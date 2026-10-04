@@ -16,6 +16,7 @@ open physics/geometry/HullCreate
 open physics/geometry/Mesh
 open physics/geometry/MeshQuery
 open physics/geometry/HeightField
+open physics/geometry/Compound
 open physics/collision/ShapePair
 open physics/container/IdPool
 open physics/dynamics/WorldTypes
@@ -71,6 +72,7 @@ func createShapeInternal(
   shape.hullIndex = geometry.hullIndex
   shape.meshIndex = geometry.meshIndex
   shape.heightFieldIndex = geometry.heightFieldIndex
+  shape.compoundIndex = geometry.compoundIndex
   shape.localBounds = geometry.localBounds
   shape.id = shapeId
   shape.bodyId = bodyId
@@ -87,9 +89,16 @@ func createShapeInternal(
   )
   shape.aabb = Aabb { lowerBound: zeroVector(), upperBound: zeroVector() }
   shape.generation = shape.generation + 1
-  # The common case: one material, stored inline
-  shape.material = def.baseMaterial
-  shape.materialCount = 1
+  if shape.shapeType is ShapeType.compound {
+    # Own a copy of the compound's materials
+    shape.materials = geometry.materials
+    shape.materialCount = geometry.materials.length
+  } else {
+    # The common case: one material, stored inline
+    shape.material = def.baseMaterial
+    shape.materialCount = 1
+    shape.materials = List.create(SurfaceMaterial, cap: 0)
+  }
   world.shapes.set(index: shapeId, value: shape)
   world.fatAabbs.set(
     index: shapeId
@@ -342,6 +351,44 @@ func createHeightFieldShape(
   )
 }
 
+# b3CreateBakedCompoundShape: a compound, on a static body only (a null id
+# otherwise, before any slot is taken, as Box3D's b3CreateShape). Its child
+# hulls and meshes are copied into the world's lists, where the convex and
+# mesh collision find them.
+func createCompoundShape(
+  world: mod PhysicsWorld
+  bodyId: view BodyId
+  def: view ShapeDef
+  compound: view CompoundData
+) ret ShapeId {
+  if bodyAt(world: world, bodyId: bodyIndexOf(bodyId: bodyId)).bodyType is not BodyType.staticBody {
+    ret nullShapeId()
+  }
+  let shapeId: Int = allocateShapeSlot(world: world)
+  var geometry: Shape = zeroShape()
+  geometry.shapeType = ShapeType.compound
+  geometry.compoundIndex = world.compounds.length
+  geometry.hullIndex = world.hulls.length
+  geometry.meshIndex = world.meshes.length
+  geometry.localBounds = compoundLocalBounds(compound: compound)
+  geometry.materials = compound.materials
+  loop let child: view CompoundHull in compound.hulls {
+    world.hulls.add(value: child.hull)
+  }
+  loop let child: view CompoundMesh in compound.meshes {
+    world.meshes.add(value: child.mesh)
+  }
+  world.compounds.add(value: compound)
+  world.compoundShapeCount = world.compoundShapeCount + 1
+  ret finishShape(
+    world: world
+    bodyId: bodyId
+    def: def
+    geometry: geometry
+    shapeId: shapeId
+  )
+}
+
 # b3DestroyShapeInternal: unlink from the body, drop the proxy and the
 # shape's contacts and its sensor, free the id.
 func destroyShapeInternal(
@@ -366,6 +413,9 @@ func destroyShapeInternal(
       body.headShapeId = shape.nextShapeId
     }
     body.shapeCount = body.shapeCount - 1
+  }
+  if shape.shapeType is ShapeType.compound {
+    world.compoundShapeCount = world.compoundShapeCount - 1
   }
   destroyShapeProxy(world: world, shapeId: shapeId)
 

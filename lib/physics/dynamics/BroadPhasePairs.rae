@@ -8,11 +8,14 @@
 # (ParallelFor), each worker gathering into its task context's pair keys.
 # Checked bit for bit against the oracle in fixture 956.
 #
-# Not here yet: the custom filter callback (Rae has no function values; the
-# ECS layer, P8, decides its form) and compound shapes, which arrive with
-# their pair emission in P5 (Box3D's checkCompounds is false without them).
+# A compound shape (static only, so met in the static cross pass) expands
+# into one pair per child its box overlaps (b3EmitCompoundPairs). Not here
+# yet: the custom filter callback (Rae has no function values; the ECS
+# layer, P8, decides its form).
 open physics/Constants
 open physics/math/AabbMath
+open physics/math/TransformMath
+open physics/geometry/Compound
 open physics/broadPhase/DynamicTree
 open physics/broadPhase/DynamicTreeQuery
 open physics/broadPhase/DynamicTreeRebuild
@@ -61,6 +64,8 @@ type NodePair {
 # b3PairContext: a task's candidate batch and the keys it found, plus the
 # traversal stacks Box3D keeps on the C stack.
 type PairContext {
+  # Only the static cross pass can meet a compound
+  checkCompounds: Bool
   batch: List(CandidatePair)
   pairKeys: List(UInt64)
   proxyStack: List(Int)
@@ -69,6 +74,7 @@ type PairContext {
 
 func createPairContext() ret PairContext {
   ret PairContext {
+    checkCompounds: false
     batch: List.create(CandidatePair, cap: candidateBatch)
     pairKeys: List.create(UInt64, cap: 64)
     proxyStack: List.create(Int, cap: 64)
@@ -115,11 +121,88 @@ func shouldCreatePair(world: view PhysicsWorld, shapeIdA: view Int, shapeIdB: vi
   ret shouldBodiesCollide(bodyA: bodyA, bodyB: bodyB)
 }
 
-# b3FlushCandidatePairs: cull the batch's pairs that already have a
-# contact, keep those that pass the gauntlet. (Box3D culls the whole batch,
-# then filters it; one pass keeps the same order.)
+# b3EmitCompoundPairs: the other shape's box pulled into the compound's
+# frame, a key per child it overlaps that has no contact yet; the whole
+# batch is dropped when the pair fails the gauntlet.
+func emitCompoundPairs(
+  world: view PhysicsWorld
+  context: mod PairContext
+  compoundShapeId: view Int
+  otherShapeId: view Int
+) {
+  let compoundShape: Shape = world.shapes.copyAtDefault(index: compoundShapeId)
+  let otherProxyKey: Int = world.shapes.copyAtDefault(index: otherShapeId).proxyKey
+  var otherBox: Aabb = { lowerBound: zeroVector(), upperBound: zeroVector() }
+  if let tree: view DynamicTree => world.broadPhase.trees.viewAt(
+    index: proxyType(proxyKey: otherProxyKey)
+  ) {
+    otherBox = treeProxyAabb(tree: tree, proxyId: proxyId(proxyKey: otherProxyKey))
+  }
+  # The query bounds are float world space, so the demoted transform is the
+  # matching float frame
+  let compoundTransform: Transform = bodyTransformOf(
+    world: world
+    body: bodyAt(world: world, bodyId: compoundShape.bodyId)
+  )
+  let localBox: Aabb = transformAabb(transform: invert(transform: compoundTransform), box: otherBox)
+  let startCount: Int = context.pairKeys.length
+  if let compound: view CompoundData => world.compounds.viewAt(index: compoundShape.compoundIndex) {
+    let children: List(Int) = queryCompound(compound: compound, bounds: localBox)
+    loop let childIndex: view Int in children {
+      let key: UInt64 = shapePairKey(
+        shape1: compoundShapeId
+        shape2: otherShapeId
+        child: childIndex
+      )
+      if pairSetContains(set: world.broadPhase.pairSet, key: key) is false {
+        context.pairKeys.add(value: key)
+      }
+    }
+  }
+  if context.pairKeys.length > startCount and shouldCreatePair(
+    world: world
+    shapeIdA: compoundShapeId
+    shapeIdB: otherShapeId
+  ) is false {
+    loop context.pairKeys.length > startCount {
+      context.pairKeys.removeLast()
+    }
+  }
+}
+
+# b3FlushCandidatePairs: a compound pair expands per child (its key is not
+# known yet); the rest are culled when they already have a contact and kept
+# when they pass the gauntlet. (Box3D culls the whole batch, then filters
+# it; one pass keeps the same order.)
 func flushCandidatePairs(world: view PhysicsWorld, context: mod PairContext) {
+  let plain: List(CandidatePair) = List.create(CandidatePair, cap: context.batch.length)
   loop let candidate: view CandidatePair in context.batch {
+    if context.checkCompounds {
+      let compoundA: Bool = world.shapes.copyAtDefault(index: candidate.shapeIdA).shapeType is ShapeType.compound
+      let compoundB: Bool = world.shapes.copyAtDefault(index: candidate.shapeIdB).shapeType is ShapeType.compound
+      if compoundA {
+        # Compound against compound is not supported
+        emitCompoundPairs(
+          world: world
+          context: context
+          compoundShapeId: candidate.shapeIdA
+          otherShapeId: candidate.shapeIdB
+        )
+        continue
+      }
+      if compoundB {
+        emitCompoundPairs(
+          world: world
+          context: context
+          compoundShapeId: candidate.shapeIdB
+          otherShapeId: candidate.shapeIdA
+        )
+        continue
+      }
+    }
+    plain.add(value: candidate)
+  }
+  loop let candidate: view CandidatePair in plain {
     let key: UInt64 = shapePairKey(shape1: candidate.shapeIdA, shape2: candidate.shapeIdB, child: 0)
     if pairSetContains(set: world.broadPhase.pairSet, key: key) is false {
       if shouldCreatePair(world: world, shapeIdA: candidate.shapeIdA, shapeIdB: candidate.shapeIdB) {
@@ -374,6 +457,7 @@ func crossPairsTask(
   if let dynamicNodes: view DynamicTree => world.broadPhase.trees.viewAt(index: dynamicTree) {
     if let staticNodes: view DynamicTree => world.broadPhase.trees.viewAt(index: staticTree) {
       let staticEnd: Int = minInt(left: endIndex, right: staticSeedCount)
+      context.checkCompounds = world.compoundShapeCount > 0
       loop var i: Int = startIndex, i < staticEnd, ++i {
         let seed: NodePair = seeds.copyAtDefault(index: i)
         collideCrossPairs(
@@ -387,6 +471,7 @@ func crossPairsTask(
       }
     }
     flushCandidatePairs(world: world, context: context)
+    context.checkCompounds = false
     if let kinematicNodes: view DynamicTree => world.broadPhase.trees.viewAt(index: kinematicTree) {
       loop var i: Int = maxInt(left: startIndex, right: staticSeedCount), i < endIndex, ++i {
         let seed: NodePair = seeds.copyAtDefault(index: i)

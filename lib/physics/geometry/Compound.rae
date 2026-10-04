@@ -1,0 +1,323 @@
+# Compound shapes (Box3D's compound.c at 9f998c8: b3CreateCompound,
+# b3GetCompoundChild, b3ComputeCompoundAABB and b3QueryCompound): many
+# capsules, hulls, meshes and spheres baked into one static shape, with a
+# dynamic tree over the children and a shared material table. The child
+# index runs over the capsules, then the hulls, the meshes and the spheres.
+# Box3D's operation order is kept exactly; checked bit for bit against the
+# oracle in fixture 981.
+#
+# Box3D packs a compound into one byte block and shares equal hulls and
+# meshes inside it (that only saves memory); here a CompoundData is a struct
+# of lists and every child keeps its own geometry. The ray, shape and mover
+# casts are P7.
+import Math
+open Vec3
+open physics/Constants
+open physics/math/TransformMath
+open physics/math/AabbMath
+open physics/geometry/QueryTypes
+open physics/geometry/Sphere
+open physics/geometry/Capsule
+open physics/geometry/Hull
+open physics/geometry/Mesh
+open physics/geometry/MeshQuery
+open physics/collision/ShapePair
+open physics/broadPhase/DynamicTree
+open physics/broadPhase/DynamicTreeQuery
+open physics/broadPhase/DynamicTreeRebuild
+open physics/dynamics/WorldTypes
+
+# A capsule of a compound to create (b3CompoundCapsuleDef).
+type CompoundCapsuleDef {
+  capsule: Capsule
+  material: SurfaceMaterial
+}
+
+# A hull of a compound to create, placed by `transform` (b3CompoundHullDef).
+type CompoundHullDef {
+  hull: Hull
+  transform: Transform
+  material: SurfaceMaterial
+}
+
+# A mesh of a compound to create, placed and scaled (b3CompoundMeshDef);
+# `materials` lines up with the mesh's triangle material indices.
+type CompoundMeshDef {
+  mesh: MeshData
+  transform: Transform
+  scale: Vec3
+  materials: List(SurfaceMaterial)
+}
+
+# A sphere of a compound to create (b3CompoundSphereDef).
+type CompoundSphereDef {
+  sphere: Sphere
+  material: SurfaceMaterial
+}
+
+# The children of a compound to create (b3CompoundDef).
+type CompoundDef {
+  capsules: List(CompoundCapsuleDef)
+  hulls: List(CompoundHullDef)
+  meshes: List(CompoundMeshDef)
+  spheres: List(CompoundSphereDef)
+}
+
+# b3CompoundCapsule
+type CompoundCapsule {
+  capsule: Capsule
+  materialIndex: Int
+}
+
+# b3CompoundHull
+type CompoundHull {
+  hull: Hull
+  transform: Transform
+  materialIndex: Int
+}
+
+# b3CompoundMesh: the mesh with its scale, and its triangles' material
+# indices mapped into the compound's material table.
+type CompoundMesh {
+  mesh: Mesh
+  transform: Transform
+  materialIndices: List(Int)
+}
+
+# b3CompoundSphere
+type CompoundSphere {
+  sphere: Sphere
+  materialIndex: Int
+}
+
+# A baked compound (b3CompoundData).
+type CompoundData {
+  tree: DynamicTree
+  materials: List(SurfaceMaterial)
+  capsules: List(CompoundCapsule)
+  hulls: List(CompoundHull)
+  meshes: List(CompoundMesh)
+  spheres: List(CompoundSphere)
+}
+
+# A child of a compound (b3ChildShape): its kind, its index among the
+# children of that kind, its transform in the compound (identity for
+# capsules and spheres) and its material indices (one for a convex child).
+type ChildShape {
+  shapeType: ShapeType
+  kindIndex: Int
+  capsule: Capsule
+  sphere: Sphere
+  transform: Transform
+  materialIndices: List(Int)
+}
+
+# b3CompareMaterials: the same bytes (a memcmp, so -0 is not 0).
+func sameMaterial(first: view SurfaceMaterial, second: view SurfaceMaterial) ret Bool {
+  ret Math.floatBits(value: first.friction) is Math.floatBits(value: second.friction) and Math.floatBits(
+    value: first.restitution
+  ) is Math.floatBits(value: second.restitution) and Math.floatBits(value: first.rollingResistance) is Math.floatBits(
+    value: second.rollingResistance
+  ) and Math.floatBits(value: first.tangentVelocity.x) is Math.floatBits(
+    value: second.tangentVelocity.x
+  ) and Math.floatBits(value: first.tangentVelocity.y) is Math.floatBits(
+    value: second.tangentVelocity.y
+  ) and Math.floatBits(value: first.tangentVelocity.z) is Math.floatBits(
+    value: second.tangentVelocity.z
+  ) and first.userMaterialId is second.userMaterialId and first.customColor is second.customColor
+}
+
+# b3MaterialMap_get_or_insert: the index of `material` in the shared table,
+# appending it when it is new.
+func sharedMaterialIndex(
+  materials: mod List(SurfaceMaterial)
+  material: view SurfaceMaterial
+) ret Int {
+  loop var i: Int = 0, i < materials.length, ++i {
+    if sameMaterial(first: materials.copyAtDefault(index: i), second: material) {
+      ret i
+    }
+  }
+  materials.add(value: material)
+  ret materials.length - 1
+}
+
+# b3CreateCompound: none when there are too many children.
+func createCompound(def: view CompoundDef) ret opt CompoundData {
+  let shapeCount: Int = def.capsules.length + def.hulls.length + def.meshes.length + def.spheres.length
+  if shapeCount >= maxChildShapes {
+    ret none
+  }
+  var tree: DynamicTree = createDynamicTree(proxyCapacity: shapeCount)
+  var childIndex: Int = 0
+  let materials: List(SurfaceMaterial) = List.create(SurfaceMaterial, cap: 4)
+  let identity: Transform = transformIdentity()
+
+  let capsules: List(CompoundCapsule) = List.create(CompoundCapsule, cap: def.capsules.length)
+  loop let capsuleDef: view CompoundCapsuleDef in def.capsules {
+    let materialIndex: Int = sharedMaterialIndex(
+      materials: materials
+      material: capsuleDef.material
+    )
+    capsules.add(
+      value: CompoundCapsule { capsule: capsuleDef.capsule, materialIndex: materialIndex }
+    )
+    let proxy: Int = createTreeProxy(
+      tree: tree
+      box: computeCapsuleAabb(capsule: capsuleDef.capsule, transform: identity)
+      categoryBits: allBits
+      userData: childIndex as UInt64
+    )
+    childIndex = childIndex + 1
+  }
+
+  let hulls: List(CompoundHull) = List.create(CompoundHull, cap: def.hulls.length)
+  loop let hullDef: view CompoundHullDef in def.hulls {
+    let proxy: Int = createTreeProxy(
+      tree: tree
+      box: computeHullAabb(hull: hullDef.hull, transform: hullDef.transform)
+      categoryBits: allBits
+      userData: childIndex as UInt64
+    )
+    childIndex = childIndex + 1
+    let materialIndex: Int = sharedMaterialIndex(materials: materials, material: hullDef.material)
+    hulls.add(
+      value: CompoundHull {
+        hull: hullDef.hull
+        transform: hullDef.transform
+        materialIndex: materialIndex
+      }
+    )
+  }
+
+  let meshes: List(CompoundMesh) = List.create(CompoundMesh, cap: def.meshes.length)
+  loop let meshDef: view CompoundMeshDef in def.meshes {
+    let proxy: Int = createTreeProxy(
+      tree: tree
+      box: computeMeshAabb(data: meshDef.mesh, transform: meshDef.transform, scale: meshDef.scale)
+      categoryBits: allBits
+      userData: childIndex as UInt64
+    )
+    childIndex = childIndex + 1
+    # Mesh materials go in the shared table too, but the map is per mesh
+    let materialIndices: List(Int) = List.create(Int, cap: meshDef.materials.length)
+    loop let material: view SurfaceMaterial in meshDef.materials {
+      materialIndices.add(value: sharedMaterialIndex(materials: materials, material: material))
+    }
+    meshes.add(
+      value: CompoundMesh {
+        mesh: Mesh { data: meshDef.mesh, scale: meshDef.scale }
+        transform: meshDef.transform
+        materialIndices: materialIndices
+      }
+    )
+  }
+
+  let spheres: List(CompoundSphere) = List.create(CompoundSphere, cap: def.spheres.length)
+  loop let sphereDef: view CompoundSphereDef in def.spheres {
+    let materialIndex: Int = sharedMaterialIndex(materials: materials, material: sphereDef.material)
+    spheres.add(value: CompoundSphere { sphere: sphereDef.sphere, materialIndex: materialIndex })
+    let proxy: Int = createTreeProxy(
+      tree: tree
+      box: computeSphereAabb(sphere: sphereDef.sphere, transform: identity)
+      categoryBits: allBits
+      userData: childIndex as UInt64
+    )
+    childIndex = childIndex + 1
+  }
+
+  let rebuilt: Int = rebuildTree(tree: tree, fullBuild: true)
+  ret CompoundData {
+    tree: tree
+    materials: materials
+    capsules: capsules
+    hulls: hulls
+    meshes: meshes
+    spheres: spheres
+  }
+}
+
+# The number of children.
+func compoundChildCount(compound: view CompoundData) ret Int {
+  ret compound.capsules.length + compound.hulls.length + compound.meshes.length + compound.spheres.length
+}
+
+# b3GetCompoundChild
+func getCompoundChild(compound: view CompoundData, childIndex: view Int) ret ChildShape {
+  var child: ChildShape = {
+    shapeType: ShapeType.sphere
+    kindIndex: 0
+    capsule: Capsule { center1: zeroVector(), center2: zeroVector(), radius: 0.0 }
+    sphere: Sphere { center: zeroVector(), radius: 0.0 }
+    transform: transformIdentity()
+    materialIndices: List.create(Int, cap: 1)
+  }
+  var index: Int = childIndex
+  if 0 <= index and index < compound.capsules.length {
+    let capsule: CompoundCapsule = compound.capsules.copyAtDefault(index: index)
+    child.shapeType = ShapeType.capsule
+    child.kindIndex = index
+    child.capsule = capsule.capsule
+    child.materialIndices.add(value: capsule.materialIndex)
+    ret child
+  }
+  index = index - compound.capsules.length
+  if 0 <= index and index < compound.hulls.length {
+    if let hull: view CompoundHull => compound.hulls.viewAt(index: index) {
+      child.shapeType = ShapeType.hull
+      child.kindIndex = index
+      child.transform = hull.transform
+      child.materialIndices.add(value: hull.materialIndex)
+    }
+    ret child
+  }
+  index = index - compound.hulls.length
+  if 0 <= index and index < compound.meshes.length {
+    if let mesh: view CompoundMesh => compound.meshes.viewAt(index: index) {
+      child.shapeType = ShapeType.mesh
+      child.kindIndex = index
+      child.transform = mesh.transform
+      loop let materialIndex: view Int in mesh.materialIndices {
+        child.materialIndices.add(value: materialIndex)
+      }
+    }
+    ret child
+  }
+  index = index - compound.meshes.length
+  let sphere: CompoundSphere = compound.spheres.copyAtDefault(index: index)
+  child.shapeType = ShapeType.sphere
+  child.kindIndex = index
+  child.sphere = sphere.sphere
+  child.materialIndices.add(value: sphere.materialIndex)
+  ret child
+}
+
+# The children's bounds in the compound frame: the tree's root box.
+func compoundLocalBounds(compound: view CompoundData) ret Aabb {
+  ret nodeBox(tree: compound.tree, index: rootNode)
+}
+
+# b3ComputeCompoundAABB
+func computeCompoundAabb(compound: view CompoundData, transform: view Transform) ret Aabb {
+  ret transformAabb(transform: transform, box: compoundLocalBounds(compound: compound))
+}
+
+# b3QueryCompound: the children whose boxes overlap `bounds` (in the
+# compound frame), in the tree's visiting order.
+func queryCompound(compound: view CompoundData, bounds: view Aabb) ret List(Int) {
+  let result: List(Int) = List.create(Int, cap: 8)
+  var query: TreeQuery = beginTreeQuery(
+    tree: compound.tree
+    box: bounds
+    maskBits: allBits
+    requireAllBits: false
+  )
+  loop true {
+    let proxyId: Int = nextTreeQueryProxy(tree: compound.tree, query: query)
+    if proxyId is -1 {
+      break
+    }
+    result.add(value: treeUserData(tree: compound.tree, proxyId: proxyId) as Int)
+  }
+  ret result
+}

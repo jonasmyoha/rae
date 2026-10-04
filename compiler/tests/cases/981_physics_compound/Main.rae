@@ -1,0 +1,389 @@
+# The physics port's compound shapes (P5d: lib/physics/geometry/Compound)
+# against Box3D itself: every line of tools/box3d-oracle/goldens/
+# compound.golden is one call of compound.c — b3CreateCompound (shared
+# materials, the child tree: one proxy per child, then a full rebuild) over
+# capsules, box hulls, box meshes (mirrored and scaled) and spheres, with
+# every child (b3GetCompoundChild), then b3ComputeCompoundAABB and
+# b3QueryCompound — with inputs and results as exact hex floats, written by
+# Box3D's own C build. Every value must have the SAME BITS
+# (docs/physics-rae-port-design.md §4).
+import Vec3
+import Quat
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/TransformMath
+open physics/math/AabbMath
+open physics/geometry/QueryTypes
+open physics/geometry/Sphere
+open physics/geometry/Capsule
+open physics/geometry/Hull
+open physics/geometry/BoxHull
+open physics/geometry/Mesh
+open physics/geometry/MeshQuery
+open physics/geometry/Compound
+open physics/collision/ShapePair
+open physics/broadPhase/DynamicTree
+open physics/dynamics/WorldTypes
+
+type Reader {
+  values: List(Float)
+  next: Int
+}
+
+func readFloat(reader: mod Reader) ret Float {
+  let value: Float = reader.values.copyAtDefault(index: reader.next)
+  reader.next = reader.next + 1
+  ret value
+}
+
+func readInt(reader: mod Reader) ret Int {
+  ret readFloat(reader: reader).toInt()
+}
+
+func readVec(reader: mod Reader) ret Vec3 {
+  let x: Float = readFloat(reader: reader)
+  let y: Float = readFloat(reader: reader)
+  let z: Float = readFloat(reader: reader)
+  ret Vec3 { x: x, y: y, z: z }
+}
+
+func readTransform(reader: mod Reader) ret Transform {
+  let position: Vec3 = readVec(reader: reader)
+  let x: Float = readFloat(reader: reader)
+  let y: Float = readFloat(reader: reader)
+  let z: Float = readFloat(reader: reader)
+  let w: Float = readFloat(reader: reader)
+  ret Transform { position: position, rotation: Quat { x: x, y: y, z: z, w: w } }
+}
+
+func readBool(reader: mod Reader) ret Bool {
+  ret readInt(reader: reader) is not 0
+}
+
+func readBox(reader: mod Reader) ret Aabb {
+  let lowerBound: Vec3 = readVec(reader: reader)
+  let upperBound: Vec3 = readVec(reader: reader)
+  ret Aabb { lowerBound: lowerBound, upperBound: upperBound }
+}
+
+func putFloat(out: mod List(Float), value: view Float) {
+  out.add(value: value)
+}
+
+func putInt(out: mod List(Float), value: view Int) {
+  out.add(value: value.toFloat())
+}
+
+func putVec(out: mod List(Float), vector: view Vec3) {
+  out.add(value: vector.x)
+  out.add(value: vector.y)
+  out.add(value: vector.z)
+}
+
+func putBox(out: mod List(Float), box: view Aabb) {
+  putVec(out: out, vector: box.lowerBound)
+  putVec(out: out, vector: box.upperBound)
+}
+
+func readU64(reader: mod Reader) ret UInt64 {
+  let high: UInt64 = readInt(reader: reader) as UInt64
+  let low: UInt64 = readInt(reader: reader) as UInt64
+  ret (high shl 32) bitor low
+}
+
+func readMaterial(reader: mod Reader) ret SurfaceMaterial {
+  let friction: Float = readFloat(reader: reader)
+  let restitution: Float = readFloat(reader: reader)
+  let rolling: Float = readFloat(reader: reader)
+  let tangent: Vec3 = readVec(reader: reader)
+  let userMaterialId: UInt64 = readU64(reader: reader)
+  let color: Int = readInt(reader: reader)
+  ret SurfaceMaterial {
+    friction: friction
+    restitution: restitution
+    rollingResistance: rolling
+    tangentVelocity: tangent
+    userMaterialId: userMaterialId
+    customColor: color
+  }
+}
+
+func putU64(out: mod List(Float), value: view UInt64) {
+  putInt(out: out, value: (value shr 32) as Int)
+  putInt(out: out, value: (value bitand 4294967295) as Int)
+}
+
+func putMaterial(out: mod List(Float), material: view SurfaceMaterial) {
+  putFloat(out: out, value: material.friction)
+  putFloat(out: out, value: material.restitution)
+  putFloat(out: out, value: material.rollingResistance)
+  putVec(out: out, vector: material.tangentVelocity)
+  putU64(out: out, value: material.userMaterialId)
+  putInt(out: out, value: material.customColor)
+}
+
+func putTransform(out: mod List(Float), transform: view Transform) {
+  putVec(out: out, vector: transform.position)
+  putFloat(out: out, value: transform.rotation.x)
+  putFloat(out: out, value: transform.rotation.y)
+  putFloat(out: out, value: transform.rotation.z)
+  putFloat(out: out, value: transform.rotation.w)
+}
+
+# The compound the AABB and query lines apply to: the one built last.
+type CompoundState {
+  compound: opt CompoundData
+}
+
+func putCompound(out: mod List(Float), compound: view CompoundData) {
+  putInt(out: out, value: compound.materials.length)
+  loop let material: view SurfaceMaterial in compound.materials {
+    putMaterial(out: out, material: material)
+  }
+  let tree: view DynamicTree => compound.tree
+  putInt(out: out, value: tree.nodeEnd)
+  loop var k: Int = 0, k < tree.nodeEnd, ++k {
+    let node: TreeNode = treeNode(tree: tree, index: k)
+    putBox(out: out, box: node.aabb)
+    putInt(out: out, value: node.flagIndex)
+    putInt(out: out, value: node.height)
+  }
+  putInt(out: out, value: tree.proxyCount)
+  loop var k: Int = 0, k < tree.proxyCount, ++k {
+    let proxy: TreeProxy = treeProxy(tree: tree, proxyId: k)
+    putInt(out: out, value: proxy.node)
+    putInt(out: out, value: proxy.next)
+    putU64(out: out, value: proxy.categoryBits)
+    putU64(out: out, value: proxy.userData)
+  }
+  let childCount: Int = compoundChildCount(compound: compound)
+  putInt(out: out, value: childCount)
+  loop var k: Int = 0, k < childCount, ++k {
+    let child: ChildShape = getCompoundChild(compound: compound, childIndex: k)
+    putInt(out: out, value: shapeTypeCode(shapeType: child.shapeType))
+    putTransform(out: out, transform: child.transform)
+    putInt(out: out, value: child.materialIndices.length)
+    loop let materialIndex: view Int in child.materialIndices {
+      putInt(out: out, value: materialIndex)
+    }
+    if child.shapeType is ShapeType.capsule {
+      putVec(out: out, vector: child.capsule.center1)
+      putVec(out: out, vector: child.capsule.center2)
+      putFloat(out: out, value: child.capsule.radius)
+    }
+    if child.shapeType is ShapeType.sphere {
+      putVec(out: out, vector: child.sphere.center)
+      putFloat(out: out, value: child.sphere.radius)
+    }
+  }
+}
+
+func readCompoundDef(reader: mod Reader) ret CompoundDef {
+  var def: CompoundDef = {
+    capsules: List.create(CompoundCapsuleDef, cap: 4)
+    hulls: List.create(CompoundHullDef, cap: 4)
+    meshes: List.create(CompoundMeshDef, cap: 2)
+    spheres: List.create(CompoundSphereDef, cap: 4)
+  }
+  let capsuleCount: Int = readInt(reader: reader)
+  loop var k: Int = 0, k < capsuleCount, ++k {
+    let center1: Vec3 = readVec(reader: reader)
+    let center2: Vec3 = readVec(reader: reader)
+    let radius: Float = readFloat(reader: reader)
+    let material: SurfaceMaterial = readMaterial(reader: reader)
+    def.capsules.add(
+      value: CompoundCapsuleDef {
+        capsule: Capsule { center1: center1, center2: center2, radius: radius }
+        material: material
+      }
+    )
+  }
+  let hullCount: Int = readInt(reader: reader)
+  loop var k: Int = 0, k < hullCount, ++k {
+    let hx: Float = readFloat(reader: reader)
+    let hy: Float = readFloat(reader: reader)
+    let hz: Float = readFloat(reader: reader)
+    let transform: Transform = readTransform(reader: reader)
+    let material: SurfaceMaterial = readMaterial(reader: reader)
+    let hull: Hull = makeTransformedBoxHull(
+      hx: hx
+      hy: hy
+      hz: hz
+      transform: transformIdentity()
+      lengthUnitsPerMeter: 1.0
+    )
+    def.hulls.add(value: CompoundHullDef { hull: hull, transform: transform, material: material })
+  }
+  let meshCount: Int = readInt(reader: reader)
+  loop var k: Int = 0, k < meshCount, ++k {
+    let center: Vec3 = readVec(reader: reader)
+    let extent: Vec3 = readVec(reader: reader)
+    let transform: Transform = readTransform(reader: reader)
+    let scale: Vec3 = readVec(reader: reader)
+    let materialCount: Int = readInt(reader: reader)
+    let materials: List(SurfaceMaterial) = List.create(SurfaceMaterial, cap: materialCount)
+    loop var m: Int = 0, m < materialCount, ++m {
+      materials.add(value: readMaterial(reader: reader))
+    }
+    if let mesh: MeshData = createBoxMesh(
+      center: center
+      extent: extent
+      identifyEdges: true
+      lengthUnitsPerMeter: 1.0
+    ) {
+      def.meshes.add(
+        value: CompoundMeshDef {
+          mesh: mesh
+          transform: transform
+          scale: scale
+          materials: materials
+        }
+      )
+    }
+  }
+  let sphereCount: Int = readInt(reader: reader)
+  loop var k: Int = 0, k < sphereCount, ++k {
+    let center: Vec3 = readVec(reader: reader)
+    let radius: Float = readFloat(reader: reader)
+    let material: SurfaceMaterial = readMaterial(reader: reader)
+    def.spheres.add(
+      value: CompoundSphereDef {
+        sphere: Sphere { center: center, radius: radius }
+        material: material
+      }
+    )
+  }
+  ret def
+}
+
+func evaluate(
+  name: view String
+  reader: mod Reader
+  out: mod List(Float)
+  state: mod CompoundState
+) ret Bool {
+  if name is "b3CreateCompound" {
+    let def: CompoundDef = readCompoundDef(reader: reader)
+    if let compound: CompoundData = createCompound(def: def) {
+      putCompound(out: out, compound: compound)
+      state.compound = compound
+    }
+  } else if name is "compound.aabb" {
+    let transform: Transform = readTransform(reader: reader)
+    if let compound: view CompoundData => state.compound {
+      putBox(out: out, box: computeCompoundAabb(compound: compound, transform: transform))
+    }
+  } else if name is "compound.query" {
+    let bounds: Aabb = readBox(reader: reader)
+    if let compound: view CompoundData => state.compound {
+      let found: List(Int) = queryCompound(compound: compound, bounds: bounds)
+      putInt(out: out, value: found.length)
+      loop let childIndex: view Int in found {
+        putInt(out: out, value: childIndex)
+      }
+    }
+  } else {
+    ret false
+  }
+  ret true
+}
+
+func sameBits(actual: view Float, expected: view Float) ret Bool {
+  if actual is not actual {
+    ret expected is not expected
+  }
+  if actual is not expected {
+    ret false
+  }
+  if actual is 0.0 {
+    ret 1.0 / actual is 1.0 / expected
+  }
+  ret true
+}
+
+func readGolden() ret String {
+  # The runner runs from compiler/, the TSan gate from the case's folder.
+  let candidates: List(String) = {
+    "../tools/box3d-oracle/goldens/compound.golden"
+    "../../../tools/box3d-oracle/goldens/compound.golden"
+    "tools/box3d-oracle/goldens/compound.golden"
+  }
+  loop var i: Int = 0, i < candidates.length, ++i {
+    if let text: String = readFile(path: candidates.copyAtDefault(index: i)) {
+      ret text
+    }
+  }
+  ret ""
+}
+
+func main() {
+  let golden: String = readGolden()
+  let lines: List(String) = golden.split(sep: "\n")
+  var calls: Int = 0
+  var mismatches: Int = 0
+  var unknown: Int = 0
+  var state: CompoundState = { compound: none }
+  let names: List(String) = List.create(String, cap: 8)
+  loop var i: Int = 0, i < lines.length, ++i {
+    let line: String = lines.copyAtDefault(index: i)
+    if line.length() is 0 or line.startsWith(prefix: "#") {
+      continue
+    }
+    let tokens: List(String) = line.split(sep: " ")
+    let name: String = tokens.copyAtDefault(index: 0)
+    var reader: Reader = { values: List.create(Float, cap: 128), next: 0 }
+    let expected: List(Float) = List.create(Float, cap: 64)
+    var afterArrow: Bool = false
+    loop var j: Int = 1, j < tokens.length, ++j {
+      let token: String = tokens.copyAtDefault(index: j)
+      if token is "->" {
+        afterArrow = true
+      } else if afterArrow {
+        expected.add(value: token.toFloat())
+      } else {
+        reader.values.add(value: token.toFloat())
+      }
+    }
+    let actual: List(Float) = List.create(Float, cap: 64)
+    if evaluate(
+      name: name
+      reader: reader
+      out: actual
+      state: state
+    ) is false {
+      unknown = unknown + 1
+      log("not ported: {name}")
+      continue
+    }
+    calls = calls + 1
+    if names.contains(value: name) is false {
+      names.add(value: name)
+    }
+    var same: Bool = actual.length is expected.length
+    loop var j: Int = 0, j < expected.length and same, ++j {
+      same = sameBits(
+        actual: actual.copyAtDefault(index: j)
+        expected: expected.copyAtDefault(index: j)
+      )
+    }
+    if same is false {
+      mismatches = mismatches + 1
+      if mismatches <= 6 {
+        log("MISMATCH line {i + 1}: {line.sub(start: 0, len: 200)}")
+        var got: String = "  got"
+        loop var j: Int = 0, j < actual.length and j < 40, ++j {
+          got = "{got} {actual.copyAtDefault(index: j)}"
+        }
+        log(got)
+        var want: String = "  want"
+        loop var j: Int = 0, j < expected.length and j < 40, ++j {
+          want = "{want} {expected.copyAtDefault(index: j)}"
+        }
+        log(want)
+      }
+    }
+  }
+  log(
+    "compound.golden: {calls} calls of {names.length} Box3D functions, {mismatches} not bit-exact, {unknown} not ported"
+  )
+}

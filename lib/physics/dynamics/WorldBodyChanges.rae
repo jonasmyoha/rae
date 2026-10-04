@@ -123,6 +123,17 @@ func setBodyType(world: mod PhysicsWorld, bodyId: view BodyId, bodyType: view Bo
   if originalType is bodyType {
     ret
   }
+  # Not supported for bodies with a compound or height shape
+  if bodyType is not BodyType.staticBody {
+    var shapeId: Int = bodyAt(world: world, bodyId: bodyIndex).headShapeId
+    loop shapeId is not -1 {
+      let shape: Shape = world.shapes.copyAtDefault(index: shapeId)
+      if shape.shapeType is ShapeType.compound or shape.shapeType is ShapeType.height {
+        ret
+      }
+      shapeId = shape.nextShapeId
+    }
+  }
 
   # Disabled bodies don't change solver sets or islands when they change type
   if bodyAt(world: world, bodyId: bodyIndex).setIndex is disabledSet {

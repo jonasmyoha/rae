@@ -3,9 +3,8 @@
 # and broad-phase proxy. Box3D keeps the geometry in a union; here the shape
 # carries a sphere, a capsule, for a hull the index of its data in the
 # world's hull list (Box3D points into a shared hull database), and for a
-# mesh (a height field) the index of its data in the world's mesh (height
-# field) list with its local bounds (so the box cases need neither).
-# Compounds arrive in P5d; their cases are inert until then.
+# mesh, a height field or a compound the index of its data in the world's
+# list of those with its local bounds (so the box cases need none of them).
 # Box3D's operation order is kept exactly; checked bit for bit against the
 # oracle in fixture 954.
 import Math
@@ -50,8 +49,14 @@ type Shape {
   sphere: Sphere
   capsule: Capsule
   hullIndex: Int
+  # A compound's child hulls and meshes are copied into the world's lists:
+  # these are then the indices of its first child hull and mesh
   meshIndex: Int
   heightFieldIndex: Int
+  compoundIndex: Int
+  # A compound's own copy of its material table (b3Shape.materials); empty
+  # for every other shape, whose one material is `material`
+  materials: List(SurfaceMaterial)
   # The local bounds b3ComputeMeshAABB / b3ComputeHeightFieldAABB transform
   # (a mesh's scaled bounds, a height field's aabb)
   localBounds: Aabb
@@ -88,6 +93,8 @@ func zeroShape() ret Shape {
     hullIndex: -1
     meshIndex: -1
     heightFieldIndex: -1
+    compoundIndex: -1
+    materials: List.create(SurfaceMaterial, cap: 0)
     localBounds: Aabb { lowerBound: zeroVector(), upperBound: zeroVector() }
   }
 }
@@ -154,15 +161,37 @@ func shapeCentroid(shape: view Shape, hulls: view List(Hull)) ret Vec3 {
       ret center(box: meshAabb(shape: shape, transform: transformIdentity()))
     }
     case ShapeType.compound {
-      ret zeroVector()
+      ret center(box: meshAabb(shape: shape, transform: transformIdentity()))
     }
   }
 }
 
-# b3ComputeMeshAABB / b3ComputeHeightFieldAABB of a mesh or height shape:
-# its local bounds, transformed.
+# b3ComputeMeshAABB / b3ComputeHeightFieldAABB / b3ComputeCompoundAABB of a
+# mesh, height or compound shape: its local bounds, transformed.
 func meshAabb(shape: view Shape, transform: view Transform) ret Aabb {
   ret transformAabb(transform: transform, box: shape.localBounds)
+}
+
+# The extent of a mesh or compound shape about `localCenter`: the nearer
+# corner's distance, the farther corner's offset (b3ComputeShapeExtent).
+func localBoundsExtent(shape: view Shape, localCenter: view Vec3) ret ShapeExtent {
+  let box: Aabb = meshAabb(shape: shape, transform: transformIdentity())
+  let r1: Float = length(vector: subtract(left: box.lowerBound, right: localCenter))
+  let r2: Float = length(vector: subtract(left: box.upperBound, right: localCenter))
+  let farthest: Vec3 = farthestPointOnAabb(box: box, point: localCenter)
+  ret ShapeExtent {
+    minExtent: minFloat(left: r1, right: r2)
+    maxExtent: abs(vector: subtract(left: farthest, right: localCenter))
+  }
+}
+
+# b3GetShapeMaterials(shape)[0]: a compound's first table material, else
+# the shape's material.
+func firstShapeMaterial(shape: view Shape) ret SurfaceMaterial {
+  if shape.materials.length > 0 {
+    ret shape.materials.copyAtDefault(index: 0)
+  }
+  ret shape.material
 }
 
 # b3FarthestPointOnAABB
@@ -208,7 +237,7 @@ func computeShapeAabb(
       ret meshAabb(shape: shape, transform: transform)
     }
     case ShapeType.compound {
-      ret Aabb { lowerBound: transform.position, upperBound: transform.position }
+      ret meshAabb(shape: shape, transform: transform)
     }
   }
 }
@@ -297,20 +326,14 @@ func computeShapeExtent(
     }
     case ShapeType.mesh {
       # Needed for kinematic mesh sleeping
-      let box: Aabb = meshAabb(shape: shape, transform: transformIdentity())
-      let r1: Float = length(vector: subtract(left: box.lowerBound, right: localCenter))
-      let r2: Float = length(vector: subtract(left: box.upperBound, right: localCenter))
-      let farthest: Vec3 = farthestPointOnAabb(box: box, point: localCenter)
-      ret ShapeExtent {
-        minExtent: minFloat(left: r1, right: r2)
-        maxExtent: abs(vector: subtract(left: farthest, right: localCenter))
-      }
+      ret localBoundsExtent(shape: shape, localCenter: localCenter)
     }
     case ShapeType.height {
       ret ShapeExtent { minExtent: 0.0, maxExtent: zeroVector() }
     }
     case ShapeType.compound {
-      ret ShapeExtent { minExtent: 0.0, maxExtent: zeroVector() }
+      # Not needed, but for completeness
+      ret localBoundsExtent(shape: shape, localCenter: localCenter)
     }
   }
 }
