@@ -1,0 +1,68 @@
+# Lists of lists of structs and Strings, built by nested literals and by
+# `List.create`, read through `if let ... view List(T) =>` narrowing. Three
+# compiler faults met here: the narrowed binding's type was a stack copy the
+# generic-type registry kept (a dangling pointer that crashed the backend),
+# the literal registered its list type the same way, and an inner list's drop
+# was not declared before the outer list's drop called it when the inner
+# elements own nothing. Nothing may leak.
+type Point {
+  x: Int
+  y: Int
+}
+
+func scaled(scale: view Int, point: view Point) ret Point {
+  ret Point { x: scale * point.x, y: scale * point.y }
+}
+
+func sumX(points: view List(Point)) ret Int {
+  var total: Int = 0
+  loop let point: view Point in points {
+    total = total + point.x
+  }
+  ret total
+}
+
+func main() {
+  let first: Point = { x: 1, y: 2 }
+  let grid: List(List(Point)) = {
+    { scaled(scale: -1, point: first), first }
+    { scaled(scale: 3, point: first) }
+    {}
+  }
+  log("grid rows {grid.length}")
+  loop let row: view List(Point) in grid {
+    log("row {row.length} sum {sumX(points: row)}")
+  }
+  if let middle: view List(Point) => grid.viewAt(index: 1) {
+    log("middle {middle.copyAtDefault(index: 0).x} {middle.copyAtDefault(index: 0).y}")
+  }
+
+  let tail: String = "delta {first.y}"
+  let words: List(List(String)) = { { "alpha", "beta" }, { "gamma {first.x}" }, { tail } }
+  loop let line: view List(String) in words {
+    var joined: String = ""
+    loop let word: view String in line {
+      joined = "{joined}{word};"
+    }
+    log("words {joined}")
+  }
+
+  let deep: List(List(List(Point))) = { { { first }, { scaled(scale: 2, point: first), first } } }
+  if let outer: view List(List(Point)) => deep.viewAt(index: 0) {
+    if let inner: view List(Point) => outer.viewAt(index: 1) {
+      log("deep {inner.length} sum {sumX(points: inner)}")
+    }
+  }
+
+  let built: List(List(Point)) = List.create(List(Point), cap: 2)
+  loop var i: Int = 0, i < 3, ++i {
+    let row: List(Point) = { scaled(scale: i, point: first) }
+    built.add(value: row)
+  }
+  if let last: mod List(Point) => built.modAt(index: 2) {
+    last.add(value: first)
+  }
+  loop let row: view List(Point) in built {
+    log("built {row.length} sum {sumX(points: row)}")
+  }
+}

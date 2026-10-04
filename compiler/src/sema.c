@@ -4439,14 +4439,19 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                      * the narrowed reference, not an optional. Keeping the
                      * optional TypeInfo here previously relied on implicit
                      * unboxing in every expression that used the binding. */
-                    AstTypeRef narrowed = *btr;
-                    narrowed.is_opt = false;
-                    narrowed.resolved_type = NULL;
+                    /* In the arena, not on the stack: resolving a generic
+                     * type registers the AstTypeRef pointer for emission, so a
+                     * stack copy dangled and crashed the backend
+                     * (`if let inner: view List(T) => lists.viewAt(...)`). */
+                    AstTypeRef* narrowed = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
+                    *narrowed = *btr;
+                    narrowed->is_opt = false;
+                    narrowed->resolved_type = NULL;
                     Symbol* narrowed_symbol = symbol_table_lookup(
                         symbols, b->as.let_stmt.name);
                     if (narrowed_symbol) {
                         narrowed_symbol->type = sema_resolve_type_internal(
-                            ctx, module, symbols, &narrowed);
+                            ctx, module, symbols, narrowed);
                     }
                 }
                 const AstExpr* bsrc = b->as.let_stmt.value;
