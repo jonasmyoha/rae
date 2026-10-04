@@ -1,0 +1,237 @@
+# A joint's place in the islands and solver sets (b3AddJointToIsland,
+# b3LinkJoint, b3UnlinkJoint of Box3D's island.c; b3MergeSolverSets and
+# b3TransferJoint of solver_set.c, at 9f998c8). Box3D's order of array moves
+# is kept exactly; checked against the oracle in fixture 984.
+open physics/container/IdPool
+open physics/dynamics/WorldTypes
+open physics/dynamics/Body
+open physics/dynamics/Contact
+open physics/dynamics/Joint
+open physics/dynamics/ConstraintGraph
+open physics/dynamics/SolverSet
+open physics/dynamics/Island
+open physics/dynamics/World
+open physics/dynamics/WorldGraph
+open physics/dynamics/WorldIslands
+
+# b3AddJointToIsland
+func addJointToIsland(world: mod PhysicsWorld, islandId: view Int, jointId: view Int) {
+  let joint: Joint = world.joints.copyAtDefault(index: jointId)
+  var islandIndex: Int = 0
+  if let island: mod Island => world.islands.modAt(index: islandId) {
+    islandIndex = island.joints.length
+    island.joints.add(
+      value: JointLink {
+        jointId: jointId
+        bodyIdA: joint.edgeA.bodyId
+        bodyIdB: joint.edgeB.bodyId
+      }
+    )
+  }
+  if let target: mod Joint => world.joints.modAt(index: jointId) {
+    target.islandId = islandId
+    target.islandIndex = islandIndex
+  }
+}
+
+# b3LinkJoint: a joint joins (and merges) its bodies' islands, waking a
+# sleeping body joined to an awake one.
+func linkJoint(world: mod PhysicsWorld, jointId: view Int) {
+  let joint: Joint = world.joints.copyAtDefault(index: jointId)
+  let bodyIdA: Int = joint.edgeA.bodyId
+  let bodyIdB: Int = joint.edgeB.bodyId
+  let setA: Int = bodyAt(world: world, bodyId: bodyIdA).setIndex
+  let setB: Int = bodyAt(world: world, bodyId: bodyIdB).setIndex
+  if setA is awakeSet and setB >= firstSleepingSet {
+    wakeSolverSet(world: world, setIndex: setB)
+  } else if setB is awakeSet and setA >= firstSleepingSet {
+    wakeSolverSet(world: world, setIndex: setA)
+  }
+
+  # Merging destroys one of the islands
+  let finalIslandId: Int = mergeIslands(
+    world: world
+    islandIdA: bodyAt(world: world, bodyId: bodyIdA).islandId
+    islandIdB: bodyAt(world: world, bodyId: bodyIdB).islandId
+  )
+  addJointToIsland(world: world, islandId: finalIslandId, jointId: jointId)
+}
+
+# b3UnlinkJoint: the joint leaves its island, which becomes a split
+# candidate.
+func unlinkJoint(world: mod PhysicsWorld, jointId: view Int) {
+  let joint: Joint = world.joints.copyAtDefault(index: jointId)
+  if joint.islandId is -1 {
+    ret
+  }
+  let islandId: Int = joint.islandId
+  let removeIndex: Int = joint.islandIndex
+  var movedJointId: Int = -1
+  if let island: mod Island => world.islands.modAt(index: islandId) {
+    let lastIndex: Int = island.joints.length - 1
+    if removeIndex is not lastIndex {
+      let moved: JointLink = island.joints.copyAtDefault(index: lastIndex)
+      island.joints.set(index: removeIndex, value: moved)
+      movedJointId = moved.jointId
+    }
+    island.joints.removeLast()
+    island.constraintRemoveCount = island.constraintRemoveCount + 1
+  }
+  if movedJointId is not -1 {
+    # Fix the island index of the joint swapped into the hole
+    if let moved: mod Joint => world.joints.modAt(index: movedJointId) {
+      moved.islandIndex = removeIndex
+    }
+  }
+  if let target: mod Joint => world.joints.modAt(index: jointId) {
+    target.islandId = -1
+    target.islandIndex = -1
+  }
+}
+
+# b3MergeSolverSets: a joint between two sleeping sets merges them (the
+# smaller into the bigger) so they keep sleeping; their islands merge when
+# the set wakes.
+func mergeSolverSets(world: mod PhysicsWorld, setId1: view Int, setId2: view Int) {
+  var keepId: Int = setId1
+  var mergeId: Int = setId2
+  # Move the fewest bodies
+  if world.solverSets.copyAtDefault(index: setId1).bodySims.length < world.solverSets.copyAtDefault(
+    index: setId2
+  ).bodySims.length {
+    keepId = setId2
+    mergeId = setId1
+  }
+  let merged: SolverSet = world.solverSets.copyAtDefault(index: mergeId)
+
+  # Transfer the bodies
+  loop let sim: view BodySim in merged.bodySims {
+    var localIndex: Int = 0
+    if let keep: mod SolverSet => world.solverSets.modAt(index: keepId) {
+      localIndex = keep.bodySims.length
+      keep.bodySims.add(value: sim)
+    }
+    if let body: mod Body => world.bodies.modAt(index: sim.bodyId) {
+      body.setIndex = keepId
+      body.localIndex = localIndex
+    }
+  }
+
+  # Transfer the contacts
+  loop var i: Int = 0, i < merged.contactIndices.length, ++i {
+    let contactId: Int = merged.contactIndices.copyAtDefault(index: i)
+    let localIndex: Int = addSetContact(world: world, setIndex: keepId, contactId: contactId)
+    if let contact: mod Contact => world.contacts.modAt(index: contactId) {
+      contact.setIndex = keepId
+      contact.localIndex = localIndex
+    }
+  }
+
+  # Transfer the joints
+  loop let jointSim: view JointSim in merged.jointSims {
+    var localIndex: Int = 0
+    if let keep: mod SolverSet => world.solverSets.modAt(index: keepId) {
+      localIndex = keep.jointSims.length
+      keep.jointSims.add(value: jointSim)
+    }
+    if let joint: mod Joint => world.joints.modAt(index: jointSim.jointId) {
+      joint.setIndex = keepId
+      joint.localIndex = localIndex
+    }
+  }
+
+  # Transfer the islands
+  loop var i: Int = 0, i < merged.islandSims.length, ++i {
+    let islandId: Int = merged.islandSims.copyAtDefault(index: i)
+    var localIndex: Int = 0
+    if let keep: mod SolverSet => world.solverSets.modAt(index: keepId) {
+      localIndex = keep.islandSims.length
+      keep.islandSims.add(value: islandId)
+    }
+    if let island: mod Island => world.islands.modAt(index: islandId) {
+      island.setIndex = keepId
+      island.localIndex = localIndex
+    }
+  }
+
+  # Destroy the merged set
+  destroySolverSet(world: world, setIndex: mergeId)
+}
+
+# Remove joint sim `localIndex` of set `setIndex` by moving the last one into
+# it, fixing the moved joint.
+func removeSetJoint(world: mod PhysicsWorld, setIndex: view Int, localIndex: view Int) {
+  var movedId: Int = -1
+  if let set: mod SolverSet => world.solverSets.modAt(index: setIndex) {
+    let lastIndex: Int = set.jointSims.length - 1
+    if localIndex is not lastIndex {
+      let moved: JointSim = set.jointSims.copyAtDefault(index: lastIndex)
+      set.jointSims.set(index: localIndex, value: moved)
+      movedId = moved.jointId
+    }
+    set.jointSims.removeLast()
+  }
+  if movedId is not -1 {
+    if let moved: mod Joint => world.joints.modAt(index: movedId) {
+      moved.localIndex = localIndex
+    }
+  }
+}
+
+# b3TransferJoint: move a joint's sim from its set (or the graph) to set
+# `targetIndex` (or the graph).
+func transferJoint(
+  world: mod PhysicsWorld
+  targetIndex: view Int
+  sourceIndex: view Int
+  jointId: view Int
+) {
+  if targetIndex is sourceIndex {
+    ret
+  }
+  let joint: Joint = world.joints.copyAtDefault(index: jointId)
+  let localIndex: Int = joint.localIndex
+  let colorIndex: Int = joint.colorIndex
+
+  # The source sim
+  var sourceSim: JointSim = zeroJointSim()
+  if sourceIndex is awakeSet {
+    if let color: view GraphColor => world.constraintGraph.colors.viewAt(index: colorIndex) {
+      sourceSim = color.jointSims.copyAtDefault(index: localIndex)
+    }
+  } else if let set: view SolverSet => world.solverSets.viewAt(index: sourceIndex) {
+    sourceSim = set.jointSims.copyAtDefault(index: localIndex)
+  }
+
+  # Create the target and copy; fix the joint
+  if targetIndex is awakeSet {
+    addJointToGraph(world: world, jointId: jointId, sim: sourceSim)
+    if let target: mod Joint => world.joints.modAt(index: jointId) {
+      target.setIndex = awakeSet
+    }
+  } else {
+    var targetLocalIndex: Int = 0
+    if let set: mod SolverSet => world.solverSets.modAt(index: targetIndex) {
+      targetLocalIndex = set.jointSims.length
+      set.jointSims.add(value: sourceSim)
+    }
+    if let target: mod Joint => world.joints.modAt(index: jointId) {
+      target.setIndex = targetIndex
+      target.localIndex = targetLocalIndex
+      target.colorIndex = -1
+    }
+  }
+
+  # Destroy the source
+  if sourceIndex is awakeSet {
+    removeJointFromGraph(
+      world: world
+      bodyIdA: joint.edgeA.bodyId
+      bodyIdB: joint.edgeB.bodyId
+      colorIndex: colorIndex
+      localIndex: localIndex
+    )
+  } else {
+    removeSetJoint(world: world, setIndex: sourceIndex, localIndex: localIndex)
+  }
+}

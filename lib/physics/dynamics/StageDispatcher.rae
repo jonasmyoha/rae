@@ -9,6 +9,7 @@
 # loop joins this module, while the solver tasks stay as they are.
 open Vec3
 open physics/Constants
+open physics/dynamics/JointSolver
 open physics/dynamics/WorldTypes
 open physics/dynamics/Body
 open physics/dynamics/SolverSet
@@ -157,7 +158,7 @@ func executeBlock(
   }
   match stageType {
     case SolverStageType.prepareJoints {
-      # (Joints: P6.)
+      prepareJointsBlock(world: world, context: context, block: block)
     }
     case SolverStageType.prepareWideContacts {
       prepareContactsWide(world: world, context: context, block: block)
@@ -178,6 +179,9 @@ func executeBlock(
       }
     }
     case SolverStageType.warmStart {
+      if joint {
+        warmStartJointsBlock(world: world, block: block)
+      }
       if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
         if wide {
           warmStartContactsWide(
@@ -198,6 +202,14 @@ func executeBlock(
       }
     }
     case SolverStageType.solve {
+      if joint {
+        solveJointsBlock(
+          world: world
+          context: context
+          block: block
+          useBias: true
+        )
+      }
       let contactSpeed: Float = world.contactSpeed
       if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
         if wide {
@@ -235,6 +247,14 @@ func executeBlock(
       }
     }
     case SolverStageType.relax {
+      if joint {
+        solveJointsBlock(
+          world: world
+          context: context
+          block: block
+          useBias: false
+        )
+      }
       if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
         if wide {
           solveContactsWide(

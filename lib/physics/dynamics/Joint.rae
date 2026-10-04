@@ -1,0 +1,437 @@
+# Joints (b3Joint, b3JointEdge, b3JointSim, the joint definitions and
+# b3JointEvent of Box3D's joint.h and types.h at 9f998c8): a constraint
+# between two bodies. A Joint is the world's record (its set, colour, island
+# and its links in both bodies' joint lists); a JointSim is the solver's
+# data, living in the solver set or graph colour the joint is in. Box3D keeps
+# the per-kind data in a union; here a JointSim carries one record per kind
+# and its `jointType` says which one is live. The kinds are solved in their
+# own modules (RevoluteJoint, DistanceJoint); prismatic, wheel, spherical,
+# motor, parallel and weld joints are P6b-P6c.
+open Vec2
+open Vec3
+open Quat
+open physics/Constants
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/QuatMath
+open physics/math/MatrixMath
+open physics/math/TransformMath
+open physics/dynamics/WorldTypes
+open physics/dynamics/ContactConstraints
+
+# b3JointType
+enum JointType {
+  parallelJoint
+  distanceJoint
+  filterJoint
+  motorJoint
+  prismaticJoint
+  revoluteJoint
+  sphericalJoint
+  weldJoint
+  wheelJoint
+}
+
+# Box3D's numbering of b3JointType
+func jointTypeCode(jointType: view JointType) ret Int {
+  match jointType {
+    case JointType.parallelJoint {
+      ret 0
+    }
+    case JointType.distanceJoint {
+      ret 1
+    }
+    case JointType.filterJoint {
+      ret 2
+    }
+    case JointType.motorJoint {
+      ret 3
+    }
+    case JointType.prismaticJoint {
+      ret 4
+    }
+    case JointType.revoluteJoint {
+      ret 5
+    }
+    case JointType.sphericalJoint {
+      ret 6
+    }
+    case JointType.weldJoint {
+      ret 7
+    }
+    case JointType.wheelJoint {
+      ret 8
+    }
+  }
+}
+
+# A joint handle (b3JointId)
+type JointId {
+  index1: Int
+  world0: Int
+  generation: Int
+}
+
+# One of a joint's two links in its bodies' joint lists (b3JointEdge). A
+# joint key is the joint id times two plus the edge index.
+type JointEdge {
+  bodyId: Int
+  prevKey: Int
+  nextKey: Int
+}
+
+# b3Joint
+type Joint {
+  # The solver set; -1 for a free slot
+  setIndex: Int
+  # The graph colour while awake, else -1
+  colorIndex: Int
+  # The index in the set's or colour's joint sims
+  localIndex: Int
+  edgeA: JointEdge
+  edgeB: JointEdge
+  # -1 for a free slot
+  jointId: Int
+  islandId: Int
+  islandIndex: Int
+  drawScale: Float
+  jointType: JointType
+  generation: Int
+  collideConnected: Bool
+}
+
+# A joint of an island, with its two bodies, so splitting an island never
+# needs the joint itself (b3JointLink).
+type JointLink {
+  jointId: Int
+  bodyIdA: Int
+  bodyIdB: Int
+}
+
+# b3DistanceJoint
+type DistanceJointData {
+  length: Float
+  hertz: Float
+  dampingRatio: Float
+  lowerSpringForce: Float
+  upperSpringForce: Float
+  minLength: Float
+  maxLength: Float
+  maxMotorForce: Float
+  motorSpeed: Float
+  impulse: Float
+  lowerImpulse: Float
+  upperImpulse: Float
+  motorImpulse: Float
+  indexA: Int
+  indexB: Int
+  anchorA: Vec3
+  anchorB: Vec3
+  deltaCenter: Vec3
+  distanceSoftness: Softness
+  axialMass: Float
+  enableSpring: Bool
+  enableLimit: Bool
+  enableMotor: Bool
+}
+
+# b3RevoluteJoint
+type RevoluteJointData {
+  linearImpulse: Vec3
+  perpImpulse: Vec2
+  springImpulse: Float
+  motorImpulse: Float
+  lowerImpulse: Float
+  upperImpulse: Float
+  hertz: Float
+  dampingRatio: Float
+  maxMotorTorque: Float
+  motorSpeed: Float
+  targetAngle: Float
+  lowerAngle: Float
+  upperAngle: Float
+  indexA: Int
+  indexB: Int
+  frameA: Transform
+  frameB: Transform
+  rotationAxisZ: Vec3
+  perpAxisX: Vec3
+  perpAxisY: Vec3
+  deltaCenter: Vec3
+  deltaAngle: Float
+  axialMass: Float
+  springSoftness: Softness
+  enableSpring: Bool
+  enableMotor: Bool
+  enableLimit: Bool
+}
+
+# b3JointSim: the common solver data and the live kind's record.
+type JointSim {
+  jointId: Int
+  bodyIdA: Int
+  bodyIdB: Int
+  jointType: JointType
+  # The joint frames, local to the body origins
+  localFrameA: Transform
+  localFrameB: Transform
+  invMassA: Float
+  invMassB: Float
+  invIA: Matrix3
+  invIB: Matrix3
+  constraintHertz: Float
+  constraintDampingRatio: Float
+  constraintSoftness: Softness
+  forceThreshold: Float
+  torqueThreshold: Float
+  fixedRotation: Bool
+  distanceJoint: DistanceJointData
+  revoluteJoint: RevoluteJointData
+}
+
+# b3JointDef: what every joint kind's definition starts with.
+type JointDef {
+  bodyIdA: BodyId
+  bodyIdB: BodyId
+  localFrameA: Transform
+  localFrameB: Transform
+  forceThreshold: Float
+  torqueThreshold: Float
+  constraintHertz: Float
+  constraintDampingRatio: Float
+  drawScale: Float
+  collideConnected: Bool
+}
+
+# b3DistanceJointDef
+type DistanceJointDef {
+  base: JointDef
+  length: Float
+  enableSpring: Bool
+  lowerSpringForce: Float
+  upperSpringForce: Float
+  hertz: Float
+  dampingRatio: Float
+  enableLimit: Bool
+  minLength: Float
+  maxLength: Float
+  enableMotor: Bool
+  maxMotorForce: Float
+  motorSpeed: Float
+}
+
+# b3RevoluteJointDef
+type RevoluteJointDef {
+  base: JointDef
+  targetAngle: Float
+  enableSpring: Bool
+  hertz: Float
+  dampingRatio: Float
+  enableLimit: Bool
+  lowerAngle: Float
+  upperAngle: Float
+  enableMotor: Bool
+  maxMotorTorque: Float
+  motorSpeed: Float
+}
+
+# b3JointEvent: an awake joint whose force or torque reached its threshold.
+type JointEvent {
+  jointId: JointId
+}
+
+func identityFrame() ret Transform {
+  ret Transform { position: zeroVector(), rotation: quatIdentity() }
+}
+
+# b3DefaultJointDef
+func defaultJointDef(lengthUnitsPerMeter: view Float) ret JointDef {
+  ret JointDef {
+    bodyIdA: BodyId { index1: 0, world0: 0, generation: 0 }
+    bodyIdB: BodyId { index1: 0, world0: 0, generation: 0 }
+    localFrameA: identityFrame()
+    localFrameB: identityFrame()
+    forceThreshold: floatMax
+    torqueThreshold: floatMax
+    constraintHertz: 60.0
+    constraintDampingRatio: 2.0
+    drawScale: lengthUnitsPerMeter
+    collideConnected: false
+  }
+}
+
+# b3DefaultDistanceJointDef
+func defaultDistanceJointDef(lengthUnitsPerMeter: view Float) ret DistanceJointDef {
+  ret DistanceJointDef {
+    base: defaultJointDef(lengthUnitsPerMeter: lengthUnitsPerMeter)
+    length: 1.0
+    enableSpring: false
+    lowerSpringForce: -floatMax
+    upperSpringForce: floatMax
+    hertz: 0.0
+    dampingRatio: 0.0
+    enableLimit: false
+    minLength: 0.0
+    maxLength: huge(lengthUnitsPerMeter: lengthUnitsPerMeter)
+    enableMotor: false
+    maxMotorForce: 0.0
+    motorSpeed: 0.0
+  }
+}
+
+# b3DefaultRevoluteJointDef
+func defaultRevoluteJointDef(lengthUnitsPerMeter: view Float) ret RevoluteJointDef {
+  ret RevoluteJointDef {
+    base: defaultJointDef(lengthUnitsPerMeter: lengthUnitsPerMeter)
+    targetAngle: 0.0
+    enableSpring: false
+    hertz: 0.0
+    dampingRatio: 0.0
+    enableLimit: false
+    lowerAngle: 0.0
+    upperAngle: 0.0
+    enableMotor: false
+    maxMotorTorque: 0.0
+    motorSpeed: 0.0
+  }
+}
+
+func zeroJointEdge() ret JointEdge {
+  ret JointEdge { bodyId: 0, prevKey: 0, nextKey: 0 }
+}
+
+# `(b3Joint){ 0 }`
+func zeroJoint() ret Joint {
+  ret Joint {
+    setIndex: 0
+    colorIndex: 0
+    localIndex: 0
+    edgeA: zeroJointEdge()
+    edgeB: zeroJointEdge()
+    jointId: 0
+    islandId: 0
+    islandIndex: 0
+    drawScale: 0.0
+    jointType: JointType.parallelJoint
+    generation: 0
+    collideConnected: false
+  }
+}
+
+func zeroSoftnessValue() ret Softness {
+  ret Softness { biasRate: 0.0, massScale: 0.0, impulseScale: 0.0 }
+}
+
+func zeroTransform() ret Transform {
+  ret Transform { position: zeroVector(), rotation: Quat { x: 0.0, y: 0.0, z: 0.0, w: 0.0 } }
+}
+
+# `(b3DistanceJoint){ 0 }`
+func zeroDistanceJointData() ret DistanceJointData {
+  ret DistanceJointData {
+    length: 0.0
+    hertz: 0.0
+    dampingRatio: 0.0
+    lowerSpringForce: 0.0
+    upperSpringForce: 0.0
+    minLength: 0.0
+    maxLength: 0.0
+    maxMotorForce: 0.0
+    motorSpeed: 0.0
+    impulse: 0.0
+    lowerImpulse: 0.0
+    upperImpulse: 0.0
+    motorImpulse: 0.0
+    indexA: 0
+    indexB: 0
+    anchorA: zeroVector()
+    anchorB: zeroVector()
+    deltaCenter: zeroVector()
+    distanceSoftness: zeroSoftnessValue()
+    axialMass: 0.0
+    enableSpring: false
+    enableLimit: false
+    enableMotor: false
+  }
+}
+
+# `(b3RevoluteJoint){ 0 }`
+func zeroRevoluteJointData() ret RevoluteJointData {
+  ret RevoluteJointData {
+    linearImpulse: zeroVector()
+    perpImpulse: Vec2 { x: 0.0, y: 0.0 }
+    springImpulse: 0.0
+    motorImpulse: 0.0
+    lowerImpulse: 0.0
+    upperImpulse: 0.0
+    hertz: 0.0
+    dampingRatio: 0.0
+    maxMotorTorque: 0.0
+    motorSpeed: 0.0
+    targetAngle: 0.0
+    lowerAngle: 0.0
+    upperAngle: 0.0
+    indexA: 0
+    indexB: 0
+    frameA: zeroTransform()
+    frameB: zeroTransform()
+    rotationAxisZ: zeroVector()
+    perpAxisX: zeroVector()
+    perpAxisY: zeroVector()
+    deltaCenter: zeroVector()
+    deltaAngle: 0.0
+    axialMass: 0.0
+    springSoftness: zeroSoftnessValue()
+    enableSpring: false
+    enableMotor: false
+    enableLimit: false
+  }
+}
+
+# `memset( jointSim, 0, sizeof( b3JointSim ) )`
+func zeroJointSim() ret JointSim {
+  ret JointSim {
+    jointId: 0
+    bodyIdA: 0
+    bodyIdB: 0
+    jointType: JointType.parallelJoint
+    localFrameA: zeroTransform()
+    localFrameB: zeroTransform()
+    invMassA: 0.0
+    invMassB: 0.0
+    invIA: matrixZero()
+    invIB: matrixZero()
+    constraintHertz: 0.0
+    constraintDampingRatio: 0.0
+    constraintSoftness: zeroSoftnessValue()
+    forceThreshold: 0.0
+    torqueThreshold: 0.0
+    fixedRotation: false
+    distanceJoint: zeroDistanceJointData()
+    revoluteJoint: zeroRevoluteJointData()
+  }
+}
+
+# `joint->edges[edgeIndex]`
+func jointEdge(joint: view Joint, edgeIndex: view Int) ret JointEdge {
+  if edgeIndex is 0 {
+    ret joint.edgeA
+  }
+  ret joint.edgeB
+}
+
+func setJointEdgePrev(joint: mod Joint, edgeIndex: view Int, prevKey: view Int) {
+  if edgeIndex is 0 {
+    joint.edgeA.prevKey = prevKey
+  } else {
+    joint.edgeB.prevKey = prevKey
+  }
+}
+
+func setJointEdgeNext(joint: mod Joint, edgeIndex: view Int, nextKey: view Int) {
+  if edgeIndex is 0 {
+    joint.edgeA.nextKey = nextKey
+  } else {
+    joint.edgeB.nextKey = nextKey
+  }
+}

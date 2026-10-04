@@ -1,13 +1,17 @@
 # Adding contacts to the constraint graph and removing them
 # (b3AddContactToGraph, b3RemoveContactFromGraph of Box3D's
-# constraint_graph.c at 9f998c8), with Box3D's colour assignment order.
-# Checked against the oracle in fixture 957. Joints: P6.
+# constraint_graph.c at 9f998c8), with Box3D's colour assignment order, and
+# the same for joints (b3AssignJointColor, b3CreateJointInGraph,
+# b3AddJointToGraph, b3RemoveJointFromGraph). Checked against the oracle in
+# fixtures 957 and 984.
 open physics/Constants
 open physics/container/Bitset
 open physics/dynamics/WorldTypes
 open physics/dynamics/Body
 open physics/dynamics/Contact
+open physics/dynamics/Joint
 open physics/dynamics/ConstraintGraph
+open physics/dynamics/SolverSet
 open physics/dynamics/World
 
 # The colour for a constraint between bodies of types `typeA` and `typeB`
@@ -152,4 +156,73 @@ func removeContactFromGraph(
       moved.localIndex = localIndex
     }
   }
+}
+
+# b3CreateJointInGraph / b3AddJointToGraph: joint `jointId` takes a colour
+# (b3AssignJointColor, the contact order) and `sim` goes to its end.
+func addJointToGraph(world: mod PhysicsWorld, jointId: view Int, sim: view JointSim) {
+  let joint: Joint = world.joints.copyAtDefault(index: jointId)
+  let bodyIdA: Int = joint.edgeA.bodyId
+  let bodyIdB: Int = joint.edgeB.bodyId
+  let colorIndex: Int = assignContactColor(
+    world: world
+    bodyIdA: bodyIdA
+    bodyIdB: bodyIdB
+    typeA: bodyAt(world: world, bodyId: bodyIdA).bodyType
+    typeB: bodyAt(world: world, bodyId: bodyIdB).bodyType
+  )
+  var localIndex: Int = 0
+  if let color: mod GraphColor => world.constraintGraph.colors.modAt(index: colorIndex) {
+    color.jointSims.add(value: sim)
+    localIndex = color.jointSims.length - 1
+  }
+  if let target: mod Joint => world.joints.modAt(index: jointId) {
+    target.colorIndex = colorIndex
+    target.localIndex = localIndex
+  }
+}
+
+# b3RemoveJointFromGraph
+func removeJointFromGraph(
+  world: mod PhysicsWorld
+  bodyIdA: view Int
+  bodyIdB: view Int
+  colorIndex: view Int
+  localIndex: view Int
+) {
+  var movedId: Int = -1
+  if let color: mod GraphColor => world.constraintGraph.colors.modAt(index: colorIndex) {
+    if colorIndex is not overflowIndex {
+      # This might clear a bit for a static body, which has no effect
+      clearBit(bitset: color.bodySet, bitIndex: bodyIdA)
+      clearBit(bitset: color.bodySet, bitIndex: bodyIdB)
+    }
+    let lastIndex: Int = color.jointSims.length - 1
+    if localIndex is not lastIndex {
+      let moved: JointSim = color.jointSims.copyAtDefault(index: lastIndex)
+      color.jointSims.set(index: localIndex, value: moved)
+      movedId = moved.jointId
+    }
+    color.jointSims.removeLast()
+  }
+  if movedId is not -1 {
+    # Fix the moved joint
+    if let moved: mod Joint => world.joints.modAt(index: movedId) {
+      moved.localIndex = localIndex
+    }
+  }
+}
+
+# The joint sim of joint `jointId` wherever it lives (b3GetJointSim).
+func jointSimOf(world: view PhysicsWorld, jointId: view Int) ret JointSim {
+  let joint: Joint = world.joints.copyAtDefault(index: jointId)
+  if joint.setIndex is awakeSet {
+    if let color: view GraphColor => world.constraintGraph.colors.viewAt(index: joint.colorIndex) {
+      ret color.jointSims.copyAtDefault(index: joint.localIndex)
+    }
+  }
+  if let set: view SolverSet => world.solverSets.viewAt(index: joint.setIndex) {
+    ret set.jointSims.copyAtDefault(index: joint.localIndex)
+  }
+  ret zeroJointSim()
 }

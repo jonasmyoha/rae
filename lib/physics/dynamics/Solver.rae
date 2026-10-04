@@ -4,7 +4,7 @@
 # stages (StageDispatcher) for each sub-step, then finalizing the bodies,
 # continuous collision (FinalizeBodies), refitting the trees and island sleep. Box3D's
 # operation order is kept exactly; checked against the oracle in fixture
-# 958 and 959. Joints and joint events are not here yet (P6).
+# 958, 959 and 984.
 import Math
 open Vec3
 open Quat
@@ -32,6 +32,7 @@ open physics/dynamics/ParallelFor
 open physics/dynamics/ContactConstraints
 open physics/dynamics/StepContext
 open physics/dynamics/StageDispatcher
+open physics/dynamics/JointSolver
 open physics/dynamics/Continuous
 open physics/dynamics/FinalizeBodies
 open physics/dynamics/SolverEvents
@@ -46,6 +47,7 @@ type ColorPlan {
   colorIndex: Int
   wideContactCount: Int
   contactCount: Int
+  jointCount: Int
   wideDim: BlockDim
   contactDim: BlockDim
   jointDim: BlockDim
@@ -92,6 +94,7 @@ func runSolverStages(world: mod PhysicsWorld, context: mod StepContext) {
 
   # Single-threaded overflow work: these constraints fit no graph colour
   let overflowBlock: SolverBlock = overflowSolverBlock(world: world)
+  prepareJointsOverflow(world: world, context: context)
   if overflowBlock.count > 0 {
     prepareContactsScalar(world: world, context: context, block: overflowBlock)
   }
@@ -112,6 +115,7 @@ func runSolverStages(world: mod PhysicsWorld, context: mod StepContext) {
     bodySyncIndex = bodySyncIndex + 1
 
     # Warm start constraints
+    warmStartJointsOverflow(world: world)
     warmStartOverflow(world: world, context: context, block: overflowBlock)
     loop var colorIndex: Int = 0, colorIndex < activeColorCount, ++colorIndex {
       executeMainStage(
@@ -127,6 +131,7 @@ func runSolverStages(world: mod PhysicsWorld, context: mod StepContext) {
     # Solve constraints; overflow constraints (usually dynamic against
     # dynamic) have lower priority
     loop var j: Int = 0, j < solveIterations, ++j {
+      solveJointsOverflow(world: world, context: context, useBias: true)
       pushOverflow(world: world, context: context, block: overflowBlock)
       loop var colorIndex: Int = 0, colorIndex < activeColorCount, ++colorIndex {
         executeMainStage(
@@ -152,6 +157,7 @@ func runSolverStages(world: mod PhysicsWorld, context: mod StepContext) {
 
     # Relax constraints
     loop var j: Int = 0, j < relaxIterations, ++j {
+      solveJointsOverflow(world: world, context: context, useBias: false)
       relaxOverflow(world: world, context: context, block: overflowBlock)
       loop var colorIndex: Int = 0, colorIndex < activeColorCount, ++colorIndex {
         executeMainStage(
@@ -348,12 +354,14 @@ func solve(world: mod PhysicsWorld, context: mod StepContext) {
   var wideContactCount: Int = 0
   var contactCount: Int = 0
   var manifoldCount: Int = 0
+  var jointCount: Int = 0
   var graphBlockCount: Int = 0
   loop var i: Int = 0, i < overflowIndex, ++i {
     if let color: mod GraphColor => world.constraintGraph.colors.modAt(index: i) {
       let colorConvexContactCount: Int = color.convexContacts.length
       let colorContactCount: Int = color.contacts.length
-      if colorConvexContactCount + colorContactCount is 0 {
+      let colorJointCount: Int = color.jointSims.length
+      if colorConvexContactCount + colorContactCount + colorJointCount is 0 {
         continue
       }
       # The ceiling of the wide constraint count
@@ -370,10 +378,12 @@ func solve(world: mod PhysicsWorld, context: mod StepContext) {
           manifoldCount = manifoldCount + spec.manifoldCount
         }
       }
+      jointCount = jointCount + colorJointCount
       let plan: ColorPlan = {
         colorIndex: i
         wideContactCount: colorWideCount
         contactCount: colorContactCount
+        jointCount: colorJointCount
         wideDim: computeBlockCount(
           itemCount: colorWideCount
           minSize: minContactsPerBlock
@@ -385,7 +395,7 @@ func solve(world: mod PhysicsWorld, context: mod StepContext) {
           maxBlockCount: maxBlockCount
         )
         jointDim: computeBlockCount(
-          itemCount: 0
+          itemCount: colorJointCount
           minSize: minJointsPerBlock
           maxBlockCount: maxBlockCount
         )
@@ -408,7 +418,7 @@ func solve(world: mod PhysicsWorld, context: mod StepContext) {
     maxBlockCount: maxBlockCount
   )
   let jointPrepareDim: BlockDim = computeBlockCount(
-    itemCount: 0
+    itemCount: jointCount
     minSize: minJointsPerBlock
     maxBlockCount: maxBlockCount
   )
@@ -451,6 +461,7 @@ func solve(world: mod PhysicsWorld, context: mod StepContext) {
   # slice of the constraint lists
   context.widePrepareSpans.clear()
   context.contactPrepareSpans.clear()
+  context.jointPrepareSpans.clear()
   context.colorWideStarts.clear()
   context.colorContactStarts.clear()
   loop var i: Int = 0, i < graphColorCount, ++i {
@@ -459,6 +470,7 @@ func solve(world: mod PhysicsWorld, context: mod StepContext) {
   }
   var wideBase: Int = 0
   var contactBase: Int = 0
+  var jointBase: Int = 0
   loop let plan: view ColorPlan in plans {
     let colorConvexCount: Int = world.constraintGraph.colors.copyAtDefault(index: plan.colorIndex).convexContacts.length
     context.widePrepareSpans.add(
@@ -475,6 +487,10 @@ func solve(world: mod PhysicsWorld, context: mod StepContext) {
     )
     context.colorContactStarts.set(index: plan.colorIndex, value: contactBase)
     contactBase = contactBase + plan.contactCount
+    context.jointPrepareSpans.add(
+      value: PrepareSpan { start: jointBase, count: plan.jointCount, colorIndex: plan.colorIndex }
+    )
+    jointBase = jointBase + plan.jointCount
   }
   # Sentinels
   context.widePrepareSpans.add(
@@ -483,6 +499,7 @@ func solve(world: mod PhysicsWorld, context: mod StepContext) {
   context.contactPrepareSpans.add(
     value: PrepareSpan { start: contactCount, count: 0, colorIndex: -1 }
   )
+  context.jointPrepareSpans.add(value: PrepareSpan { start: jointCount, count: 0, colorIndex: -1 })
   context.wideContactCount = wideContactCount
   context.overflowSpans.clear()
   context.overflowSpans.add(
@@ -526,7 +543,7 @@ func solve(world: mod PhysicsWorld, context: mod StepContext) {
   let jointBlocks: Int = initBlocks(
     context: context
     dim: jointPrepareDim
-    itemCount: 0
+    itemCount: jointCount
     blockType: SolverBlockType.jointBlock
     colorIndex: noColor
   )
@@ -537,7 +554,7 @@ func solve(world: mod PhysicsWorld, context: mod StepContext) {
     let jointStart: Int = initBlocks(
       context: context
       dim: plan.jointDim
-      itemCount: 0
+      itemCount: plan.jointCount
       blockType: SolverBlockType.graphJointBlock
       colorIndex: plan.colorIndex
     )
@@ -647,9 +664,11 @@ func solve(world: mod PhysicsWorld, context: mod StepContext) {
   context.anyRestitution = false
 
   # Solve the constraints (worker 0 orchestrates)
+  let jointIdCapacity: Int = world.jointIdPool.nextIndex
   let contactIdCapacity: Int = world.contactIdPool.nextIndex
   loop var i: Int = 0, i < world.taskContexts.length, ++i {
     if let taskContext: mod TaskContext => world.taskContexts.modAt(index: i) {
+      setBitCountAndClear(bitset: taskContext.jointStateBitSet, bitCount: jointIdCapacity)
       setBitCountAndClear(bitset: taskContext.hitEventBitSet, bitCount: contactIdCapacity)
       taskContext.hasHitEvents = false
     }
@@ -692,7 +711,7 @@ func solve(world: mod PhysicsWorld, context: mod StepContext) {
     )
   }
 
-  # (Joint events: P6.)
+  reportJointEvents(world: world)
   reportHitEvents(world: world)
 
   # Refit the kinematic and dynamic trees

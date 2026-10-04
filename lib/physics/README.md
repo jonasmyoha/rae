@@ -222,7 +222,7 @@ later changes only the block loops.
 | `b3SelfPairsTask` `b3CrossPairsTask` | `selfPairsTask` `crossPairsTask` |
 | `b3CollideCrossPairs` `b3VisitPair` `b3CollideProxyAndSubtree` `b3TestPair` | `collideCrossPairs` `visitPair` `collideProxyAndSubtree` `testNodePair` |
 | `b3AddCandidatePair` `b3FlushCandidatePairs` `b3ShouldCreatePair` | `addCandidatePair` `flushCandidatePairs` `shouldCreatePair` |
-| `b3ShouldBodiesCollide` | `shouldBodiesCollide` (`dynamics/WorldBodies`; the joint walk is P6) |
+| `b3ShouldBodiesCollide` | `shouldBodiesCollide` (`dynamics/WorldBodies`, walking the joints of the body with fewer) |
 | `b3ParallelFor`'s block split | `parallelForBlockSize` `parallelForBlockCount` … (`dynamics/ParallelFor`) |
 | `b3TaskContext` | `TaskContext` (`dynamics/World`; only the pair keys so far) |
 | `b3CreateContact` | `createContact` (`dynamics/Contact`; the pair registry and pair set only, the rest is P4b) |
@@ -448,3 +448,38 @@ capsules and boxes thrown at 45-70 m/s onto a grid and a platform mesh, a
 wave height field and a compound course, 600 steps each. Where Box3D's time
 of impact stops a body and where it lets one through, every step's body hash
 and every 20 steps the bodies and mesh contacts are bit-exact.
+
+## P6a — joints: the core, distance, revolute and filter (`dynamics/Joint`, `WorldJoints`, `WorldJointSets`, `JointSolver`)
+
+A joint lives in the solver sets like a contact: its sim sits in a graph
+colour while awake (coloured like a contact, the overflow colour when no
+colour is free), in a sleeping, static or disabled set otherwise. It links
+its bodies' islands, merging them; destroying it makes its island a split
+candidate. A joint created between two sleeping sets merges them so they
+keep sleeping. Body type changes, disable/enable and destroying a body move
+or destroy its joints as Box3D does. Every solver stage dispatches on the
+joint's kind with an exhaustive match; joints run before contacts, and the
+overflow joints before the overflow contacts. A joint whose force or torque
+reaches its threshold reports a joint event.
+
+| Box3D | Rae |
+|---|---|
+| `b3Joint` `b3JointSim` `b3JointDef` `b3JointEvent` | `Joint` `JointSim` `JointDef` `JointEvent` (`dynamics/Joint`) |
+| `b3CreateJointInternal` `b3DestroyJointInternal` `b3Create*Joint` `b3DestroyJoint` | `createJoint` `destroyJointInternal` `createDistanceJoint` `createRevoluteJoint` `createFilterJoint` `destroyJoint` (`dynamics/WorldJoints`) |
+| `b3LinkJoint` `b3UnlinkJoint` `b3MergeSolverSets` `b3TransferJoint` | `linkJoint` `unlinkJoint` `mergeSolverSets` `transferJoint` (`dynamics/WorldJointSets`) |
+| `b3AddJointToGraph` `b3RemoveJointFromGraph` | `addJointToGraph` `removeJointFromGraph` (`dynamics/WorldGraph`) |
+| `b3PrepareJoint` `b3WarmStartJoint` `b3SolveJoint` `b3GetJointReaction`, the `_Overflow` and task variants | `prepareJoint` `warmStartJoint` `solveJoint` `jointReaction` and the block variants (`dynamics/JointSolver`) |
+| distance_joint.c, revolute_joint.c | `dynamics/DistanceJoint`, `dynamics/RevoluteJoint` |
+
+Not yet: the prismatic and wheel joints (P6b); the spherical, motor,
+parallel and weld joints (P6c). Their match arms are empty and they cannot
+be created.
+
+The check: fixture 984 replays `goldens/joints.golden` — six worlds, 600
+steps each with sleep on: pendulums and a filter joint, revolute limits,
+motor and spring, distance springs, limits, motor and a rope, a chain bridge
+with event thresholds, a sleeping chain split by destroying a joint, and
+jointed bodies destroyed, disabled, enabled, retyped and merged across two
+sleeping sets. Every step's body hash and joint events, and every 20 steps
+the bodies and every joint's set, colour, island and impulses, are
+bit-exact.
