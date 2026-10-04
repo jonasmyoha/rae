@@ -538,3 +538,46 @@ held against a tilted cone, a sprung and a motorised ball joint; motor
 joints pulling, driving and following; a keel and a parallel pair on a rope;
 a cantilevered beam of rigid and soft welds. 600 steps each, bit-exact with
 every joint's impulses.
+
+## P7a — world queries and the character mover (`dynamics/WorldQueries`, `ShapeQueries`, `collision/Mover`, `character/CharacterMover`)
+
+The world's queries walk the three broad-phase trees (static, kinematic,
+dynamic) with the tree's ray, box-cast and box iterators, skip the shapes the
+query filter refuses, and run the shape's own query relative to the query's
+origin. Box3D hands each hit to a user callback; Rae has no function values,
+so each query is one fixed callback: the overlaps and the mover planes are
+collected, `castRay` / `castShape` collect every hit (a callback returning
+1), `castRayClosest` is Box3D's closest-hit callback (ignoring a start
+inside a shape) and `castShapeClosest` keeps the closest hit. The mover cast
+takes the shapes to ignore as a list (the sample's filter callback).
+
+The character mover is the loop of Box3D's samples/mover.cpp in Rae: a
+capsule held up by a "pogo" spring (a ray cast down from its lower sphere)
+walks with friction and acceleration, then up to five rounds of collide,
+solve planes and cast move it; it pushes the dynamic bodies it touches. It
+steps up anything the pogo spring reaches: a 0.3 m curb and also a 0.6 m
+block (the capsule's bottom hovers 0.6 m up); a 1.0 m block stops it.
+
+| Box3D | Rae |
+|---|---|
+| `b3QueryFilter` `b3DefaultQueryFilter` `b3ShouldQueryCollide` | `QueryFilter` `defaultQueryFilter` `shouldQueryCollide` (`dynamics/WorldQueries`) |
+| `b3World_CastRayClosest` `b3World_CastRay` `b3RayResult` | `castRayClosest` `castRay` `RayResult` `CastHit` |
+| `b3World_CastShape` | `castShape` `castShapeClosest` |
+| `b3World_OverlapAABB` `b3World_OverlapShape` | `overlapAabb` `overlapShapeProxy` |
+| `b3World_CollideMover` `b3World_CastMover` | `collideMover` (`MoverPlane`s) `castMover` |
+| `b3RayCastShape` `b3ShapeCastShape` `b3OverlapShape` `b3CollideMover` | `rayCastShape` `shapeCastShape` `overlapShape` `collideMoverShape` (`dynamics/ShapeQueries`) |
+| `b3CollisionPlane` `b3SolvePlanes` `b3ClipVector` | `CollisionPlane` `solvePlanes` `clipVector` (`collision/Mover`) |
+| samples/mover.cpp `CharacterMover` | `CharacterMover` `solveMove` `jumpCharacter` (`character/CharacterMover`) |
+| `b3Body_GetType` `GetInverseMass` `GetWorldInverseRotationalInertia` `GetWorldCenter`, `b3Shape_GetBody` | `getBodyType` `getBodyInverseMass` `getBodyWorldInverseInertia` `getBodyWorldCenter` `getShapeBody` (`dynamics/WorldBodies`) |
+
+Not yet: the ray, shape and mover queries of meshes, height fields and
+compounds (P7b); they report no hit, no overlap and no planes.
+
+The checks: fixture 985 replays `goldens/queries.golden` — every query,
+under three filters, before and while a world of static, kinematic and
+dynamic spheres, capsules and boxes steps. Fixture 986 replays
+`goldens/character.golden`, where the same mover loop runs in C: sliding
+along a wall, a 0.3 m curb and a 0.6 m block stepped, a 1.0 m block that
+stops it, standing grounded on a 20 degree ramp with its normal, pushing a
+box, jumping. All bit-exact.
+

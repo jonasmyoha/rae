@@ -1,0 +1,85 @@
+# The character mover's plane solver (b3SolvePlanes and b3ClipVector of
+# Box3D's mover.c at 9f998c8): the planes a mover collides with push its
+# target movement out of them, each push clamped to its plane's limit, and
+# clip a velocity against the planes that pushed. Box3D's operation order is
+# kept exactly; checked against the oracle in fixture 986.
+open Vec3
+open physics/Constants
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/PlaneMath
+
+# b3CollisionPlane: a plane the mover is kept out of, how far it may push,
+# how far it pushed, and whether it clips the mover's velocity.
+type CollisionPlane {
+  plane: Plane
+  pushLimit: Float
+  push: Float
+  clipVelocity: Bool
+}
+
+# b3PlaneSolverResult: the movement left after the pushes, and the number of
+# solver iterations.
+type PlaneSolverResult {
+  delta: Vec3
+  iterationCount: Int
+}
+
+# b3SolvePlanes: push `targetDelta` out of the planes (accumulated pushes in
+# each plane's `push`, clamped to [0, pushLimit]) until the total push of an
+# iteration is under the linear slop, 20 iterations at most.
+func solvePlanes(
+  targetDelta: view Vec3
+  planes: mod List(CollisionPlane)
+  lengthUnitsPerMeter: view Float
+) ret PlaneSolverResult {
+  loop var i: Int = 0, i < planes.length, ++i {
+    if let plane: mod CollisionPlane => planes.modAt(index: i) {
+      plane.push = 0.0
+    }
+  }
+
+  var delta: Vec3 = targetDelta
+  let slop: Float = linearSlop(lengthUnitsPerMeter: lengthUnitsPerMeter)
+  let tolerance: Float = slop
+  var iteration: Int = 0
+  loop iteration < 20 {
+    var totalPush: Float = 0.0
+    loop var planeIndex: Int = 0, planeIndex < planes.length, ++planeIndex {
+      if let plane: mod CollisionPlane => planes.modAt(index: planeIndex) {
+        # Add slop to prevent jitter
+        let separation: Float = planeSeparation(plane: plane.plane, point: delta) + slop
+        var push: Float = -separation
+        # Clamp the accumulated push
+        let accumulatedPush: Float = plane.push
+        plane.push = clampFloat(value: plane.push + push, lower: 0.0, upper: plane.pushLimit)
+        push = plane.push - accumulatedPush
+        delta = mulAdd(base: delta, scale: push, vector: plane.plane.normal)
+        # Track the total push for convergence
+        totalPush = totalPush + absFloat(value: push)
+      }
+    }
+    if totalPush < tolerance {
+      break
+    }
+    iteration = iteration + 1
+  }
+  ret PlaneSolverResult { delta: delta, iterationCount: iteration }
+}
+
+# b3ClipVector: remove from `vector` its components into the planes that
+# pushed and clip velocity.
+func clipVector(vector: view Vec3, planes: view List(CollisionPlane)) ret Vec3 {
+  var clipped: Vec3 = vector
+  loop let plane: view CollisionPlane in planes {
+    if plane.push is 0.0 or plane.clipVelocity is false {
+      continue
+    }
+    clipped = mulSub(
+      base: clipped
+      scale: minFloat(left: 0.0, right: dot(left: clipped, right: plane.plane.normal))
+      vector: plane.plane.normal
+    )
+  }
+  ret clipped
+}
