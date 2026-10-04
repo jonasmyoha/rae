@@ -867,10 +867,10 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                                 ctx->compiler_ctx, ctx->generic_params,
                                 ctx->generic_args, pp->type);
                             int tid = ctx->temp_counter++;
-                            fprintf(out, "(__extension__ ({ %s __cpy%d; rae_deep_copy_%s(&__cpy%d, &(",
+                            fprintf(out, "(__extension__ ({ %s __cpy%d; rae_deep_copy_%s(&__cpy%d, ",
                                     tn, tid, tn, tid);
-                            emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
-                            fprintf(out, ")); __cpy%d; }))", tid);
+                            emit_deep_copy_source(ctx, a->value, out);
+                            fprintf(out, "); __cpy%d; }))", tid);
                         } else {
                             fprintf(out, "(");
                             emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
@@ -1660,10 +1660,10 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                     ctx->compiler_ctx, ctx->generic_params,
                     ctx->generic_args, (AstTypeRef*)eff_field_tr);
                 int tmp_id = ctx->temp_counter++;
-                fprintf(out, "(__extension__ ({ %s __fdc%d; rae_deep_copy_%s(&__fdc%d, &(",
+                fprintf(out, "(__extension__ ({ %s __fdc%d; rae_deep_copy_%s(&__fdc%d, ",
                         tn_dc, tmp_id, tn_dc, tmp_id);
-                emit_expr(ctx, f->value, out, PREC_LOWEST, false, false);
-                fprintf(out, ")); __fdc%d; }))", tmp_id);
+                emit_deep_copy_source(ctx, f->value, out);
+                fprintf(out, "); __fdc%d; }))", tmp_id);
             } else if (rhs_is_move_local) {
                 // #798: transfer ownership — emit the bare local (shallow byte
                 // copy of the struct value) and mark it moved so the return
