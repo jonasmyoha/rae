@@ -109,6 +109,12 @@ than a `lib/` package.
 
 ## Module directives: `import` and `open`
 
+An import names a **package path** — `import ui/Theme`, `open
+collections/StringMap`, a dependency's `import codec/Decoder` — never a
+path relative to the importing file. `import "./x"` and `import "../x"` are
+rejected where they are written: the project's own files are visible
+without an import (above), so a relative path is never needed.
+
 ### `import module`
 
 Makes the module available through its namespace, and makes its functions

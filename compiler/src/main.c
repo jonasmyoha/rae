@@ -1738,6 +1738,20 @@ static bool module_graph_load_module(ModuleGraph* graph,
       free(raw);
       continue;
     }
+    // #23184735: imports are package paths (`import ui/Theme`), never
+    // file-relative (`./x`, `../x`): the project's own files are visible with
+    // no import at all (docs/module-namespacing.md, "Project folders"), so a
+    // relative path is never needed — and reads as a path, not a module.
+    if (is_relative_spec(raw)) {
+      char message[1024];
+      snprintf(message, sizeof message,
+        "relative import '%s' is not supported: the project's own files are visible without "
+        "an import, and a lib/ or dependency package is imported by its package path "
+        "(`import ui/Theme`)", raw);
+      diag_error(file_path, (int)import->line, (int)import->column, message);
+      free(raw);
+      return false;
+    }
     char* normalized = normalize_import_path(module_path, raw);
     free(raw);
     if (!normalized) {
