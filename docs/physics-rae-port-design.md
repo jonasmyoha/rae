@@ -335,7 +335,8 @@ C added.
   fixture 969). The joint steps of these functions wait for P6.
 - **P5 — meshes, height fields, compounds** and their manifolds. Split:
   **P5a** the triangle manifolds (triangle_manifold.c); **P5b** meshes (the
-  BVH build, mesh_contact.c, the mesh shape and its shape pairs, a scene);
+  BVH build, then mesh_contact.c, the mesh shape and its shape pairs, a
+  scene);
   **P5c** height fields; **P5d** compounds.
   **P5a landed 2026-10-04, bit-exact:** b3ClosestPointOnTriangle and a
   triangle against a sphere, a capsule (with the simplex cache) and a hull
@@ -343,6 +344,14 @@ C added.
   b3LocalManifold gained its triangle fields (`lib/physics/collision/
   TriangleManifold`, `TriangleHullManifold`, `Manifold`; golden `triangle`,
   fixture 970).
+  **P5b's mesh build landed 2026-10-04, bit-exact:** b3CreateMesh (welding,
+  the BVH with the binned SAH, median and half splits, the depth-first
+  triangle order, the edge flags), the generated grid, box, hollow-box and
+  platform meshes, b3GetHeight, b3QueryMesh (with the scalar bounds and
+  triangle-box tests) and b3ComputeMeshAABB (`lib/physics/geometry/Mesh`,
+  `MeshQuery`; golden `mesh`, fixture 971). The mesh's byte-block layout
+  and hash are not ported (a MeshData is a struct of lists). The mesh ray,
+  shape and mover casts are P7.
 - **P6 — joints**, one module per kind, each scene bit-exact.
 - **P7 — queries and the mover**: ray/shape casts, overlaps, the character
   loop (walls, steps, slopes).

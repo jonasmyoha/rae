@@ -1,0 +1,493 @@
+# Triangle mesh queries and generated meshes (Box3D's mesh.c at 9f998c8:
+# b3QueryMesh, b3ComputeMeshAABB, b3GetHeight, and b3CreateGridMesh,
+# b3CreateBoxMesh, b3CreateHollowBoxMesh, b3CreatePlatformMesh), with the
+# scalar bounds tests of simd.h / simd.c (Box3D's B3_SIMD_NONE path). Box3D's
+# operation order is kept exactly; checked bit for bit against the oracle in
+# fixture 971.
+open Vec3
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/TransformMath
+open physics/math/AabbMath
+open physics/geometry/Mesh
+
+# A mesh with a scale (b3Mesh). The scale may be non-uniform and have
+# negative components, but no component may be very small.
+type Mesh {
+  data: MeshData
+  scale: Vec3
+}
+
+# A triangle a query found, scaled, wound counter-clockwise, with its index.
+type MeshQueryTriangle {
+  a: Vec3
+  b: Vec3
+  c: Vec3
+  triangleIndex: Int
+}
+
+# b3MinV / b3MaxV of the scalar path: `<` and `>`, unlike b3Min / b3Max.
+func minV(left: view Vec3, right: view Vec3) ret Vec3 {
+  var result: Vec3 = right
+  if left.x < right.x {
+    result.x = left.x
+  }
+  if left.y < right.y {
+    result.y = left.y
+  }
+  if left.z < right.z {
+    result.z = left.z
+  }
+  ret result
+}
+
+func maxV(left: view Vec3, right: view Vec3) ret Vec3 {
+  var result: Vec3 = right
+  if left.x > right.x {
+    result.x = left.x
+  }
+  if left.y > right.y {
+    result.y = left.y
+  }
+  if left.z > right.z {
+    result.z = left.z
+  }
+  ret result
+}
+
+func absV(vector: view Vec3) ret Vec3 {
+  var result: Vec3 = vector
+  if vector.x < 0.0 {
+    result.x = -vector.x
+  }
+  if vector.y < 0.0 {
+    result.y = -vector.y
+  }
+  if vector.z < 0.0 {
+    result.z = -vector.z
+  }
+  ret result
+}
+
+# b3ModifiedCrossV: the cross product with its minus signs made plus.
+func modifiedCross(left: view Vec3, right: view Vec3) ret Vec3 {
+  ret Vec3 {
+    x: left.y * right.z + left.z * right.y
+    y: left.z * right.x + left.x * right.z
+    z: left.x * right.y + left.y * right.x
+  }
+}
+
+func anyGreaterThanZero(vector: view Vec3) ret Bool {
+  ret vector.x > 0.0 or vector.y > 0.0 or vector.z > 0.0
+}
+
+# b3Dot3V's scalar dot: x, then y, then z.
+func dot3(left: view Vec3, right: view Vec3) ret Float {
+  ret left.x * right.x + left.y * right.y + left.z * right.z
+}
+
+# b3TestBoundsOverlap
+func testBoundsOverlap(
+  min1: view Vec3
+  max1: view Vec3
+  min2: view Vec3
+  max2: view Vec3
+) ret Bool {
+  let separation: Vec3 = maxV(
+    left: subtract(left: min2, right: max1)
+    right: subtract(left: min1, right: max2)
+  )
+  ret separation.x <= 0.0 and separation.y <= 0.0 and separation.z <= 0.0
+}
+
+# b3TestBoundsTriangleOverlap: the separating axis test of a box (center,
+# extent) and a triangle: the box faces, the triangle face, the edge axes.
+func testBoundsTriangleOverlap(
+  nodeCenter: view Vec3
+  nodeExtent: view Vec3
+  vertex1: view Vec3
+  vertex2: view Vec3
+  vertex3: view Vec3
+) ret Bool {
+  let two: Vec3 = { x: 2.0, y: 2.0, z: 2.0 }
+  let p1: Vec3 = subtract(left: vertex1, right: nodeCenter)
+  let p2: Vec3 = subtract(left: vertex2, right: nodeCenter)
+  let p3: Vec3 = subtract(left: vertex3, right: nodeCenter)
+
+  # The box faces
+  let triangleMin: Vec3 = minV(left: p1, right: minV(left: p2, right: p3))
+  let triangleMax: Vec3 = maxV(left: p1, right: maxV(left: p2, right: p3))
+  let separation1: Vec3 = subtract(left: triangleMin, right: nodeExtent)
+  let separation2: Vec3 = add(left: triangleMax, right: nodeExtent)
+  if anyGreaterThanZero(vector: maxV(left: separation1, right: negate(vector: separation2))) {
+    ret false
+  }
+
+  # The triangle face
+  let edge1: Vec3 = subtract(left: p2, right: p1)
+  let edge2: Vec3 = subtract(left: p3, right: p2)
+  let edge3: Vec3 = subtract(left: p1, right: p3)
+  let normal: Vec3 = cross(left: edge1, right: edge2)
+  if absFloat(value: dot3(left: normal, right: p1)) - dot3(
+    left: absV(vector: normal)
+    right: nodeExtent
+  ) > 0.0 {
+    ret false
+  }
+
+  # The edges
+  let edgeSeparation1: Vec3 = subtract(
+    left: subtract(
+      left: absV(vector: cross(left: edge1, right: add(left: p1, right: p3)))
+      right: absV(vector: cross(left: edge1, right: edge3))
+    )
+    right: multiply(left: two, right: modifiedCross(left: absV(vector: edge1), right: nodeExtent))
+  )
+  if anyGreaterThanZero(vector: edgeSeparation1) {
+    ret false
+  }
+  let edgeSeparation2: Vec3 = subtract(
+    left: subtract(
+      left: absV(vector: cross(left: edge2, right: add(left: p1, right: p2)))
+      right: absV(vector: cross(left: edge2, right: edge1))
+    )
+    right: multiply(left: two, right: modifiedCross(left: absV(vector: edge2), right: nodeExtent))
+  )
+  if anyGreaterThanZero(vector: edgeSeparation2) {
+    ret false
+  }
+  let edgeSeparation3: Vec3 = subtract(
+    left: subtract(
+      left: absV(vector: cross(left: edge3, right: add(left: p2, right: p3)))
+      right: absV(vector: cross(left: edge3, right: edge2))
+    )
+    right: multiply(left: two, right: modifiedCross(left: absV(vector: edge3), right: nodeExtent))
+  )
+  if anyGreaterThanZero(vector: edgeSeparation3) {
+    ret false
+  }
+  ret true
+}
+
+# b3QueryMesh: the triangles overlapping `bounds` (in the mesh's scaled
+# frame), in depth-first order, at most `capacity` (Box3D's callback stops
+# the walk by returning false; here the walk stops when the list is full).
+func queryMesh(mesh: view Mesh, bounds: view Aabb, capacity: view Int) ret List(MeshQueryTriangle) {
+  let result: List(MeshQueryTriangle) = List.create(MeshQueryTriangle, cap: 8)
+  let meshScale: Vec3 = mesh.scale
+  let ccw: Bool = meshScale.x * meshScale.y * meshScale.z > 0.0
+
+  # A scale with reflection can swap min and max once unscaled
+  let one: Vec3 = { x: 1.0, y: 1.0, z: 1.0 }
+  let invScale: Vec3 = { x: one.x / meshScale.x, y: one.y / meshScale.y, z: one.z / meshScale.z }
+  let temp1: Vec3 = multiply(left: invScale, right: bounds.lowerBound)
+  let temp2: Vec3 = multiply(left: invScale, right: bounds.upperBound)
+  let boundsMin: Vec3 = minV(left: temp1, right: temp2)
+  let boundsMax: Vec3 = maxV(left: temp1, right: temp2)
+  let half: Vec3 = { x: 0.5, y: 0.5, z: 0.5 }
+  let boundsCenter: Vec3 = multiply(left: half, right: add(left: boundsMin, right: boundsMax))
+  let boundsExtent: Vec3 = subtract(left: boundsMax, right: boundsCenter)
+
+  let data: MeshData = mesh.data
+  let stack: List(Int) = List.create(Int, cap: meshStackSize)
+  var nodeIndex: Int = 0
+  loop true {
+    let node: MeshNode = data.nodes.copyAtDefault(index: nodeIndex)
+    if testBoundsOverlap(
+      min1: node.lowerBound
+      max1: node.upperBound
+      min2: boundsMin
+      max2: boundsMax
+    ) {
+      if isLeafNode(node: node) {
+        loop var index: Int = 0, index < node.count, ++index {
+          let triangleIndex: Int = node.triangleOffset + index
+          let triangle: MeshTriangle = data.triangles.copyAtDefault(index: triangleIndex)
+          let vertex1: Vec3 = data.vertices.copyAtDefault(index: triangle.index1)
+          let vertex2: Vec3 = data.vertices.copyAtDefault(index: triangle.index2)
+          let vertex3: Vec3 = data.vertices.copyAtDefault(index: triangle.index3)
+          if testBoundsTriangleOverlap(
+            nodeCenter: boundsCenter
+            nodeExtent: boundsExtent
+            vertex1: vertex1
+            vertex2: vertex2
+            vertex3: vertex3
+          ) {
+            let a: Vec3 = multiply(left: meshScale, right: vertex1)
+            var b: Vec3 = multiply(left: meshScale, right: vertex3)
+            var c: Vec3 = multiply(left: meshScale, right: vertex2)
+            if ccw {
+              b = multiply(left: meshScale, right: vertex2)
+              c = multiply(left: meshScale, right: vertex3)
+            }
+            if result.length >= capacity {
+              ret result
+            }
+            result.add(value: MeshQueryTriangle { a: a, b: b, c: c, triangleIndex: triangleIndex })
+          }
+        }
+      } else {
+        # Recurse: the right child waits, the left child is next
+        stack.add(value: nodeIndex + node.count)
+        nodeIndex = nodeIndex + 1
+        continue
+      }
+    }
+    if stack.length is 0 {
+      break
+    }
+    nodeIndex = stack.copyAtDefault(index: stack.length - 1)
+    stack.removeLast()
+  }
+  ret result
+}
+
+# b3ComputeMeshAABB
+func computeMeshAabb(data: view MeshData, transform: view Transform, scale: view Vec3) ret Aabb {
+  let scaledLower: Vec3 = multiply(left: scale, right: data.bounds.lowerBound)
+  let scaledUpper: Vec3 = multiply(left: scale, right: data.bounds.upperBound)
+  let bounds: Aabb = {
+    lowerBound: min(left: scaledLower, right: scaledUpper)
+    upperBound: max(left: scaledLower, right: scaledUpper)
+  }
+  ret transformAabb(transform: transform, box: bounds)
+}
+
+func nodeHeight(data: view MeshData, nodeIndex: view Int) ret Int {
+  let node: MeshNode = data.nodes.copyAtDefault(index: nodeIndex)
+  if isLeafNode(node: node) {
+    ret 0
+  }
+  let leftHeight: Int = nodeHeight(data: data, nodeIndex: nodeIndex + 1)
+  let rightHeight: Int = nodeHeight(data: data, nodeIndex: nodeIndex + node.count)
+  ret 1 + maxInt(left: leftHeight, right: rightHeight)
+}
+
+# b3GetHeight: the BVH height, recomputed from the nodes.
+func meshHeight(data: view MeshData) ret Int {
+  if data.nodes.length is 0 {
+    ret 0
+  }
+  ret nodeHeight(data: data, nodeIndex: 0)
+}
+
+func emptyMeshDef() ret MeshDef {
+  ret MeshDef {
+    vertices: List.create(Vec3, cap: 8)
+    indices: List.create(Int, cap: 36)
+    materialIndices: List.create(Int, cap: 0)
+    weldTolerance: 0.0
+    weldVertices: false
+    useMedianSplit: false
+    identifyEdges: false
+    clockWiseWinding: false
+  }
+}
+
+# b3CreateGridMesh: an xCount by zCount grid of square cells in the y = 0
+# plane, centered on the origin, two triangles per cell.
+func createGridMesh(
+  xCount: view Int
+  zCount: view Int
+  cellWidth: view Float
+  materialCount: view Int
+  identifyEdges: view Bool
+  lengthUnitsPerMeter: view Float
+) ret opt MeshData {
+  var def: MeshDef = emptyMeshDef()
+  let xWidth: Float = cellWidth * xCount.toFloat()
+  let zWidth: Float = cellWidth * zCount.toFloat()
+  var x: Float = -0.5 * xWidth
+  loop var ix: Int = 0, ix <= xCount, ++ix {
+    var z: Float = -0.5 * zWidth
+    loop var iz: Int = 0, iz <= zCount, ++iz {
+      def.vertices.add(value: Vec3 { x: x, y: 0.0, z: z })
+      z = z + cellWidth
+    }
+    x = x + cellWidth
+  }
+  var materialIndex: Int = 0
+  loop var ix: Int = 0, ix < xCount, ++ix {
+    loop var iz: Int = 0, iz < zCount, ++iz {
+      let index1: Int = iz + (zCount + 1) * ix
+      let index2: Int = index1 + 1
+      let index3: Int = index2 + (zCount + 1)
+      let index4: Int = index3 - 1
+      def.indices.add(value: index1)
+      def.indices.add(value: index2)
+      def.indices.add(value: index3)
+      def.indices.add(value: index3)
+      def.indices.add(value: index4)
+      def.indices.add(value: index1)
+      if materialCount > 0 {
+        def.materialIndices.add(value: materialIndex % materialCount)
+        def.materialIndices.add(value: materialIndex % materialCount)
+      }
+      materialIndex = materialIndex + 1
+    }
+  }
+  def.useMedianSplit = true
+  def.identifyEdges = identifyEdges
+  ret createMesh(def: def, lengthUnitsPerMeter: lengthUnitsPerMeter)
+}
+
+func boxCornerVertices(center: view Vec3, extent: view Vec3) ret List(Vec3) {
+  let x: Float = extent.x
+  let y: Float = extent.y
+  let z: Float = extent.z
+  let corners: List(Vec3) = {
+    Vec3 { x: x, y: y, z: z }
+    Vec3 { x: -x, y: y, z: z }
+    Vec3 { x: -x, y: -y, z: z }
+    Vec3 { x: x, y: -y, z: z }
+    Vec3 { x: x, y: y, z: -z }
+    Vec3 { x: -x, y: y, z: -z }
+    Vec3 { x: -x, y: -y, z: -z }
+    Vec3 { x: x, y: -y, z: -z }
+  }
+  let placed: List(Vec3) = List.create(Vec3, cap: 8)
+  loop let corner: view Vec3 in corners {
+    placed.add(value: add(left: corner, right: center))
+  }
+  ret placed
+}
+
+func outwardBoxIndices() ret List(Int) {
+  let indices: List(Int) = {
+    0
+    1
+    3
+    1
+    2
+    3
+    0
+    4
+    1
+    1
+    4
+    5
+    0
+    3
+    7
+    4
+    0
+    7
+    4
+    7
+    5
+    6
+    5
+    7
+    1
+    5
+    2
+    6
+    2
+    5
+    3
+    2
+    7
+    6
+    7
+    2
+  }
+  ret indices
+}
+
+# b3CreateBoxMesh: a closed box, triangles facing out.
+func createBoxMesh(
+  center: view Vec3
+  extent: view Vec3
+  identifyEdges: view Bool
+  lengthUnitsPerMeter: view Float
+) ret opt MeshData {
+  var def: MeshDef = emptyMeshDef()
+  def.vertices = boxCornerVertices(center: center, extent: extent)
+  def.indices = outwardBoxIndices()
+  def.identifyEdges = identifyEdges
+  ret createMesh(def: def, lengthUnitsPerMeter: lengthUnitsPerMeter)
+}
+
+# b3CreateHollowBoxMesh: a box with its triangles facing in.
+func createHollowBoxMesh(
+  center: view Vec3
+  extent: view Vec3
+  lengthUnitsPerMeter: view Float
+) ret opt MeshData {
+  var def: MeshDef = emptyMeshDef()
+  def.vertices = boxCornerVertices(center: center, extent: extent)
+  let indices: List(Int) = {
+    3
+    1
+    0
+    3
+    2
+    1
+    1
+    4
+    0
+    5
+    4
+    1
+    7
+    3
+    0
+    7
+    0
+    4
+    5
+    7
+    4
+    7
+    5
+    6
+    2
+    5
+    1
+    5
+    2
+    6
+    7
+    2
+    3
+    2
+    7
+    6
+  }
+  def.indices = indices
+  def.identifyEdges = true
+  ret createMesh(def: def, lengthUnitsPerMeter: lengthUnitsPerMeter)
+}
+
+# b3CreatePlatformMesh: a frustum, topWidth across at the top, bottomWidth at
+# the bottom.
+func createPlatformMesh(
+  center: view Vec3
+  height: view Float
+  topWidth: view Float
+  bottomWidth: view Float
+  lengthUnitsPerMeter: view Float
+) ret opt MeshData {
+  let hb: Float = 0.5 * bottomWidth
+  let ht: Float = 0.5 * topWidth
+  let hy: Float = 0.5 * height
+  let corners: List(Vec3) = {
+    Vec3 { x: ht, y: hy, z: ht }
+    Vec3 { x: -ht, y: hy, z: ht }
+    Vec3 { x: -hb, y: -hy, z: hb }
+    Vec3 { x: hb, y: -hy, z: hb }
+    Vec3 { x: ht, y: hy, z: -ht }
+    Vec3 { x: -ht, y: hy, z: -ht }
+    Vec3 { x: -hb, y: -hy, z: -hb }
+    Vec3 { x: hb, y: -hy, z: -hb }
+  }
+  var def: MeshDef = emptyMeshDef()
+  loop let corner: view Vec3 in corners {
+    def.vertices.add(value: add(left: corner, right: center))
+  }
+  def.indices = outwardBoxIndices()
+  def.useMedianSplit = true
+  def.identifyEdges = true
+  ret createMesh(def: def, lengthUnitsPerMeter: lengthUnitsPerMeter)
+}
