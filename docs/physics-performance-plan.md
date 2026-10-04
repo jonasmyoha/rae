@@ -82,6 +82,12 @@ So:
    should top out where the HUD shows the budget breaking, and say so — a
    showcase of real performance, not a staged one.
 
+**Measured (P9a, 2026-10-05):** k = 1.34 on the large pyramid single-
+threaded (14.84 ms against C scalar's 11.05; 1.45 on many pyramids, 2.5-2.6
+on the joint grid and the convex pile). The causes and the follow-ups are in
+`docs/physics-rae-port-design.md` §6.1; `benchmarks/physics/run.sh`
+reproduces the table.
+
 ## 4. Box3D's step against Rae today
 
 Box3D's step, in order (`physics_world.c`, `solver.c`): update the broad-phase

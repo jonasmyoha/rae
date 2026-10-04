@@ -319,7 +319,7 @@ func restitutionOverflow(
 func solve(world: mod PhysicsWorld, context: mod StepContext) {
   # Only steps that advance the simulation count
   world.stepIndex = world.stepIndex + 1
-  let awakeBodyCount: Int = world.solverSets.copyAtDefault(index: awakeSet).bodySims.length
+  let awakeBodyCount: Int = setBodyCount(world: world, setIndex: awakeSet)
   if awakeBodyCount is 0 {
     ret
   }
@@ -677,7 +677,7 @@ func solve(world: mod PhysicsWorld, context: mod StepContext) {
   world.splitIslandId = -1
 
   # The island bits for body finalization
-  let awakeIslandCount: Int = world.solverSets.copyAtDefault(index: awakeSet).islandSims.length
+  let awakeIslandCount: Int = setIslandCount(world: world, setIndex: awakeSet)
   loop var i: Int = 0, i < world.taskContexts.length, ++i {
     if let taskContext: mod TaskContext => world.taskContexts.modAt(index: i) {
       setBitCountAndClear(bitset: taskContext.awakeIslandBitSet, bitCount: awakeIslandCount)
@@ -789,9 +789,7 @@ func initColorStages(
 # The bullet half of b3Solve: enlarge the proxies of a bullet whose bounds
 # grew.
 func enlargeBulletProxies(world: mod PhysicsWorld, simIndex: view Int) {
-  var sim: BodySim = world.solverSets.copyAtDefault(index: awakeSet).bodySims.copyAtDefault(
-    index: simIndex
-  )
+  var sim: BodySim = setBodySimAt(world: world, setIndex: awakeSet, localIndex: simIndex)
   if (sim.flags bitand enlargeBulletBoundsFlag) is 0 {
     ret
   }
@@ -830,7 +828,7 @@ func sleepIslands(world: mod PhysicsWorld) {
     }
   }
   let awakeIslands: Bitset = world.taskContexts.copyAtDefault(index: 0).awakeIslandBitSet
-  let islandSims: List(Int) = world.solverSets.copyAtDefault(index: awakeSet).islandSims
+  let islandSims: List(Int) = setIslandSims(world: world, setIndex: awakeSet)
   var islandIndex: Int = islandSims.length - 1
   loop islandIndex >= 0 {
     if getBit(bitset: awakeIslands, bitIndex: islandIndex) is false {

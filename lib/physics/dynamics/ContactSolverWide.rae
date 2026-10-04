@@ -181,24 +181,114 @@ func scatterBodies(
 
 # The per-lane inputs of b3PrepareContacts_Convex: zero for an empty lane.
 type PrepareLane {
-  contact: Contact
-  manifold: Manifold
-  simA: BodySim
-  simB: BodySim
+  friction: Float
+  restitution: Float
+  rollingResistance: Float
+  tangentVelocity: Vec3
+  normal: Vec3
+  twistImpulse: Float
+  frictionImpulse: Vec3
+  rollingImpulse: Vec3
+  points: Array(ManifoldPoint, cap: 4)
+  invMassA: Float
+  invMassB: Float
+  invInertiaA: Matrix3
+  invInertiaB: Matrix3
   hitEvents: Bool
+}
+
+func emptyPrepareLane() ret PrepareLane {
+  ret PrepareLane {
+    friction: 0.0
+    restitution: 0.0
+    rollingResistance: 0.0
+    tangentVelocity: zeroVector()
+    normal: zeroVector()
+    twistImpulse: 0.0
+    frictionImpulse: zeroVector()
+    rollingImpulse: zeroVector()
+    points: Array(ManifoldPoint, cap: 4)
+    invMassA: 0.0
+    invMassB: 0.0
+    invInertiaA: matrixZero()
+    invInertiaB: matrixZero()
+    hitEvents: false
+  }
+}
+
+# One lane of a wide constraint: contact `contactIndex` of span `span` (an
+# empty lane past the span's end), read through views, its bodies and
+# contact id written into the fresh `wide`.
+func gatherPrepareLane(
+  world: view PhysicsWorld
+  span: view PrepareSpan
+  contactIndex: view Int
+  lane: view Int
+  wide: mod ContactConstraintWide
+) ret PrepareLane {
+  # `wide` is fresh: its indices and point counts are zero
+  var prepared: PrepareLane = emptyPrepareLane()
+  if contactIndex >= span.count {
+    wide.contactIds.set(index: lane, value: -1)
+    ret prepared
+  }
+  var contactId: Int = -1
+  if let color: view GraphColor => world.constraintGraph.colors.viewAt(index: span.colorIndex) {
+    contactId = color.convexContacts.copyAtDefault(index: contactIndex)
+  }
+  wide.contactIds.set(index: lane, value: contactId)
+  var indexA: Int = -1
+  var indexB: Int = -1
+  if let contact: view Contact => world.contacts.viewAt(index: contactId) {
+    indexA = contact.encodedBodySimA
+    if indexA < 0 {
+      indexA = -1
+    }
+    indexB = contact.encodedBodySimB
+    if indexB < 0 {
+      indexB = -1
+    }
+    prepared.friction = contact.friction
+    prepared.restitution = contact.restitution
+    prepared.rollingResistance = contact.rollingResistance
+    prepared.tangentVelocity = contact.tangentVelocity
+    prepared.hitEvents = (contact.flags bitand simEnableHitEvent) is not 0
+    if let manifold: view Manifold => contact.manifolds.viewAt(index: 0) {
+      wide.pointCounts.set(index: lane, value: manifold.pointCount)
+      prepared.normal = manifold.normal
+      prepared.twistImpulse = manifold.twistImpulse
+      prepared.frictionImpulse = manifold.frictionImpulse
+      prepared.rollingImpulse = manifold.rollingImpulse
+      loop var pointIndex: Int = 0, pointIndex < 4, ++pointIndex {
+        prepared.points.set(
+          index: pointIndex
+          value: manifold.points.copyAtFallback(index: pointIndex, fallback: zeroManifoldPoint())
+        )
+      }
+    }
+  }
+  wide.indexA.set(index: lane, value: indexA + 1)
+  wide.indexB.set(index: lane, value: indexB + 1)
+  if let awake: view SolverSet => world.solverSets.viewAt(index: awakeSet) {
+    if let simA: view BodySim => awake.bodySims.viewAt(index: indexA) {
+      prepared.invMassA = simA.invMass
+      prepared.invInertiaA = simA.invInertiaWorld
+    }
+    if let simB: view BodySim => awake.bodySims.viewAt(index: indexB) {
+      prepared.invMassB = simB.invMass
+      prepared.invInertiaB = simB.invInertiaWorld
+    }
+  }
+  ret prepared
 }
 
 # The lanes' inverse inertia as a symmetric wide matrix (b3GatherInvInertiaW)
 func gatherInvInertia(
-  first: view BodySim
-  second: view BodySim
-  third: view BodySim
-  fourth: view BodySim
+  i0: view Matrix3
+  i1: view Matrix3
+  i2: view Matrix3
+  i3: view Matrix3
 ) ret SymMatrix3Wide {
-  let i0: Matrix3 = first.invInertiaWorld
-  let i1: Matrix3 = second.invInertiaWorld
-  let i2: Matrix3 = third.invInertiaWorld
-  let i3: Matrix3 = fourth.invInertiaWorld
   ret SymMatrix3Wide {
     cxx: setWide(
       x: i0.columnX.x
@@ -240,7 +330,7 @@ func gatherInvInertia(
 }
 
 func lanePoint(lane: view PrepareLane, pointIndex: view Int) ret ManifoldPoint {
-  ret lane.manifold.points.copyAtFallback(index: pointIndex, fallback: zeroManifoldPoint())
+  ret lane.points.copyAtFallback(index: pointIndex, fallback: zeroManifoldPoint())
 }
 
 # b3PrepareContacts_Convex: the wide constraints of flat range `block`.
@@ -264,7 +354,7 @@ func prepareContactsWide(
   let minDet: FloatWide = splatWide(value: minDeterminant)
   var anyRestitution: Bool = false
 
-  let spans: List(PrepareSpan) = context.widePrepareSpans
+  let spans: view List(PrepareSpan) => context.widePrepareSpans
   var wideIndex: Int = block.startIndex
   let endWideIndex: Int = block.startIndex + block.count
   var slot: Int = spanSlotOf(spans: spans, index: wideIndex)
@@ -277,94 +367,71 @@ func prepareContactsWide(
     loop wideIndex < colorWideEndIndex {
       let localWideIndex: Int = wideIndex - span.start
       var wide: ContactConstraintWide = zeroContactConstraintWide()
-      let lanes: List(PrepareLane) = List.create(PrepareLane, cap: 4)
+      let lane0: PrepareLane = gatherPrepareLane(
+        world: world
+        span: span
+        contactIndex: 4 * localWideIndex
+        lane: 0
+        wide: wide
+      )
+      let lane1: PrepareLane = gatherPrepareLane(
+        world: world
+        span: span
+        contactIndex: 4 * localWideIndex + 1
+        lane: 1
+        wide: wide
+      )
+      let lane2: PrepareLane = gatherPrepareLane(
+        world: world
+        span: span
+        contactIndex: 4 * localWideIndex + 2
+        lane: 2
+        wide: wide
+      )
+      let lane3: PrepareLane = gatherPrepareLane(
+        world: world
+        span: span
+        contactIndex: 4 * localWideIndex + 3
+        lane: 3
+        wide: wide
+      )
       var hitEventLanes: Int = 0
-      loop var lane: Int = 0, lane < 4, ++lane {
-        let contactIndex: Int = 4 * localWideIndex + lane
-        if contactIndex < span.count {
-          var contactId: Int = -1
-          if let color: view GraphColor => world.constraintGraph.colors.viewAt(
-            index: span.colorIndex
-          ) {
-            contactId = color.convexContacts.copyAtDefault(index: contactIndex)
-          }
-          let contact: Contact = world.contacts.copyAtDefault(index: contactId)
-          let manifold: Manifold = contact.manifolds.copyAtDefault(index: 0)
-          var indexA: Int = contact.encodedBodySimA
-          if indexA < 0 {
-            indexA = -1
-          }
-          var indexB: Int = contact.encodedBodySimB
-          if indexB < 0 {
-            indexB = -1
-          }
-          wide.indexA.set(index: lane, value: indexA + 1)
-          wide.indexB.set(index: lane, value: indexB + 1)
-          wide.pointCounts.set(index: lane, value: manifold.pointCount)
-          wide.contactIds.set(index: lane, value: contactId)
-          var simA: BodySim = zeroBodySim()
-          var simB: BodySim = zeroBodySim()
-          if let awake: view SolverSet => world.solverSets.viewAt(index: awakeSet) {
-            if indexA is not -1 {
-              simA = awake.bodySims.copyAtDefault(index: indexA)
-            }
-            if indexB is not -1 {
-              simB = awake.bodySims.copyAtDefault(index: indexB)
-            }
-          }
-          let hitEvents: Bool = (contact.flags bitand simEnableHitEvent) is not 0
-          if hitEvents {
-            hitEventLanes = hitEventLanes bitor (1 shl lane)
-          }
-          lanes.add(value: PrepareLane {
-            contact: contact
-            manifold: manifold
-            simA: simA
-            simB: simB
-            hitEvents: hitEvents
-          })
-        } else {
-          wide.indexA.set(index: lane, value: 0)
-          wide.indexB.set(index: lane, value: 0)
-          wide.pointCounts.set(index: lane, value: 0)
-          wide.contactIds.set(index: lane, value: -1)
-          lanes.add(value: PrepareLane {
-            contact: zeroContact()
-            manifold: zeroManifold()
-            simA: zeroBodySim()
-            simB: zeroBodySim()
-            hitEvents: false
-          })
-        }
+      if lane0.hitEvents {
+        hitEventLanes = hitEventLanes bitor 1
       }
-      let lane0: PrepareLane = lanes.copyAtDefault(index: 0)
-      let lane1: PrepareLane = lanes.copyAtDefault(index: 1)
-      let lane2: PrepareLane = lanes.copyAtDefault(index: 2)
-      let lane3: PrepareLane = lanes.copyAtDefault(index: 3)
+      if lane1.hitEvents {
+        hitEventLanes = hitEventLanes bitor 2
+      }
+      if lane2.hitEvents {
+        hitEventLanes = hitEventLanes bitor 4
+      }
+      if lane3.hitEvents {
+        hitEventLanes = hitEventLanes bitor 8
+      }
 
       let mA: FloatWide = setWide(
-        x: lane0.simA.invMass
-        y: lane1.simA.invMass
-        z: lane2.simA.invMass
-        w: lane3.simA.invMass
+        x: lane0.invMassA
+        y: lane1.invMassA
+        z: lane2.invMassA
+        w: lane3.invMassA
       )
       let mB: FloatWide = setWide(
-        x: lane0.simB.invMass
-        y: lane1.simB.invMass
-        z: lane2.simB.invMass
-        w: lane3.simB.invMass
+        x: lane0.invMassB
+        y: lane1.invMassB
+        z: lane2.invMassB
+        w: lane3.invMassB
       )
       let iA: SymMatrix3Wide = gatherInvInertia(
-        first: lane0.simA
-        second: lane1.simA
-        third: lane2.simA
-        fourth: lane3.simA
+        i0: lane0.invInertiaA
+        i1: lane1.invInertiaA
+        i2: lane2.invInertiaA
+        i3: lane3.invInertiaA
       )
       let iB: SymMatrix3Wide = gatherInvInertia(
-        first: lane0.simB
-        second: lane1.simB
-        third: lane2.simB
-        fourth: lane3.simB
+        i0: lane0.invInertiaB
+        i1: lane1.invInertiaB
+        i2: lane2.invInertiaB
+        i3: lane3.invInertiaB
       )
       wide.invMassA = mA
       wide.invMassB = mB
@@ -372,108 +439,108 @@ func prepareContactsWide(
       wide.invIB = iB
 
       wide.friction = setWide(
-        x: lane0.contact.friction
-        y: lane1.contact.friction
-        z: lane2.contact.friction
-        w: lane3.contact.friction
+        x: lane0.friction
+        y: lane1.friction
+        z: lane2.friction
+        w: lane3.friction
       )
       wide.rollingResistance = setWide(
-        x: lane0.contact.rollingResistance
-        y: lane1.contact.rollingResistance
-        z: lane2.contact.rollingResistance
-        w: lane3.contact.rollingResistance
+        x: lane0.rollingResistance
+        y: lane1.rollingResistance
+        z: lane2.rollingResistance
+        w: lane3.rollingResistance
       )
       wide.restitution = setWide(
-        x: lane0.contact.restitution
-        y: lane1.contact.restitution
-        z: lane2.contact.restitution
-        w: lane3.contact.restitution
+        x: lane0.restitution
+        y: lane1.restitution
+        z: lane2.restitution
+        w: lane3.restitution
       )
       let tangentVelocity: Vec3Wide = {
         x: setWide(
-          x: lane0.contact.tangentVelocity.x
-          y: lane1.contact.tangentVelocity.x
-          z: lane2.contact.tangentVelocity.x
-          w: lane3.contact.tangentVelocity.x
+          x: lane0.tangentVelocity.x
+          y: lane1.tangentVelocity.x
+          z: lane2.tangentVelocity.x
+          w: lane3.tangentVelocity.x
         )
         y: setWide(
-          x: lane0.contact.tangentVelocity.y
-          y: lane1.contact.tangentVelocity.y
-          z: lane2.contact.tangentVelocity.y
-          w: lane3.contact.tangentVelocity.y
+          x: lane0.tangentVelocity.y
+          y: lane1.tangentVelocity.y
+          z: lane2.tangentVelocity.y
+          w: lane3.tangentVelocity.y
         )
         z: setWide(
-          x: lane0.contact.tangentVelocity.z
-          y: lane1.contact.tangentVelocity.z
-          z: lane2.contact.tangentVelocity.z
-          w: lane3.contact.tangentVelocity.z
+          x: lane0.tangentVelocity.z
+          y: lane1.tangentVelocity.z
+          z: lane2.tangentVelocity.z
+          w: lane3.tangentVelocity.z
         )
       }
 
       let normal: Vec3Wide = {
         x: setWide(
-          x: lane0.manifold.normal.x
-          y: lane1.manifold.normal.x
-          z: lane2.manifold.normal.x
-          w: lane3.manifold.normal.x
+          x: lane0.normal.x
+          y: lane1.normal.x
+          z: lane2.normal.x
+          w: lane3.normal.x
         )
         y: setWide(
-          x: lane0.manifold.normal.y
-          y: lane1.manifold.normal.y
-          z: lane2.manifold.normal.y
-          w: lane3.manifold.normal.y
+          x: lane0.normal.y
+          y: lane1.normal.y
+          z: lane2.normal.y
+          w: lane3.normal.y
         )
         z: setWide(
-          x: lane0.manifold.normal.z
-          y: lane1.manifold.normal.z
-          z: lane2.manifold.normal.z
-          w: lane3.manifold.normal.z
+          x: lane0.normal.z
+          y: lane1.normal.z
+          z: lane2.normal.z
+          w: lane3.normal.z
         )
       }
       let twistImpulse: FloatWide = setWide(
-        x: lane0.manifold.twistImpulse
-        y: lane1.manifold.twistImpulse
-        z: lane2.manifold.twistImpulse
-        w: lane3.manifold.twistImpulse
+        x: lane0.twistImpulse
+        y: lane1.twistImpulse
+        z: lane2.twistImpulse
+        w: lane3.twistImpulse
       )
       let frictionImpulse: Vec3Wide = {
         x: setWide(
-          x: lane0.manifold.frictionImpulse.x
-          y: lane1.manifold.frictionImpulse.x
-          z: lane2.manifold.frictionImpulse.x
-          w: lane3.manifold.frictionImpulse.x
+          x: lane0.frictionImpulse.x
+          y: lane1.frictionImpulse.x
+          z: lane2.frictionImpulse.x
+          w: lane3.frictionImpulse.x
         )
         y: setWide(
-          x: lane0.manifold.frictionImpulse.y
-          y: lane1.manifold.frictionImpulse.y
-          z: lane2.manifold.frictionImpulse.y
-          w: lane3.manifold.frictionImpulse.y
+          x: lane0.frictionImpulse.y
+          y: lane1.frictionImpulse.y
+          z: lane2.frictionImpulse.y
+          w: lane3.frictionImpulse.y
         )
         z: setWide(
-          x: lane0.manifold.frictionImpulse.z
-          y: lane1.manifold.frictionImpulse.z
-          z: lane2.manifold.frictionImpulse.z
-          w: lane3.manifold.frictionImpulse.z
+          x: lane0.frictionImpulse.z
+          y: lane1.frictionImpulse.z
+          z: lane2.frictionImpulse.z
+          w: lane3.frictionImpulse.z
         )
       }
       let rollingImpulse: Vec3Wide = {
         x: setWide(
-          x: lane0.manifold.rollingImpulse.x
-          y: lane1.manifold.rollingImpulse.x
-          z: lane2.manifold.rollingImpulse.x
-          w: lane3.manifold.rollingImpulse.x
+          x: lane0.rollingImpulse.x
+          y: lane1.rollingImpulse.x
+          z: lane2.rollingImpulse.x
+          w: lane3.rollingImpulse.x
         )
         y: setWide(
-          x: lane0.manifold.rollingImpulse.y
-          y: lane1.manifold.rollingImpulse.y
-          z: lane2.manifold.rollingImpulse.y
-          w: lane3.manifold.rollingImpulse.y
+          x: lane0.rollingImpulse.y
+          y: lane1.rollingImpulse.y
+          z: lane2.rollingImpulse.y
+          w: lane3.rollingImpulse.y
         )
         z: setWide(
-          x: lane0.manifold.rollingImpulse.z
-          y: lane1.manifold.rollingImpulse.z
-          z: lane2.manifold.rollingImpulse.z
-          w: lane3.manifold.rollingImpulse.z
+          x: lane0.rollingImpulse.z
+          y: lane1.rollingImpulse.z
+          z: lane2.rollingImpulse.z
+          w: lane3.rollingImpulse.z
         )
       }
 
@@ -841,69 +908,70 @@ func storeImpulsesWide(
 ) {
   let negHitThreshold: Float = -world.hitEventThreshold
   loop var wideIndex: Int = block.startIndex, wideIndex < block.startIndex + block.count, ++wideIndex {
-    let wide: ContactConstraintWide = context.wideConstraints.copyAtDefault(index: wideIndex)
-    loop var lane: Int = 0, lane < 4, ++lane {
-      let contactId: Int = wide.contactIds.copyAtFallback(index: lane, fallback: -1)
-      if contactId is -1 {
-        continue
-      }
-      let f1: Float = laneOf(value: wide.frictionImpulse.x, lane: lane)
-      let f2: Float = laneOf(value: wide.frictionImpulse.y, lane: lane)
-      var hit: Bool = false
-      if let contact: mod Contact => world.contacts.modAt(index: contactId) {
-        if let manifold: mod Manifold => contact.manifolds.modAt(index: 0) {
-          manifold.frictionImpulse = Vec3 {
-            x: f1 * laneOf(value: wide.tangent1.x, lane: lane) + f2 * laneOf(
-              value: wide.tangent2.x
-              lane: lane
-            )
-            y: f1 * laneOf(value: wide.tangent1.y, lane: lane) + f2 * laneOf(
-              value: wide.tangent2.y
-              lane: lane
-            )
-            z: f1 * laneOf(value: wide.tangent1.z, lane: lane) + f2 * laneOf(
-              value: wide.tangent2.z
-              lane: lane
-            )
-          }
-          manifold.twistImpulse = laneOf(value: wide.twistImpulse, lane: lane)
-          manifold.rollingImpulse = Vec3 {
-            x: laneOf(value: wide.rollingImpulse.x, lane: lane)
-            y: laneOf(value: wide.rollingImpulse.y, lane: lane)
-            z: laneOf(value: wide.rollingImpulse.z, lane: lane)
-          }
-          loop var pointIndex: Int = 0, pointIndex < manifold.pointCount, ++pointIndex {
-            if let constraintPoint: view ContactConstraintPointWide => wide.points.viewAt(
-              index: pointIndex
-            ) {
-              if let point: mod ManifoldPoint => manifold.points.modAt(index: pointIndex) {
-                point.normalImpulse = laneOf(value: constraintPoint.normalImpulse, lane: lane)
-                point.totalNormalImpulse = laneOf(
-                  value: constraintPoint.totalNormalImpulse
-                  lane: lane
-                )
+    if let wide: view ContactConstraintWide => context.wideConstraints.viewAt(index: wideIndex) {
+      loop var lane: Int = 0, lane < 4, ++lane {
+        let contactId: Int = wide.contactIds.copyAtFallback(index: lane, fallback: -1)
+        if contactId is -1 {
+          continue
+        }
+        let f1: Float = laneOf(value: wide.frictionImpulse.x, lane: lane)
+        let f2: Float = laneOf(value: wide.frictionImpulse.y, lane: lane)
+        var hit: Bool = false
+        if let contact: mod Contact => world.contacts.modAt(index: contactId) {
+          if let manifold: mod Manifold => contact.manifolds.modAt(index: 0) {
+            manifold.frictionImpulse = Vec3 {
+              x: f1 * laneOf(value: wide.tangent1.x, lane: lane) + f2 * laneOf(
+                value: wide.tangent2.x
+                lane: lane
+              )
+              y: f1 * laneOf(value: wide.tangent1.y, lane: lane) + f2 * laneOf(
+                value: wide.tangent2.y
+                lane: lane
+              )
+              z: f1 * laneOf(value: wide.tangent1.z, lane: lane) + f2 * laneOf(
+                value: wide.tangent2.z
+                lane: lane
+              )
+            }
+            manifold.twistImpulse = laneOf(value: wide.twistImpulse, lane: lane)
+            manifold.rollingImpulse = Vec3 {
+              x: laneOf(value: wide.rollingImpulse.x, lane: lane)
+              y: laneOf(value: wide.rollingImpulse.y, lane: lane)
+              z: laneOf(value: wide.rollingImpulse.z, lane: lane)
+            }
+            loop var pointIndex: Int = 0, pointIndex < manifold.pointCount, ++pointIndex {
+              if let constraintPoint: view ContactConstraintPointWide => wide.points.viewAt(
+                index: pointIndex
+              ) {
+                if let point: mod ManifoldPoint => manifold.points.modAt(index: pointIndex) {
+                  point.normalImpulse = laneOf(value: constraintPoint.normalImpulse, lane: lane)
+                  point.totalNormalImpulse = laneOf(
+                    value: constraintPoint.totalNormalImpulse
+                    lane: lane
+                  )
+                }
               }
             }
-          }
-          if (contact.flags bitand simEnableHitEvent) is not 0 {
-            loop var k: Int = 0, k < manifold.pointCount, ++k {
-              let point: ManifoldPoint = manifold.points.copyAtFallback(
-                index: k
-                fallback: zeroManifoldPoint()
-              )
-              # The total impulse rules out speculative points
-              if point.normalVelocity < negHitThreshold and point.totalNormalImpulse > 0.0 {
-                hit = true
-                break
+            if (contact.flags bitand simEnableHitEvent) is not 0 {
+              loop var k: Int = 0, k < manifold.pointCount, ++k {
+                let point: ManifoldPoint = manifold.points.copyAtFallback(
+                  index: k
+                  fallback: zeroManifoldPoint()
+                )
+                # The total impulse rules out speculative points
+                if point.normalVelocity < negHitThreshold and point.totalNormalImpulse > 0.0 {
+                  hit = true
+                  break
+                }
               }
             }
           }
         }
-      }
-      if hit {
-        if let taskContext: mod TaskContext => world.taskContexts.modAt(index: 0) {
-          setBit(bitset: taskContext.hitEventBitSet, bitIndex: contactId)
-          taskContext.hasHitEvents = true
+        if hit {
+          if let taskContext: mod TaskContext => world.taskContexts.modAt(index: 0) {
+            setBit(bitset: taskContext.hitEventBitSet, bitIndex: contactId)
+            taskContext.hasHitEvents = true
+          }
         }
       }
     }

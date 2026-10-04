@@ -231,6 +231,60 @@ func bodySimOf(world: view PhysicsWorld, body: view Body) ret BodySim {
   ret zeroBodySim()
 }
 
+# Read one element of solver set `setIndex` through a view: copying the set
+# (`world.solverSets.copyAtDefault(index:)`) would copy every list in it.
+func setBodySimAt(world: view PhysicsWorld, setIndex: view Int, localIndex: view Int) ret BodySim {
+  if let set: view SolverSet => world.solverSets.viewAt(index: setIndex) {
+    ret set.bodySims.copyAtDefault(index: localIndex)
+  }
+  ret zeroBodySim()
+}
+
+func setBodyStateAt(
+  world: view PhysicsWorld
+  setIndex: view Int
+  localIndex: view Int
+) ret BodyState {
+  if let set: view SolverSet => world.solverSets.viewAt(index: setIndex) {
+    ret set.bodyStates.copyAtDefault(index: localIndex)
+  }
+  ret identityBodyState()
+}
+
+# The number of bodies, contacts and islands in solver set `setIndex`.
+func setBodyCount(world: view PhysicsWorld, setIndex: view Int) ret Int {
+  if let set: view SolverSet => world.solverSets.viewAt(index: setIndex) {
+    ret set.bodySims.length
+  }
+  ret 0
+}
+
+func setContactCount(world: view PhysicsWorld, setIndex: view Int) ret Int {
+  if let set: view SolverSet => world.solverSets.viewAt(index: setIndex) {
+    ret set.contactIndices.length
+  }
+  ret 0
+}
+
+func setIslandCount(world: view PhysicsWorld, setIndex: view Int) ret Int {
+  if let set: view SolverSet => world.solverSets.viewAt(index: setIndex) {
+    ret set.islandSims.length
+  }
+  ret 0
+}
+
+# A copy of solver set `setIndex`'s island list (only that list).
+func setIslandSims(world: view PhysicsWorld, setIndex: view Int) ret List(Int) {
+  if let set: view SolverSet => world.solverSets.viewAt(index: setIndex) {
+    let islandSims: List(Int) = List.create(Int, cap: set.islandSims.length)
+    loop let islandId: view Int in set.islandSims {
+      islandSims.add(value: islandId)
+    }
+    ret islandSims
+  }
+  ret List.create(Int, cap: 0)
+}
+
 # Write back the sim of `body`.
 func setBodySim(world: mod PhysicsWorld, body: view Body, sim: view BodySim) {
   if let set: mod SolverSet => world.solverSets.modAt(index: body.setIndex) {

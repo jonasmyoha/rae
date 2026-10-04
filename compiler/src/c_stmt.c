@@ -2059,9 +2059,91 @@ static bool name_only_returns_nothing(const CFuncContext* ctx, Str name) {
   return false;
 }
 
-static bool call_result_may_pool(CFuncContext* ctx, const AstExpr* e, Str name) {
+/* The same question per (method name, receiver type): `dots.add(value: x)`
+ * on a List is void even though a value-returning `add` exists elsewhere
+ * (VectorMath's `add(left:, right:)`), so the name alone keeps the
+ * conservative answer and a pool mark/flush pair in every hot loop that
+ * appends to a list. The receiver is the `this` parameter; its base type
+ * name (List, Array, Hull, ...) narrows the overloads. */
+typedef struct {
+  const void* owner;
+  Str* names;
+  Str* receivers;
+  uint8_t* state;  /* 0 empty, 1 all declarations void, 2 some returns a value */
+  size_t cap;
+} VoidMethodTable;
+static VoidMethodTable g_void_methods;
+
+static size_t void_method_slot(Str name, Str receiver, size_t cap) {
+  uint64_t h = 1469598103934665603ULL;
+  for (size_t i = 0; i < name.len; i++) h = (h ^ (uint8_t)name.data[i]) * 1099511628211ULL;
+  h = (h ^ 0x01u) * 1099511628211ULL;
+  for (size_t i = 0; i < receiver.len; i++) h = (h ^ (uint8_t)receiver.data[i]) * 1099511628211ULL;
+  return (size_t)(h & (cap - 1));
+}
+
+static Str func_receiver_base(const AstFuncDecl* fd) {
+  for (const AstParam* p = fd->params; p; p = p->next)
+    if (str_eq_cstr(p->name, "this") && p->type) return get_base_type_name(p->type);
+  return (Str){0};
+}
+
+static void build_void_methods(const CompilerContext* cctx) {
+  free(g_void_methods.names); free(g_void_methods.receivers); free(g_void_methods.state);
+  size_t cap = 64;
+  while (cap < cctx->all_decl_count * 2 + 64) cap <<= 1;
+  g_void_methods.names = calloc(cap, sizeof(Str));
+  g_void_methods.receivers = calloc(cap, sizeof(Str));
+  g_void_methods.state = calloc(cap, 1);
+  g_void_methods.cap = cap;
+  g_void_methods.owner = cctx;
+  if (!g_void_methods.names || !g_void_methods.receivers || !g_void_methods.state) {
+    g_void_methods.cap = 0;
+    return;
+  }
+  for (size_t i = 0; i < cctx->all_decl_count; i++) {
+    const AstDecl* d = cctx->all_decls[i];
+    if (d->kind != AST_DECL_FUNC) continue;
+    const AstFuncDecl* fd = &d->as.func_decl;
+    Str receiver = func_receiver_base(fd);
+    if (receiver.len == 0) continue;
+    bool returns_value = fd->returns && fd->returns->type;
+    size_t slot = void_method_slot(fd->name, receiver, cap);
+    while (g_void_methods.state[slot]
+           && !(str_eq(g_void_methods.names[slot], fd->name)
+                && str_eq(g_void_methods.receivers[slot], receiver)))
+      slot = (slot + 1) & (cap - 1);
+    if (!g_void_methods.state[slot]) {
+      g_void_methods.names[slot] = fd->name;
+      g_void_methods.receivers[slot] = receiver;
+      g_void_methods.state[slot] = returns_value ? 2 : 1;
+    } else if (returns_value) {
+      g_void_methods.state[slot] = 2;
+    }
+  }
+}
+
+static bool method_only_returns_nothing(CFuncContext* ctx, const AstExpr* receiver, Str name) {
+  if (!receiver || name.len == 0) return false;
+  const AstTypeRef* receiver_type = infer_expr_type_ref(ctx, receiver);
+  if (!receiver_type) return false;
+  Str base = get_base_type_name(receiver_type);
+  if (base.len == 0) return false;
+  if (g_void_methods.owner != ctx->compiler_ctx) build_void_methods(ctx->compiler_ctx);
+  if (g_void_methods.cap == 0) return false;
+  size_t slot = void_method_slot(name, base, g_void_methods.cap);
+  while (g_void_methods.state[slot]) {
+    if (str_eq(g_void_methods.names[slot], name) && str_eq(g_void_methods.receivers[slot], base))
+      return g_void_methods.state[slot] == 1;
+    slot = (slot + 1) & (g_void_methods.cap - 1);
+  }
+  return false;
+}
+
+static bool call_result_may_pool(CFuncContext* ctx, const AstExpr* e, Str name, const AstExpr* receiver) {
   const AstTypeRef* tr = infer_expr_type_ref(ctx, e);
   if (!tr && name_only_returns_nothing(ctx, name)) return false;
+  if (!tr && method_only_returns_nothing(ctx, receiver, name)) return false;
   return type_may_carry_pool_string(ctx, tr);
 }
 
@@ -2076,15 +2158,19 @@ bool expr_may_pool(CFuncContext* ctx, const AstExpr* e) {
     case AST_EXPR_CALL: {
       const AstExpr* callee = e->as.call.callee;
       Str callee_name = {0};
+      const AstExpr* receiver = NULL;
       if (callee && callee->kind == AST_EXPR_IDENT) callee_name = callee->as.ident;
-      else if (callee && callee->kind == AST_EXPR_MEMBER) callee_name = callee->as.member.member;
-      if (call_result_may_pool(ctx, e, callee_name)) return true;
+      else if (callee && callee->kind == AST_EXPR_MEMBER) {
+        callee_name = callee->as.member.member;
+        receiver = callee->as.member.object;
+      }
+      if (call_result_may_pool(ctx, e, callee_name, receiver)) return true;
       for (const AstCallArg* a = e->as.call.args; a; a = a->next)
         if (expr_may_pool(ctx, a->value)) return true;
       return expr_may_pool(ctx, callee);
     }
     case AST_EXPR_METHOD_CALL:
-      if (call_result_may_pool(ctx, e, e->as.method_call.method_name)) return true;
+      if (call_result_may_pool(ctx, e, e->as.method_call.method_name, e->as.method_call.object)) return true;
       for (const AstCallArg* a = e->as.method_call.args; a; a = a->next)
         if (expr_may_pool(ctx, a->value)) return true;
       return expr_may_pool(ctx, e->as.method_call.object);

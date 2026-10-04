@@ -235,6 +235,66 @@ Known risks, each addressed when measured, not before:
   5 000-box pyramid), `Float4` is the margin, and P4 ports the step structure
   parallel-ready (§8 there).
 
+### 6.1 Measured (P9a, 2026-10-05)
+
+`sh benchmarks/physics/run.sh`: one worker, 60 Hz with 4 sub-steps, the C
+app's step counts, best of three, ms per step; M1 Max at load ~6 from
+unrelated work (`BENCH_ALLOW_LOAD=1`), Rae at the release profile with
+`Float4`'s NEON lowering. Fixtures 948-988 stay bit-exact; the checksum is
+the benchmark's own (FNV-1a over the final positions) and did not move
+through the fixes.
+
+| scene | C scalar | C SIMD | Rae | Rae / C scalar | Rae / C SIMD |
+|---|---|---|---|---|---|
+| large_pyramid | 11.05 | 8.10 | 14.84 | 1.34x | 1.83x |
+| many_pyramids | 21.23 | 15.09 | 30.84 | 1.45x | 2.04x |
+| joint_grid | 11.68 | 11.61 | 30.12 | 2.58x | 2.59x |
+| convex_pile | 13.79 | 11.60 | 34.44 | 2.50x | 2.97x |
+
+The target (1.2x C scalar) is not met; the pyramids are inside the 1.5x
+failure line, the joint grid and the convex pile are not. The large pyramid
+started at **2 267 ms per step** (190x): per-element reads copied whole
+structs, and the fixes were all of that kind:
+
+- **Whole solver-set copies** (`world.solverSets.copyAtDefault(index:)`
+  copies every list in the set) per contact in collide and per body in
+  finalize: view accessors in `World` (`setBodySimAt`, `setBodyCount`, ...).
+  2 267 → 27 ms.
+- **Contact deep copies in the wide prepare** (a `Contact` owns heap lists;
+  each lane copied it four times): `PrepareLane` holds only the scalars the
+  prepare reads, gathered through views; `Manifold.points` is an inline
+  `Array(ManifoldPoint, cap: 4)` instead of a heap `List` (Box3D's fixed
+  array). 27 → 18 ms.
+- **Wide constraint copies** in warm start and store impulses, the span
+  list in prepare, the shapes in collide (only read when the contact is not
+  recycled), the `BodySim` in integrate velocities and the `JointSim` in the
+  joint threshold check: views. 18 → 14.8 ms.
+- Two compiler fixes found on the way: a generic `Array` call whose result's
+  field is an argument re-inferred `T` from that argument's type (fixture
+  993), and a void method call on a list (`dots.add(value: x)`) was wrapped in
+  a String-pool mark/flush pair because another function named `add` returns
+  a value — now judged by the receiver's type (822 → 422 pool marks in the
+  benchmark, convex pile 37.7 → 34.4 ms).
+
+Where the rest goes, profiled against the C app:
+
+- **Contacts (pyramids).** Rae's SIMD solve and push are already faster than
+  C scalar's; collide and prepare are ~2.5x C's. Box3D iterates the colour's
+  contiguous `b3ContactSim` array; the port reaches each contact through its
+  id in `world.contacts` (432-byte `Contact`, its manifold in a separate heap
+  list) and copies both `BodySim`s (224 bytes each) per contact in collide.
+- **Joints (joint grid).** `JointSim` is 1 816 bytes: Rae has no union, so
+  it carries every joint kind's data side by side where Box3D's union is a
+  few hundred; the solve streams ~4x the memory per joint.
+- **Narrow phase (convex pile).** The hull SAT and clipping allocate `List`s
+  per pair (`faceDots`, the edge candidates, the clip polygons) where Box3D
+  uses stack arrays, and the step is not allocation-free:
+  `RAE_MEM_STATS` counts ~3 400 buffer allocations (~28 MB) per steady
+  large-pyramid step, most of it `StepContext` rebuilt every step
+  (`wideConstraints` regrown from empty).
+
+These are queued as P9 follow-ups.
+
 ## 7. Phases (queue tasks)
 
 Each phase lands green: the full suite, its oracle fixtures bit-exact, and no
@@ -434,6 +494,12 @@ C added.
   (two worlds, identical transforms).
 - **P9 — performance**: the benchmark programs, profiling, the fixes of §6;
   then `parallelLoop` parallelism.
+  **P9a (single-threaded, 2026-10-05):** `benchmarks/physics` ports
+  upstream's large pyramid, many pyramids, joint grid and convex pile
+  (`run.sh` builds the release profile, runs the oracle's C scalar and SIMD
+  apps, best of three); the numbers and the remaining gap are §6.1. Rain is
+  not ported: it needs the ragdoll (`shared/human.c`) and
+  `b3CreateTorusMesh`.
 - **P10 — demos**: the featured example `examples/122_physics_playground`
   (the field scenes: pyramid, dominoes, a bridge, the character mover, thrown
   balls; a performance HUD; instanced rendering), a performance pass that
