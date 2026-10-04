@@ -1,0 +1,433 @@
+# The revolute joint (b3PrepareRevoluteJoint, b3WarmStartRevoluteJoint and
+# b3SolveRevoluteJoint of Box3D's revolute_joint.c at 9f998c8): body B turns
+# about the z-axis of joint frame A, with an optional spring to a target
+# angle, a motor and angle limits; the other two rotations and the point are
+# held by a collinearity and a point-to-point constraint. Box3D's operation
+# order is kept exactly; checked against the oracle in fixture 984.
+open Vec2
+open Vec3
+open Quat
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/Vector2Math
+open physics/math/QuatMath
+open physics/math/MatrixMath
+open physics/math/TransformMath
+open physics/dynamics/WorldTypes
+open physics/dynamics/Body
+open physics/dynamics/Joint
+open physics/dynamics/ContactConstraints
+open physics/dynamics/StepContext
+
+func axisX() ret Vec3 {
+  ret Vec3 { x: 1.0, y: 0.0, z: 0.0 }
+}
+
+func axisY() ret Vec3 {
+  ret Vec3 { x: 0.0, y: 1.0, z: 0.0 }
+}
+
+func axisZ() ret Vec3 {
+  ret Vec3 { x: 0.0, y: 0.0, z: 1.0 }
+}
+
+# 0.5 * rotate(frame, relQ.s * axis + cross(relQ.v, axis)): the collinearity
+# axes of the revolute joint.
+func collinearAxis(frameRotation: view Quat, relative: view Quat, axis: view Vec3) ret Vec3 {
+  let vector: Vec3 = { x: relative.x, y: relative.y, z: relative.z }
+  ret scale(
+    scale: 0.5
+    vector: rotateVector(
+      quat: frameRotation
+      vector: add(
+        left: scale(scale: relative.w, vector: axis)
+        right: cross(left: vector, right: axis)
+      )
+    )
+  )
+}
+
+# The body state at awake index `index`, or the identity state of a body
+# that is not awake (Box3D's dummy state).
+func jointBodyState(states: view List(BodyState), index: view Int) ret BodyState {
+  if index is -1 {
+    ret identityBodyState()
+  }
+  ret states.copyAtDefault(index: index)
+}
+
+# Write back the velocities of a dynamic body's state.
+func storeJointBodyVelocity(
+  states: mod List(BodyState)
+  index: view Int
+  flags: view Int
+  linearVelocity: view Vec3
+  angularVelocity: view Vec3
+) {
+  if (flags bitand dynamicFlag) is 0 {
+    ret
+  }
+  if let state: mod BodyState => states.modAt(index: index) {
+    state.linearVelocity = linearVelocity
+    state.angularVelocity = angularVelocity
+  }
+}
+
+# b3PrepareRevoluteJoint (the masses and frames are read from the bodies'
+# sims by the caller).
+func prepareRevoluteJoint(
+  base: mod JointSim
+  simA: view BodySim
+  simB: view BodySim
+  indexA: view Int
+  indexB: view Int
+  h: view Float
+  enableWarmStarting: view Bool
+) {
+  base.invMassA = simA.invMass
+  base.invMassB = simB.invMass
+  base.invIA = simA.invInertiaWorld
+  base.invIB = simB.invInertiaWorld
+  let invInertiaSum: Matrix3 = add(left: base.invIA, right: base.invIB)
+  base.fixedRotation = determinant(matrix: invInertiaSum) < 1000.0 * floatMin
+
+  var joint: RevoluteJointData = base.revoluteJoint
+  joint.indexA = indexA
+  joint.indexB = indexB
+
+  # The joint frames with world rotations, relative to the centers of mass
+  joint.frameA.rotation = multiply(left: simA.transform.rotation, right: base.localFrameA.rotation)
+  joint.frameA.position = rotateVector(
+    quat: simA.transform.rotation
+    vector: subtract(left: base.localFrameA.position, right: simA.localCenter)
+  )
+  joint.frameB.rotation = multiply(left: simB.transform.rotation, right: base.localFrameB.rotation)
+  joint.frameB.position = rotateVector(
+    quat: simB.transform.rotation
+    vector: subtract(left: base.localFrameB.position, right: simB.localCenter)
+  )
+  joint.deltaCenter = subtractPositions(left: simB.center, right: simA.center)
+
+  # The rotation axis is the z-axis of frame A
+  let rotationAxisZ: Vec3 = rotateVector(quat: joint.frameA.rotation, vector: axisZ())
+  let k: Float = dot(
+    left: rotationAxisZ
+    right: multiply(matrix: invInertiaSum, vector: rotationAxisZ)
+  )
+  joint.axialMass = 0.0
+  if k > 0.0 {
+    joint.axialMass = 1.0 / k
+  }
+  joint.rotationAxisZ = rotationAxisZ
+
+  # Needed for warm starting
+  let relative: Quat = inverseMultiply(left: joint.frameA.rotation, right: joint.frameB.rotation)
+  joint.perpAxisX = collinearAxis(
+    frameRotation: joint.frameA.rotation
+    relative: relative
+    axis: axisX()
+  )
+  joint.perpAxisY = collinearAxis(
+    frameRotation: joint.frameA.rotation
+    relative: relative
+    axis: axisY()
+  )
+
+  joint.springSoftness = makeSoft(hertz: joint.hertz, zeta: joint.dampingRatio, h: h)
+  if enableWarmStarting is false {
+    joint.linearImpulse = zeroVector()
+    joint.perpImpulse = Vec2 { x: 0.0, y: 0.0 }
+    joint.motorImpulse = 0.0
+    joint.springImpulse = 0.0
+    joint.lowerImpulse = 0.0
+    joint.upperImpulse = 0.0
+  }
+  base.revoluteJoint = joint
+}
+
+# b3WarmStartRevoluteJoint
+func warmStartRevoluteJoint(base: view JointSim, states: mod List(BodyState)) {
+  let mA: Float = base.invMassA
+  let mB: Float = base.invMassB
+  let iA: Matrix3 = base.invIA
+  let iB: Matrix3 = base.invIB
+  let joint: RevoluteJointData = base.revoluteJoint
+  let stateA: BodyState = jointBodyState(states: states, index: joint.indexA)
+  let stateB: BodyState = jointBodyState(states: states, index: joint.indexB)
+  var vA: Vec3 = stateA.linearVelocity
+  var wA: Vec3 = stateA.angularVelocity
+  var vB: Vec3 = stateB.linearVelocity
+  var wB: Vec3 = stateB.angularVelocity
+  let rA: Vec3 = rotateVector(quat: stateA.deltaRotation, vector: joint.frameA.position)
+  let rB: Vec3 = rotateVector(quat: stateB.deltaRotation, vector: joint.frameB.position)
+
+  let axialImpulse: Float = joint.springImpulse + joint.motorImpulse + joint.lowerImpulse - joint.upperImpulse
+  var angularImpulse: Vec3 = add(
+    left: scale(scale: joint.perpImpulse.x, vector: joint.perpAxisX)
+    right: scale(scale: joint.perpImpulse.y, vector: joint.perpAxisY)
+  )
+  angularImpulse = mulAdd(base: angularImpulse, scale: axialImpulse, vector: joint.rotationAxisZ)
+
+  vA = mulSub(base: vA, scale: mA, vector: joint.linearImpulse)
+  wA = subtract(
+    left: wA
+    right: multiply(
+      matrix: iA
+      vector: add(left: cross(left: rA, right: joint.linearImpulse), right: angularImpulse)
+    )
+  )
+  vB = mulAdd(base: vB, scale: mB, vector: joint.linearImpulse)
+  wB = add(
+    left: wB
+    right: multiply(
+      matrix: iB
+      vector: add(left: cross(left: rB, right: joint.linearImpulse), right: angularImpulse)
+    )
+  )
+  storeJointBodyVelocity(
+    states: states
+    index: joint.indexA
+    flags: stateA.flags
+    linearVelocity: vA
+    angularVelocity: wA
+  )
+  storeJointBodyVelocity(
+    states: states
+    index: joint.indexB
+    flags: stateB.flags
+    linearVelocity: vB
+    angularVelocity: wB
+  )
+}
+
+# One side of the revolute angle limit: the impulse change of a limit with
+# error `c` and relative speed `cdot` (speculative while separated).
+func revoluteLimitImpulse(
+  base: view JointSim
+  c: view Float
+  cdot: view Float
+  axialMass: view Float
+  oldImpulse: view Float
+  inverseH: view Float
+  useBias: view Bool
+) ret Float {
+  var bias: Float = 0.0
+  var massScale: Float = 1.0
+  var impulseScale: Float = 0.0
+  if c > 0.0 {
+    # Speculation
+    bias = c * inverseH
+  } else if useBias {
+    bias = base.constraintSoftness.biasRate * c
+    massScale = base.constraintSoftness.massScale
+    impulseScale = base.constraintSoftness.impulseScale
+  }
+  let deltaImpulse: Float = -massScale * axialMass * (cdot + bias) - impulseScale * oldImpulse
+  ret maxFloat(left: oldImpulse + deltaImpulse, right: 0.0)
+}
+
+# b3SolveRevoluteJoint
+func solveRevoluteJoint(
+  base: mod JointSim
+  states: mod List(BodyState)
+  h: view Float
+  inverseH: view Float
+  useBias: view Bool
+) {
+  let mA: Float = base.invMassA
+  let mB: Float = base.invMassB
+  let iA: Matrix3 = base.invIA
+  let iB: Matrix3 = base.invIB
+  var joint: RevoluteJointData = base.revoluteJoint
+  let stateA: BodyState = jointBodyState(states: states, index: joint.indexA)
+  let stateB: BodyState = jointBodyState(states: states, index: joint.indexB)
+  var vA: Vec3 = stateA.linearVelocity
+  var wA: Vec3 = stateA.angularVelocity
+  var vB: Vec3 = stateB.linearVelocity
+  var wB: Vec3 = stateB.angularVelocity
+  let fixedRotation: Bool = base.fixedRotation
+
+  let quatA: Quat = multiply(left: stateA.deltaRotation, right: joint.frameA.rotation)
+  var quatB: Quat = multiply(left: stateB.deltaRotation, right: joint.frameB.rotation)
+  if dot(left: quatA, right: quatB) < 0.0 {
+    # This keeps the rotation angle in [-pi, pi]
+    quatB = negate(quat: quatB)
+  }
+  let relative: Quat = inverseMultiply(left: quatA, right: quatB)
+
+  # The spring
+  if joint.enableSpring and fixedRotation is false {
+    let angle: Float = twistAngle(quat: relative)
+    let c: Float = angle - joint.targetAngle
+    let bias: Float = joint.springSoftness.biasRate * c
+    let massScale: Float = joint.springSoftness.massScale
+    let impulseScale: Float = joint.springSoftness.impulseScale
+    let cdot: Float = dot(left: subtract(left: wB, right: wA), right: joint.rotationAxisZ)
+    let deltaImpulse: Float = -massScale * joint.axialMass * (cdot + bias) - impulseScale * joint.springImpulse
+    joint.springImpulse = joint.springImpulse + deltaImpulse
+    wA = mulSub(
+      base: wA
+      scale: deltaImpulse
+      vector: multiply(matrix: iA, vector: joint.rotationAxisZ)
+    )
+    wB = mulAdd(
+      base: wB
+      scale: deltaImpulse
+      vector: multiply(matrix: iB, vector: joint.rotationAxisZ)
+    )
+  }
+
+  # The motor
+  if joint.enableMotor and fixedRotation is false {
+    let cdot: Float = dot(left: subtract(left: wB, right: wA), right: joint.rotationAxisZ) - joint.motorSpeed
+    var deltaImpulse: Float = -joint.axialMass * cdot
+    var newImpulse: Float = joint.motorImpulse + deltaImpulse
+    let maxImpulse: Float = joint.maxMotorTorque * h
+    newImpulse = clampFloat(value: newImpulse, lower: -maxImpulse, upper: maxImpulse)
+    deltaImpulse = newImpulse - joint.motorImpulse
+    joint.motorImpulse = newImpulse
+    wA = mulSub(
+      base: wA
+      scale: deltaImpulse
+      vector: multiply(matrix: iA, vector: joint.rotationAxisZ)
+    )
+    wB = mulAdd(
+      base: wB
+      scale: deltaImpulse
+      vector: multiply(matrix: iB, vector: joint.rotationAxisZ)
+    )
+  }
+
+  # The angle limits
+  if joint.enableLimit and fixedRotation is false {
+    let angle: Float = twistAngle(quat: relative)
+    let axis: Vec3 = joint.rotationAxisZ
+
+    # Lower limit
+    let lowerOld: Float = joint.lowerImpulse
+    joint.lowerImpulse = revoluteLimitImpulse(
+      base: base
+      c: angle - joint.lowerAngle
+      cdot: dot(left: subtract(left: wB, right: wA), right: axis)
+      axialMass: joint.axialMass
+      oldImpulse: lowerOld
+      inverseH: inverseH
+      useBias: useBias
+    )
+    let lowerDelta: Float = joint.lowerImpulse - lowerOld
+    wA = mulSub(base: wA, scale: lowerDelta, vector: multiply(matrix: iA, vector: axis))
+    wB = mulAdd(base: wB, scale: lowerDelta, vector: multiply(matrix: iB, vector: axis))
+
+    # Upper limit (sign flipped on cdot and on the applied impulse)
+    let upperOld: Float = joint.upperImpulse
+    joint.upperImpulse = revoluteLimitImpulse(
+      base: base
+      c: joint.upperAngle - angle
+      cdot: dot(left: subtract(left: wA, right: wB), right: axis)
+      axialMass: joint.axialMass
+      oldImpulse: upperOld
+      inverseH: inverseH
+      useBias: useBias
+    )
+    let upperDelta: Float = joint.upperImpulse - upperOld
+    wA = mulAdd(base: wA, scale: upperDelta, vector: multiply(matrix: iA, vector: axis))
+    wB = mulSub(base: wB, scale: upperDelta, vector: multiply(matrix: iB, vector: axis))
+  }
+
+  # The collinearity constraint, a 2-by-2
+  if fixedRotation is false {
+    var bias: Vec2 = { x: 0.0, y: 0.0 }
+    var massScale: Float = 1.0
+    var impulseScale: Float = 0.0
+    if useBias {
+      let c: Vec2 = { x: relative.x, y: relative.y }
+      bias = scale(scale: base.constraintSoftness.biasRate, vector: c)
+      massScale = base.constraintSoftness.massScale
+      impulseScale = base.constraintSoftness.impulseScale
+    }
+    let perpAxisX: Vec3 = collinearAxis(frameRotation: quatA, relative: relative, axis: axisX())
+    let perpAxisY: Vec3 = collinearAxis(frameRotation: quatA, relative: relative, axis: axisY())
+    joint.perpAxisX = perpAxisX
+    joint.perpAxisY = perpAxisY
+
+    let invInertiaSum: Matrix3 = add(left: iA, right: iB)
+    let kxx: Float = dot(left: perpAxisX, right: multiply(matrix: invInertiaSum, vector: perpAxisX))
+    let kyy: Float = dot(left: perpAxisY, right: multiply(matrix: invInertiaSum, vector: perpAxisY))
+    let kxy: Float = dot(left: perpAxisX, right: multiply(matrix: invInertiaSum, vector: perpAxisY))
+    let k: Matrix2 = { columnX: Vec2 { x: kxx, y: kxy }, columnY: Vec2 { x: kxy, y: kyy } }
+    let wRelative: Vec3 = subtract(left: wB, right: wA)
+    let cdot: Vec2 = {
+      x: dot(left: wRelative, right: perpAxisX)
+      y: dot(left: wRelative, right: perpAxisY)
+    }
+    let oldImpulse: Vec2 = joint.perpImpulse
+    let solution: Vec2 = solve2(matrix: k, vector: add(left: cdot, right: bias))
+    let deltaImpulse: Vec2 = subtract(
+      left: scale(scale: -massScale, vector: solution)
+      right: scale(scale: impulseScale, vector: oldImpulse)
+    )
+    joint.perpImpulse = add(left: joint.perpImpulse, right: deltaImpulse)
+    let angularImpulse: Vec3 = add(
+      left: scale(scale: deltaImpulse.x, vector: perpAxisX)
+      right: scale(scale: deltaImpulse.y, vector: perpAxisY)
+    )
+    wA = subtract(left: wA, right: multiply(matrix: iA, vector: angularImpulse))
+    wB = add(left: wB, right: multiply(matrix: iB, vector: angularImpulse))
+  }
+
+  # The point-to-point constraint
+  let rA: Vec3 = rotateVector(quat: stateA.deltaRotation, vector: joint.frameA.position)
+  let rB: Vec3 = rotateVector(quat: stateB.deltaRotation, vector: joint.frameB.position)
+  let cdot: Vec3 = subtract(
+    left: subtract(left: add(left: vB, right: cross(left: wB, right: rB)), right: vA)
+    right: cross(left: wA, right: rA)
+  )
+  var bias: Vec3 = zeroVector()
+  var massScale: Float = 1.0
+  var impulseScale: Float = 0.0
+  if useBias {
+    let dcA: Vec3 = stateA.deltaPosition
+    let dcB: Vec3 = stateB.deltaPosition
+    let separation: Vec3 = add(
+      left: add(left: subtract(left: dcB, right: dcA), right: subtract(left: rB, right: rA))
+      right: joint.deltaCenter
+    )
+    bias = scale(scale: base.constraintSoftness.biasRate, vector: separation)
+    massScale = base.constraintSoftness.massScale
+    impulseScale = base.constraintSoftness.impulseScale
+  }
+  let sA: Matrix3 = skew(vector: rA)
+  let sB: Matrix3 = skew(vector: rB)
+  let kA: Matrix3 = multiply(left: sA, right: multiply(left: base.invIA, right: sA))
+  let kB: Matrix3 = multiply(left: sB, right: multiply(left: base.invIB, right: sB))
+  var k: Matrix3 = negate(matrix: add(left: kA, right: kB))
+  k.columnX.x = k.columnX.x + (mA + mB)
+  k.columnY.y = k.columnY.y + (mA + mB)
+  k.columnZ.z = k.columnZ.z + (mA + mB)
+  let b: Vec3 = solve3(matrix: k, vector: add(left: cdot, right: bias))
+  let impulse: Vec3 = subtract(
+    left: scale(scale: -massScale, vector: b)
+    right: scale(scale: impulseScale, vector: joint.linearImpulse)
+  )
+  joint.linearImpulse = add(left: joint.linearImpulse, right: impulse)
+  vA = mulSub(base: vA, scale: mA, vector: impulse)
+  wA = subtract(left: wA, right: multiply(matrix: iA, vector: cross(left: rA, right: impulse)))
+  vB = mulAdd(base: vB, scale: mB, vector: impulse)
+  wB = add(left: wB, right: multiply(matrix: iB, vector: cross(left: rB, right: impulse)))
+
+  base.revoluteJoint = joint
+  storeJointBodyVelocity(
+    states: states
+    index: joint.indexA
+    flags: stateA.flags
+    linearVelocity: vA
+    angularVelocity: wA
+  )
+  storeJointBodyVelocity(
+    states: states
+    index: joint.indexB
+    flags: stateB.flags
+    linearVelocity: vB
+    angularVelocity: wB
+  )
+}

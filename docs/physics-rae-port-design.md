@@ -286,7 +286,7 @@ C added.
   by block as worker 0 (`lib/physics/dynamics/BroadPhasePairs`,
   `ParallelFor`; golden `pairs`, fixture 956). Still open: compound pair
   emission (with compounds, P5), the custom filter callback (P8 decides its
-  form) and the joint check of b3ShouldBodiesCollide (P6).
+  form); the joint check of b3ShouldBodiesCollide landed with P6a.
 
 - **P4 — the first world.** Bodies, shapes, contacts, solver sets, islands and
   sleep, constraint graph, scalar contact solver, sensors and events; the
@@ -332,7 +332,7 @@ C added.
   data, sensor overlaps, shape filter (b3ResetProxy), friction, restitution,
   surface material, density, event flags, and every world setting
   (`WorldBodyChanges`, `WorldShapeChanges`, `WorldSettings`; golden `api`,
-  fixture 969). The joint steps of these functions wait for P6.
+  fixture 969). Their joint steps landed with P6a.
 - **P5 — meshes, height fields, compounds** and their manifolds. Split:
   **P5a** the triangle manifolds (triangle_manifold.c); **P5b** meshes (the
   BVH build, then mesh_contact.c, the mesh shape and its shape pairs, a
@@ -388,6 +388,15 @@ C added.
   tools/box3d-oracle/drivers/pairs.c adds a world of static compounds among
   a moving crowd, some refusing by filter (fixture 956).
 - **P6 — joints**, one module per kind, each scene bit-exact.
+  **P6a landed 2026-10-04, bit-exact:** the joint core (creation and
+  destruction, graph colouring and overflow joints, joint islands with
+  link/unlink, split and the merge of two sleeping sets, the joint moves of
+  wake, sleep, b3Body_SetType, disable/enable and body destruction, the
+  joint walk of b3ShouldBodiesCollide, the solver's joint stages and joint
+  events) and the distance, revolute and filter joints (`WorldJoints`,
+  `WorldJointSets`, `JointSolver`, `DistanceJoint`, `RevoluteJoint`; golden
+  `joints`, fixture 984). Next: **P6b** prismatic and wheel, **P6c**
+  spherical, motor, parallel and weld.
 - **P7 — queries and the mover**: ray/shape casts, overlaps, the character
   loop (walls, steps, slopes).
 - **P8 — the ECS layer**: `PhysicsWorld`, `RigidBody`, `Collider`,

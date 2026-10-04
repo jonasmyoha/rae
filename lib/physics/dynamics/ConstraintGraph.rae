@@ -3,11 +3,11 @@
 # colours so that no two constraints of one colour share a dynamic body,
 # which lets a colour be solved in parallel. The last colour is the
 # overflow, for constraints that fit nowhere. Adding and removing contacts
-# is in WorldGraph; the solver's wide constraint arrays join a colour in
-# P4c, its joints in P6.
+# is in WorldGraph.
 open physics/Constants
 open physics/math/Scalar
 open physics/container/Bitset
+open physics/dynamics/Joint
 
 # B3_OVERFLOW_INDEX
 const overflowIndex: Int = graphColorCount - 1
@@ -30,6 +30,8 @@ type GraphColor {
   convexContacts: List(Int)
   # Mesh and overflow contacts, solved one by one
   contacts: List(ContactSpec)
+  # The joints of the colour
+  jointSims: List(JointSim)
 }
 
 type ConstraintGraph {
@@ -53,6 +55,7 @@ func createGraph(bodyCapacity: view Int) ret ConstraintGraph {
         bodySet: bodySet
         convexContacts: List.create(Int, cap: 4)
         contacts: List.create(ContactSpec, cap: 4)
+        jointSims: List.create(JointSim, cap: 0)
       }
     )
   }
