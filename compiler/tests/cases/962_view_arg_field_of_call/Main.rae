@@ -1,0 +1,57 @@
+# A field read off a call result, passed to a `view` parameter:
+# `dotView(left: planes.copyAtDefault(index: 0).normal, right: direction)`.
+# When the call's struct holds no heap nothing captures the result in a
+# statement temporary, so the field is an rvalue and `&(call).normal` did
+# not compile ("cannot take the address of an rvalue"). It is materialised
+# into a temporary like a whole-struct rvalue argument.
+open Vec3
+
+type Plane {
+  normal: Vec3
+  offset: Float
+}
+
+type Face {
+  plane: Plane
+  edgeCount: Int
+}
+
+type NamedPlane {
+  name: String
+  normal: Vec3
+}
+
+func dotView(left: view Vec3, right: view Vec3) ret Float {
+  ret left.x * right.x + left.y * right.y + left.z * right.z
+}
+
+func makePlane(scale: view Float) ret Plane {
+  ret Plane { normal: Vec3 { x: scale, y: 0.0, z: 0.0 }, offset: 1.0 }
+}
+
+func main() {
+  let planes: List(Plane) = List.create(Plane, cap: 1)
+  planes.add(value: Plane { normal: Vec3 { x: 1.0, y: 2.0, z: 3.0 }, offset: 0.5 })
+  let faces: List(Face) = List.create(Face, cap: 1)
+  faces.add(value: Face { plane: makePlane(scale: 4.0), edgeCount: 3 })
+  let named: List(NamedPlane) = List.create(NamedPlane, cap: 1)
+  named.add(value: NamedPlane { name: "up", normal: Vec3 { x: 0.0, y: 5.0, z: 0.0 } })
+  let direction: Vec3 = { x: 1.0, y: 1.0, z: 1.0 }
+  log(
+    "list element field: {dotView(left: planes.copyAtDefault(index: 0).normal, right: direction)}"
+  )
+  log("nested field: {dotView(left: faces.copyAtDefault(index: 0).plane.normal, right: direction)}")
+  log("function result field: {dotView(left: makePlane(scale: 2.0).normal, right: direction)}")
+  log(
+    "both arguments: {dotView(
+      left: makePlane(scale: 3.0).normal
+      right: planes.copyAtDefault(index: 0).normal
+    )}"
+  )
+  log(
+    "heap-holding element field: {dotView(
+      left: named.copyAtDefault(index: 0).normal
+      right: direction
+    )}"
+  )
+}
