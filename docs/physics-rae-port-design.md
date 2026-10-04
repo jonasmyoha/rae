@@ -359,9 +359,8 @@ C added.
   the impulse matching), the mesh shape (b3CreateMeshShape and its box,
   centroid and extent cases; no mass) and the mesh cases of contact.c and
   the narrow phase (`lib/physics/dynamics/MeshContact`, `MeshCluster`;
-  golden `meshscenes`, fixture 974). Not yet: the triangle time of impact of
-  continuous collision against a mesh (a fast body skips mesh targets) and
-  per-triangle materials (a mesh shape has one).
+  golden `meshscenes`, fixture 974). Per-triangle materials came with P5d,
+  the triangle time of impact with P5e.
   **P5c landed 2026-10-04, bit-exact:** height_field.c (b3CreateHeightField
   with the 16-bit quantization and the edge convexity flags, holes, both
   windings, b3GetHeightFieldTriangle / Material, b3ComputeHeightFieldAABB,
@@ -378,8 +377,13 @@ C added.
   per-triangle materials of mesh contacts, the compound pair emission of
   broad_phase.c (b3EmitCompoundPairs, checkCompounds) and b3Body_SetType's
   refusal for compound and height bodies (`lib/physics/geometry/Compound`;
-  goldens `compound`, `compoundscenes`, fixtures 981 and 982). Not yet: the
-  compound time of impact (a fast body skips compound targets, with P5e).
+  goldens `compound`, `compoundscenes`, fixtures 981 and 982).
+  **P5e landed 2026-10-04, bit-exact:** the mesh, height-field and compound
+  paths of b3ShapeTimeOfImpact (b3MeshTimeOfImpactFcn with its centroid
+  early-outs and the small-sphere fallback, b3CompoundTimeOfImpactFcn with
+  b3MakeCompoundChildSweep, b3ComputeSweptShapeAABB): continuous collision
+  no longer skips those targets (`lib/physics/dynamics/TriangleTimeOfImpact`;
+  golden `ccdscenes`, fixture 983).
 - **P6 — joints**, one module per kind, each scene bit-exact.
 - **P7 — queries and the mover**: ray/shape casts, overlaps, the character
   loop (walls, steps, slopes).

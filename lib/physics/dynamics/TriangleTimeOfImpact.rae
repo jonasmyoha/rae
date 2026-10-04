@@ -1,0 +1,427 @@
+# The time of impact of a convex shape against a mesh, a height field or a
+# compound (b3MeshImpactContext, b3MeshTimeOfImpactFcn,
+# b3CompoundImpactContext, b3CompoundTimeOfImpactFcn,
+# b3MakeCompoundChildSweep, b3ComputeSweptShapeAABB and the mesh, height and
+# compound cases of b3ShapeTimeOfImpact, Box3D's shape.c and compound.c at
+# 9f998c8). The target is assumed static: its triangles (or children) near
+# the fast shape's swept box are swept against one by one, keeping the
+# earliest hit; a triangle the fast shape starts behind or finishes clear of
+# is skipped, and one it starts touching falls back to a small sphere at its
+# centroid. Box3D's operation order is kept exactly; checked bit for bit
+# against the oracle in fixture 983.
+open Vec3
+open Quat
+open physics/Constants
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/QuatMath
+open physics/math/TransformMath
+open physics/math/AabbMath
+open physics/geometry/QueryTypes
+open physics/geometry/Sphere
+open physics/geometry/Capsule
+open physics/geometry/Hull
+open physics/geometry/Mesh
+open physics/geometry/MeshQuery
+open physics/geometry/HeightField
+open physics/geometry/Compound
+open physics/collision/ShapePair
+open physics/collision/ShapeCast
+open physics/collision/TimeOfImpact
+open physics/dynamics/Shape
+
+# No triangle limit: the TOI query visits every triangle in the box
+const unlimitedTriangles: Int = 1073741824
+
+# b3MeshImpactContext
+type MeshImpactContext {
+  toiInput: ToiInput
+  toiOutput: ToiOutput
+  # The fast shape's centroid in its body frame
+  localCentroidB: Vec3
+  # That centroid at the start and end of the sweep in the mesh frame
+  meshLocalCentroidB1: Vec3
+  meshLocalCentroidB2: Vec3
+  fallbackRadius: Float
+  isSensor: Bool
+}
+
+# `(b3TOIOutput){ 0 }`
+func zeroToiOutput() ret ToiOutput {
+  ret ToiOutput {
+    state: ToiState.unknown
+    point: zeroVector()
+    normal: zeroVector()
+    fraction: 0.0
+    distance: 0.0
+    distanceIterations: 0
+    pushBackIterations: 0
+    rootIterations: 0
+    usedFallback: false
+  }
+}
+
+func emptyProxy() ret ShapeProxy {
+  ret ShapeProxy { points: List.create(Vec3, cap: 0), radius: 0.0 }
+}
+
+# The transform of a sweep's start (b3ComputeSweptShapeAABB's xf1).
+func sweepStartTransform(sweep: view Sweep) ret Transform {
+  ret Transform {
+    position: subtract(
+      left: sweep.center1
+      right: rotateVector(quat: sweep.rotation1, vector: sweep.localCenter)
+    )
+    rotation: sweep.rotation1
+  }
+}
+
+# The transform of a sweep's end (the xfB2 of b3ShapeTimeOfImpact).
+func sweepEndTransform(sweep: view Sweep) ret Transform {
+  ret Transform {
+    position: subtract(
+      left: sweep.center2
+      right: rotateVector(quat: sweep.rotation2, vector: sweep.localCenter)
+    )
+    rotation: sweep.rotation2
+  }
+}
+
+# b3ComputeSweptShapeAABB: a convex shape's box over its sweep up to `time`.
+func computeSweptShapeAabb(
+  shape: view Shape
+  hulls: view List(Hull)
+  sweep: view Sweep
+  time: view Float
+) ret Aabb {
+  let transform1: Transform = sweepStartTransform(sweep: sweep)
+  let transform2: Transform = sweepTransform(sweep: sweep, time: time)
+  if shape.shapeType is ShapeType.capsule {
+    ret computeSweptCapsuleAabb(
+      capsule: shape.capsule
+      transform1: transform1
+      transform2: transform2
+    )
+  }
+  if shape.shapeType is ShapeType.hull {
+    if let hull: view Hull => hulls.viewAt(index: shape.hullIndex) {
+      ret computeSweptHullAabb(hull: hull, transform1: transform1, transform2: transform2)
+    }
+  }
+  if shape.shapeType is ShapeType.sphere {
+    ret computeSweptSphereAabb(sphere: shape.sphere, transform1: transform1, transform2: transform2)
+  }
+  ret Aabb { lowerBound: transform1.position, upperBound: transform1.position }
+}
+
+# b3MeshTimeOfImpactFcn: sweep against triangle a, b, c (mesh frame), keeping
+# an earlier hit.
+func meshTriangleTimeOfImpact(
+  context: mod MeshImpactContext
+  a: view Vec3
+  b: view Vec3
+  c: view Vec3
+  lengthUnitsPerMeter: view Float
+) {
+  # Early out for parallel movement
+  let c1: Vec3 = context.meshLocalCentroidB1
+  let c2: Vec3 = context.meshLocalCentroidB2
+  let n: Vec3 = normalize(
+    vector: cross(left: subtract(left: b, right: a), right: subtract(left: c, right: a))
+  )
+  let offset1: Float = dot(left: n, right: subtract(left: c1, right: a))
+  let offset2: Float = dot(left: n, right: subtract(left: c2, right: a))
+  if offset1 < 0.0 {
+    # Started behind or finished in front
+    ret
+  }
+  if context.isSensor is false and offset1 - offset2 < context.fallbackRadius and offset2 > context.fallbackRadius {
+    # Finished in front
+    ret
+  }
+
+  let triangle: List(Vec3) = { a, b, c }
+  context.toiInput.proxyA = ShapeProxy { points: triangle, radius: context.toiInput.proxyA.radius }
+  var output: ToiOutput = timeOfImpact(
+    input: context.toiInput
+    lengthUnitsPerMeter: lengthUnitsPerMeter
+  )
+
+  # A hit at fraction 0 is possible
+  if 0.0 < output.fraction and output.fraction < context.toiInput.maxFraction {
+    context.toiOutput = output
+    context.toiInput.maxFraction = output.fraction
+  } else if output.fraction is 0.0 {
+    # Fall back to the time of impact of a small sphere around the fast
+    # shape's centroid
+    var fallbackInput: ToiInput = context.toiInput
+    let center: List(Vec3) = { context.localCentroidB }
+    fallbackInput.proxyB = ShapeProxy {
+      points: center
+      radius: context.fallbackRadius + linearSlop(lengthUnitsPerMeter: lengthUnitsPerMeter)
+    }
+    output = timeOfImpact(input: fallbackInput, lengthUnitsPerMeter: lengthUnitsPerMeter)
+    if 0.0 < output.fraction and output.fraction < context.toiInput.maxFraction {
+      context.toiOutput = output
+      context.toiInput.maxFraction = output.fraction
+      context.toiOutput.usedFallback = true
+    }
+  }
+}
+
+# Sweep against the triangles of mesh `mesh` (or height field) in `bounds`
+# (mesh frame), by the query's visiting order.
+func sweepSurfaceTriangles(
+  context: mod MeshImpactContext
+  shapeA: view Shape
+  meshIndex: view Int
+  meshes: view List(Mesh)
+  heightFields: view List(HeightFieldData)
+  bounds: view Aabb
+  lengthUnitsPerMeter: view Float
+) {
+  if shapeA.shapeType is ShapeType.height {
+    if let heightField: view HeightFieldData => heightFields.viewAt(index: shapeA.heightFieldIndex) {
+      let indices: List(Int) = queryHeightField(
+        heightField: heightField
+        bounds: bounds
+        capacity: unlimitedTriangles
+      )
+      loop let triangleIndex: view Int in indices {
+        let triangle: MeshTriangleData = getHeightFieldTriangle(
+          heightField: heightField
+          triangleIndex: triangleIndex
+        )
+        meshTriangleTimeOfImpact(
+          context: context
+          a: triangle.vertex1
+          b: triangle.vertex2
+          c: triangle.vertex3
+          lengthUnitsPerMeter: lengthUnitsPerMeter
+        )
+      }
+    }
+    ret
+  }
+  if let mesh: view Mesh => meshes.viewAt(index: meshIndex) {
+    let triangles: List(MeshQueryTriangle) = queryMesh(
+      mesh: mesh
+      bounds: bounds
+      capacity: unlimitedTriangles
+    )
+    loop let triangle: view MeshQueryTriangle in triangles {
+      meshTriangleTimeOfImpact(
+        context: context
+        a: triangle.a
+        b: triangle.b
+        c: triangle.c
+        lengthUnitsPerMeter: lengthUnitsPerMeter
+      )
+    }
+  }
+}
+
+# The mesh and height-field case of b3ShapeTimeOfImpact (the target static).
+func meshTimeOfImpact(
+  shapeA: view Shape
+  shapeB: view Shape
+  hulls: view List(Hull)
+  meshes: view List(Mesh)
+  heightFields: view List(HeightFieldData)
+  sweepA: view Sweep
+  sweepB: view Sweep
+  maxFraction: view Float
+  lengthUnitsPerMeter: view Float
+) ret ToiOutput {
+  let localCentroidB: Vec3 = shapeCentroid(shape: shapeB, hulls: hulls)
+  let transformA: Transform = sweepStartTransform(sweep: sweepA)
+  let transformB1: Transform = sweepStartTransform(sweep: sweepB)
+  let transformB2: Transform = sweepEndTransform(sweep: sweepB)
+  let extents: ShapeExtent = computeShapeExtent(
+    shape: shapeB
+    hulls: hulls
+    localCenter: localCentroidB
+  )
+  var context: MeshImpactContext = {
+    toiInput: ToiInput {
+      proxyA: emptyProxy()
+      proxyB: makeShapeProxy(shape: shapeB, hulls: hulls)
+      sweepA: sweepA
+      sweepB: sweepB
+      maxFraction: maxFraction
+    }
+    toiOutput: zeroToiOutput()
+    localCentroidB: localCentroidB
+    meshLocalCentroidB1: inverseTransformPoint(
+      transform: transformA
+      point: transformPoint(transform: transformB1, point: localCentroidB)
+    )
+    meshLocalCentroidB2: inverseTransformPoint(
+      transform: transformA
+      point: transformPoint(transform: transformB2, point: localCentroidB)
+    )
+    fallbackRadius: maxFloat(
+      left: 0.5 * extents.minExtent
+      right: linearSlop(lengthUnitsPerMeter: lengthUnitsPerMeter)
+    )
+    isSensor: shapeA.sensorIndex is not -1
+  }
+
+  # The swept box of shape B, in the mesh frame
+  let bounds: Aabb = computeSweptShapeAabb(
+    shape: shapeB
+    hulls: hulls
+    sweep: sweepB
+    time: maxFraction
+  )
+  let localBounds: Aabb = transformAabb(transform: invert(transform: transformA), box: bounds)
+  sweepSurfaceTriangles(
+    context: context
+    shapeA: shapeA
+    meshIndex: shapeA.meshIndex
+    meshes: meshes
+    heightFields: heightFields
+    bounds: localBounds
+    lengthUnitsPerMeter: lengthUnitsPerMeter
+  )
+  ret context.toiOutput
+}
+
+# b3MakeCompoundChildSweep: a still sweep at compound * child.
+func compoundChildSweep(
+  compoundTransform: view Transform
+  childTransform: view Transform
+) ret Sweep {
+  let transform: Transform = multiply(left: compoundTransform, right: childTransform)
+  ret Sweep {
+    localCenter: zeroVector()
+    center1: transform.position
+    center2: transform.position
+    rotation1: transform.rotation
+    rotation2: transform.rotation
+  }
+}
+
+# The compound case of b3ShapeTimeOfImpact (b3CompoundTimeOfImpactFcn per
+# child the swept box overlaps).
+func compoundTimeOfImpact(
+  shapeA: view Shape
+  compound: view CompoundData
+  shapeB: view Shape
+  hulls: view List(Hull)
+  meshes: view List(Mesh)
+  heightFields: view List(HeightFieldData)
+  sweepA: view Sweep
+  sweepB: view Sweep
+  maxFraction: view Float
+  lengthUnitsPerMeter: view Float
+) ret ToiOutput {
+  var toiInput: ToiInput = {
+    proxyA: emptyProxy()
+    proxyB: makeShapeProxy(shape: shapeB, hulls: hulls)
+    sweepA: sweepA
+    sweepB: sweepB
+    maxFraction: maxFraction
+  }
+  var toiOutput: ToiOutput = zeroToiOutput()
+  let compoundTransform: Transform = { position: sweepA.center1, rotation: sweepA.rotation1 }
+  let localCentroidB: Vec3 = shapeCentroid(shape: shapeB, hulls: hulls)
+  let extents: ShapeExtent = computeShapeExtent(
+    shape: shapeB
+    hulls: hulls
+    localCenter: localCentroidB
+  )
+  let fallbackRadius: Float = maxFloat(
+    left: 0.75 * extents.minExtent
+    right: speculativeDistance(lengthUnitsPerMeter: lengthUnitsPerMeter)
+  )
+
+  # The swept box of shape B, in the compound frame
+  let bounds: Aabb = computeSweptShapeAabb(
+    shape: shapeB
+    hulls: hulls
+    sweep: sweepB
+    time: maxFraction
+  )
+  let localSweepBounds: Aabb = transformAabb(
+    transform: invert(transform: compoundTransform)
+    box: bounds
+  )
+
+  let children: List(Int) = queryCompound(compound: compound, bounds: localSweepBounds)
+  loop let childIndex: view Int in children {
+    let child: ChildShape = getCompoundChild(compound: compound, childIndex: childIndex)
+    var output: ToiOutput = zeroToiOutput()
+    toiInput.sweepA = compoundChildSweep(
+      compoundTransform: compoundTransform
+      childTransform: child.transform
+    )
+    match child.shapeType {
+      case ShapeType.capsule {
+        toiInput.proxyA = capsuleProxy(capsule: child.capsule)
+        output = timeOfImpact(input: toiInput, lengthUnitsPerMeter: lengthUnitsPerMeter)
+      }
+      case ShapeType.hull {
+        if let hull: view Hull => hulls.viewAt(index: shapeA.hullIndex + child.kindIndex) {
+          toiInput.proxyA = makeProxy(points: hull.points, radius: 0.0)
+        }
+        output = timeOfImpact(input: toiInput, lengthUnitsPerMeter: lengthUnitsPerMeter)
+      }
+      case ShapeType.mesh {
+        let meshWorldTransform: Transform = multiply(
+          left: compoundTransform
+          right: child.transform
+        )
+        let transformB1: Transform = sweepStartTransform(sweep: toiInput.sweepB)
+        let transformB2: Transform = sweepEndTransform(sweep: toiInput.sweepB)
+        var meshContext: MeshImpactContext = {
+          toiInput: toiInput
+          toiOutput: zeroToiOutput()
+          localCentroidB: localCentroidB
+          meshLocalCentroidB1: inverseTransformPoint(
+            transform: meshWorldTransform
+            point: transformPoint(transform: transformB1, point: localCentroidB)
+          )
+          meshLocalCentroidB2: inverseTransformPoint(
+            transform: meshWorldTransform
+            point: transformPoint(transform: transformB2, point: localCentroidB)
+          )
+          fallbackRadius: fallbackRadius
+          isSensor: false
+        }
+        # The bounds local to the mesh
+        let localBounds: Aabb = transformAabb(
+          transform: invert(transform: child.transform)
+          box: localSweepBounds
+        )
+        var childShape: Shape = shapeA
+        childShape.shapeType = ShapeType.mesh
+        sweepSurfaceTriangles(
+          context: meshContext
+          shapeA: childShape
+          meshIndex: shapeA.meshIndex + child.kindIndex
+          meshes: meshes
+          heightFields: heightFields
+          bounds: localBounds
+          lengthUnitsPerMeter: lengthUnitsPerMeter
+        )
+        output = meshContext.toiOutput
+      }
+      case ShapeType.sphere {
+        toiInput.proxyA = sphereProxy(sphere: child.sphere)
+        output = timeOfImpact(input: toiInput, lengthUnitsPerMeter: lengthUnitsPerMeter)
+      }
+      case ShapeType.compound {
+      }
+      case ShapeType.height {
+      }
+    }
+    if 0.0 < output.fraction and output.fraction < toiInput.maxFraction {
+      toiOutput = output
+      toiInput.maxFraction = output.fraction
+    }
+    # Cleared to be safe
+    toiInput.proxyA = emptyProxy()
+  }
+  ret toiOutput
+}

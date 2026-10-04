@@ -346,8 +346,7 @@ start cache), collides each triangle with B, drops the edge and vertex
 contacts that would be ghost collisions on inner edges, clusters the rest by
 normal, culls each cluster to four points and keeps the impulses of matching
 old manifolds. Its contact holds one manifold per cluster, solved by the
-scalar contact solver. Continuous collision against a mesh (Box3D's triangle
-time of impact) is not ported yet: a fast body skips mesh targets.
+scalar contact solver. Continuous collision against a mesh is P5e, below.
 
 | Box3D | Rae |
 |---|---|
@@ -422,3 +421,28 @@ fixture 982 replays `goldens/compoundscenes.golden` — two worlds stepped 600
 times over a compound course (sleep off, then on) and the two refused type
 changes, every step's body hash and every 20 steps the bodies and mesh
 contacts, all bit-exact.
+
+## P5e — continuous collision against meshes, height fields, compounds (`dynamics/TriangleTimeOfImpact`)
+
+A fast body's sweep against a mesh or height field visits the triangles its
+swept box overlaps (in the mesh frame) and keeps the earliest time of
+impact. A triangle is skipped when the body's centroid starts behind it, or
+moves toward it by less than the fallback radius and ends clear of it. A
+sweep that starts touching (a time of 0) retries with a small sphere at the
+centroid. Against a compound, each child the swept box overlaps is swept
+with its own still sweep, a mesh child triangle by triangle. The target is
+assumed static, as in Box3D.
+
+| Box3D | Rae |
+|---|---|
+| `b3MeshImpactContext` `b3MeshTimeOfImpactFcn` | `MeshImpactContext` `meshTriangleTimeOfImpact` `sweepSurfaceTriangles` |
+| the mesh and height cases of `b3ShapeTimeOfImpact` | `meshTimeOfImpact` |
+| `b3CompoundImpactContext` `b3CompoundTimeOfImpactFcn` `b3MakeCompoundChildSweep` | `compoundTimeOfImpact` `compoundChildSweep` |
+| `b3ComputeSweptShapeAABB` | `computeSweptShapeAabb` |
+| `b3ShapeTimeOfImpact` | `shapeTimeOfImpact` (`dynamics/Continuous`) |
+
+The check: fixture 983 replays `goldens/ccdscenes.golden` — small spheres,
+capsules and boxes thrown at 45-70 m/s onto a grid and a platform mesh, a
+wave height field and a compound course, 600 steps each. Where Box3D's time
+of impact stops a body and where it lets one through, every step's body hash
+and every 20 steps the bodies and mesh contacts are bit-exact.
