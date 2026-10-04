@@ -1,17 +1,17 @@
-# The joints (P6a-P6b: lib/physics/dynamics/Joint, WorldJoints,
-# WorldJointSets, JointSolver, DistanceJoint, RevoluteJoint, PrismaticJoint,
-# WheelJoint and the joint parts of the islands, solver sets, graph, solver
-# and body changes) against Box3D itself: tools/box3d-oracle/goldens/
-# joints.golden steps eight worlds for 600 steps each (1/60 s, 4 sub-steps,
-# sleep on): pendulums and a filter joint; revolute limits, motor and spring;
-# distance springs, limits, motor and a rope; a chain bridge with joint
-# event thresholds; a sleeping chain split by destroying a joint; jointed
-# bodies destroyed, disabled, enabled, retyped and two sleeping sets merged
-# by a new joint; prismatic sliders, a motorised elevator and a telescope; a
-# car on wheel joints over a bump and a parked car. Every step's body hash
-# and joint events, and every 20 steps a full body dump and every joint's
-# sets, colours, islands and impulses, must have the SAME BITS
-# (docs/physics-rae-port-design.md §4).
+# The joints (P6: lib/physics/dynamics/Joint, JointData, JointDefs,
+# WorldJoints, WorldJointSets, JointSolver, one module per joint kind and the
+# joint parts of the islands, solver sets, graph, solver and body changes)
+# against Box3D itself: tools/box3d-oracle/goldens/joints.golden steps twelve
+# worlds for 600 steps each (1/60 s, 4 sub-steps, sleep on): pendulums and a
+# filter joint; revolute limits, motor and spring; distance springs, limits,
+# motor and a rope; a chain bridge with joint event thresholds; a sleeping
+# chain split by destroying a joint; jointed bodies destroyed, disabled,
+# enabled, retyped and two sleeping sets merged by a new joint; prismatic
+# sliders, an elevator and a telescope; a car on wheel joints; a spherical
+# chain into its cone and twist limits; motor joints; parallel joints; a
+# welded beam. Every step's body hash and joint events, and every 20 steps a
+# full body dump and every joint's sets, colours, islands and impulses, must
+# have the SAME BITS (docs/physics-rae-port-design.md §4).
 import Math
 import Vec3
 import Quat
@@ -315,6 +315,26 @@ func putJoints(out: mod List(Int), world: view PhysicsWorld, bodies: view List(B
       putFloat(out: out, value: wheel.steeringSpringImpulse)
       putFloat(out: out, value: wheel.lowerSteeringImpulse)
       putFloat(out: out, value: wheel.upperSteeringImpulse)
+    } else if joint.jointType is JointType.sphericalJoint {
+      let spherical: SphericalJointData = sim.sphericalJoint
+      putVec(out: out, vector: spherical.linearImpulse)
+      putVec(out: out, vector: spherical.springImpulse)
+      putVec(out: out, vector: spherical.motorImpulse)
+      putFloat(out: out, value: spherical.lowerTwistImpulse)
+      putFloat(out: out, value: spherical.upperTwistImpulse)
+      putFloat(out: out, value: spherical.swingImpulse)
+    } else if joint.jointType is JointType.motorJoint {
+      let motor: MotorJointData = sim.motorJoint
+      putVec(out: out, vector: motor.linearVelocityImpulse)
+      putVec(out: out, vector: motor.angularVelocityImpulse)
+      putVec(out: out, vector: motor.linearSpringImpulse)
+      putVec(out: out, vector: motor.angularSpringImpulse)
+    } else if joint.jointType is JointType.parallelJoint {
+      putFloat(out: out, value: sim.parallelJoint.perpImpulse.x)
+      putFloat(out: out, value: sim.parallelJoint.perpImpulse.y)
+    } else if joint.jointType is JointType.weldJoint {
+      putVec(out: out, vector: sim.weldJoint.linearImpulse)
+      putVec(out: out, vector: sim.weldJoint.angularImpulse)
     }
   }
   putInt(out: out, value: bodies.length)
@@ -552,6 +572,51 @@ func evaluate(
     def.lowerSteeringLimit = readFloat(reader: reader)
     def.upperSteeringLimit = readFloat(reader: reader)
     putJointId(out: out, jointId: createWheelJoint(world: world, def: def))
+  } else if name is "joint.spherical" {
+    var def: SphericalJointDef = defaultSphericalJointDef(lengthUnitsPerMeter: 1.0)
+    def.base = readJointDef(reader: reader)
+    def.enableSpring = readBool(reader: reader)
+    def.hertz = readFloat(reader: reader)
+    def.dampingRatio = readFloat(reader: reader)
+    def.targetRotation = readQuat(reader: reader)
+    def.enableConeLimit = readBool(reader: reader)
+    def.coneAngle = readFloat(reader: reader)
+    def.enableTwistLimit = readBool(reader: reader)
+    def.lowerTwistAngle = readFloat(reader: reader)
+    def.upperTwistAngle = readFloat(reader: reader)
+    def.enableMotor = readBool(reader: reader)
+    def.maxMotorTorque = readFloat(reader: reader)
+    def.motorVelocity = readVec(reader: reader)
+    putJointId(out: out, jointId: createSphericalJoint(world: world, def: def))
+  } else if name is "joint.motor" {
+    var def: MotorJointDef = defaultMotorJointDef(lengthUnitsPerMeter: 1.0)
+    def.base = readJointDef(reader: reader)
+    def.linearVelocity = readVec(reader: reader)
+    def.maxVelocityForce = readFloat(reader: reader)
+    def.angularVelocity = readVec(reader: reader)
+    def.maxVelocityTorque = readFloat(reader: reader)
+    def.linearHertz = readFloat(reader: reader)
+    def.linearDampingRatio = readFloat(reader: reader)
+    def.maxSpringForce = readFloat(reader: reader)
+    def.angularHertz = readFloat(reader: reader)
+    def.angularDampingRatio = readFloat(reader: reader)
+    def.maxSpringTorque = readFloat(reader: reader)
+    putJointId(out: out, jointId: createMotorJoint(world: world, def: def))
+  } else if name is "joint.parallel" {
+    var def: ParallelJointDef = defaultParallelJointDef(lengthUnitsPerMeter: 1.0)
+    def.base = readJointDef(reader: reader)
+    def.hertz = readFloat(reader: reader)
+    def.dampingRatio = readFloat(reader: reader)
+    def.maxTorque = readFloat(reader: reader)
+    putJointId(out: out, jointId: createParallelJoint(world: world, def: def))
+  } else if name is "joint.weld" {
+    var def: WeldJointDef = defaultWeldJointDef(lengthUnitsPerMeter: 1.0)
+    def.base = readJointDef(reader: reader)
+    def.linearHertz = readFloat(reader: reader)
+    def.angularHertz = readFloat(reader: reader)
+    def.linearDampingRatio = readFloat(reader: reader)
+    def.angularDampingRatio = readFloat(reader: reader)
+    putJointId(out: out, jointId: createWeldJoint(world: world, def: def))
   } else if name is "joint.filter" {
     let def: JointDef = readJointDef(reader: reader)
     putJointId(out: out, jointId: createFilterJoint(world: world, def: def))
