@@ -384,6 +384,9 @@ C added.
   b3MakeCompoundChildSweep, b3ComputeSweptShapeAABB): continuous collision
   no longer skips those targets (`lib/physics/dynamics/TriangleTimeOfImpact`;
   golden `ccdscenes`, fixture 983).
+  The compound pair emission (landed with P5d) has its own oracle case:
+  tools/box3d-oracle/drivers/pairs.c adds a world of static compounds among
+  a moving crowd, some refusing by filter (fixture 956).
 - **P6 — joints**, one module per kind, each scene bit-exact.
 - **P7 — queries and the mover**: ray/shape casts, overlaps, the character
   loop (walls, steps, slopes).

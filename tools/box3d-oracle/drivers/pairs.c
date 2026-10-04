@@ -12,6 +12,13 @@
  *                    then the static, kinematic and dynamic trees (as in
  *                    world.c's tree dump)
  *
+ * A second world then has static compound bodies (P5d) among the moving
+ * crowd: a compound pair becomes one pair per child the other shape's box
+ * overlaps (b3EmitCompoundPairs), dropped as a whole when b3ShouldCreatePair
+ * refuses. Its line, in compoundscenes.c's format:
+ *
+ *   shape.compound body def <compound.c's create arguments> -> shape
+ *
  * No shape or body is destroyed: in Box3D that destroys contacts, which is
  * P4b. The filters vary (categories, masks, groups) so b3ShouldCreatePair
  * rejects pairs; shapes share bodies so same-body pairs are rejected too.
@@ -231,6 +238,101 @@ static void hullShape(b3BodyId body, bool transformed) {
 
 
 
+static void tf7(b3Transform t) { v3(t.p); q4(t.q); }
+
+static b3MeshData* g_meshes[16];
+static int g_meshCount;
+static b3CompoundData* g_compounds[8];
+static int g_compoundCount;
+
+/* A random compound of capsules, box hulls, box meshes and spheres around
+   the origin of its body, written in compound.c's create format. */
+static void compoundShape(b3BodyId body) {
+  b3CompoundCapsuleDef capsules[4];
+  b3CompoundHullDef hulls[6];
+  b3BoxHull boxes[6];
+  float halfs[6][3];
+  b3CompoundMeshDef meshes[1];
+  b3SurfaceMaterial meshMaterials[1];
+  b3Vec3 meshCenter = b3Vec3_zero;
+  b3Vec3 meshExtent = b3Vec3_zero;
+  b3CompoundSphereDef spheres[4];
+  int capsuleCount = next_int(4);
+  int hullCount = 1 + next_int(6);
+  int meshCount = next_int(2);
+  int sphereCount = next_int(4);
+  for (int k = 0; k < capsuleCount; k++) {
+    b3Vec3 c = next_vec(2.5f);
+    b3Vec3 d = next_vec(0.75f);
+    capsules[k].capsule = (b3Capsule){ b3Sub(c, d), b3Add(c, d), 0.1f + 0.25f * (float)next_int(3) };
+    capsules[k].material = b3DefaultSurfaceMaterial();
+    capsules[k].material.friction = 0.25f * (float)next_int(3);
+  }
+  for (int k = 0; k < hullCount; k++) {
+    halfs[k][0] = 0.25f + 0.25f * (float)next_int(3);
+    halfs[k][1] = 0.25f + 0.25f * (float)next_int(3);
+    halfs[k][2] = 0.25f + 0.25f * (float)next_int(3);
+    boxes[k] = b3MakeTransformedBoxHull(halfs[k][0], halfs[k][1], halfs[k][2], b3Transform_identity);
+    hulls[k].hull = &boxes[k].base;
+    hulls[k].transform = (b3Transform){ next_vec(2.5f), next_int(2) ? b3Quat_identity : next_quat() };
+    hulls[k].material = b3DefaultSurfaceMaterial();
+    hulls[k].material.friction = 0.25f * (float)next_int(3);
+  }
+  for (int k = 0; k < meshCount; k++) {
+    meshCenter = next_vec(0.5f);
+    meshExtent = (b3Vec3){ 0.5f + 0.25f * (float)next_int(3), 0.25f, 0.5f + 0.25f * (float)next_int(3) };
+    b3MeshData* mesh = b3CreateBoxMesh(meshCenter, meshExtent, true);
+    g_meshes[g_meshCount++] = mesh;
+    meshes[k].meshData = mesh;
+    meshes[k].transform = (b3Transform){ next_vec(2.0f), next_quat() };
+    meshes[k].scale = (b3Vec3){ 1.0f, 1.0f, 1.0f };
+    meshMaterials[0] = b3DefaultSurfaceMaterial();
+    meshes[k].materials = meshMaterials;
+    meshes[k].materialCount = mesh->materialCount;
+  }
+  for (int k = 0; k < sphereCount; k++) {
+    spheres[k].sphere = (b3Sphere){ next_vec(2.5f), 0.2f + 0.2f * (float)next_int(3) };
+    spheres[k].material = b3DefaultSurfaceMaterial();
+  }
+  b3CompoundDef compoundDef = { 0 };
+  compoundDef.capsules = capsules; compoundDef.capsuleCount = capsuleCount;
+  compoundDef.hulls = hulls; compoundDef.hullCount = hullCount;
+  compoundDef.meshes = meshes; compoundDef.meshCount = meshCount;
+  compoundDef.spheres = spheres; compoundDef.sphereCount = sphereCount;
+  b3CompoundData* compound = b3CreateCompound(&compoundDef);
+  g_compounds[g_compoundCount++] = compound;
+
+  b3ShapeDef def = shapeDef(false);
+  def.enableSensorEvents = false;
+  /* Every other compound accepts only the low 16 categories: its pairs with
+     shapes of a higher category fail b3ShouldCreatePair and the whole child
+     batch is dropped. */
+  if (g_compoundCount % 2 == 1) def.filter.maskBits = 0xffffull;
+  name("shape.compound"); bodyRef(body); defOut(&def);
+  i(capsuleCount);
+  for (int k = 0; k < capsuleCount; k++) {
+    v3(capsules[k].capsule.center1); v3(capsules[k].capsule.center2); f(capsules[k].capsule.radius);
+    material(capsules[k].material);
+  }
+  i(hullCount);
+  for (int k = 0; k < hullCount; k++) {
+    f(halfs[k][0]); f(halfs[k][1]); f(halfs[k][2]); tf7(hulls[k].transform); material(hulls[k].material);
+  }
+  i(meshCount);
+  for (int k = 0; k < meshCount; k++) {
+    v3(meshCenter); v3(meshExtent); tf7(meshes[k].transform); v3(meshes[k].scale); i(meshes[k].materialCount);
+    for (int n = 0; n < meshes[k].materialCount; n++) material(meshMaterials[0]);
+  }
+  i(sphereCount);
+  for (int k = 0; k < sphereCount; k++) {
+    v3(spheres[k].sphere.center); f(spheres[k].sphere.radius); material(spheres[k].material);
+  }
+  arrow();
+  b3ShapeId id = b3CreateBakedCompoundShape(body, &def, compound);
+  shapeRef(id); end();
+  g_shapes[g_shapeCount++] = id;
+}
+
 static void pairsUpdate(void) {
   int before = g_world->contacts.count;
   b3UpdateBroadPhasePairs(g_world);
@@ -323,5 +425,46 @@ int main(void) {
   pairsState();
 
   b3DestroyWorld(worldId);
+
+  /* Static compounds among a moving crowd. */
+  worldId = b3CreateWorld(&worldDef);
+  g_world = b3GetWorldFromId(worldId);
+  g_worldId = worldId;
+  g_bodyCount = 0;
+  g_shapeCount = 0;
+  name("world.create"); v3(worldDef.gravity); arrow(); end();
+  for (int k = 0; k < 3; k++) {
+    b3BodyId ground = createBody(b3_staticBody, next_vec(3.0f), next_int(2) ? b3Quat_identity : next_quat(), true, true, 0);
+    compoundShape(ground);
+    if (k == 1) addShapes(ground, 1);
+  }
+  for (int k = 0; k < 30; k++) {
+    bool isAwake = k % 5 != 2;
+    bool isEnabled = k % 13 != 7;
+    b3BodyId body = createBody(b3_dynamicBody, next_vec(4.0f), next_quat(), isAwake, isEnabled, 0);
+    addShapes(body, 1 + next_int(2));
+  }
+  pairsUpdate();
+  pairsState();
+  pairsUpdate();
+  for (int round = 0; round < 24; round++) {
+    int moves = 1 + next_int(8);
+    for (int m = 0; m < moves; m++) {
+      b3BodyId body = g_bodies[next_int(g_bodyCount)];
+      if (b3Body_IsEnabled(body) == false) continue;
+      if (b3Body_GetType(body) == b3_staticBody) continue;
+      moveBody(body, next_int(4) == 0 ? 3.0f : 0.75f);
+    }
+    if (round % 8 == 5) {
+      b3BodyId ground = createBody(b3_staticBody, next_vec(3.0f), next_quat(), true, true, 0);
+      compoundShape(ground);
+    }
+    pairsUpdate();
+    if (round % 8 == 7) pairsState();
+  }
+  pairsState();
+  b3DestroyWorld(worldId);
+  for (int k = 0; k < g_compoundCount; k++) b3DestroyCompound(g_compounds[k]);
+  for (int k = 0; k < g_meshCount; k++) b3DestroyMesh(g_meshes[k]);
   return 0;
 }
