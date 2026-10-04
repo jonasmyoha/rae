@@ -3,9 +3,9 @@
 # and broad-phase proxy. Box3D keeps the geometry in a union; here the shape
 # carries a sphere, a capsule, for a hull the index of its data in the
 # world's hull list (Box3D points into a shared hull database), and for a
-# mesh the index of its data and scale in the world's mesh list with the
-# scaled mesh bounds (so the box cases need no mesh). Height fields and
-# compounds arrive in P5c-P5d; their cases are inert until then.
+# mesh (a height field) the index of its data in the world's mesh (height
+# field) list with its local bounds (so the box cases need neither).
+# Compounds arrive in P5d; their cases are inert until then.
 # Box3D's operation order is kept exactly; checked bit for bit against the
 # oracle in fixture 954.
 import Math
@@ -51,8 +51,10 @@ type Shape {
   capsule: Capsule
   hullIndex: Int
   meshIndex: Int
-  # The scaled bounds b3ComputeMeshAABB transforms (a mesh only)
-  meshBounds: Aabb
+  heightFieldIndex: Int
+  # The local bounds b3ComputeMeshAABB / b3ComputeHeightFieldAABB transform
+  # (a mesh's scaled bounds, a height field's aabb)
+  localBounds: Aabb
 }
 
 func zeroShape() ret Shape {
@@ -85,7 +87,8 @@ func zeroShape() ret Shape {
     capsule: Capsule { center1: zeroVector(), center2: zeroVector(), radius: 0.0 }
     hullIndex: -1
     meshIndex: -1
-    meshBounds: Aabb { lowerBound: zeroVector(), upperBound: zeroVector() }
+    heightFieldIndex: -1
+    localBounds: Aabb { lowerBound: zeroVector(), upperBound: zeroVector() }
   }
 }
 
@@ -148,7 +151,7 @@ func shapeCentroid(shape: view Shape, hulls: view List(Hull)) ret Vec3 {
       ret center(box: meshAabb(shape: shape, transform: transformIdentity()))
     }
     case ShapeType.height {
-      ret zeroVector()
+      ret center(box: meshAabb(shape: shape, transform: transformIdentity()))
     }
     case ShapeType.compound {
       ret zeroVector()
@@ -156,9 +159,10 @@ func shapeCentroid(shape: view Shape, hulls: view List(Hull)) ret Vec3 {
   }
 }
 
-# b3ComputeMeshAABB of a mesh shape: its scaled bounds, transformed.
+# b3ComputeMeshAABB / b3ComputeHeightFieldAABB of a mesh or height shape:
+# its local bounds, transformed.
 func meshAabb(shape: view Shape, transform: view Transform) ret Aabb {
-  ret transformAabb(transform: transform, box: shape.meshBounds)
+  ret transformAabb(transform: transform, box: shape.localBounds)
 }
 
 # b3FarthestPointOnAABB
@@ -201,7 +205,7 @@ func computeShapeAabb(
       ret meshAabb(shape: shape, transform: transform)
     }
     case ShapeType.height {
-      ret Aabb { lowerBound: transform.position, upperBound: transform.position }
+      ret meshAabb(shape: shape, transform: transform)
     }
     case ShapeType.compound {
       ret Aabb { lowerBound: transform.position, upperBound: transform.position }

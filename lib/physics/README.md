@@ -363,3 +363,29 @@ stepped 600 times: spheres, capsules and boxes rolling and sliding across a
 grid mesh; a platform and a box mesh on a grid with sleep on; a scaled,
 mirrored and tilted grid. Every step's body hash, and every 20 steps every
 body and every mesh contact's manifolds, are bit-exact.
+
+## P5c — height fields (`geometry/HeightField`)
+
+A height field is a grid of quantized heights over x (columns) and z (rows),
+two triangles per cell with a fixed diagonal; a cell of material
+`heightFieldHole` has none. Creation quantizes the heights to 16 bits and
+flags each triangle edge concave or inverse-concave against its neighbour
+(the flat ones are both), so the mesh contact's ghost-collision reduction
+works on height fields too. A height shape sits on a static body only; its
+contacts are mesh contacts reading the field's triangles.
+
+| Box3D | Rae |
+|---|---|
+| `b3HeightFieldDef` `b3HeightFieldData` `B3_HEIGHT_FIELD_HOLE` | `HeightFieldDef` `HeightFieldData` `heightFieldHole` (`geometry/HeightField`) |
+| `b3CreateHeightField` `b3CreateGrid` `b3CreateWave` | `createHeightField` `createHeightGrid` `createHeightWave` |
+| `b3GetHeightFieldTriangle` `b3GetHeightFieldMaterial` `b3ComputeHeightFieldAABB` `b3QueryHeightField` | `getHeightFieldTriangle` `getHeightFieldMaterial` `computeHeightFieldAabb` `queryHeightField` |
+| `b3CreateHeightFieldShape` | `createHeightFieldShape` (`dynamics/WorldShapes`) |
+| the height-field cases of `b3RefreshCache` and `b3ComputeMeshManifolds` | `querySurfaceTriangles` `surfaceTriangle` (`dynamics/MeshContact`) |
+
+The checks: fixture 979 replays `goldens/heightfield.golden` (random fields
+with holes and both windings, the generated grid and wave: the data, every
+triangle, AABBs and queries); fixture 980 replays
+`goldens/heightscenes.golden` — two worlds stepped 600 times (bodies on a
+wave field; a flat grid and a tilted wave with sleep on), every step's body
+hash and every 20 steps the bodies and the height-field contacts, all
+bit-exact.
