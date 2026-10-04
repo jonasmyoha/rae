@@ -37,15 +37,48 @@ type LocalManifoldPoint {
   triangleIndex: Int
 }
 
+# b3TriangleFeature: the triangle feature a triangle manifold came from.
+const featureNone: Int = 0
+
+const featureTriangleFace: Int = 1
+
+const featureHullFace: Int = 2
+
+# v1-v2
+const featureEdge1: Int = 3
+
+# v2-v3
+const featureEdge2: Int = 4
+
+# v3-v1
+const featureEdge3: Int = 5
+
+const featureVertex1: Int = 6
+
+const featureVertex2: Int = 7
+
+const featureVertex3: Int = 8
+
 # The contact points of a shape pair, in frame A (b3LocalManifold). Box3D
 # writes into a caller's buffer of a given capacity; here the manifold owns
 # that buffer: `points` has one slot per point of capacity, `pointCount` of
-# them in use. The mesh fields of b3LocalManifold arrive with the triangle
-# manifolds.
+# them in use. The triangle fields are written by the triangle manifolds
+# (TriangleManifold) and the mesh and height-field collision.
 type LocalManifold {
   normal: Vec3
+  triangleNormal: Vec3
   points: List(LocalManifoldPoint)
   pointCount: Int
+  triangleIndex: Int
+  i1: Int
+  i2: Int
+  i3: Int
+  # The squared distance of a sphere from a triangle (ghost collision reduction)
+  squaredDistance: Float
+  # A triangle feature (featureNone ...)
+  feature: Int
+  # b3MeshEdgeFlags
+  triangleFlags: Int
 }
 
 # A polygon vertex being clipped (b3ClipVertex).
@@ -76,7 +109,19 @@ func createLocalManifold(capacity: view Int) ret LocalManifold {
   loop var i: Int = 0, i < capacity, ++i {
     points.add(value: emptyManifoldPoint())
   }
-  ret LocalManifold { normal: zeroVector(), points: points, pointCount: 0 }
+  ret LocalManifold {
+    normal: zeroVector()
+    triangleNormal: zeroVector()
+    points: points
+    pointCount: 0
+    triangleIndex: 0
+    i1: 0
+    i2: 0
+    i3: 0
+    squaredDistance: 0.0
+    feature: featureNone
+    triangleFlags: 0
+  }
 }
 
 # How many points the manifold has room for.

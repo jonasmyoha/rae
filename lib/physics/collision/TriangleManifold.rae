@@ -1,0 +1,657 @@
+# The contact manifolds of a triangle and a convex shape (Box3D's
+# triangle_manifold.c, and b3ClosestPointOnTriangle of math_functions.c, at
+# 9f998c8): a triangle against a sphere and a capsule (the hull is
+# TriangleHullManifold), the triangle in the convex shape's frame, the normal pointing from the
+# triangle to the
+# shape. Back-side contacts are culled. Meshes and height fields collide
+# their triangles through these. Box3D's operation order is kept exactly;
+# checked bit for bit against the oracle in fixture 970.
+import Math
+open Vec3
+open physics/Constants
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/TransformMath
+open physics/math/SegmentMath
+open physics/math/PlaneMath
+open physics/geometry/QueryTypes
+open physics/geometry/Hull
+open physics/collision/Simplex
+open physics/collision/Distance
+open physics/collision/Manifold
+open physics/collision/SeparatingAxis
+
+# The closest point of a triangle and the feature it lies on
+# (b3TrianglePoint).
+type TrianglePoint {
+  point: Vec3
+  feature: Int
+}
+
+# A triangle with its edges and plane (b3TriangleData).
+type TriangleData {
+  v1: Vec3
+  v2: Vec3
+  v3: Vec3
+  e1: Vec3
+  e2: Vec3
+  e3: Vec3
+  plane: Plane
+  flags: Int
+}
+
+# b3ClosestPointOnTriangle: the point of triangle a, b, c closest to q.
+func closestPointOnTriangle(
+  a: view Vec3
+  b: view Vec3
+  c: view Vec3
+  q: view Vec3
+) ret TrianglePoint {
+  # The vertex region of A
+  let ab: Vec3 = subtract(left: b, right: a)
+  let ac: Vec3 = subtract(left: c, right: a)
+  let aq: Vec3 = subtract(left: q, right: a)
+  let d1: Float = dot(left: ab, right: aq)
+  let d2: Float = dot(left: ac, right: aq)
+  if d1 <= 0.0 and d2 <= 0.0 {
+    ret TrianglePoint { point: a, feature: featureVertex1 }
+  }
+
+  # The vertex region of B
+  let bq: Vec3 = subtract(left: q, right: b)
+  let d3: Float = dot(left: ab, right: bq)
+  let d4: Float = dot(left: ac, right: bq)
+  if d3 > 0.0 and d4 <= d3 {
+    ret TrianglePoint { point: b, feature: featureVertex2 }
+  }
+
+  # The edge region AB
+  let vc: Float = d1 * d4 - d3 * d2
+  if vc <= 0.0 and d1 >= 0.0 and d3 <= 0.0 {
+    let t: Float = d1 / (d1 - d3)
+    ret TrianglePoint { point: mulAdd(base: a, scale: t, vector: ab), feature: featureEdge1 }
+  }
+
+  # The vertex region of C
+  let cq: Vec3 = subtract(left: q, right: c)
+  let d5: Float = dot(left: ab, right: cq)
+  let d6: Float = dot(left: ac, right: cq)
+  if d6 >= 0.0 and d5 <= d6 {
+    ret TrianglePoint { point: c, feature: featureVertex3 }
+  }
+
+  # The edge region AC
+  let vb: Float = d5 * d2 - d1 * d6
+  if vb <= 0.0 and d2 >= 0.0 and d6 <= 0.0 {
+    let t: Float = d2 / (d2 - d6)
+    ret TrianglePoint { point: mulAdd(base: a, scale: t, vector: ac), feature: featureEdge3 }
+  }
+
+  # The edge region BC
+  let va: Float = d3 * d6 - d5 * d4
+  if va <= 0.0 and d4 >= d3 and d5 >= d6 {
+    let bc: Vec3 = subtract(left: c, right: b)
+    let t: Float = (d4 - d3) / ((d4 - d3) + (d5 - d6))
+    ret TrianglePoint { point: mulAdd(base: b, scale: t, vector: bc), feature: featureEdge2 }
+  }
+
+  # The face region
+  let t1: Float = vb / (va + vb + vc)
+  let t2: Float = vc / (va + vb + vc)
+  var p: Vec3 = mulAdd(base: a, scale: t1, vector: ab)
+  p = mulAdd(base: p, scale: t2, vector: ac)
+  ret TrianglePoint { point: p, feature: featureTriangleFace }
+}
+
+# b3GetTriangleFeature: the triangle feature of the simplex's vertices of A
+# (a 3-bit vertex mask).
+func triangleFeatureOf(cache: view SimplexCache) ret Int {
+  var mask: Int = 0
+  loop var i: Int = 0, i < cache.count, ++i {
+    mask = mask bitor (1 shl cache.indexA.copyAtFallback(index: i, fallback: 0))
+  }
+  if mask is 1 {
+    ret featureVertex1
+  } else if mask is 2 {
+    ret featureVertex2
+  } else if mask is 3 {
+    ret featureEdge1
+  } else if mask is 4 {
+    ret featureVertex3
+  } else if mask is 5 {
+    ret featureEdge3
+  } else if mask is 6 {
+    ret featureEdge2
+  } else if mask is 7 {
+    ret featureTriangleFace
+  }
+  ret featureNone
+}
+
+func edgeFeature(index: view Int) ret Int {
+  ret featureEdge1 + index
+}
+
+# Write point, separation and pair into slot `index`, as Box3D writes them
+# (the slot's triangle index is kept).
+func writeManifoldPoint(
+  manifold: mod LocalManifold
+  index: view Int
+  point: view Vec3
+  separation: view Float
+  pair: view FeaturePair
+) {
+  var slot: LocalManifoldPoint = manifoldPoint(manifold: manifold, index: index)
+  slot.point = point
+  slot.separation = separation
+  slot.pair = pair
+  setManifoldPoint(manifold: manifold, index: index, point: slot)
+}
+
+# b3CollideTriangleAndSphere
+func collideTriangleAndSphere(
+  manifold: mod LocalManifold
+  triangle: view List(Vec3)
+  sphere: view Sphere
+  lengthUnitsPerMeter: view Float
+) {
+  manifold.pointCount = 0
+  if manifoldCapacity(manifold: manifold) is 0 {
+    ret
+  }
+
+  let center: Vec3 = sphere.center
+  let v1: Vec3 = triangle.copyAtDefault(index: 0)
+  let v2: Vec3 = triangle.copyAtDefault(index: 1)
+  let v3: Vec3 = triangle.copyAtDefault(index: 2)
+  let plane: Plane = planeFromPoints(point1: v1, point2: v2, point3: v3)
+
+  let offset: Float = planeSeparation(plane: plane, point: center)
+  if offset < 0.0 {
+    # Cull back side collision
+    ret
+  }
+
+  let radius: Float = sphere.radius
+
+  # The closest point of the triangle to the sphere center
+  let closest: TrianglePoint = closestPointOnTriangle(
+    a: v1
+    b: v2
+    c: v3
+    q: center
+  )
+
+  # The separating axis test
+  let squaredDistance: Float = distanceSquared(from: closest.point, to: center)
+  let maxDistance: Float = radius + speculativeDistance(lengthUnitsPerMeter: lengthUnitsPerMeter)
+  if squaredDistance > maxDistance * maxDistance {
+    ret
+  }
+
+  let distance: Float = Math.sqrt(x: squaredDistance)
+
+  # The normal points from the triangle to the sphere
+  var normal: Vec3 = zeroVector()
+  if distance * distance > 1000.0 * floatMin {
+    normal = scale(scale: 1.0 / distance, vector: subtract(left: center, right: closest.point))
+  } else {
+    normal = normalize(
+      vector: cross(left: subtract(left: v2, right: v1), right: subtract(left: v3, right: v1))
+    )
+  }
+
+  # The contact point mid-way: p = 0.5 * (c + q) - 0.5 * r * n
+  let contactPoint: Vec3 = scale(
+    scale: 0.5
+    vector: add(
+      left: subtract(left: center, right: scale(scale: radius, vector: normal))
+      right: closest.point
+    )
+  )
+
+  manifold.normal = normal
+  manifold.pointCount = 1
+  manifold.feature = closest.feature
+  manifold.squaredDistance = squaredDistance
+  writeManifoldPoint(
+    manifold: manifold
+    index: 0
+    point: contactPoint
+    separation: distance - radius
+    pair: singleFeaturePair()
+  )
+}
+
+# b3ClipSegmentToTriangleFace: clip the two-vertex `segment` against the
+# triangle's side planes, in place. A point created on a plane keeps its
+# slot's separation, as in Box3D. False when the segment is clipped away.
+func clipSegmentToTriangleFace(
+  segment: mod List(ClipVertex)
+  points: view List(Vec3)
+  plane: view Plane
+) ret Bool {
+  var vertex1: Vec3 = points.copyAtDefault(index: 2)
+  loop var i: Int = 0, i < 3, ++i {
+    let vertex2: Vec3 = points.copyAtDefault(index: i)
+    let tangent: Vec3 = normalize(vector: subtract(left: vertex2, right: vertex1))
+    let binormal: Vec3 = cross(left: tangent, right: plane.normal)
+    let clipPlane: Plane = planeFromNormalAndPoint(normal: binormal, point: vertex1)
+
+    var vertexCount: Int = 0
+    let p1: ClipVertex = segment.copyAtDefault(index: 0)
+    let p2: ClipVertex = segment.copyAtDefault(index: 1)
+    let distance1: Float = planeSeparation(plane: clipPlane, point: p1.position)
+    let distance2: Float = planeSeparation(plane: clipPlane, point: p2.position)
+
+    # The points behind the plane
+    if distance1 <= 0.0 {
+      segment.set(index: vertexCount, value: p1)
+      vertexCount = vertexCount + 1
+    }
+    if distance2 <= 0.0 {
+      segment.set(index: vertexCount, value: p2)
+      vertexCount = vertexCount + 1
+    }
+
+    # The points on different sides of the plane: the intersection
+    if (distance1 > 0.0) is not (distance2 > 0.0) {
+      let t: Float = distance1 / (distance1 - distance2)
+      var vertex: ClipVertex = segment.copyAtDefault(index: vertexCount)
+      vertex.position = lerp(from: p1.position, to: p2.position, alpha: t)
+      if distance1 > 0.0 {
+        vertex.pair = p1.pair
+      } else {
+        vertex.pair = p2.pair
+      }
+      segment.set(index: vertexCount, value: vertex)
+      vertexCount = vertexCount + 1
+    }
+
+    if vertexCount is not 2 {
+      ret false
+    }
+    vertex1 = vertex2
+  }
+  ret true
+}
+
+# b3QueryTriangleFaceAndCapsule
+func queryTriangleFaceAndCapsule(plane: view Plane, capsule: view Capsule) ret SeparatingAxis {
+  let separation1: Float = planeSeparation(plane: plane, point: capsule.center1)
+  let separation2: Float = planeSeparation(plane: plane, point: capsule.center2)
+  if separation1 < separation2 {
+    ret SeparatingAxis {
+      normal: plane.normal
+      separation: separation1
+      indexA: 0
+      indexB: 0
+      kind: SeparatingFeature.invalidAxis
+    }
+  }
+  ret SeparatingAxis {
+    normal: plane.normal
+    separation: separation2
+    indexA: 0
+    indexB: 1
+    kind: SeparatingFeature.invalidAxis
+  }
+}
+
+# b3QueryTriangleAndCapsuleEdges: the best edge-edge axis, each triangle edge
+# treated as a zero-area face with a side normal so the axis points out of
+# the triangle.
+func queryTriangleAndCapsuleEdges(
+  vertices: view List(Vec3)
+  plane: view Plane
+  capsule: view Capsule
+) ret SeparatingAxis {
+  let p1: Vec3 = capsule.center1
+  let p2: Vec3 = capsule.center2
+  let capsuleEdge: Vec3 = subtract(left: p2, right: p1)
+
+  var maxNormal: Vec3 = zeroVector()
+  var maxSeparation: Float = -floatMax
+  var maxIndex1: Int = -1
+  var maxIndex2: Int = -1
+  let squaredTolerance: Float = 0.005 * 0.005
+
+  var edgeIndex: Int = 2
+  let a: Float = dot(left: capsuleEdge, right: plane.normal)
+  var v1: Vec3 = vertices.copyAtDefault(index: 2)
+  loop var index: Int = 0, index < 3, ++index {
+    let v2: Vec3 = vertices.copyAtDefault(index: index)
+    let triangleEdge: Vec3 = subtract(left: v2, right: v1)
+    let sideNormal: Vec3 = normalize(vector: cross(left: triangleEdge, right: plane.normal))
+    let b: Float = dot(left: capsuleEdge, right: sideNormal)
+
+    # A capsule edge parallel to the triangle edge: the face contact handles it
+    if a * a + b * b < squaredTolerance * lengthSquared(vector: capsuleEdge) {
+      v1 = v2
+      edgeIndex = index
+      continue
+    }
+
+    var axis: Vec3 = zeroVector()
+    if a * b <= 0.0 {
+      let t: Float = b / (b - a)
+      axis = lerp(from: sideNormal, to: plane.normal, alpha: t)
+    } else {
+      let t: Float = b / (a + b)
+      axis = lerp(from: sideNormal, to: negate(vector: plane.normal), alpha: t)
+    }
+    axis = normalize(vector: axis)
+    let separation: Float = dot(left: axis, right: subtract(left: p1, right: v1))
+    if separation > maxSeparation {
+      maxNormal = axis
+      maxSeparation = separation
+      maxIndex1 = edgeIndex
+      maxIndex2 = 0
+    }
+    v1 = v2
+    edgeIndex = index
+  }
+
+  ret SeparatingAxis {
+    normal: maxNormal
+    separation: maxSeparation
+    indexA: maxIndex1
+    indexB: maxIndex2
+    kind: SeparatingFeature.invalidAxis
+  }
+}
+
+func capsuleSegment(capsule: view Capsule) ret List(ClipVertex) {
+  let segment: List(ClipVertex) = List.create(ClipVertex, cap: 2)
+  segment.add(value: ClipVertex {
+    position: capsule.center1
+    separation: 0.0
+    pair: makeFeaturePair(
+      owner1: featureShapeA
+      index1: 0
+      owner2: featureShapeA
+      index2: 0
+    )
+  })
+  segment.add(value: ClipVertex {
+    position: capsule.center2
+    separation: 0.0
+    pair: makeFeaturePair(
+      owner1: featureShapeA
+      index1: 1
+      owner2: featureShapeA
+      index2: 1
+    )
+  })
+  ret segment
+}
+
+# The two face points of a clipped capsule segment, half-way between the
+# capsule surface and the triangle plane.
+func setCapsuleFacePoints(
+  manifold: mod LocalManifold
+  segment: view List(ClipVertex)
+  plane: view Plane
+  radius: view Float
+) {
+  let first: ClipVertex = segment.copyAtDefault(index: 0)
+  let second: ClipVertex = segment.copyAtDefault(index: 1)
+  let distance1: Float = planeSeparation(plane: plane, point: first.position)
+  let distance2: Float = planeSeparation(plane: plane, point: second.position)
+  let point1: Vec3 = mulSub(
+    base: first.position
+    scale: 0.5 * (radius + distance1)
+    vector: plane.normal
+  )
+  let point2: Vec3 = mulSub(
+    base: second.position
+    scale: 0.5 * (radius + distance2)
+    vector: plane.normal
+  )
+  manifold.normal = plane.normal
+  manifold.feature = featureTriangleFace
+  manifold.pointCount = 2
+  writeManifoldPoint(
+    manifold: manifold
+    index: 0
+    point: point1
+    separation: distance1 - radius
+    pair: first.pair
+  )
+  writeManifoldPoint(
+    manifold: manifold
+    index: 1
+    point: point2
+    separation: distance2 - radius
+    pair: second.pair
+  )
+}
+
+# b3BuildTriangleAndCapsuleFaceContact
+func buildTriangleAndCapsuleFaceContact(
+  manifold: mod LocalManifold
+  triangle: view List(Vec3)
+  plane: view Plane
+  capsule: view Capsule
+  lengthUnitsPerMeter: view Float
+) {
+  var segment: List(ClipVertex) = capsuleSegment(capsule: capsule)
+  if clipSegmentToTriangleFace(segment: segment, points: triangle, plane: plane) is false {
+    ret
+  }
+  let radius: Float = capsule.radius
+  let distance1: Float = planeSeparation(
+    plane: plane
+    point: segment.copyAtDefault(index: 0).position
+  )
+  let distance2: Float = planeSeparation(
+    plane: plane
+    point: segment.copyAtDefault(index: 1).position
+  )
+  let speculative: Float = speculativeDistance(lengthUnitsPerMeter: lengthUnitsPerMeter)
+  if distance1 > speculative + radius and distance2 > speculative + radius {
+    ret
+  }
+  # The points averaged half-way between the capsule bottom and the plane
+  setCapsuleFacePoints(
+    manifold: manifold
+    segment: segment
+    plane: plane
+    radius: radius
+  )
+}
+
+# b3BuildTriangleAndCapsuleEdgeContact
+func buildTriangleAndCapsuleEdgeContact(
+  manifold: mod LocalManifold
+  triangle: view List(Vec3)
+  plane: view Plane
+  capsule: view Capsule
+  query: view SeparatingAxis
+) {
+  let p1: Vec3 = capsule.center1
+  let p2: Vec3 = capsule.center2
+  let capsuleEdge: Vec3 = subtract(left: p2, right: p1)
+
+  let v1: Vec3 = triangle.copyAtDefault(index: query.indexA)
+  let v2: Vec3 = triangle.copyAtDefault(index: (query.indexA + 1) % 3)
+  let triangleEdge: Vec3 = subtract(left: v2, right: v1)
+  let sideNormal: Vec3 = normalize(vector: cross(left: triangleEdge, right: plane.normal))
+
+  let a: Float = dot(left: capsuleEdge, right: plane.normal)
+  let b: Float = dot(left: capsuleEdge, right: sideNormal)
+
+  # A capsule edge parallel to the triangle edge: the face contact handles it
+  let squaredTolerance: Float = 0.005 * 0.005
+  if a * a + b * b < squaredTolerance * lengthSquared(vector: capsuleEdge) {
+    ret
+  }
+
+  let normal: Vec3 = query.normal
+  let result: SegmentDistanceResult = lineDistance(
+    point1: v1
+    direction1: triangleEdge
+    point2: p1
+    direction2: capsuleEdge
+  )
+  if result.fraction1 < 0.0 or 1.0 < result.fraction1 or result.fraction2 < 0.0 or 1.0 < result.fraction2 {
+    # The closest points are beyond the end points
+    ret
+  }
+
+  let point: Vec3 = lerp(
+    from: result.point1
+    to: mulSub(base: result.point2, scale: capsule.radius, vector: normal)
+    alpha: 0.5
+  )
+  let separation: Float = dot(left: normal, right: subtract(left: p1, right: v1))
+
+  manifold.normal = normal
+  manifold.pointCount = 1
+  manifold.feature = edgeFeature(index: query.indexA)
+  writeManifoldPoint(
+    manifold: manifold
+    index: 0
+    point: point
+    separation: separation - capsule.radius
+    pair: makeFeaturePair(
+      owner1: featureShapeA
+      index1: query.indexA
+      owner2: featureShapeB
+      index2: query.indexB
+    )
+  )
+}
+
+# b3CollideTriangleAndCapsule
+func collideTriangleAndCapsule(
+  manifold: mod LocalManifold
+  triangle: view List(Vec3)
+  capsule: view Capsule
+  cache: mod SimplexCache
+  lengthUnitsPerMeter: view Float
+) {
+  manifold.pointCount = 0
+  if manifoldCapacity(manifold: manifold) < 2 {
+    ret
+  }
+
+  let v1: Vec3 = triangle.copyAtDefault(index: 0)
+  let v2: Vec3 = triangle.copyAtDefault(index: 1)
+  let v3: Vec3 = triangle.copyAtDefault(index: 2)
+  let plane: Plane = planeFromPoints(point1: v1, point2: v2, point3: v3)
+  let capsuleCenter: Vec3 = lerp(from: capsule.center1, to: capsule.center2, alpha: 0.5)
+
+  let offset: Float = planeSeparation(plane: plane, point: capsuleCenter)
+  if offset < 0.0 {
+    # Cull back side collision
+    ret
+  }
+
+  let capsulePoints: List(Vec3) = { capsule.center1, capsule.center2 }
+  let output: DistanceOutput = proxyDistance(
+    proxyA: makeProxy(points: triangle, radius: 0.0)
+    proxyB: makeProxy(points: capsulePoints, radius: 0.0)
+    transform: transformIdentity()
+    useRadii: false
+    cache: cache
+  )
+  let radius: Float = capsule.radius
+  if output.distance > radius + speculativeDistance(lengthUnitsPerMeter: lengthUnitsPerMeter) {
+    # Separated: the cache persists
+    ret
+  }
+
+  if output.distance > 100.0 * floatEpsilon {
+    # Shallow penetration
+    let delta: Vec3 = normalize(vector: subtract(left: output.pointB, right: output.pointA))
+
+    # Two points when the closest points' difference is nearly parallel to
+    # the face normal
+    let tolerance: Float = 0.2
+    let cosAngle: Float = absFloat(value: dot(left: plane.normal, right: delta))
+    if cosAngle > tolerance {
+      var segment: List(ClipVertex) = capsuleSegment(capsule: capsule)
+      if clipSegmentToTriangleFace(segment: segment, points: triangle, plane: plane) {
+        setCapsuleFacePoints(
+          manifold: manifold
+          segment: segment
+          plane: plane
+          radius: radius
+        )
+        ret
+      }
+    }
+
+    # One point from the closest points
+    let point: Vec3 = lerp(
+      from: output.pointA
+      to: mulSub(base: output.pointB, scale: radius, vector: delta)
+      alpha: 0.5
+    )
+    manifold.normal = delta
+    manifold.pointCount = 1
+    manifold.feature = triangleFeatureOf(cache: cache)
+    writeManifoldPoint(
+      manifold: manifold
+      index: 0
+      point: point
+      separation: output.distance - radius
+      pair: singleFeaturePair()
+    )
+    ret
+  }
+
+  # Deep penetration
+  let faceQuery: SeparatingAxis = queryTriangleFaceAndCapsule(plane: plane, capsule: capsule)
+  if faceQuery.separation > radius {
+    # Separated; impossible for a reasonable capsule radius
+    ret
+  }
+  let edgeQuery: SeparatingAxis = queryTriangleAndCapsuleEdges(
+    vertices: triangle
+    plane: plane
+    capsule: capsule
+  )
+  if edgeQuery.separation > radius {
+    ret
+  }
+
+  # The face contact
+  var faceSeparation: Float = faceQuery.separation - radius
+  buildTriangleAndCapsuleFaceContact(
+    manifold: manifold
+    triangle: triangle
+    plane: plane
+    capsule: capsule
+    lengthUnitsPerMeter: lengthUnitsPerMeter
+  )
+  if manifold.pointCount is 2 {
+    # This becomes the clipped separation
+    faceSeparation = minFloat(
+      left: manifoldPoint(manifold: manifold, index: 0).separation
+      right: manifoldPoint(manifold: manifold, index: 1).separation
+    )
+  }
+
+  if edgeQuery.indexA is -1 {
+    # No valid edge contact
+    ret
+  }
+
+  # The face contact can be empty if it does not realize the axis of minimum
+  # penetration: the edge contact when the face fails or the edge is
+  # significantly better
+  let edgeSeparation: Float = edgeQuery.separation - radius
+  if manifold.pointCount is 0 or edgeSeparation > faceSeparation + linearSlop(
+    lengthUnitsPerMeter: lengthUnitsPerMeter
+  ) {
+    buildTriangleAndCapsuleEdgeContact(
+      manifold: manifold
+      triangle: triangle
+      plane: plane
+      capsule: capsule
+      query: edgeQuery
+    )
+  }
+}

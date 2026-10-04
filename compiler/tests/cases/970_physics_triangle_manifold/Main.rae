@@ -1,0 +1,355 @@
+# The physics port's triangle manifolds (P5a: lib/physics/collision/
+# TriangleManifold, TriangleHullManifold) against Box3D itself: every line of
+# tools/box3d-oracle/goldens/triangle.golden is one call of
+# triangle_manifold.c — b3ClosestPointOnTriangle, triangle-sphere,
+# triangle-capsule with its simplex cache, triangle-hull with its SAT cache
+# over three nudged frames — with its inputs and outputs as exact hex floats,
+# written by Box3D's own C build. Every call must give the SAME BITS
+# (docs/physics-rae-port-design.md §4).
+import Vec3
+import Quat
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/TransformMath
+open physics/math/PlaneMath
+open physics/geometry/QueryTypes
+open physics/geometry/Hull
+open physics/geometry/HullCreate
+open physics/geometry/BoxHull
+open physics/collision/Simplex
+open physics/collision/Manifold
+open physics/collision/SeparatingAxis
+open physics/collision/TriangleManifold
+open physics/collision/TriangleHullManifold
+
+# Reads the inputs of one golden line in order.
+type Reader {
+  values: List(Float)
+  next: Int
+}
+
+func readFloat(reader: mod Reader) ret Float {
+  let value: Float = reader.values.copyAtDefault(index: reader.next)
+  reader.next = reader.next + 1
+  ret value
+}
+
+func readInt(reader: mod Reader) ret Int {
+  ret readFloat(reader: reader).toInt()
+}
+
+func readVec(reader: mod Reader) ret Vec3 {
+  let x: Float = readFloat(reader: reader)
+  let y: Float = readFloat(reader: reader)
+  let z: Float = readFloat(reader: reader)
+  ret Vec3 { x: x, y: y, z: z }
+}
+
+func readTransform(reader: mod Reader) ret Transform {
+  let position: Vec3 = readVec(reader: reader)
+  let x: Float = readFloat(reader: reader)
+  let y: Float = readFloat(reader: reader)
+  let z: Float = readFloat(reader: reader)
+  let w: Float = readFloat(reader: reader)
+  ret Transform { position: position, rotation: Quat { x: x, y: y, z: z, w: w } }
+}
+
+func readSphere(reader: mod Reader) ret Sphere {
+  let center: Vec3 = readVec(reader: reader)
+  let radius: Float = readFloat(reader: reader)
+  ret Sphere { center: center, radius: radius }
+}
+
+func readCapsule(reader: mod Reader) ret Capsule {
+  let center1: Vec3 = readVec(reader: reader)
+  let center2: Vec3 = readVec(reader: reader)
+  let radius: Float = readFloat(reader: reader)
+  ret Capsule { center1: center1, center2: center2, radius: radius }
+}
+
+func readSimplexCache(reader: mod Reader) ret SimplexCache {
+  var cache: SimplexCache = emptySimplexCache()
+  cache.metric = readFloat(reader: reader)
+  cache.count = readInt(reader: reader)
+  loop var i: Int = 0, i < 4, ++i {
+    cache.indexA.set(index: i, value: readInt(reader: reader))
+  }
+  loop var i: Int = 0, i < 4, ++i {
+    cache.indexB.set(index: i, value: readInt(reader: reader))
+  }
+  ret cache
+}
+
+func readSatCache(reader: mod Reader) ret SatCache {
+  let separation: Float = readFloat(reader: reader)
+  let kind: SeparatingFeature = separatingFeatureFromCode(code: readInt(reader: reader))
+  let indexA: Int = readInt(reader: reader)
+  let indexB: Int = readInt(reader: reader)
+  let hit: Int = readInt(reader: reader)
+  ret SatCache {
+    separation: separation
+    kind: kind
+    indexA: indexA
+    indexB: indexB
+    hit: hit
+  }
+}
+
+# A hull from its spec: 0 = a point cloud (at most 128 vertices), 1 = a
+# transformed box.
+func readSpec(reader: mod Reader) ret opt Hull {
+  let kind: Int = readInt(reader: reader)
+  if kind is 0 {
+    let count: Int = readInt(reader: reader)
+    let points: List(Vec3) = List.create(Vec3, cap: count)
+    loop var i: Int = 0, i < count, ++i {
+      points.add(value: readVec(reader: reader))
+    }
+    ret createHull(points: points, maxVertexCount: 128)
+  }
+  let hx: Float = readFloat(reader: reader)
+  let hy: Float = readFloat(reader: reader)
+  let hz: Float = readFloat(reader: reader)
+  let transform: Transform = readTransform(reader: reader)
+  ret makeTransformedBoxHull(
+    hx: hx
+    hy: hy
+    hz: hz
+    transform: transform
+    lengthUnitsPerMeter: 1.0
+  )
+}
+
+func putFloat(out: mod List(Float), value: view Float) {
+  out.add(value: value)
+}
+
+func putInt(out: mod List(Float), value: view Int) {
+  out.add(value: value.toFloat())
+}
+
+func putVec(out: mod List(Float), vector: view Vec3) {
+  out.add(value: vector.x)
+  out.add(value: vector.y)
+  out.add(value: vector.z)
+}
+
+func putManifold(out: mod List(Float), manifold: view LocalManifold) {
+  putVec(out: out, vector: manifold.normal)
+  putInt(out: out, value: manifold.pointCount)
+  putInt(out: out, value: manifold.feature)
+  putFloat(out: out, value: manifold.squaredDistance)
+  loop var i: Int = 0, i < manifold.pointCount, ++i {
+    let point: LocalManifoldPoint = manifoldPoint(manifold: manifold, index: i)
+    putVec(out: out, vector: point.point)
+    putFloat(out: out, value: point.separation)
+    putInt(out: out, value: point.pair.owner1)
+    putInt(out: out, value: point.pair.index1)
+    putInt(out: out, value: point.pair.owner2)
+    putInt(out: out, value: point.pair.index2)
+    putInt(out: out, value: point.triangleIndex)
+  }
+}
+
+func putSimplexCache(out: mod List(Float), cache: view SimplexCache) {
+  putFloat(out: out, value: cache.metric)
+  putInt(out: out, value: cache.count)
+  loop var i: Int = 0, i < 4, ++i {
+    putInt(out: out, value: cacheIndexA(cache: cache, index: i))
+  }
+  loop var i: Int = 0, i < 4, ++i {
+    putInt(out: out, value: cacheIndexB(cache: cache, index: i))
+  }
+}
+
+func putSatCache(out: mod List(Float), cache: view SatCache) {
+  putFloat(out: out, value: cache.separation)
+  putInt(out: out, value: separatingFeatureCode(feature: cache.kind))
+  putInt(out: out, value: cache.indexA)
+  putInt(out: out, value: cache.indexB)
+  putInt(out: out, value: cache.hit)
+}
+
+func putAxis(out: mod List(Float), axis: view SeparatingAxis) {
+  putVec(out: out, vector: axis.normal)
+  putFloat(out: out, value: axis.separation)
+  putInt(out: out, value: axis.indexA)
+  putInt(out: out, value: axis.indexB)
+  putInt(out: out, value: separatingFeatureCode(feature: axis.kind))
+}
+
+func readTriangle(reader: mod Reader) ret List(Vec3) {
+  let v1: Vec3 = readVec(reader: reader)
+  let v2: Vec3 = readVec(reader: reader)
+  let v3: Vec3 = readVec(reader: reader)
+  let triangle: List(Vec3) = { v1, v2, v3 }
+  ret triangle
+}
+
+func readBool(reader: mod Reader) ret Bool {
+  ret readInt(reader: reader) is not 0
+}
+
+# False: not a function of this golden.
+func evaluate(name: view String, reader: mod Reader, out: mod List(Float)) ret Bool {
+  let units: Float = 1.0
+  if name is "b3ClosestPointOnTriangle" {
+    let triangle: List(Vec3) = readTriangle(reader: reader)
+    let q: Vec3 = readVec(reader: reader)
+    let closest: TrianglePoint = closestPointOnTriangle(
+      a: triangle.copyAtDefault(index: 0)
+      b: triangle.copyAtDefault(index: 1)
+      c: triangle.copyAtDefault(index: 2)
+      q: q
+    )
+    putVec(out: out, vector: closest.point)
+    putInt(out: out, value: closest.feature)
+  } else if name is "b3CollideTriangleAndSphere" {
+    let capacity: Int = readInt(reader: reader)
+    let triangle: List(Vec3) = readTriangle(reader: reader)
+    let sphere: Sphere = readSphere(reader: reader)
+    var manifold: LocalManifold = createLocalManifold(capacity: capacity)
+    collideTriangleAndSphere(
+      manifold: manifold
+      triangle: triangle
+      sphere: sphere
+      lengthUnitsPerMeter: units
+    )
+    putManifold(out: out, manifold: manifold)
+  } else if name is "b3CollideTriangleAndCapsule" {
+    let capacity: Int = readInt(reader: reader)
+    let triangle: List(Vec3) = readTriangle(reader: reader)
+    let capsule: Capsule = readCapsule(reader: reader)
+    var cache: SimplexCache = readSimplexCache(reader: reader)
+    var manifold: LocalManifold = createLocalManifold(capacity: capacity)
+    collideTriangleAndCapsule(
+      manifold: manifold
+      triangle: triangle
+      capsule: capsule
+      cache: cache
+      lengthUnitsPerMeter: units
+    )
+    putManifold(out: out, manifold: manifold)
+    putSimplexCache(out: out, cache: cache)
+  } else if name is "b3CollideTriangleAndHull" {
+    let capacity: Int = readInt(reader: reader)
+    let triangle: List(Vec3) = readTriangle(reader: reader)
+    let flags: Int = readInt(reader: reader)
+    if let hull: Hull = readSpec(reader: reader) {
+      var cache: SatCache = readSatCache(reader: reader)
+      let speculative: Bool = readBool(reader: reader)
+      var manifold: LocalManifold = createLocalManifold(capacity: capacity)
+      collideTriangleAndHull(
+        manifold: manifold
+        v1: triangle.copyAtDefault(index: 0)
+        v2: triangle.copyAtDefault(index: 1)
+        v3: triangle.copyAtDefault(index: 2)
+        triangleFlags: flags
+        hull: hull
+        cache: cache
+        enableSpeculative: speculative
+        lengthUnitsPerMeter: units
+      )
+      putManifold(out: out, manifold: manifold)
+      putSatCache(out: out, cache: cache)
+    }
+  } else {
+    ret false
+  }
+  ret true
+}
+
+# The same bits: NaN matches NaN, and a zero matches only a zero of its sign.
+func sameBits(actual: view Float, expected: view Float) ret Bool {
+  if actual is not actual {
+    ret expected is not expected
+  }
+  if actual is not expected {
+    ret false
+  }
+  if actual is 0.0 {
+    ret 1.0 / actual is 1.0 / expected
+  }
+  ret true
+}
+
+func readGolden() ret String {
+  # The runner runs from compiler/, the TSan gate from the case's folder.
+  let candidates: List(String) = {
+    "../tools/box3d-oracle/goldens/triangle.golden"
+    "../../../tools/box3d-oracle/goldens/triangle.golden"
+    "tools/box3d-oracle/goldens/triangle.golden"
+  }
+  loop var i: Int = 0, i < candidates.length, ++i {
+    if let text: String = readFile(path: candidates.copyAtDefault(index: i)) {
+      ret text
+    }
+  }
+  ret ""
+}
+
+func main() {
+  let golden: String = readGolden()
+  let lines: List(String) = golden.split(sep: "\n")
+  var calls: Int = 0
+  var mismatches: Int = 0
+  var unknown: Int = 0
+  let names: List(String) = List.create(String, cap: 8)
+  loop var i: Int = 0, i < lines.length, ++i {
+    let line: String = lines.copyAtDefault(index: i)
+    if line.length() is 0 or line.startsWith(prefix: "#") {
+      continue
+    }
+    let tokens: List(String) = line.split(sep: " ")
+    let name: String = tokens.copyAtDefault(index: 0)
+    var reader: Reader = { values: List.create(Float, cap: 128), next: 0 }
+    let expected: List(Float) = List.create(Float, cap: 64)
+    var afterArrow: Bool = false
+    loop var j: Int = 1, j < tokens.length, ++j {
+      let token: String = tokens.copyAtDefault(index: j)
+      if token is "->" {
+        afterArrow = true
+      } else if afterArrow {
+        expected.add(value: token.toFloat())
+      } else {
+        reader.values.add(value: token.toFloat())
+      }
+    }
+    let actual: List(Float) = List.create(Float, cap: 64)
+    if evaluate(name: name, reader: reader, out: actual) is false {
+      unknown = unknown + 1
+      log("not ported: {name}")
+      continue
+    }
+    calls = calls + 1
+    if names.contains(value: name) is false {
+      names.add(value: name)
+    }
+    var same: Bool = actual.length is expected.length
+    loop var j: Int = 0, j < expected.length and same, ++j {
+      same = sameBits(
+        actual: actual.copyAtDefault(index: j)
+        expected: expected.copyAtDefault(index: j)
+      )
+    }
+    if same is false {
+      mismatches = mismatches + 1
+      if mismatches <= 6 {
+        log("MISMATCH line {i + 1}: {line.sub(start: 0, len: 200)}")
+        var got: String = "  got"
+        loop var j: Int = 0, j < actual.length and j < 40, ++j {
+          got = "{got} {actual.copyAtDefault(index: j)}"
+        }
+        log(got)
+        var want: String = "  want"
+        loop var j: Int = 0, j < expected.length and j < 40, ++j {
+          want = "{want} {expected.copyAtDefault(index: j)}"
+        }
+        log(want)
+      }
+    }
+  }
+  log(
+    "triangle.golden: {calls} calls of {names.length} Box3D functions, {mismatches} not bit-exact, {unknown} not ported"
+  )
+}

@@ -333,7 +333,16 @@ C added.
   surface material, density, event flags, and every world setting
   (`WorldBodyChanges`, `WorldShapeChanges`, `WorldSettings`; golden `api`,
   fixture 969). The joint steps of these functions wait for P6.
-- **P5 — meshes, height fields, compounds** and their manifolds.
+- **P5 — meshes, height fields, compounds** and their manifolds. Split:
+  **P5a** the triangle manifolds (triangle_manifold.c); **P5b** meshes (the
+  BVH build, mesh_contact.c, the mesh shape and its shape pairs, a scene);
+  **P5c** height fields; **P5d** compounds.
+  **P5a landed 2026-10-04, bit-exact:** b3ClosestPointOnTriangle and a
+  triangle against a sphere, a capsule (with the simplex cache) and a hull
+  (with the SAT cache, back-side hysteresis and the GJK fallback);
+  b3LocalManifold gained its triangle fields (`lib/physics/collision/
+  TriangleManifold`, `TriangleHullManifold`, `Manifold`; golden `triangle`,
+  fixture 970).
 - **P6 — joints**, one module per kind, each scene bit-exact.
 - **P7 — queries and the mover**: ray/shape casts, overlaps, the character
   loop (walls, steps, slopes).
