@@ -2539,9 +2539,22 @@ static bool gcc_link_c_to_binary(const char* entry_rae_file,
   // a profiler/debugger reads the generated C and runtime cleanly.
   // -ffp-contract=off: never fuse a * b + c into an FMA, so a float result
   // is the same on every machine (rae_runtime.h has the matching pragma).
+  // release also raises clang's inline threshold from 225 to 400: at 225 the
+  // small helpers a Rae program is made of (struct-valued math like the
+  // physics solver's applyWideImpulse / multiplySym3Wide) stay out of line
+  // and pass their structs through memory. Measured (docs/float4-design.md
+  // §6.3): the scalar contact solver 1.14x -> 1.00x of C, the Float4 one
+  // 1.40x -> 1.16x of C NEON; the 77 examples compile 20% slower with 22%
+  // more code. 400 is where the gain stops (500/1000/3000 add cost only).
+  // `-mllvm` is clang's; the C compiler below is the one that built `rae`.
+#ifdef __clang__
+#define RAE_RELEASE_INLINE_FLAGS " -mllvm -inline-threshold=400"
+#else
+#define RAE_RELEASE_INLINE_FLAGS ""
+#endif
   const char* opt_flags = (profile == BUILD_PROFILE_DEV)
                               ? "-O0 -g -ffp-contract=off"
-                              : "-O2 -DNDEBUG -ffp-contract=off";
+                              : "-O2 -DNDEBUG -ffp-contract=off" RAE_RELEASE_INLINE_FLAGS;
 
   char extra_c_files[PATH_MAX * 4] = {0};
   {
@@ -2566,9 +2579,13 @@ static bool gcc_link_c_to_binary(const char* entry_rae_file,
     }
   }
 
+  // RAE_EXTRA_CFLAGS: appended to the C compile, for measuring a flag across
+  // every program before it becomes a default (docs/float4-design.md §6.3).
+  const char* extra_cflags = getenv("RAE_EXTRA_CFLAGS");
+  if (!extra_cflags) extra_cflags = "";
   char cmd[PATH_MAX * 4];
-  snprintf(cmd, sizeof(cmd), "gcc -std=c11 %s -w %s %s -I%s -I/opt/homebrew/include -L/opt/homebrew/lib -framework Foundation -framework ImageIO -framework CoreGraphics %s %s/rae_runtime.c%s -o %s",
-           opt_flags, sdl3_flags, wgpu_flags, runtime_dir,
+  snprintf(cmd, sizeof(cmd), "gcc -std=c11 %s %s -w %s %s -I%s -I/opt/homebrew/include -L/opt/homebrew/lib -framework Foundation -framework ImageIO -framework CoreGraphics %s %s/rae_runtime.c%s -o %s",
+           opt_flags, extra_cflags, sdl3_flags, wgpu_flags, runtime_dir,
            c_path, runtime_dir, extra_c_files, out_bin);
 
   long long cc_started_ms = rae_now_ms();

@@ -13,9 +13,10 @@
 # Every build must print the same checksum (bit-exact with the scalar path).
 # Prints the best of five runs of each and the ratios. The Box3D builds come
 # from the oracle cache (tools/box3d-oracle): no Box3D source is in this
-# repository. Rae is built release (-O2 -DNDEBUG -ffp-contract=off), as
-# rae build --profile release does; RAE_BENCH_CFLAGS adds flags to the Rae
-# builds (the design doc records -mllvm -inline-threshold=3000 too).
+# repository. Rae is built release (-O2 -DNDEBUG -ffp-contract=off -mllvm
+# -inline-threshold=400), as rae's release profile compiles; RAE_BENCH_CFLAGS
+# adds flags to the Rae builds (a later -inline-threshold wins, so
+# RAE_BENCH_CFLAGS="-mllvm -inline-threshold=225" measures clang's default).
 set -eu
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 RAE_ROOT=$(CDPATH= cd -- "$HERE/../.." && pwd)
@@ -49,7 +50,7 @@ done
 
 # The Rae builds
 RAE="$RAE_ROOT/compiler/bin/rae"
-RAE_CFLAGS="-std=gnu11 -O2 -DNDEBUG -ffp-contract=off ${RAE_BENCH_CFLAGS:-}"
+RAE_CFLAGS="-std=gnu11 -O2 -DNDEBUG -ffp-contract=off -mllvm -inline-threshold=400 ${RAE_BENCH_CFLAGS:-}"
 LINK="-framework Foundation -framework ImageIO -framework CoreGraphics"
 t 300 "$RAE" build --target compiled --profile release --emit-c --out "$BUILD/rae_scalar.c" "$HERE/rae/Main.rae" >/dev/null
 t 300 cc $RAE_CFLAGS "$BUILD/rae_scalar.c" "$BUILD/rae_runtime.c" -I"$BUILD" $LINK -o "$BUILD/rae_scalar"
