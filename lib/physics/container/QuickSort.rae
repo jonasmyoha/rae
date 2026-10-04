@@ -30,10 +30,18 @@ func swapAt(
   values: mod List(T)
   first: view Int
   second: view Int
+  companion: mod List(Int)
 ) {
   let held: T = values.copyAtDefault(index: first)
   values.set(index: first, value: values.copyAtDefault(index: second))
   values.set(index: second, value: held)
+  # The companion's items move with the values (Box3D's SWAP of a whole
+  # struct sorted by one of its fields)
+  if companion.length > 0 {
+    let heldItem: Int = companion.copyAtDefault(index: first)
+    companion.set(index: first, value: companion.copyAtDefault(index: second))
+    companion.set(index: second, value: heldItem)
+  }
 }
 
 # Q_SORT3: sort three elements in place.
@@ -43,6 +51,7 @@ func sortThree(
   first: view Int
   second: view Int
   third: view Int
+  companion: mod List(Int)
 ) {
   if lessAt(
     T: T
@@ -61,6 +70,7 @@ func sortThree(
         values: values
         first: first
         second: third
+        companion: companion
       )
     } else {
       swapAt(
@@ -68,6 +78,7 @@ func sortThree(
         values: values
         first: first
         second: second
+        companion: companion
       )
       if lessAt(
         T: T
@@ -80,6 +91,7 @@ func sortThree(
           values: values
           first: second
           second: third
+          companion: companion
         )
       }
     }
@@ -94,6 +106,7 @@ func sortThree(
       values: values
       first: second
       second: third
+      companion: companion
     )
     if lessAt(
       T: T
@@ -106,6 +119,7 @@ func sortThree(
         values: values
         first: first
         second: second
+        companion: companion
       )
     }
   }
@@ -117,6 +131,7 @@ func insertionSort(
   values: mod List(T)
   left: view Int
   right: view Int
+  companion: mod List(Int)
 ) {
   loop var i: Int = left + 1, i <= right, ++i {
     var j: Int = i
@@ -131,6 +146,7 @@ func insertionSort(
         values: values
         first: j
         second: j - 1
+        companion: companion
       )
       j = j - 1
     }
@@ -139,6 +155,13 @@ func insertionSort(
 
 # QSORT over all of `values`.
 func quickSort(T: type, values: mod List(T)) {
+  let noCompanion: List(Int) = List.create(Int, cap: 0)
+  quickSortWithCompanion(T: T, values: values, companion: noCompanion)
+}
+
+# QSORT over all of `values`, LESS on `values` alone; `companion` (empty, or
+# as long as `values`) is permuted the same way.
+func quickSortWithCompanion(T: type, values: mod List(T), companion: mod List(Int)) {
   if values.length <= 1 {
     ret
   }
@@ -155,12 +178,14 @@ func quickSort(T: type, values: mod List(T)) {
         first: left + 1
         second: middle
         third: right
+        companion: companion
       )
       swapAt(
         T: T
         values: values
         first: left
         second: middle
+        companion: companion
       )
       var i: Int = left + 1
       var j: Int = right
@@ -191,6 +216,7 @@ func quickSort(T: type, values: mod List(T)) {
           values: values
           first: i
           second: j
+          companion: companion
         )
       }
       i = j + 1
@@ -199,6 +225,7 @@ func quickSort(T: type, values: mod List(T)) {
         values: values
         first: left
         second: j
+        companion: companion
       )
       j = j - 1
       # Q_SUBFILES: the larger subfile is pushed, the smaller is next
@@ -226,6 +253,7 @@ func quickSort(T: type, values: mod List(T)) {
         values: values
         left: left
         right: right
+        companion: companion
       )
       if stack.length is 0 {
         break

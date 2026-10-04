@@ -1,0 +1,478 @@
+# The ghost-collision reduction and the clustering of mesh contacts
+# (b3AddEdge, b3FindEdge, b3AddVertex, b3CullPoints, b3ReduceCluster and the
+# tentative-manifold and cluster passes of b3ComputeMeshManifolds, Box3D's
+# mesh_contact.c at 9f998c8, its B3_MAX_MANIFOLD_POINTS == 4 path). Box3D's
+# operation order is kept exactly; checked bit for bit against the oracle in
+# fixture 974.
+open Vec2
+open Vec3
+open physics/Constants
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/geometry/Hull2d
+open physics/collision/Manifold
+
+# B3_MAX_EDGE_COUNT, B3_MAX_VERTEX_COUNT
+const maxFoundEdges: Int = 64
+
+const maxFoundVertices: Int = 64
+
+# b3_flatEdge1-3 and b3_allFlatEdges: concave both ways
+const flatEdge1: Int = 17
+
+const flatEdge2: Int = 34
+
+const flatEdge3: Int = 68
+
+const allFlatEdges: Int = 119
+
+# The edges (b3FoundEdges, a key per vertex pair) and vertices
+# (b3FoundVertices) of the triangles already accepted.
+type FoundFeatures {
+  edges: List(Int)
+  vertices: List(Int)
+}
+
+# A cluster of accepted manifolds with nearly the same normals (b3Cluster).
+type MeshCluster {
+  manifoldNormal: Vec3
+  triangleNormal: Vec3
+  points: List(LocalManifoldPoint)
+  pointCapacity: Int
+}
+
+func edgeKey(vertex1: view Int, vertex2: view Int) ret Int {
+  ret (minInt(left: vertex1, right: vertex2) shl 32) bitor maxInt(left: vertex1, right: vertex2)
+}
+
+# b3AddEdge: false if the edge was already found. A full list keeps no more
+# (and may let a ghost collision through).
+func addEdge(found: mod FoundFeatures, vertex1: view Int, vertex2: view Int) ret Bool {
+  let key: Int = edgeKey(vertex1: vertex1, vertex2: vertex2)
+  loop var i: Int = 0, i < found.edges.length, ++i {
+    if found.edges.copyAtDefault(index: i) is key {
+      ret false
+    }
+  }
+  if found.edges.length is maxFoundEdges {
+    ret true
+  }
+  found.edges.add(value: key)
+  ret true
+}
+
+# b3FindEdge
+func findEdge(found: view FoundFeatures, vertex1: view Int, vertex2: view Int) ret Bool {
+  let key: Int = edgeKey(vertex1: vertex1, vertex2: vertex2)
+  loop var i: Int = 0, i < found.edges.length, ++i {
+    if found.edges.copyAtDefault(index: i) is key {
+      ret true
+    }
+  }
+  ret false
+}
+
+# b3AddVertex: false if the vertex was already found.
+func addVertex(found: mod FoundFeatures, vertex: view Int) ret Bool {
+  loop var i: Int = 0, i < found.vertices.length, ++i {
+    if found.vertices.copyAtDefault(index: i) is vertex {
+      ret false
+    }
+  }
+  if found.vertices.length is maxFoundVertices {
+    ret true
+  }
+  found.vertices.add(value: vertex)
+  ret true
+}
+
+# The three edges and vertices of an accepted triangle.
+func addTriangleFeatures(found: mod FoundFeatures, manifold: view LocalManifold) {
+  let edge1: Bool = addEdge(found: found, vertex1: manifold.i1, vertex2: manifold.i2)
+  let edge2: Bool = addEdge(found: found, vertex1: manifold.i2, vertex2: manifold.i3)
+  let edge3: Bool = addEdge(found: found, vertex1: manifold.i3, vertex2: manifold.i1)
+  let vertex1: Bool = addVertex(found: found, vertex: manifold.i1)
+  let vertex2: Bool = addVertex(found: found, vertex: manifold.i2)
+  let vertex3: Bool = addVertex(found: found, vertex: manifold.i3)
+}
+
+func subtractVec2(left: view Vec2, right: view Vec2) ret Vec2 {
+  ret Vec2 { x: left.x - right.x, y: left.y - right.y }
+}
+
+# b3Cross2
+func crossVec2(left: view Vec2, right: view Vec2) ret Float {
+  ret left.x * right.y - left.y * right.x
+}
+
+# b3DistanceSquared2
+func distanceSquaredVec2(first: view Vec2, second: view Vec2) ret Float {
+  let dx: Float = second.x - first.x
+  let dy: Float = second.y - first.y
+  ret dx * dx + dy * dy
+}
+
+# b3IsBetterCullCandidate: a larger score, ties (within the tolerance) broken
+# by the deeper separation.
+func isBetterCullCandidate(
+  score: view Float
+  separation: view Float
+  bestScore: view Float
+  bestSeparation: view Float
+  scoreTolerance: view Float
+  separationTolerance: view Float
+) ret Bool {
+  if score > bestScore + scoreTolerance {
+    ret true
+  }
+  if score < bestScore - scoreTolerance {
+    ret false
+  }
+  # Break the tie using separation
+  ret separation < bestSeparation - separationTolerance
+}
+
+# Write the first points of `points` (b3CullPoints' final copy).
+func setPoints(points: mod List(Point2d), finalPoints: view List(Point2d)) ret Int {
+  loop var i: Int = 0, i < finalPoints.length, ++i {
+    points.set(index: i, value: finalPoints.copyAtDefault(index: i))
+  }
+  ret finalPoints.length
+}
+
+# b3CullPoints: at most four of `count` points spanning the most area: the
+# farthest pair, the point making the largest triangle with them, and the
+# point adding the most area outside it. Returns the count kept, at the
+# front of `points`.
+func cullPoints(
+  points: mod List(Point2d)
+  count: view Int
+  lengthUnitsPerMeter: view Float
+) ret Int {
+  if count <= 1 {
+    ret count
+  }
+  let slop: Float = linearSlop(lengthUnitsPerMeter: lengthUnitsPerMeter)
+  let tolerance: Float = 0.25 * slop
+  let toleranceSquared: Float = tolerance * tolerance
+  let separationTolerance: Float = slop
+
+  let finalPoints: List(Point2d) = List.create(Point2d, cap: 4)
+  var count1: Int = count
+
+  # Step 1: the two points with the largest distance, ties broken by the
+  # deepest combined separation
+  var bestScore: Float = 0.0
+  var bestSeparation: Float = floatMax
+  var bestIndex1: Int = -1
+  var bestIndex2: Int = -1
+  loop var i: Int = 0, i < count1, ++i {
+    let first: Point2d = points.copyAtDefault(index: i)
+    loop var j: Int = i + 1, j < count1, ++j {
+      let second: Point2d = points.copyAtDefault(index: j)
+      let score: Float = distanceSquaredVec2(first: first.point, second: second.point)
+      # Separation sum heuristic
+      let separation: Float = first.separation + second.separation
+      if isBetterCullCandidate(
+        score: score
+        separation: separation
+        bestScore: bestScore
+        bestSeparation: bestSeparation
+        scoreTolerance: toleranceSquared
+        separationTolerance: separationTolerance
+      ) {
+        bestIndex1 = i
+        bestIndex2 = j
+        bestScore = score
+        bestSeparation = separation
+      }
+    }
+  }
+
+  if bestScore < toleranceSquared {
+    # Choose the deepest point
+    var deepestIndex: Int = 0
+    loop var i: Int = 1, i < count1, ++i {
+      if points.copyAtDefault(index: i).separation < points.copyAtDefault(index: deepestIndex).separation {
+        deepestIndex = i
+      }
+    }
+    if deepestIndex is not 0 {
+      points.set(index: 0, value: points.copyAtDefault(index: deepestIndex))
+    }
+    ret 1
+  }
+
+  finalPoints.add(value: points.copyAtDefault(index: bestIndex1))
+  finalPoints.add(value: points.copyAtDefault(index: bestIndex2))
+
+  # Cull
+  points.set(index: bestIndex2, value: points.copyAtDefault(index: count1 - 1))
+  points.set(index: bestIndex1, value: points.copyAtDefault(index: count1 - 2))
+  count1 = count1 - 2
+  if count1 is 0 {
+    ret setPoints(points: points, finalPoints: finalPoints)
+  }
+
+  # The first and second anchor points
+  let a: Vec2 = finalPoints.copyAtDefault(index: 0).point
+  var b: Vec2 = finalPoints.copyAtDefault(index: 1).point
+  var ba: Vec2 = subtractVec2(left: b, right: a)
+
+  # Step 2: the point with the largest triangle area, ties broken by the
+  # deepest separation
+  bestScore = 0.0
+  bestSeparation = floatMax
+  var bestIndex: Int = -1
+  var bestSignedArea: Float = 0.0
+  loop var i: Int = 0, i < count1, ++i {
+    let candidate: Point2d = points.copyAtDefault(index: i)
+    let signedArea: Float = crossVec2(
+      left: ba
+      right: subtractVec2(left: candidate.point, right: a)
+    )
+    let score: Float = absFloat(value: signedArea)
+    if isBetterCullCandidate(
+      score: score
+      separation: candidate.separation
+      bestScore: bestScore
+      bestSeparation: bestSeparation
+      scoreTolerance: toleranceSquared
+      separationTolerance: separationTolerance
+    ) {
+      bestSignedArea = signedArea
+      bestScore = score
+      bestSeparation = candidate.separation
+      bestIndex = i
+    }
+  }
+  if bestIndex is -1 {
+    # All points collinear
+    ret setPoints(points: points, finalPoints: finalPoints)
+  }
+
+  # Store the best point
+  finalPoints.add(value: points.copyAtDefault(index: bestIndex))
+  if count1 is 1 {
+    ret setPoints(points: points, finalPoints: finalPoints)
+  }
+
+  # Cull
+  points.set(index: bestIndex, value: points.copyAtDefault(index: count1 - 1))
+  count1 = count1 - 1
+
+  # Step 4: the point adding the most area outside the current triangle
+  var c: Vec2 = finalPoints.copyAtDefault(index: 2).point
+
+  # Ensure CCW ordering
+  if bestSignedArea < 0.0 {
+    let swapped: Vec2 = b
+    b = c
+    c = swapped
+    ba = subtractVec2(left: b, right: a)
+  }
+  let cb: Vec2 = subtractVec2(left: c, right: b)
+  let ac: Vec2 = subtractVec2(left: a, right: c)
+
+  bestScore = 0.0
+  bestSeparation = floatMax
+  bestIndex = -1
+  loop var i: Int = 0, i < count1, ++i {
+    let candidate: Point2d = points.copyAtDefault(index: i)
+    let u1: Float = crossVec2(left: subtractVec2(left: candidate.point, right: a), right: ba)
+    let u2: Float = crossVec2(left: subtractVec2(left: candidate.point, right: b), right: cb)
+    let u3: Float = crossVec2(left: subtractVec2(left: candidate.point, right: c), right: ac)
+    let score: Float = maxFloat(left: u1, right: maxFloat(left: u2, right: u3))
+    # The area tolerance for collinear points and hysteresis
+    if isBetterCullCandidate(
+      score: score
+      separation: candidate.separation
+      bestScore: bestScore
+      bestSeparation: bestSeparation
+      scoreTolerance: toleranceSquared
+      separationTolerance: separationTolerance
+    ) {
+      bestScore = score
+      bestSeparation = candidate.separation
+      bestIndex = i
+    }
+  }
+  if bestIndex is -1 {
+    # No additional area
+    ret setPoints(points: points, finalPoints: finalPoints)
+  }
+
+  # A full quad
+  finalPoints.add(value: points.copyAtDefault(index: bestIndex))
+  ret setPoints(points: points, finalPoints: finalPoints)
+}
+
+# b3ReduceCluster: a cluster's points projected onto the plane of `normal`
+# and culled to at most four; `points` is shortened to them.
+func reduceCluster(
+  points: mod List(LocalManifoldPoint)
+  normal: view Vec3
+  lengthUnitsPerMeter: view Float
+) {
+  let count1: Int = points.length
+  if count1 <= 1 {
+    ret
+  }
+  let u: Vec3 = perp(vector: normal)
+  let v: Vec3 = cross(left: normal, right: u)
+  let origin: Vec3 = points.copyAtDefault(index: 0).point
+  let projected: List(Point2d) = List.create(Point2d, cap: count1)
+  loop var i: Int = 0, i < count1, ++i {
+    let source: LocalManifoldPoint = points.copyAtDefault(index: i)
+    let delta: Vec3 = subtract(left: source.point, right: origin)
+    projected.add(
+      value: Point2d {
+        point: Vec2 { x: dot(left: delta, right: u), y: dot(left: delta, right: v) }
+        separation: source.separation
+        originalIndex: i
+      }
+    )
+  }
+  let count2: Int = cullPoints(
+    points: projected
+    count: count1
+    lengthUnitsPerMeter: lengthUnitsPerMeter
+  )
+  let finalPoints: List(LocalManifoldPoint) = List.create(LocalManifoldPoint, cap: count2)
+  loop var i: Int = 0, i < count2, ++i {
+    let index: Int = projected.copyAtDefault(index: i).originalIndex
+    finalPoints.add(value: points.copyAtDefault(index: index))
+  }
+  points.clear()
+  loop var i: Int = 0, i < count2, ++i {
+    points.add(value: finalPoints.copyAtDefault(index: i))
+  }
+}
+
+# The tentative manifold `manifold` (a sphere's) collides if its feature's
+# edge or vertex was not found yet.
+func shouldCollideTentative(found: mod FoundFeatures, manifold: view LocalManifold) ret Bool {
+  let addedEdge1: Bool = addEdge(found: found, vertex1: manifold.i1, vertex2: manifold.i2)
+  let addedEdge2: Bool = addEdge(found: found, vertex1: manifold.i2, vertex2: manifold.i3)
+  let addedEdge3: Bool = addEdge(found: found, vertex1: manifold.i3, vertex2: manifold.i1)
+  let addedVertex1: Bool = addVertex(found: found, vertex: manifold.i1)
+  let addedVertex2: Bool = addVertex(found: found, vertex: manifold.i2)
+  let addedVertex3: Bool = addVertex(found: found, vertex: manifold.i3)
+  let feature: Int = manifold.feature
+  if feature is featureEdge1 {
+    ret addedEdge1
+  }
+  if feature is featureEdge2 {
+    ret addedEdge2
+  }
+  if feature is featureEdge3 {
+    ret addedEdge3
+  }
+  if feature is featureVertex1 {
+    ret addedVertex1
+  }
+  if feature is featureVertex2 {
+    ret addedVertex2
+  }
+  if feature is featureVertex3 {
+    ret addedVertex3
+  }
+  ret false
+}
+
+# A hull's or capsule's tentative manifold is dropped when its triangle is
+# all flat edges, or when a flat edge of it was already found.
+func isFlatEdgeGhost(found: view FoundFeatures, manifold: view LocalManifold) ret Bool {
+  let triangleFlags: Int = manifold.triangleFlags
+  if (triangleFlags bitand allFlatEdges) is allFlatEdges {
+    ret true
+  }
+  if (triangleFlags bitand flatEdge1) is flatEdge1 {
+    if findEdge(found: found, vertex1: manifold.i1, vertex2: manifold.i2) {
+      ret true
+    }
+  }
+  if (triangleFlags bitand flatEdge2) is flatEdge2 {
+    if findEdge(found: found, vertex1: manifold.i2, vertex2: manifold.i3) {
+      ret true
+    }
+  }
+  if (triangleFlags bitand flatEdge3) is flatEdge3 {
+    if findEdge(found: found, vertex1: manifold.i3, vertex2: manifold.i1) {
+      ret true
+    }
+  }
+  ret false
+}
+
+# The accepted manifolds clustered by manifold and triangle normal, each
+# cluster's points culled to at most four.
+func clusterManifolds(
+  manifolds: view List(LocalManifold)
+  accepted: view List(Int)
+  lengthUnitsPerMeter: view Float
+) ret List(MeshCluster) {
+  # Tighter than the warm starting manifold matching tolerance: these serve
+  # different purposes
+  let clusterThreshold: Float = 0.996
+  let clusters: List(MeshCluster) = List.create(MeshCluster, cap: 4)
+  let memberships: List(Int) = List.create(Int, cap: accepted.length)
+  loop var i: Int = 0, i < accepted.length, ++i {
+    let manifold: LocalManifold = manifolds.copyAtDefault(index: accepted.copyAtDefault(index: i))
+    # The first cluster within the (tight) tolerance is taken
+    var clusterIndex: Int = -1
+    loop var j: Int = 0, j < clusters.length, ++j {
+      let cluster: MeshCluster = clusters.copyAtDefault(index: j)
+      let cosManifoldAngle: Float = dot(left: cluster.manifoldNormal, right: manifold.normal)
+      let cosTriangleAngle: Float = dot(
+        left: cluster.triangleNormal
+        right: manifold.triangleNormal
+      )
+      if cosManifoldAngle <= clusterThreshold or cosTriangleAngle <= clusterThreshold {
+        continue
+      }
+      clusterIndex = j
+      break
+    }
+    if clusterIndex is not -1 {
+      memberships.add(value: clusterIndex)
+      if let cluster: mod MeshCluster => clusters.modAt(index: clusterIndex) {
+        cluster.pointCapacity = cluster.pointCapacity + manifold.pointCount
+      }
+    } else {
+      memberships.add(value: clusters.length)
+      clusters.add(
+        value: MeshCluster {
+          manifoldNormal: manifold.normal
+          triangleNormal: manifold.triangleNormal
+          points: List.create(LocalManifoldPoint, cap: manifold.pointCount)
+          pointCapacity: manifold.pointCount
+        }
+      )
+    }
+  }
+
+  # Populate the clusters
+  loop var i: Int = 0, i < accepted.length, ++i {
+    let manifold: LocalManifold = manifolds.copyAtDefault(index: accepted.copyAtDefault(index: i))
+    if let cluster: mod MeshCluster => clusters.modAt(index: memberships.copyAtDefault(index: i)) {
+      loop var j: Int = 0, j < manifold.pointCount, ++j {
+        var point: LocalManifoldPoint = manifold.points.copyAtDefault(index: j)
+        point.triangleIndex = manifold.triangleIndex
+        cluster.points.add(value: point)
+      }
+    }
+  }
+
+  # Simplify the clusters
+  loop var i: Int = 0, i < clusters.length, ++i {
+    if let cluster: mod MeshCluster => clusters.modAt(index: i) {
+      reduceCluster(
+        points: cluster.points
+        normal: cluster.triangleNormal
+        lengthUnitsPerMeter: lengthUnitsPerMeter
+      )
+    }
+  }
+  ret clusters
+}
