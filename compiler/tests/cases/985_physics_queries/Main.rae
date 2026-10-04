@@ -5,7 +5,11 @@
 # steps, runs the same battery: closest and all-hit ray casts, all-hit and
 # closest shape casts of a sphere, a capsule and a box, box and shape
 # overlaps, mover planes and mover casts (with ignored shapes), under three
-# query filters. Every result, tree visit count and body transform must
+# query filters. A second world runs a battery against the surface shapes
+# (P7b: MeshCast, HeightFieldCast, CompoundQueries): a grid mesh, a mirrored
+# scaled grid mesh, a wave height field with holes, a flat height field and
+# a compound of capsules, boxes, a box mesh and spheres. Every result, tree visit count and body
+# transform must
 # have the SAME BITS (docs/physics-rae-port-design.md §4).
 import Math
 import Vec3
@@ -19,6 +23,10 @@ open physics/geometry/QueryTypes
 open physics/geometry/Hull
 open physics/geometry/HullCreate
 open physics/geometry/BoxHull
+open physics/geometry/Mesh
+open physics/geometry/MeshQuery
+open physics/geometry/HeightField
+open physics/geometry/Compound
 open physics/collision/ShapePair
 open physics/dynamics/WorldTypes
 open physics/dynamics/World
@@ -208,6 +216,155 @@ func expectedValue(token: view String) ret Int {
     ret Math.floatBits(value: token.toFloat())
   }
   ret token.toInt()
+}
+
+func readHeightFieldSpec(reader: mod Reader) ret HeightFieldData {
+  let kind: Int = readInt(reader: reader)
+  let rows: Int = readInt(reader: reader)
+  let columns: Int = readInt(reader: reader)
+  let scale: Vec3 = readVec(reader: reader)
+  if kind is 0 {
+    let rowFrequency: Float = readFloat(reader: reader)
+    let columnFrequency: Float = readFloat(reader: reader)
+    let makeHoles: Bool = readBool(reader: reader)
+    ret createHeightWave(
+      rowCount: rows
+      columnCount: columns
+      scale: scale
+      rowFrequency: rowFrequency
+      columnFrequency: columnFrequency
+      makeHoles: makeHoles
+      lengthUnitsPerMeter: 1.0
+    )
+  }
+  let makeHoles: Bool = readBool(reader: reader)
+  ret createHeightGrid(
+    rowCount: rows
+    columnCount: columns
+    scale: scale
+    makeHoles: makeHoles
+    lengthUnitsPerMeter: 1.0
+  )
+}
+
+func readCompoundDef(reader: mod Reader) ret CompoundDef {
+  var def: CompoundDef = {
+    capsules: List.create(CompoundCapsuleDef, cap: 4)
+    hulls: List.create(CompoundHullDef, cap: 4)
+    meshes: List.create(CompoundMeshDef, cap: 2)
+    spheres: List.create(CompoundSphereDef, cap: 4)
+  }
+  let capsuleCount: Int = readInt(reader: reader)
+  loop var k: Int = 0, k < capsuleCount, ++k {
+    let center1: Vec3 = readVec(reader: reader)
+    let center2: Vec3 = readVec(reader: reader)
+    let radius: Float = readFloat(reader: reader)
+    let material: SurfaceMaterial = readMaterial(reader: reader)
+    def.capsules.add(
+      value: CompoundCapsuleDef {
+        capsule: Capsule { center1: center1, center2: center2, radius: radius }
+        material: material
+      }
+    )
+  }
+  let hullCount: Int = readInt(reader: reader)
+  loop var k: Int = 0, k < hullCount, ++k {
+    let hx: Float = readFloat(reader: reader)
+    let hy: Float = readFloat(reader: reader)
+    let hz: Float = readFloat(reader: reader)
+    let transform: Transform = readTransform(reader: reader)
+    let material: SurfaceMaterial = readMaterial(reader: reader)
+    let hull: Hull = makeTransformedBoxHull(
+      hx: hx
+      hy: hy
+      hz: hz
+      transform: transformIdentity()
+      lengthUnitsPerMeter: 1.0
+    )
+    def.hulls.add(value: CompoundHullDef { hull: hull, transform: transform, material: material })
+  }
+  let meshCount: Int = readInt(reader: reader)
+  loop var k: Int = 0, k < meshCount, ++k {
+    let center: Vec3 = readVec(reader: reader)
+    let extent: Vec3 = readVec(reader: reader)
+    let transform: Transform = readTransform(reader: reader)
+    let scale: Vec3 = readVec(reader: reader)
+    let materialCount: Int = readInt(reader: reader)
+    let materials: List(SurfaceMaterial) = List.create(SurfaceMaterial, cap: materialCount)
+    loop var m: Int = 0, m < materialCount, ++m {
+      materials.add(value: readMaterial(reader: reader))
+    }
+    if let mesh: MeshData = createBoxMesh(
+      center: center
+      extent: extent
+      identifyEdges: true
+      lengthUnitsPerMeter: 1.0
+    ) {
+      def.meshes.add(
+        value: CompoundMeshDef {
+          mesh: mesh
+          transform: transform
+          scale: scale
+          materials: materials
+        }
+      )
+    }
+  }
+  let sphereCount: Int = readInt(reader: reader)
+  loop var k: Int = 0, k < sphereCount, ++k {
+    let center: Vec3 = readVec(reader: reader)
+    let radius: Float = readFloat(reader: reader)
+    let material: SurfaceMaterial = readMaterial(reader: reader)
+    def.spheres.add(
+      value: CompoundSphereDef {
+        sphere: Sphere { center: center, radius: radius }
+        material: material
+      }
+    )
+  }
+  ret def
+}
+
+# A mesh from its spec: 0 = a grid, 1 = a box mesh, 2 = a platform.
+func readMeshSpec(reader: mod Reader) ret opt MeshData {
+  let kind: Int = readInt(reader: reader)
+  if kind is 0 {
+    let xCount: Int = readInt(reader: reader)
+    let zCount: Int = readInt(reader: reader)
+    let cellWidth: Float = readFloat(reader: reader)
+    let materialCount: Int = readInt(reader: reader)
+    let identifyEdges: Bool = readBool(reader: reader)
+    ret createGridMesh(
+      xCount: xCount
+      zCount: zCount
+      cellWidth: cellWidth
+      materialCount: materialCount
+      identifyEdges: identifyEdges
+      lengthUnitsPerMeter: 1.0
+    )
+  }
+  if kind is 1 {
+    let center: Vec3 = readVec(reader: reader)
+    let extent: Vec3 = readVec(reader: reader)
+    let identifyEdges: Bool = readBool(reader: reader)
+    ret createBoxMesh(
+      center: center
+      extent: extent
+      identifyEdges: identifyEdges
+      lengthUnitsPerMeter: 1.0
+    )
+  }
+  let center: Vec3 = readVec(reader: reader)
+  let height: Float = readFloat(reader: reader)
+  let topWidth: Float = readFloat(reader: reader)
+  let bottomWidth: Float = readFloat(reader: reader)
+  ret createPlatformMesh(
+    center: center
+    height: height
+    topWidth: topWidth
+    bottomWidth: bottomWidth
+    lengthUnitsPerMeter: 1.0
+  )
 }
 
 func readHullSpec(reader: mod Reader) ret opt Hull {
@@ -541,6 +698,49 @@ func evaluate(
         )
       }
     }
+  } else if name is "shape.mesh" {
+    let bodyId: BodyId = readBodyId(reader: reader)
+    let def: ShapeDef = readShapeDef(reader: reader)
+    if let mesh: MeshData = readMeshSpec(reader: reader) {
+      let scale: Vec3 = readVec(reader: reader)
+      putShapeId(
+        out: out
+        shapeId: createMeshShape(
+          world: world
+          bodyId: bodyId
+          def: def
+          mesh: mesh
+          scale: scale
+        )
+      )
+    }
+  } else if name is "shape.compound" {
+    let bodyId: BodyId = readBodyId(reader: reader)
+    let def: ShapeDef = readShapeDef(reader: reader)
+    if let compound: CompoundData = createCompound(def: readCompoundDef(reader: reader)) {
+      putShapeId(
+        out: out
+        shapeId: createCompoundShape(
+          world: world
+          bodyId: bodyId
+          def: def
+          compound: compound
+        )
+      )
+    }
+  } else if name is "shape.heightField" {
+    let bodyId: BodyId = readBodyId(reader: reader)
+    let def: ShapeDef = readShapeDef(reader: reader)
+    let heightField: HeightFieldData = readHeightFieldSpec(reader: reader)
+    putShapeId(
+      out: out
+      shapeId: createHeightFieldShape(
+        world: world
+        bodyId: bodyId
+        def: def
+        heightField: heightField
+      )
+    )
   } else if name is "body.setTransform" {
     let bodyId: BodyId = readBodyId(reader: reader)
     let position: Vec3 = readVec(reader: reader)

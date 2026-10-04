@@ -416,6 +416,11 @@ C added.
   samples/mover.cpp in Rae (`WorldQueries`, `ShapeQueries`, `Mover`,
   `character/CharacterMover`; goldens `queries`, `character`, fixtures 985
   and 986). **P7b** adds the mesh, height-field and compound queries.
+  **P7b landed 2026-10-04, bit-exact:** the mesh, height-field and compound
+  ray casts, shape casts, overlaps and mover planes (`MeshCast`,
+  `HeightFieldCast`, `CompoundQueries`; the world queries and the sensors
+  now reach every shape kind; goldens `queries` and `character` extended,
+  fixtures 985 and 986). **P7 is complete.**
 - **P8 — the ECS layer**: `PhysicsWorld`, `RigidBody`, `Collider`,
   `CharacterBody`, push/step/pull/event systems, spawn/despawn
   (`docs/physics-design.md` §5).

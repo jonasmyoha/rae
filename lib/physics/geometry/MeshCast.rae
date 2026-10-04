@@ -1,0 +1,663 @@
+# A triangle mesh's ray cast, shape cast, overlap and mover planes
+# (b3RayCastMesh, b3ShapeCastMesh, b3OverlapMesh and b3CollideMoverAndMesh of
+# Box3D's mesh.c, b3IntersectRayTriangle of simd.c, b3MakeLocalProxy and
+# b3ComputeProxyAABB of shape.c, at 9f998c8). Each walks the mesh's BVH in
+# the unscaled frame and tests the triangles in the scaled one. Box3D's
+# operation order is kept exactly (the scalar path of its simd.h); checked
+# against the oracle in fixture 985.
+open Vec3
+open physics/Constants
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/MatrixMath
+open physics/math/QuatMath
+open physics/math/TransformMath
+open physics/math/AabbMath
+open physics/math/PlaneMath
+open physics/geometry/QueryTypes
+open physics/geometry/Mesh
+open physics/geometry/MeshQuery
+open physics/collision/Simplex
+open physics/collision/Distance
+open physics/collision/ShapeCast
+open physics/broadPhase/DynamicTreeQuery
+
+# b3MakeLocalProxy: `proxy` moved into the frame of `transform` (at most
+# maxShapeCastPoints points).
+func makeLocalProxy(proxy: view ShapeProxy, transform: view Transform) ret ShapeProxy {
+  let inverse: Transform = invert(transform: transform)
+  let rotation: Matrix3 = matrixFromQuat(quat: inverse.rotation)
+  let count: Int = minInt(left: proxy.points.length, right: maxShapeCastPoints)
+  let points: List(Vec3) = List.create(Vec3, cap: count)
+  loop var i: Int = 0, i < count, ++i {
+    points.add(
+      value: add(
+        left: multiply(matrix: rotation, vector: proxy.points.copyAtDefault(index: i))
+        right: inverse.position
+      )
+    )
+  }
+  ret ShapeProxy { points: points, radius: proxy.radius }
+}
+
+# b3ComputeProxyAABB
+func computeProxyAabb(proxy: view ShapeProxy) ret Aabb {
+  let first: Vec3 = proxy.points.copyAtDefault(index: 0)
+  var box: Aabb = { lowerBound: first, upperBound: first }
+  loop var i: Int = 1, i < proxy.points.length, ++i {
+    let point: Vec3 = proxy.points.copyAtDefault(index: i)
+    box.lowerBound = min(left: box.lowerBound, right: point)
+    box.upperBound = max(left: box.upperBound, right: point)
+  }
+  let radius: Vec3 = { x: proxy.radius, y: proxy.radius, z: proxy.radius }
+  box.lowerBound = subtract(left: box.lowerBound, right: radius)
+  box.upperBound = add(left: box.upperBound, right: radius)
+  ret box
+}
+
+# b3MulV(b3_halfV, b3AddV(a, b))
+func halfSum(left: view Vec3, right: view Vec3) ret Vec3 {
+  ret Vec3 { x: 0.5 * (left.x + right.x), y: 0.5 * (left.y + right.y), z: 0.5 * (left.z + right.z) }
+}
+
+# b3DivV(b3_oneV, scale)
+func inverseScale(scale: view Vec3) ret Vec3 {
+  ret Vec3 { x: 1.0 / scale.x, y: 1.0 / scale.y, z: 1.0 / scale.z }
+}
+
+# b3IntersectRayTriangle: the fraction of the ray (start, delta) where it
+# crosses the front of the triangle, or 1 when it does not.
+func intersectRayTriangle(
+  rayStart: view Vec3
+  rayDelta: view Vec3
+  vertex1: view Vec3
+  vertex2: view Vec3
+  vertex3: view Vec3
+) ret Float {
+  # Is the ray inside all three edge planes?
+  let edge1: Vec3 = subtract(left: vertex3, right: vertex2)
+  let edge2: Vec3 = subtract(left: vertex1, right: vertex3)
+  let edge3: Vec3 = subtract(left: vertex2, right: vertex1)
+  let normal1: Vec3 = cross(
+    left: edge1
+    right: subtract(left: halfSum(left: vertex2, right: vertex3), right: rayStart)
+  )
+  let normal2: Vec3 = cross(
+    left: edge2
+    right: subtract(left: halfSum(left: vertex3, right: vertex1), right: rayStart)
+  )
+  let normal3: Vec3 = cross(
+    left: edge3
+    right: subtract(left: halfSum(left: vertex1, right: vertex2), right: rayStart)
+  )
+  if dot3(left: normal1, right: rayDelta) < 0.0 or dot3(left: normal2, right: rayDelta) < 0.0 or dot3(
+    left: normal3
+    right: rayDelta
+  ) < 0.0 {
+    ret 1.0
+  }
+
+  # The intersection with the triangle's plane
+  let normal: Vec3 = cross(
+    left: subtract(left: vertex2, right: vertex1)
+    right: subtract(left: vertex3, right: vertex1)
+  )
+  let denominator: Float = dot3(left: normal, right: rayDelta)
+  if denominator >= 0.0 {
+    ret 1.0
+  }
+  let lambda: Float = dot3(left: normal, right: subtract(left: vertex1, right: rayStart)) / denominator
+  if lambda <= 0.0 {
+    ret 1.0
+  }
+  if lambda < 1.0 {
+    ret lambda
+  }
+  ret 1.0
+}
+
+# The scaled vertices of triangle `triangleIndex`, wound counter-clockwise
+# (a mirroring scale swaps the second and third).
+type ScaledTriangle {
+  vertex1: Vec3
+  vertex2: Vec3
+  vertex3: Vec3
+}
+
+func scaledTriangle(
+  data: view MeshData
+  triangleIndex: view Int
+  meshScale: view Vec3
+  ccw: view Bool
+) ret ScaledTriangle {
+  let triangle: MeshTriangle = data.triangles.copyAtDefault(index: triangleIndex)
+  let vertex1: Vec3 = multiply(
+    left: meshScale
+    right: data.vertices.copyAtDefault(index: triangle.index1)
+  )
+  if ccw {
+    ret ScaledTriangle {
+      vertex1: vertex1
+      vertex2: multiply(left: meshScale, right: data.vertices.copyAtDefault(index: triangle.index2))
+      vertex3: multiply(left: meshScale, right: data.vertices.copyAtDefault(index: triangle.index3))
+    }
+  }
+  ret ScaledTriangle {
+    vertex1: vertex1
+    vertex2: multiply(left: meshScale, right: data.vertices.copyAtDefault(index: triangle.index3))
+    vertex3: multiply(left: meshScale, right: data.vertices.copyAtDefault(index: triangle.index2))
+  }
+}
+
+func emptyMeshCastOutput(maxFraction: view Float) ret CastOutput {
+  var output: CastOutput = emptyCastOutput()
+  output.fraction = maxFraction
+  output.triangleIndex = -1
+  ret output
+}
+
+# b3RayCastMesh: the closest front-face triangle the ray crosses. Without
+# a hit the fraction is the input's and the triangle index -1.
+func rayCastMesh(mesh: view Mesh, input: view RayCastInput) ret CastOutput {
+  let data: view MeshData => mesh.data
+  let meshScale: Vec3 = mesh.scale
+  var bestOutput: CastOutput = emptyMeshCastOutput(maxFraction: input.maxFraction)
+
+  var lambda: Float = input.maxFraction
+  let rayStart: Vec3 = input.origin
+  let rayDelta: Vec3 = input.translation
+  let invScale: Vec3 = inverseScale(scale: meshScale)
+  let ccw: Bool = meshScale.x * meshScale.y * meshScale.z > 0.0
+
+  # The inverse-scaled ray walks the BVH
+  let invScaledRayStart: Vec3 = multiply(left: invScale, right: rayStart)
+  let invScaledRayDelta: Vec3 = multiply(left: invScale, right: rayDelta)
+  var invScaledRayEnd: Vec3 = add(
+    left: invScaledRayStart
+    right: scale(scale: lambda, vector: invScaledRayDelta)
+  )
+  var invScaledRayMin: Vec3 = minV(left: invScaledRayStart, right: invScaledRayEnd)
+  var invScaledRayMax: Vec3 = maxV(left: invScaledRayStart, right: invScaledRayEnd)
+
+  let stack: List(Int) = List.create(Int, cap: meshStackSize)
+  var nodeIndex: Int = 0
+  loop true {
+    let node: MeshNode = data.nodes.copyAtDefault(index: nodeIndex)
+    if testBoundsOverlap(
+      min1: node.lowerBound
+      max1: node.upperBound
+      min2: invScaledRayMin
+      max2: invScaledRayMax
+    ) and testBoundsRayOverlap(
+      nodeMin: node.lowerBound
+      nodeMax: node.upperBound
+      rayStart: invScaledRayStart
+      rayDelta: invScaledRayDelta
+    ) {
+      if isLeafNode(node: node) {
+        loop var index: Int = 0, index < node.count, ++index {
+          let triangleIndex: Int = node.triangleOffset + index
+          let triangle: ScaledTriangle = scaledTriangle(
+            data: data
+            triangleIndex: triangleIndex
+            meshScale: meshScale
+            ccw: ccw
+          )
+          let alpha: Float = intersectRayTriangle(
+            rayStart: rayStart
+            rayDelta: rayDelta
+            vertex1: triangle.vertex1
+            vertex2: triangle.vertex2
+            vertex3: triangle.vertex3
+          )
+          if alpha < bestOutput.fraction {
+            let edge1: Vec3 = subtract(left: triangle.vertex2, right: triangle.vertex1)
+            let edge2: Vec3 = subtract(left: triangle.vertex3, right: triangle.vertex1)
+            bestOutput.normal = normalize(vector: cross(left: edge1, right: edge2))
+            bestOutput.point = add(
+              left: input.origin
+              right: scale(scale: alpha, vector: input.translation)
+            )
+            bestOutput.fraction = alpha
+            bestOutput.triangleIndex = triangleIndex
+            bestOutput.materialIndex = data.materialIndices.copyAtDefault(index: triangleIndex)
+            bestOutput.hit = true
+
+            # The ray bounds shrink, in the unscaled frame
+            lambda = alpha
+            invScaledRayEnd = add(
+              left: invScaledRayStart
+              right: scale(scale: lambda, vector: invScaledRayDelta)
+            )
+            invScaledRayMin = minV(left: invScaledRayStart, right: invScaledRayEnd)
+            invScaledRayMax = maxV(left: invScaledRayStart, right: invScaledRayEnd)
+          }
+        }
+      } else {
+        # Front to back
+        if getByIndex(vector: invScaledRayDelta, index: node.kind) > 0.0 {
+          stack.add(value: nodeIndex + node.count)
+          nodeIndex = nodeIndex + 1
+        } else {
+          stack.add(value: nodeIndex + 1)
+          nodeIndex = nodeIndex + node.count
+        }
+        continue
+      }
+    }
+    if stack.length is 0 {
+      break
+    }
+    nodeIndex = stack.copyAtDefault(index: stack.length - 1)
+    stack.removeLast()
+  }
+  ret bestOutput
+}
+
+# b3ShapeCastMesh: the closest front-face triangle the swept proxy hits.
+func shapeCastMesh(
+  mesh: view Mesh
+  input: view ShapeCastInput
+  lengthUnitsPerMeter: view Float
+) ret CastOutput {
+  let data: view MeshData => mesh.data
+  let meshScale: Vec3 = mesh.scale
+  var bestOutput: CastOutput = emptyMeshCastOutput(maxFraction: input.maxFraction)
+
+  var lambda: Float = input.maxFraction
+  let shapeBounds: Aabb = makeAabb(
+    points: input.proxy.points
+    count: input.proxy.points.length
+    radius: input.proxy.radius
+  )
+  let shapeCenter: Vec3 = center(box: shapeBounds)
+  let shapeExtent: Vec3 = extents(box: shapeBounds)
+
+  let rayStart: Vec3 = shapeCenter
+  let rayDelta: Vec3 = input.translation
+  var rayEnd: Vec3 = add(left: rayStart, right: scale(scale: lambda, vector: rayDelta))
+  var rayMin: Vec3 = minV(left: rayStart, right: rayEnd)
+  var rayMax: Vec3 = maxV(left: rayStart, right: rayEnd)
+
+  let invScale: Vec3 = inverseScale(scale: meshScale)
+  let absInvScale: Vec3 = absV(vector: invScale)
+  let ccw: Bool = meshScale.x * meshScale.y * meshScale.z > 0.0
+
+  # The inverse-scaled cast walks the BVH
+  let invScaledRayStart: Vec3 = multiply(left: invScale, right: rayStart)
+  let invScaledRayDelta: Vec3 = multiply(left: invScale, right: rayDelta)
+  var invScaledRayEnd: Vec3 = add(
+    left: invScaledRayStart
+    right: scale(scale: lambda, vector: invScaledRayDelta)
+  )
+  var invScaledRayMin: Vec3 = minV(left: invScaledRayStart, right: invScaledRayEnd)
+  var invScaledRayMax: Vec3 = maxV(left: invScaledRayStart, right: invScaledRayEnd)
+  let invScaledShapeExtent: Vec3 = multiply(left: absInvScale, right: shapeExtent)
+
+  let stack: List(Int) = List.create(Int, cap: meshStackSize)
+  var nodeIndex: Int = 0
+  loop true {
+    let node: MeshNode = data.nodes.copyAtDefault(index: nodeIndex)
+    let nodeMin: Vec3 = subtract(left: node.lowerBound, right: invScaledShapeExtent)
+    let nodeMax: Vec3 = add(left: node.upperBound, right: invScaledShapeExtent)
+    if testBoundsOverlap(
+      min1: nodeMin
+      max1: nodeMax
+      min2: invScaledRayMin
+      max2: invScaledRayMax
+    ) and testBoundsRayOverlap(
+      nodeMin: nodeMin
+      nodeMax: nodeMax
+      rayStart: invScaledRayStart
+      rayDelta: invScaledRayDelta
+    ) {
+      if isLeafNode(node: node) {
+        loop var index: Int = 0, index < node.count, ++index {
+          let triangleIndex: Int = node.triangleOffset + index
+          let triangle: ScaledTriangle = scaledTriangle(
+            data: data
+            triangleIndex: triangleIndex
+            meshScale: meshScale
+            ccw: ccw
+          )
+          let triangleMin: Vec3 = subtract(
+            left: minV(
+              left: triangle.vertex1
+              right: minV(left: triangle.vertex2, right: triangle.vertex3)
+            )
+            right: shapeExtent
+          )
+          let triangleMax: Vec3 = add(
+            left: maxV(
+              left: triangle.vertex1
+              right: maxV(left: triangle.vertex2, right: triangle.vertex3)
+            )
+            right: shapeExtent
+          )
+          # The extended triangle against the cast's bounds (no edge tests)
+          if testBoundsOverlap(
+            min1: triangleMin
+            max1: triangleMax
+            min2: rayMin
+            max2: rayMax
+          ) is false {
+            continue
+          }
+          if signedVolume(
+            v1: triangle.vertex1
+            v2: triangle.vertex2
+            v3: triangle.vertex3
+            p: shapeCenter
+          ) < 0.0 {
+            # The back side
+            continue
+          }
+
+          # The cast against the triangle, shifted to its first vertex
+          let origin: Vec3 = triangle.vertex1
+          let triangleVertices: List(Vec3) = List.create(Vec3, cap: 3)
+          triangleVertices.add(value: zeroVector())
+          triangleVertices.add(value: subtract(left: triangle.vertex2, right: origin))
+          triangleVertices.add(value: subtract(left: triangle.vertex3, right: origin))
+          let pairInput: ShapeCastPairInput = {
+            proxyA: ShapeProxy { points: triangleVertices, radius: 0.0 }
+            proxyB: input.proxy
+            transform: Transform { position: negate(vector: origin), rotation: quatIdentity() }
+            translationB: input.translation
+            maxFraction: bestOutput.fraction
+            canEncroach: input.canEncroach
+          }
+          var pairOutput: CastOutput = shapeCast(
+            input: pairInput
+            lengthUnitsPerMeter: lengthUnitsPerMeter
+          )
+          if pairOutput.hit {
+            pairOutput.point = add(left: pairOutput.point, right: origin)
+            bestOutput = pairOutput
+            bestOutput.triangleIndex = triangleIndex
+            bestOutput.materialIndex = data.materialIndices.copyAtDefault(index: triangleIndex)
+
+            # The cast bounds shrink, in both frames
+            lambda = pairOutput.fraction
+            rayEnd = add(left: rayStart, right: scale(scale: lambda, vector: rayDelta))
+            rayMin = minV(left: rayStart, right: rayEnd)
+            rayMax = maxV(left: rayStart, right: rayEnd)
+            invScaledRayEnd = add(
+              left: invScaledRayStart
+              right: scale(scale: lambda, vector: invScaledRayDelta)
+            )
+            invScaledRayMin = minV(left: invScaledRayStart, right: invScaledRayEnd)
+            invScaledRayMax = maxV(left: invScaledRayStart, right: invScaledRayEnd)
+          }
+        }
+      } else {
+        # Front to back
+        if getByIndex(vector: invScaledRayDelta, index: node.kind) > 0.0 {
+          stack.add(value: nodeIndex + node.count)
+          nodeIndex = nodeIndex + 1
+        } else {
+          stack.add(value: nodeIndex + 1)
+          nodeIndex = nodeIndex + node.count
+        }
+        continue
+      }
+    }
+    if stack.length is 0 {
+      break
+    }
+    nodeIndex = stack.copyAtDefault(index: stack.length - 1)
+    stack.removeLast()
+  }
+  ret bestOutput
+}
+
+# The distance between triangle (a, b, c) and `proxy`, from a fresh simplex
+# cache (Box3D resets the cache's count).
+func triangleDistance(
+  vertex1: view Vec3
+  vertex2: view Vec3
+  vertex3: view Vec3
+  proxy: view ShapeProxy
+  useRadii: view Bool
+) ret DistanceOutput {
+  let points: List(Vec3) = List.create(Vec3, cap: 3)
+  points.add(value: vertex1)
+  points.add(value: vertex2)
+  points.add(value: vertex3)
+  var cache: SimplexCache = emptySimplexCache()
+  ret proxyDistance(
+    proxyA: ShapeProxy { points: points, radius: 0.0 }
+    proxyB: proxy
+    transform: transformIdentity()
+    useRadii: useRadii
+    cache: cache
+  )
+}
+
+# b3OverlapMesh: does `proxy` (in the frame of `shapeTransform`'s parent)
+# touch a triangle of the mesh placed by `shapeTransform`?
+func overlapMesh(
+  mesh: view Mesh
+  shapeTransform: view Transform
+  proxy: view ShapeProxy
+  lengthUnitsPerMeter: view Float
+) ret Bool {
+  let localProxy: ShapeProxy = makeLocalProxy(proxy: proxy, transform: shapeTransform)
+  let box: Aabb = computeProxyAabb(proxy: localProxy)
+  let meshScale: Vec3 = mesh.scale
+
+  # A reflecting scale can swap min and max once unscaled
+  let invScale: Vec3 = inverseScale(scale: meshScale)
+  let temp1: Vec3 = multiply(left: invScale, right: box.lowerBound)
+  let temp2: Vec3 = multiply(left: invScale, right: box.upperBound)
+  let boundsMin: Vec3 = minV(left: temp1, right: temp2)
+  let boundsMax: Vec3 = maxV(left: temp1, right: temp2)
+  let boundsCenter: Vec3 = halfSum(left: boundsMin, right: boundsMax)
+  let boundsExtent: Vec3 = subtract(left: boundsMax, right: boundsCenter)
+  let tolerance: Float = 0.1 * linearSlop(lengthUnitsPerMeter: lengthUnitsPerMeter)
+
+  let data: view MeshData => mesh.data
+  let stack: List(Int) = List.create(Int, cap: meshStackSize)
+  var nodeIndex: Int = 0
+  loop true {
+    let node: MeshNode = data.nodes.copyAtDefault(index: nodeIndex)
+    if testBoundsOverlap(
+      min1: node.lowerBound
+      max1: node.upperBound
+      min2: boundsMin
+      max2: boundsMax
+    ) {
+      if isLeafNode(node: node) {
+        loop var index: Int = 0, index < node.count, ++index {
+          let triangle: MeshTriangle = data.triangles.copyAtDefault(
+            index: node.triangleOffset + index
+          )
+          let vertex1: Vec3 = data.vertices.copyAtDefault(index: triangle.index1)
+          let vertex2: Vec3 = data.vertices.copyAtDefault(index: triangle.index2)
+          let vertex3: Vec3 = data.vertices.copyAtDefault(index: triangle.index3)
+          if testBoundsTriangleOverlap(
+            nodeCenter: boundsCenter
+            nodeExtent: boundsExtent
+            vertex1: vertex1
+            vertex2: vertex2
+            vertex3: vertex3
+          ) {
+            # The distance in the scaled frame; the winding does not matter
+            let output: DistanceOutput = triangleDistance(
+              vertex1: multiply(left: meshScale, right: vertex1)
+              vertex2: multiply(left: meshScale, right: vertex2)
+              vertex3: multiply(left: meshScale, right: vertex3)
+              proxy: localProxy
+              useRadii: true
+            )
+            if output.distance < tolerance {
+              ret true
+            }
+          }
+        }
+      } else {
+        stack.add(value: nodeIndex + node.count)
+        nodeIndex = nodeIndex + 1
+        continue
+      }
+    }
+    if stack.length is 0 {
+      break
+    }
+    nodeIndex = stack.copyAtDefault(index: stack.length - 1)
+    stack.removeLast()
+  }
+  ret false
+}
+
+# The mover's segment as a two-point proxy (Box3D's
+# `(b3ShapeProxy){ &mover->center1, 2, 0.0f }`).
+func moverSegmentProxy(mover: view Capsule) ret ShapeProxy {
+  let points: List(Vec3) = List.create(Vec3, cap: 2)
+  points.add(value: mover.center1)
+  points.add(value: mover.center2)
+  ret ShapeProxy { points: points, radius: 0.0 }
+}
+
+# The plane a triangle pushes the mover out along, if the mover's segment
+# is within its radius of it (but not touching: a deep overlap gives none).
+func triangleMoverPlane(
+  planes: mod List(PlaneResult)
+  vertex1: view Vec3
+  vertex2: view Vec3
+  vertex3: view Vec3
+  segment: view ShapeProxy
+  mover: view Capsule
+  triangleIndex: view Int
+  materialIndex: view Int
+) {
+  let output: DistanceOutput = triangleDistance(
+    vertex1: vertex1
+    vertex2: vertex2
+    vertex3: vertex3
+    proxy: segment
+    useRadii: false
+  )
+  if output.distance is 0.0 {
+    # A deep overlap
+    ret
+  }
+  if output.distance <= mover.radius {
+    planes.add(value: PlaneResult {
+      plane: Plane { normal: output.normal, offset: mover.radius - output.distance }
+      point: output.pointA
+      triangleIndex: triangleIndex
+      childIndex: 0
+      materialIndex: materialIndex
+    })
+  }
+}
+
+# b3CollideMoverAndMesh: the planes of the front-facing triangles the
+# capsule `mover` touches, at most `capacity`.
+func collideMoverAndMesh(
+  planes: mod List(PlaneResult)
+  capacity: view Int
+  mesh: view Mesh
+  mover: view Capsule
+) ret Int {
+  if capacity is 0 {
+    ret 0
+  }
+  let segment: ShapeProxy = moverSegmentProxy(mover: mover)
+  let radius: Float = mover.radius
+  let moverCenter: Vec3 = lerp(from: mover.center1, to: mover.center2, alpha: 0.5)
+  let splatRadius: Vec3 = { x: radius, y: radius, z: radius }
+  let boundsMin: Vec3 = subtract(
+    left: minV(left: mover.center1, right: mover.center2)
+    right: splatRadius
+  )
+  let boundsMax: Vec3 = add(
+    left: maxV(left: mover.center1, right: mover.center2)
+    right: splatRadius
+  )
+
+  # A reflecting scale can swap min and max once unscaled
+  let meshScale: Vec3 = mesh.scale
+  let ccw: Bool = meshScale.x * meshScale.y * meshScale.z > 0.0
+  let invScale: Vec3 = inverseScale(scale: meshScale)
+  let temp1: Vec3 = multiply(left: invScale, right: boundsMin)
+  let temp2: Vec3 = multiply(left: invScale, right: boundsMax)
+  let invScaledBoundsMin: Vec3 = minV(left: temp1, right: temp2)
+  let invScaledBoundsMax: Vec3 = maxV(left: temp1, right: temp2)
+  let invScaledBoundsCenter: Vec3 = halfSum(left: invScaledBoundsMin, right: invScaledBoundsMax)
+  let invScaledBoundsExtent: Vec3 = subtract(left: invScaledBoundsMax, right: invScaledBoundsCenter)
+
+  let data: view MeshData => mesh.data
+  let stack: List(Int) = List.create(Int, cap: meshStackSize)
+  var nodeIndex: Int = 0
+  let startCount: Int = planes.length
+  loop planes.length - startCount < capacity {
+    let node: MeshNode = data.nodes.copyAtDefault(index: nodeIndex)
+    if testBoundsOverlap(
+      min1: node.lowerBound
+      max1: node.upperBound
+      min2: invScaledBoundsMin
+      max2: invScaledBoundsMax
+    ) {
+      if isLeafNode(node: node) {
+        loop var index: Int = 0, index < node.count, ++index {
+          let triangleIndex: Int = node.triangleOffset + index
+          let triangle: MeshTriangle = data.triangles.copyAtDefault(index: triangleIndex)
+          let vertex1: Vec3 = data.vertices.copyAtDefault(index: triangle.index1)
+          var vertex2: Vec3 = data.vertices.copyAtDefault(index: triangle.index2)
+          var vertex3: Vec3 = data.vertices.copyAtDefault(index: triangle.index3)
+          if ccw is false {
+            let swapped: Vec3 = vertex2
+            vertex2 = vertex3
+            vertex3 = swapped
+          }
+          if testBoundsTriangleOverlap(
+            nodeCenter: invScaledBoundsCenter
+            nodeExtent: invScaledBoundsExtent
+            vertex1: vertex1
+            vertex2: vertex2
+            vertex3: vertex3
+          ) {
+            # The distance in the scaled frame
+            let scaled1: Vec3 = multiply(left: meshScale, right: vertex1)
+            let scaled2: Vec3 = multiply(left: meshScale, right: vertex2)
+            let scaled3: Vec3 = multiply(left: meshScale, right: vertex3)
+            if signedVolume(
+              v1: scaled1
+              v2: scaled2
+              v3: scaled3
+              p: moverCenter
+            ) < 0.0 {
+              # The back side
+              continue
+            }
+            triangleMoverPlane(
+              planes: planes
+              vertex1: scaled1
+              vertex2: scaled2
+              vertex3: scaled3
+              segment: segment
+              mover: mover
+              triangleIndex: triangleIndex
+              materialIndex: data.materialIndices.copyAtDefault(index: triangleIndex)
+            )
+            if planes.length - startCount is capacity {
+              ret capacity
+            }
+          }
+        }
+      } else {
+        stack.add(value: nodeIndex + node.count)
+        nodeIndex = nodeIndex + 1
+        continue
+      }
+    }
+    if stack.length is 0 {
+      break
+    }
+    nodeIndex = stack.copyAtDefault(index: stack.length - 1)
+    stack.removeLast()
+  }
+  ret planes.length - startCount
+}
