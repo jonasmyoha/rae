@@ -4,9 +4,9 @@
 # 9f998c8): a fast body is swept against the static tree (a bullet also
 # against the kinematic and dynamic trees) and moved back to its first time
 # of impact. Box3D's query callback becomes an explicit query loop. Sensor
-# hits (P4d), the pre-solve callback and custom filter (P8) and compound,
-# mesh and height-field targets (their triangle sweeps, P5) are not here
-# yet: such a target is skipped.
+# hits (P4d) are here; mesh, height-field and compound targets sweep triangle
+# by triangle (TriangleTimeOfImpact). The pre-solve callback and custom
+# filter (P8) are not here yet.
 open Vec3
 open Quat
 open physics/Constants
@@ -27,6 +27,8 @@ open physics/broadPhase/BroadPhase
 open physics/dynamics/WorldTypes
 open physics/dynamics/Body
 open physics/dynamics/Shape
+open physics/dynamics/TriangleTimeOfImpact
+open physics/geometry/Compound
 open physics/dynamics/SolverSet
 open physics/dynamics/World
 open physics/dynamics/WorldBodies
@@ -43,19 +45,50 @@ func makeRelativeSweep(sim: view BodySim, base: view Vec3) ret Sweep {
   }
 }
 
-# b3ShapeTimeOfImpact for two convex shapes
+# b3ShapeTimeOfImpact: shape B (convex, the fast one) against shape A,
+# whose mesh, height-field and compound cases sweep triangle by triangle
+# (TriangleTimeOfImpact).
 func shapeTimeOfImpact(
+  world: view PhysicsWorld
   shapeA: view Shape
   shapeB: view Shape
-  hulls: view List(Hull)
   sweepA: view Sweep
   sweepB: view Sweep
   maxFraction: view Float
-  lengthUnitsPerMeter: view Float
 ) ret ToiOutput {
+  let lengthUnitsPerMeter: Float = world.lengthUnitsPerMeter
+  if shapeA.shapeType is ShapeType.compound {
+    if let compound: view CompoundData => world.compounds.viewAt(index: shapeA.compoundIndex) {
+      ret compoundTimeOfImpact(
+        shapeA: shapeA
+        compound: compound
+        shapeB: shapeB
+        hulls: world.hulls
+        meshes: world.meshes
+        heightFields: world.heightFields
+        sweepA: sweepA
+        sweepB: sweepB
+        maxFraction: maxFraction
+        lengthUnitsPerMeter: lengthUnitsPerMeter
+      )
+    }
+  }
+  if shapeA.shapeType is ShapeType.height or shapeA.shapeType is ShapeType.mesh {
+    ret meshTimeOfImpact(
+      shapeA: shapeA
+      shapeB: shapeB
+      hulls: world.hulls
+      meshes: world.meshes
+      heightFields: world.heightFields
+      sweepA: sweepA
+      sweepB: sweepB
+      maxFraction: maxFraction
+      lengthUnitsPerMeter: lengthUnitsPerMeter
+    )
+  }
   let input: ToiInput = {
-    proxyA: makeShapeProxy(shape: shapeA, hulls: hulls)
-    proxyB: makeShapeProxy(shape: shapeB, hulls: hulls)
+    proxyA: makeShapeProxy(shape: shapeA, hulls: world.hulls)
+    proxyB: makeShapeProxy(shape: shapeB, hulls: world.hulls)
     sweepA: sweepA
     sweepB: sweepB
     maxFraction: maxFraction
@@ -112,21 +145,15 @@ func continuousCandidate(
   if shouldBodiesCollide(bodyA: fastBody, bodyB: body) is false {
     ret fraction
   }
-  # A mesh, height-field or compound target needs b3ShapeTimeOfImpact's
-  # triangle sweep, not ported yet: never sweep it as a convex proxy
-  if shape.shapeType is ShapeType.mesh or shape.shapeType is ShapeType.height or shape.shapeType is ShapeType.compound {
-    ret fraction
-  }
   let sweepA: Sweep = makeRelativeSweep(sim: bodySim, base: base)
-  # Time of impact versus the shape
+  # Time of impact versus the shape (every shape type)
   let output: ToiOutput = shapeTimeOfImpact(
+    world: world
     shapeA: shape
     shapeB: fastShape
-    hulls: world.hulls
     sweepA: sweepA
     sweepB: sweep
     maxFraction: fraction
-    lengthUnitsPerMeter: world.lengthUnitsPerMeter
   )
   if isSensor {
     # Only a sensor hit sooner than the current solid hit counts
