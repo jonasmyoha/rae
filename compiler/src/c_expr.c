@@ -1767,14 +1767,25 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
         fprintf(out, " __collection%d = %s(((int64_t)%dLL)); ", temporaryId, createName, count);
         Str elementBase = get_base_type_name(elementType);
         bool elementIsAny = str_eq_cstr(elementBase, "Any") || str_eq_cstr(elementBase, "RaeAny");
+        // As the `let` lowering does: a String element moves into the list,
+        // so it is detached from the statement's string pool (an inner
+        // `{ "a {x}" }` otherwise kept an interpolation the pool flush freed),
+        // and a heap-owning local element is moved, not also dropped.
+        bool elementIsString = !elementIsAny && str_eq_cstr(elementBase, "String")
+            && !elementType->is_view && !elementType->is_mod && !elementType->is_opt;
+        bool elementOwnsHeap = type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, elementType, 0);
         for (const AstCollectionElement* element = expr->as.collection.elements; element; element = element->next) {
             ctx->has_expected_type = true;
             ctx->expected_type = *elementType;
             fprintf(out, "%s(&__collection%d, ", addName, temporaryId);
             if (elementIsAny) fprintf(out, "rae_any((");
+            if (elementIsString) fprintf(out, "rae_string_pool_take(");
             emit_expr(ctx, element->value, out, PREC_LOWEST, false, false);
+            if (elementIsString) fprintf(out, ")");
             if (elementIsAny) fprintf(out, "))");
             fprintf(out, "); ");
+            if (element->value && element->value->kind == AST_EXPR_IDENT && elementOwnsHeap)
+                mark_expr_moved_if_local(ctx, element->value);
         }
         fprintf(out, "__collection%d; })", temporaryId);
         ctx->has_expected_type = savedHasExpected;

@@ -310,7 +310,12 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
                 }
                 if (create_fd) register_function_specialization(ctx->compiler_ctx, create_fd, elem_type);
                 if (add_fd) register_function_specialization(ctx->compiler_ctx, add_fd, elem_type);
-                register_generic_type(ctx->compiler_ctx, &ctx->expected_type);
+                // A stable copy: the registry keeps the pointer, and
+                // ctx->expected_type is rewritten for every expression.
+                AstTypeRef* list_type = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
+                *list_type = ctx->expected_type;
+                list_type->next = NULL;
+                register_generic_type(ctx->compiler_ctx, list_type);
                 // A heap-owning element (another List) makes this list's drop
                 // cascade into the element's drop, so register the LIST drop
                 // specialization for this element type — resolved by CONTAINER
@@ -319,7 +324,12 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
                 // scan grabbed the wrong one and mis-registered it). This puts
                 // the inner list's drop forward decl before the outer drop
                 // body that calls it, for a nested `[[[..]]]` literal.
-                if (is_drop_target_type(elem_type)) {
+                // Every list a literal builds is dropped by its owner — for a
+                // nested literal that owner is the OUTER list's drop, which
+                // calls this level's drop per element even when this level's
+                // elements own nothing (`List(List(Point))` called an
+                // unregistered `List_drop<Point>`). So register it always.
+                {
                     Str list_base = get_base_type_name(&ctx->expected_type);
                     const AstFuncDecl* list_drop = find_drop_overload_for(ctx, list_base);
                     if (list_drop) register_function_specialization(ctx->compiler_ctx, list_drop, elem_type);

@@ -2129,6 +2129,24 @@ bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* 
 const char* g_emitted_spec_funcs[4096];
 static size_t g_emitted_spec_func_count = 0;
 
+static bool is_container_base(Str base) {
+  return str_eq_cstr(base, "List") || str_eq_cstr(base, "StringMap") || str_eq_cstr(base, "IntMap");
+}
+
+// The generic `drop` overload whose receiver is the container `base`.
+static const AstFuncDecl* find_container_drop(CompilerContext* ctx, Str base) {
+  for (size_t i = 0; i < ctx->all_decl_count; i++) {
+    const AstDecl* d = ctx->all_decls[i];
+    if (d->kind != AST_DECL_FUNC) continue;
+    if (!str_eq_cstr(d->as.func_decl.name, "drop")) continue;
+    if (!d->as.func_decl.generic_params) continue;
+    const AstParam* fp = d->as.func_decl.params;
+    if (!fp || !fp->type) continue;
+    if (str_eq(get_base_type_name(fp->type), base)) return &d->as.func_decl;
+  }
+  return NULL;
+}
+
 bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* f, const AstTypeRef* args, FILE* out) {
   // Specialized externs (sizeof(T)(), rae_ext_rae_buf_get(V), ...) have no
   // body and their call sites are inlined elsewhere — emitting an empty
@@ -2142,6 +2160,22 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
       if (strcmp(g_emitted_spec_funcs[i], mangled) == 0) return true;
   }
   if (g_emitted_spec_func_count < 4096) g_emitted_spec_funcs[g_emitted_spec_func_count++] = mangled;
+  // A container drop whose elements are containers calls the ELEMENT
+  // container's drop per element (Layer 5 below). That drop may be emitted
+  // later or not be forward-declared yet (a `List(List(Point))` made with
+  // `List.create` had no earlier mention of `List_drop<Point>`), so declare
+  // it here, at file scope; a repeated static declaration is harmless.
+  if (f->body && str_eq_cstr(f->name, "drop") && f->params && !f->params->next && args
+      && !args->is_opt && is_container_base(get_base_type_name(f->params->type))
+      && is_container_base(get_base_type_name(args)) && args->generic_args) {
+    const AstFuncDecl* nested_drop = find_container_drop(ctx, get_base_type_name(args));
+    if (nested_drop) {
+      register_function_specialization(ctx, nested_drop, args->generic_args);
+      fprintf(out, "RAE_UNUSED static void %s(%s* this);\n",
+              rae_mangle_specialized_function(ctx, nested_drop, args->generic_args),
+              rae_mangle_type_specialized(ctx, NULL, NULL, (AstTypeRef*)args));
+    }
+  }
   fprintf(out, "RAE_UNUSED static %s %s(", rt, mangled); emit_param_list(&tctx, f->params, out, false); fprintf(out, ") {\n");
   for (const AstParam* p = f->params; p; p = p->next) {
       if (tctx.local_count < 256) {
@@ -2213,19 +2247,7 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
             : rae_mangle_type_specialized(ctx, NULL, NULL, elem);
         bool elem_is_container = !elem_is_opt && (str_eq_cstr(ebase, "List") || str_eq_cstr(ebase, "StringMap") || str_eq_cstr(ebase, "IntMap"));
         // Find the per-T drop overload for nested containers.
-        const AstFuncDecl* nested_drop = NULL;
-        if (elem_is_container) {
-          for (size_t i = 0; i < ctx->all_decl_count; i++) {
-            const AstDecl* d = ctx->all_decls[i];
-            if (d->kind != AST_DECL_FUNC) continue;
-            if (!str_eq_cstr(d->as.func_decl.name, "drop")) continue;
-            if (!d->as.func_decl.generic_params) continue;
-            const AstParam* fp = d->as.func_decl.params;
-            if (!fp || !fp->type) continue;
-            Str fpb = get_base_type_name(fp->type);
-            if (str_eq(fpb, ebase)) { nested_drop = &d->as.func_decl; break; }
-          }
-        }
+        const AstFuncDecl* nested_drop = elem_is_container ? find_container_drop(ctx, ebase) : NULL;
         if (is_list) {
           fprintf(out, "  for (int64_t __i = 0; __i < this->length; __i++) {\n");
           fprintf(out, "    %s* __elem = (%s*)((char*)this->data + __i * sizeof(%s));\n",
