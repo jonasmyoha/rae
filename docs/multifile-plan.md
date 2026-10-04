@@ -1,6 +1,6 @@
 # Rae Multifile Build Plan (T008)
 
-> **Status:** `bin/rae run` now resolves both absolute (`"compiler/modules/foo"`) and relative (`"./ui/header"`, `"../shared/time"`) imports, and when a file contains no explicit imports the CLI automatically scans its directory tree for `.rae` files and includes them. The remaining tasks below focus on richer semantics and the `rae build` pipeline.
+> **Status (historical plan):** a project's own files are visible to each other without imports (the compiler scans the project tree, `docs/module-namespacing.md`), and `import` takes a package path (`import ui/Theme`). Relative imports (`"./ui/header"`, `"../shared/time"`) were supported once and are now rejected (2026-10-05). The rest of this plan is kept as history.
 
 ## Goals
 - Compile and bundle a Rae application that spans multiple `.rae` files without requiring manual concatenation.

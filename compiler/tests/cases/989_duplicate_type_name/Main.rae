@@ -1,12 +1,9 @@
-# Two modules (points/Left, points/Right) each declare `type Point`, and
-# neither opens the other. Type names are program-wide, so the program
+# Two project modules (points/Left, points/Right; visible without imports)
+# each declare `type Point`. Type names are program-wide, so the program
 # cannot load both: the compiler reports the second declaration and names
 # the first, instead of letting every `Point` mean the first one and failing
 # far away inside the second module ("unknown field 'label' in literal of
 # type 'Point'").
-import "./points/Left"
-import "./points/Right"
-
 func main() {
-  log("{Left.leftPoint().x}")
+  log("{leftPoint().x}")
 }
