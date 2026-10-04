@@ -208,6 +208,20 @@ static bool c_expr_is_moved_owned_local(const CFuncContext* ctx, const AstExpr* 
   return false;
 }
 
+// `ret text` of an owned String local into an `opt String` return: the ret
+// marked text moved, so its drop is skipped and the payload must take its
+// heap. Copying it orphaned the local: one leaked String per such return.
+static bool c_expr_is_moved_string_local(const CFuncContext* ctx, const AstExpr* expr) {
+  if (!ctx || !expr || expr->kind != AST_EXPR_IDENT) return false;
+  for (int i = (int)ctx->local_count - 1; i >= 0; i--) {
+    if (!str_eq(ctx->locals[i], expr->as.ident)) continue;
+    const AstTypeRef* type = ctx->local_type_refs[i];
+    if (!c_type_is_plain_string(type) || ctx->local_is_ptr[i]) return false;
+    return ctx->local_moved[i];
+  }
+  return false;
+}
+
 static bool c_expr_is_extern_opt_string_call(const AstExpr* expr) {
   if (!expr || (expr->kind != AST_EXPR_CALL && expr->kind != AST_EXPR_METHOD_CALL)
       || !expr->decl_link) return false;
@@ -389,7 +403,8 @@ void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
       /* opt String owns its boxed payload independently — always copy the
        * source String so list/map aliases and string-pool temporaries cannot
        * outlive or double-own it. */
-      fprintf(out, "__opt%d.value = rae_string_copy(", optn);
+      bool moves_local = c_expr_is_moved_string_local(ctx, value);
+      fprintf(out, moves_local ? "__opt%d.value = (" : "__opt%d.value = rae_string_copy(", optn);
       emit_expr(ctx, value, out, PREC_LOWEST, false, false);
       fprintf(out, "); ");
     } else {
@@ -517,7 +532,16 @@ static bool let_init_is_aliasing(CompilerContext* cctx, const AstStmt* let_s, Al
   if (!let_s) return false;
   const AstExpr* val = let_s->as.let_stmt.value;
   if (!val) return false;
-  if (val->kind == AST_EXPR_IDENT) return true; // bare-ident copy → alias
+  if (val->kind == AST_EXPR_IDENT) {
+    // `let s: String = ident` deep-copies (rae_string_copy, see the let
+    // emitter's deep_copy_string_ident): the local owns its heap, so
+    // returning it is an owned value. Calling it an alias made the caller
+    // clear is_owned and leak the copy (Filesystem.trimTrailingSeparators).
+    const AstTypeRef* lt = let_s->as.let_stmt.type;
+    if (lt && !lt->is_view && !lt->is_mod && !lt->is_opt
+        && str_eq_cstr(get_base_type_name(lt), "String")) return false;
+    return true; // bare-ident copy → alias
+  }
   if (val->kind == AST_EXPR_CALL) return call_is_aliasing(cctx, val, v);
   return false;
 }
