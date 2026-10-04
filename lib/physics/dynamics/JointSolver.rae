@@ -262,15 +262,6 @@ type JointReaction {
   torque: Float
 }
 
-# b3GetBodyTransform: body `bodyId`'s transform from the set it lives in.
-func bodyTransformOf(world: view PhysicsWorld, bodyId: view Int) ret Transform {
-  let body: Body = bodyAt(world: world, bodyId: bodyId)
-  if let set: view SolverSet => world.solverSets.viewAt(index: body.setIndex) {
-    ret set.bodySims.copyAtDefault(index: body.localIndex).transform
-  }
-  ret Transform { position: zeroVector(), rotation: quatIdentity() }
-}
-
 func jointReaction(
   sim: view JointSim
   world: view PhysicsWorld
@@ -324,8 +315,14 @@ func jointReaction(
     case JointType.sphericalJoint {
       let joint: SphericalJointData = sim.sphericalJoint
       linearImpulse = length(vector: joint.linearImpulse)
-      let transformA: Transform = bodyTransformOf(world: world, bodyId: sim.bodyIdA)
-      let transformB: Transform = bodyTransformOf(world: world, bodyId: sim.bodyIdB)
+      let transformA: Transform = bodyTransformOf(
+        world: world
+        body: bodyAt(world: world, bodyId: sim.bodyIdA)
+      )
+      let transformB: Transform = bodyTransformOf(
+        world: world
+        body: bodyAt(world: world, bodyId: sim.bodyIdB)
+      )
       let quatA: Quat = multiply(left: transformA.rotation, right: sim.localFrameA.rotation)
       let quatB: Quat = multiply(left: transformB.rotation, right: sim.localFrameB.rotation)
       # The cone axis is the z-axis of body A
