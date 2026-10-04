@@ -1,0 +1,855 @@
+# The contact manifold of a triangle and a hull (b3CollideTriangleAndHull
+# and its helpers, Box3D's triangle_manifold.c at 9f998c8): the separating
+# axis test between the triangle (in the hull's frame) and the hull picks
+# the triangle face, a hull face or an edge pair; the SAT cache lets the
+# next step try last step's feature first; GJK is the fallback when SAT
+# finds no point within the speculative distance. Box3D's operation order is
+# kept exactly; checked bit for bit against the oracle in fixture 970.
+import Math
+open Vec3
+open physics/Constants
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/TransformMath
+open physics/math/SegmentMath
+open physics/math/PlaneMath
+open physics/geometry/QueryTypes
+open physics/geometry/Hull
+open physics/collision/Simplex
+open physics/collision/Distance
+open physics/collision/Manifold
+open physics/collision/SeparatingAxis
+open physics/collision/TriangleManifold
+
+func trianglePointList(triangle: view TriangleData) ret List(Vec3) {
+  let points: List(Vec3) = { triangle.v1, triangle.v2, triangle.v3 }
+  ret points
+}
+
+func triangleEdgeList(triangle: view TriangleData) ret List(Vec3) {
+  let edges: List(Vec3) = { triangle.e1, triangle.e2, triangle.e3 }
+  ret edges
+}
+
+# b3GetTriangleSupport
+func triangleSupport(points: view List(Vec3), direction: view Vec3) ret Int {
+  var index: Int = 0
+  var distance: Float = dot(left: points.copyAtDefault(index: 0), right: direction)
+  let d1: Float = dot(left: points.copyAtDefault(index: 1), right: direction)
+  if d1 > distance {
+    distance = d1
+    index = 1
+  }
+  let d2: Float = dot(left: points.copyAtDefault(index: 2), right: direction)
+  if d2 > distance {
+    ret 2
+  }
+  ret index
+}
+
+# b3QueryTriangleFace
+func queryTriangleFace(triangle: view TriangleData, hull: view Hull) ret SeparatingAxis {
+  let plane: Plane = triangle.plane
+  let vertexIndex: Int = findHullSupportVertex(hull: hull, direction: negate(vector: plane.normal))
+  let support: Vec3 = hullPoint(hull: hull, index: vertexIndex)
+  ret SeparatingAxis {
+    normal: plane.normal
+    separation: planeSeparation(plane: plane, point: support)
+    indexA: 0
+    indexB: vertexIndex
+    kind: SeparatingFeature.faceAxisA
+  }
+}
+
+# b3QueryHullFace
+func queryHullFace(triangle: view TriangleData, hull: view Hull) ret SeparatingAxis {
+  let trianglePoints: List(Vec3) = trianglePointList(triangle: triangle)
+  var maxNormal: Vec3 = zeroVector()
+  var maxFaceSeparation: Float = -infinity()
+  var maxFaceIndex: Int = -1
+  var maxVertexIndex: Int = -1
+  let faceCount: Int = hullFaceCount(hull: hull)
+  loop var faceIndex: Int = 0, faceIndex < faceCount, ++faceIndex {
+    let plane: Plane = hullPlane(hull: hull, index: faceIndex)
+    let vertexIndex: Int = triangleSupport(
+      points: trianglePoints
+      direction: negate(vector: plane.normal)
+    )
+    let support: Vec3 = trianglePoints.copyAtDefault(index: vertexIndex)
+    let separation: Float = planeSeparation(plane: plane, point: support)
+    if separation > maxFaceSeparation {
+      maxNormal = plane.normal
+      maxFaceSeparation = separation
+      maxFaceIndex = faceIndex
+      maxVertexIndex = vertexIndex
+    }
+  }
+  # The normal points from the triangle to the hull
+  ret SeparatingAxis {
+    normal: negate(vector: maxNormal)
+    separation: maxFaceSeparation
+    indexA: maxVertexIndex
+    indexB: maxFaceIndex
+    kind: SeparatingFeature.faceAxisB
+  }
+}
+
+# b3QueryTriangleAndHullEdges
+func queryTriangleAndHullEdges(triangle: view TriangleData, hull: view Hull) ret SeparatingAxis {
+  var result: SeparatingAxis = {
+    normal: zeroVector()
+    separation: -infinity()
+    indexA: -1
+    indexB: -1
+    kind: SeparatingFeature.edgePairAxis
+  }
+  let trianglePoints: List(Vec3) = trianglePointList(triangle: triangle)
+  let triangleEdges: List(Vec3) = triangleEdgeList(triangle: triangle)
+  let triangleNormal: Vec3 = triangle.plane.normal
+  let edgeCount: Int = hullEdgeCount(hull: hull)
+  let squaredTolerance: Float = 0.005 * 0.005
+
+  # Each edge with its twin: the even half-edges
+  loop var pairIndex: Int = 0, 2 * pairIndex < edgeCount, ++pairIndex {
+    let i: Int = 2 * pairIndex
+    let edge: HullHalfEdge = hullEdge(hull: hull, index: i)
+    let twin: HullHalfEdge = hullEdge(hull: hull, index: i + 1)
+    let hullPointValue: Vec3 = hullPoint(hull: hull, index: edge.origin)
+    let hullEdgeVector: Vec3 = subtract(
+      left: hullPoint(hull: hull, index: twin.origin)
+      right: hullPointValue
+    )
+    let hullNormal1: Vec3 = hullPlane(hull: hull, index: edge.face).normal
+    let hullNormal2: Vec3 = hullPlane(hull: hull, index: twin.face).normal
+
+    loop var j: Int = 0, j < 3, ++j {
+      let triangleEdge: Vec3 = triangleEdges.copyAtDefault(index: j)
+      let cab: Float = dot(left: hullNormal1, right: triangleEdge)
+      let dab: Float = dot(left: hullNormal2, right: triangleEdge)
+      let bcd: Float = dot(left: triangleNormal, right: hullEdgeVector)
+      if cab * dab >= 0.0 or cab * bcd <= 0.0 {
+        continue
+      }
+      # Nearly parallel edges give separations at the noise floor
+      if maxFloat(left: cab * cab, right: dab * dab) < squaredTolerance * lengthSquared(
+        vector: triangleEdge
+      ) {
+        continue
+      }
+      # The normal points out of the hull by construction
+      let t: Float = cab / (cab - dab)
+      let axis: Vec3 = normalize(vector: lerp(from: hullNormal1, to: hullNormal2, alpha: t))
+      let separation: Float = dot(
+        left: axis
+        right: subtract(left: trianglePoints.copyAtDefault(index: j), right: hullPointValue)
+      )
+      if separation > result.separation {
+        # Flipped to point from the triangle to the hull
+        result.normal = negate(vector: axis)
+        result.separation = separation
+        result.indexA = j
+        result.indexB = i
+      }
+    }
+  }
+  ret result
+}
+
+# The cache as Box3D stores it: the indices are uint8_t.
+func saveSatCache(
+  cache: mod SatCache
+  separation: view Float
+  kind: view SeparatingFeature
+  indexA: view Int
+  indexB: view Int
+) {
+  cache.separation = separation
+  cache.kind = kind
+  cache.indexA = indexA bitand 255
+  cache.indexB = indexB bitand 255
+}
+
+# b3CollideHullFace: a hull face is the reference, the triangle the incident
+# polygon clipped against its side planes.
+func collideHullFace(
+  manifold: mod LocalManifold
+  triangle: view TriangleData
+  hull: view Hull
+  query: view SeparatingAxis
+  cache: mod SatCache
+  enableSpeculative: view Bool
+  lengthUnitsPerMeter: view Float
+) ret Float {
+  manifold.pointCount = 0
+  let refPlane: Plane = hullPlane(hull: hull, index: query.indexB)
+
+  # The clip polygon from the triangle face (the incident face)
+  var input: List(ClipVertex) = List.create(ClipVertex, cap: maxClipPoints)
+  var output: List(ClipVertex) = List.create(ClipVertex, cap: maxClipPoints)
+  input.add(value: ClipVertex {
+    position: triangle.v1
+    separation: planeSeparation(plane: refPlane, point: triangle.v1)
+    pair: makeFeaturePair(
+      owner1: featureShapeB
+      index1: 2
+      owner2: featureShapeB
+      index2: 0
+    )
+  })
+  input.add(value: ClipVertex {
+    position: triangle.v2
+    separation: planeSeparation(plane: refPlane, point: triangle.v2)
+    pair: makeFeaturePair(
+      owner1: featureShapeB
+      index1: 0
+      owner2: featureShapeB
+      index2: 1
+    )
+  })
+  input.add(value: ClipVertex {
+    position: triangle.v3
+    separation: planeSeparation(plane: refPlane, point: triangle.v3)
+    pair: makeFeaturePair(
+      owner1: featureShapeB
+      index1: 1
+      owner2: featureShapeB
+      index2: 2
+    )
+  })
+  var pointCount: Int = 3
+
+  # Clipped against the side planes of the reference face
+  let faceEdge: Int = hull.faces.copyAtDefault(index: query.indexB).edge
+  var edgeIndex: Int = faceEdge
+  loop true {
+    let edge: HullHalfEdge = hullEdge(hull: hull, index: edgeIndex)
+    let nextEdgeIndex: Int = edge.next
+    let next: HullHalfEdge = hullEdge(hull: hull, index: nextEdgeIndex)
+    let vertex1: Vec3 = hullPoint(hull: hull, index: edge.origin)
+    let vertex2: Vec3 = hullPoint(hull: hull, index: next.origin)
+    let tangent: Vec3 = normalize(vector: subtract(left: vertex2, right: vertex1))
+    let binormal: Vec3 = cross(left: tangent, right: refPlane.normal)
+    let clipPlane: Plane = planeFromNormalAndPoint(normal: binormal, point: vertex1)
+    pointCount = clipPolygon(
+      out: output
+      polygon: input
+      clipPlane: clipPlane
+      edge: edgeIndex
+      refPlane: refPlane
+    )
+    if pointCount < 3 {
+      # A stale cache
+      cache = emptySatCache()
+      ret query.separation
+    }
+    let swapped: List(ClipVertex) = input
+    input = output
+    output = swapped
+    edgeIndex = nextEdgeIndex
+    if edgeIndex is faceEdge {
+      break
+    }
+  }
+
+  pointCount = minInt(left: pointCount, right: manifoldCapacity(manifold: manifold))
+  var minSeparation: Float = floatMax
+  var finalPointCount: Int = 0
+  loop var i: Int = 0, i < pointCount, ++i {
+    let clipPoint: ClipVertex = input.copyAtDefault(index: i)
+    minSeparation = minFloat(left: minSeparation, right: clipPoint.separation)
+    if enableSpeculative is false and clipPoint.separation > 0.0 {
+      continue
+    }
+    # The point moved onto the hull face, for better culling
+    let point: Vec3 = mulSub(
+      base: clipPoint.position
+      scale: clipPoint.separation
+      vector: refPlane.normal
+    )
+    writeManifoldPoint(
+      manifold: manifold
+      index: finalPointCount
+      point: point
+      separation: clipPoint.separation
+      pair: flipPair(pair: clipPoint.pair)
+    )
+    finalPointCount = finalPointCount + 1
+  }
+
+  var speculative: Float = 0.0
+  if enableSpeculative {
+    speculative = speculativeDistance(lengthUnitsPerMeter: lengthUnitsPerMeter)
+  }
+  if minSeparation > speculative {
+    # This can occur with a stale SAT cache
+    manifold.pointCount = 0
+    cache = emptySatCache()
+    ret minSeparation
+  }
+
+  manifold.pointCount = finalPointCount
+  manifold.normal = negate(vector: refPlane.normal)
+  manifold.feature = featureHullFace
+  saveSatCache(
+    cache: cache
+    separation: minSeparation
+    kind: SeparatingFeature.faceAxisB
+    indexA: query.indexA
+    indexB: query.indexB
+  )
+  ret minSeparation
+}
+
+# b3CollideTriangleFace: the triangle is the reference, the hull's incident
+# face clipped against the triangle's side planes.
+func collideTriangleFace(
+  manifold: mod LocalManifold
+  triangle: view TriangleData
+  hull: view Hull
+  query: view SeparatingAxis
+  cache: mod SatCache
+  enableSpeculative: view Bool
+  lengthUnitsPerMeter: view Float
+) ret Float {
+  let refPlane: Plane = triangle.plane
+  let incidentFace: Int = findIncidentFace(
+    hull: hull
+    refNormal: refPlane.normal
+    vertexIndex: query.indexB
+  )
+
+  # The clip polygon from the incident face
+  var input: List(ClipVertex) = List.create(ClipVertex, cap: 2 * maxClipPoints)
+  var output: List(ClipVertex) = List.create(ClipVertex, cap: 2 * maxClipPoints)
+  let faceEdge: Int = hull.faces.copyAtDefault(index: incidentFace).edge
+  var hullEdgeIndex: Int = faceEdge
+  loop true {
+    let edge: HullHalfEdge = hullEdge(hull: hull, index: hullEdgeIndex)
+    let nextEdgeIndex: Int = edge.next
+    let next: HullHalfEdge = hullEdge(hull: hull, index: nextEdgeIndex)
+    let point: Vec3 = hullPoint(hull: hull, index: next.origin)
+    input.add(value: ClipVertex {
+      position: point
+      separation: planeSeparation(plane: refPlane, point: point)
+      pair: makeFeaturePair(
+        owner1: featureShapeB
+        index1: hullEdgeIndex
+        owner2: featureShapeB
+        index2: nextEdgeIndex
+      )
+    })
+    hullEdgeIndex = nextEdgeIndex
+    if hullEdgeIndex is faceEdge or input.length >= 2 * maxClipPoints {
+      break
+    }
+  }
+  var pointCount: Int = input.length
+
+  # Clipped against the side planes of the triangle
+  let trianglePoints: List(Vec3) = trianglePointList(triangle: triangle)
+  let triangleEdges: List(Vec3) = triangleEdgeList(triangle: triangle)
+  loop var i: Int = 0, i < 3 and pointCount > 0, ++i {
+    let sideNormal: Vec3 = normalize(
+      vector: cross(left: triangleEdges.copyAtDefault(index: i), right: refPlane.normal)
+    )
+    let clipPlane: Plane = planeFromNormalAndPoint(
+      normal: sideNormal
+      point: trianglePoints.copyAtDefault(index: i)
+    )
+    pointCount = clipPolygon(
+      out: output
+      polygon: input
+      clipPlane: clipPlane
+      edge: i
+      refPlane: refPlane
+    )
+    let swapped: List(ClipVertex) = input
+    input = output
+    output = swapped
+  }
+
+  if pointCount is 0 {
+    # The triangle face clipped away
+    cache = emptySatCache()
+    ret floatMax
+  }
+
+  pointCount = minInt(left: pointCount, right: manifoldCapacity(manifold: manifold))
+  var minSeparation: Float = floatMax
+  var finalPointCount: Int = 0
+  loop var i: Int = 0, i < pointCount, ++i {
+    let clipPoint: ClipVertex = input.copyAtDefault(index: i)
+    minSeparation = minFloat(left: minSeparation, right: clipPoint.separation)
+    if enableSpeculative is false and clipPoint.separation > 0.0 {
+      continue
+    }
+    writeManifoldPoint(
+      manifold: manifold
+      index: finalPointCount
+      point: clipPoint.position
+      separation: clipPoint.separation
+      pair: clipPoint.pair
+    )
+    finalPointCount = finalPointCount + 1
+  }
+
+  var speculative: Float = 0.0
+  if enableSpeculative {
+    speculative = speculativeDistance(lengthUnitsPerMeter: lengthUnitsPerMeter)
+  }
+  if minSeparation >= speculative {
+    # The shapes moved apart while a cached axis was reused
+    cache = emptySatCache()
+    ret minSeparation
+  }
+
+  manifold.pointCount = finalPointCount
+  manifold.normal = refPlane.normal
+  manifold.feature = featureTriangleFace
+  saveSatCache(
+    cache: cache
+    separation: minSeparation
+    kind: SeparatingFeature.faceAxisA
+    indexA: query.indexA
+    indexB: query.indexB
+  )
+  ret minSeparation
+}
+
+# b3CollideTriangleAndHullEdges: one point from the closest points of a
+# triangle edge and a hull edge.
+func collideTriangleAndHullEdges(
+  manifold: mod LocalManifold
+  trianglePoint: view Vec3
+  triangleEdge: view Vec3
+  hull: view Hull
+  query: view SeparatingAxis
+  cache: mod SatCache
+) {
+  let edgeB: HullHalfEdge = hullEdge(hull: hull, index: query.indexB)
+  let twinB: HullHalfEdge = hullEdge(hull: hull, index: edgeB.twin)
+  let pB: Vec3 = hullPoint(hull: hull, index: edgeB.origin)
+  let qB: Vec3 = hullPoint(hull: hull, index: twinB.origin)
+  let eB: Vec3 = subtract(left: qB, right: pB)
+
+  # The closest points of the infinite edge lines
+  let result: SegmentDistanceResult = lineDistance(
+    point1: trianglePoint
+    direction1: triangleEdge
+    point2: pB
+    direction2: eB
+  )
+  if manifoldCapacity(manifold: manifold) is 0 or result.fraction1 < 0.0 or 1.0 < result.fraction1 or result.fraction2 < 0.0 or 1.0 < result.fraction2 {
+    # An invalid edge pair: no points
+    cache = emptySatCache()
+    ret
+  }
+
+  let separation: Float = dot(left: query.normal, right: subtract(left: pB, right: trianglePoint))
+  let point: Vec3 = scale(scale: 0.5, vector: add(left: result.point1, right: result.point2))
+  writeManifoldPoint(
+    manifold: manifold
+    index: 0
+    point: point
+    separation: separation
+    pair: makeFeaturePair(
+      owner1: featureShapeA
+      index1: query.indexA
+      owner2: featureShapeB
+      index2: query.indexB
+    )
+  )
+  saveSatCache(
+    cache: cache
+    separation: separation
+    kind: SeparatingFeature.edgePairAxis
+    indexA: query.indexA
+    indexB: query.indexB
+  )
+  manifold.normal = query.normal
+  manifold.pointCount = 1
+  manifold.feature = edgeFeature(index: query.indexA)
+}
+
+# The cached-axis attempts of b3CollideTriangleAndHull. True when the cache
+# settled the call (separated, or contact points rebuilt from it); otherwise
+# the cache is invalidated and the full test follows.
+func tryTriangleHullCache(
+  manifold: mod LocalManifold
+  triangle: view TriangleData
+  hull: view Hull
+  cache: mod SatCache
+  enableSpeculative: view Bool
+  lengthUnitsPerMeter: view Float
+) ret Bool {
+  let plane: Plane = triangle.plane
+  let trianglePoints: List(Vec3) = trianglePointList(triangle: triangle)
+  let triangleEdges: List(Vec3) = triangleEdgeList(triangle: triangle)
+  let slop: Float = linearSlop(lengthUnitsPerMeter: lengthUnitsPerMeter)
+  var speculative: Float = 0.0
+  if enableSpeculative {
+    speculative = speculativeDistance(lengthUnitsPerMeter: lengthUnitsPerMeter)
+  }
+
+  if cache.kind is SeparatingFeature.faceAxisA {
+    let vertexIndex: Int = findHullSupportVertex(
+      hull: hull
+      direction: negate(vector: plane.normal)
+    )
+    let separation: Float = planeSeparation(
+      plane: plane
+      point: hullPoint(hull: hull, index: vertexIndex)
+    )
+    if separation > speculative {
+      # Cache hit: separated
+      ret true
+    }
+    let faceQuery: SeparatingAxis = {
+      normal: plane.normal
+      separation: separation
+      indexA: cache.indexA
+      indexB: vertexIndex
+      kind: SeparatingFeature.faceAxisA
+    }
+    # The cache is read but not modified
+    var localCache: SatCache = cache
+    let clippedSeparation: Float = collideTriangleFace(
+      manifold: manifold
+      triangle: triangle
+      hull: hull
+      query: faceQuery
+      cache: localCache
+      enableSpeculative: enableSpeculative
+      lengthUnitsPerMeter: lengthUnitsPerMeter
+    )
+    if manifold.pointCount > 0 and absFloat(value: cache.separation - clippedSeparation) < slop {
+      # Cache hit: contact points
+      ret true
+    }
+    manifold.pointCount = 0
+    cache = emptySatCache()
+  } else if cache.kind is SeparatingFeature.faceAxisB {
+    let hullFacePlane: Plane = hullPlane(hull: hull, index: cache.indexB)
+
+    # The triangle's support point
+    var vertexIndex: Int = 0
+    var distance: Float = -dot(left: triangle.v1, right: hullFacePlane.normal)
+    loop var i: Int = 1, i < 3, ++i {
+      let d: Float = -dot(left: trianglePoints.copyAtDefault(index: i), right: hullFacePlane.normal)
+      if d > distance {
+        distance = d
+        vertexIndex = i
+      }
+    }
+    let support: Vec3 = trianglePoints.copyAtDefault(index: vertexIndex)
+    let separation: Float = planeSeparation(plane: hullFacePlane, point: support)
+    if separation > speculative {
+      ret true
+    }
+
+    # A deep overlap may lead to an invalid cache: not persisted
+    let isDeep: Bool = separation < -2.0 * slop
+    if isDeep is false {
+      let faceQuery: SeparatingAxis = {
+        normal: negate(vector: hullFacePlane.normal)
+        separation: separation
+        indexA: vertexIndex
+        indexB: cache.indexB
+        kind: SeparatingFeature.faceAxisB
+      }
+      var localCache: SatCache = cache
+      let clippedSeparation: Float = collideHullFace(
+        manifold: manifold
+        triangle: triangle
+        hull: hull
+        query: faceQuery
+        cache: localCache
+        enableSpeculative: enableSpeculative
+        lengthUnitsPerMeter: lengthUnitsPerMeter
+      )
+      if manifold.pointCount > 0 and absFloat(value: cache.separation - clippedSeparation) < slop {
+        ret true
+      }
+    }
+    manifold.pointCount = 0
+    cache = emptySatCache()
+  } else if cache.kind is SeparatingFeature.edgePairAxis {
+    let indexA: Int = cache.indexA
+    let triPoint: Vec3 = trianglePoints.copyAtDefault(index: indexA)
+    let triEdge: Vec3 = triangleEdges.copyAtDefault(index: indexA)
+    let indexB: Int = cache.indexB
+    let edge2: HullHalfEdge = hullEdge(hull: hull, index: indexB)
+    let twin2: HullHalfEdge = hullEdge(hull: hull, index: indexB + 1)
+    let hullPointValue: Vec3 = hullPoint(hull: hull, index: edge2.origin)
+    let hullEdgeVector: Vec3 = subtract(
+      left: hullPoint(hull: hull, index: twin2.origin)
+      right: hullPointValue
+    )
+    let hullNormal1: Vec3 = hullPlane(hull: hull, index: edge2.face).normal
+    let hullNormal2: Vec3 = hullPlane(hull: hull, index: twin2.face).normal
+
+    # Is the edge pair still a Minkowski face?
+    let cab: Float = dot(left: hullNormal1, right: triEdge)
+    let dab: Float = dot(left: hullNormal2, right: triEdge)
+    let bcd: Float = dot(left: plane.normal, right: hullEdgeVector)
+    if cab * dab < 0.0 and cab * bcd > 0.0 {
+      let squaredTolerance: Float = 0.005 * 0.005
+      if maxFloat(left: cab * cab, right: dab * dab) >= squaredTolerance * lengthSquared(
+        vector: triEdge
+      ) {
+        let t: Float = cab / (cab - dab)
+        let axis: Vec3 = normalize(vector: lerp(from: hullNormal1, to: hullNormal2, alpha: t))
+        let separation: Float = dot(
+          left: axis
+          right: subtract(left: triPoint, right: hullPointValue)
+        )
+        if separation > speculative {
+          ret true
+        }
+        if absFloat(value: cache.separation - separation) < slop {
+          # Rebuild the contact from last step's features
+          let edgeQuery: SeparatingAxis = {
+            normal: negate(vector: axis)
+            separation: separation
+            indexA: indexA
+            indexB: indexB
+            kind: SeparatingFeature.edgePairAxis
+          }
+          var localCache: SatCache = cache
+          collideTriangleAndHullEdges(
+            manifold: manifold
+            trianglePoint: triPoint
+            triangleEdge: triEdge
+            hull: hull
+            query: edgeQuery
+            cache: localCache
+          )
+          if manifold.pointCount > 0 {
+            ret true
+          }
+        }
+      }
+    }
+    cache = emptySatCache()
+  } else if cache.kind is SeparatingFeature.manualFaceAxisA {
+    let query: SeparatingAxis = queryTriangleFace(triangle: triangle, hull: hull)
+    collideTriangleFace(
+      manifold: manifold
+      triangle: triangle
+      hull: hull
+      query: query
+      cache: cache
+      enableSpeculative: enableSpeculative
+      lengthUnitsPerMeter: lengthUnitsPerMeter
+    )
+    ret true
+  } else if cache.kind is SeparatingFeature.manualFaceAxisB {
+    let query: SeparatingAxis = queryHullFace(triangle: triangle, hull: hull)
+    collideHullFace(
+      manifold: manifold
+      triangle: triangle
+      hull: hull
+      query: query
+      cache: cache
+      enableSpeculative: enableSpeculative
+      lengthUnitsPerMeter: lengthUnitsPerMeter
+    )
+    ret true
+  } else if cache.kind is SeparatingFeature.manualEdgePairAxis {
+    let query: SeparatingAxis = queryTriangleAndHullEdges(triangle: triangle, hull: hull)
+    if query.indexA is not -1 {
+      collideTriangleAndHullEdges(
+        manifold: manifold
+        trianglePoint: trianglePoints.copyAtDefault(index: query.indexA)
+        triangleEdge: triangleEdges.copyAtDefault(index: query.indexA)
+        hull: hull
+        query: query
+        cache: cache
+      )
+    }
+    ret true
+  }
+  ret false
+}
+
+# b3CollideTriangleAndHull: the triangle in the hull's frame.
+func collideTriangleAndHull(
+  manifold: mod LocalManifold
+  v1: view Vec3
+  v2: view Vec3
+  v3: view Vec3
+  triangleFlags: view Int
+  hull: view Hull
+  cache: mod SatCache
+  enableSpeculative: view Bool
+  lengthUnitsPerMeter: view Float
+) {
+  manifold.pointCount = 0
+  manifold.feature = featureNone
+  if manifoldCapacity(manifold: manifold) < 4 {
+    ret
+  }
+
+  let trianglePlane: Plane = planeFromPoints(point1: v1, point2: v2, point3: v3)
+  let slop: Float = linearSlop(lengthUnitsPerMeter: lengthUnitsPerMeter)
+
+  let offset: Float = planeSeparation(plane: trianglePlane, point: hull.center)
+  if cache.kind is SeparatingFeature.backsideAxis {
+    # Hysteresis against jitter on wavy meshes
+    if absFloat(value: cache.separation - offset) < slop {
+      ret
+    }
+    cache.kind = SeparatingFeature.invalidAxis
+  }
+
+  if offset < -slop {
+    # Cull back side collision; the offset is cached for hysteresis
+    cache.kind = SeparatingFeature.backsideAxis
+    cache.separation = offset
+    ret
+  }
+
+  let triangle: TriangleData = {
+    v1: v1
+    v2: v2
+    v3: v3
+    e1: subtract(left: v2, right: v1)
+    e2: subtract(left: v3, right: v2)
+    e3: subtract(left: v1, right: v3)
+    plane: trianglePlane
+    flags: triangleFlags
+  }
+  let trianglePoints: List(Vec3) = trianglePointList(triangle: triangle)
+  let triangleEdges: List(Vec3) = triangleEdgeList(triangle: triangle)
+  var speculative: Float = 0.0
+  if enableSpeculative {
+    speculative = speculativeDistance(lengthUnitsPerMeter: lengthUnitsPerMeter)
+  }
+  cache.hit = 1
+
+  if tryTriangleHullCache(
+    manifold: manifold
+    triangle: triangle
+    hull: hull
+    cache: cache
+    enableSpeculative: enableSpeculative
+    lengthUnitsPerMeter: lengthUnitsPerMeter
+  ) {
+    ret
+  }
+
+  # Cache miss
+  cache.hit = 0
+
+  # The axis of minimum penetration
+  let faceQueryA: SeparatingAxis = queryTriangleFace(triangle: triangle, hull: hull)
+  if faceQueryA.separation > speculative {
+    saveSatCache(
+      cache: cache
+      separation: faceQueryA.separation
+      kind: SeparatingFeature.faceAxisA
+      indexA: faceQueryA.indexA
+      indexB: faceQueryA.indexB
+    )
+    ret
+  }
+  let faceQueryB: SeparatingAxis = queryHullFace(triangle: triangle, hull: hull)
+  if faceQueryB.separation > speculative {
+    saveSatCache(
+      cache: cache
+      separation: faceQueryB.separation
+      kind: SeparatingFeature.faceAxisB
+      indexA: faceQueryB.indexA
+      indexB: faceQueryB.indexB
+    )
+    ret
+  }
+  let edgeQuery: SeparatingAxis = queryTriangleAndHullEdges(triangle: triangle, hull: hull)
+  if edgeQuery.separation > speculative {
+    saveSatCache(
+      cache: cache
+      separation: edgeQuery.separation
+      kind: SeparatingFeature.edgePairAxis
+      indexA: edgeQuery.indexA
+      indexB: edgeQuery.indexB
+    )
+    ret
+  }
+
+  # A hull face significantly opposed to the triangle face is not admitted
+  # (ghost collisions)
+  var clipSeparation: Float = 0.0
+  let pushingDown: Bool = dot(left: faceQueryB.normal, right: trianglePlane.normal) < -0.25
+  if faceQueryB.separation >= faceQueryA.separation and pushingDown is false {
+    clipSeparation = collideHullFace(
+      manifold: manifold
+      triangle: triangle
+      hull: hull
+      query: faceQueryB
+      cache: cache
+      enableSpeculative: enableSpeculative
+      lengthUnitsPerMeter: lengthUnitsPerMeter
+    )
+  } else {
+    clipSeparation = collideTriangleFace(
+      manifold: manifold
+      triangle: triangle
+      hull: hull
+      query: faceQueryA
+      cache: cache
+      enableSpeculative: enableSpeculative
+      lengthUnitsPerMeter: lengthUnitsPerMeter
+    )
+  }
+
+  # An edge axis?
+  if edgeQuery.indexA is not -1 {
+    # Aligned axes can give a garbage edge separation; a face axis with a
+    # positive separation may have no points
+    let maxFaceSeparation: Float = maxFloat(
+      left: faceQueryA.separation
+      right: faceQueryB.separation
+    )
+    let noPoints: Bool = manifold.pointCount is 0 and edgeQuery.separation > maxFaceSeparation
+    let onePoint: Bool = manifold.pointCount is 1 and edgeQuery.separation > clipSeparation + slop
+    if noPoints or onePoint {
+      manifold.pointCount = 0
+      collideTriangleAndHullEdges(
+        manifold: manifold
+        trianglePoint: trianglePoints.copyAtDefault(index: edgeQuery.indexA)
+        triangleEdge: triangleEdges.copyAtDefault(index: edgeQuery.indexA)
+        hull: hull
+        query: edgeQuery
+        cache: cache
+      )
+    }
+  }
+
+  # With the speculative distance SAT may find no valid points: GJK, which
+  # prevents tunneling in rare cases
+  if manifold.pointCount is 0 {
+    var simplexCache: SimplexCache = emptySimplexCache()
+    let output: DistanceOutput = proxyDistance(
+      proxyA: makeProxy(points: trianglePoints, radius: 0.0)
+      proxyB: makeProxy(points: hull.points, radius: 0.0)
+      transform: transformIdentity()
+      useRadii: false
+      cache: simplexCache
+    )
+    if output.distance > 0.0 {
+      manifold.pointCount = 1
+      manifold.feature = triangleFeatureOf(cache: simplexCache)
+      manifold.normal = output.normal
+      # The feature pair is not accurate, which may not matter
+      writeManifoldPoint(
+        manifold: manifold
+        index: 0
+        point: output.pointB
+        separation: output.distance
+        pair: singleFeaturePair()
+      )
+    }
+    # No way to cache this
+    cache = emptySatCache()
+  }
+}
