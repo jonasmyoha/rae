@@ -262,6 +262,61 @@ func createRevoluteJoint(world: mod PhysicsWorld, def: view RevoluteJointDef) re
   ret jointHandle(world: world, jointId: jointId)
 }
 
+# b3CreatePrismaticJoint
+func createPrismaticJoint(world: mod PhysicsWorld, def: view PrismaticJointDef) ret JointId {
+  var sim: JointSim = zeroJointSim()
+  var data: PrismaticJointData = zeroPrismaticJointData()
+  data.hertz = def.hertz
+  data.dampingRatio = def.dampingRatio
+  data.targetTranslation = def.targetTranslation
+  data.lowerTranslation = def.lowerTranslation
+  data.upperTranslation = def.upperTranslation
+  data.maxMotorForce = def.maxMotorForce
+  data.motorSpeed = def.motorSpeed
+  data.enableSpring = def.enableSpring
+  data.enableLimit = def.enableLimit
+  data.enableMotor = def.enableMotor
+  sim.prismaticJoint = data
+  let jointId: Int = createJoint(
+    world: world
+    def: def.base
+    jointType: JointType.prismaticJoint
+    sim: sim
+  )
+  ret jointHandle(world: world, jointId: jointId)
+}
+
+# b3CreateWheelJoint
+func createWheelJoint(world: mod PhysicsWorld, def: view WheelJointDef) ret JointId {
+  var sim: JointSim = zeroJointSim()
+  var data: WheelJointData = zeroWheelJointData()
+  data.enableSuspensionSpring = def.enableSuspensionSpring
+  data.suspensionHertz = def.suspensionHertz
+  data.suspensionDampingRatio = def.suspensionDampingRatio
+  data.enableSuspensionLimit = def.enableSuspensionLimit
+  data.lowerSuspensionLimit = def.lowerSuspensionLimit
+  data.upperSuspensionLimit = def.upperSuspensionLimit
+  data.enableSpinMotor = def.enableSpinMotor
+  data.maxSpinTorque = def.maxSpinTorque
+  data.spinSpeed = def.spinSpeed
+  data.enableSteering = def.enableSteering
+  data.steeringHertz = def.steeringHertz
+  data.steeringDampingRatio = def.steeringDampingRatio
+  data.targetSteeringAngle = def.targetSteeringAngle
+  data.maxSteeringTorque = def.maxSteeringTorque
+  data.enableSteeringLimit = def.enableSteeringLimit
+  data.lowerSteeringLimit = def.lowerSteeringLimit
+  data.upperSteeringLimit = def.upperSteeringLimit
+  sim.wheelJoint = data
+  let jointId: Int = createJoint(
+    world: world
+    def: def.base
+    jointType: JointType.wheelJoint
+    sim: sim
+  )
+  ret jointHandle(world: world, jointId: jointId)
+}
+
 # Unlink edge `edgeIndex` of joint `jointId` from its body's joint list.
 func unlinkJointEdge(world: mod PhysicsWorld, jointId: view Int, edgeIndex: view Int) {
   let edge: JointEdge = jointEdge(

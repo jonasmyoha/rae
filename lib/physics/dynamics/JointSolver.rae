@@ -1,7 +1,7 @@
 # The joint solver's dispatch (b3PrepareJoint, b3WarmStartJoint,
 # b3SolveJoint, the *_Overflow functions and b3GetJointReaction of Box3D's
 # joint.c at 9f998c8): every stage switches on the joint's kind, an
-# exhaustive match. The kinds not ported yet (P6b-P6c) cannot be created, so
+# exhaustive match. The kinds not ported yet (P6c) cannot be created, so
 # their arms are empty. Checked against the oracle in fixture 984.
 open Vec3
 open physics/math/Scalar
@@ -16,6 +16,8 @@ open physics/container/Bitset
 open physics/dynamics/World
 open physics/dynamics/RevoluteJoint
 open physics/dynamics/DistanceJoint
+open physics/dynamics/PrismaticJoint
+open physics/dynamics/WheelJoint
 
 # The sim of body `bodyId` wherever it lives, and its awake index (-1 when
 # not awake), for a joint's prepare.
@@ -65,6 +67,15 @@ func prepareJoint(base: mod JointSim, world: view PhysicsWorld, context: view St
     case JointType.motorJoint {
     }
     case JointType.prismaticJoint {
+      preparePrismaticJoint(
+        base: base
+        simA: bodyA.sim
+        simB: bodyB.sim
+        indexA: bodyA.awakeIndex
+        indexB: bodyB.awakeIndex
+        h: context.h
+        enableWarmStarting: context.enableWarmStarting
+      )
     }
     case JointType.revoluteJoint {
       prepareRevoluteJoint(
@@ -82,6 +93,15 @@ func prepareJoint(base: mod JointSim, world: view PhysicsWorld, context: view St
     case JointType.weldJoint {
     }
     case JointType.wheelJoint {
+      prepareWheelJoint(
+        base: base
+        simA: bodyA.sim
+        simB: bodyB.sim
+        indexA: bodyA.awakeIndex
+        indexB: bodyB.awakeIndex
+        h: context.h
+        enableWarmStarting: context.enableWarmStarting
+      )
     }
   }
 }
@@ -99,6 +119,7 @@ func warmStartJoint(base: view JointSim, states: mod List(BodyState)) {
     case JointType.motorJoint {
     }
     case JointType.prismaticJoint {
+      warmStartPrismaticJoint(base: base, states: states)
     }
     case JointType.revoluteJoint {
       warmStartRevoluteJoint(base: base, states: states)
@@ -108,6 +129,7 @@ func warmStartJoint(base: view JointSim, states: mod List(BodyState)) {
     case JointType.weldJoint {
     }
     case JointType.wheelJoint {
+      warmStartWheelJoint(base: base, states: states)
     }
   }
 }
@@ -137,6 +159,13 @@ func solveJoint(
     case JointType.motorJoint {
     }
     case JointType.prismaticJoint {
+      solvePrismaticJoint(
+        base: base
+        states: states
+        h: h
+        inverseH: inverseH
+        useBias: useBias
+      )
     }
     case JointType.revoluteJoint {
       solveRevoluteJoint(
@@ -152,6 +181,13 @@ func solveJoint(
     case JointType.weldJoint {
     }
     case JointType.wheelJoint {
+      solveWheelJoint(
+        base: base
+        states: states
+        h: h
+        inverseH: inverseH
+        useBias: useBias
+      )
     }
   }
 }
@@ -179,6 +215,14 @@ func jointReaction(sim: view JointSim, invTimeStep: view Float) ret JointReactio
     case JointType.motorJoint {
     }
     case JointType.prismaticJoint {
+      let joint: PrismaticJointData = sim.prismaticJoint
+      let impulse: Vec3 = {
+        x: joint.motorImpulse + joint.lowerImpulse - joint.upperImpulse
+        y: joint.perpImpulse.x
+        z: joint.perpImpulse.y
+      }
+      linearImpulse = length(vector: impulse)
+      angularImpulse = length(vector: joint.angularImpulse)
     }
     case JointType.revoluteJoint {
       let joint: RevoluteJointData = sim.revoluteJoint
@@ -195,6 +239,11 @@ func jointReaction(sim: view JointSim, invTimeStep: view Float) ret JointReactio
     case JointType.weldJoint {
     }
     case JointType.wheelJoint {
+      let joint: WheelJointData = sim.wheelJoint
+      let axialImpulse: Float = joint.suspensionSpringImpulse + joint.lowerSuspensionImpulse - joint.upperSuspensionImpulse
+      let impulse: Vec3 = { x: joint.linearImpulse.x, y: joint.linearImpulse.y, z: axialImpulse }
+      linearImpulse = length(vector: impulse)
+      angularImpulse = absFloat(value: joint.spinImpulse)
     }
   }
   ret JointReaction { force: linearImpulse * invTimeStep, torque: angularImpulse * invTimeStep }

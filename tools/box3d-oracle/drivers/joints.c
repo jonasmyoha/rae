@@ -1,5 +1,6 @@
-/* Box3D oracle driver: joints (docs/physics-rae-port-design.md §7 P6a:
- * joint.c, distance_joint.c, revolute_joint.c, the filter joint, the joint
+/* Box3D oracle driver: joints (docs/physics-rae-port-design.md §7 P6a-P6b:
+ * joint.c, distance_joint.c, revolute_joint.c, prismatic_joint.c,
+ * wheel_joint.c, the filter joint, the joint
  * parts of island.c, solver_set.c, constraint_graph.c, solver.c and body.c),
  * stepped with b3World_Step (1/60 s, 4 sub-steps, workerCount 1), 600 steps
  * each, sleep on:
@@ -19,6 +20,12 @@
  *             joints with it), a body disabled and enabled, the static
  *             anchor made dynamic and back, and a joint created between two
  *             sleeping sets (merging them)
+ *   prismatic a slider down a slope to its limits, a sprung slider, a
+ *             motorised elevator carrying a box, a telescope between two
+ *             dynamic bodies
+ *   car       a car on four wheel joints (suspension springs and limits,
+ *             spin motors on the rear, steering with limits on the front)
+ *             driving over a bump, and a parked car settling to sleep
  *
  * The line formats are meshscenes.c's, plus
  *
@@ -27,6 +34,15 @@
  *   joint.distance base length enableSpring lowerSpringForce upperSpringForce
  *                  hertz dampingRatio enableLimit minLength maxLength enableMotor
  *                  maxMotorForce motorSpeed -> joint
+ *   joint.prismatic base enableSpring hertz dampingRatio targetTranslation
+ *                   enableLimit lowerTranslation upperTranslation enableMotor
+ *                   maxMotorForce motorSpeed -> joint
+ *   joint.wheel base enableSuspensionSpring suspensionHertz
+ *               suspensionDampingRatio enableSuspensionLimit lowerSuspensionLimit
+ *               upperSuspensionLimit enableSpinMotor maxSpinTorque spinSpeed
+ *               enableSteering steeringHertz steeringDampingRatio
+ *               targetSteeringAngle maxSteeringTorque enableSteeringLimit
+ *               lowerSteeringLimit upperSteeringLimit -> joint
  *   joint.filter base -> joint
  *   joint.destroy joint wakeAttached ->
  *   body.destroy body ->      body.disable body ->      body.enable body ->
@@ -35,9 +51,10 @@
  * where base is bodyA bodyB localFrameA(7) localFrameB(7) forceThreshold
  * torqueThreshold constraintHertz constraintDampingRatio drawScale
  * collideConnected, and a joint or body is its index and generation. A
- * destroyed body leaves the hashed body list. After every step,
+ * destroyed body leaves the hashed body list. Every step reports the body
+ * hash and the step's joint events,
  *
- *   world.jointEvents -> count (joint)*count
+ *   world.step timeStep subSteps -> hash count (joint)*count
  *
  * and every 20 steps, after the body dump,
  *
@@ -47,7 +64,10 @@
  * local index, island, island index, collideConnected, the sim's inverse
  * masses and its accumulated impulses (distance: impulse, lower, upper,
  * motor; revolute: linear(3), perpendicular(2), spring, motor, lower,
- * upper), then each hashed body's set and island.
+ * upper; prismatic: perpendicular(2), angular(3), spring, motor, lower,
+ * upper; wheel: linear(2), angular(2), spin, suspension spring, lower,
+ * upper, steering spring, lower, upper), then each hashed body's set and
+ * island.
  *
  * Compiled against the cached Box3D checkout by tools/box3d-oracle/oracle.sh,
  * never by a Rae build. */
@@ -188,6 +208,33 @@ static b3DistanceJointDef distanceDef(b3BodyId bodyA, b3BodyId bodyB, b3Transfor
   return def;
 }
 
+static b3JointId prismatic(b3PrismaticJointDef def) {
+  b3JointId id = b3CreatePrismaticJoint(g_worldId, &def);
+  name("joint.prismatic"); baseOut(&def.base); i(def.enableSpring); f(def.hertz); f(def.dampingRatio);
+  f(def.targetTranslation); i(def.enableLimit); f(def.lowerTranslation); f(def.upperTranslation); i(def.enableMotor);
+  f(def.maxMotorForce); f(def.motorSpeed); arrow(); jointRef(id); end();
+  return id;
+}
+
+static b3PrismaticJointDef prismaticDef(b3BodyId bodyA, b3BodyId bodyB, b3Transform frameA, b3Transform frameB) {
+  b3PrismaticJointDef def = b3DefaultPrismaticJointDef();
+  def.base.bodyIdA = bodyA;
+  def.base.bodyIdB = bodyB;
+  def.base.localFrameA = frameA;
+  def.base.localFrameB = frameB;
+  return def;
+}
+
+static b3JointId wheel(b3WheelJointDef def) {
+  b3JointId id = b3CreateWheelJoint(g_worldId, &def);
+  name("joint.wheel"); baseOut(&def.base); i(def.enableSuspensionSpring); f(def.suspensionHertz);
+  f(def.suspensionDampingRatio); i(def.enableSuspensionLimit); f(def.lowerSuspensionLimit); f(def.upperSuspensionLimit);
+  i(def.enableSpinMotor); f(def.maxSpinTorque); f(def.spinSpeed); i(def.enableSteering); f(def.steeringHertz);
+  f(def.steeringDampingRatio); f(def.targetSteeringAngle); f(def.maxSteeringTorque); i(def.enableSteeringLimit);
+  f(def.lowerSteeringLimit); f(def.upperSteeringLimit); arrow(); jointRef(id); end();
+  return id;
+}
+
 static b3JointId filterJoint(b3BodyId bodyA, b3BodyId bodyB) {
   b3FilterJointDef def = b3DefaultFilterJointDef();
   def.base.bodyIdA = bodyA;
@@ -267,6 +314,15 @@ static void joints(void) {
       b3RevoluteJoint* r = &sim->revoluteJoint;
       v3(r->linearImpulse); f(r->perpImpulse.x); f(r->perpImpulse.y); f(r->springImpulse); f(r->motorImpulse);
       f(r->lowerImpulse); f(r->upperImpulse);
+    } else if (joint->type == b3_prismaticJoint) {
+      b3PrismaticJoint* p = &sim->prismaticJoint;
+      f(p->perpImpulse.x); f(p->perpImpulse.y); v3(p->angularImpulse); f(p->springImpulse); f(p->motorImpulse);
+      f(p->lowerImpulse); f(p->upperImpulse);
+    } else if (joint->type == b3_wheelJoint) {
+      b3WheelJoint* w = &sim->wheelJoint;
+      f(w->linearImpulse.x); f(w->linearImpulse.y); f(w->angularImpulse.x); f(w->angularImpulse.y); f(w->spinImpulse);
+      f(w->suspensionSpringImpulse); f(w->lowerSuspensionImpulse); f(w->upperSuspensionImpulse);
+      f(w->steeringSpringImpulse); f(w->lowerSteeringImpulse); f(w->upperSteeringImpulse);
     }
   }
   i(g_bodyCount);
@@ -287,9 +343,8 @@ static void step(void) {
     bodyValues(g_bodies[k], values);
     for (int n = 0; n < 13; n++) hash = hashFloat(hash, values[n]);
   }
-  name("world.step"); f(timeStep); i(subSteps); arrow(); u64(hash); end();
   b3JointEvents events = b3World_GetJointEvents(g_worldId);
-  name("world.jointEvents"); arrow(); i(events.count);
+  name("world.step"); f(timeStep); i(subSteps); arrow(); u64(hash); i(events.count);
   for (int k = 0; k < events.count; k++) jointRef(events.jointEvents[k].jointId);
   end();
   if (g_stepIndex % DUMP_EVERY == DUMP_EVERY - 1) {
@@ -324,6 +379,51 @@ static void beginScene(void) {
 static void endScene(void) {
   steps(600 - g_stepIndex);
   b3DestroyWorld(g_worldId);
+}
+
+static b3Transform rotatedFrame(float x, float y, float z, b3Vec3 axis, float angle) {
+  b3Transform t = { { x, y, z }, b3MakeQuatFromAxisAngle(b3Normalize(axis), angle) };
+  return t;
+}
+
+/* A car: a box chassis on four sphere wheels. The suspension axis (frame A's
+ * x-axis) points up, the wheels spin about their z-axis. */
+static void makeCar(b3Vec3 position, bool driven) {
+  b3BodyId chassis = makeBody(b3_dynamicBody, position);
+  boxShape(chassis, 1.0f, 0.25f, 0.6f);
+  b3Vec3 up = { 0.0f, 0.0f, 1.0f };
+  for (int k = 0; k < 4; k++) {
+    float x = k < 2 ? 0.8f : -0.8f;
+    float z = (k % 2 == 0) ? 0.7f : -0.7f;
+    b3BodyId wheelBody = makeBody(b3_dynamicBody, (b3Vec3){ position.x + x, position.y - 0.4f, position.z + z });
+    sphereShape(wheelBody, 0.35f);
+    b3WheelJointDef def = b3DefaultWheelJointDef();
+    def.base.bodyIdA = chassis;
+    def.base.bodyIdB = wheelBody;
+    def.base.localFrameA = rotatedFrame(x, -0.4f, z, up, 1.5707963f);
+    def.base.localFrameB = frameAt(0.0f, 0.0f, 0.0f);
+    def.suspensionHertz = 4.0f;
+    def.suspensionDampingRatio = 0.7f;
+    def.enableSuspensionLimit = true;
+    def.lowerSuspensionLimit = -0.25f;
+    def.upperSuspensionLimit = 0.2f;
+    if (driven && k >= 2) {
+      def.enableSpinMotor = true;
+      def.maxSpinTorque = 3000.0f;
+      def.spinSpeed = -5.0f;
+    }
+    if (driven && k < 2) {
+      def.enableSteering = true;
+      def.steeringHertz = 3.0f;
+      def.steeringDampingRatio = 0.8f;
+      def.targetSteeringAngle = 0.15f;
+      def.maxSteeringTorque = 2000.0f;
+      def.enableSteeringLimit = true;
+      def.lowerSteeringLimit = -0.3f;
+      def.upperSteeringLimit = 0.3f;
+    }
+    wheel(def);
+  }
 }
 
 static b3BodyId makeGround(void) {
@@ -553,6 +653,79 @@ int main(void) {
     setType(first, b3_kinematicBody);
     steps(40);
     setType(first, b3_dynamicBody);
+  }
+  endScene();
+
+  /* Prismatic sliders and an elevator */
+  printf("# scene prismatic\n");
+  beginScene();
+  {
+    b3BodyId ground = makeGround();
+    b3Vec3 alongZ = { 0.0f, 0.0f, 1.0f };
+
+    /* Down a slope to the lower limit */
+    b3BodyId slider = makeBody(b3_dynamicBody, (b3Vec3){ -6.0f, 3.0f, 0.0f });
+    boxShape(slider, 0.3f, 0.3f, 0.3f);
+    b3PrismaticJointDef slope = prismaticDef(ground, slider, rotatedFrame(-6.0f, 3.5f, 0.0f, alongZ, -0.5f), frameAt(0.0f, 0.0f, 0.0f));
+    slope.enableLimit = true;
+    slope.lowerTranslation = -1.0f;
+    slope.upperTranslation = 1.5f;
+    prismatic(slope);
+
+    /* A sprung slider pulled to its target */
+    b3BodyId sprung = makeMovingBody(b3_dynamicBody, (b3Vec3){ -2.0f, 3.0f, 0.0f }, b3Quat_identity,
+                                     (b3Vec3){ 0.0f, 0.0f, 0.0f }, (b3Vec3){ 0.0f, 0.0f, 0.0f });
+    boxShape(sprung, 0.3f, 0.2f, 0.2f);
+    b3PrismaticJointDef spring = prismaticDef(ground, sprung, frameAt(-2.0f, 3.5f, 0.0f), frameAt(0.0f, 0.0f, 0.0f));
+    spring.enableSpring = true;
+    spring.hertz = 2.0f;
+    spring.dampingRatio = 0.2f;
+    spring.targetTranslation = 1.0f;
+    prismatic(spring);
+
+    /* An elevator: the axis points up, the motor lifts it to its upper limit */
+    b3BodyId platform = makeBody(b3_dynamicBody, (b3Vec3){ 3.0f, 0.5f, 0.0f });
+    boxShape(platform, 1.0f, 0.1f, 1.0f);
+    b3PrismaticJointDef lift = prismaticDef(ground, platform, rotatedFrame(3.0f, 1.0f, 0.0f, alongZ, 1.5707963f),
+                                            rotatedFrame(0.0f, 0.0f, 0.0f, alongZ, 1.5707963f));
+    lift.enableLimit = true;
+    lift.lowerTranslation = 0.0f;
+    lift.upperTranslation = 3.0f;
+    lift.enableMotor = true;
+    lift.maxMotorForce = 30000.0f;
+    lift.motorSpeed = 1.0f;
+    prismatic(lift);
+    b3BodyId cargo = makeBody(b3_dynamicBody, (b3Vec3){ 3.2f, 0.9f, 0.1f });
+    boxShape(cargo, 0.3f, 0.3f, 0.3f);
+
+    /* A telescope between two dynamic bodies, one hanging from a hinge */
+    b3BodyId outer = makeBody(b3_dynamicBody, (b3Vec3){ 8.0f, 4.0f, 0.0f });
+    capsuleShape(outer, 0.5f, 0.15f);
+    revolute(revoluteDef(ground, outer, frameAt(7.0f, 4.5f, 0.0f), frameAt(-1.0f, 0.0f, 0.0f)));
+    b3BodyId inner = makeMovingBody(b3_dynamicBody, (b3Vec3){ 9.0f, 4.0f, 0.0f }, b3Quat_identity,
+                                    (b3Vec3){ 1.0f, 0.0f, 0.5f }, b3Vec3_zero);
+    sphereShape(inner, 0.2f);
+    b3PrismaticJointDef telescope = prismaticDef(outer, inner, frameAt(0.0f, 0.0f, 0.0f), frameAt(0.0f, 0.0f, 0.0f));
+    telescope.enableLimit = true;
+    telescope.lowerTranslation = 0.5f;
+    telescope.upperTranslation = 1.5f;
+    telescope.enableSpring = true;
+    telescope.hertz = 1.0f;
+    telescope.dampingRatio = 0.5f;
+    telescope.targetTranslation = 1.2f;
+    prismatic(telescope);
+  }
+  endScene();
+
+  /* A car over a bump and a parked car */
+  printf("# scene car\n");
+  beginScene();
+  {
+    makeGround();
+    b3BodyId bump = makeBody(b3_staticBody, (b3Vec3){ -2.0f, 0.0f, 0.0f });
+    boxShape(bump, 0.4f, 0.12f, 3.0f);
+    makeCar((b3Vec3){ -8.0f, 1.0f, 0.0f }, true);
+    makeCar((b3Vec3){ 6.0f, 1.0f, 5.0f }, false);
   }
   endScene();
 

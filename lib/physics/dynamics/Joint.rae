@@ -5,8 +5,8 @@
 # data, living in the solver set or graph colour the joint is in. Box3D keeps
 # the per-kind data in a union; here a JointSim carries one record per kind
 # and its `jointType` says which one is live. The kinds are solved in their
-# own modules (RevoluteJoint, DistanceJoint); prismatic, wheel, spherical,
-# motor, parallel and weld joints are P6b-P6c.
+# own modules (RevoluteJoint, DistanceJoint, PrismaticJoint, WheelJoint);
+# spherical, motor, parallel and weld joints are P6c.
 open Vec2
 open Vec3
 open Quat
@@ -166,6 +166,78 @@ type RevoluteJointData {
   enableLimit: Bool
 }
 
+# b3PrismaticJoint
+type PrismaticJointData {
+  perpImpulse: Vec2
+  angularImpulse: Vec3
+  springImpulse: Float
+  motorImpulse: Float
+  lowerImpulse: Float
+  upperImpulse: Float
+  hertz: Float
+  dampingRatio: Float
+  maxMotorForce: Float
+  motorSpeed: Float
+  targetTranslation: Float
+  lowerTranslation: Float
+  upperTranslation: Float
+  indexA: Int
+  indexB: Int
+  frameA: Transform
+  frameB: Transform
+  jointAxis: Vec3
+  perpAxisY: Vec3
+  perpAxisZ: Vec3
+  deltaCenter: Vec3
+  deltaAngle: Float
+  rotationMass: Matrix3
+  springSoftness: Softness
+  enableSpring: Bool
+  enableLimit: Bool
+  enableMotor: Bool
+}
+
+# b3WheelJoint
+type WheelJointData {
+  linearImpulse: Vec2
+  angularImpulse: Vec2
+  spinImpulse: Float
+  maxSpinTorque: Float
+  spinSpeed: Float
+  suspensionSpringImpulse: Float
+  lowerSuspensionImpulse: Float
+  upperSuspensionImpulse: Float
+  lowerSuspensionLimit: Float
+  upperSuspensionLimit: Float
+  suspensionHertz: Float
+  suspensionDampingRatio: Float
+  steeringSpringImpulse: Float
+  lowerSteeringImpulse: Float
+  upperSteeringImpulse: Float
+  lowerSteeringLimit: Float
+  upperSteeringLimit: Float
+  targetSteeringAngle: Float
+  maxSteeringTorque: Float
+  steeringHertz: Float
+  steeringDampingRatio: Float
+  indexA: Int
+  indexB: Int
+  frameA: Transform
+  frameB: Transform
+  deltaCenter: Vec3
+  spinMass: Float
+  suspensionMass: Float
+  steeringMass: Float
+  suspensionSoftness: Softness
+  steeringSoftness: Softness
+  enableSpinMotor: Bool
+  enableSuspensionSpring: Bool
+  enableSuspensionLimit: Bool
+  enableSteering: Bool
+  enableSteeringLimit: Bool
+  enableSteeringMotor: Bool
+}
+
 # b3JointSim: the common solver data and the live kind's record.
 type JointSim {
   jointId: Int
@@ -187,6 +259,8 @@ type JointSim {
   fixedRotation: Bool
   distanceJoint: DistanceJointData
   revoluteJoint: RevoluteJointData
+  prismaticJoint: PrismaticJointData
+  wheelJoint: WheelJointData
 }
 
 # b3JointDef: what every joint kind's definition starts with.
@@ -233,6 +307,43 @@ type RevoluteJointDef {
   enableMotor: Bool
   maxMotorTorque: Float
   motorSpeed: Float
+}
+
+# b3PrismaticJointDef
+type PrismaticJointDef {
+  base: JointDef
+  enableSpring: Bool
+  hertz: Float
+  dampingRatio: Float
+  targetTranslation: Float
+  enableLimit: Bool
+  lowerTranslation: Float
+  upperTranslation: Float
+  enableMotor: Bool
+  maxMotorForce: Float
+  motorSpeed: Float
+}
+
+# b3WheelJointDef
+type WheelJointDef {
+  base: JointDef
+  enableSuspensionSpring: Bool
+  suspensionHertz: Float
+  suspensionDampingRatio: Float
+  enableSuspensionLimit: Bool
+  lowerSuspensionLimit: Float
+  upperSuspensionLimit: Float
+  enableSpinMotor: Bool
+  maxSpinTorque: Float
+  spinSpeed: Float
+  enableSteering: Bool
+  steeringHertz: Float
+  steeringDampingRatio: Float
+  targetSteeringAngle: Float
+  maxSteeringTorque: Float
+  enableSteeringLimit: Bool
+  lowerSteeringLimit: Float
+  upperSteeringLimit: Float
 }
 
 # b3JointEvent: an awake joint whose force or torque reached its threshold.
@@ -293,6 +404,47 @@ func defaultRevoluteJointDef(lengthUnitsPerMeter: view Float) ret RevoluteJointD
     enableMotor: false
     maxMotorTorque: 0.0
     motorSpeed: 0.0
+  }
+}
+
+# b3DefaultPrismaticJointDef
+func defaultPrismaticJointDef(lengthUnitsPerMeter: view Float) ret PrismaticJointDef {
+  ret PrismaticJointDef {
+    base: defaultJointDef(lengthUnitsPerMeter: lengthUnitsPerMeter)
+    enableSpring: false
+    hertz: 0.0
+    dampingRatio: 0.0
+    targetTranslation: 0.0
+    enableLimit: false
+    lowerTranslation: 0.0
+    upperTranslation: 0.0
+    enableMotor: false
+    maxMotorForce: 0.0
+    motorSpeed: 0.0
+  }
+}
+
+# b3DefaultWheelJointDef
+func defaultWheelJointDef(lengthUnitsPerMeter: view Float) ret WheelJointDef {
+  ret WheelJointDef {
+    base: defaultJointDef(lengthUnitsPerMeter: lengthUnitsPerMeter)
+    enableSuspensionSpring: true
+    suspensionHertz: 1.0
+    suspensionDampingRatio: 0.7
+    enableSuspensionLimit: false
+    lowerSuspensionLimit: 0.0
+    upperSuspensionLimit: 0.0
+    enableSpinMotor: false
+    maxSpinTorque: 0.0
+    spinSpeed: 0.0
+    enableSteering: false
+    steeringHertz: 1.0
+    steeringDampingRatio: 0.7
+    targetSteeringAngle: 0.0
+    maxSteeringTorque: 0.0
+    enableSteeringLimit: false
+    lowerSteeringLimit: 0.0
+    upperSteeringLimit: 0.0
   }
 }
 
@@ -388,6 +540,82 @@ func zeroRevoluteJointData() ret RevoluteJointData {
   }
 }
 
+# `(b3PrismaticJoint){ 0 }`
+func zeroPrismaticJointData() ret PrismaticJointData {
+  ret PrismaticJointData {
+    perpImpulse: Vec2 { x: 0.0, y: 0.0 }
+    angularImpulse: zeroVector()
+    springImpulse: 0.0
+    motorImpulse: 0.0
+    lowerImpulse: 0.0
+    upperImpulse: 0.0
+    hertz: 0.0
+    dampingRatio: 0.0
+    maxMotorForce: 0.0
+    motorSpeed: 0.0
+    targetTranslation: 0.0
+    lowerTranslation: 0.0
+    upperTranslation: 0.0
+    indexA: 0
+    indexB: 0
+    frameA: zeroTransform()
+    frameB: zeroTransform()
+    jointAxis: zeroVector()
+    perpAxisY: zeroVector()
+    perpAxisZ: zeroVector()
+    deltaCenter: zeroVector()
+    deltaAngle: 0.0
+    rotationMass: matrixZero()
+    springSoftness: zeroSoftnessValue()
+    enableSpring: false
+    enableLimit: false
+    enableMotor: false
+  }
+}
+
+# `(b3WheelJoint){ 0 }`
+func zeroWheelJointData() ret WheelJointData {
+  ret WheelJointData {
+    linearImpulse: Vec2 { x: 0.0, y: 0.0 }
+    angularImpulse: Vec2 { x: 0.0, y: 0.0 }
+    spinImpulse: 0.0
+    maxSpinTorque: 0.0
+    spinSpeed: 0.0
+    suspensionSpringImpulse: 0.0
+    lowerSuspensionImpulse: 0.0
+    upperSuspensionImpulse: 0.0
+    lowerSuspensionLimit: 0.0
+    upperSuspensionLimit: 0.0
+    suspensionHertz: 0.0
+    suspensionDampingRatio: 0.0
+    steeringSpringImpulse: 0.0
+    lowerSteeringImpulse: 0.0
+    upperSteeringImpulse: 0.0
+    lowerSteeringLimit: 0.0
+    upperSteeringLimit: 0.0
+    targetSteeringAngle: 0.0
+    maxSteeringTorque: 0.0
+    steeringHertz: 0.0
+    steeringDampingRatio: 0.0
+    indexA: 0
+    indexB: 0
+    frameA: zeroTransform()
+    frameB: zeroTransform()
+    deltaCenter: zeroVector()
+    spinMass: 0.0
+    suspensionMass: 0.0
+    steeringMass: 0.0
+    suspensionSoftness: zeroSoftnessValue()
+    steeringSoftness: zeroSoftnessValue()
+    enableSpinMotor: false
+    enableSuspensionSpring: false
+    enableSuspensionLimit: false
+    enableSteering: false
+    enableSteeringLimit: false
+    enableSteeringMotor: false
+  }
+}
+
 # `memset( jointSim, 0, sizeof( b3JointSim ) )`
 func zeroJointSim() ret JointSim {
   ret JointSim {
@@ -409,6 +637,8 @@ func zeroJointSim() ret JointSim {
     fixedRotation: false
     distanceJoint: zeroDistanceJointData()
     revoluteJoint: zeroRevoluteJointData()
+    prismaticJoint: zeroPrismaticJointData()
+    wheelJoint: zeroWheelJointData()
   }
 }
 
