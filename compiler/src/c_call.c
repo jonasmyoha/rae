@@ -1387,7 +1387,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 int tmp_id = -1;
                 if (!base_concrete->is_opt
                     && type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, base_concrete, 0)) {
-                    tmp_id = register_stmt_temp(ctx, base_concrete, a->value->kind == AST_EXPR_OBJECT);
+                    tmp_id = register_stmt_temp(ctx, base_concrete, c_stmt_temp_value_owns(ctx, a->value));
                 }
                 if (tmp_id >= 0) {
                     fprintf(out, "((__rae_stmt_tmp%d = (", tmp_id);
@@ -1491,7 +1491,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 // statement, borrowed here, dropped after the statement.
                 int tmp_id = -1;
                 if (type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, base_emit, 0)) {
-                    tmp_id = register_stmt_temp(ctx, base_emit, a->value->kind == AST_EXPR_OBJECT);
+                    tmp_id = register_stmt_temp(ctx, base_emit, c_stmt_temp_value_owns(ctx, a->value));
                 }
                 if (tmp_id >= 0) {
                     fprintf(out, "((__rae_stmt_tmp%d = (", tmp_id);

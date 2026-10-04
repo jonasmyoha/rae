@@ -1,0 +1,67 @@
+# A call result passed straight to a `view` parameter is held in a statement
+# temporary and dropped after the statement. When the call returns a value it
+# made (copyAtDefault's deep copy, a plain `ret T`), that drop must be the
+# owning one: the alias drop is empty for a struct whose nested lists own
+# heap, so every such temporary leaked its manifolds and their point lists.
+# A callee that returns an alias into the container (a raw buffer read)
+# keeps the alias drop, or the container's storage would be freed twice.
+func rae_ext_rae_mem_stats_buf_outstanding() unsafe extern ret Int
+
+type Point {
+  x: Int
+}
+
+type Manifold {
+  points: List(Point)
+}
+
+type Contact {
+  flags: Int
+  manifolds: List(Manifold)
+}
+
+func makeContact(flags: view Int) ret Contact {
+  let points: List(Point) = { Point { x: flags } }
+  let manifold: Manifold = { points: points }
+  let manifolds: List(Manifold) = { manifold }
+  ret Contact { flags: flags, manifolds: manifolds }
+}
+
+func contactWeight(contact: view Contact, edgeIndex: view Int) ret Int {
+  ret contact.flags + edgeIndex + contact.manifolds.length
+}
+
+# Returns the stored contact itself, not a copy: an alias into the list.
+func storedContact(contacts: view List(Contact), index: view Int) ret Contact {
+  unsafe {
+    let contact: Contact = rae_ext_rae_buf_get(buf: contacts.data, index: index)
+    ret contact
+  }
+}
+
+func outstandingBuffers() ret Int {
+  unsafe {
+    ret rae_ext_rae_mem_stats_buf_outstanding()
+  }
+}
+
+func main() {
+  let contacts: List(Contact) = List.create(Contact, cap: 2)
+  contacts.add(value: makeContact(flags: 1))
+  contacts.add(value: makeContact(flags: 2))
+  let before: Int = outstandingBuffers()
+  var total: Int = 0
+  loop var i: Int = 0, i < 100, ++i {
+    total = total + contactWeight(contact: contacts.copyAtDefault(index: i % 2), edgeIndex: 0)
+    total = total + contacts.copyAtDefault(index: i % 2).flags
+    total = total + contactWeight(contact: makeContact(flags: 3), edgeIndex: 1)
+    total = total + contactWeight(
+      contact: storedContact(contacts: contacts, index: i % 2)
+      edgeIndex: 0
+    )
+  }
+  let leaked: Int = outstandingBuffers() - before
+  log("total {total}")
+  log("buffers leaked {leaked}")
+  log("stored contact still intact: {contacts.copyAtDefault(index: 1).manifolds.length}")
+}
