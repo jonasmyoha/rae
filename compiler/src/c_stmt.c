@@ -363,6 +363,23 @@ void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
     ctx->has_expected_type = true;
     ctx->expected_type = payload;
   }
+  if (rae_opt_is_struct_rep(ctx, &opt_for_name) && c_type_is_plain_string(&payload)
+      && c_expr_is_extern_opt_string_call(value)) {
+    /* An extern `ret opt String` returns a plain rae_String in C: a NULL
+     * data pointer is `none` (a missing file for readFile), anything else
+     * is a fresh owned heap the caller now owns. Move it into the optional:
+     * copying it leaked the native buffer, and an unconditional `has = 1`
+     * turned `none` into a present empty String. */
+    const char* optm = rae_opt_type_name(ctx, &opt_for_name);
+    int optn = (int)ctx->temp_counter++;
+    fprintf(out, "(__extension__ ({ %s __opt%d = {0}; rae_String __optraw%d = ", optm, optn, optn);
+    emit_expr(ctx, value, out, PREC_LOWEST, false, false);
+    fprintf(out, "; if (__optraw%d.data) { __opt%d.has = 1; __opt%d.value = __optraw%d; } __opt%d; }))",
+            optn, optn, optn, optn, optn);
+    ctx->has_expected_type = saved_has_exp_box;
+    ctx->expected_type = saved_exp_box;
+    return;
+  }
   if (rae_opt_is_struct_rep(ctx, &opt_for_name)) {
     const char* optm = rae_opt_type_name(ctx, &opt_for_name);
     int optn = (int)ctx->temp_counter++;
