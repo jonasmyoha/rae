@@ -1,8 +1,46 @@
 # Float4 — a 4-wide float type for SIMD (design + measured prototype)
 
-Status: **proposal, awaiting the maintainer's approval of the surface** (§7).
-Written 2026-10-04 after the scalar contact solver landed (physics port P4).
-Background: `docs/physics-performance-plan.md` §2-§3 and §5 item 4.
+Status: **approved 2026-10-04, with changes** (§0 is the decision; it
+overrides §2 and answers §7). Written 2026-10-04 after the scalar contact
+solver landed (physics port P4). Background: `docs/physics-performance-plan.md`
+§2-§3 and §5 item 4.
+
+## 0. The decision
+
+The maintainer approved Float4 with two of the four §7 questions answered
+differently from the proposal:
+
+1. **`Mask4` stays a separate type.** A mask stored as a Float4 would be NaN
+   bit patterns that only work by accident, and its type would allow
+   arithmetic on a comparison. Mask4 exposes only `select`, `and` / `or` /
+   `not`, and `any` / `all`.
+2. **Named functions only — no lane-wise operators.** Rae has no operator
+   overloading on structs (`docs/timestamp-and-duration.md`), and `Vec4` uses
+   `vadd` / `vmul`; `+` working on Float4 but not on the scalar fallback or
+   Vec4 would make what compiles depend on the type. The prototype agrees:
+   the speedup comes from inline primitives, not syntax. Named functions also
+   make the bit-exact contract visible — `mulAdd` is unfused because its name
+   says so, and there is no `*` then `+` for a backend to contract:
+
+   ```rae
+   let d: Float4 = Float4.sub(a: p, b: q)
+   let r: Float4 = Float4.mulAdd(a: d, b: n, c: bias)
+   let m: Mask4 = Float4.less(a: r, b: zero)
+   let out: Float4 = Float4.select(mask: m, ifTrue: r, ifFalse: zero)
+   ```
+
+3. **The load returns `opt Float4`**, matching `copyAt` and the
+   no-escape-hatch rule; a hot loop does one `if let` per batch and hoists
+   the bounds check. The Array-indexed form waits until something like
+   `Array(Float, cap: 4)` needs it.
+4. **Not in the prelude:** an imported module, `lib/Float4.rae`, like `Vec4`
+   and `Channel`, with the builtin lowering behind it. Only the physics and
+   renderer kernels need it.
+
+Go-ahead for §8 (the compiler work and the FloatWide switch), with the
+bit-exact check against the scalar oracle kept as a **permanent fixture**, not
+only a benchmark assertion. `Vec4` is left alone; re-implementing it over
+Float4 is a separate ticket, to wait until a measurement asks for it.
 
 ## 1. Why
 
@@ -21,7 +59,7 @@ version" in `convex_manifold.c`). Float4 must do the same: the port's
 determinism rule (performance plan §7) says identical bits for scalar and
 Float4, and the oracle fixtures (948-959) keep checking it.
 
-## 2. The proposed surface
+## 2. The proposed surface (superseded where §0 differs)
 
 A builtin value type in the prelude, beside `Float`:
 
@@ -154,7 +192,7 @@ checksum (FNV over all body velocities) — **bit-exact across all five**.
    lane reads; `Float4.load` from a flat `List(Float)` is the obvious next
    measurement once the type exists.
 
-## 7. Questions for the maintainer
+## 7. Questions for the maintainer (answered in §0)
 
 1. The surface of §2: a builtin `Float4` with lane fields `x y z w`,
    lane-wise `+ - * /`, the named functions, and a separate `Mask4` type for
