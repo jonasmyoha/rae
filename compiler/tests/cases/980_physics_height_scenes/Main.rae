@@ -1,0 +1,585 @@
+# The height-field scenes (P5c: lib/physics/geometry/HeightField, the height
+# shape of WorldShapes and the height-field path of MeshContact) against
+# Box3D itself: tools/box3d-oracle/goldens/heightscenes.golden steps two
+# worlds for 600 steps each (1/60 s, 4 sub-steps): spheres, capsules and
+# boxes rolling, sliding and tumbling over a wave height field; a flat grid
+# and a tilted wave with boxes and capsules sliding down it, sleep on. Every
+# step's hash of every body's transform and velocities, and every 20 steps a
+# full body dump and every height-field contact's manifolds, must have the
+# SAME BITS (docs/physics-rae-port-design.md §4).
+import Math
+import Vec3
+import Quat
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/MatrixMath
+open physics/math/TransformMath
+open physics/math/AabbMath
+open physics/geometry/QueryTypes
+open physics/geometry/Hull
+open physics/geometry/HullCreate
+open physics/geometry/BoxHull
+open physics/geometry/Mesh
+open physics/geometry/MeshQuery
+open physics/geometry/HeightField
+open physics/collision/ShapePair
+open physics/dynamics/WorldTypes
+open physics/dynamics/World
+open physics/dynamics/WorldBodies
+open physics/dynamics/WorldShapes
+open physics/dynamics/BroadPhasePairs
+open physics/dynamics/Body
+open physics/dynamics/Contact
+open physics/dynamics/ConstraintGraph
+open physics/dynamics/SolverSet
+open physics/dynamics/WorldIslands
+open physics/dynamics/Collide
+open physics/dynamics/WorldStep
+
+# Reads the input tokens of one line in order.
+type Reader {
+  tokens: List(String)
+  next: Int
+}
+
+func readToken(reader: mod Reader) ret String {
+  let token: String = reader.tokens.copyAtDefault(index: reader.next)
+  reader.next = reader.next + 1
+  ret token
+}
+
+func readFloat(reader: mod Reader) ret Float {
+  ret readToken(reader: reader).toFloat()
+}
+
+func readInt(reader: mod Reader) ret Int {
+  ret readToken(reader: reader).toInt()
+}
+
+func readBool(reader: mod Reader) ret Bool {
+  ret readInt(reader: reader) is not 0
+}
+
+func readU64(reader: mod Reader) ret UInt64 {
+  let high: UInt64 = readInt(reader: reader) as UInt64
+  let low: UInt64 = readInt(reader: reader) as UInt64
+  ret (high shl 32) bitor low
+}
+
+func readVec(reader: mod Reader) ret Vec3 {
+  let x: Float = readFloat(reader: reader)
+  let y: Float = readFloat(reader: reader)
+  let z: Float = readFloat(reader: reader)
+  ret Vec3 { x: x, y: y, z: z }
+}
+
+func readQuat(reader: mod Reader) ret Quat {
+  let x: Float = readFloat(reader: reader)
+  let y: Float = readFloat(reader: reader)
+  let z: Float = readFloat(reader: reader)
+  let w: Float = readFloat(reader: reader)
+  ret Quat { x: x, y: y, z: z, w: w }
+}
+
+func readTransform(reader: mod Reader) ret Transform {
+  let position: Vec3 = readVec(reader: reader)
+  let rotation: Quat = readQuat(reader: reader)
+  ret Transform { position: position, rotation: rotation }
+}
+
+func readMatrix(reader: mod Reader) ret Matrix3 {
+  let columnX: Vec3 = readVec(reader: reader)
+  let columnY: Vec3 = readVec(reader: reader)
+  let columnZ: Vec3 = readVec(reader: reader)
+  ret Matrix3 { columnX: columnX, columnY: columnY, columnZ: columnZ }
+}
+
+func readBodyId(reader: mod Reader) ret BodyId {
+  let index: Int = readInt(reader: reader)
+  let generation: Int = readInt(reader: reader)
+  ret BodyId { index1: index + 1, world0: 0, generation: generation }
+}
+
+func readShapeId(reader: mod Reader) ret ShapeId {
+  let index: Int = readInt(reader: reader)
+  let generation: Int = readInt(reader: reader)
+  ret ShapeId { index1: index + 1, world0: 0, generation: generation }
+}
+
+func readMaterial(reader: mod Reader) ret SurfaceMaterial {
+  let friction: Float = readFloat(reader: reader)
+  let restitution: Float = readFloat(reader: reader)
+  let rolling: Float = readFloat(reader: reader)
+  let tangent: Vec3 = readVec(reader: reader)
+  let userMaterialId: UInt64 = readU64(reader: reader)
+  let color: Int = readInt(reader: reader)
+  ret SurfaceMaterial {
+    friction: friction
+    restitution: restitution
+    rollingResistance: rolling
+    tangentVelocity: tangent
+    userMaterialId: userMaterialId
+    customColor: color
+  }
+}
+
+func readShapeDef(reader: mod Reader) ret ShapeDef {
+  var def: ShapeDef = defaultShapeDef(lengthUnitsPerMeter: 1.0)
+  def.baseMaterial = readMaterial(reader: reader)
+  def.density = readFloat(reader: reader)
+  def.explosionScale = readFloat(reader: reader)
+  def.filter.categoryBits = readU64(reader: reader)
+  def.filter.maskBits = readU64(reader: reader)
+  def.filter.groupIndex = readInt(reader: reader)
+  def.enableSensorEvents = readBool(reader: reader)
+  def.enableContactEvents = readBool(reader: reader)
+  def.enableHitEvents = readBool(reader: reader)
+  def.enablePreSolveEvents = readBool(reader: reader)
+  def.enableCustomFiltering = readBool(reader: reader)
+  def.enableSpeculativeContact = readBool(reader: reader)
+  def.invokeContactCreation = readBool(reader: reader)
+  def.updateBodyMass = readBool(reader: reader)
+  ret def
+}
+
+func putFloat(out: mod List(Int), value: view Float) {
+  out.add(value: Math.floatBits(value: value))
+}
+
+func putInt(out: mod List(Int), value: view Int) {
+  out.add(value: value)
+}
+
+func putBool(out: mod List(Int), value: view Bool) {
+  if value {
+    out.add(value: 1)
+  } else {
+    out.add(value: 0)
+  }
+}
+
+func putU64(out: mod List(Int), value: view UInt64) {
+  out.add(value: (value shr 32) as Int)
+  out.add(value: (value bitand 4294967295) as Int)
+}
+
+func putVec(out: mod List(Int), vector: view Vec3) {
+  putFloat(out: out, value: vector.x)
+  putFloat(out: out, value: vector.y)
+  putFloat(out: out, value: vector.z)
+}
+
+func putQuat(out: mod List(Int), quat: view Quat) {
+  putFloat(out: out, value: quat.x)
+  putFloat(out: out, value: quat.y)
+  putFloat(out: out, value: quat.z)
+  putFloat(out: out, value: quat.w)
+}
+
+func putMatrix(out: mod List(Int), matrix: view Matrix3) {
+  putVec(out: out, vector: matrix.columnX)
+  putVec(out: out, vector: matrix.columnY)
+  putVec(out: out, vector: matrix.columnZ)
+}
+
+func putTransform(out: mod List(Int), transform: view Transform) {
+  putVec(out: out, vector: transform.position)
+  putQuat(out: out, quat: transform.rotation)
+}
+
+func putBox(out: mod List(Int), box: view Aabb) {
+  putVec(out: out, vector: box.lowerBound)
+  putVec(out: out, vector: box.upperBound)
+}
+
+func putBodyId(out: mod List(Int), bodyId: view BodyId) {
+  putInt(out: out, value: bodyId.index1 - 1)
+  putInt(out: out, value: bodyId.generation)
+}
+
+func putShapeId(out: mod List(Int), shapeId: view ShapeId) {
+  putInt(out: out, value: shapeId.index1 - 1)
+  putInt(out: out, value: shapeId.generation)
+}
+
+func expectedValue(token: view String) ret Int {
+  if token.contains(substring: "x") or token.contains(substring: "inf") or token.contains(
+    substring: "nan"
+  ) {
+    ret Math.floatBits(value: token.toFloat())
+  }
+  ret token.toInt()
+}
+
+func putPoint(out: mod List(Int), point: view ManifoldPoint) {
+  putVec(out: out, vector: point.anchorA)
+  putVec(out: out, vector: point.anchorB)
+  putFloat(out: out, value: point.separation)
+  putFloat(out: out, value: point.normalImpulse)
+  putFloat(out: out, value: point.totalNormalImpulse)
+  putFloat(out: out, value: point.normalVelocity)
+  putFloat(out: out, value: point.baseSeparation)
+  putInt(out: out, value: point.featureId)
+  putInt(out: out, value: point.triangleIndex)
+  putBool(out: out, value: point.persisted)
+}
+
+func isLiveMeshContact(contact: view Contact) ret Bool {
+  ret contact.contactId is not -1 and (contact.flags bitand simMeshContact) is not 0
+}
+
+# The driver's meshContacts (height-field contacts here), in contact id order.
+func putMeshContacts(out: mod List(Int), world: view PhysicsWorld) {
+  var count: Int = 0
+  loop let contact: view Contact in world.contacts {
+    if isLiveMeshContact(contact: contact) {
+      count = count + 1
+    }
+  }
+  putInt(out: out, value: count)
+  loop let contact: view Contact in world.contacts {
+    if isLiveMeshContact(contact: contact) is false {
+      continue
+    }
+    putInt(out: out, value: contact.contactId)
+    putInt(out: out, value: contact.flags)
+    putInt(out: out, value: contact.colorIndex)
+    putInt(out: out, value: contact.localIndex)
+    putInt(out: out, value: contact.manifolds.length)
+    loop let manifold: view Manifold in contact.manifolds {
+      putVec(out: out, vector: manifold.normal)
+      putFloat(out: out, value: manifold.twistImpulse)
+      putVec(out: out, vector: manifold.frictionImpulse)
+      putVec(out: out, vector: manifold.rollingImpulse)
+      putInt(out: out, value: manifold.pointCount)
+      loop var p: Int = 0, p < manifold.pointCount, ++p {
+        putPoint(out: out, point: manifold.points.copyAtDefault(index: p))
+      }
+    }
+    putFloat(out: out, value: contact.friction)
+    putFloat(out: out, value: contact.restitution)
+    putFloat(out: out, value: contact.rollingResistance)
+    putVec(out: out, vector: contact.tangentVelocity)
+    putInt(out: out, value: contact.triangleCache.length)
+  }
+}
+
+# A height field from its spec: 0 = a wave, 1 = a grid.
+func readHeightFieldSpec(reader: mod Reader) ret HeightFieldData {
+  let kind: Int = readInt(reader: reader)
+  let rows: Int = readInt(reader: reader)
+  let columns: Int = readInt(reader: reader)
+  let scale: Vec3 = readVec(reader: reader)
+  if kind is 0 {
+    let rowFrequency: Float = readFloat(reader: reader)
+    let columnFrequency: Float = readFloat(reader: reader)
+    let makeHoles: Bool = readBool(reader: reader)
+    ret createHeightWave(
+      rowCount: rows
+      columnCount: columns
+      scale: scale
+      rowFrequency: rowFrequency
+      columnFrequency: columnFrequency
+      makeHoles: makeHoles
+      lengthUnitsPerMeter: 1.0
+    )
+  }
+  let makeHoles: Bool = readBool(reader: reader)
+  ret createHeightGrid(
+    rowCount: rows
+    columnCount: columns
+    scale: scale
+    makeHoles: makeHoles
+    lengthUnitsPerMeter: 1.0
+  )
+}
+
+# A hull from its spec: 0 = a point cloud (128 vertices max), 1 = a box.
+func readHullSpec(reader: mod Reader) ret opt Hull {
+  let kind: Int = readInt(reader: reader)
+  if kind is 0 {
+    let count: Int = readInt(reader: reader)
+    let points: List(Vec3) = List.create(Vec3, cap: count)
+    loop var i: Int = 0, i < count, ++i {
+      points.add(value: readVec(reader: reader))
+    }
+    ret createHull(points: points, maxVertexCount: 128)
+  }
+  let hx: Float = readFloat(reader: reader)
+  let hy: Float = readFloat(reader: reader)
+  let hz: Float = readFloat(reader: reader)
+  let transform: Transform = readTransform(reader: reader)
+  ret makeTransformedBoxHull(
+    hx: hx
+    hy: hy
+    hz: hz
+    transform: transform
+    lengthUnitsPerMeter: 1.0
+  )
+}
+
+# The values a scene step reports for a body: position, rotation, linear
+# and angular velocity.
+func bodyValues(world: view PhysicsWorld, bodyId: view BodyId) ret List(Float) {
+  let transform: Transform = getBodyTransform(world: world, bodyId: bodyId)
+  let linear: Vec3 = getBodyLinearVelocity(world: world, bodyId: bodyId)
+  let angular: Vec3 = getBodyAngularVelocity(world: world, bodyId: bodyId)
+  let values: List(Float) = {
+    transform.position.x
+    transform.position.y
+    transform.position.z
+    transform.rotation.x
+    transform.rotation.y
+    transform.rotation.z
+    transform.rotation.w
+    linear.x
+    linear.y
+    linear.z
+    angular.x
+    angular.y
+    angular.z
+  }
+  ret values
+}
+
+# FNV-1a over the 32-bit words of the values' float bits
+func hashBodies(world: view PhysicsWorld, bodies: view List(BodyId)) ret UInt64 {
+  var hash: UInt64 = 14695981039346656037
+  let prime: UInt64 = 1099511628211
+  loop let bodyId: view BodyId in bodies {
+    let values: List(Float) = bodyValues(world: world, bodyId: bodyId)
+    loop var i: Int = 0, i < values.length, ++i {
+      let bits: UInt64 = (Math.floatBits(value: values.copyAtDefault(index: i)) bitand 4294967295) as UInt64
+      hash = (hash bitxor bits) * prime
+    }
+  }
+  ret hash
+}
+
+func evaluate(
+  name: view String
+  reader: mod Reader
+  world: mod PhysicsWorld
+  bodies: mod List(BodyId)
+  out: mod List(Int)
+) ret Bool {
+  if name is "world.create" {
+    var def: WorldDef = defaultWorldDef(lengthUnitsPerMeter: 1.0)
+    def.gravity = readVec(reader: reader)
+    world = createWorld(def: def)
+  } else if name is "body.create" {
+    var def: BodyDef = defaultBodyDef(lengthUnitsPerMeter: 1.0)
+    def.bodyType = bodyTypeFromCode(code: readInt(reader: reader))
+    def.position = readVec(reader: reader)
+    def.rotation = readQuat(reader: reader)
+    def.linearVelocity = readVec(reader: reader)
+    def.angularVelocity = readVec(reader: reader)
+    def.linearDamping = readFloat(reader: reader)
+    def.angularDamping = readFloat(reader: reader)
+    def.gravityScale = readFloat(reader: reader)
+    def.sleepThreshold = readFloat(reader: reader)
+    def.safetyFactor = readFloat(reader: reader)
+    let locks: Int = readInt(reader: reader)
+    def.motionLocks = MotionLocks {
+      linearX: (locks bitand 1) is not 0
+      linearY: (locks bitand 2) is not 0
+      linearZ: (locks bitand 4) is not 0
+      angularX: (locks bitand 8) is not 0
+      angularY: (locks bitand 16) is not 0
+      angularZ: (locks bitand 32) is not 0
+    }
+    def.enableSleep = readBool(reader: reader)
+    def.isAwake = readBool(reader: reader)
+    def.isBullet = readBool(reader: reader)
+    def.isEnabled = readBool(reader: reader)
+    def.allowFastRotation = readBool(reader: reader)
+    def.enableContactRecycling = readBool(reader: reader)
+    let bodyId: BodyId = createBody(world: world, def: def)
+    bodies.add(value: bodyId)
+    putBodyId(out: out, bodyId: bodyId)
+  } else if name is "shape.sphere" {
+    let bodyId: BodyId = readBodyId(reader: reader)
+    let def: ShapeDef = readShapeDef(reader: reader)
+    let center: Vec3 = readVec(reader: reader)
+    let radius: Float = readFloat(reader: reader)
+    putShapeId(
+      out: out
+      shapeId: createSphereShape(
+        world: world
+        bodyId: bodyId
+        def: def
+        sphere: Sphere { center: center, radius: radius }
+      )
+    )
+  } else if name is "shape.capsule" {
+    let bodyId: BodyId = readBodyId(reader: reader)
+    let def: ShapeDef = readShapeDef(reader: reader)
+    let center1: Vec3 = readVec(reader: reader)
+    let center2: Vec3 = readVec(reader: reader)
+    let radius: Float = readFloat(reader: reader)
+    let capsule: Capsule = { center1: center1, center2: center2, radius: radius }
+    putShapeId(
+      out: out
+      shapeId: createCapsuleShape(
+        world: world
+        bodyId: bodyId
+        def: def
+        capsule: capsule
+      )
+    )
+  } else if name is "shape.hull" or name is "shape.transformedHull" {
+    let bodyId: BodyId = readBodyId(reader: reader)
+    let def: ShapeDef = readShapeDef(reader: reader)
+    if let hull: Hull = readHullSpec(reader: reader) {
+      if name is "shape.hull" {
+        putShapeId(
+          out: out
+          shapeId: createHullShape(
+            world: world
+            bodyId: bodyId
+            def: def
+            hull: hull
+          )
+        )
+      } else {
+        let transform: Transform = readTransform(reader: reader)
+        let scaleVector: Vec3 = readVec(reader: reader)
+        putShapeId(
+          out: out
+          shapeId: createTransformedHullShape(
+            world: world
+            bodyId: bodyId
+            def: def
+            hull: hull
+            transform: transform
+            scaleVector: scaleVector
+          )
+        )
+      }
+    }
+  } else if name is "shape.heightField" {
+    let bodyId: BodyId = readBodyId(reader: reader)
+    let def: ShapeDef = readShapeDef(reader: reader)
+    let heightField: HeightFieldData = readHeightFieldSpec(reader: reader)
+    putShapeId(
+      out: out
+      shapeId: createHeightFieldShape(
+        world: world
+        bodyId: bodyId
+        def: def
+        heightField: heightField
+      )
+    )
+  } else if name is "world.meshContacts" {
+    putMeshContacts(out: out, world: world)
+  } else if name is "body.setTransform" {
+    let bodyId: BodyId = readBodyId(reader: reader)
+    let position: Vec3 = readVec(reader: reader)
+    setBodyTransform(
+      world: world
+      bodyId: bodyId
+      position: position
+      rotation: readQuat(reader: reader)
+    )
+  } else if name is "world.scene" {
+    var def: WorldDef = defaultWorldDef(lengthUnitsPerMeter: 1.0)
+    def.gravity = readVec(reader: reader)
+    def.enableSleep = readBool(reader: reader)
+    world = createWorld(def: def)
+    bodies.clear()
+  } else if name is "world.step" {
+    let timeStep: Float = readFloat(reader: reader)
+    let subSteps: Int = readInt(reader: reader)
+    stepWorld(world: world, timeStep: timeStep, subStepCount: subSteps)
+    putU64(out: out, value: hashBodies(world: world, bodies: bodies))
+  } else if name is "world.bodies" {
+    putInt(out: out, value: bodies.length)
+    loop let bodyId: view BodyId in bodies {
+      let values: List(Float) = bodyValues(world: world, bodyId: bodyId)
+      loop var i: Int = 0, i < values.length, ++i {
+        putFloat(out: out, value: values.copyAtDefault(index: i))
+      }
+    }
+  } else {
+    ret false
+  }
+  ret true
+}
+
+func readGolden() ret String {
+  # The runner runs from compiler/, the TSan gate from the case's folder.
+  let candidates: List(String) = {
+    "../tools/box3d-oracle/goldens/heightscenes.golden"
+    "../../../tools/box3d-oracle/goldens/heightscenes.golden"
+    "tools/box3d-oracle/goldens/heightscenes.golden"
+  }
+  loop var i: Int = 0, i < candidates.length, ++i {
+    if let text: String = readFile(path: candidates.copyAtDefault(index: i)) {
+      ret text
+    }
+  }
+  ret ""
+}
+
+func main() {
+  let golden: String = readGolden()
+  let lines: List(String) = golden.split(sep: "\n")
+  var world: PhysicsWorld = createWorld(def: defaultWorldDef(lengthUnitsPerMeter: 1.0))
+  let bodies: List(BodyId) = List.create(BodyId, cap: 64)
+  var calls: Int = 0
+  var mismatches: Int = 0
+  var unknown: Int = 0
+  loop var i: Int = 0, i < lines.length, ++i {
+    let line: String = lines.copyAtDefault(index: i)
+    if line.length() is 0 or line.startsWith(prefix: "#") {
+      continue
+    }
+    let tokens: List(String) = line.split(sep: " ")
+    let name: String = tokens.copyAtDefault(index: 0)
+    var reader: Reader = { tokens: List.create(String, cap: 64), next: 0 }
+    let expected: List(Int) = List.create(Int, cap: 64)
+    var afterArrow: Bool = false
+    loop var j: Int = 1, j < tokens.length, ++j {
+      let token: String = tokens.copyAtDefault(index: j)
+      if token is "->" {
+        afterArrow = true
+      } else if afterArrow {
+        expected.add(value: expectedValue(token: token))
+      } else {
+        reader.tokens.add(value: token)
+      }
+    }
+    let actual: List(Int) = List.create(Int, cap: 64)
+    if evaluate(
+      name: name
+      reader: reader
+      world: world
+      bodies: bodies
+      out: actual
+    ) is false {
+      unknown = unknown + 1
+      log("not ported: {name}")
+      continue
+    }
+    calls = calls + 1
+    var same: Bool = actual.length is expected.length
+    var firstDifference: Int = -1
+    loop var j: Int = 0, j < expected.length and j < actual.length and firstDifference < 0, ++j {
+      if actual.copyAtDefault(index: j) is not expected.copyAtDefault(index: j) {
+        same = false
+        firstDifference = j
+      }
+    }
+    if same is false {
+      mismatches = mismatches + 1
+      if mismatches <= 6 {
+        log(
+          "MISMATCH line {i + 1} ({name}): {actual.length} values, want {expected.length}; first difference at {firstDifference}: got {actual.copyAtDefault(
+            index: firstDifference
+          )}, want {expected.copyAtDefault(index: firstDifference)}"
+        )
+      }
+    }
+  }
+  log("heightscenes.golden: {calls} operations, {mismatches} not bit-exact, {unknown} not ported")
+}

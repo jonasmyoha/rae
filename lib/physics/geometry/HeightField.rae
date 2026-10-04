@@ -1,0 +1,713 @@
+# Height fields (Box3D's height_field.c at 9f998c8: b3CreateHeightField with
+# its quantized heights and convexity flags, b3GetHeightFieldTriangle,
+# b3GetHeightFieldMaterial, b3ComputeHeightFieldAABB, b3QueryHeightField,
+# b3CreateGrid and b3CreateWave). A grid of heights over x (columns) and z
+# (rows), two triangles per cell, the diagonal fixed; a cell whose material
+# is heightFieldHole has no triangles. Box3D's operation order is kept
+# exactly; checked bit for bit against the oracle in fixture 979.
+#
+# Box3D packs a height field into one byte block (and hashes it); here a
+# HeightFieldData is a struct of lists in the same order. The ray, shape and
+# mover casts are P7.
+import Math
+open Vec3
+open physics/Constants
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/TransformMath
+open physics/math/AabbMath
+open physics/math/PlaneMath
+open physics/geometry/Mesh
+open physics/geometry/MeshQuery
+
+# B3_HEIGHT_FIELD_HOLE: the material index of a cell with no triangles
+const heightFieldHole: Int = 255
+
+# UINT16_MAX: the quantization range
+const heightQuantization: Float = 65535.0
+
+# A height field to create (b3HeightFieldDef). An empty `materialIndices`
+# means every cell has material 0.
+type HeightFieldDef {
+  # countX * countZ heights, row by row
+  heights: List(Float)
+  # (countX - 1) * (countZ - 1) cell materials
+  materialIndices: List(Int)
+  # All components positive
+  scale: Vec3
+  # Grid lines along x and z
+  countX: Int
+  countZ: Int
+  # The quantization range (unscaled); heights are clamped to it
+  globalMinimumHeight: Float
+  globalMaximumHeight: Float
+  clockwiseWinding: Bool
+}
+
+# A created height field (b3HeightFieldData).
+type HeightFieldData {
+  # The local bounds
+  aabb: Aabb
+  minHeight: Float
+  maxHeight: Float
+  # The quantization step
+  heightScale: Float
+  scale: Vec3
+  columnCount: Int
+  rowCount: Int
+  clockwise: Bool
+  # The quantized heights (uint16 in Box3D), one per grid point
+  heights: List(Int)
+  # One per cell
+  materialIndices: List(Int)
+  # b3MeshEdgeFlags, one per triangle
+  flags: List(Int)
+}
+
+# A grid point of the unscaled height field, scaled.
+func scaledPoint(
+  scale: view Vec3
+  x: view Float
+  height: view Float
+  z: view Float
+) ret Vec3 {
+  ret multiply(left: scale, right: Vec3 { x: x, y: height, z: z })
+}
+
+# The concave and inverse-concave flag bits of an edge between the triangle
+# of `plane` and a neighbour with normal `normal` and its point `opposite`
+# off the shared edge: concave when the neighbour rises above the plane,
+# inverse-concave when it falls below; both when they are within 5 degrees.
+func edgeConvexity(
+  plane: view Plane
+  opposite: view Vec3
+  normal: view Vec3
+  concaveFlag: view Int
+  inverseFlag: view Int
+) ret Int {
+  let cos5Deg: Float = 0.9962
+  let separation: Float = planeSeparation(plane: plane, point: opposite)
+  let cosAngle: Float = dot(left: plane.normal, right: normal)
+  var flags: Int = 0
+  if separation > 0.0 or cosAngle > cos5Deg {
+    flags = flags bitor concaveFlag
+  }
+  if separation < 0.0 or cosAngle > cos5Deg {
+    flags = flags bitor inverseFlag
+  }
+  ret flags
+}
+
+# The normal of triangle a, b, c (b3Normalize(b3Cross(b - a, c - a))).
+func triangleNormal(a: view Vec3, b: view Vec3, c: view Vec3) ret Vec3 {
+  ret normalize(
+    vector: cross(left: subtract(left: b, right: a), right: subtract(left: c, right: a))
+  )
+}
+
+# Is cell `cellIndex` present (inside the grid and not a hole)?
+func isSolidCell(materials: view List(Int), cellIndex: view Int) ret Bool {
+  ret materials.copyAtDefault(index: cellIndex) is not heightFieldHole
+}
+
+# The convexity flags of the two triangles of cell (row, column), against
+# their neighbours across each edge (the four checks of b3CreateHeightField).
+func cellFlags(
+  heights: view List(Float)
+  materials: view List(Int)
+  scale: view Vec3
+  row: view Int
+  column: view Int
+  columnCount: view Int
+  rowCount: view Int
+) ret List(Int) {
+  let index11: Int = row * columnCount + column
+  let index12: Int = index11 + 1
+  let index21: Int = (row + 1) * columnCount + column
+  let index22: Int = index21 + 1
+  let x1: Float = column as Float
+  let x2: Float = (column + 1) as Float
+  let z1: Float = row as Float
+  let z2: Float = (row + 1) as Float
+
+  # Triangle 0: 11, 21, 12
+  let a0: Vec3 = scaledPoint(
+    scale: scale
+    x: x1
+    height: heights.copyAtDefault(index: index11)
+    z: z1
+  )
+  let b0: Vec3 = scaledPoint(
+    scale: scale
+    x: x1
+    height: heights.copyAtDefault(index: index21)
+    z: z2
+  )
+  let c0: Vec3 = scaledPoint(
+    scale: scale
+    x: x2
+    height: heights.copyAtDefault(index: index12)
+    z: z1
+  )
+  let plane1: Plane = planeFromPoints(point1: a0, point2: b0, point3: c0)
+
+  # Triangle 1: 22, 12, 21
+  let a1: Vec3 = scaledPoint(
+    scale: scale
+    x: x2
+    height: heights.copyAtDefault(index: index22)
+    z: z2
+  )
+  let b1: Vec3 = scaledPoint(
+    scale: scale
+    x: x2
+    height: heights.copyAtDefault(index: index12)
+    z: z1
+  )
+  let c1: Vec3 = scaledPoint(
+    scale: scale
+    x: x1
+    height: heights.copyAtDefault(index: index21)
+    z: z2
+  )
+  let plane2: Plane = planeFromPoints(point1: a1, point2: b1, point3: c1)
+
+  # The diagonal
+  let diagonal: Int = edgeConvexity(
+    plane: plane1
+    opposite: a1
+    normal: plane2.normal
+    concaveFlag: concaveEdge2
+    inverseFlag: inverseConcaveEdge2
+  )
+  var flags1: Int = diagonal
+  var flags2: Int = diagonal
+
+  # Top: triangle 1 of the cell above
+  let topCellIndex: Int = (row - 1) * (columnCount - 1) + column
+  if row > 0 and isSolidCell(materials: materials, cellIndex: topCellIndex) {
+    let r: Int = row - 1
+    let i12: Int = r * columnCount + column + 1
+    let i21: Int = (r + 1) * columnCount + column
+    let i22: Int = i21 + 1
+    let rz1: Float = r as Float
+    let rz2: Float = (r + 1) as Float
+    let v0: Vec3 = scaledPoint(
+      scale: scale
+      x: x2
+      height: heights.copyAtDefault(index: i22)
+      z: rz2
+    )
+    let v1: Vec3 = scaledPoint(
+      scale: scale
+      x: x2
+      height: heights.copyAtDefault(index: i12)
+      z: rz1
+    )
+    let v2: Vec3 = scaledPoint(
+      scale: scale
+      x: x1
+      height: heights.copyAtDefault(index: i21)
+      z: rz2
+    )
+    flags1 = flags1 bitor edgeConvexity(
+      plane: plane1
+      opposite: v1
+      normal: triangleNormal(a: v0, b: v1, c: v2)
+      concaveFlag: concaveEdge3
+      inverseFlag: inverseConcaveEdge3
+    )
+  }
+
+  # Bottom: triangle 0 of the cell below
+  let bottomCellIndex: Int = (row + 1) * (columnCount - 1) + column
+  if row + 1 < rowCount - 1 and isSolidCell(materials: materials, cellIndex: bottomCellIndex) {
+    let r: Int = row + 1
+    let i11: Int = r * columnCount + column
+    let i12: Int = i11 + 1
+    let i21: Int = (r + 1) * columnCount + column
+    let rz1: Float = r as Float
+    let rz2: Float = (r + 1) as Float
+    let v0: Vec3 = scaledPoint(
+      scale: scale
+      x: x1
+      height: heights.copyAtDefault(index: i11)
+      z: rz1
+    )
+    let v1: Vec3 = scaledPoint(
+      scale: scale
+      x: x1
+      height: heights.copyAtDefault(index: i21)
+      z: rz2
+    )
+    let v2: Vec3 = scaledPoint(
+      scale: scale
+      x: x2
+      height: heights.copyAtDefault(index: i12)
+      z: rz1
+    )
+    flags2 = flags2 bitor edgeConvexity(
+      plane: plane2
+      opposite: v1
+      normal: triangleNormal(a: v0, b: v1, c: v2)
+      concaveFlag: concaveEdge3
+      inverseFlag: inverseConcaveEdge3
+    )
+  }
+
+  # Left: triangle 1 of the cell to the left
+  let leftCellIndex: Int = row * (columnCount - 1) + column - 1
+  if column - 1 >= 0 and isSolidCell(materials: materials, cellIndex: leftCellIndex) {
+    let c: Int = column - 1
+    let i12: Int = row * columnCount + c + 1
+    let i21: Int = (row + 1) * columnCount + c
+    let i22: Int = i21 + 1
+    let cx1: Float = c as Float
+    let cx2: Float = (c + 1) as Float
+    let v0: Vec3 = scaledPoint(
+      scale: scale
+      x: cx2
+      height: heights.copyAtDefault(index: i22)
+      z: z2
+    )
+    let v1: Vec3 = scaledPoint(
+      scale: scale
+      x: cx2
+      height: heights.copyAtDefault(index: i12)
+      z: z1
+    )
+    let v2: Vec3 = scaledPoint(
+      scale: scale
+      x: cx1
+      height: heights.copyAtDefault(index: i21)
+      z: z2
+    )
+    flags1 = flags1 bitor edgeConvexity(
+      plane: plane1
+      opposite: v2
+      normal: triangleNormal(a: v0, b: v1, c: v2)
+      concaveFlag: concaveEdge1
+      inverseFlag: inverseConcaveEdge1
+    )
+  }
+
+  # Right: triangle 0 of the cell to the right
+  let rightCellIndex: Int = row * (columnCount - 1) + column + 1
+  if column + 1 < columnCount - 1 and isSolidCell(materials: materials, cellIndex: rightCellIndex) {
+    let c: Int = column + 1
+    let i11: Int = row * columnCount + c
+    let i12: Int = i11 + 1
+    let i21: Int = (row + 1) * columnCount + c
+    let cx1: Float = c as Float
+    let cx2: Float = (c + 1) as Float
+    let v0: Vec3 = scaledPoint(
+      scale: scale
+      x: cx1
+      height: heights.copyAtDefault(index: i11)
+      z: z1
+    )
+    let v1: Vec3 = scaledPoint(
+      scale: scale
+      x: cx1
+      height: heights.copyAtDefault(index: i21)
+      z: z2
+    )
+    let v2: Vec3 = scaledPoint(
+      scale: scale
+      x: cx2
+      height: heights.copyAtDefault(index: i12)
+      z: z1
+    )
+    flags2 = flags2 bitor edgeConvexity(
+      plane: plane2
+      opposite: v2
+      normal: triangleNormal(a: v0, b: v1, c: v2)
+      concaveFlag: concaveEdge1
+      inverseFlag: inverseConcaveEdge1
+    )
+  }
+  let result: List(Int) = { flags1, flags2 }
+  ret result
+}
+
+# b3CreateHeightField
+func createHeightField(
+  def: view HeightFieldDef
+  lengthUnitsPerMeter: view Float
+) ret HeightFieldData {
+  let columnCount: Int = def.countX
+  let rowCount: Int = def.countZ
+  let heightCount: Int = columnCount * rowCount
+  let cellCount: Int = (columnCount - 1) * (rowCount - 1)
+  let triangleCount: Int = 2 * cellCount
+
+  let minHeight: Float = def.globalMinimumHeight
+  let maxHeight: Float = def.globalMaximumHeight
+  let height: Float = maxFloat(
+    left: maxHeight - minHeight
+    right: linearSlop(lengthUnitsPerMeter: lengthUnitsPerMeter)
+  )
+  let heightScale: Float = height / heightQuantization
+  var lowerHeightBound: Float = maxHeight
+  var upperHeightBound: Float = minHeight
+
+  let invHeightScale: Float = 1.0 / heightScale
+  let compressed: List(Int) = List.create(Int, cap: heightCount)
+  loop var i: Int = 0, i < heightCount, ++i {
+    let clampedHeight: Float = clampFloat(
+      value: def.heights.copyAtDefault(index: i)
+      lower: minHeight
+      upper: maxHeight
+    )
+    let scaledHeight: Float = (clampedHeight - minHeight) * invHeightScale
+    compressed.add(value: minFloat(left: scaledHeight, right: heightQuantization) as Int)
+    lowerHeightBound = minFloat(left: lowerHeightBound, right: clampedHeight)
+    upperHeightBound = maxFloat(left: upperHeightBound, right: clampedHeight)
+  }
+
+  # The decompressed heights, for accurate convexity
+  let heights: List(Float) = List.create(Float, cap: heightCount)
+  loop var i: Int = 0, i < heightCount, ++i {
+    heights.add(value: minHeight + heightScale * (compressed.copyAtDefault(index: i) as Float))
+  }
+
+  let materials: List(Int) = List.create(Int, cap: cellCount)
+  loop var i: Int = 0, i < cellCount, ++i {
+    if def.materialIndices.length > 0 {
+      materials.add(value: def.materialIndices.copyAtDefault(index: i))
+    } else {
+      materials.add(value: 0)
+    }
+  }
+
+  let scale: Vec3 = def.scale
+  let aabb: Aabb = {
+    lowerBound: Vec3 { x: 0.0, y: scale.y * lowerHeightBound, z: 0.0 }
+    upperBound: Vec3 {
+      x: scale.x * ((columnCount - 1) as Float)
+      y: scale.y * upperHeightBound
+      z: scale.z * ((rowCount - 1) as Float)
+    }
+  }
+
+  let flags: List(Int) = List.create(Int, cap: triangleCount)
+  loop var i: Int = 0, i < triangleCount, ++i {
+    flags.add(value: 0)
+  }
+  var triangleIndex: Int = 0
+  loop var row: Int = 0, row < rowCount - 1, ++row {
+    loop var column: Int = 0, column < columnCount - 1, ++column {
+      let triangleIndex1: Int = triangleIndex
+      triangleIndex = triangleIndex + 2
+      let cellIndex: Int = row * (columnCount - 1) + column
+      if materials.copyAtDefault(index: cellIndex) is heightFieldHole {
+        continue
+      }
+      let pair: List(Int) = cellFlags(
+        heights: heights
+        materials: materials
+        scale: scale
+        row: row
+        column: column
+        columnCount: columnCount
+        rowCount: rowCount
+      )
+      flags.set(index: triangleIndex1, value: pair.copyAtDefault(index: 0))
+      flags.set(index: triangleIndex1 + 1, value: pair.copyAtDefault(index: 1))
+    }
+  }
+
+  ret HeightFieldData {
+    aabb: aabb
+    minHeight: minHeight
+    maxHeight: maxHeight
+    heightScale: heightScale
+    scale: scale
+    columnCount: columnCount
+    rowCount: rowCount
+    clockwise: def.clockwiseWinding
+    heights: compressed
+    materialIndices: materials
+    flags: flags
+  }
+}
+
+# b3GetHeightFieldCellCorners: (column, row), (column + 1, row),
+# (column, row + 1), (column + 1, row + 1), local and scaled.
+func cellCorners(
+  heightField: view HeightFieldData
+  row: view Int
+  column: view Int
+) ret List(Vec3) {
+  let columnCount: Int = heightField.columnCount
+  let index11: Int = row * columnCount + column
+  let index12: Int = index11 + 1
+  let index21: Int = (row + 1) * columnCount + column
+  let index22: Int = index21 + 1
+  let minHeight: Float = heightField.minHeight
+  let heightScale: Float = heightField.heightScale
+  let height11: Float = minHeight + heightScale * (heightField.heights.copyAtDefault(index: index11) as Float)
+  let height12: Float = minHeight + heightScale * (heightField.heights.copyAtDefault(index: index12) as Float)
+  let height21: Float = minHeight + heightScale * (heightField.heights.copyAtDefault(index: index21) as Float)
+  let height22: Float = minHeight + heightScale * (heightField.heights.copyAtDefault(index: index22) as Float)
+  let x1: Float = column as Float
+  let x2: Float = (column + 1) as Float
+  let z1: Float = row as Float
+  let z2: Float = (row + 1) as Float
+  let scale: Vec3 = heightField.scale
+  let corner11: Vec3 = scaledPoint(
+    scale: scale
+    x: x1
+    height: height11
+    z: z1
+  )
+  let corner12: Vec3 = scaledPoint(
+    scale: scale
+    x: x2
+    height: height12
+    z: z1
+  )
+  let corner21: Vec3 = scaledPoint(
+    scale: scale
+    x: x1
+    height: height21
+    z: z2
+  )
+  let corner22: Vec3 = scaledPoint(
+    scale: scale
+    x: x2
+    height: height22
+    z: z2
+  )
+  let corners: List(Vec3) = { corner11, corner12, corner21, corner22 }
+  ret corners
+}
+
+# b3GetHeightFieldTriangle: triangle 0 of a cell is 11, 21, 12 and
+# triangle 1 is 22, 12, 21; clockwise winding swaps the last two and the
+# flags of edges 1 and 3.
+func getHeightFieldTriangle(
+  heightField: view HeightFieldData
+  triangleIndex: view Int
+) ret MeshTriangleData {
+  var flags: Int = heightField.flags.copyAtDefault(index: triangleIndex)
+  let columnCount: Int = heightField.columnCount
+  let quadIndex: Int = triangleIndex shr 1
+  let row: Int = quadIndex / (columnCount - 1)
+  let column: Int = quadIndex - row * (columnCount - 1)
+  let index11: Int = row * columnCount + column
+  let index12: Int = index11 + 1
+  let index21: Int = (row + 1) * columnCount + column
+  let index22: Int = index21 + 1
+  let corners: List(Vec3) = cellCorners(heightField: heightField, row: row, column: column)
+
+  var vertex1: Vec3 = corners.copyAtDefault(index: 3)
+  var vertex2: Vec3 = corners.copyAtDefault(index: 1)
+  var vertex3: Vec3 = corners.copyAtDefault(index: 2)
+  var i1: Int = index22
+  var i2: Int = index12
+  var i3: Int = index21
+  if (triangleIndex bitand 1) is 0 {
+    vertex1 = corners.copyAtDefault(index: 0)
+    vertex2 = corners.copyAtDefault(index: 2)
+    vertex3 = corners.copyAtDefault(index: 1)
+    i1 = index11
+    i2 = index21
+    i3 = index12
+  }
+  if heightField.clockwise {
+    let swappedVertex: Vec3 = vertex2
+    vertex2 = vertex3
+    vertex3 = swappedVertex
+    let swappedIndex: Int = i2
+    i2 = i3
+    i3 = swappedIndex
+    # Reversing the winding swaps edges 1 and 3; the diagonal keeps its bits
+    let edge1Bits: Int = flags bitand (concaveEdge1 bitor inverseConcaveEdge1)
+    let edge3Bits: Int = flags bitand (concaveEdge3 bitor inverseConcaveEdge3)
+    flags = flags bitand (bitnot (concaveEdge1 bitor concaveEdge3 bitor inverseConcaveEdge1 bitor inverseConcaveEdge3))
+    flags = flags bitor (edge1Bits shl 2)
+    flags = flags bitor (edge3Bits shr 2)
+  }
+  ret MeshTriangleData {
+    vertex1: vertex1
+    vertex2: vertex2
+    vertex3: vertex3
+    index1: i1
+    index2: i2
+    index3: i3
+    flags: flags
+  }
+}
+
+# b3GetHeightFieldMaterial
+func getHeightFieldMaterial(heightField: view HeightFieldData, triangleIndex: view Int) ret Int {
+  ret heightField.materialIndices.copyAtDefault(index: triangleIndex shr 1)
+}
+
+# b3ComputeHeightFieldAABB
+func computeHeightFieldAabb(heightField: view HeightFieldData, transform: view Transform) ret Aabb {
+  ret transformAabb(transform: transform, box: heightField.aabb)
+}
+
+# b3QueryHeightField: the triangles of the solid cells whose bounds overlap
+# `bounds` (local, scaled), by increasing index, at most `capacity`.
+func queryHeightField(
+  heightField: view HeightFieldData
+  bounds: view Aabb
+  capacity: view Int
+) ret List(Int) {
+  let result: List(Int) = List.create(Int, cap: 8)
+  let scale: Vec3 = heightField.scale
+  let minRow: Int = Math.floor(x: bounds.lowerBound.z / scale.z) as Int
+  let maxRow: Int = Math.floor(x: bounds.upperBound.z / scale.z) as Int
+  let minColumn: Int = Math.floor(x: bounds.lowerBound.x / scale.x) as Int
+  let maxColumn: Int = Math.floor(x: bounds.upperBound.x / scale.x) as Int
+  # Rows outer, columns inner: the triangle indices increase
+  loop var row: Int = minRow, row <= maxRow, ++row {
+    if row < 0 or heightField.rowCount - 1 <= row {
+      continue
+    }
+    loop var column: Int = minColumn, column <= maxColumn, ++column {
+      if column < 0 or heightField.columnCount - 1 <= column {
+        continue
+      }
+      let cellIndex: Int = row * (heightField.columnCount - 1) + column
+      if heightField.materialIndices.copyAtDefault(index: cellIndex) is heightFieldHole {
+        continue
+      }
+      let corners: List(Vec3) = cellCorners(heightField: heightField, row: row, column: column)
+      let point11: Vec3 = corners.copyAtDefault(index: 0)
+      let point12: Vec3 = corners.copyAtDefault(index: 1)
+      let point21: Vec3 = corners.copyAtDefault(index: 2)
+      let point22: Vec3 = corners.copyAtDefault(index: 3)
+      let cellBound: Aabb = {
+        lowerBound: min(
+          left: min(left: point11, right: point12)
+          right: min(left: point21, right: point22)
+        )
+        upperBound: max(
+          left: max(left: point11, right: point12)
+          right: max(left: point21, right: point22)
+        )
+      }
+      if overlaps(first: bounds, second: cellBound) {
+        let triangleIndex: Int = 2 * cellIndex
+        # Box3D's collector keeps the first `capacity` triangles
+        if result.length < capacity {
+          result.add(value: triangleIndex)
+        }
+        if result.length < capacity {
+          result.add(value: triangleIndex + 1)
+        }
+      }
+    }
+  }
+  ret result
+}
+
+# The generated fields' cells: material 0, or a hole every 16th cell
+# (after the first) when `makeHoles`.
+func generatedMaterials(
+  rowCount: view Int
+  columnCount: view Int
+  makeHoles: view Bool
+) ret List(Int) {
+  let materials: List(Int) = List.create(Int, cap: (rowCount - 1) * (columnCount - 1))
+  loop var i: Int = 0, i < rowCount - 1, ++i {
+    loop var j: Int = 0, j < columnCount - 1, ++j {
+      let k: Int = i * (columnCount - 1) + j
+      if makeHoles and k > 0 and k % 16 is 0 {
+        materials.add(value: heightFieldHole)
+      } else {
+        materials.add(value: 0)
+      }
+    }
+  }
+  ret materials
+}
+
+func generatedDef(
+  heights: view List(Float)
+  materials: view List(Int)
+  scale: view Vec3
+  rowCount: view Int
+  columnCount: view Int
+) ret HeightFieldDef {
+  ret HeightFieldDef {
+    heights: heights
+    materialIndices: materials
+    scale: scale
+    countX: columnCount
+    countZ: rowCount
+    globalMinimumHeight: -256.0
+    globalMaximumHeight: 256.0
+    clockwiseWinding: false
+  }
+}
+
+# b3CreateGrid: a flat height field.
+func createHeightGrid(
+  rowCount: view Int
+  columnCount: view Int
+  scale: view Vec3
+  makeHoles: view Bool
+  lengthUnitsPerMeter: view Float
+) ret HeightFieldData {
+  let heights: List(Float) = List.create(Float, cap: rowCount * columnCount)
+  loop var k: Int = 0, k < rowCount * columnCount, ++k {
+    heights.add(value: 0.0)
+  }
+  let materials: List(Int) = generatedMaterials(
+    rowCount: rowCount
+    columnCount: columnCount
+    makeHoles: makeHoles
+  )
+  ret createHeightField(
+    def: generatedDef(
+      heights: heights
+      materials: materials
+      scale: scale
+      rowCount: rowCount
+      columnCount: columnCount
+    )
+    lengthUnitsPerMeter: lengthUnitsPerMeter
+  )
+}
+
+# b3CreateWave: heights sin(row) * sin(column) at the given frequencies.
+func createHeightWave(
+  rowCount: view Int
+  columnCount: view Int
+  scale: view Vec3
+  rowFrequency: view Float
+  columnFrequency: view Float
+  makeHoles: view Bool
+  lengthUnitsPerMeter: view Float
+) ret HeightFieldData {
+  let heights: List(Float) = List.create(Float, cap: rowCount * columnCount)
+  let omegaZ: Float = 2.0 * pi * rowFrequency
+  let omegaX: Float = 2.0 * pi * columnFrequency
+  loop var i: Int = 0, i < rowCount, ++i {
+    let rowHeight: Float = computeCosSin(radians: omegaZ * (i as Float)).sine
+    loop var j: Int = 0, j < columnCount, ++j {
+      let columnHeight: Float = computeCosSin(radians: omegaX * (j as Float)).sine
+      heights.add(value: rowHeight * columnHeight)
+    }
+  }
+  let materials: List(Int) = generatedMaterials(
+    rowCount: rowCount
+    columnCount: columnCount
+    makeHoles: makeHoles
+  )
+  ret createHeightField(
+    def: generatedDef(
+      heights: heights
+      materials: materials
+      scale: scale
+      rowCount: rowCount
+      columnCount: columnCount
+    )
+    lengthUnitsPerMeter: lengthUnitsPerMeter
+  )
+}
