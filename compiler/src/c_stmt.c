@@ -3167,8 +3167,42 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                         && rae_opt_is_struct_rep(ctx, target_tr);
                     const char* opt_c = opt_struct ? rae_opt_type_name(ctx, target_tr) : "RaeAny";
                     fprintf(out, "{ %s __asg%d = ", opt_c, tmpn);
-                    emit_optional_boxed_expr(ctx, target_tr,
-                                             stmt->as.assign_stmt.value, out);
+                    // `=` COPIES (#79484806) for an optional too (#93440860): an
+                    // RHS that reads an existing `opt T` location whose payload
+                    // owns heap lands as a deep copy. Passing the struct through
+                    // aliased the source's buffers, so the source's own drop
+                    // left the target dangling.
+                    const AstExpr* orhs = stmt->as.assign_stmt.value;
+                    const AstTypeRef* orhs_tr = (orhs->kind == AST_EXPR_IDENT
+                        || orhs->kind == AST_EXPR_MEMBER || orhs->kind == AST_EXPR_INDEX)
+                        ? infer_expr_type_ref(ctx, orhs) : NULL;
+                    AstTypeRef opayload = {0};
+                    if (target_tr) {
+                        AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
+                                                              ctx->generic_args, (AstTypeRef*)target_tr);
+                        opayload = sub ? *sub : *target_tr;
+                        opayload.is_opt = false;
+                        opayload.next = NULL;
+                        opayload.resolved_type = NULL;
+                    }
+                    if (opt_struct && orhs_tr && orhs_tr->is_opt
+                        && type_needs_deep_copy(ctx->compiler_ctx, ctx->module, &opayload, 0)) {
+                        fprintf(out, "(__extension__ ({ %s __dc%d = {0}; const %s* __dcs%d = ",
+                                opt_c, tmpn, opt_c, tmpn);
+                        emit_deep_copy_source(ctx, orhs, out);
+                        fprintf(out, "; if (__dcs%d->has) { __dc%d.has = 1; ", tmpn, tmpn);
+                        if (c_type_is_plain_string(&opayload)) {
+                            fprintf(out, "__dc%d.value = rae_string_copy(__dcs%d->value);", tmpn, tmpn);
+                        } else {
+                            const char* pm = rae_mangle_type_specialized(
+                                ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, &opayload);
+                            fprintf(out, "rae_deep_copy_%s(&__dc%d.value, &__dcs%d->value);",
+                                    pm, tmpn, tmpn);
+                        }
+                        fprintf(out, " } __dc%d; }))", tmpn);
+                    } else {
+                        emit_optional_boxed_expr(ctx, target_tr, orhs, out);
+                    }
                     fprintf(out, "; %s* __asgp%d = &(", opt_c, tmpn);
                     emit_expr(ctx, stmt->as.assign_stmt.target, out,
                               PREC_LOWEST, true, false);
