@@ -363,6 +363,14 @@ static bool emit_list_fast_access(CFuncContext* ctx, const AstExpr* expr, FILE* 
     else return false;
   }
   if (!index_value || ((read_fallback || write) && !extra_value)) return false;
+  // The list must be a PLACE (a local, a field, an element): the fast path
+  // takes its address. A list a call returns is an rvalue the caller owns
+  // (`grid.copyAtDefault(index: 0).copyAtDefault(index: 0)` took
+  // `&(copyAtDefault(...))`, which is not C, and would leak the copy); the
+  // library call binds and drops such a temporary.
+  const AstExpr* list_object = expr->as.method_call.object;
+  if (list_object->kind != AST_EXPR_IDENT && list_object->kind != AST_EXPR_MEMBER
+      && list_object->kind != AST_EXPR_INDEX) return false;
 
   int id = ctx->temp_counter++;
   bool list_is_ref = list_type->is_view || list_type->is_mod;
