@@ -1,0 +1,37 @@
+# The spelled-out copy of what a generic view-returning call refers to: bind
+# the view (`let source: view T => componentView(...)`), then copy from the
+# named binding. The copy is deep — changing the table's row afterwards
+# (through componentMod) leaves it, String field included, as it was.
+open ecs/Entity
+open ecs/ComponentTable
+
+type Pose {
+  x: Float
+  name: String
+}
+
+type Box(T: type) {
+  item: T
+}
+
+func itemOf(T: type, box: view Box(T)) ret view T {
+  ret view box.item
+}
+
+func main() {
+  var table: ComponentTable(Pose) = createComponentTable(Pose)
+  let entityId: EntityId = id(v: 3)
+  componentSet(this: table, entityId: entityId, data: Pose { x: 2.5, name: "table" })
+  let source: view Pose => componentView(this: table, entityId: entityId)
+  let copied: Pose = source
+  let row: mod Pose => componentMod(this: table, entityId: entityId)
+  row.x = 7.0
+  row.name = "changed"
+  log("copied {copied.x} {copied.name}")
+
+  var box: Box(Pose) = { item: Pose { x: 1.5, name: "boxed" } }
+  let boxed: view Pose => itemOf(box: box)
+  let boxCopy: Pose = boxed
+  box.item.name = "box changed"
+  log("box copy {boxCopy.x} {boxCopy.name}")
+}
