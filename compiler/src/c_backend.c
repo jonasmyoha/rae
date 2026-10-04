@@ -290,6 +290,19 @@ bool emit_type_recursive(CompilerContext* ctx, const AstModule* m, const AstType
 }
 
 /* Forward declarations for these now live in c_backend_internal.h. */
+// Which primitives a `view`/`mod` reference wraps in a `{ .ptr }` struct
+// (rae_View_Int64, rae_Mod_Float, ...). The fixed-width integers (Int32,
+// UInt64, UInt8, ...) have no wrapper: a reference to one is a plain C
+// pointer, so it binds as `&element`, not `{ .ptr = &element }`. Mirrors
+// emit_type_ref_as_c_type below.
+bool c_primitive_ref_has_wrapper(Str base) {
+  return str_eq_cstr(base, "Int") || str_eq_cstr(base, "Int64")
+      || str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float32")
+      || str_eq_cstr(base, "Float64") || str_eq_cstr(base, "Bool")
+      || str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32")
+      || str_eq_cstr(base, "String");
+}
+
 bool is_primitive_ref(CFuncContext* ctx, const AstTypeRef* tr) {
     if (!tr || !(tr->is_view || tr->is_mod)) return false;
     Str base = get_base_type_name(tr);
@@ -314,7 +327,7 @@ bool is_primitive_ref(CFuncContext* ctx, const AstTypeRef* tr) {
     // the pointer. String stays a ref under view/mod because it is
     // heap-owning at the language level (the ref avoids deep copies).
     bool is_num_prim = is_scalar_primitive_type(base);
-    if (is_num_prim) return tr->is_mod;
+    if (is_num_prim) return tr->is_mod && c_primitive_ref_has_wrapper(base);
     if (str_eq_cstr(base, "String")) return true;
     return false;
 }
