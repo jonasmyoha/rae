@@ -7322,6 +7322,10 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
             break;
         }
         case AST_EXPR_COLLECTION_LITERAL:
+            /* A typed literal (`ret List(Point) { ... }`) is its written type,
+             * checked against its destination like any value. */
+            if (expr->as.collection.type)
+                expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, expr->as.collection.type);
             /* The elements are expressions like any other: a call in one must
              * be resolved here, or the backend picks an overload by name alone
              * (`{ add(left: multiply(matrix: m, vector: v), ...) }` lowered the

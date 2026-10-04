@@ -177,7 +177,9 @@ These instructions define **how Codex should work**, communicate progress, and i
 - A **struct is constructed with the type on the LEFT and bare braces on the
   right** — `let p: Point = { x: 1, y: 2 }`, NOT `let p = Point { x: 1, y: 2 }`
   (no LHS type) and NOT `let p: Point = Point { ... }` (type written twice). In a
-  `ret`, where there is no LHS, the literal carries the type: `ret Point { ... }`.
+  `ret`, where there is no LHS, the literal carries the type: `ret Point { ... }`,
+  and a list literal likewise: `ret List(Point) { ... }` (a bare `ret { ... }` is an
+  error, never inferred from the return type).
 - What is written but not "inferred": `if let v: T = opt` (you still write `T`),
   `=>` aliases whose `view T`/`mod T` you write, and `loop var i: Int = 0`. The
   ban is specifically on inferring the type of a binding from its initializer.

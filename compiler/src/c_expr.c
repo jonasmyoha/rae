@@ -1739,7 +1739,14 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
         // The expected type comes from the declared field, never its elements.
         bool savedHasExpected = ctx->has_expected_type;
         AstTypeRef savedExpected = ctx->expected_type;
-        const AstTypeRef* listType = savedHasExpected
+        // The literal's own written type (`ret List(Point) { ... }`) wins;
+        // otherwise the declared type of the place it initializes. Rae never
+        // takes it from anywhere else (no inference).
+        const AstTypeRef* writtenType = expr->as.collection.type;
+        const AstTypeRef* listType = writtenType
+            ? substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
+                                  ctx->generic_args, (AstTypeRef*)writtenType)
+            : savedHasExpected
             ? substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
                                   ctx->generic_args, &savedExpected) : NULL;
         const AstTypeRef* elementType = listType ? listType->generic_args : NULL;
@@ -1756,7 +1763,8 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
         if (!elementType || !createFunction || !addFunction) {
             diag_error(ctx->module ? ctx->module->file_path : "<unknown>",
                        expr->line, expr->column,
-                       "cannot lower collection literal without a declared List element type");
+                       "a list literal here needs its type written on it: `List(T) { ... }` "
+                       "(e.g. `ret List(Point) { ... }`); Rae does not infer it");
             break;
         }
         register_generic_type(ctx->compiler_ctx, listType);

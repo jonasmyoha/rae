@@ -291,6 +291,19 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
             discover_specializations_expr_impl(ctx, expr->as.unary.operand);
             break;
         case AST_EXPR_COLLECTION_LITERAL: {
+            // A typed literal (`List(Point) { ... }`) registers for its own
+            // written type, whatever the surrounding expected type is.
+            if (expr->as.collection.type) {
+                AstTypeRef saved_written = ctx->expected_type; bool saved_written_has = ctx->has_expected_type;
+                ctx->expected_type = *expr->as.collection.type;
+                ctx->expected_type.next = NULL;
+                ctx->has_expected_type = true;
+                AstExpr untyped = *expr;
+                untyped.as.collection.type = NULL;
+                discover_specializations_expr_impl(ctx, &untyped);
+                ctx->expected_type = saved_written; ctx->has_expected_type = saved_written_has;
+                break;
+            }
             // Register createList/add for THIS list from its expected type, then
             // recurse into each element with the ELEMENT type as the expected
             // type — so a nested literal (`[[[7]]]`) registers the createList/
