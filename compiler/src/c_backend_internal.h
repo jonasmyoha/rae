@@ -168,6 +168,7 @@ void emit_stmt_temp_drops_keep(CFuncContext* ctx, FILE* out);
 // its heap (full drop); a call result may shallow-alias the callee's storage
 // (alias drop: destructors and containers still run, String fields skipped).
 int register_stmt_temp(CFuncContext* ctx, const AstTypeRef* type, bool owns_heap);
+bool c_stmt_temp_value_owns(CFuncContext* ctx, const AstExpr* value);
 // Write the pending temporary drops now (before a `return`).
 void emit_stmt_temp_drops_now(CFuncContext* ctx, FILE* out);
 // Emit the drop of one owned value of `type` held in the C lvalue `cname`.
