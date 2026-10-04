@@ -1,5 +1,5 @@
 # Triangle mesh queries and generated meshes (Box3D's mesh.c at 9f998c8:
-# b3QueryMesh, b3ComputeMeshAABB, b3GetHeight, and b3CreateGridMesh,
+# b3QueryMesh, b3ComputeMeshAABB, b3GetHeight, b3GetMeshTriangle, and b3CreateGridMesh,
 # b3CreateBoxMesh, b3CreateHollowBoxMesh, b3CreatePlatformMesh), with the
 # scalar bounds tests of simd.h / simd.c (Box3D's B3_SIMD_NONE path). Box3D's
 # operation order is kept exactly; checked bit for bit against the oracle in
@@ -24,6 +24,70 @@ type MeshQueryTriangle {
   b: Vec3
   c: Vec3
   triangleIndex: Int
+}
+
+# A mesh triangle scaled into the shape's frame (b3Triangle): its vertices,
+# their indices and its b3MeshEdgeFlags. A mirroring scale swaps the second
+# and third vertex so the winding stays counter-clockwise.
+type MeshTriangleData {
+  vertex1: Vec3
+  vertex2: Vec3
+  vertex3: Vec3
+  index1: Int
+  index2: Int
+  index3: Int
+  flags: Int
+}
+
+# b3GetMeshTriangle
+func getMeshTriangle(mesh: view Mesh, triangleIndex: view Int) ret MeshTriangleData {
+  let data: view MeshData => mesh.data
+  let triangle: MeshTriangle = data.triangles.copyAtDefault(index: triangleIndex)
+  let triangleFlags: Int = data.flags.copyAtDefault(index: triangleIndex)
+  let meshScale: Vec3 = mesh.scale
+  let vertex1: Vec3 = multiply(
+    left: meshScale
+    right: data.vertices.copyAtDefault(index: triangle.index1)
+  )
+  let vertex2: Vec3 = multiply(
+    left: meshScale
+    right: data.vertices.copyAtDefault(index: triangle.index2)
+  )
+  let vertex3: Vec3 = multiply(
+    left: meshScale
+    right: data.vertices.copyAtDefault(index: triangle.index3)
+  )
+  if meshScale.x * meshScale.y * meshScale.z < 0.0 {
+    # The mesh is inverted, so the concave edges are now convex
+    var flags: Int = 0
+    if (triangleFlags bitand inverseConcaveEdge1) is not 0 {
+      flags = flags bitor concaveEdge1
+    }
+    if (triangleFlags bitand inverseConcaveEdge2) is not 0 {
+      flags = flags bitor concaveEdge2
+    }
+    if (triangleFlags bitand inverseConcaveEdge3) is not 0 {
+      flags = flags bitor concaveEdge3
+    }
+    ret MeshTriangleData {
+      vertex1: vertex1
+      vertex2: vertex3
+      vertex3: vertex2
+      index1: triangle.index1
+      index2: triangle.index3
+      index3: triangle.index2
+      flags: flags
+    }
+  }
+  ret MeshTriangleData {
+    vertex1: vertex1
+    vertex2: vertex2
+    vertex3: vertex3
+    index1: triangle.index1
+    index2: triangle.index2
+    index3: triangle.index3
+    flags: triangleFlags
+  }
 }
 
 # b3MinV / b3MaxV of the scalar path: `<` and `>`, unlike b3Min / b3Max.
@@ -189,7 +253,7 @@ func queryMesh(mesh: view Mesh, bounds: view Aabb, capacity: view Int) ret List(
   let boundsCenter: Vec3 = multiply(left: half, right: add(left: boundsMin, right: boundsMax))
   let boundsExtent: Vec3 = subtract(left: boundsMax, right: boundsCenter)
 
-  let data: MeshData = mesh.data
+  let data: view MeshData => mesh.data
   let stack: List(Int) = List.create(Int, cap: meshStackSize)
   var nodeIndex: Int = 0
   loop true {

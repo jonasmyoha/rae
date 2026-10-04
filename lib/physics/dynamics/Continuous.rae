@@ -5,7 +5,8 @@
 # against the kinematic and dynamic trees) and moved back to its first time
 # of impact. Box3D's query callback becomes an explicit query loop. Sensor
 # hits (P4d), the pre-solve callback and custom filter (P8) and compound,
-# mesh and height-field targets (P5) are not here yet.
+# mesh and height-field targets (their triangle sweeps, P5) are not here
+# yet: such a target is skipped.
 open Vec3
 open Quat
 open physics/Constants
@@ -109,6 +110,11 @@ func continuousCandidate(
   # Skip filtered bodies
   let fastBody: Body = bodyAt(world: world, bodyId: fastSim.bodyId)
   if shouldBodiesCollide(bodyA: fastBody, bodyB: body) is false {
+    ret fraction
+  }
+  # A mesh, height-field or compound target needs b3ShapeTimeOfImpact's
+  # triangle sweep, not ported yet: never sweep it as a convex proxy
+  if shape.shapeType is ShapeType.mesh or shape.shapeType is ShapeType.height or shape.shapeType is ShapeType.compound {
     ret fraction
   }
   let sweepA: Sweep = makeRelativeSweep(sim: bodySim, base: base)

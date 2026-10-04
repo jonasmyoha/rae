@@ -1,9 +1,11 @@
 # A shape attached to a body (b3Shape of Box3D's shape.h and the geometry
 # dispatch of shape.c at 9f998c8): its kind, its geometry, material, filter
 # and broad-phase proxy. Box3D keeps the geometry in a union; here the shape
-# carries a sphere, a capsule, and for a hull the index of its data in the
-# world's hull list (Box3D points into a shared hull database). Meshes, height
-# fields and compounds arrive in P5; their cases are inert until then.
+# carries a sphere, a capsule, for a hull the index of its data in the
+# world's hull list (Box3D points into a shared hull database), and for a
+# mesh the index of its data and scale in the world's mesh list with the
+# scaled mesh bounds (so the box cases need no mesh). Height fields and
+# compounds arrive in P5c-P5d; their cases are inert until then.
 # Box3D's operation order is kept exactly; checked bit for bit against the
 # oracle in fixture 954.
 import Math
@@ -48,6 +50,9 @@ type Shape {
   sphere: Sphere
   capsule: Capsule
   hullIndex: Int
+  meshIndex: Int
+  # The scaled bounds b3ComputeMeshAABB transforms (a mesh only)
+  meshBounds: Aabb
 }
 
 func zeroShape() ret Shape {
@@ -79,6 +84,8 @@ func zeroShape() ret Shape {
     sphere: Sphere { center: zeroVector(), radius: 0.0 }
     capsule: Capsule { center1: zeroVector(), center2: zeroVector(), radius: 0.0 }
     hullIndex: -1
+    meshIndex: -1
+    meshBounds: Aabb { lowerBound: zeroVector(), upperBound: zeroVector() }
   }
 }
 
@@ -138,7 +145,7 @@ func shapeCentroid(shape: view Shape, hulls: view List(Hull)) ret Vec3 {
       ret zeroVector()
     }
     case ShapeType.mesh {
-      ret zeroVector()
+      ret center(box: meshAabb(shape: shape, transform: transformIdentity()))
     }
     case ShapeType.height {
       ret zeroVector()
@@ -147,6 +154,28 @@ func shapeCentroid(shape: view Shape, hulls: view List(Hull)) ret Vec3 {
       ret zeroVector()
     }
   }
+}
+
+# b3ComputeMeshAABB of a mesh shape: its scaled bounds, transformed.
+func meshAabb(shape: view Shape, transform: view Transform) ret Aabb {
+  ret transformAabb(transform: transform, box: shape.meshBounds)
+}
+
+# b3FarthestPointOnAABB
+func farthestPointOnAabb(box: view Aabb, point: view Vec3) ret Vec3 {
+  var x: Float = box.upperBound.x
+  if point.x - box.lowerBound.x > box.upperBound.x - point.x {
+    x = box.lowerBound.x
+  }
+  var y: Float = box.upperBound.y
+  if point.y - box.lowerBound.y > box.upperBound.y - point.y {
+    y = box.lowerBound.y
+  }
+  var z: Float = box.upperBound.z
+  if point.z - box.lowerBound.z > box.upperBound.z - point.z {
+    z = box.lowerBound.z
+  }
+  ret Vec3 { x: x, y: y, z: z }
 }
 
 # b3ComputeShapeAABB
@@ -169,7 +198,7 @@ func computeShapeAabb(
       ret Aabb { lowerBound: transform.position, upperBound: transform.position }
     }
     case ShapeType.mesh {
-      ret Aabb { lowerBound: transform.position, upperBound: transform.position }
+      ret meshAabb(shape: shape, transform: transform)
     }
     case ShapeType.height {
       ret Aabb { lowerBound: transform.position, upperBound: transform.position }
@@ -263,7 +292,15 @@ func computeShapeExtent(
       ret ShapeExtent { minExtent: 0.0, maxExtent: zeroVector() }
     }
     case ShapeType.mesh {
-      ret ShapeExtent { minExtent: 0.0, maxExtent: zeroVector() }
+      # Needed for kinematic mesh sleeping
+      let box: Aabb = meshAabb(shape: shape, transform: transformIdentity())
+      let r1: Float = length(vector: subtract(left: box.lowerBound, right: localCenter))
+      let r2: Float = length(vector: subtract(left: box.upperBound, right: localCenter))
+      let farthest: Vec3 = farthestPointOnAabb(box: box, point: localCenter)
+      ret ShapeExtent {
+        minExtent: minFloat(left: r1, right: r2)
+        maxExtent: abs(vector: subtract(left: farthest, right: localCenter))
+      }
     }
     case ShapeType.height {
       ret ShapeExtent { minExtent: 0.0, maxExtent: zeroVector() }
