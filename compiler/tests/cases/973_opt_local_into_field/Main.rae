@@ -1,0 +1,79 @@
+# Assigning an owning `opt T` location (a local, a field) into another place.
+# The optional was copied bit for bit, so the target shared the source's heap
+# and the source's own drop left it dangling: `holder.payload = built` read
+# freed buffers. `=` copies: every target below must be independent of its
+# source, and nothing may leak.
+type Payload {
+  values: List(Int)
+}
+
+type Holder {
+  payload: opt Payload
+  label: opt String
+}
+
+func makePayload(first: copy Int) ret opt Payload {
+  let values: List(Int) = { first, first + 1, first + 2 }
+  ret Payload { values: values }
+}
+
+func describe(holder: view Holder) ret String {
+  var text: String = "none"
+  if let payload: view Payload => holder.payload {
+    text = "{payload.values.length}:{payload.values.copyAtDefault(index: 0)}"
+  }
+  if let label: view String => holder.label {
+    text = "{text} {label}"
+  }
+  ret text
+}
+
+func store(holder: mod Holder, first: copy Int) {
+  var built: opt Payload = none
+  built = makePayload(first: first)
+  holder.payload = built
+}
+
+func storeThenClear(holder: mod Holder) {
+  var built: opt Payload = makePayload(first: 20)
+  var label: opt String = "kept"
+  holder.payload = built
+  holder.label = label
+  built = none
+  label = none
+}
+
+func copyField(source: view Holder, destination: mod Holder) {
+  destination.payload = source.payload
+  destination.label = source.label
+}
+
+func main() {
+  var holder: Holder = { payload: none, label: none }
+  store(holder: holder, first: 1)
+  log("stored {describe(holder: holder)}")
+  store(holder: holder, first: 5)
+  log("replaced {describe(holder: holder)}")
+  storeThenClear(holder: holder)
+  log("cleared source {describe(holder: holder)}")
+
+  var other: Holder = { payload: none, label: none }
+  copyField(source: holder, destination: other)
+  holder.payload = none
+  holder.label = none
+  log("copy outlives source {describe(holder: other)}")
+  log("source now {describe(holder: holder)}")
+
+  var local: opt Payload = none
+  local = other.payload
+  if let payload: mod Payload => local {
+    payload.values.add(value: 99)
+  }
+  if let payload: view Payload => local {
+    log("local {payload.values.length}")
+  }
+  log("field untouched {describe(holder: other)}")
+  other.payload = local
+  local = none
+  log("from local {describe(holder: other)}")
+}
