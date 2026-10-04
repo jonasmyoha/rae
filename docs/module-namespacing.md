@@ -204,6 +204,29 @@ exactly one thing:
   unknown-field error. Resolution is unchanged; this only adds context on the
   failure path.
 
+### Type names are program-wide
+
+Functions, globals and constants are namespaced by module; **type and enum
+names are not**. A program has one `Point`, wherever it is declared, and
+every `Point` in every module means that one. So two modules that both
+declare `type Point` (or `enum Point`) cannot be loaded into one program,
+even when neither opens or imports the other. This is a hard error at the
+second declaration, naming the first (fixture 989_duplicate_type_name):
+
+```
+points/Right.rae:3:1: type 'Point' is declared twice: here and at
+points/Left.rae:2:1 — type names are program-wide, so two modules of one
+program cannot declare the same type name; rename one of them
+```
+
+Before the diagnostic, the second declaration was silently dropped, and
+the failure surfaced far away as "unknown field" inside the second module's
+own code (lib/physics' `MeshData` and lib/Mesh3d's). Generic templates and
+their specializations share a name by design and are not affected. The fix
+is to rename one type — a library type takes a name specific to its
+library (`PhysicsMeshData`, `PhysicsShape`). Module-scoped type names
+(`Mesh3d.MeshData` as a type) would be a language change, not taken here.
+
 ## Contextual keywords
 
 `import` and `open` are **contextual** top-level keywords — special only in
