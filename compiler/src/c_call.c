@@ -1345,13 +1345,38 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             //   - we'd otherwise emit `&arg` (needs_addr)
             //   - the arg is a fresh rvalue (call/method/binary/interp)
             //   - we're not already wrapping with pool_take or boxing
+            // A field read off a call result (`planes.copyAtDefault(index:
+            // i).normal`) is an rvalue too when the call's struct holds no
+            // heap: no statement temporary captures it (that path is for
+            // owned heap, and yields a place), so `&(call).field` would be
+            // the address of an rvalue. Only for `view`: a `mod` argument is
+            // a place, and a buffer-get base already is one.
+            bool member_of_rvalue_call = false;
+            if (needs_addr && a->value && a->value->kind == AST_EXPR_MEMBER
+                && p->type && p->type->is_view) {
+                const AstExpr* chain_base = a->value->as.member.object;
+                while (chain_base->kind == AST_EXPR_MEMBER) chain_base = chain_base->as.member.object;
+                bool base_is_call = chain_base->kind == AST_EXPR_METHOD_CALL
+                    || (chain_base->kind == AST_EXPR_CALL && chain_base->as.call.callee
+                        && chain_base->as.call.callee->kind == AST_EXPR_IDENT
+                        && !str_eq_cstr(chain_base->as.call.callee->as.ident, "rae_ext_rae_buf_get")
+                        && !str_eq_cstr(chain_base->as.call.callee->as.ident, "rae_ext___buf_get")
+                        && !str_eq_cstr(chain_base->as.call.callee->as.ident, "__buf_get"));
+                if (base_is_call) {
+                    const AstTypeRef* chain_base_type = infer_expr_type_ref(ctx, chain_base);
+                    member_of_rvalue_call = chain_base_type && !chain_base_type->is_view
+                        && !chain_base_type->is_mod && !chain_base_type->is_opt
+                        && !type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, chain_base_type, 0);
+                }
+            }
             bool needs_rvalue_temp = needs_addr && !needs_box && !wrap_pool_take_arg
                 && a->value && (
                     a->value->kind == AST_EXPR_CALL ||
                     a->value->kind == AST_EXPR_METHOD_CALL ||
                     a->value->kind == AST_EXPR_BINARY ||
                     a->value->kind == AST_EXPR_INTERP ||
-                    a->value->kind == AST_EXPR_OBJECT);
+                    a->value->kind == AST_EXPR_OBJECT ||
+                    member_of_rvalue_call);
             if (use_hoisted_temp || use_string_place) {
                 /* The wrapper was emitted above, pointing either to its
                  * hoisted view temporary or the mutable caller slot. Skip
