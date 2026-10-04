@@ -1,11 +1,13 @@
 # The body state changes an engine layer makes between steps (body.c and
 # solver_set.c at 9f998c8, Box3D's order kept): body type, enabling and
 # disabling, waking and sleeping, bullet, motion locks, sleep settings, and
-# the touching contacts of a body. The joint parts of b3Body_SetType,
-# b3Body_Disable, b3Body_Enable and b3TransferBody wait for joints (P6).
+# the touching contacts of a body, with the joints moved between sets
+# alongside their bodies.
 open Vec3
 open physics/dynamics/WorldTypes
 open physics/dynamics/Body
+open physics/dynamics/Joint
+open physics/dynamics/WorldJointSets
 open physics/dynamics/Shape
 open physics/dynamics/SolverSet
 open physics/dynamics/Island
@@ -150,7 +152,29 @@ func setBodyType(world: mod PhysicsWorld, bodyId: view BodyId, bodyType: view Bo
   # in its sleeping solver set too
   wakeBody(world: world, bodyId: bodyIndex)
 
-  # (Joints to the static set: P6.)
+  # Move the joints to the static set first, so they get consistent colours
+  # when they go back to the graph
+  var jointKey: Int = bodyAt(world: world, bodyId: bodyIndex).headJointKey
+  loop jointKey is not -1 {
+    let jointId: Int = jointKey shr 1
+    let joint: Joint = world.joints.copyAtDefault(index: jointId)
+    jointKey = jointEdge(joint: joint, edgeIndex: jointKey bitand 1).nextKey
+    # A joint may be disabled by the other body
+    if joint.setIndex is disabledSet {
+      continue
+    }
+    # Wake the attached bodies: wakeBody above does not wake bodies joined
+    # to a static body
+    wakeBody(world: world, bodyId: joint.edgeA.bodyId)
+    wakeBody(world: world, bodyId: joint.edgeB.bodyId)
+    unlinkJoint(world: world, jointId: jointId)
+    transferJoint(
+      world: world
+      targetIndex: staticSet
+      sourceIndex: world.joints.copyAtDefault(index: jointId).setIndex
+      jointId: jointId
+    )
+  }
 
   # Change the body type and transfer the body
   setDynamicFlag(world: world, bodyId: bodyIndex, bodyType: bodyType)
@@ -167,7 +191,26 @@ func setBodyType(world: mod PhysicsWorld, bodyId: view BodyId, bodyType: view Bo
     removeBodyFromIsland(world: world, bodyId: bodyIndex)
   }
 
-  # (Joints back to their sets: P6.)
+  # Transfer the joints to their target set
+  jointKey = bodyAt(world: world, bodyId: bodyIndex).headJointKey
+  loop jointKey is not -1 {
+    let jointId: Int = jointKey shr 1
+    let joint: Joint = world.joints.copyAtDefault(index: jointId)
+    jointKey = jointEdge(joint: joint, edgeIndex: jointKey bitand 1).nextKey
+    if joint.setIndex is disabledSet {
+      continue
+    }
+    let typeA: BodyType = bodyAt(world: world, bodyId: joint.edgeA.bodyId).bodyType
+    let typeB: BodyType = bodyAt(world: world, bodyId: joint.edgeB.bodyId).bodyType
+    if typeA is BodyType.dynamicBody or typeB is BodyType.dynamicBody {
+      transferJoint(
+        world: world
+        targetIndex: awakeSet
+        sourceIndex: staticSet
+        jointId: jointId
+      )
+    }
+  }
 
   # Recreate the shape proxies in the broad-phase
   let body: Body = bodyAt(world: world, bodyId: bodyIndex)
@@ -186,7 +229,25 @@ func setBodyType(world: mod PhysicsWorld, bodyId: view BodyId, bodyType: view Bo
     shapeId = nextShapeId
   }
 
-  # (Relink joints: P6.)
+  # Relink the joints
+  jointKey = bodyAt(world: world, bodyId: bodyIndex).headJointKey
+  loop jointKey is not -1 {
+    let jointId: Int = jointKey shr 1
+    let edgeIndex: Int = jointKey bitand 1
+    let joint: Joint = world.joints.copyAtDefault(index: jointId)
+    jointKey = jointEdge(joint: joint, edgeIndex: edgeIndex).nextKey
+    let otherBody: Body = bodyAt(
+      world: world
+      bodyId: jointEdge(joint: joint, edgeIndex: edgeIndex bitxor 1).bodyId
+    )
+    if otherBody.setIndex is disabledSet {
+      continue
+    }
+    if bodyType is not BodyType.dynamicBody and otherBody.bodyType is not BodyType.dynamicBody {
+      continue
+    }
+    linkJoint(world: world, jointId: jointId)
+  }
 
   syncBodyFlags(world: world, bodyId: bodyIndex)
 
@@ -205,7 +266,24 @@ func disableBody(world: mod PhysicsWorld, bodyId: view BodyId) {
   # left floating. Necessary even for static bodies.
   destroyBodyContacts(world: world, bodyId: bodyIndex, wakeBodies: true)
 
-  # (Joints to the disabled set: P6.)
+  # Unlink the joints and move them to the disabled set
+  var jointKey: Int = bodyAt(world: world, bodyId: bodyIndex).headJointKey
+  loop jointKey is not -1 {
+    let jointId: Int = jointKey shr 1
+    let joint: Joint = world.joints.copyAtDefault(index: jointId)
+    jointKey = jointEdge(joint: joint, edgeIndex: jointKey bitand 1).nextKey
+    # A joint may be disabled by the other body already
+    if joint.setIndex is disabledSet {
+      continue
+    }
+    unlinkJoint(world: world, jointId: jointId)
+    transferJoint(
+      world: world
+      targetIndex: disabledSet
+      sourceIndex: world.joints.copyAtDefault(index: jointId).setIndex
+      jointId: jointId
+    )
+  }
 
   # Remove the shapes from the broad-phase
   var shapeId: Int = bodyAt(world: world, bodyId: bodyIndex).headShapeId
@@ -255,7 +333,35 @@ func enableBody(world: mod PhysicsWorld, bodyId: view BodyId) {
     createIslandForBody(world: world, setIndex: setIndex, bodyId: bodyIndex)
   }
 
-  # (Joints back from the disabled set: P6.)
+  # Transfer the joints, unless the other body is still disabled
+  var jointKey: Int = bodyAt(world: world, bodyId: bodyIndex).headJointKey
+  loop jointKey is not -1 {
+    let jointId: Int = jointKey shr 1
+    let joint: Joint = world.joints.copyAtDefault(index: jointId)
+    jointKey = jointEdge(joint: joint, edgeIndex: jointKey bitand 1).nextKey
+    let bodyA: Body = bodyAt(world: world, bodyId: joint.edgeA.bodyId)
+    let bodyB: Body = bodyAt(world: world, bodyId: joint.edgeB.bodyId)
+    if bodyA.setIndex is disabledSet or bodyB.setIndex is disabledSet {
+      continue
+    }
+    # Transfer the joint first
+    var jointSetId: Int = bodyA.setIndex
+    if bodyA.bodyType is not BodyType.dynamicBody and bodyB.bodyType is not BodyType.dynamicBody {
+      jointSetId = staticSet
+    } else if bodyA.setIndex is staticSet {
+      jointSetId = bodyB.setIndex
+    }
+    transferJoint(
+      world: world
+      targetIndex: jointSetId
+      sourceIndex: disabledSet
+      jointId: jointId
+    )
+    # Now that the joint is in the right set it can join the island
+    if jointSetId is not staticSet {
+      linkJoint(world: world, jointId: jointId)
+    }
+  }
 }
 
 func isBodyEnabled(world: view PhysicsWorld, bodyId: view BodyId) ret Bool {

@@ -2,8 +2,7 @@
 # physics_world.c at 9f998c8). Everything a world owns is a field of this
 # one value, passed `mod` to whatever changes it: Box3D's global world
 # registry, length scale and allocators become fields here, and there are no
-# globals (AGENTS.md). The solver, joints, sensors and
-# events join it in P4c-P4d and P6.
+# globals (AGENTS.md).
 open Vec3
 open physics/Constants
 open physics/math/Scalar
@@ -22,6 +21,7 @@ open physics/dynamics/Shape
 open physics/dynamics/SolverSet
 open physics/dynamics/Island
 open physics/dynamics/Contact
+open physics/dynamics/Joint
 open physics/dynamics/ConstraintGraph
 open physics/collision/Manifold
 open physics/container/Bitset
@@ -45,6 +45,8 @@ type TaskContext {
   awakeIslandBitSet: Bitset
   splitIslandId: Int
   splitSleepTime: Float
+  # The joints whose force or torque reached a threshold, by id
+  jointStateBitSet: Bitset
   # The contacts with a hit event candidate, by id
   hitEventBitSet: Bitset
   hasHitEvents: Bool
@@ -71,6 +73,7 @@ func createTaskContext() ret TaskContext {
     awakeIslandBitSet: createBitset(bitCapacity: 256)
     splitIslandId: -1
     splitSleepTime: 0.0
+    jointStateBitSet: createBitset(bitCapacity: 64)
     hitEventBitSet: createBitset(bitCapacity: 1024)
     hasHitEvents: false
     sensorHits: List.create(SensorHit, cap: 4)
@@ -105,6 +108,9 @@ type PhysicsWorld {
   compoundShapeCount: Int
   contactIdPool: IdPool
   contacts: List(Contact)
+  # Joints, by joint id
+  joints: List(Joint)
+  jointEvents: List(JointEvent)
   constraintGraph: ConstraintGraph
   bodyMoveEvents: List(BodyMoveEvent)
   sensors: List(Sensor)
@@ -164,6 +170,8 @@ func createWorld(def: view WorldDef) ret PhysicsWorld {
     compoundShapeCount: 0
     contactIdPool: createIdPool()
     contacts: List.create(Contact, cap: 16)
+    joints: List.create(Joint, cap: 4)
+    jointEvents: List.create(JointEvent, cap: 4)
     constraintGraph: createGraph(bodyCapacity: 16)
     bodyMoveEvents: List.create(BodyMoveEvent, cap: 16)
     sensors: List.create(Sensor, cap: 4)

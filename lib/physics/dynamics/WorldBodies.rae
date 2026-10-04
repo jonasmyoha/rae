@@ -1,8 +1,8 @@
 # Creating and destroying bodies and the body API (b3CreateBody,
-# b3DestroyBody and the b3Body_* functions of Box3D's body.c at 9f998c8 that
-# do not involve contacts or joints). Box3D's operation order is kept
-# exactly; checked bit for bit against the oracle in fixture 954. Joints and
-# contacts attached to a destroyed body arrive with P4b and P6.
+# b3DestroyBody and the b3Body_* functions of Box3D's body.c at 9f998c8).
+# Box3D's operation order is kept exactly; checked bit for bit against the
+# oracle in fixture 954. Destroying a body destroys its joints and contacts
+# (fixture 984).
 open Vec3
 open Quat
 open physics/Constants
@@ -16,6 +16,7 @@ open physics/geometry/QueryTypes
 open physics/container/IdPool
 open physics/dynamics/WorldTypes
 open physics/dynamics/Body
+open physics/dynamics/Joint
 open physics/dynamics/Shape
 open physics/dynamics/SolverSet
 open physics/dynamics/Island
@@ -23,6 +24,7 @@ open physics/dynamics/World
 open physics/dynamics/WorldIslands
 open physics/dynamics/Contact
 open physics/dynamics/WorldContacts
+open physics/dynamics/WorldJoints
 open physics/dynamics/Sensors
 open physics/dynamics/ShapeProxy
 open physics/dynamics/BodyMass
@@ -165,7 +167,19 @@ func destroyBody(world: mod PhysicsWorld, bodyId: view BodyId) {
   let bodyIndex: Int = bodyIndexOf(bodyId: bodyId)
   var body: Body = bodyAt(world: world, bodyId: bodyIndex)
 
-  # (Joints of the body: P6.)
+  # Destroy the joints, waking the bodies they join, even if this body is
+  # static (this changes the list being walked)
+  var jointKey: Int = body.headJointKey
+  loop jointKey is not -1 {
+    let jointId: Int = jointKey shr 1
+    let jointEdgeIndex: Int = jointKey bitand 1
+    jointKey = jointEdge(
+      joint: world.joints.copyAtDefault(index: jointId)
+      edgeIndex: jointEdgeIndex
+    ).nextKey
+    destroyJointInternal(world: world, jointId: jointId, wakeBodies: true)
+  }
+  body = bodyAt(world: world, bodyId: bodyIndex)
 
   # Destroy the contacts, waking the bodies they touch, even if this body
   # is static
@@ -739,13 +753,27 @@ func setBodyGravityScale(world: mod PhysicsWorld, bodyId: view BodyId, gravitySc
   setBodySim(world: world, body: body, sim: sim)
 }
 
-# b3ShouldBodiesCollide: at least one body must be dynamic. Box3D then walks
-# the joints of the body with fewer joints, refusing the pair when a joint
-# joins the two bodies with collideConnected off; joints arrive in P6, and
-# until then no body has a joint, so the walk finds nothing.
-func shouldBodiesCollide(bodyA: view Body, bodyB: view Body) ret Bool {
+# b3ShouldBodiesCollide: at least one body must be dynamic, and no joint
+# with collideConnected off may join the two (the joints of the body with
+# fewer joints are walked).
+func shouldBodiesCollide(world: view PhysicsWorld, bodyA: view Body, bodyB: view Body) ret Bool {
   if bodyA.bodyType is not BodyType.dynamicBody and bodyB.bodyType is not BodyType.dynamicBody {
     ret false
+  }
+  var jointKey: Int = bodyB.headJointKey
+  var otherBodyId: Int = bodyA.id
+  if bodyA.jointCount < bodyB.jointCount {
+    jointKey = bodyA.headJointKey
+    otherBodyId = bodyB.id
+  }
+  loop jointKey is not -1 {
+    let jointId: Int = jointKey shr 1
+    let edgeIndex: Int = jointKey bitand 1
+    let joint: Joint = world.joints.copyAtDefault(index: jointId)
+    if joint.collideConnected is false and jointEdge(joint: joint, edgeIndex: edgeIndex bitxor 1).bodyId is otherBodyId {
+      ret false
+    }
+    jointKey = jointEdge(joint: joint, edgeIndex: edgeIndex).nextKey
   }
   ret true
 }

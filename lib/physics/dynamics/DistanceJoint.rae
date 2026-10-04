@@ -1,0 +1,399 @@
+# The distance joint (b3PrepareDistanceJoint, b3WarmStartDistanceJoint and
+# b3SolveDistanceJoint of Box3D's distance_joint.c at 9f998c8): the anchors
+# are held a length apart, rigidly, or softly by a spring with force bounds,
+# optionally within length limits and with a motor along the axis. Box3D's
+# operation order is kept exactly; checked against the oracle in fixture 984.
+open Vec3
+open Quat
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/QuatMath
+open physics/math/MatrixMath
+open physics/math/TransformMath
+open physics/dynamics/WorldTypes
+open physics/dynamics/Body
+open physics/dynamics/Joint
+open physics/dynamics/ContactConstraints
+open physics/dynamics/StepContext
+open physics/dynamics/RevoluteJoint
+
+# b3PrepareDistanceJoint
+func prepareDistanceJoint(
+  base: mod JointSim
+  simA: view BodySim
+  simB: view BodySim
+  indexA: view Int
+  indexB: view Int
+  h: view Float
+  enableWarmStarting: view Bool
+) {
+  let mA: Float = simA.invMass
+  let iA: Matrix3 = simA.invInertiaWorld
+  let mB: Float = simB.invMass
+  let iB: Matrix3 = simB.invInertiaWorld
+  base.invMassA = mA
+  base.invMassB = mB
+  base.invIA = iA
+  base.invIB = iB
+
+  var joint: DistanceJointData = base.distanceJoint
+  joint.indexA = indexA
+  joint.indexB = indexB
+
+  # The initial anchors in world space
+  joint.anchorA = rotateVector(
+    quat: simA.transform.rotation
+    vector: subtract(left: base.localFrameA.position, right: simA.localCenter)
+  )
+  joint.anchorB = rotateVector(
+    quat: simB.transform.rotation
+    vector: subtract(left: base.localFrameB.position, right: simB.localCenter)
+  )
+  joint.deltaCenter = subtractPositions(left: simB.center, right: simA.center)
+  let rA: Vec3 = joint.anchorA
+  let rB: Vec3 = joint.anchorB
+  let separation: Vec3 = add(left: subtract(left: rB, right: rA), right: joint.deltaCenter)
+  let axis: Vec3 = normalize(vector: separation)
+
+  # The effective mass
+  let crA: Vec3 = cross(left: rA, right: axis)
+  let crB: Vec3 = cross(left: rB, right: axis)
+  let k: Float = mA + mB + dot(left: crA, right: multiply(matrix: iA, vector: crA)) + dot(
+    left: crB
+    right: multiply(matrix: iB, vector: crB)
+  )
+  joint.axialMass = 0.0
+  if k > 0.0 {
+    joint.axialMass = 1.0 / k
+  }
+  joint.distanceSoftness = makeSoft(hertz: joint.hertz, zeta: joint.dampingRatio, h: h)
+  if enableWarmStarting is false {
+    joint.impulse = 0.0
+    joint.lowerImpulse = 0.0
+    joint.upperImpulse = 0.0
+    joint.motorImpulse = 0.0
+  }
+  base.distanceJoint = joint
+}
+
+# The current axis and anchors of a distance joint from its bodies' states.
+type DistanceGeometry {
+  rA: Vec3
+  rB: Vec3
+  separation: Vec3
+}
+
+func distanceGeometry(
+  joint: view DistanceJointData
+  stateA: view BodyState
+  stateB: view BodyState
+) ret DistanceGeometry {
+  let rA: Vec3 = rotateVector(quat: stateA.deltaRotation, vector: joint.anchorA)
+  let rB: Vec3 = rotateVector(quat: stateB.deltaRotation, vector: joint.anchorB)
+  let ds: Vec3 = add(
+    left: subtract(left: stateB.deltaPosition, right: stateA.deltaPosition)
+    right: subtract(left: rB, right: rA)
+  )
+  ret DistanceGeometry { rA: rA, rB: rB, separation: add(left: joint.deltaCenter, right: ds) }
+}
+
+# b3WarmStartDistanceJoint
+func warmStartDistanceJoint(base: view JointSim, states: mod List(BodyState)) {
+  let mA: Float = base.invMassA
+  let mB: Float = base.invMassB
+  let iA: Matrix3 = base.invIA
+  let iB: Matrix3 = base.invIB
+  let joint: DistanceJointData = base.distanceJoint
+  let stateA: BodyState = jointBodyState(states: states, index: joint.indexA)
+  let stateB: BodyState = jointBodyState(states: states, index: joint.indexB)
+  let geometry: DistanceGeometry = distanceGeometry(joint: joint, stateA: stateA, stateB: stateB)
+  let axis: Vec3 = normalize(vector: geometry.separation)
+  let axialImpulse: Float = joint.impulse + joint.lowerImpulse - joint.upperImpulse + joint.motorImpulse
+  let impulse: Vec3 = scale(scale: axialImpulse, vector: axis)
+  storeJointBodyVelocity(
+    states: states
+    index: joint.indexA
+    flags: stateA.flags
+    linearVelocity: mulSub(base: stateA.linearVelocity, scale: mA, vector: impulse)
+    angularVelocity: subtract(
+      left: stateA.angularVelocity
+      right: multiply(matrix: iA, vector: cross(left: geometry.rA, right: impulse))
+    )
+  )
+  storeJointBodyVelocity(
+    states: states
+    index: joint.indexB
+    flags: stateB.flags
+    linearVelocity: mulAdd(base: stateB.linearVelocity, scale: mB, vector: impulse)
+    angularVelocity: add(
+      left: stateB.angularVelocity
+      right: multiply(matrix: iB, vector: cross(left: geometry.rB, right: impulse))
+    )
+  )
+}
+
+# The relative velocity of the anchors, B minus A.
+func anchorVelocity(
+  vA: view Vec3
+  wA: view Vec3
+  vB: view Vec3
+  wB: view Vec3
+  rA: view Vec3
+  rB: view Vec3
+) ret Vec3 {
+  ret add(
+    left: subtract(left: vB, right: vA)
+    right: subtract(left: cross(left: wB, right: rB), right: cross(left: wA, right: rA))
+  )
+}
+
+# The velocities of a distance joint's two bodies while it is solved.
+type DistanceVelocities {
+  vA: Vec3
+  wA: Vec3
+  vB: Vec3
+  wB: Vec3
+}
+
+# Apply axial impulse `impulse` (along `axis`) to the velocities.
+func applyAxialImpulse(
+  velocities: mod DistanceVelocities
+  base: view JointSim
+  impulse: view Float
+  axis: view Vec3
+  rA: view Vec3
+  rB: view Vec3
+) {
+  let p: Vec3 = scale(scale: impulse, vector: axis)
+  velocities.vA = mulSub(base: velocities.vA, scale: base.invMassA, vector: p)
+  velocities.wA = subtract(
+    left: velocities.wA
+    right: multiply(matrix: base.invIA, vector: cross(left: rA, right: p))
+  )
+  velocities.vB = mulAdd(base: velocities.vB, scale: base.invMassB, vector: p)
+  velocities.wB = add(
+    left: velocities.wB
+    right: multiply(matrix: base.invIB, vector: cross(left: rB, right: p))
+  )
+}
+
+# The bias, mass scale and impulse scale of a limit with error `c`:
+# speculative while separated, soft (with bias) while overlapped.
+type LimitCoefficients {
+  bias: Float
+  massScale: Float
+  impulseScale: Float
+}
+
+func limitCoefficients(
+  base: view JointSim
+  c: view Float
+  inverseH: view Float
+  useBias: view Bool
+) ret LimitCoefficients {
+  if c > 0.0 {
+    # Speculative
+    ret LimitCoefficients { bias: c * inverseH, massScale: 1.0, impulseScale: 0.0 }
+  }
+  if useBias {
+    ret LimitCoefficients {
+      bias: base.constraintSoftness.biasRate * c
+      massScale: base.constraintSoftness.massScale
+      impulseScale: base.constraintSoftness.impulseScale
+    }
+  }
+  ret LimitCoefficients { bias: 0.0, massScale: 1.0, impulseScale: 0.0 }
+}
+
+# b3SolveDistanceJoint
+func solveDistanceJoint(
+  base: mod JointSim
+  states: mod List(BodyState)
+  h: view Float
+  inverseH: view Float
+  useBias: view Bool
+) {
+  var joint: DistanceJointData = base.distanceJoint
+  let stateA: BodyState = jointBodyState(states: states, index: joint.indexA)
+  let stateB: BodyState = jointBodyState(states: states, index: joint.indexB)
+  var velocities: DistanceVelocities = {
+    vA: stateA.linearVelocity
+    wA: stateA.angularVelocity
+    vB: stateB.linearVelocity
+    wB: stateB.angularVelocity
+  }
+
+  # The current anchors and separation
+  let geometry: DistanceGeometry = distanceGeometry(joint: joint, stateA: stateA, stateB: stateB)
+  let rA: Vec3 = geometry.rA
+  let rB: Vec3 = geometry.rB
+  let currentLength: Float = length(vector: geometry.separation)
+  let axis: Vec3 = normalize(vector: geometry.separation)
+
+  # Soft when the spring is on and the limits are unequal or off
+  if joint.enableSpring and (joint.minLength < joint.maxLength or joint.enableLimit is false) {
+    # The spring
+    if joint.hertz > 0.0 {
+      let vr: Vec3 = anchorVelocity(
+        vA: velocities.vA
+        wA: velocities.wA
+        vB: velocities.vB
+        wB: velocities.wB
+        rA: rA
+        rB: rB
+      )
+      let cdot: Float = dot(left: axis, right: vr)
+      let c: Float = currentLength - joint.length
+      let bias: Float = joint.distanceSoftness.biasRate * c
+      let m: Float = joint.distanceSoftness.massScale * joint.axialMass
+      let oldImpulse: Float = joint.impulse
+      var impulse: Float = -m * (cdot + bias) - joint.distanceSoftness.impulseScale * oldImpulse
+      joint.impulse = clampFloat(
+        value: joint.impulse + impulse
+        lower: joint.lowerSpringForce * h
+        upper: joint.upperSpringForce * h
+      )
+      impulse = joint.impulse - oldImpulse
+      applyAxialImpulse(
+        velocities: velocities
+        base: base
+        impulse: impulse
+        axis: axis
+        rA: rA
+        rB: rB
+      )
+    }
+    if joint.enableLimit {
+      # The lower limit
+      let lowerVelocity: Vec3 = anchorVelocity(
+        vA: velocities.vA
+        wA: velocities.wA
+        vB: velocities.vB
+        wB: velocities.wB
+        rA: rA
+        rB: rB
+      )
+      let lowerCdot: Float = dot(left: axis, right: lowerVelocity)
+      let lower: LimitCoefficients = limitCoefficients(
+        base: base
+        c: currentLength - joint.minLength
+        inverseH: inverseH
+        useBias: useBias
+      )
+      var lowerImpulse: Float = -lower.massScale * joint.axialMass * (lowerCdot + lower.bias) - lower.impulseScale * joint.lowerImpulse
+      let lowerNew: Float = maxFloat(left: 0.0, right: joint.lowerImpulse + lowerImpulse)
+      lowerImpulse = lowerNew - joint.lowerImpulse
+      joint.lowerImpulse = lowerNew
+      applyAxialImpulse(
+        velocities: velocities
+        base: base
+        impulse: lowerImpulse
+        axis: axis
+        rA: rA
+        rB: rB
+      )
+
+      # The upper limit (A minus B)
+      let upperVelocity: Vec3 = add(
+        left: subtract(left: velocities.vA, right: velocities.vB)
+        right: subtract(
+          left: cross(left: velocities.wA, right: rA)
+          right: cross(left: velocities.wB, right: rB)
+        )
+      )
+      let upperCdot: Float = dot(left: axis, right: upperVelocity)
+      let upper: LimitCoefficients = limitCoefficients(
+        base: base
+        c: joint.maxLength - currentLength
+        inverseH: inverseH
+        useBias: useBias
+      )
+      var upperImpulse: Float = -upper.massScale * joint.axialMass * (upperCdot + upper.bias) - upper.impulseScale * joint.upperImpulse
+      let upperNew: Float = maxFloat(left: 0.0, right: joint.upperImpulse + upperImpulse)
+      upperImpulse = upperNew - joint.upperImpulse
+      joint.upperImpulse = upperNew
+      applyAxialImpulse(
+        velocities: velocities
+        base: base
+        impulse: -upperImpulse
+        axis: axis
+        rA: rA
+        rB: rB
+      )
+    }
+    if joint.enableMotor {
+      let vr: Vec3 = anchorVelocity(
+        vA: velocities.vA
+        wA: velocities.wA
+        vB: velocities.vB
+        wB: velocities.wB
+        rA: rA
+        rB: rB
+      )
+      let cdot: Float = dot(left: axis, right: vr)
+      var impulse: Float = joint.axialMass * (joint.motorSpeed - cdot)
+      let oldImpulse: Float = joint.motorImpulse
+      let maxImpulse: Float = h * joint.maxMotorForce
+      joint.motorImpulse = clampFloat(
+        value: joint.motorImpulse + impulse
+        lower: -maxImpulse
+        upper: maxImpulse
+      )
+      impulse = joint.motorImpulse - oldImpulse
+      applyAxialImpulse(
+        velocities: velocities
+        base: base
+        impulse: impulse
+        axis: axis
+        rA: rA
+        rB: rB
+      )
+    }
+  } else {
+    # The rigid constraint
+    let vr: Vec3 = anchorVelocity(
+      vA: velocities.vA
+      wA: velocities.wA
+      vB: velocities.vB
+      wB: velocities.wB
+      rA: rA
+      rB: rB
+    )
+    let cdot: Float = dot(left: axis, right: vr)
+    let c: Float = currentLength - joint.length
+    var bias: Float = 0.0
+    var massScale: Float = 1.0
+    var impulseScale: Float = 0.0
+    if useBias {
+      bias = base.constraintSoftness.biasRate * c
+      massScale = base.constraintSoftness.massScale
+      impulseScale = base.constraintSoftness.impulseScale
+    }
+    let impulse: Float = -massScale * joint.axialMass * (cdot + bias) - impulseScale * joint.impulse
+    joint.impulse = joint.impulse + impulse
+    applyAxialImpulse(
+      velocities: velocities
+      base: base
+      impulse: impulse
+      axis: axis
+      rA: rA
+      rB: rB
+    )
+  }
+
+  base.distanceJoint = joint
+  storeJointBodyVelocity(
+    states: states
+    index: joint.indexA
+    flags: stateA.flags
+    linearVelocity: velocities.vA
+    angularVelocity: velocities.wA
+  )
+  storeJointBodyVelocity(
+    states: states
+    index: joint.indexB
+    flags: stateB.flags
+    linearVelocity: velocities.vB
+    angularVelocity: velocities.wB
+  )
+}

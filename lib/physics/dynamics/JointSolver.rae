@@ -1,0 +1,356 @@
+# The joint solver's dispatch (b3PrepareJoint, b3WarmStartJoint,
+# b3SolveJoint, the *_Overflow functions and b3GetJointReaction of Box3D's
+# joint.c at 9f998c8): every stage switches on the joint's kind, an
+# exhaustive match. The kinds not ported yet (P6b-P6c) cannot be created, so
+# their arms are empty. Checked against the oracle in fixture 984.
+open Vec3
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/dynamics/WorldTypes
+open physics/dynamics/Body
+open physics/dynamics/Joint
+open physics/dynamics/SolverSet
+open physics/dynamics/ConstraintGraph
+open physics/dynamics/StepContext
+open physics/container/Bitset
+open physics/dynamics/World
+open physics/dynamics/RevoluteJoint
+open physics/dynamics/DistanceJoint
+
+# The sim of body `bodyId` wherever it lives, and its awake index (-1 when
+# not awake), for a joint's prepare.
+type JointBody {
+  sim: BodySim
+  awakeIndex: Int
+}
+
+func jointBodyOf(world: view PhysicsWorld, bodyId: view Int) ret JointBody {
+  let body: Body = bodyAt(world: world, bodyId: bodyId)
+  var awakeIndex: Int = -1
+  if body.setIndex is awakeSet {
+    awakeIndex = body.localIndex
+  }
+  if let set: view SolverSet => world.solverSets.viewAt(index: body.setIndex) {
+    ret JointBody {
+      sim: set.bodySims.copyAtDefault(index: body.localIndex)
+      awakeIndex: awakeIndex
+    }
+  }
+  ret JointBody { sim: zeroBodySim(), awakeIndex: awakeIndex }
+}
+
+# b3PrepareJoint: the constraint softness (its hertz clamped by the step to
+# reduce jitter), then the kind's prepare.
+func prepareJoint(base: mod JointSim, world: view PhysicsWorld, context: view StepContext) {
+  let hertz: Float = minFloat(left: base.constraintHertz, right: 0.25 * context.inverseH)
+  base.constraintSoftness = makeSoft(hertz: hertz, zeta: base.constraintDampingRatio, h: context.h)
+  let bodyA: JointBody = jointBodyOf(world: world, bodyId: base.bodyIdA)
+  let bodyB: JointBody = jointBodyOf(world: world, bodyId: base.bodyIdB)
+  match base.jointType {
+    case JointType.parallelJoint {
+    }
+    case JointType.distanceJoint {
+      prepareDistanceJoint(
+        base: base
+        simA: bodyA.sim
+        simB: bodyB.sim
+        indexA: bodyA.awakeIndex
+        indexB: bodyB.awakeIndex
+        h: context.h
+        enableWarmStarting: context.enableWarmStarting
+      )
+    }
+    case JointType.filterJoint {
+    }
+    case JointType.motorJoint {
+    }
+    case JointType.prismaticJoint {
+    }
+    case JointType.revoluteJoint {
+      prepareRevoluteJoint(
+        base: base
+        simA: bodyA.sim
+        simB: bodyB.sim
+        indexA: bodyA.awakeIndex
+        indexB: bodyB.awakeIndex
+        h: context.h
+        enableWarmStarting: context.enableWarmStarting
+      )
+    }
+    case JointType.sphericalJoint {
+    }
+    case JointType.weldJoint {
+    }
+    case JointType.wheelJoint {
+    }
+  }
+}
+
+# b3WarmStartJoint
+func warmStartJoint(base: view JointSim, states: mod List(BodyState)) {
+  match base.jointType {
+    case JointType.parallelJoint {
+    }
+    case JointType.distanceJoint {
+      warmStartDistanceJoint(base: base, states: states)
+    }
+    case JointType.filterJoint {
+    }
+    case JointType.motorJoint {
+    }
+    case JointType.prismaticJoint {
+    }
+    case JointType.revoluteJoint {
+      warmStartRevoluteJoint(base: base, states: states)
+    }
+    case JointType.sphericalJoint {
+    }
+    case JointType.weldJoint {
+    }
+    case JointType.wheelJoint {
+    }
+  }
+}
+
+# b3SolveJoint
+func solveJoint(
+  base: mod JointSim
+  states: mod List(BodyState)
+  h: view Float
+  inverseH: view Float
+  useBias: view Bool
+) {
+  match base.jointType {
+    case JointType.parallelJoint {
+    }
+    case JointType.distanceJoint {
+      solveDistanceJoint(
+        base: base
+        states: states
+        h: h
+        inverseH: inverseH
+        useBias: useBias
+      )
+    }
+    case JointType.filterJoint {
+    }
+    case JointType.motorJoint {
+    }
+    case JointType.prismaticJoint {
+    }
+    case JointType.revoluteJoint {
+      solveRevoluteJoint(
+        base: base
+        states: states
+        h: h
+        inverseH: inverseH
+        useBias: useBias
+      )
+    }
+    case JointType.sphericalJoint {
+    }
+    case JointType.weldJoint {
+    }
+    case JointType.wheelJoint {
+    }
+  }
+}
+
+# b3GetJointReaction: the joint's force and torque magnitudes.
+type JointReaction {
+  force: Float
+  torque: Float
+}
+
+func jointReaction(sim: view JointSim, invTimeStep: view Float) ret JointReaction {
+  var linearImpulse: Float = 0.0
+  var angularImpulse: Float = 0.0
+  match sim.jointType {
+    case JointType.parallelJoint {
+    }
+    case JointType.distanceJoint {
+      let joint: DistanceJointData = sim.distanceJoint
+      linearImpulse = absFloat(
+        value: joint.impulse + joint.lowerImpulse - joint.upperImpulse + joint.motorImpulse
+      )
+    }
+    case JointType.filterJoint {
+    }
+    case JointType.motorJoint {
+    }
+    case JointType.prismaticJoint {
+    }
+    case JointType.revoluteJoint {
+      let joint: RevoluteJointData = sim.revoluteJoint
+      linearImpulse = length(vector: joint.linearImpulse)
+      let impulse: Vec3 = {
+        x: joint.perpImpulse.x
+        y: joint.perpImpulse.y
+        z: joint.motorImpulse + joint.lowerImpulse - joint.upperImpulse
+      }
+      angularImpulse = length(vector: impulse)
+    }
+    case JointType.sphericalJoint {
+    }
+    case JointType.weldJoint {
+    }
+    case JointType.wheelJoint {
+    }
+  }
+  ret JointReaction { force: linearImpulse * invTimeStep, torque: angularImpulse * invTimeStep }
+}
+
+# b3PrepareJoints_Overflow
+func prepareJointsOverflow(world: mod PhysicsWorld, context: view StepContext) {
+  var count: Int = 0
+  if let color: view GraphColor => world.constraintGraph.colors.viewAt(index: overflowIndex) {
+    count = color.jointSims.length
+  }
+  loop var i: Int = 0, i < count, ++i {
+    var sim: JointSim = world.constraintGraph.colors.copyAtDefault(index: overflowIndex).jointSims.copyAtDefault(
+      index: i
+    )
+    prepareJoint(base: sim, world: world, context: context)
+    if let color: mod GraphColor => world.constraintGraph.colors.modAt(index: overflowIndex) {
+      color.jointSims.set(index: i, value: sim)
+    }
+  }
+}
+
+# b3WarmStartJoints_Overflow
+func warmStartJointsOverflow(world: mod PhysicsWorld) {
+  if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
+    if let color: view GraphColor => world.constraintGraph.colors.viewAt(index: overflowIndex) {
+      loop let sim: view JointSim in color.jointSims {
+        warmStartJoint(base: sim, states: awake.bodyStates)
+      }
+    }
+  }
+}
+
+# b3SolveJoints_Overflow
+func solveJointsOverflow(world: mod PhysicsWorld, context: view StepContext, useBias: view Bool) {
+  if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
+    if let color: mod GraphColor => world.constraintGraph.colors.modAt(index: overflowIndex) {
+      loop var i: Int = 0, i < color.jointSims.length, ++i {
+        if let sim: mod JointSim => color.jointSims.modAt(index: i) {
+          solveJoint(
+            base: sim
+            states: awake.bodyStates
+            h: context.h
+            inverseH: context.inverseH
+            useBias: useBias
+          )
+        }
+      }
+    }
+  }
+}
+
+# b3PrepareJointsTask: joints `block.startIndex` to `+ block.count` of the
+# flat range over the active colours, each found by the span table.
+func prepareJointsBlock(
+  world: mod PhysicsWorld
+  context: view StepContext
+  block: view SolverBlock
+) {
+  var index: Int = block.startIndex
+  let endIndex: Int = block.startIndex + block.count
+  # The colour of the start index
+  var spanIndex: Int = 0
+  loop context.jointPrepareSpans.copyAtDefault(index: spanIndex + 1).start <= index {
+    spanIndex = spanIndex + 1
+  }
+  loop index < endIndex {
+    let span: PrepareSpan = context.jointPrepareSpans.copyAtDefault(index: spanIndex)
+    let colorEndIndex: Int = minInt(
+      left: context.jointPrepareSpans.copyAtDefault(index: spanIndex + 1).start
+      right: endIndex
+    )
+    loop index < colorEndIndex {
+      let localIndex: Int = index - span.start
+      var sim: JointSim = world.constraintGraph.colors.copyAtDefault(index: span.colorIndex).jointSims.copyAtDefault(
+        index: localIndex
+      )
+      prepareJoint(base: sim, world: world, context: context)
+      if let color: mod GraphColor => world.constraintGraph.colors.modAt(index: span.colorIndex) {
+        color.jointSims.set(index: localIndex, value: sim)
+      }
+      index = index + 1
+    }
+    spanIndex = spanIndex + 1
+  }
+}
+
+# b3WarmStartJointsTask: a block of a colour's joints.
+func warmStartJointsBlock(world: mod PhysicsWorld, block: view SolverBlock) {
+  if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
+    if let color: view GraphColor => world.constraintGraph.colors.viewAt(index: block.colorIndex) {
+      loop var i: Int = block.startIndex, i < block.startIndex + block.count, ++i {
+        if let sim: view JointSim => color.jointSims.viewAt(index: i) {
+          warmStartJoint(base: sim, states: awake.bodyStates)
+        }
+      }
+    }
+  }
+}
+
+# b3SolveJointsTask: a block of a colour's joints; with the bias, an awake
+# joint whose force or torque reaches its threshold is flagged for a joint
+# event (worker 0's bits).
+func solveJointsBlock(
+  world: mod PhysicsWorld
+  context: view StepContext
+  block: view SolverBlock
+  useBias: view Bool
+) {
+  if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
+    if let color: mod GraphColor => world.constraintGraph.colors.modAt(index: block.colorIndex) {
+      if let taskContext: mod TaskContext => world.taskContexts.modAt(index: 0) {
+        loop var i: Int = block.startIndex, i < block.startIndex + block.count, ++i {
+          if let sim: mod JointSim => color.jointSims.modAt(index: i) {
+            solveJoint(
+              base: sim
+              states: awake.bodyStates
+              h: context.h
+              inverseH: context.inverseH
+              useBias: useBias
+            )
+            if useBias and (sim.forceThreshold < floatMax or sim.torqueThreshold < floatMax) and getBit(
+              bitset: taskContext.jointStateBitSet
+              bitIndex: sim.jointId
+            ) is false {
+              let reaction: JointReaction = jointReaction(sim: sim, invTimeStep: context.inverseH)
+              # A zero threshold reports every awake joint
+              if reaction.force >= sim.forceThreshold or reaction.torque >= sim.torqueThreshold {
+                setBit(bitset: taskContext.jointStateBitSet, bitIndex: sim.jointId)
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+# The joint events of a step (b3Solve's report): the flagged joints, by id.
+func reportJointEvents(world: mod PhysicsWorld) {
+  var stateBits: Bitset = world.taskContexts.copyAtDefault(index: 0).jointStateBitSet
+  loop var i: Int = 1, i < world.taskContexts.length, ++i {
+    inPlaceUnion(setA: stateBits, setB: world.taskContexts.copyAtDefault(index: i).jointStateBitSet)
+  }
+  let bitCount: Int = stateBits.blockCount * 64
+  loop var jointId: Int = 0, jointId < bitCount, ++jointId {
+    if getBit(bitset: stateBits, bitIndex: jointId) {
+      world.jointEvents.add(
+        value: JointEvent {
+          jointId: JointId {
+            index1: jointId + 1
+            world0: world.worldId
+            generation: world.joints.copyAtDefault(index: jointId).generation
+          }
+        }
+      )
+    }
+  }
+}

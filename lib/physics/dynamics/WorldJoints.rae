@@ -1,0 +1,332 @@
+# Creating and destroying joints (b3CreateJoint, b3DestroyContactsBetweenBodies,
+# b3CreateDistanceJoint, b3CreateFilterJoint, b3CreateRevoluteJoint,
+# b3DestroyJointInternal and b3DestroyJoint of Box3D's joint.c at 9f998c8).
+# A new joint goes to the disabled set when a body is disabled, to the
+# static set when neither body is dynamic, to the constraint graph when a
+# body is awake (waking the other) and else to the sleeping set, merging the
+# bodies' sleeping sets. Box3D's operation order is kept exactly; checked
+# against the oracle in fixture 984.
+open Vec3
+open physics/Constants
+open physics/math/Scalar
+open physics/container/IdPool
+open physics/dynamics/WorldTypes
+open physics/dynamics/Body
+open physics/dynamics/Contact
+open physics/dynamics/Joint
+open physics/dynamics/SolverSet
+open physics/dynamics/World
+open physics/dynamics/WorldGraph
+open physics/dynamics/WorldIslands
+open physics/dynamics/WorldContacts
+open physics/dynamics/WorldJointSets
+
+# b3DestroyContactsBetweenBodies: walk the shorter contact list, destroying
+# the contacts with the other body (no need to wake: the joint removes the
+# collision).
+func destroyContactsBetweenBodies(world: mod PhysicsWorld, bodyIdA: view Int, bodyIdB: view Int) {
+  let bodyA: Body = bodyAt(world: world, bodyId: bodyIdA)
+  let bodyB: Body = bodyAt(world: world, bodyId: bodyIdB)
+  var contactKey: Int = bodyB.headContactKey
+  var otherBodyId: Int = bodyIdA
+  if bodyA.contactCount < bodyB.contactCount {
+    contactKey = bodyA.headContactKey
+    otherBodyId = bodyIdB
+  }
+  loop contactKey is not -1 {
+    let contactId: Int = contactKey shr 1
+    let edgeIndex: Int = contactKey bitand 1
+    let contact: Contact = world.contacts.copyAtDefault(index: contactId)
+    contactKey = contactEdge(contact: contact, edgeIndex: edgeIndex).nextKey
+    if contactEdge(contact: contact, edgeIndex: edgeIndex bitxor 1).bodyId is otherBodyId {
+      # Careful: this removes the contact from the list being walked
+      destroyContact(world: world, contactId: contactId, wakeBodies: false)
+    }
+  }
+}
+
+# Put `sim` (the joint's solver data) at the end of set `setIndex`'s joint
+# sims; returns its local index.
+func addSetJoint(world: mod PhysicsWorld, setIndex: view Int, sim: view JointSim) ret Int {
+  var localIndex: Int = 0
+  if let set: mod SolverSet => world.solverSets.modAt(index: setIndex) {
+    localIndex = set.jointSims.length
+    set.jointSims.add(value: sim)
+  }
+  ret localIndex
+}
+
+# b3CreateJoint with the kind's solver data already in `sim`: the joint, its
+# links in both bodies' joint lists, its sim in the right set or colour and
+# its island. Returns the joint id.
+func createJoint(
+  world: mod PhysicsWorld
+  def: view JointDef
+  jointType: view JointType
+  sim: view JointSim
+) ret Int {
+  let bodyIdA: Int = bodyIndexOf(bodyId: def.bodyIdA)
+  let bodyIdB: Int = bodyIndexOf(bodyId: def.bodyIdB)
+
+  # A joint that prevents collision destroys the contacts between its
+  # bodies, first, so the world's arrays are not disturbed below
+  if def.collideConnected is false {
+    destroyContactsBetweenBodies(world: world, bodyIdA: bodyIdA, bodyIdB: bodyIdB)
+  }
+  let bodyA: Body = bodyAt(world: world, bodyId: bodyIdA)
+  let bodyB: Body = bodyAt(world: world, bodyId: bodyIdB)
+  let maxSetIndex: Int = maxInt(left: bodyA.setIndex, right: bodyB.setIndex)
+
+  let jointId: Int = allocId(pool: world.jointIdPool)
+  if jointId is world.joints.length {
+    world.joints.add(value: zeroJoint())
+  }
+  var joint: Joint = world.joints.copyAtDefault(index: jointId)
+  joint.jointId = jointId
+  joint.generation = joint.generation + 1
+  joint.setIndex = -1
+  joint.colorIndex = -1
+  joint.localIndex = -1
+  joint.islandId = -1
+  joint.islandIndex = -1
+  joint.drawScale = def.drawScale
+  joint.jointType = jointType
+  joint.collideConnected = def.collideConnected
+
+  # The doubly linked list on body A
+  let keyA: Int = (jointId shl 1) bitor 0
+  joint.edgeA = JointEdge { bodyId: bodyIdA, prevKey: -1, nextKey: bodyA.headJointKey }
+  if bodyA.headJointKey is not -1 {
+    if (bodyA.headJointKey shr 1) is jointId {
+      setJointEdgePrev(joint: joint, edgeIndex: bodyA.headJointKey bitand 1, prevKey: keyA)
+    } else if let head: mod Joint => world.joints.modAt(index: bodyA.headJointKey shr 1) {
+      setJointEdgePrev(joint: head, edgeIndex: bodyA.headJointKey bitand 1, prevKey: keyA)
+    }
+  }
+  if let owner: mod Body => world.bodies.modAt(index: bodyIdA) {
+    owner.headJointKey = keyA
+    owner.jointCount = owner.jointCount + 1
+  }
+
+  # The doubly linked list on body B
+  let keyB: Int = (jointId shl 1) bitor 1
+  let headB: Int = bodyAt(world: world, bodyId: bodyIdB).headJointKey
+  joint.edgeB = JointEdge { bodyId: bodyIdB, prevKey: -1, nextKey: headB }
+  if headB is not -1 {
+    if (headB shr 1) is jointId {
+      setJointEdgePrev(joint: joint, edgeIndex: headB bitand 1, prevKey: keyB)
+    } else if let head: mod Joint => world.joints.modAt(index: headB shr 1) {
+      setJointEdgePrev(joint: head, edgeIndex: headB bitand 1, prevKey: keyB)
+    }
+  }
+  if let owner: mod Body => world.bodies.modAt(index: bodyIdB) {
+    owner.headJointKey = keyB
+    owner.jointCount = owner.jointCount + 1
+  }
+  world.joints.set(index: jointId, value: joint)
+
+  var jointSim: JointSim = sim
+  jointSim.jointId = jointId
+  jointSim.bodyIdA = bodyIdA
+  jointSim.bodyIdB = bodyIdB
+  jointSim.localFrameA = def.localFrameA
+  jointSim.localFrameB = def.localFrameB
+  jointSim.jointType = jointType
+  jointSim.constraintHertz = def.constraintHertz
+  jointSim.constraintDampingRatio = def.constraintDampingRatio
+  jointSim.constraintSoftness = Softness { biasRate: 0.0, massScale: 1.0, impulseScale: 0.0 }
+  jointSim.forceThreshold = def.forceThreshold
+  jointSim.torqueThreshold = def.torqueThreshold
+
+  var setIndex: Int = -1
+  if bodyA.setIndex is disabledSet or bodyB.setIndex is disabledSet {
+    # A disabled body puts the joint in the disabled set
+    setIndex = disabledSet
+    let localIndex: Int = addSetJoint(world: world, setIndex: disabledSet, sim: jointSim)
+    if let target: mod Joint => world.joints.modAt(index: jointId) {
+      target.setIndex = disabledSet
+      target.localIndex = localIndex
+    }
+  } else if bodyA.bodyType is not BodyType.dynamicBody and bodyB.bodyType is not BodyType.dynamicBody {
+    # Not attached to a dynamic body
+    setIndex = staticSet
+    let localIndex: Int = addSetJoint(world: world, setIndex: staticSet, sim: jointSim)
+    if let target: mod Joint => world.joints.modAt(index: jointId) {
+      target.setIndex = staticSet
+      target.localIndex = localIndex
+    }
+  } else if bodyA.setIndex is awakeSet or bodyB.setIndex is awakeSet {
+    # A sleeping body wakes
+    if maxSetIndex >= firstSleepingSet {
+      wakeSolverSet(world: world, setIndex: maxSetIndex)
+    }
+    setIndex = awakeSet
+    if let target: mod Joint => world.joints.modAt(index: jointId) {
+      target.setIndex = awakeSet
+    }
+    addJointToGraph(world: world, jointId: jointId, sim: jointSim)
+  } else {
+    # Between sleeping and/or static bodies: the sleeping set (not the
+    # static set)
+    setIndex = maxSetIndex
+    let localIndex: Int = addSetJoint(world: world, setIndex: setIndex, sim: jointSim)
+    if let target: mod Joint => world.joints.modAt(index: jointId) {
+      target.setIndex = setIndex
+      target.localIndex = localIndex
+    }
+    if bodyA.setIndex is not bodyB.setIndex and bodyA.setIndex >= firstSleepingSet and bodyB.setIndex >= firstSleepingSet {
+      # Merge the sleeping sets
+      mergeSolverSets(world: world, setId1: bodyA.setIndex, setId2: bodyB.setIndex)
+      setIndex = bodyAt(world: world, bodyId: bodyIdA).setIndex
+    }
+  }
+
+  if world.joints.copyAtDefault(index: jointId).setIndex > disabledSet {
+    # The joint joins the island graph
+    linkJoint(world: world, jointId: jointId)
+  }
+  ret jointId
+}
+
+# The handle of joint `jointId` (b3JointId).
+func jointHandle(world: view PhysicsWorld, jointId: view Int) ret JointId {
+  ret JointId {
+    index1: jointId + 1
+    world0: world.worldId
+    generation: world.joints.copyAtDefault(index: jointId).generation
+  }
+}
+
+# b3CreateDistanceJoint
+func createDistanceJoint(world: mod PhysicsWorld, def: view DistanceJointDef) ret JointId {
+  let slop: Float = linearSlop(lengthUnitsPerMeter: world.lengthUnitsPerMeter)
+  var sim: JointSim = zeroJointSim()
+  var data: DistanceJointData = zeroDistanceJointData()
+  data.length = maxFloat(left: def.length, right: slop)
+  data.hertz = def.hertz
+  data.dampingRatio = def.dampingRatio
+  data.lowerSpringForce = def.lowerSpringForce
+  data.upperSpringForce = def.upperSpringForce
+  data.minLength = maxFloat(left: def.minLength, right: slop)
+  data.maxLength = maxFloat(left: def.minLength, right: def.maxLength)
+  data.maxMotorForce = def.maxMotorForce
+  data.motorSpeed = def.motorSpeed
+  data.enableSpring = def.enableSpring
+  data.enableLimit = def.enableLimit
+  data.enableMotor = def.enableMotor
+  sim.distanceJoint = data
+  let jointId: Int = createJoint(
+    world: world
+    def: def.base
+    jointType: JointType.distanceJoint
+    sim: sim
+  )
+  ret jointHandle(world: world, jointId: jointId)
+}
+
+# b3CreateFilterJoint: a joint with no constraint, which only keeps its
+# bodies from colliding (and joins their islands).
+func createFilterJoint(world: mod PhysicsWorld, def: view JointDef) ret JointId {
+  let jointId: Int = createJoint(
+    world: world
+    def: def
+    jointType: JointType.filterJoint
+    sim: zeroJointSim()
+  )
+  ret jointHandle(world: world, jointId: jointId)
+}
+
+# b3CreateRevoluteJoint
+func createRevoluteJoint(world: mod PhysicsWorld, def: view RevoluteJointDef) ret JointId {
+  var sim: JointSim = zeroJointSim()
+  var data: RevoluteJointData = zeroRevoluteJointData()
+  data.hertz = def.hertz
+  data.dampingRatio = def.dampingRatio
+  data.targetAngle = clampFloat(value: def.targetAngle, lower: -pi, upper: pi)
+  let lowerAngle: Float = minFloat(left: def.lowerAngle, right: def.upperAngle)
+  let upperAngle: Float = maxFloat(left: def.lowerAngle, right: def.upperAngle)
+  data.lowerAngle = clampFloat(value: lowerAngle, lower: -0.99 * pi, upper: 0.99 * pi)
+  data.upperAngle = clampFloat(value: upperAngle, lower: -0.99 * pi, upper: 0.99 * pi)
+  data.maxMotorTorque = def.maxMotorTorque
+  data.motorSpeed = def.motorSpeed
+  data.enableSpring = def.enableSpring
+  data.enableLimit = def.enableLimit
+  data.enableMotor = def.enableMotor
+  sim.revoluteJoint = data
+  let jointId: Int = createJoint(
+    world: world
+    def: def.base
+    jointType: JointType.revoluteJoint
+    sim: sim
+  )
+  ret jointHandle(world: world, jointId: jointId)
+}
+
+# Unlink edge `edgeIndex` of joint `jointId` from its body's joint list.
+func unlinkJointEdge(world: mod PhysicsWorld, jointId: view Int, edgeIndex: view Int) {
+  let edge: JointEdge = jointEdge(
+    joint: world.joints.copyAtDefault(index: jointId)
+    edgeIndex: edgeIndex
+  )
+  if edge.prevKey is not -1 {
+    if let previous: mod Joint => world.joints.modAt(index: edge.prevKey shr 1) {
+      setJointEdgeNext(joint: previous, edgeIndex: edge.prevKey bitand 1, nextKey: edge.nextKey)
+    }
+  }
+  if edge.nextKey is not -1 {
+    if let next: mod Joint => world.joints.modAt(index: edge.nextKey shr 1) {
+      setJointEdgePrev(joint: next, edgeIndex: edge.nextKey bitand 1, prevKey: edge.prevKey)
+    }
+  }
+  let edgeKey: Int = (jointId shl 1) bitor edgeIndex
+  if let body: mod Body => world.bodies.modAt(index: edge.bodyId) {
+    if body.headJointKey is edgeKey {
+      body.headJointKey = edge.nextKey
+    }
+    body.jointCount = body.jointCount - 1
+  }
+}
+
+# b3DestroyJointInternal: unlink the joint from its bodies and island,
+# remove its sim, free its id (the generation stays), maybe wake its bodies.
+func destroyJointInternal(world: mod PhysicsWorld, jointId: view Int, wakeBodies: view Bool) {
+  let joint: Joint = world.joints.copyAtDefault(index: jointId)
+  unlinkJointEdge(world: world, jointId: jointId, edgeIndex: 0)
+  unlinkJointEdge(world: world, jointId: jointId, edgeIndex: 1)
+  if joint.islandId is not -1 {
+    unlinkJoint(world: world, jointId: jointId)
+  }
+
+  # Remove the sim from the set that owns it
+  let setIndex: Int = joint.setIndex
+  let localIndex: Int = joint.localIndex
+  if setIndex is awakeSet {
+    removeJointFromGraph(
+      world: world
+      bodyIdA: joint.edgeA.bodyId
+      bodyIdB: joint.edgeB.bodyId
+      colorIndex: joint.colorIndex
+      localIndex: localIndex
+    )
+  } else {
+    removeSetJoint(world: world, setIndex: setIndex, localIndex: localIndex)
+  }
+
+  # Free the joint and its id
+  if let freed: mod Joint => world.joints.modAt(index: jointId) {
+    freed.setIndex = -1
+    freed.localIndex = -1
+    freed.colorIndex = -1
+    freed.jointId = -1
+  }
+  freeId(pool: world.jointIdPool, id: jointId)
+  if wakeBodies {
+    wakeBody(world: world, bodyId: joint.edgeA.bodyId)
+    wakeBody(world: world, bodyId: joint.edgeB.bodyId)
+  }
+}
+
+# b3DestroyJoint
+func destroyJoint(world: mod PhysicsWorld, jointId: view JointId, wakeAttached: view Bool) {
+  destroyJointInternal(world: world, jointId: jointId.index1 - 1, wakeBodies: wakeAttached)
+}

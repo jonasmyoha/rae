@@ -2,13 +2,14 @@
 # b3MergeIslands, b3LinkContact, b3UnlinkContact of Box3D's island.c;
 # b3DestroySolverSet, b3WakeSolverSet, b3TrySleepIsland of solver_set.c; the
 # island helpers of body.c, at 9f998c8). Box3D's order of array moves is kept
-# exactly; checked against the oracle in fixtures 954 and 957. Joints (their
-# links, moves and merged sleeping sets) arrive in P6.
+# exactly; checked against the oracle in fixtures 954, 957 and 984. A
+# joint's links, its transfers and merged sleeping sets are WorldJointSets.
 open physics/container/IdPool
 open physics/container/Bitset
 open physics/dynamics/WorldTypes
 open physics/dynamics/Body
 open physics/dynamics/Contact
+open physics/dynamics/Joint
 open physics/dynamics/ConstraintGraph
 open physics/dynamics/SolverSet
 open physics/dynamics/Island
@@ -35,6 +36,7 @@ func createIsland(world: mod PhysicsWorld, setIndex: view Int) ret Int {
       constraintRemoveCount: 0
       bodies: List.create(Int, cap: 4)
       contacts: List.create(ContactLink, cap: 4)
+      joints: List.create(JointLink, cap: 4)
     }
   )
   ret islandId
@@ -60,6 +62,7 @@ func destroyIsland(world: mod PhysicsWorld, islandId: view Int) {
   if let freed: mod Island => world.islands.modAt(index: islandId) {
     freed.bodies.clear()
     freed.contacts.clear()
+    freed.joints.clear()
     freed.constraintRemoveCount = 0
     freed.localIndex = -1
     freed.islandId = -1
@@ -68,7 +71,7 @@ func destroyIsland(world: mod PhysicsWorld, islandId: view Int) {
   freeId(pool: world.islandIdPool, id: islandId)
 }
 
-# b3MergeIslands: move the smaller island's bodies and contacts into the
+# b3MergeIslands: move the smaller island's bodies, contacts and joints into the
 # bigger one (A on a tie) and destroy it. Returns the island that survives.
 func mergeIslands(world: mod PhysicsWorld, islandIdA: view Int, islandIdB: view Int) ret Int {
   if islandIdA is islandIdB {
@@ -116,6 +119,20 @@ func mergeIslands(world: mod PhysicsWorld, islandIdA: view Int, islandIdB: view 
     if let contact: mod Contact => world.contacts.modAt(index: link.contactId) {
       contact.islandId = bigIslandId
       contact.islandIndex = contactIndex
+    }
+  }
+
+  # Migrate joints from the smaller island to the larger island
+  loop var i: Int = 0, i < small.joints.length, ++i {
+    let link: JointLink = small.joints.copyAtDefault(index: i)
+    var jointIndex: Int = 0
+    if let big: mod Island => world.islands.modAt(index: bigIslandId) {
+      jointIndex = big.joints.length
+      big.joints.add(value: link)
+    }
+    if let joint: mod Joint => world.joints.modAt(index: link.jointId) {
+      joint.islandId = bigIslandId
+      joint.islandIndex = jointIndex
     }
   }
 
@@ -343,7 +360,16 @@ func wakeSolverSet(world: mod PhysicsWorld, setIndex: view Int) {
     }
   }
 
-  # Transfer the islands (usually one)
+  # Transfer the joints from the sleeping set to the constraint graph
+  loop let jointSim: view JointSim in sleeping.jointSims {
+    addJointToGraph(world: world, jointId: jointSim.jointId, sim: jointSim)
+    if let joint: mod Joint => world.joints.modAt(index: jointSim.jointId) {
+      joint.setIndex = awakeSet
+    }
+  }
+
+  # Transfer the islands (usually one: joints can put sleeping islands in
+  # one set)
   loop var i: Int = 0, i < sleeping.islandSims.length, ++i {
     let islandId: Int = sleeping.islandSims.copyAtDefault(index: i)
     var localIndex: Int = 0
@@ -515,6 +541,45 @@ func trySleepIsland(world: mod PhysicsWorld, islandId: view Int) {
     }
   }
 
+  # Move the joints (this shuffles the graph)
+  loop var i: Int = 0, i < island.joints.length, ++i {
+    let jointId: Int = island.joints.copyAtDefault(index: i).jointId
+    let joint: Joint = world.joints.copyAtDefault(index: jointId)
+    let colorIndex: Int = joint.colorIndex
+    let localIndex: Int = joint.localIndex
+    var movedId: Int = -1
+    var sleepJointIndex: Int = 0
+    if let color: mod GraphColor => world.constraintGraph.colors.modAt(index: colorIndex) {
+      let awakeJointSim: JointSim = color.jointSims.copyAtDefault(index: localIndex)
+      if colorIndex is not overflowIndex {
+        # Might clear a bit for a static body, which has no effect
+        clearBit(bitset: color.bodySet, bitIndex: joint.edgeA.bodyId)
+        clearBit(bitset: color.bodySet, bitIndex: joint.edgeB.bodyId)
+      }
+      if let sleepSet: mod SolverSet => world.solverSets.modAt(index: sleepSetId) {
+        sleepJointIndex = sleepSet.jointSims.length
+        sleepSet.jointSims.add(value: awakeJointSim)
+      }
+      let lastIndex: Int = color.jointSims.length - 1
+      if localIndex is not lastIndex {
+        let moved: JointSim = color.jointSims.copyAtDefault(index: lastIndex)
+        color.jointSims.set(index: localIndex, value: moved)
+        movedId = moved.jointId
+      }
+      color.jointSims.removeLast()
+    }
+    if movedId is not -1 {
+      if let moved: mod Joint => world.joints.modAt(index: movedId) {
+        moved.localIndex = localIndex
+      }
+    }
+    if let target: mod Joint => world.joints.modAt(index: jointId) {
+      target.setIndex = sleepSetId
+      target.colorIndex = -1
+      target.localIndex = sleepJointIndex
+    }
+  }
+
   # Move the island
   let islandIndex: Int = island.localIndex
   if let sleepSet: mod SolverSet => world.solverSets.modAt(index: sleepSetId) {
@@ -593,9 +658,9 @@ func unionIslandNodes(
 }
 
 # b3SplitIsland: split island `baseId` into its connected components
-# (union-find over its contacts; static bodies connect nothing). The new
+# (union-find over its contacts and joints; static bodies connect nothing). The new
 # islands are created in the order of their first body, then the base
-# island is destroyed. (Joint links: P6.)
+# island is destroyed.
 func splitIsland(world: mod PhysicsWorld, baseId: view Int) {
   let base: Island = world.islands.copyAtDefault(index: baseId)
   let baseBodyCount: Int = base.bodies.length
@@ -629,6 +694,22 @@ func splitIsland(world: mod PhysicsWorld, baseId: view Int) {
       }
       let root: Int = findIslandRoot(parents: parents, node: islandIndex)
       contactCounts.set(index: root, value: contactCounts.copyAtDefault(index: root) + 1)
+    }
+  }
+
+  # Union over the joints (Box3D counts them per component only to size the
+  # new islands' arrays)
+  loop let link: view JointLink in base.joints {
+    let islandIndexA: Int = bodyAt(world: world, bodyId: link.bodyIdA).islandIndex
+    let islandIndexB: Int = bodyAt(world: world, bodyId: link.bodyIdB).islandIndex
+    if islandIndexA is not -1 and islandIndexB is not -1 {
+      unionIslandNodes(
+        parents: parents
+        ranks: ranks
+        contactCounts: contactCounts
+        node1: islandIndexA
+        node2: islandIndexB
+      )
     }
   }
 
@@ -699,6 +780,23 @@ func splitIsland(world: mod PhysicsWorld, baseId: view Int) {
     if let contact: mod Contact => world.contacts.modAt(index: link.contactId) {
       contact.islandId = targetIslandId
       contact.islandIndex = contactIndex
+    }
+  }
+
+  # Assign the joints to the island of their bodies
+  loop let link: view JointLink in base.joints {
+    var targetIslandId: Int = bodyAt(world: world, bodyId: link.bodyIdA).islandId
+    if targetIslandId is -1 {
+      targetIslandId = bodyAt(world: world, bodyId: link.bodyIdB).islandId
+    }
+    var jointIndex: Int = 0
+    if let island: mod Island => world.islands.modAt(index: targetIslandId) {
+      jointIndex = island.joints.length
+      island.joints.add(value: link)
+    }
+    if let joint: mod Joint => world.joints.modAt(index: link.jointId) {
+      joint.islandId = targetIslandId
+      joint.islandIndex = jointIndex
     }
   }
 
