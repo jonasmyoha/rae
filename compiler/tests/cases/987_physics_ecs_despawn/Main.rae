@@ -1,0 +1,225 @@
+# Despawn safety of the physics ECS layer (lib/physics/ecs,
+# docs/physics-design.md §7): 1000 bodies are spawned over 10 rounds of 100,
+# the world stepping between rounds, and each round despawns the 90 oldest
+# (despawnRigidBody before the entity's components are cleared and the
+# entity freed), so entity indices and body slots are recycled over and
+# over. After every round: every RigidBody's entity is alive and its body
+# maps back to it, every mapped body belongs to a live entity with that
+# RigidBody, and every live body slot (bar the venue) has an entity — a
+# recycled entity id never touches a live body.
+import Vec3
+import Quat
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open ecs/Transform
+open physics/math/TransformMath
+open physics/math/QuatMath
+open physics/geometry/QueryTypes
+open physics/dynamics/WorldTypes
+open physics/dynamics/Body
+open physics/dynamics/World
+open physics/ecs/Physics
+open physics/ecs/PhysicsComponents
+open physics/ecs/PhysicsSpawn
+open physics/ecs/PhysicsSystems
+
+type GameWorld {
+  allocator: EntityAllocator
+  transforms: ComponentTable(Transform3D)
+  rigidBodies: ComponentTable(RigidBody)
+  colliders: ComponentTable(Collider)
+  characters: ComponentTable(CharacterBody)
+  physics: Physics
+}
+
+func createGameWorld() ret GameWorld {
+  ret GameWorld {
+    allocator: createEntityAllocator()
+    transforms: createComponentTable(Transform3D)
+    rigidBodies: createComponentTable(RigidBody)
+    colliders: createComponentTable(Collider)
+    characters: createComponentTable(CharacterBody)
+    physics: createPhysics(def: defaultPhysicsWorldDef(), fixedStep: 1.0 / 60.0, subSteps: 4)
+  }
+}
+
+# Spawn the `serial`-th body: a sphere or a box above the floor.
+func spawnBall(world: mod GameWorld, serial: view Int) ret EntityId {
+  let entityId: EntityId = allocEntity(this: world.allocator)
+  var def: BodyDef = defaultBodyDef(lengthUnitsPerMeter: 1.0)
+  def.bodyType = BodyType.dynamicBody
+  let column: Int = serial % 10
+  let row: Int = (serial / 10) % 10
+  def.position = Vec3 {
+    x: (column as Float) * 1.1 - 5.0
+    y: (row as Float) * 1.1 - 5.0
+    z: 2.0 + (serial % 7) as Float * 0.3
+  }
+  spawnRigidBody(
+    physics: world.physics
+    rigidBodies: world.rigidBodies
+    transforms: world.transforms
+    entityId: entityId
+    def: def
+  )
+  let shapeDef: ShapeDef = defaultShapeDef(lengthUnitsPerMeter: 1.0)
+  if serial % 2 is 0 {
+    addSphereCollider(
+      physics: world.physics
+      rigidBodies: world.rigidBodies
+      colliders: world.colliders
+      entityId: entityId
+      def: shapeDef
+      sphere: Sphere { center: Vec3 { x: 0.0, y: 0.0, z: 0.0 }, radius: 0.4 }
+    )
+  } else {
+    addBoxCollider(
+      physics: world.physics
+      rigidBodies: world.rigidBodies
+      colliders: world.colliders
+      entityId: entityId
+      def: shapeDef
+      halfExtents: Vec3 { x: 0.35, y: 0.35, z: 0.35 }
+      transform: transformIdentity()
+    )
+  }
+  ret entityId
+}
+
+# despawnRigidBody first, then the entity's components, then the entity.
+func despawn(world: mod GameWorld, entityId: view EntityId) {
+  despawnRigidBody(
+    physics: world.physics
+    rigidBodies: world.rigidBodies
+    colliders: world.colliders
+    entityId: entityId
+  )
+  clearEntityComponents(world: world, entityId: entityId)
+  freeEntity(this: world.allocator, entityId: entityId)
+}
+
+# The invariants; how many are broken.
+func countViolations(world: view GameWorld) ret Int {
+  var violations: Int = 0
+  # Every RigidBody: a live entity whose body maps back to it
+  loop var i: Int = 0, i < componentCount(this: world.rigidBodies), ++i {
+    let entityId: EntityId = componentEntityAt(this: world.rigidBodies, i: i)
+    let rigidBody: RigidBody = componentCopyAtDefault(this: world.rigidBodies, i: i)
+    if allocatorIsAlive(this: world.allocator, entityId: entityId) is false {
+      violations = violations + 1
+    }
+    if entityOfBody(physics: world.physics, bodyId: rigidBody.bodyId) is not entityId {
+      violations = violations + 1
+    }
+    let body: Body = bodyAt(world: world.physics.world, bodyId: rigidBody.bodyId.index1 - 1)
+    if body.id is not rigidBody.bodyId.index1 - 1 or body.generation is not rigidBody.bodyId.generation {
+      violations = violations + 1
+    }
+  }
+  # Every mapped body: a live entity holding that body
+  loop var bodyIndex: Int = 0, bodyIndex < world.physics.bodyEntities.length, ++bodyIndex {
+    let entityId: EntityId = world.physics.bodyEntities.copyAtDefault(index: bodyIndex)
+    if isNone(this: entityId) {
+      continue
+    }
+    if allocatorIsAlive(this: world.allocator, entityId: entityId) is false {
+      violations = violations + 1
+      continue
+    }
+    if componentHas(this: world.rigidBodies, entityId: entityId) is false {
+      violations = violations + 1
+      continue
+    }
+    if componentView(this: world.rigidBodies, entityId: entityId).bodyId.index1 - 1 is not bodyIndex {
+      violations = violations + 1
+    }
+  }
+  # Every live body slot but the venue's: mapped to an entity
+  loop var bodyIndex: Int = 0, bodyIndex < world.physics.world.bodies.length, ++bodyIndex {
+    let body: Body = bodyAt(world: world.physics.world, bodyId: bodyIndex)
+    if body.id is -1 or bodyIndex is world.physics.venueBodyId.index1 - 1 {
+      continue
+    }
+    let entityId: EntityId = mappedEntity(entities: world.physics.bodyEntities, index: bodyIndex)
+    if isNone(this: entityId) {
+      violations = violations + 1
+    }
+  }
+  ret violations
+}
+
+func liveBodyCount(world: view GameWorld) ret Int {
+  var count: Int = 0
+  loop let body: view Body in world.physics.world.bodies {
+    if body.id is not -1 {
+      count = count + 1
+    }
+  }
+  ret count
+}
+
+func main() {
+  var world: GameWorld = createGameWorld()
+  addVenueBox(
+    physics: world.physics
+    def: defaultShapeDef(lengthUnitsPerMeter: 1.0)
+    halfExtents: Vec3 { x: 20.0, y: 20.0, z: 0.5 }
+    transform: Transform { position: Vec3 { x: 0.0, y: 0.0, z: -0.5 }, rotation: quatIdentity() }
+  )
+  let live: List(EntityId) = List.create(EntityId, cap: 128)
+  var spawned: Int = 0
+  var recycled: Int = 0
+  var totalViolations: Int = 0
+  loop var round: Int = 0, round < 10, ++round {
+    loop var k: Int = 0, k < 100, ++k {
+      let entityId: EntityId = spawnBall(world: world, serial: spawned)
+      if entityId.generation > 0 {
+        recycled = recycled + 1
+      }
+      live.add(value: entityId)
+      spawned = spawned + 1
+    }
+    loop var step: Int = 0, step < 6, ++step {
+      physicsFrame(
+        physics: world.physics
+        rigidBodies: world.rigidBodies
+        characters: world.characters
+        transforms: world.transforms
+        frameTime: 1.0 / 60.0
+      )
+    }
+    let afterSpawn: Int = countViolations(world: world)
+    # Despawn the 90 oldest
+    loop var k: Int = 0, k < 90, ++k {
+      despawn(world: world, entityId: live.copyAtDefault(index: 0))
+      live.remove(index: 0)
+    }
+    loop var step: Int = 0, step < 6, ++step {
+      physicsFrame(
+        physics: world.physics
+        rigidBodies: world.rigidBodies
+        characters: world.characters
+        transforms: world.transforms
+        frameTime: 1.0 / 60.0
+      )
+    }
+    let afterDespawn: Int = countViolations(world: world)
+    totalViolations = totalViolations + afterSpawn + afterDespawn
+    log(
+      "round {round}: live {live.length}, rigid bodies {componentCount(this: world.rigidBodies)}, live bodies {liveBodyCount(
+        world: world
+      )}, recycled ids {recycled}, violations {afterSpawn + afterDespawn}"
+    )
+  }
+  # Despawn the rest
+  loop live.length > 0 {
+    despawn(world: world, entityId: live.copyAtDefault(index: 0))
+    live.remove(index: 0)
+  }
+  totalViolations = totalViolations + countViolations(world: world)
+  log(
+    "spawned {spawned}, recycled ids {recycled}, live bodies at the end {liveBodyCount(world: world)} (the venue)"
+  )
+  log("violations: {totalViolations}")
+}

@@ -24,7 +24,7 @@ open physics/dynamics/WorldTypes
 # B3_AABB_MARGIN_FRACTION
 const aabbMarginFraction: Float = 0.125
 
-type Shape {
+type PhysicsShape {
   # -1 for a free slot
   id: Int
   bodyId: Int
@@ -62,8 +62,8 @@ type Shape {
   localBounds: Aabb
 }
 
-func zeroShape() ret Shape {
-  ret Shape {
+func zeroShape() ret PhysicsShape {
+  ret PhysicsShape {
     id: 0
     bodyId: 0
     prevShapeId: 0
@@ -102,7 +102,7 @@ func zeroShape() ret Shape {
 # b3ComputeShapeMargin: the extra room of a moving shape's fat box, an
 # eighth of its size, at most maxAabbMargin.
 func computeShapeMargin(
-  shape: view Shape
+  shape: view PhysicsShape
   hulls: view List(Hull)
   lengthUnitsPerMeter: view Float
 ) ret Float {
@@ -140,7 +140,7 @@ func computeShapeMargin(
 }
 
 # b3GetShapeCentroid
-func shapeCentroid(shape: view Shape, hulls: view List(Hull)) ret Vec3 {
+func shapeCentroid(shape: view PhysicsShape, hulls: view List(Hull)) ret Vec3 {
   match shape.shapeType {
     case ShapeType.capsule {
       ret lerp(from: shape.capsule.center1, to: shape.capsule.center2, alpha: 0.5)
@@ -168,13 +168,13 @@ func shapeCentroid(shape: view Shape, hulls: view List(Hull)) ret Vec3 {
 
 # b3ComputeMeshAABB / b3ComputeHeightFieldAABB / b3ComputeCompoundAABB of a
 # mesh, height or compound shape: its local bounds, transformed.
-func meshAabb(shape: view Shape, transform: view Transform) ret Aabb {
+func meshAabb(shape: view PhysicsShape, transform: view Transform) ret Aabb {
   ret transformAabb(transform: transform, box: shape.localBounds)
 }
 
 # The extent of a mesh or compound shape about `localCenter`: the nearer
 # corner's distance, the farther corner's offset (b3ComputeShapeExtent).
-func localBoundsExtent(shape: view Shape, localCenter: view Vec3) ret ShapeExtent {
+func localBoundsExtent(shape: view PhysicsShape, localCenter: view Vec3) ret ShapeExtent {
   let box: Aabb = meshAabb(shape: shape, transform: transformIdentity())
   let r1: Float = length(vector: subtract(left: box.lowerBound, right: localCenter))
   let r2: Float = length(vector: subtract(left: box.upperBound, right: localCenter))
@@ -187,7 +187,7 @@ func localBoundsExtent(shape: view Shape, localCenter: view Vec3) ret ShapeExten
 
 # b3GetShapeMaterials(shape)[0]: a compound's first table material, else
 # the shape's material.
-func firstShapeMaterial(shape: view Shape) ret SurfaceMaterial {
+func firstShapeMaterial(shape: view PhysicsShape) ret SurfaceMaterial {
   if shape.materials.length > 0 {
     ret shape.materials.copyAtDefault(index: 0)
   }
@@ -213,7 +213,7 @@ func farthestPointOnAabb(box: view Aabb, point: view Vec3) ret Vec3 {
 
 # b3ComputeShapeAABB
 func computeShapeAabb(
-  shape: view Shape
+  shape: view PhysicsShape
   hulls: view List(Hull)
   transform: view Transform
 ) ret Aabb {
@@ -244,7 +244,7 @@ func computeShapeAabb(
 
 # b3ComputeFatShapeAABB (single precision): the box grown by `extra`.
 func computeFatShapeAabb(
-  shape: view Shape
+  shape: view PhysicsShape
   hulls: view List(Hull)
   transform: view Transform
   extra: view Float
@@ -257,7 +257,7 @@ func computeFatShapeAabb(
 }
 
 # b3ComputeShapeMass
-func computeShapeMass(shape: view Shape, hulls: view List(Hull)) ret MassData {
+func computeShapeMass(shape: view PhysicsShape, hulls: view List(Hull)) ret MassData {
   match shape.shapeType {
     case ShapeType.capsule {
       ret computeCapsuleMass(capsule: shape.capsule, density: shape.density)
@@ -294,7 +294,7 @@ func zeroMassData() ret MassData {
 # b3ComputeShapeExtent: the shape's inner radius and its box half extents
 # about `localCenter`.
 func computeShapeExtent(
-  shape: view Shape
+  shape: view PhysicsShape
   hulls: view List(Hull)
   localCenter: view Vec3
 ) ret ShapeExtent {
@@ -339,7 +339,7 @@ func computeShapeExtent(
 }
 
 # b3MakeShapeProxy
-func makeShapeProxy(shape: view Shape, hulls: view List(Hull)) ret ShapeProxy {
+func makeShapeProxy(shape: view PhysicsShape, hulls: view List(Hull)) ret ShapeProxy {
   if shape.shapeType is ShapeType.capsule {
     let points: List(Vec3) = { shape.capsule.center1, shape.capsule.center2 }
     ret makeProxy(points: points, radius: shape.capsule.radius)

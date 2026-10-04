@@ -8,7 +8,10 @@
 # (b3World_CastMover). It slides along walls, steps up what the pogo spring
 # can reach, stands on slopes and pushes dynamic bodies. The sample's
 # drawing and camera are left out; `groundNormal` (the pogo ray's hit
-# normal) is an addition. Checked against the same loop in C in fixture 986.
+# normal) is an addition, and so is `up`: the sample is Y-up, Rae's world is
+# Z-up (docs/coordinate-system.md), so the mover takes its up axis — with
+# `yUp` every operation is the sample's, in its order. Checked against the
+# same loop in C in fixture 986 (Y-up).
 open Vec2
 open Vec3
 open Quat
@@ -42,8 +45,51 @@ const friction: Float = 4.0
 
 const moverGravity: Float = 15.0
 
+# The mover's up axis: the sample's Y-up, or Rae's Z-up.
+enum UpAxis { yUp, zUp }
+
+# The component of `vector` along the up axis.
+func upComponent(vector: view Vec3, up: view UpAxis) ret Float {
+  if up is UpAxis.zUp {
+    ret vector.z
+  }
+  ret vector.y
+}
+
+func setUpComponent(vector: mod Vec3, up: view UpAxis, value: view Float) {
+  if up is UpAxis.zUp {
+    vector.z = value
+  } else {
+    vector.y = value
+  }
+}
+
+# The second horizontal component (z when Y-up, y when Z-up; x is the first).
+func sideComponent(vector: view Vec3, up: view UpAxis) ret Float {
+  if up is UpAxis.zUp {
+    ret vector.y
+  }
+  ret vector.z
+}
+
+func setSideComponent(vector: mod Vec3, up: view UpAxis, value: view Float) {
+  if up is UpAxis.zUp {
+    vector.y = value
+  } else {
+    vector.z = value
+  }
+}
+
+func upVector(up: view UpAxis) ret Vec3 {
+  if up is UpAxis.zUp {
+    ret axisZ()
+  }
+  ret axisY()
+}
+
 # The mover's state between steps.
 type CharacterMover {
+  up: UpAxis
   transform: WorldTransform
   velocity: Vec3
   capsule: Capsule
@@ -59,16 +105,36 @@ type CharacterMover {
   groundNormal: Vec3
 }
 
-# CharacterMover::Initialize: standing at `position`.
+# CharacterMover::Initialize: standing at `position`, Y-up as the sample.
 func createCharacterMover(position: view Pos) ret CharacterMover {
-  ret CharacterMover {
-    transform: WorldTransform { position: position, rotation: quatIdentity() }
-    velocity: zeroVector()
-    capsule: Capsule {
-      center1: Vec3 { x: 0.0, y: -0.5, z: 0.0 }
-      center2: Vec3 { x: 0.0, y: 0.5, z: 0.0 }
+  ret createCharacterMoverWithUp(position: position, up: UpAxis.yUp)
+}
+
+# The mover's capsule: half height 0.5 along the up axis, radius 0.3 (the
+# sample's constants, positive zeros kept).
+func moverCapsule(up: view UpAxis) ret Capsule {
+  if up is UpAxis.zUp {
+    ret Capsule {
+      center1: Vec3 { x: 0.0, y: 0.0, z: -0.5 }
+      center2: Vec3 { x: 0.0, y: 0.0, z: 0.5 }
       radius: 0.3
     }
+  }
+  ret Capsule {
+    center1: Vec3 { x: 0.0, y: -0.5, z: 0.0 }
+    center2: Vec3 { x: 0.0, y: 0.5, z: 0.0 }
+    radius: 0.3
+  }
+}
+
+# A mover standing at `position` with up axis `up`: its capsule (half
+# height 0.5, radius 0.3) stands along that axis.
+func createCharacterMoverWithUp(position: view Pos, up: view UpAxis) ret CharacterMover {
+  ret CharacterMover {
+    up: up
+    transform: WorldTransform { position: position, rotation: quatIdentity() }
+    velocity: zeroVector()
+    capsule: moverCapsule(up: up)
     planes: List.create(CollisionPlane, cap: planeCapacity)
     planePoints: List.create(Vec3, cap: planeCapacity)
     planeShapeIds: List.create(ShapeId, cap: planeCapacity)
@@ -83,7 +149,7 @@ func createCharacterMover(position: view Pos) ret CharacterMover {
 # The jump of CharacterMover::Step: only from the ground.
 func jumpCharacter(mover: mod CharacterMover) {
   if mover.onGround {
-    mover.velocity.y = jumpSpeed
+    setUpComponent(vector: mover.velocity, up: mover.up, value: jumpSpeed)
     mover.onGround = false
   }
 }
@@ -141,7 +207,7 @@ func accelerateCharacter(
   let speed: Float = length(vector: mover.velocity)
   if speed < minSpeed {
     mover.velocity.x = 0.0
-    mover.velocity.z = 0.0
+    setSideComponent(vector: mover.velocity, up: mover.up, value: 0.0)
   } else {
     # Linear damping above stopSpeed and a fixed reduction below it
     var control: Float = speed
@@ -153,7 +219,11 @@ func accelerateCharacter(
     let newSpeed: Float = maxFloat(left: 0.0, right: speed - drop)
     let ratio: Float = newSpeed / speed
     mover.velocity.x = mover.velocity.x * ratio
-    mover.velocity.z = mover.velocity.z * ratio
+    setSideComponent(
+      vector: mover.velocity
+      up: mover.up
+      value: sideComponent(vector: mover.velocity, up: mover.up) * ratio
+    )
   }
 
   var speedLimit: Float = maxSpeed
@@ -171,7 +241,7 @@ func accelerateCharacter(
   }
 
   if mover.onGround {
-    mover.velocity.y = 0.0
+    setUpComponent(vector: mover.velocity, up: mover.up, value: 0.0)
   }
 
   # Accelerate
@@ -188,7 +258,11 @@ func accelerateCharacter(
     )
   }
 
-  mover.velocity.y = mover.velocity.y - moverGravity * timeStep
+  setUpComponent(
+    vector: mover.velocity
+    up: mover.up
+    value: upComponent(vector: mover.velocity, up: mover.up) - moverGravity * timeStep
+  )
 }
 
 # The pogo spring: a ray down from the lower sphere finds the ground, and a
@@ -197,7 +271,7 @@ func updatePogo(mover: mod CharacterMover, world: view PhysicsWorld, timeStep: v
   let pogoRestLength: Float = 3.0 * mover.capsule.radius
   let rayLength: Float = pogoRestLength + mover.capsule.radius
   let rayOrigin: Pos = transformWorldPoint(transform: mover.transform, point: mover.capsule.center1)
-  let rayTranslation: Vec3 = scale(scale: -rayLength, vector: axisY())
+  let rayTranslation: Vec3 = scale(scale: -rayLength, vector: upVector(up: mover.up))
   let rayResult: RayResult = castRayClosest(
     world: world
     origin: rayOrigin
@@ -207,7 +281,7 @@ func updatePogo(mover: mod CharacterMover, world: view PhysicsWorld, timeStep: v
 
   # After gravity, the pogo is off while moving up: a jump is not pulled
   # back to the ground
-  let suppressPogo: Bool = mover.velocity.y > 0.0
+  let suppressPogo: Bool = upComponent(vector: mover.velocity, up: mover.up) > 0.0
   if rayResult.hit is false or suppressPogo {
     mover.onGround = false
     mover.pogoVelocity = 0.0
@@ -301,7 +375,7 @@ func solveMove(
   let startPosition: Pos = mover.transform.position
   let target: Pos = add(
     left: add(left: mover.transform.position, right: scale(scale: timeStep, vector: mover.velocity))
-    right: scale(scale: timeStep * mover.pogoVelocity, vector: axisY())
+    right: scale(scale: timeStep * mover.pogoVelocity, vector: upVector(up: mover.up))
   )
 
   mover.totalIterations = 0

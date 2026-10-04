@@ -1,20 +1,18 @@
-# Physics for Rae — design (Box3D)
+# Physics for Rae — design
 
-> **Engine strategy superseded (2026-09-30):** Box3D is now **ported to Rae**
-> instead of bound as C — see `docs/physics-rae-port-design.md`. §3 (generated
-> bindings), §4 (vendoring the C build) and §5.6 (C runtime hooks) no longer
-> apply. §0 (needs), §5.1–5.5 (the ECS surface), §5.7 (vehicles), §6
-> (determinism rules) and §7 (test scenes) still do.
+**Engine:** Box3D (`github.com/erincatto/box3d`, Erin Catto, MIT) **ported to
+Rae** in `lib/physics` (decided 2026-09-30; the port's own design, rules and
+phases are `docs/physics-rae-port-design.md`). This document is the
+*application-facing* design: what the games need (§0), what Box3D brings
+(§1), the engine decision (§2), how the port is laid out and built (§3–§4),
+the ECS layer over it (§5, `lib/physics/ecs`), determinism (§6) and the test
+scenes (§7).
 
-**Status:** proposal, revised. Supersedes the first draft, which wrongly
-claimed no "Box3D" exists. It does: **`github.com/erincatto/box3d`** — Erin
-Catto's 3D engine, **portable C17, MIT**, and it is the engine this design
-adopts. Nothing here is implemented; §9 lists the open questions and §8 the
-phased tasks (not queued until the maintainer confirms).
-
-Facts below were read from the repository on 2026-09-13 (headers, docs,
-`types.c`, `CMakeLists.txt`); where the design depends on something that must
-be re-verified against the vendored copy at implementation time, it says so.
+**Status (2026-10-04):** the port is complete through P7 — bodies, shapes
+(spheres, capsules, hulls, meshes, height fields, compounds), contacts,
+continuous collision, sleep and islands, the soft-step solver, sensors, all
+nine joint kinds, events, world queries and the character mover — each phase
+bit-exact against Box3D's own C build. The ECS layer (§5) landed with P8.
 
 ## 0. What the driving game needs
 
@@ -42,7 +40,8 @@ which is why the first draft's "write it in Rae" recommendation is withdrawn.
 
 - Repository created 2026-05, **v0.1.0** tagged, ~40 public commits, pushed
   the day of this reading, CI badge, ~6.3 k stars. Young: expect API churn
-  between tags — pin the tag, regenerate bindings on a bump.
+  between tags — the port pins a commit and moves it deliberately
+  (`docs/physics-rae-port-design.md` §8).
 - Core: **50 `.c` files (~1.5 MB) + 274 KB headers**, 8 public headers under
   `include/box3d/` (`box3d.h` has 424 `B3_API` functions), "no dependencies
   beyond the C runtime (and `libm`)". The repo's C++ is the sokol/imgui
@@ -63,213 +62,219 @@ which is why the first draft's "write it in Rae" recommendation is withdrawn.
 - Units: MKS, tuned for 0.1–10 m objects; `b3SetLengthUnitsPerMeter`.
 - **No built-in up axis.** Gravity is any `b3Vec3` (docs/samples use Y-up,
   default `{0,-10,0}`). Rae stays **Z-up** with `gravity = (0,0,-9.81)`; no
-  axis conversion anywhere. The one place Y-up leaks is the height-field
-  definition (`countX`/`countZ`, heights along the field's local up) — a
-  height-field body is simply rotated so its local up is world +Z, or the
-  venue uses triangle meshes, which are axis-agnostic (§5).
-- Types that matter for binding: `b3Vec3 {float x,y,z}`; `b3Quat {b3Vec3 v;
-  float s}`; `b3Transform {p,q}`; **`b3Pos` is `b3Vec3` unless
-  `BOX3D_DOUBLE_PRECISION`** (then `double x,y,z`) — the single-precision build
-  is used; ids are small by-value structs (`b3BodyId {int32 index1; uint16
-  world0; uint16 generation}`); defs are plain structs filled by
-  `b3DefaultWorldDef()` etc. (returned **by value**); events reference shapes
-  by id and carry `userData`.
-- Build: CMake, `BOX3D_DISABLE_SIMD`, `BOX3D_DOUBLE_PRECISION`, emscripten
-  supported (`-msimd128 -msse2` or SIMD off; pthreads optional and top-level
-  only). Rae will not use CMake (§4).
+  axis conversion anywhere. The places Y-up leaks are the height-field
+  definition (rows along local z, heights along local y — a height-field body
+  is rotated so its local up is world +Z, or the venue uses triangle meshes,
+  which are axis-agnostic, §5.5) and the character mover of Box3D's sample,
+  which the port gives an up axis (§5.2).
+- The single-precision build is the one ported (`b3Pos` is `b3Vec3`; the
+  port's `Pos` alias). Ids are small value structs (index, world,
+  generation); events reference shapes by id. The port drops `userData`
+  (§5.1).
 
 ## 2. Engine decision
 
-| | language | 3D | wasm | determinism | bind cost | verdict |
+| | language | 3D | wasm | determinism | cost | verdict |
 |---|---|---|---|---|---|---|
-| **Box3D** | C17, MIT | yes | yes (SSE2-on-wasm or scalar) | cross-platform, thread-count independent | `rae bindgen` over 8 headers, like WebGPU | **adopt** |
-| Box2D v3 | C11, MIT | 2D only | yes | yes | trivial | not needed — Rae targets 3D games only (maintainer decision) |
-| Jolt | C++17 | yes | yes | not cross-platform by default | C shim + libc++ in an all-C toolchain | no |
-| pure Rae | Rae | yes | yes | by construction | none, but a solver to write and maintain | no — Box3D covers phases 1–3 with a maintained, deterministic solver |
+| Box3D as C behind bindings | C17, MIT | yes | yes | cross-platform | bindgen gaps, a vendored C build per target, callbacks impossible | superseded |
+| **Box3D ported to Rae** | Rae | yes | yes (Rae's own wasm path) | the same as Box3D's C, proven bit for bit | a port of ~40 K lines, done phase by phase | **adopted** |
+| Jolt | C++17 | yes | yes | not cross-platform by default | C shim + libc++ | no |
+| an original Rae engine | Rae | yes | yes | by construction | a solver to design | no — Box3D's design is the one wanted |
 
-**Decision: Box3D as the solver, everything above the C ABI in Rae.** The
-Rae side owns the ECS surface, the character controller loop (Box3D
-deliberately leaves it to the application), event draining, queries, and all
-gameplay physics (drag/spin on a javelin is a velocity edit per step). This is
-the same split the renderer made: Rae over generated low-level bindings, C
-only where it is genuine ABI (`docs/webgpu-c-surface-audit.md`).
+**Decision (2026-09-30): port Box3D to Rae.** The first plan (a vendored C
+library behind generated bindings, `lib/box3d`) is withdrawn: every layer of
+physics is Rae, there is no C to build, link or vendor, and the Rae
+compiler is exercised by a large, numerically demanding program. The port
+keeps Box3D's architecture, algorithms and operation order exactly, so its
+results equal Box3D's C bit for bit (the oracle, §4); the reasons and the
+porting rules are `docs/physics-rae-port-design.md` §1 and §3.
 
-## 3. Rae binding layer — `lib/box3d/` (generated)
+## 3. The port — `lib/physics/`
 
-Generated exactly like `lib/webgpu/` (2 104 lines for wgpu; Box3D will be of
-the same order):
+| package | what | Box3D source |
+|---|---|---|
+| `math/` | scalar, vector, quaternion, matrix, transform, AABB, plane math | `math_functions.h`, `math_internal.h`, `aabb.c` |
+| `geometry/` | spheres, capsules, hulls (and their builder), meshes (BVH build and queries), height fields, compounds; each shape's mass, bounds, ray/shape casts, overlaps and mover planes | `geometry.c`, `hull.c`, `mesh.c`, `height_field.c`, `compound.c` |
+| `collision/` | GJK distance, shape cast, time of impact, the manifolds of every shape pair, the mover's plane solver | `distance.c`, `manifold*.c`, `mover.c` |
+| `broadPhase/` | the dynamic tree (queries, casts, rebuild), the broad phase and its pair set | `dynamic_tree.c`, `broad_phase.c` |
+| `container/` | the id pool, bit sets, sorting | `id_pool.c`, `bitset.c` |
+| `dynamics/` | the world: bodies, shapes, contacts, the constraint graph, islands and solver sets, the soft-step solver (scalar and wide), continuous collision, sensors, joints, events, the world queries | `physics_world.c`, `body.c`, `shape.c`, `contact*.c`, `solver*.c`, `island.c`, `joint.c` and the joint kinds |
+| `character/` | the character mover of Box3D's `samples/mover.cpp` | `samples/mover.cpp` |
+| `ecs/` | the ECS layer (§5) | — |
 
-```
-rae bindgen $B3/include/box3d/base.h $B3/include/box3d/id.h \
-  $B3/include/box3d/math_functions.h $B3/include/box3d/collision.h \
-  $B3/include/box3d/types.h $B3/include/box3d/box3d.h \
-  --out-dir lib/box3d --module Box3d --cheader box3d/box3d.h
-```
+The world is a value (`PhysicsWorld`) passed `mod` to what changes it — no
+globals, no registry of worlds. Box3D's handles keep their shape (`BodyId`,
+`ShapeId`, `JointId` with index, world and generation). What has no Rae
+counterpart is left out on purpose: user-data pointers (the ECS layer keeps
+its own body→entity map, §5.1), the callbacks (§5.6), the recording/replay
+and debug-draw paths.
 
-Mapping (already what bindgen does): ids/defs/results → `c_struct` mirrors by
-value; `const S*`/`S*` params → `view S`/`mod S`; data pointers and callbacks →
-`Ptr`; enums → `Int32` consts; `uint64_t` flags → `UInt64`; `float`/`double`
-→ `Float32`/`Float64`. Ergonomic wrappers and the `unsafe {}` obligation live
-in `lib/physics/`, never in the generated files (`# raefmt: off`, regenerate,
-do not edit).
+## 4. Building — nothing to vendor
 
-Generator gaps to close first (each is a small bindgen task, verified by a
-golden fixture):
+The port is ordinary Rae: `open physics/dynamics/World` and the rest, built
+by the compiler like any library. There is no C dependency, no per-target
+library build, no link flag. Determinism comes from the Rae C backend, which
+always compiles with `-ffp-contract=off` (no fused multiply-add), the flag
+Box3D's own cross-platform determinism rests on.
 
-1. **Preprocessor conditionals.** `math_functions.h` defines `b3Pos` twice
-   under `#if defined(BOX3D_DOUBLE_PRECISION)`; bindgen reads text, not the
-   preprocessor. Either teach it `#if/#else/#endif` over `-D` flags, or
-   generate from a preprocessed header. The former is the honest fix.
-2. **Struct-by-value returns are now common** (`b3DefaultWorldDef`,
-   `b3World_CastRayClosest` → `b3RayResult`, `b3MakeBoxHull` → `b3BoxHull`,
-   `b3Body_GetTransform`). The WebGPU notes call this "rare, mapped directly";
-   it must be ABI-tested on arm64-macOS, x86-64 and wasm32 in the first spike.
-3. **Arrays inside structs** (`uint8_t padding[7]`, `b3Matrix3`) — confirm the
-   `c_struct` mirror keeps layout/size; add fixed-size array fields if missing.
-4. **Event arrays**: `b3ContactEvents.beginEvents` is `Ptr` + `beginCount`;
-   reading `c_struct` elements from a raw pointer needs the `view`-at-index
-   helper the WebGPU layer already uses (`docs/webgpu-bindings.md`, "List vs
-   Buffer vs `view`").
-5. **Callbacks stay `Ptr`** — a Rae function cannot yet be passed to C. Phase 1
-   therefore uses no callbacks at all: `*Closest` queries instead of callback
-   queries, polled events, no custom filter/friction, `workerCount = 1`.
-   Optional later: an external task scheduler backed by Rae `spawn` once
-   Rae-function callbacks exist.
+**The oracle** (`tools/box3d-oracle/`, `docs/physics-rae-port-design.md`
+§4): Box3D's C is cloned *outside* the repository at a pinned commit, built
+scalar with the same flags, and driver programs write golden traces (every
+float as a C hex float); the Rae fixtures `compiler/tests/cases/94x–98x`
+replay them and must match bit for bit. Moving the pin is its own task.
 
-## 4. Vendoring and building — a C dependency, not a Rae dependency
-
-Rae's app build is one amalgamated `rae_runtime.c` plus `out.c`, compiled by
-clang natively and by wasi-sdk clang for WASM, with extra `.c` files passed
-on the command line. Box3D's 50 files use file-local `static` helpers, so a
-unity-include into `rae_runtime.c` risks symbol collisions and would tax every
-non-physics app; a hand-maintained prebuilt like `libwgpu_native` would rot.
-
-**Recommendation:** vendor the pinned tag at `third_party/box3d/` (source,
-LICENSE, the tag in a `VERSION` file) and let the compiler build it **on
-demand into a cached static library**:
-
-- detection mirrors `uses_webgpu` (the module graph contains a `box3d/…` or
-  `physics/…` module ⇒ `uses_physics`);
-- on first use per toolchain/target the compiler compiles `src/*.c` with
-  `-std=c17 -O2 -ffp-contract=off -I third_party/box3d/include` (+
-  `-msimd128 -msse2` for wasm, or `-DBOX3D_DISABLE_SIMD`) into
-  `.rae/box3d/<target>-<hash>/libbox3d.a`, keyed by the sources' content hash
-  and the flag set — one build, then a link line
-  `-L… -lbox3d -lm`; `wasm_build.sh` does the same with the wasi clang;
-- `-ffp-contract=off` is not optional: it is what Box3D's cross-platform
-  determinism rests on.
-
-This "vendored C dependency built by `rae`" mechanism is generic (`raylib`
-and `monocypher` could migrate to it) and is separate from #933's `.raepack`
-dependencies, which are Rae packages.
-
-## 5. The ECS layer — `lib/physics/` (hand-written Rae)
+## 5. The ECS layer — `lib/physics/ecs/` (landed with P8)
 
 Follows `docs/ecs-general-architecture.md` / `docs/ecs-resources.md`; product
-names never appear here.
+names never appear here. Every system takes only the tables it touches
+(like `prevTransformSystem`), so an app's world type is its own: it holds
+the tables below as fields and the resource as a plain field.
 
-### 5.1 Resource
+### 5.1 Resource — `Physics` (`physics/ecs/Physics`)
 
 ```rae
-type PhysicsWorld {
-  worldId: B3WorldId                 # the Box3D world (c_struct by value)
-  fixedStep: Float                   # 1/60, the app's accumulator drives it
-  substeps: Int                      # 4
-  contactBegan: EventQueue(ContactEvent)
-  contactEnded: EventQueue(ContactEvent)
-  hits: EventQueue(HitEvent)         # approach speed over hitEventThreshold
-  sensorBegan: EventQueue(SensorEvent)
-  sensorEnded: EventQueue(SensorEvent)
-  staticShapes: List(StaticShape)    # venue geometry owned here (mesh/height-field data + shape ids)
+type Physics {
+  world: PhysicsWorld                 # the port's world, by value
+  fixedStep: Float                    # 1/60
+  subSteps: Int                       # 4
+  accumulator: Float                  # frame time not yet stepped
+  maxStepsPerFrame: Int               # 4: the accumulator's cap
+  stepCount: Int
+  bodyEntities: List(EntityId)        # by body index: Box3D's body user data
+  shapeEntities: List(EntityId)       # by shape index: its shape user data
+  contactBegan: EventQueue(PhysicsContactEvent)
+  contactEnded: EventQueue(PhysicsContactEvent)
+  hits: EventQueue(PhysicsHitEvent)   # approach speed over the hit threshold
+  sensorBegan: EventQueue(PhysicsSensorEvent)
+  sensorEnded: EventQueue(PhysicsSensorEvent)
+  venueBodyId: BodyId                 # the static body the venue shapes are on
+  venueShapeIds: List(ShapeId)
 }
 ```
 
-One resource per world; a menu and a game are two resources (Box3D allows
-128 worlds). Created with `b3DefaultWorldDef()` + `gravity = (0,0,-9.81)`,
-`workerCount = 1`, `enableContinuous = true`.
+It is called `Physics` because the port's own world is `PhysicsWorld`. One
+resource per world; a menu and a game are two. `createPhysics(def:
+defaultPhysicsWorldDef(), fixedStep:, subSteps:)`; the default definition is
+Z-up (`gravity = (0, 0, -9.81)`, `docs/coordinate-system.md`), one worker,
+continuous collision on. `consumeFixedSteps(physics, frameTime)` adds a
+frame's time and returns the fixed steps to take (the accumulator is capped
+at `maxStepsPerFrame` steps, so a stall slows the game instead of
+spiralling); `physicsBlend` is the fraction into the next step for render
+interpolation (`lib/ecs/prevTransformSystem`). The port has no user-data
+pointers, so the entity maps are the resource's: `entityOfBody` /
+`entityOfShape` (noEntity for the venue or a free slot). The event queues
+gather a frame's fixed steps; the app calls `advancePhysicsEvents` once per
+frame after every consumer.
 
-### 5.2 Components
+### 5.2 Components — `physics/ecs/PhysicsComponents`
 
 ```rae
-type RigidBody {                      # a simulated body; position lives in Transform3D
-  bodyId: B3BodyId
-  motion: BodyMotion                  # staticBody | kinematicBody | dynamicBody
-  gravityScale: Float
+type RigidBody {                      # a simulated body; its pose lives in Transform3D
+  bodyId: BodyId
+  bodyType: BodyType                  # staticBody | kinematicBody | dynamicBody
+  syncedTransformStamp: Int           # the Transform3D stamp physics last synchronised
 }
 
-type Collider {                       # one shape on the entity's body; a compound is several entities or a baked compound
-  shapeId: B3ShapeId
-  shape: ColliderShape                # sphere | capsule | box | hull | mesh | heightField
-  isSensor: Bool
-  categoryBits: UInt64
-  maskBits: UInt64
+type Collider {                       # the shapes on the entity's body
+  shapeIds: List(ShapeId)
 }
 
 type CharacterBody {                  # the geometric mover; NOT a rigid body
-  radius: Float
-  halfHeight: Float
-  stepHeight: Float
-  slopeLimitCos: Float
-  desiredMove: Vec3                   # written by the game's movement system per fixed step
-  verticalVelocity: Float
-  grounded: Bool
-  groundNormal: Vec3
+  mover: CharacterMover               # lib/physics/character (Box3D's samples/mover.cpp), Z-up
+  throttle: Vec2                      # input: x forward, y right, -1..1
+  forward: Vec3
+  right: Vec3
+  jump: Bool                          # input, consumed by the system
+  clipVelocity: Bool
+  grounded: Bool                      # output
+  groundNormal: Vec3                  # output
 }
 ```
 
-`Transform3D` stays the single source of truth for pose (as the client's
-`PhysicsBody` and `lib/water/Buoyancy` already do). Render interpolation
-between fixed steps uses the existing `lib/ecs/prevTransformSystem`.
+`Transform3D` stays the single source of truth for pose. Shape options
+(material, density, filter, sensor, event flags) are the port's `ShapeDef`;
+contact and hit events are opt-in per shape, as in Box3D.
 
-### 5.3 Systems, in the fixed-step schedule
+The character is the mover of Box3D's sample, not the step-height /
+slope-limit controller this section first sketched: a capsule held up by a
+"pogo" spring that steps anything the spring reaches (a 0.6 m block
+included, §7) and stands on slopes. `CharacterMover` takes its up axis:
+`yUp` reproduces the sample bit for bit (fixture 986), the ECS uses `zUp`.
 
-1. `physicsPushSystem` — kinematic bodies: `b3Body_SetTargetTransform` from
-   `Transform3D`; dynamic bodies whose `Transform3D` was written by game code
-   (a respawn) get `b3Body_SetTransform`. Change detection via the table's
-   mod stamps (`componentModStamp`) so untouched bodies cost nothing.
-2. `physicsStepSystem` — `b3World_Step(worldId, fixedStep, substeps)`.
-3. `physicsPullSystem` — `b3World_GetBodyEvents`: only bodies that **moved**
-   are reported, so this writes `Transform3D` for exactly those (sleeping
-   bodies are free). `userData` on each body is the `EntityId` bits.
-4. `physicsEventSystem` — drain contact/sensor/hit events into the
-   `EventQueue`s (entity ids recovered from shape `userData`); game systems
-   consume them in schedule order. Physics never calls into the game.
-5. `characterSystem` — the Box3D-documented loop, in Rae: desired translation
-   → `b3World_CastMover` → move by fraction → `b3World_CollideMover` →
-   assemble `b3CollisionPlane`s (step-up and slope filtering happen here) →
-   `b3SolvePlanes` → apply delta → `b3ClipVector` on the velocity; writes
-   `Transform3D`, `grounded`, `groundNormal`. Runs *before* the step so
-   kinematic pushes see the new pose.
-6. Spawn/despawn helpers: `spawnRigidBody(world, entityId, def…)` creates the
-   body and shapes and sets `userData`; `despawnRigidBody` destroys the body
-   **before** `clearEntityComponents`, so a recycled index never owns a live
-   Box3D body. Static venue shapes are created once on a single static body.
+### 5.3 Systems, in the fixed-step schedule — `physics/ecs/PhysicsSystems`
 
-### 5.4 Queries
+`physicsFixedStep` runs one fixed step in this order; `physicsFrame(physics,
+rigidBodies, characters, transforms, frameTime)` runs the steps a frame pays
+for.
 
-`raycastClosest(world, origin, direction, maxDistance, mask) ret RayHit`,
-`spherecast`, `overlapAabb`, `overlapSphere` — thin wrappers over the
-`*Closest`/overlap functions returning Rae structs with `EntityId`s. Read-only,
-callable from any system.
+1. `characterSystem` — each `CharacterBody`: the jump request, then the
+   mover's `solveMove` (pogo ray, collide, solve planes, cast — up to five
+   rounds); writes `Transform3D.position`, `grounded`, `groundNormal`. Runs
+   before the step so the step sees the characters' new places.
+2. `physicsPushSystem` — a `Transform3D` whose mod stamp differs from the
+   `RigidBody`'s synced stamp was written by game code: a kinematic body is
+   driven there over the fixed step (`setBodyTargetTransform`), any other
+   body moved there (`setBodyTransform`). Untouched entities cost one stamp
+   compare.
+3. `physicsStepSystem` — `stepWorld(world, fixedStep, subSteps)`.
+4. `physicsPullSystem` — the body move events: only bodies that moved are
+   reported, so this writes `Transform3D` for exactly those (sleeping bodies
+   cost nothing) and records the new stamp so the push does not hand it back.
+5. `physicsEventSystem` — the step's contact begin/end, hit and sensor
+   begin/end events become `Physics*Event`s with entity ids on the queues;
+   game systems read them in schedule order. Physics never calls into the
+   game.
+
+Spawn and despawn (`physics/ecs/PhysicsSpawn`): `spawnRigidBody(physics,
+rigidBodies, transforms, entityId, def: BodyDef)` creates the body, maps it,
+gives the entity its `Transform3D` pose and `RigidBody`;
+`addSphereCollider` / `addCapsuleCollider` / `addBoxCollider` /
+`addHullCollider` add shapes (mapped, recorded in `Collider`);
+`despawnRigidBody(physics, rigidBodies, colliders, entityId)` destroys the
+body (its shapes, contacts and joints with it) and unmaps it **before** the
+caller runs `clearEntityComponents` and `freeEntity`, so a recycled index
+never owns a live body (fixture 987).
+
+### 5.4 Queries — `physics/ecs/PhysicsQueries`
+
+`raycastClosest(physics, origin, translation, filter) ret PhysicsHit`,
+`spherecastClosest`, `overlapAabbEntities`, `overlapSphereEntities` — thin
+wrappers over the port's world queries (`dynamics/WorldQueries`) answering
+with entities. Read-only, callable from any system.
 
 ### 5.5 Static venue
 
-- terrain / the hill: `b3HeightFieldDef` from the existing `MeshData` grid
-  (`lib/Mesh3d.sampleHeight` already samples it) on a static body rotated so
-  the field's local up is world +Z (verify orientation in the spike), **or**
-  a triangle mesh — meshes are axis-free and `b3CreateMesh` builds the BVH;
-- stands, props, track edge: `b3CreateMesh` from the render `MeshData`
-  (welded, `identifyEdges` on) as static shapes; a hand-placed box where a
-  gameplay edge matters;
-- the client's analytic `stadiumWalkable(x, y)` retires: the mover slides
-  against real geometry.
+- `addVenueMesh(physics, mesh: MeshData, transform, def)`
+  (`physics/ecs/VenueMesh`) turns a render mesh (`lib/Mesh3d`) into a static
+  triangle-mesh collider — welded, edges identified so bodies slide over the
+  seams — on the one venue body; meshes are axis-free, so a Z-up venue needs
+  no conversion;
+- `addVenueBox` places a box where a gameplay edge matters;
+- a height field is Y-up in its own frame (rows along local z, heights
+  along local y): a height-field body is rotated so its local up is world
+  +Z. The ECS layer has no helper for it yet.
 
-### 5.6 Runtime hooks (phase 2)
+### 5.6 Callbacks — not ported, and what covers their uses
 
-`b3SetAllocator` → the Rae runtime allocator so `RAE_MEM_STATS` accounts
-Box3D memory; `b3SetAssertFcn`/`b3SetLogFcn` → the Rae log so an engine assert
-is a Rae diagnostic, not a silent abort. These are C-side one-liners in the
-runtime behind `RAE_HAS_PHYSICS`, the only physics C Rae will have.
+Box3D's callbacks (the custom pair filter, pre-solve, friction/restitution
+mixing) are not ported: Rae has no function values. **Decision (P8): nothing
+new is needed for the needs of §0.**
+
+- **Filtering:** 64 category bits and a mask per shape, the group index
+  (shapes of one negative group never collide — a ragdoll's parts, a thrower
+  and the implement in hand), `collideConnected = false` on joints, and
+  filter joints for one specific pair cover every case §0 lists.
+- **Pre-solve** is used for one-way platforms and conveyors. Conveyors are
+  covered by the surface material's tangent velocity (ported); no §0 need is
+  a one-way platform.
+- **Mixing:** Box3D's default rule (friction √(a·b), restitution max) per
+  surface material, with `userMaterialId` on hit events for the game's
+  audio and effects, covers spikes on track, grass, sand and water.
+
+If a later game needs per-material-pair friction or one-way platforms, the
+answer is data on the resource the solver consults (a mixing table keyed by
+user material ids; a one-way normal per shape), a library change inside the
+port — not a callback and not a language feature.
 
 ### 5.7 Vehicles — what Box3D offers, and versus Jolt
 
@@ -311,7 +316,7 @@ wheels, apply a downforce impulse. That keeps the "as much Rae as possible"
 goal and avoids C++.
 
 **Decision:** stay on Box3D; add a **vehicle example** (task §8.7) written in
-Rae over the wheel-joint bindings, porting the `Driving` sample: `VehicleBody`
+Rae over the port's wheel joints (P6b), porting the `Driving` sample: `VehicleBody`
 component (chassis + wheel entities + joint ids), `vehicleSystem` mapping
 input to steering target and spin motor, a windowed demo on the venue mesh.
 Re-evaluate Jolt only if a tracked vehicle or a tire-model sim is ever asked
@@ -319,18 +324,27 @@ for.
 
 ## 6. Determinism rules
 
-- Fixed `fixedStep`, accumulator in the app (the client already has one).
-- `workerCount = 1` in phase 1 (no callbacks available anyway); Box3D
-  guarantees identical results when workers are added later.
-- Build every lockstep peer with the **same** Box3D configuration: same tag,
-  `-ffp-contract=off`, same SIMD choice (scalar vs SSE2/NEON vs wasm SSE2
-  emulation may differ — pick one per shipped platform set and test with
-  `test_determinism`-style fixtures across machines).
+- Fixed `fixedStep`, the accumulator in the `Physics` resource (§5.1).
+- One worker. The port's parallel step (P9b) must give the same results at
+  every worker count, as Box3D's does; until then the step is serial.
+- Every lockstep peer runs the same Rae build: the port is Rae compiled by
+  the Rae C backend with `-ffp-contract=off`, so the same source gives the
+  same floats on every machine; the oracle (§4) proves it equals Box3D's
+  scalar C. A SIMD path (the port's `FloatWide` over `lib/Float4`) is
+  checked bit-exact against the scalar one.
 - Box3D has no rollback: lockstep or server-authoritative netcode fits;
   rollback netcode does not without re-simulating from a recording.
 - No wall clock or randomness inside the step; the game seeds throws.
+- Fixture 988 steps two ECS worlds 600 times through the same uneven frame
+  times and compares every transform bit for bit.
 
 ## 6b. Threading, SIMD and Rae concurrency — what must come first?
+
+> Written for the bindings plan, where Box3D's C scheduler and SIMD came
+> with the library. With the port, both are Rae work: the wide solver runs
+> on `lib/Float4`, and the parallel step is P9b
+> (`docs/parallel-stages-design.md`). The argument about Rae's concurrency
+> model below still holds.
 
 **Nothing in Rae's concurrency needs to land before Box3D.** Box3D brings its
 own **internal task scheduler**: set `b3WorldDef.workerCount = N` and it
@@ -413,64 +427,42 @@ at the external-scheduler hook when callbacks land.
 
 ## 7. Testing (TDD, non-visual)
 
-Golden fixtures under `compiler/tests/cases/` (deterministic prints):
+Two kinds of fixture under `compiler/tests/cases/`:
 
-- bindgen fixtures for §3 gaps: struct-by-value return round-trip, `#if`
-  handling, array fields, event array reads;
-- "hello box3d": drop a sphere on a static box, step 120×, print `z` — the
-  first thing to make green on native and wasm;
-- restitution: rebound height = e² × drop; friction: box holds on 20° at
-  μ=0.5, slides at 0.2; projectile range `v²/g` at 45°;
-- character: slides along a wall, steps a 0.3 m curb, is blocked by 0.6 m,
-  reports `grounded` and slope normal on a 20° ramp; (as built in P7a on
-  Box3D's samples/mover.cpp loop, the pogo spring holds the capsule's bottom
-  0.6 m up, so it steps a 0.6 m block too and a 1.0 m block blocks it —
-  fixture 986);
-- revolute hurdle: pushed at the top, rotates to its limit and rests;
-- despawn safety: spawn/despawn 1000 bodies, recycled entity ids never touch
-  a live body (mirrors the client's generation test);
-- determinism: two worlds stepped 600× print identical transforms.
+- **Bit-exact against Box3D** (fixtures 948–986, the oracle of §4): every
+  phase of the port replays golden traces of Box3D's own C — scenes stepped
+  600 times with every body hash, the joints of every kind, the queries,
+  and the character mover (a wall slide, a 0.3 m curb and a 0.6 m block
+  stepped — the pogo spring holds the capsule's bottom 0.6 m up — a 1.0 m
+  block that stops it, grounded on a 20° ramp with its normal, mesh ground
+  and terrain; fixture 986).
+- **The ECS layer** (P8): despawn safety — 1000 bodies spawned and
+  despawned with recycled entity ids, no recycled id ever touching a live
+  body (fixture 987); determinism — two ECS worlds stepped 600 times
+  through the same uneven frame times, every transform identical (fixture
+  988).
 
-Plus one windowed example (a generic "field demo": mover, a row of hinged
-boxes, a thrown ball) for the manual visual gate only.
+Still to write as the games need them (deterministic prints): restitution
+(rebound height = e² × drop), friction (a box holds on 20° at μ=0.5, slides
+at 0.2), projectile range v²/g at 45°, a revolute hurdle pushed at the top
+rotating to its limit and resting. Plus one windowed example (a generic
+"field demo": mover, a row of hinged boxes, a thrown ball) for the manual
+visual gate only (P10).
 
-## 8. Phased plan (proposed queue tasks; next free id is #939)
+## 8. Phased plan
 
-1. **Spike:** vendor Box3D v0.1.0 at `third_party/box3d/`, the on-demand
-   `libbox3d.a` build + `uses_physics` link (native + wasm), a hand-written
-   10-extern "hello box3d" proving struct-by-value ABI on arm64/x86-64/wasm.
-2. **bindgen gaps** (#if/#else, struct returns, array fields) + generate
-   `lib/box3d/` with a regeneration command in `docs/box3d-bindings.md`.
-3. **`lib/physics/` core:** `PhysicsWorld`, `RigidBody`/`Collider`,
-   push/step/pull systems, spawn/despawn, event draining; fixtures 7.2–7.3.
-4. **Static venue + queries:** mesh/height-field colliders from `MeshData`,
-   raycast/shapecast/overlap wrappers; orientation verified.
-5. **Character controller** in Rae over the mover primitives; fixtures 7.4.
-6. **Joints + demo:** revolute/spherical wrappers, hurdle and bar, the
-   windowed example.
-7. **Vehicle example:** wheel-joint wrappers, a `VehicleBody` component +
-   `vehicleSystem` (input → steering target + spin motor, torque split), a
-   windowed drivable car on the venue mesh, porting Box3D's `Driving`
-   sample; non-visual fixture: a driven car on flat ground reaches a target
-   speed and a steered car turns (deterministic prints).
-8. **Runtime hooks:** allocator/assert/log into Rae's runtime accounting.
-9. **Downstream migration guide** (generic wording): `PhysicsBody` →
-   `RigidBody`, ground plane → static shapes, hurdles → hinged bodies,
-   javelin stick = hit event → weld/static.
-10. *(later)* `workerCount > 1` once cross-peer determinism is validated;
-    external task scheduler via Rae's pool when Rae-function callbacks reach
-    the FFI; ragdoll rig helpers.
+The port's phases are `docs/physics-rae-port-design.md` §7: P0–P7 (math
+through queries and the mover) and P8 (the ECS layer, §5) have landed; P9
+(performance: single-threaded, then the parallel step) and P10 (demos: the
+field scenes, the vehicle example of §5.7) follow.
 
 ## 9. Open questions for the maintainer
 
-1. Confirm **Box3D** (over Jolt/pure Rae) and vendoring at the **v0.1.0 tag**
-   with bindings regenerated on each bump. (Box2D for 2D: dropped — 3D only.)
-2. Netcode: lockstep (needs the §6 same-configuration rule across all peers,
-   including wasm) or server-authoritative?
-3. The on-demand `libbox3d.a` build inside the compiler (§4) vs. a documented
-   one-time `make box3d` in the toolchain checkout — the former is zero-config
-   for downstream projects, the latter is less compiler code.
-4. Venue collision from render `MeshData` (recommended) or hand-placed shapes?
-5. Is the mover's "experimental" status acceptable for the first sport, or
-   should the runner be a kinematic *rigid body* on the solver instead
-   (simpler, but fights the solver on stairs and edges)?
+1. ~~Box3D as C behind bindings~~ — answered: ported to Rae (§2).
+2. Netcode: lockstep (needs §6 across all peers, including wasm) or
+   server-authoritative?
+3. ~~Building the C library~~ — no C (§4).
+4. ~~Venue collision from render `MeshData` or hand-placed shapes~~ — both
+   are there (§5.5): `addVenueMesh` and `addVenueBox`.
+5. Is the sample's pogo mover right for the runner (it steps 0.6 m, §7), or
+   should a game add its own step-height limit over it?

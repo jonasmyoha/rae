@@ -209,7 +209,7 @@ func destroyBody(world: mod PhysicsWorld, bodyId: view BodyId) {
     destroyShapeProxy(world: world, shapeId: shapeId)
     freeId(pool: world.shapeIdPool, id: shapeId)
     var next: Int = -1
-    if let shape: mod Shape => world.shapes.modAt(index: shapeId) {
+    if let shape: mod PhysicsShape => world.shapes.modAt(index: shapeId) {
       shape.id = -1
       next = shape.nextShapeId
     }
@@ -339,7 +339,7 @@ func setBodyTransform(
   let speculative: Float = speculativeDistance(lengthUnitsPerMeter: world.lengthUnitsPerMeter)
   var shapeId: Int = body.headShapeId
   loop shapeId is not -1 {
-    var shape: Shape = world.shapes.copyAtDefault(index: shapeId)
+    var shape: PhysicsShape = world.shapes.copyAtDefault(index: shapeId)
     let box: Aabb = computeFatShapeAabb(
       shape: shape
       hulls: world.hulls
@@ -403,7 +403,7 @@ func getBodyWorldCenter(world: view PhysicsWorld, bodyId: view BodyId) ret Pos {
 
 # b3Shape_GetBody
 func getShapeBody(world: view PhysicsWorld, shapeId: view ShapeId) ret BodyId {
-  if let shape: view Shape => world.shapes.viewAt(index: shapeId.index1 - 1) {
+  if let shape: view PhysicsShape => world.shapes.viewAt(index: shapeId.index1 - 1) {
     ret makeBodyId(world: world, bodyIndex: shape.bodyId)
   }
   ret BodyId { index1: 0, world0: 0, generation: 0 }

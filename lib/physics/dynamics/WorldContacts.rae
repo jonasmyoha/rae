@@ -40,7 +40,7 @@ open physics/dynamics/Events
 
 # The radius rolling resistance acts at, on contact creation: spheres and
 # capsules only.
-func creationRollingRadius(shape: view Shape) ret Float {
+func creationRollingRadius(shape: view PhysicsShape) ret Float {
   match shape.shapeType {
     case ShapeType.sphere {
       ret shape.sphere.radius
@@ -73,8 +73,8 @@ func createContact(
   shapeIdB: view Int
   childIndex: view Int
 ) {
-  let shapeA: Shape = world.shapes.copyAtDefault(index: shapeIdA)
-  let shapeB: Shape = world.shapes.copyAtDefault(index: shapeIdB)
+  let shapeA: PhysicsShape = world.shapes.copyAtDefault(index: shapeIdA)
+  let shapeB: PhysicsShape = world.shapes.copyAtDefault(index: shapeIdB)
   if isSupportedContactPair(typeA: shapeA.shapeType, typeB: shapeB.shapeType) is false {
     # For example, no mesh against mesh
     ret
@@ -288,8 +288,8 @@ func destroyContact(world: mod PhysicsWorld, contactId: view Int, wakeBodies: vi
 # shapes into `manifold` (`cache` warm-starts the hull functions).
 func collideShapes(
   manifold: mod LocalManifold
-  shapeA: view Shape
-  shapeB: view Shape
+  shapeA: view PhysicsShape
+  shapeB: view PhysicsShape
   hulls: view List(Hull)
   transformBtoA: view Transform
   cache: mod ContactCache
@@ -359,9 +359,9 @@ func collideShapes(
 func computeConvexManifold(
   contact: mod Contact
   geometry: mod LocalManifold
-  shapeA: view Shape
+  shapeA: view PhysicsShape
   transformA: view Transform
-  shapeB: view Shape
+  shapeB: view PhysicsShape
   transformB: view Transform
   hulls: view List(Hull)
   lengthUnitsPerMeter: view Float
@@ -437,7 +437,7 @@ func computeConvexManifold(
 
 # The radius rolling resistance acts at, on an update: a hull's is a
 # quarter of its inner radius.
-func updateRollingRadius(shape: view Shape, hulls: view List(Hull)) ret Float {
+func updateRollingRadius(shape: view PhysicsShape, hulls: view List(Hull)) ret Float {
   if shape.shapeType is ShapeType.hull {
     if let hull: view Hull => hulls.viewAt(index: shape.hullIndex) {
       ret 0.25 * hull.innerRadius
@@ -450,9 +450,9 @@ func updateRollingRadius(shape: view Shape, hulls: view List(Hull)) ret Float {
 func updateConvexContact(
   contact: mod Contact
   geometry: mod LocalManifold
-  shapeA: view Shape
+  shapeA: view PhysicsShape
   transformA: view Transform
-  shapeB: view Shape
+  shapeB: view PhysicsShape
   transformB: view Transform
   hulls: view List(Hull)
   flip: view Bool
@@ -525,8 +525,8 @@ func updateConvexContact(
 func updateMeshHitFlag(
   contact: mod Contact
   touching: view Bool
-  shapeA: view Shape
-  shapeB: view Shape
+  shapeA: view PhysicsShape
+  shapeB: view PhysicsShape
 ) {
   if touching and ((shapeA.flags bitor shapeB.flags) bitand enableHitEventsFlag) is not 0 {
     contact.flags = contact.flags bitor simEnableHitEvent
@@ -544,10 +544,10 @@ func updateCompoundContact(
   contact: mod Contact
   geometry: mod LocalManifold
   meshManifold: mod LocalManifold
-  shapeA: view Shape
+  shapeA: view PhysicsShape
   compound: view CompoundData
   transformA: view Transform
-  shapeB: view Shape
+  shapeB: view PhysicsShape
   transformB: view Transform
   hulls: view List(Hull)
   meshes: view List(Mesh)
@@ -556,7 +556,7 @@ func updateCompoundContact(
   lengthUnitsPerMeter: view Float
 ) ret Bool {
   let child: ChildShape = getCompoundChild(compound: compound, childIndex: contact.childIndex)
-  var childShape: Shape = shapeA
+  var childShape: PhysicsShape = shapeA
   childShape.shapeType = child.shapeType
   # Child material for non-meshes
   if child.shapeType is not ShapeType.mesh {
@@ -660,9 +660,9 @@ func updateCompoundContact(
 func updateConvexChild(
   contact: mod Contact
   geometry: mod LocalManifold
-  childShape: view Shape
+  childShape: view PhysicsShape
   childTransform: view Transform
-  shapeB: view Shape
+  shapeB: view PhysicsShape
   transformB: view Transform
   hulls: view List(Hull)
   flip: view Bool
@@ -700,10 +700,10 @@ func updateContact(
   contact: mod Contact
   geometry: mod LocalManifold
   meshManifold: mod LocalManifold
-  shapeA: view Shape
+  shapeA: view PhysicsShape
   localCenterA: view Vec3
   transformA: view Transform
-  shapeB: view Shape
+  shapeB: view PhysicsShape
   localCenterB: view Vec3
   transformB: view Transform
   hulls: view List(Hull)

@@ -48,7 +48,7 @@ const maxPointsPerTriangle: Int = 32
 # in its local frame, by increasing index, at most `capacity`
 # (b3QueryMeshTriangles / b3QueryHeightFieldTriangles).
 func querySurfaceTriangles(
-  shapeA: view Shape
+  shapeA: view PhysicsShape
   meshes: view List(Mesh)
   heightFields: view List(HeightFieldData)
   bounds: view Aabb
@@ -77,7 +77,7 @@ func querySurfaceTriangles(
 # Triangle `triangleIndex` of shape A (b3GetMeshTriangle /
 # b3GetHeightFieldTriangle).
 func surfaceTriangle(
-  shapeA: view Shape
+  shapeA: view PhysicsShape
   meshes: view List(Mesh)
   heightFields: view List(HeightFieldData)
   triangleIndex: view Int
@@ -106,7 +106,7 @@ func surfaceTriangle(
 # triangle's material index (through a compound mesh's `materialMap`) or the
 # height-field cell's, clamped to the shape's materials.
 func triangleMaterial(
-  shapeA: view Shape
+  shapeA: view PhysicsShape
   meshes: view List(Mesh)
   heightFields: view List(HeightFieldData)
   materialMap: view List(Int)
@@ -135,7 +135,7 @@ func triangleMaterial(
 # of the triangles found again.
 func refreshCache(
   contact: mod Contact
-  shapeA: view Shape
+  shapeA: view PhysicsShape
   meshes: view List(Mesh)
   heightFields: view List(HeightFieldData)
   transformA: view Transform
@@ -222,7 +222,7 @@ func collideMeshTriangle(
   index: view Int
   vertices: view List(Vec3)
   triangleFlags: view Int
-  shapeB: view Shape
+  shapeB: view PhysicsShape
   hulls: view List(Hull)
   isFast: view Bool
   enableSpeculative: view Bool
@@ -285,7 +285,7 @@ func collideTriangleInto(
   index: view Int
   vertices: view List(Vec3)
   triangleFlags: view Int
-  shapeB: view Shape
+  shapeB: view PhysicsShape
   hulls: view List(Hull)
   isFast: view Bool
   enableSpeculative: view Bool
@@ -400,12 +400,12 @@ func buildMeshManifolds(
 func computeMeshManifolds(
   contact: mod Contact
   scratch: mod LocalManifold
-  shapeA: view Shape
+  shapeA: view PhysicsShape
   meshes: view List(Mesh)
   heightFields: view List(HeightFieldData)
   materialMap: view List(Int)
   transformA: view Transform
-  shapeB: view Shape
+  shapeB: view PhysicsShape
   hulls: view List(Hull)
   transformB: view Transform
   isFast: view Bool

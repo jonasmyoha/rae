@@ -89,7 +89,7 @@ func sweepEndTransform(sweep: view Sweep) ret Transform {
 
 # b3ComputeSweptShapeAABB: a convex shape's box over its sweep up to `time`.
 func computeSweptShapeAabb(
-  shape: view Shape
+  shape: view PhysicsShape
   hulls: view List(Hull)
   sweep: view Sweep
   time: view Float
@@ -173,7 +173,7 @@ func meshTriangleTimeOfImpact(
 # (mesh frame), by the query's visiting order.
 func sweepSurfaceTriangles(
   context: mod MeshImpactContext
-  shapeA: view Shape
+  shapeA: view PhysicsShape
   meshIndex: view Int
   meshes: view List(Mesh)
   heightFields: view List(HeightFieldData)
@@ -223,8 +223,8 @@ func sweepSurfaceTriangles(
 
 # The mesh and height-field case of b3ShapeTimeOfImpact (the target static).
 func meshTimeOfImpact(
-  shapeA: view Shape
-  shapeB: view Shape
+  shapeA: view PhysicsShape
+  shapeB: view PhysicsShape
   hulls: view List(Hull)
   meshes: view List(Mesh)
   heightFields: view List(HeightFieldData)
@@ -305,9 +305,9 @@ func compoundChildSweep(
 # The compound case of b3ShapeTimeOfImpact (b3CompoundTimeOfImpactFcn per
 # child the swept box overlaps).
 func compoundTimeOfImpact(
-  shapeA: view Shape
+  shapeA: view PhysicsShape
   compound: view CompoundData
-  shapeB: view Shape
+  shapeB: view PhysicsShape
   hulls: view List(Hull)
   meshes: view List(Mesh)
   heightFields: view List(HeightFieldData)
@@ -394,7 +394,7 @@ func compoundTimeOfImpact(
           transform: invert(transform: child.transform)
           box: localSweepBounds
         )
-        var childShape: Shape = shapeA
+        var childShape: PhysicsShape = shapeA
         childShape.shapeType = ShapeType.mesh
         sweepSurfaceTriangles(
           context: meshContext

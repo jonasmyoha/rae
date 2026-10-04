@@ -78,12 +78,12 @@ func putBox(out: mod List(Float), box: view Aabb) {
 
 # The mesh the query and AABB lines apply to: the one built last.
 type MeshState {
-  mesh: opt MeshData
+  mesh: opt PhysicsMeshData
 }
 
 # The driver's meshOut, of the mesh built last.
 func putMesh(out: mod List(Float), state: view MeshState) {
-  if let data: view MeshData => state.mesh {
+  if let data: view PhysicsMeshData => state.mesh {
     putInt(out: out, value: 1)
     putBox(out: out, box: data.bounds)
     putFloat(out: out, value: data.surfaceArea)
@@ -202,7 +202,7 @@ func evaluate(
     ret true
   }
 
-  if let data: view MeshData => state.mesh {
+  if let data: view PhysicsMeshData => state.mesh {
     if name is "b3QueryMesh" {
       let meshScale: Vec3 = readVec(reader: reader)
       let bounds: Aabb = readBox(reader: reader)

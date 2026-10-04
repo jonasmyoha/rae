@@ -1,0 +1,164 @@
+# The physics resource of an ECS world (docs/physics-design.md §5.1): the
+# port's PhysicsWorld with the fixed-step clock that drives it, the maps
+# from bodies and shapes back to entities (Box3D's user data), the event
+# queues the event system fills with entity ids, and the static venue body.
+# A world holds it as a plain field (a resource, docs/ecs-resources.md), and
+# the physics systems (PhysicsSystems) take it `mod`.
+open Vec3
+open Quat
+open ecs/Entity
+open ecs/Event
+open physics/math/TransformMath
+open physics/dynamics/WorldTypes
+open physics/dynamics/World
+open physics/dynamics/WorldBodies
+open physics/dynamics/WorldStep
+open physics/dynamics/Events
+
+# Two shapes started or stopped touching: their entities (noEntity for the
+# venue) and shapes.
+type PhysicsContactEvent {
+  entityIdA: EntityId
+  entityIdB: EntityId
+  shapeIdA: ShapeId
+  shapeIdB: ShapeId
+}
+
+# Two shapes hit faster than the world's hit event threshold.
+type PhysicsHitEvent {
+  entityIdA: EntityId
+  entityIdB: EntityId
+  shapeIdA: ShapeId
+  shapeIdB: ShapeId
+  # The mid-point between the surfaces at the start of the step
+  point: Vec3
+  # From shape A to shape B
+  normal: Vec3
+  approachSpeed: Float
+  userMaterialIdA: UInt64
+  userMaterialIdB: UInt64
+}
+
+# A shape started or stopped overlapping a sensor.
+type PhysicsSensorEvent {
+  sensorEntityId: EntityId
+  visitorEntityId: EntityId
+  sensorShapeId: ShapeId
+  visitorShapeId: ShapeId
+}
+
+# The physics resource.
+type Physics {
+  world: PhysicsWorld
+  # The fixed step and its sub-steps; the accumulator holds the frame time
+  # not yet stepped, capped at maxStepsPerFrame fixed steps
+  fixedStep: Float
+  subSteps: Int
+  accumulator: Float
+  maxStepsPerFrame: Int
+  # The fixed steps taken so far
+  stepCount: Int
+  # The entity of each body and shape, by index (noEntity when free or for
+  # the venue): Box3D's body and shape user data
+  bodyEntities: List(EntityId)
+  shapeEntities: List(EntityId)
+  # The events of the fixed steps of a frame, with their entities; the app
+  # advances them once per frame (frameAdvance) after every consumer
+  contactBegan: EventQueue(PhysicsContactEvent)
+  contactEnded: EventQueue(PhysicsContactEvent)
+  hits: EventQueue(PhysicsHitEvent)
+  sensorBegan: EventQueue(PhysicsSensorEvent)
+  sensorEnded: EventQueue(PhysicsSensorEvent)
+  # The one static body the venue's shapes are on (created on first use)
+  venueBodyId: BodyId
+  venueShapeIds: List(ShapeId)
+}
+
+# The world definition of an ECS world: Rae's Z-up gravity
+# (docs/coordinate-system.md), one worker, continuous collision on.
+func defaultPhysicsWorldDef() ret WorldDef {
+  var def: WorldDef = defaultWorldDef(lengthUnitsPerMeter: 1.0)
+  def.gravity = Vec3 { x: 0.0, y: 0.0, z: -9.81 }
+  def.workerCount = 1
+  def.enableContinuous = true
+  ret def
+}
+
+# A physics resource over a new world of `def`, stepping `fixedStep`
+# seconds in `subSteps` sub-steps, at most 4 fixed steps per frame.
+func createPhysics(def: view WorldDef, fixedStep: view Float, subSteps: view Int) ret Physics {
+  ret Physics {
+    world: createWorld(def: def)
+    fixedStep: fixedStep
+    subSteps: subSteps
+    accumulator: 0.0
+    maxStepsPerFrame: 4
+    stepCount: 0
+    bodyEntities: List.create(EntityId, cap: 64)
+    shapeEntities: List.create(EntityId, cap: 64)
+    contactBegan: createEventQueue(PhysicsContactEvent)
+    contactEnded: createEventQueue(PhysicsContactEvent)
+    hits: createEventQueue(PhysicsHitEvent)
+    sensorBegan: createEventQueue(PhysicsSensorEvent)
+    sensorEnded: createEventQueue(PhysicsSensorEvent)
+    venueBodyId: nullBodyId()
+    venueShapeIds: List.create(ShapeId, cap: 4)
+  }
+}
+
+# Record `entityId` at `index` of an entity map, growing it with noEntity.
+func setMappedEntity(entities: mod List(EntityId), index: view Int, entityId: view EntityId) {
+  loop entities.length <= index {
+    entities.add(value: noEntity())
+  }
+  entities.set(index: index, value: entityId)
+}
+
+func mappedEntity(entities: view List(EntityId), index: view Int) ret EntityId {
+  if index < 0 or index >= entities.length {
+    ret noEntity()
+  }
+  ret entities.copyAtDefault(index: index)
+}
+
+# The entity of a body or shape (noEntity for the venue or a free slot).
+func entityOfBody(physics: view Physics, bodyId: view BodyId) ret EntityId {
+  ret mappedEntity(entities: physics.bodyEntities, index: bodyId.index1 - 1)
+}
+
+func entityOfShape(physics: view Physics, shapeId: view ShapeId) ret EntityId {
+  ret mappedEntity(entities: physics.shapeEntities, index: shapeId.index1 - 1)
+}
+
+# Add a frame's `frameTime` to the clock and take the fixed steps it pays
+# for: how many to run now. The accumulator is capped at maxStepsPerFrame
+# steps, so a long frame (a stall, a breakpoint) slows the game down instead
+# of spiralling.
+func consumeFixedSteps(physics: mod Physics, frameTime: view Float) ret Int {
+  physics.accumulator = physics.accumulator + frameTime
+  let capped: Float = physics.fixedStep * (physics.maxStepsPerFrame as Float)
+  if physics.accumulator > capped {
+    physics.accumulator = capped
+  }
+  var count: Int = 0
+  loop physics.accumulator >= physics.fixedStep and count < physics.maxStepsPerFrame {
+    physics.accumulator = physics.accumulator - physics.fixedStep
+    count = count + 1
+  }
+  ret count
+}
+
+# How far the clock is into the next fixed step, 0 to 1: the blend between
+# the previous and the current fixed-step pose a renderer interpolates by.
+func physicsBlend(physics: view Physics) ret Float {
+  ret physics.accumulator / physics.fixedStep
+}
+
+# Advance the event queues: once per frame, after every consumer.
+func advancePhysicsEvents(physics: mod Physics) {
+  frameAdvance(this: physics.contactBegan)
+  frameAdvance(this: physics.contactEnded)
+  frameAdvance(this: physics.hits)
+  frameAdvance(this: physics.sensorBegan)
+  frameAdvance(this: physics.sensorEnded)
+}

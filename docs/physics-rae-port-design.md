@@ -424,6 +424,14 @@ C added.
 - **P8 — the ECS layer**: `PhysicsWorld`, `RigidBody`, `Collider`,
   `CharacterBody`, push/step/pull/event systems, spawn/despawn
   (`docs/physics-design.md` §5).
+  **P8 landed 2026-10-04:** `lib/physics/ecs` (the `Physics` resource, the
+  components, the five fixed-step systems, spawn/despawn, the venue, the
+  queries with entities; `docs/physics-design.md` §5, rewritten for the
+  port), the mover's up axis, and the renames `Shape` → `PhysicsShape`,
+  `MeshData` → `PhysicsMeshData` (program-wide type names clashed with
+  lib/ui and lib/Mesh3d). Callbacks: none needed for the §0 needs
+  (`docs/physics-design.md` §5.6). Fixtures 987 (despawn safety) and 988
+  (two worlds, identical transforms).
 - **P9 — performance**: the benchmark programs, profiling, the fixes of §6;
   then `parallelLoop` parallelism.
 - **P10 — demos**: the featured example `examples/122_physics_playground`

@@ -73,7 +73,7 @@ type MeshNode {
 }
 
 # A created mesh (b3MeshData).
-type MeshData {
+type PhysicsMeshData {
   bounds: Aabb
   surfaceArea: Float
   treeHeight: Int
@@ -556,7 +556,7 @@ func buildMeshNode(
 
 # b3SortMeshTriangles: the triangles (and materials) in depth-first leaf
 # order, each leaf's offset updated. False when the tree is too deep.
-func sortMeshTriangles(mesh: mod MeshData) ret Bool {
+func sortMeshTriangles(mesh: mod PhysicsMeshData) ret Bool {
   let triangles: List(MeshTriangle) = List.create(MeshTriangle, cap: mesh.triangles.length)
   let materials: List(Int) = List.create(Int, cap: mesh.triangles.length)
   var offset: Int = 0
@@ -644,7 +644,7 @@ func setTriangleFlag(flags: mod List(Int), triangle: view Int, flag: view Int) {
 # b3IdentifyEdges: each edge shared by two triangles is flagged concave
 # (the neighbour's far vertex above), inverse concave (below), or both when
 # the two faces are within 5 degrees of flat.
-func identifyMeshEdges(mesh: mod MeshData) {
+func identifyMeshEdges(mesh: mod PhysicsMeshData) {
   let triangleCount: Int = mesh.triangles.length
   let edges: List(MeshEdge) = List.create(MeshEdge, cap: 3 * triangleCount)
   let normals: List(Vec3) = List.create(Vec3, cap: triangleCount)
@@ -748,7 +748,7 @@ func identifyMeshEdges(mesh: mod MeshData) {
 
 # b3CreateMesh: none for an invalid definition, an insane bounding box or a
 # tree too deep to sort. Degenerate triangles are dropped (and counted).
-func createMesh(def: view MeshDef, lengthUnitsPerMeter: view Float) ret opt MeshData {
+func createMesh(def: view MeshDef, lengthUnitsPerMeter: view Float) ret opt PhysicsMeshData {
   let triangleCount: Int = def.indices.length / 3
   if def.vertices.length < 3 or triangleCount <= 0 {
     ret none
@@ -851,7 +851,7 @@ func createMesh(def: view MeshDef, lengthUnitsPerMeter: view Float) ret opt Mesh
     }
   }
 
-  var mesh: MeshData = {
+  var mesh: PhysicsMeshData = {
     bounds: meshBounds
     surfaceArea: surfaceArea
     treeHeight: built.height

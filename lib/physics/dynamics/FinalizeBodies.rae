@@ -193,14 +193,14 @@ func finalizeBodies(
       let transform: Transform = sim.transform
       var shapeId: Int = body.headShapeId
       loop shapeId is not -1 {
-        let shape: Shape = world.shapes.copyAtDefault(index: shapeId)
+        let shape: PhysicsShape = world.shapes.copyAtDefault(index: shapeId)
         let box: Aabb = computeFatShapeAabb(
           shape: shape
           hulls: world.hulls
           transform: transform
           extra: speculative
         )
-        if let stored: mod Shape => world.shapes.modAt(index: shapeId) {
+        if let stored: mod PhysicsShape => world.shapes.modAt(index: shapeId) {
           stored.aabb = box
         }
         let fatBox: Aabb = world.fatAabbs.copyAtDefault(index: shapeId)
