@@ -1,0 +1,11 @@
+# #79509597: two OPENED modules declaring the same const name make a bare read
+# ambiguous: lib/WorldBiome and lib/procgen/Texture both declare `matGrass`
+# (3 and 0). It is an error naming both, not a silent pick of whichever module
+# was loaded first. Opening only one of them, or `WorldBiome.matGrass`,
+# resolves it.
+open WorldBiome
+open procgen/Texture
+
+func main() {
+  log("grass {matGrass}")
+}
