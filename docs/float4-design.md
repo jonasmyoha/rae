@@ -184,9 +184,15 @@ checksum (FNV over all body velocities) — **bit-exact across all five**.
    through memory; a higher inline threshold makes `rae_scalar` *faster than
    C scalar* (0.96x) and closes the Float4 gap to C SIMD from 1.43x to 1.15x.
    This is independent of Float4 (queued separately, §8).
-4. **Scalar `Math.sqrt` is a runtime call** (`rae_ext_Math_sqrt`, an extern
-   into the runtime object), visible in the scalar solver's profile. It
-   should be an inline intrinsic like Float4's (queued separately, §8).
+4. **Scalar `Math.sqrt` was a runtime call** (`rae_ext_Math_sqrt`, an extern
+   into the runtime object), visible in the scalar solver's profile. Done
+   2026-10-04: the exactly specified scalar functions (sqrt, floor, ceil,
+   round, remainder, floatBits/floatFromBits) are `static inline` in
+   `rae_runtime.h`, so `sqrt` compiles to `fsqrt`; the transcendental ones
+   (sin … log, pow) stay out of line, because a C compiler folding
+   `sinf(constant)` with its own implementation could change the bits.
+   `rae_scalar` went from 603.6 to 588.1 ms on this benchmark (load average
+   ~4, indicative), checksums unchanged.
 5. The remaining 1.15x to C SIMD is the gather/scatter of body states through
    `List` (bounds-checked copies of 64-byte states, per lane) and `Array`
    lane reads; `Float4.load` from a flat `List(Float)` is the obvious next
