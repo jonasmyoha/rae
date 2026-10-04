@@ -1,0 +1,20 @@
+# A value binding cannot take a call that returns a reference — the copy of
+# what it refers to must be spelled out (bind the view, then copy from the
+# named binding). The rule held for plain functions; a GENERIC one
+# (`componentView`, T inferred, specialized later) slipped through and the
+# backend emitted C that assigned a pointer to a struct. Now both report it.
+open ecs/Entity
+open ecs/ComponentTable
+
+type Pose {
+  x: Float
+  name: String
+}
+
+func main() {
+  var table: ComponentTable(Pose) = createComponentTable(Pose)
+  let entityId: EntityId = id(v: 3)
+  componentSet(this: table, entityId: entityId, data: Pose { x: 2.5, name: "table" })
+  let fromTable: Pose = componentView(this: table, entityId: entityId)
+  log("{fromTable.x}")
+}

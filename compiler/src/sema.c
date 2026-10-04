@@ -2221,6 +2221,45 @@ static void sema_scan_unsafe_template(AstModule* module, AstDecl* decl) {
     s_unsafe_depth = saved_depth;
 }
 
+/* Does `func_decl` return a reference (`view T` / `mod T`, not an optional
+ * one)? */
+static bool sema_func_returns_reference(const AstFuncDecl* fd) {
+    return fd->returns && fd->returns->type
+        && (fd->returns->type->is_view || fd->returns->type->is_mod)
+        && !fd->returns->type->is_opt;
+}
+
+/* Does the call `call` return a reference? A resolved call answers from its
+ * declaration. A generic call (`componentView(this: table, ...)`, T inferred)
+ * is still unresolved here — the backend specializes it — so it answers from
+ * the program's functions of that name and arity: a reference when every one
+ * of them returns one. */
+static bool sema_call_returns_reference(const AstModule* module, const AstExpr* call) {
+    if (call->decl_link) {
+        return call->decl_link->kind == AST_DECL_FUNC
+            && sema_func_returns_reference(&call->decl_link->as.func_decl);
+    }
+    const AstExpr* callee = call->as.call.callee;
+    if (!callee || callee->kind != AST_EXPR_IDENT || !module) return false;
+    size_t argCount = 0;
+    for (const AstCallArg* a = call->as.call.args; a; a = a->next) argCount++;
+    size_t candidates = 0;
+    for (const AstDecl* d = module->decls; d; d = d->next) {
+        if (d->kind != AST_DECL_FUNC || !str_eq(d->as.func_decl.name, callee->as.ident)) continue;
+        if (d->as.func_decl.specialization_args) continue;
+        size_t paramCount = 0;
+        bool hasTypeParam = false;
+        for (const AstParam* p = d->as.func_decl.params; p; p = p->next) paramCount++;
+        // A generic function's type parameters (`T: type`) are not passed when
+        // they are inferred from the arguments.
+        for (const AstIdentifierPart* gp = d->as.func_decl.generic_params; gp; gp = gp->next) hasTypeParam = true;
+        if (paramCount != argCount && !hasTypeParam) continue;
+        if (!sema_func_returns_reference(&d->as.func_decl)) return false;
+        candidates++;
+    }
+    return candidates > 0;
+}
+
 // #815: every diagnostic raised while analysing a decl — a function body, a
 // global let initializer, a type — names THAT decl's file (see sema_diag_file).
 static void sema_analyze_decl(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstDecl* decl) {
@@ -4278,13 +4317,8 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
             if (!stmt->as.let_stmt.is_bind && stmt->as.let_stmt.type
                 && !stmt->as.let_stmt.type->is_view && !stmt->as.let_stmt.type->is_mod
                 && stmt->as.let_stmt.value
-                && stmt->as.let_stmt.value->kind == AST_EXPR_CALL
-                && stmt->as.let_stmt.value->decl_link
-                && stmt->as.let_stmt.value->decl_link->kind == AST_DECL_FUNC) {
-                const AstFuncDecl* vfd = &stmt->as.let_stmt.value->decl_link->as.func_decl;
-                if (vfd->returns && vfd->returns->type
-                    && (vfd->returns->type->is_view || vfd->returns->type->is_mod)
-                    && !vfd->returns->type->is_opt) {
+                && stmt->as.let_stmt.value->kind == AST_EXPR_CALL) {
+                if (sema_call_returns_reference(module, stmt->as.let_stmt.value)) {
                     diag_error(sema_diag_file(module), (int)stmt->line, (int)stmt->column,
                                "this call returns a reference; copying what it refers to must be spelled out: "
                                "bind it first ('let source: view T => ...'), then copy from the named binding");
