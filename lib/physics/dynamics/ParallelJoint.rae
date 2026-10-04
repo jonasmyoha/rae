@@ -1,0 +1,171 @@
+# The parallel joint (b3PrepareParallelJoint, b3WarmStartParallelJoint and
+# b3SolveParallelJoint of Box3D's parallel_joint.c at 9f998c8): a soft
+# angular constraint keeping the z-axes of the two joint frames parallel
+# (a keel), with a maximum torque; the bodies stay free to move and to turn
+# about that axis. Box3D's operation order is kept exactly; checked against
+# the oracle in fixture 984.
+open Vec2
+open Vec3
+open Quat
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/Vector2Math
+open physics/math/QuatMath
+open physics/math/MatrixMath
+open physics/dynamics/WorldTypes
+open physics/dynamics/Body
+open physics/dynamics/Joint
+open physics/dynamics/JointData
+open physics/dynamics/ContactConstraints
+open physics/dynamics/StepContext
+open physics/dynamics/RevoluteJoint
+open physics/dynamics/PrismaticJoint
+
+# b3PrepareParallelJoint (the masses and frames are read from the bodies'
+# sims by the caller).
+func prepareParallelJoint(
+  base: mod JointSim
+  simA: view BodySim
+  simB: view BodySim
+  indexA: view Int
+  indexB: view Int
+  h: view Float
+  enableWarmStarting: view Bool
+) {
+  base.invMassA = simA.invMass
+  base.invMassB = simB.invMass
+  base.invIA = simA.invInertiaWorld
+  base.invIB = simB.invInertiaWorld
+  let invInertiaSum: Matrix3 = add(left: base.invIA, right: base.invIB)
+  base.fixedRotation = determinant(matrix: invInertiaSum) < 1000.0 * floatMin
+
+  var joint: ParallelJointData = base.parallelJoint
+  joint.indexA = indexA
+  joint.indexB = indexB
+
+  # The joint frames' world rotations
+  joint.quatA = multiply(left: simA.transform.rotation, right: base.localFrameA.rotation)
+  joint.quatB = multiply(left: simB.transform.rotation, right: base.localFrameB.rotation)
+  let relative: Quat = inverseMultiply(left: joint.quatA, right: joint.quatB)
+
+  # Needed for warm starting
+  joint.perpAxisX = collinearAxis(frameRotation: joint.quatA, relative: relative, axis: axisX())
+  joint.perpAxisY = collinearAxis(frameRotation: joint.quatA, relative: relative, axis: axisY())
+
+  joint.softness = makeSoft(hertz: joint.hertz, zeta: joint.dampingRatio, h: h)
+  if enableWarmStarting is false {
+    joint.perpImpulse = Vec2 { x: 0.0, y: 0.0 }
+  }
+  base.parallelJoint = joint
+}
+
+# b3WarmStartParallelJoint
+func warmStartParallelJoint(base: view JointSim, states: mod List(BodyState)) {
+  let joint: ParallelJointData = base.parallelJoint
+  let stateA: BodyState = jointBodyState(states: states, index: joint.indexA)
+  let stateB: BodyState = jointBodyState(states: states, index: joint.indexB)
+  var velocities: JointVelocities = jointVelocities(stateA: stateA, stateB: stateB)
+  let angularImpulse: Vec3 = blend2(
+    firstScale: joint.perpImpulse.x
+    first: joint.perpAxisX
+    secondScale: joint.perpImpulse.y
+    second: joint.perpAxisY
+  )
+  velocities.angularA = subtract(
+    left: velocities.angularA
+    right: multiply(matrix: base.invIA, vector: angularImpulse)
+  )
+  velocities.angularB = add(
+    left: velocities.angularB
+    right: multiply(matrix: base.invIB, vector: angularImpulse)
+  )
+  storeJointVelocities(
+    states: states
+    indexA: joint.indexA
+    indexB: joint.indexB
+    stateA: stateA
+    stateB: stateB
+    velocities: velocities
+  )
+}
+
+# b3SolveParallelJoint: always soft, so it ignores the solver's bias flag.
+func solveParallelJoint(base: mod JointSim, states: mod List(BodyState), h: view Float) {
+  let iA: Matrix3 = base.invIA
+  let iB: Matrix3 = base.invIB
+  var joint: ParallelJointData = base.parallelJoint
+  let stateA: BodyState = jointBodyState(states: states, index: joint.indexA)
+  let stateB: BodyState = jointBodyState(states: states, index: joint.indexB)
+  var velocities: JointVelocities = jointVelocities(stateA: stateA, stateB: stateB)
+
+  let quatA: Quat = multiply(left: stateA.deltaRotation, right: joint.quatA)
+  var quatB: Quat = multiply(left: stateB.deltaRotation, right: joint.quatB)
+  if dot(left: quatA, right: quatB) < 0.0 {
+    # This keeps the rotation angle in [-pi, pi]
+    quatB = negate(quat: quatB)
+  }
+  let relative: Quat = inverseMultiply(left: quatA, right: quatB)
+
+  if base.fixedRotation is false and joint.maxTorque > 0.0 {
+    let c: Vec2 = { x: relative.x, y: relative.y }
+    let bias: Vec2 = scale(scale: joint.softness.biasRate, vector: c)
+    let massScale: Float = joint.softness.massScale
+    let impulseScale: Float = joint.softness.impulseScale
+
+    # The collinearity constraint as a 2-by-2
+    let perpAxisX: Vec3 = collinearAxis(frameRotation: quatA, relative: relative, axis: axisX())
+    let perpAxisY: Vec3 = collinearAxis(frameRotation: quatA, relative: relative, axis: axisY())
+    joint.perpAxisX = perpAxisX
+    joint.perpAxisY = perpAxisY
+
+    let invInertiaSum: Matrix3 = add(left: iA, right: iB)
+    let kxx: Float = dot(left: perpAxisX, right: multiply(matrix: invInertiaSum, vector: perpAxisX))
+    let kyy: Float = dot(left: perpAxisY, right: multiply(matrix: invInertiaSum, vector: perpAxisY))
+    let kxy: Float = dot(left: perpAxisX, right: multiply(matrix: invInertiaSum, vector: perpAxisY))
+    let k: Matrix2 = { columnX: Vec2 { x: kxx, y: kxy }, columnY: Vec2 { x: kxy, y: kyy } }
+
+    let wRelative: Vec3 = subtract(left: velocities.angularB, right: velocities.angularA)
+    let cdot: Vec2 = {
+      x: dot(left: wRelative, right: perpAxisX)
+      y: dot(left: wRelative, right: perpAxisY)
+    }
+    let maxImpulse: Float = h * joint.maxTorque
+    let oldImpulse: Vec2 = joint.perpImpulse
+    let solution: Vec2 = solve2(matrix: k, vector: add(left: cdot, right: bias))
+    var deltaImpulse: Vec2 = subtract(
+      left: scale(scale: -massScale, vector: solution)
+      right: scale(scale: impulseScale, vector: oldImpulse)
+    )
+    joint.perpImpulse = add(left: oldImpulse, right: deltaImpulse)
+    if lengthSquared(vector: joint.perpImpulse) > maxImpulse * maxImpulse {
+      let shrink: Float = maxImpulse / length(vector: joint.perpImpulse)
+      joint.perpImpulse = scale(scale: shrink, vector: joint.perpImpulse)
+    }
+    deltaImpulse = subtract(left: joint.perpImpulse, right: oldImpulse)
+
+    let angularImpulse: Vec3 = blend2(
+      firstScale: deltaImpulse.x
+      first: perpAxisX
+      secondScale: deltaImpulse.y
+      second: perpAxisY
+    )
+    velocities.angularA = subtract(
+      left: velocities.angularA
+      right: multiply(matrix: iA, vector: angularImpulse)
+    )
+    velocities.angularB = add(
+      left: velocities.angularB
+      right: multiply(matrix: iB, vector: angularImpulse)
+    )
+  }
+
+  base.parallelJoint = joint
+  storeJointVelocities(
+    states: states
+    indexA: joint.indexA
+    indexB: joint.indexB
+    stateA: stateA
+    stateB: stateB
+    velocities: velocities
+  )
+}

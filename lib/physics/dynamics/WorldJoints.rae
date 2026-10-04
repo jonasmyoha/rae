@@ -319,6 +319,93 @@ func createWheelJoint(world: mod PhysicsWorld, def: view WheelJointDef) ret Join
   ret jointHandle(world: world, jointId: jointId)
 }
 
+# b3CreateSphericalJoint
+func createSphericalJoint(world: mod PhysicsWorld, def: view SphericalJointDef) ret JointId {
+  var sim: JointSim = zeroJointSim()
+  var data: SphericalJointData = zeroSphericalJointData()
+  data.hertz = def.hertz
+  data.dampingRatio = def.dampingRatio
+  data.targetRotation = def.targetRotation
+  data.coneAngle = clampFloat(value: def.coneAngle, lower: 0.0, upper: 0.5 * pi)
+  let lowerAngle: Float = minFloat(left: def.lowerTwistAngle, right: def.upperTwistAngle)
+  let upperAngle: Float = maxFloat(left: def.lowerTwistAngle, right: def.upperTwistAngle)
+  data.lowerTwistAngle = clampFloat(value: lowerAngle, lower: -0.99 * pi, upper: 0.99 * pi)
+  data.upperTwistAngle = clampFloat(value: upperAngle, lower: -0.99 * pi, upper: 0.99 * pi)
+  data.maxMotorTorque = def.maxMotorTorque
+  data.motorVelocity = def.motorVelocity
+  data.enableSpring = def.enableSpring
+  data.enableConeLimit = def.enableConeLimit
+  data.enableTwistLimit = def.enableTwistLimit
+  data.enableMotor = def.enableMotor
+  sim.sphericalJoint = data
+  let jointId: Int = createJoint(
+    world: world
+    def: def.base
+    jointType: JointType.sphericalJoint
+    sim: sim
+  )
+  ret jointHandle(world: world, jointId: jointId)
+}
+
+# b3CreateMotorJoint
+func createMotorJoint(world: mod PhysicsWorld, def: view MotorJointDef) ret JointId {
+  var sim: JointSim = zeroJointSim()
+  var data: MotorJointData = zeroMotorJointData()
+  data.linearVelocity = def.linearVelocity
+  data.maxVelocityForce = def.maxVelocityForce
+  data.angularVelocity = def.angularVelocity
+  data.maxVelocityTorque = def.maxVelocityTorque
+  data.linearHertz = def.linearHertz
+  data.linearDampingRatio = def.linearDampingRatio
+  data.maxSpringForce = def.maxSpringForce
+  data.angularHertz = def.angularHertz
+  data.angularDampingRatio = def.angularDampingRatio
+  data.maxSpringTorque = def.maxSpringTorque
+  sim.motorJoint = data
+  let jointId: Int = createJoint(
+    world: world
+    def: def.base
+    jointType: JointType.motorJoint
+    sim: sim
+  )
+  ret jointHandle(world: world, jointId: jointId)
+}
+
+# b3CreateParallelJoint
+func createParallelJoint(world: mod PhysicsWorld, def: view ParallelJointDef) ret JointId {
+  var sim: JointSim = zeroJointSim()
+  var data: ParallelJointData = zeroParallelJointData()
+  data.hertz = def.hertz
+  data.dampingRatio = def.dampingRatio
+  data.maxTorque = def.maxTorque
+  sim.parallelJoint = data
+  let jointId: Int = createJoint(
+    world: world
+    def: def.base
+    jointType: JointType.parallelJoint
+    sim: sim
+  )
+  ret jointHandle(world: world, jointId: jointId)
+}
+
+# b3CreateWeldJoint
+func createWeldJoint(world: mod PhysicsWorld, def: view WeldJointDef) ret JointId {
+  var sim: JointSim = zeroJointSim()
+  var data: WeldJointData = zeroWeldJointData()
+  data.linearHertz = def.linearHertz
+  data.linearDampingRatio = def.linearDampingRatio
+  data.angularHertz = def.angularHertz
+  data.angularDampingRatio = def.angularDampingRatio
+  sim.weldJoint = data
+  let jointId: Int = createJoint(
+    world: world
+    def: def.base
+    jointType: JointType.weldJoint
+    sim: sim
+  )
+  ret jointHandle(world: world, jointId: jointId)
+}
+
 # Unlink edge `edgeIndex` of joint `jointId` from its body's joint list.
 func unlinkJointEdge(world: mod PhysicsWorld, jointId: view Int, edgeIndex: view Int) {
   let edge: JointEdge = jointEdge(
