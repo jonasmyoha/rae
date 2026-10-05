@@ -254,6 +254,23 @@ The second line stays legal because the source's `view` declaration is in
 local scope — the reader sees both the viewness and the copy on adjacent
 lines.
 
+The same holds for `ret`: a function that returns a value cannot return a
+reference-returning call, because that `ret` is the same implicit copy:
+
+```rae
+func pick(lib: view Library) ret Track {
+  ret returnsView()                # ERROR: crosses view -> owned implicitly
+}
+
+func pick(lib: view Library) ret Track {
+  let source: view Track => returnsView()
+  ret source                       # copy visible, as above
+}
+```
+
+Forwarding the reference (`ret view returnsView()` from a function declared
+`ret view Track`) is not a copy and stays legal (see below).
+
 `if let` is NOT an exception to this table — it is the same matrix with a
 presence test in front. An owned optional produced by a call is taken with
 `= ` (ownership transfer); a reference optional is narrowed with `=>`; a view
