@@ -162,12 +162,29 @@ func quickSort(T: type, values: mod List(T)) {
 # QSORT over all of `values`, LESS on `values` alone; `companion` (empty, or
 # as long as `values`) is permuted the same way.
 func quickSortWithCompanion(T: type, values: mod List(T), companion: mod List(Int)) {
+  var stack: List(SortRange) = List.create(SortRange, cap: 48)
+  quickSortWithStack(
+    T: T
+    values: values
+    companion: companion
+    stack: stack
+  )
+}
+
+# quickSortWithCompanion with the caller's range stack (cleared first), for
+# a caller that sorts every step and keeps the stack's buffer.
+func quickSortWithStack(
+  T: type
+  values: mod List(T)
+  companion: mod List(Int)
+  stack: mod List(SortRange)
+) {
+  stack.clear()
   if values.length <= 1 {
     ret
   }
   var left: Int = 0
   var right: Int = values.length - 1
-  let stack: List(SortRange) = List.create(SortRange, cap: 48)
   loop true {
     if right - left + 1 >= quickSortThreshold {
       # Q_PARTITION around the median of the second, middle and last items

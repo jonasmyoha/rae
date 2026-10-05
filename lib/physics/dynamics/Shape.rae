@@ -338,6 +338,31 @@ func computeShapeExtent(
   }
 }
 
+# makeShapeProxy's points written into `points` (cleared first, so a caller
+# can reuse one list); returns the proxy's radius.
+func shapeProxyPoints(
+  shape: view PhysicsShape
+  hulls: view List(Hull)
+  points: mod List(Vec3)
+) ret Float {
+  points.clear()
+  if shape.shapeType is ShapeType.capsule {
+    points.add(value: shape.capsule.center1)
+    points.add(value: shape.capsule.center2)
+    ret shape.capsule.radius
+  }
+  if shape.shapeType is ShapeType.sphere {
+    points.add(value: shape.sphere.center)
+    ret shape.sphere.radius
+  }
+  if let hull: view Hull => hulls.viewAt(index: shape.hullIndex) {
+    loop let point: view Vec3 in hull.points {
+      points.add(value: point)
+    }
+  }
+  ret 0.0
+}
+
 # b3MakeShapeProxy
 func makeShapeProxy(shape: view PhysicsShape, hulls: view List(Hull)) ret ShapeProxy {
   if shape.shapeType is ShapeType.capsule {
