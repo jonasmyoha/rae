@@ -4444,9 +4444,27 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
         }
         case AST_STMT_RET: {
             AstReturnArg* arg = stmt->as.ret_stmt.values;
+            // Spec 2.3.1 for `ret`: a function returning a VALUE cannot return
+            // a reference-returning call, for the same reason an owned `let`
+            // cannot take one - "copy what the view refers to" would hide a
+            // potentially deep copy behind a call whose viewness is only
+            // visible at its declaration. It also crashed the C backend, which
+            // returned the reference as the value (#19451472).
+            const TypeInfo* ret_base = current_return_type;
+            if (ret_base && ret_base->kind == TYPE_OPT) ret_base = ret_base->as.opt.base;
+            bool returns_value = ret_base && ret_base->kind != TYPE_REF
+                && ret_base->kind != TYPE_VOID;
             while (arg) {
                 if (arg->value) {
                     sema_analyze_expr(ctx, module, symbols, arg->value, true);
+                    if (returns_value && arg->value->kind == AST_EXPR_CALL
+                        && sema_call_returns_reference(module, arg->value)) {
+                        diag_error(sema_diag_file(module), (int)stmt->line, (int)stmt->column,
+                                   "this call returns a reference, and this function returns a value; "
+                                   "copying what it refers to must be spelled out: bind it first "
+                                   "('let source: view T => ...'), then 'ret source'");
+                        module->had_error = true;
+                    }
                     sema_check_returned_ref(ctx, module, symbols, arg->value);
                     if (current_return_type) ensure_type_match(ctx, current_return_type, &arg->value);
                 }
