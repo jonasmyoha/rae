@@ -39,6 +39,8 @@ type HullScratch {
   clipInput: List(ClipVertex)
   clipOutput: List(ClipVertex)
   points: List(LocalManifoldPoint)
+  # The one-point manifold of an edge contact tried after a face contact
+  edgeManifold: LocalManifold
 }
 
 func createHullScratch() ret HullScratch {
@@ -55,5 +57,6 @@ func createHullScratch() ret HullScratch {
     clipInput: List.create(ClipVertex, cap: maxClipPoints)
     clipOutput: List.create(ClipVertex, cap: maxClipPoints)
     points: List.create(LocalManifoldPoint, cap: maxClipPoints)
+    edgeManifold: createLocalManifold(capacity: 1)
   }
 }

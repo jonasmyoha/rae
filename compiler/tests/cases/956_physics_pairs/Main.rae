@@ -467,7 +467,8 @@ func evaluate(
       rotation: readQuat(reader: reader)
     )
   } else if name is "pairs.update" {
-    let created: List(UInt64) = updateBroadPhasePairs(world: world)
+    updateBroadPhasePairs(world: world)
+    let created: List(UInt64) = world.createdPairKeys
     putInt(out: out, value: created.length)
     loop var i: Int = 0, i < created.length, ++i {
       putU64(out: out, value: created.copyAtDefault(index: i))

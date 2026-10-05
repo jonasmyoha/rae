@@ -48,8 +48,12 @@ func destroyIsland(world: mod PhysicsWorld, islandId: view Int) {
   if world.splitIslandId is islandId {
     world.splitIslandId = -1
   }
-  let setIndex: Int = world.islands.copyAtDefault(index: islandId).setIndex
-  let localIndex: Int = world.islands.copyAtDefault(index: islandId).localIndex
+  var setIndex: Int = 0
+  var localIndex: Int = 0
+  if let island: view Island => world.islands.viewAt(index: islandId) {
+    setIndex = island.setIndex
+    localIndex = island.localIndex
+  }
   if let set: mod SolverSet => world.solverSets.modAt(index: setIndex) {
     let lastIndex: Int = set.islandSims.length - 1
     let movedIslandId: Int = set.islandSims.copyAtDefault(index: lastIndex)
@@ -71,6 +75,14 @@ func destroyIsland(world: mod PhysicsWorld, islandId: view Int) {
   freeId(pool: world.islandIdPool, id: islandId)
 }
 
+# The body count of island `islandId`, read through a view.
+func islandBodyCount(world: view PhysicsWorld, islandId: view Int) ret Int {
+  if let island: view Island => world.islands.viewAt(index: islandId) {
+    ret island.bodies.length
+  }
+  ret 0
+}
+
 # b3MergeIslands: move the smaller island's bodies, contacts and joints into the
 # bigger one (A on a tie) and destroy it. Returns the island that survives.
 func mergeIslands(world: mod PhysicsWorld, islandIdA: view Int, islandIdB: view Int) ret Int {
@@ -86,17 +98,29 @@ func mergeIslands(world: mod PhysicsWorld, islandIdA: view Int, islandIdB: view 
   var bigIslandId: Int = islandIdA
   var smallIslandId: Int = islandIdB
   # Keep the biggest island to reduce cache misses
-  if world.islands.copyAtDefault(index: islandIdA).bodies.length < world.islands.copyAtDefault(
-    index: islandIdB
-  ).bodies.length {
+  if islandBodyCount(world: world, islandId: islandIdA) < islandBodyCount(
+    world: world
+    islandId: islandIdB
+  ) {
     bigIslandId = islandIdB
     smallIslandId = islandIdA
   }
-  let small: Island = world.islands.copyAtDefault(index: smallIslandId)
+  # The small island's lists, moved out (the loops below change the world)
+  # and given back before it is destroyed, which keeps their buffers
+  var smallBodies: List(Int) = List.create(Int, cap: 0)
+  var smallContacts: List(ContactLink) = List.create(ContactLink, cap: 0)
+  var smallJoints: List(JointLink) = List.create(JointLink, cap: 0)
+  var smallRemoveCount: Int = 0
+  if let small: mod Island => world.islands.modAt(index: smallIslandId) {
+    smallBodies = own small.bodies
+    smallContacts = own small.contacts
+    smallJoints = own small.joints
+    smallRemoveCount = small.constraintRemoveCount
+  }
 
   # Move bodies from the smaller island to the larger island
-  loop var i: Int = 0, i < small.bodies.length, ++i {
-    let bodyId: Int = small.bodies.copyAtDefault(index: i)
+  loop var i: Int = 0, i < smallBodies.length, ++i {
+    let bodyId: Int = smallBodies.copyAtDefault(index: i)
     var bodyIndex: Int = 0
     if let big: mod Island => world.islands.modAt(index: bigIslandId) {
       bodyIndex = big.bodies.length
@@ -109,8 +133,8 @@ func mergeIslands(world: mod PhysicsWorld, islandIdA: view Int, islandIdB: view 
   }
 
   # Migrate contacts from the smaller island to the larger island
-  loop var i: Int = 0, i < small.contacts.length, ++i {
-    let link: ContactLink = small.contacts.copyAtDefault(index: i)
+  loop var i: Int = 0, i < smallContacts.length, ++i {
+    let link: ContactLink = smallContacts.copyAtDefault(index: i)
     var contactIndex: Int = 0
     if let big: mod Island => world.islands.modAt(index: bigIslandId) {
       contactIndex = big.contacts.length
@@ -123,8 +147,8 @@ func mergeIslands(world: mod PhysicsWorld, islandIdA: view Int, islandIdB: view 
   }
 
   # Migrate joints from the smaller island to the larger island
-  loop var i: Int = 0, i < small.joints.length, ++i {
-    let link: JointLink = small.joints.copyAtDefault(index: i)
+  loop var i: Int = 0, i < smallJoints.length, ++i {
+    let link: JointLink = smallJoints.copyAtDefault(index: i)
     var jointIndex: Int = 0
     if let big: mod Island => world.islands.modAt(index: bigIslandId) {
       jointIndex = big.joints.length
@@ -138,7 +162,12 @@ func mergeIslands(world: mod PhysicsWorld, islandIdA: view Int, islandIdB: view 
 
   # Track removed constraints
   if let big: mod Island => world.islands.modAt(index: bigIslandId) {
-    big.constraintRemoveCount = big.constraintRemoveCount + small.constraintRemoveCount
+    big.constraintRemoveCount = big.constraintRemoveCount + smallRemoveCount
+  }
+  if let small: mod Island => world.islands.modAt(index: smallIslandId) {
+    small.bodies = own smallBodies
+    small.contacts = own smallContacts
+    small.joints = own smallJoints
   }
   destroyIsland(world: world, islandId: smallIslandId)
   ret bigIslandId
@@ -400,9 +429,23 @@ func wakeBody(world: mod PhysicsWorld, bodyId: view Int) ret Bool {
 # itself move there; the bodies' non-touching contacts move to the disabled
 # set once neither body is awake. Not while a split is pending.
 func trySleepIsland(world: mod PhysicsWorld, islandId: view Int) {
-  let island: Island = world.islands.copyAtDefault(index: islandId)
-  if island.constraintRemoveCount > 0 and island.bodies.length > 1 {
+  var removeCount: Int = 0
+  var bodyCount: Int = 0
+  if let island: view Island => world.islands.viewAt(index: islandId) {
+    removeCount = island.constraintRemoveCount
+    bodyCount = island.bodies.length
+  }
+  if removeCount > 0 and bodyCount > 1 {
     ret
+  }
+  # The island's lists, moved out (the loops below change the world) and
+  # given back before the island moves
+  var island: Island = emptyIsland()
+  if let source: mod Island => world.islands.modAt(index: islandId) {
+    island.localIndex = source.localIndex
+    island.bodies = own source.bodies
+    island.contacts = own source.contacts
+    island.joints = own source.joints
   }
 
   let sleepSetId: Int = allocId(pool: world.solverSetIdPool)
@@ -582,6 +625,11 @@ func trySleepIsland(world: mod PhysicsWorld, islandId: view Int) {
 
   # Move the island
   let islandIndex: Int = island.localIndex
+  if let source: mod Island => world.islands.modAt(index: islandId) {
+    source.bodies = own island.bodies
+    source.contacts = own island.contacts
+    source.joints = own island.joints
+  }
   if let sleepSet: mod SolverSet => world.solverSets.modAt(index: sleepSetId) {
     sleepSet.islandSims.add(value: islandId)
   }

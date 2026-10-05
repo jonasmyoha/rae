@@ -837,7 +837,10 @@ func sleepIslands(world: mod PhysicsWorld) {
   if let first: mod TaskContext => world.taskContexts.modAt(index: 0) {
     awakeIslands = own first.awakeIslandBitSet
   }
-  let islandSims: List(Int) = setIslandSims(world: world, setIndex: awakeSet)
+  # A copy of the awake islands (sleeping moves islands out of the set),
+  # in the world's list, moved out and back
+  var islandSims: List(Int) = own world.sleepIslandIds
+  copySetIslandSims(world: world, setIndex: awakeSet, islandSims: islandSims)
   var islandIndex: Int = islandSims.length - 1
   loop islandIndex >= 0 {
     if getBit(bitset: awakeIslands, bitIndex: islandIndex) is false {
@@ -845,6 +848,7 @@ func sleepIslands(world: mod PhysicsWorld) {
     }
     islandIndex = islandIndex - 1
   }
+  world.sleepIslandIds = own islandSims
   if let first: mod TaskContext => world.taskContexts.modAt(index: 0) {
     first.awakeIslandBitSet = own awakeIslands
   }

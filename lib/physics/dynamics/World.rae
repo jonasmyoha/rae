@@ -112,6 +112,16 @@ type PhysicsWorld {
   collideContactIds: List(Int)
   # The pair finding's working state (BroadPhasePairs moves it out per step)
   pairContext: PairContext
+  # Working lists: the island sleep's island ids, the new pair keys sorted
+  sleepIslandIds: List(Int)
+  sortedPairKeys: List(UInt64)
+  # The pair keys of the contacts the last broad-phase update created
+  createdPairKeys: List(UInt64)
+  # Continuous collision's working lists: the sensor hits with their
+  # fractions, and the tree query stack
+  continuousSensorHits: List(SensorHit)
+  continuousFractions: List(Float)
+  continuousQueryStack: List(Int)
   # The mesh data and scale of mesh shapes (Box3D's shapes point at the
   # caller's b3MeshData)
   meshes: List(Mesh)
@@ -186,6 +196,12 @@ func createWorld(def: view WorldDef) ret PhysicsWorld {
     stepContext: createStepContext()
     collideContactIds: List.create(Int, cap: 64)
     pairContext: createPairContext()
+    sleepIslandIds: List.create(Int, cap: 16)
+    sortedPairKeys: List.create(UInt64, cap: 16)
+    createdPairKeys: List.create(UInt64, cap: 16)
+    continuousSensorHits: List.create(SensorHit, cap: 4)
+    continuousFractions: List.create(Float, cap: 4)
+    continuousQueryStack: List.create(Int, cap: 32)
     meshes: List.create(Mesh, cap: 0)
     heightFields: List.create(HeightFieldData, cap: 0)
     compounds: List.create(CompoundData, cap: 0)
@@ -328,16 +344,15 @@ func setIslandCount(world: view PhysicsWorld, setIndex: view Int) ret Int {
   ret 0
 }
 
-# A copy of solver set `setIndex`'s island list (only that list).
-func setIslandSims(world: view PhysicsWorld, setIndex: view Int) ret List(Int) {
+# Solver set `setIndex`'s island list copied into `islandSims` (cleared
+# first; only that list is read).
+func copySetIslandSims(world: view PhysicsWorld, setIndex: view Int, islandSims: mod List(Int)) {
+  islandSims.clear()
   if let set: view SolverSet => world.solverSets.viewAt(index: setIndex) {
-    let islandSims: List(Int) = List.create(Int, cap: set.islandSims.length)
     loop let islandId: view Int in set.islandSims {
       islandSims.add(value: islandId)
     }
-    ret islandSims
   }
-  ret List.create(Int, cap: 0)
 }
 
 # Write back the sim of `body`.
