@@ -57,7 +57,7 @@ static const char* const array_module_template =
   "  value: own T\n"
   ") {\n"
   "  if index < 0 or index >= %lld {\n"
-  "    runtimeWarning(message: \"Array.set: index {index} is out of range for length %lld\")\n"
+  "    indexOutOfRangeWarning(operation: \"Array.set\", index: index, length: %lld)\n"
   "    ret\n"
   "  }\n"
   "  unsafe {\n"

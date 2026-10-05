@@ -159,7 +159,7 @@ func set(
 ) {
   unsafe {
     if index < 0 or index >= this.length {
-      runtimeWarning(message: "List.set: index {index} is out of range for length {this.length}")
+      indexOutOfRangeWarning(operation: "List.set", index: index, length: this.length)
       ret
     }
     rae_ext_rae_buf_drop_at(buf: this.data, index: index)
@@ -177,7 +177,7 @@ func insert(
 ) {
   unsafe {
     if index < 0 or index > this.length {
-      runtimeWarning(message: "List.insert: index {index} is out of range for length {this.length}")
+      indexOutOfRangeWarning(operation: "List.insert", index: index, length: this.length)
       ret
     }
     if this.length is this.cap {
@@ -215,7 +215,7 @@ func pop(T: type, this: mod List(T)) ret T {
 func remove(T: type, this: mod List(T), index: view Int) {
   unsafe {
     if index < 0 or index >= this.length {
-      runtimeWarning(message: "List.remove: index {index} is out of range for length {this.length}")
+      indexOutOfRangeWarning(operation: "List.remove", index: index, length: this.length)
       ret
     }
     rae_ext_rae_buf_drop_at(buf: this.data, index: index)
@@ -239,9 +239,7 @@ func remove(T: type, this: mod List(T), index: view Int) {
 func swapRemove(T: type, this: mod List(T), index: view Int) {
   unsafe {
     if index < 0 or index >= this.length {
-      runtimeWarning(
-        message: "List.swapRemove: index {index} is out of range for length {this.length}"
-      )
+      indexOutOfRangeWarning(operation: "List.swapRemove", index: index, length: this.length)
       ret
     }
     let last: Int = this.length - 1

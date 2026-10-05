@@ -55,6 +55,14 @@ func runtimeWarning(message: view String) {
   }
 }
 
+# The warning of a collection write at an index outside `0 ..< length`
+# (List.set/insert/remove/swapRemove, Array.set). One out-of-line function,
+# so each generic method keeps only its compare and store on the in-range
+# path and stays small enough for the C compiler to inline.
+func indexOutOfRangeWarning(operation: view String, index: view Int, length: view Int) {
+  runtimeWarning(message: "{operation}: index {index} is out of range for length {length}")
+}
+
 # A declared shader composition (docs/shaders-and-the-compiler.md). Produced
 # only by the compile-time construct `shader(files: ["lib/noise.wgsl", ...])`:
 # the compiler resolves the parts at build time, composes them in order (a
