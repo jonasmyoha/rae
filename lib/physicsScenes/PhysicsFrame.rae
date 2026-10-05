@@ -1,0 +1,120 @@
+# One frame of a physics example through the deferred graph, shared by the
+# playgrounds (PlaygroundApp) and the vehicles (VehicleApp): the bodies as
+# shadow casters grouped by mesh kind, the instanced geometry pass
+# (PlaygroundRender), the renderer's generic passes, the lib/ui HUD with the
+# shared FPS meter on top, and present.
+import Gpu2d
+open ecs/ComponentTable
+open ecs/Transform
+open Gpu3d
+open Gbuffer
+open RendererDeferred
+open Rendergraph
+open Scene3d
+open Shadow3d
+open gpu/GpuResources
+open app3d/UiShell
+open ui/Ecs
+open ui/UiSystems
+open ui/DebugOverlay
+open ui/renderSystem/RenderSystem
+open physicsScenes/PlaygroundRender
+
+# One frame through the deferred graph: the bodies as shadow casters, the
+# instanced geometry pass, the generic passes, the HUD, present.
+func renderPhysicsFrame(
+  renderer: mod DeferredRenderer
+  meshes: view PlaygroundMeshes
+  batches: mod PlaygroundBatches
+  groundMesh: view MeshHandle
+  camera: view Camera3d
+  light: view Light3d
+  reach: view Float
+  renderShapes: view ComponentTable(RenderShape)
+  transforms: view ComponentTable(Transform3D)
+  uiWorld: mod UiWorld
+  uiSystems: mod UiSystems
+  gpuUi: view Gpu2dUi
+  debugOverlay: mod DebugOverlay
+  debugLog: view Bool
+) {
+  let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
+  loop var passIndex: Int = 0, passIndex < deferredOrderLength(renderer: renderer), ++passIndex {
+    let tag: Int = deferredTagAt(renderer: renderer, i: passIndex)
+    if tag is RenderTag.shadow {
+      let cascades: ShadowCascades = fitShadowCascades(
+        camPos: camera.position
+        camTarget: camera.target
+        fovYDeg: camera.fovYDeg
+        aspect: aspect
+        near: camera.nearZ
+        far: reach * 3.0
+        sunDir: light.sunDir
+        count: 3
+        resolution: 2048
+        lambda: 0.7
+        backExtent: reach * 1.5
+      )
+      beginShadowPass(renderer: renderer, c: cascades)
+      queueShadowCasters(
+        renderer: renderer
+        meshes: meshes
+        renderShapes: renderShapes
+        transforms: transforms
+      )
+      endShadowPass(renderer: renderer)
+      if debugLog {
+        log("[shadow] casters {shadowCasterCount(renderer: renderer)}")
+      }
+    } else if tag is RenderTag.gbuffer {
+      ensureRendererResources(renderer: renderer)
+      if let resources: mod GpuResources => renderer.gpuResources {
+        Gbuffer.beginPass(
+          cache: renderer.passes.gbuffer
+          resources: resources
+          camera: camera
+          light: light
+          aspect: aspect
+        )
+        drawPlaygroundGeometry(
+          cache: renderer.passes.gbuffer
+          resources: resources
+          batches: batches
+          groundMesh: groundMesh
+        )
+        Gbuffer.endPass(cache: renderer.passes.gbuffer, resources: resources)
+      }
+    } else if tag is RenderTag.uiOverlay {
+      Gpu2d.beginFrameLoad(canvas: renderer.canvas)
+      renderSystemGpu2d(
+        world: uiWorld
+        uiSystems: uiSystems
+        res: gpuUi
+        canvas: renderer.canvas
+      )
+      # Last, so nothing paints over the FPS meter
+      drawDebugOverlay(
+        debugOverlay: debugOverlay
+        canvas: renderer.canvas
+        font: gpuUi.textFont
+        didRealWork: true
+      )
+    } else if tag is RenderTag.present {
+      Gpu2d.endFrame(canvas: renderer.canvas)
+    } else {
+      renderDeferredPass(
+        renderer: renderer
+        tag: tag
+        camera: camera
+        light: light
+        aspect: aspect
+      )
+    }
+  }
+}
+
+func closePhysicsWindow(renderer: mod DeferredRenderer) {
+  shutdownDeferredRenderer(renderer: renderer)
+  Gbuffer.shutdownAll()
+  Gpu2d.closeWindow()
+}

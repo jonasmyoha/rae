@@ -215,24 +215,3 @@ func recordPlaygroundFrame(
     didRealWork: rendered
   )
 }
-
-func drawPlaygroundUi(
-  ui: mod PlaygroundUi
-  world: mod UiWorld
-  systems: mod UiSystems
-  canvas: mod Gpu2dCanvas
-) {
-  renderSystemGpu2d(
-    world: world
-    uiSystems: systems
-    res: ui.gpuUi
-    canvas: canvas
-  )
-  # Last, so nothing paints over it
-  drawDebugOverlay(
-    debugOverlay: ui.debugOverlay
-    canvas: canvas
-    font: ui.gpuUi.textFont
-    didRealWork: true
-  )
-}

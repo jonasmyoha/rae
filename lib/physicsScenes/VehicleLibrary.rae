@@ -113,8 +113,8 @@ func uprightVenueRotation(car: view VehicleDescription) ret Quat {
 func wheelTargets(
   car: view VehicleDescription
   command: view VehicleCommand
-) ret List(WheelTarget) {
-  let targets: List(WheelTarget) = List.create(WheelTarget, cap: car.wheels.length)
+) ret List(VehicleWheelTarget) {
+  let targets: List(VehicleWheelTarget) = List.create(VehicleWheelTarget, cap: car.wheels.length)
   loop let wheel: view VehicleWheel in car.wheels {
     var steering: Float = 0.0
     if wheel.steers {
@@ -129,7 +129,7 @@ func wheelTargets(
       torque = 0.5 * car.totalSpinTorque * share
     }
     targets.add(
-      value: WheelTarget {
+      value: VehicleWheelTarget {
         steeringAngle: steering
         spinSpeed: -car.spinSpeed * command.throttle
         maxSpinTorque: torque
