@@ -144,9 +144,11 @@ RaeAny rae_ext_json_get(const char* json, const char* field) {
     return rae_any_none();
 }
 
+/* A reference (`view T` / `mod T`) logs as the value it refers to, the same
+ * as logS and string interpolation: the binding's mode is not part of the
+ * value. (Printing a "view "/"mod " prefix was a debug aid from the removed
+ * VM, and it put the type spelling in front of every logged view String.) */
 void rae_ext_rae_log_any(RaeAny value) {
-  if (value.is_view) printf("view ");
-  else if (value.is_mod) printf("mod ");
   rae_ext_rae_log_stream_any(value);
   printf("\n");
   rae_flush_stdout();

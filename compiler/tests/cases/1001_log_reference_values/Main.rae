@@ -1,0 +1,33 @@
+# log() of a reference prints the value it refers to, the same as logS and
+# string interpolation. It used to print the binding's mode first ("view
+# alpha", "mod 80"), which put the type spelling in front of every logged
+# `view String` line.
+type Counter {
+  count: Int
+}
+
+func logViewString(text: view String) {
+  log(text)
+}
+
+func bumpAndLog(counter: mod Counter) {
+  let count: mod Int => counter.count
+  count = count + 1
+  log(count)
+}
+
+func main() {
+  let lines: List(String) = { "alpha", "beta" }
+  loop let line: view String in lines {
+    log(line)
+  }
+  let first: view String => lines.viewAt(index: 0)
+  log(first)
+  logViewString(text: "a parameter")
+  var counter: Counter = { count: 41 }
+  bumpAndLog(counter: counter)
+  let total: view Int => counter.count
+  log(total)
+  logS(first)
+  log(" and interpolated: {first}")
+}
