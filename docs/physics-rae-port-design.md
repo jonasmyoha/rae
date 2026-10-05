@@ -284,8 +284,19 @@ structs, and the fixes were all of that kind:
 
 Where the rest goes, profiled against the C app:
 
-- **Contacts (pyramids).** Rae's SIMD solve and push are already faster than
-  C scalar's; collide and prepare are ~2.5x C's. Box3D iterates the colour's
+- **Contacts (pyramids), P9a-4.** Re-measured after P9a-6 (collide reads
+  each body as a 72-byte ContactBodyPose, not a 224-byte BodySim copy) and
+  P9a-8 (collide and the wide prepare prefetch their contacts): large
+  pyramid 11.79 against 11.36 ms (1.04x), many pyramids 23.01 against 21.77
+  (1.06x), load ~3, checksums unchanged. Per stage over 200 / 100 steps
+  (the C app's `-s` profile against timers patched into the Rae step):
+  collide 334 against 242 ms and 329 against 221 ms (1.38x / 1.49x), solve
+  and finalize 2 040 against 2 025 and 1 999 against 1 965 (1.01x / 1.02x).
+  Collide is ~14% of a pyramid step, so storing the solver-facing contact
+  data contiguously per colour, as Box3D does, would recover at most ~0.4 ms
+  a step; with both pyramids inside the 1.2x target it was not done. The
+  earlier analysis, for the record: Rae's SIMD solve and push were already
+  faster than C scalar's; collide and prepare were ~2.5x C's. Box3D iterates the colour's
   contiguous `b3ContactSim` array; the port reaches each contact through its
   id in `world.contacts` (432-byte `Contact`, its manifold in a separate heap
   list) and copies both `BodySim`s (224 bytes each) per contact in collide.
