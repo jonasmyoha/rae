@@ -151,7 +151,9 @@ imports no physics track, only Vec3/Quat/Mesh3d and the ECS transform table:
   windows, its text lines, and the determinism hash over every Transform3D.
 
 **Each example has one adapter, `SceneSpawn.rae`, the only file that names
-its track.** It builds a Scene through that track's ECS layer and holds the
+its track.** Since the track-B twin (below) everything else is shared too:
+the window loop, renderer and HUD live in the package, and an example is
+just `SceneSpawn.rae`, an identical `Main.rae`, and its fonts and theme. It builds a Scene through that track's ECS layer and holds the
 playground's ECS world. Both ECS layers gained what the scenes need, with the
 same names:
 - `PhysicsJoints.addJoint` (revolute, spherical or weld);
@@ -218,6 +220,56 @@ After the maintainer's first try-out (2026-10-05) the controls changed:
   turn apart by entity index.
 - `RAE_PLAYGROUND_AUTOFIRE=1` opens with autofire on (for headless checks).
   `RAE_PLAYGROUND_DEBUG=1` also logs the live ball count.
+
+### Track B's playground and the shared front end (2026-10-05)
+
+`examples/123_physics_playground_c` is the twin on Box3D's C library.
+
+- **What it contains:** its `SceneSpawn.rae` opens `box3d/ecs/*` where
+  122's opens `physics/ecs/*` (Box3D's value types sit in
+  `box3d/ecs/PhysicsTypes`). Its `trackName` and `assetBase` differ. Its
+  `Main.rae` is byte-identical to 122's.
+- **What moved into `lib/physicsScenes`,** so neither example carries a
+  copy:
+  - `PlaygroundRender`: the instanced batches, shadow casters, pastel
+    materials, the camera ray, and `RenderKind`/`RenderShape`.
+  - `PlaygroundUi`: the HUD. Its layout is now
+    `scenes/PlaygroundHud.raescene`. The example passes its own fonts and
+    theme directory.
+  - `PlaygroundApp`: the window loop's shared steps. `Main` calls
+    `beginPlaygroundFrame`, `readPlaygroundControls`,
+    `updatePlaygroundCamera`, `playgroundShots`, `retirePlaygroundBalls`,
+    `playgroundShouldStep`, `updatePlaygroundHud` and
+    `finishPlaygroundFrame`, and itself makes only the track calls (spawn,
+    step, throw, despawn, counts). The renderer, `UiWorld` and `UiSystems`
+    stay locals of `Main`.
+- **Threading:** the adapter passes `workerCount` into `b3WorldDef`. With no
+  task callbacks, this Box3D version starts its built-in scheduler
+  (`b3CreateScheduler`), so track B runs on Box3D's own threads, as the plan
+  says.
+- **Same simulation:** at 240 steps, all six scenes hash identically on the
+  Rae port, Box3D scalar and Box3D SIMD, at 1 worker and at 8. The 120-step
+  hashes are pinned in `tools/box3d-oracle/goldens/playground.golden`, and
+  the example gate checks both examples against that one file. It checks
+  123 at both its default (SIMD) link and a scalar link.
+- **Gate linking:** `run_examples.sh` now adds Box3D's include and library
+  to its gcc line when the generated C includes `box3d/box3d.h`. This is the
+  rule `box3d_link_flags` in compiler/src/main.c applies for `rae run`.
+- **Memory, track B:** Rae's counters cannot see Box3D's C heap. Each
+  adapter therefore has `engineByteCount()`: `b3GetByteCount()` on track B,
+  and 0 on the port, whose memory Rae already counts. At every cycled scene
+  switch, `Main` logs it with no world alive. The gate requires every value
+  to be the same.
+  - 5-minute test, 30 switches: Box3D held 0 bytes between worlds every
+    time.
+  - Rae's peaks were identical within one buffer from the second round on
+    (7.6 MB in 1 945 buffers).
+  - Nothing was outstanding at exit, and `leaks --atExit` is clean. The same
+    gate as 122 passes.
+- **First sight of speed:** with the pyramid knocked awake by the gun, the
+  HUD showed about 1 ms per step on track A and about 2 ms on track B. These
+  are single readings on a loaded machine; the performance pass measures
+  properly.
 
 ### The playground's featured row and gates (2026-10-05)
 

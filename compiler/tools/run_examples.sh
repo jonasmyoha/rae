@@ -71,11 +71,22 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
       WGPU="${WGPU_NATIVE:-$HOME/.local/wgpu-native}"
       WGPU_FLAGS=""
       [ -f "$WGPU/lib/libwgpu_native.dylib" ] && WGPU_FLAGS="-DRAE_HAS_WEBGPU -I$WGPU/include -L$WGPU/lib -lwgpu_native -Wl,-rpath,$WGPU/lib -framework Metal -framework QuartzCore -framework Foundation -framework ImageIO -framework CoreGraphics"
+      # Box3D's C library (track B, lib/box3d): linked when the generated C
+      # includes box3d/box3d.h, from $RAE_BOX3D (default
+      # ~/.cache/rae/box3d/install, built by tools/box3d/build.sh) - the
+      # same rule as box3d_link_flags in compiler/src/main.c, which this
+      # gcc line does not go through. BOX3D_ROOT stays set for the branches
+      # below (the playground links a scalar build too).
+      BOX3D_FLAGS=""
+      BOX3D_ROOT="${RAE_BOX3D:-$HOME/.cache/rae/box3d/install}"
+      if grep -q 'box3d/box3d.h' "$TMP_OUT/out.c"; then
+        BOX3D_FLAGS="-I$BOX3D_ROOT/include $BOX3D_ROOT/lib/libbox3d.a"
+      fi
       if gcc -O2 -ffp-contract=off -o "$TMP_OUT/app" "$TMP_OUT/out.c" "$TMP_OUT/rae_runtime.c" \
          $([ -f "$TMP_OUT/monocypher.c" ] && echo "$TMP_OUT/monocypher.c") \
          $(ls "$PROJECT_DIR"/*.c 2>/dev/null | grep -v "rae_runtime.c" | grep -v "main_compiled.c" || true) \
          -I"$TMP_OUT" -I/opt/homebrew/include -L/opt/homebrew/lib -DRAE_HAS_SDL3 $WGPU_FLAGS \
-         -lSDL3 -framework Foundation -framework ImageIO -framework CoreGraphics > "$TMP_OUT/link.log" 2>&1; then
+         $BOX3D_FLAGS -lSDL3 -framework Foundation -framework ImageIO -framework CoreGraphics > "$TMP_OUT/link.log" 2>&1; then
         if [ "$EXAMPLE_NAME" = "91_pong_implicit" ]; then
           SCREENSHOT="$TMP_OUT/pong.bmp"
           if (cd .. && RAE_PONG_TEST_FRAME=1 RAE_SDL_HEADLESS_MS=800 \
@@ -1324,12 +1335,18 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" "$TMP_OUT/free-render.log" "$TMP_OUT/free-screenshot.log" "$TMP_OUT/pause-render.log" "$TMP_OUT/pause-screenshot.log" "$TMP_OUT/settings-render.log" "$TMP_OUT/settings-screenshot.log" "$TMP_OUT/scene2-render.log" "$TMP_OUT/scene2-screenshot.log" "$TMP_OUT/scene3-render.log" "$TMP_OUT/scene3-screenshot.log" 2>/dev/null | sed 's/^/  /'
             ((FAILED++))
           fi
-        elif [ "$EXAMPLE_NAME" = "122_physics_playground_port" ]; then
-          # The physics playground on the Rae port of Box3D
-          # (docs/physics-two-implementations.md §3). Four checks:
+        elif [ "$EXAMPLE_NAME" = "122_physics_playground_port" ] \
+             || [ "$EXAMPLE_NAME" = "123_physics_playground_c" ]; then
+          # The physics playground on both tracks: 122 on the Rae port of
+          # Box3D, 123 on Box3D's C library (docs/physics-two-implementations.md
+          # §3). Four checks:
           # 1. Determinism: every scene stepped 120 fixed steps at 1 worker and
           #    at the pool's worker count must hash identically (the app exits
-          #    1 on a mismatch and prints one line per scene).
+          #    1 on a mismatch and prints one line per scene), and the hashes
+          #    must equal tools/box3d-oracle/goldens/playground.golden - the
+          #    SAME file for both tracks, so the port and the C library are
+          #    held to one simulation. 123 is also linked against the scalar
+          #    library and must print the same hashes.
           # 2. A headless frame of the pyramid with its HUD and FPS meter.
           # 3. Memory flat WHILE running: scenes switch every 4 s with
           #    autofire on, so bodies spawn and despawn the whole run (the
@@ -1341,20 +1358,43 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           #    clock starts at process launch and the app's at its first
           #    frame, so a timestamp does not tell which scene is loaded. The
           #    5-minute version of this run is in the doc: the peaks were
-          #    identical over four rounds.
+          #    identical over four rounds. Rae's counters do not see Box3D's
+          #    C heap (123), so at every scene switch the app also logs the
+          #    engine's own byte count with no world alive (b3GetByteCount;
+          #    0 on the port), and every one must be the same.
           # 4. `leaks --atExit` over a shorter run of the same kind.
           SCREENSHOT="$TMP_OUT/playground.bmp"
           PLAYGROUND_OK=1
-          if (cd .. && RAE_PHYSICS_DETERMINISM=120 \
-             perl -e 'alarm shift; exec @ARGV' 120 "$TMP_OUT/app") > "$TMP_OUT/determinism.log" 2>&1 \
-             && grep -q '^determinism: 0 scenes differ' "$TMP_OUT/determinism.log" \
-             && [ "$(grep -c 'identical true' "$TMP_OUT/determinism.log")" -eq 6 ]; then
-            :
-          else
-            PLAYGROUND_OK=0
-            echo "  determinism check failed (every scene must hash the same at 1 and N workers):"
-            grep -a 'hash\|determinism' "$TMP_OUT/determinism.log" | sed 's/^/    /'
+          PLAYGROUND_BINARIES="$TMP_OUT/app"
+          if [ "$EXAMPLE_NAME" = "123_physics_playground_c" ]; then
+            if gcc -O2 -ffp-contract=off -o "$TMP_OUT/app-scalar" "$TMP_OUT/out.c" "$TMP_OUT/rae_runtime.c" \
+               -I"$TMP_OUT" -I/opt/homebrew/include -L/opt/homebrew/lib -DRAE_HAS_SDL3 $WGPU_FLAGS \
+               -I"$BOX3D_ROOT/include" "$BOX3D_ROOT/lib/scalar/libbox3d.a" \
+               -lSDL3 -framework Foundation -framework ImageIO -framework CoreGraphics > "$TMP_OUT/link-scalar.log" 2>&1; then
+              PLAYGROUND_BINARIES="$PLAYGROUND_BINARIES $TMP_OUT/app-scalar"
+            else
+              PLAYGROUND_OK=0
+              echo "  scalar Box3D link failed:"
+              sed 's/^/    /' "$TMP_OUT/link-scalar.log" | tail -5
+            fi
           fi
+          for PLAYGROUND_BINARY in $PLAYGROUND_BINARIES; do
+            if (cd .. && RAE_PHYSICS_DETERMINISM=120 \
+               perl -e 'alarm shift; exec @ARGV' 120 "$PLAYGROUND_BINARY") > "$TMP_OUT/determinism.log" 2>&1 \
+               && grep -q '^determinism: 0 scenes differ' "$TMP_OUT/determinism.log" \
+               && [ "$(grep -c 'identical true' "$TMP_OUT/determinism.log")" -eq 6 ] \
+               && sed -nE 's/^track [AB] \([^)]*\) ([^:]*): [0-9]+ steps, hash ([0-9]+) at 1 worker.*/\1 \2/p' \
+                    "$TMP_OUT/determinism.log" > "$TMP_OUT/hashes.txt" \
+               && grep -v '^#' ../tools/box3d-oracle/goldens/playground.golden | diff - "$TMP_OUT/hashes.txt" \
+                    > "$TMP_OUT/hash-diff.log" 2>&1; then
+              :
+            else
+              PLAYGROUND_OK=0
+              echo "  determinism check failed for $(basename "$PLAYGROUND_BINARY") (identical at 1 and N workers, equal to playground.golden):"
+              grep -a 'hash\|determinism' "$TMP_OUT/determinism.log" | sed 's/^/    /'
+              sed 's/^/    /' "$TMP_OUT/hash-diff.log" 2>/dev/null
+            fi
+          done
           if (cd .. && RAE_SDL_HEADLESS_MS=3000 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
              perl -e 'alarm shift; exec @ARGV' 60 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
              && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=200 \
@@ -1370,6 +1410,8 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=78000 RAE_MEM_STATS=1 RAE_MEM_STATS_EVERY_MS=2000 \
              perl -e 'alarm shift; exec @ARGV' 150 "$TMP_OUT/app") > "$TMP_OUT/live-growth.log" 2>&1 \
              && [ "$(grep -c '^\[playground\] cycle' "$TMP_OUT/live-growth.log")" -ge 18 ] \
+             && [ "$(grep -c '^\[playground\] engine bytes between worlds' "$TMP_OUT/live-growth.log")" -ge 18 ] \
+             && [ "$(sed -n 's/^\[playground\] engine bytes between worlds //p' "$TMP_OUT/live-growth.log" | sort -u | wc -l)" -eq 1 ] \
              && awk '
                   function field(line, key) { sub(".*" key "=", "", line); sub(/ .*/, "", line); return line + 0 }
                   /^\[mem:live\]/ {
@@ -1383,7 +1425,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           else
             PLAYGROUND_OK=0
             echo "  live growth check failed (scene switches + autofire; the peak of a later round must match an earlier one):"
-            grep -a '^\[mem:live\]\|^\[playground\]' "$TMP_OUT/live-growth.log" 2>/dev/null | sed 's/^/    /'
+            grep -a '^\[mem:live\]\|^\[playground\]' "$TMP_OUT/live-growth.log" | tail -40 2>/dev/null | sed 's/^/    /'
           fi
           if command -v leaks >/dev/null 2>&1; then
             (cd .. && RAE_PLAYGROUND_CYCLE_SECONDS=3 RAE_PLAYGROUND_AUTOFIRE=1 \
@@ -1398,7 +1440,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             fi
           fi
           if [ "$PLAYGROUND_OK" -eq 1 ]; then
-            echo "PASS: $EXAMPLE_NAME (6 scenes deterministic across worker counts, HUD frame, memory flat over scene switches + autofire, leaks clean)"
+            echo "PASS: $EXAMPLE_NAME (6 scenes deterministic across worker counts and equal to playground.golden, HUD frame, memory flat over scene switches + autofire, leaks clean)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (physics playground gate)"

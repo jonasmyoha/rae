@@ -1,8 +1,8 @@
-# The physics playground's adapter to track A, the Rae port of Box3D
-# (lib/physics/ecs): builds a backend-neutral PhysicsScene (lib/physicsScenes) as
-# entities. This is the ONE file of the playground that names a physics track:
-# 123_physics_playground_c has the same file with its `open` lines changed to
-# box3d/ecs (docs/physics-two-implementations.md §3).
+# The physics playground's adapter to track B, upstream Box3D's C library
+# through its bindings (lib/box3d/ecs): builds a backend-neutral PhysicsScene
+# (lib/physicsScenes) as entities. This is the ONE file of the playground that
+# names a physics track: 122_physics_playground_port has the same file over
+# physics/ecs, the Rae port (docs/physics-two-implementations.md §3).
 import Quat
 open Vec2
 open Vec3
@@ -14,22 +14,20 @@ open physicsScenes/SceneTypes
 open physicsScenes/SceneHud
 open physicsScenes/SceneLibrary
 open physicsScenes/PlaygroundRender
-open physics/math/TransformMath
-open physics/geometry/QueryTypes
-open physics/dynamics/WorldTypes
-open physics/dynamics/WorldQueries
-open physics/ecs/Physics
-open physics/ecs/PhysicsComponents
-open physics/ecs/PhysicsSpawn
-open physics/ecs/PhysicsSystems
-open physics/ecs/PhysicsQueries
-open physics/ecs/PhysicsJoints
-open physics/ecs/VenueMesh
+import box3d/Box3d
+open box3d/ecs/PhysicsTypes
+open box3d/ecs/Physics
+open box3d/ecs/PhysicsComponents
+open box3d/ecs/PhysicsSpawn
+open box3d/ecs/PhysicsSystems
+open box3d/ecs/PhysicsQueries
+open box3d/ecs/PhysicsJoints
+open box3d/ecs/VenueMesh
 
-const trackName: String = "track A (Rae port)"
+const trackName: String = "track B (Box3D C)"
 
 # This example's fonts and theme (the HUD itself is the shared package's)
-const assetBase: String = "examples/122_physics_playground_port/assets/"
+const assetBase: String = "examples/123_physics_playground_c/assets/"
 
 # The playground's ECS world.
 type PlaygroundWorld {
@@ -301,10 +299,13 @@ func playgroundAwakeCount(world: view PlaygroundWorld) ret Int {
   ret physicsCounters(physics: world.physics).awakeBodyCount
 }
 
-# The engine's own heap, outside Rae's allocation counters: none here, the
-# port's memory is Rae's (RAE_MEM_STATS counts it).
+# The engine's own heap, outside Rae's allocation counters: the bytes Box3D's
+# C library has allocated and not freed (b3GetByteCount). Between worlds it
+# must come back to the same value, or the library is leaking.
 func engineByteCount() ret Int {
-  ret 0
+  unsafe {
+    ret Box3d.b3GetByteCount() as Int
+  }
 }
 
 func destroyPlaygroundWorld(world: mod PlaygroundWorld) {
