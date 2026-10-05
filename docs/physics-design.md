@@ -1,9 +1,12 @@
 # Physics for Rae — design
 
-**Engine:** Box3D (`github.com/erincatto/box3d`, Erin Catto, MIT) **ported to
-Rae** in `lib/physics` (decided 2026-09-30; the port's own design, rules and
-phases are `docs/physics-rae-port-design.md`). This document is the
-*application-facing* design: what the games need (§0), what Box3D brings
+**Engine:** Box3D (`github.com/erincatto/box3d`, Erin Catto, MIT), in **two
+implementations built side by side** until the maintainer picks one
+(2026-10-05, `docs/physics-two-implementations.md`): the Rae port in
+`lib/physics` (its design, rules and phases are
+`docs/physics-rae-port-design.md`) and upstream's C library through generated
+bindings in `lib/box3d`. Both expose the ECS surface of §5. This document is
+the *application-facing* design: what the games need (§0), what Box3D brings
 (§1), the engine decision (§2), how the port is laid out and built (§3–§4),
 the ECS layer over it (§5, `lib/physics/ecs`), determinism (§6) and the test
 scenes (§7).
@@ -76,16 +79,22 @@ which is why the first draft's "write it in Rae" recommendation is withdrawn.
 
 | | language | 3D | wasm | determinism | cost | verdict |
 |---|---|---|---|---|---|---|
-| Box3D as C behind bindings | C17, MIT | yes | yes | cross-platform | bindgen gaps, a vendored C build per target, callbacks impossible | superseded |
-| **Box3D ported to Rae** | Rae | yes | yes (Rae's own wasm path) | the same as Box3D's C, proven bit for bit | a port of ~40 K lines, done phase by phase | **adopted** |
+| **Box3D as C behind bindings** (`lib/box3d`) | C17, MIT | yes | yes | cross-platform | bindgen gaps, a C build per target, callbacks impossible | **track B** |
+| **Box3D ported to Rae** (`lib/physics`) | Rae | yes | yes (Rae's own wasm path) | the same as Box3D's C, proven bit for bit | a port of ~40 K lines, done phase by phase | **track A** |
 | Jolt | C++17 | yes | yes | not cross-platform by default | C shim + libc++ | no |
 | an original Rae engine | Rae | yes | yes | by construction | a solver to design | no — Box3D's design is the one wanted |
 
-**Decision (2026-09-30): port Box3D to Rae.** The first plan (a vendored C
-library behind generated bindings, `lib/box3d`) is withdrawn: every layer of
-physics is Rae, there is no C to build, link or vendor, and the Rae
-compiler is exercised by a large, numerically demanding program. The port
-keeps Box3D's architecture, algorithms and operation order exactly, so its
+**Decision (2026-10-05): build both, then choose.** Box3D is the engine. It
+is built twice: as the Rae port (track A, a performance and language test as
+well as a candidate) and as upstream's C library behind generated bindings
+(track B). Each track gets the same two examples, a physics playground and a
+vehicle. When all four are finished, the comparison in
+`docs/physics-two-implementations.md` §6 decides which one Rae uses. That
+document replaces the two earlier single-track decisions: the port
+(2026-09-30) and the C library (research, 2026-10-01, agreed but never
+applied).
+
+The rest of this section and §3–§4 describe track A. The port keeps Box3D's architecture, algorithms and operation order exactly, so its
 results equal Box3D's C bit for bit (the oracle, §4); the reasons and the
 porting rules are `docs/physics-rae-port-design.md` §1 and §3.
 
@@ -109,7 +118,10 @@ counterpart is left out on purpose: user-data pointers (the ECS layer keeps
 its own body→entity map, §5.1), the callbacks (§5.6), the recording/replay
 and debug-draw paths.
 
-## 4. Building — nothing to vendor
+## 4. Building track A — nothing to vendor
+
+(Track B's build, a C library fetched at a pinned commit and linked, is
+`docs/physics-two-implementations.md` §4.)
 
 The port is ordinary Rae: `open physics/dynamics/World` and the rest, built
 by the compiler like any library. There is no C dependency, no per-target
@@ -451,17 +463,20 @@ visual gate only (P10).
 
 ## 8. Phased plan
 
-The port's phases are `docs/physics-rae-port-design.md` §7: P0–P7 (math
-through queries and the mover) and P8 (the ECS layer, §5) have landed; P9
-(performance: single-threaded, then the parallel step) and P10 (demos: the
-field scenes, the vehicle example of §5.7) follow.
+The order of the remaining work for both tracks is
+`docs/physics-two-implementations.md` §5. Track A's phases are
+`docs/physics-rae-port-design.md` §7: P0–P8 and P9a have landed, P9b (the
+parallel step) is next. The demos are now four examples, the playground and
+the vehicle on each track.
 
 ## 9. Open questions for the maintainer
 
-1. ~~Box3D as C behind bindings~~ — answered: ported to Rae (§2).
+1. ~~Box3D as C behind bindings~~ — both, then decide on measurements
+   (§2, `docs/physics-two-implementations.md` §6).
 2. Netcode: lockstep (needs §6 across all peers, including wasm) or
    server-authoritative?
-3. ~~Building the C library~~ — no C (§4).
+3. Building the C library: track B (`docs/physics-two-implementations.md`
+   §4); its first task decides how a Rae app links it.
 4. ~~Venue collision from render `MeshData` or hand-placed shapes~~ — both
    are there (§5.5): `addVenueMesh` and `addVenueBox`.
 5. Is the sample's pogo mover right for the runner (it steps 0.6 m, §7), or

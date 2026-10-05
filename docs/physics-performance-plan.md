@@ -9,7 +9,8 @@ concurrency model is `docs/concurrency-model.md`.
 
 ## 1. The target
 
-The featured example (`examples/122_physics_playground`) steps its scenes inside
+The physics playground (`examples/122_physics_playground_port`, and its track-B
+twin `123_physics_playground_c`, `docs/physics-two-implementations.md`) steps its scenes inside
 a frame with room left for rendering:
 
 - **physics ≤ 4 ms per frame** at stress scale on the maintainer's machine

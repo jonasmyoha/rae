@@ -6,6 +6,13 @@ checkout or from Rae on this machine, and each section says how. The plan this
 document questions is `docs/physics-rae-port-design.md`: port all of Box3D to
 Rae, run its scalar path single-threaded first, and track upstream by hand.
 
+> **2026-10-05:** this recommendation was agreed on 2026-10-01 but never
+> applied: the port phases were queued unchanged and the port was finished.
+> The current plan is `docs/physics-two-implementations.md`: both the port and
+> the C library are built, each with the same two examples, and the
+> maintainer chooses after measuring them. §8's integration sketch is track
+> B's starting point.
+
 ## Short answer
 
 **Do not port Box3D now. Use the C library as it is, behind a Rae ECS layer,

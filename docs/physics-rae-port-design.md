@@ -1,6 +1,6 @@
 # Physics in Rae — porting Box3D to Rae
 
-> **Questioned 2026-10-01:** `docs/physics-box3d-port-research.md` measures what Box3D's SIMD and threads are worth, how fast a direct Rae port would be, and the upstream churn, and recommends integrating the C library behind a Rae ECS layer instead of porting now.
+> **2026-10-05: this port is track A of two.** `docs/physics-two-implementations.md` is the current plan: the port continues as a performance and language test and a candidate engine, upstream's C library behind generated bindings is built beside it (track B), each gets a playground and a vehicle example, and the maintainer chooses after measuring both. (On 2026-10-01 `docs/physics-box3d-port-research.md` recommended the C library instead. That was agreed but never applied, which is why this port ran to completion.)
 
 **Status:** design, 2026-09-30. Nothing implemented. Replaces the *engine
 strategy* of `docs/physics-design.md` (bind Box3D's C through generated
@@ -667,12 +667,12 @@ C added.
   apps, best of three); the numbers and the remaining gap are §6.1. Rain is
   not ported: it needs the ragdoll (`shared/human.c`) and
   `b3CreateTorusMesh`.
-- **P10 — demos**: the featured example `examples/122_physics_playground`
+- **P10 — demos**: now part of the two-track plan
+  (`docs/physics-two-implementations.md` §3): `examples/122_physics_playground_port`
   (the field scenes: pyramid, dominoes, a bridge, the character mover, thrown
-  balls; a performance HUD; instanced rendering), a performance pass that
-  profiles it at stress scale against a frame budget, and the vehicle as one
-  of its scenes (`docs/physics-design.md` §5.7, §7), windowed, on the visual
-  gate.
+  balls; a performance HUD; instanced rendering) and `examples/124_vehicle_port`
+  (`docs/physics-design.md` §5.7, §7), each with a track-B twin on the same
+  shared scene code, and a performance pass over both playgrounds.
 
 Engine work the phases depend on is queued with them (2026-10-02): a
 threading and performance audit before P1 that writes
