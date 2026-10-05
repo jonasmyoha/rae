@@ -1,0 +1,175 @@
+# The playground's lib/ui HUD (assets/ui.raescene): the six lines of
+# SceneHud.hudLines (track and scene, body / awake / sleeping counts, contacts
+# and islands, step and frame milliseconds, workers), the pyramid body-count
+# slider (app3d/Slider over BodyTrack / BodyFill) and the controls hint. The
+# text changes about once a second (the timing windows publish per second), so
+# the UI lays out again only then, on a slider move or on a resize.
+import Gpu2d
+open app3d/Slider
+open ui/Ecs
+open ui/inputSystem/InputSystem
+open ui/layoutSystem/LayoutSystem
+open ui/renderSystem/RenderSystem
+open ui/visualBoundsSystem/VisualBoundsSystem
+open ui/SceneFile
+open ui/SceneLoader
+open ui/Transform
+open ui/UiSystems
+open ui/Scene
+open app3d/UiShell
+open Gpu2dCanvas
+open ecs/Entity
+
+const assetBase: String = "examples/122_physics_playground_port/assets/"
+
+const minBodyCount: Float = 1000.0
+
+const maxBodyCount: Float = 10000.0
+
+# The HUD's state besides its UI world and systems, which the app keeps as
+# plain locals (as every lib/ui app does) and passes in.
+type PlaygroundUi {
+  gpuUi: Gpu2dUi
+  input: UiInput
+  slider: Slider
+  # The HUD lines last written, so an unchanged line costs no relayout
+  lines: List(String)
+}
+
+func createPlaygroundUi(bodyCount: view Int) ret PlaygroundUi {
+  ret PlaygroundUi {
+    gpuUi: loadUiAssets(
+      dir: assetBase
+      textFontName: "Roboto-Regular"
+      iconFontName: "MaterialIconsRound-Regular"
+      themeFile: "Theme.raescene"
+    )
+    input: createUiInput()
+    slider: createSlider(
+      trackId: "BodyTrack"
+      fillId: "BodyFill"
+      minValue: minBodyCount
+      maxValue: maxBodyCount
+      value: bodyCount as Float
+    )
+    lines: List.create(String, cap: 8)
+  }
+}
+
+# Load the HUD scene into `world`.
+func mountPlaygroundUi(
+  ui: view PlaygroundUi
+  world: mod UiWorld
+  systems: mod UiSystems
+  width: view Float
+  height: view Float
+) {
+  seedWorldTheme(world: world, res: ui.gpuUi)
+  world.layoutW = width
+  world.layoutH = height
+  let scene: Scene = loadSceneFile(path: "{assetBase}ui.raescene")
+  let root: EntityId = loadScene(world: world, uiSystems: systems, scene: scene)
+}
+
+func relayoutPlaygroundUi(ui: view PlaygroundUi, world: mod UiWorld, systems: mod UiSystems) {
+  layoutSystem(world: world, uiSystems: systems)
+  transformSystem(world: world, uiSystems: systems)
+  visualBoundsSystem(world: world, uiSystems: systems, res: ui.gpuUi)
+  applySliderFill(s: ui.slider, world: world, uiSystems: systems)
+}
+
+func resizePlaygroundUi(
+  ui: view PlaygroundUi
+  world: mod UiWorld
+  systems: mod UiSystems
+  width: view Float
+  height: view Float
+) {
+  world.layoutW = width
+  world.layoutH = height
+  setNodeRect(
+    world: world
+    nodeId: "UiRoot"
+    x: 0.0
+    y: 0.0
+    w: width
+    h: height
+  )
+  relayoutPlaygroundUi(ui: ui, world: world, systems: systems)
+}
+
+# Show `lines` (hudLines) and the slider's caption; true when anything
+# changed (and the UI was laid out again).
+func setHudText(
+  ui: mod PlaygroundUi
+  world: mod UiWorld
+  systems: mod UiSystems
+  lines: view List(String)
+  bodyCount: view Int
+) ret Bool {
+  var changed: Bool = false
+  loop var i: Int = 0, i < lines.length, ++i {
+    let line: String = lines.copyAtDefault(index: i)
+    if i >= ui.lines.length or ui.lines.copyAtDefault(index: i) is not line {
+      setNodeText(world: world, nodeId: "HudLine{i}", value: line)
+      changed = true
+    }
+  }
+  if changed {
+    ui.lines.clear()
+    loop var i: Int = 0, i < lines.length, ++i {
+      ui.lines.add(value: lines.copyAtDefault(index: i))
+    }
+    setNodeText(
+      world: world
+      nodeId: "BodyCountCaption"
+      value: "pyramid bodies: {bodyCount} (drag to change)"
+    )
+    relayoutPlaygroundUi(ui: ui, world: world, systems: systems)
+  }
+  ret changed
+}
+
+# The frame's pointer into the UI and the slider. Returns whether the
+# slider's value moved.
+func updatePlaygroundUiInput(
+  ui: mod PlaygroundUi
+  world: mod UiWorld
+  systems: mod UiSystems
+) ret Bool {
+  updateUiInput(input: ui.input, world: world, uiSystems: systems)
+  let moved: Bool = updateSlider(
+    s: ui.slider
+    world: world
+    uiSystems: systems
+    input: ui.input
+  )
+  if moved {
+    applySliderFill(s: ui.slider, world: world, uiSystems: systems)
+  }
+  ret moved
+}
+
+# Whether the UI holds the pointer (a slider drag, a press over the panel):
+# the camera and the ball throw leave it alone then.
+func uiHoldsPointer(ui: view PlaygroundUi) ret Bool {
+  ret uiPointerCaptured(input: ui.input) or ui.slider.dragging
+}
+
+func sliderBodyCount(ui: view PlaygroundUi) ret Int {
+  ret ui.slider.value as Int
+}
+
+func drawPlaygroundUi(
+  ui: view PlaygroundUi
+  world: mod UiWorld
+  systems: mod UiSystems
+  canvas: mod Gpu2dCanvas
+) {
+  renderSystemGpu2d(
+    world: world
+    uiSystems: systems
+    res: ui.gpuUi
+    canvas: canvas
+  )
+}

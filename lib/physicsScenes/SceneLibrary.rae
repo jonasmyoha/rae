@@ -31,8 +31,8 @@ func sceneName(index: view Int) ret String {
   ret "terrain walk"
 }
 
-# Scene `index` (0 to sceneCount - 1); `bodyCount` sizes the pyramid.
-func buildScene(index: view Int, bodyCount: view Int) ret Scene {
+# PhysicsScene `index` (0 to sceneCount - 1); `bodyCount` sizes the pyramid.
+func buildScene(index: view Int, bodyCount: view Int) ret PhysicsScene {
   if index is 0 {
     ret pyramidScene(bodyCount: bodyCount)
   }
@@ -59,8 +59,8 @@ func flatGround(halfSize: view Float) ret SceneGround {
   }
 }
 
-func emptyScene(name: view String, ground: own SceneGround) ret Scene {
-  ret Scene {
+func emptyScene(name: view String, ground: own SceneGround) ret PhysicsScene {
+  ret PhysicsScene {
     name: name
     ground: own ground
     bodies: List.create(SceneBody, cap: 16)
@@ -83,10 +83,10 @@ func pyramidBase(bodyCount: view Int) ret Int {
 }
 
 # A box pyramid of about `bodyCount` unit boxes (Box3D's large pyramid, Z-up).
-func pyramidScene(bodyCount: view Int) ret Scene {
+func pyramidScene(bodyCount: view Int) ret PhysicsScene {
   let base: Int = pyramidBase(bodyCount: bodyCount)
   let extent: Float = (base as Float) * 0.6 + 10.0
-  var scene: Scene = emptyScene(name: "pyramid", ground: flatGround(halfSize: extent))
+  var scene: PhysicsScene = emptyScene(name: "pyramid", ground: flatGround(halfSize: extent))
   let half: Float = 0.5
   let box: SceneShape = boxShape(halfExtents: Vec3 { x: half, y: half, z: half })
   loop var i: Int = 0, i < base, ++i {
@@ -97,13 +97,13 @@ func pyramidScene(bodyCount: view Int) ret Scene {
     }
   }
   scene.cameraTarget = Vec3 { x: 0.0, y: 0.0, z: (base as Float) * 0.35 }
-  scene.cameraDistance = (base as Float) * 1.3 + 12.0
+  scene.cameraDistance = (base as Float) * 1.7 + 14.0
   ret scene
 }
 
 # A line of `count` dominoes along x; the first is tipped toward the second.
-func dominoesScene(count: view Int) ret Scene {
-  var scene: Scene = emptyScene(name: "dominoes", ground: flatGround(halfSize: 60.0))
+func dominoesScene(count: view Int) ret PhysicsScene {
+  var scene: PhysicsScene = emptyScene(name: "dominoes", ground: flatGround(halfSize: 60.0))
   let domino: SceneShape = boxShape(halfExtents: Vec3 { x: 0.08, y: 0.4, z: 0.8 })
   let start: Float = -0.5 * (count as Float) * 0.9
   loop var i: Int = 0, i < count, ++i {
@@ -130,7 +130,7 @@ func hingeFrame(x: view Float) ret SceneFrame {
 }
 
 func addSceneJoint(
-  scene: mod Scene
+  scene: mod PhysicsScene
   kind: view SceneJointKind
   bodyA: view Int
   bodyB: view Int
@@ -148,8 +148,8 @@ func addSceneJoint(
 
 # A bridge of `planks` hinged planks between two posts, and beside it a chain
 # of `links` capsules hanging from a beam on ball joints.
-func bridgeScene(planks: view Int, links: view Int) ret Scene {
-  var scene: Scene = emptyScene(name: "bridge and chain", ground: flatGround(halfSize: 40.0))
+func bridgeScene(planks: view Int, links: view Int) ret PhysicsScene {
+  var scene: PhysicsScene = emptyScene(name: "bridge and chain", ground: flatGround(halfSize: 40.0))
   let height: Float = 5.0
   let span: Float = (planks as Float) * 1.0
   let post: SceneShape = boxShape(halfExtents: Vec3 { x: 0.3, y: 1.4, z: 0.3 })
@@ -226,8 +226,8 @@ func bridgeScene(planks: view Int, links: view Int) ret Scene {
 
 # `towers` towers of `levels` boxes, each box welded to the one below: a tower
 # moves as one body until something breaks it free of the ground.
-func towersScene(towers: view Int, levels: view Int) ret Scene {
-  var scene: Scene = emptyScene(name: "welded towers", ground: flatGround(halfSize: 40.0))
+func towersScene(towers: view Int, levels: view Int) ret PhysicsScene {
+  var scene: PhysicsScene = emptyScene(name: "welded towers", ground: flatGround(halfSize: 40.0))
   let box: SceneShape = boxShape(halfExtents: Vec3 { x: 0.5, y: 0.5, z: 0.5 })
   loop var tower: Int = 0, tower < towers, ++tower {
     let x: Float = ((tower as Float) - 0.5 * ((towers - 1) as Float)) * 4.0
@@ -262,7 +262,7 @@ func towersScene(towers: view Int, levels: view Int) ret Scene {
 }
 
 # A rippled triangle-mesh floor with `balls` spheres and boxes dropped on it.
-func rollingScene(balls: view Int) ret Scene {
+func rollingScene(balls: view Int) ret PhysicsScene {
   let ground: SceneGround = {
     kind: SceneGroundKind.mesh
     halfSize: 30.0
@@ -275,7 +275,7 @@ func rollingScene(balls: view Int) ret Scene {
       seed: 11
     )
   }
-  var scene: Scene = emptyScene(name: "rolling mesh", ground: ground)
+  var scene: PhysicsScene = emptyScene(name: "rolling mesh", ground: ground)
   let ball: SceneShape = sphereShape(radius: 0.4)
   let crate: SceneShape = boxShape(halfExtents: Vec3 { x: 0.35, y: 0.35, z: 0.35 })
   loop var i: Int = 0, i < balls, ++i {
@@ -299,7 +299,7 @@ func rollingScene(balls: view Int) ret Scene {
 
 # A height-field terrain (a regular height grid, as a triangle mesh) with
 # `crates` loose crates and a character walking across it.
-func terrainScene(crates: view Int) ret Scene {
+func terrainScene(crates: view Int) ret PhysicsScene {
   let ground: SceneGround = {
     kind: SceneGroundKind.mesh
     halfSize: 40.0
@@ -312,7 +312,7 @@ func terrainScene(crates: view Int) ret Scene {
       seed: 5
     )
   }
-  var scene: Scene = emptyScene(name: "terrain walk", ground: ground)
+  var scene: PhysicsScene = emptyScene(name: "terrain walk", ground: ground)
   let crate: SceneShape = boxShape(halfExtents: Vec3 { x: 0.4, y: 0.4, z: 0.4 })
   loop var i: Int = 0, i < crates, ++i {
     let column: Int = i % 8

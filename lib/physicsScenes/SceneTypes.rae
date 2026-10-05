@@ -1,6 +1,6 @@
 # Backend-neutral physics scene descriptions (docs/physics-two-implementations.md
 # §3): what a scene holds, as plain Rae data, with no import of either physics
-# track. Each example builds a Scene through its own track's ECS layer (the
+# track. Each example builds a PhysicsScene through its own track's ECS layer (the
 # port's physics/ecs or the C library's box3d/ecs) in a thin adapter, so the
 # two examples of a program run the same scene and print the same hash. World
 # convention: Z-up (docs/coordinate-system.md), ground top at z = 0.
@@ -42,7 +42,7 @@ type SceneFrame {
   rotation: Quat
 }
 
-# A joint between bodies `bodyA` and `bodyB` (indices into Scene.bodies).
+# A joint between bodies `bodyA` and `bodyB` (indices into PhysicsScene.bodies).
 type SceneJoint {
   kind: SceneJointKind
   bodyA: Int
@@ -64,7 +64,7 @@ type SceneGround {
 
 # A scene: its name, ground, bodies and joints, whether a character walks it
 # (and from where), and where the camera looks from.
-type Scene {
+type PhysicsScene {
   name: String
   ground: SceneGround
   bodies: List(SceneBody)
