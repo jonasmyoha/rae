@@ -1,10 +1,14 @@
-# A static venue collider from a render mesh (docs/physics-design.md §5.5):
-# lib/Mesh3d's MeshData handed to PhysicsSpawn.addVenueTriangles. Its own
-# module because the physics geometry has a MeshData of its own.
+# Static venue colliders from data (docs/physics-design.md §5.5): a render
+# mesh (lib/Mesh3d's MeshData handed to PhysicsSpawn.addVenueTriangles; its
+# own module because the physics geometry has a MeshData of its own), and a
+# height field.
 open Vec3
 open Mesh3d
 open physics/math/TransformMath
 open physics/dynamics/WorldTypes
+open physics/dynamics/WorldBodies
+open physics/dynamics/WorldShapes
+open physics/geometry/HeightField
 open physics/ecs/Physics
 open physics/ecs/PhysicsSpawn
 
@@ -23,5 +27,51 @@ func addVenueMesh(
     renderIndices: mesh.indices
     transform: transform
     def: def
+  )
+}
+
+# A height field as a static venue collider, on its own static body placed by
+# `transform`. Box3D's height field is a grid over its local x (`countX`
+# columns) and z (`countZ` rows) with the heights along local y, `heights`
+# row by row, each axis scaled by `scale`; a Z-up venue turns it with
+# `transform`'s rotation. None when the grid is smaller than 2 x 2.
+func addVenueHeightField(
+  physics: mod Physics
+  heights: view List(Float)
+  countX: view Int
+  countZ: view Int
+  scale: view Vec3
+  transform: view Transform
+  def: view ShapeDef
+) ret opt ShapeId {
+  if countX < 2 or countZ < 2 or heights.length < countX * countZ {
+    ret none
+  }
+  let materials: List(Int) = List.create(Int, cap: (countX - 1) * (countZ - 1))
+  loop var cell: Int = 0, cell < (countX - 1) * (countZ - 1), ++cell {
+    materials.add(value: 0)
+  }
+  let heightField: HeightFieldData = createHeightField(
+    def: HeightFieldDef {
+      heights: heights
+      materialIndices: materials
+      scale: scale
+      countX: countX
+      countZ: countZ
+      globalMinimumHeight: -256.0
+      globalMaximumHeight: 256.0
+      clockwiseWinding: false
+    }
+    lengthUnitsPerMeter: physics.world.lengthUnitsPerMeter
+  )
+  var bodyDef: BodyDef = defaultBodyDef(lengthUnitsPerMeter: physics.world.lengthUnitsPerMeter)
+  bodyDef.position = transform.position
+  bodyDef.rotation = transform.rotation
+  let bodyId: BodyId = createBody(world: physics.world, def: bodyDef)
+  ret createHeightFieldShape(
+    world: physics.world
+    bodyId: bodyId
+    def: def
+    heightField: heightField
   )
 }

@@ -1,0 +1,94 @@
+# The vehicle examples' backend-neutral data (docs/physics-two-implementations.md
+# §3, docs/physics-design.md §5.7): Box3D's Driving sample as plain Rae data,
+# so 124_vehicle_port and 125_vehicle_c build the same car on the same course
+# through their own track's ECS layer. No physics track is imported here.
+#
+# FRAMES. Box3D's sample is Y-up; Rae's world is Z-up (docs/coordinate-
+# system.md). The car keeps the sample's numbers in its own Y-up local frame,
+# and its bodies are placed with `localToWorld` (a +90 degree turn about x:
+# local y becomes world z, local z becomes world -y), so every body-local
+# position and joint frame is Box3D's, verbatim. The car drives along its
+# local -x, which is world -x.
+open Vec3
+open Quat
+open physicsScenes/SceneTypes
+
+# One wheel: where its joint sits on the chassis (chassis-local, Y-up) and
+# what the wheel does.
+type VehicleWheel {
+  chassisPoint: Vec3
+  steers: Bool
+  drives: Bool
+  # The axle this wheel is on, for the torque split: true at the front
+  front: Bool
+}
+
+# The car: a box chassis, four sphere wheels on wheel joints (suspension,
+# steering, spin motor), the drive (motor speed, total torque and its split
+# between the axles), and the keep-upright parallel joint.
+type VehicleDescription {
+  chassisHalfExtents: Vec3
+  chassisDensity: Float
+  wheelRadius: Float
+  wheelDensity: Float
+  wheelFriction: Float
+  wheels: List(VehicleWheel)
+  # Wheel joint frames: on the chassis (its x axis is the suspension and
+  # steering axis) and on the wheel (its z axis is the axle)
+  chassisFrameRotation: Quat
+  wheelFrameRotation: Quat
+  # A wheel body's rotation relative to the chassis
+  wheelRotation: Quat
+  suspensionHertz: Float
+  suspensionDampingRatio: Float
+  lowerSuspensionLimit: Float
+  upperSuspensionLimit: Float
+  steeringHertz: Float
+  steeringDampingRatio: Float
+  maxSteeringTorque: Float
+  lowerSteeringLimit: Float
+  upperSteeringLimit: Float
+  maxSteeringAngle: Float
+  # The spin motors' top speed (radians per second) and total torque, split
+  # `rearDriveShare` to the rear axle and the rest to the front
+  spinSpeed: Float
+  totalSpinTorque: Float
+  rearDriveShare: Float
+  # Keep upright: the chassis frame held parallel to the venue's
+  uprightFrameRotation: Quat
+  uprightHertz: Float
+  uprightDampingRatio: Float
+  # World pose of the chassis at spawn
+  startPosition: Vec3
+  localToWorld: Quat
+}
+
+# The driver's input: throttle forward (+1) to reverse (-1), steering left
+# (+1) to right (-1).
+type VehicleCommand {
+  throttle: Float
+  steer: Float
+}
+
+# What the adapter sets on one wheel joint this frame.
+type WheelTarget {
+  steeringAngle: Float
+  spinSpeed: Float
+  maxSpinTorque: Float
+}
+
+# The course: a height-field terrain (Box3D's grid over local x and z with
+# heights along local y, placed by `terrainPosition` / `terrainRotation`),
+# static ramps and walls, and crates to knock over (respawned with the car).
+type VehicleCourse {
+  heights: List(Float)
+  countX: Int
+  countZ: Int
+  terrainScale: Vec3
+  terrainPosition: Vec3
+  terrainRotation: Quat
+  terrainFriction: Float
+  fixtures: List(SceneBody)
+  crates: List(SceneBody)
+  cameraStart: Vec3
+}

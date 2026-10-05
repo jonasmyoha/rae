@@ -1,7 +1,10 @@
 # Joints between physics entities (docs/physics-design.md §5, and the scenes of
 # docs/physics-two-implementations.md §3): a hinge (revolute), a ball joint
 # (spherical) or a weld between two spawned entities' bodies, with Box3D's
-# defaults for everything else. The same surface as the C-library track's
+# defaults for everything else; and the vehicle's (§5.7, Box3D's Driving
+# sample): a wheel joint with its suspension, steering and spin motor, a
+# parallel joint holding a body upright against the venue, and the wheel's
+# per-frame controls. The same surface as the C-library track's
 # box3d/ecs/PhysicsJoints. Box3D destroys a body's joints with the body, so
 # despawnRigidBody needs nothing more.
 open ecs/Entity
@@ -11,6 +14,8 @@ open physics/dynamics/WorldTypes
 open physics/dynamics/Joint
 open physics/dynamics/JointDefs
 open physics/dynamics/WorldJoints
+open physics/dynamics/WorldBodyChanges
+open physics/dynamics/WheelJointControl
 open physics/ecs/Physics
 open physics/ecs/PhysicsComponents
 open physics/ecs/PhysicsSpawn
@@ -70,4 +75,128 @@ func addJoint(
     }
   }
   ret true
+}
+
+# A wheel joint's tuning (b3WheelJointDef without its frames): a suspension
+# spring with travel limits along the frame's x axis, steering about that
+# axis with its own spring and limits, and a spin motor about the wheel
+# body's frame z axis.
+type WheelJointSettings {
+  suspensionHertz: Float
+  suspensionDampingRatio: Float
+  lowerSuspensionLimit: Float
+  upperSuspensionLimit: Float
+  enableSpinMotor: Bool
+  maxSpinTorque: Float
+  enableSteering: Bool
+  steeringHertz: Float
+  steeringDampingRatio: Float
+  maxSteeringTorque: Float
+  lowerSteeringLimit: Float
+  upperSteeringLimit: Float
+}
+
+# A wheel joint between `joint`'s entities (A the chassis, B the wheel; its
+# kind is ignored); a null id when either entity has no body.
+func addWheelJoint(
+  physics: mod Physics
+  rigidBodies: view ComponentTable(RigidBody)
+  joint: view PhysicsJoint
+  settings: view WheelJointSettings
+) ret JointId {
+  let bodyIdA: BodyId = entityBodyId(rigidBodies: rigidBodies, entityId: joint.entityIdA)
+  let bodyIdB: BodyId = entityBodyId(rigidBodies: rigidBodies, entityId: joint.entityIdB)
+  if bodyIdA.index1 is 0 or bodyIdB.index1 is 0 {
+    ret JointId { index1: 0, world0: 0, generation: 0 }
+  }
+  var def: WheelJointDef = defaultWheelJointDef(
+    lengthUnitsPerMeter: physics.world.lengthUnitsPerMeter
+  )
+  def.base.bodyIdA = bodyIdA
+  def.base.bodyIdB = bodyIdB
+  def.base.localFrameA = joint.localFrameA
+  def.base.localFrameB = joint.localFrameB
+  def.base.collideConnected = joint.collideConnected
+  def.enableSuspensionLimit = true
+  def.lowerSuspensionLimit = settings.lowerSuspensionLimit
+  def.upperSuspensionLimit = settings.upperSuspensionLimit
+  def.enableSuspensionSpring = true
+  def.suspensionHertz = settings.suspensionHertz
+  def.suspensionDampingRatio = settings.suspensionDampingRatio
+  def.enableSpinMotor = settings.enableSpinMotor
+  def.maxSpinTorque = settings.maxSpinTorque
+  def.enableSteering = settings.enableSteering
+  def.steeringHertz = settings.steeringHertz
+  def.steeringDampingRatio = settings.steeringDampingRatio
+  def.targetSteeringAngle = 0.0
+  def.maxSteeringTorque = settings.maxSteeringTorque
+  def.enableSteeringLimit = true
+  def.lowerSteeringLimit = settings.lowerSteeringLimit
+  def.upperSteeringLimit = settings.upperSteeringLimit
+  ret createWheelJoint(world: physics.world, def: def)
+}
+
+# A parallel joint holding `entityId`'s frame `localFrame` parallel to the
+# venue's frame `venueFrame` (a soft spring of `hertz` / `dampingRatio`): the
+# Driving sample's "keep vehicle upright". Box3D's sample attaches it to the
+# ground body; here the venue body plays that part. False when the entity
+# has no body.
+func addParallelJointToVenue(
+  physics: mod Physics
+  rigidBodies: view ComponentTable(RigidBody)
+  entityId: view EntityId
+  venueFrame: view Transform
+  localFrame: view Transform
+  hertz: view Float
+  dampingRatio: view Float
+) ret Bool {
+  let bodyId: BodyId = entityBodyId(rigidBodies: rigidBodies, entityId: entityId)
+  if bodyId.index1 is 0 {
+    ret false
+  }
+  var def: ParallelJointDef = defaultParallelJointDef(
+    lengthUnitsPerMeter: physics.world.lengthUnitsPerMeter
+  )
+  def.base.bodyIdA = venueBody(physics: physics)
+  def.base.bodyIdB = bodyId
+  def.base.localFrameA = venueFrame
+  def.base.localFrameB = localFrame
+  def.base.collideConnected = true
+  def.hertz = hertz
+  def.dampingRatio = dampingRatio
+  let jointId: JointId = createParallelJoint(world: physics.world, def: def)
+  ret true
+}
+
+# The wheel's steering target, in radians.
+func setWheelSteering(physics: mod Physics, jointId: view JointId, radians: view Float) {
+  wheelJointSetTargetSteeringAngle(world: physics.world, jointId: jointId, radians: radians)
+}
+
+# The wheel's spin motor speed, in radians per second.
+func setWheelSpinSpeed(physics: mod Physics, jointId: view JointId, speed: view Float) {
+  wheelJointSetSpinMotorSpeed(world: physics.world, jointId: jointId, motorSpeed: speed)
+}
+
+# The wheel's spin motor torque limit.
+func setWheelMaxSpinTorque(physics: mod Physics, jointId: view JointId, torque: view Float) {
+  wheelJointSetMaxSpinTorque(world: physics.world, jointId: jointId, torque: torque)
+}
+
+# The wheel's spin rate relative to its chassis, in radians per second.
+func wheelSpinSpeed(physics: view Physics, jointId: view JointId) ret Float {
+  ret wheelJointGetSpinSpeed(world: physics.world, jointId: jointId)
+}
+
+# Wake the entity's body (a motor's new target alone does not wake a
+# sleeping car, so the driver wakes it, as the Driving sample does).
+func wakeEntity(
+  physics: mod Physics
+  rigidBodies: view ComponentTable(RigidBody)
+  entityId: view EntityId
+) {
+  let bodyId: BodyId = entityBodyId(rigidBodies: rigidBodies, entityId: entityId)
+  if bodyId.index1 is not 0 {
+    setBodyAwake(world: physics.world, bodyId: bodyId, awake: true)
+  }
 }
