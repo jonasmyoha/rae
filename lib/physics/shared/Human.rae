@@ -1,0 +1,739 @@
+# The ragdoll of Box3D's samples and benchmarks (shared/human.c at 9f998c8):
+# twelve capsule bones joined by spherical joints (spine, neck, hips,
+# shoulders) and revolute joints (knees, elbows), each with limits, a
+# spring of `hertz` and `dampingRatio`, and a motor whose torque is the
+# joint friction. Three filter joints keep the thighs, and the neck and
+# arms, from colliding. The bones' data is copied from Box3D verbatim and
+# everything is created in Box3D's order, so a world with humans steps
+# bit for bit like Box3D's (fixture 996). The frames are Box3D's (y up).
+open Vec3
+open Quat
+open physics/math/Scalar
+open physics/math/QuatMath
+open physics/math/VectorMath
+open physics/geometry/QueryTypes
+open physics/dynamics/WorldTypes
+open physics/dynamics/Joint
+open physics/dynamics/JointDefs
+open physics/dynamics/World
+open physics/dynamics/WorldBodies
+open physics/dynamics/WorldShapes
+open physics/dynamics/WorldJoints
+
+# BoneId: the bones in Box3D's order.
+const pelvisBone: Int = 0
+
+const boneCount: Int = 12
+
+# One bone: its body, the joint to its parent (none for the pelvis), and
+# the joint's data (Box3D's Bone).
+type Bone {
+  bodyId: BodyId
+  jointId: JointId
+  parentIndex: Int
+  jointType: JointType
+  localFrameA: Transform
+  localFrameB: Transform
+  swingLimit: Float
+  lowerTwist: Float
+  upperTwist: Float
+  jointFriction: Float
+}
+
+type Human {
+  bones: List(Bone)
+  filterJoints: List(JointId)
+  frictionTorque: Float
+  isSpawned: Bool
+}
+
+func nullJointId() ret JointId {
+  ret JointId { index1: 0, world0: 0, generation: 0 }
+}
+
+# A human not yet spawned (Box3D's zero-initialised Human).
+func emptyHuman() ret Human {
+  ret Human {
+    bones: List.create(Bone, cap: boneCount)
+    filterJoints: List.create(JointId, cap: 3)
+    frictionTorque: 0.0
+    isSpawned: false
+  }
+}
+
+# The body of a bone at `position` offset by its reference frame.
+func createBoneBody(
+  world: mod PhysicsWorld
+  position: view Vec3
+  referenceFrame: view Transform
+) ret BodyId {
+  var bodyDef: BodyDef = defaultBodyDef(lengthUnitsPerMeter: world.lengthUnitsPerMeter)
+  bodyDef.bodyType = BodyType.dynamicBody
+  bodyDef.rotation = referenceFrame.rotation
+  bodyDef.position = add(left: position, right: referenceFrame.position)
+  ret createBody(world: world, def: bodyDef)
+}
+
+func capsuleOf(center1: view Vec3, center2: view Vec3, radius: view Float) ret Capsule {
+  ret Capsule { center1: center1, center2: center2, radius: radius }
+}
+
+# CreateHuman: the bones at `position`, their joints, and the filter joints.
+# `groupIndex` is the collision group of the spine and thighs (negative:
+# they never touch each other).
+func createHuman(
+  world: mod PhysicsWorld
+  human: mod Human
+  position: view Vec3
+  frictionTorque: view Float
+  hertz: view Float
+  dampingRatio: view Float
+  groupIndex: view Int
+) {
+  human.bones.clear()
+  human.filterJoints.clear()
+  human.frictionTorque = frictionTorque
+  var shapeDef: ShapeDef = defaultShapeDef(lengthUnitsPerMeter: world.lengthUnitsPerMeter)
+  let defaultDensity: Float = shapeDef.density
+
+  # pelvis
+  let pelvisFrame: Transform = {
+    position: Vec3 { x: 0.000000, y: 0.996219, z: -0.023868 }
+    rotation: Quat { x: 1.000000, y: 0.000000, z: 0.000000, w: 0.000000 }
+  }
+  let pelvisId: BodyId = createBoneBody(
+    world: world
+    position: position
+    referenceFrame: pelvisFrame
+  )
+  shapeDef.filter.groupIndex = 0
+  shapeDef.baseMaterial.friction = 0.6
+  shapeDef.baseMaterial.rollingResistance = 0.1
+  createCapsuleShape(
+    world: world
+    bodyId: pelvisId
+    def: shapeDef
+    capsule: capsuleOf(
+      center1: Vec3 { x: 0.040000, y: 0.000001, z: 0.000000 }
+      center2: Vec3 { x: -0.040000, y: -0.000001, z: 0.000000 }
+      radius: 0.150000
+    )
+  )
+  human.bones.add(value: Bone {
+    bodyId: pelvisId
+    jointId: nullJointId()
+    parentIndex: -1
+    jointType: JointType.filterJoint
+    localFrameA: Transform { position: zeroVector(), rotation: quatIdentity() }
+    localFrameB: Transform { position: zeroVector(), rotation: quatIdentity() }
+    swingLimit: 0.0
+    lowerTwist: 0.0
+    upperTwist: 0.0
+    jointFriction: 1.0
+  })
+
+  # spine_01
+  let spine01Frame: Transform = {
+    position: Vec3 { x: 0.000000, y: 1.017288, z: -0.024882 }
+    rotation: Quat { x: 1.000000, y: 0.000000, z: 0.000000, w: 0.000000 }
+  }
+  let spine01Id: BodyId = createBoneBody(
+    world: world
+    position: position
+    referenceFrame: spine01Frame
+  )
+  shapeDef.filter.groupIndex = -groupIndex
+  shapeDef.baseMaterial.friction = 0.5
+  shapeDef.baseMaterial.rollingResistance = 0.1
+  createCapsuleShape(
+    world: world
+    bodyId: spine01Id
+    def: shapeDef
+    capsule: capsuleOf(
+      center1: Vec3 { x: 0.029876, y: -0.146581, z: 0.006260 }
+      center2: Vec3 { x: -0.029876, y: -0.146574, z: 0.006260 }
+      radius: 0.145663
+    )
+  )
+  human.bones.add(value: Bone {
+    bodyId: spine01Id
+    jointId: nullJointId()
+    parentIndex: 0
+    jointType: JointType.sphericalJoint
+    localFrameA: Transform {
+      position: Vec3 { x: 0.000000, y: -0.021069, z: 0.001014 }
+      rotation: Quat { x: -0.642737, y: 0.000000, z: 0.000000, w: -0.766087 }
+    }
+    localFrameB: Transform {
+      position: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+      rotation: Quat { x: -0.707107, y: 0.000000, z: 0.000000, w: -0.707107 }
+    }
+    swingLimit: 35.0 * degreesToRadians
+    lowerTwist: -17.5 * degreesToRadians
+    upperTwist: 17.5 * degreesToRadians
+    jointFriction: 1.0
+  })
+
+  # spine_03
+  let spine03Frame: Transform = {
+    position: Vec3 { x: 0.000000, y: 1.267766, z: -0.022320 }
+    rotation: Quat { x: 1.000000, y: 0.000000, z: 0.000000, w: 0.000000 }
+  }
+  let spine03Id: BodyId = createBoneBody(
+    world: world
+    position: position
+    referenceFrame: spine03Frame
+  )
+  shapeDef.filter.groupIndex = 0
+  shapeDef.baseMaterial.friction = 0.5
+  shapeDef.baseMaterial.rollingResistance = 0.1
+  createCapsuleShape(
+    world: world
+    bodyId: spine03Id
+    def: shapeDef
+    capsule: capsuleOf(
+      center1: Vec3 { x: 0.063996, y: -0.117434, z: -0.040199 }
+      center2: Vec3 { x: -0.063996, y: -0.117432, z: -0.040199 }
+      radius: 0.165004
+    )
+  )
+  human.bones.add(value: Bone {
+    bodyId: spine03Id
+    jointId: nullJointId()
+    parentIndex: 1
+    jointType: JointType.sphericalJoint
+    localFrameA: Transform {
+      position: Vec3 { x: 0.000000, y: -0.250478, z: -0.002562 }
+      rotation: Quat { x: -0.642766, y: 0.000000, z: 0.000000, w: -0.766063 }
+    }
+    localFrameB: Transform {
+      position: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+      rotation: Quat { x: -0.707107, y: 0.000000, z: 0.000000, w: -0.707107 }
+    }
+    swingLimit: 35.0 * degreesToRadians
+    lowerTwist: -17.5 * degreesToRadians
+    upperTwist: 17.5 * degreesToRadians
+    jointFriction: 1.0
+  })
+
+  # neck
+  let neckFrame: Transform = {
+    position: Vec3 { x: 0.000000, y: 1.498783, z: 0.024462 }
+    rotation: Quat { x: 0.987879, y: 0.000000, z: 0.000000, w: 0.155228 }
+  }
+  let neckId: BodyId = createBoneBody(world: world, position: position, referenceFrame: neckFrame)
+  shapeDef.filter.groupIndex = 0
+  shapeDef.baseMaterial.friction = 0.2
+  shapeDef.baseMaterial.rollingResistance = 0.05
+  createCapsuleShape(
+    world: world
+    bodyId: neckId
+    def: shapeDef
+    capsule: capsuleOf(
+      center1: Vec3 { x: 0.000000, y: -0.212340, z: 0.000000 }
+      center2: Vec3 { x: 0.000000, y: -0.087340, z: 0.000000 }
+      radius: 0.110000
+    )
+  )
+  human.bones.add(value: Bone {
+    bodyId: neckId
+    jointId: nullJointId()
+    parentIndex: 2
+    jointType: JointType.sphericalJoint
+    localFrameA: Transform {
+      position: Vec3 { x: 0.000000, y: -0.231017, z: -0.046781 }
+      rotation: Quat { x: -0.516157, y: -0.000002, z: 0.000003, w: -0.856494 }
+    }
+    localFrameB: Transform {
+      position: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+      rotation: Quat { x: -0.707108, y: -0.000002, z: 0.000002, w: -0.707106 }
+    }
+    swingLimit: 30.0 * degreesToRadians
+    lowerTwist: -17.5 * degreesToRadians
+    upperTwist: 17.5 * degreesToRadians
+    jointFriction: 1.0
+  })
+
+  # thigh_l
+  let thighLeftFrame: Transform = {
+    position: Vec3 { x: 0.092175, y: 0.971562, z: -0.011177 }
+    rotation: Quat { x: 0.471412, y: 0.529510, z: -0.499888, w: -0.497495 }
+  }
+  let thighLeftId: BodyId = createBoneBody(
+    world: world
+    position: position
+    referenceFrame: thighLeftFrame
+  )
+  shapeDef.filter.groupIndex = -groupIndex
+  shapeDef.baseMaterial.friction = 0.6
+  shapeDef.baseMaterial.rollingResistance = 0.1
+  createCapsuleShape(
+    world: world
+    bodyId: thighLeftId
+    def: shapeDef
+    capsule: capsuleOf(
+      center1: Vec3 { x: -0.047269, y: 0.000001, z: 0.000000 }
+      center2: Vec3 { x: -0.379769, y: 0.000005, z: 0.000000 }
+      radius: 0.091539
+    )
+  )
+  human.bones.add(value: Bone {
+    bodyId: thighLeftId
+    jointId: nullJointId()
+    parentIndex: 0
+    jointType: JointType.sphericalJoint
+    localFrameA: Transform {
+      position: Vec3 { x: 0.092175, y: 0.024656, z: -0.012691 }
+      rotation: Quat { x: -0.460186, y: -0.365368, z: -0.637662, w: 0.498118 }
+    }
+    localFrameB: Transform {
+      position: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+      rotation: Quat { x: -0.499997, y: -0.500003, z: 0.500002, w: 0.499998 }
+    }
+    swingLimit: 30.0 * degreesToRadians
+    lowerTwist: -10.0 * degreesToRadians
+    upperTwist: 10.0 * degreesToRadians
+    jointFriction: 1.0
+  })
+
+  # calf_l
+  let calfLeftFrame: Transform = {
+    position: Vec3 { x: 0.118720, y: 0.534541, z: -0.035362 }
+    rotation: Quat { x: 0.521188, y: 0.480597, z: -0.546380, w: -0.445935 }
+  }
+  let calfLeftId: BodyId = createBoneBody(
+    world: world
+    position: position
+    referenceFrame: calfLeftFrame
+  )
+  shapeDef.filter.groupIndex = 0
+  shapeDef.baseMaterial.friction = 0.1
+  shapeDef.baseMaterial.rollingResistance = 0.0
+  createCapsuleShape(
+    world: world
+    bodyId: calfLeftId
+    def: shapeDef
+    capsule: capsuleOf(
+      center1: Vec3 { x: -0.445000, y: 0.000001, z: 0.000000 }
+      center2: Vec3 { x: 0.005000, y: -0.000001, z: 0.000000 }
+      radius: 0.080000
+    )
+  )
+  shapeDef.density = 0.5 * defaultDensity
+  createCapsuleShape(
+    world: world
+    bodyId: calfLeftId
+    def: shapeDef
+    capsule: capsuleOf(
+      center1: Vec3 { x: -0.456371, y: 0.129321, z: 0.000013 }
+      center2: Vec3 { x: -0.359977, y: 0.014394, z: 0.000013 }
+      radius: 0.070000
+    )
+  )
+  shapeDef.density = defaultDensity
+  human.bones.add(value: Bone {
+    bodyId: calfLeftId
+    jointId: nullJointId()
+    parentIndex: 4
+    jointType: JointType.revoluteJoint
+    localFrameA: Transform {
+      position: Vec3 { x: -0.438494, y: -0.000175, z: 0.000000 }
+      rotation: Quat { x: 0.344866, y: -0.938652, z: 0.000002, w: -0.000008 }
+    }
+    localFrameB: Transform {
+      position: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+      rotation: Quat { x: -0.008182, y: -0.999967, z: 0.000001, w: -0.000007 }
+    }
+    swingLimit: 0.0
+    lowerTwist: -30.0 * degreesToRadians
+    upperTwist: 30.0 * degreesToRadians
+    jointFriction: 1.0
+  })
+
+  # thigh_r
+  let thighRightFrame: Transform = {
+    position: Vec3 { x: -0.092175, y: 0.971562, z: -0.011177 }
+    rotation: Quat { x: -0.497495, y: 0.499888, z: 0.529510, w: -0.471412 }
+  }
+  let thighRightId: BodyId = createBoneBody(
+    world: world
+    position: position
+    referenceFrame: thighRightFrame
+  )
+  shapeDef.filter.groupIndex = -groupIndex
+  shapeDef.baseMaterial.friction = 0.6
+  shapeDef.baseMaterial.rollingResistance = 0.1
+  createCapsuleShape(
+    world: world
+    bodyId: thighRightId
+    def: shapeDef
+    capsule: capsuleOf(
+      center1: Vec3 { x: 0.047269, y: -0.000001, z: 0.000000 }
+      center2: Vec3 { x: 0.379769, y: -0.000005, z: 0.000000 }
+      radius: 0.092587
+    )
+  )
+  human.bones.add(value: Bone {
+    bodyId: thighRightId
+    jointId: nullJointId()
+    parentIndex: 0
+    jointType: JointType.sphericalJoint
+    localFrameA: Transform {
+      position: Vec3 { x: -0.092175, y: 0.024656, z: -0.012691 }
+      rotation: Quat { x: 0.380666, y: 0.491846, z: 0.488644, w: -0.611889 }
+    }
+    localFrameB: Transform {
+      position: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+      rotation: Quat { x: -0.500002, y: 0.499998, z: -0.499998, w: 0.500002 }
+    }
+    swingLimit: 30.0 * degreesToRadians
+    lowerTwist: -10.0 * degreesToRadians
+    upperTwist: 10.0 * degreesToRadians
+    jointFriction: 1.0
+  })
+
+  # calf_r
+  let calfRightFrame: Transform = {
+    position: Vec3 { x: -0.118720, y: 0.534541, z: -0.035362 }
+    rotation: Quat { x: -0.445935, y: 0.546380, z: 0.480597, w: -0.521188 }
+  }
+  let calfRightId: BodyId = createBoneBody(
+    world: world
+    position: position
+    referenceFrame: calfRightFrame
+  )
+  shapeDef.filter.groupIndex = 0
+  shapeDef.baseMaterial.friction = 0.1
+  shapeDef.baseMaterial.rollingResistance = 0.0
+  createCapsuleShape(
+    world: world
+    bodyId: calfRightId
+    def: shapeDef
+    capsule: capsuleOf(
+      center1: Vec3 { x: 0.445000, y: -0.000002, z: 0.000003 }
+      center2: Vec3 { x: -0.005000, y: 0.000000, z: 0.000003 }
+      radius: 0.080000
+    )
+  )
+  shapeDef.density = 0.5 * defaultDensity
+  createCapsuleShape(
+    world: world
+    bodyId: calfRightId
+    def: shapeDef
+    capsule: capsuleOf(
+      center1: Vec3 { x: 0.369113, y: -0.006830, z: 0.000017 }
+      center2: Vec3 { x: 0.465507, y: -0.121757, z: 0.000017 }
+      radius: 0.070000
+    )
+  )
+  shapeDef.density = defaultDensity
+  human.bones.add(value: Bone {
+    bodyId: calfRightId
+    jointId: nullJointId()
+    parentIndex: 6
+    jointType: JointType.revoluteJoint
+    localFrameA: Transform {
+      position: Vec3 { x: 0.438494, y: 0.000175, z: 0.000000 }
+      rotation: Quat { x: 0.000007, y: 0.000005, z: -0.344860, w: -0.938654 }
+    }
+    localFrameB: Transform {
+      position: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+      rotation: Quat { x: 0.000006, y: 0.000005, z: 0.008188, w: -0.999966 }
+    }
+    swingLimit: 0.0
+    lowerTwist: -30.0 * degreesToRadians
+    upperTwist: 30.0 * degreesToRadians
+    jointFriction: 1.0
+  })
+
+  # upper_arm_l
+  let upperArmLeftFrame: Transform = {
+    position: Vec3 { x: 0.185817, y: 1.443630, z: 0.031306 }
+    rotation: Quat { x: 0.560220, y: -0.307179, z: 0.366233, w: -0.676512 }
+  }
+  let upperArmLeftId: BodyId = createBoneBody(
+    world: world
+    position: position
+    referenceFrame: upperArmLeftFrame
+  )
+  shapeDef.filter.groupIndex = 0
+  shapeDef.baseMaterial.friction = 0.6
+  shapeDef.baseMaterial.rollingResistance = 0.1
+  createCapsuleShape(
+    world: world
+    bodyId: upperArmLeftId
+    def: shapeDef
+    capsule: capsuleOf(
+      center1: Vec3 { x: 0.296038, y: 0.004386, z: -0.000794 }
+      center2: Vec3 { x: -0.016086, y: 0.004384, z: -0.016127 }
+      radius: 0.065000
+    )
+  )
+  human.bones.add(value: Bone {
+    bodyId: upperArmLeftId
+    jointId: nullJointId()
+    parentIndex: 2
+    jointType: JointType.sphericalJoint
+    localFrameA: Transform {
+      position: Vec3 { x: 0.185817, y: -0.175865, z: -0.053625 }
+      rotation: Quat { x: -0.559466, y: -0.213784, z: -0.670199, w: 0.438323 }
+    }
+    localFrameB: Transform {
+      position: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+      rotation: Quat { x: -0.500953, y: -0.502617, z: -0.509318, w: -0.486844 }
+    }
+    swingLimit: 45.0 * degreesToRadians
+    lowerTwist: -20.0 * degreesToRadians
+    upperTwist: 20.0 * degreesToRadians
+    jointFriction: 0.8
+  })
+
+  # lower_arm_l
+  let lowerArmLeftFrame: Transform = {
+    position: Vec3 { x: 0.347683, y: 1.193455, z: 0.029378 }
+    rotation: Quat { x: 0.406736, y: -0.493012, z: 0.089135, w: -0.763911 }
+  }
+  let lowerArmLeftId: BodyId = createBoneBody(
+    world: world
+    position: position
+    referenceFrame: lowerArmLeftFrame
+  )
+  shapeDef.filter.groupIndex = 0
+  shapeDef.baseMaterial.friction = 0.3
+  shapeDef.baseMaterial.rollingResistance = 0.1
+  createCapsuleShape(
+    world: world
+    bodyId: lowerArmLeftId
+    def: shapeDef
+    capsule: capsuleOf(
+      center1: Vec3 { x: 0.312329, y: -0.008256, z: -0.016454 }
+      center2: Vec3 { x: 0.033153, y: 0.008259, z: -0.002741 }
+      radius: 0.060000
+    )
+  )
+  human.bones.add(value: Bone {
+    bodyId: lowerArmLeftId
+    jointId: nullJointId()
+    parentIndex: 8
+    jointType: JointType.revoluteJoint
+    localFrameA: Transform {
+      position: Vec3 { x: 0.297979, y: 0.000361, z: 0.000000 }
+      rotation: Quat { x: 0.916726, y: 0.399352, z: 0.000839, w: -0.011456 }
+    }
+    localFrameB: Transform {
+      position: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+      rotation: Quat { x: 0.999922, y: -0.003857, z: 0.004659, w: -0.010908 }
+    }
+    swingLimit: 0.0
+    lowerTwist: -35.0 * degreesToRadians
+    upperTwist: 35.0 * degreesToRadians
+    jointFriction: 0.06
+  })
+
+  # upper_arm_r
+  let upperArmRightFrame: Transform = {
+    position: Vec3 { x: -0.185817, y: 1.443630, z: 0.031306 }
+    rotation: Quat { x: 0.676512, y: 0.366233, z: 0.307179, w: 0.560220 }
+  }
+  let upperArmRightId: BodyId = createBoneBody(
+    world: world
+    position: position
+    referenceFrame: upperArmRightFrame
+  )
+  shapeDef.filter.groupIndex = 0
+  shapeDef.baseMaterial.friction = 0.6
+  shapeDef.baseMaterial.rollingResistance = 0.1
+  createCapsuleShape(
+    world: world
+    bodyId: upperArmRightId
+    def: shapeDef
+    capsule: capsuleOf(
+      center1: Vec3 { x: -0.300237, y: -0.000001, z: -0.000319 }
+      center2: Vec3 { x: 0.011887, y: 0.000001, z: 0.015013 }
+      radius: 0.065000
+    )
+  )
+  human.bones.add(value: Bone {
+    bodyId: upperArmRightId
+    jointId: nullJointId()
+    parentIndex: 2
+    jointType: JointType.sphericalJoint
+    localFrameA: Transform {
+      position: Vec3 { x: -0.185817, y: -0.175865, z: -0.053625 }
+      rotation: Quat { x: 0.213793, y: 0.559449, z: 0.438334, w: -0.670204 }
+    }
+    localFrameB: Transform {
+      position: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+      rotation: Quat { x: -0.509319, y: 0.486843, z: 0.500954, w: -0.502617 }
+    }
+    swingLimit: 45.0 * degreesToRadians
+    lowerTwist: -20.0 * degreesToRadians
+    upperTwist: 20.0 * degreesToRadians
+    jointFriction: 0.8
+  })
+
+  # lower_arm_r
+  let lowerArmRightFrame: Transform = {
+    position: Vec3 { x: -0.347683, y: 1.193455, z: 0.029378 }
+    rotation: Quat { x: 0.763911, y: 0.089135, z: 0.493012, w: 0.406736 }
+  }
+  let lowerArmRightId: BodyId = createBoneBody(
+    world: world
+    position: position
+    referenceFrame: lowerArmRightFrame
+  )
+  shapeDef.filter.groupIndex = 0
+  shapeDef.baseMaterial.friction = 0.3
+  shapeDef.baseMaterial.rollingResistance = 0.1
+  createCapsuleShape(
+    world: world
+    bodyId: lowerArmRightId
+    def: shapeDef
+    capsule: capsuleOf(
+      center1: Vec3 { x: -0.312649, y: -0.000003, z: 0.016471 }
+      center2: Vec3 { x: -0.032986, y: 0.000000, z: 0.002732 }
+      radius: 0.060000
+    )
+  )
+  human.bones.add(value: Bone {
+    bodyId: lowerArmRightId
+    jointId: nullJointId()
+    parentIndex: 10
+    jointType: JointType.revoluteJoint
+    localFrameA: Transform {
+      position: Vec3 { x: -0.297979, y: -0.000361, z: 0.000000 }
+      rotation: Quat { x: -0.405444, y: 0.914059, z: 0.010541, w: 0.000852 }
+    }
+    localFrameB: Transform {
+      position: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+      rotation: Quat { x: -0.002794, y: 0.999936, z: 0.010042, w: 0.004364 }
+    }
+    swingLimit: 0.0
+    lowerTwist: -35.0 * degreesToRadians
+    upperTwist: 35.0 * degreesToRadians
+    jointFriction: 0.06
+  })
+
+  # The joints, child to parent, in bone order
+  loop var i: Int = 1, i < boneCount, ++i {
+    createBoneJoint(
+      world: world
+      human: human
+      boneIndex: i
+      hertz: hertz
+      dampingRatio: dampingRatio
+    )
+  }
+
+  # Disable some collisions
+  addFilterJoint(
+    world: world
+    human: human
+    boneA: 4
+    boneB: 6
+  )
+  addFilterJoint(
+    world: world
+    human: human
+    boneA: 3
+    boneB: 8
+  )
+  addFilterJoint(
+    world: world
+    human: human
+    boneA: 3
+    boneB: 10
+  )
+  human.isSpawned = true
+}
+
+func boneBodyId(human: view Human, boneIndex: view Int) ret BodyId {
+  if let bone: view Bone => human.bones.viewAt(index: boneIndex) {
+    ret bone.bodyId
+  }
+  ret nullBodyId()
+}
+
+# The joint of bone `boneIndex` to its parent, its frames normalised.
+func createBoneJoint(
+  world: mod PhysicsWorld
+  human: mod Human
+  boneIndex: view Int
+  hertz: view Float
+  dampingRatio: view Float
+) {
+  var bone: Bone = human.bones.copyAtDefault(index: boneIndex)
+  let bodyIdA: BodyId = boneBodyId(human: human, boneIndex: bone.parentIndex)
+  bone.localFrameA.rotation = normalize(quat: bone.localFrameA.rotation)
+  bone.localFrameB.rotation = normalize(quat: bone.localFrameB.rotation)
+  if bone.jointType is JointType.revoluteJoint {
+    var def: RevoluteJointDef = defaultRevoluteJointDef(
+      lengthUnitsPerMeter: world.lengthUnitsPerMeter
+    )
+    def.base.bodyIdA = bodyIdA
+    def.base.bodyIdB = bone.bodyId
+    def.base.localFrameA = bone.localFrameA
+    def.base.localFrameB = bone.localFrameB
+    def.enableLimit = true
+    def.lowerAngle = bone.lowerTwist
+    def.upperAngle = bone.upperTwist
+    def.enableSpring = hertz > 0.0
+    def.hertz = hertz
+    def.dampingRatio = dampingRatio
+    def.enableMotor = true
+    def.maxMotorTorque = bone.jointFriction * human.frictionTorque
+    bone.jointId = createRevoluteJoint(world: world, def: def)
+  } else if bone.jointType is JointType.sphericalJoint {
+    var def: SphericalJointDef = defaultSphericalJointDef(
+      lengthUnitsPerMeter: world.lengthUnitsPerMeter
+    )
+    def.base.bodyIdA = bodyIdA
+    def.base.bodyIdB = bone.bodyId
+    def.base.localFrameA = bone.localFrameA
+    def.base.localFrameB = bone.localFrameB
+    def.enableConeLimit = true
+    def.coneAngle = bone.swingLimit
+    def.enableTwistLimit = true
+    def.lowerTwistAngle = bone.lowerTwist
+    def.upperTwistAngle = bone.upperTwist
+    def.enableSpring = hertz > 0.0
+    def.hertz = hertz
+    def.dampingRatio = dampingRatio
+    def.enableMotor = true
+    def.maxMotorTorque = bone.jointFriction * human.frictionTorque
+    bone.jointId = createSphericalJoint(world: world, def: def)
+  }
+  human.bones.set(index: boneIndex, value: bone)
+}
+
+func addFilterJoint(
+  world: mod PhysicsWorld
+  human: mod Human
+  boneA: view Int
+  boneB: view Int
+) {
+  var def: JointDef = defaultJointDef(lengthUnitsPerMeter: world.lengthUnitsPerMeter)
+  def.bodyIdA = boneBodyId(human: human, boneIndex: boneA)
+  def.bodyIdB = boneBodyId(human: human, boneIndex: boneB)
+  human.filterJoints.add(value: createFilterJoint(world: world, def: def))
+}
+
+# DestroyHuman: the filter joints, the bone joints, then the bodies.
+func destroyHuman(world: mod PhysicsWorld, human: mod Human) {
+  loop let jointId: view JointId in human.filterJoints {
+    destroyJoint(world: world, jointId: jointId, wakeAttached: false)
+  }
+  human.filterJoints.clear()
+  loop let bone: view Bone in human.bones {
+    if bone.jointId.index1 is not 0 {
+      destroyJoint(world: world, jointId: bone.jointId, wakeAttached: false)
+    }
+  }
+  loop let bone: view Bone in human.bones {
+    if bone.bodyId.index1 is not 0 {
+      destroyBody(world: world, bodyId: bone.bodyId)
+    }
+  }
+  human.bones.clear()
+  human.isSpawned = false
+}

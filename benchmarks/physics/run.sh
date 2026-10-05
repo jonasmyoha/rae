@@ -9,7 +9,7 @@
 #              lowering)
 #
 # Each scene runs the C app's step count (large_pyramid 200, many_pyramids
-# 100, joint_grid 100, convex_pile 500, the first untimed as upstream's app
+# 100, joint_grid 100, convex_pile 500, rain 400, the first untimed as upstream's app
 # does; 60 Hz, 4 sub-steps, one worker) and
 # prints the best of RUNS (default 3) in ms per step, the Rae position
 # checksum and the ratios. The Box3D builds come from the oracle cache
@@ -22,7 +22,7 @@ RAE_ROOT=$(CDPATH= cd -- "$HERE/../.." && pwd)
 BUILD="$HERE/build"
 CACHE="${RAE_BOX3D_CACHE:-$HOME/.cache/rae/box3d-oracle}"
 RUNS="${RUNS:-3}"
-SCENES="${RAE_BENCH_SCENES:-large_pyramid many_pyramids joint_grid convex_pile}"
+SCENES="${RAE_BENCH_SCENES:-large_pyramid many_pyramids joint_grid convex_pile rain}"
 mkdir -p "$BUILD"
 t() { seconds=$1; shift; perl -e 'alarm shift; exec @ARGV' "$seconds" "$@"; }
 

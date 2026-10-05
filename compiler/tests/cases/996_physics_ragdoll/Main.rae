@@ -1,0 +1,156 @@
+# The ragdoll (lib/physics/shared/Human: Box3D's shared/human.c) and the
+# torus mesh (MeshQuery.createTorusMesh: b3CreateTorusMesh) against Box3D
+# itself: tools/box3d-oracle/goldens/ragdoll.golden drops three humans onto
+# one tile of the rain benchmark (an 8 x 8 grid mesh and a torus mesh on a
+# static body), steps 240 times (1/60 s, 4 sub-steps), destroys and creates
+# the first human again at step 120, and every 20 steps dumps every bone's
+# transform. Every value must have the SAME BITS
+# (docs/physics-rae-port-design.md §4).
+import Math
+import Vec3
+import Quat
+open physics/math/QuatMath
+open physics/geometry/Mesh
+open physics/geometry/MeshQuery
+open physics/dynamics/WorldTypes
+open physics/dynamics/World
+open physics/dynamics/WorldBodies
+open physics/dynamics/WorldShapes
+open physics/dynamics/WorldStep
+open physics/shared/Human
+
+const humanCount: Int = 3
+
+const stepCount: Int = 240
+
+const respawnStep: Int = 120
+
+const gridSize: Float = 15.0
+
+func readGolden() ret String {
+  # The runner runs from compiler/, the TSan gate from the case's folder.
+  let candidates: List(String) = {
+    "../tools/box3d-oracle/goldens/ragdoll.golden"
+    "../../../tools/box3d-oracle/goldens/ragdoll.golden"
+    "tools/box3d-oracle/goldens/ragdoll.golden"
+  }
+  loop var i: Int = 0, i < candidates.length, ++i {
+    if let text: String = readFile(path: candidates.copyAtDefault(index: i)) {
+      ret text
+    }
+  }
+  ret ""
+}
+
+func spawnHuman(world: mod PhysicsWorld, human: mod Human, index: view Int) {
+  createHuman(
+    world: world
+    human: human
+    position: Vec3 { x: -0.75 + 0.75 * (index as Float), y: 8.0, z: 0.0 }
+    frictionTorque: 5.0
+    hertz: 1.0
+    dampingRatio: 0.7
+    groupIndex: 1
+  )
+}
+
+# The golden's lines as "bone h b step" -> the seven float bits.
+func goldenValues(golden: view String) ret List(Int) {
+  let values: List(Int) = List.create(Int, cap: 4096)
+  let lines: List(String) = golden.split(sep: "\n")
+  loop let line: view String in lines {
+    if line.length() is 0 or line.startsWith(prefix: "#") {
+      continue
+    }
+    let tokens: List(String) = line.split(sep: " ")
+    loop var j: Int = 5, j < tokens.length, ++j {
+      values.add(value: Math.floatBits(value: tokens.copyAtDefault(index: j).toFloat()))
+    }
+  }
+  ret values
+}
+
+func main() {
+  let expected: List(Int) = goldenValues(golden: readGolden())
+  var def: WorldDef = defaultWorldDef(lengthUnitsPerMeter: 1.0)
+  def.workerCount = 1
+  var world: PhysicsWorld = createWorld(def: def)
+
+  let cellWidth: Float = gridSize / (2.0 * 4.0)
+  let ground: BodyId = createBody(world: world, def: defaultBodyDef(lengthUnitsPerMeter: 1.0))
+  let shapeDef: ShapeDef = defaultShapeDef(lengthUnitsPerMeter: 1.0)
+  if let grid: PhysicsMeshData = createGridMesh(
+    xCount: 8
+    zCount: 8
+    cellWidth: cellWidth
+    materialCount: 1
+    identifyEdges: true
+    lengthUnitsPerMeter: 1.0
+  ) {
+    createMeshShape(
+      world: world
+      bodyId: ground
+      def: shapeDef
+      mesh: grid
+      scale: Vec3 { x: 1.0, y: 1.0, z: 1.0 }
+    )
+  }
+  if let torus: PhysicsMeshData = createTorusMesh(
+    radialResolution: 16
+    tubularResolution: 16
+    radius: 0.25 * gridSize
+    thickness: 1.0
+    lengthUnitsPerMeter: 1.0
+  ) {
+    createMeshShape(
+      world: world
+      bodyId: ground
+      def: shapeDef
+      mesh: torus
+      scale: Vec3 { x: 1.0, y: 1.0, z: 1.0 }
+    )
+  }
+
+  let humans: List(Human) = List.create(Human, cap: humanCount)
+  loop var i: Int = 0, i < humanCount, ++i {
+    humans.add(value: emptyHuman())
+    if let human: mod Human => humans.modAt(index: i) {
+      spawnHuman(world: world, human: human, index: i)
+    }
+  }
+
+  let actual: List(Int) = List.create(Int, cap: 4096)
+  loop var step: Int = 0, step < stepCount, ++step {
+    if step is respawnStep {
+      if let human: mod Human => humans.modAt(index: 0) {
+        destroyHuman(world: world, human: human)
+        spawnHuman(world: world, human: human, index: 0)
+      }
+    }
+    stepWorld(world: world, timeStep: 1.0 / 60.0, subStepCount: 4)
+    if (step + 1) % 20 is 0 {
+      loop let human: view Human in humans {
+        loop let bone: view Bone in human.bones {
+          let transform: Transform = getBodyTransform(world: world, bodyId: bone.bodyId)
+          actual.add(value: Math.floatBits(value: transform.position.x))
+          actual.add(value: Math.floatBits(value: transform.position.y))
+          actual.add(value: Math.floatBits(value: transform.position.z))
+          actual.add(value: Math.floatBits(value: transform.rotation.x))
+          actual.add(value: Math.floatBits(value: transform.rotation.y))
+          actual.add(value: Math.floatBits(value: transform.rotation.z))
+          actual.add(value: Math.floatBits(value: transform.rotation.w))
+        }
+      }
+    }
+  }
+
+  var mismatches: Int = 0
+  loop var i: Int = 0, i < expected.length, ++i {
+    if actual.copyAtDefault(index: i) is not expected.copyAtDefault(index: i) {
+      mismatches = mismatches + 1
+    }
+  }
+  log(
+    "ragdoll.golden: {expected.length / 7} bone transforms, {actual.length / 7} computed, {mismatches} values not bit-exact"
+  )
+}
