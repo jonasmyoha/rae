@@ -1,12 +1,12 @@
 # Running the solver's stages (b3ComputeBlockCount, b3InitBlocks,
-# b3InitStage, b3ExecuteBlock, GetWorkerStartIndex, b3ExecuteStage and
-# b3ExecuteMainStage of Box3D's solver.c at 9f998c8; docs/
-# physics-performance-plan.md §8). This is the ONE module that knows how
-# stages are executed: the single-threaded version below runs a stage's
-# blocks in order as worker 0. The sync indices and completion counts are
-# plain Ints, read and written only by claimBlock, addCompletions and
-# resetCompletions; with threads they become atomics and the workers' spin
-# loop joins this module, while the solver tasks stay as they are.
+# b3InitStage, b3ExecuteBlock and b3ExecuteMainStage of Box3D's solver.c at
+# 9f998c8; docs/physics-performance-plan.md §8). This is the ONE module that
+# knows how stages are executed. Box3D keeps its workers in one task for the
+# step and syncs them through atomic block claims and completion counts;
+# Rae runs each stage as one parallelLoop over its blocks
+# (docs/parallel-stages-design.md, Option C), the stage sequence being the
+# ordinary loop in Solver.runSolverStages. The join at the end of each
+# parallelLoop is the stage barrier, so no claims or counts are kept.
 open Vec3
 open physics/Constants
 open physics/dynamics/JointSolver
@@ -85,60 +85,17 @@ func initStage(
   })
 }
 
-# Claim block `blockIndex` of the pool for sync index `syncIndex` (Box3D's
-# compare-exchange of the block's sync index from `previousSyncIndex`).
-func claimBlock(
-  context: mod StepContext
-  blockIndex: view Int
-  previousSyncIndex: view Int
-  syncIndex: view Int
-) ret Bool {
-  if let syncBlock: mod SyncBlock => context.syncBlocks.modAt(index: blockIndex) {
-    if syncBlock.syncIndex is previousSyncIndex {
-      syncBlock.syncIndex = syncIndex
-      ret true
-    }
-  }
-  ret false
-}
-
-# Box3D's fetch-add of a stage's completion count.
-func addCompletions(context: mod StepContext, stageIndex: view Int, completed: view Int) {
-  if let stage: mod SolverStage => context.stages.modAt(index: stageIndex) {
-    stage.completionCount = stage.completionCount + completed
-  }
-}
-
-func resetCompletions(context: mod StepContext, stageIndex: view Int) {
-  if let stage: mod SolverStage => context.stages.modAt(index: stageIndex) {
-    stage.completionCount = 0
-  }
-}
-
-# GetWorkerStartIndex: a worker's first block, staggered so workers start
-# on different blocks; -1 if it has none.
-func workerStartIndex(workerIndex: view Int, blockCount: view Int, workerCount: view Int) ret Int {
-  if blockCount <= workerCount {
-    if workerIndex < blockCount {
-      ret workerIndex
-    }
-    ret -1
-  }
-  let blocksPerWorker: Int = blockCount / workerCount
-  let remainder: Int = blockCount - blocksPerWorker * workerCount
-  var extra: Int = remainder
-  if workerIndex < remainder {
-    extra = workerIndex
-  }
-  ret blocksPerWorker * workerIndex + extra
-}
-
-# b3ExecuteBlock: run one block of a stage.
+# b3ExecuteBlock: run one block of a stage. What a block reports for the
+# whole step (restitution, joint thresholds, hit events) goes to TaskContext
+# slot `slot`: the block's index in its stage, below chunkSlotsPerWorker *
+# workerCount for every block that reports (Solver.solve's maxBlockCount;
+# a colour stage starts with its joint blocks).
 func executeBlock(
   world: mod PhysicsWorld
   context: mod StepContext
   stageType: view SolverStageType
   block: view SolverBlock
+  slot: view Int
 ) {
   let wide: Bool = block.blockType is SolverBlockType.graphWideContactBlock
   let joint: Bool = block.blockType is SolverBlockType.graphJointBlock
@@ -155,10 +112,14 @@ func executeBlock(
       prepareJointsBlock(world: world, context: context, block: block)
     }
     case SolverStageType.prepareWideContacts {
-      prepareContactsWide(world: world, context: context, block: block)
+      if prepareContactsWide(world: world, context: context, block: block) {
+        setSlotRestitution(world: world, slot: slot)
+      }
     }
     case SolverStageType.prepareContacts {
-      prepareContactsScalar(world: world, context: context, block: block)
+      if prepareContactsScalar(world: world, context: context, block: block) {
+        setSlotRestitution(world: world, slot: slot)
+      }
     }
     case SolverStageType.integrateVelocities {
       let gravity: Vec3 = world.gravity
@@ -202,6 +163,7 @@ func executeBlock(
           context: context
           block: block
           useBias: true
+          slot: slot
         )
       }
       let contactSpeed: Float = world.contactSpeed
@@ -247,6 +209,7 @@ func executeBlock(
           context: context
           block: block
           useBias: false
+          slot: slot
         )
       }
       if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
@@ -299,7 +262,12 @@ func executeBlock(
       }
     }
     case SolverStageType.storeWideImpulses {
-      storeImpulsesWide(world: world, context: context, block: block)
+      storeImpulsesWide(
+        world: world
+        context: context
+        block: block
+        slot: slot
+      )
     }
     case SolverStageType.storeImpulses {
       let hitContacts: List(Int) = List.create(Int, cap: 0)
@@ -311,61 +279,21 @@ func executeBlock(
         negHitThreshold: -world.hitEventThreshold
         hitContacts: hitContacts
       )
-      flagHitContacts(world: world, hitContacts: hitContacts)
+      flagHitContacts(world: world, hitContacts: hitContacts, slot: slot)
     }
   }
 }
 
-# b3ExecuteStage: worker `workerIndex` sweeps the stage's blocks from its
-# start block, claiming each one it can.
-func executeStage(
-  world: mod PhysicsWorld
-  context: mod StepContext
-  stageIndex: view Int
-  previousSyncIndex: view Int
-  syncIndex: view Int
-  workerIndex: view Int
-) {
-  let stage: SolverStage = context.stages.copyAtDefault(index: stageIndex)
-  let startIndex: Int = workerStartIndex(
-    workerIndex: workerIndex
-    blockCount: stage.blockCount
-    workerCount: context.workerCount
-  )
-  if startIndex is -1 {
-    ret
+func setSlotRestitution(world: mod PhysicsWorld, slot: view Int) {
+  if let taskContext: mod TaskContext => world.taskContexts.modAt(index: slot) {
+    taskContext.anyRestitution = true
   }
-  var completedCount: Int = 0
-  var blockIndex: Int = startIndex
-  loop var i: Int = 0, i < stage.blockCount, ++i {
-    if claimBlock(
-      context: context
-      blockIndex: stage.blockStart + blockIndex
-      previousSyncIndex: previousSyncIndex
-      syncIndex: syncIndex
-    ) {
-      let block: SolverBlock = context.syncBlocks.copyAtDefault(
-        index: stage.blockStart + blockIndex
-      ).block
-      executeBlock(
-        world: world
-        context: context
-        stageType: stage.stageType
-        block: block
-      )
-      completedCount = completedCount + 1
-    }
-    blockIndex = blockIndex + 1
-    if blockIndex >= stage.blockCount {
-      blockIndex = 0
-    }
-  }
-  addCompletions(context: context, stageIndex: stageIndex, completed: completedCount)
 }
 
-# b3ExecuteMainStage: run a stage on worker 0. A single block runs directly;
-# otherwise the sync bits are published for the (future) workers, the
-# blocks are swept, and the stage completes when every block is done.
+# b3ExecuteMainStage: run a stage's blocks. A single block, or a world with
+# one worker, runs them inline in order; otherwise they are one
+# parallelLoop. `syncBits` is kept for the stage record (Box3D's sync
+# protocol needs it; the join replaces it here).
 func executeMainStage(
   world: mod PhysicsWorld
   context: mod StepContext
@@ -376,27 +304,51 @@ func executeMainStage(
   if stage.blockCount is 0 {
     ret
   }
-  if stage.blockCount is 1 {
-    let block: SolverBlock = context.syncBlocks.copyAtDefault(index: stage.blockStart).block
-    executeBlock(
-      world: world
-      context: context
-      stageType: stage.stageType
-      block: block
-    )
+  context.syncBits = syncBits
+  let slotCount: Int = world.taskContexts.length
+  if stage.blockCount is 1 or world.workerCount is 1 {
+    loop var blockOffset: Int = 0, blockOffset < stage.blockCount, ++blockOffset {
+      runStageBlock(
+        world: world
+        context: context
+        stage: stage
+        blockOffset: blockOffset
+        slotCount: slotCount
+      )
+    }
     ret
   }
-  context.syncBits = syncBits
-  let syncIndex: Int = (syncBits shr 16) bitand 65535
-  executeStage(
+  parallelLoop var blockOffset: Int = 0, blockOffset < stage.blockCount, ++blockOffset {
+    # The blocks of a stage touch disjoint data: a colour's constraints
+    # share no dynamic body (the graph colouring), a body stage visits each
+    # body once, and a block's reports go to its own TaskContext slot
+    unsafe {
+      runStageBlock(
+        world: world
+        context: context
+        stage: stage
+        blockOffset: blockOffset
+        slotCount: slotCount
+      )
+    }
+  }
+}
+
+# Block `blockOffset` of `stage`, reporting into slot blockOffset (wrapped
+# to the slot count for the block kinds that never report).
+func runStageBlock(
+  world: mod PhysicsWorld
+  context: mod StepContext
+  stage: view SolverStage
+  blockOffset: view Int
+  slotCount: view Int
+) {
+  let block: SolverBlock = context.syncBlocks.copyAtDefault(index: stage.blockStart + blockOffset).block
+  executeBlock(
     world: world
     context: context
-    stageIndex: stageIndex
-    previousSyncIndex: syncIndex - 1
-    syncIndex: syncIndex
-    workerIndex: 0
+    stageType: stage.stageType
+    block: block
+    slot: blockOffset % slotCount
   )
-  # With one worker every block is done here; threaded, this waits for the
-  # workers' completions.
-  resetCompletions(context: context, stageIndex: stageIndex)
 }

@@ -3,8 +3,9 @@
 # after each step every sensor collects the convex shapes overlapping it
 # (and those a fast body crossed), sorted by shape id, and the difference
 # from last step's overlaps becomes begin and end events. The query
-# callback is an explicit query loop; the sensors run block by block as
-# worker 0. Checked against the oracle in fixture 959. Compound, mesh and
+# callback is an explicit query loop; the sensors run block by block in
+# chunks on the worker pool (ParallelFor). Checked against the oracle in fixture 959. Compound,
+# mesh and
 # height-field sensors arrive in P5; the custom filter callback in P8.
 open Vec3
 open physics/Constants
@@ -275,6 +276,35 @@ func sensorTask(
   }
 }
 
+# Chunk `chunk`'s run of the sensor blocks (b3SensorTask per block).
+func sensorChunk(
+  world: mod PhysicsWorld
+  chunk: view Int
+  blockSize: view Int
+  blockCount: view Int
+) {
+  let sensorCount: Int = world.sensors.length
+  let chunkCount: Int = world.taskContexts.length
+  let firstBlock: Int = chunkFirstBlock(
+    chunk: chunk
+    chunkCount: chunkCount
+    blockCount: blockCount
+  )
+  let endBlock: Int = chunkFirstBlock(
+    chunk: chunk + 1
+    chunkCount: chunkCount
+    blockCount: blockCount
+  )
+  loop var block: Int = firstBlock, block < endBlock, ++block {
+    sensorTask(
+      world: world
+      startIndex: parallelForBlockStart(blockIndex: block, blockSize: blockSize)
+      endIndex: parallelForBlockEnd(blockIndex: block, blockSize: blockSize, itemCount: sensorCount)
+      workerIndex: chunk
+    )
+  }
+}
+
 func visitorShapeId(world: view PhysicsWorld, visitor: view Visitor) ret ShapeId {
   ret ShapeId { index1: visitor.shapeId + 1, world0: world.worldId, generation: visitor.generation }
 }
@@ -297,16 +327,31 @@ func overlapSensors(world: mod PhysicsWorld) {
     workerCount: world.workerCount
   )
   let blockCount: Int = parallelForBlockCount(itemCount: sensorCount, blockSize: blockSize)
-  loop var block: Int = 0, block < blockCount, ++block {
-    sensorTask(
-      world: world
-      startIndex: parallelForBlockStart(blockIndex: block, blockSize: blockSize)
-      endIndex: parallelForBlockEnd(blockIndex: block, blockSize: blockSize, itemCount: sensorCount)
-      workerIndex: 0
-    )
+  let chunkCount: Int = world.taskContexts.length
+  if world.workerCount > 1 {
+    parallelLoop var chunk: Int = 0, chunk < chunkCount, ++chunk {
+      # A chunk writes only its own sensors and its own TaskContext slot
+      unsafe {
+        sensorChunk(
+          world: world
+          chunk: chunk
+          blockSize: blockSize
+          blockCount: blockCount
+        )
+      }
+    }
+  } else {
+    loop var chunk: Int = 0, chunk < chunkCount, ++chunk {
+      sensorChunk(
+        world: world
+        chunk: chunk
+        blockSize: blockSize
+        blockCount: blockCount
+      )
+    }
   }
 
-  # The workers' bits OR-ed into worker 0's (moved out and given back)
+  # The chunks' bits OR-ed into chunk 0's (moved out and given back)
   var bits: Bitset = emptyBitset()
   if let first: mod TaskContext => world.taskContexts.modAt(index: 0) {
     bits = own first.sensorEventBits

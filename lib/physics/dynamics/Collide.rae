@@ -4,7 +4,8 @@
 # the contacts whose touching state changed are processed serially in
 # contact id order: disjoint ones are destroyed, ones that started touching
 # link islands and join the constraint graph, ones that stopped leave them.
-# The collide task runs block by block as worker 0 (ParallelFor). Checked
+# The collide task runs block by block in chunks on the worker pool
+# (ParallelFor), the chunks' state bits OR-ed after. Checked
 # against the oracle in fixture 957.
 #
 # Box3D's narrow-phase
@@ -322,6 +323,41 @@ func collideTask(
   }
 }
 
+# Chunk `chunk`'s run of collide's blocks (b3CollideTask per block), into
+# the chunk's TaskContext.
+func collideChunk(
+  world: mod PhysicsWorld
+  contactIndices: view List(Int)
+  chunk: view Int
+  blockSize: view Int
+  blockCount: view Int
+) {
+  let chunkCount: Int = world.taskContexts.length
+  let firstBlock: Int = chunkFirstBlock(
+    chunk: chunk
+    chunkCount: chunkCount
+    blockCount: blockCount
+  )
+  let endBlock: Int = chunkFirstBlock(
+    chunk: chunk + 1
+    chunkCount: chunkCount
+    blockCount: blockCount
+  )
+  loop var block: Int = firstBlock, block < endBlock, ++block {
+    collideTask(
+      world: world
+      contactIndices: contactIndices
+      startIndex: parallelForBlockStart(blockIndex: block, blockSize: blockSize)
+      endIndex: parallelForBlockEnd(
+        blockIndex: block
+        blockSize: blockSize
+        itemCount: contactIndices.length
+      )
+      workerIndex: chunk
+    )
+  }
+}
+
 # b3AddNonTouchingContact
 func addNonTouchingContact(world: mod PhysicsWorld, contactId: view Int) {
   let localIndex: Int = addSetContact(world: world, setIndex: awakeSet, contactId: contactId)
@@ -372,22 +408,35 @@ func collide(world: mod PhysicsWorld) {
     workerCount: world.workerCount
   )
   let blockCount: Int = parallelForBlockCount(itemCount: contactCount, blockSize: blockSize)
-  loop var block: Int = 0, block < blockCount, ++block {
-    collideTask(
-      world: world
-      contactIndices: contactIndices
-      startIndex: parallelForBlockStart(blockIndex: block, blockSize: blockSize)
-      endIndex: parallelForBlockEnd(
-        blockIndex: block
+  let chunkCount: Int = world.taskContexts.length
+  if world.workerCount > 1 {
+    parallelLoop var chunk: Int = 0, chunk < chunkCount, ++chunk {
+      # A chunk writes only its own contacts (each contact id is in one
+      # block) and its own TaskContext slot
+      unsafe {
+        collideChunk(
+          world: world
+          contactIndices: contactIndices
+          chunk: chunk
+          blockSize: blockSize
+          blockCount: blockCount
+        )
+      }
+    }
+  } else {
+    loop var chunk: Int = 0, chunk < chunkCount, ++chunk {
+      collideChunk(
+        world: world
+        contactIndices: contactIndices
+        chunk: chunk
         blockSize: blockSize
-        itemCount: contactCount
+        blockCount: blockCount
       )
-      workerIndex: 0
-    )
+    }
   }
   world.collideContactIds = own contactIndices
 
-  # Serially update the contact states: the workers' bits OR-ed into worker
+  # Serially update the contact states: the chunks' bits OR-ed into chunk
   # 0's (as Box3D does; moved out here, not copied, and given back at the
   # end), in contact id order
   var stateBits: Bitset = emptyBitset()

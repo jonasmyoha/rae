@@ -4,6 +4,7 @@
 # queues the event system fills with entity ids, and the static venue body.
 # A world holds it as a plain field (a resource, docs/ecs-resources.md), and
 # the physics systems (PhysicsSystems) take it `mod`.
+import Parallel
 open Vec3
 open Quat
 open ecs/Entity
@@ -75,11 +76,13 @@ type Physics {
 }
 
 # The world definition of an ECS world: Rae's Z-up gravity
-# (docs/coordinate-system.md), one worker, continuous collision on.
+# (docs/coordinate-system.md), the worker pool's worker count (lib/Parallel;
+# RAE_WORKERS sets it, and the step is the same at any count), continuous
+# collision on.
 func defaultPhysicsWorldDef() ret WorldDef {
   var def: WorldDef = defaultWorldDef(lengthUnitsPerMeter: 1.0)
   def.gravity = Vec3 { x: 0.0, y: 0.0, z: -9.81 }
-  def.workerCount = 1
+  def.workerCount = Parallel.workerCount()
   def.enableContinuous = true
   ret def
 }

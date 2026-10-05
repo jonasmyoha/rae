@@ -63,6 +63,23 @@ func createPairContext() ret PairContext {
   }
 }
 
+# A context with no buffers (capacity-0 lists allocate nothing): the
+# placeholder a context is moved into.
+func emptyPairContext() ret PairContext {
+  ret PairContext {
+    checkCompounds: false
+    batch: List.create(CandidatePair, cap: 0)
+    plain: List.create(CandidatePair, cap: 0)
+    survivors: List.create(CandidatePair, cap: 0)
+    pairKeys: List.create(UInt64, cap: 0)
+    proxyStack: List.create(Int, cap: 0)
+    crossStack: List.create(IndexPair, cap: 0)
+    siblingIndices: List.create(Int, cap: 0)
+    seeds: List.create(NodePair, cap: 0)
+    seedQueue: List.create(NodePair, cap: 0)
+  }
+}
+
 # A context for a new search: createPairContext's state, its lists cleared
 # rather than re-created.
 func resetPairContext(context: mod PairContext) {

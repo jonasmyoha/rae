@@ -211,9 +211,9 @@ moved sibling pairs of the dynamic tree collide their subtrees against each
 other, breadth-first seeds collide the dynamic tree against the static and
 kinematic trees, candidates are culled against the pair set and filtered in
 batches of 32, and the sorted new keys go to contact creation. The tasks
-run block by block as worker 0 (`dynamics/ParallelFor`, Box3D's block
-split), each gathering into its task context's pair keys, so threading them
-later changes only the block loops.
+run block by block (`dynamics/ParallelFor`, Box3D's block split) in chunks
+on the worker pool, each chunk gathering into its task context's pair keys;
+the keys are sorted after, so the result does not depend on the chunking.
 
 | Box3D | Rae |
 |---|---|
@@ -224,7 +224,7 @@ later changes only the block loops.
 | `b3AddCandidatePair` `b3FlushCandidatePairs` `b3ShouldCreatePair` | `addCandidatePair` `flushCandidatePairs` `shouldCreatePair` |
 | `b3ShouldBodiesCollide` | `shouldBodiesCollide` (`dynamics/WorldBodies`, walking the joints of the body with fewer) |
 | `b3ParallelFor`'s block split | `parallelForBlockSize` `parallelForBlockCount` … (`dynamics/ParallelFor`) |
-| `b3TaskContext` | `TaskContext` (`dynamics/World`; only the pair keys so far) |
+| `b3TaskContext` | `TaskContext` (`dynamics/World`; one per chunk slot, four per worker, not per worker) |
 | `b3CreateContact` | `createContact` (`dynamics/Contact`; the pair registry and pair set only, the rest is P4b) |
 
 Not yet: compound pair emission (`b3EmitCompoundPairs`, with compounds in
@@ -240,8 +240,8 @@ order, and the pair set's slot layout and the three trees at checkpoints).
 A contact is a value in the world's contact list, linked into both bodies'
 contact lists by keys (contact id times two plus the edge), exactly as in
 Box3D; a convex contact holds at most one manifold. The narrow phase runs
-block by block as worker 0, then processes the touching-state changes
-serially in contact id order.
+block by block in chunks on the worker pool, then processes the
+touching-state changes serially in contact id order.
 
 | Box3D | Rae |
 |---|---|
@@ -276,10 +276,10 @@ The solver keeps Box3D's structure even single-threaded: constraints are
 spread over the graph colours, the work is a list of stages (prepare,
 integrate velocities, warm start, solve, integrate positions, relax,
 restitution, store) whose blocks share a pool, and the stage dispatcher
-(`dynamics/StageDispatcher`) is the one module that runs them — as worker 0,
-block by block, with the sync indices and completion counts as plain Ints
-behind `claimBlock` / `addCompletions` / `resetCompletions`. Threading the
-solver changes that module, not the solver tasks. Convex contacts are solved
+(`dynamics/StageDispatcher`) is the one module that runs them: each stage
+is one `parallelLoop` over its blocks (docs/parallel-stages-design.md,
+Option C), whose join is the stage barrier, so Box3D's block claims and
+completion counts are not needed. The solver tasks are Box3D's. Convex contacts are solved
 four at a time on the wide path, where a wide float is a struct of four
 Floats (`dynamics/FloatWide`, Box3D's scalar `b3FloatW`); the overflow colour
 (and later mesh contacts) use the scalar path.
@@ -287,12 +287,12 @@ Floats (`dynamics/FloatWide`, Box3D's scalar `b3FloatW`); the overflow colour
 | Box3D | Rae |
 |---|---|
 | `b3World_Step` | `stepWorld` (`dynamics/WorldStep`) |
-| `b3Solve`, `b3SolverTask` (worker 0) | `solve`, `runSolverStages` (`dynamics/Solver`) |
+| `b3Solve`, `b3SolverTask` | `solve`, `runSolverStages` (`dynamics/Solver`) |
 | `b3FinalizeBodiesTask` | `finalizeBodies` (`dynamics/FinalizeBodies`) |
 | `b3IntegrateVelocitiesTask` `b3IntegratePositionsTask` | `integrateVelocities` `integratePositions` (`dynamics/BodyIntegration`) |
 | `b3SolveContinuous` `b3ContinuousQueryCallback` `b3ShapeTimeOfImpact` `b3MakeShapeProxy` | `solveContinuous` `continuousCandidate` `shapeTimeOfImpact` `makeShapeProxy` (`dynamics/Continuous`) |
 | `b3StepContext` `b3SolverStage` `b3SyncBlock` `b3SolverBlock` `b3Softness` `b3MakeSoft` | `StepContext` `SolverStage` `SyncBlock` `SolverBlock` `Softness` `makeSoft` (`dynamics/StepContext`) |
-| `b3ComputeBlockCount` `b3InitBlocks` `b3InitStage` `b3ExecuteBlock` `b3ExecuteStage` `b3ExecuteMainStage` | `computeBlockCount` `initBlocks` `initStage` `executeBlock` `executeStage` `executeMainStage` (`dynamics/StageDispatcher`) |
+| `b3ComputeBlockCount` `b3InitBlocks` `b3InitStage` `b3ExecuteBlock` `b3ExecuteMainStage` | `computeBlockCount` `initBlocks` `initStage` `executeBlock` `executeMainStage` (`dynamics/StageDispatcher`; `b3ExecuteStage` and the claim/completion protocol are a `parallelLoop`) |
 | `b3FloatW` and its operations, `b3Vec3W` `b3QuatW` `b3SymMatrix3W` … | `FloatWide` `Vec3Wide` `QuatWide` `SymMatrix3Wide` … (`dynamics/FloatWide`) |
 | `b3ContactConstraint` `b3ManifoldConstraint` `b3ContactConstraintWide` | `ContactConstraint` `ManifoldConstraint` `ContactConstraintWide` (`dynamics/ContactConstraints`) |
 | `b3*Contacts_Mesh` / `_Overflow` | `prepareContactsScalar` `warmStartContactsScalar` `pushContactsScalar` `solveContactsScalar` `applyRestitutionScalar` `storeImpulsesScalar` (`dynamics/ContactSolver`) |

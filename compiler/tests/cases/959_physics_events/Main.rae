@@ -516,10 +516,12 @@ func evaluate(
   world: mod PhysicsWorld
   bodies: mod List(BodyId)
   out: mod List(Int)
+  workers: view Int
 ) ret Bool {
   if name is "world.create" {
     var def: WorldDef = defaultWorldDef(lengthUnitsPerMeter: 1.0)
     def.gravity = readVec(reader: reader)
+    def.workerCount = workers
     world = createWorld(def: def)
   } else if name is "body.create" {
     var def: BodyDef = defaultBodyDef(lengthUnitsPerMeter: 1.0)
@@ -641,6 +643,7 @@ func evaluate(
     var def: WorldDef = defaultWorldDef(lengthUnitsPerMeter: 1.0)
     def.gravity = readVec(reader: reader)
     def.enableSleep = readBool(reader: reader)
+    def.workerCount = workers
     world = createWorld(def: def)
     bodies.clear()
   } else if name is "world.step" {
@@ -687,9 +690,9 @@ func readGolden() ret String {
   ret ""
 }
 
-func main() {
-  let golden: String = readGolden()
-  let lines: List(String) = golden.split(sep: "\n")
+# Replay the golden with every world stepped by `workers` workers: the
+# step must be bit-exact against the oracle at any worker count.
+func replay(lines: view List(String), workers: view Int) {
   var world: PhysicsWorld = createWorld(def: defaultWorldDef(lengthUnitsPerMeter: 1.0))
   let bodies: List(BodyId) = List.create(BodyId, cap: 64)
   var calls: Int = 0
@@ -722,6 +725,7 @@ func main() {
       world: world
       bodies: bodies
       out: actual
+      workers: workers
     ) is false {
       unknown = unknown + 1
       log("not ported: {name}")
@@ -747,5 +751,14 @@ func main() {
       }
     }
   }
-  log("events.golden: {calls} operations, {mismatches} not bit-exact, {unknown} not ported")
+  log(
+    "events.golden at {workers} workers: {calls} operations, {mismatches} not bit-exact, {unknown} not ported"
+  )
+}
+
+func main() {
+  let golden: String = readGolden()
+  let lines: List(String) = golden.split(sep: "\n")
+  replay(lines: lines, workers: 1)
+  replay(lines: lines, workers: 8)
 }

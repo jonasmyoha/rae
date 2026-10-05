@@ -32,13 +32,16 @@ open physics/container/Bitset
 open physics/container/QuickSort
 open physics/dynamics/Events
 
-# One worker's scratch for a step (b3TaskContext of Box3D's
-# physics_world.h). A world has one per worker; single-threaded, one. The
-# solver's parts join it in P4c (Box3D's narrow-phase statistics counters
-# are not kept).
+# One chunk's scratch for a step (b3TaskContext of Box3D's
+# physics_world.h). Box3D keeps one per worker; a parallelLoop cannot name
+# its worker, so the world keeps one per CHUNK (chunkSlotsPerWorker per
+# worker, docs/concurrency-model.md "per-worker scratch is chunk scratch"):
+# chunk c of a parallel site writes only slot c, and the results are merged
+# in slot order after the loop. (Box3D's narrow-phase statistics counters
+# are not kept.)
 type TaskContext {
-  # The pair keys the worker's pair-finding tasks found
-  pairKeys: List(UInt64)
+  # The chunk's pair finding: its candidate batch, stacks and pair keys
+  pairs: PairContext
   # The contacts whose touching state changed in the narrow phase, by id
   contactStateBitSet: Bitset
   # The narrow phase's manifold buffer (Box3D's per-worker arena)
@@ -62,7 +65,35 @@ type TaskContext {
   # The sensors whose overlaps changed, by sensor index (Box3D's sensor
   # task context)
   sensorEventBits: Bitset
+  # Whether a prepared contact has restitution (solver prepare stages)
+  anyRestitution: Bool
+  # The bullet bodies finalization found, by awake sim index, in order
+  bulletBodies: List(Int)
+  # The broad-phase proxies finalization and continuous collision moved,
+  # marked serially after the parallel section (the tree is shared)
+  movedProxies: List(MovedProxy)
+  # Continuous collision's working lists: the sensor hits with their
+  # fractions, the tree query stack and the time-of-impact proxy points
+  continuousHits: List(SensorHit)
+  continuousFractions: List(Float)
+  continuousQueryStack: List(Int)
+  toiPointsA: List(Vec3)
+  toiPointsB: List(Vec3)
 }
+
+# A shape proxy to mark moved in the broad phase, with its new fat box.
+type MovedProxy {
+  proxyKey: Int
+  box: Aabb
+}
+
+# Scratch slots per worker: four chunks per worker keep the pool's load
+# balancing (docs/concurrency-model.md), and the solver's stages have at
+# most this many blocks of a kind (Solver.solve's maxBlockCount).
+const chunkSlotsPerWorker: Int = 4
+
+# The most workers a world uses (Box3D's B3_MAX_WORKERS)
+const maxWorkerCount: Int = 64
 
 # A body that moved in the last step (b3BodyMoveEvent)
 type BodyMoveEvent {
@@ -73,7 +104,7 @@ type BodyMoveEvent {
 
 func createTaskContext() ret TaskContext {
   ret TaskContext {
-    pairKeys: List.create(UInt64, cap: 16)
+    pairs: createPairContext()
     contactStateBitSet: createBitset(bitCapacity: 1024)
     localManifold: createLocalManifold(capacity: maxManifoldPoints)
     meshManifold: createLocalManifold(capacity: maxClipPoints)
@@ -86,6 +117,14 @@ func createTaskContext() ret TaskContext {
     hasHitEvents: false
     sensorHits: List.create(SensorHit, cap: 4)
     sensorEventBits: createBitset(bitCapacity: 128)
+    anyRestitution: false
+    bulletBodies: List.create(Int, cap: 0)
+    movedProxies: List.create(MovedProxy, cap: 16)
+    continuousHits: List.create(SensorHit, cap: 4)
+    continuousFractions: List.create(Float, cap: 4)
+    continuousQueryStack: List.create(Int, cap: 32)
+    toiPointsA: List.create(Vec3, cap: 8)
+    toiPointsB: List.create(Vec3, cap: 8)
   }
 }
 
@@ -111,7 +150,9 @@ type PhysicsWorld {
   stepContext: StepContext
   # The awake contact ids the narrow phase visits (Collide.collide's list)
   collideContactIds: List(Int)
-  # The pair finding's working state (BroadPhasePairs moves it out per step)
+  # The pair finding's serial working state: the moved siblings and the
+  # cross seeds (BroadPhasePairs moves it out per step; each chunk's search
+  # uses its TaskContext's PairContext)
   pairContext: PairContext
   # Working lists: the island sleep's island ids, the new pair keys sorted
   sleepIslandIds: List(Int)
@@ -120,14 +161,6 @@ type PhysicsWorld {
   createdPairKeys: List(UInt64)
   # The pair key sort's range stack
   pairSortStack: List(SortRange)
-  # Continuous collision's working lists: the sensor hits with their
-  # fractions, and the tree query stack
-  continuousSensorHits: List(SensorHit)
-  continuousFractions: List(Float)
-  continuousQueryStack: List(Int)
-  # The point lists of continuous collision's time-of-impact proxies
-  toiPointsA: List(Vec3)
-  toiPointsB: List(Vec3)
   # The mesh data and scale of mesh shapes (Box3D's shapes point at the
   # caller's b3MeshData)
   meshes: List(Mesh)
@@ -178,7 +211,11 @@ type PhysicsWorld {
   enableWarmStarting: Bool
   enableContinuous: Bool
   enableSpeculative: Bool
+  # The step's worker count (b3WorldDef.workerCount, at least 1): its
+  # chunking and block sizes; with more than one the parallel sites run on
+  # the worker pool (lib/Parallel), with one they run inline
   workerCount: Int
+  # The chunk slots, chunkSlotsPerWorker per worker
   taskContexts: List(TaskContext)
   lengthUnitsPerMeter: Float
 }
@@ -206,11 +243,6 @@ func createWorld(def: view WorldDef) ret PhysicsWorld {
     sortedPairKeys: List.create(UInt64, cap: 16)
     createdPairKeys: List.create(UInt64, cap: 16)
     pairSortStack: List.create(SortRange, cap: 48)
-    continuousSensorHits: List.create(SensorHit, cap: 4)
-    continuousFractions: List.create(Float, cap: 4)
-    continuousQueryStack: List.create(Int, cap: 32)
-    toiPointsA: List.create(Vec3, cap: 8)
-    toiPointsB: List.create(Vec3, cap: 8)
     meshes: List.create(Mesh, cap: 0)
     heightFields: List.create(HeightFieldData, cap: 0)
     compounds: List.create(CompoundData, cap: 0)
@@ -251,11 +283,11 @@ func createWorld(def: view WorldDef) ret PhysicsWorld {
     enableWarmStarting: true
     enableContinuous: def.enableContinuous
     enableSpeculative: true
-    workerCount: 1
-    taskContexts: List.create(TaskContext, cap: 1)
+    workerCount: clampInt(value: def.workerCount, lower: 1, upper: maxWorkerCount)
+    taskContexts: List.create(TaskContext, cap: 4)
     lengthUnitsPerMeter: def.lengthUnitsPerMeter
   }
-  loop var i: Int = 0, i < world.workerCount, ++i {
+  loop var i: Int = 0, i < world.workerCount * chunkSlotsPerWorker, ++i {
     world.taskContexts.add(value: createTaskContext())
   }
   # The static, disabled and awake sets (ids 0, 1, 2)
