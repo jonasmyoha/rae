@@ -55,6 +55,7 @@ func shapeTimeOfImpact(
   sweepA: view Sweep
   sweepB: view Sweep
   maxFraction: view Float
+  proxyPoints: mod ProxyPoints
 ) ret ToiOutput {
   let lengthUnitsPerMeter: Float = world.lengthUnitsPerMeter
   if shapeA.shapeType is ShapeType.compound {
@@ -86,14 +87,28 @@ func shapeTimeOfImpact(
       lengthUnitsPerMeter: lengthUnitsPerMeter
     )
   }
-  let input: ToiInput = {
-    proxyA: makeShapeProxy(shape: shapeA, hulls: world.hulls)
-    proxyB: makeShapeProxy(shape: shapeB, hulls: world.hulls)
+  # The proxies' points go in the lent lists, moved into the query and back
+  let radiusA: Float = shapeProxyPoints(
+    shape: shapeA
+    hulls: world.hulls
+    points: proxyPoints.pointsA
+  )
+  let radiusB: Float = shapeProxyPoints(
+    shape: shapeB
+    hulls: world.hulls
+    points: proxyPoints.pointsB
+  )
+  var input: ToiInput = {
+    proxyA: ShapeProxy { points: own proxyPoints.pointsA, radius: radiusA }
+    proxyB: ShapeProxy { points: own proxyPoints.pointsB, radius: radiusB }
     sweepA: sweepA
     sweepB: sweepB
     maxFraction: maxFraction
   }
-  ret timeOfImpact(input: input, lengthUnitsPerMeter: lengthUnitsPerMeter)
+  let output: ToiOutput = timeOfImpact(input: input, lengthUnitsPerMeter: lengthUnitsPerMeter)
+  proxyPoints.pointsA = own input.proxyA.points
+  proxyPoints.pointsB = own input.proxyB.points
+  ret output
 }
 
 # B2_MAX_CONTINUOUS_SENSOR_HITS
@@ -103,6 +118,13 @@ const maxContinuousSensorHits: Int = 8
 type ContinuousHits {
   hits: List(SensorHit)
   fractions: List(Float)
+}
+
+# The point lists of a time-of-impact query's two proxies, lent by the
+# world and reused (Box3D's proxies are fixed arrays).
+type ProxyPoints {
+  pointsA: List(Vec3)
+  pointsB: List(Vec3)
 }
 
 # b3ContinuousQueryCallback for one candidate shape: the earlier impact
@@ -116,6 +138,7 @@ func continuousCandidate(
   base: view Vec3
   fraction: view Float
   sensorHits: mod ContinuousHits
+  proxyPoints: mod ProxyPoints
 ) ret Float {
   # Skip the same shape and the same body
   if shapeId is fastShape.id {
@@ -154,6 +177,7 @@ func continuousCandidate(
     sweepA: sweepA
     sweepB: sweep
     maxFraction: fraction
+    proxyPoints: proxyPoints
   )
   if isSensor {
     # Only a sensor hit sooner than the current solid hit counts
@@ -181,6 +205,7 @@ func queryContinuous(
   fraction: view Float
   sensorHits: mod ContinuousHits
   queryStack: mod List(Int)
+  proxyPoints: mod ProxyPoints
 ) ret Float {
   var result: Float = fraction
   if let tree: view DynamicTree => world.broadPhase.trees.viewAt(index: treeIndex) {
@@ -204,6 +229,7 @@ func queryContinuous(
         base: base
         fraction: result
         sensorHits: sensorHits
+        proxyPoints: proxyPoints
       )
       proxyId = nextTreeQueryProxy(tree: tree, query: query)
     }
@@ -267,6 +293,7 @@ func solveContinuous(world: mod PhysicsWorld, simIndex: view Int, dt: view Float
   sensorHits.hits.clear()
   sensorHits.fractions.clear()
   var queryStack: List(Int) = own world.continuousQueryStack
+  var proxyPoints: ProxyPoints = { pointsA: own world.toiPointsA, pointsB: own world.toiPointsB }
   let isBullet: Bool = (fastSim.flags bitand isBulletFlag) is not 0
 
   var shapeId: Int = fastBody.headShapeId
@@ -299,6 +326,7 @@ func solveContinuous(world: mod PhysicsWorld, simIndex: view Int, dt: view Float
         fraction: fraction
         sensorHits: sensorHits
         queryStack: queryStack
+        proxyPoints: proxyPoints
       )
       if isBullet {
         fraction = queryContinuous(
@@ -312,6 +340,7 @@ func solveContinuous(world: mod PhysicsWorld, simIndex: view Int, dt: view Float
           fraction: fraction
           sensorHits: sensorHits
           queryStack: queryStack
+          proxyPoints: proxyPoints
         )
         fraction = queryContinuous(
           world: world
@@ -324,6 +353,7 @@ func solveContinuous(world: mod PhysicsWorld, simIndex: view Int, dt: view Float
           fraction: fraction
           sensorHits: sensorHits
           queryStack: queryStack
+          proxyPoints: proxyPoints
         )
       }
     }
@@ -426,4 +456,6 @@ func solveContinuous(world: mod PhysicsWorld, simIndex: view Int, dt: view Float
   world.continuousSensorHits = own sensorHits.hits
   world.continuousFractions = own sensorHits.fractions
   world.continuousQueryStack = own queryStack
+  world.toiPointsA = own proxyPoints.pointsA
+  world.toiPointsB = own proxyPoints.pointsB
 }

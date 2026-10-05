@@ -636,7 +636,14 @@ func updateBroadPhasePairs(world: mod PhysicsWorld) {
       pairKeys.add(value: taskContext.pairKeys.copyAtDefault(index: i))
     }
   }
-  quickSort(T: UInt64, values: pairKeys)
+  # The world's sort stack (QSORT's ranges), reused every step
+  var noCompanion: List(Int) = List.create(Int, cap: 0)
+  quickSortWithStack(
+    T: UInt64
+    values: pairKeys
+    companion: noCompanion
+    stack: world.pairSortStack
+  )
 
   let shapeShift: UInt64 = (64 - shapePower) as UInt64
   let secondShift: UInt64 = (64 - 2 * shapePower) as UInt64
