@@ -1,0 +1,321 @@
+# The physics systems of an ECS world on the C-library track, in the order of
+# one fixed step: the same as the port's physics/ecs/PhysicsSystems. The
+# character system moves the characters, the push system hands the game's
+# pose changes to the bodies, the step system steps the world, the pull system
+# writes back the poses of the bodies that moved (Box3D's body move events),
+# and the event system turns the step's contact, hit and sensor events into
+# entity events. Box3D's event arrays are read one element at a time through
+# the glue (Box3dGlue).
+open Vec2
+open Vec3
+open Quat
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Event
+open ecs/Transform
+open box3d/Box3d
+open box3d/Box3dGlue
+open box3d/Box3dTypes
+open box3d/Box3dTypes2
+open box3d/ecs/PhysicsTypes
+open box3d/ecs/CharacterMover
+open box3d/ecs/Physics
+open box3d/ecs/PhysicsComponents
+
+# Set the position of `entityId`'s Transform3D (giving it one if missing).
+func setEntityPosition(
+  transforms: mod ComponentTable(Transform3D)
+  entityId: view EntityId
+  position: view Vec3
+) {
+  if componentHas(this: transforms, entityId: entityId) {
+    let transform: mod Transform3D => componentMod(this: transforms, entityId: entityId)
+    transform.position = position
+  } else {
+    var transform: Transform3D = createTransform3D()
+    transform.position = position
+    componentSet(this: transforms, entityId: entityId, data: transform)
+  }
+}
+
+# One character's fixed step: the jump request, then the mover; its new
+# position.
+func moveCharacter(
+  character: mod CharacterBody
+  physics: mod Physics
+  ignoreShapeIds: view List(ShapeId)
+) ret Vec3 {
+  if character.jump {
+    jumpCharacter(mover: character.mover)
+    character.jump = false
+  }
+  let ignored: List(b3ShapeId) = List.create(b3ShapeId, cap: ignoreShapeIds.length)
+  loop let shapeId: view ShapeId in ignoreShapeIds {
+    ignored.add(value: toB3ShapeId(shapeId: shapeId))
+  }
+  solveMove(
+    mover: character.mover
+    worldId: physics.world
+    timeStep: physics.fixedStep
+    forward: toB3Vector(vector: character.forward)
+    right: toB3Vector(vector: character.right)
+    throttle: character.throttle
+    clipVelocity: character.clipVelocity
+    ignoreShapeIds: ignored
+  )
+  character.grounded = character.mover.onGround
+  character.groundNormal = fromB3Vector(vector: character.mover.groundNormal)
+  ret fromB3Vector(vector: character.mover.transform.p)
+}
+
+# Move every character one fixed step (before the world steps).
+func characterSystem(
+  physics: mod Physics
+  characters: mod ComponentTable(CharacterBody)
+  transforms: mod ComponentTable(Transform3D)
+) {
+  let noIgnoredShapes: List(ShapeId) = List.create(ShapeId, cap: 0)
+  loop var i: Int = 0, i < componentCount(this: characters), ++i {
+    let entityId: EntityId = componentEntityAt(this: characters, i: i)
+    let position: Vec3 = moveCharacter(
+      character: componentMod(this: characters, entityId: entityId)
+      physics: physics
+      ignoreShapeIds: noIgnoredShapes
+    )
+    setEntityPosition(transforms: transforms, entityId: entityId, position: position)
+  }
+}
+
+# Hand the poses game code wrote since the last sync to the bodies: a
+# kinematic body is driven to its new pose over the fixed step, any other
+# body is moved there. Untouched entities cost one stamp compare.
+func physicsPushSystem(
+  physics: mod Physics
+  rigidBodies: mod ComponentTable(RigidBody)
+  transforms: view ComponentTable(Transform3D)
+) {
+  loop var i: Int = 0, i < componentCount(this: rigidBodies), ++i {
+    let entityId: EntityId = componentEntityAt(this: rigidBodies, i: i)
+    let stamp: Int = componentModStamp(this: transforms, entityId: entityId)
+    if stamp is 0 {
+      continue
+    }
+    let rigidBody: RigidBody = componentCopyAtDefault(this: rigidBodies, i: i)
+    if stamp is rigidBody.syncedTransformStamp {
+      continue
+    }
+    let transform: view Transform3D => componentView(this: transforms, entityId: entityId)
+    unsafe {
+      if rigidBody.bodyType is BodyType.kinematicBody {
+        b3Body_SetTargetTransform(
+          bodyId: toB3BodyId(bodyId: rigidBody.bodyId)
+          target: toB3Transform(
+            transform: Transform { position: transform.position, rotation: transform.rotation }
+          )
+          timeStep: physics.fixedStep
+          wake: true
+        )
+      } else {
+        b3Body_SetTransform(
+          bodyId: toB3BodyId(bodyId: rigidBody.bodyId)
+          position: toB3Vector(vector: transform.position)
+          rotation: toB3Quat(quat: transform.rotation)
+        )
+      }
+    }
+    let synced: mod RigidBody => componentMod(this: rigidBodies, entityId: entityId)
+    synced.syncedTransformStamp = stamp
+  }
+}
+
+# Step the world one fixed step.
+func physicsStepSystem(physics: mod Physics) {
+  unsafe {
+    b3World_Step(
+      worldId: physics.world
+      timeStep: physics.fixedStep
+      subStepCount: physics.subSteps as Int32
+    )
+  }
+  physics.stepCount = physics.stepCount + 1
+}
+
+# Set the position and rotation of `entityId`'s Transform3D (its scale kept).
+func setEntityPose(
+  transforms: mod ComponentTable(Transform3D)
+  entityId: view EntityId
+  pose: view Transform
+) {
+  let transform: mod Transform3D => componentMod(this: transforms, entityId: entityId)
+  transform.position = pose.position
+  transform.rotation = pose.rotation
+}
+
+# Write back the poses of the bodies the step moved (a sleeping body is not
+# reported, so it costs nothing), and record the written stamp so the push
+# system does not hand the pose back.
+func physicsPullSystem(
+  physics: view Physics
+  rigidBodies: mod ComponentTable(RigidBody)
+  transforms: mod ComponentTable(Transform3D)
+) {
+  unsafe {
+    let events: b3BodyEvents = b3World_GetBodyEvents(worldId: physics.world)
+    loop var i: Int = 0, i < events.moveCount as Int, ++i {
+      let event: b3BodyMoveEvent = rae_b3BodyMoveAt(events: events, index: i as Int32)
+      let entityId: EntityId = entityOfBody(
+        physics: physics
+        bodyId: fromB3BodyId(bodyId: event.bodyId)
+      )
+      if isNone(this: entityId) or componentHas(this: transforms, entityId: entityId) is false {
+        continue
+      }
+      setEntityPose(
+        transforms: transforms
+        entityId: entityId
+        pose: fromB3Transform(transform: event.transform)
+      )
+      if componentHas(this: rigidBodies, entityId: entityId) {
+        let stamp: Int = componentModStamp(this: transforms, entityId: entityId)
+        let rigidBody: mod RigidBody => componentMod(this: rigidBodies, entityId: entityId)
+        rigidBody.syncedTransformStamp = stamp
+      }
+    }
+  }
+}
+
+func contactEvent(
+  physics: view Physics
+  shapeIdA: view b3ShapeId
+  shapeIdB: view b3ShapeId
+) ret PhysicsContactEvent {
+  let shapeA: ShapeId = fromB3ShapeId(shapeId: shapeIdA)
+  let shapeB: ShapeId = fromB3ShapeId(shapeId: shapeIdB)
+  ret PhysicsContactEvent {
+    entityIdA: entityOfShape(physics: physics, shapeId: shapeA)
+    entityIdB: entityOfShape(physics: physics, shapeId: shapeB)
+    shapeIdA: shapeA
+    shapeIdB: shapeB
+  }
+}
+
+func sensorEvent(
+  physics: view Physics
+  sensorShapeId: view b3ShapeId
+  visitorShapeId: view b3ShapeId
+) ret PhysicsSensorEvent {
+  let sensorShape: ShapeId = fromB3ShapeId(shapeId: sensorShapeId)
+  let visitorShape: ShapeId = fromB3ShapeId(shapeId: visitorShapeId)
+  ret PhysicsSensorEvent {
+    sensorEntityId: entityOfShape(physics: physics, shapeId: sensorShape)
+    visitorEntityId: entityOfShape(physics: physics, shapeId: visitorShape)
+    sensorShapeId: sensorShape
+    visitorShapeId: visitorShape
+  }
+}
+
+# Turn the step's contact begin/end, hit and sensor begin/end events into
+# entity events on the resource's queues (the venue's shapes report
+# noEntity).
+func physicsEventSystem(physics: mod Physics) {
+  unsafe {
+    let contacts: b3ContactEvents = b3World_GetContactEvents(worldId: physics.world)
+    loop var i: Int = 0, i < contacts.beginCount as Int, ++i {
+      let event: b3ContactBeginTouchEvent = rae_b3ContactBeginAt(
+        events: contacts
+        index: i as Int32
+      )
+      eventSend(
+        this: physics.contactBegan
+        value: contactEvent(physics: physics, shapeIdA: event.shapeIdA, shapeIdB: event.shapeIdB)
+      )
+    }
+    loop var i: Int = 0, i < contacts.endCount as Int, ++i {
+      let event: b3ContactEndTouchEvent = rae_b3ContactEndAt(events: contacts, index: i as Int32)
+      eventSend(
+        this: physics.contactEnded
+        value: contactEvent(physics: physics, shapeIdA: event.shapeIdA, shapeIdB: event.shapeIdB)
+      )
+    }
+    loop var i: Int = 0, i < contacts.hitCount as Int, ++i {
+      let event: b3ContactHitEvent = rae_b3ContactHitAt(events: contacts, index: i as Int32)
+      let shapes: PhysicsContactEvent = contactEvent(
+        physics: physics
+        shapeIdA: event.shapeIdA
+        shapeIdB: event.shapeIdB
+      )
+      eventSend(
+        this: physics.hits
+        value: PhysicsHitEvent {
+          entityIdA: shapes.entityIdA
+          entityIdB: shapes.entityIdB
+          shapeIdA: shapes.shapeIdA
+          shapeIdB: shapes.shapeIdB
+          point: fromB3Vector(vector: event.point)
+          normal: fromB3Vector(vector: event.normal)
+          approachSpeed: event.approachSpeed
+          userMaterialIdA: event.userMaterialIdA
+          userMaterialIdB: event.userMaterialIdB
+        }
+      )
+    }
+    let sensors: b3SensorEvents = b3World_GetSensorEvents(worldId: physics.world)
+    loop var i: Int = 0, i < sensors.beginCount as Int, ++i {
+      let event: b3SensorBeginTouchEvent = rae_b3SensorBeginAt(events: sensors, index: i as Int32)
+      eventSend(
+        this: physics.sensorBegan
+        value: sensorEvent(
+          physics: physics
+          sensorShapeId: event.sensorShapeId
+          visitorShapeId: event.visitorShapeId
+        )
+      )
+    }
+    loop var i: Int = 0, i < sensors.endCount as Int, ++i {
+      let event: b3SensorEndTouchEvent = rae_b3SensorEndAt(events: sensors, index: i as Int32)
+      eventSend(
+        this: physics.sensorEnded
+        value: sensorEvent(
+          physics: physics
+          sensorShapeId: event.sensorShapeId
+          visitorShapeId: event.visitorShapeId
+        )
+      )
+    }
+  }
+}
+
+# One fixed step: character, push, step, pull, events.
+func physicsFixedStep(
+  physics: mod Physics
+  rigidBodies: mod ComponentTable(RigidBody)
+  characters: mod ComponentTable(CharacterBody)
+  transforms: mod ComponentTable(Transform3D)
+) {
+  characterSystem(physics: physics, characters: characters, transforms: transforms)
+  physicsPushSystem(physics: physics, rigidBodies: rigidBodies, transforms: transforms)
+  physicsStepSystem(physics: physics)
+  physicsPullSystem(physics: physics, rigidBodies: rigidBodies, transforms: transforms)
+  physicsEventSystem(physics: physics)
+}
+
+# A frame: the fixed steps `frameTime` pays for (capped), each a
+# physicsFixedStep. The number of steps taken.
+func physicsFrame(
+  physics: mod Physics
+  rigidBodies: mod ComponentTable(RigidBody)
+  characters: mod ComponentTable(CharacterBody)
+  transforms: mod ComponentTable(Transform3D)
+  frameTime: view Float
+) ret Int {
+  let steps: Int = consumeFixedSteps(physics: physics, frameTime: frameTime)
+  loop var i: Int = 0, i < steps, ++i {
+    physicsFixedStep(
+      physics: physics
+      rigidBodies: rigidBodies
+      characters: characters
+      transforms: transforms
+    )
+  }
+  ret steps
+}

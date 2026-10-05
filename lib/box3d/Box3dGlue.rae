@@ -1,0 +1,111 @@
+# Bindings to tools/box3d/rae_glue.c, the C helpers of the C-library physics
+# track (docs/physics-two-implementations.md §4): the Box3D calls that take a
+# callback, or answer with an array behind a pointer, which Rae cannot do
+# directly yet. Hand-written (the glue is ours); the rest of lib/box3d is
+# generated. Arrays are passed as a List's `.data` with its capacity; the
+# helpers return how many elements they wrote.
+
+import box3d/Box3dTypes
+import box3d/Box3dTypes2
+cheader "box3d/rae_glue.h"
+
+func rae_b3ContactBeginAt(
+  events: view b3ContactEvents
+  index: Int32
+) unsafe extern("rae_b3ContactBeginAt") ret b3ContactBeginTouchEvent
+
+func rae_b3ContactEndAt(
+  events: view b3ContactEvents
+  index: Int32
+) unsafe extern("rae_b3ContactEndAt") ret b3ContactEndTouchEvent
+
+func rae_b3ContactHitAt(
+  events: view b3ContactEvents
+  index: Int32
+) unsafe extern("rae_b3ContactHitAt") ret b3ContactHitEvent
+
+func rae_b3SensorBeginAt(
+  events: view b3SensorEvents
+  index: Int32
+) unsafe extern("rae_b3SensorBeginAt") ret b3SensorBeginTouchEvent
+
+func rae_b3SensorEndAt(
+  events: view b3SensorEvents
+  index: Int32
+) unsafe extern("rae_b3SensorEndAt") ret b3SensorEndTouchEvent
+
+func rae_b3BodyMoveAt(
+  events: view b3BodyEvents
+  index: Int32
+) unsafe extern("rae_b3BodyMoveAt") ret b3BodyMoveEvent
+
+func rae_b3World_CollideMoverInto(
+  worldId: copy b3WorldId
+  origin: copy b3Vec3
+  mover: view b3Capsule
+  filter: copy b3QueryFilter
+  planes: Ptr
+  shapeIds: Ptr
+  capacity: Int32
+) unsafe extern("rae_b3World_CollideMoverInto") ret Int32
+
+func rae_b3World_CastMoverIgnoring(
+  worldId: copy b3WorldId
+  origin: copy b3Vec3
+  mover: view b3Capsule
+  translation: copy b3Vec3
+  filter: copy b3QueryFilter
+  ignore: Ptr
+  ignoreCount: Int32
+) unsafe extern("rae_b3World_CastMoverIgnoring") ret Float32
+
+func rae_b3World_OverlapAABBInto(
+  worldId: copy b3WorldId
+  aabb: copy b3AABB
+  filter: copy b3QueryFilter
+  shapeIds: Ptr
+  capacity: Int32
+) unsafe extern("rae_b3World_OverlapAABBInto") ret Int32
+
+func rae_b3World_OverlapShapeInto(
+  worldId: copy b3WorldId
+  origin: copy b3Vec3
+  proxy: view b3ShapeProxy
+  filter: copy b3QueryFilter
+  shapeIds: Ptr
+  capacity: Int32
+) unsafe extern("rae_b3World_OverlapShapeInto") ret Int32
+
+func rae_b3World_CastShapeClosest(
+  worldId: copy b3WorldId
+  origin: copy b3Vec3
+  proxy: view b3ShapeProxy
+  translation: copy b3Vec3
+  filter: copy b3QueryFilter
+) unsafe extern("rae_b3World_CastShapeClosest") ret b3RayResult
+
+# Meshes and hulls as opaque handles (0: none)
+func rae_b3CreateMesh(def: view b3MeshDef) unsafe extern("rae_b3CreateMesh") ret UInt64
+
+func rae_b3CreateMeshShape(
+  bodyId: copy b3BodyId
+  def: view b3ShapeDef
+  mesh: UInt64
+  scale: copy b3Vec3
+) unsafe extern("rae_b3CreateMeshShape") ret b3ShapeId
+
+func rae_b3DestroyMesh(mesh: UInt64) unsafe extern("rae_b3DestroyMesh")
+
+func rae_b3CreateHull(
+  points: Ptr
+  pointCount: Int32
+  maxVertexCount: Int32
+) unsafe extern("rae_b3CreateHull") ret UInt64
+
+func rae_b3CreateHullShape(
+  bodyId: copy b3BodyId
+  def: view b3ShapeDef
+  hull: UInt64
+) unsafe extern("rae_b3CreateHullShape") ret b3ShapeId
+
+func rae_b3DestroyHull(hull: UInt64) unsafe extern("rae_b3DestroyHull")

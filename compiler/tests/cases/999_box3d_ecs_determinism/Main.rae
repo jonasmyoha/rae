@@ -1,0 +1,355 @@
+# Fixture 988 on the C-library physics track (lib/box3d/ecs,
+# docs/physics-two-implementations.md §2): the same program with only its
+# `open` lines changed, over upstream Box3D's C library, and the same expected
+# output, bit for bit. (988's description follows.)
+# Determinism of the physics ECS layer (lib/physics/ecs,
+# docs/physics-design.md §6-§7): two worlds are built the same way — a
+# venue from a render mesh (Mesh3d.makePlane) and a venue box, a stack of
+# boxes, spheres thrown at it, a kinematic platform the game moves through
+# its Transform3D, a ball the game teleports half-way, and a Z-up character
+# that walks and jumps — and are stepped through physicsFrame with the same
+# uneven frame times until each has taken 600 fixed steps. Every 100 steps
+# both worlds' transforms are hashed and compared; at the end every entity's
+# transform is printed from both worlds and must be identical. The contact,
+# hit and sensor event counts are printed too.
+import Math
+import Vec2
+import Vec3
+import Quat
+import Mesh3d
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open ecs/Event
+open ecs/Transform
+open box3d/ecs/PhysicsTypes
+open box3d/ecs/Physics
+open box3d/ecs/PhysicsComponents
+open box3d/ecs/PhysicsSpawn
+open box3d/ecs/PhysicsSystems
+open box3d/ecs/PhysicsQueries
+open box3d/ecs/VenueMesh
+
+type GameWorld {
+  allocator: EntityAllocator
+  transforms: ComponentTable(Transform3D)
+  rigidBodies: ComponentTable(RigidBody)
+  colliders: ComponentTable(Collider)
+  characters: ComponentTable(CharacterBody)
+  physics: Physics
+  # The entities the script drives
+  platformId: EntityId
+  teleportId: EntityId
+  characterId: EntityId
+  # Event totals
+  contactsBegan: Int
+  contactsEnded: Int
+  hits: Int
+}
+
+func spawnBody(
+  world: mod GameWorld
+  bodyType: BodyType
+  position: view Vec3
+  velocity: view Vec3
+) ret EntityId {
+  let entityId: EntityId = allocEntity(this: world.allocator)
+  var def: BodyDef = defaultBodyDef(lengthUnitsPerMeter: 1.0)
+  def.bodyType = bodyType
+  def.position = position
+  def.linearVelocity = velocity
+  spawnRigidBody(
+    physics: world.physics
+    rigidBodies: world.rigidBodies
+    transforms: world.transforms
+    entityId: entityId
+    def: def
+  )
+  ret entityId
+}
+
+# The bodies report contacts and hits (both are off by default, as in
+# Box3D).
+func eventShapeDef() ret ShapeDef {
+  var def: ShapeDef = defaultShapeDef(lengthUnitsPerMeter: 1.0)
+  def.enableContactEvents = true
+  def.enableHitEvents = true
+  ret def
+}
+
+func addBox(world: mod GameWorld, entityId: view EntityId, halfExtents: view Vec3) {
+  addBoxCollider(
+    physics: world.physics
+    rigidBodies: world.rigidBodies
+    colliders: world.colliders
+    entityId: entityId
+    def: eventShapeDef()
+    halfExtents: halfExtents
+    transform: transformIdentity()
+  )
+}
+
+func addBall(world: mod GameWorld, entityId: view EntityId, radius: view Float) {
+  addSphereCollider(
+    physics: world.physics
+    rigidBodies: world.rigidBodies
+    colliders: world.colliders
+    entityId: entityId
+    def: eventShapeDef()
+    sphere: Sphere { center: Vec3 { x: 0.0, y: 0.0, z: 0.0 }, radius: radius }
+  )
+}
+
+func buildWorld() ret GameWorld {
+  var world: GameWorld = {
+    allocator: createEntityAllocator()
+    transforms: createComponentTable(Transform3D)
+    rigidBodies: createComponentTable(RigidBody)
+    colliders: createComponentTable(Collider)
+    characters: createComponentTable(CharacterBody)
+    physics: createPhysics(def: defaultPhysicsWorldDef(), fixedStep: 1.0 / 60.0, subSteps: 4)
+    platformId: noEntity()
+    teleportId: noEntity()
+    characterId: noEntity()
+    contactsBegan: 0
+    contactsEnded: 0
+    hits: 0
+  }
+  # The venue: a render plane and a curb box
+  addVenueMesh(
+    physics: world.physics
+    mesh: Mesh3d.makePlane(size: 60.0, segments: 12)
+    transform: transformIdentity()
+    def: defaultShapeDef(lengthUnitsPerMeter: 1.0)
+  )
+  addVenueBox(
+    physics: world.physics
+    def: defaultShapeDef(lengthUnitsPerMeter: 1.0)
+    halfExtents: Vec3 { x: 1.0, y: 3.0, z: 0.15 }
+    transform: Transform { position: Vec3 { x: 6.0, y: 0.0, z: 0.15 }, rotation: quatIdentity() }
+  )
+  # A stack of boxes
+  loop var level: Int = 0, level < 5, ++level {
+    let boxId: EntityId = spawnBody(
+      world: world
+      bodyType: BodyType.dynamicBody
+      position: Vec3 { x: -3.0, y: 0.0, z: 0.5 + (level as Float) * 1.0 }
+      velocity: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+    )
+    addBox(world: world, entityId: boxId, halfExtents: Vec3 { x: 0.5, y: 0.5, z: 0.5 })
+  }
+  # Balls thrown at the stack
+  loop var k: Int = 0, k < 4, ++k {
+    let ballId: EntityId = spawnBody(
+      world: world
+      bodyType: BodyType.dynamicBody
+      position: Vec3 { x: 4.0, y: -1.5 + (k as Float) * 1.0, z: 1.0 + (k as Float) * 0.5 }
+      velocity: Vec3 { x: -4.0, y: 0.2 * (k as Float), z: 2.0 }
+    )
+    addBall(world: world, entityId: ballId, radius: 0.3)
+  }
+  # A kinematic platform the game moves
+  world.platformId = spawnBody(
+    world: world
+    bodyType: BodyType.kinematicBody
+    position: Vec3 { x: 0.0, y: 4.0, z: 0.5 }
+    velocity: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+  )
+  addBox(world: world, entityId: world.platformId, halfExtents: Vec3 { x: 1.0, y: 1.0, z: 0.2 })
+  let rider: EntityId = spawnBody(
+    world: world
+    bodyType: BodyType.dynamicBody
+    position: Vec3 { x: 0.0, y: 4.0, z: 1.2 }
+    velocity: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+  )
+  addBox(world: world, entityId: rider, halfExtents: Vec3 { x: 0.3, y: 0.3, z: 0.3 })
+  # A ball the game teleports half-way
+  world.teleportId = spawnBody(
+    world: world
+    bodyType: BodyType.dynamicBody
+    position: Vec3 { x: -6.0, y: -4.0, z: 2.0 }
+    velocity: Vec3 { x: 1.0, y: 0.0, z: 0.0 }
+  )
+  addBall(world: world, entityId: world.teleportId, radius: 0.4)
+  # A character
+  world.characterId = allocEntity(this: world.allocator)
+  var character: CharacterBody = createCharacterBody(position: Vec3 { x: 2.0, y: -4.0, z: 1.4 })
+  character.throttle = Vec2 { x: 1.0, y: 0.0 }
+  componentSet(this: world.characters, entityId: world.characterId, data: character)
+  ret world
+}
+
+# The game's script for frame `frame`: drive the platform, teleport the
+# ball once, steer and jump the character.
+func playScript(world: mod GameWorld, frame: view Int, time: view Float) {
+  if true {
+    let platform: mod Transform3D => componentMod(
+      this: world.transforms
+      entityId: world.platformId
+    )
+    platform.position = Vec3 { x: 2.0 * Math.sin(x: time), y: 4.0, z: 0.5 }
+  }
+  if frame is 200 {
+    let ball: mod Transform3D => componentMod(this: world.transforms, entityId: world.teleportId)
+    ball.position = Vec3 { x: -6.0, y: -6.0, z: 3.0 }
+  }
+  let character: mod CharacterBody => componentMod(
+    this: world.characters
+    entityId: world.characterId
+  )
+  if frame is 60 or frame is 150 {
+    character.jump = true
+  }
+  if frame is 100 {
+    character.forward = Vec3 { x: 0.0, y: 1.0, z: 0.0 }
+    character.right = Vec3 { x: 1.0, y: 0.0, z: 0.0 }
+  }
+  if frame is 200 {
+    character.throttle = Vec2 { x: 0.0, y: 0.0 }
+  }
+}
+
+# Count and advance the frame's physics events.
+func drainEvents(world: mod GameWorld) {
+  world.contactsBegan = world.contactsBegan + eventCount(this: world.physics.contactBegan)
+  world.contactsEnded = world.contactsEnded + eventCount(this: world.physics.contactEnded)
+  world.hits = world.hits + eventCount(this: world.physics.hits)
+  advancePhysicsEvents(physics: world.physics)
+}
+
+# FNV-1a over every transform's position and rotation bits.
+func transformHash(world: view GameWorld) ret UInt64 {
+  var hash: UInt64 = 14695981039346656037
+  let prime: UInt64 = 1099511628211
+  loop var i: Int = 0, i < componentCount(this: world.transforms), ++i {
+    let transform: Transform3D = componentCopyAtDefault(this: world.transforms, i: i)
+    let values: List(Float) = {
+      transform.position.x
+      transform.position.y
+      transform.position.z
+      transform.rotation.x
+      transform.rotation.y
+      transform.rotation.z
+      transform.rotation.w
+    }
+    loop var j: Int = 0, j < values.length, ++j {
+      let bits: UInt64 = (Math.floatBits(value: values.copyAtDefault(index: j)) bitand 4294967295) as UInt64
+      hash = (hash bitxor bits) * prime
+    }
+  }
+  ret hash
+}
+
+# One frame: the script, then the fixed steps the frame time pays for.
+func runFrame(
+  world: mod GameWorld
+  frame: view Int
+  frameTime: view Float
+  time: view Float
+) {
+  playScript(world: world, frame: frame, time: time)
+  physicsFrame(
+    physics: world.physics
+    rigidBodies: world.rigidBodies
+    characters: world.characters
+    transforms: world.transforms
+    frameTime: frameTime
+  )
+  drainEvents(world: world)
+}
+
+func describe(transform: view Transform3D) ret String {
+  ret "({Math.round(x: transform.position.x * 1000.0) / 1000.0}, {Math.round(
+    x: transform.position.y * 1000.0
+  ) / 1000.0}, {Math.round(x: transform.position.z * 1000.0) / 1000.0})"
+}
+
+func main() {
+  var first: GameWorld = buildWorld()
+  var second: GameWorld = buildWorld()
+  # Uneven frame times: the accumulator turns them into fixed steps
+  let frameTimes: List(Float) = {
+    0.016
+    0.017
+    0.033
+    0.008
+    0.016
+    0.02
+  }
+  var frame: Int = 0
+  var time: Float = 0.0
+  var nextReport: Int = 100
+  var mismatches: Int = 0
+  loop first.physics.stepCount < 600 {
+    let frameTime: Float = frameTimes.copyAtDefault(index: frame % frameTimes.length)
+    runFrame(
+      world: first
+      frame: frame
+      frameTime: frameTime
+      time: time
+    )
+    runFrame(
+      world: second
+      frame: frame
+      frameTime: frameTime
+      time: time
+    )
+    time = time + frameTime
+    frame = frame + 1
+    if first.physics.stepCount >= nextReport {
+      let hashFirst: UInt64 = transformHash(world: first)
+      let hashSecond: UInt64 = transformHash(world: second)
+      let same: Bool = hashFirst is hashSecond and first.physics.stepCount is second.physics.stepCount
+      if same is false {
+        mismatches = mismatches + 1
+      }
+      log("step {first.physics.stepCount}: frames {frame}, identical {same}")
+      nextReport = nextReport + 100
+    }
+  }
+
+  # Every entity's transform, from both worlds
+  loop var i: Int = 0, i < componentCount(this: first.transforms), ++i {
+    let entityId: EntityId = componentEntityAt(this: first.transforms, i: i)
+    let transformFirst: Transform3D = componentCopyAtDefault(this: first.transforms, i: i)
+    var identical: Bool = false
+    if let transformSecond: Transform3D = componentCopy(this: second.transforms, entityId: entityId) {
+      identical = Math.floatBits(value: transformFirst.position.x) is Math.floatBits(
+        value: transformSecond.position.x
+      ) and Math.floatBits(value: transformFirst.position.y) is Math.floatBits(
+        value: transformSecond.position.y
+      ) and Math.floatBits(value: transformFirst.position.z) is Math.floatBits(
+        value: transformSecond.position.z
+      ) and Math.floatBits(value: transformFirst.rotation.w) is Math.floatBits(
+        value: transformSecond.rotation.w
+      )
+    }
+    if identical is false {
+      mismatches = mismatches + 1
+    }
+    log("entity {entityId.index}: {describe(transform: transformFirst)} identical {identical}")
+  }
+  let character: CharacterBody = componentCopyAtDefault(this: first.characters, i: 0)
+  var characterTransform: Transform3D = createTransform3D()
+  if let found: Transform3D = componentCopy(this: first.transforms, entityId: first.characterId) {
+    characterTransform = found
+  }
+  log(
+    "character at {describe(transform: characterTransform)}, grounded {character.grounded}, ground normal z {Math.round(
+      x: character.groundNormal.z * 1000.0
+    ) / 1000.0}"
+  )
+  log(
+    "events: contacts began {first.contactsBegan} (second {second.contactsBegan}), ended {first.contactsEnded}, hits {first.hits}"
+  )
+  let hit: PhysicsHit = raycastClosest(
+    physics: first.physics
+    origin: Vec3 { x: -3.0, y: 0.0, z: 20.0 }
+    translation: Vec3 { x: 0.0, y: 0.0, z: -30.0 }
+    filter: defaultQueryFilter()
+  )
+  log("ray down onto the stack: hit {hit.hit}, entity {hit.entityId.index}")
+  log("mismatches: {mismatches}")
+  destroyPhysics(physics: first.physics)
+  destroyPhysics(physics: second.physics)
+}

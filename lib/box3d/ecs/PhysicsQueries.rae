@@ -1,0 +1,195 @@
+# The world queries of an ECS world on the C-library track: the same as the
+# port's physics/ecs/PhysicsQueries, over Box3D's own queries (the overlap and
+# shape-cast ones through the glue, Box3dGlue, since they take callbacks),
+# answering with the entity of the shape hit (noEntity for the venue).
+# Read-only: callable from any system.
+open Vec3
+open ecs/Entity
+open box3d/Box3d
+open box3d/Box3dGlue
+open box3d/Box3dTypes
+open box3d/Box3dTypes2
+open box3d/ecs/PhysicsTypes
+open box3d/ecs/Physics
+
+type PhysicsHit {
+  hit: Bool
+  entityId: EntityId
+  shapeId: ShapeId
+  point: Vec3
+  normal: Vec3
+  fraction: Float
+}
+
+func noPhysicsHit() ret PhysicsHit {
+  ret PhysicsHit {
+    hit: false
+    entityId: noEntity()
+    shapeId: nullShapeId()
+    point: zeroVector()
+    normal: zeroVector()
+    fraction: 1.0
+  }
+}
+
+func hitOf(physics: view Physics, result: view b3RayResult) ret PhysicsHit {
+  if result.hit is false {
+    ret noPhysicsHit()
+  }
+  let shapeId: ShapeId = fromB3ShapeId(shapeId: result.shapeId)
+  ret PhysicsHit {
+    hit: true
+    entityId: entityOfShape(physics: physics, shapeId: shapeId)
+    shapeId: shapeId
+    point: fromB3Vector(vector: result.point)
+    normal: fromB3Vector(vector: result.normal)
+    fraction: result.fraction
+  }
+}
+
+# The closest shape along the ray from `origin` along `translation` (a ray
+# starting inside a shape ignores it).
+func raycastClosest(
+  physics: view Physics
+  origin: view Vec3
+  translation: view Vec3
+  filter: view QueryFilter
+) ret PhysicsHit {
+  unsafe {
+    let result: b3RayResult = b3World_CastRayClosest(
+      worldId: physics.world
+      origin: toB3Vector(vector: origin)
+      translation: toB3Vector(vector: translation)
+      filter: toB3QueryFilter(filter: filter)
+    )
+    ret hitOf(physics: physics, result: result)
+  }
+}
+
+# A one-point proxy (a sphere of `radius` at the origin) over `point`'s
+# storage, which must outlive the call.
+func sphereProxy(point: view List(b3Vec3), radius: view Float) ret b3ShapeProxy {
+  let proxy: b3ShapeProxy = { points: point.data, count: 1, radius: radius }
+  ret proxy
+}
+
+# The first shape a sphere of `radius` at `origin` hits moving along
+# `translation`.
+func spherecastClosest(
+  physics: view Physics
+  origin: view Vec3
+  radius: view Float
+  translation: view Vec3
+  filter: view QueryFilter
+) ret PhysicsHit {
+  let point: List(b3Vec3) = List.create(b3Vec3, cap: 1)
+  point.add(value: toB3Vector(vector: zeroVector()))
+  unsafe {
+    let result: b3RayResult = rae_b3World_CastShapeClosest(
+      worldId: physics.world
+      origin: toB3Vector(vector: origin)
+      proxy: sphereProxy(point: point, radius: radius)
+      translation: toB3Vector(vector: translation)
+      filter: toB3QueryFilter(filter: filter)
+    )
+    ret hitOf(physics: physics, result: result)
+  }
+}
+
+# The entities of `shapeIds`, each once, in the order first met.
+func shapeEntities(physics: view Physics, shapeIds: view List(ShapeId)) ret List(EntityId) {
+  let entityIds: List(EntityId) = List.create(EntityId, cap: shapeIds.length)
+  loop let shapeId: view ShapeId in shapeIds {
+    let entityId: EntityId = entityOfShape(physics: physics, shapeId: shapeId)
+    if isNone(this: entityId) {
+      continue
+    }
+    var seen: Bool = false
+    loop let known: view EntityId in entityIds {
+      if known is entityId {
+        seen = true
+      }
+    }
+    if seen is false {
+      entityIds.add(value: entityId)
+    }
+  }
+  ret entityIds
+}
+
+# A list of `capacity` empty shape ids for the glue to write into.
+func shapeIdBuffer(capacity: view Int) ret List(b3ShapeId) {
+  let buffer: List(b3ShapeId) = List.create(b3ShapeId, cap: capacity)
+  let empty: b3ShapeId = { index1: 0 }
+  loop var i: Int = 0, i < capacity, ++i {
+    buffer.add(value: empty)
+  }
+  ret buffer
+}
+
+# The first `count` of `buffer` (at most its length), as ShapeIds.
+func collectedShapes(buffer: view List(b3ShapeId), count: view Int) ret List(ShapeId) {
+  let shapeIds: List(ShapeId) = List.create(ShapeId, cap: count)
+  loop var i: Int = 0, i < count and i < buffer.length, ++i {
+    shapeIds.add(value: fromB3ShapeId(shapeId: buffer.copyAtDefault(index: i)))
+  }
+  ret shapeIds
+}
+
+# The entities whose shapes' boxes overlap `box`.
+func overlapAabbEntities(
+  physics: view Physics
+  box: view Aabb
+  filter: view QueryFilter
+) ret List(EntityId) {
+  var capacity: Int = 64
+  loop {
+    let buffer: List(b3ShapeId) = shapeIdBuffer(capacity: capacity)
+    var count: Int = 0
+    unsafe {
+      count = rae_b3World_OverlapAABBInto(
+        worldId: physics.world
+        aabb: toB3Aabb(box: box)
+        filter: toB3QueryFilter(filter: filter)
+        shapeIds: buffer.data
+        capacity: capacity as Int32
+      ) as Int
+    }
+    if count <= capacity {
+      ret shapeEntities(physics: physics, shapeIds: collectedShapes(buffer: buffer, count: count))
+    }
+    capacity = count
+  }
+  ret List.create(EntityId, cap: 0)
+}
+
+# The entities whose shapes overlap the sphere at `center` of `radius`.
+func overlapSphereEntities(
+  physics: view Physics
+  center: view Vec3
+  radius: view Float
+  filter: view QueryFilter
+) ret List(EntityId) {
+  let point: List(b3Vec3) = List.create(b3Vec3, cap: 1)
+  point.add(value: toB3Vector(vector: zeroVector()))
+  var capacity: Int = 64
+  loop {
+    let buffer: List(b3ShapeId) = shapeIdBuffer(capacity: capacity)
+    var count: Int = 0
+    unsafe {
+      count = rae_b3World_OverlapShapeInto(
+        worldId: physics.world
+        origin: toB3Vector(vector: center)
+        proxy: sphereProxy(point: point, radius: radius)
+        filter: toB3QueryFilter(filter: filter)
+        shapeIds: buffer.data
+        capacity: capacity as Int32
+      ) as Int
+    }
+    if count <= capacity {
+      ret shapeEntities(physics: physics, shapeIds: collectedShapes(buffer: buffer, count: count))
+    }
+    capacity = count
+  }
+  ret List.create(EntityId, cap: 0)
+}

@@ -14,7 +14,10 @@
 #       lib/libbox3d.a          native, SIMD on (NEON / SSE2): the product build
 #       lib/scalar/libbox3d.a   native, BOX3D_DISABLE_SIMD: the oracle's build
 #       lib/wasm32/libbox3d.a   wasm32-wasip1 via wasi-sdk ($WASI_SDK), -msimd128
-#     plus include/box3d/*.h and COMMIT (the pin it was built from).
+#     plus include/box3d/*.h and COMMIT (the pin it was built from). Each
+#     library also holds tools/box3d/rae_glue.c (the callbacks and event
+#     array reads Rae cannot do itself yet; header installed as
+#     include/box3d/rae_glue.h).
 #   - Prints the build time and the libraries' sizes.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -37,13 +40,14 @@ git -C "$SRC" checkout --quiet --detach "$BOX3D_COMMIT"
 rm -rf "$INSTALL"
 mkdir -p "$INSTALL/include" "$INSTALL/lib/scalar" "$INSTALL/lib/wasm32"
 cp -R "$SRC/include/box3d" "$INSTALL/include/"
+cp "$HERE/rae_glue.h" "$INSTALL/include/box3d/rae_glue.h"
 
 # build <cc> <ar> <out.a> <flags...>: every src/*.c into one archive
 build() {
   cc="$1"; archiver="$2"; out="$3"; shift 3
   objs="$(mktemp -d)"
-  for file in "$SRC"/src/*.c; do
-    "$cc" -std=c17 -O2 -DNDEBUG -ffp-contract=off "$@" -I"$SRC/include" -I"$SRC/src" \
+  for file in "$SRC"/src/*.c "$HERE/rae_glue.c"; do
+    "$cc" -std=c17 -O2 -DNDEBUG -ffp-contract=off "$@" -I"$INSTALL/include" -I"$SRC/src" \
       -c "$file" -o "$objs/$(basename "$file" .c).o"
   done
   "$archiver" rcs "$out" "$objs"/*.o
