@@ -47,6 +47,7 @@ type VehicleWorld {
 func createVehicleWorld(workerCount: view Int) ret VehicleWorld {
   var def: WorldDef = defaultPhysicsWorldDef()
   def.workerCount = workerCount
+  def.contactHertz = vehicleContactHertz
   ret VehicleWorld {
     allocator: createEntityAllocator()
     transforms: createComponentTable(Transform3D)
@@ -54,7 +55,7 @@ func createVehicleWorld(workerCount: view Int) ret VehicleWorld {
     colliders: createComponentTable(Collider)
     characters: createComponentTable(CharacterBody)
     renderShapes: createComponentTable(RenderShape)
-    physics: createPhysics(def: def, fixedStep: 1.0 / 60.0, subSteps: 4)
+    physics: createPhysics(def: def, fixedStep: 1.0 / vehicleStepRate, subSteps: vehicleSubSteps)
     chassisId: noEntity()
     wheelIds: List.create(EntityId, cap: 4)
     wheelJoints: List.create(JointId, cap: 4)
@@ -271,15 +272,22 @@ func despawnVehicle(world: mod VehicleWorld) {
   world.chassisId = noEntity()
 }
 
-# Apply the driver's `command`: each wheel's steering target, spin speed and
-# torque share; a car being driven is woken (a new motor target alone does not
+# Apply the driver's `command` at the car's current speed for a frame of
+# `frameTime` seconds: each wheel's steering target, spin speed and torque,
+# and the air and rolling resistance; a car being driven is woken (a new motor target alone does not
 # wake it).
 func driveVehicle(
   world: mod VehicleWorld
   car: view VehicleDescription
   command: view VehicleCommand
+  frameTime: view Float
 ) {
-  let targets: List(VehicleWheelTarget) = wheelTargets(car: car, command: command)
+  let pose: Transform3D = chassisTransform(world: world)
+  let speed: Float = forwardSpeed(
+    velocity: chassisVelocity(world: world)
+    chassisRotation: pose.rotation
+  )
+  let targets: List(VehicleWheelTarget) = wheelTargets(car: car, command: command, speed: speed)
   loop var i: Int = 0, i < world.wheelJoints.length, ++i {
     let jointId: JointId = world.wheelJoints.copyAtDefault(index: i)
     let target: VehicleWheelTarget = targets.copyAtDefault(index: i)
@@ -290,6 +298,17 @@ func driveVehicle(
   if command.throttle is not 0.0 or command.steer is not 0.0 {
     wakeEntity(physics: world.physics, rigidBodies: world.rigidBodies, entityId: world.chassisId)
   }
+  # Air and rolling resistance, which Box3D does not model
+  applyEntityImpulse(
+    physics: world.physics
+    rigidBodies: world.rigidBodies
+    entityId: world.chassisId
+    impulse: resistanceImpulse(
+      car: car
+      velocity: chassisVelocity(world: world)
+      frameTime: frameTime
+    )
+  )
 }
 
 # The chassis' pose (from its Transform3D, written by the pull system).

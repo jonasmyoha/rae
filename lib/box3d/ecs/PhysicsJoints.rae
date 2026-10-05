@@ -206,6 +206,26 @@ func wheelSpinSpeed(physics: view Physics, jointId: view JointId) ret Float {
   }
 }
 
+# Push the entity's body by `impulse` (N s) at its centre of mass (a
+# vehicle's air and rolling resistance).
+func applyEntityImpulse(
+  physics: mod Physics
+  rigidBodies: view ComponentTable(RigidBody)
+  entityId: view EntityId
+  impulse: view Vec3
+) {
+  let bodyId: BodyId = entityBodyId(rigidBodies: rigidBodies, entityId: entityId)
+  if bodyId.index1 is not 0 {
+    unsafe {
+      b3Body_ApplyLinearImpulseToCenter(
+        bodyId: toB3BodyId(bodyId: bodyId)
+        impulse: toB3Vector(vector: impulse)
+        wake: false
+      )
+    }
+  }
+}
+
 # Wake the entity's body (a motor's new target alone does not wake a
 # sleeping car, so the driver wakes it, as the Driving sample does).
 func wakeEntity(

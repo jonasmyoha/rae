@@ -17,94 +17,90 @@ func tenths(value: view Float) ret Float {
   ret Math.round(x: value * 10.0) / 10.0
 }
 
-# A world with a flat 200 m ground and the car resting on it.
-func flatWorld() ret VehicleWorld {
+func kilometresPerHour(world: view VehicleWorld) ret Float {
+  let pose: Transform3D = chassisTransform(world: world)
+  ret forwardSpeed(velocity: chassisVelocity(world: world), chassisRotation: pose.rotation) * 3.6
+}
+
+# A world with a flat 2 km ground and the car resting on it, at the west end.
+func flatWorld(car: view VehicleDescription) ret VehicleWorld {
   var world: VehicleWorld = createVehicleWorld(workerCount: 1)
   let ground: ShapeId = addVenueBox(
     physics: world.physics
     def: defaultShapeDef(lengthUnitsPerMeter: 1.0)
-    halfExtents: Vec3 { x: 100.0, y: 100.0, z: 0.5 }
+    halfExtents: Vec3 { x: 1000.0, y: 1000.0, z: 0.5 }
     transform: Transform { position: Vec3 { x: 0.0, y: 0.0, z: -0.5 }, rotation: Quat.identity() }
   )
-  spawnVehicle(world: world, car: drivingCar(startPosition: Vec3 { x: 0.0, y: 0.0, z: 1.0 }))
+  spawnVehicle(world: world, car: car)
   ret world
 }
 
-func run(
-  world: mod VehicleWorld
-  command: view VehicleCommand
-  seconds: view Int
-  label: view String
-) {
-  let car: VehicleDescription = drivingCar(startPosition: Vec3 { x: 0.0, y: 0.0, z: 1.0 })
-  loop var second: Int = 1, second <= seconds, ++second {
-    loop var frame: Int = 0, frame < 60, ++frame {
-      driveVehicle(world: world, car: car, command: command)
-      let steps: Int = stepVehicleWorld(world: world, frameTime: 1.0 / 60.0)
-    }
-    let pose: Transform3D = chassisTransform(world: world)
-    let speed: Float = forwardSpeed(
-      velocity: chassisVelocity(world: world)
-      chassisRotation: pose.rotation
-    )
-    log(
-      "{label} t={second}s speed {tenths(value: speed)} m/s heading {tenths(
-        value: headingDegrees(chassisRotation: pose.rotation)
-      )} deg height {tenths(value: pose.position.z)} m"
-    )
-  }
+func drive(world: mod VehicleWorld, car: view VehicleDescription, command: view VehicleCommand) {
+  driveVehicle(
+    world: world
+    car: car
+    command: command
+    frameTime: 1.0 / 60.0
+  )
+  let steps: Int = stepVehicleWorld(world: world, frameTime: 1.0 / 60.0)
 }
 
 func main() {
-  var driven: VehicleWorld = flatWorld()
+  let car: VehicleDescription = drivingCar(startPosition: Vec3 { x: -900.0, y: 0.0, z: 1.0 })
   let settle: VehicleCommand = { throttle: 0.0, steer: 0.0 }
-  run(
-    world: driven
-    command: settle
-    seconds: 1
-    label: "settle"
-  )
-  let pose0: Transform3D = chassisTransform(world: driven)
   let full: VehicleCommand = { throttle: 1.0, steer: 0.0 }
-  run(
-    world: driven
-    command: full
-    seconds: 4
-    label: "drive"
+
+  # Full throttle from rest: the A7's 0-100 km/h is 5.3 s
+  var driven: VehicleWorld = flatWorld(car: car)
+  loop var frame: Int = 0, frame < 60, ++frame {
+    drive(world: driven, car: car, command: settle)
+  }
+  log("at rest: chassis centre {tenths(value: chassisTransform(world: driven).position.z)} m up")
+  var hundredAt: Float = -1.0
+  loop var frame: Int = 1, frame <= 900, ++frame {
+    drive(world: driven, car: car, command: full)
+    if hundredAt < 0.0 and kilometresPerHour(world: driven) >= 100.0 {
+      hundredAt = (frame as Float) / 60.0
+    }
+    if frame % 180 is 0 {
+      log(
+        "t={frame / 60}s {Math.round(x: kilometresPerHour(world: driven))} km/h heading {tenths(
+          value: headingDegrees(chassisRotation: chassisTransform(world: driven).rotation)
+        )} deg"
+      )
+    }
+  }
+  log(
+    "0-100 km/h in {tenths(value: hundredAt)} s: within 5.0-5.6 s {hundredAt >= 5.0 and hundredAt <= 5.6}"
   )
-  let pose1: Transform3D = chassisTransform(world: driven)
-  let speed: Float = forwardSpeed(
-    velocity: chassisVelocity(world: driven)
-    chassisRotation: pose1.rotation
-  )
-  let travelled: Float = pose1.position.x - pose0.position.x
-  log("driven: reached 10 m/s {speed >= 10.0}, moved forward along +x {travelled > 20.0}")
   destroyVehicleWorld(world: driven)
 
-  var steered: VehicleWorld = flatWorld()
-  run(
-    world: steered
-    command: settle
-    seconds: 1
-    label: "settle"
-  )
+  # Full lock at town speed (throttle held at 20%, about 50 km/h)
+  var steered: VehicleWorld = flatWorld(car: car)
+  let cruise: VehicleCommand = { throttle: 0.2, steer: 0.0 }
+  loop var frame: Int = 0, frame < 600, ++frame {
+    drive(world: steered, car: car, command: cruise)
+  }
   let startHeading: Float = headingDegrees(
     chassisRotation: chassisTransform(world: steered).rotation
   )
-  let turning: VehicleCommand = { throttle: 1.0, steer: 1.0 }
-  run(
-    world: steered
-    command: turning
-    seconds: 3
-    label: "steer"
-  )
-  let endPose: Transform3D = chassisTransform(world: steered)
-  var turned: Float = headingDegrees(chassisRotation: endPose.rotation) - startHeading
+  log("steering at {Math.round(x: kilometresPerHour(world: steered))} km/h")
+  let turning: VehicleCommand = { throttle: 0.2, steer: 1.0 }
+  var lowestUp: Float = 1.0
+  loop var frame: Int = 0, frame < 300, ++frame {
+    drive(world: steered, car: car, command: turning)
+    let up: Vec3 = Quat.rotate(
+      q: chassisTransform(world: steered).rotation
+      v: Vec3 { x: 0.0, y: 1.0, z: 0.0 }
+    )
+    lowestUp = Math.min(a: lowestUp, b: up.z)
+  }
+  var turned: Float = headingDegrees(chassisRotation: chassisTransform(world: steered).rotation) - startHeading
   if turned < 0.0 {
     turned = turned + 360.0
   }
   log(
-    "steered: turned left more than 90 degrees {turned > 90.0}, still upright {endPose.position.z < 2.0}"
+    "full lock for 5 s: turned left {Math.round(x: turned)} deg, more than 90 {turned > 90.0}, stayed upright {lowestUp > 0.9}"
   )
   destroyVehicleWorld(world: steered)
 }

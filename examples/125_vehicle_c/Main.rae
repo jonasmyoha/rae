@@ -63,7 +63,12 @@ func vehicleHash(steps: view Int, workerCount: view Int) ret UInt64 {
       speed: forwardSpeed(velocity: chassisVelocity(world: world), chassisRotation: pose.rotation)
       deltaTime: 1.0 / 60.0
     )
-    driveVehicle(world: world, car: car, command: command)
+    driveVehicle(
+      world: world
+      car: car
+      command: command
+      frameTime: 1.0 / 60.0
+    )
     let taken: Int = stepVehicleWorld(world: world, frameTime: 1.0 / 60.0)
   }
   let hash: UInt64 = transformHash(transforms: world.transforms)
@@ -129,7 +134,12 @@ func runWindowed() ret Int {
       spawnCrates(world: world, course: course)
       spawnVehicle(world: world, car: app.car)
     }
-    driveVehicle(world: world, car: app.car, command: app.command)
+    driveVehicle(
+      world: world
+      car: app.car
+      command: app.command
+      frameTime: app.deltaTime
+    )
     let started: Int = nowNs()
     let steps: Int = stepVehicleWorld(world: world, frameTime: app.deltaTime)
     recordVehicleStep(app: app, startedNs: started, steps: steps)
