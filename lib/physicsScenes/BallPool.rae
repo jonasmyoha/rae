@@ -1,0 +1,105 @@
+# The playground's machine-gun balls, as a bounded pool of entities
+# (docs/physics-two-implementations.md §3). Holding fire spawns a ball every
+# few frames, so without a bound the scene fills with balls and the step slows
+# to a crawl. A ball is retired when any of these holds:
+#   - the pool is over capacity (the OLDEST ball goes first),
+#   - it has lived `lifetimeSeconds`,
+#   - it is farther than `killDistance` from the scene's centre,
+#   - it fell below `killDepth` (off the edge of the ground).
+# The pool only decides WHICH balls go; the app's track adapter despawns them,
+# so this file names no physics track.
+open Vec3
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Transform
+
+type PooledBall {
+  entityId: EntityId
+  firedAt: Float
+}
+
+type BallPool {
+  capacity: Int
+  lifetimeSeconds: Float
+  killDistance: Float
+  killDepth: Float
+  # The live balls, oldest first
+  balls: List(PooledBall)
+}
+
+func createBallPool(
+  capacity: view Int
+  lifetimeSeconds: view Float
+  killDistance: view Float
+) ret BallPool {
+  ret BallPool {
+    capacity: capacity
+    lifetimeSeconds: lifetimeSeconds
+    killDistance: killDistance
+    killDepth: -20.0
+    balls: List.create(PooledBall, cap: capacity + 1)
+  }
+}
+
+func addPooledBall(pool: mod BallPool, entityId: view EntityId, now: view Float) {
+  pool.balls.add(value: PooledBall { entityId: entityId, firedAt: now })
+}
+
+# Forget every ball (the scene they lived in was destroyed with them).
+func clearBallPool(pool: mod BallPool) {
+  pool.balls.clear()
+}
+
+func ballCount(pool: view BallPool) ret Int {
+  ret pool.balls.length
+}
+
+# Whether `ball` has outlived its time or left the play area.
+func ballExpired(
+  pool: view BallPool
+  ball: view PooledBall
+  transforms: view ComponentTable(Transform3D)
+  center: view Vec3
+  now: view Float
+) ret Bool {
+  if now - ball.firedAt > pool.lifetimeSeconds {
+    ret true
+  }
+  if componentHas(this: transforms, entityId: ball.entityId) is false {
+    ret false
+  }
+  let position: Vec3 = componentView(this: transforms, entityId: ball.entityId).position
+  if position.z < pool.killDepth {
+    ret true
+  }
+  ret vlen(a: vsub(a: position, b: center)) > pool.killDistance
+}
+
+# Take the balls to retire now out of the pool and return their entities, for
+# the caller to despawn.
+func retireBalls(
+  pool: mod BallPool
+  transforms: view ComponentTable(Transform3D)
+  center: view Vec3
+  now: view Float
+) ret List(EntityId) {
+  let retired: List(EntityId) = List.create(EntityId, cap: 8)
+  var index: Int = 0
+  loop index < pool.balls.length {
+    let ball: PooledBall = pool.balls.copyAtDefault(index: index)
+    let overCapacity: Bool = pool.balls.length > pool.capacity
+    if overCapacity or ballExpired(
+      pool: pool
+      ball: ball
+      transforms: transforms
+      center: center
+      now: now
+    ) {
+      retired.add(value: ball.entityId)
+      pool.balls.remove(index: index)
+    } else {
+      index = index + 1
+    }
+  }
+  ret retired
+}

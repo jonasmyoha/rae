@@ -95,6 +95,10 @@ type CameraRig {
   dragging: Bool
   lastX: Float
   lastY: Float
+  # Look with the RIGHT mouse button instead of the left, for an app whose left
+  # button does something else in the view (the physics playground fires with
+  # it). Off by default; the touch path ignores it.
+  lookWithRightButton: Bool
   # Touch/pointer input tracking (#764: was module-level gCam* globals). A
   # rig that never calls setCameraTouch keeps camTouchOn=false and the desktop
   # mouse path, so 110/113 behave as before.
@@ -146,11 +150,19 @@ func pointerOutsideCamZone(rig: view CameraRig, x: view Float, y: view Float) re
   ret dx * dx + dy * dy > rig.camZoneR * rig.camZoneR
 }
 
+# The mouse button the rig looks with is held.
+func lookButtonDown(rig: view CameraRig) ret Bool {
+  if rig.lookWithRightButton {
+    ret Sdl3.isMouseButtonDown(button: 1)
+  }
+  ret Gpu2d.pointerDown()
+}
+
 func resolveCameraPointer(rig: mod CameraRig) {
   if rig.camTouchOn is false {
     rig.camPointerX = Gpu2d.pointerX()
     rig.camPointerY = Gpu2d.pointerY()
-    rig.camPointerDown = Gpu2d.pointerDown()
+    rig.camPointerDown = lookButtonDown(rig: rig)
     ret
   }
   let touches: Int = Gpu2d.touchCount()
@@ -199,7 +211,7 @@ func resolveCameraPointer(rig: mod CameraRig) {
     # Desktop mouse: skip while the joystick owns the mouse.
     rig.camPointerX = Gpu2d.pointerX()
     rig.camPointerY = Gpu2d.pointerY()
-    rig.camPointerDown = Gpu2d.pointerDown() and rig.camJoyActive is false
+    rig.camPointerDown = lookButtonDown(rig: rig) and rig.camJoyActive is false
   }
 }
 
@@ -235,6 +247,7 @@ func createCameraRig(camera: view Camera3d) pub ret CameraRig {
     dragging: false
     lastX: 0.0
     lastY: 0.0
+    lookWithRightButton: false
     camTouchOn: false
     camExcludeId: -1
     camJoyActive: false

@@ -190,10 +190,34 @@ the same simulation.
   rendering. Measured: a visible 15-second run of the welded towers costs
   1.8 s of CPU, almost all before the towers sleep.
 - **Measured at 10k bodies** (pool of 8, load ~10 from other work): a
-  6-8 ms physics step, ~55 ms per frame. Profiling the frame is the
-  performance pass.
+  6-8 ms physics step, ~55 ms per frame. The maintainer may have been
+  running a second build of 122 at the time, so treat these figures as
+  skewed. Before timing anything, check that no other copy of a playground
+  is running. Profiling the frame is the performance pass.
 - The terrain stays a height grid used as a triangle mesh; a true
   height-field shape was optional and is not done.
+
+After the maintainer's first try-out (2026-10-05) the controls changed:
+- **Fly camera:** WASD moves and Q/E go down and up; Shift is fast and
+  Control slow. A right drag looks around. This is CameraRig's free mode;
+  the rig's new `lookWithRightButton` field frees the left button. Each scene
+  opens where the old orbit would have put the eye, with a move speed scaled
+  to the scene's size.
+- **Machine gun:** holding the left button over the scene, or F, fires 15
+  balls a second along the camera ray through the pointer. T toggles
+  autofire.
+- **Ball pool:** the balls live in `physicsScenes/BallPool`. It is
+  backend-neutral, so the track-B twin reuses it. A ball is retired when
+  the pool holds more than 400, when it is 20 s old, when it is
+  `3 x cameraDistance + 100` from the scene centre, or when it falls below
+  z = -20. The adapter's `despawnBall` removes its body, its components and
+  its entity.
+- **FPS meter:** ui/DebugOverlay's fps readout, top right, the one the other
+  3D examples use.
+- **Colours:** every body gets its own pastel. The hues are a golden-ratio
+  turn apart by entity index.
+- `RAE_PLAYGROUND_AUTOFIRE=1` opens with autofire on (for headless checks).
+  `RAE_PLAYGROUND_DEBUG=1` also logs the live ball count.
 
 ## 4. Track B: building the C library
 
