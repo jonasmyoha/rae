@@ -59,7 +59,12 @@ type VehicleApp {
   frameWindow: TimingWindow
   car: VehicleDescription
   command: VehicleCommand
+  # The chassis' pose as last seen (the autopilot steers by it)
+  chassis: Transform3D
+  # The chassis' forward speed as last seen
+  speed: Float
   autopilot: Bool
+  pilot: Autopilot
   # The respawn cycle (RAE_VEHICLE_CYCLE_SECONDS; 0 is off)
   cycleSeconds: Float
   lastCycle: Float
@@ -115,7 +120,10 @@ func createVehicleApp(
     frameWindow: createTimingWindow()
     car: drivingCar(startPosition: Vec3 { x: 0.0, y: 0.0, z: 1.2 })
     command: VehicleCommand { throttle: 0.0, steer: 0.0 }
+    chassis: createTransform3D()
+    speed: 0.0
     autopilot: Sys.getEnv(name: "RAE_VEHICLE_AUTOPILOT").length() > 0
+    pilot: createAutopilot()
     cycleSeconds: cycleSeconds
     lastCycle: 0.0
     cycleCount: 0
@@ -142,15 +150,68 @@ func createVehicleApp(
   ret app
 }
 
-# The autopilot's command at `seconds` into a run: full throttle straight
-# over the ramp ahead for three seconds, then weaving gently left and right
-# across the pad and out into the hills. The determinism run and the memory
+# The autopilot's memory: how long the car has been stuck, and how long it
+# still has to back out.
+type Autopilot {
+  stuckSeconds: Float
+  reverseSeconds: Float
+}
+
+func createAutopilot() ret Autopilot {
+  ret Autopilot { stuckSeconds: 0.0, reverseSeconds: 0.0 }
+}
+
+# The autopilot's command at `seconds` into a run, for a chassis at `pose`
+# going at `speed` (forward, m/s), `deltaTime` after the last one:
+# - full throttle straight over the ramp ahead for three seconds (the jump);
+# - then a gentle weave at 60% throttle - Box3D's sample car is light and its
+#   upright spring soft, and a harder weave rolls it - turning back towards
+#   the middle of the course whenever it is more than 50 m out;
+# - stuck (barely moving for 1.5 s, against a ramp's side or a block), it
+#   backs out turning for 2 s.
+# Deterministic for a deterministic world: the determinism run and the memory
 # test drive with it.
-func autopilotCommand(seconds: view Float) ret VehicleCommand {
+func autopilotCommand(
+  autopilot: mod Autopilot
+  seconds: view Float
+  pose: view Transform3D
+  speed: view Float
+  deltaTime: view Float
+) ret VehicleCommand {
   if seconds < 3.0 {
     ret VehicleCommand { throttle: 1.0, steer: 0.0 }
   }
-  ret VehicleCommand { throttle: 1.0, steer: 0.45 * Math.sin(x: 0.5 * (seconds - 3.0)) }
+  if autopilot.reverseSeconds > 0.0 {
+    autopilot.reverseSeconds = autopilot.reverseSeconds - deltaTime
+    ret VehicleCommand { throttle: -0.6, steer: -0.6 }
+  }
+  if Math.abs(value: speed) < 0.5 {
+    autopilot.stuckSeconds = autopilot.stuckSeconds + deltaTime
+    if autopilot.stuckSeconds > 1.5 {
+      autopilot.stuckSeconds = 0.0
+      autopilot.reverseSeconds = 2.0
+    }
+  } else {
+    autopilot.stuckSeconds = 0.0
+  }
+  var steer: Float = 0.25 * Math.sin(x: 0.35 * (seconds - 3.0))
+  let out: Float = Math.sqrt(
+    x: pose.position.x * pose.position.x + pose.position.y * pose.position.y
+  )
+  if out > 50.0 {
+    # Turn left or right, whichever faces the middle sooner
+    let forward: Vec3 = vehicleForward(chassisRotation: pose.rotation)
+    let inward: Vec3 = { x: -pose.position.x, y: -pose.position.y, z: 0.0 }
+    let turn: Float = forward.x * inward.y - forward.y * inward.x
+    let facing: Float = forward.x * inward.x + forward.y * inward.y
+    if facing < 0.9 * out {
+      steer = 0.5
+      if turn < 0.0 {
+        steer = -0.5
+      }
+    }
+  }
+  ret VehicleCommand { throttle: 0.6, steer: steer }
 }
 
 func beginVehicleFrame(app: mod VehicleApp, uiWorld: mod UiWorld, uiSystems: mod UiSystems) {
@@ -190,7 +251,13 @@ func readVehicleControls(app: mod VehicleApp) ret Bool {
     app.autopilot = app.autopilot is false
   }
   if app.autopilot {
-    app.command = autopilotCommand(seconds: app.clock - app.lastCycle)
+    app.command = autopilotCommand(
+      autopilot: app.pilot
+      seconds: app.clock - app.lastCycle
+      pose: app.chassis
+      speed: app.speed
+      deltaTime: app.deltaTime
+    )
   } else {
     var throttle: Float = 0.0
     var steer: Float = 0.0
@@ -217,14 +284,17 @@ func readVehicleControls(app: mod VehicleApp) ret Bool {
   if respawn {
     app.lastCycle = app.clock
     app.respawned = true
+    app.pilot = createAutopilot()
   }
   ret respawn
 }
 
-# The camera behind the car and above it, looking just over the chassis,
+# The camera behind the car, above it and a little to its right, looking just
+# over the chassis,
 # eased so bumps do not shake the view. A camera still moving keeps the loop
 # rendering.
 func updateChaseCamera(app: mod VehicleApp, chassis: view Transform3D) {
+  app.chassis = chassis
   if app.debugLog {
     log(
       "[vehicle] t {tenths(value: app.clock)} dt {app.deltaTime} throttle {app.command.throttle} chassis ({tenths(
@@ -238,9 +308,11 @@ func updateChaseCamera(app: mod VehicleApp, chassis: view Transform3D) {
     forward = Vec3 { x: 1.0, y: 0.0, z: 0.0 }
   }
   forward = vnorm(a: forward)
+  # Behind and a little to the right: a three-quarter view shows the wheels
+  let side: Vec3 = { x: forward.y, y: -forward.x, z: 0.0 }
   let eye: Vec3 = vadd(
-    a: vsub(a: chassis.position, b: vscale(a: forward, s: 9.0))
-    b: Vec3 { x: 0.0, y: 0.0, z: 3.5 }
+    a: vadd(a: vsub(a: chassis.position, b: vscale(a: forward, s: 8.5)), b: vscale(a: side, s: 3.0))
+    b: Vec3 { x: 0.0, y: 0.0, z: 3.2 }
   )
   let target: Vec3 = vadd(a: chassis.position, b: Vec3 { x: 0.0, y: 0.0, z: 0.8 })
   var blend: Float = 1.0 - Math.exp(x: -5.0 * app.deltaTime)
@@ -276,6 +348,7 @@ func updateVehicleHud(
   speed: view Float
   workerCount: view Int
 ) ret Bool {
+  app.speed = speed
   var pilot: String = "off"
   if app.autopilot {
     pilot = "on"

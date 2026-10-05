@@ -1,7 +1,7 @@
-# The physics playgrounds' 3D drawing on the deferred renderer, shared by both
-# tracks (122_physics_playground_port, 123_physics_playground_c): one
-# InstanceBatch per RenderKind (a unit box, a unit sphere, and the sphere
-# stretched for a capsule), filled from each entity's Transform3D and
+# The physics examples' 3D drawing on the deferred renderer, shared by both
+# tracks (the playgrounds 122/123 and the vehicles 124/125): one InstanceBatch
+# per RenderKind (a unit box, a unit sphere, the sphere stretched for a
+# capsule, and a unit cylinder for a wheel), filled from each entity's Transform3D and
 # RenderShape after the pull system, drawn with drawInstances - one draw per
 # mesh kind, never one per body - and the same bodies queued as shadow casters
 # grouped by kind, so each kind is one instanced shadow draw per cascade too.
@@ -25,11 +25,14 @@ open physicsScenes/SceneTypes
 
 # How an entity is drawn: its mesh kind (one instanced draw per kind) and
 # the scale of the unit mesh.
-enum RenderKind { box, sphere, capsule }
+enum RenderKind { box, sphere, capsule, wheel }
 
 type RenderShape {
   kind: RenderKind
   scale: Vec3
+  # 0-1 round the pastel rainbow (SceneBody.hue); negative picks one from the
+  # entity
+  hue: Float
 }
 
 # The batches' capacities: the pyramid slider's maximum, and room for balls.
@@ -39,9 +42,14 @@ const sphereCapacity: Int = 2400
 
 const capsuleCapacity: Int = 256
 
+const wheelCapacity: Int = 64
+
 type PlaygroundMeshes {
   box: MeshHandle
   sphere: MeshHandle
+  # A unit cylinder along y (a wheel: scale x and z by the radius, y by half
+  # the width)
+  wheel: MeshHandle
   flatGround: MeshHandle
   # The uploaded ground of each mesh-ground scene, by scene index (an invalid
   # handle until first shown)
@@ -52,6 +60,7 @@ type PlaygroundBatches {
   boxes: InstanceBatch
   spheres: InstanceBatch
   capsules: InstanceBatch
+  wheels: InstanceBatch
   ground: InstanceBatch
 }
 
@@ -75,6 +84,7 @@ func createPlaygroundMeshes(
   ret PlaygroundMeshes {
     box: uploadMeshData(renderer: renderer, meshData: makeBox(size: 1.0))
     sphere: uploadMeshData(renderer: renderer, meshData: makeSphere(rings: 16, segments: 24))
+    wheel: uploadMeshData(renderer: renderer, meshData: makeCylinder(segments: 24))
     flatGround: uploadMeshData(renderer: renderer, meshData: makePlane(size: 1600.0, segments: 1))
     sceneGrounds: sceneGrounds
   }
@@ -85,6 +95,7 @@ func createPlaygroundBatches(meshes: view PlaygroundMeshes) ret PlaygroundBatche
     boxes: createInstanceBatch(mesh: meshes.box, capacity: boxCapacity)
     spheres: createInstanceBatch(mesh: meshes.sphere, capacity: sphereCapacity)
     capsules: createInstanceBatch(mesh: meshes.sphere, capacity: capsuleCapacity)
+    wheels: createInstanceBatch(mesh: meshes.wheel, capacity: wheelCapacity)
     ground: createInstanceBatch(mesh: meshes.flatGround, capacity: 1)
   }
 }
@@ -139,12 +150,16 @@ func pastelColor(hue: view Float) ret Vec3 {
   ret Vec3.vadd(a: Vec3.vscale(a: rainbow, s: 0.75), b: Vec3.vscale(a: white, s: 0.25))
 }
 
-# Each body its own pastel: hues a golden-ratio turn apart by entity index, so
-# neighbours (spawned one after another) never share a colour.
-func bodyMaterial(entityId: view EntityId) ret Material3d {
-  let spread: Float = (entityId.index as Float) * 0.618034
+# A body's pastel: its own hue (a scene's left-to-right gradient), or, when it
+# has none, hues a golden-ratio turn apart by entity index.
+func bodyMaterial(entityId: view EntityId, hue: view Float) ret Material3d {
+  var shownHue: Float = hue
+  if shownHue < 0.0 {
+    let spread: Float = (entityId.index as Float) * 0.618034
+    shownHue = spread - Math.floor(x: spread)
+  }
   ret Material3d {
-    baseColor: pastelColor(hue: spread - Math.floor(x: spread))
+    baseColor: pastelColor(hue: shownHue)
     metallic: 0.0
     roughness: 0.55
     emission: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
@@ -172,6 +187,7 @@ func fillBatches(
   resetInstanceBatch(batch: batches.boxes)
   resetInstanceBatch(batch: batches.spheres)
   resetInstanceBatch(batch: batches.capsules)
+  resetInstanceBatch(batch: batches.wheels)
   loop var i: Int = 0, i < componentCount(this: renderShapes), ++i {
     let entityId: EntityId = componentEntityAt(this: renderShapes, i: i)
     if componentHas(this: transforms, entityId: entityId) is false {
@@ -179,7 +195,7 @@ func fillBatches(
     }
     let shape: RenderShape = componentCopyAtDefault(this: renderShapes, i: i)
     let transform: view Transform3D => componentView(this: transforms, entityId: entityId)
-    let material: Material3d = bodyMaterial(entityId: entityId)
+    let material: Material3d = bodyMaterial(entityId: entityId, hue: shape.hue)
     if shape.kind is RenderKind.box {
       let model: Mat4 = bodyModel(transform: transform, scale: Vec3.vscale(a: shape.scale, s: 2.0))
       addInstance(
@@ -192,6 +208,14 @@ func fillBatches(
       let model: Mat4 = bodyModel(transform: transform, scale: shape.scale)
       addInstance(
         batch: batches.spheres
+        model: model
+        prevModel: model
+        material: material
+      )
+    } else if shape.kind is RenderKind.wheel {
+      let model: Mat4 = bodyModel(transform: transform, scale: shape.scale)
+      addInstance(
+        batch: batches.wheels
         model: model
         prevModel: model
         material: material
@@ -216,7 +240,7 @@ func queueShadowCasters(
   renderShapes: view ComponentTable(RenderShape)
   transforms: view ComponentTable(Transform3D)
 ) {
-  loop var pass: Int = 0, pass < 3, ++pass {
+  loop var pass: Int = 0, pass < 4, ++pass {
     loop var i: Int = 0, i < componentCount(this: renderShapes), ++i {
       let entityId: EntityId = componentEntityAt(this: renderShapes, i: i)
       if componentHas(this: transforms, entityId: entityId) is false {
@@ -245,6 +269,13 @@ func queueShadowCasters(
           model: bodyModel(transform: transform, scale: shape.scale)
         )
       }
+      if pass is 3 and shape.kind is RenderKind.wheel {
+        drawShadowCasterWith(
+          renderer: renderer
+          mesh: meshes.wheel
+          model: bodyModel(transform: transform, scale: shape.scale)
+        )
+      }
     }
   }
 }
@@ -269,6 +300,7 @@ func drawPlaygroundGeometry(
   drawInstances(cache: cache, resources: resources, batch: batches.boxes)
   drawInstances(cache: cache, resources: resources, batch: batches.spheres)
   drawInstances(cache: cache, resources: resources, batch: batches.capsules)
+  drawInstances(cache: cache, resources: resources, batch: batches.wheels)
 }
 
 # The ray from the camera through window point (x, y) of a `width` x `height`

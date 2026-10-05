@@ -385,6 +385,44 @@ and its assets path.
   The 124/125 gate branch passes for both, as does 123 after the glue
   change.
 
+### The vehicles featured, and gradient colours (2026-10-05)
+
+After the maintainer's try-out:
+
+- **Wheels look like wheels.** They are drawn as cylinders (the new
+  `Mesh3d.makeCylinder` and a `RenderKind.wheel` batch with its own shadow
+  pass); the collider stays Box3D's 0.4 m sphere. They now sit at ±1.2 m,
+  just outside the 2 m chassis, instead of the sample's ±0.8 m underneath
+  it, so they show.
+- **The boxes on the ground fly when hit.** `dynamicBody` defaults to
+  density 1000, so a 1 m crate weighed a tonne against Box3D's roughly 6 kg
+  sample car, and could not be pushed. The crates and a new wall of six
+  blocks (the static wall is gone) now have density 0.4. Driven into the
+  wall at about 40 km/h, the car throws a block 19 m. The ramps stay static,
+  because a ramp has to hold still to be jumped from.
+- **Colours are gradients.** `SceneBody` and `RenderShape` carry a hue.
+  `applyGradientHues(bodies, along)` spreads red to violet by position
+  along a direction: every playground scene uses +x, so a pyramid or a row
+  of dominoes is one smooth left-to-right rainbow. Each group of the
+  vehicle's loose boxes runs along its own length. The gun's balls step
+  slowly round the rainbow. This is drawing only: the playground hashes
+  are unchanged.
+- **The autopilot no longer rolls the car.** The old weave rolled the light
+  sample car onto its side for 17 of 30 seconds.
+  - Now: the 3 s straight run and jump, then a gentle weave at 60%
+    throttle that turns back towards the middle beyond 50 m, and a 2 s
+    turning reverse when it has been stuck for 1.5 s.
+  - It keeps a small `Autopilot` state, which advances only with the
+    fixed steps, so it stays deterministic.
+  - Over 5 minutes it stays upright and within about 60 m of the middle.
+- **Chase camera:** behind and slightly to the right, a three-quarter view.
+- **New hashes.** The changed course and car give a new
+  `vehicle.golden`, equal on the port, Box3D SIMD and Box3D scalar.
+  Fixtures 1002 and 1005 print the same new readings.
+- **Featured:** both vehicles have a pack, a README row and two
+  screenshots each, taken after all of the above. The playground
+  screenshots were retaken with the new colours.
+
 ## 4. Track B: building the C library
 
 Built by B1 (2026-10-05).

@@ -114,7 +114,7 @@ func spawnShapeBody(
     componentSet(
       this: world.renderShapes
       entityId: entityId
-      data: RenderShape { kind: RenderKind.sphere, scale: body.shape.halfExtents }
+      data: RenderShape { kind: RenderKind.sphere, scale: body.shape.halfExtents, hue: body.hue }
     )
   } else {
     addBoxCollider(
@@ -129,7 +129,7 @@ func spawnShapeBody(
     componentSet(
       this: world.renderShapes
       entityId: entityId
-      data: RenderShape { kind: RenderKind.box, scale: body.shape.halfExtents }
+      data: RenderShape { kind: RenderKind.box, scale: body.shape.halfExtents, hue: body.hue }
     )
   }
   ret entityId
@@ -188,6 +188,7 @@ func spawnVehicle(world: mod VehicleWorld, car: view VehicleDescription) {
   )
   chassis.rotation = chassisStartRotation(car: car)
   chassis.density = car.chassisDensity
+  chassis.hue = car.chassisHue
   world.chassisId = spawnShapeBody(world: world, body: chassis, fastRotation: false)
   let uprightAdded: Bool = addParallelJointToVenue(
     physics: world.physics
@@ -213,6 +214,17 @@ func spawnVehicle(world: mod VehicleWorld, car: view VehicleDescription) {
     wheelBody.density = car.wheelDensity
     wheelBody.friction = car.wheelFriction
     let wheelId: EntityId = spawnShapeBody(world: world, body: wheelBody, fastRotation: true)
+    # Drawn as a wheel: a cylinder about the axle (the wheel's local y), on
+    # the sample's sphere collider
+    componentSet(
+      this: world.renderShapes
+      entityId: wheelId
+      data: RenderShape {
+        kind: RenderKind.wheel
+        scale: Vec3 { x: car.wheelRadius, y: car.wheelHalfWidth, z: car.wheelRadius }
+        hue: car.wheelHue
+      }
+    )
     world.wheelIds.add(value: wheelId)
     world.wheelJoints.add(value: addWheelJoint(
       physics: world.physics

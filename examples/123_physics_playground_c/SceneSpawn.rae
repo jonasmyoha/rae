@@ -4,6 +4,7 @@
 # names a physics track: 122_physics_playground_port has the same file over
 # physics/ecs, the Rae port (docs/physics-two-implementations.md §3).
 import Quat
+import Math
 open Vec2
 open Vec3
 open ecs/Entity
@@ -114,7 +115,7 @@ func spawnSceneBody(world: mod PlaygroundWorld, body: view SceneBody) ret Entity
       componentSet(
         this: world.renderShapes
         entityId: entityId
-        data: RenderShape { kind: RenderKind.box, scale: body.shape.halfExtents }
+        data: RenderShape { kind: RenderKind.box, scale: body.shape.halfExtents, hue: body.hue }
       )
     }
     case SceneShapeKind.sphere {
@@ -129,7 +130,7 @@ func spawnSceneBody(world: mod PlaygroundWorld, body: view SceneBody) ret Entity
       componentSet(
         this: world.renderShapes
         entityId: entityId
-        data: RenderShape { kind: RenderKind.sphere, scale: body.shape.halfExtents }
+        data: RenderShape { kind: RenderKind.sphere, scale: body.shape.halfExtents, hue: body.hue }
       )
     }
     case SceneShapeKind.capsule {
@@ -148,7 +149,7 @@ func spawnSceneBody(world: mod PlaygroundWorld, body: view SceneBody) ret Entity
       componentSet(
         this: world.renderShapes
         entityId: entityId
-        data: RenderShape { kind: RenderKind.capsule, scale: body.shape.halfExtents }
+        data: RenderShape { kind: RenderKind.capsule, scale: body.shape.halfExtents, hue: body.hue }
       )
     }
   }
@@ -213,7 +214,11 @@ func spawnScene(world: mod PlaygroundWorld, scene: view PhysicsScene) {
     componentSet(
       this: world.renderShapes
       entityId: world.characterId
-      data: RenderShape { kind: RenderKind.capsule, scale: Vec3 { x: 0.3, y: 0.3, z: 0.8 } }
+      data: RenderShape {
+        kind: RenderKind.capsule
+        scale: Vec3 { x: 0.3, y: 0.3, z: 0.8 }
+        hue: 0.55
+      }
     )
   }
 }
@@ -237,12 +242,15 @@ func throwBallAlong(
   if hit.hit {
     target = hit.point
   }
-  let ball: SceneBody = thrownBall(
+  var ball: SceneBody = thrownBall(
     origin: origin
     target: target
     speed: 30.0
     radius: 0.35
   )
+  # The gun's stream walks slowly round the rainbow, one small step a ball
+  let step: Float = (world.ballsThrown as Float) * 0.013
+  ball.hue = gradientHueSpan * (step - Math.floor(x: step))
   let entityId: EntityId = spawnSceneBody(world: world, body: ball)
   world.ballsThrown = world.ballsThrown + 1
   ret entityId
