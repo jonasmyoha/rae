@@ -246,18 +246,19 @@ through the fixes.
 
 | scene | C scalar | C SIMD | Rae | Rae / C scalar | Rae / C SIMD |
 |---|---|---|---|---|---|
-| large_pyramid | 11.76 | 8.32 | 15.56 | 1.32x | 1.87x |
-| many_pyramids | 22.92 | 16.57 | 30.15 | 1.32x | 1.82x |
-| joint_grid | 11.68 | 11.70 | 15.48 | 1.33x | 1.32x |
-| convex_pile | 13.85 | 11.59 | 34.55 | 2.50x | 2.98x |
+| large_pyramid | 11.30 | 7.92 | 13.38 | 1.18x | 1.69x |
+| many_pyramids | 21.77 | 15.51 | 29.41 | 1.35x | 1.90x |
+| joint_grid | 11.56 | 11.57 | 13.44 | 1.16x | 1.16x |
+| convex_pile | 13.72 | 11.48 | 34.32 | 2.50x | 2.99x |
 
-(P9a-2, 2026-10-05, load ~12; the P9a run before it measured the joint
-grid at 30.12 ms, 2.58x. Both sides now leave the first step untimed and
-divide by the steps - 1 they time, as upstream's app does; before, the Rae
-side timed the first step too and both divided by all steps.)
+(P9a-5, 2026-10-05, load ~3.4: the ratios move with the machine's load,
+the large pyramid measured 1.32x at load ~12. The joint grid was 30.12 ms,
+2.58x, before P9a-2. Both sides leave the first step untimed and divide by
+the steps - 1 they time, as upstream's app does; the P9a run timed the
+first step on the Rae side and divided both by all steps.)
 
-The target (1.2x C scalar) is not met; the pyramids and the joint grid are
-inside the 1.5x failure line, the convex pile is not. The large pyramid
+The target (1.2x C scalar) is met by the large pyramid and the joint grid;
+many pyramids is inside the 1.5x failure line, the convex pile is not. The large pyramid
 started at **2 267 ms per step** (190x): per-element reads copied whole
 structs, and the fixes were all of that kind:
 
@@ -304,6 +305,20 @@ Where the rest goes, profiled against the C app:
   run retires 19% more instructions at a lower IPC (3.7 against 4.6): the
   per-joint bounds checks, the kind dispatch, and `jointBodyState` copying
   each `BodyState` where Box3D points at it.
+- **Joint solve overhead, P9a-5.** Measured by patching the generated C in
+  /tmp and counting instructions and cycles (`/usr/bin/time -l`, the setup
+  subtracted, configurations interleaved with the C app and the minimum
+  taken; wall time alone is too noisy at load). What paid:
+  `pointToPointMass` written out in the spherical solve as Box3D writes it
+  (a call clang would not inline in the eight-kind dispatch; ~5M of 193M
+  instructions per step, up to 14% of the time when every site was
+  inlined); the joint-event threshold pass skipped when no joint of the
+  block has a threshold (Box3D checks inline after each solve; 1.4M); and
+  prepare in place, the bodies read first and the sim prepared where it
+  lives instead of copied out and set back (1.4M). What did not: an
+  unchecked `BodyState` read in `jointBodyState` (2M fewer instructions,
+  no fewer cycles), and keeping each kind's functions out of line. Joint
+  grid 15.5 → 13.4 ms, 1.16x.
 - **Narrow phase (convex pile).** The hull SAT and clipping allocate `List`s
   per pair (`faceDots`, the edge candidates, the clip polygons) where Box3D
   uses stack arrays, and the step is not allocation-free:
