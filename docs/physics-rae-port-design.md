@@ -246,19 +246,19 @@ through the fixes.
 
 | scene | C scalar | C SIMD | Rae | Rae / C scalar | Rae / C SIMD |
 |---|---|---|---|---|---|
-| large_pyramid | 11.36 | 7.95 | 13.03 | 1.15x | 1.64x |
-| many_pyramids | 21.87 | 15.55 | 27.70 | 1.27x | 1.78x |
-| joint_grid | 11.64 | 11.61 | 13.40 | 1.15x | 1.15x |
-| convex_pile | 13.77 | 11.53 | 19.69 | 1.43x | 1.71x |
+| large_pyramid | 11.31 | 7.91 | 11.12 | 0.98x | 1.41x |
+| many_pyramids | 21.67 | 14.74 | 23.06 | 1.06x | 1.56x |
+| joint_grid | 11.55 | 11.52 | 13.04 | 1.13x | 1.13x |
+| convex_pile | 13.71 | 11.48 | 16.48 | 1.20x | 1.44x |
 
-(P9a-6, 2026-10-05, load ~9: the ratios move with the machine's load.
+(P9a-8, 2026-10-05, load ~3: the ratios move with the machine's load.
 Before P9a-2/P9a-5 the joint grid was 30.12 ms (2.58x), before P9a-3 the
 convex pile 34.4 ms (2.50x). Both sides leave the first step untimed and
 divide by the steps - 1 they time, as upstream's app does; the P9a run
 timed the first step on the Rae side and divided both by all steps.)
 
-The target (1.2x C scalar) is met by the large pyramid and the joint grid;
-many pyramids is inside the 1.5x failure line, the convex pile just past it. The large pyramid
+The target (1.2x C scalar) is met by every scene since P9a-8; the convex
+pile is on the line (1.20x). The large pyramid
 started at **2 267 ms per step** (190x): per-element reads copied whole
 structs, and the fixes were all of that kind:
 
@@ -365,6 +365,25 @@ Where the rest goes, profiled against the C app:
   `List` elements where C indexes raw arrays, Int (8-byte) hull indices
   where Box3D's half-edges are four bytes, and struct copies of edges and
   planes in edgeCandidates and the face loops.
+- **Memory latency, P9a-8.** Patching the generated C showed the gap was
+  stalls, not instructions: removing every List bounds check cut the
+  convex pile's instructions from 152M to 128M per step (C: 124M) but its
+  cycles only 1%; 8-bit hull indices, a 32-bit Contact or TreeNode, -O3 or
+  -mcpu changed nothing. Per stage (the C app's `-s` step profile against
+  timers patched into the Rae step): collide 12.4 against 8.9 ms, pairs
+  2.6 against 1.6, solve 3.7 against 3.1. Box3D prefetches the contact four
+  iterations ahead in b3CollideTask (its comment: "the random 216 B contact
+  load"); the port did not, and its contacts are 432 bytes. `List.prefetch`
+  (lib/core; `rae_ext_rae_buf_prefetch` prefetches every cache line of the
+  element, a hint that changes no result, fixture 994) lets Rae ask for the
+  same: collideTask prefetches four contacts ahead (convex 19.4 → 16.8 ms,
+  cycles 61 → 53M per step), the wide prepare prefetches the next wide
+  constraint's four contacts (~2%), and the candidate flush prefetches the
+  pair-set slots and shapes as Box3D's does (neutral here). Prefetching a
+  contact's manifold block or the body sims gained nothing. The compiler
+  also stopped wrapping calls with a `sizeof(T)` argument (List.create,
+  grow, prefetch) in a String-pool mark/flush pair. The pyramids gained as
+  much: large 13.0 → 11.1 ms, many 27.7 → 23.1 ms.
 
 These are queued as P9 follow-ups.
 

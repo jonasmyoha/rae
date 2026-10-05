@@ -1,0 +1,23 @@
+# List.prefetch is a cache hint: it changes no element and no result, in
+# range or out of it (negative, past the end, an empty list), for plain and
+# heap-owning element types.
+type Item {
+  label: String
+  weight: Float
+}
+
+func main() {
+  let items: List(Item) = List.create(Item, cap: 2)
+  items.add(value: Item { label: "first", weight: 1.5 })
+  items.add(value: Item { label: "second", weight: 2.5 })
+  items.prefetch(index: 0)
+  items.prefetch(index: 1)
+  items.prefetch(index: -1)
+  items.prefetch(index: 2)
+  let empty: List(Int) = List.create(Int, cap: 0)
+  empty.prefetch(index: 0)
+  let numbers: List(Int) = { 4, 5, 6 }
+  numbers.prefetch(index: 2)
+  log("{items.copyAtDefault(index: 0).label} {items.copyAtDefault(index: 1).weight}")
+  log("{items.length} {empty.length} {numbers.copyAtDefault(index: 2)}")
+}

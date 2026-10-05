@@ -161,17 +161,35 @@ func flushCandidatePairs(world: view PhysicsWorld, context: mod PairContext) {
     }
     plain.add(value: candidate)
   }
+  # As Box3D: prefetch the batch's pair set slots, cull the existing pairs
+  # (prefetching the shapes of the rest), then filter
+  loop let candidate: view CandidatePair in plain {
+    prefetchPairSetSlot(
+      set: world.broadPhase.pairSet
+      key: shapePairKey(shape1: candidate.shapeIdA, shape2: candidate.shapeIdB, child: 0)
+    )
+  }
+  var survivors: List(CandidatePair) = own context.survivors
+  survivors.clear()
   loop let candidate: view CandidatePair in plain {
     let key: UInt64 = shapePairKey(shape1: candidate.shapeIdA, shape2: candidate.shapeIdB, child: 0)
     if pairSetContains(set: world.broadPhase.pairSet, key: key) is false {
-      if shouldCreatePair(world: world, shapeIdA: candidate.shapeIdA, shapeIdB: candidate.shapeIdB) {
-        # The pair passed the gauntlet. A new contact will be created.
-        context.pairKeys.add(value: key)
-      }
+      world.shapes.prefetch(index: candidate.shapeIdA)
+      world.shapes.prefetch(index: candidate.shapeIdB)
+      survivors.add(value: candidate)
+    }
+  }
+  loop let candidate: view CandidatePair in survivors {
+    if shouldCreatePair(world: world, shapeIdA: candidate.shapeIdA, shapeIdB: candidate.shapeIdB) {
+      # The pair passed the gauntlet. A new contact will be created.
+      context.pairKeys.add(
+        value: shapePairKey(shape1: candidate.shapeIdA, shape2: candidate.shapeIdB, child: 0)
+      )
     }
   }
   context.batch.clear()
   context.plain = own plain
+  context.survivors = own survivors
 }
 
 # The type of shape `shapeId`, read through a view (a shape copy would copy

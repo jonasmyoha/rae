@@ -89,6 +89,11 @@ func pairSetCapacity(set: view PairSet) ret Int {
   ret set.items.length
 }
 
+# b3PrefetchHash: a cache prefetch of the home slot of `key`.
+func prefetchPairSetSlot(set: view PairSet, key: view UInt64) {
+  set.items.prefetch(index: keyHash(key: key) bitand (set.items.length - 1))
+}
+
 # b3FindSlot: the slot holding `key`, or the empty slot it would go in.
 func findSlot(set: view PairSet, key: view UInt64, hash: view Int) ret Int {
   let capacity: Int = set.items.length
