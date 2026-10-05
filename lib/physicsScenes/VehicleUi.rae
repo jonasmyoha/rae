@@ -1,0 +1,140 @@
+# The vehicle examples' lib/ui HUD (scenes/VehicleHud.raescene), shared by both
+# tracks: four lines (track, speed, physics step time, frame time and
+# autopilot) and the controls hint, plus the shared FPS meter in the top
+# right corner (ui/DebugOverlay). The UI lays out again only when a line's
+# text changes or the window is resized.
+import Gpu2d
+open ui/Ecs
+open ui/inputSystem/InputSystem
+open ui/layoutSystem/LayoutSystem
+open ui/visualBoundsSystem/VisualBoundsSystem
+open ui/renderSystem/RenderSystem
+open ui/SceneFile
+open ui/SceneLoader
+open ui/Transform
+open ui/UiSystems
+open ui/Scene
+open ui/DebugOverlay
+open app3d/UiShell
+open ecs/Entity
+
+const vehicleHudScenePath: String = "lib/physicsScenes/scenes/VehicleHud.raescene"
+
+type VehicleUi {
+  gpuUi: Gpu2dUi
+  input: UiInput
+  # The FPS readout (fps only: no debug button, memory or heartbeat)
+  debugOverlay: DebugOverlay
+  # The HUD lines last written, so an unchanged line costs no relayout
+  lines: List(String)
+}
+
+# `assetBase` is the example's assets directory: its fonts and Theme.raescene.
+func createVehicleUi(assetBase: view String) ret VehicleUi {
+  ret VehicleUi {
+    gpuUi: loadUiAssets(
+      dir: assetBase
+      textFontName: "Roboto-Regular"
+      iconFontName: "MaterialIconsRound-Regular"
+      themeFile: "Theme.raescene"
+    )
+    input: createUiInput()
+    debugOverlay: createDebugOverlay(
+      button: false
+      fps: true
+      memory: false
+      heartbeat: false
+    )
+    lines: List.create(String, cap: 4)
+  }
+}
+
+func relayoutVehicleUi(ui: view VehicleUi, world: mod UiWorld, systems: mod UiSystems) {
+  layoutSystem(world: world, uiSystems: systems)
+  transformSystem(world: world, uiSystems: systems)
+  visualBoundsSystem(world: world, uiSystems: systems, res: ui.gpuUi)
+}
+
+# Size the HUD to the window and lay it out.
+func resizeVehicleUi(
+  ui: view VehicleUi
+  world: mod UiWorld
+  systems: mod UiSystems
+  width: view Float
+  height: view Float
+) {
+  world.layoutW = width
+  world.layoutH = height
+  setNodeRect(
+    world: world
+    nodeId: "UiRoot"
+    x: 0.0
+    y: 0.0
+    w: width
+    h: height
+  )
+  relayoutVehicleUi(ui: ui, world: world, systems: systems)
+}
+
+# Load the HUD scene into `world`.
+func mountVehicleUi(
+  ui: view VehicleUi
+  world: mod UiWorld
+  systems: mod UiSystems
+  width: view Float
+  height: view Float
+) {
+  seedWorldTheme(world: world, res: ui.gpuUi)
+  let scene: Scene = loadSceneFile(path: vehicleHudScenePath)
+  let root: EntityId = loadScene(world: world, uiSystems: systems, scene: scene)
+  resizeVehicleUi(
+    ui: ui
+    world: world
+    systems: systems
+    width: width
+    height: height
+  )
+}
+
+# Show `lines` on HudLine0..3; true when any changed (and the UI was laid out
+# again).
+func setVehicleHudText(
+  ui: mod VehicleUi
+  world: mod UiWorld
+  systems: mod UiSystems
+  lines: view List(String)
+) ret Bool {
+  var changed: Bool = false
+  loop var i: Int = 0, i < lines.length, ++i {
+    let line: String = lines.copyAtDefault(index: i)
+    if i >= ui.lines.length or ui.lines.copyAtDefault(index: i) is not line {
+      setNodeText(world: world, nodeId: "HudLine{i}", value: line)
+      changed = true
+    }
+  }
+  if changed {
+    ui.lines.clear()
+    loop let line: view String in lines {
+      ui.lines.add(value: line)
+    }
+    relayoutVehicleUi(ui: ui, world: world, systems: systems)
+  }
+  ret changed
+}
+
+# Count this loop iteration for the FPS meter (`rendered`: it drew a frame).
+func recordVehicleFrame(
+  ui: mod VehicleUi
+  width: view Float
+  height: view Float
+  now: view Float64
+  rendered: view Bool
+) {
+  let tookPointer: Bool = updateDebugOverlay(
+    debugOverlay: ui.debugOverlay
+    screenW: width
+    screenH: height
+    now: now
+    didRealWork: rendered
+  )
+}

@@ -1,0 +1,161 @@
+# The vehicle on track A, the Rae port of Box3D (docs/physics-two-implementations.md
+# §3; 125_vehicle_c is the same program on upstream Box3D's C library, with
+# only the `open physicsScenes/<track>/VehicleSpawn` line different). Box3D's
+# Driving sample - a box chassis on four wheel joints with suspension,
+# steering on the leading axle, spin motors with the torque split between the
+# axles, and a parallel joint keeping it upright - on a height-field course
+# with ramps, a wall and crates; a chase camera and a small HUD (speed, step
+# and frame time, track). The car, the course and the window are the shared
+# package's (VehicleLibrary, VehicleApp); this file makes the track calls.
+#
+# Controls: W/S (or the arrow keys) drive and reverse, A/D steer, R respawns
+# the car and the crates, P toggles the autopilot. When the car and crates
+# sleep and nothing is pressed the loop waits for events instead of
+# rendering, and it never renders hidden.
+#
+#   RAE_PHYSICS_DETERMINISM=<steps>  headless: the course and car driven by
+#                                    the autopilot for <steps> fixed steps at
+#                                    1 worker and at the pool's worker count;
+#                                    prints both transform hashes (the example
+#                                    gate's determinism print); exits 1 when
+#                                    they differ
+# The window's settings (autopilot, respawn cycle, debug log) are listed in
+# lib/physicsScenes/VehicleApp.rae.
+# Headless screenshot, from the repository root:
+#   RAE_SDL_HEADLESS_MS=3000 RAE_GPU2D_SCREENSHOT=/tmp/vehicle.bmp \
+#     rae run examples/124_vehicle_port/Main.rae
+import Sys
+import Gpu2d
+import Parallel
+open Vec3
+open ecs/Transform
+open RendererDeferred
+open Rendergraph
+open ui/Ecs
+open ui/UiSystems
+open physicsScenes/SceneHud
+open physicsScenes/VehicleTypes
+open physicsScenes/VehicleLibrary
+open physicsScenes/VehicleApp
+open physicsScenes/PhysicsFrame
+open physicsScenes/port/VehicleSpawn
+
+# This example's fonts and theme (the HUD itself is the shared package's)
+const assetBase: String = "examples/124_vehicle_port/assets/"
+
+# The course with the car and crates, driven by the autopilot for `steps`
+# fixed steps at `workerCount` workers: the transform hash.
+func vehicleHash(steps: view Int, workerCount: view Int) ret UInt64 {
+  let course: VehicleCourse = drivingCourse()
+  let car: VehicleDescription = drivingCar(startPosition: Vec3 { x: 0.0, y: 0.0, z: 1.2 })
+  var world: VehicleWorld = createVehicleWorld(workerCount: workerCount)
+  spawnCourse(world: world, course: course)
+  spawnCrates(world: world, course: course)
+  spawnVehicle(world: world, car: car)
+  loop var step: Int = 0, step < steps, ++step {
+    driveVehicle(world: world, car: car, command: autopilotCommand(seconds: (step as Float) / 60.0))
+    let taken: Int = stepVehicleWorld(world: world, frameTime: 1.0 / 60.0)
+  }
+  let hash: UInt64 = transformHash(transforms: world.transforms)
+  let pose: Transform3D = chassisTransform(world: world)
+  log(
+    "[vehicle] after {steps} steps at {workerCount} workers: chassis at ({tenths(
+      value: pose.position.x
+    )}, {tenths(value: pose.position.y)}, {tenths(value: pose.position.z)})"
+  )
+  destroyVehicleWorld(world: world)
+  ret hash
+}
+
+func determinismRun(steps: view Int) ret Int {
+  let workers: Int = Parallel.workerCount()
+  let single: UInt64 = vehicleHash(steps: steps, workerCount: 1)
+  let many: UInt64 = vehicleHash(steps: steps, workerCount: workers)
+  let same: Bool = single is many
+  log(
+    "{vehicleTrackName} vehicle: {steps} steps, hash {single} at 1 worker, {many} at {workers}, identical {same}"
+  )
+  if same {
+    ret 0
+  }
+  ret 1
+}
+
+# The window: the shared VehicleApp does the frame; this loop makes the calls
+# into the track (spawn, drive, step, respawn, the chassis).
+func runWindowed() ret Int {
+  openVehicleWindow(trackName: vehicleTrackName)
+  var renderer: DeferredRenderer = createDeferredRendererWithUi()
+  var uiWorld: UiWorld = create()
+  var uiSystems: UiSystems = createUiSystems()
+  let course: VehicleCourse = drivingCourse()
+  var app: VehicleApp = createVehicleApp(
+    renderer: renderer
+    uiWorld: uiWorld
+    uiSystems: uiSystems
+    assetBase: assetBase
+    course: course
+  )
+  let workers: Int = Parallel.workerCount()
+  var world: VehicleWorld = createVehicleWorld(workerCount: workers)
+  spawnCourse(world: world, course: course)
+  spawnCrates(world: world, course: course)
+  spawnVehicle(world: world, car: app.car)
+  let graphStatus: Int = compileDeferred(renderer: renderer)
+  if graphStatus is not 0 {
+    log("deferred graph invalid: {statusName(status: graphStatus)}")
+    ret 1
+  }
+  loop not Gpu2d.pollClose() {
+    beginVehicleFrame(app: app, uiWorld: uiWorld, uiSystems: uiSystems)
+    if readVehicleControls(app: app) {
+      despawnVehicle(world: world)
+      despawnCrates(world: world)
+      if app.cycleSeconds > 0.0 {
+        # The memory test's engine check: what the engine holds with the
+        # car and crates gone must be the same at every respawn
+        log("[vehicle] engine bytes between respawns {engineByteCount()}")
+      }
+      spawnCrates(world: world, course: course)
+      spawnVehicle(world: world, car: app.car)
+    }
+    driveVehicle(world: world, car: app.car, command: app.command)
+    let started: Int = nowNs()
+    let steps: Int = stepVehicleWorld(world: world, frameTime: app.deltaTime)
+    recordVehicleStep(app: app, startedNs: started, steps: steps)
+    let chassis: Transform3D = chassisTransform(world: world)
+    updateChaseCamera(app: app, chassis: chassis)
+    let hudChanged: Bool = updateVehicleHud(
+      app: app
+      uiWorld: uiWorld
+      uiSystems: uiSystems
+      trackName: vehicleTrackName
+      speed: forwardSpeed(
+        velocity: chassisVelocity(world: world)
+        chassisRotation: chassis.rotation
+      )
+      workerCount: workers
+    )
+    finishVehicleFrame(
+      app: app
+      renderer: renderer
+      uiWorld: uiWorld
+      uiSystems: uiSystems
+      renderShapes: world.renderShapes
+      transforms: world.transforms
+      awakeCount: vehicleAwakeCount(world: world)
+      hudChanged: hudChanged
+    )
+  }
+  destroyVehicleWorld(world: world)
+  closePhysicsWindow(renderer: renderer)
+  ret 0
+}
+
+func main() ret Int {
+  let steps: String = Sys.getEnv(name: "RAE_PHYSICS_DETERMINISM")
+  if steps.length() > 0 {
+    ret determinismRun(steps: steps.toInt())
+  }
+  ret runWindowed()
+}
