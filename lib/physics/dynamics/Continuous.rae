@@ -245,11 +245,47 @@ func markShapeProxyMoved(world: mod PhysicsWorld, proxyKey: view Int, box: view 
   }
 }
 
+# Record a moved proxy in chunk `chunk`'s list; applyMovedProxies marks it
+# after the parallel section. (Box3D marks the tree from the workers with
+# atomics. Deferring gives the same tree: a mark only sets the leaf's box
+# and moved flags, and nothing in finalization or continuous collision
+# queries the trees it marks - non-bullets sweep against the static tree.)
+func deferProxyMoved(
+  world: mod PhysicsWorld
+  chunk: view Int
+  proxyKey: view Int
+  box: view Aabb
+) {
+  if let taskContext: mod TaskContext => world.taskContexts.modAt(index: chunk) {
+    taskContext.movedProxies.add(value: MovedProxy { proxyKey: proxyKey, box: box })
+  }
+}
+
+# Mark every chunk's moved proxies, in chunk order, and clear the lists.
+func applyMovedProxies(world: mod PhysicsWorld) {
+  loop var chunk: Int = 0, chunk < world.taskContexts.length, ++chunk {
+    var moved: List(MovedProxy) = List.create(MovedProxy, cap: 0)
+    if let taskContext: mod TaskContext => world.taskContexts.modAt(index: chunk) {
+      moved = own taskContext.movedProxies
+    }
+    loop var i: Int = 0, i < moved.length, ++i {
+      if let proxy: view MovedProxy => moved.viewAt(index: i) {
+        markShapeProxyMoved(world: world, proxyKey: proxy.proxyKey, box: proxy.box)
+      }
+    }
+    moved.clear()
+    if let taskContext: mod TaskContext => world.taskContexts.modAt(index: chunk) {
+      taskContext.movedProxies = own moved
+    }
+  }
+}
+
 # The fat box of shape `shapeId` after `box` moved; a non-bullet marks its
 # proxy moved, a bullet asks for its bounds to be enlarged later. Returns
 # whether the bullet bounds need enlarging.
 func refreshFatBox(
   world: mod PhysicsWorld
+  chunk: view Int
   shapeId: view Int
   box: view Aabb
   isBullet: view Bool
@@ -265,13 +301,24 @@ func refreshFatBox(
   if isBullet {
     ret true
   }
-  markShapeProxyMoved(world: world, proxyKey: shape.proxyKey, box: inflated)
+  deferProxyMoved(
+    world: world
+    chunk: chunk
+    proxyKey: shape.proxyKey
+    box: inflated
+  )
   ret false
 }
 
 # b3SolveContinuous: continuous collision of awake sim `simIndex` against
 # static shapes (a bullet also against kinematic and dynamic ones).
-func solveContinuous(world: mod PhysicsWorld, simIndex: view Int, dt: view Float) {
+# Its working lists and results are chunk `chunk`'s TaskContext's.
+func solveContinuous(
+  world: mod PhysicsWorld
+  simIndex: view Int
+  dt: view Float
+  chunk: view Int
+) {
   var fastSim: BodySim = setBodySimAt(world: world, setIndex: awakeSet, localIndex: simIndex)
   # Re-center the sweep on the fast body (float precision far from the origin)
   let base: Vec3 = fastSim.center0
@@ -285,15 +332,25 @@ func solveContinuous(world: mod PhysicsWorld, simIndex: view Int, dt: view Float
   }
   let fastBody: Body = bodyAt(world: world, bodyId: fastSim.bodyId)
   var fraction: Float = 1.0
-  # The world's working lists, moved out for the sweep and back at the end
+  # The chunk's working lists, moved out for the sweep and back at the end
   var sensorHits: ContinuousHits = {
-    hits: own world.continuousSensorHits
-    fractions: own world.continuousFractions
+    hits: List.create(SensorHit, cap: 0)
+    fractions: List.create(Float, cap: 0)
+  }
+  var queryStack: List(Int) = List.create(Int, cap: 0)
+  var proxyPoints: ProxyPoints = {
+    pointsA: List.create(Vec3, cap: 0)
+    pointsB: List.create(Vec3, cap: 0)
+  }
+  if let taskContext: mod TaskContext => world.taskContexts.modAt(index: chunk) {
+    sensorHits.hits = own taskContext.continuousHits
+    sensorHits.fractions = own taskContext.continuousFractions
+    queryStack = own taskContext.continuousQueryStack
+    proxyPoints.pointsA = own taskContext.toiPointsA
+    proxyPoints.pointsB = own taskContext.toiPointsB
   }
   sensorHits.hits.clear()
   sensorHits.fractions.clear()
-  var queryStack: List(Int) = own world.continuousQueryStack
-  var proxyPoints: ProxyPoints = { pointsA: own world.toiPointsA, pointsB: own world.toiPointsB }
   let isBullet: Bool = (fastSim.flags bitand isBulletFlag) is not 0
 
   var shapeId: Int = fastBody.headShapeId
@@ -416,6 +473,7 @@ func solveContinuous(world: mod PhysicsWorld, simIndex: view Int, dt: view Float
       }
       enlargeBullet = refreshFatBox(
         world: world
+        chunk: chunk
         shapeId: nextId
         box: box
         isBullet: isBullet
@@ -432,6 +490,7 @@ func solveContinuous(world: mod PhysicsWorld, simIndex: view Int, dt: view Float
       # The shape's box is still valid from above
       enlargeBullet = refreshFatBox(
         world: world
+        chunk: chunk
         shapeId: nextId
         box: shape.aabb
         isBullet: isBullet
@@ -445,7 +504,7 @@ func solveContinuous(world: mod PhysicsWorld, simIndex: view Int, dt: view Float
   # The sensor hits before the solid hit, for serial processing
   loop var i: Int = 0, i < sensorHits.hits.length, ++i {
     if sensorHits.fractions.copyAtDefault(index: i) < fraction {
-      if let taskContext: mod TaskContext => world.taskContexts.modAt(index: 0) {
+      if let taskContext: mod TaskContext => world.taskContexts.modAt(index: chunk) {
         taskContext.sensorHits.add(value: sensorHits.hits.copyAtDefault(index: i))
       }
     }
@@ -453,9 +512,11 @@ func solveContinuous(world: mod PhysicsWorld, simIndex: view Int, dt: view Float
   if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
     awake.bodySims.set(index: simIndex, value: fastSim)
   }
-  world.continuousSensorHits = own sensorHits.hits
-  world.continuousFractions = own sensorHits.fractions
-  world.continuousQueryStack = own queryStack
-  world.toiPointsA = own proxyPoints.pointsA
-  world.toiPointsB = own proxyPoints.pointsB
+  if let taskContext: mod TaskContext => world.taskContexts.modAt(index: chunk) {
+    taskContext.continuousHits = own sensorHits.hits
+    taskContext.continuousFractions = own sensorHits.fractions
+    taskContext.continuousQueryStack = own queryStack
+    taskContext.toiPointsA = own proxyPoints.pointsA
+    taskContext.toiPointsB = own proxyPoints.pointsB
+  }
 }

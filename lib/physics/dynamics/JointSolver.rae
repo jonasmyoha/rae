@@ -569,7 +569,7 @@ func warmStartJointsBlock(world: mod PhysicsWorld, block: view SolverBlock) {
 
 # b3SolveJointsTask: a block of a colour's joints; with the bias, an awake
 # joint whose force or torque reaches its threshold is flagged for a joint
-# event (worker 0's bits). The threshold check runs after the block is
+# event (TaskContext slot `slot`'s bits). The threshold check runs after the block is
 # solved, so the reaction can read the world: a joint's impulses do not
 # change after its own solve, and the body transforms are only moved by
 # finalize, so the values are the ones Box3D checks right after each solve.
@@ -578,6 +578,7 @@ func solveJointsBlock(
   context: view StepContext
   block: view SolverBlock
   useBias: view Bool
+  slot: view Int
 ) {
   # Whether any joint of the block has a threshold: most have none, and
   # then the second pass is skipped (Box3D checks inline after each solve)
@@ -613,7 +614,7 @@ func solveJointsBlock(
         if sim.forceThreshold < floatMax or sim.torqueThreshold < floatMax {
           jointId = sim.jointId
           var flagged: Bool = false
-          if let taskContext: view TaskContext => world.taskContexts.viewAt(index: 0) {
+          if let taskContext: view TaskContext => world.taskContexts.viewAt(index: slot) {
             flagged = getBit(bitset: taskContext.jointStateBitSet, bitIndex: jointId)
           }
           if flagged is false {
@@ -629,7 +630,7 @@ func solveJointsBlock(
       }
     }
     if report {
-      if let taskContext: mod TaskContext => world.taskContexts.modAt(index: 0) {
+      if let taskContext: mod TaskContext => world.taskContexts.modAt(index: slot) {
         setBit(bitset: taskContext.jointStateBitSet, bitIndex: jointId)
       }
     }
@@ -638,7 +639,7 @@ func solveJointsBlock(
 
 # The joint events of a step (b3Solve's report): the flagged joints, by id.
 func reportJointEvents(world: mod PhysicsWorld) {
-  # The workers' bits OR-ed into worker 0's (moved out and given back)
+  # The chunks' bits OR-ed into chunk 0's (moved out and given back)
   var stateBits: Bitset = emptyBitset()
   if let first: mod TaskContext => world.taskContexts.modAt(index: 0) {
     stateBits = own first.jointStateBitSet

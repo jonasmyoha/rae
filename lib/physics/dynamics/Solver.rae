@@ -85,7 +85,15 @@ func runSolverStages(world: mod PhysicsWorld, context: mod StepContext) {
   let overflowBlock: SolverBlock = overflowSolverBlock(world: world)
   prepareJointsOverflow(world: world, context: context)
   if overflowBlock.count > 0 {
-    prepareContactsScalar(world: world, context: context, block: overflowBlock)
+    if prepareContactsScalar(world: world, context: context, block: overflowBlock) {
+      context.anyRestitution = true
+    }
+  }
+  # The prepare blocks' restitution flags
+  loop let taskContext: view TaskContext in world.taskContexts {
+    if taskContext.anyRestitution {
+      context.anyRestitution = true
+    }
   }
 
   var graphSyncIndex: Int = 1
@@ -194,7 +202,7 @@ func runSolverStages(world: mod PhysicsWorld, context: mod StepContext) {
       negHitThreshold: -world.hitEventThreshold
       hitContacts: hitContacts
     )
-    flagHitContacts(world: world, hitContacts: hitContacts)
+    flagHitContacts(world: world, hitContacts: hitContacts, slot: 0)
   }
   executeMainStage(
     world: world
@@ -668,6 +676,7 @@ func solve(world: mod PhysicsWorld, context: mod StepContext) {
       setBitCountAndClear(bitset: taskContext.jointStateBitSet, bitCount: jointIdCapacity)
       setBitCountAndClear(bitset: taskContext.hitEventBitSet, bitCount: contactIdCapacity)
       taskContext.hasHitEvents = false
+      taskContext.anyRestitution = false
     }
   }
   runSolverStages(world: world, context: context)
@@ -681,6 +690,8 @@ func solve(world: mod PhysicsWorld, context: mod StepContext) {
       taskContext.splitIslandId = -1
       taskContext.splitSleepTime = 0.0
       taskContext.sensorHits.clear()
+      taskContext.bulletBodies.clear()
+      taskContext.movedProxies.clear()
     }
   }
 
@@ -694,19 +705,40 @@ func solve(world: mod PhysicsWorld, context: mod StepContext) {
     itemCount: awakeBodyCount
     blockSize: finalizeBlockSize
   )
-  loop var block: Int = 0, block < finalizeBlocks, ++block {
-    finalizeBodies(
-      world: world
-      context: context
-      startIndex: parallelForBlockStart(blockIndex: block, blockSize: finalizeBlockSize)
-      endIndex: parallelForBlockEnd(
-        blockIndex: block
+  let chunkCount: Int = world.taskContexts.length
+  if world.workerCount > 1 {
+    parallelLoop var chunk: Int = 0, chunk < chunkCount, ++chunk {
+      # A chunk writes only its own bodies, sims and shapes, and its own
+      # TaskContext slot (FinalizeBodies)
+      unsafe {
+        finalizeChunk(
+          world: world
+          context: context
+          chunk: chunk
+          blockSize: finalizeBlockSize
+          blockCount: finalizeBlocks
+        )
+      }
+    }
+  } else {
+    loop var chunk: Int = 0, chunk < chunkCount, ++chunk {
+      finalizeChunk(
+        world: world
+        context: context
+        chunk: chunk
         blockSize: finalizeBlockSize
-        itemCount: awakeBodyCount
+        blockCount: finalizeBlocks
       )
-      workerIndex: 0
-    )
+    }
   }
+  # The chunks' bullets in chunk order (the sequential order), then the
+  # broad-phase marks of finalization and continuous collision
+  loop let taskContext: view TaskContext in world.taskContexts {
+    loop var i: Int = 0, i < taskContext.bulletBodies.length, ++i {
+      context.bulletBodies.add(value: taskContext.bulletBodies.copyAtDefault(index: i))
+    }
+  }
+  applyMovedProxies(world: world)
 
   reportJointEvents(world: world)
   reportHitEvents(world: world)
@@ -731,18 +763,27 @@ func solve(world: mod PhysicsWorld, context: mod StepContext) {
       itemCount: bulletBodyCount
       blockSize: bulletBlockSize
     )
-    loop var block: Int = 0, block < bulletBlocks, ++block {
-      let start: Int = parallelForBlockStart(blockIndex: block, blockSize: bulletBlockSize)
-      let end: Int = parallelForBlockEnd(
-        blockIndex: block
-        blockSize: bulletBlockSize
-        itemCount: bulletBodyCount
-      )
-      loop var i: Int = start, i < end, ++i {
-        solveContinuous(
+    if world.workerCount > 1 {
+      parallelLoop var chunk: Int = 0, chunk < chunkCount, ++chunk {
+        # A bullet writes only its own sim and shapes, and the chunk's slot
+        unsafe {
+          bulletChunk(
+            world: world
+            context: context
+            chunk: chunk
+            blockSize: bulletBlockSize
+            blockCount: bulletBlocks
+          )
+        }
+      }
+    } else {
+      loop var chunk: Int = 0, chunk < chunkCount, ++chunk {
+        bulletChunk(
           world: world
-          simIndex: context.bulletBodies.copyAtDefault(index: i)
-          dt: context.dt
+          context: context
+          chunk: chunk
+          blockSize: bulletBlockSize
+          blockCount: bulletBlocks
         )
       }
     }
@@ -763,6 +804,80 @@ func solve(world: mod PhysicsWorld, context: mod StepContext) {
   context.colorPlans = own plans
   context.colorBlockStarts = own colorBlockStarts
   context.colorBlockCounts = own colorBlockCounts
+}
+
+# Chunk `chunk`'s run of the finalization blocks.
+func finalizeChunk(
+  world: mod PhysicsWorld
+  context: mod StepContext
+  chunk: view Int
+  blockSize: view Int
+  blockCount: view Int
+) {
+  let awakeBodyCount: Int = setBodyCount(world: world, setIndex: awakeSet)
+  let chunkCount: Int = world.taskContexts.length
+  let firstBlock: Int = chunkFirstBlock(
+    chunk: chunk
+    chunkCount: chunkCount
+    blockCount: blockCount
+  )
+  let endBlock: Int = chunkFirstBlock(
+    chunk: chunk + 1
+    chunkCount: chunkCount
+    blockCount: blockCount
+  )
+  loop var block: Int = firstBlock, block < endBlock, ++block {
+    finalizeBodies(
+      world: world
+      context: context
+      startIndex: parallelForBlockStart(blockIndex: block, blockSize: blockSize)
+      endIndex: parallelForBlockEnd(
+        blockIndex: block
+        blockSize: blockSize
+        itemCount: awakeBodyCount
+      )
+      workerIndex: chunk
+    )
+  }
+}
+
+# Chunk `chunk`'s run of the bullet blocks: continuous collision of each
+# bullet body in context.bulletBodies.
+func bulletChunk(
+  world: mod PhysicsWorld
+  context: view StepContext
+  chunk: view Int
+  blockSize: view Int
+  blockCount: view Int
+) {
+  let bulletBodyCount: Int = context.bulletBodies.length
+  let chunkCount: Int = world.taskContexts.length
+  let firstBlock: Int = chunkFirstBlock(
+    chunk: chunk
+    chunkCount: chunkCount
+    blockCount: blockCount
+  )
+  let endBlock: Int = chunkFirstBlock(
+    chunk: chunk + 1
+    chunkCount: chunkCount
+    blockCount: blockCount
+  )
+  loop var block: Int = firstBlock, block < endBlock, ++block {
+    let start: Int = parallelForBlockStart(blockIndex: block, blockSize: blockSize)
+    let end: Int = parallelForBlockEnd(
+      blockIndex: block
+      blockSize: blockSize
+      itemCount: bulletBodyCount
+    )
+    loop var i: Int = start, i < end, ++i {
+      solveContinuous(
+        world: world
+        simIndex: context.bulletBodies.copyAtDefault(index: i)
+        dt: context.dt
+        chunk: chunk
+      )
+    }
+  }
 }
 
 func initColorStages(
@@ -832,10 +947,16 @@ func sleepIslands(world: mod PhysicsWorld) {
       splitSleepTimer = splitSleepTime
     }
   }
-  # Worker 0's awake islands, moved out (not copied) and given back below
+  # The chunks' awake islands OR-ed into chunk 0's, moved out (not copied)
+  # and given back below
   var awakeIslands: Bitset = emptyBitset()
   if let first: mod TaskContext => world.taskContexts.modAt(index: 0) {
     awakeIslands = own first.awakeIslandBitSet
+  }
+  loop var i: Int = 1, i < world.taskContexts.length, ++i {
+    if let other: view TaskContext => world.taskContexts.viewAt(index: i) {
+      inPlaceUnion(setA: awakeIslands, setB: other.awakeIslandBitSet)
+    }
   }
   # A copy of the awake islands (sleeping moves islands out of the set),
   # in the world's list, moved out and back

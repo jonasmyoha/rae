@@ -53,12 +53,13 @@ func storeVelocities(
 }
 
 # b3PrepareContacts_Mesh: the constraints of flat range `block` (or of the
-# overflow colour) from their contacts.
+# overflow colour) from their contacts. Returns whether any has restitution
+# (the caller records it: blocks of one stage run in parallel).
 func prepareContactsScalar(
   world: mod PhysicsWorld
   context: mod StepContext
   block: view SolverBlock
-) {
+) ret Bool {
   let overflow: Bool = block.blockType is SolverBlockType.overflowBlock
   var spans: List(PrepareSpan) = context.contactPrepareSpans
   if overflow {
@@ -102,9 +103,7 @@ func prepareContactsScalar(
     # Advance to the next colour
     slot = slot + 1
   }
-  if anyRestitution {
-    context.anyRestitution = true
-  }
+  ret anyRestitution
 }
 
 # One contact of b3PrepareContacts_Mesh.
@@ -882,11 +881,11 @@ func storeImpulsesScalar(
 }
 
 # Mark the contacts `storeImpulsesScalar` flagged as hit event candidates.
-func flagHitContacts(world: mod PhysicsWorld, hitContacts: view List(Int)) {
+func flagHitContacts(world: mod PhysicsWorld, hitContacts: view List(Int), slot: view Int) {
   if hitContacts.length is 0 {
     ret
   }
-  if let taskContext: mod TaskContext => world.taskContexts.modAt(index: 0) {
+  if let taskContext: mod TaskContext => world.taskContexts.modAt(index: slot) {
     loop var i: Int = 0, i < hitContacts.length, ++i {
       setBit(bitset: taskContext.hitEventBitSet, bitIndex: hitContacts.copyAtDefault(index: i))
     }

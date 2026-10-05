@@ -334,11 +334,12 @@ func lanePoint(lane: view PrepareLane, pointIndex: view Int) ret ManifoldPoint {
 }
 
 # b3PrepareContacts_Convex: the wide constraints of flat range `block`.
+# Returns whether any has restitution (the caller records it).
 func prepareContactsWide(
   world: mod PhysicsWorld
   context: mod StepContext
   block: view SolverBlock
-) {
+) ret Bool {
   let zero: FloatWide = zeroWide()
   let one: FloatWide = splatWide(value: 1.0)
   let two: FloatWide = splatWide(value: 2.0)
@@ -846,9 +847,7 @@ func prepareContactsWide(
     # Advance to the next colour
     slot = slot + 1
   }
-  if anyRestitution {
-    context.anyRestitution = true
-  }
+  ret anyRestitution
 }
 
 # The normal velocities at the points of a wide constraint, for restitution
@@ -910,10 +909,12 @@ func zeroBodyStateWide() ret BodyStateWide {
 
 # b3StoreImpulses_Convex: each lane's impulses back into its contact's
 # manifold, for warm starting the next step, flagging hit event candidates.
+# Hit candidates are flagged in TaskContext slot `slot` (the block's).
 func storeImpulsesWide(
   world: mod PhysicsWorld
   context: view StepContext
   block: view SolverBlock
+  slot: view Int
 ) {
   let negHitThreshold: Float = -world.hitEventThreshold
   loop var wideIndex: Int = block.startIndex, wideIndex < block.startIndex + block.count, ++wideIndex {
@@ -977,7 +978,7 @@ func storeImpulsesWide(
           }
         }
         if hit {
-          if let taskContext: mod TaskContext => world.taskContexts.modAt(index: 0) {
+          if let taskContext: mod TaskContext => world.taskContexts.modAt(index: slot) {
             setBit(bitset: taskContext.hitEventBitSet, bitIndex: contactId)
             taskContext.hasHitEvents = true
           }

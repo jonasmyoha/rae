@@ -1,0 +1,349 @@
+# The physics step on the worker pool (P9b): the same scenes stepped by 1, 2,
+# 4 and 8 workers give the same body transforms and the same event lists,
+# step for step. A pyramid exercises the solver stages (many colours, many
+# blocks per stage), pair finding, collide, finalize and island sleep; the
+# events scene adds contact begin/end/hit events, sensors, joint threshold
+# events and bullets. Each run folds every step's transforms and events into
+# one hash; the runs must agree. (The oracle fixtures 958, 959, 983 and 984
+# replay Box3D's goldens at 1 and 8 workers; this one adds scenes big enough
+# that every stage runs many blocks in parallel.)
+import Math
+open physics/math/TransformMath
+open physics/geometry/QueryTypes
+open physics/geometry/Hull
+open physics/geometry/BoxHull
+open physics/dynamics/WorldTypes
+open physics/dynamics/World
+open physics/dynamics/WorldBodies
+open physics/dynamics/WorldShapes
+open physics/dynamics/WorldStep
+open physics/dynamics/WorldJoints
+open physics/dynamics/JointDefs
+open physics/dynamics/Joint
+open physics/dynamics/Events
+
+# The hash of a run, and the event counts that show the scene did something
+type RunSummary {
+  hash: UInt64
+  contactBegins: Int
+  contactEnds: Int
+  hits: Int
+  sensorBegins: Int
+  sensorEnds: Int
+  jointEvents: Int
+  fellAsleep: Int
+}
+
+func emptySummary() ret RunSummary {
+  ret RunSummary {
+    hash: 14695981039346656037
+    contactBegins: 0
+    contactEnds: 0
+    hits: 0
+    sensorBegins: 0
+    sensorEnds: 0
+    jointEvents: 0
+    fellAsleep: 0
+  }
+}
+
+# FNV-1a over 32-bit words
+func mixInt(summary: mod RunSummary, value: view Int) {
+  let prime: UInt64 = 1099511628211
+  summary.hash = (summary.hash bitxor ((value bitand 4294967295) as UInt64)) * prime
+}
+
+func mixFloat(summary: mod RunSummary, value: view Float) {
+  mixInt(summary: summary, value: Math.floatBits(value: value))
+}
+
+func mixVector(summary: mod RunSummary, vector: view Vec3) {
+  mixFloat(summary: summary, value: vector.x)
+  mixFloat(summary: summary, value: vector.y)
+  mixFloat(summary: summary, value: vector.z)
+}
+
+func mixTransform(summary: mod RunSummary, transform: view Transform) {
+  mixVector(summary: summary, vector: transform.position)
+  mixFloat(summary: summary, value: transform.rotation.x)
+  mixFloat(summary: summary, value: transform.rotation.y)
+  mixFloat(summary: summary, value: transform.rotation.z)
+  mixFloat(summary: summary, value: transform.rotation.w)
+}
+
+func mixShape(summary: mod RunSummary, shapeId: view ShapeId) {
+  mixInt(summary: summary, value: shapeId.index1)
+  mixInt(summary: summary, value: shapeId.generation)
+}
+
+# One step's transforms and every event list, in the world's order.
+func mixStep(summary: mod RunSummary, world: view PhysicsWorld, bodies: view List(BodyId)) {
+  loop let bodyId: view BodyId in bodies {
+    mixTransform(summary: summary, transform: getBodyTransform(world: world, bodyId: bodyId))
+  }
+  let contacts: ContactEvents = getContactEvents(world: world)
+  mixInt(summary: summary, value: contacts.beginEvents.length)
+  loop let event: view ContactBeginTouchEvent in contacts.beginEvents {
+    mixShape(summary: summary, shapeId: event.shapeIdA)
+    mixShape(summary: summary, shapeId: event.shapeIdB)
+  }
+  mixInt(summary: summary, value: contacts.endEvents.length)
+  loop let event: view ContactEndTouchEvent in contacts.endEvents {
+    mixShape(summary: summary, shapeId: event.shapeIdA)
+    mixShape(summary: summary, shapeId: event.shapeIdB)
+  }
+  mixInt(summary: summary, value: contacts.hitEvents.length)
+  loop let event: view ContactHitEvent in contacts.hitEvents {
+    mixShape(summary: summary, shapeId: event.shapeIdA)
+    mixShape(summary: summary, shapeId: event.shapeIdB)
+    mixVector(summary: summary, vector: event.point)
+    mixFloat(summary: summary, value: event.approachSpeed)
+  }
+  let sensors: SensorEvents = getSensorEvents(world: world)
+  mixInt(summary: summary, value: sensors.beginEvents.length)
+  loop let event: view SensorBeginTouchEvent in sensors.beginEvents {
+    mixShape(summary: summary, shapeId: event.sensorShapeId)
+    mixShape(summary: summary, shapeId: event.visitorShapeId)
+  }
+  mixInt(summary: summary, value: sensors.endEvents.length)
+  loop let event: view SensorEndTouchEvent in sensors.endEvents {
+    mixShape(summary: summary, shapeId: event.sensorShapeId)
+    mixShape(summary: summary, shapeId: event.visitorShapeId)
+  }
+  mixInt(summary: summary, value: world.jointEvents.length)
+  loop let event: view JointEvent in world.jointEvents {
+    mixInt(summary: summary, value: event.jointId.index1)
+  }
+  let moves: List(BodyMoveEvent) = getBodyEvents(world: world)
+  mixInt(summary: summary, value: moves.length)
+  loop let event: view BodyMoveEvent in moves {
+    mixInt(summary: summary, value: event.bodyId.index1)
+    mixTransform(summary: summary, transform: event.transform)
+    if event.fellAsleep {
+      mixInt(summary: summary, value: 1)
+      summary.fellAsleep = summary.fellAsleep + 1
+    }
+  }
+  summary.contactBegins = summary.contactBegins + contacts.beginEvents.length
+  summary.contactEnds = summary.contactEnds + contacts.endEvents.length
+  summary.hits = summary.hits + contacts.hitEvents.length
+  summary.sensorBegins = summary.sensorBegins + sensors.beginEvents.length
+  summary.sensorEnds = summary.sensorEnds + sensors.endEvents.length
+  summary.jointEvents = summary.jointEvents + world.jointEvents.length
+}
+
+func newWorld(workers: view Int) ret PhysicsWorld {
+  var def: WorldDef = defaultWorldDef(lengthUnitsPerMeter: 1.0)
+  def.workerCount = workers
+  ret createWorld(def: def)
+}
+
+func addStaticBox(
+  world: mod PhysicsWorld
+  position: view Vec3
+  halfExtents: view Vec3
+  def: view ShapeDef
+) {
+  var bodyDef: BodyDef = defaultBodyDef(lengthUnitsPerMeter: 1.0)
+  bodyDef.position = position
+  let bodyId: BodyId = createBody(world: world, def: bodyDef)
+  createHullShape(
+    world: world
+    bodyId: bodyId
+    def: def
+    hull: makeBoxHull(
+      hx: halfExtents.x
+      hy: halfExtents.y
+      hz: halfExtents.z
+      lengthUnitsPerMeter: 1.0
+    )
+  )
+}
+
+# A 24-box-wide pyramid (300 boxes) settling and falling asleep.
+func runPyramid(workers: view Int) ret RunSummary {
+  var world: PhysicsWorld = newWorld(workers: workers)
+  let bodies: List(BodyId) = List.create(BodyId, cap: 300)
+  var groundDef: ShapeDef = defaultShapeDef(lengthUnitsPerMeter: 1.0)
+  addStaticBox(
+    world: world
+    position: Vec3 { x: 0.0, y: -1.0, z: 0.0 }
+    halfExtents: Vec3 { x: 40.0, y: 1.0, z: 40.0 }
+    def: groundDef
+  )
+  var bodyDef: BodyDef = defaultBodyDef(lengthUnitsPerMeter: 1.0)
+  bodyDef.bodyType = BodyType.dynamicBody
+  var shapeDef: ShapeDef = defaultShapeDef(lengthUnitsPerMeter: 1.0)
+  shapeDef.enableContactEvents = true
+  let box: Hull = makeBoxHull(
+    hx: 0.5
+    hy: 0.5
+    hz: 0.5
+    lengthUnitsPerMeter: 1.0
+  )
+  let baseCount: Int = 24
+  loop var i: Int = 0, i < baseCount, ++i {
+    loop var j: Int = i, j < baseCount, ++j {
+      let x: Float = ((i as Float) + 1.0) * 0.5 + ((j - i) as Float) - 0.5 * (baseCount as Float)
+      bodyDef.position = Vec3 { x: x, y: (i as Float) + 0.5, z: 0.0 }
+      let bodyId: BodyId = createBody(world: world, def: bodyDef)
+      createHullShape(
+        world: world
+        bodyId: bodyId
+        def: shapeDef
+        hull: box
+      )
+      bodies.add(value: bodyId)
+    }
+  }
+  var summary: RunSummary = emptySummary()
+  loop var step: Int = 0, step < 240, ++step {
+    stepWorld(world: world, timeStep: 1.0 / 60.0, subStepCount: 4)
+    mixStep(summary: summary, world: world, bodies: bodies)
+  }
+  ret summary
+}
+
+# Boxes raining through a sensor onto the ground, a chain whose joints
+# report a force threshold, and bullets fired at a wall.
+func runEvents(workers: view Int) ret RunSummary {
+  var world: PhysicsWorld = newWorld(workers: workers)
+  let bodies: List(BodyId) = List.create(BodyId, cap: 128)
+  var groundDef: ShapeDef = defaultShapeDef(lengthUnitsPerMeter: 1.0)
+  groundDef.enableContactEvents = true
+  groundDef.enableHitEvents = true
+  addStaticBox(
+    world: world
+    position: Vec3 { x: 0.0, y: -1.0, z: 0.0 }
+    halfExtents: Vec3 { x: 40.0, y: 1.0, z: 40.0 }
+    def: groundDef
+  )
+  # The wall the bullets hit
+  addStaticBox(
+    world: world
+    position: Vec3 { x: 20.0, y: 3.0, z: 0.0 }
+    halfExtents: Vec3 { x: 0.5, y: 3.0, z: 6.0 }
+    def: groundDef
+  )
+  # The sensor the boxes fall through
+  var sensorDef: ShapeDef = defaultShapeDef(lengthUnitsPerMeter: 1.0)
+  sensorDef.isSensor = true
+  sensorDef.enableSensorEvents = true
+  addStaticBox(
+    world: world
+    position: Vec3 { x: 0.0, y: 4.0, z: 0.0 }
+    halfExtents: Vec3 { x: 6.0, y: 1.0, z: 6.0 }
+    def: sensorDef
+  )
+
+  var bodyDef: BodyDef = defaultBodyDef(lengthUnitsPerMeter: 1.0)
+  bodyDef.bodyType = BodyType.dynamicBody
+  var boxDef: ShapeDef = defaultShapeDef(lengthUnitsPerMeter: 1.0)
+  boxDef.enableContactEvents = true
+  boxDef.enableHitEvents = true
+  boxDef.enableSensorEvents = true
+  let box: Hull = makeBoxHull(
+    hx: 0.4
+    hy: 0.4
+    hz: 0.4
+    lengthUnitsPerMeter: 1.0
+  )
+  loop var i: Int = 0, i < 8, ++i {
+    loop var j: Int = 0, j < 8, ++j {
+      bodyDef.position = Vec3 {
+        x: ((i - 4) as Float) * 1.1
+        y: 8.0 + ((i + j) as Float) * 0.7
+        z: ((j - 4) as Float) * 1.1
+      }
+      let bodyId: BodyId = createBody(world: world, def: bodyDef)
+      createHullShape(
+        world: world
+        bodyId: bodyId
+        def: boxDef
+        hull: box
+      )
+      bodies.add(value: bodyId)
+    }
+  }
+
+  # A hanging chain of spheres; its joints report forces over a threshold
+  var anchorDef: BodyDef = defaultBodyDef(lengthUnitsPerMeter: 1.0)
+  anchorDef.position = Vec3 { x: -12.0, y: 12.0, z: 0.0 }
+  var previous: BodyId = createBody(world: world, def: anchorDef)
+  var jointDef: SphericalJointDef = defaultSphericalJointDef(lengthUnitsPerMeter: 1.0)
+  jointDef.base.forceThreshold = 20.0
+  let sphere: Sphere = { center: Vec3 { x: 0.0, y: 0.0, z: 0.0 }, radius: 0.3 }
+  loop var i: Int = 1, i <= 12, ++i {
+    bodyDef.position = Vec3 { x: -12.0 + (i as Float), y: 12.0, z: 0.0 }
+    let bodyId: BodyId = createBody(world: world, def: bodyDef)
+    createSphereShape(
+      world: world
+      bodyId: bodyId
+      def: boxDef
+      sphere: sphere
+    )
+    jointDef.base.bodyIdA = previous
+    jointDef.base.bodyIdB = bodyId
+    jointDef.base.localFrameA.position = Vec3 { x: 0.5, y: 0.0, z: 0.0 }
+    jointDef.base.localFrameB.position = Vec3 { x: -0.5, y: 0.0, z: 0.0 }
+    createSphericalJoint(world: world, def: jointDef)
+    bodies.add(value: bodyId)
+    previous = bodyId
+  }
+
+  # Bullets: small, fast, swept against the wall and the boxes
+  var bulletDef: BodyDef = defaultBodyDef(lengthUnitsPerMeter: 1.0)
+  bulletDef.bodyType = BodyType.dynamicBody
+  bulletDef.isBullet = true
+  let bullet: Sphere = { center: Vec3 { x: 0.0, y: 0.0, z: 0.0 }, radius: 0.1 }
+  loop var i: Int = 0, i < 6, ++i {
+    bulletDef.position = Vec3 { x: -4.0, y: 1.0 + (i as Float) * 0.8, z: ((i - 3) as Float) * 1.5 }
+    bulletDef.linearVelocity = Vec3 { x: 120.0, y: 0.0, z: 0.0 }
+    let bodyId: BodyId = createBody(world: world, def: bulletDef)
+    createSphereShape(
+      world: world
+      bodyId: bodyId
+      def: boxDef
+      sphere: bullet
+    )
+    bodies.add(value: bodyId)
+  }
+
+  var summary: RunSummary = emptySummary()
+  loop var step: Int = 0, step < 300, ++step {
+    stepWorld(world: world, timeStep: 1.0 / 60.0, subStepCount: 4)
+    mixStep(summary: summary, world: world, bodies: bodies)
+  }
+  ret summary
+}
+
+func describe(name: view String, workers: view Int, summary: view RunSummary) {
+  log(
+    "{name} at {workers} workers: hash {summary.hash}, contact begin {summary.contactBegins} end {summary.contactEnds} hit {summary.hits}, sensor begin {summary.sensorBegins} end {summary.sensorEnds}, joint {summary.jointEvents}, asleep {summary.fellAsleep}"
+  )
+}
+
+func main() {
+  let workerCounts: List(Int) = { 1, 2, 4, 8 }
+  var pyramidHash: UInt64 = 0
+  var eventsHash: UInt64 = 0
+  var identical: Bool = true
+  loop var i: Int = 0, i < workerCounts.length, ++i {
+    let workers: Int = workerCounts.copyAtDefault(index: i)
+    let pyramid: RunSummary = runPyramid(workers: workers)
+    describe(name: "pyramid", workers: workers, summary: pyramid)
+    let events: RunSummary = runEvents(workers: workers)
+    describe(name: "events", workers: workers, summary: events)
+    if i is 0 {
+      pyramidHash = pyramid.hash
+      eventsHash = events.hash
+    } else if pyramid.hash is not pyramidHash or events.hash is not eventsHash {
+      identical = false
+    }
+  }
+  if identical {
+    log("identical at 1, 2, 4 and 8 workers")
+  } else {
+    log("DIFFERENT across worker counts")
+  }
+}

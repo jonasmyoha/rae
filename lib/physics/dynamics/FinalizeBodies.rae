@@ -33,7 +33,10 @@ open physics/dynamics/Continuous
 
 # b3FinalizeBodiesTask for awake sims `startIndex` to `endIndex`: apply the
 # position deltas, measure sleepiness, run continuous collision for fast
-# bodies, update the world inertia and the shapes' boxes.
+# bodies, update the world inertia and the shapes' boxes. It writes only its
+# own bodies, sims and shapes; what other chunks share (the bullet list, the
+# broad-phase marks, the island bits) goes to TaskContext slot `workerIndex`
+# and is merged after the parallel section.
 func finalizeBodies(
   world: mod PhysicsWorld
   context: mod StepContext
@@ -127,7 +130,9 @@ func finalizeBodies(
         # Bullets wait for the continuous stage; the order of the sweeps
         # does not matter
         if (sim.flags bitand isBulletFlag) is not 0 {
-          context.bulletBodies.add(value: simIndex)
+          if let taskContext: mod TaskContext => world.taskContexts.modAt(index: workerIndex) {
+            taskContext.bulletBodies.add(value: simIndex)
+          }
         } else {
           continuous = true
         }
@@ -149,7 +154,12 @@ func finalizeBodies(
       awake.bodySims.set(index: simIndex, value: sim)
     }
     if continuous {
-      solveContinuous(world: world, simIndex: simIndex, dt: timeStep)
+      solveContinuous(
+        world: world
+        simIndex: simIndex
+        dt: timeStep
+        chunk: workerIndex
+      )
       sim = setBodySimAt(world: world, setIndex: awakeSet, localIndex: simIndex)
     }
 
@@ -203,7 +213,12 @@ func finalizeBodies(
         if contains(outer: fatBox, inner: box) is false {
           let inflated: Aabb = inflate(box: box, extension: shape.aabbMargin)
           world.fatAabbs.set(index: shapeId, value: inflated)
-          markShapeProxyMoved(world: world, proxyKey: shape.proxyKey, box: inflated)
+          deferProxyMoved(
+            world: world
+            chunk: workerIndex
+            proxyKey: shape.proxyKey
+            box: inflated
+          )
         }
         shapeId = shape.nextShapeId
       }

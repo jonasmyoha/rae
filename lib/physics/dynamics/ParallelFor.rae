@@ -1,9 +1,10 @@
 # b3ParallelFor of Box3D's parallel_for.c at 9f998c8: how `itemCount` items
-# split into blocks. Rae has no function values, so a caller loops over the
-# blocks itself (`parallelForBlockCount`, then `parallelForBlockStart` and
-# `parallelForBlockEnd` of each) and runs its task on each, in order, as
-# worker 0: exactly what Box3D does with one worker. Threading it later
-# changes these loops, not the tasks.
+# split into blocks. Rae has no function values, so each parallel site runs
+# its own loop: a parallelLoop over the world's chunk slots (one TaskContext
+# each), where chunk c runs the contiguous blocks `chunkFirstBlock(c)` up to
+# `chunkFirstBlock(c + 1)` in order, as Box3D's tasks run one block each.
+# The chunks' results are merged in chunk order, so the step is the same at
+# every worker count. With one worker the same chunks run as a plain loop.
 
 # Blocks per worker (Box3D's measured optimum)
 const blocksPerWorker: Int = 32
@@ -34,4 +35,10 @@ func parallelForBlockEnd(blockIndex: view Int, blockSize: view Int, itemCount: v
     ret itemCount
   }
   ret end
+}
+
+# The first block of chunk `chunk` when `chunkCount` chunks share
+# `blockCount` blocks in contiguous runs (chunk `chunkCount` gives the end).
+func chunkFirstBlock(chunk: view Int, chunkCount: view Int, blockCount: view Int) ret Int {
+  ret chunk * blockCount / chunkCount
 }

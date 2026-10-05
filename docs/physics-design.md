@@ -167,8 +167,8 @@ type Physics {
 It is called `Physics` because the port's own world is `PhysicsWorld`. One
 resource per world; a menu and a game are two. `createPhysics(def:
 defaultPhysicsWorldDef(), fixedStep:, subSteps:)`; the default definition is
-Z-up (`gravity = (0, 0, -9.81)`, `docs/coordinate-system.md`), one worker,
-continuous collision on. `consumeFixedSteps(physics, frameTime)` adds a
+Z-up (`gravity = (0, 0, -9.81)`, `docs/coordinate-system.md`), the worker
+pool's worker count (`Parallel.workerCount()`), continuous collision on. `consumeFixedSteps(physics, frameTime)` adds a
 frame's time and returns the fixed steps to take (the accumulator is capped
 at `maxStepsPerFrame` steps, so a stall slows the game instead of
 spiralling); `physicsBlend` is the fraction into the next step for render
@@ -337,8 +337,9 @@ for.
 ## 6. Determinism rules
 
 - Fixed `fixedStep`, the accumulator in the `Physics` resource (§5.1).
-- One worker. The port's parallel step (P9b) must give the same results at
-  every worker count, as Box3D's does; until then the step is serial.
+- Any worker count. The port's parallel step (P9b) gives the same results
+  at every worker count, as Box3D's does (fixture 997; the oracle replays
+  run at 1 and 8 workers).
 - Every lockstep peer runs the same Rae build: the port is Rae compiled by
   the Rae C backend with `-ffp-contract=off`, so the same source gives the
   same floats on every machine; the oracle (§4) proves it equals Box3D's

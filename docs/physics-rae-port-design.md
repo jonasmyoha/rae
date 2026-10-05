@@ -667,6 +667,27 @@ C added.
   apps, best of three); the numbers and the remaining gap are §6.1. Rain is
   not ported: it needs the ragdoll (`shared/human.c`) and
   `b3CreateTorusMesh`.
+  **P9b (the parallel step, 2026-10-05):**
+  - Every parallel site of the step runs on the worker pool: each solver
+    stage is one `parallelLoop` over its blocks
+    (`dynamics/StageDispatcher`), and pair finding, collide, finalize,
+    sensors and bullets run chunks of their blocks.
+  - The scratch lives in one TaskContext per chunk, four per worker. Per-step
+    reports go to the block's or chunk's slot and are merged in slot order:
+    pair keys, contact, joint, hit and sensor bits, awake islands, bullets,
+    restitution, and broad-phase marks, which are applied serially after
+    finalize.
+  - `workerCount` comes from the world definition, as in Box3D (at least 1;
+    the ECS default asks the pool). With one worker the same chunks run
+    inline.
+  - The results are identical at 1, 2, 4 and 8 workers:
+    - fixture 997 (a 300-box pyramid and an events scene with contacts,
+      hits, sensors, joint thresholds, bullets and sleep), clean under the
+      TSan gate;
+    - the oracle replays 958, 959, 983 and 984, which now run at 1 and at
+      8 workers.
+  - The speedup curve against Box3D's is `docs/physics-performance-plan.md`
+    §2b.
 - **P10 — demos**: now part of the two-track plan
   (`docs/physics-two-implementations.md` §3): `examples/122_physics_playground_port`
   (the field scenes: pyramid, dominoes, a bridge, the character mover, thrown
