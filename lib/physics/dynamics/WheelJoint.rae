@@ -58,6 +58,7 @@ func steeringFrame(matrixA: view Matrix3, matrixB: view Matrix3) ret SteeringFra
 # by the caller).
 func prepareWheelJoint(
   base: mod JointSim
+  joint: mod WheelJointData
   simA: view BodySim
   simB: view BodySim
   indexA: view Int
@@ -72,7 +73,6 @@ func prepareWheelJoint(
   let invInertiaSum: Matrix3 = add(left: base.invIA, right: base.invIB)
   base.fixedRotation = determinant(matrix: invInertiaSum) < 1000.0 * floatMin
 
-  var joint: WheelJointData = base.wheelJoint
   joint.indexA = indexA
   joint.indexB = indexB
 
@@ -148,7 +148,6 @@ func prepareWheelJoint(
     joint.lowerSteeringImpulse = 0.0
     joint.upperSteeringImpulse = 0.0
   }
-  base.wheelJoint = joint
 }
 
 # The joint rotations of the sub-step, B negated to keep the relative angle
@@ -172,8 +171,11 @@ func wheelRotations(
 }
 
 # b3WarmStartWheelJoint
-func warmStartWheelJoint(base: view JointSim, states: mod List(BodyState)) {
-  let joint: WheelJointData = base.wheelJoint
+func warmStartWheelJoint(
+  base: view JointSim
+  joint: view WheelJointData
+  states: mod List(BodyState)
+) {
   let stateA: BodyState = jointBodyState(states: states, index: joint.indexA)
   let stateB: BodyState = jointBodyState(states: states, index: joint.indexB)
 
@@ -336,12 +338,12 @@ func suspensionSpeed(
 # b3SolveWheelJoint
 func solveWheelJoint(
   base: mod JointSim
+  joint: mod WheelJointData
   states: mod List(BodyState)
   h: view Float
   inverseH: view Float
   useBias: view Bool
 ) {
-  var joint: WheelJointData = base.wheelJoint
   let stateA: BodyState = jointBodyState(states: states, index: joint.indexA)
   let stateB: BodyState = jointBodyState(states: states, index: joint.indexB)
   var velocities: JointVelocities = jointVelocities(stateA: stateA, stateB: stateB)
@@ -664,7 +666,6 @@ func solveWheelJoint(
     useBias: useBias
   )
 
-  base.wheelJoint = joint
   storeJointVelocities(
     states: states
     indexA: joint.indexA

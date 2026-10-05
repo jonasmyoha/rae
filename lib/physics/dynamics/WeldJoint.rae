@@ -25,6 +25,7 @@ open physics/dynamics/SphericalJoint
 # by the caller).
 func prepareWeldJoint(
   base: mod JointSim
+  joint: mod WeldJointData
   simA: view BodySim
   simB: view BodySim
   indexA: view Int
@@ -39,7 +40,6 @@ func prepareWeldJoint(
   let invInertiaSum: Matrix3 = add(left: base.invIA, right: base.invIB)
   base.fixedRotation = determinant(matrix: invInertiaSum) < 1000.0 * floatMin
 
-  var joint: WeldJointData = base.weldJoint
   joint.indexA = indexA
   joint.indexB = indexB
 
@@ -72,12 +72,14 @@ func prepareWeldJoint(
     joint.linearImpulse = zeroVector()
     joint.angularImpulse = zeroVector()
   }
-  base.weldJoint = joint
 }
 
 # b3WarmStartWeldJoint
-func warmStartWeldJoint(base: view JointSim, states: mod List(BodyState)) {
-  let joint: WeldJointData = base.weldJoint
+func warmStartWeldJoint(
+  base: view JointSim
+  joint: view WeldJointData
+  states: mod List(BodyState)
+) {
   let stateA: BodyState = jointBodyState(states: states, index: joint.indexA)
   let stateB: BodyState = jointBodyState(states: states, index: joint.indexB)
   let rA: Vec3 = rotateVector(quat: stateA.deltaRotation, vector: joint.frameA.position)
@@ -111,6 +113,7 @@ func rotationError(quatA: view Quat, relative: view Quat) ret Vec3 {
 # b3SolveWeldJoint
 func solveWeldJoint(
   base: mod JointSim
+  joint: mod WeldJointData
   states: mod List(BodyState)
   h: view Float
   inverseH: view Float
@@ -118,7 +121,6 @@ func solveWeldJoint(
 ) {
   let iA: Matrix3 = base.invIA
   let iB: Matrix3 = base.invIB
-  var joint: WeldJointData = base.weldJoint
   let stateA: BodyState = jointBodyState(states: states, index: joint.indexA)
   let stateB: BodyState = jointBodyState(states: states, index: joint.indexB)
   var velocities: JointVelocities = jointVelocities(stateA: stateA, stateB: stateB)
@@ -197,7 +199,6 @@ func solveWeldJoint(
     angularB: cross(left: rB, right: impulse)
   )
 
-  base.weldJoint = joint
   storeJointVelocities(
     states: states
     indexA: joint.indexA

@@ -280,12 +280,26 @@ func putJoints(out: mod List(Int), world: view PhysicsWorld, bodies: view List(B
     putFloat(out: out, value: sim.invMassA)
     putFloat(out: out, value: sim.invMassB)
     if joint.jointType is JointType.distanceJoint {
-      putFloat(out: out, value: sim.distanceJoint.impulse)
-      putFloat(out: out, value: sim.distanceJoint.lowerImpulse)
-      putFloat(out: out, value: sim.distanceJoint.upperImpulse)
-      putFloat(out: out, value: sim.distanceJoint.motorImpulse)
+      putFloat(
+        out: out
+        value: world.jointData.distanceJoints.copyAtDefault(index: sim.dataIndex).impulse
+      )
+      putFloat(
+        out: out
+        value: world.jointData.distanceJoints.copyAtDefault(index: sim.dataIndex).lowerImpulse
+      )
+      putFloat(
+        out: out
+        value: world.jointData.distanceJoints.copyAtDefault(index: sim.dataIndex).upperImpulse
+      )
+      putFloat(
+        out: out
+        value: world.jointData.distanceJoints.copyAtDefault(index: sim.dataIndex).motorImpulse
+      )
     } else if joint.jointType is JointType.revoluteJoint {
-      let revolute: RevoluteJointData = sim.revoluteJoint
+      let revolute: RevoluteJointData = world.jointData.revoluteJoints.copyAtDefault(
+        index: sim.dataIndex
+      )
       putVec(out: out, vector: revolute.linearImpulse)
       putFloat(out: out, value: revolute.perpImpulse.x)
       putFloat(out: out, value: revolute.perpImpulse.y)
@@ -294,7 +308,9 @@ func putJoints(out: mod List(Int), world: view PhysicsWorld, bodies: view List(B
       putFloat(out: out, value: revolute.lowerImpulse)
       putFloat(out: out, value: revolute.upperImpulse)
     } else if joint.jointType is JointType.prismaticJoint {
-      let prismatic: PrismaticJointData = sim.prismaticJoint
+      let prismatic: PrismaticJointData = world.jointData.prismaticJoints.copyAtDefault(
+        index: sim.dataIndex
+      )
       putFloat(out: out, value: prismatic.perpImpulse.x)
       putFloat(out: out, value: prismatic.perpImpulse.y)
       putVec(out: out, vector: prismatic.angularImpulse)
@@ -303,7 +319,7 @@ func putJoints(out: mod List(Int), world: view PhysicsWorld, bodies: view List(B
       putFloat(out: out, value: prismatic.lowerImpulse)
       putFloat(out: out, value: prismatic.upperImpulse)
     } else if joint.jointType is JointType.wheelJoint {
-      let wheel: WheelJointData = sim.wheelJoint
+      let wheel: WheelJointData = world.jointData.wheelJoints.copyAtDefault(index: sim.dataIndex)
       putFloat(out: out, value: wheel.linearImpulse.x)
       putFloat(out: out, value: wheel.linearImpulse.y)
       putFloat(out: out, value: wheel.angularImpulse.x)
@@ -316,7 +332,9 @@ func putJoints(out: mod List(Int), world: view PhysicsWorld, bodies: view List(B
       putFloat(out: out, value: wheel.lowerSteeringImpulse)
       putFloat(out: out, value: wheel.upperSteeringImpulse)
     } else if joint.jointType is JointType.sphericalJoint {
-      let spherical: SphericalJointData = sim.sphericalJoint
+      let spherical: SphericalJointData = world.jointData.sphericalJoints.copyAtDefault(
+        index: sim.dataIndex
+      )
       putVec(out: out, vector: spherical.linearImpulse)
       putVec(out: out, vector: spherical.springImpulse)
       putVec(out: out, vector: spherical.motorImpulse)
@@ -324,17 +342,29 @@ func putJoints(out: mod List(Int), world: view PhysicsWorld, bodies: view List(B
       putFloat(out: out, value: spherical.upperTwistImpulse)
       putFloat(out: out, value: spherical.swingImpulse)
     } else if joint.jointType is JointType.motorJoint {
-      let motor: MotorJointData = sim.motorJoint
+      let motor: MotorJointData = world.jointData.motorJoints.copyAtDefault(index: sim.dataIndex)
       putVec(out: out, vector: motor.linearVelocityImpulse)
       putVec(out: out, vector: motor.angularVelocityImpulse)
       putVec(out: out, vector: motor.linearSpringImpulse)
       putVec(out: out, vector: motor.angularSpringImpulse)
     } else if joint.jointType is JointType.parallelJoint {
-      putFloat(out: out, value: sim.parallelJoint.perpImpulse.x)
-      putFloat(out: out, value: sim.parallelJoint.perpImpulse.y)
+      putFloat(
+        out: out
+        value: world.jointData.parallelJoints.copyAtDefault(index: sim.dataIndex).perpImpulse.x
+      )
+      putFloat(
+        out: out
+        value: world.jointData.parallelJoints.copyAtDefault(index: sim.dataIndex).perpImpulse.y
+      )
     } else if joint.jointType is JointType.weldJoint {
-      putVec(out: out, vector: sim.weldJoint.linearImpulse)
-      putVec(out: out, vector: sim.weldJoint.angularImpulse)
+      putVec(
+        out: out
+        vector: world.jointData.weldJoints.copyAtDefault(index: sim.dataIndex).linearImpulse
+      )
+      putVec(
+        out: out
+        vector: world.jointData.weldJoints.copyAtDefault(index: sim.dataIndex).angularImpulse
+      )
     }
   }
   putInt(out: out, value: bodies.length)
