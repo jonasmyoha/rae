@@ -1,0 +1,351 @@
+# The physics playground's scenes as backend-neutral descriptions
+# (SceneTypes; docs/physics-two-implementations.md §3): a box pyramid sized by
+# a body count, dominoes, a hinged plank bridge with a hanging chain, welded
+# towers, balls rolling over a rippled mesh, and a character walking a
+# height-field terrain. Every number here is fixed, so a scene is the same on
+# every run and on both physics tracks.
+import Math
+import Quat
+open Vec3
+open Mesh3d
+open physicsScenes/SceneTypes
+
+const sceneCount: Int = 6
+
+func sceneName(index: view Int) ret String {
+  if index is 0 {
+    ret "pyramid"
+  }
+  if index is 1 {
+    ret "dominoes"
+  }
+  if index is 2 {
+    ret "bridge and chain"
+  }
+  if index is 3 {
+    ret "welded towers"
+  }
+  if index is 4 {
+    ret "rolling mesh"
+  }
+  ret "terrain walk"
+}
+
+# Scene `index` (0 to sceneCount - 1); `bodyCount` sizes the pyramid.
+func buildScene(index: view Int, bodyCount: view Int) ret Scene {
+  if index is 0 {
+    ret pyramidScene(bodyCount: bodyCount)
+  }
+  if index is 1 {
+    ret dominoesScene(count: 60)
+  }
+  if index is 2 {
+    ret bridgeScene(planks: 16, links: 12)
+  }
+  if index is 3 {
+    ret towersScene(towers: 3, levels: 6)
+  }
+  if index is 4 {
+    ret rollingScene(balls: 200)
+  }
+  ret terrainScene(crates: 40)
+}
+
+func flatGround(halfSize: view Float) ret SceneGround {
+  ret SceneGround {
+    kind: SceneGroundKind.flat
+    halfSize: halfSize
+    mesh: makePlane(size: 2.0 * halfSize, segments: 1)
+  }
+}
+
+func emptyScene(name: view String, ground: own SceneGround) ret Scene {
+  ret Scene {
+    name: name
+    ground: own ground
+    bodies: List.create(SceneBody, cap: 16)
+    joints: List.create(SceneJoint, cap: 0)
+    hasCharacter: false
+    characterStart: Vec3 { x: 0.0, y: 0.0, z: 1.4 }
+    cameraTarget: Vec3 { x: 0.0, y: 0.0, z: 2.0 }
+    cameraDistance: 30.0
+  }
+}
+
+# The largest pyramid base whose box count (base * (base + 1) / 2) fits
+# `bodyCount` (at least 1).
+func pyramidBase(bodyCount: view Int) ret Int {
+  var base: Int = 1
+  loop (base + 1) * (base + 2) / 2 <= bodyCount {
+    base = base + 1
+  }
+  ret base
+}
+
+# A box pyramid of about `bodyCount` unit boxes (Box3D's large pyramid, Z-up).
+func pyramidScene(bodyCount: view Int) ret Scene {
+  let base: Int = pyramidBase(bodyCount: bodyCount)
+  let extent: Float = (base as Float) * 0.6 + 10.0
+  var scene: Scene = emptyScene(name: "pyramid", ground: flatGround(halfSize: extent))
+  let half: Float = 0.5
+  let box: SceneShape = boxShape(halfExtents: Vec3 { x: half, y: half, z: half })
+  loop var i: Int = 0, i < base, ++i {
+    let z: Float = (2.0 * (i as Float) + 1.0) * half
+    loop var j: Int = i, j < base, ++j {
+      let x: Float = ((i as Float) + 1.0) * half + 2.0 * ((j - i) as Float) * half - half * (base as Float)
+      scene.bodies.add(value: dynamicBody(shape: box, position: Vec3 { x: x, y: 0.0, z: z }))
+    }
+  }
+  scene.cameraTarget = Vec3 { x: 0.0, y: 0.0, z: (base as Float) * 0.35 }
+  scene.cameraDistance = (base as Float) * 1.3 + 12.0
+  ret scene
+}
+
+# A line of `count` dominoes along x; the first is tipped toward the second.
+func dominoesScene(count: view Int) ret Scene {
+  var scene: Scene = emptyScene(name: "dominoes", ground: flatGround(halfSize: 60.0))
+  let domino: SceneShape = boxShape(halfExtents: Vec3 { x: 0.08, y: 0.4, z: 0.8 })
+  let start: Float = -0.5 * (count as Float) * 0.9
+  loop var i: Int = 0, i < count, ++i {
+    var body: SceneBody = dynamicBody(
+      shape: domino
+      position: Vec3 { x: start + (i as Float) * 0.9, y: 0.0, z: 0.8 }
+    )
+    if i is 0 {
+      body.rotation = Quat.fromAxisAngle(axis: Vec3 { x: 0.0, y: 1.0, z: 0.0 }, angle: 0.3)
+      body.position.z = 0.82
+    }
+    scene.bodies.add(value: body)
+  }
+  scene.cameraDistance = 40.0
+  ret scene
+}
+
+# A hinge frame at `x` along a plank, its axis along y (z turned onto y).
+func hingeFrame(x: view Float) ret SceneFrame {
+  ret SceneFrame {
+    position: Vec3 { x: x, y: 0.0, z: 0.0 }
+    rotation: Quat.fromAxisAngle(axis: Vec3 { x: 1.0, y: 0.0, z: 0.0 }, angle: -0.5 * Math.pi)
+  }
+}
+
+func addSceneJoint(
+  scene: mod Scene
+  kind: view SceneJointKind
+  bodyA: view Int
+  bodyB: view Int
+  frameA: view SceneFrame
+  frameB: view SceneFrame
+) {
+  scene.joints.add(value: SceneJoint {
+    kind: kind
+    bodyA: bodyA
+    bodyB: bodyB
+    frameA: frameA
+    frameB: frameB
+  })
+}
+
+# A bridge of `planks` hinged planks between two posts, and beside it a chain
+# of `links` capsules hanging from a beam on ball joints.
+func bridgeScene(planks: view Int, links: view Int) ret Scene {
+  var scene: Scene = emptyScene(name: "bridge and chain", ground: flatGround(halfSize: 40.0))
+  let height: Float = 5.0
+  let span: Float = (planks as Float) * 1.0
+  let post: SceneShape = boxShape(halfExtents: Vec3 { x: 0.3, y: 1.4, z: 0.3 })
+  scene.bodies.add(
+    value: staticBody(shape: post, position: Vec3 { x: -0.5 * span - 0.3, y: 0.0, z: height })
+  )
+  scene.bodies.add(
+    value: staticBody(shape: post, position: Vec3 { x: 0.5 * span + 0.3, y: 0.0, z: height })
+  )
+  let plank: SceneShape = boxShape(halfExtents: Vec3 { x: 0.45, y: 1.2, z: 0.08 })
+  var previous: Int = 0
+  var previousEdge: Float = 0.3
+  loop var i: Int = 0, i < planks, ++i {
+    let x: Float = -0.5 * span + 0.5 + (i as Float) * 1.0
+    let index: Int = scene.bodies.length
+    scene.bodies.add(value: dynamicBody(shape: plank, position: Vec3 { x: x, y: 0.0, z: height }))
+    addSceneJoint(
+      scene: scene
+      kind: SceneJointKind.hinge
+      bodyA: previous
+      bodyB: index
+      frameA: hingeFrame(x: previousEdge)
+      frameB: hingeFrame(x: -0.5)
+    )
+    previous = index
+    previousEdge = 0.5
+  }
+  addSceneJoint(
+    scene: scene
+    kind: SceneJointKind.hinge
+    bodyA: previous
+    bodyB: 1
+    frameA: hingeFrame(x: 0.5)
+    frameB: hingeFrame(x: -0.3)
+  )
+
+  # The chain: a beam, then capsules along -z on ball joints
+  let beamPosition: Vec3 = { x: 0.0, y: 6.0, z: 10.0 }
+  scene.bodies.add(
+    value: staticBody(
+      shape: boxShape(halfExtents: Vec3 { x: 0.3, y: 0.3, z: 0.3 })
+      position: beamPosition
+    )
+  )
+  var link: Int = scene.bodies.length - 1
+  var linkEnd: Float = -0.3
+  let capsule: SceneShape = capsuleShape(radius: 0.12, halfLength: 0.25)
+  loop var i: Int = 0, i < links, ++i {
+    let index: Int = scene.bodies.length
+    var body: SceneBody = dynamicBody(
+      shape: capsule
+      position: Vec3 { x: 0.0, y: 6.0, z: beamPosition.z - 0.7 - (i as Float) * 0.8 }
+    )
+    # A push so the chain swings
+    if i is links - 1 {
+      body.linearVelocity = Vec3 { x: 6.0, y: 0.0, z: 0.0 }
+    }
+    scene.bodies.add(value: body)
+    addSceneJoint(
+      scene: scene
+      kind: SceneJointKind.ball
+      bodyA: link
+      bodyB: index
+      frameA: SceneFrame { position: Vec3 { x: 0.0, y: 0.0, z: linkEnd }, rotation: identityQuat() }
+      frameB: SceneFrame { position: Vec3 { x: 0.0, y: 0.0, z: 0.4 }, rotation: identityQuat() }
+    )
+    link = index
+    linkEnd = -0.4
+  }
+  scene.cameraTarget = Vec3 { x: 0.0, y: 2.0, z: 4.0 }
+  scene.cameraDistance = 26.0
+  ret scene
+}
+
+# `towers` towers of `levels` boxes, each box welded to the one below: a tower
+# moves as one body until something breaks it free of the ground.
+func towersScene(towers: view Int, levels: view Int) ret Scene {
+  var scene: Scene = emptyScene(name: "welded towers", ground: flatGround(halfSize: 40.0))
+  let box: SceneShape = boxShape(halfExtents: Vec3 { x: 0.5, y: 0.5, z: 0.5 })
+  loop var tower: Int = 0, tower < towers, ++tower {
+    let x: Float = ((tower as Float) - 0.5 * ((towers - 1) as Float)) * 4.0
+    var below: Int = -1
+    loop var level: Int = 0, level < levels, ++level {
+      let index: Int = scene.bodies.length
+      scene.bodies.add(
+        value: dynamicBody(
+          shape: box
+          position: Vec3 { x: x, y: 0.0, z: 0.5 + (level as Float) * 1.0 }
+        )
+      )
+      if below >= 0 {
+        addSceneJoint(
+          scene: scene
+          kind: SceneJointKind.weld
+          bodyA: below
+          bodyB: index
+          frameA: SceneFrame { position: Vec3 { x: 0.0, y: 0.0, z: 0.5 }, rotation: identityQuat() }
+          frameB: SceneFrame {
+            position: Vec3 { x: 0.0, y: 0.0, z: -0.5 }
+            rotation: identityQuat()
+          }
+        )
+      }
+      below = index
+    }
+  }
+  scene.cameraTarget = Vec3 { x: 0.0, y: 0.0, z: 3.0 }
+  scene.cameraDistance = 22.0
+  ret scene
+}
+
+# A rippled triangle-mesh floor with `balls` spheres and boxes dropped on it.
+func rollingScene(balls: view Int) ret Scene {
+  let ground: SceneGround = {
+    kind: SceneGroundKind.mesh
+    halfSize: 30.0
+    mesh: makeFbmTerrain(
+      size: 60.0
+      segments: 48
+      heightScale: 1.5
+      frequency: 0.06
+      octaves: 2
+      seed: 11
+    )
+  }
+  var scene: Scene = emptyScene(name: "rolling mesh", ground: ground)
+  let ball: SceneShape = sphereShape(radius: 0.4)
+  let crate: SceneShape = boxShape(halfExtents: Vec3 { x: 0.35, y: 0.35, z: 0.35 })
+  loop var i: Int = 0, i < balls, ++i {
+    let column: Int = i % 15
+    let row: Int = i / 15
+    let position: Vec3 = {
+      x: (column as Float) * 1.4 - 10.0
+      y: (row as Float) * 1.4 - 9.0
+      z: 6.0 + ((i % 3) as Float)
+    }
+    if i % 4 is 0 {
+      scene.bodies.add(value: dynamicBody(shape: crate, position: position))
+    } else {
+      scene.bodies.add(value: dynamicBody(shape: ball, position: position))
+    }
+  }
+  scene.cameraTarget = Vec3 { x: 0.0, y: 0.0, z: 1.0 }
+  scene.cameraDistance = 34.0
+  ret scene
+}
+
+# A height-field terrain (a regular height grid, as a triangle mesh) with
+# `crates` loose crates and a character walking across it.
+func terrainScene(crates: view Int) ret Scene {
+  let ground: SceneGround = {
+    kind: SceneGroundKind.mesh
+    halfSize: 40.0
+    mesh: makeFbmTerrain(
+      size: 80.0
+      segments: 64
+      heightScale: 3.0
+      frequency: 0.04
+      octaves: 3
+      seed: 5
+    )
+  }
+  var scene: Scene = emptyScene(name: "terrain walk", ground: ground)
+  let crate: SceneShape = boxShape(halfExtents: Vec3 { x: 0.4, y: 0.4, z: 0.4 })
+  loop var i: Int = 0, i < crates, ++i {
+    let column: Int = i % 8
+    let row: Int = i / 8
+    scene.bodies.add(
+      value: dynamicBody(
+        shape: crate
+        position: Vec3 { x: (column as Float) * 2.0 - 4.0, y: (row as Float) * 2.0 + 4.0, z: 8.0 }
+      )
+    )
+  }
+  scene.hasCharacter = true
+  scene.characterStart = Vec3 { x: -6.0, y: -6.0, z: 6.0 }
+  scene.cameraTarget = Vec3 { x: 0.0, y: 0.0, z: 2.0 }
+  scene.cameraDistance = 36.0
+  ret scene
+}
+
+# A ball of `radius` thrown from `origin` toward `target` at `speed`.
+func thrownBall(
+  origin: view Vec3
+  target: view Vec3
+  speed: view Float
+  radius: view Float
+) ret SceneBody {
+  let delta: Vec3 = vsub(a: target, b: origin)
+  let length: Float = vlen(a: delta)
+  var direction: Vec3 = { x: 0.0, y: 0.0, z: -1.0 }
+  if length > 0.0001 {
+    direction = vscale(a: delta, s: 1.0 / length)
+  }
+  var body: SceneBody = dynamicBody(shape: sphereShape(radius: radius), position: origin)
+  body.linearVelocity = vscale(a: direction, s: speed)
+  body.density = 4000.0
+  ret body
+}

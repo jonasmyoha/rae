@@ -1,0 +1,86 @@
+# Joints between physics entities on the C-library track: the same surface as
+# the port's physics/ecs/PhysicsJoints (a hinge, a ball joint or a weld with
+# Box3D's defaults), over b3CreateRevoluteJoint / b3CreateSphericalJoint /
+# b3CreateWeldJoint. Box3D destroys a body's joints with the body.
+open ecs/Entity
+open ecs/ComponentTable
+open box3d/Box3d
+open box3d/Box3dTypes
+open box3d/Box3dTypes2
+open box3d/ecs/PhysicsTypes
+open box3d/ecs/Physics
+open box3d/ecs/PhysicsComponents
+open box3d/ecs/PhysicsSpawn
+
+enum PhysicsJointKind { revolute, spherical, weld }
+
+type PhysicsJoint {
+  kind: PhysicsJointKind
+  entityIdA: EntityId
+  entityIdB: EntityId
+  localFrameA: Transform
+  localFrameB: Transform
+  collideConnected: Bool
+}
+
+# The shared part of every joint definition.
+func fillJointBase(
+  base: mod b3JointDef
+  bodyIdA: view BodyId
+  bodyIdB: view BodyId
+  joint: view PhysicsJoint
+) {
+  base.bodyIdA = toB3BodyId(bodyId: bodyIdA)
+  base.bodyIdB = toB3BodyId(bodyId: bodyIdB)
+  base.localFrameA = toB3Transform(transform: joint.localFrameA)
+  base.localFrameB = toB3Transform(transform: joint.localFrameB)
+  base.collideConnected = joint.collideConnected
+}
+
+# Create `joint`; false when either entity has no body.
+func addJoint(
+  physics: mod Physics
+  rigidBodies: view ComponentTable(RigidBody)
+  joint: view PhysicsJoint
+) ret Bool {
+  let bodyIdA: BodyId = entityBodyId(rigidBodies: rigidBodies, entityId: joint.entityIdA)
+  let bodyIdB: BodyId = entityBodyId(rigidBodies: rigidBodies, entityId: joint.entityIdB)
+  if bodyIdA.index1 is 0 or bodyIdB.index1 is 0 {
+    ret false
+  }
+  unsafe {
+    match joint.kind {
+      case PhysicsJointKind.revolute {
+        var def: b3RevoluteJointDef = b3DefaultRevoluteJointDef()
+        fillJointBase(
+          base: def.base
+          bodyIdA: bodyIdA
+          bodyIdB: bodyIdB
+          joint: joint
+        )
+        let jointId: b3JointId = b3CreateRevoluteJoint(worldId: physics.world, def: def)
+      }
+      case PhysicsJointKind.spherical {
+        var def: b3SphericalJointDef = b3DefaultSphericalJointDef()
+        fillJointBase(
+          base: def.base
+          bodyIdA: bodyIdA
+          bodyIdB: bodyIdB
+          joint: joint
+        )
+        let jointId: b3JointId = b3CreateSphericalJoint(worldId: physics.world, def: def)
+      }
+      case PhysicsJointKind.weld {
+        var def: b3WeldJointDef = b3DefaultWeldJointDef()
+        fillJointBase(
+          base: def.base
+          bodyIdA: bodyIdA
+          bodyIdB: bodyIdB
+          joint: joint
+        )
+        let jointId: b3JointId = b3CreateWeldJoint(worldId: physics.world, def: def)
+      }
+    }
+  }
+  ret true
+}

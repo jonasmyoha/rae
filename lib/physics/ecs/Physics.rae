@@ -15,6 +15,7 @@ open physics/dynamics/World
 open physics/dynamics/WorldBodies
 open physics/dynamics/WorldStep
 open physics/dynamics/Events
+open physics/container/IdPool
 
 # Two shapes started or stopped touching: their entities (noEntity for the
 # venue) and shapes.
@@ -170,4 +171,25 @@ func advancePhysicsEvents(physics: mod Physics) {
   frameAdvance(this: physics.hits)
   frameAdvance(this: physics.sensorBegan)
   frameAdvance(this: physics.sensorEnded)
+}
+
+# The world's size for a HUD: live bodies (the venue's included), awake
+# bodies, contacts, islands and joints (b3World_GetCounters and
+# b3World_GetAwakeBodyCount).
+type PhysicsCounters {
+  bodyCount: Int
+  awakeBodyCount: Int
+  contactCount: Int
+  islandCount: Int
+  jointCount: Int
+}
+
+func physicsCounters(physics: view Physics) ret PhysicsCounters {
+  ret PhysicsCounters {
+    bodyCount: idCount(pool: physics.world.bodyIdPool)
+    awakeBodyCount: setBodyCount(world: physics.world, setIndex: awakeSet)
+    contactCount: idCount(pool: physics.world.contactIdPool)
+    islandCount: idCount(pool: physics.world.islandIdPool)
+    jointCount: idCount(pool: physics.world.jointIdPool)
+  }
 }

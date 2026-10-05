@@ -133,6 +133,38 @@ What the C library forced, each listed in its module comment:
   keep-upright torque. It also has a non-visual fixture: a driven car reaches a
   target speed, and a steered car turns.
 
+### The shared package and the adapters (2026-10-05)
+
+**Where it lives: `lib/physicsScenes/`.** It is a library package rather than
+a path dependency because `benchmarks/physics` can use the same scenes. It
+imports no physics track, only Vec3/Quat/Mesh3d and the ECS transform table:
+- **`SceneTypes`:** a `Scene` is a ground (a flat box, or a Mesh3d mesh used
+  as the collider too), bodies (type, one box/sphere/capsule shape, pose,
+  velocity, density, friction), joints (hinge, ball or weld between body
+  indices, with a frame on each body), an optional character, and a camera
+  framing.
+- **`SceneLibrary`:** the six scenes (pyramid sized by a body count,
+  dominoes, bridge and chain, welded towers, rolling mesh, terrain walk) and
+  the thrown ball.
+- **`SceneHud`:** the HUD's counts, one-second step and frame timing
+  windows, its text lines, and the determinism hash over every Transform3D.
+
+**Each example has one adapter, `SceneSpawn.rae`, the only file that names
+its track.** It builds a Scene through that track's ECS layer and holds the
+playground's ECS world. Both ECS layers gained what the scenes need, with the
+same names:
+- `PhysicsJoints.addJoint` (revolute, spherical or weld);
+- `physicsCounters` (bodies, awake bodies, contacts, islands, joints).
+
+The terrain is a regular height grid used as a triangle mesh. A true
+height-field shape is one of the queued items.
+
+**Measured:** `RAE_PHYSICS_DETERMINISM=240` steps all six scenes at one
+worker and at the pool's eight. Each scene's hash is identical at both counts
+on track A. The same adapter with its `open` lines switched to `box3d/ecs`
+prints the very same hashes on track B (scalar), so the two playgrounds run
+the same simulation.
+
 ## 4. Track B: building the C library
 
 Built by B1 (2026-10-05).

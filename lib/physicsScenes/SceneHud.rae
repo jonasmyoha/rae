@@ -1,0 +1,108 @@
+# What the physics playground's HUD shows (docs/physics-two-implementations.md
+# §3), backend-neutral: the counts each track's ECS layer reports
+# (physicsCounters), the physics step and frame times averaged and maxed over
+# the last second, the worker count and the track's name, as text lines. Plus
+# the determinism hash both examples print: FNV-1a over every Transform3D's
+# position and rotation bits.
+import Math
+open ecs/ComponentTable
+open ecs/Transform
+
+# A one-second window of millisecond samples: the last full second's average
+# and maximum, shown while the next second fills.
+type TimingWindow {
+  sum: Float
+  max: Float
+  count: Int
+  started: Float
+  shownAverage: Float
+  shownMax: Float
+}
+
+func createTimingWindow() ret TimingWindow {
+  ret TimingWindow {
+    sum: 0.0
+    max: 0.0
+    count: 0
+    started: 0.0
+    shownAverage: 0.0
+    shownMax: 0.0
+  }
+}
+
+# Add a `milliseconds` sample taken at `now` (seconds); a window older than a
+# second is published and restarted.
+func addTimingSample(window: mod TimingWindow, milliseconds: view Float, now: view Float) {
+  if window.count is 0 {
+    window.started = now
+  }
+  window.sum = window.sum + milliseconds
+  if milliseconds > window.max {
+    window.max = milliseconds
+  }
+  window.count = window.count + 1
+  if now - window.started >= 1.0 {
+    window.shownAverage = window.sum / (window.count as Float)
+    window.shownMax = window.max
+    window.sum = 0.0
+    window.max = 0.0
+    window.count = 0
+  }
+}
+
+type HudStats {
+  trackName: String
+  sceneName: String
+  bodyCount: Int
+  awakeBodyCount: Int
+  contactCount: Int
+  islandCount: Int
+  jointCount: Int
+  workerCount: Int
+  targetBodyCount: Int
+}
+
+# One decimal, for milliseconds.
+func tenths(value: view Float) ret String {
+  ret "{Math.round(x: value * 10.0) / 10.0}"
+}
+
+func hudLines(
+  stats: view HudStats
+  step: view TimingWindow
+  frame: view TimingWindow
+) ret List(String) {
+  let sleeping: Int = stats.bodyCount - stats.awakeBodyCount
+  let lines: List(String) = {
+    "{stats.trackName}: {stats.sceneName}"
+    "bodies {stats.bodyCount} (awake {stats.awakeBodyCount}, sleeping {sleeping}), joints {stats.jointCount}"
+    "contacts {stats.contactCount}, islands {stats.islandCount}"
+    "physics step {tenths(value: step.shownAverage)} ms avg, {tenths(value: step.shownMax)} ms max"
+    "frame {tenths(value: frame.shownAverage)} ms avg, {tenths(value: frame.shownMax)} ms max"
+    "workers {stats.workerCount}, pyramid target {stats.targetBodyCount} bodies"
+  }
+  ret lines
+}
+
+# FNV-1a over every transform's position and rotation bits, in table order.
+func transformHash(transforms: view ComponentTable(Transform3D)) ret UInt64 {
+  var hash: UInt64 = 14695981039346656037
+  let prime: UInt64 = 1099511628211
+  loop var i: Int = 0, i < componentCount(this: transforms), ++i {
+    let transform: Transform3D = componentCopyAtDefault(this: transforms, i: i)
+    let values: List(Float) = {
+      transform.position.x
+      transform.position.y
+      transform.position.z
+      transform.rotation.x
+      transform.rotation.y
+      transform.rotation.z
+      transform.rotation.w
+    }
+    loop var j: Int = 0, j < values.length, ++j {
+      let bits: UInt64 = (Math.floatBits(value: values.copyAtDefault(index: j)) bitand 4294967295) as UInt64
+      hash = (hash bitxor bits) * prime
+    }
+  }
+  ret hash
+}

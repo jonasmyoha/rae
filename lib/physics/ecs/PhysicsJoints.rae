@@ -1,0 +1,73 @@
+# Joints between physics entities (docs/physics-design.md §5, and the scenes of
+# docs/physics-two-implementations.md §3): a hinge (revolute), a ball joint
+# (spherical) or a weld between two spawned entities' bodies, with Box3D's
+# defaults for everything else. The same surface as the C-library track's
+# box3d/ecs/PhysicsJoints. Box3D destroys a body's joints with the body, so
+# despawnRigidBody needs nothing more.
+open ecs/Entity
+open ecs/ComponentTable
+open physics/math/TransformMath
+open physics/dynamics/WorldTypes
+open physics/dynamics/Joint
+open physics/dynamics/JointDefs
+open physics/dynamics/WorldJoints
+open physics/ecs/Physics
+open physics/ecs/PhysicsComponents
+open physics/ecs/PhysicsSpawn
+
+enum PhysicsJointKind { revolute, spherical, weld }
+
+# A joint: its kind, its two entities, each body's joint frame (local to the
+# body origin: a revolute joint turns about the frames' z axis), and whether
+# the two bodies still collide.
+type PhysicsJoint {
+  kind: PhysicsJointKind
+  entityIdA: EntityId
+  entityIdB: EntityId
+  localFrameA: Transform
+  localFrameB: Transform
+  collideConnected: Bool
+}
+
+# Create `joint`; false when either entity has no body.
+func addJoint(
+  physics: mod Physics
+  rigidBodies: view ComponentTable(RigidBody)
+  joint: view PhysicsJoint
+) ret Bool {
+  let bodyIdA: BodyId = entityBodyId(rigidBodies: rigidBodies, entityId: joint.entityIdA)
+  let bodyIdB: BodyId = entityBodyId(rigidBodies: rigidBodies, entityId: joint.entityIdB)
+  if bodyIdA.index1 is 0 or bodyIdB.index1 is 0 {
+    ret false
+  }
+  var base: JointDef = defaultJointDef(lengthUnitsPerMeter: physics.world.lengthUnitsPerMeter)
+  base.bodyIdA = bodyIdA
+  base.bodyIdB = bodyIdB
+  base.localFrameA = joint.localFrameA
+  base.localFrameB = joint.localFrameB
+  base.collideConnected = joint.collideConnected
+  match joint.kind {
+    case PhysicsJointKind.revolute {
+      var def: RevoluteJointDef = defaultRevoluteJointDef(
+        lengthUnitsPerMeter: physics.world.lengthUnitsPerMeter
+      )
+      def.base = base
+      let jointId: JointId = createRevoluteJoint(world: physics.world, def: def)
+    }
+    case PhysicsJointKind.spherical {
+      var def: SphericalJointDef = defaultSphericalJointDef(
+        lengthUnitsPerMeter: physics.world.lengthUnitsPerMeter
+      )
+      def.base = base
+      let jointId: JointId = createSphericalJoint(world: physics.world, def: def)
+    }
+    case PhysicsJointKind.weld {
+      var def: WeldJointDef = defaultWeldJointDef(
+        lengthUnitsPerMeter: physics.world.lengthUnitsPerMeter
+      )
+      def.base = base
+      let jointId: JointId = createWeldJoint(world: physics.world, def: def)
+    }
+  }
+  ret true
+}
