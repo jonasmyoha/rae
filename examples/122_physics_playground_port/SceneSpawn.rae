@@ -1,5 +1,5 @@
 # The physics playground's adapter to track A, the Rae port of Box3D
-# (lib/physics/ecs): builds a backend-neutral Scene (lib/physicsScenes) as
+# (lib/physics/ecs): builds a backend-neutral PhysicsScene (lib/physicsScenes) as
 # entities. This is the ONE file of the playground that names a physics track:
 # 123_physics_playground_c has the same file with its `open` lines changed to
 # box3d/ecs (docs/physics-two-implementations.md §3).
@@ -45,7 +45,7 @@ type PlaygroundWorld {
   characters: ComponentTable(CharacterBody)
   renderShapes: ComponentTable(RenderShape)
   physics: Physics
-  # The scene's bodies' entities, in Scene.bodies order (joints refer to them)
+  # The scene's bodies' entities, in PhysicsScene.bodies order (joints refer to them)
   sceneEntities: List(EntityId)
   characterId: EntityId
   ballsThrown: Int
@@ -179,7 +179,7 @@ func jointKindOf(kind: view SceneJointKind) ret PhysicsJointKind {
 
 # Build `scene` into `world`: the ground, every body, every joint, and the
 # character when the scene has one.
-func spawnScene(world: mod PlaygroundWorld, scene: view Scene) {
+func spawnScene(world: mod PlaygroundWorld, scene: view PhysicsScene) {
   if scene.ground.kind is SceneGroundKind.flat {
     addVenueBox(
       physics: world.physics
@@ -280,6 +280,11 @@ func playgroundStats(
     workerCount: world.workerCount
     targetBodyCount: targetBodyCount
   }
+}
+
+# How many bodies are awake (the idle loop sleeps when none are).
+func playgroundAwakeCount(world: view PlaygroundWorld) ret Int {
+  ret physicsCounters(physics: world.physics).awakeBodyCount
 }
 
 func destroyPlaygroundWorld(world: mod PlaygroundWorld) {
