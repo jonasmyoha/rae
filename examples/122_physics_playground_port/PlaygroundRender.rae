@@ -1,0 +1,280 @@
+# The playground's 3D drawing on the deferred renderer: one InstanceBatch per
+# RenderKind (a unit box, a unit sphere, and the sphere stretched for a
+# capsule), filled from each entity's Transform3D and RenderShape after the
+# pull system, drawn with drawInstances - one draw per mesh kind, never one
+# per body - and the same bodies queued as shadow casters grouped by kind, so
+# each kind is one instanced shadow draw per cascade too. The ground is a
+# one-instance batch of its mesh, uploaded once per ground kind.
+import Math
+import Quat
+import Vec3
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Transform
+open Gpu3d
+open Gbuffer
+open GbufferInstanced
+open RendererDeferred
+open Scene3d
+open Math3d
+open Mesh3d
+open gpu/GpuResources
+open physicsScenes/SceneTypes
+
+# The batches' capacities: the pyramid slider's maximum, and room for balls.
+const boxCapacity: Int = 10400
+
+const sphereCapacity: Int = 2400
+
+const capsuleCapacity: Int = 256
+
+type PlaygroundMeshes {
+  box: MeshHandle
+  sphere: MeshHandle
+  flatGround: MeshHandle
+  # The uploaded ground of each mesh-ground scene, by scene index (an invalid
+  # handle until first shown)
+  sceneGrounds: List(MeshHandle)
+}
+
+type PlaygroundBatches {
+  boxes: InstanceBatch
+  spheres: InstanceBatch
+  capsules: InstanceBatch
+  ground: InstanceBatch
+}
+
+func uploadMeshData(renderer: mod DeferredRenderer, meshData: view MeshData) ret MeshHandle {
+  ret uploadMesh(
+    renderer: renderer
+    verts: meshData.verts
+    vertCount: meshData.vertCount
+    indices: meshData.indices
+  )
+}
+
+func createPlaygroundMeshes(
+  renderer: mod DeferredRenderer
+  sceneCount: view Int
+) ret PlaygroundMeshes {
+  let sceneGrounds: List(MeshHandle) = List.create(MeshHandle, cap: sceneCount)
+  loop var i: Int = 0, i < sceneCount, ++i {
+    sceneGrounds.add(value: meshHandle(id: -1, generation: 0))
+  }
+  ret PlaygroundMeshes {
+    box: uploadMeshData(renderer: renderer, meshData: makeBox(size: 1.0))
+    sphere: uploadMeshData(renderer: renderer, meshData: makeSphere(rings: 16, segments: 24))
+    flatGround: uploadMeshData(renderer: renderer, meshData: makePlane(size: 1600.0, segments: 1))
+    sceneGrounds: sceneGrounds
+  }
+}
+
+func createPlaygroundBatches(meshes: view PlaygroundMeshes) ret PlaygroundBatches {
+  ret PlaygroundBatches {
+    boxes: createInstanceBatch(mesh: meshes.box, capacity: boxCapacity)
+    spheres: createInstanceBatch(mesh: meshes.sphere, capacity: sphereCapacity)
+    capsules: createInstanceBatch(mesh: meshes.sphere, capacity: capsuleCapacity)
+    ground: createInstanceBatch(mesh: meshes.flatGround, capacity: 1)
+  }
+}
+
+# The ground mesh of scene `sceneIndex`: the shared flat plane, or the
+# scene's own mesh, uploaded the first time it is shown.
+func groundMeshFor(
+  renderer: mod DeferredRenderer
+  meshes: mod PlaygroundMeshes
+  sceneIndex: view Int
+  ground: view SceneGround
+) ret MeshHandle {
+  if ground.kind is SceneGroundKind.flat {
+    ret meshes.flatGround
+  }
+  let cached: MeshHandle = meshes.sceneGrounds.copyAtFallback(
+    index: sceneIndex
+    fallback: meshes.flatGround
+  )
+  if meshHandleIsValid(h: cached) {
+    ret cached
+  }
+  let uploaded: MeshHandle = uploadMeshData(renderer: renderer, meshData: ground.mesh)
+  meshes.sceneGrounds.set(index: sceneIndex, value: uploaded)
+  ret uploaded
+}
+
+# A body's model matrix: translate, rotate (its quaternion), scale.
+func bodyModel(transform: view Transform3D, scale: view Vec3) ret Mat4 {
+  let rotation: Mat4 = Quat.toMat4(q: transform.rotation)
+  let translation: Mat4 = mat4Translate(
+    x: transform.position.x
+    y: transform.position.y
+    z: transform.position.z
+  )
+  ret mat4Mul(
+    a: translation
+    b: mat4Mul(a: rotation, b: mat4ScaleXYZ(x: scale.x, y: scale.y, z: scale.z))
+  )
+}
+
+func kindMaterial(kind: view RenderKind, shade: view Float) ret Material3d {
+  var color: Vec3 = Vec3.create(x: 0.86, y: 0.52, z: 0.22)
+  if kind is RenderKind.sphere {
+    color = Vec3.create(x: 0.25, y: 0.55, z: 0.9)
+  }
+  if kind is RenderKind.capsule {
+    color = Vec3.create(x: 0.9, y: 0.82, z: 0.3)
+  }
+  ret Material3d {
+    baseColor: Vec3.vscale(a: color, s: shade)
+    metallic: 0.0
+    roughness: 0.6
+    emission: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    toon: false
+  }
+}
+
+func groundMaterial() ret Material3d {
+  ret Material3d {
+    baseColor: Vec3.create(x: 0.36, y: 0.42, z: 0.36)
+    metallic: 0.0
+    roughness: 0.9
+    emission: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    toon: false
+  }
+}
+
+# Refill the batches from the world's render shapes and transforms (after the
+# physics pull system has written this frame's poses).
+func fillBatches(
+  batches: mod PlaygroundBatches
+  renderShapes: view ComponentTable(RenderShape)
+  transforms: view ComponentTable(Transform3D)
+) {
+  resetInstanceBatch(batch: batches.boxes)
+  resetInstanceBatch(batch: batches.spheres)
+  resetInstanceBatch(batch: batches.capsules)
+  loop var i: Int = 0, i < componentCount(this: renderShapes), ++i {
+    let entityId: EntityId = componentEntityAt(this: renderShapes, i: i)
+    if componentHas(this: transforms, entityId: entityId) is false {
+      continue
+    }
+    let shape: RenderShape = componentCopyAtDefault(this: renderShapes, i: i)
+    let transform: view Transform3D => componentView(this: transforms, entityId: entityId)
+    # A little variation per entity so neighbours read apart
+    let shade: Float = 0.8 + 0.2 * (((entityId.index * 37) % 11) as Float) / 10.0
+    if shape.kind is RenderKind.box {
+      let model: Mat4 = bodyModel(transform: transform, scale: Vec3.vscale(a: shape.scale, s: 2.0))
+      addInstance(
+        batch: batches.boxes
+        model: model
+        prevModel: model
+        material: kindMaterial(kind: shape.kind, shade: shade)
+      )
+    } else if shape.kind is RenderKind.sphere {
+      let model: Mat4 = bodyModel(transform: transform, scale: shape.scale)
+      addInstance(
+        batch: batches.spheres
+        model: model
+        prevModel: model
+        material: kindMaterial(kind: shape.kind, shade: shade)
+      )
+    } else {
+      let model: Mat4 = bodyModel(transform: transform, scale: shape.scale)
+      addInstance(
+        batch: batches.capsules
+        model: model
+        prevModel: model
+        material: kindMaterial(kind: shape.kind, shade: shade)
+      )
+    }
+  }
+}
+
+# Queue every body as a shadow caster, one kind after another, so each kind
+# is one contiguous run: one instanced draw per kind and cascade.
+func queueShadowCasters(
+  renderer: mod DeferredRenderer
+  meshes: view PlaygroundMeshes
+  renderShapes: view ComponentTable(RenderShape)
+  transforms: view ComponentTable(Transform3D)
+) {
+  loop var pass: Int = 0, pass < 3, ++pass {
+    loop var i: Int = 0, i < componentCount(this: renderShapes), ++i {
+      let entityId: EntityId = componentEntityAt(this: renderShapes, i: i)
+      if componentHas(this: transforms, entityId: entityId) is false {
+        continue
+      }
+      let shape: RenderShape = componentCopyAtDefault(this: renderShapes, i: i)
+      let transform: view Transform3D => componentView(this: transforms, entityId: entityId)
+      if pass is 0 and shape.kind is RenderKind.box {
+        drawShadowCasterWith(
+          renderer: renderer
+          mesh: meshes.box
+          model: bodyModel(transform: transform, scale: Vec3.vscale(a: shape.scale, s: 2.0))
+        )
+      }
+      if pass is 1 and shape.kind is RenderKind.sphere {
+        drawShadowCasterWith(
+          renderer: renderer
+          mesh: meshes.sphere
+          model: bodyModel(transform: transform, scale: shape.scale)
+        )
+      }
+      if pass is 2 and shape.kind is RenderKind.capsule {
+        drawShadowCasterWith(
+          renderer: renderer
+          mesh: meshes.sphere
+          model: bodyModel(transform: transform, scale: shape.scale)
+        )
+      }
+    }
+  }
+}
+
+# The geometry pass: the ground, then each kind's batch as one draw.
+func drawPlaygroundGeometry(
+  cache: mod GbufferCache
+  resources: mod GpuResources
+  batches: mod PlaygroundBatches
+  groundMesh: view MeshHandle
+) {
+  setInstanceBatchMesh(batch: batches.ground, mesh: groundMesh)
+  resetInstanceBatch(batch: batches.ground)
+  let groundModel: Mat4 = mat4Identity()
+  addInstance(
+    batch: batches.ground
+    model: groundModel
+    prevModel: groundModel
+    material: groundMaterial()
+  )
+  drawInstances(cache: cache, resources: resources, batch: batches.ground)
+  drawInstances(cache: cache, resources: resources, batch: batches.boxes)
+  drawInstances(cache: cache, resources: resources, batch: batches.spheres)
+  drawInstances(cache: cache, resources: resources, batch: batches.capsules)
+}
+
+# The ray from the camera through window point (x, y) of a `width` x `height`
+# view: its direction (normalised).
+func pointerRay(
+  camera: view Camera3d
+  x: view Float
+  y: view Float
+  width: view Float
+  height: view Float
+) ret Vec3 {
+  let forward: Vec3 = Vec3.vnorm(a: Vec3.vsub(a: camera.target, b: camera.position))
+  let worldUp: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
+  let right: Vec3 = Vec3.vnorm(a: Vec3.vcross(a: forward, b: worldUp))
+  let up: Vec3 = Vec3.vcross(a: right, b: forward)
+  let tanHalf: Float = Math.tan(x: camera.fovYDeg * 0.5 * Math.pi / 180.0)
+  let ndcX: Float = 2.0 * x / width - 1.0
+  let ndcY: Float = 1.0 - 2.0 * y / height
+  let aspect: Float = width / height
+  let direction: Vec3 = Vec3.vadd(
+    a: forward
+    b: Vec3.vadd(
+      a: Vec3.vscale(a: right, s: ndcX * tanHalf * aspect)
+      b: Vec3.vscale(a: up, s: ndcY * tanHalf)
+    )
+  )
+  ret Vec3.vnorm(a: direction)
+}

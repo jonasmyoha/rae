@@ -138,7 +138,8 @@ What the C library forced, each listed in its module comment:
 **Where it lives: `lib/physicsScenes/`.** It is a library package rather than
 a path dependency because `benchmarks/physics` can use the same scenes. It
 imports no physics track, only Vec3/Quat/Mesh3d and the ECS transform table:
-- **`SceneTypes`:** a `Scene` is a ground (a flat box, or a Mesh3d mesh used
+- **`SceneTypes`:** a `PhysicsScene` (not `Scene`, which lib/ui's `ui/Scene`
+  already names program-wide) is a ground (a flat box, or a Mesh3d mesh used
   as the collider too), bodies (type, one box/sphere/capsule shape, pose,
   velocity, density, friction), joints (hinge, ball or weld between body
   indices, with a frame on each body), an optional character, and a camera
@@ -164,6 +165,35 @@ worker and at the pool's eight. Each scene's hash is identical at both counts
 on track A. The same adapter with its `open` lines switched to `box3d/ecs`
 prints the very same hashes on track B (scalar), so the two playgrounds run
 the same simulation.
+
+### The playground's window (2026-10-05)
+
+`examples/122_physics_playground_port` runs on the deferred renderer:
+- **Drawing** (`PlaygroundRender`): one InstanceBatch per mesh kind (a unit
+  box, a unit sphere, the sphere stretched for a capsule) is refilled from
+  every entity's Transform3D after the pull system and drawn with
+  `drawInstances`. The ground is a one-instance batch of its mesh. The same
+  bodies are queued as shadow casters grouped by kind, so each kind is one
+  instanced shadow draw per cascade.
+- **Limits:** the renderer's per-frame caps were 4096 draws and 4096 shadow
+  casters. They are now 16384 (`gbufferMaxDraws`, `shadowMaxDraws` and the
+  shadow buffer sizes), so the 10k-body pyramid draws in full: 9 870 boxes,
+  9 870 casters.
+- **HUD and input** (`PlaygroundUi`): a lib/ui scene shows the six
+  `hudLines` and the body-count slider (app3d's Slider, 1k-10k, which
+  rebuilds the pyramid when let go). Keys 1-6 switch scenes, R resets, a
+  click casts the camera ray through the pointer and throws a ball
+  (`throwBallAlong`), and a drag orbits (app3d's CameraRig).
+- **Idle:** physics steps only while something is awake. When nothing needs
+  drawing the loop parks in `Gpu2d.waitEvents` (lib/ui EventLoop's
+  timeout), and `Gpu2d.shouldRenderFrame` keeps a hidden window from
+  rendering. Measured: a visible 15-second run of the welded towers costs
+  1.8 s of CPU, almost all before the towers sleep.
+- **Measured at 10k bodies** (pool of 8, load ~10 from other work): a
+  6-8 ms physics step, ~55 ms per frame. Profiling the frame is the
+  performance pass.
+- The terrain stays a height grid used as a triangle mesh; a true
+  height-field shape was optional and is not done.
 
 ## 4. Track B: building the C library
 
