@@ -101,6 +101,13 @@ type BodyId {
   generation: Int
 }
 
+# A joint's id (b3JointId), the same fields as the port's.
+type JointId {
+  index1: Int
+  world0: Int
+  generation: Int
+}
+
 type ShapeId {
   index1: Int
   world0: Int
@@ -299,6 +306,23 @@ func fromB3BodyId(bodyId: view b3BodyId) ret BodyId {
     index1: bodyId.index1 as Int
     world0: bodyId.world0 as Int
     generation: bodyId.generation as Int
+  }
+}
+
+func toB3JointId(jointId: view JointId) ret b3JointId {
+  let result: b3JointId = {
+    index1: jointId.index1 as Int32
+    world0: jointId.world0 as UInt16
+    generation: jointId.generation as UInt16
+  }
+  ret result
+}
+
+func fromB3JointId(jointId: view b3JointId) ret JointId {
+  ret JointId {
+    index1: jointId.index1 as Int
+    world0: jointId.world0 as Int
+    generation: jointId.generation as Int
   }
 }
 

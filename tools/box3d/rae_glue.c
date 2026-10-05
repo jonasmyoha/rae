@@ -170,3 +170,18 @@ void rae_b3DestroyHull( uint64_t hull )
 {
 	b3DestroyHull( (b3HullData*)(uintptr_t)hull );
 }
+
+uint64_t rae_b3CreateHeightField( const b3HeightFieldDef* def )
+{
+	return (uint64_t)(uintptr_t)b3CreateHeightField( def );
+}
+
+b3ShapeId rae_b3CreateHeightFieldShape( b3BodyId bodyId, const b3ShapeDef* def, uint64_t heightField )
+{
+	return b3CreateHeightFieldShape( bodyId, def, (const b3HeightFieldData*)(uintptr_t)heightField );
+}
+
+void rae_b3DestroyHeightField( uint64_t heightField )
+{
+	b3DestroyHeightField( (b3HeightFieldData*)(uintptr_t)heightField );
+}

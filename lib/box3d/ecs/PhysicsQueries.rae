@@ -11,6 +11,9 @@ open box3d/Box3dTypes
 open box3d/Box3dTypes2
 open box3d/ecs/PhysicsTypes
 open box3d/ecs/Physics
+open ecs/ComponentTable
+open box3d/ecs/PhysicsComponents
+open box3d/ecs/PhysicsSpawn
 
 type PhysicsHit {
   hit: Bool
@@ -192,4 +195,20 @@ func overlapSphereEntities(
     capacity = count
   }
   ret List.create(EntityId, cap: 0)
+}
+
+# The linear velocity of the entity's body's centre of mass (zero when it has
+# no body): a vehicle's speed readout.
+func entityLinearVelocity(
+  physics: view Physics
+  rigidBodies: view ComponentTable(RigidBody)
+  entityId: view EntityId
+) ret Vec3 {
+  let bodyId: BodyId = entityBodyId(rigidBodies: rigidBodies, entityId: entityId)
+  if bodyId.index1 is 0 {
+    ret Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+  }
+  unsafe {
+    ret fromB3Vector(vector: b3Body_GetLinearVelocity(bodyId: toB3BodyId(bodyId: bodyId)))
+  }
 }

@@ -1,0 +1,110 @@
+# Fixture 1002 on track B, Box3D's C library (lib/box3d/ecs through
+# physicsScenes/box3d/VehicleSpawn): the same car on the same flat ground,
+# driven and steered the same way, must print 1002's expected output byte for
+# byte - with the scalar library at the shared pin and with the SIMD one the
+# runner links (docs/physics-two-implementations.md §3).
+import Math
+open Vec3
+open Quat
+open ecs/Transform
+open physicsScenes/VehicleTypes
+open physicsScenes/VehicleLibrary
+open physicsScenes/box3d/VehicleSpawn
+open box3d/ecs/PhysicsTypes
+open box3d/ecs/PhysicsSpawn
+
+func tenths(value: view Float) ret Float {
+  ret Math.round(x: value * 10.0) / 10.0
+}
+
+# A world with a flat 200 m ground and the car resting on it.
+func flatWorld() ret VehicleWorld {
+  var world: VehicleWorld = createVehicleWorld(workerCount: 1)
+  let ground: ShapeId = addVenueBox(
+    physics: world.physics
+    def: defaultShapeDef(lengthUnitsPerMeter: 1.0)
+    halfExtents: Vec3 { x: 100.0, y: 100.0, z: 0.5 }
+    transform: Transform { position: Vec3 { x: 0.0, y: 0.0, z: -0.5 }, rotation: Quat.identity() }
+  )
+  spawnVehicle(world: world, car: drivingCar(startPosition: Vec3 { x: 0.0, y: 0.0, z: 1.0 }))
+  ret world
+}
+
+func run(
+  world: mod VehicleWorld
+  command: view VehicleCommand
+  seconds: view Int
+  label: view String
+) {
+  let car: VehicleDescription = drivingCar(startPosition: Vec3 { x: 0.0, y: 0.0, z: 1.0 })
+  loop var second: Int = 1, second <= seconds, ++second {
+    loop var frame: Int = 0, frame < 60, ++frame {
+      driveVehicle(world: world, car: car, command: command)
+      let steps: Int = stepVehicleWorld(world: world, frameTime: 1.0 / 60.0)
+    }
+    let pose: Transform3D = chassisTransform(world: world)
+    let speed: Float = forwardSpeed(
+      velocity: chassisVelocity(world: world)
+      chassisRotation: pose.rotation
+    )
+    log(
+      "{label} t={second}s speed {tenths(value: speed)} m/s heading {tenths(
+        value: headingDegrees(chassisRotation: pose.rotation)
+      )} deg height {tenths(value: pose.position.z)} m"
+    )
+  }
+}
+
+func main() {
+  var driven: VehicleWorld = flatWorld()
+  let settle: VehicleCommand = { throttle: 0.0, steer: 0.0 }
+  run(
+    world: driven
+    command: settle
+    seconds: 1
+    label: "settle"
+  )
+  let pose0: Transform3D = chassisTransform(world: driven)
+  let full: VehicleCommand = { throttle: 1.0, steer: 0.0 }
+  run(
+    world: driven
+    command: full
+    seconds: 4
+    label: "drive"
+  )
+  let pose1: Transform3D = chassisTransform(world: driven)
+  let speed: Float = forwardSpeed(
+    velocity: chassisVelocity(world: driven)
+    chassisRotation: pose1.rotation
+  )
+  let travelled: Float = pose1.position.x - pose0.position.x
+  log("driven: reached 10 m/s {speed >= 10.0}, moved forward along +x {travelled > 20.0}")
+  destroyVehicleWorld(world: driven)
+
+  var steered: VehicleWorld = flatWorld()
+  run(
+    world: steered
+    command: settle
+    seconds: 1
+    label: "settle"
+  )
+  let startHeading: Float = headingDegrees(
+    chassisRotation: chassisTransform(world: steered).rotation
+  )
+  let turning: VehicleCommand = { throttle: 1.0, steer: 1.0 }
+  run(
+    world: steered
+    command: turning
+    seconds: 3
+    label: "steer"
+  )
+  let endPose: Transform3D = chassisTransform(world: steered)
+  var turned: Float = headingDegrees(chassisRotation: endPose.rotation) - startHeading
+  if turned < 0.0 {
+    turned = turned + 360.0
+  }
+  log(
+    "steered: turned left more than 90 degrees {turned > 90.0}, still upright {endPose.position.z < 2.0}"
+  )
+  destroyVehicleWorld(world: steered)
+}
