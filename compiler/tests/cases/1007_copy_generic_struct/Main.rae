@@ -1,0 +1,71 @@
+# Copying a whole generic struct instance - ComponentTable(T), or a generic
+# struct of the program's own - is a deep copy, like any owning aggregate:
+# the copy gets its own lists, so changing it leaves the original alone, and
+# each is released once. The copy helper for a generic instance used to be
+# called but never generated, so gcc failed on its implicit declaration.
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open ecs/Transform
+
+type Named(T: type) {
+  names: List(String)
+  values: List(T)
+}
+
+# A plain struct holding generic instances: copied whole, its tables must be
+# deep-copied too (a shallow copy would share their lists)
+type Poses {
+  current: ComponentTable(Transform3D)
+  previous: ComponentTable(Transform3D)
+}
+
+# From a view, the reported shape
+func snapshot(current: view ComponentTable(Transform3D)) ret ComponentTable(Transform3D) {
+  var shown: ComponentTable(Transform3D) = current
+  ret shown
+}
+
+func main() {
+  var allocator: EntityAllocator = createEntityAllocator()
+  let first: EntityId = allocEntity(this: allocator)
+  let second: EntityId = allocEntity(this: allocator)
+  var poses: Poses = {
+    current: createComponentTable(Transform3D)
+    previous: createComponentTable(Transform3D)
+  }
+  componentSet(this: poses.current, entityId: first, data: createTransform3D())
+
+  # A field-to-field store, the other reported shape
+  poses.previous = poses.current
+  componentSet(this: poses.current, entityId: second, data: createTransform3D())
+  log(
+    "after the store: current {componentCount(this: poses.current)}, previous {componentCount(
+      this: poses.previous
+    )}"
+  )
+
+  var shown: ComponentTable(Transform3D) = snapshot(current: poses.current)
+  componentRemove(this: shown, entityId: first)
+  log("snapshot {componentCount(this: shown)}, original {componentCount(this: poses.current)}")
+
+  # The whole struct
+  var copied: Poses = poses
+  componentRemove(this: copied.current, entityId: second)
+  log(
+    "copied struct {componentCount(this: copied.current)}, original {componentCount(
+      this: poses.current
+    )}"
+  )
+
+  # A generic struct of the program's own, with Strings in it
+  var named: Named(Int) = { names: { "one", "two" }, values: { 1, 2 } }
+  var other: Named(Int) = named
+  other.names.set(index: 0, value: "changed")
+  other.values.add(value: 3)
+  log(
+    "named {named.names.copyAtDefault(index: 0)} x{named.values.length}, other {other.names.copyAtDefault(
+      index: 0
+    )} x{other.values.length}"
+  )
+}

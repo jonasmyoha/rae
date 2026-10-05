@@ -3610,6 +3610,43 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
     copy_entries[copy_entry_count++] = (StructDropEntry){.decl = d, .type_ref = tr, .mangled = mangled};
   }
 
+  // Pass A': concrete generic struct instances (ComponentTable(Transform3D),
+  // a user Box(Int), ...) - the copy counterpart of the drop pass's Pass A'.
+  // Copy sites (`var t: G(X) = view`, `a.f = b.f`, a struct holding one) call
+  // rae_deep_copy_<instance>; without this pass it was never emitted and gcc
+  // failed on the implicit declaration. The leaf containers keep their own
+  // pass (Pass B); the body below substitutes the instance's type arguments
+  // into the template's fields.
+  size_t first_generic_copy_entry = copy_entry_count;
+  for (size_t gi = 0; gi < ctx->generic_type_count; gi++) {
+    const AstTypeRef* gt = ctx->generic_types[gi];
+    if (!gt || gt->is_view || gt->is_mod || gt->is_opt) continue;
+    if (!gt->generic_args) continue;
+    Str gb = get_base_type_name(gt);
+    if (str_eq_cstr(gb, "List") || str_eq_cstr(gb, "StringMap") || str_eq_cstr(gb, "IntMap")
+        || str_eq_cstr(gb, "Buffer") || str_eq_cstr(gb, "Opt")) continue;
+    const AstDecl* tdecl = NULL;
+    for (size_t k = 0; k < ctx->all_decl_count; k++) {
+      const AstDecl* d = ctx->all_decls[k];
+      if (d->kind != AST_DECL_TYPE || d->as.type_decl.specialization_args) continue;
+      if (!str_eq(d->as.type_decl.name, gb)) continue;
+      tdecl = d;
+      break;
+    }
+    if (!tdecl || !tdecl->as.type_decl.generic_params
+        || has_property(tdecl->as.type_decl.properties, "c_struct")) continue;
+    if (!type_needs_deep_copy(ctx, module, (AstTypeRef*)gt, 0)) continue;
+    const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, (AstTypeRef*)gt);
+    if (!mangled) continue;
+    bool seen = false;
+    for (size_t k = 0; k < copy_entry_count; k++) {
+      if (copy_entries[k].mangled && strcmp(copy_entries[k].mangled, mangled) == 0) { seen = true; break; }
+    }
+    if (seen) continue;
+    RAE_GROW1(copy_entries, copy_entry_count, copy_entry_cap);
+    copy_entries[copy_entry_count++] = (StructDropEntry){.decl = tdecl, .type_ref = gt, .mangled = mangled};
+  }
+
   // Pass B: collect container specializations (List / StringMap / IntMap)
   // from the discovered generic_types list. Only collect ones whose
   // element type transitively needs deep copy OR which are StringMap
@@ -3644,6 +3681,35 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
     container_entries[container_entry_count].mangled = mangled;
     container_entries[container_entry_count].kind = is_list ? 0 : (is_smap ? 1 : 2);
     container_entry_count++;
+  }
+
+  // The containers a generic instance's substituted fields copy through
+  // (ComponentTable(Transform3D)'s List(Transform3D), ...) need their helper
+  // too, whether or not anything else registered them.
+  for (size_t i = first_generic_copy_entry; i < copy_entry_count; i++) {
+    const StructDropEntry* e = &copy_entries[i];
+    const AstIdentifierPart* gp = e->decl->as.type_decl.generic_params;
+    for (const AstTypeField* f = e->decl->as.type_decl.fields; f; f = f->next) {
+      const AstTypeRef* ft = f->type;
+      if (gp && e->type_ref->generic_args) ft = substitute_type_ref(ctx, gp, e->type_ref->generic_args, f->type);
+      if (!ft || ft->is_view || ft->is_mod || ft->is_opt || !ft->generic_args) continue;
+      Str fb = get_base_type_name(ft);
+      bool is_list = str_eq_cstr(fb, "List");
+      bool is_smap = str_eq_cstr(fb, "StringMap");
+      bool is_imap = str_eq_cstr(fb, "IntMap");
+      if (!is_list && !is_smap && !is_imap) continue;
+      const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, (AstTypeRef*)ft);
+      bool seen = false;
+      for (size_t k = 0; k < container_entry_count; k++) {
+        if (strcmp(container_entries[k].mangled, mangled) == 0) { seen = true; break; }
+      }
+      if (seen) continue;
+      RAE_GROW1(container_entries, container_entry_count, container_entry_cap);
+      container_entries[container_entry_count].type_ref = ft;
+      container_entries[container_entry_count].mangled = mangled;
+      container_entries[container_entry_count].kind = is_list ? 0 : (is_smap ? 1 : 2);
+      container_entry_count++;
+    }
   }
 
   // Forward decls — structs first, then containers.
@@ -3709,6 +3775,19 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
           fprintf(out, "  rae_deep_copy_%s(&%s, &%s);\n", _fm, (dst_expr), (src_expr)); \
           break; \
         } \
+        /* A generic struct instance field (a ComponentTable(T) inside a \
+         * struct): its Pass A' helper, when one was synthesised. */ \
+        if (_fd && _fd->kind == AST_DECL_TYPE && _fd->as.type_decl.generic_params \
+            && (ft)->generic_args) { \
+          const char* _gm = rae_mangle_type_specialized(ctx, NULL, NULL, (AstTypeRef*)(ft)); \
+          bool _have = false; \
+          for (size_t _k = 0; _gm && _k < copy_entry_count && !_have; _k++) \
+            _have = copy_entries[_k].mangled && strcmp(copy_entries[_k].mangled, _gm) == 0; \
+          if (_have) { \
+            fprintf(out, "  rae_deep_copy_%s(&%s, &%s);\n", _gm, (dst_expr), (src_expr)); \
+            break; \
+          } \
+        } \
       } \
       fprintf(out, "  %s = %s;\n", (dst_expr), (src_expr)); \
   } while (0)
@@ -3719,7 +3798,8 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
     // #882: a user copy `func copy(this: view T) ret T` IS the deep copy of T.
     // Every copy site (owning let, copy parameter, literal field, container
     // element, copyAt) reaches it through this helper.
-    const AstFuncDecl* user_copy = find_user_copy_for(ctx, e->decl->as.type_decl.name);
+    const AstIdentifierPart* entry_gp = e->decl->as.type_decl.generic_params;
+    const AstFuncDecl* user_copy = entry_gp ? NULL : find_user_copy_for(ctx, e->decl->as.type_decl.name);
     if (user_copy) {
       CFuncContext ptctx = {.compiler_ctx = ctx, .module = module};
       fprintf(out, "RAE_UNUSED static %s %s(", c_return_type(&ptctx, user_copy), rae_mangle_function(ctx, user_copy));
@@ -3734,6 +3814,8 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
             e->mangled, e->mangled, e->mangled);
     for (const AstTypeField* f = e->decl->as.type_decl.fields; f; f = f->next) {
       const AstTypeRef* ft = f->type;
+      if (entry_gp && e->type_ref && e->type_ref->generic_args)
+        ft = substitute_type_ref(ctx, entry_gp, e->type_ref->generic_args, f->type);
       Str fbase = ft ? get_base_type_name(ft) : (Str){0};
       char dst_expr[128];
       char src_expr[128];
