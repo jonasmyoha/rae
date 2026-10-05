@@ -403,9 +403,15 @@ Where the rest goes, profiled against the C app:
   - mergeIslands, destroyIsland and trySleepIsland move an island's lists
     out instead of copying the island; island sleep's id list is a world list;
     begin/end-touch handling reads contacts through views.
-  Steps 460-500 now allocate 4 per step: a ShapeProxy's point list per
+  Steps 460-500 then allocated 4 per step: a ShapeProxy's point list per
   time-of-impact query (Box3D's proxy is a fixed array) and QuickSort's range
-  stack. While the pile settles (steps 2-40), 57 of its 62 allocations per
+  stack. P9a-9 removed both: continuous collision lends two world point
+  lists to the time-of-impact proxies (`shapeProxyPoints` fills them, the
+  query moves them back), and the pair keys sort with a world-owned range
+  stack (`quickSortWithStack`). Steps 460-500 now allocate 2 buffers in 40
+  steps, both the capacity of collide's world-owned contact list growing
+  with the contact count: once a pile stops creating contacts its step
+  allocates nothing. While the pile settles (steps 2-40), 57 of its 62 allocations per
   step are new contact slots: the contact count grows to ~56 000, and a slot
   gets its manifold list once. A steady large-pyramid step still allocates
   nothing. The move needed a compiler fix: `own` of a `mod` parameter
