@@ -638,9 +638,15 @@ func solveJointsBlock(
 
 # The joint events of a step (b3Solve's report): the flagged joints, by id.
 func reportJointEvents(world: mod PhysicsWorld) {
-  var stateBits: Bitset = world.taskContexts.copyAtDefault(index: 0).jointStateBitSet
+  # The workers' bits OR-ed into worker 0's (moved out and given back)
+  var stateBits: Bitset = emptyBitset()
+  if let first: mod TaskContext => world.taskContexts.modAt(index: 0) {
+    stateBits = own first.jointStateBitSet
+  }
   loop var i: Int = 1, i < world.taskContexts.length, ++i {
-    inPlaceUnion(setA: stateBits, setB: world.taskContexts.copyAtDefault(index: i).jointStateBitSet)
+    if let other: view TaskContext => world.taskContexts.viewAt(index: i) {
+      inPlaceUnion(setA: stateBits, setB: other.jointStateBitSet)
+    }
   }
   let bitCount: Int = stateBits.blockCount * 64
   loop var jointId: Int = 0, jointId < bitCount, ++jointId {
@@ -655,5 +661,8 @@ func reportJointEvents(world: mod PhysicsWorld) {
         }
       )
     }
+  }
+  if let first: mod TaskContext => world.taskContexts.modAt(index: 0) {
+    first.jointStateBitSet = own stateBits
   }
 }

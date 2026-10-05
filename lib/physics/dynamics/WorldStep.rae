@@ -27,7 +27,10 @@ func stepWorld(world: mod PhysicsWorld, timeStep: view Float, subStepCount: view
   # Update the collision pairs and create contacts
   let created: List(UInt64) = updateBroadPhasePairs(world: world)
 
-  var context: StepContext = createStepContext()
+  # The world's context, moved out for the step (solve takes the world and
+  # the context) and back at the end; reset, its lists keep their capacity
+  var context: StepContext = own world.stepContext
+  resetStepContext(context: context)
   context.dt = timeStep
   context.subStepCount = maxInt(left: 1, right: subStepCount)
   if timeStep > 0.0 {
@@ -64,6 +67,8 @@ func stepWorld(world: mod PhysicsWorld, timeStep: view Float, subStepCount: view
   if timeStep > 0.0 {
     solve(world: world, context: context)
   }
+
+  world.stepContext = own context
 
   # Update the sensors
   overlapSensors(world: world)

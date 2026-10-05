@@ -63,9 +63,9 @@ func assignContactColor(
 # b3AddContactToGraph: a contact that started touching (or woke up
 # touching) joins a colour.
 func addContactToGraph(world: mod PhysicsWorld, contactId: view Int) {
-  let contact: Contact = world.contacts.copyAtDefault(index: contactId)
-  let bodyIdA: Int = contact.edgeA.bodyId
-  let bodyIdB: Int = contact.edgeB.bodyId
+  let contact: ContactSummary = contactSummaryOf(world: world, contactId: contactId)
+  let bodyIdA: Int = contact.bodyIdA
+  let bodyIdB: Int = contact.bodyIdB
   let bodyA: Body = bodyAt(world: world, bodyId: bodyIdA)
   let bodyB: Body = bodyAt(world: world, bodyId: bodyIdB)
   let colorIndex: Int = assignContactColor(
@@ -84,7 +84,7 @@ func addContactToGraph(world: mod PhysicsWorld, contactId: view Int) {
         value: ContactSpec {
           contactId: contactId
           manifoldStart: 0
-          manifoldCount: contact.manifolds.length
+          manifoldCount: contact.manifoldCount
         }
       )
     } else {

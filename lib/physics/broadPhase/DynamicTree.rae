@@ -75,6 +75,10 @@ type DynamicTree {
   leafIndices: List(Int)
   leafNodes: List(TreeNode)
   leafCenters: List(Vec3)
+  # The rebuild's work stacks (Box3D's stack arrays), kept between rebuilds
+  rebuildStack: List(RebuildItem)
+  copyStack: List(CopyItem)
+  leafStack: List(Int)
   # Children follow their parents (cache friendly, and the sweep refit
   # needs it). Inserting can break it; a rebuild restores it.
   dfsOrdered: Bool
@@ -208,6 +212,23 @@ func freeProxySlot(next: view Int) ret TreeProxy {
   ret TreeProxy { userData: 0, categoryBits: 0, node: -1, next: next }
 }
 
+# One subtree under construction (b3RebuildItem): where it is written, the
+# pair its children go in, and its range of build leaves split in two.
+type RebuildItem {
+  nodeIndex: Int
+  pair: Int
+  childCount: Int
+  startIndex: Int
+  splitIndex: Int
+  endIndex: Int
+}
+
+# A subtree being copied (b3CopyItem).
+type CopyItem {
+  oldPair: Int
+  newIndex: Int
+}
+
 # b3DynamicTree_Create: room for `proxyCapacity` proxies (at least 16).
 func createDynamicTree(proxyCapacity: view Int) ret DynamicTree {
   let capacity: Int = maxInt(left: proxyCapacity, right: 16)
@@ -223,6 +244,9 @@ func createDynamicTree(proxyCapacity: view Int) ret DynamicTree {
     leafIndices: List.create(Int, cap: 0)
     leafNodes: List.create(TreeNode, cap: 0)
     leafCenters: List.create(Vec3, cap: 0)
+    rebuildStack: List.create(RebuildItem, cap: 32)
+    copyStack: List.create(CopyItem, cap: 32)
+    leafStack: List.create(Int, cap: 32)
     dfsOrdered: true
   }
   # The root and the empty node always exist

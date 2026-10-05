@@ -306,9 +306,15 @@ func overlapSensors(world: mod PhysicsWorld) {
     )
   }
 
-  var bits: Bitset = world.taskContexts.copyAtDefault(index: 0).sensorEventBits
+  # The workers' bits OR-ed into worker 0's (moved out and given back)
+  var bits: Bitset = emptyBitset()
+  if let first: mod TaskContext => world.taskContexts.modAt(index: 0) {
+    bits = own first.sensorEventBits
+  }
   loop var i: Int = 1, i < world.taskContexts.length, ++i {
-    inPlaceUnion(setA: bits, setB: world.taskContexts.copyAtDefault(index: i).sensorEventBits)
+    if let other: view TaskContext => world.taskContexts.viewAt(index: i) {
+      inPlaceUnion(setA: bits, setB: other.sensorEventBits)
+    }
   }
   loop var sensorIndex: Int = 0, sensorIndex < bits.blockCount * 64, ++sensorIndex {
     if getBit(bitset: bits, bitIndex: sensorIndex) is false {
@@ -389,6 +395,9 @@ func overlapSensors(world: mod PhysicsWorld) {
       )
       index2 = index2 + 1
     }
+  }
+  if let first: mod TaskContext => world.taskContexts.modAt(index: 0) {
+    first.sensorEventBits = own bits
   }
 }
 

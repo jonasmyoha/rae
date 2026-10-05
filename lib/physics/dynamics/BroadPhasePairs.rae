@@ -27,60 +27,16 @@ open physics/dynamics/WorldTypes
 open physics/dynamics/Body
 open physics/dynamics/Shape
 open physics/dynamics/World
+open physics/dynamics/PairContext
 open physics/dynamics/WorldBodies
 open physics/dynamics/WorldContacts
 open physics/dynamics/ParallelFor
-
-# B3_CANDIDATE_BATCH
-const candidateBatch: Int = 32
-
-# B3_CROSS_SEED_COUNT (a power of two)
-const crossSeedCount: Int = 64
 
 const staticTree: Int = 0
 
 const kinematicTree: Int = 1
 
 const dynamicTree: Int = 2
-
-# b3CandidatePair: shape ids in increasing order
-type CandidatePair {
-  shapeIdA: Int
-  shapeIdB: Int
-}
-
-# b3IndexPair: two sibling pairs, one in each tree
-type IndexPair {
-  pairA: Int
-  pairB: Int
-}
-
-# b3NodePair: copies of a node of each tree
-type NodePair {
-  nodeA: TreeNode
-  nodeB: TreeNode
-}
-
-# b3PairContext: a task's candidate batch and the keys it found, plus the
-# traversal stacks Box3D keeps on the C stack.
-type PairContext {
-  # Only the static cross pass can meet a compound
-  checkCompounds: Bool
-  batch: List(CandidatePair)
-  pairKeys: List(UInt64)
-  proxyStack: List(Int)
-  crossStack: List(IndexPair)
-}
-
-func createPairContext() ret PairContext {
-  ret PairContext {
-    checkCompounds: false
-    batch: List.create(CandidatePair, cap: candidateBatch)
-    pairKeys: List.create(UInt64, cap: 64)
-    proxyStack: List.create(Int, cap: 64)
-    crossStack: List.create(IndexPair, cap: 64)
-  }
-}
 
 # b3GatherMovedSiblings: the sibling pairs (below the root) where either
 # sibling moved.
@@ -175,11 +131,14 @@ func emitCompoundPairs(
 # when they pass the gauntlet. (Box3D culls the whole batch, then filters
 # it; one pass keeps the same order.)
 func flushCandidatePairs(world: view PhysicsWorld, context: mod PairContext) {
-  let plain: List(CandidatePair) = List.create(CandidatePair, cap: context.batch.length)
+  # The context's plain list, moved out (emitCompoundPairs takes the
+  # context) and back at the end
+  var plain: List(CandidatePair) = own context.plain
+  plain.clear()
   loop let candidate: view CandidatePair in context.batch {
     if context.checkCompounds {
-      let compoundA: Bool = world.shapes.copyAtDefault(index: candidate.shapeIdA).shapeType is ShapeType.compound
-      let compoundB: Bool = world.shapes.copyAtDefault(index: candidate.shapeIdB).shapeType is ShapeType.compound
+      let compoundA: Bool = shapeTypeOf(world: world, shapeId: candidate.shapeIdA) is ShapeType.compound
+      let compoundB: Bool = shapeTypeOf(world: world, shapeId: candidate.shapeIdB) is ShapeType.compound
       if compoundA {
         # Compound against compound is not supported
         emitCompoundPairs(
@@ -212,6 +171,16 @@ func flushCandidatePairs(world: view PhysicsWorld, context: mod PairContext) {
     }
   }
   context.batch.clear()
+  context.plain = own plain
+}
+
+# The type of shape `shapeId`, read through a view (a shape copy would copy
+# its material list).
+func shapeTypeOf(world: view PhysicsWorld, shapeId: view Int) ret ShapeType {
+  if let shape: view PhysicsShape => world.shapes.viewAt(index: shapeId) {
+    ret shape.shapeType
+  }
+  ret ShapeType.capsule
 }
 
 # b3AddCandidatePair: in shape id order.
@@ -398,12 +367,13 @@ func gatherCrossSeeds(
   treeA: view DynamicTree
   treeB: view DynamicTree
   seeds: mod List(NodePair)
+  queue: mod List(NodePair)
 ) ret Int {
   let queueSize: Int = 2 * crossSeedCount
   let mask: Int = queueSize - 1
   let rootA: TreeNode = treeNode(tree: treeA, index: rootNode)
   let rootB: TreeNode = treeNode(tree: treeB, index: rootNode)
-  let queue: List(NodePair) = List.create(NodePair, cap: queueSize)
+  queue.clear()
   loop var i: Int = 0, i < queueSize, ++i {
     queue.add(value: NodePair { nodeA: rootA, nodeB: rootB })
   }
@@ -492,8 +462,12 @@ func crossPairsTask(
 # The cross and self pair tasks over their blocks, as worker 0, into
 # `context` (b3ParallelFor of both tasks).
 func findPairs(world: view PhysicsWorld, context: mod PairContext) {
-  let siblingIndices: List(Int) = List.create(Int, cap: 16)
-  let seeds: List(NodePair) = List.create(NodePair, cap: 2 * crossSeedCount)
+  # The context's working lists, moved out (the tasks below take the
+  # context too) and back at the end
+  var siblingIndices: List(Int) = own context.siblingIndices
+  var seeds: List(NodePair) = own context.seeds
+  var seedQueue: List(NodePair) = own context.seedQueue
+  seeds.clear()
   var dynamicMoveCount: Int = 0
   var staticSeedCount: Int = 0
   var kinematicSeedCount: Int = 0
@@ -502,10 +476,20 @@ func findPairs(world: view PhysicsWorld, context: mod PairContext) {
     dynamicMoveCount = gatherMovedSiblings(tree: tree, pairIndices: siblingIndices)
     # Seeds for colliding against the static and kinematic trees
     if let other: view DynamicTree => world.broadPhase.trees.viewAt(index: staticTree) {
-      staticSeedCount = gatherCrossSeeds(treeA: tree, treeB: other, seeds: seeds)
+      staticSeedCount = gatherCrossSeeds(
+        treeA: tree
+        treeB: other
+        seeds: seeds
+        queue: seedQueue
+      )
     }
     if let other: view DynamicTree => world.broadPhase.trees.viewAt(index: kinematicTree) {
-      kinematicSeedCount = gatherCrossSeeds(treeA: tree, treeB: other, seeds: seeds)
+      kinematicSeedCount = gatherCrossSeeds(
+        treeA: tree
+        treeB: other
+        seeds: seeds
+        queue: seedQueue
+      )
     }
   }
   let crossMoveCount: Int = staticSeedCount + kinematicSeedCount
@@ -552,6 +536,9 @@ func findPairs(world: view PhysicsWorld, context: mod PairContext) {
       )
     )
   }
+  context.siblingIndices = own siblingIndices
+  context.seeds = own seeds
+  context.seedQueue = own seedQueue
 }
 
 # Whether a tree's root is marked moved (b3HasTreeMoved), and whether it
@@ -574,7 +561,8 @@ func needsRebuild(world: view PhysicsWorld, treeIndex: view Int) ret Bool {
 # kinematic trees, and create a contact for each new pair in key order.
 # Returns the pair keys handed to contact creation, in that order.
 func updateBroadPhasePairs(world: mod PhysicsWorld) ret List(UInt64) {
-  let created: List(UInt64) = List.create(UInt64, cap: 16)
+  # Allocates only when a step creates contacts
+  let created: List(UInt64) = List.create(UInt64, cap: 0)
   var needUpdate: Bool = hasTreeMoved(world: world, treeIndex: staticTree)
   needUpdate = needUpdate or needsRebuild(world: world, treeIndex: kinematicTree)
   needUpdate = needUpdate or needsRebuild(world: world, treeIndex: dynamicTree)
@@ -590,7 +578,9 @@ func updateBroadPhasePairs(world: mod PhysicsWorld) ret List(UInt64) {
 
   # Generate pairs by querying the dynamic body tree against itself and
   # against the kinematic and static trees.
-  var context: PairContext = createPairContext()
+  # The world's pair context, moved out for the search and back
+  var context: PairContext = own world.pairContext
+  resetPairContext(context: context)
   findPairs(world: world, context: context)
   if let taskContext: mod TaskContext => world.taskContexts.modAt(index: 0) {
     # (An index loop: a view loop over List(UInt64) emits invalid C, #97861858.)
@@ -598,6 +588,7 @@ func updateBroadPhasePairs(world: mod PhysicsWorld) ret List(UInt64) {
       taskContext.pairKeys.add(value: context.pairKeys.copyAtDefault(index: i))
     }
   }
+  world.pairContext = own context
 
   if let tree: mod DynamicTree => world.broadPhase.trees.modAt(index: staticTree) {
     clearMoved(tree: tree)
@@ -614,7 +605,8 @@ func updateBroadPhasePairs(world: mod PhysicsWorld) ret List(UInt64) {
   # Pairs arrive in a deterministic order, scrambled relative to body and
   # shape order. Sorting them improves solver performance and makes contact
   # order independent of tree structure.
-  let pairKeys: List(UInt64) = List.create(UInt64, cap: 16)
+  # Allocates only when new pairs were found
+  let pairKeys: List(UInt64) = List.create(UInt64, cap: 0)
   loop let taskContext: view TaskContext in world.taskContexts {
     loop var i: Int = 0, i < taskContext.pairKeys.length, ++i {
       pairKeys.add(value: taskContext.pairKeys.copyAtDefault(index: i))

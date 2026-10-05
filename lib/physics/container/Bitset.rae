@@ -19,6 +19,12 @@ func zeroBlocks(count: view Int) ret List(UInt64) {
 }
 
 # b3CreateBitSet: room for `bitCapacity` bits, none in use.
+# A bitset with no blocks (allocates nothing): the placeholder a bitset is
+# moved into.
+func emptyBitset() ret Bitset {
+  ret Bitset { bits: List.create(UInt64, cap: 0), blockCapacity: 0, blockCount: 0 }
+}
+
 func createBitset(bitCapacity: view Int) ret Bitset {
   let blockCapacity: Int = (bitCapacity + 64 - 1) / 64
   ret Bitset { bits: zeroBlocks(count: blockCapacity), blockCapacity: blockCapacity, blockCount: 0 }
