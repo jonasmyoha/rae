@@ -26,6 +26,10 @@
 #   RAE_PLAYGROUND_SCENE=<1-6>       the scene the window opens on
 #   RAE_PLAYGROUND_BODIES=<count>    the pyramid's starting body count
 #   RAE_PLAYGROUND_AUTOFIRE=1        the window opens with autofire on
+#   RAE_PLAYGROUND_CYCLE_SECONDS=<s> switches to the next scene every <s>
+#                                    seconds and logs each switch (the
+#                                    memory test: with autofire, bodies spawn
+#                                    and despawn the whole run)
 #   RAE_PLAYGROUND_DEBUG=1           logs the shadow casters and live balls
 #                                    of each frame
 # Headless screenshot:
@@ -262,6 +266,13 @@ func runWindowed() ret Int {
   # Seconds until the gun may fire again
   var fireCooldown: Float = 0.0
   let debugLog: Bool = Sys.getEnv(name: "RAE_PLAYGROUND_DEBUG").length() > 0
+  var cycleSeconds: Float = 0.0
+  let cycleSetting: String = Sys.getEnv(name: "RAE_PLAYGROUND_CYCLE_SECONDS")
+  if cycleSetting.length() > 0 {
+    cycleSeconds = cycleSetting.toFloat()
+  }
+  var lastCycle: Float = 0.0
+  var cycleCount: Int = 0
   loop not Gpu2d.pollClose() {
     let now: Float64 = Gpu2d.nowSeconds()
     var deltaTime: Float = (now - lastFrame) as Float
@@ -298,6 +309,15 @@ func runWindowed() ret Int {
     }
     if Sdl3.isKeyPressed(key: Keys.keyR) {
       rebuild = true
+    }
+    if cycleSeconds > 0.0 and clock - lastCycle >= cycleSeconds {
+      lastCycle = clock
+      cycleCount = cycleCount + 1
+      sceneIndex = (sceneIndex + 1) % sceneCount
+      rebuild = true
+      log(
+        "[playground] cycle {cycleCount}: scene {sceneIndex + 1}, {world.ballsThrown} balls fired before it"
+      )
     }
     # The slider rebuilds the pyramid when it is let go at a new count
     if ui.slider.dragging is false and sliderBodyCount(ui: ui) is not bodyCount {

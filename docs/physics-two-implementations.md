@@ -219,6 +219,35 @@ After the maintainer's first try-out (2026-10-05) the controls changed:
 - `RAE_PLAYGROUND_AUTOFIRE=1` opens with autofire on (for headless checks).
   `RAE_PLAYGROUND_DEBUG=1` also logs the live ball count.
 
+### The playground's featured row and gates (2026-10-05)
+
+- **Featured:** `122_physics_playground_port.raepack` (category "Physics",
+  `featured: "true"`), a README Featured row, and two screenshots in
+  docs/screenshots: the bridge and chain, and the pyramid under fire.
+- **Example gate** (`compiler/tools/run_examples.sh`, about 3 minutes):
+  1. `RAE_PHYSICS_DETERMINISM=120` must print `identical true` for all six
+     scenes and `determinism: 0 scenes differ`.
+  2. A headless frame must not be blank.
+  3. Memory must stay flat while running: `RAE_PLAYGROUND_CYCLE_SECONDS=4`
+     switches scenes every 4 s, with autofire on and the runtime's test
+     pointer aiming into the scene. The PEAK of `[mem:live]` buffers and
+     bytes over a later 24 s round of the six scenes must match the round
+     after warm-up.
+  4. `leaks --atExit` over 20 s of the same kind of run must find no
+     `ROOT LEAK`.
+- **The 5-minute memory test:** 10 s per scene, 5 rounds, 29 scene
+  switches, about 2 000 balls fired and retired. Every round after the
+  first peaked at exactly 16 761 696 bytes in 9 040 buffers. At exit,
+  0 Strings and 0 buffers were outstanding. `leaks --atExit` reports only
+  AppKit's three NSXPCConnection root cycles, as for every windowed
+  example.
+- **Notes for the track-B twin (123):**
+  - It can copy this gate branch.
+  - `run_examples.sh` links every example with its own gcc line, which
+    lacks the Box3D link flags that `rae` adds itself (`box3d_link_flags`
+    in compiler/src/main.c). The twin's branch needs them added there.
+  - The test pointer is in design units (1280 x 800), not pixels.
+
 ## 4. Track B: building the C library
 
 Built by B1 (2026-10-05).
