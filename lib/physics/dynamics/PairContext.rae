@@ -1,0 +1,75 @@
+# The pair finding's working state (b3PairContext of Box3D's broad_phase.c
+# at 9f998c8), kept on the world between steps so its lists keep their
+# capacity: BroadPhasePairs.updateBroadPhasePairs moves it out for the step
+# and back.
+open physics/broadPhase/DynamicTree
+
+# B3_CANDIDATE_BATCH
+const candidateBatch: Int = 32
+
+# B3_CROSS_SEED_COUNT (a power of two)
+const crossSeedCount: Int = 64
+
+# b3CandidatePair: shape ids in increasing order
+type CandidatePair {
+  shapeIdA: Int
+  shapeIdB: Int
+}
+
+# b3IndexPair: two sibling pairs, one in each tree
+type IndexPair {
+  pairA: Int
+  pairB: Int
+}
+
+# b3NodePair: copies of a node of each tree
+type NodePair {
+  nodeA: TreeNode
+  nodeB: TreeNode
+}
+
+# b3PairContext: a task's candidate batch and the keys it found, plus the
+# traversal stacks Box3D keeps on the C stack.
+type PairContext {
+  # Only the static cross pass can meet a compound
+  checkCompounds: Bool
+  batch: List(CandidatePair)
+  # The batch's plain (non-compound) pairs, reused by every flush
+  plain: List(CandidatePair)
+  pairKeys: List(UInt64)
+  proxyStack: List(Int)
+  crossStack: List(IndexPair)
+  # findPairs' working lists: the moved sibling pairs of the dynamic tree,
+  # the cross seeds, and the breadth-first queue that finds them
+  siblingIndices: List(Int)
+  seeds: List(NodePair)
+  seedQueue: List(NodePair)
+}
+
+func createPairContext() ret PairContext {
+  ret PairContext {
+    checkCompounds: false
+    batch: List.create(CandidatePair, cap: candidateBatch)
+    plain: List.create(CandidatePair, cap: candidateBatch)
+    pairKeys: List.create(UInt64, cap: 64)
+    proxyStack: List.create(Int, cap: 64)
+    crossStack: List.create(IndexPair, cap: 64)
+    siblingIndices: List.create(Int, cap: 16)
+    seeds: List.create(NodePair, cap: 2 * crossSeedCount)
+    seedQueue: List.create(NodePair, cap: 2 * crossSeedCount)
+  }
+}
+
+# A context for a new search: createPairContext's state, its lists cleared
+# rather than re-created.
+func resetPairContext(context: mod PairContext) {
+  context.checkCompounds = false
+  context.batch.clear()
+  context.plain.clear()
+  context.pairKeys.clear()
+  context.proxyStack.clear()
+  context.crossStack.clear()
+  context.siblingIndices.clear()
+  context.seeds.clear()
+  context.seedQueue.clear()
+}

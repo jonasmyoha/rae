@@ -146,15 +146,15 @@ func mergeIslands(world: mod PhysicsWorld, islandIdA: view Int, islandIdB: view 
 
 # b3AddContactToIsland
 func addContactToIsland(world: mod PhysicsWorld, islandId: view Int, contactId: view Int) {
-  let contact: Contact = world.contacts.copyAtDefault(index: contactId)
+  let contact: ContactSummary = contactSummaryOf(world: world, contactId: contactId)
   var islandIndex: Int = 0
   if let island: mod Island => world.islands.modAt(index: islandId) {
     islandIndex = island.contacts.length
     island.contacts.add(
       value: ContactLink {
         contactId: contactId
-        bodyIdA: contact.edgeA.bodyId
-        bodyIdB: contact.edgeB.bodyId
+        bodyIdA: contact.bodyIdA
+        bodyIdB: contact.bodyIdB
       }
     )
   }
@@ -167,9 +167,9 @@ func addContactToIsland(world: mod PhysicsWorld, islandId: view Int, contactId: 
 # b3LinkContact: a contact that started touching joins (and merges) its
 # bodies' islands, waking a sleeping body touched by an awake one.
 func linkContact(world: mod PhysicsWorld, contactId: view Int) {
-  let contact: Contact = world.contacts.copyAtDefault(index: contactId)
-  let bodyIdA: Int = contact.edgeA.bodyId
-  let bodyIdB: Int = contact.edgeB.bodyId
+  let contact: ContactSummary = contactSummaryOf(world: world, contactId: contactId)
+  let bodyIdA: Int = contact.bodyIdA
+  let bodyIdB: Int = contact.bodyIdB
 
   # Wake body B if body A is awake and body B is sleeping, and the reverse
   let setA: Int = bodyAt(world: world, bodyId: bodyIdA).setIndex
@@ -195,7 +195,7 @@ func linkContact(world: mod PhysicsWorld, contactId: view Int) {
 # b3UnlinkContact: a contact that stopped touching (or is destroyed) leaves
 # its island, which becomes a split candidate.
 func unlinkContact(world: mod PhysicsWorld, contactId: view Int) {
-  let contact: Contact = world.contacts.copyAtDefault(index: contactId)
+  let contact: ContactSummary = contactSummaryOf(world: world, contactId: contactId)
   let islandId: Int = contact.islandId
   let removeIndex: Int = contact.islandIndex
   var movedContactId: Int = -1

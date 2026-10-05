@@ -42,17 +42,6 @@ const solveIterations: Int = 1
 
 const relaxIterations: Int = 1
 
-# Each active colour's constraint counts and block dimensions.
-type ColorPlan {
-  colorIndex: Int
-  wideContactCount: Int
-  contactCount: Int
-  jointCount: Int
-  wideDim: BlockDim
-  contactDim: BlockDim
-  jointDim: BlockDim
-}
-
 # b3SolverTask for worker 0: the stage sequence of a step.
 func runSolverStages(world: mod PhysicsWorld, context: mod StepContext) {
   let activeColorCount: Int = context.activeColorCount
@@ -350,7 +339,10 @@ func solve(world: mod PhysicsWorld, context: mod StepContext) {
   let minJointsPerBlock: Int = 4
 
   # The active colours, in colour order, with their constraint counts
-  let plans: List(ColorPlan) = List.create(ColorPlan, cap: graphColorCount)
+  # The context's working lists, moved out (the calls below take the
+  # context too) and back at the end
+  var plans: List(ColorPlan) = own context.colorPlans
+  plans.clear()
   var wideContactCount: Int = 0
   var contactCount: Int = 0
   var manifoldCount: Int = 0
@@ -472,7 +464,10 @@ func solve(world: mod PhysicsWorld, context: mod StepContext) {
   var contactBase: Int = 0
   var jointBase: Int = 0
   loop let plan: view ColorPlan in plans {
-    let colorConvexCount: Int = world.constraintGraph.colors.copyAtDefault(index: plan.colorIndex).convexContacts.length
+    var colorConvexCount: Int = 0
+    if let color: view GraphColor => world.constraintGraph.colors.viewAt(index: plan.colorIndex) {
+      colorConvexCount = color.convexContacts.length
+    }
     context.widePrepareSpans.add(
       value: PrepareSpan { start: wideBase, count: colorConvexCount, colorIndex: plan.colorIndex }
     )
@@ -547,8 +542,10 @@ func solve(world: mod PhysicsWorld, context: mod StepContext) {
     blockType: SolverBlockType.jointBlock
     colorIndex: noColor
   )
-  let colorBlockStarts: List(Int) = List.create(Int, cap: graphColorCount)
-  let colorBlockCounts: List(Int) = List.create(Int, cap: graphColorCount)
+  var colorBlockStarts: List(Int) = own context.colorBlockStarts
+  var colorBlockCounts: List(Int) = own context.colorBlockCounts
+  colorBlockStarts.clear()
+  colorBlockCounts.clear()
   loop let plan: view ColorPlan in plans {
     colorBlockStarts.add(value: context.syncBlocks.length)
     let jointStart: Int = initBlocks(
@@ -763,6 +760,9 @@ func solve(world: mod PhysicsWorld, context: mod StepContext) {
   if world.enableSleep {
     sleepIslands(world: world)
   }
+  context.colorPlans = own plans
+  context.colorBlockStarts = own colorBlockStarts
+  context.colorBlockCounts = own colorBlockCounts
 }
 
 func initColorStages(
@@ -817,17 +817,26 @@ func enlargeBulletProxies(world: mod PhysicsWorld, simIndex: view Int) {
 func sleepIslands(world: mod PhysicsWorld) {
   var splitSleepTimer: Float = 0.0
   loop var i: Int = 0, i < world.taskContexts.length, ++i {
-    let taskContext: TaskContext = world.taskContexts.copyAtDefault(index: i)
-    if taskContext.splitIslandId is not -1 and taskContext.splitSleepTime >= splitSleepTimer {
+    var splitIslandId: Int = -1
+    var splitSleepTime: Float = 0.0
+    if let taskContext: view TaskContext => world.taskContexts.viewAt(index: i) {
+      splitIslandId = taskContext.splitIslandId
+      splitSleepTime = taskContext.splitSleepTime
+    }
+    if splitIslandId is not -1 and splitSleepTime >= splitSleepTimer {
       # Largest island id wins a tie
-      if taskContext.splitSleepTime is splitSleepTimer and taskContext.splitIslandId < world.splitIslandId {
+      if splitSleepTime is splitSleepTimer and splitIslandId < world.splitIslandId {
         continue
       }
-      world.splitIslandId = taskContext.splitIslandId
-      splitSleepTimer = taskContext.splitSleepTime
+      world.splitIslandId = splitIslandId
+      splitSleepTimer = splitSleepTime
     }
   }
-  let awakeIslands: Bitset = world.taskContexts.copyAtDefault(index: 0).awakeIslandBitSet
+  # Worker 0's awake islands, moved out (not copied) and given back below
+  var awakeIslands: Bitset = emptyBitset()
+  if let first: mod TaskContext => world.taskContexts.modAt(index: 0) {
+    awakeIslands = own first.awakeIslandBitSet
+  }
   let islandSims: List(Int) = setIslandSims(world: world, setIndex: awakeSet)
   var islandIndex: Int = islandSims.length - 1
   loop islandIndex >= 0 {
@@ -835,5 +844,8 @@ func sleepIslands(world: mod PhysicsWorld) {
       trySleepIsland(world: world, islandId: islandSims.copyAtDefault(index: islandIndex))
     }
     islandIndex = islandIndex - 1
+  }
+  if let first: mod TaskContext => world.taskContexts.modAt(index: 0) {
+    first.awakeIslandBitSet = own awakeIslands
   }
 }

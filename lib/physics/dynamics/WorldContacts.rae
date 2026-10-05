@@ -386,14 +386,14 @@ func computeConvexManifold(
     ret false
   }
 
-  let oldPoints: List(ManifoldPoint) = List.create(ManifoldPoint, cap: maxManifoldPoints)
+  # The old points: a copy of the manifold's inline array (no allocation)
+  var oldPoints: Array(ManifoldPoint, cap: 4) = Array(ManifoldPoint, cap: 4)
+  var oldCount: Int = 0
   if contact.manifolds.length is 0 {
     contact.manifolds.add(value: zeroManifold())
-  } else {
-    let old: Manifold = contact.manifolds.copyAtDefault(index: 0)
-    loop var i: Int = 0, i < old.pointCount, ++i {
-      oldPoints.add(value: old.points.copyAtFallback(index: i, fallback: zeroManifoldPoint()))
-    }
+  } else if let old: view Manifold => contact.manifolds.viewAt(index: 0) {
+    oldPoints = old.points
+    oldCount = minInt(left: old.pointCount, right: maxManifoldPoints)
   }
 
   if let manifold: mod Manifold => contact.manifolds.modAt(index: 0) {
@@ -420,7 +420,7 @@ func computeConvexManifold(
       if let point: mod ManifoldPoint => manifold.points.modAt(index: i) {
         point.totalNormalImpulse = 0.0
         point.persisted = false
-        loop var j: Int = 0, j < oldPoints.length, ++j {
+        loop var j: Int = 0, j < oldCount, ++j {
           if let old: mod ManifoldPoint => oldPoints.modAt(index: j) {
             if point.featureId is old.featureId {
               point.normalImpulse = old.normalImpulse

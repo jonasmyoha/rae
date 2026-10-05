@@ -8,23 +8,6 @@ open physics/math/VectorMath
 open physics/math/AabbMath
 open physics/broadPhase/DynamicTree
 
-# One subtree under construction (b3RebuildItem): where it is written, the
-# pair its children go in, and its range of build leaves split in two.
-type RebuildItem {
-  nodeIndex: Int
-  pair: Int
-  childCount: Int
-  startIndex: Int
-  splitIndex: Int
-  endIndex: Int
-}
-
-# A subtree being copied (b3CopyItem).
-type CopyItem {
-  oldPair: Int
-  newIndex: Int
-}
-
 # The parent of child pair `pair` in `nodes` (b3MakeInternalNode over any
 # node array).
 func internalNodeOf(nodes: view List(TreeNode), pair: view Int) ret TreeNode {
@@ -159,7 +142,9 @@ func copySubtree(tree: mod DynamicTree, root: view TreeNode, newIndex: view Int)
     setProxyNode(tree: tree, proxyId: nodeProxyId(node: root), node: newIndex)
     ret
   }
-  let stack: List(CopyItem) = List.create(CopyItem, cap: 32)
+  # The tree's copy stack (Box3D's stack array), moved out and back at the end
+  var stack: List(CopyItem) = own tree.copyStack
+  stack.clear()
   var oldPair: Int = leftChild(node: root)
   var newPair: Int = bumpPair(tree: tree, parent: newIndex)
   # The subtree root, a left or a right sibling
@@ -209,6 +194,7 @@ func copySubtree(tree: mod DynamicTree, root: view TreeNode, newIndex: view Int)
       node: withLeftChild(node: parentNode, pair: newPair)
     )
   }
+  tree.copyStack = own stack
 }
 
 # b3PlaceLeaf: a build leaf is a proxy or a retained subtree.
@@ -237,7 +223,9 @@ func buildTree(tree: mod DynamicTree, leafCount: view Int) {
     ret
   }
 
-  let stack: List(RebuildItem) = List.create(RebuildItem, cap: 32)
+  # The tree's rebuild stack, moved out and back at the end
+  var stack: List(RebuildItem) = own tree.rebuildStack
+  stack.clear()
   let rootPairIndex: Int = bumpPair(tree: tree, parent: rootNode)
   stack.add(value: RebuildItem {
     nodeIndex: rootNode
@@ -312,6 +300,7 @@ func buildTree(tree: mod DynamicTree, leafCount: view Int) {
       stack.add(value: newItem)
     }
   }
+  tree.rebuildStack = own stack
 }
 
 # A build leaf: `node` with its moved flag cleared unless this is a full
@@ -348,7 +337,9 @@ func rebuildTree(tree: mod DynamicTree, fullBuild: view Bool) ret Int {
   # The build leaves: a marked internal node is descended (and abandoned),
   # anything else is a leaf, retained subtrees included.
   var leafCount: Int = 0
-  let stack: List(Int) = List.create(Int, cap: 32)
+  # The tree's leaf walk stack, moved out and back before the build
+  var stack: List(Int) = own tree.leafStack
+  stack.clear()
   if isLeafNode(node: root) is false and (fullBuild or isMovedNode(node: root)) {
     stack.add(value: leftChild(node: root))
   } else {
@@ -379,12 +370,13 @@ func rebuildTree(tree: mod DynamicTree, fullBuild: view Bool) ret Int {
     }
   }
 
+  tree.leafStack = own stack
   buildTree(tree: tree, leafCount: leafCount)
 
   # The new array is the tree; the old one is the spare.
-  let previous: List(TreeNode) = tree.nodes
-  tree.nodes = tree.swapNodes
-  tree.swapNodes = previous
+  let previous: List(TreeNode) = own tree.nodes
+  tree.nodes = own tree.swapNodes
+  tree.swapNodes = own previous
   tree.pairFreeList = -1
   tree.dfsOrdered = true
   ret leafCount
