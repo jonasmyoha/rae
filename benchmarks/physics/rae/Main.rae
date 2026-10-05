@@ -1,7 +1,8 @@
 # Box3D's benchmark scenes (benchmark/main.c and shared/benchmarks.c at
-# 9f998c8) on the Rae port: the large pyramid, many pyramids, the joint grid
-# and the convex pile, built exactly as Box3D builds them (Y-up, workerCount
-# 1), stepped at 60 Hz with 4 sub-steps for the scene's step count. Prints
+# 9f998c8) on the Rae port: the large pyramid, many pyramids, the joint grid,
+# the convex pile and rain (Rain.rae), built exactly as Box3D builds them
+# (Y-up, workerCount 1), stepped at 60 Hz with 4 sub-steps for the scene's
+# step count. Prints
 # one line per scene:
 #
 #   RESULT,<scene>,<ns per step>,<checksum>
@@ -23,6 +24,7 @@ open physics/dynamics/WorldSettings
 open physics/dynamics/WorldStep
 open physics/dynamics/WorldJoints
 open physics/dynamics/JointDefs
+open physics/shared/Human
 
 func benchWorld() ret PhysicsWorld {
   var def: WorldDef = defaultWorldDef(lengthUnitsPerMeter: 1.0)
@@ -245,6 +247,8 @@ func runScene(scene: view String) {
   var world: PhysicsWorld = benchWorld()
   let bodies: List(BodyId) = List.create(BodyId, cap: 16384)
   var stepCount: Int = 0
+  var rain: RainState = { humans: List.create(Human, cap: 0), columnCount: 0, columnIndex: 0 }
+  let isRain: Bool = scene is "rain"
   if scene is "large_pyramid" {
     createLargePyramid(world: world, bodies: bodies)
     stepCount = 200
@@ -257,18 +261,31 @@ func runScene(scene: view String) {
   } else if scene is "convex_pile" {
     createConvexPile(world: world, bodies: bodies)
     stepCount = 500
+  } else if isRain {
+    rain = createRain(world: world)
+    stepCount = 400
   } else {
-    log("unknown scene {scene}: large_pyramid, many_pyramids, joint_grid, convex_pile")
+    log("unknown scene {scene}: large_pyramid, many_pyramids, joint_grid, convex_pile, rain")
     ret
   }
   # As upstream's benchmark app: the first step (creating every contact and
-  # colouring the graph) is not timed, the other stepCount - 1 are
+  # colouring the graph) is not timed, the other stepCount - 1 are. Rain
+  # changes its scene before every step (the app's stepFcn), timed with it.
+  if isRain {
+    stepRain(world: world, rain: rain, stepIndex: 0)
+  }
   stepWorld(world: world, timeStep: 1.0 / 60.0, subStepCount: 4)
   let start: Int = nowNs()
   loop var i: Int = 1, i < stepCount, ++i {
+    if isRain {
+      stepRain(world: world, rain: rain, stepIndex: i)
+    }
     stepWorld(world: world, timeStep: 1.0 / 60.0, subStepCount: 4)
   }
   let elapsed: Int = nowNs() - start
+  if isRain {
+    rainBodies(rain: rain, bodies: bodies)
+  }
   log("RESULT,{scene},{elapsed / (stepCount - 1)},{positionChecksum(world: world, bodies: bodies)}")
 }
 

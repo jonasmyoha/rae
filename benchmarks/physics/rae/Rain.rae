@@ -1,0 +1,176 @@
+# Box3D's rain benchmark (shared/benchmarks.c CreateRain / StepRain at
+# 9f998c8, the release sizes): a 10 x 10 grid of static tiles, each a grid
+# mesh and a torus mesh, and groups of three ragdolls (physics/shared/Human)
+# dropped from 20 m: every 48 steps a new column of groups appears, and once
+# all ten columns are there the oldest column is destroyed and dropped again.
+open physics/geometry/Mesh
+open physics/geometry/MeshQuery
+open physics/math/Scalar
+open physics/dynamics/WorldTypes
+open physics/dynamics/World
+open physics/dynamics/WorldBodies
+open physics/dynamics/WorldShapes
+open physics/shared/Human
+
+const rainGridSize: Float = 15.0
+
+const rainGridCount: Int = 10
+
+const rainGroupSize: Int = 3
+
+type RainState {
+  # group (row * rainGridCount + column) * rainGroupSize + i
+  humans: List(Human)
+  columnCount: Int
+  columnIndex: Int
+}
+
+# CreateRain: the tiles; the humans come with the steps.
+func createRain(world: mod PhysicsWorld) ret RainState {
+  let halfMeshGridRows: Int = 4
+  let meshGridCellWidth: Float = rainGridSize / (2.0 * (halfMeshGridRows as Float))
+  let span: Float = rainGridSize * (rainGridCount as Float)
+  var bodyDef: BodyDef = defaultBodyDef(lengthUnitsPerMeter: world.lengthUnitsPerMeter)
+  let shapeDef: ShapeDef = defaultShapeDef(lengthUnitsPerMeter: world.lengthUnitsPerMeter)
+  let one: Vec3 = { x: 1.0, y: 1.0, z: 1.0 }
+  if let gridMesh: PhysicsMeshData = createGridMesh(
+    xCount: 2 * halfMeshGridRows
+    zCount: 2 * halfMeshGridRows
+    cellWidth: meshGridCellWidth
+    materialCount: 1
+    identifyEdges: true
+    lengthUnitsPerMeter: world.lengthUnitsPerMeter
+  ) {
+    if let torusMesh: PhysicsMeshData = createTorusMesh(
+      radialResolution: 16
+      tubularResolution: 16
+      radius: 0.25 * rainGridSize
+      thickness: 1.0
+      lengthUnitsPerMeter: world.lengthUnitsPerMeter
+    ) {
+      bodyDef.position.x = -0.5 * span + 0.5 * rainGridSize
+      loop var i: Int = 0, i < rainGridCount, ++i {
+        bodyDef.position.z = -0.5 * span + 0.5 * rainGridSize
+        loop var j: Int = 0, j < rainGridCount, ++j {
+          let bodyId: BodyId = createBody(world: world, def: bodyDef)
+          createMeshShape(
+            world: world
+            bodyId: bodyId
+            def: shapeDef
+            mesh: gridMesh
+            scale: one
+          )
+          createMeshShape(
+            world: world
+            bodyId: bodyId
+            def: shapeDef
+            mesh: torusMesh
+            scale: one
+          )
+          bodyDef.position.z = bodyDef.position.z + rainGridSize
+        }
+        bodyDef.position.x = bodyDef.position.x + rainGridSize
+      }
+    }
+  }
+  let humans: List(Human) = List.create(Human, cap: rainGridCount * rainGridCount * rainGroupSize)
+  loop var i: Int = 0, i < rainGridCount * rainGridCount * rainGroupSize, ++i {
+    humans.add(value: emptyHuman())
+  }
+  ret RainState { humans: humans, columnCount: 0, columnIndex: 0 }
+}
+
+# CreateGroup: three humans 0.75 m apart above tile (row, column).
+func createGroup(
+  world: mod PhysicsWorld
+  rain: mod RainState
+  rowIndex: view Int
+  columnIndex: view Int
+) {
+  let groupIndex: Int = rowIndex * rainGridCount + columnIndex
+  let span: Float = (rainGridCount as Float) * rainGridSize
+  let groupDistance: Float = 1.0 * span / (rainGridCount as Float)
+  var position: Vec3 = {
+    x: -0.5 * span + groupDistance * ((columnIndex as Float) + 0.5)
+    y: 20.0
+    z: -0.5 * span + groupDistance * ((rowIndex as Float) + 0.5)
+  }
+  loop var i: Int = 0, i < rainGroupSize, ++i {
+    if let human: mod Human => rain.humans.modAt(index: groupIndex * rainGroupSize + i) {
+      createHuman(
+        world: world
+        human: human
+        position: position
+        frictionTorque: 5.0
+        hertz: 1.0
+        dampingRatio: 0.7
+        groupIndex: groupIndex
+      )
+    }
+    position.x = position.x + 0.75
+  }
+}
+
+func destroyGroup(
+  world: mod PhysicsWorld
+  rain: mod RainState
+  rowIndex: view Int
+  columnIndex: view Int
+) {
+  let groupIndex: Int = rowIndex * rainGridCount + columnIndex
+  loop var i: Int = 0, i < rainGroupSize, ++i {
+    if let human: mod Human => rain.humans.modAt(index: groupIndex * rainGroupSize + i) {
+      destroyHuman(world: world, human: human)
+    }
+  }
+}
+
+# StepRain: before step `stepIndex`.
+func stepRain(world: mod PhysicsWorld, rain: mod RainState, stepIndex: view Int) {
+  let delay: Int = 47
+  if (stepIndex bitand delay) is not 0 {
+    ret
+  }
+  if rain.columnCount < rainGridCount {
+    loop var i: Int = 0, i < rainGridCount, ++i {
+      createGroup(
+        world: world
+        rain: rain
+        rowIndex: i
+        columnIndex: rain.columnCount
+      )
+    }
+    rain.columnCount = minInt(left: rain.columnCount + 1, right: rainGridCount)
+  } else {
+    loop var i: Int = 0, i < rainGridCount, ++i {
+      destroyGroup(
+        world: world
+        rain: rain
+        rowIndex: i
+        columnIndex: rain.columnIndex
+      )
+      createGroup(
+        world: world
+        rain: rain
+        rowIndex: i
+        columnIndex: rain.columnIndex
+      )
+    }
+    rain.columnIndex = rain.columnIndex + 1
+    if rain.columnIndex >= rainGridCount {
+      rain.columnIndex = 0
+    }
+  }
+}
+
+# The bodies of the spawned humans, in group, human and bone order.
+func rainBodies(rain: view RainState, bodies: mod List(BodyId)) {
+  bodies.clear()
+  loop let human: view Human in rain.humans {
+    if human.isSpawned {
+      loop let bone: view Bone in human.bones {
+        bodies.add(value: bone.bodyId)
+      }
+    }
+  }
+}

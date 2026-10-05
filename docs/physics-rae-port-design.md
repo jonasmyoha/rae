@@ -246,16 +246,16 @@ through the fixes.
 
 | scene | C scalar | C SIMD | Rae | Rae / C scalar | Rae / C SIMD |
 |---|---|---|---|---|---|
-| large_pyramid | 11.31 | 7.91 | 11.12 | 0.98x | 1.41x |
-| many_pyramids | 21.67 | 14.74 | 23.06 | 1.06x | 1.56x |
-| joint_grid | 11.55 | 11.52 | 13.04 | 1.13x | 1.13x |
-| convex_pile | 13.71 | 11.48 | 16.48 | 1.20x | 1.44x |
+| large_pyramid | 11.40 | 7.93 | 11.75 | 1.03x | 1.48x |
+| many_pyramids | 21.88 | 15.43 | 23.05 | 1.05x | 1.49x |
+| joint_grid | 11.66 | 11.70 | 14.96 | 1.28x | 1.28x |
+| convex_pile | 13.78 | 11.57 | 16.26 | 1.18x | 1.40x |
+| rain | 4.90 | 4.83 | 6.07 | 1.24x | 1.26x |
 
-(P9a-8, 2026-10-05, load ~3: the ratios move with the machine's load.
-Before P9a-2/P9a-5 the joint grid was 30.12 ms (2.58x), before P9a-3 the
-convex pile 34.4 ms (2.50x). Both sides leave the first step untimed and
-divide by the steps - 1 they time, as upstream's app does; the P9a run
-timed the first step on the Rae side and divided both by all steps.)
+(2026-10-05, after the rain port, load ~3.7: the ratios move with the
+machine's load. The joint grid was 13.04 ms (1.13x) in P9a-8's table; see
+the regression note below. Both sides leave the first step untimed and
+divide by the steps - 1 they time, as upstream's app does.)
 
 The target (1.2x C scalar) is met by every scene since P9a-8; the convex
 pile is on the line (1.20x). The large pyramid
@@ -431,6 +431,26 @@ Where the rest goes, profiled against the C app:
   directory of the shorter run broke its C build from P9a-3 on, so the
   profiler compared against a stale binary. Re-measured with the build
   checked, the large pyramid's steady step is still 0.)
+
+- **Rain.** Upstream's rain (shared/benchmarks.c CreateRain / StepRain,
+  the release sizes) is `benchmarks/physics/rae/Rain.rae`: a 10 x 10 grid of
+  static tiles, each a grid mesh and a torus mesh (`createTorusMesh`,
+  b3CreateTorusMesh, MeshQuery), and groups of three ragdolls dropping in a
+  new column every 48 steps, the oldest column destroyed and dropped again
+  once all ten are there; 400 steps, the scene changed before every step as
+  the app's stepFcn does. The ragdoll is `lib/physics/shared/Human.rae`,
+  generated from Box3D's shared/human.c (12 capsule bones, spherical and
+  revolute joints with limits, springs and friction motors, three filter
+  joints). Fixture 996 checks it against the oracle (driver `ragdoll.c`:
+  three humans on one rain tile, one destroyed and created again, every
+  bone every 20 steps): 432 transforms, all bit-exact. At the end the scene
+  holds 3 700 bodies, 4 400 shapes and 4 200 joints on both sides; Rae
+  1.24x C scalar.
+- **Joint grid regression (open).** The joint grid measures ~15.4 ms since
+  P9a-7 (13.2-13.5 ms at P9a-8, same checksum). Bisected to that commit; the
+  solver's generated C is identical between the two, and neither forced code
+  alignment, the allocator zone, extra setup allocations nor moving the new
+  PhysicsWorld fields to the end of the struct closes it. Queued.
 
 These are queued as P9 follow-ups.
 
