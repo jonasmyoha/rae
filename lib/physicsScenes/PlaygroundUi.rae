@@ -1,4 +1,5 @@
-# The playground's lib/ui HUD (assets/ui.raescene): the six lines of
+# The physics playgrounds' lib/ui HUD (scenes/PlaygroundHud.raescene), shared
+# by both tracks: the six lines of
 # SceneHud.hudLines (track and scene, body / awake / sleeping counts, contacts
 # and islands, step and frame milliseconds, workers), the pyramid body-count
 # slider (app3d/Slider over BodyTrack / BodyFill) and the controls hint, plus
@@ -23,7 +24,9 @@ open app3d/UiShell
 open Gpu2dCanvas
 open ecs/Entity
 
-const assetBase: String = "examples/122_physics_playground_port/assets/"
+# The HUD's layout, read through the toolchain-aware asset reader (a "lib/"
+# path also resolves against $RAE_STDLIB)
+const hudScenePath: String = "lib/physicsScenes/scenes/PlaygroundHud.raescene"
 
 const minBodyCount: Float = 1000.0
 
@@ -41,7 +44,8 @@ type PlaygroundUi {
   lines: List(String)
 }
 
-func createPlaygroundUi(bodyCount: view Int) ret PlaygroundUi {
+# `assetBase` is the example's assets directory: its fonts and Theme.raescene.
+func createPlaygroundUi(assetBase: view String, bodyCount: view Int) ret PlaygroundUi {
   ret PlaygroundUi {
     gpuUi: loadUiAssets(
       dir: assetBase
@@ -78,7 +82,7 @@ func mountPlaygroundUi(
   seedWorldTheme(world: world, res: ui.gpuUi)
   world.layoutW = width
   world.layoutH = height
-  let scene: Scene = loadSceneFile(path: "{assetBase}ui.raescene")
+  let scene: Scene = loadSceneFile(path: hudScenePath)
   let root: EntityId = loadScene(world: world, uiSystems: systems, scene: scene)
   setHudHint(
     ui: ui
