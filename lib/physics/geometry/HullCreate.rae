@@ -30,6 +30,12 @@ func emptyHull() ret Hull {
     edges: List.create(HullHalfEdge, cap: 24)
     faces: List.create(HullFace, cap: 6)
     planes: List.create(Plane, cap: 6)
+    soaPointsX: List.create(Float, cap: 8)
+    soaPointsY: List.create(Float, cap: 8)
+    soaPointsZ: List.create(Float, cap: 8)
+    soaNormalsX: List.create(Float, cap: 8)
+    soaNormalsY: List.create(Float, cap: 8)
+    soaNormalsZ: List.create(Float, cap: 8)
   }
 }
 
@@ -125,6 +131,7 @@ func createHull(points: view List(Vec3), maxVertexCount: view Int) ret opt Hull 
   if updateHullBulkProperties(hull: hull) is false {
     ret none
   }
+  buildHullSoa(hull: hull)
   ret hull
 }
 
@@ -358,5 +365,6 @@ func cloneAndTransformHull(
   if updateHullBulkProperties(hull: hull) is false {
     ret none
   }
+  buildHullSoa(hull: hull)
   ret hull
 }
