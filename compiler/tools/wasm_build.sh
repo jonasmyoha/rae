@@ -37,6 +37,18 @@ trap 'rm -rf "$TMP"' EXIT
 EXTRA_C="$(ls "$PROJ"/*.c 2>/dev/null | grep -v 'rae_runtime.c' || true)"
 
 mkdir -p "$(dirname "$OUT")"
+# Upstream Box3D's C library (lib/box3d, docs/physics-two-implementations.md
+# §4): a program whose C includes its header links the wasm32 build
+# tools/box3d/build.sh installed ($RAE_BOX3D, default ~/.cache/rae/box3d/install).
+BOX3D_FLAGS=""
+if grep -q '#include "box3d/box3d.h"' "$TMP/out.c"; then
+  BOX3D="${RAE_BOX3D:-$HOME/.cache/rae/box3d/install}"
+  if [ ! -f "$BOX3D/lib/wasm32/libbox3d.a" ]; then
+    echo "wasm_build: this program imports box3d, but $BOX3D/lib/wasm32/libbox3d.a is missing; run tools/box3d/build.sh" >&2
+    exit 2
+  fi
+  BOX3D_FLAGS="-I$BOX3D/include $BOX3D/lib/wasm32/libbox3d.a"
+fi
 # WASM_THREADS=1 builds a *threaded* module: wasm32-wasip1-threads + -pthread,
 # so Rae `spawn` (which lowers to pthread_create) runs on real OS-thread-backed
 # wasm threads — the same spawn code as the compiled target, no JS-side
@@ -50,14 +62,14 @@ if [ "${WASM_THREADS:-0}" = "1" ]; then
     -DRAE_WASM_THREADS \
     -Wl,--allow-undefined \
     -Wl,--import-memory,--export-memory,--shared-memory,--max-memory=1073741824 \
-    -o "$OUT" "$TMP/out.c" "$TMP/rae_runtime.c" $EXTRA_C -I"$TMP"
+    -o "$OUT" "$TMP/out.c" "$TMP/rae_runtime.c" $EXTRA_C $BOX3D_FLAGS -I"$TMP"
 else
   # -msimd128: enable WASM SIMD (clang auto-vectorizes hot float loops); supported
   # by Node and all modern browsers. -Wl,--allow-undefined lets examples import
   # functions the host supplies from JS (e.g. fbPixel) as env imports.
   "$CC" --target=wasm32-wasip1 --sysroot="$SYS" -O2 -ffp-contract=off -msimd128 \
     -Wl,--allow-undefined \
-    -o "$OUT" "$TMP/out.c" "$TMP/rae_runtime.c" $EXTRA_C -I"$TMP"
+    -o "$OUT" "$TMP/out.c" "$TMP/rae_runtime.c" $EXTRA_C $BOX3D_FLAGS -I"$TMP"
 fi
 
 echo "wasm_build: $OUT ($(wc -c < "$OUT" | tr -d ' ') bytes)"

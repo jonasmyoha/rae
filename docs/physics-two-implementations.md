@@ -89,27 +89,97 @@ match the scalar ones is measured and recorded, not assumed.
 
 ## 4. Track B: building the C library
 
-- **Source:** upstream Box3D, fetched at a pinned commit into a cache outside
-  the repository, as `tools/box3d-oracle/` and wgpu-native already work. No
-  Box3D source is committed. The pin starts at `9f998c8`, the port's commit,
-  so the two tracks are comparable. §6 also measures moving it to upstream
-  HEAD.
-- **Build:** compiled with `-ffp-contract=off`, the cross-platform
-  determinism flag, for every target Rae builds: native, and WASM through the
-  existing WASM build. Released with SIMD on; scalar for the oracle-equality
-  fixtures.
-- **Bindings:** `rae bindgen` over `include/box3d/*.h`, checked in under
-  `lib/box3d/` with a regeneration script, like `lib/webgpu`. The binding
-  generator's gaps (static inline math helpers, structs by value, callbacks)
-  are fixed in the generator or covered by a small hand-written module, with
-  each case listed.
-- **Linking:** Rae has no general "this library needs that C library" step
-  yet. The first track-B task uses the existing mechanism if one fits. If it
-  needs new `.raepack` surface, it writes the design and stops with a question
-  for the maintainer.
+Built by B1 (2026-10-05).
+
+- **The pin:** `tools/box3d/pin` is the single place holding the commit
+  (`9f998c8`, the port's) and the URL. `tools/box3d/build.sh` and the port's
+  oracle (`tools/box3d-oracle/oracle.sh`) both read it, so one edit moves both
+  tracks. §6 also measures moving it to upstream HEAD.
+- **The build:** `tools/box3d/build.sh` clones upstream into
+  `~/.cache/rae/box3d/src` (`$RAE_BOX3D_CACHE`) and checks out the pin; no
+  Box3D source is committed. It compiles `src/*.c` with `-ffp-contract=off`
+  into three static libraries under `~/.cache/rae/box3d/install`
+  (`$RAE_BOX3D`):
+  - `lib/libbox3d.a`: native with SIMD (NEON / SSE2), the product build;
+  - `lib/scalar/libbox3d.a`: native `BOX3D_DISABLE_SIMD`, the oracle's
+    build;
+  - `lib/wasm32/libbox3d.a`: wasm32-wasip1 through wasi-sdk, `-msimd128`.
+
+  It also installs the headers and a `COMMIT` stamp. All three take 31-34 s
+  on the M1 Max. `make setup` runs it when the library is missing.
+- **Linking: the existing mechanism, no new surface.** wgpu-native is linked
+  because the build sees the program use its bindings, and found through an
+  environment variable (`WGPU_NATIVE`). Box3D works the same way:
+  - When the generated C includes `box3d/box3d.h` (the `cheader` of
+    `lib/box3d`), `rae run` / `rae watch` add `-I<install>/include
+    <install>/lib/libbox3d.a`. `RAE_BOX3D` overrides the install, and
+    `RAE_BOX3D_SCALAR=1` links the scalar library.
+  - `compiler/tools/wasm_build.sh` links the wasm32 library the same way.
+  - A program that imports `lib/box3d` while the library is missing fails
+    with the command to run.
+  - The browser (emcc) build does not link Box3D yet: it needs an emscripten
+    build of the library, which is part of the WASM measurement in §6.
+- **Size:** linking Box3D adds about 690 KB to a native release binary (the
+  boxstack fixture is 917 KB against 229 KB for hello world; `__TEXT` +590 KB)
+  and about 430 KB to a WASM module (811 KB against 378 KB).
+- **Bindings:** `tools/gen_box3d_bindings.sh` runs `rae bindgen` over
+  `base.h`, `constants.h`, `math_functions.h`, `id.h`, `collision.h`,
+  `types.h` and `box3d.h`, in that order, into `lib/box3d/`:
+  - `Box3dEnums.rae`;
+  - `Box3dTypes.rae` and `Box3dTypes2.rae`;
+  - `Box3d.rae`.
+
+  They hold 715 functions, 111 structs, 10 enums, 23 integer constants and
+  23 callback types. The output is deterministic, checked in, and a file-wide
+  `# raefmt: off` region; the generator's header line exempts it from the
+  naming rules, as `lib/webgpu` is exempt. The generator gained what these
+  headers need, and the WebGPU bindings regenerate byte-identical apart from
+  three fixes in `WebgpuTypes.rae`. Case by case:
+  - *Functions*: found by `--api-macro B3_API`, not by a name prefix.
+  - *Static inline math helpers* (`B3_INLINE`, `B3_FORCE_INLINE`,
+    `B3_ID_INLINE`): bound like any function. The extern names the inline
+    function and the generated C includes the header, so the call compiles
+    to the inline body. No shim is needed.
+  - *Structs by value*: work as they are. A parameter is `copy T` and a
+    return is `T`, and the C call passes and returns the struct
+    (`b3World_Step(worldId: copy b3WorldId, …)`,
+    `b3Body_GetTransform(...) ret b3Transform`).
+  - *Callbacks* (`typedef bool b3MeshQueryFcn(...)` and function-pointer
+    fields such as the debug draw's): bound as `Ptr`. Passing a Rae function
+    to C is not possible yet, so custom filters, pre-solve, the task-system
+    hooks and debug draw cannot be driven from Rae. B2 decides whether the
+    ECS layer needs any of them.
+  - *Preprocessor branches*: `#if` / `#ifdef` / `#elif` over `defined(...)`
+    are evaluated (`--define` adds macros), so the double-precision
+    alternatives (`BOX3D_DOUBLE_PRECISION`) and the C++ operator overloads
+    are left out, and `b3Pos` / `b3WorldTransform` are the aliases they are
+    in a float build.
+  - *Aliases* (`typedef b3Vec3 b3Pos;`): resolved to their target.
+  - *Enums with implicit member values*: counted as in C.
+  - *Comma-separated fields*: split.
+  - *Array fields, nested unions, `static const` struct values and
+    non-integer `#define`s* (`B3_PI`): skipped and listed in the output. The
+    real C struct is used, so a skipped field only means Rae cannot name it:
+    19 arrays (the box hull's tables, the profile counters), 4 nested unions,
+    17 struct constants such as `b3Vec3_zero` and `b3_nullBodyId`, 5 enum
+    members whose values are expressions (the flat-edge flags), and the float
+    constants.
+  - *An array of structs passed by pointer* (`const b3Vec3* points, int
+    count`): bound as `Ptr` (a List's `.data`), not as a single `view`.
+  - *Output above the 1000-line cap*: continued in numbered parts. Each types
+    part imports the ones before it.
+  - *A struct literal of a lowercase C type* (`ret b3Vec3 { ... }`) is not
+    parsed as a literal. Bind it with its type on the left
+    (`let v: b3Vec3 = { ... }`), which Rae prefers anyway.
+- **The check:** fixture 998 builds the oracle's new `boxstack` scene through
+  the bindings: a ground box and five rotated boxes, 60 steps. All 30 poses
+  equal `tools/box3d-oracle/goldens/boxstack.golden` bit for bit with the SIMD
+  library, and with `RAE_BOX3D_SCALAR=1`. The same program built for WASM
+  gives the same bits.
 - **Threading:** Box3D's own scheduler through `workerCount`, or later
   `enqueueTask` / `finishTask` over Rae's worker pool, whichever the step
-  measurements favour.
+  measurements favour. The task callbacks need Rae functions passed to C, so
+  the worker pool is not an option yet.
 
 ## 5. Task order
 
