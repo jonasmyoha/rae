@@ -999,7 +999,17 @@ void emit_drop_for_value(CFuncContext* ctx, FILE* out, const AstTypeRef* type,
       if (sub) concrete = *sub;
     }
     concrete.next = NULL;
-    if (!generic_struct_template(ctx->compiler_ctx, &concrete)) return;
+    if (!generic_struct_template(ctx->compiler_ctx, &concrete)) {
+      // generic_struct_template leaves out the container-shaped generics
+      // (ComponentTable, ...) for the struct-shape walk, but those are still
+      // generic user structs with a synthesised rae_drop_struct_<instance>
+      // (the scope-exit drop calls it). Without this a whole-value store into
+      // one - `table = createComponentTable(T)`, or through a `mod` parameter
+      // - released nothing and leaked the old value's lists every time.
+      const AstDecl* decl = find_type_decl(ctx, ctx->module, get_base_type_name(&concrete));
+      if (!decl || decl->kind != AST_DECL_TYPE || !decl->as.type_decl.generic_params
+          || has_property(decl->as.type_decl.properties, "c_struct")) return;
+    }
     const char* want = rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, &concrete);
     bool registered = false;
     for (size_t gi = 0; want && gi < ctx->compiler_ctx->generic_type_count && !registered; gi++) {
