@@ -176,3 +176,26 @@ func advancePhysicsEvents(physics: mod Physics) {
   frameAdvance(this: physics.sensorBegan)
   frameAdvance(this: physics.sensorEnded)
 }
+
+# The world's size for a HUD: live bodies (the venue's included), awake
+# bodies, contacts, islands and joints.
+type PhysicsCounters {
+  bodyCount: Int
+  awakeBodyCount: Int
+  contactCount: Int
+  islandCount: Int
+  jointCount: Int
+}
+
+func physicsCounters(physics: view Physics) ret PhysicsCounters {
+  unsafe {
+    let counters: b3Counters = b3World_GetCounters(worldId: physics.world)
+    ret PhysicsCounters {
+      bodyCount: counters.bodyCount as Int
+      awakeBodyCount: b3World_GetAwakeBodyCount(worldId: physics.world) as Int
+      contactCount: counters.contactCount as Int
+      islandCount: counters.islandCount as Int
+      jointCount: counters.jointCount as Int
+    }
+  }
+}

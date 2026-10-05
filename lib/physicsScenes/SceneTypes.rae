@@ -1,0 +1,130 @@
+# Backend-neutral physics scene descriptions (docs/physics-two-implementations.md
+# §3): what a scene holds, as plain Rae data, with no import of either physics
+# track. Each example builds a Scene through its own track's ECS layer (the
+# port's physics/ecs or the C library's box3d/ecs) in a thin adapter, so the
+# two examples of a program run the same scene and print the same hash. World
+# convention: Z-up (docs/coordinate-system.md), ground top at z = 0.
+open Vec3
+open Quat
+open Mesh3d
+
+enum SceneBodyType { staticBody, kinematicBody, dynamicBody }
+
+enum SceneShapeKind { box, sphere, capsule }
+
+# A shape centred on its body: a box of `halfExtents`, a sphere of `radius`,
+# or a capsule of `radius` whose segment runs `halfLength` either way along
+# the body's z axis.
+type SceneShape {
+  kind: SceneShapeKind
+  halfExtents: Vec3
+  radius: Float
+  halfLength: Float
+}
+
+# A body: its type, one shape, its pose and initial velocity, and the shape's
+# material.
+type SceneBody {
+  bodyType: SceneBodyType
+  shape: SceneShape
+  position: Vec3
+  rotation: Quat
+  linearVelocity: Vec3
+  density: Float
+  friction: Float
+}
+
+enum SceneJointKind { hinge, ball, weld }
+
+# A frame on a body, local to its origin (a hinge turns about its z axis).
+type SceneFrame {
+  position: Vec3
+  rotation: Quat
+}
+
+# A joint between bodies `bodyA` and `bodyB` (indices into Scene.bodies).
+type SceneJoint {
+  kind: SceneJointKind
+  bodyA: Int
+  bodyB: Int
+  frameA: SceneFrame
+  frameB: SceneFrame
+}
+
+enum SceneGroundKind { flat, mesh }
+
+# The static ground: a flat box (`halfSize` square, top at z = 0), or a render
+# mesh used as the collider too (Mesh3d's MeshData; a terrain for the uneven
+# grounds).
+type SceneGround {
+  kind: SceneGroundKind
+  halfSize: Float
+  mesh: MeshData
+}
+
+# A scene: its name, ground, bodies and joints, whether a character walks it
+# (and from where), and where the camera looks from.
+type Scene {
+  name: String
+  ground: SceneGround
+  bodies: List(SceneBody)
+  joints: List(SceneJoint)
+  hasCharacter: Bool
+  characterStart: Vec3
+  cameraTarget: Vec3
+  cameraDistance: Float
+}
+
+func identityQuat() ret Quat {
+  ret Quat { x: 0.0, y: 0.0, z: 0.0, w: 1.0 }
+}
+
+func originFrame() ret SceneFrame {
+  ret SceneFrame { position: Vec3 { x: 0.0, y: 0.0, z: 0.0 }, rotation: identityQuat() }
+}
+
+func boxShape(halfExtents: view Vec3) ret SceneShape {
+  ret SceneShape {
+    kind: SceneShapeKind.box
+    halfExtents: halfExtents
+    radius: 0.0
+    halfLength: 0.0
+  }
+}
+
+func sphereShape(radius: view Float) ret SceneShape {
+  ret SceneShape {
+    kind: SceneShapeKind.sphere
+    halfExtents: Vec3 { x: radius, y: radius, z: radius }
+    radius: radius
+    halfLength: 0.0
+  }
+}
+
+func capsuleShape(radius: view Float, halfLength: view Float) ret SceneShape {
+  ret SceneShape {
+    kind: SceneShapeKind.capsule
+    halfExtents: Vec3 { x: radius, y: radius, z: halfLength + radius }
+    radius: radius
+    halfLength: halfLength
+  }
+}
+
+# A dynamic body of `shape` at `position` (density 1000, friction 0.6, at rest).
+func dynamicBody(shape: view SceneShape, position: view Vec3) ret SceneBody {
+  ret SceneBody {
+    bodyType: SceneBodyType.dynamicBody
+    shape: shape
+    position: position
+    rotation: identityQuat()
+    linearVelocity: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+    density: 1000.0
+    friction: 0.6
+  }
+}
+
+func staticBody(shape: view SceneShape, position: view Vec3) ret SceneBody {
+  var body: SceneBody = dynamicBody(shape: shape, position: position)
+  body.bodyType = SceneBodyType.staticBody
+  ret body
+}
