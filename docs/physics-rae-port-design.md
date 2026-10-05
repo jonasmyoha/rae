@@ -246,19 +246,19 @@ through the fixes.
 
 | scene | C scalar | C SIMD | Rae | Rae / C scalar | Rae / C SIMD |
 |---|---|---|---|---|---|
-| large_pyramid | 11.30 | 7.92 | 13.38 | 1.18x | 1.69x |
-| many_pyramids | 21.77 | 15.51 | 29.41 | 1.35x | 1.90x |
-| joint_grid | 11.56 | 11.57 | 13.44 | 1.16x | 1.16x |
-| convex_pile | 13.72 | 11.48 | 34.32 | 2.50x | 2.99x |
+| large_pyramid | 11.39 | 7.96 | 13.09 | 1.15x | 1.64x |
+| many_pyramids | 21.93 | 15.59 | 27.71 | 1.26x | 1.78x |
+| joint_grid | 11.69 | 11.68 | 13.31 | 1.14x | 1.14x |
+| convex_pile | 13.74 | 11.49 | 21.22 | 1.54x | 1.85x |
 
-(P9a-5, 2026-10-05, load ~3.4: the ratios move with the machine's load,
-the large pyramid measured 1.32x at load ~12. The joint grid was 30.12 ms,
-2.58x, before P9a-2. Both sides leave the first step untimed and divide by
-the steps - 1 they time, as upstream's app does; the P9a run timed the
-first step on the Rae side and divided both by all steps.)
+(P9a-3, 2026-10-05, load ~9: the ratios move with the machine's load.
+Before P9a-2/P9a-5 the joint grid was 30.12 ms (2.58x), before P9a-3 the
+convex pile 34.4 ms (2.50x). Both sides leave the first step untimed and
+divide by the steps - 1 they time, as upstream's app does; the P9a run
+timed the first step on the Rae side and divided both by all steps.)
 
 The target (1.2x C scalar) is met by the large pyramid and the joint grid;
-many pyramids is inside the 1.5x failure line, the convex pile is not. The large pyramid
+many pyramids is inside the 1.5x failure line, the convex pile just past it. The large pyramid
 started at **2 267 ms per step** (190x): per-element reads copied whole
 structs, and the fixes were all of that kind:
 
@@ -319,12 +319,33 @@ Where the rest goes, profiled against the C app:
   unchecked `BodyState` read in `jointBodyState` (2M fewer instructions,
   no fewer cycles), and keeping each kind's functions out of line. Joint
   grid 15.5 → 13.4 ms, 1.16x.
-- **Narrow phase (convex pile).** The hull SAT and clipping allocate `List`s
-  per pair (`faceDots`, the edge candidates, the clip polygons) where Box3D
-  uses stack arrays, and the step is not allocation-free:
-  `RAE_MEM_STATS` counts ~3 400 buffer allocations (~28 MB) per steady
-  large-pyramid step, most of it `StepContext` rebuilt every step
-  (`wideConstraints` regrown from empty).
+- **Narrow phase and allocations (convex pile), P9a-3.** Box3D keeps hulls
+  in a database that shares equal hulls between shapes; the port copied the
+  hull into every shape, so a pile of one convex streamed ~15 MB of copies
+  where C reads one hull from cache. `addSharedHull` (WorldShapes, by
+  content hash and a full comparison, HullContent) shares them: 31 → 23 ms.
+  The hull narrow phase's per-pair lists (SAT's face dots, edge candidates
+  and edge-pair lists, the clip polygons, the face contact's points) live
+  in a per-task `HullScratch`, cleared and reused, and the clip polygons
+  swap by moving instead of copying both lists per clip plane.
+  The step is now allocation-free when nothing changes: the world keeps
+  its `StepContext` and `PairContext` and lends them with `own` moves
+  (`solve(world: mod, context: mod)` cannot take a world-owned context
+  directly; moving it out for the step and back needs no language
+  feature), the trees keep their rebuild, copy and leaf-walk stacks, and
+  the rebuild's node arrays swap by moving (it deep-copied both arrays on
+  every rebuild). Whole-struct copies that only wanted one field (TaskContext,
+  GraphColor, PhysicsShape, Contact in the island and graph bookkeeping)
+  read through views or move the field out and back. Allocations in a
+  steady large-pyramid step (an allocation-counting runtime, full run less
+  a two-step run): 431 → 0. Convex pile 34.4 → 21.2 ms (1.54x). What is
+  left there is arithmetic: Box3D's SAT runs on structure-of-arrays copies
+  of each hull's points and normals four lanes at a time (b3FloatW, which
+  clang vectorises even in the scalar build) in the support search, the
+  face separation and the edge-pair loop; the port's hull has no SoA copies
+  and its loops are scalar over AoS points (findHullSupportVertex 11%,
+  testEdgePairs 10% of the convex pile). Contact and island creation still
+  allocate (a contact's manifold list, island merges), as the pile settles.
 
 These are queued as P9 follow-ups.
 
