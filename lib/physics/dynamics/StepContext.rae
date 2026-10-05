@@ -68,6 +68,23 @@ type PrepareSpan {
   colorIndex: Int
 }
 
+# b3BlockDim: items per block (all but the last) and the block count
+type BlockDim {
+  size: Int
+  count: Int
+}
+
+# Each active colour's constraint counts and block dimensions.
+type ColorPlan {
+  colorIndex: Int
+  wideContactCount: Int
+  contactCount: Int
+  jointCount: Int
+  wideDim: BlockDim
+  contactDim: BlockDim
+  jointDim: BlockDim
+}
+
 type StepContext {
   dt: Float
   inverseDt: Float
@@ -103,6 +120,10 @@ type StepContext {
   syncBlocks: List(SyncBlock)
   # sync index (16 bits) | stage index (16 bits)
   syncBits: Int
+  # solve's working lists: the active colours and their block ranges
+  colorPlans: List(ColorPlan)
+  colorBlockStarts: List(Int)
+  colorBlockCounts: List(Int)
 }
 
 func zeroSoftness() ret Softness {
@@ -152,7 +173,47 @@ func createStepContext() ret StepContext {
     stages: List.create(SolverStage, cap: 16)
     syncBlocks: List.create(SyncBlock, cap: 16)
     syncBits: 0
+    colorPlans: List.create(ColorPlan, cap: graphColorCount)
+    colorBlockStarts: List.create(Int, cap: graphColorCount)
+    colorBlockCounts: List.create(Int, cap: graphColorCount)
   }
+}
+
+# The context of a new step: createStepContext's values, with the lists
+# cleared rather than re-created so they keep their capacity (the world
+# keeps its step context between steps; a steady step allocates nothing).
+func resetStepContext(context: mod StepContext) {
+  context.dt = 0.0
+  context.inverseDt = 0.0
+  context.h = 0.0
+  context.inverseH = 0.0
+  context.subStepCount = 1
+  context.contactSoftness = zeroSoftness()
+  context.staticSoftness = zeroSoftness()
+  context.maxLinearVelocity = 0.0
+  context.enableWarmStarting = true
+  context.bulletBodies.clear()
+  context.anyRestitution = false
+  context.wideConstraints.clear()
+  context.widePrepareSpans.clear()
+  context.wideContactCount = 0
+  context.contactConstraints.clear()
+  context.manifoldConstraints.clear()
+  context.contactPrepareSpans.clear()
+  context.overflowSpans.clear()
+  context.jointPrepareSpans.clear()
+  context.overflowContactConstraints.clear()
+  context.overflowManifoldConstraints.clear()
+  context.colorWideStarts.clear()
+  context.colorContactStarts.clear()
+  context.activeColorCount = 0
+  context.workerCount = 1
+  context.stages.clear()
+  context.syncBlocks.clear()
+  context.syncBits = 0
+  context.colorPlans.clear()
+  context.colorBlockStarts.clear()
+  context.colorBlockCounts.clear()
 }
 
 # The span holding flat index `index` of `spans` (spans end in a sentinel

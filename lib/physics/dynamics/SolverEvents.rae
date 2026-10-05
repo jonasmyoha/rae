@@ -35,11 +35,16 @@ func reportHitEvents(world: mod PhysicsWorld) {
   if anyHitEvents is false {
     ret
   }
-  var bits: Bitset = world.taskContexts.copyAtDefault(index: 0).hitEventBitSet
+  # The workers' bits OR-ed into worker 0's (moved out and given back)
+  var bits: Bitset = emptyBitset()
+  if let first: mod TaskContext => world.taskContexts.modAt(index: 0) {
+    bits = own first.hitEventBitSet
+  }
   loop var i: Int = 1, i < world.taskContexts.length, ++i {
-    let taskContext: TaskContext = world.taskContexts.copyAtDefault(index: i)
-    if taskContext.hasHitEvents {
-      inPlaceUnion(setA: bits, setB: taskContext.hitEventBitSet)
+    if let taskContext: view TaskContext => world.taskContexts.viewAt(index: i) {
+      if taskContext.hasHitEvents {
+        inPlaceUnion(setA: bits, setB: taskContext.hitEventBitSet)
+      }
     }
   }
   let threshold: Float = world.hitEventThreshold
@@ -84,18 +89,28 @@ func reportHitEvents(world: mod PhysicsWorld) {
       world.contactHitEvents.add(value: event)
     }
   }
+  if let first: mod TaskContext => world.taskContexts.modAt(index: 0) {
+    first.hitEventBitSet = own bits
+  }
 }
 
 # The sensor hits of continuous collision, onto their sensors.
 func reportSensorHits(world: mod PhysicsWorld) {
   loop var i: Int = 0, i < world.taskContexts.length, ++i {
-    let hits: List(SensorHit) = world.taskContexts.copyAtDefault(index: i).sensorHits
+    # Moved out of the worker (not copied) and given back below
+    var hits: List(SensorHit) = List.create(SensorHit, cap: 0)
+    if let taskContext: mod TaskContext => world.taskContexts.modAt(index: i) {
+      hits = own taskContext.sensorHits
+    }
     loop let hit: view SensorHit in hits {
       let sensorShape: PhysicsShape = world.shapes.copyAtDefault(index: hit.sensorId)
       let visitor: PhysicsShape = world.shapes.copyAtDefault(index: hit.visitorId)
       if let sensor: mod Sensor => world.sensors.modAt(index: sensorShape.sensorIndex) {
         sensor.hits.add(value: Visitor { shapeId: hit.visitorId, generation: visitor.generation })
       }
+    }
+    if let taskContext: mod TaskContext => world.taskContexts.modAt(index: i) {
+      taskContext.sensorHits = own hits
     }
   }
 }

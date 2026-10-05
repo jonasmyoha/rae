@@ -284,7 +284,9 @@ func addNonTouchingContact(world: mod PhysicsWorld, contactId: view Int) {
 func collide(world: mod PhysicsWorld) {
   # Gather the contacts of all the graph colours, then the awake
   # non-touching ones, into one list
-  let contactIndices: List(Int) = List.create(Int, cap: 64)
+  # The world's list, moved out for the step's collide and back
+  var contactIndices: List(Int) = own world.collideContactIds
+  contactIndices.clear()
   loop let color: view GraphColor in world.constraintGraph.colors {
     loop var j: Int = 0, j < color.convexContacts.length, ++j {
       contactIndices.add(value: color.convexContacts.copyAtDefault(index: j))
@@ -300,6 +302,7 @@ func collide(world: mod PhysicsWorld) {
   }
   let contactCount: Int = contactIndices.length
   if contactCount is 0 {
+    world.collideContactIds = own contactIndices
     ret
   }
 
@@ -331,15 +334,19 @@ func collide(world: mod PhysicsWorld) {
       workerIndex: 0
     )
   }
+  world.collideContactIds = own contactIndices
 
-  # Serially update the contact states: the workers' bits OR-ed together,
-  # in contact id order
-  var stateBits: Bitset = world.taskContexts.copyAtDefault(index: 0).contactStateBitSet
+  # Serially update the contact states: the workers' bits OR-ed into worker
+  # 0's (as Box3D does; moved out here, not copied, and given back at the
+  # end), in contact id order
+  var stateBits: Bitset = emptyBitset()
+  if let first: mod TaskContext => world.taskContexts.modAt(index: 0) {
+    stateBits = own first.contactStateBitSet
+  }
   loop var i: Int = 1, i < world.taskContexts.length, ++i {
-    inPlaceUnion(
-      setA: stateBits
-      setB: world.taskContexts.copyAtDefault(index: i).contactStateBitSet
-    )
+    if let other: view TaskContext => world.taskContexts.viewAt(index: i) {
+      inPlaceUnion(setA: stateBits, setB: other.contactStateBitSet)
+    }
   }
   let bitCount: Int = stateBits.blockCount * 64
   loop var contactId: Int = 0, contactId < bitCount, ++contactId {
@@ -387,6 +394,9 @@ func collide(world: mod PhysicsWorld) {
         meshContact: (contact.flags bitand simMeshContact) is not 0
       )
     }
+  }
+  if let first: mod TaskContext => world.taskContexts.modAt(index: 0) {
+    first.contactStateBitSet = own stateBits
   }
 }
 
