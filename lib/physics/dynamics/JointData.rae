@@ -292,7 +292,10 @@ func zeroWheelJointData() ret WheelJointData {
   }
 }
 
-# b3SphericalJoint
+# b3SphericalJoint. The body indices are Int32 as Box3D's ints are, so the
+# record is 260 bytes like C's: at 272 the joint grid's solve pass (about
+# 10 MB of joints and body states) no longer fit the 12 MB L2 reliably and ran
+# 1.1-2 ms per step slower depending on which pages the heap handed out.
 type SphericalJointData {
   linearImpulse: Vec3
   springImpulse: Vec3
@@ -308,8 +311,8 @@ type SphericalJointData {
   upperTwistAngle: Float
   coneAngle: Float
   targetRotation: Quat
-  indexA: Int
-  indexB: Int
+  indexA: Int32
+  indexB: Int32
   frameA: Transform
   frameB: Transform
   deltaCenter: Vec3
