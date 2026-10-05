@@ -246,12 +246,12 @@ through the fixes.
 
 | scene | C scalar | C SIMD | Rae | Rae / C scalar | Rae / C SIMD |
 |---|---|---|---|---|---|
-| large_pyramid | 11.39 | 7.96 | 13.09 | 1.15x | 1.64x |
-| many_pyramids | 21.93 | 15.59 | 27.71 | 1.26x | 1.78x |
-| joint_grid | 11.69 | 11.68 | 13.31 | 1.14x | 1.14x |
-| convex_pile | 13.74 | 11.49 | 21.22 | 1.54x | 1.85x |
+| large_pyramid | 11.36 | 7.95 | 13.03 | 1.15x | 1.64x |
+| many_pyramids | 21.87 | 15.55 | 27.70 | 1.27x | 1.78x |
+| joint_grid | 11.64 | 11.61 | 13.40 | 1.15x | 1.15x |
+| convex_pile | 13.77 | 11.53 | 19.69 | 1.43x | 1.71x |
 
-(P9a-3, 2026-10-05, load ~9: the ratios move with the machine's load.
+(P9a-6, 2026-10-05, load ~9: the ratios move with the machine's load.
 Before P9a-2/P9a-5 the joint grid was 30.12 ms (2.58x), before P9a-3 the
 convex pile 34.4 ms (2.50x). Both sides leave the first step untimed and
 divide by the steps - 1 they time, as upstream's app does; the P9a run
@@ -346,6 +346,25 @@ Where the rest goes, profiled against the C app:
   and its loops are scalar over AoS points (findHullSupportVertex 11%,
   testEdgePairs 10% of the convex pile). Contact and island creation still
   allocate (a contact's manifold list, island merges), as the pile settles.
+- **SoA hulls, P9a-6.** A Hull now carries Box3D's structure-of-arrays
+  copies (`soaPointsX/Y/Z`, padded with point 0, and `soaNormalsX/Y/Z`,
+  padded with zeros; `buildHullSoa`, called by every hull constructor,
+  compared by HullContent). The support search, `supportWide` (Box3D's
+  b3GetSupportWide with the index embedded in the mantissa) and the face
+  dots run four lanes at a time on lib/Float4 in Box3D's operation order and
+  tie-breaking; the generated loop is plain NEON (three loads, three
+  multiplies, two adds, a compare and two selects per four vertices). The
+  edge-pair phase reads one `EdgeOfA` record per candidate edge, and collide
+  reads the two bodies as a 72-byte `ContactBodyPose` instead of two 224-byte
+  BodySim copies. Convex pile 21.2 → 19.7 ms (1.43x). The support search now
+  costs what C's does; what is left is spread evenly: every part of the
+  narrow phase is ~1.4x C's (the narrow phase is ~68% of the step on both
+  sides), with 25% more instructions at a lower IPC (`/usr/bin/time -l`:
+  77.8G against 62.0G instructions per run, IPC 2.67 against 2.89). That
+  is per-access overhead rather than one loop: bounds-checked reads of
+  `List` elements where C indexes raw arrays, Int (8-byte) hull indices
+  where Box3D's half-edges are four bytes, and struct copies of edges and
+  planes in edgeCandidates and the face loops.
 
 These are queued as P9 follow-ups.
 

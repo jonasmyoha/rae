@@ -37,19 +37,51 @@ open physics/dynamics/Events
 open physics/dynamics/BroadPhasePairs
 open physics/dynamics/ParallelFor
 
-# b3ResolveContactBodySim: a contact body's sim from its encoded index.
-func resolveContactBodySim(
+# The parts of a contact body's sim the narrow phase reads: a BodySim copy
+# is 224 bytes, and collide took two per contact.
+type ContactBodyPose {
+  transform: Transform
+  center: Vec3
+  localCenter: Vec3
+  maxExtent: Vec3
+  flags: Int
+}
+
+func poseOfSim(sim: view BodySim) ret ContactBodyPose {
+  ret ContactBodyPose {
+    transform: sim.transform
+    center: sim.center
+    localCenter: sim.localCenter
+    maxExtent: sim.maxExtent
+    flags: sim.flags
+  }
+}
+
+# b3ResolveContactBodySim: a contact body's sim from its encoded index, read
+# through a view.
+func resolveContactBodyPose(
   world: view PhysicsWorld
   encodedIndex: view Int
   bodyId: view Int
-) ret BodySim {
+) ret ContactBodyPose {
+  var setIndex: Int = -1
+  var localIndex: Int = 0
   if encodedIndex >= 0 {
-    ret setBodySimAt(world: world, setIndex: awakeSet, localIndex: encodedIndex)
+    setIndex = awakeSet
+    localIndex = encodedIndex
+  } else if isStaticSimIndex(encodedBodySimIndex: encodedIndex) {
+    setIndex = staticSet
+    localIndex = -encodedIndex - 2
   }
-  if isStaticSimIndex(encodedBodySimIndex: encodedIndex) {
-    ret setBodySimAt(world: world, setIndex: staticSet, localIndex: -encodedIndex - 2)
+  if setIndex is -1 {
+    ret poseOfSim(sim: bodySimOf(world: world, body: bodyAt(world: world, bodyId: bodyId)))
   }
-  ret bodySimOf(world: world, body: bodyAt(world: world, bodyId: bodyId))
+  if let set: view SolverSet => world.solverSets.viewAt(index: setIndex) {
+    if let sim: view BodySim => set.bodySims.viewAt(index: localIndex) {
+      ret poseOfSim(sim: sim)
+    }
+  }
+  ret poseOfSim(sim: zeroBodySim())
 }
 
 # Contact recycling: when neither body moved further (with its extent) than
@@ -57,8 +89,8 @@ func resolveContactBodySim(
 # update the separations. True if recycled.
 func recycleContact(
   contact: mod Contact
-  simA: view BodySim
-  simB: view BodySim
+  simA: view ContactBodyPose
+  simB: view ContactBodyPose
   recycleTolerance: view Float
 ) ret Bool {
   let transformA: Transform = simA.transform
@@ -170,8 +202,16 @@ func collideTask(
       continue
     }
 
-    let simA: BodySim = resolveContactBodySim(world: world, encodedIndex: encodedA, bodyId: bodyIdA)
-    let simB: BodySim = resolveContactBodySim(world: world, encodedIndex: encodedB, bodyId: bodyIdB)
+    let simA: ContactBodyPose = resolveContactBodyPose(
+      world: world
+      encodedIndex: encodedA
+      bodyId: bodyIdA
+    )
+    let simB: ContactBodyPose = resolveContactBodyPose(
+      world: world
+      encodedIndex: encodedB
+      bodyId: bodyIdB
+    )
     let transformA: Transform = simA.transform
     let transformB: Transform = simB.transform
     let isFast: Bool = ((simA.flags bitor simB.flags) bitand isFastFlag) is not 0

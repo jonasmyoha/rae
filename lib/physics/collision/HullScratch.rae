@@ -6,18 +6,26 @@
 open Vec3
 open physics/collision/Manifold
 
-# The per-edge data of the edge-pair phase (testEdgePairs).
+# One candidate edge of A in the edge-pair phase: its two face normals, its
+# direction, its first vertex, the parallel tolerance scaled by its length,
+# and its half-edge index (Box3D's per-edge SoA arrays, as one record so the
+# inner loop reads it through one view).
+type EdgeOfA {
+  normal0: Vec3
+  normal1: Vec3
+  direction: Vec3
+  start: Vec3
+  tolerance: Float
+  edgeIndex: Int
+}
+
+# The working lists of the edge-pair phase (testEdgePairs).
 type EdgeScratch {
   # B's face normals and vertices in A's frame, negated
   normalsB: List(Vec3)
   pointsB: List(Vec3)
-  # Per candidate edge of A: its face normals, direction, first vertex and
-  # parallel tolerance
-  normals0: List(Vec3)
-  normals1: List(Vec3)
-  directions: List(Vec3)
-  starts: List(Vec3)
-  tolerances: List(Float)
+  # The candidate edges of A
+  edgesA: List(EdgeOfA)
 }
 
 type HullScratch {
@@ -42,11 +50,7 @@ func createHullScratch() ret HullScratch {
     edges: EdgeScratch {
       normalsB: List.create(Vec3, cap: 16)
       pointsB: List.create(Vec3, cap: 16)
-      normals0: List.create(Vec3, cap: 16)
-      normals1: List.create(Vec3, cap: 16)
-      directions: List.create(Vec3, cap: 16)
-      starts: List.create(Vec3, cap: 16)
-      tolerances: List.create(Float, cap: 16)
+      edgesA: List.create(EdgeOfA, cap: 16)
     }
     clipInput: List.create(ClipVertex, cap: maxClipPoints)
     clipOutput: List.create(ClipVertex, cap: maxClipPoints)

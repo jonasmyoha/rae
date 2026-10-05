@@ -229,6 +229,12 @@ func makeTransformedBoxHull(
     edges: List.create(HullHalfEdge, cap: 24)
     faces: List.create(HullFace, cap: 6)
     planes: List.create(Plane, cap: 6)
+    soaPointsX: List.create(Float, cap: 8)
+    soaPointsY: List.create(Float, cap: 8)
+    soaPointsZ: List.create(Float, cap: 8)
+    soaNormalsX: List.create(Float, cap: 8)
+    soaNormalsY: List.create(Float, cap: 8)
+    soaNormalsZ: List.create(Float, cap: 8)
   }
   addBoxTopology(hull: hull)
 
@@ -293,6 +299,7 @@ func makeTransformedBoxHull(
   hull.points.add(
     value: transformPoint(transform: transform, point: Vec3 { x: half.x, y: -half.y, z: -half.z })
   )
+  buildHullSoa(hull: hull)
   ret hull
 }
 
