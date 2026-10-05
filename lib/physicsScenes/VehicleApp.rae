@@ -48,6 +48,12 @@ open physicsScenes/VehicleUi
 # How far the camera reaches (the shadow cascades' extent)
 const vehicleReach: Float = 30.0
 
+# The chase camera: how far behind the car's centre and how high (an A7 is
+# 5 m long)
+const chaseDistance: Float = 10.0
+
+const chaseHeight: Float = 3.2
+
 type VehicleApp {
   meshes: PlaygroundMeshes
   batches: PlaygroundBatches
@@ -61,6 +67,8 @@ type VehicleApp {
   command: VehicleCommand
   # The chassis' pose as last seen (the autopilot steers by it)
   chassis: Transform3D
+  # The chase camera's eased heading (flat, unit)
+  cameraHeading: Vec3
   # The chassis' forward speed as last seen
   speed: Float
   autopilot: Bool
@@ -108,7 +116,7 @@ func createVehicleApp(
   var camera: Camera3d = defaultCamera3d()
   camera.position = course.cameraStart
   camera.target = Vec3 { x: 0.0, y: 0.0, z: 1.0 }
-  camera.farZ = 400.0
+  camera.farZ = 2500.0
   let app: VehicleApp = {
     meshes: meshes
     batches: createPlaygroundBatches(meshes: meshes)
@@ -121,6 +129,7 @@ func createVehicleApp(
     car: drivingCar(startPosition: Vec3 { x: 0.0, y: 0.0, z: 1.2 })
     command: VehicleCommand { throttle: 0.0, steer: 0.0 }
     chassis: createTransform3D()
+    cameraHeading: Vec3 { x: 1.0, y: 0.0, z: 0.0 }
     speed: 0.0
     autopilot: Sys.getEnv(name: "RAE_VEHICLE_AUTOPILOT").length() > 0
     pilot: createAutopilot()
@@ -164,9 +173,10 @@ func createAutopilot() ret Autopilot {
 # The autopilot's command at `seconds` into a run, for a chassis at `pose`
 # going at `speed` (forward, m/s), `deltaTime` after the last one:
 # - full throttle straight over the ramp ahead for three seconds (the jump);
-# - then a gentle weave at 60% throttle - Box3D's sample car is light and its
-#   upright spring soft, and a harder weave rolls it - turning back towards
-#   the middle of the course whenever it is more than 50 m out;
+# - then cruising at 40% throttle (about 100 km/h) in a gentle weave, turning
+#   back towards the middle of the course whenever it is more than 200 m out
+#   (the course is 1 km across; the steering's speed limit makes the turn a
+#   wide one);
 # - stuck (barely moving for 1.5 s, against a ramp's side or a block), it
 #   backs out turning for 2 s.
 # Deterministic for a deterministic world: the determinism run and the memory
@@ -198,20 +208,20 @@ func autopilotCommand(
   let out: Float = Math.sqrt(
     x: pose.position.x * pose.position.x + pose.position.y * pose.position.y
   )
-  if out > 50.0 {
+  if out > 200.0 {
     # Turn left or right, whichever faces the middle sooner
     let forward: Vec3 = vehicleForward(chassisRotation: pose.rotation)
     let inward: Vec3 = { x: -pose.position.x, y: -pose.position.y, z: 0.0 }
     let turn: Float = forward.x * inward.y - forward.y * inward.x
     let facing: Float = forward.x * inward.x + forward.y * inward.y
     if facing < 0.9 * out {
-      steer = 0.5
+      steer = 1.0
       if turn < 0.0 {
-        steer = -0.5
+        steer = -1.0
       }
     }
   }
-  ret VehicleCommand { throttle: 0.6, steer: steer }
+  ret VehicleCommand { throttle: 0.4, steer: steer }
 }
 
 func beginVehicleFrame(app: mod VehicleApp, uiWorld: mod UiWorld, uiSystems: mod UiSystems) {
@@ -289,10 +299,11 @@ func readVehicleControls(app: mod VehicleApp) ret Bool {
   ret respawn
 }
 
-# The camera behind the car, above it and a little to its right, looking just
-# over the chassis,
-# eased so bumps do not shake the view. A camera still moving keeps the loop
-# rendering.
+# The camera centred behind the car and above it, looking at it. Only the
+# HEADING is eased (so bumps and steering do not shake the view); the
+# distance stays fixed, so the car stays centred at any speed - easing the
+# position instead let the camera fall further behind the faster the car went.
+# A camera still turning keeps the loop rendering.
 func updateChaseCamera(app: mod VehicleApp, chassis: view Transform3D) {
   app.chassis = chassis
   if app.debugLog {
@@ -305,27 +316,26 @@ func updateChaseCamera(app: mod VehicleApp, chassis: view Transform3D) {
   var forward: Vec3 = vehicleForward(chassisRotation: chassis.rotation)
   forward = Vec3 { x: forward.x, y: forward.y, z: 0.0 }
   if vlen(a: forward) < 0.1 {
-    forward = Vec3 { x: 1.0, y: 0.0, z: 0.0 }
+    forward = app.cameraHeading
   }
   forward = vnorm(a: forward)
-  # Behind and a little to the right: a three-quarter view shows the wheels
-  let side: Vec3 = { x: forward.y, y: -forward.x, z: 0.0 }
-  let eye: Vec3 = vadd(
-    a: vadd(a: vsub(a: chassis.position, b: vscale(a: forward, s: 8.5)), b: vscale(a: side, s: 3.0))
-    b: Vec3 { x: 0.0, y: 0.0, z: 3.2 }
-  )
-  let target: Vec3 = vadd(a: chassis.position, b: Vec3 { x: 0.0, y: 0.0, z: 0.8 })
-  var blend: Float = 1.0 - Math.exp(x: -5.0 * app.deltaTime)
+  var blend: Float = 1.0 - Math.exp(x: -4.0 * app.deltaTime)
   if app.respawned {
     blend = 1.0
   }
-  let previous: Vec3 = app.camera.position
-  app.camera.position = vadd(a: previous, b: vscale(a: vsub(a: eye, b: previous), s: blend))
-  app.camera.target = vadd(
-    a: app.camera.target
-    b: vscale(a: vsub(a: target, b: app.camera.target), s: blend)
+  let previous: Vec3 = app.cameraHeading
+  app.cameraHeading = vnorm(
+    a: vadd(a: previous, b: vscale(a: vsub(a: forward, b: previous), s: blend))
   )
-  app.cameraMoved = vlen(a: vsub(a: app.camera.position, b: previous)) > 0.0005
+  let eye: Vec3 = vadd(
+    a: vsub(a: chassis.position, b: vscale(a: app.cameraHeading, s: chaseDistance))
+    b: Vec3 { x: 0.0, y: 0.0, z: chaseHeight }
+  )
+  let target: Vec3 = vadd(a: chassis.position, b: Vec3 { x: 0.0, y: 0.0, z: 1.0 })
+  let moved: Float = vlen(a: vsub(a: eye, b: app.camera.position))
+  app.camera.position = eye
+  app.camera.target = target
+  app.cameraMoved = moved > 0.0005 or vlen(a: vsub(a: app.cameraHeading, b: previous)) > 0.00001
 }
 
 # Record a step's time (`startedNs` from nowNs, `steps` fixed steps taken).

@@ -1,20 +1,28 @@
 # The vehicle examples' car, course and driving math (VehicleTypes;
-# docs/physics-design.md §5.7). The car is Box3D's Driving sample
-# (samples/sample_joint.cpp at the pin): a 4 x 1 x 2 m box chassis of density
-# 0.5, four 0.4 m sphere wheels (density 2, friction 3) on wheel joints with a
-# 4 Hz suspension of +-0.2 m, 10 Hz steering of +-45 degrees on the leading
-# axle, 30 rad/s spin motors, and a 0.5 Hz parallel joint keeping it upright.
-# Three changes from the sample: every wheel has a spin motor and the drive
-# torque is SPLIT between the axles (`rearDriveShare`, asked for by the plan);
-# the wheels sit at +-1.2 m, just outside the 2 m wide chassis, instead of
-# +-0.8 m underneath it, so they show; and forward is the chassis' local +x -
-# the way the sample's W key actually drives it (the sample's own speed
-# readout projects on -x, so it shows a negative speed going forward).
+# docs/physics-design.md §5.7).
 #
-# The course is a height field: a flat pad around the start with two ramps, a
-# wall of blocks and two groups of crates on it - the boxes light enough for
-# the car to scatter - then rolling hills out to 128 m. Every
-# number is fixed, so both tracks build the same course.
+# THE CAR is built the way Box3D's Driving sample builds one (samples/
+# sample_joint.cpp at the pin): a box chassis on four sphere wheels, each on a
+# wheel joint with suspension, steering on the front axle and a spin motor,
+# and a parallel joint keeping the body upright. Its SIZE, MASS AND SPEED are
+# an Audi A7 Sportback 55 TFSI quattro (C8), from Audi's published figures:
+#   body 4,969 x 1,908 x 1,422 mm, wheelbase 2,926 mm, track 1,651 mm front
+#   and 1,637 mm rear; 225/55 R18 tyres (704.7 mm across, 225 mm wide);
+#   1,815 kg; 250 kW; 0-100 km/h in 5.3 s; 250 km/h governed;
+#   a 12.4 m turning circle (about 28 degrees of front-wheel lock).
+# The drive: the spin motors' torque at the wheels is what 0-100 in 5.3 s
+# takes, capped by the engine's 250 kW as the car speeds up, split 40/60
+# front/rear (quattro); a governor at 250 km/h; coasting when the throttle is
+# released, braking when it is reversed at speed. The steering turns less
+# the faster the car goes (at most 0.8 g sideways), as a real car's does, and
+# the tyres grip like tyres (friction 1.1 rather than the sample's 3).
+# Forward is the chassis' local +x - the way the sample's W key actually
+# drives it (the sample's own speed readout projects on -x).
+#
+# THE COURSE is a kilometre-wide height field, so 250 km/h lasts more than a
+# few seconds: a flat pad around the start with two ramps, a wall of blocks
+# and two groups of crates on it, then rolling hills. Every number is fixed, so
+# both tracks build the same course.
 import Math
 open Vec3
 open Quat
@@ -41,47 +49,172 @@ func quarterTurnZ() ret Quat {
   ret Quat { x: 0.0, y: 0.0, z: halfRoot, w: halfRoot }
 }
 
-func wheelAt(x: view Float, z: view Float, front: view Bool) ret VehicleWheel {
+# The Audi A7's measurements (metres, kilograms, seconds, watts)
+const a7Length: Float = 4.969
+
+# Over the wheel arches (the body box is narrower; see drivingCar)
+const a7Width: Float = 1.908
+
+const a7Height: Float = 1.422
+
+const a7Wheelbase: Float = 2.926
+
+const a7FrontTrack: Float = 1.651
+
+const a7RearTrack: Float = 1.637
+
+# 225/55 R18: 18 in of rim plus twice the 55% sidewall of a 225 mm tyre
+const a7TyreRadius: Float = 0.35235
+
+const a7TyreWidth: Float = 0.225
+
+const a7Mass: Float = 1815.0
+
+const a7EnginePower: Float = 250000.0
+
+# 250 km/h
+const a7TopSpeed: Float = 69.444
+
+# 100 km/h in 5.3 s
+const a7Acceleration: Float = 5.241
+
+# The drive is CALIBRATED, not the nominal figures plugged in: Box3D's sphere
+# tyre (one Coulomb contact on a wheel that sinks a little at speed) puts more
+# of a motor's torque on the road than a real tyre and drivetrain do - with
+# 250 kW and the 5.3 s launch torque the simulated car did 0-100 in 4.3 s and
+# 0-200 in 10.3 s. These scale the torque and power so the simulated car
+# matches the published times: 0-100 km/h 5.3 s (Audi), 0-200 km/h ~20.1 s
+# (automobile-catalog's estimate for the 55 TFSI quattro).
+const launchTorqueScale: Float = 0.82
+
+const wheelPowerScale: Float = 0.46
+
+# Drag coefficient 0.27, frontal area 2.29 m^2 (Audi's technical data)
+const a7DragArea: Float = 0.27 * 2.29
+
+# A road tyre's rolling resistance (of the weight)
+const a7RollingResistance: Float = 0.012
+
+# Sea-level air, kg/m^3
+const airDensity: Float = 1.225
+
+# How far the wheels' rim speed may run ahead of the car: a fraction of its
+# speed plus a little (m/s) - enough slip for the tyres to pull, too little to
+# spin them up
+const tractionSlipRatio: Float = 0.08
+
+const tractionSlip: Float = 1.5
+
+# The vehicle worlds step at 120 Hz in 4 sub-steps. Box3D computes a contact
+# once per step and carries it through the sub-steps, so a wheel turning fast
+# within one step carries its contact point away and sinks: at 60 Hz a tyre at
+# motorway speed turns ~3 rad a step and sank 8-10 cm (rolling 18% too small);
+# at 120 Hz it sinks ~3 cm.
+const vehicleStepRate: Float = 120.0
+
+const vehicleSubSteps: Int = 4
+
+# The body box: from just above the wheel centres (so the wheels show below
+# it, as in a real car's arches) to the roof
+const bodyBottom: Float = 0.40
+
+# A corner's unsprung mass - wheel, tyre, brake and hub: about 40 kg
+const a7WheelMass: Float = 40.0
+
+# The contacts' stiffness (Box3D's contactHertz; its default is 30, and 60 is
+# the most a 240 Hz sub-step allows). A soft contact sinks the light wheel
+# under the heavy car - 4 cm at 30 Hz, so the tyres rolled 12% too small and
+# the motors fought the road - so the vehicle worlds use the stiffest.
+const vehicleContactHertz: Float = 60.0
+
+func wheelAt(
+  x: view Float
+  y: view Float
+  z: view Float
+  front: view Bool
+) ret VehicleWheel {
   ret VehicleWheel {
-    chassisPoint: Vec3 { x: x, y: -0.5, z: z }
+    chassisPoint: Vec3 { x: x, y: y, z: z }
     steers: front
     drives: true
     front: front
   }
 }
 
-# Box3D's Driving car, chassis centre at `startPosition`.
+# The Audi A7, chassis centre at `startPosition`.
 func drivingCar(startPosition: view Vec3) ret VehicleDescription {
+  let bodyHalfHeight: Float = 0.5 * (a7Height - bodyBottom)
+  let bodyCentre: Float = bodyBottom + bodyHalfHeight
+  # The wheel centres sit a tyre radius above the ground
+  let wheelY: Float = a7TyreRadius - bodyCentre
+  let halfBase: Float = 0.5 * a7Wheelbase
   let wheels: List(VehicleWheel) = {
-    wheelAt(x: 1.5, z: 1.2, front: true)
-    wheelAt(x: 1.5, z: -1.2, front: true)
-    wheelAt(x: -1.5, z: 1.2, front: false)
-    wheelAt(x: -1.5, z: -1.2, front: false)
+    wheelAt(
+      x: halfBase
+      y: wheelY
+      z: 0.5 * a7FrontTrack
+      front: true
+    )
+    wheelAt(
+      x: halfBase
+      y: wheelY
+      z: -0.5 * a7FrontTrack
+      front: true
+    )
+    wheelAt(
+      x: -halfBase
+      y: wheelY
+      z: 0.5 * a7RearTrack
+      front: false
+    )
+    wheelAt(
+      x: -halfBase
+      y: wheelY
+      z: -0.5 * a7RearTrack
+      front: false
+    )
   }
+  # The body box is the width BETWEEN the tyres (the cabin's), not the A7's
+  # 1,908 mm: that width is the wheel arches, which cover the tyres, and a box
+  # that wide hides the wheels completely. The wheels keep the real track and
+  # size, and the mass is the A7's whatever the box's size.
+  let bodyWidth: Float = a7RearTrack - a7TyreWidth - 0.02
+  let bodyVolume: Float = a7Length * (a7Height - bodyBottom) * bodyWidth
+  let wheelVolume: Float = 4.0 / 3.0 * Math.pi * a7TyreRadius * a7TyreRadius * a7TyreRadius
   ret VehicleDescription {
-    chassisHalfExtents: Vec3 { x: 2.0, y: 0.5, z: 1.0 }
-    chassisDensity: 0.5
-    wheelRadius: 0.4
-    wheelHalfWidth: 0.18
-    wheelDensity: 2.0
-    wheelFriction: 3.0
+    chassisHalfExtents: Vec3 { x: 0.5 * a7Length, y: bodyHalfHeight, z: 0.5 * bodyWidth }
+    chassisDensity: (a7Mass - 4.0 * a7WheelMass) / bodyVolume
+    wheelRadius: a7TyreRadius
+    wheelHalfWidth: 0.5 * a7TyreWidth
+    wheelDensity: a7WheelMass / wheelVolume
+    wheelFriction: 1.1
     wheels: wheels
     chassisFrameRotation: quarterTurnZ()
     wheelFrameRotation: quarterTurnBackX()
     wheelRotation: quarterTurnX()
-    suspensionHertz: 4.0
+    # Box3D's spring frequency is relative to the joint's effective mass (the
+    # 40 kg wheel's), not the 430 kg the corner carries: 6 Hz is a ~55 kN/m
+    # spring, a firm car's, sagging ~8 cm
+    suspensionHertz: 6.0
     suspensionDampingRatio: 0.7
-    lowerSuspensionLimit: -0.2
-    upperSuspensionLimit: 0.2
+    lowerSuspensionLimit: -0.12
+    upperSuspensionLimit: 0.12
     steeringHertz: 10.0
     steeringDampingRatio: 0.7
-    maxSteeringTorque: 5.0
-    lowerSteeringLimit: -0.25 * Math.pi
-    upperSteeringLimit: 0.25 * Math.pi
-    maxSteeringAngle: 0.25 * Math.pi
-    spinSpeed: 30.0
-    totalSpinTorque: 10.0
-    rearDriveShare: 0.7
+    maxSteeringTorque: 1500.0
+    lowerSteeringLimit: -0.55
+    upperSteeringLimit: 0.55
+    maxSteeringAngle: 0.5
+    steeringLateralAcceleration: 8.0
+    wheelbase: a7Wheelbase
+    topSpeed: a7TopSpeed
+    peakDriveTorque: launchTorqueScale * a7Mass * a7Acceleration * a7TyreRadius
+    enginePower: wheelPowerScale * a7EnginePower
+    reverseShare: 0.15
+    rearDriveShare: 0.6
+    dragArea: a7DragArea
+    rollingResistance: a7RollingResistance
+    mass: a7Mass
     uprightFrameRotation: quarterTurnBackX()
     uprightHertz: 0.5
     uprightDampingRatio: 1.0
@@ -112,36 +245,107 @@ func uprightVenueRotation(car: view VehicleDescription) ret Quat {
   ret Quat.qmul(a: car.localToWorld, b: car.uprightFrameRotation)
 }
 
-# Each wheel's targets for `command`, in `car.wheels` order: the leading
-# axle steers, and every wheel's spin motor runs at the throttle's speed with
-# its axle's share of the drive torque.
+# Each wheel's targets for `command` with the car going `speed` (m/s,
+# forward), in `car.wheels` order:
+# - the front axle steers, by less the faster the car goes (the angle that
+#   asks for `steeringLateralAcceleration` sideways, never more than the full
+#   lock);
+# - throttle drives every wheel towards the speed it asks for (full throttle:
+#   the top speed) with its axle's share of the drive torque, which the
+#   engine's power caps as speed rises, under traction control;
+# - throttle reversed while still going forward brakes (the motors hold the
+#   wheels); stopped, it reverses at a fraction of the top speed;
+# - no throttle coasts, with a little engine braking.
 func wheelTargets(
   car: view VehicleDescription
   command: view VehicleCommand
+  speed: view Float
 ) ret List(VehicleWheelTarget) {
   let targets: List(VehicleWheelTarget) = List.create(VehicleWheelTarget, cap: car.wheels.length)
+  let pace: Float = Math.max(a: Math.abs(value: speed), b: 1.0)
+  var lock: Float = car.wheelbase * car.steeringLateralAcceleration / (pace * pace)
+  if lock > car.maxSteeringAngle {
+    lock = car.maxSteeringAngle
+  }
+  # The torque the engine can put down at this speed (power = force x speed)
+  var driveTorque: Float = car.enginePower * car.wheelRadius / pace
+  if driveTorque > car.peakDriveTorque {
+    driveTorque = car.peakDriveTorque
+  }
+  var spinTarget: Float = 0.0
+  var totalTorque: Float = 0.03 * car.peakDriveTorque
+  var split: Bool = true
+  # Traction control: the wheels' rim speed is held at most `tractionSlip`
+  # ahead of the car, so the motors pull the car instead of spinning the tyres
+  # (a velocity motor with the launch torque would otherwise spin them up to
+  # the top speed at once and the car would slide)
+  if command.throttle > 0.0 {
+    let rimSpeed: Float = Math.max(a: speed, b: 0.0) * (1.0 + tractionSlipRatio) + tractionSlip
+    spinTarget = -rimSpeed / car.wheelRadius
+    # The governor: the drive fades out over the 2 m/s around the speed the
+    # throttle asks for (full throttle: the top speed)
+    var fade: Float = (car.topSpeed * command.throttle + 1.0 - speed) / 2.0
+    if fade > 1.0 {
+      fade = 1.0
+    }
+    if fade < 0.0 {
+      fade = 0.0
+    }
+    totalTorque = driveTorque * fade
+  } else if command.throttle < 0.0 and speed > 1.0 {
+    totalTorque = 1.5 * car.peakDriveTorque * -command.throttle
+    split = false
+  } else if command.throttle < 0.0 {
+    let rimSpeed: Float = Math.min(
+      a: car.topSpeed * car.reverseShare * -command.throttle
+      b: Math.max(a: -speed, b: 0.0) * (1.0 + tractionSlipRatio) + tractionSlip
+    )
+    spinTarget = rimSpeed / car.wheelRadius
+    totalTorque = driveTorque
+  }
   loop let wheel: view VehicleWheel in car.wheels {
     var steering: Float = 0.0
     if wheel.steers {
-      steering = car.maxSteeringAngle * command.steer
+      steering = lock * command.steer
     }
-    var share: Float = car.rearDriveShare
-    if wheel.front {
-      share = 1.0 - car.rearDriveShare
+    var share: Float = 0.5
+    if split {
+      share = car.rearDriveShare
+      if wheel.front {
+        share = 1.0 - car.rearDriveShare
+      }
     }
     var torque: Float = 0.0
     if wheel.drives {
-      torque = 0.5 * car.totalSpinTorque * share
+      torque = 0.5 * totalTorque * share
     }
     targets.add(
       value: VehicleWheelTarget {
         steeringAngle: steering
-        spinSpeed: -car.spinSpeed * command.throttle
+        spinSpeed: spinTarget
         maxSpinTorque: torque
       }
     )
   }
   ret targets
+}
+
+# The impulse that air and rolling resistance take from a car moving at
+# `velocity` over `frameTime` seconds: drag 1/2 rho Cd A v^2 against the
+# motion, plus the tyres' rolling resistance. An impulse, not a force, so it
+# is the same however many fixed steps the frame takes.
+func resistanceImpulse(
+  car: view VehicleDescription
+  velocity: view Vec3
+  frameTime: view Float
+) ret Vec3 {
+  let speed: Float = vlen(a: velocity)
+  if speed < 0.1 {
+    ret Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+  }
+  let drag: Float = 0.5 * airDensity * car.dragArea * speed * speed
+  let rolling: Float = car.rollingResistance * car.mass * 9.81
+  ret vscale(a: velocity, s: -(drag + rolling) / speed * frameTime)
 }
 
 # The chassis' forward direction in the world (its local +x).
@@ -163,10 +367,12 @@ func headingDegrees(chassisRotation: view Quat) ret Float {
 # ----- the course -------------------------------------------------------
 
 # The terrain's height at world (x, y): flat within 18 m of the start, rolling
-# hills of up to ~2.4 m beyond 48 m, blended between.
+# The terrain's height at world (x, y): flat within 40 m of the start, long
+# rolling hills of up to ~5 m beyond 160 m (gentle enough to drive at speed),
+# blended between.
 func courseHeight(x: view Float, y: view Float) ret Float {
   let radius: Float = Math.sqrt(x: x * x + y * y)
-  var blend: Float = (radius - 18.0) / 30.0
+  var blend: Float = (radius - 40.0) / 120.0
   if blend < 0.0 {
     blend = 0.0
   }
@@ -174,8 +380,8 @@ func courseHeight(x: view Float, y: view Float) ret Float {
     blend = 1.0
   }
   blend = blend * blend * (3.0 - 2.0 * blend)
-  let hills: Float = 1.6 * Math.sin(x: x * 0.045) * Math.cos(x: y * 0.037) + 0.8 * Math.sin(
-    x: (x + y) * 0.09
+  let hills: Float = 3.5 * Math.sin(x: x * 0.012) * Math.cos(x: y * 0.009) + 1.5 * Math.sin(
+    x: (x + y) * 0.024
   )
   ret blend * hills
 }
@@ -186,7 +392,7 @@ func staticBox(halfExtents: view Vec3, position: view Vec3, rotation: view Quat)
   ret body
 }
 
-# A ramp of `length` x `width` rising towards `heading` (degrees from +x) by
+# A ramp of `length` x 6 m rising towards `heading` (degrees from +x) by
 # `slopeDegrees`, its low edge at `start` on the flat pad.
 func ramp(
   start: view Vec3
@@ -216,10 +422,10 @@ func ramp(
   )
 }
 
-# The density of the loose boxes. The car is Box3D's sample, about 6 kg (a
-# density-0.5 chassis); a default-density (1000) 1 m crate would be a tonne it
-# could not move, so the boxes are light enough to send flying.
-const looseBoxDensity: Float = 0.4
+# The density of the loose boxes: a wooden crate's (a 1 m crate is 60 kg), so
+# the 1.8 t car sends them flying; dynamicBody's default (1000, a tonne a
+# crate) would stop it dead.
+const looseBoxDensity: Float = 60.0
 
 func looseBox(halfExtents: view Vec3, position: view Vec3) ret SceneBody {
   var body: SceneBody = dynamicBody(shape: boxShape(halfExtents: halfExtents), position: position)
@@ -235,11 +441,11 @@ func courseCrates() ret List(SceneBody) {
   var stack: List(SceneBody) = List.create(SceneBody, cap: 6)
   loop var level: Int = 0, level < 3, ++level {
     loop var i: Int = 0, i < 3 - level, ++i {
-      let y: Float = 10.0 + (i as Float) * 1.05 + 0.525 * (level as Float)
+      let y: Float = 12.0 + (i as Float) * 1.05 + 0.525 * (level as Float)
       stack.add(
         value: looseBox(
           halfExtents: crate
-          position: Vec3 { x: 8.0, y: y, z: 0.5 + 1.0 * (level as Float) }
+          position: Vec3 { x: 14.0, y: y, z: 0.5 + 1.0 * (level as Float) }
         )
       )
     }
@@ -250,7 +456,7 @@ func courseCrates() ret List(SceneBody) {
     row.add(
       value: looseBox(
         halfExtents: crate
-        position: Vec3 { x: -4.0 + 2.0 * (i as Float), y: -9.0, z: 0.5 }
+        position: Vec3 { x: -2.0 + 2.5 * (i as Float), y: -14.0, z: 0.5 }
       )
     )
   }
@@ -260,7 +466,7 @@ func courseCrates() ret List(SceneBody) {
     wall.add(
       value: looseBox(
         halfExtents: Vec3 { x: 0.4, y: 0.95, z: 0.6 }
-        position: Vec3 { x: -12.0, y: -5.0 + 2.0 * (i as Float), z: 0.6 }
+        position: Vec3 { x: -24.0, y: -5.0 + 2.0 * (i as Float), z: 0.6 }
       )
     )
   }
@@ -278,12 +484,12 @@ func courseCrates() ret List(SceneBody) {
   ret crates
 }
 
-# The course: a 65 x 65 grid of 4 m cells centred on the start, two static
-# ramps (one ahead, one off to the left), and the loose boxes.
+# The course: a 129 x 129 grid of 8 m cells (1 km) centred on the start, two
+# static ramps (one ahead, one off to the left), and the loose boxes.
 func drivingCourse() ret VehicleCourse {
-  let countX: Int = 65
-  let countZ: Int = 65
-  let cell: Float = 4.0
+  let countX: Int = 129
+  let countZ: Int = 129
+  let cell: Float = 8.0
   let half: Float = 0.5 * cell * ((countX - 1) as Float)
   # Local column i is world x = -half + i * cell; local row j is world
   # y = half - j * cell (the quarter turn takes local z to world -y)
@@ -297,16 +503,16 @@ func drivingCourse() ret VehicleCourse {
   }
   var fixtures: List(SceneBody) = {
     ramp(
-      start: Vec3 { x: 9.0, y: 0.0, z: 0.0 }
+      start: Vec3 { x: 18.0, y: 0.0, z: 0.0 }
       heading: 0.0
-      slopeDegrees: 14.0
-      length: 8.0
+      slopeDegrees: 12.0
+      length: 12.0
     )
     ramp(
-      start: Vec3 { x: -6.0, y: 9.0, z: 0.0 }
+      start: Vec3 { x: -14.0, y: 16.0, z: 0.0 }
       heading: 90.0
       slopeDegrees: 10.0
-      length: 10.0
+      length: 12.0
     )
   }
   # The two ramps: a soft green and a soft blue
@@ -326,7 +532,7 @@ func drivingCourse() ret VehicleCourse {
     terrainFriction: 0.8
     fixtures: fixtures
     crates: courseCrates()
-    cameraStart: Vec3 { x: -10.0, y: 0.0, z: 4.0 }
+    cameraStart: Vec3 { x: -9.0, y: 0.0, z: 3.0 }
   }
 }
 

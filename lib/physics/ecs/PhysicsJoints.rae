@@ -16,6 +16,7 @@ open physics/dynamics/JointDefs
 open physics/dynamics/WorldJoints
 open physics/dynamics/WorldBodyChanges
 open physics/dynamics/WheelJointControl
+open physics/dynamics/WorldBodies
 open physics/ecs/Physics
 open physics/ecs/PhysicsComponents
 open physics/ecs/PhysicsSpawn
@@ -186,6 +187,25 @@ func setWheelMaxSpinTorque(physics: mod Physics, jointId: view JointId, torque: 
 # The wheel's spin rate relative to its chassis, in radians per second.
 func wheelSpinSpeed(physics: view Physics, jointId: view JointId) ret Float {
   ret wheelJointGetSpinSpeed(world: physics.world, jointId: jointId)
+}
+
+# Push the entity's body by `impulse` (N s) at its centre of mass (a
+# vehicle's air and rolling resistance).
+func applyEntityImpulse(
+  physics: mod Physics
+  rigidBodies: view ComponentTable(RigidBody)
+  entityId: view EntityId
+  impulse: view Vec3
+) {
+  let bodyId: BodyId = entityBodyId(rigidBodies: rigidBodies, entityId: entityId)
+  if bodyId.index1 is not 0 {
+    applyBodyLinearImpulseToCenter(
+      world: physics.world
+      bodyId: bodyId
+      impulse: impulse
+      wake: false
+    )
+  }
 }
 
 # Wake the entity's body (a motor's new target alone does not wake a

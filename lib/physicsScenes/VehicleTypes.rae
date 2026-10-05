@@ -24,7 +24,7 @@ type VehicleWheel {
 }
 
 # The car: a box chassis, four sphere wheels on wheel joints (suspension,
-# steering, spin motor), the drive (motor speed, total torque and its split
+# steering, spin motor), the drive (top speed, torque, power and its split
 # between the axles), and the keep-upright parallel joint.
 type VehicleDescription {
   chassisHalfExtents: Vec3
@@ -51,11 +51,27 @@ type VehicleDescription {
   lowerSteeringLimit: Float
   upperSteeringLimit: Float
   maxSteeringAngle: Float
-  # The spin motors' top speed (radians per second) and total torque, split
-  # `rearDriveShare` to the rear axle and the rest to the front
-  spinSpeed: Float
-  totalSpinTorque: Float
+  # The steering's speed limit: the most sideways acceleration (m/s^2) a turn
+  # may ask for, so the wheels turn less the faster the car goes, as a real
+  # car's do (45 degrees at walking pace, a few degrees at motorway speed)
+  steeringLateralAcceleration: Float
+  # Distance between the axles (m), for that limit
+  wheelbase: Float
+  # The drive: the governed top speed (m/s), the peak torque at the wheels
+  # (N m, all four together), the engine's power (W) that caps it as the car
+  # speeds up, and how much of the top speed reverse allows. The torque is
+  # split `rearDriveShare` to the rear axle and the rest to the front.
+  topSpeed: Float
+  peakDriveTorque: Float
+  enginePower: Float
+  reverseShare: Float
   rearDriveShare: Float
+  # What slows it: air (drag coefficient x frontal area, m^2) and the tyres'
+  # rolling resistance (a fraction of the weight). Box3D has no air, so
+  # without these 250 kW would accelerate far too hard at speed.
+  dragArea: Float
+  rollingResistance: Float
+  mass: Float
   # Keep upright: the chassis frame held parallel to the venue's
   uprightFrameRotation: Quat
   uprightHertz: Float
