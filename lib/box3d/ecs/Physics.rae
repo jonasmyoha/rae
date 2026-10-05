@@ -1,0 +1,178 @@
+# The physics resource of an ECS world on upstream Box3D's C library (the
+# C-library physics track, docs/physics-two-implementations.md §2). The same
+# surface as the port's physics/ecs/Physics: the fixed-step clock, the maps
+# from bodies and shapes back to entities, the event queues, the static venue
+# body. Differences forced by the C library:
+# - `world` is the C world's handle (b3WorldId), not a world value; the
+#   C world lives until destroyPhysics, which an app calls when it is done
+#   (the port's world is freed with the resource, and its destroyPhysics does
+#   nothing).
+# - The venue's meshes are C allocations, kept in `meshes` and freed by
+#   destroyPhysics.
+# - `lengthUnitsPerMeter` is kept here (the C world does not report it).
+import Parallel
+open Vec3
+open ecs/Entity
+open ecs/Event
+open box3d/Box3d
+open box3d/Box3dGlue
+open box3d/Box3dTypes
+open box3d/ecs/PhysicsTypes
+
+type PhysicsContactEvent {
+  entityIdA: EntityId
+  entityIdB: EntityId
+  shapeIdA: ShapeId
+  shapeIdB: ShapeId
+}
+
+type PhysicsHitEvent {
+  entityIdA: EntityId
+  entityIdB: EntityId
+  shapeIdA: ShapeId
+  shapeIdB: ShapeId
+  # The mid-point between the surfaces at the start of the step
+  point: Vec3
+  # From shape A to shape B
+  normal: Vec3
+  approachSpeed: Float
+  userMaterialIdA: UInt64
+  userMaterialIdB: UInt64
+}
+
+type PhysicsSensorEvent {
+  sensorEntityId: EntityId
+  visitorEntityId: EntityId
+  sensorShapeId: ShapeId
+  visitorShapeId: ShapeId
+}
+
+type Physics {
+  world: b3WorldId
+  lengthUnitsPerMeter: Float
+  # The fixed step and its sub-steps; the accumulator holds the frame time
+  # not yet stepped, capped at maxStepsPerFrame fixed steps
+  fixedStep: Float
+  subSteps: Int
+  accumulator: Float
+  maxStepsPerFrame: Int
+  stepCount: Int
+  # The entity of each body and shape, by index (noEntity when free or for
+  # the venue): Box3D's body and shape user data
+  bodyEntities: List(EntityId)
+  shapeEntities: List(EntityId)
+  contactBegan: EventQueue(PhysicsContactEvent)
+  contactEnded: EventQueue(PhysicsContactEvent)
+  hits: EventQueue(PhysicsHitEvent)
+  sensorBegan: EventQueue(PhysicsSensorEvent)
+  sensorEnded: EventQueue(PhysicsSensorEvent)
+  # The one static body the venue's shapes are on (created on first use)
+  venueBodyId: BodyId
+  venueShapeIds: List(ShapeId)
+  # The venue's meshes (the glue's handles), owned here
+  meshes: List(UInt64)
+}
+
+# The world definition of an ECS world: Rae's Z-up gravity
+# (docs/coordinate-system.md), the worker pool's worker count, continuous
+# collision on.
+func defaultPhysicsWorldDef() ret WorldDef {
+  var def: WorldDef = defaultWorldDef(lengthUnitsPerMeter: 1.0)
+  def.gravity = Vec3 { x: 0.0, y: 0.0, z: -9.81 }
+  def.workerCount = Parallel.workerCount()
+  def.enableContinuous = true
+  ret def
+}
+
+# A physics resource over a new world of `def`, stepping `fixedStep`
+# seconds in `subSteps` sub-steps, at most 4 fixed steps per frame.
+func createPhysics(def: view WorldDef, fixedStep: view Float, subSteps: view Int) ret Physics {
+  unsafe {
+    ret Physics {
+      world: b3CreateWorld(def: toB3WorldDef(def: def))
+      lengthUnitsPerMeter: def.lengthUnitsPerMeter
+      fixedStep: fixedStep
+      subSteps: subSteps
+      accumulator: 0.0
+      maxStepsPerFrame: 4
+      stepCount: 0
+      bodyEntities: List.create(EntityId, cap: 64)
+      shapeEntities: List.create(EntityId, cap: 64)
+      contactBegan: createEventQueue(PhysicsContactEvent)
+      contactEnded: createEventQueue(PhysicsContactEvent)
+      hits: createEventQueue(PhysicsHitEvent)
+      sensorBegan: createEventQueue(PhysicsSensorEvent)
+      sensorEnded: createEventQueue(PhysicsSensorEvent)
+      venueBodyId: nullBodyId()
+      venueShapeIds: List.create(ShapeId, cap: 4)
+      meshes: List.create(UInt64, cap: 0)
+    }
+  }
+}
+
+# Destroy the C world (its bodies, shapes and joints) and the venue's meshes.
+# The resource must not be used afterwards.
+func destroyPhysics(physics: mod Physics) {
+  unsafe {
+    if b3World_IsValid(id: physics.world) {
+      b3DestroyWorld(worldId: physics.world)
+    }
+    loop var i: Int = 0, i < physics.meshes.length, ++i {
+      rae_b3DestroyMesh(mesh: physics.meshes.copyAtDefault(index: i))
+    }
+  }
+  physics.meshes.clear()
+}
+
+func setMappedEntity(entities: mod List(EntityId), index: view Int, entityId: view EntityId) {
+  loop entities.length <= index {
+    entities.add(value: noEntity())
+  }
+  entities.set(index: index, value: entityId)
+}
+
+func mappedEntity(entities: view List(EntityId), index: view Int) ret EntityId {
+  if index < 0 or index >= entities.length {
+    ret noEntity()
+  }
+  ret entities.copyAtDefault(index: index)
+}
+
+func entityOfBody(physics: view Physics, bodyId: view BodyId) ret EntityId {
+  ret mappedEntity(entities: physics.bodyEntities, index: bodyId.index1 - 1)
+}
+
+func entityOfShape(physics: view Physics, shapeId: view ShapeId) ret EntityId {
+  ret mappedEntity(entities: physics.shapeEntities, index: shapeId.index1 - 1)
+}
+
+# Add a frame's `frameTime` to the clock and take the fixed steps it pays
+# for (capped at maxStepsPerFrame, so a long frame slows the game down
+# instead of spiralling).
+func consumeFixedSteps(physics: mod Physics, frameTime: view Float) ret Int {
+  physics.accumulator = physics.accumulator + frameTime
+  let capped: Float = physics.fixedStep * (physics.maxStepsPerFrame as Float)
+  if physics.accumulator > capped {
+    physics.accumulator = capped
+  }
+  var count: Int = 0
+  loop physics.accumulator >= physics.fixedStep and count < physics.maxStepsPerFrame {
+    physics.accumulator = physics.accumulator - physics.fixedStep
+    count = count + 1
+  }
+  ret count
+}
+
+# How far the clock is into the next fixed step, 0 to 1.
+func physicsBlend(physics: view Physics) ret Float {
+  ret physics.accumulator / physics.fixedStep
+}
+
+# Advance the event queues: once per frame, after every consumer.
+func advancePhysicsEvents(physics: mod Physics) {
+  frameAdvance(this: physics.contactBegan)
+  frameAdvance(this: physics.contactEnded)
+  frameAdvance(this: physics.hits)
+  frameAdvance(this: physics.sensorBegan)
+  frameAdvance(this: physics.sensorEnded)
+}

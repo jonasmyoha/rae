@@ -1,0 +1,456 @@
+# A character mover on upstream Box3D's C library: the loop of Box3D's
+# samples/mover.cpp at the pin (CharacterMover::SolveMove and the jump of
+# CharacterMover::Step), as the port's physics/character/CharacterMover has
+# it, with the same up-axis choice (the sample is Y-up, Rae's world Z-up).
+# The world queries are Box3D's own (b3World_CastRayClosest, and
+# b3World_CollideMover / b3World_CastMover through the glue, Box3dGlue, since
+# they take callbacks) and the vector math is Box3D's inline math, in the
+# sample's operation order. Unlike the port, the mover's state is held in
+# Box3D's C types (b3Vec3, b3Transform, b3CollisionPlane): it is handed to the
+# C calls as it is. CharacterBody (PhysicsComponents) reports its results in
+# Rae types.
+open Vec2
+open Vec3
+open box3d/Box3d
+open box3d/Box3dGlue
+open box3d/Box3dTypes
+open box3d/Box3dTypes2
+open box3d/Box3dEnums
+open box3d/ecs/PhysicsTypes
+
+const planeCapacity: Int = 8
+
+const jumpSpeed: Float = 5.0
+
+const maxSpeed: Float = 6.0
+
+const minSpeed: Float = 0.01
+
+const stopSpeed: Float = 1.0
+
+const accelerate: Float = 30.0
+
+const friction: Float = 4.0
+
+const moverGravity: Float = 15.0
+
+# FLT_MIN, for b3GetLengthAndNormalize's threshold
+const floatMin: Float = 0.0000000000000000000000000000000000000117549435082228750797
+
+# The largest float (B3_HUGE is not a literal in the header; FLT_MAX)
+const floatMax: Float = 340282346638528859811704183484516925440.0
+
+# b3_pi
+const pi: Float = 3.14159265359
+
+enum UpAxis { yUp, zUp }
+
+func upComponent(vector: view b3Vec3, up: view UpAxis) ret Float {
+  if up is UpAxis.zUp {
+    ret vector.z
+  }
+  ret vector.y
+}
+
+func setUpComponent(vector: mod b3Vec3, up: view UpAxis, value: view Float) {
+  if up is UpAxis.zUp {
+    vector.z = value
+  } else {
+    vector.y = value
+  }
+}
+
+# The second horizontal component (z when Y-up, y when Z-up; x is the first).
+func sideComponent(vector: view b3Vec3, up: view UpAxis) ret Float {
+  if up is UpAxis.zUp {
+    ret vector.y
+  }
+  ret vector.z
+}
+
+func setSideComponent(vector: mod b3Vec3, up: view UpAxis, value: view Float) {
+  if up is UpAxis.zUp {
+    vector.y = value
+  } else {
+    vector.z = value
+  }
+}
+
+func upVector(up: view UpAxis) ret b3Vec3 {
+  if up is UpAxis.zUp {
+    ret toB3Vector(vector: Vec3 { x: 0.0, y: 0.0, z: 1.0 })
+  }
+  ret toB3Vector(vector: Vec3 { x: 0.0, y: 1.0, z: 0.0 })
+}
+
+type CharacterMover {
+  up: UpAxis
+  transform: b3Transform
+  velocity: b3Vec3
+  capsule: b3Capsule
+  # The planes of the last collide, with the contact point and shape of each
+  planes: List(b3CollisionPlane)
+  planePoints: List(b3Vec3)
+  planeShapeIds: List(b3ShapeId)
+  totalIterations: Int
+  pogoVelocity: Float
+  onGround: Bool
+  sprint: Bool
+  groundNormal: b3Vec3
+}
+
+# The sample's capsule: half height 0.5 along the up axis, radius 0.3.
+func moverCapsule(up: view UpAxis) ret b3Capsule {
+  if up is UpAxis.zUp {
+    ret toB3Capsule(
+      capsule: Capsule {
+        center1: Vec3 { x: 0.0, y: 0.0, z: -0.5 }
+        center2: Vec3 { x: 0.0, y: 0.0, z: 0.5 }
+        radius: 0.3
+      }
+    )
+  }
+  ret toB3Capsule(
+    capsule: Capsule {
+      center1: Vec3 { x: 0.0, y: -0.5, z: 0.0 }
+      center2: Vec3 { x: 0.0, y: 0.5, z: 0.0 }
+      radius: 0.3
+    }
+  )
+}
+
+func createCharacterMoverWithUp(position: view Vec3, up: view UpAxis) ret CharacterMover {
+  ret CharacterMover {
+    up: up
+    transform: toB3Transform(transform: Transform { position: position, rotation: quatIdentity() })
+    velocity: toB3Vector(vector: zeroVector())
+    capsule: moverCapsule(up: up)
+    planes: List.create(b3CollisionPlane, cap: planeCapacity)
+    planePoints: List.create(b3Vec3, cap: planeCapacity)
+    planeShapeIds: List.create(b3ShapeId, cap: planeCapacity)
+    totalIterations: 0
+    pogoVelocity: 0.0
+    onGround: false
+    sprint: false
+    groundNormal: toB3Vector(vector: zeroVector())
+  }
+}
+
+# CharacterMover::Initialize: Y-up, as the sample.
+func createCharacterMover(position: view Vec3) ret CharacterMover {
+  ret createCharacterMoverWithUp(position: position, up: UpAxis.yUp)
+}
+
+func jumpCharacter(mover: mod CharacterMover) {
+  if mover.onGround {
+    setUpComponent(vector: mover.velocity, up: mover.up, value: jumpSpeed)
+    mover.onGround = false
+  }
+}
+
+# The sample's 32-bit query filters: `{ 1, ~2u }` skips team 2 (the pogo
+# ray and the cast), `{ 1, ~0u }` collides with everything.
+func skipTeamFilter() ret b3QueryFilter {
+  ret toB3QueryFilter(filter: QueryFilter { categoryBits: 1, maskBits: 4294967293, id: 1 })
+}
+
+func moverCollideFilter() ret b3QueryFilter {
+  ret toB3QueryFilter(filter: QueryFilter { categoryBits: 1, maskBits: 4294967295, id: 1 })
+}
+
+# b3GetLengthAndNormalize without the out pointer: the direction, and the
+# length into `length`.
+func lengthAndNormalize(length: mod Float, vector: view b3Vec3) ret b3Vec3 {
+  unsafe {
+    if b3LengthSquared(a: vector) > 1000.0 * floatMin {
+      length = b3Length(v: vector)
+      ret b3Normalize(a: vector)
+    }
+    length = 0.0
+    ret toB3Vector(vector: zeroVector())
+  }
+}
+
+# Friction, acceleration toward the throttle and the mover's own gravity.
+func accelerateCharacter(
+  mover: mod CharacterMover
+  timeStep: view Float
+  forward: view b3Vec3
+  right: view b3Vec3
+  throttle: view Vec2
+) {
+  unsafe {
+    let speed: Float = b3Length(v: mover.velocity)
+    if speed < minSpeed {
+      mover.velocity.x = 0.0
+      setSideComponent(vector: mover.velocity, up: mover.up, value: 0.0)
+    } else {
+      var control: Float = speed
+      if speed < stopSpeed {
+        control = stopSpeed
+      }
+      let drop: Float = control * friction * timeStep
+      let newSpeed: Float = b3MaxFloat(a: 0.0, b: speed - drop)
+      let ratio: Float = newSpeed / speed
+      mover.velocity.x = mover.velocity.x * ratio
+      setSideComponent(
+        vector: mover.velocity
+        up: mover.up
+        value: sideComponent(vector: mover.velocity, up: mover.up) * ratio
+      )
+    }
+
+    var speedLimit: Float = maxSpeed
+    if mover.sprint {
+      speedLimit = 1.5 * maxSpeed
+    }
+    let desiredVelocity: b3Vec3 = b3Add(
+      a: b3MulSV(s: speedLimit * throttle.x, a: forward)
+      b: b3MulSV(s: speedLimit * throttle.y, a: right)
+    )
+    var desiredSpeed: Float = 0.0
+    let desiredDirection: b3Vec3 = lengthAndNormalize(length: desiredSpeed, vector: desiredVelocity)
+    if desiredSpeed > speedLimit {
+      desiredSpeed = speedLimit
+    }
+
+    if mover.onGround {
+      setUpComponent(vector: mover.velocity, up: mover.up, value: 0.0)
+    }
+
+    let currentSpeed: Float = b3Dot(a: mover.velocity, b: desiredDirection)
+    let addSpeed: Float = desiredSpeed - currentSpeed
+    if addSpeed > 0.0 {
+      var accelerationSpeed: Float = accelerate * speedLimit * timeStep
+      if accelerationSpeed > addSpeed {
+        accelerationSpeed = addSpeed
+      }
+      mover.velocity = b3Add(
+        a: mover.velocity
+        b: b3MulSV(s: accelerationSpeed, a: desiredDirection)
+      )
+    }
+
+    setUpComponent(
+      vector: mover.velocity
+      up: mover.up
+      value: upComponent(vector: mover.velocity, up: mover.up) - moverGravity * timeStep
+    )
+  }
+}
+
+# The pogo spring: a ray down from the lower sphere finds the ground, and a
+# soft spring (4 Hz, damping 0.7) holds the mover at three radii above it.
+func updatePogo(mover: mod CharacterMover, worldId: view b3WorldId, timeStep: view Float) {
+  unsafe {
+    let pogoRestLength: Float = 3.0 * mover.capsule.radius
+    let rayLength: Float = pogoRestLength + mover.capsule.radius
+    let rayOrigin: b3Vec3 = b3TransformWorldPoint(t: mover.transform, p: mover.capsule.center1)
+    let rayTranslation: b3Vec3 = b3MulSV(s: -rayLength, a: upVector(up: mover.up))
+    let rayResult: b3RayResult = b3World_CastRayClosest(
+      worldId: worldId
+      origin: rayOrigin
+      translation: rayTranslation
+      filter: skipTeamFilter()
+    )
+    let suppressPogo: Bool = upComponent(vector: mover.velocity, up: mover.up) > 0.0
+    if rayResult.hit is false or suppressPogo {
+      mover.onGround = false
+      mover.pogoVelocity = 0.0
+      mover.groundNormal = toB3Vector(vector: zeroVector())
+    } else {
+      mover.onGround = true
+      mover.groundNormal = rayResult.normal
+      let pogoCurrentLength: Float = rayResult.fraction * rayLength
+      let zeta: Float = 0.7
+      let hertz: Float = 4.0
+      let omega: Float = 2.0 * pi * hertz
+      let omegaH: Float = omega * timeStep
+      mover.pogoVelocity = (mover.pogoVelocity - omega * omegaH * (pogoCurrentLength - pogoRestLength)) / (1.0 + 2.0 * zeta * omegaH + omegaH * omegaH)
+    }
+  }
+}
+
+# Push the dynamic bodies the mover touches: a one-sided impulse at each
+# contact point that stops the body moving into the mover.
+func pushBodies(mover: mod CharacterMover) {
+  unsafe {
+    loop var i: Int = 0, i < mover.planes.length, ++i {
+      let bodyId: b3BodyId = b3Shape_GetBody(shapeId: mover.planeShapeIds.copyAtDefault(index: i))
+      if b3Body_GetType(bodyId: bodyId) is not b3_dynamicBody {
+        continue
+      }
+      let point: b3Vec3 = mover.planePoints.copyAtDefault(index: i)
+      let normal: b3Vec3 = b3Neg(a: mover.planes.copyAtDefault(index: i).plane.normal)
+
+      let invMassA: Float = 0.0
+      let invMassB: Float = b3Body_GetInverseMass(bodyId: bodyId)
+      let invIB: b3Matrix3 = b3Body_GetWorldInverseRotationalInertia(bodyId: bodyId)
+      let centerB: b3Vec3 = b3Body_GetWorldCenter(bodyId: bodyId)
+      let rB: b3Vec3 = b3SubPos(a: point, b: centerB)
+
+      let rnB: b3Vec3 = b3Cross(a: rB, b: normal)
+      let kNormal: Float = invMassA + invMassB + b3Dot(a: rnB, b: b3MulMV(m: invIB, a: rnB))
+      var normalMass: Float = 0.0
+      if kNormal > 0.0 {
+        normalMass = 1.0 / kNormal
+      }
+
+      let velocityB: b3Vec3 = b3Body_GetLinearVelocity(bodyId: bodyId)
+      let omegaB: b3Vec3 = b3Body_GetAngularVelocity(bodyId: bodyId)
+      let relativeVelocityB: b3Vec3 = b3Add(a: velocityB, b: b3Cross(a: omegaB, b: rB))
+      let normalSpeed: Float = b3Dot(a: b3Sub(a: relativeVelocityB, b: mover.velocity), b: normal)
+      let impulse: Float = b3MaxFloat(a: -normalMass * normalSpeed, b: 0.0)
+
+      let linearImpulse: b3Vec3 = b3MulSV(s: impulse, a: normal)
+      mover.velocity = b3MulSub(a: mover.velocity, s: invMassA, b: linearImpulse)
+      b3Body_ApplyLinearImpulse(
+        bodyId: bodyId
+        impulse: linearImpulse
+        point: point
+        wake: true
+      )
+    }
+  }
+}
+
+func isIgnored(shapeId: view b3ShapeId, ignoreShapeIds: view List(b3ShapeId)) ret Bool {
+  loop var i: Int = 0, i < ignoreShapeIds.length, ++i {
+    let ignored: b3ShapeId = ignoreShapeIds.copyAtDefault(index: i)
+    if ignored.index1 is shapeId.index1 and ignored.world0 is shapeId.world0 and ignored.generation is shapeId.generation {
+      ret true
+    }
+  }
+  ret false
+}
+
+# One collide: the planes of the shapes the mover does not ignore, up to the
+# plane capacity (the sample's PlaneResultFcn), each pushing without limit and
+# clipping velocity.
+func collidePlanes(
+  mover: mod CharacterMover
+  worldId: view b3WorldId
+  ignoreShapeIds: view List(b3ShapeId)
+) {
+  mover.planes.clear()
+  mover.planePoints.clear()
+  mover.planeShapeIds.clear()
+  # The glue writes into the lists' buffers, so they are filled to capacity
+  # first and only the first `count` entries are read
+  let capacity: Int = 64
+  let results: List(b3PlaneResult) = List.create(b3PlaneResult, cap: capacity)
+  let shapeIds: List(b3ShapeId) = List.create(b3ShapeId, cap: capacity)
+  let noResult: b3PlaneResult = { triangleIndex: 0 }
+  let noShape: b3ShapeId = { index1: 0 }
+  loop var i: Int = 0, i < capacity, ++i {
+    results.add(value: noResult)
+    shapeIds.add(value: noShape)
+  }
+  var count: Int = 0
+  unsafe {
+    count = rae_b3World_CollideMoverInto(
+      worldId: worldId
+      origin: mover.transform.p
+      mover: mover.capsule
+      filter: moverCollideFilter()
+      planes: results.data
+      shapeIds: shapeIds.data
+      capacity: capacity as Int32
+    ) as Int
+  }
+  loop var i: Int = 0, i < count, ++i {
+    let shapeId: b3ShapeId = shapeIds.copyAtDefault(index: i)
+    if isIgnored(shapeId: shapeId, ignoreShapeIds: ignoreShapeIds) or mover.planes.length >= planeCapacity {
+      continue
+    }
+    let result: b3PlaneResult = results.copyAtDefault(index: i)
+    let plane: b3CollisionPlane = {
+      plane: result.plane
+      pushLimit: floatMax
+      push: 0.0
+      clipVelocity: true
+    }
+    mover.planes.add(value: plane)
+    unsafe {
+      mover.planePoints.add(value: b3OffsetPos(p: mover.transform.p, d: result.point))
+    }
+    mover.planeShapeIds.add(value: shapeId)
+  }
+}
+
+# CharacterMover::SolveMove: one step of `timeStep` toward the throttle
+# (x along `forward`, y along `right`), ignoring `ignoreShapeIds`. With
+# `clipVelocity` the velocity is clipped against the planes that pushed;
+# otherwise it is the step's position change.
+func solveMove(
+  mover: mod CharacterMover
+  worldId: view b3WorldId
+  timeStep: view Float
+  forward: view b3Vec3
+  right: view b3Vec3
+  throttle: view Vec2
+  clipVelocity: view Bool
+  ignoreShapeIds: view List(b3ShapeId)
+) {
+  accelerateCharacter(
+    mover: mover
+    timeStep: timeStep
+    forward: forward
+    right: right
+    throttle: throttle
+  )
+  updatePogo(mover: mover, worldId: worldId, timeStep: timeStep)
+  unsafe {
+    let startPosition: b3Vec3 = mover.transform.p
+    let target: b3Vec3 = b3Add(
+      a: b3Add(a: mover.transform.p, b: b3MulSV(s: timeStep, a: mover.velocity))
+      b: b3MulSV(s: timeStep * mover.pogoVelocity, a: upVector(up: mover.up))
+    )
+
+    mover.totalIterations = 0
+    let tolerance: Float = 0.01
+    loop var iteration: Int = 0, iteration < 5, ++iteration {
+      collidePlanes(mover: mover, worldId: worldId, ignoreShapeIds: ignoreShapeIds)
+      let targetDelta: b3Vec3 = b3SubPos(a: target, b: mover.transform.p)
+      let result: b3PlaneSolverResult = b3SolvePlanes(
+        targetDelta: targetDelta
+        planes: mover.planes.data
+        count: mover.planes.length as Int32
+      )
+      mover.totalIterations = mover.totalIterations + (result.iterationCount as Int)
+
+      var delta: b3Vec3 = result.delta
+      let fraction: Float = rae_b3World_CastMoverIgnoring(
+        worldId: worldId
+        origin: mover.transform.p
+        mover: mover.capsule
+        translation: delta
+        filter: skipTeamFilter()
+        ignore: ignoreShapeIds.data
+        ignoreCount: ignoreShapeIds.length as Int32
+      )
+      delta.x = delta.x * fraction
+      delta.y = delta.y * fraction
+      delta.z = delta.z * fraction
+      mover.transform.p = b3OffsetPos(p: mover.transform.p, d: delta)
+      if b3LengthSquared(a: delta) < tolerance * tolerance {
+        break
+      }
+    }
+
+    pushBodies(mover: mover)
+
+    if clipVelocity {
+      mover.velocity = b3ClipVector(
+        vector: mover.velocity
+        planes: mover.planes.data
+        count: mover.planes.length as Int32
+      )
+    } else if timeStep > 0.0 {
+      mover.velocity = b3MulSV(
+        s: 1.0 / timeStep
+        a: b3SubPos(a: mover.transform.p, b: startPosition)
+      )
+    }
+  }
+}

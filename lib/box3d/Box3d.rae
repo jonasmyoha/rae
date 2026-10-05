@@ -184,13 +184,13 @@ func b3DynamicTree_Save(tree: view b3DynamicTree, fileName: Ptr) unsafe extern("
 func b3DynamicTree_Load(fileName: Ptr, scale: Float32) unsafe extern("b3DynamicTree_Load") ret b3DynamicTree
 func b3DynamicTree_GetUserData(tree: view b3DynamicTree, proxyId: Int32) unsafe extern("b3DynamicTree_GetUserData") ret UInt64
 func b3DynamicTree_GetAABB(tree: view b3DynamicTree, proxyId: Int32) unsafe extern("b3DynamicTree_GetAABB") ret b3AABB
-func b3GetHullVertices(hull: view b3HullData) unsafe extern("b3GetHullVertices")
-func b3GetHullPoints(hull: view b3HullData) unsafe extern("b3GetHullPoints")
-func b3GetHullEdges(hull: view b3HullData) unsafe extern("b3GetHullEdges")
-func b3GetHullPlanes(hull: view b3HullData) unsafe extern("b3GetHullPlanes")
-func b3GetHullFaces(hull: view b3HullData) unsafe extern("b3GetHullFaces")
-func b3GetHullSoaVertices(hull: view b3HullData) unsafe extern("b3GetHullSoaVertices")
-func b3GetHullSoaNormals(hull: view b3HullData) unsafe extern("b3GetHullSoaNormals")
+func b3GetHullVertices(hull: view b3HullData) unsafe extern("b3GetHullVertices") ret Ptr
+func b3GetHullPoints(hull: view b3HullData) unsafe extern("b3GetHullPoints") ret Ptr
+func b3GetHullEdges(hull: view b3HullData) unsafe extern("b3GetHullEdges") ret Ptr
+func b3GetHullPlanes(hull: view b3HullData) unsafe extern("b3GetHullPlanes") ret Ptr
+func b3GetHullFaces(hull: view b3HullData) unsafe extern("b3GetHullFaces") ret Ptr
+func b3GetHullSoaVertices(hull: view b3HullData) unsafe extern("b3GetHullSoaVertices") ret Ptr
+func b3GetHullSoaNormals(hull: view b3HullData) unsafe extern("b3GetHullSoaNormals") ret Ptr
 func b3CreateCylinder(height: Float32, radius: Float32, yOffset: Float32, sides: Int32) unsafe extern("b3CreateCylinder") ret Ptr
 func b3CreateCone(height: Float32, radius1: Float32, radius2: Float32, slices: Int32) unsafe extern("b3CreateCone") ret Ptr
 func b3CreateRock(radius: Float32) unsafe extern("b3CreateRock") ret Ptr
@@ -205,11 +205,11 @@ func b3MakeOffsetBoxHull(hx: Float32, hy: Float32, hz: Float32, offset: copy b3V
 func b3MakeTransformedBoxHull(hx: Float32, hy: Float32, hz: Float32, transform: copy b3Transform) unsafe extern("b3MakeTransformedBoxHull") ret b3BoxHull
 func b3MakeScaledBoxHull(halfWidths: copy b3Vec3, transform: copy b3Transform, postScale: copy b3Vec3) unsafe extern("b3MakeScaledBoxHull") ret b3BoxHull
 func b3ScaleBox(halfWidths: mod b3Vec3, transform: mod b3Transform, postScale: copy b3Vec3, minHalfWidth: Float32) unsafe extern("b3ScaleBox")
-func b3GetMeshNodes(mesh: view b3MeshData) unsafe extern("b3GetMeshNodes")
-func b3GetMeshVertices(mesh: view b3MeshData) unsafe extern("b3GetMeshVertices")
-func b3GetMeshTriangles(mesh: view b3MeshData) unsafe extern("b3GetMeshTriangles")
-func b3GetMeshMaterialIndices(mesh: view b3MeshData) unsafe extern("b3GetMeshMaterialIndices")
-func b3GetMeshFlags(mesh: view b3MeshData) unsafe extern("b3GetMeshFlags")
+func b3GetMeshNodes(mesh: view b3MeshData) unsafe extern("b3GetMeshNodes") ret Ptr
+func b3GetMeshVertices(mesh: view b3MeshData) unsafe extern("b3GetMeshVertices") ret Ptr
+func b3GetMeshTriangles(mesh: view b3MeshData) unsafe extern("b3GetMeshTriangles") ret Ptr
+func b3GetMeshMaterialIndices(mesh: view b3MeshData) unsafe extern("b3GetMeshMaterialIndices") ret Ptr
+func b3GetMeshFlags(mesh: view b3MeshData) unsafe extern("b3GetMeshFlags") ret Ptr
 func b3CreateGridMesh(xCount: Int32, zCount: Int32, cellWidth: Float32, materialCount: Int32, identifyEdges: Bool) unsafe extern("b3CreateGridMesh") ret Ptr
 func b3CreateWaveMesh(xCount: Int32, zCount: Int32, cellWidth: Float32, amplitude: Float32, rowFrequency: Float32, columnFrequency: Float32) unsafe extern("b3CreateWaveMesh") ret Ptr
 func b3CreateTorusMesh(radialResolution: Int32, tubularResolution: Int32, radius: Float32, thickness: Float32) unsafe extern("b3CreateTorusMesh") ret Ptr
@@ -219,9 +219,9 @@ func b3CreatePlatformMesh(center: copy b3Vec3, height: Float32, topWidth: Float3
 func b3CreateMesh(def: view b3MeshDef, degenerateTriangleIndices: Ptr, degenerateCapacity: Int32) unsafe extern("b3CreateMesh") ret Ptr
 func b3DestroyMesh(mesh: mod b3MeshData) unsafe extern("b3DestroyMesh")
 func b3GetHeight(mesh: view b3MeshData) unsafe extern("b3GetHeight") ret Int32
-func b3GetHeightFieldCompressedHeights(hf: view b3HeightFieldData) unsafe extern("b3GetHeightFieldCompressedHeights")
-func b3GetHeightFieldMaterialIndices(hf: view b3HeightFieldData) unsafe extern("b3GetHeightFieldMaterialIndices")
-func b3GetHeightFieldFlags(hf: view b3HeightFieldData) unsafe extern("b3GetHeightFieldFlags")
+func b3GetHeightFieldCompressedHeights(hf: view b3HeightFieldData) unsafe extern("b3GetHeightFieldCompressedHeights") ret Ptr
+func b3GetHeightFieldMaterialIndices(hf: view b3HeightFieldData) unsafe extern("b3GetHeightFieldMaterialIndices") ret Ptr
+func b3GetHeightFieldFlags(hf: view b3HeightFieldData) unsafe extern("b3GetHeightFieldFlags") ret Ptr
 func b3CreateHeightField(data: view b3HeightFieldDef) unsafe extern("b3CreateHeightField") ret Ptr
 func b3CreateGrid(rowCount: Int32, columnCount: Int32, scale: copy b3Vec3, makeHoles: Bool) unsafe extern("b3CreateGrid") ret Ptr
 func b3CreateWave(rowCount: Int32, columnCount: Int32, scale: copy b3Vec3, rowFrequency: Float32, columnFrequency: Float32, makeHoles: Bool) unsafe extern("b3CreateWave") ret Ptr
@@ -234,7 +234,7 @@ func b3GetCompoundCapsule(compound: view b3CompoundData, index: Int32) unsafe ex
 func b3GetCompoundHull(compound: view b3CompoundData, index: Int32) unsafe extern("b3GetCompoundHull") ret b3CompoundHull
 func b3GetCompoundMesh(compound: view b3CompoundData, index: Int32) unsafe extern("b3GetCompoundMesh") ret b3CompoundMesh
 func b3GetCompoundSphere(compound: view b3CompoundData, index: Int32) unsafe extern("b3GetCompoundSphere") ret b3CompoundSphere
-func b3GetCompoundMaterials(compound: view b3CompoundData) unsafe extern("b3GetCompoundMaterials")
+func b3GetCompoundMaterials(compound: view b3CompoundData) unsafe extern("b3GetCompoundMaterials") ret Ptr
 func b3CreateCompound(def: view b3CompoundDef) unsafe extern("b3CreateCompound") ret Ptr
 func b3DestroyCompound(compound: mod b3CompoundData) unsafe extern("b3DestroyCompound")
 func b3ConvertCompoundToBytes(compound: mod b3CompoundData) unsafe extern("b3ConvertCompoundToBytes") ret Ptr
@@ -364,7 +364,7 @@ func b3World_DumpShapeBounds(worldId: copy b3WorldId, type_: Int32) unsafe exter
 func b3World_EnableSpeculative(worldId: copy b3WorldId, flag: Bool) unsafe extern("b3World_EnableSpeculative")
 func b3CreateRecording(byteCapacity: Int32) unsafe extern("b3CreateRecording") ret Ptr
 func b3DestroyRecording(recording: Ptr) unsafe extern("b3DestroyRecording")
-func b3Recording_GetData(recording: Ptr) unsafe extern("b3Recording_GetData")
+func b3Recording_GetData(recording: Ptr) unsafe extern("b3Recording_GetData") ret Ptr
 func b3Recording_GetSize(recording: Ptr) unsafe extern("b3Recording_GetSize") ret Int32
 func b3World_StartRecording(worldId: copy b3WorldId, recording: Ptr) unsafe extern("b3World_StartRecording")
 func b3World_StopRecording(worldId: copy b3WorldId) unsafe extern("b3World_StopRecording")
@@ -404,7 +404,7 @@ func b3Body_IsValid(id: copy b3BodyId) unsafe extern("b3Body_IsValid") ret Bool
 func b3Body_GetType(bodyId: copy b3BodyId) unsafe extern("b3Body_GetType") ret Int32
 func b3Body_SetType(bodyId: copy b3BodyId, type_: Int32) unsafe extern("b3Body_SetType")
 func b3Body_SetName(bodyId: copy b3BodyId, name: Ptr) unsafe extern("b3Body_SetName")
-func b3Body_GetName(bodyId: copy b3BodyId) unsafe extern("b3Body_GetName")
+func b3Body_GetName(bodyId: copy b3BodyId) unsafe extern("b3Body_GetName") ret Ptr
 func b3Body_SetUserData(bodyId: copy b3BodyId, userData: Ptr) unsafe extern("b3Body_SetUserData")
 func b3Body_GetUserData(bodyId: copy b3BodyId) unsafe extern("b3Body_GetUserData") ret Ptr
 func b3Body_GetPosition(bodyId: copy b3BodyId) unsafe extern("b3Body_GetPosition") ret b3Vec3
@@ -494,7 +494,7 @@ func b3Shape_GetBody(shapeId: copy b3ShapeId) unsafe extern("b3Shape_GetBody") r
 func b3Shape_GetWorld(shapeId: copy b3ShapeId) unsafe extern("b3Shape_GetWorld") ret b3WorldId
 func b3Shape_IsSensor(shapeId: copy b3ShapeId) unsafe extern("b3Shape_IsSensor") ret Bool
 func b3Shape_SetName(shapeId: copy b3ShapeId, name: Ptr) unsafe extern("b3Shape_SetName")
-func b3Shape_GetName(shapeId: copy b3ShapeId) unsafe extern("b3Shape_GetName")
+func b3Shape_GetName(shapeId: copy b3ShapeId) unsafe extern("b3Shape_GetName") ret Ptr
 func b3Shape_SetUserData(shapeId: copy b3ShapeId, userData: Ptr) unsafe extern("b3Shape_SetUserData")
 func b3Shape_GetUserData(shapeId: copy b3ShapeId) unsafe extern("b3Shape_GetUserData") ret Ptr
 func b3Shape_SetDensity(shapeId: copy b3ShapeId, density: Float32, updateBodyMass: Bool) unsafe extern("b3Shape_SetDensity")
@@ -521,9 +521,9 @@ func b3Shape_AreHitEventsEnabled(shapeId: copy b3ShapeId) unsafe extern("b3Shape
 func b3Shape_RayCast(shapeId: copy b3ShapeId, origin: copy b3Vec3, translation: copy b3Vec3) unsafe extern("b3Shape_RayCast") ret b3CastOutput
 func b3Shape_GetSphere(shapeId: copy b3ShapeId) unsafe extern("b3Shape_GetSphere") ret b3Sphere
 func b3Shape_GetCapsule(shapeId: copy b3ShapeId) unsafe extern("b3Shape_GetCapsule") ret b3Capsule
-func b3Shape_GetHull(shapeId: copy b3ShapeId) unsafe extern("b3Shape_GetHull")
+func b3Shape_GetHull(shapeId: copy b3ShapeId) unsafe extern("b3Shape_GetHull") ret Ptr
 func b3Shape_GetMesh(shapeId: copy b3ShapeId) unsafe extern("b3Shape_GetMesh") ret b3Mesh
-func b3Shape_GetHeightField(shapeId: copy b3ShapeId) unsafe extern("b3Shape_GetHeightField")
+func b3Shape_GetHeightField(shapeId: copy b3ShapeId) unsafe extern("b3Shape_GetHeightField") ret Ptr
 func b3Shape_SetSphere(shapeId: copy b3ShapeId, sphere: view b3Sphere) unsafe extern("b3Shape_SetSphere")
 func b3Shape_SetCapsule(shapeId: copy b3ShapeId, capsule: view b3Capsule) unsafe extern("b3Shape_SetCapsule")
 func b3Shape_SetHull(shapeId: copy b3ShapeId, hull: view b3HullData) unsafe extern("b3Shape_SetHull")

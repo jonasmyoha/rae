@@ -109,6 +109,12 @@ func createPhysics(def: view WorldDef, fixedStep: view Float, subSteps: view Int
   }
 }
 
+# Nothing to do: the port's world is a value, freed with the resource. (The
+# C-library track's box3d/ecs/Physics frees its C world here; an app that
+# calls this runs on either track.)
+func destroyPhysics(physics: mod Physics) {
+}
+
 # Record `entityId` at `index` of an entity map, growing it with noEntity.
 func setMappedEntity(entities: mod List(EntityId), index: view Int, entityId: view EntityId) {
   loop entities.length <= index {
