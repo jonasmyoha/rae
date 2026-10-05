@@ -1,8 +1,9 @@
 # The solver records of the joint kinds (b3DistanceJoint, b3RevoluteJoint,
 # b3PrismaticJoint, b3WheelJoint, b3SphericalJoint, b3MotorJoint,
 # b3ParallelJoint and b3WeldJoint of Box3D's joint.h at 9f998c8) and their
-# zero values. A JointSim (Joint) carries one of each; its `jointType` says
-# which one is live.
+# zero values, and JointKindData, the world's lists of them. Box3D keeps the
+# live kind's record in a union inside b3JointSim; Rae has no union, so a
+# JointSim holds the index of its record in its kind's list instead.
 open Vec2
 open Vec3
 open Quat
@@ -481,4 +482,67 @@ func zeroWeldJointData() ret WeldJointData {
     deltaCenter: zeroVector()
     angularMass: matrixZero()
   }
+}
+
+# The joint kinds' records, one list per kind (Box3D's union in
+# b3JointSim): a joint's record is `<kind>Joints[dataIndex]`, where
+# `dataIndex` is on its JointSim and Joint. The record stays in place while
+# the joint's sim moves between solver sets and colours, so the sim the
+# solver streams is the common part only. A freed slot is reused by the next
+# joint of the same kind.
+type JointKindData {
+  distanceJoints: List(DistanceJointData)
+  revoluteJoints: List(RevoluteJointData)
+  prismaticJoints: List(PrismaticJointData)
+  wheelJoints: List(WheelJointData)
+  sphericalJoints: List(SphericalJointData)
+  motorJoints: List(MotorJointData)
+  parallelJoints: List(ParallelJointData)
+  weldJoints: List(WeldJointData)
+  freeDistanceSlots: List(Int)
+  freeRevoluteSlots: List(Int)
+  freePrismaticSlots: List(Int)
+  freeWheelSlots: List(Int)
+  freeSphericalSlots: List(Int)
+  freeMotorSlots: List(Int)
+  freeParallelSlots: List(Int)
+  freeWeldSlots: List(Int)
+}
+
+func createJointKindData() ret JointKindData {
+  ret JointKindData {
+    distanceJoints: List.create(DistanceJointData, cap: 4)
+    revoluteJoints: List.create(RevoluteJointData, cap: 4)
+    prismaticJoints: List.create(PrismaticJointData, cap: 4)
+    wheelJoints: List.create(WheelJointData, cap: 4)
+    sphericalJoints: List.create(SphericalJointData, cap: 4)
+    motorJoints: List.create(MotorJointData, cap: 4)
+    parallelJoints: List.create(ParallelJointData, cap: 4)
+    weldJoints: List.create(WeldJointData, cap: 4)
+    freeDistanceSlots: List.create(Int, cap: 4)
+    freeRevoluteSlots: List.create(Int, cap: 4)
+    freePrismaticSlots: List.create(Int, cap: 4)
+    freeWheelSlots: List.create(Int, cap: 4)
+    freeSphericalSlots: List.create(Int, cap: 4)
+    freeMotorSlots: List.create(Int, cap: 4)
+    freeParallelSlots: List.create(Int, cap: 4)
+    freeWeldSlots: List.create(Int, cap: 4)
+  }
+}
+
+# Store `record` in a free slot of `records` (or a new one); its index.
+func addJointRecord(
+  T: type
+  records: mod List(T)
+  freeSlots: mod List(Int)
+  record: view T
+) ret Int {
+  if freeSlots.length > 0 {
+    let slot: Int = freeSlots.copyAtDefault(index: freeSlots.length - 1)
+    freeSlots.remove(index: freeSlots.length - 1)
+    records.set(index: slot, value: record)
+    ret slot
+  }
+  records.add(value: record)
+  ret records.length - 1
 }

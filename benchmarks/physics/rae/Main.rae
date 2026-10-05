@@ -261,12 +261,15 @@ func runScene(scene: view String) {
     log("unknown scene {scene}: large_pyramid, many_pyramids, joint_grid, convex_pile")
     ret
   }
+  # As upstream's benchmark app: the first step (creating every contact and
+  # colouring the graph) is not timed, the other stepCount - 1 are
+  stepWorld(world: world, timeStep: 1.0 / 60.0, subStepCount: 4)
   let start: Int = nowNs()
-  loop var i: Int = 0, i < stepCount, ++i {
+  loop var i: Int = 1, i < stepCount, ++i {
     stepWorld(world: world, timeStep: 1.0 / 60.0, subStepCount: 4)
   }
   let elapsed: Int = nowNs() - start
-  log("RESULT,{scene},{elapsed / stepCount},{positionChecksum(world: world, bodies: bodies)}")
+  log("RESULT,{scene},{elapsed / (stepCount - 1)},{positionChecksum(world: world, bodies: bodies)}")
 }
 
 func main() {

@@ -246,13 +246,18 @@ through the fixes.
 
 | scene | C scalar | C SIMD | Rae | Rae / C scalar | Rae / C SIMD |
 |---|---|---|---|---|---|
-| large_pyramid | 11.05 | 8.10 | 14.84 | 1.34x | 1.83x |
-| many_pyramids | 21.23 | 15.09 | 30.84 | 1.45x | 2.04x |
-| joint_grid | 11.68 | 11.61 | 30.12 | 2.58x | 2.59x |
-| convex_pile | 13.79 | 11.60 | 34.44 | 2.50x | 2.97x |
+| large_pyramid | 11.76 | 8.32 | 15.56 | 1.32x | 1.87x |
+| many_pyramids | 22.92 | 16.57 | 30.15 | 1.32x | 1.82x |
+| joint_grid | 11.68 | 11.70 | 15.48 | 1.33x | 1.32x |
+| convex_pile | 13.85 | 11.59 | 34.55 | 2.50x | 2.98x |
 
-The target (1.2x C scalar) is not met; the pyramids are inside the 1.5x
-failure line, the joint grid and the convex pile are not. The large pyramid
+(P9a-2, 2026-10-05, load ~12; the P9a run before it measured the joint
+grid at 30.12 ms, 2.58x. Both sides now leave the first step untimed and
+divide by the steps - 1 they time, as upstream's app does; before, the Rae
+side timed the first step too and both divided by all steps.)
+
+The target (1.2x C scalar) is not met; the pyramids and the joint grid are
+inside the 1.5x failure line, the convex pile is not. The large pyramid
 started at **2 267 ms per step** (190x): per-element reads copied whole
 structs, and the fixes were all of that kind:
 
@@ -283,9 +288,22 @@ Where the rest goes, profiled against the C app:
   contiguous `b3ContactSim` array; the port reaches each contact through its
   id in `world.contacts` (432-byte `Contact`, its manifold in a separate heap
   list) and copies both `BodySim`s (224 bytes each) per contact in collide.
-- **Joints (joint grid).** `JointSim` is 1 816 bytes: Rae has no union, so
-  it carries every joint kind's data side by side where Box3D's union is a
-  few hundred; the solve streams ~4x the memory per joint.
+- **Joints (joint grid), P9a-2.** `JointSim` was 1 816 bytes: Rae has no
+  union, so it carried every joint kind's record side by side where Box3D's
+  union is a few hundred bytes, and the solve streamed ~4x the memory per
+  joint. Now the records live in the world's `JointKindData`, one list per
+  kind with a free-slot stack, and a `JointSim` (208 bytes) holds its
+  record's `dataIndex` (so does the `Joint`, which frees the slot on
+  destroy). The record stays put while the sim moves between sets and
+  colours; the kind's prepare, warm start and solve take it as a `mod` /
+  `view` parameter, as Box3D passes `&base->sphericalJoint`, instead of
+  copying it in and back. Joint grid 30.1 → 15.5 ms (2.58x → 1.33x),
+  fixture 984 and the checksums unchanged. The rest of the gap is not
+  layout: the spherical solve compiles to Box3D's instruction count (1 140
+  instructions, the same loads, stores and float operations), but the whole
+  run retires 19% more instructions at a lower IPC (3.7 against 4.6): the
+  per-joint bounds checks, the kind dispatch, and `jointBodyState` copying
+  each `BodyState` where Box3D points at it.
 - **Narrow phase (convex pile).** The hull SAT and clipping allocate `List`s
   per pair (`faceDots`, the edge candidates, the clip polygons) where Box3D
   uses stack arrays, and the step is not allocation-free:

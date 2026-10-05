@@ -94,6 +94,7 @@ func createJoint(
   joint.drawScale = def.drawScale
   joint.jointType = jointType
   joint.collideConnected = def.collideConnected
+  joint.dataIndex = sim.dataIndex
 
   # The doubly linked list on body A
   let keyA: Int = (jointId shl 1) bitor 0
@@ -216,7 +217,11 @@ func createDistanceJoint(world: mod PhysicsWorld, def: view DistanceJointDef) re
   data.enableSpring = def.enableSpring
   data.enableLimit = def.enableLimit
   data.enableMotor = def.enableMotor
-  sim.distanceJoint = data
+  sim.dataIndex = addJointRecord(
+    records: world.jointData.distanceJoints
+    freeSlots: world.jointData.freeDistanceSlots
+    record: data
+  )
   let jointId: Int = createJoint(
     world: world
     def: def.base
@@ -254,7 +259,11 @@ func createRevoluteJoint(world: mod PhysicsWorld, def: view RevoluteJointDef) re
   data.enableSpring = def.enableSpring
   data.enableLimit = def.enableLimit
   data.enableMotor = def.enableMotor
-  sim.revoluteJoint = data
+  sim.dataIndex = addJointRecord(
+    records: world.jointData.revoluteJoints
+    freeSlots: world.jointData.freeRevoluteSlots
+    record: data
+  )
   let jointId: Int = createJoint(
     world: world
     def: def.base
@@ -278,7 +287,11 @@ func createPrismaticJoint(world: mod PhysicsWorld, def: view PrismaticJointDef) 
   data.enableSpring = def.enableSpring
   data.enableLimit = def.enableLimit
   data.enableMotor = def.enableMotor
-  sim.prismaticJoint = data
+  sim.dataIndex = addJointRecord(
+    records: world.jointData.prismaticJoints
+    freeSlots: world.jointData.freePrismaticSlots
+    record: data
+  )
   let jointId: Int = createJoint(
     world: world
     def: def.base
@@ -309,7 +322,11 @@ func createWheelJoint(world: mod PhysicsWorld, def: view WheelJointDef) ret Join
   data.enableSteeringLimit = def.enableSteeringLimit
   data.lowerSteeringLimit = def.lowerSteeringLimit
   data.upperSteeringLimit = def.upperSteeringLimit
-  sim.wheelJoint = data
+  sim.dataIndex = addJointRecord(
+    records: world.jointData.wheelJoints
+    freeSlots: world.jointData.freeWheelSlots
+    record: data
+  )
   let jointId: Int = createJoint(
     world: world
     def: def.base
@@ -337,7 +354,11 @@ func createSphericalJoint(world: mod PhysicsWorld, def: view SphericalJointDef) 
   data.enableConeLimit = def.enableConeLimit
   data.enableTwistLimit = def.enableTwistLimit
   data.enableMotor = def.enableMotor
-  sim.sphericalJoint = data
+  sim.dataIndex = addJointRecord(
+    records: world.jointData.sphericalJoints
+    freeSlots: world.jointData.freeSphericalSlots
+    record: data
+  )
   let jointId: Int = createJoint(
     world: world
     def: def.base
@@ -361,7 +382,11 @@ func createMotorJoint(world: mod PhysicsWorld, def: view MotorJointDef) ret Join
   data.angularHertz = def.angularHertz
   data.angularDampingRatio = def.angularDampingRatio
   data.maxSpringTorque = def.maxSpringTorque
-  sim.motorJoint = data
+  sim.dataIndex = addJointRecord(
+    records: world.jointData.motorJoints
+    freeSlots: world.jointData.freeMotorSlots
+    record: data
+  )
   let jointId: Int = createJoint(
     world: world
     def: def.base
@@ -378,7 +403,11 @@ func createParallelJoint(world: mod PhysicsWorld, def: view ParallelJointDef) re
   data.hertz = def.hertz
   data.dampingRatio = def.dampingRatio
   data.maxTorque = def.maxTorque
-  sim.parallelJoint = data
+  sim.dataIndex = addJointRecord(
+    records: world.jointData.parallelJoints
+    freeSlots: world.jointData.freeParallelSlots
+    record: data
+  )
   let jointId: Int = createJoint(
     world: world
     def: def.base
@@ -396,7 +425,11 @@ func createWeldJoint(world: mod PhysicsWorld, def: view WeldJointDef) ret JointI
   data.linearDampingRatio = def.linearDampingRatio
   data.angularHertz = def.angularHertz
   data.angularDampingRatio = def.angularDampingRatio
-  sim.weldJoint = data
+  sim.dataIndex = addJointRecord(
+    records: world.jointData.weldJoints
+    freeSlots: world.jointData.freeWeldSlots
+    record: data
+  )
   let jointId: Int = createJoint(
     world: world
     def: def.base
@@ -428,6 +461,41 @@ func unlinkJointEdge(world: mod PhysicsWorld, jointId: view Int, edgeIndex: view
       body.headJointKey = edge.nextKey
     }
     body.jointCount = body.jointCount - 1
+  }
+}
+
+# Give a destroyed joint's record slot back to its kind's list.
+func freeJointRecord(world: mod PhysicsWorld, jointType: view JointType, dataIndex: view Int) {
+  if dataIndex is -1 {
+    ret
+  }
+  match jointType {
+    case JointType.parallelJoint {
+      world.jointData.freeParallelSlots.add(value: dataIndex)
+    }
+    case JointType.distanceJoint {
+      world.jointData.freeDistanceSlots.add(value: dataIndex)
+    }
+    case JointType.filterJoint {
+    }
+    case JointType.motorJoint {
+      world.jointData.freeMotorSlots.add(value: dataIndex)
+    }
+    case JointType.prismaticJoint {
+      world.jointData.freePrismaticSlots.add(value: dataIndex)
+    }
+    case JointType.revoluteJoint {
+      world.jointData.freeRevoluteSlots.add(value: dataIndex)
+    }
+    case JointType.sphericalJoint {
+      world.jointData.freeSphericalSlots.add(value: dataIndex)
+    }
+    case JointType.weldJoint {
+      world.jointData.freeWeldSlots.add(value: dataIndex)
+    }
+    case JointType.wheelJoint {
+      world.jointData.freeWheelSlots.add(value: dataIndex)
+    }
   }
 }
 
@@ -463,6 +531,7 @@ func destroyJointInternal(world: mod PhysicsWorld, jointId: view Int, wakeBodies
     freed.colorIndex = -1
     freed.jointId = -1
   }
+  freeJointRecord(world: world, jointType: joint.jointType, dataIndex: joint.dataIndex)
   freeId(pool: world.jointIdPool, id: jointId)
   if wakeBodies {
     wakeBody(world: world, bodyId: joint.edgeA.bodyId)

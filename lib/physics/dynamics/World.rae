@@ -22,6 +22,7 @@ open physics/dynamics/SolverSet
 open physics/dynamics/Island
 open physics/dynamics/Contact
 open physics/dynamics/Joint
+open physics/dynamics/JointData
 open physics/dynamics/ConstraintGraph
 open physics/collision/Manifold
 open physics/container/Bitset
@@ -127,6 +128,8 @@ type PhysicsWorld {
   inverseH: Float
   inverseDt: Float
   jointIdPool: IdPool
+  # The joint kinds' records (Box3D's union in b3JointSim)
+  jointData: JointKindData
   stepIndex: Int
   splitIslandId: Int
   gravity: Vec3
@@ -186,6 +189,7 @@ func createWorld(def: view WorldDef) ret PhysicsWorld {
     inverseH: 0.0
     inverseDt: 0.0
     jointIdPool: createIdPool()
+    jointData: createJointKindData()
     stepIndex: 0
     splitIslandId: -1
     gravity: def.gravity
