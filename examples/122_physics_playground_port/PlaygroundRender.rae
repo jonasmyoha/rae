@@ -115,18 +115,27 @@ func bodyModel(transform: view Transform3D, scale: view Vec3) ret Mat4 {
   )
 }
 
-func kindMaterial(kind: view RenderKind, shade: view Float) ret Material3d {
-  var color: Vec3 = Vec3.create(x: 0.86, y: 0.52, z: 0.22)
-  if kind is RenderKind.sphere {
-    color = Vec3.create(x: 0.25, y: 0.55, z: 0.9)
-  }
-  if kind is RenderKind.capsule {
-    color = Vec3.create(x: 0.9, y: 0.82, z: 0.3)
-  }
+# A pastel of `hue` (0-1 round the colour wheel): a cosine rainbow lifted
+# towards white.
+func pastelColor(hue: view Float) ret Vec3 {
+  let turn: Float = 2.0 * Math.pi
+  let rainbow: Vec3 = Vec3.create(
+    x: 0.5 + 0.5 * Math.cos(x: turn * hue)
+    y: 0.5 + 0.5 * Math.cos(x: turn * (hue - 1.0 / 3.0))
+    z: 0.5 + 0.5 * Math.cos(x: turn * (hue - 2.0 / 3.0))
+  )
+  let white: Vec3 = Vec3.create(x: 1.0, y: 1.0, z: 1.0)
+  ret Vec3.vadd(a: Vec3.vscale(a: rainbow, s: 0.75), b: Vec3.vscale(a: white, s: 0.25))
+}
+
+# Each body its own pastel: hues a golden-ratio turn apart by entity index, so
+# neighbours (spawned one after another) never share a colour.
+func bodyMaterial(entityId: view EntityId) ret Material3d {
+  let spread: Float = (entityId.index as Float) * 0.618034
   ret Material3d {
-    baseColor: Vec3.vscale(a: color, s: shade)
+    baseColor: pastelColor(hue: spread - Math.floor(x: spread))
     metallic: 0.0
-    roughness: 0.6
+    roughness: 0.55
     emission: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
     toon: false
   }
@@ -159,15 +168,14 @@ func fillBatches(
     }
     let shape: RenderShape = componentCopyAtDefault(this: renderShapes, i: i)
     let transform: view Transform3D => componentView(this: transforms, entityId: entityId)
-    # A little variation per entity so neighbours read apart
-    let shade: Float = 0.8 + 0.2 * (((entityId.index * 37) % 11) as Float) / 10.0
+    let material: Material3d = bodyMaterial(entityId: entityId)
     if shape.kind is RenderKind.box {
       let model: Mat4 = bodyModel(transform: transform, scale: Vec3.vscale(a: shape.scale, s: 2.0))
       addInstance(
         batch: batches.boxes
         model: model
         prevModel: model
-        material: kindMaterial(kind: shape.kind, shade: shade)
+        material: material
       )
     } else if shape.kind is RenderKind.sphere {
       let model: Mat4 = bodyModel(transform: transform, scale: shape.scale)
@@ -175,7 +183,7 @@ func fillBatches(
         batch: batches.spheres
         model: model
         prevModel: model
-        material: kindMaterial(kind: shape.kind, shade: shade)
+        material: material
       )
     } else {
       let model: Mat4 = bodyModel(transform: transform, scale: shape.scale)
@@ -183,7 +191,7 @@ func fillBatches(
         batch: batches.capsules
         model: model
         prevModel: model
-        material: kindMaterial(kind: shape.kind, shade: shade)
+        material: material
       )
     }
   }
