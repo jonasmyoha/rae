@@ -14,6 +14,7 @@ open physics/math/TransformMath
 open physics/math/AabbMath
 open physics/math/PlaneMath
 open physics/geometry/Hull
+open physics/collision/HullScratch
 
 # What a separating axis comes from (b3SeparatingFeature). The manual kinds
 # force a feature, for testing.
@@ -273,13 +274,12 @@ func faceSeparation(
 }
 
 # b3GetFaceDots: dot(normal, direction) for every face normal of `hull`.
-func faceDots(hull: view Hull, direction: view Vec3) ret List(Float) {
-  let dots: List(Float) = List.create(Float, cap: hull.planes.length)
+func faceDots(hull: view Hull, direction: view Vec3, dots: mod List(Float)) {
+  dots.clear()
   loop let plane: view Plane in hull.planes {
     let normal: Vec3 = plane.normal
     dots.add(value: normal.x * direction.x + normal.y * direction.y + normal.z * direction.z)
   }
-  ret dots
 }
 
 # b3TestEdgeCandidate: can an edge between faces with normal dots a1 and a2
@@ -338,6 +338,7 @@ func computeSeparatingAxis(
   transformB: view Transform
   earlyReturn: view Bool
   lengthUnitsPerMeter: view Float
+  scratch: mod HullScratch
 ) ret AxisQuery {
   let rotation: Matrix3 = matrixFromQuat(quat: transformB.rotation)
   let inverseRotation: Matrix3 = transpose(matrix: rotation)
@@ -364,7 +365,8 @@ func computeSeparatingAxis(
 
   # Faces of A against the vertices of B, seeded by the face most along the
   # center offset.
-  let dotsA: List(Float) = faceDots(hull: hullA, direction: deltaCenter)
+  faceDots(hull: hullA, direction: deltaCenter, dots: scratch.dotsA)
+  let dotsA: view List(Float) => scratch.dotsA
   var seedIndexA: Int = 0
   var maxDotA: Float = dotsA.copyAtDefault(index: 0)
   loop var i: Int = 1, i < hullA.planes.length, ++i {
@@ -422,10 +424,12 @@ func computeSeparatingAxis(
 
   # Faces of B against the vertices of A, seeded by the face most along the
   # offset from B's center to A's.
-  let dotsB: List(Float) = faceDots(
+  faceDots(
     hull: hullB
     direction: negate(vector: multiply(matrix: inverseRotation, vector: deltaCenter))
+    dots: scratch.dotsB
   )
+  let dotsB: view List(Float) => scratch.dotsB
   var seedIndexB: Int = 0
   var maxDotB: Float = dotsB.copyAtDefault(index: 0)
   loop var i: Int = 1, i < hullB.planes.length, ++i {
@@ -488,9 +492,19 @@ func computeSeparatingAxis(
   if earlyReturn {
     edgeBound = maxFloat(left: result.faceA.separation, right: result.faceB.separation) + radiusBound
   }
-  let edgeIndicesA: List(Int) = edgeCandidates(hull: hullA, dots: dotsA, bound: edgeBound)
-  let edgeIndicesB: List(Int) = edgeCandidates(hull: hullB, dots: dotsB, bound: edgeBound)
-  if edgeIndicesA.length is 0 or edgeIndicesB.length is 0 {
+  edgeCandidates(
+    hull: hullA
+    dots: scratch.dotsA
+    bound: edgeBound
+    indices: scratch.edgeIndicesA
+  )
+  edgeCandidates(
+    hull: hullB
+    dots: scratch.dotsB
+    bound: edgeBound
+    indices: scratch.edgeIndicesB
+  )
+  if scratch.edgeIndicesA.length is 0 or scratch.edgeIndicesB.length is 0 {
     # No edge candidates
     ret result
   }
@@ -498,8 +512,9 @@ func computeSeparatingAxis(
     result: result
     hullA: hullA
     hullB: hullB
-    edgeIndicesA: edgeIndicesA
-    edgeIndicesB: edgeIndicesB
+    edgeIndicesA: scratch.edgeIndicesA
+    edgeIndicesB: scratch.edgeIndicesB
+    edges: scratch.edges
     rotation: rotation
     translation: transformB.position
     earlyReturn: earlyReturn
@@ -511,8 +526,13 @@ func computeSeparatingAxis(
 
 # The edges of `hull` (first half-edge of each twin pair) that pass
 # testEdgeCandidate, in order.
-func edgeCandidates(hull: view Hull, dots: view List(Float), bound: view Float) ret List(Int) {
-  let indices: List(Int) = List.create(Int, cap: hull.edges.length / 2)
+func edgeCandidates(
+  hull: view Hull
+  dots: view List(Float)
+  bound: view Float
+  indices: mod List(Int)
+) {
+  indices.clear()
   var i: Int = 0
   loop i < hull.edges.length {
     let face1: Int = hullEdge(hull: hull, index: i).face
@@ -530,7 +550,6 @@ func edgeCandidates(hull: view Hull, dots: view List(Float), bound: view Float) 
     }
     i = i + 2
   }
-  ret indices
 }
 
 # The edge-pair phase of b3ComputeSeparatingAxis (the scalar B3_SIMD_NONE
@@ -542,6 +561,7 @@ func testEdgePairs(
   hullB: view Hull
   edgeIndicesA: view List(Int)
   edgeIndicesB: view List(Int)
+  edges: mod EdgeScratch
   rotation: view Matrix3
   translation: view Vec3
   earlyReturn: view Bool
@@ -549,11 +569,13 @@ func testEdgePairs(
   slop: view Float
 ) {
   # B's face normals and vertices in A's frame, negated
-  let normalsB: List(Vec3) = List.create(Vec3, cap: hullB.planes.length)
+  let normalsB: mod List(Vec3) => edges.normalsB
+  normalsB.clear()
   loop let plane: view Plane in hullB.planes {
     normalsB.add(value: negate(vector: multiply(matrix: rotation, vector: plane.normal)))
   }
-  let pointsB: List(Vec3) = List.create(Vec3, cap: hullB.points.length)
+  let pointsB: mod List(Vec3) => edges.pointsB
+  pointsB.clear()
   loop let point: view Vec3 in hullB.points {
     pointsB.add(
       value: negate(
@@ -565,11 +587,16 @@ func testEdgePairs(
   # Per edge of A: its two face normals, its direction, its first vertex,
   # and the parallel tolerance scaled by its length.
   let edgeCount: Int = edgeIndicesA.length
-  let normals0: List(Vec3) = List.create(Vec3, cap: edgeCount)
-  let normals1: List(Vec3) = List.create(Vec3, cap: edgeCount)
-  let directions: List(Vec3) = List.create(Vec3, cap: edgeCount)
-  let starts: List(Vec3) = List.create(Vec3, cap: edgeCount)
-  let tolerances: List(Float) = List.create(Float, cap: edgeCount)
+  let normals0: mod List(Vec3) => edges.normals0
+  normals0.clear()
+  let normals1: mod List(Vec3) => edges.normals1
+  normals1.clear()
+  let directions: mod List(Vec3) => edges.directions
+  directions.clear()
+  let starts: mod List(Vec3) => edges.starts
+  starts.clear()
+  let tolerances: mod List(Float) => edges.tolerances
+  tolerances.clear()
   let squaredTolerance: Float = parallelEdgeTolerance * parallelEdgeTolerance
   loop let edgeIndex: view Int in edgeIndicesA {
     let edge: HullHalfEdge = hullEdge(hull: hullA, index: edgeIndex)

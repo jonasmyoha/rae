@@ -20,6 +20,7 @@ open physics/geometry/BoxHull
 open physics/collision/Simplex
 open physics/collision/Manifold
 open physics/collision/SeparatingAxis
+open physics/collision/HullScratch
 open physics/collision/ShapePair
 
 # Reads the inputs of one golden line in order.
@@ -208,12 +209,14 @@ func evaluate(name: view String, reader: mod Reader, out: mod List(Float)) ret B
       if let hullB: Hull = readSpec(reader: reader) {
         let transform: Transform = readTransform(reader: reader)
         let earlyReturn: Bool = readInt(reader: reader) is 1
+        var scratch: HullScratch = createHullScratch()
         let query: AxisQuery = computeSeparatingAxis(
           hullA: hullA
           hullB: hullB
           transformB: transform
           earlyReturn: earlyReturn
           lengthUnitsPerMeter: units
+          scratch: scratch
         )
         putAxis(out: out, axis: query.faceA)
         putAxis(out: out, axis: query.faceB)

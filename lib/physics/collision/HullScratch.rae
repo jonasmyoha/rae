@@ -1,0 +1,55 @@
+# Reusable working lists of the hull narrow phase (b3ComputeSeparatingAxis
+# and the face contact builders of Box3D's convex_manifold.c at 9f998c8,
+# which keep these on the stack). Each worker's TaskContext owns one; the
+# functions clear a list before filling it, so after the first steps a hull
+# pair allocates nothing.
+open Vec3
+open physics/collision/Manifold
+
+# The per-edge data of the edge-pair phase (testEdgePairs).
+type EdgeScratch {
+  # B's face normals and vertices in A's frame, negated
+  normalsB: List(Vec3)
+  pointsB: List(Vec3)
+  # Per candidate edge of A: its face normals, direction, first vertex and
+  # parallel tolerance
+  normals0: List(Vec3)
+  normals1: List(Vec3)
+  directions: List(Vec3)
+  starts: List(Vec3)
+  tolerances: List(Float)
+}
+
+type HullScratch {
+  # The face dots of each hull and their edge candidates
+  dotsA: List(Float)
+  dotsB: List(Float)
+  edgeIndicesA: List(Int)
+  edgeIndicesB: List(Int)
+  edges: EdgeScratch
+  # The clip polygons of a face contact, and its points before reduction
+  clipInput: List(ClipVertex)
+  clipOutput: List(ClipVertex)
+  points: List(LocalManifoldPoint)
+}
+
+func createHullScratch() ret HullScratch {
+  ret HullScratch {
+    dotsA: List.create(Float, cap: 16)
+    dotsB: List.create(Float, cap: 16)
+    edgeIndicesA: List.create(Int, cap: 16)
+    edgeIndicesB: List.create(Int, cap: 16)
+    edges: EdgeScratch {
+      normalsB: List.create(Vec3, cap: 16)
+      pointsB: List.create(Vec3, cap: 16)
+      normals0: List.create(Vec3, cap: 16)
+      normals1: List.create(Vec3, cap: 16)
+      directions: List.create(Vec3, cap: 16)
+      starts: List.create(Vec3, cap: 16)
+      tolerances: List.create(Float, cap: 16)
+    }
+    clipInput: List.create(ClipVertex, cap: maxClipPoints)
+    clipOutput: List.create(ClipVertex, cap: maxClipPoints)
+    points: List.create(LocalManifoldPoint, cap: maxClipPoints)
+  }
+}

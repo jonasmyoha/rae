@@ -19,6 +19,7 @@ open physics/math/PlaneMath
 open physics/geometry/Hull
 open physics/collision/Manifold
 open physics/collision/SeparatingAxis
+open physics/collision/HullScratch
 
 # b3BuildPolygon: face `incidentFace` of `hull`, placed by `transform`, as a
 # clip polygon with separations from `refPlane`.
@@ -70,6 +71,7 @@ func buildFaceAContact(
   query: view SeparatingAxis
   cache: mod SatCache
   lengthUnitsPerMeter: view Float
+  scratch: mod HullScratch
 ) ret Bool {
   # The reference face, and the incident face found from B's support vertex
   let refFace: Int = query.indexA
@@ -85,8 +87,10 @@ func buildFaceAContact(
   )
 
   # The incident face in frame A, clipped by each side plane in turn
-  var input: List(ClipVertex) = List.create(ClipVertex, cap: maxClipPoints)
-  var output: List(ClipVertex) = List.create(ClipVertex, cap: maxClipPoints)
+  # The clip polygons are the scratch's, moved out here and back before
+  # every return (the move keeps their buffers)
+  var input: List(ClipVertex) = own scratch.clipInput
+  var output: List(ClipVertex) = own scratch.clipOutput
   buildPolygon(
     out: input
     transform: transformBtoA
@@ -114,11 +118,13 @@ func buildFaceAContact(
       edge: edgeIndex
       refPlane: refPlane
     )
-    let swapped: List(ClipVertex) = input
-    input = output
-    output = swapped
+    let swapped: List(ClipVertex) = own input
+    input = own output
+    output = own swapped
     if pointCount < 3 {
       cache = emptySatCache()
+      scratch.clipInput = own input
+      scratch.clipOutput = own output
       ret false
     }
     edgeIndex = nextEdgeIndex
@@ -128,7 +134,8 @@ func buildFaceAContact(
   }
   pointCount = minInt(left: pointCount, right: maxClipPoints)
 
-  let points: List(LocalManifoldPoint) = List.create(LocalManifoldPoint, cap: pointCount)
+  var points: List(LocalManifoldPoint) = own scratch.points
+  points.clear()
   var minSeparation: Float = floatMax
   manifold.normal = refPlane.normal
   loop var i: Int = 0, i < pointCount, ++i {
@@ -151,8 +158,11 @@ func buildFaceAContact(
     minSeparation = minFloat(left: minSeparation, right: clipPoint.separation)
   }
 
+  scratch.clipInput = own input
+  scratch.clipOutput = own output
   if minSeparation >= speculativeDistance(lengthUnitsPerMeter: lengthUnitsPerMeter) {
     cache = emptySatCache()
+    scratch.points = own points
     ret false
   }
 
@@ -167,6 +177,7 @@ func buildFaceAContact(
   cache.kind = SeparatingFeature.faceAxisA
   cache.indexA = query.indexA
   cache.indexB = query.indexB
+  scratch.points = own points
   ret true
 }
 
@@ -181,6 +192,7 @@ func buildFaceBContact(
   query: view SeparatingAxis
   cache: mod SatCache
   lengthUnitsPerMeter: view Float
+  scratch: mod HullScratch
 ) ret Bool {
   let transformAtoB: Transform = invert(transform: transformBtoA)
   let flippedQuery: SeparatingAxis = {
@@ -198,6 +210,7 @@ func buildFaceBContact(
     query: flippedQuery
     cache: cache
     lengthUnitsPerMeter: lengthUnitsPerMeter
+    scratch: scratch
   )
   if touching is false {
     cache = emptySatCache()
@@ -302,6 +315,7 @@ func tryCachedFaceA(
   transformBtoA: view Transform
   cache: mod SatCache
   lengthUnitsPerMeter: view Float
+  scratch: mod HullScratch
 ) ret Bool {
   let plane: Plane = hullPlane(hull: hullA, index: cache.indexA)
   let searchDirectionInB: Vec3 = negate(
@@ -335,6 +349,7 @@ func tryCachedFaceA(
     query: faceQuery
     cache: localCache
     lengthUnitsPerMeter: lengthUnitsPerMeter
+    scratch: scratch
   )
   if touching and absFloat(value: cache.separation - localCache.separation) < linearSlop(
     lengthUnitsPerMeter: lengthUnitsPerMeter
@@ -353,6 +368,7 @@ func tryCachedFaceB(
   transformBtoA: view Transform
   cache: mod SatCache
   lengthUnitsPerMeter: view Float
+  scratch: mod HullScratch
 ) ret Bool {
   let plane: Plane = hullPlane(hull: hullB, index: cache.indexB)
   let searchDirectionInA: Vec3 = negate(
@@ -384,6 +400,7 @@ func tryCachedFaceB(
     query: faceQuery
     cache: localCache
     lengthUnitsPerMeter: lengthUnitsPerMeter
+    scratch: scratch
   )
   if touching and absFloat(value: cache.separation - localCache.separation) < linearSlop(
     lengthUnitsPerMeter: lengthUnitsPerMeter
@@ -487,6 +504,7 @@ func collideHulls(
   transformBtoA: view Transform
   cache: mod SatCache
   lengthUnitsPerMeter: view Float
+  scratch: mod HullScratch
 ) {
   manifold.pointCount = 0
   if manifoldCapacity(manifold: manifold) < 4 {
@@ -511,6 +529,7 @@ func collideHulls(
         transformBtoA: transformBtoA
         cache: cache
         lengthUnitsPerMeter: lengthUnitsPerMeter
+        scratch: scratch
       ) {
         ret
       }
@@ -523,6 +542,7 @@ func collideHulls(
         transformBtoA: transformBtoA
         cache: cache
         lengthUnitsPerMeter: lengthUnitsPerMeter
+        scratch: scratch
       ) {
         ret
       }
@@ -547,6 +567,7 @@ func collideHulls(
         transformB: transformBtoA
         earlyReturn: false
         lengthUnitsPerMeter: lengthUnitsPerMeter
+        scratch: scratch
       )
       buildFaceAContact(
         manifold: manifold
@@ -556,6 +577,7 @@ func collideHulls(
         query: query.faceA
         cache: cache
         lengthUnitsPerMeter: lengthUnitsPerMeter
+        scratch: scratch
       )
       ret
     }
@@ -566,6 +588,7 @@ func collideHulls(
         transformB: transformBtoA
         earlyReturn: false
         lengthUnitsPerMeter: lengthUnitsPerMeter
+        scratch: scratch
       )
       buildFaceBContact(
         manifold: manifold
@@ -575,6 +598,7 @@ func collideHulls(
         query: query.faceB
         cache: cache
         lengthUnitsPerMeter: lengthUnitsPerMeter
+        scratch: scratch
       )
       ret
     }
@@ -585,6 +609,7 @@ func collideHulls(
         transformB: transformBtoA
         earlyReturn: false
         lengthUnitsPerMeter: lengthUnitsPerMeter
+        scratch: scratch
       )
       if query.edge.indexA is not -1 {
         buildEdgeContact(
@@ -609,6 +634,7 @@ func collideHulls(
     transformB: transformBtoA
     earlyReturn: true
     lengthUnitsPerMeter: lengthUnitsPerMeter
+    scratch: scratch
   )
 
   if axisQuery.separatedFeature is not SeparatingFeature.invalidAxis {
@@ -635,6 +661,7 @@ func collideHulls(
       query: axisQuery.faceA
       cache: cache
       lengthUnitsPerMeter: lengthUnitsPerMeter
+      scratch: scratch
     )
   } else {
     buildFaceBContact(
@@ -645,6 +672,7 @@ func collideHulls(
       query: axisQuery.faceB
       cache: cache
       lengthUnitsPerMeter: lengthUnitsPerMeter
+      scratch: scratch
     )
   }
 
