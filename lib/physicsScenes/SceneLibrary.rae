@@ -33,6 +33,12 @@ func sceneName(index: view Int) ret String {
 
 # PhysicsScene `index` (0 to sceneCount - 1); `bodyCount` sizes the pyramid.
 func buildScene(index: view Int, bodyCount: view Int) ret PhysicsScene {
+  var scene: PhysicsScene = sceneOf(index: index, bodyCount: bodyCount)
+  applyGradientHues(bodies: scene.bodies, along: Vec3 { x: 1.0, y: 0.0, z: 0.0 })
+  ret scene
+}
+
+func sceneOf(index: view Int, bodyCount: view Int) ret PhysicsScene {
   if index is 0 {
     ret pyramidScene(bodyCount: bodyCount)
   }

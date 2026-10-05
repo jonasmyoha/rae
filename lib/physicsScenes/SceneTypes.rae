@@ -22,8 +22,9 @@ type SceneShape {
   halfLength: Float
 }
 
-# A body: its type, one shape, its pose and initial velocity, and the shape's
-# material.
+# A body: its type, one shape, its pose and initial velocity, the shape's
+# material, and the hue it is drawn with (0-1 round a pastel rainbow; a
+# negative hue lets the renderer pick one).
 type SceneBody {
   bodyType: SceneBodyType
   shape: SceneShape
@@ -32,6 +33,7 @@ type SceneBody {
   linearVelocity: Vec3
   density: Float
   friction: Float
+  hue: Float
 }
 
 enum SceneJointKind { hinge, ball, weld }
@@ -120,6 +122,7 @@ func dynamicBody(shape: view SceneShape, position: view Vec3) ret SceneBody {
     linearVelocity: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
     density: 1000.0
     friction: 0.6
+    hue: -1.0
   }
 }
 
@@ -127,4 +130,39 @@ func staticBody(shape: view SceneShape, position: view Vec3) ret SceneBody {
   var body: SceneBody = dynamicBody(shape: shape, position: position)
   body.bodyType = SceneBodyType.staticBody
   ret body
+}
+
+# The hues' span: red through to violet, stopping short of wrapping back to red
+const gradientHueSpan: Float = 0.82
+
+# Colour `bodies` as one gradient along the direction `along` (a unit vector;
+# +x for left to right across a scene): each body's hue follows how far along
+# it sits between the first and the last body, so a pyramid or a row of
+# dominoes reads as a smooth rainbow rather than neighbours in unrelated
+# colours.
+func applyGradientHues(bodies: mod List(SceneBody), along: view Vec3) {
+  if bodies.length is 0 {
+    ret
+  }
+  var low: Float = vdot(a: bodies.copyAtDefault(index: 0).position, b: along)
+  var high: Float = low
+  loop let body: view SceneBody in bodies {
+    let distance: Float = vdot(a: body.position, b: along)
+    if distance < low {
+      low = distance
+    }
+    if distance > high {
+      high = distance
+    }
+  }
+  let width: Float = high - low
+  loop var i: Int = 0, i < bodies.length, ++i {
+    if let body: mod SceneBody => bodies.modAt(index: i) {
+      if width > 0.0001 {
+        body.hue = gradientHueSpan * (vdot(a: body.position, b: along) - low) / width
+      } else {
+        body.hue = 0.5 * gradientHueSpan
+      }
+    }
+  }
 }

@@ -119,6 +119,104 @@ func makeSphere(rings: view Int, segments: view Int) pub ret MeshData {
   ret MeshData { verts: own verts, indices: own indices, vertCount: vertCount }
 }
 
+# Unit cylinder along Y: radius 1, from y = -1 to y = 1, with flat caps
+# (a wheel, an axle, a post). The side's normals point out radially, the caps'
+# along +-Y; every triangle is wound counter-clockwise seen from outside, the
+# sphere's convention.
+func makeCylinder(segments: view Int) ret MeshData {
+  let verts: List(Float) = List.create(Float, cap: (4 * (segments + 1) + 2) * 8)
+  let indices: List(Int) = List.create(Int, cap: segments * 12)
+  let pi: Float = 3.141592653589793
+  # The side: a bottom and a top vertex per segment edge
+  loop var s: Int = 0, s <= segments, ++s {
+    let theta: Float = 2.0 * pi * s.toFloat() / segments.toFloat()
+    let x: Float = Math.cos(x: theta)
+    let z: Float = Math.sin(x: theta)
+    let u: Float = s.toFloat() / segments.toFloat()
+    pushVert(
+      verts: verts
+      px: x
+      py: -1.0
+      pz: z
+      nx: x
+      ny: 0.0
+      nz: z
+      u: u
+      value: 0.0
+    )
+    pushVert(
+      verts: verts
+      px: x
+      py: 1.0
+      pz: z
+      nx: x
+      ny: 0.0
+      nz: z
+      u: u
+      value: 1.0
+    )
+  }
+  loop var s: Int = 0, s < segments, ++s {
+    let bottom0: Int = 2 * s
+    let top0: Int = bottom0 + 1
+    let bottom1: Int = bottom0 + 2
+    let top1: Int = bottom0 + 3
+    indices.add(value: bottom0)
+    indices.add(value: top0)
+    indices.add(value: bottom1)
+    indices.add(value: bottom1)
+    indices.add(value: top0)
+    indices.add(value: top1)
+  }
+  # The caps: a centre and a ring each, normals along the axis
+  loop var cap: Int = 0, cap < 2, ++cap {
+    var y: Float = -1.0
+    if cap is 1 {
+      y = 1.0
+    }
+    let centre: Int = verts.length / 8
+    pushVert(
+      verts: verts
+      px: 0.0
+      py: y
+      pz: 0.0
+      nx: 0.0
+      ny: y
+      nz: 0.0
+      u: 0.5
+      value: 0.5
+    )
+    loop var s: Int = 0, s <= segments, ++s {
+      let theta: Float = 2.0 * pi * s.toFloat() / segments.toFloat()
+      let x: Float = Math.cos(x: theta)
+      let z: Float = Math.sin(x: theta)
+      pushVert(
+        verts: verts
+        px: x
+        py: y
+        pz: z
+        nx: 0.0
+        ny: y
+        nz: 0.0
+        u: 0.5 + 0.5 * x
+        value: 0.5 + 0.5 * z
+      )
+    }
+    loop var s: Int = 0, s < segments, ++s {
+      let ring0: Int = centre + 1 + s
+      indices.add(value: centre)
+      if cap is 1 {
+        indices.add(value: ring0 + 1)
+        indices.add(value: ring0)
+      } else {
+        indices.add(value: ring0)
+        indices.add(value: ring0 + 1)
+      }
+    }
+  }
+  ret MeshData { verts: own verts, indices: own indices, vertCount: verts.length / 8 }
+}
+
 # Flat ground plane in XY (normal +Z), centered, `size` on a side.
 func makePlane(size: view Float, segments: view Int) pub ret MeshData {
   let verts: List(Float) = List.create(Float, cap: (segments + 1) * (segments + 1) * 8)

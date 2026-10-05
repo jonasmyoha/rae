@@ -53,8 +53,17 @@ func vehicleHash(steps: view Int, workerCount: view Int) ret UInt64 {
   spawnCourse(world: world, course: course)
   spawnCrates(world: world, course: course)
   spawnVehicle(world: world, car: car)
+  var autopilot: Autopilot = createAutopilot()
   loop var step: Int = 0, step < steps, ++step {
-    driveVehicle(world: world, car: car, command: autopilotCommand(seconds: (step as Float) / 60.0))
+    let pose: Transform3D = chassisTransform(world: world)
+    let command: VehicleCommand = autopilotCommand(
+      autopilot: autopilot
+      seconds: (step as Float) / 60.0
+      pose: pose
+      speed: forwardSpeed(velocity: chassisVelocity(world: world), chassisRotation: pose.rotation)
+      deltaTime: 1.0 / 60.0
+    )
+    driveVehicle(world: world, car: car, command: command)
     let taken: Int = stepVehicleWorld(world: world, frameTime: 1.0 / 60.0)
   }
   let hash: UInt64 = transformHash(transforms: world.transforms)
