@@ -1,8 +1,8 @@
 # Box3D's benchmark scenes (benchmark/main.c and shared/benchmarks.c at
 # 9f998c8) on the Rae port: the large pyramid, many pyramids, the joint grid,
 # the convex pile and rain (Rain.rae), built exactly as Box3D builds them
-# (Y-up, workerCount 1), stepped at 60 Hz with 4 sub-steps for the scene's
-# step count. Prints
+# (Y-up), stepped at 60 Hz with 4 sub-steps for the scene's step count, by
+# `workers` workers (the second argument; 1 when absent). Prints
 # one line per scene:
 #
 #   RESULT,<scene>,<ns per step>,<checksum>
@@ -11,6 +11,7 @@
 # port must not change it (the bit-exact fixtures guard the same thing).
 import Math
 import Sys
+open String
 open physics/math/TransformMath
 open physics/geometry/QueryTypes
 open physics/geometry/Hull
@@ -26,9 +27,9 @@ open physics/dynamics/WorldJoints
 open physics/dynamics/JointDefs
 open physics/shared/Human
 
-func benchWorld() ret PhysicsWorld {
+func benchWorld(workers: view Int) ret PhysicsWorld {
   var def: WorldDef = defaultWorldDef(lengthUnitsPerMeter: 1.0)
-  def.workerCount = 1
+  def.workerCount = workers
   ret createWorld(def: def)
 }
 
@@ -243,8 +244,8 @@ func positionChecksum(world: view PhysicsWorld, bodies: view List(BodyId)) ret U
   ret hash
 }
 
-func runScene(scene: view String) {
-  var world: PhysicsWorld = benchWorld()
+func runScene(scene: view String, workers: view Int) {
+  var world: PhysicsWorld = benchWorld(workers: workers)
   let bodies: List(BodyId) = List.create(BodyId, cap: 16384)
   var stepCount: Int = 0
   var rain: RainState = { humans: List.create(Human, cap: 0), columnCount: 0, columnIndex: 0 }
@@ -290,9 +291,13 @@ func runScene(scene: view String) {
 }
 
 func main() {
+  var workers: Int = 1
+  if Sys.argCount() > 1 {
+    workers = Sys.argAt(index: 1).toInt()
+  }
   if Sys.argCount() > 0 {
-    runScene(scene: Sys.argAt(index: 0))
+    runScene(scene: Sys.argAt(index: 0), workers: workers)
   } else {
-    runScene(scene: "large_pyramid")
+    runScene(scene: "large_pyramid", workers: workers)
   }
 }

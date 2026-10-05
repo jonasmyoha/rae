@@ -4,8 +4,9 @@
 # kinematic trees (from breadth-first seeds), candidate pairs pass the pair
 # set and b3ShouldCreatePair in batches, and the new pair keys are sorted
 # and handed to contact creation. Box3D's traversal and task structure is
-# kept: the cross and self pair tasks run block by block as worker 0
-# (ParallelFor), each worker gathering into its task context's pair keys.
+# kept: the cross and self pair tasks run block by block in chunks on the
+# worker pool (ParallelFor), each chunk gathering into its task context's
+# pair keys; the keys are sorted after, so the chunking does not matter.
 # Checked bit for bit against the oracle in fixture 956.
 #
 # A compound shape (static only, so met in the static cross pass) expands
@@ -477,11 +478,12 @@ func crossPairsTask(
   }
 }
 
-# The cross and self pair tasks over their blocks, as worker 0, into
-# `context` (b3ParallelFor of both tasks).
-func findPairs(world: view PhysicsWorld, context: mod PairContext) {
-  # The context's working lists, moved out (the tasks below take the
-  # context too) and back at the end
+# The cross and self pair tasks (b3ParallelFor of both): the seeds and the
+# moved siblings are gathered serially into `context`, then every chunk runs
+# its share of both kinds of block into its TaskContext's PairContext.
+func findPairs(world: mod PhysicsWorld, context: mod PairContext) {
+  # The context's working lists, moved out (the chunks read them while the
+  # world is passed on) and back at the end
   var siblingIndices: List(Int) = own context.siblingIndices
   var seeds: List(NodePair) = own context.seeds
   var seedQueue: List(NodePair) = own context.seedQueue
@@ -511,52 +513,129 @@ func findPairs(world: view PhysicsWorld, context: mod PairContext) {
     }
   }
   let crossMoveCount: Int = staticSeedCount + kinematicSeedCount
-
-  # The dynamic body tree against the static and kinematic trees
-  let crossBlockSize: Int = parallelForBlockSize(
-    itemCount: crossMoveCount
-    minRange: 1
-    workerCount: world.workerCount
-  )
-  let crossBlocks: Int = parallelForBlockCount(itemCount: crossMoveCount, blockSize: crossBlockSize)
-  loop var block: Int = 0, block < crossBlocks, ++block {
-    crossPairsTask(
-      world: world
-      context: context
-      seeds: seeds
-      staticSeedCount: staticSeedCount
-      startIndex: parallelForBlockStart(blockIndex: block, blockSize: crossBlockSize)
-      endIndex: parallelForBlockEnd(
-        blockIndex: block
-        blockSize: crossBlockSize
-        itemCount: crossMoveCount
-      )
+  let plan: PairBlocks = {
+    staticSeedCount: staticSeedCount
+    crossCount: crossMoveCount
+    crossBlockSize: parallelForBlockSize(
+      itemCount: crossMoveCount
+      minRange: 1
+      workerCount: world.workerCount
+    )
+    selfCount: dynamicMoveCount
+    selfBlockSize: parallelForBlockSize(
+      itemCount: dynamicMoveCount
+      minRange: 64
+      workerCount: world.workerCount
     )
   }
-
-  # The dynamic body tree against itself
-  let selfBlockSize: Int = parallelForBlockSize(
-    itemCount: dynamicMoveCount
-    minRange: 64
-    workerCount: world.workerCount
-  )
-  let selfBlocks: Int = parallelForBlockCount(itemCount: dynamicMoveCount, blockSize: selfBlockSize)
-  loop var block: Int = 0, block < selfBlocks, ++block {
-    selfPairsTask(
-      world: world
-      context: context
-      siblingIndices: siblingIndices
-      startIndex: parallelForBlockStart(blockIndex: block, blockSize: selfBlockSize)
-      endIndex: parallelForBlockEnd(
-        blockIndex: block
-        blockSize: selfBlockSize
-        itemCount: dynamicMoveCount
+  let chunkCount: Int = world.taskContexts.length
+  if world.workerCount > 1 {
+    parallelLoop var chunk: Int = 0, chunk < chunkCount, ++chunk {
+      # A chunk only reads the trees and writes its own TaskContext slot
+      unsafe {
+        pairChunk(
+          world: world
+          seeds: seeds
+          siblingIndices: siblingIndices
+          plan: plan
+          chunk: chunk
+        )
+      }
+    }
+  } else {
+    loop var chunk: Int = 0, chunk < chunkCount, ++chunk {
+      pairChunk(
+        world: world
+        seeds: seeds
+        siblingIndices: siblingIndices
+        plan: plan
+        chunk: chunk
       )
-    )
+    }
   }
   context.siblingIndices = own siblingIndices
   context.seeds = own seeds
   context.seedQueue = own seedQueue
+}
+
+# The block split of a step's pair finding: the cross pass over the seeds
+# (the static ones first) and the self pass over the moved siblings.
+type PairBlocks {
+  staticSeedCount: Int
+  crossCount: Int
+  crossBlockSize: Int
+  selfCount: Int
+  selfBlockSize: Int
+}
+
+# Chunk `chunk`'s run of the cross blocks, then of the self blocks, into its
+# TaskContext's PairContext (moved out for the search and back).
+func pairChunk(
+  world: mod PhysicsWorld
+  seeds: view List(NodePair)
+  siblingIndices: view List(Int)
+  plan: view PairBlocks
+  chunk: view Int
+) {
+  var pairs: PairContext = emptyPairContext()
+  if let taskContext: mod TaskContext => world.taskContexts.modAt(index: chunk) {
+    pairs = own taskContext.pairs
+  }
+  let chunkCount: Int = world.taskContexts.length
+  let crossBlocks: Int = parallelForBlockCount(
+    itemCount: plan.crossCount
+    blockSize: plan.crossBlockSize
+  )
+  let firstCross: Int = chunkFirstBlock(
+    chunk: chunk
+    chunkCount: chunkCount
+    blockCount: crossBlocks
+  )
+  let endCross: Int = chunkFirstBlock(
+    chunk: chunk + 1
+    chunkCount: chunkCount
+    blockCount: crossBlocks
+  )
+  loop var block: Int = firstCross, block < endCross, ++block {
+    crossPairsTask(
+      world: world
+      context: pairs
+      seeds: seeds
+      staticSeedCount: plan.staticSeedCount
+      startIndex: parallelForBlockStart(blockIndex: block, blockSize: plan.crossBlockSize)
+      endIndex: parallelForBlockEnd(
+        blockIndex: block
+        blockSize: plan.crossBlockSize
+        itemCount: plan.crossCount
+      )
+    )
+  }
+  let selfBlocks: Int = parallelForBlockCount(
+    itemCount: plan.selfCount
+    blockSize: plan.selfBlockSize
+  )
+  let firstSelf: Int = chunkFirstBlock(chunk: chunk, chunkCount: chunkCount, blockCount: selfBlocks)
+  let endSelf: Int = chunkFirstBlock(
+    chunk: chunk + 1
+    chunkCount: chunkCount
+    blockCount: selfBlocks
+  )
+  loop var block: Int = firstSelf, block < endSelf, ++block {
+    selfPairsTask(
+      world: world
+      context: pairs
+      siblingIndices: siblingIndices
+      startIndex: parallelForBlockStart(blockIndex: block, blockSize: plan.selfBlockSize)
+      endIndex: parallelForBlockEnd(
+        blockIndex: block
+        blockSize: plan.selfBlockSize
+        itemCount: plan.selfCount
+      )
+    )
+  }
+  if let taskContext: mod TaskContext => world.taskContexts.modAt(index: chunk) {
+    taskContext.pairs = own pairs
+  }
 }
 
 # Whether a tree's root is marked moved (b3HasTreeMoved), and whether it
@@ -594,22 +673,16 @@ func updateBroadPhasePairs(world: mod PhysicsWorld) {
 
   loop var i: Int = 0, i < world.taskContexts.length, ++i {
     if let taskContext: mod TaskContext => world.taskContexts.modAt(index: i) {
-      taskContext.pairKeys.clear()
+      resetPairContext(context: taskContext.pairs)
     }
   }
 
   # Generate pairs by querying the dynamic body tree against itself and
   # against the kinematic and static trees.
-  # The world's pair context, moved out for the search and back
+  # The world's serial pair context, moved out for the search and back
   var context: PairContext = own world.pairContext
   resetPairContext(context: context)
   findPairs(world: world, context: context)
-  if let taskContext: mod TaskContext => world.taskContexts.modAt(index: 0) {
-    # (An index loop: a view loop over List(UInt64) emits invalid C, #97861858.)
-    loop var i: Int = 0, i < context.pairKeys.length, ++i {
-      taskContext.pairKeys.add(value: context.pairKeys.copyAtDefault(index: i))
-    }
-  }
   world.pairContext = own context
 
   if let tree: mod DynamicTree => world.broadPhase.trees.modAt(index: staticTree) {
@@ -632,8 +705,8 @@ func updateBroadPhasePairs(world: mod PhysicsWorld) {
   var pairKeys: List(UInt64) = own world.sortedPairKeys
   pairKeys.clear()
   loop let taskContext: view TaskContext in world.taskContexts {
-    loop var i: Int = 0, i < taskContext.pairKeys.length, ++i {
-      pairKeys.add(value: taskContext.pairKeys.copyAtDefault(index: i))
+    loop var i: Int = 0, i < taskContext.pairs.pairKeys.length, ++i {
+      pairKeys.add(value: taskContext.pairs.pairKeys.copyAtDefault(index: i))
     }
   }
   # The world's sort stack (QSORT's ranges), reused every step

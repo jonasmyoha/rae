@@ -52,6 +52,43 @@ What threads and SIMD are worth:
   scalar and 8.1 ms SIMD single-threaded. It fits 4 ms only with at least 4
   workers: 3.8 ms scalar (no margin) or 2.75 ms with SIMD.
 
+### 2b. The Rae port on the worker pool (P9b, 2026-10-05)
+
+The port's step runs its parallel sites as `parallelLoop`s:
+- each solver stage over its blocks;
+- pair finding, collide, finalize, sensors and bullets over chunks of their
+  blocks, one TaskContext per chunk, merged in chunk order.
+
+Fixture 997 and the oracle fixtures replayed at 8 workers show the result is
+identical at every worker count. Same scenes as above, measured interleaved
+with Box3D's app on the same machine (load ~5-6 from other work), best of
+3, ms per step. The Rae side runs at `RAE_WORKERS=N` with world workerCount
+N, and uses the release profile's `Float4` lowering.
+
+| scene | workers | C scalar | C SIMD | Rae | Rae / C scalar |
+|---|---|---|---|---|---|
+| large_pyramid | 1 / 2 / 4 / 8 | 11.73 / 6.61 / 3.79 / 3.40 | 8.30 / 4.79 / 2.85 / 2.66 | 12.92 / 6.72 / 3.92 / 4.09 | 1.10 / 1.02 / 1.03 / 1.20 |
+| many_pyramids | 1 / 2 / 4 / 8 | 22.27 / 12.19 / 6.88 / 5.25 | 16.15 / 8.96 / 5.29 / 3.84 | 25.14 / 13.13 / 7.32 / 5.66 | 1.13 / 1.08 / 1.06 / 1.08 |
+| joint_grid | 1 / 2 / 4 / 8 | 11.82 / 6.32 / 3.41 / 2.60 | 11.90 / 6.33 / 3.45 / 2.59 | 13.52 / 6.99 / 3.88 / 3.44 | 1.14 / 1.11 / 1.14 / 1.32 |
+| convex_pile | 1 / 2 / 4 / 8 | 14.14 / 7.62 / 4.25 / 3.07 | 11.78 / 6.46 / 3.65 / 2.71 | 16.71 / 10.18 / 6.56 / 5.26 | 1.18 / 1.34 / 1.54 / 1.71 |
+| rain | 1 / 2 / 4 / 8 | 5.01 / 2.97 / 1.78 / 1.52 | 4.94 / 2.93 / 1.80 / 1.52 | 6.23 / 4.59 / 4.11 / 5.56 | 1.24 / 1.55 / 2.31 / 3.66 |
+
+What it shows:
+- **The pyramids and the joint grid scale like Box3D.** They run 3.2-4.4x
+  faster at 8 workers, against C's 3.4-4.5x. The 5 000-box pyramid is
+  3.9 ms at 4 workers, inside the 4 ms budget (§1).
+- **The convex pile scales 3.2x**, against C's 4.6x. Sampled at 8 workers,
+  the workers mostly wait while the main thread runs the step's serial
+  parts: contact creation from the new pairs, collide's state pass, the tree
+  rebuild and refit, and the solver's setup. Box3D overlaps the tree
+  rebuild with collide.
+- **Rain stops scaling at 4 workers and is slower at 8.** At 8 workers most
+  samples sit in the runtime's buffer alloc and free. The mesh narrow
+  phase (`computeMeshManifolds`, `collideTriangleInto`, `queryMesh`)
+  allocates per contact and per triangle. Every allocation also updates
+  the runtime's always-on atomic counters, so the cores fight over one
+  cache line. Both are queued.
+
 ## 3. What that means for the Rae port
 
 The port runs at `k` times Box3D's scalar C. P0 measured the access pattern
