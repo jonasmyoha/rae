@@ -156,6 +156,10 @@ func recycleContact(
   ret false
 }
 
+# How many contacts ahead collideTask prefetches (Box3D's
+# contactPrefetchDistance: ~200 cycles of memory latency).
+const contactPrefetchDistance: Int = 4
+
 # b3CollideTask: contacts `startIndex` to `endIndex` of `contactIndices`.
 func collideTask(
   world: mod PhysicsWorld
@@ -170,6 +174,13 @@ func collideTask(
     right: speculativeDistance(lengthUnitsPerMeter: world.lengthUnitsPerMeter)
   )
   loop var i: Int = startIndex, i < endIndex, ++i {
+    # Prefetch the contact a few iterations ahead, as Box3D does: its random
+    # load is in cache by the time the loop reaches it
+    if i + contactPrefetchDistance < endIndex {
+      world.contacts.prefetch(
+        index: contactIndices.copyAtDefault(index: i + contactPrefetchDistance)
+      )
+    }
     let contactId: Int = contactIndices.copyAtDefault(index: i)
     # (Read through a view: a copy of a contact is a deep copy.)
     var shapeIdA: Int = 0

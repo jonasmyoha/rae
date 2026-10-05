@@ -2141,6 +2141,10 @@ static bool method_only_returns_nothing(CFuncContext* ctx, const AstExpr* receiv
 }
 
 static bool call_result_may_pool(CFuncContext* ctx, const AstExpr* e, Str name, const AstExpr* receiver) {
+  /* sizeof(T) is an Int the backend folds; its type is not inferred, and an
+   * unknown result counts as a possible String, which wrapped every
+   * List.create/grow (and List.prefetch) in a pool mark/flush pair. */
+  if (str_eq_cstr(name, "sizeof")) return false;
   const AstTypeRef* tr = infer_expr_type_ref(ctx, e);
   if (!tr && name_only_returns_nothing(ctx, name)) return false;
   if (!tr && method_only_returns_nothing(ctx, receiver, name)) return false;
