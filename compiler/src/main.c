@@ -2536,6 +2536,52 @@ static bool build_c_backend_output(const char* entry_file,
 /* Defined with the watch supervisor below; used by the plain `run` path to give
  * each app its own directory (hot-reload channel + window geometry). */
 #define RAE_HOT_RELOAD_DIR_ENV "RAE_HOT_RELOAD_DIR"
+/* Whether the generated C at `c_path` #includes `header` (the `cheader`
+ * directives come first, so the start of the file is enough). */
+static bool c_output_includes(const char* c_path, const char* header) {
+  FILE* f = fopen(c_path, "r");
+  if (!f) return false;
+  char needle[256];
+  snprintf(needle, sizeof(needle), "#include \"%s\"", header);
+  char line[1024];
+  bool found = false;
+  for (int i = 0; i < 4000 && fgets(line, sizeof(line), f); i++) {
+    if (strstr(line, needle)) { found = true; break; }
+  }
+  fclose(f);
+  return found;
+}
+
+/* Upstream Box3D's C library (the C-library physics track, lib/box3d,
+ * docs/physics-two-implementations.md §4): a program whose C includes its
+ * header links the static library tools/box3d/build.sh installed at
+ * $RAE_BOX3D (default ~/.cache/rae/box3d/install) - lib/libbox3d.a (SIMD), or
+ * lib/scalar/libbox3d.a with RAE_BOX3D_SCALAR=1 (the oracle's build). Fills
+ * `flags` (empty when the program does not use it); false when it does but the
+ * library is missing. */
+static bool box3d_link_flags(const char* c_path, char* flags, size_t cap) {
+  flags[0] = '\0';
+  if (!c_output_includes(c_path, "box3d/box3d.h")) return true;
+  const char* root = getenv("RAE_BOX3D");
+  char rootbuf[PATH_MAX];
+  if (!root || !*root) {
+    const char* home = getenv("HOME"); if (!home) home = ".";
+    snprintf(rootbuf, sizeof(rootbuf), "%s/.cache/rae/box3d/install", home);
+    root = rootbuf;
+  }
+  const char* scalar = getenv("RAE_BOX3D_SCALAR");
+  bool use_scalar = scalar && strcmp(scalar, "1") == 0;
+  char lib[PATH_MAX + 32];
+  snprintf(lib, sizeof(lib), "%s/lib/%slibbox3d.a", root, use_scalar ? "scalar/" : "");
+  struct stat st;
+  if (stat(lib, &st) != 0) {
+    fprintf(stderr, "error: this program imports box3d, but %s is missing; run tools/box3d/build.sh (or set RAE_BOX3D)\n", lib);
+    return false;
+  }
+  snprintf(flags, cap, "-I%s/include %s", root, lib);
+  return true;
+}
+
 static bool gcc_link_c_to_binary(const char* entry_rae_file,
                                  const char* c_path,
                                  const char* out_bin,
@@ -2613,10 +2659,12 @@ static bool gcc_link_c_to_binary(const char* entry_rae_file,
   // every program before it becomes a default (docs/float4-design.md §6.3).
   const char* extra_cflags = getenv("RAE_EXTRA_CFLAGS");
   if (!extra_cflags) extra_cflags = "";
-  char cmd[PATH_MAX * 4];
-  snprintf(cmd, sizeof(cmd), "gcc -std=c11 %s%s %s -w %s %s -I%s -I/opt/homebrew/include -L/opt/homebrew/lib -framework Foundation -framework ImageIO -framework CoreGraphics %s %s/rae_runtime.c%s -o %s",
+  char box3d_flags[PATH_MAX * 2 + 64];
+  if (!box3d_link_flags(c_path, box3d_flags, sizeof(box3d_flags))) return false;
+  char cmd[PATH_MAX * 6];
+  snprintf(cmd, sizeof(cmd), "gcc -std=c11 %s%s %s -w %s %s -I%s -I/opt/homebrew/include -L/opt/homebrew/lib -framework Foundation -framework ImageIO -framework CoreGraphics %s %s/rae_runtime.c%s %s -o %s",
            opt_flags, g_float4_scalar ? " -DRAE_FLOAT4_SCALAR" : "", extra_cflags, sdl3_flags, wgpu_flags, runtime_dir,
-           c_path, runtime_dir, extra_c_files, out_bin);
+           c_path, runtime_dir, extra_c_files, box3d_flags, out_bin);
 
   long long cc_started_ms = rae_now_ms();
   progress_phase(PROGRESS_CC);
