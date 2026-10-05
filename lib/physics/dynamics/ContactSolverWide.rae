@@ -366,6 +366,15 @@ func prepareContactsWide(
     )
     loop wideIndex < colorWideEndIndex {
       let localWideIndex: Int = wideIndex - span.start
+      # Prefetch the next wide constraint's contacts (read by id, scattered)
+      if let color: view GraphColor => world.constraintGraph.colors.viewAt(index: span.colorIndex) {
+        loop var lane: Int = 4, lane < 8, ++lane {
+          let nextIndex: Int = 4 * localWideIndex + lane
+          if nextIndex < span.count {
+            world.contacts.prefetch(index: color.convexContacts.copyAtDefault(index: nextIndex))
+          }
+        }
+      }
       var wide: ContactConstraintWide = zeroContactConstraintWide()
       let lane0: PrepareLane = gatherPrepareLane(
         world: world

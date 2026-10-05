@@ -195,6 +195,12 @@ RaeAny rae_ext_rae_buf_get_any(void* buf, int64_t index);
 /* Legacy buffer intrinsics (single-arg alloc, value-sized elements) */
 RAE_UNUSED static void* rae_ext___buf_alloc(int64_t count) { return rae_ext_rae_buf_alloc(count, sizeof(int64_t)); }
 RAE_UNUSED static void rae_ext___buf_free(void* buf) { rae_ext_rae_buf_free(buf); }
+/* List.prefetch: a hint that element `index` (elem_size bytes) is read
+ * soon; every cache line of it is prefetched. It changes no result. */
+static inline void rae_ext_rae_buf_prefetch(const void* buf, int64_t index, int64_t elem_size) {
+  const char* element = (const char*)buf + index * elem_size;
+  for (int64_t offset = 0; offset < elem_size; offset += 64) __builtin_prefetch(element + offset);
+}
 RAE_UNUSED static void rae_ext___buf_set_i64(void* buf, int64_t index, int64_t value) { if (buf) ((int64_t*)buf)[index] = value; }
 RAE_UNUSED static void rae_ext___buf_set_any(void* buf, int64_t index, RaeAny value) { if (buf) ((int64_t*)buf)[index] = value.as.i; }
 #define rae_ext___buf_set(buf, index, value) _Generic((value), \

@@ -66,6 +66,7 @@ same answer on purpose:
 | `copyAt(index:)`, `viewAt`, `modAt` | return `none` — a read may miss, and the caller says what happens with `if let` |
 | `copyAtFallback(index:, fallback:)` | return the fallback |
 | `set(index:, value:)`, `insert(index:, value:)`, `remove(index:)`, `swapRemove(index:)` | bounds-checked, **ignored** (the list is unchanged), and reported: `warning: List.set: index 10 is out of range for length 3` on stderr; the program continues |
+| `prefetch(index:)` | does nothing (it is only a cache hint: in range it prefetches the element's cache lines for a read soon, so a loop over scattered elements can ask for the one a few iterations ahead; it changes no result) |
 
 A read past the end is a question ("is there something at 10?") and the
 optional is the honest reply. A write past the end has no slot to land in,

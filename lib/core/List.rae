@@ -107,6 +107,19 @@ func copyAtDefault(T: type, this: view List(T), index: view Int) ret T {
   ret defaultValue
 }
 
+# A hint that element `index` will be read soon: its cache lines are
+# prefetched, so a loop over scattered elements can ask for the one a few
+# iterations ahead (Box3D prefetches its contacts this way). It changes no
+# result; out of range it does nothing.
+func prefetch(T: type, this: view List(T), index: view Int) {
+  if index < 0 or index >= this.length {
+    ret
+  }
+  unsafe {
+    rae_ext_rae_buf_prefetch(buf: this.data, index: index, elemSize: sizeof(T))
+  }
+}
+
 # A read-only window INTO the list's own storage, rather than a copy of the
 # element. `at` hands back an optional value, so reading one field of a
 # big struct copies the whole struct — including a deep copy of every heap

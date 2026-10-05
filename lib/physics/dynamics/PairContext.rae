@@ -36,6 +36,8 @@ type PairContext {
   batch: List(CandidatePair)
   # The batch's plain (non-compound) pairs, reused by every flush
   plain: List(CandidatePair)
+  # The plain pairs not yet in the pair set, before the filter
+  survivors: List(CandidatePair)
   pairKeys: List(UInt64)
   proxyStack: List(Int)
   crossStack: List(IndexPair)
@@ -51,6 +53,7 @@ func createPairContext() ret PairContext {
     checkCompounds: false
     batch: List.create(CandidatePair, cap: candidateBatch)
     plain: List.create(CandidatePair, cap: candidateBatch)
+    survivors: List.create(CandidatePair, cap: candidateBatch)
     pairKeys: List.create(UInt64, cap: 64)
     proxyStack: List.create(Int, cap: 64)
     crossStack: List.create(IndexPair, cap: 64)
@@ -66,6 +69,7 @@ func resetPairContext(context: mod PairContext) {
   context.checkCompounds = false
   context.batch.clear()
   context.plain.clear()
+  context.survivors.clear()
   context.pairKeys.clear()
   context.proxyStack.clear()
   context.crossStack.clear()
