@@ -1324,6 +1324,86 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" "$TMP_OUT/free-render.log" "$TMP_OUT/free-screenshot.log" "$TMP_OUT/pause-render.log" "$TMP_OUT/pause-screenshot.log" "$TMP_OUT/settings-render.log" "$TMP_OUT/settings-screenshot.log" "$TMP_OUT/scene2-render.log" "$TMP_OUT/scene2-screenshot.log" "$TMP_OUT/scene3-render.log" "$TMP_OUT/scene3-screenshot.log" 2>/dev/null | sed 's/^/  /'
             ((FAILED++))
           fi
+        elif [ "$EXAMPLE_NAME" = "122_physics_playground_port" ]; then
+          # The physics playground on the Rae port of Box3D
+          # (docs/physics-two-implementations.md §3). Four checks:
+          # 1. Determinism: every scene stepped 120 fixed steps at 1 worker and
+          #    at the pool's worker count must hash identically (the app exits
+          #    1 on a mismatch and prints one line per scene).
+          # 2. A headless frame of the pyramid with its HUD and FPS meter.
+          # 3. Memory flat WHILE running: scenes switch every 4 s with
+          #    autofire on, so bodies spawn and despawn the whole run (the
+          #    test pointer aims the balls into the scene, where the pool's
+          #    capacity and age limits retire them). A round of all six
+          #    scenes is 24 s. `[mem:live]` is sampled every 2 s, and the PEAK
+          #    of a later round must match the peak of the round after
+          #    warm-up. Peaks, not single samples, because the sampler's
+          #    clock starts at process launch and the app's at its first
+          #    frame, so a timestamp does not tell which scene is loaded. The
+          #    5-minute version of this run is in the doc: the peaks were
+          #    identical over four rounds.
+          # 4. `leaks --atExit` over a shorter run of the same kind.
+          SCREENSHOT="$TMP_OUT/playground.bmp"
+          PLAYGROUND_OK=1
+          if (cd .. && RAE_PHYSICS_DETERMINISM=120 \
+             perl -e 'alarm shift; exec @ARGV' 120 "$TMP_OUT/app") > "$TMP_OUT/determinism.log" 2>&1 \
+             && grep -q '^determinism: 0 scenes differ' "$TMP_OUT/determinism.log" \
+             && [ "$(grep -c 'identical true' "$TMP_OUT/determinism.log")" -eq 6 ]; then
+            :
+          else
+            PLAYGROUND_OK=0
+            echo "  determinism check failed (every scene must hash the same at 1 and N workers):"
+            grep -a 'hash\|determinism' "$TMP_OUT/determinism.log" | sed 's/^/    /'
+          fi
+          if (cd .. && RAE_SDL_HEADLESS_MS=3000 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
+             perl -e 'alarm shift; exec @ARGV' 60 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
+             && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=200 \
+                > "$TMP_OUT/screenshot.log" 2>&1; then
+            :
+          else
+            PLAYGROUND_OK=0
+            echo "  screenshot check failed:"
+            cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" 2>/dev/null | grep -v '^\[present\]' | tail -8 | sed 's/^/    /'
+          fi
+          if (cd .. && RAE_PLAYGROUND_CYCLE_SECONDS=4 RAE_PLAYGROUND_AUTOFIRE=1 \
+             RAE_GPU2D_TEST_POINTER="sweep:640,300,560,60" \
+             RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=78000 RAE_MEM_STATS=1 RAE_MEM_STATS_EVERY_MS=2000 \
+             perl -e 'alarm shift; exec @ARGV' 150 "$TMP_OUT/app") > "$TMP_OUT/live-growth.log" 2>&1 \
+             && [ "$(grep -c '^\[playground\] cycle' "$TMP_OUT/live-growth.log")" -ge 18 ] \
+             && awk '
+                  function field(line, key) { sub(".*" key "=", "", line); sub(/ .*/, "", line); return line + 0 }
+                  /^\[mem:live\]/ {
+                    t = field($0, "t"); bufs = field($0, "bufs"); bytes = field($0, "buf_bytes")
+                    if (t >= 26000 && t < 50000) { baseSeen++; if (bufs > baseBufs) baseBufs = bufs; if (bytes > baseBytes) baseBytes = bytes }
+                    if (t >= 50000 && t < 74000) { lastSeen++; if (bufs > lastBufs) lastBufs = bufs; if (bytes > lastBytes) lastBytes = bytes }
+                  }
+                  END { exit !(baseSeen >= 10 && lastSeen >= 10 && lastBufs - baseBufs <= 64 && lastBytes - baseBytes <= 262144) }
+                ' "$TMP_OUT/live-growth.log"; then
+            :
+          else
+            PLAYGROUND_OK=0
+            echo "  live growth check failed (scene switches + autofire; the peak of a later round must match an earlier one):"
+            grep -a '^\[mem:live\]\|^\[playground\]' "$TMP_OUT/live-growth.log" 2>/dev/null | sed 's/^/    /'
+          fi
+          if command -v leaks >/dev/null 2>&1; then
+            (cd .. && RAE_PLAYGROUND_CYCLE_SECONDS=3 RAE_PLAYGROUND_AUTOFIRE=1 \
+               RAE_GPU2D_TEST_POINTER="sweep:640,300,560,60" \
+               RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=20000 MallocStackLogging=1 \
+               perl -e 'alarm shift; exec @ARGV' 150 leaks --atExit -- "$TMP_OUT/app") > "$TMP_OUT/leaks-at-exit.log" 2>&1 || true
+            if ! grep -q 'leaks for' "$TMP_OUT/leaks-at-exit.log" \
+               || grep -q "^STACK OF .*'ROOT LEAK:" "$TMP_OUT/leaks-at-exit.log"; then
+              PLAYGROUND_OK=0
+              echo "  leaks --atExit found unreachable memory (or did not report):"
+              grep -a "leaks for\|^STACK OF .*'ROOT LEAK:" "$TMP_OUT/leaks-at-exit.log" | sort -u | head -8 | sed 's/^/    /'
+            fi
+          fi
+          if [ "$PLAYGROUND_OK" -eq 1 ]; then
+            echo "PASS: $EXAMPLE_NAME (6 scenes deterministic across worker counts, HUD frame, memory flat over scene switches + autofire, leaks clean)"
+            ((PASSED++))
+          else
+            echo "FAIL: $EXAMPLE_NAME (physics playground gate)"
+            ((FAILED++))
+          fi
         elif [ "$EXAMPLE_NAME" = "115_procgen_showcase" ]; then
           # The procgen scene (trees, rocks, the texture swatches over it) must
           # come out SHADED: thousands of colours, not a swatch strip over black.
