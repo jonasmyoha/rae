@@ -373,7 +373,17 @@ func solveSphericalJoint(
     massScale = base.constraintSoftness.massScale
     impulseScale = base.constraintSoftness.impulseScale
   }
-  let k: Matrix3 = pointToPointMass(base: base, rA: rA, rB: rB)
+  # pointToPointMass, written out as Box3D's solve does: a call here kept
+  # clang from inlining it and cost ~14% of the joint grid
+  # K = (mA + mB) * I - skew(rA) * iA * skew(rA) - skew(rB) * iB * skew(rB)
+  let sA: Matrix3 = skew(vector: rA)
+  let sB: Matrix3 = skew(vector: rB)
+  let kA: Matrix3 = multiply(left: sA, right: multiply(left: iA, right: sA))
+  let kB: Matrix3 = multiply(left: sB, right: multiply(left: iB, right: sB))
+  var k: Matrix3 = negate(matrix: add(left: kA, right: kB))
+  k.columnX.x = k.columnX.x + (base.invMassA + base.invMassB)
+  k.columnY.y = k.columnY.y + (base.invMassA + base.invMassB)
+  k.columnZ.z = k.columnZ.z + (base.invMassA + base.invMassB)
   let b: Vec3 = solve3(matrix: k, vector: add(left: cdot, right: bias))
   let impulse: Vec3 = mulSub(
     base: scale(scale: -massScale, vector: b)
