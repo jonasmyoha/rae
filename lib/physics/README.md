@@ -498,6 +498,7 @@ torque limit, and angle limits). The two share the point-to-line solve.
 | `b3WheelJoint` `b3WheelJointDef` `b3CreateWheelJoint` | `WheelJointData` `WheelJointDef` `createWheelJoint` |
 | `b3PreparePrismaticJoint` `b3WarmStartPrismaticJoint` `b3SolvePrismaticJoint` | `preparePrismaticJoint` `warmStartPrismaticJoint` `solvePrismaticJoint` (`dynamics/PrismaticJoint`) |
 | `b3PrepareWheelJoint` `b3WarmStartWheelJoint` `b3SolveWheelJoint` | `prepareWheelJoint` `warmStartWheelJoint` `solveWheelJoint` (`dynamics/WheelJoint`) |
+| `b3WheelJoint_EnableSpinMotor` `_SetSpinMotorSpeed` `_SetMaxSpinTorque` `_SetTargetSteeringAngle` `_GetSpinSpeed` `_GetSteeringAngle` | `wheelJointEnableSpinMotor` `wheelJointSetSpinMotorSpeed` `wheelJointSetMaxSpinTorque` `wheelJointSetTargetSteeringAngle` `wheelJointGetSpinSpeed` `wheelJointGetSteeringAngle` (`dynamics/WheelJointControl`, the controls a driver sets between steps) |
 
 The check: fixture 984's golden gains two worlds: a slider down a slope to
 its limit, a sprung slider, a motorised elevator lifting a box to its upper

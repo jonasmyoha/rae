@@ -300,6 +300,57 @@ After the maintainer's first try-out (2026-10-05) the controls changed:
     in compiler/src/main.c). The twin's branch needs them added there.
   - The test pointer is in design units (1280 x 800), not pixels.
 
+### The vehicle on track A (2026-10-05)
+
+`examples/124_vehicle_port` drives Box3D's Driving sample on the port.
+
+- **The car and course are shared data.** `lib/physicsScenes/VehicleTypes`
+  and `VehicleLibrary` hold them, so `125_vehicle_c` reuses them.
+  - **The car** is the sample's numbers, verbatim. It keeps its own Y-up
+    local frame, and its bodies are placed with a quarter turn about x into
+    Rae's Z-up world. Two changes from the sample, both from the brief:
+    every wheel has a spin motor, with the drive torque split 70/30 between
+    the rear and front axles; and forward is the chassis' local +x, the way
+    the sample's W key really drives it. (The sample's own speed readout
+    projects on -x.)
+  - **The course** is a 65 x 65 height field of 4 m cells: a flat pad
+    with two ramps, a wall and nine crates, then rolling hills.
+  - Plus the course's render mesh, made from the height field's own
+    triangles, and `wheelTargets`, which turns a throttle and steering
+    command into each wheel's steering target, spin speed and torque.
+- **The track adapter lives in the package.** It is
+  `physicsScenes/port/VehicleSpawn`, so the example and fixture 1002 share
+  one copy. 125 adds `physicsScenes/box3d/VehicleSpawn` with the same
+  functions, and its `Main` differs from 124's in that one `open` line.
+- **The window loop** is `VehicleApp` and `VehicleUi`: a chase camera, a
+  four-line HUD and the FPS meter. W/S drive, A/D steer, R respawns, P
+  toggles the autopilot. The deferred frame is now `PhysicsFrame`, shared
+  with the playgrounds.
+- **What track A gained:**
+  - `dynamics/WheelJointControl`, which ports `b3WheelJoint_*`: the spin
+    motor, the steering target, spin speed and steering angle.
+  - In the ECS: `addWheelJoint`, `addParallelJointToVenue`,
+    `addVenueHeightField`, the wheel setters, `wakeEntity` and
+    `entityLinearVelocity`.
+  - Track B needs the same ECS functions over the C library.
+- **Fixture 1002_vehicle_drive:** on flat ground, full throttle reaches
+  11.8 m/s, which is the motors' 30 rad/s on 0.4 m wheels. Full steering
+  turns the car through more than 90 degrees while it stays upright.
+- **Gate** (`run_examples.sh`, one branch for 124 and 125):
+  - the autopilot's 300-step drive must hash the same at 1 and 8 workers,
+    and equal `tools/box3d-oracle/goldens/vehicle.golden`;
+  - a headless frame must not be blank;
+  - memory must stay flat while the car and crates respawn every 4 s;
+  - `leaks --atExit` must find no root leak.
+- **5-minute memory test** (respawn every 5 s, 59 respawns):
+  - live buffers stayed between 2 317 and 2 343, varying with the car's
+    contacts, and bytes between 8.33 and 8.34 MB, with no growth;
+  - nothing was outstanding at exit.
+- **The autopilot** is a pure function of time. It drives straight over
+  the ramp for 3 s (a 3 m jump), then weaves into the hills. Box3D's
+  upright joint is a soft 0.5 Hz spring, so a car that lands on its side
+  stays there, as in the sample; R respawns it.
+
 ## 4. Track B: building the C library
 
 Built by B1 (2026-10-05).

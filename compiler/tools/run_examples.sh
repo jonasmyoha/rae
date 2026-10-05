@@ -1446,6 +1446,104 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             echo "FAIL: $EXAMPLE_NAME (physics playground gate)"
             ((FAILED++))
           fi
+        elif [ "$EXAMPLE_NAME" = "124_vehicle_port" ] \
+             || [ "$EXAMPLE_NAME" = "125_vehicle_c" ]; then
+          # The vehicle (Box3D's Driving car on a height-field course) on
+          # both tracks: 124 on the Rae port, 125 on Box3D's C library
+          # (docs/physics-two-implementations.md §3). Four checks:
+          # 1. Determinism: the autopilot drives the car 300 fixed steps at 1
+          #    worker and at the pool's worker count; both hashes must be the
+          #    same, and equal tools/box3d-oracle/goldens/vehicle.golden - the
+          #    same file for both tracks. 125 is also linked against the
+          #    scalar library and must print the same hash.
+          # 2. A headless frame (the car on the course, the HUD) not blank.
+          # 3. Memory flat WHILE running: RAE_VEHICLE_CYCLE_SECONDS=4 respawns
+          #    the car (five bodies, five joints) and its nine crates every 4 s
+          #    under the autopilot; the [mem:live] peak of a later 24 s window
+          #    must match the window after warm-up, and the engine's own bytes
+          #    (b3GetByteCount on 125, 0 on the port) must be the same at every
+          #    respawn. A 5-minute run of this is in the doc.
+          # 4. `leaks --atExit` over a 20 s run of the same kind.
+          SCREENSHOT="$TMP_OUT/vehicle.bmp"
+          VEHICLE_OK=1
+          VEHICLE_BINARIES="$TMP_OUT/app"
+          if [ "$EXAMPLE_NAME" = "125_vehicle_c" ]; then
+            if gcc -O2 -ffp-contract=off -o "$TMP_OUT/app-scalar" "$TMP_OUT/out.c" "$TMP_OUT/rae_runtime.c" \
+               -I"$TMP_OUT" -I/opt/homebrew/include -L/opt/homebrew/lib -DRAE_HAS_SDL3 $WGPU_FLAGS \
+               -I"$BOX3D_ROOT/include" "$BOX3D_ROOT/lib/scalar/libbox3d.a" \
+               -lSDL3 -framework Foundation -framework ImageIO -framework CoreGraphics > "$TMP_OUT/link-scalar.log" 2>&1; then
+              VEHICLE_BINARIES="$VEHICLE_BINARIES $TMP_OUT/app-scalar"
+            else
+              VEHICLE_OK=0
+              echo "  scalar Box3D link failed:"
+              sed 's/^/    /' "$TMP_OUT/link-scalar.log" | tail -5
+            fi
+          fi
+          for VEHICLE_BINARY in $VEHICLE_BINARIES; do
+            if (cd .. && RAE_PHYSICS_DETERMINISM=300 \
+               perl -e 'alarm shift; exec @ARGV' 120 "$VEHICLE_BINARY") > "$TMP_OUT/determinism.log" 2>&1 \
+               && grep -q 'vehicle: 300 steps, hash .* identical true' "$TMP_OUT/determinism.log" \
+               && sed -nE 's/^track [AB] \([^)]*\) vehicle: [0-9]+ steps, hash ([0-9]+) at 1 worker.*/vehicle \1/p' \
+                    "$TMP_OUT/determinism.log" > "$TMP_OUT/hashes.txt" \
+               && grep -v '^#' ../tools/box3d-oracle/goldens/vehicle.golden | diff - "$TMP_OUT/hashes.txt" \
+                    > "$TMP_OUT/hash-diff.log" 2>&1; then
+              :
+            else
+              VEHICLE_OK=0
+              echo "  determinism check failed for $(basename "$VEHICLE_BINARY") (identical at 1 and N workers, equal to vehicle.golden):"
+              grep -a 'hash\|vehicle' "$TMP_OUT/determinism.log" | sed 's/^/    /'
+              sed 's/^/    /' "$TMP_OUT/hash-diff.log" 2>/dev/null
+            fi
+          done
+          if (cd .. && RAE_VEHICLE_AUTOPILOT=1 RAE_SDL_HEADLESS_MS=3000 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
+             perl -e 'alarm shift; exec @ARGV' 60 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
+             && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=200 \
+                > "$TMP_OUT/screenshot.log" 2>&1; then
+            :
+          else
+            VEHICLE_OK=0
+            echo "  screenshot check failed:"
+            cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" 2>/dev/null | grep -v '^\[present\]' | tail -8 | sed 's/^/    /'
+          fi
+          if (cd .. && RAE_VEHICLE_CYCLE_SECONDS=4 RAE_VEHICLE_AUTOPILOT=1 \
+             RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=78000 RAE_MEM_STATS=1 RAE_MEM_STATS_EVERY_MS=2000 \
+             perl -e 'alarm shift; exec @ARGV' 150 "$TMP_OUT/app") > "$TMP_OUT/live-growth.log" 2>&1 \
+             && [ "$(grep -c '^\[vehicle\] cycle' "$TMP_OUT/live-growth.log")" -ge 18 ] \
+             && [ "$(grep -c '^\[vehicle\] engine bytes between respawns' "$TMP_OUT/live-growth.log")" -ge 18 ] \
+             && [ "$(sed -n 's/^\[vehicle\] engine bytes between respawns //p' "$TMP_OUT/live-growth.log" | sort -u | wc -l)" -eq 1 ] \
+             && awk '
+                  function field(line, key) { sub(".*" key "=", "", line); sub(/ .*/, "", line); return line + 0 }
+                  /^\[mem:live\]/ {
+                    t = field($0, "t"); bufs = field($0, "bufs"); bytes = field($0, "buf_bytes")
+                    if (t >= 26000 && t < 50000) { baseSeen++; if (bufs > baseBufs) baseBufs = bufs; if (bytes > baseBytes) baseBytes = bytes }
+                    if (t >= 50000 && t < 74000) { lastSeen++; if (bufs > lastBufs) lastBufs = bufs; if (bytes > lastBytes) lastBytes = bytes }
+                  }
+                  END { exit !(baseSeen >= 10 && lastSeen >= 10 && lastBufs - baseBufs <= 64 && lastBytes - baseBytes <= 262144) }
+                ' "$TMP_OUT/live-growth.log"; then
+            :
+          else
+            VEHICLE_OK=0
+            echo "  live growth check failed (car + crates respawned every 4 s; the peak of a later window must match an earlier one):"
+            grep -a '^\[mem:live\]\|^\[vehicle\] \(cycle\|engine\)' "$TMP_OUT/live-growth.log" 2>/dev/null | tail -40 | sed 's/^/    /'
+          fi
+          if command -v leaks >/dev/null 2>&1; then
+            (cd .. && RAE_VEHICLE_CYCLE_SECONDS=3 RAE_VEHICLE_AUTOPILOT=1 \
+               RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=20000 MallocStackLogging=1 \
+               perl -e 'alarm shift; exec @ARGV' 150 leaks --atExit -- "$TMP_OUT/app") > "$TMP_OUT/leaks-at-exit.log" 2>&1 || true
+            if ! grep -q 'leaks for' "$TMP_OUT/leaks-at-exit.log" \
+               || grep -q "^STACK OF .*'ROOT LEAK:" "$TMP_OUT/leaks-at-exit.log"; then
+              VEHICLE_OK=0
+              echo "  leaks --atExit found unreachable memory (or did not report):"
+              grep -a "leaks for\|^STACK OF .*'ROOT LEAK:" "$TMP_OUT/leaks-at-exit.log" | sort -u | head -8 | sed 's/^/    /'
+            fi
+          fi
+          if [ "$VEHICLE_OK" -eq 1 ]; then
+            echo "PASS: $EXAMPLE_NAME (autopilot drive deterministic across worker counts and equal to vehicle.golden, frame, memory flat over respawns, leaks clean)"
+            ((PASSED++))
+          else
+            echo "FAIL: $EXAMPLE_NAME (vehicle gate)"
+            ((FAILED++))
+          fi
         elif [ "$EXAMPLE_NAME" = "115_procgen_showcase" ]; then
           # The procgen scene (trees, rocks, the texture swatches over it) must
           # come out SHADED: thousands of colours, not a swatch strip over black.

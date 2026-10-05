@@ -58,6 +58,7 @@ open physicsScenes/SceneHud
 open physicsScenes/BallPool
 open physicsScenes/PlaygroundRender
 open physicsScenes/PlaygroundUi
+open physicsScenes/PhysicsFrame
 
 # The pyramid's body count (the HUD's slider sets it in the window)
 const defaultPlaygroundBodyCount: Int = 1000
@@ -507,8 +508,7 @@ func finishPlaygroundFrame(
   uiFrameEnd(world: uiWorld, uiSystems: uiSystems)
 }
 
-# One frame through the deferred graph: the bodies as shadow casters, the
-# instanced geometry pass, the generic passes, the HUD, present.
+# One frame through the deferred graph (PhysicsFrame).
 func renderPlaygroundFrame(
   app: mod PlaygroundApp
   renderer: mod DeferredRenderer
@@ -517,77 +517,24 @@ func renderPlaygroundFrame(
   renderShapes: view ComponentTable(RenderShape)
   transforms: view ComponentTable(Transform3D)
 ) {
-  let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
-  let reach: Float = app.sceneReach
-  loop var passIndex: Int = 0, passIndex < deferredOrderLength(renderer: renderer), ++passIndex {
-    let tag: Int = deferredTagAt(renderer: renderer, i: passIndex)
-    if tag is RenderTag.shadow {
-      let cascades: ShadowCascades = fitShadowCascades(
-        camPos: app.camera.position
-        camTarget: app.camera.target
-        fovYDeg: app.camera.fovYDeg
-        aspect: aspect
-        near: app.camera.nearZ
-        far: reach * 3.0
-        sunDir: app.light.sunDir
-        count: 3
-        resolution: 2048
-        lambda: 0.7
-        backExtent: reach * 1.5
-      )
-      beginShadowPass(renderer: renderer, c: cascades)
-      queueShadowCasters(
-        renderer: renderer
-        meshes: app.meshes
-        renderShapes: renderShapes
-        transforms: transforms
-      )
-      endShadowPass(renderer: renderer)
-      if app.debugLog {
-        log("[shadow] casters {shadowCasterCount(renderer: renderer)}")
-      }
-    } else if tag is RenderTag.gbuffer {
-      ensureRendererResources(renderer: renderer)
-      if let resources: mod GpuResources => renderer.gpuResources {
-        Gbuffer.beginPass(
-          cache: renderer.passes.gbuffer
-          resources: resources
-          camera: app.camera
-          light: app.light
-          aspect: aspect
-        )
-        drawPlaygroundGeometry(
-          cache: renderer.passes.gbuffer
-          resources: resources
-          batches: app.batches
-          groundMesh: app.groundMesh
-        )
-        Gbuffer.endPass(cache: renderer.passes.gbuffer, resources: resources)
-      }
-    } else if tag is RenderTag.uiOverlay {
-      Gpu2d.beginFrameLoad(canvas: renderer.canvas)
-      drawPlaygroundUi(
-        ui: app.ui
-        world: uiWorld
-        systems: uiSystems
-        canvas: renderer.canvas
-      )
-    } else if tag is RenderTag.present {
-      Gpu2d.endFrame(canvas: renderer.canvas)
-    } else {
-      renderDeferredPass(
-        renderer: renderer
-        tag: tag
-        camera: app.camera
-        light: app.light
-        aspect: aspect
-      )
-    }
-  }
+  renderPhysicsFrame(
+    renderer: renderer
+    meshes: app.meshes
+    batches: app.batches
+    groundMesh: app.groundMesh
+    camera: app.camera
+    light: app.light
+    reach: app.sceneReach
+    renderShapes: renderShapes
+    transforms: transforms
+    uiWorld: uiWorld
+    uiSystems: uiSystems
+    gpuUi: app.ui.gpuUi
+    debugOverlay: app.ui.debugOverlay
+    debugLog: app.debugLog
+  )
 }
 
 func closePlaygroundWindow(renderer: mod DeferredRenderer) {
-  shutdownDeferredRenderer(renderer: renderer)
-  Gbuffer.shutdownAll()
-  Gpu2d.closeWindow()
+  closePhysicsWindow(renderer: renderer)
 }

@@ -1,0 +1,359 @@
+# The vehicle examples' window, shared by both tracks
+# (docs/physics-two-implementations.md §3): everything of the frame loop that
+# does not touch a physics engine. Each example's Main makes only the calls
+# into its track's adapter (physicsScenes/<track>/VehicleSpawn: spawn, drive,
+# step, despawn, the chassis pose) and calls these in order every frame:
+#
+#   beginVehicleFrame     time, resize, the HUD's pointer
+#   readVehicleControls   W/S/A/D (or the autopilot) into `app.command`, P,
+#                         R and the reset cycle; true when the car and crates
+#                         must be respawned
+#   updateChaseCamera     the camera behind the car, eased
+#   updateVehicleHud      the HUD lines from the car's speed and the timings
+#   finishVehicleFrame    render (instanced bodies, shadows, HUD, FPS meter) or
+#                         park in waitEvents when idle
+#
+#   RAE_VEHICLE_AUTOPILOT=1          the window opens with the autopilot on
+#   RAE_VEHICLE_CYCLE_SECONDS=<s>    respawns the car and crates every <s>
+#                                    seconds and logs each respawn (the
+#                                    memory test: bodies and joints despawn
+#                                    and spawn the whole run)
+#   RAE_VEHICLE_DEBUG=1              logs the chassis pose and the shadow
+#                                    casters of each frame
+import Math
+import Sys
+import Gpu2d
+import Sdl3
+import Keys
+import Quat
+open Vec3
+open ecs/ComponentTable
+open ecs/Transform
+open Gpu3d
+open RendererDeferred
+open Scene3d
+open app3d/UiShell
+open ui/EventLoop
+open ui/Registry
+open ui/inputSystem/InputSystem
+open ui/Ecs
+open ui/UiSystems
+open physicsScenes/SceneHud
+open physicsScenes/VehicleTypes
+open physicsScenes/VehicleLibrary
+open physicsScenes/PlaygroundRender
+open physicsScenes/PhysicsFrame
+open physicsScenes/VehicleUi
+
+# How far the camera reaches (the shadow cascades' extent)
+const vehicleReach: Float = 30.0
+
+type VehicleApp {
+  meshes: PlaygroundMeshes
+  batches: PlaygroundBatches
+  courseMesh: MeshHandle
+  ui: VehicleUi
+  camera: Camera3d
+  light: Light3d
+  stepWindow: TimingWindow
+  frameWindow: TimingWindow
+  car: VehicleDescription
+  command: VehicleCommand
+  autopilot: Bool
+  # The respawn cycle (RAE_VEHICLE_CYCLE_SECONDS; 0 is off)
+  cycleSeconds: Float
+  lastCycle: Float
+  cycleCount: Int
+  debugLog: Bool
+  # This frame
+  extentW: Float
+  extentH: Float
+  startTime: Float64
+  lastFrame: Float64
+  now: Float64
+  deltaTime: Float
+  clock: Float
+  renderedOnce: Bool
+  respawned: Bool
+  resized: Bool
+  cameraMoved: Bool
+}
+
+func openVehicleWindow(trackName: view String) {
+  Gpu2d.initWindow(width: 1280, height: 800, title: "Rae — vehicle ({trackName})")
+  Gpu2d.setDesignResolution(width: windowExtentW(), height: windowExtentH(), fit: 0)
+}
+
+# The app's shared state with the course's terrain uploaded and its HUD
+# mounted into `uiWorld`; `assetBase` is the example's fonts and theme.
+func createVehicleApp(
+  renderer: mod DeferredRenderer
+  uiWorld: mod UiWorld
+  uiSystems: mod UiSystems
+  assetBase: view String
+  course: view VehicleCourse
+) ret VehicleApp {
+  var cycleSeconds: Float = 0.0
+  let cycleSetting: String = Sys.getEnv(name: "RAE_VEHICLE_CYCLE_SECONDS")
+  if cycleSetting.length() > 0 {
+    cycleSeconds = cycleSetting.toFloat()
+  }
+  let meshes: PlaygroundMeshes = createPlaygroundMeshes(renderer: renderer, sceneCount: 0)
+  let startTime: Float64 = Gpu2d.nowSeconds()
+  var camera: Camera3d = defaultCamera3d()
+  camera.position = course.cameraStart
+  camera.target = Vec3 { x: 0.0, y: 0.0, z: 1.0 }
+  camera.farZ = 400.0
+  let app: VehicleApp = {
+    meshes: meshes
+    batches: createPlaygroundBatches(meshes: meshes)
+    courseMesh: uploadMeshData(renderer: renderer, meshData: courseMesh(course: course))
+    ui: createVehicleUi(assetBase: assetBase)
+    camera: camera
+    light: defaultLight3d()
+    stepWindow: createTimingWindow()
+    frameWindow: createTimingWindow()
+    car: drivingCar(startPosition: Vec3 { x: 0.0, y: 0.0, z: 1.2 })
+    command: VehicleCommand { throttle: 0.0, steer: 0.0 }
+    autopilot: Sys.getEnv(name: "RAE_VEHICLE_AUTOPILOT").length() > 0
+    cycleSeconds: cycleSeconds
+    lastCycle: 0.0
+    cycleCount: 0
+    debugLog: Sys.getEnv(name: "RAE_VEHICLE_DEBUG").length() > 0
+    extentW: windowExtentW()
+    extentH: windowExtentH()
+    startTime: startTime
+    lastFrame: startTime
+    now: startTime
+    deltaTime: 0.0
+    clock: 0.0
+    renderedOnce: false
+    respawned: true
+    resized: false
+    cameraMoved: false
+  }
+  mountVehicleUi(
+    ui: app.ui
+    world: uiWorld
+    systems: uiSystems
+    width: app.extentW
+    height: app.extentH
+  )
+  ret app
+}
+
+# The autopilot's command at `seconds` into a run: full throttle straight
+# over the ramp ahead for three seconds, then weaving gently left and right
+# across the pad and out into the hills. The determinism run and the memory
+# test drive with it.
+func autopilotCommand(seconds: view Float) ret VehicleCommand {
+  if seconds < 3.0 {
+    ret VehicleCommand { throttle: 1.0, steer: 0.0 }
+  }
+  ret VehicleCommand { throttle: 1.0, steer: 0.45 * Math.sin(x: 0.5 * (seconds - 3.0)) }
+}
+
+func beginVehicleFrame(app: mod VehicleApp, uiWorld: mod UiWorld, uiSystems: mod UiSystems) {
+  app.now = Gpu2d.nowSeconds()
+  app.deltaTime = (app.now - app.lastFrame) as Float
+  app.lastFrame = app.now
+  if app.deltaTime < 0.0 {
+    app.deltaTime = 0.0
+  }
+  app.clock = (app.now - app.startTime) as Float
+  app.resized = false
+  if Gpu2d.windowResized() {
+    let width: Float = windowExtentW()
+    let height: Float = windowExtentH()
+    if width > 0.0 and height > 0.0 {
+      app.extentW = width
+      app.extentH = height
+      Gpu2d.setDesignResolution(width: width, height: height, fit: 0)
+      resizeVehicleUi(
+        ui: app.ui
+        world: uiWorld
+        systems: uiSystems
+        width: width
+        height: height
+      )
+      app.resized = true
+    }
+  }
+  updateUiInput(input: app.ui.input, world: uiWorld, uiSystems: uiSystems)
+}
+
+# The driver's keys (or the autopilot) into `app.command`; P toggles the
+# autopilot. True when the car and the crates must be respawned (R, or the
+# memory test's cycle).
+func readVehicleControls(app: mod VehicleApp) ret Bool {
+  if Sdl3.isKeyPressed(key: Keys.keyP) {
+    app.autopilot = app.autopilot is false
+  }
+  if app.autopilot {
+    app.command = autopilotCommand(seconds: app.clock - app.lastCycle)
+  } else {
+    var throttle: Float = 0.0
+    var steer: Float = 0.0
+    if Sdl3.isKeyDown(key: Keys.keyW) or Sdl3.isKeyDown(key: Keys.keyUp) {
+      throttle = throttle + 1.0
+    }
+    if Sdl3.isKeyDown(key: Keys.keyS) or Sdl3.isKeyDown(key: Keys.keyDown) {
+      throttle = throttle - 1.0
+    }
+    if Sdl3.isKeyDown(key: Keys.keyA) or Sdl3.isKeyDown(key: Keys.keyLeft) {
+      steer = steer + 1.0
+    }
+    if Sdl3.isKeyDown(key: Keys.keyD) or Sdl3.isKeyDown(key: Keys.keyRight) {
+      steer = steer - 1.0
+    }
+    app.command = VehicleCommand { throttle: throttle, steer: steer }
+  }
+  var respawn: Bool = Sdl3.isKeyPressed(key: Keys.keyR)
+  if app.cycleSeconds > 0.0 and app.clock - app.lastCycle >= app.cycleSeconds {
+    app.cycleCount = app.cycleCount + 1
+    respawn = true
+    log("[vehicle] cycle {app.cycleCount}: car and crates respawned")
+  }
+  if respawn {
+    app.lastCycle = app.clock
+    app.respawned = true
+  }
+  ret respawn
+}
+
+# The camera behind the car and above it, looking just over the chassis,
+# eased so bumps do not shake the view. A camera still moving keeps the loop
+# rendering.
+func updateChaseCamera(app: mod VehicleApp, chassis: view Transform3D) {
+  if app.debugLog {
+    log(
+      "[vehicle] t {tenths(value: app.clock)} dt {app.deltaTime} throttle {app.command.throttle} chassis ({tenths(
+        value: chassis.position.x
+      )}, {tenths(value: chassis.position.y)}, {tenths(value: chassis.position.z)})"
+    )
+  }
+  var forward: Vec3 = vehicleForward(chassisRotation: chassis.rotation)
+  forward = Vec3 { x: forward.x, y: forward.y, z: 0.0 }
+  if vlen(a: forward) < 0.1 {
+    forward = Vec3 { x: 1.0, y: 0.0, z: 0.0 }
+  }
+  forward = vnorm(a: forward)
+  let eye: Vec3 = vadd(
+    a: vsub(a: chassis.position, b: vscale(a: forward, s: 9.0))
+    b: Vec3 { x: 0.0, y: 0.0, z: 3.5 }
+  )
+  let target: Vec3 = vadd(a: chassis.position, b: Vec3 { x: 0.0, y: 0.0, z: 0.8 })
+  var blend: Float = 1.0 - Math.exp(x: -5.0 * app.deltaTime)
+  if app.respawned {
+    blend = 1.0
+  }
+  let previous: Vec3 = app.camera.position
+  app.camera.position = vadd(a: previous, b: vscale(a: vsub(a: eye, b: previous), s: blend))
+  app.camera.target = vadd(
+    a: app.camera.target
+    b: vscale(a: vsub(a: target, b: app.camera.target), s: blend)
+  )
+  app.cameraMoved = vlen(a: vsub(a: app.camera.position, b: previous)) > 0.0005
+}
+
+# Record a step's time (`startedNs` from nowNs, `steps` fixed steps taken).
+func recordVehicleStep(app: mod VehicleApp, startedNs: view Int, steps: view Int) {
+  if steps > 0 {
+    addTimingSample(
+      window: app.stepWindow
+      milliseconds: ((nowNs() - startedNs) as Float) / 1000000.0 / (steps as Float)
+      now: app.clock
+    )
+  }
+}
+
+# The HUD lines; true when the text changed.
+func updateVehicleHud(
+  app: mod VehicleApp
+  uiWorld: mod UiWorld
+  uiSystems: mod UiSystems
+  trackName: view String
+  speed: view Float
+  workerCount: view Int
+) ret Bool {
+  var pilot: String = "off"
+  if app.autopilot {
+    pilot = "on"
+  }
+  let kilometresPerHour: Int = Math.round(x: Math.abs(value: speed) * 3.6) as Int
+  let lines: List(String) = {
+    "{trackName}: vehicle"
+    "speed {kilometresPerHour} km/h"
+    "physics step {tenths(value: app.stepWindow.shownAverage)} ms avg, {tenths(
+      value: app.stepWindow.shownMax
+    )} ms max, workers {workerCount}"
+    "frame {tenths(value: app.frameWindow.shownAverage)} ms avg, autopilot {pilot}"
+  }
+  ret setVehicleHudText(
+    ui: app.ui
+    world: uiWorld
+    systems: uiSystems
+    lines: lines
+  )
+}
+
+# Render the frame, or park in waitEvents when nothing needs drawing.
+func finishVehicleFrame(
+  app: mod VehicleApp
+  renderer: mod DeferredRenderer
+  uiWorld: mod UiWorld
+  uiSystems: mod UiSystems
+  renderShapes: view ComponentTable(RenderShape)
+  transforms: view ComponentTable(Transform3D)
+  awakeCount: view Int
+  hudChanged: view Bool
+) {
+  let driving: Bool = app.command.throttle is not 0.0 or app.command.steer is not 0.0
+  let needsRender: Bool = awakeCount > 0 or driving or app.cameraMoved or app.respawned or hudChanged or app.resized or app.renderedOnce is false
+  if Gpu2d.shouldRenderFrame(appNeedsRender: needsRender) is false {
+    Gpu2d.waitEvents(timeoutSec: nextWaitTimeoutSec(
+      visible: Gpu2d.renderableNow()
+      animating: false
+      mouseDown: false
+      pollWatcher: false
+      frameSec: 0.016667
+      heartbeatSec: 1.0
+    ))
+    recordVehicleFrame(
+      ui: app.ui
+      width: app.extentW
+      height: app.extentH
+      now: app.now
+      rendered: false
+    )
+  } else {
+    app.renderedOnce = true
+    app.respawned = false
+    fillBatches(batches: app.batches, renderShapes: renderShapes, transforms: transforms)
+    renderPhysicsFrame(
+      renderer: renderer
+      meshes: app.meshes
+      batches: app.batches
+      groundMesh: app.courseMesh
+      camera: app.camera
+      light: app.light
+      reach: vehicleReach
+      renderShapes: renderShapes
+      transforms: transforms
+      uiWorld: uiWorld
+      uiSystems: uiSystems
+      gpuUi: app.ui.gpuUi
+      debugOverlay: app.ui.debugOverlay
+      debugLog: app.debugLog
+    )
+    addTimingSample(window: app.frameWindow, milliseconds: app.deltaTime * 1000.0, now: app.clock)
+    recordVehicleFrame(
+      ui: app.ui
+      width: app.extentW
+      height: app.extentH
+      now: app.now
+      rendered: true
+    )
+  }
+  uiFrameEnd(world: uiWorld, uiSystems: uiSystems)
+}

@@ -267,10 +267,10 @@ func driveVehicle(
   car: view VehicleDescription
   command: view VehicleCommand
 ) {
-  let targets: List(WheelTarget) = wheelTargets(car: car, command: command)
+  let targets: List(VehicleWheelTarget) = wheelTargets(car: car, command: command)
   loop var i: Int = 0, i < world.wheelJoints.length, ++i {
     let jointId: JointId = world.wheelJoints.copyAtDefault(index: i)
-    let target: WheelTarget = targets.copyAtDefault(index: i)
+    let target: VehicleWheelTarget = targets.copyAtDefault(index: i)
     setWheelSteering(physics: world.physics, jointId: jointId, radians: target.steeringAngle)
     setWheelSpinSpeed(physics: world.physics, jointId: jointId, speed: target.spinSpeed)
     setWheelMaxSpinTorque(physics: world.physics, jointId: jointId, torque: target.maxSpinTorque)
