@@ -82,10 +82,11 @@ So:
    should top out where the HUD shows the budget breaking, and say so — a
    showcase of real performance, not a staged one.
 
-**Measured (P9a, P9a-2, P9a-5, 2026-10-05):** k = 1.18 on the large pyramid
-single-threaded (13.38 ms against C scalar's 11.30), 1.35 on many pyramids,
-1.16 on the joint grid (2.58 before the joint fixes) and 2.50 on the convex
-pile, at load ~3.4. The causes and the follow-ups are in
+**Measured (P9a, P9a-2, P9a-3, P9a-5, 2026-10-05):** k = 1.15 on the large
+pyramid single-threaded (13.09 ms against C scalar's 11.39), 1.26 on many
+pyramids, 1.14 on the joint grid and 1.54 on the convex pile (2.50 before
+P9a-3); a steady large-pyramid step allocates nothing. The causes and the
+follow-ups are in
 `docs/physics-rae-port-design.md` §6.1; `benchmarks/physics/run.sh`
 reproduces the table.
 
