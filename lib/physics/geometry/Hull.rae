@@ -6,9 +6,11 @@
 # Box3D lays a hull out as one block with its arrays hanging off the end,
 # addressed by byte offsets, plus a hash, a version and structure-of-arrays
 # copies of the points and normals for its SIMD support search. A Rae hull
-# is a struct of Lists; the scalar support search needs no SoA copies, and
-# the hash/version only serve Box3D's hull map, so they are not ported.
+# is a struct of Lists, with the same SoA copies as Float lists (the support
+# searches run four lanes at a time on lib/Float4); the hash/version only
+# serve Box3D's hull map, so they are not ported.
 import Math
+import Float4
 open Vec3
 open physics/Constants
 open physics/math/Scalar
@@ -61,12 +63,57 @@ type Hull {
   edges: List(HullHalfEdge)
   faces: List(HullFace)
   planes: List(Plane)
+  # Structure-of-arrays copies for the four-wide support search and face
+  # dots (Box3D's SoA vertices and normals): each coordinate padded to a
+  # multiple of four, the points with point 0, the normals with zeros.
+  # buildHullSoa fills them from `points` and `planes`.
+  soaPointsX: List(Float)
+  soaPointsY: List(Float)
+  soaPointsZ: List(Float)
+  soaNormalsX: List(Float)
+  soaNormalsY: List(Float)
+  soaNormalsZ: List(Float)
 }
 
 # The extent of a shape about a point (b3ShapeExtent).
 type ShapeExtent {
   minExtent: Float
   maxExtent: Vec3
+}
+
+# Fill the SoA copies from `points` and `planes` (b3CreateHull's last loops):
+# x, y and z each padded to a multiple of four, the points with point 0 and
+# the normals with zeros. Every hull constructor calls it last.
+func buildHullSoa(hull: mod Hull) {
+  let pointCount: Int = hull.points.length
+  let soaPointCount: Int = (pointCount + 3) bitand -4
+  hull.soaPointsX.clear()
+  hull.soaPointsY.clear()
+  hull.soaPointsZ.clear()
+  loop var i: Int = 0, i < soaPointCount, ++i {
+    var index: Int = i
+    if i >= pointCount {
+      index = 0
+    }
+    let point: Vec3 = hull.points.copyAtDefault(index: index)
+    hull.soaPointsX.add(value: point.x)
+    hull.soaPointsY.add(value: point.y)
+    hull.soaPointsZ.add(value: point.z)
+  }
+  let faceCount: Int = hull.planes.length
+  let soaFaceCount: Int = (faceCount + 3) bitand -4
+  hull.soaNormalsX.clear()
+  hull.soaNormalsY.clear()
+  hull.soaNormalsZ.clear()
+  loop var i: Int = 0, i < soaFaceCount, ++i {
+    var normal: Vec3 = zeroVector()
+    if i < faceCount {
+      normal = hull.planes.copyAtDefault(index: i).normal
+    }
+    hull.soaNormalsX.add(value: normal.x)
+    hull.soaNormalsY.add(value: normal.y)
+    hull.soaNormalsZ.add(value: normal.z)
+  }
 }
 
 func hullVertexCount(hull: view Hull) ret Int {
@@ -267,96 +314,78 @@ func isValidHull(hull: view Hull) ret Bool {
   ret true
 }
 
-# b3FindHullSupportVertex: the vertex furthest along `direction`, the
-# lowest index on a tie (what Box3D's four-lane search returns).
+# b3FindHullSupportVertex: the vertex most along `direction`, four lanes at
+# a time over the SoA points (the padding repeats point 0), then the lanes
+# reduced to the largest projection with the smallest index (Box3D's order).
 func findHullSupportVertex(hull: view Hull, direction: view Vec3) ret Int {
-  # Four running maxima over the indices of each lane (index mod 4), as
-  # Box3D's four-wide loop, then the largest projection with the smallest
-  # index: the same vertex a single strict `>` scan picks, with independent
-  # dependency chains.
-  var bestDot0: Float = -floatMax
-  var bestDot1: Float = -floatMax
-  var bestDot2: Float = -floatMax
-  var bestDot3: Float = -floatMax
-  var bestIndex0: Int = -1
-  var bestIndex1: Int = -1
-  var bestIndex2: Int = -1
-  var bestIndex3: Int = -1
-  let count: Int = hull.points.length
-  if let points: view List(Vec3) => hull.points {
-    var index: Int = 0
-    loop index + 3 < count {
-      let point0: Vec3 = points.copyAtDefault(index: index + 0)
-      let projection0: Float = direction.x * point0.x + direction.y * point0.y + direction.z * point0.z
-      if projection0 > bestDot0 {
-        bestDot0 = projection0
-        bestIndex0 = index + 0
+  let directionX: Float4 = Float4.splat(value: direction.x)
+  let directionY: Float4 = Float4.splat(value: direction.y)
+  let directionZ: Float4 = Float4.splat(value: direction.z)
+  let four: Float4 = Float4.splat(value: 4.0)
+  var laneIndex: Float4 = { x: 0.0, y: 1.0, z: 2.0, w: 3.0 }
+  var bestDots: Float4 = Float4.splat(value: -floatMax)
+  var bestIndices: Float4 = Float4.splat(value: -1.0)
+  let count: Int = hull.soaPointsX.length
+  var i: Int = 0
+  loop i < count {
+    if let pointX: Float4 = Float4.load(from: hull.soaPointsX, index: i) {
+      if let pointY: Float4 = Float4.load(from: hull.soaPointsY, index: i) {
+        if let pointZ: Float4 = Float4.load(from: hull.soaPointsZ, index: i) {
+          let projection: Float4 = Float4.add(
+            a: Float4.add(
+              a: Float4.mul(a: directionX, b: pointX)
+              b: Float4.mul(a: directionY, b: pointY)
+            )
+            b: Float4.mul(a: directionZ, b: pointZ)
+          )
+          let better: Mask4 = Float4.greater(a: projection, b: bestDots)
+          bestDots = Float4.select(mask: better, ifTrue: projection, ifFalse: bestDots)
+          bestIndices = Float4.select(mask: better, ifTrue: laneIndex, ifFalse: bestIndices)
+        }
       }
-      let point1: Vec3 = points.copyAtDefault(index: index + 1)
-      let projection1: Float = direction.x * point1.x + direction.y * point1.y + direction.z * point1.z
-      if projection1 > bestDot1 {
-        bestDot1 = projection1
-        bestIndex1 = index + 1
-      }
-      let point2: Vec3 = points.copyAtDefault(index: index + 2)
-      let projection2: Float = direction.x * point2.x + direction.y * point2.y + direction.z * point2.z
-      if projection2 > bestDot2 {
-        bestDot2 = projection2
-        bestIndex2 = index + 2
-      }
-      let point3: Vec3 = points.copyAtDefault(index: index + 3)
-      let projection3: Float = direction.x * point3.x + direction.y * point3.y + direction.z * point3.z
-      if projection3 > bestDot3 {
-        bestDot3 = projection3
-        bestIndex3 = index + 3
-      }
-      index = index + 4
     }
-    loop index < count {
-      let point: Vec3 = points.copyAtDefault(index: index)
-      let projection: Float = direction.x * point.x + direction.y * point.y + direction.z * point.z
-      if projection > bestDot0 {
-        bestDot0 = projection
-        bestIndex0 = index
-      }
-      index = index + 1
-    }
+    laneIndex = Float4.add(a: laneIndex, b: four)
+    i = i + 4
   }
-  var bestDot: Float = bestDot0
-  var bestIndex: Int = bestIndex0
+  var bestDot: Float = -floatMax
+  var bestIndex: Int = -1
   supportCandidate(
     bestDot: bestDot
     bestIndex: bestIndex
-    dot: bestDot1
-    index: bestIndex1
+    dot: bestDots.x
+    index: bestIndices.x as Int
   )
   supportCandidate(
     bestDot: bestDot
     bestIndex: bestIndex
-    dot: bestDot2
-    index: bestIndex2
+    dot: bestDots.y
+    index: bestIndices.y as Int
   )
   supportCandidate(
     bestDot: bestDot
     bestIndex: bestIndex
-    dot: bestDot3
-    index: bestIndex3
+    dot: bestDots.z
+    index: bestIndices.z as Int
+  )
+  supportCandidate(
+    bestDot: bestDot
+    bestIndex: bestIndex
+    dot: bestDots.w
+    index: bestIndices.w as Int
   )
   ret bestIndex
 }
 
-# Merge one lane's maximum into the running best: a larger projection wins,
-# a tie goes to the smaller index (the order a scalar scan would meet them).
+# Merge one lane's maximum into the running best (Box3D's reduction): a lane
+# that found a vertex wins with a larger projection, or an equal one and a
+# smaller index.
 func supportCandidate(
   bestDot: mod Float
   bestIndex: mod Int
   dot: view Float
   index: view Int
 ) {
-  if index is -1 {
-    ret
-  }
-  if bestIndex is -1 or dot > bestDot or (dot is bestDot and index < bestIndex) {
+  if index >= 0 and (dot > bestDot or (dot is bestDot and index < bestIndex)) {
     bestDot = dot
     bestIndex = index
   }

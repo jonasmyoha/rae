@@ -5,6 +5,7 @@
 # four-lane support search; Box3D's operation order is kept exactly, checked
 # bit for bit against the oracle in fixture 952.
 import Math
+import Float4
 open Vec3
 open physics/Constants
 open physics/math/Scalar
@@ -157,93 +158,50 @@ func emptySeparatingAxis(kind: view SeparatingFeature) ret SeparatingAxis {
   }
 }
 
-# A hull vertex as Box3D's SoA arrays hold it: padded past the vertex count
-# with repeats of vertex 0.
-func soaPoint(hull: view Hull, index: view Int) ret Vec3 {
-  if index < hull.points.length {
-    ret hull.points.copyAtDefault(index: index)
-  }
-  ret hull.points.copyAtDefault(index: 0)
-}
-
-# A count rounded up to the four-lane width.
-func soaCount(count: view Int) ret Int {
-  ret (count + 3) bitand -4
-}
-
-# The support value with the vertex index in its low mantissa bits
-# (b3EmbedIndexW for one lane).
-func embedIndex(value: view Float, index: view Int) ret Float {
-  let mask: Int = (1 shl hullBitCount) - 1
-  let bits: Int = Math.floatBits(value: value)
-  ret Math.floatFromBits(bits: (bits bitand (4294967295 - mask)) bitor index)
-}
-
-# b3GetSupportWide: the vertex of `hull` furthest along `normal`, found by
-# minimising (bias - dot) with the index packed into the value, so the
-# smallest index wins a tie and padding never does. The bias keeps the
-# value positive. `support` gets the exact dot of the winner.
+# b3GetSupportWide: the vertex of `hull` furthest along `normal`, four lanes
+# at a time over the SoA points: minimising (bias - dot) with the index
+# packed into the value's low mantissa bits, so the smallest index wins a
+# tie and the padding (point 0 again, with a higher index) never does. The
+# bias keeps the value positive. `support` gets the exact dot of the winner.
 func supportWide(
   normal: view Vec3
   hull: view Hull
   bias: view Float
   support: mod Float
 ) ret Int {
-  let count: Int = soaCount(count: hull.points.length)
-  var lane0: Float = infinity()
-  var lane1: Float = infinity()
-  var lane2: Float = infinity()
-  var lane3: Float = infinity()
+  let normalX: Float4 = Float4.splat(value: normal.x)
+  let normalY: Float4 = Float4.splat(value: normal.y)
+  let normalZ: Float4 = Float4.splat(value: normal.z)
+  let biasWide: Float4 = Float4.splat(value: bias)
+  var minimum: Float4 = Float4.splat(value: infinity())
+  let count: Int = hull.soaPointsX.length
   var i: Int = 0
   loop i < count {
-    loop var lane: Int = 0, lane < 4, ++lane {
-      let point: Vec3 = soaPoint(hull: hull, index: i + lane)
-      let projection: Float = normal.x * point.x + normal.y * point.y + normal.z * point.z
-      let value: Float = embedIndex(value: bias - projection, index: i + lane)
-      # b3MinW: keep the running value unless the new one is smaller
-      match lane {
-        case 0 {
-          if lane0 <= value {
-          } else {
-            lane0 = value
-          }
-        }
-        case 1 {
-          if lane1 <= value {
-          } else {
-            lane1 = value
-          }
-        }
-        case 2 {
-          if lane2 <= value {
-          } else {
-            lane2 = value
-          }
-        }
-        default {
-          if lane3 <= value {
-          } else {
-            lane3 = value
-          }
+    if let pointX: Float4 = Float4.load(from: hull.soaPointsX, index: i) {
+      if let pointY: Float4 = Float4.load(from: hull.soaPointsY, index: i) {
+        if let pointZ: Float4 = Float4.load(from: hull.soaPointsZ, index: i) {
+          let projection: Float4 = Float4.add(
+            a: Float4.add(
+              a: Float4.mul(a: normalX, b: pointX)
+              b: Float4.mul(a: normalY, b: pointY)
+            )
+            b: Float4.mul(a: normalZ, b: pointZ)
+          )
+          let value: Float4 = Float4.sub(a: biasWide, b: projection)
+          minimum = Float4.min(
+            a: minimum
+            b: Float4.embedIndex(value: value, baseIndex: i, bitCount: hullBitCount)
+          )
         }
       }
     }
     i = i + 4
   }
   # b3MinIndexW: the horizontal minimum, then its index bits
-  var minimum: Float = lane0
-  if lane1 < minimum {
-    minimum = lane1
-  }
-  if lane2 < minimum {
-    minimum = lane2
-  }
-  if lane3 < minimum {
-    minimum = lane3
-  }
-  let vertexIndex: Int = Math.floatBits(value: minimum) bitand ((1 shl hullBitCount) - 1)
-  let point: Vec3 = soaPoint(hull: hull, index: vertexIndex)
-  support = normal.x * point.x + normal.y * point.y + normal.z * point.z
+  let vertexIndex: Int = Float4.minLaneIndex(value: minimum, bitCount: hullBitCount)
+  support = normal.x * hull.soaPointsX.copyAtDefault(index: vertexIndex) + normal.y * hull.soaPointsY.copyAtDefault(
+    index: vertexIndex
+  ) + normal.z * hull.soaPointsZ.copyAtDefault(index: vertexIndex)
   ret vertexIndex
 }
 
@@ -275,10 +233,33 @@ func faceSeparation(
 
 # b3GetFaceDots: dot(normal, direction) for every face normal of `hull`.
 func faceDots(hull: view Hull, direction: view Vec3, dots: mod List(Float)) {
+  # b3GetFaceDots: four faces at a time over the SoA normals (`dots` gets
+  # the padding's zero dots too)
   dots.clear()
-  loop let plane: view Plane in hull.planes {
-    let normal: Vec3 = plane.normal
-    dots.add(value: normal.x * direction.x + normal.y * direction.y + normal.z * direction.z)
+  let directionX: Float4 = Float4.splat(value: direction.x)
+  let directionY: Float4 = Float4.splat(value: direction.y)
+  let directionZ: Float4 = Float4.splat(value: direction.z)
+  let count: Int = hull.soaNormalsX.length
+  var i: Int = 0
+  loop i < count {
+    if let normalX: Float4 = Float4.load(from: hull.soaNormalsX, index: i) {
+      if let normalY: Float4 = Float4.load(from: hull.soaNormalsY, index: i) {
+        if let normalZ: Float4 = Float4.load(from: hull.soaNormalsZ, index: i) {
+          let faceDot: Float4 = Float4.add(
+            a: Float4.add(
+              a: Float4.mul(a: normalX, b: directionX)
+              b: Float4.mul(a: normalY, b: directionY)
+            )
+            b: Float4.mul(a: normalZ, b: directionZ)
+          )
+          dots.add(value: faceDot.x)
+          dots.add(value: faceDot.y)
+          dots.add(value: faceDot.z)
+          dots.add(value: faceDot.w)
+        }
+      }
+    }
+    i = i + 4
   }
 }
 
@@ -584,33 +565,25 @@ func testEdgePairs(
     )
   }
 
-  # Per edge of A: its two face normals, its direction, its first vertex,
-  # and the parallel tolerance scaled by its length.
-  let edgeCount: Int = edgeIndicesA.length
-  let normals0: mod List(Vec3) => edges.normals0
-  normals0.clear()
-  let normals1: mod List(Vec3) => edges.normals1
-  normals1.clear()
-  let directions: mod List(Vec3) => edges.directions
-  directions.clear()
-  let starts: mod List(Vec3) => edges.starts
-  starts.clear()
-  let tolerances: mod List(Float) => edges.tolerances
-  tolerances.clear()
+  # Per candidate edge of A: its two face normals, its direction, its first
+  # vertex, and the parallel tolerance scaled by its length.
+  let edgesA: mod List(EdgeOfA) => edges.edgesA
+  edgesA.clear()
   let squaredTolerance: Float = parallelEdgeTolerance * parallelEdgeTolerance
   loop let edgeIndex: view Int in edgeIndicesA {
     let edge: HullHalfEdge = hullEdge(hull: hullA, index: edgeIndex)
     let twin: HullHalfEdge = hullEdge(hull: hullA, index: edgeIndex + 1)
-    normals0.add(value: hullPlane(hull: hullA, index: edge.face).normal)
-    normals1.add(value: hullPlane(hull: hullA, index: twin.face).normal)
     let start: Vec3 = hullPoint(hull: hullA, index: edge.origin)
     let finish: Vec3 = hullPoint(hull: hullA, index: twin.origin)
     let direction: Vec3 = { x: finish.x - start.x, y: finish.y - start.y, z: finish.z - start.z }
-    directions.add(value: direction)
-    starts.add(value: start)
-    tolerances.add(
-      value: squaredTolerance * (direction.x * direction.x + direction.y * direction.y + direction.z * direction.z)
-    )
+    edgesA.add(value: EdgeOfA {
+      normal0: hullPlane(hull: hullA, index: edge.face).normal
+      normal1: hullPlane(hull: hullA, index: twin.face).normal
+      direction: direction
+      start: start
+      tolerance: squaredTolerance * (direction.x * direction.x + direction.y * direction.y + direction.z * direction.z)
+      edgeIndex: edgeIndex
+    })
   }
 
   let epsilon: Float = -slop * slop
@@ -624,24 +597,21 @@ func testEdgePairs(
     let finishB: Vec3 = pointsB.copyAtDefault(index: twin.origin)
     let directionB: Vec3 = subtract(left: finishB, right: startB)
 
-    loop var i: Int = 0, i < edgeCount, ++i {
-      let directionA: Vec3 = directions.copyAtDefault(index: i)
+    loop let edgeA: view EdgeOfA in edgesA {
       # The Gauss map arcs cross: CBA * DBA < eps, ADC * BDC < eps, CBA * BDC < eps
-      let cba: Float = dot(left: normalC, right: directionA)
-      let dba: Float = dot(left: normalD, right: directionA)
+      let cba: Float = dot(left: normalC, right: edgeA.direction)
+      let dba: Float = dot(left: normalD, right: edgeA.direction)
       if cba * dba >= epsilon {
         continue
       }
-      let normal0: Vec3 = normals0.copyAtDefault(index: i)
-      let normal1: Vec3 = normals1.copyAtDefault(index: i)
-      let adc: Float = dot(left: normal0, right: directionB)
-      let bdc: Float = dot(left: normal1, right: directionB)
+      let adc: Float = dot(left: edgeA.normal0, right: directionB)
+      let bdc: Float = dot(left: edgeA.normal1, right: directionB)
       if adc * bdc >= epsilon or cba * bdc >= epsilon {
         continue
       }
       # Reject near parallel edges
       let maxCd: Float = maxFloat(left: cba * cba, right: dba * dba)
-      if maxCd <= tolerances.copyAtDefault(index: i) {
+      if maxCd <= edgeA.tolerance {
         continue
       }
       # normal = lerp(C, D, t), t = -CBA / (DBA - CBA)
@@ -655,14 +625,11 @@ func testEdgePairs(
       let inverseLength: Float = 1.0 / Math.sqrt(x: lengthSquaredOfNormal)
       normal = scale(scale: inverseLength, vector: normal)
       # separation = -dot(normal, av0 + bv0)
-      let separation: Float = -dot(
-        left: add(left: starts.copyAtDefault(index: i), right: startB)
-        right: normal
-      )
+      let separation: Float = -dot(left: add(left: edgeA.start, right: startB), right: normal)
       if separation > result.edge.separation {
         result.edge.normal = normal
         result.edge.separation = separation
-        result.edge.indexA = edgeIndicesA.copyAtDefault(index: i)
+        result.edge.indexA = edgeA.edgeIndex
         result.edge.indexB = edgeIndexB
         if separation > speculative and earlyReturn {
           result.separatedFeature = SeparatingFeature.edgePairAxis
