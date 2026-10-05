@@ -1,0 +1,64 @@
+# The spelled-out form of returning a copy of what a reference-returning call
+# refers to (spec 2.3.1; the one-line form is rejected, fixture 1003): bind the
+# view, then return the binding. The copy is independent - a struct carrying
+# a String is deep-copied, so changing the copy leaves the original alone -
+# and the program ends with nothing allocated.
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+
+type Point {
+  x: Int
+  y: Int
+}
+
+type Named {
+  name: String
+  point: Point
+}
+
+type Holder {
+  point: Point
+  named: Named
+}
+
+func pointView(holder: view Holder) ret view Point {
+  ret view holder.point
+}
+
+func namedView(holder: view Holder) ret view Named {
+  ret view holder.named
+}
+
+func pointCopy(holder: view Holder) ret Point {
+  let source: view Point => pointView(holder: holder)
+  ret source
+}
+
+func namedCopy(holder: view Holder) ret Named {
+  let source: view Named => namedView(holder: holder)
+  ret source
+}
+
+func componentPoint(table: view ComponentTable(Point), entityId: view EntityId) ret Point {
+  let source: view Point => componentView(this: table, entityId: entityId)
+  ret source
+}
+
+func main() {
+  let holder: Holder = {
+    point: Point { x: 3, y: 4 }
+    named: Named { name: "original", point: Point { x: 1, y: 2 } }
+  }
+  var point: Point = pointCopy(holder: holder)
+  point.x = 9
+  var named: Named = namedCopy(holder: holder)
+  named.name = "changed"
+  log("copies: {point.x} {named.name}; originals: {holder.point.x} {holder.named.name}")
+  var allocator: EntityAllocator = createEntityAllocator()
+  var table: ComponentTable(Point) = createComponentTable(Point)
+  let entityId: EntityId = allocEntity(this: allocator)
+  componentSet(this: table, entityId: entityId, data: Point { x: 7, y: 8 })
+  let fromTable: Point = componentPoint(table: table, entityId: entityId)
+  log("from the table: {fromTable.x} {fromTable.y}")
+}

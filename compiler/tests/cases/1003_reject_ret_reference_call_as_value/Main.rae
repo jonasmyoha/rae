@@ -1,0 +1,51 @@
+# Spec 2.3.1 for `ret`: a function that returns a VALUE cannot return a call
+# that returns a reference. Copying what the view refers to would hide a
+# potentially deep copy behind a call whose viewness is visible only at its
+# declaration - the same rule as an owned `let` - and the C backend used to
+# return the reference as the value, which gcc rejected. The spelled-out form
+# (bind the view, return the binding) is fixture 1004.
+open ecs/Entity
+open ecs/ComponentTable
+
+type Point {
+  x: Int
+  y: Int
+}
+
+type Holder {
+  point: Point
+}
+
+func pointView(holder: view Holder) ret view Point {
+  ret view holder.point
+}
+
+func firstOf(T: type, items: view List(T)) ret view T {
+  ret items.viewAt(index: 0)
+}
+
+func pointCopy(holder: view Holder) ret Point {
+  ret pointView(holder: holder)
+}
+
+func firstCopy(items: view List(Point)) ret Point {
+  ret firstOf(items: items)
+}
+
+func componentPoint(table: view ComponentTable(Point), entityId: view EntityId) ret Point {
+  ret componentView(this: table, entityId: entityId)
+}
+
+func maybePoint(holder: view Holder) ret opt Point {
+  ret pointView(holder: holder)
+}
+
+# Forwarding a reference stays legal (spec 4.1)
+func forwardView(holder: view Holder) ret view Point {
+  ret view pointView(holder: holder)
+}
+
+func main() {
+  let holder: Holder = { point: Point { x: 3, y: 4 } }
+  let point: Point = pointCopy(holder: holder)
+}
