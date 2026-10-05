@@ -1,9 +1,11 @@
 # The playground's lib/ui HUD (assets/ui.raescene): the six lines of
 # SceneHud.hudLines (track and scene, body / awake / sleeping counts, contacts
 # and islands, step and frame milliseconds, workers), the pyramid body-count
-# slider (app3d/Slider over BodyTrack / BodyFill) and the controls hint. The
-# text changes about once a second (the timing windows publish per second), so
-# the UI lays out again only then, on a slider move or on a resize.
+# slider (app3d/Slider over BodyTrack / BodyFill) and the controls hint, plus
+# the shared FPS meter in the top right corner (ui/DebugOverlay, the one every
+# 3D example uses). The text changes about once a second (the timing windows
+# publish per second), so the UI lays out again only then, on a slider move,
+# an autofire toggle or a resize.
 import Gpu2d
 open app3d/Slider
 open ui/Ecs
@@ -16,6 +18,7 @@ open ui/SceneLoader
 open ui/Transform
 open ui/UiSystems
 open ui/Scene
+open ui/DebugOverlay
 open app3d/UiShell
 open Gpu2dCanvas
 open ecs/Entity
@@ -32,6 +35,8 @@ type PlaygroundUi {
   gpuUi: Gpu2dUi
   input: UiInput
   slider: Slider
+  # The FPS readout (fps only: no debug button, memory or heartbeat)
+  debugOverlay: DebugOverlay
   # The HUD lines last written, so an unchanged line costs no relayout
   lines: List(String)
 }
@@ -52,6 +57,12 @@ func createPlaygroundUi(bodyCount: view Int) ret PlaygroundUi {
       maxValue: maxBodyCount
       value: bodyCount as Float
     )
+    debugOverlay: createDebugOverlay(
+      button: false
+      fps: true
+      memory: false
+      heartbeat: false
+    )
     lines: List.create(String, cap: 8)
   }
 }
@@ -69,6 +80,30 @@ func mountPlaygroundUi(
   world.layoutH = height
   let scene: Scene = loadSceneFile(path: "{assetBase}ui.raescene")
   let root: EntityId = loadScene(world: world, uiSystems: systems, scene: scene)
+  setHudHint(
+    ui: ui
+    world: world
+    systems: systems
+    autoFire: false
+  )
+}
+
+# The controls hint, which shows whether autofire (T) is on.
+func setHudHint(
+  ui: view PlaygroundUi
+  world: mod UiWorld
+  systems: mod UiSystems
+  autoFire: view Bool
+) {
+  var fireState: String = "off"
+  if autoFire {
+    fireState = "ON"
+  }
+  setNodeText(
+    world: world
+    nodeId: "HudHintFire"
+    value: "hold click or F fires, T autofire: {fireState}, 1-6 scene, R reset"
+  )
 }
 
 func relayoutPlaygroundUi(ui: view PlaygroundUi, world: mod UiWorld, systems: mod UiSystems) {
@@ -160,8 +195,25 @@ func sliderBodyCount(ui: view PlaygroundUi) ret Int {
   ret ui.slider.value as Int
 }
 
+# Count this loop iteration for the FPS meter (`rendered`: it drew a frame).
+func recordPlaygroundFrame(
+  ui: mod PlaygroundUi
+  width: view Float
+  height: view Float
+  now: view Float64
+  rendered: view Bool
+) {
+  let tookPointer: Bool = updateDebugOverlay(
+    debugOverlay: ui.debugOverlay
+    screenW: width
+    screenH: height
+    now: now
+    didRealWork: rendered
+  )
+}
+
 func drawPlaygroundUi(
-  ui: view PlaygroundUi
+  ui: mod PlaygroundUi
   world: mod UiWorld
   systems: mod UiSystems
   canvas: mod Gpu2dCanvas
@@ -171,5 +223,12 @@ func drawPlaygroundUi(
     uiSystems: systems
     res: ui.gpuUi
     canvas: canvas
+  )
+  # Last, so nothing paints over it
+  drawDebugOverlay(
+    debugOverlay: ui.debugOverlay
+    canvas: canvas
+    font: ui.gpuUi.textFont
+    didRealWork: true
   )
 }

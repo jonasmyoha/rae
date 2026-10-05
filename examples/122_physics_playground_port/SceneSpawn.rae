@@ -226,8 +226,13 @@ func spawnScene(world: mod PlaygroundWorld, scene: view PhysicsScene) {
 }
 
 # Throw a ball from `origin` at whatever the ray from `origin` along
-# `direction` hits (straight on when it hits nothing): the click's throw.
-func throwBallAlong(world: mod PlaygroundWorld, origin: view Vec3, direction: view Vec3) {
+# `direction` hits (straight on when it hits nothing): one machine-gun shot.
+# Returns the ball's entity (for the app's BallPool).
+func throwBallAlong(
+  world: mod PlaygroundWorld
+  origin: view Vec3
+  direction: view Vec3
+) ret EntityId {
   let reach: Vec3 = vscale(a: direction, s: 200.0)
   let hit: PhysicsHit = raycastClosest(
     physics: world.physics
@@ -247,6 +252,20 @@ func throwBallAlong(world: mod PlaygroundWorld, origin: view Vec3, direction: vi
   )
   let entityId: EntityId = spawnSceneBody(world: world, body: ball)
   world.ballsThrown = world.ballsThrown + 1
+  ret entityId
+}
+
+# Remove a thrown ball: its body, its components and the entity itself.
+func despawnBall(world: mod PlaygroundWorld, entityId: view EntityId) {
+  despawnRigidBody(
+    physics: world.physics
+    rigidBodies: world.rigidBodies
+    colliders: world.colliders
+    entityId: entityId
+  )
+  componentRemove(this: world.transforms, entityId: entityId)
+  componentRemove(this: world.renderShapes, entityId: entityId)
+  freeEntity(this: world.allocator, entityId: entityId)
 }
 
 # One frame of physics (the fixed steps `frameTime` pays for).

@@ -7,10 +7,14 @@
 # file that names the physics track; drawn with one instanced draw per mesh
 # kind (PlaygroundRender) under a lib/ui HUD (PlaygroundUi).
 #
-# Controls: keys 1-6 switch scenes, R resets, a click throws a ball at what
-# the pointer is over, drag orbits, the wheel zooms, the slider sizes the
-# pyramid (1k-10k bodies). When every body sleeps and nothing is pressed the
-# loop waits for events instead of rendering, and it never renders hidden.
+# Controls: WASD flies, Q/E go down/up (Shift fast, Control slow), a right
+# drag looks around; holding the left button or F fires balls like a machine
+# gun at what the pointer is over, T toggles autofire; keys 1-6 switch scenes,
+# R resets, the slider sizes the pyramid (1k-10k bodies). The balls live in a
+# BallPool: the oldest go past its capacity, and any that live 20 s, fly far
+# off or fall off the ground are despawned. An FPS meter sits top right. When
+# every body sleeps and nothing is pressed the loop waits for events instead
+# of rendering, and it never renders hidden.
 #
 #   RAE_PHYSICS_DETERMINISM=<steps>  headless: every scene stepped <steps>
 #                                    fixed steps at 1 worker and at the pool's
@@ -21,7 +25,9 @@
 #                                    scene, printing the HUD's lines
 #   RAE_PLAYGROUND_SCENE=<1-6>       the scene the window opens on
 #   RAE_PLAYGROUND_BODIES=<count>    the pyramid's starting body count
-#   RAE_PLAYGROUND_DEBUG=1           logs the shadow casters of each frame
+#   RAE_PLAYGROUND_AUTOFIRE=1        the window opens with autofire on
+#   RAE_PLAYGROUND_DEBUG=1           logs the shadow casters and live balls
+#                                    of each frame
 # Headless screenshot:
 #   RAE_SDL_HEADLESS_MS=3000 RAE_GPU2D_SCREENSHOT=/tmp/playground.bmp \
 #     rae run examples/122_physics_playground_port/Main.rae
@@ -50,9 +56,18 @@ open ui/UiSystems
 open physicsScenes/SceneTypes
 open physicsScenes/SceneLibrary
 open physicsScenes/SceneHud
+open physicsScenes/BallPool
+open ecs/Entity
 
 # The pyramid's body count (the HUD's slider sets it in the windowed app)
 const defaultBodyCount: Int = 1000
+
+# The machine gun: balls per second, and how many may be alive at once
+const fireRate: Float = 15.0
+
+const maxBalls: Int = 400
+
+const ballLifetimeSeconds: Float = 20.0
 
 # PhysicsScene `index` stepped `steps` fixed steps at `workerCount` workers: the
 # transform hash.
@@ -61,7 +76,7 @@ func sceneHash(index: view Int, steps: view Int, workerCount: view Int) ret UInt
   spawnScene(world: world, scene: buildScene(index: index, bodyCount: defaultBodyCount))
   loop var step: Int = 0, step < steps, ++step {
     if step is steps / 2 {
-      throwBallAlong(
+      let ballId: EntityId = throwBallAlong(
         world: world
         origin: Vec3 { x: -12.0, y: -12.0, z: 8.0 }
         direction: Vec3 { x: 0.6, y: 0.6, z: -0.3 }
@@ -102,7 +117,7 @@ func scriptedRun() {
     var time: Float = 0.0
     loop var frame: Int = 0, frame < 120, ++frame {
       if frame is 30 {
-        throwBallAlong(
+        let ballId: EntityId = throwBallAlong(
           world: world
           origin: vadd(a: scene.cameraTarget, b: Vec3 { x: -10.0, y: -10.0, z: 6.0 })
           direction: Vec3 { x: 0.6, y: 0.6, z: -0.4 }
@@ -137,21 +152,30 @@ func sceneKeyPressed() ret Int {
   ret -1
 }
 
-# Point the camera rig at a scene's framing.
+# Put the fly camera at a scene's framing: where an orbit of the scene's
+# distance would put the eye, looking at the scene's target.
 func frameScene(rig: mod CameraRig, camera: mod Camera3d, scene: view PhysicsScene) {
   camera.target = scene.cameraTarget
-  # Far enough for the whole scene from as far out as the rig may zoom
+  # Far enough to see the whole scene from well outside it
   camera.farZ = 4.0 * scene.cameraDistance + 200.0
   camera.nearZ = 0.1 + scene.cameraDistance * 0.002
+  rig.mode = CameraRigMode.orbit
   rig.minDistance = 3.0
   rig.maxDistance = 600.0
   rig.distance = scene.cameraDistance
   rig.yaw = 0.3
   rig.orbitPitch = 0.35
-  # Jump there rather than easing across the whole scene
-  rig.viewDistance = rig.distance
-  rig.viewYaw = rig.yaw
-  rig.viewOrbitPitch = rig.orbitPitch
+  snapCameraRigView(rig: rig)
+  applyCameraRig(rig: rig, camera: camera)
+  # Orbit to fly keeps the view exactly where the orbit put it
+  toggleCameraRigMode(rig: rig, camera: camera)
+  # Cross the scene in a few seconds, whatever its size
+  rig.moveSpeed = Math.max(a: 8.0, b: scene.cameraDistance * 0.4)
+}
+
+# The camera ray through the pointer, from just ahead of the eye.
+func fireOrigin(camera: view Camera3d, direction: view Vec3) ret Vec3 {
+  ret vadd(a: camera.position, b: vscale(a: direction, s: 1.0))
 }
 
 func runWindowed() ret Int {
@@ -206,6 +230,8 @@ func runWindowed() ret Int {
 
   var camera: Camera3d = defaultCamera3d()
   var rig: CameraRig = createCameraRig(camera: camera)
+  # The left button fires, so the camera looks with the right
+  rig.lookWithRightButton = true
   frameScene(rig: rig, camera: camera, scene: scene)
   applyCameraRig(rig: rig, camera: camera)
   var light: Light3d = defaultLight3d()
@@ -221,8 +247,21 @@ func runWindowed() ret Int {
   var lastFrame: Float64 = startTime
   var renderedOnce: Bool = false
   var sceneChanged: Bool = true
-  var pressX: Float = 0.0
-  var pressY: Float = 0.0
+  var balls: BallPool = createBallPool(
+    capacity: maxBalls
+    lifetimeSeconds: ballLifetimeSeconds
+    killDistance: 3.0 * scene.cameraDistance + 100.0
+  )
+  var autoFire: Bool = Sys.getEnv(name: "RAE_PLAYGROUND_AUTOFIRE").length() > 0
+  setHudHint(
+    ui: ui
+    world: uiWorld
+    systems: uiSystems
+    autoFire: autoFire
+  )
+  # Seconds until the gun may fire again
+  var fireCooldown: Float = 0.0
+  let debugLog: Bool = Sys.getEnv(name: "RAE_PLAYGROUND_DEBUG").length() > 0
   loop not Gpu2d.pollClose() {
     let now: Float64 = Gpu2d.nowSeconds()
     var deltaTime: Float = (now - lastFrame) as Float
@@ -272,6 +311,8 @@ func runWindowed() ret Int {
       scene = buildScene(index: sceneIndex, bodyCount: bodyCount)
       world = createPlaygroundWorld(workerCount: workers)
       spawnScene(world: world, scene: scene)
+      clearBallPool(pool: balls)
+      balls.killDistance = 3.0 * scene.cameraDistance + 100.0
       groundMesh = groundMeshFor(
         renderer: renderer
         meshes: meshes
@@ -281,29 +322,16 @@ func runWindowed() ret Int {
       frameScene(rig: rig, camera: camera, scene: scene)
       sceneChanged = true
     }
-    let pointerX: Float = Gpu2d.pointerX()
-    let pointerY: Float = Gpu2d.pointerY()
-    if Gpu2d.pointerPressed() {
-      pressX = pointerX
-      pressY = pointerY
-    }
-    var thrown: Bool = false
-    if Gpu2d.pointerReleased() and uiHoldsPointer(ui: ui) is false {
-      let moved: Float = Math.abs(value: pointerX - pressX) + Math.abs(value: pointerY - pressY)
-      if moved < 4.0 {
-        throwBallAlong(
-          world: world
-          origin: camera.position
-          direction: pointerRay(
-            camera: camera
-            x: pointerX
-            y: pointerY
-            width: extentW
-            height: extentH
-          )
-        )
-        thrown = true
-      }
+    if Sdl3.isKeyPressed(key: Keys.keyT) {
+      autoFire = autoFire is false
+      setHudHint(
+        ui: ui
+        world: uiWorld
+        systems: uiSystems
+        autoFire: autoFire
+      )
+      relayoutPlaygroundUi(ui: ui, world: uiWorld, systems: uiSystems)
+      sceneChanged = true
     }
     let cameraMoved: Bool = updateCameraRig(
       rig: rig
@@ -312,6 +340,59 @@ func runWindowed() ret Int {
       wheel: uiWheelUnclaimed(input: ui.input)
       deltaTime: deltaTime
     )
+    applyCameraRig(rig: rig, camera: camera)
+
+    # The machine gun: `fireRate` balls a second while the trigger is held
+    # (the left button over the scene, or F) or autofire is on, each along
+    # the camera ray through the pointer
+    let leftHeld: Bool = Gpu2d.pointerDown() and uiHoldsPointer(ui: ui) is false
+    let triggerHeld: Bool = autoFire or leftHeld or Sdl3.isKeyDown(key: Keys.keyF)
+    var fired: Int = 0
+    if triggerHeld {
+      fireCooldown = fireCooldown - deltaTime
+      # At most a few per frame, so a long hitch does not fire a burst
+      loop fireCooldown <= 0.0 and fired < 4 {
+        let direction: Vec3 = pointerRay(
+          camera: camera
+          x: Gpu2d.pointerX()
+          y: Gpu2d.pointerY()
+          width: extentW
+          height: extentH
+        )
+        let ballId: EntityId = throwBallAlong(
+          world: world
+          origin: fireOrigin(camera: camera, direction: direction)
+          direction: direction
+        )
+        addPooledBall(pool: balls, entityId: ballId, now: clock)
+        fireCooldown = fireCooldown + 1.0 / fireRate
+        fired = fired + 1
+      }
+      if fireCooldown < 0.0 {
+        fireCooldown = 0.0
+      }
+    } else {
+      fireCooldown = 0.0
+    }
+    let thrown: Bool = fired > 0
+    # The pool's killers: over capacity, too old, too far, fallen off
+    let retired: List(EntityId) = retireBalls(
+      pool: balls
+      transforms: world.transforms
+      center: scene.cameraTarget
+      now: clock
+    )
+    loop let ballId: view EntityId in retired {
+      despawnBall(world: world, entityId: ballId)
+    }
+    if retired.length > 0 {
+      sceneChanged = true
+    }
+    if debugLog and (fired > 0 or retired.length > 0) {
+      log(
+        "[balls] live {ballCount(pool: balls)}, fired {world.ballsThrown}, retired {retired.length}"
+      )
+    }
 
     # Physics: only while something is awake (a sleeping world costs nothing)
     let awake: Int = playgroundAwakeCount(world: world)
@@ -350,10 +431,16 @@ func runWindowed() ret Int {
         frameSec: 0.016667
         heartbeatSec: 1.0
       ))
+      recordPlaygroundFrame(
+        ui: ui
+        width: extentW
+        height: extentH
+        now: now
+        rendered: false
+      )
     } else {
       renderedOnce = true
       sceneChanged = false
-      applyCameraRig(rig: rig, camera: camera)
       fillBatches(batches: batches, renderShapes: world.renderShapes, transforms: world.transforms)
       renderPlaygroundFrame(
         renderer: renderer
@@ -369,6 +456,13 @@ func runWindowed() ret Int {
         reach: scene.cameraDistance
       )
       addTimingSample(window: frameWindow, milliseconds: deltaTime * 1000.0, now: clock)
+      recordPlaygroundFrame(
+        ui: ui
+        width: extentW
+        height: extentH
+        now: now
+        rendered: true
+      )
     }
     uiFrameEnd(world: uiWorld, uiSystems: uiSystems)
   }
@@ -386,7 +480,7 @@ func renderPlaygroundFrame(
   meshes: view PlaygroundMeshes
   batches: mod PlaygroundBatches
   world: view PlaygroundWorld
-  ui: view PlaygroundUi
+  ui: mod PlaygroundUi
   uiWorld: mod UiWorld
   uiSystems: mod UiSystems
   groundMesh: view MeshHandle
