@@ -246,15 +246,14 @@ through the fixes.
 
 | scene | C scalar | C SIMD | Rae | Rae / C scalar | Rae / C SIMD |
 |---|---|---|---|---|---|
-| large_pyramid | 11.40 | 7.93 | 11.75 | 1.03x | 1.48x |
-| many_pyramids | 21.88 | 15.43 | 23.05 | 1.05x | 1.49x |
-| joint_grid | 11.66 | 11.70 | 14.96 | 1.28x | 1.28x |
-| convex_pile | 13.78 | 11.57 | 16.26 | 1.18x | 1.40x |
-| rain | 4.90 | 4.83 | 6.07 | 1.24x | 1.26x |
+| large_pyramid | 11.49 | 7.98 | 11.76 | 1.02x | 1.47x |
+| many_pyramids | 21.90 | 15.54 | 22.93 | 1.05x | 1.48x |
+| joint_grid | 11.92 | 11.62 | 12.97 | 1.09x | 1.12x |
+| convex_pile | 13.71 | 11.46 | 16.12 | 1.18x | 1.41x |
+| rain | 4.86 | 4.83 | 6.06 | 1.25x | 1.25x |
 
-(2026-10-05, after the rain port, load ~3.7: the ratios move with the
-machine's load. The joint grid was 13.04 ms (1.13x) in P9a-8's table; see
-the regression note below. Both sides leave the first step untimed and
+(2026-10-05, after the joint grid's L2 fix below, load ~4.9: the ratios
+move with the machine's load. Both sides leave the first step untimed and
 divide by the steps - 1 they time, as upstream's app does.)
 
 The target (1.2x C scalar) is met by every scene since P9a-8; the convex
@@ -446,11 +445,20 @@ Where the rest goes, profiled against the C app:
   bone every 20 steps): 432 transforms, all bit-exact. At the end the scene
   holds 3 700 bodies, 4 400 shapes and 4 200 joints on both sides; Rae
   1.24x C scalar.
-- **Joint grid regression (open).** The joint grid measures ~15.4 ms since
-  P9a-7 (13.2-13.5 ms at P9a-8, same checksum). Bisected to that commit; the
-  solver's generated C is identical between the two, and neither forced code
-  alignment, the allocator zone, extra setup allocations nor moving the new
-  PhysicsWorld fields to the end of the struct closes it. Queued.
+- **Joint grid and the L2 (fixed).** The joint grid measured ~15.2 ms after
+  P9a-7 (13.2-13.5 ms at P9a-8, same checksum), though the solver's C was
+  identical. The trigger was mergeIslands: P9a-7 stopped copying both
+  islands to compare their sizes, and those setup copies had shaped which
+  pages libmalloc's large-allocation cache handed out. The step itself did
+  not change, so moving the hot arrays, padding code or data, or reordering
+  struct fields did not help, but a 256 MB allocate-and-free at start-up
+  made P9a-7 fast and a 16 MB one made P9a-8 slow (MallocLargeCache=0 also
+  made P9a-8 slow). One solve pass reads every joint's JointSim and
+  SphericalJointData plus the body states, about 10 MB, against the M1 Max's
+  12 MB physically indexed L2, so how the pages map onto it decided whether
+  the pass stayed in cache. SphericalJointData's body indices are now Int32
+  as Box3D's ints are (272 -> 260 bytes, Box3D's size). The scene then
+  measures 12.3-13.4 ms whatever the start-up history, 1.09x C scalar.
 
 These are queued as P9 follow-ups.
 

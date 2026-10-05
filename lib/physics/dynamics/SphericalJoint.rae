@@ -56,8 +56,8 @@ func prepareSphericalJoint(
   let invInertiaSum: Matrix3 = add(left: base.invIA, right: base.invIB)
   base.fixedRotation = determinant(matrix: invInertiaSum) < 1000.0 * floatMin
 
-  joint.indexA = indexA
-  joint.indexB = indexB
+  joint.indexA = indexA as Int32
+  joint.indexB = indexB as Int32
 
   # The joint frames with world rotations, relative to the centers of mass
   joint.frameA.rotation = multiply(left: simA.transform.rotation, right: base.localFrameA.rotation)
@@ -129,8 +129,8 @@ func warmStartSphericalJoint(
   joint: view SphericalJointData
   states: mod List(BodyState)
 ) {
-  let stateA: BodyState = jointBodyState(states: states, index: joint.indexA)
-  let stateB: BodyState = jointBodyState(states: states, index: joint.indexB)
+  let stateA: BodyState = jointBodyState(states: states, index: joint.indexA as Int)
+  let stateB: BodyState = jointBodyState(states: states, index: joint.indexB as Int)
   let rA: Vec3 = rotateVector(quat: stateA.deltaRotation, vector: joint.frameA.position)
   let rB: Vec3 = rotateVector(quat: stateB.deltaRotation, vector: joint.frameB.position)
 
@@ -152,8 +152,8 @@ func warmStartSphericalJoint(
   )
   storeJointVelocities(
     states: states
-    indexA: joint.indexA
-    indexB: joint.indexB
+    indexA: joint.indexA as Int
+    indexB: joint.indexB as Int
     stateA: stateA
     stateB: stateB
     velocities: velocities
@@ -197,8 +197,8 @@ func solveSphericalJoint(
 ) {
   let iA: Matrix3 = base.invIA
   let iB: Matrix3 = base.invIB
-  let stateA: BodyState = jointBodyState(states: states, index: joint.indexA)
-  let stateB: BodyState = jointBodyState(states: states, index: joint.indexB)
+  let stateA: BodyState = jointBodyState(states: states, index: joint.indexA as Int)
+  let stateB: BodyState = jointBodyState(states: states, index: joint.indexB as Int)
   var velocities: JointVelocities = jointVelocities(stateA: stateA, stateB: stateB)
   let fixedRotation: Bool = base.fixedRotation
 
@@ -401,8 +401,8 @@ func solveSphericalJoint(
 
   storeJointVelocities(
     states: states
-    indexA: joint.indexA
-    indexB: joint.indexB
+    indexA: joint.indexA as Int
+    indexB: joint.indexB as Int
     stateA: stateA
     stateB: stateB
     velocities: velocities
