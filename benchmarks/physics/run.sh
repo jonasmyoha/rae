@@ -9,7 +9,8 @@
 #              lowering)
 #
 # Each scene runs the C app's step count (large_pyramid 200, many_pyramids
-# 100, joint_grid 100, convex_pile 500; 60 Hz, 4 sub-steps, one worker) and
+# 100, joint_grid 100, convex_pile 500, the first untimed as upstream's app
+# does; 60 Hz, 4 sub-steps, one worker) and
 # prints the best of RUNS (default 3) in ms per step, the Rae position
 # checksum and the ratios. The Box3D builds come from the oracle cache
 # (docs/physics-performance-plan.md §9): no Box3D source is in this
@@ -46,15 +47,15 @@ LINK="-framework Foundation -framework ImageIO -framework CoreGraphics"
   --out "$BUILD/rae.c" "$HERE/rae/Main.rae" >/dev/null)
 t 300 cc $RAE_CFLAGS "$BUILD/rae.c" "$BUILD/rae_runtime.c" -I"$BUILD" $LINK -o "$BUILD/rae" 2>/dev/null
 
-# Best of RUNS, in ns per step. Box3D's app prints "run N : <ms> (ms)" for
-# the whole scene.
+# Best of RUNS, in ns per step. Box3D's app steps once untimed, then prints
+# "run N : <ms> (ms)" for the other steps - 1; the Rae program does the same.
 c_best() {
   exe=$1; scene=$2
   # From the build directory: the app writes <scene>.csv into its cwd
   (cd "$BUILD" && t 900 "$exe" -t=1 -w=1 -r="$RUNS" -b="$scene") | awk -v scene="$scene" '
     /^benchmark:/ { split($0, parts, "steps = "); steps = parts[2] + 0 }
     /^run [0-9]+ :/ { ms = $4 + 0; if (best == "" || ms < best) best = ms }
-    END { printf "%.0f\n", best * 1e6 / steps }'
+    END { printf "%.0f\n", best * 1e6 / (steps - 1) }'
 }
 rae_best() {
   scene=$1; best=""; sum=""

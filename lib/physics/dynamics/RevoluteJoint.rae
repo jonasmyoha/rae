@@ -66,6 +66,7 @@ func storeJointBodyVelocity(
 # sims by the caller).
 func prepareRevoluteJoint(
   base: mod JointSim
+  joint: mod RevoluteJointData
   simA: view BodySim
   simB: view BodySim
   indexA: view Int
@@ -80,7 +81,6 @@ func prepareRevoluteJoint(
   let invInertiaSum: Matrix3 = add(left: base.invIA, right: base.invIB)
   base.fixedRotation = determinant(matrix: invInertiaSum) < 1000.0 * floatMin
 
-  var joint: RevoluteJointData = base.revoluteJoint
   joint.indexA = indexA
   joint.indexB = indexB
 
@@ -131,16 +131,18 @@ func prepareRevoluteJoint(
     joint.lowerImpulse = 0.0
     joint.upperImpulse = 0.0
   }
-  base.revoluteJoint = joint
 }
 
 # b3WarmStartRevoluteJoint
-func warmStartRevoluteJoint(base: view JointSim, states: mod List(BodyState)) {
+func warmStartRevoluteJoint(
+  base: view JointSim
+  joint: view RevoluteJointData
+  states: mod List(BodyState)
+) {
   let mA: Float = base.invMassA
   let mB: Float = base.invMassB
   let iA: Matrix3 = base.invIA
   let iB: Matrix3 = base.invIB
-  let joint: RevoluteJointData = base.revoluteJoint
   let stateA: BodyState = jointBodyState(states: states, index: joint.indexA)
   let stateB: BodyState = jointBodyState(states: states, index: joint.indexB)
   var vA: Vec3 = stateA.linearVelocity
@@ -218,6 +220,7 @@ func revoluteLimitImpulse(
 # b3SolveRevoluteJoint
 func solveRevoluteJoint(
   base: mod JointSim
+  joint: mod RevoluteJointData
   states: mod List(BodyState)
   h: view Float
   inverseH: view Float
@@ -227,7 +230,6 @@ func solveRevoluteJoint(
   let mB: Float = base.invMassB
   let iA: Matrix3 = base.invIA
   let iB: Matrix3 = base.invIB
-  var joint: RevoluteJointData = base.revoluteJoint
   let stateA: BodyState = jointBodyState(states: states, index: joint.indexA)
   let stateB: BodyState = jointBodyState(states: states, index: joint.indexB)
   var vA: Vec3 = stateA.linearVelocity
@@ -404,7 +406,6 @@ func solveRevoluteJoint(
   vB = mulAdd(base: vB, scale: mB, vector: impulse)
   wB = add(left: wB, right: multiply(matrix: iB, vector: cross(left: rB, right: impulse)))
 
-  base.revoluteJoint = joint
   storeJointBodyVelocity(
     states: states
     index: joint.indexA

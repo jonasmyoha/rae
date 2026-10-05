@@ -27,6 +27,7 @@ open physics/dynamics/WeldJoint
 # by the caller).
 func prepareMotorJoint(
   base: mod JointSim
+  joint: mod MotorJointData
   simA: view BodySim
   simB: view BodySim
   indexA: view Int
@@ -41,7 +42,6 @@ func prepareMotorJoint(
   let invInertiaSum: Matrix3 = add(left: base.invIA, right: base.invIB)
   base.fixedRotation = determinant(matrix: invInertiaSum) < 1000.0 * floatMin
 
-  var joint: MotorJointData = base.motorJoint
   joint.indexA = indexA
   joint.indexB = indexB
 
@@ -69,7 +69,6 @@ func prepareMotorJoint(
     joint.linearSpringImpulse = zeroVector()
     joint.angularSpringImpulse = zeroVector()
   }
-  base.motorJoint = joint
 }
 
 # Write back an awake body's velocities. Box3D's motor warm start writes
@@ -88,8 +87,11 @@ func storeAwakeBodyVelocity(
 }
 
 # b3WarmStartMotorJoint
-func warmStartMotorJoint(base: view JointSim, states: mod List(BodyState)) {
-  let joint: MotorJointData = base.motorJoint
+func warmStartMotorJoint(
+  base: view JointSim
+  joint: view MotorJointData
+  states: mod List(BodyState)
+) {
   let stateA: BodyState = jointBodyState(states: states, index: joint.indexA)
   let stateB: BodyState = jointBodyState(states: states, index: joint.indexB)
   let rA: Vec3 = rotateVector(quat: stateA.deltaRotation, vector: joint.frameA.position)
@@ -132,10 +134,14 @@ func clampImpulse(impulse: view Vec3, maxImpulse: view Float) ret Vec3 {
 }
 
 # b3SolveMotorJoint
-func solveMotorJoint(base: mod JointSim, states: mod List(BodyState), h: view Float) {
+func solveMotorJoint(
+  base: mod JointSim
+  joint: mod MotorJointData
+  states: mod List(BodyState)
+  h: view Float
+) {
   let iA: Matrix3 = base.invIA
   let iB: Matrix3 = base.invIB
-  var joint: MotorJointData = base.motorJoint
   let stateA: BodyState = jointBodyState(states: states, index: joint.indexA)
   let stateB: BodyState = jointBodyState(states: states, index: joint.indexB)
   var velocities: JointVelocities = jointVelocities(stateA: stateA, stateB: stateB)
@@ -265,7 +271,6 @@ func solveMotorJoint(base: mod JointSim, states: mod List(BodyState), h: view Fl
     )
   }
 
-  base.motorJoint = joint
   storeJointVelocities(
     states: states
     indexA: joint.indexA

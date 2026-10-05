@@ -25,6 +25,7 @@ open physics/dynamics/PrismaticJoint
 # sims by the caller).
 func prepareParallelJoint(
   base: mod JointSim
+  joint: mod ParallelJointData
   simA: view BodySim
   simB: view BodySim
   indexA: view Int
@@ -39,7 +40,6 @@ func prepareParallelJoint(
   let invInertiaSum: Matrix3 = add(left: base.invIA, right: base.invIB)
   base.fixedRotation = determinant(matrix: invInertiaSum) < 1000.0 * floatMin
 
-  var joint: ParallelJointData = base.parallelJoint
   joint.indexA = indexA
   joint.indexB = indexB
 
@@ -56,12 +56,14 @@ func prepareParallelJoint(
   if enableWarmStarting is false {
     joint.perpImpulse = Vec2 { x: 0.0, y: 0.0 }
   }
-  base.parallelJoint = joint
 }
 
 # b3WarmStartParallelJoint
-func warmStartParallelJoint(base: view JointSim, states: mod List(BodyState)) {
-  let joint: ParallelJointData = base.parallelJoint
+func warmStartParallelJoint(
+  base: view JointSim
+  joint: view ParallelJointData
+  states: mod List(BodyState)
+) {
   let stateA: BodyState = jointBodyState(states: states, index: joint.indexA)
   let stateB: BodyState = jointBodyState(states: states, index: joint.indexB)
   var velocities: JointVelocities = jointVelocities(stateA: stateA, stateB: stateB)
@@ -90,10 +92,14 @@ func warmStartParallelJoint(base: view JointSim, states: mod List(BodyState)) {
 }
 
 # b3SolveParallelJoint: always soft, so it ignores the solver's bias flag.
-func solveParallelJoint(base: mod JointSim, states: mod List(BodyState), h: view Float) {
+func solveParallelJoint(
+  base: mod JointSim
+  joint: mod ParallelJointData
+  states: mod List(BodyState)
+  h: view Float
+) {
   let iA: Matrix3 = base.invIA
   let iB: Matrix3 = base.invIB
-  var joint: ParallelJointData = base.parallelJoint
   let stateA: BodyState = jointBodyState(states: states, index: joint.indexA)
   let stateB: BodyState = jointBodyState(states: states, index: joint.indexB)
   var velocities: JointVelocities = jointVelocities(stateA: stateA, stateB: stateB)
@@ -159,7 +165,6 @@ func solveParallelJoint(base: mod JointSim, states: mod List(BodyState), h: view
     )
   }
 
-  base.parallelJoint = joint
   storeJointVelocities(
     states: states
     indexA: joint.indexA

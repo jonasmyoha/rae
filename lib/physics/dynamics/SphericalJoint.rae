@@ -41,6 +41,7 @@ func pointToPointMass(base: view JointSim, rA: view Vec3, rB: view Vec3) ret Mat
 # sims by the caller).
 func prepareSphericalJoint(
   base: mod JointSim
+  joint: mod SphericalJointData
   simA: view BodySim
   simB: view BodySim
   indexA: view Int
@@ -55,7 +56,6 @@ func prepareSphericalJoint(
   let invInertiaSum: Matrix3 = add(left: base.invIA, right: base.invIB)
   base.fixedRotation = determinant(matrix: invInertiaSum) < 1000.0 * floatMin
 
-  var joint: SphericalJointData = base.sphericalJoint
   joint.indexA = indexA
   joint.indexB = indexB
 
@@ -121,12 +121,14 @@ func prepareSphericalJoint(
     joint.lowerTwistImpulse = 0.0
     joint.upperTwistImpulse = 0.0
   }
-  base.sphericalJoint = joint
 }
 
 # b3WarmStartSphericalJoint
-func warmStartSphericalJoint(base: view JointSim, states: mod List(BodyState)) {
-  let joint: SphericalJointData = base.sphericalJoint
+func warmStartSphericalJoint(
+  base: view JointSim
+  joint: view SphericalJointData
+  states: mod List(BodyState)
+) {
   let stateA: BodyState = jointBodyState(states: states, index: joint.indexA)
   let stateB: BodyState = jointBodyState(states: states, index: joint.indexB)
   let rA: Vec3 = rotateVector(quat: stateA.deltaRotation, vector: joint.frameA.position)
@@ -187,6 +189,7 @@ func angleLimitImpulse(
 # b3SolveSphericalJoint
 func solveSphericalJoint(
   base: mod JointSim
+  joint: mod SphericalJointData
   states: mod List(BodyState)
   h: view Float
   inverseH: view Float
@@ -194,7 +197,6 @@ func solveSphericalJoint(
 ) {
   let iA: Matrix3 = base.invIA
   let iB: Matrix3 = base.invIB
-  var joint: SphericalJointData = base.sphericalJoint
   let stateA: BodyState = jointBodyState(states: states, index: joint.indexA)
   let stateB: BodyState = jointBodyState(states: states, index: joint.indexB)
   var velocities: JointVelocities = jointVelocities(stateA: stateA, stateB: stateB)
@@ -387,7 +389,6 @@ func solveSphericalJoint(
     angularB: cross(left: rB, right: impulse)
   )
 
-  base.sphericalJoint = joint
   storeJointVelocities(
     states: states
     indexA: joint.indexA

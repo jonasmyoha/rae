@@ -3,9 +3,9 @@
 # between two bodies. A Joint is the world's record (its set, colour, island
 # and its links in both bodies' joint lists); a JointSim is the solver's
 # data, living in the solver set or graph colour the joint is in. Box3D keeps
-# the per-kind data in a union; here a JointSim carries one record per kind
-# and its `jointType` says which one is live (the records are in JointData,
-# the definitions in JointDefs). Each kind is solved in its own module.
+# the per-kind data in a union; here the kind's record lives in the world's
+# JointKindData list for its `jointType`, at `dataIndex` (JointData; the
+# definitions are in JointDefs). Each kind is solved in its own module.
 open Vec2
 open Vec3
 open Quat
@@ -98,6 +98,8 @@ type Joint {
   jointType: JointType
   generation: Int
   collideConnected: Bool
+  # The kind's record in the world's JointKindData (as on the JointSim)
+  dataIndex: Int
 }
 
 # A joint of an island, with its two bodies, so splitting an island never
@@ -108,7 +110,7 @@ type JointLink {
   bodyIdB: Int
 }
 
-# b3JointSim: the common solver data and the live kind's record.
+# b3JointSim: the common solver data and where the kind's record is.
 type JointSim {
   jointId: Int
   bodyIdA: Int
@@ -127,14 +129,8 @@ type JointSim {
   forceThreshold: Float
   torqueThreshold: Float
   fixedRotation: Bool
-  distanceJoint: DistanceJointData
-  revoluteJoint: RevoluteJointData
-  prismaticJoint: PrismaticJointData
-  wheelJoint: WheelJointData
-  sphericalJoint: SphericalJointData
-  motorJoint: MotorJointData
-  parallelJoint: ParallelJointData
-  weldJoint: WeldJointData
+  # The kind's record in the world's JointKindData; -1 for a filter joint
+  dataIndex: Int
 }
 
 # b3JointEvent: an awake joint whose force or torque reached its threshold.
@@ -161,6 +157,7 @@ func zeroJoint() ret Joint {
     jointType: JointType.parallelJoint
     generation: 0
     collideConnected: false
+    dataIndex: -1
   }
 }
 
@@ -183,14 +180,7 @@ func zeroJointSim() ret JointSim {
     forceThreshold: 0.0
     torqueThreshold: 0.0
     fixedRotation: false
-    distanceJoint: zeroDistanceJointData()
-    revoluteJoint: zeroRevoluteJointData()
-    prismaticJoint: zeroPrismaticJointData()
-    wheelJoint: zeroWheelJointData()
-    sphericalJoint: zeroSphericalJointData()
-    motorJoint: zeroMotorJointData()
-    parallelJoint: zeroParallelJointData()
-    weldJoint: zeroWeldJointData()
+    dataIndex: -1
   }
 }
 

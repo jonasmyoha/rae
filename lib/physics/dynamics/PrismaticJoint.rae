@@ -105,6 +105,7 @@ func storeJointVelocities(
 # sims by the caller).
 func preparePrismaticJoint(
   base: mod JointSim
+  joint: mod PrismaticJointData
   simA: view BodySim
   simB: view BodySim
   indexA: view Int
@@ -119,7 +120,6 @@ func preparePrismaticJoint(
   let invInertiaSum: Matrix3 = add(left: base.invIA, right: base.invIB)
   base.fixedRotation = determinant(matrix: invInertiaSum) < 1000.0 * floatMin
 
-  var joint: PrismaticJointData = base.prismaticJoint
   joint.indexA = indexA
   joint.indexB = indexB
 
@@ -152,12 +152,14 @@ func preparePrismaticJoint(
     joint.lowerImpulse = 0.0
     joint.upperImpulse = 0.0
   }
-  base.prismaticJoint = joint
 }
 
 # b3WarmStartPrismaticJoint
-func warmStartPrismaticJoint(base: view JointSim, states: mod List(BodyState)) {
-  let joint: PrismaticJointData = base.prismaticJoint
+func warmStartPrismaticJoint(
+  base: view JointSim
+  joint: view PrismaticJointData
+  states: mod List(BodyState)
+) {
   let stateA: BodyState = jointBodyState(states: states, index: joint.indexA)
   let stateB: BodyState = jointBodyState(states: states, index: joint.indexB)
 
@@ -262,6 +264,7 @@ func prismaticLimitImpulse(
 # b3SolvePrismaticJoint
 func solvePrismaticJoint(
   base: mod JointSim
+  joint: mod PrismaticJointData
   states: mod List(BodyState)
   h: view Float
   inverseH: view Float
@@ -271,7 +274,6 @@ func solvePrismaticJoint(
   let mB: Float = base.invMassB
   let iA: Matrix3 = base.invIA
   let iB: Matrix3 = base.invIB
-  var joint: PrismaticJointData = base.prismaticJoint
   let stateA: BodyState = jointBodyState(states: states, index: joint.indexA)
   let stateB: BodyState = jointBodyState(states: states, index: joint.indexB)
   var velocities: JointVelocities = jointVelocities(stateA: stateA, stateB: stateB)
@@ -467,7 +469,6 @@ func solvePrismaticJoint(
     useBias: useBias
   )
 
-  base.prismaticJoint = joint
   storeJointVelocities(
     states: states
     indexA: joint.indexA
