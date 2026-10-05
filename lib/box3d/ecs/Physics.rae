@@ -69,8 +69,9 @@ type Physics {
   # The one static body the venue's shapes are on (created on first use)
   venueBodyId: BodyId
   venueShapeIds: List(ShapeId)
-  # The venue's meshes (the glue's handles), owned here
+  # The venue's meshes and height fields (the glue's handles), owned here
   meshes: List(UInt64)
+  heightFields: List(UInt64)
 }
 
 # The world definition of an ECS world: Rae's Z-up gravity
@@ -106,11 +107,13 @@ func createPhysics(def: view WorldDef, fixedStep: view Float, subSteps: view Int
       venueBodyId: nullBodyId()
       venueShapeIds: List.create(ShapeId, cap: 4)
       meshes: List.create(UInt64, cap: 0)
+      heightFields: List.create(UInt64, cap: 0)
     }
   }
 }
 
-# Destroy the C world (its bodies, shapes and joints) and the venue's meshes.
+# Destroy the C world (its bodies, shapes and joints) and the venue's meshes
+# and height fields.
 # The resource must not be used afterwards.
 func destroyPhysics(physics: mod Physics) {
   unsafe {
@@ -120,8 +123,12 @@ func destroyPhysics(physics: mod Physics) {
     loop var i: Int = 0, i < physics.meshes.length, ++i {
       rae_b3DestroyMesh(mesh: physics.meshes.copyAtDefault(index: i))
     }
+    loop var i: Int = 0, i < physics.heightFields.length, ++i {
+      rae_b3DestroyHeightField(heightField: physics.heightFields.copyAtDefault(index: i))
+    }
   }
   physics.meshes.clear()
+  physics.heightFields.clear()
 }
 
 func setMappedEntity(entities: mod List(EntityId), index: view Int, entityId: view EntityId) {

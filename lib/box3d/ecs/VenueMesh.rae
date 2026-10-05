@@ -1,8 +1,12 @@
-# A static venue collider from a render mesh on the C-library track: the same
-# as the port's physics/ecs/VenueMesh (lib/Mesh3d's MeshData handed to
-# PhysicsSpawn.addVenueTriangles).
+# Static venue colliders from data on the C-library track: the same as the
+# port's physics/ecs/VenueMesh - a render mesh (lib/Mesh3d's MeshData handed to
+# PhysicsSpawn.addVenueTriangles) and a height field (b3CreateHeightField,
+# owned by the Physics resource, which frees it after the world).
 open Vec3
 open Mesh3d
+open box3d/Box3d
+open box3d/Box3dTypes
+open box3d/Box3dGlue
 open box3d/ecs/PhysicsTypes
 open box3d/ecs/Physics
 open box3d/ecs/PhysicsSpawn
@@ -23,4 +27,60 @@ func addVenueMesh(
     transform: transform
     def: def
   )
+}
+
+# A height field as a static venue collider, on its own static body placed by
+# `transform`. Box3D's height field is a grid over its local x (`countX`
+# columns) and z (`countZ` rows) with the heights along local y, `heights`
+# row by row, each axis scaled by `scale`; a Z-up venue turns it with
+# `transform`'s rotation. None when the grid is smaller than 2 x 2 or Box3D
+# refuses it.
+func addVenueHeightField(
+  physics: mod Physics
+  heights: view List(Float)
+  countX: view Int
+  countZ: view Int
+  scale: view Vec3
+  transform: view Transform
+  def: view ShapeDef
+) ret opt ShapeId {
+  if countX < 2 or countZ < 2 or heights.length < countX * countZ {
+    ret none
+  }
+  let heightValues: List(Float32) = List.create(Float32, cap: countX * countZ)
+  loop var i: Int = 0, i < countX * countZ, ++i {
+    heightValues.add(value: heights.copyAtDefault(index: i) as Float32)
+  }
+  let materials: List(UInt8) = List.create(UInt8, cap: (countX - 1) * (countZ - 1))
+  loop var cell: Int = 0, cell < (countX - 1) * (countZ - 1), ++cell {
+    materials.add(value: 0 as UInt8)
+  }
+  unsafe {
+    let heightFieldDef: b3HeightFieldDef = {
+      heights: heightValues.data
+      materialIndices: materials.data
+      scale: toB3Vector(vector: scale)
+      countX: countX as Int32
+      countZ: countZ as Int32
+      globalMinimumHeight: -256.0
+      globalMaximumHeight: 256.0
+      clockwiseWinding: false
+    }
+    let heightField: UInt64 = rae_b3CreateHeightField(def: heightFieldDef)
+    if heightField is 0 {
+      ret none
+    }
+    physics.heightFields.add(value: heightField)
+    var bodyDef: BodyDef = defaultBodyDef(lengthUnitsPerMeter: physics.lengthUnitsPerMeter)
+    bodyDef.position = transform.position
+    bodyDef.rotation = transform.rotation
+    let bodyId: b3BodyId = b3CreateBody(worldId: physics.world, def: toB3BodyDef(def: bodyDef))
+    ret fromB3ShapeId(
+      shapeId: rae_b3CreateHeightFieldShape(
+        bodyId: bodyId
+        def: toB3ShapeDef(def: def)
+        heightField: heightField
+      )
+    )
+  }
 }

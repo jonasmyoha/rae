@@ -351,6 +351,40 @@ After the maintainer's first try-out (2026-10-05) the controls changed:
   upright joint is a soft 0.5 Hz spring, so a car that lands on its side
   stays there, as in the sample; R respawns it.
 
+### The vehicle on track B (2026-10-05)
+
+`examples/125_vehicle_c` is 124's program on Box3D's C library. Its `Main`
+differs from 124's in two code lines: `open physicsScenes/box3d/VehicleSpawn`
+and its assets path.
+
+- **Adapter:** `lib/physicsScenes/box3d/VehicleSpawn` is the port's
+  adapter with its `open` lines switched to `box3d/ecs/*`. Its
+  `engineByteCount` is `b3GetByteCount()`.
+- **What track B gained,** with the port's names and signatures:
+  - in `box3d/ecs`: `JointId` (with `toB3JointId` / `fromB3JointId`),
+    `WheelJointSettings`, `addWheelJoint`, `addParallelJointToVenue`, the
+    wheel setters, `wheelSpinSpeed`, `wakeEntity`, `entityLinearVelocity`
+    and `addVenueHeightField`;
+  - in the glue: `rae_b3CreateHeightField`, `_CreateHeightFieldShape` and
+    `_DestroyHeightField`, as `uint64` handles. A height-field shape points
+    at its data, as a mesh shape does, so `Physics` owns the handles and
+    `destroyPhysics` frees them after the world. `tools/box3d/build.sh`
+    rebuilds the library with the glue.
+- **Same simulation:** fixture `1005_vehicle_drive_box3d` is 1002 on
+  track B. It prints 1002's expected output byte for byte, with the scalar
+  library and with the SIMD one the runner links. The example's 300-step
+  autopilot hash equals `vehicle.golden` with SIMD and scalar, at 1 and
+  8 workers. A 600-step drive, through the jump and into the hills, also
+  hashes the same on both tracks (15823478267626950115).
+- **5-minute memory test** (respawn every 5 s, 59 respawns):
+  - Rae's live memory stayed at exactly 900 buffers and 6.65 MB;
+  - Box3D's own heap was exactly 1 359 360 bytes at every respawn (the
+    world with its course);
+  - nothing was outstanding at exit.
+
+  The 124/125 gate branch passes for both, as does 123 after the glue
+  change.
+
 ## 4. Track B: building the C library
 
 Built by B1 (2026-10-05).
