@@ -494,6 +494,26 @@ scalar:
   90 degree turn at full lock at town speed.
 - `vehicle.golden` is updated; the three builds agree on it.
 
+### Drawing between fixed steps (2026-10-05)
+
+The maintainer saw the port's vehicle stutter at full speed. It was not the
+port: both tracks drew the raw fixed-step poses. With 120 Hz steps and frames
+that do not divide them evenly, a frame either repeats the last pose (zero
+steps) or jumps two. Measured headless at full throttle, with a per-frame log
+under `RAE_VEHICLE_DEBUG`, about 28% of frames were frozen and 22% doubled,
+on both tracks. A display near 120 Hz drifts in and out of phase with the
+steps, so the stutter came and went.
+
+The fix is interpolation (`physicsScenes/PoseBlend`):
+- the adapters keep `previousTransforms`, the poses from before the last
+  fixed step;
+- each frame draws, and the chase camera follows,
+  `interpolatedTransforms(previous, current, physicsBlend)`.
+
+After the change, 0% of frames were frozen or doubled on either track. The
+physics is unchanged: the hashes and fixtures are the same. The playgrounds
+still draw raw poses; that is queued.
+
 ## 4. Track B: building the C library
 
 Built by B1 (2026-10-05).

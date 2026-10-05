@@ -18,7 +18,8 @@
 #                                    seconds and logs each respawn (the
 #                                    memory test: bodies and joints despawn
 #                                    and spawn the whole run)
-#   RAE_VEHICLE_DEBUG=1              logs the chassis pose and the shadow
+#   RAE_VEHICLE_DEBUG=1              logs the drawn chassis pose, each frame's
+#                                    physics steps and time, and the shadow
 #                                    casters of each frame
 import Math
 import Sys
@@ -299,6 +300,11 @@ func readVehicleControls(app: mod VehicleApp) ret Bool {
   ret respawn
 }
 
+# Two decimals, for the debug log's positions.
+func centi(value: view Float) ret Float {
+  ret Math.round(x: value * 100.0) / 100.0
+}
+
 # The camera centred behind the car and above it, looking at it. Only the
 # HEADING is eased (so bumps and steering do not shake the view); the
 # distance stays fixed, so the car stays centred at any speed - easing the
@@ -308,9 +314,9 @@ func updateChaseCamera(app: mod VehicleApp, chassis: view Transform3D) {
   app.chassis = chassis
   if app.debugLog {
     log(
-      "[vehicle] t {tenths(value: app.clock)} dt {app.deltaTime} throttle {app.command.throttle} chassis ({tenths(
+      "[vehicle] t {tenths(value: app.clock)} dt {app.deltaTime} throttle {app.command.throttle} chassis ({centi(
         value: chassis.position.x
-      )}, {tenths(value: chassis.position.y)}, {tenths(value: chassis.position.z)})"
+      )}, {centi(value: chassis.position.y)}, {centi(value: chassis.position.z)})"
     )
   }
   var forward: Vec3 = vehicleForward(chassisRotation: chassis.rotation)
@@ -340,6 +346,13 @@ func updateChaseCamera(app: mod VehicleApp, chassis: view Transform3D) {
 
 # Record a step's time (`startedNs` from nowNs, `steps` fixed steps taken).
 func recordVehicleStep(app: mod VehicleApp, startedNs: view Int, steps: view Int) {
+  if app.debugLog {
+    log(
+      "[vehicle-frame] dt {Math.round(x: app.deltaTime * 10000.0) / 10.0} ms, steps {steps}, physics {Math.round(
+        x: ((nowNs() - startedNs) as Float) / 10000.0
+      ) / 100.0} ms, sim {steps * 1000 / 120} ms"
+    )
+  }
   if steps > 0 {
     addTimingSample(
       window: app.stepWindow
