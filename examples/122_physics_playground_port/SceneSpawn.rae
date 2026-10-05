@@ -13,6 +13,7 @@ open ecs/Transform
 open physicsScenes/SceneTypes
 open physicsScenes/SceneHud
 open physicsScenes/SceneLibrary
+open physicsScenes/PlaygroundRender
 open physics/math/TransformMath
 open physics/geometry/QueryTypes
 open physics/dynamics/WorldTypes
@@ -27,14 +28,8 @@ open physics/ecs/VenueMesh
 
 const trackName: String = "track A (Rae port)"
 
-# How an entity is drawn: its mesh kind (one instanced draw per kind) and
-# the scale of the unit mesh.
-enum RenderKind { box, sphere, capsule }
-
-type RenderShape {
-  kind: RenderKind
-  scale: Vec3
-}
+# This example's fonts and theme (the HUD itself is the shared package's)
+const assetBase: String = "examples/122_physics_playground_port/assets/"
 
 # The playground's ECS world.
 type PlaygroundWorld {
@@ -304,6 +299,12 @@ func playgroundStats(
 # How many bodies are awake (the idle loop sleeps when none are).
 func playgroundAwakeCount(world: view PlaygroundWorld) ret Int {
   ret physicsCounters(physics: world.physics).awakeBodyCount
+}
+
+# The engine's own heap, outside Rae's allocation counters: none here, the
+# port's memory is Rae's (RAE_MEM_STATS counts it).
+func engineByteCount() ret Int {
+  ret 0
 }
 
 func destroyPlaygroundWorld(world: mod PlaygroundWorld) {

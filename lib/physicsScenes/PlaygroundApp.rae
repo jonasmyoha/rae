@@ -1,0 +1,593 @@
+# The physics playgrounds' window, shared by both tracks
+# (docs/physics-two-implementations.md §3): everything of the frame loop that
+# does not touch a physics engine. Each example's Main keeps only the calls
+# into its track's adapter (SceneSpawn: create, spawn, step, throw, despawn,
+# counts) and calls these in order every frame:
+#
+#   beginPlaygroundFrame      time, resize, the HUD's pointer and slider
+#   readPlaygroundControls    scene keys, R, the slider, the scene cycle, T;
+#                             true when the scene must be rebuilt (the app
+#                             rebuilds it, then calls startPlaygroundScene)
+#   updatePlaygroundCamera    the fly camera (WASD/Q/E, right-drag look)
+#   playgroundShots           this frame's machine-gun directions (the app
+#                             throws a ball along each and pools it)
+#   retirePlaygroundBalls     the pool's killers; the app despawns the result
+#   playgroundShouldStep / recordPlaygroundStep    step only while awake
+#   updatePlaygroundHud       the HUD lines from the track's counts
+#   finishPlaygroundFrame     render (instanced bodies, shadows, HUD, FPS
+#                             meter) or park in waitEvents when idle
+#
+# The renderer, the UI world and its systems are the app's locals and are
+# passed in (a UiWorld is never bundled into a struct that gets copied).
+#
+#   RAE_PLAYGROUND_SCENE=<1-6>       the scene the window opens on
+#   RAE_PLAYGROUND_BODIES=<count>    the pyramid's starting body count
+#   RAE_PLAYGROUND_AUTOFIRE=1        the window opens with autofire on
+#   RAE_PLAYGROUND_CYCLE_SECONDS=<s> switches to the next scene every <s>
+#                                    seconds and logs each switch (the
+#                                    memory test: with autofire, bodies spawn
+#                                    and despawn the whole run)
+#   RAE_PLAYGROUND_DEBUG=1           logs the shadow casters and live balls
+#                                    of each frame
+import Math
+import Sys
+import Gpu2d
+import Sdl3
+import Keys
+open Vec3
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Transform
+open Gpu3d
+open Gbuffer
+open RendererDeferred
+open Rendergraph
+open Scene3d
+open Shadow3d
+open gpu/GpuResources
+open app3d/CameraRig
+open app3d/UiShell
+open ui/EventLoop
+open ui/Registry
+open ui/inputSystem/InputSystem
+open ui/Ecs
+open ui/UiSystems
+open physicsScenes/SceneTypes
+open physicsScenes/SceneLibrary
+open physicsScenes/SceneHud
+open physicsScenes/BallPool
+open physicsScenes/PlaygroundRender
+open physicsScenes/PlaygroundUi
+
+# The pyramid's body count (the HUD's slider sets it in the window)
+const defaultPlaygroundBodyCount: Int = 1000
+
+# The machine gun: balls per second, and how many may be alive at once
+const fireRate: Float = 15.0
+
+const maxBalls: Int = 400
+
+const ballLifetimeSeconds: Float = 20.0
+
+type PlaygroundApp {
+  meshes: PlaygroundMeshes
+  batches: PlaygroundBatches
+  ui: PlaygroundUi
+  camera: Camera3d
+  rig: CameraRig
+  light: Light3d
+  groundMesh: MeshHandle
+  balls: BallPool
+  stepWindow: TimingWindow
+  frameWindow: TimingWindow
+  # The scene on show: its index, the pyramid's count, and what the frame
+  # needs of it (the PhysicsScene itself stays with the app that spawned it)
+  sceneIndex: Int
+  bodyCount: Int
+  sceneName: String
+  sceneCenter: Vec3
+  sceneReach: Float
+  # The gun
+  autoFire: Bool
+  fireCooldown: Float
+  shotsThisFrame: Int
+  # The scene cycle (RAE_PLAYGROUND_CYCLE_SECONDS; 0 is off)
+  cycleSeconds: Float
+  lastCycle: Float
+  cycleCount: Int
+  debugLog: Bool
+  # This frame
+  extentW: Float
+  extentH: Float
+  startTime: Float64
+  lastFrame: Float64
+  now: Float64
+  deltaTime: Float
+  clock: Float
+  renderedOnce: Bool
+  sceneChanged: Bool
+  resized: Bool
+  sliderMoved: Bool
+  cameraMoved: Bool
+}
+
+# Open the window (before the renderer is created).
+func openPlaygroundWindow(trackName: view String) {
+  Gpu2d.initWindow(width: 1280, height: 800, title: "Rae — physics playground ({trackName})")
+  Gpu2d.setDesignResolution(width: windowExtentW(), height: windowExtentH(), fit: 0)
+}
+
+func envFlag(name: view String) ret Bool {
+  ret Sys.getEnv(name: name).length() > 0
+}
+
+# The app's shared state, its HUD mounted into `uiWorld`. `assetBase` is the
+# example's assets directory (fonts and Theme.raescene).
+func createPlaygroundApp(
+  renderer: mod DeferredRenderer
+  uiWorld: mod UiWorld
+  uiSystems: mod UiSystems
+  assetBase: view String
+) ret PlaygroundApp {
+  var bodyCount: Int = defaultPlaygroundBodyCount
+  let bodiesSetting: String = Sys.getEnv(name: "RAE_PLAYGROUND_BODIES")
+  if bodiesSetting.length() > 0 {
+    bodyCount = bodiesSetting.toInt()
+  }
+  var sceneIndex: Int = 0
+  let sceneSetting: String = Sys.getEnv(name: "RAE_PLAYGROUND_SCENE")
+  if sceneSetting.length() > 0 {
+    sceneIndex = sceneSetting.toInt() - 1
+    if sceneIndex < 0 or sceneIndex >= sceneCount {
+      sceneIndex = 0
+    }
+  }
+  var cycleSeconds: Float = 0.0
+  let cycleSetting: String = Sys.getEnv(name: "RAE_PLAYGROUND_CYCLE_SECONDS")
+  if cycleSetting.length() > 0 {
+    cycleSeconds = cycleSetting.toFloat()
+  }
+  let meshes: PlaygroundMeshes = createPlaygroundMeshes(renderer: renderer, sceneCount: sceneCount)
+  let camera: Camera3d = defaultCamera3d()
+  var rig: CameraRig = createCameraRig(camera: camera)
+  # The left button fires, so the camera looks with the right
+  rig.lookWithRightButton = true
+  let startTime: Float64 = Gpu2d.nowSeconds()
+  var app: PlaygroundApp = {
+    meshes: meshes
+    batches: createPlaygroundBatches(meshes: meshes)
+    ui: createPlaygroundUi(assetBase: assetBase, bodyCount: bodyCount)
+    camera: camera
+    rig: rig
+    light: defaultLight3d()
+    groundMesh: meshes.flatGround
+    balls: createBallPool(
+      capacity: maxBalls
+      lifetimeSeconds: ballLifetimeSeconds
+      killDistance: 100.0
+    )
+    stepWindow: createTimingWindow()
+    frameWindow: createTimingWindow()
+    sceneIndex: sceneIndex
+    bodyCount: bodyCount
+    sceneName: ""
+    sceneCenter: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+    sceneReach: 10.0
+    autoFire: envFlag(name: "RAE_PLAYGROUND_AUTOFIRE")
+    fireCooldown: 0.0
+    shotsThisFrame: 0
+    cycleSeconds: cycleSeconds
+    lastCycle: 0.0
+    cycleCount: 0
+    debugLog: envFlag(name: "RAE_PLAYGROUND_DEBUG")
+    extentW: windowExtentW()
+    extentH: windowExtentH()
+    startTime: startTime
+    lastFrame: startTime
+    now: startTime
+    deltaTime: 0.0
+    clock: 0.0
+    renderedOnce: false
+    sceneChanged: true
+    resized: false
+    sliderMoved: false
+    cameraMoved: false
+  }
+  mountPlaygroundUi(
+    ui: app.ui
+    world: uiWorld
+    systems: uiSystems
+    width: app.extentW
+    height: app.extentH
+  )
+  resizePlaygroundUi(
+    ui: app.ui
+    world: uiWorld
+    systems: uiSystems
+    width: app.extentW
+    height: app.extentH
+  )
+  setHudHint(
+    ui: app.ui
+    world: uiWorld
+    systems: uiSystems
+    autoFire: app.autoFire
+  )
+  ret app
+}
+
+# Put the fly camera at a scene's framing: where an orbit of the scene's
+# distance would put the eye, looking at the scene's target.
+func frameScene(rig: mod CameraRig, camera: mod Camera3d, scene: view PhysicsScene) {
+  camera.target = scene.cameraTarget
+  # Far enough to see the whole scene from well outside it
+  camera.farZ = 4.0 * scene.cameraDistance + 200.0
+  camera.nearZ = 0.1 + scene.cameraDistance * 0.002
+  rig.mode = CameraRigMode.orbit
+  rig.minDistance = 3.0
+  rig.maxDistance = 600.0
+  rig.distance = scene.cameraDistance
+  rig.yaw = 0.3
+  rig.orbitPitch = 0.35
+  snapCameraRigView(rig: rig)
+  applyCameraRig(rig: rig, camera: camera)
+  # Orbit to fly keeps the view exactly where the orbit put it
+  toggleCameraRigMode(rig: rig, camera: camera)
+  # Cross the scene in a few seconds, whatever its size
+  rig.moveSpeed = Math.max(a: 8.0, b: scene.cameraDistance * 0.4)
+}
+
+# The scene the app has just spawned (at start or after a rebuild): its
+# ground mesh, the camera at its framing, and an empty ball pool (the old
+# balls went with the old world).
+func startPlaygroundScene(
+  app: mod PlaygroundApp
+  renderer: mod DeferredRenderer
+  scene: view PhysicsScene
+) {
+  app.groundMesh = groundMeshFor(
+    renderer: renderer
+    meshes: app.meshes
+    sceneIndex: app.sceneIndex
+    ground: scene.ground
+  )
+  frameScene(rig: app.rig, camera: app.camera, scene: scene)
+  clearBallPool(pool: app.balls)
+  app.balls.killDistance = 3.0 * scene.cameraDistance + 100.0
+  app.sceneName = scene.name
+  app.sceneCenter = scene.cameraTarget
+  app.sceneReach = scene.cameraDistance
+  app.sceneChanged = true
+}
+
+# The scene the app should build now (index and pyramid size).
+func playgroundScene(app: view PlaygroundApp) ret PhysicsScene {
+  ret buildScene(index: app.sceneIndex, bodyCount: app.bodyCount)
+}
+
+# Time, resize and the HUD's pointer and slider for this frame.
+func beginPlaygroundFrame(app: mod PlaygroundApp, uiWorld: mod UiWorld, uiSystems: mod UiSystems) {
+  app.now = Gpu2d.nowSeconds()
+  app.deltaTime = (app.now - app.lastFrame) as Float
+  app.lastFrame = app.now
+  if app.deltaTime < 0.0 {
+    app.deltaTime = 0.0
+  }
+  app.clock = (app.now - app.startTime) as Float
+  app.resized = false
+  if Gpu2d.windowResized() {
+    let width: Float = windowExtentW()
+    let height: Float = windowExtentH()
+    if width > 0.0 and height > 0.0 {
+      app.extentW = width
+      app.extentH = height
+      Gpu2d.setDesignResolution(width: width, height: height, fit: 0)
+      resizePlaygroundUi(
+        ui: app.ui
+        world: uiWorld
+        systems: uiSystems
+        width: width
+        height: height
+      )
+      app.resized = true
+    }
+  }
+  app.sliderMoved = updatePlaygroundUiInput(ui: app.ui, world: uiWorld, systems: uiSystems)
+}
+
+# The scene a number key selects (keys 1-6), or -1.
+func sceneKeyPressed() ret Int {
+  loop var index: Int = 0, index < sceneCount, ++index {
+    if Sdl3.isKeyPressed(key: Keys.key1 + index) {
+      ret index
+    }
+  }
+  ret -1
+}
+
+# Keys 1-6, R, the slider let go at a new count, the scene cycle, and T
+# (autofire). True when the app must rebuild the scene (playgroundScene).
+func readPlaygroundControls(
+  app: mod PlaygroundApp
+  uiWorld: mod UiWorld
+  uiSystems: mod UiSystems
+) ret Bool {
+  var rebuild: Bool = false
+  let keyScene: Int = sceneKeyPressed()
+  if keyScene >= 0 {
+    app.sceneIndex = keyScene
+    rebuild = true
+  }
+  if Sdl3.isKeyPressed(key: Keys.keyR) {
+    rebuild = true
+  }
+  if app.cycleSeconds > 0.0 and app.clock - app.lastCycle >= app.cycleSeconds {
+    app.lastCycle = app.clock
+    app.cycleCount = app.cycleCount + 1
+    app.sceneIndex = (app.sceneIndex + 1) % sceneCount
+    rebuild = true
+    log("[playground] cycle {app.cycleCount}: scene {app.sceneIndex + 1}")
+  }
+  # The slider rebuilds the pyramid when it is let go at a new count
+  if app.ui.slider.dragging is false and sliderBodyCount(ui: app.ui) is not app.bodyCount {
+    app.bodyCount = sliderBodyCount(ui: app.ui)
+    if app.sceneIndex is 0 {
+      rebuild = true
+    }
+  }
+  if Sdl3.isKeyPressed(key: Keys.keyT) {
+    app.autoFire = app.autoFire is false
+    setHudHint(
+      ui: app.ui
+      world: uiWorld
+      systems: uiSystems
+      autoFire: app.autoFire
+    )
+    relayoutPlaygroundUi(ui: app.ui, world: uiWorld, systems: uiSystems)
+    app.sceneChanged = true
+  }
+  ret rebuild
+}
+
+# The fly camera: WASD/Q/E (Shift fast, Control slow) and a right drag.
+func updatePlaygroundCamera(app: mod PlaygroundApp) {
+  app.cameraMoved = updateCameraRig(
+    rig: app.rig
+    camera: app.camera
+    allowInput: uiHoldsPointer(ui: app.ui) is false
+    wheel: uiWheelUnclaimed(input: app.ui.input)
+    deltaTime: app.deltaTime
+  )
+  applyCameraRig(rig: app.rig, camera: app.camera)
+}
+
+# The machine gun: the directions to fire along this frame, `fireRate` a
+# second while the trigger is held (the left button over the scene, or F) or
+# autofire is on, each the camera ray through the pointer. The app throws a
+# ball from shotOrigin along each and pools it (addPooledBall).
+func playgroundShots(app: mod PlaygroundApp) ret List(Vec3) {
+  let shots: List(Vec3) = List.create(Vec3, cap: 4)
+  let leftHeld: Bool = Gpu2d.pointerDown() and uiHoldsPointer(ui: app.ui) is false
+  let triggerHeld: Bool = app.autoFire or leftHeld or Sdl3.isKeyDown(key: Keys.keyF)
+  if triggerHeld {
+    app.fireCooldown = app.fireCooldown - app.deltaTime
+    # At most a few per frame, so a long hitch does not fire a burst
+    loop app.fireCooldown <= 0.0 and shots.length < 4 {
+      shots.add(value: pointerRay(
+        camera: app.camera
+        x: Gpu2d.pointerX()
+        y: Gpu2d.pointerY()
+        width: app.extentW
+        height: app.extentH
+      ))
+      app.fireCooldown = app.fireCooldown + 1.0 / fireRate
+    }
+    if app.fireCooldown < 0.0 {
+      app.fireCooldown = 0.0
+    }
+  } else {
+    app.fireCooldown = 0.0
+  }
+  app.shotsThisFrame = shots.length
+  ret shots
+}
+
+# Where a shot along `direction` starts: just ahead of the eye.
+func shotOrigin(app: view PlaygroundApp, direction: view Vec3) ret Vec3 {
+  ret vadd(a: app.camera.position, b: direction)
+}
+
+# The balls the pool retires now (over capacity, too old, too far, fallen
+# off), for the app to despawn.
+func retirePlaygroundBalls(
+  app: mod PlaygroundApp
+  transforms: view ComponentTable(Transform3D)
+) ret List(EntityId) {
+  let retired: List(EntityId) = retireBalls(
+    pool: app.balls
+    transforms: transforms
+    center: app.sceneCenter
+    now: app.clock
+  )
+  if retired.length > 0 {
+    app.sceneChanged = true
+  }
+  if app.debugLog and (app.shotsThisFrame > 0 or retired.length > 0) {
+    log(
+      "[balls] live {ballCount(pool: app.balls)}, fired {app.shotsThisFrame}, retired {retired.length}"
+    )
+  }
+  ret retired
+}
+
+# Step only while something is awake (a sleeping world costs nothing).
+func playgroundShouldStep(app: view PlaygroundApp, awakeCount: view Int) ret Bool {
+  ret awakeCount > 0 or app.shotsThisFrame > 0 or app.sceneChanged
+}
+
+# Record a step's time (`startedNs` from nowNs, `steps` fixed steps taken).
+func recordPlaygroundStep(app: mod PlaygroundApp, startedNs: view Int, steps: view Int) {
+  if steps > 0 {
+    addTimingSample(
+      window: app.stepWindow
+      milliseconds: ((nowNs() - startedNs) as Float) / 1000000.0 / (steps as Float)
+      now: app.clock
+    )
+  }
+}
+
+# The HUD's lines from the track's counts; true when the text changed.
+func updatePlaygroundHud(
+  app: mod PlaygroundApp
+  uiWorld: mod UiWorld
+  uiSystems: mod UiSystems
+  stats: view HudStats
+) ret Bool {
+  let lines: List(String) = hudLines(stats: stats, step: app.stepWindow, frame: app.frameWindow)
+  ret setHudText(
+    ui: app.ui
+    world: uiWorld
+    systems: uiSystems
+    lines: lines
+    bodyCount: app.bodyCount
+  )
+}
+
+# Render the frame, or park in waitEvents when nothing needs drawing.
+# `awakeCount` is the world's after this frame's step; `hudChanged` from
+# updatePlaygroundHud.
+func finishPlaygroundFrame(
+  app: mod PlaygroundApp
+  renderer: mod DeferredRenderer
+  uiWorld: mod UiWorld
+  uiSystems: mod UiSystems
+  renderShapes: view ComponentTable(RenderShape)
+  transforms: view ComponentTable(Transform3D)
+  awakeCount: view Int
+  hudChanged: view Bool
+) {
+  let needsRender: Bool = awakeCount > 0 or app.cameraMoved or app.sliderMoved or app.sceneChanged or hudChanged or app.resized or app.shotsThisFrame > 0 or app.renderedOnce is false or Gpu2d.pointerDown()
+  if Gpu2d.shouldRenderFrame(appNeedsRender: needsRender) is false {
+    Gpu2d.waitEvents(timeoutSec: nextWaitTimeoutSec(
+      visible: Gpu2d.renderableNow()
+      animating: false
+      mouseDown: false
+      pollWatcher: false
+      frameSec: 0.016667
+      heartbeatSec: 1.0
+    ))
+    recordPlaygroundFrame(
+      ui: app.ui
+      width: app.extentW
+      height: app.extentH
+      now: app.now
+      rendered: false
+    )
+  } else {
+    app.renderedOnce = true
+    app.sceneChanged = false
+    fillBatches(batches: app.batches, renderShapes: renderShapes, transforms: transforms)
+    renderPlaygroundFrame(
+      app: app
+      renderer: renderer
+      uiWorld: uiWorld
+      uiSystems: uiSystems
+      renderShapes: renderShapes
+      transforms: transforms
+    )
+    addTimingSample(window: app.frameWindow, milliseconds: app.deltaTime * 1000.0, now: app.clock)
+    recordPlaygroundFrame(
+      ui: app.ui
+      width: app.extentW
+      height: app.extentH
+      now: app.now
+      rendered: true
+    )
+  }
+  uiFrameEnd(world: uiWorld, uiSystems: uiSystems)
+}
+
+# One frame through the deferred graph: the bodies as shadow casters, the
+# instanced geometry pass, the generic passes, the HUD, present.
+func renderPlaygroundFrame(
+  app: mod PlaygroundApp
+  renderer: mod DeferredRenderer
+  uiWorld: mod UiWorld
+  uiSystems: mod UiSystems
+  renderShapes: view ComponentTable(RenderShape)
+  transforms: view ComponentTable(Transform3D)
+) {
+  let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
+  let reach: Float = app.sceneReach
+  loop var passIndex: Int = 0, passIndex < deferredOrderLength(renderer: renderer), ++passIndex {
+    let tag: Int = deferredTagAt(renderer: renderer, i: passIndex)
+    if tag is RenderTag.shadow {
+      let cascades: ShadowCascades = fitShadowCascades(
+        camPos: app.camera.position
+        camTarget: app.camera.target
+        fovYDeg: app.camera.fovYDeg
+        aspect: aspect
+        near: app.camera.nearZ
+        far: reach * 3.0
+        sunDir: app.light.sunDir
+        count: 3
+        resolution: 2048
+        lambda: 0.7
+        backExtent: reach * 1.5
+      )
+      beginShadowPass(renderer: renderer, c: cascades)
+      queueShadowCasters(
+        renderer: renderer
+        meshes: app.meshes
+        renderShapes: renderShapes
+        transforms: transforms
+      )
+      endShadowPass(renderer: renderer)
+      if app.debugLog {
+        log("[shadow] casters {shadowCasterCount(renderer: renderer)}")
+      }
+    } else if tag is RenderTag.gbuffer {
+      ensureRendererResources(renderer: renderer)
+      if let resources: mod GpuResources => renderer.gpuResources {
+        Gbuffer.beginPass(
+          cache: renderer.passes.gbuffer
+          resources: resources
+          camera: app.camera
+          light: app.light
+          aspect: aspect
+        )
+        drawPlaygroundGeometry(
+          cache: renderer.passes.gbuffer
+          resources: resources
+          batches: app.batches
+          groundMesh: app.groundMesh
+        )
+        Gbuffer.endPass(cache: renderer.passes.gbuffer, resources: resources)
+      }
+    } else if tag is RenderTag.uiOverlay {
+      Gpu2d.beginFrameLoad(canvas: renderer.canvas)
+      drawPlaygroundUi(
+        ui: app.ui
+        world: uiWorld
+        systems: uiSystems
+        canvas: renderer.canvas
+      )
+    } else if tag is RenderTag.present {
+      Gpu2d.endFrame(canvas: renderer.canvas)
+    } else {
+      renderDeferredPass(
+        renderer: renderer
+        tag: tag
+        camera: app.camera
+        light: app.light
+        aspect: aspect
+      )
+    }
+  }
+}
+
+func closePlaygroundWindow(renderer: mod DeferredRenderer) {
+  shutdownDeferredRenderer(renderer: renderer)
+  Gbuffer.shutdownAll()
+  Gpu2d.closeWindow()
+}

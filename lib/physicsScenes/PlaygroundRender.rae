@@ -1,10 +1,12 @@
-# The playground's 3D drawing on the deferred renderer: one InstanceBatch per
-# RenderKind (a unit box, a unit sphere, and the sphere stretched for a
-# capsule), filled from each entity's Transform3D and RenderShape after the
-# pull system, drawn with drawInstances - one draw per mesh kind, never one
-# per body - and the same bodies queued as shadow casters grouped by kind, so
-# each kind is one instanced shadow draw per cascade too. The ground is a
-# one-instance batch of its mesh, uploaded once per ground kind.
+# The physics playgrounds' 3D drawing on the deferred renderer, shared by both
+# tracks (122_physics_playground_port, 123_physics_playground_c): one
+# InstanceBatch per RenderKind (a unit box, a unit sphere, and the sphere
+# stretched for a capsule), filled from each entity's Transform3D and
+# RenderShape after the pull system, drawn with drawInstances - one draw per
+# mesh kind, never one per body - and the same bodies queued as shadow casters
+# grouped by kind, so each kind is one instanced shadow draw per cascade too.
+# The ground is a one-instance batch of its mesh, uploaded once per ground
+# kind. Names no physics track: it reads only the ECS tables.
 import Math
 import Quat
 import Vec3
@@ -20,6 +22,15 @@ open Math3d
 open Mesh3d
 open gpu/GpuResources
 open physicsScenes/SceneTypes
+
+# How an entity is drawn: its mesh kind (one instanced draw per kind) and
+# the scale of the unit mesh.
+enum RenderKind { box, sphere, capsule }
+
+type RenderShape {
+  kind: RenderKind
+  scale: Vec3
+}
 
 # The batches' capacities: the pyramid slider's maximum, and room for balls.
 const boxCapacity: Int = 10400
