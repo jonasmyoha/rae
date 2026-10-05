@@ -384,6 +384,36 @@ Where the rest goes, profiled against the C app:
   also stopped wrapping calls with a `sizeof(T)` argument (List.create,
   grow, prefetch) in a String-pool mark/flush pair. The pyramids gained as
   much: large 13.0 → 11.1 ms, many 27.7 → 23.1 ms.
+- **Contact and island churn, P9a-7.** A moving pile allocated wherever
+  contacts or islands changed. Measured with an allocation-counting runtime
+  (each buffer allocation counted by its callers, a full run less a shorter
+  one), the convex pile's steps 460-500 made ~38 500 buffer allocations per
+  step. The fixes:
+  - `destroyContact` read the contact by copying it, manifold list and all
+    (~6 900 per step); it reads it through a view now.
+  - Continuous collision built a hits list, a fractions list and a tree
+    query stack for every fast body (~29 000); they are world lists lent with
+    `own`, and `beginTreeQueryWith` takes a caller's stack.
+  - collideHulls' edge path built a one-point manifold per try (~800); it
+    lives in HullScratch.
+  - The new pair keys are recorded in `world.createdPairKeys` instead of a
+    returned list.
+  - A new contact reuses its slot's manifold and triangle-cache buffers
+    (`zeroContactWithLists`).
+  - mergeIslands, destroyIsland and trySleepIsland move an island's lists
+    out instead of copying the island; island sleep's id list is a world list;
+    begin/end-touch handling reads contacts through views.
+  Steps 460-500 now allocate 4 per step: a ShapeProxy's point list per
+  time-of-impact query (Box3D's proxy is a fixed array) and QuickSort's range
+  stack. While the pile settles (steps 2-40), 57 of its 62 allocations per
+  step are new contact slots: the contact count grows to ~56 000, and a slot
+  gets its manifold list once. A steady large-pyramid step still allocates
+  nothing. The move needed a compiler fix: `own` of a `mod` parameter
+  emitted the pointer (fixture 995).
+  (A correction to P9a-3's method: a stray second `Main.rae` in the
+  directory of the shorter run broke its C build from P9a-3 on, so the
+  profiler compared against a stale binary. Re-measured with the build
+  checked, the large pyramid's steady step is still 0.)
 
 These are queued as P9 follow-ups.
 

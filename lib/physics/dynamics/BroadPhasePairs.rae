@@ -577,15 +577,19 @@ func needsRebuild(world: view PhysicsWorld, treeIndex: view Int) ret Bool {
 
 # b3UpdateBroadPhasePairs: find the new shape pairs, rebuild the dynamic and
 # kinematic trees, and create a contact for each new pair in key order.
-# Returns the pair keys handed to contact creation, in that order.
-func updateBroadPhasePairs(world: mod PhysicsWorld) ret List(UInt64) {
+# The pair keys handed to contact creation, in that order, are left in
+# world.createdPairKeys.
+func updateBroadPhasePairs(world: mod PhysicsWorld) {
   # Allocates only when a step creates contacts
-  let created: List(UInt64) = List.create(UInt64, cap: 0)
+  # The world's list, moved out and back (cleared: this step's keys only)
+  var created: List(UInt64) = own world.createdPairKeys
+  created.clear()
   var needUpdate: Bool = hasTreeMoved(world: world, treeIndex: staticTree)
   needUpdate = needUpdate or needsRebuild(world: world, treeIndex: kinematicTree)
   needUpdate = needUpdate or needsRebuild(world: world, treeIndex: dynamicTree)
   if needUpdate is false {
-    ret created
+    world.createdPairKeys = own created
+    ret
   }
 
   loop var i: Int = 0, i < world.taskContexts.length, ++i {
@@ -624,7 +628,9 @@ func updateBroadPhasePairs(world: mod PhysicsWorld) ret List(UInt64) {
   # shape order. Sorting them improves solver performance and makes contact
   # order independent of tree structure.
   # Allocates only when new pairs were found
-  let pairKeys: List(UInt64) = List.create(UInt64, cap: 0)
+  # The world's list, moved out and back at the end
+  var pairKeys: List(UInt64) = own world.sortedPairKeys
+  pairKeys.clear()
   loop let taskContext: view TaskContext in world.taskContexts {
     loop var i: Int = 0, i < taskContext.pairKeys.length, ++i {
       pairKeys.add(value: taskContext.pairKeys.copyAtDefault(index: i))
@@ -654,5 +660,6 @@ func updateBroadPhasePairs(world: mod PhysicsWorld) ret List(UInt64) {
     )
     created.add(value: key)
   }
-  ret created
+  world.sortedPairKeys = own pairKeys
+  world.createdPairKeys = own created
 }

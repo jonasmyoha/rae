@@ -691,7 +691,9 @@ func collideHulls(
   # separation, or in narrow speculative cases; an edge contact then, or
   # when the edge is clearly better.
   if (manifold.pointCount is 0 and edgeQuery.separation > faceSeparationValue) or edgeQuery.separation > clipSeparation + slop {
-    var edgeManifold: LocalManifold = createLocalManifold(capacity: 1)
+    # The scratch's manifold, reset and moved back below
+    var edgeManifold: LocalManifold = own scratch.edgeManifold
+    resetLocalManifold(manifold: edgeManifold, capacity: 1)
     var edgeCache: SatCache = emptySatCache()
     buildEdgeContact(
       manifold: edgeManifold
@@ -713,5 +715,6 @@ func collideHulls(
       )
       cache = edgeCache
     }
+    scratch.edgeManifold = own edgeManifold
   }
 }

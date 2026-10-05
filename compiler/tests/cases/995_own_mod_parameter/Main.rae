@@ -1,0 +1,23 @@
+# `own` of a `mod` parameter moves the caller's value out and leaves the
+# caller's place empty (as `own` of a field does), both into a local and
+# into another `mod` parameter. Emitted as a plain identifier it used to be
+# the pointer, which C rejected.
+func takeAll(items: mod List(Int)) ret List(Int) {
+  var taken: List(Int) = own items
+  taken.add(value: 9)
+  ret taken
+}
+
+func lend(items: mod List(Int), into: mod List(Int)) {
+  into = own items
+}
+
+func main() {
+  var items: List(Int) = { 1, 2, 3 }
+  let taken: List(Int) = takeAll(items: items)
+  log("{taken.length} {items.length}")
+  var target: List(Int) = List.create(Int, cap: 0)
+  var source: List(Int) = { 4, 5 }
+  lend(items: source, into: target)
+  log("{target.length} {source.length} {target.copyAtDefault(index: 1)}")
+}

@@ -124,6 +124,25 @@ func createLocalManifold(capacity: view Int) ret LocalManifold {
   }
 }
 
+# Reset `manifold` to what createLocalManifold(capacity:) returns, reusing
+# its point list's buffer.
+func resetLocalManifold(manifold: mod LocalManifold, capacity: view Int) {
+  manifold.points.clear()
+  loop var i: Int = 0, i < capacity, ++i {
+    manifold.points.add(value: emptyManifoldPoint())
+  }
+  manifold.normal = zeroVector()
+  manifold.triangleNormal = zeroVector()
+  manifold.pointCount = 0
+  manifold.triangleIndex = 0
+  manifold.i1 = 0
+  manifold.i2 = 0
+  manifold.i3 = 0
+  manifold.squaredDistance = 0.0
+  manifold.feature = featureNone
+  manifold.triangleFlags = 0
+}
+
 # How many points the manifold has room for.
 func manifoldCapacity(manifold: view LocalManifold) ret Int {
   ret manifold.points.length
