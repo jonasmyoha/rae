@@ -1,0 +1,287 @@
+# The physics playground's adapter to track A, the Rae port of Box3D
+# (lib/physics/ecs): builds a backend-neutral Scene (lib/physicsScenes) as
+# entities. This is the ONE file of the playground that names a physics track:
+# 123_physics_playground_c has the same file with its `open` lines changed to
+# box3d/ecs (docs/physics-two-implementations.md §3).
+import Quat
+open Vec2
+open Vec3
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open ecs/Transform
+open physicsScenes/SceneTypes
+open physicsScenes/SceneHud
+open physicsScenes/SceneLibrary
+open physics/math/TransformMath
+open physics/geometry/QueryTypes
+open physics/dynamics/WorldTypes
+open physics/dynamics/WorldQueries
+open physics/ecs/Physics
+open physics/ecs/PhysicsComponents
+open physics/ecs/PhysicsSpawn
+open physics/ecs/PhysicsSystems
+open physics/ecs/PhysicsQueries
+open physics/ecs/PhysicsJoints
+open physics/ecs/VenueMesh
+
+const trackName: String = "track A (Rae port)"
+
+# How an entity is drawn: its mesh kind (one instanced draw per kind) and
+# the scale of the unit mesh.
+enum RenderKind { box, sphere, capsule }
+
+type RenderShape {
+  kind: RenderKind
+  scale: Vec3
+}
+
+# The playground's ECS world.
+type PlaygroundWorld {
+  allocator: EntityAllocator
+  transforms: ComponentTable(Transform3D)
+  rigidBodies: ComponentTable(RigidBody)
+  colliders: ComponentTable(Collider)
+  characters: ComponentTable(CharacterBody)
+  renderShapes: ComponentTable(RenderShape)
+  physics: Physics
+  # The scene's bodies' entities, in Scene.bodies order (joints refer to them)
+  sceneEntities: List(EntityId)
+  characterId: EntityId
+  ballsThrown: Int
+  workerCount: Int
+}
+
+func createPlaygroundWorld(workerCount: view Int) ret PlaygroundWorld {
+  var def: WorldDef = defaultPhysicsWorldDef()
+  def.workerCount = workerCount
+  ret PlaygroundWorld {
+    allocator: createEntityAllocator()
+    transforms: createComponentTable(Transform3D)
+    rigidBodies: createComponentTable(RigidBody)
+    colliders: createComponentTable(Collider)
+    characters: createComponentTable(CharacterBody)
+    renderShapes: createComponentTable(RenderShape)
+    physics: createPhysics(def: def, fixedStep: 1.0 / 60.0, subSteps: 4)
+    sceneEntities: List.create(EntityId, cap: 64)
+    characterId: noEntity()
+    ballsThrown: 0
+    workerCount: workerCount
+  }
+}
+
+func bodyTypeOf(sceneType: view SceneBodyType) ret BodyType {
+  match sceneType {
+    case SceneBodyType.staticBody {
+      ret BodyType.staticBody
+    }
+    case SceneBodyType.kinematicBody {
+      ret BodyType.kinematicBody
+    }
+    case SceneBodyType.dynamicBody {
+      ret BodyType.dynamicBody
+    }
+  }
+  ret BodyType.staticBody
+}
+
+func transformOf(frame: view SceneFrame) ret Transform {
+  ret Transform { position: frame.position, rotation: frame.rotation }
+}
+
+# Spawn one scene body as an entity: body, collider and render shape.
+func spawnSceneBody(world: mod PlaygroundWorld, body: view SceneBody) ret EntityId {
+  let entityId: EntityId = allocEntity(this: world.allocator)
+  var def: BodyDef = defaultBodyDef(lengthUnitsPerMeter: 1.0)
+  def.bodyType = bodyTypeOf(sceneType: body.bodyType)
+  def.position = body.position
+  def.rotation = body.rotation
+  def.linearVelocity = body.linearVelocity
+  spawnRigidBody(
+    physics: world.physics
+    rigidBodies: world.rigidBodies
+    transforms: world.transforms
+    entityId: entityId
+    def: def
+  )
+  var shapeDef: ShapeDef = defaultShapeDef(lengthUnitsPerMeter: 1.0)
+  shapeDef.density = body.density
+  shapeDef.baseMaterial.friction = body.friction
+  match body.shape.kind {
+    case SceneShapeKind.box {
+      addBoxCollider(
+        physics: world.physics
+        rigidBodies: world.rigidBodies
+        colliders: world.colliders
+        entityId: entityId
+        def: shapeDef
+        halfExtents: body.shape.halfExtents
+        transform: transformIdentity()
+      )
+      componentSet(
+        this: world.renderShapes
+        entityId: entityId
+        data: RenderShape { kind: RenderKind.box, scale: body.shape.halfExtents }
+      )
+    }
+    case SceneShapeKind.sphere {
+      addSphereCollider(
+        physics: world.physics
+        rigidBodies: world.rigidBodies
+        colliders: world.colliders
+        entityId: entityId
+        def: shapeDef
+        sphere: Sphere { center: Vec3 { x: 0.0, y: 0.0, z: 0.0 }, radius: body.shape.radius }
+      )
+      componentSet(
+        this: world.renderShapes
+        entityId: entityId
+        data: RenderShape { kind: RenderKind.sphere, scale: body.shape.halfExtents }
+      )
+    }
+    case SceneShapeKind.capsule {
+      addCapsuleCollider(
+        physics: world.physics
+        rigidBodies: world.rigidBodies
+        colliders: world.colliders
+        entityId: entityId
+        def: shapeDef
+        capsule: Capsule {
+          center1: Vec3 { x: 0.0, y: 0.0, z: -body.shape.halfLength }
+          center2: Vec3 { x: 0.0, y: 0.0, z: body.shape.halfLength }
+          radius: body.shape.radius
+        }
+      )
+      componentSet(
+        this: world.renderShapes
+        entityId: entityId
+        data: RenderShape { kind: RenderKind.capsule, scale: body.shape.halfExtents }
+      )
+    }
+  }
+  ret entityId
+}
+
+func jointKindOf(kind: view SceneJointKind) ret PhysicsJointKind {
+  match kind {
+    case SceneJointKind.hinge {
+      ret PhysicsJointKind.revolute
+    }
+    case SceneJointKind.ball {
+      ret PhysicsJointKind.spherical
+    }
+    case SceneJointKind.weld {
+      ret PhysicsJointKind.weld
+    }
+  }
+  ret PhysicsJointKind.weld
+}
+
+# Build `scene` into `world`: the ground, every body, every joint, and the
+# character when the scene has one.
+func spawnScene(world: mod PlaygroundWorld, scene: view Scene) {
+  if scene.ground.kind is SceneGroundKind.flat {
+    addVenueBox(
+      physics: world.physics
+      def: defaultShapeDef(lengthUnitsPerMeter: 1.0)
+      halfExtents: Vec3 { x: scene.ground.halfSize, y: scene.ground.halfSize, z: 0.5 }
+      transform: Transform { position: Vec3 { x: 0.0, y: 0.0, z: -0.5 }, rotation: Quat.identity() }
+    )
+  } else {
+    let shapeId: opt ShapeId = addVenueMesh(
+      physics: world.physics
+      mesh: scene.ground.mesh
+      transform: transformIdentity()
+      def: defaultShapeDef(lengthUnitsPerMeter: 1.0)
+    )
+  }
+  loop let body: view SceneBody in scene.bodies {
+    world.sceneEntities.add(value: spawnSceneBody(world: world, body: body))
+  }
+  loop let joint: view SceneJoint in scene.joints {
+    let added: Bool = addJoint(
+      physics: world.physics
+      rigidBodies: world.rigidBodies
+      joint: PhysicsJoint {
+        kind: jointKindOf(kind: joint.kind)
+        entityIdA: world.sceneEntities.copyAtDefault(index: joint.bodyA)
+        entityIdB: world.sceneEntities.copyAtDefault(index: joint.bodyB)
+        localFrameA: transformOf(frame: joint.frameA)
+        localFrameB: transformOf(frame: joint.frameB)
+        collideConnected: false
+      }
+    )
+  }
+  if scene.hasCharacter {
+    world.characterId = allocEntity(this: world.allocator)
+    var character: CharacterBody = createCharacterBody(position: scene.characterStart)
+    character.throttle = Vec2 { x: 1.0, y: 0.0 }
+    componentSet(this: world.characters, entityId: world.characterId, data: character)
+    componentSet(
+      this: world.renderShapes
+      entityId: world.characterId
+      data: RenderShape { kind: RenderKind.capsule, scale: Vec3 { x: 0.3, y: 0.3, z: 0.8 } }
+    )
+  }
+}
+
+# Throw a ball from `origin` at whatever the ray from `origin` along
+# `direction` hits (straight on when it hits nothing): the click's throw.
+func throwBallAlong(world: mod PlaygroundWorld, origin: view Vec3, direction: view Vec3) {
+  let reach: Vec3 = vscale(a: direction, s: 200.0)
+  let hit: PhysicsHit = raycastClosest(
+    physics: world.physics
+    origin: origin
+    translation: reach
+    filter: defaultQueryFilter()
+  )
+  var target: Vec3 = vadd(a: origin, b: reach)
+  if hit.hit {
+    target = hit.point
+  }
+  let ball: SceneBody = thrownBall(
+    origin: origin
+    target: target
+    speed: 30.0
+    radius: 0.35
+  )
+  let entityId: EntityId = spawnSceneBody(world: world, body: ball)
+  world.ballsThrown = world.ballsThrown + 1
+}
+
+# One frame of physics (the fixed steps `frameTime` pays for).
+func stepPlayground(world: mod PlaygroundWorld, frameTime: view Float) ret Int {
+  let steps: Int = physicsFrame(
+    physics: world.physics
+    rigidBodies: world.rigidBodies
+    characters: world.characters
+    transforms: world.transforms
+    frameTime: frameTime
+  )
+  advancePhysicsEvents(physics: world.physics)
+  ret steps
+}
+
+# The HUD's counts for `sceneName`.
+func playgroundStats(
+  world: view PlaygroundWorld
+  sceneName: view String
+  targetBodyCount: view Int
+) ret HudStats {
+  let counters: PhysicsCounters = physicsCounters(physics: world.physics)
+  ret HudStats {
+    trackName: trackName
+    sceneName: sceneName
+    bodyCount: counters.bodyCount
+    awakeBodyCount: counters.awakeBodyCount
+    contactCount: counters.contactCount
+    islandCount: counters.islandCount
+    jointCount: counters.jointCount
+    workerCount: world.workerCount
+    targetBodyCount: targetBodyCount
+  }
+}
+
+func destroyPlaygroundWorld(world: mod PlaygroundWorld) {
+  destroyPhysics(physics: world.physics)
+}

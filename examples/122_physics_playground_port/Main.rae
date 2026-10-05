@@ -1,0 +1,115 @@
+# The physics playground on track A, the Rae port of Box3D
+# (docs/physics-two-implementations.md §3; 123_physics_playground_c is the
+# same program on upstream Box3D's C library). Six switchable scenes from
+# lib/physicsScenes - a box pyramid sized by a body count, dominoes, a hinged
+# bridge with a hanging chain, welded towers, balls rolling over a mesh, and a
+# character walking a height-field terrain - built through SceneSpawn, the one
+# file that names the physics track.
+#
+# This entry is the playground's headless core: the windowed front end
+# (instanced rendering, the lib/ui HUD, clicks and keys, the idle loop) is
+# queued as its own task and drives the same functions.
+#
+#   RAE_PHYSICS_DETERMINISM=<steps>  every scene stepped <steps> fixed steps at
+#                                    1 worker and at the pool's worker count;
+#                                    prints both transform hashes (the
+#                                    example gate's determinism print)
+#   (unset)                          a scripted run through every scene: a
+#                                    ball thrown into each, the HUD's lines
+#                                    printed after two seconds
+import Math
+import Sys
+import Parallel
+open Vec3
+open ecs/Transform
+open physicsScenes/SceneTypes
+open physicsScenes/SceneLibrary
+open physicsScenes/SceneHud
+
+# The pyramid's body count (the HUD's slider sets it in the windowed app)
+const defaultBodyCount: Int = 1000
+
+# Scene `index` stepped `steps` fixed steps at `workerCount` workers: the
+# transform hash.
+func sceneHash(index: view Int, steps: view Int, workerCount: view Int) ret UInt64 {
+  var world: PlaygroundWorld = createPlaygroundWorld(workerCount: workerCount)
+  spawnScene(world: world, scene: buildScene(index: index, bodyCount: defaultBodyCount))
+  loop var step: Int = 0, step < steps, ++step {
+    if step is steps / 2 {
+      throwBallAlong(
+        world: world
+        origin: Vec3 { x: -12.0, y: -12.0, z: 8.0 }
+        direction: Vec3 { x: 0.6, y: 0.6, z: -0.3 }
+      )
+    }
+    let taken: Int = stepPlayground(world: world, frameTime: 1.0 / 60.0)
+  }
+  let hash: UInt64 = transformHash(transforms: world.transforms)
+  destroyPlaygroundWorld(world: world)
+  ret hash
+}
+
+func determinismRun(steps: view Int) ret Int {
+  let workers: Int = Parallel.workerCount()
+  var mismatches: Int = 0
+  loop var index: Int = 0, index < sceneCount, ++index {
+    let single: UInt64 = sceneHash(index: index, steps: steps, workerCount: 1)
+    let many: UInt64 = sceneHash(index: index, steps: steps, workerCount: workers)
+    let same: Bool = single is many
+    if same is false {
+      mismatches = mismatches + 1
+    }
+    log(
+      "{trackName} {sceneName(index: index)}: {steps} steps, hash {single} at 1 worker, {many} at {workers}, identical {same}"
+    )
+  }
+  log("determinism: {mismatches} scenes differ")
+  ret mismatches
+}
+
+func scriptedRun() {
+  loop var index: Int = 0, index < sceneCount, ++index {
+    var world: PlaygroundWorld = createPlaygroundWorld(workerCount: Parallel.workerCount())
+    let scene: Scene = buildScene(index: index, bodyCount: defaultBodyCount)
+    spawnScene(world: world, scene: scene)
+    var stepWindow: TimingWindow = createTimingWindow()
+    var frameWindow: TimingWindow = createTimingWindow()
+    var time: Float = 0.0
+    loop var frame: Int = 0, frame < 120, ++frame {
+      if frame is 30 {
+        throwBallAlong(
+          world: world
+          origin: vadd(a: scene.cameraTarget, b: Vec3 { x: -10.0, y: -10.0, z: 6.0 })
+          direction: Vec3 { x: 0.6, y: 0.6, z: -0.4 }
+        )
+      }
+      let started: Int = nowNs()
+      let taken: Int = stepPlayground(world: world, frameTime: 1.0 / 60.0)
+      let elapsed: Float = ((nowNs() - started) as Float) / 1000000.0
+      time = time + 1.0 / 60.0
+      addTimingSample(window: stepWindow, milliseconds: elapsed, now: time)
+      addTimingSample(window: frameWindow, milliseconds: elapsed, now: time)
+    }
+    let lines: List(String) = hudLines(
+      stats: playgroundStats(world: world, sceneName: scene.name, targetBodyCount: defaultBodyCount)
+      step: stepWindow
+      frame: frameWindow
+    )
+    loop let line: view String in lines {
+      log("{line}")
+    }
+    destroyPlaygroundWorld(world: world)
+  }
+}
+
+func main() ret Int {
+  let steps: String = Sys.getEnv(name: "RAE_PHYSICS_DETERMINISM")
+  if steps.length() > 0 {
+    if determinismRun(steps: steps.toInt()) > 0 {
+      ret 1
+    }
+    ret 0
+  }
+  scriptedRun()
+  ret 0
+}
