@@ -274,8 +274,8 @@ After the maintainer's first try-out (2026-10-05) the controls changed:
 ### The playground's featured row and gates (2026-10-05)
 
 - **Featured:** `122_physics_playground_port.raepack` (category "Physics",
-  `featured: "true"`), a README Featured row, and two screenshots in
-  docs/screenshots: the bridge and chain, and the pyramid under fire.
+  `featured: "true"`), a README Featured row, and one screenshot in
+  docs/screenshots (the bridge and chain).
 - **Example gate** (`compiler/tools/run_examples.sh`, about 3 minutes):
   1. `RAE_PHYSICS_DETERMINISM=120` must print `identical true` for all six
      scenes and `determinism: 0 scenes differ`.
@@ -419,8 +419,8 @@ After the maintainer's try-out:
 - **New hashes.** The changed course and car give a new
   `vehicle.golden`, equal on the port, Box3D SIMD and Box3D scalar.
   Fixtures 1002 and 1005 print the same new readings.
-- **Featured:** both vehicles have a pack, a README row and two
-  screenshots each, taken after all of the above. The playground
+- **Featured:** both vehicles have a pack, a README row and one
+  screenshot each, taken after all of the above. The playground
   screenshots were retaken with the new colours.
 
 ## 4. Track B: building the C library
