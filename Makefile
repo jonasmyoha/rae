@@ -42,7 +42,7 @@ setup:
 	else \
 	  echo "warning: naga not installed and cargo is not available; declared shaders will not be validated at build time (install Rust, then: cargo install naga-cli)" >&2; \
 	fi
-	@if [ -f "$${RAE_BOX3D:-$$HOME/.cache/rae/box3d/install}/lib/libbox3d.a" ]; then \
+	@if [ -f "$${RAE_BOX3D:-$$HOME/.cache/rae/box3d/install}/include/box3d/rae_glue.h" ]; then \
 	  echo "box3d found: programs importing lib/box3d link upstream Box3D's C library"; \
 	else \
 	  echo "Building upstream Box3D (the C-library physics track; tools/box3d/build.sh)..."; \

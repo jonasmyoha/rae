@@ -1,0 +1,442 @@
+# The value types of the C-library physics track's ECS layer
+# (docs/physics-two-implementations.md §2), with the names, fields and
+# defaults of the port's (physics/dynamics/WorldTypes, physics/dynamics/
+# WorldQueries' QueryFilter, physics/geometry/QueryTypes, physics/math/
+# TransformMath and AabbMath), so an app moves between the tracks by its
+# `open` lines. The rest of this module converts them to and from upstream
+# Box3D's C structs (lib/box3d). Floats are Box3D's 32-bit floats both ways,
+# so a conversion never rounds.
+open Vec3
+open Quat
+open box3d/Box3d
+open box3d/Box3dTypes
+open box3d/Box3dTypes2
+open box3d/Box3dEnums
+
+enum BodyType { staticBody, kinematicBody, dynamicBody }
+
+# B3_DEFAULT_CATEGORY_BITS / B3_DEFAULT_MASK_BITS
+const allBits: UInt64 = 18446744073709551615
+
+type SurfaceMaterial {
+  friction: Float
+  restitution: Float
+  rollingResistance: Float
+  tangentVelocity: Vec3
+  userMaterialId: UInt64
+  customColor: Int
+}
+
+type Filter {
+  categoryBits: UInt64
+  maskBits: UInt64
+  groupIndex: Int
+}
+
+type MotionLocks {
+  linearX: Bool
+  linearY: Bool
+  linearZ: Bool
+  angularX: Bool
+  angularY: Bool
+  angularZ: Bool
+}
+
+type BodyDef {
+  bodyType: BodyType
+  position: Vec3
+  rotation: Quat
+  linearVelocity: Vec3
+  angularVelocity: Vec3
+  linearDamping: Float
+  angularDamping: Float
+  gravityScale: Float
+  sleepThreshold: Float
+  safetyFactor: Float
+  motionLocks: MotionLocks
+  enableSleep: Bool
+  isAwake: Bool
+  isBullet: Bool
+  isEnabled: Bool
+  allowFastRotation: Bool
+  enableContactRecycling: Bool
+}
+
+type ShapeDef {
+  baseMaterial: SurfaceMaterial
+  density: Float
+  explosionScale: Float
+  filter: Filter
+  enableCustomFiltering: Bool
+  isSensor: Bool
+  enableSensorEvents: Bool
+  enableContactEvents: Bool
+  enableHitEvents: Bool
+  enablePreSolveEvents: Bool
+  invokeContactCreation: Bool
+  updateBodyMass: Bool
+  enableSpeculativeContact: Bool
+}
+
+type WorldDef {
+  gravity: Vec3
+  restitutionThreshold: Float
+  restitutionIterations: Int
+  enableRestitutionPropagation: Bool
+  hitEventThreshold: Float
+  contactHertz: Float
+  contactDampingRatio: Float
+  contactSpeed: Float
+  maximumLinearSpeed: Float
+  enableSleep: Bool
+  enableContinuous: Bool
+  workerCount: Int
+  lengthUnitsPerMeter: Float
+}
+
+# Handles: index + 1 (0 is null), world, generation (b3BodyId, b3ShapeId)
+type BodyId {
+  index1: Int
+  world0: Int
+  generation: Int
+}
+
+type ShapeId {
+  index1: Int
+  world0: Int
+  generation: Int
+}
+
+type QueryFilter {
+  categoryBits: UInt64
+  maskBits: UInt64
+  id: UInt64
+}
+
+type Sphere {
+  center: Vec3
+  radius: Float
+}
+
+type Capsule {
+  center1: Vec3
+  center2: Vec3
+  radius: Float
+}
+
+type Aabb {
+  lowerBound: Vec3
+  upperBound: Vec3
+}
+
+type Transform {
+  position: Vec3
+  rotation: Quat
+}
+
+func zeroVector() ret Vec3 {
+  ret Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+}
+
+func quatIdentity() ret Quat {
+  ret Quat { x: 0.0, y: 0.0, z: 0.0, w: 1.0 }
+}
+
+func transformIdentity() ret Transform {
+  ret Transform { position: zeroVector(), rotation: quatIdentity() }
+}
+
+func nullBodyId() ret BodyId {
+  ret BodyId { index1: 0, world0: 0, generation: 0 }
+}
+
+func nullShapeId() ret ShapeId {
+  ret ShapeId { index1: 0, world0: 0, generation: 0 }
+}
+
+# b3DefaultWorldDef
+func defaultWorldDef(lengthUnitsPerMeter: view Float) ret WorldDef {
+  ret WorldDef {
+    gravity: Vec3 { x: 0.0, y: -10.0, z: 0.0 }
+    restitutionThreshold: 1.0 * lengthUnitsPerMeter
+    restitutionIterations: 2
+    enableRestitutionPropagation: false
+    hitEventThreshold: 1.0 * lengthUnitsPerMeter
+    contactHertz: 30.0
+    contactDampingRatio: 10.0
+    contactSpeed: 3.0 * lengthUnitsPerMeter
+    maximumLinearSpeed: 400.0 * lengthUnitsPerMeter
+    enableSleep: true
+    enableContinuous: true
+    workerCount: 0
+    lengthUnitsPerMeter: lengthUnitsPerMeter
+  }
+}
+
+func noMotionLocks() ret MotionLocks {
+  ret MotionLocks {
+    linearX: false
+    linearY: false
+    linearZ: false
+    angularX: false
+    angularY: false
+    angularZ: false
+  }
+}
+
+# b3DefaultBodyDef
+func defaultBodyDef(lengthUnitsPerMeter: view Float) ret BodyDef {
+  ret BodyDef {
+    bodyType: BodyType.staticBody
+    position: zeroVector()
+    rotation: quatIdentity()
+    linearVelocity: zeroVector()
+    angularVelocity: zeroVector()
+    linearDamping: 0.0
+    angularDamping: 0.0
+    gravityScale: 1.0
+    sleepThreshold: 0.05 * lengthUnitsPerMeter
+    safetyFactor: 0.5
+    motionLocks: noMotionLocks()
+    enableSleep: true
+    isAwake: true
+    isBullet: false
+    isEnabled: true
+    allowFastRotation: false
+    enableContactRecycling: true
+  }
+}
+
+# b3DefaultFilter
+func defaultFilter() ret Filter {
+  ret Filter { categoryBits: allBits, maskBits: allBits, groupIndex: 0 }
+}
+
+# b3DefaultSurfaceMaterial
+func defaultSurfaceMaterial() ret SurfaceMaterial {
+  ret SurfaceMaterial {
+    friction: 0.6
+    restitution: 0.0
+    rollingResistance: 0.0
+    tangentVelocity: zeroVector()
+    userMaterialId: 0
+    customColor: 0
+  }
+}
+
+# b3DefaultShapeDef
+func defaultShapeDef(lengthUnitsPerMeter: view Float) ret ShapeDef {
+  ret ShapeDef {
+    baseMaterial: defaultSurfaceMaterial()
+    density: 1000.0 / (lengthUnitsPerMeter * lengthUnitsPerMeter * lengthUnitsPerMeter)
+    explosionScale: 1.0
+    filter: defaultFilter()
+    enableCustomFiltering: false
+    isSensor: false
+    enableSensorEvents: false
+    enableContactEvents: false
+    enableHitEvents: false
+    enablePreSolveEvents: false
+    invokeContactCreation: true
+    updateBodyMass: true
+    enableSpeculativeContact: true
+  }
+}
+
+# b3DefaultQueryFilter
+func defaultQueryFilter() ret QueryFilter {
+  ret QueryFilter { categoryBits: allBits, maskBits: allBits, id: 0 }
+}
+
+# ---- conversions to and from the C structs ----
+func toB3Vector(vector: view Vec3) ret b3Vec3 {
+  let result: b3Vec3 = { x: vector.x, y: vector.y, z: vector.z }
+  ret result
+}
+
+func fromB3Vector(vector: view b3Vec3) ret Vec3 {
+  ret Vec3 { x: vector.x, y: vector.y, z: vector.z }
+}
+
+func toB3Quat(quat: view Quat) ret b3Quat {
+  let result: b3Quat = {
+    v: toB3Vector(vector: Vec3 { x: quat.x, y: quat.y, z: quat.z })
+    s: quat.w
+  }
+  ret result
+}
+
+func fromB3Quat(quat: view b3Quat) ret Quat {
+  ret Quat { x: quat.v.x, y: quat.v.y, z: quat.v.z, w: quat.s }
+}
+
+func toB3Transform(transform: view Transform) ret b3Transform {
+  let result: b3Transform = {
+    p: toB3Vector(vector: transform.position)
+    q: toB3Quat(quat: transform.rotation)
+  }
+  ret result
+}
+
+func fromB3Transform(transform: view b3Transform) ret Transform {
+  ret Transform {
+    position: fromB3Vector(vector: transform.p)
+    rotation: fromB3Quat(quat: transform.q)
+  }
+}
+
+func toB3BodyId(bodyId: view BodyId) ret b3BodyId {
+  let result: b3BodyId = {
+    index1: bodyId.index1 as Int32
+    world0: bodyId.world0 as UInt16
+    generation: bodyId.generation as UInt16
+  }
+  ret result
+}
+
+func fromB3BodyId(bodyId: view b3BodyId) ret BodyId {
+  ret BodyId {
+    index1: bodyId.index1 as Int
+    world0: bodyId.world0 as Int
+    generation: bodyId.generation as Int
+  }
+}
+
+func toB3ShapeId(shapeId: view ShapeId) ret b3ShapeId {
+  let result: b3ShapeId = {
+    index1: shapeId.index1 as Int32
+    world0: shapeId.world0 as UInt16
+    generation: shapeId.generation as UInt16
+  }
+  ret result
+}
+
+func fromB3ShapeId(shapeId: view b3ShapeId) ret ShapeId {
+  ret ShapeId {
+    index1: shapeId.index1 as Int
+    world0: shapeId.world0 as Int
+    generation: shapeId.generation as Int
+  }
+}
+
+# b3BodyType's numbering
+func bodyTypeCode(bodyType: view BodyType) ret Int32 {
+  match bodyType {
+    case BodyType.staticBody {
+      ret b3_staticBody
+    }
+    case BodyType.kinematicBody {
+      ret b3_kinematicBody
+    }
+    case BodyType.dynamicBody {
+      ret b3_dynamicBody
+    }
+  }
+  ret b3_staticBody
+}
+
+func toB3WorldDef(def: view WorldDef) ret b3WorldDef {
+  unsafe {
+    var result: b3WorldDef = b3DefaultWorldDef()
+    result.gravity = toB3Vector(vector: def.gravity)
+    result.restitutionThreshold = def.restitutionThreshold
+    result.restitutionIterations = def.restitutionIterations as Int32
+    result.enableRestitutionPropagation = def.enableRestitutionPropagation
+    result.hitEventThreshold = def.hitEventThreshold
+    result.contactHertz = def.contactHertz
+    result.contactDampingRatio = def.contactDampingRatio
+    result.contactSpeed = def.contactSpeed
+    result.maximumLinearSpeed = def.maximumLinearSpeed
+    result.enableSleep = def.enableSleep
+    result.enableContinuous = def.enableContinuous
+    result.workerCount = def.workerCount as UInt32
+    ret result
+  }
+}
+
+func toB3BodyDef(def: view BodyDef) ret b3BodyDef {
+  unsafe {
+    var result: b3BodyDef = b3DefaultBodyDef()
+    result.type_ = bodyTypeCode(bodyType: def.bodyType)
+    result.position = toB3Vector(vector: def.position)
+    result.rotation = toB3Quat(quat: def.rotation)
+    result.linearVelocity = toB3Vector(vector: def.linearVelocity)
+    result.angularVelocity = toB3Vector(vector: def.angularVelocity)
+    result.linearDamping = def.linearDamping
+    result.angularDamping = def.angularDamping
+    result.gravityScale = def.gravityScale
+    result.sleepThreshold = def.sleepThreshold
+    result.safetyFactor = def.safetyFactor
+    result.motionLocks.linearX = def.motionLocks.linearX
+    result.motionLocks.linearY = def.motionLocks.linearY
+    result.motionLocks.linearZ = def.motionLocks.linearZ
+    result.motionLocks.angularX = def.motionLocks.angularX
+    result.motionLocks.angularY = def.motionLocks.angularY
+    result.motionLocks.angularZ = def.motionLocks.angularZ
+    result.enableSleep = def.enableSleep
+    result.isAwake = def.isAwake
+    result.isBullet = def.isBullet
+    result.isEnabled = def.isEnabled
+    result.allowFastRotation = def.allowFastRotation
+    result.enableContactRecycling = def.enableContactRecycling
+    ret result
+  }
+}
+
+func toB3ShapeDef(def: view ShapeDef) ret b3ShapeDef {
+  unsafe {
+    var result: b3ShapeDef = b3DefaultShapeDef()
+    result.baseMaterial.friction = def.baseMaterial.friction
+    result.baseMaterial.restitution = def.baseMaterial.restitution
+    result.baseMaterial.rollingResistance = def.baseMaterial.rollingResistance
+    result.baseMaterial.tangentVelocity = toB3Vector(vector: def.baseMaterial.tangentVelocity)
+    result.baseMaterial.userMaterialId = def.baseMaterial.userMaterialId
+    result.baseMaterial.customColor = def.baseMaterial.customColor as UInt32
+    result.density = def.density
+    result.explosionScale = def.explosionScale
+    result.filter.categoryBits = def.filter.categoryBits
+    result.filter.maskBits = def.filter.maskBits
+    result.filter.groupIndex = def.filter.groupIndex as Int32
+    result.enableCustomFiltering = def.enableCustomFiltering
+    result.isSensor = def.isSensor
+    result.enableSensorEvents = def.enableSensorEvents
+    result.enableContactEvents = def.enableContactEvents
+    result.enableHitEvents = def.enableHitEvents
+    result.enablePreSolveEvents = def.enablePreSolveEvents
+    result.invokeContactCreation = def.invokeContactCreation
+    result.updateBodyMass = def.updateBodyMass
+    result.enableSpeculativeContact = def.enableSpeculativeContact
+    ret result
+  }
+}
+
+func toB3QueryFilter(filter: view QueryFilter) ret b3QueryFilter {
+  let result: b3QueryFilter = {
+    categoryBits: filter.categoryBits
+    maskBits: filter.maskBits
+    id: filter.id
+  }
+  ret result
+}
+
+func toB3Sphere(sphere: view Sphere) ret b3Sphere {
+  let result: b3Sphere = { center: toB3Vector(vector: sphere.center), radius: sphere.radius }
+  ret result
+}
+
+func toB3Capsule(capsule: view Capsule) ret b3Capsule {
+  let result: b3Capsule = {
+    center1: toB3Vector(vector: capsule.center1)
+    center2: toB3Vector(vector: capsule.center2)
+    radius: capsule.radius
+  }
+  ret result
+}
+
+func toB3Aabb(box: view Aabb) ret b3AABB {
+  let result: b3AABB = {
+    lowerBound: toB3Vector(vector: box.lowerBound)
+    upperBound: toB3Vector(vector: box.upperBound)
+  }
+  ret result
+}

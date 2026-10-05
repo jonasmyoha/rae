@@ -1,0 +1,373 @@
+# Spawning and despawning physics entities, and the static venue, on the
+# C-library track: the same functions as the port's physics/ecs/PhysicsSpawn.
+# A body or shape is mapped to its entity the moment it is created;
+# despawnRigidBody destroys the body (with its shapes, contacts and joints)
+# BEFORE the caller clears the entity's components and frees the entity, so a
+# recycled entity index never owns a live body. Differences forced by the C
+# library:
+# - A Hull is the C library's hull (createHull from points, b3CreateHull),
+#   which its owner frees with destroyHull; a shape keeps its own copy.
+# - A venue mesh is a C allocation the resource keeps (Physics.meshes).
+open Vec3
+open Quat
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Transform
+open box3d/Box3d
+open box3d/Box3dGlue
+open box3d/Box3dTypes
+open box3d/Box3dTypes2
+open box3d/ecs/PhysicsTypes
+open box3d/ecs/Physics
+open box3d/ecs/PhysicsComponents
+
+# A convex hull built by the C library (the glue's handle), owned by the
+# caller.
+type Hull {
+  handle: UInt64
+}
+
+# The hull of `points` (at most `maxVertexCount` vertices); none when the
+# points span no volume.
+func createHull(points: view List(Vec3), maxVertexCount: view Int) ret opt Hull {
+  unsafe {
+    let handle: UInt64 = rae_b3CreateHull(
+      points: points.data
+      pointCount: points.length as Int32
+      maxVertexCount: maxVertexCount as Int32
+    )
+    if handle is 0 {
+      ret none
+    }
+    ret Hull { handle: handle }
+  }
+}
+
+func destroyHull(hull: view Hull) {
+  unsafe {
+    rae_b3DestroyHull(hull: hull.handle)
+  }
+}
+
+# Create a body for `entityId` from `def` and give the entity its RigidBody;
+# its Transform3D takes the body's pose (its scale kept, or 1).
+func spawnRigidBody(
+  physics: mod Physics
+  rigidBodies: mod ComponentTable(RigidBody)
+  transforms: mod ComponentTable(Transform3D)
+  entityId: view EntityId
+  def: view BodyDef
+) ret BodyId {
+  var bodyId: BodyId = nullBodyId()
+  unsafe {
+    bodyId = fromB3BodyId(bodyId: b3CreateBody(worldId: physics.world, def: toB3BodyDef(def: def)))
+  }
+  setMappedEntity(entities: physics.bodyEntities, index: bodyId.index1 - 1, entityId: entityId)
+  if componentHas(this: transforms, entityId: entityId) {
+    let transform: mod Transform3D => componentMod(this: transforms, entityId: entityId)
+    transform.position = def.position
+    transform.rotation = def.rotation
+  } else {
+    var transform: Transform3D = createTransform3D()
+    transform.position = def.position
+    transform.rotation = def.rotation
+    componentSet(this: transforms, entityId: entityId, data: transform)
+  }
+  componentSet(
+    this: rigidBodies
+    entityId: entityId
+    data: RigidBody {
+      bodyId: bodyId
+      bodyType: def.bodyType
+      syncedTransformStamp: componentModStamp(this: transforms, entityId: entityId)
+    }
+  )
+  ret bodyId
+}
+
+# Map a new shape to `entityId` and add it to the entity's Collider.
+func recordCollider(
+  physics: mod Physics
+  colliders: mod ComponentTable(Collider)
+  entityId: view EntityId
+  shapeId: view ShapeId
+) {
+  setMappedEntity(entities: physics.shapeEntities, index: shapeId.index1 - 1, entityId: entityId)
+  if componentHas(this: colliders, entityId: entityId) {
+    let collider: mod Collider => componentMod(this: colliders, entityId: entityId)
+    collider.shapeIds.add(value: shapeId)
+  } else {
+    let shapeIds: List(ShapeId) = List.create(ShapeId, cap: 1)
+    shapeIds.add(value: shapeId)
+    componentSet(this: colliders, entityId: entityId, data: Collider { shapeIds: shapeIds })
+  }
+}
+
+# The body of a spawned entity (nullBodyId when it has none).
+func entityBodyId(rigidBodies: view ComponentTable(RigidBody), entityId: view EntityId) ret BodyId {
+  if componentHas(this: rigidBodies, entityId: entityId) {
+    ret componentView(this: rigidBodies, entityId: entityId).bodyId
+  }
+  ret nullBodyId()
+}
+
+func addSphereCollider(
+  physics: mod Physics
+  rigidBodies: view ComponentTable(RigidBody)
+  colliders: mod ComponentTable(Collider)
+  entityId: view EntityId
+  def: view ShapeDef
+  sphere: view Sphere
+) ret ShapeId {
+  var shapeId: ShapeId = nullShapeId()
+  unsafe {
+    shapeId = fromB3ShapeId(
+      shapeId: b3CreateSphereShape(
+        bodyId: toB3BodyId(bodyId: entityBodyId(rigidBodies: rigidBodies, entityId: entityId))
+        def: toB3ShapeDef(def: def)
+        sphere: toB3Sphere(sphere: sphere)
+      )
+    )
+  }
+  recordCollider(
+    physics: physics
+    colliders: colliders
+    entityId: entityId
+    shapeId: shapeId
+  )
+  ret shapeId
+}
+
+func addCapsuleCollider(
+  physics: mod Physics
+  rigidBodies: view ComponentTable(RigidBody)
+  colliders: mod ComponentTable(Collider)
+  entityId: view EntityId
+  def: view ShapeDef
+  capsule: view Capsule
+) ret ShapeId {
+  var shapeId: ShapeId = nullShapeId()
+  unsafe {
+    shapeId = fromB3ShapeId(
+      shapeId: b3CreateCapsuleShape(
+        bodyId: toB3BodyId(bodyId: entityBodyId(rigidBodies: rigidBodies, entityId: entityId))
+        def: toB3ShapeDef(def: def)
+        capsule: toB3Capsule(capsule: capsule)
+      )
+    )
+  }
+  recordCollider(
+    physics: physics
+    colliders: colliders
+    entityId: entityId
+    shapeId: shapeId
+  )
+  ret shapeId
+}
+
+func addHullCollider(
+  physics: mod Physics
+  rigidBodies: view ComponentTable(RigidBody)
+  colliders: mod ComponentTable(Collider)
+  entityId: view EntityId
+  def: view ShapeDef
+  hull: view Hull
+) ret ShapeId {
+  var shapeId: ShapeId = nullShapeId()
+  unsafe {
+    shapeId = fromB3ShapeId(
+      shapeId: rae_b3CreateHullShape(
+        bodyId: toB3BodyId(bodyId: entityBodyId(rigidBodies: rigidBodies, entityId: entityId))
+        def: toB3ShapeDef(def: def)
+        hull: hull.handle
+      )
+    )
+  }
+  recordCollider(
+    physics: physics
+    colliders: colliders
+    entityId: entityId
+    shapeId: shapeId
+  )
+  ret shapeId
+}
+
+# A box shape of half extents placed by `transform` on body `bodyId`
+# (b3MakeTransformedBoxHull; the shape copies the hull).
+func createBoxShape(
+  bodyId: view BodyId
+  def: view ShapeDef
+  halfExtents: view Vec3
+  transform: view Transform
+) ret ShapeId {
+  unsafe {
+    let hull: b3BoxHull = b3MakeTransformedBoxHull(
+      hx: halfExtents.x
+      hy: halfExtents.y
+      hz: halfExtents.z
+      transform: toB3Transform(transform: transform)
+    )
+    ret fromB3ShapeId(
+      shapeId: b3CreateHullShape(
+        bodyId: toB3BodyId(bodyId: bodyId)
+        def: toB3ShapeDef(def: def)
+        hull: hull.base
+      )
+    )
+  }
+}
+
+func addBoxCollider(
+  physics: mod Physics
+  rigidBodies: view ComponentTable(RigidBody)
+  colliders: mod ComponentTable(Collider)
+  entityId: view EntityId
+  def: view ShapeDef
+  halfExtents: view Vec3
+  transform: view Transform
+) ret ShapeId {
+  let shapeId: ShapeId = createBoxShape(
+    bodyId: entityBodyId(rigidBodies: rigidBodies, entityId: entityId)
+    def: def
+    halfExtents: halfExtents
+    transform: transform
+  )
+  recordCollider(
+    physics: physics
+    colliders: colliders
+    entityId: entityId
+    shapeId: shapeId
+  )
+  ret shapeId
+}
+
+# Forget the entities of a collider's shapes.
+func unmapShapes(physics: mod Physics, collider: view Collider) {
+  loop let shapeId: view ShapeId in collider.shapeIds {
+    setMappedEntity(
+      entities: physics.shapeEntities
+      index: shapeId.index1 - 1
+      entityId: noEntity()
+    )
+  }
+}
+
+# Destroy the entity's body (and with it its shapes, contacts and joints)
+# and drop its RigidBody and Collider. Call it BEFORE clearing the entity's
+# other components and freeing it.
+func despawnRigidBody(
+  physics: mod Physics
+  rigidBodies: mod ComponentTable(RigidBody)
+  colliders: mod ComponentTable(Collider)
+  entityId: view EntityId
+) {
+  if componentHas(this: colliders, entityId: entityId) {
+    unmapShapes(physics: physics, collider: componentView(this: colliders, entityId: entityId))
+    componentRemove(this: colliders, entityId: entityId)
+  }
+  if componentHas(this: rigidBodies, entityId: entityId) {
+    let bodyId: BodyId = componentView(this: rigidBodies, entityId: entityId).bodyId
+    unsafe {
+      b3DestroyBody(bodyId: toB3BodyId(bodyId: bodyId))
+    }
+    setMappedEntity(entities: physics.bodyEntities, index: bodyId.index1 - 1, entityId: noEntity())
+    componentRemove(this: rigidBodies, entityId: entityId)
+  }
+}
+
+# The static body the venue's shapes go on, created on first use.
+func venueBody(physics: mod Physics) ret BodyId {
+  if physics.venueBodyId.index1 is 0 {
+    unsafe {
+      physics.venueBodyId = fromB3BodyId(
+        bodyId: b3CreateBody(
+          worldId: physics.world
+          def: toB3BodyDef(def: defaultBodyDef(lengthUnitsPerMeter: physics.lengthUnitsPerMeter))
+        )
+      )
+    }
+  }
+  ret physics.venueBodyId
+}
+
+# The stride of Mesh3d's interleaved vertices: position, normal, uv.
+const renderVertexStride: Int = 8
+
+# A static venue collider from a render mesh's arrays (interleaved vertices
+# `verts`, `vertCount` of them, and `renderIndices`): its positions placed by
+# `transform`, welded and with the edges identified. None if the mesh has no
+# triangles.
+func addVenueTriangles(
+  physics: mod Physics
+  verts: view List(Float)
+  vertCount: view Int
+  renderIndices: view List(Int)
+  transform: view Transform
+  def: view ShapeDef
+) ret opt ShapeId {
+  let vertices: List(b3Vec3) = List.create(b3Vec3, cap: vertCount)
+  let placement: b3Transform = toB3Transform(transform: transform)
+  loop var i: Int = 0, i < vertCount, ++i {
+    let base: Int = i * renderVertexStride
+    let local: Vec3 = {
+      x: verts.copyAtDefault(index: base)
+      y: verts.copyAtDefault(index: base + 1)
+      z: verts.copyAtDefault(index: base + 2)
+    }
+    unsafe {
+      vertices.add(value: b3TransformPoint(t: placement, v: toB3Vector(vector: local)))
+    }
+  }
+  let indices: List(Int32) = List.create(Int32, cap: renderIndices.length)
+  loop let index: view Int in renderIndices {
+    indices.add(value: index as Int32)
+  }
+  if indices.length < 3 {
+    ret none
+  }
+  unsafe {
+    let meshDef: b3MeshDef = {
+      vertices: vertices.data
+      stride: 0
+      indices: indices.data
+      weldTolerance: 0.001
+      vertexCount: vertices.length as Int32
+      triangleCount: (indices.length / 3) as Int32
+      weldVertices: true
+      useMedianSplit: false
+      identifyEdges: true
+      clockWiseWinding: false
+    }
+    let mesh: UInt64 = rae_b3CreateMesh(def: meshDef)
+    if mesh is 0 {
+      ret none
+    }
+    physics.meshes.add(value: mesh)
+    let venueBodyId: BodyId = venueBody(physics: physics)
+    let shapeId: ShapeId = fromB3ShapeId(shapeId: rae_b3CreateMeshShape(
+      bodyId: toB3BodyId(bodyId: venueBodyId)
+      def: toB3ShapeDef(def: def)
+      mesh: mesh
+      scale: toB3Vector(vector: Vec3 { x: 1.0, y: 1.0, z: 1.0 })
+    ))
+    physics.venueShapeIds.add(value: shapeId)
+    ret shapeId
+  }
+}
+
+# A hand-placed static venue box (where a gameplay edge matters).
+func addVenueBox(
+  physics: mod Physics
+  def: view ShapeDef
+  halfExtents: view Vec3
+  transform: view Transform
+) ret ShapeId {
+  let shapeId: ShapeId = createBoxShape(
+    bodyId: venueBody(physics: physics)
+    def: def
+    halfExtents: halfExtents
+    transform: transform
+  )
+  physics.venueShapeIds.add(value: shapeId)
+  ret shapeId
+}

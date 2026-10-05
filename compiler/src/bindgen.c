@@ -335,9 +335,7 @@ static Decl parse_decl(const char* text) {
     return d;
 }
 
-// ---------------------------------------------------------------------------
 // Rae keyword-safe parameter names.
-// ---------------------------------------------------------------------------
 static const char* safe_name(const char* name, char* buf, size_t cap) {
     static const char* kw[] = {"type","ret","func","let","var","const","if","else",
         "loop","match","view","mod","own","copy","open","import","export","enum",
@@ -567,7 +565,10 @@ static void emit_function(FILE* out, const char* text) {
     // return type = text before the name
     char rettext[256]; size_t rl = (size_t)(np - text); if (rl >= sizeof(rettext)) rl = sizeof(rettext)-1;
     memcpy(rettext, text, rl); rettext[rl] = '\0';
-    Decl rd = parse_decl(rettext);
+    const char* rt = rettext; while (isspace((unsigned char)*rt)) rt++;
+    char retdecl[300]; // `const T*` gets a placeholder name, so T is read as the type
+    snprintf(retdecl, sizeof(retdecl), "%s%s", rettext, starts_kw(rt, "const") ? " returned" : "");
+    Decl rd = parse_decl(retdecl);
     // params
     char params[4096]; size_t pl = (size_t)(rp - lp - 1); if (pl >= sizeof(params)) pl = sizeof(params)-1;
     memcpy(params, lp + 1, pl); params[pl] = '\0';
@@ -742,10 +743,9 @@ static void part_write(int kind, const char* text) {
     o->lines += n;
 }
 
-// Items are emitted into a memory stream, then written whole to their part.
 static char* g_item_buf = NULL;
 static size_t g_item_len = 0;
-static FILE* item_begin(void) { return open_memstream(&g_item_buf, &g_item_len); }
+static FILE* item_begin(void) { return open_memstream(&g_item_buf, &g_item_len); } // one item, written whole
 static void item_end(FILE* m, int kind) {
     fclose(m);
     part_write(kind, g_item_buf);

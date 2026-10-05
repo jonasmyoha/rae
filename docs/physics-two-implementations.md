@@ -53,6 +53,52 @@ two must agree bit for bit, since the port is bit-exact against that build.
 Track B's product build uses Box3D's SIMD path; whether its results still
 match the scalar ones is measured and recorded, not assumed.
 
+### Track B's ECS layer (B2, 2026-10-05)
+
+`lib/box3d/ecs` has the port's modules and names:
+- `Physics`, `PhysicsComponents`, `PhysicsSpawn`, `PhysicsSystems`,
+  `PhysicsQueries`, `VenueMesh` and `CharacterMover`;
+- `PhysicsTypes`, which holds the value types the port spreads over its
+  `WorldTypes`, `QueryTypes`, `TransformMath` and `AabbMath` (`BodyDef`,
+  `ShapeDef`, `WorldDef`, `BodyId`, `ShapeId`, `BodyType`, `Sphere`,
+  `Capsule`, `QueryFilter`, `Aabb`, `Transform`, with the same defaults),
+  and their conversions to the C structs.
+
+An app moves between the tracks by its `open` lines:
+- **Fixture 999** is 988 (two worlds, a venue mesh, a box stack, thrown
+  balls, a kinematic platform, a teleport and a walking character) with only
+  its `open` lines changed. It prints 988's expected output byte for byte.
+- **Fixture 1000** is 987 (1000 bodies spawned and despawned over recycled
+  entity ids). It prints 987's expected output; its invariant checks ask the C
+  library (`b3Body_IsValid`, `b3World_GetCounters`) where 987 reads the
+  port's world.
+
+Both match with the scalar library (`RAE_BOX3D_SCALAR=1`) and the SIMD one,
+which the runner uses. The ECS default worker count is the pool's, so Box3D
+runs its own thread scheduler and still gives the port's bits.
+
+What the C library forced, each listed in its module comment:
+- `Physics.world` is the C world's handle. `destroyPhysics` frees it with the
+  venue's meshes; the port gained the same function, which does nothing
+  there.
+- A `Hull` is the C library's (`createHull` from points, freed with
+  `destroyHull`). Meshes and hulls are integer handles from the glue, so no
+  app struct holds a raw pointer, which would force `unsafe` on its
+  construction.
+- The mover's internal state is in Box3D's C types (`b3Vec3`,
+  `b3CollisionPlane`), and its math is Box3D's inline math in the sample's
+  order. `CharacterBody` reports in Rae types as before.
+- The calls that take callbacks or return arrays behind pointers go through
+  `tools/box3d/rae_glue.c`:
+  - the mover's collide and cast;
+  - the overlap queries;
+  - the closest shape cast;
+  - the event arrays;
+  - mesh and hull creation.
+
+  The glue is compiled into `libbox3d.a` by `build.sh` and bound by the
+  hand-written `lib/box3d/Box3dGlue.rae`. It holds no state.
+
 ## 3. The examples: two programs, each built on both tracks
 
 | program | track A | track B |

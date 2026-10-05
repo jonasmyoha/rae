@@ -1,0 +1,50 @@
+# The physics components of an ECS world on the C-library track: the same as
+# the port's physics/ecs/PhysicsComponents. The pose of an entity lives in its
+# Transform3D (lib/ecs/Transform); the push system hands what game code wrote
+# to the body, the pull system writes back what the step moved. The one
+# difference: CharacterBody's mover is this track's CharacterMover, whose
+# state is in Box3D's C types.
+open Vec2
+open Vec3
+open ecs/Entity
+open box3d/ecs/PhysicsTypes
+open box3d/ecs/CharacterMover
+
+type RigidBody {
+  bodyId: BodyId
+  bodyType: BodyType
+  syncedTransformStamp: Int
+}
+
+type Collider {
+  shapeIds: List(ShapeId)
+}
+
+type CharacterBody {
+  mover: CharacterMover
+  # The input: the throttle (x forward, y right, each -1 to 1) along the
+  # given forward and right directions, a jump request (consumed by the
+  # system), and whether to clip the velocity against the planes
+  throttle: Vec2
+  forward: Vec3
+  right: Vec3
+  jump: Bool
+  clipVelocity: Bool
+  # The output: on the ground, and the ground's normal
+  grounded: Bool
+  groundNormal: Vec3
+}
+
+# A Z-up character standing at `position` (its capsule's center), facing +x.
+func createCharacterBody(position: view Vec3) ret CharacterBody {
+  ret CharacterBody {
+    mover: createCharacterMoverWithUp(position: position, up: UpAxis.zUp)
+    throttle: Vec2 { x: 0.0, y: 0.0 }
+    forward: Vec3 { x: 1.0, y: 0.0, z: 0.0 }
+    right: Vec3 { x: 0.0, y: -1.0, z: 0.0 }
+    jump: false
+    clipVelocity: true
+    grounded: false
+    groundNormal: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+  }
+}
