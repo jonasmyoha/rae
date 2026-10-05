@@ -10,7 +10,9 @@
 #     pinned commit below. No Box3D source ever enters this repository.
 #   - Builds the library scalar (BOX3D_DISABLE_SIMD), with -ffp-contract=off
 #     (Box3D's CMake adds it too), validation and every extra target off.
-#   - Compiles each tools/box3d-oracle/drivers/<name>.c against it, runs it,
+#   - Compiles each tools/box3d-oracle/drivers/<name>.c against it (upstream's
+#     shared/ sample code is on the include path: a driver may #include e.g.
+#     human.c), runs it,
 #     and writes tools/box3d-oracle/goldens/<name>.golden: one line per call,
 #     every float a C hex float (`%a`), which is exact and parses back to the
 #     same bits. A driver that steps a world creates it with workerCount = 1.
@@ -52,7 +54,7 @@ fi
 for driver in "${DRIVERS[@]}"; do
   exe="$BUILD/oracle-$driver"
   cc -std=c17 -O2 -DNDEBUG -ffp-contract=off -DBOX3D_DISABLE_SIMD \
-    -DBOX3D_ORACLE_COMMIT="\"$BOX3D_COMMIT\"" -I"$SRC/include" -I"$SRC/src" \
+    -DBOX3D_ORACLE_COMMIT="\"$BOX3D_COMMIT\"" -I"$SRC/include" -I"$SRC/src" -I"$SRC/shared" \
     "$HERE/drivers/$driver.c" "$LIB" -lm -lpthread -o "$exe"
   "$exe" > "$HERE/goldens/$driver.golden"
   echo "box3d-oracle: $driver -> tools/box3d-oracle/goldens/$driver.golden ($(wc -l < "$HERE/goldens/$driver.golden" | tr -d ' ') lines)"

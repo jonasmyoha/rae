@@ -477,6 +477,53 @@ func createBoxMesh(
   ret createMesh(def: def, lengthUnitsPerMeter: lengthUnitsPerMeter)
 }
 
+# b3CreateTorusMesh: a torus around the z axis, `radius` to the middle of a
+# tube of radius `thickness`, radialResolution rings of tubularResolution
+# vertices, two triangles per quad, edges identified (b3Cos/b3Sin are the
+# deterministic approximations).
+func createTorusMesh(
+  radialResolution: view Int
+  tubularResolution: view Int
+  radius: view Float
+  thickness: view Float
+  lengthUnitsPerMeter: view Float
+) ret opt PhysicsMeshData {
+  var def: MeshDef = emptyMeshDef()
+  loop var radialIndex: Int = 0, radialIndex < radialResolution, ++radialIndex {
+    loop var tubularIndex: Int = 0, tubularIndex < tubularResolution, ++tubularIndex {
+      let u: Float = (tubularIndex as Float) / (tubularResolution as Float) * twoPi
+      let v: Float = (radialIndex as Float) / (radialResolution as Float) * twoPi
+      let ring: Float = radius + thickness * deterministicCos(radians: v)
+      def.vertices.add(
+        value: Vec3 {
+          x: ring * deterministicCos(radians: u)
+          y: ring * deterministicSin(radians: u)
+          z: thickness * deterministicSin(radians: v)
+        }
+      )
+    }
+  }
+  loop var radialIndex1: Int = 0, radialIndex1 < radialResolution, ++radialIndex1 {
+    let radialIndex2: Int = (radialIndex1 + 1) % radialResolution
+    loop var tubularIndex1: Int = 0, tubularIndex1 < tubularResolution, ++tubularIndex1 {
+      let tubularIndex2: Int = (tubularIndex1 + 1) % tubularResolution
+      let index1: Int = radialIndex1 * tubularResolution + tubularIndex1
+      let index2: Int = radialIndex1 * tubularResolution + tubularIndex2
+      let index3: Int = radialIndex2 * tubularResolution + tubularIndex2
+      let index4: Int = radialIndex2 * tubularResolution + tubularIndex1
+      def.indices.add(value: index1)
+      def.indices.add(value: index2)
+      def.indices.add(value: index3)
+      def.indices.add(value: index3)
+      def.indices.add(value: index4)
+      def.indices.add(value: index1)
+    }
+  }
+  def.useMedianSplit = false
+  def.identifyEdges = true
+  ret createMesh(def: def, lengthUnitsPerMeter: lengthUnitsPerMeter)
+}
+
 # b3CreateHollowBoxMesh: a box with its triangles facing in.
 func createHollowBoxMesh(
   center: view Vec3
