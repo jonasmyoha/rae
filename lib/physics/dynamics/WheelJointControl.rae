@@ -1,0 +1,129 @@
+# A wheel joint's controls and readbacks between steps (wheel_joint.c at
+# 9f998c8, Box3D's order kept): the spin motor and the steering target a
+# driver sets every frame, and the spin speed and steering angle a HUD or a
+# torque split reads back. Box3D's Driving sample drives a car with exactly
+# these (docs/physics-design.md §5.7).
+open Vec3
+open Quat
+open physics/math/Scalar
+open physics/math/VectorMath
+open physics/math/QuatMath
+open physics/math/MatrixMath
+open physics/dynamics/WorldTypes
+open physics/dynamics/Body
+open physics/dynamics/Joint
+open physics/dynamics/JointData
+open physics/dynamics/World
+open physics/dynamics/WorldGraph
+
+# The world's index of `jointId`'s wheel data record (-1 when the joint is not
+# a wheel joint).
+func wheelDataIndex(world: view PhysicsWorld, jointId: view JointId) ret Int {
+  let sim: JointSim = jointSimOf(world: world, jointId: jointId.index1 - 1)
+  if sim.jointType is not JointType.wheelJoint {
+    ret -1
+  }
+  ret sim.dataIndex
+}
+
+# b3WheelJoint_EnableSpinMotor
+func wheelJointEnableSpinMotor(
+  world: mod PhysicsWorld
+  jointId: view JointId
+  enableMotor: view Bool
+) {
+  if let data: mod WheelJointData => world.jointData.wheelJoints.modAt(
+    index: wheelDataIndex(world: world, jointId: jointId)
+  ) {
+    if data.enableSpinMotor is not enableMotor {
+      data.spinImpulse = 0.0
+      data.enableSpinMotor = enableMotor
+    }
+  }
+}
+
+# b3WheelJoint_SetSpinMotorSpeed
+func wheelJointSetSpinMotorSpeed(
+  world: mod PhysicsWorld
+  jointId: view JointId
+  motorSpeed: view Float
+) {
+  if let data: mod WheelJointData => world.jointData.wheelJoints.modAt(
+    index: wheelDataIndex(world: world, jointId: jointId)
+  ) {
+    data.spinSpeed = motorSpeed
+  }
+}
+
+# b3WheelJoint_SetMaxSpinTorque
+func wheelJointSetMaxSpinTorque(
+  world: mod PhysicsWorld
+  jointId: view JointId
+  torque: view Float
+) {
+  if let data: mod WheelJointData => world.jointData.wheelJoints.modAt(
+    index: wheelDataIndex(world: world, jointId: jointId)
+  ) {
+    data.maxSpinTorque = torque
+  }
+}
+
+# b3WheelJoint_SetTargetSteeringAngle
+func wheelJointSetTargetSteeringAngle(
+  world: mod PhysicsWorld
+  jointId: view JointId
+  radians: view Float
+) {
+  if let data: mod WheelJointData => world.jointData.wheelJoints.modAt(
+    index: wheelDataIndex(world: world, jointId: jointId)
+  ) {
+    data.targetSteeringAngle = radians
+  }
+}
+
+# The angular velocity of body index `bodyIndex`, zero when it has no state
+# (b3GetBodyState returning NULL).
+func bodyAngularVelocityAt(world: view PhysicsWorld, bodyIndex: view Int) ret Vec3 {
+  let body: Body = bodyAt(world: world, bodyId: bodyIndex)
+  if hasBodyState(body: body) {
+    ret bodyStateOf(world: world, body: body).angularVelocity
+  }
+  ret zeroVector()
+}
+
+# b3WheelJoint_GetSpinSpeed: the wheel's spin rate about its axle relative to
+# the chassis, in radians per second.
+func wheelJointGetSpinSpeed(world: view PhysicsWorld, jointId: view JointId) ret Float {
+  let base: JointSim = jointSimOf(world: world, jointId: jointId.index1 - 1)
+  let bodyB: Body = bodyAt(world: world, bodyId: base.bodyIdB)
+  let quatB: Quat = multiply(
+    left: bodySimOf(world: world, body: bodyB).transform.rotation
+    right: base.localFrameB.rotation
+  )
+  let spinAxis: Vec3 = rotateVector(quat: quatB, vector: axisZ())
+  let angularVelocityA: Vec3 = bodyAngularVelocityAt(world: world, bodyIndex: base.bodyIdA)
+  let angularVelocityB: Vec3 = bodyAngularVelocityAt(world: world, bodyIndex: base.bodyIdB)
+  ret dot(left: subtract(left: angularVelocityB, right: angularVelocityA), right: spinAxis)
+}
+
+# b3WheelJoint_GetSteeringAngle: the wheel's twist about the suspension axis,
+# in radians.
+func wheelJointGetSteeringAngle(world: view PhysicsWorld, jointId: view JointId) ret Float {
+  let base: JointSim = jointSimOf(world: world, jointId: jointId.index1 - 1)
+  let bodyA: Body = bodyAt(world: world, bodyId: base.bodyIdA)
+  let bodyB: Body = bodyAt(world: world, bodyId: base.bodyIdB)
+  let quatA: Quat = multiply(
+    left: bodySimOf(world: world, body: bodyA).transform.rotation
+    right: base.localFrameA.rotation
+  )
+  let quatB: Quat = multiply(
+    left: bodySimOf(world: world, body: bodyB).transform.rotation
+    right: base.localFrameB.rotation
+  )
+  let matrixA: Matrix3 = matrixFromQuat(quat: quatA)
+  let matrixB: Matrix3 = matrixFromQuat(quat: quatB)
+  # Twist around x-axis
+  let cs: Float = dot(left: matrixB.columnZ, right: matrixA.columnZ)
+  let ss: Float = -dot(left: matrixB.columnZ, right: matrixA.columnY)
+  ret deterministicAtan2(y: ss, x: cs)
+}

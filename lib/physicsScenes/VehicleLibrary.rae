@@ -1,0 +1,359 @@
+# The vehicle examples' car, course and driving math (VehicleTypes;
+# docs/physics-design.md §5.7). The car is Box3D's Driving sample
+# (samples/sample_joint.cpp at the pin): a 4 x 1 x 2 m box chassis of density
+# 0.5, four 0.4 m sphere wheels (density 2, friction 3) on wheel joints with a
+# 4 Hz suspension of +-0.2 m, 10 Hz steering of +-45 degrees on the leading
+# axle, 30 rad/s spin motors, and a 0.5 Hz parallel joint keeping it upright.
+# Two changes from the sample, both asked for by the plan: every wheel has a
+# spin motor and the drive torque is SPLIT between the axles
+# (`rearDriveShare`), and forward is the chassis' local +x - the way the
+# sample's W key actually drives it (the sample's own speed readout projects
+# on -x, so it shows a negative speed going forward).
+#
+# The course is a height field: a flat pad around the start with two ramps, a
+# wall and two groups of crates on it, then rolling hills out to 128 m. Every
+# number is fixed, so both tracks build the same course.
+import Math
+open Vec3
+open Quat
+open Mesh3d
+open physicsScenes/SceneTypes
+open physicsScenes/VehicleTypes
+
+# sqrt(1/2): the quaternion part of a quarter turn
+const halfRoot: Float = 0.70710677
+
+# A quarter turn about x (Box3D's b3ComputeQuatBetweenUnitVectors(y, z)): local
+# y to z.
+func quarterTurnX() ret Quat {
+  ret Quat { x: halfRoot, y: 0.0, z: 0.0, w: halfRoot }
+}
+
+# b3ComputeQuatBetweenUnitVectors(z, y): local z to y.
+func quarterTurnBackX() ret Quat {
+  ret Quat { x: -halfRoot, y: 0.0, z: 0.0, w: halfRoot }
+}
+
+# b3ComputeQuatBetweenUnitVectors(x, y): local x to y.
+func quarterTurnZ() ret Quat {
+  ret Quat { x: 0.0, y: 0.0, z: halfRoot, w: halfRoot }
+}
+
+func wheelAt(x: view Float, z: view Float, front: view Bool) ret VehicleWheel {
+  ret VehicleWheel {
+    chassisPoint: Vec3 { x: x, y: -0.5, z: z }
+    steers: front
+    drives: true
+    front: front
+  }
+}
+
+# Box3D's Driving car, chassis centre at `startPosition`.
+func drivingCar(startPosition: view Vec3) ret VehicleDescription {
+  let wheels: List(VehicleWheel) = {
+    wheelAt(x: 1.5, z: 0.8, front: true)
+    wheelAt(x: 1.5, z: -0.8, front: true)
+    wheelAt(x: -1.5, z: 0.8, front: false)
+    wheelAt(x: -1.5, z: -0.8, front: false)
+  }
+  ret VehicleDescription {
+    chassisHalfExtents: Vec3 { x: 2.0, y: 0.5, z: 1.0 }
+    chassisDensity: 0.5
+    wheelRadius: 0.4
+    wheelDensity: 2.0
+    wheelFriction: 3.0
+    wheels: wheels
+    chassisFrameRotation: quarterTurnZ()
+    wheelFrameRotation: quarterTurnBackX()
+    wheelRotation: quarterTurnX()
+    suspensionHertz: 4.0
+    suspensionDampingRatio: 0.7
+    lowerSuspensionLimit: -0.2
+    upperSuspensionLimit: 0.2
+    steeringHertz: 10.0
+    steeringDampingRatio: 0.7
+    maxSteeringTorque: 5.0
+    lowerSteeringLimit: -0.25 * Math.pi
+    upperSteeringLimit: 0.25 * Math.pi
+    maxSteeringAngle: 0.25 * Math.pi
+    spinSpeed: 30.0
+    totalSpinTorque: 10.0
+    rearDriveShare: 0.7
+    uprightFrameRotation: quarterTurnBackX()
+    uprightHertz: 0.5
+    uprightDampingRatio: 1.0
+    startPosition: startPosition
+    localToWorld: quarterTurnX()
+  }
+}
+
+# The chassis' world rotation at spawn.
+func chassisStartRotation(car: view VehicleDescription) ret Quat {
+  ret car.localToWorld
+}
+
+# Wheel `index`'s world position and rotation at spawn.
+func wheelStartPosition(car: view VehicleDescription, wheel: view VehicleWheel) ret Vec3 {
+  ret vadd(a: car.startPosition, b: Quat.rotate(q: car.localToWorld, v: wheel.chassisPoint))
+}
+
+func wheelStartRotation(car: view VehicleDescription) ret Quat {
+  ret Quat.qmul(a: car.localToWorld, b: car.wheelRotation)
+}
+
+# The upright joint's frame on the venue (whose frame is the world's): the
+# chassis' frame as it sits when the car is level.
+func uprightVenueRotation(car: view VehicleDescription) ret Quat {
+  ret Quat.qmul(a: car.localToWorld, b: car.uprightFrameRotation)
+}
+
+# Each wheel's targets for `command`, in `car.wheels` order: the leading
+# axle steers, and every wheel's spin motor runs at the throttle's speed with
+# its axle's share of the drive torque.
+func wheelTargets(
+  car: view VehicleDescription
+  command: view VehicleCommand
+) ret List(WheelTarget) {
+  let targets: List(WheelTarget) = List.create(WheelTarget, cap: car.wheels.length)
+  loop let wheel: view VehicleWheel in car.wheels {
+    var steering: Float = 0.0
+    if wheel.steers {
+      steering = car.maxSteeringAngle * command.steer
+    }
+    var share: Float = car.rearDriveShare
+    if wheel.front {
+      share = 1.0 - car.rearDriveShare
+    }
+    var torque: Float = 0.0
+    if wheel.drives {
+      torque = 0.5 * car.totalSpinTorque * share
+    }
+    targets.add(
+      value: WheelTarget {
+        steeringAngle: steering
+        spinSpeed: -car.spinSpeed * command.throttle
+        maxSpinTorque: torque
+      }
+    )
+  }
+  ret targets
+}
+
+# The chassis' forward direction in the world (its local +x).
+func vehicleForward(chassisRotation: view Quat) ret Vec3 {
+  ret Quat.rotate(q: chassisRotation, v: Vec3 { x: 1.0, y: 0.0, z: 0.0 })
+}
+
+# The car's speed along its forward direction, in metres per second.
+func forwardSpeed(velocity: view Vec3, chassisRotation: view Quat) ret Float {
+  ret vdot(a: velocity, b: vehicleForward(chassisRotation: chassisRotation))
+}
+
+# The car's heading in the ground plane, degrees counter-clockwise from +x.
+func headingDegrees(chassisRotation: view Quat) ret Float {
+  let forward: Vec3 = vehicleForward(chassisRotation: chassisRotation)
+  ret Math.atan2(y: forward.y, x: forward.x) * 180.0 / Math.pi
+}
+
+# ----- the course -------------------------------------------------------
+
+# The terrain's height at world (x, y): flat within 18 m of the start, rolling
+# hills of up to ~2.4 m beyond 48 m, blended between.
+func courseHeight(x: view Float, y: view Float) ret Float {
+  let radius: Float = Math.sqrt(x: x * x + y * y)
+  var blend: Float = (radius - 18.0) / 30.0
+  if blend < 0.0 {
+    blend = 0.0
+  }
+  if blend > 1.0 {
+    blend = 1.0
+  }
+  blend = blend * blend * (3.0 - 2.0 * blend)
+  let hills: Float = 1.6 * Math.sin(x: x * 0.045) * Math.cos(x: y * 0.037) + 0.8 * Math.sin(
+    x: (x + y) * 0.09
+  )
+  ret blend * hills
+}
+
+func staticBox(halfExtents: view Vec3, position: view Vec3, rotation: view Quat) ret SceneBody {
+  var body: SceneBody = staticBody(shape: boxShape(halfExtents: halfExtents), position: position)
+  body.rotation = rotation
+  ret body
+}
+
+# A ramp of `length` x `width` rising towards `heading` (degrees from +x) by
+# `slopeDegrees`, its low edge at `start` on the flat pad.
+func ramp(
+  start: view Vec3
+  heading: view Float
+  slopeDegrees: view Float
+  length: view Float
+) ret SceneBody {
+  let slope: Float = slopeDegrees * Math.pi / 180.0
+  let turn: Float = heading * Math.pi / 180.0
+  let tilt: Quat = Quat.fromAxisAngle(axis: Vec3 { x: 0.0, y: 1.0, z: 0.0 }, angle: -slope)
+  let face: Quat = Quat.fromAxisAngle(axis: Vec3 { x: 0.0, y: 0.0, z: 1.0 }, angle: turn)
+  let thickness: Float = 0.25
+  let halfLength: Float = 0.5 * length
+  let along: Vec3 = { x: Math.cos(x: turn), y: Math.sin(x: turn), z: 0.0 }
+  let centre: Vec3 = vadd(
+    a: start
+    b: Vec3 {
+      x: along.x * halfLength * Math.cos(x: slope)
+      y: along.y * halfLength * Math.cos(x: slope)
+      z: halfLength * Math.sin(x: slope) - thickness
+    }
+  )
+  ret staticBox(
+    halfExtents: Vec3 { x: halfLength, y: 3.0, z: thickness }
+    position: centre
+    rotation: Quat.qmul(a: face, b: tilt)
+  )
+}
+
+# The crates: a 3-2-1 stack ahead-left of the start and a row to the right.
+func courseCrates() ret List(SceneBody) {
+  let crates: List(SceneBody) = List.create(SceneBody, cap: 12)
+  let crate: SceneShape = boxShape(halfExtents: Vec3 { x: 0.5, y: 0.5, z: 0.5 })
+  loop var level: Int = 0, level < 3, ++level {
+    loop var i: Int = 0, i < 3 - level, ++i {
+      let y: Float = 10.0 + (i as Float) * 1.05 + 0.525 * (level as Float)
+      crates.add(
+        value: dynamicBody(
+          shape: crate
+          position: Vec3 { x: 8.0, y: y, z: 0.5 + 1.0 * (level as Float) }
+        )
+      )
+    }
+  }
+  loop var i: Int = 0, i < 6, ++i {
+    crates.add(
+      value: dynamicBody(
+        shape: crate
+        position: Vec3 { x: -4.0 + 2.0 * (i as Float), y: -9.0, z: 0.5 }
+      )
+    )
+  }
+  ret crates
+}
+
+# The course: a 65 x 65 grid of 4 m cells centred on the start, two ramps
+# (one ahead, one off to the left), a low wall behind, and the crates.
+func drivingCourse() ret VehicleCourse {
+  let countX: Int = 65
+  let countZ: Int = 65
+  let cell: Float = 4.0
+  let half: Float = 0.5 * cell * ((countX - 1) as Float)
+  # Local column i is world x = -half + i * cell; local row j is world
+  # y = half - j * cell (the quarter turn takes local z to world -y)
+  let heights: List(Float) = List.create(Float, cap: countX * countZ)
+  loop var row: Int = 0, row < countZ, ++row {
+    loop var column: Int = 0, column < countX, ++column {
+      heights.add(
+        value: courseHeight(x: -half + (column as Float) * cell, y: half - (row as Float) * cell)
+      )
+    }
+  }
+  let fixtures: List(SceneBody) = {
+    ramp(
+      start: Vec3 { x: 9.0, y: 0.0, z: 0.0 }
+      heading: 0.0
+      slopeDegrees: 14.0
+      length: 8.0
+    )
+    ramp(
+      start: Vec3 { x: -6.0, y: 9.0, z: 0.0 }
+      heading: 90.0
+      slopeDegrees: 10.0
+      length: 10.0
+    )
+    staticBox(
+      halfExtents: Vec3 { x: 0.4, y: 6.0, z: 0.6 }
+      position: Vec3 { x: -12.0, y: 0.0, z: 0.6 }
+      rotation: Quat.identity()
+    )
+  }
+  ret VehicleCourse {
+    heights: heights
+    countX: countX
+    countZ: countZ
+    terrainScale: Vec3 { x: cell, y: 1.0, z: cell }
+    terrainPosition: Vec3 { x: -half, y: half, z: 0.0 }
+    terrainRotation: quarterTurnX()
+    terrainFriction: 0.8
+    fixtures: fixtures
+    crates: courseCrates()
+    cameraStart: Vec3 { x: -10.0, y: 0.0, z: 4.0 }
+  }
+}
+
+# The terrain as a render mesh in world coordinates: the height field's own
+# triangles (11, 21, 12 and 22, 12, 21 per cell, Box3D's order), smooth
+# normals from the neighbouring heights.
+func courseMesh(course: view VehicleCourse) ret MeshData {
+  let countX: Int = course.countX
+  let countZ: Int = course.countZ
+  let verts: List(Float) = List.create(Float, cap: countX * countZ * 8)
+  let indices: List(Int) = List.create(Int, cap: (countX - 1) * (countZ - 1) * 6)
+  let scale: Vec3 = course.terrainScale
+  loop var row: Int = 0, row < countZ, ++row {
+    loop var column: Int = 0, column < countX, ++column {
+      let height: Float = course.heights.copyAtDefault(index: row * countX + column)
+      let left: Float = course.heights.copyAtDefault(
+        index: row * countX + Math.max(a: column - 1, b: 0)
+      )
+      let right: Float = course.heights.copyAtDefault(
+        index: row * countX + Math.min(a: column + 1, b: countX - 1)
+      )
+      let up: Float = course.heights.copyAtDefault(
+        index: Math.max(a: row - 1, b: 0) * countX + column
+      )
+      let down: Float = course.heights.copyAtDefault(
+        index: Math.min(a: row + 1, b: countZ - 1) * countX + column
+      )
+      let localPoint: Vec3 = {
+        x: (column as Float) * scale.x
+        y: height * scale.y
+        z: (row as Float) * scale.z
+      }
+      let localNormal: Vec3 = vnorm(
+        a: Vec3 {
+          x: (left - right) * scale.y / (2.0 * scale.x)
+          y: 1.0
+          z: (up - down) * scale.y / (2.0 * scale.z)
+        }
+      )
+      let point: Vec3 = vadd(
+        a: course.terrainPosition
+        b: Quat.rotate(q: course.terrainRotation, v: localPoint)
+      )
+      let normal: Vec3 = Quat.rotate(q: course.terrainRotation, v: localNormal)
+      pushVert(
+        verts: verts
+        px: point.x
+        py: point.y
+        pz: point.z
+        nx: normal.x
+        ny: normal.y
+        nz: normal.z
+        u: (column as Float) / ((countX - 1) as Float)
+        value: (row as Float) / ((countZ - 1) as Float)
+      )
+    }
+  }
+  loop var row: Int = 0, row < countZ - 1, ++row {
+    loop var column: Int = 0, column < countX - 1, ++column {
+      let index11: Int = row * countX + column
+      let index12: Int = index11 + 1
+      let index21: Int = index11 + countX
+      let index22: Int = index21 + 1
+      indices.add(value: index11)
+      indices.add(value: index21)
+      indices.add(value: index12)
+      indices.add(value: index22)
+      indices.add(value: index12)
+      indices.add(value: index21)
+    }
+  }
+  ret MeshData { verts: verts, indices: indices, vertCount: countX * countZ }
+}
