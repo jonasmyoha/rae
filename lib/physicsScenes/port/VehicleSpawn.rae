@@ -13,6 +13,7 @@ open physicsScenes/SceneTypes
 open physicsScenes/VehicleTypes
 open physicsScenes/VehicleLibrary
 open physicsScenes/PlaygroundRender
+open physicsScenes/PoseBlend
 open physics/math/TransformMath
 open physics/dynamics/WorldTypes
 open physics/dynamics/Joint
@@ -31,6 +32,9 @@ const vehicleTrackName: String = "track A (Rae port)"
 type VehicleWorld {
   allocator: EntityAllocator
   transforms: ComponentTable(Transform3D)
+  # The poses before the last fixed step: a frame is drawn between these and
+  # `transforms`, by how far the clock is into the next step
+  previousTransforms: ComponentTable(Transform3D)
   rigidBodies: ComponentTable(RigidBody)
   colliders: ComponentTable(Collider)
   characters: ComponentTable(CharacterBody)
@@ -51,6 +55,7 @@ func createVehicleWorld(workerCount: view Int) ret VehicleWorld {
   ret VehicleWorld {
     allocator: createEntityAllocator()
     transforms: createComponentTable(Transform3D)
+    previousTransforms: createComponentTable(Transform3D)
     rigidBodies: createComponentTable(RigidBody)
     colliders: createComponentTable(Collider)
     characters: createComponentTable(CharacterBody)
@@ -171,6 +176,7 @@ func spawnCrates(world: mod VehicleWorld, course: view VehicleCourse) {
   loop let crate: view SceneBody in course.crates {
     world.crateIds.add(value: spawnShapeBody(world: world, body: crate, fastRotation: false))
   }
+  copyTransforms(from: world.transforms, into: world.previousTransforms)
 }
 
 func despawnCrates(world: mod VehicleWorld) {
@@ -257,6 +263,7 @@ func spawnVehicle(world: mod VehicleWorld, car: view VehicleDescription) {
       }
     ))
   }
+  copyTransforms(from: world.transforms, into: world.previousTransforms)
 }
 
 # Remove the car (its joints go with its bodies).
@@ -327,17 +334,27 @@ func chassisVelocity(world: view VehicleWorld) ret Vec3 {
   )
 }
 
-# One frame of physics (the fixed steps `frameTime` pays for).
+# One frame of physics: the fixed steps `frameTime` pays for, keeping the
+# poses from before the last of them for interpolatedTransforms.
 func stepVehicleWorld(world: mod VehicleWorld, frameTime: view Float) ret Int {
-  let steps: Int = physicsFrame(
-    physics: world.physics
-    rigidBodies: world.rigidBodies
-    characters: world.characters
-    transforms: world.transforms
-    frameTime: frameTime
-  )
+  let steps: Int = consumeFixedSteps(physics: world.physics, frameTime: frameTime)
+  loop var i: Int = 0, i < steps, ++i {
+    copyTransforms(from: world.transforms, into: world.previousTransforms)
+    physicsFixedStep(
+      physics: world.physics
+      rigidBodies: world.rigidBodies
+      characters: world.characters
+      transforms: world.transforms
+    )
+  }
   advancePhysicsEvents(physics: world.physics)
   ret steps
+}
+
+# How far the clock is into the next fixed step, 0 to 1: the blend between
+# `previousTransforms` and `transforms` a frame is drawn at.
+func vehicleBlend(world: view VehicleWorld) ret Float {
+  ret physicsBlend(physics: world.physics)
 }
 
 func vehicleAwakeCount(world: view VehicleWorld) ret Int {

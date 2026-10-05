@@ -1,0 +1,58 @@
+# Drawing physics between its fixed steps. Physics advances in fixed steps
+# (120 Hz for the vehicles), and a frame shows whatever the last step left: a
+# frame that falls between two steps shows the same pose again, and the next
+# one jumps a whole step - at 250 km/h a step is 58 cm, which reads as
+# stutter (measured: ~30% of frames frozen and ~22% doubled at a 160 fps
+# frame rate). So each frame is drawn between the poses before and after the
+# last step, by how far the clock is into the next one (physicsBlend). Shared
+# by both tracks: it reads only the ECS transform tables.
+import Quat
+open Vec3
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Transform
+
+# Make `into` an exact copy of `from` (every entity's pose, and no others),
+# in place: entities `from` no longer has are removed (walking backwards, as a
+# removal moves the last entry into the gap), then every pose is set.
+func copyTransforms(from: view ComponentTable(Transform3D), into: mod ComponentTable(Transform3D)) {
+  var i: Int = componentCount(this: into) - 1
+  loop i >= 0 {
+    let entityId: EntityId = componentEntityAt(this: into, i: i)
+    if componentHas(this: from, entityId: entityId) is false {
+      componentRemove(this: into, entityId: entityId)
+    }
+    i = i - 1
+  }
+  loop var j: Int = 0, j < componentCount(this: from), ++j {
+    componentSet(
+      this: into
+      entityId: componentEntityAt(this: from, i: j)
+      data: componentCopyAtDefault(this: from, i: j)
+    )
+  }
+}
+
+# The poses to draw a frame with: each body `blend` (0 to 1) of the way from
+# its pose before the last fixed step (`previous`) to its current one; a body
+# with no earlier pose (just spawned) is drawn where it is.
+func interpolatedTransforms(
+  previous: view ComponentTable(Transform3D)
+  current: view ComponentTable(Transform3D)
+  blend: view Float
+) ret ComponentTable(Transform3D) {
+  var shown: ComponentTable(Transform3D) = createComponentTable(Transform3D)
+  loop var i: Int = 0, i < componentCount(this: current), ++i {
+    let entityId: EntityId = componentEntityAt(this: current, i: i)
+    var pose: Transform3D = componentCopyAtDefault(this: current, i: i)
+    if let before: Transform3D = componentCopy(this: previous, entityId: entityId) {
+      pose.position = vadd(
+        a: before.position
+        b: vscale(a: vsub(a: pose.position, b: before.position), s: blend)
+      )
+      pose.rotation = Quat.slerp(a: before.rotation, b: pose.rotation, t: blend)
+    }
+    componentSet(this: shown, entityId: entityId, data: pose)
+  }
+  ret shown
+}
