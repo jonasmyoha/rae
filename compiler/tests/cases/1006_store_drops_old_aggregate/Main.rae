@@ -1,0 +1,68 @@
+# A whole-value store releases the value it replaces, for every owning
+# aggregate - including the container-shaped generic ComponentTable(T), whose
+# stores (to a local `var`, or through a `mod` parameter) used to install the
+# new table without dropping the old one, leaking its four lists on every
+# store. The runner checks for leaks at exit (RAE_MEM_STATS), so a missing
+# drop fails this case even though its output is right.
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open ecs/Transform
+
+type Bag {
+  items: List(Int)
+  name: String
+}
+
+type Box(T: type) {
+  items: List(T)
+}
+
+func freshBag(size: view Int) ret Bag {
+  let items: List(Int) = List.create(Int, cap: size)
+  loop var i: Int = 0, i < size, ++i {
+    items.add(value: i)
+  }
+  ret Bag { items: items, name: "bag {size}" }
+}
+
+func freshBox(T: type, size: view Int) ret Box(T) {
+  ret Box(T) { items: List.create(T, cap: size) }
+}
+
+func replaceBag(into: mod Bag) {
+  into = freshBag(size: 5)
+}
+
+func replaceBox(into: mod Box(Int)) {
+  into = freshBox(T: Int, size: 8)
+}
+
+# The reported shape (lib/physicsScenes/PoseBlend first met it)
+func replaceTable(into: mod ComponentTable(Transform3D)) {
+  into = createComponentTable(Transform3D)
+}
+
+func main() {
+  var allocator: EntityAllocator = createEntityAllocator()
+  let entityId: EntityId = allocEntity(this: allocator)
+  var bag: Bag = freshBag(size: 3)
+  var box: Box(Int) = freshBox(T: Int, size: 2)
+  var table: ComponentTable(Transform3D) = createComponentTable(Transform3D)
+  var localTable: ComponentTable(Int) = createComponentTable(Int)
+  loop var round: Int = 0, round < 50, ++round {
+    replaceBag(into: bag)
+    replaceBox(into: box)
+    componentSet(this: table, entityId: entityId, data: createTransform3D())
+    replaceTable(into: table)
+    componentSet(this: localTable, entityId: entityId, data: round)
+    localTable = createComponentTable(Int)
+  }
+  componentSet(this: localTable, entityId: entityId, data: 7)
+  log("bag {bag.name} with {bag.items.length} items, box of {box.items.length}")
+  log(
+    "tables after 50 replacements: {componentCount(this: table)} and {componentCount(
+      this: localTable
+    )}"
+  )
+}
