@@ -457,6 +457,7 @@ Start on the **Featured** tab — a cross-section of what the language can do:
 | **Metaballs (deferred rendering)** | the 3D renderer, with a settings panel and a sky that moves with the time of day |
 | **3D Renderer — Walker Character** | a skinned, animated glTF character |
 | **Physics Playground — Box3D ported to Rae** and **— Box3D's C library** | six physics scenes, from a 10k-box pyramid to a hinged bridge; fly around and machine-gun balls into them. Twins: the same program on the Box3D engine ported to Rae and on its C library through generated bindings, giving identical results |
+| **Vehicle — Box3D ported to Rae** and **— Box3D's C library** | Box3D's Driving car on a height-field course: suspension, steering, a torque split, a ramp to jump and light crates to scatter. Twins again, driving identically step for step |
 | **Mobile UI — GPU2D** | a phone-shaped application at real app scale |
 | **UI Editor — .raescene viewer** | opens any authored `.raescene` and shows it as the UI system renders it, with a live inspector |
 | **2D Renderer — Animated shapes** | the 2D shape pipeline in motion, with a sound-style EQ visualizer |

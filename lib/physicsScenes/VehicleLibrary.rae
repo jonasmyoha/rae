@@ -4,14 +4,16 @@
 # 0.5, four 0.4 m sphere wheels (density 2, friction 3) on wheel joints with a
 # 4 Hz suspension of +-0.2 m, 10 Hz steering of +-45 degrees on the leading
 # axle, 30 rad/s spin motors, and a 0.5 Hz parallel joint keeping it upright.
-# Two changes from the sample, both asked for by the plan: every wheel has a
-# spin motor and the drive torque is SPLIT between the axles
-# (`rearDriveShare`), and forward is the chassis' local +x - the way the
-# sample's W key actually drives it (the sample's own speed readout projects
-# on -x, so it shows a negative speed going forward).
+# Three changes from the sample: every wheel has a spin motor and the drive
+# torque is SPLIT between the axles (`rearDriveShare`, asked for by the plan);
+# the wheels sit at +-1.2 m, just outside the 2 m wide chassis, instead of
+# +-0.8 m underneath it, so they show; and forward is the chassis' local +x -
+# the way the sample's W key actually drives it (the sample's own speed
+# readout projects on -x, so it shows a negative speed going forward).
 #
 # The course is a height field: a flat pad around the start with two ramps, a
-# wall and two groups of crates on it, then rolling hills out to 128 m. Every
+# wall of blocks and two groups of crates on it - the boxes light enough for
+# the car to scatter - then rolling hills out to 128 m. Every
 # number is fixed, so both tracks build the same course.
 import Math
 open Vec3
@@ -51,15 +53,16 @@ func wheelAt(x: view Float, z: view Float, front: view Bool) ret VehicleWheel {
 # Box3D's Driving car, chassis centre at `startPosition`.
 func drivingCar(startPosition: view Vec3) ret VehicleDescription {
   let wheels: List(VehicleWheel) = {
-    wheelAt(x: 1.5, z: 0.8, front: true)
-    wheelAt(x: 1.5, z: -0.8, front: true)
-    wheelAt(x: -1.5, z: 0.8, front: false)
-    wheelAt(x: -1.5, z: -0.8, front: false)
+    wheelAt(x: 1.5, z: 1.2, front: true)
+    wheelAt(x: 1.5, z: -1.2, front: true)
+    wheelAt(x: -1.5, z: 1.2, front: false)
+    wheelAt(x: -1.5, z: -1.2, front: false)
   }
   ret VehicleDescription {
     chassisHalfExtents: Vec3 { x: 2.0, y: 0.5, z: 1.0 }
     chassisDensity: 0.5
     wheelRadius: 0.4
+    wheelHalfWidth: 0.18
     wheelDensity: 2.0
     wheelFriction: 3.0
     wheels: wheels
@@ -84,6 +87,8 @@ func drivingCar(startPosition: view Vec3) ret VehicleDescription {
     uprightDampingRatio: 1.0
     startPosition: startPosition
     localToWorld: quarterTurnX()
+    chassisHue: 0.92
+    wheelHue: 0.62
   }
 }
 
@@ -211,34 +216,70 @@ func ramp(
   )
 }
 
-# The crates: a 3-2-1 stack ahead-left of the start and a row to the right.
+# The density of the loose boxes. The car is Box3D's sample, about 6 kg (a
+# density-0.5 chassis); a default-density (1000) 1 m crate would be a tonne it
+# could not move, so the boxes are light enough to send flying.
+const looseBoxDensity: Float = 0.4
+
+func looseBox(halfExtents: view Vec3, position: view Vec3) ret SceneBody {
+  var body: SceneBody = dynamicBody(shape: boxShape(halfExtents: halfExtents), position: position)
+  body.density = looseBoxDensity
+  ret body
+}
+
+# The loose boxes: a 3-2-1 stack of crates ahead-left of the start, a row of
+# crates to the right, and a wall of six blocks behind - each group one
+# gradient along its own length.
 func courseCrates() ret List(SceneBody) {
-  let crates: List(SceneBody) = List.create(SceneBody, cap: 12)
-  let crate: SceneShape = boxShape(halfExtents: Vec3 { x: 0.5, y: 0.5, z: 0.5 })
+  let crate: Vec3 = { x: 0.5, y: 0.5, z: 0.5 }
+  var stack: List(SceneBody) = List.create(SceneBody, cap: 6)
   loop var level: Int = 0, level < 3, ++level {
     loop var i: Int = 0, i < 3 - level, ++i {
       let y: Float = 10.0 + (i as Float) * 1.05 + 0.525 * (level as Float)
-      crates.add(
-        value: dynamicBody(
-          shape: crate
+      stack.add(
+        value: looseBox(
+          halfExtents: crate
           position: Vec3 { x: 8.0, y: y, z: 0.5 + 1.0 * (level as Float) }
         )
       )
     }
   }
+  applyGradientHues(bodies: stack, along: Vec3 { x: 0.0, y: 1.0, z: 0.0 })
+  var row: List(SceneBody) = List.create(SceneBody, cap: 6)
   loop var i: Int = 0, i < 6, ++i {
-    crates.add(
-      value: dynamicBody(
-        shape: crate
+    row.add(
+      value: looseBox(
+        halfExtents: crate
         position: Vec3 { x: -4.0 + 2.0 * (i as Float), y: -9.0, z: 0.5 }
       )
     )
   }
+  applyGradientHues(bodies: row, along: Vec3 { x: 1.0, y: 0.0, z: 0.0 })
+  var wall: List(SceneBody) = List.create(SceneBody, cap: 6)
+  loop var i: Int = 0, i < 6, ++i {
+    wall.add(
+      value: looseBox(
+        halfExtents: Vec3 { x: 0.4, y: 0.95, z: 0.6 }
+        position: Vec3 { x: -12.0, y: -5.0 + 2.0 * (i as Float), z: 0.6 }
+      )
+    )
+  }
+  applyGradientHues(bodies: wall, along: Vec3 { x: 0.0, y: 1.0, z: 0.0 })
+  let crates: List(SceneBody) = List.create(SceneBody, cap: 18)
+  loop let body: view SceneBody in stack {
+    crates.add(value: body)
+  }
+  loop let body: view SceneBody in row {
+    crates.add(value: body)
+  }
+  loop let body: view SceneBody in wall {
+    crates.add(value: body)
+  }
   ret crates
 }
 
-# The course: a 65 x 65 grid of 4 m cells centred on the start, two ramps
-# (one ahead, one off to the left), a low wall behind, and the crates.
+# The course: a 65 x 65 grid of 4 m cells centred on the start, two static
+# ramps (one ahead, one off to the left), and the loose boxes.
 func drivingCourse() ret VehicleCourse {
   let countX: Int = 65
   let countZ: Int = 65
@@ -254,7 +295,7 @@ func drivingCourse() ret VehicleCourse {
       )
     }
   }
-  let fixtures: List(SceneBody) = {
+  var fixtures: List(SceneBody) = {
     ramp(
       start: Vec3 { x: 9.0, y: 0.0, z: 0.0 }
       heading: 0.0
@@ -267,11 +308,13 @@ func drivingCourse() ret VehicleCourse {
       slopeDegrees: 10.0
       length: 10.0
     )
-    staticBox(
-      halfExtents: Vec3 { x: 0.4, y: 6.0, z: 0.6 }
-      position: Vec3 { x: -12.0, y: 0.0, z: 0.6 }
-      rotation: Quat.identity()
-    )
+  }
+  # The two ramps: a soft green and a soft blue
+  if let first: mod SceneBody => fixtures.modAt(index: 0) {
+    first.hue = 0.3
+  }
+  if let second: mod SceneBody => fixtures.modAt(index: 1) {
+    second.hue = 0.52
   }
   ret VehicleCourse {
     heights: heights

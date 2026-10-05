@@ -30,6 +30,8 @@ type VehicleDescription {
   chassisHalfExtents: Vec3
   chassisDensity: Float
   wheelRadius: Float
+  # How wide a wheel is drawn (the collider is the sample's sphere)
+  wheelHalfWidth: Float
   wheelDensity: Float
   wheelFriction: Float
   wheels: List(VehicleWheel)
@@ -61,6 +63,9 @@ type VehicleDescription {
   # World pose of the chassis at spawn
   startPosition: Vec3
   localToWorld: Quat
+  # Drawn hues (0-1 round the pastel rainbow)
+  chassisHue: Float
+  wheelHue: Float
 }
 
 # The driver's input: throttle forward (+1) to reverse (-1), steering left
@@ -79,7 +84,8 @@ type VehicleWheelTarget {
 
 # The course: a height-field terrain (Box3D's grid over local x and z with
 # heights along local y, placed by `terrainPosition` / `terrainRotation`),
-# static ramps and walls, and crates to knock over (respawned with the car).
+# static ramps (`fixtures`), and light boxes to knock flying - crates and a
+# wall of blocks - respawned with the car (`crates`).
 type VehicleCourse {
   heights: List(Float)
   countX: Int
