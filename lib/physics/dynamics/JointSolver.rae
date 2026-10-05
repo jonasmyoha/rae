@@ -51,16 +51,18 @@ func jointBodyOf(world: view PhysicsWorld, bodyId: view Int) ret JointBody {
 
 # b3PrepareJoint: the constraint softness (its hertz clamped by the step to
 # reduce jitter), then the kind's prepare.
-func prepareJoint(base: mod JointSim, world: mod PhysicsWorld, context: view StepContext) {
+func prepareJoint(
+  base: mod JointSim
+  data: mod JointKindData
+  bodyA: view JointBody
+  bodyB: view JointBody
+  context: view StepContext
+) {
   let hertz: Float = minFloat(left: base.constraintHertz, right: 0.25 * context.inverseH)
   base.constraintSoftness = makeSoft(hertz: hertz, zeta: base.constraintDampingRatio, h: context.h)
-  let bodyA: JointBody = jointBodyOf(world: world, bodyId: base.bodyIdA)
-  let bodyB: JointBody = jointBodyOf(world: world, bodyId: base.bodyIdB)
   match base.jointType {
     case JointType.parallelJoint {
-      if let joint: mod ParallelJointData => world.jointData.parallelJoints.modAt(
-        index: base.dataIndex
-      ) {
+      if let joint: mod ParallelJointData => data.parallelJoints.modAt(index: base.dataIndex) {
         prepareParallelJoint(
           base: base
           joint: joint
@@ -74,9 +76,7 @@ func prepareJoint(base: mod JointSim, world: mod PhysicsWorld, context: view Ste
       }
     }
     case JointType.distanceJoint {
-      if let joint: mod DistanceJointData => world.jointData.distanceJoints.modAt(
-        index: base.dataIndex
-      ) {
+      if let joint: mod DistanceJointData => data.distanceJoints.modAt(index: base.dataIndex) {
         prepareDistanceJoint(
           base: base
           joint: joint
@@ -92,7 +92,7 @@ func prepareJoint(base: mod JointSim, world: mod PhysicsWorld, context: view Ste
     case JointType.filterJoint {
     }
     case JointType.motorJoint {
-      if let joint: mod MotorJointData => world.jointData.motorJoints.modAt(index: base.dataIndex) {
+      if let joint: mod MotorJointData => data.motorJoints.modAt(index: base.dataIndex) {
         prepareMotorJoint(
           base: base
           joint: joint
@@ -106,9 +106,7 @@ func prepareJoint(base: mod JointSim, world: mod PhysicsWorld, context: view Ste
       }
     }
     case JointType.prismaticJoint {
-      if let joint: mod PrismaticJointData => world.jointData.prismaticJoints.modAt(
-        index: base.dataIndex
-      ) {
+      if let joint: mod PrismaticJointData => data.prismaticJoints.modAt(index: base.dataIndex) {
         preparePrismaticJoint(
           base: base
           joint: joint
@@ -122,9 +120,7 @@ func prepareJoint(base: mod JointSim, world: mod PhysicsWorld, context: view Ste
       }
     }
     case JointType.revoluteJoint {
-      if let joint: mod RevoluteJointData => world.jointData.revoluteJoints.modAt(
-        index: base.dataIndex
-      ) {
+      if let joint: mod RevoluteJointData => data.revoluteJoints.modAt(index: base.dataIndex) {
         prepareRevoluteJoint(
           base: base
           joint: joint
@@ -138,9 +134,7 @@ func prepareJoint(base: mod JointSim, world: mod PhysicsWorld, context: view Ste
       }
     }
     case JointType.sphericalJoint {
-      if let joint: mod SphericalJointData => world.jointData.sphericalJoints.modAt(
-        index: base.dataIndex
-      ) {
+      if let joint: mod SphericalJointData => data.sphericalJoints.modAt(index: base.dataIndex) {
         prepareSphericalJoint(
           base: base
           joint: joint
@@ -154,7 +148,7 @@ func prepareJoint(base: mod JointSim, world: mod PhysicsWorld, context: view Ste
       }
     }
     case JointType.weldJoint {
-      if let joint: mod WeldJointData => world.jointData.weldJoints.modAt(index: base.dataIndex) {
+      if let joint: mod WeldJointData => data.weldJoints.modAt(index: base.dataIndex) {
         prepareWeldJoint(
           base: base
           joint: joint
@@ -168,7 +162,7 @@ func prepareJoint(base: mod JointSim, world: mod PhysicsWorld, context: view Ste
       }
     }
     case JointType.wheelJoint {
-      if let joint: mod WheelJointData => world.jointData.wheelJoints.modAt(index: base.dataIndex) {
+      if let joint: mod WheelJointData => data.wheelJoints.modAt(index: base.dataIndex) {
         prepareWheelJoint(
           base: base
           joint: joint
@@ -447,17 +441,36 @@ func jointReaction(
   ret JointReaction { force: linearImpulse * invTimeStep, torque: angularImpulse * invTimeStep }
 }
 
-# Joint sim `localIndex` of graph colour `colorIndex`, read through a view
-# (copying the colour would copy all of its lists).
-func colorJointSim(
-  world: view PhysicsWorld
+# Prepare joint sim `localIndex` of colour `colorIndex` in place: its
+# bodies are read first, then the sim and its kind's record are prepared
+# where they live (a JointSim copied out and set back cost a copy each way).
+func prepareColorJoint(
+  world: mod PhysicsWorld
   colorIndex: view Int
   localIndex: view Int
-) ret JointSim {
+  context: view StepContext
+) {
+  var bodyIdA: Int = 0
+  var bodyIdB: Int = 0
   if let color: view GraphColor => world.constraintGraph.colors.viewAt(index: colorIndex) {
-    ret color.jointSims.copyAtDefault(index: localIndex)
+    if let sim: view JointSim => color.jointSims.viewAt(index: localIndex) {
+      bodyIdA = sim.bodyIdA
+      bodyIdB = sim.bodyIdB
+    }
   }
-  ret zeroJointSim()
+  let bodyA: JointBody = jointBodyOf(world: world, bodyId: bodyIdA)
+  let bodyB: JointBody = jointBodyOf(world: world, bodyId: bodyIdB)
+  if let color: mod GraphColor => world.constraintGraph.colors.modAt(index: colorIndex) {
+    if let sim: mod JointSim => color.jointSims.modAt(index: localIndex) {
+      prepareJoint(
+        base: sim
+        data: world.jointData
+        bodyA: bodyA
+        bodyB: bodyB
+        context: context
+      )
+    }
+  }
 }
 
 # b3PrepareJoints_Overflow
@@ -467,11 +480,12 @@ func prepareJointsOverflow(world: mod PhysicsWorld, context: view StepContext) {
     count = color.jointSims.length
   }
   loop var i: Int = 0, i < count, ++i {
-    var sim: JointSim = colorJointSim(world: world, colorIndex: overflowIndex, localIndex: i)
-    prepareJoint(base: sim, world: world, context: context)
-    if let color: mod GraphColor => world.constraintGraph.colors.modAt(index: overflowIndex) {
-      color.jointSims.set(index: i, value: sim)
-    }
+    prepareColorJoint(
+      world: world
+      colorIndex: overflowIndex
+      localIndex: i
+      context: context
+    )
   }
 }
 
@@ -528,15 +542,12 @@ func prepareJointsBlock(
     )
     loop index < colorEndIndex {
       let localIndex: Int = index - span.start
-      var sim: JointSim = colorJointSim(
+      prepareColorJoint(
         world: world
         colorIndex: span.colorIndex
         localIndex: localIndex
+        context: context
       )
-      prepareJoint(base: sim, world: world, context: context)
-      if let color: mod GraphColor => world.constraintGraph.colors.modAt(index: span.colorIndex) {
-        color.jointSims.set(index: localIndex, value: sim)
-      }
       index = index + 1
     }
     spanIndex = spanIndex + 1
@@ -568,6 +579,9 @@ func solveJointsBlock(
   block: view SolverBlock
   useBias: view Bool
 ) {
+  # Whether any joint of the block has a threshold: most have none, and
+  # then the second pass is skipped (Box3D checks inline after each solve)
+  var anyThreshold: Bool = false
   if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
     if let color: mod GraphColor => world.constraintGraph.colors.modAt(index: block.colorIndex) {
       loop var i: Int = block.startIndex, i < block.startIndex + block.count, ++i {
@@ -580,11 +594,14 @@ func solveJointsBlock(
             inverseH: context.inverseH
             useBias: useBias
           )
+          if sim.forceThreshold < floatMax or sim.torqueThreshold < floatMax {
+            anyThreshold = true
+          }
         }
       }
     }
   }
-  if useBias is false {
+  if useBias is false or anyThreshold is false {
     ret
   }
   loop var i: Int = block.startIndex, i < block.startIndex + block.count, ++i {
