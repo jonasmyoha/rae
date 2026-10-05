@@ -1,0 +1,113 @@
+# The C-library physics track (docs/physics-two-implementations.md §4):
+# upstream Box3D's own C, linked by the compiler because the program imports
+# the generated bindings (lib/box3d), builds the oracle's boxstack scene - a
+# ground box and five rotated boxes, stepped 60 times - and every pose must
+# equal tools/box3d-oracle/goldens/boxstack.golden bit for bit. (The golden
+# comes from the scalar build; the product build links SIMD, and the scene
+# gives the same bits on both.)
+import Math
+open box3d/Box3d
+open box3d/Box3dTypes
+open box3d/Box3dTypes2
+open box3d/Box3dEnums
+
+func readGolden() ret String {
+  # The runner runs from compiler/, a case's own folder may be the cwd too.
+  let candidates: List(String) = {
+    "../tools/box3d-oracle/goldens/boxstack.golden"
+    "../../../tools/box3d-oracle/goldens/boxstack.golden"
+    "tools/box3d-oracle/goldens/boxstack.golden"
+  }
+  loop var i: Int = 0, i < candidates.length, ++i {
+    if let text: String = readFile(path: candidates.copyAtDefault(index: i)) {
+      ret text
+    }
+  }
+  ret ""
+}
+
+func vector(x: view Float32, y: view Float32, z: view Float32) ret b3Vec3 {
+  let result: b3Vec3 = { x: x, y: y, z: z }
+  ret result
+}
+
+# The seven floats of a pose, as the golden lists them
+func poseBits(transform: view b3Transform) ret List(Int) {
+  let values: List(Float32) = {
+    transform.p.x
+    transform.p.y
+    transform.p.z
+    transform.q.v.x
+    transform.q.v.y
+    transform.q.v.z
+    transform.q.s
+  }
+  let bits: List(Int) = List.create(Int, cap: 7)
+  loop var i: Int = 0, i < values.length, ++i {
+    bits.add(value: Math.floatBits(value: values.copyAtDefault(index: i)))
+  }
+  ret bits
+}
+
+func main() {
+  let golden: List(String) = readGolden().split(sep: "\n")
+  var mismatches: Int = 0
+  var compared: Int = 0
+  unsafe {
+    var worldDef: b3WorldDef = b3DefaultWorldDef()
+    worldDef.workerCount = 1
+    let worldId: b3WorldId = b3CreateWorld(def: worldDef)
+
+    var groundDef: b3BodyDef = b3DefaultBodyDef()
+    groundDef.position = vector(x: 0.0, y: -1.0, z: 0.0)
+    let groundId: b3BodyId = b3CreateBody(worldId: worldId, def: groundDef)
+    let shapeDef: b3ShapeDef = b3DefaultShapeDef()
+    let ground: b3BoxHull = b3MakeBoxHull(hx: 20.0, hy: 1.0, hz: 20.0)
+    b3CreateHullShape(bodyId: groundId, def: shapeDef, hull: ground.base)
+
+    let boxes: List(b3BodyId) = List.create(b3BodyId, cap: 5)
+    let box: b3BoxHull = b3MakeBoxHull(hx: 0.5, hy: 0.5, hz: 0.5)
+    loop var i: Int = 0, i < 5, ++i {
+      var bodyDef: b3BodyDef = b3DefaultBodyDef()
+      bodyDef.type_ = b3_dynamicBody
+      let index: Float32 = i as Float32
+      bodyDef.position = vector(x: 0.3 * index - 0.6, y: 1.0 + 1.2 * index, z: 0.1 * index)
+      bodyDef.rotation = b3MakeQuatFromAxisAngle(
+        axis: vector(x: 0.0, y: 1.0, z: 0.0)
+        radians: 0.25 * index
+      )
+      let bodyId: b3BodyId = b3CreateBody(worldId: worldId, def: bodyDef)
+      b3CreateHullShape(bodyId: bodyId, def: shapeDef, hull: box.base)
+      boxes.add(value: bodyId)
+    }
+
+    var line: Int = 1
+    loop var step: Int = 1, step <= 60, ++step {
+      b3World_Step(worldId: worldId, timeStep: 1.0 / 60.0, subStepCount: 4)
+      if step % 10 is 0 {
+        loop var i: Int = 0, i < boxes.length, ++i {
+          let bits: List(Int) = poseBits(
+            transform: b3Body_GetTransform(bodyId: boxes.copyAtDefault(index: i))
+          )
+          let tokens: List(String) = golden.copyAtDefault(index: line).split(sep: " ")
+          line = line + 1
+          compared = compared + 1
+          var same: Bool = tokens.length is 11
+          loop var j: Int = 0, j < 7 and same, ++j {
+            if Math.floatBits(value: tokens.copyAtDefault(index: 4 + j).toFloat()) is not bits.copyAtDefault(
+              index: j
+            ) {
+              same = false
+            }
+          }
+          if same is false {
+            mismatches = mismatches + 1
+            log("MISMATCH box {i} step {step}")
+          }
+        }
+      }
+    }
+    b3DestroyWorld(worldId: worldId)
+  }
+  log("boxstack.golden: {compared} poses, {mismatches} not bit-exact")
+}

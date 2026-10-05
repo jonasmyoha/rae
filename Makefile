@@ -24,8 +24,8 @@ test-examples:
 stop:
 	@$(MAKE) -C tools/devtools-web stop
 
-# First-time setup: Devtools Web dependencies (when Bun is installed) and the
-# compiler.
+# First-time setup: Devtools Web dependencies (when Bun is installed), the
+# compiler, naga, and upstream Box3D's C library (lib/box3d links it).
 setup:
 	@if command -v bun >/dev/null 2>&1; then \
 	  echo "Installing Devtools Web dependencies..."; \
@@ -41,6 +41,12 @@ setup:
 	  cargo install naga-cli; \
 	else \
 	  echo "warning: naga not installed and cargo is not available; declared shaders will not be validated at build time (install Rust, then: cargo install naga-cli)" >&2; \
+	fi
+	@if [ -f "$${RAE_BOX3D:-$$HOME/.cache/rae/box3d/install}/lib/libbox3d.a" ]; then \
+	  echo "box3d found: programs importing lib/box3d link upstream Box3D's C library"; \
+	else \
+	  echo "Building upstream Box3D (the C-library physics track; tools/box3d/build.sh)..."; \
+	  bash tools/box3d/build.sh; \
 	fi
 	@echo "Setup complete. Compiler: ./compiler/bin/rae   Devtools Web: make dev"
 

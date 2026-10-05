@@ -59,6 +59,7 @@ SRCS = $(SRC_DIR)/main.c \
        $(SRC_DIR)/rae_version.c \
        $(SRC_DIR)/rae_deps.c \
        $(SRC_DIR)/bindgen.c \
+       $(SRC_DIR)/bindgen_preprocess.c \
        $(SRC_DIR)/c_backend.c \
        $(SRC_DIR)/c_call.c \
        $(SRC_DIR)/c_discovery.c \

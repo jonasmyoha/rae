@@ -43,6 +43,14 @@ rae bindgen \
   --module-comment "WebGPU (webgpu.h + wgpu-native wgpu.h) low-level bindings."
 ```
 
+Other C libraries use the same generator with options: `--api-macro M`
+(functions are declared `M RET name(params);`), `--inline-macro M` (static
+inline definitions to bind too), `--drop-macro M`, `--define-prefix P`
+(`#define P...` integer constants) and `--define NAME` (for `#if`). Upstream
+Box3D's bindings (`tools/gen_box3d_bindings.sh`, `lib/box3d`) are the second
+user; `docs/physics-two-implementations.md` §4 lists what the generator learned
+for them. Output longer than a file may be continues in numbered parts.
+
 Output is **deterministic** (same headers → byte-identical files) and checked
 in, so a normal build never needs the generator. Because the compiler caps
 files at 1000 lines, the output is split into three files:

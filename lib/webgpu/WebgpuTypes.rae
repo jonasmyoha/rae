@@ -724,23 +724,21 @@ type WGPURenderPipelineDescriptor: c_struct {
 
 type WGPUXlibDisplayHandle: c_struct {
   display: Ptr
-  # skipped field screen (unmapped type int)
+  screen: Int32
 }
 
 type WGPUXcbDisplayHandle: c_struct {
   connection: Ptr
-  # skipped field screen (unmapped type int)
+  screen: Int32
 }
 
 type WGPUWaylandDisplayHandle: c_struct {
   display: Ptr
 }
 
-type data: c_struct {
+type WGPUNativeDisplayHandle: c_struct {
   type_: Int32
-  xlib: WGPUXlibDisplayHandle
-  xcb: WGPUXcbDisplayHandle
-  wayland: WGPUWaylandDisplayHandle
+  # skipped a nested union/struct member
 }
 
 type WGPUInstanceExtras: c_struct {
@@ -755,7 +753,7 @@ type WGPUInstanceExtras: c_struct {
   dx12PresentationSystem: Int32
   budgetForDeviceCreation: Ptr
   budgetForDeviceLoss: Ptr
-  # skipped field displayHandle (unmapped type WGPUNativeDisplayHandle)
+  displayHandle: WGPUNativeDisplayHandle
 }
 
 type WGPUDeviceExtras: c_struct {
