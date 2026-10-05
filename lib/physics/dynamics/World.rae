@@ -25,6 +25,7 @@ open physics/dynamics/Joint
 open physics/dynamics/JointData
 open physics/dynamics/ConstraintGraph
 open physics/collision/Manifold
+open physics/collision/HullScratch
 open physics/container/Bitset
 open physics/dynamics/Events
 
@@ -41,6 +42,8 @@ type TaskContext {
   localManifold: LocalManifold
   # The mesh contacts' per-triangle manifold buffer
   meshManifold: LocalManifold
+  # The hull narrow phase's working lists (Box3D keeps them on the stack)
+  hullScratch: HullScratch
   # Body finalization: the awake islands (by local index) and the
   # sleepiest island that needs splitting first
   awakeIslandBitSet: Bitset
@@ -71,6 +74,7 @@ func createTaskContext() ret TaskContext {
     contactStateBitSet: createBitset(bitCapacity: 1024)
     localManifold: createLocalManifold(capacity: maxManifoldPoints)
     meshManifold: createLocalManifold(capacity: maxClipPoints)
+    hullScratch: createHullScratch()
     awakeIslandBitSet: createBitset(bitCapacity: 256)
     splitIslandId: -1
     splitSleepTime: 0.0
@@ -97,6 +101,8 @@ type PhysicsWorld {
   fatAabbs: List(Aabb)
   # The hull data of hull shapes (Box3D's hull database)
   hulls: List(Hull)
+  # The content hash of each hull (HullContent), to share equal hulls
+  hullHashes: List(UInt64)
   # The mesh data and scale of mesh shapes (Box3D's shapes point at the
   # caller's b3MeshData)
   meshes: List(Mesh)
@@ -167,6 +173,7 @@ func createWorld(def: view WorldDef) ret PhysicsWorld {
     shapes: List.create(PhysicsShape, cap: 16)
     fatAabbs: List.create(Aabb, cap: 16)
     hulls: List.create(Hull, cap: 4)
+    hullHashes: List.create(UInt64, cap: 4)
     meshes: List.create(Mesh, cap: 0)
     heightFields: List.create(HeightFieldData, cap: 0)
     compounds: List.create(CompoundData, cap: 0)

@@ -270,17 +270,96 @@ func isValidHull(hull: view Hull) ret Bool {
 # b3FindHullSupportVertex: the vertex furthest along `direction`, the
 # lowest index on a tie (what Box3D's four-lane search returns).
 func findHullSupportVertex(hull: view Hull, direction: view Vec3) ret Int {
-  var bestIndex: Int = -1
-  var bestDot: Float = -floatMax
-  loop var index: Int = 0, index < hull.points.length, ++index {
-    let point: Vec3 = hull.points.copyAtDefault(index: index)
-    let projection: Float = direction.x * point.x + direction.y * point.y + direction.z * point.z
-    if projection > bestDot {
-      bestDot = projection
-      bestIndex = index
+  # Four running maxima over the indices of each lane (index mod 4), as
+  # Box3D's four-wide loop, then the largest projection with the smallest
+  # index: the same vertex a single strict `>` scan picks, with independent
+  # dependency chains.
+  var bestDot0: Float = -floatMax
+  var bestDot1: Float = -floatMax
+  var bestDot2: Float = -floatMax
+  var bestDot3: Float = -floatMax
+  var bestIndex0: Int = -1
+  var bestIndex1: Int = -1
+  var bestIndex2: Int = -1
+  var bestIndex3: Int = -1
+  let count: Int = hull.points.length
+  if let points: view List(Vec3) => hull.points {
+    var index: Int = 0
+    loop index + 3 < count {
+      let point0: Vec3 = points.copyAtDefault(index: index + 0)
+      let projection0: Float = direction.x * point0.x + direction.y * point0.y + direction.z * point0.z
+      if projection0 > bestDot0 {
+        bestDot0 = projection0
+        bestIndex0 = index + 0
+      }
+      let point1: Vec3 = points.copyAtDefault(index: index + 1)
+      let projection1: Float = direction.x * point1.x + direction.y * point1.y + direction.z * point1.z
+      if projection1 > bestDot1 {
+        bestDot1 = projection1
+        bestIndex1 = index + 1
+      }
+      let point2: Vec3 = points.copyAtDefault(index: index + 2)
+      let projection2: Float = direction.x * point2.x + direction.y * point2.y + direction.z * point2.z
+      if projection2 > bestDot2 {
+        bestDot2 = projection2
+        bestIndex2 = index + 2
+      }
+      let point3: Vec3 = points.copyAtDefault(index: index + 3)
+      let projection3: Float = direction.x * point3.x + direction.y * point3.y + direction.z * point3.z
+      if projection3 > bestDot3 {
+        bestDot3 = projection3
+        bestIndex3 = index + 3
+      }
+      index = index + 4
+    }
+    loop index < count {
+      let point: Vec3 = points.copyAtDefault(index: index)
+      let projection: Float = direction.x * point.x + direction.y * point.y + direction.z * point.z
+      if projection > bestDot0 {
+        bestDot0 = projection
+        bestIndex0 = index
+      }
+      index = index + 1
     }
   }
+  var bestDot: Float = bestDot0
+  var bestIndex: Int = bestIndex0
+  supportCandidate(
+    bestDot: bestDot
+    bestIndex: bestIndex
+    dot: bestDot1
+    index: bestIndex1
+  )
+  supportCandidate(
+    bestDot: bestDot
+    bestIndex: bestIndex
+    dot: bestDot2
+    index: bestIndex2
+  )
+  supportCandidate(
+    bestDot: bestDot
+    bestIndex: bestIndex
+    dot: bestDot3
+    index: bestIndex3
+  )
   ret bestIndex
+}
+
+# Merge one lane's maximum into the running best: a larger projection wins,
+# a tie goes to the smaller index (the order a scalar scan would meet them).
+func supportCandidate(
+  bestDot: mod Float
+  bestIndex: mod Int
+  dot: view Float
+  index: view Int
+) {
+  if index is -1 {
+    ret
+  }
+  if bestIndex is -1 or dot > bestDot or (dot is bestDot and index < bestIndex) {
+    bestDot = dot
+    bestIndex = index
+  }
 }
 
 # b3FindHullSupportFace: the face whose normal is most along `direction`.

@@ -1,10 +1,11 @@
 # Creating and destroying shapes (b3CreateShapeInternal, b3CreateShape,
 # b3Create*Shape, b3DestroyShapeInternal, b3DestroyShape of Box3D's shape.c
 # at 9f998c8). Box3D's operation order is kept exactly; checked against the
-# oracle in fixtures 954 and 974. A hull shape stores a copy of its hull in
-# the world's hull list (Box3D shares equal hulls through a database; that
-# only saves memory); a mesh shape stores its mesh and scale in the world's
-# mesh list (Box3D points at the caller's mesh data).
+# oracle in fixtures 954 and 974. A hull shape refers to its hull in the
+# world's hull list, shared with every other shape of an equal hull (Box3D's
+# hull database: a pile of one convex reads one hull, which stays in cache);
+# a mesh shape stores its mesh and scale in the world's mesh list (Box3D
+# points at the caller's mesh data).
 open Vec3
 open physics/Constants
 open physics/math/VectorMath
@@ -13,6 +14,7 @@ open physics/math/AabbMath
 open physics/geometry/QueryTypes
 open physics/geometry/Hull
 open physics/geometry/HullCreate
+open physics/geometry/HullContent
 open physics/geometry/Mesh
 open physics/geometry/MeshQuery
 open physics/geometry/HeightField
@@ -238,6 +240,26 @@ func createCapsuleShape(
   )
 }
 
+# The index of a hull equal to `hull` in the world's hull list, adding a
+# copy when there is none (b3AddHullToDatabase: compared by content, the
+# hash only narrows the search). Hulls are never removed: compounds address
+# theirs as a run of indices.
+func addSharedHull(world: mod PhysicsWorld, hull: view Hull) ret Int {
+  let hash: UInt64 = hullContentHash(hull: hull)
+  loop var i: Int = 0, i < world.hullHashes.length, ++i {
+    if world.hullHashes.copyAtDefault(index: i) is hash {
+      if let existing: view Hull => world.hulls.viewAt(index: i) {
+        if sameHull(left: existing, right: hull) {
+          ret i
+        }
+      }
+    }
+  }
+  world.hulls.add(value: hull)
+  world.hullHashes.add(value: hash)
+  ret world.hulls.length - 1
+}
+
 # b3CreateHullShape
 func createHullShape(
   world: mod PhysicsWorld
@@ -248,8 +270,7 @@ func createHullShape(
   let shapeId: Int = allocateShapeSlot(world: world)
   var geometry: PhysicsShape = zeroShape()
   geometry.shapeType = ShapeType.hull
-  geometry.hullIndex = world.hulls.length
-  world.hulls.add(value: hull)
+  geometry.hullIndex = addSharedHull(world: world, hull: hull)
   ret finishShape(
     world: world
     bodyId: bodyId
@@ -278,8 +299,7 @@ func createTransformedHullShape(
   ) {
     var geometry: PhysicsShape = zeroShape()
     geometry.shapeType = ShapeType.hull
-    geometry.hullIndex = world.hulls.length
-    world.hulls.add(value: baked)
+    geometry.hullIndex = addSharedHull(world: world, hull: baked)
     ret finishShape(
       world: world
       bodyId: bodyId
@@ -374,6 +394,7 @@ func createCompoundShape(
   geometry.materials = compound.materials
   loop let child: view CompoundHull in compound.hulls {
     world.hulls.add(value: child.hull)
+    world.hullHashes.add(value: hullContentHash(hull: child.hull))
   }
   loop let child: view CompoundMesh in compound.meshes {
     world.meshes.add(value: child.mesh)

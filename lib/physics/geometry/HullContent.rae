@@ -1,0 +1,127 @@
+# The content identity of hulls, for sharing equal hulls between shapes
+# (b3AddHullToDatabase of Box3D's physics_world.c at 9f998c8: hulls are
+# compared by content, the hash only narrows the search). Floats compare by
+# their bits, as Box3D's byte comparison does.
+import Math
+open Vec3
+open physics/math/AabbMath
+open physics/math/MatrixMath
+open physics/math/PlaneMath
+open physics/geometry/Hull
+
+# FNV-1a over the low 32 bits of `value`.
+func hashBits(hash: view UInt64, value: view Int) ret UInt64 {
+  let prime: UInt64 = 1099511628211
+  ret (hash bitxor ((value bitand 4294967295) as UInt64)) * prime
+}
+
+func hashFloat(hash: view UInt64, value: view Float) ret UInt64 {
+  ret hashBits(hash: hash, value: Math.floatBits(value: value))
+}
+
+func hashVector(hash: view UInt64, vector: view Vec3) ret UInt64 {
+  ret hashFloat(
+    hash: hashFloat(hash: hashFloat(hash: hash, value: vector.x), value: vector.y)
+    value: vector.z
+  )
+}
+
+# A hash of the hull's points and planes (the rest follows from them for
+# hulls built by HullCreate; sameHull compares everything).
+func hullContentHash(hull: view Hull) ret UInt64 {
+  var hash: UInt64 = 14695981039346656037
+  hash = hashBits(hash: hash, value: hull.points.length)
+  hash = hashBits(hash: hash, value: hull.planes.length)
+  loop let point: view Vec3 in hull.points {
+    hash = hashVector(hash: hash, vector: point)
+  }
+  loop let plane: view Plane in hull.planes {
+    hash = hashVector(hash: hash, vector: plane.normal)
+    hash = hashFloat(hash: hash, value: plane.offset)
+  }
+  ret hash
+}
+
+func sameFloat(left: view Float, right: view Float) ret Bool {
+  ret Math.floatBits(value: left) is Math.floatBits(value: right)
+}
+
+func sameVector(left: view Vec3, right: view Vec3) ret Bool {
+  ret sameFloat(left: left.x, right: right.x) and sameFloat(left: left.y, right: right.y) and sameFloat(
+    left: left.z
+    right: right.z
+  )
+}
+
+func sameMatrix(left: view Matrix3, right: view Matrix3) ret Bool {
+  ret sameVector(left: left.columnX, right: right.columnX) and sameVector(
+    left: left.columnY
+    right: right.columnY
+  ) and sameVector(left: left.columnZ, right: right.columnZ)
+}
+
+# Whether two hulls are the same, field by field and element by element.
+func sameHull(left: view Hull, right: view Hull) ret Bool {
+  if left.points.length is not right.points.length or left.vertices.length is not right.vertices.length {
+    ret false
+  }
+  if left.edges.length is not right.edges.length or left.faces.length is not right.faces.length {
+    ret false
+  }
+  if left.planes.length is not right.planes.length {
+    ret false
+  }
+  if sameVector(left: left.aabb.lowerBound, right: right.aabb.lowerBound) is false or sameVector(
+    left: left.aabb.upperBound
+    right: right.aabb.upperBound
+  ) is false {
+    ret false
+  }
+  if sameFloat(left: left.surfaceArea, right: right.surfaceArea) is false or sameFloat(
+    left: left.volume
+    right: right.volume
+  ) is false or sameFloat(left: left.innerRadius, right: right.innerRadius) is false {
+    ret false
+  }
+  if sameVector(left: left.center, right: right.center) is false or sameMatrix(
+    left: left.centralInertia
+    right: right.centralInertia
+  ) is false {
+    ret false
+  }
+  loop var i: Int = 0, i < left.points.length, ++i {
+    if sameVector(
+      left: left.points.copyAtDefault(index: i)
+      right: right.points.copyAtDefault(index: i)
+    ) is false {
+      ret false
+    }
+    if left.vertices.copyAtDefault(index: i).edge is not right.vertices.copyAtDefault(index: i).edge {
+      ret false
+    }
+  }
+  loop var i: Int = 0, i < left.edges.length, ++i {
+    let leftEdge: HullHalfEdge = left.edges.copyAtDefault(index: i)
+    let rightEdge: HullHalfEdge = right.edges.copyAtDefault(index: i)
+    if leftEdge.next is not rightEdge.next or leftEdge.twin is not rightEdge.twin {
+      ret false
+    }
+    if leftEdge.origin is not rightEdge.origin or leftEdge.face is not rightEdge.face {
+      ret false
+    }
+  }
+  loop var i: Int = 0, i < left.planes.length, ++i {
+    let leftPlane: Plane = left.planes.copyAtDefault(index: i)
+    let rightPlane: Plane = right.planes.copyAtDefault(index: i)
+    if sameVector(left: leftPlane.normal, right: rightPlane.normal) is false or sameFloat(
+      left: leftPlane.offset
+      right: rightPlane.offset
+    ) is false {
+      ret false
+    }
+    if left.faces.copyAtDefault(index: i).edge is not right.faces.copyAtDefault(index: i).edge {
+      ret false
+    }
+  }
+  ret true
+}
