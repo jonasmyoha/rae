@@ -23,6 +23,7 @@ open physics/geometry/MeshQuery
 open physics/geometry/HeightField
 open physics/geometry/Compound
 open physics/collision/Manifold
+open physics/collision/HullScratch
 open physics/collision/ConvexManifold
 open physics/collision/HullManifold
 open physics/collision/HullHullManifold
@@ -294,6 +295,7 @@ func collideShapes(
   transformBtoA: view Transform
   cache: mod ContactCache
   lengthUnitsPerMeter: view Float
+  scratch: mod HullScratch
 ) {
   manifold.pointCount = 0
   manifold.normal = zeroVector()
@@ -348,6 +350,7 @@ func collideShapes(
         transformBtoA: transformBtoA
         cache: cache.satCache
         lengthUnitsPerMeter: lengthUnitsPerMeter
+        scratch: scratch
       )
     }
   }
@@ -365,6 +368,7 @@ func computeConvexManifold(
   transformB: view Transform
   hulls: view List(Hull)
   lengthUnitsPerMeter: view Float
+  scratch: mod HullScratch
 ) ret Bool {
   let transformBtoA: Transform = inverseMultiplyWorld(left: transformA, right: transformB)
   collideShapes(
@@ -375,6 +379,7 @@ func computeConvexManifold(
     transformBtoA: transformBtoA
     cache: contact.cache
     lengthUnitsPerMeter: lengthUnitsPerMeter
+    scratch: scratch
   )
   if geometry.pointCount is 0 {
     contact.manifolds.clear()
@@ -457,6 +462,7 @@ func updateConvexContact(
   hulls: view List(Hull)
   flip: view Bool
   lengthUnitsPerMeter: view Float
+  scratch: mod HullScratch
 ) ret Bool {
   let touching: Bool = computeConvexManifold(
     contact: contact
@@ -467,6 +473,7 @@ func updateConvexContact(
     transformB: transformB
     hulls: hulls
     lengthUnitsPerMeter: lengthUnitsPerMeter
+    scratch: scratch
   )
   if touching is false {
     ret false
@@ -554,6 +561,7 @@ func updateCompoundContact(
   heightFields: view List(HeightFieldData)
   isFast: view Bool
   lengthUnitsPerMeter: view Float
+  scratch: mod HullScratch
 ) ret Bool {
   let child: ChildShape = getCompoundChild(compound: compound, childIndex: contact.childIndex)
   var childShape: PhysicsShape = shapeA
@@ -581,6 +589,7 @@ func updateCompoundContact(
         hulls: hulls
         flip: shapeB.shapeType is ShapeType.hull
         lengthUnitsPerMeter: lengthUnitsPerMeter
+        scratch: scratch
       )
     }
     case ShapeType.hull {
@@ -595,6 +604,7 @@ func updateCompoundContact(
         hulls: hulls
         flip: false
         lengthUnitsPerMeter: lengthUnitsPerMeter
+        scratch: scratch
       )
     }
     case ShapeType.mesh {
@@ -632,6 +642,7 @@ func updateCompoundContact(
         hulls: hulls
         flip: shapeB.shapeType is ShapeType.capsule or shapeB.shapeType is ShapeType.hull
         lengthUnitsPerMeter: lengthUnitsPerMeter
+        scratch: scratch
       )
     }
     case ShapeType.compound {
@@ -667,6 +678,7 @@ func updateConvexChild(
   hulls: view List(Hull)
   flip: view Bool
   lengthUnitsPerMeter: view Float
+  scratch: mod HullScratch
 ) ret Bool {
   if flip {
     ret updateConvexContact(
@@ -679,6 +691,7 @@ func updateConvexChild(
       hulls: hulls
       flip: true
       lengthUnitsPerMeter: lengthUnitsPerMeter
+      scratch: scratch
     )
   }
   ret updateConvexContact(
@@ -691,6 +704,7 @@ func updateConvexChild(
     hulls: hulls
     flip: false
     lengthUnitsPerMeter: lengthUnitsPerMeter
+    scratch: scratch
   )
 }
 
@@ -712,6 +726,7 @@ func updateContact(
   compounds: view List(CompoundData)
   isFast: view Bool
   lengthUnitsPerMeter: view Float
+  scratch: mod HullScratch
 ) ret Bool {
   var touching: Bool = false
   if shapeA.shapeType is ShapeType.compound {
@@ -730,6 +745,7 @@ func updateContact(
         heightFields: heightFields
         isFast: isFast
         lengthUnitsPerMeter: lengthUnitsPerMeter
+        scratch: scratch
       )
     }
   } else if shapeA.shapeType is ShapeType.mesh or shapeA.shapeType is ShapeType.height {
@@ -765,6 +781,7 @@ func updateContact(
       hulls: hulls
       flip: false
       lengthUnitsPerMeter: lengthUnitsPerMeter
+      scratch: scratch
     )
   }
   if touching {
