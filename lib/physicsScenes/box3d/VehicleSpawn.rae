@@ -1,0 +1,327 @@
+# The vehicle on track B, upstream Box3D's C library through its bindings
+# (lib/box3d/ecs): builds the shared car and course
+# (physicsScenes/VehicleLibrary) as entities and drives the car. The one module
+# of the vehicle example that names its physics track; the track-A twin is
+# physicsScenes/port/VehicleSpawn with the same functions over lib/physics/ecs
+# (docs/physics-two-implementations.md §3).
+import Quat
+open Vec3
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open ecs/Transform
+open physicsScenes/SceneTypes
+open physicsScenes/VehicleTypes
+open physicsScenes/VehicleLibrary
+open physicsScenes/PlaygroundRender
+import box3d/Box3d
+open box3d/ecs/PhysicsTypes
+open box3d/ecs/Physics
+open box3d/ecs/PhysicsComponents
+open box3d/ecs/PhysicsSpawn
+open box3d/ecs/PhysicsSystems
+open box3d/ecs/PhysicsQueries
+open box3d/ecs/PhysicsJoints
+open box3d/ecs/VenueMesh
+
+const vehicleTrackName: String = "track B (Box3D C)"
+
+# The vehicle example's ECS world: the car's entities and wheel joints, the
+# course's crates (respawned with the car), and the physics resource.
+type VehicleWorld {
+  allocator: EntityAllocator
+  transforms: ComponentTable(Transform3D)
+  rigidBodies: ComponentTable(RigidBody)
+  colliders: ComponentTable(Collider)
+  characters: ComponentTable(CharacterBody)
+  renderShapes: ComponentTable(RenderShape)
+  physics: Physics
+  chassisId: EntityId
+  wheelIds: List(EntityId)
+  # In the car's `wheels` order
+  wheelJoints: List(JointId)
+  crateIds: List(EntityId)
+  workerCount: Int
+}
+
+func createVehicleWorld(workerCount: view Int) ret VehicleWorld {
+  var def: WorldDef = defaultPhysicsWorldDef()
+  def.workerCount = workerCount
+  ret VehicleWorld {
+    allocator: createEntityAllocator()
+    transforms: createComponentTable(Transform3D)
+    rigidBodies: createComponentTable(RigidBody)
+    colliders: createComponentTable(Collider)
+    characters: createComponentTable(CharacterBody)
+    renderShapes: createComponentTable(RenderShape)
+    physics: createPhysics(def: def, fixedStep: 1.0 / 60.0, subSteps: 4)
+    chassisId: noEntity()
+    wheelIds: List.create(EntityId, cap: 4)
+    wheelJoints: List.create(JointId, cap: 4)
+    crateIds: List.create(EntityId, cap: 16)
+    workerCount: workerCount
+  }
+}
+
+func bodyTypeOf(sceneType: view SceneBodyType) ret BodyType {
+  match sceneType {
+    case SceneBodyType.staticBody {
+      ret BodyType.staticBody
+    }
+    case SceneBodyType.kinematicBody {
+      ret BodyType.kinematicBody
+    }
+    case SceneBodyType.dynamicBody {
+      ret BodyType.dynamicBody
+    }
+  }
+  ret BodyType.staticBody
+}
+
+# A body of `shape` (box or sphere) as an entity with its render shape;
+# `fastRotation` for a wheel (Box3D's allowFastRotation).
+func spawnShapeBody(
+  world: mod VehicleWorld
+  body: view SceneBody
+  fastRotation: view Bool
+) ret EntityId {
+  let entityId: EntityId = allocEntity(this: world.allocator)
+  var def: BodyDef = defaultBodyDef(lengthUnitsPerMeter: 1.0)
+  def.bodyType = bodyTypeOf(sceneType: body.bodyType)
+  def.position = body.position
+  def.rotation = body.rotation
+  def.linearVelocity = body.linearVelocity
+  def.allowFastRotation = fastRotation
+  spawnRigidBody(
+    physics: world.physics
+    rigidBodies: world.rigidBodies
+    transforms: world.transforms
+    entityId: entityId
+    def: def
+  )
+  var shapeDef: ShapeDef = defaultShapeDef(lengthUnitsPerMeter: 1.0)
+  shapeDef.density = body.density
+  shapeDef.baseMaterial.friction = body.friction
+  if body.shape.kind is SceneShapeKind.sphere {
+    addSphereCollider(
+      physics: world.physics
+      rigidBodies: world.rigidBodies
+      colliders: world.colliders
+      entityId: entityId
+      def: shapeDef
+      sphere: Sphere { center: Vec3 { x: 0.0, y: 0.0, z: 0.0 }, radius: body.shape.radius }
+    )
+    componentSet(
+      this: world.renderShapes
+      entityId: entityId
+      data: RenderShape { kind: RenderKind.sphere, scale: body.shape.halfExtents }
+    )
+  } else {
+    addBoxCollider(
+      physics: world.physics
+      rigidBodies: world.rigidBodies
+      colliders: world.colliders
+      entityId: entityId
+      def: shapeDef
+      halfExtents: body.shape.halfExtents
+      transform: transformIdentity()
+    )
+    componentSet(
+      this: world.renderShapes
+      entityId: entityId
+      data: RenderShape { kind: RenderKind.box, scale: body.shape.halfExtents }
+    )
+  }
+  ret entityId
+}
+
+func despawnBody(world: mod VehicleWorld, entityId: view EntityId) {
+  despawnRigidBody(
+    physics: world.physics
+    rigidBodies: world.rigidBodies
+    colliders: world.colliders
+    entityId: entityId
+  )
+  componentRemove(this: world.transforms, entityId: entityId)
+  componentRemove(this: world.renderShapes, entityId: entityId)
+  freeEntity(this: world.allocator, entityId: entityId)
+}
+
+# The course's terrain and its static ramps and wall (the crates come with
+# spawnCrates).
+func spawnCourse(world: mod VehicleWorld, course: view VehicleCourse) {
+  var groundDef: ShapeDef = defaultShapeDef(lengthUnitsPerMeter: 1.0)
+  groundDef.baseMaterial.friction = course.terrainFriction
+  let terrain: opt ShapeId = addVenueHeightField(
+    physics: world.physics
+    heights: course.heights
+    countX: course.countX
+    countZ: course.countZ
+    scale: course.terrainScale
+    transform: Transform { position: course.terrainPosition, rotation: course.terrainRotation }
+    def: groundDef
+  )
+  loop let fixture: view SceneBody in course.fixtures {
+    let fixtureId: EntityId = spawnShapeBody(world: world, body: fixture, fastRotation: false)
+  }
+}
+
+func spawnCrates(world: mod VehicleWorld, course: view VehicleCourse) {
+  loop let crate: view SceneBody in course.crates {
+    world.crateIds.add(value: spawnShapeBody(world: world, body: crate, fastRotation: false))
+  }
+}
+
+func despawnCrates(world: mod VehicleWorld) {
+  loop let crateId: view EntityId in world.crateIds {
+    despawnBody(world: world, entityId: crateId)
+  }
+  world.crateIds.clear()
+}
+
+# The car at its start: the chassis, the four wheels and their joints, and
+# the keep-upright joint.
+func spawnVehicle(world: mod VehicleWorld, car: view VehicleDescription) {
+  var chassis: SceneBody = dynamicBody(
+    shape: boxShape(halfExtents: car.chassisHalfExtents)
+    position: car.startPosition
+  )
+  chassis.rotation = chassisStartRotation(car: car)
+  chassis.density = car.chassisDensity
+  world.chassisId = spawnShapeBody(world: world, body: chassis, fastRotation: false)
+  let uprightAdded: Bool = addParallelJointToVenue(
+    physics: world.physics
+    rigidBodies: world.rigidBodies
+    entityId: world.chassisId
+    venueFrame: Transform {
+      position: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+      rotation: uprightVenueRotation(car: car)
+    }
+    localFrame: Transform {
+      position: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+      rotation: car.uprightFrameRotation
+    }
+    hertz: car.uprightHertz
+    dampingRatio: car.uprightDampingRatio
+  )
+  loop let wheel: view VehicleWheel in car.wheels {
+    var wheelBody: SceneBody = dynamicBody(
+      shape: sphereShape(radius: car.wheelRadius)
+      position: wheelStartPosition(car: car, wheel: wheel)
+    )
+    wheelBody.rotation = wheelStartRotation(car: car)
+    wheelBody.density = car.wheelDensity
+    wheelBody.friction = car.wheelFriction
+    let wheelId: EntityId = spawnShapeBody(world: world, body: wheelBody, fastRotation: true)
+    world.wheelIds.add(value: wheelId)
+    world.wheelJoints.add(value: addWheelJoint(
+      physics: world.physics
+      rigidBodies: world.rigidBodies
+      joint: PhysicsJoint {
+        kind: PhysicsJointKind.revolute
+        entityIdA: world.chassisId
+        entityIdB: wheelId
+        localFrameA: Transform { position: wheel.chassisPoint, rotation: car.chassisFrameRotation }
+        localFrameB: Transform {
+          position: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+          rotation: car.wheelFrameRotation
+        }
+        collideConnected: false
+      }
+      settings: WheelJointSettings {
+        suspensionHertz: car.suspensionHertz
+        suspensionDampingRatio: car.suspensionDampingRatio
+        lowerSuspensionLimit: car.lowerSuspensionLimit
+        upperSuspensionLimit: car.upperSuspensionLimit
+        enableSpinMotor: wheel.drives
+        maxSpinTorque: 0.0
+        enableSteering: wheel.steers
+        steeringHertz: car.steeringHertz
+        steeringDampingRatio: car.steeringDampingRatio
+        maxSteeringTorque: car.maxSteeringTorque
+        lowerSteeringLimit: car.lowerSteeringLimit
+        upperSteeringLimit: car.upperSteeringLimit
+      }
+    ))
+  }
+}
+
+# Remove the car (its joints go with its bodies).
+func despawnVehicle(world: mod VehicleWorld) {
+  loop let wheelId: view EntityId in world.wheelIds {
+    despawnBody(world: world, entityId: wheelId)
+  }
+  world.wheelIds.clear()
+  world.wheelJoints.clear()
+  if isNone(this: world.chassisId) is false {
+    despawnBody(world: world, entityId: world.chassisId)
+  }
+  world.chassisId = noEntity()
+}
+
+# Apply the driver's `command`: each wheel's steering target, spin speed and
+# torque share; a car being driven is woken (a new motor target alone does not
+# wake it).
+func driveVehicle(
+  world: mod VehicleWorld
+  car: view VehicleDescription
+  command: view VehicleCommand
+) {
+  let targets: List(VehicleWheelTarget) = wheelTargets(car: car, command: command)
+  loop var i: Int = 0, i < world.wheelJoints.length, ++i {
+    let jointId: JointId = world.wheelJoints.copyAtDefault(index: i)
+    let target: VehicleWheelTarget = targets.copyAtDefault(index: i)
+    setWheelSteering(physics: world.physics, jointId: jointId, radians: target.steeringAngle)
+    setWheelSpinSpeed(physics: world.physics, jointId: jointId, speed: target.spinSpeed)
+    setWheelMaxSpinTorque(physics: world.physics, jointId: jointId, torque: target.maxSpinTorque)
+  }
+  if command.throttle is not 0.0 or command.steer is not 0.0 {
+    wakeEntity(physics: world.physics, rigidBodies: world.rigidBodies, entityId: world.chassisId)
+  }
+}
+
+# The chassis' pose (from its Transform3D, written by the pull system).
+func chassisTransform(world: view VehicleWorld) ret Transform3D {
+  if let transform: Transform3D = componentCopy(this: world.transforms, entityId: world.chassisId) {
+    ret transform
+  }
+  ret createTransform3D()
+}
+
+func chassisVelocity(world: view VehicleWorld) ret Vec3 {
+  ret entityLinearVelocity(
+    physics: world.physics
+    rigidBodies: world.rigidBodies
+    entityId: world.chassisId
+  )
+}
+
+# One frame of physics (the fixed steps `frameTime` pays for).
+func stepVehicleWorld(world: mod VehicleWorld, frameTime: view Float) ret Int {
+  let steps: Int = physicsFrame(
+    physics: world.physics
+    rigidBodies: world.rigidBodies
+    characters: world.characters
+    transforms: world.transforms
+    frameTime: frameTime
+  )
+  advancePhysicsEvents(physics: world.physics)
+  ret steps
+}
+
+func vehicleAwakeCount(world: view VehicleWorld) ret Int {
+  ret physicsCounters(physics: world.physics).awakeBodyCount
+}
+
+# The engine's own heap, outside Rae's allocation counters: the bytes Box3D's
+# C library has allocated and not freed (b3GetByteCount). Between respawns it
+# must come back to the same value, or the library is leaking.
+func engineByteCount() ret Int {
+  unsafe {
+    ret Box3d.b3GetByteCount() as Int
+  }
+}
+
+func destroyVehicleWorld(world: mod VehicleWorld) {
+  destroyPhysics(physics: world.physics)
+}

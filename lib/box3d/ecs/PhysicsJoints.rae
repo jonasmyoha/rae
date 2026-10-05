@@ -1,7 +1,10 @@
 # Joints between physics entities on the C-library track: the same surface as
 # the port's physics/ecs/PhysicsJoints (a hinge, a ball joint or a weld with
-# Box3D's defaults), over b3CreateRevoluteJoint / b3CreateSphericalJoint /
-# b3CreateWeldJoint. Box3D destroys a body's joints with the body.
+# Box3D's defaults, and the vehicle's wheel joint, keep-upright parallel joint
+# and per-frame wheel controls), over b3CreateRevoluteJoint /
+# b3CreateSphericalJoint / b3CreateWeldJoint / b3CreateWheelJoint /
+# b3CreateParallelJoint and b3WheelJoint_*. Box3D destroys a body's joints
+# with the body.
 open ecs/Entity
 open ecs/ComponentTable
 open box3d/Box3d
@@ -83,4 +86,137 @@ func addJoint(
     }
   }
   ret true
+}
+
+# A wheel joint's tuning (b3WheelJointDef without its frames): the same fields
+# as the port's.
+type WheelJointSettings {
+  suspensionHertz: Float
+  suspensionDampingRatio: Float
+  lowerSuspensionLimit: Float
+  upperSuspensionLimit: Float
+  enableSpinMotor: Bool
+  maxSpinTorque: Float
+  enableSteering: Bool
+  steeringHertz: Float
+  steeringDampingRatio: Float
+  maxSteeringTorque: Float
+  lowerSteeringLimit: Float
+  upperSteeringLimit: Float
+}
+
+# A wheel joint between `joint`'s entities (A the chassis, B the wheel; its
+# kind is ignored); a null id when either entity has no body.
+func addWheelJoint(
+  physics: mod Physics
+  rigidBodies: view ComponentTable(RigidBody)
+  joint: view PhysicsJoint
+  settings: view WheelJointSettings
+) ret JointId {
+  let bodyIdA: BodyId = entityBodyId(rigidBodies: rigidBodies, entityId: joint.entityIdA)
+  let bodyIdB: BodyId = entityBodyId(rigidBodies: rigidBodies, entityId: joint.entityIdB)
+  if bodyIdA.index1 is 0 or bodyIdB.index1 is 0 {
+    ret JointId { index1: 0, world0: 0, generation: 0 }
+  }
+  unsafe {
+    var def: b3WheelJointDef = b3DefaultWheelJointDef()
+    fillJointBase(
+      base: def.base
+      bodyIdA: bodyIdA
+      bodyIdB: bodyIdB
+      joint: joint
+    )
+    def.enableSuspensionLimit = true
+    def.lowerSuspensionLimit = settings.lowerSuspensionLimit
+    def.upperSuspensionLimit = settings.upperSuspensionLimit
+    def.enableSuspensionSpring = true
+    def.suspensionHertz = settings.suspensionHertz
+    def.suspensionDampingRatio = settings.suspensionDampingRatio
+    def.enableSpinMotor = settings.enableSpinMotor
+    def.maxSpinTorque = settings.maxSpinTorque
+    def.enableSteering = settings.enableSteering
+    def.steeringHertz = settings.steeringHertz
+    def.steeringDampingRatio = settings.steeringDampingRatio
+    def.targetSteeringAngle = 0.0
+    def.maxSteeringTorque = settings.maxSteeringTorque
+    def.enableSteeringLimit = true
+    def.lowerSteeringLimit = settings.lowerSteeringLimit
+    def.upperSteeringLimit = settings.upperSteeringLimit
+    ret fromB3JointId(jointId: b3CreateWheelJoint(worldId: physics.world, def: def))
+  }
+}
+
+# A parallel joint holding `entityId`'s frame `localFrame` parallel to the
+# venue's frame `venueFrame` (a soft spring of `hertz` / `dampingRatio`): the
+# Driving sample's "keep vehicle upright", with the venue body as its ground
+# body. False when the entity has no body.
+func addParallelJointToVenue(
+  physics: mod Physics
+  rigidBodies: view ComponentTable(RigidBody)
+  entityId: view EntityId
+  venueFrame: view Transform
+  localFrame: view Transform
+  hertz: view Float
+  dampingRatio: view Float
+) ret Bool {
+  let bodyId: BodyId = entityBodyId(rigidBodies: rigidBodies, entityId: entityId)
+  if bodyId.index1 is 0 {
+    ret false
+  }
+  let venueBodyId: BodyId = venueBody(physics: physics)
+  unsafe {
+    var def: b3ParallelJointDef = b3DefaultParallelJointDef()
+    def.base.bodyIdA = toB3BodyId(bodyId: venueBodyId)
+    def.base.bodyIdB = toB3BodyId(bodyId: bodyId)
+    def.base.localFrameA = toB3Transform(transform: venueFrame)
+    def.base.localFrameB = toB3Transform(transform: localFrame)
+    def.base.collideConnected = true
+    def.hertz = hertz
+    def.dampingRatio = dampingRatio
+    let jointId: b3JointId = b3CreateParallelJoint(worldId: physics.world, def: def)
+  }
+  ret true
+}
+
+# The wheel's steering target, in radians.
+func setWheelSteering(physics: mod Physics, jointId: view JointId, radians: view Float) {
+  unsafe {
+    b3WheelJoint_SetTargetSteeringAngle(jointId: toB3JointId(jointId: jointId), radians: radians)
+  }
+}
+
+# The wheel's spin motor speed, in radians per second.
+func setWheelSpinSpeed(physics: mod Physics, jointId: view JointId, speed: view Float) {
+  unsafe {
+    b3WheelJoint_SetSpinMotorSpeed(jointId: toB3JointId(jointId: jointId), speed: speed)
+  }
+}
+
+# The wheel's spin motor torque limit.
+func setWheelMaxSpinTorque(physics: mod Physics, jointId: view JointId, torque: view Float) {
+  unsafe {
+    b3WheelJoint_SetMaxSpinTorque(jointId: toB3JointId(jointId: jointId), torque: torque)
+  }
+}
+
+# The wheel's spin rate relative to its chassis, in radians per second.
+func wheelSpinSpeed(physics: view Physics, jointId: view JointId) ret Float {
+  unsafe {
+    ret b3WheelJoint_GetSpinSpeed(jointId: toB3JointId(jointId: jointId))
+  }
+}
+
+# Wake the entity's body (a motor's new target alone does not wake a
+# sleeping car, so the driver wakes it, as the Driving sample does).
+func wakeEntity(
+  physics: mod Physics
+  rigidBodies: view ComponentTable(RigidBody)
+  entityId: view EntityId
+) {
+  let bodyId: BodyId = entityBodyId(rigidBodies: rigidBodies, entityId: entityId)
+  if bodyId.index1 is not 0 {
+    unsafe {
+      b3Body_SetAwake(bodyId: toB3BodyId(bodyId: bodyId), awake: true)
+    }
+  }
 }

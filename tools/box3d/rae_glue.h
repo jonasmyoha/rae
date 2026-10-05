@@ -50,5 +50,10 @@ void rae_b3DestroyMesh( uint64_t mesh );
 uint64_t rae_b3CreateHull( const b3Vec3* points, int pointCount, int maxVertexCount );
 b3ShapeId rae_b3CreateHullShape( b3BodyId bodyId, const b3ShapeDef* def, uint64_t hull );
 void rae_b3DestroyHull( uint64_t hull );
+/* A height field, the same way: like a mesh, it must outlive its shapes
+ * (the shape points at it). */
+uint64_t rae_b3CreateHeightField( const b3HeightFieldDef* def );
+b3ShapeId rae_b3CreateHeightFieldShape( b3BodyId bodyId, const b3ShapeDef* def, uint64_t heightField );
+void rae_b3DestroyHeightField( uint64_t heightField );
 
 #endif
