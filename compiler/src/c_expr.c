@@ -1299,6 +1299,28 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                     break;
                 }
             }
+            /* The same for a `mod` parameter or alias (`own queries` where
+             * `queries: mod List(Int)`): the value lives in the caller, so the
+             * move reads it through the pointer and leaves the caller's place
+             * empty. Emitted as a plain identifier it was the pointer itself,
+             * which C rejected as a value. */
+            if (place && place->kind == AST_EXPR_IDENT) {
+                const AstTypeRef* ptr = infer_expr_type_ref(ctx, place);
+                if (ptr && ptr->is_mod && !ptr->is_opt) {
+                    AstTypeRef value_type = *ptr;
+                    value_type.is_mod = false;
+                    int mvn = ctx->temp_counter++;
+                    fprintf(out, "(__extension__ ({ ");
+                    emit_type_ref_as_c_type(ctx, &value_type, out, false);
+                    fprintf(out, "* __rae_mvp%d = ", mvn);
+                    emit_expr(ctx, place, out, PREC_LOWEST, false, true);
+                    fprintf(out, "; ");
+                    emit_type_ref_as_c_type(ctx, &value_type, out, false);
+                    fprintf(out, " __rae_mv%d = *__rae_mvp%d; memset(__rae_mvp%d, 0, sizeof(*__rae_mvp%d)); __rae_mv%d; }))",
+                            mvn, mvn, mvn, mvn, mvn);
+                    break;
+                }
+            }
         }
         {
             // A local moved on some paths only clears its live flag as the

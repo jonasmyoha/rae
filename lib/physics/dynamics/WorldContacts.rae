@@ -103,11 +103,21 @@ func createContact(
   if contactId is world.contacts.length {
     world.contacts.add(value: zeroContact())
   }
+  # The slot's lists are moved into the new contact (their buffers reused)
   var generation: Int = 0
-  if let slot: view Contact => world.contacts.viewAt(index: contactId) {
+  var manifolds: List(Manifold) = List.create(Manifold, cap: 0)
+  var triangleCache: List(TriangleCache) = List.create(TriangleCache, cap: 0)
+  if let slot: mod Contact => world.contacts.modAt(index: contactId) {
     generation = slot.generation
+    manifolds = own slot.manifolds
+    triangleCache = own slot.triangleCache
   }
-  var contact: Contact = zeroContact()
+  manifolds.clear()
+  triangleCache.clear()
+  var contact: Contact = zeroContactWithLists(
+    manifolds: own manifolds
+    triangleCache: own triangleCache
+  )
   contact.contactId = contactId
   contact.generation = generation + 1
   contact.setIndex = setIndex
@@ -229,46 +239,65 @@ func unlinkContactEdge(world: mod PhysicsWorld, contactId: view Int, edgeIndex: 
 # overlapping, or its shape or body is destroyed. A touching contact may
 # wake its bodies.
 func destroyContact(world: mod PhysicsWorld, contactId: view Int, wakeBodies: view Bool) {
-  let contact: Contact = world.contacts.copyAtDefault(index: contactId)
+  # The fields used below, read through a view (a Contact copy would copy
+  # its manifold list)
+  var shapeIdA: Int = 0
+  var shapeIdB: Int = 0
+  var childIndex: Int = 0
+  var bodyIdA: Int = 0
+  var bodyIdB: Int = 0
+  var flags: Int = 0
+  var islandId: Int = -1
+  var colorIndex: Int = -1
+  var localIndex: Int = 0
+  var setIndex: Int = 0
+  var endEvent: ContactEndTouchEvent = emptyContactEndTouchEvent()
+  if let contact: view Contact => world.contacts.viewAt(index: contactId) {
+    shapeIdA = contact.shapeIdA
+    shapeIdB = contact.shapeIdB
+    childIndex = contact.childIndex
+    bodyIdA = contact.edgeA.bodyId
+    bodyIdB = contact.edgeB.bodyId
+    flags = contact.flags
+    islandId = contact.islandId
+    colorIndex = contact.colorIndex
+    localIndex = contact.localIndex
+    setIndex = contact.setIndex
+    endEvent = contactEndEventOf(world: world, contact: contact)
+  }
   # Remove the pair from the set
-  let pairKey: UInt64 = shapePairKey(
-    shape1: contact.shapeIdA
-    shape2: contact.shapeIdB
-    child: contact.childIndex
-  )
+  let pairKey: UInt64 = shapePairKey(shape1: shapeIdA, shape2: shapeIdB, child: childIndex)
   let removed: Bool = removePairKey(set: world.broadPhase.pairSet, key: pairKey)
   if let target: mod Contact => world.contacts.modAt(index: contactId) {
     target.manifolds.clear()
     target.triangleCache.clear()
   }
-  let bodyIdA: Int = contact.edgeA.bodyId
-  let bodyIdB: Int = contact.edgeB.bodyId
-  let touching: Bool = (contact.flags bitand contactTouchingFlag) is not 0
+  let touching: Bool = (flags bitand contactTouchingFlag) is not 0
   # The end touch event
-  if touching and (contact.flags bitand contactEnableContactEvents) is not 0 {
-    pushContactEndEvent(world: world, event: contactEndEventOf(world: world, contact: contact))
+  if touching and (flags bitand contactEnableContactEvents) is not 0 {
+    pushContactEndEvent(world: world, event: endEvent)
   }
 
   unlinkContactEdge(world: world, contactId: contactId, edgeIndex: 0)
   unlinkContactEdge(world: world, contactId: contactId, edgeIndex: 1)
 
   # Remove the contact from the list that owns it
-  if contact.islandId is not -1 {
+  if islandId is not -1 {
     unlinkContact(world: world, contactId: contactId)
   }
-  if contact.colorIndex is not -1 {
+  if colorIndex is not -1 {
     # An active constraint
     removeContactFromGraph(
       world: world
       bodyIdA: bodyIdA
       bodyIdB: bodyIdB
-      colorIndex: contact.colorIndex
-      localIndex: contact.localIndex
-      meshContact: (contact.flags bitand simMeshContact) is not 0
+      colorIndex: colorIndex
+      localIndex: localIndex
+      meshContact: (flags bitand simMeshContact) is not 0
     )
   } else {
     # Non-touching or asleep
-    removeSetContact(world: world, setIndex: contact.setIndex, localIndex: contact.localIndex)
+    removeSetContact(world: world, setIndex: setIndex, localIndex: localIndex)
   }
 
   # Free the contact and its id (the generation is kept)

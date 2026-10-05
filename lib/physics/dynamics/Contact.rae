@@ -167,6 +167,18 @@ func zeroQuat() ret Quat {
 
 # `(b3Contact){ 0 }`
 func zeroContact() ret Contact {
+  ret zeroContactWithLists(
+    manifolds: List.create(Manifold, cap: 1)
+    triangleCache: List.create(TriangleCache, cap: 0)
+  )
+}
+
+# A zero contact owning the given (empty) lists: a contact slot that is
+# reused keeps its lists' buffers.
+func zeroContactWithLists(
+  manifolds: own List(Manifold)
+  triangleCache: own List(TriangleCache)
+) ret Contact {
   ret Contact {
     setIndex: 0
     colorIndex: 0
@@ -182,13 +194,13 @@ func zeroContact() ret Contact {
     encodedBodySimA: 0
     encodedBodySimB: 0
     flags: 0
-    manifolds: List.create(Manifold, cap: 1)
+    manifolds: own manifolds
     cachedRotationA: zeroQuat()
     cachedRotationB: zeroQuat()
     cachedRelativePose: Transform { position: zeroVector(), rotation: zeroQuat() }
     friction: 0.0
     cache: emptyContactCache()
-    triangleCache: List.create(TriangleCache, cap: 0)
+    triangleCache: own triangleCache
     queryBounds: Aabb { lowerBound: zeroVector(), upperBound: zeroVector() }
     restitution: 0.0
     rollingResistance: 0.0

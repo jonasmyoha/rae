@@ -410,8 +410,10 @@ func collide(world: mod PhysicsWorld) {
       destroyContact(world: world, contactId: contactId, wakeBodies: false)
     } else if (flags bitand simStartedTouching) is not 0 {
       if (flags bitand contactEnableContactEvents) is not 0 {
-        let contact: Contact = world.contacts.copyAtDefault(index: contactId)
-        world.contactBeginEvents.add(value: contactBeginEventOf(world: world, contact: contact))
+        if let contact: view Contact => world.contacts.viewAt(index: contactId) {
+          let event: ContactBeginTouchEvent = contactBeginEventOf(world: world, contact: contact)
+          world.contactBeginEvents.add(value: event)
+        }
       }
       # Link first: this wakes colliding bodies, so the body sims are in
       # the right place.
@@ -428,21 +430,38 @@ func collide(world: mod PhysicsWorld) {
         contact.flags = contact.flags bitand (bitnot simStoppedTouching)
         contact.flags = contact.flags bitand (bitnot contactTouchingFlag)
       }
-      let contact: Contact = world.contacts.copyAtDefault(index: contactId)
-      if (contact.flags bitand contactEnableContactEvents) is not 0 {
-        pushContactEndEvent(world: world, event: contactEndEventOf(world: world, contact: contact))
+      # The fields used below, read through a view (a Contact copy would
+      # copy its manifold list)
+      var colorIndex: Int = 0
+      var localIndex: Int = 0
+      var bodyIdA: Int = 0
+      var bodyIdB: Int = 0
+      var contactFlags: Int = 0
+      var endEvents: Bool = false
+      var endEvent: ContactEndTouchEvent = emptyContactEndTouchEvent()
+      if let contact: view Contact => world.contacts.viewAt(index: contactId) {
+        colorIndex = contact.colorIndex
+        localIndex = contact.localIndex
+        bodyIdA = contact.edgeA.bodyId
+        bodyIdB = contact.edgeB.bodyId
+        contactFlags = contact.flags
+        if (contact.flags bitand contactEnableContactEvents) is not 0 {
+          endEvents = true
+          endEvent = contactEndEventOf(world: world, contact: contact)
+        }
       }
-      let colorIndex: Int = contact.colorIndex
-      let localIndex: Int = contact.localIndex
+      if endEvents {
+        pushContactEndEvent(world: world, event: endEvent)
+      }
       unlinkContact(world: world, contactId: contactId)
       addNonTouchingContact(world: world, contactId: contactId)
       removeContactFromGraph(
         world: world
-        bodyIdA: contact.edgeA.bodyId
-        bodyIdB: contact.edgeB.bodyId
+        bodyIdA: bodyIdA
+        bodyIdB: bodyIdB
         colorIndex: colorIndex
         localIndex: localIndex
-        meshContact: (contact.flags bitand simMeshContact) is not 0
+        meshContact: (contactFlags bitand simMeshContact) is not 0
       )
     }
   }
@@ -455,7 +474,7 @@ func collide(world: mod PhysicsWorld) {
 # then the narrow phase. P4c adds the solver after it for a positive step.
 func collideWorld(world: mod PhysicsWorld) {
   world.locked = true
-  let created: List(UInt64) = updateBroadPhasePairs(world: world)
+  updateBroadPhasePairs(world: world)
   collide(world: world)
   world.locked = false
 }

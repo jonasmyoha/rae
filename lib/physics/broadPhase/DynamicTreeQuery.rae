@@ -130,7 +130,25 @@ func beginTreeQuery(
   maskBits: view UInt64
   requireAllBits: view Bool
 ) ret TreeQuery {
-  let stack: List(Int) = List.create(Int, cap: 32)
+  ret beginTreeQueryWith(
+    tree: tree
+    box: box
+    maskBits: maskBits
+    requireAllBits: requireAllBits
+    stack: List.create(Int, cap: 32)
+  )
+}
+
+# beginTreeQuery with a given stack (cleared first): a caller that queries
+# often lends its own and moves it back out of `query.stack` when done.
+func beginTreeQueryWith(
+  tree: view DynamicTree
+  box: view Aabb
+  maskBits: view UInt64
+  requireAllBits: view Bool
+  stack: own List(Int)
+) ret TreeQuery {
+  stack.clear()
   if tree.proxyCount > 0 {
     stack.add(value: rootPair(tree: tree))
   }
@@ -138,7 +156,7 @@ func beginTreeQuery(
     box: box
     maskBits: maskBits
     requireAllBits: requireAllBits
-    stack: stack
+    stack: own stack
     pair: 0
     child: 2
     stats: emptyTreeStats()

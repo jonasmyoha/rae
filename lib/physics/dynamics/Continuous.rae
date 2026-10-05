@@ -180,14 +180,17 @@ func queryContinuous(
   base: view Vec3
   fraction: view Float
   sensorHits: mod ContinuousHits
+  queryStack: mod List(Int)
 ) ret Float {
   var result: Float = fraction
   if let tree: view DynamicTree => world.broadPhase.trees.viewAt(index: treeIndex) {
-    var query: TreeQuery = beginTreeQuery(
+    # The caller's stack, lent to the query and taken back below
+    var query: TreeQuery = beginTreeQueryWith(
       tree: tree
       box: box
       maskBits: allBits
       requireAllBits: false
+      stack: own queryStack
     )
     var proxyId: Int = nextTreeQueryProxy(tree: tree, query: query)
     loop proxyId is not -1 {
@@ -204,6 +207,7 @@ func queryContinuous(
       )
       proxyId = nextTreeQueryProxy(tree: tree, query: query)
     }
+    queryStack = own query.stack
   }
   ret result
 }
@@ -255,10 +259,14 @@ func solveContinuous(world: mod PhysicsWorld, simIndex: view Int, dt: view Float
   }
   let fastBody: Body = bodyAt(world: world, bodyId: fastSim.bodyId)
   var fraction: Float = 1.0
+  # The world's working lists, moved out for the sweep and back at the end
   var sensorHits: ContinuousHits = {
-    hits: List.create(SensorHit, cap: 2)
-    fractions: List.create(Float, cap: 2)
+    hits: own world.continuousSensorHits
+    fractions: own world.continuousFractions
   }
+  sensorHits.hits.clear()
+  sensorHits.fractions.clear()
+  var queryStack: List(Int) = own world.continuousQueryStack
   let isBullet: Bool = (fastSim.flags bitand isBulletFlag) is not 0
 
   var shapeId: Int = fastBody.headShapeId
@@ -290,6 +298,7 @@ func solveContinuous(world: mod PhysicsWorld, simIndex: view Int, dt: view Float
         base: base
         fraction: fraction
         sensorHits: sensorHits
+        queryStack: queryStack
       )
       if isBullet {
         fraction = queryContinuous(
@@ -302,6 +311,7 @@ func solveContinuous(world: mod PhysicsWorld, simIndex: view Int, dt: view Float
           base: base
           fraction: fraction
           sensorHits: sensorHits
+          queryStack: queryStack
         )
         fraction = queryContinuous(
           world: world
@@ -313,6 +323,7 @@ func solveContinuous(world: mod PhysicsWorld, simIndex: view Int, dt: view Float
           base: base
           fraction: fraction
           sensorHits: sensorHits
+          queryStack: queryStack
         )
       }
     }
@@ -412,4 +423,7 @@ func solveContinuous(world: mod PhysicsWorld, simIndex: view Int, dt: view Float
   if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
     awake.bodySims.set(index: simIndex, value: fastSim)
   }
+  world.continuousSensorHits = own sensorHits.hits
+  world.continuousFractions = own sensorHits.fractions
+  world.continuousQueryStack = own queryStack
 }
