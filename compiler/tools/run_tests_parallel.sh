@@ -119,6 +119,14 @@ if [ -f tools/test-packages-cli.sh ]; then
   echo
   if bash tools/test-packages-cli.sh; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 fi
+# The browser build (rae build --target wasm, Emscripten + EmdawnWebGPU):
+# 109 and 110 as pages and an embeddable module, ~50 s. It prints SKIP and
+# passes on a machine without emcc. It broke once unnoticed for every WebGPU
+# app (wgpu-native's webgpu/wgpu.h; docs/physics-performance-plan.md §10g).
+if [ -f tools/wasm_webgpu_smoke.sh ]; then
+  echo
+  if bash tools/wasm_webgpu_smoke.sh; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
+fi
 # #44411932: native file-open dialog binding, env-driven headless path.
 if [ -f tools/test-sdl-file-dialog.sh ]; then
   echo

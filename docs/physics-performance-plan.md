@@ -776,11 +776,46 @@ falls back to running the simulation slower, not to a spiral. WASM threads
 WASM_THREADS=1; backlog #245 for the browser) would give back the §10e
 scaling.
 
-**The playground in the browser** could not be built. `rae build --target
-wasm` fails for every WebGPU app, not just the playground: the generated
-bindings (`lib/webgpu/Webgpu.rae`, `WebgpuTypes.rae`) declare
-`cheader "webgpu/wgpu.h"`, wgpu-native's header, which the browser's
-EmdawnWebGPU package does not have. `compiler/tools/wasm_webgpu_smoke.sh`
-(109_gpu3d_pbr) fails the same way. Queued; the browser frame numbers wait
-for it.
+**The playground in the browser** (2026-10-06, fixed the same day). `rae build
+--target wasm` had failed for every WebGPU app, on wgpu-native's
+`webgpu/wgpu.h`, which the generated bindings declare as their cheader.
+Five fixes got it running:
+- `compiler/runtime/web/webgpu/wgpu.h`, on emcc's include path only, maps
+  that header to the browser's standard `webgpu.h`. It also gives
+  `wgpuQueueSubmitForIndex` a browser version: a submit plus an increasing
+  index, which is all GpuLifetime's completion tracking needs.
+- The bindings' enum constants come from the header natively and from their
+  Rae literals in the browser. The 493 constants the two headers share have
+  the same values; Dawn lacks wgpu-native's 131 extension constants.
+- Browser builds get an 8 MB stack (`-sSTACK_SIZE`, as a native process
+  has); Emscripten's 64 KB default overflowed in the physics step. The
+  `RAE_WGPU_REPORT` diagnostic is native-only. `lib/physicsScenes/scenes`
+  is preloaded with the other `lib` scene folders.
+- Two shaders broke Dawn's stricter WGSL uniformity rule. The deferred
+  composite's FXAA samples its one-mip target with `textureSampleLevel`,
+  and the glyph shader takes its clip coverage (`fwidth`) before its
+  branch. Native output is unchanged.
+- The web shell passes URL query parameters named `RAE_*` as environment
+  variables, so `index.html?RAE_PLAYGROUND_PROFILE=300` profiles in the
+  browser.
+
+`compiler/tools/wasm_webgpu_smoke.sh` passes again and now runs as a case of
+every full suite run (~50 s; SKIP without emcc).
+
+Port playground in headless Chrome 154 (WebGPU on Metal), single-threaded,
+release, 1280 x 800 window, ms per frame:
+
+| scene | whole frame | physics | render CPU | the rest |
+|---|---|---|---|---|
+| pyramid, 5 000 boxes, autofire | 44.1 (~23 fps) | 31.2 (1.55 steps a frame: ~20 ms per step) | ~1.6 | 10.6 waiting for the browser's frame |
+| pyramid, 1 000 boxes, autofire | 16.67 (60 fps, vsync) | 0.12 | | 15.4 waiting for the browser's frame |
+
+On the web the profile's "input, camera" lap holds the wait for the browser's
+next animation frame (the Asyncify yield in the poll). The browser's step,
+~20 ms at 5 000 boxes, is ~1.2x the 16.4 ms the same physics takes in Node's
+WASI, which is the cost of Asyncify's instrumentation (queued: a frame
+callback instead). At 5 000 boxes the browser cannot keep real time on one
+thread; with the cap of 2 it runs the simulation slower, at 1.55 steps a
+frame. At 1 000 boxes it is smooth at 60 fps. WASM threads (backlog #245)
+are what would bring 5 000 back.
 

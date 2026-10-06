@@ -199,6 +199,11 @@ void rae_wgpu_report_periodic(void) {
 }
 
 void rae_wgpu_report(const char* tag) {
+#ifdef __EMSCRIPTEN__
+    /* wgpu-native's object report; the browser's WebGPU has none */
+    (void)tag;
+    return;
+#else
     if (!g_wgpu_inst) return;
     WGPUGlobalReport r; memset(&r, 0, sizeof(r));
     wgpuGenerateReport(g_wgpu_inst, &r);
@@ -211,6 +216,7 @@ void rae_wgpu_report(const char* tag) {
         r.hub.computePipelines.numAllocated, r.hub.commandBuffers.numAllocated,
         r.hub.querySets.numAllocated, r.hub.samplers.numAllocated, r.surfaces.numAllocated);
     fflush(stderr);
+#endif
 }
 
 /* #528's handle store for lib/GpuTiming.rae (query set + 2 buffers) is gone

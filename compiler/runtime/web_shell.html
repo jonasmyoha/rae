@@ -29,7 +29,15 @@
       printErr(text) {
         console.error(text);
         status.textContent = text;
-      }
+      },
+      // URL query parameters named RAE_* become the program's environment
+      // (index.html?RAE_PLAYGROUND_PROFILE=600), as env vars do natively.
+      // ENV is the Emscripten runtime's environment, filled before main.
+      preRun: [() => {
+        for (const [name, value] of new URLSearchParams(location.search)) {
+          if (name.startsWith('RAE_')) ENV[name] = value;
+        }
+      }]
     };
   </script>
   {{{ SCRIPT }}}

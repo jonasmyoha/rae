@@ -555,6 +555,13 @@ if [ -z "$TEST_NAME_FILTER" ] && [ -f "tools/test-packages-cli.sh" ]; then
   if ! bash tools/test-packages-cli.sh; then FAILED=$((FAILED+1)); fi
 fi
 
+# The browser build (tools/wasm_webgpu_smoke.sh: 109/110 through Emscripten +
+# EmdawnWebGPU, ~50 s; SKIP without emcc). Full run only.
+if [ -z "$TEST_NAME_FILTER" ] && [ -f "tools/wasm_webgpu_smoke.sh" ]; then
+  echo
+  if ! bash tools/wasm_webgpu_smoke.sh; then FAILED=$((FAILED+1)); fi
+fi
+
 # #44411932: native file-open dialog binding on its env-driven headless path
 # (RAE_SDL_FILE_DIALOG_RESULT / RAE_SDL_HEADLESS_MS), which a single-file
 # fixture cannot set per case. Full run only.
