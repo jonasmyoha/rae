@@ -31,8 +31,6 @@ func renderPhysicsFrame(
   camera: view Camera3d
   light: view Light3d
   reach: view Float
-  renderShapes: view ComponentTable(RenderShape)
-  transforms: view ComponentTable(Transform3D)
   uiWorld: mod UiWorld
   uiSystems: mod UiSystems
   gpuUi: view Gpu2dUi
@@ -58,12 +56,7 @@ func renderPhysicsFrame(
         backExtent: reach * 1.5
       )
       beginShadowPass(renderer: renderer, c: cascades)
-      queueShadowCasters(
-        renderer: renderer
-        meshes: meshes
-        renderShapes: renderShapes
-        transforms: transforms
-      )
+      queueShadowCasters(renderer: renderer, meshes: meshes, batches: batches)
       endShadowPass(renderer: renderer)
       if debugLog {
         log("[shadow] casters {shadowCasterCount(renderer: renderer)}")

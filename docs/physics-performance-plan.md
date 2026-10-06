@@ -573,3 +573,30 @@ The gaps and their causes:
 - **The ECS layer costs nothing measurable:** push, pull, events and poses
   are under 0.3 ms per frame in both tracks (§10).
 
+### 10c. Shadow casters from the instance batches (2026-10-06)
+
+`queueShadowCasters` walked every body four times (once per mesh kind),
+looked each one up in the transform table, rebuilt its model matrix and
+appended 21 values to the shadow queue, one call per body. It now queues
+each kind in one go from the instance batch `fillBatches` has just built
+for the G-buffer (`drawShadowCasterBatchWith` -> `shadowQueueRecords`, which
+copies each record's model). The queue ends up the same: one run per mesh,
+in the same order, and every body still casts (the debug log's caster
+count is bodies + live balls).
+
+Temporary timers inside the shadow lap, port playground, 5 000 boxes,
+autofire, ms per frame:
+
+| | before | after |
+|---|---|---|
+| shadow lap (RAE_PLAYGROUND_PROFILE, both tracks) | 0.66 | 0.48-0.50 |
+| of which queueing the casters | ~0.3 | 0.084 |
+| beginShadowPass (cascade uniforms) | | 0.14 |
+| endShadowPass: model upload (320 KB) | | 0.095 |
+| endShadowPass: three cascade passes | | 0.022 |
+| endShadowPass: its own queue submit and poll | | 0.18 |
+
+What is left is fixed cost per frame, not per caster. The shadow pass
+uploads the same model matrices the G-buffer's instance buffer already holds,
+and submits on its own instead of in the frame's submission (queued).
+

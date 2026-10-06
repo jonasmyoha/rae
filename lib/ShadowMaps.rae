@@ -465,6 +465,68 @@ func drawShadowCaster(
   )
 }
 
+# Many static casters of one mesh at once: the first `count` records of
+# `records`, `stride` floats each with the model matrix in the first 16 (an
+# InstanceBatch's DrawU records). The queue ends up exactly as one
+# shadowQueue call per record would leave it, but the models are copied
+# straight out of the batch the G-buffer draws, with no per-caster lookup or
+# matrix rebuild.
+func shadowQueueRecords(
+  shadow: mod ShadowCache
+  key: copy Int
+  vbuf: view BufferId
+  ibuf: view BufferId
+  icount: copy Int
+  records: view List(Float)
+  stride: view Int
+  count: view Int
+) {
+  if not shadow.enabled or icount < 1 {
+    ret
+  }
+  loop var record: Int = 0, record < count and shadow.drawCount < shadowMaxDraws, ++record {
+    let base: Int = record * stride
+    loop var i: Int = 0, i < 16, ++i {
+      shadow.modelFloats.add(value: records.copyAtFallback(index: base + i, fallback: 0.0))
+    }
+    shadow.paletteBaseRows.add(value: 0 as Int32)
+    shadow.casterKeys.add(value: key)
+    shadow.casterVbufs.add(value: vbuf)
+    shadow.casterIbufs.add(value: ibuf)
+    shadow.casterIcounts.add(value: icount)
+    shadow.drawCount = shadow.drawCount + 1
+  }
+}
+
+# drawShadowCaster for the first `count` records of an instance batch
+# (shadowQueueRecords).
+func drawShadowCasterRecords(
+  shadow: mod ShadowCache
+  meshes: view MeshStore
+  resources: view GpuResources
+  mesh: view MeshHandle
+  records: view List(Float)
+  stride: view Int
+  count: view Int
+) {
+  if count < 1 or not meshHandleIsValid(h: mesh) {
+    ret
+  }
+  if not meshStoreReady(store: meshes, resources: resources, mesh: mesh.id) {
+    ret
+  }
+  shadowQueueRecords(
+    shadow: shadow
+    key: mesh.id
+    vbuf: meshStoreVbuf(store: meshes, mesh: mesh.id)
+    ibuf: meshStoreIbuf(store: meshes, mesh: mesh.id)
+    icount: meshStoreIndexCount(store: meshes, mesh: mesh.id)
+    records: records
+    stride: stride
+    count: count
+  )
+}
+
 # A skinned caster from a SkinStore. `paletteBase` is its start row in the
 # shared palette (characterPaletteBase, #547) — the SAME base its G-buffer
 # instance uses, so a crowd member's shadow shows its own pose; 0 for a lone
