@@ -1029,3 +1029,17 @@ pollReadback, a MapRead `wgpuBufferMapAsync` with AllowProcessEvents) never
 completes, and the console shows no error. The same path works natively. So
 the per-pass timing has no samples in the browser, and probably every
 nonblocking manager readback is stuck there too (queued).
+
+*Found and fixed (2026-10-07):* the readback did complete. The copy out of
+the mapped buffer was what failed. `rae_wgpu_read_copy` bounds the copy by
+the destination's real allocation (`rae_malloc_size_safe`), and that
+answered 0 under Emscripten, so every copy was refused without a word and
+each timing sample was dropped. Emscripten's allocator has
+`malloc_usable_size`, which is now used there. In headless Chrome (1280 x 800
+CSS pixels at DPR 1) the playground then reports per-pass GPU time like
+native: GPU whole frame 2.9 ms over 100 sampled frames, with the
+copy/present span at 0.1 ms. There it is real GPU time, since a browser
+frame has no blocking end-of-frame poll. `examples/zz_web_readback_check`
+(a readback polled once per mainLoop frame, bytes checked) guards it:
+`compiler/tools/wasm_webgpu_smoke.sh` builds it and, with Chrome installed,
+runs it headless and requires `READBACK OK`. It failed on the old runtime.
