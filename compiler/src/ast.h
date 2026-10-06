@@ -364,6 +364,9 @@ struct AstStmt {
                         // compiled as a sequential loop on both backends;
                         // real parallel execution lands with the C thread
                         // runtime. Disjointness/capture checks are future.
+      bool is_main_loop;    // `mainLoop state { }` (docs/web-frame-loop.md): the
+                            // program's frame loop, body runs once per frame
+      Str main_loop_state;  // ... over this owned local of `main`
       AstQueryLoopBinding* query_bindings;  // non-NULL: this loop was a query-loop sugar form
       AstExpr* query_iterable;              // ... iterating this query call (the hoisted value)
     } loop_stmt;
@@ -638,12 +641,6 @@ typedef struct CompilerContext {
     char* parallel_thunks_buf;
     size_t parallel_thunks_len;
     int parallel_thunk_counter;
-
-    // The entry file as its decls' origin_file spells it: where a program
-    // without `main` declares its `setup`/`frame` entry
-    // (docs/web-frame-loop.md). The merged module's file_path is the last
-    // file loaded, not the entry.
-    const char* entry_file_path;
 } CompilerContext;
 
 void compiler_init(CompilerContext* ctx, Arena* ast_arena);

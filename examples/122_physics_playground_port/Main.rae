@@ -182,10 +182,10 @@ func scalingRun(counts: view String) {
   }
 }
 
-# Everything the window keeps between frames, owned in one value: setup
-# builds it, frame advances it once per frame (docs/web-frame-loop.md). In a
-# browser the page calls frame on each animation frame; natively the
-# generated main loops over it.
+# Everything the window keeps between frames, owned in one value that main's
+# mainLoop advances once per frame (docs/web-frame-loop.md). In a browser the
+# page runs the loop's body on each animation frame; natively it is a plain
+# loop.
 type PlaygroundState {
   renderer: DeferredRenderer
   uiWorld: UiWorld
@@ -196,34 +196,8 @@ type PlaygroundState {
   workers: Int
 }
 
-# The headless modes' exit code, or -1 to open the window.
-func headlessRun() ret Int {
-  let steps: String = Sys.getEnv(name: "RAE_PHYSICS_DETERMINISM")
-  if steps.length() > 0 {
-    if determinismRun(steps: steps.toInt()) > 0 {
-      ret 1
-    }
-    ret 0
-  }
-  let scalingCounts: String = Sys.getEnv(name: "RAE_PLAYGROUND_SCALING")
-  if scalingCounts.length() > 0 {
-    scalingRun(counts: scalingCounts)
-    ret 0
-  }
-  if Sys.getEnv(name: "RAE_PLAYGROUND_SCRIPTED").length() > 0 {
-    scriptedRun()
-    ret 0
-  }
-  ret -1
-}
-
-# The program's entry: a headless mode runs to its end and exits; otherwise
-# the window, the renderer, the UI and the first scene's world.
-func setup() ret PlaygroundState {
-  let headlessCode: Int = headlessRun()
-  if headlessCode >= 0 {
-    Sys.exit(code: headlessCode)
-  }
+# The window, the renderer, the UI and the first scene's world.
+func createPlayground() ret PlaygroundState {
   openPlaygroundWindow(trackName: trackName)
   var renderer: DeferredRenderer = createDeferredRendererWithUi()
   var uiWorld: UiWorld = create()
@@ -239,11 +213,6 @@ func setup() ret PlaygroundState {
   var scene: PhysicsScene = playgroundScene(app: app)
   spawnScene(world: world, scene: scene)
   startPlaygroundScene(app: app, renderer: renderer, scene: scene)
-  let graphStatus: Int = compileDeferred(renderer: renderer)
-  if graphStatus is not 0 {
-    log("deferred graph invalid: {statusName(status: graphStatus)}")
-    Sys.exit(code: 1)
-  }
   # The state takes the renderer's GPU handles with it: moved, never copied
   unsafe {
     ret PlaygroundState {
@@ -258,20 +227,16 @@ func setup() ret PlaygroundState {
   }
 }
 
-# Leaves the window: the world and the window go; false ends the frames.
-func endPlayground(state: mod PlaygroundState) ret Bool {
+# Leaves the window: the world and the window go.
+func endPlayground(state: mod PlaygroundState) {
   destroyPlaygroundWorld(world: state.world)
   closePlaygroundWindow(renderer: state.renderer)
-  ret false
 }
 
 # One frame: the shared PlaygroundApp does the frame; this makes the calls
-# into the track (spawn, step, throw, despawn, counts). False once the window
-# closes or the profile run has its report.
-func frame(state: mod PlaygroundState) ret Bool {
-  if Gpu2d.pollClose() {
-    ret endPlayground(state: state)
-  }
+# into the track (spawn, step, throw, despawn, counts). False once the profile
+# run has its report.
+func runPlaygroundFrame(state: mod PlaygroundState) ret Bool {
   profileFrameStart(profile: state.app.profile)
   beginPlaygroundFrame(app: state.app, uiWorld: state.uiWorld, uiSystems: state.uiSystems)
   if readPlaygroundControls(app: state.app, uiWorld: state.uiWorld, uiSystems: state.uiSystems) {
@@ -347,7 +312,43 @@ func frame(state: mod PlaygroundState) ret Bool {
     hudChanged: hudChanged
   )
   if profileFrameEnd(profile: state.app.profile, section: profileFrameEnd) {
-    ret endPlayground(state: state)
+    ret false
   }
   ret true
+}
+
+func main() ret Int {
+  let steps: String = Sys.getEnv(name: "RAE_PHYSICS_DETERMINISM")
+  if steps.length() > 0 {
+    if determinismRun(steps: steps.toInt()) > 0 {
+      ret 1
+    }
+    ret 0
+  }
+  let scalingCounts: String = Sys.getEnv(name: "RAE_PLAYGROUND_SCALING")
+  if scalingCounts.length() > 0 {
+    scalingRun(counts: scalingCounts)
+    ret 0
+  }
+  if Sys.getEnv(name: "RAE_PLAYGROUND_SCRIPTED").length() > 0 {
+    scriptedRun()
+    ret 0
+  }
+  var state: PlaygroundState = createPlayground()
+  let graphStatus: Int = compileDeferred(renderer: state.renderer)
+  if graphStatus is not 0 {
+    log("deferred graph invalid: {statusName(status: graphStatus)}")
+    ret 1
+  }
+  mainLoop state {
+    if Gpu2d.pollClose() {
+      endPlayground(state: state)
+      break
+    }
+    if runPlaygroundFrame(state: state) is false {
+      endPlayground(state: state)
+      break
+    }
+  }
+  ret 0
 }

@@ -54,7 +54,7 @@ static const Keyword KEYWORDS[] = {
     {"type", TOK_KW_TYPE},   {"view", TOK_KW_VIEW},    {"val", TOK_KW_VAL},
     {"own", TOK_KW_OWN},     {"copy", TOK_KW_COPY},
     {"defer", TOK_KW_DEFER}, {"taskScope", TOK_KW_TASKSCOPE},
-    {"parallelLoop", TOK_KW_PARALLELLOOP},
+    {"parallelLoop", TOK_KW_PARALLELLOOP}, {"mainLoop", TOK_KW_MAINLOOP},
     {"break", TOK_KW_BREAK}, {"continue", TOK_KW_CONTINUE},
     {"as", TOK_KW_AS},   {"any", TOK_KW_ANY}, {"unsafe", TOK_KW_UNSAFE}};
 
@@ -82,6 +82,7 @@ static const char* const TOKEN_KIND_NAMES[] = {
     [TOK_KW_SPAWN] = "TOK_SPAWN",
     [TOK_KW_TASKSCOPE] = "TOK_TASKSCOPE",
     [TOK_KW_PARALLELLOOP] = "TOK_PARALLELLOOP",
+    [TOK_KW_MAINLOOP] = "TOK_MAINLOOP",
     [TOK_KW_AS] = "TOK_AS",
     [TOK_KW_ANY] = "TOK_ANY",
     [TOK_KW_UNSAFE] = "TOK_UNSAFE",

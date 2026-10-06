@@ -2025,75 +2025,6 @@ static void write_function_body_with_pool(FILE* out, const char* body, bool keep
   }
 }
 
-// The frame entry (docs/web-frame-loop.md, option B): an entry module with no
-// `main` may define `func setup() ret T` and `func frame(app: mod T) ret
-// Bool` instead. The C main is generated: natively setup once, then frame
-// until it returns false, then the app value is dropped. In the browser the
-// value lives in a heap box and the browser calls frame through
-// emscripten_set_main_loop_arg, so the program never blocks and needs no
-// per-frame Asyncify yield (main.c sees the marker comment and links the
-// build for it). The app value is owned by that loop between frames, so no
-// module-level state is involved.
-static bool is_entry_func(const CompilerContext* ctx, const AstFuncDecl* f, const char* name) {
-  if (!str_eq_cstr(f->name, name) || f->is_extern || f->generic_params) return false;
-  if (!ctx->entry_file_path || !f->origin_file) return false;
-  return strcmp(ctx->entry_file_path, f->origin_file) == 0;
-}
-
-static void emit_frame_entry(CompilerContext* ctx, const AstModule* module, FILE* out) {
-  const AstFuncDecl* setup = NULL;
-  const AstFuncDecl* frame = NULL;
-  for (size_t i = 0; i < ctx->all_decl_count; i++) {
-    const AstDecl* d = ctx->all_decls[i];
-    if (d->kind != AST_DECL_FUNC) continue;
-    if (is_entry_func(ctx, &d->as.func_decl, "setup")) setup = &d->as.func_decl;
-    if (is_entry_func(ctx, &d->as.func_decl, "frame")) frame = &d->as.func_decl;
-  }
-  if (!setup && !frame) return;
-  const AstTypeRef* app_type = (setup && setup->returns && !setup->returns->next) ? setup->returns->type : NULL;
-  const AstParam* app_param = frame ? frame->params : NULL;
-  bool shapes_ok = setup && frame && !setup->params && app_type && app_param && !app_param->next &&
-                   app_param->type && app_param->type->is_mod && frame->returns && !frame->returns->next &&
-                   frame->returns->type && str_eq_cstr(get_base_type_name(frame->returns->type), "Bool");
-  if (!shapes_ok) {
-    fprintf(out, "#error \"Rae: an entry module without main needs func setup() ret T and func frame(app: mod T) ret Bool\"\n");
-    return;
-  }
-  CFuncContext tctx = {.compiler_ctx = ctx, .module = module, .func_decl = setup, .func_first_let_idx = (size_t)-1};
-  const char* setup_name = rae_mangle_function(ctx, setup);
-  const char* frame_name = rae_mangle_function(ctx, frame);
-  fprintf(out, "/* RAE_FRAME_CALLBACK_ENTRY: generated main over setup/frame */\n");
-  fprintf(out, "#ifdef __EMSCRIPTEN__\n#include <emscripten.h>\n");
-  fprintf(out, "static void rae_frame_entry_tick(void* arg) {\n  ");
-  emit_type_ref_as_c_type(&tctx, app_type, out, false);
-  fprintf(out, "* app_box = (");
-  emit_type_ref_as_c_type(&tctx, app_type, out, false);
-  fprintf(out, "*)arg;\n  if (!%s(app_box)) {\n    emscripten_cancel_main_loop();\n", frame_name);
-  emit_drop_for_value(&tctx, out, app_type, "(*app_box)", true);
-  fprintf(out, "    free(app_box);\n  }\n}\n#endif\n");
-  fprintf(out, "int main(int argc, char** argv) {\n  rae_runtime_set_args(argc, argv);\n");
-  for (size_t gi = 0; gi < ctx->all_decl_count; gi++) {
-    const AstDecl* gd = ctx->all_decls[gi];
-    if (gd->kind != AST_DECL_GLOBAL_LET || !global_init_is_deferred(gd->as.let_decl.value)) continue;
-    bool sh = tctx.has_expected_type; AstTypeRef se = tctx.expected_type;
-    if (gd->as.let_decl.type) { tctx.expected_type = *gd->as.let_decl.type; tctx.has_expected_type = true; }
-    fprintf(out, "  %s = ", global_c_name(ctx, gd));
-    emit_expr(&tctx, gd->as.let_decl.value, out, PREC_LOWEST, false, false);
-    fprintf(out, ";\n");
-    tctx.has_expected_type = sh; tctx.expected_type = se;
-  }
-  fprintf(out, "#ifdef __EMSCRIPTEN__\n  ");
-  emit_type_ref_as_c_type(&tctx, app_type, out, false);
-  fprintf(out, "* app_box = (");
-  emit_type_ref_as_c_type(&tctx, app_type, out, false);
-  fprintf(out, "*)malloc(sizeof(*app_box));\n  *app_box = %s();\n", setup_name);
-  fprintf(out, "  emscripten_set_main_loop_arg(rae_frame_entry_tick, app_box, 0, 1);\n  return 0;\n#else\n  ");
-  emit_type_ref_as_c_type(&tctx, app_type, out, false);
-  fprintf(out, " app = %s();\n  while (%s(&app)) {}\n", setup_name, frame_name);
-  emit_drop_for_value(&tctx, out, app_type, "app", true);
-  fprintf(out, "  return 0;\n#endif\n}\n\n");
-}
-
 bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* f, FILE* out) {
   if (f->is_extern || str_starts_with_cstr(f->name, "rae_ext_")) return true;
   CFuncContext tctx = {.compiler_ctx = ctx, .module = m, .func_decl = f, .func_first_let_idx = (size_t)-1};
@@ -4268,17 +4199,14 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   }
   progress_work(EMIT_STAGE_SPEC_BODIES_HI, 1.0, 0, 1);
   
-  // Finally emit main (or, with no main, the setup/frame entry)
+  // Finally emit main
   size_t pre_main_spec_count = ctx->specialized_func_count;
-  bool emitted_main = false;
   for (size_t i = 0; i < ctx->all_decl_count; i++) {
       const AstDecl* d = ctx->all_decls[i];
       if (d->kind == AST_DECL_FUNC && str_eq_cstr(d->as.func_decl.name, "main")) {
           emit_function(ctx, module, &d->as.func_decl, out);
-          emitted_main = true;
       }
   }
-  if (!emitted_main) emit_frame_entry(ctx, module, out);
 
   // Emit any specializations discovered during main (e.g. from collection literals)
   {

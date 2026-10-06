@@ -508,7 +508,12 @@ static void dump_if_stmt(const AstStmt* stmt, FILE* out, int indent) {
 
 static void dump_loop_stmt(const AstStmt* stmt, FILE* out, int indent) {
   print_indent(out, indent);
-  fputs(stmt->as.loop_stmt.is_parallel ? "parallelLoop" : "loop", out);
+  fputs(stmt->as.loop_stmt.is_main_loop ? "mainLoop"
+        : stmt->as.loop_stmt.is_parallel ? "parallelLoop" : "loop", out);
+  if (stmt->as.loop_stmt.is_main_loop) {
+    fputc(' ', out);
+    print_str(out, stmt->as.loop_stmt.main_loop_state);
+  }
   if (stmt->as.loop_stmt.query_bindings) {
     /* The ECS query-loop sugar: dump the SOURCE bindings + iterable, not the
      * hoisted-let expansion (whose hidden names vary run to run). */

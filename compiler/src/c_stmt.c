@@ -699,6 +699,10 @@ static int count_ident_refs_block(const AstBlock* b, Str name) {
   }
   return total;
 }
+// The mainLoop body check (sema_main_loop.c) asks the same question.
+int rae_count_ident_refs_in_block(const AstBlock* block, Str name) {
+  return count_ident_refs_block(block, name);
+}
 static int count_ident_refs_args(const AstCallArg* a, Str name) {
   int total = 0;
   for (; a; a = a->next) total += count_ident_refs_expr(a->value, name);
@@ -1622,7 +1626,96 @@ static bool emit_parallel_loop(CFuncContext* ctx, const AstStmt* stmt, Str index
     return true;
 }
 
+// `mainLoop state { body }` (docs/web-frame-loop.md §5): the body is
+// outlined into `rae_Bool __rae_main_loop_bodyN(T* state)`, one frame that
+// answers whether to go on (`break` -> false, the end or `continue` -> true).
+// Sema let the body name only the state, which the function sees as a `mod`
+// alias of the caller's value. Natively main loops over it and drops the
+// state; in a browser the state moves into a heap box and the page calls a
+// trampoline each animation frame (emscripten_set_main_loop_arg), which drops
+// and frees the box when the body says stop. Either way main's own drops skip
+// the state. The `RAE_FRAME_CALLBACK_ENTRY` marker tells the web link that no
+// frame blocks (main.c emcc_link_c_to_web).
+static bool emit_main_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
+    CompilerContext* cc = ctx->compiler_ctx;
+    Str state = stmt->as.loop_stmt.main_loop_state;
+    int state_index = -1;
+    for (int i = (int)ctx->local_count - 1; i >= 0 && state_index < 0; i--)
+        if (str_eq(ctx->locals[i], state)) state_index = i;
+    if (state_index < 0 || !ctx->local_type_refs[state_index]) {
+        fprintf(out, "  /* invalid mainLoop; rejected by sema */\n");
+        return true;
+    }
+    const AstTypeRef* value_type = ctx->local_type_refs[state_index];
+    AstTypeRef* alias_type = arena_alloc(cc->ast_arena, sizeof(AstTypeRef));
+    *alias_type = *value_type;
+    alias_type->is_mod = true;
+    alias_type->resolved_type = NULL;
+    char* type_buf = NULL; size_t type_len = 0;
+    FILE* type_out = open_memstream(&type_buf, &type_len);
+    if (!type_out) return false;
+    emit_type_ref_as_c_type(ctx, value_type, type_out, false);
+    fclose(type_out);
+
+    char* thunk_buf = NULL; size_t thunk_len = 0;
+    FILE* thunk = open_memstream(&thunk_buf, &thunk_len);
+    if (!thunk) { free(type_buf); return false; }
+    int id = cc->parallel_thunk_counter++;
+    fprintf(thunk, "rae_Bool __rae_main_loop_body%d(%s* %.*s) {\n", id, type_buf, (int)state.len, state.data);
+    fprintf(thunk, "  int __rae_spm_func = rae_string_pool_mark();\n  rae_Bool __rae_keep_going = 0;\n");
+    fprintf(thunk, "  for (int __rae_frame_pass = 0;; __rae_frame_pass = 1) {\n");
+    fprintf(thunk, "    if (__rae_frame_pass) { __rae_keep_going = 1; break; }\n");
+    size_t saved_locals = ctx->local_count;
+    if (ctx->local_count < 256) {
+        size_t slot = ctx->local_count++;
+        ctx->locals[slot] = state;
+        ctx->local_types[slot] = ctx->local_types[state_index];
+        ctx->local_type_refs[slot] = alias_type;
+        ctx->local_is_ptr[slot] = true;
+        ctx->local_is_mod[slot] = true;
+        ctx->local_moved[slot] = false;
+        ctx->local_drop_flag[slot] = false;
+        ctx->local_struct_owns_heap[slot] = false;
+    }
+    size_t body_locals = ctx->local_count;
+    if (ctx->loop_depth < 32) ctx->loop_body_local_start[ctx->loop_depth] = body_locals;
+    if (ctx->loop_depth < 32) ctx->loop_temps[ctx->loop_depth] = ctx->stmt_temps;
+    ctx->loop_depth++;
+    const AstBlock* body = stmt->as.loop_stmt.body;
+    if (body) for (const AstStmt* s = body->first; s; s = s->next) emit_stmt(ctx, s, thunk);
+    ctx->loop_depth--;
+    emit_implicit_drops_for_body(ctx, thunk, body_locals);
+    ctx->local_count = saved_locals;
+    fprintf(thunk, "  }\n  rae_string_pool_flush(__rae_spm_func);\n  return __rae_keep_going;\n}\n\n");
+    fprintf(thunk, "#ifdef __EMSCRIPTEN__\n#include <emscripten.h>\n");
+    fprintf(thunk, "void __rae_main_loop_tick%d(void* arg) {\n  %s* __rae_state_box = (%s*)arg;\n", id, type_buf, type_buf);
+    fprintf(thunk, "  if (!__rae_main_loop_body%d(__rae_state_box)) {\n    emscripten_cancel_main_loop();\n", id);
+    emit_drop_for_value(ctx, thunk, value_type, "(*__rae_state_box)", true);
+    fprintf(thunk, "    free(__rae_state_box);\n  }\n}\n");
+    fprintf(thunk, "void __rae_main_loop_start%d(%s value) {\n  %s* __rae_state_box = (%s*)malloc(sizeof(%s));\n",
+            id, type_buf, type_buf, type_buf, type_buf);
+    fprintf(thunk, "  *__rae_state_box = value;\n  emscripten_set_main_loop_arg(__rae_main_loop_tick%d, __rae_state_box, 0, 0);\n}\n#endif\n\n", id);
+    fclose(thunk);
+    if (!cc->parallel_thunks) cc->parallel_thunks = open_memstream(&cc->parallel_thunks_buf, &cc->parallel_thunks_len);
+    if (cc->parallel_thunks && thunk_buf) fputs(thunk_buf, cc->parallel_thunks);
+    free(thunk_buf);
+
+    fprintf(out, "  /* RAE_FRAME_CALLBACK_ENTRY: mainLoop */\n  {\n");
+    fprintf(out, "    rae_Bool __rae_main_loop_body%d(%s*);\n#ifdef __EMSCRIPTEN__\n", id, type_buf);
+    fprintf(out, "    void __rae_main_loop_start%d(%s);\n    __rae_main_loop_start%d(%.*s);\n#else\n",
+            id, type_buf, id, (int)state.len, state.data);
+    fprintf(out, "    while (__rae_main_loop_body%d(&%.*s)) {}\n", id, (int)state.len, state.data);
+    char state_cname[256];
+    snprintf(state_cname, sizeof state_cname, "%.*s", (int)state.len, state.data);
+    emit_drop_for_value(ctx, out, value_type, state_cname, true);
+    fprintf(out, "#endif\n  }\n");
+    ctx->local_moved[state_index] = true;
+    free(type_buf);
+    return true;
+}
+
 static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
+    if (stmt->as.loop_stmt.is_main_loop) return emit_main_loop(ctx, stmt, out);
     if (stmt->as.loop_stmt.is_parallel) {
         // Sema rejected any other shape, so a non-empty index is the norm.
         Str index = sema_parallel_loop_index(stmt);

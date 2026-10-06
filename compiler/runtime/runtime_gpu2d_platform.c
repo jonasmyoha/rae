@@ -370,7 +370,7 @@ rae_Bool rae_ext_Gpu2d_pollClose(void) {
 #ifdef __EMSCRIPTEN__
     /* Browser WebGPU presents at requestAnimationFrame boundaries. Asyncify
      * lets the current Rae loop await that boundary without source changes.
-     * A setup/frame program (RAE_WEB_FRAME_CALLBACK) is already called once
+     * A mainLoop program (RAE_WEB_FRAME_CALLBACK) is already called once
      * per browser frame, so it does not wait here. */
 #ifndef RAE_WEB_FRAME_CALLBACK
     rae_browser_next_frame();
