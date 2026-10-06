@@ -2794,6 +2794,11 @@ static bool emcc_link_c_to_web(const char* entry_rae_file,
    * step contexts in the playgrounds). */
   args[n++] = "-sSTACK_SIZE=8388608";
   args[n++] = "-sASYNCIFY";
+  /* WebAssembly SIMD, as the WASI build has always had: lib/Float4 lowers to
+   * wasm_simd128 with it and to scalar code without. Every current browser
+   * runs it (Chrome 91, Firefox 89, Safari 16.4). Without it the physics
+   * playground's step was 1.7x slower in Chrome (docs/web-frame-loop.md). */
+  args[n++] = "-msimd128";
   if (emits_html) {
     args[n++] = "--shell-file";
     args[n++] = shell_html;

@@ -811,10 +811,11 @@ release, 1280 x 800 window, ms per frame:
 | pyramid, 1 000 boxes, autofire | 16.67 (60 fps, vsync) | 0.12 | | 15.4 waiting for the browser's frame |
 
 On the web the profile's "input, camera" lap holds the wait for the browser's
-next animation frame (the Asyncify yield in the poll). The browser's step,
-~20 ms at 5 000 boxes, is ~1.2x the 16.4 ms the same physics takes in Node's
-WASI, which is the cost of Asyncify's instrumentation (queued: a frame
-callback instead). At 5 000 boxes the browser cannot keep real time on one
+next animation frame (the Asyncify yield in the poll). The browser's step was
+~20 ms at 5 000 boxes against 16.4 in Node's WASI. That turned out to be the
+browser build's missing `-msimd128`, not Asyncify (docs/web-frame-loop.md
+§2). With SIMD on, the step is ~12.7 ms and the frame 35 ms (was 44-52);
+Asyncify itself costs ~4% of the step. At 5 000 boxes the browser cannot keep real time on one
 thread; with the cap of 2 it runs the simulation slower, at 1.55 steps a
 frame. At 1 000 boxes it is smooth at 60 fps. WASM threads (backlog #245)
 are what would bring 5 000 back.
