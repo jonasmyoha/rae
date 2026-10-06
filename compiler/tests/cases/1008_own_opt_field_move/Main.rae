@@ -1,0 +1,78 @@
+# `own` out of an optional field leaves the field empty (none), exactly like
+# a move out of a List or String field: the value now belongs to the
+# destination, so assigning the source afterwards, or dropping its owner,
+# must not free it again. It used to copy the value and leave the source
+# still holding it, so `holder.first = none` freed the list `holder.second`
+# had just received (a use after free, then a double free at exit). The
+# runner checks the allocation counters at exit (RAE_MEM_STATS): a double
+# free shows as negative outstanding buffers and fails the case.
+type Holder {
+  first: opt List(Int)
+  second: opt List(Int)
+  label: opt String
+  copyOfLabel: opt String
+}
+
+func listSum(items: view List(Int)) ret Int {
+  var sum: Int = 0
+  loop let item: view Int in items {
+    sum = sum + item
+  }
+  ret sum
+}
+
+# Log the holder's first (or second) list, or that it is empty.
+func describe(name: view String, holder: view Holder, first: view Bool) {
+  var found: Bool = false
+  if first {
+    if let list: view List(Int) => holder.first {
+      log("{name}: {list.length} items, sum {listSum(items: list)}")
+      found = true
+    }
+  } else if let list: view List(Int) => holder.second {
+    log("{name}: {list.length} items, sum {listSum(items: list)}")
+    found = true
+  }
+  if found is false {
+    log("{name}: empty")
+  }
+}
+
+func moveThenClearSource() {
+  let items: List(Int) = { 1, 2, 3 }
+  var holder: Holder = { first: items, second: none, label: none, copyOfLabel: none }
+  holder.second = own holder.first
+  describe(name: "after the move, first", holder: holder, first: true)
+  holder.first = none
+  describe(name: "after clearing first, second", holder: holder, first: false)
+}
+
+func swapThroughLocal() {
+  let low: List(Int) = { 1, 2 }
+  let high: List(Int) = { 10, 20, 30 }
+  var holder: Holder = { first: low, second: high, label: none, copyOfLabel: none }
+  var temporary: opt List(Int) = own holder.first
+  holder.first = own holder.second
+  holder.second = own temporary
+  describe(name: "swapped first", holder: holder, first: true)
+  describe(name: "swapped second", holder: holder, first: false)
+}
+
+func moveStringThenOwnerDrops() {
+  var holder: Holder = { first: none, second: none, label: "a label {3}", copyOfLabel: none }
+  holder.copyOfLabel = own holder.label
+  if let text: view String => holder.copyOfLabel {
+    log("moved label: {text}")
+  }
+  if let text: view String => holder.label {
+    log("label still set: {text}")
+  } else {
+    log("label is empty")
+  }
+}
+
+func main() {
+  moveThenClearSource()
+  swapThroughLocal()
+  moveStringThenOwnerDrops()
+}
