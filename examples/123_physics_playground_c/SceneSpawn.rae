@@ -54,6 +54,7 @@ type PlaygroundWorld {
 func createPlaygroundWorld(workerCount: view Int) ret PlaygroundWorld {
   var def: WorldDef = defaultPhysicsWorldDef()
   def.workerCount = workerCount
+  let rate: StepRate = playgroundStepRate()
   ret PlaygroundWorld {
     allocator: createEntityAllocator()
     transforms: createComponentTable(Transform3D)
@@ -62,7 +63,11 @@ func createPlaygroundWorld(workerCount: view Int) ret PlaygroundWorld {
     colliders: createComponentTable(Collider)
     characters: createComponentTable(CharacterBody)
     renderShapes: createComponentTable(RenderShape)
-    physics: createPhysics(def: def, fixedStep: 1.0 / 60.0, subSteps: 4)
+    physics: createPhysics(
+      def: def
+      fixedStep: 1.0 / (rate.hertz as Float)
+      subSteps: rate.subSteps
+    )
     sceneEntities: List.create(EntityId, cap: 64)
     characterId: noEntity()
     ballsThrown: 0

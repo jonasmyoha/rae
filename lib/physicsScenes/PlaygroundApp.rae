@@ -33,6 +33,10 @@
 #                                    HUD, batches, each render pass,
 #                                    present), logs one [profile] report and
 #                                    closes the window (FrameProfile)
+#   RAE_PLAYGROUND_WINDOW=x,y,w,h    the window's position and size in
+#                                    points (default 1280 x 800 wherever the
+#                                    OS puts it): a profile on a given
+#                                    display, or a smaller window
 #   RAE_PLAYGROUND_DEBUG=1           logs the shadow casters and live balls
 #                                    of each frame, and each frame's time,
 #                                    physics steps and newest ball's drawn
@@ -127,7 +131,20 @@ type PlaygroundApp {
 
 # Open the window (before the renderer is created).
 func openPlaygroundWindow(trackName: view String) {
-  Gpu2d.initWindow(width: 1280, height: 800, title: "Rae — physics playground ({trackName})")
+  var width: Int = 1280
+  var height: Int = 800
+  let placement: List(String) = Sys.getEnv(name: "RAE_PLAYGROUND_WINDOW").split(sep: ",")
+  if placement.length is 4 {
+    width = placement.copyAtDefault(index: 2).toInt()
+    height = placement.copyAtDefault(index: 3).toInt()
+  }
+  Gpu2d.initWindow(width: width, height: height, title: "Rae — physics playground ({trackName})")
+  if placement.length is 4 {
+    Gpu2d.setWindowPosition(
+      x: placement.copyAtDefault(index: 0).toInt()
+      y: placement.copyAtDefault(index: 1).toInt()
+    )
+  }
   Gpu2d.setDesignResolution(width: windowExtentW(), height: windowExtentH(), fit: 0)
 }
 
