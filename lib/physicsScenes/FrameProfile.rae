@@ -1,0 +1,237 @@
+# A frame's time by system, for the physics examples' performance pass
+# (docs/physics-performance-plan.md §10). Off unless the app turns it on
+# (the playground's RAE_PLAYGROUND_PROFILE=<frames>); then the frame loop marks
+# a lap after each system, and after `frameLimit` frames one report gives each
+# system's average and worst milliseconds per frame. A lap is one nowNs()
+# call, so the profile does not change what it measures. The first
+# `warmupFrames` frames (startup, the first uploads) are not counted.
+import Math
+
+const warmupFrames: Int = 120
+
+# A system taking longer than this in one frame is logged as a spike (a
+# hitch; present is left out, it waits for the GPU and the display)
+const spikeNs: Int = 8000000
+
+# The systems a frame is split into, in frame order
+const profileInput: Int = 0
+
+const profileShots: Int = 1
+
+const profileCharacter: Int = 2
+
+const profilePush: Int = 3
+
+const profileWorldStep: Int = 4
+
+const profilePull: Int = 5
+
+const profileEvents: Int = 6
+
+const profileCopyPrevious: Int = 7
+
+const profileInterpolate: Int = 8
+
+const profileHud: Int = 9
+
+const profileBatches: Int = 10
+
+const profileShadowQueue: Int = 11
+
+const profileGbuffer: Int = 12
+
+const profileLightingPasses: Int = 13
+
+const profileUiOverlay: Int = 14
+
+const profilePresent: Int = 15
+
+const profileFrameEnd: Int = 16
+
+const profileSectionCount: Int = 17
+
+func profileSectionName(section: view Int) ret String {
+  if section is profileInput {
+    ret "input, camera"
+  }
+  if section is profileShots {
+    ret "spawn and despawn balls"
+  }
+  if section is profileCharacter {
+    ret "character system"
+  }
+  if section is profilePush {
+    ret "physics push (ECS -> world)"
+  }
+  if section is profileWorldStep {
+    ret "physics world step"
+  }
+  if section is profilePull {
+    ret "physics pull (world -> ECS)"
+  }
+  if section is profileEvents {
+    ret "physics events"
+  }
+  if section is profileCopyPrevious {
+    ret "keep previous poses"
+  }
+  if section is profileInterpolate {
+    ret "interpolate poses"
+  }
+  if section is profileHud {
+    ret "HUD"
+  }
+  if section is profileBatches {
+    ret "instance batches"
+  }
+  if section is profileShadowQueue {
+    ret "shadow casters (cull, queue)"
+  }
+  if section is profileGbuffer {
+    ret "gbuffer (instance upload, draw)"
+  }
+  if section is profileLightingPasses {
+    ret "deferred passes"
+  }
+  if section is profileUiOverlay {
+    ret "UI overlay"
+  }
+  if section is profilePresent {
+    ret "present (end frame)"
+  }
+  ret "frame end, poll, wait"
+}
+
+type FrameProfile {
+  enabled: Bool
+  frameLimit: Int
+  warmupLeft: Int
+  frames: Int
+  steps: Int
+  frameSteps: Int
+  # Per section: this frame's, the run's total and the worst frame's ns
+  frameNs: List(Int)
+  totalNs: List(Int)
+  maxNs: List(Int)
+  # The worst whole frame, and the time the last lap ended
+  maxFrameNs: Int
+  frameStartNs: Int
+  markNs: Int
+  reported: Bool
+}
+
+# A profile of `frameLimit` frames; 0 is off.
+func createFrameProfile(frameLimit: view Int) ret FrameProfile {
+  var profile: FrameProfile = {
+    enabled: frameLimit > 0
+    frameLimit: frameLimit
+    warmupLeft: warmupFrames
+    frames: 0
+    steps: 0
+    frameSteps: 0
+    frameNs: List.create(Int, cap: profileSectionCount)
+    totalNs: List.create(Int, cap: profileSectionCount)
+    maxNs: List.create(Int, cap: profileSectionCount)
+    maxFrameNs: 0
+    frameStartNs: 0
+    markNs: 0
+    reported: false
+  }
+  loop var i: Int = 0, i < profileSectionCount, ++i {
+    profile.frameNs.add(value: 0)
+    profile.totalNs.add(value: 0)
+    profile.maxNs.add(value: 0)
+  }
+  ret profile
+}
+
+# Start timing a frame. The time since the last frame's end (the window
+# poll at the top of the loop) goes to the frame's first lap.
+func profileFrameStart(profile: mod FrameProfile) {
+  if profile.enabled {
+    if profile.markNs is 0 {
+      profile.markNs = nowNs()
+    }
+    profile.frameStartNs = profile.markNs
+  }
+}
+
+# The time since the last lap belongs to `section`.
+func profileLap(profile: mod FrameProfile, section: view Int) {
+  if profile.enabled is false {
+    ret
+  }
+  let now: Int = nowNs()
+  profile.frameNs.set(
+    index: section
+    value: profile.frameNs.copyAtDefault(index: section) + now - profile.markNs
+  )
+  profile.markNs = now
+}
+
+func profileSteps(profile: mod FrameProfile, steps: view Int) {
+  profile.steps = profile.steps + steps
+  profile.frameSteps = profile.frameSteps + steps
+}
+
+func nsToMs(ns: view Int) ret Float {
+  ret Math.round(x: (ns as Float) / 10000.0) / 100.0
+}
+
+# Close the frame (its last lap is `section`); after `frameLimit` frames, log
+# the report once. True when the report was just logged.
+func profileFrameEnd(profile: mod FrameProfile, section: view Int) ret Bool {
+  if profile.enabled is false or profile.reported {
+    ret false
+  }
+  profileLap(profile: profile, section: section)
+  if profile.warmupLeft > 0 {
+    profile.warmupLeft = profile.warmupLeft - 1
+    profile.steps = 0
+    profile.frameSteps = 0
+    loop var i: Int = 0, i < profileSectionCount, ++i {
+      profile.frameNs.set(index: i, value: 0)
+    }
+    ret false
+  }
+  loop var i: Int = 0, i < profileSectionCount, ++i {
+    let ns: Int = profile.frameNs.copyAtDefault(index: i)
+    if ns > spikeNs and i is not profilePresent {
+      log(
+        "[profile] spike: frame {profile.frames} ({profile.frameSteps} steps), {profileSectionName(
+          section: i
+        )} {nsToMs(ns: ns)} ms"
+      )
+    }
+    profile.totalNs.set(index: i, value: profile.totalNs.copyAtDefault(index: i) + ns)
+    if ns > profile.maxNs.copyAtDefault(index: i) {
+      profile.maxNs.set(index: i, value: ns)
+    }
+    profile.frameNs.set(index: i, value: 0)
+  }
+  profile.frameSteps = 0
+  let frameNs: Int = profile.markNs - profile.frameStartNs
+  if frameNs > profile.maxFrameNs {
+    profile.maxFrameNs = frameNs
+  }
+  profile.frames = profile.frames + 1
+  if profile.frames < profile.frameLimit {
+    ret false
+  }
+  profile.reported = true
+  var sum: Int = 0
+  log(
+    "[profile] {profile.frames} frames, {profile.steps} physics steps; ms per frame: average, worst"
+  )
+  loop var i: Int = 0, i < profileSectionCount, ++i {
+    let total: Int = profile.totalNs.copyAtDefault(index: i)
+    sum = sum + total
+    log(
+      "[profile] {profileSectionName(section: i)}: {nsToMs(ns: total / profile.frames)}, {nsToMs(
+        ns: profile.maxNs.copyAtDefault(index: i)
+      )}"
+    )
+  }
+  log("[profile] whole frame: {nsToMs(ns: sum / profile.frames)}, {nsToMs(ns: profile.maxFrameNs)}")
+  ret true
+}

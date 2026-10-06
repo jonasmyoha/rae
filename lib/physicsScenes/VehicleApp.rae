@@ -27,6 +27,7 @@ import Gpu2d
 import Sdl3
 import Keys
 import Quat
+open physicsScenes/FrameProfile
 open Vec3
 open ecs/ComponentTable
 open ecs/Transform
@@ -56,6 +57,8 @@ const chaseDistance: Float = 10.0
 const chaseHeight: Float = 3.2
 
 type VehicleApp {
+  # renderPhysicsFrame's frame profile (off in the vehicle examples)
+  profile: FrameProfile
   meshes: PlaygroundMeshes
   batches: PlaygroundBatches
   courseMesh: MeshHandle
@@ -119,6 +122,7 @@ func createVehicleApp(
   camera.target = Vec3 { x: 0.0, y: 0.0, z: 1.0 }
   camera.farZ = 2500.0
   let app: VehicleApp = {
+    profile: createFrameProfile(frameLimit: 0)
     meshes: meshes
     batches: createPlaygroundBatches(meshes: meshes)
     courseMesh: uploadMeshData(renderer: renderer, meshData: courseMesh(course: course))
@@ -441,6 +445,7 @@ func finishVehicleFrame(
       gpuUi: app.ui.gpuUi
       debugOverlay: app.ui.debugOverlay
       debugLog: app.debugLog
+      profile: app.profile
     )
     addTimingSample(window: app.frameWindow, milliseconds: app.deltaTime * 1000.0, now: app.clock)
     recordVehicleFrame(

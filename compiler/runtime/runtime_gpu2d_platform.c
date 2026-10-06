@@ -100,7 +100,13 @@ static void rae_g2d_configure(int pw, int ph) {
     cfg.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_CopyDst;
     cfg.width = (uint32_t)pw;
     cfg.height = (uint32_t)ph;
+    /* Vsync (Fifo). RAE_PRESENT_MODE=immediate presents without waiting for
+     * the display, for profiling: a frame then takes max(CPU, GPU) instead of
+     * the display's interval, whatever its refresh rate (a 60 Hz monitor hides
+     * whether a frame would fit 120 Hz). */
     cfg.presentMode = WGPUPresentMode_Fifo;
+    const char* present_mode = getenv("RAE_PRESENT_MODE");
+    if (present_mode && strcmp(present_mode, "immediate") == 0) cfg.presentMode = WGPUPresentMode_Immediate;
     cfg.alphaMode = WGPUCompositeAlphaMode_Auto;
     wgpuSurfaceConfigure(g_g2d_surface, &cfg);
     g_sdl_w = pw; g_sdl_h = ph;

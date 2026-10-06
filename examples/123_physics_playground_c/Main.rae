@@ -44,6 +44,7 @@ open physicsScenes/SceneLibrary
 open physicsScenes/SceneHud
 open physicsScenes/BallPool
 open physicsScenes/PlaygroundApp
+open physicsScenes/FrameProfile
 
 # PhysicsScene `index` stepped `steps` fixed steps at `workerCount` workers: the
 # transform hash.
@@ -146,6 +147,7 @@ func runWindowed() ret Int {
     ret 1
   }
   loop not Gpu2d.pollClose() {
+    profileFrameStart(profile: app.profile)
     beginPlaygroundFrame(app: app, uiWorld: uiWorld, uiSystems: uiSystems)
     if readPlaygroundControls(app: app, uiWorld: uiWorld, uiSystems: uiSystems) {
       destroyPlaygroundWorld(world: world)
@@ -160,6 +162,7 @@ func runWindowed() ret Int {
       startPlaygroundScene(app: app, renderer: renderer, scene: scene)
     }
     updatePlaygroundCamera(app: app)
+    profileLap(profile: app.profile, section: profileInput)
     loop let direction: view Vec3 in playgroundShots(app: app) {
       let ballId: EntityId = throwBallAlong(
         world: world
@@ -171,13 +174,15 @@ func runWindowed() ret Int {
     loop let ballId: view EntityId in retirePlaygroundBalls(app: app, transforms: world.transforms) {
       despawnBall(world: world, entityId: ballId)
     }
+    profileLap(profile: app.profile, section: profileShots)
     var steps: Int = 0
     if playgroundShouldStep(app: app, awakeCount: playgroundAwakeCount(world: world)) {
       let started: Int = nowNs()
-      steps = stepPlayground(world: world, frameTime: app.deltaTime)
+      steps = stepPlaygroundProfiled(world: world, frameTime: app.deltaTime, profile: app.profile)
       recordPlaygroundStep(app: app, startedNs: started, steps: steps)
     } else {
       settlePlaygroundPoses(world: world)
+      profileLap(profile: app.profile, section: profileCopyPrevious)
     }
     # Draw the poses between the last two fixed steps, so motion is smooth
     # however the frames and the steps fall
@@ -186,6 +191,7 @@ func runWindowed() ret Int {
       current: world.transforms
       blend: playgroundBlend(world: world)
     )
+    profileLap(profile: app.profile, section: profileInterpolate)
     logPlaygroundFrame(app: app, shown: shown, steps: steps)
     let hudChanged: Bool = updatePlaygroundHud(
       app: app
@@ -193,6 +199,7 @@ func runWindowed() ret Int {
       uiSystems: uiSystems
       stats: playgroundStats(world: world, sceneName: app.sceneName, targetBodyCount: app.bodyCount)
     )
+    profileLap(profile: app.profile, section: profileHud)
     finishPlaygroundFrame(
       app: app
       renderer: renderer
@@ -203,6 +210,9 @@ func runWindowed() ret Int {
       awakeCount: playgroundAwakeCount(world: world)
       hudChanged: hudChanged
     )
+    if profileFrameEnd(profile: app.profile, section: profileFrameEnd) {
+      break
+    }
   }
   destroyPlaygroundWorld(world: world)
   closePlaygroundWindow(renderer: renderer)

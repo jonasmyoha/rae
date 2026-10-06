@@ -3,6 +3,7 @@
 # shadow casters grouped by mesh kind, the instanced geometry pass
 # (PlaygroundRender), the renderer's generic passes, the lib/ui HUD with the
 # shared FPS meter on top, and present.
+open physicsScenes/FrameProfile
 import Gpu2d
 open ecs/ComponentTable
 open ecs/Transform
@@ -37,6 +38,7 @@ func renderPhysicsFrame(
   gpuUi: view Gpu2dUi
   debugOverlay: mod DebugOverlay
   debugLog: view Bool
+  profile: mod FrameProfile
 ) {
   let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
   loop var passIndex: Int = 0, passIndex < deferredOrderLength(renderer: renderer), ++passIndex {
@@ -66,6 +68,7 @@ func renderPhysicsFrame(
       if debugLog {
         log("[shadow] casters {shadowCasterCount(renderer: renderer)}")
       }
+      profileLap(profile: profile, section: profileShadowQueue)
     } else if tag is RenderTag.gbuffer {
       ensureRendererResources(renderer: renderer)
       if let resources: mod GpuResources => renderer.gpuResources {
@@ -84,6 +87,7 @@ func renderPhysicsFrame(
         )
         Gbuffer.endPass(cache: renderer.passes.gbuffer, resources: resources)
       }
+      profileLap(profile: profile, section: profileGbuffer)
     } else if tag is RenderTag.uiOverlay {
       Gpu2d.beginFrameLoad(canvas: renderer.canvas)
       renderSystemGpu2d(
@@ -99,8 +103,10 @@ func renderPhysicsFrame(
         font: gpuUi.textFont
         didRealWork: true
       )
+      profileLap(profile: profile, section: profileUiOverlay)
     } else if tag is RenderTag.present {
       Gpu2d.endFrame(canvas: renderer.canvas)
+      profileLap(profile: profile, section: profilePresent)
     } else {
       renderDeferredPass(
         renderer: renderer
@@ -109,6 +115,7 @@ func renderPhysicsFrame(
         light: light
         aspect: aspect
       )
+      profileLap(profile: profile, section: profileLightingPasses)
     }
   }
 }
