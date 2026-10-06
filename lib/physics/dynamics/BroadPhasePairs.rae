@@ -655,8 +655,25 @@ func needsRebuild(world: view PhysicsWorld, treeIndex: view Int) ret Bool {
   ret false
 }
 
-# b3UpdateBroadPhasePairs: find the new shape pairs, rebuild the dynamic and
-# kinematic trees, and create a contact for each new pair in key order.
+# The pending rebuild of the dynamic and kinematic trees (b3UpdateTreesTask,
+# Box3D's b3UpdateBroadPhaseTrees); a no-op when none is pending. Anything
+# that reads the trees after updateBroadPhasePairs runs it first.
+func finishTreeRebuild(world: mod PhysicsWorld) {
+  if world.treeRebuildPending is false {
+    ret
+  }
+  if let tree: mod DynamicTree => world.broadPhase.trees.modAt(index: dynamicTree) {
+    let dynamicLeaves: Int = rebuildTree(tree: tree, fullBuild: false)
+  }
+  if let tree: mod DynamicTree => world.broadPhase.trees.modAt(index: kinematicTree) {
+    let kinematicLeaves: Int = rebuildTree(tree: tree, fullBuild: false)
+  }
+  world.treeRebuildPending = false
+}
+
+# b3UpdateBroadPhasePairs: find the new shape pairs, mark the dynamic and
+# kinematic trees for their rebuild (finishTreeRebuild), and create a
+# contact for each new pair in key order.
 # The pair keys handed to contact creation, in that order, are left in
 # world.createdPairKeys.
 func updateBroadPhasePairs(world: mod PhysicsWorld) {
@@ -690,13 +707,10 @@ func updateBroadPhasePairs(world: mod PhysicsWorld) {
     clearMoved(tree: tree)
   }
 
-  # Update stale trees (b3EnqueueTreeUpdate: inline with one worker).
-  if let tree: mod DynamicTree => world.broadPhase.trees.modAt(index: dynamicTree) {
-    let dynamicLeaves: Int = rebuildTree(tree: tree, fullBuild: false)
-  }
-  if let tree: mod DynamicTree => world.broadPhase.trees.modAt(index: kinematicTree) {
-    let kinematicLeaves: Int = rebuildTree(tree: tree, fullBuild: false)
-  }
+  # Update stale trees (b3EnqueueTreeUpdate): collide runs the rebuild as
+  # one more chunk of its parallel loop, beside the narrow phase, which
+  # reads no tree (finishTreeRebuild)
+  world.treeRebuildPending = true
 
   # Pairs arrive in a deterministic order, scrambled relative to body and
   # shape order. Sorting them improves solver performance and makes contact
