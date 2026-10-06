@@ -391,6 +391,7 @@ func collide(world: mod PhysicsWorld) {
   let contactCount: Int = contactIndices.length
   if contactCount is 0 {
     world.collideContactIds = own contactIndices
+    finishTreeRebuild(world: world)
     ret
   }
 
@@ -411,10 +412,18 @@ func collide(world: mod PhysicsWorld) {
   let blockCount: Int = parallelForBlockCount(itemCount: contactCount, blockSize: blockSize)
   let chunkCount: Int = world.taskContexts.length
   if world.workerCount > 1 {
+    # Chunk 0 first runs the tree rebuild, which writes only the dynamic
+    # and kinematic trees (the narrow phase reads none). Chunk 0 is the
+    # caller's, so the rebuild starts at once and the other workers steal
+    # the rest of its range (one more iteration would make the pool pair
+    # the chunks up, which balances worse).
     parallelLoop var chunk: Int = 0, chunk < chunkCount, ++chunk {
       # A chunk writes only its own contacts (each contact id is in one
       # block) and its own TaskContext slot
       unsafe {
+        if chunk is 0 {
+          finishTreeRebuild(world: world)
+        }
         collideChunk(
           world: world
           contactIndices: contactIndices
@@ -425,6 +434,7 @@ func collide(world: mod PhysicsWorld) {
       }
     }
   } else {
+    finishTreeRebuild(world: world)
     loop var chunk: Int = 0, chunk < chunkCount, ++chunk {
       collideChunk(
         world: world

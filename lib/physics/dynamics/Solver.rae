@@ -29,6 +29,7 @@ open physics/dynamics/SolverSet
 open physics/dynamics/Island
 open physics/dynamics/World
 open physics/dynamics/WorldIslands
+open physics/dynamics/BroadPhasePairs
 open physics/dynamics/ParallelFor
 open physics/dynamics/ContactConstraints
 open physics/dynamics/StepContext
@@ -315,6 +316,8 @@ func restitutionOverflow(
 # b3Solve: solve the constraints of the awake bodies with graph colouring,
 # then finalize them.
 func solve(world: mod PhysicsWorld, context: mod StepContext) {
+  # The tree rebuild ran beside collide; finish it here if it did not
+  finishTreeRebuild(world: world)
   # Only steps that advance the simulation count
   world.stepIndex = world.stepIndex + 1
   let awakeBodyCount: Int = setBodyCount(world: world, setIndex: awakeSet)
