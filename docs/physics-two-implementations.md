@@ -649,24 +649,128 @@ it.
 
 ## 6. The comparison
 
-Measured on the four examples and `benchmarks/physics` (which gains a track-B
-column), written up in this document:
+Measured 2026-10-07 on an M1 Max (8 performance cores), at Box3D pin
+9f998c8. Other work kept the load average at 2-5, so the numbers carry a few
+percent of noise. Track B's step is Box3D's own C, so its speed is measured
+with Box3D's benchmark app built from the same pin (the C cost of a step does
+not change when Rae calls it). Track A is the port in Rae's release profile.
 
-- **speed:** step ms per scene at 1, 2, 4 and 8 workers, frame time in the
-  playground at stress scale, and the WASM build in the browser;
-- **behaviour:** the determinism hashes (identical across worker counts and
-  across platforms where measurable), and equality between the tracks at the
-  same pin;
-- **cost to own:**
-  - lines of Rae and C each track adds;
-  - build time and binary size;
-  - what moving the pin to upstream HEAD costs: for track B, measured by
-    doing it; for track A, by the size of the upstream diff it would have to
-    port;
-- **what each makes possible:** callbacks (custom filtering, friction
-  mixing), solver changes of our own, debugging in one language, and the
-  compiler and language work the port drives.
+### Speed
 
-The task ends with `[question]`: the maintainer picks the track. The other
-one is then retired, kept as a benchmark only, or kept as a second backend,
-and the docs and examples follow.
+**Step time per scene** (`benchmarks/physics/run.sh`, which now takes
+`WORKERS="1 2 4 8"`; ms per step, best of 2):
+
+| scene | workers | B: C SIMD | C scalar | A: port | A / B |
+|---|---|---|---|---|---|
+| large_pyramid | 1 / 8 | 7.37 / 1.75 | 10.73 / 2.17 | 10.84 / 2.24 | 1.47x / 1.28x |
+| many_pyramids | 1 / 8 | 14.53 / 3.14 | 20.80 / 4.01 | 20.55 / 4.01 | 1.41x / 1.28x |
+| joint_grid | 1 / 8 | 11.42 / 1.96 | 11.40 / 1.92 | 12.31 / 2.30 | 1.08x / 1.18x |
+| convex_pile | 1 / 8 | 10.90 / 2.27 | 13.10 / 2.56 | 15.33 / 3.19 | 1.41x / 1.41x |
+| rain | 1 / 8 | 4.70 / 1.22 | 4.75 / 1.20 | 5.53 / 1.32 | 1.18x / 1.09x |
+
+At 2 and 4 workers the ratios fall in between (1.10-1.49x). So:
+- **Track B is 1.1-1.5x faster at every worker count.** Both scale alike
+  (about 4.8x from 1 to 8 workers on the pyramids).
+- **The port matches Box3D's *scalar* build on the pyramids, and is
+  1.1-1.25x slower on joints, hulls and rain.** The gap to track B is mostly
+  Box3D's SIMD contact solver, which the port's Float4 lowering does not
+  reach yet.
+
+**The playground at stress scale** (pyramid, 10 000 boxes, autofire, 900
+frames, two runs each, present without vsync, display off so nothing was
+shown): about 5.0 ms per fixed step on the port against 3.7 ms on track B. A
+frame is 9.5-9.7 ms against 8.6-9.0 ms, the GPU frame 5.6-5.8 ms on both, and
+neither had a step spike.
+
+**In the browser** (headless Chrome, 5 000 boxes, autofire, single-threaded
+WASM with SIMD, 300 frames, two runs each): the port takes 13-15 ms per
+step, with frames of 17-24 ms. Track B takes 8.6-8.8 ms per step and holds
+60 fps (16.7 ms frames). Track B had no browser build until this
+comparison. `tools/box3d/build.sh` now also builds Box3D with Emscripten
+(`lib/emscripten/libbox3d.a`; Box3D takes its SSE2 path, which Emscripten
+lowers to WASM SIMD), and `rae build --target wasm` links it. The .wasm is
+2.15 MB (A) against 2.13 MB (B).
+
+### Behaviour
+
+- **Determinism:** each of the playground's six scenes stepped 300 fixed
+  steps hashes the same at 1 and 7 workers on both tracks.
+- **Equality between the tracks:** every scene's hash is **identical across
+  the tracks**: the port in its dev and release builds, and track B with
+  Box3D's scalar and SIMD libraries (pyramid 13989882217973405586, dominoes
+  7984529933928460054, bridge and chain 10921941951751306776, welded towers
+  18137990624986220419, rolling mesh 2559445745101452581, terrain walk
+  1077010086784316763). Under that sit the port's 27 bit-exact oracle traces
+  against Box3D's scalar build (fixtures 948-996), and fixture 998, where the
+  SIMD library equals the scalar golden.
+
+### Cost to own
+
+| | track A: the port | track B: the C library |
+|---|---|---|
+| Rae in the repository | 45 001 lines, 116 files (`lib/physics`, ECS 1 331 of them) | 4 664 lines, 14 files (`lib/box3d`, 2 231 generated bindings) |
+| C in the repository | none | 577 lines (glue 507, build script 70) |
+| upstream C it carries | none (ported) | 68 624 lines, built from a cache outside the repo |
+| shared | `lib/physicsScenes` 4 784 lines; the examples' Main is one file | the same |
+| clean release build, playground | 94 s (80 s emitting C, 98 500 lines of C) | 39 s (30 s emitting, 58 500 lines), plus 30-40 s to build the library once per pin |
+| release binary, playground / vehicle | 1.55 / 1.52 MB | 1.77 / 1.73 MB |
+
+**Moving to upstream HEAD** (16f7f4c, 2026-10-06: three commits and nine
+days after the pin, but 35 files and +5 351/-3 705 lines in `src` and
+`include`: AVX2 with runtime detection, a restructured SIMD layer, the wide
+contact solver and convex manifold, a tree speed-up):
+- **Track B, done on branch `trial/box3d-upstream-head`** (not merged). The
+  library and the glue build at HEAD (30 s). The regenerated bindings
+  change 13 lines (two stall-threshold functions gone, two AVX2 functions
+  added, constants moved). Both examples build and run, and the
+  playground's determinism holds. Fixture 998's bit-exact golden fails:
+  rotated-box contact changed upstream, so the oracle goldens move with the
+  pin and the two tracks stop being equal. About half an hour of work.
+- **Track A would have to port the upstream diff.** The bit-exact fixtures
+  show the contact changes alter results, so following them means porting
+  the convex-manifold and contact-solver changes to Rae. That is roughly
+  2-3 thousand lines of the diff, plus regenerating the goldens. The AVX2 and
+  SIMD-layer refactor has no Rae counterpart to port. This is days per
+  upstream batch of this size, every time.
+
+### What each makes possible
+
+- **Track A:**
+  - Rae all the way down: one language to debug and profile, Rae's own
+    leak, zero-allocation and race checks over the engine (the
+    zero-allocation step of §10h was found that way).
+  - Engine changes are ordinary Rae edits: custom contact filtering or
+    friction mixing as ECS data or enum-selected code rather than C
+    callbacks (Rae has no function values), and solver changes of our own.
+  - A 45 000-line real program that drives the compiler. The Float4 SIMD
+    lowering, `parallelLoop` and its worker pool, the `opt`/`own` move fixes,
+    `unsafe` colouring, the per-pass and allocation tooling were all built or
+    fixed because the port needed them.
+  - Runs wherever Rae runs, with no C library to build per target.
+- **Track B:**
+  - Box3D as its author ships it: faster (1.1-1.5x native, ~1.6x in the
+    browser), upstream fixes and features by moving a pin (measured above),
+    and Box3D's own SIMD.
+  - A tenth of the code to own.
+  - Callbacks (filters, friction, pre-solve) need C glue, since Rae cannot
+    pass a function. Debugging crosses into C. The threads are Box3D's (now
+    run through the glue's task system, §10h of the performance plan). A
+    new target needs the library built for it (now done for the browser).
+
+### Recommendation
+
+Use **track B as Rae's physics engine**. It is faster everywhere it was
+measured, it is a tenth of the code to own, and following upstream costs
+half an hour instead of days. The two tracks give identical results today, so
+apps can switch with no behaviour change: the ECS surface is the same.
+
+Keep **track A as a frozen benchmark and compiler test**, pinned at
+9f998c8 and not following upstream. It stays the largest real Rae program and
+the best measure of how close safe Rae gets to C. It already found and drove
+most of this cycle's compiler and runtime work, and its bit-exact fixtures
+cost nothing to keep while the pin does not move. Retiring it would lose
+that. Keeping it as a second backend would mean porting every upstream change
+twice, for no user-visible gain.
+
+The maintainer decides (`QUEUE.md`): which track Rae uses, and whether the
+other is retired, kept as a benchmark, or kept as a second backend.

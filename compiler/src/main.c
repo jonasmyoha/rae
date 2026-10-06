@@ -2865,6 +2865,28 @@ static bool emcc_link_c_to_web(const char* entry_rae_file,
     args[n++] = "--preload-file";
     args[n++] = preload_lib[i];
   }
+  /* Upstream Box3D (the C-library physics track): its headers and the
+   * Emscripten build of the library tools/box3d/build.sh installs. */
+  char box3d_include[PATH_MAX + 4];
+  char box3d_library[PATH_MAX + 48];
+  if (c_output_includes(c_path, "box3d/box3d.h")) {
+    const char* box3d_root = getenv("RAE_BOX3D");
+    char box3d_rootbuf[PATH_MAX];
+    if (!box3d_root || !*box3d_root) {
+      const char* home = getenv("HOME"); if (!home) home = ".";
+      snprintf(box3d_rootbuf, sizeof(box3d_rootbuf), "%s/.cache/rae/box3d/install", home);
+      box3d_root = box3d_rootbuf;
+    }
+    snprintf(box3d_include, sizeof(box3d_include), "-I%s/include", box3d_root);
+    snprintf(box3d_library, sizeof(box3d_library), "%s/lib/emscripten/libbox3d.a", box3d_root);
+    struct stat box3d_stat;
+    if (stat(box3d_library, &box3d_stat) != 0) {
+      fprintf(stderr, "error: this program imports box3d, but %s is missing; run tools/box3d/build.sh with emcc installed (or set RAE_BOX3D)\n", box3d_library);
+      return false;
+    }
+    args[n++] = box3d_include;
+    args[n++] = box3d_library;
+  }
   args[n++] = c_path;
   args[n++] = runtime_c;
   for (int i = 0; i < extra_count; i++) args[n++] = extra_paths[i];
