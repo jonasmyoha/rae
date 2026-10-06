@@ -110,6 +110,18 @@ func rae_b3CreateHullShape(
 
 func rae_b3DestroyHull(hull: UInt64) unsafe extern("rae_b3DestroyHull")
 
+# A world's task system as an opaque handle (0: none, Box3D's own threads):
+# threads at the creating thread's QoS class (docs/physics-performance-plan.md
+# §10h)
+func rae_b3CreateTaskSystem(workerCount: Int32) unsafe extern("rae_b3CreateTaskSystem") ret UInt64
+
+func rae_b3DestroyTaskSystem(taskSystem: UInt64) unsafe extern("rae_b3DestroyTaskSystem")
+
+func rae_b3CreateWorldWithTasks(
+  def: view b3WorldDef
+  taskSystem: UInt64
+) unsafe extern("rae_b3CreateWorldWithTasks") ret b3WorldId
+
 func rae_b3CreateHeightField(
   def: view b3HeightFieldDef
 ) unsafe extern("rae_b3CreateHeightField") ret UInt64

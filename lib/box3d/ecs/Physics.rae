@@ -73,6 +73,10 @@ type Physics {
   # The venue's meshes and height fields (the glue's handles), owned here
   meshes: List(UInt64)
   heightFields: List(UInt64)
+  # The world's worker threads (the glue's handle, 0 for one worker), owned
+  # here: Box3D's built-in scheduler would start them below the stepping
+  # thread's QoS class (docs/physics-performance-plan.md §10h)
+  taskSystem: UInt64
 }
 
 # The world definition of an ECS world: Rae's Z-up gravity
@@ -90,8 +94,10 @@ func defaultPhysicsWorldDef() ret WorldDef {
 # seconds in `subSteps` sub-steps, at most 4 fixed steps per frame.
 func createPhysics(def: view WorldDef, fixedStep: view Float, subSteps: view Int) ret Physics {
   unsafe {
+    let taskSystem: UInt64 = rae_b3CreateTaskSystem(workerCount: def.workerCount as Int32)
+    let worldDef: b3WorldDef = toB3WorldDef(def: def)
     ret Physics {
-      world: b3CreateWorld(def: toB3WorldDef(def: def))
+      world: rae_b3CreateWorldWithTasks(def: worldDef, taskSystem: taskSystem)
       lengthUnitsPerMeter: def.lengthUnitsPerMeter
       fixedStep: fixedStep
       subSteps: subSteps
@@ -109,6 +115,7 @@ func createPhysics(def: view WorldDef, fixedStep: view Float, subSteps: view Int
       venueShapeIds: List.create(ShapeId, cap: 4)
       meshes: List.create(UInt64, cap: 0)
       heightFields: List.create(UInt64, cap: 0)
+      taskSystem: taskSystem
     }
   }
 }
@@ -121,6 +128,9 @@ func destroyPhysics(physics: mod Physics) {
     if b3World_IsValid(id: physics.world) {
       b3DestroyWorld(worldId: physics.world)
     }
+    # After the world: its step was the task system's last user
+    rae_b3DestroyTaskSystem(taskSystem: physics.taskSystem)
+    physics.taskSystem = 0
     loop var i: Int = 0, i < physics.meshes.length, ++i {
       rae_b3DestroyMesh(mesh: physics.meshes.copyAtDefault(index: i))
     }
