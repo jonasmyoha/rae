@@ -446,8 +446,8 @@ func destroyShapeInternal(
   loop contactKey is not -1 {
     let contactId: Int = contactKey shr 1
     let edgeIndex: Int = contactKey bitand 1
-    let contact: Contact = world.contacts.copyAtDefault(index: contactId)
-    contactKey = contactEdge(contact: contact, edgeIndex: edgeIndex).nextKey
+    let contact: ContactLinks = contactLinksAt(contacts: world.contacts, contactId: contactId)
+    contactKey = linksEdge(links: contact, edgeIndex: edgeIndex).nextKey
     if contact.shapeIdA is shapeId or contact.shapeIdB is shapeId {
       destroyContact(world: world, contactId: contactId, wakeBodies: wakeBodies)
     }
