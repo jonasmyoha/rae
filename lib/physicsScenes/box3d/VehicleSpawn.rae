@@ -13,6 +13,7 @@ open ecs/Transform
 open physicsScenes/SceneTypes
 open physicsScenes/VehicleTypes
 open physicsScenes/VehicleLibrary
+open physicsScenes/VehicleStunts
 open physicsScenes/PlaygroundRender
 open physicsScenes/PoseBlend
 import box3d/Box3d
@@ -45,6 +46,11 @@ type VehicleWorld {
   # In the car's `wheels` order
   wheelJoints: List(JointId)
   crateIds: List(EntityId)
+  # The course's spinning obstacles (kinematic), in `movers` order, and the
+  # time they are turned to
+  moverIds: List(EntityId)
+  movers: List(CourseMover)
+  moverTime: Float
   workerCount: Int
 }
 
@@ -65,6 +71,9 @@ func createVehicleWorld(workerCount: view Int) ret VehicleWorld {
     wheelIds: List.create(EntityId, cap: 4)
     wheelJoints: List.create(JointId, cap: 4)
     crateIds: List.create(EntityId, cap: 16)
+    moverIds: List.create(EntityId, cap: 4)
+    movers: List.create(CourseMover, cap: 4)
+    moverTime: 0.0
     workerCount: workerCount
   }
 }
@@ -169,6 +178,28 @@ func spawnCourse(world: mod VehicleWorld, course: view VehicleCourse) {
   )
   loop let fixture: view SceneBody in course.fixtures {
     let fixtureId: EntityId = spawnShapeBody(world: world, body: fixture, fastRotation: false)
+  }
+  loop let mover: view CourseMover in course.movers {
+    world.moverIds.add(value: spawnShapeBody(world: world, body: mover.body, fastRotation: false))
+    world.movers.add(value: mover)
+  }
+}
+
+# Turn the spinning obstacles to where they are at the end of the coming
+# fixed step: the push system turns a kinematic body's new Transform3D into
+# the velocity that reaches it over the step.
+func driveMovers(world: mod VehicleWorld) {
+  world.moverTime = world.moverTime + world.physics.fixedStep
+  loop var i: Int = 0, i < world.moverIds.length, ++i {
+    if let mover: view CourseMover => world.movers.viewAt(index: i) {
+      let pose: SceneFrame = moverPose(mover: mover, time: world.moverTime)
+      let transform: mod Transform3D => componentMod(
+        this: world.transforms
+        entityId: world.moverIds.copyAtDefault(index: i)
+      )
+      transform.position = pose.position
+      transform.rotation = pose.rotation
+    }
   }
 }
 
@@ -340,6 +371,7 @@ func stepVehicleWorld(world: mod VehicleWorld, frameTime: view Float) ret Int {
   let steps: Int = consumeFixedSteps(physics: world.physics, frameTime: frameTime)
   loop var i: Int = 0, i < steps, ++i {
     copyTransforms(from: world.transforms, into: world.previousTransforms)
+    driveMovers(world: world)
     physicsFixedStep(
       physics: world.physics
       rigidBodies: world.rigidBodies

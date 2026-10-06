@@ -18,6 +18,9 @@
 #                                    seconds and logs each respawn (the
 #                                    memory test: bodies and joints despawn
 #                                    and spawn the whole run)
+#   RAE_VEHICLE_OVERVIEW=1           a fixed camera high over the course
+#                                    instead of the chase camera (a whole-
+#                                    level view: screenshots, level review)
 #   RAE_VEHICLE_DEBUG=1              logs the drawn chassis pose, each frame's
 #                                    physics steps and time, and the shadow
 #                                    casters of each frame
@@ -82,6 +85,8 @@ type VehicleApp {
   lastCycle: Float
   cycleCount: Int
   debugLog: Bool
+  # RAE_VEHICLE_OVERVIEW: the fixed whole-level camera
+  overview: Bool
   # This frame
   extentW: Float
   extentH: Float
@@ -142,6 +147,7 @@ func createVehicleApp(
     lastCycle: 0.0
     cycleCount: 0
     debugLog: Sys.getEnv(name: "RAE_VEHICLE_DEBUG").length() > 0
+    overview: Sys.getEnv(name: "RAE_VEHICLE_OVERVIEW").length() > 0
     extentW: windowExtentW()
     extentH: windowExtentH()
     startTime: startTime
@@ -337,11 +343,15 @@ func updateChaseCamera(app: mod VehicleApp, chassis: view Transform3D) {
   app.cameraHeading = vnorm(
     a: vadd(a: previous, b: vscale(a: vsub(a: forward, b: previous), s: blend))
   )
-  let eye: Vec3 = vadd(
+  var eye: Vec3 = vadd(
     a: vsub(a: chassis.position, b: vscale(a: app.cameraHeading, s: chaseDistance))
     b: Vec3 { x: 0.0, y: 0.0, z: chaseHeight }
   )
-  let target: Vec3 = vadd(a: chassis.position, b: Vec3 { x: 0.0, y: 0.0, z: 1.0 })
+  var target: Vec3 = vadd(a: chassis.position, b: Vec3 { x: 0.0, y: 0.0, z: 1.0 })
+  if app.overview {
+    eye = Vec3 { x: -62.0, y: -58.0, z: 52.0 }
+    target = Vec3 { x: 2.0, y: 0.0, z: 3.0 }
+  }
   let moved: Float = vlen(a: vsub(a: eye, b: app.camera.position))
   app.camera.position = eye
   app.camera.target = target

@@ -98,9 +98,20 @@ type VehicleWheelTarget {
   maxSpinTorque: Float
 }
 
+# An obstacle that turns on its own: a kinematic body spun about `axis`
+# through `pivot` at `radiansPerSecond` (a sweeper arm, a paddle wheel). The
+# body's pose is its pose at time 0; pivot and axis are in world space.
+type CourseMover {
+  body: SceneBody
+  pivot: Vec3
+  axis: Vec3
+  radiansPerSecond: Float
+}
+
 # The course: a height-field terrain (Box3D's grid over local x and z with
 # heights along local y, placed by `terrainPosition` / `terrainRotation`),
-# static ramps (`fixtures`), and light boxes to knock flying - crates and a
+# static ramps and the stunt pieces (`fixtures`), spinning obstacles
+# (`movers`), and light boxes to knock flying - crates and a
 # wall of blocks - respawned with the car (`crates`).
 type VehicleCourse {
   heights: List(Float)
@@ -111,6 +122,8 @@ type VehicleCourse {
   terrainRotation: Quat
   terrainFriction: Float
   fixtures: List(SceneBody)
+  # The spinning obstacles (VehicleStunts), stepped with the physics
+  movers: List(CourseMover)
   crates: List(SceneBody)
   cameraStart: Vec3
 }
