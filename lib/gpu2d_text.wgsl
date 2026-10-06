@@ -69,6 +69,9 @@ fn clipCoverage(posD: vec2<f32>) -> f32 {
 fn fs(in: VsOut) -> @location(0) vec4<f32> {
   let g = glyphs[in.inst];
   let s = textureSample(atlasTex, atlasSamp, in.uv);
+// The clip coverage once, in uniform control flow: it takes fwidth, which
+// strict WGSL (Dawn in the browser) rejects inside the outline branch below.
+  let clipCov = clipCoverage(in.posD);
 // signed distance from the glyph edge, in physical px (design pxRange * avg
 // scale). Positive inside the glyph.
   let sc = (uXform[0].z + uXform[0].w) * 0.5;
@@ -76,7 +79,7 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
 // softness widens the coverage falloff (px) — 1 = crisp AA, larger = a soft
 // blurred edge (used for soft drop-shadows).
   let sw = max(g.params.z, 1.0);
-  let bodyCov = clamp(sd / sw + 0.5, 0.0, 1.0) * clipCoverage(in.posD);
+  let bodyCov = clamp(sd / sw + 0.5, 0.0, 1.0) * clipCov;
   let ow = g.params.y;
   if (ow <= 0.0) {
     let a = g.color.a * bodyCov;
@@ -84,7 +87,7 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
   }
 // Outline = the glyph dilated by `ow` px; composite body OVER outline,
 // both premultiplied.
-  let outerCov = clamp((sd + ow) / sw + 0.5, 0.0, 1.0) * clipCoverage(in.posD);
+  let outerCov = clamp((sd + ow) / sw + 0.5, 0.0, 1.0) * clipCov;
   let ba = g.color.a * bodyCov;
   let oa = g.outline.a * outerCov;
   let outA = ba + oa * (1.0 - ba);

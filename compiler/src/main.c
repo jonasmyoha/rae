@@ -2717,13 +2717,19 @@ static bool emcc_link_c_to_web(const char* entry_rae_file,
    * build -- a project that uses none of this should not have to have lib/. */
   static const char* lib_runtime_paths[] = {
     "lib/app3d/scenes",
+    "lib/physicsScenes/scenes",
     "lib/data"
   };
-  char preload_lib[2][PATH_MAX * 2 + 4];
+  char preload_lib[sizeof(lib_runtime_paths) / sizeof(lib_runtime_paths[0])][PATH_MAX * 2 + 4];
   int preload_lib_count = 0;
   snprintf(runtime_c, sizeof(runtime_c), "%s/rae_runtime.c", RAE_RUNTIME_SOURCE_DIR);
   snprintf(shell_html, sizeof(shell_html), "%s/web_shell.html", RAE_RUNTIME_SOURCE_DIR);
   snprintf(include_flag, sizeof(include_flag), "-I%s", RAE_RUNTIME_SOURCE_DIR);
+  /* runtime/web resolves wgpu-native's "webgpu/wgpu.h" (the generated
+   * bindings' cheader) to the browser's standard webgpu.h; browser-only, so
+   * it never shadows the real header in a native build. */
+  char web_include_flag[PATH_MAX + 8];
+  snprintf(web_include_flag, sizeof(web_include_flag), "-I%s/web", RAE_RUNTIME_SOURCE_DIR);
 
   char extra_paths[32][PATH_MAX];
   int extra_count = 0;
@@ -2782,6 +2788,11 @@ static bool emcc_link_c_to_web(const char* entry_rae_file,
     args[n++] = "-DNDEBUG";
   }
   args[n++] = "-sALLOW_MEMORY_GROWTH=1";
+  /* The main thread's stack as a native process has it (8 MB): Emscripten's
+   * 64 KB default overflows into the heap ("memory access out of bounds") as
+   * soon as a program keeps a large struct on the stack (the physics world's
+   * step contexts in the playgrounds). */
+  args[n++] = "-sSTACK_SIZE=8388608";
   args[n++] = "-sASYNCIFY";
   if (emits_html) {
     args[n++] = "--shell-file";
@@ -2804,6 +2815,11 @@ static bool emcc_link_c_to_web(const char* entry_rae_file,
   if (uses_webgpu) {
     args[n++] = "-DRAE_HAS_WEBGPU";
     args[n++] = "--use-port=emdawnwebgpu";
+    args[n++] = web_include_flag;
+    /* A `Ptr` stored in a chained-struct field (`nextInChain: sourceList.data`)
+     * is a pointer-type mismatch clang only warns about natively; Emscripten's
+     * newer clang makes it an error. Keep it the warning it is natively. */
+    args[n++] = "-Wno-error=incompatible-pointer-types";
   }
   if (has_assets) {
     args[n++] = "--preload-file";
