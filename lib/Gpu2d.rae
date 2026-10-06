@@ -494,13 +494,27 @@ func beginFrameLoad(canvas: mod Gpu2dCanvas) {
 # still platform glue) and retire the frame's per-run objects behind the
 # tracked submission.
 func endFrame(canvas: mod Gpu2dCanvas) {
+  if endFrameSubmit(canvas: canvas) {
+    endFramePresent(canvas: canvas)
+  }
+}
+
+# endFrame in its two halves, for a caller that does something between them
+# (the deferred renderer's per-pass GPU timing marks the boundary): submit the
+# frame's 2D work, then copy it into the drawable and present. The first
+# answers false when no frame was open, and then the second must not run.
+func endFrameSubmit(canvas: mod Gpu2dCanvas) ret Bool {
   # Advance the deterministic clock every frame, even one with no drawable yet.
   g2dTick()
   if not canvasFrameActive(canvas: canvas) {
-    ret
+    ret false
   }
   flush(canvas: canvas)
   canvasCloseFrame(canvas: canvas)
+  ret true
+}
+
+func endFramePresent(canvas: mod Gpu2dCanvas) {
   g2dPresent(canvas: canvas)
   boxFrameEnd(canvas: canvas)
 }
