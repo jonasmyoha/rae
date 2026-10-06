@@ -32,6 +32,9 @@ import Gpu2d
 import Parallel
 open Vec3
 open ecs/Entity
+open ecs/ComponentTable
+open ecs/Transform
+open physicsScenes/PoseBlend
 open RendererDeferred
 open Rendergraph
 open ui/Ecs
@@ -168,11 +171,22 @@ func runWindowed() ret Int {
     loop let ballId: view EntityId in retirePlaygroundBalls(app: app, transforms: world.transforms) {
       despawnBall(world: world, entityId: ballId)
     }
+    var steps: Int = 0
     if playgroundShouldStep(app: app, awakeCount: playgroundAwakeCount(world: world)) {
       let started: Int = nowNs()
-      let steps: Int = stepPlayground(world: world, frameTime: app.deltaTime)
+      steps = stepPlayground(world: world, frameTime: app.deltaTime)
       recordPlaygroundStep(app: app, startedNs: started, steps: steps)
+    } else {
+      settlePlaygroundPoses(world: world)
     }
+    # Draw the poses between the last two fixed steps, so motion is smooth
+    # however the frames and the steps fall
+    let shown: ComponentTable(Transform3D) = interpolatedTransforms(
+      previous: world.previousTransforms
+      current: world.transforms
+      blend: playgroundBlend(world: world)
+    )
+    logPlaygroundFrame(app: app, shown: shown, steps: steps)
     let hudChanged: Bool = updatePlaygroundHud(
       app: app
       uiWorld: uiWorld
@@ -185,7 +199,7 @@ func runWindowed() ret Int {
       uiWorld: uiWorld
       uiSystems: uiSystems
       renderShapes: world.renderShapes
-      transforms: world.transforms
+      transforms: shown
       awakeCount: playgroundAwakeCount(world: world)
       hudChanged: hudChanged
     )
