@@ -28,7 +28,9 @@
 #                                    memory test: with autofire, bodies spawn
 #                                    and despawn the whole run)
 #   RAE_PLAYGROUND_DEBUG=1           logs the shadow casters and live balls
-#                                    of each frame
+#                                    of each frame, and each frame's time,
+#                                    physics steps and newest ball's drawn
+#                                    position ([playground-frame])
 import Math
 import Sys
 import Gpu2d
@@ -97,6 +99,8 @@ type PlaygroundApp {
   lastCycle: Float
   cycleCount: Int
   debugLog: Bool
+  # The ball the debug log follows (logPlaygroundFrame)
+  trackedBall: EntityId
   # This frame
   extentW: Float
   extentH: Float
@@ -181,6 +185,7 @@ func createPlaygroundApp(
     lastCycle: 0.0
     cycleCount: 0
     debugLog: envFlag(name: "RAE_PLAYGROUND_DEBUG")
+    trackedBall: noEntity()
     extentW: windowExtentW()
     extentH: windowExtentH()
     startTime: startTime
@@ -424,6 +429,32 @@ func retirePlaygroundBalls(
 # Step only while something is awake (a sleeping world costs nothing).
 func playgroundShouldStep(app: view PlaygroundApp, awakeCount: view Int) ret Bool {
   ret awakeCount > 0 or app.shotsThisFrame > 0 or app.sceneChanged
+}
+
+# The debug log's per-frame line (RAE_PLAYGROUND_DEBUG): the frame's time, its
+# physics steps, and where one ball is drawn - the same ball until it is
+# retired, then the newest - the measure of how smoothly motion reaches the
+# screen.
+func logPlaygroundFrame(
+  app: mod PlaygroundApp
+  shown: view ComponentTable(Transform3D)
+  steps: view Int
+) {
+  if app.debugLog is false or app.balls.balls.length is 0 {
+    ret
+  }
+  if componentHas(this: shown, entityId: app.trackedBall) is false {
+    app.trackedBall = app.balls.balls.copyAtDefault(index: app.balls.balls.length - 1).entityId
+  }
+  if let pose: Transform3D = componentCopy(this: shown, entityId: app.trackedBall) {
+    log(
+      "[playground-frame] dt {Math.round(x: app.deltaTime * 10000.0) / 10.0} ms, steps {steps}, ball {app.trackedBall.index} at ({Math.round(
+        x: pose.position.x * 100.0
+      ) / 100.0}, {Math.round(x: pose.position.y * 100.0) / 100.0}, {Math.round(
+        x: pose.position.z * 100.0
+      ) / 100.0})"
+    )
+  }
 }
 
 # Record a step's time (`startedNs` from nowNs, `steps` fixed steps taken).
