@@ -182,9 +182,48 @@ func scalingRun(counts: view String) {
   }
 }
 
-# The window: the shared PlaygroundApp does the frame; this loop makes the
-# calls into the track (spawn, step, throw, despawn, counts).
-func runWindowed() ret Int {
+# Everything the window keeps between frames, owned in one value: setup
+# builds it, frame advances it once per frame (docs/web-frame-loop.md). In a
+# browser the page calls frame on each animation frame; natively the
+# generated main loops over it.
+type PlaygroundState {
+  renderer: DeferredRenderer
+  uiWorld: UiWorld
+  uiSystems: UiSystems
+  app: PlaygroundApp
+  world: PlaygroundWorld
+  scene: PhysicsScene
+  workers: Int
+}
+
+# The headless modes' exit code, or -1 to open the window.
+func headlessRun() ret Int {
+  let steps: String = Sys.getEnv(name: "RAE_PHYSICS_DETERMINISM")
+  if steps.length() > 0 {
+    if determinismRun(steps: steps.toInt()) > 0 {
+      ret 1
+    }
+    ret 0
+  }
+  let scalingCounts: String = Sys.getEnv(name: "RAE_PLAYGROUND_SCALING")
+  if scalingCounts.length() > 0 {
+    scalingRun(counts: scalingCounts)
+    ret 0
+  }
+  if Sys.getEnv(name: "RAE_PLAYGROUND_SCRIPTED").length() > 0 {
+    scriptedRun()
+    ret 0
+  }
+  ret -1
+}
+
+# The program's entry: a headless mode runs to its end and exits; otherwise
+# the window, the renderer, the UI and the first scene's world.
+func setup() ret PlaygroundState {
+  let headlessCode: Int = headlessRun()
+  if headlessCode >= 0 {
+    Sys.exit(code: headlessCode)
+  }
   openPlaygroundWindow(trackName: trackName)
   var renderer: DeferredRenderer = createDeferredRendererWithUi()
   var uiWorld: UiWorld = create()
@@ -203,97 +242,112 @@ func runWindowed() ret Int {
   let graphStatus: Int = compileDeferred(renderer: renderer)
   if graphStatus is not 0 {
     log("deferred graph invalid: {statusName(status: graphStatus)}")
-    ret 1
+    Sys.exit(code: 1)
   }
-  loop not Gpu2d.pollClose() {
-    profileFrameStart(profile: app.profile)
-    beginPlaygroundFrame(app: app, uiWorld: uiWorld, uiSystems: uiSystems)
-    if readPlaygroundControls(app: app, uiWorld: uiWorld, uiSystems: uiSystems) {
-      destroyPlaygroundWorld(world: world)
-      if app.cycleSeconds > 0.0 {
-        # The memory test's engine check: what the engine still holds with
-        # no world alive must be the same at every switch
-        log("[playground] engine bytes between worlds {engineByteCount()}")
-      }
-      world = createPlaygroundWorld(workerCount: workers)
-      scene = playgroundScene(app: app)
-      spawnScene(world: world, scene: scene)
-      startPlaygroundScene(app: app, renderer: renderer, scene: scene)
-    }
-    updatePlaygroundCamera(app: app)
-    profileLap(profile: app.profile, section: profileInput)
-    loop let direction: view Vec3 in playgroundShots(app: app) {
-      let ballId: EntityId = throwBallAlong(
-        world: world
-        origin: shotOrigin(app: app, direction: direction)
-        direction: direction
-      )
-      addPooledBall(pool: app.balls, entityId: ballId, now: app.clock)
-    }
-    loop let ballId: view EntityId in retirePlaygroundBalls(app: app, transforms: world.transforms) {
-      despawnBall(world: world, entityId: ballId)
-    }
-    profileLap(profile: app.profile, section: profileShots)
-    var steps: Int = 0
-    if playgroundShouldStep(app: app, awakeCount: playgroundAwakeCount(world: world)) {
-      let started: Int = nowNs()
-      steps = stepPlaygroundProfiled(world: world, frameTime: app.deltaTime, profile: app.profile)
-      recordPlaygroundStep(app: app, startedNs: started, steps: steps)
-    } else {
-      settlePlaygroundPoses(world: world)
-      profileLap(profile: app.profile, section: profileCopyPrevious)
-    }
-    # Draw the poses between the last two fixed steps, so motion is smooth
-    # however the frames and the steps fall
-    let shown: ComponentTable(Transform3D) = interpolatedTransforms(
-      previous: world.previousTransforms
-      current: world.transforms
-      blend: playgroundBlend(world: world)
-    )
-    profileLap(profile: app.profile, section: profileInterpolate)
-    logPlaygroundFrame(app: app, shown: shown, steps: steps)
-    let hudChanged: Bool = updatePlaygroundHud(
-      app: app
-      uiWorld: uiWorld
-      uiSystems: uiSystems
-      stats: playgroundStats(world: world, sceneName: app.sceneName, targetBodyCount: app.bodyCount)
-    )
-    profileLap(profile: app.profile, section: profileHud)
-    finishPlaygroundFrame(
-      app: app
-      renderer: renderer
-      uiWorld: uiWorld
-      uiSystems: uiSystems
-      renderShapes: world.renderShapes
-      transforms: shown
-      awakeCount: playgroundAwakeCount(world: world)
-      hudChanged: hudChanged
-    )
-    if profileFrameEnd(profile: app.profile, section: profileFrameEnd) {
-      break
+  # The state takes the renderer's GPU handles with it: moved, never copied
+  unsafe {
+    ret PlaygroundState {
+      renderer: own renderer
+      uiWorld: own uiWorld
+      uiSystems: own uiSystems
+      app: own app
+      world: own world
+      scene: own scene
+      workers: workers
     }
   }
-  destroyPlaygroundWorld(world: world)
-  closePlaygroundWindow(renderer: renderer)
-  ret 0
 }
 
-func main() ret Int {
-  let steps: String = Sys.getEnv(name: "RAE_PHYSICS_DETERMINISM")
-  if steps.length() > 0 {
-    if determinismRun(steps: steps.toInt()) > 0 {
-      ret 1
+# Leaves the window: the world and the window go; false ends the frames.
+func endPlayground(state: mod PlaygroundState) ret Bool {
+  destroyPlaygroundWorld(world: state.world)
+  closePlaygroundWindow(renderer: state.renderer)
+  ret false
+}
+
+# One frame: the shared PlaygroundApp does the frame; this makes the calls
+# into the track (spawn, step, throw, despawn, counts). False once the window
+# closes or the profile run has its report.
+func frame(state: mod PlaygroundState) ret Bool {
+  if Gpu2d.pollClose() {
+    ret endPlayground(state: state)
+  }
+  profileFrameStart(profile: state.app.profile)
+  beginPlaygroundFrame(app: state.app, uiWorld: state.uiWorld, uiSystems: state.uiSystems)
+  if readPlaygroundControls(app: state.app, uiWorld: state.uiWorld, uiSystems: state.uiSystems) {
+    destroyPlaygroundWorld(world: state.world)
+    if state.app.cycleSeconds > 0.0 {
+      # The memory test's engine check: what the engine still holds with
+      # no world alive must be the same at every switch
+      log("[playground] engine bytes between worlds {engineByteCount()}")
     }
-    ret 0
+    state.world = createPlaygroundWorld(workerCount: state.workers)
+    state.scene = playgroundScene(app: state.app)
+    spawnScene(world: state.world, scene: state.scene)
+    startPlaygroundScene(app: state.app, renderer: state.renderer, scene: state.scene)
   }
-  let scalingCounts: String = Sys.getEnv(name: "RAE_PLAYGROUND_SCALING")
-  if scalingCounts.length() > 0 {
-    scalingRun(counts: scalingCounts)
-    ret 0
+  updatePlaygroundCamera(app: state.app)
+  profileLap(profile: state.app.profile, section: profileInput)
+  loop let direction: view Vec3 in playgroundShots(app: state.app) {
+    let ballId: EntityId = throwBallAlong(
+      world: state.world
+      origin: shotOrigin(app: state.app, direction: direction)
+      direction: direction
+    )
+    addPooledBall(pool: state.app.balls, entityId: ballId, now: state.app.clock)
   }
-  if Sys.getEnv(name: "RAE_PLAYGROUND_SCRIPTED").length() > 0 {
-    scriptedRun()
-    ret 0
+  loop let ballId: view EntityId in retirePlaygroundBalls(
+    app: state.app
+    transforms: state.world.transforms
+  ) {
+    despawnBall(world: state.world, entityId: ballId)
   }
-  ret runWindowed()
+  profileLap(profile: state.app.profile, section: profileShots)
+  var steps: Int = 0
+  if playgroundShouldStep(app: state.app, awakeCount: playgroundAwakeCount(world: state.world)) {
+    let started: Int = nowNs()
+    steps = stepPlaygroundProfiled(
+      world: state.world
+      frameTime: state.app.deltaTime
+      profile: state.app.profile
+    )
+    recordPlaygroundStep(app: state.app, startedNs: started, steps: steps)
+  } else {
+    settlePlaygroundPoses(world: state.world)
+    profileLap(profile: state.app.profile, section: profileCopyPrevious)
+  }
+  # Draw the poses between the last two fixed steps, so motion is smooth
+  # however the frames and the steps fall
+  let shown: ComponentTable(Transform3D) = interpolatedTransforms(
+    previous: state.world.previousTransforms
+    current: state.world.transforms
+    blend: playgroundBlend(world: state.world)
+  )
+  profileLap(profile: state.app.profile, section: profileInterpolate)
+  logPlaygroundFrame(app: state.app, shown: shown, steps: steps)
+  let hudChanged: Bool = updatePlaygroundHud(
+    app: state.app
+    uiWorld: state.uiWorld
+    uiSystems: state.uiSystems
+    stats: playgroundStats(
+      world: state.world
+      sceneName: state.app.sceneName
+      targetBodyCount: state.app.bodyCount
+    )
+  )
+  profileLap(profile: state.app.profile, section: profileHud)
+  finishPlaygroundFrame(
+    app: state.app
+    renderer: state.renderer
+    uiWorld: state.uiWorld
+    uiSystems: state.uiSystems
+    renderShapes: state.world.renderShapes
+    transforms: shown
+    awakeCount: playgroundAwakeCount(world: state.world)
+    hudChanged: hudChanged
+  )
+  if profileFrameEnd(profile: state.app.profile, section: profileFrameEnd) {
+    ret endPlayground(state: state)
+  }
+  ret true
 }

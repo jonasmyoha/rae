@@ -254,7 +254,7 @@ void rae_g2d_present(void* texture, int64_t width, int64_t height) {
      * cannot stop that. Waiting here is bounded by one frame's GPU work (no
      * vsync is involved), and it is the backpressure a presenting frame gets
      * from Fifo: the loop runs no faster than the GPU finishes frames. */
-    rae_wgpu_poll(1);
+    rae_wgpu_poll_frame_end();
 }
 
 rae_Bool rae_ext_Gpu2d_lastPresentOk(void) {
