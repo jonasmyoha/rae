@@ -124,7 +124,7 @@ static int rae_string_pool_grow(void) {
 void rae_string_pool_register(void* ptr) {
   if (!ptr) return;
   if (g_rae_string_pool_count >= g_rae_string_pool_cap && !rae_string_pool_grow()) return;
-  RAE_STAT_ADD(g_mem_pool_register_n, 1);
+  RAE_STAT_ADD(RAE_MC_POOL_REGISTER_N, 1);
   g_rae_string_pool[g_rae_string_pool_count++] = ptr;
 }
 
@@ -135,13 +135,13 @@ int rae_string_pool_mark(void) {
 void rae_string_pool_flush(int saved) {
   if (saved < 0) saved = 0;
   if (saved > g_rae_string_pool_count) return;  // nothing to flush
-  RAE_STAT_ADD(g_mem_pool_flush_calls, 1);
+  RAE_STAT_ADD(RAE_MC_POOL_FLUSH_CALLS, 1);
   for (int i = g_rae_string_pool_count - 1; i >= saved; i--) {
     if (g_rae_string_pool[i]) {
       /* The pool only knows the ptr; the hash lookup recovers the
        * site and rae_malloc_size_safe gives us the byte count. */
       rae_mem_str_untag(g_rae_string_pool[i], 0);
-      RAE_STAT_ADD(g_mem_pool_flush_freed, 1);
+      RAE_STAT_ADD(RAE_MC_POOL_FLUSH_FREED, 1);
       free(g_rae_string_pool[i]);
     }
     g_rae_string_pool[i] = NULL;
@@ -151,7 +151,7 @@ void rae_string_pool_flush(int saved) {
 
 void rae_string_pool_remove(void* ptr) {
   if (!ptr) return;
-  RAE_STAT_ADD(g_mem_pool_remove_n, 1);
+  RAE_STAT_ADD(RAE_MC_POOL_REMOVE_N, 1);
   // Linear scan from the top — the entry we want to detach is
   // almost always the most recently registered one (a binding
   // taking the result of the just-emitted interpolation).

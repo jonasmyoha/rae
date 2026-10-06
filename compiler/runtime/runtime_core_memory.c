@@ -241,32 +241,129 @@ static const char* const g_rae_site_names[RAE_SITE__COUNT] = {
   "json_get_str", "json_get_obj", "json_extract", "unknown"
 };
 
-/* Thread safety: every counter below is bumped from whichever thread
- * allocates or frees (a spawn'd worker allocates Strings and Lists like the
- * main thread), so each is a C11 atomic, incremented with a RELAXED add
- * (RAE_STAT_ADD): one instruction, no ordering, because a counter only has to
- * be exact, not ordered against anything. Reading an _Atomic is an atomic
- * load, so the readers need no change. The ptr -> site hash table below is
- * not a counter; it is guarded by g_mem_hash_lock. g_mem_stats_enabled is set
- * once by a constructor before any thread exists. Checked under
- * -fsanitize=thread by compiler/tools/tsan-check.sh. */
-#define RAE_STAT_ADD(counter, n) atomic_fetch_add_explicit(&(counter), (n), memory_order_relaxed)
+/* The counters: one slot each in a RaeMemCounter block. The per-site String
+ * counters are four RAE_SITE__COUNT ranges at the end. */
+typedef enum {
+  RAE_MC_ALLOC_TOTAL_N = 0,  /* always on, see below (#356) */
+  RAE_MC_BUF_ALLOC_N,
+  RAE_MC_BUF_ALLOC_B,
+  RAE_MC_BUF_FREE_N,
+  RAE_MC_BUF_FREE_B,
+  RAE_MC_BUF_RESIZE_N,
+  RAE_MC_POOL_REGISTER_N,
+  RAE_MC_POOL_REMOVE_N,
+  RAE_MC_POOL_FLUSH_CALLS,
+  RAE_MC_POOL_FLUSH_FREED,
+  RAE_MC_SITE_ALLOC_N,
+  RAE_MC_SITE_ALLOC_B = RAE_MC_SITE_ALLOC_N + RAE_SITE__COUNT,
+  RAE_MC_SITE_FREE_N  = RAE_MC_SITE_ALLOC_B + RAE_SITE__COUNT,
+  RAE_MC_SITE_FREE_B  = RAE_MC_SITE_FREE_N + RAE_SITE__COUNT,
+  RAE_MC__COUNT       = RAE_MC_SITE_FREE_B + RAE_SITE__COUNT
+} RaeMemCounter;
 
-static _Atomic int64_t g_mem_site_alloc_n[RAE_SITE__COUNT];
-static _Atomic int64_t g_mem_site_alloc_b[RAE_SITE__COUNT];
-static _Atomic int64_t g_mem_site_free_n[RAE_SITE__COUNT];
-static _Atomic int64_t g_mem_site_free_b[RAE_SITE__COUNT];
+/* Thread safety, and why the counters are PER THREAD. Every thread that
+ * allocates or frees (the main thread, the parallelLoop workers, spawn'd
+ * threads) bumps them, on every String and List allocation. One shared set of
+ * atomics is one cache line every core writes: at 8 workers the physics rain
+ * scene spent most of its samples inside rae_ext_rae_buf_alloc/free fighting
+ * over it (docs/physics-performance-plan.md §2b). So each thread owns a block
+ * (RaeMemCounterBlock, padded off its neighbours' lines) and only that thread
+ * writes it: RAE_STAT_ADD is a relaxed load and a relaxed store, a plain add
+ * on the thread's own line. Readers (the exit report, rae_ext_rae_mem_*) sum
+ * every live block plus g_mem_retired under g_mem_blocks_lock; the slots are
+ * _Atomic so those cross-thread reads are not data races. A thread that exits
+ * folds its block into g_mem_retired under the same lock (the pthread key's
+ * destructor), so a sum never misses or double-counts it: the leak check stays
+ * exact. The ptr -> site hash table below is not a counter; it is guarded by
+ * g_mem_hash_lock. g_mem_stats_enabled is set once by a constructor before
+ * any thread exists. Checked under -fsanitize=thread by
+ * compiler/tools/tsan-check.sh. */
+typedef struct RaeMemCounterBlock {
+  char pad_before[64];
+  _Atomic int64_t value[RAE_MC__COUNT];
+  struct RaeMemCounterBlock* next;
+  char pad_after[64];
+} RaeMemCounterBlock;
 
-static _Atomic int64_t g_mem_buf_alloc_n;
-static _Atomic int64_t g_mem_buf_alloc_b;
-static _Atomic int64_t g_mem_buf_free_n;
-static _Atomic int64_t g_mem_buf_free_b;
-static _Atomic int64_t g_mem_buf_resize_n;
+static RaeMemCounterBlock g_mem_retired;  /* exited threads' counts */
+static RaeMemCounterBlock* g_mem_blocks;  /* live threads' blocks */
+static pthread_mutex_t g_mem_blocks_lock = PTHREAD_MUTEX_INITIALIZER;
+static __thread RaeMemCounterBlock* t_mem_block;
 
-static _Atomic int64_t g_mem_pool_register_n;
-static _Atomic int64_t g_mem_pool_remove_n;
-static _Atomic int64_t g_mem_pool_flush_calls;
-static _Atomic int64_t g_mem_pool_flush_freed;
+#if !defined(__wasm__) || defined(RAE_WASM_THREADS)
+static pthread_key_t g_mem_block_key;
+static pthread_once_t g_mem_block_key_once = PTHREAD_ONCE_INIT;
+
+static void rae_mem_block_retire(void* data) {
+  RaeMemCounterBlock* block = (RaeMemCounterBlock*)data;
+  RAE_LOCK(&g_mem_blocks_lock);
+  for (int k = 0; k < RAE_MC__COUNT; k++) {
+    int64_t sum = atomic_load_explicit(&g_mem_retired.value[k], memory_order_relaxed) +
+                  atomic_load_explicit(&block->value[k], memory_order_relaxed);
+    atomic_store_explicit(&g_mem_retired.value[k], sum, memory_order_relaxed);
+  }
+  for (RaeMemCounterBlock** link = &g_mem_blocks; *link; link = &(*link)->next) {
+    if (*link == block) { *link = block->next; break; }
+  }
+  RAE_UNLOCK(&g_mem_blocks_lock);
+  /* A free in a later thread-exit destructor registers a fresh block. */
+  t_mem_block = NULL;
+  free(block);
+}
+
+static void rae_mem_block_key_create(void) {
+  pthread_key_create(&g_mem_block_key, rae_mem_block_retire);
+}
+#endif
+
+static RaeMemCounterBlock* rae_mem_block_register(void) {
+  RaeMemCounterBlock* block = (RaeMemCounterBlock*)calloc(1, sizeof(RaeMemCounterBlock));
+  if (!block) return &g_mem_retired;  /* out of memory: count racily, never crash */
+#if !defined(__wasm__) || defined(RAE_WASM_THREADS)
+  pthread_once(&g_mem_block_key_once, rae_mem_block_key_create);
+  pthread_setspecific(g_mem_block_key, block);
+#endif
+  RAE_LOCK(&g_mem_blocks_lock);
+  block->next = g_mem_blocks;
+  g_mem_blocks = block;
+  RAE_UNLOCK(&g_mem_blocks_lock);
+  t_mem_block = block;
+  return block;
+}
+
+static inline void rae_mem_stat_add(int counter, int64_t amount) {
+  RaeMemCounterBlock* block = t_mem_block;
+  if (!block) block = rae_mem_block_register();
+  _Atomic int64_t* slot = &block->value[counter];
+  atomic_store_explicit(slot, atomic_load_explicit(slot, memory_order_relaxed) + amount,
+                        memory_order_relaxed);
+}
+#define RAE_STAT_ADD(counter, n) rae_mem_stat_add((counter), (n))
+
+/* Every counter summed over all threads, live and exited. */
+static void rae_mem_counters_read(int64_t* out) {
+  RAE_LOCK(&g_mem_blocks_lock);
+  for (int k = 0; k < RAE_MC__COUNT; k++) {
+    out[k] = atomic_load_explicit(&g_mem_retired.value[k], memory_order_relaxed);
+  }
+  for (RaeMemCounterBlock* block = g_mem_blocks; block; block = block->next) {
+    for (int k = 0; k < RAE_MC__COUNT; k++) {
+      out[k] += atomic_load_explicit(&block->value[k], memory_order_relaxed);
+    }
+  }
+  RAE_UNLOCK(&g_mem_blocks_lock);
+}
+
+/* One counter summed over all threads. */
+static int64_t rae_mem_counter_read(int counter) {
+  RAE_LOCK(&g_mem_blocks_lock);
+  int64_t total = atomic_load_explicit(&g_mem_retired.value[counter], memory_order_relaxed);
+  for (RaeMemCounterBlock* block = g_mem_blocks; block; block = block->next) {
+    total += atomic_load_explicit(&block->value[counter], memory_order_relaxed);
+  }
+  RAE_UNLOCK(&g_mem_blocks_lock);
+  return total;
+}
 
 static int g_mem_stats_enabled = 0;
 
@@ -279,13 +376,13 @@ static int g_mem_stats_enabled = 0;
  * the env var is absent — passing for the wrong reason.
  *
  * This counter is a single unconditional increment per allocation, so it
- * is always correct and costs nothing measurable. It counts CUMULATIVE
+ * is always correct and costs nothing measurable (RAE_MC_ALLOC_TOTAL_N, in
+ * the calling thread's own counter block). It counts CUMULATIVE
  * allocations, not outstanding ones: a path that allocates a scratch list
  * per object and frees it again has still allocated per object, which is
  * exactly the regression the deferred renderer's per-object path must not
  * have. `rae_ext_rae_mem_stats_outstanding` cannot see that; this can.
  */
-static _Atomic int64_t g_mem_alloc_total_n;
 
 /* Side hash table: ptr → site. Allocated only when mem-stats is on.
  * 4M slots sized for ~2M outstanding allocations (peak observed in
@@ -403,13 +500,13 @@ static inline int64_t rae_mem_block_bytes(void* ptr, int64_t hint) {
 }
 
 static inline void rae_mem_str_tag(void* ptr, int64_t bytes, uint8_t site) {
-  /* Counted BEFORE the opt-in gate: see g_mem_alloc_total_n. Every String
+  /* Counted BEFORE the opt-in gate: see RAE_MC_ALLOC_TOTAL_N. Every String
    * body allocation in the runtime funnels through here, so this is a
    * complete count of Rae's string heap traffic. */
-  RAE_STAT_ADD(g_mem_alloc_total_n, 1);
+  RAE_STAT_ADD(RAE_MC_ALLOC_TOTAL_N, 1);
   if (!g_mem_stats_enabled) return;
-  RAE_STAT_ADD(g_mem_site_alloc_n[site], 1);
-  RAE_STAT_ADD(g_mem_site_alloc_b[site], rae_mem_block_bytes(ptr, bytes));
+  RAE_STAT_ADD(RAE_MC_SITE_ALLOC_N + site, 1);
+  RAE_STAT_ADD(RAE_MC_SITE_ALLOC_B + site, rae_mem_block_bytes(ptr, bytes));
   RAE_LOCK(&g_mem_hash_lock);
   rae_mem_hash_insert(ptr, site);
   RAE_UNLOCK(&g_mem_hash_lock);
@@ -420,43 +517,45 @@ static inline void rae_mem_str_untag(void* ptr, int64_t bytes_hint) {
   RAE_LOCK(&g_mem_hash_lock);
   uint8_t site = rae_mem_hash_remove(ptr);
   RAE_UNLOCK(&g_mem_hash_lock);
-  RAE_STAT_ADD(g_mem_site_free_n[site], 1);
+  RAE_STAT_ADD(RAE_MC_SITE_FREE_N + site, 1);
   /* Measured exactly as rae_mem_str_tag measured it (rae_mem_block_bytes). */
-  RAE_STAT_ADD(g_mem_site_free_b[site], rae_mem_block_bytes(ptr, bytes_hint));
+  RAE_STAT_ADD(RAE_MC_SITE_FREE_B + site, rae_mem_block_bytes(ptr, bytes_hint));
 }
 
 static void rae_mem_stats_print(void) {
   if (!g_mem_stats_enabled) return;
+  int64_t counts[RAE_MC__COUNT];
+  rae_mem_counters_read(counts);
   int64_t tot_an = 0, tot_ab = 0, tot_fn = 0, tot_fb = 0;
   for (int i = 0; i < RAE_SITE__COUNT; i++) {
-    tot_an += g_mem_site_alloc_n[i];
-    tot_ab += g_mem_site_alloc_b[i];
-    tot_fn += g_mem_site_free_n[i];
-    tot_fb += g_mem_site_free_b[i];
+    tot_an += counts[RAE_MC_SITE_ALLOC_N + i];
+    tot_ab += counts[RAE_MC_SITE_ALLOC_B + i];
+    tot_fn += counts[RAE_MC_SITE_FREE_N + i];
+    tot_fb += counts[RAE_MC_SITE_FREE_B + i];
   }
   fprintf(stderr, "\n[rae mem-stats] cumulative since process start:\n");
   for (int i = 0; i < RAE_SITE__COUNT; i++) {
-    if (g_mem_site_alloc_n[i] == 0 && g_mem_site_free_n[i] == 0) continue;
-    int64_t out_n = g_mem_site_alloc_n[i] - g_mem_site_free_n[i];
-    int64_t out_b = g_mem_site_alloc_b[i] - g_mem_site_free_b[i];
+    if (counts[RAE_MC_SITE_ALLOC_N + i] == 0 && counts[RAE_MC_SITE_FREE_N + i] == 0) continue;
+    int64_t out_n = counts[RAE_MC_SITE_ALLOC_N + i] - counts[RAE_MC_SITE_FREE_N + i];
+    int64_t out_b = counts[RAE_MC_SITE_ALLOC_B + i] - counts[RAE_MC_SITE_FREE_B + i];
     fprintf(stderr, "  [mem:string:%-13s] alloc=%lld free=%lld outstanding=%lld bytes=%lld (alloc_b=%lld free_b=%lld)\n",
       g_rae_site_names[i],
-      (long long)g_mem_site_alloc_n[i], (long long)g_mem_site_free_n[i],
+      (long long)counts[RAE_MC_SITE_ALLOC_N + i], (long long)counts[RAE_MC_SITE_FREE_N + i],
       (long long)out_n, (long long)out_b,
-      (long long)g_mem_site_alloc_b[i], (long long)g_mem_site_free_b[i]);
+      (long long)counts[RAE_MC_SITE_ALLOC_B + i], (long long)counts[RAE_MC_SITE_FREE_B + i]);
   }
   fprintf(stderr, "  [mem:string:TOTAL          ] alloc=%lld free=%lld outstanding=%lld bytes=%lld\n",
     (long long)tot_an, (long long)tot_fn,
     (long long)(tot_an - tot_fn), (long long)(tot_ab - tot_fb));
   fprintf(stderr, "  [mem:buf               ] alloc=%lld (%lld B) free=%lld (%lld B) outstanding=%lld (%lld B) resize=%lld\n",
-    (long long)g_mem_buf_alloc_n, (long long)g_mem_buf_alloc_b,
-    (long long)g_mem_buf_free_n,  (long long)g_mem_buf_free_b,
-    (long long)(g_mem_buf_alloc_n - g_mem_buf_free_n),
-    (long long)(g_mem_buf_alloc_b - g_mem_buf_free_b),
-    (long long)g_mem_buf_resize_n);
+    (long long)counts[RAE_MC_BUF_ALLOC_N], (long long)counts[RAE_MC_BUF_ALLOC_B],
+    (long long)counts[RAE_MC_BUF_FREE_N],  (long long)counts[RAE_MC_BUF_FREE_B],
+    (long long)(counts[RAE_MC_BUF_ALLOC_N] - counts[RAE_MC_BUF_FREE_N]),
+    (long long)(counts[RAE_MC_BUF_ALLOC_B] - counts[RAE_MC_BUF_FREE_B]),
+    (long long)counts[RAE_MC_BUF_RESIZE_N]);
   fprintf(stderr, "  [mem:pool              ] register=%lld remove=%lld flush_calls=%lld flush_freed=%lld\n",
-    (long long)g_mem_pool_register_n, (long long)g_mem_pool_remove_n,
-    (long long)g_mem_pool_flush_calls, (long long)g_mem_pool_flush_freed);
+    (long long)counts[RAE_MC_POOL_REGISTER_N], (long long)counts[RAE_MC_POOL_REMOVE_N],
+    (long long)counts[RAE_MC_POOL_FLUSH_CALLS], (long long)counts[RAE_MC_POOL_FLUSH_FREED]);
   RAE_LOCK(&g_mem_hash_lock);
   int64_t full_drops = g_mem_hash_full_drops;
   RAE_UNLOCK(&g_mem_hash_lock);
@@ -531,11 +630,13 @@ void rae_mem_stats_live_tick(void) {
   }
   if (now_ms < g_mem_live_next_ms) return;
   g_mem_live_next_ms = now_ms + g_mem_live_every_ms;
+  int64_t counts[RAE_MC__COUNT];
+  rae_mem_counters_read(counts);
   fprintf(stderr, "[mem:live] t=%lld strings=%lld bufs=%lld buf_bytes=%lld\n",
     (long long)(now_ms - g_mem_live_start_ms),
     (long long)rae_ext_rae_mem_stats_outstanding(),
-    (long long)(g_mem_buf_alloc_n - g_mem_buf_free_n),
-    (long long)(g_mem_buf_alloc_b - g_mem_buf_free_b));
+    (long long)(counts[RAE_MC_BUF_ALLOC_N] - counts[RAE_MC_BUF_FREE_N]),
+    (long long)(counts[RAE_MC_BUF_ALLOC_B] - counts[RAE_MC_BUF_FREE_B]));
 }
 
 /* Returns the total outstanding String allocation count (alloc -
@@ -545,10 +646,12 @@ void rae_mem_stats_live_tick(void) {
  * mem-stats is disabled. */
 int64_t rae_ext_rae_mem_stats_outstanding(void) {
   if (!g_mem_stats_enabled) return 0;
+  int64_t counts[RAE_MC__COUNT];
+  rae_mem_counters_read(counts);
   int64_t total = 0;
   for (int i = 0; i < RAE_SITE__COUNT; i++) {
     if (i == RAE_SITE_UNKNOWN) continue;
-    total += g_mem_site_alloc_n[i] - g_mem_site_free_n[i];
+    total += counts[RAE_MC_SITE_ALLOC_N + i] - counts[RAE_MC_SITE_FREE_N + i];
   }
   return total;
 }
@@ -560,7 +663,7 @@ int64_t rae_ext_rae_mem_stats_outstanding(void) {
  * only what it tagged, so this stays flat. */
 int64_t rae_ext_rae_mem_stats_unknown_frees(void) {
   if (!g_mem_stats_enabled) return 0;
-  return g_mem_site_free_n[RAE_SITE_UNKNOWN];
+  return rae_mem_counter_read(RAE_MC_SITE_FREE_N + RAE_SITE_UNKNOWN);
 }
 
 /* Total heap allocations made through Rae semantics since process start:
@@ -571,15 +674,15 @@ int64_t rae_ext_rae_mem_stats_unknown_frees(void) {
  * to forget, which is what lets it back a hard "allocates nothing" test.
  * Sample it either side of the work under test and assert the delta. */
 int64_t rae_ext_rae_mem_alloc_total(void) {
-  return g_mem_alloc_total_n + g_mem_buf_alloc_n;
+  return rae_mem_counter_read(RAE_MC_ALLOC_TOTAL_N) + rae_mem_counter_read(RAE_MC_BUF_ALLOC_N);
 }
 
 int64_t rae_ext_rae_mem_stats_buf_outstanding(void) {
   if (!g_mem_stats_enabled) return 0;
-  return g_mem_buf_alloc_n - g_mem_buf_free_n;
+  return rae_mem_counter_read(RAE_MC_BUF_ALLOC_N) - rae_mem_counter_read(RAE_MC_BUF_FREE_N);
 }
 
 int64_t rae_ext_rae_mem_stats_buf_outstanding_bytes(void) {
   if (!g_mem_stats_enabled) return 0;
-  return g_mem_buf_alloc_b - g_mem_buf_free_b;
+  return rae_mem_counter_read(RAE_MC_BUF_ALLOC_B) - rae_mem_counter_read(RAE_MC_BUF_FREE_B);
 }
