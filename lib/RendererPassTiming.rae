@@ -1,0 +1,184 @@
+# Per-pass GPU timing of the deferred renderer (RAE_GPU_PASS_TIMING=1,
+# docs/physics-performance-plan.md §10i). The passes record their work in
+# many ways (manager recordings, raw encoders, compute, the 2D canvas), so
+# they are not timed one by one: the renderer submits a timestamp mark
+# (gpu/GpuTiming recordTimingMark) before each pass of its graph and one after
+# the last. The queue runs in submission order, so the time between two marks
+# is the GPU time of the pass between them. The readback never blocks: a
+# frame's marks are resolved with its last mark, read back a few frames later,
+# and a new frame is timed only once the last one has landed.
+import Sys
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuTiming
+open gpu/GpuIds
+
+# Marks per frame: one before each graph pass and one at the end
+const passTimingMaxMarks: Int = 24
+
+type DeferredPassTiming {
+  enabled: Bool
+  timing: opt GpuTiming
+  timingMade: Bool
+  # The marks' do-nothing compute pipeline
+  markPipeline: opt PipelineId
+  # This frame's marks are being recorded
+  marking: Bool
+  # The tag before each mark of the frame being recorded (-1 for the end)
+  markTags: List(Int)
+  # The frame in flight: its tags, and the submission that resolved it
+  sampleTags: List(Int)
+  submission: SubmissionId
+  resolvePending: Bool
+  # Every mark's submission, retired once complete
+  inFlight: List(SubmissionId)
+  # The last frame read back: the pass tag of each span and its microseconds
+  lastTags: List(Int)
+  lastMicroseconds: List(Int)
+  spans: List(Int)
+  # Frames read back so far
+  samples: Int
+}
+
+func createDeferredPassTiming() ret DeferredPassTiming {
+  # The timing (its query set is a raw Ptr) is made at the first frame
+  unsafe {
+    ret DeferredPassTiming {
+      enabled: Sys.getEnv(name: "RAE_GPU_PASS_TIMING") is "1"
+      timing: none
+      timingMade: false
+      markPipeline: none
+      marking: false
+      markTags: List.create(Int, cap: passTimingMaxMarks)
+      sampleTags: List.create(Int, cap: passTimingMaxMarks)
+      submission: { managerTag: 0, slot: -1, generation: 0 }
+      resolvePending: false
+      inFlight: List.create(SubmissionId, cap: passTimingMaxMarks * 2)
+      lastTags: List.create(Int, cap: passTimingMaxMarks)
+      lastMicroseconds: List.create(Int, cap: passTimingMaxMarks)
+      spans: List.create(Int, cap: passTimingMaxMarks)
+      samples: 0
+    }
+  }
+}
+
+# Start of a frame: take in a sample that landed, start the readback of a
+# resolved one, and begin marking this frame if nothing is in flight.
+func passTimingFrameBegin(passTiming: mod DeferredPassTiming, resources: mod GpuResources) {
+  passTiming.marking = false
+  if passTiming.enabled is false {
+    ret
+  }
+  if passTiming.timingMade is false {
+    passTiming.timing = createGpuTiming(resources: resources, maxPasses: passTimingMaxMarks)
+    passTiming.timingMade = true
+    passTiming.markPipeline = createComputePipelineSource(
+      resources: resources
+      wgsl: "@compute @workgroup_size(1) fn mark() \{\}"
+      entryPoint: "mark"
+      constants: noShaderConstants()
+    )
+    if let timing: view GpuTiming => passTiming.timing {
+      if timingAvailable(timing: timing) is false {
+        log("[gpu passes] GPU timestamps unavailable; no per-pass timing")
+      }
+    }
+  }
+  if let timing: mod GpuTiming => passTiming.timing {
+    if timingAvailable(timing: timing) is false {
+      ret
+    }
+    # The resolving submission is polled first: once retired it answers -1,
+    # which also means complete
+    if passTiming.resolvePending and pollSubmission(resources: resources, id: passTiming.submission) is not 0 {
+      passTiming.resolvePending = false
+      startTimingSample(timing: timing, resources: resources)
+    }
+    pollSubmissions(inFlight: passTiming.inFlight, resources: resources)
+    if timingSampleInFlight(timing: timing) {
+      if collectTimingMarks(timing: timing, resources: resources, out: passTiming.spans) {
+        passTiming.lastTags.clear()
+        passTiming.lastMicroseconds.clear()
+        loop var i: Int = 0, i < passTiming.spans.length, ++i {
+          passTiming.lastTags.add(value: passTiming.sampleTags.copyAtDefault(index: i))
+          passTiming.lastMicroseconds.add(value: passTiming.spans.copyAtDefault(index: i))
+        }
+        passTiming.samples = passTiming.samples + 1
+      }
+      ret
+    }
+    if passTiming.resolvePending {
+      ret
+    }
+    beginTimingFrame(timing: timing)
+    passTiming.markTags.clear()
+    passTiming.marking = true
+  }
+}
+
+# A mark before the pass of `tag` (the end of the frame passes -1 and
+# resolves). Each mark is its own small submission, so it lands between the
+# submissions of the passes around it.
+func passTimingMark(
+  passTiming: mod DeferredPassTiming
+  resources: mod GpuResources
+  tag: view Int
+) {
+  if passTiming.marking is false {
+    ret
+  }
+  var pipeline: PipelineId = { managerTag: 0, slot: -1, generation: 0 }
+  if let made: view PipelineId => passTiming.markPipeline {
+    pipeline = made
+  } else {
+    passTiming.marking = false
+    ret
+  }
+  if let timing: mod GpuTiming => passTiming.timing {
+    if let opened: Recording = beginRecording(resources: resources) {
+      var recording: Recording = own opened
+      if recordTimingMark(
+        timing: timing
+        recording: recording
+        resources: resources
+        pipeline: pipeline
+      ) is false {
+        passTiming.marking = false
+        ret
+      }
+      passTiming.markTags.add(value: tag)
+      if tag < 0 {
+        recordTimingResolve(timing: timing, recording: recording, resources: resources)
+      }
+      if let submitted: SubmissionId = submit(resources: resources, recording: recording) {
+        passTiming.inFlight.add(value: submitted)
+        if tag < 0 {
+          passTiming.submission = submitted
+          passTiming.resolvePending = true
+          passTiming.sampleTags.clear()
+          loop var i: Int = 0, i < passTiming.markTags.length, ++i {
+            passTiming.sampleTags.add(value: passTiming.markTags.copyAtDefault(index: i))
+          }
+          passTiming.marking = false
+        }
+      } else {
+        passTiming.marking = false
+      }
+    }
+  }
+}
+
+func passTimingShutdown(passTiming: mod DeferredPassTiming, resources: mod GpuResources) {
+  drainSubmissions(inFlight: passTiming.inFlight, resources: resources)
+  if let pipeline: view PipelineId => passTiming.markPipeline {
+    let retired: Bool = retirePipeline(resources: resources, id: pipeline)
+  }
+  passTiming.markPipeline = none
+  if let timing: mod GpuTiming => passTiming.timing {
+    shutdownTiming(timing: timing, resources: resources)
+  }
+  passTiming.timing = none
+  passTiming.timingMade = false
+  passTiming.marking = false
+  passTiming.resolvePending = false
+}
