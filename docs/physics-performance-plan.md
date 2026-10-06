@@ -222,6 +222,42 @@ Measured interleaved with the build before (best of 3, load ~5-8):
 The convex pile now scales 4.1x at 8 workers (16.5 -> 4.05 ms), against
 Box3D's 4.6x.
 
+### 2e. The solver stages at 8 workers match Box3D's (2026-10-06)
+
+§2c's "solver stages scale 2.1x" was measured with per-section timers on
+an older build. It was compared against an assumed ~4x for Box3D, and that
+assumption was wrong. Box3D's benchmark app records the solver-stage time
+itself (`-s` writes `p.constraints` per step). On the convex pile, on this
+machine, at the same moment:
+
+| | 1 worker | 8 workers | speedup |
+|---|---|---|---|
+| Box3D scalar, `p.constraints` | 2.641 ms | 1.035 ms | 2.55x |
+| Rae port, runSolverStages | 2.77 ms | 0.99-1.04 ms | 2.7-2.8x |
+
+So the port's solver is already level with Box3D's, in both absolute time
+and scaling. Per-stage timing (temporary: each block's time stored in its
+own TaskContext slot and read after the stage) shows where the 8-worker
+time goes:
+- **The work itself inflates.** A colour stage's blocks sum to ~1.8x their
+  1-worker time, because a body's state is written by one core in colour k
+  and read by another in colour k+1. Body stages (integrate velocities)
+  do not inflate: a block costs 5.3 µs at 8 workers, exactly its 1/32 share.
+  This is inherent to the parallel colour sweep, which Box3D uses too.
+- **The split is even.** A stage's blocks cost about the same, and the
+  pool keeps each worker on the same blocks every stage.
+- **Stragglers and the barrier.** An occasional block takes 2-4x longer on
+  a random worker (the machine was at load 4-6), and the join costs
+  ~1.8 µs (`benchmarks/parallel_stages`, against 3.0 for Box3D's own spin
+  barrier). Across ~100 stages per step, these are most of the gap between
+  the wall time and work / 8.
+
+No change was made. The one lever left is locality: which worker solves
+which constraints. It does not change results, because a colour's blocks
+are independent. Keeping a body's constraints on one core across colours
+would need a body-ownership-aware assignment that Box3D does not have
+either, and that is a design question, not a fix.
+
 ## 3. What that means for the Rae port
 
 The port runs at `k` times Box3D's scalar C. P0 measured the access pattern
