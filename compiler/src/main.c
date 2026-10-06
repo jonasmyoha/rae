@@ -2470,6 +2470,15 @@ static bool build_c_backend_output(const char* entry_file,
   /* `shader(files: [...])` resolves its parts against the project root and
    * the toolchain stdlib (shader_compose.h). */
   ctx.project_root = graph.root_path;
+  {
+    char abs_entry[PATH_MAX];
+    const char* canonical_entry = realpath(entry_file, abs_entry) ? abs_entry : entry_file;
+    for (ModuleNode* node = graph.head; node; node = node->next) {
+      if (node->module && strcmp(node->canonical_path, canonical_entry) == 0) {
+        ctx.entry_file_path = node->module->file_path;
+      }
+    }
+  }
   ctx.stdlib_dir = compiler_stdlib_dir();
   
   progress_phase(PROGRESS_SEMA);
@@ -2681,6 +2690,28 @@ static bool gcc_link_c_to_binary(const char* entry_rae_file,
 /* Link generated C into an Emscripten browser bundle. This is deliberately
  * separate from tools/wasm_build.sh, which targets standalone WASI rather
  * than the browser's SDL3 + WebGPU APIs. */
+/* Does the file at `path` contain `needle`? (The generated C is scanned for
+ * the frame entry's marker; a read failure answers no.) */
+static bool file_contains_text(const char* path, const char* needle) {
+  FILE* file = fopen(path, "rb");
+  if (!file) return false;
+  size_t needle_len = strlen(needle);
+  char buffer[65536];
+  size_t carry = 0;
+  bool found = false;
+  for (;;) {
+    size_t got = fread(buffer + carry, 1, sizeof(buffer) - carry - 1, file);
+    if (got == 0) break;
+    size_t len = carry + got;
+    buffer[len] = 0;
+    if (strstr(buffer, needle)) { found = true; break; }
+    carry = needle_len < len ? needle_len - 1 : 0;
+    if (carry) memmove(buffer, buffer + len - carry, carry);
+  }
+  fclose(file);
+  return found;
+}
+
 static bool emcc_link_c_to_web(const char* entry_rae_file,
                                const char* c_path,
                                const char* out_path,
@@ -2794,6 +2825,15 @@ static bool emcc_link_c_to_web(const char* entry_rae_file,
    * step contexts in the playgrounds). */
   args[n++] = "-sSTACK_SIZE=8388608";
   args[n++] = "-sASYNCIFY";
+  /* A setup/frame program (docs/web-frame-loop.md): the browser calls its
+   * frame, so nothing yields per frame. Asyncify stays only for the waits
+   * that are still blocking (the WebGPU device request at setup, GPU
+   * readbacks), which are direct calls, so indirect calls need no
+   * instrumentation: most of Asyncify's code goes. */
+  if (file_contains_text(c_path, "RAE_FRAME_CALLBACK_ENTRY")) {
+    args[n++] = "-DRAE_WEB_FRAME_CALLBACK";
+    args[n++] = "-sASYNCIFY_IGNORE_INDIRECT=1";
+  }
   /* WebAssembly SIMD, as the WASI build has always had: lib/Float4 lowers to
    * wasm_simd128 with it and to scalar code without. Every current browser
    * runs it (Chrome 91, Firefox 89, Safari 16.4). Without it the physics

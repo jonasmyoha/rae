@@ -1136,7 +1136,7 @@ static void rae_g3d_present_offscreen(WGPUTexture tex, int width, int height) {
      * rendering. Same fix and rationale as the 2D endFrame; Fifo already
      * paces to vsync so it costs no frame rate. Occluded/headless frames
      * (nothing presented) keep the cheap non-blocking poll. */
-    rae_wgpu_poll(presented ? 1 : 0);
+    if (presented) rae_wgpu_poll_frame_end(); else rae_wgpu_poll(0);
 }
 
 /* Present the tonemapped offscreen (#514): advance the virtual clock and copy

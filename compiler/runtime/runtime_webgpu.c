@@ -46,6 +46,18 @@ static void rae_wgpu_poll(int wait) {
 #endif
 }
 
+/* The end of a presented frame: natively a blocking poll, the backpressure
+ * that retires the frame's submissions. A browser frame callback
+ * (RAE_WEB_FRAME_CALLBACK, docs/web-frame-loop.md) is already paced by the
+ * browser and has no stack to unwind, so it only processes events. */
+static void rae_wgpu_poll_frame_end(void) {
+#if defined(__EMSCRIPTEN__) && defined(RAE_WEB_FRAME_CALLBACK)
+    rae_wgpu_poll(0);
+#else
+    rae_wgpu_poll(1);
+#endif
+}
+
 static WGPUStringView rae_wgpu_sv(const char* s) { WGPUStringView v; v.data = s; v.length = WGPU_STRLEN; return v; }
 
 static WGPUAdapter g_wgpu_adapter; static int g_wgpu_adapter_done;
