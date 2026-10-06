@@ -22,6 +22,12 @@
 #                                    print); exits 1 when they differ
 #   RAE_PLAYGROUND_SCRIPTED=1        headless: a scripted run through every
 #                                    scene, printing the HUD's lines
+#   RAE_PLAYGROUND_SCALING=<counts>  headless: the pyramid at each body count
+#                                    (comma-separated) stepped at the world's
+#                                    worker count (the pool's, RAE_WORKERS);
+#                                    one SCALING line per count with the mean
+#                                    and median step ms
+#                                    (benchmarks/physics_scaling)
 # The window's settings (scene, body count, autofire, scene cycle, debug log)
 # are listed in lib/physicsScenes/PlaygroundApp.rae.
 # Headless screenshot, from the repository root:
@@ -120,6 +126,59 @@ func scriptedRun() {
       log(line)
     }
     destroyPlaygroundWorld(world: world)
+  }
+}
+
+# The scaling benchmark's steps: the first ones settle the freshly built
+# pyramid (contacts, islands, the first tree rebuild); the next ones are timed
+const scalingWarmupSteps: Int = 20
+
+const scalingTimedSteps: Int = 100
+
+# One SCALING line for the pyramid at `bodyCount` bodies, stepped at 60 Hz by
+# `workerCount` workers: the bodies actually built, the mean and median ms per
+# fixed step, and the bodies awake at the end (all of them: sleeping is
+# turned off, as in Box3D's large-pyramid benchmark).
+func scalingCase(bodyCount: view Int, workerCount: view Int) {
+  var world: PlaygroundWorld = createPlaygroundWorld(workerCount: workerCount)
+  spawnScene(world: world, scene: buildScene(index: 0, bodyCount: bodyCount))
+  setPlaygroundSleeping(world: world, enabled: false)
+  loop var step: Int = 0, step < scalingWarmupSteps, ++step {
+    let taken: Int = stepPlayground(world: world, frameTime: 1.0 / 60.0)
+  }
+  var stepMs: List(Float) = List.create(Float, cap: scalingTimedSteps)
+  var totalMs: Float = 0.0
+  loop var step: Int = 0, step < scalingTimedSteps, ++step {
+    let started: Int = nowNs()
+    let taken: Int = stepPlayground(world: world, frameTime: 1.0 / 60.0)
+    let elapsed: Float = ((nowNs() - started) as Float) / 1000000.0
+    if taken > 0 {
+      let perStep: Float = elapsed / (taken as Float)
+      stepMs.add(value: perStep)
+      totalMs = totalMs + perStep
+    }
+  }
+  stepMs.sort()
+  let median: Float = stepMs.copyAtDefault(index: stepMs.length / 2)
+  let mean: Float = totalMs / (stepMs.length as Float)
+  let stats: HudStats = playgroundStats(
+    world: world
+    sceneName: "pyramid"
+    targetBodyCount: bodyCount
+  )
+  log(
+    "SCALING,{trackName},{bodyCount},{workerCount},{stats.bodyCount},{mean},{median},{stats.awakeBodyCount}"
+  )
+  destroyPlaygroundWorld(world: world)
+}
+
+func scalingRun(counts: view String) {
+  let workers: Int = Parallel.workerCount()
+  let items: List(String) = counts.split(sep: ",")
+  loop let item: view String in items {
+    if item.length() > 0 {
+      scalingCase(bodyCount: item.toInt(), workerCount: workers)
+    }
   }
 }
 
@@ -225,6 +284,11 @@ func main() ret Int {
     if determinismRun(steps: steps.toInt()) > 0 {
       ret 1
     }
+    ret 0
+  }
+  let scalingCounts: String = Sys.getEnv(name: "RAE_PLAYGROUND_SCALING")
+  if scalingCounts.length() > 0 {
+    scalingRun(counts: scalingCounts)
     ret 0
   }
   if Sys.getEnv(name: "RAE_PLAYGROUND_SCRIPTED").length() > 0 {
