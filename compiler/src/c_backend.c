@@ -4025,10 +4025,14 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
           // #816. The Rae fallback is exact too since #817 taught the const
           // folder and the literal emitter uint64, so this is purely the
           // "header is the source of truth" rule, not a correctness crutch.)
+          // A browser build (__EMSCRIPTEN__) takes the Rae literal: its
+          // webgpu.h is Dawn's, which lacks wgpu-native's 131 extension
+          // constants (WGPUSType_*Extras, WGPUNativeFeature_*, ...), and the
+          // 493 the two headers share have the same values in both.
           bool webgpu_binding = d->origin_file && strstr(d->origin_file, "/webgpu/") != NULL;
           const char* gname = global_c_name(ctx, d);
           if (webgpu_binding) {
-              fprintf(out, "#ifdef RAE_HAS_WEBGPU\nRAE_UNUSED static ");
+              fprintf(out, "#if defined(RAE_HAS_WEBGPU) && !defined(__EMSCRIPTEN__)\nRAE_UNUSED static ");
               if (d->as.let_decl.type) emit_type_ref_as_c_type(&gctx, d->as.let_decl.type, out, false);
               else fprintf(out, "int64_t");
               fprintf(out, " %s = (", gname);

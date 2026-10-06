@@ -40,8 +40,12 @@ fn vibrance(c: vec3<f32>, amount: f32) -> vec3<f32> {
   let w = 1.0 - (mx - mn);
   return mix(vec3<f32>(luma(c)), c, 1.0 + amount * w);
 }
+// The lit target has one mip, so the explicit level 0 samples exactly what
+// textureSample would, and needs no derivatives: FXAA calls shade() after an
+// early return, which strict WGSL (Dawn in the browser) rejects for
+// textureSample as non-uniform control flow.
 fn shade(uv: vec2<f32>) -> vec3<f32> {
-  let hdr = textureSample(litTex, litSamp, uv).rgb;
+  let hdr = textureSampleLevel(litTex, litSamp, uv, 0.0).rgb;
   let exposed = hdr * P.p0.x;
   var c = aces(exposed);
   if (P.p0.z > 0.5) { c = pbrNeutral(exposed); }
