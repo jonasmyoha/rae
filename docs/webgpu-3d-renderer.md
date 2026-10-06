@@ -26,7 +26,9 @@ runtime creates its surface from `#canvas`, omits wgpu-native-only logging and
 polling calls, and lets the browser present at its frame boundary. Rae's current
 blocking application loop is kept compatible with `-sASYNCIFY`; a future
 first-class frame-callback API should replace that compatibility layer without
-changing renderer APIs.
+changing renderer APIs (designed, with the measurements and the open
+decision, in `docs/web-frame-loop.md`; browser builds compile with
+`-msimd128`).
 
 Tooling can request an embeddable ES module by using a `.mjs` (or `.js`)
 output path instead of `.html`. That build exports an asynchronous
