@@ -1,0 +1,85 @@
+Box3D samples timing patch: derived from Box3D's samples/main.cpp at 9f998c8,
+Copyright (c) 2025 Erin Catto, MIT License (lib/physics/LICENSE-box3d.md).
+Applied by tools/box3d-oracle/samples.sh; see docs/physics-performance-plan.md §10.
+
+--- a/samples/main.cpp	2026-10-02 11:47:11
++++ b/samples/main.cpp	2026-10-06 07:50:55
+@@ -48,6 +48,11 @@
+ static int s_frame = 0;
+ static int s_frameLimit = -1;
+ static int s_sampleOverride = -1;
++// Rae performance pass: per-frame timing, printed at exit
++static double s_stepMsSum = 0.0, s_frameMsSum = 0.0, s_worldStepMsSum = 0.0;
++static double s_stepMsMax = 0.0, s_frameMsMax = 0.0;
++static int s_timedFrames = 0;
++static double s_acquireMsSum = 0.0;
+ static int s_exitCode = 0;
+ 
+ static int CompareSamples( const void* a, const void* b )
+@@ -115,6 +120,7 @@
+ 
+ 	int cores = (int)std::thread::hardware_concurrency();
+ 	s_context.workerCount = b3ClampInt( cores / 2, 1, 8 );
++	if ( getenv( "SAMPLES_WORKERS" ) ) s_context.workerCount = atoi( getenv( "SAMPLES_WORKERS" ) );
+ 	s_context.windowWidth = sapp_width();
+ 	s_context.windowHeight = sapp_height();
+ 
+@@ -403,7 +409,10 @@
+ 	SetTransparentKinematic( s_context.transparentKinematic );
+ 	s_context.sample->ResetText();
+ 
++	const uint64_t stepStart = b3GetTicks();
+ 	s_context.sample->Step();
++	const float stepMs = b3GetMilliseconds( stepStart );
++	const float worldStepMs = b3World_GetProfile( s_context.sample->m_worldId ).step;
+ 	s_context.sample->Render();
+ 
+ 	FrameInput fi{};
+@@ -429,7 +438,9 @@
+ 	fi.disableAmbientOcclusion = !s_context.enableGtao;
+ 	fi.zUp = s_context.viewZUp;
+ 
++	const uint64_t acquireStart = b3GetTicks();
+ 	const sg_swapchain sc = sglue_swapchain();
++	const float acquireMs = b3GetMilliseconds( acquireStart );
+ 	RenderFrame( &sc, &fi );
+ 
+ 	// StartUIFrame runs after RenderFrame: it drains the text arena with the
+@@ -439,6 +450,15 @@
+ 	RenderUI( &sc );
+ 	sg_commit();
+ 	++s_frame;
++	if ( s_frame > 120 )
++	{
++		const float frameMs = b3GetMilliseconds( frameStart );
++		s_acquireMsSum += acquireMs;
++		s_stepMsSum += stepMs; s_worldStepMsSum += worldStepMs; s_frameMsSum += frameMs;
++		if ( stepMs > s_stepMsMax ) s_stepMsMax = stepMs;
++		if ( frameMs > s_frameMsMax ) s_frameMsMax = frameMs;
++		s_timedFrames += 1;
++	}
+ 
+ 	// For the Tracy profiler
+ 	FrameMark;
+@@ -461,6 +481,10 @@
+ 
+ 	const int errors = GetRenderErrorCount();
+ 	fprintf( stderr, "samples: %d frames, %d sokol errors\n", s_frame, errors );
++	if ( s_timedFrames > 0 )
++		fprintf( stderr, "RAEPERF workers %d frames %d: sample step %.3f ms (max %.2f), world step %.3f ms, frame %.3f ms (max %.2f), drawable wait %.3f ms\n",
++				 s_context.workerCount, s_timedFrames, s_stepMsSum / s_timedFrames, s_stepMsMax,
++				 s_worldStepMsSum / s_timedFrames, s_frameMsSum / s_timedFrames, s_frameMsMax, s_acquireMsSum / s_timedFrames );
+ 
+ #if defined( _WIN32 )
+ 	timeEndPeriod( 1 );
+@@ -533,8 +557,8 @@
+ 	desc.gl.major_version = 4;
+ 	desc.gl.minor_version = 5;
+ 
+-	desc.width = 1920;
+-	desc.height = 1080;
++	desc.width = getenv( "SAMPLES_WIDTH" ) ? atoi( getenv( "SAMPLES_WIDTH" ) ) : 1920;
++	desc.height = getenv( "SAMPLES_HEIGHT" ) ? atoi( getenv( "SAMPLES_HEIGHT" ) ) : 1080;
+ 
+ 	// No swap-chain MSAA. The renderer runs MSAA in its own scene target.
+ 	desc.sample_count = 1;
