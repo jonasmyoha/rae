@@ -38,7 +38,7 @@ fi
 git -C "$SRC" checkout --quiet --detach "$BOX3D_COMMIT"
 
 rm -rf "$INSTALL"
-mkdir -p "$INSTALL/include" "$INSTALL/lib/scalar" "$INSTALL/lib/wasm32"
+mkdir -p "$INSTALL/include" "$INSTALL/lib/scalar" "$INSTALL/lib/wasm32" "$INSTALL/lib/emscripten"
 cp -R "$SRC/include/box3d" "$INSTALL/include/"
 cp "$HERE/rae_glue.h" "$INSTALL/include/box3d/rae_glue.h"
 
@@ -60,6 +60,13 @@ if [ -x "$WASI_SDK/bin/clang" ]; then
     --target=wasm32-wasip1 --sysroot="$WASI_SDK/share/wasi-sysroot" -msimd128
 else
   echo "box3d: wasi-sdk not found at $WASI_SDK; skipped the wasm32 library"
+fi
+# The browser build (rae build --target wasm links it with emcc)
+if command -v emcc >/dev/null 2>&1; then
+  # Box3D takes its SSE2 path here; Emscripten lowers SSE2 to WASM SIMD
+  build emcc emar "$INSTALL/lib/emscripten/libbox3d.a" -msimd128 -msse2 -D_POSIX_C_SOURCE=200809L
+else
+  echo "box3d: emcc not found; skipped the browser library"
 fi
 echo "$BOX3D_COMMIT" > "$INSTALL/COMMIT"
 
