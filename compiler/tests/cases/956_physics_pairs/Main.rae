@@ -468,6 +468,7 @@ func evaluate(
     )
   } else if name is "pairs.update" {
     updateBroadPhasePairs(world: world)
+    finishTreeRebuild(world: world)
     let created: List(UInt64) = world.createdPairKeys
     putInt(out: out, value: created.length)
     loop var i: Int = 0, i < created.length, ++i {

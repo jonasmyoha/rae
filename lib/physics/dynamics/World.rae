@@ -201,6 +201,9 @@ type PhysicsWorld {
   jointData: JointKindData
   stepIndex: Int
   splitIslandId: Int
+  # The dynamic and kinematic trees wait for their rebuild, which collide
+  # runs beside the narrow phase (b3EnqueueTreeUpdate)
+  treeRebuildPending: Bool
   gravity: Vec3
   hitEventThreshold: Float
   restitutionThreshold: Float
@@ -273,6 +276,7 @@ func createWorld(def: view WorldDef) ret PhysicsWorld {
     jointData: createJointKindData()
     stepIndex: 0
     splitIslandId: -1
+    treeRebuildPending: false
     gravity: def.gravity
     hitEventThreshold: def.hitEventThreshold
     restitutionThreshold: def.restitutionThreshold

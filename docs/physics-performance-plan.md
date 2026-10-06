@@ -136,6 +136,60 @@ What it shows:
   move one allocation) and the scene's body and joint creation. Step time
   did not change, because sleep and wake are not hot.
 
+### 2c. The step's serial parts at 8 workers (2026-10-06)
+
+The convex pile was timed per section with temporary `nowNs()` timers
+(µs per step, averaged over its 500 steps; the timers are not kept):
+
+| section | 1 worker | 8 workers | |
+|---|---|---|---|
+| collide's narrow phase | 10 081 | 2 706 | parallel, 3.7x |
+| solver stages | 2 789 | 1 302 | parallel, 2.1x |
+| finalize bodies | 560 | 164 | parallel |
+| pair finding | 1 982 | 485 | parallel |
+| **dynamic/kinematic tree rebuild** | 377 | **397** | serial |
+| collide's state-change pass | 221 | 248 | serial |
+| contact creation from the sorted keys | 136 | 133 | serial |
+| merging the moved proxies (applyMovedProxies) | 70 | 104 | serial |
+| solve's colour and block setup | 42 | 54 | serial |
+| refits | 25 | 28 | serial |
+| pair-key gather and sort | 23 | 24 | serial |
+
+The serial parts add up to about 1.0 ms of the 5.8 ms step. The largest is the
+tree rebuild. As Box3D does (b3EnqueueTreeUpdate), it now runs beside the
+narrow phase:
+- `updateBroadPhasePairs` only marks it pending (`world.treeRebuildPending`).
+- `finishTreeRebuild` runs it first in chunk 0 of collide's parallelLoop.
+  Chunk 0 is the caller's range, so it starts at once, and the other workers
+  steal the rest of that range. The narrow phase reads no tree.
+- `solve` calls it again in case collide did not (a no-op). Fixture 956,
+  which dumps the trees after `pairs.update`, also calls it.
+
+Giving the rebuild its own 33rd iteration was slower (5.7 -> 6.8 ms): the
+pool aims for 4 chunks per worker, so 33 iterations are paired into 17
+chunks, which balance worse.
+
+At 8 workers, measured interleaved with the build before (load ~4-6):
+
+| scene | before | after |
+|---|---|---|
+| convex_pile | 5.19 | 4.73 |
+| large_pyramid | 3.76 | 3.55 |
+| many_pyramids | 7.58 | 7.32 |
+| joint_grid | 4.27 | 4.33 |
+| rain | 1.82 | 1.67 |
+
+The convex pile now scales 3.5x (16.5 -> 4.73 ms), against Box3D's 4.6x.
+The checksums are identical at 1, 2, 4 and 8 workers. Fixture 997, the
+oracle scene fixtures replayed with 8 workers forced, and the TSan gate
+pass.
+
+What is left:
+- The two parallel sections scale worst: collide's narrow phase reaches
+  3.7x (the ideal is 1 260 µs, not 2 706) and the solver stages 2.1x.
+- The rest of the serial parts (state pass, contact creation, the
+  moved-proxy merge) are serial in Box3D too.
+
 ## 3. What that means for the Rae port
 
 The port runs at `k` times Box3D's scalar C. P0 measured the access pattern
