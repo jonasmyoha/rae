@@ -1280,11 +1280,15 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
         // value every drop path treats as "nothing to free"), yield the
         // value. This is what makes the swap idiom (`var t = own a.x; a.x =
         // own a.y; a.y = own t`) both leak-free and double-free-free.
+        // An optional place is moved the same way: a zeroed opt is `none`
+        // (has = 0). Copying it without zeroing left the source still owning
+        // the value, so the next store into the source (or the owner's drop)
+        // freed what the destination had just received.
         {
             const AstExpr* place = expr->as.unary.operand;
             if (place && (place->kind == AST_EXPR_MEMBER || place->kind == AST_EXPR_INDEX)) {
                 const AstTypeRef* ptr = infer_expr_type_ref(ctx, place);
-                if (ptr && !ptr->is_view && !ptr->is_mod && !ptr->is_opt
+                if (ptr && !ptr->is_view && !ptr->is_mod
                     && (type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, ptr, 0)
                         || str_eq_cstr(get_base_type_name(ptr), "String"))) {
                     int mvn = ctx->temp_counter++;
