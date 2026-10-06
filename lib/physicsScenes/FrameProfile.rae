@@ -6,6 +6,8 @@
 # call, so the profile does not change what it measures. The first
 # `warmupFrames` frames (startup, the first uploads) are not counted.
 import Math
+open RendererDeferred
+open RendererPassTiming
 
 const warmupFrames: Int = 120
 
@@ -118,6 +120,13 @@ type FrameProfile {
   frameStartNs: Int
   markNs: Int
   reported: Bool
+  # GPU time per graph pass (RAE_GPU_PASS_TIMING=1, RendererPassTiming): the
+  # renderer's samples taken after warm-up, summed per pass, with the worst
+  gpuSamplesSeen: Int
+  gpuSamples: Int
+  gpuTags: List(Int)
+  gpuTotalUs: List(Int)
+  gpuMaxUs: List(Int)
 }
 
 # A profile of `frameLimit` frames; 0 is off.
@@ -136,6 +145,11 @@ func createFrameProfile(frameLimit: view Int) ret FrameProfile {
     frameStartNs: 0
     markNs: 0
     reported: false
+    gpuSamplesSeen: 0
+    gpuSamples: 0
+    gpuTags: List.create(Int, cap: 16)
+    gpuTotalUs: List.create(Int, cap: 16)
+    gpuMaxUs: List.create(Int, cap: 16)
   }
   loop var i: Int = 0, i < profileSectionCount, ++i {
     profile.frameNs.add(value: 0)
@@ -167,6 +181,62 @@ func profileLap(profile: mod FrameProfile, section: view Int) {
     value: profile.frameNs.copyAtDefault(index: section) + now - profile.markNs
   )
   profile.markNs = now
+}
+
+# Take in the renderer's newest GPU pass sample, if there is one since the
+# last call (after warm-up only).
+func profileGpuPasses(profile: mod FrameProfile, passTiming: view DeferredPassTiming) {
+  if profile.enabled is false or passTiming.samples is profile.gpuSamplesSeen {
+    ret
+  }
+  profile.gpuSamplesSeen = passTiming.samples
+  if profile.warmupLeft > 0 or profile.reported {
+    ret
+  }
+  if profile.gpuTags.length is 0 {
+    loop var i: Int = 0, i < passTiming.lastTags.length, ++i {
+      profile.gpuTags.add(value: passTiming.lastTags.copyAtDefault(index: i))
+      profile.gpuTotalUs.add(value: 0)
+      profile.gpuMaxUs.add(value: 0)
+    }
+  }
+  if passTiming.lastTags.length is not profile.gpuTags.length {
+    ret
+  }
+  loop var i: Int = 0, i < profile.gpuTags.length, ++i {
+    let microseconds: Int = passTiming.lastMicroseconds.copyAtDefault(index: i)
+    profile.gpuTotalUs.set(
+      index: i
+      value: profile.gpuTotalUs.copyAtDefault(index: i) + microseconds
+    )
+    if microseconds > profile.gpuMaxUs.copyAtDefault(index: i) {
+      profile.gpuMaxUs.set(index: i, value: microseconds)
+    }
+  }
+  profile.gpuSamples = profile.gpuSamples + 1
+}
+
+func usToMs(microseconds: view Int) ret Float {
+  ret Math.round(x: (microseconds as Float) / 10.0) / 100.0
+}
+
+# The GPU part of the report: ms per sampled frame, average and worst.
+func reportGpuPasses(profile: view FrameProfile) {
+  if profile.gpuSamples is 0 {
+    ret
+  }
+  log("[profile] GPU per pass, {profile.gpuSamples} sampled frames; ms: average, worst")
+  var sum: Int = 0
+  loop var i: Int = 0, i < profile.gpuTags.length, ++i {
+    let total: Int = profile.gpuTotalUs.copyAtDefault(index: i)
+    sum = sum + total
+    log(
+      "[profile] GPU {renderTagName(tag: profile.gpuTags.copyAtDefault(index: i))}: {usToMs(
+        microseconds: total / profile.gpuSamples
+      )}, {usToMs(microseconds: profile.gpuMaxUs.copyAtDefault(index: i))}"
+    )
+  }
+  log("[profile] GPU whole frame: {usToMs(microseconds: sum / profile.gpuSamples)}")
 }
 
 func profileSteps(profile: mod FrameProfile, steps: view Int) {
@@ -233,5 +303,6 @@ func profileFrameEnd(profile: mod FrameProfile, section: view Int) ret Bool {
     )
   }
   log("[profile] whole frame: {nsToMs(ns: sum / profile.frames)}, {nsToMs(ns: profile.maxFrameNs)}")
+  reportGpuPasses(profile: profile)
   ret true
 }

@@ -908,3 +908,74 @@ steady steps: the port allocated **720** (6 a step), all in
 the world's five event Lists, and the system took those copies every step.
 It now reads the lists in place, and the count is **0**. Track B also counts
 0, but the counter only sees Rae's allocations, not Box3D's own C mallocs.
+
+### 10i. The GPU frame, per pass (2026-10-06)
+
+**How it is measured.** `RAE_GPU_PASS_TIMING=1` turns on per-pass GPU
+timing in the deferred renderer (`lib/RendererPassTiming.rae`, over
+`gpu/GpuTiming`). The passes record their work in many ways (manager
+recordings, raw fullscreen encoders, compute, the 2D canvas), so they are
+not instrumented one by one. Instead the renderer submits a timestamp
+**mark** before each pass of its graph and one after the last: a compute
+pass that dispatches one workgroup of a do-nothing shader. Metal writes no
+timestamps for a pass with no work at all. The queue runs submissions in
+order, so the time from one mark to the next is the GPU timeline of the
+pass between them. The readback never blocks: a frame's marks are resolved
+with its last mark, read back a few frames later, and the next frame is
+timed once that one has landed (about every other frame). The playground's
+`RAE_PLAYGROUND_PROFILE` report then adds a `GPU <pass>` line per pass
+(average and worst ms over the sampled frames) and a GPU whole frame.
+`renderDeferredFrameWorld` marks its passes too, so any app on the deferred
+graph can turn it on.
+
+Two limits apply:
+- **A span is timeline, not busy time.** If the GPU waits for the CPU to
+  submit the next pass, the wait counts. The CPU records every pass after
+  the G-buffer in 0.62 ms per frame, so at most that much of those spans
+  can be waiting.
+- **Work can spill across marks.** A tile GPU overlaps consecutive
+  command buffers, so the time can move between neighbouring spans. The
+  whole-frame total is the solid number.
+
+**The result.** The playground (pyramid, 5 000 boxes, autofire, 2560 x 1600
+pixels, 1 200 frames, ~570 sampled), ms per frame:
+
+| pass | before | the pyramid in one command buffer |
+|---|---|---|
+| water fft (no water: nothing) | 0.12 | 0.11 |
+| shadow cascades | 0.47 | 0.51 |
+| gbuffer | 0.28 | 0.27 |
+| ssao | 0.22 | 0.20 |
+| **depth pyramid** | **2.64** | **0.57** |
+| lighting | 0.26 | 1.51 |
+| transparent forward | 0.19 | 0.40 |
+| underwater, taa, composite, ui overlay | 0.13 + 0.09 + 0.13 + 0.11 | 0.11 + 0.09 + 0.10 + 0.11 |
+| **present** (UI flush, copy to drawable) | **3.35** | **2.19** |
+| **GPU whole frame** | **7.98** | **6.17** |
+
+- **The depth pyramid was a third of the GPU frame, and its work was not
+  the cause.** A half-resolution R32Float min chain is a few hundred
+  microseconds of shading. But each of its ~11 mip levels was its own
+  command buffer and submission (`runFullscreen`), and that fixed cost
+  per submission on the GPU's timeline was most of the 2.6 ms. The mips
+  are now render passes in one command buffer (`beginFullscreenBatchEncoder`
+  / `runFullscreenInBatch` / `submitFullscreenBatch` in
+  `GbufferFullscreen.rae`). Each mip is still its own pass, so a mip reads
+  the one before it as it did, and the image is unchanged. The GPU frame
+  dropped 1.8 ms. Part of the pyramid's time now shows up in the lighting
+  span, which is the spill described above.
+- **Present is the other big span** (2.2-3.4 ms): the 2D canvas's flush of
+  the UI and the copy into the drawable, both inside the C glue's endFrame.
+  It could not be measured cleanly here. The display was off for these runs,
+  so every present found its window not visible, and the copy and present
+  did not happen as they do on screen. Re-measuring it with the window on
+  screen, and splitting the UI flush from the copy, is queued.
+- **In the browser** the build compiles with the timing in (the web
+  `wgpu.h` shim answers wgpu-native's `wgpuQueueGetTimestampPeriod` with 1:
+  browser timestamps are already nanoseconds), but a headless Chrome run
+  with `?RAE_GPU_PASS_TIMING=1` produced no samples and no "unavailable"
+  line. Not investigated further here (queued with the present measurement).
+- The same per-submission cost is paid by every fullscreen post pass
+  (ssao, lighting, taa, composite each submit their own command buffer), so
+  recording the whole post chain into one command buffer is the next lever
+  (queued).

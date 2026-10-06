@@ -14,6 +14,7 @@ open GbufferUnderwater
 open Gpu2dCanvas
 open gpu/GpuResources
 open RendererDeferred
+open RendererPassTiming
 
 # Declare the deferred frame. Pass declaration order here is deliberately
 # scrambled — present first, gbuffer last — so that a regression to
@@ -517,6 +518,7 @@ func buildDeferredGraph(withUi: view Bool) ret DeferredRenderer {
       gpuResources: none
       canvas: createGpu2dCanvas()
       underwater: noUnderwater()
+      passTiming: createDeferredPassTiming()
     }
   }
 }

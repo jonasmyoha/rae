@@ -24,4 +24,12 @@ static inline uint64_t wgpuQueueSubmitForIndex(WGPUQueue queue, size_t commandCo
     rae_web_submission_index += 1;
     return rae_web_submission_index;
 }
+
+/* wgpu-native's tick length of a timestamp query (gpu/GpuTiming converts
+ * ticks to time with it). Browser WebGPU already reports timestamps in
+ * nanoseconds. */
+static inline float wgpuQueueGetTimestampPeriod(WGPUQueue queue) {
+    (void)queue;
+    return 1.0f;
+}
 #endif

@@ -618,31 +618,36 @@ func buildDepthPyramid(
   loop cache.binds.length < mips {
     cache.binds.add(value: noBindGroupId())
   }
-  var i: Int = 0
-  loop i < mips {
-    var pipeline: RenderPipelineId = targets.pyrReduce
-    var source: ResourceRef = pyramidViewRef(targets: targets, level: i - 1)
-    if i is 0 {
-      pipeline = targets.pyrFromDepth
-      source = gbufferTargetRef(cache: gbuffer, index: gbufferTargetDepth)
-    }
-    if not bindSlotUsable(resources: resources, binds: cache.binds, idx: i) {
-      let entries: List(ResourceRef) = List.create(ResourceRef, cap: 1)
-      entries.add(value: source)
-      if let bind: BindGroupId = createRenderBindGroup(
-        resources: resources
-        pipeline: pipeline
-        entries: entries
-      ) {
-        cache.binds.set(index: i, value: bind)
-      } else {
-        ret
+  # Every mip is its own render pass, all in one command buffer
+  unsafe {
+    let encoder: Ptr = beginFullscreenBatchEncoder()
+    var i: Int = 0
+    loop i < mips {
+      var pipeline: RenderPipelineId = targets.pyrReduce
+      var source: ResourceRef = pyramidViewRef(targets: targets, level: i - 1)
+      if i is 0 {
+        pipeline = targets.pyrFromDepth
+        source = gbufferTargetRef(cache: gbuffer, index: gbufferTargetDepth)
       }
-    }
-    if let bind: BindGroupId = cache.binds.copyAt(index: i) {
-      if let target: TextureViewId = targets.pyramidViews.copyAt(index: i) {
-        unsafe {
-          runFullscreen(
+      if not bindSlotUsable(resources: resources, binds: cache.binds, idx: i) {
+        let entries: List(ResourceRef) = List.create(ResourceRef, cap: 1)
+        entries.add(value: source)
+        if let bind: BindGroupId = createRenderBindGroup(
+          resources: resources
+          pipeline: pipeline
+          entries: entries
+        ) {
+          cache.binds.set(index: i, value: bind)
+        } else {
+          # Submit the mips already recorded; the rest wait for a later frame
+          submitFullscreenBatch(encoder: encoder)
+          ret
+        }
+      }
+      if let bind: BindGroupId = cache.binds.copyAt(index: i) {
+        if let target: TextureViewId = targets.pyramidViews.copyAt(index: i) {
+          runFullscreenInBatch(
+            encoder: encoder
             resources: resources
             pipeline: pipeline
             bind: bind
@@ -650,8 +655,9 @@ func buildDepthPyramid(
           )
         }
       }
+      i = i + 1
     }
-    i = i + 1
+    submitFullscreenBatch(encoder: encoder)
   }
 }
 
