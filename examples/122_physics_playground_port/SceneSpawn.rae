@@ -21,6 +21,7 @@ open physics/math/TransformMath
 open physics/geometry/QueryTypes
 open physics/dynamics/WorldTypes
 open physics/dynamics/WorldQueries
+open physics/dynamics/WorldSettings
 open physics/ecs/Physics
 open physics/ecs/PhysicsComponents
 open physics/ecs/PhysicsSpawn
@@ -333,6 +334,12 @@ func stepPlaygroundProfiled(
   profileLap(profile: profile, section: profileEvents)
   profileSteps(profile: profile, steps: steps)
   ret steps
+}
+
+# Turn the world's sleeping on or off (the scaling benchmark measures a
+# pyramid that stays awake, as Box3D's own large-pyramid benchmark does).
+func setPlaygroundSleeping(world: mod PlaygroundWorld, enabled: view Bool) {
+  enableWorldSleeping(world: world.physics.world, flag: enabled)
 }
 
 # A frame that does not step (everything asleep): nothing moves, so draw the

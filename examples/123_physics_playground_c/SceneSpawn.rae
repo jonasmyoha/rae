@@ -333,6 +333,14 @@ func stepPlaygroundProfiled(
   ret steps
 }
 
+# Turn the world's sleeping on or off (the scaling benchmark measures a
+# pyramid that stays awake, as Box3D's own large-pyramid benchmark does).
+func setPlaygroundSleeping(world: mod PlaygroundWorld, enabled: view Bool) {
+  unsafe {
+    Box3d.b3World_EnableSleeping(worldId: world.physics.world, flag: enabled)
+  }
+}
+
 # A frame that does not step (everything asleep): nothing moves, so draw the
 # current poses rather than blending towards them from a stale earlier one.
 func settlePlaygroundPoses(world: mod PlaygroundWorld) {

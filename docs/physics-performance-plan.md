@@ -634,3 +634,36 @@ without emptying the source, so assigning the source afterwards frees what
 the destination still holds. A `List` field is moved correctly (the
 source is zeroed).
 
+### 10e. Scaling curves: bodies and workers, both tracks (2026-10-06)
+
+`benchmarks/physics_scaling` steps the playground's pyramid headless on both
+tracks: `RAE_PLAYGROUND_SCALING=<counts>` in the playground itself, with
+sleeping off, 20 settling and 100 timed 60 Hz steps (4 sub-steps). It
+covers 1k to 20k bodies at 1, 2, 4 and 8 workers. The page is on the
+devtools Benchmarks tab ("Physics scaling"). M1 Max, release, load ~4.5,
+median ms per step:
+
+| bodies | port 1 w | port 8 w | port speedup | Box3D C 1 w | Box3D C 8 w | Box3D C speedup | port / C at 8 w |
+|---|---|---|---|---|---|---|---|
+| 1 000 | 1.78 | 0.70 | 2.6x | 1.29 | 0.72 | 1.8x | 0.97x |
+| 2 000 | 3.96 | 1.48 | 2.7x | 2.70 | 1.02 | 2.6x | 1.45x |
+| 5 000 | 11.81 | 2.87 | 4.1x | 7.92 | 2.20 | 3.6x | 1.31x |
+| 10 000 | 27.28 | 5.92 | 4.6x | 17.99 | 4.23 | 4.3x | 1.40x |
+| 20 000 | 59.10 | 12.57 | 4.7x | 40.35 | 9.00 | 4.5x | 1.40x |
+
+What the curves show:
+- **Both tracks grow roughly linearly with bodies.** The 1-worker step is
+  ~2x per doubling, a little more for the port at 20k. On a log-log chart
+  the lines are parallel.
+- **The port scales as well as Box3D across workers.** It reaches 4.7x
+  at 20k bodies against Box3D's 4.5x, and 4.1x at 5k against 3.6x. Small
+  pyramids stop scaling past 4 workers on both tracks, because there is
+  too little work per stage (§2e).
+- **The port's constant factor is ~1.3-1.5x Box3D's.** Track B's Box3D is
+  the release build with its SIMD paths (NEON), so this matches §2's ratio
+  of the port to Box3D SIMD on the large pyramid. The port's own Float4
+  lowering applies only in its solver.
+- **The 4 ms budget** at 8 workers holds to ~6 000 bodies on the port and
+  ~9 000 on Box3D. 5 000 awake bodies (§6's target) is 2.9 ms on the port
+  and 2.2 ms on Box3D.
+
