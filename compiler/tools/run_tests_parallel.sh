@@ -9,7 +9,12 @@
 # so the interleaving that makes a naive `make test &` unreliable never happens.
 #
 # Why parallel CASES are safe:
-#   * `rae run` writes $TMPDIR/rae_compiled_<pid>.{c,bin} — pid-unique.
+#   * `rae run` builds in its OWN scratch dir ($TMPDIR/rae_run_XXXXXX: the
+#     generated C, the binary AND the runtime copies the C includes). It used
+#     to write rae_compiled_<pid>.{c,bin} into $TMPDIR itself, which looked
+#     pid-unique - but the runtime headers were copied next to them, shared by
+#     every concurrent run, and a run could read a half-rewritten
+#     rae_runtime.h (~1 in 100 under 20-way concurrency).
 #   * a case's build cache lives in ITS OWN dir (tests/cases/<x>/.rae/).
 #   * the one shared write — stats/test_history.json (+ a `git log` per passed
 #     test) at the end of every run_tests.sh call — is disabled per case

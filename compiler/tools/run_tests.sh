@@ -380,6 +380,8 @@ for TARGET in "${TARGETS[@]}"; do
             esac
         fi
         LEAK_MSG=""
+        CMD_RAW=""
+        APP_EXIT_CODE=""
         # For parse/lex/format, we want to capture both stdout and stderr to see errors + any partial results
         if [[ "${CMD_ARGS[0]}" =~ ^(parse|lex|format)$ ]]; then
             CMD_STDOUT=$("$BIN" "${CMD_RUN_ARGS[@]}" 2>&1 || true)
@@ -505,6 +507,21 @@ for TARGET in "${TARGETS[@]}"; do
       echo "$EXPECTED_OUTPUT" | sed 's/^/    /'
       echo "  Actual:"
       echo "$ACTUAL_OUTPUT" | sed 's/^/    /'
+      # A compiled run's exit, which the comparison filters out with the
+      # driver's @@ lines: a crash, or a program that never started (the build
+      # failed) - otherwise a run that printed nothing fails with a blank
+      # "Actual" and no clue (999_box3d_ecs_determinism, 2026-10-06).
+      if [ -n "$CMD_RAW" ]; then
+        if [ -n "$APP_EXIT_CODE" ]; then
+          echo "  Program exit code: $APP_EXIT_CODE"
+        else
+          echo "  Program exit: none - the driver stopped before running it (build failed?)"
+        fi
+        if [ -z "$ACTUAL_OUTPUT" ]; then
+          echo "  Raw output (last lines, unfiltered):"
+          printf '%s\n' "$CMD_RAW" | tail -8 | sed 's/^/    /'
+        fi
+      fi
       echo
       ((FAILED++))
     fi

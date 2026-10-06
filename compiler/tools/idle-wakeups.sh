@@ -26,7 +26,7 @@ LOG="$(mktemp -t idle-wakeups)"
 
 # The app binary, by executable name: the C compiler's command line names the
 # same file, so `pgrep -f` would find the build instead.
-app_pids() { ps -axo pid=,comm= | awk '$2 ~ /rae_compiled_[0-9]+\.bin$/ { print $1 }'; }
+app_pids() { ps -axo pid=,comm= | awk '$2 ~ /rae_compiled(_[0-9]+)?\.bin$/ { print $1 }'; }
 before="$(app_pids | sort)"
 RAE_LOOP_TRACE=1 perl -e 'alarm shift; exec @ARGV' 600 ./compiler/bin/rae run --target compiled \
   --project "$PROJECT" "$ENTRY" > "$LOG" 2>&1 &
