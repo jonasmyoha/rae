@@ -726,3 +726,61 @@ frame.
   CPU frame, or if the step spikes stay after their fix: async stepping
   would hide a spike behind the previous poses.
 
+### 10g. The low end: no catch-up spiral, and WASM (2026-10-06)
+
+**The fixed-step accumulator.** `consumeFixedSteps` (both tracks:
+`lib/physics/ecs/Physics.rae`, `lib/box3d/ecs/Physics.rae`) now takes at most
+**2** fixed steps per frame (`maxStepsPerFrame`, was 4): one catch-up step.
+After them, whole steps still owed are dropped and the fraction of a step is
+kept, since it is the blend PoseBlend draws at. The old rule clipped the
+accumulator to the cap before stepping. At a cap of 2 that would also have
+thrown away the ordinary remainder of an uneven frame (10 ms left over plus a
+33 ms frame), losing time on a machine that was not behind. Fixtures 988 and
+999 drive exactly such uneven frames and are unchanged under the new rule,
+since no frame of theirs owes more than 2 steps.
+
+Fixture 1009 models the loop (a 9 ms render plus each step's cost, with a
+frame's length the next frame's time) through `consumeFixedSteps` itself:
+
+| case | cap 4 (before) | cap 2 (now) |
+|---|---|---|
+| 3 ms steps | 12 ms frames, real time | the same |
+| 12 ms steps | 33 ms worst, real time | 33 ms worst, real time |
+| 20 ms steps (slower than the 16.7 ms they simulate) | **89 ms** frames of 4 steps, 0.75x real time | **49 ms** frames of 2 steps, 0.68x |
+| a 100 ms hitch, then 3 ms steps | 21 ms catch-up frame (4 steps) | 15 ms (2 steps) |
+
+A step slower than the time it simulates is the spiral: each frame owes more
+than it pays. With a cap of 4 it settles at four-step frames, the playground's
+40-80 ms frames (§10). The cap of 2 bounds the worst frame at render plus two
+steps and lets the simulation run slower instead.
+
+**WASM.** The port's step in WebAssembly, single-threaded, as a browser
+without WASM threads runs it. `benchmarks/physics`'s scenes were emitted with
+the release profile (the Float4 SIMD lowering) and compiled with wasi-sdk
+(`-O2 -msimd128`, wasm32-wasip1). They ran in Node 26's WASI against a native
+binary built from the same C, 1 worker, best of 2, ms per step:
+
+| scene | native | WASM (Node) | WASM / native |
+|---|---|---|---|
+| large_pyramid (5 050 boxes) | 12.80 | 16.42 | 1.28x |
+| many_pyramids | 24.91 | 31.56 | 1.27x |
+| joint_grid | 15.12 | 18.83 | 1.25x |
+| convex_pile | 16.75 | 25.70 | 1.53x |
+| rain | 6.16 | 7.73 | 1.25x |
+
+Every checksum is identical to native: the port is bit-exact in WASM too.
+Single-threaded, a 5 000-box pyramid takes ~16 ms per 60 Hz step, so it just
+keeps real time with no room for the frame. With the cap of 2, a browser
+falls back to running the simulation slower, not to a spiral. WASM threads
+(the wasip1-threads build `compiler/tools/wasm_build.sh` already has,
+WASM_THREADS=1; backlog #245 for the browser) would give back the §10e
+scaling.
+
+**The playground in the browser** could not be built. `rae build --target
+wasm` fails for every WebGPU app, not just the playground: the generated
+bindings (`lib/webgpu/Webgpu.rae`, `WebgpuTypes.rae`) declare
+`cheader "webgpu/wgpu.h"`, wgpu-native's header, which the browser's
+EmdawnWebGPU package does not have. `compiler/tools/wasm_webgpu_smoke.sh`
+(109_gpu3d_pbr) fails the same way. Queued; the browser frame numbers wait
+for it.
+

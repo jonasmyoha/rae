@@ -4,6 +4,7 @@
 # queues the event system fills with entity ids, and the static venue body.
 # A world holds it as a plain field (a resource, docs/ecs-resources.md), and
 # the physics systems (PhysicsSystems) take it `mod`.
+import Math
 import Parallel
 open Vec3
 open Quat
@@ -96,7 +97,7 @@ func createPhysics(def: view WorldDef, fixedStep: view Float, subSteps: view Int
     fixedStep: fixedStep
     subSteps: subSteps
     accumulator: 0.0
-    maxStepsPerFrame: 4
+    maxStepsPerFrame: 2
     stepCount: 0
     bodyEntities: List.create(EntityId, cap: 64)
     shapeEntities: List.create(EntityId, cap: 64)
@@ -141,19 +142,24 @@ func entityOfShape(physics: view Physics, shapeId: view ShapeId) ret EntityId {
 }
 
 # Add a frame's `frameTime` to the clock and take the fixed steps it pays
-# for: how many to run now. The accumulator is capped at maxStepsPerFrame
-# steps, so a long frame (a stall, a breakpoint) slows the game down instead
-# of spiralling.
+# for: how many to run now. At most maxStepsPerFrame (2: one catch-up step);
+# whole steps owed past that are dropped, the fraction of a step is kept.
+# A long frame (a stall, a slow step, a breakpoint) then slows the game down
+# instead of spiralling: with a cap of 4, a step slower than the time it
+# simulates made each frame owe more steps until frames of four steps ran at
+# 40-80 ms (docs/physics-performance-plan.md §10g, fixture 1009).
 func consumeFixedSteps(physics: mod Physics, frameTime: view Float) ret Int {
   physics.accumulator = physics.accumulator + frameTime
-  let capped: Float = physics.fixedStep * (physics.maxStepsPerFrame as Float)
-  if physics.accumulator > capped {
-    physics.accumulator = capped
-  }
   var count: Int = 0
   loop physics.accumulator >= physics.fixedStep and count < physics.maxStepsPerFrame {
     physics.accumulator = physics.accumulator - physics.fixedStep
     count = count + 1
+  }
+  # Whole steps still owed past the cap are dropped; the fraction of a step
+  # stays (it is the blend between the last two steps' poses)
+  if physics.accumulator >= physics.fixedStep {
+    let owed: Float = Math.floor(x: physics.accumulator / physics.fixedStep)
+    physics.accumulator = physics.accumulator - owed * physics.fixedStep
   }
   ret count
 }
