@@ -580,7 +580,7 @@ func updateMeshHitFlag(
 func updateCompoundContact(
   contact: mod Contact
   geometry: mod LocalManifold
-  meshManifold: mod LocalManifold
+  meshScratch: mod MeshScratch
   shapeA: view PhysicsShape
   compound: view CompoundData
   transformA: view Transform
@@ -641,7 +641,7 @@ func updateCompoundContact(
       childShape.meshIndex = shapeA.meshIndex + child.kindIndex
       touching = computeMeshManifolds(
         contact: contact
-        scratch: meshManifold
+        scratch: meshScratch
         shapeA: childShape
         meshes: meshes
         heightFields: heightFields
@@ -743,7 +743,7 @@ func updateConvexChild(
 func updateContact(
   contact: mod Contact
   geometry: mod LocalManifold
-  meshManifold: mod LocalManifold
+  meshScratch: mod MeshScratch
   shapeA: view PhysicsShape
   localCenterA: view Vec3
   transformA: view Transform
@@ -764,7 +764,7 @@ func updateContact(
       touching = updateCompoundContact(
         contact: contact
         geometry: geometry
-        meshManifold: meshManifold
+        meshScratch: meshScratch
         shapeA: shapeA
         compound: compound
         transformA: transformA
@@ -782,7 +782,7 @@ func updateContact(
     let noMaterialMap: List(Int) = List.create(Int, cap: 0)
     touching = computeMeshManifolds(
       contact: contact
-      scratch: meshManifold
+      scratch: meshScratch
       shapeA: shapeA
       meshes: meshes
       heightFields: heightFields

@@ -29,6 +29,8 @@ open physics/dynamics/JointData
 open physics/dynamics/ConstraintGraph
 open physics/collision/Manifold
 open physics/collision/HullScratch
+open physics/dynamics/MeshContact
+open physics/dynamics/TriangleTimeOfImpact
 open physics/container/Bitset
 open physics/container/QuickSort
 open physics/dynamics/Events
@@ -47,8 +49,8 @@ type TaskContext {
   contactStateBitSet: Bitset
   # The narrow phase's manifold buffer (Box3D's per-worker arena)
   localManifold: LocalManifold
-  # The mesh contacts' per-triangle manifold buffer
-  meshManifold: LocalManifold
+  # The mesh narrow phase's working lists (Box3D's per-worker arena)
+  meshScratch: MeshScratch
   # The hull narrow phase's working lists (Box3D keeps them on the stack)
   hullScratch: HullScratch
   # Body finalization: the awake islands (by local index) and the
@@ -80,6 +82,7 @@ type TaskContext {
   continuousQueryStack: List(Int)
   toiPointsA: List(Vec3)
   toiPointsB: List(Vec3)
+  toiMeshQuery: MeshImpactScratch
 }
 
 # A shape proxy to mark moved in the broad phase, with its new fat box.
@@ -108,7 +111,7 @@ func createTaskContext() ret TaskContext {
     pairs: createPairContext()
     contactStateBitSet: createBitset(bitCapacity: 1024)
     localManifold: createLocalManifold(capacity: maxManifoldPoints)
-    meshManifold: createLocalManifold(capacity: maxClipPoints)
+    meshScratch: createMeshScratch()
     hullScratch: createHullScratch()
     awakeIslandBitSet: createBitset(bitCapacity: 256)
     splitIslandId: -1
@@ -126,6 +129,7 @@ func createTaskContext() ret TaskContext {
     continuousQueryStack: List.create(Int, cap: 32)
     toiPointsA: List.create(Vec3, cap: 8)
     toiPointsB: List.create(Vec3, cap: 8)
+    toiMeshQuery: createMeshImpactScratch()
   }
 }
 

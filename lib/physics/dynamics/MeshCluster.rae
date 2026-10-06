@@ -42,6 +42,37 @@ type MeshCluster {
   pointCapacity: Int
 }
 
+# The reusable working lists of the clustering: the cluster pool (the first
+# `clusterCount` are this contact's; a slot's points list is kept and
+# refilled), each accepted manifold's cluster, and the culling's projected,
+# chosen and kept points. Cleared before use, so a steady contact allocates
+# nothing.
+type ClusterScratch {
+  clusters: List(MeshCluster)
+  clusterCount: Int
+  memberships: List(Int)
+  cull: CullScratch
+}
+
+type CullScratch {
+  projected: List(Point2d)
+  finalPoints: List(Point2d)
+  keptPoints: List(LocalManifoldPoint)
+}
+
+func createClusterScratch() ret ClusterScratch {
+  ret ClusterScratch {
+    clusters: List.create(MeshCluster, cap: 4)
+    clusterCount: 0
+    memberships: List.create(Int, cap: 16)
+    cull: CullScratch {
+      projected: List.create(Point2d, cap: 16)
+      finalPoints: List.create(Point2d, cap: 4)
+      keptPoints: List.create(LocalManifoldPoint, cap: 4)
+    }
+  }
+}
+
 func edgeKey(vertex1: view Int, vertex2: view Int) ret Int {
   ret (minInt(left: vertex1, right: vertex2) shl 32) bitor maxInt(left: vertex1, right: vertex2)
 }
@@ -144,11 +175,12 @@ func setPoints(points: mod List(Point2d), finalPoints: view List(Point2d)) ret I
 # b3CullPoints: at most four of `count` points spanning the most area: the
 # farthest pair, the point making the largest triangle with them, and the
 # point adding the most area outside it. Returns the count kept, at the
-# front of `points`.
+# front of `points`. `finalPoints` is working space.
 func cullPoints(
   points: mod List(Point2d)
   count: view Int
   lengthUnitsPerMeter: view Float
+  finalPoints: mod List(Point2d)
 ) ret Int {
   if count <= 1 {
     ret count
@@ -158,7 +190,7 @@ func cullPoints(
   let toleranceSquared: Float = tolerance * tolerance
   let separationTolerance: Float = slop
 
-  let finalPoints: List(Point2d) = List.create(Point2d, cap: 4)
+  finalPoints.clear()
   var count1: Int = count
 
   # Step 1: the two points with the largest distance, ties broken by the
@@ -314,6 +346,7 @@ func reduceCluster(
   points: mod List(LocalManifoldPoint)
   normal: view Vec3
   lengthUnitsPerMeter: view Float
+  cull: mod CullScratch
 ) {
   let count1: Int = points.length
   if count1 <= 1 {
@@ -322,11 +355,11 @@ func reduceCluster(
   let u: Vec3 = perp(vector: normal)
   let v: Vec3 = cross(left: normal, right: u)
   let origin: Vec3 = points.copyAtDefault(index: 0).point
-  let projected: List(Point2d) = List.create(Point2d, cap: count1)
+  cull.projected.clear()
   loop var i: Int = 0, i < count1, ++i {
     let source: LocalManifoldPoint = points.copyAtDefault(index: i)
     let delta: Vec3 = subtract(left: source.point, right: origin)
-    projected.add(
+    cull.projected.add(
       value: Point2d {
         point: Vec2 { x: dot(left: delta, right: u), y: dot(left: delta, right: v) }
         separation: source.separation
@@ -335,18 +368,19 @@ func reduceCluster(
     )
   }
   let count2: Int = cullPoints(
-    points: projected
+    points: cull.projected
     count: count1
     lengthUnitsPerMeter: lengthUnitsPerMeter
+    finalPoints: cull.finalPoints
   )
-  let finalPoints: List(LocalManifoldPoint) = List.create(LocalManifoldPoint, cap: count2)
+  cull.keptPoints.clear()
   loop var i: Int = 0, i < count2, ++i {
-    let index: Int = projected.copyAtDefault(index: i).originalIndex
-    finalPoints.add(value: points.copyAtDefault(index: index))
+    let index: Int = cull.projected.copyAtDefault(index: i).originalIndex
+    cull.keptPoints.add(value: points.copyAtDefault(index: index))
   }
   points.clear()
   loop var i: Int = 0, i < count2, ++i {
-    points.add(value: finalPoints.copyAtDefault(index: i))
+    points.add(value: cull.keptPoints.copyAtDefault(index: i))
   }
 }
 
@@ -407,73 +441,89 @@ func isFlatEdgeGhost(found: view FoundFeatures, manifold: view LocalManifold) re
 }
 
 # The accepted manifolds clustered by manifold and triangle normal, each
-# cluster's points culled to at most four.
+# cluster's points culled to at most four: the first `scratch.clusterCount`
+# of `scratch.clusters`.
 func clusterManifolds(
   manifolds: view List(LocalManifold)
   accepted: view List(Int)
   lengthUnitsPerMeter: view Float
-) ret List(MeshCluster) {
+  scratch: mod ClusterScratch
+) {
   # Tighter than the warm starting manifold matching tolerance: these serve
   # different purposes
   let clusterThreshold: Float = 0.996
-  let clusters: List(MeshCluster) = List.create(MeshCluster, cap: 4)
-  let memberships: List(Int) = List.create(Int, cap: accepted.length)
+  scratch.clusterCount = 0
+  scratch.memberships.clear()
   loop var i: Int = 0, i < accepted.length, ++i {
-    let manifold: LocalManifold = manifolds.copyAtDefault(index: accepted.copyAtDefault(index: i))
-    # The first cluster within the (tight) tolerance is taken
-    var clusterIndex: Int = -1
-    loop var j: Int = 0, j < clusters.length, ++j {
-      let cluster: MeshCluster = clusters.copyAtDefault(index: j)
-      let cosManifoldAngle: Float = dot(left: cluster.manifoldNormal, right: manifold.normal)
-      let cosTriangleAngle: Float = dot(
-        left: cluster.triangleNormal
-        right: manifold.triangleNormal
-      )
-      if cosManifoldAngle <= clusterThreshold or cosTriangleAngle <= clusterThreshold {
-        continue
-      }
-      clusterIndex = j
-      break
-    }
-    if clusterIndex is not -1 {
-      memberships.add(value: clusterIndex)
-      if let cluster: mod MeshCluster => clusters.modAt(index: clusterIndex) {
-        cluster.pointCapacity = cluster.pointCapacity + manifold.pointCount
-      }
-    } else {
-      memberships.add(value: clusters.length)
-      clusters.add(
-        value: MeshCluster {
-          manifoldNormal: manifold.normal
-          triangleNormal: manifold.triangleNormal
-          points: List.create(LocalManifoldPoint, cap: manifold.pointCount)
-          pointCapacity: manifold.pointCount
+    if let manifold: view LocalManifold => manifolds.viewAt(index: accepted.copyAtDefault(index: i)) {
+      # The first cluster within the (tight) tolerance is taken
+      var clusterIndex: Int = -1
+      loop var j: Int = 0, j < scratch.clusterCount, ++j {
+        if let cluster: view MeshCluster => scratch.clusters.viewAt(index: j) {
+          let cosManifoldAngle: Float = dot(left: cluster.manifoldNormal, right: manifold.normal)
+          let cosTriangleAngle: Float = dot(
+            left: cluster.triangleNormal
+            right: manifold.triangleNormal
+          )
+          if cosManifoldAngle <= clusterThreshold or cosTriangleAngle <= clusterThreshold {
+            continue
+          }
         }
-      )
+        clusterIndex = j
+        break
+      }
+      if clusterIndex is not -1 {
+        scratch.memberships.add(value: clusterIndex)
+        if let cluster: mod MeshCluster => scratch.clusters.modAt(index: clusterIndex) {
+          cluster.pointCapacity = cluster.pointCapacity + manifold.pointCount
+        }
+      } else {
+        scratch.memberships.add(value: scratch.clusterCount)
+        if scratch.clusterCount is scratch.clusters.length {
+          scratch.clusters.add(
+            value: MeshCluster {
+              manifoldNormal: zeroVector()
+              triangleNormal: zeroVector()
+              points: List.create(LocalManifoldPoint, cap: 4)
+              pointCapacity: 0
+            }
+          )
+        }
+        if let cluster: mod MeshCluster => scratch.clusters.modAt(index: scratch.clusterCount) {
+          cluster.manifoldNormal = manifold.normal
+          cluster.triangleNormal = manifold.triangleNormal
+          cluster.points.clear()
+          cluster.pointCapacity = manifold.pointCount
+        }
+        scratch.clusterCount = scratch.clusterCount + 1
+      }
     }
   }
 
   # Populate the clusters
   loop var i: Int = 0, i < accepted.length, ++i {
-    let manifold: LocalManifold = manifolds.copyAtDefault(index: accepted.copyAtDefault(index: i))
-    if let cluster: mod MeshCluster => clusters.modAt(index: memberships.copyAtDefault(index: i)) {
-      loop var j: Int = 0, j < manifold.pointCount, ++j {
-        var point: LocalManifoldPoint = manifold.points.copyAtDefault(index: j)
-        point.triangleIndex = manifold.triangleIndex
-        cluster.points.add(value: point)
+    if let manifold: view LocalManifold => manifolds.viewAt(index: accepted.copyAtDefault(index: i)) {
+      if let cluster: mod MeshCluster => scratch.clusters.modAt(
+        index: scratch.memberships.copyAtDefault(index: i)
+      ) {
+        loop var j: Int = 0, j < manifold.pointCount, ++j {
+          var point: LocalManifoldPoint = manifold.points.copyAtDefault(index: j)
+          point.triangleIndex = manifold.triangleIndex
+          cluster.points.add(value: point)
+        }
       }
     }
   }
 
   # Simplify the clusters
-  loop var i: Int = 0, i < clusters.length, ++i {
-    if let cluster: mod MeshCluster => clusters.modAt(index: i) {
+  loop var i: Int = 0, i < scratch.clusterCount, ++i {
+    if let cluster: mod MeshCluster => scratch.clusters.modAt(index: i) {
       reduceCluster(
         points: cluster.points
         normal: cluster.triangleNormal
         lengthUnitsPerMeter: lengthUnitsPerMeter
+        cull: scratch.cull
       )
     }
   }
-  ret clusters
 }

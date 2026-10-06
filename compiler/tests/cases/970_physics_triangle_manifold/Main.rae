@@ -222,12 +222,14 @@ func evaluate(name: view String, reader: mod Reader, out: mod List(Float)) ret B
     let capsule: Capsule = readCapsule(reader: reader)
     var cache: SimplexCache = readSimplexCache(reader: reader)
     var manifold: LocalManifold = createLocalManifold(capacity: capacity)
+    var scratch: TriangleScratch = createTriangleScratch()
     collideTriangleAndCapsule(
       manifold: manifold
       triangle: triangle
       capsule: capsule
       cache: cache
       lengthUnitsPerMeter: units
+      scratch: scratch
     )
     putManifold(out: out, manifold: manifold)
     putSimplexCache(out: out, cache: cache)
