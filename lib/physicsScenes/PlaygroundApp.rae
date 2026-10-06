@@ -27,6 +27,12 @@
 #                                    seconds and logs each switch (the
 #                                    memory test: with autofire, bodies spawn
 #                                    and despawn the whole run)
+#   RAE_PLAYGROUND_PROFILE=<frames>  after 120 warm-up frames, times
+#                                    <frames> frames by system (input,
+#                                    physics push/step/pull/events, poses,
+#                                    HUD, batches, each render pass,
+#                                    present), logs one [profile] report and
+#                                    closes the window (FrameProfile)
 #   RAE_PLAYGROUND_DEBUG=1           logs the shadow casters and live balls
 #                                    of each frame, and each frame's time,
 #                                    physics steps and newest ball's drawn
@@ -36,6 +42,7 @@ import Sys
 import Gpu2d
 import Sdl3
 import Keys
+open physicsScenes/FrameProfile
 open Vec3
 open ecs/Entity
 open ecs/ComponentTable
@@ -99,6 +106,8 @@ type PlaygroundApp {
   lastCycle: Float
   cycleCount: Int
   debugLog: Bool
+  # RAE_PLAYGROUND_PROFILE's per-system frame timing (off when unset)
+  profile: FrameProfile
   # The ball the debug log follows (logPlaygroundFrame)
   trackedBall: EntityId
   # This frame
@@ -147,6 +156,11 @@ func createPlaygroundApp(
       sceneIndex = 0
     }
   }
+  var profileFrames: Int = 0
+  let profileSetting: String = Sys.getEnv(name: "RAE_PLAYGROUND_PROFILE")
+  if profileSetting.length() > 0 {
+    profileFrames = profileSetting.toInt()
+  }
   var cycleSeconds: Float = 0.0
   let cycleSetting: String = Sys.getEnv(name: "RAE_PLAYGROUND_CYCLE_SECONDS")
   if cycleSetting.length() > 0 {
@@ -185,6 +199,7 @@ func createPlaygroundApp(
     lastCycle: 0.0
     cycleCount: 0
     debugLog: envFlag(name: "RAE_PLAYGROUND_DEBUG")
+    profile: createFrameProfile(frameLimit: profileFrames)
     trackedBall: noEntity()
     extentW: windowExtentW()
     extentH: windowExtentH()
@@ -519,6 +534,7 @@ func finishPlaygroundFrame(
     app.renderedOnce = true
     app.sceneChanged = false
     fillBatches(batches: app.batches, renderShapes: renderShapes, transforms: transforms)
+    profileLap(profile: app.profile, section: profileBatches)
     renderPlaygroundFrame(
       app: app
       renderer: renderer
@@ -563,6 +579,7 @@ func renderPlaygroundFrame(
     gpuUi: app.ui.gpuUi
     debugOverlay: app.ui.debugOverlay
     debugLog: app.debugLog
+    profile: app.profile
   )
 }
 

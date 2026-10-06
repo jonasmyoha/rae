@@ -5,6 +5,7 @@
 # physics/ecs, the Rae port (docs/physics-two-implementations.md §3).
 import Quat
 import Math
+open physicsScenes/FrameProfile
 open Vec2
 open Vec3
 open ecs/Entity
@@ -288,6 +289,47 @@ func stepPlayground(world: mod PlaygroundWorld, frameTime: view Float) ret Int {
     )
   }
   advancePhysicsEvents(physics: world.physics)
+  ret steps
+}
+
+# stepPlayground with each system's time lapped into `profile` (the window's
+# RAE_PLAYGROUND_PROFILE): physicsFixedStep's systems, called one by one in
+# its order.
+func stepPlaygroundProfiled(
+  world: mod PlaygroundWorld
+  frameTime: view Float
+  profile: mod FrameProfile
+) ret Int {
+  let steps: Int = consumeFixedSteps(physics: world.physics, frameTime: frameTime)
+  loop var i: Int = 0, i < steps, ++i {
+    copyTransforms(from: world.transforms, into: world.previousTransforms)
+    profileLap(profile: profile, section: profileCopyPrevious)
+    characterSystem(
+      physics: world.physics
+      characters: world.characters
+      transforms: world.transforms
+    )
+    profileLap(profile: profile, section: profileCharacter)
+    physicsPushSystem(
+      physics: world.physics
+      rigidBodies: world.rigidBodies
+      transforms: world.transforms
+    )
+    profileLap(profile: profile, section: profilePush)
+    physicsStepSystem(physics: world.physics)
+    profileLap(profile: profile, section: profileWorldStep)
+    physicsPullSystem(
+      physics: world.physics
+      rigidBodies: world.rigidBodies
+      transforms: world.transforms
+    )
+    profileLap(profile: profile, section: profilePull)
+    physicsEventSystem(physics: world.physics)
+    profileLap(profile: profile, section: profileEvents)
+  }
+  advancePhysicsEvents(physics: world.physics)
+  profileLap(profile: profile, section: profileEvents)
+  profileSteps(profile: profile, steps: steps)
   ret steps
 }
 

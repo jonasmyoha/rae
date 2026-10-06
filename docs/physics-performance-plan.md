@@ -463,3 +463,66 @@ that module, not a restructuring of the solver.
   runs (unrelated headless browser tests), which mostly affects the 8-worker
   column.
 - Rae's ratio to C: `benchmarks/solver_struct` (P0).
+
+## 10. The playgrounds' frame, measured (2026-10-06)
+
+Measured with the playground's own per-system profile:
+`RAE_PLAYGROUND_PROFILE=<frames>` times `<frames>` frames after 120 warm-up
+frames, logs one `[profile]` report, and logs a `spike` line for any system
+over 8 ms in one frame (`lib/physicsScenes/FrameProfile.rae`). The setup
+was the pyramid at 5 000 boxes (~4 950 awake) with autofire, the pool's 8
+workers, release build, M1 Max. Present ran without vsync
+(`RAE_PRESENT_MODE=immediate`, new): the maintainer's main display is a
+60 Hz 6K monitor, and with vsync, present simply waits out the 16.7 ms
+interval, which hides whether a frame would fit 120 Hz. The window is
+1280 x 800 points, 2560 x 1600 pixels. The machine was at load 4-8 from
+other work. ms per frame, average and worst over 1 200 frames:
+
+| system | budget (§6) | track A: Rae port | track B: Box3D C |
+|---|---|---|---|
+| input, camera | | 0.06 / 0.5 | 0.06 / 0.6 |
+| spawn and despawn balls | | 0.00 / 0.03 | 0.00 / 0.03 |
+| physics push (ECS -> world) | ≤ 0.2 | 0.02 / 0.15 | 0.02 / 0.09 |
+| **physics world step** | **≤ 4.0** | **1.5-2.2 / 9-44 (spikes)** | **1.2-1.3 / 7-10** |
+| physics pull (world -> ECS) | ≤ 0.5 | 0.02 / 0.3 | 0.02 / 0.08 |
+| physics events | | 0.00 / 0.04 | 0.00 / 0.01 |
+| keep previous poses | | 0.05 / 0.3 | 0.04 / 0.2 |
+| interpolate poses | | 0.17 / 0.5 | 0.16 / 0.3 |
+| HUD | | 0.02 / 0.09 | 0.02 / 0.06 |
+| instance batches (fill) | ≤ 0.3 | 0.24 / 0.4 | 0.23 / 0.3 |
+| shadow casters (cull, queue) | | 0.66 / 1.0 | 0.66 / 1.0 |
+| gbuffer (instance upload, draw) | ≤ 0.3 | 0.28 / 0.6 | 0.28 / 0.7 |
+| deferred passes | | 0.65 / 1.1 | 0.65 / 1.0 |
+| UI overlay | | 0.26 / 0.5 | 0.26 / 0.45 |
+| present (waits for the GPU) | | 7.9-8.2 / 35 | 7.9 / 25 |
+| **whole frame** | **8.3 at 120 Hz** | **12.2-12.8** | **11.5-11.6** |
+
+Per physics step (frames that stepped), the port averages ~2.1-2.8 ms and
+Box3D ~1.7 ms. Both are inside the 4 ms budget.
+
+What it shows:
+- **The frame is GPU-bound, not physics-bound.** All the CPU work is
+  ~4.5 ms (port) and ~3.6 ms (C). Present then waits ~8 ms for the GPU, so
+  a frame takes ~12 ms: it misses 120 Hz (8.3 ms) and fits 60 Hz. Physics
+  and the ECS (push, pull, events, poses: under 0.3 ms together) are not
+  the problem. The deferred renderer has no per-pass GPU timing yet
+  (`lib/GpuTiming.rae` is driven only by a check fixture), so which pass
+  costs the GPU's 8 ms is the next measurement (queued).
+- **With vsync** on the 60 Hz display, the frame is 16.67 ms and present
+  waits ~12 ms: everything fits 60 Hz.
+- **The port's step has spikes; Box3D's does not.** In the same runs, the
+  port logged 1-30 frames with a single step of 8-28 ms. The spike
+  breakdown puts the time in the solver stages: 4-15 ms against ~2 ms
+  normally, with the same ~4 950 bodies and 7 colours awake. Box3D logged
+  none. The count swung between runs with the machine's load. Letting the
+  pool's workers spin for 20 ms instead of 250 µs between launches made it
+  worse (worst step 82 ms): spinning workers then compete with the render
+  thread and the driver. So the likely cause is preemption under CPU
+  contention. The port syncs ~100 stage launches per step, and one
+  descheduled worker stalls each barrier; Box3D's solver runs as one task.
+  Not fixed here (queued).
+- **Catch-up spirals.** A slow step makes the next frame owe 2-4 steps
+  (`maxStepsPerFrame` is 4 in both tracks), which made the worst frames
+  40-80 ms. The accumulator already drops time beyond the cap. Whether to
+  cap lower is item (4) of the performance pass (queued).
+
