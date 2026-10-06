@@ -15,6 +15,7 @@ open physicsScenes/SceneTypes
 open physicsScenes/SceneHud
 open physicsScenes/SceneLibrary
 open physicsScenes/PlaygroundRender
+open physicsScenes/PoseBlend
 open physics/math/TransformMath
 open physics/geometry/QueryTypes
 open physics/dynamics/WorldTypes
@@ -36,6 +37,9 @@ const assetBase: String = "examples/122_physics_playground_port/assets/"
 type PlaygroundWorld {
   allocator: EntityAllocator
   transforms: ComponentTable(Transform3D)
+  # The poses before the last fixed step: a frame is drawn between these and
+  # `transforms` (physicsScenes/PoseBlend)
+  previousTransforms: ComponentTable(Transform3D)
   rigidBodies: ComponentTable(RigidBody)
   colliders: ComponentTable(Collider)
   characters: ComponentTable(CharacterBody)
@@ -54,6 +58,7 @@ func createPlaygroundWorld(workerCount: view Int) ret PlaygroundWorld {
   ret PlaygroundWorld {
     allocator: createEntityAllocator()
     transforms: createComponentTable(Transform3D)
+    previousTransforms: createComponentTable(Transform3D)
     rigidBodies: createComponentTable(RigidBody)
     colliders: createComponentTable(Collider)
     characters: createComponentTable(CharacterBody)
@@ -271,17 +276,33 @@ func despawnBall(world: mod PlaygroundWorld, entityId: view EntityId) {
   freeEntity(this: world.allocator, entityId: entityId)
 }
 
-# One frame of physics (the fixed steps `frameTime` pays for).
+# One frame of physics: the fixed steps `frameTime` pays for, keeping the
+# poses from before the last of them for interpolatedTransforms.
 func stepPlayground(world: mod PlaygroundWorld, frameTime: view Float) ret Int {
-  let steps: Int = physicsFrame(
-    physics: world.physics
-    rigidBodies: world.rigidBodies
-    characters: world.characters
-    transforms: world.transforms
-    frameTime: frameTime
-  )
+  let steps: Int = consumeFixedSteps(physics: world.physics, frameTime: frameTime)
+  loop var i: Int = 0, i < steps, ++i {
+    copyTransforms(from: world.transforms, into: world.previousTransforms)
+    physicsFixedStep(
+      physics: world.physics
+      rigidBodies: world.rigidBodies
+      characters: world.characters
+      transforms: world.transforms
+    )
+  }
   advancePhysicsEvents(physics: world.physics)
   ret steps
+}
+
+# A frame that does not step (everything asleep): nothing moves, so draw the
+# current poses rather than blending towards them from a stale earlier one.
+func settlePlaygroundPoses(world: mod PlaygroundWorld) {
+  copyTransforms(from: world.transforms, into: world.previousTransforms)
+}
+
+# How far the clock is into the next fixed step, 0 to 1: the blend a frame is
+# drawn at.
+func playgroundBlend(world: view PlaygroundWorld) ret Float {
+  ret physicsBlend(physics: world.physics)
 }
 
 # The HUD's counts for `sceneName`.

@@ -511,8 +511,21 @@ The fix is interpolation (`physicsScenes/PoseBlend`):
   `interpolatedTransforms(previous, current, physicsBlend)`.
 
 After the change, 0% of frames were frozen or doubled on either track. The
-physics is unchanged: the hashes and fixtures are the same. The playgrounds
-still draw raw poses; that is queued.
+physics is unchanged: the hashes and fixtures are the same.
+
+The playgrounds now do the same. Their `SceneSpawn` adapters keep
+`previousTransforms`, `stepPlayground` loops the fixed steps itself, and a
+frame that does not step settles the previous poses. The shared `Main`
+draws `interpolatedTransforms`.
+
+They needed it even more than the vehicles: they step at 60 Hz, so at
+~150 fps 61% of frames ran no step at all. A new `[playground-frame]` log
+(under `RAE_PLAYGROUND_DEBUG`) follows one ball frame by frame:
+- before: 47.5% of moving frames frozen, 22.5% doubled;
+- after: 0.1% frozen, 0% doubled.
+
+At 10,000 bodies the per-frame blend costs nothing measurable (23.0 ms
+against 24.1 ms per frame). The playground hashes are unchanged.
 
 ## 4. Track B: building the C library
 
