@@ -526,3 +526,50 @@ What it shows:
   40-80 ms. The accumulator already drops time beyond the cap. Whether to
   cap lower is item (4) of the performance pass (queued).
 
+### 10b. Against Box3D's own samples app (2026-10-06)
+
+Box3D's samples app (its sokol renderer, from the oracle cache's source at
+9f998c8) was built with a small timing patch: `tools/box3d-oracle/samples.sh`
+applies `samples-timing.patch`, which sets the worker count and window size
+and prints one line at exit. It ran "Benchmark / Large Pyramid" (sample 11,
+Box3D's CreateLargePyramid: 5 050 boxes, sleeping off) at 8 workers in a
+1280 x 800 window (high-DPI, 2560 x 1600 pixels, like the playground's), 1 200
+frames after 120. The playgrounds ran the same pyramid (`RAE_PLAYGROUND_BODIES=
+5050`, scene 1) with autofire, which keeps ~4 950 of the boxes awake (the
+playground's world sleeps). Both had vsync; the runs were interleaved, two
+rounds, load 5-7. ms:
+
+| | physics step | CPU per frame (frame minus present/drawable wait) | GPU per frame | frame |
+|---|---|---|---|---|
+| Box3D samples app | 1.44-1.50 (Box3D's profile; 2.57 over frames 120-720 while the pile settles) | ~2.5 (its step 2.2-2.3 included) | ≤ 2.9 (it renders uncapped: 2.9 ms frames, 0.39 ms drawable wait) | 2.9 |
+| track B: Box3D C through Rae's ECS | 1.13-1.28 | ~3.6 | ~8 (§10) | 16.67 (vsync) |
+| track A: the Rae port | 1.24-1.47, spikes to 18-37 | ~3.7 | ~8 (§10) | 16.67 (vsync), worst 33-52 |
+
+The gaps and their causes:
+- **Physics is at parity on average.** With vsync both tracks step in about
+  Box3D's time. Track B is a little faster than the samples app, because
+  the sample's world never sleeps and the playground's does, and the
+  samples app does more per frame inside its Step. The port's average is
+  within noise of Box3D's. The steps are faster here than in §10's
+  uncapped runs (2.1-2.8 ms per step), where the render thread and the
+  driver competed with the workers all the time. Only the port's spikes
+  remain (§10, queued). Track B logged 0-3 frames over 8 ms, all but one
+  of them catch-up frames with 2 steps.
+- **Rendering is the gap: the GPU first, then the CPU.** Box3D's app
+  draws the same 5 050 boxes with shadows at 2560 x 1600 in under ~2.9 ms
+  of GPU per frame. The playground's deferred renderer needs ~8 ms, about
+  3x. That is why the playground misses 120 Hz and Box3D's app does not.
+  On the CPU, the playground spends ~2.1 ms on rendering:
+  - instance batches 0.24;
+  - shadow casters 0.66, which culls and queues 5 000 casters per frame
+    on the main thread;
+  - gbuffer 0.28;
+  - deferred passes 0.65;
+  - UI 0.26.
+
+  Box3D's sample spends ~0.3 ms beyond its step. Which GPU pass costs the
+  8 ms needs the deferred renderer's per-pass GPU timing (queued). The
+  per-frame CPU shadow-caster culling is the largest CPU render item.
+- **The ECS layer costs nothing measurable:** push, pull, events and poses
+  are under 0.3 ms per frame in both tracks (§10).
+
