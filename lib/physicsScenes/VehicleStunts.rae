@@ -1,0 +1,202 @@
+# The vehicle course's stunt pieces (docs/physics-two-implementations.md
+# §3, a car-physics sandbox): whiteboxed out of plain box slabs, the way a
+# level is blocked out before it is modelled. A 20 m loop the car can drive
+# through, a raised plateau, a quarter-pipe bank, and three spinning
+# obstacles that throw the car around. Backend-neutral data, like the rest
+# of the course (VehicleLibrary.drivingCourse places them); the spinning ones
+# are kinematic bodies each track's VehicleSpawn turns every fixed step
+# (moverPose).
+import Math
+open Vec3
+open Quat
+open physicsScenes/SceneTypes
+open physicsScenes/VehicleTypes
+
+# A static box slab: `halfExtents` around `centre`, turned by `rotation`, drawn
+# at `hue`.
+func slab(
+  halfExtents: view Vec3
+  centre: view Vec3
+  rotation: view Quat
+  hue: view Float
+) ret SceneBody {
+  var body: SceneBody = staticBody(shape: boxShape(halfExtents: halfExtents), position: centre)
+  body.rotation = rotation
+  body.hue = hue
+  ret body
+}
+
+# One slab of a circle drawn in the xz plane about (centreX, y, radius): the
+# slab at angle `angle` from the bottom (0 at the bottom, rising towards +x),
+# its inner face on the circle, `halfWidth` across the lane (y) and
+# `halfLength` along the curve. A loop's and a quarter-pipe's slabs.
+func curveSlab(
+  centreX: view Float
+  y: view Float
+  radius: view Float
+  angle: view Float
+  halfLength: view Float
+  halfWidth: view Float
+  hue: view Float
+) ret SceneBody {
+  let thickness: Float = 0.3
+  # Pushed out by the half thickness, so the inner face sits on the circle
+  let reach: Float = radius + thickness
+  let centre: Vec3 = {
+    x: centreX + reach * Math.sin(x: angle)
+    y: y
+    z: radius - reach * Math.cos(x: angle)
+  }
+  # Turning about y by -angle points the slab's x along the curve and its z
+  # (its face) at the circle's centre
+  let rotation: Quat = Quat.fromAxisAngle(axis: Vec3 { x: 0.0, y: 1.0, z: 0.0 }, angle: -angle)
+  ret slab(
+    halfExtents: Vec3 { x: halfLength, y: halfWidth, z: thickness }
+    centre: centre
+    rotation: rotation
+    hue: hue
+  )
+}
+
+# A loop the car drives through, `2 * radius` tall: `slabCount` slabs round a
+# full circle centred at x = `centreX`, entered at the bottom heading +x. The
+# lane drifts `drift` metres along +y over the turn (a corkscrew), so the way
+# out runs beside the way in instead of back into it. Pastel rainbow round the
+# loop.
+func stuntLoop(
+  centreX: view Float
+  laneY: view Float
+  radius: view Float
+  drift: view Float
+  slabCount: view Int
+) ret List(SceneBody) {
+  let slabs: List(SceneBody) = List.create(SceneBody, cap: slabCount)
+  let step: Float = 2.0 * Math.pi / (slabCount as Float)
+  # A little longer than its arc, so neighbouring slabs overlap with no seam
+  let halfLength: Float = 0.5 * radius * step * 1.08
+  loop var i: Int = 0, i < slabCount, ++i {
+    let fraction: Float = (i as Float) / (slabCount as Float)
+    slabs.add(value: curveSlab(
+      centreX: centreX
+      y: laneY + drift * fraction
+      radius: radius
+      angle: step * (i as Float)
+      halfLength: halfLength
+      halfWidth: 3.2
+      hue: gradientHueSpan * fraction
+    ))
+  }
+  ret slabs
+}
+
+# A quarter-pipe bank: a quarter circle of `slabCount` slabs, flat at x =
+# `baseX` and vertical `radius` metres further along +x, running `length`
+# metres along y about `centreY`. A car driven into it climbs the wall.
+func quarterPipe(
+  baseX: view Float
+  centreY: view Float
+  radius: view Float
+  length: view Float
+  slabCount: view Int
+  hue: view Float
+) ret List(SceneBody) {
+  let slabs: List(SceneBody) = List.create(SceneBody, cap: slabCount)
+  let step: Float = 0.5 * Math.pi / (slabCount as Float)
+  let halfLength: Float = 0.5 * radius * step * 1.08
+  loop var i: Int = 0, i < slabCount, ++i {
+    # Each slab's middle, so the first lies flat and the last stands upright
+    let angle: Float = step * ((i as Float) + 0.5)
+    slabs.add(value: curveSlab(
+      centreX: baseX
+      y: centreY
+      radius: radius
+      angle: angle
+      halfLength: halfLength
+      halfWidth: 0.5 * length
+      hue: hue
+    ))
+  }
+  ret slabs
+}
+
+# A raised platform: a block `height` m tall with its top `halfSize` around
+# `centre`, sunk 2 m into the ground so the terrain's hills never show under
+# its edges.
+func plateau(
+  centre: view Vec3
+  halfSize: view Vec3
+  height: view Float
+  hue: view Float
+) ret SceneBody {
+  let sunk: Float = 2.0
+  ret slab(
+    halfExtents: Vec3 { x: halfSize.x, y: halfSize.y, z: 0.5 * (height + sunk) }
+    centre: Vec3 { x: centre.x, y: centre.y, z: 0.5 * (height - sunk) }
+    rotation: Quat.identity()
+    hue: hue
+  )
+}
+
+func kinematicBox(halfExtents: view Vec3, centre: view Vec3, hue: view Float) ret SceneBody {
+  var body: SceneBody = slab(
+    halfExtents: halfExtents
+    centre: centre
+    rotation: Quat.identity()
+    hue: hue
+  )
+  body.bodyType = SceneBodyType.kinematicBody
+  ret body
+}
+
+# A sweeper: a long low bar spinning flat about its middle at `centre`, its
+# ends sweeping a circle `halfLength` m across at bumper height. A car caught
+# by an end is batted away.
+func sweeper(
+  centre: view Vec3
+  halfLength: view Float
+  radiansPerSecond: view Float
+  hue: view Float
+) ret CourseMover {
+  ret CourseMover {
+    body: kinematicBox(
+      halfExtents: Vec3 { x: halfLength, y: 0.5, z: 0.6 }
+      centre: Vec3 { x: centre.x, y: centre.y, z: 0.7 }
+      hue: hue
+    )
+    pivot: Vec3 { x: centre.x, y: centre.y, z: 0.7 }
+    axis: Vec3 { x: 0.0, y: 0.0, z: 1.0 }
+    radiansPerSecond: radiansPerSecond
+  }
+}
+
+# A paddle wheel: a tall paddle spinning end over end about a horizontal axle
+# (along y) `axleHeight` m up at `centre`. Each turn its lower end scoops
+# across the lane and flips whatever is in the way.
+func paddleWheel(
+  centre: view Vec3
+  axleHeight: view Float
+  radiansPerSecond: view Float
+  hue: view Float
+) ret CourseMover {
+  let axle: Vec3 = { x: centre.x, y: centre.y, z: axleHeight }
+  ret CourseMover {
+    body: kinematicBox(
+      halfExtents: Vec3 { x: 0.6, y: 2.8, z: axleHeight - 0.3 }
+      centre: axle
+      hue: hue
+    )
+    pivot: axle
+    axis: Vec3 { x: 0.0, y: 1.0, z: 0.0 }
+    radiansPerSecond: radiansPerSecond
+  }
+}
+
+# `mover`'s pose `time` seconds in: its start pose turned about the pivot.
+func moverPose(mover: view CourseMover, time: view Float) ret SceneFrame {
+  let turn: Quat = Quat.fromAxisAngle(axis: mover.axis, angle: mover.radiansPerSecond * time)
+  let offset: Vec3 = vsub(a: mover.body.position, b: mover.pivot)
+  ret SceneFrame {
+    position: vadd(a: mover.pivot, b: Quat.rotate(q: turn, v: offset))
+    rotation: Quat.qmul(a: turn, b: mover.body.rotation)
+  }
+}
