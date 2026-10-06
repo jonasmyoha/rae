@@ -979,3 +979,53 @@ pixels, 1 200 frames, ~570 sampled), ms per frame:
   (ssao, lighting, taa, composite each submit their own command buffer), so
   recording the whole post chain into one command buffer is the next lever
   (queued).
+
+### 10j. Present, the post chain and the browser (2026-10-07)
+
+**Present, split.** `Gpu2d.endFrame` now comes in two halves
+(`endFrameSubmit`: the 2D canvas's flush and submit; `endFramePresent`: the
+C glue's copy into the drawable, present and end-of-frame poll). The
+renderer marks the boundary between them (`endUiFrameTimed`), so the
+report has `present: 2D submit (UI flush)` and `present: copy to drawable,
+present` apart. Same setup as §10i, 600 frames:
+
+| span | ms |
+|---|---|
+| present: 2D submit (UI flush) | 0.08 |
+| present: copy to drawable, present | 2.47 |
+| GPU whole frame | 6.80 |
+
+The UI costs nothing. The second span is not GPU work either, at least
+here: the display was off again, so the window was not visible, and
+`rae_g2d_present` skipped the copy and the present. Between that span's
+two marks the GPU has nothing to run. The span is the CPU's
+`rae_wgpu_poll_frame_end` (a blocking poll for the frame's GPU work) waking
+up, then the final mark's submit. So **the GPU's real work per frame is
+about 4.3 ms** (6.8 - 2.5), and the rest of §10i's "present" time was this
+wait. The copy and present on a visible window are still unmeasured: that
+needs the display on (queued).
+
+The wait itself is worth noting. The frame-end poll waits until the GPU has
+finished the frame, so frame N+1's CPU work never overlaps frame N's GPU
+work, and each frame pays CPU record + GPU tail + the wake-up. With vsync on
+a visible window the swap chain paces anyway. Overlapping CPU and GPU (one
+frame in flight) is the lever if a frame is ever CPU+GPU bound rather than
+vsync bound.
+
+**The post chain in one command buffer: no gain, not kept.** SSAO, the
+pyramid and lighting into one command buffer and TAA and composite into
+another (submitted before any pass that submits its own work) measured,
+interleaved A/B in one session: GPU whole frame 7.02 and 6.58 ms batched
+against 6.53 and 6.54 unbatched, frame time level. The pyramid's gain came
+from eleven tiny passes each paying a command buffer's fixed cost. Five
+passes that each do real work, merged into two command buffers, save
+nothing measurable. The change was reverted rather than kept as complexity
+for nothing.
+
+**The browser's missing samples.** Headless Chrome reports timestamps
+available, and the marks and the resolve are submitted and complete. But the
+readback of the resolved timestamps (`gpu/GpuReadback` startReadback ->
+pollReadback, a MapRead `wgpuBufferMapAsync` with AllowProcessEvents) never
+completes, and the console shows no error. The same path works natively. So
+the per-pass timing has no samples in the browser, and probably every
+nonblocking manager readback is stuck there too (queued).
