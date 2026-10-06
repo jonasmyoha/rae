@@ -118,6 +118,75 @@ func runFullscreen(
   }
 }
 
+# Several fullscreen passes in ONE command buffer (the depth pyramid's mips):
+# beginFullscreenBatchEncoder, then runFullscreenInBatch per pass, then
+# submitFullscreenBatch. Each pass is still its own render pass, so a pass may
+# sample what the one before it wrote; what goes is a submission per pass,
+# whose fixed cost on the GPU's timeline was most of the pyramid's time
+# (docs/physics-performance-plan.md §10i).
+func beginFullscreenBatchEncoder() ret Ptr {
+  unsafe {
+    let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
+    ret wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
+  }
+}
+
+func runFullscreenInBatch(
+  encoder: copy Ptr
+  resources: view GpuResources
+  pipeline: view RenderPipelineId
+  bind: view BindGroupId
+  target: copy Ptr
+) unsafe {
+  unsafe {
+    if target is webgpuNull() or encoder is webgpuNull() {
+      ret
+    }
+    var atts: List(WGPURenderPassColorAttachment) = List.create(
+      WGPURenderPassColorAttachment
+      cap: 1
+    )
+    atts.add(
+      value: {
+        view_: target
+        depthSlice: WGPU_DEPTH_SLICE_UNDEFINED as UInt32
+        loadOp: WGPULoadOp_Clear
+        storeOp: WGPUStoreOp_Store
+      }
+    )
+    let rpDesc: WGPURenderPassDescriptor = {
+      colorAttachmentCount: 1 as UInt64
+      colorAttachments: atts.data
+    }
+    let pass: Ptr = wgpuCommandEncoderBeginRenderPass(commandEncoder: encoder, descriptor: rpDesc)
+    let drawn: Bool = recordDrawInPass(
+      resources: resources
+      pass: pass
+      pipeline: pipeline
+      bindGroup: bind
+      vertexCount: 3
+      instanceCount: 1
+      firstVertex: 0
+      firstInstance: 0
+    )
+    wgpuRenderPassEncoderEnd(renderPassEncoder: pass)
+    wgpuRenderPassEncoderRelease(renderPassEncoder: pass)
+  }
+}
+
+func submitFullscreenBatch(encoder: copy Ptr) unsafe {
+  unsafe {
+    if encoder is webgpuNull() {
+      ret
+    }
+    let cbDesc: WGPUCommandBufferDescriptor = { nextInChain: webgpuNull() }
+    let cmd: Ptr = wgpuCommandEncoderFinish(commandEncoder: encoder, descriptor: cbDesc)
+    gbSubmit(cmd: cmd)
+    wgpuCommandBufferRelease(commandBuffer: cmd)
+    wgpuCommandEncoderRelease(commandEncoder: encoder)
+  }
+}
+
 func runFullscreenExternal(
   resources: view GpuResources
   pipeline: view ExternalId

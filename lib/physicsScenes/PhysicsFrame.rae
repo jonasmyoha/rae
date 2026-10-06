@@ -39,8 +39,11 @@ func renderPhysicsFrame(
   profile: mod FrameProfile
 ) {
   let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
+  gpuPassTimingBegin(renderer: renderer)
+  profileGpuPasses(profile: profile, passTiming: renderer.passTiming)
   loop var passIndex: Int = 0, passIndex < deferredOrderLength(renderer: renderer), ++passIndex {
     let tag: Int = deferredTagAt(renderer: renderer, i: passIndex)
+    gpuPassMark(renderer: renderer, tag: tag)
     if tag is RenderTag.shadow {
       let cascades: ShadowCascades = fitShadowCascades(
         camPos: camera.position
@@ -111,6 +114,7 @@ func renderPhysicsFrame(
       profileLap(profile: profile, section: profileLightingPasses)
     }
   }
+  gpuPassTimingEnd(renderer: renderer)
 }
 
 func closePhysicsWindow(renderer: mod DeferredRenderer) {

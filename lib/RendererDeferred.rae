@@ -53,6 +53,7 @@ open ShadowMapsSdf
 open gpu/GpuResources
 open gpu/GpuLifetime
 open Gpu2dCanvas
+open RendererPassTiming
 
 # ----- pass tags ------------------------------------------------------
 # Which pass of the deferred frame this is. An enum (not Int consts) so the
@@ -125,6 +126,8 @@ type DeferredRenderer {
   # owns the bodies decides (water/Underwater.rae) and sets them; inactive
   # by default, so a frame without water pays nothing.
   underwater: UnderwaterParams
+  # Per-pass GPU timing (RendererPassTiming), on with RAE_GPU_PASS_TIMING=1
+  passTiming: DeferredPassTiming
 }
 
 # The Rae-side deferred-pass caches, aggregated. Fields hold each pass's "have I
@@ -435,6 +438,7 @@ func shutdownDeferredRenderer(renderer: mod DeferredRenderer) pub {
     terrainShutdown(cache: renderer.passes.gbuffer, resources: resources)
     meshStoreShutdown(store: renderer.passes.gbuffer.meshes, resources: resources)
     skinStoreShutdown(store: renderer.passes.gbuffer.skins, resources: resources)
+    passTimingShutdown(passTiming: renderer.passTiming, resources: resources)
     shutdown(resources: resources)
   }
   renderer.gpuResources = none
@@ -718,6 +722,70 @@ func renderDeferredPassWith(
   }
 }
 
+# Per-pass GPU timing (RendererPassTiming, RAE_GPU_PASS_TIMING=1). A frame
+# loop calls gpuPassTimingBegin before its first pass, gpuPassMark before
+# each graph pass and gpuPassTimingEnd after the last; the results are in
+# renderer.passTiming (lastTags, lastMicroseconds, samples). Every call is a
+# no-op while the flag is off.
+func gpuPassTimingBegin(renderer: mod DeferredRenderer) {
+  if let resources: mod GpuResources => renderer.gpuResources {
+    passTimingFrameBegin(passTiming: renderer.passTiming, resources: resources)
+  }
+}
+
+func gpuPassMark(renderer: mod DeferredRenderer, tag: view Int) {
+  if let resources: mod GpuResources => renderer.gpuResources {
+    passTimingMark(passTiming: renderer.passTiming, resources: resources, tag: tag)
+  }
+}
+
+func gpuPassTimingEnd(renderer: mod DeferredRenderer) {
+  gpuPassMark(renderer: renderer, tag: -1)
+}
+
+# A graph pass's name, for reports.
+func renderTagName(tag: view Int) ret String {
+  match tag {
+    case RenderTag.gbuffer {
+      ret "gbuffer"
+    }
+    case RenderTag.depthPyramid {
+      ret "depth pyramid"
+    }
+    case RenderTag.ssao {
+      ret "ssao"
+    }
+    case RenderTag.lighting {
+      ret "lighting"
+    }
+    case RenderTag.composite {
+      ret "composite"
+    }
+    case RenderTag.present {
+      ret "present (UI flush, copy to drawable)"
+    }
+    case RenderTag.uiOverlay {
+      ret "ui overlay"
+    }
+    case RenderTag.taa {
+      ret "taa"
+    }
+    case RenderTag.shadow {
+      ret "shadow cascades"
+    }
+    case RenderTag.transparentForward {
+      ret "transparent forward"
+    }
+    case RenderTag.waterFft {
+      ret "water fft"
+    }
+    case RenderTag.underwater {
+      ret "underwater"
+    }
+  }
+  ret "pass {tag}"
+}
+
 # #794: the World3d twin of renderDeferredFrame — walk the derived graph order and
 # dispatch each pass through renderDeferredPassWorld.
 func renderDeferredFrameWorld(
@@ -727,8 +795,10 @@ func renderDeferredFrameWorld(
   light: view Light3d
   aspect: view Float
 ) pub {
+  gpuPassTimingBegin(renderer: renderer)
   var i: Int = 0
   loop i < renderer.graph.order.length {
+    gpuPassMark(renderer: renderer, tag: deferredTagAt(renderer: renderer, i: i))
     renderDeferredPassWorld(
       renderer: renderer
       tag: deferredTagAt(renderer: renderer, i: i)
@@ -739,6 +809,7 @@ func renderDeferredFrameWorld(
     )
     i = i + 1
   }
+  gpuPassTimingEnd(renderer: renderer)
 }
 
 # How many instances the G-buffer pass submitted last frame.

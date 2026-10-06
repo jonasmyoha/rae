@@ -297,6 +297,104 @@ func collectTiming(
   ret true
 }
 
+# A timestamp mark (the deferred renderer's per-pass timing,
+# RendererPassTiming): a compute pass on `recording` that claims a slot, writes
+# its timestamps and dispatches one workgroup of `pipeline` (a shader that does
+# nothing: Metal writes no timestamps for a pass with no work), so the GPU
+# stamps the moment the queue reaches it.
+# Marks between passes, read with collectTimingMarks, time whatever ran
+# between them, however those passes record their work. false when
+# unavailable, the budget is full or the pass could not begin.
+func recordTimingMark(
+  timing: mod GpuTiming
+  recording: mod Recording
+  resources: view GpuResources
+  pipeline: view PipelineId
+) ret Bool {
+  if recordingIsOpen(recording: recording, resources: resources) is false {
+    ret false
+  }
+  if isValidPipeline(resources: resources, id: pipeline) is false {
+    ret false
+  }
+  if timedPass(timing: timing) < 0 {
+    ret false
+  }
+  unsafe {
+    let passDescriptor: WGPUComputePassDescriptor = {
+      nextInChain: webgpuNull()
+      timestampWrites: timing.writes.data
+    }
+    let pass: Ptr = wgpuCommandEncoderBeginComputePass(
+      commandEncoder: recording.encoder
+      descriptor: passDescriptor
+    )
+    if pass is webgpuNull() {
+      ret false
+    }
+    wgpuComputePassEncoderSetPipeline(
+      computePassEncoder: pass
+      pipeline: slotHandle(table: resources.pipelines, slot: pipeline.slot)
+    )
+    wgpuComputePassEncoderDispatchWorkgroups(
+      computePassEncoder: pass
+      workgroupCountX: 1 as UInt32
+      workgroupCountY: 1 as UInt32
+      workgroupCountZ: 1 as UInt32
+    )
+    wgpuComputePassEncoderEnd(computePassEncoder: pass)
+    wgpuComputePassEncoderRelease(computePassEncoder: pass)
+  }
+  ret true
+}
+
+# collectTiming for marks: nonblocking; once the sample landed, fills `out`
+# with the microseconds from each mark to the next (one fewer than the marks)
+# and returns true.
+func collectTimingMarks(
+  timing: mod GpuTiming
+  resources: mod GpuResources
+  out: mod List(Int)
+) ret Bool {
+  if timing.available is false or timing.sampling is false {
+    ret false
+  }
+  let status: Int = pollReadback(resources: resources, id: timing.current)
+  if status is 0 {
+    ret false
+  }
+  if status is not 1 {
+    retireReadback(resources: resources, id: timing.current)
+    timing.sampling = false
+    ret false
+  }
+  let count: Int = timing.passCount
+  var bytes: List(UInt8) = List.create(UInt8, cap: count * 16)
+  loop var i: Int = 0, i < count * 16, ++i {
+    bytes.add(value: 0 as UInt8)
+  }
+  let copied: Bool = copyReadback(resources: resources, id: timing.current, destination: bytes)
+  retireReadback(resources: resources, id: timing.current)
+  timing.sampling = false
+  if copied is false {
+    ret false
+  }
+  out.clear()
+  var total: Int = 0
+  loop var mark: Int = 0, mark + 1 < count, ++mark {
+    let begin: Int = readU64(bytes: bytes, offset: mark * 16)
+    let next: Int = readU64(bytes: bytes, offset: (mark + 1) * 16)
+    var microseconds: Int = 0
+    if next > begin {
+      microseconds = ((next - begin) as Float * timing.periodNs / 1000.0).toInt()
+    }
+    out.add(value: microseconds)
+    total = total + microseconds
+  }
+  timing.lastTotalUs = total
+  ret true
+}
+
 # Little-endian u64 from 8 bytes (values fit comfortably in Int for GPU ticks).
 func readU64(bytes: view List(UInt8), offset: view Int) ret Int {
   var value: Int = 0
