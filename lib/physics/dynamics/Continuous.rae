@@ -28,6 +28,7 @@ open physics/broadPhase/BroadPhase
 open physics/dynamics/WorldTypes
 open physics/dynamics/Body
 open physics/dynamics/Shape
+open physics/geometry/MeshQuery
 open physics/dynamics/TriangleTimeOfImpact
 open physics/geometry/Compound
 open physics/dynamics/SolverSet
@@ -86,6 +87,9 @@ func shapeTimeOfImpact(
       sweepB: sweepB
       maxFraction: maxFraction
       lengthUnitsPerMeter: lengthUnitsPerMeter
+      pointsA: proxyPoints.pointsA
+      pointsB: proxyPoints.pointsB
+      query: proxyPoints.meshQuery
     )
   }
   # The proxies' points go in the lent lists, moved into the query and back
@@ -126,6 +130,8 @@ type ContinuousHits {
 type ProxyPoints {
   pointsA: List(Vec3)
   pointsB: List(Vec3)
+  # The mesh sweep's query lists
+  meshQuery: MeshImpactScratch
 }
 
 # b3ContinuousQueryCallback for one candidate shape: the earlier impact
@@ -342,6 +348,12 @@ func solveContinuous(
   var proxyPoints: ProxyPoints = {
     pointsA: List.create(Vec3, cap: 0)
     pointsB: List.create(Vec3, cap: 0)
+    meshQuery: MeshImpactScratch {
+      triangles: List.create(MeshQueryTriangle, cap: 0)
+      stack: List.create(Int, cap: 0)
+      indices: List.create(Int, cap: 0)
+      fallbackPoints: List.create(Vec3, cap: 0)
+    }
   }
   if let taskContext: mod TaskContext => world.taskContexts.modAt(index: chunk) {
     sensorHits.hits = own taskContext.continuousHits
@@ -349,6 +361,10 @@ func solveContinuous(
     queryStack = own taskContext.continuousQueryStack
     proxyPoints.pointsA = own taskContext.toiPointsA
     proxyPoints.pointsB = own taskContext.toiPointsB
+    proxyPoints.meshQuery.triangles = own taskContext.toiMeshQuery.triangles
+    proxyPoints.meshQuery.stack = own taskContext.toiMeshQuery.stack
+    proxyPoints.meshQuery.indices = own taskContext.toiMeshQuery.indices
+    proxyPoints.meshQuery.fallbackPoints = own taskContext.toiMeshQuery.fallbackPoints
   }
   sensorHits.hits.clear()
   sensorHits.fractions.clear()
@@ -519,5 +535,9 @@ func solveContinuous(
     taskContext.continuousQueryStack = own queryStack
     taskContext.toiPointsA = own proxyPoints.pointsA
     taskContext.toiPointsB = own proxyPoints.pointsB
+    taskContext.toiMeshQuery.triangles = own proxyPoints.meshQuery.triangles
+    taskContext.toiMeshQuery.stack = own proxyPoints.meshQuery.stack
+    taskContext.toiMeshQuery.indices = own proxyPoints.meshQuery.indices
+    taskContext.toiMeshQuery.fallbackPoints = own proxyPoints.meshQuery.fallbackPoints
   }
 }

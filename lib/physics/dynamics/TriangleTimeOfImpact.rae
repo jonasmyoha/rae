@@ -62,6 +62,26 @@ func zeroToiOutput() ret ToiOutput {
   }
 }
 
+# The mesh sweep's query working lists: a mesh's triangles and its walk
+# stack, or a height field's triangle indices. Each chunk's TaskContext owns
+# one; the queries clear them first.
+type MeshImpactScratch {
+  triangles: List(MeshQueryTriangle)
+  stack: List(Int)
+  indices: List(Int)
+  # The fallback sphere's one point
+  fallbackPoints: List(Vec3)
+}
+
+func createMeshImpactScratch() ret MeshImpactScratch {
+  ret MeshImpactScratch {
+    triangles: List.create(MeshQueryTriangle, cap: 16)
+    stack: List.create(Int, cap: meshStackSize)
+    indices: List.create(Int, cap: 16)
+    fallbackPoints: List.create(Vec3, cap: 1)
+  }
+}
+
 func emptyProxy() ret ShapeProxy {
   ret ShapeProxy { points: List.create(Vec3, cap: 0), radius: 0.0 }
 }
@@ -123,6 +143,7 @@ func meshTriangleTimeOfImpact(
   b: view Vec3
   c: view Vec3
   lengthUnitsPerMeter: view Float
+  fallbackPoints: mod List(Vec3)
 ) {
   # Early out for parallel movement
   let c1: Vec3 = context.meshLocalCentroidB1
@@ -141,8 +162,10 @@ func meshTriangleTimeOfImpact(
     ret
   }
 
-  let triangle: List(Vec3) = { a, b, c }
-  context.toiInput.proxyA = ShapeProxy { points: triangle, radius: context.toiInput.proxyA.radius }
+  context.toiInput.proxyA.points.clear()
+  context.toiInput.proxyA.points.add(value: a)
+  context.toiInput.proxyA.points.add(value: b)
+  context.toiInput.proxyA.points.add(value: c)
   var output: ToiOutput = timeOfImpact(
     input: context.toiInput
     lengthUnitsPerMeter: lengthUnitsPerMeter
@@ -154,14 +177,26 @@ func meshTriangleTimeOfImpact(
     context.toiInput.maxFraction = output.fraction
   } else if output.fraction is 0.0 {
     # Fall back to the time of impact of a small sphere around the fast
-    # shape's centroid
-    var fallbackInput: ToiInput = context.toiInput
-    let center: List(Vec3) = { context.localCentroidB }
-    fallbackInput.proxyB = ShapeProxy {
-      points: center
-      radius: context.fallbackRadius + linearSlop(lengthUnitsPerMeter: lengthUnitsPerMeter)
+    # shape's centroid (the triangle's points and the sphere's are lent to
+    # the fallback query and moved back)
+    fallbackPoints.clear()
+    fallbackPoints.add(value: context.localCentroidB)
+    var fallbackInput: ToiInput = {
+      proxyA: ShapeProxy {
+        points: own context.toiInput.proxyA.points
+        radius: context.toiInput.proxyA.radius
+      }
+      proxyB: ShapeProxy {
+        points: own fallbackPoints
+        radius: context.fallbackRadius + linearSlop(lengthUnitsPerMeter: lengthUnitsPerMeter)
+      }
+      sweepA: context.toiInput.sweepA
+      sweepB: context.toiInput.sweepB
+      maxFraction: context.toiInput.maxFraction
     }
     output = timeOfImpact(input: fallbackInput, lengthUnitsPerMeter: lengthUnitsPerMeter)
+    context.toiInput.proxyA.points = own fallbackInput.proxyA.points
+    fallbackPoints = own fallbackInput.proxyB.points
     if 0.0 < output.fraction and output.fraction < context.toiInput.maxFraction {
       context.toiOutput = output
       context.toiInput.maxFraction = output.fraction
@@ -180,15 +215,17 @@ func sweepSurfaceTriangles(
   heightFields: view List(HeightFieldData)
   bounds: view Aabb
   lengthUnitsPerMeter: view Float
+  query: mod MeshImpactScratch
 ) {
   if shapeA.shapeType is ShapeType.height {
     if let heightField: view HeightFieldData => heightFields.viewAt(index: shapeA.heightFieldIndex) {
-      let indices: List(Int) = queryHeightField(
+      queryHeightFieldInto(
         heightField: heightField
         bounds: bounds
         capacity: unlimitedTriangles
+        result: query.indices
       )
-      loop let triangleIndex: view Int in indices {
+      loop let triangleIndex: view Int in query.indices {
         let triangle: MeshTriangleData = getHeightFieldTriangle(
           heightField: heightField
           triangleIndex: triangleIndex
@@ -199,24 +236,28 @@ func sweepSurfaceTriangles(
           b: triangle.vertex2
           c: triangle.vertex3
           lengthUnitsPerMeter: lengthUnitsPerMeter
+          fallbackPoints: query.fallbackPoints
         )
       }
     }
     ret
   }
   if let mesh: view Mesh => meshes.viewAt(index: meshIndex) {
-    let triangles: List(MeshQueryTriangle) = queryMesh(
+    queryMeshInto(
       mesh: mesh
       bounds: bounds
       capacity: unlimitedTriangles
+      result: query.triangles
+      stack: query.stack
     )
-    loop let triangle: view MeshQueryTriangle in triangles {
+    loop let triangle: view MeshQueryTriangle in query.triangles {
       meshTriangleTimeOfImpact(
         context: context
         a: triangle.a
         b: triangle.b
         c: triangle.c
         lengthUnitsPerMeter: lengthUnitsPerMeter
+        fallbackPoints: query.fallbackPoints
       )
     }
   }
@@ -233,6 +274,9 @@ func meshTimeOfImpact(
   sweepB: view Sweep
   maxFraction: view Float
   lengthUnitsPerMeter: view Float
+  pointsA: mod List(Vec3)
+  pointsB: mod List(Vec3)
+  query: mod MeshImpactScratch
 ) ret ToiOutput {
   let localCentroidB: Vec3 = shapeCentroid(shape: shapeB, hulls: hulls)
   let transformA: Transform = sweepStartTransform(sweep: sweepA)
@@ -243,10 +287,12 @@ func meshTimeOfImpact(
     hulls: hulls
     localCenter: localCentroidB
   )
+  # The proxies' points go in the lent lists, moved into the sweep and back
+  let radiusB: Float = shapeProxyPoints(shape: shapeB, hulls: hulls, points: pointsB)
   var context: MeshImpactContext = {
     toiInput: ToiInput {
-      proxyA: emptyProxy()
-      proxyB: makeShapeProxy(shape: shapeB, hulls: hulls)
+      proxyA: ShapeProxy { points: own pointsA, radius: 0.0 }
+      proxyB: ShapeProxy { points: own pointsB, radius: radiusB }
       sweepA: sweepA
       sweepB: sweepB
       maxFraction: maxFraction
@@ -284,7 +330,10 @@ func meshTimeOfImpact(
     heightFields: heightFields
     bounds: localBounds
     lengthUnitsPerMeter: lengthUnitsPerMeter
+    query: query
   )
+  pointsA = own context.toiInput.proxyA.points
+  pointsB = own context.toiInput.proxyB.points
   ret context.toiOutput
 }
 
@@ -397,6 +446,7 @@ func compoundTimeOfImpact(
         )
         var childShape: PhysicsShape = shapeA
         childShape.shapeType = ShapeType.mesh
+        var query: MeshImpactScratch = createMeshImpactScratch()
         sweepSurfaceTriangles(
           context: meshContext
           shapeA: childShape
@@ -405,6 +455,7 @@ func compoundTimeOfImpact(
           heightFields: heightFields
           bounds: localBounds
           lengthUnitsPerMeter: lengthUnitsPerMeter
+          query: query
         )
         output = meshContext.toiOutput
       }

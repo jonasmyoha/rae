@@ -10,8 +10,10 @@
 # operation order is kept exactly (its B3_MAX_MANIFOLD_POINTS == 4 path);
 # checked bit for bit against the oracle in fixture 974.
 #
-# Box3D writes into a per-worker arena; here the per-triangle manifolds and
-# the clusters are lists. A mesh shape has one surface material here, so the
+# Box3D writes into a per-worker arena; here the per-triangle manifolds,
+# the clusters and every working list are a chunk's MeshScratch, refilled
+# per contact, so a steady mesh contact allocates nothing. A mesh shape has one surface material
+# here, so the
 # per-triangle material lookup always lands on it (Box3D clamps a triangle's
 # material index to the shape's material count).
 import Math
@@ -45,23 +47,87 @@ open physics/dynamics/Contact
 # B3_MAX_POINTS_PER_TRIANGLE
 const maxPointsPerTriangle: Int = 32
 
+# The mesh narrow phase's working lists (Box3D's per-worker arena). Each
+# chunk's TaskContext owns one.
+type MeshScratch {
+  # The per-triangle collide buffer, and the smaller one of a nearly full
+  # point buffer
+  manifold: LocalManifold
+  smallManifold: LocalManifold
+  # The capsule-triangle proxies and segment
+  triangle: TriangleScratch
+  # The triangle in shape B's frame
+  vertices: List(Vec3)
+  # The kept per-triangle manifolds: the first `manifoldCount` slots are
+  # this contact's (a slot's points list is kept and refilled)
+  manifolds: List(LocalManifold)
+  manifoldCount: Int
+  accepted: List(Int)
+  tentative: List(Int)
+  tentativeDistances: List(Float)
+  tentativeOrder: List(Int)
+  found: FoundFeatures
+  clusters: ClusterScratch
+  # buildMeshManifolds: the previous manifolds and which were matched
+  oldManifolds: List(Manifold)
+  consumed: List(Bool)
+  # refreshCache: the triangles found and the new cache
+  triangleIndices: List(Int)
+  queryTriangles: List(MeshQueryTriangle)
+  queryStack: List(Int)
+  freshCache: List(TriangleCache)
+}
+
+func createMeshScratch() ret MeshScratch {
+  let vertices: List(Vec3) = { zeroVector(), zeroVector(), zeroVector() }
+  ret MeshScratch {
+    manifold: createLocalManifold(capacity: maxClipPoints)
+    smallManifold: createLocalManifold(capacity: maxClipPoints)
+    triangle: createTriangleScratch()
+    vertices: vertices
+    manifolds: List.create(LocalManifold, cap: 16)
+    manifoldCount: 0
+    accepted: List.create(Int, cap: 16)
+    tentative: List.create(Int, cap: 16)
+    tentativeDistances: List.create(Float, cap: 16)
+    tentativeOrder: List.create(Int, cap: 16)
+    found: FoundFeatures {
+      edges: List.create(Int, cap: maxFoundEdges)
+      vertices: List.create(Int, cap: maxFoundVertices)
+    }
+    clusters: createClusterScratch()
+    oldManifolds: List.create(Manifold, cap: 4)
+    consumed: List.create(Bool, cap: 4)
+    triangleIndices: List.create(Int, cap: 16)
+    queryTriangles: List.create(MeshQueryTriangle, cap: 16)
+    queryStack: List.create(Int, cap: meshStackSize)
+    freshCache: List.create(TriangleCache, cap: 16)
+  }
+}
+
 # The triangles of shape A (a mesh or a height field) overlapping `bounds`
 # in its local frame, by increasing index, at most `capacity`
-# (b3QueryMeshTriangles / b3QueryHeightFieldTriangles).
-func querySurfaceTriangles(
+# (b3QueryMeshTriangles / b3QueryHeightFieldTriangles), into `indices`;
+# `triangles` and `stack` are the mesh query's working lists.
+func querySurfaceTrianglesInto(
   shapeA: view PhysicsShape
   meshes: view List(Mesh)
   heightFields: view List(HeightFieldData)
   bounds: view Aabb
   capacity: view Int
-) ret List(Int) {
-  let indices: List(Int) = List.create(Int, cap: 16)
+  indices: mod List(Int)
+  triangles: mod List(MeshQueryTriangle)
+  stack: mod List(Int)
+) {
+  indices.clear()
   if shapeA.shapeType is ShapeType.mesh {
     if let mesh: view Mesh => meshes.viewAt(index: shapeA.meshIndex) {
-      let triangles: List(MeshQueryTriangle) = queryMesh(
+      queryMeshInto(
         mesh: mesh
         bounds: bounds
         capacity: capacity
+        result: triangles
+        stack: stack
       )
       loop let triangle: view MeshQueryTriangle in triangles {
         indices.add(value: triangle.triangleIndex)
@@ -70,9 +136,13 @@ func querySurfaceTriangles(
   } else if let heightField: view HeightFieldData => heightFields.viewAt(
     index: shapeA.heightFieldIndex
   ) {
-    ret queryHeightField(heightField: heightField, bounds: bounds, capacity: capacity)
+    queryHeightFieldInto(
+      heightField: heightField
+      bounds: bounds
+      capacity: capacity
+      result: indices
+    )
   }
-  ret indices
 }
 
 # Triangle `triangleIndex` of shape A (b3GetMeshTriangle /
@@ -142,6 +212,7 @@ func refreshCache(
   transformA: view Transform
   bounds: view Aabb
   lengthUnitsPerMeter: view Float
+  scratch: mod MeshScratch
 ) {
   # If the shape didn't move out of the cached query bounds we are done
   if contains(outer: contact.queryBounds, inner: bounds) {
@@ -163,19 +234,22 @@ func refreshCache(
     transform: invert(transform: transformA)
     box: contact.queryBounds
   )
-  let triangles: List(Int) = querySurfaceTriangles(
+  querySurfaceTrianglesInto(
     shapeA: shapeA
     meshes: meshes
     heightFields: heightFields
     bounds: localBounds
     capacity: maxMeshContactTriangles
+    indices: scratch.triangleIndices
+    triangles: scratch.queryTriangles
+    stack: scratch.queryStack
   )
 
   # A new cache matched with the old one (both sorted by triangle index)
-  let fresh: List(TriangleCache) = List.create(TriangleCache, cap: triangles.length)
+  scratch.freshCache.clear()
   var index2: Int = 0
-  loop var index1: Int = 0, index1 < triangles.length, ++index1 {
-    let triangleIndex: Int = triangles.copyAtDefault(index: index1)
+  loop var index1: Int = 0, index1 < scratch.triangleIndices.length, ++index1 {
+    let triangleIndex: Int = scratch.triangleIndices.copyAtDefault(index: index1)
     var entry: TriangleCache = { triangleIndex: triangleIndex, cache: emptyContactCache() }
     loop index2 < contact.triangleCache.length and contact.triangleCache.copyAtDefault(
       index: index2
@@ -189,30 +263,35 @@ func refreshCache(
         }
       }
     }
-    fresh.add(value: entry)
+    scratch.freshCache.add(value: entry)
   }
-  contact.triangleCache = fresh
+  contact.triangleCache.clear()
+  loop let entry: view TriangleCache in scratch.freshCache {
+    contact.triangleCache.add(value: entry)
+  }
 }
 
-# The manifold of `scratch`'s points in use, for keeping.
-func keepManifold(scratch: view LocalManifold) ret LocalManifold {
-  let points: List(LocalManifoldPoint) = List.create(LocalManifoldPoint, cap: scratch.pointCount)
-  loop var i: Int = 0, i < scratch.pointCount, ++i {
-    points.add(value: scratch.points.copyAtDefault(index: i))
+# Keep `source`'s points in use in `slot` (its points list is refilled, so
+# it may be longer than the point count).
+func keepManifoldInto(slot: mod LocalManifold, source: view LocalManifold) {
+  loop var i: Int = 0, i < source.pointCount, ++i {
+    let point: LocalManifoldPoint = source.points.copyAtDefault(index: i)
+    if i < slot.points.length {
+      slot.points.set(index: i, value: point)
+    } else {
+      slot.points.add(value: point)
+    }
   }
-  ret LocalManifold {
-    normal: scratch.normal
-    triangleNormal: scratch.triangleNormal
-    points: points
-    pointCount: scratch.pointCount
-    triangleIndex: scratch.triangleIndex
-    i1: scratch.i1
-    i2: scratch.i2
-    i3: scratch.i3
-    squaredDistance: scratch.squaredDistance
-    feature: scratch.feature
-    triangleFlags: scratch.triangleFlags
-  }
+  slot.normal = source.normal
+  slot.triangleNormal = source.triangleNormal
+  slot.pointCount = source.pointCount
+  slot.triangleIndex = source.triangleIndex
+  slot.i1 = source.i1
+  slot.i2 = source.i2
+  slot.i3 = source.i3
+  slot.squaredDistance = source.squaredDistance
+  slot.feature = source.feature
+  slot.triangleFlags = source.triangleFlags
 }
 
 # Collide triangle `index` of the contact's cache with shape B into
@@ -228,6 +307,7 @@ func collideMeshTriangle(
   isFast: view Bool
   enableSpeculative: view Bool
   lengthUnitsPerMeter: view Float
+  triangleScratch: mod TriangleScratch
 ) {
   if let entry: mod TriangleCache => contact.triangleCache.modAt(index: index) {
     match shapeB.shapeType {
@@ -238,6 +318,7 @@ func collideMeshTriangle(
           capsule: shapeB.capsule
           cache: entry.cache.simplexCache
           lengthUnitsPerMeter: lengthUnitsPerMeter
+          scratch: triangleScratch
         )
       }
       case ShapeType.hull {
@@ -291,6 +372,7 @@ func collideTriangleInto(
   isFast: view Bool
   enableSpeculative: view Bool
   lengthUnitsPerMeter: view Float
+  triangleScratch: mod TriangleScratch
 ) ret Int {
   manifold.pointCount = 0
   manifold.triangleFlags = triangleFlags
@@ -306,6 +388,7 @@ func collideTriangleInto(
     isFast: isFast
     enableSpeculative: enableSpeculative
     lengthUnitsPerMeter: lengthUnitsPerMeter
+    triangleScratch: triangleScratch
   )
   ret manifold.pointCount
 }
@@ -315,92 +398,95 @@ func collideTriangleInto(
 # points with the same feature and triangle.
 func buildMeshManifolds(
   contact: mod Contact
-  clusters: view List(MeshCluster)
+  clusters: view ClusterScratch
   transformA: view Transform
   transformB: view Transform
   lengthUnitsPerMeter: view Float
+  oldManifolds: mod List(Manifold)
+  consumed: mod List(Bool)
 ) {
   let restOffset: Float = meshRestOffset(lengthUnitsPerMeter: lengthUnitsPerMeter)
   # A temporary copy of the previous manifolds; the new ones start zeroed
-  var oldManifolds: List(Manifold) = contact.manifolds
-  let consumed: List(Bool) = List.create(Bool, cap: oldManifolds.length)
-  loop var j: Int = 0, j < oldManifolds.length, ++j {
+  oldManifolds.clear()
+  consumed.clear()
+  loop let old: view Manifold in contact.manifolds {
+    oldManifolds.add(value: old)
     consumed.add(value: false)
   }
-  let fresh: List(Manifold) = List.create(Manifold, cap: clusters.length)
+  contact.manifolds.clear()
 
   let matrixB: Matrix3 = matrixFromQuat(quat: transformB.rotation)
   let offsetA: Vec3 = subtractPositions(left: transformB.position, right: transformA.position)
   let normalMatchTolerance: Float = 0.995
-  loop var i: Int = 0, i < clusters.length, ++i {
-    let cluster: MeshCluster = clusters.copyAtDefault(index: i)
-    let pointCount: Int = cluster.points.length
-    var manifold: Manifold = zeroManifold()
-    manifold.pointCount = pointCount
-    manifold.normal = multiply(matrix: matrixB, vector: cluster.manifoldNormal)
+  loop var i: Int = 0, i < clusters.clusterCount, ++i {
+    if let cluster: view MeshCluster => clusters.clusters.viewAt(index: i) {
+      let pointCount: Int = cluster.points.length
+      var manifold: Manifold = zeroManifold()
+      manifold.pointCount = pointCount
+      manifold.normal = multiply(matrix: matrixB, vector: cluster.manifoldNormal)
 
-    let clusterNormal: Vec3 = multiply(matrix: matrixB, vector: cluster.manifoldNormal)
-    var bestDot: Float = normalMatchTolerance
-    var bestIndex: Int = -1
-    loop var j: Int = 0, j < oldManifolds.length, ++j {
-      if consumed.copyAtDefault(index: j) {
-        continue
+      let clusterNormal: Vec3 = multiply(matrix: matrixB, vector: cluster.manifoldNormal)
+      var bestDot: Float = normalMatchTolerance
+      var bestIndex: Int = -1
+      loop var j: Int = 0, j < oldManifolds.length, ++j {
+        if consumed.copyAtDefault(index: j) {
+          continue
+        }
+        let alignment: Float = dot(
+          left: oldManifolds.copyAtDefault(index: j).normal
+          right: clusterNormal
+        )
+        if alignment > bestDot {
+          bestIndex = j
+          bestDot = alignment
+        }
       }
-      let alignment: Float = dot(
-        left: oldManifolds.copyAtDefault(index: j).normal
-        right: clusterNormal
-      )
-      if alignment > bestDot {
-        bestIndex = j
-        bestDot = alignment
+      if bestIndex is not -1 {
+        let matched: Manifold = oldManifolds.copyAtDefault(index: bestIndex)
+        manifold.frictionImpulse = matched.frictionImpulse
+        manifold.rollingImpulse = matched.rollingImpulse
+        manifold.twistImpulse = matched.twistImpulse
+        consumed.set(index: bestIndex, value: true)
       }
-    }
-    if bestIndex is not -1 {
-      let matched: Manifold = oldManifolds.copyAtDefault(index: bestIndex)
-      manifold.frictionImpulse = matched.frictionImpulse
-      manifold.rollingImpulse = matched.rollingImpulse
-      manifold.twistImpulse = matched.twistImpulse
-      consumed.set(index: bestIndex, value: true)
-    }
 
-    loop var j: Int = 0, j < pointCount, ++j {
-      let source: LocalManifoldPoint = cluster.points.copyAtDefault(index: j)
-      if let target: mod ManifoldPoint => manifold.points.modAt(index: j) {
-        # Contact points are computed in frame B
-        target.anchorB = multiply(matrix: matrixB, vector: source.point)
-        target.anchorA = add(left: target.anchorB, right: offsetA)
-        target.separation = source.separation - restOffset
-        target.featureId = makeFeatureId(pair: source.pair)
-        target.triangleIndex = source.triangleIndex
+      loop var j: Int = 0, j < pointCount, ++j {
+        let source: LocalManifoldPoint = cluster.points.copyAtDefault(index: j)
+        if let target: mod ManifoldPoint => manifold.points.modAt(index: j) {
+          # Contact points are computed in frame B
+          target.anchorB = multiply(matrix: matrixB, vector: source.point)
+          target.anchorA = add(left: target.anchorB, right: offsetA)
+          target.separation = source.separation - restOffset
+          target.featureId = makeFeatureId(pair: source.pair)
+          target.triangleIndex = source.triangleIndex
 
-        # Preserve the normal impulse if possible
-        if bestIndex is not -1 {
-          if let matched: mod Manifold => oldManifolds.modAt(index: bestIndex) {
-            loop var k: Int = 0, k < matched.pointCount, ++k {
-              if let oldPoint: mod ManifoldPoint => matched.points.modAt(index: k) {
-                if target.featureId is oldPoint.featureId and target.triangleIndex is oldPoint.triangleIndex {
-                  target.normalImpulse = oldPoint.normalImpulse
-                  target.persisted = true
-                  # Claimed
-                  oldPoint.triangleIndex = -1
-                  break
+          # Preserve the normal impulse if possible
+          if bestIndex is not -1 {
+            if let matched: mod Manifold => oldManifolds.modAt(index: bestIndex) {
+              loop var k: Int = 0, k < matched.pointCount, ++k {
+                if let oldPoint: mod ManifoldPoint => matched.points.modAt(index: k) {
+                  if target.featureId is oldPoint.featureId and target.triangleIndex is oldPoint.triangleIndex {
+                    target.normalImpulse = oldPoint.normalImpulse
+                    target.persisted = true
+                    # Claimed
+                    oldPoint.triangleIndex = -1
+                    break
+                  }
                 }
               }
             }
           }
         }
       }
+      contact.manifolds.add(value: manifold)
     }
-    fresh.add(value: manifold)
   }
-  contact.manifolds = fresh
 }
 
 # b3ComputeMeshManifolds: the manifolds of convex shape B against mesh or
 # height-field shape A. False (and no manifolds) when not touching.
 func computeMeshManifolds(
   contact: mod Contact
-  scratch: mod LocalManifold
+  scratch: mod MeshScratch
   shapeA: view PhysicsShape
   meshes: view List(Mesh)
   heightFields: view List(HeightFieldData)
@@ -420,19 +506,18 @@ func computeMeshManifolds(
     transformA: transformA
     bounds: shapeB.aabb
     lengthUnitsPerMeter: lengthUnitsPerMeter
+    scratch: scratch
   )
 
   # Collide with the triangles and build manifolds
   let triangleCount: Int = contact.triangleCache.length
-  let manifolds: List(LocalManifold) = List.create(LocalManifold, cap: triangleCount)
-  let accepted: List(Int) = List.create(Int, cap: triangleCount)
-  let tentative: List(Int) = List.create(Int, cap: triangleCount)
-  let tentativeDistances: List(Float) = List.create(Float, cap: triangleCount)
-  let tentativeOrder: List(Int) = List.create(Int, cap: triangleCount)
-  var found: FoundFeatures = {
-    edges: List.create(Int, cap: maxFoundEdges)
-    vertices: List.create(Int, cap: maxFoundVertices)
-  }
+  scratch.manifoldCount = 0
+  scratch.accepted.clear()
+  scratch.tentative.clear()
+  scratch.tentativeDistances.clear()
+  scratch.tentativeOrder.clear()
+  scratch.found.edges.clear()
+  scratch.found.vertices.clear()
 
   # From the mesh frame into shape B's frame
   let transformAtoB: Transform = inverseMultiplyWorld(left: transformB, right: transformA)
@@ -465,43 +550,56 @@ func computeMeshManifolds(
       left: multiply(matrix: relativeMatrix, vector: triangle.vertex3)
       right: transformAtoB.position
     )
-    let vertices: List(Vec3) = { vertex1, vertex2, vertex3 }
+    scratch.vertices.set(index: 0, value: vertex1)
+    scratch.vertices.set(index: 1, value: vertex2)
+    scratch.vertices.set(index: 2, value: vertex3)
+
+    # The kept manifold's slot
+    let manifoldIndex: Int = scratch.manifoldCount
+    if manifoldIndex is scratch.manifolds.length {
+      scratch.manifolds.add(value: createLocalManifold(capacity: 0))
+    }
 
     # The scratch manifold has room for any triangle's clip points; a
     # nearly full buffer gets a smaller one, as Box3D's capacity shrinks
     let pointCapacity: Int = pointBufferCapacity - totalPointCount
-    var kept: LocalManifold = createLocalManifold(capacity: 0)
     var manifoldPointCount: Int = 0
-    if pointCapacity < manifoldCapacity(manifold: scratch) {
-      var small: LocalManifold = createLocalManifold(capacity: pointCapacity)
+    if pointCapacity < manifoldCapacity(manifold: scratch.manifold) {
+      resetLocalManifold(manifold: scratch.smallManifold, capacity: pointCapacity)
       manifoldPointCount = collideTriangleInto(
-        manifold: small
+        manifold: scratch.smallManifold
         contact: contact
         index: index
-        vertices: vertices
+        vertices: scratch.vertices
         triangleFlags: triangle.flags
         shapeB: shapeB
         hulls: hulls
         isFast: isFast
         enableSpeculative: enableSpeculative
         lengthUnitsPerMeter: lengthUnitsPerMeter
+        triangleScratch: scratch.triangle
       )
-      kept = keepManifold(scratch: small)
+      if let slot: mod LocalManifold => scratch.manifolds.modAt(index: manifoldIndex) {
+        keepManifoldInto(slot: slot, source: scratch.smallManifold)
+      }
     } else {
       manifoldPointCount = collideTriangleInto(
-        manifold: scratch
+        manifold: scratch.manifold
         contact: contact
         index: index
-        vertices: vertices
+        vertices: scratch.vertices
         triangleFlags: triangle.flags
         shapeB: shapeB
         hulls: hulls
         isFast: isFast
         enableSpeculative: enableSpeculative
         lengthUnitsPerMeter: lengthUnitsPerMeter
+        triangleScratch: scratch.triangle
       )
       if manifoldPointCount > 0 {
-        kept = keepManifold(scratch: scratch)
+        if let slot: mod LocalManifold => scratch.manifolds.modAt(index: manifoldIndex) {
+          keepManifoldInto(slot: slot, source: scratch.manifold)
+        }
       }
     }
     if manifoldPointCount is 0 {
@@ -509,96 +607,103 @@ func computeMeshManifolds(
     }
 
     totalPointCount = totalPointCount + manifoldPointCount
-    kept.triangleIndex = triangleIndex
-    kept.triangleNormal = normalFromPoints(
-      point1: vertices.copyAtDefault(index: 0)
-      point2: vertices.copyAtDefault(index: 1)
-      point3: vertices.copyAtDefault(index: 2)
-    )
-    kept.i1 = triangle.index1
-    kept.i2 = triangle.index2
-    kept.i3 = triangle.index3
-    let manifoldIndex: Int = manifolds.length
-
+    scratch.manifoldCount = manifoldIndex + 1
     var isTentative: Bool = false
-    if kept.feature is featureTriangleFace {
-      addTriangleFeatures(found: found, manifold: kept)
-    } else if kept.feature is featureHullFace {
-      let cosNormalAngle: Float = dot(left: kept.triangleNormal, right: kept.normal)
-      if cosNormalAngle > 0.5 {
-        addTriangleFeatures(found: found, manifold: kept)
-      } else {
-        var minSeparation: Float = kept.points.copyAtDefault(index: 0).separation
-        loop var i: Int = 1, i < manifoldPointCount, ++i {
-          minSeparation = minFloat(
-            left: minSeparation
-            right: kept.points.copyAtDefault(index: i).separation
-          )
-        }
-        if minSeparation < -2.0 * slop {
-          # Deep overlap
-          addTriangleFeatures(found: found, manifold: kept)
+    if let kept: mod LocalManifold => scratch.manifolds.modAt(index: manifoldIndex) {
+      kept.triangleIndex = triangleIndex
+      kept.triangleNormal = normalFromPoints(point1: vertex1, point2: vertex2, point3: vertex3)
+      kept.i1 = triangle.index1
+      kept.i2 = triangle.index2
+      kept.i3 = triangle.index3
+
+      if kept.feature is featureTriangleFace {
+        addTriangleFeatures(found: scratch.found, manifold: kept)
+      } else if kept.feature is featureHullFace {
+        let cosNormalAngle: Float = dot(left: kept.triangleNormal, right: kept.normal)
+        if cosNormalAngle > 0.5 {
+          addTriangleFeatures(found: scratch.found, manifold: kept)
         } else {
-          isTentative = true
+          var minSeparation: Float = kept.points.copyAtDefault(index: 0).separation
+          loop var i: Int = 1, i < manifoldPointCount, ++i {
+            minSeparation = minFloat(
+              left: minSeparation
+              right: kept.points.copyAtDefault(index: i).separation
+            )
+          }
+          if minSeparation < -2.0 * slop {
+            # Deep overlap
+            addTriangleFeatures(found: scratch.found, manifold: kept)
+          } else {
+            isTentative = true
+          }
         }
+      } else {
+        isTentative = true
       }
-    } else {
-      isTentative = true
+      if isTentative {
+        scratch.tentativeDistances.add(value: kept.squaredDistance)
+      }
     }
-    manifolds.add(value: kept)
     if isTentative {
-      tentativeDistances.add(value: kept.squaredDistance)
-      tentativeOrder.add(value: tentative.length)
-      tentative.add(value: manifoldIndex)
+      scratch.tentativeOrder.add(value: scratch.tentative.length)
+      scratch.tentative.add(value: manifoldIndex)
     } else {
-      accepted.add(value: manifoldIndex)
+      scratch.accepted.add(value: manifoldIndex)
     }
   }
 
   if shapeB.shapeType is ShapeType.sphere {
     # Sort the triangles so the closest are processed first
-    quickSortWithCompanion(T: Float, values: tentativeDistances, companion: tentativeOrder)
+    quickSortWithCompanion(
+      T: Float
+      values: scratch.tentativeDistances
+      companion: scratch.tentativeOrder
+    )
     # Add the tentative manifolds in sorted order, avoiding the ones that
     # generate ghost collisions
-    loop var i: Int = 0, i < tentativeOrder.length, ++i {
-      let manifoldIndex: Int = tentative.copyAtDefault(
-        index: tentativeOrder.copyAtDefault(index: i)
+    loop var i: Int = 0, i < scratch.tentativeOrder.length, ++i {
+      let manifoldIndex: Int = scratch.tentative.copyAtDefault(
+        index: scratch.tentativeOrder.copyAtDefault(index: i)
       )
-      if shouldCollideTentative(
-        found: found
-        manifold: manifolds.copyAtDefault(index: manifoldIndex)
-      ) {
-        accepted.add(value: manifoldIndex)
+      if let manifold: view LocalManifold => scratch.manifolds.viewAt(index: manifoldIndex) {
+        if shouldCollideTentative(found: scratch.found, manifold: manifold) {
+          scratch.accepted.add(value: manifoldIndex)
+        }
       }
     }
   } else {
     # A hull can tunnel if the time of impact is at a concave edge (a flat
     # box sliding down a ramp to a flat bottom), so only flat edges are
     # ignored
-    loop var i: Int = 0, i < tentative.length, ++i {
-      let manifoldIndex: Int = tentative.copyAtDefault(index: i)
-      if isFlatEdgeGhost(found: found, manifold: manifolds.copyAtDefault(index: manifoldIndex)) is false {
-        accepted.add(value: manifoldIndex)
+    loop var i: Int = 0, i < scratch.tentative.length, ++i {
+      let manifoldIndex: Int = scratch.tentative.copyAtDefault(index: i)
+      if let manifold: view LocalManifold => scratch.manifolds.viewAt(index: manifoldIndex) {
+        if isFlatEdgeGhost(found: scratch.found, manifold: manifold) is false {
+          scratch.accepted.add(value: manifoldIndex)
+        }
       }
     }
   }
 
-  if accepted.length is 0 {
+  if scratch.accepted.length is 0 {
     contact.manifolds.clear()
     ret false
   }
 
-  let clusters: List(MeshCluster) = clusterManifolds(
-    manifolds: manifolds
-    accepted: accepted
+  clusterManifolds(
+    manifolds: scratch.manifolds
+    accepted: scratch.accepted
     lengthUnitsPerMeter: lengthUnitsPerMeter
+    scratch: scratch.clusters
   )
   buildMeshManifolds(
     contact: contact
-    clusters: clusters
+    clusters: scratch.clusters
     transformA: transformA
     transformB: transformB
     lengthUnitsPerMeter: lengthUnitsPerMeter
+    oldManifolds: scratch.oldManifolds
+    consumed: scratch.consumed
   )
 
   # The mixed material values, one sample per contact point, each with its

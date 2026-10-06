@@ -558,7 +558,24 @@ func queryHeightField(
   bounds: view Aabb
   capacity: view Int
 ) ret List(Int) {
-  let result: List(Int) = List.create(Int, cap: 8)
+  var result: List(Int) = List.create(Int, cap: 8)
+  queryHeightFieldInto(
+    heightField: heightField
+    bounds: bounds
+    capacity: capacity
+    result: result
+  )
+  ret result
+}
+
+# queryHeightField into `result` (cleared first, so a caller can reuse it).
+func queryHeightFieldInto(
+  heightField: view HeightFieldData
+  bounds: view Aabb
+  capacity: view Int
+  result: mod List(Int)
+) {
+  result.clear()
   let scale: Vec3 = heightField.scale
   let minRow: Int = Math.floor(x: bounds.lowerBound.z / scale.z) as Int
   let maxRow: Int = Math.floor(x: bounds.upperBound.z / scale.z) as Int
@@ -604,7 +621,6 @@ func queryHeightField(
       }
     }
   }
-  ret result
 }
 
 # The generated fields' cells: material 0, or a hole every 16th cell
