@@ -102,6 +102,29 @@ What it shows:
   Box3D's 1.52 ms at 8. The per-contact allocations in the mesh narrow
   phase are still queued. `benchmarks/parallel_loop`, which does not
   allocate, did not change. The checksum is identical.
+- **The mesh narrow phase no longer allocates (2026-10-06).** Each chunk's
+  TaskContext now owns a `MeshScratch` (`dynamics/MeshContact.rae`), which
+  holds the per-contact lists, the kept per-triangle manifold slots, the
+  cluster pool (`MeshCluster.ClusterScratch`), the capsule-triangle proxies
+  and segment (`TriangleManifold.TriangleScratch`), and the query lists
+  (`queryMeshInto`, `queryHeightFieldInto`). The mesh time-of-impact sweep
+  also borrows the chunk's proxy and query lists (`MeshImpactScratch`).
+
+  Allocations per steady rain step, counted over steps 360-400 at 1 worker,
+  fell from 29 216 to 209. What collide still allocates (about 48) is lists
+  growing for newly created contacts: the triangle cache and the
+  manifolds. The rest is outside collide: the solver's island sleep and
+  wake copy whole contacts, and the scene's body spawning.
+
+  Rain, best of 3, measured interleaved with the build before (load ~3):
+
+  | workers | 1 | 2 | 4 | 8 |
+  |---|---|---|---|---|
+  | before | 6.16 | 3.68 | 2.36 | 2.04 |
+  | after | 5.86 | 3.39 | 2.13 | 1.80 |
+
+  At 8 workers that is 1.18x Box3D's 1.52 ms. Every benchmark checksum and
+  fixtures 970-983, 996 and 997 are unchanged.
 
 ## 3. What that means for the Rae port
 

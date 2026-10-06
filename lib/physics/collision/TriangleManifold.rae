@@ -362,8 +362,27 @@ func queryTriangleAndCapsuleEdges(
   }
 }
 
-func capsuleSegment(capsule: view Capsule) ret List(ClipVertex) {
-  let segment: List(ClipVertex) = List.create(ClipVertex, cap: 2)
+# The reusable working lists of the capsule-triangle manifold (Box3D keeps
+# them on the stack): the two distance proxies and the clipped segment. The
+# functions refill them, so after the first triangles a capsule allocates
+# nothing.
+type TriangleScratch {
+  triangleProxy: ShapeProxy
+  capsuleProxy: ShapeProxy
+  segment: List(ClipVertex)
+}
+
+func createTriangleScratch() ret TriangleScratch {
+  ret TriangleScratch {
+    triangleProxy: ShapeProxy { points: List.create(Vec3, cap: 3), radius: 0.0 }
+    capsuleProxy: ShapeProxy { points: List.create(Vec3, cap: 2), radius: 0.0 }
+    segment: List.create(ClipVertex, cap: 2)
+  }
+}
+
+# The capsule's segment as two clip vertices, written into `segment`.
+func fillCapsuleSegment(segment: mod List(ClipVertex), capsule: view Capsule) {
+  segment.clear()
   segment.add(value: ClipVertex {
     position: capsule.center1
     separation: 0.0
@@ -384,7 +403,6 @@ func capsuleSegment(capsule: view Capsule) ret List(ClipVertex) {
       index2: 1
     )
   })
-  ret segment
 }
 
 # The two face points of a clipped capsule segment, half-way between the
@@ -435,8 +453,9 @@ func buildTriangleAndCapsuleFaceContact(
   plane: view Plane
   capsule: view Capsule
   lengthUnitsPerMeter: view Float
+  segment: mod List(ClipVertex)
 ) {
-  var segment: List(ClipVertex) = capsuleSegment(capsule: capsule)
+  fillCapsuleSegment(segment: segment, capsule: capsule)
   if clipSegmentToTriangleFace(segment: segment, points: triangle, plane: plane) is false {
     ret
   }
@@ -531,6 +550,7 @@ func collideTriangleAndCapsule(
   capsule: view Capsule
   cache: mod SimplexCache
   lengthUnitsPerMeter: view Float
+  scratch: mod TriangleScratch
 ) {
   manifold.pointCount = 0
   if manifoldCapacity(manifold: manifold) < 2 {
@@ -549,10 +569,16 @@ func collideTriangleAndCapsule(
     ret
   }
 
-  let capsulePoints: List(Vec3) = { capsule.center1, capsule.center2 }
+  scratch.triangleProxy.points.clear()
+  scratch.triangleProxy.points.add(value: v1)
+  scratch.triangleProxy.points.add(value: v2)
+  scratch.triangleProxy.points.add(value: v3)
+  scratch.capsuleProxy.points.clear()
+  scratch.capsuleProxy.points.add(value: capsule.center1)
+  scratch.capsuleProxy.points.add(value: capsule.center2)
   let output: DistanceOutput = proxyDistance(
-    proxyA: makeProxy(points: triangle, radius: 0.0)
-    proxyB: makeProxy(points: capsulePoints, radius: 0.0)
+    proxyA: scratch.triangleProxy
+    proxyB: scratch.capsuleProxy
     transform: transformIdentity()
     useRadii: false
     cache: cache
@@ -572,11 +598,11 @@ func collideTriangleAndCapsule(
     let tolerance: Float = 0.2
     let cosAngle: Float = absFloat(value: dot(left: plane.normal, right: delta))
     if cosAngle > tolerance {
-      var segment: List(ClipVertex) = capsuleSegment(capsule: capsule)
-      if clipSegmentToTriangleFace(segment: segment, points: triangle, plane: plane) {
+      fillCapsuleSegment(segment: scratch.segment, capsule: capsule)
+      if clipSegmentToTriangleFace(segment: scratch.segment, points: triangle, plane: plane) {
         setCapsuleFacePoints(
           manifold: manifold
-          segment: segment
+          segment: scratch.segment
           plane: plane
           radius: radius
         )
@@ -626,6 +652,7 @@ func collideTriangleAndCapsule(
     plane: plane
     capsule: capsule
     lengthUnitsPerMeter: lengthUnitsPerMeter
+    segment: scratch.segment
   )
   if manifold.pointCount is 2 {
     # This becomes the clipped separation

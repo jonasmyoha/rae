@@ -239,7 +239,29 @@ func testBoundsTriangleOverlap(
 # frame), in depth-first order, at most `capacity` (Box3D's callback stops
 # the walk by returning false; here the walk stops when the list is full).
 func queryMesh(mesh: view Mesh, bounds: view Aabb, capacity: view Int) ret List(MeshQueryTriangle) {
-  let result: List(MeshQueryTriangle) = List.create(MeshQueryTriangle, cap: 8)
+  var result: List(MeshQueryTriangle) = List.create(MeshQueryTriangle, cap: 8)
+  var stack: List(Int) = List.create(Int, cap: meshStackSize)
+  queryMeshInto(
+    mesh: mesh
+    bounds: bounds
+    capacity: capacity
+    result: result
+    stack: stack
+  )
+  ret result
+}
+
+# queryMesh into `result`, walking with `stack` (both cleared first, so a
+# caller can reuse them and the query allocates nothing).
+func queryMeshInto(
+  mesh: view Mesh
+  bounds: view Aabb
+  capacity: view Int
+  result: mod List(MeshQueryTriangle)
+  stack: mod List(Int)
+) {
+  result.clear()
+  stack.clear()
   let meshScale: Vec3 = mesh.scale
   let ccw: Bool = meshScale.x * meshScale.y * meshScale.z > 0.0
 
@@ -255,7 +277,6 @@ func queryMesh(mesh: view Mesh, bounds: view Aabb, capacity: view Int) ret List(
   let boundsExtent: Vec3 = subtract(left: boundsMax, right: boundsCenter)
 
   let data: view PhysicsMeshData => mesh.data
-  let stack: List(Int) = List.create(Int, cap: meshStackSize)
   var nodeIndex: Int = 0
   loop true {
     let node: MeshNode = data.nodes.copyAtDefault(index: nodeIndex)
@@ -287,7 +308,7 @@ func queryMesh(mesh: view Mesh, bounds: view Aabb, capacity: view Int) ret List(
               c = multiply(left: meshScale, right: vertex3)
             }
             if result.length >= capacity {
-              ret result
+              ret
             }
             result.add(value: MeshQueryTriangle { a: a, b: b, c: c, triangleIndex: triangleIndex })
           }
@@ -305,7 +326,6 @@ func queryMesh(mesh: view Mesh, bounds: view Aabb, capacity: view Int) ret List(
     nodeIndex = stack.copyAtDefault(index: stack.length - 1)
     stack.removeLast()
   }
-  ret result
 }
 
 # b3ComputeMeshAABB
