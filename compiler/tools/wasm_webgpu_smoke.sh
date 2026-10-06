@@ -42,6 +42,21 @@ test -s "$TMP/app.mjs"
 test -s "$TMP/app.wasm"
 grep -q 'createRaeApp' "$TMP/app.mjs"
 
+# The C-library physics track links upstream Box3D's Emscripten build
+# (tools/box3d/build.sh installs it when emcc is present;
+# docs/physics-two-implementations.md §6). Built when that library exists.
+box3d_note=""
+BOX3D_WEB_LIB="${RAE_BOX3D:-$HOME/.cache/rae/box3d/install}/lib/emscripten/libbox3d.a"
+if [ -f "$BOX3D_WEB_LIB" ]; then
+  perl -e 'alarm shift; exec @ARGV' 300 compiler/bin/rae build \
+    --target wasm --profile dev \
+    --project examples/125_vehicle_c \
+    --out "$TMP/box3d/index.html" \
+    examples/125_vehicle_c/Main.rae >/dev/null
+  test -s "$TMP/box3d/index.wasm"
+  box3d_note="; the Box3D C track's browser build"
+fi
+
 # A nonblocking GPU readback completes in the browser and copies the right
 # bytes (examples/zz_web_readback_check). It once never produced a sample:
 # the runtime's allocation-size check answered 0 under Emscripten, so every
@@ -79,4 +94,4 @@ if [ -n "$CHROME" ] && [ -x "$CHROME" ] && command -v python3 >/dev/null 2>&1; t
   fi
 fi
 
-echo "PASS wasm_webgpu_smoke: 109 and composed 110 browser pages plus embeddable module built; $readback_note"
+echo "PASS wasm_webgpu_smoke: 109 and composed 110 browser pages plus embeddable module built$box3d_note; $readback_note"
