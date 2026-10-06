@@ -1,6 +1,7 @@
 # The worker pool behind `parallelLoop` (runtime_threads.c, docs/concurrency-
-# model.md §5): one worker per performance core, the thread that starts a
-# parallelLoop being one of them. `RAE_WORKERS=n` sets the count;
+# model.md §5): one worker per performance core but one (left to the
+# program's other threads), the thread that starts a parallelLoop being one of
+# them. `RAE_WORKERS=n` sets the count;
 # `RAE_WORKERS=1` makes every parallelLoop sequential.
 func nativeWorkerCount() unsafe extern("rae_ext_Parallel_workerCount") ret Int
 

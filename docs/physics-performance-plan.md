@@ -356,7 +356,8 @@ code the compiler outlines, as `parallelLoop`'s body is.
    back, 5-16 us from sleep; 3.8x at 4 workers, 6x at 8 on a compute kernel.)*
    - Workers = performance cores (`hw.perflevel0.physicalcpu` on macOS, 8
      here); the efficiency cores slow every spin barrier down to their pace.
-     The calling thread participates.
+     The calling thread participates. (Since §10h: performance cores minus
+     one, 7 here, at the launcher's QoS class.)
    - Deterministic chunking: fixed-size chunks, results combined in chunk order.
    - The body sees its `workerIndex`, and may write the per-worker scratch slot
      of that index, besides the element of its own iteration.
@@ -523,7 +524,8 @@ What it shows:
   thread and the driver. So the likely cause is preemption under CPU
   contention. The port syncs ~100 stage launches per step, and one
   descheduled worker stalls each barrier; Box3D's solver runs as one task.
-  Not fixed here (queued).
+  Fixed in §10h: the cause was the workers' QoS class and the pool taking
+  every performance core, not the number of barriers.
 - **Catch-up spirals.** A slow step makes the next frame owe 2-4 steps
   (`maxStepsPerFrame` is 4 in both tracks), which made the worst frames
   40-80 ms. The accumulator already drops time beyond the cap. Whether to
@@ -820,3 +822,66 @@ thread; with the cap of 2 it runs the simulation slower, at 1.55 steps a
 frame. At 1 000 boxes it is smooth at 60 fps. WASM threads (backlog #245)
 are what would bring 5 000 back.
 
+### 10h. The step's spikes, the spawn hitch and a zero-allocation step (2026-10-06)
+
+**The spikes.** Reproduced with the windowed playground (pyramid, 5 000
+boxes, autofire, `RAE_PRESENT_MODE=immediate`, 1 200 profiled frames), with
+and without 6 CPU burners at the default QoS class (`perl -e '1 while 1'`).
+"Spikes" counts frames whose physics step took over 8 ms:
+
+| run | spikes | step avg / worst (ms) |
+|---|---|---|
+| port, 8 workers at DEFAULT QoS (before), 6 burners | 184 | 2.84 / 29.5 |
+| Box3D C (its own scheduler), 6 burners | 120 | 3.02 / 52.0 |
+| port, 8 workers at the launcher's QoS, 6 burners | 5, 5 | 1.57-1.61 / 12.5-13.3 |
+| port, 7 workers at the launcher's QoS, 6 burners | 2 | 1.49 / 13.3 |
+| port, 8 workers at the launcher's QoS, no burners | 2, 4 | 1.27-1.36 / 11.6-12.0 |
+| port, 7 workers at the launcher's QoS, no burners | 0, 0 | 1.17-1.22 / 4.9-6.9 |
+
+- **The cause was preemption, and it was not the port's ~100 barriers.**
+  Box3D, which runs its solver as one task, spiked just as badly under the
+  same load: a stage join waits for every claimed chunk, and a worker
+  preempted mid-chunk holds one for a whole time slice (~10 ms on macOS).
+  Both pools already steal unclaimed work, so a worker that is merely late
+  costs nothing.
+- **The pool's threads ran below their launcher.** macOS starts a new
+  pthread at QoS DEFAULT (0x15), while an app's main thread, the one waiting
+  at every join, is USER_INTERACTIVE (0x21). Any default-class work on the
+  machine then competed with the workers on equal terms. The pool now creates
+  its workers at the launching thread's class (`pthread_attr_set_qos_class_np`
+  in `runtime_threads.c`).
+- **The pool took every performance core.** At 8 workers on 8 performance
+  cores, the program's own render thread, the GPU driver and the window
+  server still preempt a worker now and then. The default is now
+  **performance cores minus one** (7 here). Headless, at 5 000 and 10 000
+  boxes, 7 and 8 workers are level within noise (2.7-3.2 against 3.0-3.1 ms;
+  5.8-6.4 against 6.0-6.2 ms), and in the window 7 is faster. `RAE_WORKERS`
+  still sets any count.
+- Box3D's built-in scheduler (track B) creates its threads at DEFAULT and
+  Rae cannot reach them without patching upstream, so track B keeps its
+  spikes under load; it uses the same 7 workers (`Parallel.workerCount()`).
+
+**The 1 000-body spawn.** `RAE_PLAYGROUND_SPAWN=1000` (new, headless):
+spawning the pyramid at once into a fresh world (sleeping off), then its
+first steps against a steady one:
+
+| | spawn | first three steps | steady step (median) |
+|---|---|---|---|
+| port | 1.75-1.96 ms | 2.8, 0.9-1.1, 0.8 ms | 0.73-0.81 ms |
+| Box3D C | 1.22 ms | 3.6, 0.6, 0.7 ms | 0.72 ms |
+
+There is no hitch to remove: spawn plus the first step is ~5 ms on both
+tracks, inside one frame. The first step costs ~4x a steady one because a
+thousand new proxies find their pairs at once. The port allocates on the
+way (19 allocations per box: 13 for its box hull's Lists, then 3 per island
+and per contact the first time a slot is used). Contacts and islands reuse
+their slot's Lists when recycled, so this is pool growth that stops once
+the pools are warm, not per-step traffic.
+
+**The steady step allocates nothing.** `Sys.allocationCount()` (new: the
+runtime's always-on count of String and List/Buffer allocations) across 120
+steady steps: the port allocated **720** (6 a step), all in
+`physicsEventSystem`. `getContactEvents`/`getSensorEvents` return copies of
+the world's five event Lists, and the system took those copies every step.
+It now reads the lists in place, and the count is **0**. Track B also counts
+0, but the counter only sees Rae's allocations, not Box3D's own C mallocs.
