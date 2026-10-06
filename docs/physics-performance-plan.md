@@ -88,6 +88,20 @@ What it shows:
   allocates per contact and per triangle. Every allocation also updates
   the runtime's always-on atomic counters, so the cores fight over one
   cache line. Both are queued.
+- **Per-thread counters fixed the contention (2026-10-06).** Each thread
+  now counts into its own counter block, and readers sum the blocks
+  (`compiler/runtime/runtime_core_memory.c`). Rain, best of 3, measured
+  interleaved with the old build (load ~5):
+
+  | workers | 1 | 2 | 4 | 8 |
+  |---|---|---|---|---|
+  | before | 6.19 | 4.56 | 4.11 | 5.37 |
+  | after | 6.26 | 3.68 | 2.39 | 1.94 |
+
+  It now scales at every step up to 8 workers, though it is still 1.3x
+  Box3D's 1.52 ms at 8. The per-contact allocations in the mesh narrow
+  phase are still queued. `benchmarks/parallel_loop`, which does not
+  allocate, did not change. The checksum is identical.
 
 ## 3. What that means for the Rae port
 

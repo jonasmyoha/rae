@@ -170,14 +170,14 @@ static inline int64_t rae_mem_buf_bytes(void* ptr, int64_t hint) {
 void* rae_ext_rae_buf_alloc(int64_t count, int64_t elem_size) {
   if (count <= 0) return NULL;
   void* p = calloc((size_t)count, (size_t)elem_size);
-  if (p) { RAE_STAT_ADD(g_mem_buf_alloc_n, 1); RAE_STAT_ADD(g_mem_buf_alloc_b, rae_mem_buf_bytes(p, count * elem_size)); }
+  if (p) { RAE_STAT_ADD(RAE_MC_BUF_ALLOC_N, 1); RAE_STAT_ADD(RAE_MC_BUF_ALLOC_B, rae_mem_buf_bytes(p, count * elem_size)); }
   RAE_BR_REGISTER(p, count, elem_size);
   return p;
 }
 
 void rae_ext_rae_buf_free(void* buf) {
   if (buf) {
-    RAE_STAT_ADD(g_mem_buf_free_n, 1); RAE_STAT_ADD(g_mem_buf_free_b, rae_mem_buf_bytes(buf, 0));
+    RAE_STAT_ADD(RAE_MC_BUF_FREE_N, 1); RAE_STAT_ADD(RAE_MC_BUF_FREE_B, rae_mem_buf_bytes(buf, 0));
     RAE_BR_UNREGISTER(buf);
     free(buf);
   }
@@ -186,7 +186,7 @@ void rae_ext_rae_buf_free(void* buf) {
 void* rae_ext_rae_buf_resize(void* buf, int64_t new_count, int64_t elem_size) {
   if (new_count <= 0) {
     if (buf) {
-      RAE_STAT_ADD(g_mem_buf_free_n, 1); RAE_STAT_ADD(g_mem_buf_free_b, rae_mem_buf_bytes(buf, 0));
+      RAE_STAT_ADD(RAE_MC_BUF_FREE_N, 1); RAE_STAT_ADD(RAE_MC_BUF_FREE_B, rae_mem_buf_bytes(buf, 0));
       RAE_BR_UNREGISTER(buf);
       free(buf);
     }
@@ -199,9 +199,9 @@ void* rae_ext_rae_buf_resize(void* buf, int64_t new_count, int64_t elem_size) {
   int64_t old_bytes = buf ? rae_mem_buf_bytes(buf, 0) : 0;
   RAE_BR_UNREGISTER(buf);
   void* p = realloc(buf, (size_t)new_count * (size_t)elem_size);
-  if (buf) { RAE_STAT_ADD(g_mem_buf_free_n, 1); RAE_STAT_ADD(g_mem_buf_free_b, old_bytes); }
-  if (p)   { RAE_STAT_ADD(g_mem_buf_alloc_n, 1); RAE_STAT_ADD(g_mem_buf_alloc_b, rae_mem_buf_bytes(p, new_count * elem_size)); }
-  RAE_STAT_ADD(g_mem_buf_resize_n, 1);
+  if (buf) { RAE_STAT_ADD(RAE_MC_BUF_FREE_N, 1); RAE_STAT_ADD(RAE_MC_BUF_FREE_B, old_bytes); }
+  if (p)   { RAE_STAT_ADD(RAE_MC_BUF_ALLOC_N, 1); RAE_STAT_ADD(RAE_MC_BUF_ALLOC_B, rae_mem_buf_bytes(p, new_count * elem_size)); }
+  RAE_STAT_ADD(RAE_MC_BUF_RESIZE_N, 1);
   RAE_BR_REGISTER(p, new_count, elem_size);
   return p;
 }
