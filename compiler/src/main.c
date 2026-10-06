@@ -2967,6 +2967,21 @@ static int run_compiled_file(const RunOptions* run_opts, const char* project_roo
     return 1;
   }
 
+  /* RAE_RUN_KEEP_BINARY=<path>: also keep a copy of the linked program there,
+   * since the scratch directory is removed after the run. For a benchmark
+   * that reruns one build under different environments (pool sizes:
+   * benchmarks/physics_scaling) instead of rebuilding for each. */
+  {
+    const char* keep_path = getenv("RAE_RUN_KEEP_BINARY");
+    if (keep_path && keep_path[0]) {
+      if (copy_file_to(temp_bin, keep_path)) {
+        chmod(keep_path, 0755);
+      } else {
+        fprintf(stderr, "warning: could not keep the binary at '%s'\n", keep_path);
+      }
+    }
+  }
+
   /* Give this run the same per-app directory `rae watch` gives its children.
    * Nothing writes a reload signal for a plain run, so the hot-reload half is
    * inert — but the WINDOW GEOMETRY lives there too, and without this two

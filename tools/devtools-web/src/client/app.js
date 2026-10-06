@@ -4306,25 +4306,79 @@ function setActiveView(targetView) {
 }
 
 // ---- Benchmarks tab ---------------------------------------------------------
-// The benchmark suite's own generated page (benchmarks/list_access/site), served
-// by the devtools server under /benchmarks/list_access/. Loaded on first open
-// only, so the iframe does not fetch the page while the tab is never visited.
-// The frame is sized to the page's full height, so the dashboard scrolls the
-// report like any other tab instead of nesting a second scrollbar; a
-// ResizeObserver keeps the height right when the report reflows (window width).
+// Each suite's own generated page (benchmarks/<suite>/site), served by the
+// devtools server under /benchmarks/<suite>/. The toolbar's buttons switch
+// the suite (remembered across reloads). Loaded on first open only, so the
+// iframe does not fetch a page while the tab is never visited. The frame is
+// sized to the page's full height, so the dashboard scrolls the report like
+// any other tab instead of nesting a second scrollbar; a ResizeObserver keeps
+// the height right when the report reflows (window width).
+const BENCHMARK_SUITES = {
+  list_access: {
+    title: "List access benchmark results",
+    hint: "Rae vs C, Rust, JavaScript and Python. Regenerate with <code>benchmarks/list_access/run.sh</code>.",
+  },
+  physics_scaling: {
+    title: "Physics scaling results",
+    hint: "The playground pyramid on both physics tracks: step ms against bodies (1k-20k) and workers (1-8). Regenerate with <code>benchmarks/physics_scaling/run.sh</code>.",
+  },
+};
+const BENCHMARK_SUITE_KEY = "rae-devtools-benchmark-suite";
+let benchmarksWired = false;
+let benchmarksObserver = null;
+
+function showBenchmarkSuite(suite) {
+  const entry = BENCHMARK_SUITES[suite] ?? BENCHMARK_SUITES.list_access;
+  const name = BENCHMARK_SUITES[suite] ? suite : "list_access";
+  const frame = document.getElementById("benchmarks-frame");
+  const link = document.getElementById("benchmarks-open");
+  const hint = document.getElementById("benchmarks-hint");
+  if (!frame) return;
+  document.querySelectorAll("[data-benchmark-suite]").forEach((button) => {
+    button.setAttribute("aria-selected", button.dataset.benchmarkSuite === name ? "true" : "false");
+  });
+  if (hint) hint.innerHTML = entry.hint;
+  if (link) link.setAttribute("href", `/benchmarks/${name}/`);
+  frame.setAttribute("title", entry.title);
+  try {
+    localStorage.setItem(BENCHMARK_SUITE_KEY, name);
+  } catch (_) {
+    // Storage may be unavailable; the choice just is not remembered
+  }
+  const src = `/benchmarks/${name}/`;
+  if (frame.getAttribute("src") !== src) frame.setAttribute("src", src);
+}
+
 function loadBenchmarksPage() {
   const frame = document.getElementById("benchmarks-frame");
-  if (!frame || frame.getAttribute("src")) return;
-  frame.addEventListener("load", () => {
-    const doc = frame.contentDocument;
-    if (!doc || !doc.documentElement) return;
-    const fit = () => {
-      frame.style.height = `${doc.documentElement.scrollHeight}px`;
-    };
-    fit();
-    if (typeof ResizeObserver === "function") new ResizeObserver(fit).observe(doc.body);
-  });
-  frame.setAttribute("src", "/benchmarks/list_access/");
+  if (!frame) return;
+  if (!benchmarksWired) {
+    benchmarksWired = true;
+    frame.addEventListener("load", () => {
+      const doc = frame.contentDocument;
+      if (!doc || !doc.documentElement) return;
+      const fit = () => {
+        frame.style.height = `${doc.documentElement.scrollHeight}px`;
+      };
+      fit();
+      if (benchmarksObserver) benchmarksObserver.disconnect();
+      if (typeof ResizeObserver === "function") {
+        benchmarksObserver = new ResizeObserver(fit);
+        benchmarksObserver.observe(doc.body);
+      }
+    });
+    document.querySelectorAll("[data-benchmark-suite]").forEach((button) => {
+      button.addEventListener("click", () => showBenchmarkSuite(button.dataset.benchmarkSuite));
+    });
+  }
+  if (frame.getAttribute("src")) return;
+  let saved = "list_access";
+  try {
+    saved = localStorage.getItem(BENCHMARK_SUITE_KEY) || "list_access";
+  } catch (_) {
+    // Storage may be unavailable; start on the first suite
+  }
+  showBenchmarkSuite(saved);
 }
 
 // ---- Stress tab (docs/stress-tests.md) --------------------------------------
