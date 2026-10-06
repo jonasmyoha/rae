@@ -352,7 +352,12 @@ static void pp_print_match_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
 
 static void pp_print_loop_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
   pp_stmt_prologue(pp, stmt->line);
-  pp_write(pp, stmt->as.loop_stmt.is_parallel ? "parallelLoop" : "loop");
+  pp_write(pp, stmt->as.loop_stmt.is_main_loop ? "mainLoop"
+               : stmt->as.loop_stmt.is_parallel ? "parallelLoop" : "loop");
+  if (stmt->as.loop_stmt.is_main_loop) {
+    pp_space(pp);
+    pp_write_str(pp, stmt->as.loop_stmt.main_loop_state);
+  }
   if (stmt->as.loop_stmt.query_bindings) {
     /* The ECS query loop sugar (#807): print the source bindings, not the
      * hoisted `let` + accessor expansion the parser produced. */

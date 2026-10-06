@@ -1,0 +1,27 @@
+tests/cases/1011_main_loop_rejects/Main.rae:9:3: mainLoop is the program's frame loop, so it may stand only in 'main'
+     9 |   mainLoop game {
+       |   ^~~~
+tests/cases/1011_main_loop_rejects/Main.rae:19:3: mainLoop must be main's last statement; only 'ret <exit code>' may follow it (in a browser, main returns before the first frame)
+    19 |   let limit: Int = 3
+       |   ^~~~
+tests/cases/1011_main_loop_rejects/Main.rae:16:3: mainLoop's state 'count' must be a struct value (one type that owns the program's state), not 'Int'
+    16 |   mainLoop count {
+       |   ^~~~
+tests/cases/1011_main_loop_rejects/Main.rae:24:3: mainLoop must be main's last statement; only 'ret <exit code>' may follow it (in a browser, main returns before the first frame)
+    24 |   var game: Game = { score: 0 }
+       |   ^~~~
+tests/cases/1011_main_loop_rejects/Main.rae:21:3: mainLoop's state 'frozen' must be an owned value declared with 'var' (the loop takes it over and drops it when it ends)
+    21 |   mainLoop frozen {
+       |   ^~~~
+tests/cases/1011_main_loop_rejects/Main.rae:36:3: mainLoop must be main's last statement; only 'ret <exit code>' may follow it (in a browser, main returns before the first frame)
+    36 |   log("after")
+       |   ^~~~
+tests/cases/1011_main_loop_rejects/Main.rae:25:3: mainLoop's body may use only its state 'game' and constants, but it uses main's local 'limit'; move it into the state
+    25 |   mainLoop game {
+       |   ^~~~
+tests/cases/1011_main_loop_rejects/Main.rae:28:7: 'ret' cannot leave a mainLoop body: it runs as one frame at a time; 'break' ends the loop
+    28 |       ret 1
+       |       ^~~~
+tests/cases/1011_main_loop_rejects/Main.rae:31:7: mainLoop must be a statement of 'main' itself, not inside another block
+    31 |       mainLoop game {
+       |       ^~~~

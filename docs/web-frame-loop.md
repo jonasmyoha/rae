@@ -1,10 +1,10 @@
 # The browser frame loop: Asyncify, SIMD and a frame callback
 
-**Status (2026-10-06):** implemented, option B (§4). The real browser
-slowdown was the missing WebAssembly SIMD, and that is fixed (`-msimd128`,
-§2). An entry module may now declare `func setup() ret T` and
-`func frame(app: mod T) ret Bool` instead of `main`; the browser then calls
-`frame` once per animation frame, without the per-frame Asyncify yield (§6).
+**Status (2026-10-06):** implemented as the `mainLoop` keyword (§4, §5).
+The real browser slowdown was the missing WebAssembly SIMD, and that is
+fixed (`-msimd128`, §2). `main` stays the one entry point and ends with
+`mainLoop state { ... }`; in a browser the page runs its body once per
+animation frame, without the per-frame Asyncify yield (§6).
 122/123_physics_playground use it.
 
 ## 1. How a Rae app runs in the browser today
@@ -98,46 +98,59 @@ is less explicit than A (a reader has to know the rule).
 and ~17% size cost stay, and every app keeps its own loop exactly as
 written.
 
-**Decision (maintainer, 2026-10-06): B.** Rae keeps having no function
-values: a function passed as an argument is a pattern the language does not
-want, and an entry convention is the same kind of rule `main` already is. The
-state is one owned value, the ECS way (a world or app that systems take as
-`mod`), not a closure.
+**Decision (maintainer, 2026-10-06): a loop keyword, `mainLoop`.** Option B
+was built first (fixed-name `setup`/`frame` functions instead of `main`) and
+then replaced the same day: the maintainer wants one entry point, `main`, and
+no special function names. Rae keeps having no function values (a function
+passed as an argument is a pattern the language does not want; closures
+would bring hidden ownership), so instead of A's function-name argument the
+frame is a loop body, in the `loop`/`parallelLoop` family. The state is one
+owned value, the ECS way (a world or app that systems take as `mod`).
 
-## 5. The entry convention
-
-An entry module (the file `rae run`/`build` is given) that has no `main` and
-declares
+## 5. `mainLoop`
 
 ```rae
-func setup() ret PlaygroundState { ... }
-func frame(state: mod PlaygroundState) ret Bool { ... }
+func main() ret Int {
+  # headless modes, argument checks: plain code
+  var state: PlaygroundState = createPlayground()
+  mainLoop state {
+    if Gpu2d.pollClose() {
+      break
+    }
+    stepAndDrawPlayground(state: state)
+  }
+  ret 0
+}
 ```
 
-gets a generated C `main` (`emit_frame_entry` in `compiler/src/c_backend.c`):
-
-- **Natively:** `state = setup(); while (frame(&state)) {}`, then the state
-  is dropped. The same program, the same loop it would have written.
-- **In the browser:** `setup` runs once, its result goes into a heap box, and
+- **Semantics:** the body runs once per frame; `break` ends the loop and
+  `continue` ends the frame. `state` is moved into the loop and dropped when
+  it ends.
+- **Rules** (sema_main_loop.c, fixture 1011): `mainLoop` stands only in
+  `main`, in main's own block, as its last statement, followed by nothing but
+  `ret <exit code>`; its state is a `var` of a struct type declared in main
+  before it; the body may use only that state and constants (not main's
+  other locals), and may not `ret`. The exit code is the native one; in a
+  browser it is ignored, because main returns before the first frame.
+- **Lowering** (`emit_main_loop` in compiler/src/c_stmt.c): the body is
+  outlined into `rae_Bool __rae_main_loop_bodyN(T* state)` (the same
+  outlining as a `parallelLoop` body), which sees the state as a `mod`
+  alias. Natively main runs `while (body(&state)) {}` and drops the state.
+  In a browser the state moves into a heap box and
   `emscripten_set_main_loop_arg` calls a generated trampoline each animation
-  frame. When `frame` returns false the loop is cancelled and the box dropped
-  and freed.
-- **Rules:** `setup` takes nothing and returns one value; `frame` takes one
-  `mod` parameter of that type and returns `Bool` (false ends the program).
-  Any other shape is a build error. A program with `main` is untouched: `main`
-  wins, so a module may still have functions called `setup` or `frame`.
-- **Headless modes** that run to an end (tests, benchmarks) stay plain
-  loops inside `setup` and finish with `Sys.exit(code:)`.
+  frame; when the body says stop, the loop is cancelled and the box dropped
+  and freed. main then returns at once, with its other locals dropped as
+  usual.
 
-122_physics_playground_port (and 123, the same file) moved its window loop
-into this form: `PlaygroundState` owns the renderer, the UI world and
-systems, the app, the physics world and the scene; `setup` builds it (the
-renderer's GPU handles are moved in under `unsafe`, never copied); `frame` is
-the old loop body and returns false where the loop used to `break`.
+122_physics_playground_port (and 123, the same file) runs its window this
+way: `createPlayground` builds the `PlaygroundState` (renderer, UI world and
+systems, app, physics world, scene; the renderer's GPU handles are moved in
+under `unsafe`, never copied), and the body polls for close and runs
+`runPlaygroundFrame`. Its headless modes stay plain code in `main`.
 
-## 6. The browser build of a setup/frame program
+## 6. The browser build of a mainLoop program
 
-The build sees the generated entry (its `RAE_FRAME_CALLBACK_ENTRY` marker)
+The build sees the generated loop (its `RAE_FRAME_CALLBACK_ENTRY` marker)
 and links with:
 
 - `-DRAE_WEB_FRAME_CALLBACK`: `Gpu2d.pollClose` no longer awaits the next
@@ -145,14 +158,15 @@ and links with:
   browser paces the frames; natively it is still the blocking backpressure
   poll).
 - `-sASYNCIFY_IGNORE_INDIRECT=1`: Asyncify stays only for the waits that are
-  still blocking (requesting the WebGPU adapter and device during `setup`),
+  still blocking (requesting the WebGPU adapter and device before the loop),
   which are direct calls.
 
 **Limit:** a blocking GPU readback (a buffer map waited on with
-`rae_wgpu_poll(1)`) cannot run inside `frame` in the browser, because a frame
+`rae_wgpu_poll(1)`) cannot run inside a `mainLoop` body in the browser, because a frame
 callback has no stack Asyncify can return to the browser through; it fails
 with "null function". A frame that needs one must request it and read it on a
-later frame. Programs with `main` keep the Asyncify loop and can still block.
+later frame. Programs with their own `loop` keep the Asyncify path and can
+still block.
 
 Measured as §2 (headless Chrome 154, 5 000 boxes, autofire, 300 frames, two
 interleaved runs each; the wall time per frame follows from the fixed steps
@@ -160,8 +174,8 @@ taken at 60 Hz):
 
 | build | .wasm | fixed steps / 300 frames | wall per frame | physics per frame |
 |---|---|---|---|---|
-| `main` loop, Asyncify yield per frame | 2.52 MB | 449-467 | ~25 ms (~40 fps) | 16.8-17.3 |
-| `setup`/`frame` callback | 2.13 MB | 326-334 | ~18.6 ms (~54 fps) | 16.1-16.6 |
+| own `loop`, Asyncify yield per frame | 2.52 MB | 449-467 | ~25 ms (~40 fps) | 16.8-17.3 |
+| frame callback (`setup`/`frame`, now `mainLoop`) | 2.13 MB | 326-334 | ~18.6 ms (~54 fps) | 16.1-16.6 |
 
 The frame's own work is the same (~18.5 ms). The difference is the yield:
 the Asyncify loop unwinds to the browser and then waits for a fresh
@@ -171,3 +185,9 @@ soon as it can. The .wasm is 15% smaller, since indirect calls are no longer
 instrumented. (Physics per step is not comparable between the rows: the
 callback takes ~1.1 steps a frame against ~1.5, and the first step of a frame
 costs more.)
+
+The `mainLoop` build is the same C as the `setup`/`frame` one it replaced
+(2.13 MB .wasm). Measured again later the same day on a loaded machine (load
+average 5.5), where every build takes more fixed steps a frame: `mainLoop`
+25.8-28.0 ms of frame work, `setup`/`frame` 26.2 ms, the Asyncify loop
+34.9 ms.

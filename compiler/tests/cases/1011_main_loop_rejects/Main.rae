@@ -1,0 +1,38 @@
+# mainLoop's rules (docs/web-frame-loop.md §5): only in main, main's last
+# statement, an owned struct state, and a body that sees only that state.
+type Game {
+  score: Int
+}
+
+func helper() {
+  var game: Game = { score: 0 }
+  mainLoop game {
+    break
+  }
+}
+
+func main() ret Int {
+  var count: Int = 0
+  mainLoop count {
+    break
+  }
+  let limit: Int = 3
+  let frozen: Game = { score: 0 }
+  mainLoop frozen {
+    break
+  }
+  var game: Game = { score: 0 }
+  mainLoop game {
+    game.score = game.score + limit
+    if game.score > 9 {
+      ret 1
+    }
+    if game.score > 5 {
+      mainLoop game {
+        break
+      }
+    }
+  }
+  log("after")
+  ret 0
+}

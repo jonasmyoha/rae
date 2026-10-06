@@ -2897,6 +2897,17 @@ static AstStmt* parse_statement(Parser* parser) {
     }
     return s;
   }
+  if (parser_match(parser, TOK_KW_MAINLOOP)) {
+    // `mainLoop state { body }`: the frame loop over one owned local of
+    // `main` (docs/web-frame-loop.md). An unconditional loop flagged with
+    // its state; sema checks where it may stand and what the body may use.
+    AstStmt* s = new_stmt(parser, AST_STMT_LOOP, parser_previous(parser));
+    const Token* state = parser_consume_ident(parser, "expected the state's name after 'mainLoop'");
+    s->as.loop_stmt.is_main_loop = true;
+    if (state) s->as.loop_stmt.main_loop_state = parser_copy_str(parser, state->lexeme);
+    s->as.loop_stmt.body = parse_block(parser);
+    return s;
+  }
   if (parser_match(parser, TOK_KW_BREAK)) {
     return new_stmt(parser, AST_STMT_BREAK, parser_previous(parser));
   }

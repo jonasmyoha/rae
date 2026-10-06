@@ -2426,6 +2426,7 @@ static void sema_analyze_decl_inner(CompilerContext* ctx, AstModule* module, Sym
                 AstStmt* stmt = decl->as.func_decl.body->first;
                 while (stmt) { sema_analyze_stmt(ctx, module, symbols, stmt, current_return_type); stmt = stmt->next; }
                 sema_lifecycle_post_pass(ctx, module, sema_diag_file(module), &decl->as.func_decl);
+                sema_check_main_loops(module, sema_diag_file(module), &decl->as.func_decl);
                 s_current_decl_origin = saved_origin;
                 s_current_params = saved_params;
                 s_current_generic_params = saved_gparams;
