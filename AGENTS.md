@@ -579,6 +579,32 @@ The compiler has one version, `compiler/VERSION` — a single semver line
   short commit). All four operate on the pack in the current directory.
 
 ---
+## Copyright: claimed file by file
+
+Copyright is claimed **per file**. The repo's `LICENSE` (MIT) covers every
+file that is Rae's own work, and such files carry NO copyright header. Do not
+add one.
+
+A file that is a **direct port** of someone else's code keeps the original
+author's copyright and licence, stated in ONE line at the top of the file. It is
+one line because every line counts against the 1,000-line cap, and the full
+licence text lives once, beside the code:
+
+- **The Box3D port** is every `lib/physics/**` module except `lib/physics/ecs/`,
+  plus `benchmarks/physics/rae/`. Its first line is:
+  `# Ported from Box3D: Copyright (c) 2025 Erin Catto, MIT License (lib/physics/LICENSE-box3d.md)`
+- **The generated `lib/box3d/Box3d*.rae` bindings** get a "Derived from Box3D's
+  headers" line from `tools/gen_box3d_bindings.sh` (`--module-comment`). Never
+  hand-edit it in; regenerate.
+- **Rae-side new work built on top keeps no notice.** That covers
+  `lib/physics/ecs/`, `lib/box3d/Box3dGlue.rae` and `lib/box3d/ecs/`,
+  `tools/box3d/rae_glue.c`, the oracle drivers, `lib/physicsScenes/`, the
+  examples and the tests. This holds even when they reuse a sample's numbers.
+- A new file you port line for line from Box3D gets the line. A new file you
+  write gets nothing. A port of some other project adds its own one-line notice,
+  naming the holder and the licence, plus a `LICENSE-<project>.md` beside it.
+
+---
 ## Interaction rules
 
 - Assume the human may not be at the keyboard

@@ -25,6 +25,7 @@ if [ ! -f "$INC/box3d.h" ]; then echo "box3d.h not found under $INC (run tools/b
   --api-macro B3_API \
   --inline-macro B3_INLINE --inline-macro B3_FORCE_INLINE --inline-macro B3_ID_INLINE \
   --define-prefix B3_ \
-  --module-comment "Box3D $(cat "$BOX3D/COMMIT") (upstream's C library, tools/box3d) low-level bindings."
+  --module-comment "Box3D $(cat "$BOX3D/COMMIT") (upstream's C library, tools/box3d) low-level bindings.
+Derived from Box3D's headers: Copyright (c) 2025 Erin Catto, MIT License (lib/physics/LICENSE-box3d.md)"
 
 echo "Regenerated lib/box3d/Box3d*.rae"
