@@ -14,7 +14,7 @@
 #include <CoreFoundation/CoreFoundation.h>
 #endif
 
-#if defined(__linux__) || defined(__GLIBC__)
+#if defined(__linux__) || defined(__GLIBC__) || defined(__EMSCRIPTEN__)
 #include <malloc.h>
 #endif
 
@@ -403,7 +403,10 @@ static int64_t rae_malloc_size_safe(void* p) {
   if (!p) return 0;
 #if defined(__APPLE__)
   return (int64_t)malloc_size(p);
-#elif defined(__linux__) || defined(__GLIBC__)
+#elif defined(__linux__) || defined(__GLIBC__) || defined(__EMSCRIPTEN__)
+  /* Emscripten's allocators (dlmalloc, emmalloc) answer this too. Without
+   * it the browser answered 0, and every size-checked copy into a Rae List
+   * (rae_wgpu_read_copy: a GPU readback's bytes) was refused. */
   return (int64_t)malloc_usable_size(p);
 #else
   return 0;

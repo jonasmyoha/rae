@@ -1,0 +1,146 @@
+# A nonblocking readback completes in a frame loop, natively and in the
+# browser (compiler/tools/wasm_webgpu_smoke.sh runs the browser build in
+# headless Chrome). A MapRead buffer holding known bytes is read back through
+# the GPU manager (gpu/GpuReadback), polled once per frame of a mainLoop the
+# way the deferred renderer's per-pass timing polls its samples. Logs
+# "READBACK OK after N frames" with the bytes checked, or "READBACK TIMEOUT"
+# after 5 s;
+# exit code 0 only for OK.
+open webgpu/Context
+open webgpu/WebgpuEnums
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuReadback
+
+const readbackBytes: Int = 32
+
+# Give up after this long (the frames of a native loop are microseconds)
+const timeLimitNs: Int = 5000000000
+
+type ReadbackCheck {
+  resources: opt GpuResources
+  buffer: BufferId
+  readback: ReadbackId
+  frames: Int
+  startedNs: Int
+  passed: Bool
+}
+
+func filled(count: view Int) ret List(UInt8) {
+  let bytes: List(UInt8) = List.create(UInt8, cap: count)
+  loop var i: Int = 0, i < count, ++i {
+    bytes.add(value: (i * 3 + 7) as UInt8)
+  }
+  ret bytes
+}
+
+# The bytes read back are the bytes written.
+func bytesMatch(check: mod ReadbackCheck) ret Bool {
+  var out: List(UInt8) = List.create(UInt8, cap: readbackBytes)
+  loop var i: Int = 0, i < readbackBytes, ++i {
+    out.add(value: 0 as UInt8)
+  }
+  var copied: Bool = false
+  if let resources: mod GpuResources => check.resources {
+    copied = copyReadback(resources: resources, id: check.readback, destination: out)
+  }
+  if copied is false {
+    log("READBACK FAIL: the copy out of the mapped buffer was refused")
+    ret false
+  }
+  let expected: List(UInt8) = filled(count: readbackBytes)
+  loop var i: Int = 0, i < readbackBytes, ++i {
+    if out.copyAtDefault(index: i) is not expected.copyAtDefault(index: i) {
+      log("READBACK FAIL: byte {i} differs")
+      ret false
+    }
+  }
+  ret true
+}
+
+# One frame: false once the readback landed (or the frame limit passed).
+func checkFrame(check: mod ReadbackCheck) ret Bool {
+  check.frames = check.frames + 1
+  var status: Int = -1
+  if let resources: mod GpuResources => check.resources {
+    status = pollReadback(resources: resources, id: check.readback)
+  }
+  if status is 1 {
+    check.passed = bytesMatch(check: check)
+    if check.passed {
+      log("READBACK OK after {check.frames} frames")
+    }
+    ret false
+  }
+  if status is not 0 {
+    log("READBACK FAIL: status {status}")
+    ret false
+  }
+  if nowNs() - check.startedNs > timeLimitNs {
+    log("READBACK TIMEOUT after {check.frames} frames")
+    ret false
+  }
+  ret true
+}
+
+# The MapRead buffer with its known bytes and the readback of it; false
+# when any of it could not be made.
+func startCheck(check: mod ReadbackCheck) ret Bool {
+  if let resources: mod GpuResources => check.resources {
+    if let buffer: BufferId = createBuffer(
+      resources: resources
+      size: readbackBytes
+      usage: WGPUBufferUsage_MapRead + WGPUBufferUsage_CopyDst
+    ) {
+      check.buffer = buffer
+      if writeBuffer(
+        resources: resources
+        id: buffer
+        offset: 0
+        bytes: filled(count: readbackBytes)
+      ) is false {
+        ret false
+      }
+      if let readback: ReadbackId = startReadback(
+        resources: resources
+        buffer: buffer
+        offset: 0
+        size: readbackBytes
+      ) {
+        check.readback = readback
+        ret true
+      }
+    }
+  }
+  ret false
+}
+
+func main() ret Int {
+  var bootstrapped: Int = 0
+  unsafe {
+    bootstrapped = webgpuBootstrap()
+  }
+  if bootstrapped is not 1 {
+    log("READBACK FAIL: no GPU")
+    ret 1
+  }
+  var issuer: IdIssuer = IdIssuer.create()
+  var check: ReadbackCheck = {
+    resources: GpuResources.create(issuer: issuer, capacity: 4)
+    buffer: { managerTag: 0, slot: -1, generation: 0 }
+    readback: { managerTag: 0, slot: -1, generation: 0 }
+    frames: 0
+    startedNs: nowNs()
+    passed: false
+  }
+  if startCheck(check: check) is false {
+    log("READBACK FAIL: could not start")
+    ret 1
+  }
+  mainLoop check {
+    if checkFrame(check: check) is false {
+      break
+    }
+  }
+  ret 0
+}
