@@ -45,7 +45,12 @@ change.
 
 ## Why parallel cases are safe (what was checked)
 
-* `rae run` writes `$TMPDIR/rae_compiled_<pid>.{c,bin}` — pid-unique.
+* `rae run` builds in its own scratch directory (`$TMPDIR/rae_run_XXXXXX`):
+  the generated C, the binary, and the runtime sources it copies next to
+  them. (Until 2026-10-06 it wrote `$TMPDIR/rae_compiled_<pid>.{c,bin}`,
+  which looked pid-unique, but it copied `rae_runtime.h` into `$TMPDIR` for
+  every run. Concurrent runs rewrote the one shared header while gcc read it,
+  so about 1 run in 100 failed under 20-way concurrency.)
 * A case's build cache lives in its own directory (`tests/cases/<x>/.rae/`).
 * The ONE shared write was `stats/test_history.json` (plus a `git log` per
   passed test) at the end of every `run_tests.sh` call. With 450 concurrent

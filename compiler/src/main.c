@@ -2886,6 +2886,23 @@ static int spawn_app_and_wait(const char* bin_path, int app_argc, char** app_arg
   return status;
 }
 
+/* Remove a `rae run` scratch directory: its files (the generated C, the
+ * binary, the runtime copies), then the directory. */
+static void remove_run_dir(const char* dir) {
+  DIR* d = opendir(dir);
+  if (d) {
+    struct dirent* ent;
+    while ((ent = readdir(d)) != NULL) {
+      if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
+      char path[PATH_MAX];
+      snprintf(path, sizeof(path), "%s/%s", dir, ent->d_name);
+      unlink(path);
+    }
+    closedir(d);
+  }
+  rmdir(dir);
+}
+
 static int run_compiled_file(const RunOptions* run_opts, const char* project_root) {
   char temp_c[PATH_MAX];
   char temp_bin[PATH_MAX];
@@ -2893,8 +2910,21 @@ static int run_compiled_file(const RunOptions* run_opts, const char* project_roo
   const char* tmp_dir = getenv("TMPDIR");
   if (!tmp_dir) tmp_dir = "/tmp";
 
-  snprintf(temp_c, sizeof(temp_c), "%s/rae_compiled_%d.c", tmp_dir, getpid());
-  snprintf(temp_bin, sizeof(temp_bin), "%s/rae_compiled_%d.bin", tmp_dir, getpid());
+  /* A private scratch directory per run. The backend writes the generated C
+   * here AND copies the runtime sources and headers next to it (the C file
+   * includes "rae_runtime.h" from its own directory). Writing those into the
+   * shared temp dir made concurrent runs - the test runner's parallel jobs -
+   * rewrite each other's rae_runtime.h while gcc read it: a truncated header
+   * failed the build with "unknown type name 'rae_String'" (seen ~1 run in
+   * 100 under 20-way concurrency). */
+  char run_dir[PATH_MAX];
+  snprintf(run_dir, sizeof(run_dir), "%s/rae_run_XXXXXX", tmp_dir);
+  if (!mkdtemp(run_dir)) {
+    fprintf(stderr, "error: could not create a scratch directory in '%s' (%s)\n", tmp_dir, strerror(errno));
+    return 1;
+  }
+  snprintf(temp_c, sizeof(temp_c), "%s/rae_compiled.c", run_dir);
+  snprintf(temp_bin, sizeof(temp_bin), "%s/rae_compiled.bin", run_dir);
 
   // Resolve the entry to an absolute path, then run the WHOLE pipeline (compile
   // + run) with cwd = project root. Module resolution and asset reads are both
@@ -2926,12 +2956,13 @@ static int run_compiled_file(const RunOptions* run_opts, const char* project_roo
   bool uses_sdl3 = false;
   bool uses_webgpu = false;
   if (!build_c_backend_output(file_path, project_root, temp_c, run_opts->no_implicit, &uses_sdl3, &uses_webgpu, NULL, PROGRESS_CC)) {
+    remove_run_dir(run_dir);
     if (chdired && have_saved) { if (chdir(saved_cwd) != 0) {} }
     return 1;
   }
 
   if (!gcc_link_c_to_binary(file_path, temp_c, temp_bin, uses_sdl3, uses_webgpu, run_opts->profile)) {
-    unlink(temp_c);
+    remove_run_dir(run_dir);
     if (chdired && have_saved) { if (chdir(saved_cwd) != 0) {} }
     return 1;
   }
@@ -2971,8 +3002,7 @@ static int run_compiled_file(const RunOptions* run_opts, const char* project_roo
   fflush(stderr);
 
   if (chdired && have_saved) { if (chdir(saved_cwd) != 0) { /* best effort */ } }
-  unlink(temp_c);
-  unlink(temp_bin);
+  remove_run_dir(run_dir);
 
   return (result == 0) ? 0 : 1;
 }
