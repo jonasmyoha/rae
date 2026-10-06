@@ -190,6 +190,38 @@ What is left:
 - The rest of the serial parts (state pass, contact creation, the
   moved-proxy merge) are serial in Box3D too.
 
+### 2d. Balancing collide's chunks (2026-10-06)
+
+Timing each collide chunk of the convex pile at 8 workers (temporary
+timers, µs per step) showed why its narrow phase scaled only 3.7x. Each
+TaskContext slot took a contiguous run of the contact list's blocks. The
+list holds every colour's touching contacts first and the cheap
+non-touching ones last, so chunks 0-2 took ~1 850 µs each, chunk 3 668,
+and chunks 4-31 ~170 each. The pool gives each worker a contiguous range of
+4 chunks, so chunks 0-3 all landed on the caller, which also runs the tree
+rebuild. Stealing could not even that out.
+
+`collideChunk` now deals the blocks round-robin: chunk c takes blocks c,
+c + chunkCount, and so on. The chunks then cost 170-490 µs, and the loop
+fell from 2 866 to 2 147 µs per step. A chunk only sets bits in its own
+state bitset (OR-ed afterwards) and uses its own scratch, so the result
+does not depend on which chunk ran a block. The checksums are identical at
+1, 2, 4 and 8 workers. Fixture 997, the oracle scene fixtures with 8
+workers forced, and the TSan gate pass.
+
+Measured interleaved with the build before (best of 3, load ~5-8):
+
+| scene | 4 workers before / after | 8 workers before / after |
+|---|---|---|
+| convex_pile | 6.35 / 5.27 | 5.21 / 4.05 |
+| large_pyramid | 3.67 / 3.61 | 2.96 / 3.00 |
+| many_pyramids | 6.83 / 6.84 | 5.28 / 5.40 (noise: 6.0-9.2 over 5 runs each) |
+| joint_grid | 3.85 / 3.84 | 3.33 / 3.19 |
+| rain | 1.93 / 1.92 | 1.70 / 1.67 |
+
+The convex pile now scales 4.1x at 8 workers (16.5 -> 4.05 ms), against
+Box3D's 4.6x.
+
 ## 3. What that means for the Rae port
 
 The port runs at `k` times Box3D's scalar C. P0 measured the access pattern
