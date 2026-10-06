@@ -232,52 +232,18 @@ func fillBatches(
   }
 }
 
-# Queue every body as a shadow caster, one kind after another, so each kind
-# is one contiguous run: one instanced draw per kind and cascade.
+# The bodies as shadow casters, straight from this frame's instance batches
+# (fillBatches runs first): one queue run per mesh, in the order the batches
+# are drawn. Capsules cast with the sphere mesh, as they always have.
 func queueShadowCasters(
   renderer: mod DeferredRenderer
   meshes: view PlaygroundMeshes
-  renderShapes: view ComponentTable(RenderShape)
-  transforms: view ComponentTable(Transform3D)
+  batches: view PlaygroundBatches
 ) {
-  loop var pass: Int = 0, pass < 4, ++pass {
-    loop var i: Int = 0, i < componentCount(this: renderShapes), ++i {
-      let entityId: EntityId = componentEntityAt(this: renderShapes, i: i)
-      if componentHas(this: transforms, entityId: entityId) is false {
-        continue
-      }
-      let shape: RenderShape = componentCopyAtDefault(this: renderShapes, i: i)
-      let transform: view Transform3D => componentView(this: transforms, entityId: entityId)
-      if pass is 0 and shape.kind is RenderKind.box {
-        drawShadowCasterWith(
-          renderer: renderer
-          mesh: meshes.box
-          model: bodyModel(transform: transform, scale: Vec3.vscale(a: shape.scale, s: 2.0))
-        )
-      }
-      if pass is 1 and shape.kind is RenderKind.sphere {
-        drawShadowCasterWith(
-          renderer: renderer
-          mesh: meshes.sphere
-          model: bodyModel(transform: transform, scale: shape.scale)
-        )
-      }
-      if pass is 2 and shape.kind is RenderKind.capsule {
-        drawShadowCasterWith(
-          renderer: renderer
-          mesh: meshes.sphere
-          model: bodyModel(transform: transform, scale: shape.scale)
-        )
-      }
-      if pass is 3 and shape.kind is RenderKind.wheel {
-        drawShadowCasterWith(
-          renderer: renderer
-          mesh: meshes.wheel
-          model: bodyModel(transform: transform, scale: shape.scale)
-        )
-      }
-    }
-  }
+  drawShadowCasterBatchWith(renderer: renderer, mesh: meshes.box, batch: batches.boxes)
+  drawShadowCasterBatchWith(renderer: renderer, mesh: meshes.sphere, batch: batches.spheres)
+  drawShadowCasterBatchWith(renderer: renderer, mesh: meshes.sphere, batch: batches.capsules)
+  drawShadowCasterBatchWith(renderer: renderer, mesh: meshes.wheel, batch: batches.wheels)
 }
 
 # The geometry pass: the ground, then each kind's batch as one draw.

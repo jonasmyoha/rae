@@ -333,6 +333,27 @@ func drawShadowCasterWith(
   }
 }
 
+# Every instance of `batch` as a shadow caster of `mesh` (the batch's own
+# mesh, or a stand-in such as a sphere for capsules): the models the G-buffer
+# draws, queued in one go.
+func drawShadowCasterBatchWith(
+  renderer: mod DeferredRenderer
+  mesh: view MeshHandle
+  batch: view InstanceBatch
+) {
+  if let resources: view GpuResources => renderer.gpuResources {
+    drawShadowCasterRecords(
+      shadow: renderer.passes.shadow
+      meshes: renderer.passes.gbuffer.meshes
+      resources: resources
+      mesh: mesh
+      records: batch.records
+      stride: instanceRecordFloats
+      count: batch.count
+    )
+  }
+}
+
 # A skinned shadow caster from this renderer's SkinStore; `paletteBase` is its
 # start row in the palette (characterPaletteBase, #547).
 func drawShadowCasterSkinnedWith(
