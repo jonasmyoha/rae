@@ -606,7 +606,7 @@ func renderDeferredPass(
   # #920); with a UI the 2D endFrame does it after the overlay.
   if tag is RenderTag.present {
     if renderer.hasUi {
-      Gpu2d.endFrame(canvas: renderer.canvas)
+      endUiFrameTimed(renderer: renderer)
     } else {
       presentFrame(canvas: renderer.canvas)
     }
@@ -739,6 +739,15 @@ func gpuPassMark(renderer: mod DeferredRenderer, tag: view Int) {
   }
 }
 
+# The UI-overlay frame's end (Gpu2d.endFrame) with a timing mark between the
+# 2D submit and the copy into the drawable, so the two are timed apart.
+func endUiFrameTimed(renderer: mod DeferredRenderer) {
+  if Gpu2d.endFrameSubmit(canvas: renderer.canvas) {
+    gpuPassMark(renderer: renderer, tag: passTimingCopyTag)
+    Gpu2d.endFramePresent(canvas: renderer.canvas)
+  }
+}
+
 func gpuPassTimingEnd(renderer: mod DeferredRenderer) {
   gpuPassMark(renderer: renderer, tag: -1)
 }
@@ -762,7 +771,7 @@ func renderTagName(tag: view Int) ret String {
       ret "composite"
     }
     case RenderTag.present {
-      ret "present (UI flush, copy to drawable)"
+      ret "present: 2D submit (UI flush)"
     }
     case RenderTag.uiOverlay {
       ret "ui overlay"
@@ -782,6 +791,9 @@ func renderTagName(tag: view Int) ret String {
     case RenderTag.underwater {
       ret "underwater"
     }
+  }
+  if tag is passTimingCopyTag {
+    ret "present: copy to drawable, present"
   }
   ret "pass {tag}"
 }
