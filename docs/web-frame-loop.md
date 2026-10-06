@@ -1,10 +1,11 @@
 # The browser frame loop: Asyncify, SIMD and a frame callback
 
-**Status (2026-10-06):** measured. The real browser slowdown was the missing
-WebAssembly SIMD, and that is fixed (`-msimd128`, §2). The frame-callback API
-that would replace Asyncify is designed here but **not implemented**: Rae has
-no function values, so every form of it is a new language or compiler rule,
-and that needs the maintainer's decision (§4).
+**Status (2026-10-06):** implemented, option B (§4). The real browser
+slowdown was the missing WebAssembly SIMD, and that is fixed (`-msimd128`,
+§2). An entry module may now declare `func setup() ret T` and
+`func frame(app: mod T) ret Bool` instead of `main`; the browser then calls
+`frame` once per animation frame, without the per-frame Asyncify yield (§6).
+122/123_physics_playground use it.
 
 ## 1. How a Rae app runs in the browser today
 
@@ -97,15 +98,76 @@ is less explicit than A (a reader has to know the rule).
 and ~17% size cost stay, and every app keeps its own loop exactly as
 written.
 
-**Recommendation: A**, because it is explicit at the call site and keeps one
-loop shape for native and web. It is not worth doing before the renderer's
-GPU frame (docs/physics-performance-plan.md §10) and WASM threads (backlog
-#245), which cost more in the browser than Asyncify does.
+**Decision (maintainer, 2026-10-06): B.** Rae keeps having no function
+values: a function passed as an argument is a pattern the language does not
+want, and an entry convention is the same kind of rule `main` already is. The
+state is one owned value, the ECS way (a world or app that systems take as
+`mod`), not a closure.
 
-## 5. Porting an example (after the decision)
+## 5. The entry convention
 
-122_physics_playground_port's `runWindowed` becomes `setup` (open the
-window, build the renderer, UI world, app and physics world into one
-`PlaygroundState`) and `playgroundFrame(state: mod PlaygroundState)
-ret Bool` (today's loop body; returns false where the loop would exit). The
-headless modes (determinism, scripted, scaling) keep their plain loops.
+An entry module (the file `rae run`/`build` is given) that has no `main` and
+declares
+
+```rae
+func setup() ret PlaygroundState { ... }
+func frame(state: mod PlaygroundState) ret Bool { ... }
+```
+
+gets a generated C `main` (`emit_frame_entry` in `compiler/src/c_backend.c`):
+
+- **Natively:** `state = setup(); while (frame(&state)) {}`, then the state
+  is dropped. The same program, the same loop it would have written.
+- **In the browser:** `setup` runs once, its result goes into a heap box, and
+  `emscripten_set_main_loop_arg` calls a generated trampoline each animation
+  frame. When `frame` returns false the loop is cancelled and the box dropped
+  and freed.
+- **Rules:** `setup` takes nothing and returns one value; `frame` takes one
+  `mod` parameter of that type and returns `Bool` (false ends the program).
+  Any other shape is a build error. A program with `main` is untouched: `main`
+  wins, so a module may still have functions called `setup` or `frame`.
+- **Headless modes** that run to an end (tests, benchmarks) stay plain
+  loops inside `setup` and finish with `Sys.exit(code:)`.
+
+122_physics_playground_port (and 123, the same file) moved its window loop
+into this form: `PlaygroundState` owns the renderer, the UI world and
+systems, the app, the physics world and the scene; `setup` builds it (the
+renderer's GPU handles are moved in under `unsafe`, never copied); `frame` is
+the old loop body and returns false where the loop used to `break`.
+
+## 6. The browser build of a setup/frame program
+
+The build sees the generated entry (its `RAE_FRAME_CALLBACK_ENTRY` marker)
+and links with:
+
+- `-DRAE_WEB_FRAME_CALLBACK`: `Gpu2d.pollClose` no longer awaits the next
+  animation frame, and the end-of-frame present poll does not block (the
+  browser paces the frames; natively it is still the blocking backpressure
+  poll).
+- `-sASYNCIFY_IGNORE_INDIRECT=1`: Asyncify stays only for the waits that are
+  still blocking (requesting the WebGPU adapter and device during `setup`),
+  which are direct calls.
+
+**Limit:** a blocking GPU readback (a buffer map waited on with
+`rae_wgpu_poll(1)`) cannot run inside `frame` in the browser, because a frame
+callback has no stack Asyncify can return to the browser through; it fails
+with "null function". A frame that needs one must request it and read it on a
+later frame. Programs with `main` keep the Asyncify loop and can still block.
+
+Measured as §2 (headless Chrome 154, 5 000 boxes, autofire, 300 frames, two
+interleaved runs each; the wall time per frame follows from the fixed steps
+taken at 60 Hz):
+
+| build | .wasm | fixed steps / 300 frames | wall per frame | physics per frame |
+|---|---|---|---|---|
+| `main` loop, Asyncify yield per frame | 2.52 MB | 449-467 | ~25 ms (~40 fps) | 16.8-17.3 |
+| `setup`/`frame` callback | 2.13 MB | 326-334 | ~18.6 ms (~54 fps) | 16.1-16.6 |
+
+The frame's own work is the same (~18.5 ms). The difference is the yield:
+the Asyncify loop unwinds to the browser and then waits for a fresh
+animation frame after the work, so a frame that overruns 16.7 ms loses most
+of the next one too. The callback returns, and the browser calls it again as
+soon as it can. The .wasm is 15% smaller, since indirect calls are no longer
+instrumented. (Physics per step is not comparable between the rows: the
+callback takes ~1.1 steps a frame against ~1.5, and the first step of a frame
+costs more.)

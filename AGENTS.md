@@ -411,7 +411,10 @@ Hard-won lesson (full postmortem: `rae/docs/ui-render-loop-performance.md`):
   Games already do this — classic `setTargetFPS(n)` + busy
   `loop not windowShouldClose()`.
 - Each app **owns its render loop** (`lib/ui` provides systems + the
-  `nextWaitTimeoutSec` policy, not the loop). If you add a new animation
+  `nextWaitTimeoutSec` policy, not the loop). An app that must run well in
+  the browser writes it as the `func setup() ret T` + `func frame(app: mod T)
+  ret Bool` entry instead of `main` (docs/web-frame-loop.md §5): natively the
+  same loop, in the browser a frame callback with no per-frame Asyncify yield. If you add a new animation
   source, feed it into the loop's "is animating" flag or it silently
   starves to the watcher-poll rate.
 - **Keep per-frame work O(n), never O(n²).** ECS component lookups are
