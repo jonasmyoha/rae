@@ -169,10 +169,11 @@ func physicsPullSystem(
 # Turn the step's contact begin/end, hit and sensor begin/end events into
 # entity events on the resource's queues (the venue's shapes report
 # noEntity). Physics never calls into the game: systems later in the
-# schedule read the queues.
+# schedule read the queues. The world's event lists are read in place:
+# getContactEvents/getSensorEvents copy them, which cost 6 List allocations
+# a step.
 func physicsEventSystem(physics: mod Physics) {
-  let contacts: ContactEvents = getContactEvents(world: physics.world)
-  loop let event: view ContactBeginTouchEvent in contacts.beginEvents {
+  loop let event: view ContactBeginTouchEvent in physics.world.contactBeginEvents {
     eventSend(
       this: physics.contactBegan
       value: PhysicsContactEvent {
@@ -183,18 +184,18 @@ func physicsEventSystem(physics: mod Physics) {
       }
     )
   }
-  loop let event: view ContactEndTouchEvent in contacts.endEvents {
-    eventSend(
-      this: physics.contactEnded
-      value: PhysicsContactEvent {
-        entityIdA: entityOfShape(physics: physics, shapeId: event.shapeIdA)
-        entityIdB: entityOfShape(physics: physics, shapeId: event.shapeIdB)
-        shapeIdA: event.shapeIdA
-        shapeIdB: event.shapeIdB
-      }
-    )
+  # The end events are double-buffered: this step's are in the buffer the
+  # index does not name (getContactEvents)
+  if physics.world.endEventArrayIndex is 1 {
+    loop let event: view ContactEndTouchEvent in physics.world.contactEndEvents0 {
+      sendContactEnded(physics: physics, event: event)
+    }
+  } else {
+    loop let event: view ContactEndTouchEvent in physics.world.contactEndEvents1 {
+      sendContactEnded(physics: physics, event: event)
+    }
   }
-  loop let event: view ContactHitEvent in contacts.hitEvents {
+  loop let event: view ContactHitEvent in physics.world.contactHitEvents {
     eventSend(
       this: physics.hits
       value: PhysicsHitEvent {
@@ -210,8 +211,7 @@ func physicsEventSystem(physics: mod Physics) {
       }
     )
   }
-  let sensors: SensorEvents = getSensorEvents(world: physics.world)
-  loop let event: view SensorBeginTouchEvent in sensors.beginEvents {
+  loop let event: view SensorBeginTouchEvent in physics.world.sensorBeginEvents {
     eventSend(
       this: physics.sensorBegan
       value: PhysicsSensorEvent {
@@ -222,17 +222,39 @@ func physicsEventSystem(physics: mod Physics) {
       }
     )
   }
-  loop let event: view SensorEndTouchEvent in sensors.endEvents {
-    eventSend(
-      this: physics.sensorEnded
-      value: PhysicsSensorEvent {
-        sensorEntityId: entityOfShape(physics: physics, shapeId: event.sensorShapeId)
-        visitorEntityId: entityOfShape(physics: physics, shapeId: event.visitorShapeId)
-        sensorShapeId: event.sensorShapeId
-        visitorShapeId: event.visitorShapeId
-      }
-    )
+  if physics.world.endEventArrayIndex is 1 {
+    loop let event: view SensorEndTouchEvent in physics.world.sensorEndEvents0 {
+      sendSensorEnded(physics: physics, event: event)
+    }
+  } else {
+    loop let event: view SensorEndTouchEvent in physics.world.sensorEndEvents1 {
+      sendSensorEnded(physics: physics, event: event)
+    }
   }
+}
+
+func sendContactEnded(physics: mod Physics, event: view ContactEndTouchEvent) {
+  eventSend(
+    this: physics.contactEnded
+    value: PhysicsContactEvent {
+      entityIdA: entityOfShape(physics: physics, shapeId: event.shapeIdA)
+      entityIdB: entityOfShape(physics: physics, shapeId: event.shapeIdB)
+      shapeIdA: event.shapeIdA
+      shapeIdB: event.shapeIdB
+    }
+  )
+}
+
+func sendSensorEnded(physics: mod Physics, event: view SensorEndTouchEvent) {
+  eventSend(
+    this: physics.sensorEnded
+    value: PhysicsSensorEvent {
+      sensorEntityId: entityOfShape(physics: physics, shapeId: event.sensorShapeId)
+      visitorEntityId: entityOfShape(physics: physics, shapeId: event.visitorShapeId)
+      sensorShapeId: event.sensorShapeId
+      visitorShapeId: event.visitorShapeId
+    }
+  )
 }
 
 # One fixed step: character, push, step, pull, events.

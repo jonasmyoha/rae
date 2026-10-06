@@ -29,6 +29,8 @@ func rae_sys_file_mtime(path: String) unsafe extern ret Float64
 
 func rae_sys_rss_kb() unsafe extern ret Int
 
+func rae_ext_rae_mem_alloc_total() unsafe extern ret Int
+
 func rae_crypto_argon2i(
   password: String
   salt: String
@@ -198,6 +200,16 @@ func fileModTime(path: view String) ret Float64 {
 func processRssKb() ret Int {
   unsafe {
     ret rae_sys_rss_kb()
+  }
+}
+
+# Heap allocations made through Rae since the program started: String bodies
+# and List/Buffer storage, a growing List's reallocation included. Always
+# counted (no env var). Sample it either side of some work: the difference is
+# what that work allocated, and a steady frame loop wants it to be 0.
+func allocationCount() ret Int {
+  unsafe {
+    ret rae_ext_rae_mem_alloc_total()
   }
 }
 

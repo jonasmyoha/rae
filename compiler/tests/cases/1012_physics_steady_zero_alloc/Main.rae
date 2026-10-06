@@ -1,0 +1,122 @@
+# A steady physics step allocates nothing (docs/physics-performance-plan.md
+# §10h). A pile of boxes with contact and hit events on, sleeping off so
+# every body stays awake, stepped through the ECS layer's physicsFrame (the
+# push, step, pull and event systems) and its event queues drained the way a
+# game does. After warm-up, when the world's pools have grown to fit, 120
+# steps must make no String or List allocation (Sys.allocationCount). The
+# event system used to copy the world's five event Lists every step.
+import Sys
+import Vec3
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open ecs/Event
+open ecs/Transform
+open physics/math/TransformMath
+open physics/dynamics/WorldTypes
+open physics/dynamics/WorldSettings
+open physics/ecs/Physics
+open physics/ecs/PhysicsComponents
+open physics/ecs/PhysicsSpawn
+open physics/ecs/PhysicsSystems
+
+type GameWorld {
+  allocator: EntityAllocator
+  transforms: ComponentTable(Transform3D)
+  rigidBodies: ComponentTable(RigidBody)
+  colliders: ComponentTable(Collider)
+  characters: ComponentTable(CharacterBody)
+  physics: Physics
+  contactsBegan: Int
+}
+
+func eventShapeDef() ret ShapeDef {
+  var def: ShapeDef = defaultShapeDef(lengthUnitsPerMeter: 1.0)
+  def.enableContactEvents = true
+  def.enableHitEvents = true
+  ret def
+}
+
+func spawnBox(world: mod GameWorld, position: view Vec3) {
+  let entityId: EntityId = allocEntity(this: world.allocator)
+  var def: BodyDef = defaultBodyDef(lengthUnitsPerMeter: 1.0)
+  def.bodyType = BodyType.dynamicBody
+  def.position = position
+  spawnRigidBody(
+    physics: world.physics
+    rigidBodies: world.rigidBodies
+    transforms: world.transforms
+    entityId: entityId
+    def: def
+  )
+  addBoxCollider(
+    physics: world.physics
+    rigidBodies: world.rigidBodies
+    colliders: world.colliders
+    entityId: entityId
+    def: eventShapeDef()
+    halfExtents: Vec3 { x: 0.5, y: 0.5, z: 0.5 }
+    transform: transformIdentity()
+  )
+}
+
+func buildWorld() ret GameWorld {
+  var world: GameWorld = {
+    allocator: createEntityAllocator()
+    transforms: createComponentTable(Transform3D)
+    rigidBodies: createComponentTable(RigidBody)
+    colliders: createComponentTable(Collider)
+    characters: createComponentTable(CharacterBody)
+    physics: createPhysics(def: defaultPhysicsWorldDef(), fixedStep: 1.0 / 60.0, subSteps: 4)
+    contactsBegan: 0
+  }
+  let groundId: ShapeId = addVenueBox(
+    physics: world.physics
+    def: eventShapeDef()
+    halfExtents: Vec3 { x: 20.0, y: 20.0, z: 0.5 }
+    transform: transformIdentity()
+  )
+  loop var i: Int = 0, i < 4, ++i {
+    loop var j: Int = 0, j < 4, ++j {
+      loop var k: Int = 0, k < 3, ++k {
+        spawnBox(
+          world: world
+          position: Vec3 {
+            x: (i as Float) * 1.1
+            y: (j as Float) * 1.1
+            z: 1.0 + (k as Float) * 1.05
+          }
+        )
+      }
+    }
+  }
+  enableWorldSleeping(world: world.physics.world, flag: false)
+  ret world
+}
+
+func stepOnce(world: mod GameWorld) {
+  let steps: Int = physicsFrame(
+    physics: world.physics
+    rigidBodies: world.rigidBodies
+    characters: world.characters
+    transforms: world.transforms
+    frameTime: 1.0 / 60.0
+  )
+  world.contactsBegan = world.contactsBegan + eventCount(this: world.physics.contactBegan)
+  advancePhysicsEvents(physics: world.physics)
+}
+
+func main() {
+  var world: GameWorld = buildWorld()
+  loop var step: Int = 0, step < 60, ++step {
+    stepOnce(world: world)
+  }
+  let before: Int = Sys.allocationCount()
+  loop var step: Int = 0, step < 120, ++step {
+    stepOnce(world: world)
+  }
+  let allocations: Int = Sys.allocationCount() - before
+  log("contacts began: {world.contactsBegan > 0}")
+  log("allocations in 120 steady steps: {allocations}")
+  destroyPhysics(physics: world.physics)
+}

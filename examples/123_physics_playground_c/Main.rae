@@ -28,6 +28,14 @@
 #                                    one SCALING line per count with the mean
 #                                    and median step ms
 #                                    (benchmarks/physics_scaling)
+#   RAE_PLAYGROUND_SPAWN=<bodies>    headless: the pyramid at <bodies>
+#                                    spawned at once into a fresh world; one
+#                                    SPAWN line with the spawn's and the first
+#                                    steps' ms and allocations against a
+#                                    steady step, and one ALLOC line with the
+#                                    allocations of 120 steady steps (0 is the
+#                                    goal: docs/physics-performance-plan.md
+#                                    §10h)
 # The window's settings (scene, body count, autofire, scene cycle, debug log)
 # are listed in lib/physicsScenes/PlaygroundApp.rae.
 # Headless screenshot, from the repository root:
@@ -168,6 +176,48 @@ func scalingCase(bodyCount: view Int, workerCount: view Int) {
   )
   log(
     "SCALING,{trackName},{bodyCount},{workerCount},{stats.bodyCount},{mean},{median},{stats.awakeBodyCount}"
+  )
+  destroyPlaygroundWorld(world: world)
+}
+
+# One step of `world`: its ms.
+func timedStep(world: mod PlaygroundWorld) ret Float {
+  let started: Int = nowNs()
+  let taken: Int = stepPlayground(world: world, frameTime: 1.0 / 60.0)
+  ret ((nowNs() - started) as Float) / 1000000.0
+}
+
+# The spawn hitch and the steady step's allocations, at `bodyCount` bodies
+# (sleeping off, so every body stays awake and every step does full work).
+func spawnCheck(bodyCount: view Int) {
+  var world: PlaygroundWorld = createPlaygroundWorld(workerCount: Parallel.workerCount())
+  setPlaygroundSleeping(world: world, enabled: false)
+  let scene: PhysicsScene = buildScene(index: 0, bodyCount: bodyCount)
+  let spawnAllocations: Int = Sys.allocationCount()
+  let spawnStarted: Int = nowNs()
+  spawnScene(world: world, scene: scene)
+  let spawnMs: Float = ((nowNs() - spawnStarted) as Float) / 1000000.0
+  let firstAllocations: Int = Sys.allocationCount()
+  let firstMs: Float = timedStep(world: world)
+  let secondMs: Float = timedStep(world: world)
+  let thirdMs: Float = timedStep(world: world)
+  let afterFirst: Int = Sys.allocationCount()
+  loop var step: Int = 3, step < 120, ++step {
+    let warmMs: Float = timedStep(world: world)
+  }
+  var steadyMs: List(Float) = List.create(Float, cap: 120)
+  let steadyAllocations: Int = Sys.allocationCount()
+  loop var step: Int = 0, step < 120, ++step {
+    steadyMs.add(value: timedStep(world: world))
+  }
+  let steadyAllocated: Int = Sys.allocationCount() - steadyAllocations
+  steadyMs.sort()
+  let median: Float = steadyMs.copyAtDefault(index: steadyMs.length / 2)
+  log(
+    "SPAWN,{trackName},{bodyCount},spawn {spawnMs} ms ({firstAllocations - spawnAllocations} allocations),first steps {firstMs} {secondMs} {thirdMs} ms ({afterFirst - firstAllocations} allocations),steady median {median} ms"
+  )
+  log(
+    "ALLOC,{trackName},{bodyCount},120 steady steps,{steadyAllocated} allocations from {steadyAllocations}"
   )
   destroyPlaygroundWorld(world: world)
 }
@@ -328,6 +378,11 @@ func main() ret Int {
   let scalingCounts: String = Sys.getEnv(name: "RAE_PLAYGROUND_SCALING")
   if scalingCounts.length() > 0 {
     scalingRun(counts: scalingCounts)
+    ret 0
+  }
+  let spawnBodies: String = Sys.getEnv(name: "RAE_PLAYGROUND_SPAWN")
+  if spawnBodies.length() > 0 {
+    spawnCheck(bodyCount: spawnBodies.toInt())
     ret 0
   }
   if Sys.getEnv(name: "RAE_PLAYGROUND_SCRIPTED").length() > 0 {

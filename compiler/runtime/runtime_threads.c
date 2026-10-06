@@ -181,11 +181,15 @@ void rae_ext_rae_chan_free(int64_t ch) {
  * own locals and the element of its own index, so the order iterations run in
  * cannot change any result).
  *
- * The pool: one thread per performance core minus one (the caller is the
- * last worker), started on the first parallelLoop, joined at exit.
- * `RAE_WORKERS=n` overrides the count; `RAE_WORKERS=1` runs every
- * parallelLoop sequentially on the caller. Efficiency cores are left out on
- * purpose: they would set the pace of every join.
+ * The pool: one worker per performance core but one, the caller being one
+ * of them, started on the first parallelLoop, joined at exit. The core left
+ * over is for the program's other threads (a renderer, the GPU driver, the
+ * window server): with every performance core in the pool, those preempt a
+ * worker in the middle of a chunk and the join waits out the time slice
+ * (docs/physics-performance-plan.md §10h). `RAE_WORKERS=n` overrides the
+ * count; `RAE_WORKERS=1` runs every parallelLoop sequentially on the caller.
+ * Efficiency cores are left out on purpose: they would set the pace of every
+ * join.
  *
  * One job at a time. The range is cut into fixed-size chunks (about four per
  * worker, so a slow worker is balanced by the others), claimed with one
@@ -292,6 +296,7 @@ static void rae_pcheck_new_launch(void) {
 #include <sched.h>
 #if defined(__APPLE__)
 #include <sys/sysctl.h>
+#include <pthread/qos.h>
 #endif
 
 #define RAE_POOL_MAX 64
@@ -357,6 +362,7 @@ static int rae_pool_default_workers(void) {
     long online = sysconf(_SC_NPROCESSORS_ONLN);
     n = online > 0 ? (int)online : 1;
   }
+  n = n > 1 ? n - 1 : 1;   /* leave one core to the program's other threads */
   return n > RAE_POOL_MAX ? RAE_POOL_MAX : n;
 }
 
@@ -446,11 +452,28 @@ static int rae_pool_start(void) {
   if (!g_pool.started) {
     g_pool.started = 1;
     int workers = rae_pool_default_workers();
+    /* The workers run at the launching thread's QoS class. macOS starts a
+     * new thread at DEFAULT, below an app's main thread (USER_INTERACTIVE),
+     * while that thread waits on them at every join: under CPU load from
+     * other processes a preempted worker then holds a chunk for a whole time
+     * slice and the join waits it out. The physics step spiked to 8-30 ms
+     * that way (docs/physics-performance-plan.md §10h: 184 steps over 8 ms
+     * in 1 200 frames at DEFAULT, 5 at the launcher's class). */
+    pthread_attr_t attributes;
+    pthread_attr_t* worker_attributes = NULL;
+    if (pthread_attr_init(&attributes) == 0) {
+      worker_attributes = &attributes;
+#if defined(__APPLE__)
+      qos_class_t launcher_qos = qos_class_self();
+      if (launcher_qos != QOS_CLASS_UNSPECIFIED) pthread_attr_set_qos_class_np(&attributes, launcher_qos, 0);
+#endif
+    }
     for (int i = 0; i < workers - 1; i++) {
-      if (pthread_create(&g_pool.threads[g_pool.thread_count], NULL, rae_pool_worker,
+      if (pthread_create(&g_pool.threads[g_pool.thread_count], worker_attributes, rae_pool_worker,
                          (void*)(intptr_t)(i + 1)) != 0) break;
       g_pool.thread_count++;
     }
+    if (worker_attributes) pthread_attr_destroy(worker_attributes);
     atexit(rae_pool_shutdown);
   }
   int count = g_pool.thread_count + 1;
