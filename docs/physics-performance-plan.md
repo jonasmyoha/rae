@@ -125,6 +125,16 @@ What it shows:
 
   At 8 workers that is 1.18x Box3D's 1.52 ms. Every benchmark checksum and
   fixtures 970-983, 996 and 997 are unchanged.
+- **Sleep, wake and destroy no longer copy whole contacts (2026-10-06).**
+  Walking a body's contact list read each contact with `copyAtDefault`,
+  which deep-copied its manifolds and triangle cache. Those walks are in
+  island sleep and wake, shape destruction and joint creation. They now
+  read a `ContactLinks` record (`dynamics/Contact.rae`) that holds the
+  edges, shape ids, set placement and flags. Rain allocations per steady
+  step fell from 209 to 110. The rest is list growth for brand-new contact
+  slots (a reused slot keeps its buffers, so reserving capacity would only
+  move one allocation) and the scene's body and joint creation. Step time
+  did not change, because sleep and wake are not hot.
 
 ## 3. What that means for the Rae port
 

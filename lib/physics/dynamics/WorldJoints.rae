@@ -39,9 +39,9 @@ func destroyContactsBetweenBodies(world: mod PhysicsWorld, bodyIdA: view Int, bo
   loop contactKey is not -1 {
     let contactId: Int = contactKey shr 1
     let edgeIndex: Int = contactKey bitand 1
-    let contact: Contact = world.contacts.copyAtDefault(index: contactId)
-    contactKey = contactEdge(contact: contact, edgeIndex: edgeIndex).nextKey
-    if contactEdge(contact: contact, edgeIndex: edgeIndex bitxor 1).bodyId is otherBodyId {
+    let contact: ContactLinks = contactLinksAt(contacts: world.contacts, contactId: contactId)
+    contactKey = linksEdge(links: contact, edgeIndex: edgeIndex).nextKey
+    if linksEdge(links: contact, edgeIndex: edgeIndex bitxor 1).bodyId is otherBodyId {
       # Careful: this removes the contact from the list being walked
       destroyContact(world: world, contactId: contactId, wakeBodies: false)
     }

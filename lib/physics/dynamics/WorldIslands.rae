@@ -359,8 +359,8 @@ func wakeSolverSet(world: mod PhysicsWorld, setIndex: view Int) {
     loop contactKey is not -1 {
       let edgeIndex: Int = contactKey bitand 1
       let contactId: Int = contactKey shr 1
-      let contact: Contact = world.contacts.copyAtDefault(index: contactId)
-      contactKey = contactEdge(contact: contact, edgeIndex: edgeIndex).nextKey
+      let contact: ContactLinks = contactLinksAt(contacts: world.contacts, contactId: contactId)
+      contactKey = linksEdge(links: contact, edgeIndex: edgeIndex).nextKey
       if contact.setIndex is not disabledSet {
         # An awake non-touching contact needs its body sim index fixed here
         if contact.setIndex is awakeSet {
@@ -517,8 +517,8 @@ func trySleepIsland(world: mod PhysicsWorld, islandId: view Int) {
     loop contactKey is not -1 {
       let contactId: Int = contactKey shr 1
       let edgeIndex: Int = contactKey bitand 1
-      let contact: Contact = world.contacts.copyAtDefault(index: contactId)
-      contactKey = contactEdge(contact: contact, edgeIndex: edgeIndex).nextKey
+      let contact: ContactLinks = contactLinksAt(contacts: world.contacts, contactId: contactId)
+      contactKey = linksEdge(links: contact, edgeIndex: edgeIndex).nextKey
       if contact.colorIndex is not -1 {
         # Touching: moved separately below
         continue
@@ -528,7 +528,7 @@ func trySleepIsland(world: mod PhysicsWorld, islandId: view Int) {
       }
       # The other body may still be awake; when it falls asleep it moves the
       # contact to the disabled set.
-      let otherBodyId: Int = contactEdge(contact: contact, edgeIndex: edgeIndex bitxor 1).bodyId
+      let otherBodyId: Int = linksEdge(links: contact, edgeIndex: edgeIndex bitxor 1).bodyId
       if bodyAt(world: world, bodyId: otherBodyId).setIndex is awakeSet {
         continue
       }
@@ -549,7 +549,7 @@ func trySleepIsland(world: mod PhysicsWorld, islandId: view Int) {
   # Move the touching contacts to the sleeping set (this shuffles the graph)
   loop var i: Int = 0, i < island.contacts.length, ++i {
     let contactId: Int = island.contacts.copyAtDefault(index: i).contactId
-    let contact: Contact = world.contacts.copyAtDefault(index: contactId)
+    let contact: ContactLinks = contactLinksAt(contacts: world.contacts, contactId: contactId)
     let colorIndex: Int = contact.colorIndex
     var movedId: Int = -1
     if let color: mod GraphColor => world.constraintGraph.colors.modAt(index: colorIndex) {

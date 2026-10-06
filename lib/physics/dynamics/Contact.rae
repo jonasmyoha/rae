@@ -211,6 +211,54 @@ func zeroContactWithLists(
 }
 
 # `contact->edges[edgeIndex]`
+# A contact's links and set placement without its lists, for the walks over
+# a body's contacts that move or destroy them (copying the whole Contact
+# would copy its manifolds and triangle cache).
+type ContactLinks {
+  edgeA: ContactEdge
+  edgeB: ContactEdge
+  shapeIdA: Int
+  shapeIdB: Int
+  setIndex: Int
+  colorIndex: Int
+  localIndex: Int
+  flags: Int
+}
+
+# Contact `contactId`'s links (all zero for an index out of range, as
+# copyAtDefault gives).
+func contactLinksAt(contacts: view List(Contact), contactId: view Int) ret ContactLinks {
+  if let contact: view Contact => contacts.viewAt(index: contactId) {
+    ret ContactLinks {
+      edgeA: contact.edgeA
+      edgeB: contact.edgeB
+      shapeIdA: contact.shapeIdA
+      shapeIdB: contact.shapeIdB
+      setIndex: contact.setIndex
+      colorIndex: contact.colorIndex
+      localIndex: contact.localIndex
+      flags: contact.flags
+    }
+  }
+  ret ContactLinks {
+    edgeA: zeroContactEdge()
+    edgeB: zeroContactEdge()
+    shapeIdA: 0
+    shapeIdB: 0
+    setIndex: 0
+    colorIndex: 0
+    localIndex: 0
+    flags: 0
+  }
+}
+
+func linksEdge(links: view ContactLinks, edgeIndex: view Int) ret ContactEdge {
+  if edgeIndex is 0 {
+    ret links.edgeA
+  }
+  ret links.edgeB
+}
+
 func contactEdge(contact: view Contact, edgeIndex: view Int) ret ContactEdge {
   if edgeIndex is 0 {
     ret contact.edgeA
