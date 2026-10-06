@@ -420,7 +420,10 @@ render must fit 8.3 ms on those frames, with transforms interpolated between
 steps on the others. The alternative is a 120 Hz step with 2 substeps (about
 the same solver work per second, twice the collision work). The performance
 pass on the example measures both and picks one; the overlap of item 5's
-nice-to-have removes the question.
+nice-to-have removes the question. **Picked (§10f): the 60 Hz step with
+interpolated poses.** A 120 Hz step with 2 sub-steps costs ~1.5x the CPU per
+second and only lowers the per-frame peak, which does not matter while the
+frame is GPU-bound.
 
 ## 7. The determinism rule
 
@@ -666,4 +669,60 @@ What the curves show:
 - **The 4 ms budget** at 8 workers holds to ~6 000 bodies on the port and
   ~9 000 on Box3D. 5 000 awake bodies (§6's target) is 2.9 ms on the port
   and 2.2 ms on Box3D.
+
+### 10f. 120 Hz: the step rate, the window and async physics (2026-10-06)
+
+Two new switches for this:
+- `RAE_PLAYGROUND_WINDOW=x,y,w,h` places and sizes the playground window. The
+  built-in 120 Hz panel sits left of the 60 Hz main monitor:
+  `-1628,675,1280,800` opens on it.
+- `RAE_PLAYGROUND_STEP=<hz>,<subSteps>` sets the fixed step, 60,4 by default
+  (`physicsScenes/SceneTypes.playgroundStepRate`).
+
+**The step rate.** Headless (`RAE_PLAYGROUND_SCALING`, sleeping off, 8
+workers, best of three interleaved), ms per fixed step and per simulated
+second:
+
+| track, bodies | 60 Hz x 4 sub-steps | 120 Hz x 2 sub-steps | 120 Hz / 60 Hz per second |
+|---|---|---|---|
+| port, 5 000 | 3.38 (203 ms/s) | 2.62 (315 ms/s) | 1.55x |
+| port, 10 000 | 6.84 (411 ms/s) | 5.20 (624 ms/s) | 1.52x |
+| Box3D C, 5 000 | 2.49 (149 ms/s) | 1.78 (213 ms/s) | 1.43x |
+| Box3D C, 10 000 | 4.90 (294 ms/s) | 3.58 (430 ms/s) | 1.46x |
+
+A 120 Hz step costs ~1.5x the CPU per second: collision runs twice as
+often, and halving the sub-steps does not halve the step. Its only gain is
+a lower peak per frame: 2.6 ms every frame against 3.4 ms every other
+frame.
+
+**The frame on the 120 Hz panel.** Port playground, 5 000 boxes, autofire,
+8 workers, RAE_PLAYGROUND_PROFILE, ms per frame:
+
+| run | whole frame | present (waits for the GPU) | physics |
+|---|---|---|---|
+| 1280 x 800 points (2560 x 1600 px), no vsync | 11.3 | 7.2 | 1.8 |
+| 960 x 600 points (1920 x 1200 px), no vsync | 7.6 | 3.9 | 1.5 |
+| 1280 x 800, vsync at 120 Hz, 60 Hz step | 9.4 (~106 fps) | 5.9 | 1.3 |
+| 1280 x 800, vsync at 120 Hz, 120 Hz x 2 step | 10.1 (~99 fps) | 5.9 | 1.9 |
+
+- **A smaller window reaches 120 Hz.** At 1920 x 1200 px the frame
+  averages 7.6 ms. The GPU cost follows the pixel count (~4.1 MP: ~11 ms;
+  ~2.3 MP: ~7.6 ms), so the deferred renderer's full-screen passes are the
+  bottleneck, not the 5 000 instances. At the default size the frame stays
+  GPU-bound and misses 8.3 ms until the renderer is fixed (the per-pass GPU
+  timing task, queued; a render scale would also do it).
+- **The pick (§6): a 60 Hz step with interpolated poses.** The playgrounds
+  already interpolate (PoseBlend). The 120 Hz step costs ~1.5x the CPU and
+  made the frame slower (10.1 against 9.4 ms), because the frame is
+  GPU-bound and the extra step work only adds to it. Its lower per-frame
+  peak would matter only in a CPU-bound frame. The worst frames in both
+  runs are the port's step spikes (queued separately), not the step rate.
+- **Stepping physics on the workers while the main thread renders the
+  previous poses (double-buffered transforms) is not worth queueing now.**
+  The GPU already overlaps the CPU: a frame takes max(CPU, GPU). The CPU
+  part is ~3.4-3.7 ms (physics 1.3-1.8 of it), well under the GPU's 6-9 ms
+  even in the small window. Taking physics off the main thread would not
+  move the frame. Revisit when the renderer's GPU frame drops below the
+  CPU frame, or if the step spikes stay after their fix: async stepping
+  would hide a spike behind the previous poses.
 

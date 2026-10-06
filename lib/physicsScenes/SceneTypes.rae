@@ -4,6 +4,7 @@
 # port's physics/ecs or the C library's box3d/ecs) in a thin adapter, so the
 # two examples of a program run the same scene and print the same hash. World
 # convention: Z-up (docs/coordinate-system.md), ground top at z = 0.
+import Sys
 open Vec3
 open Quat
 open Mesh3d
@@ -165,4 +166,26 @@ func applyGradientHues(bodies: mod List(SceneBody), along: view Vec3) {
       }
     }
   }
+}
+
+# The playgrounds' fixed step: how often physics steps per second and with
+# how many sub-steps. 60 Hz with 4 sub-steps by default;
+# RAE_PLAYGROUND_STEP=<hz>,<subSteps> picks another (120,2 for the 120 Hz
+# comparison, docs/physics-performance-plan.md §10f).
+type StepRate {
+  hertz: Int
+  subSteps: Int
+}
+
+func playgroundStepRate() ret StepRate {
+  var rate: StepRate = { hertz: 60, subSteps: 4 }
+  let setting: List(String) = Sys.getEnv(name: "RAE_PLAYGROUND_STEP").split(sep: ",")
+  if setting.length is 2 {
+    let hertz: Int = setting.copyAtDefault(index: 0).toInt()
+    let subSteps: Int = setting.copyAtDefault(index: 1).toInt()
+    if hertz > 0 and subSteps > 0 {
+      rate = StepRate { hertz: hertz, subSteps: subSteps }
+    }
+  }
+  ret rate
 }
