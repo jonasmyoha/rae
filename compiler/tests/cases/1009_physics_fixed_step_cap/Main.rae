@@ -1,0 +1,117 @@
+# The fixed-step accumulator never spirals (docs/physics-performance-plan.md
+# §10g). A frame costs its render plus the fixed steps it takes, and its
+# length is the next frame's time to pay for; when a step costs more than the
+# frame can spare, every extra step a frame owes makes it longer still. The
+# cap on steps per frame (the default 2: at most one catch-up step) bounds
+# that: whole steps still owed past the cap are dropped (the fraction of a
+# step is kept), so the simulation runs slower than real time instead of the
+# frames growing. Modelled here with a 9 ms render
+# and consumeFixedSteps itself, at the old cap (4) and the default.
+open physics/ecs/Physics
+
+const renderMs: Float = 9.0
+
+const frameCount: Int = 120
+
+# Frames 0..frameCount at `stepMs` per fixed step (`hitchMs` added to frame
+# 10, a one-off stall): the worst frame after frame 10, the steps that frame
+# took, and how much simulated time each real second gets.
+func runModel(
+  name: view String
+  maxSteps: view Int
+  stepMs: view Float
+  hitchMs: view Float
+) {
+  var physics: Physics = createPhysics(
+    def: defaultPhysicsWorldDef()
+    fixedStep: 1.0 / 60.0
+    subSteps: 4
+  )
+  if maxSteps > 0 {
+    physics.maxStepsPerFrame = maxSteps
+  }
+  var frameSeconds: Float = 1.0 / 60.0
+  var worstMs: Float = 0.0
+  var worstSteps: Int = 0
+  var realSeconds: Float = 0.0
+  var simulatedSeconds: Float = 0.0
+  loop var frame: Int = 0, frame < frameCount, ++frame {
+    let steps: Int = consumeFixedSteps(physics: physics, frameTime: frameSeconds)
+    var frameMs: Float = renderMs + (steps as Float) * stepMs
+    if frame is 10 {
+      frameMs = frameMs + hitchMs
+    }
+    if frame > 10 {
+      if frameMs > worstMs {
+        worstMs = frameMs
+        worstSteps = steps
+      }
+      realSeconds = realSeconds + frameMs / 1000.0
+      simulatedSeconds = simulatedSeconds + (steps as Float) * physics.fixedStep
+    }
+    frameSeconds = frameMs / 1000.0
+  }
+  let speed: Float = Math.round(x: simulatedSeconds / realSeconds * 100.0) / 100.0
+  log(
+    "{name}, cap {physics.maxStepsPerFrame}: worst frame {worstMs} ms ({worstSteps} steps), simulated/real {speed}"
+  )
+  destroyPhysics(physics: physics)
+}
+
+func main() {
+  # The default cap, so a change to it shows here
+  runModel(
+    name: "default"
+    maxSteps: 0
+    stepMs: 3.0
+    hitchMs: 0.0
+  )
+  runModel(
+    name: "3 ms steps"
+    maxSteps: 4
+    stepMs: 3.0
+    hitchMs: 0.0
+  )
+  runModel(
+    name: "3 ms steps"
+    maxSteps: 2
+    stepMs: 3.0
+    hitchMs: 0.0
+  )
+  runModel(
+    name: "12 ms steps"
+    maxSteps: 4
+    stepMs: 12.0
+    hitchMs: 0.0
+  )
+  runModel(
+    name: "12 ms steps"
+    maxSteps: 2
+    stepMs: 12.0
+    hitchMs: 0.0
+  )
+  runModel(
+    name: "20 ms steps"
+    maxSteps: 4
+    stepMs: 20.0
+    hitchMs: 0.0
+  )
+  runModel(
+    name: "20 ms steps"
+    maxSteps: 2
+    stepMs: 20.0
+    hitchMs: 0.0
+  )
+  runModel(
+    name: "a 100 ms hitch"
+    maxSteps: 4
+    stepMs: 3.0
+    hitchMs: 100.0
+  )
+  runModel(
+    name: "a 100 ms hitch"
+    maxSteps: 2
+    stepMs: 3.0
+    hitchMs: 100.0
+  )
+}
