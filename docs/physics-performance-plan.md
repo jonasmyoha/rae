@@ -600,3 +600,37 @@ What is left is fixed cost per frame, not per caster. The shadow pass
 uploads the same model matrices the G-buffer's instance buffer already holds,
 and submits on its own instead of in the frame's submission (queued).
 
+### 10d. The shadow pass's submission and model upload: not worth sharing (2026-10-06)
+
+§10c left two per-frame costs in the shadow lap: the pass's own queue
+submission (~0.17 ms; polling is 0.003 ms) and the 320 KB model upload
+(0.095 ms). This measured whether to remove them:
+- **The submission.** The shadow cascades were recorded into the G-buffer
+  pass's recording and submitted with it. The G-buffer kept the shadow
+  pass's unsubmitted recording and opened its geometry pass in it.
+  Measured with RAE_PLAYGROUND_PROFILE, port playground, 5 000 boxes,
+  autofire, ms per frame:
+
+  | | shadow lap | gbuffer lap | together |
+  |---|---|---|---|
+  | separate submissions (§10c) | 0.48-0.50 | 0.24-0.27 | 0.74-0.77 |
+  | one submission | 0.33-0.37 | 0.37-0.42 | 0.70-0.79 |
+
+  The cost moved with the work instead of disappearing. Committing a
+  command buffer costs in proportion to what was encoded into it, so one
+  submission instead of two saves nothing measurable. It was reverted: a
+  carried recording across two modules is not worth ~0.03 ms.
+- **The model upload.** Sharing the G-buffer's instance buffer would save
+  at most the 0.095 ms upload. It would need a third shadow pipeline and
+  shader that read the G-buffer's 160-byte draw records, and the shadow
+  cascades encoded after the geometry pass, so the records' offsets are
+  known. Static and skinned casters from other apps would keep the
+  current path. Not done: too much machinery for 0.1 ms in a frame that
+  is GPU-bound at ~8 ms (§10, §10b).
+
+The trial also turned up a compiler bug, queued: `own` moving out of an
+`opt` field (`cache.recording = own cache.carried`) copies the value
+without emptying the source, so assigning the source afterwards frees what
+the destination still holds. A `List` field is moved correctly (the
+source is zeroed).
+
