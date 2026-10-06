@@ -5,7 +5,8 @@
  * here and its results copied into arrays the caller owns, and each event
  * array is read one element at a time. tools/box3d/build.sh compiles this
  * into libbox3d.a and installs this header next to Box3D's. No state lives
- * here: everything is passed in. */
+ * here: everything is passed in, apart from the task system behind a
+ * handle the caller owns (like the mesh and hull handles). */
 #ifndef RAE_BOX3D_GLUE_H
 #define RAE_BOX3D_GLUE_H
 
@@ -55,5 +56,22 @@ void rae_b3DestroyHull( uint64_t hull );
 uint64_t rae_b3CreateHeightField( const b3HeightFieldDef* def );
 b3ShapeId rae_b3CreateHeightFieldShape( b3BodyId bodyId, const b3ShapeDef* def, uint64_t heightField );
 void rae_b3DestroyHeightField( uint64_t heightField );
+
+/* A task system for a world, owned by the caller (one per world). Box3D's
+ * built-in scheduler starts its threads at macOS QoS DEFAULT, below an app's
+ * main thread, which waits on them every step; under CPU load a worker
+ * preempted mid-task then stalls the step for a time slice
+ * (docs/physics-performance-plan.md §10h). These threads start at the
+ * creating thread's QoS class; otherwise the scheduling is Box3D's own:
+ * a worker claims any pending task, and the waiting thread runs pending
+ * tasks itself. `workerCount` counts the calling thread, so it starts
+ * `workerCount - 1` threads. Returns 0 for a worker count below 2. */
+uint64_t rae_b3CreateTaskSystem( int workerCount );
+void rae_b3DestroyTaskSystem( uint64_t taskSystem );
+
+/* b3CreateWorld with `taskSystem` (from rae_b3CreateTaskSystem, or 0 for
+ * Box3D's own threads) as its enqueueTask/finishTask. The task system must
+ * outlive the world. */
+b3WorldId rae_b3CreateWorldWithTasks( const b3WorldDef* def, uint64_t taskSystem );
 
 #endif

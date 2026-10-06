@@ -857,9 +857,32 @@ and without 6 CPU burners at the default QoS class (`perl -e '1 while 1'`).
   boxes, 7 and 8 workers are level within noise (2.7-3.2 against 3.0-3.1 ms;
   5.8-6.4 against 6.0-6.2 ms), and in the window 7 is faster. `RAE_WORKERS`
   still sets any count.
-- Box3D's built-in scheduler (track B) creates its threads at DEFAULT and
-  Rae cannot reach them without patching upstream, so track B keeps its
-  spikes under load; it uses the same 7 workers (`Parallel.workerCount()`).
+- Box3D's built-in scheduler (track B) created its threads at DEFAULT, out
+  of Rae's reach without patching upstream. Track B now brings its own task
+  system instead (`rae_b3CreateTaskSystem` in `tools/box3d/rae_glue.c`, owned
+  by the `Physics` resource and plugged in through the world definition's
+  `enqueueTask`/`finishTask`). It keeps Box3D's scheduling exactly (a worker
+  claims any pending task; the waiting thread runs pending tasks itself) and
+  changes only the threads' QoS class, to the creating thread's. Same 7
+  workers, the same transform hashes at 1 and 7 workers.
+
+Both tracks after it, windowed, same setup, 1 200 frames:
+
+| run | spikes | step avg / worst (ms) |
+|---|---|---|
+| Box3D C, its own scheduler, 6 burners (before) | 120 | 3.02 / 52.0 |
+| Box3D C, the glue's task system, 6 burners | 46, 11 | 1.66-2.14 / 11.7-21.5 |
+| port, same session, 6 burners | 4 | 1.58 / 13.3 |
+| Box3D C, the glue's task system, no burners (load ~8) | 1, 1 | 0.87-0.99 / 10.8-11.4 |
+| port, same session, no burners | 3 | 1.17 / 13.4 |
+
+Under load track B still spikes more than the port, and the scheduler is
+not the reason. The port's join waits until every chunk of work is done, so
+a worker that is preempted while it holds nothing costs nothing. Box3D's
+step instead waits for every worker's task to return (`finishTask` on each
+`b3SolverTask`), so a worker preempted just before it returns still costs a
+time slice when no work is left. That is Box3D's design; a task system
+cannot finish a task for it.
 
 **The 1 000-body spawn.** `RAE_PLAYGROUND_SPAWN=1000` (new, headless):
 spawning the pyramid at once into a fresh world (sleeping off), then its
