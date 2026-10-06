@@ -169,7 +169,7 @@ static void rae_install_crash_handler(void) {
   if (getenv("RAE_NO_CRASH_HANDLER")) return;
   /* `rae run` executes a temporary binary; it passes the source entry it
    * stands for in RAE_PROGRAM so the crash line names the program the
-   * reader has open, not rae_compiled_<pid>.bin. A `rae build` binary has
+   * reader has open, not rae_compiled.bin. A `rae build` binary has
    * no such variable and is named after argv[0] (rae_runtime_set_args). */
   const char* program = getenv("RAE_PROGRAM");
   if (program && program[0]) g_rae_program_name = program;
