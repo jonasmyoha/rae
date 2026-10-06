@@ -333,18 +333,14 @@ func collideChunk(
   blockSize: view Int
   blockCount: view Int
 ) {
+  # The blocks are dealt round-robin (chunk c takes blocks c, c +
+  # chunkCount, ...). The contact list holds every colour's touching
+  # contacts first and the cheap non-touching ones last, so a contiguous run
+  # of blocks could cost ten times another, more than the pool's stealing
+  # can even out.
   let chunkCount: Int = world.taskContexts.length
-  let firstBlock: Int = chunkFirstBlock(
-    chunk: chunk
-    chunkCount: chunkCount
-    blockCount: blockCount
-  )
-  let endBlock: Int = chunkFirstBlock(
-    chunk: chunk + 1
-    chunkCount: chunkCount
-    blockCount: blockCount
-  )
-  loop var block: Int = firstBlock, block < endBlock, ++block {
+  var block: Int = chunk
+  loop block < blockCount {
     collideTask(
       world: world
       contactIndices: contactIndices
@@ -356,6 +352,7 @@ func collideChunk(
       )
       workerIndex: chunk
     )
+    block = block + chunkCount
   }
 }
 
