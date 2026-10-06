@@ -377,10 +377,14 @@ each captured local under its own name and C type, so the body's C is exactly
 what it would be inline; it owns nothing, so nothing is dropped twice. Each
 call has its own String-pool mark (the pool is per thread).
 
-**The pool** (`runtime_threads.c`). Workers = performance cores
-(`hw.perflevel0.physicalcpu` on macOS, 8 on the M1 Max; efficiency cores would
-pace every join), the launching thread being one of them, started on the
-first parallelLoop, joined at exit. `RAE_WORKERS=n` sets the count;
+**The pool** (`runtime_threads.c`). Workers = performance cores minus one
+(`hw.perflevel0.physicalcpu` on macOS, so 7 on the M1 Max's 8; efficiency
+cores would pace every join), the launching thread being one of them, started
+on the first parallelLoop, joined at exit. The core left over is for the
+program's other threads (renderer, GPU driver, window server), which otherwise
+preempt a worker mid-chunk and stall the join; the workers run at the
+launching thread's QoS class (2026-10-06, docs/physics-performance-plan.md
+§10h). `RAE_WORKERS=n` sets the count;
 `RAE_WORKERS=1` runs every parallelLoop sequentially. One job at a time: the
 range is cut into about four chunks per worker, claimed through one atomic
 word that packs the job's generation with the next chunk index (a worker late
