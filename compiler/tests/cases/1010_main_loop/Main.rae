@@ -1,0 +1,30 @@
+type App {
+  frameCount: Int
+  history: List(Int)
+  name: String
+}
+
+const lastFrame: Int = 3
+
+func createApp() ret App {
+  log("setup")
+  ret App { frameCount: 0, history: List.create(Int, cap: 2), name: "main loop {1}" }
+}
+
+func main() ret Int {
+  var app: App = createApp()
+  mainLoop app {
+    app.frameCount = app.frameCount + 1
+    let label: String = "frame {app.frameCount}"
+    if app.frameCount is 2 {
+      app.history.add(value: 0)
+      continue
+    }
+    app.history.add(value: app.frameCount * 10)
+    log("{label}, history {app.history.length}, {app.name}")
+    if app.frameCount >= lastFrame {
+      break
+    }
+  }
+  ret 0
+}

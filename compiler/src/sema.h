@@ -34,6 +34,8 @@ AstBlock* reflect_instantiate_body(CompilerContext* ctx, const AstModule* module
 AstTypeRef* infer_generic_args(CompilerContext* ctx, const AstFuncDecl* func, const AstTypeRef* pattern, const AstTypeRef* concrete_type);
 AstTypeRef* infer_generic_args_multi(CompilerContext* ctx, const AstFuncDecl* func, const AstTypeRef** patterns, const AstTypeRef** concretes, size_t pair_count);
 Str get_base_type_name(const AstTypeRef* type);
+// `mainLoop` placement, state and body rules (sema_main_loop.c).
+void sema_check_main_loops(AstModule* module, const char* file, const AstFuncDecl* func);
 Str get_decl_name(const AstDecl* d);
 
 #endif // RAE_SEMA_H
