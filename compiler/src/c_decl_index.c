@@ -29,6 +29,8 @@ typedef struct {
   /* The first non-generic, non-extern unary `drop` / `copy` taking this type */
   size_t firstDrop;
   size_t firstCopy;
+  /* The first module-level `let`/`var` of this name */
+  size_t firstGlobal;
   /* Every function of this name, as all_decls indexes in list order */
   size_t* functions;
   size_t functionCount;
@@ -169,6 +171,14 @@ static void index_decl(const AstDecl* decl, size_t position) {
     index_unary(decl, position);
     return;
   }
+  if (decl->kind == AST_DECL_GLOBAL_LET) {
+    Str global = decl->as.let_decl.name;
+    if (!global.data) return;
+    if ((g_decl_index.nameCount + 1) * 2 > g_decl_index.nameCap) grow_names();
+    DeclNameEntry* entry = name_slot(global, true);
+    if (!entry->firstGlobal) entry->firstGlobal = position + 1;
+    return;
+  }
   Str name;
   if (decl->kind == AST_DECL_TYPE) name = decl->as.type_decl.name;
   else if (decl->kind == AST_DECL_ENUM) name = decl->as.enum_decl.name;
@@ -248,6 +258,12 @@ const AstDecl* decl_index_find_type(const CompilerContext* ctx, Str name, bool t
 
 const AstDecl* decl_index_find_enum(const CompilerContext* ctx, Str name) {
   return lookup(ctx, name, 2);
+}
+
+const AstDecl* decl_index_find_global(const CompilerContext* ctx, Str name) {
+  decl_index_sync(ctx);
+  DeclNameEntry* entry = name_slot(name, false);
+  return entry && entry->firstGlobal ? ctx->all_decls[entry->firstGlobal - 1] : NULL;
 }
 
 /* The all_decls indexes of the functions named `name`, in list order. The
@@ -343,6 +359,12 @@ typedef struct {
   const AstDecl* anyType;
   const AstDecl* enumDecl;
   const AstDecl* alias;
+  /* The functions of this name in REVERSE list order: decls are entered
+   * last-to-first and clones prepended later are entered after, so an append
+   * keeps the order and a reader's snapshot (the first `count`) stays valid */
+  const AstDecl** functions;
+  size_t functionCount;
+  size_t functionCap;
 } ModuleNameEntry;
 
 typedef struct {
@@ -389,6 +411,18 @@ static void module_index_grow(ModuleIndex* index) {
 /* Entered last-to-first, so an earlier decl in the list overwrites a later one */
 static void module_index_enter(ModuleIndex* index, const AstDecl* decl) {
   Str name;
+  if (decl->kind == AST_DECL_FUNC) {
+    name = decl->as.func_decl.name;
+    if (!name.data) return;
+    if ((index->count + 1) * 2 > index->cap) module_index_grow(index);
+    ModuleNameEntry* entry = module_name_slot(index, name, true);
+    if (entry->functionCount == entry->functionCap) {
+      entry->functionCap = entry->functionCap ? entry->functionCap * 2 : 4;
+      entry->functions = realloc(entry->functions, entry->functionCap * sizeof(AstDecl*));
+    }
+    entry->functions[entry->functionCount++] = decl;
+    return;
+  }
   if (decl->kind == AST_DECL_TYPE) name = decl->as.type_decl.name;
   else if (decl->kind == AST_DECL_ENUM) name = decl->as.enum_decl.name;
   else if (decl->kind == AST_DECL_ALIAS) name = decl->as.alias_decl.name;
@@ -445,6 +479,7 @@ static ModuleIndex* module_index_for(const AstModule* module) {
   }
   if (index->head != module->decls) {
     if (!module_index_enter_until(index, index->head)) {
+      for (size_t i = 0; i < index->cap; i++) free(index->names[i].functions);
       free(index->names);
       index->names = NULL; index->cap = 0; index->count = 0;
       module_index_grow(index);
@@ -480,6 +515,21 @@ const AstDecl* module_index_find_type(const AstModule* module, Str name) {
 const AstDecl* module_index_find_enum(const AstModule* module, Str name) {
   ModuleNameEntry* entry = module_entry(module, name);
   return entry ? entry->enumDecl : NULL;
+}
+
+/* The functions named `name` of one module, read in list order as
+ *   n = module_index_function_count(module, name);
+ *   for (k = 0; k < n; k++) decl = module_index_function_at(module, name, n, k);
+ * A clone prepended while the loop runs is not visited, as when the loop
+ * walked module->decls. */
+size_t module_index_function_count(const AstModule* module, Str name) {
+  ModuleNameEntry* entry = module_name_slot(module_index_for(module), name, false);
+  return entry ? entry->functionCount : 0;
+}
+
+const AstDecl* module_index_function_at(const AstModule* module, Str name, size_t count, size_t k) {
+  ModuleNameEntry* entry = module_name_slot(module_index_for(module), name, false);
+  return entry->functions[count - 1 - k];
 }
 
 /* An alias is matched by its exact name (no String spellings) */
@@ -767,4 +817,54 @@ void name_map_set(NameMap* map, Str name, void* value) {
   size_t slot = name_map_slot(map, name);
   if (!map->names[slot].data) { map->names[slot] = name; map->count++; }
   map->values[slot] = value;
+}
+
+/* A set of pointers (sema's "already analyzed" decls) */
+struct PointerSet {
+  const void** items;
+  size_t cap;
+  size_t count;
+};
+
+PointerSet* pointer_set_create(void) {
+  PointerSet* set = calloc(1, sizeof(PointerSet));
+  set->cap = 1024;
+  set->items = calloc(set->cap, sizeof(void*));
+  return set;
+}
+
+void pointer_set_free(PointerSet* set) {
+  if (!set) return;
+  free(set->items);
+  free(set);
+}
+
+bool pointer_set_contains(const PointerSet* set, const void* pointer) {
+  size_t mask = set->cap - 1;
+  size_t slot = (size_t)hash_pointer(pointer) & mask;
+  while (set->items[slot]) {
+    if (set->items[slot] == pointer) return true;
+    slot = (slot + 1) & mask;
+  }
+  return false;
+}
+
+void pointer_set_add(PointerSet* set, const void* pointer) {
+  if ((set->count + 1) * 2 > set->cap) {
+    const void** old = set->items;
+    size_t oldCap = set->cap;
+    set->cap *= 2;
+    set->items = calloc(set->cap, sizeof(void*));
+    set->count = 0;
+    for (size_t i = 0; i < oldCap; i++) if (old[i]) pointer_set_add(set, old[i]);
+    free(old);
+  }
+  size_t mask = set->cap - 1;
+  size_t slot = (size_t)hash_pointer(pointer) & mask;
+  while (set->items[slot]) {
+    if (set->items[slot] == pointer) return;
+    slot = (slot + 1) & mask;
+  }
+  set->items[slot] = pointer;
+  set->count++;
 }

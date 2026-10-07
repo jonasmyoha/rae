@@ -6780,9 +6780,9 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                     AstDecl* resolved = NULL;
                     const char* resolved_mn = NULL;
                     bool qual_ambiguous = false;  // #787(c): 2+ distinct home modules match
-                    for (AstDecl* d = module->decls; d; d = d->next) {
-                        if (d->kind != AST_DECL_FUNC) continue;
-                        if (!str_eq(d->as.func_decl.name, fname)) continue;
+                    size_t named_count = module_index_function_count(module, fname);
+                    for (size_t k = 0; k < named_count; k++) {
+                        AstDecl* d = (AstDecl*)module_index_function_at(module, fname, named_count, k);
                         if (d->as.func_decl.specialization_args) continue;
                         const char* mn = d->module_name; if (!mn) continue;
                         size_t mlen = strlen(mn);
@@ -7047,9 +7047,10 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                     }
                     // Iterate all decls to find the best matching overload for this receiver type
                     AstDecl* best_decl = NULL;
-                    for (AstDecl* dd = module->decls; dd; dd = dd->next) {
-                        if (dd->kind != AST_DECL_FUNC) continue;
-                        if (!str_eq(dd->as.func_decl.name, expr->as.method_call.method_name)) continue;
+                    Str method_name = expr->as.method_call.method_name;
+                    size_t named_count = module_index_function_count(module, method_name);
+                    for (size_t k = 0; k < named_count; k++) {
+                        AstDecl* dd = (AstDecl*)module_index_function_at(module, method_name, named_count, k);
                         if (dd->as.func_decl.specialization_args) continue; // skip existing specializations
                         AstFuncDecl* fd = &dd->as.func_decl;
                         if (!fd->params || !str_eq_cstr(fd->params->name, "this")) continue;
@@ -7069,9 +7070,9 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                     if (!best_decl) {
                         for (const AstImport* imp = module->imports; imp && !best_decl; imp = imp->next) {
                             if (!imp->module) continue;
-                            for (AstDecl* dd = imp->module->decls; dd; dd = dd->next) {
-                                if (dd->kind != AST_DECL_FUNC) continue;
-                                if (!str_eq(dd->as.func_decl.name, expr->as.method_call.method_name)) continue;
+                            size_t imported_count = module_index_function_count(imp->module, method_name);
+                            for (size_t k = 0; k < imported_count; k++) {
+                                AstDecl* dd = (AstDecl*)module_index_function_at(imp->module, method_name, imported_count, k);
                                 if (dd->as.func_decl.specialization_args) continue;
                                 AstFuncDecl* fd = &dd->as.func_decl;
                                 if (!fd->params || !str_eq_cstr(fd->params->name, "this")) continue;
@@ -7179,11 +7180,12 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                     AstDecl* ufcs_match = NULL;
                     const char* ufcs_mod = NULL;
                     bool ufcs_ambiguous = false;
-                    for (AstDecl* dd = module->decls; dd; dd = dd->next) {
-                        if (dd->kind != AST_DECL_FUNC) continue;
+                    Str ufcs_name = expr->as.method_call.method_name;
+                    size_t named_count = module_index_function_count(module, ufcs_name);
+                    for (size_t k = 0; k < named_count; k++) {
+                        AstDecl* dd = (AstDecl*)module_index_function_at(module, ufcs_name, named_count, k);
                         AstFuncDecl* fd = &dd->as.func_decl;
                         if (fd->generic_params || fd->specialization_args || !fd->params) continue;
-                        if (!str_eq(fd->name, expr->as.method_call.method_name)) continue;
                         if (!sema_decl_visible(s_current_decl_origin, dd)) continue;  // module must be visible here
                         size_t pc = 0; for (AstParam* p = fd->params; p; p = p->next) pc++;
                         if (pc != want) continue;
@@ -7243,7 +7245,21 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                         scan_mods[scan_n++] = module;
                         for (const AstImport* imp = module->imports; imp && scan_n < 64; imp = imp->next)
                             if (imp->module) scan_mods[scan_n++] = imp->module;
+                        // The same-named methods decide whether this is an
+                        // error; only then is every method walked for a
+                        // near-miss suggestion (the walk below recomputes both).
                         for (size_t si = 0; si < scan_n; si++) {
+                            size_t named_count = module_index_function_count(scan_mods[si], mname);
+                            for (size_t k = 0; k < named_count; k++) {
+                                const AstFuncDecl* fd = &module_index_function_at(scan_mods[si], mname, named_count, k)->as.func_decl;
+                                if (fd->specialization_args || !fd->params) continue;
+                                if (!str_eq_cstr(fd->params->name, "this")) continue;
+                                if (str_eq(get_base_type_name(fd->params->type), erec_base)) same_name_this_receiver = true;
+                                else same_name_other_receiver = true;
+                            }
+                        }
+                        bool report = same_name_other_receiver && !same_name_this_receiver;
+                        for (size_t si = 0; report && si < scan_n; si++) {
                             for (AstDecl* dd = scan_mods[si]->decls; dd; dd = dd->next) {
                                 if (dd->kind != AST_DECL_FUNC) continue;
                                 AstFuncDecl* fd = &dd->as.func_decl;
@@ -7541,16 +7557,17 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                 for (const AstImport* imp = module->imports; imp && sn < 64; imp = imp->next)
                     if (imp->module) scan[sn++] = imp->module;
                 int generic_matches = 0, unsafe_matches = 0;
-                for (size_t si = 0; si < sn; si++)
-                    for (AstDecl* d = scan[si]->decls; d; d = d->next) {
-                        if (d->kind != AST_DECL_FUNC) continue;
+                for (size_t si = 0; si < sn; si++) {
+                    size_t named_count = module_index_function_count(scan[si], cname);
+                    for (size_t k = 0; k < named_count; k++) {
+                        const AstDecl* d = module_index_function_at(scan[si], cname, named_count, k);
                         const AstFuncDecl* fd = &d->as.func_decl;
                         if (!fd->generic_params || fd->specialization_args) continue;
-                        if (!str_eq(fd->name, cname)) continue;
                         if (!sema_decl_opened(s_current_decl_origin, d)) continue;
                         generic_matches++;
                         if (fd->is_unsafe || fd->is_extern) unsafe_matches++;
                     }
+                }
                 if (generic_matches > 0 && generic_matches == unsafe_matches)
                     called_unsafe_by_name = true;
             }
@@ -8570,7 +8587,7 @@ bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
     }
     SymbolTable symbols = {0};
     s_lifecycle_symbols = &symbols;
- size_t processed_count = 0; const AstDecl* processed[8192]; memset(processed, 0, sizeof(processed));
+ size_t processed_count = 0; PointerSet* processed = pointer_set_create();  /* at most 8192, as the array it replaced */
     AstDecl* d = module->decls;
     while (d) {
         Str name = {0}; TypeInfo* t = NULL;
@@ -8639,7 +8656,7 @@ bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
         sema_check_template_loop_context(module, template->as.func_decl.body, 0);
         s_current_decl_origin = saved_origin;
     }
-    if (module->had_error) return false;
+    if (module->had_error) { pointer_set_free(processed); return false; }
     /* Build progress (progress.h): the sema phase is one declaration at a
      * time, so the bar counts them. */
     size_t decl_total = 0;
@@ -8648,14 +8665,14 @@ bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
     while (found_new) {
         found_new = false; d = module->decls;
         while (d) {
-            bool already = false; for (size_t i = 0; i < processed_count; i++) if (processed[i] == d) { already = true; break; }
+            bool already = pointer_set_contains(processed, d);
             if (already) { d = d->next; continue; }
             
             bool is_template = (d->kind == AST_DECL_FUNC && d->as.func_decl.generic_params && !d->as.func_decl.specialization_args) || 
                                (d->kind == AST_DECL_TYPE && d->as.type_decl.generic_params && !d->as.type_decl.specialization_args);
             
             if (!is_template) {
-                if (processed_count < 8192) processed[processed_count++] = d;
+                if (processed_count < 8192) { pointer_set_add(processed, d); processed_count++; }
                 found_new = true;
                 progress_work(0.0, 1.0, processed_count, decl_total);
                 
@@ -8671,10 +8688,11 @@ bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
                 // Templates are marked as processed but not analyzed — except for
                 // the #877 by-name unsafe-obligation scan of their bodies.
                 sema_scan_unsafe_template(module, d);
-                if (processed_count < 8192) processed[processed_count++] = d;
+                if (processed_count < 8192) { pointer_set_add(processed, d); processed_count++; }
             }
             d = d->next;
         }
     }
+    pointer_set_free(processed);
     return !module->had_error;
 }

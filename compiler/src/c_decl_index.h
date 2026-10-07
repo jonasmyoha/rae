@@ -15,6 +15,8 @@ void decl_index_note_module(const CompilerContext* ctx, const AstModule* module)
 bool decl_index_module_collected(const CompilerContext* ctx, const AstModule* module);
 const AstDecl* decl_index_find_type(const CompilerContext* ctx, Str name, bool templateOnly);
 const AstDecl* decl_index_find_enum(const CompilerContext* ctx, Str name);
+/* The first module-level `let`/`var` named `name` */
+const AstDecl* decl_index_find_global(const CompilerContext* ctx, Str name);
 /* The all_decls indexes of the functions named `name`, in list order (valid
  * until the next decl is registered) */
 const size_t* decl_index_functions(const CompilerContext* ctx, Str name, size_t* count);
@@ -37,6 +39,10 @@ bool decl_visit_first(const AstModule* module, int depth);
 const AstDecl* module_index_find_type(const AstModule* module, Str name);
 const AstDecl* module_index_find_enum(const AstModule* module, Str name);
 const AstTypeRef* module_index_find_alias(const AstModule* module, Str name);
+/* One module's functions named `name`, in list order: snapshot the count,
+ * then read entry k < count (clones prepended meanwhile are not visited) */
+size_t module_index_function_count(const AstModule* module, Str name);
+const AstDecl* module_index_function_at(const AstModule* module, Str name, size_t count, size_t k);
 
 /* A per-module set of names, built by `collect` (which calls `add` per name)
  * and rebuilt when the module's or an import's decl list changes */
@@ -49,5 +55,12 @@ typedef struct NameMap NameMap;
 NameMap* name_map_create(void);
 void* name_map_get(const NameMap* map, Str name);
 void name_map_set(NameMap* map, Str name, void* value);
+
+/* A set of pointers */
+typedef struct PointerSet PointerSet;
+PointerSet* pointer_set_create(void);
+void pointer_set_free(PointerSet* set);
+bool pointer_set_contains(const PointerSet* set, const void* pointer);
+void pointer_set_add(PointerSet* set, const void* pointer);
 
 #endif
