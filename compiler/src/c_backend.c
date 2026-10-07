@@ -1651,7 +1651,11 @@ const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
             // type it. Its type is the enum itself — return a type-ref naming
             // it, so a generic call `describe(value: Kind.large)` binds T=Kind
             // exactly as `let k: Kind = Kind.large; describe(value: k)` does.
+            // A local is a value, never an enum name, so it skips the
+            // whole-program enum scan (most member accesses are `local.field`;
+            // scanning for each one cost ~13% of emit time).
             if (expr->as.member.object->kind == AST_EXPR_IDENT
+                && !get_local_type_ref(ctx, expr->as.member.object->as.ident)
                 && find_enum_decl(ctx, ctx->module, expr->as.member.object->as.ident)) {
                 AstTypeRef* etr = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
                 memset(etr, 0, sizeof *etr);
