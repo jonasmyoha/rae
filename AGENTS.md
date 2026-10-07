@@ -531,6 +531,45 @@ timestamps, a new pass), reach it **through the bindings** — do NOT add a new
 
 ---
 
+## Runtime C rule: C only for platform ABI (maintainer decision 2026-10-08)
+
+Rae is dogfooded: **code is written in Rae whenever it can be.** The C in
+`compiler/runtime/` is the platform boundary, not a second standard library.
+This generalises the renderer C-surface gate above to the whole runtime.
+
+- **New runtime C is allowed only for genuine platform ABI:**
+  - a system, OS or C-library call itself (`socket`, `kevent`, `pthread_create`,
+    `localtime_r`, an SDL/WebGPU/Objective-C call);
+  - `errno` (a macro over a hidden per-platform function);
+  - calling a **variadic** C function (`fcntl`, `ioctl`, `open` with a mode),
+    which a plain extern cannot do safely on Apple Silicon;
+  - **per-OS struct layouts** (`sockaddr`, `stat`, `kevent`) and per-OS
+    **constants** (`O_NONBLOCK`, `SOL_SOCKET`, `EAGAIN`).
+- **Each such C function makes ONE call and holds no policy.** It returns the
+  result or a negated error code. It has no loops, no retries, no option
+  choices, no error mapping and no bookkeeping. The sequence, the retry on
+  `EINTR`, which options to set and what an error means are all Rae, over the
+  shim. `lib/net` is the model (docs/server-benchmarks-design.md §1.2).
+- **Pure algorithms are always Rae:** hashing, encoding (base64, UTF-8, URL),
+  parsing (JSON, HTTP, numbers), formatting (dates, integers), searching and
+  string manipulation. They never need the platform.
+- **Existing exceptions, kept for now and not to be grown:**
+  - the compiler's own runtime ABI that generated C calls directly: the
+    `rae_String` pool and allocation, `Buffer` storage, tasks and channels,
+    the worker pool, memory statistics, the crash handler, the `log` entry
+    points;
+  - vendored C libraries used as libraries (`lodepng`, `stb_image`).
+
+  Logic inside these can still move to Rae when the codegen calls Rae
+  instead (see the audit).
+- **Before adding a `runtime_*.c` function, name its platform reason** in the
+  commit message (which of the reasons above). "It was quicker in C" is not
+  one. A pure-logic C function that already exists is migration debt, listed in
+  `docs/runtime-c-audit.md` in order of value; when you touch one, prefer moving
+  it to Rae.
+
+---
+
 ## Compiler versioning (#930 — docs/versioning-and-toolchain.md §1)
 
 The compiler has one version, `compiler/VERSION` — a single semver line
