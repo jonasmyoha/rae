@@ -1,0 +1,245 @@
+# TCP sockets (docs/server-benchmarks-design.md §9 G1, decision F1).
+#
+# A socket is a value handle (`SocketId`), stored and passed like any other
+# id; the runtime (compiler/runtime/runtime_net.c) owns the OS side. Every
+# operation that can fail answers a `NetStatus` with its result — never an
+# errno, never a C address struct. Every socket is non-blocking: when an
+# operation would have to wait it answers `wouldBlock`, and the caller waits
+# for readiness (one socket: `socketWaitReadable`; many: the poller).
+#
+# The runtime sets the options a server always wants: SO_REUSEADDR on
+# listeners, TCP_NODELAY on connections, and no SIGPIPE when writing to a
+# closed peer (that is `connectionReset`, not a dead process).
+#
+# A SocketId is a handle, not the connection: closing it is explicit
+# (`socketClose`), as with every other runtime handle. macOS and Linux;
+# elsewhere every call answers `unsupported`.
+type SocketId {
+  handle: Int
+}
+
+enum NetStatus {
+  ok
+  wouldBlock
+  endOfStream
+  addressInUse
+  connectionRefused
+  connectionReset
+  invalidAddress
+  tooManyOpen
+  unsupported
+  failed
+}
+
+# A socket, or why there is none (`socketId` is `noSocket()` unless `ok`)
+type SocketResult {
+  socketId: SocketId
+  status: NetStatus
+}
+
+# How many bytes a read or write moved, and its status
+type IoResult {
+  bytes: Int
+  status: NetStatus
+}
+
+func nativeListen(host: String, port: Int, backlog: Int) unsafe extern("rae_ext_Net_listen") ret Int
+
+func nativeAccept(listener: Int) unsafe extern("rae_ext_Net_accept") ret Int
+
+func nativeConnect(
+  host: String
+  port: Int
+  timeoutMs: Int
+) unsafe extern("rae_ext_Net_connect") ret Int
+
+func nativeRead(
+  handle: Int
+  buffer: Buffer(UInt8)
+  offset: Int
+  maxBytes: Int
+) unsafe extern("rae_ext_Net_read") ret Int
+
+func nativeWrite(
+  handle: Int
+  buffer: Buffer(UInt8)
+  offset: Int
+  count: Int
+) unsafe extern("rae_ext_Net_write") ret Int
+
+func nativeWriteText(handle: Int, text: String) unsafe extern("rae_ext_Net_writeText") ret Int
+
+func nativeWaitReadable(
+  handle: Int
+  timeoutMs: Int
+) unsafe extern("rae_ext_Net_waitReadable") ret Bool
+
+func nativeLocalPort(handle: Int) unsafe extern("rae_ext_Net_localPort") ret Int
+
+func nativeClose(handle: Int) unsafe extern("rae_ext_Net_close")
+
+func nativeBytesToText(
+  buffer: Buffer(UInt8)
+  offset: Int
+  count: Int
+) unsafe extern("rae_ext_Net_bytesToText") ret String
+
+func noSocket() ret SocketId {
+  ret SocketId { handle: -1 }
+}
+
+func socketIsValid(socketId: view SocketId) ret Bool {
+  ret socketId.handle >= 0
+}
+
+# The runtime's status code (< 0; see runtime_net.c) as a NetStatus
+func netStatusFromCode(code: view Int) ret NetStatus {
+  if code >= 0 {
+    ret NetStatus.ok
+  }
+  if code is -1 {
+    ret NetStatus.wouldBlock
+  }
+  if code is -2 {
+    ret NetStatus.endOfStream
+  }
+  if code is -3 {
+    ret NetStatus.addressInUse
+  }
+  if code is -4 {
+    ret NetStatus.connectionRefused
+  }
+  if code is -5 {
+    ret NetStatus.connectionReset
+  }
+  if code is -6 {
+    ret NetStatus.invalidAddress
+  }
+  if code is -7 {
+    ret NetStatus.tooManyOpen
+  }
+  if code is -8 {
+    ret NetStatus.unsupported
+  }
+  ret NetStatus.failed
+}
+
+func socketResultFromCode(code: view Int) ret SocketResult {
+  if code >= 0 {
+    ret SocketResult { socketId: { handle: code }, status: NetStatus.ok }
+  }
+  ret SocketResult { socketId: noSocket(), status: netStatusFromCode(code: code) }
+}
+
+func ioResultFromCode(code: view Int) ret IoResult {
+  if code >= 0 {
+    ret IoResult { bytes: code, status: NetStatus.ok }
+  }
+  ret IoResult { bytes: 0, status: netStatusFromCode(code: code) }
+}
+
+# Listen on `host` ("" = every local address, "127.0.0.1" = this machine
+# only) and `port` (0 picks a free port; `socketLocalPort` says which).
+func tcpListen(host: view String, port: view Int, backlog: view Int) ret SocketResult {
+  unsafe {
+    ret socketResultFromCode(code: nativeListen(host: host, port: port, backlog: backlog))
+  }
+}
+
+# Accept one pending connection; `wouldBlock` when none is waiting.
+func tcpAccept(listenerSocketId: view SocketId) ret SocketResult {
+  unsafe {
+    ret socketResultFromCode(code: nativeAccept(listener: listenerSocketId.handle))
+  }
+}
+
+# Connect to `host`:`port`, waiting up to `timeoutMs` for the connection
+# (`wouldBlock` when it did not complete in time). The socket it answers is
+# non-blocking like every other.
+func tcpConnect(host: view String, port: view Int, timeoutMs: view Int) ret SocketResult {
+  unsafe {
+    ret socketResultFromCode(code: nativeConnect(host: host, port: port, timeoutMs: timeoutMs))
+  }
+}
+
+# Read up to `maxBytes` and APPEND them to `bytes` (growing it if needed).
+# `endOfStream` when the peer closed; `wouldBlock` when nothing is there yet.
+func socketRead(socketId: view SocketId, bytes: mod List(UInt8), maxBytes: view Int) ret IoResult {
+  loop bytes.cap - bytes.length < maxBytes {
+    bytes.grow()
+  }
+  unsafe {
+    let code: Int = nativeRead(
+      handle: socketId.handle
+      buffer: bytes.data
+      offset: bytes.length
+      maxBytes: maxBytes
+    )
+    if code > 0 {
+      bytes.length = bytes.length + code
+    }
+    ret ioResultFromCode(code: code)
+  }
+}
+
+# Write `count` bytes of `bytes` from `start`. It may write fewer when the
+# socket's send buffer is full; `bytes` says how many went out.
+func socketWrite(
+  socketId: view SocketId
+  bytes: view List(UInt8)
+  start: view Int
+  count: view Int
+) ret IoResult {
+  if start < 0 or count < 0 or start + count > bytes.length {
+    ret IoResult { bytes: 0, status: NetStatus.failed }
+  }
+  unsafe {
+    ret ioResultFromCode(code: nativeWrite(
+      handle: socketId.handle
+      buffer: bytes.data
+      offset: start
+      count: count
+    ))
+  }
+}
+
+# Write a String's bytes (small messages; bulk data goes through bytes)
+func socketWriteText(socketId: view SocketId, text: view String) ret IoResult {
+  unsafe {
+    ret ioResultFromCode(code: nativeWriteText(handle: socketId.handle, text: text))
+  }
+}
+
+# Wait until the socket has data or its peer closed: true, or false after
+# `timeoutMs` (-1 waits for ever). For one socket; many use the poller.
+func socketWaitReadable(socketId: view SocketId, timeoutMs: view Int) ret Bool {
+  unsafe {
+    ret nativeWaitReadable(handle: socketId.handle, timeoutMs: timeoutMs)
+  }
+}
+
+# The local port the socket is bound to; -1 when it has none
+func socketLocalPort(socketId: view SocketId) ret Int {
+  unsafe {
+    ret nativeLocalPort(handle: socketId.handle)
+  }
+}
+
+func socketClose(socketId: view SocketId) {
+  if socketId.handle < 0 {
+    ret
+  }
+  unsafe {
+    nativeClose(handle: socketId.handle)
+  }
+}
+
+# Bytes `start` .. `start + count` of `bytes` as a String
+func textFromBytes(bytes: view List(UInt8), start: view Int, count: view Int) ret String {
+  if start < 0 or count <= 0 or start + count > bytes.length {
+    ret ""
+  }
+  unsafe {
+    ret nativeBytesToText(buffer: bytes.data, offset: start, count: count)
+  }
+}
