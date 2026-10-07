@@ -30,6 +30,7 @@ import Gpu2d
 import Sdl3
 import Keys
 import Quat
+import GbufferInstanced
 open physicsScenes/FrameProfile
 open Vec3
 open ecs/ComponentTable
@@ -126,7 +127,7 @@ func createVehicleApp(
   camera.position = course.cameraStart
   camera.target = Vec3 { x: 0.0, y: 0.0, z: 1.0 }
   camera.farZ = 2500.0
-  let app: VehicleApp = {
+  var app: VehicleApp = {
     profile: createFrameProfile(frameLimit: 0)
     meshes: meshes
     batches: createPlaygroundBatches(meshes: meshes)
@@ -166,6 +167,11 @@ func createVehicleApp(
     systems: uiSystems
     width: app.extentW
     height: app.extentH
+  )
+  # The course's dark checker squares, the second part of the ground
+  GbufferInstanced.setInstanceBatchMesh(
+    batch: app.batches.groundChecker
+    mesh: uploadMeshData(renderer: renderer, meshData: courseCheckerMesh(course: course))
   )
   ret app
 }
