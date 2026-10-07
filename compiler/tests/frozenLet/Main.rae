@@ -1,0 +1,38 @@
+# tools/test-frozen-let.sh: RAE_FROZEN_LET=warn reports each write into a
+# `let` (docs/let-is-frozen.md) and nothing else. Lines marked WARN must
+# warn; every other line must not.
+type Inner {
+  value: Int
+}
+
+type Outer {
+  inner: Inner
+}
+
+type Holder {
+  data: Ptr
+}
+
+func bump(inner: mod Inner) {
+  inner.value = inner.value + 1
+}
+
+func readOnly(inner: view Inner) ret Int {
+  ret inner.value
+}
+
+func main() ret Int {
+  let outer: Outer = { inner: { value: 1 } }
+  bump(inner: outer.inner)  # WARN
+  outer.inner.value = 5  # WARN
+  let numbers: List(Int) = List.create(Int, cap: 4)
+  numbers.add(value: 3)  # WARN
+  let count: Int = numbers.length + readOnly(inner: outer.inner)
+  var free: Outer = { inner: { value: 1 } }
+  free.inner.value = 2
+  bump(inner: free.inner)
+  let freeInner: mod Inner => free.inner
+  freeInner.value = 7
+  log("{outer.inner.value} {count} {free.inner.value}")
+  ret 0
+}
