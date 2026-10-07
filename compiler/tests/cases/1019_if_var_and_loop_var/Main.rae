@@ -1,0 +1,47 @@
+# `if var` and `loop var x: T in` (docs/let-is-frozen.md): a value binding has a
+# mutable twin. The if-var payload is owned and changed in place (else-if
+# var too, a heap-owning payload is dropped once); the loop var is a COPY,
+# so changing it leaves the list as it was.
+type Bag {
+  name: String
+  items: List(Int)
+}
+
+func makeBag(name: view String) ret opt Bag {
+  if name.length() is 0 {
+    ret none
+  }
+  var items: List(Int) = List.create(Int, cap: 2)
+  items.add(value: 1)
+  ret Bag { name: "{name}", items: items }
+}
+
+func maybeNumber(present: view Bool) ret opt Int {
+  if present {
+    ret 41
+  }
+  ret none
+}
+
+func main() ret Int {
+  if var bag: Bag = makeBag(name: "") {
+    log("unexpected {bag.name}")
+  } else if var bag: Bag = makeBag(name: "tools") {
+    bag.items.add(value: 2)
+    bag.name = "{bag.name}!"
+    log("{bag.name} has {bag.items.length} items")
+  }
+  if var number: Int = maybeNumber(present: true) {
+    number = number + 1
+    log("number {number}")
+  }
+  var words: List(String) = List.create(String, cap: 2)
+  words.add(value: "a")
+  words.add(value: "b")
+  loop var word: String in words {
+    word = "{word}{word}"
+    log("copy {word}")
+  }
+  log("list {words.copyAtDefault(index: 0)} {words.copyAtDefault(index: 1)}")
+  ret 0
+}

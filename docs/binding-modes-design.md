@@ -75,7 +75,15 @@ loop let row: view ListViewRow in rows { … }
 loop var i: Int = 0, i < n, ++i { … }
 if let inner: view Inner => outer.maybe { … }
 if let member: EntityId = selection.copyAt(index: k) { … }
+if var track: Track = loadTrack(id: 3) { track.volume = 0.5 }   # a mutable payload
+loop var word: String in words { … }   # a mutable COPY of each element
 ```
+
+A binding that holds its own value has a frozen `let` form and a mutable
+`var` form, everywhere it appears: `let`/`var`, `if let`/`if var`,
+`loop let x: T in`/`loop var x: T in` (docs/let-is-frozen.md). An alias
+(`view T` / `mod T`, bound with `=>` or as a loop element) has only `let`:
+its mode already says what it may do, and aliases are bind-once.
 
 ## 2. The matrix
 

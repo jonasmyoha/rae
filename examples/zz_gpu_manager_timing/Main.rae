@@ -43,8 +43,7 @@ func runFrame(
     if passA is not 0 {
       ret fail(message: "timedPass 0")
     }
-    if let openedRecording: Recording = beginRecording(resources: resources) {
-      var recording: Recording = own openedRecording
+    if var recording: Recording = beginRecording(resources: resources) {
       if recordComputeTimed(
         recording: recording
         resources: resources
@@ -133,8 +132,7 @@ func main() ret Int {
       ret 1
     }
     var issuer: IdIssuer = IdIssuer.create()
-    if let createdResources: GpuResources = GpuResources.create(issuer: issuer, capacity: 10) {
-      var resources: GpuResources = own createdResources
+    if var resources: GpuResources = GpuResources.create(issuer: issuer, capacity: 10) {
       var timing: GpuTiming = createGpuTiming(resources: resources, maxPasses: 4)
       if timingAvailable(timing: timing) is false {
         # Documented fallback: no timestamp support. Everything is inert.

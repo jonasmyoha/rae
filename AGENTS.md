@@ -193,6 +193,10 @@ These instructions define **how Codex should work**, communicate progress, and i
   passed to a `mod` parameter, at any depth; `var` is the only mutable one.
 - Enforced since compiler 0.1.200: a write into a `let` is a compile error
   naming the binding's line. If you change it, it is `var`.
+- Every VALUE binding has both forms: `let`/`var`, `if let`/`if var`,
+  `loop let x: T in`/`loop var x: T in` (a mutable copy of each element).
+  Aliases (`view`/`mod`, `=>`) have only `let`. Write `if var x: T = opt`
+  for a payload you change — never `if let tmp ... { var x = own tmp`.
 - Edges: a `let` holding a `Ptr`/`Buffer`, a GPU/entity handle or a
   `mod`/`view` alias freezes the HANDLE, not what it points at (writing
   through it is fine); `if let` and `=>` make new bindings.

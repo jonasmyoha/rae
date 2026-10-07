@@ -271,12 +271,15 @@ func begin(
     clearValue: 0.0
     readOnly: false
   )
-  if let recording: Recording = beginRecording(resources: resources) {
-    var opened: Recording = own recording
+  if var recording: Recording = beginRecording(resources: resources) {
     unsafe {
-      cache.pass = beginRenderPassMulti(recording: opened, resources: resources, targets: targets)
+      cache.pass = beginRenderPassMulti(
+        recording: recording
+        resources: resources
+        targets: targets
+      )
     }
-    cache.recording = own opened
+    cache.recording = own recording
   }
   # Every draw binds its own pipeline + group (gbIssueInstanced), so the pass
   # opens with nothing bound; the SDF draw binds its own too.

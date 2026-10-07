@@ -57,8 +57,7 @@ func readbackFloat4(
   let rowBytes: Int = readbackRowBytes(width: width)
   let bytes: Int = rowBytes * height
   var copied: Bool = false
-  if let openedRecording: Recording = beginRecording(resources: resources) {
-    var recording: Recording = own openedRecording
+  if var recording: Recording = beginRecording(resources: resources) {
     if recordCopyTextureToBuffer(
       recording: recording
       resources: resources
