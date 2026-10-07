@@ -3965,7 +3965,7 @@ async function refreshStatisticsPanels() {
   }
 }
 
-async function fetchMetricSeries(metric, limit = 500) {
+async function fetchMetricSeries(metric, limit = 1000) {
   const response = await fetch(
     `/api/stats/recent?metric=${encodeURIComponent(metric)}&limit=${limit}`
   );
@@ -3976,7 +3976,7 @@ async function fetchMetricSeries(metric, limit = 500) {
   return Array.isArray(payload.data) ? payload.data : [];
 }
 
-async function fetchCompilerLineMetrics(limit = 500) {
+async function fetchCompilerLineMetrics(limit = 1000) {
   const response = await fetch(`/api/stats/compiler-metrics?limit=${limit}`);
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}`);
@@ -4210,12 +4210,80 @@ const chartValueFormatters = {
   }
 };
 
+// The time range each stats graph shows ("1 week" .. "All time"), chosen
+// with the buttons above it and remembered per graph.
+const CHART_RANGES = [
+  { key: "week", label: "1 week", days: 7 },
+  { key: "month", label: "1 month", days: 30 },
+  { key: "year", label: "1 year", days: 365 },
+  { key: "all", label: "All time", days: null }
+];
+const CHART_RANGE_DEFAULT = "month";
+
+function chartRangeKey(canvas) {
+  const saved = localStorage.getItem(`rae-stats-range-${canvas.id}`);
+  return CHART_RANGES.some((range) => range.key === saved) ? saved : CHART_RANGE_DEFAULT;
+}
+
+// The range buttons, once per graph, above its chart.
+function attachChartRangeButtons(canvas) {
+  if (canvas.__rangeButtons) return;
+  const container = canvas.parentElement;
+  const group = document.createElement("div");
+  group.className = "chart-range";
+  group.setAttribute("role", "group");
+  group.setAttribute("aria-label", "Time range");
+  for (const range of CHART_RANGES) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "chart-range__button";
+    button.textContent = range.label;
+    button.dataset.range = range.key;
+    button.addEventListener("click", () => {
+      localStorage.setItem(`rae-stats-range-${canvas.id}`, range.key);
+      scheduleLineChartRender();
+    });
+    group.appendChild(button);
+  }
+  container.parentElement.insertBefore(group, container);
+  canvas.__rangeButtons = group;
+}
+
+// Draw `entries` (oldest first) limited to the graph's chosen range. A
+// limited range spans its whole window up to now on the time axis, so a
+// quiet week shows as empty axis, not as a stretched line.
+function drawRangedChart(canvas, entries, valueKey, emptyEl, formatValue) {
+  attachChartRangeButtons(canvas);
+  const key = chartRangeKey(canvas);
+  for (const button of canvas.__rangeButtons.children) {
+    const active = button.dataset.range === key;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", String(active));
+  }
+  const range = CHART_RANGES.find((candidate) => candidate.key === key);
+  let shown = entries;
+  let timeWindow = null;
+  if (range && range.days !== null) {
+    const to = Date.now();
+    const from = to - range.days * 24 * 60 * 60 * 1000;
+    shown = entries.filter((entry) => {
+      const time = Date.parse(entry.timestamp ?? "");
+      return Number.isFinite(time) && time >= from;
+    });
+    timeWindow = { from, to };
+  }
+  drawMetricChart(canvas, shown, valueKey, emptyEl, formatValue, -1, timeWindow);
+  if (!shown.length && entries.length && emptyEl) {
+    emptyEl.textContent = `Nothing recorded in the last ${range.label}.`;
+  }
+}
+
 function scheduleLineChartRender() {
   if (!statsViewContainer || !statsViewContainer.classList.contains("is-active")) return;
   if (lineChartFrame) cancelAnimationFrame(lineChartFrame);
   lineChartFrame = requestAnimationFrame(() => {
     if (compilerSpeedCanvas) {
-      drawMetricChart(
+      drawRangedChart(
         compilerSpeedCanvas,
         [...compilerSpeedMetrics].reverse(),
         "value",
@@ -4224,10 +4292,10 @@ function scheduleLineChartRender() {
       );
     }
     if (lineCountCanvas) {
-      drawMetricChart(lineCountCanvas, compilerLineMetrics, "lines", lineCountEmpty, chartValueFormatters.lines);
+      drawRangedChart(lineCountCanvas, compilerLineMetrics, "lines", lineCountEmpty, chartValueFormatters.lines);
     }
     if (testDurationCanvas) {
-      drawMetricChart(
+      drawRangedChart(
         testDurationCanvas,
         [...testDurationMetrics].reverse(),
         "value",
@@ -4236,7 +4304,7 @@ function scheduleLineChartRender() {
       );
     }
     if (buildDurationCanvas) {
-      drawMetricChart(
+      drawRangedChart(
         buildDurationCanvas,
         [...buildDurationMetrics].reverse(),
         "value",
@@ -4263,7 +4331,7 @@ function attachChartHover(canvas) {
     tooltip.hidden = true;
     const chart = canvas.__chart;
     if (chart && chart.highlight !== -1) {
-      drawMetricChart(canvas, chart.entries, chart.valueKey, chart.emptyEl, chart.formatValue, -1);
+      drawMetricChart(canvas, chart.entries, chart.valueKey, chart.emptyEl, chart.formatValue, -1, chart.timeWindow);
     }
   };
   canvas.addEventListener("mouseleave", hide);
@@ -4277,7 +4345,7 @@ function attachChartHover(canvas) {
       if (Math.abs(chart.points[i].x - x) < Math.abs(chart.points[nearest].x - x)) nearest = i;
     }
     if (chart.highlight !== nearest) {
-      drawMetricChart(canvas, chart.entries, chart.valueKey, chart.emptyEl, chart.formatValue, nearest);
+      drawMetricChart(canvas, chart.entries, chart.valueKey, chart.emptyEl, chart.formatValue, nearest, chart.timeWindow);
     }
     const entry = chart.entries[nearest];
     const point = chart.points[nearest];
@@ -4296,7 +4364,7 @@ function attachChartHover(canvas) {
   });
 }
 
-function drawMetricChart(canvas, entries, valueKey, emptyEl, formatValue = null, highlight = -1) {
+function drawMetricChart(canvas, entries, valueKey, emptyEl, formatValue = null, highlight = -1, timeWindow = null) {
   if (!canvas) return;
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
@@ -4311,7 +4379,7 @@ function drawMetricChart(canvas, entries, valueKey, emptyEl, formatValue = null,
       else if (emptyEl.id === "build-duration-empty") emptyEl.textContent = "No build runs recorded yet.";
       else if (emptyEl.id === "compiler-speed-empty") emptyEl.textContent = "No compiler speed recorded yet.";
     }
-    canvas.__chart = { entries, valueKey, emptyEl, formatValue, points: [], highlight: -1 };
+    canvas.__chart = { entries, valueKey, emptyEl, formatValue, points: [], highlight: -1, timeWindow };
     return;
   }
   if (emptyEl) {
@@ -4350,8 +4418,9 @@ function drawMetricChart(canvas, entries, valueKey, emptyEl, formatValue = null,
   // order.
   const times = entries.map((entry) => Date.parse(entry.timestamp ?? ""));
   const timed = times.every((time) => Number.isFinite(time));
-  const firstTime = timed ? Math.min(...times) : 0;
-  const lastTime = timed ? Math.max(...times) : 0;
+  // A chosen range spans its whole window; "All time" spans the data
+  const firstTime = timed ? (timeWindow ? timeWindow.from : Math.min(...times)) : 0;
+  const lastTime = timed ? (timeWindow ? timeWindow.to : Math.max(...times)) : 0;
   const timeSpan = lastTime - firstTime;
   const spacing = entries.length > 1 ? chartWidth / (entries.length - 1) : 0;
   const points = entries.map((entry, index) => {
@@ -4433,7 +4502,7 @@ function drawMetricChart(canvas, entries, valueKey, emptyEl, formatValue = null,
     ctx.arc(point.x, point.y, 6, 0, Math.PI * 2);
     ctx.stroke();
   }
-  canvas.__chart = { entries, valueKey, emptyEl, formatValue, points, highlight };
+  canvas.__chart = { entries, valueKey, emptyEl, formatValue, points, highlight, timeWindow };
 }
 
 function setActiveView(targetView) {
