@@ -1,0 +1,10 @@
+# Two project modules in subfolders declare the same const `level`. A module
+# picks one by opening it by its package path (`open alpha/Values`): its bare
+# `level` is then that module's, with no ambiguity, although every project
+# file is visible to every other. (A file-relative `open "../alpha/Values"`
+# is not an import form: relative imports are an error since 0.1.146, fixture
+# 990.)
+func main() {
+  log("gamma/Reader opens alpha/Values: level {alphaLevel()}")
+  log("delta/Reader2 opens beta/Levels: level {betaLevel()}")
+}
