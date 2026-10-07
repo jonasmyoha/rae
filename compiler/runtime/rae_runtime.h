@@ -939,6 +939,32 @@ rae_Bool rae_ext_isFontSlotLoaded(int64_t slot);
 void rae_ext_drawTextWithFont(int64_t slot, rae_String text, float x, float y, float fontSize, float spacing, Color color);
 #endif
 
+/* Integers formatted by their RAE type (the compiler picks rae_str_<width> from
+ * the type name, c_expr.c rae_int_formatter): the _Generic rae_ext_rae_str
+ * below sees only C types, and there UInt32 is Char's uint32_t (it printed as
+ * a code point) and Int8 is Bool's int8_t where bool is missing (it printed as
+ * true/false). Each takes the value or a pointer to it (how a view or mod
+ * binding can reach the formatter). */
+#define RAE_INT_STR_FORMATTER(NAME, CTYPE, WIDE, FORMAT) \
+    RAE_UNUSED static rae_String NAME##_value(CTYPE v) { return FORMAT((WIDE)v); } \
+    RAE_UNUSED static rae_String NAME##_pointer(const CTYPE* v) { return FORMAT((WIDE)*v); }
+RAE_INT_STR_FORMATTER(rae_str_int8, int8_t, int64_t, rae_ext_rae_str_i64)
+RAE_INT_STR_FORMATTER(rae_str_int16, int16_t, int64_t, rae_ext_rae_str_i64)
+RAE_INT_STR_FORMATTER(rae_str_int32, int32_t, int64_t, rae_ext_rae_str_i64)
+RAE_INT_STR_FORMATTER(rae_str_uint8, uint8_t, int64_t, rae_ext_rae_str_i64)
+RAE_INT_STR_FORMATTER(rae_str_uint16, uint16_t, int64_t, rae_ext_rae_str_i64)
+RAE_INT_STR_FORMATTER(rae_str_uint32, uint32_t, int64_t, rae_ext_rae_str_i64)
+RAE_INT_STR_FORMATTER(rae_str_uint64, uint64_t, uint64_t, rae_ext_rae_str_u64)
+#define RAE_INT_STR_DISPATCH(NAME, CTYPE, X) _Generic((X), \
+    CTYPE*: NAME##_pointer, const CTYPE*: NAME##_pointer, default: NAME##_value)(X)
+#define rae_str_int8(X) RAE_INT_STR_DISPATCH(rae_str_int8, int8_t, X)
+#define rae_str_int16(X) RAE_INT_STR_DISPATCH(rae_str_int16, int16_t, X)
+#define rae_str_int32(X) RAE_INT_STR_DISPATCH(rae_str_int32, int32_t, X)
+#define rae_str_uint8(X) RAE_INT_STR_DISPATCH(rae_str_uint8, uint8_t, X)
+#define rae_str_uint16(X) RAE_INT_STR_DISPATCH(rae_str_uint16, uint16_t, X)
+#define rae_str_uint32(X) RAE_INT_STR_DISPATCH(rae_str_uint32, uint32_t, X)
+#define rae_str_uint64(X) RAE_INT_STR_DISPATCH(rae_str_uint64, uint64_t, X)
+
 #define rae_ext_rae_str(X) _Generic((X), \
     int64_t: rae_ext_rae_str_i64, \
     int64_t*: rae_ext_rae_str_i64_ptr, \

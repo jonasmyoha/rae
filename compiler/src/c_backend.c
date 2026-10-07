@@ -1448,6 +1448,21 @@ void rae_value_to_str_expr(CompilerContext* ctx, const AstModule* module, const 
         fprintf(out, "(rae_String){(uint8_t*)\"<%.*s>\", %d}", (int)base.len, base.data, (int)base.len + 2);
         return;
     }
+    // Integers by their Rae type, not their C type: the _Generic sees only
+    // C types, and UInt32 is uint32_t like Char (it printed as a code point)
+    // while Int8 is int8_t like Bool where bool is not available (it printed
+    // as true/false).
+    if (!type->is_view && !type->is_mod) {
+        if (str_eq_cstr(base, "UInt64")) {
+            fprintf(out, "rae_ext_rae_str_u64((uint64_t)(%s))", cexpr);
+            return;
+        }
+        if (str_eq_cstr(base, "Int8") || str_eq_cstr(base, "Int16") || str_eq_cstr(base, "Int32")
+            || str_eq_cstr(base, "UInt8") || str_eq_cstr(base, "UInt16") || str_eq_cstr(base, "UInt32")) {
+            fprintf(out, "rae_ext_rae_str_i64((int64_t)(%s))", cexpr);
+            return;
+        }
+    }
     fprintf(out, "rae_ext_rae_str((%s))", cexpr);
 }
 

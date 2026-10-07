@@ -1,0 +1,51 @@
+# Interpolation and toString format an integer by its Rae type, not its C
+# type: UInt32 is uint32_t in C like Char, and once printed as a code point
+# (15 came out as a control character); Int8 is int8_t like Bool where bool
+# is missing, and printed as true/false. Every width, at its edges, as a
+# value, through view and mod, in a struct, a List and an opt; and Char still
+# prints as a character.
+type Sample {
+  small: Int8
+  wide: UInt32
+  letter: Char
+}
+
+func showView(narrow: view Int8, unsigned: view UInt32, letter: view Char) {
+  log("view: {narrow} {unsigned} {letter}")
+}
+
+func showMod(narrow: mod Int8, unsigned: mod UInt32) {
+  narrow = narrow + 1
+  unsigned = unsigned + 1
+  log("mod: {narrow} {unsigned}")
+}
+
+func main() {
+  let int8Low: Int8 = -128
+  let int8High: Int8 = 127
+  let int16Low: Int16 = -32768
+  let int32Low: Int32 = -2147483648
+  let int64Low: Int = -9223372036854775807
+  let uint8High: UInt8 = 255
+  let uint16High: UInt16 = 65535
+  let uint32Small: UInt32 = 15
+  let uint32High: UInt32 = 4294967295
+  let uint64High: UInt64 = 18446744073709551615
+  let letter: Char = 'R'
+  log("Int8 {int8Low} {int8High}, Int16 {int16Low}, Int32 {int32Low}, Int {int64Low}")
+  log(
+    "UInt8 {uint8High}, UInt16 {uint16High}, UInt32 {uint32Small} {uint32High}, UInt64 {uint64High}"
+  )
+  log("Char {letter}")
+  log("toString: {uint32Small.toString()} {int8Low.toString()} {letter.toString()}")
+  showView(narrow: int8Low, unsigned: uint32Small, letter: letter)
+  var narrow: Int8 = -2
+  var unsigned: UInt32 = 41
+  showMod(narrow: narrow, unsigned: unsigned)
+  let sample: Sample = { small: -5, wide: 7, letter: 'x' }
+  log("struct: {sample}")
+  let values: List(UInt32) = { 1, 15, 4294967295 }
+  log("list: {values}")
+  let maybe: opt UInt32 = 15
+  log("opt: {maybe}")
+}
