@@ -106,6 +106,20 @@ extern int rae_func_count_param_refs(const AstFuncDecl* fd, Str name);
 // Emit "rae_ext_rae_str(X)" for primitives, "rae_to_str_<Type>_(&X)" for user
 // structs. The _Generic-based macro can't be extended from generated code,
 // so user types route through the per-type function emitted in c_backend.c.
+// The runtime formatter of an integer type, by its Rae name (NULL for any
+// other type): rae_str_<width> in rae_runtime.h, which also accept a pointer
+// to the value (how a view/mod binding may be emitted).
+static const char* rae_int_formatter(Str base) {
+    if (str_eq_cstr(base, "Int8")) return "rae_str_int8";
+    if (str_eq_cstr(base, "Int16")) return "rae_str_int16";
+    if (str_eq_cstr(base, "Int32")) return "rae_str_int32";
+    if (str_eq_cstr(base, "UInt8")) return "rae_str_uint8";
+    if (str_eq_cstr(base, "UInt16")) return "rae_str_uint16";
+    if (str_eq_cstr(base, "UInt32")) return "rae_str_uint32";
+    if (str_eq_cstr(base, "UInt64")) return "rae_str_uint64";
+    return NULL;
+}
+
 static void emit_to_string_expr(CFuncContext* ctx, const AstExpr* operand, FILE* out) {
     const AstTypeRef* tr = infer_expr_type_ref(ctx, operand);
     // In a generic body the operand's type may be the parameter `T`: the
@@ -255,9 +269,17 @@ static void emit_to_string_expr(CFuncContext* ctx, const AstExpr* operand, FILE*
         && !has_property(d->as.type_decl.properties, "c_struct")
         && !d->as.type_decl.generic_params
         && !(tr && tr->is_opt);
+    // Integers by their Rae type (rae_int_to_str_expr): the _Generic below sees
+    // only C types, where UInt32 is Char's uint32_t and Int8 may be Bool's
+    // int8_t.
+    const char* int_formatter = (tr && !tr->is_opt) ? rae_int_formatter(base) : NULL;
     if (is_user_struct) {
         const char* mangled = rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = base}});
         fprintf(out, "rae_to_str_%s_(&(", mangled);
+        emit_expr(ctx, operand, out, PREC_LOWEST, false, false);
+        fprintf(out, "))");
+    } else if (int_formatter) {
+        fprintf(out, "%s((", int_formatter);
         emit_expr(ctx, operand, out, PREC_LOWEST, false, false);
         fprintf(out, "))");
     } else {
