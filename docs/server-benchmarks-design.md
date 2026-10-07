@@ -1,9 +1,9 @@
 # Server benchmarks: design
 
-**Status:** design, awaiting the maintainer's decisions (§10). Nothing is
-implemented. Written 2026-10-08; revised the same day: every Rae server is
-written in TWO styles, a plain event loop and ECS, to measure what the
-architecture costs (maintainer decision, §5).
+**Status:** design DECIDED (§10), implementation queued. Written
+2026-10-08. Every Rae server is written in TWO styles, a plain event loop and
+ECS, to measure what the architecture costs (maintainer decision, §5); in the
+ECS style connections are entities and requests are events (§7).
 
 A small suite that measures Rae servers against the same servers in Rust and
 JavaScript, before real web backends and game servers are written in Rae.
@@ -23,7 +23,7 @@ physics); does it hold up, and at what cost, for a server?
 | JSON | `lib/Json` (a parsed document + value builders) | enough for `{"message":"Hello, World!"}` and the shootout messages; serialisation speed is part of what phase 1 measures |
 | time | `nowNs()`, `sleep(ms:)`, `lib/Time` (log formatting) | an HTTP `Date` header (IMF-fixdate) and a sub-millisecond tick wait are missing (G4) |
 | hashing | monocypher (argon2, blake2b) in the runtime | no SHA-1 or base64, which the WebSocket handshake needs (G5) |
-| FFI | `unsafe extern("c_symbol")`, `cheader`, generated bindings (Box3D track B, `lib/webgpu`) | the libc socket API could be bound, but see fork F1: its macros, `errno`, `sockaddr` unions and variadic `fcntl` would leak unsafe C shapes into every server |
+| FFI | `unsafe extern("c_symbol")`, `cheader`, generated bindings (Box3D track B, `lib/webgpu`) | the libc socket API could be bound, but F1 chose a runtime module instead: its macros, `errno`, `sockaddr` unions and variadic `fcntl` would leak unsafe C shapes into every server |
 
 **The `view`/`mod`-not-in-structs rule shapes connection state** in both
 styles:
@@ -68,8 +68,8 @@ benchmarks/servers/                      A  committed
   javascript/bun/   Http.js  WebSocket.js  GameRoom.js
                                          A  Bun references (built-in server, no deps)
   loadClient/  Cargo.toml  Cargo.lock  src/main.rs
-                                         A  our WebSocket + game-room load/measure client (fork F4)
-  results/  summary.json  metadata.json  A  the latest dated baseline (fork F6)
+                                         A  our WebSocket + game-room load/measure client (F4)
+  results/  summary.json  metadata.json  A  the latest dated baseline (F6)
   build/                                 C  gitignored (benchmarks/**/build/ already is)
 ~/.cache/rae/servers/                    B  fetched: reference repos at pinned SHAs, built load tools
 ```
@@ -85,7 +85,7 @@ benchmarks/servers/                      A  committed
   lockfiles (A) pin them, the toolchains fetch them.
 - **C, generated:** `build/` (binaries, generated C), raw per-run results
   (`build/raw/*.json`), charts. Never committed, except the summary in
-  `results/` if fork F6 says so.
+  `results/` (F6).
 - Nothing external is copied into the repository, so no third-party licence
   is carried. If that changes, the copied file gets the one-line notice the
   repository's per-file copyright rule requires.
@@ -158,7 +158,7 @@ and commit them with lockfiles:
 
 | | HTTP | WebSocket / room |
 |---|---|---|
-| **Rust** | `hyper` 1.x on `tokio` (or `axum`, fork F3) | `tokio-tungstenite` |
+| **Rust** | `hyper` 1.x on `tokio` (F3) | `tokio-tungstenite` |
 | **Node** | built-in `node:http` | `ws` |
 | **Bun** | `Bun.serve` | `Bun.serve` websockets (built-in) |
 
@@ -190,8 +190,9 @@ measurable when the program is a server, and what it buys.
 
 **Reported per benchmark:**
 
-- both styles side by side, and the ECS/eventLoop ratio for every metric
-  (requests/s, p50/p99, RSS, tick duration and jitter);
+- both styles side by side (two Rae implementations of every phase, always),
+  and the ECS/eventLoop ratio for every metric (requests/s, p50/p99, RSS,
+  tick duration and jitter);
 - allocations per request or per tick (from `RAE_MEM_STATS`);
 - the source size of each server, excluding the shared library code.
 
@@ -232,97 +233,139 @@ list slot through an `IntMap`.
 ## 7. Style 2: ECS
 
 A server is a loop that turns events into state changes, which is a game
-loop's shape. The ECS server is a World per worker, with connections as
-entities and the request pipeline as systems run once per poll.
+loop's shape. The ECS server is a World per worker, run once per poll (one
+"frame"), built from the three kinds of thing Rae's UI and game worlds
+already use:
+
+- **entities** for things that LIVE across frames, have state that changes,
+  and are referred to later (widgets, bodies; here: connections);
+- **events** for things that HAPPEN: produced and consumed within one frame,
+  in an `EventQueue(T)` resource (`lib/ui` keeps `uiActions:
+  EventQueue(UiAction)`, the physics world keeps `contactBegan`, `hits`, …);
+- **resources** for singletons (fields of the World).
+
+The test for entity versus event is **lifetime, not count**. A request is
+parsed, routed, answered and encoded in the frame its bytes arrived, so it is
+an event. 4 096 requests in one frame (256 connections × 16 pipelined) are a
+4 096-element list. An `EventQueue` is a dense list walked front to back, the
+cache-friendly part of ECS, with no sparse lookup and no create/destroy per
+item: the queue's double buffer, swapped at the end of each frame, is the
+pool.
 
 **Entities**
 
-- **connection**: one per accepted socket, destroyed on close.
-- **request** (phase 1): fork F9 decides whether a request is its own entity
-  or components on its connection entity. The recommendation is components on
-  the connection, which avoids an entity per request.
-- **room** and **player** (phase 3): a player is the connection entity plus
+- **connection**: one per accepted socket, created on accept, destroyed on
+  close. It lives for seconds to minutes and is referred to across frames.
+- **room** (phase 3): one entity; a **player** is its connection entity plus
   game components.
 
-**Components** (all values; buffers are owned `List(UInt8)`-backed structs):
+**Events** (`EventQueue(T)` resources, one per type, cleared each frame):
+
+| event | carries | produced by → consumed by |
+|---|---|---|
+| `HttpRequest` | connection `EntityId`, sequence number, method (an enum), path and header byte ranges into the connection's `ReadBuffer` | httpParseSystem → dispatchSystem |
+| `WebSocketMessage` | connection `EntityId`, message kind, payload byte range | frameDecodeSystem → message systems |
+| `PlayerInputEvent` | connection `EntityId`, the decoded 32-byte input | inputSystem → tickSystem |
+
+Events carry **no heap of their own**: byte ranges point into the
+connection's `ReadBuffer`, which stays untouched until the frame's events are
+consumed. Producing one copies a few plain fields into a list that already
+has capacity: zero allocations per request after warmup, and the report
+checks it (`RAE_MEM_STATS`).
+
+**When a request outlives its frame** (it waits on a database or an upstream
+service; not in this benchmark, but every real backend has it), it stops
+being an event. The dispatch system *promotes* it to state on its connection:
+an `AwaitingResult` component holding the request's sequence number and
+ranges, whose `ReadBuffer` bytes are kept. A worker sends the result back
+over a channel, and a later system completes it and encodes the response. Only
+the long-lived requests pay for table storage.
+
+**Components** on connection entities (all values; buffers are owned
+`List(UInt8)`-backed structs):
 
 | component | meaning | phases |
 |---|---|---|
 | `Socket {socketId}` | the OS handle | all |
-| `Readable`, `Writable` | **tags**, set by the poll system for this iteration only | all |
+| `Readable`, `Writable` | **tags**, set by the poll system for this frame only | all |
 | `ReadBuffer`, `WriteBuffer` | bytes received / still to send | all |
-| `HttpParse` | incremental parser state (partial request line, headers) | 1, 2 (upgrade) |
-| `PendingRequests` | the parsed requests in arrival order (pipelining keeps replies in order) | 1 |
+| `HttpParse` | incremental parser state (a request split across reads) | 1, 2 (upgrade) |
 | `KeepAlive {idleSinceNs}` | idle timeout bookkeeping | 1, 2 |
+| `AwaitingResult` | a request promoted out of its frame (above) | real servers |
 | `Closing` | tag: flush, then destroy | all |
-| `WebSocketSession` | handshake done; frame decoder state | 2, 3 |
-| `IncomingMessages` | decoded messages of this iteration | 2, 3 |
-| `RoomMember {roomId}`, `PlayerInput`, `PlayerState` | game state | 3 |
+| `WebSocketSession` | handshake done; frame decoder state (a frame split across reads) | 2, 3 |
+| `RoomMember {roomId}`, `PlayerState` | game state | 3 |
 
-**Resources** (fields of the World, not entities): the listener, the poller
-and its readiness list, the socket-to-entity `IntMap`, the cached `Date`
-header, the tick clock and the room registry.
+**Resources** (fields of the World): the listener, the poller and its
+readiness list, the socket-to-entity `IntMap`, the event queues, the cached
+`Date` header, the tick clock, the room registry, and a buffer pool for the
+rare per-request heap that does outlive a frame (G8).
 
-**Systems, in this order, once per poll (one "frame"):**
+**Systems, in this order, once per frame:**
 
 1. **pollSystem**: wait for readiness and set the `Readable` / `Writable`
    tags. Every later system queries a tag table, so the work per frame is
-   proportional to the *active* connections, not to all of them (AGENTS.md's O(n)
-   rule; idle WebSocket clients cost nothing).
+   proportional to the *active* connections, not to all of them (AGENTS.md's
+   O(n) rule; idle WebSocket clients cost nothing).
 2. **acceptSystem**: accept pending sockets; allocate an entity with `Socket`,
    `ReadBuffer`, `WriteBuffer`, `HttpParse`, `KeepAlive`.
 3. **readSystem** (`Readable`): read into `ReadBuffer`; on end-of-stream, tag
    `Closing`.
-4. **httpParseSystem** (`ReadBuffer` + `HttpParse`): parse every complete
-   request into `PendingRequests`. An `Upgrade: websocket` request answers the
-   handshake and swaps components: it removes `HttpParse` and
-   `PendingRequests` and adds `WebSocketSession`. The connection's protocol
-   state machine is simply which components it has.
-5. **route systems**, one per route (`plaintextSystem`, `jsonSystem`,
-   `notFoundSystem`): each takes the requests for its path from
-   `PendingRequests` and appends the encoded response to `WriteBuffer`, in
-   request order.
+4. **httpParseSystem** (`ReadBuffer` + `HttpParse`): send an `HttpRequest`
+   event for every complete request, in arrival order. An `Upgrade:
+   websocket` request answers the handshake and swaps components: it removes
+   `HttpParse` and adds `WebSocketSession`. The connection's protocol state
+   machine is simply which components it has.
+5. **dispatchSystem**: walks the `HttpRequest` events in order and calls the
+   route's handler for each (`plaintextResponse`, `jsonResponse`,
+   `notFoundResponse`). The handlers are plain functions, not systems, which
+   append the encoded response to the connection's `WriteBuffer`. One system
+   in event order is what keeps a mixed pipeline (`/json` then `/plaintext`
+   on one connection) answered in request order: a system per route would
+   answer in system order instead.
 6. phase 2: **frameDecodeSystem** (`WebSocketSession` + `ReadBuffer` →
-   `IncomingMessages`), **echoSystem**, **broadcastSystem** (a query over
-   every `WebSocketSession` writes into every `WriteBuffer`).
-7. phase 3: **inputSystem** (messages → `PlayerInput`), then at the 30 Hz
-   deadline **tickSystem** (inputs → `PlayerState`) and **snapshotSystem**
-   (one snapshot per tick, encoded once, appended to every `RoomMember`'s
-   `WriteBuffer`).
+   `WebSocketMessage` events), then **messageSystem** (echo: append to the
+   sender's `WriteBuffer`; broadcast: encode once, append to every
+   `WebSocketSession`'s `WriteBuffer`, then the `broadcastResult`).
+7. phase 3: **inputSystem** (messages → `PlayerInputEvent`), then at the
+   30 Hz deadline **tickSystem** (input events → `PlayerState`) and
+   **snapshotSystem** (one snapshot per tick, encoded once, appended to every
+   `RoomMember`'s `WriteBuffer`).
 8. **writeSystem** (`WriteBuffer` non-empty): write what the socket takes;
    keep the rest (and register for `Writable`).
 9. **timeoutSystem** and **closeSystem**: tag idle connections `Closing`;
    destroy `Closing` entities whose `WriteBuffer` has drained, freeing the
    socket and the entity.
+10. **end of frame**: consume the read bytes the events pointed into, and
+    `frameAdvance` every event queue.
 
-A system takes the tables it touches as parameters, as `lib/water/Buoyancy`
-does, so each one says in its signature what it reads and writes:
+A system takes the tables and queues it touches as parameters, as
+`lib/water/Buoyancy` does, so each one says in its signature what it reads
+and writes:
 
 ```rae
-func readSystem(
-  sockets: view ComponentTable(Socket)
-  readables: view ComponentTable(Readable)
-  readBuffers: mod ComponentTable(ReadBuffer)
-  closings: mod ComponentTable(Closing)
+func dispatchSystem(
+  requests: view EventQueue(HttpRequest)
+  readBuffers: view ComponentTable(ReadBuffer)
+  writeBuffers: mod ComponentTable(WriteBuffer)
+  dateHeader: view String
 ) {
-  loop let entityId: EntityId, readable: view Readable, input: mod ReadBuffer in query2(
-    tableA: readables
-    tableB: readBuffers
-  ) {
+  loop var i: Int = 0, i < eventCount(HttpRequest, this: requests), ++i {
+    let request: HttpRequest = eventAt(HttpRequest, this: requests, i: i)
     ...
   }
 }
 ```
 
-(The sketch shows the shape: the query-loop and table syntax are today's
-`lib/ecs`; `Readable` and `ReadBuffer` are the proposed G8 components.)
+(The sketch shows the shape: the queue, table and loop syntax are today's
+`lib/ecs` and Rae; `HttpRequest`, `ReadBuffer` and `WriteBuffer` are the
+proposed G6/G8 types.)
 
 **What ECS buys a server:**
 
-- **No callbacks and no `async`.** "Waiting" is a component: a request that
-  needs a slow resource gets `AwaitingResult`, a worker sends the answer back
-  over a channel, and a later system completes it. Rae has neither callbacks
-  nor `async`, so this is the natural way to write it.
+- **No callbacks and no `async`.** "Waiting" is a component (`AwaitingResult`)
+  that a later system completes. Rae has neither callbacks nor `async`, so
+  this is the natural way to write it.
 - **Batching.** Every ready socket of one poll goes through each stage
   together, which is the "parse everything, answer in one write" behaviour
   that pipelining rewards.
@@ -330,20 +373,18 @@ func readSystem(
   call. That is the `view`/`mod`-not-in-structs rule exactly, with no
   connection objects holding references.
 - **Testable without a network.** Put bytes in a `ReadBuffer`, run the parse
-  and route systems, check the `WriteBuffer`.
-- **Observability.** The count of entities with `PendingRequests` is a
-  metric, and the same tooling as the UI and game worlds applies.
+  and dispatch systems, check the `WriteBuffer`.
+- **Observability.** Requests per frame is an event count, open connections
+  an entity count, and the same tooling as the UI and game worlds applies.
 
 **What it costs, or might (the measurement decides):**
 
 - **Iteration.** Every frame runs every system. Systems over empty tag tables
-  are cheap but not free.
-- **Component churn.** Adding and removing tags and requests each frame costs
-  table updates where the event loop only changes a field.
+  and queues are cheap but not free.
+- **Tag churn.** Setting and clearing the readiness tags each frame costs
+  table updates where the event loop just handles the event.
 - **Indirection.** One connection's data is spread over several tables
   instead of one struct.
-- **Ordering** is bookkeeping, not free: replies must leave in request order,
-  hence `PendingRequests` as an ordered list per connection.
 - **One slow system stalls the frame.** That is the same rule as any event
   loop: blocking work becomes "start, a component, finish later", never a
   wait inside a system.
@@ -363,10 +404,10 @@ func readSystem(
 - `check.sh` validates every spec rule: status, body, required headers,
   pipelined order, the echo / broadcast / broadcastResult shapes, the tick
   rate. Both Rae styles must pass the same checks. It is the only piece that
-  could join the normal suite later (fork F7).
+  joins the normal suite once it exists (F7).
 - Load generators: `oha` for HTTP (`cargo install`, JSON output with
-  latency percentiles; fork F2 on pipelining) and our `loadClient` (Rust) for
-  phases 2–3.
+  latency percentiles), `wrk` with a committed Lua script for the pipelined
+  plaintext case only (F2), and our `loadClient` (Rust) for phases 2–3.
 - **Fairness on macOS** (no cgroups; thread affinity is only a hint):
   - same machine, nothing else heavy running: the runner refuses to start
     when the 1-minute load average is above a threshold (overridable), and
@@ -388,8 +429,9 @@ func readSystem(
     the Rae commit, and the load average.
 - **Dependencies:** `run.sh` and `fetch.sh` check for them, name each missing
   one with its install command, and exit non-zero.
-  - Needed: the Rust toolchain, `oha` (`cargo install oha`), Node and Bun; Go
-    only if fork F4 picks `websocket-bench`.
+  - Needed: the Rust toolchain, `oha` (`cargo install oha`), `wrk` (`brew
+    install wrk`, for pipelined plaintext only), Node and Bun. Go is not
+    needed (F4).
   - On this machine today, cargo, node and bun are present; oha, wrk,
     bombardier and go are not.
 
@@ -401,13 +443,13 @@ benchmark-only hack: each is stdlib a real server needs.
 
 | # | ticket | size | notes |
 |---|---|---|---|
-| G1 | `lib/net`: TCP listen/accept/connect/read/write/close on value handles (`SocketId`), non-blocking, `TCP_NODELAY`, `SO_REUSEADDR`; errors as values (`opt` / result enums), never `errno` | L | runtime C (`runtime_net.c`) behind a small handle API, the FileNotify pattern (fork F1) |
+| G1 | `lib/net`: TCP listen/accept/connect/read/write/close on value handles (`SocketId`), non-blocking, `TCP_NODELAY`, `SO_REUSEADDR`; errors as values (`opt` / result enums), never `errno` | L | runtime C (`runtime_net.c`) behind a small handle API, the FileNotify pattern (F1) |
 | G2 | `lib/net` poller: kqueue (macOS) / epoll (Linux) readiness, `wait(timeoutMs)` filling a caller-owned `List(Readiness)` (no allocation per wait) | M | used by both styles |
 | G3 | a byte buffer for I/O: append, consume from the front, find a byte sequence, view a range as a `String` without copying, reuse without reallocating | M | read and write buffers per connection |
 | G4 | time for servers: IMF-fixdate (`Date:` header, cached once a second), a monotonic sub-ms clock and a tick wait that sleeps until a deadline | S | `nowNs()` exists; `sleep(ms:)` is too coarse for a 30 Hz tick |
 | G5 | SHA-1 and base64 (WebSocket handshake), in the runtime next to monocypher | S | |
 | G6 | `lib/http` (HTTP/1.1 request parser, response encoder, pipelining, keep-alive) and `lib/webSocket` (upgrade, frame codec, masking) in plain Rae on G1–G5, as functions over bytes with no I/O and no architecture | L | shared by both styles |
-| G8 | `lib/net/ecs`: the server components (§7 table) and systems (accept, read, write, timeout, close, frame decode) with the readiness tags, on `lib/ecs` | M | the reusable ECS server core; the benchmark's ECS servers add only route / room systems |
+| G8 | `lib/net/ecs`: the server components and event types (§7), the systems (poll with readiness tags, accept, read, parse into `EventQueue(HttpRequest)`, write, timeout, close, frame decode), the end-of-frame consume + `frameAdvance`, the promotion to `AwaitingResult`, and a World buffer pool, on `lib/ecs` | M | the reusable ECS server core; the benchmark's ECS servers add only route handlers and room systems |
 | G7 | measure, then fix if needed: `Json` serialisation and `String` building cost per request (no ticket until phase 1 numbers show a problem) | — | listed so the result is read correctly |
 
 **Phasing** (each phase lands both Rae styles together):
@@ -418,71 +460,44 @@ benchmark-only hack: each is stdlib a real server needs.
 3. Phase 3 on the same code: only the room logic, the tick and the snapshot
    system are new.
 
-## 10. Decisions for the maintainer
+## 10. Decisions (2026-10-08)
 
-1. **F1: sockets as a runtime C module, or bound libc?**
-   - (a) `runtime_net.c` with a handle API, like FileNotify; Rae never sees
-     `errno` or `sockaddr`.
-   - (b) Bind `<sys/socket.h>` and `<sys/event.h>` with the generated-bindings
-     tool and write the rest in Rae.
+Settled with the maintainer: F9 (requests are events) and "two Rae
+implementations of every phase, eventLoop and ECS" are the maintainer's.
+The rest are the design's defaults, which the maintainer asked to be taken as
+decided.
 
-   *Recommend (a):* the libc surface is macros, unions and `errno`, i.e.
-   `unsafe` in every server.
-2. **F2: the HTTP load tool.**
-   - (a) `oha` only: it installs with cargo and has JSON output, but no
-     pipelining, so plaintext is measured without it.
-   - (b) `oha` plus `wrk` for the pipelined plaintext case (brew, Lua
-     script).
-
-   *Recommend (b)* if pipelining matters to you; (a) is simpler.
-3. **F3: the Rust HTTP reference.** `hyper` directly (closest to raw speed)
-   or `axum` (what people actually write). *Recommend hyper* for phase 1,
-   since the comparison is about the server core.
-4. **F4: the WebSocket load tool.**
-   - (a) Our own `loadClient` in Rust, which phase 3 needs anyway (jitter is
-     measured client-side).
-   - (b) The shootout's Go `websocket-bench` for phase 2 (needs Go, 2016
-     code).
-
-   *Recommend (a).*
-5. **F5: the concurrency model of both Rae styles.**
-   - (a) One event loop or World per core: readiness polling, non-blocking
-     sockets, and an acceptor handing sockets to workers over a channel.
-   - (b) A blocking thread per connection: much simpler and fine for phase 1,
-     but it cannot hold thousands of WebSocket clients, and it has no frame
-     for ECS systems to run in.
-
-   *Recommend (a).*
-6. **F6: commit results?**
-   - (a) Like `benchmarks/list_access`: a dated `results/summary.json` and
-     `metadata.json` baseline, regenerated by hand after relevant changes.
-   - (b) Results stay local.
-
-   *Recommend (a):* it is the repository's existing practice, and a baseline
-   makes regressions visible.
-7. **F7: the checker in the normal suite?**
-   - After phase 1 lands, run `check.sh` against both Rae HTTP servers (seconds,
-     no load) as one pre-suite case.
-   - Or keep everything under `make bench-servers`.
-
-   *Recommend adding it* once it exists: it guards `lib/net` / `lib/http` /
-   `lib/net/ecs` correctness, not speed.
-8. **F8: Linux numbers.** Is a Linux machine (epoll, `taskset`) in scope
-   later, or is macOS the only target for now? It decides whether G2 does
-   epoll in the first pass.
-9. **F9: ECS requests as entities, or components on the connection?**
-   - (a) Components on the connection entity (`PendingRequests`, an ordered
-     list), so there is no entity per request.
-   - (b) An entity per request, linked to its connection: purer, but it costs
-     an entity allocate/free per request.
-
-   *Recommend (a).* (b) could be a third measured variant if the first results
-   make it interesting.
-10. **F10: how ECS-pure the ECS servers are.**
-    - (a) Use the `lib/ecs` `Schedule` (dirty-skipping) to run the systems.
-    - (b) Call the systems in a fixed order from the loop, as the physics and
-      vehicle apps do.
-
-    *Recommend (b)* for the benchmark: the readiness tags already skip idle
-    work, and a schedule's bookkeeping would be measured as ECS cost when it
-    is a separate feature.
+1. **F1 Sockets: a runtime C module.** `runtime_net.c` behind value handles
+   (the FileNotify pattern). Rae never sees `errno`, `sockaddr` or `fcntl`;
+   errors come back as values.
+2. **F2 Load tools: `oha` for HTTP, and `wrk` only for pipelined plaintext.**
+   The spec requires pipelining, and `oha` cannot pipeline. `wrk` (brew) runs
+   just that one case through a small committed Lua script. If `wrk` is
+   missing, the runner skips the case and says why.
+3. **F3 Rust HTTP: `hyper` 1.x on `tokio`.** The comparison is about the
+   server core; `axum` can be added later as "what people write".
+4. **F4 WebSocket load: our own `loadClient` in Rust.** Phase 3 needs it
+   anyway, it sits on the same toolchain as the references, and Go is not
+   needed.
+5. **F5 Concurrency: one event loop or World per core.** Readiness polling,
+   non-blocking sockets, and an acceptor handing sockets out over a channel.
+   Both Rae styles use it (an ECS frame needs a poll to run on).
+6. **F6 Results: committed.** As `benchmarks/list_access` does: a dated
+   `results/summary.json` and `metadata.json` baseline, regenerated by hand
+   after changes that can move the numbers.
+7. **F7 Checker: in the normal suite once it exists.** After phase 1,
+   `check.sh` runs against both Rae HTTP servers as one pre-suite case
+   (seconds, no load). It guards correctness, never speed.
+8. **F8 Platform: macOS first, epoll second.** G2's API is shaped for both,
+   but the first pass implements kqueue only. Linux and epoll come when a
+   Linux machine is in use; `taskset`-pinned Linux runs then become the
+   reference numbers.
+9. **F9 Requests are EVENTS, not entities** (maintainer, §7). The rule is
+   lifetime, not count: a request lives one frame, so it goes in an
+   `EventQueue(HttpRequest)`; connections are the entities. A request that
+   outlives its frame is promoted to an `AwaitingResult` component on its
+   connection. A dispatch system walks the events in order, so pipelined
+   replies keep request order.
+10. **F10 Systems in a fixed order, called from the loop.** No `Schedule`.
+    The readiness tags already skip idle work, and a schedule's bookkeeping
+    would be measured as ECS cost when it is a separate feature.
