@@ -277,6 +277,9 @@ static bool sema_file_declares_package(const char* file, const AstDecl* d, bool 
     if (!d->module_name) return false;
     const char* mod = d->module_name;
     size_t mlen = strlen(mod);
+    char pkg[256] = {0};
+    if (d->origin_file) sema_package_token(d->origin_file, pkg, sizeof pkg);
+    bool project_decl = d->origin_file && pkg[0] == '\0';
     for (AstImport* im = sema_imports_for_file(file); im; im = im->next) {
         if (require_open && !im->is_open) continue;
         if (!im->path.data) continue;
@@ -284,6 +287,12 @@ static bool sema_file_declares_package(const char* file, const AstDecl* d, bool 
         if (n == 0) continue;
         if (n == mlen && memcmp(ip, mod, n) == 0) return true;                       // exactly this module
         if (n < mlen && memcmp(ip, mod, n) == 0 && mod[n] == '/') return true;        // the whole package
+        // A PROJECT module's name is root-relative (`tests/x/alpha/Values`) and
+        // depends on where the root was inferred, so its package path
+        // (`open alpha/Values`) matches the end of it, as the file-component
+        // rule does for qualifiers (#816). Lib modules keep the exact rule.
+        if (project_decl && n < mlen && mod[mlen - n - 1] == '/' && memcmp(mod + mlen - n, ip, n) == 0)
+            return true;
     }
     return false;
 }

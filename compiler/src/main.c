@@ -114,6 +114,11 @@ typedef struct {
   // the project — in that case the implicit scan uses the entry file's own
   // directory instead. (docs/module-namespacing.md)
   bool explicit_root;
+  // The entry file's directory when the root was NOT explicit: the implicit
+  // project, whose files the implicit scan loads. A package path import or
+  // open (`open alpha/Values`) also resolves there, after the root, lib and
+  // folder packages.
+  char* entry_dir;
   Arena* arena;
 } ModuleGraph;
 
@@ -1207,6 +1212,8 @@ static void module_graph_free(ModuleGraph* graph) {
   graph->head = graph->tail = NULL;
   free(graph->root_path);
   graph->root_path = NULL;
+  free(graph->entry_dir);
+  graph->entry_dir = NULL;
 }
 
 static void watch_sources_init(WatchSources* sources) {
@@ -1791,6 +1798,23 @@ static bool module_graph_load_module(ModuleGraph* graph,
           free(child_file);
           continue;
         }
+        // The implicit project (the entry's directory): a project module
+        // opened by its package path. Loaded under the module path the
+        // implicit scan gives the same file, so it is one module, not two.
+        if (graph->entry_dir) {
+          char project_file[PATH_MAX];
+          snprintf(project_file, sizeof project_file, "%s/%s.rae", graph->entry_dir, normalized);
+          if (file_exists(project_file)) {
+            char* project_module = derive_module_path(graph->root_path, project_file);
+            bool loaded = project_module
+              && module_graph_load_module(graph, project_module, project_file, &frame, hash_out, no_implicit);
+            free(project_module);
+            free(normalized);
+            free(child_file);
+            if (!loaded) return false;
+            continue;
+          }
+        }
         fprintf(stderr, "error: imported module '%s' not found (required by '%s')\n", normalized,
                 module_path ? module_path : "<entry>");
         module_stack_print_trace(&frame, normalized);
@@ -1917,6 +1941,11 @@ static bool module_graph_build(ModuleGraph* graph, const char* entry_file, uint6
   if (!module_path) {
     free(resolved_entry);
     return false;
+  }
+  if (!graph->explicit_root) {
+    graph->entry_dir = strdup(resolved_entry);
+    char* entry_slash = graph->entry_dir ? strrchr(graph->entry_dir, '/') : NULL;
+    if (entry_slash) *entry_slash = '\0';
   }
   bool ok = module_graph_load_module(graph, module_path, resolved_entry, NULL, hash_out, no_implicit);
   if (!ok) {

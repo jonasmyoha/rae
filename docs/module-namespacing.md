@@ -77,6 +77,15 @@ the types the compiler itself understands (`List`); collections = pure-Rae
 libraries over `List`/`Buffer` that you import. See `docs/collections.md`.
 
 
+**Picking one of two project modules.** When two project files declare the
+same name, a bare read of it is ambiguous; a file picks one by opening it by
+its package path, relative to the project: `open alpha/Values` (2026-10-07,
+fixture 1016). This works with or without `--project`: without it, the
+project is the entry file's directory, and the open resolves there and
+matches the module whatever root-relative name the scan gave it. (A
+file-relative `open "../alpha/Values"` is not an import form; relative
+imports are an error.)
+
 **Project root.** The tree is scanned from the project root. `--project <dir>`
 sets that root explicitly, so an entry deep in the tree still sees the whole
 project:
