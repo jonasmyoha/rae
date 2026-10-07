@@ -94,6 +94,77 @@ parking a thread. For a server, that is how "call service A, then B, then
 reply" stays straight-line code instead of a hand-written state machine in
 components.
 
+### 3.1 Fork-join recursion: the lesson from Bend
+
+**Bend** (HigherOrderCO, Victor Taelin) is a language built around massively
+parallel divide-and-conquer.
+
+- **Bend 1** (2024, on the HVM2 runtime) parallelised everything implicitly.
+  It evaluated programs as interaction nets over immutable data, with no
+  annotations at all. Divide-and-conquer code then spread over thousands of
+  CPU or GPU threads. Its cost was single-thread speed: by its own README and
+  independent benchmarks, 10–50x slower than C, with linked-list arrays
+  (O(i) indexing) and high memory use.
+- **Bend 2** ("a new language; Bend 1 programs and HVM do not carry over")
+  reverses most of that:
+  - "everything is annotated and nothing is inferred";
+  - parallel and GPU execution are marked at the call (`pow2!(20n)`);
+  - values are **affine** (closures and arrays cannot be shared);
+  - it has dependent types and machine-checked proofs (`LAWS.bend`);
+  - it compiles to C, Metal, CUDA and JavaScript;
+  - its README *claims* hand-written-C speed on one core (no published
+    numbers there yet).
+
+Its model of parallelism is the same idea as Bend 1's, now explicit: "split
+the work in two, and Bend spreads the calls over every core it can find, then
+joins them back."
+
+**What Rae takes from it.** Bend 2 has converged on what Rae already has: an
+explicit marker at the call site, plus values with one owner. Rae's version
+is `spawn` with `own`/`copy` arguments and frozen `let`s. What Bend does that
+Rae cannot do cheaply today is **fork-join recursion**, that is splitting in
+two, solving both halves concurrently and combining:
+
+```rae
+func parallelSum(numbers: view List(Int), start: copy Int, count: copy Int) ret Int {
+  if count < 4096 {
+    ret sequentialSum(numbers: numbers, start: start, count: count)
+  }
+  let half: Int = count / 2
+  let left: Task(Int) = spawn sumRange(start: start, count: half)
+  let right: Int = parallelSum(numbers: numbers, start: start + half, count: count - half)
+  ret left.get() + right
+}
+```
+
+(A sketch: in real code the spawned half takes its slice by `copy` or `own`,
+since a `spawn`'s arguments cannot borrow from the caller. Making the halves
+share read-only data without copying is part of what S3 measures.)
+
+With an OS thread per `spawn`, a recursion like this costs a thread per split,
+and `get()` parks a whole thread, so it only pays off for very coarse
+splits. With lightweight tasks on a work-stealing pool (§4.3) it becomes the
+cheap, natural way to use every core. The pattern goes back to Cilk; it is
+how Go, Rayon (Rust) and Bend all do it.
+
+So fork-join recursion is a **first-class target** of this design:
+
+- S1 benchmarks it with today's threads;
+- S3 must make it scale: near-linear speedup on 8 cores for a recursion down
+  to small leaves, with no hand-tuned cut-off beyond a leaf size.
+
+**What Rae does not take:**
+
+- implicit parallelism (Bend 1's, which Bend 2 itself dropped);
+- interaction-net runtimes and pointer-heavy data (Rae is data-oriented:
+  dense lists and ECS tables);
+- the proof system.
+
+A possible later construct, "run these independent calls in parallel" with
+independence proven from parameter modes (no shared `mod` argument), is fork
+F9: new syntax, only if `taskScope` + `spawn` reads too heavily once spawn is
+cheap.
+
 ## 4. Implementation: stackless, inferred
 
 ### 4.1 Which functions become resumable (the inference)
@@ -233,8 +304,9 @@ inserts. The options (fork F3):
 
 ## 8. Phasing (if approved)
 
-1. Measure first: the server phases 1–3 with thread-per-`spawn`, plus a
-   microbenchmark (spawn and join 100 000 tasks; 10 000 concurrent sleeps).
+1. Measure first: the server phases 1–3 with thread-per-`spawn`, plus
+   microbenchmarks (spawn and join 100 000 tasks; 10 000 concurrent sleeps;
+   fork-join recursion, §3.1, against its sequential version).
 2. The may-wait analysis, with a report only (`rae build --report-waits`):
    which functions would become resumable, and how many.
 3. Resumable codegen for `Task.get` and `sleep` only, on the existing worker
@@ -263,3 +335,8 @@ inserts. The options (fork F3):
    minimal C (threads, atomics, poller), per the runtime rule (recommended),
    versus a C scheduler.
 8. **F8 When:** after the server phase 1 numbers exist (recommended), or now.
+9. **F9 A parallel-calls construct:** later, and only if `taskScope` +
+   `spawn` reads too heavily for fork-join once spawn is cheap: a construct
+   that runs independent calls in parallel, with independence proven from
+   parameter modes (§3.1). It is new syntax, so it needs approval. Not now
+   (recommended).
