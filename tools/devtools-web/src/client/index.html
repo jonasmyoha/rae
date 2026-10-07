@@ -241,16 +241,19 @@
             <button id="stats-view-refresh" type="button">Refresh</button>
           </div>
         </section>
-        <section class="panel panel--full stats-card" id="stats-speed-panel">
+        <section class="panel stats-card" id="stats-speed-panel">
           <header>
             <h3>Compiler speed</h3>
-            <p class="panel-subtitle">Rae source lines per second the compiler parses, checks and emits as C (no C compiler), on one standard program, <code>examples/119_ocean_fft</code> with its stdlib. Measured on every full test run by <code>compiler/tools/compiler-speed.sh</code>; higher is faster. Points before 2026-10-07 come from that example's recorded dashboard builds.</p>
+            <p class="panel-subtitle">How fast the compiler turns Rae into C, in lines per second: higher is faster. Always the same program, <code>examples/119_ocean_fft</code> (~39k lines with its stdlib), measured on every full test run.</p>
           </header>
           <div class="line-chart-container">
             <canvas id="compiler-speed-chart" aria-label="Compiler speed chart"></canvas>
             <p class="line-chart-empty" id="compiler-speed-empty">No compiler speed recorded yet.</p>
           </div>
-          <p class="line-chart-summary" id="compiler-speed-summary"></p>
+          <ul class="stats-list" id="stats-speed-list">
+            <li class="stats-empty">Open the Statistics view to load data.</li>
+          </ul>
+          <button class="stats-more-btn" id="stats-speed-more" hidden>More...</button>
         </section>
         <section class="panel stats-card" id="stats-tests-panel">
           <header>
@@ -280,7 +283,7 @@
           </ul>
           <button class="stats-more-btn" id="stats-builds-more" hidden>More...</button>
         </section>
-        <section class="panel panel--full stats-card" id="stats-linecount-panel">
+        <section class="panel stats-card" id="stats-linecount-panel">
           <header>
             <h3>Compiler line count</h3>
             <p class="panel-subtitle">Snapshots collected from <code>tools/stats/update_metrics.sh</code></p>
