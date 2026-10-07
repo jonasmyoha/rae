@@ -1,7 +1,14 @@
 # Lightweight `spawn`: design
 
-**Status:** design only, for the maintainer's decisions (§9). Nothing is
-implemented and nothing is queued beyond this document. Written 2026-10-08.
+**Status:** design, queued 2026-10-08 as five tasks (S1–S5, following §8).
+Nothing is implemented. The tasks take §9's recommendations as working
+decisions unless the maintainer changes a fork here. S1 measures first and
+says whether the numbers justify continuing (F8).
+
+- S1 and S2 (measure; the may-wait report) sit right after the server phase 1
+  task.
+- S3–S5 (codegen and scheduler; socket waits and the browser; blocking externs
+  and fairness) sit after the server phase 3 task.
 
 **In one paragraph.** Rae keeps its "reversed await" syntax: concurrency is
 marked at the call site with `spawn`, functions are never coloured, and
