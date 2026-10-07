@@ -6,6 +6,7 @@
 #include "pretty.h"
 #include "pretty_internal.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 /* An import path is written bare (`ui/renderSystem/RenderSystem`) unless it
@@ -37,14 +38,24 @@ static void pp_print_import(PrettyPrinter* pp, const AstImport* imp) {
   pp_newline(pp);
 }
 
+/* Whether a comment contains `needle`. A lexeme points into the source and is
+ * not terminated, so strstr ran to the end of the FILE for every comment
+ * (quadratic in file length) and could match a later comment's marker. */
+static bool comment_contains(Str comment, const char* needle) {
+  size_t needle_len = strlen(needle);
+  for (size_t i = 0; i + needle_len <= comment.len; i++)
+    if (memcmp(comment.data + i, needle, needle_len) == 0) return true;
+  return false;
+}
+
 static void collect_verbatim_ranges(PrettyPrinter* pp, const AstModule* module) {
   size_t off_line = 0;
   for (size_t i = 0; i < module->comment_count; i++) {
     const Token* c = &module->comments[i];
     if (c->kind != TOK_COMMENT) continue;
-    if (strstr(c->lexeme.data, "raefmt: off")) {
+    if (comment_contains(c->lexeme, "raefmt: off")) {
       if (off_line == 0) off_line = c->line;
-    } else if (strstr(c->lexeme.data, "raefmt: on")) {
+    } else if (comment_contains(c->lexeme, "raefmt: on")) {
       if (off_line != 0) {
         if (pp->verbatim_count < PP_MAX_VERBATIM) {
           pp->verbatim_ranges[pp->verbatim_count++] = (VerbatimRange){off_line, c->line};
@@ -73,6 +84,16 @@ void pretty_print_module(const AstModule* module, const char* source, FILE* out)
       .source = source,
       .verbatim_count = 0,
   };
+  if (source) {
+    size_t count = 1;
+    for (const char* p = source; *p; p++) if (*p == '\n') count++;
+    pp.line_starts = malloc(count * sizeof(char*));
+    if (pp.line_starts) {
+      pp.line_starts[0] = source;
+      for (const char* p = source; *p; p++) if (*p == '\n') pp.line_starts[pp.line_count++ + 1] = p + 1;
+      pp.line_count++;
+    }
+  }
   collect_verbatim_ranges(&pp, module);
 
   size_t last_verbatim_end = 0;
@@ -143,4 +164,5 @@ void pretty_print_module(const AstModule* module, const char* source, FILE* out)
   pp.block_start = false;
   pp_flush_comments_before(&pp, (size_t)-1);
   if (!pp.start_of_line) pp_newline(&pp);
+  free(pp.line_starts);
 }

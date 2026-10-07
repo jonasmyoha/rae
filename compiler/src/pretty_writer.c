@@ -148,8 +148,13 @@ PrettyPrinter pp_measure_begin(const PrettyPrinter* pp) {
 
 /* ---- source lines ---- */
 
-static const char* get_line_ptr(const char* source, size_t line) {
+static const char* get_line_ptr(const PrettyPrinter* pp, size_t line) {
+  const char* source = pp->source;
   if (!source) return NULL;
+  if (pp->line_starts && line >= 1) {
+    if (line <= pp->line_count) return pp->line_starts[line - 1];
+    return pp->line_starts[pp->line_count - 1] + strlen(pp->line_starts[pp->line_count - 1]);
+  }
   const char* p = source;
   size_t current = 1;
   while (current < line && *p) {
@@ -160,7 +165,7 @@ static const char* get_line_ptr(const char* source, size_t line) {
 }
 
 bool pp_source_line_is_blank(const PrettyPrinter* pp, size_t line) {
-  const char* p = get_line_ptr(pp->source, line);
+  const char* p = get_line_ptr(pp, line);
   if (!p) return false;
   while (*p && *p != '\n') {
     if (!isspace((unsigned char)*p)) return false;
@@ -175,10 +180,10 @@ void pp_blank_line_before(PrettyPrinter* pp, size_t line) {
 }
 
 void pp_print_verbatim_range(PrettyPrinter* pp, size_t start_line, size_t end_line) {
-  const char* start = get_line_ptr(pp->source, start_line);
+  const char* start = get_line_ptr(pp, start_line);
   /* A `# raefmt: off` with no matching `on` runs to the end of the file. */
   const char* end = (end_line == (size_t)-1) ? pp->source + strlen(pp->source)
-                                             : get_line_ptr(pp->source, end_line + 1);
+                                             : get_line_ptr(pp, end_line + 1);
   if (start && end && end > start) {
     if (pp->out) fwrite(start, 1, (size_t)(end - start), pp->out);
     pp->start_of_line = 1;
