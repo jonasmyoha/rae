@@ -94,9 +94,10 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
                         receiver_cap = rae_array_ref_cap(recv_tr);
                     }
                     const AstFuncDecl* generic_fallback = NULL;
-                    for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count && !d; i++) {
-                        const AstDecl* dd = ctx->compiler_ctx->all_decls[i];
-                        if (dd->kind != AST_DECL_FUNC || !str_eq(dd->as.func_decl.name, callee->as.ident)) continue;
+                    size_t named_count = 0;
+                    const size_t* named = decl_index_functions(ctx->compiler_ctx, callee->as.ident, &named_count);
+                    for (size_t k = 0; k < named_count && !d; k++) {
+                        const AstDecl* dd = ctx->compiler_ctx->all_decls[named[k]];
                         uint16_t pc = 0; for (const AstParam* pp = dd->as.func_decl.params; pp; pp = pp->next) pc++;
                         if (pc != param_count) continue;
                         // Skip specialization clones — they would force their own concrete
@@ -203,10 +204,9 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
                     || is_pointer_type(ctx, obj_name);
                 bool fn_exists = false;
                 if (!obj_has_value) {
-                    for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count && !fn_exists; i++) {
-                        const AstDecl* dd = ctx->compiler_ctx->all_decls[i];
-                        fn_exists = dd->kind == AST_DECL_FUNC && str_eq(dd->as.func_decl.name, expr->as.method_call.method_name);
-                    }
+                    size_t named_count = 0;
+                    decl_index_functions(ctx->compiler_ctx, expr->as.method_call.method_name, &named_count);
+                    fn_exists = named_count > 0;
                 }
                 if (fn_exists) {
                     AstExpr* synth_call = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstExpr));
@@ -315,11 +315,17 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
                 const AstTypeRef* elem_type = ctx->expected_type.generic_args;
                 const AstFuncDecl* create_fd = NULL;
                 const AstFuncDecl* add_fd = NULL;
-                for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
-                    const AstDecl* d = ctx->compiler_ctx->all_decls[i];
-                    if (d->kind != AST_DECL_FUNC) continue;
-                    if (str_eq_cstr(d->as.func_decl.name, "createList") && d->as.func_decl.generic_params) create_fd = &d->as.func_decl;
-                    if (str_eq_cstr(d->as.func_decl.name, "add") && d->as.func_decl.generic_params) add_fd = &d->as.func_decl;
+                // The LAST generic createList / add in list order, as the scan found
+                size_t named_count = 0;
+                const size_t* named = decl_index_functions(ctx->compiler_ctx, str_from_cstr("createList"), &named_count);
+                for (size_t k = 0; k < named_count; k++) {
+                    const AstDecl* d = ctx->compiler_ctx->all_decls[named[k]];
+                    if (d->as.func_decl.generic_params) create_fd = &d->as.func_decl;
+                }
+                named = decl_index_functions(ctx->compiler_ctx, str_from_cstr("add"), &named_count);
+                for (size_t k = 0; k < named_count; k++) {
+                    const AstDecl* d = ctx->compiler_ctx->all_decls[named[k]];
+                    if (d->as.func_decl.generic_params) add_fd = &d->as.func_decl;
                 }
                 if (create_fd) register_function_specialization(ctx->compiler_ctx, create_fd, elem_type);
                 if (add_fd) register_function_specialization(ctx->compiler_ctx, add_fd, elem_type);

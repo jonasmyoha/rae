@@ -7,6 +7,7 @@
 #include "mangler.h"
 #include "ownership.h"
 #include "c_backend.h"
+#include "c_decl_index.h"
 #include "progress.h"
 #include <string.h>
 #include <errno.h>
@@ -409,12 +410,24 @@ struct Symbol {
     double const_d;
     long long const_i;
     Symbol* next;
+    /* The next symbol OF THE SAME NAME in `next` order (SymbolTable.byName) */
+    Symbol* sameNext;
 };
 
 typedef struct SymbolTable {
     Symbol* head;
     int current_depth;
+    /* name -> its first symbol in `head` order. Every global of every module
+     * is in this one list, so a lookup that walked it made sema quadratic in
+     * program size. The per-name chains change exactly as the list does: a
+     * define prepends, a scope pop removes from the front. */
+    NameMap* byName;
 } SymbolTable;
+
+/* The symbols named `name`, in list order: for (s = first; s; s = s->sameNext) */
+static Symbol* symbol_table_first(SymbolTable* table, Str name) {
+    return name_map_get(table->byName, name);
+}
 
 static void symbol_table_push_scope(SymbolTable* table) {
     table->current_depth++;
@@ -422,7 +435,10 @@ static void symbol_table_push_scope(SymbolTable* table) {
 
 static void symbol_table_pop_scope(SymbolTable* table) {
     while (table->head && table->head->scope_depth == table->current_depth) {
-        table->head = table->head->next;
+        Symbol* popped = table->head;
+        if (symbol_table_first(table, popped->name) == popped)
+            name_map_set(table->byName, popped->name, popped->sameNext);
+        table->head = popped->next;
     }
     table->current_depth--;
 }
@@ -446,16 +462,14 @@ static Symbol* symbol_table_define(SymbolTable* table, Arena* arena, Str name, A
     sym->const_i = 0;
     sym->next = table->head;
     table->head = sym;
+    if (!table->byName) table->byName = name_map_create();
+    sym->sameNext = symbol_table_first(table, name);
+    name_map_set(table->byName, name, sym);
     return sym;
 }
 
 static Symbol* symbol_table_lookup(SymbolTable* table, Str name) {
-    Symbol* curr = table->head;
-    while (curr) {
-        if (str_eq(curr->name, name)) return curr;
-        curr = curr->next;
-    }
-    return NULL;
+    return symbol_table_first(table, name);
 }
 
 // #79509597: a bare module const/global read from `file`. There is one symbol
@@ -471,8 +485,7 @@ static Symbol* symbol_table_lookup(SymbolTable* table, Str name) {
 static Symbol* sema_resolve_bare_global(SymbolTable* symbols, Str name, const char* file,
                                         AstModule* module, size_t line, size_t column) {
     Symbol* visible[16]; size_t visible_count = 0;
-    for (Symbol* curr = symbols->head; curr; curr = curr->next) {
-        if (!str_eq(curr->name, name)) continue;
+    for (Symbol* curr = symbol_table_first(symbols, name); curr; curr = curr->sameNext) {
         if (!curr->decl || curr->decl->kind != AST_DECL_GLOBAL_LET) continue;
         if (file && curr->decl->origin_file && strcmp(file, curr->decl->origin_file) == 0) return curr;
         if (!sema_decl_opened(file, curr->decl)) continue;
@@ -1747,8 +1760,7 @@ static AstDecl* resolve_function_overload(CompilerContext* ctx, AstModule* modul
     // resolves normally, even from a subfolder. (docs/module-namespacing.md)
     {
         char spaces[8][256]; size_t space_count = 0;
-        for (Symbol* curr = symbols->head; curr; curr = curr->next) {
-            if (!str_eq(curr->name, name)) continue;
+        for (Symbol* curr = symbol_table_first(symbols, name); curr; curr = curr->sameNext) {
             if (!curr->decl || curr->decl->kind != AST_DECL_FUNC) continue;
             if (curr->decl->as.func_decl.specialization_args) continue;
             if (!sema_decl_opened(s_current_decl_origin, curr->decl)) continue;
@@ -1834,8 +1846,7 @@ static AstDecl* resolve_function_overload(CompilerContext* ctx, AstModule* modul
     // (the previous rule: first kind match wins).
     AstDecl* first_kind_match = NULL;
 
-    for (Symbol* curr = symbols->head; curr; curr = curr->next) {
-        if (!str_eq(curr->name, name)) continue;
+    for (Symbol* curr = symbol_table_first(symbols, name); curr; curr = curr->sameNext) {
         if (!curr->decl || curr->decl->kind != AST_DECL_FUNC) continue;
         if (!sema_decl_opened(s_current_decl_origin, curr->decl)) { if (!ineligible) ineligible = curr->decl; continue; }
 
@@ -5384,8 +5395,7 @@ static bool sema_resolve_create(CompilerContext* ctx, AstModule* module, SymbolT
     for (AstCallArg* a = expr->as.call.args; a; a = a->next) arg_count++;
     AstDecl* found = NULL;
     int matches = 0;
-    for (Symbol* curr = symbols->head; curr; curr = curr->next) {
-        if (!str_eq_cstr(curr->name, "create")) continue;
+    for (Symbol* curr = symbol_table_first(symbols, str_from_cstr("create")); curr; curr = curr->sameNext) {
         if (!curr->decl || curr->decl->kind != AST_DECL_FUNC) continue;
         const AstFuncDecl* fd = &curr->decl->as.func_decl;
         if (fd->specialization_args) continue;
@@ -5778,22 +5788,35 @@ static bool sema_module_file_component_is(const AstDecl* d, Str name) {
     return strlen(comp) == name.len && memcmp(comp, name.data, name.len) == 0;
 }
 
-static bool sema_is_module_name(AstModule* module, Str name) {
+static void sema_collect_module_names(const AstModule* module, ModuleNameAdd add) {
     for (AstDecl* d = module->decls; d; d = d->next) {
-        if (d->module_name && str_eq_cstr(name, d->module_name)) return true;
-        if (sema_module_file_component_is(d, name)) return true;  // #816
+        if (d->module_name) add(d->module_name, strlen(d->module_name));
+        // #816: a project module's file component
+        if (d->module_name && d->origin_file) {
+            char pkg[256]; sema_package_token(d->origin_file, pkg, sizeof pkg);
+            if (pkg[0] == '\0') {
+                const char* slash = strrchr(d->module_name, '/');
+                const char* comp = slash ? slash + 1 : d->module_name;
+                add(comp, strlen(comp));
+            }
+        }
         // A project folder name (`enemies`) also qualifies, so `enemies.tick()`
         // resolves with no import/open. (docs/module-namespacing.md)
         char ns[256]; sema_project_namespace(d, ns, sizeof ns);
-        if (ns[0] != '\0' && str_eq_cstr(name, ns)) return true;
+        if (ns[0] != '\0') add(ns, strlen(ns));
     }
     for (const AstImport* imp = module->imports; imp; imp = imp->next) {
         if (!imp->module) continue;
         for (AstDecl* d = imp->module->decls; d; d = d->next) {
-            if (d->module_name && str_eq_cstr(name, d->module_name)) return true;
+            if (d->module_name) add(d->module_name, strlen(d->module_name));
         }
     }
-    return false;
+}
+
+// The names are collected once per module (c_decl_index.c): this is asked for
+// nearly every member expression.
+static bool sema_is_module_name(AstModule* module, Str name) {
+    return module_names_contain(module, name, sema_collect_module_names);
 }
 
 // #970: is `name` the last path component of ANY reachable module (lib,
@@ -8173,10 +8196,12 @@ static void sema_check_own_args(CompilerContext* ctx, AstModule* module, SymbolT
 // methods, no conversions). Returns NULL when `name` is not an alias.
 static const AstTypeRef* find_alias_target(const AstModule* module, Str name, int depth) {
     if (!module || depth > 16) return NULL;
-    for (const AstDecl* d = module->decls; d; d = d->next) {
-        if (d->kind == AST_DECL_ALIAS && str_eq(d->as.alias_decl.name, name))
-            return d->as.alias_decl.target;
-    }
+    // Each module once per lookup (most names are not aliases, and walking
+    // every path of the import DAG re-scanned shared modules exponentially).
+    if (depth == 0) decl_visit_begin();
+    if (!decl_visit_first(module, depth)) return NULL;
+    const AstTypeRef* own = module_index_find_alias(module, name);
+    if (own) return own;
     for (const AstImport* imp = module->imports; imp; imp = imp->next) {
         if (imp->module) {
             const AstTypeRef* t = find_alias_target(imp->module, name, depth + 1);
@@ -8586,6 +8611,9 @@ bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
                 symbols.head = second->next;
                 second->next = existing->next;
                 existing->next = second;
+                name_map_set(symbols.byName, name, existing);
+                second->sameNext = existing->sameNext;
+                existing->sameNext = second;
             } else if (existing->decl && existing->decl != d && sema_is_named_type_decl(existing->decl)
                        && sema_is_named_type_decl(d)) {
                 // #36872332: type names are program-wide, so two modules that
