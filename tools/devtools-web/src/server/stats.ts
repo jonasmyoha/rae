@@ -8,6 +8,10 @@ export type RuntimeMetricEntry = {
   metric_name: string;
   metric_value: number;
   metadata: MetricMetadata;
+  /** Kept in the file but left out of the graphs and lists: an outlier
+   * (a hung or overloaded run) marked by hand, with `hidden_reason`. */
+  hidden?: boolean;
+  hidden_reason?: string;
 };
 
 export type TestRunStats = {
@@ -153,7 +157,7 @@ export class StatsStore {
     // By time, not file order: backfilled history is appended with its
     // original timestamps (scripts/backfill-compiler-speed.mjs).
     return all
-      .filter(e => e.metric_name === metricName)
+      .filter(e => e.metric_name === metricName && !e.hidden)
       .sort((a, b) => (a.timestamp < b.timestamp ? -1 : a.timestamp > b.timestamp ? 1 : 0))
       .reverse()
       .slice(0, limit)
