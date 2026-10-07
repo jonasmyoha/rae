@@ -1036,6 +1036,10 @@ static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, AstModule* mod
 static bool sema_rewrite_match_let(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstStmt* stmt);
 static void sema_check_own_args(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, const AstFuncDecl* fd, AstCallArg* args, bool skip_receiver);
 static void sema_reject_view_to_mod(AstModule* module, SymbolTable* symbols, const AstParam* p, const AstExpr* value);
+static bool expr_roots_in_let(SymbolTable* symbols, const AstExpr* e, Str* base);
+static void sema_warn_let_write(AstModule* module, int line, int column, Str root, const char* action);
+static void sema_render_access(const AstExpr* e, char* out, size_t cap);
+static void sema_warn_let_receiver(AstModule* module, SymbolTable* symbols, const AstExpr* call);
 static bool expr_is_owning(SymbolTable* symbols, const AstExpr* e);
 static TypeInfo* sema_array_type_from_call(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr);
 static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr** expr_ptr);
@@ -4983,6 +4987,13 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                     diag_error(sema_diag_file(module), (int)stmt->line, (int)stmt->column, buffer);
                     module->had_error = true;
                 }
+                Str let_root = {0};
+                if (expr_roots_in_let(symbols, stmt->as.assign_stmt.target, &let_root))
+                {
+                    char path[200]; sema_render_access(stmt->as.assign_stmt.target, path, sizeof path);
+                    char action[260]; snprintf(action, sizeof action, "cannot modify '%s'", path);
+                    sema_warn_let_write(module, (int)stmt->line, (int)stmt->column, let_root, action);
+                }
             }
             break;
         }
@@ -7344,6 +7355,7 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                 sema_reject_view_to_mod(module, symbols, expr->decl_link->as.func_decl.params,
                                         expr->as.method_call.object);
             }
+            sema_warn_let_receiver(module, symbols, expr);
             // #927: an unknown MODULE-QUALIFIED call (`Math.noSuchFunction(...)`)
             // or an unknown method on a TYPE NAME used as a namespace
             // (`Ptr.null()`) reached here without resolving — decl_link unset,
@@ -8107,6 +8119,102 @@ static bool expr_roots_in_view(SymbolTable* symbols, const AstExpr* e, Str* base
     return false;
 }
 
+/* docs/let-is-frozen.md: a `let` is a FROZEN value — nothing in it may be
+ * changed, at any depth. Is `e` (a write target, or an argument handed to a
+ * `mod` parameter) storage owned by a `let` binding? Walks member/element
+ * access to the root name; a step through a pointer (`Ptr`, `Buffer`) or a
+ * reference (a `mod`/`view` alias) leaves the let's own storage — the write
+ * lands in what it points at, which the let does not freeze. View roots are
+ * rejected elsewhere. Returns the root name in *base. */
+static bool expr_roots_in_let(SymbolTable* symbols, const AstExpr* e, Str* base) {
+    while (e && (e->kind == AST_EXPR_MEMBER || e->kind == AST_EXPR_INDEX)) {
+        const AstExpr* object = (e->kind == AST_EXPR_MEMBER) ? e->as.member.object : e->as.index.target;
+        const TypeInfo* ot = object ? object->resolved_type : NULL;
+        if (ot && (ot->kind == TYPE_REF || ot->kind == TYPE_BUFFER)) return false;
+        e = object;
+    }
+    if (!e || e->kind != AST_EXPR_IDENT) return false;
+    Symbol* sym = symbol_table_lookup(symbols, e->as.ident);
+    if (!sym || sym->bind_kind != BIND_LET || !sym->is_immutable || !sym->type) return false;
+    const TypeInfo* t = sym->type;
+    if (t->kind == TYPE_OPT && t->as.opt.base) t = t->as.opt.base;
+    if (t->kind == TYPE_REF || t->kind == TYPE_BUFFER) return false;
+    if (base) *base = e->as.ident;
+    return true;
+}
+
+/* `a.b[i].c` as written, for a diagnostic (an index prints as `[...]`) */
+static void sema_render_access(const AstExpr* e, char* out, size_t cap) {
+    if (!cap) return;
+    out[0] = '\0';
+    if (!e) return;
+    if (e->kind == AST_EXPR_IDENT) {
+        snprintf(out, cap, "%.*s", (int)e->as.ident.len, e->as.ident.data);
+    } else if (e->kind == AST_EXPR_MEMBER) {
+        sema_render_access(e->as.member.object, out, cap);
+        size_t used = strlen(out);
+        snprintf(out + used, cap - used, ".%.*s", (int)e->as.member.member.len, e->as.member.member.data);
+    } else if (e->kind == AST_EXPR_INDEX) {
+        sema_render_access(e->as.index.target, out, cap);
+        size_t used = strlen(out);
+        snprintf(out + used, cap - used, "[...]");
+    }
+}
+
+/* Step 1 of the frozen-let change: a WARNING, so the tree can be measured
+ * and migrated before it becomes an error. OPT-IN (RAE_FROZEN_LET=warn):
+ * the tree has ~2,100 such sites, ~770 of them in lib/, so a default-on
+ * warning would print hundreds of lines for every program and change the
+ * output of ~130 fixtures. Step 2 migrates them and makes this an error.
+ * `action` says what was done to the let ("cannot modify 'a.b'", "cannot
+ * pass 'a' to 'mod' parameter 'x'"). */
+static void sema_warn_let_write(AstModule* module, int line, int column, Str root, const char* action) {
+    const char* mode = getenv("RAE_FROZEN_LET");
+    if (!mode || strcmp(mode, "warn") != 0) return;
+    char buffer[400];
+    snprintf(buffer, sizeof buffer,
+             "%s: '%.*s' is a 'let', which is frozen (docs/let-is-frozen.md); declare it 'var'",
+             action, (int)root.len, root.data);
+    diag_warn(sema_diag_file(module), line, column, buffer);
+}
+
+/* A method call on a let: `numbers.add(value: 3)`. With a bound decl, its
+ * `this` decides; a generic container method is bound by the backend, so
+ * without one every same-named method on the receiver's type is consulted
+ * and the call counts as mutating when all of them take `this: mod`. */
+static void sema_warn_let_receiver(AstModule* module, SymbolTable* symbols, const AstExpr* call) {
+    const AstExpr* receiver = call->as.method_call.object;
+    Str root = {0};
+    if (!receiver || !expr_roots_in_let(symbols, receiver, &root)) return;
+    Str method = call->as.method_call.method_name;
+    bool mutating = false;
+    if (call->decl_link && call->decl_link->kind == AST_DECL_FUNC) {
+        const AstParam* self = call->decl_link->as.func_decl.params;
+        mutating = self && str_eq_cstr(self->name, "this") && self->type && self->type->is_mod;
+    } else {
+        const TypeInfo* rt = receiver->resolved_type;
+        if (rt && rt->kind == TYPE_REF) rt = rt->as.ref.base;
+        Str receiver_base = sema_struct_template_name(rt);
+        if (receiver_base.len == 0) return;
+        size_t total = 0, mods = 0;
+        for (Symbol* sym = symbol_table_first(symbols, method); sym; sym = sym->sameNext) {
+            if (!sym->decl || sym->decl->kind != AST_DECL_FUNC) continue;
+            const AstParam* self = sym->decl->as.func_decl.params;
+            if (!self || !str_eq_cstr(self->name, "this") || !self->type) continue;
+            if (!str_eq(get_base_type_name(self->type), receiver_base)) continue;
+            total++;
+            if (self->type->is_mod) mods++;
+        }
+        mutating = total > 0 && mods == total;
+    }
+    if (!mutating) return;
+    char path[200]; sema_render_access(receiver, path, sizeof path);
+    char action[320];
+    snprintf(action, sizeof action, "cannot call mutating method '%.*s' on '%s'",
+             (int)method.len, method.data, path);
+    sema_warn_let_write(module, (int)call->line, (int)call->column, root, action);
+}
+
 /* docs/binding-modes-design.md §4.1: a view passed to a `mod` parameter
  * would let the callee write through a read-only promise — the argument
  * form of the `=>` rule (fixture 613). */
@@ -8114,6 +8222,14 @@ static void sema_reject_view_to_mod(AstModule* module, SymbolTable* symbols,
                                     const AstParam* p, const AstExpr* value) {
     if (!p || !p->type || !p->type->is_mod || !value) return;
     Str root = {0};
+    if (!str_eq_cstr(p->name, "this") && expr_roots_in_let(symbols, value, &root)) {
+        char path[200]; sema_render_access(value, path, sizeof path);
+        char action[320];
+        snprintf(action, sizeof action, "cannot pass '%s' to 'mod' parameter '%.*s'",
+                 path, (int)p->name.len, p->name.data);
+        sema_warn_let_write(module, (int)value->line, (int)value->column, root, action);
+        return;
+    }
     if (!expr_roots_in_view(symbols, value, &root)) return;
     char buffer[320];
     if (root.len > 0)

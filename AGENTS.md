@@ -184,17 +184,29 @@ These instructions define **how Codex should work**, communicate progress, and i
   `=>` aliases whose `view T`/`mod T` you write, and `loop var i: Int = 0`. The
   ban is specifically on inferring the type of a binding from its initializer.
 
-### Prefer `let` — a binding is `var` only when it is really reassigned or mutated:
-- Write `let` by default. Use `var` only for a binding the code genuinely
-  changes later (a loop counter, an accumulator, a value built up step by step).
-  A reader sees `let` and knows the value is settled at that line; every `var`
-  makes them scan the rest of the function for writes.
-- Do not turn a `let` into a `var` just to patch one field after construction
-  (`var app: App = { ... }` then `app.batches.x = ...`). Build the part first
-  and put it into the literal: make the PART the short-lived `var`, set it up,
-  then construct the whole as `let` (`var batches: Batches = ...; setup(batch:
-  batches.x); let app: App = { batches: batches ... }`). The mutation stays
-  local to the piece that needs it.
+### `const` / `let` / `var` — and a `let` is FROZEN (docs/let-is-frozen.md):
+- Rae has Nim's three bindings (maintainer decision 2026-10-07):
+  `const` is a compile-time value (literals, earlier consts, enum cases and
+  arithmetic on them); `let` is a runtime value that is **frozen as a whole**
+  — like Rust's `let` or a Swift struct `let`, nothing in it changes after
+  that line: no `x.field = ...`, no `x.list.add(...)`, no `x` or `x.part`
+  passed to a `mod` parameter, at any depth; `var` is the only mutable one.
+- The compiler is being moved there in two steps: today the check is a
+  warning you opt into (`RAE_FROZEN_LET=warn`), because ~2,100 existing
+  sites still write into a `let`; the follow-up migrates them and makes it an
+  error. Write NEW code to the frozen rule now: if you change it, it is `var`.
+- Edges: a `let` holding a `Ptr`/`Buffer`, a GPU/entity handle or a
+  `mod`/`view` alias freezes the HANDLE, not what it points at (writing
+  through it is fine); `if let` and `=>` make new bindings.
+- **Prefer `let`.** Write `let` by default and `var` only for a binding the
+  code genuinely changes (a loop counter, an accumulator, a value built up
+  step by step). A reader sees `let` and knows the value is settled at that
+  line; every `var` makes them scan the rest of the function for writes.
+- **Keep the `var` small.** When one part of a value needs setting up before
+  the whole is built, make the PART the short-lived `var`, set it up, then
+  construct the whole as `let` (`var batches: Batches = ...; setup(batch:
+  batches.x); let app: App = { batches: batches ... }`) — rather than making
+  the whole value a `var` to patch it afterwards.
 
 ### NO globals — mutable module-level state is forbidden (see docs/globals-and-app-ownership.md):
 - "No globals" means precisely: a module-level **`var`** (mutable global state)
