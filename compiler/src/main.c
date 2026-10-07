@@ -108,17 +108,11 @@ typedef struct {
   ModuleNode* head;
   ModuleNode* tail;
   char* root_path;
-  // True when root_path came from an EXPLICIT `--project` (so it is the real
-  // project source root and safe to scan wholesale). False when root_path was
-  // discovered by ascending to a `lib/core.rae` marker, which may sit far above
-  // the project — in that case the implicit scan uses the entry file's own
-  // directory instead. (docs/module-namespacing.md)
+  // True when root_path came from an EXPLICIT `--project` (scanned wholesale,
+  // so an entry deep in it sees every file). False when it is the entry
+  // file's own folder, which the implicit scan covers from the entry.
+  // (docs/module-namespacing.md)
   bool explicit_root;
-  // The entry file's directory when the root was NOT explicit: the implicit
-  // project, whose files the implicit scan loads. A package path import or
-  // open (`open alpha/Values`) also resolves there, after the root, lib and
-  // folder packages.
-  char* entry_dir;
   Arena* arena;
 } ModuleGraph;
 
@@ -1212,8 +1206,6 @@ static void module_graph_free(ModuleGraph* graph) {
   graph->head = graph->tail = NULL;
   free(graph->root_path);
   graph->root_path = NULL;
-  free(graph->entry_dir);
-  graph->entry_dir = NULL;
 }
 
 static void watch_sources_init(WatchSources* sources) {
@@ -1798,23 +1790,6 @@ static bool module_graph_load_module(ModuleGraph* graph,
           free(child_file);
           continue;
         }
-        // The implicit project (the entry's directory): a project module
-        // opened by its package path. Loaded under the module path the
-        // implicit scan gives the same file, so it is one module, not two.
-        if (graph->entry_dir) {
-          char project_file[PATH_MAX];
-          snprintf(project_file, sizeof project_file, "%s/%s.rae", graph->entry_dir, normalized);
-          if (file_exists(project_file)) {
-            char* project_module = derive_module_path(graph->root_path, project_file);
-            bool loaded = project_module
-              && module_graph_load_module(graph, project_module, project_file, &frame, hash_out, no_implicit);
-            free(project_module);
-            free(normalized);
-            free(child_file);
-            if (!loaded) return false;
-            continue;
-          }
-        }
         fprintf(stderr, "error: imported module '%s' not found (required by '%s')\n", normalized,
                 module_path ? module_path : "<entry>");
         module_stack_print_trace(&frame, normalized);
@@ -1941,11 +1916,6 @@ static bool module_graph_build(ModuleGraph* graph, const char* entry_file, uint6
   if (!module_path) {
     free(resolved_entry);
     return false;
-  }
-  if (!graph->explicit_root) {
-    graph->entry_dir = strdup(resolved_entry);
-    char* entry_slash = graph->entry_dir ? strrchr(graph->entry_dir, '/') : NULL;
-    if (entry_slash) *entry_slash = '\0';
   }
   bool ok = module_graph_load_module(graph, module_path, resolved_entry, NULL, hash_out, no_implicit);
   if (!ok) {
@@ -3976,7 +3946,6 @@ static int run_command(const char* cmd, int argc, char** argv) {
   bool is_watch = (strcmp(cmd, "watch") == 0);
 
   const char* project_root = NULL;
-  char repo_root[PATH_MAX];
   char project_path[PATH_MAX];
 
   if (is_run || is_build || is_watch) {
@@ -3998,23 +3967,12 @@ static int run_command(const char* cmd, int argc, char** argv) {
               if (slash) *slash = '\0';
               else strcpy(project_path, ".");
 
-              strncpy(repo_root, project_path, sizeof(repo_root) - 1);
-              repo_root[sizeof(repo_root) - 1] = '\0';
-              
-              bool found_root = false;
-              for (int i = 0; i < 5; ++i) {
-                  char test_lib[PATH_MAX];
-                  snprintf(test_lib, sizeof(test_lib), "%s/lib/core/Core.rae", repo_root);  /* #818 */
-                  if (file_exists(test_lib)) {
-                      found_root = true;
-                      break;
-                  }
-                  char* parent = strrchr(repo_root, '/');
-                  if (!parent || parent == repo_root) break;
-                  *parent = '\0';
-              }
-              if (found_root) project_root = repo_root;
-              else project_root = project_path;
+              // The project is the entry file's folder (or --project): never
+              // the folder above that happens to hold lib/. Climbing there
+              // made a project's own modules repo-relative, so a package-path
+              // open of one of them (`open alpha/Values`) missed; lib/ is
+              // found through the toolchain like any project's.
+              project_root = project_path;
           }
       }
   }
