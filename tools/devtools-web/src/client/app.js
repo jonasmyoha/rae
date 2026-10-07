@@ -4249,9 +4249,9 @@ function attachChartRangeButtons(canvas) {
   canvas.__rangeButtons = group;
 }
 
-// Draw `entries` (oldest first) limited to the graph's chosen range. A
-// limited range spans its whole window up to now on the time axis, so a
-// quiet week shows as empty axis, not as a stretched line.
+// Draw `entries` (oldest first) limited to the graph's chosen range. The
+// range only filters: the time axis runs from the first to the last point
+// shown, so the line always uses the whole width.
 function drawRangedChart(canvas, entries, valueKey, emptyEl, formatValue) {
   attachChartRangeButtons(canvas);
   const key = chartRangeKey(canvas);
@@ -4262,17 +4262,14 @@ function drawRangedChart(canvas, entries, valueKey, emptyEl, formatValue) {
   }
   const range = CHART_RANGES.find((candidate) => candidate.key === key);
   let shown = entries;
-  let timeWindow = null;
   if (range && range.days !== null) {
-    const to = Date.now();
-    const from = to - range.days * 24 * 60 * 60 * 1000;
+    const from = Date.now() - range.days * 24 * 60 * 60 * 1000;
     shown = entries.filter((entry) => {
       const time = Date.parse(entry.timestamp ?? "");
       return Number.isFinite(time) && time >= from;
     });
-    timeWindow = { from, to };
   }
-  drawMetricChart(canvas, shown, valueKey, emptyEl, formatValue, -1, timeWindow);
+  drawMetricChart(canvas, shown, valueKey, emptyEl, formatValue, -1);
   if (!shown.length && entries.length && emptyEl) {
     emptyEl.textContent = `Nothing recorded in the last ${range.label}.`;
   }
