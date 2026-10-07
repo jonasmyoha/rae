@@ -131,15 +131,19 @@ func parallelSum(numbers: view List(Int), start: copy Int, count: copy Int) ret 
     ret sequentialSum(numbers: numbers, start: start, count: count)
   }
   let half: Int = count / 2
-  let left: Task(Int) = spawn sumRange(start: start, count: half)
+  let left: Task(Int) = spawn parallelSum(numbers: numbers, start: start, count: half)
   let right: Int = parallelSum(numbers: numbers, start: start + half, count: count - half)
   ret left.get() + right
 }
 ```
 
-(A sketch: in real code the spawned half takes its slice by `copy` or `own`,
-since a `spawn`'s arguments cannot borrow from the caller. Making the halves
-share read-only data without copying is part of what S3 measures.)
+(A sketch that shows the real open point. Today a `spawn` whose argument is
+a `view` of a non-scalar runs synchronously instead (docs/concurrency-model.md),
+so this exact code would not run in parallel. The halves must either get
+their own copy, or the language must let tasks inside a `taskScope` share
+read-only data that outlives them. Bend 2 sidesteps the question because its
+values are affine. S3 has to decide it, and measure the cost of copying
+against the cost of sharing.)
 
 With an OS thread per `spawn`, a recursion like this costs a thread per split,
 and `get()` parks a whole thread, so it only pays off for very coarse
