@@ -119,6 +119,12 @@ if [ -f tools/test-packages-cli.sh ]; then
   echo
   if bash tools/test-packages-cli.sh; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 fi
+# The frozen-let warning (docs/let-is-frozen.md): the opt-in check reports
+# exactly the writes into a `let` in its sample, and is silent by default.
+if [ -f tools/test-frozen-let.sh ]; then
+  echo
+  if bash tools/test-frozen-let.sh; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
+fi
 # The browser build (rae build --target wasm, Emscripten + EmdawnWebGPU):
 # 109 and 110 as pages and an embeddable module, ~50 s. It prints SKIP and
 # passes on a machine without emcc. It broke once unnoticed for every WebGPU
