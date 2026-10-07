@@ -11,7 +11,7 @@ open ui/SceneFile
 func loadSceneFile(path: view String) pub ret Scene {
   unsafe {
     let content: String = rae_ext_rae_sys_read_file(path: path)
-    let scene: Scene = parseScene(source: content)
+    var scene: Scene = parseScene(source: content)
     scene.sceneId = sceneIdentityFromFilePath(path: path)
     ret scene
   }

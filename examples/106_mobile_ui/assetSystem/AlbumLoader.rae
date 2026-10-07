@@ -182,7 +182,7 @@ func fieldInt(doc: view JsonDoc, obj: view JsonValue, key: view String) ret Int 
 # Missing array, wrong kind, or per-entry errors all yield an empty
 # / partial list rather than a hard failure.
 func parseTracks(doc: view JsonDoc, root: view JsonValue) ret List(Track) {
-  let result: List(Track) = List.create(Track, cap: 12)
+  var result: List(Track) = List.create(Track, cap: 12)
   let arrIdx: Int = Json.field(doc: doc, this: root, key: "tracks")
   let arr: JsonValue = Json.jsonValueAt(doc: doc, idx: arrIdx)
   let n: Int = Json.arrayLen(this: arr)
@@ -290,7 +290,7 @@ func loadAlbum(folder: view String, stem: view String) pub ret Album {
 func loadAllAlbums(folder: view String) pub ret List(Album) {
   unsafe {
     let copiedFolder: String = folder
-    let result: List(Album) = List.create(Album, cap: 32)
+    var result: List(Album) = List.create(Album, cap: 32)
     let entries: List(File) = listDir(folder: copiedFolder)
     var i: Int = 0
     loop i < entries.length {

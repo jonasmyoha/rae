@@ -128,7 +128,7 @@ func ensureSdfObjects(sdf: mod SdfPassCache, resources: mod GpuResources) {
 }
 
 func sdfPipelineSpec() ret RenderPipelineSpec {
-  let colorFormats: List(Int32) = List.create(Int32, cap: 3)
+  var colorFormats: List(Int32) = List.create(Int32, cap: 3)
   colorFormats.add(value: WGPUTextureFormat_RGB10A2Unorm)
   colorFormats.add(value: WGPUTextureFormat_RGBA8Unorm)
   colorFormats.add(value: WGPUTextureFormat_RGBA8Unorm)
@@ -154,7 +154,7 @@ func ensureSdfBind(sdf: mod SdfPassCache, resources: mod GpuResources, gi: copy 
       ret true
     }
   }
-  let entries: List(ResourceRef) = List.create(ResourceRef, cap: 4)
+  var entries: List(ResourceRef) = List.create(ResourceRef, cap: 4)
   entries.add(value: bufferRef(id: sdf.frameUniform))
   entries.add(value: bufferRef(id: sdf.balls.copyAtFallback(index: gi, fallback: noBufferId())))
   entries.add(value: bufferRef(id: sdf.params.copyAtFallback(index: gi, fallback: noBufferId())))

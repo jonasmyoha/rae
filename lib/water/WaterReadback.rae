@@ -74,7 +74,7 @@ func ensureWaterReadback(waterSystem: mod WaterSystem, resources: mod GpuResourc
       usage: WGPUBufferUsage_Storage + WGPUBufferUsage_CopySrc
     ) {
       waterSystem.cache.storage.set(index: i, value: storage)
-      let entries: List(ResourceRef) = List.create(ResourceRef, cap: 3)
+      var entries: List(ResourceRef) = List.create(ResourceRef, cap: 3)
       entries.add(
         value: textureViewRef(id: cascadeView(waterSystem: waterSystem, cascade: i, map: 0))
       )
@@ -121,7 +121,7 @@ func updateWaterReadback(waterSystem: mod WaterSystem, resources: mod GpuResourc
           continue
         }
         if status is 1 and cascade.pendingGeneration is waterSystem.surfaceCache.generation {
-          let raw: List(UInt8) = List.create(UInt8, cap: fftCacheBytes)
+          var raw: List(UInt8) = List.create(UInt8, cap: fftCacheBytes)
           loop raw.length < fftCacheBytes {
             raw.add(value: 0 as UInt8)
           }
@@ -159,7 +159,8 @@ func updateWaterReadback(waterSystem: mod WaterSystem, resources: mod GpuResourc
         workgroupsZ: 1
       )
       var submitted: Bool = false
-      if let recording: Recording = beginRecording(resources: resources) {
+      if let openedRecording: Recording = beginRecording(resources: resources) {
+        var recording: Recording = own openedRecording
         if recordComputeCommand(recording: recording, resources: resources, command: command) {
           if recordCopyBuffer(
             recording: recording

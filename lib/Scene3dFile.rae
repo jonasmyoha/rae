@@ -157,8 +157,8 @@ func parseWorld3dAsset(source: view String, meshes: view MeshRegistry3d) pub ret
   # Materials are node-addressable values; the registry maps a material node's id
   # to its index in this list so a MeshRenderer/SdfPrimitive can copy the value
   # onto its own entity.
-  let materials: MaterialRegistry3d = createMaterialRegistry3d()
-  let materialValues: List(Material3d) = List.create(Material3d, cap: 8)
+  var materials: MaterialRegistry3d = createMaterialRegistry3d()
+  var materialValues: List(Material3d) = List.create(Material3d, cap: 8)
 
   # Pass 1: materials, independent of node order.
   var i: Int = 0

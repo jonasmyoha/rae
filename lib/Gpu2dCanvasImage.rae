@@ -123,7 +123,7 @@ func canvasRegisterImageRgba(
   var handle: Int = 0
   if let resources: mod GpuResources => canvas.gpuResources {
     let count: Int = width * height
-    let bytes: List(UInt8) = List.create(UInt8, cap: count * 4)
+    var bytes: List(UInt8) = List.create(UInt8, cap: count * 4)
     unsafe {
       loop var i: Int = 0, i < count, ++i {
         let packed: Int = rae_ext_rae_buf_get(buf: pixels, index: i)
@@ -659,7 +659,7 @@ func imageDrawCommand(
     retireBindGroup(resources: resources, id: bind)
     bind = noBindGroupId()
     if let image: Gpu2dImage = canvas.images.copyAt(index: handle - 1) {
-      let entries: List(ResourceRef) = List.create(ResourceRef, cap: 4)
+      var entries: List(ResourceRef) = List.create(ResourceRef, cap: 4)
       entries.add(value: bufferRef(id: canvas.viewport))
       entries.add(value: bufferRef(id: uniform))
       entries.add(value: textureViewRef(id: image.textureView))

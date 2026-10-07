@@ -40,7 +40,8 @@ func frame(app: mod App) {
 }
 
 func returnEarly() {
-  if let app: App = App.create(id: 2, succeed: true) {
+  if let createdApp: App = App.create(id: 2, succeed: true) {
+    var app: App = own createdApp
     frame(app: app)
     ret
   }
@@ -48,7 +49,8 @@ func returnEarly() {
 }
 
 func main() {
-  if let app: App = App.create(id: 1, succeed: true) {
+  if let createdApp: App = App.create(id: 1, succeed: true) {
+    var app: App = own createdApp
     loop not shouldClose(resources: app.renderSystem.resources) {
       frame(app: app)
     }
@@ -58,7 +60,8 @@ func main() {
   log("after app scope")
   returnEarly()
   log("after early return")
-  if let app: App = App.create(id: 3, succeed: false) {
+  if let createdApp: App = App.create(id: 3, succeed: false) {
+    var app: App = own createdApp
     frame(app: app)
   } else {
     log("creation failed")

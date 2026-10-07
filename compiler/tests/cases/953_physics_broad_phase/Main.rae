@@ -183,7 +183,7 @@ func runCast(
   cast: mod TreeCast
   extension: view Vec3
 ) {
-  let records: List(Int) = List.create(Int, cap: 16)
+  var records: List(Int) = List.create(Int, cap: 16)
   var calls: Int = 0
   loop true {
     let proxyId: Int = nextTreeCastProxy(tree: tree, cast: cast)
@@ -250,7 +250,7 @@ func evaluateTree(
     let proxyId: Int = readInt(reader: reader)
     markProxyMoved(tree: scene.tree, proxyId: proxyId, box: readBox(reader: reader))
   } else if name is "tree.gatherMoved" {
-    let ids: List(Int) = List.create(Int, cap: 64)
+    var ids: List(Int) = List.create(Int, cap: 64)
     putInt(out: out, value: gatherMovedProxies(tree: scene.tree, proxyIds: ids))
     loop let id: view Int in ids {
       out.add(value: id)
@@ -274,7 +274,7 @@ func evaluateTree(
       maskBits: mask
       requireAllBits: requireAll
     )
-    let ids: List(Int) = List.create(Int, cap: 16)
+    var ids: List(Int) = List.create(Int, cap: 16)
     loop true {
       let proxyId: Int = nextTreeQueryProxy(tree: scene.tree, query: query)
       if proxyId is -1 {
@@ -339,7 +339,7 @@ func evaluateTree(
       requireAllBits: false
       minDistanceSquared: start
     )
-    let records: List(Int) = List.create(Int, cap: 16)
+    var records: List(Int) = List.create(Int, cap: 16)
     var calls: Int = 0
     loop true {
       let proxyId: Int = nextTreeClosestProxy(tree: scene.tree, query: query)
@@ -452,7 +452,7 @@ func evaluateContainers(
     putInt(out: out, value: idCapacity(pool: scene.ids))
   } else if name is "qsort" {
     let count: Int = readInt(reader: reader)
-    let keys: List(UInt64) = List.create(UInt64, cap: count)
+    var keys: List(UInt64) = List.create(UInt64, cap: count)
     loop var i: Int = 0, i < count, ++i {
       keys.add(value: readU64(reader: reader))
     }
@@ -502,7 +502,7 @@ func main() {
     let tokens: List(String) = line.split(sep: " ")
     let name: String = tokens.copyAtDefault(index: 0)
     var reader: Reader = { tokens: List.create(String, cap: 64), next: 0 }
-    let expected: List(Int) = List.create(Int, cap: 64)
+    var expected: List(Int) = List.create(Int, cap: 64)
     var afterArrow: Bool = false
     loop var j: Int = 1, j < tokens.length, ++j {
       let token: String = tokens.copyAtDefault(index: j)
@@ -514,7 +514,7 @@ func main() {
         reader.tokens.add(value: token)
       }
     }
-    let actual: List(Int) = List.create(Int, cap: 64)
+    var actual: List(Int) = List.create(Int, cap: 64)
     let known: Bool = evaluateTree(
       name: name
       reader: reader

@@ -42,7 +42,7 @@ func appendActionEvent(input: mod InputSystem, entityId: view EntityId, actionId
 }
 
 func main() {
-  let world: UiWorld = createUiWorld()
+  var world: UiWorld = createUiWorld()
   let entityId: EntityId = createEntity(world: world)
   let oc: OnClick = {
     actionId: "playback.toggle.long.string"
@@ -53,7 +53,7 @@ func main() {
   componentSet(this: world.onClicks, entityId: entityId, data: oc)
 
   if true {
-    let input: InputSystem = createInputSystem()
+    var input: InputSystem = createInputSystem()
     let ocView: view OnClick => componentView(this: world.onClicks, entityId: entityId)
     appendActionEvent(input: input, entityId: entityId, actionId: ocView.actionId)
     log("appended action event; input has {input.events.length} events")

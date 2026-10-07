@@ -221,7 +221,7 @@ func readHullSpec(reader: mod Reader) ret opt Hull {
   let kind: Int = readInt(reader: reader)
   if kind is 0 {
     let count: Int = readInt(reader: reader)
-    let points: List(Vec3) = List.create(Vec3, cap: count)
+    var points: List(Vec3) = List.create(Vec3, cap: count)
     loop var i: Int = 0, i < count, ++i {
       points.add(value: readVec(reader: reader))
     }
@@ -669,7 +669,7 @@ func main() {
   let golden: String = readGolden()
   let lines: List(String) = golden.split(sep: "\n")
   var world: PhysicsWorld = createWorld(def: defaultWorldDef(lengthUnitsPerMeter: 1.0))
-  let bodies: List(BodyId) = List.create(BodyId, cap: 64)
+  var bodies: List(BodyId) = List.create(BodyId, cap: 64)
   var calls: Int = 0
   var mismatches: Int = 0
   var unknown: Int = 0
@@ -681,7 +681,7 @@ func main() {
     let tokens: List(String) = line.split(sep: " ")
     let name: String = tokens.copyAtDefault(index: 0)
     var reader: Reader = { tokens: List.create(String, cap: 64), next: 0 }
-    let expected: List(Int) = List.create(Int, cap: 64)
+    var expected: List(Int) = List.create(Int, cap: 64)
     var afterArrow: Bool = false
     loop var j: Int = 1, j < tokens.length, ++j {
       let token: String = tokens.copyAtDefault(index: j)
@@ -693,7 +693,7 @@ func main() {
         reader.tokens.add(value: token)
       }
     }
-    let actual: List(Int) = List.create(Int, cap: 64)
+    var actual: List(Int) = List.create(Int, cap: 64)
     if evaluate(
       name: name
       reader: reader

@@ -17,7 +17,7 @@ func fail(message: view String) ret Bool {
 }
 
 func filled(count: view Int, base: view Int) ret List(UInt8) {
-  let bytes: List(UInt8) = List.create(UInt8, cap: count)
+  var bytes: List(UInt8) = List.create(UInt8, cap: count)
   var i: Int = 0
   loop i < count {
     bytes.add(value: (base + i) as UInt8)
@@ -61,7 +61,7 @@ func checkCopy(resources: mod GpuResources, id: view ReadbackId, base: view Int)
   if readbackByteCount(resources: resources, id: id) is not 32 {
     ret fail(message: "byte count")
   }
-  let out: List(UInt8) = List.create(UInt8, cap: 32)
+  var out: List(UInt8) = List.create(UInt8, cap: 32)
   var k: Int = 0
   loop k < 32 {
     out.add(value: 0 as UInt8)
@@ -89,7 +89,8 @@ func main() ret Int {
       ret 1
     }
     var issuer: IdIssuer = IdIssuer.create()
-    if let resources: GpuResources = GpuResources.create(issuer: issuer, capacity: 2) {
+    if let createdResources: GpuResources = GpuResources.create(issuer: issuer, capacity: 2) {
+      var resources: GpuResources = own createdResources
       # --- two concurrent requests on two buffers, byte-exact ---
       if let bufferA: BufferId = makeMapReadBuffer(resources: resources, base: 0) {
         if let bufferB: BufferId = makeMapReadBuffer(resources: resources, base: 100) {

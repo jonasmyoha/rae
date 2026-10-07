@@ -127,7 +127,7 @@ func navRow(id: view String, kind: view ActionKind, screen: view Screen) ret Act
 # cover tile, Player by the mini-player, History by the "Recently played"
 # header.
 func createActionTable() ret ActionTable {
-  let rows: List(ActionEntry) = List.create(ActionEntry, cap: 32)
+  var rows: List(ActionEntry) = List.create(ActionEntry, cap: 32)
   rows.add(value: navRow(id: "nav.home", kind: ActionKind.navigateTab, screen: Screen.home))
   rows.add(value: navRow(id: "nav.library", kind: ActionKind.navigateTab, screen: Screen.library))
   rows.add(value: navRow(id: "nav.search", kind: ActionKind.navigateTab, screen: Screen.search))
@@ -173,7 +173,7 @@ func createActionTable() ret ActionTable {
 # The bottom sheet's menus, as data: which choices a `openSheet` row offers.
 # Every choice's id is itself a table row.
 func sheetMenuActions(menu: view String) ret List(BottomSheetAction) {
-  let actions: List(BottomSheetAction) = List.create(BottomSheetAction, cap: 2)
+  var actions: List(BottomSheetAction) = List.create(BottomSheetAction, cap: 2)
   if menu is "album" {
     actions.add(value: own mkSheetAction(label: "Remove from library", actionId: "library.remove"))
     actions.add(value: own mkSheetAction(label: "Cancel", actionId: "sheet.cancel"))

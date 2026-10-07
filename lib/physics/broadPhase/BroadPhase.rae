@@ -38,7 +38,7 @@ func createBroadPhase(
   dynamicShapeCount: view Int
   contactCount: view Int
 ) ret BroadPhase {
-  let trees: List(DynamicTree) = List.create(DynamicTree, cap: bodyTypeCount)
+  var trees: List(DynamicTree) = List.create(DynamicTree, cap: bodyTypeCount)
   trees.add(value: createDynamicTree(proxyCapacity: maxInt(left: 16, right: staticShapeCount)))
   trees.add(value: createDynamicTree(proxyCapacity: 16))
   trees.add(value: createDynamicTree(proxyCapacity: maxInt(left: 16, right: dynamicShapeCount)))

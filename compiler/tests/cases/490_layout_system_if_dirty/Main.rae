@@ -11,7 +11,7 @@ open ecs/ComponentTable
 open ui/UiSystems
 
 func main() {
-  let world: UiWorld = createUiWorld()
+  var world: UiWorld = createUiWorld()
   var uiSystems: UiSystems = createUiSystems()
   let root: EntityId = createEntity(world: world)
   let r: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: 200.0, y: 100.0 } }
@@ -22,7 +22,7 @@ func main() {
   }
   componentSet(this: world.sizes, entityId: root, data: sz)
 
-  let cache: LayoutCache = createLayoutCache()
+  var cache: LayoutCache = createLayoutCache()
 
   # First call: cache is fresh (-1 sentinels), inputs have non-sentinel
   # generations from the componentSet calls above, so dirty=true → runs.

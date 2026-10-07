@@ -66,15 +66,15 @@ func createHull(points: view List(Vec3), maxVertexCount: view Int) ret opt Hull 
   }
 
   # Number the vertices, then the faces and half-edges, twins in pairs.
-  let finalVertices: List(Int) = List.create(Int, cap: builder.finalVertexCount)
+  var finalVertices: List(Int) = List.create(Int, cap: builder.finalVertexCount)
   var node: Int = nodeNextOf(builder: builder, node: vertexHead)
   loop node is not vertexHead {
     builder.nodeFinalIndex.set(index: node, value: finalVertices.length)
     finalVertices.add(value: node)
     node = nodeNextOf(builder: builder, node: node)
   }
-  let finalFaces: List(Int) = List.create(Int, cap: builder.finalFaceCount)
-  let finalEdges: List(Int) = List.create(Int, cap: builder.finalHalfEdgeCount)
+  var finalFaces: List(Int) = List.create(Int, cap: builder.finalFaceCount)
+  var finalEdges: List(Int) = List.create(Int, cap: builder.finalHalfEdgeCount)
   var face: Int = builder.faceNext.copyAtDefault(index: faceHead)
   loop face is not faceHead {
     builder.faceFinalIndex.set(index: face, value: finalFaces.length)
@@ -145,7 +145,7 @@ func ringPoints(
   upperRadius: view Float
   upperHeight: view Float
 ) ret List(Vec3) {
-  let points: List(Vec3) = List.create(Vec3, cap: 2 * sides)
+  var points: List(Vec3) = List.create(Vec3, cap: 2 * sides)
   var alpha: Float = 0.0
   let deltaAlpha: Float = 2.0 * pi / sides.toFloat()
   loop var index: Int = 0, index < sides, ++index {
@@ -199,7 +199,7 @@ func createRock(radius: view Float) ret opt Hull {
   let pointCount: Int = 10
   # The golden ratio
   let phi: Float = (1.0 + Math.sqrt(x: 5.0)) / 2.0
-  let points: List(Vec3) = List.create(Vec3, cap: pointCount)
+  var points: List(Vec3) = List.create(Vec3, cap: pointCount)
   # The azimuthal angle
   let theta: Float = 2.0 * pi / phi
   var cosSin: CosSin = { cosine: 1.0, sine: 0.0 }
@@ -250,7 +250,7 @@ func complexHullRandomDirection(state: mod Int) ret Vec3 {
 # convex pile hull of PEEL).
 func createComplexHull(radius: view Float) ret opt Hull {
   let pointCount: Int = 32
-  let points: List(Vec3) = List.create(Vec3, cap: pointCount)
+  var points: List(Vec3) = List.create(Vec3, cap: pointCount)
   var state: Int = 42
   loop var i: Int = 0, i < pointCount, ++i {
     points.add(value: scale(scale: radius, vector: complexHullRandomDirection(state: state)))

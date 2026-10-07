@@ -34,7 +34,7 @@ func rayCastHeightField(
   input: view RayCastInput
   lengthUnitsPerMeter: view Float
 ) ret CastOutput {
-  let points: List(Vec3) = List.create(Vec3, cap: 1)
+  var points: List(Vec3) = List.create(Vec3, cap: 1)
   points.add(value: input.origin)
   let shapeInput: ShapeCastInput = {
     proxy: ShapeProxy { points: points, radius: 0.0 }
@@ -140,7 +140,7 @@ func castHeightTriangle(
   }
   # The cast against the triangle, shifted to its first vertex
   let origin: Vec3 = vertex1
-  let triangleVertices: List(Vec3) = List.create(Vec3, cap: 3)
+  var triangleVertices: List(Vec3) = List.create(Vec3, cap: 3)
   triangleVertices.add(value: zeroVector())
   triangleVertices.add(value: subtract(left: vertex2, right: origin))
   triangleVertices.add(value: subtract(left: vertex3, right: origin))

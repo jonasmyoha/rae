@@ -49,7 +49,7 @@ func overlapSensor(
   let proxy: ShapeProxy = makeShapeProxy(shape: visitorShape, hulls: world.hulls)
   # The visitor in the frame of the sensor
   let relativeTransform: Transform = inverseMultiply(left: sensorTransform, right: visitorTransform)
-  let localPoints: List(Vec3) = List.create(Vec3, cap: proxy.points.length)
+  var localPoints: List(Vec3) = List.create(Vec3, cap: proxy.points.length)
   var count: Int = proxy.points.length
   if count > maxShapeCastPoints {
     count = maxShapeCastPoints
@@ -242,7 +242,7 @@ func sensorTask(
       # Sort the overlaps to find begin and end events
       sortVisitors(visitors: sensor.overlaps2)
       # Remove duplicates (possible from the continuous hits)
-      let unique: List(Visitor) = List.create(Visitor, cap: sensor.overlaps2.length)
+      var unique: List(Visitor) = List.create(Visitor, cap: sensor.overlaps2.length)
       loop var i: Int = 0, i < sensor.overlaps2.length, ++i {
         let visitor: Visitor = sensor.overlaps2.copyAtDefault(index: i)
         if unique.length is 0 or visitor.shapeId is not unique.copyAtDefault(

@@ -170,7 +170,7 @@ func buildControlPanel(
   # APPEND rather than replace. A host may already have authored
   # children — a title, a readout — and a panel that overwrote them would
   # silently delete part of the scene it was asked to extend.
-  let kids: List(EntityId) = List.create(EntityId, cap: panel.ids.length + 4)
+  var kids: List(EntityId) = List.create(EntityId, cap: panel.ids.length + 4)
   if componentHas(this: world.childrens, entityId: host) {
     let existing: view Children => componentView(this: world.childrens, entityId: host)
     var e: Int = 0
@@ -225,7 +225,7 @@ func buildControlPanel(
     }
     componentSet(this: world.opticalAligns, entityId: labelE, data: optical)
 
-    let labelKids: List(EntityId) = List.create(EntityId, cap: 1)
+    var labelKids: List(EntityId) = List.create(EntityId, cap: 1)
     labelKids.add(value: labelE)
     let buttonChildren: Children = { ids: own labelKids }
     componentSet(this: world.childrens, entityId: buttonE, data: buttonChildren)

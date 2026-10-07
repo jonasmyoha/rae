@@ -226,7 +226,7 @@ func buildScene3d() ret Scene3d {
 }
 
 func packObjects(scene: view Scene3d) ret List(Float) {
-  let out: List(Float) = List.create(Float, cap: scene.renderables.length * 12)
+  var out: List(Float) = List.create(Float, cap: scene.renderables.length * 12)
   var i: Int = 0
   loop let renderable: view Renderable3d in scene.renderables {
     if let transform: view Transform3d => scene.transforms.viewAt(index: i) {
@@ -249,7 +249,7 @@ func packObjects(scene: view Scene3d) ret List(Float) {
 }
 
 func packMaterials(scene: view Scene3d) ret List(Float) {
-  let out: List(Float) = List.create(Float, cap: scene.materials.length * 8)
+  var out: List(Float) = List.create(Float, cap: scene.materials.length * 8)
   loop let material: view Material3d in scene.materials {
     out.add(value: material.r)
     out.add(value: material.g)
@@ -267,7 +267,7 @@ func packCamera(pos: view Vec3, fwd: view Vec3, aspect: view Float) ret List(Flo
   let worldUp: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
   let right: Vec3 = Vec3.vnorm(a: Vec3.vcross(a: fwd, b: worldUp))
   let up: Vec3 = Vec3.vnorm(a: Vec3.vcross(a: right, b: fwd))
-  let out: List(Float) = List.create(Float, cap: 16)
+  var out: List(Float) = List.create(Float, cap: 16)
   out.add(value: pos.x)
   out.add(value: pos.y)
   out.add(value: pos.z)
@@ -307,7 +307,7 @@ func buildGpu3d(
 }
 
 func fillPixels(width: view Int, height: view Int) ret List(Int) {
-  let fb: List(Int) = List.create(Int, cap: width * height)
+  var fb: List(Int) = List.create(Int, cap: width * height)
   var i: Int = 0
   loop i < width * height {
     fb.add(value: 0)
@@ -343,7 +343,7 @@ func main() {
   let mouseSens: Float = 0.0045
   let worldUp: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
 
-  let params: List(Int) = List.create(Int, cap: 8)
+  var params: List(Int) = List.create(Int, cap: 8)
   var pIdx: Int = 0
   loop pIdx < 8 {
     params.add(value: 0)
@@ -499,7 +499,7 @@ func main() {
     params.set(index: 2, value: frame)
     Gpu.writeU32(buf: rt.paramsBuf, data: params.data, count: 8)
 
-    let bufs: List(Int) = List.create(Int, cap: 5)
+    var bufs: List(Int) = List.create(Int, cap: 5)
     bufs.add(value: rt.paramsBuf)
     bufs.add(value: rt.cameraBuf)
     bufs.add(value: rt.objectBuf)

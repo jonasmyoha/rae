@@ -80,7 +80,7 @@ func loadSceneIntoPage(
     # itself; without this filter we mount both copies (once via the
     # SceneInstance resolver, once as orphans here).
     let nodeCount: Int = scene.nodes.length
-    let reachable: List(Bool) = List.create(Bool, cap: nodeCount)
+    var reachable: List(Bool) = List.create(Bool, cap: nodeCount)
     var ri: Int = 0
     loop ri < nodeCount {
       reachable.add(value: false)
@@ -90,7 +90,7 @@ func loadSceneIntoPage(
     if rootIdxR < 0 {
       ret noEntity()
     }
-    let stack: List(Int) = List.create(Int, cap: 32)
+    var stack: List(Int) = List.create(Int, cap: 32)
     stack.add(value: rootIdxR)
     loop stack.length > 0 {
       let popAt: Int = stack.length - 1
@@ -128,7 +128,7 @@ func loadSceneIntoPage(
     # Non-reachable slots keep a noEntity() sentinel so later passes
     # can detect + skip them while keeping the index-by-nodeIndex map
     # intact for sceneNodeIndex lookups.
-    let entitiesByNodeIndex: List(EntityId) = List.create(EntityId, cap: nodeCount)
+    var entitiesByNodeIndex: List(EntityId) = List.create(EntityId, cap: nodeCount)
     let nodeIdsMap: mod StringMap(Int) => world.nodeIds
     var i: Int = 0
     loop i < nodeCount {
@@ -284,7 +284,7 @@ func loadSceneIntoPage(
 # The overrides a SceneInstance authors, as the list mountSceneInstanceIntoPage
 # takes.
 func sceneInstanceOverrides(inst: view SceneInstance) ret List(SceneOverride) {
-  let overrides: List(SceneOverride) = List.create(SceneOverride, cap: inst.overrideNodeIds.length)
+  var overrides: List(SceneOverride) = List.create(SceneOverride, cap: inst.overrideNodeIds.length)
   loop var j: Int = 0, j < inst.overrideNodeIds.length, ++j {
     if let nodeId: String = inst.overrideNodeIds.copyAt(index: j) {
       if let componentName: String = inst.overrideComponents.copyAt(index: j) {
@@ -444,7 +444,7 @@ func dumpScene(world: view UiWorld, uiSystems: view UiSystems, scene: view Scene
 # to `entityId`. Order matches `registeredComponentNames()` for stable
 # diagnostic output.
 func componentNamesFor(world: view UiWorld, entityId: view EntityId) ret String {
-  let parts: List(String) = List.create(String, cap: 8)
+  var parts: List(String) = List.create(String, cap: 8)
   if componentHas(this: world.rects, entityId: entityId) {
     parts.add(value: "Rect")
   }

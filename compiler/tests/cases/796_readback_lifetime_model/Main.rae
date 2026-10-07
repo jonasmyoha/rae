@@ -34,10 +34,10 @@ type Manager {
 }
 
 func createManager(capacity: view Int) ret Manager {
-  let slots: List(Slot) = List.create(Slot, cap: capacity)
-  let requests: List(Request) = List.create(Request, cap: capacity)
-  let bufferPins: List(Int) = List.create(Int, cap: capacity)
-  let bufferLive: List(Int) = List.create(Int, cap: capacity)
+  var slots: List(Slot) = List.create(Slot, cap: capacity)
+  var requests: List(Request) = List.create(Request, cap: capacity)
+  var bufferPins: List(Int) = List.create(Int, cap: capacity)
+  var bufferLive: List(Int) = List.create(Int, cap: capacity)
   var i: Int = 0
   loop i < capacity {
     slots.add(value: { live: 0, generation: 0, completed: 0, sourceBuffer: -1 })

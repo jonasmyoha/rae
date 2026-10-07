@@ -380,7 +380,7 @@ func castRayClosest(
   filter: view QueryFilter
 ) ret RayResult {
   var result: RayResult = emptyRayResult()
-  let unused: List(CastHit) = List.create(CastHit, cap: 1)
+  var unused: List(CastHit) = List.create(CastHit, cap: 1)
   let stats: TreeStats = castRayWith(
     world: world
     origin: origin
@@ -521,7 +521,7 @@ func castShapeClosest(
   filter: view QueryFilter
   hit: mod CastHit
 ) ret Bool {
-  let hits: List(CastHit) = List.create(CastHit, cap: 4)
+  var hits: List(CastHit) = List.create(CastHit, cap: 4)
   castShapeWith(
     world: world
     origin: origin

@@ -70,7 +70,7 @@ func stuntLoop(
   drift: view Float
   slabCount: view Int
 ) ret List(SceneBody) {
-  let slabs: List(SceneBody) = List.create(SceneBody, cap: slabCount)
+  var slabs: List(SceneBody) = List.create(SceneBody, cap: slabCount)
   let step: Float = 2.0 * Math.pi / (slabCount as Float)
   # A little longer than its arc, so neighbouring slabs overlap with no seam
   let halfLength: Float = 0.5 * radius * step * 1.08
@@ -100,7 +100,7 @@ func quarterPipe(
   slabCount: view Int
   hue: view Float
 ) ret List(SceneBody) {
-  let slabs: List(SceneBody) = List.create(SceneBody, cap: slabCount)
+  var slabs: List(SceneBody) = List.create(SceneBody, cap: slabCount)
   let step: Float = 0.5 * Math.pi / (slabCount as Float)
   let halfLength: Float = 0.5 * radius * step * 1.08
   loop var i: Int = 0, i < slabCount, ++i {

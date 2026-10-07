@@ -106,7 +106,7 @@ func deriveActiveHierarchy(
   }
 
   # Raw entity value per scene node (-1 = not mounted in this page).
-  let entityVals: List(Int) = List.create(Int, cap: nodeCount)
+  var entityVals: List(Int) = List.create(Int, cap: nodeCount)
   var e: Int = 0
   loop e < nodeCount {
     let node: view SceneNode => nodeAt(this: scene, idx: e)
@@ -119,8 +119,8 @@ func deriveActiveHierarchy(
   }
 
   # Authored parent map + within-parent sort keys.
-  let parentIdxs: List(Int) = List.create(Int, cap: nodeCount)
-  let sortKeys: List(Float) = List.create(Float, cap: nodeCount)
+  var parentIdxs: List(Int) = List.create(Int, cap: nodeCount)
+  var sortKeys: List(Float) = List.create(Float, cap: nodeCount)
   var z: Int = 0
   loop z < nodeCount {
     parentIdxs.add(value: -1)
@@ -215,7 +215,7 @@ func deriveActiveHierarchy(
     if parentRaw >= 0 {
       let parentEntityId: EntityId = nodeEntityId(world: world, index: parentRaw)
       # Gather b's mounted children, selection-sorted by sort key.
-      let unsorted: List(Int) = List.create(Int, cap: 8)
+      var unsorted: List(Int) = List.create(Int, cap: 8)
       var c: Int = 0
       loop c < nodeCount {
         if parentIdxs.copyAt(index: c) is b {
@@ -227,7 +227,7 @@ func deriveActiveHierarchy(
       }
       let childCount: Int = unsorted.length
       if childCount > 0 {
-        let used: List(Int) = List.create(Int, cap: childCount)
+        var used: List(Int) = List.create(Int, cap: childCount)
         var w: Int = 0
         loop w < childCount {
           used.add(value: 0)

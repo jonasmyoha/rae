@@ -32,8 +32,8 @@ func cell(
 }
 
 func tileRow(key: view String, kind: view String) ret ListViewRow {
-  let keys: List(String) = List.create(String, cap: 3)
-  let values: List(String) = List.create(String, cap: 3)
+  var keys: List(String) = List.create(String, cap: 3)
+  var values: List(String) = List.create(String, cap: 3)
   cell(
     keys: keys
     values: values
@@ -114,7 +114,7 @@ func stripScene() ret String {
 }
 
 func rowIds(world: view UiWorld, listEntityId: view EntityId) ret List(String) {
-  let out: List(String) = List.create(String, cap: 8)
+  var out: List(String) = List.create(String, cap: 8)
   unsafe {
     if componentHas(this: world.childrens, entityId: listEntityId) is false {
       ret out
@@ -154,18 +154,18 @@ func rowNodeText(world: view UiWorld, row: view EntityId, nodeId: view String) r
 }
 
 func main() {
-  let registry: SceneRegistry = createSceneRegistry()
-  let cover: Scene = parseScene(source: tileScene(rootId: "Tile", artId: "Art"))
+  var registry: SceneRegistry = createSceneRegistry()
+  var cover: Scene = parseScene(source: tileScene(rootId: "Tile", artId: "Art"))
   cover.sceneId = "CoverTile"
   registerScene(reg: registry, key: "CoverTile", scene: own cover)
-  let playlist: Scene = parseScene(source: tileScene(rootId: "Tile", artId: "Art"))
+  var playlist: Scene = parseScene(source: tileScene(rootId: "Tile", artId: "Art"))
   playlist.sceneId = "PlaylistTile"
   registerScene(reg: registry, key: "PlaylistTile", scene: own playlist)
 
   # ----- A: the grid, mixed tile kinds, fitted side, bindings -----
-  let world: UiWorld = createUiWorld()
+  var world: UiWorld = createUiWorld()
   var uiSystems: UiSystems = createUiSystems()
-  let grid: Scene = parseScene(source: gridScene())
+  var grid: Scene = parseScene(source: gridScene())
   grid.sceneId = "grid"
   loadScene(world: world, uiSystems: uiSystems, scene: grid)
   var listEntityId: EntityId = noEntity()
@@ -176,7 +176,7 @@ func main() {
   log(
     "mode flow: {lv.mode is ListViewMode.flow} rowScenes: {lv.rowScenes.length} fit: {lv.fitToColumns}"
   )
-  let rows: List(ListViewRow) = List.create(ListViewRow, cap: 4)
+  var rows: List(ListViewRow) = List.create(ListViewRow, cap: 4)
   rows.add(value: tileRow(key: "liked", kind: "playlist"))
   rows.add(value: tileRow(key: "abbey", kind: "album"))
   rows.add(value: tileRow(key: "kind", kind: "album"))
@@ -209,7 +209,7 @@ func main() {
 
   # ----- B: keyed rebind — drop "abbey", add "help", reorder -----
   let before: List(String) = rowIds(world: world, listEntityId: listEntityId)
-  let rows2: List(ListViewRow) = List.create(ListViewRow, cap: 4)
+  var rows2: List(ListViewRow) = List.create(ListViewRow, cap: 4)
   rows2.add(value: tileRow(key: "kind", kind: "album"))
   rows2.add(value: tileRow(key: "liked", kind: "playlist"))
   rows2.add(value: tileRow(key: "help", kind: "album"))
@@ -232,15 +232,15 @@ func main() {
   log("stable: {describeRows(world: world, listEntityId: listEntityId)}")
 
   # ----- C: a horizontal strip with fixed-width rows -----
-  let stripWorld: UiWorld = createUiWorld()
-  let strip: Scene = parseScene(source: stripScene())
+  var stripWorld: UiWorld = createUiWorld()
+  var strip: Scene = parseScene(source: stripScene())
   strip.sceneId = "strip"
   loadScene(world: stripWorld, uiSystems: uiSystems, scene: strip)
   var stripEntityId: EntityId = noEntity()
   if let raw: Int = stripWorld.nodeIds.get(k: "Strip") {
     stripEntityId = id(v: raw)
   }
-  let thumbs: List(ListViewRow) = List.create(ListViewRow, cap: 3)
+  var thumbs: List(ListViewRow) = List.create(ListViewRow, cap: 3)
   thumbs.add(value: tileRow(key: "a", kind: "album"))
   thumbs.add(value: tileRow(key: "b", kind: "album"))
   componentSet(

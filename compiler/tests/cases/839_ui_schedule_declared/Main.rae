@@ -61,9 +61,9 @@ func frame(
 }
 
 func main() {
-  let world: UiWorld = createUiWorld()
+  var world: UiWorld = createUiWorld()
   var uiSystems: UiSystems = createUiSystems()
-  let sched: Schedule = createUiPipeline(world: world)
+  var sched: Schedule = createUiPipeline(world: world)
 
   # (a) order + count
   log("systems: {scheduleSize(schedule: sched)} (expected {uiSystemCount})")
@@ -105,8 +105,8 @@ func main() {
   }
   componentSet(this: world.sizes, entityId: root, data: sz)
 
-  let layoutCache: LayoutCache = createLayoutCache()
-  let transformCache: TransformCache = createTransformCache()
+  var layoutCache: LayoutCache = createLayoutCache()
+  var transformCache: TransformCache = createTransformCache()
   var allSame: Bool = true
 
   let f1: Compare = frame(

@@ -98,7 +98,7 @@ func main() {
   printParent(parents: parents, child: c2, label: "c2 parent after rebuild")
 
   # getChildren returns a copy: mutating it must not touch the cache.
-  let snapshot: List(EntityId) = getChildren(childrens: childrens, parent: pA)
+  var snapshot: List(EntityId) = getChildren(childrens: childrens, parent: pA)
   snapshot.clear()
   printKids(childrens: childrens, entityId: pA, label: "pA kids after copy cleared")
 }

@@ -1,8 +1,10 @@
 # `let` is frozen
 
-**Status:** decided 2026-10-07 by the maintainer. Step 1 (this document, an
-opt-in warning, the counts below) has landed; step 2 (migrate the flagged
-code, make it an error) is queued.
+**Status:** decided 2026-10-07 by the maintainer; ENFORCED since compiler
+0.1.200. Writing into a `let` is a compile error. Step 1 measured the tree
+(below); step 2 changed the 832 flagged declarations to `var` and made the
+check an error. `RAE_FROZEN_LET=warn` downgrades it to a warning, only to
+migrate code written before the rule.
 
 ## The three bindings
 
@@ -31,7 +33,7 @@ With `let outer: Outer = ...`:
 | passing it, or a part of it, to a `mod` parameter | `bump(inner: outer.inner)` with `func bump(inner: mod Inner)` |
 | calling a mutating method on it, or on a part of it | `numbers.add(value: 3)` on `let numbers: List(Int)` |
 
-Each is reported as: `cannot modify 'outer.inner.value': 'outer' is a 'let',
+Each is a compile error: `cannot modify 'outer.inner.value': 'outer' is a 'let',
 which is frozen (docs/let-is-frozen.md); declare it 'var'` (and `cannot pass
 '…' to 'mod' parameter '…'`, `cannot call mutating method '…' on '…'`).
 
@@ -89,9 +91,19 @@ To list them again:
 RAE_FROZEN_LET=warn rae build --emit-c --out /tmp/out.c <entry>/Main.rae 2>&1 | grep 'is frozen'
 ```
 
-## Step 2 (queued)
+## Step 2: migration and enforcement (2026-10-07)
 
-Change every flagged `let` to `var` (or restructure so the mutation happens
-on a short-lived `var` part), make the check an error by default, add
-fixtures for each forbidden form and each allowed edge, and bump the
-compiler's PATCH version: it is a breaking change.
+The compiler's message names each binding's declaration line, so the
+migration was mechanical: the 832 `let` declarations behind the 2,095 sites
+(in 314 files) became `var`; none needed restructuring. A rebuild of every
+example, test case and stress case with the warning on then found no site
+left, and the check became an error. Fixtures:
+`1017_reject_frozen_let` (every forbidden form: member and nested member
+writes, list/array element writes through `add`/`set`, a member and the whole
+let as `mod` arguments, mutating method calls) and `1018_frozen_let_edges`
+(`var`, `mod` parameters, a `mod` alias into a `var`, a `let` Buffer written
+through, `if let` narrowing, `view` arguments).
+
+A generic function body is checked per instantiation; a template that is
+never instantiated is not analysed, so a write into a `let` there surfaces
+when it is first used.

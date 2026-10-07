@@ -428,7 +428,7 @@ func clearMoved(tree: mod DynamicTree) {
   if isLeafNode(node: root) {
     ret
   }
-  let stack: List(Int) = List.create(Int, cap: 32)
+  var stack: List(Int) = List.create(Int, cap: 32)
   stack.add(value: leftChild(node: root))
   loop stack.length > 0 {
     let pair: Int = stack.copyAtDefault(index: stack.length - 1)
@@ -457,7 +457,7 @@ func gatherMovedProxies(tree: view DynamicTree, proxyIds: mod List(Int)) ret Int
     proxyIds.add(value: nodeProxyId(node: root))
     ret 1
   }
-  let stack: List(Int) = List.create(Int, cap: 32)
+  var stack: List(Int) = List.create(Int, cap: 32)
   stack.add(value: leftChild(node: root))
   loop stack.length > 0 {
     let pair: Int = stack.copyAtDefault(index: stack.length - 1)
@@ -485,7 +485,7 @@ func refitSubtree(tree: mod DynamicTree, rootIndex: view Int) {
     ret
   }
   # A negative entry -1 - i is the deferred union of node i
-  let stack: List(Int) = List.create(Int, cap: 32)
+  var stack: List(Int) = List.create(Int, cap: 32)
   stack.add(value: -1 - rootIndex)
   stack.add(value: leftChild(node: root))
   stack.add(value: leftChild(node: root) + 1)

@@ -135,7 +135,7 @@ func renderTile(
   seedBase: view Int
 ) ret List(Int) {
   seed(value: seedBase + ty0 * 9781 + tx0 * 17)
-  let out: List(Int) = List.create(Int, cap: tw * th)
+  var out: List(Int) = List.create(Int, cap: tw * th)
   var ry: Int = 0
   loop ry < th {
     let py: Int = ty0 + ry
@@ -213,7 +213,7 @@ func quadTile(
   if ty0 + th > qy0 + qh {
     th = qy0 + qh - ty0
   }
-  let res: List(Int) = List.create(Int, cap: 4)
+  var res: List(Int) = List.create(Int, cap: 4)
   res.add(value: tx0)
   res.add(value: ty0)
   res.add(value: tw)

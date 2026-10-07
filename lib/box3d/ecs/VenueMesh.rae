@@ -47,11 +47,11 @@ func addVenueHeightField(
   if countX < 2 or countZ < 2 or heights.length < countX * countZ {
     ret none
   }
-  let heightValues: List(Float32) = List.create(Float32, cap: countX * countZ)
+  var heightValues: List(Float32) = List.create(Float32, cap: countX * countZ)
   loop var i: Int = 0, i < countX * countZ, ++i {
     heightValues.add(value: heights.copyAtDefault(index: i) as Float32)
   }
-  let materials: List(UInt8) = List.create(UInt8, cap: (countX - 1) * (countZ - 1))
+  var materials: List(UInt8) = List.create(UInt8, cap: (countX - 1) * (countZ - 1))
   loop var cell: Int = 0, cell < (countX - 1) * (countZ - 1), ++cell {
     materials.add(value: 0 as UInt8)
   }

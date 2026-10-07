@@ -21,9 +21,9 @@ open gpu/GpuLifetime
 # bounded by what is actually referenced. Returns whether anything was dropped.
 func compactDependencies(resources: mod GpuResources) ret Bool {
   let before: Int = resources.depKinds.length
-  let kinds: List(Int) = List.create(Int, cap: before)
-  let slots: List(Int) = List.create(Int, cap: before)
-  let generations: List(Int) = List.create(Int, cap: before)
+  var kinds: List(Int) = List.create(Int, cap: before)
+  var slots: List(Int) = List.create(Int, cap: before)
+  var generations: List(Int) = List.create(Int, cap: before)
   relocateSlices(
     resources: resources
     table: resources.bindGroups

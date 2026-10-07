@@ -10,7 +10,7 @@ open ecs/ComponentTable
 open ui/UiSystems
 
 func main() {
-  let world: UiWorld = createUiWorld()
+  var world: UiWorld = createUiWorld()
   var uiSystems: UiSystems = createUiSystems()
   let root: EntityId = createEntity(world: world)
   let r: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: 200.0, y: 100.0 } }
@@ -23,7 +23,7 @@ func main() {
 
   layoutSystem(world: world, uiSystems: uiSystems)
 
-  let cache: TransformCache = createTransformCache()
+  var cache: TransformCache = createTransformCache()
 
   # First call: cache is fresh (-1 sentinels), inputs have non-sentinel
   # generations from the layout pass, so dirty=true → runs.

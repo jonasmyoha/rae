@@ -498,7 +498,7 @@ func getBodyContactData(
   bodyId: view BodyId
   capacity: view Int
 ) ret List(ContactData) {
-  let result: List(ContactData) = List.create(ContactData, cap: 4)
+  var result: List(ContactData) = List.create(ContactData, cap: 4)
   var contactKey: Int = bodyAt(world: world, bodyId: bodyIndexOf(bodyId: bodyId)).headContactKey
   loop contactKey is not -1 and result.length < capacity {
     let contactId: Int = contactKey shr 1

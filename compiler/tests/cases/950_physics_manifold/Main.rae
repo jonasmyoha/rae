@@ -146,14 +146,14 @@ func evaluate(name: view String, reader: mod Reader, out: mod List(Float)) ret B
     putInt(out: out, value: makeFeatureId(pair: readPair(reader: reader)))
   } else if name is "b3ClipPolygon" {
     let count: Int = readInt(reader: reader)
-    let polygon: List(ClipVertex) = List.create(ClipVertex, cap: count)
+    var polygon: List(ClipVertex) = List.create(ClipVertex, cap: count)
     loop var i: Int = 0, i < count, ++i {
       polygon.add(value: readClipVertex(reader: reader))
     }
     let clipPlane: Plane = readPlane(reader: reader)
     let edge: Int = readInt(reader: reader)
     let refPlane: Plane = readPlane(reader: reader)
-    let clipped: List(ClipVertex) = List.create(ClipVertex, cap: maxClipPoints)
+    var clipped: List(ClipVertex) = List.create(ClipVertex, cap: maxClipPoints)
     let outCount: Int = clipPolygon(
       out: clipped
       polygon: polygon
@@ -178,7 +178,7 @@ func evaluate(name: view String, reader: mod Reader, out: mod List(Float)) ret B
     var manifold: LocalManifold = createLocalManifold(capacity: capacity)
     manifold.normal = readVec(reader: reader)
     let count: Int = readInt(reader: reader)
-    let points: List(LocalManifoldPoint) = List.create(LocalManifoldPoint, cap: count)
+    var points: List(LocalManifoldPoint) = List.create(LocalManifoldPoint, cap: count)
     loop var i: Int = 0, i < count, ++i {
       points.add(value: readManifoldPoint(reader: reader))
     }
@@ -265,7 +265,7 @@ func main() {
   var calls: Int = 0
   var mismatches: Int = 0
   var unknown: Int = 0
-  let names: List(String) = List.create(String, cap: 16)
+  var names: List(String) = List.create(String, cap: 16)
   loop var i: Int = 0, i < lines.length, ++i {
     let line: String = lines.copyAtDefault(index: i)
     if line.length() is 0 or line.startsWith(prefix: "#") {
@@ -274,7 +274,7 @@ func main() {
     let tokens: List(String) = line.split(sep: " ")
     let name: String = tokens.copyAtDefault(index: 0)
     var reader: Reader = { values: List.create(Float, cap: 64), next: 0 }
-    let expected: List(Float) = List.create(Float, cap: 64)
+    var expected: List(Float) = List.create(Float, cap: 64)
     var afterArrow: Bool = false
     loop var j: Int = 1, j < tokens.length, ++j {
       let token: String = tokens.copyAtDefault(index: j)
@@ -286,7 +286,7 @@ func main() {
         reader.values.add(value: token.toFloat())
       }
     }
-    let actual: List(Float) = List.create(Float, cap: 64)
+    var actual: List(Float) = List.create(Float, cap: 64)
     if evaluate(name: name, reader: reader, out: actual) is false {
       unknown = unknown + 1
       log("not ported: {name}")

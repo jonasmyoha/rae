@@ -713,9 +713,9 @@ func unionIslandNodes(
 func splitIsland(world: mod PhysicsWorld, baseId: view Int) {
   let base: Island = world.islands.copyAtDefault(index: baseId)
   let baseBodyCount: Int = base.bodies.length
-  let parents: List(Int) = List.create(Int, cap: baseBodyCount)
-  let ranks: List(Int) = List.create(Int, cap: baseBodyCount)
-  let contactCounts: List(Int) = List.create(Int, cap: baseBodyCount)
+  var parents: List(Int) = List.create(Int, cap: baseBodyCount)
+  var ranks: List(Int) = List.create(Int, cap: baseBodyCount)
+  var contactCounts: List(Int) = List.create(Int, cap: baseBodyCount)
   loop var i: Int = 0, i < baseBodyCount, ++i {
     parents.add(value: i)
     ranks.add(value: 0)
@@ -781,7 +781,7 @@ func splitIsland(world: mod PhysicsWorld, baseId: view Int) {
   }
 
   # The new island of each root body, in body order
-  let rootMap: List(Int) = List.create(Int, cap: baseBodyCount)
+  var rootMap: List(Int) = List.create(Int, cap: baseBodyCount)
   loop var i: Int = 0, i < baseBodyCount, ++i {
     rootMap.add(value: -1)
   }
@@ -793,7 +793,7 @@ func splitIsland(world: mod PhysicsWorld, baseId: view Int) {
       islandCount = islandCount + 1
     }
   }
-  let islandIds: List(Int) = List.create(Int, cap: islandCount)
+  var islandIds: List(Int) = List.create(Int, cap: islandCount)
   loop var i: Int = 0, i < islandCount, ++i {
     islandIds.add(value: createIsland(world: world, setIndex: awakeSet))
   }

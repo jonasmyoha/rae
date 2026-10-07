@@ -76,7 +76,8 @@ func main() ret Int {
       ret 1
     }
     var issuer: IdIssuer = IdIssuer.create()
-    if let resources: GpuResources = GpuResources.create(issuer: issuer, capacity: 12) {
+    if let createdResources: GpuResources = GpuResources.create(issuer: issuer, capacity: 12) {
+      var resources: GpuResources = own createdResources
       # Pack the known argument struct.
       var writer: ArgWriter = createArgs(uniform: true)
       pushF32(writer: writer, value: 1.0)
@@ -96,7 +97,7 @@ func main() ret Int {
         z: 11.0
         w: 12.0
       )
-      let identity: List(Float) = List.create(Float, cap: 16)
+      var identity: List(Float) = List.create(Float, cap: 16)
       var mi: Int = 0
       loop mi < 16 {
         if mi is 0 or mi is 5 or mi is 10 or mi is 15 {
@@ -142,7 +143,7 @@ func main() ret Int {
               entryPoint: "main"
               constants: noShaderConstants()
             ) {
-              let buffers: List(BufferId) = List.create(BufferId, cap: 2)
+              var buffers: List(BufferId) = List.create(BufferId, cap: 2)
               buffers.add(value: uniform)
               buffers.add(value: storage)
               let noViews: List(TextureViewId) = List.create(TextureViewId, cap: 1)
@@ -162,7 +163,8 @@ func main() ret Int {
                   workgroupsY: 1
                   workgroupsZ: 1
                 )
-                if let recording: Recording = beginRecording(resources: resources) {
+                if let openedRecording: Recording = beginRecording(resources: resources) {
+                  var recording: Recording = own openedRecording
                   if recordComputeCommand(
                     recording: recording
                     resources: resources
@@ -198,7 +200,7 @@ func main() ret Int {
                       if awaitReadback(resources: resources, id: read) is not 1 {
                         ret fail(message: "readback")
                       }
-                      let out: List(UInt8) = List.create(UInt8, cap: 64)
+                      var out: List(UInt8) = List.create(UInt8, cap: 64)
                       var z: Int = 0
                       loop z < 64 {
                         out.add(value: 0 as UInt8)
@@ -209,7 +211,7 @@ func main() ret Int {
                       }
                       retireReadback(resources: resources, id: read)
                       # Compare each field the shader read to the packed bit pattern.
-                      let expected: List(Float) = List.create(Float, cap: 16)
+                      var expected: List(Float) = List.create(Float, cap: 16)
                       expected.add(value: 1.0)
                       expected.add(value: 2.0)
                       expected.add(value: 3.0)

@@ -97,7 +97,7 @@ func collideHullAndSphere(
   let center: Vec3 = transformPoint(transform: transformBtoA, point: sphereB.center)
   let speculative: Float = speculativeDistance(lengthUnitsPerMeter: lengthUnitsPerMeter)
 
-  let centerPoints: List(Vec3) = List.create(Vec3, cap: 1)
+  var centerPoints: List(Vec3) = List.create(Vec3, cap: 1)
   centerPoints.add(value: center)
   let radiusA: Float = 0.0
   let radiusB: Float = sphereB.radius
@@ -223,7 +223,7 @@ func queryFaceDirectionHullAndCapsule(
   var maxFaceIndex: Int = -1
   var maxVertexIndex: Int = -1
   var maxFaceSeparation: Float = -floatMax
-  let capsulePoints: List(Vec3) = List.create(Vec3, cap: 2)
+  var capsulePoints: List(Vec3) = List.create(Vec3, cap: 2)
   capsulePoints.add(value: transformPoint(transform: capsuleTransform, point: capsule.center1))
   capsulePoints.add(value: transformPoint(transform: capsuleTransform, point: capsule.center2))
   loop var faceIndex: Int = 0, faceIndex < hull.planes.length, ++faceIndex {
@@ -438,7 +438,7 @@ func collideHullAndCapsule(
   if manifoldCapacity(manifold: manifold) < 2 {
     ret
   }
-  let segmentPoints: List(Vec3) = List.create(Vec3, cap: 2)
+  var segmentPoints: List(Vec3) = List.create(Vec3, cap: 2)
   segmentPoints.add(value: capsuleB.center1)
   segmentPoints.add(value: capsuleB.center2)
   let output: DistanceOutput = proxyDistance(

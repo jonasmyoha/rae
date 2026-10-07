@@ -85,7 +85,7 @@ func listRowValue(row: view ListViewRow, key: view String) ret String {
 # distinctNodeIds[k] on every recycle.
 func listViewDistinctNodeIds(lv: view ListView) ret List(String) {
   unsafe {
-    let out: List(String) = List.create(String, cap: 4)
+    var out: List(String) = List.create(String, cap: 4)
     let n: Int = lv.bindings.length
     var i: Int = 0
     loop i < n {
@@ -444,7 +444,7 @@ func listViewApplyRow(
     }
     # Snapshot this row's child ids (distinct-order) so binding writes don't
     # alias the childrens table while it is being read.
-    let kids: List(EntityId) = List.create(EntityId, cap: distinct.length)
+    var kids: List(EntityId) = List.create(EntityId, cap: distinct.length)
     if componentHas(this: world.childrens, entityId: rowRoot) {
       let ch: view Children => componentView(this: world.childrens, entityId: rowRoot)
       var i: Int = 0
@@ -554,7 +554,7 @@ func listViewSyncEntity(
     let distinct: List(String) = listViewDistinctNodeIds(lv: lv)
 
     # Snapshot the current pool (the ListView's row-root children).
-    let pool: List(EntityId) = List.create(EntityId, cap: windowCount + 2)
+    var pool: List(EntityId) = List.create(EntityId, cap: windowCount + 2)
     if componentHas(this: world.childrens, entityId: entityId) {
       let ch: view Children => componentView(this: world.childrens, entityId: entityId)
       var i: Int = 0
@@ -592,7 +592,7 @@ func listViewSyncEntity(
 
     # Re-snapshot the pool (post grow/shrink) in stable child order, then
     # re-point each slot at its data row.
-    let rows2: List(EntityId) = List.create(EntityId, cap: target)
+    var rows2: List(EntityId) = List.create(EntityId, cap: target)
     if componentHas(this: world.childrens, entityId: entityId) {
       let ch: view Children => componentView(this: world.childrens, entityId: entityId)
       var i: Int = 0
@@ -775,7 +775,7 @@ func listViewSyncFlow(
       count = componentView(this: world.listViewDatas, entityId: entityId).rows.length
     }
     # Snapshot the current rows (children carrying a ListViewRowKey).
-    let existing: List(EntityId) = List.create(EntityId, cap: count + 4)
+    var existing: List(EntityId) = List.create(EntityId, cap: count + 4)
     if componentHas(this: world.childrens, entityId: entityId) {
       let ch: view Children => componentView(this: world.childrens, entityId: entityId)
       var i: Int = 0
@@ -787,7 +787,7 @@ func listViewSyncFlow(
         i = i + 1
       }
     }
-    let reused: List(Bool) = List.create(Bool, cap: existing.length)
+    var reused: List(Bool) = List.create(Bool, cap: existing.length)
     loop let unused: view EntityId in existing {
       reused.add(value: false)
     }
@@ -797,7 +797,7 @@ func listViewSyncFlow(
       listEntityId: entityId
       lv: lv
     )
-    let ordered: List(EntityId) = List.create(EntityId, cap: count)
+    var ordered: List(EntityId) = List.create(EntityId, cap: count)
     let distinct: List(String) = listViewDistinctNodeIds(lv: lv)
     var d: Int = 0
     loop d < count {
@@ -873,8 +873,8 @@ func listViewSyncFlow(
     # Children generation eagerly, so an unconditional borrow would re-dirty
     # layout every frame even when nothing moved (an idle busy-loop).
     if componentHas(this: world.childrens, entityId: entityId) {
-      let currentIds: List(EntityId) = List.create(EntityId, cap: 8)
-      let kept: List(EntityId) = List.create(EntityId, cap: 8)
+      var currentIds: List(EntityId) = List.create(EntityId, cap: 8)
+      var kept: List(EntityId) = List.create(EntityId, cap: 8)
       let chv: view Children => componentView(this: world.childrens, entityId: entityId)
       var i: Int = 0
       loop i < chv.ids.length {
@@ -933,7 +933,7 @@ func listViewApplyFlowRow(
       }
       ret
     }
-    let kids: List(EntityId) = List.create(EntityId, cap: distinct.length)
+    var kids: List(EntityId) = List.create(EntityId, cap: distinct.length)
     if componentHas(this: world.childrens, entityId: rowRoot) {
       let ch: view Children => componentView(this: world.childrens, entityId: rowRoot)
       var i: Int = 0
@@ -969,7 +969,7 @@ func listViewSystem(world: mod UiWorld, uiSystems: mod UiSystems, scenes: view S
     let n: Int = componentCount(this: world.listViews)
     # Collect entity ids first: syncing mutates childrens/entities, which must
     # not alias the listViews table iteration.
-    let entities: List(EntityId) = List.create(EntityId, cap: n)
+    var entities: List(EntityId) = List.create(EntityId, cap: n)
     var i: Int = 0
     loop i < n {
       entities.add(value: componentEntityAt(this: world.listViews, i: i))

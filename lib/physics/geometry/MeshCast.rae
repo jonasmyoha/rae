@@ -29,7 +29,7 @@ func makeLocalProxy(proxy: view ShapeProxy, transform: view Transform) ret Shape
   let inverse: Transform = invert(transform: transform)
   let rotation: Matrix3 = matrixFromQuat(quat: inverse.rotation)
   let count: Int = minInt(left: proxy.points.length, right: maxShapeCastPoints)
-  let points: List(Vec3) = List.create(Vec3, cap: count)
+  var points: List(Vec3) = List.create(Vec3, cap: count)
   loop var i: Int = 0, i < count, ++i {
     points.add(
       value: add(
@@ -180,7 +180,7 @@ func rayCastMesh(mesh: view Mesh, input: view RayCastInput) ret CastOutput {
   var invScaledRayMin: Vec3 = minV(left: invScaledRayStart, right: invScaledRayEnd)
   var invScaledRayMax: Vec3 = maxV(left: invScaledRayStart, right: invScaledRayEnd)
 
-  let stack: List(Int) = List.create(Int, cap: meshStackSize)
+  var stack: List(Int) = List.create(Int, cap: meshStackSize)
   var nodeIndex: Int = 0
   loop true {
     let node: MeshNode = data.nodes.copyAtDefault(index: nodeIndex)
@@ -295,7 +295,7 @@ func shapeCastMesh(
   var invScaledRayMax: Vec3 = maxV(left: invScaledRayStart, right: invScaledRayEnd)
   let invScaledShapeExtent: Vec3 = multiply(left: absInvScale, right: shapeExtent)
 
-  let stack: List(Int) = List.create(Int, cap: meshStackSize)
+  var stack: List(Int) = List.create(Int, cap: meshStackSize)
   var nodeIndex: Int = 0
   loop true {
     let node: MeshNode = data.nodes.copyAtDefault(index: nodeIndex)
@@ -356,7 +356,7 @@ func shapeCastMesh(
 
           # The cast against the triangle, shifted to its first vertex
           let origin: Vec3 = triangle.vertex1
-          let triangleVertices: List(Vec3) = List.create(Vec3, cap: 3)
+          var triangleVertices: List(Vec3) = List.create(Vec3, cap: 3)
           triangleVertices.add(value: zeroVector())
           triangleVertices.add(value: subtract(left: triangle.vertex2, right: origin))
           triangleVertices.add(value: subtract(left: triangle.vertex3, right: origin))
@@ -421,7 +421,7 @@ func triangleDistance(
   proxy: view ShapeProxy
   useRadii: view Bool
 ) ret DistanceOutput {
-  let points: List(Vec3) = List.create(Vec3, cap: 3)
+  var points: List(Vec3) = List.create(Vec3, cap: 3)
   points.add(value: vertex1)
   points.add(value: vertex2)
   points.add(value: vertex3)
@@ -458,7 +458,7 @@ func overlapMesh(
   let tolerance: Float = 0.1 * linearSlop(lengthUnitsPerMeter: lengthUnitsPerMeter)
 
   let data: view PhysicsMeshData => mesh.data
-  let stack: List(Int) = List.create(Int, cap: meshStackSize)
+  var stack: List(Int) = List.create(Int, cap: meshStackSize)
   var nodeIndex: Int = 0
   loop true {
     let node: MeshNode = data.nodes.copyAtDefault(index: nodeIndex)
@@ -514,7 +514,7 @@ func overlapMesh(
 # The mover's segment as a two-point proxy (Box3D's
 # `(b3ShapeProxy){ &mover->center1, 2, 0.0f }`).
 func moverSegmentProxy(mover: view Capsule) ret ShapeProxy {
-  let points: List(Vec3) = List.create(Vec3, cap: 2)
+  var points: List(Vec3) = List.create(Vec3, cap: 2)
   points.add(value: mover.center1)
   points.add(value: mover.center2)
   ret ShapeProxy { points: points, radius: 0.0 }
@@ -590,7 +590,7 @@ func collideMoverAndMesh(
   let invScaledBoundsExtent: Vec3 = subtract(left: invScaledBoundsMax, right: invScaledBoundsCenter)
 
   let data: view PhysicsMeshData => mesh.data
-  let stack: List(Int) = List.create(Int, cap: meshStackSize)
+  var stack: List(Int) = List.create(Int, cap: meshStackSize)
   var nodeIndex: Int = 0
   let startCount: Int = planes.length
   loop planes.length - startCount < capacity {

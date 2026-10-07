@@ -576,7 +576,7 @@ func ensureShadowBinds(shadow: mod ShadowCache, resources: mod GpuResources) {
       resources: resources
       id: shadow.staticBinds.copyAtFallback(index: c, fallback: noBindGroupId())
     ) {
-      let entries: List(ResourceRef) = List.create(ResourceRef, cap: 2)
+      var entries: List(ResourceRef) = List.create(ResourceRef, cap: 2)
       entries.add(value: bufferRef(id: cascadeUniform))
       entries.add(value: bufferRef(id: shadow.models))
       if let bind: BindGroupId = createRenderBindGroup(
@@ -592,7 +592,7 @@ func ensureShadowBinds(shadow: mod ShadowCache, resources: mod GpuResources) {
       id: shadow.skinBinds.copyAtFallback(index: c, fallback: noBindGroupId())
     )
     if not skinBindUsable and isValidBuffer(resources: resources, id: shadow.palette) {
-      let entries: List(ResourceRef) = List.create(ResourceRef, cap: 4)
+      var entries: List(ResourceRef) = List.create(ResourceRef, cap: 4)
       entries.add(value: bufferRef(id: cascadeUniform))
       entries.add(value: bufferRef(id: shadow.models))
       entries.add(value: bufferRef(id: shadow.palette))
