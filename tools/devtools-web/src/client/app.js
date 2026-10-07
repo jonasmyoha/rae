@@ -34,6 +34,9 @@ const statsBuildsMoreBtn = document.getElementById("stats-builds-more");
 const runTestLiveBtn = document.getElementById("run-test-live-btn");
 const runTestCompiledBtn = document.getElementById("run-test-compiled-btn");
 const lineCountCanvas = document.getElementById("line-count-chart");
+const compilerSpeedCanvas = document.getElementById("compiler-speed-chart");
+const compilerSpeedEmpty = document.getElementById("compiler-speed-empty");
+const compilerSpeedSummary = document.getElementById("compiler-speed-summary");
 const lineCountSummary = document.getElementById("line-count-summary");
 const lineCountEmpty = document.getElementById("line-count-empty");
 const lineCountHistory = document.getElementById("line-count-history");
@@ -279,6 +282,7 @@ let exampleEditMode = false;
 let exampleEditorDirty = false;
 let statsViewLoaded = false;
 let compilerLineMetrics = [];
+let compilerSpeedMetrics = [];
 let testDurationMetrics = [];
 let buildDurationMetrics = [];
 let lineChartFrame = null;
@@ -3910,11 +3914,20 @@ async function refreshStatisticsPanels() {
     lineCountEmpty.textContent = "Loading line counts…";
   }
   try {
-    const [testsResult, buildsResult, compilerResult] = await Promise.allSettled([
+    const [testsResult, buildsResult, compilerResult, speedResult] = await Promise.allSettled([
       fetchMetricSeries("tests.duration_ms"),
       fetchMetricSeries("builds.duration_ms"),
-      fetchCompilerLineMetrics()
+      fetchCompilerLineMetrics(),
+      fetchMetricSeries("compiler.lines_per_s")
     ]);
+    if (speedResult.status === "fulfilled") {
+      compilerSpeedMetrics = speedResult.value;
+      renderCompilerSpeedSummary(compilerSpeedMetrics);
+    } else {
+      compilerSpeedMetrics = [];
+      if (compilerSpeedSummary) compilerSpeedSummary.textContent = "";
+      recordError("Stats", getErrorMessage(speedResult.reason));
+    }
     if (testsResult.status === "fulfilled") {
       testDurationMetrics = testsResult.value;
       renderMetricList(statsTestsList, testDurationMetrics, "tests.duration_ms", statsTestsMoreBtn);
@@ -4154,19 +4167,67 @@ function renderLineCountHistory(entries) {
   }
 }
 
+// The newest compiler-speed point against the oldest one on the graph.
+function renderCompilerSpeedSummary(entries) {
+  if (!compilerSpeedSummary) return;
+  if (!entries.length) {
+    compilerSpeedSummary.textContent = "";
+    return;
+  }
+  const latest = entries[0];
+  const oldest = entries[entries.length - 1];
+  const meta = latest.metadata ?? {};
+  const latestLabel = `${numberFormatter.format(latest.value)} lines/s`;
+  const detail = typeof meta.lines === "number" && typeof meta.emitMs === "number"
+    ? ` (${numberFormatter.format(meta.lines)} lines in ${(meta.emitMs / 1000).toFixed(1)} s)`
+    : "";
+  const change = oldest.value > 0 && entries.length > 1
+    ? `, ${latest.value >= oldest.value ? "+" : ""}${Math.round(((latest.value - oldest.value) / oldest.value) * 100)}% since ${new Date(oldest.timestamp).toLocaleDateString()}`
+    : "";
+  compilerSpeedSummary.textContent = `Latest: ${latestLabel}${detail}, ${new Date(latest.timestamp).toLocaleString()}${change}`;
+}
+
+// What a chart's hover shows for one point: its date and its value.
+const chartValueFormatters = {
+  speed: (entry) => {
+    const meta = entry.metadata ?? {};
+    const lines = typeof meta.lines === "number" ? ` · ${numberFormatter.format(meta.lines)} lines` : "";
+    return `${numberFormatter.format(entry.value)} lines/s${lines}`;
+  },
+  tests: (entry) => {
+    const meta = entry.metadata ?? {};
+    const cases = typeof meta.passed === "number"
+      ? ` · ${numberFormatter.format(meta.passed + (meta.failed ?? 0))} cases`
+      : "";
+    return `${(entry.value / 60000).toFixed(1)} min${cases}`;
+  },
+  builds: (entry) => `${(entry.value / 1000).toFixed(1)} s`,
+  lines: (entry) => `${numberFormatter.format(entry.lines ?? 0)} lines`
+};
+
 function scheduleLineChartRender() {
   if (!statsViewContainer || !statsViewContainer.classList.contains("is-active")) return;
   if (lineChartFrame) cancelAnimationFrame(lineChartFrame);
   lineChartFrame = requestAnimationFrame(() => {
+    if (compilerSpeedCanvas) {
+      drawMetricChart(
+        compilerSpeedCanvas,
+        [...compilerSpeedMetrics].reverse(),
+        "value",
+        compilerSpeedEmpty,
+        chartValueFormatters.speed
+      );
+    }
     if (lineCountCanvas) {
-      drawMetricChart(lineCountCanvas, compilerLineMetrics, "lines", lineCountEmpty);
+      drawMetricChart(lineCountCanvas, compilerLineMetrics, "lines", lineCountEmpty, chartValueFormatters.lines);
     }
     if (testDurationCanvas) {
       drawMetricChart(
         testDurationCanvas,
         [...testDurationMetrics].reverse(),
         "value",
-        testDurationEmpty
+        testDurationEmpty,
+        chartValueFormatters.tests
       );
     }
     if (buildDurationCanvas) {
@@ -4174,17 +4235,62 @@ function scheduleLineChartRender() {
         buildDurationCanvas,
         [...buildDurationMetrics].reverse(),
         "value",
-        buildDurationEmpty
+        buildDurationEmpty,
+        chartValueFormatters.builds
       );
     }
     lineChartFrame = null;
   });
 }
 
-function drawMetricChart(canvas, entries, valueKey, emptyEl) {
+// Hover on a chart: the point nearest the pointer (by x) is ringed, a guide
+// line drops from it, and a tooltip shows its date and value. The chart keeps
+// what it last drew on the canvas (canvas.__chart) so the hover can redraw it.
+function attachChartHover(canvas) {
+  if (canvas.__hoverAttached) return;
+  canvas.__hoverAttached = true;
+  const container = canvas.parentElement;
+  const tooltip = document.createElement("div");
+  tooltip.className = "chart-tooltip";
+  tooltip.hidden = true;
+  container.appendChild(tooltip);
+  const hide = () => {
+    tooltip.hidden = true;
+    const chart = canvas.__chart;
+    if (chart && chart.highlight !== -1) {
+      drawMetricChart(canvas, chart.entries, chart.valueKey, chart.emptyEl, chart.formatValue, -1);
+    }
+  };
+  canvas.addEventListener("mouseleave", hide);
+  canvas.addEventListener("mousemove", (event) => {
+    const chart = canvas.__chart;
+    if (!chart || !chart.points.length) return hide();
+    const rect = canvas.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    let nearest = 0;
+    for (let i = 1; i < chart.points.length; i++) {
+      if (Math.abs(chart.points[i].x - x) < Math.abs(chart.points[nearest].x - x)) nearest = i;
+    }
+    if (chart.highlight !== nearest) {
+      drawMetricChart(canvas, chart.entries, chart.valueKey, chart.emptyEl, chart.formatValue, nearest);
+    }
+    const entry = chart.entries[nearest];
+    const point = chart.points[nearest];
+    const when = entry.timestamp ? new Date(entry.timestamp).toLocaleString() : "Unknown time";
+    const value = chart.formatValue ? chart.formatValue(entry) : String(entry[chart.valueKey]);
+    tooltip.innerHTML = `<time>${when}</time><strong>${value}</strong>`;
+    tooltip.hidden = false;
+    const left = Math.min(Math.max(point.x, tooltip.offsetWidth / 2 + 4), rect.width - tooltip.offsetWidth / 2 - 4);
+    tooltip.style.left = `${canvas.offsetLeft + left}px`;
+    tooltip.style.top = `${canvas.offsetTop + point.y - 12}px`;
+  });
+}
+
+function drawMetricChart(canvas, entries, valueKey, emptyEl, formatValue = null, highlight = -1) {
   if (!canvas) return;
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
+  attachChartHover(canvas);
   if (!entries.length) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     if (emptyEl) {
@@ -4193,7 +4299,9 @@ function drawMetricChart(canvas, entries, valueKey, emptyEl) {
       if (emptyEl.id === "line-count-empty") emptyEl.textContent = "No line counts recorded yet.";
       else if (emptyEl.id === "test-duration-empty") emptyEl.textContent = "No test runs recorded yet.";
       else if (emptyEl.id === "build-duration-empty") emptyEl.textContent = "No build runs recorded yet.";
+      else if (emptyEl.id === "compiler-speed-empty") emptyEl.textContent = "No compiler speed recorded yet.";
     }
+    canvas.__chart = { entries, valueKey, emptyEl, formatValue, points: [], highlight: -1 };
     return;
   }
   if (emptyEl) {
@@ -4268,6 +4376,21 @@ function drawMetricChart(canvas, entries, valueKey, emptyEl) {
     ctx.arc(point.x, point.y, 3, 0, Math.PI * 2);
     ctx.fill();
   }
+  if (highlight >= 0 && highlight < points.length) {
+    const point = points[highlight];
+    ctx.strokeStyle = "rgba(125, 211, 252, 0.45)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(point.x, padding);
+    ctx.lineTo(point.x, height - padding);
+    ctx.stroke();
+    ctx.strokeStyle = "#e0f2fe";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, 6, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  canvas.__chart = { entries, valueKey, emptyEl, formatValue, points, highlight };
 }
 
 function setActiveView(targetView) {

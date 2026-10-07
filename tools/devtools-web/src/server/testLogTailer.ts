@@ -12,6 +12,8 @@ type BroadcastFn = (event: ServerEvent) => void;
 // crash that never prints a "Results:" summary is still reported as a failure.
 const RUN_START = /^@@RAE_RUN_START (.+)@@$/;
 const RUN_END = /^@@RAE_RUN_END exit=(-?\d+)@@$/;
+// compiler/tools/compiler-speed.sh: the emit speed of the standard program.
+const COMPILER_SPEED = /^@@RAE_COMPILER_SPEED@@ example=(\S+) lines=(\d+) emit_ms=(\d+) lines_per_s=(\d+)$/;
 
 // Bridges an EXTERNAL test run (e.g. an agent running `make test >
 // /tmp/rae-test-live.log`) into the devtools' live WebSocket test pipeline, so
@@ -98,6 +100,16 @@ export class TestLogTailer {
       if (startMatch) { this.beginRun(startMatch[1], true); continue; }
       const endMatch = RUN_END.exec(line);
       if (endMatch) { this.finishRun(Number(endMatch[1])); continue; }
+      const speedMatch = COMPILER_SPEED.exec(line);
+      if (speedMatch) {
+        this.stats?.recordCompilerSpeed({
+          exampleId: speedMatch[1]!,
+          lines: Number(speedMatch[2]),
+          emitMs: Number(speedMatch[3]),
+          linesPerSecond: Number(speedMatch[4])
+        });
+        continue;
+      }
 
       // Implicit start for un-instrumented producers (bare `make test > log`).
       if (!this.runId) this.beginRun(null, false);
