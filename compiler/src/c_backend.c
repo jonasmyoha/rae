@@ -356,22 +356,18 @@ const AstDecl* find_type_decl(CFuncContext* ctx, const AstModule* module, Str na
   // would mislead substitution at the caller. Pass 1: template/non-generic.
   // Pass 2: anything that matches.
   if (ctx && ctx->compiler_ctx) {
-      for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
-          const AstDecl* decl = ctx->compiler_ctx->all_decls[i];
-          if (decl->kind == AST_DECL_TYPE && !decl->as.type_decl.specialization_args &&
-              types_match(decl->as.type_decl.name, name)) return decl;
-      }
-      for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
-          const AstDecl* decl = ctx->compiler_ctx->all_decls[i];
-          if (decl->kind == AST_DECL_TYPE && types_match(decl->as.type_decl.name, name)) return decl;
-      }
+      const AstDecl* found = decl_index_find_type(ctx->compiler_ctx, name, true);
+      if (!found) found = decl_index_find_type(ctx->compiler_ctx, name, false);
+      if (found) return found;
+      if (module && decl_index_module_collected(ctx->compiler_ctx, module)) return NULL;
   }
   if (!module) return NULL;
-  for (const AstDecl* decl = module->decls; decl; decl = decl->next) {
-      if (decl->kind == AST_DECL_TYPE && !decl->as.type_decl.specialization_args &&
-          types_match(decl->as.type_decl.name, name)) return decl;
-  }
-  for (const AstDecl* decl = module->decls; decl; decl = decl->next) { if (decl->kind == AST_DECL_TYPE && types_match(decl->as.type_decl.name, name)) return decl; }
+  // Each module is searched once per lookup: imports form a DAG with shared
+  // modules (every module imports core), and walking every path re-scanned
+  // them exponentially often.
+  if (g_find_module_stack_count == 0) decl_visit_begin();
+  if (!decl_visit_first(module, (int)g_find_module_stack_count)) return NULL;
+  { const AstDecl* own = module_index_find_type(module, name); if (own) return own; }
   for (size_t i = 0; i < g_find_module_stack_count; i++) if (g_find_module_stack[i] == module) return NULL;
   if (g_find_module_stack_count >= 64) return NULL;
   g_find_module_stack[g_find_module_stack_count++] = module;
@@ -382,13 +378,14 @@ const AstDecl* find_type_decl(CFuncContext* ctx, const AstModule* module, Str na
 
 const AstDecl* find_enum_decl(CFuncContext* ctx, const AstModule* module, Str name) {
   if (ctx && ctx->compiler_ctx) {
-      for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
-          const AstDecl* decl = ctx->compiler_ctx->all_decls[i];
-          if (decl->kind == AST_DECL_ENUM && types_match(decl->as.enum_decl.name, name)) return decl;
-      }
+      const AstDecl* found = decl_index_find_enum(ctx->compiler_ctx, name);
+      if (found) return found;
+      if (module && decl_index_module_collected(ctx->compiler_ctx, module)) return NULL;
   }
   if (!module) return NULL;
-  for (const AstDecl* decl = module->decls; decl; decl = decl->next) { if (decl->kind == AST_DECL_ENUM && types_match(decl->as.enum_decl.name, name)) return decl; }
+  if (g_find_module_stack_count == 0) decl_visit_begin();
+  if (!decl_visit_first(module, (int)g_find_module_stack_count)) return NULL;
+  { const AstDecl* own = module_index_find_enum(module, name); if (own) return own; }
   for (size_t i = 0; i < g_find_module_stack_count; i++) if (g_find_module_stack[i] == module) return NULL;
   if (g_find_module_stack_count >= 64) return NULL;
   g_find_module_stack[g_find_module_stack_count++] = module;
@@ -399,13 +396,14 @@ const AstDecl* find_enum_decl(CFuncContext* ctx, const AstModule* module, Str na
 
 void register_decl(CompilerContext* ctx, const AstDecl* decl) {
     if (!decl) return;
-    for (size_t i = 0; i < ctx->all_decl_count; i++) { if (ctx->all_decls[i] == decl) return; }
+    if (decl_index_contains(ctx, decl)) return;
     if (ctx->all_decl_count < ctx->all_decl_cap) ctx->all_decls[ctx->all_decl_count++] = decl;
 }
 
 void collect_decls_from_module(CompilerContext* ctx, const AstModule* module) {
     if (!module) return;
-    if (module->decls) { for (size_t i = 0; i < ctx->all_decl_count; i++) { if (ctx->all_decls[i] == module->decls) return; } }
+    if (module->decls && decl_index_contains(ctx, module->decls)) return;
+    decl_index_note_module(ctx, module);
     for (const AstDecl* decl = module->decls; decl; decl = decl->next) register_decl(ctx, decl);
     for (const AstImport* imp = module->imports; imp; imp = imp->next) collect_decls_from_module(ctx, imp->module);
 }
@@ -507,15 +505,31 @@ bool rae_type_ref_has_enum_arg(CompilerContext* ctx, const AstModule* module, co
         // Scan the whole program's decls rather than one module: this runs
         // during registration, where `current_module` is often unset, and an
         // enum name is unique program-wide anyway.
-        if (ab.len > 0) {
-            for (size_t i = 0; i < ctx->all_decl_count; i++) {
-                const AstDecl* d = ctx->all_decls[i];
-                if (d->kind == AST_DECL_ENUM && types_match(d->as.enum_decl.name, ab)) return true;
-            }
-        }
+        if (ab.len > 0 && decl_index_find_enum(ctx, ab)) return true;
         if (rae_type_ref_has_enum_arg(ctx, module, arg)) return true;
     }
     return false;
+}
+
+static bool generic_type_is_equal(const AstTypeRef* other, const AstTypeRef* type, void* data) {
+    (void)data;
+    return type_refs_equal(other, type);
+}
+
+typedef struct {
+    CompilerContext* ctx;
+    bool hasEnumArg;
+    const char* mangled;
+} GenericEnumTwin;
+
+static bool generic_type_is_registered_twin(const AstTypeRef* other, const AstTypeRef* type, void* data) {
+    const GenericEnumTwin* twin = data;
+    if (!type_refs_equal(other, type)) return false;
+    if (twin->hasEnumArg) {
+        const char* om = rae_mangle_type_specialized(twin->ctx, NULL, NULL, (AstTypeRef*)other);
+        if (twin->mangled && om && strcmp(twin->mangled, om) != 0) return false;  // the enum twin
+    }
+    return true;
 }
 
 void register_generic_type(CompilerContext* ctx, const AstTypeRef* type) {
@@ -546,7 +560,7 @@ void register_generic_type(CompilerContext* ctx, const AstTypeRef* type) {
             // so it is registered too — even over a primitive payload, which
             // the primitive/kind early-outs below would otherwise skip (a lone
             // `let some: opt Int = 7` had no rae_opt_int64_t).
-            for (size_t i = 0; i < ctx->generic_type_count; i++) { if (type_refs_equal(ctx->generic_types[i], type)) return; }
+            if (generic_index_any(ctx, type, generic_type_is_equal, NULL)) return;
             RAE_GROW1(ctx->generic_types, ctx->generic_type_count, ctx->generic_type_cap);
             ctx->generic_types[ctx->generic_type_count++] = type;
             return;
@@ -568,15 +582,8 @@ void register_generic_type(CompilerContext* ctx, const AstTypeRef* type) {
     bool this_has_enum_arg = rae_type_ref_has_enum_arg(ctx, ctx->current_module, type);
     const char* this_mangled = this_has_enum_arg
         ? rae_mangle_type_specialized(ctx, NULL, NULL, (AstTypeRef*)type) : NULL;
-    for (size_t i = 0; i < ctx->generic_type_count; i++) {
-        const AstTypeRef* other = ctx->generic_types[i];
-        if (!type_refs_equal(other, type)) continue;
-        if (this_has_enum_arg) {
-            const char* om = rae_mangle_type_specialized(ctx, NULL, NULL, (AstTypeRef*)other);
-            if (this_mangled && om && strcmp(this_mangled, om) != 0) continue;  // the enum twin
-        }
-        goto scan_args;
-    }
+    GenericEnumTwin twin = { ctx, this_has_enum_arg, this_mangled };
+    if (generic_index_any(ctx, type, generic_type_is_registered_twin, &twin)) goto scan_args;
     RAE_GROW1(ctx->generic_types, ctx->generic_type_count, ctx->generic_type_cap);
     ctx->generic_types[ctx->generic_type_count++] = type;
 scan_args:
@@ -590,14 +597,8 @@ scan_args:
     // Pair(Int) back, and — an already registered type rescans its fields —
     // recursed until the stack ran out (a nested generic next to a
     // List(Pair(Int)) crashed the compiler).
-    const AstDecl* d = NULL;
-    for (size_t i = 0; i < ctx->all_decl_count; i++) {
-        const AstDecl* ad = ctx->all_decls[i];
-        if (ad->kind != AST_DECL_TYPE || !types_match(ad->as.type_decl.name, base)) continue;
-        if (ad->as.type_decl.specialization_args) { if (!d) d = ad; continue; }
-        d = ad;
-        break;
-    }
+    const AstDecl* d = decl_index_find_type(ctx, base, true);
+    if (!d) d = decl_index_find_type(ctx, base, false);
     if (!d && ctx->current_module) d = find_type_decl(NULL, ctx->current_module, base);
     if (d && d->kind == AST_DECL_TYPE) {
         for (const AstTypeField* f = d->as.type_decl.fields; f; f = f->next) {
