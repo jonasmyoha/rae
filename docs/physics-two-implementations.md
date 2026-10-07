@@ -124,9 +124,9 @@ What the C library forced, each listed in its module comment:
 
   At the same pin, built scalar, the two variants of a program print the same
   hash.
-- **Featured:** both playgrounds are featured during the evaluation, side by
-  side, with a README row and a screenshot each. After §6, the chosen track's
-  playground stays featured.
+- **Featured:** both playgrounds were featured during the evaluation, side by
+  side, with a README row and a screenshot each. Since §7 only track B's
+  (123, 125) are; the port's (122, 124) stay as unfeatured frozen references.
 - The playground's content is the existing brief: a large box pyramid (1k to
   10k bodies), dominoes, a hinged plank bridge and a chain, a joint-held
   stack, mesh and height-field ground, the character mover, a thrown ball, a
@@ -796,3 +796,11 @@ other is retired, kept as a benchmark, or kept as a second backend.
     oracle. Track B's own bit-exact fixture (998, the boxstack golden) then
     needs its expectation updated in the same commit, as the trial move to
     `16f7f4c` showed (branch `trial/box3d-upstream-head`).
+- **The examples.** 123_physics_playground_c and 125_vehicle_c are the
+  featured physics examples (README and the Featured tab). 122 and 124 stay in
+  `examples/` under their names, unfeatured, and marked frozen references: in
+  their name, their description, and the header of their track's file
+  (`SceneSpawn.rae`, the vehicle's `Main.rae`). They stay in the example gate
+  (it selects by name, not by the featured flag), so the port keeps
+  compiling and keeps running. `benchmarks/physics` keeps measuring the port
+  against Box3D's C.
