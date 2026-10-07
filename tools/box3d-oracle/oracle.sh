@@ -7,7 +7,7 @@
 #
 #   - Clones github.com/erincatto/box3d into a cache OUTSIDE the repo
 #     ($RAE_BOX3D_CACHE, default ~/.cache/rae/box3d-oracle) and checks out the
-#     pinned commit (tools/box3d/pin). No Box3D source ever enters this repository.
+#     port's frozen commit (tools/box3d-oracle/pin). No Box3D source ever enters this repository.
 #   - Builds the library scalar (BOX3D_DISABLE_SIMD), with -ffp-contract=off
 #     (Box3D's CMake adds it too), validation and every extra target off.
 #   - Compiles each tools/box3d-oracle/drivers/<name>.c against it (upstream's
@@ -17,13 +17,14 @@
 #     every float a C hex float (`%a`), which is exact and parses back to the
 #     same bits. A driver that steps a world creates it with workerCount = 1.
 #
-# Moving the pin is its own task (design §8): change tools/box3d/pin (the one
-# pin both physics tracks use), rerun, and let the bit-exact fixtures show
+# The port is frozen at tools/box3d-oracle/pin (docs/physics-two-implementations.md
+# §7); the C-library track moves tools/box3d/pin on its own. Re-porting is its
+# own decision: change this pin, rerun, and let the bit-exact fixtures show
 # every place the behaviour changed.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-. "$HERE/../box3d/pin"
+. "$HERE/pin"
 CACHE="${RAE_BOX3D_CACHE:-$HOME/.cache/rae/box3d-oracle}"
 SRC="$CACHE/box3d"
 BUILD="$CACHE/build-$BOX3D_COMMIT"
