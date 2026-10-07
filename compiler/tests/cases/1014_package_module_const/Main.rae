@@ -1,0 +1,15 @@
+# A module inside a lib package is qualified by its last name, for its consts
+# as for its calls: `Texture.matGrass` is procgen/Texture's const, as
+# `Texture.texClampByte(...)` is its function. Both opened modules declare
+# `matGrass`, so the bare name is ambiguous and the qualified forms are the
+# way to say which (WorldBiome's is 3, procgen/Texture's 0). The qualifier
+# counts only for a module this file imports or opens.
+open WorldBiome
+open procgen/Texture
+
+func main() {
+  let biome: Int = WorldBiome.matGrass
+  let texture: Int = Texture.matGrass
+  log("WorldBiome.matGrass {biome}, Texture.matGrass {texture}")
+  log("Texture.texClampByte {Texture.texClampByte(value: 0.5)}")
+}

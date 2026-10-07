@@ -334,6 +334,37 @@ static Str sema_resolve_alias(const char* file, Str qualifier) {
     return (Str){0};
 }
 
+// A module inside a package (`procgen/Texture`) is qualified by its last path
+// component, `Texture.matGrass`, as its calls already are (`Texture.f()`), but
+// only when `file` imports or opens that module itself: `Entity` never means
+// `ecs/Entity` by accident. Returns the module's path ("procgen/Texture"); {0}
+// when no import of the file ends in `qualifier`, and {0} with `*ambiguous`
+// set (naming the first two in `first`/`second`) when several do.
+static Str sema_resolve_package_component(Arena* arena, const char* file, Str qualifier,
+                                          bool* ambiguous, Str* first, Str* second) {
+    *ambiguous = false;
+    Str found = {0};
+    for (AstImport* im = sema_imports_for_file(file); im; im = im->next) {
+        if (!im->path.data) continue;
+        char ip[512]; size_t n = sema_norm_import_path(im->path, ip, sizeof ip);
+        const char* slash = strrchr(ip, '/');
+        if (n == 0 || !slash) continue;
+        const char* comp = slash + 1;
+        if (strlen(comp) != qualifier.len || memcmp(comp, qualifier.data, qualifier.len) != 0) continue;
+        char* copy = arena_alloc(arena, n + 1);
+        memcpy(copy, ip, n + 1);
+        Str path = { .data = copy, .len = n };
+        if (found.data && !str_eq(found, path)) {
+            *ambiguous = true;
+            *first = found;
+            *second = path;
+            return (Str){0};
+        }
+        found = path;
+    }
+    return found;
+}
+
 typedef struct Symbol Symbol;
 // Why a binding is immutable — drives a precise reassignment diagnostic.
 typedef enum {
@@ -6522,6 +6553,35 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
             // const decl, so codegen emits the flat global and the type is
             // known. A local binding that shadows the module name wins (it's a
             // value), so only take this path when no symbol is in scope.
+            // `procgen.Texture.matGrass`: a package is not a qualifier. Its
+            // module is qualified by its last name alone (`Texture.matGrass`),
+            // so say that instead of "unknown value 'procgen'".
+            if (expr->as.member.object->kind == AST_EXPR_MEMBER
+                && expr->as.member.object->as.member.object
+                && expr->as.member.object->as.member.object->kind == AST_EXPR_IDENT
+                && !symbol_table_lookup(symbols, expr->as.member.object->as.member.object->as.ident)) {
+                bool package_qualifier = false;
+                Str package = expr->as.member.object->as.member.object->as.ident;
+                Str component = expr->as.member.object->as.member.member;
+                char wanted[512];
+                snprintf(wanted, sizeof wanted, "%.*s/%.*s", (int)package.len, package.data,
+                         (int)component.len, component.data);
+                for (AstImport* im = sema_imports_for_file(s_current_decl_origin); im; im = im->next) {
+                    if (!im->path.data) continue;
+                    char ip[512]; sema_norm_import_path(im->path, ip, sizeof ip);
+                    if (strcmp(ip, wanted) != 0) continue;
+                    char buf[640];
+                    snprintf(buf, sizeof buf,
+                             "a package is not a qualifier: module '%s' is qualified by its last name, '%.*s.%.*s'",
+                             wanted, (int)component.len, component.data,
+                             (int)expr->as.member.member.len, expr->as.member.member.data);
+                    diag_error(sema_diag_file(module), (int)expr->line, (int)expr->column, buf);
+                    module->had_error = true;
+                    package_qualifier = true;
+                    break;
+                }
+                if (package_qualifier) break;
+            }
             if (expr->as.member.object->kind == AST_EXPR_IDENT) {
                 Str lhs = expr->as.member.object->as.ident;
                 // A genuine VALUE binding named `lhs` (a local/param/global
@@ -6532,14 +6592,45 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                 Symbol* lsym = symbol_table_lookup(symbols, lhs);
                 bool value_shadow = lsym && !(lsym->decl && lsym->decl->kind == AST_DECL_FUNC);
                 Str modname = (Str){0};
+                bool package_qualified = false;
                 if (!value_shadow && sema_is_module_name(module, lhs)) {
                     modname = lhs;
                 } else if (!value_shadow) {
                     Str aliased = sema_resolve_alias(s_current_decl_origin, lhs);
                     if (aliased.data && sema_is_module_name(module, aliased)) modname = aliased;
                 }
+                if (!modname.data && !value_shadow) {
+                    bool ambiguous = false;
+                    Str first = {0}, second = {0};
+                    Str package_module = sema_resolve_package_component(
+                        ctx->ast_arena, s_current_decl_origin, lhs, &ambiguous, &first, &second);
+                    if (ambiguous) {
+                        char buf[512];
+                        snprintf(buf, sizeof buf,
+                                 "'%.*s.%.*s' is ambiguous: '%.*s' is the last name of both '%.*s' and '%.*s'; import one of them with `as` and qualify by that name",
+                                 (int)lhs.len, lhs.data, (int)expr->as.member.member.len, expr->as.member.member.data,
+                                 (int)lhs.len, lhs.data, (int)first.len, first.data, (int)second.len, second.data);
+                        diag_error(sema_diag_file(module), (int)expr->line, (int)expr->column, buf);
+                        module->had_error = true;
+                        break;
+                    }
+                    if (package_module.data && sema_is_module_name(module, package_module)) {
+                        modname = package_module;
+                        package_qualified = true;
+                    }
+                }
                 if (modname.data) {
                     AstDecl* gd = sema_find_module_global(module, modname, expr->as.member.member);
+                    if (!gd && package_qualified && !sema_any_function_named(module, expr->as.member.member)) {
+                        char buf[512];
+                        snprintf(buf, sizeof buf,
+                                 "module '%.*s' has no module-level const or let named '%.*s'",
+                                 (int)modname.len, modname.data,
+                                 (int)expr->as.member.member.len, expr->as.member.member.data);
+                        diag_error(sema_diag_file(module), (int)expr->line, (int)expr->column, buf);
+                        module->had_error = true;
+                        break;
+                    }
                     if (gd) {
                         // #785 tooling: RAE_DUMP_QUALSITES lists every RESOLVED module
                         // qualifier site (file, line, col of the module name), so a

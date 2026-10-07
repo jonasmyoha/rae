@@ -36,6 +36,16 @@ const restart: Int = Keys.keyR   # also valid in a const initializer (folds to t
 shadow it, since `Keys.keyW` cannot be a call.
 A genuine value binding of the same name in scope does win.
 
+A module inside a lib **package** (`procgen/Texture`) is qualified by its
+**last name**, for its consts as for its calls: `Texture.matGrass`,
+`Texture.texClampByte(...)` (2026-10-07). The last name counts only for a
+module the file itself imports or opens, so `Entity` never means
+`ecs/Entity` by accident. Two imports with the same last name make it an
+error that names both; import one with `as` and qualify by that name. A
+package is never a qualifier: `procgen.Texture.matGrass` is an error that
+spells the right form, as is a const the module does not declare (fixtures
+1014, 1015).
+
 This works the same for a lib module and for a project sibling (`Pal.shade`
 where `Pal.rae` sits next to `Main.rae`), and in every expression position —
 a plain initializer, an operand, or a `"{Pal.shade}"` interpolation part. A
