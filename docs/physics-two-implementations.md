@@ -1,6 +1,8 @@
 # Physics — two implementations, then a decision
 
-**Status:** plan, 2026-10-05. Decided by the maintainer. This is the current
+**Status:** decided, 2026-10-07 (§7): Rae's engine is track B, upstream
+Box3D's C library; track A, the port, is frozen as a reference and benchmark.
+Planned 2026-10-05, decided by the maintainer. This is the current
 physics plan. It replaces the single-engine decisions in
 `docs/physics-design.md` §2 ("port Box3D to Rae", 2026-09-30) and
 `docs/physics-box3d-port-research.md` §9 ("use the C library instead",
@@ -774,3 +776,23 @@ twice, for no user-visible gain.
 
 The maintainer decides (`QUEUE.md`): which track Rae uses, and whether the
 other is retired, kept as a benchmark, or kept as a second backend.
+
+## 7. The decision (maintainer, 2026-10-07)
+
+- **Track B, upstream Box3D's C library (`lib/box3d`), is Rae's physics
+  engine.** It follows upstream by moving `tools/box3d/pin`.
+- **Track A, the port (`lib/physics`), is frozen as a reference and
+  benchmark.** It keeps compiling and its fixtures keep passing, but nothing
+  new is ported to it until the maintainer decides so.
+  - **Ported from** Box3D `9f998c8` (2026-09-27), ported 2026-10-02 to
+    2026-10-06.
+  - **Not ported:** every upstream commit after it. As of 2026-10-07 that is
+    `51f056e` (2026-10-02), `e77352c` (2026-10-04) and `16f7f4c`
+    (2026-10-06). `lib/physics/README.md` keeps the list.
+- **The two pins are now separate.**
+  - `tools/box3d-oracle/pin` is the port's frozen commit. The oracle builds
+    its golden traces there, so the port's bit-exact fixtures do not move.
+  - `tools/box3d/pin` is track B's. Moving it no longer touches the
+    oracle. Track B's own bit-exact fixture (998, the boxstack golden) then
+    needs its expectation updated in the same commit, as the trial move to
+    `16f7f4c` showed (branch `trial/box3d-upstream-head`).

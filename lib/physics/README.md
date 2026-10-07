@@ -1,5 +1,19 @@
 # lib/physics — a Rae port of Box3D
 
+> **FROZEN (2026-10-07).** Rae's physics engine is upstream Box3D's C library
+> (`lib/box3d`, docs/physics-two-implementations.md §7). This port is kept as
+> a reference and a compiler benchmark: it must keep compiling and its
+> fixtures must pass, but nothing new is ported to it until the maintainer
+> decides so.
+>
+> - **Ported from:** Box3D `9f998c8` (2026-09-27, "SAT samples (#173)"),
+>   ported 2026-10-02 to 2026-10-06. That commit is in
+>   `tools/box3d-oracle/pin`, and the oracle's goldens are built at it.
+> - **Not ported** (upstream after the pin, as of 2026-10-07):
+>   `51f056e` 2026-10-02 SAT benchmark (#177), `e77352c` 2026-10-04 AVX2 and
+>   runtime feature detection (#174), `16f7f4c` 2026-10-06 Tree perf (#179).
+>   For later ones: `git log 9f998c8..origin/main` in a Box3D clone.
+
 A port of [Box3D](https://github.com/erincatto/box3d) (commit `9f998c8`, MIT —
 `LICENSE-box3d.md`) to Rae, phase by phase (`docs/physics-rae-port-design.md`).
 Every ported function is checked BIT-EXACT against Box3D's own C build through
