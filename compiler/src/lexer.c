@@ -234,6 +234,7 @@ static void emit_token(Lexer* lexer,
 
 TokenKind lookup_keyword(Str lexeme) {
   for (size_t i = 0; i < sizeof(KEYWORDS) / sizeof(KEYWORDS[0]); ++i) {
+    if (lexeme.len == 0 || KEYWORDS[i].text[0] != lexeme.data[0]) continue;
     if (str_eq_cstr(lexeme, KEYWORDS[i].text)) {
       return KEYWORDS[i].kind;
     }

@@ -42,6 +42,10 @@ typedef struct {
   size_t comment_count;
   size_t next_comment_idx;
   const char* source;
+  /* line_starts[k] is where source line k + 1 begins (pretty.c builds it):
+   * finding a line by scanning from the top made long files quadratic */
+  const char** line_starts;
+  size_t line_count;
   VerbatimRange verbatim_ranges[PP_MAX_VERBATIM];
   size_t verbatim_count;
   size_t lines_written;      /* newlines emitted so far (a statement that spans lines gets its trailing comment below it) */

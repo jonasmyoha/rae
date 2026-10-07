@@ -571,9 +571,10 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         const AstFuncDecl* receiver_match = NULL;
         const AstFuncDecl* nongeneric_fallback = NULL;
         const AstFuncDecl* generic_fallback = NULL;
-        for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
-            const AstDecl* d = ctx->compiler_ctx->all_decls[i];
-            if (d->kind != AST_DECL_FUNC || !str_eq(d->as.func_decl.name, callee_name)) continue;
+        size_t named_count = 0;
+        const size_t* named = decl_index_functions(ctx->compiler_ctx, callee_name, &named_count);
+        for (size_t k = 0; k < named_count; k++) {
+            const AstDecl* d = ctx->compiler_ctx->all_decls[named[k]];
             const AstFuncDecl* candidate = &d->as.func_decl;
             uint16_t param_count = 0; for (const AstParam* pp = candidate->params; pp; pp = pp->next) param_count++;
             if (param_count != call_arg_count) continue;

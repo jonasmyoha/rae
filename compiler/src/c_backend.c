@@ -614,10 +614,12 @@ scan_args:
 const AstFuncDecl* find_function_overload(const AstModule* module, CFuncContext* ctx, Str name, const Str* param_types, uint16_t param_count, bool is_method, const AstExpr* call_expr) {
     if (!module) return NULL;
     
-    for (const AstDecl* d = module->decls; d; d = d->next) {
-        if (d->kind == AST_DECL_FUNC) {
+    size_t named_count = module_index_function_count(module, name);
+    for (size_t k = 0; k < named_count; k++) {
+        const AstDecl* d = module_index_function_at(module, name, named_count, k);
+        {
             const AstFuncDecl* fd = &d->as.func_decl;
-            if (str_eq(fd->name, name)) {
+            {
                 uint16_t fd_param_count = 0;
                 for (const AstParam* p = fd->params; p; p = p->next) fd_param_count++;
                 
@@ -1638,11 +1640,8 @@ const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
             // global receiver (e.g. `g_list.get(i)`, `g_list.length`) dispatch
             // with the right receiver type instead of a bare, type-less mangling.
             if (ctx->compiler_ctx) {
-                for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
-                    const AstDecl* d = ctx->compiler_ctx->all_decls[i];
-                    if (d->kind == AST_DECL_GLOBAL_LET && str_eq(d->as.let_decl.name, expr->as.ident))
-                        return d->as.let_decl.type;
-                }
+                const AstDecl* global = decl_index_find_global(ctx->compiler_ctx, expr->as.ident);
+                if (global) return global->as.let_decl.type;
             }
             return NULL;
         }
@@ -1758,11 +1757,11 @@ const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
                     ? infer_expr_type_ref(ctx, expr->as.call.args->value) : NULL;
                 Str a0base = get_base_type_name(a0);
                 const AstFuncDecl* best = NULL;
-                for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
-                    const AstDecl* d = ctx->compiler_ctx->all_decls[i];
-                    if (d->kind != AST_DECL_FUNC) continue;
-                    const AstFuncDecl* cfd = &d->as.func_decl;
-                    if (!str_eq(cfd->name, fname) || !cfd->returns) continue;
+                size_t named_count = 0;
+                const size_t* named = decl_index_functions(ctx->compiler_ctx, fname, &named_count);
+                for (size_t k = 0; k < named_count; k++) {
+                    const AstFuncDecl* cfd = &ctx->compiler_ctx->all_decls[named[k]]->as.func_decl;
+                    if (!cfd->returns) continue;
                     // Require the first value parameter's base type to match the
                     // first argument's — a bare name match would pick the wrong
                     // overload (e.g. a String-returning `get` for an Int call),
