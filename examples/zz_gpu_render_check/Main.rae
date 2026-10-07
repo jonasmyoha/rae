@@ -117,8 +117,7 @@ func main() ret Int {
     ret 1
   }
   var issuer: IdIssuer = IdIssuer.create()
-  if let createdResources: GpuResources = GpuResources.create(issuer: issuer, capacity: 12) {
-    var resources: GpuResources = own createdResources
+  if var resources: GpuResources = GpuResources.create(issuer: issuer, capacity: 12) {
     # Geometry: one triangle covering clip space, u32 indices, packed with GpuArgs.
     var vertices: ArgWriter = createArgs(uniform: false)
     pushVec2F(writer: vertices, x: 0.0 - 1.0, y: 0.0 - 1.0)
@@ -224,8 +223,7 @@ func main() ret Int {
                     b: 0.0
                     a: 1.0
                   )
-                  if let openedRecording: Recording = beginRecording(resources: resources) {
-                    var recording: Recording = own openedRecording
+                  if var recording: Recording = beginRecording(resources: resources) {
                     if recordDrawIndexed(
                       recording: recording
                       resources: resources
@@ -339,8 +337,7 @@ func main() ret Int {
                         ) {
                           ret 1
                         }
-                        if let openedRecording2: Recording = beginRecording(resources: resources) {
-                          var recording2: Recording = own openedRecording2
+                        if var recording2: Recording = beginRecording(resources: resources) {
                           if recordDrawIndexed(
                             recording: recording2
                             resources: resources

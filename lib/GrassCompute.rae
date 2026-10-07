@@ -471,8 +471,7 @@ func grassGenerate(
     workgroupsY: 1
     workgroupsZ: 1
   )
-  if let openedRecording: Recording = beginRecording(resources: resources) {
-    var recording: Recording = own openedRecording
+  if var recording: Recording = beginRecording(resources: resources) {
     if recordComputeCommand(recording: recording, resources: resources, command: command) {
       trackSubmission(inFlight: grass.inFlight, resources: resources, recording: recording)
     }
@@ -531,8 +530,7 @@ func grassReadVisible(grass: mod GrassCompute, resources: mod GpuResources) ret 
     ret -1
   }
   var copied: Bool = false
-  if let openedRecording: Recording = beginRecording(resources: resources) {
-    var recording: Recording = own openedRecording
+  if var recording: Recording = beginRecording(resources: resources) {
     if recordCopyBuffer(
       recording: recording
       resources: resources

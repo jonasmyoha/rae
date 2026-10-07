@@ -2203,15 +2203,24 @@ static AstStmt* parse_if_statement(Parser* parser, const Token* if_token) {
   // lowers to the null check optional references already use — and because an
   // optional reference and a reference are the same pointer, the narrowing
   // itself costs nothing.
-  if (parser_check(parser, TOK_KW_LET)) {
+  //
+  // `if var name: T = opt` is the same owned narrowing with a mutable binding
+  // (docs/let-is-frozen.md: a value binding has a `let` and a `var` form; a
+  // `let` is frozen). A reference binding is an alias, whose mode word
+  // already says what it may do, so it has no `var` form:
+  // parse_binding_statement rejects `var x: mod T =>` ("aliases are
+  // bind-once").
+  if (parser_check(parser, TOK_KW_LET) || parser_check(parser, TOK_KW_VAR)) {
     const Token* let_token = parser_peek(parser);
+    bool is_var = let_token->kind == TOK_KW_VAR;
     parser_advance(parser);
-    AstStmt* bind = parse_binding_statement(parser, let_token, false, false, /*require_type=*/false);
+    AstStmt* bind = parse_binding_statement(parser, let_token, is_var, false, /*require_type=*/false);
     if (bind && bind->kind == AST_STMT_LET) {
       AstTypeRef* bt = bind->as.let_stmt.type;
       if (!bt) {
-        parser_error(parser, let_token,
-          "'if let' needs the binding's type: 'view T'/'mod T' with '=>', or 'T' with '=' (spec 4.2)");
+        parser_error(parser, let_token, is_var
+          ? "'if var' needs the binding's type: 'if var name: T = optional'"
+          : "'if let' needs the binding's type: 'view T'/'mod T' with '=>', or 'T' with '=' (spec 4.2)");
       } else if (!(bt->is_view || bt->is_mod)) {
         // OWNED narrowing (spec 4.2): `if let track: Track = getTrack()` is
         // ownership transfer of a produced optional's payload — the same `=`
@@ -2222,7 +2231,7 @@ static AstStmt* parse_if_statement(Parser* parser, const Token* if_token) {
         // NULL: the payload cannot be tested against none, so the backend
         // tests the optional value it materialises.
         if (!bind->as.let_stmt.value) {
-          parser_error(parser, let_token, "'if let' requires an initializer");
+          parser_error(parser, let_token, is_var ? "'if var' requires an initializer" : "'if let' requires an initializer");
         }
         stmt->as.if_stmt.binding = bind;
         stmt->as.if_stmt.condition = NULL;

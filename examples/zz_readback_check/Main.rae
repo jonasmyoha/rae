@@ -210,11 +210,10 @@ func main() ret Int {
     ) {
       ret 2
     }
-    if let createdCancelled: ReadRequest = ReadRequest.create(
+    if var cancelled: ReadRequest = ReadRequest.create(
       buffer: buffer
       range: { offset: 0 as UInt64, size: 32 as UInt64 }
     ) {
-      var cancelled: ReadRequest = own createdCancelled
       cancelled.drop()
     } else {
       ret 2

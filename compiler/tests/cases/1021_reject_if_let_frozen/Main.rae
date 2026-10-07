@@ -1,0 +1,22 @@
+# An `if let` payload is a frozen `let` (docs/let-is-frozen.md): changing it
+# is rejected and points at `if var`.
+type Counter {
+  count: Int
+}
+
+func makeCounter() ret opt Counter {
+  ret Counter { count: 0 }
+}
+
+func bump(counter: mod Counter) {
+  counter.count = counter.count + 1
+}
+
+func main() ret Int {
+  if let counter: Counter = makeCounter() {
+    counter.count = 3
+    bump(counter: counter)
+    log("{counter.count}")
+  }
+  ret 0
+}

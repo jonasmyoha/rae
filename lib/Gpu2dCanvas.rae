@@ -903,8 +903,7 @@ func canvasShutdown(canvas: mod Gpu2dCanvas) {
     retireSampler(resources: resources, id: canvas.imageSampler)
     retireRenderPipeline(resources: resources, id: canvas.imagePipeline)
     loop var ai: Int = 0, ai < canvas.textAtlases.length, ++ai {
-      if let atlas: Gpu2dTextAtlas = canvas.textAtlases.copyAt(index: ai) {
-        var retired: Gpu2dTextAtlas = own atlas
+      if var retired: Gpu2dTextAtlas = canvas.textAtlases.copyAt(index: ai) {
         retireBufferIds(resources: resources, list: retired.buffers)
         retireTextureView(resources: resources, id: retired.textureView)
         retireTexture(resources: resources, id: retired.texture)

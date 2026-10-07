@@ -244,10 +244,9 @@ func waterAddBody(waterSystem: mod WaterSystem, body: view WaterBody) {
 
 # The first body: it sizes the shared mesh and owns the FFT cascades.
 func primaryBody(waterSystem: view WaterSystem) ret WaterBody {
-  if let body: WaterBody = waterSystem.bodies.copyAt(index: 0) {
-    var normalized: WaterBody = body
-    normalizeWaterTier(body: normalized)
-    ret normalized
+  if var body: WaterBody = waterSystem.bodies.copyAt(index: 0) {
+    normalizeWaterTier(body: body)
+    ret body
   }
   ret createLakeToon(surfaceZ: 0.0, extent: 1.0)
 }
@@ -731,8 +730,7 @@ func drawWaterBody(
   # one sample in flight, resolved on this recording, read back later — so
   # the reflection cost (SSR on vs off) is measured apart from the compute.
   let timed: Bool = beginWaterPerf(performance: waterSystem.surfacePerf, resources: resources)
-  if let openedRecording: Recording = beginRecording(resources: resources) {
-    var recording: Recording = own openedRecording
+  if var recording: Recording = beginRecording(resources: resources) {
     var recorded: Bool = false
     unsafe {
       var timestampWrites: Ptr = webgpuNull()
