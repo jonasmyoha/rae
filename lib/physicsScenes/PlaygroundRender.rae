@@ -62,6 +62,9 @@ type PlaygroundBatches {
   capsules: InstanceBatch
   wheels: InstanceBatch
   ground: InstanceBatch
+  # A second part of the ground in `groundCheckerMaterial` (the vehicle
+  # course's dark checker squares); no mesh (-1) for the playgrounds
+  groundChecker: InstanceBatch
 }
 
 func uploadMeshData(renderer: mod DeferredRenderer, meshData: view MeshData) ret MeshHandle {
@@ -97,6 +100,7 @@ func createPlaygroundBatches(meshes: view PlaygroundMeshes) ret PlaygroundBatche
     capsules: createInstanceBatch(mesh: meshes.sphere, capacity: capsuleCapacity)
     wheels: createInstanceBatch(mesh: meshes.wheel, capacity: wheelCapacity)
     ground: createInstanceBatch(mesh: meshes.flatGround, capacity: 1)
+    groundChecker: createInstanceBatch(mesh: meshHandle(id: -1, generation: 0), capacity: 1)
   }
 }
 
@@ -170,6 +174,16 @@ func bodyMaterial(entityId: view EntityId, hue: view Float) ret Material3d {
 func groundMaterial() ret Material3d {
   ret Material3d {
     baseColor: Vec3.create(x: 0.36, y: 0.42, z: 0.36)
+    metallic: 0.0
+    roughness: 0.9
+    emission: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    toon: false
+  }
+}
+
+func groundCheckerMaterial() ret Material3d {
+  ret Material3d {
+    baseColor: Vec3.create(x: 0.17, y: 0.23, z: 0.19)
     metallic: 0.0
     roughness: 0.9
     emission: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
@@ -263,6 +277,16 @@ func drawPlaygroundGeometry(
     material: groundMaterial()
   )
   drawInstances(cache: cache, resources: resources, batch: batches.ground)
+  if batches.groundChecker.meshId >= 0 {
+    resetInstanceBatch(batch: batches.groundChecker)
+    addInstance(
+      batch: batches.groundChecker
+      model: groundModel
+      prevModel: groundModel
+      material: groundCheckerMaterial()
+    )
+    drawInstances(cache: cache, resources: resources, batch: batches.groundChecker)
+  }
   drawInstances(cache: cache, resources: resources, batch: batches.boxes)
   drawInstances(cache: cache, resources: resources, batch: batches.spheres)
   drawInstances(cache: cache, resources: resources, batch: batches.capsules)

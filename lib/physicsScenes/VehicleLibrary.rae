@@ -598,14 +598,26 @@ func drivingCourse() ret VehicleCourse {
   }
 }
 
-# The terrain as a render mesh in world coordinates: the height field's own
-# triangles (11, 21, 12 and 22, 12, 21 per cell, Box3D's order), smooth
-# normals from the neighbouring heights.
+# The terrain as two render meshes in world coordinates, the squares of a
+# checkerboard over the height-field cells (8 m): one flat colour gave the
+# eye nothing to see the car move against. Both hold every vertex (smooth
+# normals from the neighbouring heights); `courseMesh` has the even cells and
+# `courseCheckerMesh` the odd ones, drawn in a darker colour.
 func courseMesh(course: view VehicleCourse) ret MeshData {
+  ret courseCellsMesh(course: course, oddCells: false)
+}
+
+func courseCheckerMesh(course: view VehicleCourse) ret MeshData {
+  ret courseCellsMesh(course: course, oddCells: true)
+}
+
+# The cells whose row + column parity is `oddCells`: the height field's own
+# triangles (11, 21, 12 and 22, 12, 21 per cell, Box3D's order).
+func courseCellsMesh(course: view VehicleCourse, oddCells: view Bool) ret MeshData {
   let countX: Int = course.countX
   let countZ: Int = course.countZ
   let verts: List(Float) = List.create(Float, cap: countX * countZ * 8)
-  let indices: List(Int) = List.create(Int, cap: (countX - 1) * (countZ - 1) * 6)
+  let indices: List(Int) = List.create(Int, cap: (countX - 1) * (countZ - 1) * 3 + 6)
   let scale: Vec3 = course.terrainScale
   loop var row: Int = 0, row < countZ, ++row {
     loop var column: Int = 0, column < countX, ++column {
@@ -654,6 +666,9 @@ func courseMesh(course: view VehicleCourse) ret MeshData {
   }
   loop var row: Int = 0, row < countZ - 1, ++row {
     loop var column: Int = 0, column < countX - 1, ++column {
+      if ((row + column) % 2 is 1) is not oddCells {
+        continue
+      }
       let index11: Int = row * countX + column
       let index12: Int = index11 + 1
       let index21: Int = index11 + countX
