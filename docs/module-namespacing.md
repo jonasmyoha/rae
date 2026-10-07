@@ -81,8 +81,7 @@ libraries over `List`/`Buffer` that you import. See `docs/collections.md`.
 same name, a bare read of it is ambiguous; a file picks one by opening it by
 its package path, relative to the project: `open alpha/Values` (2026-10-07,
 fixture 1016). This works with or without `--project`: without it, the
-project is the entry file's directory, and the open resolves there and
-matches the module whatever root-relative name the scan gave it. (A
+project root is the entry file's directory. (A
 file-relative `open "../alpha/Values"` is not an import form; relative
 imports are an error.)
 
@@ -94,10 +93,12 @@ project:
 rae run --project game game/ui/hud.rae   # hud.rae sees every file under game/
 ```
 
-Without `--project`, the scan roots at the entry file's own directory. (The
-separate lib-marker root — the nearest ancestor containing `lib/core/Core.rae`, used
-to resolve `lib/` imports — is *not* the scan root, so it never drags unrelated
-files in.)
+Without `--project`, the project root is the entry file's own directory, and
+that is the ONE place the project's own modules come from (2026-10-07). The
+compiler no longer climbs to the nearest folder holding `lib/core/Core.rae`
+to use as the root: inside a tree with a `lib/` (this repository) that made
+a project's module names repo-relative, so `open alpha/Values` missed.
+`lib/` is found through the toolchain, as for any project.
 
 **Folders are namespaces, only for disambiguation.** Each project file belongs
 to the namespace of the folder that directly contains it. This is **not** a
