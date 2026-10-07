@@ -115,6 +115,16 @@ export class StatsStore {
     this.record("examples.build_ms_per_kloc", data.msPerKloc, metadata);
   }
 
+  /** The compiler's emit speed on the standard program
+   * (compiler/tools/compiler-speed.sh), Rae source lines per second. */
+  recordCompilerSpeed(data: { exampleId: string; lines: number; emitMs: number; linesPerSecond: number }) {
+    this.record("compiler.lines_per_s", data.linesPerSecond, {
+      exampleId: data.exampleId,
+      lines: data.lines,
+      emitMs: data.emitMs
+    });
+  }
+
   /** The latest recorded value of `metricName` for every example, keyed by
    * exampleId — what the Featured list shows next to each app. */
   latestPerExample(metricName: string) {
@@ -140,8 +150,11 @@ export class StatsStore {
 
   listRecentMetrics(metricName: string, limit = 20) {
     const all = this.readAll();
+    // By time, not file order: backfilled history is appended with its
+    // original timestamps (scripts/backfill-compiler-speed.mjs).
     return all
       .filter(e => e.metric_name === metricName)
+      .sort((a, b) => (a.timestamp < b.timestamp ? -1 : a.timestamp > b.timestamp ? 1 : 0))
       .reverse()
       .slice(0, limit)
       .map(e => ({

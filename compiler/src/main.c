@@ -4060,6 +4060,13 @@ static int run_command(const char* cmd, int argc, char** argv) {
                                           NULL,
                                           PROGRESS_EMIT);
         progress_end(okc);
+        // RAE_BUILD_TIME=1: the timing line of a full build, for an emit-only
+        // one (cc_ms 0). The compiler-speed measurement reads it
+        // (tools/compiler-speed.sh).
+        const char* build_time_env = getenv("RAE_BUILD_TIME");
+        if (okc && build_time_env && strcmp(build_time_env, "1") == 0) {
+          build_timing_print(build_opts.entry_path, 0);
+        }
         // Record which non-toolchain-bundled libs the program imports next to
         // the emitted C, so `rae watch` (which emits via this subprocess) can
         // link SDL3 / wgpu-native rather than assuming a plain program.

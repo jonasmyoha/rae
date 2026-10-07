@@ -127,6 +127,12 @@ if [ -f tools/wasm_webgpu_smoke.sh ]; then
   echo
   if bash tools/wasm_webgpu_smoke.sh; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 fi
+# The compiler's speed on one standard program (tools/compiler-speed.sh): a
+# measurement, not a case, so it never changes the pass/fail count.
+if [ -f tools/compiler-speed.sh ]; then
+  echo
+  bash tools/compiler-speed.sh || true
+fi
 # #44411932: native file-open dialog binding, env-driven headless path.
 if [ -f tools/test-sdl-file-dialog.sh ]; then
   echo
