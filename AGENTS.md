@@ -184,6 +184,18 @@ These instructions define **how Codex should work**, communicate progress, and i
   `=>` aliases whose `view T`/`mod T` you write, and `loop var i: Int = 0`. The
   ban is specifically on inferring the type of a binding from its initializer.
 
+### Prefer `let` — a binding is `var` only when it is really reassigned or mutated:
+- Write `let` by default. Use `var` only for a binding the code genuinely
+  changes later (a loop counter, an accumulator, a value built up step by step).
+  A reader sees `let` and knows the value is settled at that line; every `var`
+  makes them scan the rest of the function for writes.
+- Do not turn a `let` into a `var` just to patch one field after construction
+  (`var app: App = { ... }` then `app.batches.x = ...`). Build the part first
+  and put it into the literal: make the PART the short-lived `var`, set it up,
+  then construct the whole as `let` (`var batches: Batches = ...; setup(batch:
+  batches.x); let app: App = { batches: batches ... }`). The mutation stays
+  local to the piece that needs it.
+
 ### NO globals — mutable module-level state is forbidden (see docs/globals-and-app-ownership.md):
 - "No globals" means precisely: a module-level **`var`** (mutable global state)
   and a module-level **`let` that owns heap** (a `String`, `List`, `Map`, or any
