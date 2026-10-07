@@ -53,8 +53,36 @@ receiver's type is consulted, and the call counts when all of them take
   `mod` alias: writes through it land in `free`, which must itself be a
   `var`. A `view` alias (or `view` parameter) stays read-only, as before.
 - **Narrowing makes new bindings.** `if let value: T = maybe` and `=>` bind a
-  new name; they do not change the binding they read.
+  new name; they do not change the binding they read. The `if let` payload is
+  itself a frozen `let`; `if var` is its mutable form (below).
 - **`view` parameters** are unchanged: read-only, as today.
+
+## Every value binding has a `var` form
+
+Where a binding holds its OWN value, there is a frozen `let` and a mutable
+`var` (maintainer decision 2026-10-07, compiler 0.1.201):
+
+| frozen | mutable | binds |
+|---|---|---|
+| `let x: T = value` | `var x: T = value` | a value |
+| `if let x: T = optional { … }` | `if var x: T = optional { … }` (also `} else if var`) | the unwrapped payload, owned by the branch |
+| `loop let x: T in list { … }` | `loop var x: T in list { … }` | a COPY of each element |
+
+`if var` is `if let` with a mutable payload: the same presence test, the
+same move of the payload into the branch, the same drop at its end.
+
+`loop var x: T in list` changes the copy only — the list keeps its element.
+To change the elements in place, take them as aliases:
+`loop let x: mod T in list { x.count = 0 }`.
+
+An ALIAS (`view T` / `mod T`, bound with `=>` or as a loop element) has no
+`var` form: its mode word already says whether it may write, and an alias is
+bind-once. `if var x: mod T => place` and `loop var x: view T in list` are
+parse errors (fixture 1020).
+
+Before `if var` existed, the frozen-let migration wrote the mutable payload
+as `if let openedX: T = … { var x: T = own openedX`; those 45 places (and
+three older hand-written copies of the same shape) are now `if var`.
 
 ## Step 1: the measurement (2026-10-07)
 

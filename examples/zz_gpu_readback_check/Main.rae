@@ -89,8 +89,7 @@ func main() ret Int {
       ret 1
     }
     var issuer: IdIssuer = IdIssuer.create()
-    if let createdResources: GpuResources = GpuResources.create(issuer: issuer, capacity: 2) {
-      var resources: GpuResources = own createdResources
+    if var resources: GpuResources = GpuResources.create(issuer: issuer, capacity: 2) {
       # --- two concurrent requests on two buffers, byte-exact ---
       if let bufferA: BufferId = makeMapReadBuffer(resources: resources, base: 0) {
         if let bufferB: BufferId = makeMapReadBuffer(resources: resources, base: 100) {

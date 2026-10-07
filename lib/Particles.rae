@@ -145,15 +145,14 @@ func particleUpdate(sys: mod ParticleSystem, deltaTime: copy Float) pub {
   var live: List(Particle) = List.create(Particle, cap: sys.list.length)
   var i: Int = 0
   loop i < sys.list.length {
-    if let p: Particle = sys.list.copyAt(index: i) {
-      var pp: Particle = p
-      pp.life = pp.life - deltaTime
-      if pp.life > 0.0 {
-        pp.vz = pp.vz - sys.gravity * deltaTime
-        pp.x = pp.x + pp.vx * deltaTime
-        pp.y = pp.y + pp.vy * deltaTime
-        pp.z = pp.z + pp.vz * deltaTime
-        live.add(value: pp)
+    if var particle: Particle = sys.list.copyAt(index: i) {
+      particle.life = particle.life - deltaTime
+      if particle.life > 0.0 {
+        particle.vz = particle.vz - sys.gravity * deltaTime
+        particle.x = particle.x + particle.vx * deltaTime
+        particle.y = particle.y + particle.vy * deltaTime
+        particle.z = particle.z + particle.vz * deltaTime
+        live.add(value: particle)
       }
     }
     i = i + 1

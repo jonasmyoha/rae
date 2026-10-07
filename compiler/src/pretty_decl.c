@@ -268,11 +268,12 @@ static void pp_print_if_body(PrettyPrinter* pp, const AstStmt* stmt) {
   } else {
     pp_write(pp, "if ");
     if (stmt->as.if_stmt.binding) {
-      /* `if let name: T = expr` / `if let name: view T => place`. The parser
+      /* `if let name: T = expr` / `if var name: T = expr` /
+       * `if let name: view T => place`. The parser
        * marks the reference form's type `opt` for its own null test; the
        * source never spells it, so it is not printed. */
       const AstStmt* bind = stmt->as.if_stmt.binding;
-      pp_write(pp, "let ");
+      pp_write(pp, bind->as.let_stmt.is_var ? "var " : "let ");
       pp_write_str(pp, bind->as.let_stmt.name);
       pp_write(pp, ": ");
       AstTypeRef shown = *bind->as.let_stmt.type;

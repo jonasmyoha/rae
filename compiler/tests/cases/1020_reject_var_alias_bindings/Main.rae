@@ -1,0 +1,17 @@
+# A `view`/`mod` binding is an alias — its mode already says what it may do —
+# so it has no `var` form: `if var` and `loop var ... in` take values only.
+type Point {
+  x: Int
+}
+
+func main() ret Int {
+  var point: Point = { x: 1 }
+  var points: List(Point) = List.create(Point, cap: 1)
+  if var pointAlias: mod Point => point {
+    pointAlias.x = 2
+  }
+  loop var each: view Point in points {
+    log("{each.x}")
+  }
+  ret 0
+}

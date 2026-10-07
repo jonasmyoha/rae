@@ -159,8 +159,7 @@ func updateWaterReadback(waterSystem: mod WaterSystem, resources: mod GpuResourc
         workgroupsZ: 1
       )
       var submitted: Bool = false
-      if let openedRecording: Recording = beginRecording(resources: resources) {
-        var recording: Recording = own openedRecording
+      if var recording: Recording = beginRecording(resources: resources) {
         if recordComputeCommand(recording: recording, resources: resources, command: command) {
           if recordCopyBuffer(
             recording: recording

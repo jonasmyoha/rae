@@ -76,8 +76,7 @@ func main() ret Int {
       ret 1
     }
     var issuer: IdIssuer = IdIssuer.create()
-    if let createdResources: GpuResources = GpuResources.create(issuer: issuer, capacity: 12) {
-      var resources: GpuResources = own createdResources
+    if var resources: GpuResources = GpuResources.create(issuer: issuer, capacity: 12) {
       # Pack the known argument struct.
       var writer: ArgWriter = createArgs(uniform: true)
       pushF32(writer: writer, value: 1.0)
@@ -163,8 +162,7 @@ func main() ret Int {
                   workgroupsY: 1
                   workgroupsZ: 1
                 )
-                if let openedRecording: Recording = beginRecording(resources: resources) {
-                  var recording: Recording = own openedRecording
+                if var recording: Recording = beginRecording(resources: resources) {
                   if recordComputeCommand(
                     recording: recording
                     resources: resources

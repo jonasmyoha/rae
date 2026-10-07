@@ -517,10 +517,8 @@ func recordThenAbandon(manager: view Manager, group: view BindGroupId) ret Bool 
 
 func main() {
   var issuer: IdIssuer = IdIssuer.create()
-  if let createdManagerA: Manager = Manager.create(issuer: issuer, capacity: 3) {
-    var managerA: Manager = own createdManagerA
-    if let createdManagerB: Manager = Manager.create(issuer: issuer, capacity: 3) {
-      var managerB: Manager = own createdManagerB
+  if var managerA: Manager = Manager.create(issuer: issuer, capacity: 3) {
+    if var managerB: Manager = Manager.create(issuer: issuer, capacity: 3) {
       # --- early retirement behind in-flight work, then behind the bind group ---
       if let buffer: BufferId = createBuffer(manager: managerA) {
         if let group: BindGroupId = createBindGroup(manager: managerA, buffer: buffer) {

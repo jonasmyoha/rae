@@ -347,8 +347,7 @@ func dispatchFft(
     workgroupsY: workgroups(extent: height)
     workgroupsZ: 1
   )
-  if let openedRecording: Recording = beginRecording(resources: resources) {
-    var recording: Recording = own openedRecording
+  if var recording: Recording = beginRecording(resources: resources) {
     if recordComputeCommand(recording: recording, resources: resources, command: command) {
       waterSubmit(waterSystem: waterSystem, resources: resources, recording: recording)
     }
@@ -793,8 +792,7 @@ func waterFftUpdate(waterSystem: mod WaterSystem, resources: mod GpuResources, t
   }
   let timed: Bool = beginWaterPerf(performance: waterSystem.performance, resources: resources)
   var submitted: Bool = false
-  if let openedRecording: Recording = beginRecording(resources: resources) {
-    var recording: Recording = own openedRecording
+  if var recording: Recording = beginRecording(resources: resources) {
     if recordWaterCompute(
       recording: recording
       resources: resources

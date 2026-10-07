@@ -689,8 +689,7 @@ func shadowEnd(shadow: mod ShadowCache, resources: mod GpuResources) {
     }
   }
   ensureShadowBinds(shadow: shadow, resources: resources)
-  if let recording: Recording = beginRecording(resources: resources) {
-    var opened: Recording = own recording
+  if var recording: Recording = beginRecording(resources: resources) {
     loop var c: Int = 0, c < shadow.cascadeCount, ++c {
       var targets: RenderTargetSet = createRenderTargetSet(clear: false)
       setDepthTarget(
@@ -704,7 +703,7 @@ func shadowEnd(shadow: mod ShadowCache, resources: mod GpuResources) {
       )
       unsafe {
         let pass: Ptr = beginRenderPassMulti(
-          recording: opened
+          recording: recording
           resources: resources
           targets: targets
         )
@@ -725,25 +724,25 @@ func shadowEnd(shadow: mod ShadowCache, resources: mod GpuResources) {
         }
       }
     }
-    recordRenderPipelineUse(recording: opened, resources: resources, id: shadow.staticPipeline)
-    recordRenderPipelineUse(recording: opened, resources: resources, id: shadow.skinPipeline)
+    recordRenderPipelineUse(recording: recording, resources: resources, id: shadow.staticPipeline)
+    recordRenderPipelineUse(recording: recording, resources: resources, id: shadow.skinPipeline)
     loop var c: Int = 0, c < shadow.cascadeCount, ++c {
       recordBindGroupUse(
-        recording: opened
+        recording: recording
         resources: resources
         id: shadow.staticBinds.copyAtFallback(index: c, fallback: noBindGroupId())
       )
       recordBindGroupUse(
-        recording: opened
+        recording: recording
         resources: resources
         id: shadow.skinBinds.copyAtFallback(index: c, fallback: noBindGroupId())
       )
     }
-    shadowSdfRecordUses(sdf: shadow.sdf, recording: opened, resources: resources)
+    shadowSdfRecordUses(sdf: shadow.sdf, recording: recording, resources: resources)
     let tracked: opt SubmissionId = trackSubmission(
       inFlight: shadow.inFlight
       resources: resources
-      recording: opened
+      recording: recording
     )
   }
   pollSubmissions(inFlight: shadow.inFlight, resources: resources)

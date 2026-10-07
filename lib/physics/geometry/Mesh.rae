@@ -164,8 +164,7 @@ func findDuplicateVertex(
     loop var dy: Int = -1, dy <= 1, ++dy {
       loop var dz: Int = -1, dz <= 1, ++dz {
         let key: Int = weldCellKey(x: baseX + dx, y: baseY + dy, z: baseZ + dz)
-        if let head: Int = cellMap.get(k: key) {
-          var nodeIndex: Int = head
+        if var nodeIndex: Int = cellMap.get(k: key) {
           loop nodeIndex is not -1 {
             let node: WeldNode = nodes.copyAtDefault(index: nodeIndex)
             let other: Vec3 = vertices.copyAtDefault(index: node.vertexIndex)

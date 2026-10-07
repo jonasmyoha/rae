@@ -46,8 +46,7 @@ func canvasOpenFrame(
     ret
   }
   if let resources: mod GpuResources => canvas.gpuResources {
-    if let recording: Recording = beginRecording(resources: resources) {
-      var opened: Recording = own recording
+    if var recording: Recording = beginRecording(resources: resources) {
       let target: RenderTarget = renderTarget(
         colorView: textureViewRef(id: canvas.offscreenView)
         clear: clear
@@ -57,9 +56,13 @@ func canvasOpenFrame(
         a: a
       )
       unsafe {
-        canvas.framePass = beginRenderPass(recording: opened, resources: resources, target: target)
+        canvas.framePass = beginRenderPass(
+          recording: recording
+          resources: resources
+          target: target
+        )
       }
-      canvas.recording = own opened
+      canvas.recording = own recording
     }
   }
 }
