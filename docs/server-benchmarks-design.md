@@ -1,9 +1,13 @@
 # Server benchmarks: design
 
 **Status:** design DECIDED (§10), implementation queued. Written
-2026-10-08. Every Rae server is written in TWO styles, a plain event loop and
-ECS, to measure what the architecture costs (maintainer decision, §5); in the
-ECS style connections are entities and requests are events (§7).
+2026-10-08, revised the same day. Every Rae server is written in TWO styles, a
+plain event loop and ECS, to measure what the architecture costs (maintainer
+decision, §5); in the ECS style connections are entities and requests are
+events (§7). **Rae first:** the server stack is Rae code over a thin,
+syscall-shaped C shim; C holds only what the platform forces (§1.2,
+maintainer decision). There is no `async`/`await`; slow work is `spawn`ed
+(§1.3).
 
 A small suite that measures Rae servers against the same servers in Rust and
 JavaScript, before real web backends and game servers are written in Rae.
@@ -16,14 +20,14 @@ physics); does it hold up, and at what cost, for a server?
 | capability | today | consequence |
 |---|---|---|
 | TCP sockets | **none**: no `socket`/`listen`/`accept` anywhere in `lib/` or the runtime | phase 1 cannot start until a `net` module exists (gap G1) |
-| readiness polling (kqueue / epoll) | the runtime uses kqueue/inotify for one thing, `lib/FileNotify` (runtime C behind a handle API) | that file is the model for a socket poller (G2); there is no general event loop over file descriptors |
-| threads | `spawn f(...)` → `Task(T)` on real OS threads; `Channel(T)` (MPSC, non-blocking, any value-type payload since #969); `Parallel.workerCount()` | enough to run one event loop (or one World) per core and hand accepted sockets (plain value handles) to workers over a channel |
+| readiness polling (kqueue / epoll) | the runtime uses kqueue/inotify only inside `lib/FileNotify` | the poller (G2) is a kqueue shim plus Rae bookkeeping (§1.2); there is no general event loop over file descriptors |
+| threads | `spawn f(...)` → `Task(T)` on real OS threads; `Channel(T)` (MPSC, non-blocking, any value-type payload since #969); `Parallel.workerCount()` | enough to run one event loop (or one World) per core and hand accepted sockets (plain value handles) to workers over a channel; a `Task` cannot yet be asked "done?" without joining (gap T1, §1.3) |
 | ECS | `lib/ecs`: `EntityAllocator` (`allocEntity` / `freeEntity`), `ComponentTable(T)` (sparse set, O(1) lookup), query loops over one to three tables, zero-field tag components, `EventQueue(T)`, an ordered `Schedule` | everything the ECS-style servers need already exists; only the server components and systems are new (G8) |
 | bytes | `List(UInt8)`, `Buffer(T)`, `String` is byte-indexed (`byteAt`, `sub`, `indexOf`, `startsWith`, `split`) | an HTTP parser can be written in plain Rae; a reusable read/write byte buffer that does not allocate per request is missing (G3) |
 | JSON | `lib/Json` (a parsed document + value builders) | enough for `{"message":"Hello, World!"}` and the shootout messages; serialisation speed is part of what phase 1 measures |
-| time | `nowNs()`, `sleep(ms:)`, `lib/Time` (log formatting) | an HTTP `Date` header (IMF-fixdate) and a sub-millisecond tick wait are missing (G4) |
-| hashing | monocypher (argon2, blake2b) in the runtime | no SHA-1 or base64, which the WebSocket handshake needs (G5) |
-| FFI | `unsafe extern("c_symbol")`, `cheader`, generated bindings (Box3D track B, `lib/webgpu`) | the libc socket API could be bound, but F1 chose a runtime module instead: its macros, `errno`, `sockaddr` unions and variadic `fcntl` would leak unsafe C shapes into every server |
+| time | `nowNs()`, `sleep(ms:)`, `lib/Time` (log formatting) | an HTTP `Date` header (IMF-fixdate, plain Rae arithmetic) and a deadline wait for a 30 Hz tick are missing (G4) |
+| hashing | monocypher (argon2, blake2b) in the runtime | no SHA-1 or base64, which the WebSocket handshake needs; both are pure algorithms, so they are written in Rae (G5) |
+| FFI | `unsafe extern("c_symbol")`, `cheader`, generated bindings (Box3D track B, `lib/webgpu`) | Rae can call C directly, but four things in the socket API cannot be called safely or portably from Rae (§1.2); those go in a thin shim, and nothing else |
 
 **The `view`/`mod`-not-in-structs rule shapes connection state** in both
 styles:
@@ -37,6 +41,67 @@ styles:
   and returns; nothing outlives the call by reference;
 - each worker thread owns its connections outright; threads exchange only
   socket handles over a channel, never shared state.
+
+### 1.2 Rae first: C only for what the platform forces
+
+Rae is dogfooded: code is written in Rae whenever it can be, and C is used
+only where the platform ABI leaves no choice (the rule AGENTS.md states for
+the whole runtime, following the renderer's C-surface gate). For sockets,
+exactly four things force C:
+
+- **`errno`** is a macro over a hidden per-platform function (`__error()` on
+  macOS, `__errno_location()` on Linux) returning a pointer to thread-local
+  storage;
+- **`fcntl`** is variadic, and calling a variadic C function through a plain
+  extern is undefined behaviour on Apple Silicon (variadic arguments travel on
+  the stack);
+- **address structs** (`sockaddr_in`/`sockaddr_in6`, the `addrinfo` list
+  from `getaddrinfo`) have per-OS layouts (BSD has a length byte Linux lacks);
+- **constants** (`O_NONBLOCK`, `SOL_SOCKET`, `SO_REUSEADDR`, `TCP_NODELAY`,
+  `EAGAIN`, …) are macros with different values on macOS and Linux.
+
+So the C side is a **syscall-shaped shim**:
+
+- each function makes ONE system call and returns its result, or the
+  negated `errno` value;
+- address resolution answers a plain value, and the platform's constants
+  are exported as a table;
+- it holds no loops, no retry policy, no option choices and no error
+  mapping.
+
+Everything else is Rae in `lib/net`:
+
+- the listen sequence (socket, reuse option, bind, listen, non-blocking);
+- retrying an interrupted call;
+- connect with a timeout (start, wait for writable, read the socket error);
+- which options a server sets (no Nagle delay, no SIGPIPE);
+- turning error numbers into `NetStatus`;
+- the accept-abort rule;
+- the poller's readiness bookkeeping.
+
+The first version of G1 (0.1.202) put that logic in `runtime_net.c`; T2
+moves it to Rae behind the same API and fixture.
+
+Pure algorithms never need C: SHA-1, base64, the IMF-fixdate `Date` header
+and the HTTP/WebSocket codecs are Rae.
+
+### 1.3 No `async`/`await`: `spawn` is the marker
+
+`docs/concurrency-model.md` §1 already decides this: normal calls are
+synchronous and waited, `spawn` is the only marker for concurrent work,
+synchronisation is an explicit `task.get()`, and there is no `await` keyword
+and no function colouring. A server needs nothing more:
+
+- network I/O never blocks: the poller says which sockets are ready, and the
+  loop (or the ECS systems) handles exactly those;
+- slow work (a database query, a file, a heavy computation) is `spawn`ed, and
+  its result is picked up on a later frame. In the ECS style that is the
+  `AwaitingResult` component (§7).
+
+Picking it up without blocking needs one addition (gap T1): a `Task` that
+can be asked whether it has finished (`isDone`), and a non-blocking
+`tryGet() ret opt T`. Today only a `Channel` can be polled, and only
+`task.get()` reads a Task, which joins.
 
 ## 2. Directory layout and the A/B/C buckets
 
@@ -277,9 +342,10 @@ checks it (`RAE_MEM_STATS`).
 service; not in this benchmark, but every real backend has it), it stops
 being an event. The dispatch system *promotes* it to state on its connection:
 an `AwaitingResult` component holding the request's sequence number and
-ranges, whose `ReadBuffer` bytes are kept. A worker sends the result back
-over a channel, and a later system completes it and encodes the response. Only
-the long-lived requests pay for table storage.
+ranges, whose `ReadBuffer` bytes are kept, plus the `Task` of the `spawn`ed
+slow work (§1.3). A later system polls the task with `tryGet` (T1), completes
+the request and encodes the response. Only the long-lived requests pay for
+table storage.
 
 **Components** on connection entities (all values; buffers are owned
 `List(UInt8)`-backed structs):
@@ -435,41 +501,53 @@ proposed G6/G8 types.)
   - On this machine today, cargo, node and bun are present; oha, wrk,
     bombardier and go are not.
 
-## 9. Rae capability gaps (proposed tickets) and phasing
+## 9. Rae capability gaps (tickets) and phasing
 
-Each is a separate queue task when approved; sizes are relative (the queue
-runs every task as `{difficulty:4}` and splits big ones). None is a
-benchmark-only hack: each is stdlib a real server needs.
+Each is a queue task; sizes are relative (the queue runs every task as
+`{difficulty:4}` and splits big ones). None is a benchmark-only hack: each is
+stdlib a real server needs. Every one follows §1.2: Rae code, with C only in
+a syscall-shaped shim where the platform forces it.
 
 | # | ticket | size | notes |
 |---|---|---|---|
-| G1 | **landed 0.1.202** (`lib/net/Tcp.rae` + `compiler/runtime/runtime_net.c`: `tcpListen`/`tcpAccept`/`tcpConnect` → `SocketResult`, `socketRead` appends into a `List(UInt8)`, `socketWrite`/`socketWriteText` → `IoResult`, `socketWaitReadable`, `socketLocalPort`, `socketClose`, `textFromBytes`; fixture 1022). `lib/net`: TCP listen/accept/connect/read/write/close on value handles (`SocketId`), non-blocking, `TCP_NODELAY`, `SO_REUSEADDR`; errors as values (`opt` / result enums), never `errno` | L | runtime C (`runtime_net.c`) behind a small handle API, the FileNotify pattern (F1) |
-| G2 | `lib/net` poller: kqueue (macOS) / epoll (Linux) readiness, `wait(timeoutMs)` filling a caller-owned `List(Readiness)` (no allocation per wait) | M | used by both styles |
-| G3 | a byte buffer for I/O: append, consume from the front, find a byte sequence, view a range as a `String` without copying, reuse without reallocating | M | read and write buffers per connection |
-| G4 | time for servers: IMF-fixdate (`Date:` header, cached once a second), a monotonic sub-ms clock and a tick wait that sleeps until a deadline | S | `nowNs()` exists; `sleep(ms:)` is too coarse for a 30 Hz tick |
-| G5 | SHA-1 and base64 (WebSocket handshake), in the runtime next to monocypher | S | |
+| G1 | `lib/net/Tcp.rae`: TCP listen/accept/connect/read/write/close on `SocketId` value handles, non-blocking, errors as `NetStatus` values | — | **landed 0.1.202** with the policy in C; T2 redoes the split |
+| T1 | `Task.isDone()` and a non-blocking `tryGet() ret opt T` (docs/concurrency-model.md) | S | how a server picks up `spawn`ed slow work without blocking its frame |
+| T2 | `lib/net` as Rae over a syscall shim (§1.2): `runtime_net.c` shrinks to one-syscall functions + a constant table; the listen sequence, retries, connect timeout, options and status mapping move to Rae; same API, fixture 1022 unchanged | M | done before G2 builds on it |
+| T3 | the runtime-wide rule: C only for platform ABI, in AGENTS.md, plus an audit list of logic in today's runtime C that could move to Rae | S | the rule §1.2 follows |
+| G2 | `lib/net` poller: a kqueue shim (register/unregister/wait returning raw events) and Rae on top (`createPoller`, interest per `SocketId`, `pollWait` filling a caller-owned `List(Readiness)`, no allocation per wait); epoll later behind the same Rae API (F8) | M | used by both styles |
+| G3 | a byte buffer for I/O, pure Rae: append, consume from the front, find a byte sequence, read a range as a `String`, reuse without reallocating | M | read and write buffers per connection |
+| G4 | time for servers: IMF-fixdate `Date` header in Rae (cached once per second), a monotonic clock and a deadline wait (a clock/sleep shim only if `nowNs()`/`sleep` cannot do it) | S | a 30 Hz tick needs sub-millisecond deadlines |
+| G5 | SHA-1 and base64 in pure Rae (`lib/crypto/Sha1.rae`, `lib/text/Base64.rae` or similar), RFC test vectors | S | the WebSocket handshake |
 | G6 | `lib/http` (HTTP/1.1 request parser, response encoder, pipelining, keep-alive) and `lib/webSocket` (upgrade, frame codec, masking) in plain Rae on G1–G5, as functions over bytes with no I/O and no architecture | L | shared by both styles |
-| G8 | `lib/net/ecs`: the server components and event types (§7), the systems (poll with readiness tags, accept, read, parse into `EventQueue(HttpRequest)`, write, timeout, close, frame decode), the end-of-frame consume + `frameAdvance`, the promotion to `AwaitingResult`, and a World buffer pool, on `lib/ecs` | M | the reusable ECS server core; the benchmark's ECS servers add only route handlers and room systems |
+| G8 | `lib/net/ecs`: the server components and event types (§7), the systems (poll with readiness tags, accept, read, parse into `EventQueue(HttpRequest)`, write, timeout, close, frame decode), the end-of-frame consume + `frameAdvance`, the promotion to `AwaitingResult` with its `Task` (T1), and a World buffer pool, on `lib/ecs` | M | the reusable ECS server core; the benchmark's ECS servers add only route handlers and room systems |
 | G7 | measure, then fix if needed: `Json` serialisation and `String` building cost per request (no ticket until phase 1 numbers show a problem) | — | listed so the result is read correctly |
 
-**Phasing** (each phase lands both Rae styles together):
+**Phasing:**
 
-1. G1–G4, G6 (HTTP part), G8 (HTTP systems) → phase 1 servers (Rae
-   eventLoop, Rae ECS, Rust, Node, Bun), checker, runner, first baseline.
-2. G5, G6 (WebSocket part), G8 (frame systems), `loadClient` → phase 2.
+0. T1, T2, T3 first (the rule, the corrected socket split, task polling).
+1. G2, G3, G4, G6 (HTTP part) and G8 (HTTP systems), then phase 1. Phase 1
+   is both Rae styles plus the Rust, Node and Bun servers, with the checker,
+   the runner and the first baseline.
+2. G5, G6 (WebSocket part), G8 (frame systems) and `loadClient`, then phase
+   2.
 3. Phase 3 on the same code: only the room logic, the tick and the snapshot
    system are new.
 
 ## 10. Decisions (2026-10-08)
 
-Settled with the maintainer: F9 (requests are events) and "two Rae
-implementations of every phase, eventLoop and ECS" are the maintainer's.
+Settled with the maintainer: F1 (Rae over a syscall shim), F9 (requests are
+events), F11 (no `async`), and "two Rae implementations of every phase,
+eventLoop and ECS" are the maintainer's.
 The rest are the design's defaults, which the maintainer asked to be taken as
 decided.
 
-1. **F1 Sockets: a runtime C module.** `runtime_net.c` behind value handles
-   (the FileNotify pattern). Rae never sees `errno`, `sockaddr` or `fcntl`;
-   errors come back as values.
+1. **F1 Sockets: Rae over a syscall-shaped shim** (maintainer, revised
+   2026-10-08; §1.2). C holds only `errno` capture, the variadic `fcntl`,
+   address resolution and the platform constants, one system call per
+   function. Every policy is Rae. Rae code still never sees `errno` or
+   `sockaddr`: the shim hands back plain numbers, and `lib/net` maps them to
+   `NetStatus`. (The first take, "a runtime C module like FileNotify", put
+   policy in C and is superseded.)
 2. **F2 Load tools: `oha` for HTTP, and `wrk` only for pipelined plaintext.**
    The spec requires pipelining, and `oha` cannot pipeline. `wrk` (brew) runs
    just that one case through a small committed Lua script. If `wrk` is
@@ -501,3 +579,6 @@ decided.
 10. **F10 Systems in a fixed order, called from the loop.** No `Schedule`.
     The readiness tags already skip idle work, and a schedule's bookkeeping
     would be measured as ECS cost when it is a separate feature.
+11. **F11 No `async`/`await`** (maintainer, §1.3). Network I/O is readiness
+    polling; slow work is `spawn`ed, and its `Task` is polled with
+    `isDone`/`tryGet` (T1) by the frame that owns the request.
