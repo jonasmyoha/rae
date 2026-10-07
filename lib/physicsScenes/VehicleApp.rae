@@ -127,10 +127,16 @@ func createVehicleApp(
   camera.position = course.cameraStart
   camera.target = Vec3 { x: 0.0, y: 0.0, z: 1.0 }
   camera.farZ = 2500.0
-  var app: VehicleApp = {
+  # The course's dark checker squares are the second part of the ground
+  var batches: PlaygroundBatches = createPlaygroundBatches(meshes: meshes)
+  GbufferInstanced.setInstanceBatchMesh(
+    batch: batches.groundChecker
+    mesh: uploadMeshData(renderer: renderer, meshData: courseCheckerMesh(course: course))
+  )
+  let app: VehicleApp = {
     profile: createFrameProfile(frameLimit: 0)
     meshes: meshes
-    batches: createPlaygroundBatches(meshes: meshes)
+    batches: batches
     courseMesh: uploadMeshData(renderer: renderer, meshData: courseMesh(course: course))
     ui: createVehicleUi(assetBase: assetBase)
     camera: camera
@@ -167,11 +173,6 @@ func createVehicleApp(
     systems: uiSystems
     width: app.extentW
     height: app.extentH
-  )
-  # The course's dark checker squares, the second part of the ground
-  GbufferInstanced.setInstanceBatchMesh(
-    batch: app.batches.groundChecker
-    mesh: uploadMeshData(renderer: renderer, meshData: courseCheckerMesh(course: course))
   )
   ret app
 }
