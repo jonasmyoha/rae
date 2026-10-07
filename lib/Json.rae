@@ -553,7 +553,7 @@ func parseValue(
       # this, a nested object's fields would be interleaved into the outer
       # object's range, and the start/len pair would no longer point at a
       # contiguous slice.
-      let localFields: List(JsonField) = List.create(JsonField, cap: 4)
+      var localFields: List(JsonField) = List.create(JsonField, cap: 4)
       if Json.peek(jsonParser: jsonParser) is '}' {
         jsonParser.pos = jsonParser.pos + 1
       } else {
@@ -638,7 +638,7 @@ func parseValue(
       Json.skipWhitespace(jsonParser)
       # Same trick as for objects — collect into a local list first so a
       # nested array's children don't interleave with the outer array's.
-      let localKids: List(Int) = List.create(Int, cap: 4)
+      var localKids: List(Int) = List.create(Int, cap: 4)
       if Json.peek(jsonParser: jsonParser) is ']' {
         jsonParser.pos = jsonParser.pos + 1
       } else {
@@ -744,7 +744,7 @@ func parseValue(
 # `ok = false` and `errorPos` pointing at the first byte the parser
 # couldn't consume.
 func parseJson(source: view String) ret JsonDoc {
-  let doc: JsonDoc = {
+  var doc: JsonDoc = {
     values: List.create(JsonValue, cap: 8)
     children: List.create(Int, cap: 8)
     fields: List.create(JsonField, cap: 8)
@@ -752,7 +752,7 @@ func parseJson(source: view String) ret JsonDoc {
     ok: false
     errorPos: 0
   }
-  let jsonParser: JsonParser = { source: source, pos: 0, ok: true }
+  var jsonParser: JsonParser = { source: source, pos: 0, ok: true }
   let rootIdx: Int = Json.parseValue(
     jsonParser
     vals: doc.values

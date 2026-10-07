@@ -29,7 +29,7 @@ func loadSceneFile(path: view String) pub ret Scene {
   unsafe {
     source = nativeSceneReadFile(path: path)
   }
-  let scene: Scene = parseScene(source: source)
+  var scene: Scene = parseScene(source: source)
   scene.sceneId = sceneIdentityFromFilePath(path: path)
   ret scene
 }
@@ -38,7 +38,7 @@ func loadSceneFile(path: view String) pub ret Scene {
 # the file and `sceneId` records that same path for diagnostics and scoping;
 # document contents never supply a competing identity.
 func loadScenePackageFile(path: view String, sceneId: view String) ret Scene {
-  let scene: Scene = loadSceneFile(path: path)
+  var scene: Scene = loadSceneFile(path: path)
   scene.sceneId = "{sceneId}"
   ret scene
 }

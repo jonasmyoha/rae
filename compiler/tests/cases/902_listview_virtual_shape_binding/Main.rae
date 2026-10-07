@@ -29,8 +29,8 @@ func cell(
 }
 
 func row(label: view String, slot: view String) ret ListViewRow {
-  let keys: List(String) = List.create(String, cap: 4)
-  let values: List(String) = List.create(String, cap: 4)
+  var keys: List(String) = List.create(String, cap: 4)
+  var values: List(String) = List.create(String, cap: 4)
   cell(
     keys: keys
     values: values
@@ -106,13 +106,13 @@ func describe(world: view UiWorld, rowEntityId: view EntityId, nodeId: view Stri
 }
 
 func main() {
-  let registry: SceneRegistry = createSceneRegistry()
-  let rs: Scene = parseScene(source: rowScene())
+  var registry: SceneRegistry = createSceneRegistry()
+  var rs: Scene = parseScene(source: rowScene())
   rs.sceneId = "RowScene"
   registerScene(reg: registry, key: "RowScene", scene: own rs)
-  let world: UiWorld = createUiWorld()
+  var world: UiWorld = createUiWorld()
   var uiSystems: UiSystems = createUiSystems()
-  let ls: Scene = parseScene(source: listScene())
+  var ls: Scene = parseScene(source: listScene())
   ls.sceneId = "list"
   loadScene(world: world, uiSystems: uiSystems, scene: ls)
   var listEntityId: EntityId = noEntity()
@@ -121,7 +121,7 @@ func main() {
   }
   let lv: view ListView => componentView(this: world.listViews, entityId: listEntityId)
   log("mode virtual: {lv.mode is ListViewMode.virtual} bindings: {lv.bindings.length}")
-  let rows: List(ListViewRow) = List.create(ListViewRow, cap: 3)
+  var rows: List(ListViewRow) = List.create(ListViewRow, cap: 3)
   rows.add(value: row(label: "one", slot: "accent"))
   rows.add(value: row(label: "two", slot: ""))
   componentSet(
@@ -145,7 +145,7 @@ func main() {
   # --- REBIND with the SAME keys: only the non-key cell `fillSlot` changes.
   # This is what the editor does on every selection change: the labels stay,
   # the plate token flips. Row "two" gains a slot, row "one" loses its slot.
-  let rows2: List(ListViewRow) = List.create(ListViewRow, cap: 3)
+  var rows2: List(ListViewRow) = List.create(ListViewRow, cap: 3)
   rows2.add(value: row(label: "one", slot: ""))
   rows2.add(value: row(label: "two", slot: "accent"))
   componentSet(

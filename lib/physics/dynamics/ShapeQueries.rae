@@ -97,7 +97,7 @@ func shapeCastShape(
   input: view ShapeCastInput
 ) ret CastOutput {
   let count: Int = minInt(left: input.proxy.points.length, right: maxShapeCastPoints)
-  let localPoints: List(Vec3) = List.create(Vec3, cap: count)
+  var localPoints: List(Vec3) = List.create(Vec3, cap: count)
   loop var i: Int = 0, i < count, ++i {
     localPoints.add(
       value: inverseTransformPoint(
@@ -262,7 +262,7 @@ func collideMoverShape(
     center2: inverseTransformPoint(transform: transform, point: mover.center2)
     radius: mover.radius
   }
-  let planes: List(PlaneResult) = List.create(PlaneResult, cap: 1)
+  var planes: List(PlaneResult) = List.create(PlaneResult, cap: 1)
   var result: PlaneResult = emptyPlaneResult()
   match shape.shapeType {
     case ShapeType.capsule {

@@ -115,7 +115,7 @@ func listDir(folder: view String) pub ret List(File) {
     raw = rae_sys_list_dir(folder: folder)
   }
   let lines: List(String) = raw.split(sep: "\n")
-  let result: List(File) = List.create(File, cap: lines.length)
+  var result: List(File) = List.create(File, cap: lines.length)
   var i: Int = 0
   loop i < lines.length {
     if let n: String = lines.copyAt(index: i) {
@@ -140,7 +140,7 @@ func listDir(folder: view String) pub ret List(File) {
 # track-row loop in album_view.rae).
 func listDirByExt(folder: view String, ext: view String) pub ret List(File) {
   let all: List(File) = listDir(folder: folder)
-  let result: List(File) = List.create(File, cap: all.length)
+  var result: List(File) = List.create(File, cap: all.length)
   var i: Int = 0
   loop i < all.length {
     # `rae_ext_rae_buf_get` returns a shallow copy aliasing the list's storage,

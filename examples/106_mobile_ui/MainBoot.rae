@@ -69,7 +69,7 @@ func createBootTheme(gpuUi: view Gpu2dUi) ret UiTheme {
 # what decides whether the poll worker (`startSpotifyPoller`, #950) polls
 # at all.
 func setupSpotify(isHeadless: view Bool) ret SpotifySystem {
-  let spotifySystem: SpotifySystem = createSpotifySystem()
+  var spotifySystem: SpotifySystem = createSpotifySystem()
   var spotifyOn: Bool = spotifySystem.enabled
   if isHeadless and spotifyForcedOn() is false {
     spotifyOn = false
@@ -144,7 +144,7 @@ func initialScrollY(restored: view RestoredState) ret Float {
 # The .raescene files whose edits hot-reload the data (polled 4x/s).
 func createSceneWatcher() ret FileWatcher {
   let dataHotReloadEnabled: Bool = true
-  let watchedPaths: List(String) = List.create(String, cap: 8)
+  var watchedPaths: List(String) = List.create(String, cap: 8)
   watchedPaths.add(value: trackRowPath)
   watchedPaths.add(value: navTabPath)
   watchedPaths.add(value: miniPlayerPath)
@@ -171,7 +171,7 @@ func createSceneWatcher() ret FileWatcher {
 # (`open` pre-opens the menu, `labels` pre-enables the FPS / mem read-out) so
 # the snapshot tooling captures those states without scripting a click.
 func createBootDebugSystem(viewport: view Viewport) ret DebugSystem {
-  let debug: DebugSystem = createDebugSystem()
+  var debug: DebugSystem = createDebugSystem()
   restoreDebugFlags(debug: debug, path: debugFlagsFilePath)
   setDebugScreenSize(debug: debug, w: viewport.layoutW, h: viewport.layoutH)
   let debugMargin: Float = 34.69879518072289

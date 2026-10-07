@@ -82,7 +82,7 @@ func collectionFromAlbum(album: view Album) pub ret CollectionView {
     let artist: String = "{album.artist}"
     let coverStem: String = "{album.stem}"
 
-    let rows: List(CollectionRow) = List.create(CollectionRow, cap: n)
+    var rows: List(CollectionRow) = List.create(CollectionRow, cap: n)
     var i: Int = 0
     loop i < n {
       let t: Track = rae_ext_rae_buf_get(buf: album.tracks.data, index: i)
@@ -122,7 +122,7 @@ func collectionFromPlaylist(
   albums: view List(Album)
 ) pub ret CollectionView {
   unsafe {
-    let rows: List(CollectionRow) = List.create(CollectionRow, cap: playlist.items.length)
+    var rows: List(CollectionRow) = List.create(CollectionRow, cap: playlist.items.length)
     let n: Int = playlist.items.length
     var i: Int = 0
     loop i < n {

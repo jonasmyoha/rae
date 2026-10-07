@@ -20,7 +20,7 @@ import Sys
 # users had before this feature.
 func librarySeedFromCatalog(albums: view List(Album)) pub ret List(String) {
   unsafe {
-    let lib: List(String) = List.create(String, cap: albums.length)
+    var lib: List(String) = List.create(String, cap: albums.length)
     var i: Int = 0
     loop i < albums.length {
       let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: i)
@@ -131,7 +131,7 @@ func parseLibraryFromJson(
     }
     let stemsVal: JsonValue = Json.jsonValueAt(doc: doc, idx: stemsIdx)
     let n: Int = Json.arrayLen(this: stemsVal)
-    let out: List(String) = List.create(String, cap: n)
+    var out: List(String) = List.create(String, cap: n)
     var i: Int = 0
     loop i < n {
       let v: JsonValue = Json.arrayAt(doc: doc, this: stemsVal, idx: i)

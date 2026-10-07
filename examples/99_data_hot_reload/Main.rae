@@ -41,9 +41,9 @@ func main() {
   writeFile(path: configPath, content: "color=red")
   log("startup config: {loadConfig(path: configPath)}")
 
-  let paths: List(String) = List.create(String, cap: 1)
+  var paths: List(String) = List.create(String, cap: 1)
   paths.add(value: configPath)
-  let watcher: FileWatcher = FileWatch.createFileWatcher(
+  var watcher: FileWatcher = FileWatch.createFileWatcher(
     paths: paths
     enabled: true
     intervalSec: 0.0

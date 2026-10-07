@@ -98,7 +98,7 @@ func entityLayerOrder(world: view UiWorld, entityId: view EntityId) pub ret Int 
 # the input hit-test (which walks the result in reverse).
 func collectPaintableRoots(world: view UiWorld, uiSystems: view UiSystems) pub ret List(EntityId) {
   unsafe {
-    let roots: List(EntityId) = List.create(EntityId, cap: 16)
+    var roots: List(EntityId) = List.create(EntityId, cap: 16)
     let alive: view List(EntityId) => world.allocator.alive
     let n: Int = alive.length
     var i: Int = 0

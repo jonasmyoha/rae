@@ -41,7 +41,7 @@ func writeChunk(
 ) {
   pushBE32(out: out, value: data.length)
   # CRC is over the type bytes followed by the data.
-  let crcIn: List(Int) = List.create(Int, cap: data.length + 4)
+  var crcIn: List(Int) = List.create(Int, cap: data.length + 4)
   crcIn.add(value: t0)
   crcIn.add(value: t1)
   crcIn.add(value: t2)
@@ -90,13 +90,13 @@ func encodePng(
   }
   let stride: Int = width * channels
 
-  let raw: List(Int) = List.create(Int, cap: height * (1 + stride))
-  let prevRow: List(Int) = List.create(Int, cap: stride)  # previous row, raw (unfiltered) bytes
+  var raw: List(Int) = List.create(Int, cap: height * (1 + stride))
+  var prevRow: List(Int) = List.create(Int, cap: stride)  # previous row, raw (unfiltered) bytes
   var havePrev: Bool = false
   var y: Int = 0
   loop y < height {
     # Extract this row's raw bytes.
-    let cur: List(Int) = List.create(Int, cap: stride)
+    var cur: List(Int) = List.create(Int, cap: stride)
     var x: Int = 0
     loop x < width {
       let p: Int = pngIntAt(data: pixels, index: y * width + x)
@@ -109,12 +109,12 @@ func encodePng(
       x = x + 1
     }
     # Try the five filters, keep the one with the smallest signed-abs sum.
-    let best: List(Int) = List.create(Int, cap: stride)
+    var best: List(Int) = List.create(Int, cap: stride)
     var bestType: Int = 0
     var bestCost: Int = -1
     var ft: Int = 0
     loop ft <= 4 {
-      let cand: List(Int) = List.create(Int, cap: stride)
+      var cand: List(Int) = List.create(Int, cap: stride)
       var cost: Int = 0
       var i: Int = 0
       loop i < stride {
@@ -171,7 +171,7 @@ func encodePng(
     y = y + 1
   }
 
-  let out: List(Int) = List.create(Int, cap: raw.length / 2 + 64)
+  var out: List(Int) = List.create(Int, cap: raw.length / 2 + 64)
   # Signature.
   out.add(value: 137)
   out.add(value: 80)
@@ -182,7 +182,7 @@ func encodePng(
   out.add(value: 26)
   out.add(value: 10)
   # IHDR.
-  let ihdr: List(Int) = List.create(Int, cap: 13)
+  var ihdr: List(Int) = List.create(Int, cap: 13)
   pushBE32(out: ihdr, value: width)
   pushBE32(out: ihdr, value: height)
   ihdr.add(value: 8)  # bit depth
@@ -266,7 +266,7 @@ func decodePng(
   var w: Int = 0
   var h: Int = 0
   var colorType: Int = 6
-  let idat: List(Int) = List.create(Int, cap: len)
+  var idat: List(Int) = List.create(Int, cap: len)
 
   var pos: Int = 8  # skip the 8-byte signature
   loop pos + 8 <= len {
@@ -310,7 +310,7 @@ func decodePng(
   let stride: Int = w * channels
 
   # Unfilter into a flat byte buffer `recon` (stride bytes per row, no filter byte).
-  let recon: List(Int) = List.create(Int, cap: h * stride)
+  var recon: List(Int) = List.create(Int, cap: h * stride)
   var rp: Int = 0  # read cursor in `raw`
   var y: Int = 0
   loop y < h {
@@ -352,7 +352,7 @@ func decodePng(
   }
 
   # Pack to 0xAARRGGBB.
-  let pixels: List(Int) = List.create(Int, cap: w * h)
+  var pixels: List(Int) = List.create(Int, cap: w * h)
   var py: Int = 0
   loop py < h {
     var px: Int = 0

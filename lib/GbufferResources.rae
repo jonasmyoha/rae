@@ -185,7 +185,7 @@ func ensureStaticBind(cache: mod GbufferCache, resources: mod GpuResources) {
   if bindGroupIsUsable(resources: resources, id: cache.staticBind) {
     ret
   }
-  let entries: List(ResourceRef) = List.create(ResourceRef, cap: 2)
+  var entries: List(ResourceRef) = List.create(ResourceRef, cap: 2)
   entries.add(value: bufferRef(id: cache.frameUniform))
   entries.add(value: bufferRef(id: cache.draws))
   if let bind: BindGroupId = createRenderBindGroup(
@@ -239,7 +239,7 @@ func ensurePipelines(cache: mod GbufferCache, resources: mod GpuResources) {
     stride: 32
     attributes: gbufferStaticAttributes()
   )
-  let skinAttributes: List(VertexAttributeSpec) = gbufferStaticAttributes()
+  var skinAttributes: List(VertexAttributeSpec) = gbufferStaticAttributes()
   skinAttributes.add(value: { format: WGPUVertexFormat_Float32x4, offset: 32, location: 3 })
   skinAttributes.add(value: { format: WGPUVertexFormat_Float32x4, offset: 48, location: 4 })
   skinAttributes.add(value: { format: WGPUVertexFormat_Float32x4, offset: 64, location: 5 })

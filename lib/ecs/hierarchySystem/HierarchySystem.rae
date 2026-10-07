@@ -148,7 +148,7 @@ func getChildren(
   childrens: view ComponentTable(Children)
   parent: view EntityId
 ) ret List(EntityId) {
-  let out: List(EntityId) = List.create(EntityId, cap: 4)
+  var out: List(EntityId) = List.create(EntityId, cap: 4)
   if componentHas(this: childrens, entityId: parent) {
     let cache: view Children => componentView(this: childrens, entityId: parent)
     loop var i: Int = 0, i < cache.ids.length, ++i {
@@ -340,7 +340,7 @@ func destroySubtree(
   childrens: mod ComponentTable(Children)
   root: view EntityId
 ) {
-  let subtree: List(EntityId) = List.create(EntityId, cap: 16)
+  var subtree: List(EntityId) = List.create(EntityId, cap: 16)
   collectSubtree(childrens: childrens, node: root, out: subtree)
   # Unlink the root from its parent's Children so the (surviving) parent doesn't
   # dangle to the destroyed root.

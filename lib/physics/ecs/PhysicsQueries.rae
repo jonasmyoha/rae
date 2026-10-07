@@ -73,7 +73,7 @@ func spherecastClosest(
   translation: view Vec3
   filter: view QueryFilter
 ) ret PhysicsHit {
-  let points: List(Vec3) = List.create(Vec3, cap: 1)
+  var points: List(Vec3) = List.create(Vec3, cap: 1)
   points.add(value: zeroVector())
   var castHit: CastHit = {
     shapeId: ShapeId { index1: 0, world0: 0, generation: 0 }
@@ -106,7 +106,7 @@ func spherecastClosest(
 
 # The entities of `shapeIds`, each once, in the order first met.
 func shapeEntities(physics: view Physics, shapeIds: view List(ShapeId)) ret List(EntityId) {
-  let entityIds: List(EntityId) = List.create(EntityId, cap: shapeIds.length)
+  var entityIds: List(EntityId) = List.create(EntityId, cap: shapeIds.length)
   loop let shapeId: view ShapeId in shapeIds {
     let entityId: EntityId = entityOfShape(physics: physics, shapeId: shapeId)
     if isNone(this: entityId) {
@@ -131,7 +131,7 @@ func overlapAabbEntities(
   box: view Aabb
   filter: view QueryFilter
 ) ret List(EntityId) {
-  let shapeIds: List(ShapeId) = List.create(ShapeId, cap: 8)
+  var shapeIds: List(ShapeId) = List.create(ShapeId, cap: 8)
   overlapAabb(
     world: physics.world
     box: box
@@ -148,9 +148,9 @@ func overlapSphereEntities(
   radius: view Float
   filter: view QueryFilter
 ) ret List(EntityId) {
-  let points: List(Vec3) = List.create(Vec3, cap: 1)
+  var points: List(Vec3) = List.create(Vec3, cap: 1)
   points.add(value: zeroVector())
-  let shapeIds: List(ShapeId) = List.create(ShapeId, cap: 8)
+  var shapeIds: List(ShapeId) = List.create(ShapeId, cap: 8)
   overlapShapeProxy(
     world: physics.world
     origin: center

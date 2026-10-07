@@ -121,7 +121,7 @@ type SlotTable {
 }
 
 func createIntList(capacity: view Int, value: view Int) ret List(Int) {
-  let list: List(Int) = List.create(Int, cap: capacity)
+  var list: List(Int) = List.create(Int, cap: capacity)
   var i: Int = 0
   loop i < capacity {
     list.add(value: value)
@@ -131,7 +131,7 @@ func createIntList(capacity: view Int, value: view Int) ret List(Int) {
 }
 
 func createSlotTable(capacity: view Int, empty: copy Ptr) ret SlotTable {
-  let handles: List(Ptr) = List.create(Ptr, cap: capacity)
+  var handles: List(Ptr) = List.create(Ptr, cap: capacity)
   var i: Int = 0
   loop i < capacity {
     unsafe {

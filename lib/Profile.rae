@@ -226,7 +226,7 @@ func joinBlocked(frags: view List(String), blockSize: view Int) ret String {
     if n is 0 {
       ret ""
     }
-    let blocks: List(String) = List.create(String, cap: n / blockSize + 2)
+    var blocks: List(String) = List.create(String, cap: n / blockSize + 2)
     var i: Int = 0
     loop i < n {
       var stop: Int = i + blockSize
@@ -251,7 +251,7 @@ func joinBlocked(frags: view List(String), blockSize: view Int) ret String {
 func write(profiler: view Profiler, path: view String) ret Bool {
   unsafe {
     let n: Int = profiler.names.length
-    let frags: List(String) = List.create(String, cap: n + 2)
+    var frags: List(String) = List.create(String, cap: n + 2)
     # Label the CPU track; a second thread_name for tid 1 (GPU) lands here once GPU
     # timestamp events exist (phase 2).
     frags.add(

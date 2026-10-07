@@ -488,8 +488,8 @@ func themeTextMaskHas(mask: view Int, field: view Int) ret Bool {
 # uses themeTextStyleIndex, so a page declaration shadows an imported one both
 # as a requested style and as an extends parent.
 func themeMergedTextChain(theme: view ResolvedTheme, name: view String) ret List(Int) {
-  let up: List(Int) = List.create(Int, cap: 4)
-  let seen: List(String) = List.create(String, cap: 4)
+  var up: List(Int) = List.create(Int, cap: 4)
+  var seen: List(String) = List.create(String, cap: 4)
   var currentName: String = "{name}"
   var steps: Int = 0
   var walking: Bool = true
@@ -609,8 +609,8 @@ func themeResolveChain(
   kind: view String
 ) ret List(Int) {
   # child-first while walking up, reversed at the end.
-  let up: List(Int) = List.create(Int, cap: 4)
-  let seen: List(String) = List.create(String, cap: 4)
+  var up: List(Int) = List.create(Int, cap: 4)
+  var seen: List(String) = List.create(String, cap: 4)
   var curName: String = "{name}"
   var steps: Int = 0
   var walking: Bool = true
@@ -668,7 +668,7 @@ func themeSeenName(seen: view List(String), name: view String) ret Bool {
 }
 
 func themeReverseIntList(src: view List(Int)) ret List(Int) {
-  let out: List(Int) = List.create(Int, cap: src.length)
+  var out: List(Int) = List.create(Int, cap: src.length)
   var i: Int = src.length - 1
   loop i >= 0 {
     if let value: Int = src.copyAt(index: i) {

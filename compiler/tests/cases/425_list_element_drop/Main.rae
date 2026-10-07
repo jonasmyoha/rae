@@ -17,10 +17,10 @@ type Foo {
 }
 
 func transientList() {
-  let xs: List(Foo) = List.create(Foo, cap: 64)
+  var xs: List(Foo) = List.create(Foo, cap: 64)
   var i: Int = 0
   loop i < 64 {
-    let inner: List(Int) = List.create(Int, cap: 4)
+    var inner: List(Int) = List.create(Int, cap: 4)
     inner.add(value: i)
     inner.add(value: i + 1)
     inner.add(value: i + 2)

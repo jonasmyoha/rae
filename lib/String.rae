@@ -389,7 +389,7 @@ func trim(this: view String) ret String {
 }
 
 func split(this: view String, sep: view String) ret List(String) {
-  let result: List(String) = List.create(String, cap: 4)
+  var result: List(String) = List.create(String, cap: 4)
   if sep.length() is 0 {
     # A COPY, not the borrow. `result` is returned and eventually dropped,
     # and dropping it would free the caller's buffer — `this` is a view we

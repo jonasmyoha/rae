@@ -59,7 +59,7 @@ type TransparentPassCache {
 
 func createTransparentPassCache(capacity: copy Int) pub ret TransparentPassCache {
   let floatCount: Int = capacity * instanceRecordFloats
-  let records: List(Float) = List.create(Float, cap: floatCount)
+  var records: List(Float) = List.create(Float, cap: floatCount)
   var floatIndex: Int = 0
   loop floatIndex < floatCount {
     records.add(value: 0.0)
@@ -159,9 +159,9 @@ func copyOpaqueRadiance(resources: view GpuResources, targets: view DeferredTarg
 # No culling: a transparent surface (water sheet, a fading particle seen from
 # inside its splash) is meaningful from both sides.
 func transparentPipelineSpec(litFormat: copy Int32) ret RenderPipelineSpec {
-  let colorFormats: List(Int32) = List.create(Int32, cap: 1)
+  var colorFormats: List(Int32) = List.create(Int32, cap: 1)
   colorFormats.add(value: litFormat)
-  let attributes: List(VertexAttributeSpec) = List.create(VertexAttributeSpec, cap: 3)
+  var attributes: List(VertexAttributeSpec) = List.create(VertexAttributeSpec, cap: 3)
   attributes.add(value: { format: WGPUVertexFormat_Float32x3, offset: 0, location: 0 })
   attributes.add(value: { format: WGPUVertexFormat_Float32x3, offset: 12, location: 1 })
   attributes.add(value: { format: WGPUVertexFormat_Float32x2, offset: 24, location: 2 })
@@ -215,7 +215,7 @@ func ensureTransparentBind(
   if bindGroupIsUsable(resources: resources, id: cache.bindGroup) {
     ret
   }
-  let entries: List(ResourceRef) = List.create(ResourceRef, cap: 2)
+  var entries: List(ResourceRef) = List.create(ResourceRef, cap: 2)
   entries.add(value: bufferRef(id: gbuffer.frameUniform))
   entries.add(value: bufferRef(id: gbuffer.draws))
   if let bind: BindGroupId = createRenderBindGroup(

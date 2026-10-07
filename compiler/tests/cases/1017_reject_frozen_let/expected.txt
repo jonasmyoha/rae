@@ -1,0 +1,27 @@
+tests/cases/1017_reject_frozen_let/Main.rae:37:15: cannot modify 'outer.inner': 'outer' (declared at line 31) is a 'let', which is frozen (docs/let-is-frozen.md); declare it 'var'
+    37 |   outer.inner = { value: 3 }
+       |               ^~~~
+tests/cases/1017_reject_frozen_let/Main.rae:39:21: cannot modify 'outer.inner.value': 'outer' (declared at line 31) is a 'let', which is frozen (docs/let-is-frozen.md); declare it 'var'
+    39 |   outer.inner.value = 5
+       |                     ^~~~
+tests/cases/1017_reject_frozen_let/Main.rae:41:18: cannot call mutating method 'add' on 'outer.items': 'outer' (declared at line 31) is a 'let', which is frozen (docs/let-is-frozen.md); declare it 'var'
+    41 |   outer.items.add(value: 1)
+       |                  ^~~~
+tests/cases/1017_reject_frozen_let/Main.rae:42:18: cannot call mutating method 'set' on 'outer.items': 'outer' (declared at line 31) is a 'let', which is frozen (docs/let-is-frozen.md); declare it 'var'
+    42 |   outer.items.set(index: 0, value: 2)
+       |                  ^~~~
+tests/cases/1017_reject_frozen_let/Main.rae:43:17: cannot call mutating method 'set' on 'outer.grid': 'outer' (declared at line 31) is a 'let', which is frozen (docs/let-is-frozen.md); declare it 'var'
+    43 |   outer.grid.set(index: 0, value: 2)
+       |                 ^~~~
+tests/cases/1017_reject_frozen_let/Main.rae:45:21: cannot pass 'outer.inner' to 'mod' parameter 'inner': 'outer' (declared at line 31) is a 'let', which is frozen (docs/let-is-frozen.md); declare it 'var'
+    45 |   bump(inner: outer.inner)
+       |                     ^~~~
+tests/cases/1017_reject_frozen_let/Main.rae:47:16: cannot pass 'outer' to 'mod' parameter 'outer': 'outer' (declared at line 31) is a 'let', which is frozen (docs/let-is-frozen.md); declare it 'var'
+    47 |   reset(outer: outer)
+       |                ^~~~
+tests/cases/1017_reject_frozen_let/Main.rae:50:14: cannot call mutating method 'add' on 'numbers': 'numbers' (declared at line 49) is a 'let', which is frozen (docs/let-is-frozen.md); declare it 'var'
+    50 |   numbers.add(value: 3)
+       |              ^~~~
+tests/cases/1017_reject_frozen_let/Main.rae:52:20: cannot call mutating method 'increment' on 'counter': 'counter' (declared at line 51) is a 'let', which is frozen (docs/let-is-frozen.md); declare it 'var'
+    52 |   counter.increment()
+       |                    ^~~~

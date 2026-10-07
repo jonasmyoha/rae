@@ -131,7 +131,7 @@ func withAtlasColors(
   width: view Int
   height: view Int
 ) pub ret SkinnedMeshData {
-  let out: List(Float) = List.create(Float, cap: m.verts.length)
+  var out: List(Float) = List.create(Float, cap: m.verts.length)
   var i: Int = 0
   loop i < m.verts.length {
     out.add(value: floatAt(list: m.verts, index: i))
@@ -240,7 +240,7 @@ func loadSkeleton(glb: view Glb, skinIndex: view Int) pub ret Skeleton {
   let skin: JsonValue = arrayAt(doc: glb.doc, this: skins, idx: skinIndex)
   let jointsArr: JsonValue = arrayField(glb: glb, obj: skin, key: "joints")
   let jointCount: Int = arrayLen(this: jointsArr)
-  let jointNodes: List(Int) = List.create(Int, cap: jointCount)
+  var jointNodes: List(Int) = List.create(Int, cap: jointCount)
   var i: Int = 0
   loop i < jointCount {
     jointNodes.add(
@@ -258,11 +258,11 @@ func loadSkeleton(glb: view Glb, skinIndex: view Int) pub ret Skeleton {
 
   let nodes: JsonValue = arrayField(glb: glb, obj: root, key: "nodes")
   let nodeCount: Int = arrayLen(this: nodes)
-  let parent: List(Int) = List.create(Int, cap: nodeCount)
-  let nodeNames: List(String) = List.create(String, cap: nodeCount)
-  let localT: List(Float) = List.create(Float, cap: nodeCount * 3)
-  let localR: List(Float) = List.create(Float, cap: nodeCount * 4)
-  let localS: List(Float) = List.create(Float, cap: nodeCount * 3)
+  var parent: List(Int) = List.create(Int, cap: nodeCount)
+  var nodeNames: List(String) = List.create(String, cap: nodeCount)
+  var localT: List(Float) = List.create(Float, cap: nodeCount * 3)
+  var localR: List(Float) = List.create(Float, cap: nodeCount * 4)
+  var localS: List(Float) = List.create(Float, cap: nodeCount * 3)
   var n: Int = 0
   loop n < nodeCount {
     parent.add(value: -1)
@@ -354,9 +354,9 @@ func loadSkeleton(glb: view Glb, skinIndex: view Int) pub ret Skeleton {
 }
 
 func captureSkeletonPose(sk: view Skeleton) ret SkeletonPose {
-  let localT: List(Float) = List.create(Float, cap: sk.localT.length)
-  let localR: List(Float) = List.create(Float, cap: sk.localR.length)
-  let localS: List(Float) = List.create(Float, cap: sk.localS.length)
+  var localT: List(Float) = List.create(Float, cap: sk.localT.length)
+  var localR: List(Float) = List.create(Float, cap: sk.localR.length)
+  var localS: List(Float) = List.create(Float, cap: sk.localS.length)
   var index: Int = 0
   loop index < sk.localT.length {
     localT.add(value: floatAt(list: sk.localT, index: index))
@@ -640,14 +640,14 @@ func loadClip(glb: view Glb, animIndex: view Int, sk: view Skeleton) pub ret Cli
   let channels: JsonValue = arrayField(glb: glb, obj: anim, key: "channels")
   let nodes: JsonValue = arrayField(glb: glb, obj: root, key: "nodes")
 
-  let targetNode: List(Int) = List.create(Int, cap: 0)
-  let pathList: List(Int) = List.create(Int, cap: 0)
-  let interpList: List(Int) = List.create(Int, cap: 0)
-  let timeStart: List(Int) = List.create(Int, cap: 0)
-  let timeCount: List(Int) = List.create(Int, cap: 0)
-  let times: List(Float) = List.create(Float, cap: 0)
-  let valueStart: List(Int) = List.create(Int, cap: 0)
-  let values: List(Float) = List.create(Float, cap: 0)
+  var targetNode: List(Int) = List.create(Int, cap: 0)
+  var pathList: List(Int) = List.create(Int, cap: 0)
+  var interpList: List(Int) = List.create(Int, cap: 0)
+  var timeStart: List(Int) = List.create(Int, cap: 0)
+  var timeCount: List(Int) = List.create(Int, cap: 0)
+  var times: List(Float) = List.create(Float, cap: 0)
+  var valueStart: List(Int) = List.create(Int, cap: 0)
+  var values: List(Float) = List.create(Float, cap: 0)
   var duration: Float = 0.0
 
   var c: Int = 0

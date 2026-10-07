@@ -105,7 +105,7 @@ func renderBand(
   let aspect: Float = width.toFloat() / height.toFloat()
   let vw: Float = aspect * 2.0
   let llx: Float = 0.0 - vw / 2.0
-  let out: List(Int) = List.create(Int, cap: (y1 - y0) * width)
+  var out: List(Int) = List.create(Int, cap: (y1 - y0) * width)
   var y: Int = y0
   loop y < y1 {
     let v: Float = (height - 1 - y).toFloat() / (height - 1).toFloat()
@@ -136,7 +136,7 @@ func checksum(buf: view List(Int)) ret Int {
 }
 
 func buildScene() ret List(Float) {
-  let scene: List(Float) = List.create(Float, cap: 8)
+  var scene: List(Float) = List.create(Float, cap: 8)
   scene.add(value: 0.0)
   scene.add(value: 0.0)
   scene.add(value: -1.0)
@@ -201,7 +201,7 @@ func main() {
     y1: height
   )
 
-  let full: List(Int) = List.create(Int, cap: width * height)
+  var full: List(Int) = List.create(Int, cap: width * height)
   let pa: List(Int) = ta.get()
   let pb: List(Int) = tb.get()
   let pc: List(Int) = tc.get()

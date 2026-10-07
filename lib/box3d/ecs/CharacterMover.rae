@@ -338,8 +338,8 @@ func collidePlanes(
   # The glue writes into the lists' buffers, so they are filled to capacity
   # first and only the first `count` entries are read
   let capacity: Int = 64
-  let results: List(b3PlaneResult) = List.create(b3PlaneResult, cap: capacity)
-  let shapeIds: List(b3ShapeId) = List.create(b3ShapeId, cap: capacity)
+  var results: List(b3PlaneResult) = List.create(b3PlaneResult, cap: capacity)
+  var shapeIds: List(b3ShapeId) = List.create(b3ShapeId, cap: capacity)
   let noResult: b3PlaneResult = { triangleIndex: 0 }
   let noShape: b3ShapeId = { index1: 0 }
   loop var i: Int = 0, i < capacity, ++i {

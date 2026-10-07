@@ -59,7 +59,7 @@ func attachChildren(
   kids: view List(EntityId)
 ) {
   unsafe {
-    let kidsCopy: List(EntityId) = List.create(EntityId, cap: kids.length)
+    var kidsCopy: List(EntityId) = List.create(EntityId, cap: kids.length)
     var i: Int = 0
     loop i < kids.length {
       let kid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: i)
@@ -99,7 +99,7 @@ func dumpEntity(
 }
 
 func main() {
-  let world: UiWorld = createUiWorld()
+  var world: UiWorld = createUiWorld()
   var uiSystems: UiSystems = createUiSystems()
 
   let root: EntityId = createEntity(world: world)
@@ -168,7 +168,7 @@ func main() {
     g: 255
     b: 0
   )
-  let headerKids: List(EntityId) = List.create(EntityId, cap: 2)
+  var headerKids: List(EntityId) = List.create(EntityId, cap: 2)
   headerKids.add(value: iconA)
   headerKids.add(value: iconB)
   attachChildren(
@@ -208,7 +208,7 @@ func main() {
     b: 100
   )
 
-  let rootKids: List(EntityId) = List.create(EntityId, cap: 3)
+  var rootKids: List(EntityId) = List.create(EntityId, cap: 3)
   rootKids.add(value: header)
   rootKids.add(value: body)
   rootKids.add(value: footer)

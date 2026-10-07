@@ -23,7 +23,7 @@ open GbufferPasses
 # A fullscreen pipeline: no vertex buffer, no depth, no cull, one colour
 # target. The reusable primitive every deferred post-pass builds on.
 func fullscreenPipelineSpec(format: copy Int32) ret RenderPipelineSpec {
-  let colorFormats: List(Int32) = List.create(Int32, cap: 1)
+  var colorFormats: List(Int32) = List.create(Int32, cap: 1)
   colorFormats.add(value: format)
   let attributes: List(VertexAttributeSpec) = List.create(VertexAttributeSpec, cap: 1)
   ret RenderPipelineSpec {

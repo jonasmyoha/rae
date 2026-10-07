@@ -66,7 +66,7 @@ func readCapsule(reader: mod Reader) ret Capsule {
 
 func readProxy(reader: mod Reader) ret ShapeProxy {
   let count: Int = readInt(reader: reader)
-  let points: List(Vec3) = List.create(Vec3, cap: count)
+  var points: List(Vec3) = List.create(Vec3, cap: count)
   loop var i: Int = 0, i < count, ++i {
     points.add(value: readVec(reader: reader))
   }
@@ -75,7 +75,7 @@ func readProxy(reader: mod Reader) ret ShapeProxy {
 }
 
 func readPoints(reader: mod Reader, count: view Int) ret List(Vec3) {
-  let points: List(Vec3) = List.create(Vec3, cap: count)
+  var points: List(Vec3) = List.create(Vec3, cap: count)
   loop var i: Int = 0, i < count, ++i {
     points.add(value: readVec(reader: reader))
   }
@@ -470,11 +470,11 @@ func evaluate2d(name: view String, reader: mod Reader, out: mod List(Float)) ret
   let units: Float = 1.0
   if name is "b3Hull2D" {
     let count: Int = readInt(reader: reader)
-    let points: List(Point2d) = List.create(Point2d, cap: count)
+    var points: List(Point2d) = List.create(Point2d, cap: count)
     loop var i: Int = 0, i < count, ++i {
       points.add(value: readPoint2d(reader: reader))
     }
-    let hull: List(Point2d) = List.create(Point2d, cap: 2 * count)
+    var hull: List(Point2d) = List.create(Point2d, cap: 2 * count)
     let hullCount: Int = hull2d(points: points, hull: hull, lengthUnitsPerMeter: units)
     putInt(out: out, value: hullCount)
     loop let point: view Point2d in hull {
@@ -482,7 +482,7 @@ func evaluate2d(name: view String, reader: mod Reader, out: mod List(Float)) ret
     }
   } else if name is "b3SimplifyHull2D" {
     let count: Int = readInt(reader: reader)
-    let hull: List(Point2d) = List.create(Point2d, cap: count)
+    var hull: List(Point2d) = List.create(Point2d, cap: count)
     loop var i: Int = 0, i < count, ++i {
       hull.add(value: readPoint2d(reader: reader))
     }
@@ -534,7 +534,7 @@ func main() {
   var mismatches: Int = 0
   var unknown: Int = 0
   var checks: Checks = { invalidHulls: 0 }
-  let names: List(String) = List.create(String, cap: 32)
+  var names: List(String) = List.create(String, cap: 32)
   loop var i: Int = 0, i < lines.length, ++i {
     let line: String = lines.copyAtDefault(index: i)
     if line.length() is 0 or line.startsWith(prefix: "#") {
@@ -543,7 +543,7 @@ func main() {
     let tokens: List(String) = line.split(sep: " ")
     let name: String = tokens.copyAtDefault(index: 0)
     var reader: Reader = { values: List.create(Float, cap: 256), next: 0 }
-    let expected: List(Float) = List.create(Float, cap: 256)
+    var expected: List(Float) = List.create(Float, cap: 256)
     var afterArrow: Bool = false
     loop var j: Int = 1, j < tokens.length, ++j {
       let token: String = tokens.copyAtDefault(index: j)
@@ -555,7 +555,7 @@ func main() {
         reader.values.add(value: token.toFloat())
       }
     }
-    let actual: List(Float) = List.create(Float, cap: 256)
+    var actual: List(Float) = List.create(Float, cap: 256)
     let known: Bool = evaluateConstruction(
       name: name
       reader: reader

@@ -67,7 +67,7 @@ func recordCollider(
     let collider: mod Collider => componentMod(this: colliders, entityId: entityId)
     collider.shapeIds.add(value: shapeId)
   } else {
-    let shapeIds: List(ShapeId) = List.create(ShapeId, cap: 1)
+    var shapeIds: List(ShapeId) = List.create(ShapeId, cap: 1)
     shapeIds.add(value: shapeId)
     componentSet(this: colliders, entityId: entityId, data: Collider { shapeIds: shapeIds })
   }
@@ -241,7 +241,7 @@ func addVenueTriangles(
   transform: view Transform
   def: view ShapeDef
 ) ret opt ShapeId {
-  let vertices: List(Vec3) = List.create(Vec3, cap: vertCount)
+  var vertices: List(Vec3) = List.create(Vec3, cap: vertCount)
   loop var i: Int = 0, i < vertCount, ++i {
     let base: Int = i * renderVertexStride
     let local: Vec3 = {
@@ -251,7 +251,7 @@ func addVenueTriangles(
     }
     vertices.add(value: transformPoint(transform: transform, point: local))
   }
-  let indices: List(Int) = List.create(Int, cap: renderIndices.length)
+  var indices: List(Int) = List.create(Int, cap: renderIndices.length)
   loop let index: view Int in renderIndices {
     indices.add(value: index)
   }

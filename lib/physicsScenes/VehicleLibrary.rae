@@ -262,7 +262,7 @@ func wheelTargets(
   command: view VehicleCommand
   speed: view Float
 ) ret List(VehicleWheelTarget) {
-  let targets: List(VehicleWheelTarget) = List.create(VehicleWheelTarget, cap: car.wheels.length)
+  var targets: List(VehicleWheelTarget) = List.create(VehicleWheelTarget, cap: car.wheels.length)
   let pace: Float = Math.max(a: Math.abs(value: speed), b: 1.0)
   var lock: Float = car.wheelbase * car.steeringLateralAcceleration / (pace * pace)
   if lock > car.maxSteeringAngle {
@@ -472,7 +472,7 @@ func courseCrates() ret List(SceneBody) {
     )
   }
   applyGradientHues(bodies: wall, along: Vec3 { x: 0.0, y: 1.0, z: 0.0 })
-  let crates: List(SceneBody) = List.create(SceneBody, cap: 18)
+  var crates: List(SceneBody) = List.create(SceneBody, cap: 18)
   loop let body: view SceneBody in stack {
     crates.add(value: body)
   }
@@ -495,7 +495,7 @@ func drivingCourse() ret VehicleCourse {
   let half: Float = 0.5 * cell * ((countX - 1) as Float)
   # Local column i is world x = -half + i * cell; local row j is world
   # y = half - j * cell (the quarter turn takes local z to world -y)
-  let heights: List(Float) = List.create(Float, cap: countX * countZ)
+  var heights: List(Float) = List.create(Float, cap: countX * countZ)
   loop var row: Int = 0, row < countZ, ++row {
     loop var column: Int = 0, column < countX, ++column {
       heights.add(
@@ -616,8 +616,8 @@ func courseCheckerMesh(course: view VehicleCourse) ret MeshData {
 func courseCellsMesh(course: view VehicleCourse, oddCells: view Bool) ret MeshData {
   let countX: Int = course.countX
   let countZ: Int = course.countZ
-  let verts: List(Float) = List.create(Float, cap: countX * countZ * 8)
-  let indices: List(Int) = List.create(Int, cap: (countX - 1) * (countZ - 1) * 3 + 6)
+  var verts: List(Float) = List.create(Float, cap: countX * countZ * 8)
+  var indices: List(Int) = List.create(Int, cap: (countX - 1) * (countZ - 1) * 3 + 6)
   let scale: Vec3 = course.terrainScale
   loop var row: Int = 0, row < countZ, ++row {
     loop var column: Int = 0, column < countX, ++column {

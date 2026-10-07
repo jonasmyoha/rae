@@ -180,7 +180,7 @@ func extractScene(
   forward: view Vec3
   frame: view Int
 ) ret List(Float) {
-  let packed: List(Float) = List.create(
+  var packed: List(Float) = List.create(
     Float
     cap: 16 + scene.materials.length * 8 + scene.renderables.length * 8
   )
@@ -238,7 +238,7 @@ func main() {
   var quality: Int = 1
   var width: Int = 960
   var height: Int = 540
-  let params: List(Int) = List.create(Int, cap: 8)
+  var params: List(Int) = List.create(Int, cap: 8)
   # Named pIdx, not pi: `pi` is `const pi: Float` in lib/math, and an Int
   # loop counter of that name shadowed it — `yaw = pi / 2.0` below silently
   # computed 0 instead of pi/2. The no-implicit-conversion rule caught it.
@@ -418,7 +418,7 @@ func main() {
     params.set(index: 4, value: frame)
     Gpu.writeU32(buf: rt.paramsBuf, data: params.data, count: 8)
 
-    let bufs: List(Int) = List.create(Int, cap: 3)
+    var bufs: List(Int) = List.create(Int, cap: 3)
     bufs.add(value: rt.paramsBuf)
     bufs.add(value: rt.sceneBuf)
     bufs.add(value: rt.outBuf)

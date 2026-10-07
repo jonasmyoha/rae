@@ -1,0 +1,49 @@
+# What a frozen `let` (docs/let-is-frozen.md) does NOT forbid: a `var` and a
+# `mod` parameter change freely; a `mod` alias writes into the `var` it
+# names; a `let` Buffer is a handle, so writing through it is allowed; an
+# `if let` makes a new binding and reads the optional; a `let` is read and
+# passed as `view` as before.
+type Inner {
+  value: Int
+}
+
+func bump(inner: mod Inner) {
+  inner.value = inner.value + 1
+}
+
+func readValue(inner: view Inner) ret Int {
+  ret inner.value
+}
+
+func firstPositive(numbers: view List(Int)) ret opt Int {
+  loop var i: Int = 0, i < numbers.length, ++i {
+    let number: Int = numbers.copyAtDefault(index: i)
+    if number > 0 {
+      ret number
+    }
+  }
+  ret none
+}
+
+func main() ret Int {
+  var free: Inner = { value: 1 }
+  free.value = 2
+  bump(inner: free)
+  let freeAlias: mod Inner => free
+  freeAlias.value = freeAlias.value + 10
+  let frozen: Inner = { value: 7 }
+  log("free {free.value}, frozen {readValue(inner: frozen)}")
+  unsafe {
+    let buffer: Buffer(Int) = rae_ext_rae_buf_alloc(size: 2, elemSize: sizeof(Int))
+    rae_ext_rae_buf_set(buf: buffer, index: 0, value: 42)
+    log("buffer {rae_ext_rae_buf_get(buf: buffer, index: 0)}")
+    rae_ext_rae_buf_free(buf: buffer)
+  }
+  var numbers: List(Int) = List.create(Int, cap: 3)
+  numbers.add(value: -1)
+  numbers.add(value: 5)
+  if let found: Int = firstPositive(numbers: numbers) {
+    log("first positive {found}")
+  }
+  ret 0
+}

@@ -24,7 +24,7 @@ func waitForRead(request: view ReadRequest) ret Int {
 }
 
 func filledBytes(count: view Int, stride: view Int) ret List(UInt8) {
-  let bytes: List(UInt8) = List.create(UInt8, cap: count)
+  var bytes: List(UInt8) = List.create(UInt8, cap: count)
   var i: Int = 0
   loop i < count {
     bytes.add(value: (i * stride) as UInt8)
@@ -60,7 +60,7 @@ func checkKnownContents(resources: mod GpuResources) ret Bool {
       if waitForRead(request: request) is not 1 {
         ret fail(message: "read did not complete")
       }
-      let out: List(UInt8) = filledBytes(count: 32, stride: 0)
+      var out: List(UInt8) = filledBytes(count: 32, stride: 0)
       if copyToBytes(this: request, destination: out) is false {
         ret fail(message: "copy refused")
       }
@@ -129,8 +129,10 @@ func checkKnownContents(resources: mod GpuResources) ret Bool {
 }
 
 func checkIdentity(issuer: mod IdIssuer) ret Bool {
-  if let managerA: GpuResources = GpuResources.create(issuer: issuer, capacity: 2) {
-    if let managerB: GpuResources = GpuResources.create(issuer: issuer, capacity: 2) {
+  if let createdManagerA: GpuResources = GpuResources.create(issuer: issuer, capacity: 2) {
+    var managerA: GpuResources = own createdManagerA
+    if let createdManagerB: GpuResources = GpuResources.create(issuer: issuer, capacity: 2) {
+      var managerB: GpuResources = own createdManagerB
       if let idA: BufferId = createBuffer(
         resources: managerA
         size: 16
@@ -267,7 +269,8 @@ func checkFailures(issuer: mod IdIssuer) ret Bool {
   if let rejected: GpuResources = GpuResources.create(issuer: issuer, capacity: 0) {
     ret fail(message: "capacity 0 accepted")
   }
-  if let manager: GpuResources = GpuResources.create(issuer: issuer, capacity: 1) {
+  if let createdManager: GpuResources = GpuResources.create(issuer: issuer, capacity: 1) {
+    var manager: GpuResources = own createdManager
     if let badSize: BufferId = createBuffer(
       resources: manager
       size: 0
@@ -298,7 +301,8 @@ func checkFailures(issuer: mod IdIssuer) ret Bool {
 # The manager and its live resources are dropped at scope exit; the escaped ID
 # is rejected by a recreated manager even with a matching slot and generation.
 func escapedId(issuer: mod IdIssuer) ret BufferId {
-  if let shortLived: GpuResources = GpuResources.create(issuer: issuer, capacity: 1) {
+  if let createdShortLived: GpuResources = GpuResources.create(issuer: issuer, capacity: 1) {
+    var shortLived: GpuResources = own createdShortLived
     if let id: BufferId = createBuffer(
       resources: shortLived
       size: 16
@@ -315,7 +319,8 @@ func checkScopeExit(issuer: mod IdIssuer) ret Bool {
   if stale.managerTag is 0 {
     ret fail(message: "escaped id not created")
   }
-  if let fresh: GpuResources = GpuResources.create(issuer: issuer, capacity: 1) {
+  if let createdFresh: GpuResources = GpuResources.create(issuer: issuer, capacity: 1) {
+    var fresh: GpuResources = own createdFresh
     if let freshId: BufferId = createBuffer(
       resources: fresh
       size: 16
@@ -340,7 +345,8 @@ func main() ret Int {
       ret 1
     }
     var issuer: IdIssuer = IdIssuer.create()
-    if let resources: GpuResources = GpuResources.create(issuer: issuer, capacity: 4) {
+    if let createdResources: GpuResources = GpuResources.create(issuer: issuer, capacity: 4) {
+      var resources: GpuResources = own createdResources
       if checkKnownContents(resources: resources) is false {
         ret 1
       }
