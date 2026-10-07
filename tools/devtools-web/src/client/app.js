@@ -4249,9 +4249,11 @@ function attachChartRangeButtons(canvas) {
   canvas.__rangeButtons = group;
 }
 
-// Draw `entries` (oldest first) limited to the graph's chosen range. The
-// range only filters: the time axis runs from the first to the last point
-// shown, so the line always uses the whole width.
+// Draw `entries` (oldest first) over the graph's chosen range. The axis
+// starts where the range starts (one month ago, ...) and the line starts
+// there too, at the value it had at that moment: interpolated between the
+// last point before the range and the first one inside it. Only when the
+// data itself begins later does the axis start at the data.
 function drawRangedChart(canvas, entries, valueKey, emptyEl, formatValue) {
   attachChartRangeButtons(canvas);
   const key = chartRangeKey(canvas);
@@ -4262,12 +4264,27 @@ function drawRangedChart(canvas, entries, valueKey, emptyEl, formatValue) {
   }
   const range = CHART_RANGES.find((candidate) => candidate.key === key);
   let shown = entries;
-  if (range && range.days !== null) {
-    const from = Date.now() - range.days * 24 * 60 * 60 * 1000;
-    shown = entries.filter((entry) => {
-      const time = Date.parse(entry.timestamp ?? "");
-      return Number.isFinite(time) && time >= from;
-    });
+  const timeOf = (entry) => Date.parse(entry.timestamp ?? "");
+  if (range && range.days !== null && entries.length) {
+    const firstTime = timeOf(entries[0]);
+    const windowStart = Date.now() - range.days * 24 * 60 * 60 * 1000;
+    const start = Number.isFinite(firstTime) ? Math.max(windowStart, firstTime) : windowStart;
+    const inside = entries.filter((entry) => timeOf(entry) >= start);
+    const before = entries.filter((entry) => timeOf(entry) < start).pop();
+    shown = inside;
+    if (before) {
+      let value = before[valueKey];
+      const next = inside[0];
+      if (next) {
+        const beforeTime = timeOf(before);
+        const fraction = (start - beforeTime) / Math.max(timeOf(next) - beforeTime, 1);
+        value = before[valueKey] + (next[valueKey] - before[valueKey]) * fraction;
+      }
+      const edge = { timestamp: new Date(start).toISOString(), [valueKey]: value, interpolated: true };
+      shown = [edge, ...inside];
+      // No point inside the range: the value held from before it, to now
+      if (!next) shown.push({ ...edge, timestamp: new Date().toISOString() });
+    }
   }
   drawMetricChart(canvas, shown, valueKey, emptyEl, formatValue, -1);
   if (!shown.length && entries.length && emptyEl) {
@@ -4347,7 +4364,9 @@ function attachChartHover(canvas) {
     const entry = chart.entries[nearest];
     const point = chart.points[nearest];
     const when = entry.timestamp ? new Date(entry.timestamp).toLocaleString() : "Unknown time";
-    const value = chart.formatValue ? chart.formatValue.point(entry) : String(entry[chart.valueKey]);
+    const value = entry.interpolated
+      ? `${chart.formatValue ? chart.formatValue.axis(entry[chart.valueKey]) : Math.round(entry[chart.valueKey])} (estimated between two points)`
+      : chart.formatValue ? chart.formatValue.point(entry) : String(entry[chart.valueKey]);
     tooltip.innerHTML = `<time>${when}</time><strong>${value}</strong>`;
     tooltip.hidden = false;
     const left = Math.min(Math.max(point.x, tooltip.offsetWidth / 2 + 4), rect.width - tooltip.offsetWidth / 2 - 4);
@@ -4480,7 +4499,8 @@ function drawMetricChart(canvas, entries, valueKey, emptyEl, formatValue = null,
   ctx.fillStyle = fillGradient;
   ctx.fill();
   ctx.fillStyle = "#7dd3fc";
-  for (const point of points) {
+  for (const [index, point] of points.entries()) {
+    if (entries[index].interpolated) continue;   // the range's edge, not a measurement
     ctx.beginPath();
     ctx.arc(point.x, point.y, 3, 0, Math.PI * 2);
     ctx.fill();
