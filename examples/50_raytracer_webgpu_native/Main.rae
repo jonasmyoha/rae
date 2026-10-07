@@ -44,7 +44,7 @@ func main() {
 
     # Pack the scene as f32-as-Float: camera(19) then per sphere center(3)
     # radius albedo(3) kind fuzz ior (10) — exactly what raytrace.wgsl reads.
-    let sceneBuf: List(Float) = List.create(Float, cap: 64)
+    var sceneBuf: List(Float) = List.create(Float, cap: 64)
     pushVec3(buf: sceneBuf, a: cam.origin)
     pushVec3(buf: sceneBuf, a: cam.lowerLeft)
     pushVec3(buf: sceneBuf, a: cam.horizontal)
@@ -66,7 +66,7 @@ func main() {
     # composed and validated at build, embedded — nothing is read at run time.
     let wgsl: Shader = shader(files: ["raytrace.wgsl"])
 
-    let fb: List(Int) = List.create(Int, cap: width * height)
+    var fb: List(Int) = List.create(Int, cap: width * height)
     var i: Int = 0
     loop i < width * height {
       fb.add(value: 0)

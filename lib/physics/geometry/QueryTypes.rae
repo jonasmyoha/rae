@@ -102,7 +102,7 @@ func emptyPlaneResult() ret PlaneResult {
 
 # b3MakeProxy: a proxy over a copy of `points`.
 func makeProxy(points: view List(Vec3), radius: view Float) ret ShapeProxy {
-  let copied: List(Vec3) = List.create(Vec3, cap: points.length)
+  var copied: List(Vec3) = List.create(Vec3, cap: points.length)
   loop let point: view Vec3 in points {
     copied.add(value: point)
   }
@@ -111,14 +111,14 @@ func makeProxy(points: view List(Vec3), radius: view Float) ret ShapeProxy {
 
 # The one-point proxy of a sphere.
 func sphereProxy(sphere: view Sphere) ret ShapeProxy {
-  let points: List(Vec3) = List.create(Vec3, cap: 1)
+  var points: List(Vec3) = List.create(Vec3, cap: 1)
   points.add(value: sphere.center)
   ret ShapeProxy { points: points, radius: sphere.radius }
 }
 
 # The two-point proxy of a capsule.
 func capsuleProxy(capsule: view Capsule) ret ShapeProxy {
-  let points: List(Vec3) = List.create(Vec3, cap: 2)
+  var points: List(Vec3) = List.create(Vec3, cap: 2)
   points.add(value: capsule.center1)
   points.add(value: capsule.center2)
   ret ShapeProxy { points: points, radius: capsule.radius }

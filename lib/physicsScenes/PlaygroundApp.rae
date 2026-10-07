@@ -404,7 +404,7 @@ func updatePlaygroundCamera(app: mod PlaygroundApp) {
 # autofire is on, each the camera ray through the pointer. The app throws a
 # ball from shotOrigin along each and pools it (addPooledBall).
 func playgroundShots(app: mod PlaygroundApp) ret List(Vec3) {
-  let shots: List(Vec3) = List.create(Vec3, cap: 4)
+  var shots: List(Vec3) = List.create(Vec3, cap: 4)
   let leftHeld: Bool = Gpu2d.pointerDown() and uiHoldsPointer(ui: app.ui) is false
   let triggerHeld: Bool = app.autoFire or leftHeld or Sdl3.isKeyDown(key: Keys.keyF)
   if triggerHeld {

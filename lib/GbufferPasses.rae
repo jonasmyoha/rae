@@ -199,7 +199,7 @@ func composite(
   }
   let idx: Int = compositeSourceIndex(targets: targets)
   if not bindSlotUsable(resources: resources, binds: cache.binds, idx: idx) {
-    let entries: List(ResourceRef) = List.create(ResourceRef, cap: 3)
+    var entries: List(ResourceRef) = List.create(ResourceRef, cap: 3)
     entries.add(value: bufferRef(id: cache.uniform))
     entries.add(value: compositeSourceRef(targets: targets))
     entries.add(value: samplerRef(id: cache.sampler))
@@ -351,7 +351,7 @@ func ssaoPass(
     cache.bindGroup = noBindGroupId()
   }
   if not bindGroupIsUsable(resources: resources, id: cache.bindGroup) {
-    let entries: List(ResourceRef) = List.create(ResourceRef, cap: 3)
+    var entries: List(ResourceRef) = List.create(ResourceRef, cap: 3)
     entries.add(value: bufferRef(id: targets.lightUniform))
     entries.add(value: gbufferTargetRef(cache: gbuffer, index: gbufferTargetA))
     entries.add(value: gbufferTargetRef(cache: gbuffer, index: gbufferTargetDepth))
@@ -433,7 +433,7 @@ func lighting(
     cache.bindGroup = noBindGroupId()
   }
   if not bindGroupIsUsable(resources: resources, id: cache.bindGroup) {
-    let entries: List(ResourceRef) = List.create(ResourceRef, cap: 9)
+    var entries: List(ResourceRef) = List.create(ResourceRef, cap: 9)
     entries.add(value: bufferRef(id: targets.lightUniform))
     entries.add(value: gbufferTargetRef(cache: gbuffer, index: gbufferTargetA))
     entries.add(value: gbufferTargetRef(cache: gbuffer, index: gbufferTargetB))
@@ -566,7 +566,7 @@ func taaPass(
     retireBindGroupIds(resources: resources, list: cache.binds)
   }
   if not bindSlotUsable(resources: resources, binds: cache.binds, idx: cur) {
-    let entries: List(ResourceRef) = List.create(ResourceRef, cap: 4)
+    var entries: List(ResourceRef) = List.create(ResourceRef, cap: 4)
     entries.add(value: textureViewRef(id: targets.litView))
     entries.add(value: taaViewRef(targets: targets, slot: 1 - cur))
     entries.add(value: gbufferTargetRef(cache: gbuffer, index: gbufferTargetC))
@@ -630,7 +630,7 @@ func buildDepthPyramid(
         source = gbufferTargetRef(cache: gbuffer, index: gbufferTargetDepth)
       }
       if not bindSlotUsable(resources: resources, binds: cache.binds, idx: i) {
-        let entries: List(ResourceRef) = List.create(ResourceRef, cap: 1)
+        var entries: List(ResourceRef) = List.create(ResourceRef, cap: 1)
         entries.add(value: source)
         if let bind: BindGroupId = createRenderBindGroup(
           resources: resources

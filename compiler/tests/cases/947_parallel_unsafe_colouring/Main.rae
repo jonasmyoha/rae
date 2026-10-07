@@ -22,7 +22,7 @@ func nextState(state: view Int) ret Int {
 }
 
 func makeContacts() ret List(Contact) {
-  let contacts: List(Contact) = List.create(Contact, cap: constraintCount)
+  var contacts: List(Contact) = List.create(Contact, cap: constraintCount)
   var state: Int = 7
   loop var i: Int = 0, i < constraintCount, ++i {
     state = nextState(state: state)
@@ -38,7 +38,7 @@ func makeContacts() ret List(Contact) {
 }
 
 func makeVelocities() ret List(Float) {
-  let velocities: List(Float) = List.create(Float, cap: bodyCount)
+  var velocities: List(Float) = List.create(Float, cap: bodyCount)
   loop var i: Int = 0, i < bodyCount, ++i {
     velocities.add(value: (i % 9) as Float * 0.5 - 2.0)
   }
@@ -50,11 +50,11 @@ func makeVelocities() ret List(Float) {
 # where colour c begins in it (and the last entry is the end).
 func colour(contacts: view List(Contact), order: mod List(Int), colourStart: mod List(Int)) {
   let maxColours: Int = 64
-  let used: List(Bool) = List.create(Bool, cap: maxColours * bodyCount)
+  var used: List(Bool) = List.create(Bool, cap: maxColours * bodyCount)
   loop var i: Int = 0, i < maxColours * bodyCount, ++i {
     used.add(value: false)
   }
-  let colourOf: List(Int) = List.create(Int, cap: constraintCount)
+  var colourOf: List(Int) = List.create(Int, cap: constraintCount)
   var colourCount: Int = 0
   loop var i: Int = 0, i < contacts.length, ++i {
     let contact: Contact = contacts.copyAtDefault(index: i)
@@ -140,15 +140,15 @@ func solveParallel(
 func main() {
   Parallel.checkWrites(enabled: true)
   let contacts: List(Contact) = makeContacts()
-  let order: List(Int) = List.create(Int, cap: constraintCount)
-  let colourStart: List(Int) = List.create(Int, cap: 64)
+  var order: List(Int) = List.create(Int, cap: constraintCount)
+  var colourStart: List(Int) = List.create(Int, cap: 64)
   colour(contacts: contacts, order: order, colourStart: colourStart)
   log("{contacts.length} contacts in {colourStart.length - 1} colours")
 
-  let sequential: List(Float) = makeVelocities()
-  let sequentialContacts: List(Contact) = makeContacts()
-  let parallel: List(Float) = makeVelocities()
-  let impulses: List(Float) = List.create(Float, cap: constraintCount)
+  var sequential: List(Float) = makeVelocities()
+  var sequentialContacts: List(Contact) = makeContacts()
+  var parallel: List(Float) = makeVelocities()
+  var impulses: List(Float) = List.create(Float, cap: constraintCount)
   loop var i: Int = 0, i < constraintCount, ++i {
     impulses.add(value: 0.0)
   }

@@ -51,8 +51,8 @@ func create(issuer: mod IdIssuer, capacity: view Int) ret opt Resources {
   if capacity < 1 {
     ret none
   }
-  let generations: List(Int) = List.create(Int, cap: capacity)
-  let live: List(Int) = List.create(Int, cap: capacity)
+  var generations: List(Int) = List.create(Int, cap: capacity)
+  var live: List(Int) = List.create(Int, cap: capacity)
   var i: Int = 0
   loop i < capacity {
     generations.add(value: 0)
@@ -134,7 +134,8 @@ func describe(id: view TextureId) ret String {
 # A manager that lives only for this call: its ID escapes as a copyable value
 # while the manager itself is destroyed at scope exit.
 func idFromShortLivedManager(issuer: mod IdIssuer) ret TextureId {
-  if let shortLived: Resources = Resources.create(issuer: issuer, capacity: 1) {
+  if let createdShortLived: Resources = Resources.create(issuer: issuer, capacity: 1) {
+    var shortLived: Resources = own createdShortLived
     if let id: TextureId = createTexture(resources: shortLived) {
       ret id
     }
@@ -146,8 +147,10 @@ func main() {
   var issuer: IdIssuer = IdIssuer.create()
 
   # Two independent Apps, each with its own manager built from the shared issuer.
-  if let managerA: Resources = Resources.create(issuer: issuer, capacity: 2) {
-    if let managerB: Resources = Resources.create(issuer: issuer, capacity: 2) {
+  if let createdManagerA: Resources = Resources.create(issuer: issuer, capacity: 2) {
+    var managerA: Resources = own createdManagerA
+    if let createdManagerB: Resources = Resources.create(issuer: issuer, capacity: 2) {
+      var managerB: Resources = own createdManagerB
       if let idA: TextureId = createTexture(resources: managerA) {
         if let idB: TextureId = createTexture(resources: managerB) {
           log("A: {describe(id: idA)}")
@@ -198,7 +201,8 @@ func main() {
   # rejected by the new manager even though slot 0 / generation 0 match.
   let stale: TextureId = idFromShortLivedManager(issuer: issuer)
   log("escaped: {describe(id: stale)}")
-  if let fresh: Resources = Resources.create(issuer: issuer, capacity: 1) {
+  if let createdFresh: Resources = Resources.create(issuer: issuer, capacity: 1) {
+    var fresh: Resources = own createdFresh
     if let freshId: TextureId = createTexture(resources: fresh) {
       log("fresh: {describe(id: freshId)}")
       log(

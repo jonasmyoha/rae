@@ -285,7 +285,7 @@ func ensureBoxResources(canvas: mod Gpu2dCanvas) {
 # The box pipeline: a procedural quad (no vertex buffer), one colour target in
 # the gpu2d presentable format, premultiplied alpha blending, no depth, no cull.
 func boxPipelineSpec(format: copy Int32) ret RenderPipelineSpec {
-  let colorFormats: List(Int32) = List.create(Int32, cap: 1)
+  var colorFormats: List(Int32) = List.create(Int32, cap: 1)
   colorFormats.add(value: format)
   let attributes: List(VertexAttributeSpec) = List.create(VertexAttributeSpec, cap: 1)
   ret RenderPipelineSpec {
@@ -840,7 +840,7 @@ func boxFlushWith(canvas: mod Gpu2dCanvas, resources: mod GpuResources) {
     loop runEnd < count and boxClipAt(canvas: canvas, i: runEnd) is clip {
       runEnd = runEnd + 1
     }
-    let entries: List(ResourceRef) = List.create(ResourceRef, cap: 3)
+    var entries: List(ResourceRef) = List.create(ResourceRef, cap: 3)
     entries.add(value: bufferRef(id: canvas.viewport))
     entries.add(value: bufferRef(id: instances))
     entries.add(

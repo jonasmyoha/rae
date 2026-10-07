@@ -45,7 +45,7 @@ func applyCanvasState(
   let deviceFrame: DeviceFrame = activeDeviceFrame()
   let forcedName: String = frameIdName(id: deviceFrame.forcedFrameId)
   let framePtW: Float = world.layoutW / unitScale
-  let activeStates: List(String) = List.create(String, cap: 2)
+  var activeStates: List(String) = List.create(String, cap: 2)
   if state.canvasOpen {
     let openState: String = "canvasOpen"
     activeStates.add(value: openState)
@@ -84,7 +84,7 @@ func mountCanvasOverlay(
   if scene.ok is false {
     ret noEntity()
   }
-  let overrides: List(SceneOverride) = emptyOverrides()
+  var overrides: List(SceneOverride) = emptyOverrides()
   # Board art shows the album cover active at mount time. Not
   # re-bound on album change — the board is a scaling demo, not a
   # playback surface.

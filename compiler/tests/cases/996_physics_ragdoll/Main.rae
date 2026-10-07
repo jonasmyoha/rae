@@ -56,7 +56,7 @@ func spawnHuman(world: mod PhysicsWorld, human: mod Human, index: view Int) {
 
 # The golden's lines as "bone h b step" -> the seven float bits.
 func goldenValues(golden: view String) ret List(Int) {
-  let values: List(Int) = List.create(Int, cap: 4096)
+  var values: List(Int) = List.create(Int, cap: 4096)
   let lines: List(String) = golden.split(sep: "\n")
   loop let line: view String in lines {
     if line.length() is 0 or line.startsWith(prefix: "#") {
@@ -111,7 +111,7 @@ func main() {
     )
   }
 
-  let humans: List(Human) = List.create(Human, cap: humanCount)
+  var humans: List(Human) = List.create(Human, cap: humanCount)
   loop var i: Int = 0, i < humanCount, ++i {
     humans.add(value: emptyHuman())
     if let human: mod Human => humans.modAt(index: i) {
@@ -119,7 +119,7 @@ func main() {
     }
   }
 
-  let actual: List(Int) = List.create(Int, cap: 4096)
+  var actual: List(Int) = List.create(Int, cap: 4096)
   loop var step: Int = 0, step < stepCount, ++step {
     if step is respawnStep {
       if let human: mod Human => humans.modAt(index: 0) {

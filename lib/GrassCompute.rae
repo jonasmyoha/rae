@@ -186,7 +186,7 @@ func resetGrassPipeline(grass: mod GrassCompute) {
 # since a thin blade (or a billboard) is seen from both sides. Shared with the
 # sprite pass.
 func gbufferProceduralPipelineSpec() ret RenderPipelineSpec {
-  let colorFormats: List(Int32) = List.create(Int32, cap: 3)
+  var colorFormats: List(Int32) = List.create(Int32, cap: 3)
   colorFormats.add(value: WGPUTextureFormat_RGB10A2Unorm)
   colorFormats.add(value: WGPUTextureFormat_RGBA8Unorm)
   colorFormats.add(value: WGPUTextureFormat_RGBA8Unorm)
@@ -279,7 +279,7 @@ func ensureGrassGpu(grass: mod GrassCompute, resources: mod GpuResources) {
   # terrain had already moved off.
   if let computePipeline: PipelineId = grassComputePipeline(grass: grass, resources: resources) {
     grass.computePipeline = computePipeline
-    let entries: List(ResourceRef) = List.create(ResourceRef, cap: 3)
+    var entries: List(ResourceRef) = List.create(ResourceRef, cap: 3)
     entries.add(value: bufferRef(id: grass.uniform))
     entries.add(value: bufferRef(id: grass.instances))
     entries.add(value: bufferRef(id: grass.indirect))
@@ -339,7 +339,7 @@ func ensureGrassDrawBind(
       grass.frameUniform = frameUniform
     }
   }
-  let entries: List(ResourceRef) = List.create(ResourceRef, cap: 3)
+  var entries: List(ResourceRef) = List.create(ResourceRef, cap: 3)
   entries.add(value: externalRef(id: grass.frameUniform))
   entries.add(value: bufferRef(id: grass.instances))
   entries.add(value: bufferRef(id: grass.uniform))
@@ -471,7 +471,8 @@ func grassGenerate(
     workgroupsY: 1
     workgroupsZ: 1
   )
-  if let recording: Recording = beginRecording(resources: resources) {
+  if let openedRecording: Recording = beginRecording(resources: resources) {
+    var recording: Recording = own openedRecording
     if recordComputeCommand(recording: recording, resources: resources, command: command) {
       trackSubmission(inFlight: grass.inFlight, resources: resources, recording: recording)
     }
@@ -530,7 +531,8 @@ func grassReadVisible(grass: mod GrassCompute, resources: mod GpuResources) ret 
     ret -1
   }
   var copied: Bool = false
-  if let recording: Recording = beginRecording(resources: resources) {
+  if let openedRecording: Recording = beginRecording(resources: resources) {
+    var recording: Recording = own openedRecording
     if recordCopyBuffer(
       recording: recording
       resources: resources
@@ -561,7 +563,7 @@ func grassReadVisible(grass: mod GrassCompute, resources: mod GpuResources) ret 
     size: grassIndirectBytes
   ) {
     if waitReadback(resources: resources, id: read) {
-      let bytes: List(UInt8) = List.create(UInt8, cap: grassIndirectBytes)
+      var bytes: List(UInt8) = List.create(UInt8, cap: grassIndirectBytes)
       loop bytes.length < grassIndirectBytes {
         bytes.add(value: 0 as UInt8)
       }

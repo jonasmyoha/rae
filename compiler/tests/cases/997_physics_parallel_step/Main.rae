@@ -163,7 +163,7 @@ func addStaticBox(
 # A 24-box-wide pyramid (300 boxes) settling and falling asleep.
 func runPyramid(workers: view Int) ret RunSummary {
   var world: PhysicsWorld = newWorld(workers: workers)
-  let bodies: List(BodyId) = List.create(BodyId, cap: 300)
+  var bodies: List(BodyId) = List.create(BodyId, cap: 300)
   var groundDef: ShapeDef = defaultShapeDef(lengthUnitsPerMeter: 1.0)
   addStaticBox(
     world: world
@@ -208,7 +208,7 @@ func runPyramid(workers: view Int) ret RunSummary {
 # report a force threshold, and bullets fired at a wall.
 func runEvents(workers: view Int) ret RunSummary {
   var world: PhysicsWorld = newWorld(workers: workers)
-  let bodies: List(BodyId) = List.create(BodyId, cap: 128)
+  var bodies: List(BodyId) = List.create(BodyId, cap: 128)
   var groundDef: ShapeDef = defaultShapeDef(lengthUnitsPerMeter: 1.0)
   groundDef.enableContactEvents = true
   groundDef.enableHitEvents = true

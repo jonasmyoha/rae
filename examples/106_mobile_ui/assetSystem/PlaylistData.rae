@@ -145,7 +145,7 @@ func playlistToggleTrack(
 # playlist's own cover would be a grid-of-grids).
 func playlistCoverStems(playlist: view Playlist, max: view Int) pub ret List(String) {
   unsafe {
-    let result: List(String) = List.create(String, cap: max)
+    var result: List(String) = List.create(String, cap: max)
     let n: Int = playlist.items.length
     var i: Int = 0
     loop i < n {
@@ -251,7 +251,7 @@ func parsePlaylist(source: view String, id: view String) pub ret Playlist {
   let title: String = Json.jsonString(this: titleVal, fallback: fallbackTitle)
 
   let copiedId: String = "{id}"
-  let pl: Playlist = createPlaylist(id: own copiedId, title: own title)
+  var pl: Playlist = createPlaylist(id: own copiedId, title: own title)
 
   # Prefer the new `items` array; fall back to the legacy `tracks`
   # array (parsed identically — its entries lack `kind`, which

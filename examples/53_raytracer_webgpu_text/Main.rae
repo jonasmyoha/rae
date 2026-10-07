@@ -41,7 +41,7 @@ func triBase() ret Int {
 # empty so the storage binding is never zero-size.
 func triFloats(tris: view List(Triangle)) ret List(Float) {
   unsafe {
-    let f: List(Float) = List.create(Float, cap: 16)
+    var f: List(Float) = List.create(Float, cap: 16)
     var i: Int = 0
     loop i < tris.length {
       let t: Triangle = rae_ext_rae_buf_get(buf: tris.data, index: i)
@@ -91,7 +91,7 @@ type SceneGpu {
 
 func buildSceneBvh(world: view List(Sphere), tris: view List(Triangle)) ret SceneGpu {
   unsafe {
-    let prims: List(PrimRec) = List.create(PrimRec, cap: world.length + tris.length + 1)
+    var prims: List(PrimRec) = List.create(PrimRec, cap: world.length + tris.length + 1)
     var i: Int = 0
     loop i < world.length {
       let s: Sphere = rae_ext_rae_buf_get(buf: world.data, index: i)
@@ -126,8 +126,8 @@ func buildSceneBvh(world: view List(Sphere), tris: view List(Triangle)) ret Scen
       })
       k = k + 1
     }
-    let nodes: List(Float) = buildBvh(prims: prims, leafSize: 4)
-    let refs: List(Float) = List.create(Float, cap: prims.length + 1)
+    var nodes: List(Float) = buildBvh(prims: prims, leafSize: 4)
+    var refs: List(Float) = List.create(Float, cap: prims.length + 1)
     i = 0
     loop i < prims.length {
       let p: PrimRec = rae_ext_rae_buf_get(buf: prims.data, index: i)
@@ -154,7 +154,7 @@ func buildSceneBvh(world: view List(Sphere), tris: view List(Triangle)) ret Scen
 # means the kernel never reads it).
 func boxFloats(boxes: view List(Box)) ret List(Float) {
   unsafe {
-    let f: List(Float) = List.create(Float, cap: 16)
+    var f: List(Float) = List.create(Float, cap: 16)
     var i: Int = 0
     loop i < boxes.length {
       let bx: Box = rae_ext_rae_buf_get(buf: boxes.data, index: i)
@@ -190,7 +190,7 @@ func pushVec3(buf: mod List(Float), a: view Vec3) {
 }
 
 func sceneFloats(cam: view Camera, world: view List(Sphere)) ret List(Float) {
-  let s: List(Float) = List.create(Float, cap: 64)
+  var s: List(Float) = List.create(Float, cap: 64)
   pushVec3(buf: s, a: cam.origin)
   pushVec3(buf: s, a: cam.lowerLeft)
   pushVec3(buf: s, a: cam.horizontal)
@@ -326,7 +326,7 @@ func main() {
     var width: Int = 1920
     var height: Int = 1080
 
-    let params: List(Int) = List.create(Int, cap: 12)
+    var params: List(Int) = List.create(Int, cap: 12)
     var pinit: Int = 0
     loop pinit < 12 {
       params.add(value: 0)
@@ -590,7 +590,7 @@ func main() {
       params.set(index: 6, value: spp)
       Gpu.writeU32(buf: rt.paramsBuf, data: params.data, count: 8)
 
-      let bufs: List(Int) = List.create(Int, cap: 8)
+      var bufs: List(Int) = List.create(Int, cap: 8)
       bufs.add(value: rt.paramsBuf)
       bufs.add(value: rt.sceneBuf)
       bufs.add(value: rt.accumBuf)

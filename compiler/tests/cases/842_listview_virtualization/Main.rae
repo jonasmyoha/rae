@@ -23,15 +23,15 @@ const rowCount: Int = 10000
 const rowPitch: Float = 40.0
 
 func makeRow(label: own String) ret ListViewRow {
-  let keys: List(String) = List.create(String, cap: 1)
+  var keys: List(String) = List.create(String, cap: 1)
   keys.add(value: "label")
-  let values: List(String) = List.create(String, cap: 1)
+  var values: List(String) = List.create(String, cap: 1)
   values.add(value: own label)
   ret ListViewRow { keys: own keys, values: own values }
 }
 
 func buildData(count: view Int) ret ListViewData {
-  let rows: List(ListViewRow) = List.create(ListViewRow, cap: count)
+  var rows: List(ListViewRow) = List.create(ListViewRow, cap: count)
   var i: Int = 0
   loop i < count {
     rows.add(value: makeRow(label: "Row {i}"))
@@ -41,7 +41,7 @@ func buildData(count: view Int) ret ListViewData {
 }
 
 func makeListView() ret ListView {
-  let bindings: List(ListViewBinding) = List.create(ListViewBinding, cap: 1)
+  var bindings: List(ListViewBinding) = List.create(ListViewBinding, cap: 1)
   let binding: ListViewBinding = {
     nodeId: "Label"
     componentName: "Text"
@@ -119,10 +119,10 @@ func main() {
   # Bindings-only rows: no item sub-scene, so an empty registry (#964).
   let rowScenes: SceneRegistry = createSceneRegistry()
   # ----- Part A: ListView deserialises from a scene (#941 arm) -----
-  let scene: Scene = parseScene(source: partAScene())
+  var scene: Scene = parseScene(source: partAScene())
   scene.sceneId = "lv-demo"
   log("scene ok: {scene.ok}")
-  let sceneWorld: UiWorld = createUiWorld()
+  var sceneWorld: UiWorld = createUiWorld()
   var uiSystems: UiSystems = createUiSystems()
   loadScene(world: sceneWorld, uiSystems: uiSystems, scene: scene)
   if let listRaw: Int = sceneWorld.nodeIds.get(k: "List") {
@@ -144,7 +144,7 @@ func main() {
   }
 
   # ----- Part B: 10k rows stay bounded + recycle on scroll -----
-  let world: UiWorld = createUiWorld()
+  var world: UiWorld = createUiWorld()
   # Part B's own systems (Part A's belong to sceneWorld).
   uiSystems = createUiSystems()
   let listEntityId: EntityId = createEntity(world: world)

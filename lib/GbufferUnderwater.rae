@@ -152,7 +152,7 @@ func ensureUnderwaterBind(
   if not gbufferTargetsReady(cache: gbuffer, resources: resources) {
     ret
   }
-  let entries: List(ResourceRef) = List.create(ResourceRef, cap: 3)
+  var entries: List(ResourceRef) = List.create(ResourceRef, cap: 3)
   entries.add(value: bufferRef(id: cache.uniform))
   entries.add(value: textureViewRef(id: targets.litCopyView))
   entries.add(value: gbufferTargetRef(cache: gbuffer, index: gbufferTargetDepth))

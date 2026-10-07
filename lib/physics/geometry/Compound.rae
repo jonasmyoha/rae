@@ -151,10 +151,10 @@ func createCompound(def: view CompoundDef) ret opt CompoundData {
   }
   var tree: DynamicTree = createDynamicTree(proxyCapacity: shapeCount)
   var childIndex: Int = 0
-  let materials: List(SurfaceMaterial) = List.create(SurfaceMaterial, cap: 4)
+  var materials: List(SurfaceMaterial) = List.create(SurfaceMaterial, cap: 4)
   let identity: Transform = transformIdentity()
 
-  let capsules: List(CompoundCapsule) = List.create(CompoundCapsule, cap: def.capsules.length)
+  var capsules: List(CompoundCapsule) = List.create(CompoundCapsule, cap: def.capsules.length)
   loop let capsuleDef: view CompoundCapsuleDef in def.capsules {
     let materialIndex: Int = sharedMaterialIndex(
       materials: materials
@@ -172,7 +172,7 @@ func createCompound(def: view CompoundDef) ret opt CompoundData {
     childIndex = childIndex + 1
   }
 
-  let hulls: List(CompoundHull) = List.create(CompoundHull, cap: def.hulls.length)
+  var hulls: List(CompoundHull) = List.create(CompoundHull, cap: def.hulls.length)
   loop let hullDef: view CompoundHullDef in def.hulls {
     let proxy: Int = createTreeProxy(
       tree: tree
@@ -191,7 +191,7 @@ func createCompound(def: view CompoundDef) ret opt CompoundData {
     )
   }
 
-  let meshes: List(CompoundMesh) = List.create(CompoundMesh, cap: def.meshes.length)
+  var meshes: List(CompoundMesh) = List.create(CompoundMesh, cap: def.meshes.length)
   loop let meshDef: view CompoundMeshDef in def.meshes {
     let proxy: Int = createTreeProxy(
       tree: tree
@@ -201,7 +201,7 @@ func createCompound(def: view CompoundDef) ret opt CompoundData {
     )
     childIndex = childIndex + 1
     # Mesh materials go in the shared table too, but the map is per mesh
-    let materialIndices: List(Int) = List.create(Int, cap: meshDef.materials.length)
+    var materialIndices: List(Int) = List.create(Int, cap: meshDef.materials.length)
     loop let material: view SurfaceMaterial in meshDef.materials {
       materialIndices.add(value: sharedMaterialIndex(materials: materials, material: material))
     }
@@ -214,7 +214,7 @@ func createCompound(def: view CompoundDef) ret opt CompoundData {
     )
   }
 
-  let spheres: List(CompoundSphere) = List.create(CompoundSphere, cap: def.spheres.length)
+  var spheres: List(CompoundSphere) = List.create(CompoundSphere, cap: def.spheres.length)
   loop let sphereDef: view CompoundSphereDef in def.spheres {
     let materialIndex: Int = sharedMaterialIndex(materials: materials, material: sphereDef.material)
     spheres.add(value: CompoundSphere { sphere: sphereDef.sphere, materialIndex: materialIndex })
@@ -306,7 +306,7 @@ func computeCompoundAabb(compound: view CompoundData, transform: view Transform)
 # b3QueryCompound: the children whose boxes overlap `bounds` (in the
 # compound frame), in the tree's visiting order.
 func queryCompound(compound: view CompoundData, bounds: view Aabb) ret List(Int) {
-  let result: List(Int) = List.create(Int, cap: 8)
+  var result: List(Int) = List.create(Int, cap: 8)
   var query: TreeQuery = beginTreeQuery(
     tree: compound.tree
     box: bounds

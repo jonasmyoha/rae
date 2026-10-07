@@ -85,7 +85,7 @@ func spherecastClosest(
   translation: view Vec3
   filter: view QueryFilter
 ) ret PhysicsHit {
-  let point: List(b3Vec3) = List.create(b3Vec3, cap: 1)
+  var point: List(b3Vec3) = List.create(b3Vec3, cap: 1)
   point.add(value: toB3Vector(vector: zeroVector()))
   unsafe {
     let result: b3RayResult = rae_b3World_CastShapeClosest(
@@ -101,7 +101,7 @@ func spherecastClosest(
 
 # The entities of `shapeIds`, each once, in the order first met.
 func shapeEntities(physics: view Physics, shapeIds: view List(ShapeId)) ret List(EntityId) {
-  let entityIds: List(EntityId) = List.create(EntityId, cap: shapeIds.length)
+  var entityIds: List(EntityId) = List.create(EntityId, cap: shapeIds.length)
   loop let shapeId: view ShapeId in shapeIds {
     let entityId: EntityId = entityOfShape(physics: physics, shapeId: shapeId)
     if isNone(this: entityId) {
@@ -122,7 +122,7 @@ func shapeEntities(physics: view Physics, shapeIds: view List(ShapeId)) ret List
 
 # A list of `capacity` empty shape ids for the glue to write into.
 func shapeIdBuffer(capacity: view Int) ret List(b3ShapeId) {
-  let buffer: List(b3ShapeId) = List.create(b3ShapeId, cap: capacity)
+  var buffer: List(b3ShapeId) = List.create(b3ShapeId, cap: capacity)
   let empty: b3ShapeId = { index1: 0 }
   loop var i: Int = 0, i < capacity, ++i {
     buffer.add(value: empty)
@@ -132,7 +132,7 @@ func shapeIdBuffer(capacity: view Int) ret List(b3ShapeId) {
 
 # The first `count` of `buffer` (at most its length), as ShapeIds.
 func collectedShapes(buffer: view List(b3ShapeId), count: view Int) ret List(ShapeId) {
-  let shapeIds: List(ShapeId) = List.create(ShapeId, cap: count)
+  var shapeIds: List(ShapeId) = List.create(ShapeId, cap: count)
   loop var i: Int = 0, i < count and i < buffer.length, ++i {
     shapeIds.add(value: fromB3ShapeId(shapeId: buffer.copyAtDefault(index: i)))
   }
@@ -173,7 +173,7 @@ func overlapSphereEntities(
   radius: view Float
   filter: view QueryFilter
 ) ret List(EntityId) {
-  let point: List(b3Vec3) = List.create(b3Vec3, cap: 1)
+  var point: List(b3Vec3) = List.create(b3Vec3, cap: 1)
   point.add(value: toB3Vector(vector: zeroVector()))
   var capacity: Int = 64
   loop {

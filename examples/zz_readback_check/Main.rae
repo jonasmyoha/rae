@@ -51,7 +51,7 @@ func checkListCleanup() ret Bool {
   unsafe {
     let firstBuffer: Ptr = createBuffer(usage: WGPUBufferUsage_MapRead + WGPUBufferUsage_CopyDst)
     let secondBuffer: Ptr = createBuffer(usage: WGPUBufferUsage_MapRead + WGPUBufferUsage_CopyDst)
-    let requests: List(ReadRequest) = List.create(ReadRequest, cap: 2)
+    var requests: List(ReadRequest) = List.create(ReadRequest, cap: 2)
     if let first: ReadRequest = ReadRequest.create(
       buffer: firstBuffer
       range: { offset: 0 as UInt64, size: 32 as UInt64 }
@@ -210,10 +210,11 @@ func main() ret Int {
     ) {
       ret 2
     }
-    if let cancelled: ReadRequest = ReadRequest.create(
+    if let createdCancelled: ReadRequest = ReadRequest.create(
       buffer: buffer
       range: { offset: 0 as UInt64, size: 32 as UInt64 }
     ) {
+      var cancelled: ReadRequest = own createdCancelled
       cancelled.drop()
     } else {
       ret 2

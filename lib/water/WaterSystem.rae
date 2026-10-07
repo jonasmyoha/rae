@@ -161,7 +161,7 @@ func createWaterSystem(renderer: mod DeferredRenderer, body: view WaterBody) ret
       vertCount: grid.vertCount
       indices: grid.indices
     )
-    let uniform: List(Float) = List.create(Float, cap: waterUniformFloats)
+    var uniform: List(Float) = List.create(Float, cap: waterUniformFloats)
     var i: Int = 0
     loop i < waterUniformFloats {
       uniform.add(value: 0.0)
@@ -270,11 +270,11 @@ func ensureWaterPipeline(
   }
   waterSystem.pipeMade = true
   let source: Shader = waterSurfaceShader()
-  let attributes: List(VertexAttributeSpec) = List.create(VertexAttributeSpec, cap: 3)
+  var attributes: List(VertexAttributeSpec) = List.create(VertexAttributeSpec, cap: 3)
   attributes.add(value: { format: WGPUVertexFormat_Float32x3, offset: 0, location: 0 })
   attributes.add(value: { format: WGPUVertexFormat_Float32x3, offset: 12, location: 1 })
   attributes.add(value: { format: WGPUVertexFormat_Float32x2, offset: 24, location: 2 })
-  let colorFormats: List(Int32) = List.create(Int32, cap: 1)
+  var colorFormats: List(Int32) = List.create(Int32, cap: 1)
   colorFormats.add(value: litFormat)
   let spec: RenderPipelineSpec = {
     vertexStride: 32
@@ -365,7 +365,7 @@ func ensureWaterBind(
   if not waterSystem.surface.frame.valid {
     ret
   }
-  let entries: List(ResourceRef) = List.create(ResourceRef, cap: 12)
+  var entries: List(ResourceRef) = List.create(ResourceRef, cap: 12)
   entries.add(value: externalRef(id: waterSystem.surface.frame.frameUniform))
   entries.add(value: bufferRef(id: waterSystem.surface.uniform))
   entries.add(value: externalRef(id: waterSystem.surface.frame.depthView))
@@ -731,7 +731,8 @@ func drawWaterBody(
   # one sample in flight, resolved on this recording, read back later — so
   # the reflection cost (SSR on vs off) is measured apart from the compute.
   let timed: Bool = beginWaterPerf(performance: waterSystem.surfacePerf, resources: resources)
-  if let recording: Recording = beginRecording(resources: resources) {
+  if let openedRecording: Recording = beginRecording(resources: resources) {
+    var recording: Recording = own openedRecording
     var recorded: Bool = false
     unsafe {
       var timestampWrites: Ptr = webgpuNull()

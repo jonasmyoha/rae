@@ -409,6 +409,10 @@ struct Symbol {
     bool const_is_unsigned;  // #817: const_i holds a uint64 bit pattern > INT64_MAX
     double const_d;
     long long const_i;
+    /* Where a `let`/`var` was declared (0 when unknown), for diagnostics
+     * that point back at the binding (docs/let-is-frozen.md) */
+    int decl_line;
+    int decl_column;
     Symbol* next;
     /* The next symbol OF THE SAME NAME in `next` order (SymbolTable.byName) */
     Symbol* sameNext;
@@ -1037,7 +1041,7 @@ static bool sema_rewrite_match_let(CompilerContext* ctx, AstModule* module, Symb
 static void sema_check_own_args(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, const AstFuncDecl* fd, AstCallArg* args, bool skip_receiver);
 static void sema_reject_view_to_mod(AstModule* module, SymbolTable* symbols, const AstParam* p, const AstExpr* value);
 static bool expr_roots_in_let(SymbolTable* symbols, const AstExpr* e, Str* base);
-static void sema_warn_let_write(AstModule* module, int line, int column, Str root, const char* action);
+static void sema_report_let_write(AstModule* module, int line, int column, Str root, const char* action);
 static void sema_render_access(const AstExpr* e, char* out, size_t cap);
 static void sema_warn_let_receiver(AstModule* module, SymbolTable* symbols, const AstExpr* call);
 static bool expr_is_owning(SymbolTable* symbols, const AstExpr* e);
@@ -2524,6 +2528,8 @@ static void sema_analyze_decl_inner(CompilerContext* ctx, AstModule* module, Sym
                 } else {
                     gs->bind_kind = immut ? BIND_LET : BIND_MUTABLE;
                 }
+                gs->decl_line = (int)decl->line;
+                gs->decl_column = (int)decl->column;
             }
             /* #763 no-globals rule (docs/globals-and-app-ownership.md): a
              * module-level `var` is mutable global state; a module-level `let`
@@ -4465,9 +4471,8 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                 }
             }
             // `let` and `const` are immutable bindings; only `var` may be
-            // reassigned. (Mutating the value a `let` points at — container
-            // methods, field/index writes — is unaffected; this only governs
-            // rebinding the local itself.)
+            // reassigned. A `let` is also FROZEN: nothing inside it may be
+            // modified either (expr_roots_in_let, docs/let-is-frozen.md).
             bool immut = !stmt->as.let_stmt.is_var;
             Symbol* sym = symbol_table_define(symbols, ctx->ast_arena, stmt->as.let_stmt.name, NULL, t, immut);
             /* A `let`/`var` in a body owns frame storage — unless it is
@@ -4496,6 +4501,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
             } else {
                 sym->bind_kind = immut ? BIND_LET : BIND_MUTABLE;
             }
+            if (sym) { sym->decl_line = (int)stmt->line; sym->decl_column = (int)stmt->column; }
             break;
         }
         case AST_STMT_RET: {
@@ -4992,7 +4998,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                 {
                     char path[200]; sema_render_access(stmt->as.assign_stmt.target, path, sizeof path);
                     char action[260]; snprintf(action, sizeof action, "cannot modify '%s'", path);
-                    sema_warn_let_write(module, (int)stmt->line, (int)stmt->column, let_root, action);
+                    sema_report_let_write(module, (int)stmt->line, (int)stmt->column, let_root, action);
                 }
             }
             break;
@@ -8126,6 +8132,7 @@ static bool expr_roots_in_view(SymbolTable* symbols, const AstExpr* e, Str* base
  * reference (a `mod`/`view` alias) leaves the let's own storage — the write
  * lands in what it points at, which the let does not freeze. View roots are
  * rejected elsewhere. Returns the root name in *base. */
+static int s_let_root_decl_line = 0;  /* the last root found by expr_roots_in_let */
 static bool expr_roots_in_let(SymbolTable* symbols, const AstExpr* e, Str* base) {
     while (e && (e->kind == AST_EXPR_MEMBER || e->kind == AST_EXPR_INDEX)) {
         const AstExpr* object = (e->kind == AST_EXPR_MEMBER) ? e->as.member.object : e->as.index.target;
@@ -8140,6 +8147,7 @@ static bool expr_roots_in_let(SymbolTable* symbols, const AstExpr* e, Str* base)
     if (t->kind == TYPE_OPT && t->as.opt.base) t = t->as.opt.base;
     if (t->kind == TYPE_REF || t->kind == TYPE_BUFFER) return false;
     if (base) *base = e->as.ident;
+    s_let_root_decl_line = sym->decl_line;
     return true;
 }
 
@@ -8161,21 +8169,22 @@ static void sema_render_access(const AstExpr* e, char* out, size_t cap) {
     }
 }
 
-/* Step 1 of the frozen-let change: a WARNING, so the tree can be measured
- * and migrated before it becomes an error. OPT-IN (RAE_FROZEN_LET=warn):
- * the tree has ~2,100 such sites, ~770 of them in lib/, so a default-on
- * warning would print hundreds of lines for every program and change the
- * output of ~130 fixtures. Step 2 migrates them and makes this an error.
- * `action` says what was done to the let ("cannot modify 'a.b'", "cannot
- * pass 'a' to 'mod' parameter 'x'"). */
-static void sema_warn_let_write(AstModule* module, int line, int column, Str root, const char* action) {
-    const char* mode = getenv("RAE_FROZEN_LET");
-    if (!mode || strcmp(mode, "warn") != 0) return;
+/* A write into a frozen `let` is an ERROR (docs/let-is-frozen.md).
+ * RAE_FROZEN_LET=warn downgrades it to a warning, to migrate code from
+ * before the rule. `action` says what was done to the let ("cannot modify
+ * 'a.b'", "cannot pass 'a' to 'mod' parameter 'x'"). */
+static void sema_report_let_write(AstModule* module, int line, int column, Str root, const char* action) {
     char buffer[400];
     snprintf(buffer, sizeof buffer,
-             "%s: '%.*s' is a 'let', which is frozen (docs/let-is-frozen.md); declare it 'var'",
-             action, (int)root.len, root.data);
-    diag_warn(sema_diag_file(module), line, column, buffer);
+             "%s: '%.*s' (declared at line %d) is a 'let', which is frozen (docs/let-is-frozen.md); declare it 'var'",
+             action, (int)root.len, root.data, s_let_root_decl_line);
+    const char* mode = getenv("RAE_FROZEN_LET");
+    if (mode && strcmp(mode, "warn") == 0) {
+        diag_warn(sema_diag_file(module), line, column, buffer);
+        return;
+    }
+    diag_error(sema_diag_file(module), line, column, buffer);
+    module->had_error = true;
 }
 
 /* A method call on a let: `numbers.add(value: 3)`. With a bound decl, its
@@ -8212,7 +8221,7 @@ static void sema_warn_let_receiver(AstModule* module, SymbolTable* symbols, cons
     char action[320];
     snprintf(action, sizeof action, "cannot call mutating method '%.*s' on '%s'",
              (int)method.len, method.data, path);
-    sema_warn_let_write(module, (int)call->line, (int)call->column, root, action);
+    sema_report_let_write(module, (int)call->line, (int)call->column, root, action);
 }
 
 /* docs/binding-modes-design.md §4.1: a view passed to a `mod` parameter
@@ -8227,7 +8236,7 @@ static void sema_reject_view_to_mod(AstModule* module, SymbolTable* symbols,
         char action[320];
         snprintf(action, sizeof action, "cannot pass '%s' to 'mod' parameter '%.*s'",
                  path, (int)p->name.len, p->name.data);
-        sema_warn_let_write(module, (int)value->line, (int)value->column, root, action);
+        sema_report_let_write(module, (int)value->line, (int)value->column, root, action);
         return;
     }
     if (!expr_roots_in_view(symbols, value, &root)) return;

@@ -82,7 +82,7 @@ func readCapsule(reader: mod Reader) ret Capsule {
 
 func readProxy(reader: mod Reader) ret ShapeProxy {
   let count: Int = readInt(reader: reader)
-  let points: List(Vec3) = List.create(Vec3, cap: count)
+  var points: List(Vec3) = List.create(Vec3, cap: count)
   loop var i: Int = 0, i < count, ++i {
     points.add(value: readVec(reader: reader))
   }
@@ -478,7 +478,7 @@ func main() {
   var calls: Int = 0
   var mismatches: Int = 0
   var unknown: Int = 0
-  let names: List(String) = List.create(String, cap: 32)
+  var names: List(String) = List.create(String, cap: 32)
   loop var i: Int = 0, i < lines.length, ++i {
     let line: String = lines.copyAtDefault(index: i)
     if line.length() is 0 or line.startsWith(prefix: "#") {
@@ -487,7 +487,7 @@ func main() {
     let tokens: List(String) = line.split(sep: " ")
     let name: String = tokens.copyAtDefault(index: 0)
     var reader: Reader = { values: List.create(Float, cap: 64), next: 0 }
-    let expected: List(Float) = List.create(Float, cap: 32)
+    var expected: List(Float) = List.create(Float, cap: 32)
     var afterArrow: Bool = false
     loop var j: Int = 1, j < tokens.length, ++j {
       let token: String = tokens.copyAtDefault(index: j)
@@ -499,7 +499,7 @@ func main() {
         reader.values.add(value: token.toFloat())
       }
     }
-    let actual: List(Float) = List.create(Float, cap: 32)
+    var actual: List(Float) = List.create(Float, cap: 32)
     let known: Bool = evaluateShapes(name: name, reader: reader, out: actual) or evaluateDistance(
       name: name
       reader: reader

@@ -1,0 +1,54 @@
+# A `let` is frozen (docs/let-is-frozen.md): nothing in it may change, at
+# any depth. Each write below is rejected and names the binding to make
+# `var`.
+type Inner {
+  value: Int
+}
+
+type Outer {
+  inner: Inner
+  items: List(Int)
+  grid: Array(Int, cap: 4)
+}
+
+type Counter {
+  count: Int
+}
+
+func bump(inner: mod Inner) {
+  inner.value = inner.value + 1
+}
+
+func reset(outer: mod Outer) {
+  outer.inner.value = 0
+}
+
+func increment(this: mod Counter) {
+  this.count = this.count + 1
+}
+
+func main() ret Int {
+  let outer: Outer = {
+    inner: { value: 1 }
+    items: List.create(Int, cap: 2)
+    grid: Array(Int, cap: 4)
+  }
+  # member assignment
+  outer.inner = { value: 3 }
+  # nested member assignment
+  outer.inner.value = 5
+  # list and array elements
+  outer.items.add(value: 1)
+  outer.items.set(index: 0, value: 2)
+  outer.grid.set(index: 0, value: 2)
+  # a member as a `mod` argument
+  bump(inner: outer.inner)
+  # the whole let as a `mod` argument
+  reset(outer: outer)
+  # a mutating method call
+  let numbers: List(Int) = List.create(Int, cap: 2)
+  numbers.add(value: 3)
+  let counter: Counter = { count: 0 }
+  counter.increment()
+  ret 0
+}

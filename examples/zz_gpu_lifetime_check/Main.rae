@@ -51,7 +51,7 @@ func readWords(
     if status is not 1 {
       ret false
     }
-    let bytes: List(UInt8) = List.create(UInt8, cap: words * 4)
+    var bytes: List(UInt8) = List.create(UInt8, cap: words * 4)
     var i: Int = 0
     loop i < words * 4 {
       bytes.add(value: 0 as UInt8)
@@ -95,7 +95,7 @@ func checkComputeAndCopy(resources: mod GpuResources) ret Bool {
         entryPoint: "main"
         constants: noShaderConstants()
       ) {
-        let buffers: List(BufferId) = List.create(BufferId, cap: 1)
+        var buffers: List(BufferId) = List.create(BufferId, cap: 1)
         buffers.add(value: storage)
         let noViews: List(TextureViewId) = List.create(TextureViewId, cap: 1)
         let noSamplers: List(SamplerId) = List.create(SamplerId, cap: 1)
@@ -106,7 +106,8 @@ func checkComputeAndCopy(resources: mod GpuResources) ret Bool {
           textureViews: noViews
           samplers: noSamplers
         ) {
-          if let recording: Recording = beginRecording(resources: resources) {
+          if let openedRecording: Recording = beginRecording(resources: resources) {
+            var recording: Recording = own openedRecording
             if recordCompute(
               recording: recording
               resources: resources
@@ -139,7 +140,7 @@ func checkComputeAndCopy(resources: mod GpuResources) ret Bool {
               if pollSubmission(resources: resources, id: submission) is not 1 {
                 ret fail(message: "repeated poll after completion")
               }
-              let words: List(Int) = List.create(Int, cap: 16)
+              var words: List(Int) = List.create(Int, cap: 16)
               if readWords(
                 resources: resources
                 id: readback
@@ -165,7 +166,8 @@ func checkComputeAndCopy(resources: mod GpuResources) ret Bool {
               }
               # Early retirement: retire the storage buffer while a new
               # submission that uses it is in flight. No new use, deferred release.
-              if let second: Recording = beginRecording(resources: resources) {
+              if let openedSecond: Recording = beginRecording(resources: resources) {
+                var second: Recording = own openedSecond
                 if recordCompute(
                   recording: second
                   resources: resources
@@ -194,7 +196,8 @@ func checkComputeAndCopy(resources: mod GpuResources) ret Bool {
                   if bindGroupIsUsable(resources: resources, id: bindGroup) {
                     ret fail(message: "old bind group still usable")
                   }
-                  if let stale: Recording = beginRecording(resources: resources) {
+                  if let openedStale: Recording = beginRecording(resources: resources) {
+                    var stale: Recording = own openedStale
                     if recordCompute(
                       recording: stale
                       resources: resources
@@ -230,7 +233,8 @@ func checkComputeAndCopy(resources: mod GpuResources) ret Bool {
                 ret fail(message: "second beginRecording")
               }
               # Abandoned recording: dropped unsubmitted, nothing pinned or leaked.
-              if let abandoned: Recording = beginRecording(resources: resources) {
+              if let openedAbandoned: Recording = beginRecording(resources: resources) {
+                var abandoned: Recording = own openedAbandoned
                 if recordCopyBuffer(
                   recording: abandoned
                   resources: resources
@@ -247,7 +251,8 @@ func checkComputeAndCopy(resources: mod GpuResources) ret Bool {
                 ret fail(message: "abandoned recording left a submission")
               }
               # A submission whose use was retired between record and submit is refused.
-              if let doomed: Recording = beginRecording(resources: resources) {
+              if let openedDoomed: Recording = beginRecording(resources: resources) {
+                var doomed: Recording = own openedDoomed
                 if let scratch: BufferId = createBuffer(
                   resources: resources
                   size: 64
@@ -302,7 +307,7 @@ func checkRepeated(resources: mod GpuResources) ret Bool {
       entryPoint: "main"
       constants: noShaderConstants()
     ) {
-      let buffers: List(BufferId) = List.create(BufferId, cap: 1)
+      var buffers: List(BufferId) = List.create(BufferId, cap: 1)
       buffers.add(value: storage)
       let noViews: List(TextureViewId) = List.create(TextureViewId, cap: 1)
       let noSamplers: List(SamplerId) = List.create(SamplerId, cap: 1)
@@ -316,7 +321,8 @@ func checkRepeated(resources: mod GpuResources) ret Bool {
         var round: Int = 0
         var lastSlot: Int = -1
         loop round < 3 {
-          if let recording: Recording = beginRecording(resources: resources) {
+          if let openedRecording: Recording = beginRecording(resources: resources) {
+            var recording: Recording = own openedRecording
             if recordCompute(
               recording: recording
               resources: resources
@@ -365,8 +371,10 @@ func main() ret Int {
       ret 1
     }
     var issuer: IdIssuer = IdIssuer.create()
-    if let managerA: GpuResources = GpuResources.create(issuer: issuer, capacity: 8) {
-      if let managerB: GpuResources = GpuResources.create(issuer: issuer, capacity: 8) {
+    if let createdManagerA: GpuResources = GpuResources.create(issuer: issuer, capacity: 8) {
+      var managerA: GpuResources = own createdManagerA
+      if let createdManagerB: GpuResources = GpuResources.create(issuer: issuer, capacity: 8) {
+        var managerB: GpuResources = own createdManagerB
         if checkComputeAndCopy(resources: managerA) is false {
           ret 1
         }
@@ -383,7 +391,8 @@ func main() ret Int {
           size: 64
           usage: WGPUBufferUsage_CopySrc + WGPUBufferUsage_CopyDst
         ) {
-          if let recording: Recording = beginRecording(resources: managerA) {
+          if let openedRecording: Recording = beginRecording(resources: managerA) {
+            var recording: Recording = own openedRecording
             # A self-copy is invalid WebGPU; the manager refuses it before wgpu sees it.
             if recordCopyBuffer(
               recording: recording

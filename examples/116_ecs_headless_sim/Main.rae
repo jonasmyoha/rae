@@ -144,7 +144,7 @@ func applyDamageSystem(world: mod GameWorld) {
 func cullSystem(world: mod GameWorld) {
   unsafe {
     let tagged: List(EntityId) = taggedEntities(table: world.enemies)
-    let dead: List(EntityId) = List.create(EntityId, cap: 8)
+    var dead: List(EntityId) = List.create(EntityId, cap: 8)
     loop var i: Int = 0, i < tagged.length, ++i {
       let e: EntityId = rae_ext_rae_buf_get(buf: tagged.data, index: i)
       if componentHas(this: world.healths, entityId: e) {

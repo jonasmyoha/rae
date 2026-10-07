@@ -74,7 +74,7 @@ type ScreenPage {
 
 # The table, built by its cold callers (screen switch, world rebuild).
 func createScreenPages() ret List(ScreenPage) {
-  let rows: List(ScreenPage) = List.create(ScreenPage, cap: 7)
+  var rows: List(ScreenPage) = List.create(ScreenPage, cap: 7)
   rows.add(
     value: ScreenPage {
       screen: Screen.home
@@ -232,7 +232,7 @@ func buildAppWorldFor(
   textureRegistry: view TextureRegistry
   viewport: view Viewport
 ) ret UiWorld {
-  let world: UiWorld = create()
+  var world: UiWorld = create()
   seedWorldThemeFrom(world: world, src: state.theme)  # #764: theme from AppState
   world.bundles = cloneBundleSet(set: state.bundles)  # the shared Bundles.raescene
   # Publish the active Viewport extent before mounting anything. Builders

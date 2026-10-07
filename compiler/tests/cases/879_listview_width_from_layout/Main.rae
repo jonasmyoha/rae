@@ -38,8 +38,8 @@ func pageScene() ret String {
 }
 
 func dataRow(index: view Int) ret ListViewRow {
-  let keys: List(String) = List.create(String, cap: 2)
-  let values: List(String) = List.create(String, cap: 2)
+  var keys: List(String) = List.create(String, cap: 2)
+  var values: List(String) = List.create(String, cap: 2)
   keys.add(value: "id")
   values.add(value: "{index}")
   keys.add(value: "label")
@@ -86,18 +86,18 @@ func listSize(
 }
 
 func main() {
-  let world: UiWorld = createUiWorld()
+  var world: UiWorld = createUiWorld()
   var uiSystems: UiSystems = createUiSystems()
   world.layoutW = 1000.0
   world.layoutH = 800.0
-  let page: Scene = parseScene(source: pageScene())
+  var page: Scene = parseScene(source: pageScene())
   page.sceneId = "page"
   loadScene(world: world, uiSystems: uiSystems, scene: page)
   var listEntityId: EntityId = noEntity()
   if let raw: Int = world.nodeIds.get(k: "List") {
     listEntityId = id(v: raw)
   }
-  let rows: List(ListViewRow) = List.create(ListViewRow, cap: 5)
+  var rows: List(ListViewRow) = List.create(ListViewRow, cap: 5)
   loop var i: Int = 0, i < 5, ++i {
     rows.add(value: dataRow(index: i))
   }
@@ -124,7 +124,7 @@ func main() {
     "after resize rows:{rowWidths(world: world, uiSystems: uiSystems, listEntityId: listEntityId)} (560 each)"
   )
   # Fewer rows than the visible count: the list hugs the rows it has.
-  let two: List(ListViewRow) = List.create(ListViewRow, cap: 2)
+  var two: List(ListViewRow) = List.create(ListViewRow, cap: 2)
   two.add(value: dataRow(index: 0))
   two.add(value: dataRow(index: 1))
   componentSet(

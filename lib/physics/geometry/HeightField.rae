@@ -353,7 +353,7 @@ func createHeightField(
   var upperHeightBound: Float = minHeight
 
   let invHeightScale: Float = 1.0 / heightScale
-  let compressed: List(Int) = List.create(Int, cap: heightCount)
+  var compressed: List(Int) = List.create(Int, cap: heightCount)
   loop var i: Int = 0, i < heightCount, ++i {
     let clampedHeight: Float = clampFloat(
       value: def.heights.copyAtDefault(index: i)
@@ -367,12 +367,12 @@ func createHeightField(
   }
 
   # The decompressed heights, for accurate convexity
-  let heights: List(Float) = List.create(Float, cap: heightCount)
+  var heights: List(Float) = List.create(Float, cap: heightCount)
   loop var i: Int = 0, i < heightCount, ++i {
     heights.add(value: minHeight + heightScale * (compressed.copyAtDefault(index: i) as Float))
   }
 
-  let materials: List(Int) = List.create(Int, cap: cellCount)
+  var materials: List(Int) = List.create(Int, cap: cellCount)
   loop var i: Int = 0, i < cellCount, ++i {
     if def.materialIndices.length > 0 {
       materials.add(value: def.materialIndices.copyAtDefault(index: i))
@@ -391,7 +391,7 @@ func createHeightField(
     }
   }
 
-  let flags: List(Int) = List.create(Int, cap: triangleCount)
+  var flags: List(Int) = List.create(Int, cap: triangleCount)
   loop var i: Int = 0, i < triangleCount, ++i {
     flags.add(value: 0)
   }
@@ -630,7 +630,7 @@ func generatedMaterials(
   columnCount: view Int
   makeHoles: view Bool
 ) ret List(Int) {
-  let materials: List(Int) = List.create(Int, cap: (rowCount - 1) * (columnCount - 1))
+  var materials: List(Int) = List.create(Int, cap: (rowCount - 1) * (columnCount - 1))
   loop var i: Int = 0, i < rowCount - 1, ++i {
     loop var j: Int = 0, j < columnCount - 1, ++j {
       let k: Int = i * (columnCount - 1) + j
@@ -671,7 +671,7 @@ func createHeightGrid(
   makeHoles: view Bool
   lengthUnitsPerMeter: view Float
 ) ret HeightFieldData {
-  let heights: List(Float) = List.create(Float, cap: rowCount * columnCount)
+  var heights: List(Float) = List.create(Float, cap: rowCount * columnCount)
   loop var k: Int = 0, k < rowCount * columnCount, ++k {
     heights.add(value: 0.0)
   }
@@ -702,7 +702,7 @@ func createHeightWave(
   makeHoles: view Bool
   lengthUnitsPerMeter: view Float
 ) ret HeightFieldData {
-  let heights: List(Float) = List.create(Float, cap: rowCount * columnCount)
+  var heights: List(Float) = List.create(Float, cap: rowCount * columnCount)
   let omegaZ: Float = 2.0 * pi * rowFrequency
   let omegaX: Float = 2.0 * pi * columnFrequency
   loop var i: Int = 0, i < rowCount, ++i {

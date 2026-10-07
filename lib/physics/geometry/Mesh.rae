@@ -201,9 +201,9 @@ func weldVertices(
 ) ret List(Vec3) {
   let vertexCount: Int = vertices.length
   var cellMap: IntMap(Int) = createIntMap(Int, cap: 2 * vertexCount + 8)
-  let nodes: List(WeldNode) = List.create(WeldNode, cap: vertexCount)
-  let mapping: List(Int) = List.create(Int, cap: vertexCount)
-  let unique: List(Vec3) = List.create(Vec3, cap: vertexCount)
+  var nodes: List(WeldNode) = List.create(WeldNode, cap: vertexCount)
+  var mapping: List(Int) = List.create(Int, cap: vertexCount)
+  var unique: List(Vec3) = List.create(Vec3, cap: vertexCount)
   loop var i: Int = 0, i < vertexCount, ++i {
     let duplicateIndex: Int = findDuplicateVertex(
       vertices: vertices
@@ -274,7 +274,7 @@ func splitBinnedSah(
       continue
     }
 
-    let buckets: List(MeshBucket) = List.create(MeshBucket, cap: binCount)
+    var buckets: List(MeshBucket) = List.create(MeshBucket, cap: binCount)
     loop var i: Int = 0, i < binCount, ++i {
       buckets.add(value: MeshBucket { count: 0, bounds: emptyBounds() })
     }
@@ -558,10 +558,10 @@ func buildMeshNode(
 # b3SortMeshTriangles: the triangles (and materials) in depth-first leaf
 # order, each leaf's offset updated. False when the tree is too deep.
 func sortMeshTriangles(mesh: mod PhysicsMeshData) ret Bool {
-  let triangles: List(MeshTriangle) = List.create(MeshTriangle, cap: mesh.triangles.length)
-  let materials: List(Int) = List.create(Int, cap: mesh.triangles.length)
+  var triangles: List(MeshTriangle) = List.create(MeshTriangle, cap: mesh.triangles.length)
+  var materials: List(Int) = List.create(Int, cap: mesh.triangles.length)
   var offset: Int = 0
-  let stack: List(Int) = List.create(Int, cap: meshStackSize)
+  var stack: List(Int) = List.create(Int, cap: meshStackSize)
   stack.add(value: 0)
   loop stack.length > 0 {
     let nodeIndex: Int = stack.copyAtDefault(index: stack.length - 1)
@@ -647,8 +647,8 @@ func setTriangleFlag(flags: mod List(Int), triangle: view Int, flag: view Int) {
 # the two faces are within 5 degrees of flat.
 func identifyMeshEdges(mesh: mod PhysicsMeshData) {
   let triangleCount: Int = mesh.triangles.length
-  let edges: List(MeshEdge) = List.create(MeshEdge, cap: 3 * triangleCount)
-  let normals: List(Vec3) = List.create(Vec3, cap: triangleCount)
+  var edges: List(MeshEdge) = List.create(MeshEdge, cap: 3 * triangleCount)
+  var normals: List(Vec3) = List.create(Vec3, cap: triangleCount)
   loop var i: Int = 0, i < triangleCount, ++i {
     let triangle: MeshTriangle = mesh.triangles.copyAtDefault(index: i)
     edges.add(value: meshEdge(
@@ -768,7 +768,7 @@ func createMesh(def: view MeshDef, lengthUnitsPerMeter: view Float) ret opt Phys
     vertices = weldVertices(vertices: vertices, indices: indices, tolerance: def.weldTolerance)
   }
 
-  let primitives: List(MeshPrimitive) = List.create(MeshPrimitive, cap: triangleCount)
+  var primitives: List(MeshPrimitive) = List.create(MeshPrimitive, cap: triangleCount)
   var degenerateCount: Int = 0
   let slop: Float = linearSlop(lengthUnitsPerMeter: lengthUnitsPerMeter)
   let minArea: Float = 0.01 * slop * slop
@@ -816,7 +816,7 @@ func createMesh(def: view MeshDef, lengthUnitsPerMeter: view Float) ret opt Phys
   }
 
   # The tree (this reorders the primitives)
-  let nodes: List(MeshNode) = List.create(MeshNode, cap: 2 * primitives.length)
+  var nodes: List(MeshNode) = List.create(MeshNode, cap: 2 * primitives.length)
   let built: MeshBuildResult = buildMeshNode(
     nodes: nodes
     primitives: primitives
@@ -826,9 +826,9 @@ func createMesh(def: view MeshDef, lengthUnitsPerMeter: view Float) ret opt Phys
     lengthUnitsPerMeter: lengthUnitsPerMeter
   )
 
-  let triangles: List(MeshTriangle) = List.create(MeshTriangle, cap: primitives.length)
-  let materials: List(Int) = List.create(Int, cap: primitives.length)
-  let flags: List(Int) = List.create(Int, cap: primitives.length)
+  var triangles: List(MeshTriangle) = List.create(MeshTriangle, cap: primitives.length)
+  var materials: List(Int) = List.create(Int, cap: primitives.length)
+  var flags: List(Int) = List.create(Int, cap: primitives.length)
   loop let primitive: view MeshPrimitive in primitives {
     var i2: Int = 3 * primitive.triangleIndex + 1
     var i3: Int = 3 * primitive.triangleIndex + 2

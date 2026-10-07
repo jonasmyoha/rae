@@ -43,7 +43,8 @@ func runFrame(
     if passA is not 0 {
       ret fail(message: "timedPass 0")
     }
-    if let recording: Recording = beginRecording(resources: resources) {
+    if let openedRecording: Recording = beginRecording(resources: resources) {
+      var recording: Recording = own openedRecording
       if recordComputeTimed(
         recording: recording
         resources: resources
@@ -89,7 +90,7 @@ func runFrame(
         if timingSampleInFlight(timing: timing) is false {
           ret fail(message: "sample not in flight")
         }
-        let perPass: List(Int) = List.create(Int, cap: 2)
+        var perPass: List(Int) = List.create(Int, cap: 2)
         var done: Bool = false
         var spins: Int = 0
         loop done is false and spins < 1000000 {
@@ -132,7 +133,8 @@ func main() ret Int {
       ret 1
     }
     var issuer: IdIssuer = IdIssuer.create()
-    if let resources: GpuResources = GpuResources.create(issuer: issuer, capacity: 10) {
+    if let createdResources: GpuResources = GpuResources.create(issuer: issuer, capacity: 10) {
+      var resources: GpuResources = own createdResources
       var timing: GpuTiming = createGpuTiming(resources: resources, maxPasses: 4)
       if timingAvailable(timing: timing) is false {
         # Documented fallback: no timestamp support. Everything is inert.
@@ -151,7 +153,7 @@ func main() ret Int {
           entryPoint: "main"
           constants: noShaderConstants()
         ) {
-          let buffers: List(BufferId) = List.create(BufferId, cap: 1)
+          var buffers: List(BufferId) = List.create(BufferId, cap: 1)
           buffers.add(value: storage)
           let noViews: List(TextureViewId) = List.create(TextureViewId, cap: 1)
           let noSamplers: List(SamplerId) = List.create(SamplerId, cap: 1)

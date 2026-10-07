@@ -60,15 +60,15 @@ type ShadowSdfCache {
 }
 
 func createShadowSdfCache() ret ShadowSdfCache {
-  let ballFloats: List(Float) = List.create(
+  var ballFloats: List(Float) = List.create(
     Float
     cap: shadowSdfMaxClusters * shadowSdfMaxBalls * 4
   )
   loop var i: Int = 0, i < shadowSdfMaxClusters * shadowSdfMaxBalls * 4, ++i {
     ballFloats.add(value: 0.0)
   }
-  let counts: List(Int) = List.create(Int, cap: shadowSdfMaxClusters)
-  let smoothing: List(Float) = List.create(Float, cap: shadowSdfMaxClusters)
+  var counts: List(Int) = List.create(Int, cap: shadowSdfMaxClusters)
+  var smoothing: List(Float) = List.create(Float, cap: shadowSdfMaxClusters)
   loop var i: Int = 0, i < shadowSdfMaxClusters, ++i {
     counts.add(value: 0)
     smoothing.add(value: 0.0001)
@@ -201,7 +201,7 @@ func ensureShadowSdfBind(
   ) {
     ret true
   }
-  let entries: List(ResourceRef) = List.create(ResourceRef, cap: 2)
+  var entries: List(ResourceRef) = List.create(ResourceRef, cap: 2)
   entries.add(value: bufferRef(id: sdf.uniforms.copyAtFallback(index: ui, fallback: noBufferId())))
   entries.add(value: bufferRef(id: sdf.balls.copyAtFallback(index: ci, fallback: noBufferId())))
   if let bind: BindGroupId = createRenderBindGroup(

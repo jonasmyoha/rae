@@ -56,8 +56,8 @@ func vertComponent(verts: view List(Float), index: copy Int) ret Float {
 
 # Unit-radius UV sphere centered at origin.
 func makeSphere(rings: view Int, segments: view Int) pub ret MeshData {
-  let verts: List(Float) = List.create(Float, cap: (rings + 1) * (segments + 1) * 8)
-  let indices: List(Int) = List.create(Int, cap: rings * segments * 6)
+  var verts: List(Float) = List.create(Float, cap: (rings + 1) * (segments + 1) * 8)
+  var indices: List(Int) = List.create(Int, cap: rings * segments * 6)
   let pi: Float = 3.141592653589793
   var r: Int = 0
   loop r <= rings {
@@ -124,8 +124,8 @@ func makeSphere(rings: view Int, segments: view Int) pub ret MeshData {
 # along +-Y; every triangle is wound counter-clockwise seen from outside, the
 # sphere's convention.
 func makeCylinder(segments: view Int) ret MeshData {
-  let verts: List(Float) = List.create(Float, cap: (4 * (segments + 1) + 2) * 8)
-  let indices: List(Int) = List.create(Int, cap: segments * 12)
+  var verts: List(Float) = List.create(Float, cap: (4 * (segments + 1) + 2) * 8)
+  var indices: List(Int) = List.create(Int, cap: segments * 12)
   let pi: Float = 3.141592653589793
   # The side: a bottom and a top vertex per segment edge
   loop var s: Int = 0, s <= segments, ++s {
@@ -219,8 +219,8 @@ func makeCylinder(segments: view Int) ret MeshData {
 
 # Flat ground plane in XY (normal +Z), centered, `size` on a side.
 func makePlane(size: view Float, segments: view Int) pub ret MeshData {
-  let verts: List(Float) = List.create(Float, cap: (segments + 1) * (segments + 1) * 8)
-  let indices: List(Int) = List.create(Int, cap: segments * segments * 6)
+  var verts: List(Float) = List.create(Float, cap: (segments + 1) * (segments + 1) * 8)
+  var indices: List(Int) = List.create(Int, cap: segments * segments * 6)
   var yi: Int = 0
   loop yi <= segments {
     let vy: Float = yi.toFloat() / segments.toFloat()
@@ -276,9 +276,9 @@ func makeFbmTerrain(
 ) pub ret MeshData {
   let stride: Int = segments + 1
   let vertCount: Int = stride * stride
-  let heights: List(Float) = List.create(Float, cap: vertCount)
-  let verts: List(Float) = List.create(Float, cap: vertCount * 8)
-  let indices: List(Int) = List.create(Int, cap: segments * segments * 6)
+  var heights: List(Float) = List.create(Float, cap: vertCount)
+  var verts: List(Float) = List.create(Float, cap: vertCount * 8)
+  var indices: List(Int) = List.create(Int, cap: segments * segments * 6)
 
   var yi: Int = 0
   loop yi <= segments {
@@ -383,8 +383,8 @@ func makeFbmTerrain(
 # outward normal — see the note in makeSphere for what an inverted winding
 # costs.
 func makeBox(size: view Float) pub ret MeshData {
-  let verts: List(Float) = List.create(Float, cap: 24 * 8)
-  let indices: List(Int) = List.create(Int, cap: 36)
+  var verts: List(Float) = List.create(Float, cap: 24 * 8)
+  var indices: List(Int) = List.create(Int, cap: 36)
   let h: Float = size * 0.5
 
   # Per face: outward normal, then the four corners in counter-clockwise
@@ -680,8 +680,8 @@ func makeTorus(
   majorSegs: view Int
   minorSegs: view Int
 ) pub ret MeshData {
-  let verts: List(Float) = List.create(Float, cap: (majorSegs + 1) * (minorSegs + 1) * 8)
-  let indices: List(Int) = List.create(Int, cap: majorSegs * minorSegs * 6)
+  var verts: List(Float) = List.create(Float, cap: (majorSegs + 1) * (minorSegs + 1) * 8)
+  var indices: List(Int) = List.create(Int, cap: majorSegs * minorSegs * 6)
   let pi: Float = 3.141592653589793
   var i: Int = 0
   loop i <= majorSegs {
@@ -763,8 +763,8 @@ const meshSmoothAngleDefault: Float = 60.0
 # have a hard seam. A position hash would trade that clarity for time
 # this does not need to save: it runs once, at load.
 func smoothMeshNormals(meshData: view MeshData, angleDeg: view Float) pub ret MeshData {
-  let verts: List(Float) = List.create(Float, cap: meshData.verts.length)
-  let indices: List(Int) = List.create(Int, cap: meshData.indices.length)
+  var verts: List(Float) = List.create(Float, cap: meshData.verts.length)
+  var indices: List(Int) = List.create(Int, cap: meshData.indices.length)
   loop let vertValue: view Float in meshData.verts {
     verts.add(value: vertValue)
   }

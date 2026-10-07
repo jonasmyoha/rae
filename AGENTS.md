@@ -191,10 +191,8 @@ These instructions define **how Codex should work**, communicate progress, and i
   — like Rust's `let` or a Swift struct `let`, nothing in it changes after
   that line: no `x.field = ...`, no `x.list.add(...)`, no `x` or `x.part`
   passed to a `mod` parameter, at any depth; `var` is the only mutable one.
-- The compiler is being moved there in two steps: today the check is a
-  warning you opt into (`RAE_FROZEN_LET=warn`), because ~2,100 existing
-  sites still write into a `let`; the follow-up migrates them and makes it an
-  error. Write NEW code to the frozen rule now: if you change it, it is `var`.
+- Enforced since compiler 0.1.200: a write into a `let` is a compile error
+  naming the binding's line. If you change it, it is `var`.
 - Edges: a `let` holding a `Ptr`/`Buffer`, a GPU/entity handle or a
   `mod`/`view` alias freezes the HANDLE, not what it points at (writing
   through it is fine); `if let` and `=>` make new bindings.

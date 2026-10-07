@@ -596,7 +596,7 @@ func evaluateGeometry(name: view String, input: view List(Float), out: mod List(
   let firstVec2: Vec2 = vec2At(values: input, index: 0)
   let secondVec2: Vec2 = vec2At(values: input, index: 2)
   if name is "b3MakeAABB" {
-    let points: List(Vec3) = List.create(Vec3, cap: 5)
+    var points: List(Vec3) = List.create(Vec3, cap: 5)
     loop var j: Int = 0, j < 5, ++j {
       points.add(value: vecAt(values: input, index: j * 3))
     }
@@ -858,7 +858,7 @@ func main() {
   var calls: Int = 0
   var mismatches: Int = 0
   var unknown: Int = 0
-  let names: List(String) = List.create(String, cap: 160)
+  var names: List(String) = List.create(String, cap: 160)
   loop var i: Int = 0, i < lines.length, ++i {
     let line: String = lines.copyAtDefault(index: i)
     if line.length() is 0 or line.startsWith(prefix: "#") {
@@ -866,8 +866,8 @@ func main() {
     }
     let tokens: List(String) = line.split(sep: " ")
     let name: String = tokens.copyAtDefault(index: 0)
-    let input: List(Float) = List.create(Float, cap: 24)
-    let expected: List(Float) = List.create(Float, cap: 16)
+    var input: List(Float) = List.create(Float, cap: 24)
+    var expected: List(Float) = List.create(Float, cap: 16)
     var afterArrow: Bool = false
     loop var j: Int = 1, j < tokens.length, ++j {
       let token: String = tokens.copyAtDefault(index: j)
@@ -879,7 +879,7 @@ func main() {
         input.add(value: token.toFloat())
       }
     }
-    let actual: List(Float) = List.create(Float, cap: 16)
+    var actual: List(Float) = List.create(Float, cap: 16)
     let known: Bool = evaluateVectors(name: name, input: input, out: actual) or evaluateRotations(
       name: name
       input: input

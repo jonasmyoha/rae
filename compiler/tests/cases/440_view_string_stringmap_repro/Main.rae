@@ -38,17 +38,17 @@ func nodeIndex(nodes: view List(Node), target: view String) ret Int {
 
 func main() {
   unsafe {
-    let nodes: List(Node) = List.create(Node, cap: 8)
+    var nodes: List(Node) = List.create(Node, cap: 8)
 
     # Build 5 nodes with siblings of different lengths to maximize
     # chance of torn-read pattern.
-    let rootKids: List(String) = List.create(String, cap: 4)
+    var rootKids: List(String) = List.create(String, cap: 4)
     rootKids.add(value: "TopBar")
     rootKids.add(value: "AlbumHero")
     rootKids.add(value: "PlayButton")
     nodes.add(value: { nodeId: "AlbumRoot", childIds: own rootKids })
 
-    let topKids: List(String) = List.create(String, cap: 1)
+    var topKids: List(String) = List.create(String, cap: 1)
     topKids.add(value: "BackButton")
     nodes.add(value: { nodeId: "TopBar", childIds: own topKids })
 
@@ -62,7 +62,7 @@ func main() {
     nodes.add(value: { nodeId: "PlayButton", childIds: own playKids })
 
     # Build a parallel map of nodeId → index, mirroring world.nodeIds.
-    let map: StringMap(Int) = StringMap.create(Int, cap: 16)
+    var map: StringMap(Int) = StringMap.create(Int, cap: 16)
     var s: Int = 0
     loop s < nodes.length {
       let nd: Node = rae_ext_rae_buf_get(buf: nodes.data, index: s)
@@ -78,7 +78,7 @@ func main() {
       var parent: Node = rae_ext_rae_buf_get(buf: nodes.data, index: p)
       let kn: Int = parent.childIds.length
       if kn > 0 {
-        let kidsAssembly: List(Int) = List.create(Int, cap: kn)
+        var kidsAssembly: List(Int) = List.create(Int, cap: kn)
         var q: Int = 0
         loop q < kn {
           if let childId: String = parent.childIds.copyAt(index: q) {

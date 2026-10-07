@@ -33,8 +33,8 @@ func loadSkinnedPrimitiveSmoothed(
   primIndex: view Int
   smoothAngleDeg: view Float
 ) pub ret SkinnedMeshData {
-  let verts: List(Float) = List.create(Float, cap: 0)
-  let indices: List(Int) = List.create(Int, cap: 0)
+  var verts: List(Float) = List.create(Float, cap: 0)
+  var indices: List(Int) = List.create(Int, cap: 0)
   if glb.ok is false {
     ret SkinnedMeshData { verts: own verts, indices: own indices, vertCount: 0 }
   }
@@ -148,7 +148,7 @@ func srgbToLinear(c: view Float) ret Float {
 }
 
 func copyIndices(src: view List(Int)) ret List(Int) {
-  let out: List(Int) = List.create(Int, cap: src.length)
+  var out: List(Int) = List.create(Int, cap: src.length)
   var i: Int = 0
   loop i < src.length {
     out.add(value: intAt(list: src, index: i, fallback: 0))

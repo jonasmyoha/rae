@@ -65,7 +65,7 @@ func coverGridData(state: view AppState, withPlaylist: view Bool) ret ListViewDa
     albums: state.mediaLibrary.albums
     library: state.library
   )
-  let rows: List(ListViewRow) = List.create(ListViewRow, cap: keys.length + 1)
+  var rows: List(ListViewRow) = List.create(ListViewRow, cap: keys.length + 1)
   if withPlaylist {
     rows.add(value: playlistTileRow(state: state))
   }
@@ -103,7 +103,7 @@ func searchData(
   albumsOnly: view Bool
   maxRows: view Int
 ) ret ListViewData {
-  let rows: List(ListViewRow) = List.create(ListViewRow, cap: maxRows)
+  var rows: List(ListViewRow) = List.create(ListViewRow, cap: maxRows)
   if query.length() is 0 {
     ret ListViewData { rows: own rows }
   }
@@ -191,7 +191,7 @@ func trackRow(
 
 func albumTracksData(state: view AppState, playbackSystem: view PlaybackSystem) ret ListViewData {
   let cv: CollectionView = buildCurrentCollection(state: state)
-  let rows: List(ListViewRow) = List.create(ListViewRow, cap: cv.rows.length)
+  var rows: List(ListViewRow) = List.create(ListViewRow, cap: cv.rows.length)
   var r: Int = 0
   loop let cr: view CollectionRow in cv.rows {
     rows.add(value: trackRow(cr: cr, visual: r, playbackSystem: playbackSystem))
@@ -202,7 +202,7 @@ func albumTracksData(state: view AppState, playbackSystem: view PlaybackSystem) 
 
 # ----- the bottom sheet's actions ------------------------------------------
 func sheetData(sheet: view BottomSheetState) ret ListViewData {
-  let rows: List(ListViewRow) = List.create(ListViewRow, cap: sheet.actions.length)
+  var rows: List(ListViewRow) = List.create(ListViewRow, cap: sheet.actions.length)
   loop let action: view BottomSheetAction in sheet.actions {
     var row: ListViewRow = newListRow(cap: 3)
     listCell(row: row, key: "key", value: "{action.actionId}")
@@ -230,7 +230,7 @@ func recentData(state: view AppState) ret ListViewData {
   if n < count {
     count = n
   }
-  let rows: List(ListViewRow) = List.create(ListViewRow, cap: count)
+  var rows: List(ListViewRow) = List.create(ListViewRow, cap: count)
   var visual: Int = 0
   loop visual < count {
     let entryIdx: Int = n - 1 - visual

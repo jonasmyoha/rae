@@ -42,7 +42,7 @@ func poseBits(transform: view b3Transform) ret List(Int) {
     transform.q.v.z
     transform.q.s
   }
-  let bits: List(Int) = List.create(Int, cap: 7)
+  var bits: List(Int) = List.create(Int, cap: 7)
   loop var i: Int = 0, i < values.length, ++i {
     bits.add(value: Math.floatBits(value: values.copyAtDefault(index: i)))
   }
@@ -65,7 +65,7 @@ func main() {
     let ground: b3BoxHull = b3MakeBoxHull(hx: 20.0, hy: 1.0, hz: 20.0)
     b3CreateHullShape(bodyId: groundId, def: shapeDef, hull: ground.base)
 
-    let boxes: List(b3BodyId) = List.create(b3BodyId, cap: 5)
+    var boxes: List(b3BodyId) = List.create(b3BodyId, cap: 5)
     let box: b3BoxHull = b3MakeBoxHull(hx: 0.5, hy: 0.5, hz: 0.5)
     loop var i: Int = 0, i < 5, ++i {
       var bodyDef: b3BodyDef = b3DefaultBodyDef()

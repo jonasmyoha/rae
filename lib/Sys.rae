@@ -116,7 +116,7 @@ func readFileBytes(path: view String) pub ret List(Int) {
   # List(Int) is an ordinary owned value.
   unsafe {
     let raw: Buffer(Int) = rae_sys_read_file_bytes(path: path, outLen: count)
-    let out: List(Int) = List.create(Int, cap: count)
+    var out: List(Int) = List.create(Int, cap: count)
     if count is 0 {
       ret own out
     }

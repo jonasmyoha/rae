@@ -61,7 +61,7 @@ type Adopter {
 }
 
 func createAdopter() ret Adopter {
-  let handles: List(Ptr) = List.create(Ptr, cap: 1)
+  var handles: List(Ptr) = List.create(Ptr, cap: 1)
   unsafe {
     let descriptor: WGPUBufferDescriptor = {
       size: 16 as UInt64
@@ -117,7 +117,8 @@ func main() ret Int {
     ret 1
   }
   var issuer: IdIssuer = IdIssuer.create()
-  if let resources: GpuResources = GpuResources.create(issuer: issuer, capacity: 12) {
+  if let createdResources: GpuResources = GpuResources.create(issuer: issuer, capacity: 12) {
+    var resources: GpuResources = own createdResources
     # Geometry: one triangle covering clip space, u32 indices, packed with GpuArgs.
     var vertices: ArgWriter = createArgs(uniform: false)
     pushVec2F(writer: vertices, x: 0.0 - 1.0, y: 0.0 - 1.0)
@@ -185,9 +186,9 @@ func main() ret Int {
                 ret 1
               }
               # Pipeline: float32x2 position at location 0, RGBA8 target, no blend, no depth.
-              let attributes: List(VertexAttributeSpec) = List.create(VertexAttributeSpec, cap: 1)
+              var attributes: List(VertexAttributeSpec) = List.create(VertexAttributeSpec, cap: 1)
               attributes.add(value: { format: WGPUVertexFormat_Float32x2, offset: 0, location: 0 })
-              let colorFormats: List(Int32) = List.create(Int32, cap: 1)
+              var colorFormats: List(Int32) = List.create(Int32, cap: 1)
               colorFormats.add(value: WGPUTextureFormat_RGBA8Unorm)
               let spec: RenderPipelineSpec = {
                 vertexStride: 8
@@ -208,7 +209,7 @@ func main() ret Int {
                 spec: spec
                 constants: noShaderConstants()
               ) {
-                let entries: List(ResourceRef) = List.create(ResourceRef, cap: 1)
+                var entries: List(ResourceRef) = List.create(ResourceRef, cap: 1)
                 entries.add(value: externalRef(id: adopted))
                 if let bindGroup: BindGroupId = createRenderBindGroup(
                   resources: resources
@@ -223,7 +224,8 @@ func main() ret Int {
                     b: 0.0
                     a: 1.0
                   )
-                  if let recording: Recording = beginRecording(resources: resources) {
+                  if let openedRecording: Recording = beginRecording(resources: resources) {
+                    var recording: Recording = own openedRecording
                     if recordDrawIndexed(
                       recording: recording
                       resources: resources
@@ -262,7 +264,7 @@ func main() ret Int {
                         if awaitReadback(resources: resources, id: read) is not 1 {
                           ret 1
                         }
-                        let bytes: List(UInt8) = List.create(UInt8, cap: 1024)
+                        var bytes: List(UInt8) = List.create(UInt8, cap: 1024)
                         var z: Int = 0
                         loop z < 1024 {
                           bytes.add(value: 0 as UInt8)
@@ -328,7 +330,7 @@ func main() ret Int {
                         releaseAdopter(adopter: adopter)
                         # Refusals: a released external cannot be bound, a stale pipeline cannot
                         # take a bind group, and a draw with a too-small index buffer is refused.
-                        let staleEntries: List(ResourceRef) = List.create(ResourceRef, cap: 1)
+                        var staleEntries: List(ResourceRef) = List.create(ResourceRef, cap: 1)
                         staleEntries.add(value: externalRef(id: adopted))
                         if let stale: BindGroupId = createRenderBindGroup(
                           resources: resources
@@ -337,7 +339,8 @@ func main() ret Int {
                         ) {
                           ret 1
                         }
-                        if let recording2: Recording = beginRecording(resources: resources) {
+                        if let openedRecording2: Recording = beginRecording(resources: resources) {
+                          var recording2: Recording = own openedRecording2
                           if recordDrawIndexed(
                             recording: recording2
                             resources: resources

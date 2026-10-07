@@ -46,7 +46,7 @@ func runHoverStressMode(
   var textureRegistry: TextureRegistry = createTextureRegistry()
   let viewport: Viewport = createViewportFromWindow()
   loadAllTextures(reg: textureRegistry, albums: appState.mediaLibrary.albums)
-  let world: UiWorld = buildScreenWorld(
+  var world: UiWorld = buildScreenWorld(
     uiSystems: uiSystems
     dockSystem: dockSystem
     screen: Screen.home
@@ -172,7 +172,7 @@ func runStressMode(
   let stressPlayback: PlaybackSystem = createPlaybackSystem()
   var stressTextureRegistry: TextureRegistry = createTextureRegistry()
   let stressViewport: Viewport = createViewportFromWindow()
-  let warm: UiWorld = buildScreenWorld(
+  var warm: UiWorld = buildScreenWorld(
     uiSystems: uiSystems
     dockSystem: dockSystem
     screen: Screen.album
@@ -192,7 +192,7 @@ func runStressMode(
     if (stressI - (stressI / 2) * 2) is 1 {
       stressScreen = Screen.player
     }
-    let sworld: UiWorld = buildScreenWorld(
+    var sworld: UiWorld = buildScreenWorld(
       uiSystems: uiSystems
       dockSystem: dockSystem
       screen: stressScreen

@@ -162,7 +162,7 @@ func registerAppObserver(
   sources: view Int
   tables: view List(String)
 ) {
-  let reads: List(Int) = List.create(Int, cap: tables.length)
+  var reads: List(Int) = List.create(Int, cap: tables.length)
   loop let table: view String in tables {
     let id: Int = tableIdByName(UiWorld, world: world, name: table)
     if id < 0 {

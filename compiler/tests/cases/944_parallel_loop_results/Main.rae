@@ -16,7 +16,7 @@ func main() {
   let count: Int = 1000000
 
   # A per-element transform over a million elements: element i from i alone.
-  let squares: List(Int) = List.create(Int, cap: count)
+  var squares: List(Int) = List.create(Int, cap: count)
   loop var i: Int = 0, i < count, ++i {
     squares.add(value: 0)
   }
@@ -33,7 +33,7 @@ func main() {
   # the sequential sum, whatever the worker count.
   let chunkCount: Int = 64
   let chunkSize: Int = count / chunkCount
-  let partials: List(Int) = List.create(Int, cap: chunkCount)
+  var partials: List(Int) = List.create(Int, cap: chunkCount)
   loop var c: Int = 0, c < chunkCount, ++c {
     partials.add(value: 0)
   }
@@ -56,7 +56,7 @@ func main() {
 
   # Structs updated in place through `modAt`, reading captured values.
   let deltaTime: Float = 0.5
-  let particles: List(Particle) = List.create(Particle, cap: 1000)
+  var particles: List(Particle) = List.create(Particle, cap: 1000)
   loop var i: Int = 0, i < 1000, ++i {
     particles.add(value: Particle { x: i as Float, velocity: 1.0 })
   }
@@ -75,7 +75,7 @@ func main() {
 
   # Strings made in the body (the temp pool is per thread) and stored as the
   # element of the index.
-  let labels: List(String) = List.create(String, cap: 100)
+  var labels: List(String) = List.create(String, cap: 100)
   loop var i: Int = 0, i < 100, ++i {
     labels.add(value: "")
   }
@@ -87,12 +87,12 @@ func main() {
   # A parallelLoop inside a parallel body runs inline on its worker. The
   # inner loop writes the element of ITS index in a List local to the outer
   # iteration.
-  let grid: List(Int) = List.create(Int, cap: 8)
+  var grid: List(Int) = List.create(Int, cap: 8)
   loop var i: Int = 0, i < 8, ++i {
     grid.add(value: 0)
   }
   parallelLoop var row: Int = 0, row < 8, ++row {
-    let cells: List(Int) = List.create(Int, cap: 8)
+    var cells: List(Int) = List.create(Int, cap: 8)
     loop var k: Int = 0, k < 8, ++k {
       cells.add(value: 0)
     }
