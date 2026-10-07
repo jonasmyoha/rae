@@ -263,6 +263,7 @@ bool emit_type_recursive(CompilerContext* ctx, const AstModule* m, const AstType
 
 // -- Decl/spec registry --
 void register_decl(CompilerContext* ctx, const AstDecl* decl);
+#include "c_decl_index.h"
 void collect_decls_from_module(CompilerContext* ctx, const AstModule* module);
 bool type_refs_equal(const AstTypeRef* a, const AstTypeRef* b);
 bool is_concrete_type(const AstTypeRef* type);

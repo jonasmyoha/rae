@@ -44,28 +44,14 @@ static bool array_element_ref(const AstTypeRef* type, AstTypeRef* out) {
   return false;
 }
 
-static const AstFuncDecl* find_named_unary_for(CompilerContext* cctx, const char* name, Str base) {
-  if (!cctx || base.len == 0) return NULL;
-  for (size_t j = 0; j < cctx->all_decl_count; j++) {
-    const AstDecl* d = cctx->all_decls[j];
-    if (d->kind != AST_DECL_FUNC) continue;
-    if (!str_eq_cstr(d->as.func_decl.name, name)) continue;
-    if (d->as.func_decl.generic_params) continue;
-    if (d->as.func_decl.is_extern) continue;
-    const AstParam* first = d->as.func_decl.params;
-    if (!first || !first->type || first->next) continue;
-    if (!str_eq(get_base_type_name(first->type), base)) continue;
-    return &d->as.func_decl;
-  }
-  return NULL;
-}
-
 const AstFuncDecl* find_user_drop_for(CompilerContext* cctx, Str base) {
-  return find_named_unary_for(cctx, "drop", base);
+  if (!cctx || base.len == 0) return NULL;
+  return decl_index_find_unary(cctx, true, base);
 }
 
 const AstFuncDecl* find_user_copy_for(CompilerContext* cctx, Str base) {
-  return find_named_unary_for(cctx, "copy", base);
+  if (!cctx || base.len == 0) return NULL;
+  return decl_index_find_unary(cctx, false, base);
 }
 
 bool type_has_user_drop(CompilerContext* cctx, const AstTypeRef* type) {
