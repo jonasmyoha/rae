@@ -251,6 +251,32 @@ options (fork F2):
   machinery.
 - (c) Nothing: document that blocking externs inside tasks stall a worker.
 
+**Decided (maintainer, 2026-10-08): (a), with the keyword `blocking`.** It is
+written where Rae puts declaration modifiers, before `unsafe extern`, and is
+valid ONLY on `extern` declarations:
+
+```rae
+# may wait on the disk for a long time: inside a task it runs on a blocking-call thread
+func nativeReadFile(path: String) blocking unsafe extern("rae_ext_Files_read") ret String
+
+# never waits (sockets are non-blocking; the poller does the waiting): no mark
+func nativeRead(handle: Int, buffer: Buffer(UInt8), offset: Int, maxBytes: Int) unsafe extern("rae_ext_Net_read") ret Int
+```
+
+- **Why this word:** "blocking call" is the standard term (Rust's tokio has
+  `spawn_blocking` for exactly this). It is a plain keyword, never an `@`
+  attribute.
+- **Who uses it:** with the Rae-first rule almost every extern lives in
+  `lib/`, so the stdlib authors mark the few C calls that can wait (file I/O,
+  a library doing its own network calls). The generated WebGPU and Box3D
+  bindings do not block and stay unmarked.
+- **Meaning:** inside a lightweight task, a call to a `blocking` extern runs on
+  a separate blocking-call thread while the task suspends. Outside a task (in
+  `main`, a `mainLoop` frame, or with today's thread-per-spawn) it changes
+  nothing, and the call just runs.
+- **Rules:** sema rejects `blocking` on a non-extern function; `rae format`
+  prints it; it is part of the extern's declaration, not of its type.
+
 ### 4.5 Fairness
 
 A task that computes for a long time without waiting keeps its worker. Go
@@ -324,8 +350,8 @@ inserts. The options (fork F3):
 1. **F1 Implementation:** stackless inferred state machines (recommended:
    portable C, works in wasm, fits the whole-program compiler) or stackful
    tasks.
-2. **F2 Blocking externs:** a bare modifier keyword on such externs
-   (recommended, explicit and simple), Go-style hand-off, or nothing.
+2. **F2 Blocking externs: DECIDED** (maintainer, 2026-10-08). The `blocking`
+   keyword on extern declarations (§4.4).
 3. **F3 Fairness:** cooperative only first (recommended), with loop
    back-edge yield checks as a later option if measurements show starvation.
 4. **F4 One keyword:** `spawn` becomes lightweight and stays the only spelling
