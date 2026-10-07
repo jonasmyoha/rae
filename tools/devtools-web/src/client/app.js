@@ -36,7 +36,8 @@ const runTestCompiledBtn = document.getElementById("run-test-compiled-btn");
 const lineCountCanvas = document.getElementById("line-count-chart");
 const compilerSpeedCanvas = document.getElementById("compiler-speed-chart");
 const compilerSpeedEmpty = document.getElementById("compiler-speed-empty");
-const compilerSpeedSummary = document.getElementById("compiler-speed-summary");
+const statsSpeedList = document.getElementById("stats-speed-list");
+const statsSpeedMoreBtn = document.getElementById("stats-speed-more");
 const lineCountSummary = document.getElementById("line-count-summary");
 const lineCountEmpty = document.getElementById("line-count-empty");
 const lineCountHistory = document.getElementById("line-count-history");
@@ -3922,10 +3923,10 @@ async function refreshStatisticsPanels() {
     ]);
     if (speedResult.status === "fulfilled") {
       compilerSpeedMetrics = speedResult.value;
-      renderCompilerSpeedSummary(compilerSpeedMetrics);
+      renderMetricList(statsSpeedList, compilerSpeedMetrics, "compiler.lines_per_s", statsSpeedMoreBtn);
     } else {
       compilerSpeedMetrics = [];
-      if (compilerSpeedSummary) compilerSpeedSummary.textContent = "";
+      setStatsListPlaceholder(statsSpeedList, "Failed to load compiler speed.");
       recordError("Stats", getErrorMessage(speedResult.reason));
     }
     if (testsResult.status === "fulfilled") {
@@ -4024,7 +4025,10 @@ function renderMetricList(listEl, entries, metricName, moreBtn) {
 
     const meta = document.createElement("div");
     const timestamp = entry.timestamp ? new Date(entry.timestamp).toLocaleString() : "Unknown time";
-    meta.innerHTML = `<strong>${formatMetricStatus(entry.metadata)}</strong><br/><time>${timestamp}</time>`;
+    const status = metricName === "compiler.lines_per_s"
+      ? formatSpeedDetail(entry.metadata)
+      : formatMetricStatus(entry.metadata);
+    meta.innerHTML = `<strong>${status}</strong><br/><time>${timestamp}</time>`;
     meta.style.textAlign = "right";
 
     item.appendChild(value);
@@ -4072,6 +4076,9 @@ function formatDurationMs(ms) {
 }
 
 function formatMetricValue(metric, value) {
+  if (typeof value === "number" && metric === "compiler.lines_per_s") {
+    return `${numberFormatter.format(value)} lines/s`;
+  }
   if (typeof value === "number") {
     if (metric?.includes("duration")) {
       return formatDurationMs(value);
@@ -4079,6 +4086,15 @@ function formatMetricValue(metric, value) {
     return value.toFixed(2);
   }
   return String(value ?? "");
+}
+
+// A compiler-speed row: what was measured, and where a backfilled point came
+// from.
+function formatSpeedDetail(metadata = {}) {
+  const lines = typeof metadata.lines === "number" ? numberFormatter.format(metadata.lines) : "?";
+  const seconds = typeof metadata.emitMs === "number" ? (metadata.emitMs / 1000).toFixed(1) : "?";
+  const source = metadata.backfilled ? " (from a dashboard build)" : "";
+  return `${lines} lines in ${seconds} s${source}`;
 }
 
 function formatMetricStatus(metadata = {}) {
@@ -4167,42 +4183,31 @@ function renderLineCountHistory(entries) {
   }
 }
 
-// The newest compiler-speed point against the oldest one on the graph.
-function renderCompilerSpeedSummary(entries) {
-  if (!compilerSpeedSummary) return;
-  if (!entries.length) {
-    compilerSpeedSummary.textContent = "";
-    return;
-  }
-  const latest = entries[0];
-  const oldest = entries[entries.length - 1];
-  const meta = latest.metadata ?? {};
-  const latestLabel = `${numberFormatter.format(latest.value)} lines/s`;
-  const detail = typeof meta.lines === "number" && typeof meta.emitMs === "number"
-    ? ` (${numberFormatter.format(meta.lines)} lines in ${(meta.emitMs / 1000).toFixed(1)} s)`
-    : "";
-  const change = oldest.value > 0 && entries.length > 1
-    ? `, ${latest.value >= oldest.value ? "+" : ""}${Math.round(((latest.value - oldest.value) / oldest.value) * 100)}% since ${new Date(oldest.timestamp).toLocaleDateString()}`
-    : "";
-  compilerSpeedSummary.textContent = `Latest: ${latestLabel}${detail}, ${new Date(latest.timestamp).toLocaleString()}${change}`;
-}
-
-// What a chart's hover shows for one point: its date and its value.
+// Per chart: what the hover shows for one point (`point`) and how an axis
+// value reads (`axis`).
 const chartValueFormatters = {
-  speed: (entry) => {
-    const meta = entry.metadata ?? {};
-    const lines = typeof meta.lines === "number" ? ` · ${numberFormatter.format(meta.lines)} lines` : "";
-    return `${numberFormatter.format(entry.value)} lines/s${lines}`;
+  speed: {
+    point: (entry) => `${numberFormatter.format(entry.value)} lines per second`,
+    axis: (value) => `${numberFormatter.format(Math.round(value))} lines/s`
   },
-  tests: (entry) => {
-    const meta = entry.metadata ?? {};
-    const cases = typeof meta.passed === "number"
-      ? ` · ${numberFormatter.format(meta.passed + (meta.failed ?? 0))} cases`
-      : "";
-    return `${(entry.value / 60000).toFixed(1)} min${cases}`;
+  tests: {
+    point: (entry) => {
+      const meta = entry.metadata ?? {};
+      const cases = typeof meta.passed === "number"
+        ? `, ${numberFormatter.format(meta.passed + (meta.failed ?? 0))} cases`
+        : "";
+      return `${formatDurationMs(entry.value)}${cases}`;
+    },
+    axis: (value) => `${(value / 60000).toFixed(1)} min`
   },
-  builds: (entry) => `${(entry.value / 1000).toFixed(1)} s`,
-  lines: (entry) => `${numberFormatter.format(entry.lines ?? 0)} lines`
+  builds: {
+    point: (entry) => formatDurationMs(entry.value),
+    axis: (value) => `${(value / 1000).toFixed(1)} s`
+  },
+  lines: {
+    point: (entry) => `${numberFormatter.format(entry.lines ?? 0)} lines of compiler`,
+    axis: (value) => `${numberFormatter.format(Math.round(value))} lines`
+  }
 };
 
 function scheduleLineChartRender() {
@@ -4277,12 +4282,17 @@ function attachChartHover(canvas) {
     const entry = chart.entries[nearest];
     const point = chart.points[nearest];
     const when = entry.timestamp ? new Date(entry.timestamp).toLocaleString() : "Unknown time";
-    const value = chart.formatValue ? chart.formatValue(entry) : String(entry[chart.valueKey]);
+    const value = chart.formatValue ? chart.formatValue.point(entry) : String(entry[chart.valueKey]);
     tooltip.innerHTML = `<time>${when}</time><strong>${value}</strong>`;
     tooltip.hidden = false;
     const left = Math.min(Math.max(point.x, tooltip.offsetWidth / 2 + 4), rect.width - tooltip.offsetWidth / 2 - 4);
     tooltip.style.left = `${canvas.offsetLeft + left}px`;
-    tooltip.style.top = `${canvas.offsetTop + point.y - 12}px`;
+    // Above the point, or below it when that would leave the chart (the
+    // container clips what overflows it)
+    const above = point.y - 12 - tooltip.offsetHeight >= 4;
+    tooltip.style.top = above
+      ? `${canvas.offsetTop + point.y - 12 - tooltip.offsetHeight}px`
+      : `${canvas.offsetTop + point.y + 14}px`;
   });
 }
 
@@ -4325,36 +4335,69 @@ function drawMetricChart(canvas, entries, valueKey, emptyEl, formatValue = null,
   ctx.scale(dpr, dpr);
   ctx.clearRect(0, 0, width, height);
   
+  // Room above the plot for the top value label, below it for the dates
   const padding = 24;
+  const topPadding = 30;
+  const bottomPadding = 30;
   const chartWidth = width - padding * 2;
-  const chartHeight = height - padding * 2;
+  const chartHeight = height - topPadding - bottomPadding;
   const values = entries.map((entry) => entry[valueKey] ?? 0);
   const minValue = Math.min(...values);
   const maxValue = Math.max(...values);
   const range = Math.max(maxValue - minValue, 1);
+  // x is TIME: a point sits at its date, so a month without runs is a month
+  // of axis, not one step. Entries without a usable date fall back to their
+  // order.
+  const times = entries.map((entry) => Date.parse(entry.timestamp ?? ""));
+  const timed = times.every((time) => Number.isFinite(time));
+  const firstTime = timed ? Math.min(...times) : 0;
+  const lastTime = timed ? Math.max(...times) : 0;
+  const timeSpan = lastTime - firstTime;
   const spacing = entries.length > 1 ? chartWidth / (entries.length - 1) : 0;
   const points = entries.map((entry, index) => {
-    const x = entries.length > 1 ? padding + index * spacing : padding + chartWidth / 2;
+    let x = padding + chartWidth / 2;
+    if (timed && timeSpan > 0) x = padding + ((times[index] - firstTime) / timeSpan) * chartWidth;
+    else if (entries.length > 1) x = padding + index * spacing;
     const normalized = (entry[valueKey] - minValue) / range;
-    const y = padding + chartHeight - normalized * chartHeight;
+    const y = topPadding + chartHeight - normalized * chartHeight;
     return { x, y };
   });
   ctx.strokeStyle = "rgba(154, 161, 185, 0.2)";
   ctx.lineWidth = 1;
   const gridLines = 4;
   for (let i = 0; i <= gridLines; i++) {
-    const y = padding + (chartHeight / gridLines) * i;
+    const y = topPadding + (chartHeight / gridLines) * i;
     ctx.beginPath();
     ctx.moveTo(padding, y);
     ctx.lineTo(width - padding, y);
     ctx.stroke();
+  }
+  // The value range (top and bottom grid lines) and the date range
+  ctx.fillStyle = "rgba(203, 213, 225, 0.75)";
+  ctx.font = "11px system-ui, sans-serif";
+  const axisLabel = (value) => (formatValue ? formatValue.axis(value) : String(Math.round(value)));
+  // Values at the top and bottom grid lines, on the left; dates under the
+  // axis at its two ends
+  ctx.textAlign = "left";
+  ctx.textBaseline = "bottom";
+  ctx.fillText(axisLabel(maxValue), padding, topPadding - 6);
+  ctx.fillText(axisLabel(minValue), padding + 4, topPadding + chartHeight - 4);
+  if (timed) {
+    const dateLabel = (time) => new Date(time).toLocaleDateString();
+    ctx.textBaseline = "top";
+    ctx.textAlign = "right";
+    ctx.fillText(dateLabel(lastTime), width - padding, topPadding + chartHeight + 6);
+    if (timeSpan > 0) {
+      ctx.textAlign = "left";
+      ctx.fillText(dateLabel(firstTime), padding, topPadding + chartHeight + 6);
+    }
   }
   ctx.beginPath();
   points.forEach((point, index) => {
     if (index === 0) ctx.moveTo(point.x, point.y);
     else ctx.lineTo(point.x, point.y);
   });
-  const strokeGradient = ctx.createLinearGradient(0, padding, 0, height - padding);
+  const strokeGradient = ctx.createLinearGradient(0, topPadding, 0, topPadding + chartHeight);
   strokeGradient.addColorStop(0, "rgba(125, 211, 252, 0.9)");
   strokeGradient.addColorStop(1, "rgba(125, 211, 252, 0.4)");
   ctx.lineWidth = 2;
@@ -4362,10 +4405,10 @@ function drawMetricChart(canvas, entries, valueKey, emptyEl, formatValue = null,
   ctx.lineCap = "round";
   ctx.strokeStyle = strokeGradient;
   ctx.stroke();
-  ctx.lineTo(points[points.length - 1].x, height - padding);
-  ctx.lineTo(points[0].x, height - padding);
+  ctx.lineTo(points[points.length - 1].x, topPadding + chartHeight);
+  ctx.lineTo(points[0].x, topPadding + chartHeight);
   ctx.closePath();
-  const fillGradient = ctx.createLinearGradient(0, padding, 0, height - padding);
+  const fillGradient = ctx.createLinearGradient(0, topPadding, 0, topPadding + chartHeight);
   fillGradient.addColorStop(0, "rgba(125, 211, 252, 0.2)");
   fillGradient.addColorStop(1, "rgba(125, 211, 252, 0)");
   ctx.fillStyle = fillGradient;
@@ -4381,8 +4424,8 @@ function drawMetricChart(canvas, entries, valueKey, emptyEl, formatValue = null,
     ctx.strokeStyle = "rgba(125, 211, 252, 0.45)";
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(point.x, padding);
-    ctx.lineTo(point.x, height - padding);
+    ctx.moveTo(point.x, topPadding);
+    ctx.lineTo(point.x, topPadding + chartHeight);
     ctx.stroke();
     ctx.strokeStyle = "#e0f2fe";
     ctx.lineWidth = 2;
