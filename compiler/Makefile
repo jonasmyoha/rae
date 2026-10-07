@@ -4,8 +4,14 @@
 MODE ?= DEV_FAST
 
 CC = gcc
-COMMON_CFLAGS = -std=c11 -Wall -Wextra -Wpedantic -O0 -g -ffp-contract=off
-LDFLAGS = -framework Foundation -framework ImageIO -framework CoreGraphics -L/opt/homebrew/lib
+# -O2 -flto: the compiler is optimised (O3 measured no faster than O2; LTO
+# adds ~5-10% by inlining small cross-file helpers like str_eq). -g keeps
+# symbols for profiling and debuggers; `make clean build COMPILER_OPT=-O0` gives an
+# unoptimised build for stepping through code (objects do not track the
+# flags, hence the clean).
+COMPILER_OPT ?= -O2 -flto
+COMMON_CFLAGS = -std=c11 -Wall -Wextra -Wpedantic $(COMPILER_OPT) -g -ffp-contract=off
+LDFLAGS = $(filter -flto,$(COMPILER_OPT)) -framework Foundation -framework ImageIO -framework CoreGraphics -L/opt/homebrew/lib
 COMMON_CFLAGS += -I/opt/homebrew/include -I../third_party/tinyexpr
 
 ifeq ($(MODE), CI_STRICT)
