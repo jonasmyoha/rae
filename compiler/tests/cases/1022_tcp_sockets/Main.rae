@@ -1,0 +1,85 @@
+# lib/net/Tcp (docs/server-benchmarks-design.md §9 G1): a loopback echo
+# round-trip on a free port, listening on a busy port, reading from a closed
+# peer, and connecting where nothing listens. Errors are NetStatus values.
+open net/Tcp
+
+func statusName(status: view NetStatus) ret String {
+  ret "{status}"
+}
+
+# Accept the connection the client just made (non-blocking: it may take a
+# moment to arrive)
+func acceptWithin(listenerSocketId: view SocketId, attempts: view Int) ret SocketResult {
+  loop var attempt: Int = 0, attempt < attempts, ++attempt {
+    let accepted: SocketResult = tcpAccept(listenerSocketId: listenerSocketId)
+    if accepted.status is not NetStatus.wouldBlock {
+      ret accepted
+    }
+    sleep(ms: 5)
+  }
+  ret SocketResult { socketId: noSocket(), status: NetStatus.wouldBlock }
+}
+
+func main() ret Int {
+  let listening: SocketResult = tcpListen(host: "127.0.0.1", port: 0, backlog: 16)
+  log("listen: {statusName(status: listening.status)}")
+  let port: Int = socketLocalPort(socketId: listening.socketId)
+  log("port chosen: {port > 0}")
+
+  let client: SocketResult = tcpConnect(host: "127.0.0.1", port: port, timeoutMs: 2000)
+  log("connect: {statusName(status: client.status)}")
+  let server: SocketResult = acceptWithin(listenerSocketId: listening.socketId, attempts: 200)
+  log("accept: {statusName(status: server.status)}")
+  let nothingPending: SocketResult = tcpAccept(listenerSocketId: listening.socketId)
+  log("accept again: {statusName(status: nothingPending.status)}")
+
+  # The echo: client -> server -> client
+  let sent: IoResult = socketWriteText(socketId: client.socketId, text: "hello, rae")
+  log("client wrote {sent.bytes} bytes")
+  var serverBytes: List(UInt8) = List.create(UInt8, cap: 4)
+  log("server readable: {socketWaitReadable(socketId: server.socketId, timeoutMs: 2000)}")
+  let received: IoResult = socketRead(socketId: server.socketId, bytes: serverBytes, maxBytes: 64)
+  log(
+    "server read {received.bytes}: {textFromBytes(
+      bytes: serverBytes
+      start: 0
+      count: serverBytes.length
+    )}"
+  )
+  let echoed: IoResult = socketWrite(
+    socketId: server.socketId
+    bytes: serverBytes
+    start: 0
+    count: serverBytes.length
+  )
+  log("server echoed {echoed.bytes} bytes")
+  var clientBytes: List(UInt8) = List.create(UInt8, cap: 64)
+  let waited: Bool = socketWaitReadable(socketId: client.socketId, timeoutMs: 2000)
+  let back: IoResult = socketRead(socketId: client.socketId, bytes: clientBytes, maxBytes: 64)
+  log("client got back: {textFromBytes(bytes: clientBytes, start: 0, count: back.bytes)}")
+  let empty: IoResult = socketRead(socketId: client.socketId, bytes: clientBytes, maxBytes: 64)
+  log("nothing more: {statusName(status: empty.status)}")
+
+  # A second listener on the same port
+  let busy: SocketResult = tcpListen(host: "127.0.0.1", port: port, backlog: 16)
+  log(
+    "listen on a busy port: {statusName(status: busy.status)} valid {socketIsValid(
+      socketId: busy.socketId
+    )}"
+  )
+
+  # The peer closes: the server's next read is the end of the stream
+  socketClose(socketId: client.socketId)
+  let closedWait: Bool = socketWaitReadable(socketId: server.socketId, timeoutMs: 2000)
+  let after: IoResult = socketRead(socketId: server.socketId, bytes: serverBytes, maxBytes: 64)
+  log("read after the peer closed: {statusName(status: after.status)}")
+  socketClose(socketId: server.socketId)
+
+  # Nothing listens any more: connecting is refused
+  socketClose(socketId: listening.socketId)
+  let refused: SocketResult = tcpConnect(host: "127.0.0.1", port: port, timeoutMs: 2000)
+  log("connect to a closed port: {statusName(status: refused.status)}")
+  let badHost: SocketResult = tcpListen(host: "no.such.host.invalid", port: 0, backlog: 1)
+  log("listen on an unknown host: {statusName(status: badHost.status)}")
+  ret 0
+}

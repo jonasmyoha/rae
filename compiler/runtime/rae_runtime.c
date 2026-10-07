@@ -63,6 +63,7 @@
 #include "runtime_strings_algorithms.c"
 #include "runtime_filesystem.c"
 #include "runtime_file_notify.c"
+#include "runtime_net.c"
 #include "runtime_buffers_math.c"
 /* The cooked sky table. Ahead of every renderer that reads it, and outside
  * the WebGPU guards because the stub builds answer the same push. */

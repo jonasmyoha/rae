@@ -443,7 +443,7 @@ benchmark-only hack: each is stdlib a real server needs.
 
 | # | ticket | size | notes |
 |---|---|---|---|
-| G1 | `lib/net`: TCP listen/accept/connect/read/write/close on value handles (`SocketId`), non-blocking, `TCP_NODELAY`, `SO_REUSEADDR`; errors as values (`opt` / result enums), never `errno` | L | runtime C (`runtime_net.c`) behind a small handle API, the FileNotify pattern (F1) |
+| G1 | **landed 0.1.202** (`lib/net/Tcp.rae` + `compiler/runtime/runtime_net.c`: `tcpListen`/`tcpAccept`/`tcpConnect` → `SocketResult`, `socketRead` appends into a `List(UInt8)`, `socketWrite`/`socketWriteText` → `IoResult`, `socketWaitReadable`, `socketLocalPort`, `socketClose`, `textFromBytes`; fixture 1022). `lib/net`: TCP listen/accept/connect/read/write/close on value handles (`SocketId`), non-blocking, `TCP_NODELAY`, `SO_REUSEADDR`; errors as values (`opt` / result enums), never `errno` | L | runtime C (`runtime_net.c`) behind a small handle API, the FileNotify pattern (F1) |
 | G2 | `lib/net` poller: kqueue (macOS) / epoll (Linux) readiness, `wait(timeoutMs)` filling a caller-owned `List(Readiness)` (no allocation per wait) | M | used by both styles |
 | G3 | a byte buffer for I/O: append, consume from the front, find a byte sequence, view a range as a `String` without copying, reuse without reallocating | M | read and write buffers per connection |
 | G4 | time for servers: IMF-fixdate (`Date:` header, cached once a second), a monotonic sub-ms clock and a tick wait that sleeps until a deadline | S | `nowNs()` exists; `sleep(ms:)` is too coarse for a 30 Hz tick |
