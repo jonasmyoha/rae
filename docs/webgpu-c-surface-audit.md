@@ -79,8 +79,11 @@ remains; tracked as #513 so it is a scoped commit, not a drive-by.
 
 ## Category D — forward renderer (Track A). NOT migrated; known debt (#514).
 
-`runtime_gpu3d.c` (~1221 lines) + `runtime_gpu3d_ssao.c` + `runtime_gpu3d_sky.c`
-still C-encode a *complete second renderer*: `rae_ext_gpu3d_{begin, draw,`
+`runtime_gpu3d.c` (793 lines; its WGSL text is in `runtime_gpu3d_shaders.c`
+since 2026-10-08, and the TAA jitter, the frame's inverse view-projection and
+the TAA / draw-limit settings come from Rae in the frame block —
+`lib/Gpu3dTemporal.rae`, docs/runtime-c-audit.md row 11) + `runtime_gpu3d_ssao.c`
++ `runtime_gpu3d_sky.c` still C-encode a *complete second renderer*: `rae_ext_gpu3d_{begin, draw,`
 `drawMetaballs, drawSkinned, end, submit, tonemap, taa, ssao, skyDraw,`
 `skyHosekPush}`. It is reached through `lib/gpu3d.rae`'s `beginScene`/pass
 wrappers and still drives the forward examples (109 PBR, 111 metaballs-forward).

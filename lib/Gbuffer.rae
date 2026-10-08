@@ -360,18 +360,6 @@ func uploadFrameUniform(
   }
 }
 
-func halton(index: copy Int, base: copy Int) ret Float {
-  var f: Float = 1.0
-  var r: Float = 0.0
-  var i: Int = index
-  loop i > 0 {
-    f = f / base.toFloat()
-    r = r + f * (i % base).toFloat()
-    i = i / base
-  }
-  ret r
-}
-
 func gbufferFrameActive(cache: view GbufferCache) ret Bool {
   unsafe {
     ret cache.pass is not webgpuNull()

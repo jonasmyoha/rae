@@ -472,3 +472,19 @@ func orbitEye(
     z: targetZ + dist * Math.sin(x: pitch)
   )
 }
+
+# Element `index` of the base-`base` Halton sequence in 0.0 ..< 1.0: the
+# digits of `index` in that base, mirrored behind the point. A low-discrepancy
+# walk, so successive indices spread out instead of clumping: the TAA jitter of
+# both renderers (Gbuffer, Gpu3dTemporal).
+func halton(index: view Int, base: view Int) ret Float {
+  var digitWeight: Float = 1.0
+  var value: Float = 0.0
+  var rest: Int = index
+  loop rest > 0 {
+    digitWeight = digitWeight / base.toFloat()
+    value = value + digitWeight * (rest % base).toFloat()
+    rest = rest / base
+  }
+  ret value
+}
