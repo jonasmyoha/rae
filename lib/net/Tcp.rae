@@ -17,6 +17,7 @@
 # (`socketClose`), as with every other runtime handle. macOS and Linux;
 # elsewhere every call answers `unsupported`.
 open net/NetSystem
+open net/ByteBuffer
 
 type SocketId {
   handle: Int
@@ -402,6 +403,35 @@ func socketWriteText(socketId: view SocketId, text: view String) ret IoResult {
     }
   }
   ret IoResult { bytes: 0, status: NetStatus.failed }
+}
+
+# Read up to `maxBytes` onto the end of `buffer` (room is made by compacting
+# its consumed front first, growing only when that is not enough)
+func socketReadBuffer(
+  socketId: view SocketId
+  buffer: mod ByteBuffer
+  maxBytes: view Int
+) ret IoResult {
+  if maxBytes <= 0 {
+    ret IoResult { bytes: 0, status: NetStatus.failed }
+  }
+  byteBufferReserve(buffer: buffer, count: maxBytes)
+  ret socketRead(socketId: socketId, bytes: buffer.bytes, maxBytes: maxBytes)
+}
+
+# Write as much of `buffer`'s unread bytes as the socket takes, and consume
+# what went out (the rest stays for the next writable moment)
+func socketWriteBuffer(socketId: view SocketId, buffer: mod ByteBuffer) ret IoResult {
+  let result: IoResult = socketWrite(
+    socketId: socketId
+    bytes: buffer.bytes
+    start: buffer.start
+    count: byteBufferLength(buffer: buffer)
+  )
+  if result.status is NetStatus.ok {
+    consume(buffer: buffer, count: result.bytes)
+  }
+  ret result
 }
 
 # Wait until the socket has data or its peer closed: true, or false after
