@@ -1,17 +1,246 @@
 # Time and Timer library for Rae
-func nativeFormatTimestamp(epochMs: Int) unsafe extern("rae_ext_Time_formatTimestamp") ret String
+#
+# Dates are computed here, in Rae, from epoch seconds (docs/runtime-c-audit.md
+# row 6; docs/server-benchmarks-design.md §9 G4): `civilFromEpochSeconds` is
+# the one calendar routine, shared by `formatTimestamp`, `formatDate` and the
+# HTTP Date header. All of them are UTC (as gmtime_r was), so no time-zone
+# call is needed.
 
-func formatTimestamp(epochMs: copy Int) ret String {
-  unsafe {
-    ret nativeFormatTimestamp(epochMs: epochMs)
+# A moment broken into its UTC calendar fields
+type CivilTime {
+  year: Int
+  # 1..12
+  month: Int
+  # 1..31
+  day: Int
+  hour: Int
+  minute: Int
+  second: Int
+  # 0 = Sunday .. 6 = Saturday
+  weekday: Int
+}
+
+# `value / divisor` rounded toward minus infinity (Int division truncates)
+func floorDivide(value: view Int, divisor: view Int) ret Int {
+  let quotient: Int = value / divisor
+  if value % divisor is not 0 and (value < 0) is not (divisor < 0) {
+    ret quotient - 1
+  }
+  ret quotient
+}
+
+# The UTC calendar fields of `epochSeconds` (proleptic Gregorian; the days-to-
+# civil conversion is Howard Hinnant's, exact for every Int day count)
+func civilFromEpochSeconds(epochSeconds: view Int) ret CivilTime {
+  let days: Int = floorDivide(value: epochSeconds, divisor: 86400)
+  let secondOfDay: Int = epochSeconds - days * 86400
+  let shifted: Int = days + 719468
+  var era: Int = shifted / 146097
+  if shifted < 0 {
+    era = (shifted - 146096) / 146097
+  }
+  let dayOfEra: Int = shifted - era * 146097
+  let yearOfEra: Int = (dayOfEra - dayOfEra / 1460 + dayOfEra / 36524 - dayOfEra / 146096) / 365
+  let dayOfYear: Int = dayOfEra - (365 * yearOfEra + yearOfEra / 4 - yearOfEra / 100)
+  let monthIndex: Int = (5 * dayOfYear + 2) / 153
+  let day: Int = dayOfYear - (153 * monthIndex + 2) / 5 + 1
+  var month: Int = monthIndex + 3
+  if monthIndex >= 10 {
+    month = monthIndex - 9
+  }
+  var year: Int = yearOfEra + era * 400
+  if month <= 2 {
+    year = year + 1
+  }
+  ret CivilTime {
+    year: year
+    month: month
+    day: day
+    hour: secondOfDay / 3600
+    minute: secondOfDay % 3600 / 60
+    second: secondOfDay % 60
+    weekday: days + 4 - floorDivide(value: days + 4, divisor: 7) * 7
   }
 }
 
-func nativeFormatDate(epochMs: Int) unsafe extern("rae_ext_Time_formatDate") ret String
+# `value` in decimal, at least `width` characters wide with zeros in front; a
+# minus sign counts toward the width (strftime's %Y: year -1 is "-001")
+func padded(value: view Int, width: view Int) ret String {
+  var digits: String = "{value}"
+  var digitWidth: Int = width
+  if value < 0 {
+    digits = "{-value}"
+    digitWidth = width - 1
+  }
+  loop digits.length() < digitWidth {
+    digits = "0{digits}"
+  }
+  if value < 0 {
+    ret "-{digits}"
+  }
+  ret digits
+}
 
+# Append `value` in decimal to `bytes`, at least `width` characters wide with
+# zeros in front; a minus sign counts toward the width (as `padded`)
+func appendPadded(bytes: mod List(UInt8), value: view Int, width: view Int) {
+  var magnitude: Int = value
+  var digitWidth: Int = width
+  if value < 0 {
+    bytes.add(value: 45)
+    magnitude = -value
+    digitWidth = width - 1
+  }
+  var digits: Int = 1
+  var probe: Int = magnitude
+  loop probe >= 10 {
+    probe = probe / 10
+    digits = digits + 1
+  }
+  loop var pad: Int = digits, pad < digitWidth, ++pad {
+    bytes.add(value: 48)
+  }
+  let first: Int = bytes.length
+  loop var i: Int = 0, i < digits, ++i {
+    bytes.add(value: 48)
+  }
+  var position: Int = first + digits - 1
+  loop position >= first {
+    bytes.set(index: position, value: (48 + magnitude % 10) as UInt8)
+    magnitude = magnitude / 10
+    position = position - 1
+  }
+}
+
+# "YYYY-MM-DD" (and, with `withTime`, " HH:MM:SS") of a civil time, built in
+# one byte list and made a String once
+func civilText(civil: view CivilTime, withTime: view Bool) ret String {
+  var bytes: List(UInt8) = List.create(UInt8, cap: 24)
+  appendPadded(bytes: bytes, value: civil.year, width: 4)
+  bytes.add(value: 45)
+  appendPadded(bytes: bytes, value: civil.month, width: 2)
+  bytes.add(value: 45)
+  appendPadded(bytes: bytes, value: civil.day, width: 2)
+  if withTime {
+    bytes.add(value: 32)
+    appendPadded(bytes: bytes, value: civil.hour, width: 2)
+    bytes.add(value: 58)
+    appendPadded(bytes: bytes, value: civil.minute, width: 2)
+    bytes.add(value: 58)
+    appendPadded(bytes: bytes, value: civil.second, width: 2)
+  }
+  ret fromBytes(bytes: bytes, start: 0, count: bytes.length)
+}
+
+# Epoch milliseconds to whole seconds the way the former C did (truncating)
+func epochSecondsOf(epochMs: view Int) ret Int {
+  ret epochMs / 1000
+}
+
+# "YYYY-MM-DD HH:MM:SS" in UTC
+func formatTimestamp(epochMs: copy Int) ret String {
+  let civil: CivilTime = civilFromEpochSeconds(epochSeconds: epochSecondsOf(epochMs: epochMs))
+  ret civilText(civil: civil, withTime: true)
+}
+
+# "YYYY-MM-DD" in UTC
 func formatDate(epochMs: copy Int) ret String {
-  unsafe {
-    ret nativeFormatDate(epochMs: epochMs)
+  let civil: CivilTime = civilFromEpochSeconds(epochSeconds: epochSecondsOf(epochMs: epochMs))
+  ret civilText(civil: civil, withTime: false)
+}
+
+# ----- the HTTP Date header -------------------------------------------
+
+# `epochSeconds` as an IMF-fixdate (RFC 9110 §5.6.7), the form an HTTP
+# Date header uses: "Sun, 06 Nov 1994 08:49:37 GMT"
+func httpDate(epochSeconds: view Int) ret String {
+  let civil: CivilTime = civilFromEpochSeconds(epochSeconds: epochSeconds)
+  let weekdays: String = "SunMonTueWedThuFriSat"
+  let months: String = "JanFebMarAprMayJunJulAugSepOctNovDec"
+  let weekday: String = weekdays.sub(start: civil.weekday * 3, len: 3)
+  let month: String = months.sub(start: (civil.month - 1) * 3, len: 3)
+  ret "{weekday}, {padded(value: civil.day, width: 2)} {month} {padded(value: civil.year, width: 4)} {padded(
+    value: civil.hour
+    width: 2
+  )}:{padded(value: civil.minute, width: 2)}:{padded(value: civil.second, width: 2)} GMT"
+}
+
+# The Date header text, made at most once per second: a server answering
+# thousands of requests a second formats it once and reads `text`.
+type HttpDateCache {
+  # The second `text` was made for; -1 before the first update
+  second: Int
+  text: String
+}
+
+func createHttpDateCache() ret HttpDateCache {
+  ret HttpDateCache { second: -1, text: "" }
+}
+
+# Bring `cache.text` up to `epochSeconds`. True when it changed (a new second).
+func updateHttpDate(cache: mod HttpDateCache, epochSeconds: view Int) ret Bool {
+  if cache.second is epochSeconds {
+    ret false
+  }
+  cache.second = epochSeconds
+  cache.text = httpDate(epochSeconds: epochSeconds)
+  ret true
+}
+
+# ----- deadlines ------------------------------------------------------
+func nativeSleepNs(ns: Int) unsafe extern("rae_ext_Time_sleepNs") ret Int
+
+# Sleep until the monotonic clock (`nowNs()`) reaches `deadlineNs`, to well
+# under a millisecond. The OS may let a sleep run long by a share of its length
+# (macOS timer coalescing: a 33 ms sleep wakes ~4 ms late), so a long wait
+# sleeps 7/8 of what is left, reads the clock, and repeats; the last sleeps are
+# short and so is their slack. A signal that cuts a sleep short only makes it
+# read the clock again.
+func waitUntil(deadlineNs: view Int) {
+  loop {
+    let remaining: Int = deadlineNs - nowNs()
+    if remaining <= 0 {
+      ret
+    }
+    var step: Int = remaining
+    if remaining > 1000000 {
+      step = remaining - remaining / 8
+    }
+    unsafe {
+      let code: Int = nativeSleepNs(ns: step)
+    }
+  }
+}
+
+# A fixed-rate tick (a 30 Hz server frame): each `tickerWait` returns at the
+# next multiple of the period after the start, so lateness never accumulates.
+type Ticker {
+  periodNs: Int
+  nextNs: Int
+  # Ticks skipped because a frame ran longer than a whole period
+  missed: Int
+}
+
+func createTicker(hertz: view Int) ret Ticker {
+  var rate: Int = hertz
+  if rate <= 0 {
+    rate = 1
+  }
+  let period: Int = 1000000000 / rate
+  ret Ticker { periodNs: period, nextNs: nowNs() + period, missed: 0 }
+}
+
+# Wait for the next tick. A frame that overran by more than a period does not
+# make the ticker race to catch up: the missed ticks are counted and the next
+# one is the next period boundary still ahead.
+func tickerWait(ticker: mod Ticker) {
+  waitUntil(deadlineNs: ticker.nextNs)
+  ticker.nextNs = ticker.nextNs + ticker.periodNs
+  let now: Int = nowNs()
+  if ticker.nextNs <= now {
+    let behind: Int = (now - ticker.nextNs) / ticker.periodNs + 1
+    ticker.missed = ticker.missed + behind
+    ticker.nextNs = ticker.nextNs + behind * ticker.periodNs
   }
 }
 

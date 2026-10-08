@@ -36,37 +36,15 @@ void rae_ext_rae_sleep(int64_t ms) {
   }
 }
 
-rae_String rae_ext_Time_formatTimestamp(int64_t epoch_ms) {
-  time_t secs = (time_t)(epoch_ms / 1000);
-  struct tm tm_buf;
-  struct tm* tm_p = gmtime_r(&secs, &tm_buf);
-  if (!tm_p) return (rae_String){NULL, 0, 0, 0};
-  char buf[32];
-  int n = (int)strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", tm_p);
-  if (n <= 0) return (rae_String){NULL, 0, 0, 0};
-  uint8_t* data = malloc((size_t)n + 1);
-  if (!data) return (rae_String){NULL, 0, 0, 0};
-  memcpy(data, buf, (size_t)n);
-  data[n] = '\0';
-  rae_mem_str_tag(data, n + 1, RAE_SITE_FORMAT_TS);
-  return (rae_String){data, (int64_t)n, (int64_t)n + 1, 1};
+/* One nanosleep (lib/Time.rae waitUntil): 0, or -errno (EINTR when a signal
+ * cut it short; the caller re-reads the clock). Platform reason: sleep(ms:)
+ * takes whole milliseconds, and a 30 Hz tick (33.333 ms) needs finer. */
+int64_t rae_ext_Time_sleepNs(int64_t ns) {
+  if (ns <= 0) return 0;
+  struct timespec wait = { (time_t)(ns / 1000000000LL), (long)(ns % 1000000000LL) };
+  return nanosleep(&wait, NULL) == 0 ? 0 : -errno;
 }
 
-rae_String rae_ext_Time_formatDate(int64_t epoch_ms) {
-  time_t secs = (time_t)(epoch_ms / 1000);
-  struct tm tm_buf;
-  struct tm* tm_p = gmtime_r(&secs, &tm_buf);
-  if (!tm_p) return (rae_String){NULL, 0, 0, 0};
-  char buf[16];
-  int n = (int)strftime(buf, sizeof(buf), "%Y-%m-%d", tm_p);
-  if (n <= 0) return (rae_String){NULL, 0, 0, 0};
-  uint8_t* data = malloc((size_t)n + 1);
-  if (!data) return (rae_String){NULL, 0, 0, 0};
-  memcpy(data, buf, (size_t)n);
-  data[n] = '\0';
-  rae_mem_str_tag(data, n + 1, RAE_SITE_FORMAT_DATE);
-  return (rae_String){data, (int64_t)n, (int64_t)n + 1, 1};
-}
 
 void rae_spawn(void* (*func)(void*), void* data) {
 #ifdef _WIN32
