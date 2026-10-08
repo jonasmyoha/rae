@@ -1,0 +1,321 @@
+# Phase 1 HTTP server, plain event-loop style (benchmarks/servers/spec/Http.md,
+# docs/server-benchmarks-design.md §6): one loop per worker owns a list of
+# connections and handles each ready socket with a function call. The sockets,
+# poller, byte buffers and HTTP codec are lib/net and lib/http, the same ones
+# the ECS server (rae/ecs/http) uses, so only the architecture differs.
+#
+# PORT (default 8080) and WORKERS (default 1) come from the environment. Every
+# worker's poller watches the one listener and accepts one connection per
+# wake-up, which spreads the connections over the workers. With
+# RAE_BENCH_STATS=1 each worker prints its request count and the process's
+# allocation count once a second, for the runner's allocations per request.
+open net/Tcp
+open net/Poller
+open net/ByteBuffer
+open http/Http
+open collections/IntMap
+open Time
+
+type Message {
+  message: String
+}
+
+type Connection {
+  socketId: SocketId
+  input: ByteBuffer
+  output: ByteBuffer
+  parse: HttpParseState
+  watchingWritable: Bool
+  # Close once the output is sent
+  closing: Bool
+  open: Bool
+}
+
+type Worker {
+  index: Int
+  listenerSocketId: SocketId
+  poller: Poller
+  ready: List(Readiness)
+  connections: List(Connection)
+  # Socket handle -> its slot in `connections`
+  slots: IntMap(Int)
+  # Slots of closed connections, reused with their buffers
+  freeSlots: List(Int)
+  date: HttpDateCache
+  requests: Int
+  printStats: Bool
+}
+
+func envInt(name: view String, fallback: view Int) ret Int {
+  let text: String = Sys.getEnv(name: name)
+  if text.length() is 0 {
+    ret fallback
+  }
+  ret text.toInt()
+}
+
+# ----- one request ----------------------------------------------------------
+func answer(connection: mod Connection, request: view HttpRequest, date: view String) {
+  if httpPathIs(buffer: connection.input, request: request, path: "/plaintext") {
+    httpAppendResponse(
+      output: connection.output
+      status: 200
+      contentType: "text/plain"
+      body: "Hello, World!"
+      date: date
+      keepAlive: request.keepAlive
+    )
+  } else if httpPathIs(buffer: connection.input, request: request, path: "/json") {
+    let message: Message = { message: "Hello, World!" }
+    httpAppendResponse(
+      output: connection.output
+      status: 200
+      contentType: "application/json"
+      body: message.toJson()
+      date: date
+      keepAlive: request.keepAlive
+    )
+  } else {
+    httpAppendResponse(
+      output: connection.output
+      status: 404
+      contentType: "text/plain"
+      body: "Not Found"
+      date: date
+      keepAlive: request.keepAlive
+    )
+  }
+  if not request.keepAlive {
+    connection.closing = true
+  }
+}
+
+# ----- one connection -------------------------------------------------------
+
+# Read what arrived, answer every complete request, write what the socket
+# takes. The number of requests answered.
+func serviceConnection(connection: mod Connection, date: view String) ret Int {
+  var answered: Int = 0
+  loop var chunk: Int = 0, chunk < 4, ++chunk {
+    let result: IoResult = socketReadBuffer(
+      socketId: connection.socketId
+      buffer: connection.input
+      maxBytes: 16384
+    )
+    if result.status is NetStatus.wouldBlock {
+      break
+    }
+    if result.status is not NetStatus.ok {
+      connection.closing = true
+      break
+    }
+    if result.bytes < 16384 {
+      break
+    }
+  }
+  var request: HttpRequest = createHttpRequest()
+  loop not connection.closing or answered is 0 {
+    let parsed: HttpParseResult = httpParseNext(
+      state: connection.parse
+      buffer: connection.input
+      request: request
+    )
+    if parsed is HttpParseResult.needMore {
+      break
+    }
+    if parsed is HttpParseResult.badRequest {
+      httpAppendBadRequest(output: connection.output, date: date)
+      connection.closing = true
+      break
+    }
+    answer(connection: connection, request: request, date: date)
+    answered = answered + 1
+    if connection.closing {
+      break
+    }
+  }
+  httpParseConsumed(state: connection.parse, buffer: connection.input)
+  flush(connection: connection)
+  ret answered
+}
+
+# Write until the output is empty or the socket takes no more
+func flush(connection: mod Connection) {
+  loop byteBufferLength(buffer: connection.output) > 0 {
+    let result: IoResult = socketWriteBuffer(
+      socketId: connection.socketId
+      buffer: connection.output
+    )
+    if result.status is NetStatus.wouldBlock {
+      ret
+    }
+    if result.status is not NetStatus.ok {
+      byteBufferClear(buffer: connection.output)
+      connection.closing = true
+      ret
+    }
+  }
+}
+
+# ----- the worker -----------------------------------------------------------
+func createWorker(index: view Int, listenerSocketId: view SocketId) ret Worker {
+  let worker: Worker = {
+    index: index
+    listenerSocketId: listenerSocketId
+    poller: createPoller()
+    ready: List.create(Readiness, cap: 256)
+    connections: List.create(Connection, cap: 256)
+    slots: createIntMap(Int, cap: 256)
+    freeSlots: List.create(Int, cap: 64)
+    date: createHttpDateCache()
+    requests: 0
+    printStats: Sys.getEnv(name: "RAE_BENCH_STATS").length() > 0
+  }
+  let status: NetStatus = pollerWatch(
+    poller: worker.poller
+    socketId: listenerSocketId
+    readable: true
+    writable: false
+  )
+  ret worker
+}
+
+func acceptOne(worker: mod Worker) {
+  let accepted: SocketResult = tcpAccept(listenerSocketId: worker.listenerSocketId)
+  if accepted.status is not NetStatus.ok {
+    ret
+  }
+  var slot: Int = worker.connections.length
+  if worker.freeSlots.length > 0 {
+    slot = worker.freeSlots.pop()
+    if let connection: mod Connection => worker.connections.modAt(index: slot) {
+      connection.socketId = accepted.socketId
+      connection.watchingWritable = false
+      connection.closing = false
+      connection.open = true
+    }
+  } else {
+    worker.connections.add(value: Connection {
+      socketId: accepted.socketId
+      input: createByteBuffer(capacity: 4096)
+      output: createByteBuffer(capacity: 4096)
+      parse: createHttpParseState()
+      watchingWritable: false
+      closing: false
+      open: true
+    })
+  }
+  set(this: worker.slots, k: accepted.socketId.handle, value: slot)
+  let status: NetStatus = pollerWatch(
+    poller: worker.poller
+    socketId: accepted.socketId
+    readable: true
+    writable: false
+  )
+}
+
+# After servicing: close a finished connection, or watch for writability
+# while output is waiting
+func settle(worker: mod Worker, slot: view Int) {
+  var closeIt: Bool = false
+  if let connection: mod Connection => worker.connections.modAt(index: slot) {
+    let waiting: Bool = byteBufferLength(buffer: connection.output) > 0
+    if connection.closing and not waiting {
+      let status: NetStatus = pollerForget(
+        poller: worker.poller
+        socketId: connection.socketId
+        readable: true
+        writable: connection.watchingWritable
+      )
+      remove(this: worker.slots, k: connection.socketId.handle)
+      socketClose(socketId: connection.socketId)
+      byteBufferClear(buffer: connection.input)
+      byteBufferClear(buffer: connection.output)
+      connection.parse.position = 0
+      connection.parse.headers.clear()
+      connection.open = false
+      closeIt = true
+    } else if waiting and not connection.watchingWritable {
+      let status: NetStatus = pollerWatch(
+        poller: worker.poller
+        socketId: connection.socketId
+        readable: false
+        writable: true
+      )
+      connection.watchingWritable = true
+    } else if not waiting and connection.watchingWritable {
+      let status: NetStatus = pollerForget(
+        poller: worker.poller
+        socketId: connection.socketId
+        readable: false
+        writable: true
+      )
+      connection.watchingWritable = false
+    }
+  }
+  if closeIt {
+    worker.freeSlots.add(value: slot)
+  }
+}
+
+func handleReady(worker: mod Worker, readiness: view Readiness) {
+  if readiness.socketId is worker.listenerSocketId {
+    acceptOne(worker: worker)
+    ret
+  }
+  var slot: Int = -1
+  if let found: Int = get(this: worker.slots, k: readiness.socketId.handle) {
+    slot = found
+  }
+  if slot < 0 {
+    ret
+  }
+  if let connection: mod Connection => worker.connections.modAt(index: slot) {
+    if readiness.readable or readiness.closed or readiness.failed {
+      worker.requests = worker.requests + serviceConnection(
+        connection: connection
+        date: worker.date.text
+      )
+    } else if readiness.writable {
+      flush(connection: connection)
+    }
+  }
+  settle(worker: worker, slot: slot)
+}
+
+func serve(index: copy Int, listenerHandle: copy Int) ret Int {
+  var worker: Worker = createWorker(
+    index: index
+    listenerSocketId: SocketId { handle: listenerHandle }
+  )
+  loop {
+    let status: NetStatus = pollWait(poller: worker.poller, ready: worker.ready, timeoutMs: 1000)
+    if updateHttpDate(cache: worker.date, epochSeconds: nowMs() / 1000) and worker.printStats {
+      log(
+        "stats worker={worker.index} requests={worker.requests} allocations={Sys.allocationCount()}"
+      )
+    }
+    loop var i: Int = 0, i < worker.ready.length, ++i {
+      if let readiness: view Readiness => worker.ready.viewAt(index: i) {
+        handleReady(worker: worker, readiness: readiness)
+      }
+    }
+  }
+  ret 0
+}
+
+func main() ret Int {
+  let port: Int = envInt(name: "PORT", fallback: 8080)
+  let workers: Int = envInt(name: "WORKERS", fallback: 1)
+  let listening: SocketResult = tcpListen(host: "127.0.0.1", port: port, backlog: 1024)
+  if listening.status is not NetStatus.ok {
+    log("cannot listen on {port}: {listening.status}")
+    ret 1
+  }
+  log("listening on {socketLocalPort(socketId: listening.socketId)} with {workers} workers")
+  var tasks: List(Task(Int)) = {}
+  loop var i: Int = 1, i < workers, ++i {
+    tasks.add(value: spawn serve(index: i, listenerHandle: listening.socketId.handle))
+  }
+  ret serve(index: 0, listenerHandle: listening.socketId.handle)
+}
