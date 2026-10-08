@@ -582,6 +582,20 @@ static inline int64_t rae_ext_rae_str_find_byte(rae_String s, int64_t byte, int6
   const uint8_t* hit = (const uint8_t*)memchr(s.data + from, (int)byte, (size_t)(s.len - from));
   return hit ? (int64_t)(hit - s.data) : -1;
 }
+/* strtod of the number starting at `index` (lib/core/JsonScan.rae): the C
+ * library's correctly rounded decimal-to-double. The number's characters are
+ * copied out first, so a String that is not NUL-terminated is never overread. */
+static inline double rae_ext_rae_str_f64_at(rae_String s, int64_t index) {
+  char digits[64]; int count = 0;
+  if (!s.data || index < 0) return 0.0;
+  while (index + count < s.len && count < 63) {
+    uint8_t byte = s.data[index + count];
+    if (!((byte >= '0' && byte <= '9') || byte == '-' || byte == '+' || byte == '.' || byte == 'e' || byte == 'E')) break;
+    digits[count++] = (char)byte;
+  }
+  digits[count] = 0;
+  return strtod(digits, NULL);
+}
 rae_String rae_ext_rae_str_from_bytes(uint8_t* buffer, int64_t offset, int64_t count);
 rae_String rae_ext_rae_str_from_small_bytes(int64_t first, int64_t second, int64_t third, int64_t fourth, int64_t count);
 rae_String rae_ext_rae_str_from_packed(uint64_t first, uint64_t second, uint64_t third, int64_t count);
@@ -749,23 +763,12 @@ RAE_UNUSED static rae_String rae_ext_rae_str_u8(unsigned char v) { return rae_ex
 rae_String rae_ext_rae_str_any(RaeAny v); // String-format any boxed value (incl. `none`)
 
 /* JSON helpers */
-// #761: defined in runtime_buffers_math.c (next to rae_json_extract_string) so
+// #761: defined in runtime_buffers_math.c so
 // it can mem-tag + pool-register its result like every other owned-String
 // producer (rae_ext_rae_str_interp etc.). Without that, a toJson result bound to
 // a local (`let s = obj.toJson()`) was freed as an UNTRACKED heap (mem-stats
 // outstanding=-1), while inlined use silently LEAKED it (untagged, invisible).
 rae_String rae_json_build(const char* s, int64_t len);
-int64_t rae_json_extract_int(rae_String json, const char* key);
-double rae_json_extract_float(rae_String json, const char* key);
-rae_String rae_json_extract_string(rae_String json, const char* key);
-rae_String rae_json_extract_object(rae_String json, const char* key);
-rae_String rae_json_extract_array(rae_String json, const char* key);
-int64_t rae_json_array_count(rae_String arr);
-rae_String rae_json_array_item(rae_String arr, int64_t idx);
-rae_Bool rae_json_extract_bool(rae_String json, const char* key);
-// #651: presence test for value-opt fromJson — 1 iff key exists and its value
-// is not JSON `null`. Lets `opt <T>` decode has=0 for absent/null keys.
-rae_Bool rae_json_key_present(rae_String json, const char* key);
 rae_String rae_ext_rae_str_cstr_ptr(const char** s); // Legacy/helper
 
 int64_t rae_ext_nextTick(void);

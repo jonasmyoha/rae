@@ -1,0 +1,527 @@
+# core/JsonScan.rae — the JSON reading and writing the compiler-generated
+# `toJson` / `fromJson` of every struct run (docs/runtime-c-audit.md row 5).
+# It replaces a C-only scanner in the runtime; lib/Json is the general parser
+# (a document tree), this is the small one the generated code needs.
+#
+# Every function works on POSITIONS (byte indices) inside the JSON text, so
+# reading a nested object or a list element copies nothing: the generated
+# `fromJson` of a struct finds each field's value with `jsonScanMember` and
+# reads it in place. Only a String value allocates (its decoded text).
+#
+# A value that is not what the reader asks for reads as the type's zero (0,
+# false, "") and an absent key as -1, which is how the generated code leaves
+# missing fields at their zero value.
+func rae_ext_rae_str_byte_at(s: String, index: Int) unsafe extern ret Int
+
+func rae_ext_rae_str_len(s: String) unsafe extern ret Int
+
+func rae_ext_rae_str_compare_bytes(
+  a: String
+  aStart: Int
+  b: String
+  bStart: Int
+  count: Int
+) unsafe extern ret Int
+
+func rae_ext_rae_str_from_bytes(
+  buffer: Buffer(UInt8)
+  offset: Int
+  count: Int
+) unsafe extern ret String
+
+func rae_ext_rae_str_sub(s: String, start: Int, len: Int) unsafe extern ret String
+
+# The C library's decimal-to-double conversion (`strtod`) at a byte position:
+# correctly rounded, which is a C-library job
+func rae_ext_rae_str_f64_at(s: String, index: Int) unsafe extern ret Float64
+
+const quoteByte: Int = 34
+
+const backslashByte: Int = 92
+
+# The byte at `position`, -1 past the end
+func jsonScanByte(json: view String, position: view Int) ret Int {
+  unsafe {
+    ret rae_ext_rae_str_byte_at(s: json, index: position)
+  }
+}
+
+# The first position at or after `position` that is not JSON whitespace
+func jsonScanSkipSpace(json: view String, position: view Int) ret Int {
+  var current: Int = position
+  loop true {
+    let byte: Int = jsonScanByte(json: json, position: current)
+    if byte is 32 or byte is 9 or byte is 10 or byte is 13 {
+      current = current + 1
+    } else {
+      ret current
+    }
+  }
+  ret current
+}
+
+# Just past the closing quote of the string starting at `position`
+func jsonScanStringEnd(json: view String, position: view Int) ret Int {
+  var current: Int = position + 1
+  loop true {
+    let byte: Int = jsonScanByte(json: json, position: current)
+    if byte < 0 {
+      ret current
+    }
+    if byte is quoteByte {
+      ret current + 1
+    }
+    if byte is backslashByte {
+      current = current + 2
+    } else {
+      current = current + 1
+    }
+  }
+  ret current
+}
+
+# Just past the value starting at `position`: a string, a whole object or
+# array (strings inside them may hold brackets), or a number / literal
+func jsonScanValueEnd(json: view String, position: view Int) ret Int {
+  let first: Int = jsonScanByte(json: json, position: position)
+  if first is quoteByte {
+    ret jsonScanStringEnd(json: json, position: position)
+  }
+  if first is 123 or first is 91 {
+    var depth: Int = 0
+    var current: Int = position
+    loop true {
+      let byte: Int = jsonScanByte(json: json, position: current)
+      if byte < 0 {
+        ret current
+      }
+      if byte is quoteByte {
+        current = jsonScanStringEnd(json: json, position: current)
+      } else {
+        if byte is 123 or byte is 91 {
+          depth = depth + 1
+        } else if byte is 125 or byte is 93 {
+          depth = depth - 1
+          if depth is 0 {
+            ret current + 1
+          }
+        }
+        current = current + 1
+      }
+    }
+  }
+  var current: Int = position
+  loop true {
+    let byte: Int = jsonScanByte(json: json, position: current)
+    if byte < 0 or byte is 44 or byte is 125 or byte is 93 or byte is 32 or byte is 9 or byte is 10 or byte is 13 {
+      ret current
+    }
+    current = current + 1
+  }
+  ret current
+}
+
+# The position of the value of `key` among the members of the object starting
+# at `objectStart` — only its own members, never a key of a nested object — or
+# -1 when the key is absent or `objectStart` is not an object.
+#
+# The search starts at the member whose key is at `from` (-1: the first
+# member) and wraps around to the first member. The generated `fromJson` reads
+# fields in declaration order and passes the member after the last one it
+# found (`jsonScanMemberAfter`), so an object written by `toJson`, whose
+# members are in that order, is read in one pass.
+func jsonScanMember(
+  json: view String
+  objectStart: view Int
+  from: view Int
+  key: view String
+) ret Int {
+  if jsonScanByte(json: json, position: objectStart) is not 123 {
+    ret -1
+  }
+  var keyLength: Int = 0
+  unsafe {
+    keyLength = rae_ext_rae_str_len(s: key)
+  }
+  let first: Int = jsonScanSkipSpace(json: json, position: objectStart + 1)
+  var start: Int = first
+  if from >= 0 {
+    start = from
+  }
+  var position: Int = start
+  var wrapped: Bool = false
+  loop true {
+    if wrapped and position >= start {
+      ret -1
+    }
+    if jsonScanByte(json: json, position: position) is not quoteByte {
+      if wrapped or start is first {
+        ret -1
+      }
+      wrapped = true
+      position = first
+    } else {
+      let keyEnd: Int = jsonScanStringEnd(json: json, position: position)
+      let colon: Int = jsonScanSkipSpace(json: json, position: keyEnd)
+      if jsonScanByte(json: json, position: colon) is not 58 {
+        ret -1
+      }
+      let value: Int = jsonScanSkipSpace(json: json, position: colon + 1)
+      if keyEnd - position - 2 is keyLength {
+        unsafe {
+          let order: Int = rae_ext_rae_str_compare_bytes(
+            a: json
+            aStart: position + 1
+            b: key
+            bStart: 0
+            count: keyLength
+          )
+          if order is 0 {
+            ret value
+          }
+        }
+      }
+      position = jsonScanMemberAfter(json: json, value: value)
+      if position < 0 {
+        if wrapped or start is first {
+          ret -1
+        }
+        wrapped = true
+        position = first
+      }
+    }
+  }
+  ret -1
+}
+
+# The key position of the member after the one whose value is at `value`, or
+# -1 after the last member
+func jsonScanMemberAfter(json: view String, value: view Int) ret Int {
+  let after: Int = jsonScanSkipSpace(
+    json: json
+    position: jsonScanValueEnd(json: json, position: value)
+  )
+  if jsonScanByte(json: json, position: after) is not 44 {
+    ret -1
+  }
+  let next: Int = jsonScanSkipSpace(json: json, position: after + 1)
+  if jsonScanByte(json: json, position: next) is not quoteByte {
+    ret -1
+  }
+  ret next
+}
+
+# Whether the value at `position` is `null` (or there is no value)
+func jsonScanIsNull(json: view String, position: view Int) ret Bool {
+  if position < 0 {
+    ret true
+  }
+  unsafe {
+    ret rae_ext_rae_str_compare_bytes(
+      a: json
+      aStart: position
+      b: "null"
+      bStart: 0
+      count: 4
+    ) is 0
+  }
+}
+
+func jsonScanBool(json: view String, position: view Int) ret Bool {
+  ret jsonScanByte(json: json, position: position) is 116
+}
+
+# Whether the value at `position` starts like a JSON number
+func jsonScanIsNumber(json: view String, position: view Int) ret Bool {
+  var first: Int = jsonScanByte(json: json, position: position)
+  if first is 45 {
+    first = jsonScanByte(json: json, position: position + 1)
+  }
+  ret first >= 48 and first <= 57
+}
+
+func jsonScanFloat(json: view String, position: view Int) ret Float64 {
+  if not jsonScanIsNumber(json: json, position: position) {
+    ret 0
+  }
+  unsafe {
+    ret rae_ext_rae_str_f64_at(s: json, index: position)
+  }
+}
+
+# An integer value. Digits beyond the Int range clamp to the smallest or
+# largest Int; a number with a fraction or an exponent (`2.5`, `1e3`) is read
+# as a Float64 and cut toward zero.
+func jsonScanInt(json: view String, position: view Int) ret Int {
+  if not jsonScanIsNumber(json: json, position: position) {
+    ret 0
+  }
+  let negative: Bool = jsonScanByte(json: json, position: position) is 45
+  var current: Int = position
+  if negative {
+    current = current + 1
+  }
+  # Accumulated as a NEGATIVE number, so the smallest Int is reachable
+  let smallest: Int = -9223372036854775807 - 1
+  var value: Int = 0
+  var clamped: Bool = false
+  loop true {
+    let digit: Int = jsonScanByte(json: json, position: current) - 48
+    if digit < 0 or digit > 9 {
+      break
+    }
+    if not clamped {
+      if value < (smallest + digit) / 10 {
+        clamped = true
+      } else {
+        value = value * 10 - digit
+      }
+    }
+    current = current + 1
+  }
+  let next: Int = jsonScanByte(json: json, position: current)
+  if not clamped and (next is 46 or next is 101 or next is 69) {
+    let real: Float64 = jsonScanFloat(json: json, position: position)
+    if real >= 9223372036854775807.0 {
+      ret 9223372036854775807
+    }
+    if real <= -9223372036854775808.0 {
+      ret smallest
+    }
+    ret real as Int
+  }
+  if negative {
+    if clamped {
+      ret smallest
+    }
+    ret value
+  }
+  if clamped or value is smallest {
+    ret 9223372036854775807
+  }
+  ret -value
+}
+
+# The value of a hex digit byte, or -1
+func jsonScanHexDigit(byte: view Int) ret Int {
+  if byte >= 48 and byte <= 57 {
+    ret byte - 48
+  }
+  if byte >= 97 and byte <= 102 {
+    ret byte - 87
+  }
+  if byte >= 65 and byte <= 70 {
+    ret byte - 55
+  }
+  ret -1
+}
+
+# The four hex digits at `position` as a number, or -1
+func jsonScanHexQuad(json: view String, position: view Int) ret Int {
+  var value: Int = 0
+  loop var i: Int = 0, i < 4, ++i {
+    let digit: Int = jsonScanHexDigit(byte: jsonScanByte(json: json, position: position + i))
+    if digit < 0 {
+      ret -1
+    }
+    value = value * 16 + digit
+  }
+  ret value
+}
+
+# `code`'s UTF-8 bytes appended to `bytes`
+func jsonScanAddUtf8(bytes: mod List(UInt8), code: view Int) {
+  if code < 128 {
+    bytes.add(value: code as UInt8)
+  } else if code < 2048 {
+    bytes.add(value: (192 bitor (code shr 6)) as UInt8)
+    bytes.add(value: (128 bitor (code bitand 63)) as UInt8)
+  } else if code < 65536 {
+    bytes.add(value: (224 bitor (code shr 12)) as UInt8)
+    bytes.add(value: (128 bitor ((code shr 6) bitand 63)) as UInt8)
+    bytes.add(value: (128 bitor (code bitand 63)) as UInt8)
+  } else {
+    bytes.add(value: (240 bitor (code shr 18)) as UInt8)
+    bytes.add(value: (128 bitor ((code shr 12) bitand 63)) as UInt8)
+    bytes.add(value: (128 bitor ((code shr 6) bitand 63)) as UInt8)
+    bytes.add(value: (128 bitor (code bitand 63)) as UInt8)
+  }
+}
+
+# The decoded text of the string value at `position` ("" when it is not a
+# string). The escapes are JSON's: `\"` `\\` `\/` `\b` `\f` `\n` `\r` `\t` and
+# `\uXXXX`, a surrogate pair of them being one character; a lone surrogate
+# decodes to U+FFFD, the replacement character, so the text stays valid UTF-8.
+func jsonScanString(json: view String, position: view Int) ret String {
+  if jsonScanByte(json: json, position: position) is not quoteByte {
+    ret ""
+  }
+  let start: Int = position + 1
+  var current: Int = start
+  loop true {
+    let byte: Int = jsonScanByte(json: json, position: current)
+    if byte < 0 or byte is quoteByte {
+      unsafe {
+        ret rae_ext_rae_str_sub(s: json, start: start, len: current - start)
+      }
+    }
+    if byte is backslashByte {
+      break
+    }
+    current = current + 1
+  }
+  # Escaped: copy the bytes so far, then decode as we go
+  var bytes: List(UInt8) = {}
+  loop var i: Int = start, i < current, ++i {
+    bytes.add(value: jsonScanByte(json: json, position: i) as UInt8)
+  }
+  loop true {
+    let byte: Int = jsonScanByte(json: json, position: current)
+    if byte < 0 or byte is quoteByte {
+      break
+    }
+    if byte is not backslashByte {
+      bytes.add(value: byte as UInt8)
+      current = current + 1
+    } else {
+      let escaped: Int = jsonScanByte(json: json, position: current + 1)
+      current = current + 2
+      if escaped is 110 {
+        bytes.add(value: 10)
+      } else if escaped is 116 {
+        bytes.add(value: 9)
+      } else if escaped is 114 {
+        bytes.add(value: 13)
+      } else if escaped is 98 {
+        bytes.add(value: 8)
+      } else if escaped is 102 {
+        bytes.add(value: 12)
+      } else if escaped is 117 {
+        var code: Int = jsonScanHexQuad(json: json, position: current)
+        if code < 0 {
+          code = 65533
+        } else {
+          current = current + 4
+        }
+        if code >= 55296 and code <= 56319 {
+          let low: Int = jsonScanHexQuad(json: json, position: current + 2)
+          let pairs: Bool = jsonScanByte(json: json, position: current) is backslashByte and jsonScanByte(
+            json: json
+            position: current + 1
+          ) is 117
+          if pairs and low >= 56320 and low <= 57343 {
+            code = 65536 + (code - 55296) * 1024 + (low - 56320)
+            current = current + 6
+          } else {
+            code = 65533
+          }
+        } else if code >= 56320 and code <= 57343 {
+          code = 65533
+        }
+        jsonScanAddUtf8(bytes: bytes, code: code)
+      } else if escaped >= 0 {
+        # `\"`, `\\`, `\/` and anything else: the byte itself
+        bytes.add(value: escaped as UInt8)
+      }
+    }
+  }
+  unsafe {
+    ret rae_ext_rae_str_from_bytes(buffer: bytes.data, offset: 0, count: bytes.length)
+  }
+}
+
+# The position of the first element of the array at `position`, or -1 when it
+# is empty or not an array
+func jsonScanArrayFirst(json: view String, position: view Int) ret Int {
+  if jsonScanByte(json: json, position: position) is not 91 {
+    ret -1
+  }
+  let first: Int = jsonScanSkipSpace(json: json, position: position + 1)
+  let byte: Int = jsonScanByte(json: json, position: first)
+  if byte < 0 or byte is 93 {
+    ret -1
+  }
+  ret first
+}
+
+# The position of the element after the one at `item`, or -1 after the last
+func jsonScanArrayNext(json: view String, item: view Int) ret Int {
+  let after: Int = jsonScanSkipSpace(
+    json: json
+    position: jsonScanValueEnd(json: json, position: item)
+  )
+  if jsonScanByte(json: json, position: after) is not 44 {
+    ret -1
+  }
+  let next: Int = jsonScanSkipSpace(json: json, position: after + 1)
+  let byte: Int = jsonScanByte(json: json, position: next)
+  if byte < 0 or byte is 93 {
+    ret -1
+  }
+  ret next
+}
+
+func jsonScanArrayCount(json: view String, position: view Int) ret Int {
+  var count: Int = 0
+  var item: Int = jsonScanArrayFirst(json: json, position: position)
+  loop item >= 0 {
+    count = count + 1
+    item = jsonScanArrayNext(json: json, item: item)
+  }
+  ret count
+}
+
+# Whether `text` needs escaping to be a JSON string's content: a quote, a
+# backslash or a control character
+func jsonScanNeedsEscape(text: view String) ret Bool {
+  var length: Int = 0
+  unsafe {
+    length = rae_ext_rae_str_len(s: text)
+  }
+  loop var i: Int = 0, i < length, ++i {
+    let byte: Int = jsonScanByte(json: text, position: i)
+    if byte is quoteByte or byte is backslashByte or byte < 32 {
+      ret true
+    }
+  }
+  ret false
+}
+
+# `text` escaped as a JSON string's content (without the quotes). UTF-8 is
+# kept as it is; only quote, backslash and control characters are escaped.
+func jsonScanEscaped(text: view String) ret String {
+  var length: Int = 0
+  unsafe {
+    length = rae_ext_rae_str_len(s: text)
+  }
+  var bytes: List(UInt8) = {}
+  loop var i: Int = 0, i < length, ++i {
+    let byte: Int = jsonScanByte(json: text, position: i)
+    if byte is quoteByte or byte is backslashByte {
+      bytes.add(value: 92)
+      bytes.add(value: byte as UInt8)
+    } else if byte is 10 {
+      bytes.add(value: 92)
+      bytes.add(value: 110)
+    } else if byte is 9 {
+      bytes.add(value: 92)
+      bytes.add(value: 116)
+    } else if byte is 13 {
+      bytes.add(value: 92)
+      bytes.add(value: 114)
+    } else if byte < 32 {
+      let hexDigits: String = "0123456789abcdef"
+      bytes.add(value: 92)
+      bytes.add(value: 117)
+      bytes.add(value: 48)
+      bytes.add(value: 48)
+      bytes.add(value: jsonScanByte(json: hexDigits, position: byte shr 4) as UInt8)
+      bytes.add(value: jsonScanByte(json: hexDigits, position: byte bitand 15) as UInt8)
+    } else {
+      bytes.add(value: byte as UInt8)
+    }
+  }
+  unsafe {
+    ret rae_ext_rae_str_from_bytes(buffer: bytes.data, offset: 0, count: bytes.length)
+  }
+}
