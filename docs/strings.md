@@ -6,6 +6,20 @@ and a character (Unicode code point) view sits on top of it for the places
 that count what a person sees. Stress case `stress/07_stringIsBytes` asserts
 the rules below.
 
+## Char literals
+
+A `Char32` literal holds exactly ONE character (Unicode scalar), written
+directly in UTF-8 or as an escape: `'a'`, `'é'`, `'—'`, `'😀'`, `'\u{E9}'`.
+`'é' is "é".at(index: 0)` is true. The compiler rejects anything else, with a
+message saying why:
+
+- two characters (`'ab'`, `'é!'`);
+- bytes that are not UTF-8 (a lone lead byte, an overlong form);
+- a surrogate, U+D800..U+DFFF, spelled in bytes or as `'\u{D800}'`;
+- an escape past U+10FFFF.
+
+Fixtures 1025 and 1026.
+
 ## The byte API (primary)
 
 | call | meaning |
