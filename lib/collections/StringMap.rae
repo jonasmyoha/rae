@@ -43,7 +43,7 @@ func set(
     if not this.isGrowing and this.length * 2 > this.cap {
       growStringMap(this)
     }
-    let h: Int = rae_str_hash(s: k)
+    let h: Int = k.hash()
     var idx: Int = h % this.cap
     if idx < 0 {
       idx = -idx
@@ -95,7 +95,7 @@ func viewGet(V: type, this: view StringMap(V), key: view String) ret opt view V 
     if this.cap is 0 {
       ret none
     }
-    let hash: Int = rae_str_hash(s: key)
+    let hash: Int = key.hash()
     var idx: Int = hash % this.cap
     if idx < 0 {
       idx = -idx
@@ -126,7 +126,7 @@ func modGet(V: type, this: mod StringMap(V), key: view String) ret opt mod V {
     if this.cap is 0 {
       ret none
     }
-    let hash: Int = rae_str_hash(s: key)
+    let hash: Int = key.hash()
     var idx: Int = hash % this.cap
     if idx < 0 {
       idx = -idx
@@ -153,7 +153,7 @@ func get(V: type, this: view StringMap(V), k: view String) ret opt V {
     if this.cap is 0 {
       ret none
     }
-    let h: Int = rae_str_hash(s: k)
+    let h: Int = k.hash()
     var idx: Int = h % this.cap
     if idx < 0 {
       idx = -idx
@@ -187,7 +187,7 @@ func remove(V: type, this: mod StringMap(V), k: view String) {
     if this.cap is 0 {
       ret
     }
-    let h: Int = rae_str_hash(s: k)
+    let h: Int = k.hash()
     var idx: Int = h % this.cap
     if idx < 0 {
       idx = -idx
@@ -222,7 +222,7 @@ func remove(V: type, this: mod StringMap(V), k: view String) {
           if not next.occupied or probe is idx {
             break
           }
-          var home: Int = rae_str_hash(s: next.k) % this.cap
+          var home: Int = next.k.hash() % this.cap
           if home < 0 {
             home = -home
           }
@@ -305,7 +305,7 @@ func growStringMap(V: type, this: mod StringMap(V)) {
     loop i < oldCap {
       let entry: StringMapEntry(V) = rae_ext_rae_buf_get(buf: oldData, index: i)
       if entry.occupied {
-        var slot: Int = rae_str_hash(s: entry.k) % this.cap
+        var slot: Int = entry.k.hash() % this.cap
         if slot < 0 {
           slot = -slot
         }
