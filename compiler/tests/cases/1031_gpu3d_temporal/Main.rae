@@ -1,0 +1,48 @@
+# The forward renderer's frame-to-frame settings in Rae (docs/runtime-c-audit.md
+# row 11). The jitter, Halton and inverse values were compared bit for bit with
+# the former C functions when they moved; this pins them.
+open Math3d
+open Gpu3dTemporal
+import Math
+
+func main() {
+  # RAE_GPU3D_DRAW_LIMIT is read the way C's strtol + "whole text" check read it
+  var texts: List(String) = {}
+  texts.add(value: "1")
+  texts.add(value: "4096")
+  texts.add(value: "  +12")
+  texts.add(value: "-5")
+  texts.add(value: "12 ")
+  texts.add(value: "abc")
+  texts.add(value: "")
+  texts.add(value: "99999999999999999999999")
+  loop let text: String in texts {
+    log("strictDecimal [{text}] = {strictDecimal(text: text)}")
+  }
+  # Halton(2) and Halton(3) at the first indices
+  loop var i: Int = 0, i < 6, ++i {
+    log("halton {i}: {halton(index: i, base: 2)} {halton(index: i, base: 3)}")
+  }
+  # The jitter walks 16 offsets and the index wraps at 64 without a jump
+  var temporal: RenderTemporal = { frameIndex: 62, taaEnabled: true, drawLimit: maxForwardDraws }
+  loop var i: Int = 0, i < 4, ++i {
+    log(
+      "frame {temporal.frameIndex}: jitter {jitterPixels(temporal: temporal, base: 2)} {jitterPixels(
+        temporal: temporal
+        base: 3
+      )}"
+    )
+    advanceRenderTemporal(temporal: temporal)
+  }
+  let off: RenderTemporal = { frameIndex: 5, taaEnabled: false, drawLimit: 1 }
+  log(
+    "TAA off: jitter {jitterPixels(temporal: off, base: 2)} {jitterPixels(temporal: off, base: 3)}"
+  )
+  # floatBits of the jitter at frame 0 (C: (halton(1, 2) - 0.5f) = 0.0f, halton(1, 3) - 0.5f)
+  let first: RenderTemporal = { frameIndex: 0, taaEnabled: true, drawLimit: 1 }
+  log(
+    "frame 0 bits: {floatBits(value: jitterPixels(temporal: first, base: 2))} {floatBits(
+      value: jitterPixels(temporal: first, base: 3)
+    )}"
+  )
+}

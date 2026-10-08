@@ -33,6 +33,7 @@ open gpu/GpuResources
 open gpu/GpuIds
 open gpu/GpuRender
 open Gpu3d
+open Gpu3dTemporal
 open Gpu3dWorld
 open Gpu3dNative
 open Shadow3d
@@ -71,6 +72,7 @@ type Renderer3d {
   meshes: MeshStore
   skins: SkinStore  # #921: the skinned meshes + joint palette of the forward path
   shadow: ShadowCache  # #925: the sun cascades — targets, pipelines, caster queue, passes
+  temporal: RenderTemporal  # TAA on/off, its jitter walk, the draw limit (Gpu3dTemporal)
 }
 
 const forwardManagerCapacity: Int = 512
@@ -218,6 +220,7 @@ func beginSceneWith(
     light: light
     aspect: aspect
     time: time
+    temporal: r.temporal
   )
 }
 
@@ -505,6 +508,7 @@ func createRenderer3d() pub ret Renderer3d {
       meshes: createMeshStore()
       skins: createSkinStore()
       shadow: createShadowCache()
+      temporal: createRenderTemporal()
     }
   }
 }
@@ -775,6 +779,7 @@ func createRenderer3dWithUi() pub ret Renderer3d {
       meshes: createMeshStore()
       skins: createSkinStore()
       shadow: createShadowCache()
+      temporal: createRenderTemporal()
     }
   }
 }
