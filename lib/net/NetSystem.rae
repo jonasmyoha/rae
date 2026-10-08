@@ -155,23 +155,35 @@ func systemPollOne(
   timeoutMs: Int
 ) unsafe extern("rae_ext_NetSys_pollOne") ret Int
 
-# The readiness poller: create a kqueue; one interest change; one wait that
-# writes (handle, filter, flags) per event into `events` and answers how many
-func systemPollerCreate() unsafe extern("rae_ext_NetSys_pollerCreate") ret Int
+# The kernel readiness queues, as capabilities (docs/platform-conditional-code.md
+# §3.1 layer 3): kqueue on Apple and the BSDs, epoll on a Linux kernel. Each
+# shim below exists only where its queue does; elsewhere lib/net/Poller.rae
+# and lib/FileNotify.rae answer `unsupported` in Rae. (epoll's shim lands with
+# the Linux task; until then `hasEpoll` selects nothing.)
+const hasKqueue: Bool = Target.isApple or Target.isBsd
 
-func systemPollerChange(
-  queue: Int
-  handle: Int
-  filter: Int
-  flags: Int
-) unsafe extern("rae_ext_NetSys_pollerChange") ret Int
+const hasEpoll: Bool = Target.isLinuxKernel
 
-func systemPollerWait(
-  queue: Int
-  events: Buffer(Int)
-  maxEvents: Int
-  timeoutMs: Int
-) unsafe extern("rae_ext_NetSys_pollerWait") ret Int
+when hasKqueue {
+  # The readiness poller: create a kqueue; one interest change; one wait that
+  # writes (handle, filter, flags) per event into `events` and answers how
+  # many
+  func systemPollerCreate() unsafe extern("rae_ext_NetSys_pollerCreate") ret Int
+
+  func systemPollerChange(
+    queue: Int
+    handle: Int
+    filter: Int
+    flags: Int
+  ) unsafe extern("rae_ext_NetSys_pollerChange") ret Int
+
+  func systemPollerWait(
+    queue: Int
+    events: Buffer(Int)
+    maxEvents: Int
+    timeoutMs: Int
+  ) unsafe extern("rae_ext_NetSys_pollerWait") ret Int
+}
 
 func systemClose(handle: Int) unsafe extern("rae_ext_NetSys_close") ret Int
 
