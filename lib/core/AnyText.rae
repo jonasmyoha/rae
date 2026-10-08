@@ -1,0 +1,124 @@
+# core/AnyText.rae — the text of a boxed value (an `Any`), for `log` / `logS`
+# of an Any and for interpolating one (docs/runtime-c-audit.md row 12). A value
+# whose type the compiler knows never comes here: it is formatted by the same
+# generated formatter as its interpolation. The box is read through one-field
+# accessors (rae_runtime.h); a `view` / `mod` box is followed to its value.
+#
+# `forLog` keeps the two callers' former outputs: a log prints a missing
+# String as "(null)" and spells an Id, a Key, a List and a raw pointer;
+# interpolation gives "" for those.
+func rae_ext_rae_any_resolved(value: Any) unsafe extern ret Any
+
+func rae_ext_rae_any_kind(value: Any) unsafe extern ret Int
+
+func rae_ext_rae_any_int(value: Any) unsafe extern ret Int
+
+func rae_ext_rae_any_uint64(value: Any) unsafe extern ret UInt64
+
+func rae_ext_rae_any_float(value: Any) unsafe extern ret Float64
+
+func rae_ext_rae_any_bool(value: Any) unsafe extern ret Bool
+
+func rae_ext_rae_any_string(value: Any) unsafe extern ret String
+
+func rae_ext_rae_any_string_missing(value: Any) unsafe extern ret Bool
+
+func rae_ext_rae_any_address(value: Any) unsafe extern ret Int
+
+func rae_ext_rae_char_from_code(code: Int) unsafe extern ret Char32
+
+# The box kinds (RaeType in rae_runtime.h)
+const anyNone: Int = 0
+
+const anyInt64: Int = 1
+
+const anyInt32: Int = 2
+
+const anyUInt64: Int = 3
+
+const anyUInt32: Int = 4
+
+const anyFloat64: Int = 5
+
+const anyFloat32: Int = 6
+
+const anyBool: Int = 7
+
+const anyString: Int = 8
+
+const anyChar: Int = 9
+
+const anyId: Int = 10
+
+const anyKey: Int = 11
+
+const anyList: Int = 12
+
+const anyBuffer: Int = 13
+
+# `number` in lowercase hexadecimal after "0x", as C's %p prints an address
+func addressText(number: view Int) ret String {
+  if number is 0 {
+    ret "0x0"
+  }
+  let hexDigits: String = "0123456789abcdef"
+  var text: String = ""
+  var rest: UInt64 = number as UInt64
+  loop rest > 0 {
+    let digit: Int = (rest % 16) as Int
+    unsafe {
+      text = "{rae_ext_rae_char_from_code(code: rae_ext_rae_str_byte_at(s: hexDigits, index: digit))}{text}"
+    }
+    rest = rest / 16
+  }
+  ret "0x{text}"
+}
+
+func rae_ext_rae_str_byte_at(s: String, index: Int) unsafe extern ret Int
+
+func anyText(value: Any, forLog: view Bool) ret String {
+  unsafe {
+    let box: Any = rae_ext_rae_any_resolved(value: value)
+    let kind: Int = rae_ext_rae_any_kind(value: box)
+    if kind is anyInt64 or kind is anyInt32 or kind is anyUInt32 {
+      ret "{rae_ext_rae_any_int(value: box)}"
+    }
+    if kind is anyUInt64 {
+      ret "{rae_ext_rae_any_uint64(value: box)}"
+    }
+    if kind is anyFloat64 or kind is anyFloat32 {
+      ret "{rae_ext_rae_any_float(value: box)}"
+    }
+    if kind is anyBool {
+      ret "{rae_ext_rae_any_bool(value: box)}"
+    }
+    if kind is anyChar {
+      ret "{rae_ext_rae_char_from_code(code: rae_ext_rae_any_int(value: box))}"
+    }
+    if kind is anyString {
+      if forLog and rae_ext_rae_any_string_missing(value: box) {
+        ret "(null)"
+      }
+      ret rae_ext_rae_any_string(value: box)
+    }
+    if kind is anyNone {
+      ret "none"
+    }
+    if not forLog {
+      ret ""
+    }
+    if kind is anyId {
+      ret "Id({rae_ext_rae_any_int(value: box)})"
+    }
+    if kind is anyKey {
+      ret "Key(\"{rae_ext_rae_any_string(value: box)}\")"
+    }
+    if kind is anyList {
+      ret "[...]"
+    }
+    if kind is anyBuffer {
+      ret addressText(number: rae_ext_rae_any_address(value: box))
+    }
+    ret "Any(...)"
+  }
+}

@@ -237,7 +237,7 @@ rae_String rae_ext_rae_str_interp(int n, ...) {
   }
 
   // Free any owned input — these are compiler-generated temporaries
-  // (e.g. rae_ext_rae_str_i64 results). Borrowed inputs (literals,
+  // (e.g. rae_text_int64 results). Borrowed inputs (literals,
   // rae_string_borrow-wrapped identifiers) are is_owned=0 and a
   // no-op here. The pool_remove keeps the temp-pool in sync so a
   // later flush doesn't double-free a heap we already returned to
