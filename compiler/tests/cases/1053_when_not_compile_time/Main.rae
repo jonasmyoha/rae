@@ -1,0 +1,24 @@
+# A `when` condition must be a compile-time Bool. Each error names the part
+# that is not: a `let`, a call, a comparison other than `is`, a bare Target
+# name (Target is imported, not opened).
+let level: Int = 3
+
+func ready() ret Bool {
+  ret true
+}
+
+when level is 3 {
+  const fromLet: Int = 1
+}
+
+func main() {
+  when ready() {
+    log("call")
+  }
+  when level < 4 {
+    log("comparison")
+  }
+  when isApple {
+    log("bare")
+  }
+}

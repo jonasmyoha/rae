@@ -625,6 +625,20 @@ static void dump_unsafe_stmt(const AstStmt* stmt, FILE* out, int indent) {
   dump_block(stmt->as.unsafe_stmt.block, out, indent + 1);
 }
 
+static void dump_when_stmt(const AstStmt* stmt, FILE* out, int indent) {
+  for (const AstWhenBranch* branch = stmt->as.when_stmt.branches; branch; branch = branch->next) {
+    print_indent(out, indent);
+    if (branch->condition) {
+      fputs(branch == stmt->as.when_stmt.branches ? "WHEN " : "ELSE WHEN ", out);
+      dump_expr(branch->condition, out);
+      fputc('\n', out);
+    } else {
+      fputs("ELSE\n", out);
+    }
+    dump_block(branch->block, out, indent + 1);
+  }
+}
+
 static void dump_block(const AstBlock* block, FILE* out, int indent) {
   if (!block || !block->first) {
     print_indent(out, indent);
@@ -653,6 +667,9 @@ static void dump_block(const AstBlock* block, FILE* out, int indent) {
         break;
       case AST_STMT_IF:
         dump_if_stmt(stmt, out, indent);
+        break;
+      case AST_STMT_WHEN:
+        dump_when_stmt(stmt, out, indent);
         break;
       case AST_STMT_LOOP:
         dump_loop_stmt(stmt, out, indent);
@@ -798,6 +815,52 @@ static void dump_func_decl(const AstDecl* decl, FILE* out, int indent) {
   }
 }
 
+static void dump_decl(const AstDecl* decl, FILE* out, int indent) {
+    switch (decl->kind) {
+      case AST_DECL_TYPE:
+        dump_type_decl(decl, out, indent);
+        break;
+      case AST_DECL_FUNC:
+        dump_func_decl(decl, out, indent);
+        break;
+      case AST_DECL_ENUM:
+        dump_enum_decl(decl, out, indent);
+        break;
+      case AST_DECL_GLOBAL_LET:
+        print_indent(out, indent);
+        fputs(decl->as.let_decl.is_const ? "const " : decl->as.let_decl.is_var ? "var " : "let ", out);
+        print_str(out, decl->as.let_decl.name);
+        fputs(": ", out);
+        dump_type_ref(decl->as.let_decl.type, out);
+        if (decl->as.let_decl.value) {
+          fputs(decl->as.let_decl.is_bind ? " => " : " = ", out);
+          dump_expr(decl->as.let_decl.value, out);
+        }
+        fputc('\n', out);
+        break;
+      case AST_DECL_ALIAS:
+        print_indent(out, indent);
+        fprintf(out, "ALIAS %.*s = ",
+                (int)decl->as.alias_decl.name.len, decl->as.alias_decl.name.data);
+        dump_type_ref(decl->as.alias_decl.target, out);
+        fputc('\n', out);
+        break;
+      case AST_DECL_WHEN:
+        for (const AstWhenBranch* branch = decl->as.when_decl.branches; branch; branch = branch->next) {
+          print_indent(out, indent);
+          if (branch->condition) {
+            fputs(branch == decl->as.when_decl.branches ? "WHEN " : "ELSE WHEN ", out);
+            dump_expr(branch->condition, out);
+            fputc('\n', out);
+          } else {
+            fputs("ELSE\n", out);
+          }
+          for (const AstDecl* child = branch->decls; child; child = child->next) dump_decl(child, out, indent + 1);
+        }
+        break;
+    }
+}
+
 void ast_dump_module(const AstModule* module, FILE* out) {
   if (!module) {
     fputs("<null module>\n", out);
@@ -814,37 +877,5 @@ void ast_dump_module(const AstModule* module, FILE* out) {
     }
     fputc('\n', out);
   }
-  const AstDecl* decl = module->decls;
-  while (decl) {
-    switch (decl->kind) {
-      case AST_DECL_TYPE:
-        dump_type_decl(decl, out, 1);
-        break;
-      case AST_DECL_FUNC:
-        dump_func_decl(decl, out, 1);
-        break;
-      case AST_DECL_ENUM:
-        dump_enum_decl(decl, out, 1);
-        break;
-      case AST_DECL_GLOBAL_LET:
-        print_indent(out, 1);
-        fputs(decl->as.let_decl.is_const ? "const " : decl->as.let_decl.is_var ? "var " : "let ", out);
-        print_str(out, decl->as.let_decl.name);
-        fputs(": ", out);
-        dump_type_ref(decl->as.let_decl.type, out);
-        if (decl->as.let_decl.value) {
-          fputs(decl->as.let_decl.is_bind ? " => " : " = ", out);
-          dump_expr(decl->as.let_decl.value, out);
-        }
-        fputc('\n', out);
-        break;
-      case AST_DECL_ALIAS:
-        fprintf(out, "  ALIAS %.*s = ",
-                (int)decl->as.alias_decl.name.len, decl->as.alias_decl.name.data);
-        dump_type_ref(decl->as.alias_decl.target, out);
-        fputc('\n', out);
-        break;
-    }
-    decl = decl->next;
-  }
+  for (const AstDecl* decl = module->decls; decl; decl = decl->next) dump_decl(decl, out, 1);
 }

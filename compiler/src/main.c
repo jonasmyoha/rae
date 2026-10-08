@@ -52,6 +52,7 @@
 #include "sys_thread.h"
 #include "progress.h"
 #include "may_wait.h"
+#include "when_resolve.h"
 #include "../runtime/rae_runtime.h"
 
 typedef struct {
@@ -2601,12 +2602,30 @@ static bool build_c_backend_output(const char* entry_file,
   ctx.project_root = graph.root_path;
   ctx.stdlib_dir = compiler_stdlib_dir();
   
+  /* Compile-time `when` (docs/platform-conditional-code.md): only the
+   * selected branches go on to sema and the backend */
+  if (!when_resolve_module(arena, &merged)) {
+      module_graph_free(&graph);
+      arena_destroy(arena);
+      progress_end(false);
+      return false;
+  }
   progress_phase(PROGRESS_SEMA);
   if (!sema_analyze_module(&ctx, &merged)) {
       module_graph_free(&graph);
       arena_destroy(arena);
       progress_end(false);
       return false;
+  }
+  if (g_report_waits) {
+    /* The backend's discovery pass instantiates the generics; its output is
+     * thrown away, the report reads the specialisations it found */
+    bool reported = c_backend_emit_module(&ctx, &merged, "/dev/null") &&
+                    may_wait_report(&ctx, &merged, entry_file, g_report_waits_lib, stdout);
+    module_graph_free(&graph);
+    arena_destroy(arena);
+    progress_end(reported);
+    return reported;
   }
   if (g_print_target || g_target_check_only) {
     /* A check-only build for another target, or --print-target: sema has
@@ -2630,16 +2649,6 @@ static bool build_c_backend_output(const char* entry_file,
     arena_destroy(arena);
     progress_end(true);
     return true;
-  }
-  if (g_report_waits) {
-    /* The backend's discovery pass instantiates the generics; its output is
-     * thrown away, the report reads the specialisations it found */
-    bool reported = c_backend_emit_module(&ctx, &merged, "/dev/null") &&
-                    may_wait_report(&ctx, &merged, entry_file, g_report_waits_lib, stdout);
-    module_graph_free(&graph);
-    arena_destroy(arena);
-    progress_end(reported);
-    return reported;
   }
   /* Every WGSL part a shader was composed of is a build input: `rae watch`
    * rebuilds when one changes, exactly as for a `.rae` file. */

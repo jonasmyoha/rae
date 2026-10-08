@@ -5,7 +5,7 @@
 # packs had silently drifted while only `.rae` was checked), docs/, stress/ and
 # tests/cases,
 # minus the inputs that are deliberately non-canonical — the format fixtures
-# (200-208, 568, 786, 810-813, 829, 830), the lexer fixtures whose token
+# (200-208, 568, 786, 810-813, 829, 830, 1055), the lexer fixtures whose token
 # columns are the test (006, 015, 019) and the CRLF / missing-final-newline
 # fixtures (345, 346, 348). Fixtures that expect a parse error, OR are
 # themselves over the 1,000-line cap (390, 850 — the cap's own regression
@@ -24,7 +24,7 @@ FILES=$({
     -not -path "$ROOT/examples/24_code_hybrid_hot_reload/scripts/*"
   find tests/cases -name '*.rae' -type f
   find "$ROOT/docs" "$ROOT/stress" \( -name '*.rae' -o -name '*.raepack' \) -type f
-} | grep -vE 'tests/cases/(006_|015_|019_|20[0-8]_|345_|346_|348_|568_|786_|81[0-3]_|829_|830_)' | sort)
+} | grep -vE 'tests/cases/(006_|015_|019_|20[0-8]_|345_|346_|348_|568_|786_|81[0-3]_|829_|830_|1055_)' | sort)
 JSON=$("$BIN" format --json --check $FILES 2>/dev/null)
 python3 - "$JSON" <<'PY'
 import json, sys
