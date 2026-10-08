@@ -80,7 +80,11 @@ Everything else is Rae in `lib/net`:
 - the poller's readiness bookkeeping.
 
 The first version of G1 (0.1.202) put that logic in `runtime_net.c`; T2
-moves it to Rae behind the same API and fixture.
+moved it to Rae behind the same API and fixture (2026-10-08). The bindings
+and the constant indices live in `lib/net/NetSystem.rae`, and the policy in
+`lib/net/Tcp.rae`. The C platform section went from 193 code lines with 6
+loops and 37 branches to 149 lines with 1 loop (walking `getaddrinfo`'s own
+list) and 7 branches. About 45 of those lines are the constant table.
 
 Pure algorithms never need C: SHA-1, base64, the IMF-fixdate `Date` header
 and the HTTP/WebSocket codecs are Rae.
@@ -512,7 +516,7 @@ a syscall-shaped shim where the platform forces it.
 |---|---|---|---|
 | G1 | `lib/net/Tcp.rae`: TCP listen/accept/connect/read/write/close on `SocketId` value handles, non-blocking, errors as `NetStatus` values | — | **landed 0.1.202** with the policy in C; T2 redoes the split |
 | T1 | `Task.isDone()` and a non-blocking `tryGet() ret opt T` (docs/concurrency-model.md) | S | how a server picks up `spawn`ed slow work without blocking its frame |
-| T2 | `lib/net` as Rae over a syscall shim (§1.2): `runtime_net.c` shrinks to one-syscall functions + a constant table; the listen sequence, retries, connect timeout, options and status mapping move to Rae; same API, fixture 1022 unchanged | M | done before G2 builds on it |
+| T2 | **landed** — `lib/net` as Rae over a syscall shim (§1.2): `runtime_net.c` shrinks to one-syscall functions + a constant table; the listen sequence, retries, connect timeout, options and status mapping move to Rae; same API, fixture 1022 unchanged | M | done before G2 builds on it |
 | T3 | the runtime-wide rule: C only for platform ABI, in AGENTS.md, plus an audit list of logic in today's runtime C that could move to Rae | S | the rule §1.2 follows |
 | G2 | `lib/net` poller: a kqueue shim (register/unregister/wait returning raw events) and Rae on top (`createPoller`, interest per `SocketId`, `pollWait` filling a caller-owned `List(Readiness)`, no allocation per wait); epoll later behind the same Rae API (F8) | M | used by both styles |
 | G3 | a byte buffer for I/O, pure Rae: append, consume from the front, find a byte sequence, read a range as a `String`, reuse without reallocating | M | read and write buffers per connection |

@@ -1,19 +1,23 @@
-# TCP sockets (docs/server-benchmarks-design.md §9 G1, decision F1).
+# TCP sockets (docs/server-benchmarks-design.md §9 G1 and §1.2, decision F1).
 #
 # A socket is a value handle (`SocketId`), stored and passed like any other
-# id; the runtime (compiler/runtime/runtime_net.c) owns the OS side. Every
-# operation that can fail answers a `NetStatus` with its result — never an
-# errno, never a C address struct. Every socket is non-blocking: when an
-# operation would have to wait it answers `wouldBlock`, and the caller waits
+# id. Every operation that can fail answers a `NetStatus` with its result —
+# never an errno, never a C address struct. Every socket is non-blocking: when
+# an operation would have to wait it answers `wouldBlock`, and the caller waits
 # for readiness (one socket: `socketWaitReadable`; many: the poller).
 #
-# The runtime sets the options a server always wants: SO_REUSEADDR on
-# listeners, TCP_NODELAY on connections, and no SIGPIPE when writing to a
-# closed peer (that is `connectionReset`, not a dead process).
+# This module is the POLICY, in Rae, over the one-call-per-function system
+# shim in lib/net/NetSystem.rae (AGENTS.md "Runtime C rule"): the listen
+# sequence, retrying a call a signal interrupted, connect with a timeout, the
+# options a server always wants (SO_REUSEADDR on listeners; TCP_NODELAY,
+# close-on-exec and no SIGPIPE on connections, so a write to a closed peer is
+# `connectionReset`, not a dead process) and what each error means.
 #
 # A SocketId is a handle, not the connection: closing it is explicit
 # (`socketClose`), as with every other runtime handle. macOS and Linux;
 # elsewhere every call answers `unsupported`.
+open net/NetSystem
+
 type SocketId {
   handle: Int
 }
@@ -43,46 +47,9 @@ type IoResult {
   status: NetStatus
 }
 
-func nativeListen(host: String, port: Int, backlog: Int) unsafe extern("rae_ext_Net_listen") ret Int
-
-func nativeAccept(listener: Int) unsafe extern("rae_ext_Net_accept") ret Int
-
-func nativeConnect(
-  host: String
-  port: Int
-  timeoutMs: Int
-) unsafe extern("rae_ext_Net_connect") ret Int
-
-func nativeRead(
-  handle: Int
-  buffer: Buffer(UInt8)
-  offset: Int
-  maxBytes: Int
-) unsafe extern("rae_ext_Net_read") ret Int
-
-func nativeWrite(
-  handle: Int
-  buffer: Buffer(UInt8)
-  offset: Int
-  count: Int
-) unsafe extern("rae_ext_Net_write") ret Int
-
-func nativeWriteText(handle: Int, text: String) unsafe extern("rae_ext_Net_writeText") ret Int
-
-func nativeWaitReadable(
-  handle: Int
-  timeoutMs: Int
-) unsafe extern("rae_ext_Net_waitReadable") ret Bool
-
-func nativeLocalPort(handle: Int) unsafe extern("rae_ext_Net_localPort") ret Int
-
-func nativeClose(handle: Int) unsafe extern("rae_ext_Net_close")
-
-func nativeBytesToText(
-  buffer: Buffer(UInt8)
-  offset: Int
-  count: Int
-) unsafe extern("rae_ext_Net_bytesToText") ret String
+# How many addresses a name may resolve to that we try (IPv4 and IPv6, a few
+# interfaces)
+const maxAddressRecords: Int = 8
 
 func noSocket() ret SocketId {
   ret SocketId { handle: -1 }
@@ -92,43 +59,49 @@ func socketIsValid(socketId: view SocketId) ret Bool {
   ret socketId.handle >= 0
 }
 
-# The runtime's status code (< 0; see runtime_net.c) as a NetStatus
+# What a failed shim answer (< 0: a negated errno or a marker) means
 func netStatusFromCode(code: view Int) ret NetStatus {
   if code >= 0 {
     ret NetStatus.ok
   }
-  if code is -1 {
-    ret NetStatus.wouldBlock
+  if code is netConstant(which: unsupportedCode) {
+    ret NetStatus.unsupported
   }
-  if code is -2 {
-    ret NetStatus.endOfStream
-  }
-  if code is -3 {
-    ret NetStatus.addressInUse
-  }
-  if code is -4 {
-    ret NetStatus.connectionRefused
-  }
-  if code is -5 {
-    ret NetStatus.connectionReset
-  }
-  if code is -6 {
+  if code is netConstant(which: resolveFailedCode) {
     ret NetStatus.invalidAddress
   }
-  if code is -7 {
-    ret NetStatus.tooManyOpen
+  if isError(code: code, which: errorTryAgain) or isError(code: code, which: errorWouldBlock) or isError(
+    code: code
+    which: errorInProgress
+  ) {
+    ret NetStatus.wouldBlock
   }
-  if code is -8 {
-    ret NetStatus.unsupported
+  if isError(code: code, which: errorAddressInUse) {
+    ret NetStatus.addressInUse
+  }
+  if isError(code: code, which: errorConnectionRefused) {
+    ret NetStatus.connectionRefused
+  }
+  if isError(code: code, which: errorConnectionReset) or isError(code: code, which: errorBrokenPipe) {
+    ret NetStatus.connectionReset
+  }
+  if isError(code: code, which: errorAddressNotAvailable) or isError(
+    code: code
+    which: errorFamilyNotSupported
+  ) {
+    ret NetStatus.invalidAddress
+  }
+  if isError(code: code, which: errorTooManyFilesProcess) or isError(
+    code: code
+    which: errorTooManyFilesSystem
+  ) {
+    ret NetStatus.tooManyOpen
   }
   ret NetStatus.failed
 }
 
-func socketResultFromCode(code: view Int) ret SocketResult {
-  if code >= 0 {
-    ret SocketResult { socketId: { handle: code }, status: NetStatus.ok }
-  }
-  ret SocketResult { socketId: noSocket(), status: netStatusFromCode(code: code) }
+func failedSocket(status: view NetStatus) ret SocketResult {
+  ret SocketResult { socketId: noSocket(), status: status }
 }
 
 func ioResultFromCode(code: view Int) ret IoResult {
@@ -138,48 +111,244 @@ func ioResultFromCode(code: view Int) ret IoResult {
   ret IoResult { bytes: 0, status: netStatusFromCode(code: code) }
 }
 
-# Listen on `host` ("" = every local address, "127.0.0.1" = this machine
-# only) and `port` (0 picks a free port; `socketLocalPort` says which).
-func tcpListen(host: view String, port: view Int, backlog: view Int) ret SocketResult {
+# Turn on non-blocking mode: answers 0 or the failing call's code
+func setNonBlocking(handle: view Int) ret Int {
   unsafe {
-    ret socketResultFromCode(code: nativeListen(host: host, port: port, backlog: backlog))
+    let flags: Int = systemGetFileFlags(handle: handle)
+    if flags < 0 {
+      ret flags
+    }
+    ret systemSetFileFlags(
+      handle: handle
+      flags: flags bitor netConstant(which: fileFlagNonBlocking)
+    )
   }
 }
 
-# Accept one pending connection; `wouldBlock` when none is waiting.
+# The options every connected socket gets: small replies go out at once (no
+# Nagle delay), no SIGPIPE where the OS has a socket option for it (Linux
+# avoids it per send instead), and not inherited by child processes. They
+# are best effort: a failure leaves the socket usable.
+func prepareConnected(handle: view Int) {
+  unsafe {
+    let noDelay: Int = systemSetIntOption(
+      handle: handle
+      level: netConstant(which: protocolTcp)
+      option: netConstant(which: optionTcpNoDelay)
+      value: 1
+    )
+    let noSigPipe: Int = netConstant(which: optionNoSigPipe)
+    if noSigPipe >= 0 {
+      let set: Int = systemSetIntOption(
+        handle: handle
+        level: netConstant(which: optionLevelSocket)
+        option: noSigPipe
+        value: 1
+      )
+    }
+    let closeOnExec: Int = systemSetCloseOnExec(handle: handle)
+  }
+}
+
+func closeHandle(handle: view Int) {
+  unsafe {
+    let closed: Int = systemClose(handle: handle)
+  }
+}
+
+# Listen on `host` ("" = every local address, "127.0.0.1" = this machine
+# only) and `port` (0 picks a free port; `socketLocalPort` says which). Tries
+# each address the name resolves to: socket, reuse the address (a restarted
+# server can rebind at once), close-on-exec, bind, listen, non-blocking.
+func tcpListen(host: view String, port: view Int, backlog: view Int) ret SocketResult {
+  if port < 0 or port > 65535 {
+    ret failedSocket(status: NetStatus.invalidAddress)
+  }
+  var records: List(UInt8) = List.create(
+    UInt8
+    cap: maxAddressRecords * netConstant(which: addressRecordBytes)
+  )
+  var status: NetStatus = NetStatus.invalidAddress
+  unsafe {
+    let count: Int = systemResolve(
+      host: host
+      port: port
+      passive: true
+      records: records.data
+      maxRecords: maxAddressRecords
+    )
+    if count < 0 {
+      ret failedSocket(status: netStatusFromCode(code: count))
+    }
+    var queueLength: Int = backlog
+    if queueLength <= 0 {
+      queueLength = netConstant(which: listenBacklogMax)
+    }
+    loop var index: Int = 0, index < count, ++index {
+      let handle: Int = systemSocketFor(records: records.data, index: index)
+      if handle < 0 {
+        status = netStatusFromCode(code: handle)
+        continue
+      }
+      let reuse: Int = systemSetIntOption(
+        handle: handle
+        level: netConstant(which: optionLevelSocket)
+        option: netConstant(which: optionReuseAddress)
+        value: 1
+      )
+      let closeOnExec: Int = systemSetCloseOnExec(handle: handle)
+      var code: Int = systemBindTo(handle: handle, records: records.data, index: index)
+      if code is 0 {
+        code = systemListen(handle: handle, backlog: queueLength)
+      }
+      if code is 0 {
+        code = setNonBlocking(handle: handle)
+      }
+      if code < 0 {
+        status = netStatusFromCode(code: code)
+        closeHandle(handle: handle)
+        continue
+      }
+      ret SocketResult { socketId: { handle: handle }, status: NetStatus.ok }
+    }
+  }
+  ret failedSocket(status: status)
+}
+
+# Accept one pending connection; `wouldBlock` when none is waiting. A peer
+# that gave up before it was accepted is not the listener's failure: that is
+# `wouldBlock` too, and the caller goes on.
 func tcpAccept(listenerSocketId: view SocketId) ret SocketResult {
   unsafe {
-    ret socketResultFromCode(code: nativeAccept(listener: listenerSocketId.handle))
+    loop {
+      let handle: Int = systemAccept(handle: listenerSocketId.handle)
+      if handle >= 0 {
+        if setNonBlocking(handle: handle) < 0 {
+          closeHandle(handle: handle)
+          ret failedSocket(status: NetStatus.failed)
+        }
+        prepareConnected(handle: handle)
+        ret SocketResult { socketId: { handle: handle }, status: NetStatus.ok }
+      }
+      if isError(code: handle, which: errorInterrupted) {
+        continue
+      }
+      if isError(code: handle, which: errorConnectionAborted) {
+        ret failedSocket(status: NetStatus.wouldBlock)
+      }
+      ret failedSocket(status: netStatusFromCode(code: handle))
+    }
   }
+  ret failedSocket(status: NetStatus.failed)
 }
 
 # Connect to `host`:`port`, waiting up to `timeoutMs` for the connection
-# (`wouldBlock` when it did not complete in time). The socket it answers is
+# (`wouldBlock` when it did not complete in time). Tries each address: a
+# non-blocking connect, then a wait until the socket is writable, then its
+# pending error says whether it connected. The socket it answers is
 # non-blocking like every other.
 func tcpConnect(host: view String, port: view Int, timeoutMs: view Int) ret SocketResult {
-  unsafe {
-    ret socketResultFromCode(code: nativeConnect(host: host, port: port, timeoutMs: timeoutMs))
+  if port < 0 or port > 65535 {
+    ret failedSocket(status: NetStatus.invalidAddress)
   }
+  var records: List(UInt8) = List.create(
+    UInt8
+    cap: maxAddressRecords * netConstant(which: addressRecordBytes)
+  )
+  var status: NetStatus = NetStatus.connectionRefused
+  unsafe {
+    let count: Int = systemResolve(
+      host: host
+      port: port
+      passive: false
+      records: records.data
+      maxRecords: maxAddressRecords
+    )
+    if count < 0 {
+      ret failedSocket(status: netStatusFromCode(code: count))
+    }
+    loop var index: Int = 0, index < count, ++index {
+      let handle: Int = systemSocketFor(records: records.data, index: index)
+      if handle < 0 {
+        status = netStatusFromCode(code: handle)
+        continue
+      }
+      if setNonBlocking(handle: handle) < 0 {
+        status = NetStatus.failed
+        closeHandle(handle: handle)
+        continue
+      }
+      let code: Int = systemConnectTo(handle: handle, records: records.data, index: index)
+      if code < 0 {
+        # An interrupted connect carries on in the background, like one in
+        # progress
+        if not isError(code: code, which: errorInProgress) and not isError(
+          code: code
+          which: errorInterrupted
+        ) {
+          status = netStatusFromCode(code: code)
+          closeHandle(handle: handle)
+          continue
+        }
+        let ready: Int = systemPollOne(
+          handle: handle
+          events: netConstant(which: pollWritable)
+          timeoutMs: timeoutMs
+        )
+        if ready <= 0 {
+          status = NetStatus.wouldBlock
+          closeHandle(handle: handle)
+          continue
+        }
+        let pending: Int = systemSocketError(handle: handle)
+        if pending is not 0 {
+          var pendingCode: Int = pending
+          if pending > 0 {
+            pendingCode = -pending
+          }
+          status = netStatusFromCode(code: pendingCode)
+          closeHandle(handle: handle)
+          continue
+        }
+      }
+      prepareConnected(handle: handle)
+      ret SocketResult { socketId: { handle: handle }, status: NetStatus.ok }
+    }
+  }
+  ret failedSocket(status: status)
 }
 
 # Read up to `maxBytes` and APPEND them to `bytes` (growing it if needed).
 # `endOfStream` when the peer closed; `wouldBlock` when nothing is there yet.
 func socketRead(socketId: view SocketId, bytes: mod List(UInt8), maxBytes: view Int) ret IoResult {
+  if maxBytes <= 0 {
+    ret IoResult { bytes: 0, status: NetStatus.failed }
+  }
   loop bytes.cap - bytes.length < maxBytes {
     bytes.grow()
   }
   unsafe {
-    let code: Int = nativeRead(
-      handle: socketId.handle
-      buffer: bytes.data
-      offset: bytes.length
-      maxBytes: maxBytes
-    )
-    if code > 0 {
-      bytes.length = bytes.length + code
+    loop {
+      let code: Int = systemReceive(
+        handle: socketId.handle
+        buffer: bytes.data
+        offset: bytes.length
+        maxBytes: maxBytes
+      )
+      if code > 0 {
+        bytes.length = bytes.length + code
+        ret IoResult { bytes: code, status: NetStatus.ok }
+      }
+      if code is 0 {
+        ret IoResult { bytes: 0, status: NetStatus.endOfStream }
+      }
+      if isError(code: code, which: errorInterrupted) {
+        continue
+      }
+      ret ioResultFromCode(code: code)
     }
-    ret ioResultFromCode(code: code)
   }
+  ret IoResult { bytes: 0, status: NetStatus.failed }
 }
 
 # Write `count` bytes of `bytes` from `start`. It may write fewer when the
@@ -193,35 +362,81 @@ func socketWrite(
   if start < 0 or count < 0 or start + count > bytes.length {
     ret IoResult { bytes: 0, status: NetStatus.failed }
   }
-  unsafe {
-    ret ioResultFromCode(code: nativeWrite(
-      handle: socketId.handle
-      buffer: bytes.data
-      offset: start
-      count: count
-    ))
+  if count is 0 {
+    ret IoResult { bytes: 0, status: NetStatus.ok }
   }
+  unsafe {
+    loop {
+      let code: Int = systemSend(
+        handle: socketId.handle
+        buffer: bytes.data
+        offset: start
+        count: count
+        flags: netConstant(which: sendFlagNoSignal)
+      )
+      if isError(code: code, which: errorInterrupted) {
+        continue
+      }
+      ret ioResultFromCode(code: code)
+    }
+  }
+  ret IoResult { bytes: 0, status: NetStatus.failed }
 }
 
 # Write a String's bytes (small messages; bulk data goes through bytes)
 func socketWriteText(socketId: view SocketId, text: view String) ret IoResult {
-  unsafe {
-    ret ioResultFromCode(code: nativeWriteText(handle: socketId.handle, text: text))
+  if text.length() is 0 {
+    ret IoResult { bytes: 0, status: NetStatus.ok }
   }
+  unsafe {
+    loop {
+      let code: Int = systemSendText(
+        handle: socketId.handle
+        text: text
+        flags: netConstant(which: sendFlagNoSignal)
+      )
+      if isError(code: code, which: errorInterrupted) {
+        continue
+      }
+      ret ioResultFromCode(code: code)
+    }
+  }
+  ret IoResult { bytes: 0, status: NetStatus.failed }
 }
 
 # Wait until the socket has data or its peer closed: true, or false after
 # `timeoutMs` (-1 waits for ever). For one socket; many use the poller.
 func socketWaitReadable(socketId: view SocketId, timeoutMs: view Int) ret Bool {
-  unsafe {
-    ret nativeWaitReadable(handle: socketId.handle, timeoutMs: timeoutMs)
+  if socketId.handle < 0 {
+    ret false
   }
+  unsafe {
+    loop {
+      let ready: Int = systemPollOne(
+        handle: socketId.handle
+        events: netConstant(which: pollReadable)
+        timeoutMs: timeoutMs
+      )
+      if isError(code: ready, which: errorInterrupted) {
+        continue
+      }
+      ret ready > 0
+    }
+  }
+  ret false
 }
 
 # The local port the socket is bound to; -1 when it has none
 func socketLocalPort(socketId: view SocketId) ret Int {
+  if socketId.handle < 0 {
+    ret -1
+  }
   unsafe {
-    ret nativeLocalPort(handle: socketId.handle)
+    let port: Int = systemLocalPort(handle: socketId.handle)
+    if port < 0 {
+      ret -1
+    }
+    ret port
   }
 }
 
@@ -229,9 +444,7 @@ func socketClose(socketId: view SocketId) {
   if socketId.handle < 0 {
     ret
   }
-  unsafe {
-    nativeClose(handle: socketId.handle)
-  }
+  closeHandle(handle: socketId.handle)
 }
 
 # Bytes `start` .. `start + count` of `bytes` as a String
@@ -240,6 +453,6 @@ func textFromBytes(bytes: view List(UInt8), start: view Int, count: view Int) re
     ret ""
   }
   unsafe {
-    ret nativeBytesToText(buffer: bytes.data, offset: start, count: count)
+    ret systemBytesToText(buffer: bytes.data, offset: start, count: count)
   }
 }
