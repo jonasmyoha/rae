@@ -3,11 +3,7 @@ import Char
 
 func rae_str_len(s: String) unsafe extern ret Int
 
-func rae_str_compare(a: String, b: String) unsafe extern ret Int
-
 func rae_str_eq(a: String, b: String) unsafe extern ret Bool
-
-func rae_str_hash(s: String) unsafe extern ret Int
 
 func rae_str_concat(a: String, b: String) unsafe extern ret String
 
@@ -15,7 +11,46 @@ func rae_str_sub(s: String, start: Int, len: Int) unsafe extern ret String
 
 func rae_str_to_f64(s: String) unsafe extern ret Float
 
-func rae_str_to_i64(text: String) unsafe extern ret Int
+# The byte primitives the algorithms below are built on (inline in
+# compiler/runtime/rae_runtime.h; docs/runtime-c-audit.md row 3): `memcmp` of
+# two byte ranges (a range outside either String compares as different), and
+# `memchr` for one byte from a position (-1 when absent). Allocating a String
+# from bytes is the third.
+func rae_ext_rae_str_compare_bytes(
+  a: String
+  aStart: Int
+  b: String
+  bStart: Int
+  count: Int
+) unsafe extern ret Int
+
+func rae_ext_rae_str_find_byte(s: String, value: Int, from: Int) unsafe extern ret Int
+
+# One to four byte values as a String (one UTF-8 character, no List)
+func rae_ext_rae_str_from_small_bytes(
+  first: Int
+  second: Int
+  third: Int
+  fourth: Int
+  count: Int
+) unsafe extern ret String
+
+func rae_ext_rae_str_from_bytes(
+  buffer: Buffer(UInt8)
+  offset: Int
+  count: Int
+) unsafe extern ret String
+
+# Bytes `start` .. `start + count` of `bytes` as a String. The bytes are
+# copied as they are: the caller decides what they encode.
+func fromBytes(bytes: view List(UInt8), start: view Int, count: view Int) ret String {
+  if start < 0 or count <= 0 or start + count > bytes.length {
+    ret ""
+  }
+  unsafe {
+    ret rae_ext_rae_str_from_bytes(buffer: bytes.data, offset: start, count: count)
+  }
+}
 
 func rae_ext_rae_str_from_cstr(s: view Buffer(Any)) unsafe extern ret String
 
@@ -43,14 +78,53 @@ func fromCStr(s: view Buffer(Any)) unsafe ret String {
   }
 }
 
-func rae_ext_rae_str_from_codepoint(code: Int) unsafe extern ret String
-
 # One Unicode scalar (a code point, e.g. 8212 for the em dash) as a String —
 # its 1..4 UTF-8 bytes. A value outside U+0000..U+10FFFF, or in the
-# surrogate range, becomes U+FFFD. The inverse of `at`.
+# surrogate range, becomes U+FFFD. The inverse of `at`. U+0000 gives ""
+# (a String holds text, and the runtime ends text at a zero byte).
 func fromCodepoint(code: view Int) ret String {
+  var scalar: Int = code
+  if code < 0 or code > 1114111 or (code >= 55296 and code <= 57343) {
+    scalar = 65533
+  }
+  if scalar is 0 {
+    ret ""
+  }
   unsafe {
-    ret rae_ext_rae_str_from_codepoint(code: code)
+    if scalar < 128 {
+      ret rae_ext_rae_str_from_small_bytes(
+        first: scalar
+        second: 0
+        third: 0
+        fourth: 0
+        count: 1
+      )
+    }
+    if scalar < 2048 {
+      ret rae_ext_rae_str_from_small_bytes(
+        first: 192 bitor (scalar shr 6)
+        second: 128 bitor (scalar bitand 63)
+        third: 0
+        fourth: 0
+        count: 2
+      )
+    }
+    if scalar < 65536 {
+      ret rae_ext_rae_str_from_small_bytes(
+        first: 224 bitor (scalar shr 12)
+        second: 128 bitor ((scalar shr 6) bitand 63)
+        third: 128 bitor (scalar bitand 63)
+        fourth: 0
+        count: 3
+      )
+    }
+    ret rae_ext_rae_str_from_small_bytes(
+      first: 240 bitor (scalar shr 18)
+      second: 128 bitor ((scalar shr 12) bitand 63)
+      third: 128 bitor ((scalar shr 6) bitand 63)
+      fourth: 128 bitor (scalar bitand 63)
+      count: 4
+    )
   }
 }
 
@@ -62,12 +136,55 @@ func toCStr(this: view String) unsafe ret Buffer(Any) {
   }
 }
 
-func rae_ext_rae_str_at(s: String, index: Int) unsafe extern ret Char32
+# A code point as a Char32. Rae has no `as Char32` conversion; this inline
+# runtime cast stands in for it (rae_runtime.h).
+func rae_ext_rae_char_from_code(code: Int) unsafe extern ret Char32
 
-func at(this: view String, index: view Int) ret Char32 {
+func charFromCode(code: view Int) ret Char32 {
   unsafe {
-    ret rae_ext_rae_str_at(s: this, index: index)
+    ret rae_ext_rae_char_from_code(code: code)
   }
+}
+
+# The character (Unicode scalar) whose UTF-8 encoding starts at byte
+# `index`; 0 out of range. A byte that does not start a valid sequence, or a
+# sequence cut short by the end of the String, reads as the byte itself.
+func at(this: view String, index: view Int) ret Char32 {
+  let first: Int = this.byteAt(index: index)
+  if first < 0 {
+    ret charFromCode(code: 0)
+  }
+  if first < 128 {
+    ret charFromCode(code: first)
+  }
+  let length: Int = this.length()
+  if (first bitand 224) is 192 {
+    if index + 1 >= length {
+      ret charFromCode(code: first)
+    }
+    let second: Int = this.byteAt(index: index + 1) bitand 63
+    ret charFromCode(code: ((first bitand 31) shl 6) bitor second)
+  }
+  if (first bitand 240) is 224 {
+    if index + 2 >= length {
+      ret charFromCode(code: first)
+    }
+    let second: Int = this.byteAt(index: index + 1) bitand 63
+    let third: Int = this.byteAt(index: index + 2) bitand 63
+    ret charFromCode(code: ((first bitand 15) shl 12) bitor (second shl 6) bitor third)
+  }
+  if (first bitand 248) is 240 {
+    if index + 3 >= length {
+      ret charFromCode(code: first)
+    }
+    let second: Int = this.byteAt(index: index + 1) bitand 63
+    let third: Int = this.byteAt(index: index + 2) bitand 63
+    let fourth: Int = this.byteAt(index: index + 3) bitand 63
+    ret charFromCode(
+      code: ((first bitand 7) shl 18) bitor (second shl 12) bitor (third shl 6) bitor fourth
+    )
+  }
+  ret charFromCode(code: first)
 }
 
 # Stage 5: read-only String helpers take `view String` so callers
@@ -91,16 +208,46 @@ func length(this: view String) ret Int {
   }
 }
 
+# Byte-wise order: < 0, 0 or > 0 (memcmp's sign); when one String is a
+# prefix of the other, the shorter one comes first.
 func compare(this: view String, other: view String) ret Int {
-  unsafe {
-    ret rae_str_compare(a: this, b: other)
+  let length: Int = this.length()
+  let otherLength: Int = other.length()
+  var common: Int = length
+  if otherLength < common {
+    common = otherLength
   }
+  unsafe {
+    let result: Int = rae_ext_rae_str_compare_bytes(
+      a: this
+      aStart: 0
+      b: other
+      bStart: 0
+      count: common
+    )
+    if result is not 0 {
+      ret result
+    }
+  }
+  if length < otherLength {
+    ret -1
+  }
+  if length > otherLength {
+    ret 1
+  }
+  ret 0
 }
 
+# 64-bit FNV-1a over the bytes (UInt64 arithmetic wraps). Equal Strings hash
+# equal, the empty String included.
 func hash(this: view String) ret Int {
-  unsafe {
-    ret rae_str_hash(s: this)
+  var value: UInt64 = 14695981039346656037
+  let prime: UInt64 = 1099511628211
+  let length: Int = this.length()
+  loop var i: Int = 0, i < length, ++i {
+    value = (value bitxor (this.byteAt(index: i) as UInt64)) * prime
   }
+  ret value as Int
 }
 
 func concat(this: view String, other: view String) ret String {
@@ -197,76 +344,99 @@ func contains(this: view String, sub: view String) ret Bool {
 }
 
 func startsWith(this: view String, prefix: view String) ret Bool {
-  let prefixLen: Int = prefix.length()
-  if prefixLen is 0 {
+  let prefixLength: Int = prefix.length()
+  if prefixLength is 0 {
     ret true
   }
-  if prefixLen > this.length() {
+  if prefixLength > this.length() {
     ret false
   }
-  let head: String = this.sub(start: 0, len: prefixLen)
-  ret head is prefix
+  unsafe {
+    ret rae_ext_rae_str_compare_bytes(
+      a: this
+      aStart: 0
+      b: prefix
+      bStart: 0
+      count: prefixLength
+    ) is 0
+  }
 }
 
 func endsWith(this: view String, suffix: view String) ret Bool {
-  let suffixLen: Int = suffix.length()
-  if suffixLen is 0 {
+  let suffixLength: Int = suffix.length()
+  if suffixLength is 0 {
     ret true
   }
-  let n: Int = this.length()
-  if suffixLen > n {
+  let length: Int = this.length()
+  if suffixLength > length {
     ret false
   }
-  let tail: String = this.sub(start: n - suffixLen, len: suffixLen)
-  ret tail is suffix
+  unsafe {
+    ret rae_ext_rae_str_compare_bytes(
+      a: this
+      aStart: length - suffixLength
+      b: suffix
+      bStart: 0
+      count: suffixLength
+    ) is 0
+  }
 }
 
+# The byte index of the first occurrence of `sub`, or -1; 0 for an empty
+# `sub`. Jumps between occurrences of `sub`'s first byte (memchr) and
+# compares the rest there (memcmp): no allocation.
 func indexOf(this: view String, sub: view String) ret Int {
-  let needleLen: Int = sub.length()
-  if needleLen is 0 {
+  let needleLength: Int = sub.length()
+  if needleLength is 0 {
     ret 0
   }
-  let n: Int = this.length()
-  if needleLen > n {
+  let lastStart: Int = this.length() - needleLength
+  if lastStart < 0 {
     ret -1
   }
-  var i: Int = 0
-  loop i <= n - needleLen {
-    let part: String = this.sub(start: i, len: needleLen)
-    if part is sub {
-      ret i
+  let first: Int = sub.byteAt(index: 0)
+  unsafe {
+    var position: Int = rae_ext_rae_str_find_byte(s: this, value: first, from: 0)
+    loop position >= 0 and position <= lastStart {
+      if rae_ext_rae_str_compare_bytes(
+        a: this
+        aStart: position
+        b: sub
+        bStart: 0
+        count: needleLength
+      ) is 0 {
+        ret position
+      }
+      position = rae_ext_rae_str_find_byte(s: this, value: first, from: position + 1)
     }
-    i = i + 1
   }
   ret -1
 }
 
-# Right-most occurrence of `sub` inside `this`, or -1 if not found.
-# Implemented in pure Rae so we don't need a parallel C native: scan
-# left-to-right via `indexOf` keeping the most-recent hit. O(n*m)
-# worst case which is fine for typical "find the last dot in a
-# filename" usage.
+# The byte index of the last occurrence of `sub`, or -1 (also -1 for an
+# empty `sub`). Scans back from the end; no allocation.
 func lastIndexOf(this: view String, sub: view String) ret Int {
-  let needleLen: Int = sub.length()
-  if needleLen is 0 {
+  let needleLength: Int = sub.length()
+  if needleLength is 0 {
     ret -1
   }
-  let n: Int = this.length()
-  if needleLen > n {
-    ret -1
-  }
-  var result: Int = -1
-  var pos: Int = 0
-  loop pos <= n - needleLen {
-    let tail: String = this.sub(start: pos, len: n - pos)
-    let found: Int = tail.indexOf(sub: sub)
-    if found is -1 {
-      ret result
+  let first: Int = sub.byteAt(index: 0)
+  var position: Int = this.length() - needleLength
+  unsafe {
+    loop position >= 0 {
+      if this.byteAt(index: position) is first and rae_ext_rae_str_compare_bytes(
+        a: this
+        aStart: position
+        b: sub
+        bStart: 0
+        count: needleLength
+      ) is 0 {
+        ret position
+      }
+      position = position - 1
     }
-    result = pos + found
-    pos = result + 1
   }
-  ret result
+  ret -1
 }
 
 func lowerAsciiByte(ch: view String) ret String {
@@ -461,8 +631,58 @@ func toFloat(this: view String) ret Float {
   }
 }
 
+# The smallest Int (-2^63), spelled as arithmetic because its magnitude has
+# no positive Int
+const smallestInt: Int = -9223372036854775807 - 1
+
+# A decimal integer at the start of the String, like C's strtoll: leading
+# spaces, tabs and line breaks are skipped, then an optional sign, then digits
+# up to the first non-digit. No digits gives 0; a value out of Int's range
+# clamps to the nearest end.
 func toInt(this: view String) ret Int {
-  unsafe {
-    ret rae_str_to_i64(text: this)
+  let length: Int = this.length()
+  var i: Int = 0
+  loop i < length {
+    let space: Int = this.byteAt(index: i)
+    if space is 32 or (space >= 9 and space <= 13) {
+      i = i + 1
+    } else {
+      break
+    }
   }
+  var negative: Bool = false
+  if i < length {
+    let sign: Int = this.byteAt(index: i)
+    if sign is 45 {
+      negative = true
+      i = i + 1
+    } else if sign is 43 {
+      i = i + 1
+    }
+  }
+  # Accumulated as a NEGATIVE number, so the smallest Int is reachable
+  var value: Int = 0
+  var clamped: Bool = false
+  loop i < length {
+    let digit: Int = this.byteAt(index: i) - 48
+    if digit < 0 or digit > 9 {
+      break
+    }
+    if value < (smallestInt + digit) / 10 {
+      clamped = true
+      break
+    }
+    value = value * 10 - digit
+    i = i + 1
+  }
+  if negative {
+    if clamped {
+      ret smallestInt
+    }
+    ret value
+  }
+  if clamped or value is smallestInt {
+    ret 9223372036854775807
+  }
+  ret -value
 }

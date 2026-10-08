@@ -46,6 +46,21 @@ rae_String rae_ext_rae_str_from_buf(const uint8_t* data, int64_t len) {
   return rae_str_from_buf_impl(data, len, RAE_SITE_FROM_BUF);
 }
 
+/* Bytes buffer[offset .. offset+count) as a fresh String (lib/String.rae
+ * fromBytes): the allocation half of building text from bytes in Rae. */
+rae_String rae_ext_rae_str_from_bytes(uint8_t* buffer, int64_t offset, int64_t count) {
+  if (!buffer || offset < 0 || count <= 0) return (rae_String){NULL, 0, 0, 0};
+  return rae_str_from_buf_impl(buffer + offset, count, RAE_SITE_FROM_BUF);
+}
+
+/* A String of the first `count` (1..4) of these byte values: one UTF-8
+ * character without an intermediate List (lib/String.rae fromCodepoint) */
+rae_String rae_ext_rae_str_from_small_bytes(int64_t first, int64_t second, int64_t third, int64_t fourth, int64_t count) {
+  if (count < 1 || count > 4) return (rae_String){NULL, 0, 0, 0};
+  uint8_t bytes[4] = { (uint8_t)first, (uint8_t)second, (uint8_t)third, (uint8_t)fourth };
+  return rae_str_from_buf_impl(bytes, count, RAE_SITE_FROM_BUF);
+}
+
 void* rae_ext_rae_str_to_cstr(rae_String s) {
   // We ensure rae_String is always NUL-terminated for convenience,
   // but we should still handle the case where it might not be if we ever change that.

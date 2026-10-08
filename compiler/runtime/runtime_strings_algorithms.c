@@ -1,6 +1,8 @@
-/* String algorithms above the allocation kernel. Most ordinary policy is moving
- * to lib/string.rae; these C entry points remain as compatibility bridges until
- * no generated or legacy code path references them.
+/* The String operations that stay C (AGENTS.md "Runtime C rule";
+ * docs/runtime-c-audit.md row 3): allocating a rae_String (concat, sub), the
+ * equality the generated code calls for `is` (a length check and memcmp), and
+ * atof for toFloat. Every other String algorithm is Rae in lib/String.rae,
+ * over the inline byte primitives in rae_runtime.h.
  *
  * Split from rae_runtime.c by runtime migration task #288.
  * This module is included by rae_runtime.c into one translation unit.
@@ -31,37 +33,10 @@ rae_String rae_ext_rae_str_concat_cstr(rae_String a, rae_String b) {
   return rae_ext_rae_str_concat(a, b);
 }
 
-int64_t rae_ext_rae_str_len(rae_String s) {
-  return s.len;
-}
-
-int64_t rae_ext_rae_str_compare(rae_String a, rae_String b) {
-  if (a.len < b.len) {
-    int res = memcmp(a.data, b.data, a.len);
-    return res == 0 ? -1 : res;
-  } else if (a.len > b.len) {
-    int res = memcmp(a.data, b.data, b.len);
-    return res == 0 ? 1 : res;
-  } else {
-    return memcmp(a.data, b.data, a.len);
-  }
-}
-
 rae_Bool rae_ext_rae_str_eq(rae_String a, rae_String b) {
   if (a.len != b.len) return false;
   if (a.len == 0) return true;
   return memcmp(a.data, b.data, a.len) == 0;
-}
-
-int64_t rae_ext_rae_str_hash(rae_String s) {
-  if (!s.data) return 0;
-  // FNV-1a hash
-  uint64_t hash = 0xcbf29ce484222325ULL;
-  for (int64_t i = 0; i < s.len; i++) {
-    hash ^= (uint64_t)s.data[i];
-    hash *= 0x100000001b3ULL;
-  }
-  return (int64_t)hash;
 }
 
 /* Byte-indexed substring that never cuts a character (docs/strings.md): a
@@ -92,106 +67,8 @@ rae_String rae_ext_rae_str_sub(rae_String s, int64_t start, int64_t len) {
   return (rae_String){result_data, len, len + 1, 1};
 }
 
-rae_Bool rae_ext_rae_str_contains(rae_String s, rae_String sub) {
-  if (!s.data || !sub.data) return false;
-  if (sub.len == 0) return true;
-  if (sub.len > s.len) return false;
-  // Naive search because we don't necessarily have NUL termination at the right place if it's a subslice
-  // But we DO ensure NUL termination in our helpers.
-  return strstr((const char*)s.data, (const char*)sub.data) != NULL;
-}
-
-rae_Bool rae_ext_rae_str_starts_with(rae_String s, rae_String prefix) {
-  if (prefix.len > s.len) return false;
-  if (prefix.len == 0) return true;
-  return memcmp(s.data, prefix.data, prefix.len) == 0;
-}
-
-rae_Bool rae_ext_rae_str_ends_with(rae_String s, rae_String suffix) {
-  if (suffix.len > s.len) return false;
-  if (suffix.len == 0) return true;
-  return memcmp(s.data + s.len - suffix.len, suffix.data, suffix.len) == 0;
-}
-
-int64_t rae_ext_rae_str_index_of(rae_String s, rae_String sub) {
-  if (!s.data || !sub.data) return -1;
-  if (sub.len == 0) return 0;
-  const char* p = strstr((const char*)s.data, (const char*)sub.data);
-  if (!p) return -1;
-  return (int64_t)(p - (const char*)s.data);
-}
-
-rae_String rae_ext_rae_str_trim(rae_String s) {
-  if (!s.data || s.len == 0) return (rae_String){NULL, 0, 0, 0};
-  int64_t start = 0;
-  while (start < s.len && (s.data[start] == ' ' || s.data[start] == '\t' || s.data[start] == '\n' || s.data[start] == '\r')) start++;
-  if (start == s.len) return (rae_String){NULL, 0, 0, 0};
-  int64_t end = s.len - 1;
-  while (end > start && (s.data[end] == ' ' || s.data[end] == '\t' || s.data[end] == '\n' || s.data[end] == '\r')) end--;
-  return rae_ext_rae_str_sub(s, start, end - start + 1);
-}
-
-/* #976: the raw byte at `index` (0..255), -1 out of range. The UTF-8 aware
- * `rae_ext_rae_str_at` decodes; editing code that steps over continuation
- * bytes (a Backspace on a multi-byte character) needs the bytes themselves. */
-int64_t rae_ext_rae_str_byte_at(rae_String s, int64_t index) {
-  if (!s.data || index < 0 || index >= s.len) return -1;
-  return (int64_t)s.data[index];
-}
-
-uint32_t rae_ext_rae_str_at(rae_String s, int64_t index) {
-  if (!s.data || index < 0 || index >= s.len) return 0;
-  uint8_t c = s.data[index];
-  if (c < 0x80) return (uint32_t)c;
-  if ((c & 0xE0) == 0xC0) {
-    if (index + 1 >= s.len) return (uint32_t)c;
-    return (uint32_t)(((c & 0x1F) << 6) | (s.data[index+1] & 0x3F));
-  }
-  if ((c & 0xF0) == 0xE0) {
-    if (index + 2 >= s.len) return (uint32_t)c;
-    return (uint32_t)(((c & 0x0F) << 12) | ((s.data[index+1] & 0x3F) << 6) | (s.data[index+2] & 0x3F));
-  }
-  if ((c & 0xF8) == 0xF0) {
-    if (index + 3 >= s.len) return (uint32_t)c;
-    return (uint32_t)(((c & 0x07) << 18) | ((s.data[index+1] & 0x3F) << 12) | ((s.data[index+2] & 0x3F) << 6) | (s.data[index+3] & 0x3F));
-  }
-  return (uint32_t)c;
-}
-
-/* #81444309: the inverse of rae_ext_rae_str_at — one Unicode scalar as a
- * fresh UTF-8 String (1..4 bytes). Out-of-range values and the surrogate
- * range encode U+FFFD, the replacement character. The JSON parser's \uXXXX
- * decoding is built on this. */
-rae_String rae_ext_rae_str_from_codepoint(int64_t code) {
-  uint32_t cp = (uint32_t)code;
-  if (code < 0 || code > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) cp = 0xFFFD;
-  char buf[5];
-  int n = 0;
-  if (cp < 0x80) {
-    buf[n++] = (char)cp;
-  } else if (cp < 0x800) {
-    buf[n++] = (char)(0xC0 | (cp >> 6));
-    buf[n++] = (char)(0x80 | (cp & 0x3F));
-  } else if (cp < 0x10000) {
-    buf[n++] = (char)(0xE0 | (cp >> 12));
-    buf[n++] = (char)(0x80 | ((cp >> 6) & 0x3F));
-    buf[n++] = (char)(0x80 | (cp & 0x3F));
-  } else {
-    buf[n++] = (char)(0xF0 | (cp >> 18));
-    buf[n++] = (char)(0x80 | ((cp >> 12) & 0x3F));
-    buf[n++] = (char)(0x80 | ((cp >> 6) & 0x3F));
-    buf[n++] = (char)(0x80 | (cp & 0x3F));
-  }
-  buf[n] = '\0';
-  return rae_ext_rae_str_from_cstr((const void*)buf);
-}
-
 double rae_ext_rae_str_to_f64(rae_String s) {
   if (!s.data) return 0.0;
   return atof((const char*)s.data);
 }
 
-int64_t rae_ext_rae_str_to_i64(rae_String s) {
-  if (!s.data) return 0;
-  return (int64_t)atoll((const char*)s.data);
-}

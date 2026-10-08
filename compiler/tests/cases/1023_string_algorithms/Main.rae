@@ -1,0 +1,97 @@
+# The String algorithms in Rae (docs/runtime-c-audit.md row 3): compare,
+# hash, at, fromCodepoint, toInt, startsWith/endsWith, indexOf/lastIndexOf,
+# contains. The expected output was produced by the C runtime functions they
+# replace, on the same inputs, with one deliberate difference: the old
+# lastIndexOf answered 9 for 'é' in 'héllo héllo' (it searched suffixes cut by
+# `sub`, which snaps a start inside a character back to the character), and
+# the byte-exact search answers 8, the second 'é''s first byte.
+func showCompare(left: view String, right: view String) {
+  let result: Int = left.compare(other: right)
+  var sign: Int = 0
+  if result < 0 {
+    sign = -1
+  } else if result > 0 {
+    sign = 1
+  }
+  log("compare '{left}' '{right}': {sign}")
+}
+
+func showAt(text: view String, index: view Int) {
+  log("at '{text}' {index}: '{text.at(index: index)}'")
+}
+
+func showCodepoint(code: view Int) {
+  let text: String = String.fromCodepoint(code: code)
+  log("fromCodepoint {code}: '{text}' length {text.length()}")
+}
+
+func showInt(text: view String) {
+  log("toInt '{text}': {text.toInt()}")
+}
+
+func showSearch(text: view String, needle: view String) {
+  log(
+    "'{text}' '{needle}': indexOf {text.indexOf(sub: needle)} lastIndexOf {text.lastIndexOf(
+      sub: needle
+    )} contains {text.contains(sub: needle)} starts {text.startsWith(prefix: needle)} ends {text.endsWith(
+      suffix: needle
+    )}"
+  )
+}
+
+func main() ret Int {
+  showCompare(left: "", right: "")
+  showCompare(left: "a", right: "")
+  showCompare(left: "", right: "a")
+  showCompare(left: "abc", right: "abd")
+  showCompare(left: "abd", right: "abc")
+  showCompare(left: "abc", right: "abcd")
+  showCompare(left: "é", right: "e")
+  showCompare(left: "same text", right: "same text")
+
+  log("hash '': {"".hash()}")
+  log("hash 'a': {"a".hash()}")
+  log("hash 'hello': {"hello".hash()}")
+  log("hash 'héllo wörld': {"héllo wörld".hash()}")
+
+  showAt(text: "abc", index: 1)
+  showAt(text: "héllo", index: 1)
+  showAt(text: "héllo", index: 2)
+  showAt(text: "a—b", index: 1)
+  showAt(text: "x😀", index: 1)
+  # Out of range reads as the zero character
+  let zero: Char32 = String.charFromCode(code: 0)
+  log("at 'abc' 3 is zero: {"abc".at(index: 3) is zero}")
+  log("at 'abc' -1 is zero: {"abc".at(index: -1) is zero}")
+
+  showCodepoint(code: 65)
+  showCodepoint(code: 233)
+  showCodepoint(code: 8212)
+  showCodepoint(code: 128512)
+  showCodepoint(code: 0)
+  showCodepoint(code: -1)
+  showCodepoint(code: 1114112)
+  showCodepoint(code: 55296)
+
+  showInt(text: "")
+  showInt(text: "42")
+  showInt(text: "-42")
+  showInt(text: "+7")
+  showInt(text: "  12x")
+  showInt(text: "\t\n-3")
+  showInt(text: "abc")
+  showInt(text: "9223372036854775807")
+  showInt(text: "-9223372036854775808")
+  showInt(text: "007")
+
+  showSearch(text: "hello world", needle: "o")
+  showSearch(text: "hello world", needle: "world")
+  showSearch(text: "hello world", needle: "hello")
+  showSearch(text: "hello world", needle: "")
+  showSearch(text: "hello world", needle: "xyz")
+  showSearch(text: "aaaa", needle: "aa")
+  showSearch(text: "héllo héllo", needle: "é")
+  showSearch(text: "short", needle: "much longer needle")
+  showSearch(text: "", needle: "a")
+  ret 0
+}

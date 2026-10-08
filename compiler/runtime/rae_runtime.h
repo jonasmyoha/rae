@@ -412,7 +412,6 @@ void rae_ext_rae_log_list_typed(void* data, int64_t length, int64_t capacity, in
 void rae_ext_rae_log_stream_list_typed(void* data, int64_t length, int64_t capacity, int elem_kind);
 
 rae_String rae_ext_rae_str_from_cstr(const void* s);
-rae_String rae_ext_rae_str_from_codepoint(int64_t code);
 rae_String rae_ext_rae_str_from_buf(const uint8_t* data, int64_t len);
 void* rae_ext_rae_str_to_cstr(rae_String s);
 // Free `s.data` only when `s.is_owned`. Safe to call on borrowed
@@ -557,10 +556,39 @@ rae_String rae_ext_rae_str_interp(int n, ...);
 
 rae_String rae_ext_rae_str_concat(rae_String a, rae_String b);
 rae_String rae_ext_rae_str_concat_cstr(rae_String a, rae_String b); // Legacy/helper name
-int64_t rae_ext_rae_str_len(rae_String s);
-int64_t rae_ext_rae_str_compare(rae_String a, rae_String b);
 rae_Bool rae_ext_rae_str_eq(rae_String a, rae_String b);
-int64_t rae_ext_rae_str_hash(rae_String s);
+/* The String byte primitives lib/String.rae builds its algorithms on
+ * (docs/runtime-c-audit.md row 3). Inline, so a Rae loop over bytes compiles
+ * to plain loads; each is one access or one C-library call (memcmp, memchr),
+ * range-checked so a wrong index can never read outside the String. */
+static inline int64_t rae_ext_rae_str_len(rae_String s) {
+  return s.len;
+}
+/* The byte at `index` (0..255), -1 out of range */
+static inline int64_t rae_ext_rae_str_byte_at(rae_String s, int64_t index) {
+  if (!s.data || index < 0 || index >= s.len) return -1;
+  return (int64_t)s.data[index];
+}
+/* memcmp of a[aStart ..) and b[bStart ..) over `count` bytes: < 0, 0, > 0;
+ * a range outside either String compares as different (2) */
+static inline int64_t rae_ext_rae_str_compare_bytes(rae_String a, int64_t aStart, rae_String b, int64_t bStart, int64_t count) {
+  if (count <= 0) return 0;
+  if (aStart < 0 || bStart < 0 || aStart + count > a.len || bStart + count > b.len || !a.data || !b.data) return 2;
+  return (int64_t)memcmp(a.data + aStart, b.data + bStart, (size_t)count);
+}
+/* memchr: the first index >= `from` holding `byte`, or -1 */
+static inline int64_t rae_ext_rae_str_find_byte(rae_String s, int64_t byte, int64_t from) {
+  if (!s.data || from < 0 || from >= s.len) return -1;
+  const uint8_t* hit = (const uint8_t*)memchr(s.data + from, (int)byte, (size_t)(s.len - from));
+  return hit ? (int64_t)(hit - s.data) : -1;
+}
+rae_String rae_ext_rae_str_from_bytes(uint8_t* buffer, int64_t offset, int64_t count);
+rae_String rae_ext_rae_str_from_small_bytes(int64_t first, int64_t second, int64_t third, int64_t fourth, int64_t count);
+/* A code point as a Char32: the conversion Rae has no `as` for yet (lib/String
+ * at); nothing but the cast */
+static inline uint32_t rae_ext_rae_char_from_code(int64_t code) {
+  return (uint32_t)code;
+}
 rae_String rae_ext_rae_str_sub(rae_String s, int64_t start, int64_t len);
 /* A library-level runtime error (lib/core Core.rae runtimeError): one line on
  * stderr, exit RAE_TRAP_EXIT_CODE. runtime_filesystem.c. */
@@ -570,15 +598,7 @@ __attribute__((cold, noinline)) void rae_list_set_out_of_range(int64_t index, in
 /* runtime_core_memory.c: per-thread alternate signal stack for the crash
  * handler; the emitted spawn thunk calls it first. No-op on WASM. */
 void rae_thread_install_altstack(void);
-rae_Bool rae_ext_rae_str_contains(rae_String s, rae_String sub);
-rae_Bool rae_ext_rae_str_starts_with(rae_String s, rae_String prefix);
-rae_Bool rae_ext_rae_str_ends_with(rae_String s, rae_String suffix);
-int64_t rae_ext_rae_str_index_of(rae_String s, rae_String sub);
-rae_String rae_ext_rae_str_trim(rae_String s);
-uint32_t rae_ext_rae_str_at(rae_String s, int64_t index);
-int64_t rae_ext_rae_str_byte_at(rae_String s, int64_t index);
 double rae_ext_rae_str_to_f64(rae_String s);
-int64_t rae_ext_rae_str_to_i64(rae_String s);
 
 rae_String rae_ext_rae_io_read_line(void);
 rae_Char rae_ext_rae_io_read_char(void);

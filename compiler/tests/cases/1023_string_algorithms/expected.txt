@@ -1,0 +1,47 @@
+compare '' '': 0
+compare 'a' '': 1
+compare '' 'a': -1
+compare 'abc' 'abd': -1
+compare 'abd' 'abc': 1
+compare 'abc' 'abcd': -1
+compare 'é' 'e': 1
+compare 'same text' 'same text': 0
+hash '': -3750763034362895579
+hash 'a': -5808556873153909620
+hash 'hello': -6615550055289275125
+hash 'héllo wörld': 1261653000850579490
+at 'abc' 1: 'b'
+at 'héllo' 1: 'é'
+at 'héllo' 2: '©'
+at 'a—b' 1: '—'
+at 'x😀' 1: '😀'
+at 'abc' 3 is zero: true
+at 'abc' -1 is zero: true
+fromCodepoint 65: 'A' length 1
+fromCodepoint 233: 'é' length 2
+fromCodepoint 8212: '—' length 3
+fromCodepoint 128512: '😀' length 4
+fromCodepoint 0: '' length 0
+fromCodepoint -1: '�' length 3
+fromCodepoint 1114112: '�' length 3
+fromCodepoint 55296: '�' length 3
+toInt '': 0
+toInt '42': 42
+toInt '-42': -42
+toInt '+7': 7
+toInt '  12x': 12
+toInt '	
+-3': -3
+toInt 'abc': 0
+toInt '9223372036854775807': 9223372036854775807
+toInt '-9223372036854775808': -9223372036854775808
+toInt '007': 7
+'hello world' 'o': indexOf 4 lastIndexOf 7 contains true starts false ends false
+'hello world' 'world': indexOf 6 lastIndexOf 6 contains true starts false ends true
+'hello world' 'hello': indexOf 0 lastIndexOf 0 contains true starts true ends false
+'hello world' '': indexOf 0 lastIndexOf -1 contains true starts true ends true
+'hello world' 'xyz': indexOf -1 lastIndexOf -1 contains false starts false ends false
+'aaaa' 'aa': indexOf 0 lastIndexOf 2 contains true starts true ends true
+'héllo héllo' 'é': indexOf 1 lastIndexOf 8 contains true starts false ends false
+'short' 'much longer needle': indexOf -1 lastIndexOf -1 contains false starts false ends false
+'' 'a': indexOf -1 lastIndexOf -1 contains false starts false ends false

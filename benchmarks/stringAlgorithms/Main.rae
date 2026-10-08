@@ -1,0 +1,164 @@
+# The String algorithms (docs/runtime-c-audit.md row 3), timed one by one in
+# the release profile: `rae run --release benchmarks/stringAlgorithms/Main.rae`.
+# Each case runs a fixed number of operations and prints nanoseconds per
+# operation plus a checksum, so the work cannot be optimised away and a
+# behaviour change shows up as a different checksum.
+func repeatText(piece: view String, times: view Int) ret String {
+  var text: String = ""
+  loop var i: Int = 0, i < times, ++i {
+    text = text.concat(other: piece)
+  }
+  ret text
+}
+
+func report(
+  name: view String
+  started: view Int
+  operations: view Int
+  checksum: view Int
+) {
+  let elapsed: Int = nowNs() - started
+  log("{name}: {elapsed / operations} ns/op (checksum {checksum})")
+}
+
+func main() ret Int {
+  let key: String = repeatText(piece: "abcdefgh", times: 4)
+  let sameKey: String = repeatText(piece: "abcdefgh", times: 4)
+  let longText: String = "{repeatText(piece: "lorem ipsum dolor sit amet ", times: 40)}needle!"
+  let otherText: String = "{repeatText(piece: "lorem ipsum dolor sit amet ", times: 40)}needle?"
+  let utf8Text: String = repeatText(piece: "héllo wörld — ", times: 60)
+  let number: String = "-1234567890"
+  let padded: String = "   hello world   "
+
+  var checksum: Int = 0
+  var started: Int = nowNs()
+  loop var i: Int = 0, i < 1000000, ++i {
+    if key is sameKey {
+      checksum = checksum + 1
+    }
+  }
+  report(
+    name: "equality (32 bytes)"
+    started: started
+    operations: 1000000
+    checksum: checksum
+  )
+
+  checksum = 0
+  started = nowNs()
+  loop var i: Int = 0, i < 1000000, ++i {
+    checksum = checksum bitxor key.hash()
+  }
+  report(
+    name: "hash (32 bytes)"
+    started: started
+    operations: 1000000
+    checksum: checksum
+  )
+
+  checksum = 0
+  started = nowNs()
+  loop var i: Int = 0, i < 200000, ++i {
+    checksum = checksum + longText.compare(other: otherText)
+  }
+  report(
+    name: "compare (1 KB, differ at end)"
+    started: started
+    operations: 200000
+    checksum: checksum
+  )
+
+  checksum = 0
+  started = nowNs()
+  loop var i: Int = 0, i < 20000, ++i {
+    checksum = checksum + longText.indexOf(sub: "needle")
+  }
+  report(
+    name: "indexOf (1 KB, match at end)"
+    started: started
+    operations: 20000
+    checksum: checksum
+  )
+
+  checksum = 0
+  started = nowNs()
+  loop var i: Int = 0, i < 20000, ++i {
+    if longText.contains(sub: "absent") {
+      checksum = checksum + 1
+    }
+  }
+  report(
+    name: "contains (1 KB, absent)"
+    started: started
+    operations: 20000
+    checksum: checksum
+  )
+
+  checksum = 0
+  started = nowNs()
+  loop var i: Int = 0, i < 1000000, ++i {
+    if longText.startsWith(prefix: "lorem ipsum") and longText.endsWith(suffix: "needle!") {
+      checksum = checksum + 1
+    }
+  }
+  report(
+    name: "startsWith + endsWith"
+    started: started
+    operations: 1000000
+    checksum: checksum
+  )
+
+  checksum = 0
+  started = nowNs()
+  let utf8Length: Int = utf8Text.length()
+  loop var round: Int = 0, round < 200, ++round {
+    loop var i: Int = 0, i < utf8Length, ++i {
+      if utf8Text.at(index: i) is 'w' {
+        checksum = checksum + 1
+      }
+    }
+  }
+  report(
+    name: "at (per byte, UTF-8 text)"
+    started: started
+    operations: 200 * utf8Length
+    checksum: checksum
+  )
+
+  checksum = 0
+  started = nowNs()
+  loop var i: Int = 0, i < 1000000, ++i {
+    checksum = checksum + number.toInt()
+  }
+  report(
+    name: "toInt"
+    started: started
+    operations: 1000000
+    checksum: checksum
+  )
+
+  checksum = 0
+  started = nowNs()
+  loop var i: Int = 0, i < 200000, ++i {
+    checksum = checksum + padded.trim().length()
+  }
+  report(
+    name: "trim"
+    started: started
+    operations: 200000
+    checksum: checksum
+  )
+
+  checksum = 0
+  started = nowNs()
+  loop var i: Int = 0, i < 200000, ++i {
+    checksum = checksum + String.fromCodepoint(code: 8212).length()
+  }
+  report(
+    name: "fromCodepoint"
+    started: started
+    operations: 200000
+    checksum: checksum
+  )
+  ret 0
+}
