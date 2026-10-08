@@ -542,10 +542,7 @@ func mountSceneInstanceImpl(
 # addition; the dispatch is just a name match.
 # Parse `"r,g,b,a"` into an RgbaColor. The override channel is a plain
 # String so colours encode as comma-separated ints. Missing components
-# default to 255 (alpha) / 0 (rgb). Uses `rae_str_to_i64` directly
-# rather than the `String.toInt()` method because the C backend's
-# method-overload resolution currently confuses `String.toInt` with
-# `Float.toInt` when chained off `List(String).get`.
+# default to 255 (alpha) / 0 (rgb). Each component is a local String, read with `toInt()`.
 func parseRgbaString(text: view String) ret RgbaColor {
   unsafe {
     let comma: String = ","
@@ -556,24 +553,24 @@ func parseRgbaString(text: view String) ret RgbaColor {
     var a: Int = 255
     if parts.length > 0 {
       if let rs: String = parts.copyAt(index: 0) {
-        r = rae_str_to_i64(text: rs)
+        r = rs.toInt()
       }
     }
     if parts.length > 1 {
       if let gs: String = parts.copyAt(index: 1) {
-        g = rae_str_to_i64(text: gs)
+        g = gs.toInt()
       }
     }
     if parts.length > 2 {
       if let bs: String = parts.copyAt(index: 2) {
-        b = rae_str_to_i64(text: bs)
+        b = bs.toInt()
       }
     }
     if parts.length > 3 {
       # `as` is now a keyword (explicit conversion), so this alpha component
       # string follows the rs/gs/bs naming instead.
       if let alphaStr: String = parts.copyAt(index: 3) {
-        a = rae_str_to_i64(text: alphaStr)
+        a = alphaStr.toInt()
       }
     }
     ret RgbaColor { r: r, g: g, b: b, a: a }

@@ -603,15 +603,8 @@ const char* rae_mangle_function(CompilerContext* ctx, const AstFuncDecl* func) {
         else if (str_eq_cstr(name, "rae_str") || str_eq_cstr(name, "str")) mapped = "rae_ext_rae_str";
         else if (str_eq_cstr(name, "rae_str_len") || str_eq_cstr(name, "str_len")) mapped = "rae_ext_rae_str_len";
         else if (str_eq_cstr(name, "rae_str_concat") || str_eq_cstr(name, "str_concat")) mapped = "rae_ext_rae_str_concat";
-        else if (str_eq_cstr(name, "rae_str_compare") || str_eq_cstr(name, "str_compare")) mapped = "rae_ext_rae_str_compare";
         else if (str_eq_cstr(name, "rae_str_sub") || str_eq_cstr(name, "str_sub")) mapped = "rae_ext_rae_str_sub";
-        else if (str_eq_cstr(name, "rae_str_contains") || str_eq_cstr(name, "str_contains")) mapped = "rae_ext_rae_str_contains";
-        else if (str_eq_cstr(name, "rae_str_starts_with") || str_eq_cstr(name, "str_starts_with")) mapped = "rae_ext_rae_str_starts_with";
-        else if (str_eq_cstr(name, "rae_str_ends_with") || str_eq_cstr(name, "str_ends_with")) mapped = "rae_ext_rae_str_ends_with";
-        else if (str_eq_cstr(name, "rae_str_index_of") || str_eq_cstr(name, "str_index_of")) mapped = "rae_ext_rae_str_index_of";
-        else if (str_eq_cstr(name, "rae_str_trim") || str_eq_cstr(name, "str_trim")) mapped = "rae_ext_rae_str_trim";
         else if (str_eq_cstr(name, "rae_str_to_f64") || str_eq_cstr(name, "str_to_float")) mapped = "rae_ext_rae_str_to_f64";
-        else if (str_eq_cstr(name, "rae_str_to_i64") || str_eq_cstr(name, "str_to_int")) mapped = "rae_ext_rae_str_to_i64";
         else if (str_eq_cstr(name, "getEnv")) mapped = "rae_ext_rae_sys_get_env";
         else if (str_eq_cstr(name, "exit")) mapped = "rae_ext_rae_sys_exit";
         else if (str_eq_cstr(name, "readFile")) mapped = "rae_ext_rae_sys_read_file";
