@@ -1457,12 +1457,12 @@ void rae_value_to_str_expr(CompilerContext* ctx, const AstModule* module, const 
     // as true/false).
     if (!type->is_view && !type->is_mod) {
         if (str_eq_cstr(base, "UInt64")) {
-            fprintf(out, "rae_ext_rae_str_u64((uint64_t)(%s))", cexpr);
+            fprintf(out, "rae_text_uint64((uint64_t)(%s))", cexpr);
             return;
         }
         if (str_eq_cstr(base, "Int8") || str_eq_cstr(base, "Int16") || str_eq_cstr(base, "Int32")
             || str_eq_cstr(base, "UInt8") || str_eq_cstr(base, "UInt16") || str_eq_cstr(base, "UInt32")) {
-            fprintf(out, "rae_ext_rae_str_i64((int64_t)(%s))", cexpr);
+            fprintf(out, "rae_text_int64((int64_t)(%s))", cexpr);
             return;
         }
     }
@@ -2461,6 +2461,41 @@ static const char* rae_json_struct_mangled_type(CompilerContext* ctx, const AstM
   return rae_json_struct_mangled(ctx, module, get_base_type_name(type));
 }
 
+/* The `rae_text_*` wrappers the runtime header's `rae_ext_rae_str` dispatch
+ * selects for an Int, UInt64, Bool or Char32 (docs/runtime-c-audit.md row 4):
+ * each runs the lib/core/Text.rae function, which answers the text's bytes as
+ * a plain PackedText, and turns them into a String with one allocation. A
+ * program built without the prelude falls back to the runtime's C formatter. */
+static void emit_text_wrappers(CompilerContext* ctx, FILE* out) {
+  static const struct { const char* rae; const char* wrapper; const char* ctype; const char* fallback; } items[] = {
+    { "packedFromInt", "rae_text_int64", "int64_t", "rae_ext_rae_str_i64" },
+    { "packedFromUnsigned", "rae_text_uint64", "uint64_t", "rae_ext_rae_str_u64" },
+    { "packedFromBool", "rae_text_bool", "rae_Bool", "rae_ext_rae_str_bool" },
+    { "packedFromChar", "rae_text_char", "uint32_t", "rae_ext_rae_str_char" },
+  };
+  for (size_t i = 0; i < sizeof items / sizeof items[0]; i++) {
+    const char* packer = NULL;
+    size_t count = 0;
+    const size_t* named = decl_index_functions(ctx, str_from_cstr(items[i].rae), &count);
+    for (size_t k = 0; k < count; k++) {
+      const AstFuncDecl* fd = &ctx->all_decls[named[k]]->as.func_decl;
+      if (fd->generic_params || fd->is_extern || !fd->params || fd->params->next) continue;
+      packer = rae_mangle_function(ctx, fd);
+      break;
+    }
+    if (packer) {
+      fprintf(out, "RAE_UNUSED static rae_String %s(%s value) { __typeof__(%s(value)) packed = %s(value); "
+                   "return rae_ext_rae_str_from_packed(packed.first, packed.second, packed.third, packed.count); }\n",
+              items[i].wrapper, items[i].ctype, packer, packer);
+    } else {
+      fprintf(out, "RAE_UNUSED static rae_String %s(%s value) { return %s(value); }\n",
+              items[i].wrapper, items[i].ctype, items[i].fallback);
+    }
+    fprintf(out, "RAE_UNUSED static rae_String %s_ptr(const %s* value) { return %s(*value); }\n",
+            items[i].wrapper, items[i].ctype, items[i].wrapper);
+  }
+}
+
 bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const char* out_path) {
   if (!module) return false;
   g_emitted_spec_func_count = 0; // Reset dedup for this compilation
@@ -2488,6 +2523,17 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
 
   FILE* out = fopen(out_path, "w"); if (!out) return false;
   fprintf(out, "#include \"rae_runtime.h\"\n");
+  // The int/Bool/Char text wrappers the header's rae_ext_rae_str dispatch
+  // names: declared first, because type toString helpers emitted before the
+  // prototypes already use the dispatch; defined by emit_text_wrappers.
+  fprintf(out, "RAE_UNUSED static rae_String rae_text_int64(int64_t value);\n"
+               "RAE_UNUSED static rae_String rae_text_int64_ptr(const int64_t* value);\n"
+               "RAE_UNUSED static rae_String rae_text_uint64(uint64_t value);\n"
+               "RAE_UNUSED static rae_String rae_text_uint64_ptr(const uint64_t* value);\n"
+               "RAE_UNUSED static rae_String rae_text_bool(rae_Bool value);\n"
+               "RAE_UNUSED static rae_String rae_text_bool_ptr(const rae_Bool* value);\n"
+               "RAE_UNUSED static rae_String rae_text_char(uint32_t value);\n"
+               "RAE_UNUSED static rae_String rae_text_char_ptr(const uint32_t* value);\n");
   // lib/Float4's inline lowering (runtime_float4.h) only where it is used: a
   // program that binds an `rae_f4_*` / `rae_m4_*` extern. Including the SIMD
   // headers in every program cost ~4% of the runtime's compile.
@@ -4127,6 +4173,8 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       fprintf(out, "RAE_UNUSED static %s %s(", c_return_type(&tctx, f), mangled); emit_param_list(&tctx, f->params, out, false); fprintf(out, ");\n");
   }
   
+  emit_text_wrappers(ctx, out);
+
   // Path-1 spawn thunks: one per threadable function (all params passed by
   // value, so a worker thread safely owns its copies). pthread needs a
   // void*(*)(void*); the thunk unpacks the args struct, runs the function,
