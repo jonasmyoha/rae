@@ -70,3 +70,64 @@ Sizes are rough line counts of the logic that moves, not of whole files.
    - row 13 inside the lightweight-spawn scheduler task (S3).
 
    Each task marks its row done here.
+
+## Every `#if` in the runtime C (2026-10-08)
+
+The per-platform choices that are POLICY (which facility a platform has, so
+which code path a program takes) belong in Rae as `when` over a capability
+(docs/platform-conditional-code.md). The ones that only pick the right
+system call, struct layout or instruction for one operation stay in C. This
+is the list for our own runtime files. The vendored `stb_image.h`,
+`lodepng.c` and `lodepng.h` keep their own configuration macros and are not
+listed.
+
+**Policy, moved to Rae:**
+
+| where | was | now |
+|---|---|---|
+| `runtime_crypto_platform.c` | `#if __APPLE__` CommonCrypto, `#else` an "unsupported" stub | `lib/crypto/Sha1.rae`: `const hasCommonCrypto: Bool = Target.isApple`; the binding is declared under `when hasCommonCrypto`; the stub is gone (0.1.229) |
+| `runtime_net.c` poller (`pollerCreate` / `pollerChange` / `pollerWait`) | `#ifdef __APPLE__` kqueue, `#else` and non-POSIX "unsupported" stubs | `lib/net/NetSystem.rae`: `const hasKqueue: Bool = Target.isApple or Target.isBsd`, `const hasEpoll: Bool = Target.isLinuxKernel`; the shims are declared under `when hasKqueue`, and `lib/net/Poller.rae` answers `unsupported` in Rae elsewhere; the stubs are gone (0.1.231) |
+| `runtime_net.c` constants 26-31 (`EVFILT_*`, `EV_*`) | `#ifdef __APPLE__` | `#ifdef RAE_HAS_KQUEUE`, read only by the kqueue path |
+| `runtime_file_notify.c` (the whole file) | `#if __APPLE__ \|\| __FreeBSD__`, `#else` stubs and a `supported()` call | `lib/FileNotify.rae` uses `hasKqueue`: its shims are declared under `when hasKqueue`, `supported()` and every stub are gone, and the file is under `#ifdef RAE_HAS_KQUEUE` (0.1.231) |
+
+`RAE_HAS_KQUEUE` (in `rae_runtime.h`) is the C twin of `hasKqueue`, so the
+C bodies exist exactly where Rae declares them. The BSDs are now included on
+both sides; they are type-checked by `--check-targets` but not built or
+tested on a BSD yet.
+
+**Policy, not moved yet** (each answers "unsupported" or does nothing off its
+platform, which a `when` in Rae would make explicit):
+
+| where | `#if` | the Rae side today |
+|---|---|---|
+| `runtime_net.c:34` | sockets only on Apple, Linux and kqueue systems; `#else` every socket call answers `RAE_NET_UNSUPPORTED` (web, Windows) | lib/net declares the socket shims everywhere |
+| `runtime_platform_apple.c:8` | `disableAppNap`, `activateSelf`, `thermalState`: `#else` no-ops and 0 | declared unconditionally |
+| `runtime_spotify_apple.c:14` | the osascript / curl bridge: `#else` empty answers | `lib/sys/Spotify.rae` declares it unconditionally |
+
+**Stays in C: one operation, the right call or layout per platform:**
+
+| where | what it selects |
+|---|---|
+| `runtime_float4.h:40, 59, 142, 283` | the Float4 lowering per instruction set (NEON / SSE2 / wasm SIMD128 / scalar, `RAE_FLOAT4_SCALAR`) |
+| `runtime_threads.c:214` | the spin-wait hint instruction (`yield` / `pause`) |
+| `runtime_threads.c:25, 41, 81, 96, 168, 295`; `runtime_core_memory.c:293, 322`; `rae_runtime.c:42` | whether the build has OS threads (`!__wasm__ \|\| RAE_WASM_THREADS`): the thread ABI itself |
+| `runtime_threads.c:298, 358, 467` | Apple's `sysctl` performance-core count and QoS class for the worker pool |
+| `runtime_system_log.c:19` | the monotonic clock call (`mach_absolute_time` / `clock_gettime`) |
+| `runtime_system_log.c:50` | the thread-creation call (`CreateThread` / none on single-threaded wasm / `pthread_create`) |
+| `runtime_core_memory.c:8, 17, 404` | the headers and call for an allocation's size (`malloc_size` / `malloc_usable_size`) |
+| `runtime_core_memory.c:46, 71` | the main stack's bounds and the signal context's stack pointer: per-OS, per-arch struct layout for the crash handler |
+| `runtime_core_memory.c:31`; `rae_runtime.c:19, 23, 28, 50`; `runtime_core_memory.c:136` | system headers (`ucontext`, `windows.h`, `execinfo`) and whether `backtrace` exists |
+| `runtime_filesystem.c:187, 199, 216` | `flock` and file locking: absent under wasm |
+| `runtime_filesystem.c:229` | the resident-set-size call (`task_info` / `/proc`) |
+| `runtime_filesystem.c:278` | the `stat` field holding nanosecond mtimes (`st_mtimespec` / `st_mtim`) |
+| `runtime_args.c:10, 44` | the parent-death watcher thread: none under wasm |
+| `runtime_net.c:66, 74` | `SO_NOSIGPIPE` / `MSG_NOSIGNAL`: per-OS constants |
+| `runtime_file_notify.c:41` | `O_EVTONLY` where it exists |
+| `runtime_crypto_platform.c:14`, `rae_runtime.h:771` | the CommonCrypto body and prototype: exactly where `hasCommonCrypto` declares it |
+| `rae_runtime.h:31, 745, 775`; `runtime_net.c:44, 85, 217`; `runtime_file_notify.c:33` | `RAE_HAS_KQUEUE` and the kqueue bodies, headers and prototypes it guards |
+| `runtime_gpu2d_platform.c` (8), `runtime_gpu2d_frame.c:210, 272`, `runtime_gpu3d.c:156, 165, 730`, `runtime_webgpu.c` (5) | the browser (`__EMSCRIPTEN__`, `RAE_WEB_FRAME_CALLBACK`) against SDL3 + wgpu-native: two different platform APIs for windows, frames and the GPU device |
+| `rae_runtime.c:75, 77, 105`; `rae_runtime.h:132, 970, 1086`; `runtime_audio_sdl3.c:15`; `runtime_image_sdl3.c:222` | build features (`RAE_HAS_SDL3`, `RAE_HAS_WEBGPU`, `RAE_HAS_RAYLIB`): whether the library is linked into this build at all |
+| `rae_runtime.h:12, 81`; `runtime_image_sdl3.c:32, 42` | compiler-specific attributes and warning pragmas |
+| `runtime_buffers_math.c:23` | the `RAE_DEBUG_BOUNDS` debug build |
+| `runtime_gpu3d.c:538`, `runtime_gpu3d_gbuffer.c:161`, `runtime_gpu3d_stubs.c:34`, `runtime_gbuffer_stubs.c:19` | a one-definition guard for the `rae_Mat4` FFI typedef |
+| `rae_runtime.h:1`, `runtime_float4.h:32`, `runtime_sky_state.h:17`, `runtime_sky_wgsl.h:19` | include guards |

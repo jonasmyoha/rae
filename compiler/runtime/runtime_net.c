@@ -13,7 +13,11 @@
  * which is the compiler's runtime ABI (Rae has no byte-level string builder
  * yet; docs/runtime-c-audit.md).
  *
- * macOS and Linux. Elsewhere every call answers RAE_NET_UNSUPPORTED. */
+ * macOS, Linux and the BSDs (the BSDs are not built or tested here yet).
+ * Elsewhere every socket call answers RAE_NET_UNSUPPORTED. The readiness
+ * poller (kqueue) exists only under RAE_HAS_KQUEUE, the C twin of
+ * NetSystem.rae's `hasKqueue`: the Rae side declares it only there, so no
+ * stub is needed elsewhere. */
 
 /* Answers that are not a negated errno (errno values are small positives) */
 #define RAE_NET_UNSUPPORTED -1000000
@@ -27,7 +31,7 @@
  * stack: per-OS struct layout, no allocation per wait) */
 #define RAE_NET_MAX_WAIT_EVENTS 256
 
-#if (defined(__APPLE__) || defined(__linux__)) && !defined(__wasm__) && !defined(__EMSCRIPTEN__)
+#if (defined(__APPLE__) || defined(__linux__) || defined(RAE_HAS_KQUEUE)) && !defined(__wasm__) && !defined(__EMSCRIPTEN__)
 
 #include <errno.h>
 #include <fcntl.h>
@@ -37,7 +41,7 @@
 #include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
-#ifdef __APPLE__
+#ifdef RAE_HAS_KQUEUE
 #include <sys/event.h>
 #endif
 
@@ -78,7 +82,7 @@ int64_t rae_ext_NetSys_constant(int64_t which) {
     case 23: return RAE_NET_RESOLVE_FAILED;
     case 24: return RAE_NET_UNSUPPORTED;
     case 25: return SOMAXCONN;
-#ifdef __APPLE__
+#ifdef RAE_HAS_KQUEUE
     case 26: return EVFILT_READ;
     case 27: return EVFILT_WRITE;
     case 28: return EV_ADD | EV_ENABLE;
@@ -208,9 +212,9 @@ int64_t rae_ext_NetSys_close(int64_t fd) {
   return close((int)fd) == 0 ? 0 : -errno;
 }
 
-/* The readiness poller (lib/net/Poller.rae). kqueue on macOS; Linux answers
- * RAE_NET_UNSUPPORTED until epoll lands behind the same Rae API (F8). */
-#ifdef __APPLE__
+/* The readiness poller (lib/net/Poller.rae): kqueue, under `hasKqueue`. A
+ * Linux kernel gets epoll behind the same Rae API (F8, `hasEpoll`). */
+#ifdef RAE_HAS_KQUEUE
 int64_t rae_ext_NetSys_pollerCreate(void) {
   int queue = kqueue();
   return queue >= 0 ? queue : -errno;
@@ -238,16 +242,6 @@ int64_t rae_ext_NetSys_pollerWait(int64_t queue, int64_t* events, int64_t maxEve
     events[i * 3 + 2] = (int64_t)ready[i].flags;
   }
   return count;
-}
-#else
-int64_t rae_ext_NetSys_pollerCreate(void) { return RAE_NET_UNSUPPORTED; }
-int64_t rae_ext_NetSys_pollerChange(int64_t queue, int64_t fd, int64_t filter, int64_t flags) {
-  (void)queue; (void)fd; (void)filter; (void)flags;
-  return RAE_NET_UNSUPPORTED;
-}
-int64_t rae_ext_NetSys_pollerWait(int64_t queue, int64_t* events, int64_t maxEvents, int64_t timeoutMs) {
-  (void)queue; (void)events; (void)maxEvents; (void)timeoutMs;
-  return RAE_NET_UNSUPPORTED;
 }
 #endif
 
@@ -299,15 +293,6 @@ int64_t rae_ext_NetSys_sendText(int64_t fd, rae_String text, int64_t flags) { (v
 int64_t rae_ext_NetSys_pollOne(int64_t fd, int64_t events, int64_t timeoutMs) { (void)fd; (void)events; (void)timeoutMs; return RAE_NET_UNSUPPORTED; }
 int64_t rae_ext_NetSys_close(int64_t fd) { (void)fd; return RAE_NET_UNSUPPORTED; }
 int64_t rae_ext_NetSys_localPort(int64_t fd) { (void)fd; return RAE_NET_UNSUPPORTED; }
-int64_t rae_ext_NetSys_pollerCreate(void) { return RAE_NET_UNSUPPORTED; }
-int64_t rae_ext_NetSys_pollerChange(int64_t queue, int64_t fd, int64_t filter, int64_t flags) {
-  (void)queue; (void)fd; (void)filter; (void)flags;
-  return RAE_NET_UNSUPPORTED;
-}
-int64_t rae_ext_NetSys_pollerWait(int64_t queue, int64_t* events, int64_t maxEvents, int64_t timeoutMs) {
-  (void)queue; (void)events; (void)maxEvents; (void)timeoutMs;
-  return RAE_NET_UNSUPPORTED;
-}
 
 #endif
 

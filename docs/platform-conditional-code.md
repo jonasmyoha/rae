@@ -368,7 +368,15 @@ per-platform.
      targets) and 1059 (the same program runs on macOS).
 4. Migrate the other C `#if` choices that are really policy (lib/net's
    kqueue/epoll, FileNotify) to capabilities. Float4's lowering choice stays
-   in C, because it is per-instruction.
+   in C, because it is per-instruction. **Done (0.1.231):**
+   - `hasKqueue` / `hasEpoll` live in `lib/net/NetSystem.rae`, and the
+     kqueue poller and FileNotify shims are declared under
+     `when hasKqueue`.
+   - The C stubs are gone, and `RAE_HAS_KQUEUE` is the C twin of
+     `hasKqueue`.
+   - Every runtime `#if` is classified in docs/runtime-c-audit.md. Three
+     policy ones remain and are queued: sockets on web/Windows, the Apple
+     platform calls, and the Spotify bridge.
 5. The runtime `Device` / `Display` facts (§3.1 layer 4).
 6. lib/ui: the per-event pointer kind, `lastInputKind`, hover only when
    `canHover`, and the window size class in points.
