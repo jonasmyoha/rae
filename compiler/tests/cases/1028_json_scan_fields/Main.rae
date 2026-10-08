@@ -1,0 +1,110 @@
+enum Mood { calm, loud }
+
+type Vec2 {
+  x: Float64
+  y: Float64
+}
+
+type Tag {
+  name: String
+  weight: Int
+}
+
+type Item {
+  id: Int
+  label: String
+  ratio: Float64
+  active: Bool
+  mood: Mood
+  position: Vec2
+  tags: List(Tag)
+  scores: List(Int)
+  names: List(String)
+  flags: List(Bool)
+  nickname: opt String
+  level: opt Int
+}
+
+func show(item: view Item) {
+  log("id={item.id} label=[{item.label}] ratio={item.ratio} active={item.active}")
+  log("  mood={item.mood} position={item.position.x},{item.position.y}")
+  log("  tags={item.tags.length} scores={item.scores} names={item.names} flags={item.flags}")
+  loop let tag: Tag in item.tags {
+    log("  tag [{tag.name}] {tag.weight}")
+  }
+  if let nickname: view String => item.nickname {
+    log("  nickname=[{nickname}]")
+  } else {
+    log("  nickname=none")
+  }
+  if let level: view Int => item.level {
+    log("  level={level}")
+  } else {
+    log("  level=none")
+  }
+}
+
+func main() {
+  var tags: List(Tag) = {}
+  tags.add(value: { name: "first", weight: 1 })
+  tags.add(value: { name: "second", weight: -2 })
+  var scores: List(Int) = {}
+  scores.add(value: 10)
+  scores.add(value: -20)
+  var names: List(String) = {}
+  names.add(value: "ann")
+  names.add(value: "bob")
+  var flags: List(Bool) = {}
+  flags.add(value: true)
+  flags.add(value: false)
+  let original: Item = {
+    id: 42
+    label: "plain"
+    ratio: 0.25
+    active: true
+    mood: Mood.loud
+    position: { x: 1.5, y: -2 }
+    tags: tags
+    scores: scores
+    names: names
+    flags: flags
+    nickname: "nick"
+    level: 7
+  }
+  log("round trip")
+  show(item: Item.fromJson(json: original.toJson()))
+  var quoted: Tag = { name: "say \"hi\" \\ tab\tline\nend", weight: 3 }
+  let quotedJson: String = quoted.toJson()
+  log(quotedJson)
+  let back: Tag = Tag.fromJson(json: quotedJson)
+  log("[{back.name}] {back.name is quoted.name}")
+  log("nested id first, extra keys, exponents, whitespace")
+  show(
+    item: Item.fromJson(
+      json: "\{ \"position\" : \{ \"id\": 99, \"x\": 2.5e3, \"y\": -1E-2 \},\n  \"extra\": [1, \{\"label\": \"no\"\}],\n  \"id\" : -17, \"label\": \"top\", \"ratio\": 1e2, \"active\": false, \"mood\": \"calm\", \"level\": null \}"
+    )
+  )
+  log("escapes and unicode")
+  show(
+    item: Item.fromJson(
+      json: "\{\"label\": \"a \\\"q\\\" \\\\ \\/ tab\\tend \\u00e9 \\ud83d\\ude00 é\", \"names\": [\"x\\\"y\", \"\\u2014\"], \"nickname\": \"\\n\"\}"
+    )
+  )
+  log("missing keys")
+  show(item: Item.fromJson(json: "\{\}"))
+  log("empty input")
+  show(item: Item.fromJson(json: ""))
+  log("int in exponent form and big ints")
+  show(
+    item: Item.fromJson(
+      json: "\{\"id\": 1e3, \"scores\": [9223372036854775807, -9223372036854775808, 2.5]\}"
+    )
+  )
+  var long: String = ""
+  loop var i: Int = 0, i < 200, ++i {
+    long = long.concat(other: "abcde")
+  }
+  log("long label")
+  let longItem: Item = Item.fromJson(json: "\{\"label\": \"{long}\", \"id\": 5\}")
+  log("length={longItem.label.length()} id={longItem.id}")
+}
