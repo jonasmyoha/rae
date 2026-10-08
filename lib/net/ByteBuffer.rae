@@ -1,0 +1,151 @@
+# A reusable byte buffer for socket I/O (docs/server-benchmarks-design.md §9
+# G3), in plain Rae: bytes arrive at the end (`appendBytes`, a socket read),
+# leave from the front (`consume`, a parser or a socket write), and the
+# storage is reused, so a connection's read and write buffers stop
+# allocating once they have grown to the size its traffic needs.
+#
+# The unread bytes are `bytes[start ..< bytes.length]`. Consuming only moves
+# `start`; a buffer read to the end starts over at 0 for free. The bytes are
+# moved to the front (compacted) lazily, only when an append needs the room,
+# and the storage grows (doubling) only when compacting is not enough.
+type ByteBuffer {
+  bytes: List(UInt8)
+  start: Int
+}
+
+func createByteBuffer(capacity: view Int) ret ByteBuffer {
+  var size: Int = capacity
+  if size < 16 {
+    size = 16
+  }
+  ret ByteBuffer { bytes: List.create(UInt8, cap: size), start: 0 }
+}
+
+# How many unread bytes there are
+func byteBufferLength(buffer: view ByteBuffer) ret Int {
+  ret buffer.bytes.length - buffer.start
+}
+
+# Unread byte `index` (0 is the first unread one), -1 outside
+func byteBufferAt(buffer: view ByteBuffer, index: view Int) ret Int {
+  if index < 0 or index >= byteBufferLength(buffer: buffer) {
+    ret -1
+  }
+  ret buffer.bytes.copyAtFallback(index: buffer.start + index, fallback: 0) as Int
+}
+
+# Make room for `count` more bytes at the end: first by moving the unread
+# bytes to the front, then by growing the storage
+func byteBufferReserve(buffer: mod ByteBuffer, count: view Int) {
+  if buffer.bytes.cap - buffer.bytes.length >= count {
+    ret
+  }
+  let unread: Int = byteBufferLength(buffer: buffer)
+  if buffer.start > 0 {
+    unsafe {
+      rae_ext_rae_buf_copy(
+        src: buffer.bytes.data
+        src_off: buffer.start
+        dst: buffer.bytes.data
+        dst_off: 0
+        len: unread
+        elemSize: 1
+      )
+    }
+    buffer.bytes.length = unread
+    buffer.start = 0
+  }
+  loop buffer.bytes.cap - buffer.bytes.length < count {
+    buffer.bytes.grow()
+  }
+}
+
+# Append `count` bytes of `bytes` from `start`
+func appendBytes(
+  buffer: mod ByteBuffer
+  bytes: view List(UInt8)
+  start: view Int
+  count: view Int
+) {
+  if count <= 0 or start < 0 or start + count > bytes.length {
+    ret
+  }
+  byteBufferReserve(buffer: buffer, count: count)
+  unsafe {
+    rae_ext_rae_buf_copy(
+      src: bytes.data
+      src_off: start
+      dst: buffer.bytes.data
+      dst_off: buffer.bytes.length
+      len: count
+      elemSize: 1
+    )
+  }
+  buffer.bytes.length = buffer.bytes.length + count
+}
+
+# Append the bytes of `text` (its UTF-8, unchanged)
+func appendText(buffer: mod ByteBuffer, text: view String) {
+  let count: Int = text.length()
+  byteBufferReserve(buffer: buffer, count: count)
+  loop var i: Int = 0, i < count, ++i {
+    buffer.bytes.add(value: text.byteAt(index: i) as UInt8)
+  }
+}
+
+# Drop the first `count` unread bytes (all of them if there are fewer)
+func consume(buffer: mod ByteBuffer, count: view Int) {
+  if count <= 0 {
+    ret
+  }
+  if count >= byteBufferLength(buffer: buffer) {
+    byteBufferClear(buffer: buffer)
+    ret
+  }
+  buffer.start = buffer.start + count
+}
+
+# Forget every byte, keeping the storage
+func byteBufferClear(buffer: mod ByteBuffer) {
+  buffer.bytes.length = 0
+  buffer.start = 0
+}
+
+# Where `pattern`'s bytes first occur in the unread bytes at or after `from`
+# (an unread index), -1 when they do not. An empty pattern is found at `from`.
+func byteBufferIndexOf(buffer: view ByteBuffer, pattern: view String, from: view Int) ret Int {
+  let length: Int = byteBufferLength(buffer: buffer)
+  let patternLength: Int = pattern.length()
+  if from < 0 or from > length {
+    ret -1
+  }
+  if patternLength is 0 {
+    ret from
+  }
+  let first: Int = pattern.byteAt(index: 0)
+  var position: Int = from
+  loop position + patternLength <= length {
+    if byteBufferAt(buffer: buffer, index: position) is first {
+      var matched: Int = 1
+      loop matched < patternLength and byteBufferAt(buffer: buffer, index: position + matched) is pattern.byteAt(
+        index: matched
+      ) {
+        matched = matched + 1
+      }
+      if matched is patternLength {
+        ret position
+      }
+    }
+    position = position + 1
+  }
+  ret -1
+}
+
+# `count` unread bytes from `start` (an unread index) as a String; "" when the
+# range is not inside the unread bytes
+func byteBufferText(buffer: view ByteBuffer, start: view Int, count: view Int) ret String {
+  if start < 0 or count <= 0 or start + count > byteBufferLength(buffer: buffer) {
+    ret ""
+  }
+  ret fromBytes(bytes: buffer.bytes, start: buffer.start + start, count: count)
+}

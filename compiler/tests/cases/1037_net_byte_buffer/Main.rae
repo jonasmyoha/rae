@@ -1,0 +1,127 @@
+# lib/net/ByteBuffer (docs/server-benchmarks-design.md §9 G3): append at the
+# end, consume from the front, find a byte sequence, read a range as text,
+# reuse without reallocating — and the socket read / write that use it.
+open net/ByteBuffer
+open net/Tcp
+
+func acceptWithin(listenerSocketId: view SocketId) ret SocketResult {
+  loop var attempt: Int = 0, attempt < 200, ++attempt {
+    let accepted: SocketResult = tcpAccept(listenerSocketId: listenerSocketId)
+    if accepted.status is not NetStatus.wouldBlock {
+      ret accepted
+    }
+    sleep(ms: 5)
+  }
+  ret SocketResult { socketId: noSocket(), status: NetStatus.wouldBlock }
+}
+
+func main() ret Int {
+  var buffer: ByteBuffer = createByteBuffer(capacity: 16)
+  appendText(buffer: buffer, text: "GET / HTTP/1.1\r\nHost: ünï\r\n\r\nrest")
+  log("length: {byteBufferLength(buffer: buffer)}")
+  let headerEnd: Int = byteBufferIndexOf(buffer: buffer, pattern: "\r\n\r\n", from: 0)
+  log("header ends at: {headerEnd}")
+  log(
+    "request line: [{byteBufferText(
+      buffer: buffer
+      start: 0
+      count: byteBufferIndexOf(buffer: buffer, pattern: "\r\n", from: 0)
+    )}]"
+  )
+  log("not found: {byteBufferIndexOf(buffer: buffer, pattern: "XYZ", from: 0)}")
+  log("empty pattern: {byteBufferIndexOf(buffer: buffer, pattern: "", from: 3)}")
+  log("out of range text: [{byteBufferText(buffer: buffer, start: 40, count: 5)}]")
+  consume(buffer: buffer, count: headerEnd + 4)
+  log(
+    "after consume: [{byteBufferText(
+      buffer: buffer
+      start: 0
+      count: byteBufferLength(buffer: buffer)
+    )}] at {byteBufferAt(buffer: buffer, index: 0)}"
+  )
+  # Appending into a buffer with a consumed front compacts instead of growing
+  var more: List(UInt8) = {}
+  loop var i: Int = 0, i < 40, ++i {
+    more.add(value: (97 + i % 26) as UInt8)
+  }
+  # 40 bytes do not fit after the 35 written so far, but do once the 31
+  # consumed ones are dropped
+  let capacityBefore: Int = buffer.bytes.cap
+  appendBytes(
+    buffer: buffer
+    bytes: more
+    start: 0
+    count: 40
+  )
+  log("compacted, not grown: {buffer.bytes.cap is capacityBefore} start {buffer.start}")
+  log("text: [{byteBufferText(buffer: buffer, start: 0, count: byteBufferLength(buffer: buffer))}]")
+  consume(buffer: buffer, count: 1000)
+  log("consumed past the end: length {byteBufferLength(buffer: buffer)}, start {buffer.start}")
+
+  # Zero allocations after warmup: a request-sized cycle reuses the storage
+  var reused: ByteBuffer = createByteBuffer(capacity: 64)
+  var found: Int = 0
+  loop var round: Int = 0, round < 3, ++round {
+    appendBytes(
+      buffer: reused
+      bytes: more
+      start: 0
+      count: 20
+    )
+    appendBytes(
+      buffer: reused
+      bytes: more
+      start: 5
+      count: 10
+    )
+    consume(buffer: reused, count: 7)
+  }
+  byteBufferClear(buffer: reused)
+  let allocationsBefore: Int = Sys.allocationCount()
+  loop var round: Int = 0, round < 1000, ++round {
+    appendBytes(
+      buffer: reused
+      bytes: more
+      start: 0
+      count: 20
+    )
+    appendBytes(
+      buffer: reused
+      bytes: more
+      start: 5
+      count: 10
+    )
+    found = found + byteBufferIndexOf(buffer: reused, pattern: "jk", from: 0)
+    consume(buffer: reused, count: 12)
+    if byteBufferLength(buffer: reused) > 40 {
+      byteBufferClear(buffer: reused)
+    }
+  }
+  let allocationsAfter: Int = Sys.allocationCount()
+  log("allocations in 1000 cycles after warmup: {allocationsAfter - allocationsBefore}")
+  log("searches found: {found > 0}")
+
+  # Through a socket: the client writes from a buffer, the server reads into one
+  let listening: SocketResult = tcpListen(host: "127.0.0.1", port: 0, backlog: 4)
+  let port: Int = socketLocalPort(socketId: listening.socketId)
+  let client: SocketResult = tcpConnect(host: "127.0.0.1", port: port, timeoutMs: 2000)
+  let server: SocketResult = acceptWithin(listenerSocketId: listening.socketId)
+  var outgoing: ByteBuffer = createByteBuffer(capacity: 16)
+  appendText(buffer: outgoing, text: "hello over a buffer")
+  let written: IoResult = socketWriteBuffer(socketId: client.socketId, buffer: outgoing)
+  log("wrote {written.bytes} ({written.status}), left {byteBufferLength(buffer: outgoing)}")
+  var incoming: ByteBuffer = createByteBuffer(capacity: 16)
+  let ready: Bool = socketWaitReadable(socketId: server.socketId, timeoutMs: 2000)
+  let got: IoResult = socketReadBuffer(socketId: server.socketId, buffer: incoming, maxBytes: 64)
+  log(
+    "read {got.bytes} ({got.status}): [{byteBufferText(
+      buffer: incoming
+      start: 0
+      count: byteBufferLength(buffer: incoming)
+    )}]"
+  )
+  socketClose(socketId: client.socketId)
+  socketClose(socketId: server.socketId)
+  socketClose(socketId: listening.socketId)
+  ret 0
+}
