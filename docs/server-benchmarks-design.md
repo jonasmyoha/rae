@@ -332,7 +332,7 @@ pool.
 
 | event | carries | produced by → consumed by |
 |---|---|---|
-| `HttpRequest` | connection `EntityId`, sequence number, method (an enum), path and header byte ranges into the connection's `ReadBuffer` | httpParseSystem → dispatchSystem |
+| `HttpRequestEvent` | connection `EntityId`, sequence number, the parser's `HttpRequest` (method enum, path and header byte ranges into the connection's `ReadBuffer`), a bad-request flag | httpParseSystem → dispatchSystem |
 | `WebSocketMessage` | connection `EntityId`, message kind, payload byte range | frameDecodeSystem → message systems |
 | `PlayerInputEvent` | connection `EntityId`, the decoded 32-byte input | inputSystem → tickSystem |
 
@@ -358,6 +358,7 @@ table storage.
 |---|---|---|
 | `Socket {socketId}` | the OS handle | all |
 | `Readable`, `Writable` | **tags**, set by the poll system for this frame only | all |
+| `Sending` | tag: the `WriteBuffer` holds unsent bytes (the write system walks this, not every connection) | all |
 | `ReadBuffer`, `WriteBuffer` | bytes received / still to send | all |
 | `HttpParse` | incremental parser state (a request split across reads) | 1, 2 (upgrade) |
 | `KeepAlive {idleSinceNs}` | idle timeout bookkeeping | 1, 2 |
@@ -380,7 +381,11 @@ rare per-request heap that does outlive a frame (G8).
 2. **acceptSystem**: accept pending sockets; allocate an entity with `Socket`,
    `ReadBuffer`, `WriteBuffer`, `HttpParse`, `KeepAlive`.
 3. **readSystem** (`Readable`): read into `ReadBuffer`; on end-of-stream, tag
-   `Closing`.
+   `Closing`. Then **awaitingResultSystem**: answer each `AwaitingResult`
+   whose task `tryGet` hands a reply, drop the bytes up to that request and
+   tag the connection `Readable`, so the requests pipelined behind it are
+   parsed this frame. Until then the connection parses nothing further, which
+   keeps its answers in request order.
 4. **httpParseSystem** (`ReadBuffer` + `HttpParse`): send an `HttpRequest`
    event for every complete request, in arrival order. An `Upgrade:
    websocket` request answers the handshake and swaps components: it removes
@@ -389,7 +394,11 @@ rare per-request heap that does outlive a frame (G8).
 5. **dispatchSystem**: walks the `HttpRequest` events in order and calls the
    route's handler for each (`plaintextResponse`, `jsonResponse`,
    `notFoundResponse`). The handlers are plain functions, not systems, which
-   append the encoded response to the connection's `WriteBuffer`. One system
+   append the encoded response to the connection's `WriteBuffer`. In
+   `lib/net/ecs` the app's routes are a router type `R` with a
+   `route(router: mod R, server:, event:)` function; the generic
+   `dispatchSystem(R, ...)` calls it for each event, and it answers with
+   `respond` (now) or `promote` (later). One system
    in event order is what keeps a mixed pipeline (`/json` then `/plaintext`
    on one connection) answered in request order: a system per route would
    answer in system order instead.
@@ -427,9 +436,9 @@ func dispatchSystem(
 }
 ```
 
-(The sketch shows the shape: the queue, table and loop syntax are today's
-`lib/ecs` and Rae; `HttpRequest`, `ReadBuffer` and `WriteBuffer` are the
-proposed G6/G8 types.)
+(The sketch shows the shape. The landed systems, `lib/net/ecs/HttpSystems.rae`,
+take the whole `HttpServer` where a system touches most of it, and the tables
+where it touches a few, as `httpParseSystem` does.)
 
 **What ECS buys a server:**
 
@@ -523,7 +532,7 @@ a syscall-shaped shim where the platform forces it.
 | G4 ✅ | **landed** 2026-10-08 (0.1.220): `Time.httpDate` / `HttpDateCache` (IMF-fixdate from epoch seconds, made once per second), `Time.waitUntil(deadlineNs:)` over `nowNs()` and a one-call `nanosleep` shim (`sleep(ms:)` is whole milliseconds; a 33.333 ms period needs finer), chunked to beat macOS timer coalescing (33 ms waits: median lateness 4.3 ms → 0.3 ms, max under 0.9 ms), and `Ticker` (fixed rate, lateness never accumulates, overruns counted); fixture 1038. Was: time for servers: IMF-fixdate `Date` header in Rae (cached once per second), a monotonic clock and a deadline wait (a clock/sleep shim only if `nowNs()`/`sleep` cannot do it) | S | a 30 Hz tick needs sub-millisecond deadlines |
 | G5 | SHA-1 and base64 in pure Rae (`lib/crypto/Sha1.rae`, `lib/text/Base64.rae` or similar), RFC test vectors | S | the WebSocket handshake |
 | G6 (HTTP part ✅) | **HTTP landed** 2026-10-08 (0.1.221): `lib/http/Http.rae` — `httpParseNext` (incremental across reads, pipelining, keep-alive rules, method enum, target / headers / body as `ByteRange`s into the connection's `ByteBuffer`, headers in a reused list: no heap per request), `httpParseConsumed`, `httpPathIs`, `httpHeaderValue`, `httpAppendResponse` / `httpAppendBadRequest` (no allocation after warmup); malformed, oversized, chunked → `badRequest`; fixture 1039. The WebSocket part is still to do. Was: `lib/http` (HTTP/1.1 request parser, response encoder, pipelining, keep-alive) and `lib/webSocket` (upgrade, frame codec, masking) in plain Rae on G1–G5, as functions over bytes with no I/O and no architecture | L | shared by both styles |
-| G8 | `lib/net/ecs`: the server components and event types (§7), the systems (poll with readiness tags, accept, read, parse into `EventQueue(HttpRequest)`, write, timeout, close, frame decode), the end-of-frame consume + `frameAdvance`, the promotion to `AwaitingResult` with its `Task` (T1), and a World buffer pool, on `lib/ecs` | M | the reusable ECS server core; the benchmark's ECS servers add only route handlers and room systems |
+| G8 (HTTP part ✅) | **HTTP landed** 2026-10-08 (0.1.222): `lib/net/ecs/HttpServer.rae` (the `HttpServer` World: `Socket`, `ReadBuffer`, `WriteBuffer`, `HttpParse`, `KeepAlive`, `AwaitingResult` components, the `Readable` / `Writable` / `Sending` / `Closing` tags, the `HttpRequestEvent` queue, a `BufferPool` of released connection buffers; `openConnection`, `destroyConnection`, and `respond` / `promote` for route handlers) and `lib/net/ecs/HttpSystems.rae` (the ten systems in §7's order, run by `httpServerFrame`); the app's router is a type `R` with a `route` function that `dispatchSystem` calls; zero allocations per pipelined request after warmup; fixture 1040 runs it with no network on detached connections. The frame-decode systems (WebSocket) are still to do. Was: `lib/net/ecs`: the server components and event types (§7), the systems (poll with readiness tags, accept, read, parse into `EventQueue(HttpRequest)`, write, timeout, close, frame decode), the end-of-frame consume + `frameAdvance`, the promotion to `AwaitingResult` with its `Task` (T1), and a World buffer pool, on `lib/ecs` | M | the reusable ECS server core; the benchmark's ECS servers add only route handlers and room systems |
 | G7 | measure, then fix if needed: `Json` serialisation and `String` building cost per request (no ticket until phase 1 numbers show a problem) | — | listed so the result is read correctly |
 
 **Phasing:**

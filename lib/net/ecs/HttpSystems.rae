@@ -1,0 +1,484 @@
+# The ECS HTTP server's systems (docs/server-benchmarks-design.md §7), called
+# once per frame in this fixed order (decision F10, no Schedule):
+#
+#    1. pollSystem             wait for readiness; set Readable / Writable
+#    2. acceptSystem           a new connection entity per accepted socket
+#    3. readSystem             Readable: read into the ReadBuffer
+#    4. awaitingResultSystem   answer the promoted requests whose task is done
+#    5. httpParseSystem        Readable: an HttpRequestEvent per request
+#    6. dispatchSystem         the events in order -> the app's `route`
+#    7. writeSystem            Sending: write what the socket takes
+#    8. timeoutSystem          tag idle connections Closing
+#    9. closeSystem            destroy Closing connections once flushed
+#   10. endOfFrameSystem       consume the parsed bytes, clear the tags,
+#                              frameAdvance the event queue
+#
+# `httpServerFrame` runs them all. The app supplies the routes: dispatch calls
+# `route(router: mod R, server: mod HttpServer, event: view HttpRequestEvent)`
+# for the app's router type R, which answers with `respond` (now) or `promote`
+# (later). The work per frame follows the active connections: every walk is
+# over a tag table or the event queue, except the idle check, which runs once
+# a second.
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open ecs/Query
+open ecs/Tag
+open ecs/Event
+open collections/IntMap
+open net/Tcp
+open net/Poller
+open net/ByteBuffer
+open http/Http
+open net/ecs/HttpServer
+open Time
+
+# One whole frame: every system in order, waiting up to `timeoutMs` for
+# readiness first
+func httpServerFrame(
+  R: type
+  router: mod R
+  server: mod HttpServer
+  timeoutMs: view Int
+) {
+  pollSystem(server: server, timeoutMs: timeoutMs)
+  acceptSystem(server: server)
+  readSystem(server: server)
+  awaitingResultSystem(server: server)
+  httpParseSystem(
+    requests: server.requests
+    readables: server.readables
+    readBuffers: server.readBuffers
+    httpParses: server.httpParses
+    awaitingResults: server.awaitingResults
+  )
+  dispatchSystem(R, router: router, server: server)
+  writeSystem(server: server)
+  timeoutSystem(server: server)
+  closeSystem(server: server)
+  endOfFrameSystem(server: server)
+}
+
+# ----- 1. poll --------------------------------------------------------------
+
+# Wait up to `timeoutMs` for readiness and tag what can make progress; read
+# the clocks for the frame
+func pollSystem(server: mod HttpServer, timeoutMs: view Int) {
+  let status: NetStatus = pollWait(
+    poller: server.poller
+    ready: server.readiness
+    timeoutMs: timeoutMs
+  )
+  server.frameNs = nowNs()
+  server.secondChanged = updateHttpDate(cache: server.date, epochSeconds: nowMs() / 1000)
+  loop var i: Int = 0, i < server.readiness.length, ++i {
+    if let readiness: view Readiness => server.readiness.viewAt(index: i) {
+      if readiness.socketId is server.listenerSocketId {
+        server.listenerReady = true
+      } else if let entityId: EntityId = get(
+        this: server.socketEntities
+        k: readiness.socketId.handle
+      ) {
+        # An end of stream or an error is learned by reading
+        if readiness.readable or readiness.closed or readiness.failed {
+          addTag(table: server.readables, entityId: entityId)
+        }
+        if readiness.writable {
+          addTag(table: server.writables, entityId: entityId)
+        }
+      }
+    }
+  }
+}
+
+# ----- 2. accept ------------------------------------------------------------
+
+# Accept every waiting connection
+func acceptSystem(server: mod HttpServer) {
+  if not server.listenerReady {
+    ret
+  }
+  server.listenerReady = false
+  loop {
+    let accepted: SocketResult = tcpAccept(listenerSocketId: server.listenerSocketId)
+    if accepted.status is not NetStatus.ok {
+      ret
+    }
+    let entityId: EntityId = openConnection(server: server, socketId: accepted.socketId)
+  }
+}
+
+# ----- 3. read --------------------------------------------------------------
+
+# Read what the socket has, up to a few chunks per frame
+func readInto(
+  readBuffers: mod ComponentTable(ReadBuffer)
+  entityId: view EntityId
+  socketId: view SocketId
+) ret IoResult {
+  let readBuffer: mod ReadBuffer => componentMod(this: readBuffers, entityId: entityId)
+  var total: Int = 0
+  loop var chunk: Int = 0, chunk < 4, ++chunk {
+    let result: IoResult = socketReadBuffer(
+      socketId: socketId
+      buffer: readBuffer.buffer
+      maxBytes: readChunkBytes
+    )
+    if result.status is not NetStatus.ok {
+      if total > 0 and result.status is NetStatus.wouldBlock {
+        ret IoResult { bytes: total, status: NetStatus.ok }
+      }
+      ret IoResult { bytes: total, status: result.status }
+    }
+    total = total + result.bytes
+    if result.bytes < readChunkBytes {
+      ret IoResult { bytes: total, status: NetStatus.ok }
+    }
+  }
+  ret IoResult { bytes: total, status: NetStatus.ok }
+}
+
+func touchKeepAlive(
+  keepAlives: mod ComponentTable(KeepAlive)
+  entityId: view EntityId
+  nowNs: view Int
+) {
+  if componentHas(this: keepAlives, entityId: entityId) {
+    let keepAlive: mod KeepAlive => componentMod(this: keepAlives, entityId: entityId)
+    keepAlive.idleSinceNs = nowNs
+  }
+}
+
+# Readable: read into the ReadBuffer. The end of the stream or an error closes
+# the connection, after what was read is answered.
+func readSystem(server: mod HttpServer) {
+  loop var i: Int = 0, i < componentCount(this: server.readables), ++i {
+    let entityId: EntityId = componentEntityAt(this: server.readables, i: i)
+    let socket: Socket = socketOf(sockets: server.sockets, entityId: entityId)
+    if socketIsValid(socketId: socket.socketId) {
+      let result: IoResult = readInto(
+        readBuffers: server.readBuffers
+        entityId: entityId
+        socketId: socket.socketId
+      )
+      if result.bytes > 0 {
+        touchKeepAlive(keepAlives: server.keepAlives, entityId: entityId, nowNs: server.frameNs)
+      }
+      if result.status is not NetStatus.ok and result.status is not NetStatus.wouldBlock {
+        addTag(table: server.closings, entityId: entityId)
+      }
+    }
+  }
+}
+
+# ----- 4. promoted requests -------------------------------------------------
+
+# The reply of the connection's promoted request when its task is done
+func takeReply(
+  awaitingResults: mod ComponentTable(AwaitingResult)
+  entityId: view EntityId
+) ret opt HttpReply {
+  let awaiting: mod AwaitingResult => componentMod(this: awaitingResults, entityId: entityId)
+  if let reply: HttpReply = awaiting.task.tryGet() {
+    ret reply
+  }
+  ret none
+}
+
+func awaitedRequest(
+  awaitingResults: view ComponentTable(AwaitingResult)
+  entityId: view EntityId
+) ret HttpRequestEvent {
+  let awaiting: view AwaitingResult => componentView(this: awaitingResults, entityId: entityId)
+  ret awaiting.request
+}
+
+# Drop the bytes up to the end of the answered request; the requests after it
+# are parsed again, numbered from after it
+func resumeAfter(
+  httpParses: mod ComponentTable(HttpParse)
+  readBuffers: mod ComponentTable(ReadBuffer)
+  event: view HttpRequestEvent
+) {
+  let parse: mod HttpParse => componentMod(this: httpParses, entityId: event.connectionEntityId)
+  let readBuffer: mod ReadBuffer => componentMod(
+    this: readBuffers
+    entityId: event.connectionEntityId
+  )
+  parse.state.position = event.request.whole.start + event.request.whole.count
+  httpParseConsumed(state: parse.state, buffer: readBuffer.buffer)
+  parse.nextSequence = event.sequence + 1
+  parse.finished = not event.request.keepAlive
+}
+
+# Answer every promoted request whose task has finished, then let its
+# connection's next requests be parsed (it is tagged Readable)
+func awaitingResultSystem(server: mod HttpServer) {
+  var i: Int = componentCount(this: server.awaitingResults) - 1
+  loop i >= 0 {
+    let entityId: EntityId = componentEntityAt(this: server.awaitingResults, i: i)
+    if let reply: HttpReply = takeReply(awaitingResults: server.awaitingResults, entityId: entityId) {
+      let event: HttpRequestEvent = awaitedRequest(
+        awaitingResults: server.awaitingResults
+        entityId: entityId
+      )
+      appendResponse(
+        writeBuffers: server.writeBuffers
+        entityId: entityId
+        status: reply.status
+        contentType: reply.contentType
+        body: reply.body
+        date: server.date.text
+        keepAlive: event.request.keepAlive
+      )
+      markSending(server: server, event: event)
+      resumeAfter(httpParses: server.httpParses, readBuffers: server.readBuffers, event: event)
+      componentRemove(this: server.awaitingResults, entityId: entityId)
+      addTag(table: server.readables, entityId: entityId)
+    }
+    i = i - 1
+  }
+}
+
+# ----- 5. parse -------------------------------------------------------------
+
+# Send an event for every complete request in the connection's ReadBuffer
+func parseConnection(
+  requests: mod EventQueue(HttpRequestEvent)
+  readBuffers: view ComponentTable(ReadBuffer)
+  httpParses: mod ComponentTable(HttpParse)
+  entityId: view EntityId
+) {
+  let parse: mod HttpParse => componentMod(this: httpParses, entityId: entityId)
+  let readBuffer: view ReadBuffer => componentView(this: readBuffers, entityId: entityId)
+  var request: HttpRequest = createHttpRequest()
+  loop not parse.finished {
+    let result: HttpParseResult = httpParseNext(
+      state: parse.state
+      buffer: readBuffer.buffer
+      request: request
+    )
+    if result is HttpParseResult.needMore {
+      ret
+    }
+    let badRequest: Bool = result is HttpParseResult.badRequest
+    eventSend(
+      this: requests
+      value: HttpRequestEvent {
+        connectionEntityId: entityId
+        sequence: parse.nextSequence
+        request: request
+        badRequest: badRequest
+      }
+    )
+    parse.nextSequence = parse.nextSequence + 1
+    # Nothing after a bad request or `Connection: close` is read
+    parse.finished = badRequest or not request.keepAlive
+  }
+}
+
+# Readable: an HttpRequestEvent per complete request, in arrival order. A
+# connection waiting on a promoted request reads no further requests yet.
+func httpParseSystem(
+  requests: mod EventQueue(HttpRequestEvent)
+  readables: view ComponentTable(Readable)
+  readBuffers: view ComponentTable(ReadBuffer)
+  httpParses: mod ComponentTable(HttpParse)
+  awaitingResults: view ComponentTable(AwaitingResult)
+) {
+  loop var i: Int = 0, i < componentCount(this: readables), ++i {
+    let entityId: EntityId = componentEntityAt(this: readables, i: i)
+    if componentHas(this: httpParses, entityId: entityId) and not componentHas(
+      this: awaitingResults
+      entityId: entityId
+    ) {
+      parseConnection(
+        requests: requests
+        readBuffers: readBuffers
+        httpParses: httpParses
+        entityId: entityId
+      )
+    }
+  }
+}
+
+# ----- 6. dispatch ----------------------------------------------------------
+
+# Walk the requests in order and hand each to the app's `route`. One walk in
+# event order is what answers a mixed pipeline in request order. A request
+# after a promoted one on the same connection is skipped: it is parsed again
+# once that one is answered.
+func dispatchSystem(R: type, router: mod R, server: mod HttpServer) {
+  loop var i: Int = 0, i < eventCount(this: server.requests), ++i {
+    let event: HttpRequestEvent = eventAt(this: server.requests, i: i)
+    if requestIsAnswerable(server: server, event: event) {
+      if event.badRequest {
+        appendBadRequest(
+          writeBuffers: server.writeBuffers
+          entityId: event.connectionEntityId
+          date: server.date.text
+        )
+        markSending(server: server, event: event)
+      } else {
+        route(router: router, server: server, event: event)
+      }
+    }
+  }
+}
+
+# ----- 7. write -------------------------------------------------------------
+
+# Write until the buffer is empty or the socket takes no more
+func writeFrom(
+  writeBuffers: mod ComponentTable(WriteBuffer)
+  entityId: view EntityId
+  socketId: view SocketId
+) ret IoResult {
+  let writeBuffer: mod WriteBuffer => componentMod(this: writeBuffers, entityId: entityId)
+  var total: Int = 0
+  loop byteBufferLength(buffer: writeBuffer.buffer) > 0 {
+    let result: IoResult = socketWriteBuffer(socketId: socketId, buffer: writeBuffer.buffer)
+    if result.status is not NetStatus.ok {
+      if result.status is not NetStatus.wouldBlock {
+        byteBufferClear(buffer: writeBuffer.buffer)
+      }
+      ret IoResult { bytes: total, status: result.status }
+    }
+    total = total + result.bytes
+  }
+  ret IoResult { bytes: total, status: NetStatus.ok }
+}
+
+func unsentBytes(writeBuffers: view ComponentTable(WriteBuffer), entityId: view EntityId) ret Int {
+  let writeBuffer: view WriteBuffer => componentView(this: writeBuffers, entityId: entityId)
+  ret byteBufferLength(buffer: writeBuffer.buffer)
+}
+
+func setWatchingWritable(
+  sockets: mod ComponentTable(Socket)
+  entityId: view EntityId
+  watching: view Bool
+) {
+  let socket: mod Socket => componentMod(this: sockets, entityId: entityId)
+  socket.watchingWritable = watching
+}
+
+# Sending: write what the socket takes. What it does not take waits for the
+# socket to become writable (the poller watches for it until it drains).
+func writeSystem(server: mod HttpServer) {
+  var i: Int = componentCount(this: server.sendings) - 1
+  loop i >= 0 {
+    let entityId: EntityId = componentEntityAt(this: server.sendings, i: i)
+    let socket: Socket = socketOf(sockets: server.sockets, entityId: entityId)
+    if socketIsValid(socketId: socket.socketId) {
+      let result: IoResult = writeFrom(
+        writeBuffers: server.writeBuffers
+        entityId: entityId
+        socketId: socket.socketId
+      )
+      if result.status is not NetStatus.ok and result.status is not NetStatus.wouldBlock {
+        removeTag(table: server.sendings, entityId: entityId)
+        addTag(table: server.closings, entityId: entityId)
+      } else if unsentBytes(writeBuffers: server.writeBuffers, entityId: entityId) is 0 {
+        removeTag(table: server.sendings, entityId: entityId)
+        if socket.watchingWritable {
+          let status: NetStatus = pollerForget(
+            poller: server.poller
+            socketId: socket.socketId
+            readable: false
+            writable: true
+          )
+          setWatchingWritable(sockets: server.sockets, entityId: entityId, watching: false)
+        }
+      } else if not socket.watchingWritable {
+        let status: NetStatus = pollerWatch(
+          poller: server.poller
+          socketId: socket.socketId
+          readable: false
+          writable: true
+        )
+        setWatchingWritable(sockets: server.sockets, entityId: entityId, watching: true)
+      }
+    }
+    i = i - 1
+  }
+}
+
+# ----- 8. timeouts ----------------------------------------------------------
+
+# Once a second: tag Closing every connection idle for `idleTimeoutNs` that
+# owes nothing (no promoted request, nothing left to send)
+func timeoutSystem(server: mod HttpServer) {
+  if not server.secondChanged or server.idleTimeoutNs <= 0 {
+    ret
+  }
+  loop var i: Int = 0, i < componentCount(this: server.keepAlives), ++i {
+    let entityId: EntityId = componentEntityAt(this: server.keepAlives, i: i)
+    let keepAlive: view KeepAlive => queryViewAt(table: server.keepAlives, denseIndex: i)
+    if server.frameNs - keepAlive.idleSinceNs >= server.idleTimeoutNs and not componentHas(
+      this: server.awaitingResults
+      entityId: entityId
+    ) and not hasTag(table: server.sendings, entityId: entityId) {
+      addTag(table: server.closings, entityId: entityId)
+    }
+  }
+}
+
+# ----- 9. close -------------------------------------------------------------
+
+# Destroy every Closing connection that has sent everything and owes no reply
+func closeSystem(server: mod HttpServer) {
+  var i: Int = componentCount(this: server.closings) - 1
+  loop i >= 0 {
+    let entityId: EntityId = componentEntityAt(this: server.closings, i: i)
+    if not hasTag(table: server.sendings, entityId: entityId) and not componentHas(
+      this: server.awaitingResults
+      entityId: entityId
+    ) {
+      destroyConnection(server: server, entityId: entityId)
+    }
+    i = i - 1
+  }
+}
+
+# ----- 10. end of frame -----------------------------------------------------
+func consumeParsed(
+  httpParses: mod ComponentTable(HttpParse)
+  readBuffers: mod ComponentTable(ReadBuffer)
+  entityId: view EntityId
+) {
+  let parse: mod HttpParse => componentMod(this: httpParses, entityId: entityId)
+  let readBuffer: mod ReadBuffer => componentMod(this: readBuffers, entityId: entityId)
+  httpParseConsumed(state: parse.state, buffer: readBuffer.buffer)
+}
+
+func clearTagTable(T: type, table: mod ComponentTable(T)) {
+  loop componentCount(this: table) > 0 {
+    removeTag(
+      table: table
+      entityId: componentEntityAt(this: table, i: componentCount(this: table) - 1)
+    )
+  }
+}
+
+# The frame's events are handled: drop the bytes they pointed into (a
+# connection waiting on a promoted request keeps them), clear the readiness
+# tags and advance the event queue
+func endOfFrameSystem(server: mod HttpServer) {
+  loop var i: Int = 0, i < componentCount(this: server.readables), ++i {
+    let entityId: EntityId = componentEntityAt(this: server.readables, i: i)
+    if componentHas(this: server.httpParses, entityId: entityId) and not componentHas(
+      this: server.awaitingResults
+      entityId: entityId
+    ) {
+      consumeParsed(
+        httpParses: server.httpParses
+        readBuffers: server.readBuffers
+        entityId: entityId
+      )
+    }
+  }
+  clearTagTable(Readable, table: server.readables)
+  clearTagTable(Writable, table: server.writables)
+  frameAdvance(this: server.requests)
+}

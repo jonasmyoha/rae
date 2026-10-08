@@ -1,0 +1,225 @@
+# lib/net/ecs (docs/server-benchmarks-design.md §7, §9 G8): the ECS HTTP
+# server's systems driven with no network. Bytes go into a detached
+# connection's ReadBuffer, a frame runs every system in order, and the
+# WriteBuffer holds the answers: a mixed pipeline answered in request order,
+# a request split across reads, a promoted request answered on a later frame
+# with the pipeline behind it kept in order, a bad request and
+# `Connection: close` closing their connections, and an idle timeout.
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Tag
+open ecs/World
+open net/Tcp
+open net/ByteBuffer
+open http/Http
+open net/ecs/HttpServer
+open net/ecs/HttpSystems
+
+type DemoRouter {
+  routed: Int
+}
+
+func slowReply(delayMs: copy Int) ret HttpReply {
+  sleep(ms: delayMs)
+  ret HttpReply { status: 200, contentType: "text/plain", body: "slow after {delayMs} ms" }
+}
+
+func route(router: mod DemoRouter, server: mod HttpServer, event: view HttpRequestEvent) {
+  router.routed = router.routed + 1
+  if requestPathIs(server: server, event: event, path: "/plaintext") {
+    respond(
+      server: server
+      event: event
+      status: 200
+      contentType: "text/plain"
+      body: "Hello, World!"
+    )
+  } else if requestPathIs(server: server, event: event, path: "/json") {
+    respond(
+      server: server
+      event: event
+      status: 200
+      contentType: "application/json"
+      body: "\{\"message\":\"Hello, World!\"\}"
+    )
+  } else if requestPathIs(server: server, event: event, path: "/slow") {
+    promote(server: server, event: event, task: spawn slowReply(delayMs: 30))
+  } else {
+    respond(
+      server: server
+      event: event
+      status: 404
+      contentType: "text/plain"
+      body: "Not Found"
+    )
+  }
+}
+
+# The output with each Date header's value masked (the clock is real)
+func masked(text: view String) ret String {
+  var buffer: ByteBuffer = createByteBuffer(capacity: 256)
+  appendText(buffer: buffer, text: text)
+  var out: ByteBuffer = createByteBuffer(capacity: 256)
+  var position: Int = 0
+  loop {
+    let found: Int = byteBufferIndexOf(buffer: buffer, pattern: "Date: ", from: position)
+    if found < 0 {
+      break
+    }
+    appendText(
+      buffer: out
+      text: byteBufferText(buffer: buffer, start: position, count: found + 6 - position)
+    )
+    appendText(buffer: out, text: "<date>")
+    position = byteBufferIndexOf(buffer: buffer, pattern: "\r\n", from: found)
+  }
+  appendText(
+    buffer: out
+    text: byteBufferText(
+      buffer: buffer
+      start: position
+      count: byteBufferLength(buffer: buffer) - position
+    )
+  )
+  ret byteBufferText(buffer: out, start: 0, count: byteBufferLength(buffer: out))
+}
+
+func show(label: view String, server: mod HttpServer, entityId: view EntityId) {
+  let text: String = takeOutput(server: server, entityId: entityId)
+  log("--- {label} ({text.length()} bytes)")
+  if text.length() > 0 {
+    log(masked(text: text))
+  }
+}
+
+# Forget a detached connection's output without making a String
+func dropOutput(server: mod HttpServer, entityId: view EntityId) {
+  clearWriteBuffer(writeBuffers: server.writeBuffers, entityId: entityId)
+  removeTag(table: server.sendings, entityId: entityId)
+}
+
+func clearWriteBuffer(writeBuffers: mod ComponentTable(WriteBuffer), entityId: view EntityId) {
+  let writeBuffer: mod WriteBuffer => componentMod(this: writeBuffers, entityId: entityId)
+  byteBufferClear(buffer: writeBuffer.buffer)
+}
+
+func frame(router: mod DemoRouter, server: mod HttpServer) {
+  httpServerFrame(
+    DemoRouter
+    router: router
+    server: server
+    timeoutMs: 0
+  )
+}
+
+func main() ret Int {
+  var server: HttpServer = createHttpServer(idleTimeoutMs: 1)
+  var router: DemoRouter = { routed: 0 }
+
+  # A mixed pipeline: three requests in one read, answered in request order
+  let pipelined: EntityId = openConnection(server: server, socketId: noSocket())
+  injectInput(
+    server: server
+    entityId: pipelined
+    text: "GET /json HTTP/1.1\r\nHost: a\r\n\r\nGET /plaintext HTTP/1.1\r\nHost: a\r\n\r\nGET /missing HTTP/1.1\r\nHost: a\r\n\r\n"
+  )
+  frame(router: router, server: server)
+  show(label: "mixed pipeline", server: server, entityId: pipelined)
+
+  # A request split across two reads is answered once it is whole
+  injectInput(server: server, entityId: pipelined, text: "GET /plain")
+  frame(router: router, server: server)
+  show(label: "half a request", server: server, entityId: pipelined)
+  injectInput(server: server, entityId: pipelined, text: "text HTTP/1.1\r\n\r\n")
+  frame(router: router, server: server)
+  show(label: "the other half", server: server, entityId: pipelined)
+
+  # A promoted request: the one before it is answered now, it and the one
+  # after it on a later frame, still in order
+  let waiting: EntityId = openConnection(server: server, socketId: noSocket())
+  injectInput(
+    server: server
+    entityId: waiting
+    text: "GET /plaintext HTTP/1.1\r\n\r\nGET /slow HTTP/1.1\r\n\r\nGET /json HTTP/1.1\r\n\r\n"
+  )
+  frame(router: router, server: server)
+  show(label: "before the slow one", server: server, entityId: waiting)
+  log("awaiting: {componentCount(this: server.awaitingResults)}")
+  var frames: Int = 0
+  loop componentCount(this: server.awaitingResults) > 0 and frames < 2000 {
+    sleep(ms: 1)
+    frame(router: router, server: server)
+    frames = frames + 1
+  }
+  log("answered on a later frame: {frames > 0}")
+  show(label: "the slow one and the one after", server: server, entityId: waiting)
+
+  # A bad request is answered 400 and its connection closed; so is a
+  # `Connection: close` request, and nothing after it is read
+  let bad: EntityId = openConnection(server: server, socketId: noSocket())
+  injectInput(server: server, entityId: bad, text: "GET /json HTTP/1.1\r\n\r\nNOT HTTP\r\n\r\n")
+  let closing: EntityId = openConnection(server: server, socketId: noSocket())
+  injectInput(
+    server: server
+    entityId: closing
+    text: "GET /plaintext HTTP/1.1\r\nConnection: close\r\n\r\nGET /json HTTP/1.1\r\n\r\n"
+  )
+  frame(router: router, server: server)
+  show(label: "bad request", server: server, entityId: bad)
+  show(label: "connection: close", server: server, entityId: closing)
+  log(
+    "closing tagged: {hasTag(table: server.closings, entityId: bad)} {hasTag(
+      table: server.closings
+      entityId: closing
+    )}"
+  )
+  frame(router: router, server: server)
+  log(
+    "closed: {not allocatorIsAlive(this: server.entities, entityId: bad)} {not allocatorIsAlive(
+      this: server.entities
+      entityId: closing
+    )}"
+  )
+
+  # A request still waiting for its task when the server closes is joined
+  let abandoned: EntityId = openConnection(server: server, socketId: noSocket())
+  injectInput(server: server, entityId: abandoned, text: "GET /slow HTTP/1.1\r\n\r\n")
+  frame(router: router, server: server)
+  log("abandoned awaiting: {componentHas(this: server.awaitingResults, entityId: abandoned)}")
+
+  # A steady pipeline allocates nothing per request once warm (the Date
+  # header's String is made once a second; that frame is not counted)
+  let steady: EntityId = openConnection(server: server, socketId: noSocket())
+  let batch: String = "GET /plaintext HTTP/1.1\r\n\r\nGET /json HTTP/1.1\r\n\r\n"
+  loop var round: Int = 0, round < 20, ++round {
+    injectInput(server: server, entityId: steady, text: batch)
+    frame(router: router, server: server)
+    dropOutput(server: server, entityId: steady)
+  }
+  var allocations: Int = 0
+  loop var round: Int = 0, round < 500, ++round {
+    let allocationsBefore: Int = Sys.allocationCount()
+    injectInput(server: server, entityId: steady, text: batch)
+    frame(router: router, server: server)
+    dropOutput(server: server, entityId: steady)
+    if not server.secondChanged {
+      allocations = allocations + Sys.allocationCount() - allocationsBefore
+    }
+  }
+  log("allocations for 1000 requests after warmup: {allocations}")
+
+  # Idle connections time out (1 ms here) once the clock passes a second
+  var idleFrames: Int = 0
+  loop allocatorIsAlive(this: server.entities, entityId: pipelined) and idleFrames < 3000 {
+    sleep(ms: 1)
+    frame(router: router, server: server)
+    idleFrames = idleFrames + 1
+  }
+  log("idle connection closed: {not allocatorIsAlive(this: server.entities, entityId: pipelined)}")
+  # Six buffers came back (bad, closing, this one); at most four were reused
+  log("closed connections' buffers pooled: {server.bufferPool.free.length >= 2}")
+  log("requests routed: {router.routed}")
+  closeHttpServer(server: server)
+  log("open after close: {allocatorAliveCount(this: server.entities)}")
+  ret 0
+}
