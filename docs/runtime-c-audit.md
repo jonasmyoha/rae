@@ -2,7 +2,11 @@
 
 **Status:** audit, 2026-10-08; rows marked ✅ are done. The rule this follows is in
 AGENTS.md ("Runtime C rule: C only for platform ABI"): runtime C makes one
-platform call per function and holds no policy; pure algorithms are Rae.
+platform call per function and holds no policy; pure algorithms are written
+in Rae first. A move to Rae must not make the program slower: where the C (or
+a platform routine) is clearly faster, it stays, with the Rae version as the
+portable fallback (AGENTS.md; SHA-1 uses CommonCrypto on Apple for that
+reason). Measure each migration before and after.
 
 `compiler/runtime/` holds about 12 000 lines of our own C (plus the vendored
 `lodepng` and `stb_image`). Most of it is legitimately C: platform calls,
