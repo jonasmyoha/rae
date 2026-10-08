@@ -1,0 +1,139 @@
+# lib/net/Poller (docs/server-benchmarks-design.md §9 G2): readiness over many
+# sockets. Two accepted loopback sockets, data on one: only that one is ready.
+# A wait allocates nothing (the caller's list keeps its capacity).
+open net/Tcp
+open net/Poller
+
+func acceptWithin(listenerSocketId: view SocketId) ret SocketResult {
+  loop var attempt: Int = 0, attempt < 200, ++attempt {
+    let accepted: SocketResult = tcpAccept(listenerSocketId: listenerSocketId)
+    if accepted.status is not NetStatus.wouldBlock {
+      ret accepted
+    }
+    sleep(ms: 5)
+  }
+  ret SocketResult { socketId: noSocket(), status: NetStatus.wouldBlock }
+}
+
+# Which of the two server sockets a wait reported, and how
+func describe(ready: view List(Readiness), first: view SocketId, second: view SocketId) ret String {
+  var text: String = "{ready.length} ready:"
+  loop let readiness: Readiness in ready {
+    var name: String = "other"
+    if readiness.socketId.handle is first.handle {
+      name = "first"
+    } else if readiness.socketId.handle is second.handle {
+      name = "second"
+    }
+    text = "{text} {name}(readable {readiness.readable}, writable {readiness.writable}, closed {readiness.closed})"
+  }
+  ret text
+}
+
+func main() ret Int {
+  let listening: SocketResult = tcpListen(host: "127.0.0.1", port: 0, backlog: 16)
+  let port: Int = socketLocalPort(socketId: listening.socketId)
+  let clientOne: SocketResult = tcpConnect(host: "127.0.0.1", port: port, timeoutMs: 2000)
+  let serverOne: SocketResult = acceptWithin(listenerSocketId: listening.socketId)
+  let clientTwo: SocketResult = tcpConnect(host: "127.0.0.1", port: port, timeoutMs: 2000)
+  let serverTwo: SocketResult = acceptWithin(listenerSocketId: listening.socketId)
+  log("accepted both: {serverOne.status} {serverTwo.status}")
+
+  var poller: Poller = createPoller()
+  log("poller: {poller.status}")
+  log("watch first: {pollerWatch(
+    poller: poller
+    socketId: serverOne.socketId
+    readable: true
+    writable: false
+  )}")
+  log("watch second: {pollerWatch(
+    poller: poller
+    socketId: serverTwo.socketId
+    readable: true
+    writable: false
+  )}")
+
+  var ready: List(Readiness) = List.create(Readiness, cap: 16)
+  let capacity: Int = ready.cap
+  # Nothing written yet: a short wait times out empty
+  log(
+    "before data: {pollWait(poller: poller, ready: ready, timeoutMs: 20)}, {describe(
+      ready: ready
+      first: serverOne.socketId
+      second: serverTwo.socketId
+    )}"
+  )
+
+  # Data only on the first connection: only the first is ready
+  let sent: IoResult = socketWriteText(socketId: clientOne.socketId, text: "ping")
+  log(
+    "after data: {pollWait(poller: poller, ready: ready, timeoutMs: 2000)}, {describe(
+      ready: ready
+      first: serverOne.socketId
+      second: serverTwo.socketId
+    )}"
+  )
+  var bytes: List(UInt8) = List.create(UInt8, cap: 8)
+  let got: IoResult = socketRead(socketId: serverOne.socketId, bytes: bytes, maxBytes: 64)
+  log("read {got.bytes} bytes: {textFromBytes(bytes: bytes, start: 0, count: got.bytes)}")
+  log(
+    "drained: {pollWait(poller: poller, ready: ready, timeoutMs: 20)}, {describe(
+      ready: ready
+      first: serverOne.socketId
+      second: serverTwo.socketId
+    )}"
+  )
+
+  # Writable interest: a fresh connection has room to send
+  log("watch first for writing: {pollerWatch(
+    poller: poller
+    socketId: serverOne.socketId
+    readable: false
+    writable: true
+  )}")
+  log(
+    "writable: {pollWait(poller: poller, ready: ready, timeoutMs: 2000)}, {describe(
+      ready: ready
+      first: serverOne.socketId
+      second: serverTwo.socketId
+    )}"
+  )
+  log("forget writing: {pollerForget(
+    poller: poller
+    socketId: serverOne.socketId
+    readable: false
+    writable: true
+  )}")
+  log(
+    "after forget: {pollWait(poller: poller, ready: ready, timeoutMs: 20)}, {describe(
+      ready: ready
+      first: serverOne.socketId
+      second: serverTwo.socketId
+    )}"
+  )
+
+  # The second peer closes: its socket is readable (end of stream) and closed
+  socketClose(socketId: clientTwo.socketId)
+  log(
+    "peer closed: {pollWait(poller: poller, ready: ready, timeoutMs: 2000)}, {describe(
+      ready: ready
+      first: serverOne.socketId
+      second: serverTwo.socketId
+    )}"
+  )
+
+  # Many waits, no growth
+  loop var i: Int = 0, i < 50, ++i {
+    let status: NetStatus = pollWait(poller: poller, ready: ready, timeoutMs: 0)
+  }
+  log("capacity kept: {ready.cap is capacity}")
+
+  closePoller(poller: poller)
+  log("closed poller: {pollWait(poller: poller, ready: ready, timeoutMs: 0)}")
+  socketClose(socketId: clientOne.socketId)
+  socketClose(socketId: serverOne.socketId)
+  socketClose(socketId: serverTwo.socketId)
+  socketClose(socketId: listening.socketId)
+  ret 0
+}

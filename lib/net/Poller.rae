@@ -1,0 +1,207 @@
+# Readiness polling over many sockets (docs/server-benchmarks-design.md §9 G2,
+# §1.2): which of the watched sockets can be read or written now.
+#
+# The policy is Rae over the one-call kqueue shim in lib/net/NetSystem.rae:
+# what an interest change means, retrying a wait a signal interrupted, and
+# turning raw (handle, filter, flags) events into `Readiness` values. The API
+# is the same whatever the kernel mechanism: kqueue on macOS today; epoll is
+# added behind it later (decision F8), and until then a poller elsewhere
+# answers `unsupported`.
+#
+# A wait allocates nothing: the poller owns its raw-event buffer, made once,
+# and `pollWait` refills the caller's `List(Readiness)` (cleared, its capacity
+# kept). A socket watched for both reading and writing can appear twice in one
+# wait, once per direction.
+open net/NetSystem
+open net/Tcp
+
+type Poller {
+  # The kernel queue's handle, -1 when there is none
+  handle: Int
+  status: NetStatus
+  # (handle, filter, flags) per raw event of the last wait
+  rawEvents: List(Int)
+}
+
+# One socket that can make progress now
+type Readiness {
+  socketId: SocketId
+  # Data (or a connection, on a listener) is waiting to be read
+  readable: Bool
+  # The send buffer has room
+  writable: Bool
+  # The peer closed its side: a read answers what is left, then endOfStream
+  closed: Bool
+  # The kernel reported an error for this socket
+  failed: Bool
+}
+
+func noPoller(status: view NetStatus) ret Poller {
+  ret Poller { handle: -1, status: status, rawEvents: {} }
+}
+
+# A new poller watching nothing. Its `status` says why there is none.
+func createPoller() ret Poller {
+  unsafe {
+    let code: Int = systemPollerCreate()
+    if code < 0 {
+      ret noPoller(status: netStatusFromCode(code: code))
+    }
+    let closeOnExec: Int = systemSetCloseOnExec(handle: code)
+    let maxEvents: Int = netConstant(which: pollMaxWaitEvents)
+    ret Poller {
+      handle: code
+      status: NetStatus.ok
+      rawEvents: List.create(Int, cap: maxEvents * 3)
+    }
+  }
+}
+
+# One interest change, retried if a signal interrupted it
+func changeInterest(
+  poller: view Poller
+  socketId: view SocketId
+  filter: view Int
+  change: view Int
+) ret NetStatus {
+  if poller.handle < 0 {
+    ret poller.status
+  }
+  unsafe {
+    loop {
+      let code: Int = systemPollerChange(
+        queue: poller.handle
+        handle: socketId.handle
+        filter: netConstant(which: filter)
+        flags: netConstant(which: change)
+      )
+      if code >= 0 {
+        ret NetStatus.ok
+      }
+      if not isError(code: code, which: errorInterrupted) {
+        ret netStatusFromCode(code: code)
+      }
+    }
+  }
+  ret NetStatus.failed
+}
+
+# Watch `socketId` for reading, writing or both (a direction not asked for is
+# left as it was)
+func pollerWatch(
+  poller: view Poller
+  socketId: view SocketId
+  readable: view Bool
+  writable: view Bool
+) ret NetStatus {
+  if readable {
+    let status: NetStatus = changeInterest(
+      poller: poller
+      socketId: socketId
+      filter: pollFilterRead
+      change: pollChangeAdd
+    )
+    if status is not NetStatus.ok {
+      ret status
+    }
+  }
+  if writable {
+    ret changeInterest(
+      poller: poller
+      socketId: socketId
+      filter: pollFilterWrite
+      change: pollChangeAdd
+    )
+  }
+  ret NetStatus.ok
+}
+
+# Stop watching `socketId` in the given directions. Closing a socket removes
+# it from the poller on its own; this is for a socket that stays open.
+func pollerForget(
+  poller: view Poller
+  socketId: view SocketId
+  readable: view Bool
+  writable: view Bool
+) ret NetStatus {
+  var status: NetStatus = NetStatus.ok
+  if readable {
+    status = changeInterest(
+      poller: poller
+      socketId: socketId
+      filter: pollFilterRead
+      change: pollChangeDelete
+    )
+  }
+  if writable {
+    let writeStatus: NetStatus = changeInterest(
+      poller: poller
+      socketId: socketId
+      filter: pollFilterWrite
+      change: pollChangeDelete
+    )
+    if status is NetStatus.ok {
+      status = writeStatus
+    }
+  }
+  ret status
+}
+
+# Wait up to `timeoutMs` (negative: until something is ready) and refill
+# `ready` with the sockets that can make progress. `ok` with an empty list
+# means the time ran out. A wait a signal interrupted is waited again.
+func pollWait(poller: mod Poller, ready: mod List(Readiness), timeoutMs: view Int) ret NetStatus {
+  ready.clear()
+  if poller.handle < 0 {
+    ret poller.status
+  }
+  let maxEvents: Int = poller.rawEvents.cap / 3
+  var count: Int = 0
+  unsafe {
+    loop {
+      count = systemPollerWait(
+        queue: poller.handle
+        events: poller.rawEvents.data
+        maxEvents: maxEvents
+        timeoutMs: timeoutMs
+      )
+      if count >= 0 or not isError(code: count, which: errorInterrupted) {
+        break
+      }
+    }
+  }
+  if count < 0 {
+    poller.rawEvents.length = 0
+    ret netStatusFromCode(code: count)
+  }
+  poller.rawEvents.length = count * 3
+  let readFilter: Int = netConstant(which: pollFilterRead)
+  let writeFilter: Int = netConstant(which: pollFilterWrite)
+  let endOfFile: Int = netConstant(which: pollFlagEndOfFile)
+  let errorFlag: Int = netConstant(which: pollFlagError)
+  loop var i: Int = 0, i < count, ++i {
+    let handle: Int = poller.rawEvents.copyAtFallback(index: i * 3, fallback: -1)
+    let filter: Int = poller.rawEvents.copyAtFallback(index: i * 3 + 1, fallback: 0)
+    let flags: Int = poller.rawEvents.copyAtFallback(index: i * 3 + 2, fallback: 0)
+    ready.add(value: Readiness {
+      socketId: SocketId { handle: handle }
+      readable: filter is readFilter
+      writable: filter is writeFilter
+      closed: (flags bitand endOfFile) is not 0
+      failed: (flags bitand errorFlag) is not 0
+    })
+  }
+  ret NetStatus.ok
+}
+
+# Release the kernel queue (the sockets it watched stay open). A wait on the
+# closed poller answers `failed`.
+func closePoller(poller: mod Poller) {
+  if poller.handle >= 0 {
+    unsafe {
+      let code: Int = systemClose(handle: poller.handle)
+    }
+    poller.handle = -1
+  }
+  poller.status = NetStatus.failed
+}

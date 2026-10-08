@@ -23,6 +23,9 @@
  * the address itself (opaque to Rae; its layout differs per OS). */
 #define RAE_NET_RECORD_HEADER 16
 #define RAE_NET_RECORD_BYTES (RAE_NET_RECORD_HEADER + 128)
+/* The most events one pollerWait call reports (its kevent array lives on the
+ * stack: per-OS struct layout, no allocation per wait) */
+#define RAE_NET_MAX_WAIT_EVENTS 256
 
 #if (defined(__APPLE__) || defined(__linux__)) && !defined(__wasm__) && !defined(__EMSCRIPTEN__)
 
@@ -34,6 +37,9 @@
 #include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#ifdef __APPLE__
+#include <sys/event.h>
+#endif
 
 /* The constants lib/net needs, by the index NetSystem.rae names them with */
 int64_t rae_ext_NetSys_constant(int64_t which) {
@@ -72,6 +78,15 @@ int64_t rae_ext_NetSys_constant(int64_t which) {
     case 23: return RAE_NET_RESOLVE_FAILED;
     case 24: return RAE_NET_UNSUPPORTED;
     case 25: return SOMAXCONN;
+#ifdef __APPLE__
+    case 26: return EVFILT_READ;
+    case 27: return EVFILT_WRITE;
+    case 28: return EV_ADD | EV_ENABLE;
+    case 29: return EV_DELETE;
+    case 30: return EV_EOF;
+    case 31: return EV_ERROR;
+#endif
+    case 32: return RAE_NET_MAX_WAIT_EVENTS;
     default: return -1;
   }
 }
@@ -193,6 +208,49 @@ int64_t rae_ext_NetSys_close(int64_t fd) {
   return close((int)fd) == 0 ? 0 : -errno;
 }
 
+/* The readiness poller (lib/net/Poller.rae). kqueue on macOS; Linux answers
+ * RAE_NET_UNSUPPORTED until epoll lands behind the same Rae API (F8). */
+#ifdef __APPLE__
+int64_t rae_ext_NetSys_pollerCreate(void) {
+  int queue = kqueue();
+  return queue >= 0 ? queue : -errno;
+}
+
+/* One interest change: `flags` (add / delete, from the constant table) for
+ * `filter` (read / write) on `fd` */
+int64_t rae_ext_NetSys_pollerChange(int64_t queue, int64_t fd, int64_t filter, int64_t flags) {
+  struct kevent change;
+  EV_SET(&change, (uintptr_t)fd, (int16_t)filter, (uint16_t)flags, 0, 0, NULL);
+  return kevent((int)queue, &change, 1, NULL, 0, NULL) == 0 ? 0 : -errno;
+}
+
+/* Wait up to `timeoutMs` (negative: forever) for up to `maxEvents` events and
+ * write each as (handle, filter, flags) into `events`: their count, or -errno */
+int64_t rae_ext_NetSys_pollerWait(int64_t queue, int64_t* events, int64_t maxEvents, int64_t timeoutMs) {
+  struct kevent ready[RAE_NET_MAX_WAIT_EVENTS];
+  int capacity = maxEvents < RAE_NET_MAX_WAIT_EVENTS ? (int)maxEvents : RAE_NET_MAX_WAIT_EVENTS;
+  struct timespec timeout = { (time_t)(timeoutMs / 1000), (long)((timeoutMs % 1000) * 1000000) };
+  int count = kevent((int)queue, NULL, 0, ready, capacity, timeoutMs < 0 ? NULL : &timeout);
+  if (count < 0) return -errno;
+  for (int i = 0; i < count; i++) {
+    events[i * 3] = (int64_t)ready[i].ident;
+    events[i * 3 + 1] = (int64_t)ready[i].filter;
+    events[i * 3 + 2] = (int64_t)ready[i].flags;
+  }
+  return count;
+}
+#else
+int64_t rae_ext_NetSys_pollerCreate(void) { return RAE_NET_UNSUPPORTED; }
+int64_t rae_ext_NetSys_pollerChange(int64_t queue, int64_t fd, int64_t filter, int64_t flags) {
+  (void)queue; (void)fd; (void)filter; (void)flags;
+  return RAE_NET_UNSUPPORTED;
+}
+int64_t rae_ext_NetSys_pollerWait(int64_t queue, int64_t* events, int64_t maxEvents, int64_t timeoutMs) {
+  (void)queue; (void)events; (void)maxEvents; (void)timeoutMs;
+  return RAE_NET_UNSUPPORTED;
+}
+#endif
+
 /* getsockname, decoded per address family: the local port, or -errno */
 int64_t rae_ext_NetSys_localPort(int64_t fd) {
   struct sockaddr_storage address;
@@ -209,6 +267,7 @@ int64_t rae_ext_NetSys_constant(int64_t which) {
   if (which == 22) return RAE_NET_RECORD_BYTES;
   if (which == 23) return RAE_NET_RESOLVE_FAILED;
   if (which == 24) return RAE_NET_UNSUPPORTED;
+  if (which == 32) return RAE_NET_MAX_WAIT_EVENTS;
   return 0;
 }
 int64_t rae_ext_NetSys_resolve(rae_String host, int64_t port, rae_Bool passive, uint8_t* records, int64_t maxRecords) {
@@ -240,6 +299,15 @@ int64_t rae_ext_NetSys_sendText(int64_t fd, rae_String text, int64_t flags) { (v
 int64_t rae_ext_NetSys_pollOne(int64_t fd, int64_t events, int64_t timeoutMs) { (void)fd; (void)events; (void)timeoutMs; return RAE_NET_UNSUPPORTED; }
 int64_t rae_ext_NetSys_close(int64_t fd) { (void)fd; return RAE_NET_UNSUPPORTED; }
 int64_t rae_ext_NetSys_localPort(int64_t fd) { (void)fd; return RAE_NET_UNSUPPORTED; }
+int64_t rae_ext_NetSys_pollerCreate(void) { return RAE_NET_UNSUPPORTED; }
+int64_t rae_ext_NetSys_pollerChange(int64_t queue, int64_t fd, int64_t filter, int64_t flags) {
+  (void)queue; (void)fd; (void)filter; (void)flags;
+  return RAE_NET_UNSUPPORTED;
+}
+int64_t rae_ext_NetSys_pollerWait(int64_t queue, int64_t* events, int64_t maxEvents, int64_t timeoutMs) {
+  (void)queue; (void)events; (void)maxEvents; (void)timeoutMs;
+  return RAE_NET_UNSUPPORTED;
+}
 
 #endif
 
