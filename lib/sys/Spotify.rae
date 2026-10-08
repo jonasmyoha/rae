@@ -10,28 +10,24 @@
 #   * One-time "Automation" permission — macOS prompts the first time
 #     the program tries to control Spotify
 #
-# This module is opt-in: `import sys/spotify` explicitly. It is NOT
+# This module is opt-in: `import sys/Spotify` explicitly. It is NOT
 # auto-loaded.
 #
-# Compiled-only. The Live VM does not yet register the underlying C
-# natives, so calling these from `--target live` will fail to link at
-# the VM bytecode level. Use `--target compiled` (or `rae run` /
-# `rae watch` which both default to compiled for raylib examples).
+# Everything here is Rae except running the two programs (docs/runtime-c-
+# audit.md row 9): the C shims below each run `osascript` or `curl` once and
+# answer its exit status or what it printed. Off macOS they run nothing and
+# answer empty, so every function here answers "nothing playing".
 #
-# Usage (typical poll loop):
+# Usage (typical poll loop, off the UI thread — `poll` runs osascript):
 #
-#     import sys/spotify
-#     let t: SpotifyTrack = current()
-#     if t.state is "playing" {
-#       log("now playing: {t.trackName} — {t.artistName}")
+#     import sys/Spotify
+#     let track: SpotifyTrack = Spotify.poll()
+#     if track.state is "playing" {
+#       log("now playing: {track.trackName} — {track.artistName}")
 #     }
-#
-# Search-and-play (future): not exposed yet. The C bridge can grow a
-# `playQuery(q: String)` extern that translates to
-# `spotify:search:<q>` via osascript when needed.
+open Json
 
-# A snapshot of Spotify's "now playing" state. All fields are owned
-# String copies — safe to drop without affecting the cache.
+# What Spotify is playing, as one poll saw it.
 type SpotifyTrack {
   # "playing" | "paused" | "stopped" | "" (when Spotify isn't running
   # or the Automation permission hasn't been granted yet).
@@ -45,95 +41,345 @@ type SpotifyTrack {
   # the current item is a local file / podcast / advert — use the
   # iTunes fallback (`itunesSearchArtworkUrl`) in that case.
   artworkUrl: String
+  # Playback position in seconds (0 when stopped)
+  position: Float
+  # Track length in seconds (0 when stopped / unknown)
+  duration: Float
+}
+
+# The process shims (compiler/runtime/runtime_spotify_apple.c): `osascript -e
+# <script>` (a script may span lines) answering its exit status, or what it
+# printed (empty unless it exited 0); `curl -sLf <url>` answering the body
+# (empty unless it exited 0), or writing it to a file (true when it exited 0).
+func osascriptRun(script: String) unsafe extern ret Int
+
+func osascriptOutput(script: String) unsafe extern ret String
+
+func curlOutput(url: String) unsafe extern ret String
+
+func curlToFile(url: String, path: String) unsafe extern ret Bool
+
+# Bring this app's own window back to the front (runtime_platform_apple.c)
+func nativeActivateSelf() unsafe extern("rae_ext_activateSelf")
+
+# Run one AppleScript; a failure (Spotify not running, Automation permission
+# denied) is reported on the log and otherwise ignored — the next poll shows
+# the unchanged state.
+func runScript(script: view String, action: view String) {
+  log("[spotify] {action}")
+  var status: Int = 0
+  unsafe {
+    status = osascriptRun(script: script)
+  }
+  if status is not 0 {
+    log("[spotify] {action} failed (osascript rc={status})")
+  }
+}
+
+# `text` as the inside of an AppleScript string literal
+func appleScriptQuoted(text: view String) ret String {
+  ret text.replace(old: "\\", new: "\\\\").replace(old: "\"", new: "\\\"")
 }
 
 # Transport controls. All four launch Spotify if it isn't running yet
 # (because AppleScript's `tell application "Spotify" to play` does it
-# implicitly). No return value — failures (e.g. permission denied) are
-# silent at this layer; the next `current()` snapshot will
-# reveal the unchanged state.
-func launch() unsafe extern
+# implicitly).
+func launch() {
+  runScript(
+    script: "tell application \"Spotify\" to if it is not running then launch"
+    action: "launch"
+  )
+}
 
-func play() unsafe extern
+func play() {
+  runScript(script: "tell application \"Spotify\" to play", action: "play")
+}
 
-func pause() unsafe extern
+func pause() {
+  runScript(script: "tell application \"Spotify\" to pause", action: "pause")
+}
 
-func next() unsafe extern
+func next() {
+  runScript(script: "tell application \"Spotify\" to next track", action: "next")
+}
 
-func previous() unsafe extern
+func previous() {
+  runScript(script: "tell application \"Spotify\" to previous track", action: "previous")
+}
 
 # Play a specific Spotify URI directly. Accepts the full URI form
 # Spotify hands out — spotify:track:<id>, spotify:album:<id>,
 # spotify:playlist:<id>. Use this when the local catalog has a URI
 # stored (e.g. annotated album.json).
-func playUri(uri: view String) unsafe extern
+func playUri(uri: view String) {
+  if uri.length() is 0 {
+    ret
+  }
+  runScript(
+    script: "tell application \"Spotify\" to play track \"{appleScriptQuoted(text: uri)}\""
+    action: "play uri={uri}"
+  )
+}
 
-# Search-and-play. Opens Spotify's search panel for `query` and
-# plays the top hit. Use when the local catalog has only a free-form
-# label (artist + track / artist + album). The query is URL-encoded
-# inside the C bridge; pass plain text, no escaping required.
-func playQuery(query: view String) unsafe extern
-
-# Force ONE synchronous osascript refresh of the cache (fork+exec; ~tens
-# of ms). AVOID calling this on the UI thread in a per-frame/per-poll loop
-# — it spikes the frame rate. Call it from a `spawn`'d Rae worker instead
-# (#950): osascript is a fork/exec subprocess, so running it off-thread is
-# safe, and the cache is mutex-guarded so the getters read it cheaply from
-# the UI thread. The scheduling used to live in C (`startPoller`, #279); it
-# is app code now — see examples/106_mobile_ui/spotifySystem/SpotifyPoller.rae.
-func refresh() unsafe extern
-
-func state() unsafe extern ret String
-
-func trackId() unsafe extern ret String
-
-func trackName() unsafe extern ret String
-
-func artistName() unsafe extern ret String
-
-func albumName() unsafe extern ret String
-
-func artworkUrl() unsafe extern ret String
-
-# Wall-clock playback position in seconds (0 when stopped).
-func position() unsafe extern ret Float
-
-# Total track length in seconds (0 when stopped / unknown).
-func duration() unsafe extern ret Float
-
-# Snapshot the current cache into a `SpotifyTrack` value. The struct's
-# String fields are independent owned copies of the cache, so dropping the
-# snapshot doesn't disturb the cache. Does NOT refresh — the app's poll
-# worker keeps the cache warm off the UI thread; this returns the latest
-# `refresh` data (≤ the poll interval stale).
-func current() ret SpotifyTrack {
-  unsafe {
-    ret SpotifyTrack {
-      state: state()
-      trackId: trackId()
-      trackName: trackName()
-      artistName: artistName()
-      albumName: albumName()
-      artworkUrl: artworkUrl()
+# `text` percent-encoded byte by byte: everything outside RFC 3986's
+# unreserved set (A-Z a-z 0-9 - _ . ~) becomes %XX. Spotify's search URI
+# stops at the first bare space, and the result holds no `"` or `\`, so it can
+# go straight into an AppleScript string or a URL.
+func urlEncode(text: view String) ret String {
+  let hexDigits: String = "0123456789ABCDEF"
+  var bytes: List(UInt8) = {}
+  let length: Int = text.length()
+  loop var i: Int = 0, i < length, ++i {
+    let byte: Int = text.byteAt(index: i)
+    let unreserved: Bool = (byte >= 65 and byte <= 90) or (byte >= 97 and byte <= 122) or (byte >= 48 and byte <= 57) or byte is 45 or byte is 95 or byte is 46 or byte is 126
+    if unreserved {
+      bytes.add(value: byte as UInt8)
+    } else {
+      bytes.add(value: 37)
+      bytes.add(value: hexDigits.byteAt(index: byte shr 4) as UInt8)
+      bytes.add(value: hexDigits.byteAt(index: byte bitand 15) as UInt8)
     }
+  }
+  ret fromBytes(bytes: bytes, start: 0, count: bytes.length)
+}
+
+# Search-and-play. Plays the top hit of Spotify's search for `query`, in one
+# AppleScript that launches Spotify first if needed. `launch` can pull Spotify
+# to the front, so this app's own window is brought back afterwards (never
+# "the previous app": that would hand focus to whatever launched us).
+func playQuery(query: view String) {
+  if query.length() is 0 {
+    ret
+  }
+  let launchLine: String = "tell application \"Spotify\" to if it is not running then launch"
+  let playLine: String = "tell application \"Spotify\" to play track \"spotify:search:{urlEncode(
+    text: query
+  )}\""
+  runScript(script: "{launchLine}\n{playLine}", action: "play query={query}")
+  unsafe {
+    nativeActivateSelf()
   }
 }
 
-# Download an artwork URL to a local file. Uses curl, follows redirects,
-# fails fast (`-sLf`), writes atomically (`<outPath>.part` then rename).
-# Returns true on HTTP 2xx + file written, false otherwise. Used for both
-# Spotify's CDN URL and the iTunes fallback. BLOCKS for the whole download:
-# call it from a `spawn`'d worker and post the result on a Channel (#950;
-# the former C job table `fetchArtworkAsync`/`fetchArtworkStatus` is gone —
-# see examples/106_mobile_ui/assetSystem/ArtworkFetch.rae for the Rae form).
-func fetchArtwork(url: view String, outPath: view String) unsafe extern ret Bool
+# The AppleScript one poll runs (one line per entry, joined with newlines): Spotify's state and the
+# current track's
+# fields, "||"-separated — state, id, name, artist, album, artwork URL,
+# position in seconds, duration in milliseconds.
+func pollScript() ret String {
+  var lines: List(String) = {}
+  lines.add(value: "tell application \"Spotify\"")
+  lines.add(value: "  set playerState to player state as text")
+  lines.add(value: "  if playerState is \"stopped\" then")
+  lines.add(
+    value: "    return playerState & \"||\" & \"\" & \"||\" & \"\" & \"||\" & \"\" & \"||\" & \"\" & \"||\" & \"\" & \"||\" & \"0\" & \"||\" & \"0\""
+  )
+  lines.add(value: "  end if")
+  lines.add(value: "  set trackId to \"\"")
+  lines.add(value: "  set trackName to \"\"")
+  lines.add(value: "  set artistName to \"\"")
+  lines.add(value: "  set albumName to \"\"")
+  lines.add(value: "  set artworkUrl to \"\"")
+  lines.add(value: "  set posSec to 0")
+  lines.add(value: "  set durMs to 0")
+  lines.add(value: "  try")
+  lines.add(value: "    set trackId to id of current track")
+  lines.add(value: "  end try")
+  lines.add(value: "  try")
+  lines.add(value: "    set trackName to name of current track")
+  lines.add(value: "  end try")
+  lines.add(value: "  try")
+  lines.add(value: "    set artistName to artist of current track")
+  lines.add(value: "  end try")
+  lines.add(value: "  try")
+  lines.add(value: "    set albumName to album of current track")
+  lines.add(value: "  end try")
+  lines.add(value: "  try")
+  lines.add(value: "    set artworkUrl to artwork url of current track")
+  lines.add(value: "  end try")
+  lines.add(value: "  try")
+  lines.add(value: "    set posSec to player position")
+  lines.add(value: "  end try")
+  lines.add(value: "  try")
+  lines.add(value: "    set durMs to duration of current track")
+  lines.add(value: "  end try")
+  lines.add(
+    value: "  return playerState & \"||\" & trackId & \"||\" & trackName & \"||\" & artistName & \"||\" & albumName & \"||\" & artworkUrl & \"||\" & (posSec as text) & \"||\" & (durMs as text)"
+  )
+  lines.add(value: "end tell")
+  var script: String = ""
+  loop let line: String in lines {
+    script = "{script}{line}\n"
+  }
+  ret script
+}
 
-# iTunes Search API fallback for album art. Queries
-# https://itunes.apple.com/search?term=<term>&entity=song&limit=1,
-# extracts `artworkUrl100`, and upscales the URL to 600x600 the way
-# SUMU does. Returns the upscaled URL on success, or "" if iTunes
-# returned no result (or the network is down).
+func emptySpotifyTrack() ret SpotifyTrack {
+  ret SpotifyTrack {
+    state: ""
+    trackId: ""
+    trackName: ""
+    artistName: ""
+    albumName: ""
+    artworkUrl: ""
+    position: 0.0
+    duration: 0.0
+  }
+}
+
+# `pieces[index]`, or "" past the end
+func pieceAt(pieces: view List(String), index: view Int) ret String {
+  ret pieces.copyAtDefault(index: index)
+}
+
+# What `pollScript` printed, as a SpotifyTrack. The six text fields are the
+# first six "||"-separated pieces (missing ones are empty); the position and
+# duration are read only when all eight pieces are there, the duration from
+# milliseconds. Empty output (osascript failed) is the empty track.
+func parsePollOutput(output: view String) ret SpotifyTrack {
+  var end: Int = output.length()
+  loop end > 0 and (output.byteAt(index: end - 1) is 10 or output.byteAt(index: end - 1) is 13) {
+    end = end - 1
+  }
+  if end is 0 {
+    ret emptySpotifyTrack()
+  }
+  let pieces: List(String) = output.sub(start: 0, len: end).split(sep: "||")
+  var position: Float = 0.0
+  var duration: Float = 0.0
+  if pieces.length >= 8 {
+    position = pieceAt(pieces: pieces, index: 6).toFloat()
+    duration = pieceAt(pieces: pieces, index: 7).toFloat() / 1000.0
+  }
+  ret SpotifyTrack {
+    state: pieceAt(pieces: pieces, index: 0)
+    trackId: pieceAt(pieces: pieces, index: 1)
+    trackName: pieceAt(pieces: pieces, index: 2)
+    artistName: pieceAt(pieces: pieces, index: 3)
+    albumName: pieceAt(pieces: pieces, index: 4)
+    artworkUrl: pieceAt(pieces: pieces, index: 5)
+    position: position
+    duration: duration
+  }
+}
+
+# Ask Spotify what it is playing: ONE synchronous osascript run (fork+exec,
+# ~tens of ms). Do not call it on the UI thread in a per-frame loop — run it
+# from a `spawn`'d worker and send the answer to the UI thread on a Channel
+# (examples/106_mobile_ui/spotifySystem/SpotifyPoller.rae).
+func poll() ret SpotifyTrack {
+  var output: String = ""
+  unsafe {
+    output = osascriptOutput(script: pollScript())
+  }
+  ret parsePollOutput(output: output)
+}
+
+# Byte `index` of a file read as bytes, -1 past the end
+func byteOf(bytes: view List(Int), index: view Int) ret Int {
+  ret bytes.copyAtFallback(index: index, fallback: -1)
+}
+
+# Whether the file at `path` is a whole download. An interrupted curl leaves a
+# truncated file that lenient decoders render half grey with no error, so a
+# JPEG must carry its end marker (FF D9) within its last 64 bytes (some
+# encoders pad a few bytes after it); anything else only needs 4+ bytes.
+func artworkFileComplete(path: view String) ret Bool {
+  let bytes: List(Int) = Sys.readFileBytes(path: path)
+  let size: Int = bytes.length
+  if size < 4 {
+    ret false
+  }
+  let jpeg: Bool = byteOf(bytes: bytes, index: 0) is 255 and byteOf(bytes: bytes, index: 1) is 216 and byteOf(
+    bytes: bytes
+    index: 2
+  ) is 255
+  if not jpeg {
+    ret true
+  }
+  var tailLength: Int = 64
+  if size < 64 {
+    tailLength = size
+  }
+  var i: Int = size - 2
+  loop i >= size - tailLength {
+    if byteOf(bytes: bytes, index: i) is 255 and byteOf(bytes: bytes, index: i + 1) is 217 {
+      ret true
+    }
+    i = i - 1
+  }
+  ret false
+}
+
+# Download an artwork URL to a local file. curl follows redirects and fails
+# fast (`-sLf`); the download goes to `<outPath>.part`, is checked
+# (`artworkFileComplete`) and only then renamed into place, so an app quit
+# mid-download never leaves a half file in the cache. True when the file is
+# in place. BLOCKS for the whole download: call it from a `spawn`'d worker
+# (examples/106_mobile_ui/assetSystem/ArtworkFetch.rae).
+func fetchArtwork(url: view String, outPath: view String) ret Bool {
+  if url.length() is 0 or outPath.length() is 0 {
+    ret false
+  }
+  let partPath: String = "{outPath}.part"
+  var ok: Bool = false
+  unsafe {
+    ok = curlToFile(url: url, path: partPath)
+  }
+  if ok {
+    ok = artworkFileComplete(path: partPath)
+  }
+  if ok {
+    ok = Sys.rename(oldPath: partPath, newPath: outPath)
+  }
+  if not ok {
+    let removed: Bool = Sys.delete(path: partPath)
+  }
+  ret ok
+}
+
+# The 600x600 artwork URL in an iTunes Search API response: the first
+# result's `artworkUrl100`, its "100x100" size made "600x600" (the way SUMU
+# does). "" when there is no result.
+func artworkUrlFromItunesResponse(body: view String) ret String {
+  let doc: JsonDoc = parseJson(source: body)
+  let results: JsonValue = jsonValueAt(
+    doc: doc
+    idx: field(doc: doc, this: root(doc: doc), key: "results")
+  )
+  if arrayLen(this: results) is 0 {
+    ret ""
+  }
+  let first: JsonValue = arrayAt(doc: doc, this: results, idx: 0)
+  let thumb: JsonValue = jsonValueAt(
+    doc: doc
+    idx: field(doc: doc, this: first, key: "artworkUrl100")
+  )
+  let url: String = jsonString(this: thumb, fallback: "")
+  let size: Int = url.indexOf(sub: "100x100")
+  if size < 0 {
+    ret url
+  }
+  ret "{url.sub(start: 0, len: size)}600x600{url.sub(start: size + 7, len: url.length() - size - 7)}"
+}
+
+# iTunes Search API fallback for album art: queries
+# https://itunes.apple.com/search?term=<term>&entity=song&limit=1 and answers
+# `artworkUrlFromItunesResponse` of it, or "" if iTunes returned no result
+# (or the network is down). BLOCKS for the request.
 #
 # `term` should be artist + " " + track name. Example:
 #     itunesSearchArtworkUrl(term: "Charli XCX brat")
-func itunesSearchArtworkUrl(term: view String) unsafe extern ret String
+func itunesSearchArtworkUrl(term: view String) ret String {
+  if term.length() is 0 {
+    ret ""
+  }
+  let url: String = "https://itunes.apple.com/search?term={urlEncode(text: term)}&entity=song&limit=1"
+  var body: String = ""
+  unsafe {
+    body = curlOutput(url: url)
+  }
+  if body.length() is 0 {
+    ret ""
+  }
+  ret artworkUrlFromItunesResponse(body: body)
+}
