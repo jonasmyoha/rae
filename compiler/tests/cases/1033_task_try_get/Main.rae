@@ -1,0 +1,90 @@
+# Task(T).isDone() never blocks; tryGet() hands the result out once when the
+# task has finished and is none before that (and after it was taken)
+# (docs/concurrency-model.md).
+func slowNumber(value: copy Int, delayMs: copy Int) ret Int {
+  sleep(ms: delayMs)
+  ret value * 2
+}
+
+func slowName(delayMs: copy Int) ret String {
+  sleep(ms: delayMs)
+  ret "fin ished ünï"
+}
+
+func slowList(count: copy Int) ret List(Int) {
+  sleep(ms: 20)
+  var numbers: List(Int) = {}
+  loop var i: Int = 0, i < count, ++i {
+    numbers.add(value: i * i)
+  }
+  ret numbers
+}
+
+# Polls a task handed in by `mod`: the result type comes with the Task
+func pollUntilDone(task: mod Task(Int)) ret Int {
+  var polls: Int = 0
+  loop not task.isDone() {
+    polls = polls + 1
+    sleep(ms: 1)
+  }
+  if let value: Int = task.tryGet() {
+    ret value
+  }
+  ret -1
+}
+
+func main() {
+  # Poll a slow task without blocking: it is not done at once, and the loop
+  # does other work until it is.
+  var number: Task(Int) = spawn slowNumber(value: 21, delayMs: 80)
+  log("done at start: {number.isDone()}")
+  var early: Int = 0
+  if let value: Int = number.tryGet() {
+    early = value
+  }
+  log("tryGet while running: {early}")
+  var polls: Int = 0
+  loop not number.isDone() {
+    polls = polls + 1
+    sleep(ms: 2)
+  }
+  log("polled more than once: {polls > 1}")
+  if let value: Int = number.tryGet() {
+    log("tryGet after: {value}")
+  }
+  var again: Bool = false
+  if let value: Int = number.tryGet() {
+    again = true
+  }
+  log("handed out twice: {again}")
+
+  # A heap-owning result is moved out once (leak-checked at exit)
+  var name: Task(String) = spawn slowName(delayMs: 10)
+  var text: String = ""
+  loop text.length() is 0 {
+    if let value: String = name.tryGet() {
+      text = value
+    }
+    sleep(ms: 1)
+  }
+  log("string: {text}")
+  var numbers: Task(List(Int)) = spawn slowList(count: 5)
+  var got: List(Int) = {}
+  var taken: Bool = false
+  loop not taken {
+    if let value: List(Int) = numbers.tryGet() {
+      got = value
+      taken = true
+    }
+    sleep(ms: 1)
+  }
+  log("list: {got}")
+
+  # Through a `mod Task(Int)` parameter
+  var other: Task(Int) = spawn slowNumber(value: 5, delayMs: 15)
+  log("polled through mod: {pollUntilDone(task: other)}")
+
+  # A task nobody polls is still joined when it goes out of scope
+  let ignored: Task(Int) = spawn slowNumber(value: 1, delayMs: 30)
+  log("end")
+}

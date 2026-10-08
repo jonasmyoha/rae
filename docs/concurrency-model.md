@@ -11,7 +11,8 @@ first production consumer is 106's background I/O (#950, `docs/parallelism-
 first-plan.md` §5).
 
 In one paragraph: `spawn f(args)` returns a joinable `Task(T)`; `task.get()`
-joins exactly once and yields the result; a `Task` local that goes out of
+joins exactly once and yields the result (`task.isDone()` / `task.tryGet()`
+ask without blocking); a `Task` local that goes out of
 scope without `get()` is joined on drop (`rae_task_drop`); `taskScope { }`
 is a run-once block whose tasks therefore join at its exit; `Channel(T)` is
 an MPSC, Int-payload, non-blocking channel for long-running workers;
@@ -143,6 +144,30 @@ of making concurrency explicit. The desired inversion is preserved without it:
 - `spawn` → concurrent,
 - `task.get()` → explicit synchronization point.
 
+### `Task(T).isDone()` / `tryGet()` — asking without blocking
+
+```rae
+var task: Task(Image) = spawn decode(path: path)
+loop not task.isDone() {
+  drawFrame()                       # the frame goes on while the task runs
+}
+if let image: Image = task.tryGet() {
+  show(image: image)
+}
+```
+
+- `isDone() ret Bool` — has the task finished? Never blocks.
+- `tryGet() ret opt T` — the result once the task has finished, `none` while
+  it runs. It hands the result out **once**: the task is joined (instantly —
+  it has finished) and the value is moved out exactly as `get()` would; a
+  later `tryGet()` is `none`. A heap result (a `String`, a `List`) is then
+  owned by the caller and dropped by it, once.
+- `tryGet()` needs a task with a result (`Task(Void)` is rejected: poll
+  `isDone()`, then `get()`). A task never asked at all is still joined when
+  it goes out of scope.
+- This is how a frame-driven server picks up `spawn`ed slow work
+  (docs/server-benchmarks-design.md §1.3, gap T1).
+
 ### `taskScope { … }` — structured concurrency
 
 ```rae
@@ -257,16 +282,23 @@ Everything below is the Compiled (C) backend; there is no other engine.
 
 **Front end.** `spawn` is a unary expression (`AST_UNARY_SPAWN`) typed
 `Task(T)` for a callee returning `T`; `Task(T)` is a builtin generic
-(`TYPE_TASK`) with one method, `get(): T`. `taskScope { … }` parses to a
+(`TYPE_TASK`) with three methods: `get(): T`, `isDone(): Bool` and
+`tryGet(): opt T` (2026-10-08). `taskScope { … }` parses to a
 run-once `if` block flagged `is_task_scope` (`parser.c`); `parallelLoop`
 parses to a `loop` flagged `is_parallel`. `taskScope` gets its semantics from
 join-on-drop; `parallelLoop` runs on the worker pool (below, 2026-10-03).
 
 **Runtime (`compiler/runtime/runtime_threads.c`, `rae_runtime.h`).**
-`Task(T)` lowers to `RaeTask*`: `{ pthread_t thread; void* result; int done;
-int joined; }`, one pthread per spawn. `rae_task_await` joins once (guarded)
-and hands back the result buffer, which the `get()` site casts to `T`;
-`rae_task_drop` joins if needed and frees. There is **no** running/failed
+`Task(T)` lowers to `RaeTask*`: `{ pthread_t thread; void* result; _Atomic
+int done; int joined; int taken; }`, one pthread per spawn. The worker stores
+its result, then `done` with release order; `isDone()` is one acquire load
+(`rae_task_is_done`) and `tryGet()` lowers in `c_expr.c` to `rae_task_claim`
+(done and not yet taken: mark taken), then the same join-and-read as `get()`,
+filling the `rae_opt_<T>` struct (discovery registers `opt T`, which the
+program may never spell). `taken` is touched only on the owner's thread.
+`rae_task_await` joins once (guarded) and hands back the result buffer, which
+the `get()` site casts to `T`; `rae_task_drop` joins if needed and frees. A
+`view`/`mod Task(T)` parameter is a `RaeTask**` (a reference like any other). There is **no** running/failed
 status and **no** failure propagation yet (§8 stays open). A `Task` inside a
 struct or a `List(Task(T))` (fixture 646) is not cascade-dropped — the owner
 joins it explicitly (see `ArtworkFetch.rae` in 106 for the pattern: copy the
@@ -488,8 +520,9 @@ compiled engine, and where it stands:
 - Real OS threads over pthreads — **done** for the threadable shapes (§5),
   one thread per spawned task; a persistent worker pool runs `parallelLoop`
   (§5).
-- `Task(T)` = heap struct with typed result slot — **done**; status
-  (running/completed/failed) and a condition variable — **not yet** (join is
+- `Task(T)` = heap struct with typed result slot — **done**; non-blocking
+  `isDone()` / `tryGet()` over an atomic done flag — **done** (2026-10-08);
+  a failed status and a condition variable — **not yet** (join is
   `pthread_join`).
 - `Channel(T)` = mutex-guarded queue — **done** as MPSC over any value type
   (#969); the MPMC + condvar (blocking receive) form is **not yet**.
