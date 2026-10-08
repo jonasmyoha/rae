@@ -81,69 +81,6 @@ void rae_spawn(void* (*func)(void*), void* data) {
 #endif
 }
 
-RaeAny rae_ext_json_get(const char* json, const char* field) {
-    if (!json || !field) return rae_any_none();
-    
-    // Tiny naive JSON parser: look for "field": value
-    char search[256];
-    snprintf(search, sizeof(search), "\"%s\"", field);
-    const char* key_pos = strstr(json, search);
-    if (!key_pos) return rae_any_none();
-    
-    const char* colon = strchr(key_pos + strlen(search), ':');
-    if (!colon) return rae_any_none();
-    
-    const char* val_start = colon + 1;
-    while (*val_start && (*val_start == ' ' || *val_start == '\t' || *val_start == '\n' || *val_start == '\r')) {
-        val_start++;
-    }
-    
-    if (*val_start == '\"') {
-        // String value
-        val_start++;
-        const char* val_end = strchr(val_start, '\"');
-        if (!val_end) return rae_any_none();
-        size_t len = val_end - val_start;
-        uint8_t* res = malloc(len + 1);
-        memcpy(res, val_start, len);
-        res[len] = '\0';
-        rae_mem_str_tag(res, (int64_t)len + 1, RAE_SITE_JSON_GET_STR);
-        return rae_any_string((rae_String){res, (int64_t)len, (int64_t)len + 1, 1});
-    } else if (*val_start == 't') {
-        return rae_any_bool(1);
-    } else if (*val_start == 'f') {
-        return rae_any_bool(0);
-    } else if (*val_start == 'n') {
-        return rae_any_none();
-    } else if (*val_start == '-' || (*val_start >= '0' && *val_start <= '9')) {
-        // Number
-        char* end;
-        double f = strtod(val_start, &end);
-        if (strchr(val_start, '.') && strchr(val_start, '.') < end) {
-            return rae_any_float(f);
-        } else {
-            return rae_any_int((int64_t)f);
-        }
-    } else if (*val_start == '{') {
-        // Nested object (simplified: just return the raw string part)
-        int depth = 1;
-        const char* p = val_start + 1;
-        while (*p && depth > 0) {
-            if (*p == '{') depth++;
-            else if (*p == '}') depth--;
-            p++;
-        }
-        size_t len = p - val_start;
-        uint8_t* res = malloc(len + 1);
-        memcpy(res, val_start, len);
-        res[len] = '\0';
-        rae_mem_str_tag(res, (int64_t)len + 1, RAE_SITE_JSON_GET_OBJ);
-        return rae_any_string((rae_String){res, (int64_t)len, (int64_t)len + 1, 1}); // We return objects as strings for now
-    }
-    
-    return rae_any_none();
-}
-
 /* A reference (`view T` / `mod T`) logs as the value it refers to, the same
  * as logS and string interpolation: the binding's mode is not part of the
  * value. (Printing a "view "/"mod " prefix was a debug aid from the removed

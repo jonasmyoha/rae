@@ -424,10 +424,6 @@ rae_String rae_ext_json_number(float v) {
 
 /* Float (f32) views. Formatting promotes to double, so the shared f64
  * formatter produces the same text a plain Float would. */
-rae_String rae_ext_rae_str_f32_ptr(const float* v) {
-  return rae_ext_rae_str_f64((double)*v);
-}
-
 rae_String rae_ext_rae_str_bool(rae_Bool v) {
   return rae_str_from_cstr_impl(v ? "true" : "false", RAE_SITE_BOOL_TO_STR);
 }

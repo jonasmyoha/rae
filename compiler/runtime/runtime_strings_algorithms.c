@@ -121,24 +121,6 @@ int64_t rae_ext_rae_str_index_of(rae_String s, rae_String sub) {
   return (int64_t)(p - (const char*)s.data);
 }
 
-rae_String rae_ext_rae_str_to_lower(rae_String s) {
-  if (!s.data || s.len == 0) return (rae_String){NULL, 0, 0, 0};
-  uint8_t* out = malloc(s.len + 1);
-  if (!out) return (rae_String){NULL, 0, 0, 0};
-  for (int64_t i = 0; i < s.len; i++) {
-    uint8_t c = s.data[i];
-    if (c >= 'A' && c <= 'Z') {
-      out[i] = c + ('a' - 'A');
-    } else {
-      out[i] = c;
-    }
-  }
-  out[s.len] = '\0';
-  rae_mem_str_tag(out, s.len + 1, RAE_SITE_CONCAT);
-  rae_string_pool_register(out);
-  return (rae_String){out, s.len, s.len + 1, 1};
-}
-
 rae_String rae_ext_rae_str_trim(rae_String s) {
   if (!s.data || s.len == 0) return (rae_String){NULL, 0, 0, 0};
   int64_t start = 0;
