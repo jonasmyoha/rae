@@ -167,6 +167,23 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
             break;
         }
         case AST_EXPR_METHOD_CALL: {
+            // Task(T).tryGet() yields `opt T`, which may be written nowhere in
+            // the program (`if let v: T = task.tryGet()`): register it so its
+            // `rae_opt_<T>` struct is emitted.
+            if (str_eq_cstr(expr->as.method_call.method_name, "tryGet") && expr->as.method_call.object) {
+                const AstTypeRef* task_ref = infer_expr_type_ref(ctx, expr->as.method_call.object);
+                if (task_ref && str_eq_cstr(get_base_type_name(task_ref), "Task") && task_ref->generic_args) {
+                    AstTypeRef* opt_ref = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
+                    *opt_ref = *task_ref->generic_args;
+                    opt_ref->next = NULL; opt_ref->is_opt = true; opt_ref->is_view = false; opt_ref->is_mod = false;
+                    // The payload's TypeInfo is not the optional's: kept, it
+                    // would make this compare equal to the plain T entry.
+                    opt_ref->resolved_type = NULL;
+                    if (ctx->generic_params && ctx->generic_args)
+                        opt_ref = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, opt_ref);
+                    register_generic_type(ctx->compiler_ctx, opt_ref);
+                }
+            }
             // Dot-call on a type (new generic-call syntax): `Type.fn(...)`
             // is treated as `fn(Type, ...)` for discovery so the generic
             // spec gets registered. Mirrors c_expr.c's lowering.

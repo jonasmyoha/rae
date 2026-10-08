@@ -21,7 +21,7 @@ physics); does it hold up, and at what cost, for a server?
 |---|---|---|
 | TCP sockets | **none**: no `socket`/`listen`/`accept` anywhere in `lib/` or the runtime | phase 1 cannot start until a `net` module exists (gap G1) |
 | readiness polling (kqueue / epoll) | the runtime uses kqueue/inotify only inside `lib/FileNotify` | the poller (G2) is a kqueue shim plus Rae bookkeeping (§1.2); there is no general event loop over file descriptors |
-| threads | `spawn f(...)` → `Task(T)` on real OS threads; `Channel(T)` (MPSC, non-blocking, any value-type payload since #969); `Parallel.workerCount()` | enough to run one event loop (or one World) per core and hand accepted sockets (plain value handles) to workers over a channel; a `Task` cannot yet be asked "done?" without joining (gap T1, §1.3) |
+| threads | `spawn f(...)` → `Task(T)` on real OS threads; `Channel(T)` (MPSC, non-blocking, any value-type payload since #969); `Parallel.workerCount()` | enough to run one event loop (or one World) per core and hand accepted sockets (plain value handles) to workers over a channel; a `Task` can be asked "done?" without joining (`isDone` / `tryGet`, gap T1, done 2026-10-08) |
 | ECS | `lib/ecs`: `EntityAllocator` (`allocEntity` / `freeEntity`), `ComponentTable(T)` (sparse set, O(1) lookup), query loops over one to three tables, zero-field tag components, `EventQueue(T)`, an ordered `Schedule` | everything the ECS-style servers need already exists; only the server components and systems are new (G8) |
 | bytes | `List(UInt8)`, `Buffer(T)`, `String` is byte-indexed (`byteAt`, `sub`, `indexOf`, `startsWith`, `split`) | an HTTP parser can be written in plain Rae; a reusable read/write byte buffer that does not allocate per request is missing (G3) |
 | JSON | `lib/Json` (a parsed document + value builders) | enough for `{"message":"Hello, World!"}` and the shootout messages; serialisation speed is part of what phase 1 measures |
@@ -515,7 +515,7 @@ a syscall-shaped shim where the platform forces it.
 | # | ticket | size | notes |
 |---|---|---|---|
 | G1 | `lib/net/Tcp.rae`: TCP listen/accept/connect/read/write/close on `SocketId` value handles, non-blocking, errors as `NetStatus` values | — | **landed 0.1.202** with the policy in C; T2 redoes the split |
-| T1 | `Task.isDone()` and a non-blocking `tryGet() ret opt T` (docs/concurrency-model.md) | S | how a server picks up `spawn`ed slow work without blocking its frame |
+| T1 ✅ | `Task.isDone()` and a non-blocking `tryGet() ret opt T` (docs/concurrency-model.md) — **done** 2026-10-08 (0.1.216) | S | how a server picks up `spawn`ed slow work without blocking its frame |
 | T2 | **landed** — `lib/net` as Rae over a syscall shim (§1.2): `runtime_net.c` shrinks to one-syscall functions + a constant table; the listen sequence, retries, connect timeout, options and status mapping move to Rae; same API, fixture 1022 unchanged | M | done before G2 builds on it |
 | T3 | the runtime-wide rule: C only for platform ABI, in AGENTS.md, plus an audit list of logic in today's runtime C that could move to Rae | S | the rule §1.2 follows |
 | G2 | `lib/net` poller: a kqueue shim (register/unregister/wait returning raw events) and Rae on top (`createPoller`, interest per `SocketId`, `pollWait` filling a caller-owned `List(Readiness)`, no allocation per wait); epoll later behind the same Rae API (F8) | M | used by both styles |
