@@ -954,5 +954,18 @@ identifies follow-up work that doesn't fit the current turn.
 
     `- [ ] Implement docs/ownership-model.md: …`
 
+- **Insert a new item where it belongs, not at the end by default.** The end
+  of the queue is the back of the line, behind every big design-sized task.
+  Place by priority, among the open `[ ]` items:
+  - a bug found while doing other work (a codegen failure, a leak, a silent
+    wrong result, a flaky test) goes near the FRONT, ahead of the large
+    multi-step work, because it is small and everything built on top of it
+    inherits it;
+  - a follow-up step of a series goes right after the series' other steps;
+  - only genuinely later, larger or blocked work (needs a machine you do not
+    have, waits on a decision) goes at the end.
+  Moving open `[ ]` lines is fine. Never move or rewrite a line with a
+  running marker of another agent, and keep `#id`s and `{d<n>}` intact.
+
 - Keep manual edits simple (single-line items, no multi-line
   formatting) to avoid merge conflicts with SUMU's status updates.
