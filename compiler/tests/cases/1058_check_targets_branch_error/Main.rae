@@ -1,0 +1,18 @@
+# `rae build --check-targets` (docs/platform-conditional-code.md §3.4): the
+# program is type-checked once per real target, so a `when` branch this
+# machine never selects is still checked. The Linux-kernel branch below has
+# a type error: every Linux-kernel target fails, every other target passes.
+# Fixture 1059 runs the same program on macOS, where it builds and works.
+when Target.isLinuxKernel {
+  func describe() ret String {
+    ret 42
+  }
+} else {
+  func describe() ret String {
+    ret "not a Linux kernel"
+  }
+}
+
+func main() {
+  log(describe())
+}

@@ -355,7 +355,17 @@ per-platform.
      `when`;
    - fixture 1057 type-checks the portable path on a faked Linux;
    - 16 MB still takes 7.3 ms on macOS.
-3. `rae build --check-targets` and its pre-suite case.
+3. `rae build --check-targets` and its pre-suite case. **Done (0.1.230):**
+   - The real pairs are one table in `compiler/src/main.c`
+     (`k_check_targets`): 17 pairs, `web` only with `wasm32`.
+   - Each target is a check-only child build, because the compiler keeps
+     state between builds in one process. It prints one ok/FAILED line per
+     target, under that target's errors.
+   - `compiler/tools/check-targets.sh` is the pre-suite case. It checks
+     `compiler/tests/checkTargets/Main.rae`, which must import every lib/
+     module that uses `when`, and the script fails when one is missing.
+   - Fixtures 1058 (a Linux-only type error fails exactly the Linux-kernel
+     targets) and 1059 (the same program runs on macOS).
 4. Migrate the other C `#if` choices that are really policy (lib/net's
    kqueue/epoll, FileNotify) to capabilities. Float4's lowering choice stays
    in C, because it is per-instruction.
