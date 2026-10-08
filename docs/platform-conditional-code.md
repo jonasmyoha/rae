@@ -324,7 +324,15 @@ per-platform.
 ## 5. Phasing (queued 2026-10-08 as "when 1/7" … "when 7/7")
 
 0. The `Target` module (§3.1 layers 1–2), with a check-only
-   `--target-os` / `--target-arch` override so fixtures can fake a target.
+   `--target-os` / `--target-arch` override so fixtures can fake a target. **Done (0.1.227):**
+   - `lib/Target.rae` is imported by every program but opened by none, so a
+     bare `os` is an error that says to write `Target.os`.
+   - The compiler writes the build's values into its three consts.
+   - `const` folding now evaluates Bools, enum cases, `is`/`is not`,
+     `and`/`or`/`not` and qualified consts.
+   - `rae build --target-os/--target-arch` (check-only) and `--print-target`
+     exist.
+   - Fixtures 1045–1048.
 1. `when` at statement and declaration level, with these fixtures:
    - each branch selected by a different `Target` value (one test fakes the
      target);

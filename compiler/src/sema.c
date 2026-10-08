@@ -193,7 +193,22 @@ static AstImport* sema_imports_for_file(const char* file);  // fwd: used by elig
 typedef struct SemaGlobalOpen { const char* module; struct SemaGlobalOpen* next; } SemaGlobalOpen;
 static SemaGlobalOpen* s_global_opens = NULL;
 
-void sema_reset_file_scopes(void) { s_file_scopes = NULL; s_global_opens = NULL; }
+// Modules every file imports without opening them (`Target`): qualified only.
+static SemaGlobalOpen* s_global_imports = NULL;
+
+void sema_reset_file_scopes(void) { s_file_scopes = NULL; s_global_opens = NULL; s_global_imports = NULL; }
+
+void sema_register_global_import(Arena* arena, const char* module) {
+    if (!module) return;
+    SemaGlobalOpen* g = arena_alloc(arena, sizeof(SemaGlobalOpen));
+    g->module = module; g->next = s_global_imports; s_global_imports = g;
+}
+
+static bool sema_module_globally_imported(const char* module) {
+    for (SemaGlobalOpen* g = s_global_imports; g; g = g->next)
+        if (g->module && module && strcmp(g->module, module) == 0) return true;
+    return false;
+}
 
 void sema_register_global_open(Arena* arena, const char* module) {
     if (!module) return;
@@ -312,6 +327,7 @@ static bool sema_decl_opened(const char* file, const AstDecl* d) {
 // open-set plus `import`ed (not opened) packages (import grants qualified+UFCS).
 static bool sema_decl_visible(const char* file, const AstDecl* d) {
     if (sema_decl_opened(file, d)) return true;
+    if (d->module_name && sema_module_globally_imported(d->module_name)) return true;
     return sema_file_declares_package(file, d, /*require_open=*/false);
 }
 
@@ -409,6 +425,9 @@ struct Symbol {
     bool const_is_unsigned;  // #817: const_i holds a uint64 bit pattern > INT64_MAX
     double const_d;
     long long const_i;
+    /* The folded initializer of a `const` (a Bool literal, an enum case, a
+     * number), so a later const can read a Bool or enum value through it */
+    AstExpr* const_value;
     /* Where a `let`/`var` was declared (0 when unknown), for diagnostics
      * that point back at the binding (docs/let-is-frozen.md) */
     int decl_line;
@@ -464,6 +483,7 @@ static Symbol* symbol_table_define(SymbolTable* table, Arena* arena, Str name, A
     sym->const_is_unsigned = false;
     sym->const_d = 0.0;
     sym->const_i = 0;
+    sym->const_value = NULL;
     sym->next = table->head;
     table->head = sym;
     if (!table->byName) table->byName = name_map_create();
@@ -2599,9 +2619,34 @@ typedef struct {
                       // value is done in uint64 and the result is printed %llu.
     double d;
     long long i;
+    /* A Bool or an enum case whose value is known (`true`, `Os.macos`): what
+     * `is`, `and`, `or` and `not` fold over (docs/platform-conditional-code.md) */
+    bool is_bool;
+    bool b;
+    bool is_enum;
+    Str enum_type;
+    Str enum_member;
 } ConstResult;
 
 static double cr_num(ConstResult r) { return r.is_float ? r.d : (double)r.i; }
+
+static ConstResult const_eval(SymbolTable* symbols, AstExpr* e);
+
+/* A module-level const's value, by its decl (a qualified `Target.os`, or a
+ * const of another module): its initializer evaluated, depth-limited */
+static int s_const_eval_depth = 0;
+
+static ConstResult const_eval_decl(SymbolTable* symbols, AstDecl* decl) {
+    ConstResult fail = {0};
+    if (!decl || decl->kind != AST_DECL_GLOBAL_LET || !decl->as.let_decl.is_const) return fail;
+    if (s_const_eval_depth > 32) return fail;
+    s_const_eval_depth++;
+    ConstResult r = const_eval(symbols, decl->as.let_decl.value);
+    s_const_eval_depth--;
+    return r;
+}
+
+static AstDecl* sema_find_module_global(AstModule* module, Str modname, Str name);
 
 static ConstResult const_eval(SymbolTable* symbols, AstExpr* e) {
     ConstResult fail = {0};
@@ -2626,12 +2671,32 @@ static ConstResult const_eval(SymbolTable* symbols, AstExpr* e) {
             return (ConstResult){ .ok = true, .numeric = true, .is_float = true, .d = strtod(buf, NULL) };
         }
         case AST_EXPR_BOOL:
+            return (ConstResult){ .ok = true, .is_bool = true, .b = e->as.boolean };
         case AST_EXPR_STRING:
             return ok_nonnum;  // valid const, not foldable arithmetic
-        case AST_EXPR_MEMBER:
+        case AST_EXPR_MEMBER: {
             // Enum case (e.g. RenderMode.pathTraced) — a compile-time value the
-            // backends already lower to a constant. Accept without folding.
+            // backends already lower to a constant. Its case is known, so `is`
+            // can compare it. A module-qualified const (`Target.os`) is that
+            // const's value.
+            AstExpr* object = e->as.member.object;
+            if (object && object->kind == AST_EXPR_IDENT) {
+                Symbol* type_sym = symbol_table_lookup(symbols, object->as.ident);
+                if (type_sym && type_sym->decl && type_sym->decl->kind == AST_DECL_ENUM) {
+                    for (AstEnumMember* m = type_sym->decl->as.enum_decl.members; m; m = m->next) {
+                        if (str_eq(m->name, e->as.member.member)) {
+                            return (ConstResult){ .ok = true, .is_enum = true, .enum_type = type_sym->decl->as.enum_decl.name,
+                                                  .enum_member = m->name };
+                        }
+                    }
+                }
+                if (s_current_module) {
+                    AstDecl* global = sema_find_module_global(s_current_module, object->as.ident, e->as.member.member);
+                    if (global) return const_eval_decl(symbols, global);
+                }
+            }
             return ok_nonnum;
+        }
         case AST_EXPR_IDENT: {
             Symbol* s = symbol_table_lookup(symbols, e->as.ident);
             if (s && s->decl && s->decl->kind == AST_DECL_GLOBAL_LET) {
@@ -2639,12 +2704,29 @@ static ConstResult const_eval(SymbolTable* symbols, AstExpr* e) {
                 if (global) s = global;
             }
             if (!s || s->bind_kind != BIND_CONST) return fail;
+            if (s->const_value && s->const_value != e) {
+                if (s_const_eval_depth > 32) return fail;
+                s_const_eval_depth++;
+                ConstResult known = const_eval(symbols, s->const_value);
+                s_const_eval_depth--;
+                if (known.is_bool || known.is_enum) return known;
+            } else if (s->decl && s->decl->kind == AST_DECL_GLOBAL_LET) {
+                /* Not folded yet (declared later, or in another module):
+                 * evaluate its initializer */
+                ConstResult known = const_eval_decl(symbols, s->decl);
+                if (known.is_bool || known.is_enum) return known;
+            }
             if (s->const_is_number) {
                 return (ConstResult){ .ok = true, .numeric = true, .is_float = s->const_is_float, .is_unsigned = s->const_is_unsigned, .d = s->const_d, .i = s->const_i };
             }
             return ok_nonnum;
         }
         case AST_EXPR_UNARY: {
+            if (e->as.unary.op == AST_UNARY_NOT) {
+                ConstResult operand = const_eval(symbols, e->as.unary.operand);
+                if (!operand.ok || !operand.is_bool) return fail;
+                return (ConstResult){ .ok = true, .is_bool = true, .b = !operand.b };
+            }
             if (e->as.unary.op != AST_UNARY_NEG) return fail;
             ConstResult r = const_eval(symbols, e->as.unary.operand);
             if (!r.ok || !r.numeric) return fail;
@@ -2654,7 +2736,23 @@ static ConstResult const_eval(SymbolTable* symbols, AstExpr* e) {
         case AST_EXPR_BINARY: {
             ConstResult l = const_eval(symbols, e->as.binary.lhs);
             ConstResult r = const_eval(symbols, e->as.binary.rhs);
-            if (!l.ok || !r.ok || !l.numeric || !r.numeric) return fail;
+            if (!l.ok || !r.ok) return fail;
+            /* Bools and enum cases: `is`, `is not`, `and`, `or` */
+            AstBinaryOp bool_op = e->as.binary.op;
+            if ((l.is_bool && r.is_bool) || (l.is_enum && r.is_enum)) {
+                bool equal = l.is_bool ? (l.b == r.b)
+                                       : (str_eq(l.enum_type, r.enum_type) && str_eq(l.enum_member, r.enum_member));
+                if (bool_op == AST_BIN_IS) return (ConstResult){ .ok = true, .is_bool = true, .b = equal };
+                if (bool_op == AST_BIN_NEQ) return (ConstResult){ .ok = true, .is_bool = true, .b = !equal };
+                if (l.is_bool && bool_op == AST_BIN_AND) return (ConstResult){ .ok = true, .is_bool = true, .b = l.b && r.b };
+                if (l.is_bool && bool_op == AST_BIN_OR) return (ConstResult){ .ok = true, .is_bool = true, .b = l.b || r.b };
+                return fail;
+            }
+            if (l.numeric && r.numeric && (bool_op == AST_BIN_IS || bool_op == AST_BIN_NEQ)) {
+                bool equal = (l.is_float || r.is_float) ? cr_num(l) == cr_num(r) : l.i == r.i;
+                return (ConstResult){ .ok = true, .is_bool = true, .b = bool_op == AST_BIN_IS ? equal : !equal };
+            }
+            if (!l.numeric || !r.numeric) return fail;
             bool isf = l.is_float || r.is_float;
             // #817: integer folding runs in uint64 (no signed-overflow UB) and
             // the result is unsigned when either operand was, or when two
@@ -2712,6 +2810,13 @@ static void sema_fold_const(CompilerContext* ctx, AstModule* module, SymbolTable
         sym->const_is_unsigned = r.is_unsigned;
         sym->const_d = r.d;
         sym->const_i = r.i;
+        sym->const_value = init;
+    }
+    /* A Bool folds to its literal, so the backends emit `true`/`false` and a
+     * later `when` reads a plain value */
+    if (r.is_bool) {
+        init->kind = AST_EXPR_BOOL;
+        init->as.boolean = r.b;
     }
     if (r.numeric) {
         char buf[64];
@@ -6064,6 +6169,17 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                 if (global) {
                     sym = global;
                     expr->decl_link = global->decl;
+                } else if (sym->decl->module_name && sema_module_globally_imported(sym->decl->module_name) &&
+                           !sema_file_declares_package(s_current_decl_origin, sym->decl, /*require_open=*/true)) {
+                    /* `Target` is imported everywhere but opened nowhere: its
+                     * names are written qualified */
+                    char buf[256];
+                    snprintf(buf, sizeof(buf), "'%.*s' is in module %s, which is not opened here: write `%s.%.*s`",
+                             (int)expr->as.ident.len, expr->as.ident.data, sym->decl->module_name,
+                             sym->decl->module_name, (int)expr->as.ident.len, expr->as.ident.data);
+                    diag_error(sema_diag_file(module), (int)expr->line, (int)expr->column, buf);
+                    module->had_error = true;
+                    return;
                 }
             }
             if (sym) {

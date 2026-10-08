@@ -1,0 +1,57 @@
+# The target a program is built for (docs/platform-conditional-code.md §3.1).
+# Every program sees this module as `Target` without an import; it is not
+# opened, so its names are always written qualified: `Target.os`,
+# `Target.isApple`.
+#
+# Layer 1, the exact values: one per axis, set by the compiler for each build.
+# `os` is the system API the program is compiled against (not a brand: Android
+# and Sailfish are not `linux`, and in a browser the API is `web` whatever OS
+# is underneath). Layer 2, the families: overlapping Bool predicates written
+# below, so anyone can read what "unix" means. Capabilities (layer 3) are
+# defined next to the code that uses them, and the device a build runs on
+# (touch, screen size, browser) is a runtime question, never one of these.
+enum Os {
+  macos
+  ios
+  tvos
+  watchos
+  visionos
+  android
+  sailfish
+  linux
+  freebsd
+  openbsd
+  netbsd
+  windows
+  web
+}
+
+enum Arch { arm64, x64, wasm32 }
+
+# The compiler replaces these three values with the build's target: the host
+# for a native build, `web` + `wasm32` for `--target wasm`, or the
+# `--target-os` / `--target-arch` of a check-only build. `simd` is false
+# under `--float4-scalar`.
+const os: Os = Os.macos
+
+const arch: Arch = Arch.arm64
+
+const simd: Bool = true
+
+# ----- families ----------------------------------------------------------
+const isApple: Bool = os is Os.macos or os is Os.ios or os is Os.tvos or os is Os.watchos or os is Os.visionos
+
+const isBsd: Bool = os is Os.freebsd or os is Os.openbsd or os is Os.netbsd
+
+const isLinuxKernel: Bool = os is Os.linux or os is Os.android or os is Os.sailfish
+
+# POSIX: fork, file descriptors, signals
+const isUnix: Bool = isApple or isBsd or isLinuxKernel
+
+# The mobile app model (suspended in the background, sandboxed), not a small
+# screen
+const isMobileOs: Bool = os is Os.ios or os is Os.android or os is Os.sailfish
+
+const isDesktopOs: Bool = os is Os.macos or os is Os.windows or os is Os.linux or isBsd
+
+const isNative: Bool = os is not Os.web
