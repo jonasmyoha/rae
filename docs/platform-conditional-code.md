@@ -1,7 +1,7 @@
 # Per-platform code: `when` (design)
 
-**Status:** design, 2026-10-08. Proposed; it is new syntax, so the keyword and
-the rules below need the maintainer's approval before implementation.
+**Status:** design approved by the maintainer, 2026-10-08: W1-W4 (§6) are
+decided as recommended. The implementation is queued in seven steps (§5).
 
 ## 1. Why
 
@@ -321,10 +321,11 @@ per-platform.
 - **Leave it in C.** That is what we do today. It hides the choice and
   forces a C stub for every platform without a native path.
 
-## 5. Phasing (once approved)
+## 5. Phasing (queued 2026-10-08 as "when 1/7" … "when 7/7")
 
-1. The `Target` module and `when` at statement and declaration level, with
-   these fixtures:
+0. The `Target` module (§3.1 layers 1–2), with a check-only
+   `--target-os` / `--target-arch` override so fixtures can fake a target.
+1. `when` at statement and declaration level, with these fixtures:
    - each branch selected by a different `Target` value (one test fakes the
      target);
    - an error for a non-constant condition;
@@ -333,10 +334,14 @@ per-platform.
 2. Move SHA-1's platform choice into Rae: the extern is declared only for
    Apple, and the `#else` stub is removed.
 3. `rae build --check-targets` and its pre-suite case.
-4. Migrate the other C `#if` choices that are really policy (Float4's
-   lowering choice stays in C, because it is per-instruction).
+4. Migrate the other C `#if` choices that are really policy (lib/net's
+   kqueue/epoll, FileNotify) to capabilities. Float4's lowering choice stays
+   in C, because it is per-instruction.
+5. The runtime `Device` / `Display` facts (§3.1 layer 4).
+6. lib/ui: the per-event pointer kind, `lastInputKind`, hover only when
+   `canHover`, and the window size class in points.
 
-## 6. Decisions for the maintainer
+## 6. Decisions (maintainer, 2026-10-08: all four as recommended)
 
 1. **W1** The keyword: `when` (recommended), `version`, or another bare
    keyword.
