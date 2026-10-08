@@ -1,0 +1,24 @@
+# A module-qualified call into a module that also declares a TYPE of its own
+# name: `Poller.createPoller()` for lib/net/Poller (type Poller),
+# `FileNotify.createFileNotify()` for lib/FileNotify (type FileNotify) and
+# `Circle.grow(...)` for the project module shapes/Circle (type Circle). The
+# qualifier names the module, not the type; it used to be taken as a receiver
+# of type Poller, which emitted a call to a function that does not exist.
+import net/Poller
+import FileNotify
+import shapes/Circle
+
+func main() {
+  var poller: Poller = Poller.createPoller()
+  log("poller: {poller.status}")
+  Poller.closePoller(poller: poller)
+  log("closed: {poller.status}")
+
+  var watcher: FileNotify = FileNotify.createFileNotify()
+  log("notifications: {FileNotify.fileNotifyActive(fileNotify: watcher)}")
+  FileNotify.closeFileNotify(fileNotify: watcher)
+
+  var circle: Circle = Circle.createCircle(radius: 2)
+  Circle.grow(circle: circle, by: 3)
+  log(Circle.describe(circle: circle))
+}
