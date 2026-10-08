@@ -1,0 +1,10 @@
+# The entry `tools/check-targets.sh` type-checks for every real target
+# (`rae build --check-targets`, docs/platform-conditional-code.md §3.4), so
+# the `when` branches of lib/ for platforms this machine does not build for
+# cannot rot. It imports every lib/ module that uses `when`; the script fails
+# when one is missing.
+import crypto/Sha1
+
+func main() {
+  log(Sha1.hexText(bytes: Sha1.sha1Text(text: "abc")))
+}

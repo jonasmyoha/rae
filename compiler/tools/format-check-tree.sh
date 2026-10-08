@@ -22,7 +22,7 @@ FILES=$({
   find "$ROOT/lib" "$ROOT/examples" \( -name '*.rae' -o -name '*.raepack' \) -type f \
     -not -path "$ROOT/examples/legacy/*" -not -path '*/.rae/*' \
     -not -path "$ROOT/examples/24_code_hybrid_hot_reload/scripts/*"
-  find tests/cases -name '*.rae' -type f
+  find tests/cases tests/checkTargets -name '*.rae' -type f
   find "$ROOT/docs" "$ROOT/stress" \( -name '*.rae' -o -name '*.raepack' \) -type f
 } | grep -vE 'tests/cases/(006_|015_|019_|20[0-8]_|345_|346_|348_|568_|786_|81[0-3]_|829_|830_|1055_)' | sort)
 JSON=$("$BIN" format --json --check $FILES 2>/dev/null)

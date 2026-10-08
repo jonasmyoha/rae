@@ -231,7 +231,13 @@ These instructions define **how Codex should work**, communicate progress, and i
   `when`: it is a runtime question, answered with `if`.
 - Keep the Rae fallback in the `else` branch (the fastest implementation
   wins, see the runtime C rule). `rae build --target-os <os> --target-arch
-  <arch>` type-checks another target without emitting anything.
+  <arch>` type-checks another target without emitting anything, and
+  `rae build --check-targets` does it for every real target.
+- A lib/ module that starts using `when` must be imported by
+  `compiler/tests/checkTargets/Main.rae`. The pre-suite case
+  `tools/check-targets.sh` checks that entry for every target and fails if
+  a module is missing, so a branch for a platform this machine never
+  builds cannot rot.
 
 ### NO globals — mutable module-level state is forbidden (see docs/globals-and-app-ownership.md):
 - "No globals" means precisely: a module-level **`var`** (mutable global state)
