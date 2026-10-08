@@ -397,8 +397,14 @@ on the machine, so it is skipped.
   `pthread_create`'s result, so a task that never started still returns
   from `get()`, with a result that was never computed. With 17 000, 20 000 or
   30 000 tasks alive at once, exactly 16 383 returned their value and the
-  rest returned 0 without an error. That is a correctness bug independent of
-  this design; it is queued.
+  rest returned 0 without an error. That was a correctness bug independent
+  of this design. **Fixed (0.1.233):**
+  - the spawn site calls `rae_task_start`, which runs the task on the caller
+    when no thread can be had, as an uncapturable spawn already does, and
+    says so once on stderr;
+  - 17 000 and 20 000 `held` tasks now all finish;
+  - fixture 1061 hits a test-only cap (`RAE_SPAWN_THREAD_CAP=4` in its
+    `config.env`) and is checked under TSan.
 - **Spawning slows down while threads are exiting.** For 10 000 sleeps,
   spawning took 92 ms. For 15 000 it took 502 ms, and for 50 000 it took
   9.3 s. Those runs never had all their tasks alive at once, because the

@@ -175,6 +175,17 @@ void rae_string_pool_flush(int saved) {
   g_rae_string_pool_count = saved;
 }
 
+/* Forget (do NOT free) every entry registered since `saved`: their owner is
+ * no longer the statement that is running. A spawned task that runs on its
+ * caller (rae_task_start's fallback) leaves its result String here, and the
+ * task owns it, exactly as a worker thread's never-flushed pool leaves it. */
+void rae_string_pool_release(int saved) {
+  if (saved < 0) saved = 0;
+  if (saved >= g_rae_string_pool_count) return;
+  for (int i = saved; i < g_rae_string_pool_count; i++) g_rae_string_pool[i] = NULL;
+  g_rae_string_pool_count = saved;
+}
+
 void rae_string_pool_remove(void* ptr) {
   if (!ptr) return;
   RAE_STAT_ADD(RAE_MC_POOL_REMOVE_N, 1);

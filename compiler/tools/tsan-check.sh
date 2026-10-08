@@ -29,7 +29,7 @@ trap 'rm -rf "$TMP"' EXIT
 CASES="511_spawn_raytracer_bands 512_spawn_string_workers 513_spawn_own_list_copy \
 541_channel_worker 646_list_of_tasks 848_channel_struct_payload 941_file_notify \
 944_parallel_loop_results 946_parallel_chunk_scratch \
-997_physics_parallel_step 1033_task_try_get 1036_file_notify_rae 1040_net_ecs_http"
+997_physics_parallel_step 1033_task_try_get 1036_file_notify_rae 1040_net_ecs_http 1061_spawn_thread_cap"
 if [ -n "${RAE_TSAN_FILTER:-}" ]; then CASES="$RAE_TSAN_FILTER"; fi
 
 # The toolchain probe: a compiler without the TSan runtime cannot run this gate.
@@ -63,7 +63,15 @@ for name in $CASES; do
     echo "FAIL: tsan $name (TSan build failed)"; sed 's/^/    /' "$work/cc.log" | tail -5
     failed=$((failed + 1)); continue
   fi
-  (cd "$dir" && RAE_MEM_STATS=1 TSAN_OPTIONS="halt_on_error=0 exitcode=66 second_deadlock_stack=1" \
+  # The case's own environment (config.env, as run_tests.sh applies it), so a
+  # case like 1061's thread cap runs the same path under TSan
+  case_env=()
+  if [ -f "$dir/config.env" ]; then
+    while IFS= read -r env_line || [ -n "$env_line" ]; do
+      case "$env_line" in ''|'#'*) ;; *) case_env+=("$env_line") ;; esac
+    done < "$dir/config.env"
+  fi
+  (cd "$dir" && env ${case_env[@]+"${case_env[@]}"} RAE_MEM_STATS=1 TSAN_OPTIONS="halt_on_error=0 exitcode=66 second_deadlock_stack=1" \
     perl -e 'alarm shift; exec @ARGV' "$TIMEOUT_S" "$work/app") > "$work/stdout" 2> "$work/stderr"
   rc=$?
   if grep -q "ThreadSanitizer" "$work/stderr"; then
@@ -77,8 +85,9 @@ for name in $CASES; do
     failed=$((failed + 1)); continue
   fi
   # Trailing blank lines differ between `rae run` (what expected.txt holds)
-  # and the bare binary; nothing else may.
-  trim() { grep -v '^@@RAE_' "$1" | perl -0pe 's/\n+\z/\n/'; }
+  # and the bare binary; nothing else may. The runtime's own `[rae] ...`
+  # notices go to stderr, which expected.txt holds too but stdout does not.
+  trim() { grep -v '^@@RAE_' "$1" | grep -v '^\[rae\] ' | perl -0pe 's/\n+\z/\n/'; }
   if [ -f "$dir/expected.txt" ] && ! diff -q <(trim "$work/stdout") <(trim "$dir/expected.txt") >/dev/null; then
     echo "FAIL: tsan $name (output differs from expected.txt)"
     diff <(trim "$work/stdout") <(trim "$dir/expected.txt") | head -10 | sed 's/^/    /'
