@@ -284,22 +284,8 @@ double rae_ext_rae_sys_file_mtime(rae_String path){
 #endif
 }
 
-rae_String rae_ext_rae_str_i64(int64_t v) {
-  char buffer[32];
-  int len = snprintf(buffer, 32, "%lld", (long long)v);
-  return rae_str_from_buf_impl((uint8_t*)buffer, len, RAE_SITE_INT_TO_STR);
-}
 
-// #817: UInt64 formats as unsigned (2^64-1 used to print as -1 via the i64 path).
-rae_String rae_ext_rae_str_u64(uint64_t v) {
-  char buffer[32];
-  int len = snprintf(buffer, 32, "%llu", (unsigned long long)v);
-  return rae_str_from_buf_impl((uint8_t*)buffer, len, RAE_SITE_INT_TO_STR);
-}
 
-rae_String rae_ext_rae_str_i64_ptr(const int64_t* v) {
-  return rae_ext_rae_str_i64(*v);
-}
 
 rae_String rae_ext_rae_str_f64(double v) {
   char buffer[32];
@@ -335,71 +321,14 @@ rae_String rae_ext_json_number(float v) {
 
 /* Float (f32) views. Formatting promotes to double, so the shared f64
  * formatter produces the same text a plain Float would. */
-rae_String rae_ext_rae_str_bool(rae_Bool v) {
-  return rae_str_from_cstr_impl(v ? "true" : "false", RAE_SITE_BOOL_TO_STR);
-}
 
-rae_String rae_ext_rae_str_bool_ptr(const rae_Bool* v) {
-  return rae_ext_rae_str_bool(*v);
-}
 
-rae_String rae_ext_rae_str_char(uint32_t v) {
-  uint8_t buffer[5];
-  int len = 0;
-  if (v < 0x80) {
-    buffer[0] = (uint8_t)v;
-    len = 1;
-  } else if (v < 0x800) {
-    buffer[0] = (uint8_t)(0xC0 | (v >> 6));
-    buffer[1] = (uint8_t)(0x80 | (v & 0x3F));
-    len = 2;
-  } else if (v < 0x10000) {
-    buffer[0] = (uint8_t)(0xE0 | (v >> 12));
-    buffer[1] = (uint8_t)(0x80 | ((v >> 6) & 0x3F));
-    buffer[2] = (uint8_t)(0x80 | (v & 0x3F));
-    len = 3;
-  } else {
-    buffer[0] = (uint8_t)(0xF0 | (v >> 18));
-    buffer[1] = (uint8_t)(0x80 | ((v >> 12) & 0x3F));
-    buffer[2] = (uint8_t)(0x80 | ((v >> 6) & 0x3F));
-    buffer[3] = (uint8_t)(0x80 | (v & 0x3F));
-    len = 4;
-  }
-  buffer[len] = '\0';
-  return rae_str_from_buf_impl(buffer, len, RAE_SITE_CHAR_TO_STR);
-}
 
-rae_String rae_ext_rae_str_char_ptr(const uint32_t* v) {
-    return rae_ext_rae_str_char(*v);
-}
 
 rae_String rae_ext_rae_str_string(rae_String s) {
     return rae_str_from_buf_impl(s.data, s.len, RAE_SITE_STR_STRING);
 }
 
-rae_String rae_ext_rae_str_any(RaeAny v) {
-    // Format a boxed value as a Rae string. Handles `none` and primitive types
-    // by delegating to the typed formatters; defaults to empty for structs and
-    // other heap types (those should be formatted via toString instead).
-    switch (v.type) {
-        case RAE_TYPE_INT64:   return rae_ext_rae_str_i64(v.as.i);
-        case RAE_TYPE_INT32:   return rae_ext_rae_str_i64(v.as.i);
-        case RAE_TYPE_UINT64:  return rae_ext_rae_str_u64((uint64_t)v.as.i);
-        case RAE_TYPE_FLOAT64: return rae_ext_rae_str_f64(v.as.f);
-        case RAE_TYPE_FLOAT32: return rae_ext_rae_str_f64(v.as.f);
-        case RAE_TYPE_BOOL:    return rae_ext_rae_str_bool(v.as.b);
-        // Extracting a String from a RaeAny is a read, not an
-        // ownership transfer — the RaeAny boxed a copy of someone
-        // else's String (e.g. a list element). Always return a
-        // borrowed view (is_owned=0) so a consumer like
-        // rae_ext_rae_str_interp doesn't free the storage that
-        // still belongs to the original owner.
-        case RAE_TYPE_STRING:  return rae_string_borrow(v.as.s);
-        case RAE_TYPE_CHAR:    return rae_ext_rae_str_char((uint32_t)v.as.i);
-        case RAE_TYPE_NONE:    return (rae_String){(uint8_t*)"none", 4, 0, 0};
-        default:               return (rae_String){(uint8_t*)"", 0, 0, 0};
-    }
-}
 
 rae_String rae_ext_rae_str_string_ptr(const rae_String* s) {
     return rae_ext_rae_str_from_buf(s->data, s->len);

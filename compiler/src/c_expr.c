@@ -120,7 +120,7 @@ static const char* rae_int_formatter(Str base) {
     return NULL;
 }
 
-static void emit_to_string_expr(CFuncContext* ctx, const AstExpr* operand, FILE* out) {
+void emit_to_string_expr(CFuncContext* ctx, const AstExpr* operand, FILE* out) {
     const AstTypeRef* tr = infer_expr_type_ref(ctx, operand);
     // In a generic body the operand's type may be the parameter `T`: the
     // instantiation being emitted knows the concrete type, so substitute it

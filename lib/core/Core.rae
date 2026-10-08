@@ -14,19 +14,21 @@ func nextTick() ret Int {
 
 # Console output — a core essential (globally visible, callable bare), so
 # everyday code writes `log(x)` not `io.log(x)`. (docs/module-namespacing.md)
-func rae_ext_rae_log_any(value: Any) unsafe extern
-
-func rae_ext_rae_log_stream_any(value: Any) unsafe extern
+# A call whose argument type the compiler knows is lowered to that value's
+# text (the formatter `"{x}"` uses) and the writer below; these bodies run for
+# an argument that really is an Any (lib/core/AnyText.rae). The runtime only
+# writes the bytes (docs/runtime-c-audit.md row 12).
+func rae_ext_rae_log_write(text: String, newline: Bool) unsafe extern
 
 func log(value: Any) {
   unsafe {
-    rae_ext_rae_log_any(value: value)
+    rae_ext_rae_log_write(text: anyText(value: value, forLog: true), newline: true)
   }
 }
 
 func logS(value: Any) {
   unsafe {
-    rae_ext_rae_log_stream_any(value: value)
+    rae_ext_rae_log_write(text: anyText(value: value, forLog: true), newline: false)
   }
 }
 

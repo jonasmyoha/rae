@@ -2467,11 +2467,11 @@ static const char* rae_json_struct_mangled_type(CompilerContext* ctx, const AstM
  * a plain PackedText, and turns them into a String with one allocation. A
  * program built without the prelude falls back to the runtime's C formatter. */
 static void emit_text_wrappers(CompilerContext* ctx, FILE* out) {
-  static const struct { const char* rae; const char* wrapper; const char* ctype; const char* fallback; } items[] = {
-    { "packedFromInt", "rae_text_int64", "int64_t", "rae_ext_rae_str_i64" },
-    { "packedFromUnsigned", "rae_text_uint64", "uint64_t", "rae_ext_rae_str_u64" },
-    { "packedFromBool", "rae_text_bool", "rae_Bool", "rae_ext_rae_str_bool" },
-    { "packedFromChar", "rae_text_char", "uint32_t", "rae_ext_rae_str_char" },
+  static const struct { const char* rae; const char* wrapper; const char* ctype; } items[] = {
+    { "packedFromInt", "rae_text_int64", "int64_t" },
+    { "packedFromUnsigned", "rae_text_uint64", "uint64_t" },
+    { "packedFromBool", "rae_text_bool", "rae_Bool" },
+    { "packedFromChar", "rae_text_char", "uint32_t" },
   };
   for (size_t i = 0; i < sizeof items / sizeof items[0]; i++) {
     const char* packer = NULL;
@@ -2488,11 +2488,31 @@ static void emit_text_wrappers(CompilerContext* ctx, FILE* out) {
                    "return rae_ext_rae_str_from_packed(packed.first, packed.second, packed.third, packed.count); }\n",
               items[i].wrapper, items[i].ctype, packer, packer);
     } else {
-      fprintf(out, "RAE_UNUSED static rae_String %s(%s value) { return %s(value); }\n",
-              items[i].wrapper, items[i].ctype, items[i].fallback);
+      /* `import nostdlib`: nothing in the program can print text anyway */
+      fprintf(out, "RAE_UNUSED static rae_String %s(%s value) { (void)value; return (rae_String){0}; }\n",
+              items[i].wrapper, items[i].ctype);
     }
     fprintf(out, "RAE_UNUSED static rae_String %s_ptr(const %s* value) { return %s(*value); }\n",
             items[i].wrapper, items[i].ctype, items[i].wrapper);
+  }
+  /* An interpolated Any (the header's rae_ext_rae_str dispatch): its text
+   * from lib/core/AnyText.rae, taken out of the temporary pool so it is the
+   * same owned String every other rae_text_* answers. */
+  const char* any_text = NULL;
+  {
+    size_t count = 0;
+    const size_t* named = decl_index_functions(ctx, str_from_cstr("anyText"), &count);
+    for (size_t k = 0; k < count; k++) {
+      const AstFuncDecl* fd = &ctx->all_decls[named[k]]->as.func_decl;
+      if (fd->generic_params || fd->is_extern) continue;
+      any_text = rae_mangle_function(ctx, fd);
+      break;
+    }
+  }
+  if (any_text) {
+    fprintf(out, "RAE_UNUSED static rae_String rae_text_any(RaeAny value) { return rae_string_pool_take(%s(value, 0)); }\n", any_text);
+  } else {
+    fprintf(out, "RAE_UNUSED static rae_String rae_text_any(RaeAny value) { (void)value; return (rae_String){0}; }\n");
   }
 }
 
@@ -2599,7 +2619,27 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
                "RAE_UNUSED static rae_String rae_text_bool(rae_Bool value);\n"
                "RAE_UNUSED static rae_String rae_text_bool_ptr(const rae_Bool* value);\n"
                "RAE_UNUSED static rae_String rae_text_char(uint32_t value);\n"
-               "RAE_UNUSED static rae_String rae_text_char_ptr(const uint32_t* value);\n");
+               "RAE_UNUSED static rae_String rae_text_char_ptr(const uint32_t* value);\n"
+               "RAE_UNUSED static rae_String rae_text_any(RaeAny value);\n");
+  // The integers formatted by their Rae width (the header's rae_str_<width>
+  // dispatch macros select them): through the same Rae text as an Int.
+  {
+    static const struct { const char* name; const char* ctype; const char* text; const char* wide; } sized[] = {
+      { "rae_str_int8", "int8_t", "rae_text_int64", "int64_t" },
+      { "rae_str_int16", "int16_t", "rae_text_int64", "int64_t" },
+      { "rae_str_int32", "int32_t", "rae_text_int64", "int64_t" },
+      { "rae_str_uint8", "uint8_t", "rae_text_int64", "int64_t" },
+      { "rae_str_uint16", "uint16_t", "rae_text_int64", "int64_t" },
+      { "rae_str_uint32", "uint32_t", "rae_text_int64", "int64_t" },
+      { "rae_str_uint64", "uint64_t", "rae_text_uint64", "uint64_t" },
+    };
+    for (size_t i = 0; i < sizeof sized / sizeof sized[0]; i++) {
+      fprintf(out, "RAE_UNUSED static rae_String %s_value(%s v) { return %s((%s)v); }\n",
+              sized[i].name, sized[i].ctype, sized[i].text, sized[i].wide);
+      fprintf(out, "RAE_UNUSED static rae_String %s_pointer(const %s* v) { return %s((%s)*v); }\n",
+              sized[i].name, sized[i].ctype, sized[i].text, sized[i].wide);
+    }
+  }
   // The JSON readers the generated toJson / fromJson call, also used before
   // the prototypes; defined by emit_json_scan_wrappers.
   fprintf(out, "RAE_UNUSED static int64_t rae_jscan_skip(rae_String* json, int64_t position);\n"
@@ -3265,6 +3305,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, (AstTypeRef*)gt);
       if (!mangled) continue;
       fprintf(out, "RAE_UNUSED static rae_String rae_to_str_%s_(const %s* this);\n", mangled, mangled);
+      fprintf(out, "RAE_UNUSED static rae_String rae_log_text_%s_(const %s* this);\n", mangled, mangled);
   }
   fprintf(out, "\n");
   for (size_t si = 0; si < shape_count; si++) {
@@ -3318,6 +3359,22 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       rae_value_to_str_expr(ctx, module, &elem, "this->data[__i]", true, out);
       fprintf(out, ");\n  }\n");
       fprintf(out, "  return rae_ext_rae_str_concat(__out, (rae_String){(uint8_t*)\"]\", 1});\n}\n\n");
+      // What `log(list)` prints: every slot up to the capacity, the unused
+      // ones as `none`, then the length and the capacity —
+      // `{ #(1, 2, none), 2, 3 }`. Elements through the same formatter.
+      fprintf(out, "RAE_UNUSED static rae_String rae_log_text_%s_(const %s* this) {\n", mangled, mangled);
+      fprintf(out, "  rae_String __out = (rae_String){(uint8_t*)\"{ #(\", 4};\n");
+      fprintf(out, "  for (int64_t __i = 0; __i < this->cap; __i++) {\n");
+      fprintf(out, "    if (__i > 0) __out = rae_ext_rae_str_concat(__out, (rae_String){(uint8_t*)\", \", 2});\n");
+      fprintf(out, "    if (__i >= this->length) { __out = rae_ext_rae_str_concat(__out, (rae_String){(uint8_t*)\"none\", 4}); continue; }\n");
+      fprintf(out, "    __out = rae_ext_rae_str_concat(__out, ");
+      rae_value_to_str_expr(ctx, module, &elem, "this->data[__i]", true, out);
+      fprintf(out, ");\n  }\n");
+      fprintf(out, "  __out = rae_ext_rae_str_concat(__out, (rae_String){(uint8_t*)\"), \", 3});\n");
+      fprintf(out, "  __out = rae_ext_rae_str_concat(__out, rae_text_int64(this->length));\n");
+      fprintf(out, "  __out = rae_ext_rae_str_concat(__out, (rae_String){(uint8_t*)\", \", 2});\n");
+      fprintf(out, "  __out = rae_ext_rae_str_concat(__out, rae_text_int64(this->cap));\n");
+      fprintf(out, "  return rae_ext_rae_str_concat(__out, (rae_String){(uint8_t*)\" }\", 2});\n}\n\n");
     }
     free(done);
   }

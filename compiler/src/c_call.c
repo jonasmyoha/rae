@@ -607,32 +607,47 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     }
 
     if (fd) {
-        if ((str_eq_cstr(fd->name, "log") || str_eq_cstr(fd->name, "logS")) && expr->as.call.args) {
+        /* `log(x)` / `logS(x)` of a value whose type is known here prints the
+         * text interpolation gives it ("{x}"): the generated formatter, then
+         * the runtime only writes the bytes (docs/runtime-c-audit.md row 12).
+         * A List keeps log's layout `{ #(a, b, none), length, capacity }`
+         * (rae_log_text_<List>_). Only an argument that really is an Any
+         * reaches lib/core's log body (AnyText.rae). */
+        bool core_log = (str_eq_cstr(fd->name, "log") || str_eq_cstr(fd->name, "logS"))
+            && fd->module_name && strcmp(fd->module_name, "core/Core") == 0;
+        if (core_log && expr->as.call.args) {
             const AstExpr* arg_val = expr->as.call.args->value; if (arg_val->kind == AST_EXPR_BOX) arg_val = arg_val->as.unary.operand;
             const AstTypeRef* arg_tr = infer_expr_type_ref(ctx, arg_val);
-            Str arg_base = get_base_type_name(arg_tr);
-            if (arg_tr && str_eq_cstr(arg_base, "List") && !arg_tr->is_view && !arg_tr->is_mod) {
-                bool is_log = str_eq_cstr(fd->name, "log");
-                // Pick element-kind tag for the typed runtime helper. Lists are
-                // monomorphised so the buffer holds concrete elements; we cannot
-                // cast `data` to `RaeAny*`.
-                Str elem_base = {0};
-                const AstTypeRef* elem_tr = arg_tr->generic_args;
-                if (elem_tr) {
-                    AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, elem_tr);
-                    elem_base = get_base_type_name(sub);
-                }
-                int elem_kind = 0; // RAE_LIST_ELEM_ANY
-                if (str_eq_cstr(elem_base, "Int") || str_eq_cstr(elem_base, "Int64")) elem_kind = 1;
-                else if (str_eq_cstr(elem_base, "Float") || str_eq_cstr(elem_base, "Float64")) elem_kind = 2;
-                else if (str_eq_cstr(elem_base, "Bool")) elem_kind = 3;
-                else if (str_eq_cstr(elem_base, "Char") || str_eq_cstr(elem_base, "Char32")) elem_kind = 4;
-                else if (str_eq_cstr(elem_base, "String")) elem_kind = 5;
-                fprintf(out, "rae_ext_rae_%s_list_typed((void*)(", is_log ? "log" : "log_stream");
+            const char* newline = str_eq_cstr(fd->name, "log") ? "1" : "0";
+            const AstTypeRef* concrete_tr = (arg_tr && ctx->generic_params && ctx->generic_args)
+                ? substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, arg_tr) : arg_tr;
+            Str arg_base = get_base_type_name(concrete_tr);
+            // (An `opt T` is represented as an Any box, so its resolved type
+            // says Any; the written type is what tells it apart.)
+            bool known = concrete_tr && arg_base.len > 0 && !str_eq_cstr(arg_base, "Any");
+            if (known && str_eq_cstr(arg_base, "List") && concrete_tr->generic_args
+                && !concrete_tr->is_opt && !concrete_tr->is_view && !concrete_tr->is_mod) {
+                AstTypeRef list_tr = *concrete_tr; list_tr.next = NULL;
+                const char* mangled = rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, &list_tr);
+                fprintf(out, "(__extension__ ({ __typeof__(");
                 emit_expr(ctx, arg_val, out, PREC_LOWEST, false, false);
-                fprintf(out, ").data, ("); emit_expr(ctx, arg_val, out, PREC_LOWEST, false, false);
-                fprintf(out, ").length, ("); emit_expr(ctx, arg_val, out, PREC_LOWEST, false, false);
-                fprintf(out, ").cap, %d)", elem_kind); return true;
+                fprintf(out, ") __logged = (");
+                emit_expr(ctx, arg_val, out, PREC_LOWEST, false, false);
+                fprintf(out, "); rae_ext_rae_log_write(rae_log_text_%s_(&__logged), %s); }))", mangled, newline);
+                return true;
+            }
+            if (known && str_eq_cstr(arg_base, "String") && !concrete_tr->is_opt
+                && !concrete_tr->is_view && !concrete_tr->is_mod) {
+                fprintf(out, "rae_ext_rae_log_write((");
+                emit_expr(ctx, arg_val, out, PREC_LOWEST, false, false);
+                fprintf(out, "), %s)", newline);
+                return true;
+            }
+            if (known) {
+                fprintf(out, "rae_ext_rae_log_write(");
+                emit_to_string_expr(ctx, arg_val, out);
+                fprintf(out, ", %s)", newline);
+                return true;
             }
         }
 
