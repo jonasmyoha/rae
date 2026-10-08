@@ -1,0 +1,92 @@
+# Gpu3dTemporal — the forward renderer's frame-to-frame settings and counters
+# (docs/runtime-c-audit.md row 11): whether TAA runs, the sub-pixel jitter it
+# walks, the frame index the SSAO noise rotates with, and the draw limit. The
+# renderer (Renderer3d) owns one; Gpu3d.beginScene writes it into the frame
+# block, and the C frame prepare only applies it (scales the jitter by its
+# render-target size, clamps the limit to its fixed draw array).
+import Math
+open Math3d
+
+# The size of the C renderer's per-draw array (G3D_MAX_DRAWS in
+# compiler/runtime/runtime_gpu3d.c): the most draws one frame can take.
+const maxForwardDraws: Int = 4096
+
+type RenderTemporal {
+  # 0 ..< 64: the jitter uses it modulo 16, SSAO modulo 64, so wrapping at
+  # 64 changes neither (and keeps it exact as a frame-block Float).
+  frameIndex: Int
+  # False under RAE_NO_TAA=1 (A/B comparison, or isolating TAA when a later
+  # temporal technique misbehaves). TAA is a pure function of the frame
+  # sequence, so a fixed frame count still converges identically.
+  taaEnabled: Bool
+  # 1 ..= maxForwardDraws: draws past it are discarded with an error
+  # (RAE_GPU3D_DRAW_LIMIT, the guard the 111 example gate checks).
+  drawLimit: Int
+}
+
+# A space, tab, newline, vertical tab, form feed or carriage return
+func isSpaceByte(byte: view Int) ret Bool {
+  ret byte is 32 or (byte >= 9 and byte <= 13)
+}
+
+# The value of a strictly decimal draw-limit text, or -1 when it is not one:
+# optional leading white space and sign, then only digits (what C's strtol
+# consumed whole).
+func strictDecimal(text: view String) ret Int {
+  let length: Int = text.length()
+  var i: Int = 0
+  loop i < length and isSpaceByte(byte: text.byteAt(index: i)) {
+    i = i + 1
+  }
+  if i < length and (text.byteAt(index: i) is 43 or text.byteAt(index: i) is 45) {
+    i = i + 1
+  }
+  let digitsStart: Int = i
+  loop i < length and text.byteAt(index: i) >= 48 and text.byteAt(index: i) <= 57 {
+    i = i + 1
+  }
+  if i is digitsStart or i < length {
+    ret -1
+  }
+  ret text.toInt()
+}
+
+# The draw limit RAE_GPU3D_DRAW_LIMIT asks for: unset or empty is the full
+# array; anything but a whole number in 1 ..= maxForwardDraws is reported
+# and ignored.
+func drawLimitFromEnvironment() ret Int {
+  let text: String = getEnv(name: "RAE_GPU3D_DRAW_LIMIT")
+  if text.length() is 0 {
+    ret maxForwardDraws
+  }
+  let requested: Int = strictDecimal(text: text)
+  if requested > 0 and requested <= maxForwardDraws {
+    ret requested
+  }
+  log(
+    "[gpu3d] WARNING: ignoring invalid RAE_GPU3D_DRAW_LIMIT={text}; expected 1..{maxForwardDraws}"
+  )
+  ret maxForwardDraws
+}
+
+func createRenderTemporal() ret RenderTemporal {
+  ret RenderTemporal {
+    frameIndex: 0
+    taaEnabled: getEnv(name: "RAE_NO_TAA").length() is 0
+    drawLimit: drawLimitFromEnvironment()
+  }
+}
+
+# This frame's TAA jitter along one axis, in pixels (-0.5 ..< 0.5): Halton
+# base 2 for x, base 3 for y, at index 1..16 (index 0 would be a zero-offset
+# frame). 0 when TAA is off.
+func jitterPixels(temporal: view RenderTemporal, base: view Int) ret Float {
+  if not temporal.taaEnabled {
+    ret 0.0
+  }
+  ret halton(index: temporal.frameIndex % 16 + 1, base: base) - 0.5
+}
+
+func advanceRenderTemporal(temporal: mod RenderTemporal) {
+  temporal.frameIndex = (temporal.frameIndex + 1) % 64
+}

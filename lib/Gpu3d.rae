@@ -63,6 +63,7 @@ open SkinStore
 open gpu/GpuResources
 open Gpu3dNative
 open Gpu3dSky
+open Gpu3dTemporal
 
 # ----- raw C ABI (implementation detail; prefer the typed API below) ---
 # The LDR offscreen the window presents is the app's Gpu2dCanvas's target
@@ -88,10 +89,16 @@ type Frame3d {
   data: List(Float)
 }
 
+# The frame block rae_g3d_frame_prepare reads: [0..35] camera, sun and
+# ambient (see beginScene), [36..51] the inverse view-projection, [52..53] the
+# TAA jitter in pixels, [54] TAA on (1) or off (0), [55] the frame index,
+# [56] the draw limit (Gpu3dTemporal).
+const frameBlockFloats: Int = 57
+
 func createFrame3d() pub ret Frame3d {
-  var d: List(Float) = List.create(Float, cap: 36)
+  var d: List(Float) = List.create(Float, cap: frameBlockFloats)
   var i: Int = 0
-  loop i < 36 {
+  loop i < frameBlockFloats {
     d.add(value: 0.0)
     i = i + 1
   }
@@ -410,6 +417,7 @@ func beginScene(
   light: view Light3d
   aspect: view Float
   time: view Float
+  temporal: mod RenderTemporal
 ) pub {
   var frame: Frame3d = createFrame3d()
   let worldUp: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
@@ -440,9 +448,25 @@ func beginScene(
   setVec3At(frame: frame, base: 27, v: light.ambSky)
   setVec3At(frame: frame, base: 30, v: light.ambGround)
   setVec3At(frame: frame, base: 33, v: light.clearColor)
+  # The post passes reconstruct world positions with the inverse; the jitter
+  # is this frame's before the index advances, and SSAO reads the advanced one.
+  let inverse: Mat4 = mat4Inverse(a: viewProj)
+  loop var i: Int = 0, i < 16, ++i {
+    frame.data.set(index: 36 + i, value: mat4Get(m: inverse, i: i))
+  }
+  frame.data.set(index: 52, value: jitterPixels(temporal: temporal, base: 2))
+  frame.data.set(index: 53, value: jitterPixels(temporal: temporal, base: 3))
+  advanceRenderTemporal(temporal: temporal)
+  var taa: Float = 0.0
+  if temporal.taaEnabled {
+    taa = 1.0
+  }
+  frame.data.set(index: 54, value: taa)
+  frame.data.set(index: 55, value: temporal.frameIndex.toFloat())
+  frame.data.set(index: 56, value: temporal.drawLimit.toFloat())
   beginForward(
     frame: frame.data.data
-    count: 36
+    count: frameBlockFloats
     clearR: light.clearColor.x
     clearG: light.clearColor.y
     clearB: light.clearColor.z
