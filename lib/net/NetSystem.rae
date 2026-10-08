@@ -79,81 +79,202 @@ const pollFlagError: Int = 31
 
 const pollMaxWaitEvents: Int = 32
 
-func platformConstant(which: Int) unsafe extern("rae_ext_NetSys_constant") ret Int
+# The socket calls, as a capability (docs/platform-conditional-code.md §3.1
+# layer 3): POSIX sockets on Apple, the BSDs and a Linux kernel. Elsewhere (the
+# web, Windows) the same names are Rae that answer the unsupported marker, so
+# lib/net/Tcp.rae reports `unsupported` without a C stub.
+const hasPosixSockets: Bool = Target.isUnix
 
-func systemResolve(
-  host: String
-  port: Int
-  passive: Bool
-  records: Buffer(UInt8)
-  maxRecords: Int
-) unsafe extern("rae_ext_NetSys_resolve") ret Int
+# What every call answers where there are no sockets (`unsupportedCode`'s value)
+const unsupportedAnswer: Int = -1000000
 
-func systemSocketFor(
-  records: Buffer(UInt8)
-  index: Int
-) unsafe extern("rae_ext_NetSys_socketFor") ret Int
+when hasPosixSockets {
+  func platformConstant(which: Int) unsafe extern("rae_ext_NetSys_constant") ret Int
 
-func systemBindTo(
-  handle: Int
-  records: Buffer(UInt8)
-  index: Int
-) unsafe extern("rae_ext_NetSys_bindTo") ret Int
+  func systemResolve(
+    host: String
+    port: Int
+    passive: Bool
+    records: Buffer(UInt8)
+    maxRecords: Int
+  ) unsafe extern("rae_ext_NetSys_resolve") ret Int
 
-func systemConnectTo(
-  handle: Int
-  records: Buffer(UInt8)
-  index: Int
-) unsafe extern("rae_ext_NetSys_connectTo") ret Int
+  func systemSocketFor(
+    records: Buffer(UInt8)
+    index: Int
+  ) unsafe extern("rae_ext_NetSys_socketFor") ret Int
 
-func systemListen(handle: Int, backlog: Int) unsafe extern("rae_ext_NetSys_listen") ret Int
+  func systemBindTo(
+    handle: Int
+    records: Buffer(UInt8)
+    index: Int
+  ) unsafe extern("rae_ext_NetSys_bindTo") ret Int
 
-func systemAccept(handle: Int) unsafe extern("rae_ext_NetSys_accept") ret Int
+  func systemConnectTo(
+    handle: Int
+    records: Buffer(UInt8)
+    index: Int
+  ) unsafe extern("rae_ext_NetSys_connectTo") ret Int
 
-func systemGetFileFlags(handle: Int) unsafe extern("rae_ext_NetSys_getFileFlags") ret Int
+  func systemListen(handle: Int, backlog: Int) unsafe extern("rae_ext_NetSys_listen") ret Int
 
-func systemSetFileFlags(
-  handle: Int
-  flags: Int
-) unsafe extern("rae_ext_NetSys_setFileFlags") ret Int
+  func systemAccept(handle: Int) unsafe extern("rae_ext_NetSys_accept") ret Int
 
-func systemSetCloseOnExec(handle: Int) unsafe extern("rae_ext_NetSys_setCloseOnExec") ret Int
+  func systemGetFileFlags(handle: Int) unsafe extern("rae_ext_NetSys_getFileFlags") ret Int
 
-func systemSetIntOption(
-  handle: Int
-  level: Int
-  option: Int
-  value: Int
-) unsafe extern("rae_ext_NetSys_setIntOption") ret Int
+  func systemSetFileFlags(
+    handle: Int
+    flags: Int
+  ) unsafe extern("rae_ext_NetSys_setFileFlags") ret Int
 
-func systemSocketError(handle: Int) unsafe extern("rae_ext_NetSys_socketError") ret Int
+  func systemSetCloseOnExec(handle: Int) unsafe extern("rae_ext_NetSys_setCloseOnExec") ret Int
 
-func systemReceive(
-  handle: Int
-  buffer: Buffer(UInt8)
-  offset: Int
-  maxBytes: Int
-) unsafe extern("rae_ext_NetSys_receive") ret Int
+  func systemSetIntOption(
+    handle: Int
+    level: Int
+    option: Int
+    value: Int
+  ) unsafe extern("rae_ext_NetSys_setIntOption") ret Int
 
-func systemSend(
-  handle: Int
-  buffer: Buffer(UInt8)
-  offset: Int
-  count: Int
-  flags: Int
-) unsafe extern("rae_ext_NetSys_send") ret Int
+  func systemSocketError(handle: Int) unsafe extern("rae_ext_NetSys_socketError") ret Int
 
-func systemSendText(
-  handle: Int
-  text: String
-  flags: Int
-) unsafe extern("rae_ext_NetSys_sendText") ret Int
+  func systemReceive(
+    handle: Int
+    buffer: Buffer(UInt8)
+    offset: Int
+    maxBytes: Int
+  ) unsafe extern("rae_ext_NetSys_receive") ret Int
 
-func systemPollOne(
-  handle: Int
-  events: Int
-  timeoutMs: Int
-) unsafe extern("rae_ext_NetSys_pollOne") ret Int
+  func systemSend(
+    handle: Int
+    buffer: Buffer(UInt8)
+    offset: Int
+    count: Int
+    flags: Int
+  ) unsafe extern("rae_ext_NetSys_send") ret Int
+
+  func systemSendText(
+    handle: Int
+    text: String
+    flags: Int
+  ) unsafe extern("rae_ext_NetSys_sendText") ret Int
+
+  func systemPollOne(
+    handle: Int
+    events: Int
+    timeoutMs: Int
+  ) unsafe extern("rae_ext_NetSys_pollOne") ret Int
+
+  func systemClose(handle: Int) unsafe extern("rae_ext_NetSys_close") ret Int
+
+  func systemLocalPort(handle: Int) unsafe extern("rae_ext_NetSys_localPort") ret Int
+} else {
+  func platformConstant(which: view Int) ret Int {
+    if which is addressRecordBytes {
+      ret 144
+    }
+    if which is resolveFailedCode {
+      ret -1000001
+    }
+    if which is pollMaxWaitEvents {
+      ret 256
+    }
+    if which is unsupportedCode {
+      ret unsupportedAnswer
+    }
+    ret 0
+  }
+
+  func systemResolve(
+    host: view String
+    port: view Int
+    passive: view Bool
+    records: view Buffer(UInt8)
+    maxRecords: view Int
+  ) ret Int {
+    ret unsupportedAnswer
+  }
+
+  func systemSocketFor(records: view Buffer(UInt8), index: view Int) ret Int {
+    ret unsupportedAnswer
+  }
+
+  func systemBindTo(handle: view Int, records: view Buffer(UInt8), index: view Int) ret Int {
+    ret unsupportedAnswer
+  }
+
+  func systemConnectTo(handle: view Int, records: view Buffer(UInt8), index: view Int) ret Int {
+    ret unsupportedAnswer
+  }
+
+  func systemListen(handle: view Int, backlog: view Int) ret Int {
+    ret unsupportedAnswer
+  }
+
+  func systemAccept(handle: view Int) ret Int {
+    ret unsupportedAnswer
+  }
+
+  func systemGetFileFlags(handle: view Int) ret Int {
+    ret unsupportedAnswer
+  }
+
+  func systemSetFileFlags(handle: view Int, flags: view Int) ret Int {
+    ret unsupportedAnswer
+  }
+
+  func systemSetCloseOnExec(handle: view Int) ret Int {
+    ret unsupportedAnswer
+  }
+
+  func systemSetIntOption(
+    handle: view Int
+    level: view Int
+    option: view Int
+    value: view Int
+  ) ret Int {
+    ret unsupportedAnswer
+  }
+
+  func systemSocketError(handle: view Int) ret Int {
+    ret unsupportedAnswer
+  }
+
+  func systemReceive(
+    handle: view Int
+    buffer: view Buffer(UInt8)
+    offset: view Int
+    maxBytes: view Int
+  ) ret Int {
+    ret unsupportedAnswer
+  }
+
+  func systemSend(
+    handle: view Int
+    buffer: view Buffer(UInt8)
+    offset: view Int
+    count: view Int
+    flags: view Int
+  ) ret Int {
+    ret unsupportedAnswer
+  }
+
+  func systemSendText(handle: view Int, text: view String, flags: view Int) ret Int {
+    ret unsupportedAnswer
+  }
+
+  func systemPollOne(handle: view Int, events: view Int, timeoutMs: view Int) ret Int {
+    ret unsupportedAnswer
+  }
+
+  func systemClose(handle: view Int) ret Int {
+    ret unsupportedAnswer
+  }
+
+  func systemLocalPort(handle: view Int) ret Int {
+    ret unsupportedAnswer
+  }
+}
 
 # The kernel readiness queues, as capabilities (docs/platform-conditional-code.md
 # §3.1 layer 3): kqueue on Apple and the BSDs, epoll on a Linux kernel. Each
@@ -184,10 +305,6 @@ when hasKqueue {
     timeoutMs: Int
   ) unsafe extern("rae_ext_NetSys_pollerWait") ret Int
 }
-
-func systemClose(handle: Int) unsafe extern("rae_ext_NetSys_close") ret Int
-
-func systemLocalPort(handle: Int) unsafe extern("rae_ext_NetSys_localPort") ret Int
 
 # Not a system call: allocating a String from bytes is the compiler's string
 # runtime (docs/runtime-c-audit.md); it moves when Rae has a byte builder.
