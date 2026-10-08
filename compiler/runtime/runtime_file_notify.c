@@ -21,18 +21,17 @@
  * can go when an app's loop waits on the poller itself.
  *
  * Platform reasons: open/kevent, errno, the per-OS EVFILT_VNODE / NOTE_*
- * constants and the thread. kqueue only (macOS, BSD); elsewhere every call
- * answers "unsupported" and the watchers poll mtimes (Linux inotify comes
- * with the epoll poller, decision F8). Included by rae_runtime.c. */
+ * constants and the thread. kqueue only: the whole file is under
+ * RAE_HAS_KQUEUE, the C twin of the Rae capability `hasKqueue`, and
+ * lib/FileNotify.rae declares these shims only under `when hasKqueue`, so
+ * no "unsupported" stubs exist elsewhere; there the watchers poll mtimes
+ * (Linux inotify comes with the epoll poller, decision F8). Included by
+ * rae_runtime.c. */
 
 void rae_ext_EventLoop_wake(void);   /* runtime_gpu2d_platform.c, or the no-op */
 
-#define RAE_FILE_NOTIFY_UNSUPPORTED -1000000
-
-#if (defined(__APPLE__) || defined(__FreeBSD__)) && !defined(__wasm__) && !defined(__EMSCRIPTEN__)
+#ifdef RAE_HAS_KQUEUE
 #include <sys/event.h>
-
-int64_t rae_ext_FileNotify_supported(void) { return 1; }
 
 int64_t rae_ext_FileNotify_openForEvents(rae_String path) {
   char name[4096];
@@ -121,14 +120,5 @@ int64_t rae_ext_FileNotify_wakeOnChange(int64_t queue) {
   EV_SET(&change, (uintptr_t)queue, EVFILT_READ, EV_ADD | EV_CLEAR, 0, 0, NULL);
   return kevent(g_fn_waker_queue, &change, 1, NULL, 0, NULL) == 0 ? 0 : -errno;
 }
-
-#else
-
-int64_t rae_ext_FileNotify_supported(void) { return 0; }
-int64_t rae_ext_FileNotify_openForEvents(rae_String path) { (void)path; return RAE_FILE_NOTIFY_UNSUPPORTED; }
-int64_t rae_ext_FileNotify_watchHandle(int64_t queue, int64_t fd) { (void)queue; (void)fd; return RAE_FILE_NOTIFY_UNSUPPORTED; }
-int64_t rae_ext_FileNotify_drain(int64_t queue) { (void)queue; return RAE_FILE_NOTIFY_UNSUPPORTED; }
-int64_t rae_ext_FileNotify_wakeOnChange(int64_t queue) { (void)queue; return RAE_FILE_NOTIFY_UNSUPPORTED; }
-int64_t rae_ext_FileNotify_takePending(int64_t queue) { (void)queue; return 0; }
 
 #endif

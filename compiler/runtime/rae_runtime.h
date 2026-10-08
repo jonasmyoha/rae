@@ -24,6 +24,15 @@
 #include <wchar.h>
 #include <pthread.h>
 
+/* The C twin of lib/net/NetSystem.rae's `hasKqueue` capability
+ * (Target.isApple or Target.isBsd; docs/platform-conditional-code.md): the
+ * kqueue shims of runtime_net.c and runtime_file_notify.c exist exactly
+ * where the Rae side declares them. */
+#if (defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)) && \
+    !defined(__wasm__) && !defined(__EMSCRIPTEN__)
+#define RAE_HAS_KQUEUE 1
+#endif
+
 /* Ptr lowers directly to void* in ordinary declarations. Generic storage also
  * needs an identifier-safe spelling because the concrete type is embedded in
  * generated List/function names. This is the canonical TypeInfo spelling for
@@ -731,13 +740,15 @@ rae_Bool rae_ext_rae_sys_exists(rae_String path);
 rae_Bool rae_ext_rae_sys_lock_file(rae_String path);
 rae_Bool rae_ext_rae_sys_unlock_file(rae_String path);
 double rae_ext_rae_sys_file_mtime(rae_String path);
-/* OS file-change notifications (runtime_file_notify.c, lib/FileNotify.rae). */
-int64_t rae_ext_FileNotify_supported(void);
+/* OS file-change notifications (runtime_file_notify.c, lib/FileNotify.rae):
+ * kqueue only, declared in Rae under `when hasKqueue` */
+#ifdef RAE_HAS_KQUEUE
 int64_t rae_ext_FileNotify_openForEvents(rae_String path);
 int64_t rae_ext_FileNotify_watchHandle(int64_t queue, int64_t fd);
 int64_t rae_ext_FileNotify_drain(int64_t queue);
 int64_t rae_ext_FileNotify_wakeOnChange(int64_t queue);
 int64_t rae_ext_FileNotify_takePending(int64_t queue);
+#endif
 /* The socket system-call shim (runtime_net.c, lib/net/NetSystem.rae): one
  * call per function, the result or -errno; the policy is lib/net/Tcp.rae. */
 int64_t rae_ext_NetSys_constant(int64_t which);
@@ -761,9 +772,12 @@ int64_t rae_ext_NetSys_sendText(int64_t fd, rae_String text, int64_t flags);
 int64_t rae_ext_Sha1_commonCrypto(uint8_t* bytes, int64_t offset, int64_t count, uint8_t* digest);
 #endif
 int64_t rae_ext_NetSys_pollOne(int64_t fd, int64_t events, int64_t timeoutMs);
+#ifdef RAE_HAS_KQUEUE
+/* The kqueue poller: declared in Rae under `when hasKqueue` */
 int64_t rae_ext_NetSys_pollerCreate(void);
 int64_t rae_ext_NetSys_pollerChange(int64_t queue, int64_t fd, int64_t filter, int64_t flags);
 int64_t rae_ext_NetSys_pollerWait(int64_t queue, int64_t* events, int64_t maxEvents, int64_t timeoutMs);
+#endif
 int64_t rae_ext_NetSys_close(int64_t fd);
 int64_t rae_ext_NetSys_localPort(int64_t fd);
 rae_String rae_ext_NetSys_bytesToText(uint8_t* buffer, int64_t offset, int64_t count);

@@ -4,7 +4,18 @@
 # cannot rot. It imports every lib/ module that uses `when`; the script fails
 # when one is missing.
 import crypto/Sha1
+import net/NetSystem
+open net/Poller
+open FileNotify
 
 func main() {
   log(Sha1.hexText(bytes: Sha1.sha1Text(text: "abc")))
+  # Bare calls through `open`: a module-qualified call into a module that
+  # declares a type of its own name (`Poller.createPoller()`) does not
+  # compile yet (queued codegen bug)
+  var poller: Poller = createPoller()
+  closePoller(poller: poller)
+  var watcher: FileNotify = createFileNotify()
+  log("kqueue {NetSystem.hasKqueue}, notifications {fileNotifyActive(fileNotify: watcher)}")
+  closeFileNotify(fileNotify: watcher)
 }

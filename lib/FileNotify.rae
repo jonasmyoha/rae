@@ -18,27 +18,28 @@
 # This module is the policy, in Rae (docs/runtime-c-audit.md row 10): the
 # table of watched paths and their handles, the parent-directory rule and what
 # a change means. The runtime makes one call per function
-# (compiler/runtime/runtime_file_notify.c): kqueue on macOS. Where the OS
-# offers nothing usable here (Linux until its inotify shim lands with epoll,
-# Windows, WASM) `fileNotifyActive` is false and the caller keeps polling,
-# slowly. `RAE_FILE_NOTIFY=off` forces that path. lib/FileWatch.rae and
+# (compiler/runtime/runtime_file_notify.c): kqueue, wherever lib/net's
+# `hasKqueue` capability holds (Apple, the BSDs). Elsewhere (Linux until its
+# inotify shim lands with epoll, Windows, WASM) the shims do not exist at
+# all, `fileNotifyActive` is false and the caller keeps polling, slowly. `RAE_FILE_NOTIFY=off`
+# forces that path. lib/FileWatch.rae and
 # lib/HotReload.rae are the users in the stdlib.
 open net/NetSystem
 
-func nativeSupported() unsafe extern("rae_ext_FileNotify_supported") ret Int
+when hasKqueue {
+  func nativeOpenForEvents(path: String) unsafe extern("rae_ext_FileNotify_openForEvents") ret Int
 
-func nativeOpenForEvents(path: String) unsafe extern("rae_ext_FileNotify_openForEvents") ret Int
+  func nativeWatchHandle(
+    queue: Int
+    handle: Int
+  ) unsafe extern("rae_ext_FileNotify_watchHandle") ret Int
 
-func nativeWatchHandle(
-  queue: Int
-  handle: Int
-) unsafe extern("rae_ext_FileNotify_watchHandle") ret Int
+  func nativeDrain(queue: Int) unsafe extern("rae_ext_FileNotify_drain") ret Int
 
-func nativeDrain(queue: Int) unsafe extern("rae_ext_FileNotify_drain") ret Int
+  func nativeWakeOnChange(queue: Int) unsafe extern("rae_ext_FileNotify_wakeOnChange") ret Int
 
-func nativeWakeOnChange(queue: Int) unsafe extern("rae_ext_FileNotify_wakeOnChange") ret Int
-
-func nativeTakePending(queue: Int) unsafe extern("rae_ext_FileNotify_takePending") ret Int
+  func nativeTakePending(queue: Int) unsafe extern("rae_ext_FileNotify_takePending") ret Int
+}
 
 type FileNotify {
   # The kernel queue's handle; < 0 when notifications are unavailable.
@@ -56,23 +57,23 @@ func createFileNotify() ret FileNotify {
   if getEnv(name: "RAE_FILE_NOTIFY") is "off" {
     ret noFileNotify()
   }
-  unsafe {
-    if nativeSupported() is 0 {
-      ret noFileNotify()
+  when hasKqueue {
+    unsafe {
+      let queue: Int = systemPollerCreate()
+      if queue < 0 {
+        ret noFileNotify()
+      }
+      let closeOnExec: Int = systemSetCloseOnExec(handle: queue)
+      # Without the waker the queue still collects changes, but a loop
+      # blocked in its event wait would not hear of them: then poll instead.
+      if nativeWakeOnChange(queue: queue) < 0 {
+        let closed: Int = systemClose(handle: queue)
+        ret noFileNotify()
+      }
+      ret FileNotify { id: queue, paths: {}, handles: {} }
     }
-    let queue: Int = systemPollerCreate()
-    if queue < 0 {
-      ret noFileNotify()
-    }
-    let closeOnExec: Int = systemSetCloseOnExec(handle: queue)
-    # Without the waker the queue still collects changes, but a loop blocked
-    # in its event wait would not hear of them: then poll instead.
-    if nativeWakeOnChange(queue: queue) < 0 {
-      let closed: Int = systemClose(handle: queue)
-      ret noFileNotify()
-    }
-    ret FileNotify { id: queue, paths: {}, handles: {} }
   }
+  ret noFileNotify()
 }
 
 # Whether the OS delivers notifications for this watcher. False means the
@@ -100,19 +101,22 @@ func watchOnePath(fileNotify: mod FileNotify, path: view String) ret Bool {
       ret true
     }
   }
-  unsafe {
-    let handle: Int = nativeOpenForEvents(path: path)
-    if handle < 0 {
-      ret false
+  when hasKqueue {
+    unsafe {
+      let handle: Int = nativeOpenForEvents(path: path)
+      if handle < 0 {
+        ret false
+      }
+      if nativeWatchHandle(queue: fileNotify.id, handle: handle) < 0 {
+        let closed: Int = systemClose(handle: handle)
+        ret false
+      }
+      fileNotify.paths.add(value: "{path}")
+      fileNotify.handles.add(value: handle)
     }
-    if nativeWatchHandle(queue: fileNotify.id, handle: handle) < 0 {
-      let closed: Int = systemClose(handle: handle)
-      ret false
-    }
-    fileNotify.paths.add(value: "{path}")
-    fileNotify.handles.add(value: handle)
+    ret true
   }
-  ret true
+  ret false
 }
 
 # Watch `path` (and its directory). A missing file is fine: its directory sees
@@ -141,9 +145,11 @@ func fileNotifyClear(fileNotify: mod FileNotify) {
   }
   fileNotify.handles.clear()
   fileNotify.paths.clear()
-  if fileNotify.id >= 0 {
-    unsafe {
-      let dropped: Int = nativeDrain(queue: fileNotify.id)
+  when hasKqueue {
+    if fileNotify.id >= 0 {
+      unsafe {
+        let dropped: Int = nativeDrain(queue: fileNotify.id)
+      }
     }
   }
 }
@@ -154,23 +160,26 @@ func fileNotifyTakeChanged(fileNotify: view FileNotify) ret Bool {
   if fileNotify.id < 0 {
     ret false
   }
-  unsafe {
-    # The waker marks a queue that got an event (one atomic swap here); only
-    # then is the queue drained, which is a system call of ~10 us.
-    let pending: Int = nativeTakePending(queue: fileNotify.id)
-    if pending is 0 {
-      ret false
-    }
-    var changed: Bool = pending is 1
-    loop {
-      let count: Int = nativeDrain(queue: fileNotify.id)
-      if count <= 0 {
-        break
+  when hasKqueue {
+    unsafe {
+      # The waker marks a queue that got an event (one atomic swap here);
+      # only then is the queue drained, which is a system call of ~10 us.
+      let pending: Int = nativeTakePending(queue: fileNotify.id)
+      if pending is 0 {
+        ret false
       }
-      changed = true
+      var changed: Bool = pending is 1
+      loop {
+        let count: Int = nativeDrain(queue: fileNotify.id)
+        if count <= 0 {
+          break
+        }
+        changed = true
+      }
+      ret changed
     }
-    ret changed
   }
+  ret false
 }
 
 # Release the watcher's queue and every watched handle.

@@ -42,19 +42,22 @@ func noPoller(status: view NetStatus) ret Poller {
 
 # A new poller watching nothing. Its `status` says why there is none.
 func createPoller() ret Poller {
-  unsafe {
-    let code: Int = systemPollerCreate()
-    if code < 0 {
-      ret noPoller(status: netStatusFromCode(code: code))
-    }
-    let closeOnExec: Int = systemSetCloseOnExec(handle: code)
-    let maxEvents: Int = netConstant(which: pollMaxWaitEvents)
-    ret Poller {
-      handle: code
-      status: NetStatus.ok
-      rawEvents: List.create(Int, cap: maxEvents * 3)
+  when hasKqueue {
+    unsafe {
+      let code: Int = systemPollerCreate()
+      if code < 0 {
+        ret noPoller(status: netStatusFromCode(code: code))
+      }
+      let closeOnExec: Int = systemSetCloseOnExec(handle: code)
+      let maxEvents: Int = netConstant(which: pollMaxWaitEvents)
+      ret Poller {
+        handle: code
+        status: NetStatus.ok
+        rawEvents: List.create(Int, cap: maxEvents * 3)
+      }
     }
   }
+  ret noPoller(status: NetStatus.unsupported)
 }
 
 # One interest change, retried if a signal interrupted it
@@ -67,23 +70,25 @@ func changeInterest(
   if poller.handle < 0 {
     ret poller.status
   }
-  unsafe {
-    loop {
-      let code: Int = systemPollerChange(
-        queue: poller.handle
-        handle: socketId.handle
-        filter: netConstant(which: filter)
-        flags: netConstant(which: change)
-      )
-      if code >= 0 {
-        ret NetStatus.ok
-      }
-      if not isError(code: code, which: errorInterrupted) {
-        ret netStatusFromCode(code: code)
+  when hasKqueue {
+    unsafe {
+      loop {
+        let code: Int = systemPollerChange(
+          queue: poller.handle
+          handle: socketId.handle
+          filter: netConstant(which: filter)
+          flags: netConstant(which: change)
+        )
+        if code >= 0 {
+          ret NetStatus.ok
+        }
+        if not isError(code: code, which: errorInterrupted) {
+          ret netStatusFromCode(code: code)
+        }
       }
     }
   }
-  ret NetStatus.failed
+  ret NetStatus.unsupported
 }
 
 # Watch `socketId` for reading, writing or both (a direction not asked for is
@@ -157,18 +162,22 @@ func pollWait(poller: mod Poller, ready: mod List(Readiness), timeoutMs: view In
   }
   let maxEvents: Int = poller.rawEvents.cap / 3
   var count: Int = 0
-  unsafe {
-    loop {
-      count = systemPollerWait(
-        queue: poller.handle
-        events: poller.rawEvents.data
-        maxEvents: maxEvents
-        timeoutMs: timeoutMs
-      )
-      if count >= 0 or not isError(code: count, which: errorInterrupted) {
-        break
+  when hasKqueue {
+    unsafe {
+      loop {
+        count = systemPollerWait(
+          queue: poller.handle
+          events: poller.rawEvents.data
+          maxEvents: maxEvents
+          timeoutMs: timeoutMs
+        )
+        if count >= 0 or not isError(code: count, which: errorInterrupted) {
+          break
+        }
       }
     }
+  } else {
+    ret NetStatus.unsupported
   }
   if count < 0 {
     poller.rawEvents.length = 0
