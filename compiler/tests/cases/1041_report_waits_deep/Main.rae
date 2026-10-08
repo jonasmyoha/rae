@@ -1,0 +1,39 @@
+# `rae build --report-waits` (docs/lightweight-spawn-design.md §4.1): a wait
+# three calls below a spawned function makes every function on the way
+# resumable. A function that waits but is reached only from main is not
+# (main stays a thread), and a spawned function that never waits is not.
+func innermost(milliseconds: view Int) ret Int {
+  sleep(ms: milliseconds)
+  ret milliseconds
+}
+
+func middle(milliseconds: view Int) ret Int {
+  ret innermost(milliseconds: milliseconds) + 1
+}
+
+func outer(milliseconds: view Int) ret Int {
+  ret middle(milliseconds: milliseconds) * 2
+}
+
+func worker(milliseconds: copy Int) ret Int {
+  ret outer(milliseconds: milliseconds)
+}
+
+func pureWorker(count: copy Int) ret Int {
+  var total: Int = 0
+  loop var i: Int = 0, i < count, ++i {
+    total = total + i
+  }
+  ret total
+}
+
+func waitsOnlyInMain() {
+  sleep(ms: 1)
+}
+
+func main() {
+  let slow: Task(Int) = spawn worker(milliseconds: 1)
+  let fast: Task(Int) = spawn pureWorker(count: 10)
+  waitsOnlyInMain()
+  log("{slow.get() + fast.get()}")
+}
