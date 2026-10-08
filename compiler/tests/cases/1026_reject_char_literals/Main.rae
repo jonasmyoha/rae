@@ -1,0 +1,13 @@
+# Char literals that are not exactly one character are rejected, each with
+# a message saying why: two characters, bytes that are not UTF-8, a
+# surrogate, and an escape past U+10FFFF.
+func main() ret Int {
+  let two: Char32 = 'ab'
+  let accentAndMore: Char32 = 'Ã©!'
+  let cutShort: Char32 = 'Ã'
+  let overlong: Char32 = 'À¯'
+  let surrogate: Char32 = 'í €'
+  let surrogateEscape: Char32 = '\u{D800}'
+  let beyond: Char32 = '\u{110000}'
+  ret 0
+}

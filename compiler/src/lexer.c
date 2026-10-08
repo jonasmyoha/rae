@@ -462,18 +462,53 @@ static void scan_char_literal(Lexer* lexer, TokenBuffer* buffer, size_t start_in
         lexer_error(lexer, line, col, "expected '{' after \\u");
       } else {
         lexer_advance(lexer); // {
-        while (!lexer_is_at_end(lexer) && lexer_peek(lexer) != '}') {
+        uint32_t value = 0;
+        bool too_large = false;
+        while (!lexer_is_at_end(lexer) && lexer_peek(lexer) != '}' && lexer_peek(lexer) != '\'') {
           char h = lexer_advance(lexer);
-          if (!isxdigit((unsigned char)h)) {
-             // lexer_error(lexer, ...); // Optional: strict hex check
-          }
+          uint32_t digit = (h >= '0' && h <= '9') ? (uint32_t)(h - '0')
+                         : (h >= 'a' && h <= 'f') ? (uint32_t)(h - 'a' + 10)
+                         : (h >= 'A' && h <= 'F') ? (uint32_t)(h - 'A' + 10) : 0;
+          if (value > 0x10FFFF) too_large = true; else value = value * 16 + digit;
         }
         if (lexer_peek(lexer) == '}') {
           lexer_advance(lexer); // }
+          if (too_large || value > 0x10FFFF) {
+            lexer_error(lexer, line, col, "unicode escape is beyond U+10FFFF, the last code point");
+          } else if (value >= 0xD800 && value <= 0xDFFF) {
+            lexer_error(lexer, line, col, "a char literal cannot hold a surrogate (U+D800..U+DFFF); it is not a character on its own");
+          }
         } else {
           lexer_error(lexer, line, col, "unterminated unicode escape");
         }
       }
+    }
+  } else if ((unsigned char)c >= 0x80) {
+    /* One character spelled in UTF-8: a lead byte that says how many bytes
+     * follow (2..4), each a continuation byte 0x80..0xBF. Overlong forms,
+     * code points past U+10FFFF and surrogates are not characters. */
+    unsigned char lead = (unsigned char)c;
+    int length = (lead >= 0xC2 && lead <= 0xDF) ? 2 : (lead >= 0xE0 && lead <= 0xEF) ? 3 : (lead >= 0xF0 && lead <= 0xF4) ? 4 : 0;
+    bool valid = length > 0;
+    uint32_t code = length == 2 ? (lead & 0x1F) : length == 3 ? (lead & 0x0F) : (lead & 0x07);
+    for (int i = 1; valid && i < length; i++) {
+      unsigned char next = (unsigned char)lexer_peek(lexer);
+      if (lexer_is_at_end(lexer) || next < 0x80 || next > 0xBF) { valid = false; break; }
+      lexer_advance(lexer);
+      code = (code << 6) | (next & 0x3F);
+    }
+    if (valid && ((length == 3 && code < 0x800) || (length == 4 && (code < 0x10000 || code > 0x10FFFF)))) valid = false;
+    if (!valid) {
+      lexer_error(lexer, line, col, "invalid UTF-8 in char literal");
+      while (!lexer_is_at_end(lexer) && lexer_peek(lexer) != '\'' && lexer_peek(lexer) != '\n') lexer_advance(lexer);
+      if (lexer_peek(lexer) == '\'') lexer_advance(lexer);
+      return;
+    }
+    if (code >= 0xD800 && code <= 0xDFFF) {
+      lexer_error(lexer, line, col, "a char literal cannot hold a surrogate (U+D800..U+DFFF); it is not a character on its own");
+      while (!lexer_is_at_end(lexer) && lexer_peek(lexer) != '\'') lexer_advance(lexer);
+      if (lexer_peek(lexer) == '\'') lexer_advance(lexer);
+      return;
     }
   }
 
