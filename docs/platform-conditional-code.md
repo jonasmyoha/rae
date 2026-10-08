@@ -53,23 +53,129 @@ What Rae takes:
 
 ## 3. The proposal
 
-### 3.1 The target, as ordinary constants
+### 3.1 The target: exact values, families, capabilities, and what is not compile-time
 
-The compiler provides a prelude module `Target` whose values are fixed per
-build:
+The hard part is not the keyword but the vocabulary. "BSD", "unix",
+"mobile", "desktop" and "web" overlap. macOS is unix and Apple. Android is a
+Linux kernel, a mobile OS, and sometimes a laptop (Chromebooks). A web build
+runs in desktop Chrome and mobile Safari alike. A single exclusive `Os` enum
+cannot say any of that. The answer is four layers, each with one job.
+
+**Layer 1: exact values, one per axis, exclusive.** What the program is
+compiled *against*: the system API it links to. A build has exactly one of
+each.
 
 ```rae
-enum Os { macos, ios, linux, windows, android, web }
+enum Os {
+  macos
+  ios        # iPhone and iPad (iPadOS is iOS for the API)
+  tvos
+  watchos
+  visionos
+  android
+  sailfish   # Jolla: a Linux kernel, but its own app model
+  linux
+  freebsd
+  openbsd
+  netbsd
+  windows
+  web        # the browser platform: in a browser the API IS the web, whatever OS is under it
+}
+
 enum Arch { arm64, x64, wasm32 }
 
-# in module Target, set by the compiler for the build being made
+# module Target, set by the compiler for the build being made
 const os: Os = ...
 const arch: Arch = ...
 const simd: Bool = ...     # false under --float4-scalar
 ```
 
-They are plain `const`s, so they can also be used in ordinary code
-(`log("built for {Target.os}")`).
+An OS gets its own value when its *API* differs, not because of branding:
+- Android is not `linux`, since it has bionic, its own app lifecycle and no
+  glibc;
+- Sailfish is not `linux` either, since apps follow its mobile app model;
+- an Ubuntu phone build would just be `linux`.
+
+Adding a value is a toolchain change. A new OS needs a C toolchain and
+runtime anyway, so the list stays closed and every `when` can be checked
+against it.
+
+**Layer 2: families, as predicates, not enum values.** An umbrella is a
+`Bool` computed from the exact value, written in Rae in the `Target` module
+itself, so anyone can read exactly what "unix" means:
+
+```rae
+const isApple: Bool = os is Os.macos or os is Os.ios or os is Os.tvos or os is Os.watchos or os is Os.visionos
+const isBsd: Bool = os is Os.freebsd or os is Os.openbsd or os is Os.netbsd
+const isLinuxKernel: Bool = os is Os.linux or os is Os.android or os is Os.sailfish
+const isUnix: Bool = isApple or isBsd or isLinuxKernel          # POSIX: fork, file descriptors, signals
+const isMobileOs: Bool = os is Os.ios or os is Os.android or os is Os.sailfish
+const isDesktopOs: Bool = os is Os.macos or os is Os.windows or os is Os.linux or isBsd
+const isNative: Bool = os is not Os.web
+```
+
+Families overlap freely. macOS is `isApple`, `isUnix` and `isDesktopOs` at
+once, because they are separate `Bool`s rather than places in a tree, so no
+hierarchy has to be agreed on. A "mobile OS" family means the mobile *app
+model*: the app is suspended in the background, cannot spawn processes, and
+lives in a store sandbox. It does not mean a small screen (layer 4). macOS
+is deliberately not `isBsd`: it has kqueue, but not OpenBSD's `pledge` or
+FreeBSD's `capsicum`, and its kqueue filters differ.
+
+**Layer 3: capabilities, the preferred test.** Most per-platform code
+depends on one facility, not on an OS. Test for the facility, named by what
+it is, and define it next to the code that uses it, the way autoconf or
+browser feature detection do:
+
+```rae
+# lib/net/NetSystem.rae
+const hasKqueue: Bool = Target.isApple or Target.isBsd
+const hasEpoll: Bool = Target.isLinuxKernel
+
+# lib/crypto/Sha1.rae
+const hasCommonCrypto: Bool = Target.isApple
+```
+
+When FreeBSD gains a facility, or Sailfish loses one, the fix is one line where
+the facility is used, and no `when` elsewhere changes. The subtle
+differences inside a family stay exact tests, written where they matter:
+OpenBSD's kqueue has no `EVFILT_USER`, so lib/net writes
+`when hasKqueue and Target.os is not Os.openbsd`. The guideline for review:
+- `when Target.os is ...` for a genuinely OS-specific API;
+- a family for a shared API (POSIX, the Apple frameworks);
+- a capability whenever the code needs one facility.
+
+**Layer 4: what is NOT compile-time, so not `when`.** The device a build
+runs on. One iOS binary runs on an iPhone and on an iPad with a keyboard,
+and on an Apple-silicon Mac. One Android build runs on a phone and on a
+Chromebook with a mouse. One web build runs in desktop Chrome and mobile
+Safari. So "mobile", "desktop", "touch", "small screen" and "which browser"
+are runtime questions, answered by ordinary functions and `if`:
+
+```rae
+if Device.isTouchPrimary() { ... }          # layout and input, at runtime
+if Device.browser() is Browser.safari { ... }
+```
+
+`Device` is a separate (future) runtime module. UI layout should follow the
+window's size and the input devices actually present, not the OS: an iPad
+with a trackpad wants hover states, and a touchscreen Linux laptop wants
+large targets.
+
+So the combinations in the question are each one line:
+
+| want | write |
+|---|---|
+| OpenBSD only | `when Target.os is Os.openbsd` |
+| any BSD | `when Target.isBsd` |
+| unix, including macOS and Linux | `when Target.isUnix` |
+| kqueue wherever it exists | `when hasKqueue` (defined in lib/net) |
+| any mobile OS | `when Target.isMobileOs` |
+| Android, but not other mobile OSes | `when Target.os is Os.android` |
+| mobile OS except iOS | `when Target.isMobileOs and Target.os is not Os.ios` |
+| a browser build | `when Target.os is Os.web` |
+| a browser on a phone | runtime: `if Device.isTouchPrimary()` in a `web` build |
+| a desktop-shaped layout, anywhere | runtime: the window size and the input devices |
 
 ### 3.2 `when`
 
@@ -127,7 +233,10 @@ Apple, and the other platforms never call it.
    from selected code is an error, the same "unknown function" as any other.
 4. **No `when` inside an expression.** It is a statement or a declaration
    group, never a value, so a reader always sees whole blocks.
-5. **A file-wide `when` is just one block around the file.** No file-name
+5. **Families and capabilities are ordinary `const Bool`s.** A program can
+   define its own (`const hasMetal: Bool = Target.isApple`) and use it in
+   `when` like the built-in ones.
+6. **A file-wide `when` is just one block around the file.** No file-name
    convention (Go's `_darwin.go`) is added, because PascalCase module names
    and imports stay platform-neutral.
 
@@ -136,7 +245,7 @@ Apple, and the other platforms never call it.
 D's experience is that `version` blocks for other platforms rot, since nobody
 compiles them. Rae's answer is
 `rae build --check-targets` (and a pre-suite case that runs it on `lib/`): it
-type-checks the program once per target in the `Os` × `Arch` set, without
+type-checks the program once per real (`Os`, `Arch`) pair the toolchain supports (`web` only with `wasm32`, for one), without
 emitting C. Sema already runs per build, so that is a loop over targets, not
 a new analysis. An extern declared for one platform must then also link on
 it; the C side keeps its `#if` only around the body that really is
@@ -183,3 +292,11 @@ per-platform.
 3. **W3** Unselected branches: parsed and formatted but not type-checked,
    with `--check-targets` in the suite (recommended); or type-checked against
    every target on every build (slower, catches rot at once).
+4. **W4** The vocabulary (§3.1):
+   - exact `Os` values (recommended: one value per distinct system API, as
+     listed);
+   - families as `Bool` predicates in `Target` (recommended), rather than an
+     enum hierarchy;
+   - capabilities defined next to the code that uses them (recommended),
+     rather than a global list in `Target`;
+   - device class and browser at runtime only (recommended).
