@@ -1,0 +1,100 @@
+# Device and Display facts (docs/platform-conditional-code.md §3.1 layer 4).
+# With no window SDL lists no devices, so a headless run reads no touch, no
+# pointer, no hover and scale 1. The policy is Rae over the platform's raw
+# answers, so the design's device table is checked here from those answers,
+# and a DeviceWatch turns a simulated keyboard case or monitor change into one
+# change event.
+import Device
+import Display
+
+func describe(facts: view DeviceFacts) ret String {
+  ret "touch {facts.hasTouch}, pointer {facts.primaryPointer}, hover {facts.canHover}, scale {facts.displayScale}"
+}
+
+func native(
+  name: view String
+  touchDevices: copy Int
+  hasMouse: copy Bool
+  touchFirst: copy Bool
+) {
+  let facts: DeviceFacts = Device.factsFromInputDevices(
+    touchDevices: touchDevices
+    hasMouse: hasMouse
+    touchFirst: touchFirst
+    displayScale: 2.0
+  )
+  log("{name}: {describe(facts: facts)}")
+}
+
+func main() {
+  log(
+    "headless: touch {Device.hasTouch()}, pointer {Device.primaryPointer()}, hover {Device.canHover()}, scale {Display.scale()}"
+  )
+  log("no reported scale is 1: {Display.scaleFrom(reported: 0.0)}")
+  native(
+    name: "desktop"
+    touchDevices: 0
+    hasMouse: true
+    touchFirst: false
+  )
+  native(
+    name: "touch MacBook"
+    touchDevices: 1
+    hasMouse: true
+    touchFirst: false
+  )
+  native(
+    name: "phone"
+    touchDevices: 1
+    hasMouse: false
+    touchFirst: true
+  )
+  native(
+    name: "iPad with trackpad case"
+    touchDevices: 1
+    hasMouse: true
+    touchFirst: true
+  )
+  native(
+    name: "TV"
+    touchDevices: 0
+    hasMouse: false
+    touchFirst: false
+  )
+  let browserPhone: DeviceFacts = Device.factsFromMediaQueries(
+    anyPointerCoarse: true
+    pointerFine: false
+    pointerCoarse: true
+    anyHover: false
+    displayScale: 3.0
+  )
+  log("browser on a phone: {describe(facts: browserPhone)}")
+  var watch: DeviceWatch = Device.createDeviceWatch()
+  log("unchanged: {Device.deviceChanged(watch: watch)}")
+  let iPad: DeviceFacts = Device.factsFromInputDevices(
+    touchDevices: 1
+    hasMouse: false
+    touchFirst: true
+    displayScale: 2.0
+  )
+  log("iPad: {Device.observeFacts(watch: watch, facts: iPad)}")
+  log("iPad again: {Device.observeFacts(watch: watch, facts: iPad)}")
+  let withCase: DeviceFacts = Device.factsFromInputDevices(
+    touchDevices: 1
+    hasMouse: true
+    touchFirst: true
+    displayScale: 2.0
+  )
+  log(
+    "keyboard case attached: {Device.observeFacts(watch: watch, facts: withCase)}, hover {watch.facts.canHover}"
+  )
+  let otherMonitor: DeviceFacts = Device.factsFromInputDevices(
+    touchDevices: 1
+    hasMouse: true
+    touchFirst: true
+    displayScale: 1.0
+  )
+  log(
+    "moved to a 1x monitor: {Device.observeFacts(watch: watch, facts: otherMonitor)}, scale {watch.facts.displayScale}"
+  )
+}

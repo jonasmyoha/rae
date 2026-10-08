@@ -71,6 +71,10 @@
 #include "runtime_sky_state.c"
 #include "runtime_platform_apple.c"
 #include "runtime_image_sdl3.c"
+#ifdef RAE_HAS_SDL3
+/* lib/Device.rae / lib/Display.rae: reads the SDL window above */
+#include "runtime_device.c"
+#endif
 #include "runtime_audio_sdl3.c"
 #ifdef RAE_HAS_WEBGPU
 #include "runtime_webgpu.c"

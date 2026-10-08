@@ -211,9 +211,22 @@ Three rules for UI code:
    - They arrive as events (lib/ui's input and window resources), and
      layout reruns. Nothing reads them once at startup.
 
-`Device` and `Display` are a future runtime module, filled from SDL3
-(touch devices, pointer events with their source, display content scale) and
-in the browser from the same CSS media queries and Pointer Events.
+`Device` and `Display` are `lib/Device.rae` and `lib/Display.rae` (0.1.240):
+- Natively they are filled from SDL3: the touch device count, whether a
+  mouse or trackpad is attached (`SDL_HasMouse`), and the window's display
+  scale. In the browser they come from the media queries `any-pointer:
+  coarse`, `pointer`, `any-hover` and `devicePixelRatio`.
+- The C is one call per answer (`compiler/runtime/runtime_device.c`). Which
+  pointer is primary is Rae (`factsFromInputDevices`,
+  `factsFromMediaQueries`): on a mobile OS touch stays primary with a
+  trackpad attached, elsewhere a mouse or trackpad is.
+- With no window (a headless run) SDL lists no devices, so the facts are no
+  touch, pointer `none`, no hover, scale 1.
+- A change is an event: an app keeps a `DeviceWatch` and asks
+  `Device.deviceChanged(watch:)` once per frame. It reads the facts again,
+  including the display scale, and answers true once when any of them
+  changed (a keyboard case, a monitor move). `observeFacts` takes a reading
+  directly, which is how fixture 1067 simulates one.
 
 So the combinations in the question are each one line:
 
@@ -377,7 +390,8 @@ per-platform.
    - Every runtime `#if` is classified in docs/runtime-c-audit.md. Three
      policy ones remain and are queued: sockets on web/Windows, the Apple
      platform calls, and the Spotify bridge.
-5. The runtime `Device` / `Display` facts (§3.1 layer 4).
+5. The runtime `Device` / `Display` facts (§3.1 layer 4). **Done (0.1.240):**
+   `lib/Device.rae`, `lib/Display.rae`, `runtime_device.c`, fixture 1067.
 6. lib/ui: the per-event pointer kind, `lastInputKind`, hover only when
    `canHover`, and the window size class in points.
 

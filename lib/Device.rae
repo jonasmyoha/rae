@@ -1,0 +1,159 @@
+# What input the device has (docs/platform-conditional-code.md §3.1 layer 4):
+# separate facts, the split CSS media queries settled on (`any-pointer`,
+# `pointer`, `any-hover`). There is no `isTablet` / `isPhone`: a touch MacBook
+# has touch but a fine main pointer, and an iPad gains a trackpad when a
+# keyboard case is attached.
+#
+# These change while the app runs. An app keeps a `DeviceWatch` and asks
+# `deviceChanged` once per frame; when it answers true, layout reruns.
+import Display
+
+# The main pointer: `fine` (mouse, trackpad, pen), `coarse` (a finger) or
+# `none` (a TV remote, a headless run)
+enum Pointer { fine, coarse, none }
+
+# One reading of every fact, so a change in any of them can be noticed
+type DeviceFacts {
+  hasTouch: Bool
+  primaryPointer: Pointer
+  canHover: Bool
+  # Display.scale(): a monitor change is a change too
+  displayScale: Float
+}
+
+# The last facts the app saw
+type DeviceWatch {
+  facts: DeviceFacts
+}
+
+when Target.os is Os.web {
+  # A CSS media query, matched now (compiler/runtime/runtime_device.c)
+  func mediaMatches(query: String) unsafe extern("rae_ext_Device_mediaMatches") ret Bool
+} else {
+  # SDL3: how many touch devices exist, and whether a mouse or trackpad does
+  func touchDeviceCount() unsafe extern("rae_ext_Device_touchDeviceCount") ret Int
+
+  func mousePresent() unsafe extern("rae_ext_Device_hasMouse") ret Bool
+}
+
+# Any touch input present (the touch MacBook: true)
+func hasTouch() ret Bool {
+  ret currentFacts().hasTouch
+}
+
+# The main pointer (the touch MacBook: fine; a phone: coarse)
+func primaryPointer() ret Pointer {
+  ret currentFacts().primaryPointer
+}
+
+# A mouse or trackpad that hovers exists
+func canHover() ret Bool {
+  ret currentFacts().canHover
+}
+
+# Every fact, read from the platform now
+func currentFacts() ret DeviceFacts {
+  when Target.os is Os.web {
+    var hasCoarse: Bool = false
+    var pointerFine: Bool = false
+    var pointerCoarse: Bool = false
+    var anyHover: Bool = false
+    unsafe {
+      hasCoarse = mediaMatches(query: "(any-pointer: coarse)")
+      pointerFine = mediaMatches(query: "(pointer: fine)")
+      pointerCoarse = mediaMatches(query: "(pointer: coarse)")
+      anyHover = mediaMatches(query: "(any-hover: hover)")
+    }
+    ret factsFromMediaQueries(
+      anyPointerCoarse: hasCoarse
+      pointerFine: pointerFine
+      pointerCoarse: pointerCoarse
+      anyHover: anyHover
+      displayScale: Display.scale()
+    )
+  } else {
+    var touchDevices: Int = 0
+    var hasMouse: Bool = false
+    unsafe {
+      touchDevices = touchDeviceCount()
+      hasMouse = mousePresent()
+    }
+    ret factsFromInputDevices(
+      touchDevices: touchDevices
+      hasMouse: hasMouse
+      touchFirst: Target.isMobileOs
+      displayScale: Display.scale()
+    )
+  }
+}
+
+# The facts from the devices SDL lists. On a mobile OS touch stays the main
+# pointer even with a trackpad attached (the trackpad's own events say when it
+# is used); elsewhere a mouse or trackpad is.
+func factsFromInputDevices(
+  touchDevices: view Int
+  hasMouse: view Bool
+  touchFirst: view Bool
+  displayScale: view Float
+) ret DeviceFacts {
+  let hasTouch: Bool = touchDevices > 0
+  var pointer: Pointer = Pointer.none
+  if hasTouch and (touchFirst or not hasMouse) {
+    pointer = Pointer.coarse
+  } else if hasMouse {
+    pointer = Pointer.fine
+  }
+  ret DeviceFacts {
+    hasTouch: hasTouch
+    primaryPointer: pointer
+    canHover: hasMouse
+    displayScale: displayScale
+  }
+}
+
+# The facts from the browser's media queries, which already answer each one
+func factsFromMediaQueries(
+  anyPointerCoarse: view Bool
+  pointerFine: view Bool
+  pointerCoarse: view Bool
+  anyHover: view Bool
+  displayScale: view Float
+) ret DeviceFacts {
+  var pointer: Pointer = Pointer.none
+  if pointerFine {
+    pointer = Pointer.fine
+  } else if pointerCoarse {
+    pointer = Pointer.coarse
+  }
+  ret DeviceFacts {
+    hasTouch: anyPointerCoarse
+    primaryPointer: pointer
+    canHover: anyHover
+    displayScale: displayScale
+  }
+}
+
+# A watch holding the facts as they are now
+func createDeviceWatch() ret DeviceWatch {
+  ret DeviceWatch { facts: currentFacts() }
+}
+
+# Read the facts again: true (and the watch updated) when any of them changed
+# since the watch last saw them. Ask once per frame.
+func deviceChanged(watch: mod DeviceWatch) ret Bool {
+  ret observeFacts(watch: watch, facts: currentFacts())
+}
+
+# Hand the watch a reading: true (and the watch updated) when it differs from
+# the last one. `deviceChanged` passes the platform's; a test passes its own.
+func observeFacts(watch: mod DeviceWatch, facts: view DeviceFacts) ret Bool {
+  if sameFacts(left: watch.facts, right: facts) {
+    ret false
+  }
+  watch.facts = facts
+  ret true
+}
+
+func sameFacts(left: view DeviceFacts, right: view DeviceFacts) ret Bool {
+  ret left.hasTouch is right.hasTouch and left.primaryPointer is right.primaryPointer and left.canHover is right.canHover and left.displayScale is right.displayScale
+}

@@ -2585,7 +2585,10 @@ static bool build_c_backend_output(const char* entry_file,
                                 // Gpu2d owns an SDL3 window (its surface wraps the SDL Metal layer)
                                 || strcmp(node->module_path, "Gpu2d") == 0
                                 // Gpu3d renders through the same SDL3 window/surface
-                                || strcmp(node->module_path, "Gpu3d") == 0)) {
+                                || strcmp(node->module_path, "Gpu3d") == 0
+                                // Device / Display ask SDL3 for input devices and display scale
+                                || strcmp(node->module_path, "Device") == 0
+                                || strcmp(node->module_path, "Display") == 0)) {
           uses_sdl3 = true;
           break;
       }
