@@ -105,6 +105,7 @@ tested on a BSD yet.
 |---|---|
 | `runtime_float4.h:40, 59, 142, 283` | the Float4 lowering per instruction set (NEON / SSE2 / wasm SIMD128 / scalar, `RAE_FLOAT4_SCALAR`) |
 | `runtime_threads.c:214` | the spin-wait hint instruction (`yield` / `pause`) |
+| `runtime_device.c` | the device and display calls: the browser's media queries and `devicePixelRatio` under `__EMSCRIPTEN__`, SDL3's otherwise (Rae declares each under the matching `when Target.os is Os.web`) |
 | `runtime_threads.c:25, 41, 81, 96, 168, 295`; `runtime_core_memory.c:293, 322`; `rae_runtime.c:42` | whether the build has OS threads (`!__wasm__ \|\| RAE_WASM_THREADS`): the thread ABI itself |
 | `runtime_threads.c:298, 358, 467` | Apple's `sysctl` performance-core count and QoS class for the worker pool |
 | `runtime_system_log.c:19` | the monotonic clock call (`mach_absolute_time` / `clock_gettime`) |

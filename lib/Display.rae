@@ -1,0 +1,38 @@
+# The display the app's window is on (docs/platform-conditional-code.md §3.1
+# layer 4). Layout works in points; pixels are points times `scale()`, so a
+# Retina screen and a 1080p screen get the same layout at the same window size.
+#
+# The scale changes while the app runs (the window moves to another monitor,
+# a monitor is unplugged), so read it when a `Device.DeviceWatch` reports a
+# change, never once at startup.
+when Target.os is Os.web {
+  # window.devicePixelRatio (compiler/runtime/runtime_device.c)
+  func browserPixelRatio() unsafe extern("rae_ext_Display_browserPixelRatio") ret Float
+} else {
+  # SDL_GetWindowDisplayScale of the app's window; 0 without a window
+  func windowDisplayScale() unsafe extern("rae_ext_Display_windowDisplayScale") ret Float
+}
+
+# Pixels per point (2.0 on Retina)
+func scale() ret Float {
+  var reported: Float = 0.0
+  when Target.os is Os.web {
+    unsafe {
+      reported = browserPixelRatio()
+    }
+  } else {
+    unsafe {
+      reported = windowDisplayScale()
+    }
+  }
+  ret scaleFrom(reported: reported)
+}
+
+# The scale a platform reported, or 1.0 when it reported none (no window yet,
+# a headless run)
+func scaleFrom(reported: view Float) ret Float {
+  if reported > 0.0 {
+    ret reported
+  }
+  ret 1.0
+}
