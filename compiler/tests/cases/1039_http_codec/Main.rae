@@ -1,0 +1,185 @@
+# lib/http (docs/server-benchmarks-design.md §9 G6): an HTTP/1.1 request
+# parser over a ByteBuffer and a response encoder, no I/O. Split reads,
+# 16 pipelined requests, keep-alive rules, malformed input -> 400, and no
+# allocation per request after warmup.
+open net/ByteBuffer
+open http/Http
+
+func resultName(result: view HttpParseResult) ret String {
+  ret "{result}"
+}
+
+# Parse everything complete in `input`; the paths in order, then what stopped it
+func parseAll(input: view String) ret String {
+  var buffer: ByteBuffer = createByteBuffer(capacity: 64)
+  appendText(buffer: buffer, text: input)
+  var state: HttpParseState = createHttpParseState()
+  var request: HttpRequest = createHttpRequest()
+  var text: String = ""
+  var result: HttpParseResult = HttpParseResult.complete
+  loop {
+    result = httpParseNext(state: state, buffer: buffer, request: request)
+    if result is not HttpParseResult.complete {
+      break
+    }
+    text = "{text}{request.method} {httpRangeText(buffer: buffer, range: request.target)} keepAlive {request.keepAlive}; "
+  }
+  ret "{text}-> {resultName(result: result)}"
+}
+
+func main() {
+  let simple: String = "GET /plaintext HTTP/1.1\r\nHost: localhost\r\nAccept: */*\r\n\r\n"
+
+  # A request arriving one byte at a time is `needMore` until its last byte
+  var buffer: ByteBuffer = createByteBuffer(capacity: 16)
+  var state: HttpParseState = createHttpParseState()
+  var request: HttpRequest = createHttpRequest()
+  var needMoreCount: Int = 0
+  var completedAt: Int = -1
+  loop var i: Int = 0, i < simple.length(), ++i {
+    appendText(buffer: buffer, text: simple.sub(start: i, len: 1))
+    let result: HttpParseResult = httpParseNext(state: state, buffer: buffer, request: request)
+    if result is HttpParseResult.needMore {
+      needMoreCount = needMoreCount + 1
+    } else if result is HttpParseResult.complete and completedAt < 0 {
+      completedAt = i
+    }
+  }
+  log(
+    "byte by byte: complete at the last byte {completedAt is simple.length() - 1}, needMore {needMoreCount} times"
+  )
+  log(
+    "method {request.method}, target {httpRangeText(buffer: buffer, range: request.target)}, HTTP/1.{request.minorVersion}, {request.headerCount} headers"
+  )
+  log("host: {httpRangeText(
+    buffer: buffer
+    range: httpHeaderValue(
+      state: state
+      buffer: buffer
+      request: request
+      name: "HOST"
+    )
+  )}")
+  log("path is /plaintext: {httpPathIs(buffer: buffer, request: request, path: "/plaintext")}")
+
+  # A body by Content-Length, split mid-body
+  var bodyBuffer: ByteBuffer = createByteBuffer(capacity: 16)
+  var bodyState: HttpParseState = createHttpParseState()
+  appendText(buffer: bodyBuffer, text: "POST /echo?x=1 HTTP/1.1\r\nContent-Length: 11\r\n\r\nhello")
+  log(
+    "body half there: {resultName(
+      result: httpParseNext(state: bodyState, buffer: bodyBuffer, request: request)
+    )}"
+  )
+  appendText(buffer: bodyBuffer, text: " world")
+  log(
+    "body complete: {resultName(
+      result: httpParseNext(state: bodyState, buffer: bodyBuffer, request: request)
+    )}, [{httpRangeText(buffer: bodyBuffer, range: request.body)}], path /echo {httpPathIs(
+      buffer: bodyBuffer
+      request: request
+      path: "/echo"
+    )}"
+  )
+
+  # 16 pipelined requests in one read: 16 completes, in order
+  var pipelined: String = ""
+  loop var i: Int = 0, i < 16, ++i {
+    if i % 2 is 0 {
+      pipelined = "{pipelined}GET /plaintext HTTP/1.1\r\nHost: h\r\n\r\n"
+    } else {
+      pipelined = "{pipelined}GET /json HTTP/1.1\r\nHost: h\r\n\r\n"
+    }
+  }
+  var pipeBuffer: ByteBuffer = createByteBuffer(capacity: 64)
+  appendText(buffer: pipeBuffer, text: pipelined)
+  var pipeState: HttpParseState = createHttpParseState()
+  var output: ByteBuffer = createByteBuffer(capacity: 256)
+  var completes: Int = 0
+  var inOrder: Bool = true
+  loop httpParseNext(state: pipeState, buffer: pipeBuffer, request: request) is HttpParseResult.complete {
+    let wantsJson: Bool = completes % 2 is 1
+    if httpPathIs(buffer: pipeBuffer, request: request, path: "/json") is not wantsJson {
+      inOrder = false
+    }
+    if wantsJson {
+      httpAppendResponse(
+        output: output
+        status: 200
+        contentType: "application/json"
+        body: "\{\"message\":\"Hello, World!\"\}"
+        date: "Sun, 06 Nov 1994 08:49:37 GMT"
+        keepAlive: request.keepAlive
+      )
+    } else {
+      httpAppendResponse(
+        output: output
+        status: 200
+        contentType: "text/plain"
+        body: "Hello, World!"
+        date: "Sun, 06 Nov 1994 08:49:37 GMT"
+        keepAlive: request.keepAlive
+      )
+    }
+    completes = completes + 1
+  }
+  log("pipelined: {completes} complete, in order {inOrder}")
+  httpParseConsumed(state: pipeState, buffer: pipeBuffer)
+  log("after consume: {byteBufferLength(buffer: pipeBuffer)} bytes left")
+  let firstResponseEnd: Int = byteBufferIndexOf(buffer: output, pattern: "Hello, World!", from: 0) + 13
+  log("first response:")
+  log(byteBufferText(buffer: output, start: 0, count: firstResponseEnd))
+
+  # Keep-alive rules
+  log(
+    parseAll(
+      input: "GET /a HTTP/1.1\r\nConnection: close\r\n\r\nGET /b HTTP/1.0\r\n\r\nGET /c HTTP/1.0\r\nConnection: Keep-Alive\r\n\r\n\r\nGET /d HTTP/1.1\r\n\r\nGET /e"
+    )
+  )
+
+  # Malformed -> badRequest, answered with a 400 that closes
+  log("no version: {parseAll(input: "GET /\r\n\r\n")}")
+  log("bad version: {parseAll(input: "GET / HTTP/2.0\r\n\r\n")}")
+  log("space in method: {parseAll(input: "G T / HTTP/1.1\r\n\r\n")}")
+  log("header without colon: {parseAll(input: "GET / HTTP/1.1\r\nHost localhost\r\n\r\n")}")
+  log("space in header name: {parseAll(input: "GET / HTTP/1.1\r\nHo st: x\r\n\r\n")}")
+  log("bad length: {parseAll(input: "POST / HTTP/1.1\r\nContent-Length: -3\r\n\r\n")}")
+  log("chunked: {parseAll(input: "POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n")}")
+  var huge: String = "GET / HTTP/1.1\r\nX: "
+  loop var i: Int = 0, i < 900, ++i {
+    huge = "{huge}0123456789"
+  }
+  log("header section too big: {parseAll(input: huge)}")
+  var errorOutput: ByteBuffer = createByteBuffer(capacity: 64)
+  httpAppendBadRequest(output: errorOutput, date: "Sun, 06 Nov 1994 08:49:37 GMT")
+  log(byteBufferText(buffer: errorOutput, start: 0, count: byteBufferLength(buffer: errorOutput)))
+
+  # No allocation per request after warmup: parse 16 pipelined, answer, consume
+  var warmBuffer: ByteBuffer = createByteBuffer(capacity: 2048)
+  var warmState: HttpParseState = createHttpParseState()
+  var warmOutput: ByteBuffer = createByteBuffer(capacity: 4096)
+  var handled: Int = 0
+  var allocationsBefore: Int = 0
+  loop var round: Int = 0, round < 200, ++round {
+    if round is 100 {
+      allocationsBefore = Sys.allocationCount()
+    }
+    appendText(buffer: warmBuffer, text: pipelined)
+    loop httpParseNext(state: warmState, buffer: warmBuffer, request: request) is HttpParseResult.complete {
+      httpAppendResponse(
+        output: warmOutput
+        status: 200
+        contentType: "text/plain"
+        body: "Hello, World!"
+        date: "Sun, 06 Nov 1994 08:49:37 GMT"
+        keepAlive: true
+      )
+      handled = handled + 1
+    }
+    httpParseConsumed(state: warmState, buffer: warmBuffer)
+    byteBufferClear(buffer: warmOutput)
+  }
+  log(
+    "allocations for 1600 requests after warmup: {Sys.allocationCount() - allocationsBefore} ({handled} handled)"
+  )
+}

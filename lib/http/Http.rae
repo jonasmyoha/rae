@@ -1,0 +1,570 @@
+# HTTP/1.1 as plain functions over bytes (docs/server-benchmarks-design.md §9
+# G6): a request parser and a response encoder, with no I/O and no
+# architecture, so the event-loop server and the ECS server share them.
+#
+# The parser reads a connection's ByteBuffer (lib/net/ByteBuffer.rae) and
+# describes each request with byte RANGES into it — method, target, headers,
+# body — so a request costs no heap: an HttpRequest is plain data, and the
+# headers go into a list the parse state reuses. The buffer must stay as it is
+# until the requests are handled; then `httpParseConsumed` drops them all.
+#
+#   * Incremental: a request split across reads answers `needMore`; nothing is
+#     kept, the next call (after more bytes arrive) parses it again.
+#   * Pipelining: `state.position` moves past each complete request, so a read
+#     holding 16 requests gives 16 `complete`s in order.
+#   * Keep-alive: HTTP/1.1 keeps the connection unless `Connection: close`;
+#     HTTP/1.0 closes it unless `Connection: keep-alive`.
+#   * A body is read by `Content-Length`. `Transfer-Encoding` (chunked) is not
+#     supported and is a bad request, as is anything malformed, more than
+#     `maxHeaders` headers or a header section over `maxHeaderBytes`.
+open net/ByteBuffer
+
+const maxHeaderBytes: Int = 8192
+
+const maxHeaders: Int = 64
+
+enum HttpMethod {
+  get
+  head
+  post
+  put
+  delete
+  options
+  patch
+  connect
+  trace
+  other
+}
+
+enum HttpParseResult { complete, needMore, badRequest }
+
+# Unread bytes `start ..< start + count` of the buffer being parsed
+type ByteRange {
+  start: Int
+  count: Int
+}
+
+type HttpHeader {
+  name: ByteRange
+  value: ByteRange
+}
+
+type HttpRequest {
+  method: HttpMethod
+  # The method as written (useful for `other`)
+  methodText: ByteRange
+  target: ByteRange
+  # 1 for HTTP/1.1, 0 for HTTP/1.0
+  minorVersion: Int
+  # This request's headers: `headerCount` entries of the parse state's
+  # `headers` from `headerFirst`
+  headerFirst: Int
+  headerCount: Int
+  body: ByteRange
+  keepAlive: Bool
+  # The whole request, request line to the end of its body
+  whole: ByteRange
+}
+
+type HttpParseState {
+  # Where the next request starts (an unread index of the buffer)
+  position: Int
+  headers: List(HttpHeader)
+}
+
+func createHttpParseState() ret HttpParseState {
+  ret HttpParseState { position: 0, headers: List.create(HttpHeader, cap: 64) }
+}
+
+func emptyRange() ret ByteRange {
+  ret ByteRange { start: -1, count: 0 }
+}
+
+func createHttpRequest() ret HttpRequest {
+  ret HttpRequest {
+    method: HttpMethod.other
+    methodText: emptyRange()
+    target: emptyRange()
+    minorVersion: 1
+    headerFirst: 0
+    headerCount: 0
+    body: emptyRange()
+    keepAlive: true
+    whole: emptyRange()
+  }
+}
+
+# ----- byte helpers ---------------------------------------------------
+func lowerByte(byte: view Int) ret Int {
+  if byte >= 65 and byte <= 90 {
+    ret byte + 32
+  }
+  ret byte
+}
+
+# Whether `range` holds exactly `text`, letters compared without case when
+# `ignoreCase`
+func rangeEquals(
+  buffer: view ByteBuffer
+  range: view ByteRange
+  text: view String
+  ignoreCase: view Bool
+) ret Bool {
+  if range.start < 0 or range.count is not text.length() {
+    ret false
+  }
+  loop var i: Int = 0, i < range.count, ++i {
+    var byte: Int = byteBufferAt(buffer: buffer, index: range.start + i)
+    var expected: Int = text.byteAt(index: i)
+    if ignoreCase {
+      byte = lowerByte(byte: byte)
+      expected = lowerByte(byte: expected)
+    }
+    if byte is not expected {
+      ret false
+    }
+  }
+  ret true
+}
+
+# A token character (RFC 9110 tchar): what a method and a header name are
+# made of
+func isTokenByte(byte: view Int) ret Bool {
+  if (byte >= 48 and byte <= 57) or (byte >= 65 and byte <= 90) or (byte >= 97 and byte <= 122) {
+    ret true
+  }
+  # ! # $ % & ' * + - . ^ _ ` | ~
+  ret byte is 33 or (byte >= 35 and byte <= 39) or byte is 42 or byte is 43 or byte is 45 or byte is 46 or byte is 94 or byte is 95 or byte is 96 or byte is 124 or byte is 126
+}
+
+# Whether every byte of `start ..< end` is a token byte (and there is one)
+func isToken(buffer: view ByteBuffer, start: view Int, end: view Int) ret Bool {
+  if end <= start {
+    ret false
+  }
+  loop var i: Int = start, i < end, ++i {
+    if not isTokenByte(byte: byteBufferAt(buffer: buffer, index: i)) {
+      ret false
+    }
+  }
+  ret true
+}
+
+func methodFrom(buffer: view ByteBuffer, range: view ByteRange) ret HttpMethod {
+  if rangeEquals(
+    buffer: buffer
+    range: range
+    text: "GET"
+    ignoreCase: false
+  ) {
+    ret HttpMethod.get
+  }
+  if rangeEquals(
+    buffer: buffer
+    range: range
+    text: "POST"
+    ignoreCase: false
+  ) {
+    ret HttpMethod.post
+  }
+  if rangeEquals(
+    buffer: buffer
+    range: range
+    text: "HEAD"
+    ignoreCase: false
+  ) {
+    ret HttpMethod.head
+  }
+  if rangeEquals(
+    buffer: buffer
+    range: range
+    text: "PUT"
+    ignoreCase: false
+  ) {
+    ret HttpMethod.put
+  }
+  if rangeEquals(
+    buffer: buffer
+    range: range
+    text: "DELETE"
+    ignoreCase: false
+  ) {
+    ret HttpMethod.delete
+  }
+  if rangeEquals(
+    buffer: buffer
+    range: range
+    text: "OPTIONS"
+    ignoreCase: false
+  ) {
+    ret HttpMethod.options
+  }
+  if rangeEquals(
+    buffer: buffer
+    range: range
+    text: "PATCH"
+    ignoreCase: false
+  ) {
+    ret HttpMethod.patch
+  }
+  if rangeEquals(
+    buffer: buffer
+    range: range
+    text: "CONNECT"
+    ignoreCase: false
+  ) {
+    ret HttpMethod.connect
+  }
+  if rangeEquals(
+    buffer: buffer
+    range: range
+    text: "TRACE"
+    ignoreCase: false
+  ) {
+    ret HttpMethod.trace
+  }
+  ret HttpMethod.other
+}
+
+# The first index of `byte` in `start ..< end`, -1 when absent
+func findByte(
+  buffer: view ByteBuffer
+  byte: view Int
+  start: view Int
+  end: view Int
+) ret Int {
+  loop var i: Int = start, i < end, ++i {
+    if byteBufferAt(buffer: buffer, index: i) is byte {
+      ret i
+    }
+  }
+  ret -1
+}
+
+func isSpaceOrTab(byte: view Int) ret Bool {
+  ret byte is 32 or byte is 9
+}
+
+# A non-negative decimal number filling `range` exactly, -1 otherwise (or
+# when it would not fit an Int)
+func decimalIn(buffer: view ByteBuffer, range: view ByteRange) ret Int {
+  if range.count <= 0 or range.count > 18 {
+    ret -1
+  }
+  var value: Int = 0
+  loop var i: Int = 0, i < range.count, ++i {
+    let digit: Int = byteBufferAt(buffer: buffer, index: range.start + i) - 48
+    if digit < 0 or digit > 9 {
+      ret -1
+    }
+    value = value * 10 + digit
+  }
+  ret value
+}
+
+# ----- the parser -----------------------------------------------------
+
+# Give up on the request being parsed: its headers are dropped from the list
+func rejectRequest(state: mod HttpParseState, headerFirst: view Int) ret HttpParseResult {
+  state.headers.truncate(len: headerFirst)
+  ret HttpParseResult.badRequest
+}
+
+# Parse the next request of `buffer` into `request`. `complete` moves the
+# state past it; `needMore` and `badRequest` leave the state where it was (a
+# bad request means: answer 400 and close the connection).
+func httpParseNext(
+  state: mod HttpParseState
+  buffer: view ByteBuffer
+  request: mod HttpRequest
+) ret HttpParseResult {
+  let length: Int = byteBufferLength(buffer: buffer)
+  # Empty lines before a request line are skipped (RFC 9112 §2.2)
+  loop state.position + 1 < length and byteBufferAt(buffer: buffer, index: state.position) is 13 and byteBufferAt(
+    buffer: buffer
+    index: state.position + 1
+  ) is 10 {
+    state.position = state.position + 2
+  }
+  let begin: Int = state.position
+  if begin >= length {
+    ret HttpParseResult.needMore
+  }
+  let headerEnd: Int = byteBufferIndexOf(buffer: buffer, pattern: "\r\n\r\n", from: begin)
+  if headerEnd < 0 {
+    if length - begin > maxHeaderBytes {
+      ret HttpParseResult.badRequest
+    }
+    ret HttpParseResult.needMore
+  }
+  if headerEnd - begin > maxHeaderBytes {
+    ret HttpParseResult.badRequest
+  }
+  let headerFirst: Int = state.headers.length
+
+  # Request line: METHOD SP target SP HTTP/1.x
+  let lineEnd: Int = byteBufferIndexOf(buffer: buffer, pattern: "\r\n", from: begin)
+  let methodEnd: Int = findByte(
+    buffer: buffer
+    byte: 32
+    start: begin
+    end: lineEnd
+  )
+  if methodEnd < 0 or not isToken(buffer: buffer, start: begin, end: methodEnd) {
+    ret rejectRequest(state: state, headerFirst: headerFirst)
+  }
+  let targetEnd: Int = findByte(
+    buffer: buffer
+    byte: 32
+    start: methodEnd + 1
+    end: lineEnd
+  )
+  if targetEnd < 0 or targetEnd is methodEnd + 1 {
+    ret rejectRequest(state: state, headerFirst: headerFirst)
+  }
+  loop var i: Int = methodEnd + 1, i < targetEnd, ++i {
+    let byte: Int = byteBufferAt(buffer: buffer, index: i)
+    if byte <= 32 or byte is 127 {
+      ret rejectRequest(state: state, headerFirst: headerFirst)
+    }
+  }
+  let version: ByteRange = { start: targetEnd + 1, count: lineEnd - targetEnd - 1 }
+  var minorVersion: Int = 1
+  if rangeEquals(
+    buffer: buffer
+    range: version
+    text: "HTTP/1.0"
+    ignoreCase: false
+  ) {
+    minorVersion = 0
+  } else if not rangeEquals(
+    buffer: buffer
+    range: version
+    text: "HTTP/1.1"
+    ignoreCase: false
+  ) {
+    ret rejectRequest(state: state, headerFirst: headerFirst)
+  }
+  let methodText: ByteRange = { start: begin, count: methodEnd - begin }
+
+  # Header lines: name ":" OWS value OWS
+  var keepAlive: Bool = minorVersion is 1
+  var contentLength: Int = 0
+  var position: Int = lineEnd + 2
+  loop position < headerEnd + 2 {
+    let headerLineEnd: Int = byteBufferIndexOf(buffer: buffer, pattern: "\r\n", from: position)
+    let colon: Int = findByte(
+      buffer: buffer
+      byte: 58
+      start: position
+      end: headerLineEnd
+    )
+    if colon < 0 or not isToken(buffer: buffer, start: position, end: colon) {
+      ret rejectRequest(state: state, headerFirst: headerFirst)
+    }
+    var valueStart: Int = colon + 1
+    loop valueStart < headerLineEnd and isSpaceOrTab(
+      byte: byteBufferAt(buffer: buffer, index: valueStart)
+    ) {
+      valueStart = valueStart + 1
+    }
+    var valueEnd: Int = headerLineEnd
+    loop valueEnd > valueStart and isSpaceOrTab(
+      byte: byteBufferAt(buffer: buffer, index: valueEnd - 1)
+    ) {
+      valueEnd = valueEnd - 1
+    }
+    if state.headers.length - headerFirst >= maxHeaders {
+      ret rejectRequest(state: state, headerFirst: headerFirst)
+    }
+    let header: HttpHeader = {
+      name: ByteRange { start: position, count: colon - position }
+      value: ByteRange { start: valueStart, count: valueEnd - valueStart }
+    }
+    if rangeEquals(
+      buffer: buffer
+      range: header.name
+      text: "connection"
+      ignoreCase: true
+    ) {
+      if rangeEquals(
+        buffer: buffer
+        range: header.value
+        text: "close"
+        ignoreCase: true
+      ) {
+        keepAlive = false
+      } else if rangeEquals(
+        buffer: buffer
+        range: header.value
+        text: "keep-alive"
+        ignoreCase: true
+      ) {
+        keepAlive = true
+      }
+    } else if rangeEquals(
+      buffer: buffer
+      range: header.name
+      text: "content-length"
+      ignoreCase: true
+    ) {
+      contentLength = decimalIn(buffer: buffer, range: header.value)
+      if contentLength < 0 {
+        ret rejectRequest(state: state, headerFirst: headerFirst)
+      }
+    } else if rangeEquals(
+      buffer: buffer
+      range: header.name
+      text: "transfer-encoding"
+      ignoreCase: true
+    ) {
+      ret rejectRequest(state: state, headerFirst: headerFirst)
+    }
+    state.headers.add(value: header)
+    position = headerLineEnd + 2
+  }
+
+  # The body
+  let bodyStart: Int = headerEnd + 4
+  if bodyStart + contentLength > length {
+    state.headers.truncate(len: headerFirst)
+    ret HttpParseResult.needMore
+  }
+  request.method = methodFrom(buffer: buffer, range: methodText)
+  request.methodText = methodText
+  request.target = ByteRange { start: methodEnd + 1, count: targetEnd - methodEnd - 1 }
+  request.minorVersion = minorVersion
+  request.headerFirst = headerFirst
+  request.headerCount = state.headers.length - headerFirst
+  request.body = ByteRange { start: bodyStart, count: contentLength }
+  request.keepAlive = keepAlive
+  request.whole = ByteRange { start: begin, count: bodyStart + contentLength - begin }
+  state.position = bodyStart + contentLength
+  ret HttpParseResult.complete
+}
+
+# The requests parsed so far are handled: drop their bytes from the buffer and
+# start the next batch (their ranges are invalid from here on)
+func httpParseConsumed(state: mod HttpParseState, buffer: mod ByteBuffer) {
+  consume(buffer: buffer, count: state.position)
+  state.position = 0
+  state.headers.clear()
+}
+
+# ----- reading a request ----------------------------------------------
+
+# Whether the request's path (its target up to a `?`) is exactly `path`
+func httpPathIs(buffer: view ByteBuffer, request: view HttpRequest, path: view String) ret Bool {
+  var pathCount: Int = request.target.count
+  let query: Int = findByte(
+    buffer: buffer
+    byte: 63
+    start: request.target.start
+    end: request.target.start + request.target.count
+  )
+  if query >= 0 {
+    pathCount = query - request.target.start
+  }
+  ret rangeEquals(
+    buffer: buffer
+    range: ByteRange { start: request.target.start, count: pathCount }
+    text: path
+    ignoreCase: false
+  )
+}
+
+# The value of the request's first header called `name` (any case); a range
+# with start -1 when there is none
+func httpHeaderValue(
+  state: view HttpParseState
+  buffer: view ByteBuffer
+  request: view HttpRequest
+  name: view String
+) ret ByteRange {
+  loop var i: Int = 0, i < request.headerCount, ++i {
+    if let header: view HttpHeader => state.headers.viewAt(index: request.headerFirst + i) {
+      if rangeEquals(
+        buffer: buffer
+        range: header.name
+        text: name
+        ignoreCase: true
+      ) {
+        ret header.value
+      }
+    }
+  }
+  ret emptyRange()
+}
+
+# A range's bytes as a String (this allocates; for logging and tests)
+func httpRangeText(buffer: view ByteBuffer, range: view ByteRange) ret String {
+  if range.start < 0 {
+    ret ""
+  }
+  ret byteBufferText(buffer: buffer, start: range.start, count: range.count)
+}
+
+# ----- the response encoder -------------------------------------------
+func httpReason(status: view Int) ret String {
+  if status is 200 {
+    ret "OK"
+  }
+  if status is 204 {
+    ret "No Content"
+  }
+  if status is 400 {
+    ret "Bad Request"
+  }
+  if status is 404 {
+    ret "Not Found"
+  }
+  if status is 405 {
+    ret "Method Not Allowed"
+  }
+  if status is 500 {
+    ret "Internal Server Error"
+  }
+  ret "Unknown"
+}
+
+# Append a whole response to `output`: the status line, Server, Date,
+# Content-Type, Content-Length (and `Connection: close` when the connection
+# will not be kept), then the body. `date` is an IMF-fixdate (lib/Time's
+# HttpDateCache). Nothing is allocated once `output` has grown to its size.
+func httpAppendResponse(
+  output: mod ByteBuffer
+  status: view Int
+  contentType: view String
+  body: view String
+  date: view String
+  keepAlive: view Bool
+) {
+  appendText(buffer: output, text: "HTTP/1.1 ")
+  appendDecimal(buffer: output, value: status)
+  appendText(buffer: output, text: " ")
+  appendText(buffer: output, text: httpReason(status: status))
+  appendText(buffer: output, text: "\r\nServer: Rae\r\nDate: ")
+  appendText(buffer: output, text: date)
+  appendText(buffer: output, text: "\r\nContent-Type: ")
+  appendText(buffer: output, text: contentType)
+  appendText(buffer: output, text: "\r\nContent-Length: ")
+  appendDecimal(buffer: output, value: body.length())
+  if keepAlive {
+    appendText(buffer: output, text: "\r\n\r\n")
+  } else {
+    appendText(buffer: output, text: "\r\nConnection: close\r\n\r\n")
+  }
+  appendText(buffer: output, text: body)
+}
+
+# The answer to a request `httpParseNext` called bad: 400, then close
+func httpAppendBadRequest(output: mod ByteBuffer, date: view String) {
+  httpAppendResponse(
+    output: output
+    status: 400
+    contentType: "text/plain"
+    body: "Bad Request"
+    date: date
+    keepAlive: false
+  )
+}

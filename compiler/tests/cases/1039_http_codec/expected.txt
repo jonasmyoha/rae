@@ -1,0 +1,34 @@
+byte by byte: complete at the last byte true, needMore 56 times
+method get, target /plaintext, HTTP/1.1, 2 headers
+host: localhost
+path is /plaintext: true
+body half there: needMore
+body complete: complete, [hello world], path /echo true
+pipelined: 16 complete, in order true
+after consume: 0 bytes left
+first response:
+HTTP/1.1 200 OK
+Server: Rae
+Date: Sun, 06 Nov 1994 08:49:37 GMT
+Content-Type: text/plain
+Content-Length: 13
+
+Hello, World!
+get /a keepAlive false; get /b keepAlive false; get /c keepAlive true; get /d keepAlive true; -> needMore
+no version: -> badRequest
+bad version: -> badRequest
+space in method: -> badRequest
+header without colon: -> badRequest
+space in header name: -> badRequest
+bad length: -> badRequest
+chunked: -> badRequest
+header section too big: -> badRequest
+HTTP/1.1 400 Bad Request
+Server: Rae
+Date: Sun, 06 Nov 1994 08:49:37 GMT
+Content-Type: text/plain
+Content-Length: 11
+Connection: close
+
+Bad Request
+allocations for 1600 requests after warmup: 0 (3200 handled)

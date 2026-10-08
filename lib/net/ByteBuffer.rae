@@ -93,6 +93,34 @@ func appendText(buffer: mod ByteBuffer, text: view String) {
   }
 }
 
+# Append `value` in decimal (a Content-Length, a status code) without making
+# a String
+func appendDecimal(buffer: mod ByteBuffer, value: view Int) {
+  var magnitude: Int = value
+  if value < 0 {
+    byteBufferReserve(buffer: buffer, count: 1)
+    buffer.bytes.add(value: 45)
+    magnitude = -value
+  }
+  var digits: Int = 1
+  var probe: Int = magnitude
+  loop probe >= 10 {
+    probe = probe / 10
+    digits = digits + 1
+  }
+  byteBufferReserve(buffer: buffer, count: digits)
+  let first: Int = buffer.bytes.length
+  loop var i: Int = 0, i < digits, ++i {
+    buffer.bytes.add(value: 48)
+  }
+  var position: Int = first + digits - 1
+  loop position >= first {
+    buffer.bytes.set(index: position, value: (48 + magnitude % 10) as UInt8)
+    magnitude = magnitude / 10
+    position = position - 1
+  }
+}
+
 # Drop the first `count` unread bytes (all of them if there are fewer)
 func consume(buffer: mod ByteBuffer, count: view Int) {
   if count <= 0 {
