@@ -19,7 +19,7 @@ Sizes are rough line counts of the logic that moves, not of whole files.
 
 | # | file → where | what moves | what stays C | size | notes |
 |---|---|---|---|---|---|
-| 1 | `runtime_net.c` → `lib/net` | the listen sequence, EINTR retry, connect-with-timeout, socket option choices, errno → `NetStatus` mapping, the accept-abort rule | one-syscall shims, address resolution, a constant table | ~180 | **queued (T2)**; the model for every other row |
+| 1 ✅ | `runtime_net.c` → `lib/net` | the listen sequence, EINTR retry, connect-with-timeout, socket option choices, errno → `NetStatus` mapping, the accept-abort rule | one-syscall shims, address resolution, a constant table | ~180 | **done** 2026-10-08 (T2): one-call shim + `lib/net/NetSystem.rae` + policy in `lib/net/Tcp.rae`; the model for every other row |
 | 2 | dead code (no references found) | delete `rae_ext_json_get` (`runtime_system_log.c`), `rae_ext_rae_str_to_lower` (`runtime_strings_algorithms.c`; `lib/String.rae`'s `toLower` is already Rae), `rae_ext_rae_str_f32_ptr` (`runtime_filesystem.c`); and the stale tracked `rae_runtime.{c,h}` copies in `examples/06_list_basic/` and `examples/95_easing_2d/` | — | ~90 + 4 files | trivial; check once more with a full build of every example before deleting |
 | 3 | `runtime_strings_algorithms.c` → `lib/String.rae` | compare, equality, hash, contains, startsWith, endsWith, indexOf, trim, byteAt, UTF-8 decode (`at`), UTF-8 encode (`fromCodepoint`), integer parsing (`toInt`) | allocation of a `rae_String` (concat, sub) until Rae has a byte-level string builder; `strtod` for `toFloat` (a C-library call) | ~170 | every program uses these; `indexOf` is also called by generated C (codegen then calls the Rae function) |
 | 4 | `runtime_filesystem.c` (`rae_ext_rae_str_i64/u64/bool/char` + pointer variants) → Rae | integer, bool and char (UTF-8) to text | float and double to text (`snprintf`'s shortest round-trip is a library job) | ~90 | called by generated C for string interpolation: the codegen switches to Rae functions in `lib/core` |
@@ -57,5 +57,12 @@ Sizes are rough line counts of the logic that moves, not of whole files.
 4. Measure the hot ones (string search, interpolation) with the release
    profile before and after. A move is not done if it makes every program
    slower.
-5. One row per task; rows 1–2 first, rows 3–5 next (they touch every
-   program), rows 6–13 when their area is being worked on anyway.
+5. One row per task. **Queued 2026-10-08:**
+   - rows 2, 3, 4, 5, 7, 8, 9, 11 and 12 as their own tasks at the top of
+     the queue ("runtime audit row N: …");
+   - row 6 inside the server-time task (G4);
+   - row 10 as its own task right after the server poller task (G2), which
+     it builds on;
+   - row 13 inside the lightweight-spawn scheduler task (S3).
+
+   Each task marks its row done here.
