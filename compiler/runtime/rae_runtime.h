@@ -732,11 +732,12 @@ rae_Bool rae_ext_rae_sys_lock_file(rae_String path);
 rae_Bool rae_ext_rae_sys_unlock_file(rae_String path);
 double rae_ext_rae_sys_file_mtime(rae_String path);
 /* OS file-change notifications (runtime_file_notify.c, lib/FileNotify.rae). */
-int64_t rae_ext_FileNotify_open(void);
-rae_Bool rae_ext_FileNotify_watch(int64_t id, rae_String path);
-void rae_ext_FileNotify_clear(int64_t id);
-rae_Bool rae_ext_FileNotify_takeChanged(int64_t id);
-void rae_ext_FileNotify_close(int64_t id);
+int64_t rae_ext_FileNotify_supported(void);
+int64_t rae_ext_FileNotify_openForEvents(rae_String path);
+int64_t rae_ext_FileNotify_watchHandle(int64_t queue, int64_t fd);
+int64_t rae_ext_FileNotify_drain(int64_t queue);
+int64_t rae_ext_FileNotify_wakeOnChange(int64_t queue);
+int64_t rae_ext_FileNotify_takePending(int64_t queue);
 /* The socket system-call shim (runtime_net.c, lib/net/NetSystem.rae): one
  * call per function, the result or -errno; the policy is lib/net/Tcp.rae. */
 int64_t rae_ext_NetSys_constant(int64_t which);
