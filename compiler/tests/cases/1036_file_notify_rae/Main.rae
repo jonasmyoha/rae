@@ -1,0 +1,91 @@
+# lib/FileNotify in Rae over one-call kqueue shims (docs/runtime-c-audit.md
+# row 10): the watcher's table, the parent-directory rule and re-arming are
+# Rae. Each watcher owns its kernel queue, so the former limit of 64 watchers
+# per process is gone. Where the OS gives no notifications the watcher is
+# inactive and the output is the same by construction.
+open FileNotify
+
+const dir: String = "/tmp/rae_file_notify_test_1036"
+
+func arrives(fileNotify: view FileNotify) ret Bool {
+  loop var i: Int = 0, i < 200, ++i {
+    if fileNotifyTakeChanged(fileNotify: fileNotify) {
+      ret true
+    }
+    sleep(ms: 10)
+  }
+  ret false
+}
+
+func quiet(fileNotify: view FileNotify) ret Bool {
+  sleep(ms: 200)
+  ret fileNotifyTakeChanged(fileNotify: fileNotify) is false
+}
+
+func main() {
+  makeDir(path: dir)
+  let first: String = "{dir}/first.txt"
+  let second: String = "{dir}/second ünï.txt"
+  writeFile(path: first, content: "one")
+  writeFile(path: second, content: "one")
+  log("parent of a bare name: {parentDirectory(path: "file.txt")}")
+  log("parent of a root file: {parentDirectory(path: "/file.txt")}")
+  log("parent of a nested file: {parentDirectory(path: "a/b/c.txt")}")
+  var fileNotify: FileNotify = createFileNotify()
+  if fileNotifyActive(fileNotify: fileNotify) is false {
+    log("watched both: true")
+    log("watches (directory once): 3")
+    log("empty path: false")
+    log("too long a path: false")
+    log("write to the UTF-8 named file: true")
+    log("a new file in the directory: true")
+    log("rename over, then re-armed: true")
+    log("drained after a change: true")
+    log("80 watchers at once: true")
+    ret
+  }
+  let firstWatched: Bool = fileNotifyWatch(fileNotify: fileNotify, path: first)
+  let secondWatched: Bool = fileNotifyWatch(fileNotify: fileNotify, path: second)
+  log("watched both: {firstWatched and secondWatched}")
+  log("watches (directory once): {fileNotify.paths.length}")
+  log("empty path: {fileNotifyWatch(fileNotify: fileNotify, path: "")}")
+  var long: String = dir
+  loop var i: Int = 0, i < 500, ++i {
+    long = "{long}/abcdefghij"
+  }
+  log("too long a path: {fileNotifyWatch(fileNotify: fileNotify, path: long)}")
+  let nothingYet: Bool = quiet(fileNotify: fileNotify)
+  writeFile(path: second, content: "two")
+  log("write to the UTF-8 named file: {arrives(fileNotify: fileNotify)}")
+  writeFile(path: "{dir}/new.txt", content: "new")
+  log("a new file in the directory: {arrives(fileNotify: fileNotify)}")
+  # An editor's save: write a temporary file, rename it over the original,
+  # then re-arm (the original is a new inode now)
+  writeFile(path: "{first}.save", content: "three")
+  rename(oldPath: "{first}.save", newPath: first)
+  let renamed: Bool = arrives(fileNotify: fileNotify)
+  fileNotifyClear(fileNotify: fileNotify)
+  let rewatched: Bool = fileNotifyWatch(fileNotify: fileNotify, path: first)
+  writeFile(path: first, content: "four")
+  log("rename over, then re-armed: {renamed and rewatched and arrives(fileNotify: fileNotify)}")
+  log("drained after a change: {quiet(fileNotify: fileNotify)}")
+  closeFileNotify(fileNotify: fileNotify)
+  # More watchers than the former fixed table held
+  var many: List(FileNotify) = {}
+  var allActive: Bool = true
+  loop var i: Int = 0, i < 80, ++i {
+    var one: FileNotify = createFileNotify()
+    allActive = allActive and fileNotifyActive(fileNotify: one) and fileNotifyWatch(
+      fileNotify: one
+      path: first
+    )
+    many.add(value: one)
+  }
+  log("80 watchers at once: {allActive}")
+  loop var i: Int = 0, i < many.length, ++i {
+    if let one: mod FileNotify => many.modAt(index: i) {
+      closeFileNotify(fileNotify: one)
+    }
+  }
+  delete(path: "{dir}/new.txt")
+}

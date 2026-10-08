@@ -197,8 +197,8 @@ func createReloadSignalWatcher() ret ReloadSignalWatcher {
 
 # The same for a signal file somewhere else (tests).
 func createReloadSignalWatcherAt(path: view String) ret ReloadSignalWatcher {
-  let notify: FileNotify = createFileNotify()
-  fileNotifyWatch(fileNotify: notify, path: path)
+  var notify: FileNotify = createFileNotify()
+  let watched: Bool = fileNotifyWatch(fileNotify: notify, path: path)
   ret ReloadSignalWatcher { path: "{path}", lastMtime: fileModTime(path: path), notify: notify }
 }
 

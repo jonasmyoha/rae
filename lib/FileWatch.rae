@@ -58,7 +58,7 @@ func createFileWatcher(
     }
     i = i + 1
   }
-  let notify: FileNotify = createFileNotify()
+  var notify: FileNotify = createFileNotify()
   if enabled {
     watchPaths(notify: notify, paths: paths)
   }
@@ -71,7 +71,7 @@ func createFileWatcher(
   }
 }
 
-func watchPaths(notify: view FileNotify, paths: view List(String)) {
+func watchPaths(notify: mod FileNotify, paths: view List(String)) {
   loop var i: Int = 0, i < paths.length, ++i {
     if let path: String = paths.copyAt(index: i) {
       fileNotifyWatch(fileNotify: notify, path: path)

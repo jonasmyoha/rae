@@ -191,9 +191,9 @@ Where the wakeups came from, and the shared rule that removed each:
 
 - **A file watcher polled on a timer** (50 ms in the policy, 250 ms in the
   watchers): an idle visible window woke ~20x/s to stat files that had not
-  changed. Now the OS notifies (`lib/FileNotify.rae`: kqueue on macOS, inotify
-  on Linux), and its runtime thread calls the same `EventLoop.wake` a spawn'd
-  worker uses. `pollWatcher` is passed only where the OS has no notifications
+  changed. Now the OS notifies (`lib/FileNotify.rae`: kqueue on macOS; Linux
+  polls until its inotify shim lands with epoll), and the runtime's waker
+  thread calls the same `EventLoop.wake` a spawn'd worker uses. `pollWatcher` is passed only where the OS has no notifications
   (`fileWatcherNeedsPolling`, `reloadSignalNeedsPolling`), and then it is a 1 s
   poll.
 - **An effect kept a one-frame wait while hidden**: `animating` made the wait
