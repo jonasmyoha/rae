@@ -851,6 +851,22 @@ pkill -9 -f 'watch-tests.sh'; pkill -9 -f 'make test'; pkill -9 -f 'run_tests.sh
 Then start the single run. If you need to re-run, kill first, then re-launch —
 never launch a second run on top of a live one.
 
+**Leave no app running (2026-10-08).** Every program you start — an example,
+a scratch test, a screenshot capture — must be gone when you are done with it.
+Seventeen orphaned `rae_compiled.bin` apps (window apps never exit by
+themselves) once ran for hours, kept the fans at full speed and made the suite
+take 34 minutes instead of 14. Prefer a run that ends by itself
+(`RAE_AUTO_EXIT_SEC`, `RAE_HEADLESS_FRAMES`, `RAE_SDL_HEADLESS_MS`, a test
+frame env); wrap every run in a timeout. Since 0.1.213 `rae run` passes a
+timeout / `kill` / hang-up on to the app and the app ends when its `rae run`
+dies, but a binary started directly (`.rae/build/app`, a gate's `$TMP_OUT/app`)
+has no such guard. After any session that ran apps, check — and when the
+machine feels slow, look here first:
+
+```bash
+pgrep -fl 'rae_compiled.bin|/rae_run_' || echo "no Rae apps running"
+```
+
 ---
 
 End of instructions.
