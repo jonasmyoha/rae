@@ -1,0 +1,18 @@
+[package]
+name = "rae-spawn-references"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# tokio tasks for docs/lightweight-spawn-design.md §8 step 1: the same
+# benchmarks as rae/Main.rae, on a work-stealing pool of WORKERS threads.
+[dependencies]
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "time", "macros"] }
+
+[[bin]]
+name = "spawn"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3
+codegen-units = 1
