@@ -1241,6 +1241,41 @@ int local_index_by_name(const CFuncContext* ctx, Str name) {
 /* The scope-exit release of one local: nothing for a borrow or a cheap value,
  * otherwise the drop its type needs. The caller guards it with the local's
  * live flag when it has one. */
+/* Whether any statement in `block` (nested blocks included) assigns the
+ * plain local `name` (`name = …`) */
+bool c_block_assigns_name(const AstBlock* block, Str name) {
+  if (!block) return false;
+  for (const AstStmt* stmt = block->first; stmt; stmt = stmt->next) {
+    switch (stmt->kind) {
+      case AST_STMT_ASSIGN: {
+        const AstExpr* target = stmt->as.assign_stmt.target;
+        if (target && target->kind == AST_EXPR_IDENT && str_eq(target->as.ident, name)) return true;
+        break;
+      }
+      case AST_STMT_IF:
+        if (c_block_assigns_name(stmt->as.if_stmt.then_block, name) ||
+            c_block_assigns_name(stmt->as.if_stmt.else_block, name)) return true;
+        break;
+      case AST_STMT_LOOP:
+        if (c_block_assigns_name(stmt->as.loop_stmt.body, name)) return true;
+        break;
+      case AST_STMT_MATCH:
+        for (const AstMatchCase* match_case = stmt->as.match_stmt.cases; match_case; match_case = match_case->next)
+          if (c_block_assigns_name(match_case->block, name)) return true;
+        break;
+      case AST_STMT_DEFER:
+        if (c_block_assigns_name(stmt->as.defer_stmt.block, name)) return true;
+        break;
+      case AST_STMT_UNSAFE:
+        if (c_block_assigns_name(stmt->as.unsafe_stmt.block, name)) return true;
+        break;
+      default:
+        break;
+    }
+  }
+  return false;
+}
+
 static void emit_local_drop(CFuncContext* ctx, FILE* out, size_t idx,
                             const AstTypeRef* type) {
   // #969: inside a monomorphized generic body an OWNING local declared as
@@ -3086,6 +3121,16 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                   Str ln = stmt->as.let_stmt.name;
                   fprintf(out, "  %.*s.is_owned = 0;\n",
                           (int)ln.len, ln.data);
+                  /* A `var` the body assigns later will own a heap from
+                   * then on (#965 sets the flag at that assignment). A drop
+                   * emitted EARLIER in the source can still run after it:
+                   * a `ret` inside a loop, reached on a later iteration.
+                   * So it is owning from here; while it still holds the
+                   * literal or alias, is_owned is 0 and the drop is a
+                   * no-op. */
+                  if (stmt->as.let_stmt.is_var && ctx->func_decl &&
+                      c_block_assigns_name(ctx->func_decl->body, ln))
+                    ctx->local_struct_owns_heap[ctx->local_count] = true;
                 }
                 ctx->local_count++;
             }
