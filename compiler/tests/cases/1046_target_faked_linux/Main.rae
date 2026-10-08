@@ -1,0 +1,9 @@
+# A check-only build for another target (docs/platform-conditional-code.md
+# §3.1): `rae build --target-os linux --target-arch x64 --print-target`
+# type-checks against Linux on x64, prints what `Target` holds there, and
+# emits nothing.
+const hasEpoll: Bool = Target.isLinuxKernel
+
+func main() {
+  log("built for {Target.os} on {Target.arch}, epoll: {hasEpoll}")
+}

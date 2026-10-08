@@ -1,0 +1,22 @@
+# The Target prelude (docs/platform-conditional-code.md §3.1): every program
+# reads its build's target as `Target.*` without an import. This is the
+# host's view; the expected output is the reference machine's (macOS on
+# arm64). Fixtures 1046 and 1047 fake other targets with check-only builds.
+# A program's own capability is an ordinary const over the families.
+const hasKqueue: Bool = Target.isApple or Target.isBsd
+
+func main() {
+  log("os: {Target.os}")
+  log("arch: {Target.arch}")
+  log("simd: {Target.simd}")
+  log("isApple: {Target.isApple}")
+  log("isBsd: {Target.isBsd}")
+  log("isLinuxKernel: {Target.isLinuxKernel}")
+  log("isUnix: {Target.isUnix}")
+  log("isMobileOs: {Target.isMobileOs}")
+  log("isDesktopOs: {Target.isDesktopOs}")
+  log("isNative: {Target.isNative}")
+  log("hasKqueue: {hasKqueue}")
+  # The values are ordinary consts: they compare like any enum
+  log("built for macOS: {Target.os is Os.macos}, on arm64: {Target.arch is Arch.arm64}")
+}

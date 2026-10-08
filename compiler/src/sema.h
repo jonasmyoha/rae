@@ -15,6 +15,9 @@ void sema_reset_file_scopes(void);
 void sema_register_file_imports(Arena* arena, const char* file, AstImport* imports);
 // Register a prelude package (auto-loaded => opened for every file).
 void sema_register_global_open(Arena* arena, const char* module);
+/* A module every file IMPORTS without opening it (lib/Target.rae): reached
+ * qualified only */
+void sema_register_global_import(Arena* arena, const char* module);
 
 // Resolves a type reference (AstTypeRef) to a canonical TypeInfo*
 TypeInfo* sema_resolve_type(CompilerContext* ctx, AstTypeRef* type_ref);

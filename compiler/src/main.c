@@ -101,7 +101,8 @@ typedef struct ModuleNode {
   char* file_path;
   char* canonical_path;
   AstModule* module;
-  bool is_auto_loaded;   // intentional stdlib prelude (core/string/math/io/sys) — implicitly opened everywhere; NOT incidentally-discovered deps (docs/module-namespacing.md)
+  bool is_auto_loaded;
+  bool is_prelude_import;  // loaded for every file but NOT opened: reached qualified only (`Target.os`)   // intentional stdlib prelude (core/string/math/io/sys) — implicitly opened everywhere; NOT incidentally-discovered deps (docs/module-namespacing.md)
   struct ModuleNode* next;
 } ModuleNode;
 
@@ -241,6 +242,74 @@ static bool g_float4_scalar = false;
  * (docs/lightweight-spawn-design.md §4.1) and stop before emitting C. */
 static bool g_report_waits = false;
 static bool g_report_waits_lib = false;  /* --report-waits-lib: lib/'s counts too */
+
+/* The target the program is built for (lib/Target.rae,
+ * docs/platform-conditional-code.md §3.1): the host for a native build,
+ * web/wasm32 for --target wasm, or a check-only --target-os/--target-arch.
+ * NULL means the host. */
+static const char* g_target_os = NULL;
+static const char* g_target_arch = NULL;
+static bool g_target_check_only = false;  /* a faked target: type-check, emit nothing */
+static bool g_print_target = false;       /* --print-target: print Target's values, emit nothing */
+
+static const char* const k_target_os_names[] = {
+  "macos", "ios", "tvos", "watchos", "visionos", "android", "sailfish",
+  "linux", "freebsd", "openbsd", "netbsd", "windows", "web"
+};
+static const char* const k_target_arch_names[] = { "arm64", "x64", "wasm32" };
+
+static const char* host_target_os(void) {
+#if defined(__APPLE__)
+  return "macos";
+#elif defined(__ANDROID__)
+  return "android";
+#elif defined(__linux__)
+  return "linux";
+#elif defined(__FreeBSD__)
+  return "freebsd";
+#elif defined(__OpenBSD__)
+  return "openbsd";
+#elif defined(__NetBSD__)
+  return "netbsd";
+#elif defined(_WIN32)
+  return "windows";
+#else
+  return "linux";
+#endif
+}
+
+static const char* host_target_arch(void) {
+#if defined(__aarch64__) || defined(__arm64__)
+  return "arm64";
+#elif defined(__x86_64__) || defined(_M_X64)
+  return "x64";
+#else
+  return "arm64";
+#endif
+}
+
+static bool target_name_known(const char* name, const char* const* names, size_t count) {
+  for (size_t i = 0; i < count; i++) if (strcmp(names[i], name) == 0) return true;
+  return false;
+}
+
+/* Write the build's target into lib/Target.rae's three per-build consts, in
+ * the parsed AST (the file's own values are placeholders) */
+static void apply_build_target(AstModule* module) {
+  const char* os = g_target_os ? g_target_os : host_target_os();
+  const char* arch = g_target_arch ? g_target_arch : host_target_arch();
+  for (AstDecl* d = module->decls; d; d = d->next) {
+    if (d->kind != AST_DECL_GLOBAL_LET || !d->as.let_decl.value) continue;
+    AstExpr* value = d->as.let_decl.value;
+    if (str_eq_cstr(d->as.let_decl.name, "os") && value->kind == AST_EXPR_MEMBER) {
+      value->as.member.member = str_from_cstr(os);
+    } else if (str_eq_cstr(d->as.let_decl.name, "arch") && value->kind == AST_EXPR_MEMBER) {
+      value->as.member.member = str_from_cstr(arch);
+    } else if (str_eq_cstr(d->as.let_decl.name, "simd") && value->kind == AST_EXPR_BOOL) {
+      value->as.boolean = !g_float4_scalar;
+    }
+  }
+}
 static bool copy_runtime_assets(const char* dest_dir);
 typedef struct {
   WatchSources sources;
@@ -489,6 +558,31 @@ static bool parse_build_args(int argc, char** argv, BuildOptions* opts) {
       continue;
     }
     if (strcmp(arg, "--emit-c") == 0) {
+      opts->emit_c = true;
+      i += 1;
+      continue;
+    }
+    if (strcmp(arg, "--target-os") == 0 || strcmp(arg, "--target-arch") == 0) {
+      bool is_os = strcmp(arg, "--target-os") == 0;
+      if (i + 1 >= argc) {
+        fprintf(stderr, "error: %s expects a value\n", arg);
+        return false;
+      }
+      const char* value = argv[i + 1];
+      bool known = is_os ? target_name_known(value, k_target_os_names, sizeof k_target_os_names / sizeof *k_target_os_names)
+                         : target_name_known(value, k_target_arch_names, sizeof k_target_arch_names / sizeof *k_target_arch_names);
+      if (!known) {
+        fprintf(stderr, "error: unknown %s '%s' (see enum %s in lib/Target.rae)\n", is_os ? "target OS" : "target architecture",
+                value, is_os ? "Os" : "Arch");
+        return false;
+      }
+      if (is_os) g_target_os = value; else g_target_arch = value;
+      opts->emit_c = true;
+      i += 2;
+      continue;
+    }
+    if (strcmp(arg, "--print-target") == 0) {
+      g_print_target = true;
       opts->emit_c = true;
       i += 1;
       continue;
@@ -855,6 +949,7 @@ static bool module_graph_append(ModuleGraph* graph,
   node->module = module;
   if (module) {
       module->file_path = node->file_path;
+      if (module_path && strcmp(module_path, "Target") == 0) apply_build_target(module);
   }
   if ((module_path && !node->module_path) || !node->file_path || !node->canonical_path) {
     fprintf(stderr, "error: out of memory while duplicating module paths\n");
@@ -1651,7 +1746,8 @@ static bool module_graph_load_module(ModuleGraph* graph,
                         strcmp(module_path, "Math") != 0 &&
                         strcmp(module_path, "Io") != 0 &&
                         strcmp(module_path, "String") != 0 &&
-                        strcmp(module_path, "Sys") != 0))) {
+                        strcmp(module_path, "Sys") != 0 &&
+                        strcmp(module_path, "Target") != 0))) {
     // Prelude: auto-loaded => auto-opened for every file. `core/Core` pulls in
     // its sibling `core/List` (the generic List(T)), which is a fundamental type
     // used pervasively via bare/UFCS (.add/.get) — requiring a per-file
@@ -1684,6 +1780,19 @@ static bool module_graph_load_module(ModuleGraph* graph,
           if (n->module_path && strncmp(n->module_path, name, folder_len) == 0)
             n->is_auto_loaded = true;
         }
+      }
+    }
+    /* Target (docs/platform-conditional-code.md): loaded for every file, but
+     * only IMPORTED there, so its names are written qualified (`Target.os`)
+     * and a bare `os` or `simd` is never taken */
+    if (!module_graph_has_module(graph, "Target") && !module_stack_contains(&frame, "Target")) {
+      char* target_path = try_resolve_lib_module(graph->root_path, "Target");
+      if (target_path) {
+        bool loaded_ok = module_graph_load_module(graph, "Target", target_path, &frame, hash_out, no_implicit);
+        free(target_path);
+        if (!loaded_ok) return false;
+        ModuleNode* target_node = module_graph_find(graph, "Target");
+        if (target_node) target_node->is_prelude_import = true;
       }
     }
   }
@@ -1998,6 +2107,7 @@ static AstModule merge_module_graph(const ModuleGraph* graph) {
     // Prelude (auto-load set) is opened for every file. Driven by the load
     // mechanism's flag, not a hardcoded resolver list.
     if (node->is_auto_loaded && node->module_path) sema_register_global_open(graph->arena, node->module_path);
+    if (node->is_prelude_import && node->module_path) sema_register_global_import(graph->arena, node->module_path);
   }
   // Collision guard: namespaced extern symbols are rae_ext_<module-path>_<name>
   // with '/'->'_'. Two DISTINCT module paths must never map to the same prefix
@@ -2151,6 +2261,10 @@ static void print_usage(const char* prog) {
           "                           --report-waits (print which functions may wait and\n"
           "                           would get a resumable twin; emits nothing;\n"
           "                           --report-waits-lib adds lib/'s counts)\n");
+  fprintf(stderr,
+          "                           --target-os <os> --target-arch <arch> (type-check\n"
+          "                           for another target, lib/Target.rae; emits nothing),\n"
+          "                           --print-target (print Target's values; emits nothing)\n");
   fprintf(stderr,
           "  watch <file>    Compiled hot-reload supervisor. Builds and runs <file>,\n");
   fprintf(stderr,
@@ -2493,6 +2607,29 @@ static bool build_c_backend_output(const char* entry_file,
       arena_destroy(arena);
       progress_end(false);
       return false;
+  }
+  if (g_print_target || g_target_check_only) {
+    /* A check-only build for another target, or --print-target: sema has
+     * run (every error is reported above); nothing is emitted */
+    const char* os = g_target_os ? g_target_os : host_target_os();
+    const char* arch = g_target_arch ? g_target_arch : host_target_arch();
+    if (g_print_target) {
+      printf("target %s/%s\n", os, arch);
+      for (const AstDecl* d = merged.decls; d; d = d->next) {
+        if (d->kind != AST_DECL_GLOBAL_LET || !d->as.let_decl.is_const || !d->module_name ||
+            strcmp(d->module_name, "Target") != 0 || !d->as.let_decl.value) continue;
+        const AstExpr* value = d->as.let_decl.value;
+        printf("  Target.%.*s = ", (int)d->as.let_decl.name.len, d->as.let_decl.name.data);
+        if (value->kind == AST_EXPR_BOOL) printf("%s\n", value->as.boolean ? "true" : "false");
+        else if (value->kind == AST_EXPR_MEMBER) printf("%.*s\n", (int)value->as.member.member.len, value->as.member.member.data);
+        else printf("?\n");
+      }
+    }
+    if (g_target_check_only) printf("checked for %s/%s: no errors (a check-only build emits nothing)\n", os, arch);
+    module_graph_free(&graph);
+    arena_destroy(arena);
+    progress_end(true);
+    return true;
   }
   if (g_report_waits) {
     /* The backend's discovery pass instantiates the generics; its output is
@@ -4148,6 +4285,18 @@ static int run_command(const char* cmd, int argc, char** argv) {
       return 1;
     }
 
+    /* The build's target (lib/Target.rae). A wasm build is web/wasm32; a
+     * native one is the host. --target-os/--target-arch that name another
+     * target make a check-only build: it type-checks against that target
+     * and emits nothing, since this toolchain cannot produce its binary. */
+    {
+      const char* native_os = build_opts.target == BUILD_TARGET_WASM ? "web" : host_target_os();
+      const char* native_arch = build_opts.target == BUILD_TARGET_WASM ? "wasm32" : host_target_arch();
+      if ((g_target_os && strcmp(g_target_os, native_os) != 0) || (g_target_arch && strcmp(g_target_arch, native_arch) != 0))
+        g_target_check_only = true;
+      if (!g_target_os) g_target_os = native_os;
+      if (!g_target_arch) g_target_arch = native_arch;
+    }
     switch (build_opts.target) {
       case BUILD_TARGET_COMPILED: {
         if (!build_opts.emit_c) {
@@ -4174,7 +4323,7 @@ static int run_command(const char* cmd, int argc, char** argv) {
         // Record which non-toolchain-bundled libs the program imports next to
         // the emitted C, so `rae watch` (which emits via this subprocess) can
         // link SDL3 / wgpu-native rather than assuming a plain program.
-        if (okc && !g_report_waits) {
+        if (okc && !g_report_waits && !g_target_check_only && !g_print_target) {
           char deps_path[PATH_MAX];
           snprintf(deps_path, sizeof(deps_path), "%s.deps", build_opts.out_path);
           FILE* df = fopen(deps_path, "w");
@@ -4215,6 +4364,7 @@ static int run_command(const char* cmd, int argc, char** argv) {
                                           NULL,
                                           PROGRESS_EMIT);
         progress_end(okc);
+        if (g_target_check_only || g_print_target || g_report_waits) return okc ? 0 : 1;
         bool linked = okc && emcc_link_c_to_web(build_opts.entry_path,
                                                 temp_c,
                                                 build_opts.out_path,
