@@ -1,0 +1,472 @@
+# The ECS HTTP server's data (docs/server-benchmarks-design.md §7, §9 G8): the
+# connection components, the HttpRequestEvent, the World (HttpServer) that owns
+# them with its resources, and the helpers a route handler answers with. The
+# systems that run over it, in their fixed order, are in HttpSystems.
+#
+# A connection is an entity; a request is an EVENT (decision F9): it is
+# parsed, routed and answered in the frame its bytes arrived, and it points
+# into the connection's ReadBuffer with byte ranges, so it owns no heap. A
+# request whose answer comes later is PROMOTED to an AwaitingResult component
+# holding the Task of the `spawn`ed slow work; a later frame polls it with
+# `tryGet` (no callbacks, no async).
+#
+# A connection with no socket (`openConnection` with `noSocket()`) is DETACHED:
+# nothing reads into it or writes from it, so a test puts bytes in its
+# ReadBuffer, runs the frame, and takes its WriteBuffer (`takeOutput`).
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open ecs/Tag
+open ecs/Event
+open collections/IntMap
+open net/Tcp
+open net/Poller
+open net/ByteBuffer
+open http/Http
+open Time
+
+# How many bytes one read asks for (a read buffer grows to hold this)
+const readChunkBytes: Int = 16384
+
+# How many released connection buffers the pool keeps for reuse
+const maxPooledBuffers: Int = 1024
+
+# ----- components ---------------------------------------------------------
+
+# The OS handle of the connection, `noSocket()` for a detached one
+type Socket {
+  socketId: SocketId
+  # Registered with the poller for writability (output is waiting)
+  watchingWritable: Bool
+}
+
+# Tags set by pollSystem for this frame only: there are bytes to read / room
+# to write. A connection with new input for the parser is Readable too.
+type Readable {
+}
+
+type Writable {
+}
+
+# Tag: the WriteBuffer holds bytes still to send
+type Sending {
+}
+
+# Tag: flush, then destroy
+type Closing {
+}
+
+# Bytes received and not yet consumed
+type ReadBuffer {
+  buffer: ByteBuffer
+}
+
+# Bytes still to send
+type WriteBuffer {
+  buffer: ByteBuffer
+}
+
+# The incremental parser of an HTTP connection
+type HttpParse {
+  state: HttpParseState
+  # The sequence number the next request gets (0 for the first)
+  nextSequence: Int
+  # A bad request or `Connection: close` was parsed: nothing after it is read
+  finished: Bool
+}
+
+type KeepAlive {
+  # The monotonic time (nowNs) of the last bytes received
+  idleSinceNs: Int
+}
+
+# What slow work answers a promoted request with
+type HttpReply {
+  status: Int
+  contentType: String
+  body: String
+}
+
+# A request promoted out of its frame: its bytes stay in the ReadBuffer (the
+# connection reads no further request until it is answered), and `task` is
+# the slow work that answers it
+type AwaitingResult {
+  request: HttpRequestEvent
+  task: Task(HttpReply)
+}
+
+# ----- the event ------------------------------------------------------------
+type HttpRequestEvent {
+  connectionEntityId: EntityId
+  # The request's place on its connection (0, 1, ...): answers go in this order
+  sequence: Int
+  # Method and byte ranges into the connection's ReadBuffer
+  request: HttpRequest
+  # The bytes were not a valid request: answered with 400, then closed
+  badRequest: Bool
+}
+
+# ----- the World ------------------------------------------------------------
+
+# Released ByteBuffers, handed to new connections so that connection churn
+# stops allocating once the pool is warm
+type BufferPool {
+  free: List(ByteBuffer)
+}
+
+type HttpServer {
+  entities: EntityAllocator
+  sockets: ComponentTable(Socket)
+  readBuffers: ComponentTable(ReadBuffer)
+  writeBuffers: ComponentTable(WriteBuffer)
+  httpParses: ComponentTable(HttpParse)
+  keepAlives: ComponentTable(KeepAlive)
+  awaitingResults: ComponentTable(AwaitingResult)
+  readables: ComponentTable(Readable)
+  writables: ComponentTable(Writable)
+  sendings: ComponentTable(Sending)
+  closings: ComponentTable(Closing)
+  # Resources
+  listenerSocketId: SocketId
+  # The poll saw a connection waiting on the listener
+  listenerReady: Bool
+  poller: Poller
+  readiness: List(Readiness)
+  # Socket handle -> its connection entity
+  socketEntities: IntMap(EntityId)
+  requests: EventQueue(HttpRequestEvent)
+  date: HttpDateCache
+  # The Date header went to a new second this frame (the timeouts are checked)
+  secondChanged: Bool
+  bufferPool: BufferPool
+  # Close a connection idle this long; 0 never does
+  idleTimeoutNs: Int
+  # The monotonic clock at this frame's poll
+  frameNs: Int
+}
+
+func createHttpServer(idleTimeoutMs: view Int) ret HttpServer {
+  ret HttpServer {
+    entities: createEntityAllocator()
+    sockets: create()
+    readBuffers: create()
+    writeBuffers: create()
+    httpParses: create()
+    keepAlives: create()
+    awaitingResults: create()
+    readables: create()
+    writables: create()
+    sendings: create()
+    closings: create()
+    listenerSocketId: noSocket()
+    listenerReady: false
+    poller: createPoller()
+    readiness: List.create(Readiness, cap: 256)
+    socketEntities: createIntMap(EntityId, cap: 256)
+    requests: createEventQueue(HttpRequestEvent)
+    date: createHttpDateCache()
+    secondChanged: false
+    bufferPool: BufferPool { free: List.create(ByteBuffer, cap: 64) }
+    idleTimeoutNs: idleTimeoutMs * 1000000
+    frameNs: nowNs()
+  }
+}
+
+# Listen on `host`:`port` (0 picks a free port: `socketLocalPort`)
+func httpServerListen(
+  server: mod HttpServer
+  host: view String
+  port: view Int
+  backlog: view Int
+) ret NetStatus {
+  let listening: SocketResult = tcpListen(host: host, port: port, backlog: backlog)
+  if listening.status is not NetStatus.ok {
+    ret listening.status
+  }
+  server.listenerSocketId = listening.socketId
+  ret pollerWatch(
+    poller: server.poller
+    socketId: listening.socketId
+    readable: true
+    writable: false
+  )
+}
+
+# Destroy every connection, then close the listener and the poller
+func closeHttpServer(server: mod HttpServer) {
+  loop allocatorAliveCount(this: server.entities) > 0 {
+    let last: Int = server.entities.alive.length - 1
+    let entityId: EntityId = server.entities.alive.copyAtFallback(index: last, fallback: noEntity())
+    destroyConnection(server: server, entityId: entityId)
+  }
+  if socketIsValid(socketId: server.listenerSocketId) {
+    socketClose(socketId: server.listenerSocketId)
+    server.listenerSocketId = noSocket()
+  }
+  closePoller(poller: server.poller)
+}
+
+# ----- the buffer pool ------------------------------------------------------
+func takePooledBuffer(pool: mod BufferPool) ret ByteBuffer {
+  if pool.free.length > 0 {
+    var buffer: ByteBuffer = pool.free.pop()
+    byteBufferClear(buffer: buffer)
+    ret buffer
+  }
+  ret createByteBuffer(capacity: 1024)
+}
+
+func givePooledBuffer(pool: mod BufferPool, buffer: own ByteBuffer) {
+  if pool.free.length >= maxPooledBuffers {
+    ret
+  }
+  pool.free.add(value: own buffer)
+}
+
+func releaseReadBuffer(
+  pool: mod BufferPool
+  readBuffers: mod ComponentTable(ReadBuffer)
+  entityId: view EntityId
+) {
+  let readBuffer: mod ReadBuffer => componentMod(this: readBuffers, entityId: entityId)
+  givePooledBuffer(pool: pool, buffer: own readBuffer.buffer)
+}
+
+func releaseWriteBuffer(
+  pool: mod BufferPool
+  writeBuffers: mod ComponentTable(WriteBuffer)
+  entityId: view EntityId
+) {
+  let writeBuffer: mod WriteBuffer => componentMod(this: writeBuffers, entityId: entityId)
+  givePooledBuffer(pool: pool, buffer: own writeBuffer.buffer)
+}
+
+# ----- connections ----------------------------------------------------------
+
+# A new connection entity for `socketId` with its Socket, ReadBuffer,
+# WriteBuffer, HttpParse and KeepAlive; `noSocket()` makes a detached one
+func openConnection(server: mod HttpServer, socketId: view SocketId) ret EntityId {
+  let entityId: EntityId = allocEntity(this: server.entities)
+  componentSet(
+    this: server.sockets
+    entityId: entityId
+    data: Socket { socketId: socketId, watchingWritable: false }
+  )
+  componentSet(
+    this: server.readBuffers
+    entityId: entityId
+    data: ReadBuffer { buffer: takePooledBuffer(pool: server.bufferPool) }
+  )
+  componentSet(
+    this: server.writeBuffers
+    entityId: entityId
+    data: WriteBuffer { buffer: takePooledBuffer(pool: server.bufferPool) }
+  )
+  componentSet(
+    this: server.httpParses
+    entityId: entityId
+    data: HttpParse { state: createHttpParseState(), nextSequence: 0, finished: false }
+  )
+  componentSet(
+    this: server.keepAlives
+    entityId: entityId
+    data: KeepAlive { idleSinceNs: server.frameNs }
+  )
+  if socketIsValid(socketId: socketId) {
+    set(this: server.socketEntities, k: socketId.handle, value: entityId)
+    let status: NetStatus = pollerWatch(
+      poller: server.poller
+      socketId: socketId
+      readable: true
+      writable: false
+    )
+  }
+  ret entityId
+}
+
+# Wait for an unanswered promoted request's task (a Task is joined by its
+# owner) and drop the reply
+func joinAwaiting(awaitingResults: mod ComponentTable(AwaitingResult), entityId: view EntityId) {
+  let awaiting: mod AwaitingResult => componentMod(this: awaitingResults, entityId: entityId)
+  let reply: HttpReply = awaiting.task.get()
+}
+
+func socketOf(sockets: view ComponentTable(Socket), entityId: view EntityId) ret Socket {
+  if let socket: Socket = componentCopy(this: sockets, entityId: entityId) {
+    ret socket
+  }
+  ret Socket { socketId: noSocket(), watchingWritable: false }
+}
+
+# Close the connection's socket and free the entity, its buffers going back to
+# the pool
+func destroyConnection(server: mod HttpServer, entityId: view EntityId) {
+  if componentHas(this: server.awaitingResults, entityId: entityId) {
+    joinAwaiting(awaitingResults: server.awaitingResults, entityId: entityId)
+  }
+  let socket: Socket = socketOf(sockets: server.sockets, entityId: entityId)
+  if socketIsValid(socketId: socket.socketId) {
+    let status: NetStatus = pollerForget(
+      poller: server.poller
+      socketId: socket.socketId
+      readable: true
+      writable: socket.watchingWritable
+    )
+    socketClose(socketId: socket.socketId)
+    remove(this: server.socketEntities, k: socket.socketId.handle)
+  }
+  if componentHas(this: server.readBuffers, entityId: entityId) {
+    releaseReadBuffer(pool: server.bufferPool, readBuffers: server.readBuffers, entityId: entityId)
+  }
+  if componentHas(this: server.writeBuffers, entityId: entityId) {
+    releaseWriteBuffer(
+      pool: server.bufferPool
+      writeBuffers: server.writeBuffers
+      entityId: entityId
+    )
+  }
+  clearEntityComponents(HttpServer, world: server, entityId: entityId)
+  freeEntity(this: server.entities, entityId: entityId)
+}
+
+# ----- answering a request --------------------------------------------------
+func appendResponse(
+  writeBuffers: mod ComponentTable(WriteBuffer)
+  entityId: view EntityId
+  status: view Int
+  contentType: view String
+  body: view String
+  date: view String
+  keepAlive: view Bool
+) {
+  let writeBuffer: mod WriteBuffer => componentMod(this: writeBuffers, entityId: entityId)
+  httpAppendResponse(
+    output: writeBuffer.buffer
+    status: status
+    contentType: contentType
+    body: body
+    date: date
+    keepAlive: keepAlive
+  )
+}
+
+func appendBadRequest(
+  writeBuffers: mod ComponentTable(WriteBuffer)
+  entityId: view EntityId
+  date: view String
+) {
+  let writeBuffer: mod WriteBuffer => componentMod(this: writeBuffers, entityId: entityId)
+  httpAppendBadRequest(output: writeBuffer.buffer, date: date)
+}
+
+# Answer `event` now: the response goes on its connection's WriteBuffer, and
+# a request that does not keep the connection closes it once sent
+func respond(
+  server: mod HttpServer
+  event: view HttpRequestEvent
+  status: view Int
+  contentType: view String
+  body: view String
+) {
+  if not componentHas(this: server.writeBuffers, entityId: event.connectionEntityId) {
+    ret
+  }
+  appendResponse(
+    writeBuffers: server.writeBuffers
+    entityId: event.connectionEntityId
+    status: status
+    contentType: contentType
+    body: body
+    date: server.date.text
+    keepAlive: event.request.keepAlive
+  )
+  markSending(server: server, event: event)
+}
+
+func markSending(server: mod HttpServer, event: view HttpRequestEvent) {
+  addTag(table: server.sendings, entityId: event.connectionEntityId)
+  if not event.request.keepAlive or event.badRequest {
+    addTag(table: server.closings, entityId: event.connectionEntityId)
+  }
+}
+
+# Answer `event` later: `task` is the slow work that makes the reply. The
+# connection's requests after this one wait until it is answered.
+func promote(server: mod HttpServer, event: view HttpRequestEvent, task: own Task(HttpReply)) {
+  componentSet(
+    this: server.awaitingResults
+    entityId: event.connectionEntityId
+    data: AwaitingResult { request: event, task: task }
+  )
+}
+
+# Whether `event` can be answered now: false once an earlier request of its
+# connection was promoted (it is read again after that one is answered)
+func requestIsAnswerable(server: view HttpServer, event: view HttpRequestEvent) ret Bool {
+  ret not componentHas(this: server.awaitingResults, entityId: event.connectionEntityId)
+}
+
+# The bytes of a request range, for a handler (this allocates)
+func requestText(
+  server: view HttpServer
+  event: view HttpRequestEvent
+  range: view ByteRange
+) ret String {
+  let readBuffer: view ReadBuffer => componentView(
+    this: server.readBuffers
+    entityId: event.connectionEntityId
+  )
+  ret httpRangeText(buffer: readBuffer.buffer, range: range)
+}
+
+# Whether the request's path is exactly `path`
+func requestPathIs(
+  server: view HttpServer
+  event: view HttpRequestEvent
+  path: view String
+) ret Bool {
+  let readBuffer: view ReadBuffer => componentView(
+    this: server.readBuffers
+    entityId: event.connectionEntityId
+  )
+  ret httpPathIs(buffer: readBuffer.buffer, request: event.request, path: path)
+}
+
+# Take everything the connection has not sent: for a detached connection (a
+# test), whose output nothing else takes
+func takeOutput(server: mod HttpServer, entityId: view EntityId) ret String {
+  if not componentHas(this: server.writeBuffers, entityId: entityId) {
+    ret ""
+  }
+  removeTag(table: server.sendings, entityId: entityId)
+  ret takeBufferText(writeBuffers: server.writeBuffers, entityId: entityId)
+}
+
+func takeBufferText(
+  writeBuffers: mod ComponentTable(WriteBuffer)
+  entityId: view EntityId
+) ret String {
+  let writeBuffer: mod WriteBuffer => componentMod(this: writeBuffers, entityId: entityId)
+  let text: String = byteBufferText(
+    buffer: writeBuffer.buffer
+    start: 0
+    count: byteBufferLength(buffer: writeBuffer.buffer)
+  )
+  byteBufferClear(buffer: writeBuffer.buffer)
+  ret text
+}
+
+# Give a connection bytes as if they had been read (a test's input)
+func injectInput(server: mod HttpServer, entityId: view EntityId, text: view String) {
+  appendInput(readBuffers: server.readBuffers, entityId: entityId, text: text)
+  addTag(table: server.readables, entityId: entityId)
+}
+
+func appendInput(
+  readBuffers: mod ComponentTable(ReadBuffer)
+  entityId: view EntityId
+  text: view String
+) {
+  let readBuffer: mod ReadBuffer => componentMod(this: readBuffers, entityId: entityId)
+  appendText(buffer: readBuffer.buffer, text: text)
+}

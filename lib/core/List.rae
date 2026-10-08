@@ -199,10 +199,11 @@ func insert(
   }
 }
 
+# Remove and return the last element; T's default for an empty list
 func pop(T: type, this: mod List(T)) ret T {
   unsafe {
     if this.length is 0 {
-      ret none
+      ret T.default()
     }
     let val: T = rae_ext_rae_buf_get(buf: this.data, index: this.length - 1)
     this.length = this.length - 1
