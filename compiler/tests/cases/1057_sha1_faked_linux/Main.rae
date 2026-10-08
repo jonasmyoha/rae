@@ -1,0 +1,11 @@
+# lib/crypto/Sha1 on a platform without CommonCrypto: a check-only build for
+# Linux type-checks the portable Rae path, the only one that exists there
+# (the CommonCrypto binding is declared under `when hasCommonCrypto`,
+# docs/platform-conditional-code.md). Fixture 1044 runs both paths on macOS.
+import crypto/Sha1
+import webSocket/Handshake
+
+func main() {
+  log(Sha1.hexText(bytes: Sha1.sha1Text(text: "abc")))
+  log(Handshake.webSocketAccept(key: "dGhlIHNhbXBsZSBub25jZQ=="))
+}

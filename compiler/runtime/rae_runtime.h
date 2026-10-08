@@ -755,8 +755,11 @@ int64_t rae_ext_NetSys_socketError(int64_t fd);
 int64_t rae_ext_NetSys_receive(int64_t fd, uint8_t* buffer, int64_t offset, int64_t maxBytes);
 int64_t rae_ext_NetSys_send(int64_t fd, uint8_t* buffer, int64_t offset, int64_t count, int64_t flags);
 int64_t rae_ext_NetSys_sendText(int64_t fd, rae_String text, int64_t flags);
-/* runtime_crypto_platform.c: the OS crypto library's hashes, -1 where there is none */
-int64_t rae_ext_Sha1_platformDigest(uint8_t* bytes, int64_t offset, int64_t count, uint8_t* digest);
+/* runtime_crypto_platform.c: CommonCrypto's SHA-1, Apple only (lib/crypto/Sha1.rae
+ * declares it under `when hasCommonCrypto`) */
+#if defined(__APPLE__) && !defined(__wasm__) && !defined(__EMSCRIPTEN__)
+int64_t rae_ext_Sha1_commonCrypto(uint8_t* bytes, int64_t offset, int64_t count, uint8_t* digest);
+#endif
 int64_t rae_ext_NetSys_pollOne(int64_t fd, int64_t events, int64_t timeoutMs);
 int64_t rae_ext_NetSys_pollerCreate(void);
 int64_t rae_ext_NetSys_pollerChange(int64_t queue, int64_t fd, int64_t filter, int64_t flags);
