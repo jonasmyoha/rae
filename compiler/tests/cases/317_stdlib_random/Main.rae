@@ -1,8 +1,18 @@
 import Math
 
 func main() {
-  log("Random 1: {random()}")
-  log("Random 2: {random()}")
-  log("Int 1-10: {random(min: 1, max: 10)}")
-  log("Int 1-10: {random(min: 1, max: 10)}")
+  # The default seed reproduces the sequence of the former global generator.
+  var random: Random = createRandom(seed: defaultRandomSeed)
+  log("Random 1: {random.nextFloat()}")
+  log("Random 2: {random.nextFloat()}")
+  log("Int 1-10: {random.nextInt(min: 1, max: 10)}")
+  log("Int 1-10: {random.nextInt(min: 1, max: 10)}")
+  # The same seed gives the same numbers, and two values never share a stream.
+  var first: Random = createRandom(seed: 42)
+  var second: Random = createRandom(seed: 42)
+  let a: Int = first.nextInt(min: 0, max: 1000000)
+  let ignored: Float = first.nextFloat()
+  let b: Int = second.nextInt(min: 0, max: 1000000)
+  log("same seed, same first number: {a is b} {ignored >= 0.0}")
+  log("empty range answers min: {first.nextInt(min: 5, max: 5)} {first.nextInt(min: 9, max: 3)}")
 }

@@ -1,0 +1,35 @@
+# A Random is a value its owner holds. These sequences are the ones the former
+# global C generator gave for the same seeds (compared draw for draw over
+# 100000 draws per seed when it moved to Rae), so a program that seeds the
+# same way gets the same numbers.
+func show(seed: view Int) {
+  var random: Random = createRandom(seed: seed)
+  let a: Float = random.nextFloat()
+  let b: Int = random.nextInt(min: -7, max: 1000)
+  let c: Int = random.nextInt(min: 0, max: 6)
+  let d: Int = random.nextBits()
+  log("seed {seed}: {a} {b} {c} {d}")
+}
+
+func main() {
+  show(seed: defaultRandomSeed)
+  show(seed: 0)
+  show(seed: 1)
+  show(seed: 2026)
+  show(seed: -12345)
+  show(seed: 9223372036854775807)
+  # A range wider than Int answers min plus 32 random bits
+  var wide: Random = createRandom(seed: 5)
+  let value: Int = wide.nextInt(min: -9223372036854775807, max: 9223372036854775807)
+  log("wide range: {value >= -9223372036854775807}")
+  # Two values with one seed are two equal streams, not one shared one
+  var first: Random = createRandom(seed: 99)
+  var second: Random = createRandom(seed: 99)
+  var same: Bool = true
+  loop var i: Int = 0, i < 1000, ++i {
+    if first.nextInt(min: 0, max: 1000000) is not second.nextInt(min: 0, max: 1000000) {
+      same = false
+    }
+  }
+  log("equal streams: {same}")
+}

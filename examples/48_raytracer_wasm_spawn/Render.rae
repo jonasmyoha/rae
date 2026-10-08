@@ -15,9 +15,9 @@ func sphereValueAt(world: view List(Sphere), index: view Int) ret Sphere {
   }
 }
 
-func randomUnit() ret Vec3 {
-  let a: Float = random() * tau
-  let z: Float = random() * 2.0 - 1.0
+func randomUnit(random: mod Random) ret Vec3 {
+  let a: Float = random.nextFloat() * tau
+  let z: Float = random.nextFloat() * 2.0 - 1.0
   let radius: Float = Math.sqrt(x: 1.0 - z * z)
   ret Vec3.create(x: radius * Math.cos(x: a), y: radius * Math.sin(x: a), z: z)
 }
@@ -55,7 +55,12 @@ func hitSphere(sphere: view Sphere, ray: view Ray) ret Float {
   ret (-halfB - Math.sqrt(x: disc)) / a
 }
 
-func rayColor(world: view List(Sphere), ray: view Ray, depth: view Int) ret Vec3 {
+func rayColor(
+  world: view List(Sphere)
+  ray: view Ray
+  depth: view Int
+  random: mod Random
+) ret Vec3 {
   if depth <= 0 {
     ret Vec3.create(x: 0.0, y: 0.0, z: 0.0)
   }
@@ -83,13 +88,13 @@ func rayColor(world: view List(Sphere), ray: view Ray, depth: view Int) ret Vec3
   var scatter: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
   var atten: Vec3 = sphere.material.albedo
   if sphere.material.kind is 0 {
-    scatter = Vec3.vadd(a: n, b: randomUnit())
+    scatter = Vec3.vadd(a: n, b: randomUnit(random: random))
   } else {
     if sphere.material.kind is 1 {
       let ud: Vec3 = Vec3.vnorm(a: ray.dir)
       scatter = Vec3.vadd(
         a: vreflect(v: ud, normal: n)
-        b: Vec3.vscale(a: randomUnit(), s: sphere.material.fuzz)
+        b: Vec3.vscale(a: randomUnit(random: random), s: sphere.material.fuzz)
       )
       if Vec3.vdot(a: scatter, b: n) <= 0.0 {
         ret Vec3.create(x: 0.0, y: 0.0, z: 0.0)
@@ -108,7 +113,7 @@ func rayColor(world: view List(Sphere), ray: view Ray, depth: view Int) ret Vec3
         cosT = 1.0
       }
       let sinT: Float = Math.sqrt(x: 1.0 - cosT * cosT)
-      if etaRatio * sinT > 1.0 or schlick(cosine: cosT, refIdx: etaRatio) > random() {
+      if etaRatio * sinT > 1.0 or schlick(cosine: cosT, refIdx: etaRatio) > random.nextFloat() {
         scatter = vreflect(v: ud, normal: frontN)
       } else {
         scatter = vrefract(uv: ud, normal: frontN, etaRatio: etaRatio)
@@ -116,7 +121,15 @@ func rayColor(world: view List(Sphere), ray: view Ray, depth: view Int) ret Vec3
     }
   }
   let bounce: Ray = { origin: p, dir: scatter }
-  ret Vec3.vmul(a: atten, b: rayColor(world: world, ray: bounce, depth: depth - 1))
+  ret Vec3.vmul(
+    a: atten
+    b: rayColor(
+      world: world
+      ray: bounce
+      depth: depth - 1
+      random: random
+    )
+  )
 }
 
 # One worker: renders the tile [tx0,tx0+tw) x [ty0,ty0+th), returns tw*th packed
@@ -134,7 +147,7 @@ func renderTile(
   maxDepth: view Int
   seedBase: view Int
 ) ret List(Int) {
-  seed(value: seedBase + ty0 * 9781 + tx0 * 17)
+  var random: Random = createRandom(seed: seedBase + ty0 * 9781 + tx0 * 17)
   var out: List(Int) = List.create(Int, cap: tw * th)
   var ry: Int = 0
   loop ry < th {
@@ -145,10 +158,23 @@ func renderTile(
       var acc: Vec3 = { x: 0.0, y: 0.0, z: 0.0 }
       var sIdx: Int = 0
       loop sIdx < samples {
-        let u: Float = (px.toFloat() + random()) / (width - 1).toFloat()
-        let v: Float = ((height - 1 - py).toFloat() + random()) / (height - 1).toFloat()
-        let ray: Ray = makeRay(cam: cam, u: u, v: v)
-        acc = Vec3.vadd(a: acc, b: rayColor(world: world, ray: ray, depth: maxDepth))
+        let u: Float = (px.toFloat() + random.nextFloat()) / (width - 1).toFloat()
+        let v: Float = ((height - 1 - py).toFloat() + random.nextFloat()) / (height - 1).toFloat()
+        let ray: Ray = makeRay(
+          cam: cam
+          u: u
+          v: v
+          random: random
+        )
+        acc = Vec3.vadd(
+          a: acc
+          b: rayColor(
+            world: world
+            ray: ray
+            depth: maxDepth
+            random: random
+          )
+        )
         sIdx = sIdx + 1
       }
       let inv: Float = 1.0 / samples.toFloat()

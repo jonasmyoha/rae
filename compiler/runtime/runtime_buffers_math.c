@@ -1,37 +1,9 @@
-/* Random numbers, raw buffers, libc math wrappers, C JSON extraction bridge, and crypto stubs. Buffers are permanent kernel; JSON/crypto stubs are migration/compatibility bridges.
+/* Raw buffers, libc math wrappers, the toJson buffer as a String, and crypto stubs. Buffers are permanent kernel; crypto stubs are a compatibility bridge.
  *
  * Split from rae_runtime.c by runtime migration task #288.
  * This module is included by rae_runtime.c into one translation unit.
  * No behavior or ABI changes are intended here.
  */
-
-// Thread-local: each OS thread (main + spawned workers) gets its own RNG
-// stream, so concurrent workers (e.g. a multithreaded raytracer sampling
-// random scatter directions) don't race on a shared seed and skew each
-// other's distributions. Each worker should seed() itself (e.g. by its band
-// index) to decorrelate streams — without that, every thread starts from the
-// same default and produces identical sequences. Transparent for
-// single-threaded programs (the main thread's instance == the old global).
-static __thread uint64_t g_rae_random_state = 0x123456789ABCDEF0ULL;
-
-void rae_ext_rae_seed(int64_t seed) {
-  g_rae_random_state = (uint64_t)seed;
-}
-
-static uint32_t rae_next_u32(void) {
-  g_rae_random_state = g_rae_random_state * 6364136223846793005ULL + 1;
-  return (uint32_t)(g_rae_random_state >> 32);
-}
-
-float rae_ext_rae_random(void){
-  return (double)rae_next_u32() / (double)4294967295.0;
-}
-
-int64_t rae_ext_rae_random_int(int64_t min, int64_t max) {
-  if (min >= max) return min;
-  uint64_t range = (uint64_t)(max - min + 1);
-  return min + (int64_t)(rae_next_u32() % range);
-}
 
 float rae_ext_rae_int_to_float(int64_t v){ return (double)v; }
 int64_t rae_ext_rae_float_to_int(float v){ return (int64_t)v; }
