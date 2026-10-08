@@ -181,14 +181,9 @@ func main() ret Int {
     )}"
   )
 
-  # A request still waiting for its task when the server closes is joined
-  let abandoned: EntityId = openConnection(server: server, socketId: noSocket())
-  injectInput(server: server, entityId: abandoned, text: "GET /slow HTTP/1.1\r\n\r\n")
-  frame(router: router, server: server)
-  log("abandoned awaiting: {componentHas(this: server.awaitingResults, entityId: abandoned)}")
-
   # A steady pipeline allocates nothing per request once warm (the Date
-  # header's String is made once a second; that frame is not counted)
+  # header's String is made once a second; that frame is not counted). No task
+  # is running, so nothing on another thread allocates meanwhile.
   let steady: EntityId = openConnection(server: server, socketId: noSocket())
   let batch: String = "GET /plaintext HTTP/1.1\r\n\r\nGET /json HTTP/1.1\r\n\r\n"
   loop var round: Int = 0, round < 20, ++round {
@@ -207,6 +202,12 @@ func main() ret Int {
     }
   }
   log("allocations for 1000 requests after warmup: {allocations}")
+
+  # A request still waiting for its task when the server closes is joined
+  let abandoned: EntityId = openConnection(server: server, socketId: noSocket())
+  injectInput(server: server, entityId: abandoned, text: "GET /slow HTTP/1.1\r\n\r\n")
+  frame(router: router, server: server)
+  log("abandoned awaiting: {componentHas(this: server.awaitingResults, entityId: abandoned)}")
 
   # Idle connections time out (1 ms here) once the clock passes a second
   var idleFrames: Int = 0
