@@ -846,8 +846,7 @@ void rae_ext_Gpu3d_skyDraw(float skyKind, float turbidity, float skyExposure, fl
                            float clearR, float clearG, float clearB);
 int64_t rae_ext_nowNs(void);
 void rae_ext_rae_sleep(int64_t ms);
-rae_String rae_ext_Time_formatTimestamp(int64_t epoch_ms);
-rae_String rae_ext_Time_formatDate(int64_t epoch_ms);
+int64_t rae_ext_Time_sleepNs(int64_t ns);  /* one nanosleep (lib/Time.rae waitUntil) */
 
 /* lib/Math.rae's scalar functions over `Float`, which is f32 (see
  * docs/primitive-types.md): the C side takes and returns `float` and uses the

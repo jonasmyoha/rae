@@ -1,0 +1,53 @@
+# Server time (docs/server-benchmarks-design.md §9 G4) and lib/Time's dates in
+# Rae (docs/runtime-c-audit.md row 6): one calendar routine for the HTTP Date
+# header and formatTimestamp / formatDate, a nanosecond deadline wait and a
+# fixed-rate ticker.
+import Time
+
+func main() {
+  # Known instants, leap days included (2000 is a leap year, 2100 is not)
+  log(Time.httpDate(epochSeconds: 0))
+  log(Time.httpDate(epochSeconds: 784111777))
+  log(Time.httpDate(epochSeconds: 951782400))
+  log(Time.httpDate(epochSeconds: 1709251199))
+  log(Time.httpDate(epochSeconds: 4107542399))
+  log(Time.httpDate(epochSeconds: -1))
+  log(Time.formatTimestamp(epochMs: 951868799000))
+  log(Time.formatDate(epochMs: -1500))
+  log(Time.formatTimestamp(epochMs: -62198755200000))
+  let civil: CivilTime = Time.civilFromEpochSeconds(epochSeconds: 1791435032)
+  log("civil: {civil.year}-{civil.month}-{civil.day} weekday {civil.weekday}")
+
+  # The Date header is made once per second
+  var cache: HttpDateCache = Time.createHttpDateCache()
+  let first: Bool = Time.updateHttpDate(cache: cache, epochSeconds: 784111777)
+  let same: Bool = Time.updateHttpDate(cache: cache, epochSeconds: 784111777)
+  let next: Bool = Time.updateHttpDate(cache: cache, epochSeconds: 784111778)
+  log("cache: first {first}, same second {same}, next second {next}: {cache.text}")
+
+  # Deadlines to well under a millisecond (bounds loose enough for a loaded
+  # machine: never early, the median lateness under 2 ms)
+  var lateness: List(Int) = {}
+  var early: Bool = false
+  loop var i: Int = 0, i < 9, ++i {
+    let deadline: Int = nowNs() + 7500000
+    Time.waitUntil(deadlineNs: deadline)
+    let late: Int = nowNs() - deadline
+    if late < 0 {
+      early = true
+    }
+    lateness.add(value: late)
+  }
+  lateness.sort()
+  log("deadline never early: {early is false}")
+  log("median lateness under 2 ms: {lateness.copyAtFallback(index: 4, fallback: 0) < 2000000}")
+
+  # A 30 Hz tick: 30 ticks take a second, not a second plus 30 delays
+  var ticker: Ticker = Time.createTicker(hertz: 30)
+  let start: Int = nowNs()
+  loop var i: Int = 0, i < 30, ++i {
+    Time.tickerWait(ticker: ticker)
+  }
+  let elapsedMs: Int = (nowNs() - start) / 1000000
+  log("30 ticks at 30 Hz took about a second: {elapsedMs >= 990 and elapsedMs < 1150}")
+}
