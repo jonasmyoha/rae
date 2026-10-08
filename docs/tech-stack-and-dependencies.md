@@ -61,6 +61,23 @@ The ordering decides between *equivalent* options. For genuinely hard domains
 there is often only one choice and **necessity overrides rank** — e.g. VST3 and
 HarfBuzz are C++-only, so C++ wins there regardless of sitting at #5.
 
+**Performance overrides rank too.** Rae is a high-performance language. A Rae
+implementation is the reference and the portable fallback, but when a platform
+or native library is clearly faster, that is what Rae uses on that platform,
+through one binding. Dogfooding never justifies shipping the slow path.
+Measure first.
+
+- **SHA-1:** Rae 100 ms, plain C 77 ms and macOS CommonCrypto 7 ms for 16 MB
+  (the hardware SHA instructions). `lib/crypto/Sha1.rae` uses CommonCrypto on
+  Apple, and its Rae code everywhere else.
+- **Box3D physics:** Rae uses upstream's C library behind bindings rather than
+  the Rae port. The C library is 1.1-1.5x faster, and upstream maintains it, so
+  its fixes and updates arrive without re-porting
+  (`docs/physics-two-implementations.md` §7).
+
+Per-platform paths are chosen in the C shim today. The Rae construct for them
+is designed in `docs/platform-conditional-code.md`.
+
 ### The real rule
 
 > Rewrite small, controllable pieces in Rae; use proven libraries for genuinely

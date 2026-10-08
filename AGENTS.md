@@ -550,9 +550,32 @@ This generalises the renderer C-surface gate above to the whole runtime.
   choices, no error mapping and no bookkeeping. The sequence, the retry on
   `EINTR`, which options to set and what an error means are all Rae, over the
   shim. `lib/net` is the model (docs/server-benchmarks-design.md §1.2).
-- **Pure algorithms are always Rae:** hashing, encoding (base64, UTF-8, URL),
-  parsing (JSON, HTTP, numbers), formatting (dates, integers), searching and
-  string manipulation. They never need the platform.
+- **Pure algorithms are written in Rae first:** hashing, encoding (base64,
+  UTF-8, URL), parsing (JSON, HTTP, numbers), formatting (dates, integers),
+  searching and string manipulation. The Rae version is the reference
+  implementation, the one tested against the spec, and the portable fallback.
+- **But the fastest implementation wins. Rae is a high-performance language,
+  and dogfooding never justifies shipping the slow path.** When a platform or
+  an established native library is clearly faster (hardware instructions, an
+  OS-optimised routine, a tuned upstream library), USE IT on that platform,
+  through one binding, and keep the Rae version as the fallback everywhere
+  else. Measure; do not assume.
+  - **SHA-1 (2026-10-08):** the Rae SHA-1 hashes 16 MB in 100 ms, plain C
+    in 77 ms, and macOS's CommonCrypto in 7 ms (the CPU's SHA instructions).
+    So `lib/crypto/Sha1.rae` calls CommonCrypto on Apple through one shim
+    (`runtime_crypto_platform.c`) and runs its Rae code only where the
+    platform has no SHA-1. Nobody should ever pick 100 ms over 7 ms.
+  - **Box3D (2026-10-07):** Rae's physics is upstream Box3D's C behind
+    bindings, not the Rae port. The C library is 1.1-1.5x faster (the port
+    is that much slower), and upstream maintains it: fixes and new features
+    arrive without porting them (`docs/physics-two-implementations.md` §7).
+  - The order of preference is the one in
+    `docs/tech-stack-and-dependencies.md`: Rae, then C (or any language behind
+    a C API, Rust prebuilt), then C++ only when interoperability leaves no
+    other choice. Performance and maintenance cost override that order.
+  - Per-platform code paths are chosen in the C shim with `#if` today. The
+    Rae-level construct for them is designed in
+    `docs/platform-conditional-code.md`.
 - **Existing exceptions, kept for now and not to be grown:**
   - the compiler's own runtime ABI that generated C calls directly: the
     `rae_String` pool and allocation, `Buffer` storage, tasks and channels,
@@ -563,7 +586,8 @@ This generalises the renderer C-surface gate above to the whole runtime.
   Logic inside these can still move to Rae when the codegen calls Rae
   instead (see the audit).
 - **Before adding a `runtime_*.c` function, name its platform reason** in the
-  commit message (which of the reasons above). "It was quicker in C" is not
+  commit message: one of the reasons above, or a faster platform
+  implementation, with the measurement. "It was quicker to write in C" is not
   one. A pure-logic C function that already exists is migration debt, listed in
   `docs/runtime-c-audit.md` in order of value; when you touch one, prefer moving
   it to Rae.
