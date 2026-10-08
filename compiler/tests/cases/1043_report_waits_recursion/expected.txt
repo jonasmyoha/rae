@@ -1,0 +1,19 @@
+may-wait report: Main.rae
+  the program:
+    functions: 8 (0 generic specialisations)
+    wait primitive sites: Task.get 0, sleep extern 0, socket/poller extern 0, task join 3
+    calls resolved conservatively (to every candidate): 0
+    may wait: 6 functions
+    spawn sites: 3, spawned functions: 3, reachable from a spawn: 7
+  resumable twins (may wait and reachable from a spawn): 5 in the program, 2 in lib/
+    countdown  Main.rae:5
+      countdown -> sleep -> nativeSleep [sleep extern]
+    isEven  Main.rae:13
+      isEven -> sleep -> nativeSleep [sleep extern]
+    isOdd  Main.rae:21
+      isOdd -> isEven -> sleep -> nativeSleep [sleep extern]
+    countdownWorker  Main.rae:35  spawned
+      countdownWorker -> countdown -> sleep -> nativeSleep [sleep extern]
+    parityWorker  Main.rae:39  spawned
+      parityWorker -> isOdd -> isEven -> sleep -> nativeSleep [sleep extern]
+    lib/: nativeSleep sleep
