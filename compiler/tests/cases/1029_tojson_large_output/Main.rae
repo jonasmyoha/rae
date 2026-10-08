@@ -1,0 +1,48 @@
+# The generated toJson grows its output: a text far over the 16 KB the old
+# fixed buffer held (which then wrote out of bounds) is written whole and
+# reads back the same.
+type Line {
+  number: Int
+  text: String
+}
+
+type Book {
+  title: String
+  words: List(String)
+  lines: List(Line)
+  body: String
+}
+
+func main() {
+  var words: List(String) = {}
+  loop var i: Int = 0, i < 3000, ++i {
+    words.add(value: "word{i}")
+  }
+  var lines: List(Line) = {}
+  loop var i: Int = 0, i < 500, ++i {
+    lines.add(value: { number: i, text: "line \"{i}\" of the book" })
+  }
+  var body: String = ""
+  loop var i: Int = 0, i < 2000, ++i {
+    body = body.concat(other: "0123456789")
+  }
+  let book: Book = { title: "Large", words: words, lines: lines, body: body }
+  let json: String = book.toJson()
+  log("json bytes over 16 KB: {json.length() > 16384}")
+  log("json length: {json.length()}")
+  log("ends with: {json.sub(start: json.length() - 12, len: 12)}")
+  let back: Book = Book.fromJson(json: json)
+  log("title: {back.title}")
+  log("words: {back.words.length}")
+  if let word: view String => back.words.viewAt(index: 2999) {
+    log("last word: {word}")
+  }
+  log("lines: {back.lines.length}")
+  if let line: view Line => back.lines.viewAt(index: 499) {
+    log("last line: {line.number} {line.text}")
+  }
+  log("body length: {back.body.length()}, same: {back.body is body}")
+  log("rewritten the same: {back.toJson() is json}")
+  let small: Line = { number: 7, text: "short" }
+  log(small.toJson())
+}
