@@ -47,20 +47,48 @@ type SpotifyTrack {
   duration: Float
 }
 
-# The process shims (compiler/runtime/runtime_spotify_apple.c): `osascript -e
-# <script>` (a script may span lines) answering its exit status, or what it
-# printed (empty unless it exited 0); `curl -sLf <url>` answering the body
-# (empty unless it exited 0), or writing it to a file (true when it exited 0).
-func osascriptRun(script: String) unsafe extern ret Int
+# The bridge is macOS's: `osascript` drives the Spotify app, and the C shims
+# exist only there (docs/platform-conditional-code.md §3.1 layer 3).
+# Elsewhere the same names are Rae that run nothing: every answer is empty,
+# so a poll reports a stopped player.
+const hasSpotifyBridge: Bool = Target.os is Os.macos
 
-func osascriptOutput(script: String) unsafe extern ret String
+when hasSpotifyBridge {
+  # The process shims (compiler/runtime/runtime_spotify_apple.c): `osascript
+  # -e <script>` (a script may span lines) answering its exit status, or what
+  # it printed (empty unless it exited 0); `curl -sLf <url>` answering the
+  # body (empty unless it exited 0), or writing it to a file (true when it
+  # exited 0).
+  func osascriptRun(script: String) unsafe extern ret Int
 
-func curlOutput(url: String) unsafe extern ret String
+  func osascriptOutput(script: String) unsafe extern ret String
 
-func curlToFile(url: String, path: String) unsafe extern ret Bool
+  func curlOutput(url: String) unsafe extern ret String
 
-# Bring this app's own window back to the front (runtime_platform_apple.c)
-func nativeActivateSelf() unsafe extern("rae_ext_activateSelf")
+  func curlToFile(url: String, path: String) unsafe extern ret Bool
+
+  # Bring this app's own window back to the front (runtime_platform_apple.c)
+  func nativeActivateSelf() unsafe extern("rae_ext_activateSelf")
+} else {
+  func osascriptRun(script: view String) ret Int {
+    ret -1
+  }
+
+  func osascriptOutput(script: view String) ret String {
+    ret ""
+  }
+
+  func curlOutput(url: view String) ret String {
+    ret ""
+  }
+
+  func curlToFile(url: view String, path: view String) ret Bool {
+    ret false
+  }
+
+  func nativeActivateSelf() {
+  }
+}
 
 # Run one AppleScript; a failure (Spotify not running, Automation permission
 # denied) is reported on the log and otherwise ignored — the next poll shows

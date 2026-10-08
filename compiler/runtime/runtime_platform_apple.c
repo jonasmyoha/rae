@@ -3,6 +3,10 @@
  * Split from rae_runtime.c by runtime migration task #288.
  * This module is included by rae_runtime.c into one translation unit.
  * No behavior or ABI changes are intended here.
+ *
+ * Apple only: the Rae side declares these under `when Target.isApple`
+ * (lib/app3d/RenderScale.rae, lib/sys/Spotify.rae, lib/Raylib.rae), so there
+ * are no stubs elsewhere.
  */
 
 #if defined(__APPLE__)
@@ -89,13 +93,4 @@ int64_t rae_ext_thermalState(void) {
   if (!pi) return 0;
   return (int64_t)((long (*)(void*, SEL))objc_msgSend)(pi, sel_registerName("thermalState"));
 }
-#else
-void rae_ext_disableAppNap(void) {
-  /* No-op outside macOS — App Nap is a macOS-specific power
-   * management feature. */
-}
-void rae_ext_activateSelf(void) {
-  /* No-op outside macOS. */
-}
-int64_t rae_ext_thermalState(void) { return 0; }  /* no thermal API off Apple */
-#endif
+#endif  /* __APPLE__ */

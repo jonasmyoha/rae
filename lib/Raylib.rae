@@ -426,8 +426,10 @@ func mouseHookActive() unsafe extern ret Bool
 # through `objc_msgSend` to call
 # `[[NSProcessInfo processInfo] beginActivityWithOptions:reason:]`
 # and stashes the returned activity for the process lifetime.
-# No-op on non-macOS targets.
-func disableAppNap() unsafe extern
+# Only Apple has it (runtime_platform_apple.c), so it does not exist elsewhere.
+when Target.isApple {
+  func disableAppNap() unsafe extern
+}
 
 func isKeyDown(key: Int) unsafe extern ret Bool
 

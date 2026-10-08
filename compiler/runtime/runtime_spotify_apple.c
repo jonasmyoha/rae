@@ -7,6 +7,10 @@
  * (docs/runtime-c-audit.md row 9). There is no cache here any more: the app's
  * poll worker sends each parsed answer to the UI thread on a Channel.
  *
+ * The Rae side declares these only under `when hasSpotifyBridge` (macOS); off
+ * it, Spotify.rae's own same-named functions answer empty, so there are no
+ * stubs here.
+ *
  * Split from rae_runtime.c by runtime migration task #288.
  * This module is included by rae_runtime.c into one translation unit.
  */
@@ -115,12 +119,5 @@ rae_Bool rae_ext_sys_Spotify_curlToFile(rae_String url, rae_String path) {
     free(link); free(file);
     return status == 0;
 }
-
-#else  /* !__APPLE__ — the bridge is macOS-only: nothing runs, every answer is empty. */
-
-int64_t rae_ext_sys_Spotify_osascriptRun(rae_String script) { (void)script; return -1; }
-rae_String rae_ext_sys_Spotify_osascriptOutput(rae_String script) { (void)script; return (rae_String){NULL, 0, 0, 0}; }
-rae_String rae_ext_sys_Spotify_curlOutput(rae_String url) { (void)url; return (rae_String){NULL, 0, 0, 0}; }
-rae_Bool rae_ext_sys_Spotify_curlToFile(rae_String url, rae_String path) { (void)url; (void)path; return false; }
 
 #endif  /* __APPLE__ */

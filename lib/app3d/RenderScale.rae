@@ -24,12 +24,20 @@ func setRenderScale(s: copy Float64) {
   }
 }
 
-# OS thermal pressure (Apple): 0 nominal, 1 fair, 2 serious, 3 critical; 0 else.
-func nativeThermalState() unsafe extern("rae_ext_thermalState") ret Int
+# OS thermal pressure (Apple's NSProcessInfo, runtime_platform_apple.c): 0
+# nominal, 1 fair, 2 serious, 3 critical. Other platforms have no such API, so
+# their state is always nominal.
+when Target.isApple {
+  func nativeThermalState() unsafe extern("rae_ext_thermalState") ret Int
+}
 
 func thermalState() ret Int {
-  unsafe {
-    ret nativeThermalState()
+  when Target.isApple {
+    unsafe {
+      ret nativeThermalState()
+    }
+  } else {
+    ret 0
   }
 }
 
