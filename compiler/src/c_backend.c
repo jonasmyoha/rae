@@ -1567,6 +1567,11 @@ const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
         case AST_EXPR_COLLECTION_LITERAL:
             if (expr->as.collection.type) return expr->as.collection.type;
             break;
+        /* A typed struct literal (`Point { x: 3, y: 4 }`) is its written
+         * type, so `log(Point { ... })` takes the typed path, not `rae_any` */
+        case AST_EXPR_OBJECT:
+            if (expr->as.object_literal.type) return expr->as.object_literal.type;
+            break;
         /* Indexing an Array(T, cap: N) yields T. Sema already recorded it;
          * surfacing it here is what lets the ordinary assignment path see a
          * String target and wrap the RHS in rae_string_pool_take, exactly as

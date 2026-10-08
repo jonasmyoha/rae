@@ -201,8 +201,11 @@ void emit_to_string_expr(CFuncContext* ctx, const AstExpr* operand, FILE* out) {
     // this expression owns: hold it in a named temp, format it, release it.
     // Taking `&(call())` did not compile for a plain struct, and the
     // List / generic path below captured the value but never released it.
+    // A literal (`Named { name: "a {n}" }`, `List(Int) { 1, 2 }`) owns its
+    // fields the same way.
     if (tr && !tr->is_opt && !tr->is_view && !tr->is_mod
-        && (operand->kind == AST_EXPR_CALL || operand->kind == AST_EXPR_METHOD_CALL)) {
+        && (operand->kind == AST_EXPR_CALL || operand->kind == AST_EXPR_METHOD_CALL
+            || operand->kind == AST_EXPR_OBJECT || operand->kind == AST_EXPR_COLLECTION_LITERAL)) {
         AstTypeRef value_type = *tr;
         value_type.next = NULL;
         const AstDecl* vd = (base.len > 0) ? find_type_decl(ctx, ctx->module, base) : NULL;

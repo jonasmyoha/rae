@@ -635,9 +635,9 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 emit_expr(ctx, arg_val, out, PREC_LOWEST, false, false);
                 fprintf(out, "); rae_ext_rae_log_write(rae_log_text_%s_(&__logged), %s);", mangled, newline);
                 /* A fresh List (a call's result that is not an alias into a
-                 * container, or a task's get()) has no other owner: the
-                 * logged copy releases it. A local or field is not touched. */
-                bool fresh_list = false;
+                 * container, a task's get(), or a literal) has no other owner:
+                 * the logged copy releases it. A local or field is not touched. */
+                bool fresh_list = arg_val->kind == AST_EXPR_COLLECTION_LITERAL;
                 if (arg_val->kind == AST_EXPR_CALL && arg_val->decl_link && arg_val->decl_link->kind == AST_DECL_FUNC
                     && arg_val->decl_link->as.func_decl.body)
                     fresh_list = !rae_func_returns_alias(ctx->compiler_ctx, &arg_val->decl_link->as.func_decl);

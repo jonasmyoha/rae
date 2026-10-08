@@ -1,0 +1,25 @@
+# A struct or List LITERAL logs and interpolates like a variable of its type:
+# its written type is used at the call (not an Any box), its String fields
+# are freed (the runner leak-checks this case), and a `}` closing the
+# literal inside an interpolation hole does not end the hole.
+type Point {
+  x: Int
+  y: Int
+}
+
+type Named {
+  name: String
+  size: Int
+}
+
+func main() {
+  log(Point { x: 3, y: 4 })
+  log(Named { name: "box {7}", size: 2 })
+  let size: Int = 9
+  log(Named { name: "size {size}", size: size })
+  log(List(String) { "a {size}", "b" })
+  logS(Point { x: 1, y: 2 })
+  log("")
+  log("at {Point { x: 5, y: 6 }} and {Named { name: "n {size}", size: 1 }}, end")
+  log("nested {"inner {Point { x: 7, y: 8 }}"} done")
+}
