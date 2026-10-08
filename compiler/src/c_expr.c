@@ -636,9 +636,10 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
           Str lhs_base = eff_base_name(ctx, expr->as.binary.lhs);
           bool lhs_is_string = str_eq_cstr(lhs_base, "String") || str_eq_cstr(lhs_base, "rae_String");
           bool rhs_is_string_lit = expr->as.binary.rhs->kind == AST_EXPR_STRING;
-          // Also detect toString() calls — they always return String
+          // Also detect toString() / toJson() calls — they always return String
           bool lhs_is_tostring = expr->as.binary.lhs->kind == AST_EXPR_METHOD_CALL &&
-              str_eq_cstr(expr->as.binary.lhs->as.method_call.method_name, "toString");
+              (str_eq_cstr(expr->as.binary.lhs->as.method_call.method_name, "toString")
+               || str_eq_cstr(expr->as.binary.lhs->as.method_call.method_name, "toJson"));
           if (lhs_is_string || rhs_is_string_lit || lhs_is_tostring) {
               if (expr->as.binary.op == AST_BIN_NEQ) fprintf(out, "(bool)(!rae_ext_rae_str_eq(");
               else fprintf(out, "(bool)rae_ext_rae_str_eq(");

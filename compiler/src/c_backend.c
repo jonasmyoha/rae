@@ -2546,20 +2546,20 @@ static void emit_json_scan_wrappers(CompilerContext* ctx, FILE* out) {
     if (mangled) fprintf(out, items[i].call, mangled); else fprintf(out, "%s", items[i].fallback);
     fprintf(out, " }\n");
   }
-  /* A String as a quoted JSON string at `position` of the toJson buffer:
-   * escaped by jsonScanEscaped only when jsonScanNeedsEscape says so. */
+  /* A String as a quoted JSON string appended to the toJson output: escaped
+   * by jsonScanEscaped only when jsonScanNeedsEscape says so. */
   const char* needs = core_function_mangled(ctx, "jsonScanNeedsEscape");
   const char* escaped = core_function_mangled(ctx, "jsonScanEscaped");
-  fprintf(out, "RAE_UNUSED static int rae_jscan_put_string(char* buffer, int position, int capacity, rae_String text) {\n");
+  fprintf(out, "RAE_UNUSED static void rae_jscan_put_string(rae_JsonOut* out, rae_String text) {\n");
   if (needs && escaped) {
     fprintf(out, "  if (%s((rae_View_String){&text})) {\n"
                  "    rae_String quoted = rae_string_pool_take(%s((rae_View_String){&text}));\n"
-                 "    int written = snprintf(buffer + position, capacity - position, \"\\\"%%.*s\\\"\", (int)quoted.len, (char*)quoted.data);\n"
+                 "    rae_jout_printf(out, \"\\\"%%.*s\\\"\", (int)quoted.len, (char*)quoted.data);\n"
                  "    rae_ext_rae_str_free(quoted);\n"
-                 "    return written;\n"
+                 "    return;\n"
                  "  }\n", needs, escaped);
   }
-  fprintf(out, "  return snprintf(buffer + position, capacity - position, \"\\\"%%.*s\\\"\", (int)text.len, (char*)text.data);\n}\n");
+  fprintf(out, "  rae_jout_printf(out, \"\\\"%%.*s\\\"\", (int)text.len, (char*)text.data);\n}\n");
 }
 
 bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const char* out_path) {
@@ -2613,7 +2613,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
                "RAE_UNUSED static int64_t rae_jscan_first(rae_String* json, int64_t position);\n"
                "RAE_UNUSED static int64_t rae_jscan_next(rae_String* json, int64_t item);\n"
                "RAE_UNUSED static int64_t rae_jscan_count(rae_String* json, int64_t position);\n"
-               "RAE_UNUSED static int rae_jscan_put_string(char* buffer, int position, int capacity, rae_String text);\n");
+               "RAE_UNUSED static void rae_jscan_put_string(rae_JsonOut* out, rae_String text);\n");
   // lib/Float4's inline lowering (runtime_float4.h) only where it is used: a
   // program that binds an `rae_f4_*` / `rae_m4_*` extern. Including the SIMD
   // headers in every program cost ~4% of the runtime's compile.
@@ -3010,15 +3010,15 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       const AstTypeDecl* td = &shapes[si].decl;
       const char* mangled = shapes[si].mangled;
 
-      // toJson: rae_String rae_toJson_TYPE_(TYPE* this). A generous fixed buffer:
-      // #768 nested-struct recursion embeds child JSON, so flat 4K was too small
-      // for aggregate UI components (Sprite, StyleOverride, ...).
+      // toJson: rae_String rae_toJson_TYPE_(TYPE* this), written into a
+      // rae_JsonOut that starts on the stack and grows on the heap, so a JSON
+      // text of any length fits (#768's nested structs and long lists).
       fprintf(out, "RAE_UNUSED static rae_String rae_toJson_%s_(%s* this) {\n", mangled, mangled);
-      fprintf(out, "  char __buf[16384]; int __p = 0;\n");
-      fprintf(out, "  __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"{\");\n");
+      fprintf(out, "  rae_JsonOut __out; rae_jout_init(&__out);\n");
+      fprintf(out, "  rae_jout_printf(&__out, \"{\");\n");
       bool first = true;
       for (const AstTypeField* f = td->fields; f; f = f->next) {
-          if (!first) fprintf(out, "  __p += snprintf(__buf + __p, sizeof(__buf) - __p, \", \");\n");
+          if (!first) fprintf(out, "  rae_jout_printf(&__out, \", \");\n");
           first = false;
           Str base = get_base_type_name(f->type);
           if (f->type && f->type->is_opt) {
@@ -3031,40 +3031,40 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
                   && rae_opt_is_struct_rep(&_jctx, f->type);
               int nl = (int)f->name.len; const char* nd = f->name.data;
               if (opt_struct && str_eq_cstr(base, "String")) {
-                  fprintf(out, "  if (this->%.*s.has) { __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": \"); __p += rae_jscan_put_string(__buf, __p, sizeof(__buf), this->%.*s.value); }\n",
+                  fprintf(out, "  if (this->%.*s.has) { rae_jout_printf(&__out, \"\\\"%.*s\\\": \"); rae_jscan_put_string(&__out, this->%.*s.value); }\n",
                       nl, nd, nl, nd, nl, nd);
-                  fprintf(out, "  else __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": null\");\n", nl, nd);
+                  fprintf(out, "  else rae_jout_printf(&__out, \"\\\"%.*s\\\": null\");\n", nl, nd);
               } else if (opt_struct && (str_eq_cstr(base, "Int64") || str_eq_cstr(base, "Int") || str_eq_cstr(base, "Int32"))) {
-                  fprintf(out, "  if (this->%.*s.has) __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": %%lld\", (long long)this->%.*s.value);\n", nl, nd, nl, nd, nl, nd);
-                  fprintf(out, "  else __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": null\");\n", nl, nd);
+                  fprintf(out, "  if (this->%.*s.has) rae_jout_printf(&__out, \"\\\"%.*s\\\": %%lld\", (long long)this->%.*s.value);\n", nl, nd, nl, nd, nl, nd);
+                  fprintf(out, "  else rae_jout_printf(&__out, \"\\\"%.*s\\\": null\");\n", nl, nd);
               } else if (opt_struct && (str_eq_cstr(base, "Float64") || str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float32"))) {
-                  fprintf(out, "  if (this->%.*s.has) __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": %%g\", (double)this->%.*s.value);\n", nl, nd, nl, nd, nl, nd);
-                  fprintf(out, "  else __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": null\");\n", nl, nd);
+                  fprintf(out, "  if (this->%.*s.has) rae_jout_printf(&__out, \"\\\"%.*s\\\": %%g\", (double)this->%.*s.value);\n", nl, nd, nl, nd, nl, nd);
+                  fprintf(out, "  else rae_jout_printf(&__out, \"\\\"%.*s\\\": null\");\n", nl, nd);
               } else if (opt_struct && str_eq_cstr(base, "Bool")) {
-                  fprintf(out, "  if (this->%.*s.has) __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": %%s\", this->%.*s.value ? \"true\" : \"false\");\n", nl, nd, nl, nd, nl, nd);
-                  fprintf(out, "  else __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": null\");\n", nl, nd);
+                  fprintf(out, "  if (this->%.*s.has) rae_jout_printf(&__out, \"\\\"%.*s\\\": %%s\", this->%.*s.value ? \"true\" : \"false\");\n", nl, nd, nl, nd, nl, nd);
+                  fprintf(out, "  else rae_jout_printf(&__out, \"\\\"%.*s\\\": null\");\n", nl, nd);
               } else {
                   // opt Any / opt <aggregate/enum/char> — no scalar JSON form.
-                  fprintf(out, "  __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": null\");\n", nl, nd);
+                  fprintf(out, "  rae_jout_printf(&__out, \"\\\"%.*s\\\": null\");\n", nl, nd);
               }
           } else if (str_eq_cstr(base, "String")) {
               // Escaped by lib/core/JsonScan.rae when it holds a quote, a
               // backslash or a control character, so fromJson reads it back.
-              fprintf(out, "  __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": \"); __p += rae_jscan_put_string(__buf, __p, sizeof(__buf), this->%.*s);\n",
+              fprintf(out, "  rae_jout_printf(&__out, \"\\\"%.*s\\\": \"); rae_jscan_put_string(&__out, this->%.*s);\n",
                   (int)f->name.len, f->name.data, (int)f->name.len, f->name.data);
           } else if (str_eq_cstr(base, "Int64") || str_eq_cstr(base, "Int") || str_eq_cstr(base, "Int32")) {
-              fprintf(out, "  __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": %%lld\", (long long)this->%.*s);\n",
+              fprintf(out, "  rae_jout_printf(&__out, \"\\\"%.*s\\\": %%lld\", (long long)this->%.*s);\n",
                   (int)f->name.len, f->name.data, (int)f->name.len, f->name.data);
           } else if (str_eq_cstr(base, "Float64") || str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float32")) {
-              fprintf(out, "  __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": %%g\", this->%.*s);\n",
+              fprintf(out, "  rae_jout_printf(&__out, \"\\\"%.*s\\\": %%g\", this->%.*s);\n",
                   (int)f->name.len, f->name.data, (int)f->name.len, f->name.data);
           } else if (str_eq_cstr(base, "Bool")) {
-              fprintf(out, "  __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": %%s\", this->%.*s ? \"true\" : \"false\");\n",
+              fprintf(out, "  rae_jout_printf(&__out, \"\\\"%.*s\\\": %%s\", this->%.*s ? \"true\" : \"false\");\n",
                   (int)f->name.len, f->name.data, (int)f->name.len, f->name.data);
           } else if (find_enum_decl(NULL, module, base)) {
               // #767: an enum field serializes as its member NAME string, so
               // fromJson can round-trip it (was the "...": placeholder below).
-              fprintf(out, "  { rae_String __e = rae_enum_toString_%.*s((int64_t)this->%.*s); __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": \\\"%%.*s\\\"\", (int)__e.len, (char*)__e.data); }\n",
+              fprintf(out, "  { rae_String __e = rae_enum_toString_%.*s((int64_t)this->%.*s); rae_jout_printf(&__out, \"\\\"%.*s\\\": \\\"%%.*s\\\"\", (int)__e.len, (char*)__e.data); }\n",
                   (int)base.len, base.data, (int)f->name.len, f->name.data, (int)f->name.len, f->name.data);
           } else if (rae_json_struct_mangled_type(ctx, module, f->type)) {
               // #768: a NESTED user-struct field recurses through its own
@@ -3072,7 +3072,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
               // components (Rect{Vec2}, Shape{Color}, ...) valid, round-trippable
               // JSON instead of the old `...` placeholder.
               const char* fm = rae_json_struct_mangled_type(ctx, module, f->type);
-              fprintf(out, "  { rae_String __j = rae_toJson_%s_(&this->%.*s); __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": %%.*s\", (int)__j.len, (char*)__j.data); }\n",
+              fprintf(out, "  { rae_String __j = rae_toJson_%s_(&this->%.*s); rae_jout_printf(&__out, \"\\\"%.*s\\\": %%.*s\", (int)__j.len, (char*)__j.data); }\n",
                   fm, (int)f->name.len, f->name.data, (int)f->name.len, f->name.data);
           } else if (str_eq_cstr(base, "List") && f->type->generic_args) {
               // #768: a List(T) field serializes as a JSON array. Element T may be
@@ -3093,35 +3093,35 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
                   // struct) is runtime state with no JSON form. Emit null rather
                   // than mis-mangle the element type — #764 surfaced this on a
                   // List(WGPUPassTimestampWrites) field getting an auto toJson.
-                  fprintf(out, "  __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": null\");\n", nl, nd);
+                  fprintf(out, "  rae_jout_printf(&__out, \"\\\"%.*s\\\": null\");\n", nl, nd);
               } else {
               const char* em = rae_mangle_type_specialized(ctx, NULL, NULL, elem);
-              fprintf(out, "  __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": [\");\n", nl, nd);
+              fprintf(out, "  rae_jout_printf(&__out, \"\\\"%.*s\\\": [\");\n", nl, nd);
               fprintf(out, "  for (int64_t __k = 0; __k < this->%.*s.length; __k++) {\n", nl, nd);
-              fprintf(out, "    if (__k) __p += snprintf(__buf + __p, sizeof(__buf) - __p, \", \");\n");
+              fprintf(out, "    if (__k) rae_jout_printf(&__out, \", \");\n");
               fprintf(out, "    %s __e; rae_ext_rae_buf_get(this->%.*s.data, __k, sizeof(%s), &__e);\n", em, nl, nd, em);
               if (esm) {
-                  fprintf(out, "    { rae_String __ej = rae_toJson_%s_(&__e); __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"%%.*s\", (int)__ej.len, (char*)__ej.data); }\n", esm);
+                  fprintf(out, "    { rae_String __ej = rae_toJson_%s_(&__e); rae_jout_printf(&__out, \"%%.*s\", (int)__ej.len, (char*)__ej.data); }\n", esm);
               } else if (eString) {
-                  fprintf(out, "    __p += rae_jscan_put_string(__buf, __p, sizeof(__buf), __e);\n");
+                  fprintf(out, "    rae_jscan_put_string(&__out, __e);\n");
               } else if (eFloat) {
-                  fprintf(out, "    __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"%%g\", (double)__e);\n");
+                  fprintf(out, "    rae_jout_printf(&__out, \"%%g\", (double)__e);\n");
               } else if (eBool) {
-                  fprintf(out, "    __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"%%s\", __e ? \"true\" : \"false\");\n");
+                  fprintf(out, "    rae_jout_printf(&__out, \"%%s\", __e ? \"true\" : \"false\");\n");
               } else {
                   // Int and enum ordinals both write as a number.
-                  fprintf(out, "    __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"%%lld\", (long long)__e);\n");
+                  fprintf(out, "    rae_jout_printf(&__out, \"%%lld\", (long long)__e);\n");
               }
               fprintf(out, "  }\n");
-              fprintf(out, "  __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"]\");\n");
+              fprintf(out, "  rae_jout_printf(&__out, \"]\");\n");
               }
           } else {
-              fprintf(out, "  __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": ...\");\n",
+              fprintf(out, "  rae_jout_printf(&__out, \"\\\"%.*s\\\": ...\");\n",
                   (int)f->name.len, f->name.data);
           }
       }
-      fprintf(out, "  __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"}\");\n");
-      fprintf(out, "  return rae_json_build(__buf, __p);\n}\n\n");
+      fprintf(out, "  rae_jout_printf(&__out, \"}\");\n");
+      fprintf(out, "  return rae_jout_finish(&__out);\n}\n\n");
 
       // fromJson: TYPE rae_fromJson_TYPE_(rae_String json) reads the object
       // at the start of the text; rae_fromJsonAt_ reads the object at a
