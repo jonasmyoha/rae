@@ -19,6 +19,10 @@ typedef struct {
   size_t line;
   size_t column;
   int interpolation_depth;
+  /* open `{` count inside each open interpolation hole (the hole's own `{`
+   * included), so a `}` that closes a nested `Point { ... }` stays a brace
+   * and only the hole's last `}` resumes the string */
+  int hole_braces[32];
   bool inside_raw_string;
   bool strict;
   bool had_error;
@@ -603,10 +607,16 @@ TokenList lexer_tokenize(Arena* arena,
                                  break;
                                case '{':
                                  emit_token(&lexer, &buffer, TOK_LBRACE, start_index, token_line, token_column);
+                                 if (lexer.interpolation_depth > 0 && lexer.interpolation_depth <= 32)
+                                     lexer.hole_braces[lexer.interpolation_depth - 1]++;
                                  break;
                                case '}':
                                  emit_token(&lexer, &buffer, TOK_RBRACE, start_index, token_line, token_column);
-                                 if (lexer.interpolation_depth > 0) {
+                                 if (lexer.interpolation_depth > 0 && lexer.interpolation_depth <= 32
+                                     && lexer.hole_braces[lexer.interpolation_depth - 1] > 1) {
+                                     lexer.hole_braces[lexer.interpolation_depth - 1]--;
+                                 } else if (lexer.interpolation_depth > 0) {
+                                     if (lexer.interpolation_depth <= 32) lexer.hole_braces[lexer.interpolation_depth - 1] = 0;
                                      lexer.interpolation_depth--;
                                      scan_string(&lexer, &buffer, lexer.index, lexer.line, lexer.column, true);
                                  }
