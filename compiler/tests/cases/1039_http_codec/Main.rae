@@ -16,15 +16,14 @@ func parseAll(input: view String) ret String {
   var state: HttpParseState = createHttpParseState()
   var request: HttpRequest = createHttpRequest()
   var text: String = ""
-  var result: HttpParseResult = HttpParseResult.complete
   loop {
-    result = httpParseNext(state: state, buffer: buffer, request: request)
+    let result: HttpParseResult = httpParseNext(state: state, buffer: buffer, request: request)
     if result is not HttpParseResult.complete {
-      break
+      ret "{text}-> {resultName(result: result)}"
     }
     text = "{text}{request.method} {httpRangeText(buffer: buffer, range: request.target)} keepAlive {request.keepAlive}; "
   }
-  ret "{text}-> {resultName(result: result)}"
+  ret text
 }
 
 func main() {

@@ -1,0 +1,87 @@
+# A `var` String that starts as a literal and is reassigned later in a loop is
+# dropped by a `ret` that comes EARLIER in the source. On the second pass the
+# local owns the heap from the reassignment, and that `ret` used to skip its
+# drop (it was classified while the local still held the literal), so
+# `string:interp outstanding=1` at exit. The leak check (every `run` case) is
+# the test; the variants cover a nested loop, a `ret` that MOVES the local
+# (it must not be dropped as well), a match arm and a local never reassigned.
+func build(count: view Int) ret String {
+  var text: String = ""
+  var steps: Int = 0
+  loop {
+    if steps is count {
+      ret "{text}-> end"
+    }
+    text = "{text}x"
+    steps = steps + 1
+  }
+  ret ""
+}
+
+func nested(rows: view Int, columns: view Int) ret String {
+  var grid: String = ""
+  loop var row: Int = 0, row < rows + 1, ++row {
+    loop var column: Int = 0, column < columns, ++column {
+      if row is rows {
+        ret "{grid}|"
+      }
+      grid = "{grid}{row}{column} "
+    }
+  }
+  ret grid
+}
+
+func moved(count: view Int) ret String {
+  var text: String = ""
+  var steps: Int = 0
+  loop {
+    if steps is count {
+      ret text
+    }
+    text = "{text}y"
+    steps = steps + 1
+  }
+  ret ""
+}
+
+enum Step { more, done }
+
+func byMatch(count: view Int) ret String {
+  var text: String = ""
+  var steps: Int = 0
+  loop {
+    var step: Step = Step.more
+    if steps is count {
+      step = Step.done
+    }
+    match step {
+      case Step.done {
+        ret "matched {text}"
+      }
+      case Step.more {
+        text = "{text}z"
+      }
+    }
+    steps = steps + 1
+  }
+  ret ""
+}
+
+func neverReassigned(count: view Int) ret String {
+  var text: String = "fixed"
+  loop var i: Int = 0, i < count + 1, ++i {
+    if i is count {
+      ret "{text} {i}"
+    }
+  }
+  ret text
+}
+
+func main() {
+  log(build(count: 3))
+  log(build(count: 0))
+  log(nested(rows: 2, columns: 2))
+  log(moved(count: 4))
+  log(byMatch(count: 2))
+  log(neverReassigned(count: 2))
+}
