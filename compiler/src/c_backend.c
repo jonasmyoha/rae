@@ -1825,6 +1825,16 @@ const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
             break;
         }
         case AST_EXPR_METHOD_CALL: {
+            /* Task(T).tryGet() is a builtin whose type sema already gave as
+             * `opt T`. Surfacing it here is what lets `ret task.tryGet()`
+             * pass the optional through instead of wrapping it in a second
+             * one (an `opt rae_opt_T` the C rejected). */
+            if (str_eq_cstr(expr->as.method_call.method_name, "tryGet") && expr->resolved_type
+                && expr->resolved_type->kind == TYPE_OPT) {
+                const TypeInfo* receiver = expr->as.method_call.object ? expr->as.method_call.object->resolved_type : NULL;
+                while (receiver && receiver->kind == TYPE_REF) receiver = receiver->as.ref.base;
+                if (receiver && receiver->kind == TYPE_TASK) return infer_tr_from_resolved(ctx, expr->resolved_type);
+            }
             const AstDecl* mdecl = (expr->decl_link && expr->decl_link->kind == AST_DECL_FUNC)
                                  ? expr->decl_link : NULL;
             /* Sema leaves a GENERIC method call unresolved (no decl_link, no
