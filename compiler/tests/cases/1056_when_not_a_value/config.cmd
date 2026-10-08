@@ -1,0 +1,1 @@
+build --print-target

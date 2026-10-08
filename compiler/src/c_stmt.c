@@ -823,6 +823,8 @@ static int count_ident_refs_stmt(const AstStmt* s, Str name) {
     case AST_STMT_BREAK:
     case AST_STMT_CONTINUE:
       return 0;  // no operands
+    case AST_STMT_WHEN:
+      return 0;  // resolved to its selected block before sema (when_resolve.c)
   }
   return 0;
 }

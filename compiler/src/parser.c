@@ -712,7 +712,9 @@ static AstReturnItem* parse_return_clause(Parser* parser, bool multiline) {
         parser_check(parser, TOK_KW_FUNC) || parser_check(parser, TOK_KW_TYPE) ||
         parser_check(parser, TOK_KW_ENUM) || parser_check(parser, TOK_KW_LET) ||
         parser_check(parser, TOK_KW_VAR) || parser_check(parser, TOK_KW_CONST) ||
-        parser_check(parser, TOK_KW_EXTERN)) break;
+        parser_check(parser, TOK_KW_EXTERN) || parser_check(parser, TOK_KW_WHEN) ||
+        /* the end of a `when` branch around a bodyless (extern) function */
+        parser_check(parser, TOK_RBRACE)) break;
 
     parser_consume_comma(parser, multiline, "return type list");
     if (parser_check(parser, TOK_LBRACE)) {
@@ -753,6 +755,7 @@ static AstDestructureBinding* append_destructure_binding(AstDestructureBinding* 
 // Forward declarations for parsing expressions and statements
 static AstExpr* parse_expression(Parser* parser);
 static AstBlock* parse_block(Parser* parser);
+static AstWhenBranch* parse_when_branches(Parser* parser, const Token* when_token, bool declarations);
 static AstStmt* parse_statement(Parser* parser);
 static AstExpr* parse_collection_literal(Parser* parser, const Token* start_token);
 static AstExpr* parse_list_literal(Parser* parser, const Token* start_token);
@@ -1539,7 +1542,13 @@ static AstExpr* parse_primary(Parser* parser) {
       return parse_match_expression(parser, match_token);
     }
     default:
-      parser_error(parser, token, "unexpected token in expression");
+      if (token->kind == TOK_KW_WHEN) {
+        /* docs/platform-conditional-code.md §3.3: `when` picks whole blocks */
+        parser_error(parser, token, "`when` cannot be a value: it selects statements or declarations at compile time "
+                                    "(use `when` around whole statements, or `if` for a value)");
+      } else {
+        parser_error(parser, token, "unexpected token in expression");
+      }
       parser_advance(parser); // Advance to avoid infinite loops
       return NULL;
   }
@@ -2892,6 +2901,12 @@ static AstStmt* parse_statement(Parser* parser) {
   if (parser_match(parser, TOK_KW_IF)) {
     return parse_if_statement(parser, parser_previous(parser));
   }
+  if (parser_match(parser, TOK_KW_WHEN)) {
+    const Token* when_token = parser_previous(parser);
+    AstStmt* stmt = new_stmt(parser, AST_STMT_WHEN, when_token);
+    stmt->as.when_stmt.branches = parse_when_branches(parser, when_token, false);
+    return stmt;
+  }
   if (parser_match(parser, TOK_KW_LOOP)) {
     return parse_loop_statement(parser, parser_previous(parser));
   }
@@ -3206,7 +3221,8 @@ static AstDecl* parse_func_declaration(Parser* parser, bool is_extern) {
       // overshoot into a following enum / let / var / const / func / type.
       if (t->kind == TOK_LBRACE || t->kind == TOK_EOF || t->kind == TOK_KW_FUNC || t->kind == TOK_KW_TYPE
           || t->kind == TOK_KW_ENUM || t->kind == TOK_KW_LET || t->kind == TOK_KW_VAR
-          || t->kind == TOK_KW_CONST || t->kind == TOK_KW_EXTERN) {
+          || t->kind == TOK_KW_CONST || t->kind == TOK_KW_EXTERN || t->kind == TOK_KW_WHEN
+          || t->kind == TOK_RBRACE) {
         end_brace = t;
         break;
       }
@@ -3360,6 +3376,56 @@ static AstDecl* parse_alias_declaration(Parser* parser) {
   return decl;
 }
 
+static AstDecl* parse_declaration(Parser* parser);
+static AstDecl* append_decl(AstDecl* head, AstDecl* node);
+
+/* The branches of a compile-time `when` (docs/platform-conditional-code.md):
+ *   when <condition> { … } else when <condition> { … } else { … }
+ * At statement level each branch is a block; at declaration level it holds
+ * declarations. The condition is any expression here; the resolver checks
+ * that it is a compile-time Bool. */
+static AstWhenBranch* parse_when_branches(Parser* parser, const Token* when_token, bool declarations) {
+  AstWhenBranch* head = NULL;
+  AstWhenBranch* tail = NULL;
+  const Token* branch_token = when_token;
+  bool has_condition = true;
+  for (;;) {
+    AstWhenBranch* branch = parser_alloc(parser, sizeof(AstWhenBranch));
+    branch->line = branch_token->line;
+    branch->column = branch_token->column;
+    if (has_condition) branch->condition = parse_expression(parser);
+    if (declarations) {
+      parser_consume(parser, TOK_LBRACE, "expected '{' after the `when` condition");
+      while (!parser_check(parser, TOK_RBRACE) && !parser_check(parser, TOK_EOF)) {
+        size_t prev_index = parser->index;
+        branch->decls = append_decl(branch->decls, parse_declaration(parser));
+        if (parser->index == prev_index) parser_advance(parser);
+      }
+      const Token* close = parser_consume(parser, TOK_RBRACE, "expected '}' to close the `when` branch");
+      branch->end_line = close ? close->line : 0;
+    } else {
+      branch->block = parse_block(parser);
+      branch->end_line = branch->block ? branch->block->end_line : 0;
+    }
+    if (!head) head = branch; else tail->next = branch;
+    tail = branch;
+    if (!has_condition || !parser_match(parser, TOK_KW_ELSE)) break;
+    branch_token = parser_previous(parser);
+    has_condition = parser_match(parser, TOK_KW_WHEN);
+  }
+  return head;
+}
+
+static AstDecl* parse_when_declaration(Parser* parser) {
+  const Token* when_token = parser_previous(parser);
+  AstDecl* decl = parser_alloc(parser, sizeof(AstDecl));
+  decl->kind = AST_DECL_WHEN;
+  decl->line = when_token->line;
+  decl->column = when_token->column;
+  decl->as.when_decl.branches = parse_when_branches(parser, when_token, true);
+  return decl;
+}
+
 static AstDecl* parse_declaration(Parser* parser) {
   if (parser_check(parser, TOK_KW_PUB) || parser_check(parser, TOK_KW_PRIV)) {
     const Token* token = parser_advance(parser);
@@ -3401,6 +3467,9 @@ static AstDecl* parse_declaration(Parser* parser) {
   if (parser_match(parser, TOK_KW_CONST)) {
     return parse_global_let_declaration(parser, false, true);
   }
+  if (parser_match(parser, TOK_KW_WHEN)) {
+    return parse_when_declaration(parser);
+  }
 
   parser_error(parser, parser_peek(parser), "expected 'type', 'enum' or 'func'");
   parser_advance(parser); // Advance to avoid infinite loop
@@ -3421,6 +3490,8 @@ static AstDecl* append_decl(AstDecl* head, AstDecl* node) {
   tail->next = node;
   return head;
 }
+
+static void parser_check_declarations(Parser* parser, AstDecl* head);
 
 AstModule* parse_module(Arena* arena, const char* file_path, TokenList tokens) {
   if (!tokens.count) {
@@ -3544,26 +3615,36 @@ AstModule* parse_module(Arena* arena, const char* file_path, TokenList tokens) {
   /* #868/#877: the unsafe boundary is UNCONDITIONAL for every source file.
    * (The #868 staging gated it on the file adopting an unsafe block or an
    * unsafe Rae function; #877 removed that source-file adoption bypass.) */
+  parser_check_declarations(&parser, head);
+  module->imports = imports;
+  module->c_headers = c_headers;
+  module->decls = head;
+  module->had_error = parser.had_error;
+  return module;
+}
+
+/* The per-declaration checks of a file, also inside every `when` branch */
+static void parser_check_declarations(Parser* parser, AstDecl* head) {
   for (AstDecl* decl = head; decl; decl = decl->next) {
     decl->unsafe_checks_enabled = true;
+    if (decl->kind == AST_DECL_WHEN) {
+      for (AstWhenBranch* branch = decl->as.when_decl.branches; branch; branch = branch->next)
+        parser_check_declarations(parser, branch->decls);
+      continue;
+    }
     if (decl->kind != AST_DECL_FUNC || !decl->as.func_decl.is_extern) continue;
     // Every extern must say `unsafe` (post-parameter, before `extern`).
     if (!decl->as.func_decl.is_unsafe) {
       Token token = { .line = decl->line, .column = decl->column };
-      parser_error(&parser, &token,
+      parser_error(parser, &token,
           "extern declarations must explicitly include 'unsafe' after the parameter list, before 'extern'");
     }
     // #896/#877: wrong modifier order is always rejected.
     if (decl->as.func_decl.extern_before_func
         || decl->as.func_decl.invalid_unsafe_extern_order) {
       Token token = { .line = decl->line, .column = decl->column };
-      parser_error(&parser, &token,
+      parser_error(parser, &token,
           "foreign declarations must be written 'func name(...) unsafe extern(\"symbol\")'");
     }
   }
-  module->imports = imports;
-  module->c_headers = c_headers;
-  module->decls = head;
-  module->had_error = parser.had_error;
-  return module;
 }

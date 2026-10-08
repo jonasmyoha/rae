@@ -1,0 +1,11 @@
+# A declaration in a branch that is not selected does not exist: on Windows
+# the Linux-only function is the ordinary unknown-function error.
+when Target.os is Os.linux {
+  func linuxOnly() ret Int {
+    ret 1
+  }
+}
+
+func main() {
+  log("{linuxOnly()}")
+}
