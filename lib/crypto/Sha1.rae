@@ -7,7 +7,8 @@
 # CPU's SHA instructions), `sha1` uses it: 16 MB in 7 ms on an M1 Max. The
 # Rae implementation below (`portableSha1Range`, 100 ms) is the reference
 # and the portable fallback for every other platform (AGENTS.md: the faster
-# native implementation wins).
+# native implementation wins). The choice is a compile-time `when`: on other
+# platforms the CommonCrypto binding does not exist at all.
 #
 # The 32-bit words live in Int and are masked back to 32 bits after every
 # operation that can overflow them.
@@ -110,37 +111,44 @@ func appendWord(digest: mod List(UInt8), word: view Int) {
   digest.add(value: (word bitand 255) as UInt8)
 }
 
-# The platform's SHA-1 (one call into the OS crypto library): -1 where there
-# is none
-func platformSha1Digest(
-  bytes: Buffer(UInt8)
-  offset: Int
-  count: Int
-  digest: Buffer(UInt8)
-) unsafe extern("rae_ext_Sha1_platformDigest") ret Int
+# Where the platform has a hardware SHA-1: CommonCrypto on Apple
+# (docs/platform-conditional-code.md, a capability defined next to its user)
+const hasCommonCrypto: Bool = Target.isApple
+
+when hasCommonCrypto {
+  # One call into CommonCrypto: 1, or -1 for an input over 4 GB (CC_LONG is
+  # 32 bits), which then takes the Rae path
+  func commonCryptoSha1(
+    bytes: Buffer(UInt8)
+    offset: Int
+    count: Int
+    digest: Buffer(UInt8)
+  ) unsafe extern("rae_ext_Sha1_commonCrypto") ret Int
+}
 
 # The 20-byte SHA-1 digest of `count` bytes of `bytes` from `start`: the
 # platform's hardware SHA-1 where there is one, the Rae implementation
 # elsewhere
 func sha1Range(bytes: view List(UInt8), start: view Int, count: view Int) ret List(UInt8) {
-  if start < 0 or count < 0 or start + count > bytes.length {
-    ret portableSha1Range(bytes: bytes, start: start, count: count)
-  }
-  var digest: List(UInt8) = List.create(UInt8, cap: 20)
-  loop var i: Int = 0, i < 20, ++i {
-    digest.add(value: 0)
-  }
-  var answered: Int = -1
-  unsafe {
-    answered = platformSha1Digest(
-      bytes: bytes.data
-      offset: start
-      count: count
-      digest: digest.data
-    )
-  }
-  if answered is 1 {
-    ret digest
+  when hasCommonCrypto {
+    if start >= 0 and count >= 0 and start + count <= bytes.length {
+      var digest: List(UInt8) = List.create(UInt8, cap: 20)
+      loop var i: Int = 0, i < 20, ++i {
+        digest.add(value: 0)
+      }
+      var answered: Int = -1
+      unsafe {
+        answered = commonCryptoSha1(
+          bytes: bytes.data
+          offset: start
+          count: count
+          digest: digest.data
+        )
+      }
+      if answered is 1 {
+        ret digest
+      }
+    }
   }
   ret portableSha1Range(bytes: bytes, start: start, count: count)
 }
