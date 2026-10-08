@@ -16,10 +16,12 @@ was SHA-1:
 | plain C, same algorithm | 77 ms |
 | macOS CommonCrypto (the CPU's SHA instructions) | 7 ms |
 
-Today the platform choice is made in C. `runtime_crypto_platform.c` has an
-`#if defined(__APPLE__)` body that calls CommonCrypto and a stub elsewhere that
-answers -1, and `lib/crypto/Sha1.rae` calls the shim on every platform and
-falls back to Rae on -1. The kqueue poller, FileNotify and Float4's
+At first the platform choice was made in C. `runtime_crypto_platform.c` had
+an `#if defined(__APPLE__)` body that called CommonCrypto and a stub
+elsewhere that answered -1, and `lib/crypto/Sha1.rae` called the shim on
+every platform and fell back to Rae on -1. Since 0.1.229, the
+choice is in Rae: the binding is declared only under
+`when hasCommonCrypto`, and the stub is gone. The kqueue poller, FileNotify and Float4's
 NEON/SSE2/wasm/scalar split (`runtime_float4.h`, `--float4-scalar`) do the
 same. That works, but:
 
@@ -253,7 +255,7 @@ that select them:
 ```rae
 when Target.os is Os.macos or Target.os is Os.ios {
   # CommonCrypto: one call, the CPU's SHA instructions
-  func platformSha1Digest(bytes: Buffer(UInt8), offset: Int, count: Int, digest: Buffer(UInt8)) unsafe extern(
+  func commonCryptoSha1(bytes: Buffer(UInt8), offset: Int, count: Int, digest: Buffer(UInt8)) unsafe extern(
     "rae_ext_Sha1_commonCrypto"
   ) ret Int
 }
@@ -347,7 +349,12 @@ per-platform.
    - an error for a reference to an unselected declaration;
    - formatting of every branch.
 2. Move SHA-1's platform choice into Rae: the extern is declared only for
-   Apple, and the `#else` stub is removed.
+   Apple, and the `#else` stub is removed. **Done (0.1.229):**
+   - `const hasCommonCrypto: Bool = Target.isApple`, with
+     `commonCryptoSha1` declared under it and selected by a statement-level
+     `when`;
+   - fixture 1057 type-checks the portable path on a faked Linux;
+   - 16 MB still takes 7.3 ms on macOS.
 3. `rae build --check-targets` and its pre-suite case.
 4. Migrate the other C `#if` choices that are really policy (lib/net's
    kqueue/epoll, FileNotify) to capabilities. Float4's lowering choice stays
