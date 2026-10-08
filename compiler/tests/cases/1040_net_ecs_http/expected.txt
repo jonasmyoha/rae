@@ -1,0 +1,85 @@
+--- mixed pipeline (406 bytes)
+HTTP/1.1 200 OK
+Server: Rae
+Date: <date>
+Content-Type: application/json
+Content-Length: 27
+
+{"message":"Hello, World!"}HTTP/1.1 200 OK
+Server: Rae
+Date: <date>
+Content-Type: text/plain
+Content-Length: 13
+
+Hello, World!HTTP/1.1 404 Not Found
+Server: Rae
+Date: <date>
+Content-Type: text/plain
+Content-Length: 9
+
+Not Found
+--- half a request (0 bytes)
+--- the other half (128 bytes)
+HTTP/1.1 200 OK
+Server: Rae
+Date: <date>
+Content-Type: text/plain
+Content-Length: 13
+
+Hello, World!
+--- before the slow one (128 bytes)
+HTTP/1.1 200 OK
+Server: Rae
+Date: <date>
+Content-Type: text/plain
+Content-Length: 13
+
+Hello, World!
+awaiting: 1
+answered on a later frame: true
+--- the slow one and the one after (279 bytes)
+HTTP/1.1 200 OK
+Server: Rae
+Date: <date>
+Content-Type: text/plain
+Content-Length: 16
+
+slow after 30 msHTTP/1.1 200 OK
+Server: Rae
+Date: <date>
+Content-Type: application/json
+Content-Length: 27
+
+{"message":"Hello, World!"}
+--- bad request (302 bytes)
+HTTP/1.1 200 OK
+Server: Rae
+Date: <date>
+Content-Type: application/json
+Content-Length: 27
+
+{"message":"Hello, World!"}HTTP/1.1 400 Bad Request
+Server: Rae
+Date: <date>
+Content-Type: text/plain
+Content-Length: 11
+Connection: close
+
+Bad Request
+--- connection: close (147 bytes)
+HTTP/1.1 200 OK
+Server: Rae
+Date: <date>
+Content-Type: text/plain
+Content-Length: 13
+Connection: close
+
+Hello, World!
+closing tagged: true true
+closed: true true
+abandoned awaiting: true
+allocations for 1000 requests after warmup: 0
+idle connection closed: true
+closed connections' buffers pooled: true
+requests routed: 1050
+open after close: 0
