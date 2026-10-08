@@ -1,0 +1,21 @@
+# A char literal holds exactly one character, spelled directly in UTF-8 (2-4
+# bytes) as well as in ASCII or as a \u{...} escape: 'é', '—', '😀'.
+func describe(character: view Char32) {
+  log("[{character}] is 'é': {character is 'é'}")
+}
+
+func main() ret Int {
+  let ascii: Char32 = 'a'
+  let accent: Char32 = 'é'
+  let dash: Char32 = '—'
+  let face: Char32 = '😀'
+  let clef: Char32 = '𝄞'
+  let escaped: Char32 = '\u{E9}'
+  log("{ascii} {accent} {dash} {face} {clef} {escaped}")
+  log("same as decoded text: {accent is "é".at(index: 0)} {face is "😀".at(index: 0)}")
+  log("escape equals literal: {escaped is accent}")
+  describe(character: 'é')
+  describe(character: 'e')
+  log("{dash.toString()} has {dash.toString().length()} bytes")
+  ret 0
+}

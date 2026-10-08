@@ -1,0 +1,21 @@
+tests/cases/1026_reject_char_literals/Main.rae:5:21: char literal must contain exactly one character
+     5 |   let two: Char32 = 'ab'
+       |                     ^~~~
+tests/cases/1026_reject_char_literals/Main.rae:6:31: char literal must contain exactly one character
+     6 |   let accentAndMore: Char32 = 'Ã©!'
+       |                               ^~~~
+tests/cases/1026_reject_char_literals/Main.rae:7:26: invalid UTF-8 in char literal
+     7 |   let cutShort: Char32 = 'Ã'
+       |                          ^~~~
+tests/cases/1026_reject_char_literals/Main.rae:8:26: invalid UTF-8 in char literal
+     8 |   let overlong: Char32 = 'À¯'
+       |                          ^~~~
+tests/cases/1026_reject_char_literals/Main.rae:9:27: a char literal cannot hold a surrogate (U+D800..U+DFFF); it is not a character on its own
+     9 |   let surrogate: Char32 = 'í €'
+       |                           ^~~~
+tests/cases/1026_reject_char_literals/Main.rae:10:33: a char literal cannot hold a surrogate (U+D800..U+DFFF); it is not a character on its own
+    10 |   let surrogateEscape: Char32 = '\u{D800}'
+       |                                 ^~~~
+tests/cases/1026_reject_char_literals/Main.rae:11:24: unicode escape is beyond U+10FFFF, the last code point
+    11 |   let beyond: Char32 = '\u{110000}'
+       |                        ^~~~
