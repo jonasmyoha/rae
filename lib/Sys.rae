@@ -136,6 +136,64 @@ func readFile(path: view String) ret opt String {
   }
 }
 
+func rae_io_write_error(text: String) unsafe extern
+
+# Sys is loaded by itself too, without lib/String, so readAsset works on the
+# String primitives directly
+func rae_ext_rae_str_len(s: String) unsafe extern ret Int
+
+func rae_ext_rae_str_compare_bytes(
+  a: String
+  aStart: Int
+  b: String
+  bStart: Int
+  count: Int
+) unsafe extern ret Int
+
+func rae_ext_rae_str_sub(s: String, start: Int, len: Int) unsafe extern ret String
+
+# Read a stdlib asset (a .raescene, the sky dataset). The path is tried as
+# given first (relative to the working directory, so a project's own copy
+# wins); a "lib/..." path is then tried in $RAE_STDLIB, the toolchain stdlib
+# directory `rae run` exports (that directory IS the stdlib `lib`, so the
+# leading "lib/" is dropped), so a project needs no local lib/ copy. Found
+# nowhere, it says so on stderr, naming the path, and answers "". Shaders never
+# come through here: a `shader(files:)` composition is embedded at build.
+func readAsset(path: view String) ret String {
+  if let text: String = readFile(path: path) {
+    ret own text
+  }
+  let stdlib: String = getEnv(name: "RAE_STDLIB")
+  var stdlibLength: Int = 0
+  unsafe {
+    stdlibLength = rae_ext_rae_str_len(s: stdlib)
+    let pathLength: Int = rae_ext_rae_str_len(s: path)
+    let underLib: Bool = rae_ext_rae_str_compare_bytes(
+      a: path
+      aStart: 0
+      b: "lib/"
+      bStart: 0
+      count: 4
+    ) is 0
+    if stdlibLength > 0 and underLib {
+      let rest: String = rae_ext_rae_str_sub(s: path, start: 4, len: pathLength - 4)
+      if let text: String = readFile(path: "{stdlib}/{rest}") {
+        ret own text
+      }
+    }
+  }
+  var message: String = ""
+  if stdlibLength > 0 {
+    message = "error: could not read stdlib asset '{path}' (also tried $RAE_STDLIB={stdlib}). The Rae stdlib files are missing here; set RAE_STDLIB to the toolchain's lib/ directory.\n"
+  } else {
+    message = "error: could not read stdlib asset '{path}', and $RAE_STDLIB is unset. Run through `rae run`, or set RAE_STDLIB to the toolchain's lib/ directory so stdlib assets resolve without a local lib/ copy.\n"
+  }
+  unsafe {
+    rae_io_write_error(text: message)
+  }
+  ret ""
+}
+
 func writeFile(path: view String, content: view String) ret Bool {
   unsafe {
     ret rae_sys_write_file(path: path, content: content)

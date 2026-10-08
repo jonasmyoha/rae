@@ -5,25 +5,24 @@
  * No behavior or ABI changes are intended here.
  */
 
-rae_String rae_ext_rae_io_read_line(void) {
+/* One getline from stdin: the line as read, its newline included, or empty
+ * at end of input. lib/Io.rae readLine drops the line ending. */
+rae_String rae_ext_rae_io_read_line_raw(void) {
   char* buffer = NULL;
-  size_t len = 0;
-  if (getline(&buffer, &len, stdin) == -1) {
+  size_t capacity = 0;
+  ssize_t length = getline(&buffer, &capacity, stdin);
+  if (length <= 0) {
     free(buffer);
     return (rae_String){NULL, 0, 0, 0};
   }
-  // Remove newline
-  size_t blen = strlen(buffer);
-  if (blen > 0 && buffer[blen-1] == '\n') {
-      buffer[blen-1] = '\0';
-      blen--;
-  }
-  if (blen > 0 && buffer[blen-1] == '\r') {
-      buffer[blen-1] = '\0';
-      blen--;
-  }
-  rae_mem_str_tag(buffer, (int64_t)len, RAE_SITE_READ_LINE);
-  return (rae_String){(uint8_t*)buffer, (int64_t)blen, (int64_t)len, 1};
+  rae_mem_str_tag(buffer, (int64_t)capacity, RAE_SITE_READ_LINE);
+  return (rae_String){(uint8_t*)buffer, (int64_t)length, (int64_t)capacity, 1};
+}
+
+/* `text` written to stderr and flushed (lib/Sys.rae's asset-miss message) */
+void rae_ext_rae_io_write_error(rae_String text) {
+  if (text.data && text.len > 0) fwrite(text.data, 1, (size_t)text.len, stderr);
+  fflush(stderr);
 }
 
 rae_Char rae_ext_rae_io_read_char(void) {
@@ -87,60 +86,6 @@ rae_String rae_ext_rae_sys_read_file(rae_String path) {
   }
   fclose(f);
   return (rae_String){buffer, (int64_t)len, (int64_t)len + 1, 1};
-}
-
-/* #935: stdlib-asset read (scenes, sky data) with stdlib resolution + a loud
- * miss. See the header. Shaders no longer come through here: a declared
- * `shader(files:)` is composed and embedded at build. */
-static rae_String rae_read_whole_file(const char* path) {
-  FILE* f = fopen(path, "rb");
-  if (!f) return (rae_String){NULL, 0, 0, 0};
-  fseek(f, 0, SEEK_END);
-  long len = ftell(f);
-  fseek(f, 0, SEEK_SET);
-  uint8_t* buffer = malloc((size_t)len + 1);
-  if (buffer) {
-    fread(buffer, 1, (size_t)len, f);
-    buffer[len] = '\0';
-    rae_mem_str_tag(buffer, (int64_t)len + 1, RAE_SITE_READ_FILE);
-  }
-  fclose(f);
-  return (rae_String){buffer, (int64_t)len, (int64_t)len + 1, 1};
-}
-
-rae_String rae_ext_rae_read_asset(rae_String path) {
-  if (!path.data) return (rae_String){NULL, 0, 0, 0};
-  const char* p = (const char*)path.data;
-
-  /* 1. As given: a project's own lib/ (cwd) or an assets/ override wins. */
-  rae_String direct = rae_read_whole_file(p);
-  if (direct.data) return direct;
-
-  /* 2. A "lib/<rest>" asset, resolved against the toolchain stdlib dir the
-   *    compiler exports as $RAE_STDLIB (that dir IS the stdlib `lib`, so the
-   *    leading "lib/" is dropped when joining). Lets a project run without a
-   *    local lib/ copy — the gap #933 left for these runtime reads. */
-  const char* stdlib = getenv("RAE_STDLIB");
-  if (stdlib && stdlib[0] && strncmp(p, "lib/", 4) == 0) {
-    char joined[4096];
-    snprintf(joined, sizeof(joined), "%s/%s", stdlib, p + 4);
-    rae_String viaStdlib = rae_read_whole_file(joined);
-    if (viaStdlib.data) return viaStdlib;
-  }
-
-  /* 3. Nowhere: fail loudly at the point of the miss. */
-  if (stdlib && stdlib[0]) {
-    fprintf(stderr,
-            "error: could not read stdlib asset '%s' (also tried $RAE_STDLIB=%s). "
-            "The Rae stdlib files are missing here; set RAE_STDLIB to the "
-            "toolchain's lib/ directory.\n", p, stdlib);
-  } else {
-    fprintf(stderr,
-            "error: could not read stdlib asset '%s', and $RAE_STDLIB is unset. "
-            "Run through `rae run`, or set RAE_STDLIB to the toolchain's lib/ "
-            "directory so stdlib assets resolve without a local lib/ copy.\n", p);
-  }
-  return (rae_String){NULL, 0, 0, 0};
 }
 
 /* Read a file as raw BYTES.
@@ -307,57 +252,23 @@ int64_t rae_ext_rae_sys_rss_kb(void) {
 #endif
 }
 
-/* Non-recursive directory scan. Returns a newline-separated list of
- * entry names (excluding "." and ".."), or the empty string when the
- * directory can't be opened. Caller-side `lib/fs.rae::listDir` splits
- * this back into `List(File)`. Names are returned in the order the
- * OS yields them — POSIX makes no guarantee, and APFS in particular
- * returns entries in insertion order rather than sorted. */
-rae_String rae_ext_rae_sys_list_dir(rae_String folder) {
-  if (!folder.data) return (rae_String){NULL, 0, 0, 0};
-  DIR* dir = opendir((const char*)folder.data);
+/* A directory read one entry per call (lib/Files.rae listDir): opendir, one
+ * readdir (the entry's name, empty after the last), closedir. A NULL
+ * directory (one that could not be opened) reads as empty. */
+void* rae_ext_rae_sys_dir_open(rae_String folder) {
+  if (!folder.data) return NULL;
+  return opendir((const char*)folder.data);
+}
+
+rae_String rae_ext_rae_sys_dir_next(void* dir) {
   if (!dir) return (rae_String){NULL, 0, 0, 0};
+  struct dirent* entry = readdir((DIR*)dir);
+  if (!entry) return (rae_String){NULL, 0, 0, 0};
+  return rae_ext_rae_str_from_cstr((void*)entry->d_name);
+}
 
-  /* Grow a heap buffer as we append entries with '\n' separators.
-   * Keeps the function single-pass (no readdir count then re-read). */
-  size_t cap = 256;
-  size_t len = 0;
-  uint8_t* buf = malloc(cap);
-  if (!buf) { closedir(dir); return (rae_String){NULL, 0, 0, 0}; }
-
-  struct dirent* entry;
-  while ((entry = readdir(dir)) != NULL) {
-    const char* name = entry->d_name;
-    if (name[0] == '.' && (name[1] == '\0' || (name[1] == '.' && name[2] == '\0'))) {
-      continue; /* skip . and .. */
-    }
-    size_t nameLen = strlen(name);
-    size_t need = len + nameLen + 1; /* +1 for separator newline */
-    if (need > cap) {
-      while (need > cap) cap *= 2;
-      uint8_t* grown = realloc(buf, cap);
-      if (!grown) { free(buf); closedir(dir); return (rae_String){NULL, 0, 0, 0}; }
-      buf = grown;
-    }
-    if (len > 0) {
-      buf[len++] = '\n';
-    }
-    memcpy(buf + len, name, nameLen);
-    len += nameLen;
-  }
-  closedir(dir);
-
-  if (len == 0) { free(buf); return (rae_String){NULL, 0, 0, 0}; }
-
-  /* Null-terminate and register with the string pool so the caller's
-   * Rae-side `let raw: String = ...` gets the same lifetime semantics
-   * as any other owning String. */
-  uint8_t* finalBuf = realloc(buf, len + 1);
-  if (!finalBuf) finalBuf = buf;
-  finalBuf[len] = '\0';
-  rae_mem_str_tag(finalBuf, len + 1, RAE_SITE_CONCAT);
-  rae_string_pool_register(finalBuf);
-  return (rae_String){finalBuf, (int64_t)len, (int64_t)(len + 1), 1};
+void rae_ext_rae_sys_dir_close(void* dir) {
+  if (dir) closedir((DIR*)dir);
 }
 
 double rae_ext_rae_sys_file_mtime(rae_String path){

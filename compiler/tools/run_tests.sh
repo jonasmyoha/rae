@@ -555,6 +555,14 @@ if [ -z "$TEST_NAME_FILTER" ] && [ -f "tools/test-packages-cli.sh" ]; then
   if ! bash tools/test-packages-cli.sh; then FAILED=$((FAILED+1)); fi
 fi
 
+# File, asset and console policy (docs/runtime-c-audit.md row 7): stdin,
+# $RAE_STDLIB and a scratch directory, which a single-file fixture cannot set.
+# Full run only.
+if [ -z "$TEST_NAME_FILTER" ] && [ -f "tools/test-files-io.sh" ]; then
+  echo
+  if ! bash tools/test-files-io.sh; then FAILED=$((FAILED+1)); fi
+fi
+
 # The browser build (tools/wasm_webgpu_smoke.sh: 109/110 through Emscripten +
 # EmdawnWebGPU, ~50 s; SKIP without emcc). Full run only.
 if [ -z "$TEST_NAME_FILTER" ] && [ -f "tools/wasm_webgpu_smoke.sh" ]; then

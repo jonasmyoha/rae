@@ -145,6 +145,12 @@ if [ -f tools/test-watch-scene-data.sh ]; then
   echo
   if bash tools/test-watch-scene-data.sh; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 fi
+# File, asset and console policy (docs/runtime-c-audit.md row 7) with stdin,
+# $RAE_STDLIB and a scratch directory, which a single-file case cannot set.
+if [ -f tools/test-files-io.sh ]; then
+  echo
+  if bash tools/test-files-io.sh; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
+fi
 echo
 echo "=========================================="
 echo "Results: $PASSED passed, $FAILED failed"

@@ -596,6 +596,15 @@ static inline double rae_ext_rae_str_f64_at(rae_String s, int64_t index) {
   digits[count] = 0;
   return strtod(digits, NULL);
 }
+/* `text` cut to its first `length` bytes in place, no allocation (lib/Io.rae
+ * readLine drops the line ending with it): only a shorter length changes it,
+ * and an owned buffer is NUL-terminated again at the new end. */
+static inline void rae_ext_rae_str_shorten(rae_Mod_String text, int64_t length) {
+  rae_String* target = text.ptr;
+  if (!target || length < 0 || length >= target->len) return;
+  target->len = length;
+  if (target->data && target->is_owned) target->data[length] = 0;
+}
 rae_String rae_ext_rae_str_from_bytes(uint8_t* buffer, int64_t offset, int64_t count);
 rae_String rae_ext_rae_str_from_small_bytes(int64_t first, int64_t second, int64_t third, int64_t fourth, int64_t count);
 rae_String rae_ext_rae_str_from_packed(uint64_t first, uint64_t second, uint64_t third, int64_t count);
@@ -619,7 +628,8 @@ __attribute__((cold, noinline)) void rae_list_set_out_of_range(int64_t index, in
 void rae_thread_install_altstack(void);
 double rae_ext_rae_str_to_f64(rae_String s);
 
-rae_String rae_ext_rae_io_read_line(void);
+rae_String rae_ext_rae_io_read_line_raw(void);
+void rae_ext_rae_io_write_error(rae_String text);
 rae_Char rae_ext_rae_io_read_char(void);
 
 /* Diagnostics: dump cumulative alloc/free counters to stderr.
@@ -683,19 +693,13 @@ void rae_runtime_set_args(int argc, char** argv);
 int64_t rae_ext_rae_sys_arg_count(void);
 rae_String rae_ext_rae_sys_arg_at(int64_t index);
 rae_String rae_ext_rae_sys_read_file(rae_String path);
-/* #935: read a stdlib asset (a .raescene, the sky dataset). Tries the path as
- * given (cwd-relative, so a project's own copy still wins), then — for a
- * "lib/..." path — joins it against $RAE_STDLIB (the toolchain stdlib dir the
- * compiler exports, so a project needs no local lib/ copy). If the file is
- * found nowhere it fails LOUDLY (a stderr diagnostic naming the path) and
- * returns empty. Shaders never come through here: a `shader(files:)`
- * composition is read, validated and embedded by the compiler. */
-rae_String rae_ext_rae_read_asset(rae_String path);
 /* Binary counterpart: a Buffer of one-byte-per-Int values, for container
  * formats whose content is not text. */
 void* rae_ext_rae_sys_read_file_bytes(rae_String path, rae_Mod_Int64 out);
 rae_String rae_ext_rae_sys_read_file_text(rae_String path, int64_t offset, int64_t len);
-rae_String rae_ext_rae_sys_list_dir(rae_String folder);
+void* rae_ext_rae_sys_dir_open(rae_String folder);
+rae_String rae_ext_rae_sys_dir_next(void* dir);
+void rae_ext_rae_sys_dir_close(void* dir);
 /* captureAndBlurRegion and loadCircleCroppedTexture are declared
  * in the raylib.h-scope helper block above (RAE_HAS_RAYLIB);
  * see implementations in rae_runtime.c. */

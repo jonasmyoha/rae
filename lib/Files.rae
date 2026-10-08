@@ -94,37 +94,39 @@ func hasExtension(this: view File, ext: view String) ret Bool {
 
 # ----- listDir --------------------------------------------------------
 
-# Native: returns the directory's entries as a "\n"-separated string
-# (no trailing newline), or "" on error / empty. `.` and `..` are
-# filtered by the native; everything else passes through, including
-# hidden files starting with `.` and broken symlinks.
-func rae_sys_list_dir(folder: String) unsafe extern ret String
+# The directory read, one call each: open (a handle that reads as empty when
+# the folder cannot be opened), the next entry's name (empty after the last),
+# close. `.` and `..` come through like any entry.
+func rae_sys_dir_open(folder: String) unsafe extern ret Ptr
 
-# Scan `folder` for direct children. Non-recursive. Returns an
-# empty list when the folder doesn't exist, can't be read, or is
-# empty — callers that need to tell those apart should call
+func rae_sys_dir_next(dir: Ptr) unsafe extern ret String
+
+func rae_sys_dir_close(dir: Ptr) unsafe extern
+
+# Scan `folder` for direct children. Non-recursive. Every entry but `.` and
+# `..` is listed, including hidden files starting with `.` and broken
+# symlinks. Returns an empty list when the folder doesn't exist, can't be
+# read, or is empty — callers that need to tell those apart should call
 # `Sys.exists` first.
 #
 # Order: whatever the OS returns. macOS APFS yields insertion
 # order; Linux ext4 typically yields hash-bucket order. Don't
 # rely on either — sort the result if your UI needs stable
 # ordering.
-func listDir(folder: view String) pub ret List(File) {
-  var raw: String = ""
+func listDir(folder: view String) ret List(File) {
+  var result: List(File) = {}
   unsafe {
-    raw = rae_sys_list_dir(folder: folder)
-  }
-  let lines: List(String) = raw.split(sep: "\n")
-  var result: List(File) = List.create(File, cap: lines.length)
-  var i: Int = 0
-  loop i < lines.length {
-    if let n: String = lines.copyAt(index: i) {
-      if n.length() > 0 {
-        let entry: File = { name: n, folder: folder }
-        result.add(value: entry)
+    let dir: Ptr = rae_sys_dir_open(folder: folder)
+    loop true {
+      let name: String = rae_sys_dir_next(dir: dir)
+      if name.length() is 0 {
+        break
+      }
+      if name is not "." and name is not ".." {
+        result.add(value: { name: name, folder: folder })
       }
     }
-    i = i + 1
+    rae_sys_dir_close(dir: dir)
   }
   ret result
 }
