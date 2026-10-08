@@ -33,9 +33,12 @@ Methods (resolved by type):
 - `clamp(val: Int, low: Int, high: Int): ret Int`
 
 ### Randomness
-- `seed(n: Int)`
-- `random(): ret Float` (0.0 to 1.0)
-- `random(min: Int, max: Int): ret Int`
+A generator is a `Random` value its owner holds (no global state; 0.1.210):
+- `createRandom(seed: Int): ret Random` (`defaultRandomSeed` reproduces the
+  former global generator's sequence)
+- `nextFloat(this: mod Random): ret Float` (0.0 to 1.0)
+- `nextInt(this: mod Random, min: Int, max: Int): ret Int` (inclusive)
+- `nextBits(this: mod Random): ret Int` (the next 32 random bits)
 
 ## 3. String Utilities (`lib/string.rae`)
 
