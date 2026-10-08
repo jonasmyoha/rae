@@ -22,6 +22,9 @@ This is the normative reference for Rae's primitive numeric model. It is a
 | `Bool`    | boolean                   | `rae_Bool` |    — |
 | `Char`    | Unicode scalar            | `uint32_t` |   32 |
 
+`Char32` is another spelling of `Char` (the same type, as `Float32` is `Float`),
+so `List(Char)` and `List(Char32)` are one List type.
+
 Each fixed-width integer is a **distinct first-class type**, not a display alias
 of `Int`: it interns separately, so `List(Int32)`, `List(Int16)` and `List(Int)`
 are three different monomorphizations with byte-accurate element layout
