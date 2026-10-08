@@ -2134,6 +2134,16 @@ static AstDecl* resolve_qualified_function(CompilerContext* ctx, AstModule* modu
             char ns[256]; sema_project_namespace(d, ns, sizeof ns);
             qual_match = ns[0] != '\0' && str_eq_cstr(qualifier, ns);
         }
+        /* A package module by its file component: `Poller.createPoller()`
+         * for `net/Poller`, `Sha1.sha1Text()` for `crypto/Sha1`. Only for a
+         * module visible here (the check below), so it is the module the
+         * file imported or opened. Matching it in sema, rather than leaving
+         * it to the backend, is what keeps a same-named TYPE (`type Poller`)
+         * from claiming the qualifier as a receiver. */
+        if (!qual_match && d->module_name) {
+            const char* slash = strrchr(d->module_name, '/');
+            qual_match = slash && str_eq_cstr(qualifier, slash + 1);
+        }
         if (!qual_match) continue;
         if (!str_eq(d->as.func_decl.name, name)) continue;
         if (d->as.func_decl.specialization_args) continue;
@@ -6993,12 +7003,20 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                 // `import/open X as lhs` alias resolving to module X. (Aliases are
                 // per-file; auto-loaded modules need no directive.)
                 Str modname = (Str){0};
+                bool via_component = false;
                 if (!valueShadows) {
                     if (sema_is_module_name(module, lhs)) {
                         modname = lhs;
                     } else {
                         Str aliased = sema_resolve_alias(s_current_decl_origin, lhs);
                         if (aliased.data && sema_is_module_name(module, aliased)) modname = aliased;
+                        /* The file component of a package module (`Poller`
+                         * for `net/Poller`): tried too, and committed below
+                         * only if a module function resolves */
+                        else if (sema_name_is_module_component(module, lhs)) {
+                            modname = lhs;
+                            via_component = true;
+                        }
                     }
                 }
                 if (modname.data) {
@@ -7008,6 +7026,10 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                 // Analyze args first so the resolver can use their types.
                 for (AstCallArg* a = qargs; a; a = a->next) sema_analyze_expr(ctx, module, symbols, a->value, true);
                 AstDecl* resolved = resolve_qualified_function(ctx, module, symbols, modname, fname, qargs, expr->line, expr->column);
+                /* A generic function reached by a file component
+                 * (`Query.query2(A, B, ...)`) stays on the backend's path,
+                 * which specialises it from the type arguments */
+                if (resolved && via_component && resolved->as.func_decl.generic_params) resolved = NULL;
                 if (resolved) sema_check_call_arg_names(module, symbols, &resolved->as.func_decl, qargs);
                 // #777: only commit to the module-qualified rewrite when a module
                 // function actually resolved. If not (e.g. the qualifier is a type

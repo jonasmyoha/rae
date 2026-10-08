@@ -46,6 +46,14 @@ package is never a qualifier: `procgen.Texture.matGrass` is an error that
 spells the right form, as is a const the module does not declare (fixtures
 1014, 1015).
 
+A module often declares a type of its own name (`net/Poller` has
+`type Poller`, `FileNotify` has `type FileNotify`). The qualifier is still
+the module: `Poller.createPoller()` calls `net/Poller`'s function, and the
+type does not claim `Poller.` as a receiver. Sema binds such a
+last-name-qualified call itself when a non-generic module function
+resolves. A generic one (`Query.query2(A, B, …)`) is specialised by the
+backend from its type arguments (fixture 1060, 0.1.232).
+
 This works the same for a lib module and for a project sibling (`Pal.shade`
 where `Pal.rae` sits next to `Main.rae`), and in every expression position —
 a plain initializer, an operand, or a `"{Pal.shade}"` interpolation part. A
