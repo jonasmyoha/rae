@@ -863,7 +863,8 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                         ? &callexpr->decl_link->as.func_decl : NULL;
                 if (callee && c_spawn_threadable(ctx, callee)) {
                     // Real OS thread: pack args by value into the per-function
-                    // struct and pthread_create the thunk. get() joins it.
+                    // struct and start the thunk (rae_task_start: a thread, or the
+                    // caller when no thread can be had). get() joins it.
                     const char* mangled = rae_mangle_function(ctx->compiler_ctx, callee);
                     fprintf(out, "({ __raespawn_args_%s* __s = (__raespawn_args_%s*)malloc(sizeof(__raespawn_args_%s)); ",
                             mangled, mangled, mangled);
@@ -920,7 +921,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                     fprintf(out, "RaeTask* __t = rae_task_new(");
                     if (is_void) fprintf(out, "0");
                     else { fprintf(out, "sizeof("); emit_type_info_as_c_type(ctx, resT, out); fprintf(out, ")"); }
-                    fprintf(out, "); __s->__task = __t; pthread_create(&__t->thread, ((void*)0), __raespawn_thunk_%s, __s); __t; })", mangled);
+                    fprintf(out, "); __s->__task = __t; rae_task_start(__t, __raespawn_thunk_%s, __s); __t; })", mangled);
                     break;
                 }
                 // Sequential fallback (heap/mod/view-enum args, or an

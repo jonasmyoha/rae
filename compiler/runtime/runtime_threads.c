@@ -19,6 +19,80 @@ RaeTask* rae_task_new(size_t result_size) {
   return t;
 }
 
+/* Start a spawned task's thunk on its own thread. When no thread can be had
+ * (pthread_create fails: macOS stops at 16 383 live threads per process, or
+ * the test-only cap RAE_SPAWN_THREAD_CAP=N is reached) the thunk runs right
+ * here on the caller, exactly as an uncapturable spawn runs, so the task
+ * still computes its result and `get()` returns it. It used to be treated as
+ * started, and get() handed back an uncomputed result (docs/lightweight-spawn
+ * -design.md §10). The first such fallback is reported once on stderr. */
+#if !defined(__wasm__) || defined(RAE_WASM_THREADS)
+typedef struct {
+  void* (*thunk)(void*);
+  void* args;
+} RaeTaskLaunch;
+
+static _Atomic int64_t g_rae_live_task_threads = 0;
+static _Atomic int64_t g_rae_spawn_thread_cap = -2;  /* -2: not read yet; -1: none */
+static _Atomic int g_rae_spawn_fallback_reported = 0;
+
+static void* rae_task_trampoline(void* launch_pointer) {
+  RaeTaskLaunch launch = *(RaeTaskLaunch*)launch_pointer;
+  free(launch_pointer);
+  void* answer = launch.thunk(launch.args);
+  atomic_fetch_sub_explicit(&g_rae_live_task_threads, 1, memory_order_relaxed);
+  return answer;
+}
+
+static int64_t rae_spawn_thread_cap(void) {
+  int64_t cap = atomic_load_explicit(&g_rae_spawn_thread_cap, memory_order_relaxed);
+  if (cap == -2) {
+    const char* text = getenv("RAE_SPAWN_THREAD_CAP");
+    cap = (text && text[0]) ? (int64_t)atoll(text) : -1;
+    atomic_store_explicit(&g_rae_spawn_thread_cap, cap, memory_order_relaxed);
+  }
+  return cap;
+}
+#endif
+
+void rae_task_start(RaeTask* t, void* (*thunk)(void*), void* args) {
+#if !defined(__wasm__) || defined(RAE_WASM_THREADS)
+  int64_t cap = rae_spawn_thread_cap();
+  int64_t live = atomic_fetch_add_explicit(&g_rae_live_task_threads, 1, memory_order_relaxed);
+  int error = 0;
+  if (cap >= 0 && live >= cap) {
+    error = -1;
+  } else {
+    RaeTaskLaunch* launch = (RaeTaskLaunch*)malloc(sizeof(RaeTaskLaunch));
+    if (launch) {
+      launch->thunk = thunk;
+      launch->args = args;
+      error = pthread_create(&t->thread, NULL, rae_task_trampoline, launch);
+      if (error == 0) return;
+      free(launch);
+    } else {
+      error = ENOMEM;
+    }
+  }
+  atomic_fetch_sub_explicit(&g_rae_live_task_threads, 1, memory_order_relaxed);
+  if (atomic_exchange_explicit(&g_rae_spawn_fallback_reported, 1, memory_order_relaxed) == 0) {
+    if (error == -1)
+      fprintf(stderr, "[rae] spawn: the thread cap RAE_SPAWN_THREAD_CAP=%lld is reached; tasks beyond it run on the caller "
+                      "(shown once)\n", (long long)cap);
+    else
+      fprintf(stderr, "[rae] spawn: no thread could be started (%s, %lld live); tasks run on the caller until one can "
+                      "(shown once)\n", strerror(error), (long long)live);
+  }
+#endif
+  /* The task's result belongs to the task, not to the statement that spawned
+   * it: what the thunk leaves in this thread's String pool is released, not
+   * flushed (a worker thread's pool is never flushed either) */
+  int pool_mark = rae_string_pool_mark();
+  thunk(args);
+  rae_string_pool_release(pool_mark);
+  t->joined = 1;  /* nothing to join: the task ran here */
+}
+
 void* rae_task_await(RaeTask* t) {
   if (!t) return NULL;
   if (!t->joined) {

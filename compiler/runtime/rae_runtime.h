@@ -54,6 +54,9 @@ typedef struct {
 } RaeTask;
 
 RaeTask* rae_task_new(size_t result_size);
+/* Start a spawned task's thunk on a thread, or on the caller when no thread
+ * can be had (runtime_threads.c) */
+void rae_task_start(RaeTask* t, void* (*thunk)(void*), void* args);
 /* parallelLoop (runtime_threads.c): run body(captures, first, end) over
  * [start, end) in chunks on the worker pool, returning when all are done. */
 typedef void (*RaeParallelBody)(void* captures, int64_t first, int64_t end);
@@ -523,6 +526,7 @@ void rae_string_pool_register(void* ptr);
 int rae_string_pool_mark(void);
 void rae_string_pool_flush(int saved);
 void rae_string_pool_remove(void* ptr);
+void rae_string_pool_release(int saved);
 int rae_string_pool_contains(void* ptr);
 RAE_UNUSED static inline rae_String rae_string_pool_take(rae_String s) {
   rae_string_pool_remove(s.data);

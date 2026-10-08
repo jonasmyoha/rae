@@ -1,0 +1,58 @@
+# A spawn that cannot get a thread still computes its task. Past the
+# platform's limit (macOS: 16 383 live threads per process) pthread_create
+# fails; that used to be ignored, and get() returned a result that was never
+# computed (docs/lightweight-spawn-design.md §10). Now such a task runs on the
+# caller, as an uncapturable spawn does, and the first fallback is reported
+# once. This case lowers the limit to 4 with the test-only
+# RAE_SPAWN_THREAD_CAP (config.env): of 10 tasks alive at once, 6 run on the
+# caller, and every result is right.
+func square(value: copy Int, delayMs: copy Int) ret Int {
+  sleep(ms: delayMs)
+  ret value * value
+}
+
+# Sleeps so the 6 name tasks are alive together: 4 hold threads, 2 run on the
+# caller, whose String result must survive the spawning statement (the
+# caller's String pool releases it to the task instead of freeing it)
+func describe(value: copy Int) ret String {
+  sleep(ms: 30)
+  ret "task {value}"
+}
+
+func main() {
+  var tasks: List(Task(Int)) = {}
+  loop var i: Int = 0, i < 10, ++i {
+    tasks.add(value: spawn square(value: i, delayMs: 50))
+  }
+  var total: Int = 0
+  var allRight: Bool = true
+  loop var i: Int = 0, i < tasks.length, ++i {
+    if let task: Task(Int) = tasks.copyAt(index: i) {
+      let result: Int = task.get()
+      if result is not i * i {
+        allRight = false
+      }
+      total = total + result
+    }
+  }
+  log("10 tasks: sum of squares {total}, every result right: {allRight}")
+  # A heap result (String) through the same fallback, and isDone / tryGet
+  # on a task that ran on the caller
+  var names: List(Task(String)) = {}
+  loop var i: Int = 0, i < 6, ++i {
+    names.add(value: spawn describe(value: i))
+  }
+  loop var i: Int = 0, i < names.length, ++i {
+    if let task: Task(String) = names.copyAt(index: i) {
+      let name: String = task.get()
+      log(name)
+    }
+  }
+  var late: Task(Int) = spawn square(value: 7, delayMs: 0)
+  loop not late.isDone() {
+    sleep(ms: 1)
+  }
+  if let value: Int = late.tryGet() {
+    log("tryGet: {value}")
+  }
+}

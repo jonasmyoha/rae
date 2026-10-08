@@ -145,6 +145,15 @@ for TARGET in "${TARGETS[@]}"; do
     fi
 
     CMD_FILE="$TEST_DIRNAME/config.cmd"
+    # A case's own environment: `config.env`, one NAME=value per line, set
+    # only for that case's command (passed with `env`, so it never leaks
+    # into the next case of a serial run)
+    CASE_ENV=()
+    if [ -f "$TEST_DIRNAME/config.env" ]; then
+      while IFS= read -r env_line || [ -n "$env_line" ]; do
+        case "$env_line" in ''|'#'*) ;; *) CASE_ENV+=("$env_line") ;; esac
+      done < "$TEST_DIRNAME/config.env"
+    fi
     CMD_ARGS=("parse") # Default
     if [ -f "$CMD_FILE" ]; then
       CMD_LINE=$(head -n 1 "$CMD_FILE" | tr -d '\r')
@@ -398,9 +407,9 @@ for TARGET in "${TARGETS[@]}"; do
         APP_EXIT_CODE=""
         # For parse/lex/format, we want to capture both stdout and stderr to see errors + any partial results
         if [[ "${CMD_ARGS[0]}" =~ ^(parse|lex|format)$ ]]; then
-            CMD_STDOUT=$("$BIN" "${CMD_RUN_ARGS[@]}" 2>&1 || true)
+            CMD_STDOUT=$(env ${CASE_ENV[@]+"${CASE_ENV[@]}"} "$BIN" "${CMD_RUN_ARGS[@]}" 2>&1 || true)
         elif [ $ENABLE_MEM_STATS -eq 1 ]; then
-            CMD_RAW=$(RAE_MEM_STATS=1 "$BIN" "${CMD_RUN_ARGS[@]}" 2>&1 || true)
+            CMD_RAW=$(env ${CASE_ENV[@]+"${CASE_ENV[@]}"} RAE_MEM_STATS=1 "$BIN" "${CMD_RUN_ARGS[@]}" 2>&1 || true)
             # Leak-check only a program that ran to its normal end: one that
             # stops itself on purpose (a fatal report, exit code != 0) still
             # holds its live World, which is not a leak. The driver's
@@ -417,7 +426,7 @@ for TARGET in "${TARGETS[@]}"; do
             fi
             CMD_STDOUT=$(printf '%s\n' "$CMD_RAW" | grep -Ev '^\[rae (vm )?mem-stats\]|^  \[(mem|vm):' || true)
         else
-            CMD_STDOUT=$("$BIN" "${CMD_RUN_ARGS[@]}" 2>&1 || true)
+            CMD_STDOUT=$(env ${CASE_ENV[@]+"${CASE_ENV[@]}"} "$BIN" "${CMD_RUN_ARGS[@]}" 2>&1 || true)
         fi
         ACTUAL_OUTPUT="$CMD_STDOUT"
         
