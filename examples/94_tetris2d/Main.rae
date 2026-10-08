@@ -57,6 +57,8 @@ type Game {
   lockTimer: Int
   lockDelay: Int
   maxLockTimer: Int
+  # The piece generator, owned by the game (no global generator state)
+  random: Random
 }
 
 func getModernColor(index: view Int) ret Int {
@@ -380,8 +382,8 @@ func checkLines(game: mod Game) {
   }
 }
 
-func randomKind() ret TetrominoKind {
-  let k: Int = random(min: 0, max: 6)
+func randomKind(random: mod Random) ret TetrominoKind {
+  let k: Int = random.nextInt(min: 0, max: 6)
   if k is 0 {
     ret TetrominoKind.i
   }
@@ -406,7 +408,7 @@ func randomKind() ret TetrominoKind {
 func spawnPiece(game: mod Game) {
   let cp: mod Piece => game.currentPiece
   cp.kind = game.nextPieceKind
-  game.nextPieceKind = randomKind()
+  game.nextPieceKind = randomKind(random: game.random)
 
   let pos: mod Position => cp.pos
   pos.x = game.width / 2 - 2
@@ -445,7 +447,7 @@ func initGame(game: mod Game) {
   # Max cumulative lock delay (e.g. 2s)
   game.maxLockTimer = 0
 
-  game.nextPieceKind = randomKind()
+  game.nextPieceKind = randomKind(random: game.random)
 
   # Initialize grid with 0s
   var i: Int = 0
@@ -868,8 +870,8 @@ func main() ret Int {
     lockTimer: 0
     lockDelay: 0
     maxLockTimer: 0
+    random: createRandom(seed: 2026)
   }
-  seed(value: 2026)
   initGame(game)
   let testMode: Bool = getEnv(name: "RAE_TETRIS2D_TEST_FRAME").length() > 0
   if testMode {

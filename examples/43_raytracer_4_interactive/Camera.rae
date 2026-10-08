@@ -56,11 +56,16 @@ func buildCamera(
 
 # Primary ray for normalized screen coords (u right, v up), with lens sampling
 # for defocus blur when lensRadius > 0.
-func makeRay(cam: view Camera, u: view Float, v: view Float) ret Ray {
+func makeRay(
+  cam: view Camera
+  u: view Float
+  v: view Float
+  random: mod Random
+) ret Ray {
   var ro: Vec3 = cam.origin
   if cam.lensRadius > 0.0 {
-    let a: Float = random() * tau
-    let r: Float = cam.lensRadius * Math.sqrt(x: random())
+    let a: Float = random.nextFloat() * tau
+    let r: Float = cam.lensRadius * Math.sqrt(x: random.nextFloat())
     let lx: Float = r * Math.cos(x: a)
     let ly: Float = r * Math.sin(x: a)
     ro = Vec3.vadd(

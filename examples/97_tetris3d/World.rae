@@ -64,6 +64,9 @@ type World {
 
   # Visual flash on the most recently locked piece — fades over a few frames
   lockFlash: Float
+
+  # The piece and particle generator, owned by the world (no global state)
+  random: Random
 }
 
 func makeEmptyParticle() ret Particle {
@@ -92,8 +95,8 @@ func initWorld(world: mod World) {
   }
   world.grid = grid
 
-  world.currentPiece = Piece { kind: randomKind(), x: 3, y: 0, rotation: 0 }
-  world.nextKind = randomKind()
+  world.currentPiece = Piece { kind: randomKind(random: world.random), x: 3, y: 0, rotation: 0 }
+  world.nextKind = randomKind(random: world.random)
 
   world.score = 0
   world.lines = 0

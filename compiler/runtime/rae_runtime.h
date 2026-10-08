@@ -647,9 +647,6 @@ int64_t rae_ext_rae_mem_stats_buf_outstanding_bytes(void);
  * "allocates nothing" guarantee. */
 int64_t rae_ext_rae_mem_alloc_total(void);
 
-void rae_ext_rae_seed(int64_t seed);
-float rae_ext_rae_random(void);
-int64_t rae_ext_rae_random_int(int64_t min, int64_t max);
 /* Bit intrinsics (lib/Math.rae popcount / leadingZeros / trailingZeros).
  * Defined here, static inline, so each call compiles to the one CPU
  * instruction instead of a call into the runtime: the physics bitsets and

@@ -5,8 +5,8 @@
 import Vec3
 open Math
 
-func randomRange(minimum: view Float, maximum: view Float) ret Float {
-  ret minimum + (maximum - minimum) * Math.random()
+func randomRange(minimum: view Float, maximum: view Float, random: mod Random) ret Float {
+  ret minimum + (maximum - minimum) * random.nextFloat()
 }
 
 func findFreeParticle(world: mod World) ret Int {
@@ -65,9 +65,9 @@ func spawnLineClearParticles(world: mod World, row: view Int) {
     # 4 small particles per cell of the cleared row.
     var burst: Int = 0
     loop burst < 4 {
-      let vx: Float = randomRange(minimum: 0.0 - 4.0, maximum: 4.0)
-      let vy: Float = randomRange(minimum: 2.0, maximum: 6.0)
-      let vz: Float = randomRange(minimum: 0.0 - 4.0, maximum: 4.0)
+      let vx: Float = randomRange(minimum: 0.0 - 4.0, maximum: 4.0, random: world.random)
+      let vy: Float = randomRange(minimum: 2.0, maximum: 6.0, random: world.random)
+      let vz: Float = randomRange(minimum: 0.0 - 4.0, maximum: 4.0, random: world.random)
       let colorId: Int = i % 7 + 1
       let color: Vec3 = kindColor(id: colorId)
       spawnParticle(

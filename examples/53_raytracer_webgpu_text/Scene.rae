@@ -470,7 +470,7 @@ func buildSceneOne() ret List(Sphere) {
 # ground + a field of ~480 random small spheres + three big feature spheres.
 # Uses the bright sky (skyMode 0).
 func buildSceneBook() ret List(Sphere) {
-  seed(value: 1)
+  var random: Random = createRandom(seed: 1)
   var s: List(Sphere) = List.create(Sphere, cap: 512)
   # ground
   s.add(
@@ -484,11 +484,11 @@ func buildSceneBook() ret List(Sphere) {
   loop a < 11 {
     var b: Int = -11
     loop b < 11 {
-      let cx: Float = a.toFloat() + 0.9 * random()
-      let cy: Float = b.toFloat() + 0.9 * random()
+      let cx: Float = a.toFloat() + 0.9 * random.nextFloat()
+      let cy: Float = b.toFloat() + 0.9 * random.nextFloat()
       let dx: Float = cx - 4.0
       if dx * dx + cy * cy > 0.81 {
-        let chooseMat: Float = random()
+        let chooseMat: Float = random.nextFloat()
         if chooseMat < 0.8 {
           s.add(
             value: {
@@ -496,7 +496,11 @@ func buildSceneBook() ret List(Sphere) {
               radius: 0.2
               material: {
                 kind: 0
-                albedo: { x: random() * random(), y: random() * random(), z: random() * random() }
+                albedo: {
+                  x: random.nextFloat() * random.nextFloat()
+                  y: random.nextFloat() * random.nextFloat()
+                  z: random.nextFloat() * random.nextFloat()
+                }
                 fuzz: 0.0
                 ior: 0.0
               }
@@ -511,11 +515,11 @@ func buildSceneBook() ret List(Sphere) {
                 material: {
                   kind: 1
                   albedo: {
-                    x: 0.5 * (1.0 + random())
-                    y: 0.5 * (1.0 + random())
-                    z: 0.5 * (1.0 + random())
+                    x: 0.5 * (1.0 + random.nextFloat())
+                    y: 0.5 * (1.0 + random.nextFloat())
+                    z: 0.5 * (1.0 + random.nextFloat())
                   }
-                  fuzz: 0.5 * random()
+                  fuzz: 0.5 * random.nextFloat()
                   ior: 0.0
                 }
               }

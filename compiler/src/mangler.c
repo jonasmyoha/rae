@@ -611,10 +611,6 @@ const char* rae_mangle_function(CompilerContext* ctx, const AstFuncDecl* func) {
         else if (str_eq_cstr(name, "writeFile")) mapped = "rae_ext_rae_sys_write_file";
         else if (str_eq_cstr(name, "nextTick")) mapped = "rae_ext_nextTick";
         else if (str_eq_cstr(name, "nowMs")) mapped = "rae_ext_nowMs";
-        else if (str_eq_cstr(name, "rae_random")) mapped = "rae_ext_rae_random";
-        else if (str_eq_cstr(name, "rae_random_int")) mapped = "rae_ext_rae_random_int";
-        else if (str_eq_cstr(name, "random")) { uint16_t c = 0; for (const AstParam* p = func->params; p; p = p->next) c++; if (c == 0) mapped = "rae_ext_rae_random"; else if (c == 2) mapped = "rae_ext_rae_random_int"; }
-        else if (str_eq_cstr(name, "random_int")) mapped = "rae_ext_rae_random_int";
         else if (str_eq_cstr(name, "rae_int_to_float")) mapped = "rae_ext_rae_int_to_float";
         else if (str_eq_cstr(name, "readChar")) mapped = "rae_ext_rae_io_read_char";
         // math.* now uses the namespace rule below (rae_ext_Math_<name>).

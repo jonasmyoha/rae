@@ -1,10 +1,4 @@
 # Math and Random library for Rae
-func rae_seed(value: Int) unsafe extern
-
-func rae_random() unsafe extern ret Float
-
-func rae_random_int(min: Int, max: Int) unsafe extern ret Int
-
 func rae_popcount(x: Int) unsafe extern ret Int
 
 func rae_leading_zeros(x: Int) unsafe extern ret Int
@@ -161,27 +155,51 @@ func round(x: copy Float) ret Float {
 }
 
 # pi, and tau = 2*pi (one full turn in radians). Compile-time constants, used
-# directly (no call): `random() * tau`.
+# directly (no call): `random.nextFloat() * tau`.
 const pi: Float = 3.14159265358979323846
 
 const tau: Float = pi * 2.0
 
-func seed(value: view Int) {
-  unsafe {
-    rae_seed(value: value)
-  }
+# A pseudo-random number generator as a value its owner holds (no hidden
+# global, so two owners — two threads, two systems — never share a stream).
+# Same seed, same numbers, on every platform: a 64-bit linear congruential
+# step (Knuth's MMIX multiplier) whose high 32 bits are the output.
+type Random {
+  state: Int
 }
 
-func random() ret Float {
-  unsafe {
-    ret rae_random()
-  }
+# The seed a program used when it never seeded the former global generator;
+# `createRandom(seed: defaultRandomSeed)` gives that same sequence.
+const defaultRandomSeed: Int = 1311768467463790320
+
+func createRandom(seed: view Int) ret Random {
+  ret Random { state: seed }
 }
 
-func random(min: view Int, max: view Int) ret Int {
-  unsafe {
-    ret rae_random_int(min: min, max: max)
+# The next 32 random bits, 0 .. 4294967295
+func nextBits(this: mod Random) ret Int {
+  this.state = this.state * 6364136223846793005 + 1
+  ret (this.state shr 32) bitand 4294967295
+}
+
+# A Float in 0.0 ..= 1.0
+func nextFloat(this: mod Random) ret Float {
+  let bits: Int = this.nextBits()
+  ret ((bits as Float64) / 4294967295.0) as Float
+}
+
+# An Int in min ..= max (min when max <= min)
+func nextInt(this: mod Random, min: view Int, max: view Int) ret Int {
+  if min >= max {
+    ret min
   }
+  let bits: Int = this.nextBits()
+  let range: Int = max - min + 1
+  if range <= 0 {
+    # The range is wider than Int: every 32-bit value fits in it.
+    ret min + bits
+  }
+  ret min + bits % range
 }
 
 # Bit intrinsics over the 64-bit two's-complement Int. popcount = number of set
@@ -291,18 +309,4 @@ func clamp(val: view Float, low: view Float, high: view Float) ret Float {
 
 func lerp(a: view Float, b: view Float, t: view Float) ret Float {
   ret a + (b - a) * t
-}
-
-func randomFloat(min: view Float, max: view Float) ret Float {
-  unsafe {
-    ret min + rae_random() * (max - min)
-  }
-}
-
-# Alias: prefer the explicit `randomInt` name in new code. The existing
-# overloaded `random(min, max)` stays for backward compatibility.
-func randomInt(min: view Int, max: view Int) ret Int {
-  unsafe {
-    ret rae_random_int(min: min, max: max)
-  }
 }

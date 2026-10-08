@@ -14,9 +14,9 @@ func sphereValueAt(world: view List(Sphere), index: view Int) ret Sphere {
 }
 
 # A uniformly-distributed random unit vector (for diffuse scatter).
-func randomUnit() ret Vec3 {
-  let a: Float = random() * tau
-  let z: Float = random() * 2.0 - 1.0
+func randomUnit(random: mod Random) ret Vec3 {
+  let a: Float = random.nextFloat() * tau
+  let z: Float = random.nextFloat() * 2.0 - 1.0
   let r: Float = Math.sqrt(x: 1.0 - z * z)
   ret Vec3.create(x: r * Math.cos(x: a), y: r * Math.sin(x: a), z: z)
 }
@@ -39,6 +39,7 @@ func rayColor(
   ro: view Vec3
   rd: view Vec3
   depth: view Int
+  random: mod Random
 ) ret Vec3 {
   if depth <= 0 {
     ret Vec3.create(x: 0.0, y: 0.0, z: 0.0)
@@ -65,12 +66,13 @@ func rayColor(
   let p: Vec3 = Vec3.vadd(a: ro, b: Vec3.vscale(a: rd, s: best))
   let n: Vec3 = Vec3.vscale(a: Vec3.vsub(a: p, b: sphere.center), s: 1.0 / sphere.radius)
   # Lambertian scatter toward normal + random unit vector.
-  let scatter: Vec3 = Vec3.vadd(a: n, b: randomUnit())
+  let scatter: Vec3 = Vec3.vadd(a: n, b: randomUnit(random: random))
   let bounced: Vec3 = rayColor(
     world: world
     ro: p
     rd: scatter
     depth: depth - 1
+    random: random
   )
   ret Vec3.vmul(a: sphere.albedo, b: bounced)
 }
@@ -84,6 +86,7 @@ func renderRow(
   y: view Int
   samples: view Int
   maxDepth: view Int
+  random: mod Random
 ) {
   let aspect: Float = width.toFloat() / height.toFloat()
   let vw: Float = aspect * 2.0
@@ -95,8 +98,8 @@ func renderRow(
     var acc: Vec3 = { x: 0.0, y: 0.0, z: 0.0 }
     var sIdx: Int = 0
     loop sIdx < samples {
-      let u: Float = (x.toFloat() + random()) / (width - 1).toFloat()
-      let v: Float = ((height - 1 - y).toFloat() + random()) / (height - 1).toFloat()
+      let u: Float = (x.toFloat() + random.nextFloat()) / (width - 1).toFloat()
+      let v: Float = ((height - 1 - y).toFloat() + random.nextFloat()) / (height - 1).toFloat()
       let rd: Vec3 = { x: llx + u * vw, y: 1.0, z: -1.0 + v * 2.0 }
       acc = Vec3.vadd(
         a: acc
@@ -105,6 +108,7 @@ func renderRow(
           ro: ro
           rd: rd
           depth: maxDepth
+          random: random
         )
       )
       sIdx = sIdx + 1

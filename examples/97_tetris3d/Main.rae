@@ -65,7 +65,6 @@ func renderFrame(
 func main() ret Int {
   Gpu2d.initWindow(width: 900, height: 900, title: "Rae Tetris 3D — Deferred")
   Gpu2d.setDesignResolution(width: 900.0, height: 900.0, fit: 0)
-  seed(value: 2026)
 
   var game: World = {
     state: GameState.playing
@@ -85,6 +84,7 @@ func main() ret Int {
     camTime: 0.0
     particles: List.create(Particle, cap: 0)
     lockFlash: 0.0
+    random: createRandom(seed: 2026)
   }
   initWorld(world: game)
 
