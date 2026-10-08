@@ -1,0 +1,22 @@
+# `rae format` prints EVERY branch of a `when`, selected or not
+const hasMetal: Bool   = Target.isApple
+when hasMetal {
+  # the Apple path
+  func backendName() ret String { ret "metal" }
+  const preferred: Int = 1
+} else when Target.os is Os.web { func backendName() ret String {
+    ret "webgpu"
+  } }
+else {
+  func backendName() ret String {
+    ret "vulkan"
+  }
+}
+func main() {
+  when Target.isUnix   {
+    log("unix {backendName()}")
+  }   else when Target.isMobileOs { log("mobile") } else {
+    log("other")
+  }
+  when Target.os is Os.ios { log("ios") }
+}

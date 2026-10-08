@@ -210,6 +210,29 @@ These instructions define **how Codex should work**, communicate progress, and i
   batches.x); let app: App = { batches: batches ... }`) — rather than making
   the whole value a `var` to patch it afterwards.
 
+### Per-platform code: `when` and `Target` (docs/platform-conditional-code.md):
+- `when <compile-time Bool> { … } else when … { … } else { … }` selects code
+  per target, around statements or around declarations (func, extern, type,
+  enum, const). Every branch is parsed and formatted; only the selected one
+  is checked and compiled. A declaration in another branch does not exist,
+  so naming it is the ordinary unknown-name error. `when` is never a value,
+  and its condition is only consts, enum cases, `true`/`false`, `is`,
+  `is not`, `and`, `or`, `not`.
+- The target is the prelude module `Target`, always written qualified
+  (`Target.os`). Test the narrowest thing that is true:
+  - **a capability** you define next to the code that needs it, the
+    preferred test: `const hasKqueue: Bool = Target.isApple or Target.isBsd`,
+    then `when hasKqueue`;
+  - **a family** for a shared API: `Target.isApple`, `isBsd`,
+    `isLinuxKernel`, `isUnix`, `isMobileOs`, `isDesktopOs`, `isNative`;
+  - **an exact value** only for a genuinely OS-specific API:
+    `when Target.os is Os.openbsd`.
+- The device a build runs on (touch, screen size, which browser) is never a
+  `when`: it is a runtime question, answered with `if`.
+- Keep the Rae fallback in the `else` branch (the fastest implementation
+  wins, see the runtime C rule). `rae build --target-os <os> --target-arch
+  <arch>` type-checks another target without emitting anything.
+
 ### NO globals — mutable module-level state is forbidden (see docs/globals-and-app-ownership.md):
 - "No globals" means precisely: a module-level **`var`** (mutable global state)
   and a module-level **`let` that owns heap** (a `String`, `List`, `Map`, or any
@@ -498,7 +521,7 @@ style configuration. The policy (full design: `docs/rae-format-design.md`):
   run) and the example gate all run in CHECK mode (`RAE_FORMAT=check`) — an
   unformatted file fails them instead of being rewritten under the runner.
   The only deliberately non-canonical inputs are the format fixtures (200–208,
-  568, 786, 810–813, 829, 830), the expected-parse-error fixtures, the lexer
+  568, 786, 810–813, 829, 830, 1055), the expected-parse-error fixtures, the lexer
   fixtures whose token columns are the test (006, 015, 019) and the CRLF /
   missing-final-newline fixtures (345, 346, 348 — the runner sets
   `RAE_FORMAT=off` for them); the generated `lib/webgpu` bindings are a

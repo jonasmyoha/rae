@@ -1,0 +1,27 @@
+# The same program selects different code per target. `rae build
+# --report-waits` analyses only the selected code, so it shows which branch
+# a faked target took: on Linux the epoll worker waits on the poller (a
+# twin), the kqueue and iOS paths do not exist.
+when Target.isLinuxKernel {
+  func waitForEvents() ret Int {
+    sleep(ms: 1)
+    ret 1
+  }
+} else {
+  func waitForEvents() ret Int {
+    ret 0
+  }
+}
+
+func worker() ret Int {
+  when Target.os is Os.ios {
+    ret 0
+  } else {
+    ret waitForEvents()
+  }
+}
+
+func main() {
+  let task: Task(Int) = spawn worker()
+  log("{task.get()}")
+}

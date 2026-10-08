@@ -333,7 +333,14 @@ per-platform.
    - `rae build --target-os/--target-arch` (check-only) and `--print-target`
      exist.
    - Fixtures 1045–1048.
-1. `when` at statement and declaration level, with these fixtures:
+1. `when` at statement and declaration level. **Done (0.1.228):**
+   - `compiler/src/when_resolve.c` keeps the selected branch after the merge
+     and before sema: declarations are spliced in, to a fixed point, and a
+     statement becomes `if true { … }`.
+   - Fixtures 1049–1056.
+   - `--report-waits` follows the selection, also with `--target-os`.
+
+   The fixtures cover:
    - each branch selected by a different `Target` value (one test fakes the
      target);
    - an error for a non-constant condition;

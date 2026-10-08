@@ -257,6 +257,43 @@ static void pp_print_return_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
 
 static void pp_print_if_body(PrettyPrinter* pp, const AstStmt* stmt);
 
+/* `when <condition> {` … `} else when <condition> {` … `} else {` … `}`:
+ * the head of each branch; its body is printed by the caller */
+static void pp_print_when_branch_head(PrettyPrinter* pp, const AstWhenBranch* branch, bool first) {
+  if (!first) pp_write(pp, " else ");
+  if (branch->condition) {
+    pp_write(pp, "when ");
+    pp_expr(pp, branch->condition);
+    pp_space(pp);
+  }
+  pp_begin_block(pp);
+}
+
+/* A statement-level `when`: every branch, like `if` / `else if` / `else` */
+static void pp_print_when_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
+  pp_stmt_prologue(pp, stmt->line);
+  for (const AstWhenBranch* branch = stmt->as.when_stmt.branches; branch; branch = branch->next) {
+    pp_print_when_branch_head(pp, branch, branch == stmt->as.when_stmt.branches);
+    pp_print_block_body(pp, branch->block);
+    pp_end_block(pp, branch->end_line);
+  }
+  pp_newline(pp);
+}
+
+/* A declaration-level `when`: each branch holds declarations, one blank
+ * line between them as at the top level */
+static void pp_print_when_decl(PrettyPrinter* pp, const AstDecl* decl) {
+  for (const AstWhenBranch* branch = decl->as.when_decl.branches; branch; branch = branch->next) {
+    pp_print_when_branch_head(pp, branch, branch == decl->as.when_decl.branches);
+    for (const AstDecl* child = branch->decls; child; child = child->next) {
+      if (child != branch->decls) pp_blank_line(pp);
+      pp_print_decl(pp, child);
+    }
+    pp_end_block(pp, branch->end_line);
+  }
+  pp_newline(pp);
+}
+
 static void pp_print_if_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
   pp_stmt_prologue(pp, stmt->line);
   pp_print_if_body(pp, stmt);
@@ -449,6 +486,7 @@ static void pp_print_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
     }
     case AST_STMT_RET: pp_print_return_stmt(pp, stmt); break;
     case AST_STMT_IF: pp_print_if_stmt(pp, stmt); break;
+    case AST_STMT_WHEN: pp_print_when_stmt(pp, stmt); break;
     case AST_STMT_LOOP: pp_print_loop_stmt(pp, stmt); break;
     case AST_STMT_MATCH: pp_print_match_stmt(pp, stmt); break;
     case AST_STMT_ASSIGN: pp_print_assign_stmt(pp, stmt); break;
@@ -581,5 +619,6 @@ void pp_print_decl(PrettyPrinter* pp, const AstDecl* decl) {
     case AST_DECL_GLOBAL_LET: pp_print_global_let_decl(pp, decl); break;
     case AST_DECL_ALIAS: pp_print_alias_decl(pp, decl); break;
     case AST_DECL_FUNC: pp_print_func_decl(pp, decl); break;
+    case AST_DECL_WHEN: pp_print_when_decl(pp, decl); break;
   }
 }

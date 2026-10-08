@@ -1,0 +1,13 @@
+may-wait report: Main.rae
+  the program:
+    functions: 3 (0 generic specialisations)
+    wait primitive sites: Task.get 0, sleep extern 0, socket/poller extern 0, task join 1
+    calls resolved conservatively (to every candidate): 0
+    may wait: 3 functions
+    spawn sites: 1, spawned functions: 1, reachable from a spawn: 2
+  resumable twins (may wait and reachable from a spawn): 2 in the program, 2 in lib/
+    waitForEvents  Main.rae:6
+      waitForEvents -> sleep -> nativeSleep [sleep extern]
+    worker  Main.rae:16  spawned
+      worker -> waitForEvents -> sleep -> nativeSleep [sleep extern]
+    lib/: nativeSleep sleep

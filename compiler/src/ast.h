@@ -288,7 +288,8 @@ typedef enum {
   AST_STMT_DEFER,
   AST_STMT_UNSAFE,
   AST_STMT_BREAK,
-  AST_STMT_CONTINUE
+  AST_STMT_CONTINUE,
+  AST_STMT_WHEN   // compile-time `when` (docs/platform-conditional-code.md); resolved before sema
 } AstStmtKind;
 
 // One extra pattern in an or-pattern arm (`case A, B, C { }`). The first
@@ -320,6 +321,21 @@ typedef struct AstQueryLoopBinding {
   AstTypeRef* type;
   struct AstQueryLoopBinding* next;
 } AstQueryLoopBinding;
+
+/* One branch of a compile-time `when` (docs/platform-conditional-code.md):
+ * `when <condition> { … } else when … { … } else { … }`. A statement-level
+ * `when` holds blocks, a declaration-level one holds declarations. Every
+ * branch is parsed and formatted; the resolver (when_resolve.c) keeps the
+ * selected one before sema, so sema and the backend never see the others. */
+typedef struct AstWhenBranch {
+  AstExpr* condition;            // NULL for the final `else`
+  AstBlock* block;               // statement level
+  struct AstDecl* decls;         // declaration level
+  size_t line;
+  size_t column;
+  size_t end_line;               // the closing `}` (comments before it stay inside)
+  struct AstWhenBranch* next;
+} AstWhenBranch;
 
 struct AstStmt {
   AstStmtKind kind;
@@ -394,6 +410,9 @@ struct AstStmt {
     struct {
       AstBlock* block;
     } unsafe_stmt;
+    struct {
+      AstWhenBranch* branches;
+    } when_stmt;
   } as;
 };
 
@@ -407,7 +426,8 @@ typedef enum {
   AST_DECL_FUNC,
   AST_DECL_ENUM,
   AST_DECL_GLOBAL_LET,
-  AST_DECL_ALIAS   // `alias Name = Type` — a transparent type alias (#647).
+  AST_DECL_ALIAS,  // `alias Name = Type` — a transparent type alias (#647).
+  AST_DECL_WHEN    // compile-time `when` around declarations; resolved before sema
 } AstDeclKind;
 
 typedef struct AstEnumMember {
@@ -472,6 +492,9 @@ struct AstDecl {
       Str name;            // the alias name, e.g. `Size`
       AstTypeRef* target;  // the aliased type, e.g. `Vec2`
     } alias_decl;
+    struct {
+      AstWhenBranch* branches;
+    } when_decl;
   } as;
 };
 

@@ -1,0 +1,62 @@
+# Declaration-level `when` (docs/platform-conditional-code.md §3.2): the
+# declarations of the selected branch exist, the others do not. Functions,
+# an extern, a type, an enum and consts can all be selected, and a const
+# declared inside one `when` can be tested by another. The expected output
+# is the reference machine's (macOS on arm64).
+when Target.isApple {
+  const fastHash: Bool = true
+
+  enum Backend { metal, software }
+
+  type Frame {
+    backend: Backend
+    pixels: Int
+  }
+
+  func platformName() ret String {
+    ret "Apple"
+  }
+} else {
+  const fastHash: Bool = false
+
+  enum Backend { vulkan, software }
+
+  type Frame {
+    backend: Backend
+    pixels: Int
+  }
+
+  func platformName() ret String {
+    ret "other"
+  }
+}
+
+# Tests a const that only exists after the `when` above is resolved
+when fastHash {
+  func hashName() ret String {
+    ret "the platform's hardware hash"
+  }
+} else {
+  func hashName() ret String {
+    ret "the portable hash"
+  }
+}
+
+# An extern declared only where it exists
+when Target.isNative {
+  func monotonicNs() unsafe extern("rae_ext_nowNs") ret Int
+}
+
+func main() {
+  log("platform: {platformName()}")
+  log("hash: {hashName()}")
+  let frame: Frame = { backend: Backend.metal, pixels: 4 }
+  log("frame: {frame.backend} {frame.pixels}")
+  var clockRuns: Bool = false
+  when Target.isNative {
+    unsafe {
+      clockRuns = monotonicNs() > 0
+    }
+  }
+  log("native clock runs: {clockRuns}")
+}

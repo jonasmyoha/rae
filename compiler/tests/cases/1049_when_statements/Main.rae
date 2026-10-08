@@ -1,0 +1,50 @@
+# Statement-level `when` (docs/platform-conditional-code.md §3.2): only the
+# selected block is compiled. The conditions use the three kinds of test:
+# an exact value (`Target.os is Os.macos`), a family (`Target.isUnix`) and a
+# capability the program defines itself (`hasKqueue`). The expected output is
+# the reference machine's (macOS on arm64); fixtures 1051 and 1052 select
+# other branches with faked targets.
+const hasKqueue: Bool = Target.isApple or Target.isBsd
+
+const hasMetal: Bool = Target.isApple
+
+func describe() ret String {
+  when Target.os is Os.macos {
+    ret "macOS"
+  } else when Target.isLinuxKernel {
+    ret "a Linux kernel"
+  } else {
+    ret "elsewhere"
+  }
+}
+
+func main() {
+  log(describe())
+  when hasKqueue {
+    log("poller: kqueue")
+  } else when Target.isLinuxKernel {
+    log("poller: epoll")
+  } else {
+    log("poller: none")
+  }
+  # A `when` inside a loop, and its own scope
+  var total: Int = 0
+  loop var i: Int = 0, i < 4, ++i {
+    when Target.isUnix {
+      let doubled: Int = i * 2
+      total = total + doubled
+    }
+  }
+  log("unix loop total: {total}")
+  # No branch selected and no `else`: nothing runs
+  when Target.isMobileOs {
+    log("never on a desktop")
+  }
+  # Nested, with `and` / `not`
+  when Target.isApple {
+    when hasMetal and not Target.isMobileOs {
+      log("nested: a desktop Apple with Metal")
+    }
+  }
+  log("done")
+}
