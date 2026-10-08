@@ -6,7 +6,11 @@
 import crypto/Sha1
 import net/NetSystem
 import net/Poller
+import net/Tcp
 import FileNotify
+import app3d/RenderScale
+import sys/Spotify
+import Raylib
 
 func main() {
   log(Sha1.hexText(bytes: Sha1.sha1Text(text: "abc")))
@@ -17,4 +21,5 @@ func main() {
     "kqueue {NetSystem.hasKqueue}, notifications {FileNotify.fileNotifyActive(fileNotify: watcher)}"
   )
   FileNotify.closeFileNotify(fileNotify: watcher)
+  log("thermal {RenderScale.thermalState()}, spotify {Spotify.hasSpotifyBridge}")
 }

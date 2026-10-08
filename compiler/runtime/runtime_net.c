@@ -13,8 +13,10 @@
  * which is the compiler's runtime ABI (Rae has no byte-level string builder
  * yet; docs/runtime-c-audit.md).
  *
- * macOS, Linux and the BSDs (the BSDs are not built or tested here yet).
- * Elsewhere every socket call answers RAE_NET_UNSUPPORTED. The readiness
+ * macOS, Linux and the BSDs (the BSDs are not built or tested here yet):
+ * RAE_HAS_POSIX_SOCKETS, the C twin of NetSystem.rae's `hasPosixSockets`.
+ * Elsewhere the Rae side declares Rae functions of the same names that
+ * answer the unsupported marker, so there are no C stubs. The readiness
  * poller (kqueue) exists only under RAE_HAS_KQUEUE, the C twin of
  * NetSystem.rae's `hasKqueue`: the Rae side declares it only there, so no
  * stub is needed elsewhere. */
@@ -31,7 +33,7 @@
  * stack: per-OS struct layout, no allocation per wait) */
 #define RAE_NET_MAX_WAIT_EVENTS 256
 
-#if (defined(__APPLE__) || defined(__linux__) || defined(RAE_HAS_KQUEUE)) && !defined(__wasm__) && !defined(__EMSCRIPTEN__)
+#ifdef RAE_HAS_POSIX_SOCKETS
 
 #include <errno.h>
 #include <fcntl.h>
@@ -255,46 +257,7 @@ int64_t rae_ext_NetSys_localPort(int64_t fd) {
   return -EAFNOSUPPORT;
 }
 
-#else
-
-int64_t rae_ext_NetSys_constant(int64_t which) {
-  if (which == 22) return RAE_NET_RECORD_BYTES;
-  if (which == 23) return RAE_NET_RESOLVE_FAILED;
-  if (which == 24) return RAE_NET_UNSUPPORTED;
-  if (which == 32) return RAE_NET_MAX_WAIT_EVENTS;
-  return 0;
-}
-int64_t rae_ext_NetSys_resolve(rae_String host, int64_t port, rae_Bool passive, uint8_t* records, int64_t maxRecords) {
-  (void)host; (void)port; (void)passive; (void)records; (void)maxRecords;
-  return RAE_NET_UNSUPPORTED;
-}
-int64_t rae_ext_NetSys_socketFor(uint8_t* records, int64_t index) { (void)records; (void)index; return RAE_NET_UNSUPPORTED; }
-int64_t rae_ext_NetSys_bindTo(int64_t fd, uint8_t* records, int64_t index) { (void)fd; (void)records; (void)index; return RAE_NET_UNSUPPORTED; }
-int64_t rae_ext_NetSys_connectTo(int64_t fd, uint8_t* records, int64_t index) { (void)fd; (void)records; (void)index; return RAE_NET_UNSUPPORTED; }
-int64_t rae_ext_NetSys_listen(int64_t fd, int64_t backlog) { (void)fd; (void)backlog; return RAE_NET_UNSUPPORTED; }
-int64_t rae_ext_NetSys_accept(int64_t fd) { (void)fd; return RAE_NET_UNSUPPORTED; }
-int64_t rae_ext_NetSys_getFileFlags(int64_t fd) { (void)fd; return RAE_NET_UNSUPPORTED; }
-int64_t rae_ext_NetSys_setFileFlags(int64_t fd, int64_t flags) { (void)fd; (void)flags; return RAE_NET_UNSUPPORTED; }
-int64_t rae_ext_NetSys_setCloseOnExec(int64_t fd) { (void)fd; return RAE_NET_UNSUPPORTED; }
-int64_t rae_ext_NetSys_setIntOption(int64_t fd, int64_t level, int64_t option, int64_t value) {
-  (void)fd; (void)level; (void)option; (void)value;
-  return RAE_NET_UNSUPPORTED;
-}
-int64_t rae_ext_NetSys_socketError(int64_t fd) { (void)fd; return RAE_NET_UNSUPPORTED; }
-int64_t rae_ext_NetSys_receive(int64_t fd, uint8_t* buffer, int64_t offset, int64_t maxBytes) {
-  (void)fd; (void)buffer; (void)offset; (void)maxBytes;
-  return RAE_NET_UNSUPPORTED;
-}
-int64_t rae_ext_NetSys_send(int64_t fd, uint8_t* buffer, int64_t offset, int64_t count, int64_t flags) {
-  (void)fd; (void)buffer; (void)offset; (void)count; (void)flags;
-  return RAE_NET_UNSUPPORTED;
-}
-int64_t rae_ext_NetSys_sendText(int64_t fd, rae_String text, int64_t flags) { (void)fd; (void)text; (void)flags; return RAE_NET_UNSUPPORTED; }
-int64_t rae_ext_NetSys_pollOne(int64_t fd, int64_t events, int64_t timeoutMs) { (void)fd; (void)events; (void)timeoutMs; return RAE_NET_UNSUPPORTED; }
-int64_t rae_ext_NetSys_close(int64_t fd) { (void)fd; return RAE_NET_UNSUPPORTED; }
-int64_t rae_ext_NetSys_localPort(int64_t fd) { (void)fd; return RAE_NET_UNSUPPORTED; }
-
-#endif
+#endif  /* RAE_HAS_POSIX_SOCKETS */
 
 /* Bytes buffer[offset .. offset+count) as an owned String (string ABI) */
 rae_String rae_ext_NetSys_bytesToText(uint8_t* buffer, int64_t offset, int64_t count) {

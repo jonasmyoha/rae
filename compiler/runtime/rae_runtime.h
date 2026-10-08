@@ -33,6 +33,13 @@
 #define RAE_HAS_KQUEUE 1
 #endif
 
+/* The C twin of lib/net/NetSystem.rae's `hasPosixSockets` (Target.isUnix):
+ * runtime_net.c's socket shims exist exactly where the Rae side declares them */
+#if (defined(__APPLE__) || defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__) || \
+     defined(__NetBSD__)) && !defined(__wasm__) && !defined(__EMSCRIPTEN__)
+#define RAE_HAS_POSIX_SOCKETS 1
+#endif
+
 /* Ptr lowers directly to void* in ordinary declarations. Generic storage also
  * needs an identifier-safe spelling because the concrete type is embedded in
  * generated List/function names. This is the canonical TypeInfo spelling for
