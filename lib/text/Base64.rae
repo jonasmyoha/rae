@@ -1,0 +1,136 @@
+# Base64 (RFC 4648 §4, the standard alphabet with `=` padding) in plain Rae,
+# for the WebSocket handshake and data URIs (docs/server-benchmarks-design.md
+# §9 G5).
+#
+# Decoding is strict: the length must be a multiple of 4, `=` may appear only
+# as the last one or two characters, and any other character (whitespace
+# included) is an error. The unused bits of the last character are not
+# checked, as most decoders do.
+const base64Alphabet: String = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+
+# Append the base64 of `count` bytes of `bytes` from `start` to `output`
+func appendBase64(
+  output: mod List(UInt8)
+  bytes: view List(UInt8)
+  start: view Int
+  count: view Int
+) {
+  var i: Int = start
+  let end: Int = start + count
+  loop i + 3 <= end {
+    let group: Int = (bytes.copyAtFallback(index: i, fallback: 0) as Int shl 16) bitor (bytes.copyAtFallback(
+      index: i + 1
+      fallback: 0
+    ) as Int shl 8) bitor bytes.copyAtFallback(index: i + 2, fallback: 0) as Int
+    output.add(value: base64Alphabet.byteAt(index: (group shr 18) bitand 63) as UInt8)
+    output.add(value: base64Alphabet.byteAt(index: (group shr 12) bitand 63) as UInt8)
+    output.add(value: base64Alphabet.byteAt(index: (group shr 6) bitand 63) as UInt8)
+    output.add(value: base64Alphabet.byteAt(index: group bitand 63) as UInt8)
+    i = i + 3
+  }
+  let left: Int = end - i
+  if left is 1 {
+    let group: Int = bytes.copyAtFallback(index: i, fallback: 0) as Int shl 16
+    output.add(value: base64Alphabet.byteAt(index: (group shr 18) bitand 63) as UInt8)
+    output.add(value: base64Alphabet.byteAt(index: (group shr 12) bitand 63) as UInt8)
+    output.add(value: 61)
+    output.add(value: 61)
+  } else if left is 2 {
+    let group: Int = (bytes.copyAtFallback(index: i, fallback: 0) as Int shl 16) bitor (bytes.copyAtFallback(
+      index: i + 1
+      fallback: 0
+    ) as Int shl 8)
+    output.add(value: base64Alphabet.byteAt(index: (group shr 18) bitand 63) as UInt8)
+    output.add(value: base64Alphabet.byteAt(index: (group shr 12) bitand 63) as UInt8)
+    output.add(value: base64Alphabet.byteAt(index: (group shr 6) bitand 63) as UInt8)
+    output.add(value: 61)
+  }
+}
+
+# The base64 of `bytes`
+func base64Encode(bytes: view List(UInt8)) ret String {
+  var output: List(UInt8) = List.create(UInt8, cap: (bytes.length + 2) / 3 * 4)
+  appendBase64(
+    output: output
+    bytes: bytes
+    start: 0
+    count: bytes.length
+  )
+  ret fromBytes(bytes: output, start: 0, count: output.length)
+}
+
+# The base64 of the bytes of `text` (its UTF-8)
+func base64EncodeText(text: view String) ret String {
+  let count: Int = text.length()
+  var bytes: List(UInt8) = List.create(UInt8, cap: count)
+  loop var i: Int = 0, i < count, ++i {
+    bytes.add(value: text.byteAt(index: i) as UInt8)
+  }
+  ret base64Encode(bytes: bytes)
+}
+
+# The 6-bit value of a base64 character, -1 for any other byte
+func base64Value(character: view Int) ret Int {
+  if character >= 65 and character <= 90 {
+    ret character - 65
+  }
+  if character >= 97 and character <= 122 {
+    ret character - 71
+  }
+  if character >= 48 and character <= 57 {
+    ret character + 4
+  }
+  if character is 43 {
+    ret 62
+  }
+  if character is 47 {
+    ret 63
+  }
+  ret -1
+}
+
+# Decode `text` onto the end of `output`. False (and `output` as it was)
+# when `text` is not valid base64.
+func appendBase64Decoded(output: mod List(UInt8), text: view String) ret Bool {
+  let length: Int = text.length()
+  if length % 4 is not 0 {
+    ret false
+  }
+  let before: Int = output.length
+  var i: Int = 0
+  loop i < length {
+    var group: Int = 0
+    var padding: Int = 0
+    loop var k: Int = 0, k < 4, ++k {
+      let character: Int = text.byteAt(index: i + k)
+      var value: Int = base64Value(character: character)
+      # `=` only in the last group, only as its last one or two characters
+      if character is 61 and i + 4 is length and k >= 2 and (k is 3 or text.byteAt(index: i + 3) is 61) {
+        value = 0
+        padding = padding + 1
+      } else if value < 0 {
+        output.truncate(len: before)
+        ret false
+      }
+      group = (group shl 6) bitor value
+    }
+    output.add(value: ((group shr 16) bitand 255) as UInt8)
+    if padding < 2 {
+      output.add(value: ((group shr 8) bitand 255) as UInt8)
+    }
+    if padding < 1 {
+      output.add(value: (group bitand 255) as UInt8)
+    }
+    i = i + 4
+  }
+  ret true
+}
+
+# The bytes `text` encodes, or none when it is not valid base64
+func base64Decode(text: view String) ret opt List(UInt8) {
+  var output: List(UInt8) = List.create(UInt8, cap: text.length() / 4 * 3)
+  if appendBase64Decoded(output: output, text: text) {
+    ret output
+  }
+  ret none
+}

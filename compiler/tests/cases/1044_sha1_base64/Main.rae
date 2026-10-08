@@ -1,0 +1,99 @@
+# lib/crypto/Sha1 and lib/text/Base64 (docs/server-benchmarks-design.md §9
+# G5) against their RFCs: the RFC 3174 SHA-1 test vectors, the RFC 6455
+# Sec-WebSocket-Accept example, and the RFC 4648 base64 vectors, plus the
+# padding boundaries of a SHA-1 block and strict base64 decoding.
+import crypto/Sha1
+import text/Base64
+import webSocket/Handshake
+
+func repeated(text: view String, times: view Int) ret List(UInt8) {
+  var bytes: List(UInt8) = List.create(UInt8, cap: text.length() * times)
+  loop var round: Int = 0, round < times, ++round {
+    loop var i: Int = 0, i < text.length(), ++i {
+      bytes.add(value: text.byteAt(index: i) as UInt8)
+    }
+  }
+  ret bytes
+}
+
+func showDecoded(text: view String) {
+  if let bytes: List(UInt8) = Base64.base64Decode(text: text) {
+    log("decode [{text}] -> [{fromBytes(bytes: bytes, start: 0, count: bytes.length)}]")
+  } else {
+    log("decode [{text}] -> invalid")
+  }
+}
+
+func main() {
+  # RFC 3174 §7.3, TEST1..TEST4, and the empty message
+  log("abc: {Sha1.hexText(bytes: Sha1.sha1Text(text: "abc"))}")
+  log(
+    "448 bits: {Sha1.hexText(
+      bytes: Sha1.sha1Text(text: "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq")
+    )}"
+  )
+  log("a x 1000000: {Sha1.hexText(bytes: Sha1.sha1(bytes: repeated(text: "a", times: 1000000)))}")
+  log("0..7 x 80: {Sha1.hexText(bytes: Sha1.sha1(bytes: repeated(text: "01234567", times: 80)))}")
+  log("empty: {Sha1.hexText(bytes: Sha1.sha1Text(text: ""))}")
+
+  # The padding boundaries: 55 bytes fit one block with the length, 56 do not
+  let lengths: List(Int) = {
+    55
+    56
+    63
+    64
+    65
+    119
+    120
+  }
+  loop var i: Int = 0, i < lengths.length, ++i {
+    let count: Int = lengths.copyAtFallback(index: i, fallback: 0)
+    log("x * {count}: {Sha1.hexText(bytes: Sha1.sha1(bytes: repeated(text: "x", times: count)))}")
+  }
+  let alphabet: List(UInt8) = repeated(text: "abcdefghijklmnopqrstuvwxyz", times: 4)
+  log("range 3..+70: {Sha1.hexText(bytes: Sha1.sha1Range(bytes: alphabet, start: 3, count: 70))}")
+
+  # RFC 6455 §1.3
+  log("accept: {Handshake.webSocketAccept(key: "dGhlIHNhbXBsZSBub25jZQ==")}")
+
+  # RFC 4648 §10
+  let vectors: List(String) = {
+    ""
+    "f"
+    "fo"
+    "foo"
+    "foob"
+    "fooba"
+    "foobar"
+  }
+  loop var i: Int = 0, i < vectors.length, ++i {
+    let plain: String = vectors.copyAtFallback(index: i, fallback: "")
+    let encoded: String = Base64.base64EncodeText(text: plain)
+    log("encode [{plain}] -> [{encoded}]")
+    showDecoded(text: encoded)
+  }
+  # Every byte value survives a round trip
+  var allBytes: List(UInt8) = List.create(UInt8, cap: 256)
+  loop var i: Int = 0, i < 256, ++i {
+    allBytes.add(value: i as UInt8)
+  }
+  let encodedAll: String = Base64.base64Encode(bytes: allBytes)
+  var same: Bool = false
+  if let back: List(UInt8) = Base64.base64Decode(text: encodedAll) {
+    same = back.length is 256
+    loop var i: Int = 0, i < back.length, ++i {
+      if back.copyAtFallback(index: i, fallback: 0) as Int is not i {
+        same = false
+      }
+    }
+  }
+  log("256 byte values round trip: {same} ({encodedAll.length()} characters)")
+  # Strict decoding
+  showDecoded(text: "Zm9")
+  showDecoded(text: "Zm=v")
+  showDecoded(text: "Zm9v YmFy")
+  showDecoded(text: "Z===")
+  showDecoded(text: "====")
+  showDecoded(text: "Zg==Zg==")
+  showDecoded(text: "Zm9v\n")
+}
