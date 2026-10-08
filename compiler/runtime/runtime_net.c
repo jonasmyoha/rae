@@ -1,31 +1,28 @@
-/* TCP sockets for lib/net (docs/server-benchmarks-design.md §9 G1, F1).
+/* The socket system-call shim for lib/net (AGENTS.md "Runtime C rule";
+ * docs/server-benchmarks-design.md §1.2).
  *
- * Rae sees value handles and status codes only: no errno, no sockaddr, no
- * fcntl. A handle is the socket's file descriptor (>= 0); every function that
- * can fail answers a status, and lib/net turns the codes into its NetStatus
- * enum. Every socket is NON-BLOCKING: an operation that would wait answers
- * NET_WOULD_BLOCK, and the caller waits on readiness (G2's poller, or
- * rae_ext_Net_waitReadable for a single socket).
+ * Each function makes ONE call and holds no policy: it returns the call's
+ * result, or the negated errno. The listen sequence, retrying an interrupted
+ * call, connect-with-timeout, which options a socket gets and what an error
+ * means are all Rae (lib/net/NetSystem.rae binds these; lib/net/Tcp.rae is
+ * the policy). C is needed here only for what the platform forces: errno,
+ * the variadic fcntl, per-OS address structs (kept opaque in fixed-size
+ * records) and per-OS constants (rae_ext_NetSys_constant).
  *
- * Options set here, so no server forgets them: SO_REUSEADDR on listeners (a
- * restarted server can rebind at once), TCP_NODELAY on connected sockets
- * (small responses go out without Nagle's delay), and no SIGPIPE on a write
- * to a closed peer (SO_NOSIGPIPE on macOS, MSG_NOSIGNAL on Linux) — that is a
- * status, not a dead process.
+ * rae_ext_NetSys_bytesToText is not a system call: it allocates a rae_String,
+ * which is the compiler's runtime ABI (Rae has no byte-level string builder
+ * yet; docs/runtime-c-audit.md).
  *
- * macOS and Linux (F8: macOS first). Elsewhere every call answers
- * NET_UNSUPPORTED. */
+ * macOS and Linux. Elsewhere every call answers RAE_NET_UNSUPPORTED. */
 
-#define NET_OK 0
-#define NET_WOULD_BLOCK -1
-#define NET_END_OF_STREAM -2
-#define NET_ADDRESS_IN_USE -3
-#define NET_CONNECTION_REFUSED -4
-#define NET_CONNECTION_RESET -5
-#define NET_INVALID_ADDRESS -6
-#define NET_TOO_MANY_OPEN -7
-#define NET_UNSUPPORTED -8
-#define NET_FAILED -9
+/* Answers that are not a negated errno (errno values are small positives) */
+#define RAE_NET_UNSUPPORTED -1000000
+#define RAE_NET_RESOLVE_FAILED -1000001
+
+/* One resolved address: family, socket type, protocol, address length, then
+ * the address itself (opaque to Rae; its layout differs per OS). */
+#define RAE_NET_RECORD_HEADER 16
+#define RAE_NET_RECORD_BYTES (RAE_NET_RECORD_HEADER + 128)
 
 #if (defined(__APPLE__) || defined(__linux__)) && !defined(__wasm__) && !defined(__EMSCRIPTEN__)
 
@@ -38,54 +35,56 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-static int64_t rae_net_status_from_errno(int code) {
-  switch (code) {
-    case EAGAIN:
-#if EWOULDBLOCK != EAGAIN
-    case EWOULDBLOCK:
+/* The constants lib/net needs, by the index NetSystem.rae names them with */
+int64_t rae_ext_NetSys_constant(int64_t which) {
+  switch (which) {
+    case 0: return EAGAIN;
+    case 1: return EWOULDBLOCK;
+    case 2: return EINTR;
+    case 3: return EINPROGRESS;
+    case 4: return EADDRINUSE;
+    case 5: return ECONNREFUSED;
+    case 6: return ECONNRESET;
+    case 7: return EPIPE;
+    case 8: return EADDRNOTAVAIL;
+    case 9: return EAFNOSUPPORT;
+    case 10: return EMFILE;
+    case 11: return ENFILE;
+    case 12: return ECONNABORTED;
+    case 13: return SOL_SOCKET;
+    case 14: return SO_REUSEADDR;
+#ifdef SO_NOSIGPIPE
+    case 15: return SO_NOSIGPIPE;
+#else
+    case 15: return -1;
 #endif
-    case EINPROGRESS:
-      return NET_WOULD_BLOCK;
-    case EADDRINUSE: return NET_ADDRESS_IN_USE;
-    case ECONNREFUSED: return NET_CONNECTION_REFUSED;
-    case ECONNRESET:
-    case EPIPE:
-      return NET_CONNECTION_RESET;
-    case EADDRNOTAVAIL:
-    case EAFNOSUPPORT:
-      return NET_INVALID_ADDRESS;
-    case EMFILE:
-    case ENFILE:
-      return NET_TOO_MANY_OPEN;
-    default: return NET_FAILED;
+    case 16: return IPPROTO_TCP;
+    case 17: return TCP_NODELAY;
+    case 18: return O_NONBLOCK;
+#ifdef MSG_NOSIGNAL
+    case 19: return MSG_NOSIGNAL;
+#else
+    case 19: return 0;
+#endif
+    case 20: return POLLIN;
+    case 21: return POLLOUT;
+    case 22: return RAE_NET_RECORD_BYTES;
+    case 23: return RAE_NET_RESOLVE_FAILED;
+    case 24: return RAE_NET_UNSUPPORTED;
+    case 25: return SOMAXCONN;
+    default: return -1;
   }
 }
 
-static int rae_net_set_nonblocking(int fd) {
-  int flags = fcntl(fd, F_GETFL, 0);
-  if (flags < 0) return -1;
-  return fcntl(fd, F_SETFL, flags | O_NONBLOCK);
-}
-
-/* A connected socket's options: no Nagle delay, no SIGPIPE, close-on-exec. */
-static void rae_net_prepare_connected(int fd) {
-  int one = 1;
-  setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
-#ifdef SO_NOSIGPIPE
-  setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof one);
-#endif
-  fcntl(fd, F_SETFD, FD_CLOEXEC);
-}
-
-/* host + port -> address list; host "" means every local address. */
-static int64_t rae_net_resolve(rae_String host, int64_t port, int passive, struct addrinfo** out) {
-  if (port < 0 || port > 65535) return NET_INVALID_ADDRESS;
+/* getaddrinfo for TCP: writes up to maxRecords records into `records` and
+ * answers how many, or RAE_NET_RESOLVE_FAILED. host "" = any local address. */
+int64_t rae_ext_NetSys_resolve(rae_String host, int64_t port, rae_Bool passive, uint8_t* records, int64_t maxRecords) {
   char service[16];
   snprintf(service, sizeof service, "%lld", (long long)port);
   char name[256];
   const char* node = NULL;
   if (host.data && host.len > 0) {
-    if (host.len >= (int64_t)sizeof name) return NET_INVALID_ADDRESS;
+    if (host.len >= (int64_t)sizeof name) return RAE_NET_RESOLVE_FAILED;
     memcpy(name, host.data, (size_t)host.len);
     name[host.len] = '\0';
     node = name;
@@ -95,156 +94,157 @@ static int64_t rae_net_resolve(rae_String host, int64_t port, int passive, struc
   hints.ai_family = AF_UNSPEC;
   hints.ai_socktype = SOCK_STREAM;
   hints.ai_flags = passive ? AI_PASSIVE : 0;
-  if (getaddrinfo(node, service, &hints, out) != 0) return NET_INVALID_ADDRESS;
-  return NET_OK;
-}
-
-/* Listen on host:port (port 0 picks a free port; socketLocalPort tells which).
- * Answers the handle (>= 0) or a status (< 0). */
-int64_t rae_ext_Net_listen(rae_String host, int64_t port, int64_t backlog) {
   struct addrinfo* addresses = NULL;
-  int64_t status = rae_net_resolve(host, port, 1, &addresses);
-  if (status != NET_OK) return status;
-  int64_t result = NET_INVALID_ADDRESS;
-  for (struct addrinfo* a = addresses; a; a = a->ai_next) {
-    int fd = socket(a->ai_family, a->ai_socktype, a->ai_protocol);
-    if (fd < 0) { result = rae_net_status_from_errno(errno); continue; }
-    int one = 1;
-    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
-    fcntl(fd, F_SETFD, FD_CLOEXEC);
-    if (bind(fd, a->ai_addr, a->ai_addrlen) != 0
-        || listen(fd, backlog > 0 ? (int)backlog : SOMAXCONN) != 0
-        || rae_net_set_nonblocking(fd) != 0) {
-      result = rae_net_status_from_errno(errno);
-      close(fd);
-      continue;
-    }
-    result = fd;
-    break;
+  if (getaddrinfo(node, service, &hints, &addresses) != 0) return RAE_NET_RESOLVE_FAILED;
+  int64_t count = 0;
+  for (struct addrinfo* a = addresses; a && count < maxRecords; a = a->ai_next) {
+    if (a->ai_addrlen > RAE_NET_RECORD_BYTES - RAE_NET_RECORD_HEADER) continue;
+    uint8_t* record = records + count * RAE_NET_RECORD_BYTES;
+    int32_t header[4] = { a->ai_family, a->ai_socktype, a->ai_protocol, (int32_t)a->ai_addrlen };
+    memcpy(record, header, sizeof header);
+    memcpy(record + RAE_NET_RECORD_HEADER, a->ai_addr, a->ai_addrlen);
+    count++;
   }
   freeaddrinfo(addresses);
-  return result;
+  return count;
 }
 
-/* Accept one pending connection: its handle, or NET_WOULD_BLOCK when none. */
-int64_t rae_ext_Net_accept(int64_t listener) {
-  if (listener < 0) return NET_FAILED;
-  for (;;) {
-    int fd = accept((int)listener, NULL, NULL);
-    if (fd < 0) {
-      if (errno == EINTR) continue;
-      /* A peer that gave up before we accepted it is not the listener's
-       * failure: report "nothing to accept" and let the caller go on. */
-      if (errno == ECONNABORTED) return NET_WOULD_BLOCK;
-      return rae_net_status_from_errno(errno);
-    }
-    if (rae_net_set_nonblocking(fd) != 0) {
-      close(fd);
-      return NET_FAILED;
-    }
-    rae_net_prepare_connected(fd);
-    return fd;
-  }
+static const int32_t* rae_net_record_header(const uint8_t* records, int64_t index) {
+  return (const int32_t*)(const void*)(records + index * RAE_NET_RECORD_BYTES);
 }
 
-/* Connect to host:port. Waits up to timeoutMs for the connection, then
- * answers a non-blocking handle (>= 0) or a status. */
-int64_t rae_ext_Net_connect(rae_String host, int64_t port, int64_t timeoutMs) {
-  struct addrinfo* addresses = NULL;
-  int64_t status = rae_net_resolve(host, port, 0, &addresses);
-  if (status != NET_OK) return status;
-  int64_t result = NET_CONNECTION_REFUSED;
-  for (struct addrinfo* a = addresses; a; a = a->ai_next) {
-    int fd = socket(a->ai_family, a->ai_socktype, a->ai_protocol);
-    if (fd < 0) { result = rae_net_status_from_errno(errno); continue; }
-    if (rae_net_set_nonblocking(fd) != 0) { close(fd); result = NET_FAILED; continue; }
-    int code = 0;
-    if (connect(fd, a->ai_addr, a->ai_addrlen) != 0) {
-      if (errno != EINPROGRESS) {
-        result = rae_net_status_from_errno(errno);
-        close(fd);
-        continue;
-      }
-      struct pollfd waitFor = { .fd = fd, .events = POLLOUT, .revents = 0 };
-      int ready = poll(&waitFor, 1, timeoutMs < 0 ? -1 : (int)timeoutMs);
-      if (ready <= 0) { result = NET_WOULD_BLOCK; close(fd); continue; }
-      socklen_t length = sizeof code;
-      getsockopt(fd, SOL_SOCKET, SO_ERROR, &code, &length);
-      if (code != 0) { result = rae_net_status_from_errno(code); close(fd); continue; }
-    }
-    rae_net_prepare_connected(fd);
-    result = fd;
-    break;
-  }
-  freeaddrinfo(addresses);
-  return result;
+int64_t rae_ext_NetSys_socketFor(uint8_t* records, int64_t index) {
+  const int32_t* header = rae_net_record_header(records, index);
+  int fd = socket(header[0], header[1], header[2]);
+  return fd >= 0 ? fd : -errno;
 }
 
-/* Read up to maxBytes into buffer[offset...]: the byte count (> 0),
- * NET_END_OF_STREAM when the peer closed, or a status. */
-int64_t rae_ext_Net_read(int64_t handle, uint8_t* buffer, int64_t offset, int64_t maxBytes) {
-  if (handle < 0 || !buffer || maxBytes <= 0) return NET_FAILED;
-  for (;;) {
-    ssize_t got = recv((int)handle, buffer + offset, (size_t)maxBytes, 0);
-    if (got > 0) return (int64_t)got;
-    if (got == 0) return NET_END_OF_STREAM;
-    if (errno == EINTR) continue;
-    return rae_net_status_from_errno(errno);
-  }
+int64_t rae_ext_NetSys_bindTo(int64_t fd, uint8_t* records, int64_t index) {
+  const int32_t* header = rae_net_record_header(records, index);
+  const uint8_t* address = records + index * RAE_NET_RECORD_BYTES + RAE_NET_RECORD_HEADER;
+  return bind((int)fd, (const struct sockaddr*)(const void*)address, (socklen_t)header[3]) == 0 ? 0 : -errno;
 }
 
-/* Write count bytes from buffer[offset...]: the bytes written (possibly fewer
- * than asked when the socket's send buffer is full) or a status. */
-int64_t rae_ext_Net_write(int64_t handle, uint8_t* buffer, int64_t offset, int64_t count) {
-  if (handle < 0 || (!buffer && count > 0)) return NET_FAILED;
-  if (count <= 0) return 0;
-#ifdef MSG_NOSIGNAL
-  int flags = MSG_NOSIGNAL;
-#else
-  int flags = 0;
-#endif
-  for (;;) {
-    ssize_t sent = send((int)handle, buffer + offset, (size_t)count, flags);
-    if (sent >= 0) return (int64_t)sent;
-    if (errno == EINTR) continue;
-    return rae_net_status_from_errno(errno);
-  }
+int64_t rae_ext_NetSys_connectTo(int64_t fd, uint8_t* records, int64_t index) {
+  const int32_t* header = rae_net_record_header(records, index);
+  const uint8_t* address = records + index * RAE_NET_RECORD_BYTES + RAE_NET_RECORD_HEADER;
+  return connect((int)fd, (const struct sockaddr*)(const void*)address, (socklen_t)header[3]) == 0 ? 0 : -errno;
 }
 
-/* Write a String's bytes (the text convenience for small messages). */
-int64_t rae_ext_Net_writeText(int64_t handle, rae_String text) {
-  return rae_ext_Net_write(handle, text.data, 0, text.len);
+int64_t rae_ext_NetSys_listen(int64_t fd, int64_t backlog) {
+  return listen((int)fd, (int)backlog) == 0 ? 0 : -errno;
 }
 
-/* Wait until the socket has data (or the peer closed): true, or false on
- * timeout. For one socket; many sockets use the poller. */
-rae_Bool rae_ext_Net_waitReadable(int64_t handle, int64_t timeoutMs) {
-  if (handle < 0) return 0;
-  struct pollfd waitFor = { .fd = (int)handle, .events = POLLIN, .revents = 0 };
-  for (;;) {
-    int ready = poll(&waitFor, 1, timeoutMs < 0 ? -1 : (int)timeoutMs);
-    if (ready < 0 && errno == EINTR) continue;
-    return ready > 0;
-  }
+int64_t rae_ext_NetSys_accept(int64_t fd) {
+  int accepted = accept((int)fd, NULL, NULL);
+  return accepted >= 0 ? accepted : -errno;
 }
 
-/* The local port a socket is bound to (a listener on port 0 asks this). */
-int64_t rae_ext_Net_localPort(int64_t handle) {
-  if (handle < 0) return -1;
+/* fcntl is variadic: these two are why a plain extern cannot do this */
+int64_t rae_ext_NetSys_getFileFlags(int64_t fd) {
+  int flags = fcntl((int)fd, F_GETFL, 0);
+  return flags >= 0 ? flags : -errno;
+}
+
+int64_t rae_ext_NetSys_setFileFlags(int64_t fd, int64_t flags) {
+  return fcntl((int)fd, F_SETFL, (int)flags) == 0 ? 0 : -errno;
+}
+
+int64_t rae_ext_NetSys_setCloseOnExec(int64_t fd) {
+  return fcntl((int)fd, F_SETFD, FD_CLOEXEC) == 0 ? 0 : -errno;
+}
+
+int64_t rae_ext_NetSys_setIntOption(int64_t fd, int64_t level, int64_t option, int64_t value) {
+  int optionValue = (int)value;
+  return setsockopt((int)fd, (int)level, (int)option, &optionValue, sizeof optionValue) == 0 ? 0 : -errno;
+}
+
+/* The socket's pending error (SO_ERROR): 0, the error number, or -errno */
+int64_t rae_ext_NetSys_socketError(int64_t fd) {
+  int code = 0;
+  socklen_t length = sizeof code;
+  return getsockopt((int)fd, SOL_SOCKET, SO_ERROR, &code, &length) == 0 ? code : -errno;
+}
+
+/* bytes read (0 = the peer closed) or -errno */
+int64_t rae_ext_NetSys_receive(int64_t fd, uint8_t* buffer, int64_t offset, int64_t maxBytes) {
+  ssize_t got = recv((int)fd, buffer + offset, (size_t)maxBytes, 0);
+  return got >= 0 ? (int64_t)got : -errno;
+}
+
+int64_t rae_ext_NetSys_send(int64_t fd, uint8_t* buffer, int64_t offset, int64_t count, int64_t flags) {
+  ssize_t sent = send((int)fd, buffer + offset, (size_t)count, (int)flags);
+  return sent >= 0 ? (int64_t)sent : -errno;
+}
+
+int64_t rae_ext_NetSys_sendText(int64_t fd, rae_String text, int64_t flags) {
+  ssize_t sent = send((int)fd, text.data, (size_t)text.len, (int)flags);
+  return sent >= 0 ? (int64_t)sent : -errno;
+}
+
+/* poll() on one socket: > 0 ready, 0 timed out, -errno */
+int64_t rae_ext_NetSys_pollOne(int64_t fd, int64_t events, int64_t timeoutMs) {
+  struct pollfd waitFor = { .fd = (int)fd, .events = (short)events, .revents = 0 };
+  int ready = poll(&waitFor, 1, (int)timeoutMs);
+  return ready >= 0 ? ready : -errno;
+}
+
+int64_t rae_ext_NetSys_close(int64_t fd) {
+  return close((int)fd) == 0 ? 0 : -errno;
+}
+
+/* getsockname, decoded per address family: the local port, or -errno */
+int64_t rae_ext_NetSys_localPort(int64_t fd) {
   struct sockaddr_storage address;
   socklen_t length = sizeof address;
-  if (getsockname((int)handle, (struct sockaddr*)&address, &length) != 0) return -1;
+  if (getsockname((int)fd, (struct sockaddr*)&address, &length) != 0) return -errno;
   if (address.ss_family == AF_INET) return ntohs(((struct sockaddr_in*)&address)->sin_port);
   if (address.ss_family == AF_INET6) return ntohs(((struct sockaddr_in6*)&address)->sin6_port);
-  return -1;
+  return -EAFNOSUPPORT;
 }
 
-void rae_ext_Net_close(int64_t handle) {
-  if (handle >= 0) close((int)handle);
-}
+#else
 
-/* Bytes buffer[offset .. offset+count) as an owned String. */
-rae_String rae_ext_Net_bytesToText(uint8_t* buffer, int64_t offset, int64_t count) {
+int64_t rae_ext_NetSys_constant(int64_t which) {
+  if (which == 22) return RAE_NET_RECORD_BYTES;
+  if (which == 23) return RAE_NET_RESOLVE_FAILED;
+  if (which == 24) return RAE_NET_UNSUPPORTED;
+  return 0;
+}
+int64_t rae_ext_NetSys_resolve(rae_String host, int64_t port, rae_Bool passive, uint8_t* records, int64_t maxRecords) {
+  (void)host; (void)port; (void)passive; (void)records; (void)maxRecords;
+  return RAE_NET_UNSUPPORTED;
+}
+int64_t rae_ext_NetSys_socketFor(uint8_t* records, int64_t index) { (void)records; (void)index; return RAE_NET_UNSUPPORTED; }
+int64_t rae_ext_NetSys_bindTo(int64_t fd, uint8_t* records, int64_t index) { (void)fd; (void)records; (void)index; return RAE_NET_UNSUPPORTED; }
+int64_t rae_ext_NetSys_connectTo(int64_t fd, uint8_t* records, int64_t index) { (void)fd; (void)records; (void)index; return RAE_NET_UNSUPPORTED; }
+int64_t rae_ext_NetSys_listen(int64_t fd, int64_t backlog) { (void)fd; (void)backlog; return RAE_NET_UNSUPPORTED; }
+int64_t rae_ext_NetSys_accept(int64_t fd) { (void)fd; return RAE_NET_UNSUPPORTED; }
+int64_t rae_ext_NetSys_getFileFlags(int64_t fd) { (void)fd; return RAE_NET_UNSUPPORTED; }
+int64_t rae_ext_NetSys_setFileFlags(int64_t fd, int64_t flags) { (void)fd; (void)flags; return RAE_NET_UNSUPPORTED; }
+int64_t rae_ext_NetSys_setCloseOnExec(int64_t fd) { (void)fd; return RAE_NET_UNSUPPORTED; }
+int64_t rae_ext_NetSys_setIntOption(int64_t fd, int64_t level, int64_t option, int64_t value) {
+  (void)fd; (void)level; (void)option; (void)value;
+  return RAE_NET_UNSUPPORTED;
+}
+int64_t rae_ext_NetSys_socketError(int64_t fd) { (void)fd; return RAE_NET_UNSUPPORTED; }
+int64_t rae_ext_NetSys_receive(int64_t fd, uint8_t* buffer, int64_t offset, int64_t maxBytes) {
+  (void)fd; (void)buffer; (void)offset; (void)maxBytes;
+  return RAE_NET_UNSUPPORTED;
+}
+int64_t rae_ext_NetSys_send(int64_t fd, uint8_t* buffer, int64_t offset, int64_t count, int64_t flags) {
+  (void)fd; (void)buffer; (void)offset; (void)count; (void)flags;
+  return RAE_NET_UNSUPPORTED;
+}
+int64_t rae_ext_NetSys_sendText(int64_t fd, rae_String text, int64_t flags) { (void)fd; (void)text; (void)flags; return RAE_NET_UNSUPPORTED; }
+int64_t rae_ext_NetSys_pollOne(int64_t fd, int64_t events, int64_t timeoutMs) { (void)fd; (void)events; (void)timeoutMs; return RAE_NET_UNSUPPORTED; }
+int64_t rae_ext_NetSys_close(int64_t fd) { (void)fd; return RAE_NET_UNSUPPORTED; }
+int64_t rae_ext_NetSys_localPort(int64_t fd) { (void)fd; return RAE_NET_UNSUPPORTED; }
+
+#endif
+
+/* Bytes buffer[offset .. offset+count) as an owned String (string ABI) */
+rae_String rae_ext_NetSys_bytesToText(uint8_t* buffer, int64_t offset, int64_t count) {
   if (!buffer || count <= 0) return (rae_String){NULL, 0, 0, 0};
   uint8_t* data = malloc((size_t)count + 1);
   if (!data) return (rae_String){NULL, 0, 0, 0};
@@ -254,39 +254,3 @@ rae_String rae_ext_Net_bytesToText(uint8_t* buffer, int64_t offset, int64_t coun
   rae_string_pool_register(data);
   return (rae_String){data, count, count + 1, 1};
 }
-
-#else
-
-int64_t rae_ext_Net_listen(rae_String host, int64_t port, int64_t backlog) {
-  (void)host; (void)port; (void)backlog;
-  return NET_UNSUPPORTED;
-}
-int64_t rae_ext_Net_accept(int64_t listener) { (void)listener; return NET_UNSUPPORTED; }
-int64_t rae_ext_Net_connect(rae_String host, int64_t port, int64_t timeoutMs) {
-  (void)host; (void)port; (void)timeoutMs;
-  return NET_UNSUPPORTED;
-}
-int64_t rae_ext_Net_read(int64_t handle, uint8_t* buffer, int64_t offset, int64_t maxBytes) {
-  (void)handle; (void)buffer; (void)offset; (void)maxBytes;
-  return NET_UNSUPPORTED;
-}
-int64_t rae_ext_Net_write(int64_t handle, uint8_t* buffer, int64_t offset, int64_t count) {
-  (void)handle; (void)buffer; (void)offset; (void)count;
-  return NET_UNSUPPORTED;
-}
-int64_t rae_ext_Net_writeText(int64_t handle, rae_String text) {
-  (void)handle; (void)text;
-  return NET_UNSUPPORTED;
-}
-rae_Bool rae_ext_Net_waitReadable(int64_t handle, int64_t timeoutMs) {
-  (void)handle; (void)timeoutMs;
-  return 0;
-}
-int64_t rae_ext_Net_localPort(int64_t handle) { (void)handle; return -1; }
-void rae_ext_Net_close(int64_t handle) { (void)handle; }
-rae_String rae_ext_Net_bytesToText(uint8_t* buffer, int64_t offset, int64_t count) {
-  (void)buffer; (void)offset; (void)count;
-  return (rae_String){NULL, 0, 0, 0};
-}
-
-#endif
