@@ -20,7 +20,7 @@ physics); does it hold up, and at what cost, for a server?
 | capability | today | consequence |
 |---|---|---|
 | TCP sockets | **none**: no `socket`/`listen`/`accept` anywhere in `lib/` or the runtime | phase 1 cannot start until a `net` module exists (gap G1) |
-| readiness polling (kqueue / epoll) | the runtime uses kqueue/inotify only inside `lib/FileNotify` | the poller (G2, landed) is a kqueue shim plus Rae bookkeeping (§1.2), `lib/net/Poller.rae`; epoll is not there yet (F8) |
+| readiness polling (kqueue / epoll) | `lib/FileNotify` is Rae over one-call kqueue shims too (runtime audit row 10) | the poller (G2, landed) is a kqueue shim plus Rae bookkeeping (§1.2), `lib/net/Poller.rae`; epoll is not there yet (F8) |
 | threads | `spawn f(...)` → `Task(T)` on real OS threads; `Channel(T)` (MPSC, non-blocking, any value-type payload since #969); `Parallel.workerCount()` | enough to run one event loop (or one World) per core and hand accepted sockets (plain value handles) to workers over a channel; a `Task` can be asked "done?" without joining (`isDone` / `tryGet`, gap T1, done 2026-10-08) |
 | ECS | `lib/ecs`: `EntityAllocator` (`allocEntity` / `freeEntity`), `ComponentTable(T)` (sparse set, O(1) lookup), query loops over one to three tables, zero-field tag components, `EventQueue(T)`, an ordered `Schedule` | everything the ECS-style servers need already exists; only the server components and systems are new (G8) |
 | bytes | `List(UInt8)`, `Buffer(T)`, `String` is byte-indexed (`byteAt`, `sub`, `indexOf`, `startsWith`, `split`) | an HTTP parser can be written in plain Rae; a reusable read/write byte buffer that does not allocate per request is missing (G3) |

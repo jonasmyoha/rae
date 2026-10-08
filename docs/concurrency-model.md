@@ -367,7 +367,11 @@ every mutable static in the core runtime files found, and fixed:
 - the file-notification thread could mark a watcher changed AFTER
   `fileNotifyClear`, from an event it had already taken from the kernel (found
   by the gate below, whose slowdown widened the window); each kqueue
-  registration now carries a generation, and a stale event is dropped.
+  registration carried a generation, and a stale event was dropped. Since
+  2026-10-08 (runtime audit row 10) each FileNotify owns its kqueue and the
+  thread is only a waker: it marks a queue's atomic "pending" byte and wakes
+  the loop; `fileNotifyClear` drains the queue itself, and a stale mark is at
+  most one spurious "look now".
 
 Already safe: the String temp pool and the random state are `__thread`; the
 program arguments are written once before `main`; the file-notify and Spotify
