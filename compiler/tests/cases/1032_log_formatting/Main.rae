@@ -1,0 +1,125 @@
+# log / logS format in Rae (docs/runtime-c-audit.md row 12): a value whose type
+# the compiler knows prints what interpolation gives it, a List keeps log's
+# `{ #(a, none), length, capacity }` layout, and an Any goes through
+# lib/core/AnyText.rae. Byte-identical to the former C where that was right;
+# fixed where it was not (a Float, struct, enum or nested List element, a
+# missing `opt`, an enum value, a struct value).
+enum Mood { calm, loud }
+
+type Point {
+  x: Int
+  y: Int
+}
+
+func showView(
+  number: view Int
+  text: view String
+  flag: view Bool
+  ratio: view Float64
+) {
+  log(number)
+  log(text)
+  log(flag)
+  log(ratio)
+}
+
+func maybe(on: view Bool) ret opt Int {
+  if on {
+    ret 7
+  }
+  ret none
+}
+
+type Holder {
+  label: String
+}
+
+func show(value: Any) {
+  log(value)
+  logS(value)
+  logS("|")
+  log("<{value}>")
+}
+
+func main() {
+  log(42)
+  log(-9223372036854775807 - 1)
+  log(9223372036854775807)
+  log(1.5)
+  log(0.1)
+  let single: Float = 2.25
+  log(single)
+  let big: Float64 = 123456789.0
+  log(big)
+  log(true)
+  log('é')
+  log('😀')
+  log("plain ünïcode")
+  log("")
+  let unsigned: UInt64 = 18446744073709551615
+  log(unsigned)
+  let small: Int32 = -5
+  log(small)
+  let byte: UInt8 = 200
+  log(byte)
+  logS(1)
+  logS(" two ")
+  logS(3.5)
+  log("")
+  showView(
+    number: 5
+    text: "viewed"
+    flag: false
+    ratio: 2.5
+  )
+  log(maybe(on: true))
+  log(maybe(on: false))
+  log(Mood.loud)
+  var ints: List(Int) = {}
+  ints.add(value: 1)
+  ints.add(value: -2)
+  log(ints)
+  logS(ints)
+  log("")
+  var floats: List(Float) = {}
+  floats.add(value: 1.5)
+  log(floats)
+  var flags: List(Bool) = {}
+  flags.add(value: true)
+  log(flags)
+  var names: List(String) = {}
+  names.add(value: "ann")
+  names.add(value: "b\"c")
+  log(names)
+  var points: List(Point) = {}
+  points.add(value: { x: 1, y: 2 })
+  log(points)
+  var moods: List(Mood) = {}
+  moods.add(value: Mood.loud)
+  log(moods)
+  var nested: List(List(Int)) = {}
+  nested.add(value: ints)
+  log(nested)
+  let empty: List(Int) = {}
+  log(empty)
+  let first: opt Int = maybe(on: true)
+  let missing: opt Int = maybe(on: false)
+  log("interp {first} {missing} {unsigned} {small} {byte}")
+  let holder: Holder = { label: "held" }
+  log(holder)
+  logS(holder)
+  log("")
+  show(value: 42)
+  show(value: -9223372036854775807 - 1)
+  show(value: 1.5)
+  let singleAny: Float = 0.1
+  show(value: singleAny)
+  show(value: true)
+  show(value: 'é')
+  show(value: "text ünï")
+  show(value: "")
+  let unsignedAny: UInt64 = 18446744073709551615
+  show(value: unsignedAny)
+  let smallAny: Int32 = -5
+  show(value: smallAny)
+}

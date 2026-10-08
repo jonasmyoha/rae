@@ -212,16 +212,6 @@ RAE_UNUSED static void rae_ext___buf_copy(void* src, int64_t src_off, void* dst,
     if (src && dst && len > 0) memmove((int64_t*)dst + dst_off, (int64_t*)src + src_off, (size_t)len * sizeof(int64_t));
 }
 
-void rae_ext_rae_log_any(RaeAny value);
-void rae_ext_rae_log_stream_any(RaeAny value);
-
-/* Mangled wrappers for primitives (used by specialized generics) */
-RAE_UNUSED static void rae_log_stream_int64_t_(int64_t v) { printf("%lld", (long long)v); }
-RAE_UNUSED static void rae_log_stream_double_(double v) { printf("%g", v); }
-RAE_UNUSED static void rae_log_stream_rae_Bool_(rae_Bool v) { printf("%s", v ? "true" : "false"); }
-RAE_UNUSED static void rae_log_stream_rae_String_(rae_String v) { printf("%.*s", (int)v.len, (char*)v.data); }
-RAE_UNUSED static void rae_log_stream_uint32_t_(uint32_t v) { printf("%lc", (wint_t)v); }
-RAE_UNUSED static void rae_log_stream_RaeAny_(RaeAny v) { rae_ext_rae_log_stream_any(v); }
 
 /* Conversion Helpers */
 RAE_UNUSED float rae_ext_rae_int_to_float(int64_t v);
@@ -378,38 +368,54 @@ RAE_UNUSED static RaeAny rae_any_bool_ptr(rae_Bool* v) { return rae_any_view(v, 
     default: rae_any_ptr \
 )(X)
 
-void rae_ext_rae_log_cstr(const char* text);
-void rae_ext_rae_log_stream_cstr(const char* text);
-void rae_ext_rae_log_i64(int64_t value);
-void rae_ext_rae_log_stream_i64(int64_t value);
-void rae_ext_rae_log_bool(int8_t value);
-void rae_ext_rae_log_stream_bool(int8_t value);
-void rae_ext_rae_log_string(rae_String value);
-void rae_ext_rae_log_stream_string(rae_String value);
-void rae_ext_rae_log_char(uint32_t value);
-void rae_ext_rae_log_stream_char(uint32_t value);
-void rae_ext_rae_log_id(int64_t value);
-void rae_ext_rae_log_stream_id(int64_t value);
-void rae_ext_rae_log_key(rae_String value);
-void rae_ext_rae_log_stream_key(rae_String value);
-void rae_ext_rae_log_float(float value);
-void rae_ext_rae_log_stream_float(float value);
+/* Reading an Any box (the compiler's boxed-value ABI) from Rae:
+ * lib/core/AnyText.rae formats it. Each is one field read; a `view` / `mod`
+ * box holds a pointer to the value, read at the box type's width. A box of
+ * kind RAE_TYPE_ANY points at another box: rae_ext_rae_any_resolved follows it. */
+static inline RaeAny rae_ext_rae_any_resolved(RaeAny value) {
+  while (value.type == RAE_TYPE_ANY && value.as.ptr) {
+    RaeAny inner = *(RaeAny*)value.as.ptr;
+    if (value.is_view) inner.is_view = true;
+    if (value.is_mod) inner.is_mod = true;
+    value = inner;
+  }
+  return value;
+}
+static inline int64_t rae_ext_rae_any_kind(RaeAny value) { return (int64_t)value.type; }
+static inline int64_t rae_ext_rae_any_int(RaeAny value) {
+  bool ref = value.is_view || value.is_mod;
+  switch (value.type) {
+    case RAE_TYPE_INT32: return ref ? *(int32_t*)value.as.ptr : (int32_t)value.as.i;
+    case RAE_TYPE_UINT32: case RAE_TYPE_CHAR: return ref ? *(uint32_t*)value.as.ptr : (uint32_t)value.as.i;
+    default: return ref ? *(int64_t*)value.as.ptr : value.as.i;
+  }
+}
+static inline uint64_t rae_ext_rae_any_uint64(RaeAny value) {
+  return (value.is_view || value.is_mod) ? *(uint64_t*)value.as.ptr : (uint64_t)value.as.i;
+}
+static inline double rae_ext_rae_any_float(RaeAny value) {
+  bool ref = value.is_view || value.is_mod;
+  if (value.type == RAE_TYPE_FLOAT32) return ref ? *(float*)value.as.ptr : (float)value.as.f;
+  return ref ? *(double*)value.as.ptr : value.as.f;
+}
+static inline rae_Bool rae_ext_rae_any_bool(RaeAny value) {
+  return (value.is_view || value.is_mod) ? *(int8_t*)value.as.ptr : value.as.b;
+}
+rae_String rae_ext_rae_str_from_buf(const uint8_t* data, int64_t len);
+/* A String or Key box's text as an OWNED copy (the box only borrows it) */
+static inline rae_String rae_ext_rae_any_string(RaeAny value) {
+  rae_String text = (value.is_view || value.is_mod) ? *(rae_String*)value.as.ptr : value.as.s;
+  return rae_ext_rae_str_from_buf(text.data, text.len);
+}
+static inline rae_Bool rae_ext_rae_any_string_missing(RaeAny value) {
+  rae_String text = (value.is_view || value.is_mod) ? *(rae_String*)value.as.ptr : value.as.s;
+  return text.data == NULL;
+}
+static inline int64_t rae_ext_rae_any_address(RaeAny value) { return (int64_t)(intptr_t)value.as.ptr; }
 
-void rae_ext_rae_log_list_fields(RaeAny* items, int64_t length, int64_t capacity);
-void rae_ext_rae_log_stream_list_fields(RaeAny* items, int64_t length, int64_t capacity);
+/* log / logS write their text (runtime_system_log.c) */
+void rae_ext_rae_log_write(rae_String text, rae_Bool newline);
 
-// Typed list logging: monomorphised lists store concrete element types
-// (int64_t, double, rae_String, ...), not RaeAny — we need typed iteration.
-typedef enum {
-  RAE_LIST_ELEM_ANY = 0,
-  RAE_LIST_ELEM_INT64,
-  RAE_LIST_ELEM_FLOAT64,
-  RAE_LIST_ELEM_BOOL,
-  RAE_LIST_ELEM_CHAR32,
-  RAE_LIST_ELEM_STRING,
-} RaeListElemKind;
-void rae_ext_rae_log_list_typed(void* data, int64_t length, int64_t capacity, int elem_kind);
-void rae_ext_rae_log_stream_list_typed(void* data, int64_t length, int64_t capacity, int elem_kind);
 
 rae_String rae_ext_rae_str_from_cstr(const void* s);
 rae_String rae_ext_rae_str_from_buf(const uint8_t* data, int64_t len);
@@ -549,7 +555,7 @@ RAE_UNUSED static inline rae_String rae_string_pool_register_owned(rae_String s)
 // rae_String parts; each is passed via varargs. Concatenates all
 // parts into a single owned heap String, frees each part whose
 // is_owned=1 (so compiler-emitted temps in the chain — e.g.
-// `rae_ext_rae_str_i64` results — get cleaned up here), and
+// `rae_text_int64` results — get cleaned up here), and
 // registers the returned String with the temp pool for
 // statement-scope cleanup.
 rae_String rae_ext_rae_str_interp(int n, ...);
@@ -747,21 +753,12 @@ int64_t rae_ext_audio_loop(int64_t clip, float volume);
 void    rae_ext_audio_tick(void);
 void    rae_ext_audio_set_muted(int64_t muted);
 
-rae_String rae_ext_rae_str_i64(int64_t v);
-rae_String rae_ext_rae_str_u64(uint64_t v);  // #817
-rae_String rae_ext_rae_str_i64_ptr(const int64_t* v);
 rae_String rae_ext_rae_str_f64(double v);
 rae_String rae_ext_json_number(float v);
 rae_String rae_ext_rae_str_f64_ptr(const double* v);
-rae_String rae_ext_rae_str_bool(rae_Bool v);
-rae_String rae_ext_rae_str_bool_ptr(const rae_Bool* v);
-rae_String rae_ext_rae_str_char(uint32_t v);
-rae_String rae_ext_rae_str_char_ptr(const uint32_t* v);
 rae_String rae_ext_rae_str_string(rae_String s);
 rae_String rae_ext_rae_str_string_ptr(const rae_String* s);
 rae_String rae_ext_rae_str_cstr(const char* s); // Legacy/helper
-RAE_UNUSED static rae_String rae_ext_rae_str_u8(unsigned char v) { return rae_ext_rae_str_i64((int64_t)v); }
-rae_String rae_ext_rae_str_any(RaeAny v); // String-format any boxed value (incl. `none`)
 
 /* JSON helpers */
 // #761: defined in runtime_buffers_math.c so
@@ -875,28 +872,6 @@ static inline float rae_ext_Math_floatFromBits(int64_t bits) {
 }
 
 
-RAE_UNUSED static const char* rae_str_any(RaeAny v) {
-    if (v.type == RAE_TYPE_ANY) {
-        RaeAny inner = *(RaeAny*)v.as.ptr;
-        if (v.is_view) inner.is_view = true;
-        if (v.is_mod) inner.is_mod = true;
-        return rae_str_any(inner);
-    }
-    const char* res = "";
-    switch (v.type) {
-        case RAE_TYPE_INT64: res = rae_ext_rae_str_to_cstr(rae_ext_rae_str_i64(v.as.i)); break;
-        case RAE_TYPE_INT32: res = rae_ext_rae_str_to_cstr(rae_ext_rae_str_i64(v.as.i)); break;
-        case RAE_TYPE_UINT64: res = rae_ext_rae_str_to_cstr(rae_ext_rae_str_u64((uint64_t)v.as.i)); break;
-        case RAE_TYPE_FLOAT64: res = rae_ext_rae_str_to_cstr(rae_ext_rae_str_f64(v.as.f)); break;
-        case RAE_TYPE_FLOAT32: res = rae_ext_rae_str_to_cstr(rae_ext_rae_str_f64(v.as.f)); break;
-        case RAE_TYPE_BOOL: res = rae_ext_rae_str_to_cstr(rae_ext_rae_str_bool(v.as.b)); break;
-        case RAE_TYPE_STRING: res = rae_ext_rae_str_to_cstr(v.as.s); break;
-        case RAE_TYPE_CHAR: res = rae_ext_rae_str_to_cstr(rae_ext_rae_str_char((uint32_t)v.as.i)); break;
-        case RAE_TYPE_NONE: res = "none"; break;
-        default: res = ""; break;
-    }
-    return res;
-}
 
 RAE_UNUSED static RaeAny rae_any_unwrap(RaeAny v) {
     v.is_view = false;
@@ -1030,17 +1005,9 @@ void rae_ext_drawTextWithFont(int64_t slot, rae_String text, float x, float y, f
  * below sees only C types, and there UInt32 is Char's uint32_t (it printed as
  * a code point) and Int8 is Bool's int8_t where bool is missing (it printed as
  * true/false). Each takes the value or a pointer to it (how a view or mod
- * binding can reach the formatter). */
-#define RAE_INT_STR_FORMATTER(NAME, CTYPE, WIDE, FORMAT) \
-    RAE_UNUSED static rae_String NAME##_value(CTYPE v) { return FORMAT((WIDE)v); } \
-    RAE_UNUSED static rae_String NAME##_pointer(const CTYPE* v) { return FORMAT((WIDE)*v); }
-RAE_INT_STR_FORMATTER(rae_str_int8, int8_t, int64_t, rae_ext_rae_str_i64)
-RAE_INT_STR_FORMATTER(rae_str_int16, int16_t, int64_t, rae_ext_rae_str_i64)
-RAE_INT_STR_FORMATTER(rae_str_int32, int32_t, int64_t, rae_ext_rae_str_i64)
-RAE_INT_STR_FORMATTER(rae_str_uint8, uint8_t, int64_t, rae_ext_rae_str_i64)
-RAE_INT_STR_FORMATTER(rae_str_uint16, uint16_t, int64_t, rae_ext_rae_str_i64)
-RAE_INT_STR_FORMATTER(rae_str_uint32, uint32_t, int64_t, rae_ext_rae_str_i64)
-RAE_INT_STR_FORMATTER(rae_str_uint64, uint64_t, uint64_t, rae_ext_rae_str_u64)
+ * binding can reach the formatter). The <NAME>_value / _pointer functions
+ * are emitted into every program with the rae_text_* wrappers (c_backend.c
+ * emit_text_wrappers), so they format through lib/core/Text.rae. */
 #define RAE_INT_STR_DISPATCH(NAME, CTYPE, X) _Generic((X), \
     CTYPE*: NAME##_pointer, const CTYPE*: NAME##_pointer, default: NAME##_value)(X)
 #define rae_str_int8(X) RAE_INT_STR_DISPATCH(rae_str_int8, int8_t, X)
@@ -1054,7 +1021,8 @@ RAE_INT_STR_FORMATTER(rae_str_uint64, uint64_t, uint64_t, rae_ext_rae_str_u64)
 /* Text of an interpolated / toString'd value, by its C type. The integer,
  * Bool and Char entries are the `rae_text_*` wrappers the code generator
  * emits into every program (they call lib/core/Text.rae; docs/runtime-c-audit.md
- * row 4); floats, Strings and Any stay C. */
+ * row 4), and `rae_text_any` formats an Any through lib/core/AnyText.rae (row
+ * 12); floats and Strings stay C. */
 #define rae_ext_rae_str(X) _Generic((X), \
     int64_t: rae_text_int64, \
     int64_t*: rae_text_int64_ptr, \
@@ -1074,7 +1042,7 @@ RAE_INT_STR_FORMATTER(rae_str_uint64, uint64_t, uint64_t, rae_ext_rae_str_u64)
     uint16_t: rae_text_int64, \
     int32_t: rae_text_int64, \
     uint64_t: rae_text_uint64, \
-    RaeAny: rae_ext_rae_str_any, \
+    RaeAny: rae_text_any, \
     default: rae_ext_rae_str_string \
 )(X)
 
