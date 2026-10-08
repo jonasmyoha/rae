@@ -319,6 +319,7 @@ func pollSpotify(
   appState: mod AppState
   now: view Timestamp
   ticked: view Bool
+  track: view SpotifyTrack
 ) pub {
   if spotifySystem.enabled is false {
     ret
@@ -328,14 +329,13 @@ func pollSpotify(
   # this is what makes it appear within a frame instead of waiting up to 1s
   # for the next tick.
   syncNowPlayingCoverFinish(spotifySystem: spotifySystem, reg: reg, fetches: appState.artworkFetch)
-  # `ticked` is the poll worker's "the cache has a new snapshot" cue (#950);
-  # between ticks there is nothing new to mirror.
+  # `ticked` is the poll worker's "a new answer arrived" cue (#950) and
+  # `track` that answer; between ticks there is nothing new to mirror.
   if ticked is false {
     ret
   }
-  let track: SpotifyTrack = Spotify.current()
-  let pos: Float = Spotify.position()
-  let dur: Float = Spotify.duration()
+  let pos: Float = track.position
+  let dur: Float = track.duration
   # Mirror Spotify's actual spotifySystem into the local playbackSystem mock so play-button
   # revision invalidation and the progress/readout spotifySystem
   # match the real player. Includes "user paused in Spotify directly"

@@ -182,19 +182,18 @@ func toggleLiked(state: mod AppState) {
   state.libraryRevision = state.libraryRevision + 1
 }
 
-# Play / pause. In Spotify mode Spotify owns the play-state: flip the cached
-# state to its opposite (the background poller's cache, #279 — no UI-thread
-# osascript; at worst one poll interval stale) and let the 1 Hz poll mirror
-# it back. Locally it is a PlaybackSystem command (#265), applied in the
+# Play / pause. In Spotify mode Spotify owns the play-state: flip the state
+# the 1 Hz poll last mirrored into `isPlaying` (no UI-thread osascript; at
+# worst one poll interval stale) and let the next poll mirror it back. Locally it is a
+# PlaybackSystem command (#265), applied in the
 # frame's Apply(A) phase by `processCommands`.
 func togglePlaybackCommand(playbackSystem: mod PlaybackSystem, spotifyEnabled: view Bool) {
   if spotifyEnabled is false {
     enqueuePlaybackToggle(this: playbackSystem)
     ret
   }
-  let current: String = Spotify.state()
-  log("[spotify] toggle: state={current}")
-  if current is "playing" {
+  log("[spotify] toggle: playing={playbackSystem.isPlaying}")
+  if playbackSystem.isPlaying {
     Spotify.pause()
     setPlaybackPlaying(playbackSystem: playbackSystem, value: false)
   } else {

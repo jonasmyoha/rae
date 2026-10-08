@@ -1,3 +1,4 @@
+open sys/Spotify
 open ui/Ecs
 open ui/Pipeline
 open ecs/Schedule
@@ -108,15 +109,18 @@ func syncFrameData(
 ) pub ret FrameDataSyncResult {
   advancePlayback(playbackSystem: musicSystems.playbackSystem, now: now)
 
-  # The poll worker (#950) refreshed the cache off-thread and posted a tick;
-  # only then is there a new snapshot worth mirroring into the world.
+  # The poll worker (#950) asked Spotify off-thread and sent the answer; only
+  # then is there a new snapshot worth mirroring into the world.
+  var polled: SpotifyTrack = Spotify.emptySpotifyTrack()
+  let ticked: Bool = spotifyPollerTake(poller: spotifyPoller, latest: polled)
   pollSpotify(
     spotifySystem: spotifySystem
     reg: textureRegistry
     playbackSystem: musicSystems.playbackSystem
     appState: appState
     now: Time.atSeconds(s: now)
-    ticked: spotifyPollerTicked(poller: spotifyPoller)
+    ticked: ticked
+    track: polled
   )
   # Observation (B): whatever the clock tick / the Spotify mirror moved lands
   # this frame — every app system judged from its declared sources

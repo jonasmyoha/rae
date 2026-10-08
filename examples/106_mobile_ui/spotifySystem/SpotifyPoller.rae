@@ -4,16 +4,15 @@ open ui/EventLoop
 
 # The Spotify poll worker (#950, docs/parallelism-first-plan.md §5).
 #
-# `Spotify.refresh()` forks `osascript` (~tens of ms), so it must not run on
-# the UI thread. It used to be scheduled by a pthread inside the runtime
-# (`startPoller`, #279); now the scheduling is ordinary Rae: one `spawn`'d
-# worker loops "refresh, post a tick, wake the event loop, sleep", and the
-# frame's `pollSpotify` runs only when a tick arrived — so it never reads a
-# cache nobody refreshed, and the idle loop reacts to the poll the moment it
-# lands instead of on its next timeout.
+# `Spotify.poll()` forks `osascript` (~tens of ms), so it must not run on
+# the UI thread. One `spawn`'d worker loops "poll, send the answer, wake the
+# event loop, sleep", and the frame's `pollSpotify` runs only when an answer
+# arrived — the idle loop reacts to the poll the moment it lands instead of on
+# its next timeout. The answer itself travels on the channel: there is no
+# shared cache (docs/runtime-c-audit.md row 9).
 #
-# Two Int channels, both owned by the app: `ticks` (worker -> app, the poll
-# count) and `stop` (app -> worker, any value). Rae has no `detach` yet, so
+# Two channels, both owned by the app: `tracks` (worker -> app, each poll's
+# SpotifyTrack) and `stop` (app -> worker, any value). Rae has no `detach` yet, so
 # the worker is a Task the app joins at teardown (`stopSpotifyPoller`).
 const spotifyPollIntervalMs: Int = 1000
 
@@ -22,7 +21,7 @@ const spotifyPollSliceMs: Int = 50
 
 type SpotifyPoller {
   stop: Channel(Int)
-  ticks: Channel(Int)
+  tracks: Channel(SpotifyTrack)
   task: Task(Int)
 }
 
@@ -32,14 +31,13 @@ type SpotifyPoller {
 func spotifyPollWorker(
   intervalMs: copy Int
   stop: own Channel(Int)
-  ticks: own Channel(Int)
+  tracks: own Channel(SpotifyTrack)
 ) ret Int {
   var polls: Int = 0
   var running: Bool = intervalMs > 0
   loop running {
-    Spotify.refresh()
+    channelSend(this: tracks, value: Spotify.poll())
     polls = polls + 1
-    channelSend(this: ticks, value: polls)
     wake()
     var slept: Int = 0
     loop slept < intervalMs and running {
@@ -55,24 +53,24 @@ func spotifyPollWorker(
 
 func startSpotifyPoller(enabled: view Bool) ret SpotifyPoller {
   let stop: Channel(Int) = createChannel(Int)
-  let ticks: Channel(Int) = createChannel(Int)
+  let tracks: Channel(SpotifyTrack) = createChannel(SpotifyTrack)
   var intervalMs: Int = 0
   if enabled {
     intervalMs = spotifyPollIntervalMs
   }
   ret SpotifyPoller {
     stop: stop
-    ticks: ticks
-    task: spawn spotifyPollWorker(intervalMs: intervalMs, stop: stop, ticks: ticks)
+    tracks: tracks
+    task: spawn spotifyPollWorker(intervalMs: intervalMs, stop: stop, tracks: tracks)
   }
 }
 
-# Drain the tick channel. True when at least one poll completed since the
-# last call — the frame's cue to snapshot the (now refreshed) cache.
-func spotifyPollerTicked(poller: view SpotifyPoller) ret Bool {
+# Drain the answer channel into `latest`, keeping the newest. True when at
+# least one poll completed since the last call — the frame's cue to mirror it.
+func spotifyPollerTake(poller: view SpotifyPoller, latest: mod SpotifyTrack) ret Bool {
   var ticked: Bool = false
-  loop pending(this: poller.ticks) > 0 {
-    let polls: Int = receive(this: poller.ticks)
+  loop pending(this: poller.tracks) > 0 {
+    latest = receive(this: poller.tracks)
     ticked = true
   }
   ret ticked
@@ -83,5 +81,5 @@ func stopSpotifyPoller(poller: mod SpotifyPoller) {
   channelSend(this: poller.stop, value: 1)
   let polls: Int = poller.task.get()
   freeChannel(this: poller.stop)
-  freeChannel(this: poller.ticks)
+  freeChannel(this: poller.tracks)
 }
