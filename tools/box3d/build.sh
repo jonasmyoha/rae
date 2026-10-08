@@ -63,6 +63,16 @@ else
 fi
 # The browser build (rae build --target wasm links it with emcc)
 if command -v emcc >/dev/null 2>&1; then
+  # Emscripten needs python >= 3.10; Apple's /usr/bin python3 is 3.9 and may
+  # come first on PATH. Pick a recent one unless EMSDK_PYTHON is already set
+  # (the same rule `rae build --target wasm` applies).
+  if [ -z "${EMSDK_PYTHON:-}" ]; then
+    for candidate in /opt/homebrew/bin/python3 /usr/local/bin/python3 python3; do
+      if "$candidate" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
+        export EMSDK_PYTHON="$candidate"; break
+      fi
+    done
+  fi
   # Box3D takes its SSE2 path here; Emscripten lowers SSE2 to WASM SIMD
   build emcc emar "$INSTALL/lib/emscripten/libbox3d.a" -msimd128 -msse2 -D_POSIX_C_SOURCE=200809L
 else

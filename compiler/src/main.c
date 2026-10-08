@@ -2702,6 +2702,36 @@ static bool file_contains_text(const char* path, const char* needle) {
   return found;
 }
 
+
+/* Emscripten's launcher runs `$EMSDK_PYTHON`, else the first `python3` on
+ * PATH, and refuses anything older than 3.10. On macOS that first python3 is
+ * often Apple's 3.9 (/usr/bin, CommandLineTools) — a shell, an IDE or the
+ * devtools test runner can put it ahead of Homebrew's — and the browser build
+ * then fails with "emscripten requires python 3.10 or above". Unless the user
+ * chose one, point EMSDK_PYTHON at the first python >= 3.10 found. */
+static bool python_is_recent(const char* python) {
+  char command[PATH_MAX + 96];
+  snprintf(command, sizeof(command),
+           "'%s' -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' >/dev/null 2>&1",
+           python);
+  return system(command) == 0;
+}
+
+static void choose_emscripten_python(void) {
+  const char* chosen = getenv("EMSDK_PYTHON");
+  if (chosen && chosen[0]) return;
+  static const char* const candidates[] = {
+    "/opt/homebrew/bin/python3", "/usr/local/bin/python3", "python3",
+  };
+  for (size_t i = 0; i < sizeof candidates / sizeof candidates[0]; i++) {
+    if (candidates[i][0] == '/' && access(candidates[i], X_OK) != 0) continue;
+    if (python_is_recent(candidates[i])) {
+      setenv("EMSDK_PYTHON", candidates[i], 1);
+      return;
+    }
+  }
+}
+
 static bool emcc_link_c_to_web(const char* entry_rae_file,
                                const char* c_path,
                                const char* out_path,
@@ -2894,6 +2924,7 @@ static bool emcc_link_c_to_web(const char* entry_rae_file,
   args[n++] = out_path;
   args[n] = NULL;
 
+  choose_emscripten_python();
   pid_t pid = fork();
   if (pid < 0) {
     fprintf(stderr, "error: could not start emcc: %s\n", strerror(errno));
