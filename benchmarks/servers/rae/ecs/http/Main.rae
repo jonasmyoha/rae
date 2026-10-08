@@ -1,0 +1,99 @@
+# Phase 1 HTTP server, ECS style (benchmarks/servers/spec/Http.md,
+# docs/server-benchmarks-design.md §7): one HttpServer World per worker, run a
+# frame per poll by lib/net/ecs's systems in their fixed order. This file adds
+# only the routes. The sockets, poller, byte buffers and HTTP codec are the
+# same lib/net and lib/http the event-loop server (rae/eventLoop/http) uses.
+#
+# PORT (default 8080) and WORKERS (default 1) come from the environment. Every
+# worker's World watches the one listener and accepts one connection per
+# frame, which spreads the connections over the workers. With
+# RAE_BENCH_STATS=1 each worker prints its request count and the process's
+# allocation count once a second, for the runner's allocations per request.
+open net/Tcp
+open net/ecs/HttpServer
+open net/ecs/HttpSystems
+
+type Message {
+  message: String
+}
+
+type BenchRouter {
+  requests: Int
+}
+
+func route(router: mod BenchRouter, server: mod HttpServer, event: view HttpRequestEvent) {
+  router.requests = router.requests + 1
+  if requestPathIs(server: server, event: event, path: "/plaintext") {
+    respond(
+      server: server
+      event: event
+      status: 200
+      contentType: "text/plain"
+      body: "Hello, World!"
+    )
+  } else if requestPathIs(server: server, event: event, path: "/json") {
+    let message: Message = { message: "Hello, World!" }
+    respond(
+      server: server
+      event: event
+      status: 200
+      contentType: "application/json"
+      body: message.toJson()
+    )
+  } else {
+    respond(
+      server: server
+      event: event
+      status: 404
+      contentType: "text/plain"
+      body: "Not Found"
+    )
+  }
+}
+
+func envInt(name: view String, fallback: view Int) ret Int {
+  let text: String = Sys.getEnv(name: name)
+  if text.length() is 0 {
+    ret fallback
+  }
+  ret text.toInt()
+}
+
+func serve(index: copy Int, listenerHandle: copy Int) ret Int {
+  var server: HttpServer = createHttpServer(idleTimeoutMs: 0)
+  server.acceptsPerFrame = 1
+  let status: NetStatus = httpServerShareListener(
+    server: server
+    listenerSocketId: SocketId { handle: listenerHandle }
+  )
+  var router: BenchRouter = { requests: 0 }
+  let printStats: Bool = Sys.getEnv(name: "RAE_BENCH_STATS").length() > 0
+  loop {
+    httpServerFrame(
+      BenchRouter
+      router: router
+      server: server
+      timeoutMs: 1000
+    )
+    if server.secondChanged and printStats {
+      log("stats worker={index} requests={router.requests} allocations={Sys.allocationCount()}")
+    }
+  }
+  ret 0
+}
+
+func main() ret Int {
+  let port: Int = envInt(name: "PORT", fallback: 8080)
+  let workers: Int = envInt(name: "WORKERS", fallback: 1)
+  let listening: SocketResult = tcpListen(host: "127.0.0.1", port: port, backlog: 1024)
+  if listening.status is not NetStatus.ok {
+    log("cannot listen on {port}: {listening.status}")
+    ret 1
+  }
+  log("listening on {socketLocalPort(socketId: listening.socketId)} with {workers} workers")
+  var tasks: List(Task(Int)) = {}
+  loop var i: Int = 1, i < workers, ++i {
+    tasks.add(value: spawn serve(index: i, listenerHandle: listening.socketId.handle))
+  }
+  ret serve(index: 0, listenerHandle: listening.socketId.handle)
+}

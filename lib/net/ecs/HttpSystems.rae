@@ -93,13 +93,13 @@ func pollSystem(server: mod HttpServer, timeoutMs: view Int) {
 
 # ----- 2. accept ------------------------------------------------------------
 
-# Accept every waiting connection
+# Accept the waiting connections, up to `acceptsPerFrame`
 func acceptSystem(server: mod HttpServer) {
   if not server.listenerReady {
     ret
   }
   server.listenerReady = false
-  loop {
+  loop var accepts: Int = 0, accepts < server.acceptsPerFrame, ++accepts {
     let accepted: SocketResult = tcpAccept(listenerSocketId: server.listenerSocketId)
     if accepted.status is not NetStatus.ok {
       ret

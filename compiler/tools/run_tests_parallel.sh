@@ -77,6 +77,13 @@ if [ -f tools/tsan-check.sh ]; then
   if bash tools/tsan-check.sh; then TSAN_CHECK=0; fi
   echo
 fi
+# Both Rae HTTP benchmark servers against every spec/Http.md rule
+# (benchmarks/servers/check.sh --rae, decision F7): correctness, never speed.
+SERVER_CHECK=1
+if [ -f ../benchmarks/servers/check.sh ]; then
+  if sh ../benchmarks/servers/check.sh --rae; then SERVER_CHECK=0; fi
+  echo
+fi
 echo "Running Rae tests (PARALLEL: $TOTAL cases, $JOBS jobs)..."
 echo
 START=$(date +%s)
@@ -108,6 +115,7 @@ if [ "$TREE_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1))
 if [ "$TERMS_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$STRESS_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$TSAN_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
+if [ "$SERVER_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 # #917: the format-CLI behavior checks (traversal, --check/--json, mtime,
 # permissions, atomic write, over-cap) — one extra "case" folded into the run.
 if [ -f tools/test-format-cli.sh ]; then

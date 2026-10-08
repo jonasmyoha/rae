@@ -130,6 +130,9 @@ type HttpServer {
   listenerSocketId: SocketId
   # The poll saw a connection waiting on the listener
   listenerReady: Bool
+  # At most this many accepts per frame. Workers sharing one listener take 1,
+  # which spreads the connections over them.
+  acceptsPerFrame: Int
   poller: Poller
   readiness: List(Readiness)
   # Socket handle -> its connection entity
@@ -160,6 +163,7 @@ func createHttpServer(idleTimeoutMs: view Int) ret HttpServer {
     closings: create()
     listenerSocketId: noSocket()
     listenerReady: false
+    acceptsPerFrame: 64
     poller: createPoller()
     readiness: List.create(Readiness, cap: 256)
     socketEntities: createIntMap(EntityId, cap: 256)
@@ -183,10 +187,19 @@ func httpServerListen(
   if listening.status is not NetStatus.ok {
     ret listening.status
   }
-  server.listenerSocketId = listening.socketId
+  ret httpServerShareListener(server: server, listenerSocketId: listening.socketId)
+}
+
+# Accept connections from a listener made elsewhere (several workers' servers
+# can watch the same one; each accept goes to whichever takes it first)
+func httpServerShareListener(
+  server: mod HttpServer
+  listenerSocketId: view SocketId
+) ret NetStatus {
+  server.listenerSocketId = listenerSocketId
   ret pollerWatch(
     poller: server.poller
-    socketId: listening.socketId
+    socketId: listenerSocketId
     readable: true
     writable: false
   )

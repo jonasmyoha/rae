@@ -1,4 +1,4 @@
-.PHONY: all dev build test stop setup install-hooks banned-terms-gate stress devtools-install devtools-lint devtools-test gemini claude codex llm up
+.PHONY: all dev build test stop setup install-hooks banned-terms-gate stress bench-servers devtools-install devtools-lint devtools-test gemini claude codex llm up
 
 SESSION_DIR ?= $(HOME)/.ws
 PROJECT_KEY := rae
@@ -64,6 +64,15 @@ banned-terms-gate:
 stress:
 	@$(MAKE) -C compiler build
 	@bash stress/run.sh
+
+# The server benchmarks (benchmarks/servers, docs/server-benchmarks-design.md):
+# builds the pinned load tools into ~/.cache/rae/servers (once), then runs every
+# server under load and rewrites benchmarks/servers/results/. About 40 minutes
+# on an idle machine; it refuses to start on a busy one (BENCH_ALLOW_LOAD=1).
+bench-servers:
+	@$(MAKE) -C compiler build
+	@sh benchmarks/servers/fetch.sh
+	@sh benchmarks/servers/run.sh
 
 # Opt-in git hooks (#1016): pre-commit checks the STAGED changes, commit-msg
 # the message, both against the same list. Git never versions .git/hooks, so

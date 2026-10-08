@@ -77,6 +77,13 @@ if [ -z "$TEST_NAME_FILTER" ] && [ -f "tools/tsan-check.sh" ]; then
   if ! bash tools/tsan-check.sh; then TSAN_CHECK_FAILED=1; fi
   echo
 fi
+# Both Rae HTTP benchmark servers against every spec/Http.md rule
+# (benchmarks/servers/check.sh --rae, decision F7), same place.
+SERVER_CHECK_FAILED=0
+if [ -z "$TEST_NAME_FILTER" ] && [ -f "../benchmarks/servers/check.sh" ]; then
+  if ! sh ../benchmarks/servers/check.sh --rae; then SERVER_CHECK_FAILED=1; fi
+  echo
+fi
 
 for TARGET in "${TARGETS[@]}"; do
   echo "Testing target: $TARGET"
@@ -588,6 +595,7 @@ if [ "$TREE_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$TERMS_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$STRESS_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$TSAN_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
+if [ "$SERVER_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ $FAILED -gt 0 ]; then
   exit 1
 fi
