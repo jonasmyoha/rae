@@ -769,6 +769,45 @@ rae_String rae_ext_rae_str_any(RaeAny v); // String-format any boxed value (incl
 // a local (`let s = obj.toJson()`) was freed as an UNTRACKED heap (mem-stats
 // outstanding=-1), while inlined use silently LEAKED it (untagged, invisible).
 rae_String rae_json_build(const char* s, int64_t len);
+/* The text a generated toJson writes: 512 bytes on the stack, moved to a
+ * doubling heap block when they run out, so a JSON text of any length fits.
+ * rae_jout_finish hands the text over as an owned String. */
+typedef struct { char* data; int64_t len; int64_t cap; char local[512]; } rae_JsonOut;
+static inline void rae_jout_init(rae_JsonOut* out) {
+  out->data = out->local; out->len = 0; out->cap = (int64_t)sizeof out->local; out->local[0] = 0;
+}
+static inline int rae_jout_reserve(rae_JsonOut* out, int64_t extra) {
+  int64_t needed = out->len + extra + 1;
+  if (needed <= out->cap) return 1;
+  int64_t cap = out->cap * 2;
+  while (cap < needed) cap *= 2;
+  char* data = (char*)malloc((size_t)cap);
+  if (!data) return 0;
+  memcpy(data, out->data, (size_t)out->len + 1);
+  if (out->data != out->local) free(out->data);
+  out->data = data; out->cap = cap;
+  return 1;
+}
+/* snprintf straight into the output (a macro, so each call is the plain
+ * snprintf the old fixed buffer made); only a text that does not fit grows
+ * the output and is formatted again. The arguments are evaluated twice then,
+ * so the generated code passes only plain values. */
+#define rae_jout_printf(out, ...) do { \
+    rae_JsonOut* rae_jout_target = (out); \
+    int rae_jout_count = snprintf(rae_jout_target->data + rae_jout_target->len, \
+        (size_t)(rae_jout_target->cap - rae_jout_target->len), __VA_ARGS__); \
+    if (rae_jout_count >= 0 && rae_jout_target->len + rae_jout_count + 1 > rae_jout_target->cap) { \
+      if (!rae_jout_reserve(rae_jout_target, rae_jout_count)) break; \
+      snprintf(rae_jout_target->data + rae_jout_target->len, \
+        (size_t)(rae_jout_target->cap - rae_jout_target->len), __VA_ARGS__); \
+    } \
+    if (rae_jout_count >= 0) rae_jout_target->len += rae_jout_count; \
+  } while (0)
+static inline rae_String rae_jout_finish(rae_JsonOut* out) {
+  rae_String text = rae_json_build(out->data, out->len);
+  if (out->data != out->local) free(out->data);
+  return text;
+}
 rae_String rae_ext_rae_str_cstr_ptr(const char** s); // Legacy/helper
 
 int64_t rae_ext_nextTick(void);
