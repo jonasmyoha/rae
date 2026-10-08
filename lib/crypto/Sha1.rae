@@ -1,0 +1,175 @@
+# SHA-1 (RFC 3174) in plain Rae, for the WebSocket handshake
+# (docs/server-benchmarks-design.md §9 G5). SHA-1 is broken for collision
+# resistance: use it where a protocol requires it (Sec-WebSocket-Accept, Git
+# object names), never to protect anything.
+#
+# The 32-bit words live in Int and are masked back to 32 bits after every
+# operation that can overflow them.
+const sha1WordMask: Int = 4294967295
+
+type Sha1State {
+  h0: Int
+  h1: Int
+  h2: Int
+  h3: Int
+  h4: Int
+  # The 80-word message schedule, reused for every block
+  words: List(Int)
+}
+
+func createSha1State() ret Sha1State {
+  var words: List(Int) = List.create(Int, cap: 80)
+  loop var i: Int = 0, i < 80, ++i {
+    words.add(value: 0)
+  }
+  ret Sha1State {
+    h0: 1732584193
+    h1: 4023233417
+    h2: 2562383102
+    h3: 271733878
+    h4: 3285377520
+    words: words
+  }
+}
+
+func rotateLeft(value: view Int, count: view Int) ret Int {
+  ret ((value shl count) bitor (value shr (32 - count))) bitand sha1WordMask
+}
+
+# Process the 64-byte block of `bytes` that starts at `offset`
+func sha1Block(state: mod Sha1State, bytes: view List(UInt8), offset: view Int) {
+  loop var t: Int = 0, t < 16, ++t {
+    let at: Int = offset + t * 4
+    let word: Int = (bytes.copyAtFallback(index: at, fallback: 0) as Int shl 24) bitor (bytes.copyAtFallback(
+      index: at + 1
+      fallback: 0
+    ) as Int shl 16) bitor (bytes.copyAtFallback(index: at + 2, fallback: 0) as Int shl 8) bitor bytes.copyAtFallback(
+      index: at + 3
+      fallback: 0
+    ) as Int
+    state.words.set(index: t, value: word)
+  }
+  loop var t: Int = 16, t < 80, ++t {
+    let mixed: Int = state.words.copyAtFallback(index: t - 3, fallback: 0) bitxor state.words.copyAtFallback(
+      index: t - 8
+      fallback: 0
+    ) bitxor state.words.copyAtFallback(index: t - 14, fallback: 0) bitxor state.words.copyAtFallback(
+      index: t - 16
+      fallback: 0
+    )
+    state.words.set(index: t, value: rotateLeft(value: mixed, count: 1))
+  }
+  var a: Int = state.h0
+  var b: Int = state.h1
+  var c: Int = state.h2
+  var d: Int = state.h3
+  var e: Int = state.h4
+  loop var t: Int = 0, t < 80, ++t {
+    var mixed: Int = 0
+    var constant: Int = 0
+    if t < 20 {
+      mixed = (b bitand c) bitor ((b bitxor sha1WordMask) bitand d)
+      constant = 1518500249
+    } else if t < 40 {
+      mixed = b bitxor c bitxor d
+      constant = 1859775393
+    } else if t < 60 {
+      mixed = (b bitand c) bitor (b bitand d) bitor (c bitand d)
+      constant = 2400959708
+    } else {
+      mixed = b bitxor c bitxor d
+      constant = 3395469782
+    }
+    let next: Int = (rotateLeft(value: a, count: 5) + mixed + e + constant + state.words.copyAtFallback(
+      index: t
+      fallback: 0
+    )) bitand sha1WordMask
+    e = d
+    d = c
+    c = rotateLeft(value: b, count: 30)
+    b = a
+    a = next
+  }
+  state.h0 = (state.h0 + a) bitand sha1WordMask
+  state.h1 = (state.h1 + b) bitand sha1WordMask
+  state.h2 = (state.h2 + c) bitand sha1WordMask
+  state.h3 = (state.h3 + d) bitand sha1WordMask
+  state.h4 = (state.h4 + e) bitand sha1WordMask
+}
+
+func appendWord(digest: mod List(UInt8), word: view Int) {
+  digest.add(value: ((word shr 24) bitand 255) as UInt8)
+  digest.add(value: ((word shr 16) bitand 255) as UInt8)
+  digest.add(value: ((word shr 8) bitand 255) as UInt8)
+  digest.add(value: (word bitand 255) as UInt8)
+}
+
+# The 20-byte SHA-1 digest of `count` bytes of `bytes` from `start`
+func sha1Range(bytes: view List(UInt8), start: view Int, count: view Int) ret List(UInt8) {
+  var state: Sha1State = createSha1State()
+  var whole: Int = 0
+  if count > 0 {
+    whole = count - count % 64
+  }
+  var block: Int = 0
+  if start is 0 {
+    # The full blocks straight from the input
+    loop block < whole {
+      sha1Block(state: state, bytes: bytes, offset: block)
+      block = block + 64
+    }
+  }
+  # The rest (all of it when `start` is not 0), then the padding: 0x80,
+  # zeros, and the message length in bits, big-endian, in 64 bits
+  var tail: List(UInt8) = List.create(UInt8, cap: 128)
+  loop var i: Int = start + block, i < start + count, ++i {
+    tail.add(value: bytes.copyAtFallback(index: i, fallback: 0))
+  }
+  tail.add(value: 128)
+  loop tail.length % 64 is not 56 {
+    tail.add(value: 0)
+  }
+  let bits: Int = count * 8
+  loop var k: Int = 0, k < 8, ++k {
+    tail.add(value: ((bits shr (56 - k * 8)) bitand 255) as UInt8)
+  }
+  var offset: Int = 0
+  loop offset < tail.length {
+    sha1Block(state: state, bytes: tail, offset: offset)
+    offset = offset + 64
+  }
+  var digest: List(UInt8) = List.create(UInt8, cap: 20)
+  appendWord(digest: digest, word: state.h0)
+  appendWord(digest: digest, word: state.h1)
+  appendWord(digest: digest, word: state.h2)
+  appendWord(digest: digest, word: state.h3)
+  appendWord(digest: digest, word: state.h4)
+  ret digest
+}
+
+# The 20-byte SHA-1 digest of `bytes`
+func sha1(bytes: view List(UInt8)) ret List(UInt8) {
+  ret sha1Range(bytes: bytes, start: 0, count: bytes.length)
+}
+
+# The 20-byte SHA-1 digest of the bytes of `text` (its UTF-8)
+func sha1Text(text: view String) ret List(UInt8) {
+  let count: Int = text.length()
+  var bytes: List(UInt8) = List.create(UInt8, cap: count)
+  loop var i: Int = 0, i < count, ++i {
+    bytes.add(value: text.byteAt(index: i) as UInt8)
+  }
+  ret sha1(bytes: bytes)
+}
+
+# Bytes as lowercase hex ("a9993e36…"), the way digests are written
+func hexText(bytes: view List(UInt8)) ret String {
+  let digits: String = "0123456789abcdef"
+  var out: List(UInt8) = List.create(UInt8, cap: bytes.length * 2)
+  loop var i: Int = 0, i < bytes.length, ++i {
+    let byte: Int = bytes.copyAtFallback(index: i, fallback: 0) as Int
+    out.add(value: digits.byteAt(index: byte shr 4) as UInt8)
+    out.add(value: digits.byteAt(index: byte bitand 15) as UInt8)
+  }
+  ret fromBytes(bytes: out, start: 0, count: out.length)
+}
