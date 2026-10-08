@@ -61,6 +61,17 @@ rae_String rae_ext_rae_str_from_small_bytes(int64_t first, int64_t second, int64
   return rae_str_from_buf_impl(bytes, count, RAE_SITE_FROM_BUF);
 }
 
+/* Up to 24 bytes packed into three words (byte i = bits 8*(i%8) of word
+ * i/8) as a fresh String: lib/core/Text.rae builds number, Bool and Char text
+ * with it in one allocation. Read byte by byte, so it is endian-independent. */
+rae_String rae_ext_rae_str_from_packed(uint64_t first, uint64_t second, uint64_t third, int64_t count) {
+  if (count < 1 || count > 24) return (rae_String){NULL, 0, 0, 0};
+  uint64_t words[3] = { first, second, third };
+  uint8_t bytes[24];
+  for (int64_t i = 0; i < count; i++) bytes[i] = (uint8_t)(words[i / 8] >> ((i % 8) * 8));
+  return rae_str_from_buf_impl(bytes, count, RAE_SITE_INT_TO_STR);
+}
+
 void* rae_ext_rae_str_to_cstr(rae_String s) {
   // We ensure rae_String is always NUL-terminated for convenience,
   // but we should still handle the case where it might not be if we ever change that.

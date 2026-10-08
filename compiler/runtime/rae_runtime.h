@@ -584,6 +584,11 @@ static inline int64_t rae_ext_rae_str_find_byte(rae_String s, int64_t byte, int6
 }
 rae_String rae_ext_rae_str_from_bytes(uint8_t* buffer, int64_t offset, int64_t count);
 rae_String rae_ext_rae_str_from_small_bytes(int64_t first, int64_t second, int64_t third, int64_t fourth, int64_t count);
+rae_String rae_ext_rae_str_from_packed(uint64_t first, uint64_t second, uint64_t third, int64_t count);
+/* A Char32's code point (lib/core/Text.rae; the cast Rae has no `as` for) */
+static inline int64_t rae_ext_rae_char_code(uint32_t value) {
+  return (int64_t)value;
+}
 /* A code point as a Char32: the conversion Rae has no `as` for yet (lib/String
  * at); nothing but the cast */
 static inline uint32_t rae_ext_rae_char_from_code(int64_t code) {
@@ -1003,25 +1008,29 @@ RAE_INT_STR_FORMATTER(rae_str_uint64, uint64_t, uint64_t, rae_ext_rae_str_u64)
 #define rae_str_uint32(X) RAE_INT_STR_DISPATCH(rae_str_uint32, uint32_t, X)
 #define rae_str_uint64(X) RAE_INT_STR_DISPATCH(rae_str_uint64, uint64_t, X)
 
+/* Text of an interpolated / toString'd value, by its C type. The integer,
+ * Bool and Char entries are the `rae_text_*` wrappers the code generator
+ * emits into every program (they call lib/core/Text.rae; docs/runtime-c-audit.md
+ * row 4); floats, Strings and Any stay C. */
 #define rae_ext_rae_str(X) _Generic((X), \
-    int64_t: rae_ext_rae_str_i64, \
-    int64_t*: rae_ext_rae_str_i64_ptr, \
-    const int64_t*: rae_ext_rae_str_i64_ptr, \
+    int64_t: rae_text_int64, \
+    int64_t*: rae_text_int64_ptr, \
+    const int64_t*: rae_text_int64_ptr, \
     double: rae_ext_rae_str_f64, \
     double*: rae_ext_rae_str_f64_ptr, \
     const double*: rae_ext_rae_str_f64_ptr, \
     float: rae_ext_rae_str_f64, \
-    bool: rae_ext_rae_str_bool, \
-    int8_t: rae_ext_rae_str_bool, \
+    bool: rae_text_bool, \
+    int8_t: rae_text_bool, \
     rae_String: rae_ext_rae_str_string, \
     rae_String*: rae_ext_rae_str_string_ptr, \
-    uint32_t: rae_ext_rae_str_char, \
-    uint32_t*: rae_ext_rae_str_char_ptr, \
-    unsigned char: rae_ext_rae_str_u8, \
-    int16_t: rae_ext_rae_str_i64, \
-    uint16_t: rae_ext_rae_str_i64, \
-    int32_t: rae_ext_rae_str_i64, \
-    uint64_t: rae_ext_rae_str_u64, \
+    uint32_t: rae_text_char, \
+    uint32_t*: rae_text_char_ptr, \
+    unsigned char: rae_text_int64, \
+    int16_t: rae_text_int64, \
+    uint16_t: rae_text_int64, \
+    int32_t: rae_text_int64, \
+    uint64_t: rae_text_uint64, \
     RaeAny: rae_ext_rae_str_any, \
     default: rae_ext_rae_str_string \
 )(X)

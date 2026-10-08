@@ -1,0 +1,58 @@
+# Int, UInt64, Bool and Char32 as text (lib/core/Text.rae; docs/runtime-c-audit.md
+# row 4), through interpolation and toString. The expected output was produced
+# by the C formatters these replace, on the same values.
+func showInt(value: view Int) {
+  log("int [{value}] [{value.toString()}]")
+}
+
+func showUnsigned(value: view UInt64) {
+  log("unsigned [{value}]")
+}
+
+func showChar(text: view String) {
+  let character: Char32 = text.at(index: 0)
+  log("char [{character}] [{character.toString()}] length {"{character}".length()}")
+}
+
+func main() ret Int {
+  showInt(value: 0)
+  showInt(value: 7)
+  showInt(value: -7)
+  showInt(value: 10)
+  showInt(value: -10)
+  showInt(value: 1234567890)
+  showInt(value: -1234567890)
+  showInt(value: 9223372036854775807)
+  showInt(value: -9223372036854775807 - 1)
+  showInt(value: 99999999)
+  showInt(value: 100000000)
+  showInt(value: 1000000000000000000)
+
+  let zero: UInt64 = 0
+  let nine: UInt64 = 9
+  let ten: UInt64 = 10
+  let large: UInt64 = 9223372036854775808
+  let largest: UInt64 = 18446744073709551615
+  showUnsigned(value: zero)
+  showUnsigned(value: nine)
+  showUnsigned(value: ten)
+  showUnsigned(value: large)
+  showUnsigned(value: largest)
+
+  let yes: Bool = true
+  let no: Bool = false
+  log("bool [{yes}] [{no}] [{yes.toString()}] [{no.toString()}] [{1 < 2}]")
+
+  showChar(text: "a")
+  showChar(text: "~")
+  showChar(text: "é")
+  showChar(text: "ß")
+  showChar(text: "—")
+  showChar(text: "€")
+  showChar(text: "😀")
+  showChar(text: "𝄞")
+
+  let mixed: Int = -42
+  log("mixed: {mixed} and {largest} and {yes} and {"x".at(index: 0)} end")
+  ret 0
+}
