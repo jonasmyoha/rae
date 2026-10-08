@@ -11,6 +11,8 @@ import FileNotify
 import app3d/RenderScale
 import sys/Spotify
 import Raylib
+import Device
+import Display
 
 func main() {
   log(Sha1.hexText(bytes: Sha1.sha1Text(text: "abc")))
@@ -21,5 +23,6 @@ func main() {
     "kqueue {NetSystem.hasKqueue}, notifications {FileNotify.fileNotifyActive(fileNotify: watcher)}"
   )
   FileNotify.closeFileNotify(fileNotify: watcher)
+  log("pointer {Device.primaryPointer()}, scale {Display.scale()}")
   log("thermal {RenderScale.thermalState()}, spotify {Spotify.hasSpotifyBridge}")
 }
