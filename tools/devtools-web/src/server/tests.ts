@@ -21,6 +21,10 @@ type BroadcastFn = (event: ServerEvent) => void;
 type ActiveRun = {
   id: string;
   startedAt: number;
+  // performance.now() at the start: a monotonic clock that stops while the
+  // machine sleeps (mach_absolute_time on macOS), so a run that spanned a
+  // closed lid reports the time it actually ran, not the wall-clock gap.
+  startedClock: number;
   mode: TestRunMode;
   process: ReturnType<typeof spawn> | null;
   buffers: Record<"stdout" | "stderr", string>;
@@ -81,6 +85,7 @@ export class TestRunner {
 
     const runId = randomUUID();
     const startedAt = Date.now();
+    const startedClock = performance.now();
     const batchLabel = testName 
         ? `${testName} [${runnableTargets.map(t => t.label).join(", ")}]` 
         : runnableTargets.map((target) => target.label).join(" + ");
@@ -89,6 +94,7 @@ export class TestRunner {
     this.activeRun = {
       id: runId,
       startedAt,
+      startedClock,
       mode,
       target: runnableTargets[0],
       process: null,
@@ -257,14 +263,14 @@ export class TestRunner {
 
   private finishBatch() {
     if (!this.activeRun) return;
-    const endedAt = Date.now();
+    const durationMs = Math.round(performance.now() - this.activeRun.startedClock);
     const success = this.activeRun.overallSuccess;
     const payload: TestRunCompletedMessage = {
       type: "test-run-completed",
       runId: this.activeRun.id,
       exitCode: success ? 0 : 1,
       success,
-      durationMs: endedAt - this.activeRun.startedAt,
+      durationMs,
       targetId: "all",
       targetLabel: this.activeRun.batchLabel,
       timestamp: new Date().toISOString()
@@ -273,7 +279,7 @@ export class TestRunner {
     const summary = this.activeRun.summary ?? { passed: 0, failed: 0 };
     this.stats?.recordTestRun({
       runId: this.activeRun.id,
-      durationMs: endedAt - this.activeRun.startedAt,
+      durationMs,
       success,
       passed: summary.passed,
       failed: summary.failed,
