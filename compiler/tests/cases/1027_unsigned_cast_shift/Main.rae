@@ -1,0 +1,20 @@
+# `as UInt64` (and the other fixed-width integers) lowers to the matching
+# unsigned C type, so a byte >= 128 shifted into bits 56..63 is an unsigned
+# shift, never a signed overflow.
+func withTopByte(value: view Int) ret UInt64 {
+  ret (value as UInt64) shl (56 as UInt64)
+}
+
+func main() {
+  let byte: Int = 200
+  log(withTopByte(value: byte))
+  log(withTopByte(value: 255))
+  log(withTopByte(value: 128) shr (56 as UInt64))
+  let packed: UInt64 = withTopByte(value: 128) bitor (byte as UInt64)
+  log(packed)
+  let negative: Int = -1
+  log(negative as UInt64)
+  log((negative as UInt64) shr (60 as UInt64))
+  log((300 as UInt8) as Int)
+  log((-1 as UInt32) as Int)
+}
