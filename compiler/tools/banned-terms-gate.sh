@@ -63,7 +63,7 @@ case "$MODE" in
     # the staged diff (a binary shows no `+` lines), reported by path.
     SCOPE="the staged changes"
     report "staged changes" "$(git diff --cached -U0 --no-color 2>/dev/null \
-      | awk '/^\+\+\+ b\//{f=substr($0,7)} /^\+/ && !/^\+\+\+/{print f ": " substr($0,2)}' \
+      | LC_ALL=C awk '/^\+\+\+ b\//{f=substr($0,7)} /^\+/ && !/^\+\+\+/{print f ": " substr($0,2)}' \
       | grep -i -F -f "$PATTERNS")" ;;
   *)
     # The whole tracked tree (text files only), then the messages of every
