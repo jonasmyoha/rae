@@ -1,542 +1,126 @@
-/* macOS Spotify bridge and artwork-fetch integration. Platform bridge stays C; app/service policy should move out of the core runtime.
+/* macOS Spotify bridge: running the two programs lib/sys/Spotify.rae drives,
+ * `osascript` (AppleScript, to control the Spotify desktop app) and `curl`
+ * (artwork and the iTunes search). Platform reason: fork/exec/waitpid and
+ * reading a pipe. Everything else — the AppleScript text, URL encoding,
+ * parsing osascript's "||"-separated answer, the iTunes JSON, the artwork
+ * completeness check and the atomic rename — is Rae in lib/sys/Spotify.rae
+ * (docs/runtime-c-audit.md row 9). There is no cache here any more: the app's
+ * poll worker sends each parsed answer to the UI thread on a Channel.
  *
  * Split from rae_runtime.c by runtime migration task #288.
  * This module is included by rae_runtime.c into one translation unit.
- * No behavior or ABI changes are intended here.
  */
-
-/* ============================================================
- * Spotify (macOS desktop app) bridge — see lib/sys/spotify.rae
- *
- * Drives the local Spotify desktop app via `osascript` (AppleScript).
- * No credentials, no SDK, no HTTP auth — pure local automation. The
- * runtime needs the Spotify app open and the one-time macOS
- * "Automation" permission ("allow rae to control Spotify"); first
- * run triggers the system prompt.
- *
- * Layout: one `spotifyRefresh()` call per poll runs osascript and
- * fills a 6-field static cache (state + track + artist + album +
- * track id + artwork url). Per-field getters then return fresh owned
- * String copies so the rae side can build a `SpotifyTrack` struct
- * without struct-FFI gymnastics.
- *
- * Album art: `spotifyFetchArtwork(url, outPath)` shells out to curl.
- * iTunes Search API fallback for when Spotify hands back an empty
- * artwork URL (local files, podcasts) — `itunesSearchArtworkUrl`
- * upscales the 100x100 thumb to 600x600 the same way SUMU does.
- * ============================================================ */
 
 #if defined(__APPLE__)
 #ifndef __wasm__
 #include <sys/wait.h>
 #endif
 
-static int rae_osascript_run(const char* const* lines) {
-    int argc = 0;
-    while (lines[argc]) argc++;
-    char** argv = malloc(sizeof(char*) * (2 + 2 * (size_t)argc + 1));
-    if (!argv) return -1;
-    int a = 0;
-    argv[a++] = (char*)"osascript";
-    for (int i = 0; i < argc; i++) {
-        argv[a++] = (char*)"-e";
-        argv[a++] = (char*)lines[i];
-    }
-    argv[a] = NULL;
+/* A String as a NUL-terminated C copy (the caller frees it) */
+static char* rae_spotify_cstr(rae_String text) {
+    char* copy = malloc((size_t)text.len + 1);
+    if (!copy) return NULL;
+    if (text.len > 0) memcpy(copy, text.data, (size_t)text.len);
+    copy[text.len] = '\0';
+    return copy;
+}
+
+/* Run `program` with `argv` and wait for it. With `output` set, its stdout is
+ * read to the end into a growing buffer. Answers the exit status, -1 when it
+ * could not be started or did not exit normally. */
+static int rae_spotify_run(const char* program, char* const* argv, char** output, size_t* output_len) {
+    int fds[2] = {-1, -1};
+    if (output && pipe(fds) < 0) return -1;
     pid_t pid = fork();
-    if (pid < 0) { free(argv); return -1; }
+    if (pid < 0) {
+        if (output) { close(fds[0]); close(fds[1]); }
+        return -1;
+    }
     if (pid == 0) {
-        execvp("/usr/bin/osascript", argv);
+        if (output) { close(fds[0]); dup2(fds[1], 1); close(fds[1]); }
+        execvp(program, argv);
         _exit(127);
+    }
+    if (output) {
+        close(fds[1]);
+        size_t cap = 4096, len = 0;
+        char* buffer = malloc(cap);
+        while (buffer) {
+            if (len + 1 >= cap) {
+                char* grown = realloc(buffer, cap * 2);
+                if (!grown) break;
+                buffer = grown; cap *= 2;
+            }
+            ssize_t n = read(fds[0], buffer + len, cap - 1 - len);
+            if (n <= 0) break;
+            len += (size_t)n;
+        }
+        close(fds[0]);
+        *output = buffer; *output_len = buffer ? len : 0;
     }
     int status = 0;
     waitpid(pid, &status, 0);
-    free(argv);
     return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 }
 
-static long rae_osascript_capture(const char* const* lines, char* out, size_t out_cap) {
-    int fds[2];
-    if (pipe(fds) < 0) return -1;
-    int argc = 0;
-    while (lines[argc]) argc++;
-    char** argv = malloc(sizeof(char*) * (2 + 2 * (size_t)argc + 1));
-    if (!argv) { close(fds[0]); close(fds[1]); return -1; }
-    int a = 0;
-    argv[a++] = (char*)"osascript";
-    for (int i = 0; i < argc; i++) {
-        argv[a++] = (char*)"-e";
-        argv[a++] = (char*)lines[i];
+/* Captured bytes as an owned String when the program exited 0, else empty */
+static rae_String rae_spotify_output_string(int status, char* output, size_t len) {
+    rae_String text = (rae_String){NULL, 0, 0, 0};
+    if (status == 0 && output && len > 0) text = rae_ext_rae_str_from_bytes((uint8_t*)output, 0, (int64_t)len);
+    free(output);
+    return text;
+}
+
+/* `osascript -e <script>` (a script may span lines): its exit status */
+int64_t rae_ext_sys_Spotify_osascriptRun(rae_String script) {
+    char* text = rae_spotify_cstr(script);
+    if (!text) return -1;
+    char* argv[] = { (char*)"osascript", (char*)"-e", text, NULL };
+    int status = rae_spotify_run("/usr/bin/osascript", argv, NULL, NULL);
+    free(text);
+    return status;
+}
+
+/* `osascript -e <script>`: what it printed, empty unless it exited 0 */
+rae_String rae_ext_sys_Spotify_osascriptOutput(rae_String script) {
+    char* text = rae_spotify_cstr(script);
+    if (!text) return (rae_String){NULL, 0, 0, 0};
+    char* argv[] = { (char*)"osascript", (char*)"-e", text, NULL };
+    char* output = NULL; size_t len = 0;
+    int status = rae_spotify_run("/usr/bin/osascript", argv, &output, &len);
+    free(text);
+    return rae_spotify_output_string(status, output, len);
+}
+
+/* `curl -sLf <url>`: the body, empty unless curl exited 0 */
+rae_String rae_ext_sys_Spotify_curlOutput(rae_String url) {
+    char* link = rae_spotify_cstr(url);
+    if (!link) return (rae_String){NULL, 0, 0, 0};
+    char* argv[] = { (char*)"curl", (char*)"-sLf", link, NULL };
+    char* output = NULL; size_t len = 0;
+    int status = rae_spotify_run("/usr/bin/curl", argv, &output, &len);
+    free(link);
+    return rae_spotify_output_string(status, output, len);
+}
+
+/* `curl -sLf <url> -o <path>`: whether curl exited 0 */
+rae_Bool rae_ext_sys_Spotify_curlToFile(rae_String url, rae_String path) {
+    char* link = rae_spotify_cstr(url);
+    char* file = rae_spotify_cstr(path);
+    int status = -1;
+    if (link && file) {
+        char* argv[] = { (char*)"curl", (char*)"-sLf", link, (char*)"-o", file, NULL };
+        status = rae_spotify_run("/usr/bin/curl", argv, NULL, NULL);
     }
-    argv[a] = NULL;
-    pid_t pid = fork();
-    if (pid < 0) { free(argv); close(fds[0]); close(fds[1]); return -1; }
-    if (pid == 0) {
-        close(fds[0]);
-        dup2(fds[1], 1);
-        close(fds[1]);
-        execvp("/usr/bin/osascript", argv);
-        _exit(127);
-    }
-    close(fds[1]);
-    size_t off = 0;
-    while (off + 1 < out_cap) {
-        ssize_t n = read(fds[0], out + off, out_cap - 1 - off);
-        if (n <= 0) break;
-        off += (size_t)n;
-    }
-    out[off] = '\0';
-    close(fds[0]);
-    int status = 0;
-    waitpid(pid, &status, 0);
-    free(argv);
-    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) return -1;
-    while (off > 0 && (out[off - 1] == '\n' || out[off - 1] == '\r')) {
-        out[--off] = '\0';
-    }
-    return (long)off;
+    free(link); free(file);
+    return status == 0;
 }
 
-typedef struct {
-    char* state;
-    char* trackId;
-    char* trackName;
-    char* artistName;
-    char* albumName;
-    char* artworkUrl;
-    double positionSec;     /* player position in seconds, 0 when stopped */
-    double durationSec;     /* track duration in seconds, 0 when unknown */
-} RaeSpotifyCache;
-static RaeSpotifyCache g_spotify_cache = {0};
+#else  /* !__APPLE__ — the bridge is macOS-only: nothing runs, every answer is empty. */
 
-/* `rae_ext_sys_Spotify_refresh` shells out to `osascript` (~tens of ms), so
- * the app runs it from a Rae `spawn`'d worker (#950 — the poll SCHEDULING
- * used to be a pthread in here, #279; it is Rae code now, see
- * examples/106_mobile_ui/spotifySystem/SpotifyPoller.rae). What stays in C
- * is the ABI: this cache, guarded by `g_spotify_mu` because the worker
- * writes it while the UI thread's (cheap) getters read it under the lock.
- * osascript is a fork/exec subprocess, so it is safe to run off the main
- * thread (no in-process Cocoa/AppleScript, no main-thread requirement). */
-static pthread_mutex_t g_spotify_mu = PTHREAD_MUTEX_INITIALIZER;
-
-static void rae_spotify_cache_set_field(char** slot, const char* src, size_t len) {
-    free(*slot);
-    *slot = malloc(len + 1);
-    if (!*slot) return;
-    memcpy(*slot, src, len);
-    (*slot)[len] = '\0';
-}
-
-static rae_String rae_cstr_to_owned_rae_string(const char* s) {
-    if (!s) return (rae_String){NULL, 0, 0, 0};
-    size_t n = strlen(s);
-    uint8_t* buf = malloc(n + 1);
-    if (!buf) return (rae_String){NULL, 0, 0, 0};
-    memcpy(buf, s, n);
-    buf[n] = '\0';
-    rae_mem_str_tag(buf, (int64_t)n + 1, RAE_SITE_FROM_CSTR);
-    return (rae_String){buf, (int64_t)n, (int64_t)n + 1, 1};
-}
-
-void rae_ext_sys_Spotify_launch(void) {
-    fprintf(stderr, "[spotify-c] launch\n");
-    static const char* lines[] = {
-        "tell application \"Spotify\" to if it is not running then launch",
-        NULL
-    };
-    int rc = rae_osascript_run(lines);
-    if (rc != 0) fprintf(stderr, "[spotify-c] launch failed (osascript rc=%d)\n", rc);
-}
-
-void rae_ext_sys_Spotify_play(void) {
-    fprintf(stderr, "[spotify-c] play\n");
-    static const char* lines[] = { "tell application \"Spotify\" to play", NULL };
-    int rc = rae_osascript_run(lines);
-    if (rc != 0) fprintf(stderr, "[spotify-c] play failed (osascript rc=%d) — Spotify not running or Automation permission denied?\n", rc);
-}
-
-void rae_ext_sys_Spotify_pause(void) {
-    fprintf(stderr, "[spotify-c] pause\n");
-    static const char* lines[] = { "tell application \"Spotify\" to pause", NULL };
-    int rc = rae_osascript_run(lines);
-    if (rc != 0) fprintf(stderr, "[spotify-c] pause failed (osascript rc=%d)\n", rc);
-}
-
-void rae_ext_sys_Spotify_next(void) {
-    fprintf(stderr, "[spotify-c] next\n");
-    static const char* lines[] = { "tell application \"Spotify\" to next track", NULL };
-    int rc = rae_osascript_run(lines);
-    if (rc != 0) fprintf(stderr, "[spotify-c] next failed (osascript rc=%d)\n", rc);
-}
-
-void rae_ext_sys_Spotify_previous(void) {
-    fprintf(stderr, "[spotify-c] previous\n");
-    static const char* lines[] = { "tell application \"Spotify\" to previous track", NULL };
-    int rc = rae_osascript_run(lines);
-    if (rc != 0) fprintf(stderr, "[spotify-c] previous failed (osascript rc=%d)\n", rc);
-}
-
-/* Play a specific Spotify URI directly. Accepts spotify:track:<id>,
- * spotify:album:<id>, spotify:playlist:<id>, etc. Used when the local
- * album.json carries an explicit Spotify URI. */
-void rae_ext_sys_Spotify_playUri(rae_String uri) {
-    if (!uri.data || uri.len == 0) return;
-    fprintf(stderr, "[spotify-c] play uri=%.*s\n", (int)uri.len, (const char*)uri.data);
-    char* uri_c = malloc((size_t)uri.len + 1);
-    if (!uri_c) return;
-    memcpy(uri_c, uri.data, (size_t)uri.len); uri_c[uri.len] = '\0';
-    char script[1024];
-    snprintf(script, sizeof(script), "tell application \"Spotify\" to play track \"%s\"", uri_c);
-    free(uri_c);
-    const char* lines[] = { script, NULL };
-    int rc = rae_osascript_run(lines);
-    if (rc != 0) fprintf(stderr, "[spotify-c] play uri failed (osascript rc=%d)\n", rc);
-}
-
-/* Search-and-play: feed the query string to Spotify's search URI scheme,
- * wait briefly for the search panel to populate, then issue `play`. This
- * is the AppleScript equivalent of the user typing into the search box
- * and pressing the play button — Spotify auto-plays the top hit when
- * the search loads with focus on it.
- *
- * The query is URL-encoded inline (alphanumerics + a few safe chars
- * pass through; everything else %xx). Quotes are escaped for the
- * AppleScript string literal. */
-void rae_ext_sys_Spotify_playQuery(rae_String query) {
-    if (!query.data || query.len == 0) return;
-    fprintf(stderr, "[spotify-c] play query=%.*s\n", (int)query.len, (const char*)query.data);
-    /* URL-encode the query for the `spotify:search:` URI. A bare space
-     * (or any reserved/unsafe char) makes Spotify's URI handler stop at
-     * the first space: "Time to pretend MGMT" was being parsed as just
-     * "Time". Percent-encode everything outside the RFC 3986 unreserved
-     * set (A-Z a-z 0-9 - _ . ~) so the full multi-word query reaches
-     * Spotify. The encoded output contains no `"` or `\`, so it is also
-     * safe to drop straight into the AppleScript string literal below. */
-    static const char rae_hexdig[] = "0123456789ABCDEF";
-    char escaped[2048];
-    size_t off = 0;
-    for (size_t i = 0; i < (size_t)query.len && off + 4 < sizeof(escaped); i++) {
-        unsigned char c = (unsigned char)query.data[i];
-        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-            (c >= '0' && c <= '9') ||
-            c == '-' || c == '_' || c == '.' || c == '~') {
-            escaped[off++] = (char)c;
-        } else {
-            escaped[off++] = '%';
-            escaped[off++] = rae_hexdig[c >> 4];
-            escaped[off++] = rae_hexdig[c & 0x0F];
-        }
-    }
-    escaped[off] = '\0';
-    /* One atomic AppleScript: launch Spotify if needed, then play the
-     * search URI in a single `play track` call. `tell ... to play` /
-     * `launch` (never `activate`) drive Spotify via background Apple
-     * Events, like SUMU's play_spotify.
-     *
-     * Focus handling lives in C (`rae_ext_activateSelf` after the run),
-     * NOT in this AppleScript. We deliberately do NOT capture-and-
-     * restore "whatever was frontmost before the play" via System Events
-     * `set frontmost`: that hands focus to the launching app (SUMU when
-     * run from the dev tools), dropping our window out of the foreground
-     * — macOS then demotes us to a background process (no Dock entry,
-     * unfocusable, dead close button, launches behind SUMU). Re-asserting
-     * our OWN app instead has no such failure mode. */
-    char launch_line[128];
-    char play_line[2160];
-    snprintf(launch_line, sizeof(launch_line),
-        "tell application \"Spotify\" to if it is not running then launch");
-    snprintf(play_line, sizeof(play_line),
-        "tell application \"Spotify\" to play track \"spotify:search:%s\"",
-        escaped);
-    const char* lines[] = {
-        launch_line,
-        play_line,
-        NULL
-    };
-    int rc = rae_osascript_run(lines);
-    if (rc != 0) fprintf(stderr, "[spotify-c] play query failed (osascript rc=%d)\n", rc);
-    /* `tell ... to play` is a background Apple Event, but `launch` (and
-     * some Spotify configs) can pull Spotify to the front. Re-assert our
-     * own window so the user keeps clicking the rae UI instead of having
-     * focus stuck on Spotify. Activating SELF (not "the previous app")
-     * avoids handing focus to the launcher (SUMU) — see rae_ext_activateSelf. */
-    rae_ext_activateSelf();
-}
-
-void rae_ext_sys_Spotify_refresh(void) {
-    static const char* lines[] = {
-        "tell application \"Spotify\"",
-        "  set playerState to player state as text",
-        "  if playerState is \"stopped\" then",
-        "    return playerState & \"||\" & \"\" & \"||\" & \"\" & \"||\" & \"\" & \"||\" & \"\" & \"||\" & \"\" & \"||\" & \"0\" & \"||\" & \"0\"",
-        "  end if",
-        "  set trackId to \"\"",
-        "  set trackName to \"\"",
-        "  set artistName to \"\"",
-        "  set albumName to \"\"",
-        "  set artworkUrl to \"\"",
-        "  set posSec to 0",
-        "  set durMs to 0",
-        "  try",
-        "    set trackId to id of current track",
-        "  end try",
-        "  try",
-        "    set trackName to name of current track",
-        "  end try",
-        "  try",
-        "    set artistName to artist of current track",
-        "  end try",
-        "  try",
-        "    set albumName to album of current track",
-        "  end try",
-        "  try",
-        "    set artworkUrl to artwork url of current track",
-        "  end try",
-        "  try",
-        "    set posSec to player position",
-        "  end try",
-        "  try",
-        "    set durMs to duration of current track",
-        "  end try",
-        "  return playerState & \"||\" & trackId & \"||\" & trackName & \"||\" & artistName & \"||\" & albumName & \"||\" & artworkUrl & \"||\" & (posSec as text) & \"||\" & (durMs as text)",
-        "end tell",
-        NULL
-    };
-    char buf[4096];
-    /* Slow osascript shell-out runs OUTSIDE the lock (refresh worker) so it
-     * never blocks a UI-thread getter; only the fast parse below holds it. */
-    long n = rae_osascript_capture(lines, buf, sizeof(buf));
-    pthread_mutex_lock(&g_spotify_mu);
-    char** slots[] = {
-        &g_spotify_cache.state,
-        &g_spotify_cache.trackId,
-        &g_spotify_cache.trackName,
-        &g_spotify_cache.artistName,
-        &g_spotify_cache.albumName,
-        &g_spotify_cache.artworkUrl,
-    };
-    /* Reset everything before re-filling so a failure leaves a known-empty cache. */
-    for (int i = 0; i < 6; i++) {
-        rae_spotify_cache_set_field(slots[i], "", 0);
-    }
-    g_spotify_cache.positionSec = 0.0;
-    g_spotify_cache.durationSec = 0.0;
-    if (n >= 0) {
-        char* p = buf;
-        /* Parse 6 string fields. */
-        for (int i = 0; i < 6; i++) {
-            char* sep = strstr(p, "||");
-            size_t len = sep ? (size_t)(sep - p) : strlen(p);
-            rae_spotify_cache_set_field(slots[i], p, len);
-            if (!sep) break;
-            p = sep + 2;
-        }
-        /* Parse the trailing position + duration (numeric). The strstr walk
-         * above leaves p pointing past the last "||" of the strings if every
-         * separator was found. Re-walk from the buffer start to be safe. */
-        char* q = buf;
-        for (int i = 0; i < 6; i++) {
-            char* sep = strstr(q, "||");
-            if (!sep) { q = NULL; break; }
-            q = sep + 2;
-        }
-        if (q) {
-            char* sep = strstr(q, "||");
-            if (sep) {
-                *sep = '\0';
-                g_spotify_cache.positionSec = atof(q);
-                char* d = sep + 2;
-                g_spotify_cache.durationSec = atof(d) / 1000.0;
-            }
-        }
-    }
-    pthread_mutex_unlock(&g_spotify_mu);
-}
-
-/* Getters read the cache under the lock (the refresh worker writes it). Each
- * field read is race-free; a rare cross-field tear during a track change at
- * the exact poll instant is cosmetic and self-corrects on the next frame. */
-static rae_String rae_spotify_read_field(char* const* slot) {
-    pthread_mutex_lock(&g_spotify_mu);
-    rae_String s = rae_cstr_to_owned_rae_string(*slot);
-    pthread_mutex_unlock(&g_spotify_mu);
-    return s;
-}
-rae_String rae_ext_sys_Spotify_state(void)       { return rae_spotify_read_field(&g_spotify_cache.state); }
-rae_String rae_ext_sys_Spotify_trackId(void)     { return rae_spotify_read_field(&g_spotify_cache.trackId); }
-rae_String rae_ext_sys_Spotify_trackName(void)   { return rae_spotify_read_field(&g_spotify_cache.trackName); }
-rae_String rae_ext_sys_Spotify_artistName(void)  { return rae_spotify_read_field(&g_spotify_cache.artistName); }
-rae_String rae_ext_sys_Spotify_albumName(void)   { return rae_spotify_read_field(&g_spotify_cache.albumName); }
-rae_String rae_ext_sys_Spotify_artworkUrl(void)  { return rae_spotify_read_field(&g_spotify_cache.artworkUrl); }
-float rae_ext_sys_Spotify_position(void){ pthread_mutex_lock(&g_spotify_mu); double v = g_spotify_cache.positionSec; pthread_mutex_unlock(&g_spotify_mu); return v; }
-float rae_ext_sys_Spotify_duration(void){ pthread_mutex_lock(&g_spotify_mu); double v = g_spotify_cache.durationSec; pthread_mutex_unlock(&g_spotify_mu); return v; }
-
-/* Completeness check for a downloaded artwork file. Interrupted curl
- * writes leave truncated files (sizes are clean 4 KiB multiples), and
- * lenient decoders (ImageIO) render those half-image-half-grey with
- * NO error — the "In Electric Blue" glitch. A JPEG must carry its EOI
- * marker (FF D9) near the end (some encoders pad a few trailing
- * bytes, so scan the last 64). Non-JPEG payloads only need to be
- * non-empty — PNG never comes through this path today. */
-static int rae_spotify_artwork_file_complete(const char* path) {
-    FILE* f = fopen(path, "rb");
-    if (!f) return 0;
-    unsigned char head[3] = {0, 0, 0};
-    if (fread(head, 1, 3, f) != 3) { fclose(f); return 0; }
-    if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return 0; }
-    long sz = ftell(f);
-    if (sz < 4) { fclose(f); return 0; }
-    if (head[0] != 0xFF || head[1] != 0xD8 || head[2] != 0xFF) {
-        fclose(f);
-        return 1;
-    }
-    long tail_len = sz < 64 ? sz : 64;
-    if (fseek(f, -tail_len, SEEK_END) != 0) { fclose(f); return 0; }
-    unsigned char tail[64];
-    if (fread(tail, 1, (size_t)tail_len, f) != (size_t)tail_len) { fclose(f); return 0; }
-    fclose(f);
-    for (long i = tail_len - 2; i >= 0; i--) {
-        if (tail[i] == 0xFF && tail[i + 1] == 0xD9) return 1;
-    }
-    return 0;
-}
-
-/* Fetch `url_c` into `out_c` ATOMICALLY: curl writes to `<out>.part`,
- * the result is completeness-checked, and only then renamed into
- * place. An app quit mid-download (auto-exit headless runs included)
- * can no longer commit a half-file into the cache. */
-static int rae_spotify_fetch_artwork_atomic(const char* url_c, const char* out_c) {
-    if (!url_c || !out_c || !url_c[0] || !out_c[0]) return 0;
-    char tmp[1024];
-    if (snprintf(tmp, sizeof(tmp), "%s.part", out_c) >= (int)sizeof(tmp)) return 0;
-    pid_t pid = fork();
-    if (pid < 0) return 0;
-    if (pid == 0) {
-        char* argv[] = { (char*)"curl", (char*)"-sLf", (char*)url_c, (char*)"-o", (char*)tmp, NULL };
-        execvp("/usr/bin/curl", argv);
-        _exit(127);
-    }
-    int status = 0;
-    waitpid(pid, &status, 0);
-    int ok = WIFEXITED(status) && WEXITSTATUS(status) == 0;
-    if (ok) ok = rae_spotify_artwork_file_complete(tmp);
-    if (!ok) {
-        unlink(tmp);
-        return 0;
-    }
-    if (rename(tmp, out_c) != 0) {
-        unlink(tmp);
-        return 0;
-    }
-    return 1;
-}
-
-rae_Bool rae_ext_sys_Spotify_fetchArtwork(rae_String url, rae_String outPath) {
-    if (!url.data || url.len == 0 || !outPath.data || outPath.len == 0) return false;
-    char* url_c = malloc((size_t)url.len + 1);
-    char* out_c = malloc((size_t)outPath.len + 1);
-    if (!url_c || !out_c) { free(url_c); free(out_c); return false; }
-    memcpy(url_c, url.data, (size_t)url.len); url_c[url.len] = '\0';
-    memcpy(out_c, outPath.data, (size_t)outPath.len); out_c[outPath.len] = '\0';
-    int ok = rae_spotify_fetch_artwork_atomic(url_c, out_c);
-    free(url_c); free(out_c);
-    return ok ? true : false;
-}
-
-static void rae_url_encode_append(char* out, size_t* off, size_t cap, const char* s, size_t n) {
-    static const char hex[] = "0123456789ABCDEF";
-    for (size_t i = 0; i < n && *off + 3 < cap; i++) {
-        unsigned char c = (unsigned char)s[i];
-        int safe = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-                   (c >= '0' && c <= '9') || c == '-' || c == '_' ||
-                   c == '.' || c == '~';
-        if (safe) {
-            out[(*off)++] = (char)c;
-        } else {
-            out[(*off)++] = '%';
-            out[(*off)++] = hex[c >> 4];
-            out[(*off)++] = hex[c & 0xF];
-        }
-    }
-}
-
-rae_String rae_ext_sys_Spotify_itunesSearchArtworkUrl(rae_String term) {
-    if (!term.data || term.len == 0) return (rae_String){NULL, 0, 0, 0};
-    char url[1024];
-    size_t off = 0;
-    const char* prefix = "https://itunes.apple.com/search?term=";
-    size_t plen = strlen(prefix);
-    if (plen > sizeof(url)) return (rae_String){NULL, 0, 0, 0};
-    memcpy(url, prefix, plen);
-    off = plen;
-    rae_url_encode_append(url, &off, sizeof(url), (const char*)term.data, (size_t)term.len);
-    const char* suffix = "&entity=song&limit=1";
-    size_t slen = strlen(suffix);
-    if (off + slen + 1 > sizeof(url)) return (rae_String){NULL, 0, 0, 0};
-    memcpy(url + off, suffix, slen);
-    off += slen;
-    url[off] = '\0';
-    int fds[2];
-    if (pipe(fds) < 0) return (rae_String){NULL, 0, 0, 0};
-    pid_t pid = fork();
-    if (pid < 0) { close(fds[0]); close(fds[1]); return (rae_String){NULL, 0, 0, 0}; }
-    if (pid == 0) {
-        close(fds[0]);
-        dup2(fds[1], 1);
-        close(fds[1]);
-        char* argv[] = { (char*)"curl", (char*)"-sLf", url, NULL };
-        execvp("/usr/bin/curl", argv);
-        _exit(127);
-    }
-    close(fds[1]);
-    char body[32 * 1024];
-    size_t bo = 0;
-    while (bo + 1 < sizeof(body)) {
-        ssize_t n = read(fds[0], body + bo, sizeof(body) - 1 - bo);
-        if (n <= 0) break;
-        bo += (size_t)n;
-    }
-    body[bo] = '\0';
-    close(fds[0]);
-    int status = 0;
-    waitpid(pid, &status, 0);
-    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) return (rae_String){NULL, 0, 0, 0};
-    const char* key = "\"artworkUrl100\":\"";
-    char* k = strstr(body, key);
-    if (!k) return (rae_String){NULL, 0, 0, 0};
-    k += strlen(key);
-    char* end = strchr(k, '"');
-    if (!end) return (rae_String){NULL, 0, 0, 0};
-    size_t len = (size_t)(end - k);
-    char* art = malloc(len + 1);
-    if (!art) return (rae_String){NULL, 0, 0, 0};
-    memcpy(art, k, len);
-    art[len] = '\0';
-    char* hit = strstr(art, "100x100");
-    if (hit) memcpy(hit, "600x600", 7);
-    rae_mem_str_tag((uint8_t*)art, (int64_t)len + 1, RAE_SITE_FROM_CSTR);
-    return (rae_String){(uint8_t*)art, (int64_t)len, (int64_t)len + 1, 1};
-}
-
-#else  /* !__APPLE__ — Spotify bridge is macOS-only. Stubs return empty/false. */
-
-void rae_ext_sys_Spotify_launch(void)   {}
-void rae_ext_sys_Spotify_play(void)     {}
-void rae_ext_sys_Spotify_pause(void)    {}
-void rae_ext_sys_Spotify_next(void)     {}
-void rae_ext_sys_Spotify_previous(void) {}
-void rae_ext_sys_Spotify_refresh(void)  {}
-rae_String rae_ext_sys_Spotify_state(void)      { return (rae_String){NULL, 0, 0, 0}; }
-rae_String rae_ext_sys_Spotify_trackId(void)    { return (rae_String){NULL, 0, 0, 0}; }
-rae_String rae_ext_sys_Spotify_trackName(void)  { return (rae_String){NULL, 0, 0, 0}; }
-rae_String rae_ext_sys_Spotify_artistName(void) { return (rae_String){NULL, 0, 0, 0}; }
-rae_String rae_ext_sys_Spotify_albumName(void)  { return (rae_String){NULL, 0, 0, 0}; }
-rae_String rae_ext_sys_Spotify_artworkUrl(void) { return (rae_String){NULL, 0, 0, 0}; }
-float rae_ext_sys_Spotify_position(void){ return 0.0; }
-float rae_ext_sys_Spotify_duration(void){ return 0.0; }
-void rae_ext_sys_Spotify_playUri(rae_String uri) { (void)uri; }
-void rae_ext_sys_Spotify_playQuery(rae_String query) { (void)query; }
-rae_Bool rae_ext_sys_Spotify_fetchArtwork(rae_String url, rae_String outPath) { (void)url; (void)outPath; return false; }
-rae_String rae_ext_sys_Spotify_itunesSearchArtworkUrl(rae_String term) { (void)term; return (rae_String){NULL, 0, 0, 0}; }
+int64_t rae_ext_sys_Spotify_osascriptRun(rae_String script) { (void)script; return -1; }
+rae_String rae_ext_sys_Spotify_osascriptOutput(rae_String script) { (void)script; return (rae_String){NULL, 0, 0, 0}; }
+rae_String rae_ext_sys_Spotify_curlOutput(rae_String url) { (void)url; return (rae_String){NULL, 0, 0, 0}; }
+rae_Bool rae_ext_sys_Spotify_curlToFile(rae_String url, rae_String path) { (void)url; (void)path; return false; }
 
 #endif  /* __APPLE__ */
