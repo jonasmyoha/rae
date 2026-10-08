@@ -1,0 +1,535 @@
+# Today's thread-per-spawn, measured (docs/lightweight-spawn-design.md §8 step
+# 1). One benchmark per process, chosen by the first argument, so run.sh can
+# read each one's peak RSS:
+#
+#   spawnJoin <count>     spawn + get one at a time, then in batches of 256
+#   sleeps <count>        <count> tasks that each sleep(ms: 100), all at once
+#   held <count>          <count> tasks all alive together: each waits until a
+#                         deadline after the last spawn
+#   latency <samples>     spawn -> task running, and spawn -> get returned
+#   sum <count> <leaf>    fork-join parallel sum vs sequential
+#   sort <count> <leaf>   fork-join parallel merge sort vs sequential
+#
+# Each prints `RESULT,rae,<benchmark>,<parameter>,<metric>,<value>` lines.
+#
+# A spawn cannot share read-only data today: a `view` of a list makes the
+# call run synchronously (docs/concurrency-model.md). So the fork-join halves
+# get their own copy (`own`), and the copying is part of what is measured. The
+# `parallelLoop` sum, whose iterations may read shared data on the worker pool,
+# is the reference for what sharing would give.
+import Time
+
+func result(
+  benchmark: view String
+  parameter: view Int
+  metric: view String
+  value: view Float64
+) {
+  log("RESULT,rae,{benchmark},{parameter},{metric},{value}")
+}
+
+func elapsedMs(startNs: view Int) ret Float64 {
+  ret (nowNs() - startNs) as Float64 / 1000000.0
+}
+
+func median(values: view List(Float64)) ret Float64 {
+  var sorted: List(Float64) = {}
+  loop var i: Int = 0, i < values.length, ++i {
+    sorted.add(value: values.copyAtFallback(index: i, fallback: 0.0))
+  }
+  # Insertion sort: a handful of values
+  loop var i: Int = 1, i < sorted.length, ++i {
+    var j: Int = i
+    loop j > 0 and sorted.copyAtFallback(index: j - 1, fallback: 0.0) > sorted.copyAtFallback(
+      index: j
+      fallback: 0.0
+    ) {
+      let swap: Float64 = sorted.copyAtFallback(index: j, fallback: 0.0)
+      sorted.set(index: j, value: sorted.copyAtFallback(index: j - 1, fallback: 0.0))
+      sorted.set(index: j - 1, value: swap)
+      j = j - 1
+    }
+  }
+  ret sorted.copyAtFallback(index: sorted.length / 2, fallback: 0.0)
+}
+
+# ----- spawn and join -------------------------------------------------------
+func increment(value: copy Int) ret Int {
+  ret value + 1
+}
+
+func spawnJoin(count: view Int) {
+  var total: Int = 0
+  let oneStart: Int = nowNs()
+  loop var i: Int = 0, i < count, ++i {
+    let task: Task(Int) = spawn increment(value: i)
+    total = total + task.get()
+  }
+  let oneMs: Float64 = elapsedMs(startNs: oneStart)
+  result(
+    benchmark: "spawnJoin"
+    parameter: count
+    metric: "oneAtATimeUsPerTask"
+    value: oneMs * 1000.0 / count as Float64
+  )
+  let batchStart: Int = nowNs()
+  var done: Int = 0
+  loop done < count {
+    var tasks: List(Task(Int)) = {}
+    var batch: Int = 0
+    loop batch < 256 and done + batch < count {
+      tasks.add(value: spawn increment(value: done + batch))
+      batch = batch + 1
+    }
+    loop var i: Int = 0, i < tasks.length, ++i {
+      if let task: Task(Int) = tasks.copyAt(index: i) {
+        total = total + task.get()
+      }
+    }
+    done = done + batch
+  }
+  let batchMs: Float64 = elapsedMs(startNs: batchStart)
+  result(
+    benchmark: "spawnJoin"
+    parameter: count
+    metric: "batched256UsPerTask"
+    value: batchMs * 1000.0 / count as Float64
+  )
+  result(
+    benchmark: "spawnJoin"
+    parameter: count
+    metric: "checksum"
+    value: total as Float64
+  )
+}
+
+# ----- concurrent sleeps ----------------------------------------------------
+func sleeper(milliseconds: copy Int) ret Int {
+  sleep(ms: milliseconds)
+  ret 1
+}
+
+func sleeps(count: view Int) {
+  let start: Int = nowNs()
+  var tasks: List(Task(Int)) = {}
+  loop var i: Int = 0, i < count, ++i {
+    tasks.add(value: spawn sleeper(milliseconds: 100))
+  }
+  let spawnedMs: Float64 = elapsedMs(startNs: start)
+  var finished: Int = 0
+  loop var i: Int = 0, i < tasks.length, ++i {
+    if let task: Task(Int) = tasks.copyAt(index: i) {
+      finished = finished + task.get()
+    }
+  }
+  result(
+    benchmark: "sleeps"
+    parameter: count
+    metric: "spawnAllMs"
+    value: spawnedMs
+  )
+  result(
+    benchmark: "sleeps"
+    parameter: count
+    metric: "wallMs"
+    value: elapsedMs(startNs: start)
+  )
+  result(
+    benchmark: "sleeps"
+    parameter: count
+    metric: "finished"
+    value: finished as Float64
+  )
+}
+
+# All tasks alive at once: each waits until a deadline far enough out that the
+# spawning ends first (`allAlive` says whether it did)
+func holder(deadlineNs: copy Int) ret Int {
+  Time.waitUntil(deadlineNs: deadlineNs)
+  ret 1
+}
+
+func held(count: view Int) {
+  let start: Int = nowNs()
+  let deadline: Int = start + 100000000 + count * 300000
+  var tasks: List(Task(Int)) = {}
+  loop var i: Int = 0, i < count, ++i {
+    tasks.add(value: spawn holder(deadlineNs: deadline))
+  }
+  let spawnedNs: Int = nowNs()
+  var finished: Int = 0
+  loop var i: Int = 0, i < tasks.length, ++i {
+    if let task: Task(Int) = tasks.copyAt(index: i) {
+      finished = finished + task.get()
+    }
+  }
+  result(
+    benchmark: "held"
+    parameter: count
+    metric: "spawnAllMs"
+    value: (spawnedNs - start) as Float64 / 1000000.0
+  )
+  var allAlive: Float64 = 0.0
+  if spawnedNs < deadline {
+    allAlive = 1.0
+  }
+  result(
+    benchmark: "held"
+    parameter: count
+    metric: "allAlive"
+    value: allAlive
+  )
+  result(
+    benchmark: "held"
+    parameter: count
+    metric: "finished"
+    value: finished as Float64
+  )
+}
+
+# ----- latency --------------------------------------------------------------
+func startedAt(unused: copy Int) ret Int {
+  ret nowNs()
+}
+
+func percentile(sorted: view List(Int), fraction: view Float64) ret Float64 {
+  let index: Int = ((sorted.length - 1) as Float64 * fraction) as Int
+  ret sorted.copyAtFallback(index: index, fallback: 0) as Float64 / 1000.0
+}
+
+func report(name: view String, samples: mod List(Int), count: view Int) {
+  samples.sort()
+  result(
+    benchmark: "latency"
+    parameter: count
+    metric: "{name}P50Us"
+    value: percentile(sorted: samples, fraction: 0.5)
+  )
+  result(
+    benchmark: "latency"
+    parameter: count
+    metric: "{name}P90Us"
+    value: percentile(sorted: samples, fraction: 0.9)
+  )
+  result(
+    benchmark: "latency"
+    parameter: count
+    metric: "{name}P99Us"
+    value: percentile(sorted: samples, fraction: 0.99)
+  )
+  result(
+    benchmark: "latency"
+    parameter: count
+    metric: "{name}MaxUs"
+    value: percentile(sorted: samples, fraction: 1.0)
+  )
+}
+
+func latency(count: view Int) {
+  var starts: List(Int) = List.create(Int, cap: count)
+  var roundTrips: List(Int) = List.create(Int, cap: count)
+  loop var i: Int = 0, i < count, ++i {
+    let before: Int = nowNs()
+    let task: Task(Int) = spawn startedAt(unused: i)
+    let running: Int = task.get()
+    let after: Int = nowNs()
+    starts.add(value: running - before)
+    roundTrips.add(value: after - before)
+  }
+  report(name: "spawnToRunning", samples: starts, count: count)
+  report(name: "spawnToGet", samples: roundTrips, count: count)
+}
+
+# ----- fork-join sum --------------------------------------------------------
+func numbersOf(count: view Int) ret List(Int) {
+  var numbers: List(Int) = List.create(Int, cap: count)
+  var state: Int = 12345
+  loop var i: Int = 0, i < count, ++i {
+    state = (state * 1103515245 + 12345) % 2147483648
+    numbers.add(value: state % 1000)
+  }
+  ret numbers
+}
+
+func sliceOf(numbers: view List(Int), start: view Int, count: view Int) ret List(Int) {
+  var slice: List(Int) = List.create(Int, cap: count)
+  loop var i: Int = start, i < start + count, ++i {
+    slice.add(value: numbers.copyAtFallback(index: i, fallback: 0))
+  }
+  ret slice
+}
+
+func sequentialSum(numbers: view List(Int), start: view Int, count: view Int) ret Int {
+  var total: Int = 0
+  loop var i: Int = start, i < start + count, ++i {
+    total = total + numbers.copyAtFallback(index: i, fallback: 0)
+  }
+  ret total
+}
+
+# Split in two down to `leaf` elements; the left half runs on a spawned thread
+# with its own copy, the right half on this one
+func parallelSum(numbers: own List(Int), leaf: copy Int) ret Int {
+  let count: Int = numbers.length
+  if count <= leaf {
+    ret sequentialSum(numbers: numbers, start: 0, count: count)
+  }
+  let half: Int = count / 2
+  let left: Task(Int) = spawn parallelSum(
+    numbers: sliceOf(numbers: numbers, start: 0, count: half)
+    leaf: leaf
+  )
+  let right: Int = parallelSum(
+    numbers: sliceOf(numbers: numbers, start: half, count: count - half)
+    leaf: leaf
+  )
+  ret left.get() + right
+}
+
+func copiedSum(numbers: view List(Int), leaf: view Int) ret Int {
+  ret parallelSum(numbers: sliceOf(numbers: numbers, start: 0, count: numbers.length), leaf: leaf)
+}
+
+func poolSum(numbers: view List(Int), chunks: view Int) ret Int {
+  var partials: List(Int) = List.create(Int, cap: chunks)
+  loop var c: Int = 0, c < chunks, ++c {
+    partials.add(value: 0)
+  }
+  let size: Int = numbers.length / chunks
+  parallelLoop var c: Int = 0, c < chunks, ++c {
+    var partial: Int = 0
+    var end: Int = (c + 1) * size
+    if c is chunks - 1 {
+      end = numbers.length
+    }
+    loop var k: Int = c * size, k < end, ++k {
+      partial = partial + numbers.copyAtFallback(index: k, fallback: 0)
+    }
+    partials.set(index: c, value: partial)
+  }
+  ret sequentialSum(numbers: partials, start: 0, count: chunks)
+}
+
+func sum(count: view Int, leaf: view Int) {
+  let numbers: List(Int) = numbersOf(count: count)
+  let expected: Int = sequentialSum(numbers: numbers, start: 0, count: count)
+  var sequentialTimes: List(Float64) = {}
+  var copyTimes: List(Float64) = {}
+  var forkTimes: List(Float64) = {}
+  var poolTimes: List(Float64) = {}
+  var wrong: Int = 0
+  loop var round: Int = 0, round < 6, ++round {
+    var start: Int = nowNs()
+    if sequentialSum(numbers: numbers, start: 0, count: count) is not expected {
+      wrong = wrong + 1
+    }
+    let sequentialMs: Float64 = elapsedMs(startNs: start)
+    # The copy alone, sequentially: what the fork-join version pays for not sharing
+    start = nowNs()
+    let copied: List(Int) = sliceOf(numbers: numbers, start: 0, count: count)
+    let copyMs: Float64 = elapsedMs(startNs: start)
+    start = nowNs()
+    if copiedSum(numbers: numbers, leaf: leaf) is not expected {
+      wrong = wrong + 1
+    }
+    let forkMs: Float64 = elapsedMs(startNs: start)
+    start = nowNs()
+    if poolSum(numbers: numbers, chunks: 64) is not expected {
+      wrong = wrong + 1
+    }
+    let poolMs: Float64 = elapsedMs(startNs: start)
+    # The first round warms up
+    if round > 0 {
+      sequentialTimes.add(value: sequentialMs)
+      copyTimes.add(value: copyMs)
+      forkTimes.add(value: forkMs)
+      poolTimes.add(value: poolMs)
+    }
+  }
+  result(
+    benchmark: "sum"
+    parameter: leaf
+    metric: "sequentialMs"
+    value: median(values: sequentialTimes)
+  )
+  result(
+    benchmark: "sum"
+    parameter: leaf
+    metric: "oneCopyMs"
+    value: median(values: copyTimes)
+  )
+  result(
+    benchmark: "sum"
+    parameter: leaf
+    metric: "forkJoinMs"
+    value: median(values: forkTimes)
+  )
+  result(
+    benchmark: "sum"
+    parameter: leaf
+    metric: "parallelLoopMs"
+    value: median(values: poolTimes)
+  )
+  result(
+    benchmark: "sum"
+    parameter: leaf
+    metric: "leaves"
+    value: (count / leaf) as Float64
+  )
+  result(
+    benchmark: "sum"
+    parameter: leaf
+    metric: "wrong"
+    value: wrong as Float64
+  )
+}
+
+# ----- fork-join merge sort -------------------------------------------------
+func merge(left: view List(Int), right: view List(Int)) ret List(Int) {
+  var merged: List(Int) = List.create(Int, cap: left.length + right.length)
+  var i: Int = 0
+  var j: Int = 0
+  loop i < left.length and j < right.length {
+    let a: Int = left.copyAtFallback(index: i, fallback: 0)
+    let b: Int = right.copyAtFallback(index: j, fallback: 0)
+    if a <= b {
+      merged.add(value: a)
+      i = i + 1
+    } else {
+      merged.add(value: b)
+      j = j + 1
+    }
+  }
+  loop i < left.length {
+    merged.add(value: left.copyAtFallback(index: i, fallback: 0))
+    i = i + 1
+  }
+  loop j < right.length {
+    merged.add(value: right.copyAtFallback(index: j, fallback: 0))
+    j = j + 1
+  }
+  ret merged
+}
+
+func sequentialSort(numbers: own List(Int)) ret List(Int) {
+  if numbers.length <= 32 {
+    var sorted: List(Int) = numbers
+    sorted.sort()
+    ret sorted
+  }
+  let half: Int = numbers.length / 2
+  let left: List(Int) = sequentialSort(numbers: sliceOf(numbers: numbers, start: 0, count: half))
+  let right: List(Int) = sequentialSort(
+    numbers: sliceOf(numbers: numbers, start: half, count: numbers.length - half)
+  )
+  ret merge(left: left, right: right)
+}
+
+# Split in two; below `leaf` elements the rest is sequential. The left half is
+# sorted on a spawned thread.
+func parallelSort(numbers: own List(Int), leaf: copy Int) ret List(Int) {
+  if numbers.length <= leaf {
+    ret sequentialSort(numbers: numbers)
+  }
+  let half: Int = numbers.length / 2
+  let left: Task(List(Int)) = spawn parallelSort(
+    numbers: sliceOf(numbers: numbers, start: 0, count: half)
+    leaf: leaf
+  )
+  let right: List(Int) = parallelSort(
+    numbers: sliceOf(numbers: numbers, start: half, count: numbers.length - half)
+    leaf: leaf
+  )
+  let sortedLeft: List(Int) = left.get()
+  ret merge(left: sortedLeft, right: right)
+}
+
+func isSorted(numbers: view List(Int)) ret Bool {
+  loop var i: Int = 1, i < numbers.length, ++i {
+    if numbers.copyAtFallback(index: i - 1, fallback: 0) > numbers.copyAtFallback(
+      index: i
+      fallback: 0
+    ) {
+      ret false
+    }
+  }
+  ret true
+}
+
+func sort(count: view Int, leaf: view Int) {
+  let numbers: List(Int) = numbersOf(count: count)
+  var sequentialTimes: List(Float64) = {}
+  var forkTimes: List(Float64) = {}
+  var wrong: Int = 0
+  loop var round: Int = 0, round < 4, ++round {
+    var start: Int = nowNs()
+    let sequential: List(Int) = sequentialSort(
+      numbers: sliceOf(numbers: numbers, start: 0, count: count)
+    )
+    let sequentialMs: Float64 = elapsedMs(startNs: start)
+    start = nowNs()
+    let parallel: List(Int) = parallelSort(
+      numbers: sliceOf(numbers: numbers, start: 0, count: count)
+      leaf: leaf
+    )
+    let forkMs: Float64 = elapsedMs(startNs: start)
+    if not isSorted(numbers: parallel) or parallel.length is not count or not isSorted(
+      numbers: sequential
+    ) {
+      wrong = wrong + 1
+    }
+    if round > 0 {
+      sequentialTimes.add(value: sequentialMs)
+      forkTimes.add(value: forkMs)
+    }
+  }
+  result(
+    benchmark: "sort"
+    parameter: leaf
+    metric: "sequentialMs"
+    value: median(values: sequentialTimes)
+  )
+  result(
+    benchmark: "sort"
+    parameter: leaf
+    metric: "forkJoinMs"
+    value: median(values: forkTimes)
+  )
+  result(
+    benchmark: "sort"
+    parameter: leaf
+    metric: "leaves"
+    value: (count / leaf) as Float64
+  )
+  result(
+    benchmark: "sort"
+    parameter: leaf
+    metric: "wrong"
+    value: wrong as Float64
+  )
+}
+
+func main() ret Int {
+  let mode: String = Sys.argAt(index: 0)
+  let first: Int = Sys.argAt(index: 1).toInt()
+  let second: Int = Sys.argAt(index: 2).toInt()
+  if mode is "spawnJoin" {
+    spawnJoin(count: first)
+  } else if mode is "sleeps" {
+    sleeps(count: first)
+  } else if mode is "held" {
+    held(count: first)
+  } else if mode is "latency" {
+    latency(count: first)
+  } else if mode is "sum" {
+    sum(count: first, leaf: second)
+  } else if mode is "sort" {
+    sort(count: first, leaf: second)
+  } else {
+    log(
+      "usage: spawnJoin <count> | sleeps <count> | latency <samples> | sum <count> <leaf> | sort <count> <leaf>"
+    )
+    ret 2
+  }
+  ret 0
+}

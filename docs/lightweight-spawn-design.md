@@ -364,9 +364,133 @@ inserts. The options (fork F3):
 7. **F7 Scheduler code:** as much of the scheduler as possible in Rae over
    minimal C (threads, atomics, poller), per the runtime rule (recommended),
    versus a C scheduler.
-8. **F8 When:** after the server phase 1 numbers exist (recommended), or now.
+8. **F8 When:** after the server phase 1 numbers exist (recommended), or now. Measured in §10: the numbers justify continuing with S2.
 9. **F9 A parallel-calls construct:** later, and only if `taskScope` +
    `spawn` reads too heavily for fork-join once spawn is cheap: a construct
    that runs independent calls in parallel, with independence proven from
    parameter modes (§3.1). It is new syntax, so it needs approval. Not now
    (recommended).
+
+## 10. Measured (S1, 2026-10-08)
+
+`benchmarks/spawn/` (`run.sh`, results in `benchmarks/spawn/results/`)
+measures today's thread-per-`spawn` next to tokio tasks. Go is not installed
+on the machine, so it is skipped.
+
+- Machine: Apple M1 Max (8 performance cores), Rae release build.
+- The machine was busy (desktop use, load average about 7 on 10 cores). The
+  costs per spawn and the limits do not depend on that. The 8-way speedups
+  are probably a little pessimistic for both Rae and tokio.
+
+### Spawn, wait, latency
+
+| | Rae today (a thread per spawn) | tokio (8 workers) |
+|---|---|---|
+| spawn + `get`, one at a time | 22.3 µs | 8.0 µs |
+| spawn + `get`, batches of 256 | 14.7 µs per task | 0.23 µs per task (63x less) |
+| spawn → task running, p50 / p99 | 9.3 / 33.9 µs | 2.1 / 12.2 µs |
+| spawn → `get` returned, p50 / p99 | 19.7 / 59.6 µs | 4.8 / 23.5 µs |
+| 10 000 concurrent 100 ms sleeps | works: 196 ms wall, **1.26 GB** RSS | 110 ms, 4.8 MB |
+| tasks alive at once, at most | **16 383** (macOS `kern.num_taskthreads` 16 384, minus the main thread), about 126 KB RSS each: 2.0 GB at 16 000 | 1 000 000 sleeps: 766 ms, 255 MB |
+
+- **Past the limit, `spawn` fails silently.** The generated C ignores
+  `pthread_create`'s result, so a task that never started still returns
+  from `get()`, with a result that was never computed. With 17 000, 20 000 or
+  30 000 tasks alive at once, exactly 16 383 returned their value and the
+  rest returned 0 without an error. That is a correctness bug independent of
+  this design; it is queued.
+- **Spawning slows down while threads are exiting.** For 10 000 sleeps,
+  spawning took 92 ms. For 15 000 it took 502 ms, and for 50 000 it took
+  9.3 s. Those runs never had all their tasks alive at once, because the
+  first ones had finished before the last were spawned. With every thread
+  alive (`held`), 15 000 spawns take 143 ms.
+
+### Fork-join recursion (§3.1)
+
+**Merge sort** of 2 000 000 Ints. The halves are copied, in Rae and tokio
+alike. Sequential: Rae 180 ms, Rust 108 ms.
+
+| leaves (Rae: threads) | 1 | 2 | 4 | 8 | 64 | 1 024 | 4 096 |
+|---|---|---|---|---|---|---|---|
+| Rae speedup | 1.00 | 1.75 | 3.15 | 4.56 | 4.37 | 2.82 | **0.47** |
+| Rae peak RSS | 128 MB | 210 MB | 290 MB | 360 MB | 538 MB | 840 MB | 1.0 GB |
+
+tokio, 1 024 leaves on 1/2/4/8 workers: speedup 1.00 / 1.68 / 2.98 / 4.64,
+at 260–280 MB.
+
+- With one thread per core (8 leaves), today's spawn scales as well as tokio
+  (4.56x against 4.64x).
+- Splitting finer costs Rae what it costs nothing in tokio. At 1 024 leaves
+  Rae falls to 2.82x, and at 4 096 leaves it is **slower than sequential**,
+  with 1 GB of thread stacks. That is §3.1's "only pays off for very coarse
+  splits", now measured. The leaf size has to be hand-tuned to the core
+  count, which is exactly what S3 is meant to remove.
+
+**Sum** of 16 000 000 Ints. Sequential: Rae 6.8 ms, Rust 2.4 ms.
+
+| | speedup at 1 / 2 / 4 / 8 |
+|---|---|
+| Rae fork-join, leaves = 1 / 2 / 4 / 8 (each half **copied**) | 0.57 / 0.31 / 0.25 / 0.23 |
+| Rae fork-join, 64 / 1 024 / 4 096 leaves | 0.20 / 0.14 / 0.02 |
+| Rae `parallelLoop` (shared `view`), `RAE_WORKERS` 1 / 2 / 4 / 8 | 1.12 / 2.11 / 4.00 / 5.01 |
+| tokio fork-join (shared `Arc`), 1 024 leaves, workers 1 / 2 / 4 / 8 | 0.71 / 1.02 / 1.51 / 1.87 |
+
+- One copy of the input alone takes 11.3 ms, more than the whole sequential
+  sum. A fork-join that must copy its halves can never win on a cheap leaf:
+  even with 2 threads it is 3x slower than sequential.
+- The same work over shared data (`parallelLoop`) is 5x faster than
+  sequential. So for fork-join over data, **the copy is the bigger cost,
+  not the thread**, and a lightweight spawn alone would not fix it.
+- This is the open point of §3.1 in numbers. S3 must let tasks inside a
+  `taskScope` read data that outlives them (a `view` into the scope's
+  owner); copying is not a viable default.
+- Rae's sequential loops are 1.7–2.8x slower than Rust's here (the
+  per-element `copyAtFallback`). That is the list-access question in
+  `benchmarks/list_access`, separate from spawn.
+
+### The servers (phase 1, `benchmarks/servers/results/`)
+
+- **Thread-per-spawn costs phase 1 nothing.** Both Rae HTTP servers run one
+  thread per worker and spawn nothing per request.
+- With 1 worker, the event-loop and ECS servers do 134k / 138k
+  plaintext requests/s, 128k / 133k json, and 1.23M / 1.24M pipelined. That
+  is 8–16% above hyper on tokio.
+- The cost would appear only for a request that `spawn`s slow work (the ECS
+  server's `AwaitingResult`, §7 of the server design). At 22 µs and 126 KB
+  per spawn, that works for a few slow requests and fails at a few thousand
+  waiting at once.
+- Phases 2–3 (thousands of WebSocket clients) do not spawn per client in
+  either style either: they are poll-driven.
+
+### Does this justify continuing (F8)?
+
+**Yes, but not because the servers need it.** The measured case for S2/S3:
+
+1. **Many concurrent waits do not fit.**
+   - 10 000 sleeping tasks need 1.26 GB, where tokio needs 4.8 MB.
+   - There is a hard limit at 16 383, and past it spawn fails silently.
+   - "Ten thousand concurrent waits" (§1) is at the edge today, and a
+     hundred thousand is impossible.
+2. **Fork-join only works coarse.**
+   - At one thread per core, the threads are fine.
+   - At the leaf sizes a recursion naturally reaches, Rae becomes slower than
+     sequential, while tokio keeps its speedup.
+3. **Spawn itself costs 3–60x what a task costs.** That is 3x one at a time
+   and 63x in a batch. It rules out spawning per request or per item.
+
+And two findings that change the plan:
+
+- **Sharing read-only data is as important as cheap tasks.** In the sum, the
+  copy costs more than the work it splits, so S3's lightweight spawn must
+  come with `view` access to data owned outside the `taskScope`. Otherwise
+  fork-join over data stays slower than one core.
+- **The silent `pthread_create` failure needs fixing now, whatever S2/S3
+  decide.** A failed spawn should fail loudly (or run synchronously, as an
+  uncapturable spawn already does), not return garbage.
+
+Recommendation:
+
+- go ahead with S2, the report-only may-wait analysis. It is cheap, and it
+  sizes S3.
+- give S3 the shared-`view` requirement above as a co-goal.
+- the servers phase 2–3 work does not have to wait for any of it.
