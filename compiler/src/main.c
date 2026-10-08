@@ -2932,11 +2932,36 @@ static void find_lib_root(const char* project_root, char* out, size_t cap) {
   }
 }
 
+/* The app `rae run` is waiting for, and the stop signal the driver received
+ * while waiting (0: none). A driver stopped by a timeout (`alarm`, SIGALRM),
+ * `kill` (SIGTERM) or a closed terminal (SIGHUP) must not leave its app
+ * running on its own — a window app never exits by itself, and orphaned apps
+ * once piled up for hours (17 of them, the fans at full speed). So the driver
+ * hands the signal on as SIGTERM, waits for the app, and only then stops the
+ * same way. SIGINT is not forwarded: Ctrl-C already reaches the whole
+ * foreground process group, app included. */
+static volatile sig_atomic_t g_run_app_pid = 0;
+static volatile sig_atomic_t g_run_stop_signal = 0;
+
+static void forward_stop_to_app(int sig) {
+  g_run_stop_signal = sig;
+  if (g_run_app_pid > 0) kill((pid_t)g_run_app_pid, SIGTERM);
+}
+
 /* #995: run `bin_path` with the program arguments after the `--` of `rae run`
  * as its argv[1..] and wait for it. Returns the raw wait status (0 on a clean
  * exit), like system() did before arguments existed; execv (no shell) is what
- * lets an argument carry spaces or quotes verbatim. */
+ * lets an argument carry spaces or quotes verbatim. A stop signal received
+ * meanwhile is passed on to the app (forward_stop_to_app); an app that has not
+ * exited 2 s later is killed. The caller re-raises `g_run_stop_signal` once it
+ * has cleaned up. */
 static int spawn_app_and_wait(const char* bin_path, int app_argc, char** app_argv) {
+  struct sigaction forward;
+  memset(&forward, 0, sizeof(forward));
+  forward.sa_handler = forward_stop_to_app;
+  sigemptyset(&forward.sa_mask);
+  static const int stop_signals[] = { SIGALRM, SIGTERM, SIGHUP };
+  struct sigaction previous[3];
   pid_t pid = fork();
   if (pid < 0) {
     fprintf(stderr, "error: fork failed (%s)\n", strerror(errno));
@@ -2948,14 +2973,31 @@ static int spawn_app_and_wait(const char* bin_path, int app_argc, char** app_arg
     child_argv[0] = (char*)bin_path;
     for (int i = 0; i < app_argc; i++) child_argv[i + 1] = app_argv[i];
     child_argv[app_argc + 1] = NULL;
+    /* The app exits on its own if this driver dies without forwarding a
+     * signal (SIGKILL): runtime_args.c watches for its parent going away. */
+    char parent_text[32];
+    snprintf(parent_text, sizeof(parent_text), "%d", (int)getppid());
+    setenv("RAE_RUN_PARENT_PID", parent_text, 1);
     execv(bin_path, child_argv);
     fprintf(stderr, "error: could not run '%s' (%s)\n", bin_path, strerror(errno));
     _exit(127);
   }
+  g_run_app_pid = pid;
+  for (int i = 0; i < 3; i++) sigaction(stop_signals[i], &forward, &previous[i]);
   int status = 0;
-  while (waitpid(pid, &status, 0) < 0) {
-    if (errno != EINTR) return 1;
+  long long forwarded_at = 0;
+  for (;;) {
+    pid_t done = waitpid(pid, &status, g_run_stop_signal ? WNOHANG : 0);
+    if (done == pid) break;
+    if (done < 0 && errno != EINTR) { status = 1; break; }
+    if (g_run_stop_signal) {
+      if (forwarded_at == 0) forwarded_at = rae_now_ms();
+      if (rae_now_ms() - forwarded_at > 2000) kill(pid, SIGKILL);
+      usleep(20000);
+    }
   }
+  g_run_app_pid = 0;
+  for (int i = 0; i < 3; i++) sigaction(stop_signals[i], &previous[i], NULL);
   return status;
 }
 
@@ -3092,6 +3134,11 @@ static int run_compiled_file(const RunOptions* run_opts, const char* project_roo
   if (chdired && have_saved) { if (chdir(saved_cwd) != 0) { /* best effort */ } }
   remove_run_dir(run_dir);
 
+  /* Stopped while the app ran: the app is gone; now stop the way we were asked. */
+  if (g_run_stop_signal) {
+    signal(g_run_stop_signal, SIG_DFL);
+    raise(g_run_stop_signal);
+  }
   return (result == 0) ? 0 : 1;
 }
 
