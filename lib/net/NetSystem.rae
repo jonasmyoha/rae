@@ -62,6 +62,23 @@ const unsupportedCode: Int = 24
 
 const listenBacklogMax: Int = 25
 
+# The poller's kqueue constants (macOS; -1 elsewhere until epoll, F8): the
+# read / write filters, the add / delete change flags, the end-of-file and
+# error event flags, and the most events one wait reports
+const pollFilterRead: Int = 26
+
+const pollFilterWrite: Int = 27
+
+const pollChangeAdd: Int = 28
+
+const pollChangeDelete: Int = 29
+
+const pollFlagEndOfFile: Int = 30
+
+const pollFlagError: Int = 31
+
+const pollMaxWaitEvents: Int = 32
+
 func platformConstant(which: Int) unsafe extern("rae_ext_NetSys_constant") ret Int
 
 func systemResolve(
@@ -137,6 +154,24 @@ func systemPollOne(
   events: Int
   timeoutMs: Int
 ) unsafe extern("rae_ext_NetSys_pollOne") ret Int
+
+# The readiness poller: create a kqueue; one interest change; one wait that
+# writes (handle, filter, flags) per event into `events` and answers how many
+func systemPollerCreate() unsafe extern("rae_ext_NetSys_pollerCreate") ret Int
+
+func systemPollerChange(
+  queue: Int
+  handle: Int
+  filter: Int
+  flags: Int
+) unsafe extern("rae_ext_NetSys_pollerChange") ret Int
+
+func systemPollerWait(
+  queue: Int
+  events: Buffer(Int)
+  maxEvents: Int
+  timeoutMs: Int
+) unsafe extern("rae_ext_NetSys_pollerWait") ret Int
 
 func systemClose(handle: Int) unsafe extern("rae_ext_NetSys_close") ret Int
 

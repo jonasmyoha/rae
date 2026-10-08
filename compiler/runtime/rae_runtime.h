@@ -755,6 +755,9 @@ int64_t rae_ext_NetSys_receive(int64_t fd, uint8_t* buffer, int64_t offset, int6
 int64_t rae_ext_NetSys_send(int64_t fd, uint8_t* buffer, int64_t offset, int64_t count, int64_t flags);
 int64_t rae_ext_NetSys_sendText(int64_t fd, rae_String text, int64_t flags);
 int64_t rae_ext_NetSys_pollOne(int64_t fd, int64_t events, int64_t timeoutMs);
+int64_t rae_ext_NetSys_pollerCreate(void);
+int64_t rae_ext_NetSys_pollerChange(int64_t queue, int64_t fd, int64_t filter, int64_t flags);
+int64_t rae_ext_NetSys_pollerWait(int64_t queue, int64_t* events, int64_t maxEvents, int64_t timeoutMs);
 int64_t rae_ext_NetSys_close(int64_t fd);
 int64_t rae_ext_NetSys_localPort(int64_t fd);
 rae_String rae_ext_NetSys_bytesToText(uint8_t* buffer, int64_t offset, int64_t count);
