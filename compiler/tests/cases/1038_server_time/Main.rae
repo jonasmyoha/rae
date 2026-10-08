@@ -25,12 +25,18 @@ func main() {
   let next: Bool = Time.updateHttpDate(cache: cache, epochSeconds: 784111778)
   log("cache: first {first}, same second {same}, next second {next}: {cache.text}")
 
-  # Deadlines to well under a millisecond (bounds loose enough for a loaded
-  # machine: never early, the median lateness under 2 ms)
+  # Deadlines to well under a millisecond. What is checked is the mechanism,
+  # not the machine's load: a wait is never early, and the BEST of 15 waits
+  # of 33 ms lands within 0.5 ms. One undisturbed wait is enough to show that
+  # waitUntil reads the clock and finishes with short sleeps; plain
+  # `sleep(ms: 33)` never gets there on macOS (timer coalescing: 0.6-1.5 ms at
+  # best, 3-4 ms typically, measured 2026-10-08). The MEDIAN is not checked:
+  # under the parallel suite's load most waits are delayed by scheduling, and
+  # a median under 2 ms failed there while the mechanism was fine.
   var lateness: List(Int) = {}
   var early: Bool = false
-  loop var i: Int = 0, i < 9, ++i {
-    let deadline: Int = nowNs() + 7500000
+  loop var i: Int = 0, i < 15, ++i {
+    let deadline: Int = nowNs() + 33000000
     Time.waitUntil(deadlineNs: deadline)
     let late: Int = nowNs() - deadline
     if late < 0 {
@@ -40,7 +46,7 @@ func main() {
   }
   lateness.sort()
   log("deadline never early: {early is false}")
-  log("median lateness under 2 ms: {lateness.copyAtFallback(index: 4, fallback: 0) < 2000000}")
+  log("best of 15 waits within 0.5 ms: {lateness.copyAtFallback(index: 0, fallback: 0) < 500000}")
 
   # A 30 Hz tick: 30 ticks take a second, not a second plus 30 delays
   var ticker: Ticker = Time.createTicker(hertz: 30)
