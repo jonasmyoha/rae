@@ -51,6 +51,7 @@
 #include "raepack.h"
 #include "sys_thread.h"
 #include "progress.h"
+#include "may_wait.h"
 #include "../runtime/rae_runtime.h"
 
 typedef struct {
@@ -236,6 +237,10 @@ static bool ensure_parent_directory(const char* file_path);
  * NEON / SSE2 / wasm SIMD128 (-DRAE_FLOAT4_SCALAR, runtime_float4.h), so the
  * bit-exactness fixture can run both lowerings. */
 static bool g_float4_scalar = false;
+/* `rae build --report-waits`: run sema, print the may-wait report
+ * (docs/lightweight-spawn-design.md §4.1) and stop before emitting C. */
+static bool g_report_waits = false;
+static bool g_report_waits_lib = false;  /* --report-waits-lib: lib/'s counts too */
 static bool copy_runtime_assets(const char* dest_dir);
 typedef struct {
   WatchSources sources;
@@ -484,6 +489,13 @@ static bool parse_build_args(int argc, char** argv, BuildOptions* opts) {
       continue;
     }
     if (strcmp(arg, "--emit-c") == 0) {
+      opts->emit_c = true;
+      i += 1;
+      continue;
+    }
+    if (strcmp(arg, "--report-waits") == 0 || strcmp(arg, "--report-waits-lib") == 0) {
+      g_report_waits = true;
+      g_report_waits_lib = strcmp(arg, "--report-waits-lib") == 0;
       opts->emit_c = true;
       i += 1;
       continue;
@@ -2136,6 +2148,10 @@ static void print_usage(const char* prog) {
   fprintf(stderr,
           "                           --target <compiled|wasm>, --profile <dev|release>\n");
   fprintf(stderr,
+          "                           --report-waits (print which functions may wait and\n"
+          "                           would get a resumable twin; emits nothing;\n"
+          "                           --report-waits-lib adds lib/'s counts)\n");
+  fprintf(stderr,
           "  watch <file>    Compiled hot-reload supervisor. Builds and runs <file>,\n");
   fprintf(stderr,
           "                  rebuilds + restarts on source changes. The running app\n");
@@ -2477,6 +2493,16 @@ static bool build_c_backend_output(const char* entry_file,
       arena_destroy(arena);
       progress_end(false);
       return false;
+  }
+  if (g_report_waits) {
+    /* The backend's discovery pass instantiates the generics; its output is
+     * thrown away, the report reads the specialisations it found */
+    bool reported = c_backend_emit_module(&ctx, &merged, "/dev/null") &&
+                    may_wait_report(&ctx, &merged, entry_file, g_report_waits_lib, stdout);
+    module_graph_free(&graph);
+    arena_destroy(arena);
+    progress_end(reported);
+    return reported;
   }
   /* Every WGSL part a shader was composed of is a build input: `rae watch`
    * rebuilds when one changes, exactly as for a `.rae` file. */
@@ -4148,7 +4174,7 @@ static int run_command(const char* cmd, int argc, char** argv) {
         // Record which non-toolchain-bundled libs the program imports next to
         // the emitted C, so `rae watch` (which emits via this subprocess) can
         // link SDL3 / wgpu-native rather than assuming a plain program.
-        if (okc) {
+        if (okc && !g_report_waits) {
           char deps_path[PATH_MAX];
           snprintf(deps_path, sizeof(deps_path), "%s.deps", build_opts.out_path);
           FILE* df = fopen(deps_path, "w");

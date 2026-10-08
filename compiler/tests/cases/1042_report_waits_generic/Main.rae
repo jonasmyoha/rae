@@ -1,0 +1,39 @@
+# `rae build --report-waits`: generics are analysed after specialisation, so a
+# generic waits only for the type arguments that make it wait. `process(Slow)`
+# reaches a sleeping `step` and gets a resumable twin; `process(Fast)` does not.
+type Fast {
+  value: Int
+}
+
+type Slow {
+  value: Int
+}
+
+func step(item: view Fast) ret Int {
+  ret item.value
+}
+
+func step(item: view Slow) ret Int {
+  sleep(ms: 1)
+  ret item.value
+}
+
+func process(T: type, item: view T) ret Int {
+  ret step(item: item) + 1
+}
+
+func fastWorker(value: copy Int) ret Int {
+  let item: Fast = { value: value }
+  ret process(Fast, item: item)
+}
+
+func slowWorker(value: copy Int) ret Int {
+  let item: Slow = { value: value }
+  ret process(Slow, item: item)
+}
+
+func main() {
+  let fast: Task(Int) = spawn fastWorker(value: 1)
+  let slow: Task(Int) = spawn slowWorker(value: 2)
+  log("{fast.get() + slow.get()}")
+}

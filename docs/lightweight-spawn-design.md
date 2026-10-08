@@ -338,7 +338,7 @@ inserts. The options (fork F3):
    microbenchmarks (spawn and join 100 000 tasks; 10 000 concurrent sleeps;
    fork-join recursion, §3.1, against its sequential version).
 2. The may-wait analysis, with a report only (`rae build --report-waits`):
-   which functions would become resumable, and how many.
+   which functions would become resumable, and how many. **Done (S2, 0.1.224): see §11.**
 3. Resumable codegen for `Task.get` and `sleep` only, on the existing worker
    pool, with fixtures (a deep chain of waits, a wait inside a loop, a borrow
    across a wait, dropping a suspended task, leak-checked; TSan).
@@ -494,3 +494,71 @@ Recommendation:
   sizes S3.
 - give S3 the shared-`view` requirement above as a co-goal.
 - the servers phase 2–3 work does not have to wait for any of it.
+
+## 11. The may-wait report (S2, 2026-10-08)
+
+`rae build --report-waits <Main.rae>` runs §4.1's analysis and prints which
+functions would get a resumable twin. It emits nothing and changes no
+codegen. `--report-waits-lib` adds lib/'s counts and lists lib/'s twins with
+their lines. The code is `compiler/src/may_wait.c`; fixtures 1041 (a wait
+three calls deep), 1042 (a generic that waits only for some T) and 1043
+(self and mutual recursion).
+
+**How it works:**
+
+- **Wait primitives:** a closed list.
+  - `task.get()`.
+  - The externs that block: `sleep` / `Time.waitUntil` (`rae_ext_rae_sleep`,
+    `rae_ext_Time_sleepNs`) and the socket and poller waits
+    (`rae_ext_NetSys_pollOne`, `rae_ext_NetSys_pollerWait`).
+  - The implicit joins: a `taskScope` end, and a Task local joined when it
+    goes out of scope. These are waits too, and they are easy to miss: the
+    recursive fork-join `parallelSum` waits through its `left` Task.
+  - The `blocking` externs (F2) join the list when that keyword exists.
+- **Generics after specialisation:** each instantiation the backend's
+  discovery pass makes is its own node, walked with its type parameters
+  bound. So `process(Slow)` gets a twin and `process(Fast)` does not
+  (fixture 1042).
+  - Inside a generic body, sema leaves a call unresolved when it depends on
+    `T` (the app's `route(router:)` in `dispatchSystem(R)`). Such a call is
+    resolved by name, by the concrete type of its first argument, and by
+    inferring its type arguments from the arguments.
+  - What is still undecided goes to every candidate, which
+    over-approximates. The report counts those calls. Today they are all in
+    container code (`drop`, `remove`, `swapRemove` of lists and tables),
+    which never waits, so they cannot create a false twin; they only widen
+    "reachable from a spawn".
+- **The fixed point:** may-wait propagates to callers until nothing changes.
+  Recursion and cycles need nothing special (fixture 1043).
+- **Twins:** a twin is a function that may wait AND is reachable from a
+  `spawn`. `main` stays a thread (F5), so waits that only `main` reaches
+  (106's 36 may-wait program functions) are compiled as today.
+
+**Counts** (`--report-waits-lib`, 2026-10-08):
+
+| program | functions (program + lib/) | may wait | spawn sites | twins: program + lib/ | the twins |
+|---|---|---|---|---|---|
+| 106_mobile_ui | 472 + 4 929 | 36 + 53 | 3 | 1 + 2 | `spotifyPollWorker -> sleep` |
+| server, event loop (`benchmarks/servers/rae/eventLoop/http`) | 10 + 446 | 2 + 10 | 1 | 1 + 2 | `serve -> pollWait -> systemPollerWait` |
+| server, ECS (`benchmarks/servers/rae/ecs/http`) | 4 + 790 | 2 + 16 | 1 | 1 + 7 | `serve -> httpServerFrame(BenchRouter) -> pollSystem -> pollWait`; `closeSystem -> destroyConnection -> joinAwaiting` (the `AwaitingResult` join) |
+| `benchmarks/spawn` | 26 + 333 | 12 + 5 | 7 | 4 + 4 | the sleepers, `waitUntil`, and the fork-join recursions (task joins) |
+| 114_walker_character, 97_tetris3d, 124_vehicle_port | — | — | 0 | 0 | no spawns |
+
+**What the numbers say for S3:**
+
+- **The transform is small.** In every program measured, at most 8 functions
+  of up to 5 400 need a twin. The rest (parsers, layout, the renderer,
+  physics) never waits and is compiled exactly as today. That is §4.1's
+  premise, now measured.
+- **The servers' twins are the frame loop itself.** The ECS server's
+  `httpServerFrame(BenchRouter)` and `pollSystem` become resumable because
+  the worker loop waits in `pollWait`. That is how S3 removes a thread per
+  worker: the poll wait becomes a task suspension.
+- **The `AwaitingResult` join needs care.** It turns `closeSystem` and
+  `destroyConnection` into resumable functions. A connection closed while
+  its slow request is still running waits for the task inside a system. S3
+  should keep that, or change `destroyConnection` to detach and drop the
+  task instead of joining it.
+- **106 needs only its poller worker transformed.** That is one function
+  plus `sleep`.
+

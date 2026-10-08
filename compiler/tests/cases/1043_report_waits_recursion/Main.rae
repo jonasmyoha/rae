@@ -1,0 +1,52 @@
+# `rae build --report-waits`: recursion. The fixed point handles a cycle: a
+# self-recursive function whose base case sleeps may wait, mutual recursion
+# that waits at one end makes both ends wait, and a recursion that never
+# waits (fibonacci) stays as it is.
+func countdown(steps: view Int) ret Int {
+  if steps is 0 {
+    sleep(ms: 1)
+    ret 0
+  }
+  ret countdown(steps: steps - 1) + 1
+}
+
+func isEven(number: view Int) ret Bool {
+  if number is 0 {
+    sleep(ms: 1)
+    ret true
+  }
+  ret isOdd(number: number - 1)
+}
+
+func isOdd(number: view Int) ret Bool {
+  if number is 0 {
+    ret false
+  }
+  ret isEven(number: number - 1)
+}
+
+func fibonacci(index: view Int) ret Int {
+  if index < 2 {
+    ret index
+  }
+  ret fibonacci(index: index - 1) + fibonacci(index: index - 2)
+}
+
+func countdownWorker(steps: copy Int) ret Int {
+  ret countdown(steps: steps)
+}
+
+func parityWorker(number: copy Int) ret Bool {
+  ret isOdd(number: number)
+}
+
+func fibonacciWorker(index: copy Int) ret Int {
+  ret fibonacci(index: index)
+}
+
+func main() {
+  let counted: Task(Int) = spawn countdownWorker(steps: 3)
+  let parity: Task(Bool) = spawn parityWorker(number: 5)
+  let fibonacciTask: Task(Int) = spawn fibonacciWorker(index: 10)
+  log("{counted.get()} {parity.get()} {fibonacciTask.get()}")
+}
