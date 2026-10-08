@@ -38,7 +38,7 @@ bool shader_compose(Arena* arena,
 
 typedef enum {
   SHADER_VALID = 0,        /* naga accepted the text */
-  SHADER_INVALID = 1,      /* naga rejected it: `err` holds the message, *part/*line the origin */
+  SHADER_INVALID = 1,      /* naga rejected it: `err` holds the message, the part and line outparams the origin */
   SHADER_NAGA_MISSING = 2, /* no naga executable on this machine */
   SHADER_VALIDATE_OFF = 3  /* RAE_SHADER_VALIDATE=off */
 } ShaderValidation;
