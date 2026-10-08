@@ -633,7 +633,21 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 emit_expr(ctx, arg_val, out, PREC_LOWEST, false, false);
                 fprintf(out, ") __logged = (");
                 emit_expr(ctx, arg_val, out, PREC_LOWEST, false, false);
-                fprintf(out, "); rae_ext_rae_log_write(rae_log_text_%s_(&__logged), %s); }))", mangled, newline);
+                fprintf(out, "); rae_ext_rae_log_write(rae_log_text_%s_(&__logged), %s);", mangled, newline);
+                /* A fresh List (a call's result that is not an alias into a
+                 * container, or a task's get()) has no other owner: the
+                 * logged copy releases it. A local or field is not touched. */
+                bool fresh_list = false;
+                if (arg_val->kind == AST_EXPR_CALL && arg_val->decl_link && arg_val->decl_link->kind == AST_DECL_FUNC
+                    && arg_val->decl_link->as.func_decl.body)
+                    fresh_list = !rae_func_returns_alias(ctx->compiler_ctx, &arg_val->decl_link->as.func_decl);
+                if (arg_val->kind == AST_EXPR_METHOD_CALL && str_eq_cstr(arg_val->as.method_call.method_name, "get")) {
+                    const TypeInfo* receiver = arg_val->as.method_call.object ? arg_val->as.method_call.object->resolved_type : NULL;
+                    while (receiver && receiver->kind == TYPE_REF) receiver = receiver->as.ref.base;
+                    fresh_list = receiver && receiver->kind == TYPE_TASK;
+                }
+                if (fresh_list) emit_drop_for_value(ctx, out, &list_tr, "__logged", true);
+                fprintf(out, " }))");
                 return true;
             }
             if (known && str_eq_cstr(arg_base, "String") && !concrete_tr->is_opt

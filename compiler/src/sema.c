@@ -1073,7 +1073,7 @@ static bool sema_is_scalar_kind(TypeKind k);
 static const char* sema_scalar_name(TypeKind k);
 static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstDecl* generic_decl, TypeInfo** args, size_t arg_count, size_t line, size_t column);
 static bool sema_shader_from_call(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr);
-static AstTypeRef* sema_type_ref_of(CompilerContext* ctx, TypeInfo* t);
+AstTypeRef* sema_type_ref_of(CompilerContext* ctx, TypeInfo* t);
 
 AstIdentifierPart* clone_parts(CompilerContext* ctx, const AstIdentifierPart* p) {
     if (!p) return NULL;
@@ -5384,7 +5384,7 @@ static bool sema_is_pending_create(const AstExpr* e) {
 }
 
 /* An AstTypeRef naming `t` (a struct or generic instance), generic args included. */
-static AstTypeRef* sema_type_ref_of(CompilerContext* ctx, TypeInfo* t) {
+AstTypeRef* sema_type_ref_of(CompilerContext* ctx, TypeInfo* t) {
     AstTypeRef* tr = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
     memset(tr, 0, sizeof(*tr));
     tr->parts = arena_alloc(ctx->ast_arena, sizeof(AstIdentifierPart));

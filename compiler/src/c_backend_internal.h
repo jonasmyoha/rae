@@ -195,6 +195,8 @@ const char* global_c_name(CompilerContext* cctx, const AstDecl* decl);
  * matches a global), otherwise the ident itself. */
 Str ident_c_name(CFuncContext* ctx, const AstExpr* expr);
 bool is_generic_param(const AstIdentifierPart* params, Str name);
+/* c_stmt.c: whether `fd` returns an alias into a container (not a fresh value) */
+bool rae_func_returns_alias(CompilerContext* cctx, const AstFuncDecl* fd);
 /* c_stmt.c: whether `block` assigns the plain local `name` anywhere */
 bool c_block_assigns_name(const AstBlock* block, Str name);
 bool has_property(const AstProperty* props, const char* name);

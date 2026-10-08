@@ -952,11 +952,19 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                 emit_expr(ctx, expr->as.method_call.object, out, PREC_LOWEST, false, false);
                 fprintf(out, "), (void)0)");
             } else {
+                /* A String result follows the String-return convention: it
+                 * is registered in this statement's pool, so a binding
+                 * claims it (rae_string_pool_take) and an unclaimed
+                 * temporary (`log(task.get())`, boxed to Any) is freed at
+                 * the statement's flush instead of leaking */
+                bool string_result = resT->kind == TYPE_STRING;
+                if (string_result) fprintf(out, "rae_string_pool_register_owned(");
                 fprintf(out, "(*(");
                 emit_type_info_as_c_type(ctx, resT, out);
                 fprintf(out, "*)rae_task_await(");
                 emit_expr(ctx, expr->as.method_call.object, out, PREC_LOWEST, false, false);
                 fprintf(out, "))");
+                if (string_result) fprintf(out, ")");
             }
             break;
         }
