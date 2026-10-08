@@ -252,6 +252,22 @@ static const char* g_target_os = NULL;
 static const char* g_target_arch = NULL;
 static bool g_target_check_only = false;  /* a faked target: type-check, emit nothing */
 static bool g_print_target = false;       /* --print-target: print Target's values, emit nothing */
+static bool g_check_targets = false;      /* --check-targets: check-only build per real target */
+static bool g_quiet_check = false;        /* no "checked for" line (--check-targets prints its own) */
+
+/* Every real (Os, Arch) pair Rae targets: what `rae build --check-targets`
+ * type-checks a program against (docs/platform-conditional-code.md §3.4), so
+ * a `when` branch for a platform this machine does not build for cannot rot.
+ * `web` exists only with wasm32, and wasm32 only with `web`. */
+static const struct { const char* os; const char* arch; } k_check_targets[] = {
+  { "macos", "arm64" },   { "macos", "x64" },
+  { "ios", "arm64" },     { "tvos", "arm64" },   { "watchos", "arm64" }, { "visionos", "arm64" },
+  { "android", "arm64" }, { "android", "x64" },  { "sailfish", "arm64" },
+  { "linux", "arm64" },   { "linux", "x64" },
+  { "freebsd", "x64" },   { "openbsd", "x64" },  { "netbsd", "x64" },
+  { "windows", "x64" },   { "windows", "arm64" },
+  { "web", "wasm32" },
+};
 
 static const char* const k_target_os_names[] = {
   "macos", "ios", "tvos", "watchos", "visionos", "android", "sailfish",
@@ -580,6 +596,18 @@ static bool parse_build_args(int argc, char** argv, BuildOptions* opts) {
       if (is_os) g_target_os = value; else g_target_arch = value;
       opts->emit_c = true;
       i += 2;
+      continue;
+    }
+    if (strcmp(arg, "--quiet-check") == 0) {
+      /* --check-targets' children: errors only, no "checked for" line */
+      g_quiet_check = true;
+      i += 1;
+      continue;
+    }
+    if (strcmp(arg, "--check-targets") == 0) {
+      g_check_targets = true;
+      opts->emit_c = true;
+      i += 1;
       continue;
     }
     if (strcmp(arg, "--print-target") == 0) {
@@ -2265,7 +2293,8 @@ static void print_usage(const char* prog) {
   fprintf(stderr,
           "                           --target-os <os> --target-arch <arch> (type-check\n"
           "                           for another target, lib/Target.rae; emits nothing),\n"
-          "                           --print-target (print Target's values; emits nothing)\n");
+          "                           --print-target (print Target's values; emits nothing),\n"
+          "                           --check-targets (type-check for every real target)\n");
   fprintf(stderr,
           "  watch <file>    Compiled hot-reload supervisor. Builds and runs <file>,\n");
   fprintf(stderr,
@@ -2644,7 +2673,8 @@ static bool build_c_backend_output(const char* entry_file,
         else printf("?\n");
       }
     }
-    if (g_target_check_only) printf("checked for %s/%s: no errors (a check-only build emits nothing)\n", os, arch);
+    if (g_target_check_only && !g_quiet_check)
+      printf("checked for %s/%s: no errors (a check-only build emits nothing)\n", os, arch);
     module_graph_free(&graph);
     arena_destroy(arena);
     progress_end(true);
@@ -4294,6 +4324,47 @@ static int run_command(const char* cmd, int argc, char** argv) {
       return 1;
     }
 
+    /* --check-targets: one check-only build per real target, each its own
+     * load + `when` resolution + sema, then one line per target */
+    if (g_check_targets) {
+      /* The compiler keeps state between builds in one process, so each
+       * target is its own `rae build --target-os … --target-arch …` child */
+      size_t count = sizeof k_check_targets / sizeof *k_check_targets;
+      size_t failed = 0;
+      const char* self = g_rae_executable_path[0] ? g_rae_executable_path : "rae";
+      for (size_t t = 0; t < count; t++) {
+        fflush(stdout);
+        fflush(stderr);
+        const char* child_argv[12];
+        int n = 0;
+        child_argv[n++] = self;
+        child_argv[n++] = "build";
+        child_argv[n++] = "--quiet-check";
+        child_argv[n++] = "--target-os";
+        child_argv[n++] = k_check_targets[t].os;
+        child_argv[n++] = "--target-arch";
+        child_argv[n++] = k_check_targets[t].arch;
+        if (build_opts.project_path) {
+          child_argv[n++] = "--project";
+          child_argv[n++] = build_opts.project_path;
+        }
+        child_argv[n++] = build_opts.entry_path;
+        child_argv[n] = NULL;
+        pid_t pid = fork();
+        if (pid == 0) {
+          execvp(self, (char* const*)child_argv);
+          _exit(127);
+        }
+        int status = 0;
+        bool ok_target = pid > 0 && waitpid(pid, &status, 0) == pid && WIFEXITED(status) && WEXITSTATUS(status) == 0;
+        printf("%s/%s: %s\n", k_check_targets[t].os, k_check_targets[t].arch, ok_target ? "ok" : "FAILED");
+        fflush(stdout);
+        if (!ok_target) failed++;
+      }
+      if (failed) printf("checked %zu targets: %zu FAILED (their errors are above)\n", count, failed);
+      else printf("checked %zu targets: all ok\n", count);
+      return failed ? 1 : 0;
+    }
     /* The build's target (lib/Target.rae). A wasm build is web/wasm32; a
      * native one is the host. --target-os/--target-arch that name another
      * target make a check-only build: it type-checks against that target
@@ -4303,6 +4374,8 @@ static int run_command(const char* cmd, int argc, char** argv) {
       const char* native_arch = build_opts.target == BUILD_TARGET_WASM ? "wasm32" : host_target_arch();
       if ((g_target_os && strcmp(g_target_os, native_os) != 0) || (g_target_arch && strcmp(g_target_arch, native_arch) != 0))
         g_target_check_only = true;
+      /* --check-targets' children are check-only, the host's included */
+      if (g_quiet_check) g_target_check_only = true;
       if (!g_target_os) g_target_os = native_os;
       if (!g_target_arch) g_target_arch = native_arch;
     }
