@@ -564,7 +564,12 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
         switch (expr->resolved_type->kind) {
           case TYPE_FLOAT:   cname = "float";   break;
           case TYPE_FLOAT64: cname = "double";  break;
-          case TYPE_INT:     cname = "int64_t"; break;
+          /* Every fixed-width integer is TYPE_INT; its width and signedness
+           * pick the C type, so `x as UInt64` is a uint64_t cast. */
+          case TYPE_INT:
+            cname = rae_int_c_name(expr->resolved_type->as.integer.bits,
+                                   expr->resolved_type->as.integer.is_unsigned);
+            break;
           default: break;
         }
       }
