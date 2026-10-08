@@ -179,10 +179,7 @@ func takeReply(
   entityId: view EntityId
 ) ret opt HttpReply {
   let awaiting: mod AwaitingResult => componentMod(this: awaitingResults, entityId: entityId)
-  if let reply: HttpReply = awaiting.task.tryGet() {
-    ret reply
-  }
-  ret none
+  ret awaiting.task.tryGet()
 }
 
 func awaitedRequest(
