@@ -1,0 +1,163 @@
+# The socket system calls (compiler/runtime/runtime_net.c): ONE call each, no
+# policy. Each answers the call's result, or the negated errno, or one of the
+# two marker codes below. lib/net/Tcp.rae is the policy on top: the call
+# sequences, retries, option choices and what an error means (AGENTS.md
+# "Runtime C rule"; docs/server-benchmarks-design.md §1.2).
+#
+# The per-OS constants come from `platformConstant(which:)`, by the indices
+# below (they differ between macOS and Linux, so C answers them).
+const errorTryAgain: Int = 0
+
+const errorWouldBlock: Int = 1
+
+const errorInterrupted: Int = 2
+
+const errorInProgress: Int = 3
+
+const errorAddressInUse: Int = 4
+
+const errorConnectionRefused: Int = 5
+
+const errorConnectionReset: Int = 6
+
+const errorBrokenPipe: Int = 7
+
+const errorAddressNotAvailable: Int = 8
+
+const errorFamilyNotSupported: Int = 9
+
+const errorTooManyFilesProcess: Int = 10
+
+const errorTooManyFilesSystem: Int = 11
+
+const errorConnectionAborted: Int = 12
+
+const optionLevelSocket: Int = 13
+
+const optionReuseAddress: Int = 14
+
+# -1 where the OS has no such option (Linux: SIGPIPE is avoided per send)
+const optionNoSigPipe: Int = 15
+
+const protocolTcp: Int = 16
+
+const optionTcpNoDelay: Int = 17
+
+const fileFlagNonBlocking: Int = 18
+
+# 0 where the OS has no such flag (macOS uses optionNoSigPipe instead)
+const sendFlagNoSignal: Int = 19
+
+const pollReadable: Int = 20
+
+const pollWritable: Int = 21
+
+# The size of one resolved-address record (its contents are opaque to Rae)
+const addressRecordBytes: Int = 22
+
+# Marker codes (not errno values): name resolution failed / no sockets here
+const resolveFailedCode: Int = 23
+
+const unsupportedCode: Int = 24
+
+const listenBacklogMax: Int = 25
+
+func platformConstant(which: Int) unsafe extern("rae_ext_NetSys_constant") ret Int
+
+func systemResolve(
+  host: String
+  port: Int
+  passive: Bool
+  records: Buffer(UInt8)
+  maxRecords: Int
+) unsafe extern("rae_ext_NetSys_resolve") ret Int
+
+func systemSocketFor(
+  records: Buffer(UInt8)
+  index: Int
+) unsafe extern("rae_ext_NetSys_socketFor") ret Int
+
+func systemBindTo(
+  handle: Int
+  records: Buffer(UInt8)
+  index: Int
+) unsafe extern("rae_ext_NetSys_bindTo") ret Int
+
+func systemConnectTo(
+  handle: Int
+  records: Buffer(UInt8)
+  index: Int
+) unsafe extern("rae_ext_NetSys_connectTo") ret Int
+
+func systemListen(handle: Int, backlog: Int) unsafe extern("rae_ext_NetSys_listen") ret Int
+
+func systemAccept(handle: Int) unsafe extern("rae_ext_NetSys_accept") ret Int
+
+func systemGetFileFlags(handle: Int) unsafe extern("rae_ext_NetSys_getFileFlags") ret Int
+
+func systemSetFileFlags(
+  handle: Int
+  flags: Int
+) unsafe extern("rae_ext_NetSys_setFileFlags") ret Int
+
+func systemSetCloseOnExec(handle: Int) unsafe extern("rae_ext_NetSys_setCloseOnExec") ret Int
+
+func systemSetIntOption(
+  handle: Int
+  level: Int
+  option: Int
+  value: Int
+) unsafe extern("rae_ext_NetSys_setIntOption") ret Int
+
+func systemSocketError(handle: Int) unsafe extern("rae_ext_NetSys_socketError") ret Int
+
+func systemReceive(
+  handle: Int
+  buffer: Buffer(UInt8)
+  offset: Int
+  maxBytes: Int
+) unsafe extern("rae_ext_NetSys_receive") ret Int
+
+func systemSend(
+  handle: Int
+  buffer: Buffer(UInt8)
+  offset: Int
+  count: Int
+  flags: Int
+) unsafe extern("rae_ext_NetSys_send") ret Int
+
+func systemSendText(
+  handle: Int
+  text: String
+  flags: Int
+) unsafe extern("rae_ext_NetSys_sendText") ret Int
+
+func systemPollOne(
+  handle: Int
+  events: Int
+  timeoutMs: Int
+) unsafe extern("rae_ext_NetSys_pollOne") ret Int
+
+func systemClose(handle: Int) unsafe extern("rae_ext_NetSys_close") ret Int
+
+func systemLocalPort(handle: Int) unsafe extern("rae_ext_NetSys_localPort") ret Int
+
+# Not a system call: allocating a String from bytes is the compiler's string
+# runtime (docs/runtime-c-audit.md); it moves when Rae has a byte builder.
+func systemBytesToText(
+  buffer: Buffer(UInt8)
+  offset: Int
+  count: Int
+) unsafe extern("rae_ext_NetSys_bytesToText") ret String
+
+# A platform constant (the indices above)
+func netConstant(which: view Int) ret Int {
+  unsafe {
+    ret platformConstant(which: which)
+  }
+}
+
+# Whether `code` (a shim's answer) is the negated errno named by `which`
+func isError(code: view Int, which: view Int) ret Bool {
+  ret code < 0 and -code is netConstant(which: which)
+}

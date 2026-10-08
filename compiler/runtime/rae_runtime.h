@@ -677,18 +677,27 @@ rae_Bool rae_ext_FileNotify_watch(int64_t id, rae_String path);
 void rae_ext_FileNotify_clear(int64_t id);
 rae_Bool rae_ext_FileNotify_takeChanged(int64_t id);
 void rae_ext_FileNotify_close(int64_t id);
-/* TCP sockets (runtime_net.c, lib/net/Tcp.rae). Handles are file descriptors
- * (>= 0); a negative answer is a status code (see runtime_net.c). */
-int64_t rae_ext_Net_listen(rae_String host, int64_t port, int64_t backlog);
-int64_t rae_ext_Net_accept(int64_t listener);
-int64_t rae_ext_Net_connect(rae_String host, int64_t port, int64_t timeoutMs);
-int64_t rae_ext_Net_read(int64_t handle, uint8_t* buffer, int64_t offset, int64_t maxBytes);
-int64_t rae_ext_Net_write(int64_t handle, uint8_t* buffer, int64_t offset, int64_t count);
-int64_t rae_ext_Net_writeText(int64_t handle, rae_String text);
-rae_Bool rae_ext_Net_waitReadable(int64_t handle, int64_t timeoutMs);
-int64_t rae_ext_Net_localPort(int64_t handle);
-void rae_ext_Net_close(int64_t handle);
-rae_String rae_ext_Net_bytesToText(uint8_t* buffer, int64_t offset, int64_t count);
+/* The socket system-call shim (runtime_net.c, lib/net/NetSystem.rae): one
+ * call per function, the result or -errno; the policy is lib/net/Tcp.rae. */
+int64_t rae_ext_NetSys_constant(int64_t which);
+int64_t rae_ext_NetSys_resolve(rae_String host, int64_t port, rae_Bool passive, uint8_t* records, int64_t maxRecords);
+int64_t rae_ext_NetSys_socketFor(uint8_t* records, int64_t index);
+int64_t rae_ext_NetSys_bindTo(int64_t fd, uint8_t* records, int64_t index);
+int64_t rae_ext_NetSys_connectTo(int64_t fd, uint8_t* records, int64_t index);
+int64_t rae_ext_NetSys_listen(int64_t fd, int64_t backlog);
+int64_t rae_ext_NetSys_accept(int64_t fd);
+int64_t rae_ext_NetSys_getFileFlags(int64_t fd);
+int64_t rae_ext_NetSys_setFileFlags(int64_t fd, int64_t flags);
+int64_t rae_ext_NetSys_setCloseOnExec(int64_t fd);
+int64_t rae_ext_NetSys_setIntOption(int64_t fd, int64_t level, int64_t option, int64_t value);
+int64_t rae_ext_NetSys_socketError(int64_t fd);
+int64_t rae_ext_NetSys_receive(int64_t fd, uint8_t* buffer, int64_t offset, int64_t maxBytes);
+int64_t rae_ext_NetSys_send(int64_t fd, uint8_t* buffer, int64_t offset, int64_t count, int64_t flags);
+int64_t rae_ext_NetSys_sendText(int64_t fd, rae_String text, int64_t flags);
+int64_t rae_ext_NetSys_pollOne(int64_t fd, int64_t events, int64_t timeoutMs);
+int64_t rae_ext_NetSys_close(int64_t fd);
+int64_t rae_ext_NetSys_localPort(int64_t fd);
+rae_String rae_ext_NetSys_bytesToText(uint8_t* buffer, int64_t offset, int64_t count);
 int64_t rae_ext_rae_sys_rss_kb(void);
 
 /* Audio — SFX + looping ambient over the SDL3 backend (runtime_audio_sdl3.c, #46). */
