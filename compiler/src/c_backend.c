@@ -888,8 +888,10 @@ bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* ou
       }
       if (t->kind == TYPE_TASK) {
           // Type-erased handle: the result type T is recovered at the
-          // get() call site. A Task is already a pointer; view/mod are no-ops.
-          fprintf(out, "RaeTask*");
+          // get() call site. A `view`/`mod` Task is a reference to the handle
+          // like any other reference (the caller passes `&task`, the body reads
+          // `(*task)`), so it is a RaeTask**.
+          fprintf(out, (type->is_view || type->is_mod) ? "RaeTask**" : "RaeTask*");
           return true;
       }
       if (t->kind == TYPE_STRUCT) {
@@ -944,7 +946,7 @@ bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* ou
         Str arg_base = get_base_type_name(type->generic_args); if (str_eq_cstr(arg_base, "Any") || arg_base.len == 0) { fprintf(out, "void*"); return true; }
         emit_type_ref_as_c_type(ctx, type->generic_args, out, false); fprintf(out, "*"); return true;
   }
-  if (str_eq_cstr(base, "Task")) { fprintf(out, "RaeTask*"); return true; }
+  if (str_eq_cstr(base, "Task")) { fprintf(out, (type->is_view || type->is_mod) ? "RaeTask**" : "RaeTask*"); return true; }
   if (ctx && ctx->generic_params && ctx->generic_args) {
       const AstIdentifierPart* gp = ctx->generic_params; const AstTypeRef* arg = ctx->generic_args;
       while (gp && arg) {
@@ -4363,7 +4365,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       if (!is_void) fprintf(out, "  *(%s*)__a->__task->result = %s(", rt, mangled);
       else fprintf(out, "  %s(", mangled);
       for (int k = 0; k < pi; k++) { if (k) fprintf(out, ", "); fprintf(out, "__a->f%d", k); }
-      fprintf(out, ");\n  __a->__task->done = 1; free(__a); return ((void*)0);\n}\n");
+      fprintf(out, ");\n  atomic_store_explicit(&__a->__task->done, 1, memory_order_release); free(__a); return ((void*)0);\n}\n");
   }
 
   // Bodies for non-generic functions

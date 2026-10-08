@@ -18,6 +18,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdatomic.h>
 #include <string.h>
 #include <stdarg.h>
 #include <wchar.h>
@@ -37,8 +38,10 @@ typedef void* Buffer_void;
 typedef struct {
   pthread_t thread;
   void* result;   /* malloc'd to sizeof(T), or NULL for a void task */
-  int done;       /* set by the worker after storing the result */
+  _Atomic int done; /* stored by the worker after the result (a release); read
+                       by isDone/tryGet on the owner's thread (an acquire) */
   int joined;     /* pthread_join called once */
+  int taken;      /* tryGet handed the result out (owner's thread only) */
 } RaeTask;
 
 RaeTask* rae_task_new(size_t result_size);
@@ -52,6 +55,18 @@ int64_t rae_ext_Parallel_workerCount(void);
  * program. */
 void rae_parallel_check_write(const void* storage, int64_t index, int64_t iteration, const char* name);
 void* rae_task_await(RaeTask* t);   /* join once; returns the result buffer */
+/* Task(T).isDone(): the worker has stored its result. Never blocks. */
+static inline int rae_task_is_done(RaeTask* t) {
+  return t && atomic_load_explicit(&t->done, memory_order_acquire);
+}
+/* Task(T).tryGet(): true exactly once, when the task has finished and its
+ * result was not handed out yet; the caller then joins (instant) and moves the
+ * result out (c_expr.c). Only the owner's thread touches `taken`. */
+static inline int rae_task_claim(RaeTask* t) {
+  if (!t || t->taken || !rae_task_is_done(t)) return 0;
+  t->taken = 1;
+  return 1;
+}
 void rae_task_drop(RaeTask* t);     /* join (if not joined) + free; scope-exit drop */
 
 #ifdef __GNUC__

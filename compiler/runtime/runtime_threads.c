@@ -13,8 +13,9 @@
 RaeTask* rae_task_new(size_t result_size) {
   RaeTask* t = (RaeTask*)malloc(sizeof(RaeTask));
   t->result = result_size ? malloc(result_size) : NULL;
-  t->done = 0;
+  atomic_init(&t->done, 0);
   t->joined = 0;
+  t->taken = 0;
   return t;
 }
 

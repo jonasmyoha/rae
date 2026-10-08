@@ -7001,6 +7001,24 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                     expr->resolved_type = t->as.task.base;
                     break;
                 }
+                // Task(T).isDone() : Bool — never blocks. Task(T).tryGet() :
+                // opt T — the result once the task has finished (handed out
+                // once, then none), none while it runs (docs/concurrency-model.md).
+                if (t->kind == TYPE_TASK && str_eq_cstr(expr->as.method_call.method_name, "isDone")) {
+                    expr->resolved_type = type_get_bool(ctx->type_registry);
+                    break;
+                }
+                if (t->kind == TYPE_TASK && str_eq_cstr(expr->as.method_call.method_name, "tryGet")) {
+                    TypeInfo* result = t->as.task.base;
+                    if (!result || result->kind == TYPE_VOID) {
+                        diag_error(sema_diag_file(module), (int)expr->line, (int)expr->column,
+                                   "tryGet() needs a task that returns a value; for a task with no result, poll isDone() and then get()");
+                        module->had_error = true;
+                        break;
+                    }
+                    expr->resolved_type = type_get_opt(ctx->type_registry, result);
+                    break;
+                }
                 bool found = false;
                 for (size_t i = 0; i < ctx->methods.count; i++) {
                     MethodEntry* entry = &ctx->methods.entries[i];

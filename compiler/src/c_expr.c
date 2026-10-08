@@ -959,6 +959,43 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
             }
             break;
         }
+        // Built-in Task(T).isDone() / tryGet() (docs/concurrency-model.md).
+        // isDone reads the worker's atomic done flag; tryGet hands the result
+        // out once — claim, join (instant: the worker has finished), move the
+        // value into `opt T` — and is none otherwise. A `view`/`mod` Task is
+        // the same RaeTask* (c_backend.c), so a reference unwraps for free.
+        {
+            const TypeInfo* task_type = expr->as.method_call.object->resolved_type;
+            // A `view`/`mod` Task parameter reads as `(*task)`: the RaeTask*.
+            if (task_type && task_type->kind == TYPE_REF) task_type = task_type->as.ref.base;
+            bool is_done = str_eq_cstr(expr->as.method_call.method_name, "isDone");
+            bool try_get = str_eq_cstr(expr->as.method_call.method_name, "tryGet");
+            if (task_type && task_type->kind == TYPE_TASK && (is_done || try_get)) {
+                if (is_done) {
+                    fprintf(out, "((rae_Bool)rae_task_is_done((");
+                    emit_expr(ctx, expr->as.method_call.object, out, PREC_LOWEST, false, false);
+                    fprintf(out, ")))");
+                    break;
+                }
+                TypeInfo* resT = task_type->as.task.base;
+                const AstTypeRef* task_ref = infer_expr_type_ref(ctx, expr->as.method_call.object);
+                AstTypeRef opt_ref = {0};
+                if (task_ref && task_ref->generic_args) {
+                    opt_ref = *task_ref->generic_args;
+                    opt_ref.next = NULL;
+                }
+                opt_ref.is_opt = true; opt_ref.is_view = false; opt_ref.is_mod = false;
+                opt_ref.resolved_type = expr->resolved_type;
+                int id = ctx->temp_counter++;
+                fprintf(out, "(__extension__ ({ RaeTask* __tt%d = (", id);
+                emit_expr(ctx, expr->as.method_call.object, out, PREC_LOWEST, false, false);
+                fprintf(out, "); %s __tr%d = {0}; if (rae_task_claim(__tt%d)) { __tr%d.has = 1; __tr%d.value = *(",
+                        rae_opt_type_name(ctx, &opt_ref), id, id, id, id);
+                emit_type_info_as_c_type(ctx, resT, out);
+                fprintf(out, "*)rae_task_await(__tt%d); } __tr%d; }))", id, id);
+                break;
+            }
+        }
         // Built-in method: toString() → rae_ext_rae_str(object) or
         // rae_to_str_TYPE_(&object) for user structs.
         if (str_eq_cstr(expr->as.method_call.method_name, "toString") && !expr->as.method_call.args) {
