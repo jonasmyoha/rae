@@ -152,15 +152,66 @@ Chromebook with a mouse. One web build runs in desktop Chrome and mobile
 Safari. So "mobile", "desktop", "touch", "small screen" and "which browser"
 are runtime questions, answered by ordinary functions and `if`:
 
+**The runtime model: separate facts, never "is it a tablet".** "Tablet",
+"phone" and "laptop" each bundle three independent things: which inputs
+exist, which one is in use, and how much room the window has. Hardware keeps
+pulling them apart:
+- a touchscreen MacBook (expected soon) has touch, but the trackpad is still
+  its main pointer;
+- an iPad gains a trackpad when a keyboard case is attached;
+- iPad Split View gives an app a phone-sized window on a tablet;
+- a foldable changes size while running.
+
+So `Device` answers the separate questions, the same split CSS media queries
+settled on (`any-pointer`, `pointer`, `hover`):
+
 ```rae
-if Device.isTouchPrimary() { ... }          # layout and input, at runtime
-if Device.browser() is Browser.safari { ... }
+Device.hasTouch() ret Bool               # any touch input present (the touch MacBook: true)
+Device.primaryPointer() ret Pointer      # Pointer { fine, coarse, none }: the touch MacBook: fine; a phone: coarse
+Device.canHover() ret Bool               # a mouse/trackpad that hovers exists
+Display.scale() ret Float                # pixels per point (2.0 on Retina); layout works in points
 ```
 
-`Device` is a separate (future) runtime module. UI layout should follow the
-window's size and the input devices actually present, not the OS: an iPad
-with a trackpad wants hover states, and a touchscreen Linux laptop wants
-large targets.
+| device | hasTouch | primaryPointer | canHover |
+|---|---|---|---|
+| desktop / MacBook today | false | fine | true |
+| touch MacBook | true | fine | true |
+| iPhone, Android phone | true | coarse | false |
+| iPad alone | true | coarse | false |
+| iPad with trackpad case | true | coarse, or fine once the trackpad is used | true |
+| Chromebook / touch laptop | true | fine | true |
+| TV with remote | false | none | false |
+
+Three rules for UI code:
+
+1. **Size from the window, in points, never from the device or raw pixels.**
+   - Layout picks a size class from the window's width in points (for
+     example compact under 600, medium to 840, expanded above, Material 3's
+     breakpoints; Apple's compact/regular is the same idea).
+   - Pixels are points × `Display.scale()`, so a Retina screen and a
+     1080p screen get the same layout at the same window size.
+   - An iPad in Split View gets the compact layout because its window IS
+     compact, which `isTablet()` would get wrong.
+   - Physical size (millimetres, from the display's DPI) is for the rare
+     thing that must be physically sized: a ruler, a print preview. It is
+     never for layout.
+2. **Hit targets and hover from the pointer, per interaction.**
+   - Every pointer event carries its kind (`touch`, `mouse`, `pen`).
+   - A control pressed by touch uses the touch-sized target and feedback.
+     The same control clicked by a trackpad on the same touch MacBook uses
+     the precise one, and hover effects appear only when `canHover()` is
+     true.
+   - lib/ui keeps the last input kind, so a whole screen can switch density
+     the way iPadOS and Windows do when the keyboard comes off.
+3. **These values change while the app runs.**
+   - A keyboard case is attached, a window is resized, a monitor is
+     unplugged, a foldable unfolds.
+   - They arrive as events (lib/ui's input and window resources), and
+     layout reruns. Nothing reads them once at startup.
+
+`Device` and `Display` are a future runtime module, filled from SDL3
+(touch devices, pointer events with their source, display content scale) and
+in the browser from the same CSS media queries and Pointer Events.
 
 So the combinations in the question are each one line:
 
@@ -174,8 +225,10 @@ So the combinations in the question are each one line:
 | Android, but not other mobile OSes | `when Target.os is Os.android` |
 | mobile OS except iOS | `when Target.isMobileOs and Target.os is not Os.ios` |
 | a browser build | `when Target.os is Os.web` |
-| a browser on a phone | runtime: `if Device.isTouchPrimary()` in a `web` build |
-| a desktop-shaped layout, anywhere | runtime: the window size and the input devices |
+| a browser on a phone | runtime, in a `web` build: `Device.primaryPointer() is Pointer.coarse` |
+| touch-sized controls | runtime: the event's pointer kind, or the last input kind |
+| a tablet-shaped layout | runtime: the window's size class in points (no `isTablet`) |
+| hover effects | runtime: `Device.canHover()` |
 
 ### 3.2 `when`
 
@@ -299,4 +352,7 @@ per-platform.
      enum hierarchy;
    - capabilities defined next to the code that uses them (recommended),
      rather than a global list in `Target`;
-   - device class and browser at runtime only (recommended).
+   - device class and browser at runtime only (recommended), as the separate
+     facts `hasTouch`, `primaryPointer`, `canHover`, `Display.scale`, the
+     per-event pointer kind and the window's size class. There is no
+     `isTablet` / `isPhone` / `isTouchPrimary`.
