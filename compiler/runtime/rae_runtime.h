@@ -575,7 +575,6 @@ rae_Bool rae_ext_rae_str_starts_with(rae_String s, rae_String prefix);
 rae_Bool rae_ext_rae_str_ends_with(rae_String s, rae_String suffix);
 int64_t rae_ext_rae_str_index_of(rae_String s, rae_String sub);
 rae_String rae_ext_rae_str_trim(rae_String s);
-rae_String rae_ext_rae_str_to_lower(rae_String s);
 uint32_t rae_ext_rae_str_at(rae_String s, int64_t index);
 int64_t rae_ext_rae_str_byte_at(rae_String s, int64_t index);
 double rae_ext_rae_str_to_f64(rae_String s);
@@ -714,7 +713,6 @@ rae_String rae_ext_rae_str_i64_ptr(const int64_t* v);
 rae_String rae_ext_rae_str_f64(double v);
 rae_String rae_ext_json_number(float v);
 rae_String rae_ext_rae_str_f64_ptr(const double* v);
-rae_String rae_ext_rae_str_f32_ptr(const float* v);
 rae_String rae_ext_rae_str_bool(rae_Bool v);
 rae_String rae_ext_rae_str_bool_ptr(const rae_Bool* v);
 rae_String rae_ext_rae_str_char(uint32_t v);
@@ -808,7 +806,6 @@ static inline float rae_ext_Math_floatFromBits(int64_t bits) {
   uint32_t low = (uint32_t)bits; float x; memcpy(&x, &low, sizeof x); return x;
 }
 
-RaeAny rae_ext_json_get(const char* json, const char* field);
 
 RAE_UNUSED static const char* rae_str_any(RaeAny v) {
     if (v.type == RAE_TYPE_ANY) {
@@ -993,8 +990,6 @@ RAE_INT_STR_FORMATTER(rae_str_uint64, uint64_t, uint64_t, rae_ext_rae_str_u64)
     double: rae_ext_rae_str_f64, \
     double*: rae_ext_rae_str_f64_ptr, \
     const double*: rae_ext_rae_str_f64_ptr, \
-    float*: rae_ext_rae_str_f32_ptr, \
-    const float*: rae_ext_rae_str_f32_ptr, \
     float: rae_ext_rae_str_f64, \
     bool: rae_ext_rae_str_bool, \
     int8_t: rae_ext_rae_str_bool, \
