@@ -1,0 +1,30 @@
+# `Char32` is the same type as `Char`, so `List(Char)` and `List(Char32)` are
+# one List type: a list written with either spelling holds, logs and
+# interpolates characters, including multi-byte UTF-8 ones.
+func charsOf(text: view String) ret List(Char) {
+  var chars: List(Char) = {}
+  loop var i: Int = 0, i < text.charCount(), ++i {
+    chars.add(value: text.charAt(index: i))
+  }
+  ret chars
+}
+
+func countOf(chars: view List(Char32)) ret Int {
+  ret chars.length()
+}
+
+func main() {
+  var chars: List(Char32) = {}
+  chars.add(value: 'a')
+  chars.add(value: 'ä')
+  chars.add(value: '€')
+  chars.add(value: '😀')
+  log(chars)
+  log("first {chars.copyAtDefault(index: 0)}, last {chars.copyAtDefault(index: 3)}")
+  let word: List(Char) = charsOf(text: "hyvä€")
+  log(word)
+  log("count {countOf(chars: word)}")
+  loop let character: Char in word {
+    log("char {character}")
+  }
+}

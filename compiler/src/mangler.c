@@ -24,7 +24,7 @@ const char* map_rae_type_to_c(Str type_name) {
   if (str_eq_cstr(type_name, "Float") || str_eq_cstr(type_name, "Float32")) return "float";
   if (str_eq_cstr(type_name, "Float64")) return "double";
   if (str_eq_cstr(type_name, "Bool")) return "rae_Bool";
-  if (str_eq_cstr(type_name, "Char32")) return "uint32_t";
+  if (str_eq_cstr(type_name, "Char") || str_eq_cstr(type_name, "Char32")) return "uint32_t";
   if (str_eq_cstr(type_name, "String")) return "rae_String";
   if (str_eq_cstr(type_name, "Buffer")) return "void_p";
   if (str_eq_cstr(type_name, "Any")) return "RaeAny";

@@ -8559,7 +8559,8 @@ static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, AstModule* mod
         else if (str_eq_cstr(name, "Float64")) base = type_get_float64(ctx->type_registry);
         else if (str_eq_cstr(name, "Bool")) base = type_get_bool(ctx->type_registry);
         else if (str_eq_cstr(name, "String")) base = type_get_string(ctx->type_registry);
-        else if (str_eq_cstr(name, "Char")) base = type_get_char(ctx->type_registry);
+        /* `Char32` is the same type as `Char`, as `Float32` is `Float` */
+        else if (str_eq_cstr(name, "Char") || str_eq_cstr(name, "Char32")) base = type_get_char(ctx->type_registry);
         else if (str_eq_cstr(name, "Any")) base = type_get_any(ctx->type_registry);
         else if (str_eq_cstr(name, "Buffer")) {
             TypeInfo* arg = type_get_void(ctx->type_registry);
