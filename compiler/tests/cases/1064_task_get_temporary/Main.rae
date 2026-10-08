@@ -1,0 +1,42 @@
+# A `Task` result used straight in an expression is a temporary: `log(task.get())`
+# and a `get()` passed to a `view` parameter or interpolated must free it (the
+# runner leak-checks this case at exit), whether it is a String, a List or a
+# struct with a String field.
+type Named {
+  name: String
+  size: Int
+}
+
+func makeNamed(size: copy Int) ret Named {
+  ret Named { name: "named {size}", size: size }
+}
+
+func squares(count: copy Int) ret List(Int) {
+  var numbers: List(Int) = {}
+  loop var i: Int = 0, i < count, ++i {
+    numbers.add(value: i * i)
+  }
+  ret numbers
+}
+
+func describe(value: copy Int) ret String {
+  ret "task {value}"
+}
+
+func measure(text: view String) ret Int {
+  ret text.length()
+}
+
+func main() {
+  let text: Task(String) = spawn describe(value: 1)
+  log(text.get())
+  let measured: Task(String) = spawn describe(value: 22)
+  log(measure(text: measured.get()))
+  let interpolated: Task(String) = spawn describe(value: 9)
+  log("in interpolation: {interpolated.get()}")
+  let numbers: Task(List(Int)) = spawn squares(count: 4)
+  log(numbers.get())
+  let named: Task(Named) = spawn makeNamed(size: 5)
+  log(named.get())
+  log(squares(count: 4))
+}

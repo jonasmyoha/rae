@@ -1829,6 +1829,21 @@ const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
              * `opt T`. Surfacing it here is what lets `ret task.tryGet()`
              * pass the optional through instead of wrapping it in a second
              * one (an `opt rae_opt_T` the C rejected). */
+            /* ... and Task(T).get() is T (sema's type), so `log(task.get())`
+             * takes the typed log paths instead of boxing an aggregate to Any */
+            if (str_eq_cstr(expr->as.method_call.method_name, "get") && expr->resolved_type
+                && expr->resolved_type->kind != TYPE_VOID) {
+                const TypeInfo* receiver = expr->as.method_call.object ? expr->as.method_call.object->resolved_type : NULL;
+                while (receiver && receiver->kind == TYPE_REF) receiver = receiver->as.ref.base;
+                if (receiver && receiver->kind == TYPE_TASK) {
+                    /* the written form (`List(Int)` with its arguments), as
+                     * the typed paths compare the spelling */
+                    if ((expr->resolved_type->kind == TYPE_STRUCT || expr->resolved_type->kind == TYPE_GENERIC_INST)
+                        && expr->resolved_type->as.structure.decl)
+                        return sema_type_ref_of(ctx->compiler_ctx, expr->resolved_type);
+                    return infer_tr_from_resolved(ctx, expr->resolved_type);
+                }
+            }
             if (str_eq_cstr(expr->as.method_call.method_name, "tryGet") && expr->resolved_type
                 && expr->resolved_type->kind == TYPE_OPT) {
                 const TypeInfo* receiver = expr->as.method_call.object ? expr->as.method_call.object->resolved_type : NULL;
