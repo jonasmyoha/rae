@@ -1,0 +1,126 @@
+# core/Text.rae — integers, Bools and characters as text (docs/runtime-c-audit.md
+# row 4). These are what string interpolation and `toString` run for an Int,
+# a UInt64, a Bool or a Char32. Float and Float64 text stays C (the shortest
+# round-trip form is a C-library job).
+#
+# Each function answers the text's bytes as a `PackedText` — up to 24 bytes in
+# three UInt64 words, byte 0 in the lowest bits of `first` — not as a String.
+# The code generator's small wrappers (`rae_text_int64`, …, which the runtime
+# header's `rae_ext_rae_str` dispatch selects) turn that into a String with ONE
+# allocation (`rae_ext_rae_str_from_packed`). Answering plain data keeps the
+# conversion free of the String-return bookkeeping a Rae function returning a
+# String does, which would cost more than the conversion itself.
+type PackedText {
+  first: UInt64
+  second: UInt64
+  third: UInt64
+  count: Int
+}
+
+# A Char32's code point (the cast Rae has no `as` for yet)
+func rae_ext_rae_char_code(value: Char32) unsafe extern ret Int
+
+# "true" and "false" as packed bytes
+const packedTrue: UInt64 = 1702195828
+
+const packedFalse: UInt64 = 435728179558
+
+# `word` with byte `value` placed at byte `index` (0..7) of it
+func withByte(word: view UInt64, index: view Int, value: view Int) ret UInt64 {
+  ret word bitor ((value as UInt64) shl ((index * 8) as UInt64))
+}
+
+# `text` with byte `value` placed at byte `position` (0..23)
+func placeByte(text: mod PackedText, position: view Int, value: view Int) {
+  if position < 8 {
+    text.first = withByte(word: text.first, index: position, value: value)
+  } else if position < 16 {
+    text.second = withByte(word: text.second, index: position - 8, value: value)
+  } else {
+    text.third = withByte(word: text.third, index: position - 16, value: value)
+  }
+}
+
+# Decimal text of an Int: "-9223372036854775808" .. "9223372036854775807".
+# The digits are taken from the NEGATIVE magnitude, so the smallest Int (whose
+# magnitude has no positive Int) needs no special case.
+func packedFromInt(value: copy Int) ret PackedText {
+  var magnitude: Int = value
+  if value > 0 {
+    magnitude = -value
+  }
+  var digits: Int = 1
+  var probe: Int = magnitude
+  loop probe <= -10 {
+    probe = probe / 10
+    digits = digits + 1
+  }
+  var text: PackedText = { first: 0, second: 0, third: 0, count: digits }
+  if value < 0 {
+    text.count = digits + 1
+    placeByte(text: text, position: 0, value: 45)
+  }
+  var position: Int = text.count - 1
+  loop position >= text.count - digits {
+    placeByte(text: text, position: position, value: 48 - magnitude % 10)
+    magnitude = magnitude / 10
+    position = position - 1
+  }
+  ret text
+}
+
+# Decimal text of a UInt64: "0" .. "18446744073709551615"
+func packedFromUnsigned(value: copy UInt64) ret PackedText {
+  var digits: Int = 1
+  var probe: UInt64 = value
+  loop probe >= 10 {
+    probe = probe / 10
+    digits = digits + 1
+  }
+  var text: PackedText = { first: 0, second: 0, third: 0, count: digits }
+  var remaining: UInt64 = value
+  var position: Int = digits - 1
+  loop position >= 0 {
+    placeByte(text: text, position: position, value: 48 + (remaining % 10) as Int)
+    remaining = remaining / 10
+    position = position - 1
+  }
+  ret text
+}
+
+func packedFromBool(value: copy Bool) ret PackedText {
+  if value {
+    ret PackedText { first: packedTrue, second: 0, third: 0, count: 4 }
+  }
+  ret PackedText { first: packedFalse, second: 0, third: 0, count: 5 }
+}
+
+# A character's UTF-8 bytes (1..4). Every code is encoded as it is — no
+# replacement character, each byte cut to 8 bits as the C version did — and
+# the zero character is one zero byte.
+func packedFromChar(value: copy Char32) ret PackedText {
+  var code: Int = 0
+  unsafe {
+    code = rae_ext_rae_char_code(value: value)
+  }
+  if code < 128 {
+    ret PackedText { first: code as UInt64, second: 0, third: 0, count: 1 }
+  }
+  var text: PackedText = { first: 0, second: 0, third: 0, count: 4 }
+  if code < 2048 {
+    text.count = 2
+    placeByte(text: text, position: 0, value: 192 bitor (code shr 6))
+    placeByte(text: text, position: 1, value: 128 bitor (code bitand 63))
+  } else if code < 65536 {
+    text.count = 3
+    placeByte(text: text, position: 0, value: 224 bitor (code shr 12))
+    placeByte(text: text, position: 1, value: 128 bitor ((code shr 6) bitand 63))
+    placeByte(text: text, position: 2, value: 128 bitor (code bitand 63))
+  } else {
+    placeByte(text: text, position: 0, value: (240 bitor (code shr 18)) bitand 255)
+    placeByte(text: text, position: 1, value: 128 bitor ((code shr 12) bitand 63))
+    placeByte(text: text, position: 2, value: 128 bitor ((code shr 6) bitand 63))
+    placeByte(text: text, position: 3, value: 128 bitor (code bitand 63))
+  }
+  ret text
+}

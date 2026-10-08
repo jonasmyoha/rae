@@ -160,5 +160,56 @@ func main() ret Int {
     operations: 200000
     checksum: checksum
   )
+
+  # Interpolation of the to-text conversions (docs/runtime-c-audit.md row 4)
+  checksum = 0
+  started = nowNs()
+  loop var i: Int = 0, i < 1000000, ++i {
+    checksum = checksum + "{i - 500000}".length()
+  }
+  report(
+    name: "interpolate Int"
+    started: started
+    operations: 1000000
+    checksum: checksum
+  )
+
+  checksum = 0
+  started = nowNs()
+  let big: UInt64 = 18446744073709551615
+  loop var i: Int = 0, i < 1000000, ++i {
+    checksum = checksum + "{big}".length()
+  }
+  report(
+    name: "interpolate UInt64 max"
+    started: started
+    operations: 1000000
+    checksum: checksum
+  )
+
+  checksum = 0
+  started = nowNs()
+  let accent: Char32 = "é".at(index: 0)
+  loop var i: Int = 0, i < 1000000, ++i {
+    checksum = checksum + "{i > 3} {accent}".length()
+  }
+  report(
+    name: "interpolate Bool + Char"
+    started: started
+    operations: 1000000
+    checksum: checksum
+  )
+
+  checksum = 0
+  started = nowNs()
+  loop var i: Int = 0, i < 1000000, ++i {
+    checksum = checksum + i.toString().length()
+  }
+  report(
+    name: "Int toString"
+    started: started
+    operations: 1000000
+    checksum: checksum
+  )
   ret 0
 }
