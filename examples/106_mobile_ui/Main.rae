@@ -2,9 +2,17 @@
 #
 # The app was one 958-line `main`; #946 split it (docs/ui-ecs-refactor-status.md
 # §3.1) into AppTypes.rae (`type App`), AppCreate.rae (`createApp` — the setup),
-# and App.rae (`runApp` — the interactive lifecycle). Rae auto-scans every
+# and App.rae (the interactive lifecycle: one `mainLoop` frame, `runAppFrame`). Rae auto-scans every
 # project file into one compile unit, so main() just composes the two.
 func main() {
   var app: App = createApp()
-  runApp(app: app)
+  if runOneShotModes(app: app) {
+    ret
+  }
+  var run: AppRun = createAppRun(app: app)
+  mainLoop run {
+    if runAppFrame(run: run) is false {
+      break
+    }
+  }
 }
