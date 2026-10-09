@@ -1,0 +1,50 @@
+# A `view` is read-only at any depth, also where the call is generic: a
+# field of a view parameter must not reach a `mod` parameter through a
+# generic function (`T: type` shifted the argument check onto `T`), a
+# generic container method (`List.add`, which sema leaves for the backend
+# to bind) or a generic whose `T` is inferred. Each is an error, the same
+# rule fixture 929 checks for a plain call. An `own` or `copy` parameter is
+# the callee's own value to change: the last two functions compile.
+type Holder {
+  numbers: List(Int)
+  counts: List(Int)
+}
+
+func push(T: type, list: mod List(T), value: own T) {
+  list.add(value: value)
+}
+
+func pushInferred(T: type, list: mod List(T), value: own T) {
+  list.add(value: value)
+}
+
+func throughGeneric(holder: view Holder) {
+  push(Int, list: holder.numbers, value: 1)
+}
+
+func throughMethod(holder: view Holder) {
+  holder.counts.add(value: 2)
+}
+
+func throughInferred(holder: view Holder) {
+  pushInferred(list: holder.counts, value: 3)
+}
+
+func ownIsChangeable(numbers: own List(Int)) ret Int {
+  numbers.clear()
+  numbers.add(value: 4)
+  ret numbers.length
+}
+
+func copyIsChangeable(numbers: copy List(Int)) ret Int {
+  numbers.add(value: 5)
+  ret numbers.length
+}
+
+func main() {
+  let holder: Holder = { numbers: {}, counts: {} }
+  throughGeneric(holder: holder)
+  throughMethod(holder: holder)
+  throughInferred(holder: holder)
+  log("{ownIsChangeable(numbers: List(Int) { 1, 2 })}")
+}
