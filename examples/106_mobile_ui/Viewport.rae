@@ -63,12 +63,12 @@ func frameIdName(id: view Int) pub ret String {
   ret "none"
 }
 
+# No preset by default: the real window drives the layout (its size class,
+# live while it is resized). `RAE_UI_DEVICE=<preset>` (e.g. iphone-15-pro)
+# emulates one phone's screen and safe areas instead.
 func active106DevicePreset() ret DevicePreset {
   let id: String = getEnv(name: "RAE_UI_DEVICE")
-  if id.length() <= 0 {
-    ret devicePresetById(id: "iphone-15-pro")
-  }
-  if id is "none" {
+  if id.length() <= 0 or id is "none" {
     ret devicePresetNone()
   }
   ret devicePresetById(id: id)
