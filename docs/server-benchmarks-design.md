@@ -549,7 +549,13 @@ a syscall-shaped shim where the platform forces it.
    in `benchmarks/servers/`, with the baseline in `results/` and
    `check.sh --rae` as a pre-suite case (F7).
 2. G5, G6 (WebSocket part), G8 (frame systems) and `loadClient`, then phase
-   2.
+   2. **Phase 2 landed 2026-10-09**: `spec/WebSocket.md`, both Rae servers
+   (`rae/eventLoop/webSocket`, `rae/ecs/webSocket`), the Rust
+   (tokio-tungstenite), Node (`ws`) and Bun references, `loadClient` (Rust,
+   F4), `check.sh --websocket` (in `check.sh --rae`, the pre-suite case) and
+   the WebSocket section of `run.sh` / `measure.py` / `results/`. Phase 2 runs
+   every server as one worker: a broadcast reaches every client of the
+   server, and fanning out between workers is not built yet.
 3. Phase 3 on the same code: only the room logic, the tick and the snapshot
    system are new.
 

@@ -1,0 +1,613 @@
+# Phase 2 WebSocket server, plain event-loop style
+# (benchmarks/servers/spec/WebSocket.md, docs/server-benchmarks-design.md §6):
+# one loop owns a list of connections and handles each ready socket with a
+# function call. A connection starts as HTTP; `GET /ws` upgrades it and from
+# then on its input is WebSocket frames. Echo sends the message's own bytes
+# back; broadcast encodes the frame once into a scratch buffer, copies it to
+# every WebSocket connection, then answers the broadcastResult. Output is
+# written once per poll for every connection that got some. The codecs are
+# the same lib/http and lib/webSocket the ECS server (rae/ecs/webSocket) uses.
+#
+# PORT (default 8080) comes from the environment. One worker (spec: a
+# broadcast reaches every client of the server). With RAE_BENCH_STATS=1 it
+# prints its message count and the allocation count once a second.
+open net/Tcp
+open net/Poller
+open net/ByteBuffer
+open http/Http
+open webSocket/Upgrade
+open webSocket/FrameDecoder
+open webSocket/FrameEncoder
+open collections/IntMap
+open Time
+
+enum ShootoutKind { echo, broadcast, other }
+
+type Connection {
+  socketId: SocketId
+  input: ByteBuffer
+  output: ByteBuffer
+  parse: HttpParseState
+  watchingWritable: Bool
+  # Close once the output is sent
+  closing: Bool
+  open: Bool
+  # Upgraded: the input is WebSocket frames
+  webSocket: Bool
+  decode: WebSocketDecodeState
+  # Has output to write at the end of this poll
+  dirty: Bool
+}
+
+# What decoding stopped at: nothing more to do, or a broadcast whose frame is
+# in the scratch buffer and whose payload is `start`, `count` in the input
+type DecodeStep {
+  broadcast: Bool
+  start: Int
+  count: Int
+}
+
+type Worker {
+  listenerSocketId: SocketId
+  poller: Poller
+  ready: List(Readiness)
+  connections: List(Connection)
+  # Socket handle -> its slot in `connections`
+  slots: IntMap(Int)
+  # Slots of closed connections, reused with their buffers
+  freeSlots: List(Int)
+  # Slots with output to write at the end of this poll
+  dirtySlots: List(Int)
+  # A broadcast frame, encoded once
+  scratch: ByteBuffer
+  date: HttpDateCache
+  messages: Int
+  printStats: Bool
+}
+
+func envInt(name: view String, fallback: view Int) ret Int {
+  let text: String = Sys.getEnv(name: name)
+  if text.length() is 0 {
+    ret fallback
+  }
+  ret text.toInt()
+}
+
+# ----- the shootout's JSON ---------------------------------------------------
+
+# Whether `json[start ..< end]` is exactly `expected`
+func textRangeIs(
+  json: view String
+  start: view Int
+  end: view Int
+  expected: view String
+) ret Bool {
+  if end - start is not expected.length() {
+    ret false
+  }
+  loop var i: Int = 0, i < end - start, ++i {
+    if json.byteAt(index: start + i) is not expected.byteAt(index: i) {
+      ret false
+    }
+  }
+  ret true
+}
+
+func shootoutKind(json: view String) ret ShootoutKind {
+  let objectStart: Int = jsonScanSkipSpace(json: json, position: 0)
+  let typeAt: Int = jsonScanMember(
+    json: json
+    objectStart: objectStart
+    from: -1
+    key: "type"
+  )
+  if typeAt < 0 {
+    ret ShootoutKind.other
+  }
+  let typeEnd: Int = jsonScanStringEnd(json: json, position: typeAt)
+  if textRangeIs(
+    json: json
+    start: typeAt
+    end: typeEnd
+    expected: "\"echo\""
+  ) {
+    ret ShootoutKind.echo
+  }
+  if textRangeIs(
+    json: json
+    start: typeAt
+    end: typeEnd
+    expected: "\"broadcast\""
+  ) {
+    ret ShootoutKind.broadcast
+  }
+  ret ShootoutKind.other
+}
+
+# The payload's place in the message text: its start, or -1
+func payloadAt(json: view String) ret Int {
+  let objectStart: Int = jsonScanSkipSpace(json: json, position: 0)
+  ret jsonScanMember(
+    json: json
+    objectStart: objectStart
+    from: -1
+    key: "payload"
+  )
+}
+
+func decimalDigits(value: view Int) ret Int {
+  var digits: Int = 1
+  var rest: Int = value
+  loop rest >= 10 {
+    rest = rest / 10
+    digits = digits + 1
+  }
+  ret digits
+}
+
+# {"type":"broadcast","payload":X}, X copied from `source`
+func appendBroadcast(
+  output: mod ByteBuffer
+  source: view ByteBuffer
+  start: view Int
+  count: view Int
+) {
+  let prefix: String = "\{\"type\":\"broadcast\",\"payload\":"
+  webSocketAppendHeader(
+    output: output
+    kind: WebSocketOpcode.text
+    fin: true
+    length: prefix.length() + count + 1
+    masked: false
+    maskKey: 0
+  )
+  appendText(buffer: output, text: prefix)
+  appendBytes(
+    buffer: output
+    bytes: source.bytes
+    start: source.start + start
+    count: count
+  )
+  appendText(buffer: output, text: "\}")
+}
+
+# {"type":"broadcastResult","payload":X,"listenCount":N}
+func appendBroadcastResult(
+  output: mod ByteBuffer
+  source: view ByteBuffer
+  start: view Int
+  count: view Int
+  listenCount: view Int
+) {
+  let prefix: String = "\{\"type\":\"broadcastResult\",\"payload\":"
+  let middle: String = ",\"listenCount\":"
+  webSocketAppendHeader(
+    output: output
+    kind: WebSocketOpcode.text
+    fin: true
+    length: prefix.length() + count + middle.length() + decimalDigits(value: listenCount) + 1
+    masked: false
+    maskKey: 0
+  )
+  appendText(buffer: output, text: prefix)
+  appendBytes(
+    buffer: output
+    bytes: source.bytes
+    start: source.start + start
+    count: count
+  )
+  appendText(buffer: output, text: middle)
+  appendDecimal(buffer: output, value: listenCount)
+  appendText(buffer: output, text: "\}")
+}
+
+# ----- one connection: HTTP --------------------------------------------------
+
+# Read what arrived
+func readInput(connection: mod Connection) {
+  loop var chunk: Int = 0, chunk < 4, ++chunk {
+    let result: IoResult = socketReadBuffer(
+      socketId: connection.socketId
+      buffer: connection.input
+      maxBytes: 16384
+    )
+    if result.status is NetStatus.wouldBlock {
+      ret
+    }
+    if result.status is not NetStatus.ok {
+      connection.closing = true
+      ret
+    }
+    if result.bytes < 16384 {
+      ret
+    }
+  }
+}
+
+# Answer every complete HTTP request; an upgrade on /ws makes the connection
+# a WebSocket one, its frames starting right after the request
+func parseHttp(connection: mod Connection, date: view String) {
+  var request: HttpRequest = createHttpRequest()
+  loop not connection.closing {
+    let parsed: HttpParseResult = httpParseNext(
+      state: connection.parse
+      buffer: connection.input
+      request: request
+    )
+    if parsed is HttpParseResult.needMore {
+      break
+    }
+    if parsed is HttpParseResult.badRequest {
+      httpAppendBadRequest(output: connection.output, date: date)
+      connection.closing = true
+      break
+    }
+    var upgrade: WebSocketUpgradeResult = WebSocketUpgradeResult.notWebSocket
+    if httpPathIs(buffer: connection.input, request: request, path: "/ws") {
+      upgrade = webSocketUpgradeCheck(
+        state: connection.parse
+        buffer: connection.input
+        request: request
+      )
+    }
+    if upgrade is WebSocketUpgradeResult.upgrade {
+      webSocketAppendAccept(
+        output: connection.output
+        state: connection.parse
+        buffer: connection.input
+        request: request
+      )
+      connection.webSocket = true
+      connection.decode = createWebSocketDecodeState(requireMask: true, maxMessageBytes: 16777216)
+      connection.decode.position = request.whole.start + request.whole.count
+      ret
+    }
+    if upgrade is WebSocketUpgradeResult.wrongVersion {
+      webSocketAppendUpgradeRequired(output: connection.output, date: date)
+      connection.closing = true
+    } else if upgrade is WebSocketUpgradeResult.badRequest {
+      httpAppendBadRequest(output: connection.output, date: date)
+      connection.closing = true
+    } else {
+      httpAppendResponse(
+        output: connection.output
+        status: 404
+        contentType: "text/plain"
+        body: "Not Found"
+        date: date
+        keepAlive: request.keepAlive
+      )
+      if not request.keepAlive {
+        connection.closing = true
+      }
+    }
+  }
+  httpParseConsumed(state: connection.parse, buffer: connection.input)
+}
+
+# ----- one connection: WebSocket ---------------------------------------------
+
+# Decode messages, answering echo, ping and close here, until the input runs
+# out or a broadcast is encoded into `scratch` (the worker fans it out)
+func decodeMessages(
+  connection: mod Connection
+  scratch: mod ByteBuffer
+  messages: mod Int
+) ret DecodeStep {
+  var message: WebSocketMessage = createWebSocketMessage()
+  loop not connection.closing {
+    let result: WebSocketDecodeResult = webSocketDecodeNext(
+      state: connection.decode
+      buffer: connection.input
+      message: message
+    )
+    if result is WebSocketDecodeResult.needMore {
+      break
+    }
+    if result is WebSocketDecodeResult.failed {
+      webSocketAppendClose(output: connection.output, code: connection.decode.failCode, reason: "")
+      connection.closing = true
+      break
+    }
+    if message.kind is WebSocketOpcode.ping {
+      webSocketAppendFrameFrom(
+        output: connection.output
+        kind: WebSocketOpcode.pong
+        source: connection.input
+        payload: message.payload
+      )
+    } else if message.kind is WebSocketOpcode.close {
+      var code: Int = message.closeCode
+      if code is 1005 {
+        code = 1000
+      }
+      webSocketAppendClose(output: connection.output, code: code, reason: "")
+      connection.closing = true
+    } else if message.kind is WebSocketOpcode.text {
+      messages = messages + 1
+      let text: String = httpRangeText(buffer: connection.input, range: message.payload)
+      let kind: ShootoutKind = shootoutKind(json: text)
+      if kind is ShootoutKind.echo {
+        webSocketAppendFrameFrom(
+          output: connection.output
+          kind: WebSocketOpcode.text
+          source: connection.input
+          payload: message.payload
+        )
+      } else if kind is ShootoutKind.broadcast {
+        let payload: Int = payloadAt(json: text)
+        if payload >= 0 {
+          let start: Int = message.payload.start + payload
+          let count: Int = jsonScanValueEnd(json: text, position: payload) - payload
+          byteBufferClear(buffer: scratch)
+          appendBroadcast(
+            output: scratch
+            source: connection.input
+            start: start
+            count: count
+          )
+          ret DecodeStep { broadcast: true, start: start, count: count }
+        }
+      }
+    }
+  }
+  # The frames are handled: drop them (a fragmented message keeps its part)
+  webSocketDecodeConsumed(state: connection.decode, buffer: connection.input)
+  ret DecodeStep { broadcast: false, start: 0, count: 0 }
+}
+
+# Write until the output is empty or the socket takes no more
+func flush(connection: mod Connection) {
+  loop byteBufferLength(buffer: connection.output) > 0 {
+    let result: IoResult = socketWriteBuffer(
+      socketId: connection.socketId
+      buffer: connection.output
+    )
+    if result.status is NetStatus.wouldBlock {
+      ret
+    }
+    if result.status is not NetStatus.ok {
+      byteBufferClear(buffer: connection.output)
+      connection.closing = true
+      ret
+    }
+  }
+}
+
+# ----- the worker -----------------------------------------------------------
+func createWorker(listenerSocketId: view SocketId) ret Worker {
+  let worker: Worker = {
+    listenerSocketId: listenerSocketId
+    poller: createPoller()
+    ready: List.create(Readiness, cap: 256)
+    connections: List.create(Connection, cap: 256)
+    slots: createIntMap(Int, cap: 256)
+    freeSlots: List.create(Int, cap: 64)
+    dirtySlots: List.create(Int, cap: 256)
+    scratch: createByteBuffer(capacity: 256)
+    date: createHttpDateCache()
+    messages: 0
+    printStats: Sys.getEnv(name: "RAE_BENCH_STATS").length() > 0
+  }
+  let status: NetStatus = pollerWatch(
+    poller: worker.poller
+    socketId: listenerSocketId
+    readable: true
+    writable: false
+  )
+  ret worker
+}
+
+func acceptOne(worker: mod Worker) {
+  let accepted: SocketResult = tcpAccept(listenerSocketId: worker.listenerSocketId)
+  if accepted.status is not NetStatus.ok {
+    ret
+  }
+  var slot: Int = worker.connections.length
+  if worker.freeSlots.length > 0 {
+    slot = worker.freeSlots.pop()
+    if let connection: mod Connection => worker.connections.modAt(index: slot) {
+      connection.socketId = accepted.socketId
+      connection.watchingWritable = false
+      connection.closing = false
+      connection.open = true
+      connection.webSocket = false
+      connection.dirty = false
+    }
+  } else {
+    worker.connections.add(value: Connection {
+      socketId: accepted.socketId
+      input: createByteBuffer(capacity: 4096)
+      output: createByteBuffer(capacity: 4096)
+      parse: createHttpParseState()
+      watchingWritable: false
+      closing: false
+      open: true
+      webSocket: false
+      decode: createWebSocketDecodeState(requireMask: true, maxMessageBytes: 16777216)
+      dirty: false
+    })
+  }
+  set(this: worker.slots, k: accepted.socketId.handle, value: slot)
+  let status: NetStatus = pollerWatch(
+    poller: worker.poller
+    socketId: accepted.socketId
+    readable: true
+    writable: false
+  )
+}
+
+# Write the connection's output at the end of this poll
+func markDirty(worker: mod Worker, slot: view Int) {
+  var added: Bool = false
+  if let connection: mod Connection => worker.connections.modAt(index: slot) {
+    if not connection.dirty {
+      connection.dirty = true
+      added = true
+    }
+  }
+  if added {
+    worker.dirtySlots.add(value: slot)
+  }
+}
+
+# Append the scratch frame to every open WebSocket connection; how many
+func fanOut(worker: mod Worker) ret Int {
+  var sent: Int = 0
+  loop var slot: Int = 0, slot < worker.connections.length, ++slot {
+    var reached: Bool = false
+    if let connection: mod Connection => worker.connections.modAt(index: slot) {
+      if connection.open and connection.webSocket and not connection.closing {
+        appendBytes(
+          buffer: connection.output
+          bytes: worker.scratch.bytes
+          start: worker.scratch.start
+          count: byteBufferLength(buffer: worker.scratch)
+        )
+        reached = true
+      }
+    }
+    if reached {
+      sent = sent + 1
+      markDirty(worker: worker, slot: slot)
+    }
+  }
+  ret sent
+}
+
+# Readable: read, then answer everything that arrived
+func serviceInput(worker: mod Worker, slot: view Int) {
+  loop {
+    var step: DecodeStep = { broadcast: false, start: 0, count: 0 }
+    if let connection: mod Connection => worker.connections.modAt(index: slot) {
+      if not connection.webSocket {
+        parseHttp(connection: connection, date: worker.date.text)
+      }
+      if connection.webSocket {
+        step = decodeMessages(
+          connection: connection
+          scratch: worker.scratch
+          messages: worker.messages
+        )
+      }
+    }
+    if not step.broadcast {
+      ret
+    }
+    let listenCount: Int = fanOut(worker: worker)
+    if let connection: mod Connection => worker.connections.modAt(index: slot) {
+      appendBroadcastResult(
+        output: connection.output
+        source: connection.input
+        start: step.start
+        count: step.count
+        listenCount: listenCount
+      )
+    }
+  }
+}
+
+# After writing: close a finished connection, or watch for writability while
+# output is waiting
+func settle(worker: mod Worker, slot: view Int) {
+  var closeIt: Bool = false
+  if let connection: mod Connection => worker.connections.modAt(index: slot) {
+    let waiting: Bool = byteBufferLength(buffer: connection.output) > 0
+    if connection.closing and not waiting {
+      let status: NetStatus = pollerForget(
+        poller: worker.poller
+        socketId: connection.socketId
+        readable: true
+        writable: connection.watchingWritable
+      )
+      remove(this: worker.slots, k: connection.socketId.handle)
+      socketClose(socketId: connection.socketId)
+      byteBufferClear(buffer: connection.input)
+      byteBufferClear(buffer: connection.output)
+      connection.parse.position = 0
+      connection.parse.headers.clear()
+      connection.open = false
+      connection.webSocket = false
+      closeIt = true
+    } else if waiting and not connection.watchingWritable {
+      let status: NetStatus = pollerWatch(
+        poller: worker.poller
+        socketId: connection.socketId
+        readable: false
+        writable: true
+      )
+      connection.watchingWritable = true
+    } else if not waiting and connection.watchingWritable {
+      let status: NetStatus = pollerForget(
+        poller: worker.poller
+        socketId: connection.socketId
+        readable: false
+        writable: true
+      )
+      connection.watchingWritable = false
+    }
+  }
+  if closeIt {
+    worker.freeSlots.add(value: slot)
+  }
+}
+
+# The end of a poll: write every connection that got output, once
+func flushDirty(worker: mod Worker) {
+  loop var i: Int = 0, i < worker.dirtySlots.length, ++i {
+    let slot: Int = worker.dirtySlots.copyAtFallback(index: i, fallback: 0)
+    if let connection: mod Connection => worker.connections.modAt(index: slot) {
+      connection.dirty = false
+      flush(connection: connection)
+    }
+    settle(worker: worker, slot: slot)
+  }
+  worker.dirtySlots.clear()
+}
+
+func handleReady(worker: mod Worker, readiness: view Readiness) {
+  if readiness.socketId is worker.listenerSocketId {
+    acceptOne(worker: worker)
+    ret
+  }
+  var slot: Int = -1
+  if let found: Int = get(this: worker.slots, k: readiness.socketId.handle) {
+    slot = found
+  }
+  if slot < 0 {
+    ret
+  }
+  if readiness.readable or readiness.closed or readiness.failed {
+    if let connection: mod Connection => worker.connections.modAt(index: slot) {
+      readInput(connection: connection)
+    }
+    serviceInput(worker: worker, slot: slot)
+    markDirty(worker: worker, slot: slot)
+  } else if readiness.writable {
+    markDirty(worker: worker, slot: slot)
+  }
+}
+
+func main() ret Int {
+  let port: Int = envInt(name: "PORT", fallback: 8080)
+  let listening: SocketResult = tcpListen(host: "127.0.0.1", port: port, backlog: 4096)
+  if listening.status is not NetStatus.ok {
+    log("cannot listen on {port}: {listening.status}")
+    ret 1
+  }
+  log("listening on {socketLocalPort(socketId: listening.socketId)}")
+  var worker: Worker = createWorker(listenerSocketId: listening.socketId)
+  loop {
+    let status: NetStatus = pollWait(poller: worker.poller, ready: worker.ready, timeoutMs: 1000)
+    if updateHttpDate(cache: worker.date, epochSeconds: nowMs() / 1000) and worker.printStats {
+      log("stats worker=0 requests={worker.messages} allocations={Sys.allocationCount()}")
+    }
+    loop var i: Int = 0, i < worker.ready.length, ++i {
+      if let readiness: view Readiness => worker.ready.viewAt(index: i) {
+        handleReady(worker: worker, readiness: readiness)
+      }
+    }
+    flushDirty(worker: worker)
+  }
+  ret 0
+}

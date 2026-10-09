@@ -1,10 +1,15 @@
 #!/bin/sh
 # The correctness checker (docs/server-benchmarks-design.md §8): every rule of
-# spec/Http.md, against a running server or the two Rae servers.
+# spec/Http.md and spec/WebSocket.md, against a running server or the Rae
+# servers.
 #
-#   check.sh <port> [name]   check the server listening on 127.0.0.1:<port>
-#   check.sh --rae           build both Rae HTTP servers (eventLoop, ecs), start
-#                            each, check it, stop it (the pre-suite case, F7)
+#   check.sh <port> [name]               check the HTTP server on 127.0.0.1:<port>
+#   check.sh --websocket <port> [name]   check the WebSocket server on it
+#                                        (webSocketCheck.py)
+#   check.sh --rae                       build the four Rae servers (eventLoop
+#                                        and ecs, HTTP and WebSocket), start
+#                                        each, check it, stop it (the pre-suite
+#                                        case, F7)
 #
 # It checks correctness, never speed. Exit 0 when every check passes.
 set -eu
@@ -131,6 +136,16 @@ sys.exit(1 if failures else 0)
 PYTHON
 }
 
+check_websocket_port() {
+  run_with_timeout 60 python3 "$HERE/webSocketCheck.py" "$1" "$2"
+}
+
+if [ "${1:-}" = "--websocket" ]; then
+  [ $# -ge 2 ] || { echo "usage: check.sh --websocket <port> [name]" >&2; exit 2; }
+  check_websocket_port "$2" "${3:-server on $2}"
+  exit $?
+fi
+
 if [ "${1:-}" = "--rae" ]; then
   status=0
   trap 'stop_server' EXIT INT TERM
@@ -146,9 +161,21 @@ if [ "${1:-}" = "--rae" ]; then
       status=1
     fi
     stop_server
+    build_rae "$style" webSocket || { echo "FAIL: rae-$style-webSocket does not build"; status=1; continue; }
+    port=$(free_port)
+    out="$BUILD/rae-$style-webSocket"
+    start_server "$out/check.log" env PORT="$port" "$out/server"
+    if wait_for_tcp "$port"; then
+      check_websocket_port "$port" "rae-$style" || status=1
+    else
+      echo "FAIL: rae-$style-webSocket did not start"
+      cat "$out/check.log"
+      status=1
+    fi
+    stop_server
   done
   if [ "$status" = 0 ]; then
-    echo "PASS: server-check (rae-eventLoop and rae-ecs HTTP servers, every spec/Http.md rule)"
+    echo "PASS: server-check (rae-eventLoop and rae-ecs, HTTP and WebSocket, every spec/Http.md and spec/WebSocket.md rule)"
   else
     echo "FAIL: server-check (see above)"
   fi
@@ -156,7 +183,7 @@ if [ "${1:-}" = "--rae" ]; then
 fi
 
 if [ $# -lt 1 ]; then
-  echo "usage: check.sh <port> [name] | check.sh --rae" >&2
+  echo "usage: check.sh <port> [name] | check.sh --websocket <port> [name] | check.sh --rae" >&2
   exit 2
 fi
 check_port "$1" "${2:-server on $1}"
