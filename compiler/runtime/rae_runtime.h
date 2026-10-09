@@ -145,6 +145,9 @@ typedef bool rae_Bool;
 typedef int8_t rae_Bool;
 #endif
 
+/* A mainLoop's frame, for a window system that blocks the loop (rae_runtime.c) */
+void rae_set_live_frame(rae_Bool (*frame)(void*), void* state);
+
 // Rae's owned-vs-borrowed String. `data` is the UTF-8 byte buffer
 // (we keep it NUL-terminated in heap-allocated strings for cheap
 // interop with C string APIs, but length is the source of truth).

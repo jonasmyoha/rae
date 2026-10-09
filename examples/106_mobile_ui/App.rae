@@ -41,14 +41,25 @@ open ui/Transform
 open ui/animationSystem/AnimationSystem
 open Gpu2dCanvas
 
-# The interactive lifecycle. `app` (AppTypes.rae) carries the setup state;
-# the run's own state is the AppSession resource (AppSession.rae), the per-
-# world state a WorldFrame, and each frame's derived values a FrameTick. The
-# outer loop owns the world for the current route; the inner loop runs the
-# four frame systems (frameSystem/) until the window closes or a system asks
-# for a rebuild (`frame.switching`), at which point the world is rebuilt.
-func runApp(app: mod App) {
-  # Memory-stress and screenshot modes both terminate after their run.
+# The interactive lifecycle, as one `mainLoop` (Main.rae): `AppRun` is its
+# state and `runAppFrame` one frame. `app` (AppTypes.rae) carries the setup
+# state; the run's own state is the AppSession resource (AppSession.rae), the
+# per-world state a WorldFrame, and each frame's derived values a FrameTick.
+# A frame runs the four frame systems (frameSystem/); when one asks for a
+# rebuild (`frame.switching`: a screen switch, a resize) the next frame builds
+# the world again first. Being a mainLoop is what lets the window keep laying
+# out while macOS runs a live resize in its own loop: the runtime runs this
+# frame from there (rae_set_live_frame).
+type AppRun {
+  app: App
+  session: AppSession
+  world: UiWorld
+  frame: WorldFrame
+}
+
+# Memory-stress and screenshot modes run to the end here, before the loop.
+# True when one ran (the program then ends).
+func runOneShotModes(app: mod App) ret Bool {
   if runStressMode(
     uiSystems: app.uiSystems
     dockSystem: app.musicSystems.dockSystem
@@ -56,76 +67,106 @@ func runApp(app: mod App) {
     appState: app.appState
     gpuUi: app.gpuUi
   ) {
-    ret
+    ret true
   }
   if runScreenshotMode(
     scenes: app.scenes
     appState: app.appState
     textureRegistry: app.textureRegistry
     bg: palettePageBg(theme: app.appState.theme.active)
-  ) is false {
-    var session: AppSession = createAppSession(app: app)
-    loop session.running {
-      refreshActiveAlbumCache(app: app, session: session)
-      # A new world: the lib systems' derived tables start empty with it.
-      app.uiSystems = createUiSystems()
-      var world: UiWorld = buildSessionWorld(app: app, session: session)
-      # A new world, new entities: the cover system starts empty and takes
-      # the mounted pages' AlbumCover markers before the first frame observes.
-      resetMusicTables(musicSystems: app.musicSystems)
-      applyMusicComponents(world: world, musicSystems: app.musicSystems)
-      var frame: WorldFrame = createWorldFrame(world: world, uiSystems: app.uiSystems)
-      loop session.running and frame.switching is false {
-        var tick: FrameTick = createFrameTick(session: session)
-        frameWaitSystem(
-          app: app
-          session: session
-          world: world
-          uiSystems: app.uiSystems
-          frame: frame
-          tick: tick
-        )
-        if session.running {
-          frameInputSystem(
-            app: app
-            session: session
-            world: world
-            frame: frame
-            tick: tick
-          )
-          frameUpdateSystem(
-            app: app
-            session: session
-            world: world
-            uiSystems: app.uiSystems
-            frame: frame
-            tick: tick
-          )
-          frameRenderSystem(
-            app: app
-            session: session
-            world: world
-            frame: frame
-            tick: tick
-          )
-          # Frame end (MusicSystems.rae): the components this app's systems
-          # own reach their tables, the rest is reported, and the entities a
-          # screen switch unmounted are cleared and recycled.
-          musicFrameEnd(world: world, uiSystems: app.uiSystems, musicSystems: app.musicSystems)
-        }
-      }
-    }
+  ) {
+    finishApp(app: app)
+    ret true
   }
+  ret false
+}
 
-  # Final snapshot — captures window-drag-only sessions where no dispatched
-  # action fired (and thus no in-loop save ran).
+# The App holds GPU handles (the canvas's encoder), so it is moved into the
+# run under `unsafe`, never copied
+func createAppRun(app: own App) ret AppRun {
+  unsafe {
+    var running: App = app
+    var session: AppSession = createAppSession(app: running)
+    var world: UiWorld = startWorld(app: running, session: session)
+    let frame: WorldFrame = createWorldFrame(world: world, uiSystems: running.uiSystems)
+    ret AppRun { app: running, session: session, world: world, frame: frame }
+  }
+}
+
+# A new world for the current route: the lib systems' derived tables start
+# empty with it, and the cover system takes the mounted pages' AlbumCover
+# markers before the first frame observes
+func startWorld(app: mod App, session: mod AppSession) ret UiWorld {
+  refreshActiveAlbumCache(app: app, session: session)
+  app.uiSystems = createUiSystems()
+  var world: UiWorld = buildSessionWorld(app: app, session: session)
+  resetMusicTables(musicSystems: app.musicSystems)
+  applyMusicComponents(world: world, musicSystems: app.musicSystems)
+  ret world
+}
+
+# One frame; false when the app has finished (its window closed)
+func runAppFrame(run: mod AppRun) ret Bool {
+  if run.frame.switching {
+    run.world = startWorld(app: run.app, session: run.session)
+    run.frame = createWorldFrame(world: run.world, uiSystems: run.app.uiSystems)
+  }
+  var tick: FrameTick = createFrameTick(session: run.session)
+  frameWaitSystem(
+    app: run.app
+    session: run.session
+    world: run.world
+    uiSystems: run.app.uiSystems
+    frame: run.frame
+    tick: tick
+  )
+  if run.session.running {
+    frameInputSystem(
+      app: run.app
+      session: run.session
+      world: run.world
+      frame: run.frame
+      tick: tick
+    )
+    frameUpdateSystem(
+      app: run.app
+      session: run.session
+      world: run.world
+      uiSystems: run.app.uiSystems
+      frame: run.frame
+      tick: tick
+    )
+    frameRenderSystem(
+      app: run.app
+      session: run.session
+      world: run.world
+      frame: run.frame
+      tick: tick
+    )
+    # Frame end (MusicSystems.rae): the components this app's systems own
+    # reach their tables, the rest is reported, and the entities a screen
+    # switch unmounted are cleared and recycled.
+    musicFrameEnd(
+      world: run.world
+      uiSystems: run.app.uiSystems
+      musicSystems: run.app.musicSystems
+    )
+    ret true
+  }
+  finishApp(app: run.app)
+  ret false
+}
+
+# The end of the run: the final snapshot (it captures window-drag-only
+# sessions where no dispatched action fired, so no in-loop save ran), the
+# background workers joined (#950: the poll worker on its stop channel, the
+# artwork downloads waited out), then the window closed
+func finishApp(app: mod App) {
   saveAppState(
     path: stateFilePath
     state: app.appState
     playbackSystem: app.musicSystems.playbackSystem
   )
-  # #950: join the background workers before the window goes — the poll
-  # worker on its stop channel, the artwork downloads by waiting them out.
   stopSpotifyPoller(poller: app.spotifyPoller)
   shutdownArtworkFetchQueue(queue: app.appState.artworkFetch)
   textureUnloadAll(reg: app.textureRegistry)

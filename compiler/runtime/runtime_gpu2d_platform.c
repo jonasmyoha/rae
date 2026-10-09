@@ -57,6 +57,35 @@ static int    g_g2d_win_resized = 0;
  * too, marked with SDL_TOUCH_MOUSEID / SDL_PEN_MOUSEID, so the mouse
  * events say which device produced them. */
 static int    g_g2d_pointer_kind = 0;
+
+/* Live resize. macOS runs a window drag-resize in its own event loop, inside
+ * whichever SDL call was pumping events when the drag began, so the app's
+ * loop does not turn until the drag ends and the layout would only catch up
+ * then. SDL sends live-resize SDL_EVENT_WINDOW_EXPOSED events (data1 = 1) to
+ * event watchers meanwhile, and a watcher may draw. This one resizes the
+ * surface and, when the app's loop is parked at a frame boundary (waiting in
+ * waitEvents, or pumping in pollClose) and is a mainLoop (rae_set_live_frame),
+ * runs one frame of it. A frame run from here pumps no events: its
+ * waitEvents and pollClose return at once. */
+static void rae_g2d_configure(int pw, int ph);
+static int g_g2d_at_frame_boundary = 0;
+static int g_g2d_live_frame_depth = 0;
+static bool SDLCALL rae_g2d_live_resize_watch(void* userdata, SDL_Event* e) {
+    (void)userdata;
+    if (e->type != SDL_EVENT_WINDOW_EXPOSED || e->window.data1 != 1 || !g_sdl_win) return true;
+    int pw = 0, ph = 0;
+    SDL_GetWindowSizeInPixels(g_sdl_win, &pw, &ph);
+    if (pw != g_sdl_w || ph != g_sdl_h) {
+        rae_g2d_configure(pw, ph);
+        g_g2d_win_resized = 1;
+    }
+    if (g_rae_live_frame_fn && g_g2d_at_frame_boundary && g_g2d_live_frame_depth == 0) {
+        g_g2d_live_frame_depth++;
+        (void)g_rae_live_frame_fn(g_rae_live_frame_state);
+        g_g2d_live_frame_depth--;
+    }
+    return true;
+}
 static int rae_g2d_kind_of_mouse(SDL_MouseID which) {
     if (which == SDL_TOUCH_MOUSEID) return 1;
     if (which == SDL_PEN_MOUSEID) return 2;
@@ -270,6 +299,9 @@ void rae_ext_Gpu2d_initWindow(int64_t width, int64_t height, rae_String title) {
     int pw = (int)width, ph = (int)height;
     SDL_GetWindowSizeInPixels(g_sdl_win, &pw, &ph);
     rae_g2d_configure(pw, ph);
+#ifndef __EMSCRIPTEN__
+    SDL_AddEventWatch(rae_g2d_live_resize_watch, NULL);
+#endif
 
     /* Test hook: RAE_GPU2D_TEST_RESIZE=WxH resizes the window (logical
      * points) just after boot so the resize path can be exercised
@@ -374,6 +406,7 @@ static void rae_loop_trace_tick(void) {
 }
 
 rae_Bool rae_ext_Gpu2d_pollClose(void) {
+    if (g_g2d_live_frame_depth > 0) return 0;   /* a live-resize frame pumps nothing */
     rae_g2d_test_pointer_advance();
     rae_mem_stats_live_tick();
     rae_loop_trace_tick();
@@ -395,6 +428,7 @@ rae_Bool rae_ext_Gpu2d_pollClose(void) {
     g_g2d_text_input_len = 0; g_g2d_text_input[0] = 0;
     SDL_Event e;
     rae_Bool quit = 0;
+    g_g2d_at_frame_boundary = 1;
     while (SDL_PollEvent(&e)) {
         switch (e.type) {
             case SDL_EVENT_QUIT: quit = 1; break;
@@ -495,6 +529,7 @@ rae_Bool rae_ext_Gpu2d_pollClose(void) {
             default: break;
         }
     }
+    g_g2d_at_frame_boundary = 0;
     if (quit) return 1;
     if (g_sdl_headless_frames > 0) {
         if (g_sdl_frames_done >= g_sdl_headless_frames) return 1;
@@ -563,7 +598,10 @@ void rae_ext_Gpu2d_waitEvents(float timeoutSec){
     if (rae_g2d_headless_requested() && ms > RAE_HEADLESS_WAIT_EVENTS_CAP_MS) {
         ms = RAE_HEADLESS_WAIT_EVENTS_CAP_MS;
     }
+    if (g_g2d_live_frame_depth > 0) return;   /* a live-resize frame waits for nothing */
+    g_g2d_at_frame_boundary = 1;
     SDL_WaitEventTimeout(NULL, ms);
+    g_g2d_at_frame_boundary = 0;
 }
 
 /* Thread-safe waker (#950, lib/ui/EventLoop.rae `wake`): post a user event so
