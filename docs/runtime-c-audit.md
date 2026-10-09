@@ -37,6 +37,46 @@ Sizes are rough line counts of the logic that moves, not of whole files.
 | 12 ✅ | `runtime_system_log.c` typed-list and `Any` printing → Rae — **done** 2026-10-08 (0.1.215): `log(x)` / `logS(x)` of a value whose type the compiler knows is lowered to that value's interpolation text (the one generated formatter) and `rae_ext_rae_log_write`, the only C left (write the bytes, a newline, flush); a `List` keeps log's `{ #(a, b, none), length, capacity }` layout through a generated `rae_log_text_<List>_` beside `rae_to_str_<List>_`; an argument that really is an `Any` reaches lib/core's `log` body, which formats it with `lib/core/AnyText.rae` over one-field box accessors (also behind the interpolation of an `Any`, `rae_text_any`). Deleted: `rae_ext_rae_log_any`/`_stream_any`, the typed-list and list-fields printers, the unused `rae_ext_rae_log_{cstr,string,i64,bool,char,id,key,float}` family, the header's printf wrappers, `rae_ext_rae_str_any` and `rae_str_any`, `rae_ext_rae_str_i64/u64/bool/char` + `_ptr` (the `Int8`..`UInt64` formatters are emitted with the `rae_text_*` wrappers; a no-prelude program's wrappers answer ""). Byte-identical to the C wherever it was right (every scalar, String, UInt64 max, sized ints, views, Int/Bool/String lists, empty lists, `logS`, every `Any` kind, checked against the former compiler); fixed where it was not: a `List(Float)` element printed as garbage (`5.28427e-315`), struct / enum / nested-list elements printed garbage, `log` of a missing `opt` printed `0`, an enum logged its ordinal, and `log(structValue)` did not compile. Release ns per log line (output to /dev/null) before → after: String 1 308 → 1 308, Int 1 365 → 1 355, interpolated 1 468 → 1 455, an 8-element List 2 700 → 2 417. Fixture 1032 | formatting a list or a boxed value per element kind | writing bytes to stdout | ~150 | the codegen emits a Rae `toString` walk |
 | 13 | `runtime_threads.c` worker-pool policy → Rae | chunk sizing, the default worker count rule, launch bookkeeping | `pthread_create`, atomics, condition variables, QoS calls | ~120 | belongs with lightweight spawn's scheduler (docs/lightweight-spawn-design.md F7, task S3) |
 
+## Speed check of the moved rows (2026-10-09, "fastest wins")
+
+A move to Rae must not make a program slower (AGENTS.md runtime rule). Each
+row that moved logic was measured as the SAME Rae program built by the
+0.1.202 compiler (a worktree at `416bc291^`, where all of rows 3-8 were still
+C) and by this one, in the release profile on an M1 Max; base64, which never
+had C, against a plain `-O2` C version. ns per operation unless noted.
+
+| row | workload | 0.1.202 (C) | now (Rae) | verdict |
+|---|---|---|---|---|
+| 3 strings | equality / hash / compare (32 B, 1 KB) | 2 / 17 / 34 | 2 / 16 / 27 | faster |
+| 3 strings | indexOf / contains, 1 KB | 90 213 / 91 477 | 26 / 379 | faster (contains scans 40 candidate `a`s) |
+| 3 strings | trim / fromCodepoint | 124 / 93 | 109 / 94 | same |
+| 4 number text | interpolate an Int / Int toString / Bool + Char | 173 / 115 / 155 | 124 / 70 / 152 | faster |
+| 5 JSON | fromJson, 8-field record (149 B) | 676 | 466 | 1.45x faster |
+| 5 JSON | toJson, 8-field record | 867 | 424 | 2x faster (was 950, 1.1x slower: see below) |
+| 6 dates | formatTimestamp / formatDate | 686 / 518 | 205 / 186 | 3x faster |
+| 8 random | nextInt / nextFloat, per 1000 | 2 886 / 2 950 | 1 196 / 980 | 2.4-3x faster |
+| crypto | SHA-1, 16 MB | C 77 ms, CommonCrypto 7 ms | CommonCrypto on Apple (0.1.226) | platform path |
+| text | base64 encode / decode, 1 MB (us) | plain C 390 / 980 | 650 / 1 800 | 1.6-1.8x slower |
+
+- **toJson was the one regression, and it was not Rae:** the generated writer
+  made an `snprintf` per key and per String value, where the 0.1.202 one made
+  one per field into a fixed 16 KB buffer that also did not escape strings
+  (a `"` in a value made invalid JSON). A record of four Strings went from 450
+  to 565 ns. Fixed by copying the fixed text and the String values in with
+  `memcpy` (`rae_jout_put` / `rae_jout_text`): 97 ns now, and the 8-field
+  record 424 ns, twice the old speed. Numbers still go through `snprintf`.
+- **base64** is over the 1.2x line, but nothing large is base64-encoded today
+  (its user is the 24-byte WebSocket accept key). The gap is the
+  bounds-checked per-byte access and `List.add`, which the queued
+  "per-element overhead in byte loops" task closes for base64, SHA-1's
+  portable path and ByteBuffer together.
+- **Not timed, with the reason:** row 1 (net policy) is measured by the
+  server benchmarks, where the Rae servers match or beat Rust's hyper
+  (benchmarks/servers/README.md); rows 7, 9 and 10 (asset lookup, the
+  Spotify bridge, FileNotify) wait on the disk, a child process or kernel
+  events; row 11 runs a Halton step and one 4x4 inverse per frame; row 12 is
+  `log` of a typed value, bound by the write to stderr.
+
 ## What stays C (and why)
 
 | file(s) | reason |
