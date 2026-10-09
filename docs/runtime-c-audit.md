@@ -56,7 +56,9 @@ had C, against a plain `-O2` C version. ns per operation unless noted.
 | 6 dates | formatTimestamp / formatDate | 686 / 518 | 205 / 186 | 3x faster |
 | 8 random | nextInt / nextFloat, per 1000 | 2 886 / 2 950 | 1 196 / 980 | 2.4-3x faster |
 | crypto | SHA-1, 16 MB | C 77 ms, CommonCrypto 7 ms | CommonCrypto on Apple (0.1.226) | platform path |
-| text | base64 encode / decode, 1 MB (us) | plain C 390 / 980 | 650 / 1 800 | 1.6-1.8x slower |
+| text | base64 encode / decode, 1 MB (us) | plain C 390 / 980 | 905 / 975 (was 650-2 400 / 1 800) | encode 2.3x, decode level (0.1.244) |
+| crypto | portable SHA-1 (the non-Apple path), 16 MB | plain C 77 ms | 84 ms (was 96) | 1.09x (0.1.244) |
+| net | ByteBuffer.appendText, 1.6 KB | memcpy | 22 ns (was 1 083) | memcpy (0.1.244) |
 
 - **toJson was the one regression, and it was not Rae:** the generated writer
   made an `snprintf` per key and per String value, where the 0.1.202 one made
@@ -65,11 +67,18 @@ had C, against a plain `-O2` C version. ns per operation unless noted.
   to 565 ns. Fixed by copying the fixed text and the String values in with
   `memcpy` (`rae_jout_put` / `rae_jout_text`): 97 ns now, and the 8-field
   record 424 ns, twice the old speed. Numbers still go through `snprintf`.
-- **base64** is over the 1.2x line, but nothing large is base64-encoded today
-  (its user is the 24-byte WebSocket accept key). The gap is the
-  bounds-checked per-byte access and `List.add`, which the queued
-  "per-element overhead in byte loops" task closes for base64, SHA-1's
-  portable path and ByteBuffer together.
+- **Byte loops (0.1.244).** An `add` per element made each write wait for
+  the previous one's length update; the loops now grow the list once
+  (`List.addDefaults`, one `memset`) and `set` at an index they keep.
+  base64 decode reads a 256-entry table and checks each group once, and is
+  level with C. SHA-1 keeps its 80-word schedule in a local
+  `Array(Int, cap: 80)` (checks against a constant) and runs its four
+  rounds as four loops: 1.09x C. `ByteBuffer.appendText` is one `memcpy`.
+  **Still 2.3x: base64 encode,** whose per-byte bounds checks (a checked
+  read per input byte, a checked write per output byte) are what is left:
+  the same checks written in C take 950 us. Closing that needs the
+  compiler to drop checks it can prove or hoist (queued: bounds-check
+  elimination in counted loops); no unchecked accessor is exposed.
 - **Not timed, with the reason:** row 1 (net policy) is measured by the
   server benchmarks, where the Rae servers match or beat Rust's hyper
   (benchmarks/servers/README.md); rows 7, 9 and 10 (asset lookup, the

@@ -160,6 +160,15 @@ func rae_ext_rae_buf_copy(
   elemSize: Int
 ) unsafe extern
 
+# Zero `count` elements from `start` (memset): every type's default value is
+# its all-zero bytes, so this fills them with defaults (List.addDefaults)
+func rae_ext_rae_buf_zero(
+  buf: Buffer(Any)
+  start: Int
+  count: Int
+  elemSize: Int
+) unsafe extern
+
 func rae_ext_rae_buf_set(
   V: type
   buf: mod Buffer(V)
