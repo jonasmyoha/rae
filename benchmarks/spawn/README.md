@@ -9,8 +9,9 @@ modes on the worker pool (§12).
 - `results/threadPerSpawn/` holds the same build with `RAE_SPAWN_THREADS=1`
   (every spawn a thread), taken in the same session for the before/after.
 
-A spawn whose task sleeps (`sleeps`, `held`) is still a thread until step 3b,
-so those modes measure threads in both.
+Since step 3b (0.1.252, §13) a sleeping task suspends on the pool too, so
+`sleeps` and `held` measure resumable tasks in `results/` and threads in
+`results/threadPerSpawn/`.
 
 ## Run
 

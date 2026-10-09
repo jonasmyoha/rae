@@ -509,6 +509,8 @@ static bool emit_list_fast_access(CFuncContext* ctx, const AstExpr* expr, FILE* 
 
 bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_prec, bool is_lvalue, bool suppress_deref) {
   if (!expr) return true;
+  /* A wait a resumable twin hoisted before the statement: its result */
+  if (ctx->twin_override_count && c_twin_override_expr(ctx, expr, out)) return true;
   /* A typed Buffer(T) (a list's `.data`) handed to a `Ptr` (void*): a C
    * struct field or an extern parameter declared with the C library's own
    * pointer type (`WGPUChainedStruct*`, `const WGPUCommandBuffer*`). The
@@ -1021,12 +1023,17 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                     else { fprintf(out, "sizeof("); emit_type_info_as_c_type(ctx, resT, out); fprintf(out, ")"); }
                     if (c_spawn_on_pool(ctx, callexpr->decl_link)) {
                         // A task on the scheduler's worker pool: Scheduler.rae
-                        // queues it (docs/lightweight-spawn-design.md §4.3)
-                        fprintf(out, "); __s->__task = __t; rae_task_prepare(__t, __raespawn_thunk_%s, __s); "
-                                     "%s((int64_t)(intptr_t)__t); __t; })",
-                                mangled, core_function_mangled(ctx->compiler_ctx, "schedulerSubmit"));
+                        // queues it (docs/lightweight-spawn-design.md §4.3).
+                        // A function with a resumable twin runs as one, so
+                        // it suspends at its waits (§13).
+                        bool resumable = c_twin_is(ctx->compiler_ctx, callexpr->decl_link);
+                        fprintf(out, "); __s->__task = __t; __s->__frame = NULL; ");
+                        if (resumable) fprintf(out, "rae_task_prepare_step(__t, __raestep_%s, __s); ", mangled);
+                        else fprintf(out, "rae_task_prepare(__t, __raespawn_thunk_%s, __s); ", mangled);
+                        fprintf(out, "%s((int64_t)(intptr_t)__t); __t; })",
+                                core_function_mangled(ctx->compiler_ctx, "schedulerSubmit"));
                     } else {
-                        fprintf(out, "); __s->__task = __t; rae_task_start(__t, __raespawn_thunk_%s, __s); __t; })", mangled);
+                        fprintf(out, "); __s->__task = __t; __s->__frame = NULL; rae_task_start(__t, __raespawn_thunk_%s, __s); __t; })", mangled);
                     }
                     break;
                 }

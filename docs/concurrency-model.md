@@ -298,7 +298,10 @@ analysis per spawn (`may_wait_spawn_on_pool`), and the spawn site calls
 thread off the pool (`main`) that waits on a task nobody has started runs it
 itself, and otherwise blocks. Every other spawn (one that sleeps, waits on a
 socket or calls other C) is still a thread of its own, as below, until its
-wait can suspend (S3b, S4) or its C call is marked `blocking` (S5).
+wait can suspend (S4) or its C call is marked `blocking` (S5). Since 0.1.252
+(§13 of the design) a spawned function that may wait gets a resumable twin:
+its `get()` and its sleeps suspend the task instead of holding a worker, so
+sleeping spawns run on the pool as well.
 `RAE_SPAWN_THREADS=1` at build time keeps every spawn a thread.
 
 **Runtime (`compiler/runtime/runtime_threads.c`, `rae_runtime.h`).**

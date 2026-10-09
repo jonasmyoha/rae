@@ -2029,7 +2029,11 @@ Str ident_c_name(CFuncContext* ctx, const AstExpr* expr) {
     Str raw = expr->as.ident;
     if (expr->decl_link && expr->decl_link->kind == AST_DECL_GLOBAL_LET)
         return str_from_cstr(global_c_name(ctx->compiler_ctx, expr->decl_link));
-    if (get_local_type_ref(ctx, raw)) return raw;      // a local / parameter wins
+    if (get_local_type_ref(ctx, raw)) {               // a local / parameter wins
+        Str slot;
+        if (ctx->twin_args_from_frame && c_twin_slot_ref(ctx, raw, &slot)) return slot;
+        return raw;
+    }
     if (ctx->compiler_ctx) {
         const AstDecl* found = NULL;
         for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
@@ -2105,7 +2109,7 @@ bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* 
        * runtime's before anything can spawn or run a parallelLoop */
       if (core_function_mangled(ctx, "schedulerWorkerLoop")) {
           fprintf(out, "  rae_sched_install(rae_sched_hook_worker_loop, rae_sched_hook_task_wait, "
-                       "rae_sched_hook_worker_count, rae_sched_hook_chunk_size);\n");
+                       "rae_sched_hook_worker_count, rae_sched_hook_chunk_size, rae_sched_hook_wake);\n");
       }
   } else {
       fprintf(out, "RAE_UNUSED static %s %s(", rt, mangled); emit_param_list(&tctx, f->params, out, false); fprintf(out, ") {\n");
@@ -2645,7 +2649,9 @@ static void emit_scheduler_hooks(CompilerContext* ctx, FILE* out) {
   const char* task_wait = core_function_mangled(ctx, "schedulerTaskWait");
   const char* worker_count = core_function_mangled(ctx, "schedulerWorkerCount");
   const char* chunk_size = core_function_mangled(ctx, "parallelChunkSize");
-  if (!worker_loop || !task_wait || !worker_count || !chunk_size) return;
+  const char* wake = core_function_mangled(ctx, "schedulerWake");
+  if (!worker_loop || !task_wait || !worker_count || !chunk_size || !wake) return;
+  fprintf(out, "RAE_UNUSED static void rae_sched_hook_wake(int64_t task) { %s(task); }\n", wake);
   fprintf(out, "RAE_UNUSED static void rae_sched_hook_worker_loop(int64_t index) { %s(index); }\n", worker_loop);
   fprintf(out, "RAE_UNUSED static void rae_sched_hook_task_wait(int64_t task) { %s(task); }\n", task_wait);
   fprintf(out, "RAE_UNUSED static int64_t rae_sched_hook_worker_count(void) { return %s(); }\n", worker_count);
@@ -2665,7 +2671,12 @@ bool c_spawn_on_pool(CFuncContext* ctx, const AstDecl* callee_decl) {
   if (!compiler->wait_graph || !core_function_mangled(compiler, "schedulerSubmit")) return false;
   const char* forced = getenv("RAE_SPAWN_THREADS");
   if (forced && forced[0] && strcmp(forced, "0") != 0) return false;
-  return may_wait_spawn_on_pool(compiler->wait_graph, callee_decl);
+  /* A task that may sleep goes on the pool only when it can suspend there:
+   * the spawned function has a resumable twin (c_twin.c) */
+  if (may_wait_reaches_sleep(compiler->wait_graph, callee_decl)) {
+    return c_twin_is(compiler, callee_decl) && may_wait_spawn_on_pool(compiler->wait_graph, callee_decl, true);
+  }
+  return may_wait_spawn_on_pool(compiler->wait_graph, callee_decl, false);
 }
 
 bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const char* out_path) {
@@ -3776,6 +3787,8 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
    * spawns run as tasks on the scheduler (c_spawn_on_pool) */
   may_wait_free(ctx->wait_graph);
   ctx->wait_graph = may_wait_build(ctx, module);
+  /* ... and which may-wait functions get a resumable twin (c_twin.c) */
+  c_twins_plan(ctx, module);
   // Bodies — reverse field order so LIFO drop matches construction.
   // Emits both `rae_drop_struct_<T>` (full) and
   // `rae_drop_struct_<T>_alias` (skip String fields) in a single
@@ -4444,7 +4457,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
           emit_type_ref_as_c_type(&tctx, &vt, out, false);
           fprintf(out, " f%d; ", pi);
       }
-      fprintf(out, "RaeTask* __task; } __raespawn_args_%s;\n", mangled);
+      fprintf(out, "RaeTask* __task; void* __frame; } __raespawn_args_%s;\n", mangled);
       fprintf(out, "RAE_UNUSED static void* __raespawn_thunk_%s(void* __vp) {\n", mangled);
       /* The crash handler runs on an alternate signal stack, which is per
        * thread: without one of its own a worker's stack overflow dies
@@ -4454,7 +4467,40 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       if (!is_void) fprintf(out, "  *(%s*)__a->__task->result = %s(", rt, mangled);
       else fprintf(out, "  %s(", mangled);
       for (int k = 0; k < pi; k++) { if (k) fprintf(out, ", "); fprintf(out, "__a->f%d", k); }
-      fprintf(out, ");\n  atomic_store_explicit(&__a->__task->done, 1, memory_order_release); free(__a); return ((void*)0);\n}\n");
+      fprintf(out, ");\n  rae_task_complete(__a->__task); free(__a); return ((void*)0);\n}\n");
+  }
+
+  // Resumable twins (c_twin.c), then a root step per spawned twin: it makes
+  // the task's frame from the spawn's arguments on the first step and steps
+  // it until it finishes (docs/lightweight-spawn-design.md §13)
+  for (size_t i = 0; i < ctx->all_decl_count; i++) {
+      const AstDecl* d = ctx->all_decls[i];
+      if (d->kind != AST_DECL_FUNC || !c_twin_is(ctx, d)) continue;
+      CFuncContext tctx = {.compiler_ctx = ctx, .module = module, .func_decl = &d->as.func_decl};
+      if (!c_spawn_threadable(&tctx, &d->as.func_decl)) continue;
+      fprintf(out, "RAE_UNUSED static int __raestep_%s(void* __vp);\n", rae_mangle_function(ctx, &d->as.func_decl));
+  }
+  c_twins_emit(ctx, module, out);
+  for (size_t i = 0; i < ctx->all_decl_count; i++) {
+      const AstDecl* d = ctx->all_decls[i];
+      if (d->kind != AST_DECL_FUNC || !c_twin_is(ctx, d)) continue;
+      const AstFuncDecl* f = &d->as.func_decl;
+      CFuncContext tctx = {.compiler_ctx = ctx, .module = module, .func_decl = f};
+      if (!c_spawn_threadable(&tctx, f)) continue;
+      const char* mangled = rae_mangle_function(ctx, f);
+      const char* rt = c_return_type(&tctx, f);
+      bool is_void = (strcmp(rt, "void") == 0);
+      int pi = 0;
+      for (const AstParam* p = f->params; p; p = p->next) pi++;
+      fprintf(out, "RAE_UNUSED static int __raestep_%s(void* __vp) {\n", mangled);
+      fprintf(out, "  __raespawn_args_%s* __a = (__raespawn_args_%s*)__vp;\n", mangled, mangled);
+      fprintf(out, "  if (!__a->__frame) {\n    rae_thread_install_altstack();\n    __a->__frame = %s__frame_new(", mangled);
+      for (int k = 0; k < pi; k++) { if (k) fprintf(out, ", "); fprintf(out, "__a->f%d", k); }
+      fprintf(out, ");\n  }\n");
+      fprintf(out, "  if (!%s__step((%s__frame*)__a->__frame)) return 0;\n", mangled, mangled);
+      if (!is_void) fprintf(out, "  *(%s*)__a->__task->result = ((%s__frame*)__a->__frame)->result;\n", rt, mangled);
+      fprintf(out, "  %s__frame_free((%s__frame*)__a->__frame);\n", mangled, mangled);
+      fprintf(out, "  RaeTask* __t = __a->__task; free(__a); rae_task_complete(__t);\n  return 1;\n}\n");
   }
 
   // Bodies for non-generic functions
@@ -4544,6 +4590,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   }
 
   fclose(out);
+  c_twins_free(ctx);
   may_wait_free(ctx->wait_graph);
   ctx->wait_graph = NULL;
   return true;

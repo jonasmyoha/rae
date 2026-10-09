@@ -63,6 +63,11 @@ typedef struct {
   int on_pool;
   void* (*thunk)(void*);
   void* args;
+  /* A resumable task (docs/lightweight-spawn-design.md §13): `step` runs it
+   * until it finishes (1) or suspends (0) on another task or a timer; the
+   * task waiting on this one, 0 when none, -1 once this one finished */
+  int (*step)(void* args);
+  _Atomic intptr_t waiter;
 } RaeTask;
 
 RaeTask* rae_task_new(size_t result_size);
@@ -72,13 +77,28 @@ void rae_task_start(RaeTask* t, void* (*thunk)(void*), void* args);
 /* Make `t` a scheduler task: the generated spawn site then hands it to
  * lib/core/Scheduler.rae's schedulerSubmit (runtime_threads.c) */
 void rae_task_prepare(RaeTask* t, void* (*thunk)(void*), void* args);
+/* The same for a resumable task: `step` is called until it answers 1 */
+void rae_task_prepare_step(RaeTask* t, int (*step)(void* args), void* args);
+/* A task's result is stored: mark it done and wake the task waiting on it */
+void rae_task_complete(RaeTask* t);
+/* Inside a resumable task: suspend until `t` is done (1), or 0 when it is
+ * done already (or another task waits on it: then the get() waits) */
+int rae_sched_wait_task(RaeTask* t);
+/* Inside a resumable task: suspend until the monotonic clock reaches
+ * `deadline_ns` (1), or 0 when it has */
+int rae_sched_sleep_until(int64_t deadline_ns);
+int64_t rae_sched_now_ns(void);
+/* A resumable frame's saved local: storage of `size` bytes that never moves */
+void* rae_frame_slot(void** slot, size_t size);
+void rae_frame_slots_free(void** slots, int count);
 /* The policy half of the scheduler is Rae (lib/core/Scheduler.rae); the
  * generated program installs it at the start of main: the worker loop the
  * pool's threads run, the wait for an unfinished task, the default worker
  * count and a parallelLoop's chunk size. Without it (a program built without
  * the prelude) the runtime keeps its own C fallbacks. */
 void rae_sched_install(void (*worker_loop)(int64_t index), void (*task_wait)(int64_t task),
-                       int64_t (*default_workers)(void), int64_t (*chunk_size)(int64_t total, int64_t workers));
+                       int64_t (*default_workers)(void), int64_t (*chunk_size)(int64_t total, int64_t workers),
+                       void (*wake)(int64_t task));
 /* parallelLoop (runtime_threads.c): run body(captures, first, end) over
  * [start, end) in chunks on the worker pool, returning when all are done. */
 typedef void (*RaeParallelBody)(void* captures, int64_t first, int64_t end);
@@ -564,6 +584,9 @@ int rae_string_pool_mark(void);
 void rae_string_pool_flush(int saved);
 void rae_string_pool_remove(void* ptr);
 void rae_string_pool_release(int saved);
+typedef struct { void** entries; int count; } RaePoolSave;
+void rae_string_pool_detach(int saved, RaePoolSave* save);
+void rae_string_pool_reattach(RaePoolSave* save);
 int rae_string_pool_contains(void* ptr);
 RAE_UNUSED static inline rae_String rae_string_pool_take(rae_String s) {
   rae_string_pool_remove(s.data);

@@ -186,6 +186,32 @@ void rae_string_pool_release(int saved) {
   g_rae_string_pool_count = saved;
 }
 
+/* A suspended task's temporaries (docs/lightweight-spawn-design.md §13): a
+ * resumable frame moves the entries it registered since `saved` out of this
+ * thread's pool before it suspends, and puts them back on top of the pool of
+ * whichever thread resumes it, so they are flushed by the frame that made
+ * them. */
+void rae_string_pool_detach(int saved, RaePoolSave* save) {
+  if (saved < 0) saved = 0;
+  if (saved >= g_rae_string_pool_count) return;
+  int count = g_rae_string_pool_count - saved;
+  void** entries = (void**)realloc(save->entries, sizeof(void*) * (size_t)(save->count + count));
+  if (!entries) return;
+  memcpy(entries + save->count, &g_rae_string_pool[saved], sizeof(void*) * (size_t)count);
+  save->entries = entries;
+  save->count += count;
+  for (int i = saved; i < g_rae_string_pool_count; i++) g_rae_string_pool[i] = NULL;
+  g_rae_string_pool_count = saved;
+}
+
+void rae_string_pool_reattach(RaePoolSave* save) {
+  if (!save->count) return;
+  for (int i = 0; i < save->count; i++) rae_string_pool_register(save->entries[i]);
+  free(save->entries);
+  save->entries = NULL;
+  save->count = 0;
+}
+
 void rae_string_pool_remove(void* ptr) {
   if (!ptr) return;
   RAE_STAT_ADD(RAE_MC_POOL_REMOVE_N, 1);

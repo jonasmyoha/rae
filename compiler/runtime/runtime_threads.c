@@ -19,12 +19,20 @@ RaeTask* rae_task_new(size_t result_size) {
   t->on_pool = 0;
   t->thunk = NULL;
   t->args = NULL;
+  t->step = NULL;
+  atomic_init(&t->waiter, 0);
   return t;
 }
 
 void rae_task_prepare(RaeTask* t, void* (*thunk)(void*), void* args) {
   t->on_pool = 1;
   t->thunk = thunk;
+  t->args = args;
+}
+
+void rae_task_prepare_step(RaeTask* t, int (*step)(void* args), void* args) {
+  t->on_pool = 1;
+  t->step = step;
   t->args = args;
 }
 
@@ -403,6 +411,7 @@ static struct {
   void (*task_wait)(int64_t task);
   int64_t (*default_workers)(void);
   int64_t (*chunk_size)(int64_t total, int64_t workers);
+  void (*wake)(int64_t task);
 } g_sched_hooks;
 /* How long a worker spins after a job before it sleeps. A solver step runs a
  * few hundred parallelLoops a few microseconds apart, and a worker that fell
@@ -534,11 +543,13 @@ static int64_t rae_pool_now_ns(void) {
 
 
 void rae_sched_install(void (*worker_loop)(int64_t index), void (*task_wait)(int64_t task),
-                       int64_t (*default_workers)(void), int64_t (*chunk_size)(int64_t total, int64_t workers)) {
+                       int64_t (*default_workers)(void), int64_t (*chunk_size)(int64_t total, int64_t workers),
+                       void (*wake)(int64_t task)) {
   g_sched_hooks.worker_loop = worker_loop;
   g_sched_hooks.task_wait = task_wait;
   g_sched_hooks.default_workers = default_workers;
   g_sched_hooks.chunk_size = chunk_size;
+  g_sched_hooks.wake = wake;
 }
 
 typedef struct {
@@ -593,6 +604,23 @@ int64_t rae_ext_Scheduler_queuePopNewest(int64_t queue) {
   int64_t task = 0;
   if (count > 0) {
     task = (int64_t)(intptr_t)q->ring[(q->head + count - 1) % q->cap];
+    atomic_store_explicit(&q->count, count - 1, memory_order_release);
+  }
+  pthread_mutex_unlock(&q->lock);
+  return task;
+}
+
+/* The oldest task (a thief's end), or 0; also 0 when another thread holds
+ * the queue (a thief does not wait in line: the one holding it is taking) */
+int64_t rae_ext_Scheduler_queueTryPopOldest(int64_t queue) {
+  RaeTaskQueue* q = rae_sched_queue(queue);
+  if (!q || atomic_load_explicit(&q->count, memory_order_relaxed) == 0) return 0;
+  if (pthread_mutex_trylock(&q->lock) != 0) return 0;
+  int64_t count = atomic_load_explicit(&q->count, memory_order_relaxed);
+  int64_t task = 0;
+  if (count > 0) {
+    task = (int64_t)(intptr_t)q->ring[q->head];
+    q->head = (q->head + 1) % q->cap;
     atomic_store_explicit(&q->count, count - 1, memory_order_release);
   }
   pthread_mutex_unlock(&q->lock);
@@ -702,26 +730,143 @@ static pthread_mutex_t g_sched_done_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t g_sched_done_cond = PTHREAD_COND_INITIALIZER;
 static _Atomic int g_sched_done_waiters = 0;
 
-/* Run a task's thunk: it stores the result and marks the task done (after
- * which `task` may already be freed by its waiter, so it is not touched) */
+/* The resumable task this thread is running (rae_sched_wait_task and
+ * rae_sched_sleep_until suspend it) */
+static __thread RaeTask* g_sched_current_task = NULL;
+
+/* Run a task: a thunk to the end, or a resumable task's step until it
+ * finishes or suspends. Finishing stores the result and marks the task done
+ * (rae_task_complete), after which `task` may already be freed by its waiter,
+ * and a suspended task may already be running on another worker: either way
+ * it is not touched again here. */
 void rae_ext_Scheduler_runTask(int64_t task) {
   RaeTask* t = (RaeTask*)(intptr_t)task;
   if (!t) return;
   int saved_inside = g_pool_inside;
+  RaeTask* saved_task = g_sched_current_task;
   g_pool_inside = 0;
   /* The task's result belongs to the task: what the thunk leaves in this
    * thread's String pool is released, not flushed, as in rae_task_start's
    * caller fallback. A pool thread runs many tasks, and a waiting thread runs
-   * one in the middle of its own statement. */
+   * one in the middle of its own statement. A suspending step leaves nothing
+   * there (its frames carry their temporaries). */
   int pool_mark = rae_string_pool_mark();
-  t->thunk(t->args);
+  if (t->step) {
+    g_sched_current_task = t;
+    t->step(t->args);
+  } else {
+    t->thunk(t->args);
+  }
   rae_string_pool_release(pool_mark);
+  g_sched_current_task = saved_task;
   g_pool_inside = saved_inside;
+}
+
+static void rae_sched_wake_blocked(void) {
   if (atomic_load(&g_sched_done_waiters) > 0) {
     pthread_mutex_lock(&g_sched_done_lock);
     pthread_cond_broadcast(&g_sched_done_cond);
     pthread_mutex_unlock(&g_sched_done_lock);
   }
+}
+
+void rae_task_complete(RaeTask* t) {
+  intptr_t waiter = atomic_exchange(&t->waiter, (intptr_t)-1);
+  atomic_store_explicit(&t->done, 1, memory_order_release);
+  if (waiter > 0 && g_sched_hooks.wake) g_sched_hooks.wake((int64_t)waiter);
+  rae_sched_wake_blocked();
+}
+
+int rae_sched_wait_task(RaeTask* t) {
+  RaeTask* current = g_sched_current_task;
+  if (!t || !current || current == t) return 0;
+  /* Done already, perhaps without rae_task_complete (a spawn that ran on its
+   * caller marks its task done directly): nothing to wait for */
+  if (rae_task_is_done(t)) return 0;
+  intptr_t expected = 0;
+  if (atomic_compare_exchange_strong(&t->waiter, &expected, (intptr_t)current)) return 1;
+  /* Finished (-1): its result may still be on its way to `done` */
+  if (expected == (intptr_t)-1) {
+    while (!rae_task_is_done(t)) rae_cpu_relax();
+  }
+  return 0;
+}
+
+int64_t rae_sched_now_ns(void) {
+  struct timespec now;
+  clock_gettime(CLOCK_MONOTONIC, &now);
+  return (int64_t)now.tv_sec * 1000000000LL + now.tv_nsec;
+}
+
+/* The timers of sleeping tasks: a locked binary heap by deadline. Workers
+ * take the due ones (Scheduler.rae) and park no longer than the next. */
+typedef struct { int64_t deadline; RaeTask* task; } RaeTimer;
+static pthread_mutex_t g_sched_timer_lock = PTHREAD_MUTEX_INITIALIZER;
+static RaeTimer* g_sched_timers = NULL;
+static int64_t g_sched_timer_count = 0;
+static int64_t g_sched_timer_cap = 0;
+static _Atomic int64_t g_sched_next_deadline = 0;   /* 0: no timer */
+
+static void rae_sched_timer_push(int64_t deadline, RaeTask* task) {
+  pthread_mutex_lock(&g_sched_timer_lock);
+  if (g_sched_timer_count == g_sched_timer_cap) {
+    g_sched_timer_cap = g_sched_timer_cap ? g_sched_timer_cap * 2 : 256;
+    g_sched_timers = (RaeTimer*)realloc(g_sched_timers, (size_t)g_sched_timer_cap * sizeof(RaeTimer));
+  }
+  int64_t i = g_sched_timer_count++;
+  while (i > 0 && g_sched_timers[(i - 1) / 2].deadline > deadline) {
+    g_sched_timers[i] = g_sched_timers[(i - 1) / 2];
+    i = (i - 1) / 2;
+  }
+  g_sched_timers[i].deadline = deadline;
+  g_sched_timers[i].task = task;
+  atomic_store(&g_sched_next_deadline, g_sched_timers[0].deadline);
+  pthread_mutex_unlock(&g_sched_timer_lock);
+}
+
+/* The task of the earliest timer due by `now_ns`, or 0 */
+int64_t rae_ext_Scheduler_timerDue(int64_t now_ns) {
+  int64_t next = atomic_load(&g_sched_next_deadline);
+  if (next == 0 || next > now_ns) return 0;
+  pthread_mutex_lock(&g_sched_timer_lock);
+  RaeTask* task = NULL;
+  if (g_sched_timer_count > 0 && g_sched_timers[0].deadline <= now_ns) {
+    task = g_sched_timers[0].task;
+    RaeTimer last = g_sched_timers[--g_sched_timer_count];
+    int64_t i = 0;
+    for (;;) {
+      int64_t child = 2 * i + 1;
+      if (child >= g_sched_timer_count) break;
+      if (child + 1 < g_sched_timer_count && g_sched_timers[child + 1].deadline < g_sched_timers[child].deadline) child++;
+      if (g_sched_timers[child].deadline >= last.deadline) break;
+      g_sched_timers[i] = g_sched_timers[child];
+      i = child;
+    }
+    if (g_sched_timer_count > 0) g_sched_timers[i] = last;
+  }
+  atomic_store(&g_sched_next_deadline, g_sched_timer_count > 0 ? g_sched_timers[0].deadline : 0);
+  pthread_mutex_unlock(&g_sched_timer_lock);
+  return (int64_t)(intptr_t)task;
+}
+
+/* The earliest timer's deadline (monotonic ns), or 0 */
+int64_t rae_ext_Scheduler_nextTimer(void) {
+  return atomic_load(&g_sched_next_deadline);
+}
+
+int64_t rae_ext_Scheduler_nowNs(void) {
+  return rae_sched_now_ns();
+}
+
+static void rae_sched_unpark_all(void);
+
+int rae_sched_sleep_until(int64_t deadline_ns) {
+  RaeTask* current = g_sched_current_task;
+  if (!current || rae_sched_now_ns() >= deadline_ns) return 0;
+  rae_sched_timer_push(deadline_ns, current);
+  /* A parked worker may be waiting longer than this deadline */
+  rae_sched_unpark_all();
+  return 1;
 }
 
 rae_Bool rae_ext_Scheduler_taskIsDone(int64_t task) {
@@ -790,6 +935,25 @@ int64_t rae_ext_Scheduler_performanceCores(void) {
 
 int64_t rae_ext_Scheduler_maxWorkers(void) {
   return RAE_POOL_MAX;
+}
+
+/* A frame slot: `size` bytes that never move, (re)made when too small. The
+ * size sits in front of the storage. */
+void* rae_frame_slot(void** slot, size_t size) {
+  size_t* block = *slot ? ((size_t*)*slot) - 2 : NULL;
+  if (!block || block[0] < size) {
+    free(block);
+    block = (size_t*)calloc(1, size + 2 * sizeof(size_t));
+    block[0] = size;
+    *slot = block + 2;
+  }
+  return *slot;
+}
+
+void rae_frame_slots_free(void** slots, int count) {
+  for (int i = 0; i < count; i++) {
+    if (slots[i]) free(((size_t*)slots[i]) - 2);
+  }
 }
 
 static void rae_sched_wait(RaeTask* t) {
@@ -972,13 +1136,33 @@ static struct {
   void (*task_wait)(int64_t task);
 } g_sched_hooks;
 void rae_sched_install(void (*worker_loop)(int64_t index), void (*task_wait)(int64_t task),
-                       int64_t (*default_workers)(void), int64_t (*chunk_size)(int64_t total, int64_t workers)) {
-  (void)worker_loop; (void)default_workers; (void)chunk_size;
+                       int64_t (*default_workers)(void), int64_t (*chunk_size)(int64_t total, int64_t workers),
+                       void (*wake)(int64_t task)) {
+  (void)worker_loop; (void)default_workers; (void)chunk_size; (void)wake;
   g_sched_hooks.task_wait = task_wait;
 }
+/* No pool: a resumable task never runs (its spawn stays a thread, which a
+ * build without threads runs on its caller), so nothing suspends */
+void rae_task_complete(RaeTask* t) { atomic_store_explicit(&t->done, 1, memory_order_release); }
+int rae_sched_wait_task(RaeTask* t) { (void)t; return 0; }
+int rae_sched_sleep_until(int64_t deadline_ns) { (void)deadline_ns; return 0; }
+int64_t rae_sched_now_ns(void) {
+  struct timespec now;
+  clock_gettime(CLOCK_MONOTONIC, &now);
+  return (int64_t)now.tv_sec * 1000000000LL + now.tv_nsec;
+}
+int64_t rae_ext_Scheduler_timerDue(int64_t now_ns) { (void)now_ns; return 0; }
+int64_t rae_ext_Scheduler_nextTimer(void) { return 0; }
+int64_t rae_ext_Scheduler_nowNs(void) { return rae_sched_now_ns(); }
+void* rae_frame_slot(void** slot, size_t size) {
+  if (!*slot) *slot = calloc(1, size < 16 ? 16 : size);
+  return *slot;
+}
+void rae_frame_slots_free(void** slots, int count) { for (int i = 0; i < count; i++) free(slots[i]); }
 void rae_ext_Scheduler_queuePush(int64_t queue, int64_t task) { (void)queue; (void)task; }
 int64_t rae_ext_Scheduler_queuePopNewest(int64_t queue) { (void)queue; return 0; }
 int64_t rae_ext_Scheduler_queuePopOldest(int64_t queue) { (void)queue; return 0; }
+int64_t rae_ext_Scheduler_queueTryPopOldest(int64_t queue) { (void)queue; return 0; }
 int64_t rae_ext_Scheduler_queueCount(int64_t queue) { (void)queue; return 0; }
 rae_Bool rae_ext_Scheduler_queueTake(int64_t queue, int64_t task, int64_t window) { (void)queue; (void)task; (void)window; return 0; }
 int64_t rae_ext_Scheduler_currentWorker(void) { return -1; }
@@ -989,7 +1173,11 @@ void rae_ext_Scheduler_runTask(int64_t task) {
   RaeTask* t = (RaeTask*)(intptr_t)task;
   if (!t) return;
   int pool_mark = rae_string_pool_mark();
-  t->thunk(t->args);
+  if (t->step) {
+    while (!t->step(t->args)) {}
+  } else {
+    t->thunk(t->args);
+  }
   rae_string_pool_release(pool_mark);
 }
 rae_Bool rae_ext_Scheduler_taskIsDone(int64_t task) { return rae_task_is_done((RaeTask*)(intptr_t)task) ? 1 : 0; }

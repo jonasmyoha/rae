@@ -147,6 +147,24 @@ typedef struct {
   // counted loop is emitted, the plan whose accesses were proven in range for
   // every iteration; they lower to a plain load or store. NULL otherwise.
   const struct LoopVersionPlan* loop_version_fast;
+  // Resumable twins (c_twin.c, docs/lightweight-spawn-design.md §13): while a
+  // twin's step function is emitted, `twin` is set. A wait that cannot
+  // suspend where it stands and could reach a sleep sets `twin_failed`;
+  // `twin_no_suspend` counts the open constructs no wait may suspend in;
+  // the overrides print a hoisted wait's result in place of its expression;
+  // `twin_args_from_frame` reads locals from their frame slots (a child
+  // frame's arguments).
+  bool twin;
+  bool twin_failed;
+  int twin_no_suspend;
+  int twin_state;
+  struct TwinSlots* twin_slots;
+  const void* twin_override_expr[16];
+  char twin_override_text[16][48];
+  int twin_override_count;
+  bool twin_args_from_frame;
+  Str twin_hoist_temps[16];
+  int twin_hoist_count;
 } CFuncContext;
 
 typedef struct CStmtTemps {
@@ -264,6 +282,16 @@ bool c_spawn_threadable(CFuncContext* ctx, const AstFuncDecl* f);
 /* True when a spawn of this function runs as a task on the scheduler's
  * worker pool (lib/core/Scheduler.rae) instead of a thread (c_backend.c) */
 bool c_spawn_on_pool(CFuncContext* ctx, const AstDecl* callee_decl);
+/* Resumable twins (c_twin.c) */
+void c_twins_plan(CompilerContext* ctx, const AstModule* module);
+void c_twins_emit(CompilerContext* ctx, const AstModule* module, FILE* out);
+void c_twins_free(CompilerContext* ctx);
+bool c_twin_is(CompilerContext* ctx, const AstDecl* decl);
+void c_twin_before_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
+void c_twin_after_stmt(CFuncContext* ctx);
+bool c_twin_override_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out);
+/* The C spelling of local `name` read from its frame slot (twin_args_from_frame) */
+bool c_twin_slot_ref(CFuncContext* ctx, Str name, Str* out);
 /* The mangled C name of a lib/core function, NULL without the prelude */
 const char* core_function_mangled(CompilerContext* ctx, const char* name);
 /* True when a non-view/mod param type is a heap aggregate (List/Map instance
