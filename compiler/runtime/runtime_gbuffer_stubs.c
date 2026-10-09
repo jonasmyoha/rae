@@ -43,7 +43,7 @@ void rae_g3d_set_shadow_inputs(void* frame_ubuf, void* array_view, void* sampler
 }
 
 /* Skinning (#374). Stubbed for builds without the GPU backend. */
-int rae_g3d_push_skinned_draw(int64_t mesh, rae_Mat4* model,
+int rae_g3d_push_skinned_draw(int64_t mesh, const rae_Mat4* model,
                               float r, float g, float b,
                               float metallic, float roughness, void* palette){
     (void)mesh; (void)model; (void)r; (void)g; (void)b; (void)metallic; (void)roughness; (void)palette;

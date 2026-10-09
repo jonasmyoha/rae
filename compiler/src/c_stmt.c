@@ -1802,12 +1802,12 @@ static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
         bool collection_is_ref = collection_type->is_view || collection_type->is_mod;
         const char* elements = collection_is_array ? "->v" : ".data";
         fprintf(out, "  {\n    ");
-        if (collection_is_array && collection_type->is_view) fprintf(out, "const ");
-        emit_type_ref_as_c_type(ctx, &collection_value_type, out, false);
+        if (!collection_is_array) emit_type_ref_as_c_type(ctx, &collection_value_type, out, false);
         if (collection_is_array) {
             /* emit_expr already dereferences a view/mod parameter, so the
-             * expression is the struct itself in every case. */
-            fprintf(out, "* __rae_collection%d = &(", loop_id);
+             * expression is the struct itself in every case. `__auto_type`
+             * keeps its constness: an Array field of a `view` is const. */
+            fprintf(out, "__auto_type __rae_collection%d = &(", loop_id);
             emit_expr(ctx, stmt->as.loop_stmt.condition, out, PREC_LOWEST, false, false);
             fprintf(out, ")");
             fprintf(out, ";\n    int64_t __rae_collection_length%d = %lldLL;\n", loop_id, array_cap);
@@ -2700,8 +2700,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                             && !(opt_src_tr->is_view || opt_src_tr->is_mod)
                             && rae_opt_is_struct_rep(ctx, opt_src_tr)) {
                             int oid = ctx->temp_counter++;
-                            fprintf(out, "{ .ptr = ({ %s* __ov%d = &(",
-                                    rae_opt_type_name(ctx, opt_src_tr), oid);
+                            fprintf(out, "{ .ptr = ({ __auto_type __ov%d = &(", oid);
                             emit_expr(ctx, opt_src, out, PREC_LOWEST, true, false);
                             fprintf(out, "); __ov%d->has ? &__ov%d->value : NULL; }) }",
                                     oid, oid);
@@ -2751,7 +2750,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                             int oid = ctx->temp_counter++;
                             fprintf(out, "(");
                             emit_type_ref_as_c_type(ctx, stmt->as.let_stmt.type, out, false);
-                            fprintf(out, ")({ %s* __ov%d = &(", rae_opt_type_name(ctx, inner_tr), oid);
+                            fprintf(out, ")({ __auto_type __ov%d = &(", oid);
                             emit_expr(ctx, unbox_inner, out, PREC_LOWEST, true, false);
                             fprintf(out, "); __ov%d->has ? &__ov%d->value : NULL; })", oid, oid);
                         } else {

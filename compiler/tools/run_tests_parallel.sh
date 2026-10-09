@@ -84,6 +84,12 @@ if [ -f tools/check-targets.sh ]; then
   if bash tools/check-targets.sh; then TARGETS_CHECK=0; fi
   echo
 fi
+# The generated C compiles without warnings (tools/c-warnings-gate.sh).
+WARNINGS_CHECK=1
+if [ -f tools/c-warnings-gate.sh ]; then
+  if bash tools/c-warnings-gate.sh; then WARNINGS_CHECK=0; fi
+  echo
+fi
 # Both Rae HTTP benchmark servers against every spec/Http.md rule
 # (benchmarks/servers/check.sh --rae, decision F7): correctness, never speed.
 SERVER_CHECK=1
@@ -124,6 +130,7 @@ if [ "$STRESS_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1
 if [ "$TSAN_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$SERVER_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$TARGETS_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
+if [ "$WARNINGS_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 # #917: the format-CLI behavior checks (traversal, --check/--json, mtime,
 # permissions, atomic write, over-cap) — one extra "case" folded into the run.
 if [ -f tools/test-format-cli.sh ]; then
