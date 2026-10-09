@@ -47,7 +47,9 @@ func frameInputSystem(
   # buildAppWorld, so the current frame keeps rendering the old world at its
   # matching resolution until the rebuild swaps both atomically.
   let liveViewport: Viewport = createViewportFromWindow()
-  let extentChanged: Bool = liveViewport.layoutW is not app.viewport.layoutW or liveViewport.layoutH is not app.viewport.layoutH
+  # A size class change re-lays out too (a move to a display with another
+  # scale changes the points without changing the pixels)
+  let extentChanged: Bool = liveViewport.layoutW is not app.viewport.layoutW or liveViewport.layoutH is not app.viewport.layoutH or liveViewport.sizeClass is not app.viewport.sizeClass
   # The size class in points follows the window (a resize, or a move to a
   # display with another scale); an iPad in Split View is compact
   if updateInputSizeClass(input: input) {

@@ -47,8 +47,16 @@ func createApp() ret App {
   # `RAE_UI_HEADLESS=1`: see headless.rae.
   let isHeadless: Bool = headlessIsActive()
   uiSetConfigFlags(flags: headlessConfigFlags(headless: isHeadless))
-  let winW: Float = windowW
-  let winH: Float = windowH
+  # `RAE_UI_WINDOW=WxH` (points) starts at another size, to check each size
+  # class's layout headlessly (compact 500, medium 700, expanded 1200 wide)
+  var winW: Float = windowW
+  var winH: Float = windowH
+  let windowEnv: String = getEnv(name: "RAE_UI_WINDOW")
+  let windowParts: List(String) = windowEnv.split(sep: "x")
+  if windowParts.length is 2 {
+    winW = windowParts.copyAtDefault(index: 0).toInt().toFloat()
+    winH = windowParts.copyAtDefault(index: 1).toInt().toFloat()
+  }
   uiInitWindow(width: winW.toInt(), height: winH.toInt(), title: "Rae Mobile UI — {backendEnv}")
   # Remember the window across restarts. Opt-in. The name carries the app id:
   # dir() is ".rae" for every app, so a shared name is a shared window
@@ -57,7 +65,10 @@ func createApp() ret App {
     dir: dir()
     name: "window.106_mobile_ui.geometry"
   )
-  restoreWindowGeometry(windowGeometry: windowGeometry)
+  # An explicit RAE_UI_WINDOW size wins over the remembered one
+  if windowParts.length is not 2 {
+    restoreWindowGeometry(windowGeometry: windowGeometry)
+  }
   # Backend-agnostic window/input hooks are no-ops on GPU2D when the SDL3
   # backend already owns the corresponding event state.
   uiInstallWindowCloseWaker()
