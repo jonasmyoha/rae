@@ -1,0 +1,106 @@
+# lib/ui's per-interaction input rules (docs/platform-conditional-code.md
+# §3.1 layer 4): a finger gets a touch-sized hit target and no hover, a mouse
+# or pen the precise rectangle; the window's size class comes from its width
+# in points and changes when the window does (an iPad going into Split View).
+open ui/InputKind
+open ui/SizeClass
+
+# A 20 x 20 button at (100, 100), probed at (x, y) by a pointer of `kind`
+func probe(
+  label: view String
+  kind: view InputKind
+  x: copy Float
+  y: copy Float
+) {
+  let hit: Bool = pointInTarget(
+    x: x
+    y: y
+    left: 100.0
+    top: 100.0
+    width: 20.0
+    height: 20.0
+    targetSize: targetSizeFor(kind: kind, touchTargetUnits: touchTargetPoints)
+  )
+  log("{label} ({kind}): {hit}")
+}
+
+func main() {
+  log(
+    "codes: {inputKindFromCode(code: 0)} {inputKindFromCode(code: 1)} {inputKindFromCode(code: 2)}"
+  )
+  probe(
+    label: "on the button"
+    kind: InputKind.mouse
+    x: 110.0
+    y: 110.0
+  )
+  probe(
+    label: "8 pt left of it"
+    kind: InputKind.mouse
+    x: 92.0
+    y: 110.0
+  )
+  probe(
+    label: "8 pt left of it"
+    kind: InputKind.pen
+    x: 92.0
+    y: 110.0
+  )
+  probe(
+    label: "8 pt left of it"
+    kind: InputKind.touch
+    x: 92.0
+    y: 110.0
+  )
+  probe(
+    label: "13 pt left of it"
+    kind: InputKind.touch
+    x: 87.0
+    y: 110.0
+  )
+  let largeControl: Bool = pointInTarget(
+    x: 98.0
+    y: 110.0
+    left: 100.0
+    top: 100.0
+    width: 60.0
+    height: 60.0
+    targetSize: targetSizeFor(kind: InputKind.touch, touchTargetUnits: touchTargetPoints)
+  )
+  log("a 60 pt control is not grown for a finger: {largeControl}")
+  log("hover, trackpad: {showsHover(kind: InputKind.mouse, canHover: true)}")
+  log("hover, finger on a touch MacBook: {showsHover(kind: InputKind.touch, canHover: true)}")
+  log(
+    "hover, pen on a tablet without a hovering pointer: {showsHover(
+      kind: InputKind.pen
+      canHover: false
+    )}"
+  )
+  log(
+    "599 pt: {sizeClassForWidth(widthPoints: 599.0)}, 600 pt: {sizeClassForWidth(widthPoints: 600.0)}"
+  )
+  log(
+    "839 pt: {sizeClassForWidth(widthPoints: 839.0)}, 840 pt: {sizeClassForWidth(widthPoints: 840.0)}"
+  )
+  log("2048 px at scale 2: {pointsFromPixels(pixels: 2048.0, scale: 2.0)} pt")
+  var windowSizeClass: WindowSizeClass = createWindowSizeClass(widthPoints: 1024.0)
+  log("iPad full screen: {windowSizeClass.sizeClass}")
+  log(
+    "Split View half: changed {updateWindowSizeClass(
+      windowSizeClass: windowSizeClass
+      widthPoints: 507.0
+    )}, {windowSizeClass.sizeClass}"
+  )
+  log(
+    "narrower still: changed {updateWindowSizeClass(
+      windowSizeClass: windowSizeClass
+      widthPoints: 320.0
+    )}, {windowSizeClass.sizeClass}"
+  )
+  log(
+    "Split View two thirds: changed {updateWindowSizeClass(
+      windowSizeClass: windowSizeClass
+      widthPoints: 694.0
+    )}, {windowSizeClass.sizeClass}"
+  )
+}

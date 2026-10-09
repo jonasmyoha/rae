@@ -1,0 +1,78 @@
+# Which device a pointer event came from, and what that means for a control
+# (docs/platform-conditional-code.md §3.1 layer 4, rule 2): a finger gets a
+# touch-sized hit target and no hover, a mouse, trackpad or pen the precise
+# rectangle and hover where the device can hover. The decision is per
+# interaction, so the same control on a touch MacBook is precise for a
+# trackpad click and touch-sized for a tap.
+enum InputKind { mouse, touch, pen }
+
+# The smallest target a finger can hit reliably, in points (Apple's 44 pt;
+# Material's 48 dp is the same size class)
+const touchTargetPoints: Float = 44.0
+
+# The kind of the last pointer event (SDL3 marks the mouse events it makes
+# from a touch or a pen; in the browser SDL reads Pointer Events)
+func lastPointerKind() ret InputKind {
+  unsafe {
+    ret inputKindFromCode(code: pointerKindCode())
+  }
+}
+
+# The gpu2d event pump's record of it (runtime_gpu2d_platform.c): 0 mouse or
+# trackpad, 1 touch, 2 pen
+func pointerKindCode() unsafe extern("rae_ext_Gpu2d_pointerKind") ret Int
+
+func inputKindFromCode(code: view Int) ret InputKind {
+  if code is 1 {
+    ret InputKind.touch
+  }
+  if code is 2 {
+    ret InputKind.pen
+  }
+  ret InputKind.mouse
+}
+
+# The smallest target side for `kind`, in the caller's layout units:
+# `touchTargetUnits` for a finger, 0 (the control's own rectangle) otherwise
+func targetSizeFor(kind: view InputKind, touchTargetUnits: view Float) ret Float {
+  if kind is InputKind.touch {
+    ret touchTargetUnits
+  }
+  ret 0.0
+}
+
+# Whether (x, y) hits the rectangle at (left, top) of `width` x `height`,
+# grown around its centre to at least `targetSize` on each side. A
+# `targetSize` of 0 is the precise test.
+func pointInTarget(
+  x: view Float
+  y: view Float
+  left: view Float
+  top: view Float
+  width: view Float
+  height: view Float
+  targetSize: view Float
+) ret Bool {
+  var growX: Float = 0.0
+  var growY: Float = 0.0
+  if targetSize > width {
+    growX = (targetSize - width) * 0.5
+  }
+  if targetSize > height {
+    growY = (targetSize - height) * 0.5
+  }
+  if x < left - growX or x > left + width + growX {
+    ret false
+  }
+  if y < top - growY or y > top + height + growY {
+    ret false
+  }
+  ret true
+}
+
+# Hover effects show only for a pointer that hovers: never for a finger
+# (its position stays where it lifted), and only where the device has a
+# hovering pointer at all (`Device.canHover()`)
+func showsHover(kind: view InputKind, canHover: view Bool) ret Bool {
+  ret canHover and kind is not InputKind.touch
+}

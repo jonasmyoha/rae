@@ -394,6 +394,22 @@ per-platform.
    `lib/Device.rae`, `lib/Display.rae`, `runtime_device.c`, fixture 1067.
 6. lib/ui: the per-event pointer kind, `lastInputKind`, hover only when
    `canHover`, and the window size class in points.
+   **Done (0.1.241):**
+   - `lib/ui/InputKind.rae`: `InputKind { mouse, touch, pen }`, from the
+     gpu2d event pump (SDL3 marks mouse events made from a touch or a pen
+     with `SDL_TOUCH_MOUSEID` / `SDL_PEN_MOUSEID`; in the browser SDL reads
+     Pointer Events). Also `pointInTarget` (a rectangle grown to at least a
+     target size), `touchTargetPoints` (44) and `showsHover`.
+   - `lib/ui/SizeClass.rae`: `SizeClass { compact, medium, expanded }` from
+     the width in points (< 600, < 840), and the `WindowSizeClass` resource.
+   - lib/ui's `UiInput`: each `UiPointerState` carries its `kind`, there is
+     `lastInputKind`, and hit testing tries the precise rectangle first and
+     then, for a finger only, touch-sized targets. Hover is marked only when
+     `showsHover`.
+   - 106_mobile_ui's own input system does the same (44 pt converted to its
+     design units), drops hover for a finger or a device without hover, and
+     recomputes the size class every frame, logging a change.
+   - Fixture 1068.
 
 ## 6. Decisions (maintainer, 2026-10-08: all four as recommended)
 

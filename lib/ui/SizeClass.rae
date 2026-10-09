@@ -1,0 +1,62 @@
+# The window's size class, from its width in POINTS
+# (docs/platform-conditional-code.md §3.1 layer 4, rule 1): layout picks a
+# size class from the window, never from the device, so an iPad in Split View
+# gets the compact layout because its window IS compact. Material 3's
+# breakpoints; Apple's compact / regular is the same idea.
+import Gpu2d
+import Display
+
+enum SizeClass { compact, medium, expanded }
+
+# Below this width (points) a window is compact
+const compactMaxPoints: Float = 600.0
+
+# Below this width (points) a window is medium; at or above it, expanded
+const mediumMaxPoints: Float = 840.0
+
+func sizeClassForWidth(widthPoints: view Float) ret SizeClass {
+  if widthPoints < compactMaxPoints {
+    ret SizeClass.compact
+  }
+  if widthPoints < mediumMaxPoints {
+    ret SizeClass.medium
+  }
+  ret SizeClass.expanded
+}
+
+# The window's width in points: its pixels over the display scale
+func windowWidthPoints() ret Float {
+  ret pointsFromPixels(pixels: Gpu2d.windowWidth().toFloat(), scale: Display.scale())
+}
+
+func pointsFromPixels(pixels: view Float, scale: view Float) ret Float {
+  if scale > 0.0 {
+    ret pixels / scale
+  }
+  ret pixels
+}
+
+# A resource: the window's width in points and its size class, recomputed
+# when the window is resized or moves to a display with another scale
+type WindowSizeClass {
+  widthPoints: Float
+  sizeClass: SizeClass
+}
+
+func createWindowSizeClass(widthPoints: view Float) ret WindowSizeClass {
+  ret WindowSizeClass {
+    widthPoints: widthPoints
+    sizeClass: sizeClassForWidth(widthPoints: widthPoints)
+  }
+}
+
+# Take a new width: true when the size class changed (layout switches then)
+func updateWindowSizeClass(windowSizeClass: mod WindowSizeClass, widthPoints: view Float) ret Bool {
+  let next: SizeClass = sizeClassForWidth(widthPoints: widthPoints)
+  windowSizeClass.widthPoints = widthPoints
+  if next is windowSizeClass.sizeClass {
+    ret false
+  }
+  windowSizeClass.sizeClass = next
+  ret true
+}
