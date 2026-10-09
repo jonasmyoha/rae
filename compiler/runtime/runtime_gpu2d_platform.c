@@ -52,6 +52,16 @@ static size_t g_g2d_text_input_len = 0;
 /* Set when the OS reports a window resize; consumed (cleared) once by
  * gpu2d.windowResized() so the app rebuilds its layout for the new size. */
 static int    g_g2d_win_resized = 0;
+/* The kind of the last pointer event (lib/ui/InputKind.rae: 0 mouse or
+ * trackpad, 1 touch, 2 pen). SDL turns a touch or a pen into mouse events
+ * too, marked with SDL_TOUCH_MOUSEID / SDL_PEN_MOUSEID, so the mouse
+ * events say which device produced them. */
+static int    g_g2d_pointer_kind = 0;
+static int rae_g2d_kind_of_mouse(SDL_MouseID which) {
+    if (which == SDL_TOUCH_MOUSEID) return 1;
+    if (which == SDL_PEN_MOUSEID) return 2;
+    return 0;
+}
 static int    g_g2d_cursor_kind = -1;
 static SDL_Cursor* g_g2d_cursors[7] = {0};
 /* Last endFrame surface-present result. Rendering always targets the offscreen
@@ -419,6 +429,7 @@ rae_Bool rae_ext_Gpu2d_pollClose(void) {
                 break;
             }
             case SDL_EVENT_FINGER_DOWN:
+                g_g2d_pointer_kind = 1;
                 if (g_g2d_touch_n < RAE_G2D_MAX_TOUCH) {
                     g_g2d_touch[g_g2d_touch_n].id = e.tfinger.fingerID;
                     g_g2d_touch[g_g2d_touch_n].nx = e.tfinger.x;
@@ -428,6 +439,7 @@ rae_Bool rae_ext_Gpu2d_pollClose(void) {
                 }
                 break;
             case SDL_EVENT_FINGER_MOTION:
+                g_g2d_pointer_kind = 1;
                 for (int ti = 0; ti < g_g2d_touch_n; ti++) {
                     if (g_g2d_touch[ti].id == e.tfinger.fingerID) {
                         g_g2d_touch[ti].nx = e.tfinger.x;
@@ -445,7 +457,15 @@ rae_Bool rae_ext_Gpu2d_pollClose(void) {
                     }
                 }
                 break;
+            case SDL_EVENT_MOUSE_MOTION:
+                g_g2d_pointer_kind = rae_g2d_kind_of_mouse(e.motion.which);
+                break;
+            case SDL_EVENT_PEN_DOWN:
+            case SDL_EVENT_PEN_MOTION:
+                g_g2d_pointer_kind = 2;
+                break;
             case SDL_EVENT_MOUSE_BUTTON_DOWN:
+                g_g2d_pointer_kind = rae_g2d_kind_of_mouse(e.button.which);
                 if (e.button.button < 8) {
                     g_sdl_mouse[e.button.button] = 1;
                     g_sdl_mouse_pressed[e.button.button] = 1;
@@ -666,6 +686,7 @@ float rae_ext_Gpu2d_safeLeft(void){ double t,b,l,r; rae_g2d_safe_insets_design(&
 float rae_ext_Gpu2d_safeRight(void){ double t,b,l,r; rae_g2d_safe_insets_design(&t,&b,&l,&r); return (float)r; }
 /* Left mouse button held this frame (button index 1 in SDL). */
 rae_Bool rae_ext_Gpu2d_pointerDown(void) { return g_sdl_mouse[SDL_BUTTON_LEFT] != 0; }
+int64_t rae_ext_Gpu2d_pointerKind(void) { return g_g2d_pointer_kind; }
 rae_Bool rae_ext_Gpu2d_pointerPressed(void) { return g_sdl_mouse_pressed[SDL_BUTTON_LEFT] != 0; }
 rae_Bool rae_ext_Gpu2d_pointerReleased(void) { return g_sdl_mouse_released[SDL_BUTTON_LEFT] != 0; }
 /* Per-frame wheel delta (positive = wheel/scroll up). */

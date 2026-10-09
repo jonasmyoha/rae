@@ -2,6 +2,7 @@ open ui/Ecs
 open ecs/Event
 open ecs/Entity
 open ui/UiSystems
+open ui/InputKind
 
 # Per-frame "did anything change?" gate. With the wait-events loop,
 # the inner loop iterates only when an OS event arrived or our timeout
@@ -79,12 +80,17 @@ func decideActive(
   # mirrored when the debug overlay needs it.
   let mx: Float = viewportPointerX(viewport: viewport)
   let my: Float = viewportPointerY(viewport: viewport)
-  let currentHovered: EntityId = hitTest(
-    world: world
-    uiSystems: uiSystems
-    x: mx
-    y: my
-  )
+  # Hover only for a pointer that hovers: never a finger (it stays where it
+  # lifted), and only where the device has one (Device.canHover)
+  var currentHovered: EntityId = noEntity()
+  if showsHover(kind: input.pointer.kind, canHover: input.deviceWatch.facts.canHover) {
+    currentHovered = hitTest(
+      world: world
+      uiSystems: uiSystems
+      x: mx
+      y: my
+    )
+  }
   var currentMouseButtons: Int = 0
   if debug.showInputOutlines {
     # Same bitfield layout as drawDebugLabels' "button:" read-out:
