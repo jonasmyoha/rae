@@ -153,6 +153,10 @@ static void rae_crash_handler(int sig, siginfo_t* info, void* uctx) {
  * overflow silently — exactly the main-thread bug this file just fixed.
  * Thread-local storage, so nothing to free at thread exit. */
 void rae_thread_install_altstack(void) {
+  /* Once per thread: a pool worker runs many tasks, each thunk asking */
+  static __thread int installed = 0;
+  if (installed) return;
+  installed = 1;
   static __thread char alt_stack[64 * 1024];
   stack_t ss;
   memset(&ss, 0, sizeof(ss));

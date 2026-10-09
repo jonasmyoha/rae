@@ -1,0 +1,128 @@
+# Spawns whose tasks wait only on other tasks run on the scheduler's worker
+# pool (lib/core/Scheduler.rae, docs/lightweight-spawn-design.md §4.3), not
+# a thread each: a fork-join recursion to depth 20 (a million tasks, which
+# thread-per-spawn could not have alive), a merge sort that copies its
+# halves, String results, and a chain of 10 000 tasks each waiting on the
+# next. A worker waiting on a task runs other tasks meanwhile, so the
+# results are the sequential ones however the tasks were spread.
+func leafSum(start: copy Int, count: copy Int) ret Int {
+  var total: Int = 0
+  loop var i: Int = start, i < start + count, ++i {
+    total = total + i
+  }
+  ret total
+}
+
+# Split the range in two down to `depth` 0: 2^depth leaves
+func forkSum(start: copy Int, count: copy Int, depth: copy Int) ret Int {
+  if depth is 0 {
+    ret leafSum(start: start, count: count)
+  }
+  let half: Int = count / 2
+  let left: Task(Int) = spawn forkSum(start: start, count: half, depth: depth - 1)
+  let right: Int = forkSum(start: start + half, count: count - half, depth: depth - 1)
+  ret left.get() + right
+}
+
+func slice(values: view List(Int), start: copy Int, count: copy Int) ret List(Int) {
+  var part: List(Int) = List.create(Int, cap: count)
+  loop var i: Int = start, i < start + count, ++i {
+    part.add(value: values.copyAtFallback(index: i, fallback: 0))
+  }
+  ret part
+}
+
+func merge(left: view List(Int), right: view List(Int)) ret List(Int) {
+  var merged: List(Int) = List.create(Int, cap: left.length + right.length)
+  var i: Int = 0
+  var j: Int = 0
+  loop i < left.length or j < right.length {
+    let a: Int = left.copyAtFallback(index: i, fallback: 0)
+    let b: Int = right.copyAtFallback(index: j, fallback: 0)
+    if j >= right.length or (i < left.length and a <= b) {
+      merged.add(value: a)
+      i = i + 1
+    } else {
+      merged.add(value: b)
+      j = j + 1
+    }
+  }
+  ret merged
+}
+
+# The halves are copied into the tasks (a spawn copies its arguments)
+func mergeSort(values: own List(Int)) ret List(Int) {
+  if values.length <= 64 {
+    var sorted: List(Int) = values
+    loop var i: Int = 1, i < sorted.length, ++i {
+      var j: Int = i
+      loop j > 0 and sorted.copyAtFallback(index: j - 1, fallback: 0) > sorted.copyAtFallback(
+        index: j
+        fallback: 0
+      ) {
+        let swap: Int = sorted.copyAtFallback(index: j, fallback: 0)
+        sorted.set(index: j, value: sorted.copyAtFallback(index: j - 1, fallback: 0))
+        sorted.set(index: j - 1, value: swap)
+        j = j - 1
+      }
+    }
+    ret sorted
+  }
+  let half: Int = values.length / 2
+  let left: Task(List(Int)) = spawn mergeSort(values: slice(values: values, start: 0, count: half))
+  let right: List(Int) = mergeSort(
+    values: slice(values: values, start: half, count: values.length - half)
+  )
+  let sortedLeft: List(Int) = left.get()
+  ret merge(left: sortedLeft, right: right)
+}
+
+func describe(value: copy Int) ret String {
+  ret "task {value}"
+}
+
+# Each link waits on the next: 10 000 nested waits
+func chain(depth: copy Int) ret Int {
+  if depth is 0 {
+    ret 0
+  }
+  let next: Task(Int) = spawn chain(depth: depth - 1)
+  ret next.get() + 1
+}
+
+func main() {
+  let count: Int = 1048576
+  let total: Int = forkSum(start: 0, count: count, depth: 20)
+  log("fork-join to depth 20: {total}, sequential {leafSum(start: 0, count: count)}")
+
+  var values: List(Int) = List.create(Int, cap: 20000)
+  var seed: Int = 12345
+  loop var i: Int = 0, i < 20000, ++i {
+    seed = (seed * 1103515245 + 12345) % 2147483648
+    values.add(value: seed % 100000)
+  }
+  let sorted: List(Int) = mergeSort(values: values)
+  var ordered: Bool = sorted.length is 20000
+  loop var i: Int = 1, i < sorted.length, ++i {
+    if sorted.copyAtFallback(index: i - 1, fallback: 0) > sorted.copyAtFallback(
+      index: i
+      fallback: 0
+    ) {
+      ordered = false
+    }
+  }
+  log("merge sort of 20 000: in order {ordered}")
+
+  var names: List(Task(String)) = {}
+  loop var i: Int = 0, i < 5, ++i {
+    names.add(value: spawn describe(value: i))
+  }
+  loop var i: Int = 0, i < names.length, ++i {
+    if let task: Task(String) = names.copyAt(index: i) {
+      log(task.get())
+    }
+  }
+
+  let depth: Task(Int) = spawn chain(depth: 10000)
+  log("a chain of 10 000 waits: {depth.get()}")
+}
