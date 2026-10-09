@@ -1,0 +1,9 @@
+tests/cases/1070_reject_view_to_mod_generic/Main.rae:22:26: 'holder' is a read-only view, but parameter 'list' is 'mod': the callee could write through it. Declare 'holder' as 'mod' where it is bound, or take the parameter as 'view'
+    22 |   push(Int, list: holder.numbers, value: 1)
+       |                          ^~~~
+tests/cases/1070_reject_view_to_mod_generic/Main.rae:26:20: 'holder' is a read-only view, but 'add' changes 'holder.counts' (its 'this' is 'mod'). Declare 'holder' as 'mod' where it is bound
+    26 |   holder.counts.add(value: 2)
+       |                    ^~~~
+tests/cases/1070_reject_view_to_mod_generic/Main.rae:30:29: 'holder' is a read-only view, but parameter 'list' is 'mod': the callee could write through it. Declare 'holder' as 'mod' where it is bound, or take the parameter as 'view'
+    30 |   pushInferred(list: holder.counts, value: 3)
+       |                             ^~~~

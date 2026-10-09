@@ -413,6 +413,10 @@ struct Symbol {
      * a local initialised directly from one of those. It is one bit fixed
      * at declaration, never dataflow. */
     bool is_non_owning;
+    /* An `own` or `copy` parameter: the callee's own value (moved in, or
+     * deep-copied at the call), so it may change it, although (like every
+     * non-`mod` struct parameter) it is registered as a read-only binding */
+    bool is_owned_param;
     /* This binding's storage lives in the current function's frame, so a
      * reference to it dies at `ret`. True for `let`/`var` inside a body;
      * false for parameters (the caller owns that storage) and for globals
@@ -1059,6 +1063,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
 static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstTypeRef* type_ref);
 static bool sema_rewrite_match_let(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstStmt* stmt);
 static void sema_check_own_args(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, const AstFuncDecl* fd, AstCallArg* args, bool skip_receiver);
+static void sema_reject_view_to_mod_unbound(AstModule* module, SymbolTable* symbols, const AstExpr* call);
 static void sema_reject_view_to_mod(AstModule* module, SymbolTable* symbols, const AstParam* p, const AstExpr* value);
 static bool expr_roots_in_let(SymbolTable* symbols, const AstExpr* e, Str* base);
 static void sema_report_let_write(AstModule* module, int line, int column, Str root, const char* action);
@@ -2498,6 +2503,7 @@ static void sema_analyze_decl_inner(CompilerContext* ctx, AstModule* module, Sym
                     is_view_param = true;
                 }
                 Symbol* psym = symbol_table_define(symbols, ctx->ast_arena, param->name, NULL, t, is_view_param);
+                if (psym && param->type && (param->type->is_own || param->type->is_copy)) psym->is_owned_param = true;
                 /* A borrow is someone else's value: the callee may read or
                  * mutate it but never free it, so it can't satisfy `own`. */
                 if (psym && param->type && (param->type->is_view || param->type->is_mod)) {
@@ -6694,6 +6700,9 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                             }
                         }
                     } else {
+                        /* A call the backend binds by name (a generic whose
+                         * `T` sema could not infer): the view rule by name */
+                        sema_reject_view_to_mod_unbound(module, symbols, expr);
                         /* Unresolved call. If an argument is a raw
                          * `Array(T, cap: N)`, that is almost certainly the
                          * known gap (#361) rather than a typo: the same
@@ -7514,8 +7523,9 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                                     expr->as.method_call.args, true);
                 // The receiver is the first parameter: `view.method()` with
                 // `this: mod T` writes through the view the same way.
-                sema_reject_view_to_mod(module, symbols, expr->decl_link->as.func_decl.params,
-                                        expr->as.method_call.object);
+                const AstParam* receiver_param = expr->decl_link->as.func_decl.params;
+                while (sema_pl_is_type_param(receiver_param)) receiver_param = receiver_param->next;
+                sema_reject_view_to_mod(module, symbols, receiver_param, expr->as.method_call.object);
             }
             sema_warn_let_receiver(module, symbols, expr);
             // #927: an unknown MODULE-QUALIFIED call (`Math.noSuchFunction(...)`)
@@ -8267,6 +8277,7 @@ static bool expr_roots_in_view(SymbolTable* symbols, const AstExpr* e, Str* base
                 || (sym->type->kind == TYPE_OPT && sym->type->as.opt.base
                     && sym->type->as.opt.base->kind == TYPE_REF
                     && !sym->type->as.opt.base->as.ref.is_mod));
+        if (sym->is_owned_param) return false;
         if (view_type || (sym->is_immutable && sym->bind_kind == BIND_READONLY_REF)) {
             if (base) *base = e->as.ident;
             return true;
@@ -8350,11 +8361,20 @@ static void sema_report_let_write(AstModule* module, int line, int column, Str r
 static void sema_warn_let_receiver(AstModule* module, SymbolTable* symbols, const AstExpr* call) {
     const AstExpr* receiver = call->as.method_call.object;
     Str root = {0};
-    if (!receiver || !expr_roots_in_let(symbols, receiver, &root)) return;
+    if (!receiver) return;
+    bool on_let = expr_roots_in_let(symbols, receiver, &root);
+    /* A view receiver of a method with a bound decl is checked with its
+     * arguments (sema_reject_view_to_mod); one the backend binds (a generic
+     * container method: `holder.numbers.add(...)` through a `view holder`)
+     * is checked here, the way a let receiver is */
+    bool on_view = !on_let && !(call->decl_link && call->decl_link->kind == AST_DECL_FUNC)
+        && expr_roots_in_view(symbols, receiver, &root);
+    if (!on_let && !on_view) return;
     Str method = call->as.method_call.method_name;
     bool mutating = false;
     if (call->decl_link && call->decl_link->kind == AST_DECL_FUNC) {
         const AstParam* self = call->decl_link->as.func_decl.params;
+        while (sema_pl_is_type_param(self)) self = self->next;
         mutating = self && str_eq_cstr(self->name, "this") && self->type && self->type->is_mod;
     } else {
         const TypeInfo* rt = receiver->resolved_type;
@@ -8365,6 +8385,7 @@ static void sema_warn_let_receiver(AstModule* module, SymbolTable* symbols, cons
         for (Symbol* sym = symbol_table_first(symbols, method); sym; sym = sym->sameNext) {
             if (!sym->decl || sym->decl->kind != AST_DECL_FUNC) continue;
             const AstParam* self = sym->decl->as.func_decl.params;
+            while (sema_pl_is_type_param(self)) self = self->next;
             if (!self || !str_eq_cstr(self->name, "this") || !self->type) continue;
             if (!str_eq(get_base_type_name(self->type), receiver_base)) continue;
             total++;
@@ -8374,6 +8395,16 @@ static void sema_warn_let_receiver(AstModule* module, SymbolTable* symbols, cons
     }
     if (!mutating) return;
     char path[200]; sema_render_access(receiver, path, sizeof path);
+    if (on_view) {
+        char buffer[400];
+        snprintf(buffer, sizeof buffer,
+                 "'%.*s' is a read-only view, but '%.*s' changes '%s' (its 'this' is 'mod'). "
+                 "Declare '%.*s' as 'mod' where it is bound",
+                 (int)root.len, root.data, (int)method.len, method.data, path, (int)root.len, root.data);
+        diag_error(sema_diag_file(module), (int)call->line, (int)call->column, buffer);
+        module->had_error = true;
+        return;
+    }
     char action[320];
     snprintf(action, sizeof action, "cannot call mutating method '%.*s' on '%s'",
              (int)method.len, method.data, path);
@@ -8410,14 +8441,48 @@ static void sema_reject_view_to_mod(AstModule* module, SymbolTable* symbols,
     module->had_error = true;
 }
 
+/* The view rule for a call sema leaves unbound (the backend binds a generic
+ * by name when sema cannot infer its `T`): an argument named for a parameter
+ * that EVERY function of that name declares `mod` must not be a view */
+static void sema_reject_view_to_mod_unbound(AstModule* module, SymbolTable* symbols, const AstExpr* call) {
+    if (!call || call->kind != AST_EXPR_CALL || !call->as.call.callee
+        || call->as.call.callee->kind != AST_EXPR_IDENT) return;
+    Str name = call->as.call.callee->as.ident;
+    for (AstCallArg* a = call->as.call.args; a; a = a->next) {
+        if (!a->name.len || !a->value) continue;
+        const AstParam* mod_param = NULL;
+        size_t total = 0, mods = 0;
+        for (Symbol* sym = symbol_table_first(symbols, name); sym; sym = sym->sameNext) {
+            if (!sym->decl || sym->decl->kind != AST_DECL_FUNC) continue;
+            for (const AstParam* p = sym->decl->as.func_decl.params; p; p = p->next) {
+                if (!str_eq(p->name, a->name)) continue;
+                total++;
+                if (p->type && p->type->is_mod) { mods++; mod_param = p; }
+                break;
+            }
+        }
+        if (total > 0 && mods == total) sema_reject_view_to_mod(module, symbols, mod_param, a->value);
+    }
+}
+
 static void sema_check_own_args(CompilerContext* ctx, AstModule* module, SymbolTable* symbols,
                                 const AstFuncDecl* fd, AstCallArg* args, bool skip_receiver) {
     if (!fd || !module) return;
     const AstParam* p = fd->params;
+    while (sema_pl_is_type_param(p)) p = p->next;   /* `T: type` takes no argument */
     AstCallArg* a = args;
     if (skip_receiver && p) p = p->next;
     while (p && a) {
-        sema_reject_view_to_mod(module, symbols, p, a->value);
+        /* The view rule pairs by NAME: a generic's `T: type` parameters, or
+         * a call that leaves a defaulted one out, shift the positions (a
+         * view passed to `mod list` was checked against `T`) */
+        const AstParam* named = p;
+        if (a->name.len && !str_eq(a->name, p->name)) {
+            named = NULL;
+            for (const AstParam* q = fd->params; q; q = q->next)
+                if (str_eq(q->name, a->name)) { named = q; break; }
+        }
+        sema_reject_view_to_mod(module, symbols, named, a->value);
         /* `type_needs_cascade_drop`, not `type_owns_heap_storage`: the
          * latter does not count a bare String (it only reports types whose
          * FIELDS own heap), and String is the single most common `own`

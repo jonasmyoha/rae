@@ -135,3 +135,18 @@ through, `if let` narrowing, `view` arguments).
 A generic function body is checked per instantiation; a template that is
 never instantiated is not analysed, so a write into a `let` there surfaces
 when it is first used.
+
+## A `view` is read-only the same way (0.1.247)
+
+A `view` parameter or alias is someone else's value lent for reading, so
+nothing reached through it may be changed either — the same rule as a
+`let`, enforced at the same places. Three calls used to slip past it,
+because sema paired arguments with parameters by position or never bound
+the call: a generic whose `T: type` parameter shifted the pairing
+(`push(Int, list: holder.numbers, …)`), a generic container method the
+backend binds (`holder.numbers.add(…)`), and a generic whose `T` is
+inferred. All three are errors now (fixture 1070, beside 929). An `own`
+or `copy` parameter is exempt: the value was moved in or deep-copied at the
+call, so it is the callee's to change. The C backend has emitted views as `const T*` since 0.1.246,
+which is how 106's playback bindings, which wrote through a
+`view PlaybackSystem`, were found.
