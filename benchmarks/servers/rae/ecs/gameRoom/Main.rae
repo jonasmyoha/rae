@@ -1,0 +1,350 @@
+# Phase 3 game room server, ECS style (benchmarks/servers/spec/GameRoom.md,
+# docs/server-benchmarks-design.md §7): lib/net/ecs's HttpServer World runs
+# the connections (upgrade, frames, writes); the room adds a PlayerState
+# table, a PlayerInputEvent queue and four systems:
+#
+#   inputSystem      every frame: 32-byte binary messages -> PlayerInputEvent
+#   membershipSystem at the tick: a new session joins, a closed one leaves
+#   tickSystem       at the tick: the input events in order -> PlayerState
+#   snapshotSystem   at the tick: one snapshot, encoded once, appended to
+#                    every player whose WriteBuffer does not still hold one
+#
+# The input events outlive the frame they arrived in (the tick is every
+# 33 ms, a frame every poll): they hold decoded numbers, not byte ranges, and
+# the tick clears their queue. The tick waits for its deadline with
+# Time.waitUntil. PORT (default 8080) comes from the environment. One worker
+# (spec: one room). With RAE_BENCH_STATS=1 it prints its tick count and the
+# allocation count once a second.
+open net/Tcp
+open net/ByteBuffer
+open http/Http
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Query
+open ecs/Tag
+open ecs/Event
+open webSocket/FrameDecoder
+open webSocket/FrameEncoder
+open net/ecs/HttpServer
+open net/ecs/HttpSystems
+open net/ecs/WebSocketSystems
+open Time
+
+const tickHertz: Int = 30
+
+const inputBytes: Int = 32
+
+const snapshotHeaderBytes: Int = 24
+
+const playerBytes: Int = 16
+
+type PlayerState {
+  playerId: Int
+  x: Int
+  y: Int
+  lastSequence: Int
+}
+
+type PlayerInputEvent {
+  connectionEntityId: EntityId
+  sequence: Int
+  moveX: Int
+  moveY: Int
+}
+
+type GameRoom {
+  players: ComponentTable(PlayerState)
+  inputs: EventQueue(PlayerInputEvent)
+  # The snapshot, encoded once per tick
+  snapshot: ByteBuffer
+  nextPlayerId: Int
+  # The tick clock: index k is due at startNs + k * periodNs
+  startNs: Int
+  periodNs: Int
+  nextTickNs: Int
+  missedTicks: Int
+  previousTickNs: Int
+  ticks: Int
+}
+
+type BenchRouter {
+  requests: Int
+}
+
+# Only `GET /ws` upgrades (the server answers those itself)
+func route(router: mod BenchRouter, server: mod HttpServer, event: view HttpRequestEvent) {
+  respond(
+    server: server
+    event: event
+    status: 404
+    contentType: "text/plain"
+    body: "Not Found"
+  )
+}
+
+func createGameRoom() ret GameRoom {
+  let startNs: Int = nowNs()
+  ret GameRoom {
+    players: create()
+    inputs: createEventQueue(PlayerInputEvent)
+    snapshot: createByteBuffer(capacity: 256)
+    nextPlayerId: 1
+    startNs: startNs
+    periodNs: 1000000000 / tickHertz
+    nextTickNs: startNs
+    missedTicks: 0
+    previousTickNs: 0
+    ticks: 0
+  }
+}
+
+func clamp(value: view Int, limit: view Int) ret Int {
+  if value > limit {
+    ret limit
+  }
+  if value < -limit {
+    ret -limit
+  }
+  ret value
+}
+
+func appendUInt32(output: mod ByteBuffer, value: view Int) {
+  appendByte(buffer: output, byte: value)
+  appendByte(buffer: output, byte: value shr 8)
+  appendByte(buffer: output, byte: value shr 16)
+  appendByte(buffer: output, byte: value shr 24)
+}
+
+func readUInt32(buffer: view ByteBuffer, index: view Int) ret Int {
+  ret byteBufferAt(buffer: buffer, index: index) bitor (byteBufferAt(
+    buffer: buffer
+    index: index + 1
+  ) shl 8) bitor (byteBufferAt(buffer: buffer, index: index + 2) shl 16) bitor (byteBufferAt(
+    buffer: buffer
+    index: index + 3
+  ) shl 24)
+}
+
+func readInt32(buffer: view ByteBuffer, index: view Int) ret Int {
+  let value: Int = readUInt32(buffer: buffer, index: index)
+  if value >= 2147483648 {
+    ret value - 4294967296
+  }
+  ret value
+}
+
+# ----- every frame ------------------------------------------------------------
+
+# 32-byte binary messages become PlayerInputEvents (decoded now: the bytes go
+# at the end of the frame, the event waits for the tick)
+func inputSystem(room: mod GameRoom, server: view HttpServer) {
+  loop var i: Int = 0, i < eventCount(this: server.webSocketMessages), ++i {
+    let event: WebSocketMessageEvent = eventAt(this: server.webSocketMessages, i: i)
+    if event.message.kind is WebSocketOpcode.binary and event.message.payload.count is inputBytes {
+      let readBuffer: view ReadBuffer => componentView(
+        this: server.readBuffers
+        entityId: event.connectionEntityId
+      )
+      let at: Int = event.message.payload.start
+      eventSend(
+        this: room.inputs
+        value: PlayerInputEvent {
+          connectionEntityId: event.connectionEntityId
+          sequence: readUInt32(buffer: readBuffer.buffer, index: at)
+          moveX: readInt32(buffer: readBuffer.buffer, index: at + 4)
+          moveY: readInt32(buffer: readBuffer.buffer, index: at + 8)
+        }
+      )
+    }
+  }
+}
+
+# ----- at the tick --------------------------------------------------------------
+
+# A session with no PlayerState joins at (0, 0); a player whose session is
+# gone or closed leaves
+func membershipSystem(room: mod GameRoom, server: view HttpServer) {
+  var i: Int = componentCount(this: room.players) - 1
+  loop i >= 0 {
+    let entityId: EntityId = componentEntityAt(this: room.players, i: i)
+    if not sessionIsOpen(server: server, entityId: entityId) {
+      componentRemove(this: room.players, entityId: entityId)
+    }
+    i = i - 1
+  }
+  loop var j: Int = 0, j < componentCount(this: server.webSocketSessions), ++j {
+    let entityId: EntityId = componentEntityAt(this: server.webSocketSessions, i: j)
+    if sessionIsOpen(server: server, entityId: entityId) and not componentHas(
+      this: room.players
+      entityId: entityId
+    ) {
+      componentSet(
+        this: room.players
+        entityId: entityId
+        data: PlayerState { playerId: room.nextPlayerId, x: 0, y: 0, lastSequence: 0 }
+      )
+      room.nextPlayerId = room.nextPlayerId + 1
+    }
+  }
+}
+
+# Every input since the last tick, in arrival order
+func tickSystem(room: mod GameRoom) {
+  loop var i: Int = 0, i < eventCount(this: room.inputs), ++i {
+    let input: PlayerInputEvent = eventAt(this: room.inputs, i: i)
+    if componentHas(this: room.players, entityId: input.connectionEntityId) {
+      let player: mod PlayerState => componentMod(
+        this: room.players
+        entityId: input.connectionEntityId
+      )
+      player.lastSequence = input.sequence
+      player.x = clamp(value: player.x + clamp(value: input.moveX, limit: 1000), limit: 1000000)
+      player.y = clamp(value: player.y + clamp(value: input.moveY, limit: 1000), limit: 1000000)
+    }
+  }
+  eventClear(this: room.inputs)
+}
+
+func encodeSnapshot(room: mod GameRoom, tickIndex: view Int, latenessNs: view Int) {
+  let players: Int = componentCount(this: room.players)
+  byteBufferClear(buffer: room.snapshot)
+  webSocketAppendHeader(
+    output: room.snapshot
+    kind: WebSocketOpcode.binary
+    fin: true
+    length: snapshotHeaderBytes + players * playerBytes
+    masked: false
+    maskKey: 0
+  )
+  appendUInt32(output: room.snapshot, value: tickIndex)
+  appendUInt32(output: room.snapshot, value: players)
+  appendUInt32(output: room.snapshot, value: latenessNs / 1000)
+  appendUInt32(output: room.snapshot, value: room.previousTickNs / 1000)
+  appendUInt32(output: room.snapshot, value: room.missedTicks)
+  appendUInt32(output: room.snapshot, value: 0)
+  loop var i: Int = 0, i < players, ++i {
+    let player: view PlayerState => queryViewAt(table: room.players, denseIndex: i)
+    appendUInt32(output: room.snapshot, value: player.playerId)
+    appendUInt32(output: room.snapshot, value: player.x)
+    appendUInt32(output: room.snapshot, value: player.y)
+    appendUInt32(output: room.snapshot, value: player.lastSequence)
+  }
+}
+
+# The snapshot to every player whose WriteBuffer does not still hold one
+func snapshotSystem(
+  room: mod GameRoom
+  server: mod HttpServer
+  tickIndex: view Int
+  latenessNs: view Int
+) {
+  encodeSnapshot(room: room, tickIndex: tickIndex, latenessNs: latenessNs)
+  let snapshotLength: Int = byteBufferLength(buffer: room.snapshot)
+  loop var i: Int = 0, i < componentCount(this: room.players), ++i {
+    let entityId: EntityId = componentEntityAt(this: room.players, i: i)
+    if appendIfDrained(
+      writeBuffers: server.writeBuffers
+      entityId: entityId
+      snapshot: room.snapshot
+      snapshotLength: snapshotLength
+    ) {
+      addTag(table: server.sendings, entityId: entityId)
+    }
+  }
+}
+
+func appendIfDrained(
+  writeBuffers: mod ComponentTable(WriteBuffer)
+  entityId: view EntityId
+  snapshot: view ByteBuffer
+  snapshotLength: view Int
+) ret Bool {
+  let writeBuffer: mod WriteBuffer => componentMod(this: writeBuffers, entityId: entityId)
+  if byteBufferLength(buffer: writeBuffer.buffer) > snapshotLength {
+    ret false
+  }
+  appendBytes(
+    buffer: writeBuffer.buffer
+    bytes: snapshot.bytes
+    start: snapshot.start
+    count: snapshotLength
+  )
+  ret true
+}
+
+# Wait for the deadline, then run the tick's systems. A tick that starts more
+# than a period late skips the periods it missed.
+func tick(room: mod GameRoom, server: mod HttpServer) {
+  let scheduledNs: Int = room.nextTickNs
+  waitUntil(deadlineNs: scheduledNs)
+  let tickStartNs: Int = nowNs()
+  let tickIndex: Int = (scheduledNs - room.startNs) / room.periodNs
+  room.nextTickNs = scheduledNs + room.periodNs
+  if room.nextTickNs <= tickStartNs {
+    let behind: Int = (tickStartNs - room.nextTickNs) / room.periodNs + 1
+    room.missedTicks = room.missedTicks + behind
+    room.nextTickNs = room.nextTickNs + behind * room.periodNs
+  }
+  membershipSystem(room: room, server: server)
+  tickSystem(room: room)
+  snapshotSystem(
+    room: room
+    server: server
+    tickIndex: tickIndex
+    latenessNs: tickStartNs - scheduledNs
+  )
+  room.previousTickNs = nowNs() - tickStartNs
+  room.ticks = room.ticks + 1
+}
+
+# ----- main -------------------------------------------------------------------
+func envInt(name: view String, fallback: view Int) ret Int {
+  let text: String = Sys.getEnv(name: name)
+  if text.length() is 0 {
+    ret fallback
+  }
+  ret text.toInt()
+}
+
+func main() ret Int {
+  let port: Int = envInt(name: "PORT", fallback: 8080)
+  var server: HttpServer = createHttpServer(idleTimeoutMs: 0)
+  server.webSocketPath = "/ws"
+  let status: NetStatus = httpServerListen(
+    server: server
+    host: "127.0.0.1"
+    port: port
+    backlog: 4096
+  )
+  if status is not NetStatus.ok {
+    log("cannot listen on {port}: {status}")
+    ret 1
+  }
+  log("listening on {socketLocalPort(socketId: server.listenerSocketId)}")
+  var router: BenchRouter = { requests: 0 }
+  var room: GameRoom = createGameRoom()
+  let printStats: Bool = Sys.getEnv(name: "RAE_BENCH_STATS").length() > 0
+  loop {
+    # Serve I/O until the tick is near, then wait for its deadline exactly
+    let remainingNs: Int = room.nextTickNs - nowNs()
+    var timeoutMs: Int = 0
+    if remainingNs > 2000000 {
+      timeoutMs = (remainingNs - 1000000) / 1000000
+    }
+    httpServerFrameBegin(
+      BenchRouter
+      router: router
+      server: server
+      timeoutMs: timeoutMs
+    )
+    inputSystem(room: room, server: server)
+    if room.nextTickNs - nowNs() <= 2000000 {
+      tick(room: room, server: server)
+    }
+    httpServerFrameEnd(server: server)
+    if server.secondChanged and printStats {
+      log("stats worker=0 requests={room.ticks} allocations={Sys.allocationCount()}")
+    }
+  }
+  ret 0
+}

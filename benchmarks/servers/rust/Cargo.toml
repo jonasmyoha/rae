@@ -5,8 +5,8 @@ edition = "2021"
 publish = false
 
 # The Rust references of docs/server-benchmarks-design.md §4: hyper 1.x on
-# tokio (F3) for HTTP, tokio-tungstenite for WebSocket, written the ordinary
-# way, not tuned.
+# tokio (F3) for HTTP, tokio-tungstenite for WebSocket and the game room,
+# written the ordinary way, not tuned.
 [dependencies]
 bytes = "1"
 http-body-util = "0.1"
@@ -14,7 +14,7 @@ hyper = { version = "1", features = ["http1", "server"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "macros", "sync"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "macros", "sync", "time"] }
 tokio-tungstenite = "0.28"
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 
@@ -25,6 +25,10 @@ path = "src/bin/http.rs"
 [[bin]]
 name = "webSocket"
 path = "src/bin/webSocket.rs"
+
+[[bin]]
+name = "gameRoom"
+path = "src/bin/gameRoom.rs"
 
 [profile.release]
 opt-level = 3

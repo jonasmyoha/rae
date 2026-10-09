@@ -5,9 +5,10 @@ this starts them, checks them, drives the load tools, samples RSS and CPU
 time, and writes build/raw/*.json, results/summary.json and
 results/metadata.json. Run it through run.sh, which sets its environment.
 
-Phases (BENCH_PHASES, default "http webSocket"): http (spec/Http.md, oha and
-wrk) and webSocket (spec/WebSocket.md, loadClient). A run of one phase keeps
-the other phase's numbers in summary.json and metadata.json.
+Phases (BENCH_PHASES, default "http webSocket gameRoom"): http (spec/Http.md,
+oha and wrk), webSocket (spec/WebSocket.md, loadClient) and gameRoom
+(spec/GameRoom.md, loadClient gameRoom). A run of some phases keeps the other
+phases' numbers in summary.json and metadata.json.
 """
 import json
 import os
@@ -41,13 +42,16 @@ PERFORMANCE_CORES = int(os.environ["PERFORMANCE_CORES"])
 IMPLS = os.environ.get("BENCH_IMPLS", "rae-eventLoop rae-ecs rust node bun").split()
 CASES = os.environ.get("BENCH_CASES", "plaintext json pipelined").split()
 WORKERS = [int(w) for w in os.environ.get("BENCH_WORKERS", "1 %d" % PERFORMANCE_CORES).split()]
-PHASES = os.environ.get("BENCH_PHASES", "http webSocket").split()
+PHASES = os.environ.get("BENCH_PHASES", "http webSocket gameRoom").split()
 LOAD_CLIENT = os.path.join(BUILD, "loadClient", "release", "loadClient")
 WS_RUNS = int(os.environ.get("BENCH_WS_RUNS", "3"))
 WS_STEP = int(os.environ.get("BENCH_WS_STEP", "1000"))
 WS_MAX_CLIENTS = int(os.environ.get("BENCH_WS_MAX_CLIENTS", "15000"))
 WS_LIMIT_MS = float(os.environ.get("BENCH_WS_LIMIT_MS", "250"))
 WS_BROADCASTS = int(os.environ.get("BENCH_WS_BROADCASTS", "100"))
+ROOM_CLIENTS = [int(n) for n in os.environ.get("BENCH_ROOM_CLIENTS", "100 1000 2000").split()]
+ROOM_RUNS = int(os.environ.get("BENCH_ROOM_RUNS", "3"))
+ROOM_SECONDS = int(os.environ.get("BENCH_ROOM_SECONDS", "10"))
 
 SOURCES = {
     "rae-eventLoop": "rae/eventLoop/http/Main.rae",
@@ -65,14 +69,25 @@ WS_SOURCES = {
     "bun": "javascript/bun/WebSocket.js",
 }
 
+ROOM_SOURCES = {
+    "rae-eventLoop": "rae/eventLoop/gameRoom/Main.rae",
+    "rae-ecs": "rae/ecs/gameRoom/Main.rae",
+    "rust": "rust/src/bin/gameRoom.rs",
+    "node": "javascript/node/GameRoom.js",
+    "bun": "javascript/bun/GameRoom.js",
+}
+
+# Per phase: the Rust binary and the JavaScript file
+PHASE_FILES = {"http": ("http", "Http.js"), "webSocket": ("webSocket", "WebSocket.js"), "gameRoom": ("gameRoom", "GameRoom.js")}
+
 
 def command_for(impl, phase="http"):
     if impl.startswith("rae-"):
-        folder = impl if phase == "http" else "%s-webSocket" % impl
+        folder = impl if phase == "http" else "%s-%s" % (impl, phase)
         return [os.path.join(BUILD, folder, "server")]
+    binary, script = PHASE_FILES[phase]
     if impl == "rust":
-        return [os.path.join(BUILD, "rust", "release", "http" if phase == "http" else "webSocket")]
-    script = "Http.js" if phase == "http" else "WebSocket.js"
+        return [os.path.join(BUILD, "rust", "release", binary)]
     if impl == "node":
         return ["node", os.path.join(HERE, "javascript", "node", script)]
     if impl == "bun":
@@ -124,7 +139,7 @@ class Server:
         return False
 
     def check(self):
-        flags = [] if self.phase == "http" else ["--websocket"]
+        flags = {"http": [], "webSocket": ["--websocket"], "gameRoom": ["--gameRoom"]}[self.phase]
         result = subprocess.run(
             ["sh", os.path.join(HERE, "check.sh")] + flags + [str(self.port), "%s/w%d" % (self.impl, self.workers)],
             capture_output=True,
@@ -573,6 +588,139 @@ def measure_websocket(summary):
     summary["webSocket"] = section
 
 
+# ----- phase 3: game room -----------------------------------------------------------
+
+
+def run_room(port, clients):
+    output = subprocess.run(
+        [
+            LOAD_CLIENT, "gameRoom", "--url", "ws://127.0.0.1:%d/ws" % port, "--clients", str(clients),
+            "--seconds", str(ROOM_SECONDS), "--threads", str(LOADGEN_THREADS),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=ROOM_SECONDS + 300,
+    )
+    return json.loads(output.stdout.strip().splitlines()[-1])
+
+
+def measure_room(server, clients):
+    """One run at `clients` players: loadClient's numbers plus RSS, CPU and
+    allocations per tick"""
+    process_group = server.process.pid
+    stats_before = server.stats()
+    _, cpu_before = group_usage(process_group)
+    sampler = Sampler(process_group)
+    sampler.start()
+    result = run_room(server.port, clients)
+    sampler.running = False
+    sampler.join()
+    _, cpu_after = group_usage(process_group)
+    result["peakRssMb"] = sampler.peak_kb / 1024
+    result["cpuSeconds"] = cpu_after - cpu_before
+    if server.impl.startswith("rae-"):
+        time.sleep(1.2)
+        stats_after = server.stats()
+        ticks = sum(stats_after[w][0] - stats_before.get(w, (0, 0))[0] for w in stats_after)
+        allocations = max(a for _, a in stats_after.values()) - max(
+            [a for _, a in stats_before.values()] or [0]
+        )
+        result["allocationsPerTick"] = allocations / ticks if ticks else None
+    # Let the server see the players go before the next run
+    time.sleep(2)
+    return result
+
+
+def summarise_rooms(runs):
+    def percentiles(key):
+        found = [run.get(key) for run in runs if run.get(key)]
+        return {name: spread([value[name] for value in found]) for name in ["p50", "p99", "max"]} if found else None
+
+    return {
+        "connected": spread([run.get("connected") for run in runs]),
+        "tickLatenessMs": percentiles("tickLatenessMs"),
+        "tickDurationMs": percentiles("tickDurationMs"),
+        "interArrivalJitterMs": percentiles("interArrivalJitterMs"),
+        "missedTicks": spread([run.get("missedTicks") for run in runs]),
+        "droppedShare": spread([run.get("droppedShare") for run in runs]),
+        "wrongSnapshots": sum(run.get("wrongSnapshots", 0) + run.get("wrongPlayerCount", 0) for run in runs),
+        "peakRssMb": spread([run["peakRssMb"] for run in runs]),
+        "cpuSeconds": spread([run["cpuSeconds"] for run in runs]),
+        "allocationsPerTick": spread([run.get("allocationsPerTick") for run in runs]),
+    }
+
+
+def measure_game_room(summary):
+    section = {
+        "date": time.strftime("%Y-%m-%d"),
+        "workers": 1,
+        "results": {},
+        "ecsOverEventLoop": {},
+        "sourceLines": {impl: source_lines(ROOM_SOURCES[impl]) for impl in IMPLS},
+    }
+    servers = {}
+    try:
+        for impl in IMPLS:
+            server = Server(impl, 1, "gameRoom")
+            if not server.wait_ready():
+                print("%s gameRoom did not start; see %s" % (impl, server.log_path))
+                server.stop()
+                continue
+            if not server.check():
+                print("%s gameRoom failed check.sh: not timed" % impl)
+                server.stop()
+                continue
+            servers[impl] = server
+        for clients in ROOM_CLIENTS:
+            print("== game room, 1 worker, %d players" % clients)
+            runs = {impl: [] for impl in servers}
+            for run in range(ROOM_RUNS):
+                order = list(servers)
+                if run % 2 == 1 and "rae-eventLoop" in order and "rae-ecs" in order:
+                    first, second = order.index("rae-eventLoop"), order.index("rae-ecs")
+                    order[first], order[second] = order[second], order[first]
+                for impl in order:
+                    result = measure_room(servers[impl], clients)
+                    runs[impl].append(result)
+
+                    def show(key):
+                        value = result.get(key)
+                        return "%7.2f/%7.2f" % (value["p50"], value["p99"]) if value else "      -/      -"
+
+                    print(
+                        "  %-14s run %d: %5d joined  tick late %s ms  tick %s ms  jitter %s ms  missed %4d  "
+                        "dropped %5.1f%%  rss %6.1f MB%s"
+                        % (
+                            impl, run + 1, result.get("connected", 0), show("tickLatenessMs"), show("tickDurationMs"),
+                            show("interArrivalJitterMs"), result.get("missedTicks", 0),
+                            100 * result.get("droppedShare", 0), result["peakRssMb"],
+                            "  %.2f alloc/tick" % result["allocationsPerTick"]
+                            if result.get("allocationsPerTick") is not None
+                            else "",
+                        )
+                    )
+            key = "n%d" % clients
+            section["results"][key] = {}
+            for impl, impl_runs in runs.items():
+                with open(os.path.join(RAW, "%s-gameRoom-%s.json" % (impl, key)), "w") as raw:
+                    json.dump(impl_runs, raw, indent=2)
+                section["results"][key][impl] = summarise_rooms(impl_runs)
+            if "rae-ecs" in runs and "rae-eventLoop" in runs:
+                ecs = section["results"][key]["rae-ecs"]
+                event_loop = section["results"][key]["rae-eventLoop"]
+                if ecs["tickDurationMs"] and event_loop["tickDurationMs"]:
+                    a, b = ecs["tickDurationMs"]["p50"], event_loop["tickDurationMs"]["p50"]
+                    overlap = not (a["max"] < b["min"] or b["max"] < a["min"])
+                    section["ecsOverEventLoop"][key] = {
+                        "tickDurationP50": a["median"] / b["median"] if b["median"] else None,
+                        "verdict": "no measurable difference" if overlap else "measurable difference",
+                    }
+    finally:
+        for server in servers.values():
+            server.stop()
+    summary["gameRoom"] = section
+
+
 def load_json(path):
     try:
         with open(path) as source:
@@ -588,10 +736,9 @@ def main():
     meta = load_json(os.path.join(RESULTS, "metadata.json"))
     if "http" in PHASES:
         measure_http(summary)
-        web_socket_meta = meta.get("webSocket")
+        kept = {phase: meta[phase] for phase in ["webSocket", "gameRoom"] if phase in meta}
         meta = metadata(os.environ.get("LOAD", "0"))
-        if web_socket_meta:
-            meta["webSocket"] = web_socket_meta
+        meta.update(kept)
     if "webSocket" in PHASES:
         measure_websocket(summary)
         web_socket_meta = metadata(os.environ.get("LOAD", "0"))
@@ -607,6 +754,18 @@ def main():
         }
         web_socket_meta["toolchains"]["loadClient"] = "benchmarks/servers/loadClient (tokio-tungstenite)"
         meta["webSocket"] = web_socket_meta
+    if "gameRoom" in PHASES:
+        measure_game_room(summary)
+        room_meta = metadata(os.environ.get("LOAD", "0"))
+        room_meta["settings"] = {
+            "runs": ROOM_RUNS,
+            "seconds": ROOM_SECONDS,
+            "players": ROOM_CLIENTS,
+            "loadGeneratorThreads": LOADGEN_THREADS,
+            "workers": 1,
+        }
+        room_meta["toolchains"]["loadClient"] = "benchmarks/servers/loadClient gameRoom (raw sockets)"
+        meta["gameRoom"] = room_meta
     with open(os.path.join(RESULTS, "summary.json"), "w") as out:
         json.dump(summary, out, indent=2)
         out.write("\n")
