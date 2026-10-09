@@ -143,6 +143,10 @@ typedef struct {
   // #886: per open loop, that loop statement's own temporaries (its condition's),
   // dropped at the end of every iteration and on break/continue.
   struct CStmtTemps* loop_temps[32];
+  // Loop versioning (c_loop_versioning.c): while the check-free copy of a
+  // counted loop is emitted, the plan whose accesses were proven in range for
+  // every iteration; they lower to a plain load or store. NULL otherwise.
+  const struct LoopVersionPlan* loop_version_fast;
 } CFuncContext;
 
 typedef struct CStmtTemps {
@@ -341,5 +345,12 @@ void discover_specializations_module(CompilerContext* ctx, const AstModule* modu
 // -- Function emission (called from the orchestrator) --
 bool emit_function(CompilerContext* compiler_ctx, const AstModule* module, const AstFuncDecl* func, FILE* out);
 bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* f, const AstTypeRef* args, FILE* out);
+
+/* c_expr.c: the element type of a List whose element owns no heap, or NULL */
+const AstTypeRef* c_list_plain_element(CFuncContext* ctx, const AstTypeRef* list_type);
+/* c_loop_versioning.c (bounds-check elimination in counted loops) */
+bool c_loop_version_emit(CFuncContext* ctx, const AstStmt* stmt, FILE* out,
+                         void (*emit_for)(CFuncContext*, const AstStmt*, FILE*));
+const char* c_loop_version_fast_data(CFuncContext* ctx, const AstExpr* access);
 
 #endif /* C_BACKEND_INTERNAL_H */

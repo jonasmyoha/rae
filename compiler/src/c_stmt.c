@@ -46,6 +46,7 @@ void emit_deep_copy_source(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
 // File-local helpers.
 static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
+static void emit_counted_for(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
                               const AstExpr* value, FILE* out);
 // True if `value` is an ALIAS-returning call — `copyAt`/`buf_get` and any user
@@ -93,8 +94,12 @@ static bool emit_list_if_let(CFuncContext* ctx, const AstStmt* stmt, FILE* out) 
     fprintf(out, "    rae_parallel_check_write((const void*)__rae_list%d->data, __rae_index%d, (int64_t)(%.*s), \"%.*s\");\n",
             fast_id, fast_id, (int)ctx->parallel_index.len, ctx->parallel_index.data, (int)root.len, root.data);
   }
-  fprintf(out, "    if ((uint64_t)__rae_index%d < (uint64_t)__rae_list%d->length) {\n      ",
-          fast_id, fast_id);
+  // Proven in range by loop versioning (c_loop_versioning.c): no check.
+  if (c_loop_version_fast_data(ctx, call))
+    fprintf(out, "    if (1) {\n      ");
+  else
+    fprintf(out, "    if ((uint64_t)__rae_index%d < (uint64_t)__rae_list%d->length) {\n      ",
+            fast_id, fast_id);
 
   const AstTypeRef* element_type = binding->as.let_stmt.type;
   AstTypeRef value_type = *element_type;
@@ -1939,15 +1944,27 @@ static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     if (has_decl_init) {
         fprintf(out, "  {\n");
         emit_stmt(ctx, stmt->as.loop_stmt.init, out);
-        fprintf(out, "  for (; ");
-    } else {
-        fprintf(out, "  for (");
-        if (stmt->as.loop_stmt.init) {
-            emit_expr(ctx, stmt->as.loop_stmt.init->as.expr_stmt, out,
-                      PREC_LOWEST, false, false);
-        }
-        fprintf(out, "; ");
+    } else if (stmt->as.loop_stmt.init) {
+        fprintf(out, "  ");
+        emit_expr(ctx, stmt->as.loop_stmt.init->as.expr_stmt, out, PREC_LOWEST, false, false);
+        fprintf(out, ";\n");
     }
+    // A counted loop whose list and byte accesses can be bounded runs a
+    // check-free copy when its whole index range is inside them
+    // (c_loop_versioning.c); the loop as written otherwise.
+    if (!c_loop_version_emit(ctx, stmt, out, emit_counted_for)) emit_counted_for(ctx, stmt, out);
+    if (has_decl_init) {
+        emit_implicit_drops_for_body(ctx, out, saved_locals);
+        fprintf(out, "  }\n");
+    }
+    ctx->local_count = saved_locals;
+    return true;
+}
+
+// The `for (; condition; increment) { body }` of a counted loop, its init
+// already emitted. Called twice for a versioned loop (c_loop_versioning.c).
+static void emit_counted_for(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
+    fprintf(out, "  for (; ");
     if (stmt->as.loop_stmt.condition) emit_expr(ctx, stmt->as.loop_stmt.condition, out, PREC_LOWEST, false, false);
     fprintf(out, "; ");
     if (stmt->as.loop_stmt.increment) emit_expr(ctx, stmt->as.loop_stmt.increment, out, PREC_LOWEST, false, false);
@@ -1968,12 +1985,6 @@ static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     emit_implicit_drops_for_body(ctx, out, body_locals);
     ctx->local_count = body_locals;
     fprintf(out, "  }\n");
-    if (has_decl_init) {
-        emit_implicit_drops_for_body(ctx, out, saved_locals);
-        fprintf(out, "  }\n");
-    }
-    ctx->local_count = saved_locals;
-    return true;
 }
 
 // Does this expression already yield a reference (a call whose declared return

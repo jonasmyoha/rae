@@ -121,8 +121,9 @@ func base64DecodeTable() ret List(Int) {
 
 # Decode `text` onto the end of `output`. False (and `output` as it was)
 # when `text` is not valid base64. The output grows once (`addDefaults`) and
-# each byte is `set` at an index kept here; every group but the last is
-# checked once for an invalid character, and only the last may hold `=`.
+# each byte is `set` at an index kept here. Every group but the last is
+# decoded without a padding test (only the last may hold `=`), and checked
+# once for an invalid character.
 func appendBase64Decoded(output: mod List(UInt8), text: view String) ret Bool {
   let length: Int = text.length()
   if length % 4 is not 0 {
@@ -141,35 +142,47 @@ func appendBase64Decoded(output: mod List(UInt8), text: view String) ret Bool {
   }
   output.addDefaults(count: length / 4 * 3 - padding)
   let table: List(Int) = base64DecodeTable()
+  let lastGroup: Int = length - 4
   var position: Int = before
   var i: Int = 0
-  loop i < length {
-    var first: Int = table.copyAtFallback(index: text.byteAt(index: i), fallback: -1)
-    var second: Int = table.copyAtFallback(index: text.byteAt(index: i + 1), fallback: -1)
-    var third: Int = table.copyAtFallback(index: text.byteAt(index: i + 2), fallback: -1)
-    var fourth: Int = table.copyAtFallback(index: text.byteAt(index: i + 3), fallback: -1)
-    let last: Bool = i + 4 is length
-    # `=` only as the last one or two characters of the last group
-    if last and padding >= 1 {
-      fourth = 0
-      if padding is 2 {
-        third = 0
-      }
-    }
+  loop i < lastGroup {
+    let first: Int = table.copyAtFallback(index: text.byteAt(index: i), fallback: -1)
+    let second: Int = table.copyAtFallback(index: text.byteAt(index: i + 1), fallback: -1)
+    let third: Int = table.copyAtFallback(index: text.byteAt(index: i + 2), fallback: -1)
+    let fourth: Int = table.copyAtFallback(index: text.byteAt(index: i + 3), fallback: -1)
     if (first bitor second bitor third bitor fourth) < 0 {
       output.truncate(len: before)
       ret false
     }
     let group: Int = (first shl 18) bitor (second shl 12) bitor (third shl 6) bitor fourth
     output.set(index: position, value: ((group shr 16) bitand 255) as UInt8)
-    if last is false or padding < 2 {
-      output.set(index: position + 1, value: ((group shr 8) bitand 255) as UInt8)
-    }
-    if last is false or padding < 1 {
-      output.set(index: position + 2, value: (group bitand 255) as UInt8)
-    }
+    output.set(index: position + 1, value: ((group shr 8) bitand 255) as UInt8)
+    output.set(index: position + 2, value: (group bitand 255) as UInt8)
     position = position + 3
     i = i + 4
+  }
+  # The last group: `=` only as its last one or two characters
+  let first: Int = table.copyAtFallback(index: text.byteAt(index: lastGroup), fallback: -1)
+  let second: Int = table.copyAtFallback(index: text.byteAt(index: lastGroup + 1), fallback: -1)
+  var third: Int = table.copyAtFallback(index: text.byteAt(index: lastGroup + 2), fallback: -1)
+  var fourth: Int = table.copyAtFallback(index: text.byteAt(index: lastGroup + 3), fallback: -1)
+  if padding >= 1 {
+    fourth = 0
+  }
+  if padding is 2 {
+    third = 0
+  }
+  if (first bitor second bitor third bitor fourth) < 0 {
+    output.truncate(len: before)
+    ret false
+  }
+  let group: Int = (first shl 18) bitor (second shl 12) bitor (third shl 6) bitor fourth
+  output.set(index: position, value: ((group shr 16) bitand 255) as UInt8)
+  if padding < 2 {
+    output.set(index: position + 1, value: ((group shr 8) bitand 255) as UInt8)
+  }
+  if padding < 1 {
+    output.set(index: position + 2, value: (group bitand 255) as UInt8)
   }
   ret true
 }

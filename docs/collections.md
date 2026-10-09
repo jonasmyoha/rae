@@ -90,6 +90,14 @@ slow there: each one's length update must land before the next can be
 checked, so the writes run one after another (base64 encoding of 1 MB:
 2.4 ms with `add`, 0.9 ms this way).
 
+**Checks in counted loops are paid once.** When a loop counts with
+`i < n` / `i + k <= n` and steps its counters by constants, and indexes its
+lists (and Strings, through `byteAt`) at `counter + constant`, the compiler
+checks the loop's whole index range against the lengths before it starts and
+runs a copy without per-element checks when it fits
+(`compiler/src/c_loop_versioning.c`). Anything else, including a range that
+does not fit, runs the checked loop, with the same answers.
+
 **`Array(T, cap: N)` has the same API and the same answers** — `copyAt` /
 `viewAt` / `modAt` return `none`, `copyAtFallback` returns the fallback,
 `set` past the cap is ignored with `warning: Array.set: index 20 is out of

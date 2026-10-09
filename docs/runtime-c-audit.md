@@ -56,7 +56,7 @@ had C, against a plain `-O2` C version. ns per operation unless noted.
 | 6 dates | formatTimestamp / formatDate | 686 / 518 | 205 / 186 | 3x faster |
 | 8 random | nextInt / nextFloat, per 1000 | 2 886 / 2 950 | 1 196 / 980 | 2.4-3x faster |
 | crypto | SHA-1, 16 MB | C 77 ms, CommonCrypto 7 ms | CommonCrypto on Apple (0.1.226) | platform path |
-| text | base64 encode / decode, 1 MB (us) | plain C 390 / 980 | 905 / 975 (was 650-2 400 / 1 800) | encode 2.3x, decode level (0.1.244) |
+| text | base64 encode / decode, 1 MB, best of 20, reused buffers (us) | plain C 442 / 452 | 469 / 498 (0.1.243: 1 730 / 1 480) | 1.06x / 1.1x (0.1.245) |
 | crypto | portable SHA-1 (the non-Apple path), 16 MB | plain C 77 ms | 84 ms (was 96) | 1.09x (0.1.244) |
 | net | ByteBuffer.appendText, 1.6 KB | memcpy | 22 ns (was 1 083) | memcpy (0.1.244) |
 
@@ -74,11 +74,22 @@ had C, against a plain `-O2` C version. ns per operation unless noted.
   level with C. SHA-1 keeps its 80-word schedule in a local
   `Array(Int, cap: 80)` (checks against a constant) and runs its four
   rounds as four loops: 1.09x C. `ByteBuffer.appendText` is one `memcpy`.
-  **Still 2.3x: base64 encode,** whose per-byte bounds checks (a checked
-  read per input byte, a checked write per output byte) are what is left:
-  the same checks written in C take 950 us. Closing that needs the
-  compiler to drop checks it can prove or hoist (queued: bounds-check
-  elimination in counted loops); no unchecked accessor is exposed.
+  **Bounds-check elimination (0.1.245).** Measured fairly (best of 20,
+  buffers reused, as the C reference does; the 905 us above counted a
+  fresh 1.4 MB output each time), encode was already near C, but decode
+  was 2.3x: its four checked `byteAt` reads and four checked table reads
+  per group are what C written with the same checks pays (1 340 us
+  against 452). The compiler now versions counted loops
+  (`compiler/src/c_loop_versioning.c`): when every List or `byteAt` index
+  of the loop is `counter + constant` and the whole range is checked
+  inside the lengths once before the loop, a check-free copy runs (a list
+  read indexed by a proven byte needs 256 elements); otherwise the loop
+  runs as written, so out-of-range reads still answer the fallback and
+  writes still warn. Decode 1 055 -> 498 us, encode 469 us (with its
+  `memset`); benchmarks/list_access is unchanged (clang already removed
+  its sequential checks, and its random ones cannot be proven).
+  `RAE_NO_LOOP_VERSIONING=1` turns it off, `RAE_LOOP_VERSIONING_TRACE=1`
+  lists each counted loop as versioned or kept.
 - **Not timed, with the reason:** row 1 (net policy) is measured by the
   server benchmarks, where the Rae servers match or beat Rust's hyper
   (benchmarks/servers/README.md); rows 7, 9 and 10 (asset lookup, the
