@@ -92,10 +92,14 @@ class Client:
             raise ValueError("expected a text frame, got opcode %d" % opcode)
         return json.loads(payload)
 
-    def close(self):
+    def close(self, skip_other=False):
+        """The closing handshake; `skip_other` reads past other frames first
+        (a game room keeps sending snapshots)"""
         try:
             self.send(8, struct.pack(">H", 1000))
             opcode, _ = self.frame()
+            while skip_other and opcode != 8:
+                opcode, _ = self.frame()
             if opcode != 8:
                 raise ValueError("close answered with opcode %d" % opcode)
         finally:
@@ -186,21 +190,22 @@ def ping():
     client.close()
 
 
-checks = [
-    ("echo", echo),
-    ("broadcast", broadcast),
-    ("many messages in one read", many_in_one_read),
-    ("split and fragmented", split_and_fragmented),
-    ("large message", large),
-    ("ping", ping),
-]
-for label, check in checks:
-    before = len(failures)
-    try:
-        check()
-    except Exception as error:
-        failures.append("%s: %s: %s" % (label, type(error).__name__, error))
-    print("%s: %s webSocket %s" % ("PASS" if len(failures) == before else "FAIL", name, label))
-for failure in failures:
-    print("  " + failure)
-sys.exit(1 if failures else 0)
+if __name__ == "__main__":
+    checks = [
+        ("echo", echo),
+        ("broadcast", broadcast),
+        ("many messages in one read", many_in_one_read),
+        ("split and fragmented", split_and_fragmented),
+        ("large message", large),
+        ("ping", ping),
+    ]
+    for label, check in checks:
+        before = len(failures)
+        try:
+            check()
+        except Exception as error:
+            failures.append("%s: %s: %s" % (label, type(error).__name__, error))
+        print("%s: %s webSocket %s" % ("PASS" if len(failures) == before else "FAIL", name, label))
+    for failure in failures:
+        print("  " + failure)
+    sys.exit(1 if failures else 0)

@@ -1,4 +1,5 @@
-// The WebSocket load client (spec/WebSocket.md "Load", decision F4).
+// The WebSocket load client (spec/WebSocket.md "Load", decision F4), and
+// with `gameRoom` first the game room's (spec/GameRoom.md, src/room.rs).
 //
 //   loadClient --url ws://127.0.0.1:8080/ws [--step 1000] [--max-clients 15000]
 //              [--limit-ms 250] [--broadcasts 100] [--in-flight 4]
@@ -11,6 +12,8 @@
 // fan-out happens in between. The ramp stops when the step's p99 passes
 // `limit-ms`, when a client cannot connect, or at `max-clients`. The result
 // is one JSON object on stdout; progress goes to stderr.
+mod room;
+
 use std::time::{Duration, Instant};
 
 use futures_util::stream::{SplitSink, StreamExt};
@@ -253,6 +256,18 @@ async fn ramp(settings: Settings) -> Value {
 
 fn main() {
     raise_file_limit();
+    let arguments: Vec<String> = std::env::args().skip(1).collect();
+    if arguments.first().map(String::as_str) == Some("gameRoom") {
+        let settings = room::room_settings(&arguments[1..]);
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(settings.threads)
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let result = runtime.block_on(room::game_room(settings));
+        println!("{result}");
+        std::process::exit(0);
+    }
     let settings = settings();
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(settings.threads)

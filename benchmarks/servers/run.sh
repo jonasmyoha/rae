@@ -1,6 +1,6 @@
 #!/bin/sh
 # The server benchmark runner (docs/server-benchmarks-design.md §8), phases 1
-# (HTTP) and 2 (WebSocket). `make bench-servers` calls it.
+# (HTTP), 2 (WebSocket) and 3 (game room). `make bench-servers` calls it.
 #
 # HTTP: for each worker configuration (1, and all performance cores) it starts
 # every implementation, runs check.sh against it (a failing check skips its
@@ -14,6 +14,10 @@
 # same way, each ramping the clients up in BENCH_WS_STEP (1000) steps to
 # BENCH_WS_MAX_CLIENTS (15000) or until the broadcast p99 passes
 # BENCH_WS_LIMIT_MS (250).
+#
+# Game room (spec/GameRoom.md): one worker each; after check.sh --gameRoom,
+# BENCH_ROOM_RUNS (3) runs of `loadClient gameRoom` per room size in
+# BENCH_ROOM_CLIENTS ("100 1000 2000"), BENCH_ROOM_SECONDS (10) each.
 # Raw runs go to build/raw/, the medians to results/summary.json and the
 # machine and toolchains to results/metadata.json (committed baseline, F6).
 #
@@ -21,7 +25,7 @@
 # BENCH_CONNECTIONS (256), BENCH_LOADGEN_THREADS (4), BENCH_IMPLS
 # ("rae-eventLoop rae-ecs rust node bun"), BENCH_CASES ("plaintext json
 # pipelined"), BENCH_WORKERS ("1 <performance cores>"), BENCH_PHASES ("http
-# webSocket"), BENCH_WS_BROADCASTS (100 per step), BENCH_ALLOW_LOAD=1
+# webSocket gameRoom"), BENCH_WS_BROADCASTS (100 per step), BENCH_ALLOW_LOAD=1
 # (skip the load-average gate), BENCH_RESULTS (results/; a scratch run can
 # point elsewhere so the committed baseline stays).
 set -eu
@@ -64,6 +68,8 @@ build_rae eventLoop
 build_rae ecs
 build_rae eventLoop webSocket
 build_rae ecs webSocket
+build_rae eventLoop gameRoom
+build_rae ecs gameRoom
 run_with_timeout 900 cargo build --quiet --release --locked \
   --manifest-path "$HERE/rust/Cargo.toml" --target-dir "$BUILD/rust"
 run_with_timeout 900 cargo build --quiet --release --locked \

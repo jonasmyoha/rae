@@ -557,7 +557,18 @@ a syscall-shaped shim where the platform forces it.
    every server as one worker: a broadcast reaches every client of the
    server, and fanning out between workers is not built yet.
 3. Phase 3 on the same code: only the room logic, the tick and the snapshot
-   system are new.
+   system are new. **Phase 3 landed 2026-10-09**: `spec/GameRoom.md` (binary
+   32-byte inputs, a 24-byte snapshot header carrying the tick's lateness,
+   the previous tick's duration and the missed count, 16 bytes per player,
+   backpressure by skipping a player still holding a snapshot), both Rae
+   servers (`rae/eventLoop/gameRoom`, `rae/ecs/gameRoom` with `PlayerState`,
+   `PlayerInputEvent` and membership / tick / snapshot systems; one room, so
+   no `RoomMember`), the Rust, Node and Bun references, `loadClient
+   gameRoom` (raw sockets and a frame scanner), `check.sh --gameRoom` (in
+   `check.sh --rae`) and the runner's gameRoom phase. The room sizes are 100,
+   1 000 and 2 000: above about 2 500 players one machine's loopback runs out
+   of kernel network memory for every server, so 5 000 needs a second
+   machine (spec/GameRoom.md).
 
 ## 10. Decisions (2026-10-08)
 

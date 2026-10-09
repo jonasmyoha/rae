@@ -1,0 +1,581 @@
+# Phase 3 game room server, plain event-loop style
+# (benchmarks/servers/spec/GameRoom.md, docs/server-benchmarks-design.md §6):
+# the phase 2 loop's shape, with the player kept on its connection. An input
+# is applied to the player the moment it is decoded; at each 30 Hz deadline
+# (Time.waitUntil) the tick encodes one snapshot into a scratch buffer and
+# copies it to every player whose connection is not still holding the last
+# one. Output is written once per poll or tick. The codecs are the same
+# lib/http and lib/webSocket the ECS server (rae/ecs/gameRoom) uses.
+#
+# PORT (default 8080) comes from the environment. One worker (spec: one
+# room). With RAE_BENCH_STATS=1 it prints its tick count and the allocation
+# count once a second.
+open net/Tcp
+open net/Poller
+open net/ByteBuffer
+open http/Http
+open webSocket/Upgrade
+open webSocket/FrameDecoder
+open webSocket/FrameEncoder
+open collections/IntMap
+open Time
+
+type Connection {
+  socketId: SocketId
+  input: ByteBuffer
+  output: ByteBuffer
+  parse: HttpParseState
+  watchingWritable: Bool
+  # Close once the output is sent
+  closing: Bool
+  open: Bool
+  # Upgraded: the input is WebSocket frames
+  webSocket: Bool
+  decode: WebSocketDecodeState
+  # Has output to write at the end of this poll
+  dirty: Bool
+  # The player (a WebSocket connection is one)
+  playerId: Int
+  x: Int
+  y: Int
+  lastSequence: Int
+}
+
+type Worker {
+  listenerSocketId: SocketId
+  poller: Poller
+  ready: List(Readiness)
+  connections: List(Connection)
+  # Socket handle -> its slot in `connections`
+  slots: IntMap(Int)
+  # Slots of closed connections, reused with their buffers
+  freeSlots: List(Int)
+  # Slots with output to write at the end of this poll
+  dirtySlots: List(Int)
+  # The snapshot, encoded once per tick
+  scratch: ByteBuffer
+  date: HttpDateCache
+  nextPlayerId: Int
+  # The tick clock: index k is due at startNs + k * periodNs
+  startNs: Int
+  periodNs: Int
+  nextTickNs: Int
+  missedTicks: Int
+  previousTickNs: Int
+  ticks: Int
+  printStats: Bool
+}
+
+func envInt(name: view String, fallback: view Int) ret Int {
+  let text: String = Sys.getEnv(name: name)
+  if text.length() is 0 {
+    ret fallback
+  }
+  ret text.toInt()
+}
+
+# ----- the game -------------------------------------------------------------
+const tickHertz: Int = 30
+
+const inputBytes: Int = 32
+
+const snapshotHeaderBytes: Int = 24
+
+const playerBytes: Int = 16
+
+func clamp(value: view Int, limit: view Int) ret Int {
+  if value > limit {
+    ret limit
+  }
+  if value < -limit {
+    ret -limit
+  }
+  ret value
+}
+
+func appendUInt32(output: mod ByteBuffer, value: view Int) {
+  appendByte(buffer: output, byte: value)
+  appendByte(buffer: output, byte: value shr 8)
+  appendByte(buffer: output, byte: value shr 16)
+  appendByte(buffer: output, byte: value shr 24)
+}
+
+func readUInt32(buffer: view ByteBuffer, index: view Int) ret Int {
+  ret byteBufferAt(buffer: buffer, index: index) bitor (byteBufferAt(
+    buffer: buffer
+    index: index + 1
+  ) shl 8) bitor (byteBufferAt(buffer: buffer, index: index + 2) shl 16) bitor (byteBufferAt(
+    buffer: buffer
+    index: index + 3
+  ) shl 24)
+}
+
+func readInt32(buffer: view ByteBuffer, index: view Int) ret Int {
+  let value: Int = readUInt32(buffer: buffer, index: index)
+  if value >= 2147483648 {
+    ret value - 4294967296
+  }
+  ret value
+}
+
+# A 32-byte input, applied the moment it arrives (spec: every input received
+# before a tick is applied by that tick, in arrival order)
+func applyInput(connection: mod Connection, at: view Int) {
+  connection.lastSequence = readUInt32(buffer: connection.input, index: at)
+  let moveX: Int = clamp(value: readInt32(buffer: connection.input, index: at + 4), limit: 1000)
+  let moveY: Int = clamp(value: readInt32(buffer: connection.input, index: at + 8), limit: 1000)
+  connection.x = clamp(value: connection.x + moveX, limit: 1000000)
+  connection.y = clamp(value: connection.y + moveY, limit: 1000000)
+}
+
+func isPlayer(connection: view Connection) ret Bool {
+  ret connection.open and connection.webSocket and not connection.closing
+}
+
+# ----- one connection: HTTP --------------------------------------------------
+
+# Read what arrived
+func readInput(connection: mod Connection) {
+  loop var chunk: Int = 0, chunk < 4, ++chunk {
+    let result: IoResult = socketReadBuffer(
+      socketId: connection.socketId
+      buffer: connection.input
+      maxBytes: 16384
+    )
+    if result.status is NetStatus.wouldBlock {
+      ret
+    }
+    if result.status is not NetStatus.ok {
+      connection.closing = true
+      ret
+    }
+    if result.bytes < 16384 {
+      ret
+    }
+  }
+}
+
+# Answer every complete HTTP request; an upgrade on /ws makes the connection
+# a WebSocket one (a player), its frames starting right after the request
+func parseHttp(connection: mod Connection, date: view String, nextPlayerId: mod Int) {
+  var request: HttpRequest = createHttpRequest()
+  loop not connection.closing {
+    let parsed: HttpParseResult = httpParseNext(
+      state: connection.parse
+      buffer: connection.input
+      request: request
+    )
+    if parsed is HttpParseResult.needMore {
+      break
+    }
+    if parsed is HttpParseResult.badRequest {
+      httpAppendBadRequest(output: connection.output, date: date)
+      connection.closing = true
+      break
+    }
+    var upgrade: WebSocketUpgradeResult = WebSocketUpgradeResult.notWebSocket
+    if httpPathIs(buffer: connection.input, request: request, path: "/ws") {
+      upgrade = webSocketUpgradeCheck(
+        state: connection.parse
+        buffer: connection.input
+        request: request
+      )
+    }
+    if upgrade is WebSocketUpgradeResult.upgrade {
+      webSocketAppendAccept(
+        output: connection.output
+        state: connection.parse
+        buffer: connection.input
+        request: request
+      )
+      connection.webSocket = true
+      connection.decode = createWebSocketDecodeState(requireMask: true, maxMessageBytes: 16777216)
+      connection.decode.position = request.whole.start + request.whole.count
+      # A new player, at (0, 0)
+      connection.playerId = nextPlayerId
+      nextPlayerId = nextPlayerId + 1
+      connection.x = 0
+      connection.y = 0
+      connection.lastSequence = 0
+      ret
+    }
+    if upgrade is WebSocketUpgradeResult.wrongVersion {
+      webSocketAppendUpgradeRequired(output: connection.output, date: date)
+      connection.closing = true
+    } else if upgrade is WebSocketUpgradeResult.badRequest {
+      httpAppendBadRequest(output: connection.output, date: date)
+      connection.closing = true
+    } else {
+      httpAppendResponse(
+        output: connection.output
+        status: 404
+        contentType: "text/plain"
+        body: "Not Found"
+        date: date
+        keepAlive: request.keepAlive
+      )
+      if not request.keepAlive {
+        connection.closing = true
+      }
+    }
+  }
+  httpParseConsumed(state: connection.parse, buffer: connection.input)
+}
+
+# ----- one connection: WebSocket ---------------------------------------------
+
+# Decode the frames that arrived: inputs are applied, ping and close answered
+func decodeMessages(connection: mod Connection) {
+  var message: WebSocketMessage = createWebSocketMessage()
+  loop not connection.closing {
+    let result: WebSocketDecodeResult = webSocketDecodeNext(
+      state: connection.decode
+      buffer: connection.input
+      message: message
+    )
+    if result is WebSocketDecodeResult.needMore {
+      break
+    }
+    if result is WebSocketDecodeResult.failed {
+      webSocketAppendClose(output: connection.output, code: connection.decode.failCode, reason: "")
+      connection.closing = true
+      break
+    }
+    if message.kind is WebSocketOpcode.ping {
+      webSocketAppendFrameFrom(
+        output: connection.output
+        kind: WebSocketOpcode.pong
+        source: connection.input
+        payload: message.payload
+      )
+    } else if message.kind is WebSocketOpcode.close {
+      var code: Int = message.closeCode
+      if code is 1005 {
+        code = 1000
+      }
+      webSocketAppendClose(output: connection.output, code: code, reason: "")
+      connection.closing = true
+    } else if message.kind is WebSocketOpcode.binary and message.payload.count is inputBytes {
+      applyInput(connection: connection, at: message.payload.start)
+    }
+  }
+  # The frames are handled: drop them (a fragmented message keeps its part)
+  webSocketDecodeConsumed(state: connection.decode, buffer: connection.input)
+}
+
+# Write until the output is empty or the socket takes no more
+func flush(connection: mod Connection) {
+  loop byteBufferLength(buffer: connection.output) > 0 {
+    let result: IoResult = socketWriteBuffer(
+      socketId: connection.socketId
+      buffer: connection.output
+    )
+    if result.status is NetStatus.wouldBlock {
+      ret
+    }
+    if result.status is not NetStatus.ok {
+      byteBufferClear(buffer: connection.output)
+      connection.closing = true
+      ret
+    }
+  }
+}
+
+# ----- the worker -----------------------------------------------------------
+func createWorker(listenerSocketId: view SocketId) ret Worker {
+  let startNs: Int = nowNs()
+  let worker: Worker = {
+    listenerSocketId: listenerSocketId
+    poller: createPoller()
+    ready: List.create(Readiness, cap: 256)
+    connections: List.create(Connection, cap: 256)
+    slots: createIntMap(Int, cap: 256)
+    freeSlots: List.create(Int, cap: 64)
+    dirtySlots: List.create(Int, cap: 256)
+    scratch: createByteBuffer(capacity: 256)
+    date: createHttpDateCache()
+    nextPlayerId: 1
+    startNs: startNs
+    periodNs: 1000000000 / tickHertz
+    nextTickNs: startNs
+    missedTicks: 0
+    previousTickNs: 0
+    ticks: 0
+    printStats: Sys.getEnv(name: "RAE_BENCH_STATS").length() > 0
+  }
+  let status: NetStatus = pollerWatch(
+    poller: worker.poller
+    socketId: listenerSocketId
+    readable: true
+    writable: false
+  )
+  ret worker
+}
+
+func acceptOne(worker: mod Worker) {
+  let accepted: SocketResult = tcpAccept(listenerSocketId: worker.listenerSocketId)
+  if accepted.status is not NetStatus.ok {
+    ret
+  }
+  var slot: Int = worker.connections.length
+  if worker.freeSlots.length > 0 {
+    slot = worker.freeSlots.pop()
+    if let connection: mod Connection => worker.connections.modAt(index: slot) {
+      connection.socketId = accepted.socketId
+      connection.watchingWritable = false
+      connection.closing = false
+      connection.open = true
+      connection.webSocket = false
+      connection.dirty = false
+    }
+  } else {
+    worker.connections.add(value: Connection {
+      socketId: accepted.socketId
+      input: createByteBuffer(capacity: 4096)
+      output: createByteBuffer(capacity: 4096)
+      parse: createHttpParseState()
+      watchingWritable: false
+      closing: false
+      open: true
+      webSocket: false
+      decode: createWebSocketDecodeState(requireMask: true, maxMessageBytes: 16777216)
+      dirty: false
+      playerId: 0
+      x: 0
+      y: 0
+      lastSequence: 0
+    })
+  }
+  set(this: worker.slots, k: accepted.socketId.handle, value: slot)
+  let status: NetStatus = pollerWatch(
+    poller: worker.poller
+    socketId: accepted.socketId
+    readable: true
+    writable: false
+  )
+}
+
+# Write the connection's output at the end of this poll
+func markDirty(worker: mod Worker, slot: view Int) {
+  var added: Bool = false
+  if let connection: mod Connection => worker.connections.modAt(index: slot) {
+    if not connection.dirty {
+      connection.dirty = true
+      added = true
+    }
+  }
+  if added {
+    worker.dirtySlots.add(value: slot)
+  }
+}
+
+# Readable: read, then answer everything that arrived
+func serviceInput(worker: mod Worker, slot: view Int) {
+  if let connection: mod Connection => worker.connections.modAt(index: slot) {
+    if not connection.webSocket {
+      parseHttp(connection: connection, date: worker.date.text, nextPlayerId: worker.nextPlayerId)
+    }
+    if connection.webSocket {
+      decodeMessages(connection: connection)
+    }
+  }
+}
+
+# ----- the tick ---------------------------------------------------------------
+
+# The snapshot of every player into the scratch buffer, as one binary frame
+func encodeSnapshot(worker: mod Worker, tickIndex: view Int, latenessNs: view Int) {
+  var players: Int = 0
+  loop var i: Int = 0, i < worker.connections.length, ++i {
+    if let connection: view Connection => worker.connections.viewAt(index: i) {
+      if isPlayer(connection: connection) {
+        players = players + 1
+      }
+    }
+  }
+  byteBufferClear(buffer: worker.scratch)
+  webSocketAppendHeader(
+    output: worker.scratch
+    kind: WebSocketOpcode.binary
+    fin: true
+    length: snapshotHeaderBytes + players * playerBytes
+    masked: false
+    maskKey: 0
+  )
+  appendUInt32(output: worker.scratch, value: tickIndex)
+  appendUInt32(output: worker.scratch, value: players)
+  appendUInt32(output: worker.scratch, value: latenessNs / 1000)
+  appendUInt32(output: worker.scratch, value: worker.previousTickNs / 1000)
+  appendUInt32(output: worker.scratch, value: worker.missedTicks)
+  appendUInt32(output: worker.scratch, value: 0)
+  loop var i: Int = 0, i < worker.connections.length, ++i {
+    if let connection: view Connection => worker.connections.viewAt(index: i) {
+      if isPlayer(connection: connection) {
+        appendPlayer(snapshot: worker.scratch, connection: connection)
+      }
+    }
+  }
+}
+
+func appendPlayer(snapshot: mod ByteBuffer, connection: view Connection) {
+  appendUInt32(output: snapshot, value: connection.playerId)
+  appendUInt32(output: snapshot, value: connection.x)
+  appendUInt32(output: snapshot, value: connection.y)
+  appendUInt32(output: snapshot, value: connection.lastSequence)
+}
+
+# Copy the snapshot to every player not still holding the last one
+func sendSnapshot(worker: mod Worker) {
+  let snapshotLength: Int = byteBufferLength(buffer: worker.scratch)
+  loop var slot: Int = 0, slot < worker.connections.length, ++slot {
+    var sent: Bool = false
+    if let connection: mod Connection => worker.connections.modAt(index: slot) {
+      if isPlayer(connection: connection) and byteBufferLength(buffer: connection.output) <= snapshotLength {
+        appendBytes(
+          buffer: connection.output
+          bytes: worker.scratch.bytes
+          start: worker.scratch.start
+          count: snapshotLength
+        )
+        sent = true
+      }
+    }
+    if sent {
+      markDirty(worker: worker, slot: slot)
+    }
+  }
+}
+
+# Wait for the tick's deadline, then snapshot. A tick that starts more than a
+# period late skips the periods it missed.
+func tick(worker: mod Worker) {
+  let scheduledNs: Int = worker.nextTickNs
+  waitUntil(deadlineNs: scheduledNs)
+  let tickStartNs: Int = nowNs()
+  let tickIndex: Int = (scheduledNs - worker.startNs) / worker.periodNs
+  worker.nextTickNs = scheduledNs + worker.periodNs
+  if worker.nextTickNs <= tickStartNs {
+    let behind: Int = (tickStartNs - worker.nextTickNs) / worker.periodNs + 1
+    worker.missedTicks = worker.missedTicks + behind
+    worker.nextTickNs = worker.nextTickNs + behind * worker.periodNs
+  }
+  encodeSnapshot(worker: worker, tickIndex: tickIndex, latenessNs: tickStartNs - scheduledNs)
+  sendSnapshot(worker: worker)
+  worker.previousTickNs = nowNs() - tickStartNs
+  worker.ticks = worker.ticks + 1
+}
+
+# After writing: close a finished connection, or watch for writability while
+# output is waiting
+func settle(worker: mod Worker, slot: view Int) {
+  var closeIt: Bool = false
+  if let connection: mod Connection => worker.connections.modAt(index: slot) {
+    let waiting: Bool = byteBufferLength(buffer: connection.output) > 0
+    if connection.closing and not waiting {
+      let status: NetStatus = pollerForget(
+        poller: worker.poller
+        socketId: connection.socketId
+        readable: true
+        writable: connection.watchingWritable
+      )
+      remove(this: worker.slots, k: connection.socketId.handle)
+      socketClose(socketId: connection.socketId)
+      byteBufferClear(buffer: connection.input)
+      byteBufferClear(buffer: connection.output)
+      connection.parse.position = 0
+      connection.parse.headers.clear()
+      connection.open = false
+      connection.webSocket = false
+      closeIt = true
+    } else if waiting and not connection.watchingWritable {
+      let status: NetStatus = pollerWatch(
+        poller: worker.poller
+        socketId: connection.socketId
+        readable: false
+        writable: true
+      )
+      connection.watchingWritable = true
+    } else if not waiting and connection.watchingWritable {
+      let status: NetStatus = pollerForget(
+        poller: worker.poller
+        socketId: connection.socketId
+        readable: false
+        writable: true
+      )
+      connection.watchingWritable = false
+    }
+  }
+  if closeIt {
+    worker.freeSlots.add(value: slot)
+  }
+}
+
+# The end of a poll: write every connection that got output, once
+func flushDirty(worker: mod Worker) {
+  loop var i: Int = 0, i < worker.dirtySlots.length, ++i {
+    let slot: Int = worker.dirtySlots.copyAtFallback(index: i, fallback: 0)
+    if let connection: mod Connection => worker.connections.modAt(index: slot) {
+      connection.dirty = false
+      flush(connection: connection)
+    }
+    settle(worker: worker, slot: slot)
+  }
+  worker.dirtySlots.clear()
+}
+
+func handleReady(worker: mod Worker, readiness: view Readiness) {
+  if readiness.socketId is worker.listenerSocketId {
+    acceptOne(worker: worker)
+    ret
+  }
+  var slot: Int = -1
+  if let found: Int = get(this: worker.slots, k: readiness.socketId.handle) {
+    slot = found
+  }
+  if slot < 0 {
+    ret
+  }
+  if readiness.readable or readiness.closed or readiness.failed {
+    if let connection: mod Connection => worker.connections.modAt(index: slot) {
+      readInput(connection: connection)
+    }
+    serviceInput(worker: worker, slot: slot)
+    markDirty(worker: worker, slot: slot)
+  } else if readiness.writable {
+    markDirty(worker: worker, slot: slot)
+  }
+}
+
+func main() ret Int {
+  let port: Int = envInt(name: "PORT", fallback: 8080)
+  let listening: SocketResult = tcpListen(host: "127.0.0.1", port: port, backlog: 4096)
+  if listening.status is not NetStatus.ok {
+    log("cannot listen on {port}: {listening.status}")
+    ret 1
+  }
+  log("listening on {socketLocalPort(socketId: listening.socketId)}")
+  var worker: Worker = createWorker(listenerSocketId: listening.socketId)
+  loop {
+    # Serve I/O until the tick is near, then wait for its deadline exactly
+    let remainingNs: Int = worker.nextTickNs - nowNs()
+    if remainingNs > 2000000 {
+      let status: NetStatus = pollWait(
+        poller: worker.poller
+        ready: worker.ready
+        timeoutMs: (remainingNs - 1000000) / 1000000
+      )
+      if updateHttpDate(cache: worker.date, epochSeconds: nowMs() / 1000) and worker.printStats {
+        log("stats worker=0 requests={worker.ticks} allocations={Sys.allocationCount()}")
+      }
+      loop var i: Int = 0, i < worker.ready.length, ++i {
+        if let readiness: view Readiness => worker.ready.viewAt(index: i) {
+          handleReady(worker: worker, readiness: readiness)
+        }
+      }
+    } else {
+      tick(worker: worker)
+    }
+    flushDirty(worker: worker)
+  }
+  ret 0
+}
