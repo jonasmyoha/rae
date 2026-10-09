@@ -111,7 +111,8 @@ WebSocket: every implementation is started once and passes `check.sh
 --websocket`, then gets 3 ramps of `loadClient`, interleaved like the HTTP
 runs. A ramp adds 1 000 clients at a time; after each step 4 clients send 100
 broadcasts in all (4 in flight) and the round trip is from sending one to its
-sender receiving the broadcastResult, after the fan-out to every client.
+sender receiving the broadcastResult, which is queued after the broadcast is
+encoded for every client (spec/WebSocket.md has what that includes).
 Reported per step (median, min and max over the ramps): broadcast RTT p50 and
 p99. Also the client count reached with p99 under 250 ms, peak RSS, CPU
 seconds, and for Rae the allocations per message, which here include every
