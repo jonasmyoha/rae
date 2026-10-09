@@ -4336,11 +4336,13 @@ function scheduleLineChartRender() {
 function attachChartHover(canvas) {
   if (canvas.__hoverAttached) return;
   canvas.__hoverAttached = true;
-  const container = canvas.parentElement;
+  // The tooltip lives on the page itself, not in the chart's container: the
+  // statistics frame clips what overflows it, which cut off a tooltip above a
+  // point near the top of a chart.
   const tooltip = document.createElement("div");
   tooltip.className = "chart-tooltip";
   tooltip.hidden = true;
-  container.appendChild(tooltip);
+  document.body.appendChild(tooltip);
   const hide = () => {
     tooltip.hidden = true;
     const chart = canvas.__chart;
@@ -4369,14 +4371,17 @@ function attachChartHover(canvas) {
       : chart.formatValue ? chart.formatValue.point(entry) : String(entry[chart.valueKey]);
     tooltip.innerHTML = `<time>${when}</time><strong>${value}</strong>`;
     tooltip.hidden = false;
-    const left = Math.min(Math.max(point.x, tooltip.offsetWidth / 2 + 4), rect.width - tooltip.offsetWidth / 2 - 4);
-    tooltip.style.left = `${canvas.offsetLeft + left}px`;
-    // Above the point, or below it when that would leave the chart (the
-    // container clips what overflows it)
-    const above = point.y - 12 - tooltip.offsetHeight >= 4;
-    tooltip.style.top = above
-      ? `${canvas.offsetTop + point.y - 12 - tooltip.offsetHeight}px`
-      : `${canvas.offsetTop + point.y + 14}px`;
+    // In window coordinates (position: fixed): centred over the point and
+    // kept inside the window, above the point, or below it when the window
+    // has no room above
+    const width = tooltip.offsetWidth;
+    const height = tooltip.offsetHeight;
+    const pointX = rect.left + point.x;
+    const pointY = rect.top + point.y;
+    const left = Math.min(Math.max(pointX - width / 2, 4), window.innerWidth - width - 4);
+    const above = pointY - 12 - height >= 4;
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${above ? pointY - 12 - height : pointY + 14}px`;
   });
 }
 
