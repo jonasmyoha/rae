@@ -409,6 +409,13 @@ per-platform.
    - 106_mobile_ui's own input system does the same (44 pt converted to its
      design units), drops hover for a finger or a device without hover, and
      recomputes the size class every frame, logging a change.
+   - 106 lays out by it when no phone preset is emulated
+     (`RAE_UI_DEVICE=none`): compact fills the window with the page column,
+     medium widens the column so the grids gain columns (Home 2 -> 3,
+     Library 3 -> 4), expanded adds the Library as a left side panel with the
+     dock a bar under both (`Viewport.rae`, `screenSystem/SidePanel.rae`).
+     A size class change rebuilds the world. `RAE_UI_WINDOW=WxH` starts at a
+     given size in points, to check each class headlessly.
    - Fixture 1068.
 
 ## 6. Decisions (maintainer, 2026-10-08: all four as recommended)

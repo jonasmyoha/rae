@@ -1,5 +1,6 @@
 open ui/Ecs
 open ui/DevicePresets
+open ui/SizeClass
 
 # 106's coordinate spine. The SDL3 window is sized in logical points,
 # while scene/layout coordinates are native design units (du). gpu2d's
@@ -28,7 +29,19 @@ type Viewport {
   forcedFrameId: Int
   devicePresetActive: Bool
   safeInsetsDu: Insets
+  # The window's size class (points; a device preset's width when one is
+  # active), and what it lays out: compact fills the window with the page
+  # column, medium widens the column for a wider grid, expanded adds the
+  # Library side panel left of the column (0 when there is none)
+  sizeClass: SizeClass
+  sidePanelDuW: Float
 }
+
+# How much wider the page column is past compact (2 grid columns become 3)
+const wideColumnFactor: Float = 1.5
+
+# The narrowest side panel worth showing, in design units (150 pt)
+const sidePanelMinDuW: Float = 450.0
 
 func frameIdToInt(id: view String) pub ret Int {
   if id is "PhonePortrait" {
@@ -98,8 +111,13 @@ func createViewport(
   windowPtH: view Float
   framebufferPxW: view Float
   framebufferPxH: view Float
+  windowSizeClass: view SizeClass
 ) pub ret Viewport {
   let frame: DeviceFrame = activeDeviceFrame()
+  var sizeClass: SizeClass = windowSizeClass
+  if frame.enabled {
+    sizeClass = sizeClassForWidth(widthPoints: frame.widthDu / unitScale)
+  }
   var dprVal: Float = 1.0
   if windowPtW > 0.0 {
     dprVal = framebufferPxW / windowPtW
@@ -154,6 +172,24 @@ func createViewport(
   # centered content column — the documented design. Clamped to the
   # extent so a device NARROWER than the phone column can't overflow.
   var areaColumnDuW: Float = phoneFrameW * legacySceneScale
+  var sidePanelDuW: Float = 0.0
+  if frame.enabled is false {
+    let wideColumn: Float = phoneFrameW * legacySceneScale * wideColumnFactor
+    if sizeClass is SizeClass.compact {
+      # A compact window is the phone column, edge to edge
+      areaColumnDuW = layoutWVal
+    } else if sizeClass is SizeClass.medium {
+      areaColumnDuW = wideColumn
+    } else {
+      # Expanded: the wide column, centred, and the Library panel in the left
+      # gutter. A window too narrow for both gives the column less room.
+      areaColumnDuW = wideColumn
+      if layoutWVal - 2.0 * sidePanelMinDuW < areaColumnDuW {
+        areaColumnDuW = layoutWVal - 2.0 * sidePanelMinDuW
+      }
+      sidePanelDuW = (layoutWVal - areaColumnDuW) * 0.5
+    }
+  }
   if areaColumnDuW > layoutWVal {
     areaColumnDuW = layoutWVal
   }
@@ -178,6 +214,8 @@ func createViewport(
       r: frame.safeInsetsDu.r
       b: frame.safeInsetsDu.b
     }
+    sizeClass: sizeClass
+    sidePanelDuW: sidePanelDuW
   }
   ret vp
 }
@@ -196,6 +234,7 @@ func createViewportFromWindow() pub ret Viewport {
     windowPtH: fbH
     framebufferPxW: fbW
     framebufferPxH: fbH
+    windowSizeClass: sizeClassForWidth(widthPoints: windowWidthPoints())
   )
 }
 
