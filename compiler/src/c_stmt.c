@@ -1670,7 +1670,9 @@ static bool emit_parallel_loop(CFuncContext* ctx, const AstStmt* stmt, Str index
 // alias of the caller's value. Natively main loops over it and drops the
 // state; in a browser the state moves into a heap box and the page calls a
 // trampoline each animation frame (emscripten_set_main_loop_arg), which drops
-// and frees the box when the body says stop. Either way main's own drops skip
+// and frees the box when the body says stop. Natively the body is also
+// registered as the live frame (rae_set_live_frame) while the loop runs, so a
+// window system that blocks the loop, a macOS live resize, can draw frames. Either way main's own drops skip
 // the state. The `RAE_FRAME_CALLBACK_ENTRY` marker tells the web link that no
 // frame blocks (main.c emcc_link_c_to_web).
 static bool emit_main_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
@@ -1741,7 +1743,12 @@ static bool emit_main_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     fprintf(out, "    rae_Bool __rae_main_loop_body%d(%s*);\n#ifdef __EMSCRIPTEN__\n", id, type_buf);
     fprintf(out, "    void __rae_main_loop_start%d(%s);\n    __rae_main_loop_start%d(%.*s);\n#else\n",
             id, type_buf, id, (int)state.len, state.data);
+    /* The body is also the frame a blocking window system may run meanwhile
+     * (a macOS live resize: rae_set_live_frame, runtime_gpu2d_platform.c). */
+    fprintf(out, "    rae_set_live_frame((rae_Bool (*)(void*))__rae_main_loop_body%d, &%.*s);\n",
+            id, (int)state.len, state.data);
     fprintf(out, "    while (__rae_main_loop_body%d(&%.*s)) {}\n", id, (int)state.len, state.data);
+    fprintf(out, "    rae_set_live_frame(NULL, NULL);\n");
     char state_cname[256];
     snprintf(state_cname, sizeof state_cname, "%.*s", (int)state.len, state.data);
     emit_drop_for_value(ctx, out, value_type, state_cname, true);

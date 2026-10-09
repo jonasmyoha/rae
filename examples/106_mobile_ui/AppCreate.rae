@@ -58,17 +58,16 @@ func createApp() ret App {
     winH = windowParts.copyAtDefault(index: 1).toInt().toFloat()
   }
   uiInitWindow(width: winW.toInt(), height: winH.toInt(), title: "Rae Mobile UI — {backendEnv}")
-  # Remember the window across restarts. Opt-in. The name carries the app id:
+  # Remember where the window was across restarts. Opt-in. The name carries the app id:
   # dir() is ".rae" for every app, so a shared name is a shared window
   # and the 3D examples were restoring this phone-shaped one. See lib/ui.
   var windowGeometry: WindowGeometry = createWindowGeometry(
     dir: dir()
     name: "window.106_mobile_ui.geometry"
   )
-  # An explicit RAE_UI_WINDOW size wins over the remembered one
-  if windowParts.length is not 2 {
-    restoreWindowGeometry(windowGeometry: windowGeometry)
-  }
+  # Only the position is remembered: the window opens phone-shaped (or at
+  # RAE_UI_WINDOW's size) every time, wherever the user last put it
+  restoreWindowPosition(windowGeometry: windowGeometry)
   # Backend-agnostic window/input hooks are no-ops on GPU2D when the SDL3
   # backend already owns the corresponding event state.
   uiInstallWindowCloseWaker()

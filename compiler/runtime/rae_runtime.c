@@ -68,6 +68,16 @@
 #include "runtime_buffers_math.c"
 /* The cooked sky table. Ahead of every renderer that reads it, and outside
  * the WebGPU guards because the stub builds answer the same push. */
+/* The frame a `mainLoop` runs (its outlined body and state), registered by
+ * the generated loop while it runs. A window system that blocks the app's
+ * loop -- macOS runs a live window resize in its own loop -- calls it to draw
+ * frames meanwhile (runtime_gpu2d_platform.c, the live-resize watcher). */
+static rae_Bool (*g_rae_live_frame_fn)(void*) = NULL;
+static void* g_rae_live_frame_state = NULL;
+void rae_set_live_frame(rae_Bool (*frame)(void*), void* state) {
+    g_rae_live_frame_fn = frame;
+    g_rae_live_frame_state = state;
+}
 #include "runtime_sky_state.c"
 #include "runtime_platform_apple.c"
 #include "runtime_image_sdl3.c"

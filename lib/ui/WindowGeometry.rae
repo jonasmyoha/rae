@@ -110,6 +110,28 @@ func restoreWindowGeometry(windowGeometry: mod WindowGeometry) ret Bool {
   }
 }
 
+# Apply only the saved POSITION, keeping the size the app opened at. For an
+# app whose window shape is part of its design (a phone-shaped UI opens
+# phone-shaped every time; the user can still resize it while it runs).
+func restoreWindowPosition(windowGeometry: mod WindowGeometry) ret Bool {
+  unsafe {
+    let raw: String = rae_ext_rae_sys_read_file(path: windowGeometry.path)
+    if raw.length() < 1 {
+      ret false
+    }
+    let parts: List(String) = raw.trim().split(sep: " ")
+    if parts.length < 4 {
+      ret false
+    }
+    let x: Int = parts.copyAt(index: 0).trim().toInt()
+    let y: Int = parts.copyAt(index: 1).trim().toInt()
+    Gpu2d.setWindowPosition(x: x, y: y)
+    windowGeometry.lastX = x
+    windowGeometry.lastY = y
+    ret true
+  }
+}
+
 # UNITS MATTER HERE, and getting them wrong is not obvious from a screenshot.
 # Gpu2d.windowWidth/Height are the DRAWABLE size in physical pixels, while
 # setWindowSize takes LOGICAL points — so on a 2x display, saving the physical
