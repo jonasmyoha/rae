@@ -1,15 +1,17 @@
 #!/bin/sh
 # The correctness checker (docs/server-benchmarks-design.md §8): every rule of
-# spec/Http.md and spec/WebSocket.md, against a running server or the Rae
-# servers.
+# spec/Http.md, spec/WebSocket.md and spec/GameRoom.md, against a running
+# server or the Rae servers.
 #
 #   check.sh <port> [name]               check the HTTP server on 127.0.0.1:<port>
 #   check.sh --websocket <port> [name]   check the WebSocket server on it
 #                                        (webSocketCheck.py)
-#   check.sh --rae                       build the four Rae servers (eventLoop
-#                                        and ecs, HTTP and WebSocket), start
-#                                        each, check it, stop it (the pre-suite
-#                                        case, F7)
+#   check.sh --gameRoom <port> [name]    check the game room server on it
+#                                        (gameRoomCheck.py)
+#   check.sh --rae                       build the six Rae servers (eventLoop
+#                                        and ecs; HTTP, WebSocket and game
+#                                        room), start each, check it, stop it
+#                                        (the pre-suite case, F7)
 #
 # It checks correctness, never speed. Exit 0 when every check passes.
 set -eu
@@ -146,6 +148,16 @@ if [ "${1:-}" = "--websocket" ]; then
   exit $?
 fi
 
+check_game_room_port() {
+  run_with_timeout 60 python3 "$HERE/gameRoomCheck.py" "$1" "$2"
+}
+
+if [ "${1:-}" = "--gameRoom" ]; then
+  [ $# -ge 2 ] || { echo "usage: check.sh --gameRoom <port> [name]" >&2; exit 2; }
+  check_game_room_port "$2" "${3:-server on $2}"
+  exit $?
+fi
+
 if [ "${1:-}" = "--rae" ]; then
   status=0
   trap 'stop_server' EXIT INT TERM
@@ -173,9 +185,21 @@ if [ "${1:-}" = "--rae" ]; then
       status=1
     fi
     stop_server
+    build_rae "$style" gameRoom || { echo "FAIL: rae-$style-gameRoom does not build"; status=1; continue; }
+    port=$(free_port)
+    out="$BUILD/rae-$style-gameRoom"
+    start_server "$out/check.log" env PORT="$port" "$out/server"
+    if wait_for_tcp "$port"; then
+      check_game_room_port "$port" "rae-$style" || status=1
+    else
+      echo "FAIL: rae-$style-gameRoom did not start"
+      cat "$out/check.log"
+      status=1
+    fi
+    stop_server
   done
   if [ "$status" = 0 ]; then
-    echo "PASS: server-check (rae-eventLoop and rae-ecs, HTTP and WebSocket, every spec/Http.md and spec/WebSocket.md rule)"
+    echo "PASS: server-check (rae-eventLoop and rae-ecs; HTTP, WebSocket and game room; every spec rule)"
   else
     echo "FAIL: server-check (see above)"
   fi
@@ -183,7 +207,7 @@ if [ "${1:-}" = "--rae" ]; then
 fi
 
 if [ $# -lt 1 ]; then
-  echo "usage: check.sh <port> [name] | check.sh --websocket <port> [name] | check.sh --rae" >&2
+  echo "usage: check.sh <port> [name] | check.sh --websocket <port> [name] | check.sh --gameRoom <port> [name] | check.sh --rae" >&2
   exit 2
 fi
 check_port "$1" "${2:-server on $1}"

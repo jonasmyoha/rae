@@ -13,8 +13,8 @@ run_with_timeout() {
 }
 
 # build_rae <style> [phase]: benchmarks/servers/rae/<style>/<phase>
-# (phase http, the default, or webSocket) -> build/rae-<style>/server, or
-# build/rae-<style>-webSocket/server
+# (phase http, the default, webSocket or gameRoom) -> build/rae-<style>/server,
+# or build/rae-<style>-<phase>/server
 build_rae() {
   style=$1
   phase=${2:-http}
