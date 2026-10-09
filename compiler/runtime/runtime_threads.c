@@ -16,8 +16,20 @@ RaeTask* rae_task_new(size_t result_size) {
   atomic_init(&t->done, 0);
   t->joined = 0;
   t->taken = 0;
+  t->on_pool = 0;
+  t->thunk = NULL;
+  t->args = NULL;
   return t;
 }
+
+void rae_task_prepare(RaeTask* t, void* (*thunk)(void*), void* args) {
+  t->on_pool = 1;
+  t->thunk = thunk;
+  t->args = args;
+}
+
+/* Wait for a scheduler task to finish (below, with the scheduler) */
+static void rae_sched_wait(RaeTask* t);
 
 /* Start a spawned task's thunk on its own thread. When no thread can be had
  * (pthread_create fails: macOS stops at 16 383 live threads per process, or
@@ -96,9 +108,13 @@ void rae_task_start(RaeTask* t, void* (*thunk)(void*), void* args) {
 void* rae_task_await(RaeTask* t) {
   if (!t) return NULL;
   if (!t->joined) {
+    if (t->on_pool) {
+      rae_sched_wait(t);
+    } else {
 #if !defined(__wasm__) || defined(RAE_WASM_THREADS)
-    pthread_join(t->thread, NULL);
+      pthread_join(t->thread, NULL);
 #endif
+    }
     t->joined = 1;
   }
   return t->result;
@@ -112,9 +128,13 @@ void* rae_task_await(RaeTask* t) {
 void rae_task_drop(RaeTask* t) {
   if (!t) return;
   if (!t->joined) {
+    if (t->on_pool) {
+      rae_sched_wait(t);
+    } else {
 #if !defined(__wasm__) || defined(RAE_WASM_THREADS)
-    pthread_join(t->thread, NULL);
+      pthread_join(t->thread, NULL);
 #endif
+    }
     t->joined = 1;
   }
   free(t->result);
@@ -375,6 +395,15 @@ static void rae_pcheck_new_launch(void) {
 #endif
 
 #define RAE_POOL_MAX 64
+
+/* The scheduler's Rae policy (lib/core/Scheduler.rae), installed by the
+ * generated main; below, with the scheduler's kernel */
+static struct {
+  void (*worker_loop)(int64_t index);
+  void (*task_wait)(int64_t task);
+  int64_t (*default_workers)(void);
+  int64_t (*chunk_size)(int64_t total, int64_t workers);
+} g_sched_hooks;
 /* How long a worker spins after a job before it sleeps. A solver step runs a
  * few hundred parallelLoops a few microseconds apart, and a worker that fell
  * asleep between two of them costs a condition-variable wake-up (~5-15 us)
@@ -423,6 +452,10 @@ static inline int64_t rae_pool_range_start(int worker, int64_t chunk_count, int 
 }
 
 static int rae_pool_default_workers(void) {
+  if (g_sched_hooks.default_workers) {
+    int64_t n = g_sched_hooks.default_workers();
+    return n < 1 ? 1 : (n > RAE_POOL_MAX ? RAE_POOL_MAX : (int)n);
+  }
   const char* env = getenv("RAE_WORKERS");
   if (env && env[0]) {
     int n = atoi(env);
@@ -480,8 +513,304 @@ static int64_t rae_pool_now_ns(void) {
   return (int64_t)now.tv_sec * 1000000000LL + now.tv_nsec;
 }
 
+
+/* ----- The task scheduler's kernel (docs/lightweight-spawn-design.md §4.3) --
+ *
+ * A spawn whose task never waits except on other tasks runs on the worker
+ * pool above instead of a thread of its own (the C backend decides, from the
+ * may-wait analysis). The scheduler's POLICY is Rae: lib/core/Scheduler.rae
+ * owns the worker loop (what a worker runs next, whom it steals from, how
+ * long it spins before it parks), where a new task goes, how a task waits,
+ * the default worker count and a parallelLoop's chunk size
+ * (docs/runtime-c-audit.md row 13). This is only what C must do: locked task
+ * queues (one call per operation), parking a worker and waking one, running a
+ * task's thunk, and blocking a thread until a task is done. A task handle is
+ * the RaeTask pointer as an Int.
+ *
+ * Queues 1..thread_count belong to the pool's threads (the owner pushes and
+ * pops at the back, thieves take from the front); queue 0 is the injection
+ * queue for tasks spawned outside the pool. Each keeps an atomic count so an
+ * idle worker can look at all of them without taking a lock. */
+
+
+void rae_sched_install(void (*worker_loop)(int64_t index), void (*task_wait)(int64_t task),
+                       int64_t (*default_workers)(void), int64_t (*chunk_size)(int64_t total, int64_t workers)) {
+  g_sched_hooks.worker_loop = worker_loop;
+  g_sched_hooks.task_wait = task_wait;
+  g_sched_hooks.default_workers = default_workers;
+  g_sched_hooks.chunk_size = chunk_size;
+}
+
+typedef struct {
+  pthread_mutex_t lock;
+  RaeTask** ring;
+  int64_t head;
+  int64_t cap;
+  _Atomic int64_t count;
+  char pad[64];
+} RaeTaskQueue;
+
+static RaeTaskQueue g_sched_queues[RAE_POOL_MAX + 1];
+static pthread_once_t g_sched_queues_once = PTHREAD_ONCE_INIT;
+
+static void rae_sched_init_queues(void) {
+  for (int i = 0; i <= RAE_POOL_MAX; i++) pthread_mutex_init(&g_sched_queues[i].lock, NULL);
+}
+
+static __thread int64_t g_sched_worker = -1;    /* this thread's queue; -1 off the pool */
+
+static RaeTaskQueue* rae_sched_queue(int64_t queue) {
+  if (queue < 0 || queue > RAE_POOL_MAX) return NULL;
+  pthread_once(&g_sched_queues_once, rae_sched_init_queues);
+  return &g_sched_queues[queue];
+}
+
+void rae_ext_Scheduler_queuePush(int64_t queue, int64_t task) {
+  RaeTaskQueue* q = rae_sched_queue(queue);
+  if (!q || !task) return;
+  pthread_mutex_lock(&q->lock);
+  int64_t count = atomic_load_explicit(&q->count, memory_order_relaxed);
+  if (count == q->cap) {
+    int64_t cap = q->cap ? q->cap * 2 : 256;
+    RaeTask** ring = (RaeTask**)malloc((size_t)cap * sizeof(RaeTask*));
+    for (int64_t i = 0; i < count; i++) ring[i] = q->ring[(q->head + i) % q->cap];
+    free(q->ring);
+    q->ring = ring;
+    q->head = 0;
+    q->cap = cap;
+  }
+  q->ring[(q->head + count) % q->cap] = (RaeTask*)(intptr_t)task;
+  atomic_store_explicit(&q->count, count + 1, memory_order_release);
+  pthread_mutex_unlock(&q->lock);
+}
+
+/* The newest task (the owner's end), or 0 */
+int64_t rae_ext_Scheduler_queuePopNewest(int64_t queue) {
+  RaeTaskQueue* q = rae_sched_queue(queue);
+  if (!q || atomic_load_explicit(&q->count, memory_order_relaxed) == 0) return 0;
+  pthread_mutex_lock(&q->lock);
+  int64_t count = atomic_load_explicit(&q->count, memory_order_relaxed);
+  int64_t task = 0;
+  if (count > 0) {
+    task = (int64_t)(intptr_t)q->ring[(q->head + count - 1) % q->cap];
+    atomic_store_explicit(&q->count, count - 1, memory_order_release);
+  }
+  pthread_mutex_unlock(&q->lock);
+  return task;
+}
+
+/* The oldest task (a thief's end), or 0 */
+int64_t rae_ext_Scheduler_queuePopOldest(int64_t queue) {
+  RaeTaskQueue* q = rae_sched_queue(queue);
+  if (!q || atomic_load_explicit(&q->count, memory_order_relaxed) == 0) return 0;
+  pthread_mutex_lock(&q->lock);
+  int64_t count = atomic_load_explicit(&q->count, memory_order_relaxed);
+  int64_t task = 0;
+  if (count > 0) {
+    task = (int64_t)(intptr_t)q->ring[q->head];
+    q->head = (q->head + 1) % q->cap;
+    atomic_store_explicit(&q->count, count - 1, memory_order_release);
+  }
+  pthread_mutex_unlock(&q->lock);
+  return task;
+}
+
+/* Take `task` back out of `queue` if it is among the newest `window` entries
+ * (nobody has started it); true when it was there */
+rae_Bool rae_ext_Scheduler_queueTake(int64_t queue, int64_t task, int64_t window) {
+  RaeTaskQueue* q = rae_sched_queue(queue);
+  if (!q || atomic_load_explicit(&q->count, memory_order_relaxed) == 0) return 0;
+  pthread_mutex_lock(&q->lock);
+  int64_t count = atomic_load_explicit(&q->count, memory_order_relaxed);
+  rae_Bool taken = 0;
+  for (int64_t back = 0; back < window && back < count; back++) {
+    int64_t position = count - 1 - back;
+    if ((int64_t)(intptr_t)q->ring[(q->head + position) % q->cap] != task) continue;
+    for (int64_t i = position; i < count - 1; i++) q->ring[(q->head + i) % q->cap] = q->ring[(q->head + i + 1) % q->cap];
+    atomic_store_explicit(&q->count, count - 1, memory_order_release);
+    taken = 1;
+    break;
+  }
+  pthread_mutex_unlock(&q->lock);
+  return taken;
+}
+
+int64_t rae_ext_Scheduler_queueCount(int64_t queue) {
+  RaeTaskQueue* q = rae_sched_queue(queue);
+  return q ? atomic_load_explicit(&q->count, memory_order_relaxed) : 0;
+}
+
+int64_t rae_ext_Scheduler_currentWorker(void) {
+  return g_sched_worker;
+}
+
+/* Parking. A worker reads the epoch, looks at the queues once more, and
+ * parks only while the epoch is unchanged: every push that could wake it
+ * bumps the epoch first, so no wake-up is lost. */
+static pthread_mutex_t g_sched_park_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_sched_park_cond = PTHREAD_COND_INITIALIZER;
+static _Atomic int64_t g_sched_epoch = 0;
+static _Atomic int g_sched_parked = 0;
+
+int64_t rae_ext_Scheduler_parkEpoch(void) {
+  return atomic_load(&g_sched_epoch);
+}
+
+static void rae_sched_deadline(struct timespec* deadline, int64_t timeout_ns) {
+  clock_gettime(CLOCK_REALTIME, deadline);
+  int64_t nanoseconds = deadline->tv_nsec + timeout_ns;
+  deadline->tv_sec += (time_t)(nanoseconds / 1000000000LL);
+  deadline->tv_nsec = (long)(nanoseconds % 1000000000LL);
+}
+
+/* Park until the epoch moves, shutdown, or `timeout_ns` passes */
+void rae_ext_Scheduler_park(int64_t epoch, int64_t timeout_ns) {
+  struct timespec deadline;
+  rae_sched_deadline(&deadline, timeout_ns);
+  pthread_mutex_lock(&g_sched_park_lock);
+  atomic_fetch_add(&g_sched_parked, 1);
+  if (atomic_load(&g_sched_epoch) == epoch && !atomic_load(&g_pool.shutdown))
+    pthread_cond_timedwait(&g_sched_park_cond, &g_sched_park_lock, &deadline);
+  atomic_fetch_sub(&g_sched_parked, 1);
+  pthread_mutex_unlock(&g_sched_park_lock);
+}
+
+/* New work: move the epoch, and wake one parked worker if there is one */
+void rae_ext_Scheduler_unpark(void) {
+  atomic_fetch_add(&g_sched_epoch, 1);
+  if (atomic_load(&g_sched_parked) > 0) {
+    pthread_mutex_lock(&g_sched_park_lock);
+    pthread_cond_signal(&g_sched_park_cond);
+    pthread_mutex_unlock(&g_sched_park_lock);
+  }
+}
+
+/* Wake every parked worker (a parallelLoop job, shutdown) */
+static void rae_sched_unpark_all(void) {
+  atomic_fetch_add(&g_sched_epoch, 1);
+  if (atomic_load(&g_sched_parked) > 0) {
+    pthread_mutex_lock(&g_sched_park_lock);
+    pthread_cond_broadcast(&g_sched_park_cond);
+    pthread_mutex_unlock(&g_sched_park_lock);
+  }
+}
+
+/* Completion: a thread blocked on a task (one off the pool, or a worker with
+ * nothing else to run) sleeps on one condition variable; finishing a task
+ * wakes them only when someone sleeps there. */
+static pthread_mutex_t g_sched_done_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_sched_done_cond = PTHREAD_COND_INITIALIZER;
+static _Atomic int g_sched_done_waiters = 0;
+
+/* Run a task's thunk: it stores the result and marks the task done (after
+ * which `task` may already be freed by its waiter, so it is not touched) */
+void rae_ext_Scheduler_runTask(int64_t task) {
+  RaeTask* t = (RaeTask*)(intptr_t)task;
+  if (!t) return;
+  int saved_inside = g_pool_inside;
+  g_pool_inside = 0;
+  /* The task's result belongs to the task: what the thunk leaves in this
+   * thread's String pool is released, not flushed, as in rae_task_start's
+   * caller fallback. A pool thread runs many tasks, and a waiting thread runs
+   * one in the middle of its own statement. */
+  int pool_mark = rae_string_pool_mark();
+  t->thunk(t->args);
+  rae_string_pool_release(pool_mark);
+  g_pool_inside = saved_inside;
+  if (atomic_load(&g_sched_done_waiters) > 0) {
+    pthread_mutex_lock(&g_sched_done_lock);
+    pthread_cond_broadcast(&g_sched_done_cond);
+    pthread_mutex_unlock(&g_sched_done_lock);
+  }
+}
+
+rae_Bool rae_ext_Scheduler_taskIsDone(int64_t task) {
+  return rae_task_is_done((RaeTask*)(intptr_t)task) ? 1 : 0;
+}
+
+/* Block the calling thread until `task` is done, or (timeout_ns >= 0) until
+ * that much time passes */
+void rae_ext_Scheduler_waitDone(int64_t task, int64_t timeout_ns) {
+  RaeTask* t = (RaeTask*)(intptr_t)task;
+  if (!t) return;
+  struct timespec deadline;
+  if (timeout_ns >= 0) rae_sched_deadline(&deadline, timeout_ns);
+  pthread_mutex_lock(&g_sched_done_lock);
+  atomic_fetch_add(&g_sched_done_waiters, 1);
+  while (!rae_task_is_done(t)) {
+    if (timeout_ns < 0) {
+      pthread_cond_wait(&g_sched_done_cond, &g_sched_done_lock);
+    } else if (pthread_cond_timedwait(&g_sched_done_cond, &g_sched_done_lock, &deadline) != 0) {
+      break;
+    }
+  }
+  atomic_fetch_sub(&g_sched_done_waiters, 1);
+  pthread_mutex_unlock(&g_sched_done_lock);
+}
+
+/* Run the chunks of a parallelLoop job this worker has not seen yet; true
+ * when there was one */
+static __thread uint32_t g_sched_seen_generation = 0;
+
+rae_Bool rae_ext_Scheduler_helpParallel(void) {
+  uint32_t generation = atomic_load(&g_pool.generation);
+  if (generation == g_sched_seen_generation) return 0;
+  g_sched_seen_generation = generation;
+  int saved_inside = g_pool_inside;
+  g_pool_inside = 1;
+  rae_pool_run_chunks(generation, g_pool_worker_index);
+  g_pool_inside = saved_inside;
+  return 1;
+}
+
+rae_Bool rae_ext_Scheduler_shuttingDown(void) {
+  return atomic_load(&g_pool.shutdown) ? 1 : 0;
+}
+
+static int rae_pool_start(void);
+
+/* Start the pool if needed; the number of its threads (0: the tasks run on
+ * their caller) */
+int64_t rae_ext_Scheduler_start(void) {
+  return (int64_t)rae_pool_start() - 1;
+}
+
+int64_t rae_ext_Scheduler_performanceCores(void) {
+  int n = 0;
+#if defined(__APPLE__)
+  int perf = 0; size_t size = sizeof perf;
+  if (sysctlbyname("hw.perflevel0.physicalcpu", &perf, &size, NULL, 0) == 0 && perf > 0) n = perf;
+#endif
+  if (n <= 0) {
+    long online = sysconf(_SC_NPROCESSORS_ONLN);
+    n = online > 0 ? (int)online : 1;
+  }
+  return n;
+}
+
+int64_t rae_ext_Scheduler_maxWorkers(void) {
+  return RAE_POOL_MAX;
+}
+
+static void rae_sched_wait(RaeTask* t) {
+  if (rae_task_is_done(t)) return;
+  if (g_sched_hooks.task_wait) {
+    g_sched_hooks.task_wait((int64_t)(intptr_t)t);
+  } else {
+    rae_ext_Scheduler_waitDone((int64_t)(intptr_t)t, -1);
+  }
+}
+
 static void* rae_pool_worker(void* arg) {
   g_pool_worker_index = (int)(intptr_t)arg;
+  g_sched_worker = (int64_t)(intptr_t)arg;
+  rae_thread_install_altstack();
+  if (g_sched_hooks.worker_loop) {
+    /* The scheduler's Rae worker loop: tasks, and parallelLoop chunks */
+    g_sched_seen_generation = atomic_load(&g_pool.generation);
+    g_sched_hooks.worker_loop(g_sched_worker);
+    return NULL;
+  }
   g_pool_inside = 1;
   uint32_t seen = atomic_load(&g_pool.generation);
   for (;;) {
@@ -512,6 +841,7 @@ static void rae_pool_shutdown(void) {
   pthread_mutex_lock(&g_pool.lock);
   pthread_cond_broadcast(&g_pool.wake);
   pthread_mutex_unlock(&g_pool.lock);
+  rae_sched_unpark_all();
   for (int i = 0; i < g_pool.thread_count; i++) pthread_join(g_pool.threads[i], NULL);
   g_pool.thread_count = 0;
 }
@@ -538,6 +868,12 @@ static int rae_pool_start(void) {
     pthread_attr_t* worker_attributes = NULL;
     if (pthread_attr_init(&attributes) == 0) {
       worker_attributes = &attributes;
+      /* A worker that waits for a task runs other tasks meanwhile, on its own
+       * stack (lib/core/Scheduler.rae's schedulerTaskWait), so a chain of
+       * tasks each waiting on the next nests as deep as the chain. A thread
+       * per spawn gave every level a stack; the pool's threads get a large
+       * one instead (address space only: untouched pages cost nothing). */
+      pthread_attr_setstacksize(&attributes, (size_t)64 * 1024 * 1024);
 #if defined(__APPLE__)
       qos_class_t launcher_qos = qos_class_self();
       if (launcher_qos != QOS_CLASS_UNSPECIFIED) pthread_attr_set_qos_class_np(&attributes, launcher_qos, 0);
@@ -575,8 +911,13 @@ void rae_parallel_for(int64_t start, int64_t end, RaeParallelBody body, void* ca
     g_pool_inside = saved;
     return;
   }
-  int64_t target_chunks = (int64_t)workers * 4;
-  int64_t chunk = (total + target_chunks - 1) / target_chunks;
+  int64_t chunk = 0;
+  if (g_sched_hooks.chunk_size) {
+    chunk = g_sched_hooks.chunk_size(total, workers);
+  } else {
+    int64_t target_chunks = (int64_t)workers * 4;
+    chunk = (total + target_chunks - 1) / target_chunks;
+  }
   if (chunk < 1) chunk = 1;
   int64_t chunk_count = (total + chunk - 1) / chunk;
   if (chunk_count <= 1) {
@@ -608,9 +949,11 @@ void rae_parallel_for(int64_t start, int64_t end, RaeParallelBody body, void* ca
     pthread_cond_broadcast(&g_pool.wake);
     pthread_mutex_unlock(&g_pool.lock);
   }
+  rae_sched_unpark_all();
+  int saved_inside = g_pool_inside;
   g_pool_inside = 1;
   rae_pool_run_chunks(generation, 0);
-  g_pool_inside = 0;
+  g_pool_inside = saved_inside;
   int spins = 0;
   while (atomic_load_explicit(&g_pool.chunks_done, memory_order_acquire) < chunk_count) {
     if (++spins < (1 << 16)) rae_cpu_relax();
@@ -622,6 +965,44 @@ void rae_parallel_for(int64_t start, int64_t end, RaeParallelBody body, void* ca
 #else  /* a WASM build without threads: every parallelLoop runs on its caller */
 
 int64_t rae_ext_Parallel_workerCount(void) { return 1; }
+
+/* No threads: the scheduler has no pool, so a task runs on its caller
+ * (Scheduler.rae's schedulerSubmit, with 0 threads) */
+static struct {
+  void (*task_wait)(int64_t task);
+} g_sched_hooks;
+void rae_sched_install(void (*worker_loop)(int64_t index), void (*task_wait)(int64_t task),
+                       int64_t (*default_workers)(void), int64_t (*chunk_size)(int64_t total, int64_t workers)) {
+  (void)worker_loop; (void)default_workers; (void)chunk_size;
+  g_sched_hooks.task_wait = task_wait;
+}
+void rae_ext_Scheduler_queuePush(int64_t queue, int64_t task) { (void)queue; (void)task; }
+int64_t rae_ext_Scheduler_queuePopNewest(int64_t queue) { (void)queue; return 0; }
+int64_t rae_ext_Scheduler_queuePopOldest(int64_t queue) { (void)queue; return 0; }
+int64_t rae_ext_Scheduler_queueCount(int64_t queue) { (void)queue; return 0; }
+rae_Bool rae_ext_Scheduler_queueTake(int64_t queue, int64_t task, int64_t window) { (void)queue; (void)task; (void)window; return 0; }
+int64_t rae_ext_Scheduler_currentWorker(void) { return -1; }
+int64_t rae_ext_Scheduler_parkEpoch(void) { return 0; }
+void rae_ext_Scheduler_park(int64_t epoch, int64_t timeout_ns) { (void)epoch; (void)timeout_ns; }
+void rae_ext_Scheduler_unpark(void) {}
+void rae_ext_Scheduler_runTask(int64_t task) {
+  RaeTask* t = (RaeTask*)(intptr_t)task;
+  if (!t) return;
+  int pool_mark = rae_string_pool_mark();
+  t->thunk(t->args);
+  rae_string_pool_release(pool_mark);
+}
+rae_Bool rae_ext_Scheduler_taskIsDone(int64_t task) { return rae_task_is_done((RaeTask*)(intptr_t)task) ? 1 : 0; }
+void rae_ext_Scheduler_waitDone(int64_t task, int64_t timeout_ns) { (void)task; (void)timeout_ns; }
+rae_Bool rae_ext_Scheduler_helpParallel(void) { return 0; }
+rae_Bool rae_ext_Scheduler_shuttingDown(void) { return 0; }
+int64_t rae_ext_Scheduler_start(void) { return 0; }
+int64_t rae_ext_Scheduler_performanceCores(void) { return 1; }
+int64_t rae_ext_Scheduler_maxWorkers(void) { return 1; }
+static void rae_sched_wait(RaeTask* t) {
+  /* Every task already ran on its caller */
+  (void)t;
+}
 
 void rae_parallel_for(int64_t start, int64_t end, RaeParallelBody body, void* captures) {
   rae_pcheck_on();

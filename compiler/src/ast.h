@@ -664,6 +664,10 @@ typedef struct CompilerContext {
     char* parallel_thunks_buf;
     size_t parallel_thunks_len;
     int parallel_thunk_counter;
+
+    // The may-wait graph (may_wait.h) the C backend asks which spawns run as
+    // lightweight tasks on the scheduler; built after discovery, NULL before.
+    struct WaitGraph* wait_graph;
 } CompilerContext;
 
 void compiler_init(CompilerContext* ctx, Arena* ast_arena);

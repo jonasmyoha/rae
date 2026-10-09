@@ -58,12 +58,27 @@ typedef struct {
                        by isDone/tryGet on the owner's thread (an acquire) */
   int joined;     /* pthread_join called once */
   int taken;      /* tryGet handed the result out (owner's thread only) */
+  /* A task on the scheduler's worker pool (lib/core/Scheduler.rae) instead
+   * of a thread of its own: the thunk and its arguments, run by a worker */
+  int on_pool;
+  void* (*thunk)(void*);
+  void* args;
 } RaeTask;
 
 RaeTask* rae_task_new(size_t result_size);
 /* Start a spawned task's thunk on a thread, or on the caller when no thread
  * can be had (runtime_threads.c) */
 void rae_task_start(RaeTask* t, void* (*thunk)(void*), void* args);
+/* Make `t` a scheduler task: the generated spawn site then hands it to
+ * lib/core/Scheduler.rae's schedulerSubmit (runtime_threads.c) */
+void rae_task_prepare(RaeTask* t, void* (*thunk)(void*), void* args);
+/* The policy half of the scheduler is Rae (lib/core/Scheduler.rae); the
+ * generated program installs it at the start of main: the worker loop the
+ * pool's threads run, the wait for an unfinished task, the default worker
+ * count and a parallelLoop's chunk size. Without it (a program built without
+ * the prelude) the runtime keeps its own C fallbacks. */
+void rae_sched_install(void (*worker_loop)(int64_t index), void (*task_wait)(int64_t task),
+                       int64_t (*default_workers)(void), int64_t (*chunk_size)(int64_t total, int64_t workers));
 /* parallelLoop (runtime_threads.c): run body(captures, first, end) over
  * [start, end) in chunks on the worker pool, returning when all are done. */
 typedef void (*RaeParallelBody)(void* captures, int64_t first, int64_t end);

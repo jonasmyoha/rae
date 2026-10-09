@@ -261,6 +261,11 @@ void emit_param_c_type(CFuncContext* ctx, const AstParam* p, FILE* out, bool is_
  * mod; enum plain/own/copy). Heap args, `mod`, and `view`-of-enum are
  * pointers/coercion-sensitive and fall back to the sequential path. */
 bool c_spawn_threadable(CFuncContext* ctx, const AstFuncDecl* f);
+/* True when a spawn of this function runs as a task on the scheduler's
+ * worker pool (lib/core/Scheduler.rae) instead of a thread (c_backend.c) */
+bool c_spawn_on_pool(CFuncContext* ctx, const AstDecl* callee_decl);
+/* The mangled C name of a lib/core function, NULL without the prelude */
+const char* core_function_mangled(CompilerContext* ctx, const char* name);
 /* True when a non-view/mod param type is a heap aggregate (List/Map instance
  * or non-generic non-c_struct heap user struct) with a guaranteed
  * rae_deep_copy_<T> helper, so the spawn site can deep-copy it for a worker. */

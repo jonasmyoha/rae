@@ -1,9 +1,16 @@
 # Spawn benchmarks
 
-Today's thread-per-`spawn`, measured: step 1 of
-[docs/lightweight-spawn-design.md](../../docs/lightweight-spawn-design.md) §8.
-The findings, and whether they justify lightweight tasks, are in that
-document's "Measured" section.
+`spawn` measured: step 1 of
+[docs/lightweight-spawn-design.md](../../docs/lightweight-spawn-design.md) §8
+measured thread-per-`spawn` (§10), and step 3a's scheduler runs the same
+modes on the worker pool (§12).
+
+- `results/` holds the scheduler's numbers.
+- `results/threadPerSpawn/` holds the same build with `RAE_SPAWN_THREADS=1`
+  (every spawn a thread), taken in the same session for the before/after.
+
+A spawn whose task sleeps (`sleeps`, `held`) is still a thread until step 3b,
+so those modes measure threads in both.
 
 ## Run
 

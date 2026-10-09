@@ -1,6 +1,7 @@
 /* The may-wait analysis behind `rae build --report-waits`
- * (docs/lightweight-spawn-design.md §4.1, §8 step 2). A report only: it
- * changes no codegen.
+ * (docs/lightweight-spawn-design.md §4.1, §8 step 2), and the question the C
+ * backend asks of it: which spawns run as tasks on the scheduler
+ * (may_wait_spawn_on_pool, §8 step 3).
  *
  * 1. Wait primitives, a closed list the compiler knows:
  *    - `task.get()` on a Task;
@@ -67,6 +68,7 @@ typedef struct {
   bool spawned;         /* the target of some `spawn` */
   bool reachable;       /* reachable from a spawn */
   bool walked;
+  signed char pool_safe; /* may_wait_spawn_on_pool's answer: -1 not asked, 0, 1 */
 } WaitNode;
 
 typedef struct {
@@ -74,7 +76,7 @@ typedef struct {
   int first;            /* first node of this decl */
 } DeclSlot;
 
-typedef struct {
+typedef struct WaitGraph {
   CompilerContext* ctx;
   const AstModule* merged;
   WaitNode* nodes;
@@ -143,6 +145,7 @@ static int graph_node(WaitGraph* graph, const AstDecl* decl, const char* key, co
   node->key = key ? strdup(key) : NULL;
   node->concrete_args = concrete_args;
   node->via = -1;
+  node->pool_safe = -1;
   node->next_same_decl = slot->first;
   slot->first = index;
   return index;
@@ -737,11 +740,10 @@ static const AstDecl* decl_of_func(const AstFuncDecl* func) {
   return (const AstDecl*)((const char*)func - offsetof(AstDecl, as.func_decl));
 }
 
-bool may_wait_report(CompilerContext* ctx, const AstModule* merged, const char* entry, bool with_lib, FILE* out) {
-  WaitGraph graph;
-  memset(&graph, 0, sizeof(graph));
-  graph.ctx = ctx;
-  graph.merged = merged;
+static void graph_build(WaitGraph* graph, CompilerContext* ctx, const AstModule* merged) {
+  memset(graph, 0, sizeof(*graph));
+  graph->ctx = ctx;
+  graph->merged = merged;
   /* Every specialisation first, so a call can find its own */
   for (size_t i = 0; i < ctx->specialized_func_count; i++) {
     const FunctionSpecialization* spec = &ctx->specialized_funcs[i];
@@ -752,20 +754,92 @@ bool may_wait_report(CompilerContext* ctx, const AstModule* merged, const char* 
       key_of_type(&key, arg, NULL);
     }
     const AstDecl* decl = decl_of_func(spec->decl);
-    if (graph_node(&graph, decl, key.text, NULL, false) < 0) graph_node(&graph, decl, key.text, spec->concrete_args, true);
+    if (graph_node(graph, decl, key.text, NULL, false) < 0) graph_node(graph, decl, key.text, spec->concrete_args, true);
   }
   for (const AstDecl* decl = merged->decls; decl; decl = decl->next) {
-    if (decl->kind == AST_DECL_FUNC && !decl->as.func_decl.generic_params) graph_node(&graph, decl, NULL, NULL, true);
+    if (decl->kind == AST_DECL_FUNC && !decl->as.func_decl.generic_params) graph_node(graph, decl, NULL, NULL, true);
   }
   if (ctx->type_registry) {
     for (SpecializationEntry* spec = ctx->type_registry->specializations; spec; spec = spec->next) {
       if (spec->specialized_decl && spec->specialized_decl->kind == AST_DECL_FUNC) {
-        graph_node(&graph, spec->specialized_decl, NULL, NULL, true);
+        graph_node(graph, spec->specialized_decl, NULL, NULL, true);
       }
     }
   }
-  graph_walk_all(&graph);
-  graph_solve(&graph);
+  graph_walk_all(graph);
+  graph_solve(graph);
+}
+
+static void graph_release(WaitGraph* graph) {
+  for (size_t i = 0; i < graph->count; i++) {
+    free(graph->nodes[i].callees);
+    free(graph->nodes[i].key);
+  }
+  free(graph->nodes);
+  free(graph->table);
+}
+
+WaitGraph* may_wait_build(CompilerContext* ctx, const AstModule* merged) {
+  WaitGraph* graph = malloc(sizeof(WaitGraph));
+  graph_build(graph, ctx, merged);
+  return graph;
+}
+
+void may_wait_free(WaitGraph* graph) {
+  if (!graph) return;
+  graph_release(graph);
+  free(graph);
+}
+
+/* An extern the scheduler's workers may call: the runtime's own (lib/core,
+ * Math, Parallel, Time, Channel), which never blocks for long, minus the
+ * sleeps (they wait; S3b makes them suspend) */
+static bool extern_is_pool_safe(const WaitGraph* graph, const AstDecl* decl) {
+  const AstFuncDecl* func = &decl->as.func_decl;
+  if (extern_wait_kind(func) != WAIT_NONE) return false;
+  if (!is_stdlib(graph, decl)) return false;
+  const char* path = short_lib_path(decl->origin_file);
+  static const char* const safe[] = { "lib/core/", "lib/Math.rae", "lib/Parallel.rae", "lib/Time.rae",
+                                      "lib/Channel.rae" };
+  for (size_t i = 0; i < sizeof safe / sizeof safe[0]; i++) {
+    if (strncmp(path, safe[i], strlen(safe[i])) == 0) return true;
+  }
+  return false;
+}
+
+bool may_wait_spawn_on_pool(WaitGraph* graph, const AstDecl* decl) {
+  if (!graph || !decl || decl->kind != AST_DECL_FUNC || decl->as.func_decl.generic_params) return false;
+  int start = graph_node(graph, decl, NULL, NULL, false);
+  if (start < 0) return false;
+  if (graph->nodes[start].pool_safe >= 0) return graph->nodes[start].pool_safe == 1;
+  /* Everything the spawned function can reach, once */
+  bool* seen = calloc(graph->count, sizeof(bool));
+  int* stack = malloc((graph->count + 1) * sizeof(int));
+  size_t depth = 0;
+  bool safe = true;
+  stack[depth++] = start;
+  seen[start] = true;
+  while (depth > 0 && safe) {
+    const WaitNode* node = &graph->nodes[stack[--depth]];
+    if (node->direct == WAIT_SLEEP || node->direct == WAIT_SOCKET) safe = false;
+    if (node->decl->as.func_decl.is_extern && !extern_is_pool_safe(graph, node->decl)) safe = false;
+    for (size_t c = 0; c < node->callee_count && safe; c++) {
+      int callee = node->callees[c];
+      if (!seen[callee]) {
+        seen[callee] = true;
+        stack[depth++] = callee;
+      }
+    }
+  }
+  free(seen);
+  free(stack);
+  graph->nodes[start].pool_safe = safe ? 1 : 0;
+  return safe;
+}
+
+bool may_wait_report(CompilerContext* ctx, const AstModule* merged, const char* entry, bool with_lib, FILE* out) {
+  WaitGraph graph;
+  graph_build(&graph, ctx, merged);
 
   /* Every count is split: [0] the program, [1] lib/. The default report
    * prints the program's (lib/ grows; a report on a program should not move
@@ -820,11 +894,6 @@ bool may_wait_report(CompilerContext* ctx, const AstModule* merged, const char* 
     }
     fprintf(out, "\n");
   }
-  for (size_t i = 0; i < graph.count; i++) {
-    free(graph.nodes[i].callees);
-    free(graph.nodes[i].key);
-  }
-  free(graph.nodes);
-  free(graph.table);
+  graph_release(&graph);
   return true;
 }
