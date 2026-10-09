@@ -1,0 +1,404 @@
+# lib/net/ecs WebSocket (docs/server-benchmarks-design.md §7, §9 G8): the ECS
+# server's upgrade and frame systems driven with no network. Bytes go into
+# detached connections; a frame runs the systems, the test's message system
+# answers between httpServerFrameBegin and httpServerFrameEnd, and the
+# WriteBuffers hold the answers: a request pipelined before an upgrade, the
+# 101 with frames from the same read decoded that frame, an echo, a broadcast
+# encoded once, a ping, a fragmented message with a ping inside, a frame split
+# across reads, the closing handshake, a protocol error, a wrong version, a
+# malformed upgrade, an HTTP-only server, and a steady echo with no allocation.
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Tag
+open ecs/World
+open ecs/Event
+open net/Tcp
+open net/ByteBuffer
+open http/Http
+open webSocket/FrameDecoder
+open webSocket/FrameEncoder
+open net/ecs/HttpServer
+open net/ecs/HttpSystems
+open net/ecs/WebSocketSystems
+
+type DemoRouter {
+  routed: Int
+}
+
+func route(router: mod DemoRouter, server: mod HttpServer, event: view HttpRequestEvent) {
+  router.routed = router.routed + 1
+  if requestPathIs(server: server, event: event, path: "/plaintext") {
+    respond(
+      server: server
+      event: event
+      status: 200
+      contentType: "text/plain"
+      body: "Hello, World!"
+    )
+  } else {
+    respond(
+      server: server
+      event: event
+      status: 404
+      contentType: "text/plain"
+      body: "Not Found"
+    )
+  }
+}
+
+# The test's message system: text is echoed, binary is broadcast
+func answerMessages(server: mod HttpServer, verbose: view Bool) {
+  loop var i: Int = 0, i < eventCount(this: server.webSocketMessages), ++i {
+    let event: WebSocketMessageEvent = eventAt(this: server.webSocketMessages, i: i)
+    if event.message.kind is WebSocketOpcode.binary {
+      let sent: Int = broadcastFrom(server: server, event: event)
+      if verbose {
+        log("binary \"{messageText(server: server, event: event)}\" broadcast to {sent}")
+      }
+    } else {
+      if verbose {
+        log("text \"{messageText(server: server, event: event)}\" echoed")
+      }
+      sendFrom(server: server, entityId: event.connectionEntityId, event: event)
+    }
+  }
+}
+
+func frame(router: mod DemoRouter, server: mod HttpServer, verbose: view Bool) {
+  httpServerFrameBegin(
+    DemoRouter
+    router: router
+    server: server
+    timeoutMs: 0
+  )
+  answerMessages(server: server, verbose: verbose)
+  httpServerFrameEnd(server: server)
+}
+
+func hexValue(character: view Int) ret Int {
+  if character >= 97 {
+    ret character - 87
+  }
+  ret character - 48
+}
+
+func bytesOf(hex: view String) ret List(UInt8) {
+  var bytes: List(UInt8) = {}
+  var i: Int = 0
+  loop i + 1 < hex.length() {
+    bytes.add(
+      value: (hexValue(character: hex.byteAt(index: i)) * 16 + hexValue(
+        character: hex.byteAt(index: i + 1)
+      )) as UInt8
+    )
+    i = i + 2
+  }
+  ret bytes
+}
+
+func injectHex(server: mod HttpServer, entityId: view EntityId, hex: view String) {
+  let bytes: List(UInt8) = bytesOf(hex: hex)
+  injectBytes(server: server, entityId: entityId, bytes: bytes)
+}
+
+# A client's masked frame, as if it had been read
+func injectFrame(
+  server: mod HttpServer
+  entityId: view EntityId
+  kind: view WebSocketOpcode
+  fin: view Bool
+  text: view String
+) {
+  var frameBuffer: ByteBuffer = createByteBuffer(capacity: 64)
+  webSocketAppendMaskedFrame(
+    output: frameBuffer
+    kind: kind
+    fin: fin
+    text: text
+    maskKey: 925507901
+  )
+  injectBytes(server: server, entityId: entityId, bytes: frameBuffer.bytes)
+}
+
+func hexOf(buffer: view ByteBuffer, start: view Int, count: view Int) ret String {
+  let digits: String = "0123456789abcdef"
+  var bytes: List(UInt8) = {}
+  loop var i: Int = start, i < start + count, ++i {
+    let byte: Int = byteBufferAt(buffer: buffer, index: i)
+    bytes.add(value: digits.byteAt(index: byte / 16) as UInt8)
+    bytes.add(value: digits.byteAt(index: byte % 16) as UInt8)
+  }
+  ret fromBytes(bytes: bytes, start: 0, count: bytes.length)
+}
+
+# HTTP text with each Date header's value masked (the clock is real)
+func masked(buffer: view ByteBuffer, count: view Int) ret String {
+  var out: ByteBuffer = createByteBuffer(capacity: 256)
+  var position: Int = 0
+  loop {
+    let found: Int = byteBufferIndexOf(buffer: buffer, pattern: "Date: ", from: position)
+    if found < 0 or found >= count {
+      break
+    }
+    appendText(
+      buffer: out
+      text: byteBufferText(buffer: buffer, start: position, count: found + 6 - position)
+    )
+    appendText(buffer: out, text: "<date>")
+    position = byteBufferIndexOf(buffer: buffer, pattern: "\r\n", from: found)
+  }
+  appendText(
+    buffer: out
+    text: byteBufferText(buffer: buffer, start: position, count: count - position)
+  )
+  ret byteBufferText(buffer: out, start: 0, count: byteBufferLength(buffer: out))
+}
+
+# The connection's output: the HTTP part as text, the frames after it as hex
+func show(label: view String, server: mod HttpServer, entityId: view EntityId) {
+  showBuffer(label: label, writeBuffers: server.writeBuffers, entityId: entityId)
+  removeTag(table: server.sendings, entityId: entityId)
+}
+
+func showBuffer(
+  label: view String
+  writeBuffers: mod ComponentTable(WriteBuffer)
+  entityId: view EntityId
+) {
+  let writeBuffer: mod WriteBuffer => componentMod(this: writeBuffers, entityId: entityId)
+  let length: Int = byteBufferLength(buffer: writeBuffer.buffer)
+  log("--- {label} ({length} bytes)")
+  var httpEnd: Int = 0
+  loop {
+    if byteBufferIndexOf(buffer: writeBuffer.buffer, pattern: "HTTP/1.1 ", from: httpEnd) is not httpEnd {
+      break
+    }
+    let responseStart: Int = httpEnd
+    httpEnd = byteBufferIndexOf(buffer: writeBuffer.buffer, pattern: "\r\n\r\n", from: httpEnd) + 4
+    let body: Int = byteBufferIndexOf(
+      buffer: writeBuffer.buffer
+      pattern: "Content-Length: "
+      from: responseStart
+    )
+    if body >= 0 and body < httpEnd {
+      httpEnd = httpEnd + contentLength(buffer: writeBuffer.buffer, at: body + 16)
+    }
+  }
+  if httpEnd > 0 {
+    log(masked(buffer: writeBuffer.buffer, count: httpEnd))
+  }
+  if length > httpEnd {
+    log("frames: {hexOf(buffer: writeBuffer.buffer, start: httpEnd, count: length - httpEnd)}")
+  }
+  byteBufferClear(buffer: writeBuffer.buffer)
+}
+
+func contentLength(buffer: view ByteBuffer, at: view Int) ret Int {
+  var value: Int = 0
+  var i: Int = at
+  loop byteBufferAt(buffer: buffer, index: i) >= 48 and byteBufferAt(buffer: buffer, index: i) <= 57 {
+    value = value * 10 + byteBufferAt(buffer: buffer, index: i) - 48
+    i = i + 1
+  }
+  ret value
+}
+
+func upgradeRequest(path: view String, version: view String) ret String {
+  ret "GET {path} HTTP/1.1\r\nHost: server.example.com\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: {version}\r\n\r\n"
+}
+
+func isSession(server: view HttpServer, entityId: view EntityId) ret Bool {
+  ret componentHas(this: server.webSocketSessions, entityId: entityId)
+}
+
+func main() ret Int {
+  var server: HttpServer = createHttpServer(idleTimeoutMs: 0)
+  server.webSocketPath = "/ws"
+  var router: DemoRouter = { routed: 0 }
+
+  # A request pipelined before the upgrade is answered first; the 101 follows,
+  # and the frame sent in the same read is decoded and echoed that frame
+  let first: EntityId = openConnection(server: server, socketId: noSocket())
+  injectInput(
+    server: server
+    entityId: first
+    text: "GET /plaintext HTTP/1.1\r\nHost: a\r\n\r\n{upgradeRequest(path: "/ws", version: "13")}"
+  )
+  injectFrame(
+    server: server
+    entityId: first
+    kind: WebSocketOpcode.text
+    fin: true
+    text: "Hello"
+  )
+  frame(router: router, server: server, verbose: true)
+  show(label: "pipeline, upgrade, echo", server: server, entityId: first)
+  log(
+    "session: {isSession(server: server, entityId: first)}, parser kept: {componentHas(
+      this: server.httpParses
+      entityId: first
+    )}"
+  )
+
+  # A second session; a binary message is broadcast to both, encoded once
+  let second: EntityId = openConnection(server: server, socketId: noSocket())
+  injectInput(server: server, entityId: second, text: upgradeRequest(path: "/ws", version: "13"))
+  frame(router: router, server: server, verbose: true)
+  show(label: "second upgrade", server: server, entityId: second)
+  injectFrame(
+    server: server
+    entityId: first
+    kind: WebSocketOpcode.binary
+    fin: true
+    text: "all"
+  )
+  frame(router: router, server: server, verbose: true)
+  show(label: "broadcast, first", server: server, entityId: first)
+  show(label: "broadcast, second", server: server, entityId: second)
+  let sentText: Int = broadcastText(server: server, text: "news")
+  log("broadcastText to {sentText}")
+  show(label: "broadcastText, first", server: server, entityId: first)
+  show(label: "broadcastText, second", server: server, entityId: second)
+
+  # A ping is answered with a pong carrying its payload
+  injectFrame(
+    server: server
+    entityId: first
+    kind: WebSocketOpcode.ping
+    fin: true
+    text: "hi"
+  )
+  frame(router: router, server: server, verbose: true)
+  show(label: "ping", server: server, entityId: first)
+
+  # A fragmented message with a ping between its fragments
+  injectFrame(
+    server: server
+    entityId: second
+    kind: WebSocketOpcode.text
+    fin: false
+    text: "Hel"
+  )
+  injectFrame(
+    server: server
+    entityId: second
+    kind: WebSocketOpcode.ping
+    fin: true
+    text: "p"
+  )
+  injectFrame(
+    server: server
+    entityId: second
+    kind: WebSocketOpcode.continuation
+    fin: true
+    text: "lo!"
+  )
+  frame(router: router, server: server, verbose: true)
+  show(label: "fragments and a ping", server: server, entityId: second)
+
+  # A frame split across reads (and frames) is decoded once it is whole
+  injectHex(server: server, entityId: second, hex: "8184000000")
+  frame(router: router, server: server, verbose: true)
+  show(label: "half a frame", server: server, entityId: second)
+  injectHex(server: server, entityId: second, hex: "00706f6e67")
+  frame(router: router, server: server, verbose: true)
+  show(label: "the other half", server: server, entityId: second)
+
+  # The closing handshake: a close is echoed with its code, then the
+  # connection closes once sent
+  injectHex(server: server, entityId: first, hex: "88820000000003e8")
+  frame(router: router, server: server, verbose: true)
+  log("closing tagged: {hasTag(table: server.closings, entityId: first)}")
+  show(label: "close", server: server, entityId: first)
+  frame(router: router, server: server, verbose: true)
+  log("closed: {not allocatorIsAlive(this: server.entities, entityId: first)}")
+  let afterClose: Int = broadcastText(server: server, text: "left")
+  log("broadcast after a close reaches {afterClose}")
+  show(label: "broadcast after a close", server: server, entityId: second)
+
+  # An unmasked frame from a client is a protocol error: close 1002
+  injectHex(server: server, entityId: second, hex: "810548656c6c6f")
+  frame(router: router, server: server, verbose: true)
+  show(label: "unmasked frame", server: server, entityId: second)
+  frame(router: router, server: server, verbose: true)
+  log("closed: {not allocatorIsAlive(this: server.entities, entityId: second)}")
+
+  # Another version is answered 426 and closed; a malformed upgrade is a bad
+  # request; an upgrade on another path is an ordinary request
+  let oldVersion: EntityId = openConnection(server: server, socketId: noSocket())
+  injectInput(server: server, entityId: oldVersion, text: upgradeRequest(path: "/ws", version: "8"))
+  let noKey: EntityId = openConnection(server: server, socketId: noSocket())
+  injectInput(
+    server: server
+    entityId: noKey
+    text: "GET /ws HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\n\r\n"
+  )
+  let otherPath: EntityId = openConnection(server: server, socketId: noSocket())
+  injectInput(
+    server: server
+    entityId: otherPath
+    text: upgradeRequest(path: "/chat", version: "13")
+  )
+  frame(router: router, server: server, verbose: true)
+  show(label: "wrong version", server: server, entityId: oldVersion)
+  show(label: "no key", server: server, entityId: noKey)
+  show(label: "another path", server: server, entityId: otherPath)
+  log(
+    "closing: {hasTag(table: server.closings, entityId: oldVersion)} {hasTag(
+      table: server.closings
+      entityId: noKey
+    )} {hasTag(table: server.closings, entityId: otherPath)}, session: {isSession(
+      server: server
+      entityId: otherPath
+    )}"
+  )
+
+  # An HTTP-only server (no webSocketPath) routes an upgrade like any request
+  var plainServer: HttpServer = createHttpServer(idleTimeoutMs: 0)
+  let plain: EntityId = openConnection(server: plainServer, socketId: noSocket())
+  injectInput(
+    server: plainServer
+    entityId: plain
+    text: upgradeRequest(path: "/ws", version: "13")
+  )
+  frame(router: router, server: plainServer, verbose: true)
+  show(label: "HTTP-only server", server: plainServer, entityId: plain)
+  log("session: {isSession(server: plainServer, entityId: plain)}")
+  closeHttpServer(server: plainServer)
+
+  # A steady echo allocates nothing once warm (the Date header's String is
+  # made once a second; that frame is not counted)
+  let steady: EntityId = openConnection(server: server, socketId: noSocket())
+  injectInput(server: server, entityId: steady, text: upgradeRequest(path: "/ws", version: "13"))
+  frame(router: router, server: server, verbose: false)
+  show(label: "steady upgrade", server: server, entityId: steady)
+  var frameBuffer: ByteBuffer = createByteBuffer(capacity: 64)
+  webSocketAppendMaskedFrame(
+    output: frameBuffer
+    kind: WebSocketOpcode.text
+    fin: true
+    text: "steady message"
+    maskKey: 305419896
+  )
+  var allocations: Int = 0
+  loop var round: Int = 0, round < 520, ++round {
+    let allocationsBefore: Int = Sys.allocationCount()
+    injectBytes(server: server, entityId: steady, bytes: frameBuffer.bytes)
+    frame(router: router, server: server, verbose: false)
+    clearOutput(writeBuffers: server.writeBuffers, entityId: steady)
+    removeTag(table: server.sendings, entityId: steady)
+    if round >= 20 and not server.secondChanged {
+      allocations = allocations + Sys.allocationCount() - allocationsBefore
+    }
+  }
+  log("allocations for 500 echoes after warmup: {allocations}")
+  log("requests routed: {router.routed}")
+  closeHttpServer(server: server)
+  log("open after close: {allocatorAliveCount(this: server.entities)}")
+  ret 0
+}
+
+func clearOutput(writeBuffers: mod ComponentTable(WriteBuffer), entityId: view EntityId) {
+  let writeBuffer: mod WriteBuffer => componentMod(this: writeBuffers, entityId: entityId)
+  byteBufferClear(buffer: writeBuffer.buffer)
+}
