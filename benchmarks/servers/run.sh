@@ -1,19 +1,27 @@
 #!/bin/sh
-# The server benchmark runner (docs/server-benchmarks-design.md §8), phase 1
-# HTTP. `make bench-servers` calls it.
+# The server benchmark runner (docs/server-benchmarks-design.md §8), phases 1
+# (HTTP) and 2 (WebSocket). `make bench-servers` calls it.
 #
-# For each worker configuration (1, and all performance cores) it starts every
-# implementation, runs check.sh against it (a failing check skips its timing),
-# then for each case warms up and makes BENCH_RUNS timed runs, interleaving
-# the implementations and alternating the two Rae styles' order every run.
-# Cases: plaintext and json with oha; pipelined plaintext (16 deep) with wrk.
+# HTTP: for each worker configuration (1, and all performance cores) it starts
+# every implementation, runs check.sh against it (a failing check skips its
+# timing), then for each case warms up and makes BENCH_RUNS timed runs,
+# interleaving the implementations and alternating the two Rae styles' order
+# every run. Cases: plaintext and json with oha; pipelined plaintext (16 deep)
+# with wrk.
+#
+# WebSocket (spec/WebSocket.md): one worker each; after check.sh --websocket,
+# BENCH_WS_RUNS (3) ramps of loadClient per implementation, interleaved the
+# same way, each ramping the clients up in BENCH_WS_STEP (1000) steps to
+# BENCH_WS_MAX_CLIENTS (15000) or until the broadcast p99 passes
+# BENCH_WS_LIMIT_MS (250).
 # Raw runs go to build/raw/, the medians to results/summary.json and the
 # machine and toolchains to results/metadata.json (committed baseline, F6).
 #
 # Knobs: BENCH_SECONDS (15), BENCH_RUNS (5), BENCH_WARMUP (5),
 # BENCH_CONNECTIONS (256), BENCH_LOADGEN_THREADS (4), BENCH_IMPLS
 # ("rae-eventLoop rae-ecs rust node bun"), BENCH_CASES ("plaintext json
-# pipelined"), BENCH_WORKERS ("1 <performance cores>"), BENCH_ALLOW_LOAD=1
+# pipelined"), BENCH_WORKERS ("1 <performance cores>"), BENCH_PHASES ("http
+# webSocket"), BENCH_WS_BROADCASTS (100 per step), BENCH_ALLOW_LOAD=1
 # (skip the load-average gate), BENCH_RESULTS (results/; a scratch run can
 # point elsewhere so the committed baseline stays).
 set -eu
@@ -33,6 +41,7 @@ need node "brew install node"
 need bun "brew install oven-sh/bun/bun"
 need python3 "xcode-select --install"
 need curl "xcode-select --install"
+need npm "brew install node"
 need "$CACHE/bin/oha" "sh benchmarks/servers/fetch.sh"
 [ "$missing" = 0 ] || exit 1
 if [ ! -x "$CACHE/bin/wrk" ]; then
@@ -53,8 +62,17 @@ echo "building the servers ..."
 run_with_timeout 300 make -C "$RAE_ROOT/compiler" build >/dev/null
 build_rae eventLoop
 build_rae ecs
+build_rae eventLoop webSocket
+build_rae ecs webSocket
 run_with_timeout 900 cargo build --quiet --release --locked \
   --manifest-path "$HERE/rust/Cargo.toml" --target-dir "$BUILD/rust"
+run_with_timeout 900 cargo build --quiet --release --locked \
+  --manifest-path "$HERE/loadClient/Cargo.toml" --target-dir "$BUILD/loadClient"
+if [ ! -d "$HERE/javascript/node/node_modules/ws" ]; then
+  run_with_timeout 300 npm ci --silent --prefix "$HERE/javascript/node"
+fi
+# Thousands of WebSocket clients: the servers and loadClient need the room
+raise_file_limit
 
 PERFORMANCE_CORES=$(sysctl -n hw.perflevel0.physicalcpu 2>/dev/null || echo "$CORES")
 export HERE BUILD CACHE LOAD PERFORMANCE_CORES RAE_BIN RAE_ROOT

@@ -4,6 +4,10 @@ run.sh checks the dependencies and the load average and builds the servers;
 this starts them, checks them, drives the load tools, samples RSS and CPU
 time, and writes build/raw/*.json, results/summary.json and
 results/metadata.json. Run it through run.sh, which sets its environment.
+
+Phases (BENCH_PHASES, default "http webSocket"): http (spec/Http.md, oha and
+wrk) and webSocket (spec/WebSocket.md, loadClient). A run of one phase keeps
+the other phase's numbers in summary.json and metadata.json.
 """
 import json
 import os
@@ -37,6 +41,13 @@ PERFORMANCE_CORES = int(os.environ["PERFORMANCE_CORES"])
 IMPLS = os.environ.get("BENCH_IMPLS", "rae-eventLoop rae-ecs rust node bun").split()
 CASES = os.environ.get("BENCH_CASES", "plaintext json pipelined").split()
 WORKERS = [int(w) for w in os.environ.get("BENCH_WORKERS", "1 %d" % PERFORMANCE_CORES).split()]
+PHASES = os.environ.get("BENCH_PHASES", "http webSocket").split()
+LOAD_CLIENT = os.path.join(BUILD, "loadClient", "release", "loadClient")
+WS_RUNS = int(os.environ.get("BENCH_WS_RUNS", "3"))
+WS_STEP = int(os.environ.get("BENCH_WS_STEP", "1000"))
+WS_MAX_CLIENTS = int(os.environ.get("BENCH_WS_MAX_CLIENTS", "15000"))
+WS_LIMIT_MS = float(os.environ.get("BENCH_WS_LIMIT_MS", "250"))
+WS_BROADCASTS = int(os.environ.get("BENCH_WS_BROADCASTS", "100"))
 
 SOURCES = {
     "rae-eventLoop": "rae/eventLoop/http/Main.rae",
@@ -46,16 +57,26 @@ SOURCES = {
     "bun": "javascript/bun/Http.js",
 }
 
+WS_SOURCES = {
+    "rae-eventLoop": "rae/eventLoop/webSocket/Main.rae",
+    "rae-ecs": "rae/ecs/webSocket/Main.rae",
+    "rust": "rust/src/bin/webSocket.rs",
+    "node": "javascript/node/WebSocket.js",
+    "bun": "javascript/bun/WebSocket.js",
+}
 
-def command_for(impl):
+
+def command_for(impl, phase="http"):
     if impl.startswith("rae-"):
-        return [os.path.join(BUILD, impl, "server")]
+        folder = impl if phase == "http" else "%s-webSocket" % impl
+        return [os.path.join(BUILD, folder, "server")]
     if impl == "rust":
-        return [os.path.join(BUILD, "rust", "release", "http")]
+        return [os.path.join(BUILD, "rust", "release", "http" if phase == "http" else "webSocket")]
+    script = "Http.js" if phase == "http" else "WebSocket.js"
     if impl == "node":
-        return ["node", os.path.join(HERE, "javascript", "node", "Http.js")]
+        return ["node", os.path.join(HERE, "javascript", "node", script)]
     if impl == "bun":
-        return ["bun", os.path.join(HERE, "javascript", "bun", "Http.js")]
+        return ["bun", os.path.join(HERE, "javascript", "bun", script)]
     raise ValueError(impl)
 
 
@@ -78,15 +99,17 @@ def output_of(command):
 
 
 class Server:
-    def __init__(self, impl, workers):
+    def __init__(self, impl, workers, phase="http"):
         self.impl = impl
         self.workers = workers
+        self.phase = phase
         self.port = free_port()
-        self.log_path = os.path.join(RAW, "%s-w%d.log" % (impl, workers))
+        self.log_path = os.path.join(RAW, "%s-%s-w%d.log" % (impl, phase, workers))
         environment = dict(os.environ, PORT=str(self.port), WORKERS=str(workers), RAE_BENCH_STATS="1")
         self.log = open(self.log_path, "w")
         self.process = subprocess.Popen(
-            command_for(impl), env=environment, stdout=self.log, stderr=subprocess.STDOUT, start_new_session=True
+            command_for(impl, phase), env=environment, stdout=self.log, stderr=subprocess.STDOUT,
+            start_new_session=True,
         )
 
     def wait_ready(self):
@@ -101,8 +124,9 @@ class Server:
         return False
 
     def check(self):
+        flags = [] if self.phase == "http" else ["--websocket"]
         result = subprocess.run(
-            ["sh", os.path.join(HERE, "check.sh"), str(self.port), "%s/w%d" % (self.impl, self.workers)],
+            ["sh", os.path.join(HERE, "check.sh")] + flags + [str(self.port), "%s/w%d" % (self.impl, self.workers)],
             capture_output=True,
             text=True,
             timeout=120,
@@ -336,13 +360,11 @@ def metadata(load_before):
     }
 
 
-def main():
-    os.makedirs(RAW, exist_ok=True)
-    os.makedirs(RESULTS, exist_ok=True)
+def measure_http(summary):
     cases = [case for case in CASES if case != "pipelined" or os.path.exists(WRK)]
     if "pipelined" in CASES and "pipelined" not in cases:
         print("skipping the pipelined case: wrk is not built (sh fetch.sh)")
-    summary = {"date": time.strftime("%Y-%m-%d"), "results": {}, "ecsOverEventLoop": {}, "sourceLines": {}}
+    summary.update({"date": time.strftime("%Y-%m-%d"), "results": {}, "ecsOverEventLoop": {}, "sourceLines": {}})
     for impl in IMPLS:
         summary["sourceLines"][impl] = source_lines(SOURCES[impl])
     for workers in WORKERS:
@@ -408,11 +430,188 @@ def main():
         finally:
             for server in servers.values():
                 server.stop()
+
+
+# ----- phase 2: WebSocket ---------------------------------------------------------
+
+
+def run_ramp(port):
+    output = subprocess.run(
+        [
+            LOAD_CLIENT, "--url", "ws://127.0.0.1:%d/ws" % port, "--step", str(WS_STEP),
+            "--max-clients", str(WS_MAX_CLIENTS), "--limit-ms", str(WS_LIMIT_MS),
+            "--broadcasts", str(WS_BROADCASTS), "--threads", str(LOADGEN_THREADS),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=1800,
+    )
+    return json.loads(output.stdout.strip().splitlines()[-1])
+
+
+def measure_ramp(server):
+    """One ramp: loadClient's steps plus RSS, CPU and allocations per message"""
+    process_group = server.process.pid
+    stats_before = server.stats()
+    _, cpu_before = group_usage(process_group)
+    sampler = Sampler(process_group)
+    sampler.start()
+    result = run_ramp(server.port)
+    sampler.running = False
+    sampler.join()
+    _, cpu_after = group_usage(process_group)
+    result["peakRssMb"] = sampler.peak_kb / 1024
+    result["cpuSeconds"] = cpu_after - cpu_before
+    if server.impl.startswith("rae-"):
+        time.sleep(1.2)
+        stats_after = server.stats()
+        messages = sum(stats_after[w][0] - stats_before.get(w, (0, 0))[0] for w in stats_after)
+        allocations = max(a for _, a in stats_after.values()) - max(
+            [a for _, a in stats_before.values()] or [0]
+        )
+        result["allocationsPerMessage"] = allocations / messages if messages else None
+    # Let the server see the clients go before the next ramp
+    time.sleep(2)
+    return result
+
+
+def spread(values):
+    values = [value for value in values if value is not None]
+    if not values:
+        return None
+    return {"median": statistics.median(values), "min": min(values), "max": max(values)}
+
+
+def summarise_ramps(ramps):
+    by_clients = {}
+    for ramp in ramps:
+        for step in ramp["steps"]:
+            by_clients.setdefault(step["clients"], []).append(step)
+    steps = {}
+    for clients in sorted(by_clients):
+        found = by_clients[clients]
+        steps[str(clients)] = {
+            "runs": len(found),
+            "p50Ms": spread([step["p50Ms"] for step in found]),
+            "p99Ms": spread([step["p99Ms"] for step in found]),
+            "listenCountErrors": sum(step["listenCountErrors"] for step in found),
+        }
+    return {
+        "reachedClients": spread([ramp["reachedClients"] for ramp in ramps]),
+        "stoppedBy": [ramp["stoppedBy"] for ramp in ramps],
+        "steps": steps,
+        "peakRssMb": spread([ramp["peakRssMb"] for ramp in ramps]),
+        "cpuSeconds": spread([ramp["cpuSeconds"] for ramp in ramps]),
+        "allocationsPerMessage": spread([ramp.get("allocationsPerMessage") for ramp in ramps]),
+    }
+
+
+def measure_websocket(summary):
+    section = {
+        "date": time.strftime("%Y-%m-%d"),
+        "workers": 1,
+        "results": {},
+        "ecsOverEventLoop": {},
+        "sourceLines": {impl: source_lines(WS_SOURCES[impl]) for impl in IMPLS},
+    }
+    servers = {}
+    try:
+        for impl in IMPLS:
+            server = Server(impl, 1, "webSocket")
+            if not server.wait_ready():
+                print("%s webSocket did not start; see %s" % (impl, server.log_path))
+                server.stop()
+                continue
+            if not server.check():
+                print("%s webSocket failed check.sh: not timed" % impl)
+                server.stop()
+                continue
+            servers[impl] = server
+        print("== webSocket, 1 worker: broadcast RTT as clients ramp up")
+        ramps = {impl: [] for impl in servers}
+        for run in range(WS_RUNS):
+            order = list(servers)
+            if run % 2 == 1 and "rae-eventLoop" in order and "rae-ecs" in order:
+                first, second = order.index("rae-eventLoop"), order.index("rae-ecs")
+                order[first], order[second] = order[second], order[first]
+            for impl in order:
+                ramp = measure_ramp(servers[impl])
+                ramps[impl].append(ramp)
+                last = ramp["steps"][-1] if ramp["steps"] else {"clients": 0, "p50Ms": 0, "p99Ms": 0}
+                print(
+                    "  %-14s run %d: reached %6d clients (%s); at %d: p50 %7.2f ms  p99 %7.2f ms  rss %6.1f MB%s"
+                    % (
+                        impl, run + 1, ramp["reachedClients"], ramp["stoppedBy"], last["clients"],
+                        last["p50Ms"], last["p99Ms"], ramp["peakRssMb"],
+                        "  %.2f alloc/message" % ramp["allocationsPerMessage"]
+                        if ramp.get("allocationsPerMessage") is not None
+                        else "",
+                    )
+                )
+        for impl, impl_ramps in ramps.items():
+            with open(os.path.join(RAW, "%s-webSocket.json" % impl), "w") as raw:
+                json.dump(impl_ramps, raw, indent=2)
+            section["results"][impl] = summarise_ramps(impl_ramps)
+        if "rae-ecs" in ramps and "rae-eventLoop" in ramps:
+            ecs = section["results"]["rae-ecs"]["steps"]
+            event_loop = section["results"]["rae-eventLoop"]["steps"]
+            for clients in ecs:
+                if clients not in event_loop:
+                    continue
+                a, b = ecs[clients]["p99Ms"], event_loop[clients]["p99Ms"]
+                overlap = not (a["max"] < b["min"] or b["max"] < a["min"])
+                section["ecsOverEventLoop"][clients] = {
+                    "p50Ms": ecs[clients]["p50Ms"]["median"] / event_loop[clients]["p50Ms"]["median"]
+                    if event_loop[clients]["p50Ms"]["median"]
+                    else None,
+                    "p99Ms": a["median"] / b["median"] if b["median"] else None,
+                    "verdict": "no measurable difference" if overlap else "measurable difference",
+                }
+    finally:
+        for server in servers.values():
+            server.stop()
+    summary["webSocket"] = section
+
+
+def load_json(path):
+    try:
+        with open(path) as source:
+            return json.load(source)
+    except (OSError, ValueError):
+        return {}
+
+
+def main():
+    os.makedirs(RAW, exist_ok=True)
+    os.makedirs(RESULTS, exist_ok=True)
+    summary = load_json(os.path.join(RESULTS, "summary.json"))
+    meta = load_json(os.path.join(RESULTS, "metadata.json"))
+    if "http" in PHASES:
+        measure_http(summary)
+        web_socket_meta = meta.get("webSocket")
+        meta = metadata(os.environ.get("LOAD", "0"))
+        if web_socket_meta:
+            meta["webSocket"] = web_socket_meta
+    if "webSocket" in PHASES:
+        measure_websocket(summary)
+        web_socket_meta = metadata(os.environ.get("LOAD", "0"))
+        web_socket_meta["settings"] = {
+            "runs": WS_RUNS,
+            "step": WS_STEP,
+            "maxClients": WS_MAX_CLIENTS,
+            "limitMs": WS_LIMIT_MS,
+            "broadcastsPerStep": WS_BROADCASTS,
+            "inFlight": 4,
+            "loadGeneratorThreads": LOADGEN_THREADS,
+            "workers": 1,
+        }
+        web_socket_meta["toolchains"]["loadClient"] = "benchmarks/servers/loadClient (tokio-tungstenite)"
+        meta["webSocket"] = web_socket_meta
     with open(os.path.join(RESULTS, "summary.json"), "w") as out:
         json.dump(summary, out, indent=2)
         out.write("\n")
     with open(os.path.join(RESULTS, "metadata.json"), "w") as out:
-        json.dump(metadata(os.environ.get("LOAD", "0")), out, indent=2)
+        json.dump(meta, out, indent=2)
         out.write("\n")
     print("wrote %s/summary.json and metadata.json" % RESULTS)
 

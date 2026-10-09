@@ -12,13 +12,17 @@ run_with_timeout() {
   perl -e 'alarm shift; exec @ARGV' "$seconds" "$@"
 }
 
-# build_rae <style>: benchmarks/servers/rae/<style>/http -> build/rae-<style>/server
+# build_rae <style> [phase]: benchmarks/servers/rae/<style>/<phase>
+# (phase http, the default, or webSocket) -> build/rae-<style>/server, or
+# build/rae-<style>-webSocket/server
 build_rae() {
   style=$1
+  phase=${2:-http}
   out="$BUILD/rae-$style"
+  [ "$phase" = http ] || out="$BUILD/rae-$style-$phase"
   mkdir -p "$out"
   run_with_timeout 300 "$RAE_BIN" build --profile release --emit-c --out "$out/server.c" \
-    --entry "$HERE/rae/$style/http/Main.rae" >"$out/build.log" 2>&1 || {
+    --entry "$HERE/rae/$style/$phase/Main.rae" >"$out/build.log" 2>&1 || {
     cat "$out/build.log" >&2
     return 1
   }
@@ -53,6 +57,24 @@ wait_for_port() {
     sleep 0.1
   done
   return 1
+}
+
+# wait_for_tcp <port>: until something accepts a connection on it (10 s at
+# most); for servers that answer no plain HTTP
+wait_for_tcp() {
+  for attempt in $(seq 1 100); do
+    if python3 -c 'import socket, sys; socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=1).close()' "$1" 2>/dev/null; then
+      return 0
+    fi
+    kill -0 "$SERVER_PID" 2>/dev/null || return 1
+    sleep 0.1
+  done
+  return 1
+}
+
+# raise_file_limit: a WebSocket ramp holds thousands of sockets open
+raise_file_limit() {
+  ulimit -n 65536 2>/dev/null || ulimit -n "$(ulimit -Hn)" 2>/dev/null || true
 }
 
 stop_server() {

@@ -1,0 +1,291 @@
+# Phase 2 WebSocket server, ECS style (benchmarks/servers/spec/WebSocket.md,
+# docs/server-benchmarks-design.md §7): one HttpServer World, run a frame per
+# poll by lib/net/ecs's systems. The upgrade, the frame decoding, ping and
+# close are lib/net/ecs's; this file adds the message system: echo (the
+# message's own bytes sent back) and broadcast (encoded once into the World's
+# broadcast scratch, copied to every session, then the broadcastResult). The
+# codecs are the same lib/http and lib/webSocket the event-loop server
+# (rae/eventLoop/webSocket) uses.
+#
+# PORT (default 8080) comes from the environment. One worker (spec: a
+# broadcast reaches every client of the server). With RAE_BENCH_STATS=1 it
+# prints its message count and the allocation count once a second.
+open net/Tcp
+open net/ByteBuffer
+open http/Http
+open ecs/ComponentTable
+open ecs/Event
+open webSocket/FrameDecoder
+open webSocket/FrameEncoder
+open net/ecs/HttpServer
+open net/ecs/HttpSystems
+open net/ecs/WebSocketSystems
+
+enum ShootoutKind { echo, broadcast, other }
+
+type BenchRouter {
+  messages: Int
+}
+
+# Only `GET /ws` upgrades (the server answers those itself); anything else is
+# not found
+func route(router: mod BenchRouter, server: mod HttpServer, event: view HttpRequestEvent) {
+  respond(
+    server: server
+    event: event
+    status: 404
+    contentType: "text/plain"
+    body: "Not Found"
+  )
+}
+
+# ----- the shootout's JSON ---------------------------------------------------
+
+# Whether `json[start ..< end]` is exactly `expected`
+func textRangeIs(
+  json: view String
+  start: view Int
+  end: view Int
+  expected: view String
+) ret Bool {
+  if end - start is not expected.length() {
+    ret false
+  }
+  loop var i: Int = 0, i < end - start, ++i {
+    if json.byteAt(index: start + i) is not expected.byteAt(index: i) {
+      ret false
+    }
+  }
+  ret true
+}
+
+func shootoutKind(json: view String) ret ShootoutKind {
+  let objectStart: Int = jsonScanSkipSpace(json: json, position: 0)
+  let typeAt: Int = jsonScanMember(
+    json: json
+    objectStart: objectStart
+    from: -1
+    key: "type"
+  )
+  if typeAt < 0 {
+    ret ShootoutKind.other
+  }
+  let typeEnd: Int = jsonScanStringEnd(json: json, position: typeAt)
+  if textRangeIs(
+    json: json
+    start: typeAt
+    end: typeEnd
+    expected: "\"echo\""
+  ) {
+    ret ShootoutKind.echo
+  }
+  if textRangeIs(
+    json: json
+    start: typeAt
+    end: typeEnd
+    expected: "\"broadcast\""
+  ) {
+    ret ShootoutKind.broadcast
+  }
+  ret ShootoutKind.other
+}
+
+# The payload's place in the message text: its start, or -1
+func payloadAt(json: view String) ret Int {
+  let objectStart: Int = jsonScanSkipSpace(json: json, position: 0)
+  ret jsonScanMember(
+    json: json
+    objectStart: objectStart
+    from: -1
+    key: "payload"
+  )
+}
+
+func decimalDigits(value: view Int) ret Int {
+  var digits: Int = 1
+  var rest: Int = value
+  loop rest >= 10 {
+    rest = rest / 10
+    digits = digits + 1
+  }
+  ret digits
+}
+
+# {"type":"broadcast","payload":X}, X copied from `source`
+func appendBroadcast(
+  output: mod ByteBuffer
+  source: view ByteBuffer
+  start: view Int
+  count: view Int
+) {
+  let prefix: String = "\{\"type\":\"broadcast\",\"payload\":"
+  webSocketAppendHeader(
+    output: output
+    kind: WebSocketOpcode.text
+    fin: true
+    length: prefix.length() + count + 1
+    masked: false
+    maskKey: 0
+  )
+  appendText(buffer: output, text: prefix)
+  appendBytes(
+    buffer: output
+    bytes: source.bytes
+    start: source.start + start
+    count: count
+  )
+  appendText(buffer: output, text: "\}")
+}
+
+# {"type":"broadcastResult","payload":X,"listenCount":N}
+func appendBroadcastResult(
+  output: mod ByteBuffer
+  source: view ByteBuffer
+  start: view Int
+  count: view Int
+  listenCount: view Int
+) {
+  let prefix: String = "\{\"type\":\"broadcastResult\",\"payload\":"
+  let middle: String = ",\"listenCount\":"
+  webSocketAppendHeader(
+    output: output
+    kind: WebSocketOpcode.text
+    fin: true
+    length: prefix.length() + count + middle.length() + decimalDigits(value: listenCount) + 1
+    masked: false
+    maskKey: 0
+  )
+  appendText(buffer: output, text: prefix)
+  appendBytes(
+    buffer: output
+    bytes: source.bytes
+    start: source.start + start
+    count: count
+  )
+  appendText(buffer: output, text: middle)
+  appendDecimal(buffer: output, value: listenCount)
+  appendText(buffer: output, text: "\}")
+}
+
+# ----- the message system ----------------------------------------------------
+func encodeBroadcast(
+  scratch: mod ByteBuffer
+  readBuffers: view ComponentTable(ReadBuffer)
+  event: view WebSocketMessageEvent
+  start: view Int
+  count: view Int
+) {
+  let readBuffer: view ReadBuffer => componentView(
+    this: readBuffers
+    entityId: event.connectionEntityId
+  )
+  byteBufferClear(buffer: scratch)
+  appendBroadcast(
+    output: scratch
+    source: readBuffer.buffer
+    start: start
+    count: count
+  )
+}
+
+func answerBroadcast(
+  writeBuffers: mod ComponentTable(WriteBuffer)
+  readBuffers: view ComponentTable(ReadBuffer)
+  event: view WebSocketMessageEvent
+  start: view Int
+  count: view Int
+  listenCount: view Int
+) {
+  let writeBuffer: mod WriteBuffer => componentMod(
+    this: writeBuffers
+    entityId: event.connectionEntityId
+  )
+  let readBuffer: view ReadBuffer => componentView(
+    this: readBuffers
+    entityId: event.connectionEntityId
+  )
+  appendBroadcastResult(
+    output: writeBuffer.buffer
+    source: readBuffer.buffer
+    start: start
+    count: count
+    listenCount: listenCount
+  )
+}
+
+func messageSystem(router: mod BenchRouter, server: mod HttpServer) {
+  loop var i: Int = 0, i < eventCount(this: server.webSocketMessages), ++i {
+    let event: WebSocketMessageEvent = eventAt(this: server.webSocketMessages, i: i)
+    router.messages = router.messages + 1
+    let text: String = messageText(server: server, event: event)
+    let kind: ShootoutKind = shootoutKind(json: text)
+    if kind is ShootoutKind.echo {
+      sendFrom(server: server, entityId: event.connectionEntityId, event: event)
+    } else if kind is ShootoutKind.broadcast {
+      let payload: Int = payloadAt(json: text)
+      if payload >= 0 {
+        let start: Int = event.message.payload.start + payload
+        let count: Int = jsonScanValueEnd(json: text, position: payload) - payload
+        encodeBroadcast(
+          scratch: server.broadcastScratch
+          readBuffers: server.readBuffers
+          event: event
+          start: start
+          count: count
+        )
+        let listenCount: Int = sendScratchToSessions(server: server)
+        answerBroadcast(
+          writeBuffers: server.writeBuffers
+          readBuffers: server.readBuffers
+          event: event
+          start: start
+          count: count
+          listenCount: listenCount
+        )
+      }
+    }
+  }
+}
+
+# ----- main ------------------------------------------------------------------
+func envInt(name: view String, fallback: view Int) ret Int {
+  let text: String = Sys.getEnv(name: name)
+  if text.length() is 0 {
+    ret fallback
+  }
+  ret text.toInt()
+}
+
+func main() ret Int {
+  let port: Int = envInt(name: "PORT", fallback: 8080)
+  var server: HttpServer = createHttpServer(idleTimeoutMs: 0)
+  server.webSocketPath = "/ws"
+  server.maxWebSocketMessageBytes = 16777216
+  let status: NetStatus = httpServerListen(
+    server: server
+    host: "127.0.0.1"
+    port: port
+    backlog: 4096
+  )
+  if status is not NetStatus.ok {
+    log("cannot listen on {port}: {status}")
+    ret 1
+  }
+  log("listening on {socketLocalPort(socketId: server.listenerSocketId)}")
+  var router: BenchRouter = { messages: 0 }
+  let printStats: Bool = Sys.getEnv(name: "RAE_BENCH_STATS").length() > 0
+  loop {
+    httpServerFrameBegin(
+      BenchRouter
+      router: router
+      server: server
+      timeoutMs: 1000
+    )
+    messageSystem(router: router, server: server)
+    httpServerFrameEnd(server: server)
+    if server.secondChanged and printStats {
+      log("stats worker=0 requests={router.messages} allocations={Sys.allocationCount()}")
+    }
+  }
+  ret 0
+}
