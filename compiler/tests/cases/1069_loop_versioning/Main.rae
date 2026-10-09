@@ -1,0 +1,116 @@
+# Bounds-check elimination by loop versioning (compiler/src/c_loop_versioning.c):
+# a counted loop whose List / byteAt indexes stay in range runs a check-free
+# copy; when the range check fails the loop runs as written. Both must give
+# the library's answers: an out-of-range read is the fallback, an
+# out-of-range write is ignored with a warning, byteAt past the end is -1.
+func sumPairs(values: view List(Int)) ret Int {
+  var total: Int = 0
+  loop var i: Int = 0, i < values.length, ++i {
+    # the last i + 1 is past the end: the fallback, 1000
+    total = total + values.copyAtFallback(index: i, fallback: 0) * values.copyAtFallback(
+      index: i + 1
+      fallback: 1000
+    )
+  }
+  ret total
+}
+
+func scaled(values: view List(Int), factor: view Int) ret List(Int) {
+  var output: List(Int) = {}
+  output.addDefaults(count: values.length)
+  var position: Int = 0
+  var i: Int = 0
+  loop i < values.length {
+    output.set(index: position, value: values.copyAtFallback(index: i, fallback: 0) * factor)
+    position = position + 1
+    i = i + 1
+  }
+  ret output
+}
+
+# Writes one slot past the end on the last step: ignored with a warning
+func shiftedCopy(values: view List(Int)) ret List(Int) {
+  var output: List(Int) = {}
+  output.addDefaults(count: values.length)
+  loop var i: Int = 0, i < values.length, ++i {
+    output.set(index: i + 1, value: values.copyAtFallback(index: i, fallback: 0))
+  }
+  ret output
+}
+
+# A byte table read by a string's bytes, two counters, a stride of 2
+func hexValue(text: view String) ret Int {
+  var table: List(Int) = {}
+  loop var c: Int = 0, c < 256, ++c {
+    var digit: Int = -1
+    if c >= 48 and c <= 57 {
+      digit = c - 48
+    } else if c >= 97 and c <= 102 {
+      digit = c - 87
+    }
+    table.add(value: digit)
+  }
+  var value: Int = 0
+  var i: Int = 0
+  loop i + 1 < text.length() {
+    let high: Int = table.copyAtFallback(index: text.byteAt(index: i), fallback: -1)
+    let low: Int = table.copyAtFallback(index: text.byteAt(index: i + 1), fallback: -1)
+    if high < 0 or low < 0 {
+      ret -1
+    }
+    value = value * 256 + high * 16 + low
+    i = i + 2
+  }
+  ret value
+}
+
+# Reads byteAt one past the end on the last step: -1
+func trailingBytes(text: view String) ret Int {
+  var total: Int = 0
+  loop var i: Int = 0, i < text.length(), ++i {
+    total = total + text.byteAt(index: i + 1)
+  }
+  ret total
+}
+
+# Adds to the list it reads: never versioned, still correct
+func growing() ret Int {
+  var values: List(Int) = List(Int) { 1, 2, 3 }
+  loop var i: Int = 0, i < 3, ++i {
+    values.add(value: values.copyAtFallback(index: i, fallback: 0) * 10)
+  }
+  ret values.copyAtFallback(index: 5, fallback: -1)
+}
+
+# Leaves early: the proven range is an upper bound
+func firstOver(values: view List(Int), limit: view Int) ret Int {
+  loop var i: Int = 0, i < values.length, ++i {
+    if values.copyAtFallback(index: i, fallback: 0) > limit {
+      ret i
+    }
+  }
+  ret -1
+}
+
+func main() {
+  let values: List(Int) = List(Int) {
+    3
+    1
+    4
+    1
+    5
+    9
+    2
+    6
+  }
+  log("sumPairs: {sumPairs(values: values)}")
+  log("scaled: {scaled(values: values, factor: 3)}")
+  log("shiftedCopy: {shiftedCopy(values: values)}")
+  log("hexValue(c0ffee): {hexValue(text: "c0ffee")}")
+  log("hexValue(c0fxee): {hexValue(text: "c0fxee")}")
+  log("trailingBytes(abc): {trailingBytes(text: "abc")}")
+  log("growing: {growing()}")
+  log("firstOver 4: {firstOver(values: values, limit: 4)}")
+  let empty: List(Int) = {}
+  log("empty: {sumPairs(values: empty)} {firstOver(values: empty, limit: 0)}")
+}
