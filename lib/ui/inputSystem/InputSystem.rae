@@ -21,6 +21,8 @@ open ecs/ComponentTable
 open ecs/Event
 open ui/UiSystems
 open ui/buttonSystem/ButtonSystem
+open ui/InputKind
+import Device
 
 type UiPointerState {
   x: Float
@@ -28,6 +30,8 @@ type UiPointerState {
   down: Bool
   pressed: Bool
   released: Bool
+  # The device behind it: a finger gets the touch-sized target and no hover
+  kind: InputKind
 }
 
 # UI action events are no longer a list on UiInput (#943): they live in the
@@ -43,6 +47,15 @@ type UiInput {
   # (a panel background, a button): nothing under it gets the notch, and in
   # particular not the world behind the UI (uiWheelUnclaimed).
   wheelBlocked: Bool
+  # The kind of the last pointer event, so a whole screen can switch density
+  # (as iPadOS and Windows do when the keyboard comes off)
+  lastInputKind: InputKind
+  # The smallest side a finger's target gets, in the UI's layout units. The
+  # default assumes one unit is one point; an app whose units differ sets it
+  # to `touchTargetPoints` in its own units.
+  touchTargetSize: Float
+  # Whether the device has a hovering pointer, kept current every frame
+  deviceWatch: DeviceWatch
 }
 
 func createUiInput() pub ret UiInput {
@@ -53,12 +66,16 @@ func createUiInput() pub ret UiInput {
       down: false
       pressed: false
       released: false
+      kind: InputKind.mouse
     }
     hoveredEntityId: noEntity()
     pressedEntityId: noEntity()
     wheel: 0.0
     wheelTarget: noEntity()
     wheelBlocked: false
+    lastInputKind: InputKind.mouse
+    touchTargetSize: touchTargetPoints
+    deviceWatch: Device.createDeviceWatch()
   }
 }
 
@@ -76,6 +93,26 @@ func uiPointInEntity(
   entityId: view EntityId
   x: view Float
   y: view Float
+) ret Bool {
+  ret uiPointInEntityTarget(
+    world: world
+    uiSystems: uiSystems
+    entityId: entityId
+    x: x
+    y: y
+    targetSize: 0.0
+  )
+}
+
+# `uiPointInEntity` with the entity's rectangle grown to at least
+# `targetSize` on each side (InputKind.pointInTarget); 0 is the precise test
+func uiPointInEntityTarget(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  x: view Float
+  y: view Float
+  targetSize: view Float
 ) ret Bool {
   if uiEntityActive(world: world, entityId: entityId) is false {
     ret false
@@ -97,19 +134,15 @@ func uiPointInEntity(
     this: uiSystems.layout.computedRects
     entityId: entityId
   )
-  if x < wt.position.x {
-    ret false
-  }
-  if y < wt.position.y {
-    ret false
-  }
-  if x > wt.position.x + cr.size.x * wt.scale.x {
-    ret false
-  }
-  if y > wt.position.y + cr.size.y * wt.scale.y {
-    ret false
-  }
-  ret true
+  ret pointInTarget(
+    x: x
+    y: y
+    left: wt.position.x
+    top: wt.position.y
+    width: cr.size.x * wt.scale.x
+    height: cr.size.y * wt.scale.y
+    targetSize: targetSize
+  )
 }
 
 func uiHitTestEntity(
@@ -118,6 +151,7 @@ func uiHitTestEntity(
   entityId: view EntityId
   x: view Float
   y: view Float
+  targetSize: view Float
 ) ret EntityId {
   unsafe {
     if uiEntityActive(world: world, entityId: entityId) is false {
@@ -134,6 +168,7 @@ func uiHitTestEntity(
           entityId: child
           x: x
           y: y
+          targetSize: targetSize
         )
         if isNone(this: hit) is false {
           ret hit
@@ -142,12 +177,13 @@ func uiHitTestEntity(
       }
     }
     if componentHas(this: world.onClicks, entityId: entityId) {
-      if uiPointInEntity(
+      if uiPointInEntityTarget(
         world: world
         uiSystems: uiSystems
         entityId: entityId
         x: x
         y: y
+        targetSize: targetSize
       ) {
         ret entityId
       }
@@ -161,7 +197,25 @@ func uiHitTest(
   uiSystems: view UiSystems
   x: view Float
   y: view Float
-) pub ret EntityId {
+) ret EntityId {
+  ret uiHitTestTarget(
+    world: world
+    uiSystems: uiSystems
+    x: x
+    y: y
+    targetSize: 0.0
+  )
+}
+
+# The topmost clickable entity under (x, y), each grown to at least
+# `targetSize` on each side (0: the precise test)
+func uiHitTestTarget(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  x: view Float
+  y: view Float
+  targetSize: view Float
+) ret EntityId {
   unsafe {
     let roots: List(EntityId) = collectPaintableRoots(world: world, uiSystems: uiSystems)
     var i: Int = roots.length - 1
@@ -174,6 +228,7 @@ func uiHitTest(
           entityId: root
           x: x
           y: y
+          targetSize: targetSize
         )
         if isNone(this: hit) is false {
           ret hit
@@ -387,18 +442,25 @@ func updateUiInput(input: mod UiInput, world: mod UiWorld, uiSystems: mod UiSyst
   let y: Float = Gpu2d.pointerY()
   let pressed: Bool = Gpu2d.pointerPressed()
   let released: Bool = Gpu2d.pointerReleased()
+  let kind: InputKind = lastPointerKind()
   input.pointer = UiPointerState {
     x: x
     y: y
     down: Gpu2d.pointerDown()
     pressed: pressed
     released: released
+    kind: kind
   }
-  input.hoveredEntityId = uiHitTest(
+  input.lastInputKind = kind
+  # Keeps `canHover` current: a trackpad case attached or removed
+  Device.deviceChanged(watch: input.deviceWatch)
+  input.hoveredEntityId = uiHitTestFor(
     world: world
     uiSystems: uiSystems
     x: x
     y: y
+    kind: kind
+    touchTargetSize: input.touchTargetSize
   )
   routeUiWheel(
     input: input
@@ -426,19 +488,51 @@ func updateUiInput(input: mod UiInput, world: mod UiWorld, uiSystems: mod UiSyst
   }
 
   # Project this frame's hovered/pressed refs onto the entities as components.
-  buttonInteractionMark(
-    world: world
-    uiSystems: uiSystems
-    entityId: input.hoveredEntityId
-    hovered: true
-    pressed: false
-  )
+  # Hover is marked only for a pointer that hovers (InputKind.showsHover).
+  if showsHover(kind: kind, canHover: input.deviceWatch.facts.canHover) {
+    buttonInteractionMark(
+      world: world
+      uiSystems: uiSystems
+      entityId: input.hoveredEntityId
+      hovered: true
+      pressed: false
+    )
+  }
   buttonInteractionMark(
     world: world
     uiSystems: uiSystems
     entityId: input.pressedEntityId
     hovered: false
     pressed: true
+  )
+}
+
+# The entity a pointer of `kind` hits: the precise rectangle first, so a
+# finger between two small controls takes the one it is on; then, for a
+# finger only, the touch-sized targets (`touchTargetSize` on each side)
+func uiHitTestFor(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  x: view Float
+  y: view Float
+  kind: view InputKind
+  touchTargetSize: view Float
+) ret EntityId {
+  let precise: EntityId = uiHitTest(
+    world: world
+    uiSystems: uiSystems
+    x: x
+    y: y
+  )
+  if isNone(this: precise) is false or kind is not InputKind.touch {
+    ret precise
+  }
+  ret uiHitTestTarget(
+    world: world
+    uiSystems: uiSystems
+    x: x
+    y: y
+    targetSize: targetSizeFor(kind: kind, touchTargetUnits: touchTargetSize)
   )
 }
 

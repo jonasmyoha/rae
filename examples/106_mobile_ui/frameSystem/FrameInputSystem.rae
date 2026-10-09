@@ -48,6 +48,13 @@ func frameInputSystem(
   # matching resolution until the rebuild swaps both atomically.
   let liveViewport: Viewport = createViewportFromWindow()
   let extentChanged: Bool = liveViewport.layoutW is not app.viewport.layoutW or liveViewport.layoutH is not app.viewport.layoutH
+  # The size class in points follows the window (a resize, or a move to a
+  # display with another scale); an iPad in Split View is compact
+  if updateInputSizeClass(input: input) {
+    log(
+      "[ui] size class {input.windowSizeClass.sizeClass} ({input.windowSizeClass.widthPoints} pt)"
+    )
+  }
   if extentChanged {
     app.viewport = liveViewport
     setDebugScreenSize(debug: session.debug, w: app.viewport.layoutW, h: app.viewport.layoutH)

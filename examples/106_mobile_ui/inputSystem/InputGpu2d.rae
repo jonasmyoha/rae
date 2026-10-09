@@ -10,6 +10,9 @@ open ecs/ComponentTable
 open ecs/Event
 open ui/Transform
 open ui/UiSystems
+open ui/InputKind
+open ui/SizeClass
+import Device
 
 let inputNoEntityId: EntityId = { index: -1, generation: 0 }
 
@@ -19,6 +22,8 @@ type PointerState {
   down: Bool
   pressed: Bool
   released: Bool
+  # The device behind it: a finger gets the touch-sized target and no hover
+  kind: InputKind
 }
 
 # Action events use lib/ui's shared `UiAction` (#943) drained through the
@@ -40,6 +45,15 @@ type InputSystem {
   # `RAE_UI_TYPE` scripted keyboard (#976): the text still to be "typed"
   # (pasted as one frame's typedText once the screen sequence is done).
   scriptedType: String
+  # The kind of the last pointer event (a screen can switch density on it)
+  lastInputKind: InputKind
+  # A finger's smallest target side in design units (44 points, converted
+  # through the viewport each frame)
+  touchTargetSize: Float
+  # Device facts (canHover, the display scale), kept current every frame
+  deviceWatch: DeviceWatch
+  # The window's size class in points, recomputed when the window changes
+  windowSizeClass: WindowSizeClass
 }
 
 func createInputSystem() ret InputSystem {
@@ -50,6 +64,7 @@ func createInputSystem() ret InputSystem {
       down: false
       pressed: false
       released: false
+      kind: InputKind.mouse
     }
     pressedEntityId: noEntity()
     uiActions: createEventQueue(UiAction)
@@ -59,6 +74,10 @@ func createInputSystem() ret InputSystem {
     typedText: ""
     backspaces: 0
     scriptedType: getEnv(name: "RAE_UI_TYPE")
+    lastInputKind: InputKind.mouse
+    touchTargetSize: touchTargetPoints
+    deviceWatch: Device.createDeviceWatch()
+    windowSizeClass: createWindowSizeClass(widthPoints: windowWidthPoints())
   }
 }
 
@@ -105,6 +124,7 @@ func pointInEntity(
   entityId: view EntityId
   x: view Float
   y: view Float
+  targetSize: view Float
 ) ret Bool {
   if componentHas(this: uiSystems.transform2d.worldTransforms, entityId: entityId) is false {
     ret false
@@ -123,19 +143,15 @@ func pointInEntity(
     this: uiSystems.layout.computedRects
     entityId: entityId
   )
-  if x < wt.position.x {
-    ret false
-  }
-  if y < wt.position.y {
-    ret false
-  }
-  if x > wt.position.x + cr.size.x {
-    ret false
-  }
-  if y > wt.position.y + cr.size.y {
-    ret false
-  }
-  ret true
+  ret pointInTarget(
+    x: x
+    y: y
+    left: wt.position.x
+    top: wt.position.y
+    width: cr.size.x
+    height: cr.size.y
+    targetSize: targetSize
+  )
 }
 
 func hitTestEntity(
@@ -144,6 +160,7 @@ func hitTestEntity(
   entityId: view EntityId
   x: view Float
   y: view Float
+  targetSize: view Float
 ) ret EntityId {
   unsafe {
     if componentHas(this: world.childrens, entityId: entityId) {
@@ -158,6 +175,7 @@ func hitTestEntity(
           entityId: cid
           x: x
           y: y
+          targetSize: targetSize
         )
         if isNone(this: hit) is false {
           ret hit
@@ -173,6 +191,7 @@ func hitTestEntity(
         entityId: entityId
         x: x
         y: y
+        targetSize: targetSize
       ) {
         ret entityId
       }
@@ -187,6 +206,51 @@ func hitTest(
   x: view Float
   y: view Float
 ) ret EntityId {
+  ret hitTestTarget(
+    world: world
+    uiSystems: uiSystems
+    x: x
+    y: y
+    targetSize: 0.0
+  )
+}
+
+# The entity a pointer of `kind` hits: the precise rectangle first, so a
+# finger between two small controls takes the one it is on; then, for a
+# finger only, the touch-sized targets
+func hitTestFor(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  x: view Float
+  y: view Float
+  kind: view InputKind
+  touchTargetSize: view Float
+) ret EntityId {
+  let precise: EntityId = hitTest(
+    world: world
+    uiSystems: uiSystems
+    x: x
+    y: y
+  )
+  if isNone(this: precise) is false or kind is not InputKind.touch {
+    ret precise
+  }
+  ret hitTestTarget(
+    world: world
+    uiSystems: uiSystems
+    x: x
+    y: y
+    targetSize: targetSizeFor(kind: kind, touchTargetUnits: touchTargetSize)
+  )
+}
+
+func hitTestTarget(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  x: view Float
+  y: view Float
+  targetSize: view Float
+) ret EntityId {
   unsafe {
     let roots: List(EntityId) = collectPaintableRoots(world: world, uiSystems: uiSystems)
     let n: Int = roots.length
@@ -200,6 +264,7 @@ func hitTest(
           entityId: e
           x: x
           y: y
+          targetSize: targetSize
         )
         if isNone(this: hit) is false {
           ret hit
@@ -250,31 +315,43 @@ func updateInputSystem(
     released = uiPointerButtonReleased(button: mouseButtonLeft)
   }
 
+  let kind: InputKind = lastPointerKind()
   let nextPointer: PointerState = {
     x: mx
     y: my
     down: down
     pressed: pressed
     released: released
+    kind: kind
   }
   input.pointer = nextPointer
+  input.lastInputKind = kind
+  Device.deviceChanged(watch: input.deviceWatch)
+  input.touchTargetSize = touchTargetUnits(
+    viewport: viewport
+    displayScale: input.deviceWatch.facts.displayScale
+  )
 
   if pressed {
-    input.pressedEntityId = hitTest(
+    input.pressedEntityId = hitTestFor(
       world: world
       uiSystems: uiSystems
       x: mx
       y: my
+      kind: kind
+      touchTargetSize: input.touchTargetSize
     )
     log("[input] press at ({mx},{my}) -> pressedEntity={input.pressedEntityId.index}")
   }
 
   if released {
-    var hit: EntityId = hitTest(
+    var hit: EntityId = hitTestFor(
       world: world
       uiSystems: uiSystems
       x: mx
       y: my
+      kind: kind
+      touchTargetSize: input.touchTargetSize
     )
     log("[input] release at ({mx},{my}) -> hit={hit.index} pressed={input.pressedEntityId.index}")
     if isNone(this: hit) is false {
@@ -294,4 +371,21 @@ func updateInputSystem(
     }
     input.pressedEntityId = inputNoEntityId
   }
+}
+
+# 44 points in design units: a point is `displayScale` pixels, a design unit
+# `viewport.renderScale` pixels
+func touchTargetUnits(viewport: view Viewport, displayScale: view Float) ret Float {
+  if viewport.renderScale > 0.0 {
+    ret touchTargetPoints * displayScale / viewport.renderScale
+  }
+  ret touchTargetPoints
+}
+
+# Recompute the window's size class (points); true when it changed
+func updateInputSizeClass(input: mod InputSystem) ret Bool {
+  ret updateWindowSizeClass(
+    windowSizeClass: input.windowSizeClass
+    widthPoints: windowWidthPoints()
+  )
 }

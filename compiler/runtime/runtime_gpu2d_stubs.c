@@ -23,6 +23,7 @@ float rae_ext_Gpu2d_safeBottom(void){ return 0.0; }
 float rae_ext_Gpu2d_safeLeft(void){ return 0.0; }
 float rae_ext_Gpu2d_safeRight(void){ return 0.0; }
 rae_Bool rae_ext_Gpu2d_pointerDown(void) { return 0; }
+int64_t rae_ext_Gpu2d_pointerKind(void) { return 0; }
 rae_Bool rae_ext_Gpu2d_pointerPressed(void) { return 0; }
 rae_Bool rae_ext_Gpu2d_pointerReleased(void) { return 0; }
 float rae_ext_Gpu2d_wheelMove(void){ return 0.0; }
