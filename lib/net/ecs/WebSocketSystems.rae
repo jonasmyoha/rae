@@ -1,0 +1,324 @@
+# The ECS server's WebSocket half (docs/server-benchmarks-design.md §7, §9 G8):
+# the frame decode system and the helpers a message system answers with.
+#
+# A connection becomes a WebSocket one in dispatchSystem: httpParseSystem marks
+# an upgrade on the server's `webSocketPath` and parses nothing after it, and
+# dispatch answers the 101 in order with any requests pipelined before it and
+# swaps the connection's HttpParse for a WebSocketSession, whose decoder starts
+# right after the upgrade request (frames sent in the same read are decoded
+# that frame).
+#
+# frameDecodeSystem turns the frames of every Readable session into
+# WebSocketMessageEvents (text and binary), answering pings with pongs and a
+# close with a close on the spot; a protocol failure closes the connection
+# with its close code (1002, 1007, 1009). The app's message systems run after
+# it (between httpServerFrameBegin and httpServerFrameEnd) and answer
+# with `sendText` / `sendFrom` (one connection) or `broadcastText` /
+# `broadcastFrom`, which encode the frame ONCE and copy its bytes to every
+# session's WriteBuffer.
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Tag
+open ecs/Event
+open net/ByteBuffer
+open http/Http
+open webSocket/FrameDecoder
+open webSocket/FrameEncoder
+open webSocket/Upgrade
+open net/ecs/HttpServer
+
+# ----- the upgrade ----------------------------------------------------------
+
+# Answer an upgrade with 101 and make the connection a WebSocket session
+func acceptUpgrade(server: mod HttpServer, event: view HttpRequestEvent) {
+  let entityId: EntityId = event.connectionEntityId
+  appendAccept(
+    writeBuffers: server.writeBuffers
+    readBuffers: server.readBuffers
+    entityId: entityId
+    key: event.webSocketKey
+  )
+  addTag(table: server.sendings, entityId: entityId)
+  componentRemove(this: server.httpParses, entityId: entityId)
+  var decode: WebSocketDecodeState = createWebSocketDecodeState(
+    requireMask: true
+    maxMessageBytes: server.maxWebSocketMessageBytes
+  )
+  decode.position = event.request.whole.start + event.request.whole.count
+  componentSet(
+    this: server.webSocketSessions
+    entityId: entityId
+    data: WebSocketSession { decode: decode, closed: false }
+  )
+}
+
+func appendAccept(
+  writeBuffers: mod ComponentTable(WriteBuffer)
+  readBuffers: view ComponentTable(ReadBuffer)
+  entityId: view EntityId
+  key: view ByteRange
+) {
+  let writeBuffer: mod WriteBuffer => componentMod(this: writeBuffers, entityId: entityId)
+  let readBuffer: view ReadBuffer => componentView(this: readBuffers, entityId: entityId)
+  webSocketAppendAcceptKey(output: writeBuffer.buffer, buffer: readBuffer.buffer, key: key)
+}
+
+# Answer an upgrade asking for another protocol version with 426, then close
+func refuseUpgrade(server: mod HttpServer, event: view HttpRequestEvent) {
+  let entityId: EntityId = event.connectionEntityId
+  appendUpgradeRequired(
+    writeBuffers: server.writeBuffers
+    entityId: entityId
+    date: server.date.text
+  )
+  addTag(table: server.sendings, entityId: entityId)
+  addTag(table: server.closings, entityId: entityId)
+}
+
+func appendUpgradeRequired(
+  writeBuffers: mod ComponentTable(WriteBuffer)
+  entityId: view EntityId
+  date: view String
+) {
+  let writeBuffer: mod WriteBuffer => componentMod(this: writeBuffers, entityId: entityId)
+  webSocketAppendUpgradeRequired(output: writeBuffer.buffer, date: date)
+}
+
+# ----- decoding -------------------------------------------------------------
+
+# Readable sessions: an event per message, the control frames answered here
+func frameDecodeSystem(server: mod HttpServer) {
+  loop var i: Int = 0, i < componentCount(this: server.readables), ++i {
+    let entityId: EntityId = componentEntityAt(this: server.readables, i: i)
+    if componentHas(this: server.webSocketSessions, entityId: entityId) {
+      decodeConnection(
+        messages: server.webSocketMessages
+        sessions: server.webSocketSessions
+        readBuffers: server.readBuffers
+        writeBuffers: server.writeBuffers
+        sendings: server.sendings
+        closings: server.closings
+        entityId: entityId
+      )
+    }
+  }
+}
+
+func decodeConnection(
+  messages: mod EventQueue(WebSocketMessageEvent)
+  sessions: mod ComponentTable(WebSocketSession)
+  readBuffers: mod ComponentTable(ReadBuffer)
+  writeBuffers: mod ComponentTable(WriteBuffer)
+  sendings: mod ComponentTable(Sending)
+  closings: mod ComponentTable(Closing)
+  entityId: view EntityId
+) {
+  let session: mod WebSocketSession => componentMod(this: sessions, entityId: entityId)
+  let readBuffer: mod ReadBuffer => componentMod(this: readBuffers, entityId: entityId)
+  let writeBuffer: mod WriteBuffer => componentMod(this: writeBuffers, entityId: entityId)
+  var message: WebSocketMessage = createWebSocketMessage()
+  loop not session.closed {
+    let result: WebSocketDecodeResult = webSocketDecodeNext(
+      state: session.decode
+      buffer: readBuffer.buffer
+      message: message
+    )
+    if result is WebSocketDecodeResult.needMore {
+      ret
+    }
+    if result is WebSocketDecodeResult.failed {
+      webSocketAppendClose(output: writeBuffer.buffer, code: session.decode.failCode, reason: "")
+      session.closed = true
+      addTag(table: sendings, entityId: entityId)
+      addTag(table: closings, entityId: entityId)
+      ret
+    }
+    if message.kind is WebSocketOpcode.ping {
+      # Answered at once: a ping between the fragments of a message is
+      # valid only until the next decode
+      webSocketAppendFrameFrom(
+        output: writeBuffer.buffer
+        kind: WebSocketOpcode.pong
+        source: readBuffer.buffer
+        payload: message.payload
+      )
+      addTag(table: sendings, entityId: entityId)
+    } else if message.kind is WebSocketOpcode.close {
+      # The closing handshake: echo the code (1000 when none came), then close
+      var code: Int = message.closeCode
+      if code is 1005 {
+        code = 1000
+      }
+      webSocketAppendClose(output: writeBuffer.buffer, code: code, reason: "")
+      session.closed = true
+      addTag(table: sendings, entityId: entityId)
+      addTag(table: closings, entityId: entityId)
+    } else if message.kind is WebSocketOpcode.text or message.kind is WebSocketOpcode.binary {
+      eventSend(
+        this: messages
+        value: WebSocketMessageEvent { connectionEntityId: entityId, message: message }
+      )
+    }
+  }
+}
+
+# The end of the frame for a session: drop the frames its events pointed into
+func consumeDecoded(
+  sessions: mod ComponentTable(WebSocketSession)
+  readBuffers: mod ComponentTable(ReadBuffer)
+  entityId: view EntityId
+) {
+  let session: mod WebSocketSession => componentMod(this: sessions, entityId: entityId)
+  let readBuffer: mod ReadBuffer => componentMod(this: readBuffers, entityId: entityId)
+  webSocketDecodeConsumed(state: session.decode, buffer: readBuffer.buffer)
+}
+
+# ----- answering ------------------------------------------------------------
+
+# The payload of a message as a String (this allocates; for a handler that
+# parses it, like the benchmark's JSON)
+func messageText(server: view HttpServer, event: view WebSocketMessageEvent) ret String {
+  let readBuffer: view ReadBuffer => componentView(
+    this: server.readBuffers
+    entityId: event.connectionEntityId
+  )
+  ret httpRangeText(buffer: readBuffer.buffer, range: event.message.payload)
+}
+
+func sessionIsOpen(server: view HttpServer, entityId: view EntityId) ret Bool {
+  if not componentHas(this: server.webSocketSessions, entityId: entityId) {
+    ret false
+  }
+  let session: view WebSocketSession => componentView(
+    this: server.webSocketSessions
+    entityId: entityId
+  )
+  ret not session.closed
+}
+
+# A text frame to one connection
+func sendText(server: mod HttpServer, entityId: view EntityId, text: view String) {
+  if not sessionIsOpen(server: server, entityId: entityId) {
+    ret
+  }
+  let writeBuffer: mod WriteBuffer => componentMod(this: server.writeBuffers, entityId: entityId)
+  webSocketAppendText(output: writeBuffer.buffer, text: text)
+  addTag(table: server.sendings, entityId: entityId)
+}
+
+# A message's own payload sent back as a frame of its kind to `entityId` (an
+# echo), copied from the ReadBuffer with no String in between
+func sendFrom(server: mod HttpServer, entityId: view EntityId, event: view WebSocketMessageEvent) {
+  if not sessionIsOpen(server: server, entityId: entityId) {
+    ret
+  }
+  appendFrameFrom(
+    writeBuffers: server.writeBuffers
+    readBuffers: server.readBuffers
+    to: entityId
+    event: event
+  )
+  addTag(table: server.sendings, entityId: entityId)
+}
+
+func appendFrameFrom(
+  writeBuffers: mod ComponentTable(WriteBuffer)
+  readBuffers: view ComponentTable(ReadBuffer)
+  to: view EntityId
+  event: view WebSocketMessageEvent
+) {
+  let writeBuffer: mod WriteBuffer => componentMod(this: writeBuffers, entityId: to)
+  let readBuffer: view ReadBuffer => componentView(
+    this: readBuffers
+    entityId: event.connectionEntityId
+  )
+  webSocketAppendFrameFrom(
+    output: writeBuffer.buffer
+    kind: event.message.kind
+    source: readBuffer.buffer
+    payload: event.message.payload
+  )
+}
+
+# The encoded frame in the scratch buffer, appended to every open session's
+# WriteBuffer: the frame is encoded once however many receive it. Answers how
+# many sessions it went to.
+func sendScratchToSessions(server: mod HttpServer) ret Int {
+  var sent: Int = 0
+  loop var i: Int = 0, i < componentCount(this: server.webSocketSessions), ++i {
+    let entityId: EntityId = componentEntityAt(this: server.webSocketSessions, i: i)
+    if sessionIsOpen(server: server, entityId: entityId) {
+      appendScratch(
+        writeBuffers: server.writeBuffers
+        scratch: server.broadcastScratch
+        entityId: entityId
+      )
+      addTag(table: server.sendings, entityId: entityId)
+      sent = sent + 1
+    }
+  }
+  byteBufferClear(buffer: server.broadcastScratch)
+  ret sent
+}
+
+func appendScratch(
+  writeBuffers: mod ComponentTable(WriteBuffer)
+  scratch: view ByteBuffer
+  entityId: view EntityId
+) {
+  let writeBuffer: mod WriteBuffer => componentMod(this: writeBuffers, entityId: entityId)
+  appendBytes(
+    buffer: writeBuffer.buffer
+    bytes: scratch.bytes
+    start: scratch.start
+    count: byteBufferLength(buffer: scratch)
+  )
+}
+
+# A text frame to every open session, encoded once; answers how many
+func broadcastText(server: mod HttpServer, text: view String) ret Int {
+  byteBufferClear(buffer: server.broadcastScratch)
+  webSocketAppendText(output: server.broadcastScratch, text: text)
+  ret sendScratchToSessions(server: server)
+}
+
+# A message's own payload, as a frame of its kind, to every open session,
+# encoded once; answers how many
+func broadcastFrom(server: mod HttpServer, event: view WebSocketMessageEvent) ret Int {
+  byteBufferClear(buffer: server.broadcastScratch)
+  encodeFromInto(scratch: server.broadcastScratch, readBuffers: server.readBuffers, event: event)
+  ret sendScratchToSessions(server: server)
+}
+
+func encodeFromInto(
+  scratch: mod ByteBuffer
+  readBuffers: view ComponentTable(ReadBuffer)
+  event: view WebSocketMessageEvent
+) {
+  let readBuffer: view ReadBuffer => componentView(
+    this: readBuffers
+    entityId: event.connectionEntityId
+  )
+  webSocketAppendFrameFrom(
+    output: scratch
+    kind: event.message.kind
+    source: readBuffer.buffer
+    payload: event.message.payload
+  )
+}
+
+# Close a session: a close frame with `code`, then the connection
+func closeSession(server: mod HttpServer, entityId: view EntityId, code: view Int) {
+  if not sessionIsOpen(server: server, entityId: entityId) {
+    ret
+  }
+  let writeBuffer: mod WriteBuffer => componentMod(this: server.writeBuffers, entityId: entityId)
+  webSocketAppendClose(output: writeBuffer.buffer, code: code, reason: "")
+  let session: mod WebSocketSession => componentMod(
+    this: server.webSocketSessions
+    entityId: entityId
+  )
+  session.closed = true
+  addTag(table: server.sendings, entityId: entityId)
+  addTag(table: server.closings, entityId: entityId)
+}

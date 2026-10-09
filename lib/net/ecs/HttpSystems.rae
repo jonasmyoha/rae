@@ -6,19 +6,24 @@
 #    3. readSystem             Readable: read into the ReadBuffer
 #    4. awaitingResultSystem   answer the promoted requests whose task is done
 #    5. httpParseSystem        Readable: an HttpRequestEvent per request
-#    6. dispatchSystem         the events in order -> the app's `route`
-#    7. writeSystem            Sending: write what the socket takes
-#    8. timeoutSystem          tag idle connections Closing
-#    9. closeSystem            destroy Closing connections once flushed
-#   10. endOfFrameSystem       consume the parsed bytes, clear the tags,
-#                              frameAdvance the event queue
+#    6. dispatchSystem         the events in order -> the app's `route`; an
+#                              upgrade -> 101 and a WebSocketSession
+#    7. frameDecodeSystem      Readable sessions: a WebSocketMessageEvent per
+#                              message (WebSocketSystems)
+#    8. writeSystem            Sending: write what the socket takes
+#    9. timeoutSystem          tag idle connections Closing
+#   10. closeSystem            destroy Closing connections once flushed
+#   11. endOfFrameSystem       consume the parsed bytes, clear the tags,
+#                              frameAdvance the event queues
 #
 # `httpServerFrame` runs them all. The app supplies the routes: dispatch calls
 # `route(router: mod R, server: mod HttpServer, event: view HttpRequestEvent)`
 # for the app's router type R, which answers with `respond` (now) or `promote`
-# (later). The work per frame follows the active connections: every walk is
-# over a tag table or the event queue, except the idle check, which runs once
-# a second.
+# (later). An app with WebSocket messages to answer runs
+# `httpServerFrameBegin` (1-7), its own system over `server.webSocketMessages`,
+# then `httpServerFrameEnd` (8-11). The work per frame follows the active
+# connections: every walk is over a tag table or an event queue, except the
+# idle check, which runs once a second.
 open ecs/Entity
 open ecs/World
 open ecs/ComponentTable
@@ -30,12 +35,31 @@ open net/Tcp
 open net/Poller
 open net/ByteBuffer
 open http/Http
+open webSocket/Upgrade
 open net/ecs/HttpServer
+open net/ecs/WebSocketSystems
 open Time
 
 # One whole frame: every system in order, waiting up to `timeoutMs` for
 # readiness first
 func httpServerFrame(
+  R: type
+  router: mod R
+  server: mod HttpServer
+  timeoutMs: view Int
+) {
+  httpServerFrameBegin(
+    R
+    router: router
+    server: server
+    timeoutMs: timeoutMs
+  )
+  httpServerFrameEnd(server: server)
+}
+
+# The frame up to the decoded WebSocket messages: the app answers
+# `server.webSocketMessages` after it, before httpServerFrameEnd
+func httpServerFrameBegin(
   R: type
   router: mod R
   server: mod HttpServer
@@ -51,8 +75,14 @@ func httpServerFrame(
     readBuffers: server.readBuffers
     httpParses: server.httpParses
     awaitingResults: server.awaitingResults
+    webSocketPath: server.webSocketPath
   )
   dispatchSystem(R, router: router, server: server)
+  frameDecodeSystem(server: server)
+}
+
+# The rest of the frame: send, time out, close, and end the frame
+func httpServerFrameEnd(server: mod HttpServer) {
   writeSystem(server: server)
   timeoutSystem(server: server)
   closeSystem(server: server)
@@ -245,6 +275,7 @@ func parseConnection(
   readBuffers: view ComponentTable(ReadBuffer)
   httpParses: mod ComponentTable(HttpParse)
   entityId: view EntityId
+  webSocketPath: view String
 ) {
   let parse: mod HttpParse => componentMod(this: httpParses, entityId: entityId)
   let readBuffer: view ReadBuffer => componentView(this: readBuffers, entityId: entityId)
@@ -258,7 +289,32 @@ func parseConnection(
     if result is HttpParseResult.needMore {
       ret
     }
-    let badRequest: Bool = result is HttpParseResult.badRequest
+    var badRequest: Bool = result is HttpParseResult.badRequest
+    # An upgrade is looked for only on the server's WebSocket path
+    var upgrade: WebSocketUpgradeResult = WebSocketUpgradeResult.notWebSocket
+    var webSocketKey: ByteRange = { start: -1, count: 0 }
+    if not badRequest and webSocketPath.length() > 0 and httpPathIs(
+      buffer: readBuffer.buffer
+      request: request
+      path: webSocketPath
+    ) {
+      upgrade = webSocketUpgradeCheck(
+        state: parse.state
+        buffer: readBuffer.buffer
+        request: request
+      )
+      if upgrade is WebSocketUpgradeResult.badRequest {
+        badRequest = true
+        upgrade = WebSocketUpgradeResult.notWebSocket
+      } else if upgrade is WebSocketUpgradeResult.upgrade {
+        webSocketKey = httpHeaderValue(
+          state: parse.state
+          buffer: readBuffer.buffer
+          request: request
+          name: "Sec-WebSocket-Key"
+        )
+      }
+    }
     eventSend(
       this: requests
       value: HttpRequestEvent {
@@ -266,11 +322,14 @@ func parseConnection(
         sequence: parse.nextSequence
         request: request
         badRequest: badRequest
+        upgrade: upgrade
+        webSocketKey: webSocketKey
       }
     )
     parse.nextSequence = parse.nextSequence + 1
-    # Nothing after a bad request or `Connection: close` is read
-    parse.finished = badRequest or not request.keepAlive
+    # Nothing after a bad request or `Connection: close` is read, and what
+    # follows an upgrade is WebSocket frames
+    parse.finished = badRequest or not request.keepAlive or upgrade is not WebSocketUpgradeResult.notWebSocket
   }
 }
 
@@ -282,6 +341,7 @@ func httpParseSystem(
   readBuffers: view ComponentTable(ReadBuffer)
   httpParses: mod ComponentTable(HttpParse)
   awaitingResults: view ComponentTable(AwaitingResult)
+  webSocketPath: view String
 ) {
   loop var i: Int = 0, i < componentCount(this: readables), ++i {
     let entityId: EntityId = componentEntityAt(this: readables, i: i)
@@ -294,6 +354,7 @@ func httpParseSystem(
         readBuffers: readBuffers
         httpParses: httpParses
         entityId: entityId
+        webSocketPath: webSocketPath
       )
     }
   }
@@ -316,6 +377,10 @@ func dispatchSystem(R: type, router: mod R, server: mod HttpServer) {
           date: server.date.text
         )
         markSending(server: server, event: event)
+      } else if event.upgrade is WebSocketUpgradeResult.upgrade {
+        acceptUpgrade(server: server, event: event)
+      } else if event.upgrade is WebSocketUpgradeResult.wrongVersion {
+        refuseUpgrade(server: server, event: event)
       } else {
         route(router: router, server: server, event: event)
       }
@@ -473,9 +538,16 @@ func endOfFrameSystem(server: mod HttpServer) {
         readBuffers: server.readBuffers
         entityId: entityId
       )
+    } else if componentHas(this: server.webSocketSessions, entityId: entityId) {
+      consumeDecoded(
+        sessions: server.webSocketSessions
+        readBuffers: server.readBuffers
+        entityId: entityId
+      )
     }
   }
   clearTagTable(Readable, table: server.readables)
   clearTagTable(Writable, table: server.writables)
   frameAdvance(this: server.requests)
+  frameAdvance(this: server.webSocketMessages)
 }
