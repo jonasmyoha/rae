@@ -1,0 +1,61 @@
+-- upgrade (RFC 6455 §1.3)
+rfc: complete, upgrade
+HTTP/1.1 101 Switching Protocols | Upgrade: websocket | Connection: Upgrade | Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo= |  | 
+token list: complete, upgrade
+HTTP/1.1 101 Switching Protocols | Upgrade: websocket | Connection: Upgrade | Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo= |  | 
+plain GET: complete, notWebSocket
+version 8: complete, wrongVersion
+no key: complete, badRequest
+POST: complete, badRequest
+-- decoding the RFC 6455 §5.7 examples
+unmasked Hello: text "Hello"
+unmasked Hello: needMore
+masked Hello: text "Hello"
+masked Hello: needMore
+fragmented Hel+lo: text "Hello"
+fragmented Hel+lo: needMore
+unmasked ping: ping "Hello"
+unmasked ping: needMore
+masked pong: pong "Hello"
+masked pong: needMore
+256-byte binary: binary "256 bytes"
+256-byte binary: needMore
+64 KiB binary: binary "65536 bytes"
+64 KiB binary: needMore
+-- one byte at a time
+after 11 bytes (10 needMore): text "Hello"
+-- a ping between fragments, and a consume mid-message
+part 1: ping "x"
+part 1: needMore
+kept 10 bytes, position 10
+part 2: text "Hello"
+part 2: needMore
+-- failures (a server decoder)
+unmasked from a client: failed, close 1002
+RSV1 set: failed, close 1002
+continuation first: failed, close 1002
+text inside a message: failed, close 1002
+fragmented ping: failed, close 1002
+126-byte ping: failed, close 1002
+opcode 3: failed, close 1002
+invalid UTF-8: failed, close 1007
+overlong UTF-8: failed, close 1007
+surrogate: failed, close 1007
+over the limit, before its payload arrived: failed, close 1009
+close, 1-byte payload: failed, close 1002
+close 1005 on the wire: failed, close 1002
+close, empty: close 1005 ""
+close, empty: needMore
+close 1000 bye: close 1000 "bye"
+close 1000 bye: needMore
+text then needMore: text ""
+text then needMore: needMore
+-- encoding
+text Hello: 810548656c6c6f
+masked Hello (key 37fa213d): 818537fa213d7f9f4d5158
+256-byte binary header: 827e0100
+64 KiB binary header: 827f0000000000010000
+close 1000 bye: 880503e8627965
+pong for a message ping: 8a0548656c6c6f
+-- a masked round trip over 125 bytes (16-bit length)
+message: 240 bytes sent, same text: true

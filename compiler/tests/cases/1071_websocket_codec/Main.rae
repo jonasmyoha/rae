@@ -1,0 +1,355 @@
+# lib/webSocket (RFC 6455) on its own example frames (§5.7) and handshake
+# (§1.3): the upgrade check and 101 answer, the incremental decoder (masking,
+# fragmentation, control frames between fragments, the failures and their
+# close codes) and the encoder, whose frames must equal the RFC's bytes.
+open net/ByteBuffer
+open http/Http
+open webSocket/Upgrade
+open webSocket/FrameDecoder
+open webSocket/FrameEncoder
+
+func hexValue(character: view Int) ret Int {
+  if character >= 97 {
+    ret character - 87
+  }
+  ret character - 48
+}
+
+func bytesOf(hex: view String) ret List(UInt8) {
+  var bytes: List(UInt8) = {}
+  var i: Int = 0
+  loop i + 1 < hex.length() {
+    bytes.add(
+      value: (hexValue(character: hex.byteAt(index: i)) * 16 + hexValue(
+        character: hex.byteAt(index: i + 1)
+      )) as UInt8
+    )
+    i = i + 2
+  }
+  ret bytes
+}
+
+func feed(buffer: mod ByteBuffer, hex: view String) {
+  let bytes: List(UInt8) = bytesOf(hex: hex)
+  appendBytes(
+    buffer: buffer
+    bytes: bytes
+    start: 0
+    count: bytes.length
+  )
+}
+
+func hexOf(buffer: view ByteBuffer, limit: view Int) ret String {
+  let digits: String = "0123456789abcdef"
+  var bytes: List(UInt8) = {}
+  var count: Int = byteBufferLength(buffer: buffer)
+  if count > limit {
+    count = limit
+  }
+  loop var i: Int = 0, i < count, ++i {
+    let byte: Int = byteBufferAt(buffer: buffer, index: i)
+    bytes.add(value: digits.byteAt(index: byte / 16) as UInt8)
+    bytes.add(value: digits.byteAt(index: byte % 16) as UInt8)
+  }
+  ret fromBytes(bytes: bytes, start: 0, count: bytes.length)
+}
+
+# Every message the buffer holds, one line each, then how it ended
+func decodeAll(label: view String, state: mod WebSocketDecodeState, buffer: mod ByteBuffer) {
+  var message: WebSocketMessage = createWebSocketMessage()
+  loop true {
+    let result: WebSocketDecodeResult = webSocketDecodeNext(
+      state: state
+      buffer: buffer
+      message: message
+    )
+    if result is WebSocketDecodeResult.needMore {
+      log("{label}: needMore")
+      ret
+    }
+    if result is WebSocketDecodeResult.failed {
+      log("{label}: failed, close {state.failCode}")
+      ret
+    }
+    var payload: String = httpRangeText(buffer: buffer, range: message.payload)
+    if payload.length() > 12 {
+      payload = "{payload.length()} bytes"
+    }
+    if message.kind is WebSocketOpcode.close {
+      log("{label}: close {message.closeCode} \"{payload}\"")
+    } else {
+      log("{label}: {message.kind} \"{payload}\"")
+    }
+  }
+}
+
+func decodeHex(label: view String, hex: view String, requireMask: view Bool) {
+  var state: WebSocketDecodeState = createWebSocketDecodeState(
+    requireMask: requireMask
+    maxMessageBytes: 70000
+  )
+  var buffer: ByteBuffer = createByteBuffer(capacity: 64)
+  feed(buffer: buffer, hex: hex)
+  decodeAll(label: label, state: state, buffer: buffer)
+}
+
+func repeatedHex(byteHex: view String, count: view Int) ret String {
+  var parts: List(String) = {}
+  loop var i: Int = 0, i < count, ++i {
+    parts.add(value: "{byteHex}")
+  }
+  ret parts.join(sep: "")
+}
+
+func upgradeOf(label: view String, request: view String) {
+  var buffer: ByteBuffer = createByteBuffer(capacity: 256)
+  appendText(buffer: buffer, text: request)
+  var state: HttpParseState = createHttpParseState()
+  var parsed: HttpRequest = createHttpRequest()
+  let parse: HttpParseResult = httpParseNext(state: state, buffer: buffer, request: parsed)
+  let result: WebSocketUpgradeResult = webSocketUpgradeCheck(
+    state: state
+    buffer: buffer
+    request: parsed
+  )
+  log("{label}: {parse}, {result}")
+  if result is WebSocketUpgradeResult.upgrade {
+    var output: ByteBuffer = createByteBuffer(capacity: 256)
+    webSocketAppendAccept(
+      output: output
+      state: state
+      buffer: buffer
+      request: parsed
+    )
+    log(
+      byteBufferText(buffer: output, start: 0, count: byteBufferLength(buffer: output)).replace(
+        old: "\r\n"
+        new: " | "
+      )
+    )
+  }
+}
+
+func main() {
+  log("-- upgrade (RFC 6455 §1.3)")
+  let key: String = "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+  upgradeOf(
+    label: "rfc"
+    request: "GET /chat HTTP/1.1\r\nHost: server.example.com\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n{key}Origin: http://example.com\r\nSec-WebSocket-Protocol: chat, superchat\r\nSec-WebSocket-Version: 13\r\n\r\n"
+  )
+  upgradeOf(
+    label: "token list"
+    request: "GET /ws HTTP/1.1\r\nUpgrade: WebSocket\r\nConnection: keep-alive, Upgrade\r\n{key}Sec-WebSocket-Version: 13\r\n\r\n"
+  )
+  upgradeOf(label: "plain GET", request: "GET /ws HTTP/1.1\r\nHost: x\r\n\r\n")
+  upgradeOf(
+    label: "version 8"
+    request: "GET /ws HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n{key}Sec-WebSocket-Version: 8\r\n\r\n"
+  )
+  upgradeOf(
+    label: "no key"
+    request: "GET /ws HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\n\r\n"
+  )
+  upgradeOf(
+    label: "POST"
+    request: "POST /ws HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n{key}Sec-WebSocket-Version: 13\r\nContent-Length: 0\r\n\r\n"
+  )
+
+  log("-- decoding the RFC 6455 §5.7 examples")
+  decodeHex(label: "unmasked Hello", hex: "810548656c6c6f", requireMask: false)
+  decodeHex(label: "masked Hello", hex: "818537fa213d7f9f4d5158", requireMask: true)
+  decodeHex(label: "fragmented Hel+lo", hex: "010348656c80026c6f", requireMask: false)
+  decodeHex(label: "unmasked ping", hex: "890548656c6c6f", requireMask: false)
+  decodeHex(label: "masked pong", hex: "8a8537fa213d7f9f4d5158", requireMask: true)
+  decodeHex(
+    label: "256-byte binary"
+    hex: "827e0100{repeatedHex(byteHex: "ab", count: 256)}"
+    requireMask: false
+  )
+  decodeHex(
+    label: "64 KiB binary"
+    hex: "827f0000000000010000{repeatedHex(byteHex: "cd", count: 65536)}"
+    requireMask: false
+  )
+
+  log("-- one byte at a time")
+  var state: WebSocketDecodeState = createWebSocketDecodeState(
+    requireMask: true
+    maxMessageBytes: 1024
+  )
+  var buffer: ByteBuffer = createByteBuffer(capacity: 16)
+  var message: WebSocketMessage = createWebSocketMessage()
+  let frame: List(UInt8) = bytesOf(hex: "818537fa213d7f9f4d5158")
+  var waits: Int = 0
+  loop var i: Int = 0, i < frame.length, ++i {
+    appendBytes(
+      buffer: buffer
+      bytes: frame
+      start: i
+      count: 1
+    )
+    let result: WebSocketDecodeResult = webSocketDecodeNext(
+      state: state
+      buffer: buffer
+      message: message
+    )
+    if result is WebSocketDecodeResult.needMore {
+      waits = waits + 1
+    } else {
+      log(
+        "after {i + 1} bytes ({waits} needMore): {message.kind} \"{httpRangeText(
+          buffer: buffer
+          range: message.payload
+        )}\""
+      )
+    }
+  }
+
+  log("-- a ping between fragments, and a consume mid-message")
+  var client: ByteBuffer = createByteBuffer(capacity: 64)
+  webSocketAppendMaskedFrame(
+    output: client
+    kind: WebSocketOpcode.text
+    fin: false
+    text: "Hel"
+    maskKey: 305419896
+  )
+  webSocketAppendMaskedFrame(
+    output: client
+    kind: WebSocketOpcode.ping
+    fin: true
+    text: "x"
+    maskKey: 2018915346
+  )
+  var server: WebSocketDecodeState = createWebSocketDecodeState(
+    requireMask: true
+    maxMessageBytes: 1024
+  )
+  decodeAll(label: "part 1", state: server, buffer: client)
+  webSocketDecodeConsumed(state: server, buffer: client)
+  log("kept {byteBufferLength(buffer: client)} bytes, position {server.position}")
+  webSocketAppendMaskedFrame(
+    output: client
+    kind: WebSocketOpcode.continuation
+    fin: true
+    text: "lo"
+    maskKey: 1
+  )
+  decodeAll(label: "part 2", state: server, buffer: client)
+
+  log("-- failures (a server decoder)")
+  decodeHex(label: "unmasked from a client", hex: "810548656c6c6f", requireMask: true)
+  decodeHex(label: "RSV1 set", hex: "c18000000000", requireMask: true)
+  decodeHex(label: "continuation first", hex: "808000000000", requireMask: true)
+  decodeHex(label: "text inside a message", hex: "018000000000818000000000", requireMask: true)
+  decodeHex(label: "fragmented ping", hex: "098000000000", requireMask: true)
+  decodeHex(
+    label: "126-byte ping"
+    hex: "89fe007e00000000{repeatedHex(byteHex: "00", count: 126)}"
+    requireMask: true
+  )
+  decodeHex(label: "opcode 3", hex: "838000000000", requireMask: true)
+  decodeHex(label: "invalid UTF-8", hex: "818200000000c328", requireMask: true)
+  decodeHex(label: "overlong UTF-8", hex: "818200000000c0af", requireMask: true)
+  decodeHex(label: "surrogate", hex: "818300000000eda080", requireMask: true)
+  var small: WebSocketDecodeState = createWebSocketDecodeState(
+    requireMask: true
+    maxMessageBytes: 4
+  )
+  var big: ByteBuffer = createByteBuffer(capacity: 16)
+  feed(buffer: big, hex: "8285")
+  decodeAll(label: "over the limit, before its payload arrived", state: small, buffer: big)
+  decodeHex(label: "close, 1-byte payload", hex: "88810000000003", requireMask: true)
+  decodeHex(label: "close 1005 on the wire", hex: "88820000000003ed", requireMask: true)
+  decodeHex(label: "close, empty", hex: "888000000000", requireMask: true)
+  decodeHex(label: "close 1000 bye", hex: "88850000000003e8627965", requireMask: true)
+  decodeHex(label: "text then needMore", hex: "8180000000008185", requireMask: true)
+
+  log("-- encoding")
+  var output: ByteBuffer = createByteBuffer(capacity: 64)
+  webSocketAppendText(output: output, text: "Hello")
+  log("text Hello: {hexOf(buffer: output, limit: 64)}")
+  byteBufferClear(buffer: output)
+  webSocketAppendMaskedFrame(
+    output: output
+    kind: WebSocketOpcode.text
+    fin: true
+    text: "Hello"
+    maskKey: 939139389
+  )
+  log("masked Hello (key 37fa213d): {hexOf(buffer: output, limit: 64)}")
+  byteBufferClear(buffer: output)
+  webSocketAppendHeader(
+    output: output
+    kind: WebSocketOpcode.binary
+    fin: true
+    length: 256
+    masked: false
+    maskKey: 0
+  )
+  log("256-byte binary header: {hexOf(buffer: output, limit: 64)}")
+  byteBufferClear(buffer: output)
+  webSocketAppendHeader(
+    output: output
+    kind: WebSocketOpcode.binary
+    fin: true
+    length: 65536
+    masked: false
+    maskKey: 0
+  )
+  log("64 KiB binary header: {hexOf(buffer: output, limit: 64)}")
+  byteBufferClear(buffer: output)
+  webSocketAppendClose(output: output, code: 1000, reason: "bye")
+  log("close 1000 bye: {hexOf(buffer: output, limit: 64)}")
+  var pingIn: ByteBuffer = createByteBuffer(capacity: 16)
+  feed(buffer: pingIn, hex: "898537fa213d7f9f4d5158")
+  var pingState: WebSocketDecodeState = createWebSocketDecodeState(
+    requireMask: true
+    maxMessageBytes: 64
+  )
+  var ping: WebSocketMessage = createWebSocketMessage()
+  let pingResult: WebSocketDecodeResult = webSocketDecodeNext(
+    state: pingState
+    buffer: pingIn
+    message: ping
+  )
+  byteBufferClear(buffer: output)
+  webSocketAppendFrameFrom(
+    output: output
+    kind: WebSocketOpcode.pong
+    source: pingIn
+    payload: ping.payload
+  )
+  log("pong for a {pingResult} ping: {hexOf(buffer: output, limit: 64)}")
+
+  log("-- a masked round trip over 125 bytes (16-bit length)")
+  var longText: List(String) = {}
+  loop var i: Int = 0, i < 30, ++i {
+    longText.add(value: "line {i % 10} .")
+  }
+  let sent: String = longText.join(sep: "")
+  var wire: ByteBuffer = createByteBuffer(capacity: 16)
+  webSocketAppendMaskedFrame(
+    output: wire
+    kind: WebSocketOpcode.text
+    fin: true
+    text: sent
+    maskKey: 1515870810
+  )
+  var roundTrip: WebSocketDecodeState = createWebSocketDecodeState(
+    requireMask: true
+    maxMessageBytes: 1024
+  )
+  var received: WebSocketMessage = createWebSocketMessage()
+  let roundResult: WebSocketDecodeResult = webSocketDecodeNext(
+    state: roundTrip
+    buffer: wire
+    message: received
+  )
+  log(
+    "{roundResult}: {sent.length()} bytes sent, same text: {httpRangeText(
+      buffer: wire
+      range: received.payload
+    ) is sent}"
+  )
+}
