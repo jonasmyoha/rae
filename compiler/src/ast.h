@@ -668,6 +668,9 @@ typedef struct CompilerContext {
     // The may-wait graph (may_wait.h) the C backend asks which spawns run as
     // lightweight tasks on the scheduler; built after discovery, NULL before.
     struct WaitGraph* wait_graph;
+    // The resumable twins (c_twin.c): which may-wait functions get a frame
+    // and a step function; built with the wait graph.
+    struct TwinPlan* twin_plan;
 } CompilerContext;
 
 void compiler_init(CompilerContext* ctx, Arena* ast_arena);

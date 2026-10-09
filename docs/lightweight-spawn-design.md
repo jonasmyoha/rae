@@ -1,8 +1,8 @@
 # Lightweight `spawn`: design
 
-**Status:** S1 (measured, §10), S2 (the may-wait report, §11) and the
-scheduler half of S3 (S3a, §12) are done; the resumable codegen (S3b) is
-next. The tasks take §9's recommendations as working decisions unless the
+**Status:** S1 (measured, §10), S2 (the may-wait report, §11) and S3 (the
+scheduler, S3a, §12; the resumable codegen, S3b, §13) are done; S3c (fork-join
+over shared data), S4 and S5 are next. The tasks take §9's recommendations as working decisions unless the
 maintainer changes a fork here.
 
 - S1 and S2 (measure; the may-wait report) sit right after the server phase 1
@@ -344,7 +344,7 @@ inserts. The options (fork F3):
    across a wait, dropping a suspended task, leak-checked; TSan). **Split in
    two. S3a, the scheduler, is done (0.1.251, §12):** spawns that wait only on
    other tasks run M:N on the pool, with the policy in Rae. **S3b**, the frame
-   and step codegen, makes `sleep` and the other waits suspend.
+   and step codegen, makes `get()` and `sleep` suspend: done (0.1.252, §13).
 4. Socket and poller waits (after G2) and the browser path.
 5. The extern-blocking and fairness choices (F2, F3).
 
@@ -677,4 +677,127 @@ after is if anything pessimistic).
   `isDone`, a task spawning tasks, and a parallelLoop inside a task.
 
 Both are leak-checked and on the TSan gate's list.
+
+## 13. Resumable twins (S3b, 2026-10-09)
+
+S3b compiles a function that may wait, and is reachable from a spawn, a
+second time as a **resumable twin**: a frame struct and a step function
+(`compiler/src/c_twin.c`). A spawn whose target has a twin runs as a
+resumable task on the pool. Its `get()` and its sleeps suspend the task and
+free the worker; a later step on any worker resumes it.
+
+**What a twin is.**
+
+```c
+struct F__frame { int state; RaePoolSave pool; void* child; void* slots[N]; RetT result; };
+static int F__step(F__frame* __rae_frame);   /* 1: finished, 0: suspended */
+```
+
+- **The normal body, re-entered.** The step function is the normal body,
+  emitted by the normal statement emitter inside `switch (__rae_frame->state)
+  { case 0: ... }`. There is a `case K:` label after every wait: C may jump
+  into a block, past its declarations, as Duff's device does. Loops, `ret` in
+  the middle of a loop, `if` / `match` and `defer` therefore need nothing of
+  their own.
+- **Locals saved into slots.** The locals stay C locals. At a wait, every
+  local in scope (with its drop flag, and any wait result held for the same
+  statement) is saved into its frame slot; after the label it is restored.
+- **Slots never move.** A slot is heap storage that never moves
+  (`rae_frame_slot`). So a `view` or `mod` argument to a child twin points
+  into the parent's slot. It stays valid while the parent is suspended,
+  which is the "borrow across a wait" the frame design promised (§4.2).
+- **Waits, hoisted to the start of their statement** (in order):
+  - `t.get()` on a Task named by a path: suspend until `t` is done; the
+    statement then runs unchanged, on a task that is done;
+  - a sleep extern (Core's `sleep`, `Time.waitUntil`'s `nativeSleepNs`):
+    suspend on the scheduler's timer heap until the deadline; the call then
+    reads as 0;
+  - a call to another twin: a child frame is stepped until it finishes, and
+    the parent suspends whenever the child does; the call reads as the
+    child's result.
+- **String-pool temporaries move with the frame.** A statement's own pool
+  scope never spans a wait, but the function's does (an `if` condition's
+  temporaries stay until the function returns). So a frame moves its pool
+  entries out before it suspends and back onto the resuming thread's pool
+  (`rae_string_pool_detach` / `_reattach`). Nothing touches a frame after
+  its task is registered with a waker, because another worker may already
+  run it.
+- **Loop versioning is off in twins.** Its two copies of a loop would
+  duplicate the resume labels.
+
+**What stays as it was.**
+
+- A wait the transform cannot reach where it stands does not suspend there:
+  - inside a collection loop, a mainLoop or parallelLoop, a loop condition or
+    a deferred block;
+  - on the right of `and` / `or`, or in a match arm;
+  - while a statement temporary is alive, or with an alias local (`=>`, a
+    `view` / `mod` let) in scope;
+  - a twin call with arguments that call or build things, or with a String
+    result.
+
+  There a `get()` keeps S3a's help-first wait, and a twin call runs the
+  normal function. When such a wait can reach a sleep, the function is not
+  a twin, because a sleeping worker would hold the pool.
+- Which functions are twins is a fixed point: a function whose transform
+  fails is dropped, and the twins that call it are tried again
+  (`RAE_TWIN_DEBUG=1` prints the result).
+- A spawn whose task can reach a sleep goes on the pool only if its target
+  is a twin (`c_spawn_on_pool`). Otherwise it stays a thread, as before.
+- A Task dropped at the end of its scope, and a `taskScope`, keep the
+  help-first wait.
+- Rae has no cancellation: a frame is only freed after it finished, by its
+  own code, so "dropping a suspended frame" never happens. Dropping a Task
+  whose task is suspended joins it, as for any Task (fixture 1075).
+- Socket and poller waits are S4; C calls that block need the `blocking`
+  keyword (S5). A spawn reaching either is still a thread.
+
+**The scheduler side** (S3a's kernel, policy in `lib/core/Scheduler.rae`):
+
+- A task finishing hands its result over with `rae_task_complete`, which
+  takes the one task registered as its waiter and wakes it.
+- A sleeping task's timer sits in a locked heap. Workers move the due ones
+  back to a queue (`schedulerWakeTimers`) and park no longer than the next
+  timer.
+- With no pool threads (`RAE_WORKERS=1`), a resumable task is driven on its
+  spawner through its timers and the tasks it waits on (`schedulerDrive`,
+  fixture 1076).
+
+**Measured** (`benchmarks/spawn`, M1 Max, load 2.9; "threads" is
+`results/threadPerSpawn/`, S3a the previous baseline):
+
+| | thread per spawn | S3a | S3b |
+|---|---|---|---|
+| 10 000 concurrent 100 ms sleeps | 202 ms, 1.26 GB | (threads) | 128 ms, 10 MB |
+| 50 000 concurrent 100 ms sleeps | 9.3 s, 2.1 GB | (threads) | 166 ms, 23 MB |
+| 30 000 tasks alive at once (`held`): spawning them | 11.8 s, 2.3 GB | (threads) | 66 ms, 19 MB |
+| spawn + `get`, one at a time | 22.2 µs | 3.2 µs | 1.7 µs |
+| spawn + `get`, batches of 256 | 13.5 µs per task | 3.3 µs | 3.7 µs |
+| spawn → `get` returned, p50 / p99 | 21 / 63 µs | 0.17 / 45 µs | 3.0 / 11 µs |
+| merge sort, 1 024 / 4 096 leaves | 2.82x / 0.56x | 4.37x / 4.14x | 4.43x / 3.96x |
+
+- **Sleeping tasks no longer need a thread each:** 50 000 sleeps take
+  166 ms where they took 9.3 s, at 1% of the memory. 100 000 sleeps take
+  218 ms at 41 MB, where thread per spawn stopped at 16 383 tasks.
+- A chain of 100 000 tasks, each waiting on the next, suspends at every link,
+  so its depth no longer depends on a worker's stack (fixture 1075).
+- **A thief does not wait in line.** Workers steal with a try-lock pop, so
+  the idle workers that all see a new task do not convoy on its queue's lock
+  (where the spawner, taking its task back to run it, waited behind them:
+  14 µs per spawn + `get` before the change). An off-pool waiter also
+  watches its task for up to 50 µs before it blocks. The S3a p50 of 0.17 µs
+  was the spawner winning that race every time. Now the workers win it
+  sometimes, and the p99 dropped from 45 µs to 11.
+
+**Fixtures:**
+
+- 1075: 100 000 sleeping tasks, a chain of 100 000 waits, a wait in a loop
+  with a `ret` from it, a borrow across a wait, Strings and a pool temporary
+  across waits, `defer` across waits, and tasks dropped while suspended;
+- 1076: the same at smaller sizes with `RAE_WORKERS=1`.
+
+Both are leak-checked and on the TSan list, and their output is the same as
+with `RAE_SPAWN_THREADS=1`. Fixture 1061 (the thread cap) builds with
+`RAE_SPAWN_THREADS=1`, since its sleeping tasks would otherwise not need a
+thread.
 

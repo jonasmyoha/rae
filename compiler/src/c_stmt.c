@@ -47,6 +47,7 @@ void emit_deep_copy_source(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
 static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 static void emit_counted_for(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
+static bool emit_defers_inner(CFuncContext* ctx, int min_depth, FILE* out);
 void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
                               const AstExpr* value, FILE* out);
 // True if `value` is an ALIAS-returning call — `copyAt`/`buf_get` and any user
@@ -1763,7 +1764,21 @@ static bool emit_main_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     return true;
 }
 
+static bool emit_loop_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
+
 static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
+    // A resumable twin cannot suspend inside a collection loop, a mainLoop or
+    // a parallelLoop: their own C variables (the index, the outlined body)
+    // are not the twin's locals (c_twin.c)
+    bool opaque = stmt->as.loop_stmt.is_range || stmt->as.loop_stmt.is_main_loop
+        || stmt->as.loop_stmt.is_parallel;
+    if (opaque) ctx->twin_no_suspend++;
+    bool ok = emit_loop_inner(ctx, stmt, out);
+    if (opaque) ctx->twin_no_suspend--;
+    return ok;
+}
+
+static bool emit_loop_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     if (stmt->as.loop_stmt.is_main_loop) return emit_main_loop(ctx, stmt, out);
     if (stmt->as.loop_stmt.is_parallel) {
         // Sema rejected any other shape, so a non-empty index is the norm.
@@ -1952,7 +1967,8 @@ static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     // A counted loop whose list and byte accesses can be bounded runs a
     // check-free copy when its whole index range is inside them
     // (c_loop_versioning.c); the loop as written otherwise.
-    if (!c_loop_version_emit(ctx, stmt, out, emit_counted_for)) emit_counted_for(ctx, stmt, out);
+    // (Not in a resumable twin: its resume labels cannot be in two copies.)
+    if (ctx->twin || !c_loop_version_emit(ctx, stmt, out, emit_counted_for)) emit_counted_for(ctx, stmt, out);
     if (has_decl_init) {
         emit_implicit_drops_for_body(ctx, out, saved_locals);
         fprintf(out, "  }\n");
@@ -2425,7 +2441,10 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     // (the editor's `truncated`, ~13 leaked Strings per hierarchy refresh).
     int ret_local = returned_local_index(ctx, stmt);
     bool ret_local_was_moved = ret_local >= 0 && ctx->local_moved[ret_local];
+    // A resumable twin suspends at the statement's waits before it runs
+    if (ctx->twin) c_twin_before_stmt(ctx, stmt, out);
     bool ok_ret = emit_stmt_body(ctx, stmt, out);
+    if (ctx->twin) c_twin_after_stmt(ctx);
     if (ret_local >= 0 && ret_local < (int)ctx->local_count)
         ctx->local_moved[ret_local] = ret_local_was_moved;
     return ok_ret;
@@ -3771,7 +3790,8 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     && stmt->as.ret_stmt.values->value->kind == AST_EXPR_NONE) {
                     fprintf(out, "NULL;\n");
                     emit_implicit_drops_for_body(ctx, out, ctx->func_first_let_idx);
-                    fprintf(out, "    return __ret_val;\n  }\n");
+                    if (ctx->twin) fprintf(out, "    __rae_frame->result = __ret_val; return 1;\n  }\n");
+                    else fprintf(out, "    return __ret_val;\n  }\n");
                     break;
                 }
                 bool is_prim_ref_return = is_ref_return && is_primitive_type(get_base_type_name(ret_type));
@@ -4029,7 +4049,18 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 }
             }
 
-            if (has_value) {
+            if (ctx->twin) {
+                // A resumable twin's step function: the result goes into its
+                // frame and the step answers "finished"
+                if (has_value) {
+                    fprintf(out, "    __rae_frame->result = __ret_val;\n");
+                } else if (ret_type) {
+                    fprintf(out, "    __rae_frame->result = ");
+                    emit_auto_init(ctx, ret_type, out);
+                    fprintf(out, ";\n");
+                }
+                fprintf(out, "    return 1;\n");
+            } else if (has_value) {
                 fprintf(out, "    return __ret_val;\n");
             } else if (is_main_fn) {
                 fprintf(out, "    return 0;\n");
@@ -4133,6 +4164,14 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
 }
 
 bool emit_defers(CFuncContext* ctx, int min_depth, FILE* out) {
+    // A wait in a deferred block runs on a return path: no suspension there
+    ctx->twin_no_suspend++;
+    bool ok = emit_defers_inner(ctx, min_depth, out);
+    ctx->twin_no_suspend--;
+    return ok;
+}
+
+static bool emit_defers_inner(CFuncContext* ctx, int min_depth, FILE* out) {
     // Emit deferred blocks in reverse order (LIFO)
     for (int i = ctx->defer_stack.count - 1; i >= min_depth; i--) {
         const AstBlock* block = ctx->defer_stack.entries[i].block;

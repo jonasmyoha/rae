@@ -807,10 +807,72 @@ static bool extern_is_pool_safe(const WaitGraph* graph, const AstDecl* decl) {
   return false;
 }
 
-bool may_wait_spawn_on_pool(WaitGraph* graph, const AstDecl* decl) {
-  if (!graph || !decl || decl->kind != AST_DECL_FUNC || decl->as.func_decl.generic_params) return false;
-  int start = graph_node(graph, decl, NULL, NULL, false);
+/* Everything `start` can reach, once: whether any node `bad` says yes to */
+static bool reach_any(WaitGraph* graph, int start, bool (*bad)(WaitGraph*, const WaitNode*, bool), bool flag) {
+  bool* seen = calloc(graph->count, sizeof(bool));
+  int* stack = malloc((graph->count + 1) * sizeof(int));
+  size_t depth = 0;
+  bool found = false;
+  stack[depth++] = start;
+  seen[start] = true;
+  while (depth > 0 && !found) {
+    const WaitNode* node = &graph->nodes[stack[--depth]];
+    if (bad(graph, node, flag)) found = true;
+    for (size_t c = 0; c < node->callee_count && !found; c++) {
+      int callee = node->callees[c];
+      if (!seen[callee]) {
+        seen[callee] = true;
+        stack[depth++] = callee;
+      }
+    }
+  }
+  free(seen);
+  free(stack);
+  return found;
+}
+
+static bool node_sleeps(WaitGraph* graph, const WaitNode* node, bool flag) {
+  (void)graph; (void)flag;
+  return node->direct == WAIT_SLEEP;
+}
+
+/* A node a pool task must not reach: a socket wait, C that may block, and a
+ * sleep unless it can suspend (`allow_sleep`) */
+static bool node_off_pool(WaitGraph* graph, const WaitNode* node, bool allow_sleep) {
+  if (node->direct == WAIT_SOCKET) return true;
+  if (node->direct == WAIT_SLEEP && !allow_sleep) return true;
+  const AstFuncDecl* func = &node->decl->as.func_decl;
+  if (func->is_extern) {
+    if (extern_wait_kind(func) == WAIT_SLEEP) return !allow_sleep;
+    return !extern_is_pool_safe(graph, node->decl);
+  }
+  return false;
+}
+
+static int decl_node(WaitGraph* graph, const AstDecl* decl) {
+  if (!graph || !decl || decl->kind != AST_DECL_FUNC || decl->as.func_decl.generic_params) return -1;
+  return graph_node(graph, decl, NULL, NULL, false);
+}
+
+bool may_wait_reaches_sleep(WaitGraph* graph, const AstDecl* decl) {
+  int start = decl_node(graph, decl);
+  return start >= 0 && reach_any(graph, start, node_sleeps, false);
+}
+
+bool may_wait_decl_may_wait(WaitGraph* graph, const AstDecl* decl) {
+  int start = decl_node(graph, decl);
+  return start >= 0 && graph->nodes[start].may_wait;
+}
+
+bool may_wait_twin_candidate(WaitGraph* graph, const AstDecl* decl) {
+  int start = decl_node(graph, decl);
+  return start >= 0 && graph->nodes[start].may_wait && graph->nodes[start].reachable;
+}
+
+bool may_wait_spawn_on_pool(WaitGraph* graph, const AstDecl* decl, bool allow_sleep) {
+  int start = decl_node(graph, decl);
   if (start < 0) return false;
+  if (allow_sleep) return !reach_any(graph, start, node_off_pool, true);
   if (graph->nodes[start].pool_safe >= 0) return graph->nodes[start].pool_safe == 1;
   /* Everything the spawned function can reach, once */
   bool* seen = calloc(graph->count, sizeof(bool));
