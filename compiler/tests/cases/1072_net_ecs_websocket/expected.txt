@@ -1,0 +1,98 @@
+text "Hello" echoed
+--- pipeline, upgrade, echo (264 bytes)
+HTTP/1.1 200 OK
+Server: Rae
+Date: <date>
+Content-Type: text/plain
+Content-Length: 13
+
+Hello, World!HTTP/1.1 101 Switching Protocols
+Upgrade: websocket
+Connection: Upgrade
+Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=
+
+
+frames: 810548656c6c6f
+session: true, parser kept: false
+--- second upgrade (129 bytes)
+HTTP/1.1 101 Switching Protocols
+Upgrade: websocket
+Connection: Upgrade
+Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=
+
+
+binary "all" broadcast to 2
+--- broadcast, first (5 bytes)
+frames: 8203616c6c
+--- broadcast, second (5 bytes)
+frames: 8203616c6c
+broadcastText to 2
+--- broadcastText, first (6 bytes)
+frames: 81046e657773
+--- broadcastText, second (6 bytes)
+frames: 81046e657773
+--- ping (4 bytes)
+frames: 8a026869
+text "Hello!" echoed
+--- fragments and a ping (11 bytes)
+frames: 8a0170810648656c6c6f21
+--- half a frame (0 bytes)
+text "pong" echoed
+--- the other half (6 bytes)
+frames: 8104706f6e67
+closing tagged: true
+--- close (4 bytes)
+frames: 880203e8
+closed: true
+broadcast after a close reaches 1
+--- broadcast after a close (6 bytes)
+frames: 81046c656674
+--- unmasked frame (4 bytes)
+frames: 880203ea
+closed: true
+--- wrong version (148 bytes)
+HTTP/1.1 426 Upgrade Required
+Server: Rae
+Sec-WebSocket-Version: 13
+Date: <date>
+Content-Length: 0
+Connection: close
+
+
+--- no key (154 bytes)
+HTTP/1.1 400 Bad Request
+Server: Rae
+Date: <date>
+Content-Type: text/plain
+Content-Length: 11
+Connection: close
+
+Bad Request
+--- another path (130 bytes)
+HTTP/1.1 404 Not Found
+Server: Rae
+Date: <date>
+Content-Type: text/plain
+Content-Length: 9
+
+Not Found
+closing: true true false, session: false
+--- HTTP-only server (130 bytes)
+HTTP/1.1 404 Not Found
+Server: Rae
+Date: <date>
+Content-Type: text/plain
+Content-Length: 9
+
+Not Found
+session: false
+--- steady upgrade (129 bytes)
+HTTP/1.1 101 Switching Protocols
+Upgrade: websocket
+Connection: Upgrade
+Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=
+
+
+allocations for 500 echoes after warmup: 0
+requests routed: 3
+open after close: 0

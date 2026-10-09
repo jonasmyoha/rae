@@ -23,6 +23,8 @@ open net/Tcp
 open net/Poller
 open net/ByteBuffer
 open http/Http
+open webSocket/Upgrade
+open webSocket/FrameDecoder
 open Time
 
 # How many bytes one read asks for (a read buffer grows to hold this)
@@ -87,6 +89,14 @@ type HttpReply {
   body: String
 }
 
+# A WebSocket connection (an upgraded HTTP one, which no longer has HttpParse):
+# the frame decoder's state, including a message split across reads
+type WebSocketSession {
+  decode: WebSocketDecodeState
+  # A close was received or sent: nothing after it is decoded
+  closed: Bool
+}
+
 # A request promoted out of its frame: its bytes stay in the ReadBuffer (the
 # connection reads no further request until it is answered), and `task` is
 # the slow work that answers it
@@ -104,6 +114,20 @@ type HttpRequestEvent {
   request: HttpRequest
   # The bytes were not a valid request: answered with 400, then closed
   badRequest: Bool
+  # An upgrade to WebSocket on the server's `webSocketPath`: `upgrade` is
+  # answered with 101 (the connection's components were already swapped),
+  # `wrongVersion` with 426; a malformed upgrade is a bad request
+  upgrade: WebSocketUpgradeResult
+  # The Sec-WebSocket-Key of an `upgrade`
+  webSocketKey: ByteRange
+}
+
+# A WebSocket message (text or binary; pings and closes are answered by the
+# frame decode system itself), its payload a range in the connection's
+# ReadBuffer, valid until the end of the frame
+type WebSocketMessageEvent {
+  connectionEntityId: EntityId
+  message: WebSocketMessage
 }
 
 # ----- the World ------------------------------------------------------------
@@ -122,6 +146,7 @@ type HttpServer {
   httpParses: ComponentTable(HttpParse)
   keepAlives: ComponentTable(KeepAlive)
   awaitingResults: ComponentTable(AwaitingResult)
+  webSocketSessions: ComponentTable(WebSocketSession)
   readables: ComponentTable(Readable)
   writables: ComponentTable(Writable)
   sendings: ComponentTable(Sending)
@@ -138,6 +163,13 @@ type HttpServer {
   # Socket handle -> its connection entity
   socketEntities: IntMap(EntityId)
   requests: EventQueue(HttpRequestEvent)
+  webSocketMessages: EventQueue(WebSocketMessageEvent)
+  # The path a WebSocket upgrade is accepted on ("" for an HTTP-only server)
+  webSocketPath: String
+  # The largest WebSocket message accepted (a bigger one closes with 1009)
+  maxWebSocketMessageBytes: Int
+  # A frame encoded once for a broadcast, then copied to every session
+  broadcastScratch: ByteBuffer
   date: HttpDateCache
   # The Date header went to a new second this frame (the timeouts are checked)
   secondChanged: Bool
@@ -157,6 +189,7 @@ func createHttpServer(idleTimeoutMs: view Int) ret HttpServer {
     httpParses: create()
     keepAlives: create()
     awaitingResults: create()
+    webSocketSessions: create()
     readables: create()
     writables: create()
     sendings: create()
@@ -168,6 +201,10 @@ func createHttpServer(idleTimeoutMs: view Int) ret HttpServer {
     readiness: List.create(Readiness, cap: 256)
     socketEntities: createIntMap(EntityId, cap: 256)
     requests: createEventQueue(HttpRequestEvent)
+    webSocketMessages: createEventQueue(WebSocketMessageEvent)
+    webSocketPath: ""
+    maxWebSocketMessageBytes: 1048576
+    broadcastScratch: createByteBuffer(capacity: 256)
     date: createHttpDateCache()
     secondChanged: false
     bufferPool: BufferPool { free: List.create(ByteBuffer, cap: 64) }
@@ -467,6 +504,27 @@ func takeBufferText(
   )
   byteBufferClear(buffer: writeBuffer.buffer)
   ret text
+}
+
+# Give a connection raw bytes as if they had been read (a test's WebSocket
+# frames)
+func injectBytes(server: mod HttpServer, entityId: view EntityId, bytes: view List(UInt8)) {
+  appendInputBytes(readBuffers: server.readBuffers, entityId: entityId, bytes: bytes)
+  addTag(table: server.readables, entityId: entityId)
+}
+
+func appendInputBytes(
+  readBuffers: mod ComponentTable(ReadBuffer)
+  entityId: view EntityId
+  bytes: view List(UInt8)
+) {
+  let readBuffer: mod ReadBuffer => componentMod(this: readBuffers, entityId: entityId)
+  appendBytes(
+    buffer: readBuffer.buffer
+    bytes: bytes
+    start: 0
+    count: bytes.length
+  )
 }
 
 # Give a connection bytes as if they had been read (a test's input)

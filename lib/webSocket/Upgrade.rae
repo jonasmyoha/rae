@@ -114,12 +114,25 @@ func webSocketAppendAccept(
   buffer: view ByteBuffer
   request: view HttpRequest
 ) {
-  let key: ByteRange = httpHeaderValue(
-    state: state
+  webSocketAppendAcceptKey(
+    output: output
     buffer: buffer
-    request: request
-    name: "Sec-WebSocket-Key"
+    key: httpHeaderValue(
+      state: state
+      buffer: buffer
+      request: request
+      name: "Sec-WebSocket-Key"
+    )
   )
+}
+
+# The same, from the Sec-WebSocket-Key's range in `buffer` (for a server that
+# answers after the parse state's headers are gone)
+func webSocketAppendAcceptKey(
+  output: mod ByteBuffer
+  buffer: view ByteBuffer
+  key: view ByteRange
+) {
   appendText(
     buffer: output
     text: "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: "
