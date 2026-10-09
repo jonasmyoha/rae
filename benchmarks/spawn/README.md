@@ -41,6 +41,7 @@ under `/usr/bin/time -l`, which gives its peak RSS. The results go to
 | `latency <n>` | spawn → task running, and spawn → `get` returned (percentiles) |
 | `sum <n> <leaf>` | fork-join sum, split in two down to `leaf`, against sequential |
 | `sort <n> <leaf>` | fork-join merge sort, the same way |
+| `work <n> <leaf>` | fork-join over a range of compute-bound items: nothing to copy, so the scheduler alone (design §14), at 1 and 8 workers |
 
 A spawn cannot share read-only data today. A `view` argument makes the call
 run synchronously, so the fork-join halves get their own copy. The `sum`

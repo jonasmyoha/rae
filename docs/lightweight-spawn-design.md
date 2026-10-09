@@ -1,8 +1,9 @@
 # Lightweight `spawn`: design
 
 **Status:** S1 (measured, §10), S2 (the may-wait report, §11) and S3 (the
-scheduler, S3a, §12; the resumable codegen, S3b, §13) are done; S3c (fork-join
-over shared data), S4 and S5 are next. The tasks take §9's recommendations as working decisions unless the
+scheduler, S3a, §12; the resumable codegen, S3b, §13) are done. Of S3c (§14),
+the waiting thread now computes too; lending a `view` to a task is a
+proposal waiting for the maintainer's decision. S4 and S5 are next. The tasks take §9's recommendations as working decisions unless the
 maintainer changes a fork here.
 
 - S1 and S2 (measure; the may-wait report) sit right after the server phase 1
@@ -800,4 +801,138 @@ Both are leak-checked and on the TSan list, and their output is the same as
 with `RAE_SPAWN_THREADS=1`. Fixture 1061 (the thread cap) builds with
 `RAE_SPAWN_THREADS=1`, since its sleeping tasks would otherwise not need a
 thread.
+
+## 14. Fork-join over shared data (S3c, 2026-10-09)
+
+S3a's measurement (§12) left two findings. Both are about fork-join.
+
+### 14.1 The waiting thread computes too (done, 0.1.253)
+
+A fork-join started on `main` used 7 of the 8 performance cores. The pool
+has one thread per performance core but one (§12), and `main`, waiting on
+its tasks, only blocked.
+
+- **The change:** a thread off the pool now waits as a worker does. If its
+  task has not started, it takes it back and runs it. If a worker has it, it
+  runs other tasks from the injection queue and the workers' queues until
+  its task is done, and blocks only when there is nothing to run.
+- **The depth cap:** a thread off the pool runs these tasks on its own stack,
+  which is the platform's (8 MB for `main`), not a pool thread's 64 MB. So
+  it nests at most 32 deep (`schedulerOffPoolHelpDepth`).
+- **The effect:** a recursion started on `main` has 8 compute threads,
+  where it had 7.
+
+**Measured** with `benchmarks/spawn`'s new `work` mode: a fork-join over 8 M
+compute-bound items (about 90 ns each), with no data, so nothing is copied.
+
+| leaves | 8 | 64 | 512 | 4 096 | 32 768 |
+|---|---|---|---|---|---|
+| speedup, 8 workers | 5.36x | 6.76x | 7.01x | 7.06x | 6.80x |
+| speedup, 1 worker | 1.00x | 1.01x | 1.00x | 0.99x | 0.98x |
+
+- **The target is met:** near-linear on 8 cores (7x), with the leaf size as
+  the only cut-off. It holds from 64 to 32 768 leaves, and splitting finer
+  costs nothing on one worker. With exactly 8 leaves for 8 threads there is
+  no slack to balance, hence 5.4x.
+- The machine was at load 4.7. The numbers are in
+  `benchmarks/spawn/results/` (`work`).
+- A/B in the same session, at 8 workers: with the waiting thread blocking
+  (the S3b policy), the program ran 6.4x at 512 leaves and 5.2–5.5x at
+  32 768; with it helping, 7.0x and 6.4–6.8x.
+
+### 14.2 Lending a `view` to a task (a proposal: needs the maintainer)
+
+**The problem.** Fork-join over data is bound by copying, not by tasks:
+
+- The 16 M sum stays at 0.06x of sequential on the pool, because one copy of
+  the input costs more than the whole sequential sum (§10, §12).
+- The same sum through `parallelLoop`, whose iterations read the shared list
+  in place, is 5x faster than sequential.
+
+A spawn copies (or moves) every argument, and a `view` argument of a list or
+struct makes the call run synchronously (docs/concurrency-model.md), because
+nothing guarantees the borrowed place outlives the task or stays unchanged
+while it runs. §3.1's sketch therefore does not run in parallel:
+
+```rae
+func parallelSum(numbers: view List(Int), start: copy Int, count: copy Int) ret Int {
+  if count < 4096 {
+    ret sequentialSum(numbers: numbers, start: start, count: count)
+  }
+  let half: Int = count / 2
+  let left: Task(Int) = spawn parallelSum(numbers: numbers, start: start, count: half)
+  let right: Int = parallelSum(numbers: numbers, start: start + half, count: count - half)
+  ret left.get() + right
+}
+```
+
+**The proposed rule (new semantics: not implemented).** Inside a `taskScope
+{ }`, a `spawn` may pass a `view` of a place that outlives the scope:
+
+1. **What may be lent.** A local declared before the scope, a parameter of
+   the enclosing function (a `view` parameter's own referent outlives the
+   call), or a path into one of those. Never a value made inside the scope.
+2. **The lent place is frozen for the scope.** From the spawn to the end of
+   the scope, the compiler rejects every write to the lent place (and to
+   anything it is part of or contains): assignment, a mutating method, a
+   `mod` argument, a move (`own`).
+   - This is the frozen-`let` check (docs/let-is-frozen.md), applied to a
+     `var` for the extent of the scope; a `let` is frozen already.
+   - Reads stay allowed, in the scope and in the tasks: they are all
+     reads, so there is no race.
+3. **The tasks cannot leave the scope.** A Task from such a spawn is a local
+   of the scope. It can be `get()`, `isDone()` and `tryGet()`, and that is
+   all: it is not returned, stored in a struct or container, or passed on.
+   `taskScope` already joins its tasks at its end, so every borrow ends
+   before the lent place can change again.
+4. **Only `view`.** A `mod` argument to a spawn stays sequential: two tasks
+   writing the same place would race. Writing disjoint parts in parallel is
+   `parallelLoop`'s job, with its own rules.
+
+With the rule, the sketch is written:
+
+```rae
+func parallelSum(numbers: view List(Int), start: copy Int, count: copy Int) ret Int {
+  if count < 4096 {
+    ret sequentialSum(numbers: numbers, start: start, count: count)
+  }
+  let half: Int = count / 2
+  var total: Int = 0
+  taskScope {
+    let left: Task(Int) = spawn parallelSum(numbers: numbers, start: start, count: half)
+    let right: Int = parallelSum(numbers: numbers, start: start + half, count: count - half)
+    total = left.get() + right
+  }
+  ret total
+}
+```
+
+**What it costs and gives.**
+
+- **Codegen:** a lent view becomes a pointer in the task's arguments, with
+  no copy. The task runs on the pool like any other, and resumable twins
+  (§13) are unaffected.
+- **Sema:** the work is the scope-long freeze and the non-escape check.
+- **Effect:** the copy goes away, so the sum should approach
+  `parallelLoop`'s 5x. Rust needs `std::thread::scope` (or rayon's `join`)
+  for exactly this, because its `spawn` demands `'static` data. The freeze
+  is what Rust's borrow checker gives rayon for free.
+- **No new syntax:** only a spawn that is rejected today (made sequential)
+  becomes parallel, inside `taskScope`.
+
+**Alternatives.**
+
+- Keep copying: the status quo, where fork-join over data is slower than
+  one core.
+- A shared immutable value type (reference-counted, like Rust's `Arc`): a
+  new type and runtime machinery, and data has to be put into it first.
+- A parallel-calls construct (F9): new syntax, and it still needs the same
+  freeze to share data.
+
+**Questions for the maintainer:**
+
+- (a) Approve the rule as written?
+- (b) Should a `let` be lendable outside a `taskScope` too, since it is
+  frozen already? The open point is then only the Task escaping (rule 3);
+  `taskScope` is what bounds it today.
 

@@ -136,6 +136,17 @@ for benchmark in sum sort; do
   fi
 done
 
+# Fork-join with nothing to copy (lightweight-spawn-design §14): the
+# scheduler's own speedup, at 1 and all performance cores, from coarse to
+# fine leaves
+if [ "${BENCH_QUICK:-0}" = "1" ]; then WORK=1048576; else WORK=8388608; fi
+echo "fork-join work of $WORK"
+for workers in 1 "$PERFORMANCE_CORES"; do
+  for leaves in 8 64 512 4096 32768; do
+    measure "leaves=$leaves+workers=$workers" rae work $((WORK / leaves)) 600 env RAE_WORKERS="$workers" "$BUILD/rae/spawn" work "$WORK" $((WORK / leaves)) || true
+  done
+done
+
 python3 - "$RESULTS" "$RAE_ROOT" "$LOAD" "$PERFORMANCE_CORES" "$HERE" <<'PYTHON'
 import csv, json, os, platform, subprocess, sys
 results, root, load, performance_cores, here = sys.argv[1:]

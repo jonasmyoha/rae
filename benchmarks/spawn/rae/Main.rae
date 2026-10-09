@@ -9,6 +9,8 @@
 #   latency <samples>     spawn -> task running, and spawn -> get returned
 #   sum <count> <leaf>    fork-join parallel sum vs sequential
 #   sort <count> <leaf>   fork-join parallel merge sort vs sequential
+#   work <count> <leaf>   fork-join over a range of compute-bound items: no
+#                         data, so nothing is copied (the scheduler alone)
 #
 # Each prints `RESULT,rae,<benchmark>,<parameter>,<metric>,<value>` lines.
 #
@@ -509,6 +511,68 @@ func sort(count: view Int, leaf: view Int) {
   )
 }
 
+# ----- fork-join with nothing to copy ---------------------------------------
+
+# 64 rounds of a linear congruential step per item: about 90 ns of work
+func workLeaf(start: copy Int, count: copy Int) ret Int {
+  var total: Int = 0
+  loop var i: Int = start, i < start + count, ++i {
+    var x: Int = i
+    loop var round: Int = 0, round < 64, ++round {
+      x = (x * 1103515245 + 12345) % 2147483648
+    }
+    total = total + x % 1000
+  }
+  ret total
+}
+
+func forkWork(start: copy Int, count: copy Int, leaf: copy Int) ret Int {
+  if count <= leaf {
+    ret workLeaf(start: start, count: count)
+  }
+  let half: Int = count / 2
+  let left: Task(Int) = spawn forkWork(start: start, count: half, leaf: leaf)
+  let right: Int = forkWork(start: start + half, count: count - half, leaf: leaf)
+  ret left.get() + right
+}
+
+func work(count: view Int, leaf: view Int) {
+  let sequentialStart: Int = nowNs()
+  let expected: Int = workLeaf(start: 0, count: count)
+  let sequentialMs: Float64 = elapsedMs(startNs: sequentialStart)
+  let forkStart: Int = nowNs()
+  let total: Int = forkWork(start: 0, count: count, leaf: leaf)
+  let forkMs: Float64 = elapsedMs(startNs: forkStart)
+  result(
+    benchmark: "work"
+    parameter: leaf
+    metric: "sequentialMs"
+    value: sequentialMs
+  )
+  result(
+    benchmark: "work"
+    parameter: leaf
+    metric: "forkJoinMs"
+    value: forkMs
+  )
+  result(
+    benchmark: "work"
+    parameter: leaf
+    metric: "leaves"
+    value: (count / leaf) as Float64
+  )
+  var wrong: Float64 = 0.0
+  if total is not expected {
+    wrong = 1.0
+  }
+  result(
+    benchmark: "work"
+    parameter: leaf
+    metric: "wrong"
+    value: wrong
+  )
+}
+
 func main() ret Int {
   let mode: String = Sys.argAt(index: 0)
   let first: Int = Sys.argAt(index: 1).toInt()
@@ -525,9 +589,11 @@ func main() ret Int {
     sum(count: first, leaf: second)
   } else if mode is "sort" {
     sort(count: first, leaf: second)
+  } else if mode is "work" {
+    work(count: first, leaf: second)
   } else {
     log(
-      "usage: spawnJoin <count> | sleeps <count> | latency <samples> | sum <count> <leaf> | sort <count> <leaf>"
+      "usage: spawnJoin <count> | sleeps <count> | latency <samples> | sum <count> <leaf> | sort <count> <leaf> | work <count> <leaf>"
     )
     ret 2
   }

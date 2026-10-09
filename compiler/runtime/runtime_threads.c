@@ -672,6 +672,18 @@ int64_t rae_ext_Scheduler_currentWorker(void) {
   return g_sched_worker;
 }
 
+/* How many tasks this thread is running inside a wait of its own (a thread
+ * off the pool helps with a limit: its stack is the platform's) */
+static __thread int64_t g_sched_help_depth = 0;
+
+int64_t rae_ext_Scheduler_helpEnter(void) {
+  return ++g_sched_help_depth;
+}
+
+void rae_ext_Scheduler_helpLeave(void) {
+  g_sched_help_depth--;
+}
+
 /* Parking. A worker reads the epoch, looks at the queues once more, and
  * parks only while the epoch is unchanged: every push that could wake it
  * bumps the epoch first, so no wake-up is lost. */
@@ -1166,6 +1178,8 @@ int64_t rae_ext_Scheduler_queueTryPopOldest(int64_t queue) { (void)queue; return
 int64_t rae_ext_Scheduler_queueCount(int64_t queue) { (void)queue; return 0; }
 rae_Bool rae_ext_Scheduler_queueTake(int64_t queue, int64_t task, int64_t window) { (void)queue; (void)task; (void)window; return 0; }
 int64_t rae_ext_Scheduler_currentWorker(void) { return -1; }
+int64_t rae_ext_Scheduler_helpEnter(void) { return 1; }
+void rae_ext_Scheduler_helpLeave(void) {}
 int64_t rae_ext_Scheduler_parkEpoch(void) { return 0; }
 void rae_ext_Scheduler_park(int64_t epoch, int64_t timeout_ns) { (void)epoch; (void)timeout_ns; }
 void rae_ext_Scheduler_unpark(void) {}

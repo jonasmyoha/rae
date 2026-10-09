@@ -45,6 +45,10 @@ func nativeSchedulerQueueTake(
 
 func nativeSchedulerCurrentWorker() unsafe extern("rae_ext_Scheduler_currentWorker") ret Int
 
+func nativeSchedulerHelpEnter() unsafe extern("rae_ext_Scheduler_helpEnter") ret Int
+
+func nativeSchedulerHelpLeave() unsafe extern("rae_ext_Scheduler_helpLeave")
+
 func nativeSchedulerParkEpoch() unsafe extern("rae_ext_Scheduler_parkEpoch") ret Int
 
 func nativeSchedulerPark(epoch: Int, timeoutNs: Int) unsafe extern("rae_ext_Scheduler_park")
@@ -103,6 +107,11 @@ const schedulerHelpWaitNs: Int = 50000
 # before it blocks: a short task is done sooner than a blocked thread wakes
 # (~10 us)
 const schedulerOffPoolSpinNs: Int = 50000
+
+# How deep a thread off the pool nests tasks it runs while it waits: each is
+# a call on its own stack, which is the platform's (8 MB for main), not a
+# pool thread's 64 MB
+const schedulerOffPoolHelpDepth: Int = 32
 
 # How far back in the injection queue a waiting thread looks for the task it
 # waits on (it is usually the newest: spawned, then waited for)
@@ -359,8 +368,9 @@ func schedulerWorkerLoop(index: view Int) {
 
 # Wait for a task that may not be done (Task.get, or a Task dropped at the end
 # of its scope). Off the pool, a task nobody has started yet is taken back
-# and run right here (spawn, then get at once, costs no wake-up), and
-# otherwise the thread blocks. A worker runs other tasks meanwhile, so a
+# and run right here (spawn, then get at once, costs no wake-up); otherwise
+# the thread helps like a worker (up to schedulerOffPoolHelpDepth deep) and
+# blocks only when there is nothing to run. A worker runs other tasks meanwhile, so a
 # fork-join recursion keeps every worker busy and a waiting worker never
 # holds up the task it waits for; with nothing to run it sleeps until the
 # task is done, looking for new work every schedulerHelpWaitNs.
@@ -382,13 +392,19 @@ func schedulerTaskWait(task: view Int) {
           ret
         }
       }
-      let spinUntil: Int = nowNs() + schedulerOffPoolSpinNs
-      loop nowNs() < spinUntil {
-        if nativeSchedulerTaskIsDone(task: task) {
-          ret
+      # A worker took it: help as a worker does (the waiting thread is a
+      # ninth compute thread for a fork-join started here), watching the task
+      # between helped tasks; with nothing to run, block until it is done
+      let depth: Int = nativeSchedulerHelpEnter()
+      var spinUntil: Int = nowNs() + schedulerOffPoolSpinNs
+      loop not nativeSchedulerTaskIsDone(task: task) {
+        if depth <= schedulerOffPoolHelpDepth and schedulerRunOne(index: 0) {
+          spinUntil = nowNs() + schedulerOffPoolSpinNs
+        } else if nowNs() >= spinUntil {
+          nativeSchedulerWaitDone(task: task, timeoutNs: schedulerHelpWaitNs)
         }
       }
-      nativeSchedulerWaitDone(task: task, timeoutNs: -1)
+      nativeSchedulerHelpLeave()
       ret
     }
     loop not nativeSchedulerTaskIsDone(task: task) {
