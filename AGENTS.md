@@ -870,6 +870,16 @@ a machine without the list it prints `SKIP` and passes. Standalone:
 the message) so a slip is refused before it becomes a commit. Refer to such
 a project as "game proto1" (or similar) instead.
 
+**Warning-free C gate.** The C the compiler generates must compile without
+warnings, although `rae run` compiles it with `-w`.
+`compiler/tools/c-warnings-gate.sh` (`make c-warnings-gate`) emits the C of
+121, 106, 122 and the browser-smoke apps (109, 112, 125) and compiles it with
+`-Wall -Wextra -Werror` (unused-*, sign-compare and
+missing-field-initializers off); it runs as one pre-suite case of every full
+run. The rules it holds: a `view` is `const` in every position (parameter,
+local, return, the `rae_View_*` wrappers), and a typed `Buffer(T)` handed to
+a `Ptr` is cast to `void*` at that C boundary.
+
 **TSan gate (docs/concurrency-model.md §5).** `compiler/tools/tsan-check.sh`
 (`make tsan`) builds every threaded fixture (and 106_mobile_ui with its
 Spotify poller) with `-fsanitize=thread` and fails on any ThreadSanitizer

@@ -110,7 +110,7 @@ else
 TEST_RUNNER = tools/run_tests_parallel.sh
 endif
 
-.PHONY: all build test test-examples stress clean smoke install uninstall c-surface-gate FORCE
+.PHONY: c-warnings-gate all build test test-examples stress clean smoke install uninstall c-surface-gate FORCE
 
 all: build
 
@@ -200,6 +200,12 @@ stress: build
 # (tools/tsan-check.sh); `make test` runs it as one pre-suite case too.
 tsan: build
 	@bash tools/tsan-check.sh
+
+# The generated C of the largest and the browser-smoke apps compiles with
+# -Wall -Wextra -Werror (tools/c-warnings-gate.sh); `make test` runs it as one
+# pre-suite case too.
+c-warnings-gate: build
+	@bash tools/c-warnings-gate.sh
 
 smoke: build
 	@chmod +x tools/smoke.sh

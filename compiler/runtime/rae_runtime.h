@@ -286,15 +286,17 @@ RAE_UNUSED static RaeAny rae_any_owned_ptr(void* v, RaeAnyDropFn drop) {
     return out;
 }
 
-RAE_UNUSED static RaeAny rae_any_view(void* v, RaeType type) {
+/* A view boxed as Any: the box's pointer is untyped and its `is_view` flag
+ * is what keeps it read-only, so const is cast away here, once. */
+RAE_UNUSED static RaeAny rae_any_view(const void* v, RaeType type) {
     if (type == RAE_TYPE_ANY) {
-         RaeAny* res = (RaeAny*)v;
+         const RaeAny* res = (const RaeAny*)v;
          if (res->is_view || res->is_mod) return *res;
          RaeAny out = *res;
          out.is_view = true;
          return out;
     }
-    return (RaeAny){.type = type, .is_view = true, .as.ptr = v};
+    return (RaeAny){.type = type, .is_view = true, .as.ptr = (void*)v};
 }
 
 RAE_UNUSED static RaeAny rae_any_mod(void* v, RaeType type) {
@@ -316,30 +318,30 @@ RAE_UNUSED static RaeAny rae_any_identity_ptr(const RaeAny* a) {
 }
 
 // Helpers for reference structs
-typedef struct { int64_t* ptr; } rae_View_Int64;
+typedef struct { const int64_t* ptr; } rae_View_Int64;
 typedef struct { int64_t* ptr; } rae_Mod_Int64;
-typedef struct { int32_t* ptr; } rae_View_Int32;
+typedef struct { const int32_t* ptr; } rae_View_Int32;
 typedef struct { int32_t* ptr; } rae_Mod_Int32;
-typedef struct { uint64_t* ptr; } rae_View_UInt64;
+typedef struct { const uint64_t* ptr; } rae_View_UInt64;
 typedef struct { uint64_t* ptr; } rae_Mod_UInt64;
-typedef struct { uint32_t* ptr; } rae_View_UInt32;
+typedef struct { const uint32_t* ptr; } rae_View_UInt32;
 typedef struct { uint32_t* ptr; } rae_Mod_UInt32;
 /* Float (== Float32, f32) is Rae's default float; Float64 is the explicit
  * high-precision type. Both view/mod wrappers exist so the two never alias
  * each other's pointer width. */
-typedef struct { float* ptr; }  rae_View_Float;
+typedef struct { const float* ptr; }  rae_View_Float;
 typedef struct { float* ptr; }  rae_Mod_Float;
-typedef struct { double* ptr; } rae_View_Float64;
+typedef struct { const double* ptr; } rae_View_Float64;
 typedef struct { double* ptr; } rae_Mod_Float64;
-typedef struct { float* ptr; } rae_View_Float32;
+typedef struct { const float* ptr; } rae_View_Float32;
 typedef struct { float* ptr; } rae_Mod_Float32;
-typedef struct { rae_Bool* ptr; } rae_View_Bool;
+typedef struct { const rae_Bool* ptr; } rae_View_Bool;
 typedef struct { rae_Bool* ptr; } rae_Mod_Bool;
-typedef struct { uint32_t* ptr; } rae_View_Char32;
+typedef struct { const uint32_t* ptr; } rae_View_Char32;
 typedef struct { uint32_t* ptr; } rae_Mod_Char32;
-typedef struct { uint32_t* ptr; } rae_View_Char;
+typedef struct { const uint32_t* ptr; } rae_View_Char;
 typedef struct { uint32_t* ptr; } rae_Mod_Char;
-typedef struct { rae_String* ptr; } rae_View_String;
+typedef struct { const rae_String* ptr; } rae_View_String;
 typedef struct { rae_String* ptr; } rae_Mod_String;
 
 RAE_UNUSED static RaeAny rae_any_view_int64(rae_View_Int64 v) { return rae_any_view(v.ptr, RAE_TYPE_INT64); }
@@ -1292,7 +1294,7 @@ int   rae_g3d_sky_prepare(float skyKind, float turbidity, float skyExposure, flo
                           float clearR, float clearG, float clearB);
 void* rae_g3d_sky_pipeline(void);
 void* rae_g3d_sky_bind(void);
-int   rae_g3d_push_draw_record(int64_t mesh, struct rae_Mat4* model, struct rae_Mat4* prevModel,
+int   rae_g3d_push_draw_record(int64_t mesh, const struct rae_Mat4* model, const struct rae_Mat4* prevModel,
                                float r, float g, float b, float metallic,
                                float emR, float emG, float emB, float roughness);
 int   rae_g3d_push_metaball_cluster(const float* packedBalls, int64_t count,
@@ -1301,7 +1303,7 @@ int   rae_g3d_push_metaball_cluster(const float* packedBalls, int64_t count,
                                     float emR, float emG, float emB);
 void* rae_g3d_sdf_pipeline(void);
 void* rae_g3d_sdf_bind(int64_t slot);
-int   rae_g3d_push_skinned_draw(int64_t mesh, struct rae_Mat4* model,
+int   rae_g3d_push_skinned_draw(int64_t mesh, const struct rae_Mat4* model,
                                 float r, float g, float b, float metallic, float roughness,
                                 void* palette);   /* #921: the SkinStore palette, borrowed */
 void* rae_g3d_skin_pipeline(void);

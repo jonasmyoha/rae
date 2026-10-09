@@ -3081,6 +3081,9 @@ static bool emcc_link_c_to_web(const char* entry_rae_file,
   if (uses_sdl3) {
     args[n++] = "-DRAE_HAS_SDL3";
     args[n++] = "-sUSE_SDL=3";
+    /* Emscripten's notice that its SDL3 port is experimental: about the
+     * port, not this program, and printed on every build */
+    args[n++] = "-Wno-experimental";
   }
   if (uses_webgpu) {
     args[n++] = "-DRAE_HAS_WEBGPU";
