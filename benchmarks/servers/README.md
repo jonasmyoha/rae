@@ -3,15 +3,17 @@
 Rae servers next to Rust, Node and Bun servers that do the same work. The
 design, the decisions and the reasons are in
 [docs/server-benchmarks-design.md](../../docs/server-benchmarks-design.md).
-Phase 1 is HTTP ([spec/Http.md](spec/Http.md)). Phases 2 and 3 (WebSocket and
-the game room) are still to come.
+Phase 1 is HTTP ([spec/Http.md](spec/Http.md)), phase 2 WebSocket
+([spec/WebSocket.md](spec/WebSocket.md)). Phase 3 (the game room) is still to
+come.
 
 ## Run
 
 ```sh
 make bench-servers                      # fetch the load tools once, then run everything (~40 min)
-sh benchmarks/servers/check.sh --rae    # build both Rae servers and check them (seconds)
-sh benchmarks/servers/check.sh 8080     # check any server on port 8080
+sh benchmarks/servers/check.sh --rae    # build the four Rae servers and check them (seconds)
+sh benchmarks/servers/check.sh 8080     # check any HTTP server on port 8080
+sh benchmarks/servers/check.sh --websocket 8080   # check any WebSocket server on port 8080
 ```
 
 `run.sh` refuses to start when the 1-minute load average is above 0.3 × the
@@ -19,13 +21,21 @@ core count (`BENCH_ALLOW_LOAD=1` overrides). These knobs shorten a scratch
 run, and `BENCH_RESULTS=/tmp/x` keeps the committed baseline untouched:
 
 - `BENCH_SECONDS`, `BENCH_RUNS`, `BENCH_WARMUP`;
-- `BENCH_WORKERS`, `BENCH_IMPLS`, `BENCH_CASES`.
+- `BENCH_WORKERS`, `BENCH_IMPLS`, `BENCH_CASES`;
+- `BENCH_PHASES` (`http webSocket`), `BENCH_WS_RUNS` (3), `BENCH_WS_STEP`
+  (1000), `BENCH_WS_MAX_CLIENTS` (15000), `BENCH_WS_LIMIT_MS` (250),
+  `BENCH_WS_BROADCASTS` (100 per step).
 
-Example: `BENCH_SECONDS=2 BENCH_RUNS=2 BENCH_RESULTS=/tmp/x sh run.sh`.
+Examples: `BENCH_SECONDS=2 BENCH_RUNS=2 BENCH_RESULTS=/tmp/x sh run.sh`, and
+`BENCH_PHASES=webSocket BENCH_WS_RUNS=1 BENCH_WS_MAX_CLIENTS=2000
+BENCH_RESULTS=/tmp/x sh run.sh`. A run of one phase keeps the other phase's
+numbers in the results.
 
-Dependencies: the Rust toolchain, Node, Bun, `python3` and `curl`. The load
-tools are pinned in `external.lock`: `oha` for HTTP, and `wrk` for the
-pipelined case only. `fetch.sh` builds them into `~/.cache/rae/servers`.
+Dependencies: the Rust toolchain, Node with npm, Bun, `python3` and `curl`.
+The HTTP load tools are pinned in `external.lock`: `oha`, and `wrk` for the
+pipelined case only. `fetch.sh` builds them into `~/.cache/rae/servers`. The
+WebSocket load client is ours (`loadClient/`, Rust, built by `run.sh`), and
+`run.sh` installs Node's `ws` from the lockfile (`npm ci`) when it is missing.
 
 ## What runs
 
@@ -43,6 +53,21 @@ pipelined case only. `fetch.sh` builds them into `~/.cache/rae/servers`.
 - **Accepting.** In both, every worker's poller watches the one listening
   socket and accepts one connection per wake-up. That spreads the connections
   over the workers with no acceptor thread.
+
+Phase 2, WebSocket (one worker each, see the spec):
+
+| implementation | source | how |
+|---|---|---|
+| `rae-eventLoop` | `rae/eventLoop/webSocket/Main.rae` | the HTTP loop's shape; an upgraded connection's input is frames; output written once per poll |
+| `rae-ecs` | `rae/ecs/webSocket/Main.rae` | `lib/net/ecs`'s upgrade and frame systems plus one message system |
+| `rust` | `rust/src/bin/webSocket.rs` | tokio-tungstenite, current-thread runtime, a writer task per connection |
+| `node` | `javascript/node/WebSocket.js` | the `ws` package |
+| `bun` | `javascript/bun/WebSocket.js` | `Bun.serve` websockets, broadcast as `publish` to one topic |
+
+Both Rae servers use `lib/webSocket` (upgrade, frame decoder and encoder) and
+the same few lines for the shootout's JSON: the `type` and the `payload` are
+found in place (`jsonScanMember`), and the broadcast frame is built once from
+the payload's bytes in the read buffer, not by re-serialising.
 
 ## How it measures (`run.sh`, `measure.py`)
 
@@ -63,6 +88,16 @@ Reported, as the median with min and max:
 - CPU seconds;
 - for Rae, allocations per request (each worker prints its counts once a
   second when `RAE_BENCH_STATS=1`).
+
+WebSocket: every implementation is started once and passes `check.sh
+--websocket`, then gets 3 ramps of `loadClient`, interleaved like the HTTP
+runs. A ramp adds 1 000 clients at a time; after each step 4 clients send 100
+broadcasts in all (4 in flight) and the round trip is from sending one to its
+sender receiving the broadcastResult, after the fan-out to every client.
+Reported per step (median, min and max over the ramps): broadcast RTT p50 and
+p99. Also the client count reached with p99 under 250 ms, peak RSS, CPU
+seconds, and for Rae the allocations per message, which here include every
+client's connection setup (buffers, the upgrade).
 
 `results/summary.json` also holds the ECS/eventLoop ratio for every case,
 with "no measurable difference" when the two styles' min–max ranges overlap.

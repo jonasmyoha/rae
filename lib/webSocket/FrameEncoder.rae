@@ -80,8 +80,13 @@ func webSocketAppendFrameFrom(
     masked: false
     maskKey: 0
   )
-  loop var i: Int = 0, i < count, ++i {
-    appendByte(buffer: output, byte: byteBufferAt(buffer: source, index: payload.start + i))
+  if count > 0 {
+    appendBytes(
+      buffer: output
+      bytes: source.bytes
+      start: source.start + payload.start
+      count: count
+    )
   }
 }
 

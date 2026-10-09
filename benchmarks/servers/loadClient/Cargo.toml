@@ -1,0 +1,24 @@
+[package]
+name = "load-client"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Our WebSocket load and measuring client (docs/server-benchmarks-design.md
+# §3, decision F4): ramps clients up in steps and measures the broadcast
+# round trip (spec/WebSocket.md).
+[dependencies]
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+libc = "0.2"
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "macros", "sync"] }
+tokio-tungstenite = "0.28"
+
+[[bin]]
+name = "loadClient"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3
+codegen-units = 1
+lto = "thin"
