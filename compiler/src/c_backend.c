@@ -3,6 +3,7 @@
 #include "ownership.h"
 #include "mangler.h"
 #include "sema.h"
+#include "may_wait.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -2100,6 +2101,12 @@ bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* 
   bool is_main = str_eq_cstr(f->name, "main");
   if (is_main) {
       fprintf(out, "int main(int argc, char** argv) {\n  rae_runtime_set_args(argc, argv);  /* #995 */\n");
+      /* The scheduler's Rae policy (lib/core/Scheduler.rae) becomes the
+       * runtime's before anything can spawn or run a parallelLoop */
+      if (core_function_mangled(ctx, "schedulerWorkerLoop")) {
+          fprintf(out, "  rae_sched_install(rae_sched_hook_worker_loop, rae_sched_hook_task_wait, "
+                       "rae_sched_hook_worker_count, rae_sched_hook_chunk_size);\n");
+      }
   } else {
       fprintf(out, "RAE_UNUSED static %s %s(", rt, mangled); emit_param_list(&tctx, f->params, out, false); fprintf(out, ") {\n");
   }
@@ -2567,7 +2574,7 @@ static void emit_text_wrappers(CompilerContext* ctx, FILE* out) {
 
 /* The mangled C name of the lib/core function `name` (non-generic, not an
  * extern), or NULL in a program built without the prelude */
-static const char* core_function_mangled(CompilerContext* ctx, const char* name) {
+const char* core_function_mangled(CompilerContext* ctx, const char* name) {
   size_t count = 0;
   const size_t* named = decl_index_functions(ctx, str_from_cstr(name), &count);
   for (size_t k = 0; k < count; k++) {
@@ -2629,6 +2636,36 @@ static void emit_json_scan_wrappers(CompilerContext* ctx, FILE* out) {
                  "  }\n", needs, escaped);
   }
   fprintf(out, "  rae_jout_text(out, \"\\\"\"); rae_jout_put(out, (const char*)text.data, text.len); rae_jout_text(out, \"\\\"\");\n}\n");
+}
+
+/* The runtime's scheduler hooks (rae_sched_install, emitted into main): the
+ * lib/core/Scheduler.rae functions behind C signatures */
+static void emit_scheduler_hooks(CompilerContext* ctx, FILE* out) {
+  const char* worker_loop = core_function_mangled(ctx, "schedulerWorkerLoop");
+  const char* task_wait = core_function_mangled(ctx, "schedulerTaskWait");
+  const char* worker_count = core_function_mangled(ctx, "schedulerWorkerCount");
+  const char* chunk_size = core_function_mangled(ctx, "parallelChunkSize");
+  if (!worker_loop || !task_wait || !worker_count || !chunk_size) return;
+  fprintf(out, "RAE_UNUSED static void rae_sched_hook_worker_loop(int64_t index) { %s(index); }\n", worker_loop);
+  fprintf(out, "RAE_UNUSED static void rae_sched_hook_task_wait(int64_t task) { %s(task); }\n", task_wait);
+  fprintf(out, "RAE_UNUSED static int64_t rae_sched_hook_worker_count(void) { return %s(); }\n", worker_count);
+  fprintf(out, "RAE_UNUSED static int64_t rae_sched_hook_chunk_size(int64_t total, int64_t workers) "
+               "{ return %s(total, workers); }\n", chunk_size);
+}
+
+/* Whether a spawn of `callee` runs as a task on the scheduler instead of a
+ * thread of its own: it can run on a thread at all (c_spawn_threadable), the
+ * prelude's scheduler is there, and nothing the task can reach waits except
+ * on other tasks or calls C that may block (may_wait_spawn_on_pool).
+ * RAE_SPAWN_THREADS=1 at build time keeps every spawn a thread (to compare). */
+bool c_spawn_on_pool(CFuncContext* ctx, const AstDecl* callee_decl) {
+  if (!callee_decl || callee_decl->kind != AST_DECL_FUNC) return false;
+  if (!c_spawn_threadable(ctx, &callee_decl->as.func_decl)) return false;
+  CompilerContext* compiler = ctx->compiler_ctx;
+  if (!compiler->wait_graph || !core_function_mangled(compiler, "schedulerSubmit")) return false;
+  const char* forced = getenv("RAE_SPAWN_THREADS");
+  if (forced && forced[0] && strcmp(forced, "0") != 0) return false;
+  return may_wait_spawn_on_pool(compiler->wait_graph, callee_decl);
 }
 
 bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const char* out_path) {
@@ -3735,6 +3772,10 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   // C functions because the prototype comes later in the output.
   discovery_progress_window(EMIT_STAGE_REDISCOVER_LO, EMIT_STAGE_REDISCOVER_HI);
   collect_type_refs_module(ctx);
+  /* Every specialisation is known now: the may-wait graph decides which
+   * spawns run as tasks on the scheduler (c_spawn_on_pool) */
+  may_wait_free(ctx->wait_graph);
+  ctx->wait_graph = may_wait_build(ctx, module);
   // Bodies — reverse field order so LIFO drop matches construction.
   // Emits both `rae_drop_struct_<T>` (full) and
   // `rae_drop_struct_<T>_alias` (skip String fields) in a single
@@ -4380,6 +4421,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   
   emit_text_wrappers(ctx, out);
   emit_json_scan_wrappers(ctx, out);
+  emit_scheduler_hooks(ctx, out);
 
   // Path-1 spawn thunks: one per threadable function (all params passed by
   // value, so a worker thread safely owns its copies). pthread needs a
@@ -4501,5 +4543,8 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       }
   }
 
-  fclose(out); return true;
+  fclose(out);
+  may_wait_free(ctx->wait_graph);
+  ctx->wait_graph = NULL;
+  return true;
 }

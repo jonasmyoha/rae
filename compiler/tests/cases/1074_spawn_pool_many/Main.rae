@@ -1,0 +1,61 @@
+# 100 000 tasks alive at once on the scheduler's worker pool (a thread per
+# spawn stops at 16 383 on macOS), tasks dropped without get() (joined at the
+# end of their scope), isDone / tryGet on a pool task, a task spawning tasks,
+# and a parallelLoop inside a task (the pool runs both).
+func square(value: copy Int) ret Int {
+  ret value * value
+}
+
+func spawnSquares(count: copy Int) ret Int {
+  var tasks: List(Task(Int)) = {}
+  loop var i: Int = 0, i < count, ++i {
+    tasks.add(value: spawn square(value: i))
+  }
+  var total: Int = 0
+  loop var i: Int = 0, i < tasks.length, ++i {
+    if let task: Task(Int) = tasks.copyAt(index: i) {
+      total = total + task.get()
+    }
+  }
+  ret total
+}
+
+func parallelTotal(count: copy Int) ret Int {
+  var parts: List(Int) = List.create(Int, cap: count)
+  loop var i: Int = 0, i < count, ++i {
+    parts.add(value: 0)
+  }
+  parallelLoop var i: Int = 0, i < count, ++i {
+    parts.set(index: i, value: i * 3)
+  }
+  var total: Int = 0
+  loop var i: Int = 0, i < count, ++i {
+    total = total + parts.copyAtFallback(index: i, fallback: 0)
+  }
+  ret total
+}
+
+func main() {
+  log("100 000 tasks: {spawnSquares(count: 100000)}")
+
+  # Dropped at the end of each iteration without get(): joined there
+  loop var i: Int = 0, i < 1000, ++i {
+    let dropped: Task(Int) = spawn square(value: i)
+  }
+  log("1 000 tasks dropped unjoined")
+
+  var task: Task(Int) = spawn square(value: 12)
+  var answer: Int = -1
+  loop answer < 0 {
+    if let value: Int = task.tryGet() {
+      answer = value
+    }
+  }
+  log("tryGet: {answer}, done {task.isDone()}")
+
+  let nested: Task(Int) = spawn spawnSquares(count: 1000)
+  log("a task of 1 000 tasks: {nested.get()}")
+
+  let parallel: Task(Int) = spawn parallelTotal(count: 100000)
+  log("parallelLoop in a task: {parallel.get()}")
+}

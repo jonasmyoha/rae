@@ -1,0 +1,302 @@
+# core/Scheduler.rae — the task scheduler's policy (docs/lightweight-spawn
+# -design.md §4.3; docs/runtime-c-audit.md row 13).
+#
+# A spawn whose task never waits except on other tasks (`get`, a Task dropped
+# at the end of its scope, a taskScope) runs here, on the worker pool, instead
+# of on a thread of its own: the C backend decides per spawn from the may-wait
+# analysis, and every other spawn is still a thread. The pool is the one
+# parallelLoop uses, so its threads run both.
+#
+# This file is the policy: what a worker runs next, whom it steals from, how
+# long it spins before it parks, where a new task goes, how a task is waited
+# for, how many workers there are and how a parallelLoop range is cut. The C
+# kernel (runtime_threads.c) only does what C must: locked task queues, one
+# call per operation; parking and waking a worker; running a task's thunk;
+# blocking a thread until a task is done. The generated program installs
+# schedulerWorkerLoop, schedulerTaskWait, schedulerWorkerCount and
+# parallelChunkSize as the runtime's hooks at the start of main.
+#
+# A task handle is the runtime's task pointer as an Int. Queue 0 takes the
+# tasks spawned outside the pool; queues 1 .. threads are the pool threads'
+# own, newest-first for their owner and oldest-first for a thief, so a
+# fork-join recursion runs depth-first where it was spawned and is split at
+# the top when stolen.
+func nativeSchedulerQueuePush(queue: Int, task: Int) unsafe extern("rae_ext_Scheduler_queuePush")
+
+func nativeSchedulerQueuePopNewest(
+  queue: Int
+) unsafe extern("rae_ext_Scheduler_queuePopNewest") ret Int
+
+func nativeSchedulerQueuePopOldest(
+  queue: Int
+) unsafe extern("rae_ext_Scheduler_queuePopOldest") ret Int
+
+func nativeSchedulerQueueCount(queue: Int) unsafe extern("rae_ext_Scheduler_queueCount") ret Int
+
+func nativeSchedulerQueueTake(
+  queue: Int
+  task: Int
+  window: Int
+) unsafe extern("rae_ext_Scheduler_queueTake") ret Bool
+
+func nativeSchedulerCurrentWorker() unsafe extern("rae_ext_Scheduler_currentWorker") ret Int
+
+func nativeSchedulerParkEpoch() unsafe extern("rae_ext_Scheduler_parkEpoch") ret Int
+
+func nativeSchedulerPark(epoch: Int, timeoutNs: Int) unsafe extern("rae_ext_Scheduler_park")
+
+func nativeSchedulerUnpark() unsafe extern("rae_ext_Scheduler_unpark")
+
+func nativeSchedulerRunTask(task: Int) unsafe extern("rae_ext_Scheduler_runTask")
+
+func nativeSchedulerTaskIsDone(task: Int) unsafe extern("rae_ext_Scheduler_taskIsDone") ret Bool
+
+func nativeSchedulerWaitDone(task: Int, timeoutNs: Int) unsafe extern("rae_ext_Scheduler_waitDone")
+
+func nativeSchedulerHelpParallel() unsafe extern("rae_ext_Scheduler_helpParallel") ret Bool
+
+func nativeSchedulerShuttingDown() unsafe extern("rae_ext_Scheduler_shuttingDown") ret Bool
+
+func nativeSchedulerStart() unsafe extern("rae_ext_Scheduler_start") ret Int
+
+func nativeSchedulerPerformanceCores() unsafe extern("rae_ext_Scheduler_performanceCores") ret Int
+
+func nativeSchedulerMaxWorkers() unsafe extern("rae_ext_Scheduler_maxWorkers") ret Int
+
+func nativeSchedulerEnvironment(name: String) unsafe extern("rae_ext_rae_sys_get_env") ret String
+
+func nativeSchedulerTextLength(text: String) unsafe extern("rae_ext_rae_str_len") ret Int
+
+func nativeSchedulerTextByte(
+  text: String
+  index: Int
+) unsafe extern("rae_ext_rae_str_byte_at") ret Int
+
+# The queue of tasks spawned outside the pool
+const schedulerInjectionQueue: Int = 0
+
+# How long an idle worker keeps looking before it parks. A physics step runs a
+# few hundred parallelLoops a few microseconds apart, and a fork-join spawns
+# in bursts: a worker that fell asleep in between costs a wake-up (~5-15 us)
+# each time. 250 us of looking covers those gaps and costs an idle program
+# nothing measurable (docs/physics-performance-plan.md §10h).
+const schedulerSpinNs: Int = 250000
+
+# A parked worker looks again at least this often
+const schedulerParkNs: Int = 100000000
+
+# A worker waiting for a task with nothing else to run sleeps this long
+# between looks for new work
+const schedulerHelpWaitNs: Int = 50000
+
+# How far back in the injection queue a waiting thread looks for the task it
+# waits on (it is usually the newest: spawned, then waited for)
+const schedulerTakeWindow: Int = 16
+
+# ----- sizes ------------------------------------------------------------------
+
+# The pool's workers, the thread that launches a parallelLoop included:
+# RAE_WORKERS=n, else one per performance core but one. The core left over is
+# for the program's other threads (a renderer, the GPU driver, the window
+# server): with every performance core busy those preempt a worker in the
+# middle of a chunk and the join waits out the time slice. Efficiency cores
+# are left out: they would set the pace of every join.
+func schedulerWorkerCount() ret Int {
+  var text: String = ""
+  var cores: Int = 1
+  var most: Int = 1
+  var length: Int = 0
+  unsafe {
+    text = nativeSchedulerEnvironment(name: "RAE_WORKERS")
+    cores = nativeSchedulerPerformanceCores()
+    most = nativeSchedulerMaxWorkers()
+    length = nativeSchedulerTextLength(text: text)
+  }
+  var workers: Int = cores - 1
+  if length > 0 {
+    workers = schedulerLeadingNumber(text: text, length: length)
+  }
+  if workers < 1 {
+    ret 1
+  }
+  if workers > most {
+    ret most
+  }
+  ret workers
+}
+
+# The decimal number `text` starts with (0 when it does not start with a
+# digit), as RAE_WORKERS has always been read. The prelude has no String
+# methods of its own, so this reads the bytes.
+func schedulerLeadingNumber(text: view String, length: view Int) ret Int {
+  var value: Int = 0
+  unsafe {
+    loop var i: Int = 0, i < length, ++i {
+      let byte: Int = nativeSchedulerTextByte(text: text, index: i)
+      if byte < 48 or byte > 57 {
+        ret value
+      }
+      value = value * 10 + byte - 48
+    }
+  }
+  ret value
+}
+
+# A parallelLoop of `total` iterations on `workers` workers is cut into about
+# four chunks per worker, so a slow worker is balanced by the others
+func parallelChunkSize(total: view Int, workers: view Int) ret Int {
+  let targetChunks: Int = workers * 4
+  let chunk: Int = (total + targetChunks - 1) / targetChunks
+  if chunk < 1 {
+    ret 1
+  }
+  ret chunk
+}
+
+# ----- spawning -----------------------------------------------------------------
+
+# A new task: onto the spawning worker's own queue (it runs there next unless
+# stolen), or the injection queue from outside the pool, then wake a parked
+# worker. With no pool threads (RAE_WORKERS=1, or a build without threads)
+# it runs here and now, as a spawn that cannot get a thread does.
+func schedulerSubmit(task: view Int) {
+  unsafe {
+    let threads: Int = nativeSchedulerStart()
+    if threads is 0 {
+      nativeSchedulerRunTask(task: task)
+      ret
+    }
+    let worker: Int = nativeSchedulerCurrentWorker()
+    if worker > 0 {
+      nativeSchedulerQueuePush(queue: worker, task: task)
+    } else {
+      nativeSchedulerQueuePush(queue: schedulerInjectionQueue, task: task)
+    }
+    nativeSchedulerUnpark()
+  }
+}
+
+# ----- the workers --------------------------------------------------------------
+
+# The next task for worker `index`: its own newest, else the oldest spawned
+# outside the pool, else the oldest of another worker's (stealing, starting
+# with the next worker so the thieves spread out). 0 when there is none.
+func schedulerFindTask(index: view Int) ret Int {
+  unsafe {
+    if index > 0 {
+      let newest: Int = nativeSchedulerQueuePopNewest(queue: index)
+      if newest is not 0 {
+        ret newest
+      }
+    }
+    let injected: Int = nativeSchedulerQueuePopOldest(queue: schedulerInjectionQueue)
+    if injected is not 0 {
+      ret injected
+    }
+    let threads: Int = nativeSchedulerStart()
+    loop var k: Int = 1, k <= threads, ++k {
+      let victim: Int = (index - 1 + k) % threads + 1
+      if victim is not index {
+        let stolen: Int = nativeSchedulerQueuePopOldest(queue: victim)
+        if stolen is not 0 {
+          ret stolen
+        }
+      }
+    }
+  }
+  ret 0
+}
+
+# Run one task for worker `index`; false when there was none
+func schedulerRunOne(index: view Int) ret Bool {
+  let task: Int = schedulerFindTask(index: index)
+  if task is 0 {
+    ret false
+  }
+  unsafe {
+    nativeSchedulerRunTask(task: task)
+  }
+  ret true
+}
+
+# Whether any queue holds a task (no locks: the counts are atomic)
+func schedulerHasTask() ret Bool {
+  unsafe {
+    let threads: Int = nativeSchedulerStart()
+    loop var queue: Int = 0, queue <= threads, ++queue {
+      if nativeSchedulerQueueCount(queue: queue) > 0 {
+        ret true
+      }
+    }
+  }
+  ret false
+}
+
+# Nothing to do: keep looking for schedulerSpinNs, then park until a spawn, a
+# parallelLoop or shutdown wakes this worker (or schedulerParkNs passes)
+func schedulerIdle() {
+  let spinUntil: Int = nowNs() + schedulerSpinNs
+  unsafe {
+    loop nowNs() < spinUntil {
+      if schedulerHasTask() or nativeSchedulerHelpParallel() or nativeSchedulerShuttingDown() {
+        ret
+      }
+    }
+    let epoch: Int = nativeSchedulerParkEpoch()
+    if schedulerHasTask() or nativeSchedulerHelpParallel() {
+      ret
+    }
+    nativeSchedulerPark(epoch: epoch, timeoutNs: schedulerParkNs)
+  }
+}
+
+# A pool thread's life: parallelLoop chunks first (a launcher is waiting on
+# them), then tasks, then idle, until the program exits
+func schedulerWorkerLoop(index: view Int) {
+  unsafe {
+    loop not nativeSchedulerShuttingDown() {
+      if nativeSchedulerHelpParallel() {
+        continue
+      }
+      if schedulerRunOne(index: index) {
+        continue
+      }
+      schedulerIdle()
+    }
+  }
+}
+
+# ----- waiting ------------------------------------------------------------------
+
+# Wait for a task that may not be done (Task.get, or a Task dropped at the end
+# of its scope). Off the pool, a task nobody has started yet is taken back
+# and run right here (spawn, then get at once, costs no wake-up), and
+# otherwise the thread blocks. A worker runs other tasks meanwhile, so a
+# fork-join recursion keeps every worker busy and a waiting worker never
+# holds up the task it waits for; with nothing to run it sleeps until the
+# task is done, looking for new work every schedulerHelpWaitNs.
+func schedulerTaskWait(task: view Int) {
+  unsafe {
+    if nativeSchedulerTaskIsDone(task: task) {
+      ret
+    }
+    let worker: Int = nativeSchedulerCurrentWorker()
+    if worker <= 0 {
+      if nativeSchedulerQueueTake(
+        queue: schedulerInjectionQueue
+        task: task
+        window: schedulerTakeWindow
+      ) {
+        nativeSchedulerRunTask(task: task)
+        ret
+      }
+      nativeSchedulerWaitDone(task: task, timeoutNs: -1)
+      ret
+    }
+    loop not nativeSchedulerTaskIsDone(task: task) {
+      if not schedulerRunOne(index: worker) {
+        nativeSchedulerWaitDone(task: task, timeoutNs: schedulerHelpWaitNs)
+      }
+    }
+  }
+}

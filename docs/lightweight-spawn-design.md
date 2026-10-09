@@ -1,9 +1,9 @@
 # Lightweight `spawn`: design
 
-**Status:** design, queued 2026-10-08 as five tasks (S1–S5, following §8).
-Nothing is implemented. The tasks take §9's recommendations as working
-decisions unless the maintainer changes a fork here. S1 measures first and
-says whether the numbers justify continuing (F8).
+**Status:** S1 (measured, §10), S2 (the may-wait report, §11) and the
+scheduler half of S3 (S3a, §12) are done; the resumable codegen (S3b) is
+next. The tasks take §9's recommendations as working decisions unless the
+maintainer changes a fork here.
 
 - S1 and S2 (measure; the may-wait report) sit right after the server phase 1
   task.
@@ -341,7 +341,10 @@ inserts. The options (fork F3):
    which functions would become resumable, and how many. **Done (S2, 0.1.224): see §11.**
 3. Resumable codegen for `Task.get` and `sleep` only, on the existing worker
    pool, with fixtures (a deep chain of waits, a wait inside a loop, a borrow
-   across a wait, dropping a suspended task, leak-checked; TSan).
+   across a wait, dropping a suspended task, leak-checked; TSan). **Split in
+   two. S3a, the scheduler, is done (0.1.251, §12):** spawns that wait only on
+   other tasks run M:N on the pool, with the policy in Rae. **S3b**, the frame
+   and step codegen, makes `sleep` and the other waits suspend.
 4. Socket and poller waits (after G2) and the browser path.
 5. The extern-blocking and fairness choices (F2, F3).
 
@@ -567,4 +570,111 @@ three calls deep), 1042 (a generic that waits only for some T) and 1043
   task instead of joining it.
 - **106 needs only its poller worker transformed.** That is one function
   plus `sleep`.
+
+## 12. The scheduler (S3a, 2026-10-09)
+
+S3 was split into the scheduler (S3a, this section) and the resumable codegen
+(S3b). S3a puts spawned tasks on the worker pool, M:N, for every spawn that
+can run there without suspending.
+
+**Which spawns run on the pool.** The C backend keeps §11's graph after
+discovery and asks `may_wait_spawn_on_pool` per spawn. A spawn goes on the
+pool when:
+
+- it could run on a thread at all (`c_spawn_threadable`: its arguments are
+  copied or moved);
+- nothing it can reach waits except through task joins (`get`, a Task dropped
+  at the end of its scope, a `taskScope`);
+- every extern it can reach is the runtime's own kind (`lib/core/`, Math,
+  Parallel, Time and Channel, minus the sleeps).
+
+Every other spawn is still a thread, exactly as before:
+
+- a task that sleeps waits for S3b, whose frames let it suspend;
+- one that waits on a socket waits for S4;
+- one that calls other C (files, a library doing network calls) waits for
+  the `blocking` keyword (S5).
+
+`RAE_SPAWN_THREADS=1` at build time keeps every spawn a thread, for
+comparisons.
+
+**How a task waits without suspending.** A worker that waits on a task runs
+other tasks meanwhile (help-first, as Cilk's and Rayon's `join` do): its own
+newest, then the injection queue, then a stolen one. So a fork-join recursion
+keeps every worker busy, and a waiting worker never holds up the task it waits
+for. Helping nests on the worker's stack, so pool threads get a 64 MB stack
+(address space; untouched pages cost nothing). Fixture 1073 runs a chain of
+10 000 nested waits. A thread off the pool (`main`) that waits on a task
+nobody has started takes it back out of the injection queue and runs it
+itself, so spawn-then-get costs no wake-up. Otherwise it blocks until the
+task is done. That is the help-first fallback S3b keeps for code that is not
+transformed; S3b adds real suspension for `sleep` (and S4 for sockets).
+
+**Rae policy, C kernel (F7, docs/runtime-c-audit.md row 13).**
+
+- `lib/core/Scheduler.rae` holds the policy:
+  - the worker loop: parallelLoop chunks first, then its own newest task,
+    then the injection queue, then stealing the oldest task of the next
+    worker on; then 250 µs of spinning, then park;
+  - where a new task goes (the spawning worker's own queue, or the injection
+    queue from outside the pool; with no pool threads it runs on the spot);
+  - how a task is waited for;
+  - the default worker count (`RAE_WORKERS`, else performance cores minus
+    one);
+  - a parallelLoop's chunk size (four chunks per worker).
+- The generated `main` installs these as the runtime's hooks
+  (`rae_sched_install`).
+- `runtime_threads.c` keeps only what C must do, one call per operation:
+  - a locked task queue per worker plus the injection queue (push, pop
+    newest, pop oldest, take back, an atomic count to look without locking);
+  - parking a worker on an epoch, and waking one or all;
+  - running a task's thunk, and blocking a thread until a task is done;
+  - starting the pool's threads at the launcher's QoS;
+  - the parallelLoop claim words.
+- Its C copies of the worker-count and chunk rules and its old C worker loop
+  remain only for a program built without the prelude.
+- The parallelLoop pool and the task pool are one set of threads.
+  `benchmarks/parallel_stages` (220 parallelLoops per step) runs the same
+  with the Rae worker loop as with the old C loop: 0.96–1.28 ms against
+  1.15–1.24 ms per staged step at 8 workers, on a machine at load 5.
+
+**Measured (`benchmarks/spawn`, M1 Max, 8 workers).** The before is this
+build with `RAE_SPAWN_THREADS=1`, kept in `results/threadPerSpawn/` (load
+4.65). The after is `results/` (load 11.9: the machine was busy, so the
+after is if anything pessimistic).
+
+| | thread per spawn | scheduler (S3a) | tokio |
+|---|---|---|---|
+| spawn + `get`, one at a time | 22.2 µs | 3.2 µs | 8.6 µs |
+| spawn + `get`, batches of 256 | 13.5 µs per task | 3.3 µs per task | 0.22 µs |
+| spawn → `get` returned, p50 / p99 | 21 / 63 µs | 0.17 / 45 µs | 8.0 / 34 µs |
+| merge sort 2 M, 1 024 leaves: speedup | 2.82x | 4.37x | 4.52x |
+| merge sort 2 M, 4 096 leaves: speedup | **0.56x** | **4.14x** | — |
+| sum 16 M, 4 096 leaves | 331 ms | 45 ms | — |
+
+- **Fork-join no longer has to be tuned to the core count.** At 4 096 leaves
+  the thread-per-spawn sort was slower than sequential, with 1 GB of thread
+  stacks. On the pool it keeps its speedup at any leaf size, like tokio's.
+  The leaf size is the only cut-off.
+- **The speedup is not yet near-linear: 4.4x on 8 cores, as tokio's.** Two
+  things hold it there:
+  - the sort copies its halves at every level, which is memory-bound;
+  - the waiting `main` is not a worker, so 7 threads compute.
+- **The sum is still bound by copying** (§10): one copy of the input costs
+  more than the whole sequential sum. A spawn that could read data owned
+  outside its `taskScope` through a `view` is §3.1's open point; it needs a
+  language decision, so it is its own queue task.
+- The p50 of spawn → `get` is now a function call: `main` waits at once, so it
+  runs the task itself.
+- Sleeps (`sleeps`, `held`) are unchanged: those tasks still sleep, so they
+  are threads until S3b.
+
+**Fixtures:**
+
+- 1073: fork-join to depth 20 (a million tasks), a merge sort that copies its
+  halves, String results, and a chain of 10 000 nested waits;
+- 1074: 100 000 tasks alive at once, tasks dropped unjoined, `tryGet` /
+  `isDone`, a task spawning tasks, and a parallelLoop inside a task.
+
+Both are leak-checked and on the TSan gate's list.
 

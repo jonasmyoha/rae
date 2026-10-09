@@ -1019,7 +1019,15 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                     fprintf(out, "RaeTask* __t = rae_task_new(");
                     if (is_void) fprintf(out, "0");
                     else { fprintf(out, "sizeof("); emit_type_info_as_c_type(ctx, resT, out); fprintf(out, ")"); }
-                    fprintf(out, "); __s->__task = __t; rae_task_start(__t, __raespawn_thunk_%s, __s); __t; })", mangled);
+                    if (c_spawn_on_pool(ctx, callexpr->decl_link)) {
+                        // A task on the scheduler's worker pool: Scheduler.rae
+                        // queues it (docs/lightweight-spawn-design.md §4.3)
+                        fprintf(out, "); __s->__task = __t; rae_task_prepare(__t, __raespawn_thunk_%s, __s); "
+                                     "%s((int64_t)(intptr_t)__t); __t; })",
+                                mangled, core_function_mangled(ctx->compiler_ctx, "schedulerSubmit"));
+                    } else {
+                        fprintf(out, "); __s->__task = __t; rae_task_start(__t, __raespawn_thunk_%s, __s); __t; })", mangled);
+                    }
                     break;
                 }
                 // Sequential fallback (heap/mod/view-enum args, or an

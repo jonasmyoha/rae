@@ -288,9 +288,23 @@ run-once `if` block flagged `is_task_scope` (`parser.c`); `parallelLoop`
 parses to a `loop` flagged `is_parallel`. `taskScope` gets its semantics from
 join-on-drop; `parallelLoop` runs on the worker pool (below, 2026-10-03).
 
+**Tasks on the scheduler (2026-10-09, docs/lightweight-spawn-design.md
+§12).** A spawn whose task waits only on other tasks (`get`, a Task dropped at
+the end of its scope, a `taskScope`) and calls no C beyond the runtime's own
+runs on the worker pool instead of a thread: the C backend asks the may-wait
+analysis per spawn (`may_wait_spawn_on_pool`), and the spawn site calls
+`lib/core/Scheduler.rae`'s `schedulerSubmit`. The same pool runs
+`parallelLoop`. A worker waiting on a task runs other tasks meanwhile; a
+thread off the pool (`main`) that waits on a task nobody has started runs it
+itself, and otherwise blocks. Every other spawn (one that sleeps, waits on a
+socket or calls other C) is still a thread of its own, as below, until its
+wait can suspend (S3b, S4) or its C call is marked `blocking` (S5).
+`RAE_SPAWN_THREADS=1` at build time keeps every spawn a thread.
+
 **Runtime (`compiler/runtime/runtime_threads.c`, `rae_runtime.h`).**
 `Task(T)` lowers to `RaeTask*`: `{ pthread_t thread; void* result; _Atomic
-int done; int joined; int taken; }`, one pthread per spawn. The worker stores
+int done; int joined; int taken; int on_pool; thunk; args }`, one pthread
+per spawn, or a scheduler task (`on_pool`) run by a pool worker. The worker stores
 its result, then `done` with release order; `isDone()` is one acquire load
 (`rae_task_is_done`) and `tryGet()` lowers in `c_expr.c` to `rae_task_claim`
 (done and not yet taken: mark taken), then the same join-and-read as `get()`,
