@@ -1,0 +1,389 @@
+# WebSocket frames (RFC 6455 §5) read from a connection's ByteBuffer, as a
+# plain function over bytes with no I/O (docs/server-benchmarks-design.md §9
+# G6), shared by the event-loop and the ECS servers like lib/http.
+#
+#   * Incremental: a frame split across reads answers `needMore`; the next
+#     call, after more bytes arrive, reads it again from its start.
+#   * No heap: a message is a ByteRange of its payload in the buffer. Masked
+#     payloads are unmasked in place, and the pieces of a fragmented message
+#     are moved together as they arrive, so the whole message is one range.
+#   * Control frames (ping, pong, close) come back as messages of their own,
+#     also between the fragments of a message. Such a control frame's range
+#     is valid only until the next call (the next fragment is moved over it);
+#     every other range stays valid until `webSocketDecodeConsumed`.
+#   * Anything the RFC calls a failure answers `failed`, with the close code
+#     to send in `state.failCode`: 1002 (protocol error), 1007 (a text
+#     message or close reason that is not UTF-8) or 1009 (a message over
+#     `state.maxMessageBytes`). The connection is then closed.
+#
+# A server decodes the client's frames, which must be masked
+# (`requireMask`); a client decoding a server's frames sets it false.
+open net/ByteBuffer
+open http/Http
+open webSocket/Utf8
+
+enum WebSocketOpcode {
+  continuation
+  text
+  binary
+  close
+  ping
+  pong
+}
+
+enum WebSocketDecodeResult { message, needMore, failed }
+
+type WebSocketMessage {
+  # text, binary, close, ping or pong
+  kind: WebSocketOpcode
+  # The unmasked payload in the buffer (for close: the reason, after the code)
+  payload: ByteRange
+  # close only: the status code, 1005 when the frame carries none
+  closeCode: Int
+}
+
+type WebSocketDecodeState {
+  # Where the next frame starts (an unread index of the buffer)
+  position: Int
+  requireMask: Bool
+  maxMessageBytes: Int
+  # A fragmented message in progress: its kind, and its payload gathered so
+  # far at `fragmentStart ..< fragmentStart + fragmentCount`
+  fragmented: Bool
+  fragmentKind: WebSocketOpcode
+  fragmentStart: Int
+  fragmentCount: Int
+  # After `failed`: the close code to send
+  failCode: Int
+}
+
+const closeProtocolError: Int = 1002
+
+const closeInvalidData: Int = 1007
+
+const closeMessageTooBig: Int = 1009
+
+const closeNoStatus: Int = 1005
+
+func createWebSocketDecodeState(
+  requireMask: view Bool
+  maxMessageBytes: view Int
+) ret WebSocketDecodeState {
+  ret WebSocketDecodeState {
+    position: 0
+    requireMask: requireMask
+    maxMessageBytes: maxMessageBytes
+    fragmented: false
+    fragmentKind: WebSocketOpcode.text
+    fragmentStart: 0
+    fragmentCount: 0
+    failCode: 0
+  }
+}
+
+func createWebSocketMessage() ret WebSocketMessage {
+  ret WebSocketMessage {
+    kind: WebSocketOpcode.text
+    payload: ByteRange { start: -1, count: 0 }
+    closeCode: 0
+  }
+}
+
+# The opcode's value on the wire
+func webSocketOpcodeValue(kind: view WebSocketOpcode) ret Int {
+  match kind {
+    case WebSocketOpcode.continuation {
+      ret 0
+    }
+    case WebSocketOpcode.text {
+      ret 1
+    }
+    case WebSocketOpcode.binary {
+      ret 2
+    }
+    case WebSocketOpcode.close {
+      ret 8
+    }
+    case WebSocketOpcode.ping {
+      ret 9
+    }
+    case WebSocketOpcode.pong {
+      ret 10
+    }
+  }
+  ret 0
+}
+
+func failDecode(state: mod WebSocketDecodeState, code: view Int) ret WebSocketDecodeResult {
+  state.failCode = code
+  ret WebSocketDecodeResult.failed
+}
+
+# A close code a peer may send (RFC 6455 §7.4.1, §7.4.2)
+func isValidCloseCode(code: view Int) ret Bool {
+  if code >= 1000 and code <= 1003 {
+    ret true
+  }
+  if code >= 1007 and code <= 1011 {
+    ret true
+  }
+  ret code >= 3000 and code <= 4999
+}
+
+# Read the next message. `message` is filled when the answer is `message`.
+func webSocketDecodeNext(
+  state: mod WebSocketDecodeState
+  buffer: mod ByteBuffer
+  message: mod WebSocketMessage
+) ret WebSocketDecodeResult {
+  loop true {
+    let begin: Int = state.position
+    let available: Int = byteBufferLength(buffer: buffer) - begin
+    if available < 2 {
+      ret WebSocketDecodeResult.needMore
+    }
+    let first: Int = byteBufferAt(buffer: buffer, index: begin)
+    let second: Int = byteBufferAt(buffer: buffer, index: begin + 1)
+    let fin: Bool = (first bitand 128) is not 0
+    if (first bitand 112) is not 0 {
+      # RSV1-3: no extension was negotiated
+      ret failDecode(state: state, code: closeProtocolError)
+    }
+    let opcode: Int = first bitand 15
+    let masked: Bool = (second bitand 128) is not 0
+    var length: Int = second bitand 127
+    var header: Int = 2
+    if length is 126 {
+      if available < 4 {
+        ret WebSocketDecodeResult.needMore
+      }
+      length = (byteBufferAt(buffer: buffer, index: begin + 2) shl 8) bitor byteBufferAt(
+        buffer: buffer
+        index: begin + 3
+      )
+      header = 4
+    } else if length is 127 {
+      if available < 10 {
+        ret WebSocketDecodeResult.needMore
+      }
+      if byteBufferAt(buffer: buffer, index: begin + 2) >= 128 {
+        ret failDecode(state: state, code: closeProtocolError)
+      }
+      length = 0
+      loop var i: Int = 2, i < 10, ++i {
+        length = (length shl 8) bitor byteBufferAt(buffer: buffer, index: begin + i)
+      }
+      header = 10
+    }
+    if masked {
+      header = header + 4
+    } else if state.requireMask {
+      ret failDecode(state: state, code: closeProtocolError)
+    }
+    let control: Bool = opcode >= 8
+    if control {
+      if opcode > 10 or fin is false or length > 125 {
+        ret failDecode(state: state, code: closeProtocolError)
+      }
+    } else if opcode is 0 {
+      if state.fragmented is false {
+        ret failDecode(state: state, code: closeProtocolError)
+      }
+    } else if opcode is 1 or opcode is 2 {
+      if state.fragmented {
+        ret failDecode(state: state, code: closeProtocolError)
+      }
+    } else {
+      ret failDecode(state: state, code: closeProtocolError)
+    }
+    # The size limit is checked before the payload has arrived
+    var gathered: Int = 0
+    if opcode is 0 {
+      gathered = state.fragmentCount
+    }
+    if control is false and gathered + length > state.maxMessageBytes {
+      ret failDecode(state: state, code: closeMessageTooBig)
+    }
+    if available < header + length {
+      ret WebSocketDecodeResult.needMore
+    }
+    let payloadStart: Int = begin + header
+    if masked {
+      let keyAt: Int = payloadStart - 4
+      let key0: Int = byteBufferAt(buffer: buffer, index: keyAt)
+      let key1: Int = byteBufferAt(buffer: buffer, index: keyAt + 1)
+      let key2: Int = byteBufferAt(buffer: buffer, index: keyAt + 2)
+      let key3: Int = byteBufferAt(buffer: buffer, index: keyAt + 3)
+      var i: Int = 0
+      loop i + 4 <= length {
+        let at: Int = payloadStart + i
+        byteBufferSet(
+          buffer: buffer
+          index: at
+          byte: byteBufferAt(buffer: buffer, index: at) bitxor key0
+        )
+        byteBufferSet(
+          buffer: buffer
+          index: at + 1
+          byte: byteBufferAt(buffer: buffer, index: at + 1) bitxor key1
+        )
+        byteBufferSet(
+          buffer: buffer
+          index: at + 2
+          byte: byteBufferAt(buffer: buffer, index: at + 2) bitxor key2
+        )
+        byteBufferSet(
+          buffer: buffer
+          index: at + 3
+          byte: byteBufferAt(buffer: buffer, index: at + 3) bitxor key3
+        )
+        i = i + 4
+      }
+      loop i < length {
+        var key: Int = key0
+        let lane: Int = i % 4
+        if lane is 1 {
+          key = key1
+        } else if lane is 2 {
+          key = key2
+        } else if lane is 3 {
+          key = key3
+        }
+        let at: Int = payloadStart + i
+        byteBufferSet(
+          buffer: buffer
+          index: at
+          byte: byteBufferAt(buffer: buffer, index: at) bitxor key
+        )
+        i = i + 1
+      }
+    }
+    state.position = payloadStart + length
+    if control {
+      ret controlMessage(
+        state: state
+        buffer: buffer
+        message: message
+        opcode: opcode
+        payloadStart: payloadStart
+        length: length
+      )
+    }
+    if opcode is 0 {
+      # A continuation: its payload joins the ones before it
+      byteBufferMove(
+        buffer: buffer
+        from: payloadStart
+        to: state.fragmentStart + state.fragmentCount
+        count: length
+      )
+      state.fragmentCount = state.fragmentCount + length
+      if fin is false {
+        continue
+      }
+      state.fragmented = false
+      ret dataMessage(
+        state: state
+        buffer: buffer
+        message: message
+        kind: state.fragmentKind
+        payloadStart: state.fragmentStart
+        length: state.fragmentCount
+      )
+    }
+    var kind: WebSocketOpcode = WebSocketOpcode.binary
+    if opcode is 1 {
+      kind = WebSocketOpcode.text
+    }
+    if fin is false {
+      # The first fragment of a message
+      state.fragmented = true
+      state.fragmentKind = kind
+      state.fragmentStart = payloadStart
+      state.fragmentCount = length
+      continue
+    }
+    ret dataMessage(
+      state: state
+      buffer: buffer
+      message: message
+      kind: kind
+      payloadStart: payloadStart
+      length: length
+    )
+  }
+  ret WebSocketDecodeResult.needMore
+}
+
+func dataMessage(
+  state: mod WebSocketDecodeState
+  buffer: view ByteBuffer
+  message: mod WebSocketMessage
+  kind: view WebSocketOpcode
+  payloadStart: view Int
+  length: view Int
+) ret WebSocketDecodeResult {
+  if kind is WebSocketOpcode.text and isUtf8(buffer: buffer, start: payloadStart, count: length) is false {
+    ret failDecode(state: state, code: closeInvalidData)
+  }
+  message.kind = kind
+  message.payload = ByteRange { start: payloadStart, count: length }
+  message.closeCode = 0
+  ret WebSocketDecodeResult.message
+}
+
+func controlMessage(
+  state: mod WebSocketDecodeState
+  buffer: view ByteBuffer
+  message: mod WebSocketMessage
+  opcode: view Int
+  payloadStart: view Int
+  length: view Int
+) ret WebSocketDecodeResult {
+  message.closeCode = 0
+  message.payload = ByteRange { start: payloadStart, count: length }
+  if opcode is 9 {
+    message.kind = WebSocketOpcode.ping
+    ret WebSocketDecodeResult.message
+  }
+  if opcode is 10 {
+    message.kind = WebSocketOpcode.pong
+    ret WebSocketDecodeResult.message
+  }
+  # close: an optional 2-byte code, then an optional UTF-8 reason
+  message.kind = WebSocketOpcode.close
+  if length is 0 {
+    message.closeCode = closeNoStatus
+    ret WebSocketDecodeResult.message
+  }
+  if length is 1 {
+    ret failDecode(state: state, code: closeProtocolError)
+  }
+  let code: Int = (byteBufferAt(buffer: buffer, index: payloadStart) shl 8) bitor byteBufferAt(
+    buffer: buffer
+    index: payloadStart + 1
+  )
+  if isValidCloseCode(code: code) is false {
+    ret failDecode(state: state, code: closeProtocolError)
+  }
+  if isUtf8(buffer: buffer, start: payloadStart + 2, count: length - 2) is false {
+    ret failDecode(state: state, code: closeInvalidData)
+  }
+  message.closeCode = code
+  message.payload = ByteRange { start: payloadStart + 2, count: length - 2 }
+  ret WebSocketDecodeResult.message
+}
+
+# Drop the frames read so far. A fragmented message in progress keeps its
+# gathered payload (and the frames after it), moved to the front.
+func webSocketDecodeConsumed(state: mod WebSocketDecodeState, buffer: mod ByteBuffer) {
+  var count: Int = state.position
+  if state.fragmented {
+    count = state.fragmentStart
+  }
+  consume(buffer: buffer, count: count)
+  state.position = state.position - count
+  if state.fragmented {
+    state.fragmentStart = 0
+  }
+}

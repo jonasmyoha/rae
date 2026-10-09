@@ -1,0 +1,125 @@
+# WebSocket frames (RFC 6455 §5) appended to a connection's ByteBuffer, as
+# plain functions over bytes (docs/server-benchmarks-design.md §9 G6). A
+# server's frames are unmasked; a client's are masked with a 4-byte key
+# (`webSocketAppendMaskedFrame`, for a load client and for tests). Nothing is
+# allocated once the output buffer has grown to its size.
+open net/ByteBuffer
+open http/Http
+open webSocket/FrameDecoder
+
+# The frame header: FIN, opcode, the payload length in its shortest form
+# (7 bits, 16 bits after 126, 64 bits after 127), and the mask key when
+# `masked` (`maskKey`'s low 32 bits, most significant byte first)
+func webSocketAppendHeader(
+  output: mod ByteBuffer
+  kind: view WebSocketOpcode
+  fin: view Bool
+  length: view Int
+  masked: view Bool
+  maskKey: view Int
+) {
+  var first: Int = webSocketOpcodeValue(kind: kind)
+  if fin {
+    first = first bitor 128
+  }
+  appendByte(buffer: output, byte: first)
+  var maskBit: Int = 0
+  if masked {
+    maskBit = 128
+  }
+  if length < 126 {
+    appendByte(buffer: output, byte: maskBit bitor length)
+  } else if length < 65536 {
+    appendByte(buffer: output, byte: maskBit bitor 126)
+    appendByte(buffer: output, byte: length shr 8)
+    appendByte(buffer: output, byte: length)
+  } else {
+    appendByte(buffer: output, byte: maskBit bitor 127)
+    loop var i: Int = 0, i < 8, ++i {
+      appendByte(buffer: output, byte: length shr (56 - i * 8))
+    }
+  }
+  if masked {
+    appendByte(buffer: output, byte: maskKey shr 24)
+    appendByte(buffer: output, byte: maskKey shr 16)
+    appendByte(buffer: output, byte: maskKey shr 8)
+    appendByte(buffer: output, byte: maskKey)
+  }
+}
+
+# A whole unmasked text frame
+func webSocketAppendText(output: mod ByteBuffer, text: view String) {
+  webSocketAppendHeader(
+    output: output
+    kind: WebSocketOpcode.text
+    fin: true
+    length: text.length()
+    masked: false
+    maskKey: 0
+  )
+  appendText(buffer: output, text: text)
+}
+
+# A whole unmasked frame whose payload is `payload` of another buffer: an
+# echo, or the pong that answers a ping
+func webSocketAppendFrameFrom(
+  output: mod ByteBuffer
+  kind: view WebSocketOpcode
+  source: view ByteBuffer
+  payload: view ByteRange
+) {
+  var count: Int = payload.count
+  if payload.start < 0 {
+    count = 0
+  }
+  webSocketAppendHeader(
+    output: output
+    kind: kind
+    fin: true
+    length: count
+    masked: false
+    maskKey: 0
+  )
+  loop var i: Int = 0, i < count, ++i {
+    appendByte(buffer: output, byte: byteBufferAt(buffer: source, index: payload.start + i))
+  }
+}
+
+# An unmasked close frame: the status code, then `reason` (at most 123 bytes
+# of UTF-8; a control frame's payload is at most 125)
+func webSocketAppendClose(output: mod ByteBuffer, code: view Int, reason: view String) {
+  webSocketAppendHeader(
+    output: output
+    kind: WebSocketOpcode.close
+    fin: true
+    length: 2 + reason.length()
+    masked: false
+    maskKey: 0
+  )
+  appendByte(buffer: output, byte: code shr 8)
+  appendByte(buffer: output, byte: code)
+  appendText(buffer: output, text: reason)
+}
+
+# A masked frame, as a client sends it: `text`'s bytes XOR the key
+func webSocketAppendMaskedFrame(
+  output: mod ByteBuffer
+  kind: view WebSocketOpcode
+  fin: view Bool
+  text: view String
+  maskKey: view Int
+) {
+  let count: Int = text.length()
+  webSocketAppendHeader(
+    output: output
+    kind: kind
+    fin: fin
+    length: count
+    masked: true
+    maskKey: maskKey
+  )
+  loop var i: Int = 0, i < count, ++i {
+    let key: Int = (maskKey shr (24 - (i % 4) * 8)) bitand 255
+    appendByte(buffer: output, byte: text.byteAt(index: i) bitxor key)
+  }
+}
