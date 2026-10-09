@@ -8,43 +8,63 @@
 # checked, as most decoders do.
 const base64Alphabet: String = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
-# Append the base64 of `count` bytes of `bytes` from `start` to `output`
+# Append the base64 of `count` bytes of `bytes` from `start` to `output`.
+# The output grows once (`addDefaults`) and each character is `set` at an
+# index kept here: an `add` per character made every write wait on the last
+# one's length update.
 func appendBase64(
   output: mod List(UInt8)
   bytes: view List(UInt8)
   start: view Int
   count: view Int
 ) {
+  var position: Int = output.length
+  output.addDefaults(count: (count + 2) / 3 * 4)
   var i: Int = start
   let end: Int = start + count
   loop i + 3 <= end {
-    let group: Int = (bytes.copyAtFallback(index: i, fallback: 0) as Int shl 16) bitor (bytes.copyAtFallback(
-      index: i + 1
-      fallback: 0
-    ) as Int shl 8) bitor bytes.copyAtFallback(index: i + 2, fallback: 0) as Int
-    output.add(value: base64Alphabet.byteAt(index: (group shr 18) bitand 63) as UInt8)
-    output.add(value: base64Alphabet.byteAt(index: (group shr 12) bitand 63) as UInt8)
-    output.add(value: base64Alphabet.byteAt(index: (group shr 6) bitand 63) as UInt8)
-    output.add(value: base64Alphabet.byteAt(index: group bitand 63) as UInt8)
+    let first: Int = bytes.copyAtFallback(index: i, fallback: 0) as Int
+    let second: Int = bytes.copyAtFallback(index: i + 1, fallback: 0) as Int
+    let third: Int = bytes.copyAtFallback(index: i + 2, fallback: 0) as Int
+    let group: Int = (first shl 16) bitor (second shl 8) bitor third
+    output.set(
+      index: position
+      value: base64Alphabet.byteAt(index: (group shr 18) bitand 63) as UInt8
+    )
+    output.set(
+      index: position + 1
+      value: base64Alphabet.byteAt(index: (group shr 12) bitand 63) as UInt8
+    )
+    output.set(
+      index: position + 2
+      value: base64Alphabet.byteAt(index: (group shr 6) bitand 63) as UInt8
+    )
+    output.set(index: position + 3, value: base64Alphabet.byteAt(index: group bitand 63) as UInt8)
+    position = position + 4
     i = i + 3
   }
   let left: Int = end - i
-  if left is 1 {
-    let group: Int = bytes.copyAtFallback(index: i, fallback: 0) as Int shl 16
-    output.add(value: base64Alphabet.byteAt(index: (group shr 18) bitand 63) as UInt8)
-    output.add(value: base64Alphabet.byteAt(index: (group shr 12) bitand 63) as UInt8)
-    output.add(value: 61)
-    output.add(value: 61)
-  } else if left is 2 {
-    let group: Int = (bytes.copyAtFallback(index: i, fallback: 0) as Int shl 16) bitor (bytes.copyAtFallback(
-      index: i + 1
-      fallback: 0
-    ) as Int shl 8)
-    output.add(value: base64Alphabet.byteAt(index: (group shr 18) bitand 63) as UInt8)
-    output.add(value: base64Alphabet.byteAt(index: (group shr 12) bitand 63) as UInt8)
-    output.add(value: base64Alphabet.byteAt(index: (group shr 6) bitand 63) as UInt8)
-    output.add(value: 61)
+  if left is 0 {
+    ret
   }
+  var group: Int = bytes.copyAtFallback(index: i, fallback: 0) as Int shl 16
+  if left is 2 {
+    group = group bitor (bytes.copyAtFallback(index: i + 1, fallback: 0) as Int shl 8)
+  }
+  output.set(
+    index: position
+    value: base64Alphabet.byteAt(index: (group shr 18) bitand 63) as UInt8
+  )
+  output.set(
+    index: position + 1
+    value: base64Alphabet.byteAt(index: (group shr 12) bitand 63) as UInt8
+  )
+  var thirdCharacter: UInt8 = 61
+  if left is 2 {
+    thirdCharacter = base64Alphabet.byteAt(index: (group shr 6) bitand 63) as UInt8
+  }
+  output.set(index: position + 2, value: thirdCharacter)
+  output.set(index: position + 3, value: 61)
 }
 
 # The base64 of `bytes`
@@ -89,38 +109,66 @@ func base64Value(character: view Int) ret Int {
   ret -1
 }
 
+# Each byte's 6-bit value, -1 for a byte that is not a base64 character: a
+# table, because the `base64Value` branches mispredict on encoded data
+func base64DecodeTable() ret List(Int) {
+  var table: List(Int) = List.create(Int, cap: 256)
+  loop var character: Int = 0, character < 256, ++character {
+    table.add(value: base64Value(character: character))
+  }
+  ret table
+}
+
 # Decode `text` onto the end of `output`. False (and `output` as it was)
-# when `text` is not valid base64.
+# when `text` is not valid base64. The output grows once (`addDefaults`) and
+# each byte is `set` at an index kept here; every group but the last is
+# checked once for an invalid character, and only the last may hold `=`.
 func appendBase64Decoded(output: mod List(UInt8), text: view String) ret Bool {
   let length: Int = text.length()
   if length % 4 is not 0 {
     ret false
   }
+  if length is 0 {
+    ret true
+  }
   let before: Int = output.length
+  var padding: Int = 0
+  if text.byteAt(index: length - 1) is 61 {
+    padding = 1
+    if text.byteAt(index: length - 2) is 61 {
+      padding = 2
+    }
+  }
+  output.addDefaults(count: length / 4 * 3 - padding)
+  let table: List(Int) = base64DecodeTable()
+  var position: Int = before
   var i: Int = 0
   loop i < length {
-    var group: Int = 0
-    var padding: Int = 0
-    loop var k: Int = 0, k < 4, ++k {
-      let character: Int = text.byteAt(index: i + k)
-      var value: Int = base64Value(character: character)
-      # `=` only in the last group, only as its last one or two characters
-      if character is 61 and i + 4 is length and k >= 2 and (k is 3 or text.byteAt(index: i + 3) is 61) {
-        value = 0
-        padding = padding + 1
-      } else if value < 0 {
-        output.truncate(len: before)
-        ret false
+    var first: Int = table.copyAtFallback(index: text.byteAt(index: i), fallback: -1)
+    var second: Int = table.copyAtFallback(index: text.byteAt(index: i + 1), fallback: -1)
+    var third: Int = table.copyAtFallback(index: text.byteAt(index: i + 2), fallback: -1)
+    var fourth: Int = table.copyAtFallback(index: text.byteAt(index: i + 3), fallback: -1)
+    let last: Bool = i + 4 is length
+    # `=` only as the last one or two characters of the last group
+    if last and padding >= 1 {
+      fourth = 0
+      if padding is 2 {
+        third = 0
       }
-      group = (group shl 6) bitor value
     }
-    output.add(value: ((group shr 16) bitand 255) as UInt8)
-    if padding < 2 {
-      output.add(value: ((group shr 8) bitand 255) as UInt8)
+    if (first bitor second bitor third bitor fourth) < 0 {
+      output.truncate(len: before)
+      ret false
     }
-    if padding < 1 {
-      output.add(value: (group bitand 255) as UInt8)
+    let group: Int = (first shl 18) bitor (second shl 12) bitor (third shl 6) bitor fourth
+    output.set(index: position, value: ((group shr 16) bitand 255) as UInt8)
+    if last is false or padding < 2 {
+      output.set(index: position + 1, value: ((group shr 8) bitand 255) as UInt8)
     }
+    if last is false or padding < 1 {
+      output.set(index: position + 2, value: (group bitand 255) as UInt8)
+    }
+    position = position + 3
     i = i + 4
   }
   ret true
