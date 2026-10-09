@@ -39,6 +39,14 @@ static bool expr_is_const_int(const AstExpr* expr) {
     }
 }
 
+/* An operand of `|` / `^` that is a different bitwise operation */
+static bool bitwise_needs_parens(AstBinaryOp parent, const AstExpr* operand) {
+    if (parent != AST_BIN_BITOR && parent != AST_BIN_BITXOR) return false;
+    if (!operand || operand->kind != AST_EXPR_BINARY) return false;
+    AstBinaryOp op = operand->as.binary.op;
+    return op != parent && (op == AST_BIN_BITAND || op == AST_BIN_BITOR || op == AST_BIN_BITXOR);
+}
+
 static void emit_c_source_location(CFuncContext* ctx, const AstExpr* expr,
                                    FILE* out) {
     const char* file = (ctx && ctx->module && ctx->module->file_path)
@@ -501,6 +509,25 @@ static bool emit_list_fast_access(CFuncContext* ctx, const AstExpr* expr, FILE* 
 
 bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_prec, bool is_lvalue, bool suppress_deref) {
   if (!expr) return true;
+  /* A typed Buffer(T) (a list's `.data`) handed to a `Ptr` (void*): a C
+   * struct field or an extern parameter declared with the C library's own
+   * pointer type (`WGPUChainedStruct*`, `const WGPUCommandBuffer*`). The
+   * cast to void* is what converts it implicitly, as C intends, instead of
+   * an -Wincompatible-pointer-types between two unrelated pointer types. */
+  if (ctx->has_expected_type && !is_lvalue && expr->kind == AST_EXPR_MEMBER
+      && str_eq_cstr(get_base_type_name(&ctx->expected_type), "Ptr")) {
+    const AstTypeRef* value_type = infer_expr_type_ref(ctx, expr);
+    if (value_type && str_eq_cstr(get_base_type_name(value_type), "Buffer") && value_type->generic_args
+        && !str_eq_cstr(get_base_type_name(value_type->generic_args), "Any")) {
+      bool had_expected = ctx->has_expected_type;
+      ctx->has_expected_type = false;
+      fprintf(out, "((void*)(");
+      emit_expr(ctx, expr, out, PREC_LOWEST, false, suppress_deref);
+      fprintf(out, "))");
+      ctx->has_expected_type = had_expected;
+      return true;
+    }
+  }
   switch (expr->kind) {
     case AST_EXPR_INTEGER: {
         // #817: a literal above INT64_MAX (18446744073709551615) or any integer
@@ -878,7 +905,15 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
         }
       }
       if (is_bool_op) fprintf(out, "(bool)("); if (prec < parent_prec) fprintf(out, "(");
-      emit_expr(ctx, expr->as.binary.lhs, out, operand_prec, false, false);
+      /* A different bitwise operation inside `|` or `^` gets explicit
+       * parentheses: C's precedence already reads `a | b & c` as Rae
+       * meant it, but clang asks for them (-Wbitwise-op-parentheses), as
+       * Rae's own grammar does when the source mixes the operators. */
+      bool lhs_bit_parens = bitwise_needs_parens(expr->as.binary.op, expr->as.binary.lhs);
+      bool rhs_bit_parens = bitwise_needs_parens(expr->as.binary.op, expr->as.binary.rhs);
+      if (lhs_bit_parens) fprintf(out, "(");
+      emit_expr(ctx, expr->as.binary.lhs, out, lhs_bit_parens ? PREC_LOWEST : operand_prec, false, false);
+      if (lhs_bit_parens) fprintf(out, ")");
       switch (expr->as.binary.op) {
         case AST_BIN_ADD: fprintf(out, " + "); break; case AST_BIN_SUB: fprintf(out, " - "); break;
         case AST_BIN_MUL: fprintf(out, " * "); break; case AST_BIN_DIV: fprintf(out, " / "); break;
@@ -896,7 +931,9 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
        * `a - (b + c)` re-emitted as `a - b + c` silently flips signs
        * (the gpu3d mat4LookAt dot-product bug), `a / (b * c)` becomes
        * `(a / b) * c`. Equal-precedence LHS stays unparenthesized. */
-      emit_expr(ctx, expr->as.binary.rhs, out, is_shift_op ? PREC_MUL : prec + 1, false, false);
+      if (rhs_bit_parens) fprintf(out, "(");
+      emit_expr(ctx, expr->as.binary.rhs, out, rhs_bit_parens ? PREC_LOWEST : (is_shift_op ? PREC_MUL : prec + 1), false, false);
+      if (rhs_bit_parens) fprintf(out, ")");
       if (prec < parent_prec) fprintf(out, ")"); if (is_bool_op) fprintf(out, ")");
       ctx->has_expected_type = had_exp_bin;
       ctx->expected_type = saved_exp_bin;

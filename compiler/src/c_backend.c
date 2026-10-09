@@ -932,7 +932,7 @@ bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* ou
     else fprintf(out, "RaeAny");
     return true;
   }
-  Str base = type->parts->text; bool is_mod = type->is_mod;
+  Str base = type->parts->text; bool is_mod = type->is_mod; bool is_view = type->is_view && !is_mod;
   if (str_eq_cstr(base, "Int64") || str_eq_cstr(base, "Int")) { if (is_ptr) fprintf(out, "rae_%s_Int64", is_mod ? "Mod" : "View"); else fprintf(out, "int64_t"); return true; }
   if (str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float32")) { if (is_ptr) fprintf(out, "rae_%s_Float", is_mod ? "Mod" : "View"); else fprintf(out, "float"); return true; }
   if (str_eq_cstr(base, "Float64")) { if (is_ptr) fprintf(out, "rae_%s_Float64", is_mod ? "Mod" : "View"); else fprintf(out, "double"); return true; }
@@ -970,17 +970,23 @@ bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* ou
   // Check if this is an enum type — emit as int64_t
   if (ctx) {
       const AstDecl* ed = find_enum_decl(ctx, ctx->module, base);
-      if (ed) { fprintf(out, "int64_t"); if (is_ptr) fprintf(out, "*"); return true; }
+      if (ed) { if (is_ptr && is_view) fprintf(out, "const "); fprintf(out, "int64_t"); if (is_ptr) fprintf(out, "*"); return true; }
   }
   if (ctx) {
       const AstDecl* td = find_type_decl(ctx, ctx->module, base);
       if (td && td->kind == AST_DECL_TYPE && has_property(td->as.type_decl.properties, "c_struct")) {
+          if (is_ptr && is_view) fprintf(out, "const ");
           fprintf(out, "%.*s", (int)base.len, base.data);
           if (is_ptr) fprintf(out, "*");
           return true;
       }
   }
+  // A view is `const T*` in every position (a parameter, a local, a return),
+  // as the resolved-struct branch above spells it: one rule, so passing a
+  // view on never drops `const` (-Wincompatible-pointer-types-discards-
+  // qualifiers, which `-w` used to hide).
   const char* mangled = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, type);
+  if (is_ptr && is_view) fprintf(out, "const ");
   fprintf(out, "%s", mangled);
   if (is_ptr) fprintf(out, "*");
   return true;
@@ -1043,7 +1049,7 @@ const char* c_return_type(CFuncContext* ctx, const AstFuncDecl* func) {
     // Check if return type is an enum — emit as int64_t
     if (ctx && ctx->module) {
         const AstDecl* ed = find_enum_decl(ctx, ctx->module, base);
-        if (ed) return is_ptr ? "int64_t*" : "int64_t";
+        if (ed) return is_ptr ? (is_view ? "const int64_t*" : "int64_t*") : "int64_t";
     }
     if (is_primitive_type(base)) {
         if (tr->is_opt && is_ptr) {
@@ -2060,6 +2066,16 @@ static void flush_parallel_thunks(CompilerContext* ctx, FILE* out) {
   ctx->parallel_thunks_len = 0;
 }
 
+/* The end of a function that returns a value. Every path of its body
+ * returns (an exhaustive `match` whose arms all `ret`, a `loop true`), but C
+ * cannot see that and warns (-Wreturn-type); a zero value here is dead code
+ * where the body really returns, and a defined answer, not undefined
+ * behaviour, if it ever does not. */
+static void emit_fallthrough_return(FILE* out, const char* rt) {
+  if (!rt || strcmp(rt, "void") == 0) return;
+  fprintf(out, "  return (%s){0};\n", rt);
+}
+
 static void write_function_body_with_pool(FILE* out, const char* body, bool keep_pool) {
   static const char* flush_text = "rae_string_pool_flush(__rae_spm_func);";
   if (keep_pool) {
@@ -2176,7 +2192,7 @@ bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* 
   }
 
   if (is_main) fprintf(out, "  return 0;\n}\n\n");
-  else fprintf(out, "}\n\n");
+  else { emit_fallthrough_return(out, rt); fprintf(out, "}\n\n"); }
   flush_parallel_thunks(ctx, out);
   return true;
 }
@@ -2404,6 +2420,7 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
     write_function_body_with_pool(out, body_buf ? body_buf : "", tctx.func_may_pool);
     free(body_buf);
   }
+  emit_fallthrough_return(out, rt);
   fprintf(out, "}\n\n");
   flush_parallel_thunks(ctx, out);
   return true;

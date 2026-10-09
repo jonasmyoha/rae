@@ -550,7 +550,7 @@ _Static_assert(sizeof(rae_Mat4) == 16 * sizeof(float),
  * are shared with drawMetaballs/drawSkinned, so this stays in C until those
  * move too. Layout: [0..15] model, [16..31] prevModel, [32..35] baseColor+
  * metallic, [36..39] emissive+roughness. */
-int rae_g3d_push_draw_record(int64_t mesh, rae_Mat4* model, rae_Mat4* prevModel,
+int rae_g3d_push_draw_record(int64_t mesh, const rae_Mat4* model, const rae_Mat4* prevModel,
                              float r, float g, float b, float metallic,
                              float emR, float emG, float emB, float roughness){
     if (!model) return -1;

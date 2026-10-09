@@ -50,7 +50,7 @@ func coverKeyResolved(
 # Every `PlaybackIcon`: the play/pause glyph and the selected flag follow
 # `isPlaying`, observed through `PlaybackSystem.revision`. Returns whether any
 # icon changed (the caller re-syncs the widget styles on that).
-func playbackIconSystem(world: mod UiWorld, playbackSystem: view PlaybackSystem) pub ret Bool {
+func playbackIconSystem(world: mod UiWorld, playbackSystem: mod PlaybackSystem) ret Bool {
   var changed: Bool = false
   let n: Int = componentCount(this: playbackSystem.playbackIcons)
   var i: Int = 0
@@ -80,10 +80,10 @@ func playbackIconSystem(world: mod UiWorld, playbackSystem: view PlaybackSystem)
 # browsed stem. Returns whether any cover changed.
 func playbackCoverSystem(
   world: mod UiWorld
-  playbackSystem: view PlaybackSystem
+  playbackSystem: mod PlaybackSystem
   state: view AppState
   reg: view TextureRegistry
-) pub ret Bool {
+) ret Bool {
   var changed: Bool = false
   let n: Int = componentCount(this: playbackSystem.playbackCovers)
   var i: Int = 0
@@ -273,7 +273,7 @@ func playbackTimeSecond(kind: view PlaybackTimeKind, playbackSystem: view Playba
 # Every `PlaybackTime`: the M:SS position (`elapsed`) or duration (`total`)
 # from the playback clock, written to `Text.text` only when the whole second
 # changes (`builtSecond`).
-func playbackTimeSystem(world: mod UiWorld, playbackSystem: view PlaybackSystem) pub {
+func playbackTimeSystem(world: mod UiWorld, playbackSystem: mod PlaybackSystem) {
   let n: Int = componentCount(this: playbackSystem.playbackTimes)
   var i: Int = 0
   loop i < n {

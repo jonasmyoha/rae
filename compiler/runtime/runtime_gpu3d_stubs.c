@@ -39,7 +39,7 @@ _Static_assert(sizeof(rae_Mat4) == 16 * sizeof(float),
                "Rae Mat4 must stay 16 contiguous floats for the gpu3d extern boundary");
 #endif
 
-int rae_g3d_push_draw_record(int64_t mesh, rae_Mat4* model, rae_Mat4* prevModel,
+int rae_g3d_push_draw_record(int64_t mesh, const rae_Mat4* model, const rae_Mat4* prevModel,
                              float r, float g, float b, float metallic,
                              float emR, float emG, float emB, float roughness){
     (void)mesh; (void)model; (void)prevModel; (void)r; (void)g; (void)b;

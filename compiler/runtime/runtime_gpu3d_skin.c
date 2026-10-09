@@ -325,7 +325,7 @@ static void g3d_skin_ensure_bind(WGPUBuffer palette) {
  * for the Rae side to encode the instanced DrawIndexed, or -1 to skip. The skin
  * pipeline/bind/buffers stay in C (built from WGSL); Rae reads them via the
  * accessors below and restores the geometry pipeline/bind after the draw. */
-int rae_g3d_push_skinned_draw(int64_t mesh, rae_Mat4* model,
+int rae_g3d_push_skinned_draw(int64_t mesh, const rae_Mat4* model,
                               float r, float g, float b,
                               float metallic, float roughness, void* palette) {
     (void)mesh;   /* the SkinStore validated the handle; the buffers come from Rae */
