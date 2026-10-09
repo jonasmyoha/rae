@@ -8,8 +8,9 @@
 // Clients are connected `step` at a time. Every client reads every message
 // it is sent. After each step `in-flight` clients send broadcasts, one at a
 // time each, until `broadcasts` have been sent; a broadcast's round trip is
-// from sending it to its sender receiving the broadcastResult, so the whole
-// fan-out happens in between. The ramp stops when the step's p99 passes
+// from sending it to its sender receiving the broadcastResult (the server
+// has encoded the broadcast for every client by then; spec/WebSocket.md says
+// what that does and does not include). The ramp stops when the step's p99 passes
 // `limit-ms`, when a client cannot connect, or at `max-clients`. The result
 // is one JSON object on stdout; progress goes to stderr.
 mod room;

@@ -426,23 +426,33 @@ func setWatchingWritable(
 }
 
 # Sending: write what the socket takes. What it does not take waits for the
-# socket to become writable (the poller watches for it until it drains).
+# socket to become writable (the poller watches for it until it drains): a
+# connection already waiting is written only in a frame whose poll said it is
+# Writable, since a write before that can only fail.
+#
+# The connections are written in the order they were tagged, and the drained
+# ones lose the tag in a second pass, because removing a tag moves the last one
+# into its place. The order matters for fan-out: a broadcast tags every
+# session and then answers its sender, and written newest-first the sender's
+# answer waited behind every other session's write (twice the event loop's
+# broadcast round trip at 5 000 clients).
 func writeSystem(server: mod HttpServer) {
-  var i: Int = componentCount(this: server.sendings) - 1
-  loop i >= 0 {
+  loop var i: Int = 0, i < componentCount(this: server.sendings), ++i {
     let entityId: EntityId = componentEntityAt(this: server.sendings, i: i)
     let socket: Socket = socketOf(sockets: server.sockets, entityId: entityId)
-    if socketIsValid(socketId: socket.socketId) {
+    let blocked: Bool = socket.watchingWritable and not hasTag(
+      table: server.writables
+      entityId: entityId
+    )
+    if socketIsValid(socketId: socket.socketId) and not blocked {
       let result: IoResult = writeFrom(
         writeBuffers: server.writeBuffers
         entityId: entityId
         socketId: socket.socketId
       )
       if result.status is not NetStatus.ok and result.status is not NetStatus.wouldBlock {
-        removeTag(table: server.sendings, entityId: entityId)
         addTag(table: server.closings, entityId: entityId)
       } else if unsentBytes(writeBuffers: server.writeBuffers, entityId: entityId) is 0 {
-        removeTag(table: server.sendings, entityId: entityId)
         if socket.watchingWritable {
           let status: NetStatus = pollerForget(
             poller: server.poller
@@ -461,6 +471,18 @@ func writeSystem(server: mod HttpServer) {
         )
         setWatchingWritable(sockets: server.sockets, entityId: entityId, watching: true)
       }
+    }
+  }
+  # Drained (or failed: its buffer was dropped) connections stop Sending
+  var i: Int = componentCount(this: server.sendings) - 1
+  loop i >= 0 {
+    let entityId: EntityId = componentEntityAt(this: server.sendings, i: i)
+    let socket: Socket = socketOf(sockets: server.sockets, entityId: entityId)
+    if socketIsValid(socketId: socket.socketId) and unsentBytes(
+      writeBuffers: server.writeBuffers
+      entityId: entityId
+    ) is 0 {
+      removeTag(table: server.sendings, entityId: entityId)
     }
     i = i - 1
   }

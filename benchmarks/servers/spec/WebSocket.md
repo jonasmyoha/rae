@@ -46,9 +46,15 @@ Our own load client (`loadClient/`, Rust, decision F4) ramps the clients up
 in steps (1 000 at a time by default). Every client reads every message it
 is sent. After each step a few clients send broadcasts (4 in flight at a
 time), each payload carrying its send time, and the round-trip time is the
-time from sending a broadcast to its sender receiving the broadcastResult:
-the whole fan-out happens in between. Per step it reports the broadcast RTT
-p50 and p99 and checks every listenCount.
+time from sending a broadcast to its sender receiving the broadcastResult.
+The server encodes the broadcast for every client before it queues the
+broadcastResult, so the encoding of the whole fan-out is inside the round
+trip. Each client's own write happens when the server writes that client: the
+4 senders are the first clients to connect, so a server that writes its
+connections in the order they were queued or accepted answers them early in
+its write pass. Busy fan-outs still delay the next broadcasts, which is what
+the ramp sees. Per step it reports the broadcast RTT p50 and p99 and checks
+every listenCount.
 
 The ramp stops when the p99 passes 250 ms, when a client cannot connect, or
 at the client cap (15 000: macOS has about 16 000 ephemeral ports for one
