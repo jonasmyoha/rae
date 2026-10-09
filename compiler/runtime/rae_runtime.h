@@ -853,6 +853,16 @@ static inline int rae_jout_reserve(rae_JsonOut* out, int64_t extra) {
     } \
     if (rae_jout_count >= 0) rae_jout_target->len += rae_jout_count; \
   } while (0)
+/* Bytes copied in as they are: the keys, separators and String values of a
+ * toJson, which need no formatting (an snprintf per piece made toJson of a
+ * record of Strings 1.2x slower than the old fixed-buffer writer) */
+static inline void rae_jout_put(rae_JsonOut* out, const char* data, int64_t len) {
+  if (len <= 0 || !rae_jout_reserve(out, len)) return;
+  memcpy(out->data + out->len, data, (size_t)len);
+  out->len += len;
+  out->data[out->len] = 0;
+}
+#define rae_jout_text(out, literal) rae_jout_put((out), (literal), (int64_t)(sizeof(literal) - 1))
 static inline rae_String rae_jout_finish(rae_JsonOut* out) {
   rae_String text = rae_json_build(out->data, out->len);
   if (out->data != out->local) free(out->data);
