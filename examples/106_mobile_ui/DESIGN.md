@@ -258,7 +258,9 @@ the playback overlays), `WorldHelpers.rae` shortens the component setters.
   `unitScale=3`), gpu2d's design-resolution transform fits the frame into
   the SDL3 window (letterboxed), and `Viewport.rae` is the one place that
   converts. Safe areas come from `docs/ui-viewport-and-safe-area-plan.md`;
-  `RAE_UI_DEVICE` / `RAE_UI_FRAME` pick device presets.
+  by default the real window drives the layout through its size class
+  (compact / medium / expanded, live while resizing); `RAE_UI_DEVICE` /
+  `RAE_UI_FRAME` emulate a device preset instead.
 - **Text:** MSDF atlases (`assets/*.mtsdf.*`, `lib/SdfText`, `lib/ui/MsdfState`)
   — no raylib fonts, no per-glyph textures.
 - **Images:** `assetSystem/GpuAssetRegistry.rae` owns the gpu2d canvas and
