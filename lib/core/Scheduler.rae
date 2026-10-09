@@ -31,6 +31,10 @@ func nativeSchedulerQueuePopOldest(
   queue: Int
 ) unsafe extern("rae_ext_Scheduler_queuePopOldest") ret Int
 
+func nativeSchedulerQueueTryPopOldest(
+  queue: Int
+) unsafe extern("rae_ext_Scheduler_queueTryPopOldest") ret Int
+
 func nativeSchedulerQueueCount(queue: Int) unsafe extern("rae_ext_Scheduler_queueCount") ret Int
 
 func nativeSchedulerQueueTake(
@@ -63,6 +67,12 @@ func nativeSchedulerPerformanceCores() unsafe extern("rae_ext_Scheduler_performa
 
 func nativeSchedulerMaxWorkers() unsafe extern("rae_ext_Scheduler_maxWorkers") ret Int
 
+func nativeSchedulerTimerDue(nowNs: Int) unsafe extern("rae_ext_Scheduler_timerDue") ret Int
+
+func nativeSchedulerNextTimer() unsafe extern("rae_ext_Scheduler_nextTimer") ret Int
+
+func nativeSchedulerNowNs() unsafe extern("rae_ext_Scheduler_nowNs") ret Int
+
 func nativeSchedulerEnvironment(name: String) unsafe extern("rae_ext_rae_sys_get_env") ret String
 
 func nativeSchedulerTextLength(text: String) unsafe extern("rae_ext_rae_str_len") ret Int
@@ -88,6 +98,11 @@ const schedulerParkNs: Int = 100000000
 # A worker waiting for a task with nothing else to run sleeps this long
 # between looks for new work
 const schedulerHelpWaitNs: Int = 50000
+
+# A thread off the pool whose task was taken by a worker watches it this long
+# before it blocks: a short task is done sooner than a blocked thread wakes
+# (~10 us)
+const schedulerOffPoolSpinNs: Int = 50000
 
 # How far back in the injection queue a waiting thread looks for the task it
 # waits on (it is usually the newest: spawned, then waited for)
@@ -158,14 +173,22 @@ func parallelChunkSize(total: view Int, workers: view Int) ret Int {
 # A new task: onto the spawning worker's own queue (it runs there next unless
 # stolen), or the injection queue from outside the pool, then wake a parked
 # worker. With no pool threads (RAE_WORKERS=1, or a build without threads)
-# it runs here and now, as a spawn that cannot get a thread does.
+# it runs here and now, as a spawn that cannot get a thread does, and a
+# resumable one is driven here until it finishes.
 func schedulerSubmit(task: view Int) {
   unsafe {
     let threads: Int = nativeSchedulerStart()
     if threads is 0 {
-      nativeSchedulerRunTask(task: task)
+      nativeSchedulerQueuePush(queue: schedulerInjectionQueue, task: task)
+      schedulerDrive(task: task)
       ret
     }
+    schedulerQueue(task: task)
+  }
+}
+
+func schedulerQueue(task: view Int) {
+  unsafe {
     let worker: Int = nativeSchedulerCurrentWorker()
     if worker > 0 {
       nativeSchedulerQueuePush(queue: worker, task: task)
@@ -173,6 +196,65 @@ func schedulerSubmit(task: view Int) {
       nativeSchedulerQueuePush(queue: schedulerInjectionQueue, task: task)
     }
     nativeSchedulerUnpark()
+  }
+}
+
+# A suspended task can go on: the task it waited on finished, or its timer
+# is due. It goes where a new one would.
+func schedulerWake(task: view Int) {
+  schedulerQueue(task: task)
+}
+
+# Every sleeping task whose timer is due goes back to a queue; true when any
+# did
+func schedulerWakeTimers() ret Bool {
+  var woke: Bool = false
+  unsafe {
+    if nativeSchedulerNextTimer() is 0 {
+      ret false
+    }
+    let now: Int = nativeSchedulerNowNs()
+    loop {
+      let due: Int = nativeSchedulerTimerDue(nowNs: now)
+      if due is 0 {
+        break
+      }
+      schedulerQueue(task: due)
+      woke = true
+    }
+  }
+  ret woke
+}
+
+# How long an idle worker may park: until the next timer, at most
+# schedulerParkNs
+func schedulerParkTimeout() ret Int {
+  unsafe {
+    let next: Int = nativeSchedulerNextTimer()
+    if next is 0 {
+      ret schedulerParkNs
+    }
+    let wait: Int = next - nativeSchedulerNowNs()
+    if wait < 0 {
+      ret 0
+    }
+    if wait < schedulerParkNs {
+      ret wait
+    }
+  }
+  ret schedulerParkNs
+}
+
+# With no pool threads: run the queued tasks and the due timers on this
+# thread until `task` is done
+func schedulerDrive(task: view Int) {
+  unsafe {
+    loop not nativeSchedulerTaskIsDone(task: task) {
+      if not schedulerRunOne(index: 0) {
+        let epoch: Int = nativeSchedulerParkEpoch()
+        nativeSchedulerPark(epoch: epoch, timeoutNs: schedulerParkTimeout())
+      }
+    }
   }
 }
 
@@ -189,7 +271,10 @@ func schedulerFindTask(index: view Int) ret Int {
         ret newest
       }
     }
-    let injected: Int = nativeSchedulerQueuePopOldest(queue: schedulerInjectionQueue)
+    # A thief takes only from a queue nobody holds: waiting in line behind
+    # the other idle workers (and the spawner taking its task back) would
+    # only slow everyone down
+    let injected: Int = nativeSchedulerQueueTryPopOldest(queue: schedulerInjectionQueue)
     if injected is not 0 {
       ret injected
     }
@@ -197,7 +282,7 @@ func schedulerFindTask(index: view Int) ret Int {
     loop var k: Int = 1, k <= threads, ++k {
       let victim: Int = (index - 1 + k) % threads + 1
       if victim is not index {
-        let stolen: Int = nativeSchedulerQueuePopOldest(queue: victim)
+        let stolen: Int = nativeSchedulerQueueTryPopOldest(queue: victim)
         if stolen is not 0 {
           ret stolen
         }
@@ -207,8 +292,12 @@ func schedulerFindTask(index: view Int) ret Int {
   ret 0
 }
 
-# Run one task for worker `index`; false when there was none
+# Run one task for worker `index` (a due timer's first); false when there
+# was none
 func schedulerRunOne(index: view Int) ret Bool {
+  if schedulerWakeTimers() {
+    # a woken task is queued now
+  }
   let task: Int = schedulerFindTask(index: index)
   if task is 0 {
     ret false
@@ -238,15 +327,15 @@ func schedulerIdle() {
   let spinUntil: Int = nowNs() + schedulerSpinNs
   unsafe {
     loop nowNs() < spinUntil {
-      if schedulerHasTask() or nativeSchedulerHelpParallel() or nativeSchedulerShuttingDown() {
+      if schedulerHasTask() or nativeSchedulerHelpParallel() or nativeSchedulerShuttingDown() or schedulerWakeTimers() {
         ret
       }
     }
     let epoch: Int = nativeSchedulerParkEpoch()
-    if schedulerHasTask() or nativeSchedulerHelpParallel() {
+    if schedulerHasTask() or nativeSchedulerHelpParallel() or schedulerWakeTimers() {
       ret
     }
-    nativeSchedulerPark(epoch: epoch, timeoutNs: schedulerParkNs)
+    nativeSchedulerPark(epoch: epoch, timeoutNs: schedulerParkTimeout())
   }
 }
 
@@ -287,8 +376,17 @@ func schedulerTaskWait(task: view Int) {
         task: task
         window: schedulerTakeWindow
       ) {
+        # A resumable task may suspend here: then it finishes on the pool
         nativeSchedulerRunTask(task: task)
-        ret
+        if nativeSchedulerTaskIsDone(task: task) {
+          ret
+        }
+      }
+      let spinUntil: Int = nowNs() + schedulerOffPoolSpinNs
+      loop nowNs() < spinUntil {
+        if nativeSchedulerTaskIsDone(task: task) {
+          ret
+        }
       }
       nativeSchedulerWaitDone(task: task, timeoutNs: -1)
       ret

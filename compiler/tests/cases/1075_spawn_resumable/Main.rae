@@ -1,0 +1,110 @@
+# Resumable tasks (docs/lightweight-spawn-design.md §13): a spawned function
+# that may wait gets a frame and a step function, so a task on the
+# scheduler's pool suspends at `get()` and at `sleep` instead of holding its
+# worker, and resumes on any worker. 100 000 tasks sleep at once (a thread
+# per spawn stops at 16 383); a chain of 100 000 tasks each waits on the next
+# (help-first nesting would overflow the worker's stack); a wait in a loop; a
+# borrow of a local across a wait; tasks dropped while suspended (joined at
+# the end of their scope); Strings, a pool temporary, `defer` and `ret` across
+# waits.
+func sleeper(milliseconds: copy Int) ret Int {
+  sleep(ms: milliseconds)
+  ret milliseconds
+}
+
+func chain(depth: copy Int) ret Int {
+  if depth is 0 {
+    ret 0
+  }
+  let next: Task(Int) = spawn chain(depth: depth - 1)
+  ret next.get() + 1
+}
+
+# A wait inside a counted loop, and a `ret` from the middle of it
+func ticks(count: copy Int, stopAt: copy Int) ret Int {
+  var total: Int = 0
+  loop var i: Int = 0, i < count, ++i {
+    sleep(ms: 1)
+    if i is stopAt {
+      ret total
+    }
+    total = total + i
+  }
+  ret total
+}
+
+func sumAfterSleep(values: view List(Int)) ret Int {
+  sleep(ms: 5)
+  var total: Int = 0
+  loop var i: Int = 0, i < values.length, ++i {
+    total = total + values.copyAtFallback(index: i, fallback: 0)
+  }
+  ret total
+}
+
+# `values` is lent to a callee that suspends: the callee reads it through its
+# slot in this frame
+func borrower(count: copy Int) ret Int {
+  var values: List(Int) = {}
+  loop var i: Int = 0, i < count, ++i {
+    values.add(value: i)
+  }
+  let total: Int = sumAfterSleep(values: values)
+  ret total + values.length
+}
+
+# Strings across waits: an owned local, and an interpolation made before the
+# wait and used after it
+func greeting(name: copy String) ret Int {
+  let owned: String = "hello {name}"
+  sleep(ms: 2)
+  let measured: Int = "{owned}, {name}!".length()
+  sleep(ms: 2)
+  ret measured + owned.length()
+}
+
+func counted(steps: copy Int) ret Int {
+  var done: Int = 0
+  defer {
+    done = done + 1000
+  }
+  loop var i: Int = 0, i < steps, ++i {
+    sleep(ms: 1)
+    done = done + 1
+  }
+  ret done
+}
+
+func dropSome(count: copy Int) ret Int {
+  loop var i: Int = 0, i < count, ++i {
+    # suspended in its sleep when its scope ends: joined there
+    let dropped: Task(Int) = spawn sleeper(milliseconds: 5)
+  }
+  ret count
+}
+
+func main() {
+  var tasks: List(Task(Int)) = {}
+  loop var i: Int = 0, i < 100000, ++i {
+    tasks.add(value: spawn sleeper(milliseconds: 50))
+  }
+  var sum: Int = 0
+  loop var i: Int = 0, i < tasks.length, ++i {
+    if let task: Task(Int) = tasks.copyAt(index: i) {
+      sum = sum + task.get()
+    }
+  }
+  log("100 000 sleeping tasks: {sum}")
+  let deep: Task(Int) = spawn chain(depth: 100000)
+  log("a chain of 100 000 waits: {deep.get()}")
+  let looped: Task(Int) = spawn ticks(count: 20, stopAt: 15)
+  log("waits in a loop, ret from it: {looped.get()}")
+  let borrowed: Task(Int) = spawn borrower(count: 100)
+  log("a borrow across a wait: {borrowed.get()}")
+  let greeted: Task(Int) = spawn greeting(name: "world")
+  log("Strings across waits: {greeted.get()}")
+  let deferred: Task(Int) = spawn counted(steps: 5)
+  log("defer across waits: {deferred.get()}")
+  let dropper: Task(Int) = spawn dropSome(count: 20)
+  log("tasks dropped while suspended: {dropper.get()}")
+}
