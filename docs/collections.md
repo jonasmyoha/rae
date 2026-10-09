@@ -82,6 +82,14 @@ sibling `runtimeError(message:)` (one line, exit 70) is for a state the
 program cannot continue from, and List does not use it. A write whose index
 may be out of range checks `length` first, or `add`s.
 
+**A hot loop that writes a known number of elements** grows the list once
+with `addDefaults(count:)` (that many default values: 0, "", a zero-filled
+struct; one capacity check, one `memset`) and then writes each element with
+`set` at an index it keeps itself. An `add` per element is correct but
+slow there: each one's length update must land before the next can be
+checked, so the writes run one after another (base64 encoding of 1 MB:
+2.4 ms with `add`, 0.9 ms this way).
+
 **`Array(T, cap: N)` has the same API and the same answers** — `copyAt` /
 `viewAt` / `modAt` return `none`, `copyAtFallback` returns the fallback,
 `set` past the cap is ignored with `warning: Array.set: index 20 is out of

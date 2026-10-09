@@ -222,6 +222,16 @@ void* rae_ext_rae_buf_alloc(int64_t count, int64_t elem_size);
 void rae_ext_rae_buf_free(void* buf);
 void* rae_ext_rae_buf_resize(void* buf, int64_t new_count, int64_t elem_size);
 void rae_ext_rae_buf_copy(void* src, int64_t src_off, void* dst, int64_t dst_off, int64_t len, int64_t elem_size);
+/* `count` elements from `start` set to zero bytes, every type's default value
+ * (List.addDefaults). One C-library call. */
+/* `count` bytes of `s` from `start` copied into `buf` at byte `offset`
+ * (memcpy; the caller checked both ranges). One C-library call. */
+static inline void rae_ext_rae_str_copy_into(rae_String s, int64_t start, int64_t count, void* buf, int64_t offset) {
+  if (buf && s.data && count > 0) memcpy((char*)buf + offset, s.data + start, (size_t)count);
+}
+static inline void rae_ext_rae_buf_zero(void* buf, int64_t start, int64_t count, int64_t elem_size) {
+  if (buf && count > 0) memset((char*)buf + start * elem_size, 0, (size_t)(count * elem_size));
+}
 void rae_ext_rae_buf_set(void* buf, int64_t index, int64_t elem_size, const void* value);
 void rae_ext_rae_buf_get(void* buf, int64_t index, int64_t elem_size, void* out_val);
 

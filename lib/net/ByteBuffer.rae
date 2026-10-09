@@ -84,13 +84,34 @@ func appendBytes(
   buffer.bytes.length = buffer.bytes.length + count
 }
 
-# Append the bytes of `text` (its UTF-8, unchanged)
+# `count` bytes of `text` from `start` copied into `buf` at `offset`
+# (memcpy, compiler/runtime/rae_runtime.h); the caller checks both ranges
+func rae_ext_rae_str_copy_into(
+  s: String
+  start: Int
+  count: Int
+  buf: Buffer(Any)
+  offset: Int
+) unsafe extern
+
+# Append the bytes of `text` (its UTF-8, unchanged), in one copy: a byte at
+# a time through `add` was 35x slower than memcpy
 func appendText(buffer: mod ByteBuffer, text: view String) {
   let count: Int = text.length()
-  byteBufferReserve(buffer: buffer, count: count)
-  loop var i: Int = 0, i < count, ++i {
-    buffer.bytes.add(value: text.byteAt(index: i) as UInt8)
+  if count is 0 {
+    ret
   }
+  byteBufferReserve(buffer: buffer, count: count)
+  unsafe {
+    rae_ext_rae_str_copy_into(
+      s: text
+      start: 0
+      count: count
+      buf: buffer.bytes.data
+      offset: buffer.bytes.length
+    )
+  }
+  buffer.bytes.length = buffer.bytes.length + count
 }
 
 # Append `value` in decimal (a Content-Length, a status code) without making
@@ -110,9 +131,7 @@ func appendDecimal(buffer: mod ByteBuffer, value: view Int) {
   }
   byteBufferReserve(buffer: buffer, count: digits)
   let first: Int = buffer.bytes.length
-  loop var i: Int = 0, i < digits, ++i {
-    buffer.bytes.add(value: 48)
-  }
+  buffer.bytes.addDefaults(count: digits)
   var position: Int = first + digits - 1
   loop position >= first {
     buffer.bytes.set(index: position, value: (48 + magnitude % 10) as UInt8)

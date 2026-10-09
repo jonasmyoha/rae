@@ -20,22 +20,15 @@ type Sha1State {
   h2: Int
   h3: Int
   h4: Int
-  # The 80-word message schedule, reused for every block
-  words: List(Int)
 }
 
 func createSha1State() ret Sha1State {
-  var words: List(Int) = List.create(Int, cap: 80)
-  loop var i: Int = 0, i < 80, ++i {
-    words.add(value: 0)
-  }
   ret Sha1State {
     h0: 1732584193
     h1: 4023233417
     h2: 2562383102
     h3: 271733878
     h4: 3285377520
-    words: words
   }
 }
 
@@ -43,8 +36,12 @@ func rotateLeft(value: view Int, count: view Int) ret Int {
   ret ((value shl count) bitor (value shr (32 - count))) bitand sha1WordMask
 }
 
-# Process the 64-byte block of `bytes` that starts at `offset`
+# Process the 64-byte block of `bytes` that starts at `offset`. The 80-word
+# message schedule is a local fixed-size Array: its index checks are against
+# a constant, so the C compiler drops them, where a List in the state made
+# every word store reload the list (a store of an Int may change its length).
 func sha1Block(state: mod Sha1State, bytes: view List(UInt8), offset: view Int) {
+  var words: Array(Int, cap: 80) = Array(Int, cap: 80)
   loop var t: Int = 0, t < 16, ++t {
     let at: Int = offset + t * 4
     let word: Int = (bytes.copyAtFallback(index: at, fallback: 0) as Int shl 24) bitor (bytes.copyAtFallback(
@@ -54,40 +51,64 @@ func sha1Block(state: mod Sha1State, bytes: view List(UInt8), offset: view Int) 
       index: at + 3
       fallback: 0
     ) as Int
-    state.words.set(index: t, value: word)
+    words.set(index: t, value: word)
   }
   loop var t: Int = 16, t < 80, ++t {
-    let mixed: Int = state.words.copyAtFallback(index: t - 3, fallback: 0) bitxor state.words.copyAtFallback(
+    let mixed: Int = words.copyAtFallback(index: t - 3, fallback: 0) bitxor words.copyAtFallback(
       index: t - 8
       fallback: 0
-    ) bitxor state.words.copyAtFallback(index: t - 14, fallback: 0) bitxor state.words.copyAtFallback(
+    ) bitxor words.copyAtFallback(index: t - 14, fallback: 0) bitxor words.copyAtFallback(
       index: t - 16
       fallback: 0
     )
-    state.words.set(index: t, value: rotateLeft(value: mixed, count: 1))
+    words.set(index: t, value: rotateLeft(value: mixed, count: 1))
   }
   var a: Int = state.h0
   var b: Int = state.h1
   var c: Int = state.h2
   var d: Int = state.h3
   var e: Int = state.h4
-  loop var t: Int = 0, t < 80, ++t {
-    var mixed: Int = 0
-    var constant: Int = 0
-    if t < 20 {
-      mixed = (b bitand c) bitor ((b bitxor sha1WordMask) bitand d)
-      constant = 1518500249
-    } else if t < 40 {
-      mixed = b bitxor c bitxor d
-      constant = 1859775393
-    } else if t < 60 {
-      mixed = (b bitand c) bitor (b bitand d) bitor (c bitand d)
-      constant = 2400959708
-    } else {
-      mixed = b bitxor c bitxor d
-      constant = 3395469782
-    }
-    let next: Int = (rotateLeft(value: a, count: 5) + mixed + e + constant + state.words.copyAtFallback(
+  # The four rounds of 20, each its own loop so no step tests which round it
+  # is in
+  loop var t: Int = 0, t < 20, ++t {
+    let mixed: Int = (b bitand c) bitor ((b bitxor sha1WordMask) bitand d)
+    let next: Int = (rotateLeft(value: a, count: 5) + mixed + e + 1518500249 + words.copyAtFallback(
+      index: t
+      fallback: 0
+    )) bitand sha1WordMask
+    e = d
+    d = c
+    c = rotateLeft(value: b, count: 30)
+    b = a
+    a = next
+  }
+  loop var t: Int = 20, t < 40, ++t {
+    let mixed: Int = b bitxor c bitxor d
+    let next: Int = (rotateLeft(value: a, count: 5) + mixed + e + 1859775393 + words.copyAtFallback(
+      index: t
+      fallback: 0
+    )) bitand sha1WordMask
+    e = d
+    d = c
+    c = rotateLeft(value: b, count: 30)
+    b = a
+    a = next
+  }
+  loop var t: Int = 40, t < 60, ++t {
+    let mixed: Int = (b bitand c) bitor (b bitand d) bitor (c bitand d)
+    let next: Int = (rotateLeft(value: a, count: 5) + mixed + e + 2400959708 + words.copyAtFallback(
+      index: t
+      fallback: 0
+    )) bitand sha1WordMask
+    e = d
+    d = c
+    c = rotateLeft(value: b, count: 30)
+    b = a
+    a = next
+  }
+  loop var t: Int = 60, t < 80, ++t {
+    let mixed: Int = b bitxor c bitxor d
+    let next: Int = (rotateLeft(value: a, count: 5) + mixed + e + 3395469782 + words.copyAtFallback(
       index: t
       fallback: 0
     )) bitand sha1WordMask

@@ -50,6 +50,46 @@ func add(T: type, this: mod List(T), value: own T) {
   }
 }
 
+# Add `count` copies of the type's default value (0, 0.0, false, "", a
+# zero-filled struct), with one capacity check and one length update for all
+# of them. For a loop that knows how much it will write: grow the list once
+# with this, then write each element with `set` at an index the loop keeps.
+# That runs at C speed, where `add` per element cannot: each add's length
+# update waits on the one before it.
+func addDefaults(T: type, this: mod List(T), count: view Int) {
+  if count <= 0 {
+    ret
+  }
+  unsafe {
+    let needed: Int = this.length + count
+    if needed > this.cap {
+      var newCap: Int = this.cap * 2
+      if newCap < needed {
+        newCap = needed
+      }
+      let newData: Buffer(T) = rae_ext_rae_buf_alloc(size: newCap, elemSize: sizeof(T))
+      rae_ext_rae_buf_copy(
+        src: this.data
+        src_off: 0
+        dst: newData
+        dst_off: 0
+        len: this.length
+        elemSize: sizeof(T)
+      )
+      rae_ext_rae_buf_free(buf: this.data)
+      this.data = newData
+      this.cap = newCap
+    }
+    rae_ext_rae_buf_zero(
+      buf: this.data
+      start: this.length
+      count: count
+      elemSize: sizeof(T)
+    )
+    this.length = needed
+  }
+}
+
 # Copy the element out of the list. Indexed List access is always optional
 # (out-of-range yields none). The `copy` in the name is the point: this returns
 # a COPY of the element (a whole-struct copy, including deep copies of any heap
