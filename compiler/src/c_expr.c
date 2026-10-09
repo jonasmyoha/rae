@@ -358,6 +358,41 @@ static void emit_member_chain_on_temp(CFuncContext* ctx, const AstExpr* expr, co
 // same one-line warning. Arguments are evaluated once, in source order. An
 // element that owns heap (String, List, a struct with them) keeps the library
 // call, which deep-copies a read and drops the overwritten value.
+/* A List whose element owns no heap (Int, Float, Bool, a struct of those):
+ * its reads and writes are a plain load or store. The element type, or NULL. */
+const AstTypeRef* c_list_plain_element(CFuncContext* ctx, const AstTypeRef* list_type) {
+  if (!list_type || list_type->is_opt || !str_eq_cstr(get_base_type_name(list_type), "List")
+      || !list_type->generic_args || list_type->generic_args->next) return NULL;
+  const AstTypeRef* element = list_type->generic_args;
+  if (ctx->generic_params && ctx->generic_args)
+    element = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args,
+                                  (AstTypeRef*)element);
+  if (!element || element->is_opt || element->is_view || element->is_mod) return NULL;
+  Str element_base = get_base_type_name(element);
+  if (element_base.len == 0 || str_eq_cstr(element_base, "Any") || str_eq_cstr(element_base, "RaeAny")
+      || str_eq_cstr(element_base, "String")) return NULL;
+  for (const AstIdentifierPart* gp = ctx->generic_params; gp; gp = gp->next)
+    if (str_eq(gp->text, element_base)) return NULL;  // still abstract
+  if (type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, element, 0)) return NULL;
+  return element;
+}
+
+/* In the check-free copy of a versioned loop (c_loop_versioning.c), a
+ * String's `byteAt` proven in range: the byte itself */
+static bool emit_proven_byte_read(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
+  if (!str_eq_cstr(expr->as.method_call.method_name, "byteAt")) return false;
+  const char* data = c_loop_version_fast_data(ctx, expr);
+  if (!data) return false;
+  const AstExpr* index = NULL;
+  for (const AstCallArg* a = expr->as.method_call.args; a; a = a->next)
+    if (str_eq_cstr(a->name, "index")) index = a->value;
+  if (!index) return false;
+  fprintf(out, "((int64_t)%s[", data);
+  emit_expr(ctx, index, out, PREC_LOWEST, false, false);
+  fprintf(out, "])");
+  return true;
+}
+
 static bool emit_list_fast_access(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
   Str method = expr->as.method_call.method_name;
   bool read_default = str_eq_cstr(method, "copyAtDefault");
@@ -365,19 +400,8 @@ static bool emit_list_fast_access(CFuncContext* ctx, const AstExpr* expr, FILE* 
   bool write = str_eq_cstr(method, "set");
   if (!read_default && !read_fallback && !write) return false;
   const AstTypeRef* list_type = infer_expr_type_ref(ctx, expr->as.method_call.object);
-  if (!list_type || list_type->is_opt || !str_eq_cstr(get_base_type_name(list_type), "List")
-      || !list_type->generic_args || list_type->generic_args->next) return false;
-  const AstTypeRef* element = list_type->generic_args;
-  if (ctx->generic_params && ctx->generic_args)
-    element = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args,
-                                  (AstTypeRef*)element);
-  if (!element || element->is_opt || element->is_view || element->is_mod) return false;
-  Str element_base = get_base_type_name(element);
-  if (element_base.len == 0 || str_eq_cstr(element_base, "Any") || str_eq_cstr(element_base, "RaeAny")
-      || str_eq_cstr(element_base, "String")) return false;
-  for (const AstIdentifierPart* gp = ctx->generic_params; gp; gp = gp->next)
-    if (str_eq(gp->text, element_base)) return false;  // still abstract
-  if (type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, element, 0)) return false;
+  const AstTypeRef* element = c_list_plain_element(ctx, list_type);
+  if (!element) return false;
 
   const AstExpr* index_value = NULL;
   const AstExpr* extra_value = NULL;  // the fallback, or the value stored
@@ -398,6 +422,40 @@ static bool emit_list_fast_access(CFuncContext* ctx, const AstExpr* expr, FILE* 
       && list_object->kind != AST_EXPR_INDEX) return false;
 
   int id = ctx->temp_counter++;
+  /* In the check-free copy of a versioned loop (c_loop_versioning.c) a
+   * proven access is in range on every iteration: a plain load or store
+   * through the list's data held in a local. The arguments are still
+   * evaluated, in order. */
+  /* (copied: emitting the index may ask for another access's name, and the
+   * answer lives in one buffer) */
+  char proven_data[64] = "";
+  const char* proven_name = c_loop_version_fast_data(ctx, expr);
+  if (proven_name) snprintf(proven_data, sizeof proven_data, "%s", proven_name);
+  if (proven_name) {
+    fprintf(out, "(__extension__ ({ int64_t __rae_findex%d = ", id);
+    emit_expr(ctx, index_value, out, PREC_LOWEST, false, false);
+    fprintf(out, "; ");
+    if (extra_value) {
+      bool had_exp = ctx->has_expected_type;
+      AstTypeRef saved_exp = ctx->expected_type;
+      ctx->expected_type = *element;
+      ctx->has_expected_type = true;
+      emit_type_ref_as_c_type(ctx, element, out, false);
+      fprintf(out, " __rae_fvalue%d = ", id);
+      emit_expr(ctx, extra_value, out, PREC_LOWEST, false, false);
+      fprintf(out, "; ");
+      ctx->has_expected_type = had_exp;
+      ctx->expected_type = saved_exp;
+    }
+    if (write) {
+      fprintf(out, "%s[__rae_findex%d] = __rae_fvalue%d; (void)0; }))", proven_data, id, id);
+    } else {
+      if (extra_value) fprintf(out, "(void)__rae_fvalue%d; ", id);
+      emit_type_ref_as_c_type(ctx, element, out, false);
+      fprintf(out, " __rae_fresult%d = %s[__rae_findex%d]; __rae_fresult%d; }))", id, proven_data, id, id);
+    }
+    return true;
+  }
   bool list_is_ref = list_type->is_view || list_type->is_mod;
   fprintf(out, "(__extension__ ({ __auto_type __rae_flist%d = ", id);
   if (!list_is_ref) fprintf(out, "&(");
@@ -1041,6 +1099,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                 break;
             }
         }
+        if (emit_proven_byte_read(ctx, expr, out)) break;
         if (emit_list_fast_access(ctx, expr, out)) break;
         // Built-in method: toJson() → rae_toJson_TYPE_(&object)
         if (str_eq_cstr(expr->as.method_call.method_name, "toJson") && !expr->as.method_call.args) {
