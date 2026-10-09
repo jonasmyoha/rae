@@ -185,33 +185,38 @@ How to read it:
 
 ### WebSocket baseline, 2026-10-09
 
-Same machine, one worker each, 3 ramps per server (load average 2.76 at the
-start). Broadcast round trip in ms, p50 / p99 (median of the ramps), and the
-client count each ramp reached with p99 under 250 ms (cap 15 000):
+Same machine, one worker each, 3 ramps per server (load average 2.75 at the
+start), re-run after the ECS write-order fix (0.1.250). Broadcast round trip
+in ms, p50 / p99 (median of the ramps that got there), and the client count
+each ramp reached with p99 under 250 ms (cap 15 000):
 
 | clients | rae-eventLoop | rae-ecs | rust | node | bun |
 |---|---|---|---|---|---|
-| 1 000 | 4.5 / 18.4 | 8.2 / 13.0 | 14.0 / 26.9 | 16.6 / 40.1 | 4.9 / 19.4 |
-| 5 000 | 21.1 / 24.1 | 41.7 / 47.4 | 71.4 / 120.3 | 85.6 / 195.4 | 23.6 / 26.7 |
-| 10 000 | 42.1 / 47.1 | 83.9 / 89.9 | 143.9 / 260.6 | — | 47.7 / 54.2 |
-| 15 000 | 63.4 / 67.9 | 129.3 / 136.2 | — | — | 82.3 / 286.5 |
-| reached | 15 000 (all 3) | 13 000 (12 000–15 000) | 9 000 | 6 000 | 14 000 (11 000–15 000) |
-| peak RSS | 336 MB | 250 MB | 1 513 MB | 165 MB | 46 MB |
+| 1 000 | 4.5 / 16.0 | 4.6 / 14.9 | 13.9 / 28.6 | 17.1 / 39.5 | 4.9 / 16.1 |
+| 5 000 | 21.4 / 23.6 | 21.5 / 25.6 | 70.3 / 142.3 | 84.8 / 195.3 | 23.6 / 28.2 |
+| 10 000 | 42.6 / 45.0 | 43.3 / 47.1 | 142.5 / 283.7 | — | 47.4 / 52.6 |
+| 15 000 | 128.2 / 978.4 (1 ramp) | 65.4 / 70.6 (2 ramps) | — | — | 140.5 / 637.0 |
+| reached | 13 000 (13 000–14 000) | 15 000 (13 000–15 000) | 9 000 (8 000–9 000) | 6 000 | 14 000 (14 000–15 000) |
+| peak RSS | 336 MB | 273 MB | 1 429 MB | 163 MB | 47 MB |
 
 How to read it:
 
-- **rae-eventLoop scales the furthest** and is never limited by the p99 rule,
-  with Bun close behind. The round trip grows linearly with the fan-out (about
-  4.2 ms per 1 000 clients).
-- **ECS against the event loop: about 2× slower from 5 000 clients up.** This
-  is a real difference, not noise: the ranges do not overlap. At 1 000 clients
-  ECS has the better p99. Why the ECS fan-out costs twice as much per
-  recipient is a queue item.
+- **ECS against the event loop: no measurable difference** from 5 000 to
+  13 000 clients (p50 ratio 1.00–1.02, overlapping ranges). The round trip
+  grows linearly with the fan-out, about 4.3 ms per 1 000 clients, for both.
+- The first baseline that morning had ECS at 2× the event loop. The cause was
+  `writeSystem`'s order, not ECS: it wrote the `Sending` connections
+  newest-first, so the senders' broadcastResults went out after every other
+  client's copy. It now writes oldest-first, like the event loop's slot order.
+- **Near the 15 000 cap the ramps get noisy** for every fast server. Single
+  broadcasts stall for hundreds of ms (rae-eventLoop and Bun here; in the
+  morning run it was rae-ecs that stopped early). Read "reached" above 13 000
+  as the edge of this machine, not a ranking.
 - Rust's RSS is its unbounded per-connection channels holding the broadcast
   backlog.
 - Allocations per message (rae-eventLoop 101, rae-ecs 171) include every
   client's connection setup in the ramp, so they are not a per-message cost.
-- Bun reported 8 wrong listenCounts at 1 000 clients (its `subscriberCount`
+- Bun reported 7 wrong listenCounts at 1 000 clients (its `subscriberCount`
   during the ramp); every other count was right.
 
 ### Game room baseline, 2026-10-09
