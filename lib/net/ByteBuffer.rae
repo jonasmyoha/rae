@@ -140,6 +140,45 @@ func appendDecimal(buffer: mod ByteBuffer, value: view Int) {
   }
 }
 
+# Append one byte (0..255)
+func appendByte(buffer: mod ByteBuffer, byte: view Int) {
+  byteBufferReserve(buffer: buffer, count: 1)
+  buffer.bytes.add(value: (byte bitand 255) as UInt8)
+}
+
+# Overwrite unread byte `index` (ignored outside the unread bytes): a codec
+# that rewrites in place, like WebSocket unmasking
+func byteBufferSet(buffer: mod ByteBuffer, index: view Int, byte: view Int) {
+  if index < 0 or index >= byteBufferLength(buffer: buffer) {
+    ret
+  }
+  buffer.bytes.set(index: buffer.start + index, value: (byte bitand 255) as UInt8)
+}
+
+# Move `count` unread bytes from `from` to `to` (unread indexes; the ranges
+# may overlap); ignored when either range is not inside the unread bytes
+func byteBufferMove(
+  buffer: mod ByteBuffer
+  from: view Int
+  to: view Int
+  count: view Int
+) {
+  let length: Int = byteBufferLength(buffer: buffer)
+  if count <= 0 or from < 0 or to < 0 or from + count > length or to + count > length {
+    ret
+  }
+  unsafe {
+    rae_ext_rae_buf_copy(
+      src: buffer.bytes.data
+      src_off: buffer.start + from
+      dst: buffer.bytes.data
+      dst_off: buffer.start + to
+      len: count
+      elemSize: 1
+    )
+  }
+}
+
 # Drop the first `count` unread bytes (all of them if there are fewer)
 func consume(buffer: mod ByteBuffer, count: view Int) {
   if count <= 0 {

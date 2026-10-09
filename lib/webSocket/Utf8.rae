@@ -1,0 +1,57 @@
+# Strict UTF-8 validation over a ByteBuffer range (RFC 3629): a WebSocket
+# text message or close reason that is not UTF-8 fails the connection (RFC
+# 6455 §8.1). Overlong forms, surrogates (U+D800-DFFF) and anything above
+# U+10FFFF are rejected.
+open net/ByteBuffer
+
+# Whether unread bytes `start ..< start + count` are valid UTF-8
+func isUtf8(buffer: view ByteBuffer, start: view Int, count: view Int) ret Bool {
+  let end: Int = start + count
+  var i: Int = start
+  loop i < end {
+    let first: Int = byteBufferAt(buffer: buffer, index: i)
+    if first < 128 {
+      i = i + 1
+      continue
+    }
+    var size: Int = 0
+    # The allowed range of the second byte, which rules out the overlong
+    # forms, the surrogates and anything past U+10FFFF
+    var low: Int = 128
+    var high: Int = 191
+    if first >= 194 and first <= 223 {
+      size = 2
+    } else if first >= 224 and first <= 239 {
+      size = 3
+      if first is 224 {
+        low = 160
+      } else if first is 237 {
+        high = 159
+      }
+    } else if first >= 240 and first <= 244 {
+      size = 4
+      if first is 240 {
+        low = 144
+      } else if first is 244 {
+        high = 143
+      }
+    } else {
+      ret false
+    }
+    if i + size > end {
+      ret false
+    }
+    let second: Int = byteBufferAt(buffer: buffer, index: i + 1)
+    if second < low or second > high {
+      ret false
+    }
+    loop var k: Int = 2, k < size, ++k {
+      let next: Int = byteBufferAt(buffer: buffer, index: i + k)
+      if next < 128 or next > 191 {
+        ret false
+      }
+    }
+    i = i + size
+  }
+  ret true
+}

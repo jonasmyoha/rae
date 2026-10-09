@@ -1,0 +1,143 @@
+# The WebSocket opening handshake on the server (RFC 6455 §4.2): whether a
+# parsed HTTP request (lib/http) asks to upgrade, and the 101 answer that
+# accepts it. Plain functions over bytes, shared by both server styles
+# (docs/server-benchmarks-design.md §9 G6).
+open net/ByteBuffer
+open http/Http
+import text/Base64
+import webSocket/Handshake
+
+enum WebSocketUpgradeResult { upgrade, notWebSocket, wrongVersion, badRequest }
+
+# A valid upgrade: answer with webSocketAppendAccept
+# Not a WebSocket request (no `Upgrade: websocket`): plain HTTP
+# An upgrade with a version other than 13: answer 426
+# An upgrade that is malformed (not GET, no `Connection: upgrade`, no
+# valid key): answer 400
+
+# Whether `range` is a comma-separated list holding `token` (any case)
+func rangeHasToken(buffer: view ByteBuffer, range: view ByteRange, token: view String) ret Bool {
+  if range.start < 0 {
+    ret false
+  }
+  let end: Int = range.start + range.count
+  var start: Int = range.start
+  loop start <= end {
+    var stop: Int = start
+    loop stop < end and byteBufferAt(buffer: buffer, index: stop) is not 44 {
+      stop = stop + 1
+    }
+    var first: Int = start
+    var last: Int = stop
+    loop first < last and isSpaceOrTab(byte: byteBufferAt(buffer: buffer, index: first)) {
+      first = first + 1
+    }
+    loop last > first and isSpaceOrTab(byte: byteBufferAt(buffer: buffer, index: last - 1)) {
+      last = last - 1
+    }
+    if rangeEquals(
+      buffer: buffer
+      range: ByteRange { start: first, count: last - first }
+      text: token
+      ignoreCase: true
+    ) {
+      ret true
+    }
+    start = stop + 1
+  }
+  ret false
+}
+
+# What the request asks for (RFC 6455 §4.2.1)
+func webSocketUpgradeCheck(
+  state: view HttpParseState
+  buffer: view ByteBuffer
+  request: view HttpRequest
+) ret WebSocketUpgradeResult {
+  let upgrade: ByteRange = httpHeaderValue(
+    state: state
+    buffer: buffer
+    request: request
+    name: "Upgrade"
+  )
+  if rangeHasToken(buffer: buffer, range: upgrade, token: "websocket") is false {
+    ret WebSocketUpgradeResult.notWebSocket
+  }
+  if request.method is not HttpMethod.get or request.minorVersion < 1 {
+    ret WebSocketUpgradeResult.badRequest
+  }
+  let connection: ByteRange = httpHeaderValue(
+    state: state
+    buffer: buffer
+    request: request
+    name: "Connection"
+  )
+  if rangeHasToken(buffer: buffer, range: connection, token: "upgrade") is false {
+    ret WebSocketUpgradeResult.badRequest
+  }
+  let version: ByteRange = httpHeaderValue(
+    state: state
+    buffer: buffer
+    request: request
+    name: "Sec-WebSocket-Version"
+  )
+  if rangeEquals(
+    buffer: buffer
+    range: version
+    text: "13"
+    ignoreCase: false
+  ) is false {
+    ret WebSocketUpgradeResult.wrongVersion
+  }
+  # The key is the base64 of 16 bytes: 24 characters
+  let key: ByteRange = httpHeaderValue(
+    state: state
+    buffer: buffer
+    request: request
+    name: "Sec-WebSocket-Key"
+  )
+  if key.start < 0 or key.count is not 24 {
+    ret WebSocketUpgradeResult.badRequest
+  }
+  if let decoded: List(UInt8) = Base64.base64Decode(text: httpRangeText(buffer: buffer, range: key)) {
+    if decoded.length is 16 {
+      ret WebSocketUpgradeResult.upgrade
+    }
+  }
+  ret WebSocketUpgradeResult.badRequest
+}
+
+# The 101 answer to an upgrade webSocketUpgradeCheck accepted
+func webSocketAppendAccept(
+  output: mod ByteBuffer
+  state: view HttpParseState
+  buffer: view ByteBuffer
+  request: view HttpRequest
+) {
+  let key: ByteRange = httpHeaderValue(
+    state: state
+    buffer: buffer
+    request: request
+    name: "Sec-WebSocket-Key"
+  )
+  appendText(
+    buffer: output
+    text: "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: "
+  )
+  appendText(
+    buffer: output
+    text: Handshake.webSocketAccept(key: httpRangeText(buffer: buffer, range: key))
+  )
+  appendText(buffer: output, text: "\r\n\r\n")
+}
+
+# The answer to an upgrade with another version: 426, naming version 13
+# (RFC 6455 §4.4), then close
+func webSocketAppendUpgradeRequired(output: mod ByteBuffer, date: view String) {
+  appendText(
+    buffer: output
+    text: "HTTP/1.1 426 Upgrade Required\r\nServer: Rae\r\nSec-WebSocket-Version: 13\r\nDate: "
+  )
+  appendText(buffer: output, text: date)
+  appendText(buffer: output, text: "\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+}
