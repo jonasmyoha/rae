@@ -18,7 +18,7 @@ func kernel(seed: view Int) ret Float {
 
 func main() {
   let workers: Int = Parallel.workerCount()
-  let marks: List(Int) = List.create(Int, cap: 64)
+  var marks: List(Int) = List.create(Int, cap: 64)
   loop var i: Int = 0, i < 64, ++i {
     marks.add(value: 0)
   }
@@ -48,7 +48,7 @@ func main() {
   log("RESULT,cold,{workers},{coldTotal / coldLaunches}")
 
   let count: Int = 1000000
-  let out: List(Float) = List.create(Float, cap: count)
+  var out: List(Float) = List.create(Float, cap: count)
   loop var i: Int = 0, i < count, ++i {
     out.add(value: 0.0)
   }

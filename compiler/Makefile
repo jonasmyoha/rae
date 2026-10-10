@@ -209,6 +209,11 @@ tsan: build
 asan: build
 	@bash tools/asan-check.sh
 
+# Every benchmark program still compiles (tools/benchmarks-compile-check.sh);
+# `make test` runs it as one pre-suite case too.
+benchmarks-check: build
+	@bash tools/benchmarks-compile-check.sh
+
 # The generated C of the largest and the browser-smoke apps compiles with
 # -Wall -Wextra -Werror (tools/c-warnings-gate.sh); `make test` runs it as one
 # pre-suite case too.

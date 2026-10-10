@@ -102,7 +102,7 @@ func symPositive(generator: mod Generator, scale: view Float) ret SymMatrix3Wide
 }
 
 func makeStates(generator: mod Generator) ret List(BodyState) {
-  let states: List(BodyState) = List.create(BodyState, cap: bodyCount)
+  var states: List(BodyState) = List.create(BodyState, cap: bodyCount)
   loop var i: Int = 0, i < bodyCount, ++i {
     var state: BodyState = identityBodyState()
     state.linearVelocity.x = signedUnit(generator: generator)
@@ -157,7 +157,7 @@ func makeConstraint(generator: mod Generator) ret ContactConstraintWide {
   constraint.rollingMass = symPositive(generator: generator, scale: 0.5)
   constraint.rollingImpulse = vectorSigned(generator: generator, scale: 0.0625)
   constraint.friction = widePositive(generator: generator, scale: 0.5)
-  let rolling: List(Float) = List.create(Float, cap: 4)
+  var rolling: List(Float) = List.create(Float, cap: 4)
   loop var lane: Int = 0, lane < 4, ++lane {
     if (nextBits(generator: generator) bitand 3) is 0 {
       rolling.add(value: positive(generator: generator, scale: 0.125))
