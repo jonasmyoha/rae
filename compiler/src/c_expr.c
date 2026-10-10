@@ -6,6 +6,7 @@
 
 #include "c_backend.h"
 #include "c_backend_internal.h"
+#include "may_wait.h"
 #include "diag.h"
 #include "mangler.h"
 #include "sema.h"
@@ -1029,11 +1030,17 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                         // A function with a resumable twin runs as one, so
                         // it suspends at its waits (§13).
                         bool resumable = c_twin_is(ctx->compiler_ctx, callexpr->decl_link);
+                        // A socket wait suspends only where the runtime has
+                        // a readiness poller (§15): elsewhere the task stays
+                        // a thread, as before
+                        bool socket = may_wait_reaches_socket(ctx->compiler_ctx->wait_graph, callexpr->decl_link);
                         fprintf(out, "); __s->__task = __t; __s->__frame = NULL; ");
+                        if (socket) fprintf(out, "if (RAE_SCHED_IO_SUSPENDS) { ");
                         if (resumable) fprintf(out, "rae_task_prepare_step(__t, __raestep_%s, __s); ", mangled);
                         else fprintf(out, "rae_task_prepare(__t, __raespawn_thunk_%s, __s); ", mangled);
-                        fprintf(out, "%s((int64_t)(intptr_t)__t); __t; })",
-                                core_function_mangled(ctx->compiler_ctx, "schedulerSubmit"));
+                        fprintf(out, "%s((int64_t)(intptr_t)__t); ", core_function_mangled(ctx->compiler_ctx, "schedulerSubmit"));
+                        if (socket) fprintf(out, "} else { rae_task_start(__t, __raespawn_thunk_%s, __s); } ", mangled);
+                        fprintf(out, "__t; })");
                     } else {
                         fprintf(out, "); __s->__task = __t; __s->__frame = NULL; rae_task_start(__t, __raespawn_thunk_%s, __s); __t; })", mangled);
                     }

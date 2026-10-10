@@ -56,6 +56,7 @@
  * unit to preserve existing static helper visibility, linker behavior, and
  * emitted-app build mechanics. See docs/runtime-kernel-abi.md. */
 #include "runtime_threads.c"
+#include "runtime_sched_io.c"
 #include "runtime_core_memory.c"
 #include "runtime_strings_core.c"
 #include "runtime_system_log.c"

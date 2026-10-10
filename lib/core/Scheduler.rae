@@ -56,6 +56,8 @@ func nativeSchedulerWaitGroup(
   timeoutNs: Int
 ) unsafe extern("rae_ext_Scheduler_waitGroup")
 
+func nativeSchedulerIoNext(timeoutMs: Int) unsafe extern("rae_ext_Scheduler_ioNext") ret Int
+
 func nativeSchedulerParkEpoch() unsafe extern("rae_ext_Scheduler_parkEpoch") ret Int
 
 func nativeSchedulerPark(epoch: Int, timeoutNs: Int) unsafe extern("rae_ext_Scheduler_park")
@@ -92,6 +94,10 @@ func nativeSchedulerTextByte(
   text: String
   index: Int
 ) unsafe extern("rae_ext_rae_str_byte_at") ret Int
+
+# How long the readiness thread waits for a socket before it looks whether
+# the program is ending
+const schedulerIoWaitMs: Int = 100
 
 # The queue of tasks spawned outside the pool
 const schedulerInjectionQueue: Int = 0
@@ -269,6 +275,21 @@ func schedulerDrive(task: view Int) {
       if not schedulerRunOne(index: 0) {
         let epoch: Int = nativeSchedulerParkEpoch()
         nativeSchedulerPark(epoch: epoch, timeoutNs: schedulerParkTimeout())
+      }
+    }
+  }
+}
+
+# The readiness thread (started by the first task that waits on a socket,
+# docs/lightweight-spawn-design.md §15): each task whose socket is ready, or
+# whose wait timed out, goes back to a queue as a woken task does. The kernel
+# answers one at a time, the task's other registration already deleted.
+func schedulerIoLoop() {
+  unsafe {
+    loop not nativeSchedulerShuttingDown() {
+      let task: Int = nativeSchedulerIoNext(timeoutMs: schedulerIoWaitMs)
+      if task is not 0 {
+        schedulerWake(task: task)
       }
     }
   }
