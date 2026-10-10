@@ -2771,14 +2771,17 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   // lib/Float4's inline lowering (runtime_float4.h) only where it is used: a
   // program that binds an `rae_f4_*` / `rae_m4_*` extern. Including the SIMD
   // headers in every program cost ~4% of the runtime's compile.
+  // lib/Float8's (runtime_float8.h, which includes Float4's) likewise.
+  bool float4_used = false, float8_used = false;
   for (size_t i = 0; i < ctx->all_decl_count; i++) {
       const AstDecl* d = ctx->all_decls[i];
       const char* symbol = d->kind == AST_DECL_FUNC ? d->as.func_decl.extern_symbol : NULL;
-      if (symbol && (strncmp(symbol, "rae_f4_", 7) == 0 || strncmp(symbol, "rae_m4_", 7) == 0)) {
-          fprintf(out, "#include \"runtime_float4.h\"\n");
-          break;
-      }
+      if (!symbol) continue;
+      if (strncmp(symbol, "rae_f4_", 7) == 0 || strncmp(symbol, "rae_m4_", 7) == 0) float4_used = true;
+      if (strncmp(symbol, "rae_f8_", 7) == 0 || strncmp(symbol, "rae_m8_", 7) == 0) float8_used = true;
   }
+  if (float8_used) fprintf(out, "#include \"runtime_float8.h\"\n");
+  else if (float4_used) fprintf(out, "#include \"runtime_float4.h\"\n");
   // C headers declared by binding modules (`cheader "..."`, general FFI #497),
   // so their c_struct types and extern("symbol") functions resolve against the
   // real library declarations. Walk the module + its imports, deduping both the

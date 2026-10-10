@@ -214,6 +214,11 @@ asan: build
 benchmarks-check: build
 	@bash tools/benchmarks-compile-check.sh
 
+# lib/Float8 built for x86-64 (with and without AVX2) and for wasm
+# (tools/float8-lowerings-check.sh); `make test` runs it as one case too.
+float8-lowerings: build
+	@bash tools/float8-lowerings-check.sh
+
 # The generated C of the largest and the browser-smoke apps compiles with
 # -Wall -Wextra -Werror (tools/c-warnings-gate.sh); `make test` runs it as one
 # pre-suite case too.

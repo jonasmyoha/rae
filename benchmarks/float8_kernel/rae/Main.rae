@@ -1,0 +1,141 @@
+# benchmarks/float8_kernel: one kernel three ways, scalar, Float4 and Float8
+# (docs/float4-design.md §10): a degree-8 polynomial by Horner's rule over
+# 1 048 576 Floats, 20 rounds. Every element sees the same multiply, then
+# add sequence in each form, so the three print the same checksum (the sum of
+# the result bits). run.sh builds it release for this machine (AVX2 on an
+# x86-64 CPU that has it) and, with RAE_X86_AVX2=0 / --float4-scalar, the
+# other lowerings.
+import Math
+import Float4
+import Float8
+
+const elementCount: Int = 1048576
+
+const roundCount: Int = 20
+
+# Nine terms, eight multiply-adds per element (all positive: in a vertical
+# list a `-0.25` line would continue the line above as a subtraction)
+func coefficients() ret List(Float) {
+  ret List(Float) {
+    0.5
+    0.25
+    0.125
+    1.5
+    0.75
+    0.0625
+    0.3
+    0.2
+    0.1
+  }
+}
+
+func inputs() ret List(Float) {
+  var values: List(Float) = List.create(Float, cap: elementCount)
+  var state: Int = 12345
+  loop var i: Int = 0, i < elementCount, ++i {
+    state = (state * 1103515245 + 12345) % 2147483648
+    values.add(value: (state % 2000) as Float / 1000.0 - 1.0)
+  }
+  ret values
+}
+
+func hornerScalar(xs: view List(Float), terms: view List(Float), out: mod List(Float)) {
+  loop var i: Int = 0, i < xs.length, ++i {
+    let x: Float = xs.copyAtFallback(index: i, fallback: 0.0)
+    var result: Float = terms.copyAtFallback(index: 0, fallback: 0.0)
+    loop var k: Int = 1, k < terms.length, ++k {
+      let product: Float = result * x
+      result = product + terms.copyAtFallback(index: k, fallback: 0.0)
+    }
+    out.set(index: i, value: result)
+  }
+}
+
+func hornerFloat4(xs: view List(Float), terms: view List(Float), out: mod List(Float)) {
+  var splats: List(Float4) = {}
+  loop var k: Int = 0, k < terms.length, ++k {
+    splats.add(value: Float4.splat(value: terms.copyAtFallback(index: k, fallback: 0.0)))
+  }
+  var i: Int = 0
+  loop i + 4 <= xs.length {
+    if let x: Float4 = Float4.load(from: xs, index: i) {
+      var result: Float4 = splats.copyAtDefault(index: 0)
+      loop var k: Int = 1, k < splats.length, ++k {
+        result = Float4.mulAdd(a: result, b: x, c: splats.copyAtDefault(index: k))
+      }
+      Float4.store(into: out, index: i, value: result)
+    }
+    i = i + 4
+  }
+}
+
+func hornerFloat8(xs: view List(Float), terms: view List(Float), out: mod List(Float)) {
+  var splats: List(Float8) = {}
+  loop var k: Int = 0, k < terms.length, ++k {
+    splats.add(value: Float8.splat(value: terms.copyAtFallback(index: k, fallback: 0.0)))
+  }
+  var i: Int = 0
+  loop i + 8 <= xs.length {
+    if let x: Float8 = Float8.load(from: xs, index: i) {
+      var result: Float8 = splats.copyAtDefault(index: 0)
+      loop var k: Int = 1, k < splats.length, ++k {
+        result = Float8.mulAdd(a: result, b: x, c: splats.copyAtDefault(index: k))
+      }
+      Float8.store(into: out, index: i, value: result)
+    }
+    i = i + 8
+  }
+}
+
+func checksum(values: view List(Float)) ret Int {
+  var total: Int = 0
+  loop var i: Int = 0, i < values.length, ++i {
+    total = (total + Math.floatBits(value: values.copyAtFallback(index: i, fallback: 0.0))) % 1000000007
+  }
+  ret total
+}
+
+func zeros() ret List(Float) {
+  var values: List(Float) = List.create(Float, cap: elementCount)
+  loop var i: Int = 0, i < elementCount, ++i {
+    values.add(value: 0.0)
+  }
+  ret values
+}
+
+func main() {
+  let xs: List(Float) = inputs()
+  let terms: List(Float) = coefficients()
+  if terms.length is not 9 {
+    log("expected nine terms, got {terms.length}")
+  }
+  var scalarOut: List(Float) = zeros()
+  var wide4Out: List(Float) = zeros()
+  var wide8Out: List(Float) = zeros()
+  var best: List(Int) = { 0, 0, 0 }
+  loop var form: Int = 0, form < 3, ++form {
+    var fastest: Int = 0
+    loop var round: Int = 0, round < roundCount, ++round {
+      let start: Int = nowNs()
+      if form is 0 {
+        hornerScalar(xs: xs, terms: terms, out: scalarOut)
+      } else if form is 1 {
+        hornerFloat4(xs: xs, terms: terms, out: wide4Out)
+      } else {
+        hornerFloat8(xs: xs, terms: terms, out: wide8Out)
+      }
+      let elapsed: Int = nowNs() - start
+      if fastest is 0 or elapsed < fastest {
+        fastest = elapsed
+      }
+    }
+    best.set(index: form, value: fastest)
+  }
+  log("RESULT,scalar,{best.copyAtDefault(index: 0)},{checksum(values: scalarOut)}")
+  log(
+    "RESULT,float4_{Float4.lowering()},{best.copyAtDefault(index: 1)},{checksum(values: wide4Out)}"
+  )
+  log(
+    "RESULT,float8_{Float8.lowering()},{best.copyAtDefault(index: 2)},{checksum(values: wide8Out)}"
+  )
+}
