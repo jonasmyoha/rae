@@ -296,6 +296,11 @@ static void scan_expr(CFuncContext* ctx, const AstExpr* expr, bool hoistable, Tw
     case AST_EXPR_CAST:
       scan_expr(ctx, expr->as.cast.operand, hoistable, points);
       return;
+    case AST_EXPR_OWN:
+    case AST_EXPR_BOX:
+    case AST_EXPR_UNBOX:
+      scan_expr(ctx, expr->as.unary.operand, hoistable, points);
+      return;
     case AST_EXPR_MEMBER:
       scan_expr(ctx, expr->as.member.object, hoistable, points);
       return;
@@ -359,14 +364,11 @@ static void scan_expr(CFuncContext* ctx, const AstExpr* expr, bool hoistable, Tw
         for (const AstCallArg* arg = expr->as.call.args; arg; arg = arg->next) {
           if (!expr_is_simple(arg->value)) simple = false;
         }
-        /* A String (or other pool-carried) result is not handed over */
+        /* An Any result (a box) or a `mod` alias is not handed over */
         const AstTypeRef* returns = target->as.func_decl.returns ? target->as.func_decl.returns->type : NULL;
         if (returns) {
           Str base = get_base_type_name(returns);
-          if (str_eq_cstr(base, "String") || str_eq_cstr(base, "Any") || returns->is_opt || returns->is_view ||
-              returns->is_mod) {
-            simple = false;
-          }
+          if (str_eq_cstr(base, "Any") || returns->is_mod) simple = false;
         }
         TwinPoint point = { POINT_CALL, expr, hoistable && simple, false, target };
         add_point(points, point);
