@@ -123,6 +123,27 @@ func nativeLoad(data: Buffer(Float), index: Int) unsafe extern("rae_f4_load") re
 
 func nativeStore(data: Buffer(Float), index: Int, value: view Float4) unsafe extern("rae_f4_store")
 
+func nativeLoadPartial(
+  data: Buffer(Float)
+  index: Int
+  count: Int
+) unsafe extern("rae_f4_load_partial") ret Float4
+
+func nativeStorePartial(
+  data: Buffer(Float)
+  index: Int
+  value: view Float4
+  count: Int
+) unsafe extern("rae_f4_store_partial")
+
+func nativeStoreMasked(
+  data: Buffer(Float)
+  index: Int
+  value: view Float4
+  mask: view Mask4
+  count: Int
+) unsafe extern("rae_f4_store_masked")
+
 func nativeLowering() unsafe extern("rae_f4_lowering") ret Int
 
 # The lowering this program was compiled with: "neon", "sse2", "wasm" or
@@ -359,4 +380,129 @@ func store(into: mod List(Float), index: view Int, value: view Float4) {
   unsafe {
     nativeStore(data: into.data, index: index, value: value)
   }
+}
+
+# ----- the masked tail (docs/float4-design.md §9) ---------------------------
+#
+# A loop over a List(Float) takes full chunks of four with `load` / `store`
+# and the last length % 4 elements with these, instead of a second, scalar
+# loop. They never touch memory outside the list.
+
+# How many lanes from `start` on are in a list of `length` elements, at most
+# `count` and at most four (0 when start is outside the list)
+func lanesInRange(start: view Int, count: view Int, length: view Int) ret Int {
+  if start < 0 or start >= length or count <= 0 {
+    ret 0
+  }
+  var lanes: Int = count
+  if lanes > 4 {
+    lanes = 4
+  }
+  if start + lanes > length {
+    lanes = length - start
+  }
+  ret lanes
+}
+
+# The first `count` Floats of `list` from `start` on, the other lanes 0.0.
+# Only elements inside the list are read: a lane past its end is 0.0 too.
+func loadPartial(list: view List(Float), start: view Int, count: view Int) ret Float4 {
+  let lanes: Int = lanesInRange(start: start, count: count, length: list.length)
+  if lanes is 0 {
+    ret splat(value: 0.0)
+  }
+  unsafe {
+    ret nativeLoadPartial(data: list.data, index: start, count: lanes)
+  }
+}
+
+# Writes the first `count` lanes of `value` to `into` from `start` on; the
+# other elements are untouched. A lane that would land past the list's end
+# is not written, with a warning, as `store` warns.
+func storePartial(
+  into: mod List(Float)
+  start: view Int
+  value: view Float4
+  count: view Int
+) {
+  let lanes: Int = lanesInRange(start: start, count: count, length: into.length)
+  var asked: Int = count
+  if asked > 4 {
+    asked = 4
+  }
+  if lanes < asked {
+    runtimeWarning(
+      message: "Float4.storePartial: {asked} lanes from {start} do not fit a length of {into.length}"
+    )
+  }
+  if lanes is 0 {
+    ret
+  }
+  unsafe {
+    nativeStorePartial(
+      data: into.data
+      index: start
+      value: value
+      count: lanes
+    )
+  }
+}
+
+# Writes the lanes of `value` whose `mask` lane is true to `into` from
+# `start` on. A true lane past the list's end is not written, with a warning.
+func storeMasked(
+  into: mod List(Float)
+  start: view Int
+  value: view Float4
+  mask: view Mask4
+) {
+  let lanes: Int = lanesInRange(start: start, count: 4, length: into.length)
+  var lastTrue: Int = 0
+  if mask.bitsW is not 0 {
+    lastTrue = 4
+  } else if mask.bitsZ is not 0 {
+    lastTrue = 3
+  } else if mask.bitsY is not 0 {
+    lastTrue = 2
+  } else if mask.bitsX is not 0 {
+    lastTrue = 1
+  }
+  if lanes < lastTrue {
+    runtimeWarning(
+      message: "Float4.storeMasked: a true lane from {start} is past a length of {into.length}"
+    )
+  }
+  if lanes is 0 {
+    ret
+  }
+  unsafe {
+    nativeStoreMasked(
+      data: into.data
+      index: start
+      value: value
+      mask: mask
+      count: lanes
+    )
+  }
+}
+
+# The mask whose first `count` lanes are true (all bits set) and the rest
+# false: `firstLanes(count: 3)` is true, true, true, false.
+func firstLanes(count: view Int) ret Mask4 {
+  let allBits: UInt32 = 4294967295 as UInt32
+  let noBits: UInt32 = 0 as UInt32
+  var mask: Mask4 = { bitsX: noBits, bitsY: noBits, bitsZ: noBits, bitsW: noBits }
+  if count > 0 {
+    mask.bitsX = allBits
+  }
+  if count > 1 {
+    mask.bitsY = allBits
+  }
+  if count > 2 {
+    mask.bitsZ = allBits
+  }
+  if count > 3 {
+    mask.bitsW = allBits
+  }
+  ret mask
 }

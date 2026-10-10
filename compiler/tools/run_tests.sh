@@ -77,6 +77,12 @@ if [ -z "$TEST_NAME_FILTER" ] && [ -f "tools/tsan-check.sh" ]; then
   if ! bash tools/tsan-check.sh; then TSAN_CHECK_FAILED=1; fi
   echo
 fi
+# The memory-boundary fixtures under AddressSanitizer (tools/asan-check.sh).
+ASAN_CHECK_FAILED=0
+if [ -z "$TEST_NAME_FILTER" ] && [ -f "tools/asan-check.sh" ]; then
+  if ! bash tools/asan-check.sh; then ASAN_CHECK_FAILED=1; fi
+  echo
+fi
 # lib/'s `when` branches type-checked for every real target
 # (tools/check-targets.sh), same place.
 TARGETS_CHECK_FAILED=0
@@ -617,6 +623,7 @@ if [ "$TREE_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$TERMS_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$STRESS_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$TSAN_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
+if [ "$ASAN_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$SERVER_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$TARGETS_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$WARNINGS_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi

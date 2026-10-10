@@ -77,6 +77,13 @@ if [ -f tools/tsan-check.sh ]; then
   if bash tools/tsan-check.sh; then TSAN_CHECK=0; fi
   echo
 fi
+# The memory-boundary fixtures under AddressSanitizer (tools/asan-check.sh):
+# one more pre-suite "case" (SKIP without an ASan runtime).
+ASAN_CHECK=1
+if [ -f tools/asan-check.sh ]; then
+  if bash tools/asan-check.sh; then ASAN_CHECK=0; fi
+  echo
+fi
 # lib/'s `when` branches type-checked for every real target
 # (tools/check-targets.sh, docs/platform-conditional-code.md §3.4).
 TARGETS_CHECK=1
@@ -128,6 +135,7 @@ if [ "$TREE_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1))
 if [ "$TERMS_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$STRESS_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$TSAN_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
+if [ "$ASAN_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$SERVER_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$TARGETS_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$WARNINGS_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi

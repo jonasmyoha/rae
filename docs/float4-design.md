@@ -328,3 +328,96 @@ checksum (FNV over all body velocities) — **bit-exact across all five**.
 - Independent of the surface, both done 2026-10-04: the release build's
   inline threshold is 400 (§6.3) and the exactly specified scalar math is
   inline (§6.4).
+
+## 9. The masked tail (2026-10-10)
+
+A loop over a `List(Float)` runs in chunks of four, and the last
+`length % 4` elements do not fill a vector. Until now every kernel wrote that
+tail as a second, scalar loop: the same arithmetic written twice, in two
+forms that must agree bit for bit. lib/Float4 now has a masked tail instead
+(after linebender/fearless_simd).
+
+**The API** (lib/Float4.rae):
+
+- `Float4.loadPartial(list:, start:, count:) ret Float4`: the first `count`
+  elements from `start` on. The other lanes are 0.0, and so is a lane past
+  the list's end. Only elements inside the list are read.
+- `Float4.storePartial(into:, start:, value:, count:)`: writes the first
+  `count` lanes. The other elements are untouched.
+- `Float4.storeMasked(into:, start:, value:, mask:)`: writes the lanes whose
+  mask lane is true.
+- `Float4.firstLanes(count:) ret Mask4`: the mask with the first `count`
+  lanes true.
+
+A store never writes past the list's end. Asked to, it writes the lanes that
+fit and warns, as `store` warns. `firstLanes` is a function of the Float4
+module, called `Float4.firstLanes` like every other Float4 function; a
+type-qualified `Mask4.firstLanes(...)` call is not lowered yet (queued).
+
+**The loop shape:**
+
+```rae
+let length: Int = ys.length
+var i: Int = 0
+loop i + 4 <= length {
+  if let x: Float4 = Float4.load(from: xs, index: i) {
+    if let y: Float4 = Float4.load(from: ys, index: i) {
+      Float4.store(into: ys, index: i, value: Float4.mulAdd(a: scale, b: x, c: y))
+    }
+  }
+  i = i + 4
+}
+let rest: Int = length - i
+if rest > 0 {
+  let x: Float4 = Float4.loadPartial(list: xs, start: i, count: rest)
+  let y: Float4 = Float4.loadPartial(list: ys, start: i, count: rest)
+  Float4.storePartial(into: ys, start: i, value: Float4.mulAdd(a: scale, b: x, c: y), count: rest)
+}
+```
+
+- **Zeros are harmless in a reduction:** a sum or dot product adds the
+  tail's 0.0 lanes and is unchanged.
+- **A masked write:** a kernel that writes only some lanes (a clamp, a
+  select) combines its comparison with `firstLanes(count: rest)`, writes
+  with `storeMasked`, and can then run the whole list in one loop.
+
+**Lowering.** A partial load or store is a memory move, not arithmetic. One
+definition in runtime_float4.h serves NEON, SSE2, wasm SIMD128 and the
+scalar path, and the bits are the same everywhere. It copies lane by lane
+with constant-size copies, which the C compiler inlines. A variable-length
+`memcpy` was a library call and made a 3-element call 2x slower.
+
+**Checked:**
+
+- Fixtures 1085 (the platform's lowering) and 1086 (`--float4-scalar`,
+  same program) cover lengths 0, 1, 3, 4, 5 and 103. Three kernels each,
+  in chunk + masked-tail form, match the plain scalar loop bit for bit: a
+  scaled add (`storePartial`), a dot product, and a clamp (`storeMasked`
+  with a comparison and `firstLanes`). They also cover the edges: a lane
+  past the end, a start outside the list, and a store that does not fit.
+- Every list there has its exact length as capacity, so one element too far
+  is a heap overflow. `compiler/tools/asan-check.sh` (`make asan`, a
+  pre-suite case of every full run) builds both fixtures with AddressSanitizer
+  and UBSan. Made to read four lanes regardless, it reports the overflow.
+- Both fixtures are leak-checked.
+
+**Measured** (M1 Max, load 6; a scaled add, ns per call, release build):
+
+| length | scalar tail | masked tail |
+|---|---|---|
+| 3 | 6 | 7 |
+| 7 | 6 | 8 |
+| 103 | 54 | 57 |
+| 1 000 003 | 515 000 | 504 000 |
+
+The masked tail costs one to three nanoseconds per call on short lists: its
+range checks, and two loads where the scalar tail reads only what it uses.
+On long lists the two are level. So the masked tail does not make a kernel
+faster. It makes it one form instead of two, which is what this is for.
+
+**No lib kernel was converted.** None has a hand-written tail. The convex
+hull kernels (`Hull.rae`, `SeparatingAxis.rae`) pad their SoA arrays to a
+multiple of four with copies of point 0, as Box3D does. That padding is part
+of their bit-for-bit agreement with Box3D's support search (the tie rule of
+`embedIndex`), so it stays.
+
