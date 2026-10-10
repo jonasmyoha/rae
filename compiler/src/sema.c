@@ -1086,6 +1086,7 @@ typedef struct {
 static SemaTaskScope s_task_scopes[SEMA_MAX_TASK_SCOPES];
 static int s_task_scope_count = 0;
 static bool sema_spawn_lends(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* spawn, AstExpr* call);
+static void sema_report_unknown_member(AstModule* module, AstExpr* expr);
 static void sema_render_access(const AstExpr* e, char* out, size_t cap);
 static void sema_warn_let_receiver(AstModule* module, SymbolTable* symbols, const AstExpr* call);
 static bool expr_is_owning(SymbolTable* symbols, const AstExpr* e);
@@ -6880,6 +6881,7 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
             }
             sema_analyze_expr(ctx, module, symbols, expr->as.member.object, false);
             sema_report_bad_receiver(ctx, module, symbols, expr->as.member.object);
+            bool member_found = false;
             if (expr->as.member.object->resolved_type) {
                 TypeInfo* t = expr->as.member.object->resolved_type; if (t->kind == TYPE_REF) t = t->as.ref.base;
                 if (t->kind == TYPE_STRUCT) {
@@ -6903,6 +6905,7 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                         if (str_eq(f->name, expr->as.member.member)) {
                             AstTypeRef* sub = substitute_type_ref(ctx, params, concrete_args, f->type);
                             expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, sub);
+                            member_found = true;
                             break;
                         }
                         f = f->next;
@@ -6945,8 +6948,10 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                     diag_error(sema_diag_file(module),
                                (int)expr->line, (int)expr->column, buf);
                     if (module) module->had_error = true;
+                    break;
                 }
             }
+            if (!member_found && !expr->resolved_type) sema_report_unknown_member(module, expr);
             break;
         case AST_EXPR_METHOD_CALL:
             // #786: 3-level folder-package qualifier `pkg.Module.func(args)`. The
@@ -9174,3 +9179,32 @@ static bool sema_spawn_lends(CompilerContext* ctx, AstModule* module, SymbolTabl
     return true;
 }
 
+
+/* `x.name` where x's type is known and has no field `name`: a struct without
+ * that field, or a String / number / Bool / Char, which have no fields at all.
+ * Without this the C compiler was the first to notice. A String's length is
+ * the method `length()` (lib/String.rae), not a field. */
+static void sema_report_unknown_member(AstModule* module, AstExpr* expr) {
+    TypeInfo* t = expr->as.member.object->resolved_type;
+    if (t && t->kind == TYPE_REF) t = t->as.ref.base;
+    if (!t) return;
+    Str member = expr->as.member.member;
+    char buf[512];
+    if (t->kind == TYPE_STRUCT && t->as.structure.decl && t->as.structure.decl->kind == AST_DECL_TYPE) {
+        Str type_name = t->as.structure.decl->as.type_decl.name;
+        snprintf(buf, sizeof buf, "type '%.*s' has no field '%.*s'", (int)type_name.len, type_name.data,
+                 (int)member.len, member.data);
+    } else if (t->kind == TYPE_STRING) {
+        bool is_method = str_eq(member, str_from_cstr("length"));
+        snprintf(buf, sizeof buf, "a String has no field '%.*s'%s", (int)member.len, member.data,
+                 is_method ? "; its byte length is the method `length()` (lib/String.rae)" : "");
+    } else if (t->kind == TYPE_INT || t->kind == TYPE_FLOAT || t->kind == TYPE_FLOAT64 || t->kind == TYPE_BOOL ||
+               t->kind == TYPE_CHAR) {
+        snprintf(buf, sizeof buf, "type '%.*s' has no field '%.*s'", (int)t->name.len, t->name.data, (int)member.len,
+                 member.data);
+    } else {
+        return;
+    }
+    diag_error(sema_diag_file(module), (int)expr->line, (int)expr->column, buf);
+    module->had_error = true;
+}
