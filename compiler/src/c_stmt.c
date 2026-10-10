@@ -1738,7 +1738,9 @@ static bool emit_main_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     ctx->local_count = saved_locals;
     fprintf(thunk, "  }\n  rae_string_pool_flush(__rae_spm_func);\n  return __rae_keep_going;\n}\n\n");
     fprintf(thunk, "#ifdef __EMSCRIPTEN__\n#include <emscripten.h>\n");
-    fprintf(thunk, "void __rae_main_loop_tick%d(void* arg) {\n  %s* __rae_state_box = (%s*)arg;\n", id, type_buf, type_buf);
+    /* Each frame first runs the tasks that can go on (lib/core/Scheduler.rae,
+     * docs/lightweight-spawn-design.md §16): tasks interleave with frames */
+    fprintf(thunk, "void __rae_main_loop_tick%d(void* arg) {\n  %s* __rae_state_box = (%s*)arg;\n  rae_sched_frame();\n", id, type_buf, type_buf);
     fprintf(thunk, "  if (!__rae_main_loop_body%d(__rae_state_box)) {\n    emscripten_cancel_main_loop();\n", id);
     emit_drop_for_value(ctx, thunk, value_type, "(*__rae_state_box)", true);
     fprintf(thunk, "    free(__rae_state_box);\n  }\n}\n");

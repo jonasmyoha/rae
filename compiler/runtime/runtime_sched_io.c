@@ -19,10 +19,28 @@
  * timeout, as the normal function does. */
 
 static void (*g_sched_io_loop)(void) = NULL;
+static void (*g_sched_frame)(void) = NULL;
 
-/* The generated main installs Scheduler.rae's readiness loop */
-void rae_sched_install_io(void (*io_loop)(void)) {
+/* The generated main installs Scheduler.rae's readiness loop and its frame
+ * step (§16: in the browser each frame of `mainLoop` runs the tasks that
+ * can go on) */
+void rae_sched_install_io(void (*io_loop)(void), void (*frame)(void)) {
   g_sched_io_loop = io_loop;
+  g_sched_frame = frame;
+}
+
+void rae_sched_frame(void) {
+  if (g_sched_frame) g_sched_frame();
+}
+
+/* Whether this is a browser build, whose one thread runs the page's frames
+ * and may not block (platform constant) */
+rae_Bool rae_ext_Scheduler_inBrowser(void) {
+#ifdef __EMSCRIPTEN__
+  return 1;
+#else
+  return 0;
+#endif
 }
 
 #if defined(RAE_HAS_KQUEUE)

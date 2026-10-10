@@ -70,19 +70,50 @@ perl -e 'alarm shift; exec @ARGV' 240 compiler/bin/rae build \
   examples/zz_web_readback_check/Main.rae >/dev/null
 test -s "$TMP/readback/index.wasm"
 
-readback_note="readback page built (no Chrome: not run)"
+# A spawned task that sleeps runs between the frames of a mainLoop: it
+# suspends at each sleep and the frames carry it on
+# (docs/lightweight-spawn-design.md §16). Built always; run in headless
+# Chrome when Chrome is installed.
+perl -e 'alarm shift; exec @ARGV' 240 compiler/bin/rae build \
+  --target wasm --profile dev \
+  --project examples/zz_web_task_check \
+  --out "$TMP/task/index.html" \
+  examples/zz_web_task_check/Main.rae >/dev/null
+test -s "$TMP/task/index.wasm"
+
 CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 if [ ! -x "$CHROME" ]; then CHROME="$(command -v google-chrome || command -v chromium || true)"; fi
-if [ -n "$CHROME" ] && [ -x "$CHROME" ] && command -v python3 >/dev/null 2>&1; then
-  port=$((20000 + $$ % 20000))
-  (cd "$TMP/readback" && exec perl -e 'alarm shift; exec @ARGV' 90 python3 -m http.server "$port" --bind 127.0.0.1) >/dev/null 2>&1 &
-  server=$!
+have_chrome=0
+if [ -n "$CHROME" ] && [ -x "$CHROME" ] && command -v python3 >/dev/null 2>&1; then have_chrome=1; fi
+
+# The console lines of one page served from directory $1, in headless Chrome
+page_console() {
+  local port=$((20000 + ($$ + $2) % 20000))
+  (cd "$1" && exec perl -e 'alarm shift; exec @ARGV' 90 python3 -m http.server "$port" --bind 127.0.0.1) >/dev/null 2>&1 &
+  local server=$!
   sleep 1
-  console="$(perl -e 'alarm shift; exec @ARGV' 60 "$CHROME" --headless=new --enable-unsafe-webgpu \
-    --enable-logging=stderr --v=0 --no-first-run --user-data-dir="$TMP/chrome" \
-    "http://127.0.0.1:$port/index.html" 2>&1 | grep CONSOLE || true)"
+  perl -e 'alarm shift; exec @ARGV' 60 "$CHROME" --headless=new --enable-unsafe-webgpu \
+    --enable-logging=stderr --v=0 --no-first-run --user-data-dir="$1/chrome" \
+    "http://127.0.0.1:$port/index.html" 2>&1 | grep CONSOLE || true
   kill "$server" 2>/dev/null || true
   wait "$server" 2>/dev/null || true
+}
+
+task_note="task page built (no Chrome: not run)"
+if [ "$have_chrome" = 1 ]; then
+  console="$(page_console "$TMP/task" 1)"
+  if printf '%s' "$console" | grep -q 'TASK OK'; then
+    task_note="a waiting task ran between frames in headless Chrome"
+  else
+    echo "FAIL wasm_webgpu_smoke: the spawned task did not run between frames:"
+    printf '%s\n' "$console" | sed 's/.*CONSOLE:[0-9]*\] "//;s/", source.*//' | head -10
+    exit 1
+  fi
+fi
+
+readback_note="readback page built (no Chrome: not run)"
+if [ "$have_chrome" = 1 ]; then
+  console="$(page_console "$TMP/readback" 2)"
   if printf '%s' "$console" | grep -q 'READBACK OK'; then
     readback_note="readback completed in headless Chrome"
   elif printf '%s' "$console" | grep -q 'READBACK FAIL: no GPU'; then
@@ -94,4 +125,4 @@ if [ -n "$CHROME" ] && [ -x "$CHROME" ] && command -v python3 >/dev/null 2>&1; t
   fi
 fi
 
-echo "PASS wasm_webgpu_smoke: 109 and composed 110 browser pages plus embeddable module built$box3d_note; $readback_note"
+echo "PASS wasm_webgpu_smoke: 109 and composed 110 browser pages plus embeddable module built$box3d_note; $readback_note; $task_note"
