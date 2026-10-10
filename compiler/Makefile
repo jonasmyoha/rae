@@ -204,6 +204,11 @@ stress: build
 tsan: build
 	@bash tools/tsan-check.sh
 
+# The memory-boundary fixtures under AddressSanitizer + UBSan
+# (tools/asan-check.sh); `make test` runs it as one pre-suite case too.
+asan: build
+	@bash tools/asan-check.sh
+
 # The generated C of the largest and the browser-smoke apps compiles with
 # -Wall -Wextra -Werror (tools/c-warnings-gate.sh); `make test` runs it as one
 # pre-suite case too.
