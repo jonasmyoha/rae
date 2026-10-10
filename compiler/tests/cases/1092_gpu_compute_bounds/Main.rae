@@ -1,0 +1,249 @@
+# gpu/GpuCompute's bounded dispatch on the GPU: a kernel composed with
+# lib/gpu/computeBounds.wgsl (naga-validated at build time) over 1, 63, 64,
+# 65 and 1000 elements in workgroups of 64 writes exactly `count` results and
+# nothing past them. The buffer holds 1088 words pre-filled with a sentinel,
+# more than any of these dispatches has invocations, and is read back after
+# each. The same kernel without the guard does write past the count.
+open webgpu/Context
+open webgpu/WebgpuEnums
+open webgpu/ReadRequest
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuCompute
+
+const wordCount: Int = 1088
+
+const sentinel: Int = 3735928559
+
+func sentinelBytes() ret List(UInt8) {
+  var bytes: List(UInt8) = List.create(UInt8, cap: wordCount * 4)
+  loop var w: Int = 0, w < wordCount, ++w {
+    loop var b: Int = 0, b < 4, ++b {
+      bytes.add(value: ((sentinel shr (b * 8)) bitand 255) as UInt8)
+    }
+  }
+  ret bytes
+}
+
+func awaitSubmission(resources: mod GpuResources, id: view SubmissionId) ret Bool {
+  var status: Int = 0
+  var spins: Int = 0
+  loop status is 0 and spins < 10000000 {
+    status = pollSubmission(resources: resources, id: id)
+    spins = spins + 1
+  }
+  ret status is 1
+}
+
+func readWords(resources: view GpuResources, id: view BufferId, out: mod List(Int)) ret Bool {
+  if let request: ReadRequest = readBuffer(
+    resources: resources
+    id: id
+    offset: 0
+    size: wordCount * 4
+  ) {
+    var status: Int = 0
+    var spins: Int = 0
+    loop status is 0 and spins < 10000000 {
+      status = poll(this: request)
+      spins = spins + 1
+    }
+    if status is not 1 {
+      ret false
+    }
+    var bytes: List(UInt8) = List.create(UInt8, cap: wordCount * 4)
+    loop var i: Int = 0, i < wordCount * 4, ++i {
+      bytes.add(value: 0 as UInt8)
+    }
+    if copyToBytes(this: request, destination: bytes) is false {
+      ret false
+    }
+    loop var word: Int = 0, word < wordCount, ++word {
+      var value: Int = 0
+      loop var b: Int = 3, b >= 0, --b {
+        value = value * 256 + (bytes.copyAtDefault(index: word * 4 + b) as Int)
+      }
+      out.add(value: value)
+    }
+    ret true
+  }
+  ret false
+}
+
+# One dispatch over `count` elements; the words as read back
+func runOnce(
+  resources: mod GpuResources
+  pipeline: view PipelineId
+  bindGroup: view BindGroupId
+  bounds: view ComputeBounds
+  storage: view BufferId
+  readback: view BufferId
+  count: view Int
+  words: mod List(Int)
+) ret Bool {
+  if writeBuffer(
+    resources: resources
+    id: storage
+    offset: 0
+    bytes: sentinelBytes()
+  ) is false {
+    ret false
+  }
+  if var recording: Recording = beginRecording(resources: resources) {
+    if recordBoundedCompute(
+      recording: recording
+      resources: resources
+      pipeline: pipeline
+      bindGroup: bindGroup
+      bounds: bounds
+      elementCount: count
+    ) is false {
+      ret false
+    }
+    if recordCopyBuffer(
+      recording: recording
+      resources: resources
+      source: storage
+      sourceOffset: 0
+      destination: readback
+      destinationOffset: 0
+      size: wordCount * 4
+    ) is false {
+      ret false
+    }
+    if let submission: SubmissionId = submit(resources: resources, recording: recording) {
+      if not awaitSubmission(resources: resources, id: submission) {
+        ret false
+      }
+      retireSubmission(resources: resources, id: submission)
+      ret readWords(resources: resources, id: readback, out: words)
+    }
+  }
+  ret false
+}
+
+func main() ret Int {
+  var ready: Int = 0
+  unsafe {
+    ready = webgpuBootstrap()
+  }
+  if ready is not 1 {
+    log("no GPU")
+    ret 1
+  }
+  var issuer: IdIssuer = IdIssuer.create()
+  if var resources: GpuResources = GpuResources.create(issuer: issuer, capacity: 16) {
+    let guarded: Shader = shader(files: ["lib/gpu/computeBounds.wgsl", "assets/fill.wgsl"])
+    let unguarded: Shader = shader(files: ["lib/gpu/computeBounds.wgsl", "assets/unguarded.wgsl"])
+    if let bounds: ComputeBounds = createComputeBounds(resources: resources, workgroupSize: 64) {
+      if let storage: BufferId = createBuffer(
+        resources: resources
+        size: wordCount * 4
+        usage: WGPUBufferUsage_Storage + WGPUBufferUsage_CopySrc + WGPUBufferUsage_CopyDst
+      ) {
+        if let readback: BufferId = createBuffer(
+          resources: resources
+          size: wordCount * 4
+          usage: WGPUBufferUsage_MapRead + WGPUBufferUsage_CopyDst
+        ) {
+          var storageList: List(BufferId) = {}
+          storageList.add(value: storage)
+          let noViews: List(TextureViewId) = {}
+          let noSamplers: List(SamplerId) = {}
+          if let pipeline: PipelineId = createBoundedComputePipeline(
+            resources: resources
+            wgsl: guarded.text
+            entryPoint: "main"
+            bounds: bounds
+          ) {
+            if let bindGroup: BindGroupId = createBoundedBindGroup(
+              resources: resources
+              pipeline: pipeline
+              bounds: bounds
+              buffers: storageList
+              textureViews: noViews
+              samplers: noSamplers
+            ) {
+              let counts: List(Int) = {
+                1
+                63
+                64
+                65
+                1000
+              }
+              loop var c: Int = 0, c < counts.length, ++c {
+                let count: Int = counts.copyAtDefault(index: c)
+                var words: List(Int) = {}
+                if not runOnce(
+                  resources: resources
+                  pipeline: pipeline
+                  bindGroup: bindGroup
+                  bounds: bounds
+                  storage: storage
+                  readback: readback
+                  count: count
+                  words: words
+                ) {
+                  log("FAIL: count {count}: dispatch or readback failed")
+                  ret 1
+                }
+                var written: Int = 0
+                var past: Int = 0
+                loop var i: Int = 0, i < wordCount, ++i {
+                  let value: Int = words.copyAtDefault(index: i)
+                  if i < count and value is i * 3 + 1 {
+                    written = written + 1
+                  }
+                  if i >= count and value is not sentinel {
+                    past = past + 1
+                  }
+                }
+                log(
+                  "count {count}: {workgroupCountFor(elementCount: count, workgroupSize: 64)} workgroups, {written} written, {past} past the count"
+                )
+              }
+            }
+          }
+          # Without the guard the last workgroup writes past the count
+          if let pipeline: PipelineId = createBoundedComputePipeline(
+            resources: resources
+            wgsl: unguarded.text
+            entryPoint: "main"
+            bounds: bounds
+          ) {
+            if let bindGroup: BindGroupId = createBoundedBindGroup(
+              resources: resources
+              pipeline: pipeline
+              bounds: bounds
+              buffers: storageList
+              textureViews: noViews
+              samplers: noSamplers
+            ) {
+              var words: List(Int) = {}
+              if runOnce(
+                resources: resources
+                pipeline: pipeline
+                bindGroup: bindGroup
+                bounds: bounds
+                storage: storage
+                readback: readback
+                count: 65
+                words: words
+              ) {
+                var past: Int = 0
+                loop var i: Int = 65, i < wordCount, ++i {
+                  if words.copyAtDefault(index: i) is not sentinel {
+                    past = past + 1
+                  }
+                }
+                log("unguarded, count 65: {past} past the count")
+              }
+            }
+          }
+        }
+      }
+      log("count 0 records nothing: {workgroupCountFor(elementCount: 0, workgroupSize: 64) is 0}")
+    }
+  }
+  ret 0
+}
