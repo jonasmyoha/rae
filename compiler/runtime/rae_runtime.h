@@ -97,7 +97,9 @@ int rae_sched_sleep_until(int64_t deadline_ns);
  * -1 readable) or `timeout_ms` passes (1), or 0 when it cannot suspend
  * (runtime_sched_io.c) */
 int rae_sched_io_wait(int64_t fd, int64_t events, int64_t timeout_ms);
-void rae_sched_install_io(void (*io_loop)(void));
+void rae_sched_install_io(void (*io_loop)(void), void (*frame)(void));
+/* A browser frame of `mainLoop`: run the tasks that can go on */
+void rae_sched_frame(void);
 /* Whether a socket wait suspends a task here: a spawn that can reach one goes
  * on the pool only then (else it is a thread, its waits blocking it) */
 #ifdef RAE_HAS_KQUEUE

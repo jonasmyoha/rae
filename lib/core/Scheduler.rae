@@ -56,6 +56,8 @@ func nativeSchedulerWaitGroup(
   timeoutNs: Int
 ) unsafe extern("rae_ext_Scheduler_waitGroup")
 
+func nativeSchedulerInBrowser() unsafe extern("rae_ext_Scheduler_inBrowser") ret Bool
+
 func nativeSchedulerIoNext(timeoutMs: Int) unsafe extern("rae_ext_Scheduler_ioNext") ret Int
 
 func nativeSchedulerParkEpoch() unsafe extern("rae_ext_Scheduler_parkEpoch") ret Int
@@ -98,6 +100,10 @@ func nativeSchedulerTextByte(
 # How long the readiness thread waits for a socket before it looks whether
 # the program is ending
 const schedulerIoWaitMs: Int = 100
+
+# How long a browser frame runs ready tasks before it draws (a 60 Hz frame
+# is 16.7 ms)
+const schedulerFrameBudgetNs: Int = 4000000
 
 # The queue of tasks spawned outside the pool
 const schedulerInjectionQueue: Int = 0
@@ -196,9 +202,15 @@ func parallelChunkSize(total: view Int, workers: view Int) ret Int {
 # stolen), or the injection queue from outside the pool, then wake a parked
 # worker. With no pool threads (RAE_WORKERS=1, or a build without threads)
 # it runs here and now, as a spawn that cannot get a thread does, and a
-# resumable one is driven here until it finishes.
+# resumable one is driven here until it finishes. In the browser it runs
+# until it first waits: the frames of `mainLoop` run the rest
+# (schedulerRunReady), so a waiting task does not hold up the page.
 func schedulerSubmit(task: view Int) {
   unsafe {
+    if nativeSchedulerInBrowser() {
+      nativeSchedulerRunTask(task: task)
+      ret
+    }
     let threads: Int = nativeSchedulerStart()
     if threads is 0 {
       nativeSchedulerQueuePush(queue: schedulerInjectionQueue, task: task)
@@ -265,6 +277,18 @@ func schedulerParkTimeout() ret Int {
     }
   }
   ret schedulerParkNs
+}
+
+# A browser frame (docs/lightweight-spawn-design.md §16): run the tasks that
+# can go on (woken by a timer or by the task they waited on), for at most
+# schedulerFrameBudgetNs, so a frame is never held up for long
+func schedulerRunReady() {
+  let until: Int = nowNs() + schedulerFrameBudgetNs
+  loop nowNs() < until {
+    if not schedulerRunOne(index: 0) {
+      ret
+    }
+  }
 }
 
 # With no pool threads: run the queued tasks and the due timers on this

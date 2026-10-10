@@ -1,0 +1,63 @@
+# A spawned task that waits runs between the frames of a mainLoop, natively
+# and in the browser (compiler/tools/wasm_webgpu_smoke.sh runs the browser
+# build in headless Chrome; docs/lightweight-spawn-design.md §16). The task
+# sleeps five times; in the browser it suspends at each sleep and the frames
+# run it on. Logs "TASK OK" with the frames that ran while it waited, or
+# "TASK FAIL" when it finished before any frame ran (it held the page) or
+# not within 5 s.
+
+# Give up after this long
+const timeLimitNs: Int = 5000000000
+
+const sleepRounds: Int = 5
+
+type TaskCheck {
+  sleeper: Task(Int)
+  frames: Int
+  startedNs: Int
+  passed: Bool
+}
+
+func sleeper(rounds: copy Int) ret Int {
+  var done: Int = 0
+  loop done < rounds {
+    sleep(ms: 20)
+    done = done + 1
+  }
+  ret done
+}
+
+# One frame: false once the task finished (or the time ran out)
+func checkFrame(check: mod TaskCheck) ret Bool {
+  check.frames = check.frames + 1
+  if check.sleeper.isDone() {
+    let rounds: Int = check.sleeper.get()
+    let waitedNs: Int = nowNs() - check.startedNs
+    if check.frames < 2 or rounds is not sleepRounds or waitedNs < 100000000 {
+      log("TASK FAIL: done after {check.frames} frames, {rounds} sleeps, {waitedNs / 1000000} ms")
+      ret false
+    }
+    check.passed = true
+    log("TASK OK: {rounds} sleeps of 20 ms while {check.frames} frames ran")
+    ret false
+  }
+  if nowNs() - check.startedNs > timeLimitNs {
+    log("TASK FAIL: not done after {check.frames} frames")
+    ret false
+  }
+  ret true
+}
+
+func main() {
+  var check: TaskCheck = {
+    sleeper: spawn sleeper(rounds: sleepRounds)
+    frames: 0
+    startedNs: nowNs()
+    passed: false
+  }
+  mainLoop check {
+    if checkFrame(check: check) is false {
+      break
+    }
+  }
+}
