@@ -42,6 +42,11 @@ a file only checked once it contained an `unsafe` token — is gone).
    reference invalidation, drop insertion and defers all see through it.
 5. **Explicit interop stays available in every user module**: any file may
    declare `unsafe extern` and open `unsafe { }` blocks.
+6. **A C call that may wait for long says so too:** `func name(...) blocking
+   unsafe extern(...)`. `blocking` is written before `unsafe extern` and only
+   on an extern (fixture 1082). Inside a lightweight task such a call runs
+   on a blocking-call thread while the task suspends; elsewhere it changes
+   nothing (docs/lightweight-spawn-design.md §4.4, §17).
 
 ## The safe-wrapper convention
 

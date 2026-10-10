@@ -7,9 +7,9 @@ func rae_sys_arg_count() unsafe extern ret Int
 
 func rae_sys_arg_at(index: Int) unsafe extern ret String
 
-func rae_sys_read_file(path: String) unsafe extern ret opt String
+func rae_sys_read_file(path: String) blocking unsafe extern ret opt String
 
-func rae_sys_write_file(path: String, content: String) unsafe extern ret Bool
+func rae_sys_write_file(path: String, content: String) blocking unsafe extern ret Bool
 
 func rae_sys_rename(oldPath: String, newPath: String) unsafe extern ret Bool
 
@@ -19,7 +19,7 @@ func rae_sys_make_dir(path: String) unsafe extern ret Bool
 
 func rae_sys_exists(path: String) unsafe extern ret Bool
 
-func rae_sys_lock_file(path: String) unsafe extern ret Bool
+func rae_sys_lock_file(path: String) blocking unsafe extern ret Bool
 
 func rae_sys_unlock_file(path: String) unsafe extern ret Bool
 
@@ -86,9 +86,9 @@ func argAt(index: view Int) ret String {
   }
 }
 
-func rae_sys_read_file_bytes(path: String, outLen: mod Int) unsafe extern ret Buffer(Int)
+func rae_sys_read_file_bytes(path: String, outLen: mod Int) blocking unsafe extern ret Buffer(Int)
 
-func rae_sys_read_file_text(path: String, offset: Int, len: Int) unsafe extern ret String
+func rae_sys_read_file_text(path: String, offset: Int, len: Int) blocking unsafe extern ret String
 
 # Read a byte range of a file as text. For text chunks embedded in binary
 # containers — a .glb's JSON chunk, for instance — where the caller has

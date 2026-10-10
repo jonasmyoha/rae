@@ -8,6 +8,7 @@
  *    - the externs that block the calling thread: `sleep` and `Time.waitUntil`
  *      (rae_ext_rae_sleep, rae_ext_Time_sleepNs) and the socket / poller
  *      waits (rae_ext_NetSys_pollOne, rae_ext_NetSys_pollerWait);
+ *    - a call to a `blocking` extern (C that may wait for long, §4.4);
  *    - the implicit joins: the end of a `taskScope { }`, and a Task local
  *      joined when it goes out of scope.
  * 2. May-wait is a fixed point over the call graph: a function may wait if
@@ -39,6 +40,7 @@ typedef enum {
   WAIT_SLEEP,
   WAIT_SOCKET,
   WAIT_JOIN,
+  WAIT_BLOCKING,
   WAIT_KIND_COUNT
 } WaitKind;
 
@@ -48,6 +50,7 @@ static const char* wait_kind_name(WaitKind kind) {
     case WAIT_SLEEP: return "sleep extern";
     case WAIT_SOCKET: return "socket/poller extern";
     case WAIT_JOIN: return "task join";
+    case WAIT_BLOCKING: return "blocking extern";
     default: return "none";
   }
 }
@@ -169,6 +172,7 @@ static bool type_is_task(const TypeInfo* type) {
 
 /* The primitive an extern is, by its C symbol */
 static WaitKind extern_wait_kind(const AstFuncDecl* func) {
+  if (func->is_extern && func->is_blocking) return WAIT_BLOCKING;
   if (!func->is_extern || !func->extern_symbol) return WAIT_NONE;
   const char* symbol = func->extern_symbol;
   if (strcmp(symbol, "rae_ext_rae_sleep") == 0 || strcmp(symbol, "rae_ext_Time_sleepNs") == 0) return WAIT_SLEEP;
@@ -794,13 +798,12 @@ void may_wait_free(WaitGraph* graph) {
 /* An extern the scheduler's workers may call: the runtime's own (lib/core,
  * Math, Parallel, Time, Channel, String), which never blocks for long, and lib/net's
  * system calls, which are non-blocking (a socket answers `wouldBlock`) —
- * minus the waits (sleeps and socket waits suspend, S3b / S4) and the name
- * lookup (getaddrinfo may wait on DNS: a `blocking` extern once S5 lands) */
+ * minus the waits: sleeps, socket waits and `blocking` externs (the name
+ * lookup among them) suspend a task (S3b, S4, S5) */
 static bool extern_is_pool_safe(const WaitGraph* graph, const AstDecl* decl) {
   const AstFuncDecl* func = &decl->as.func_decl;
   if (extern_wait_kind(func) != WAIT_NONE) return false;
   if (!is_stdlib(graph, decl)) return false;
-  if (func->extern_symbol && strcmp(func->extern_symbol, "rae_ext_NetSys_resolve") == 0) return false;
   const char* path = short_lib_path(decl->origin_file);
   static const char* const safe[] = { "lib/core/", "lib/Math.rae", "lib/Parallel.rae", "lib/Time.rae",
                                       "lib/Channel.rae", "lib/String.rae", "lib/net/NetSystem.rae", "lib/net/ByteBuffer.rae" };
@@ -838,13 +841,15 @@ static bool reach_any(WaitGraph* graph, int start, bool (*bad)(WaitGraph*, const
  * socket / poller wait */
 static bool node_sleeps(WaitGraph* graph, const WaitNode* node, bool flag) {
   (void)graph; (void)flag;
-  return node->direct == WAIT_SLEEP || node->direct == WAIT_SOCKET;
+  return node->direct == WAIT_SLEEP || node->direct == WAIT_SOCKET || node->direct == WAIT_BLOCKING;
 }
 
 /* A node a pool task must not reach: C that may block, and a sleep or socket
  * wait unless it can suspend (`allow_sleep`) */
 static bool node_off_pool(WaitGraph* graph, const WaitNode* node, bool allow_sleep) {
-  if ((node->direct == WAIT_SLEEP || node->direct == WAIT_SOCKET) && !allow_sleep) return true;
+  if ((node->direct == WAIT_SLEEP || node->direct == WAIT_SOCKET || node->direct == WAIT_BLOCKING) && !allow_sleep) {
+    return true;
+  }
   const AstFuncDecl* func = &node->decl->as.func_decl;
   if (func->is_extern) {
     if (extern_wait_kind(func) != WAIT_NONE) return !allow_sleep;
@@ -897,7 +902,7 @@ bool may_wait_spawn_on_pool(WaitGraph* graph, const AstDecl* decl, bool allow_sl
   seen[start] = true;
   while (depth > 0 && safe) {
     const WaitNode* node = &graph->nodes[stack[--depth]];
-    if (node->direct == WAIT_SLEEP || node->direct == WAIT_SOCKET) safe = false;
+    if (node->direct == WAIT_SLEEP || node->direct == WAIT_SOCKET || node->direct == WAIT_BLOCKING) safe = false;
     if (node->decl->as.func_decl.is_extern && !extern_is_pool_safe(graph, node->decl)) safe = false;
     for (size_t c = 0; c < node->callee_count && safe; c++) {
       int callee = node->callees[c];
@@ -937,9 +942,11 @@ bool may_wait_report(CompilerContext* ctx, const AstModule* merged, const char* 
   for (int scope = 0; scope < scopes; scope++) {
     fprintf(out, "  %s\n", scope == 0 ? "the program:" : "lib/:");
     fprintf(out, "    functions: %zu (%zu generic specialisations)\n", functions[scope], specialisations[scope]);
-    fprintf(out, "    wait primitive sites: Task.get %zu, sleep extern %zu, socket/poller extern %zu, task join %zu\n",
+    fprintf(out, "    wait primitive sites: Task.get %zu, sleep extern %zu, socket/poller extern %zu, task join %zu, "
+                 "blocking extern %zu\n",
             graph.primitive_sites[scope][WAIT_TASK_GET], graph.primitive_sites[scope][WAIT_SLEEP],
-            graph.primitive_sites[scope][WAIT_SOCKET], graph.primitive_sites[scope][WAIT_JOIN]);
+            graph.primitive_sites[scope][WAIT_SOCKET], graph.primitive_sites[scope][WAIT_JOIN],
+            graph.primitive_sites[scope][WAIT_BLOCKING]);
     fprintf(out, "    calls resolved conservatively (to every candidate): %zu\n", graph.approximate_calls[scope]);
     fprintf(out, "    may wait: %zu functions\n", may_wait[scope]);
     fprintf(out, "    spawn sites: %zu, spawned functions: %zu, reachable from a spawn: %zu\n", graph.spawn_sites[scope],

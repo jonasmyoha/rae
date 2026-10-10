@@ -1,0 +1,92 @@
+# A call to a `blocking` extern from a task runs on a blocking-call thread
+# while the task suspends (docs/lightweight-spawn-design.md §17). Two
+# workers, at most four spawn threads: 32 calls that each hold their thread
+# for 200 ms overlap, and 100 quick tasks run meanwhile. Unmarked, the same
+# calls are spawn threads, capped at four: neither holds (tried). Also a
+# String argument and result: files written and read back in tasks.
+
+# C that holds its thread (hold.c), and the runtime's file calls, marked
+# `blocking`
+func holdThread(ms: Int) blocking unsafe extern ret Int
+
+func writeText(
+  path: String
+  content: String
+) blocking unsafe extern("rae_ext_rae_sys_write_file") ret Bool
+
+func readText(path: String) blocking unsafe extern("rae_ext_rae_sys_read_file") ret String
+
+func deleteFile(path: String) blocking unsafe extern("rae_ext_rae_sys_delete") ret Bool
+
+func pauseTask(ms: copy Int) ret Int {
+  unsafe {
+    let held: Int = holdThread(ms: ms)
+  }
+  ret ms
+}
+
+func double(value: copy Int) ret Int {
+  ret value * 2
+}
+
+# Write a file and read it back, both on blocking-call threads
+func roundTrip(index: copy Int) ret Int {
+  let path: String = "/tmp/rae_blocking_fixture_{index}.txt"
+  let content: String = "line {index}"
+  var written: Bool = false
+  unsafe {
+    written = writeText(path: path, content: content)
+  }
+  if not written {
+    ret -1
+  }
+  var text: String = ""
+  unsafe {
+    text = readText(path: path)
+  }
+  unsafe {
+    let removed: Bool = deleteFile(path: path)
+  }
+  if text is content {
+    ret 1
+  }
+  ret 0
+}
+
+func main() {
+  let pauses: Int = 32
+  let started: Int = nowNs()
+  var paused: List(Task(Int)) = {}
+  loop var i: Int = 0, i < pauses, ++i {
+    paused.add(value: spawn pauseTask(ms: 200))
+  }
+  # Two workers, eight calls that each hold a thread for 200 ms: other tasks
+  # still run at once
+  var doubled: Int = 0
+  loop var i: Int = 0, i < 100, ++i {
+    let quick: Task(Int) = spawn double(value: i)
+    doubled = doubled + quick.get()
+  }
+  let quickMs: Int = (nowNs() - started) / 1000000
+  var total: Int = 0
+  loop var i: Int = 0, i < paused.length, ++i {
+    if let task: Task(Int) = paused.copyAt(index: i) {
+      total = total + task.get()
+    }
+  }
+  let allMs: Int = (nowNs() - started) / 1000000
+  log("quick tasks: {doubled}, done while the calls blocked: {quickMs < 150}")
+  # Held workers would take 4 rounds of 200 ms
+  log("{pauses} blocking calls of 200 ms overlapped: {allMs < 600} (total {total} ms of pauses)")
+  var trips: List(Task(Int)) = {}
+  loop var i: Int = 0, i < 8, ++i {
+    trips.add(value: spawn roundTrip(index: i))
+  }
+  var good: Int = 0
+  loop var i: Int = 0, i < trips.length, ++i {
+    if let trip: Task(Int) = trips.copyAt(index: i) {
+      good = good + trip.get()
+    }
+  }
+  log("files written and read back in tasks: {good} of 8")
+}

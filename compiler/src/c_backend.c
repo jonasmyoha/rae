@@ -4482,8 +4482,10 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       fprintf(out, ");\n  rae_task_complete(__a->__task); free(__a); return ((void*)0);\n}\n");
   }
 
-  // The argument packs and thunks of spawns that lend views (c_lend.c)
+  // The argument packs and thunks of spawns that lend views (c_lend.c), and
+  // of blocking extern calls from tasks (c_blocking.c)
   c_lend_emit_helpers(ctx, module, out);
+  c_blocking_emit_helpers(ctx, module, out);
 
   // Resumable twins (c_twin.c), then a root step per spawned twin: it makes
   // the task's frame from the spawn's arguments on the first step and steps

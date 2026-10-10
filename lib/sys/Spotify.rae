@@ -59,13 +59,13 @@ when hasSpotifyBridge {
   # it printed (empty unless it exited 0); `curl -sLf <url>` answering the
   # body (empty unless it exited 0), or writing it to a file (true when it
   # exited 0).
-  func osascriptRun(script: String) unsafe extern ret Int
+  func osascriptRun(script: String) blocking unsafe extern ret Int
 
-  func osascriptOutput(script: String) unsafe extern ret String
+  func osascriptOutput(script: String) blocking unsafe extern ret String
 
-  func curlOutput(url: String) unsafe extern ret String
+  func curlOutput(url: String) blocking unsafe extern ret String
 
-  func curlToFile(url: String, path: String) unsafe extern ret Bool
+  func curlToFile(url: String, path: String) blocking unsafe extern ret Bool
 
   # Bring this app's own window back to the front (runtime_platform_apple.c)
   func nativeActivateSelf() unsafe extern("rae_ext_activateSelf")

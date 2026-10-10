@@ -97,6 +97,10 @@ int rae_sched_sleep_until(int64_t deadline_ns);
  * -1 readable) or `timeout_ms` passes (1), or 0 when it cannot suspend
  * (runtime_sched_io.c) */
 int rae_sched_io_wait(int64_t fd, int64_t events, int64_t timeout_ms);
+/* Inside a resumable task: run `run(args)`, a call to a `blocking` extern, on
+ * a blocking-call thread while the task suspends (1), or 0 when it cannot
+ * (the caller then runs it) (runtime_sched_io.c) */
+int rae_sched_blocking_call(void (*run)(void* args), void* args);
 void rae_sched_install_io(void (*io_loop)(void), void (*frame)(void));
 /* A browser frame of `mainLoop`: run the tasks that can go on */
 void rae_sched_frame(void);

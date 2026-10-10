@@ -3165,6 +3165,17 @@ static AstDecl* parse_func_declaration(Parser* parser, bool is_extern) {
          parser_check(parser, TOK_KW_PRIV) || parser_check(parser, TOK_KW_PUB) || 
          parser_check(parser, TOK_KW_SPAWN) || parser_check(parser, TOK_KW_UNSAFE)) {
     const Token* mod_token = parser_advance(parser);
+    // `blocking`: this C call may wait for a long time, so inside a
+    // lightweight task it runs on a blocking-call thread while the task
+    // suspends (docs/lightweight-spawn-design.md §4.4). A modifier word, not
+    // a reserved one: it is written before `unsafe extern`, on externs only.
+    if (mod_token->kind == TOK_IDENT && str_eq_cstr(mod_token->lexeme, "blocking")) {
+      if (decl->as.func_decl.is_blocking) parser_error(parser, mod_token, "duplicate 'blocking' function modifier");
+      if (is_unsafe || saw_extern_modifier) {
+        parser_error(parser, mod_token, "'blocking' is written before 'unsafe extern': `func f(...) blocking unsafe extern`");
+      }
+      decl->as.func_decl.is_blocking = true;
+    }
     if (mod_token->kind == TOK_KW_UNSAFE) {
       if (is_unsafe) parser_error(parser, mod_token, "duplicate 'unsafe' function modifier");
       if (saw_extern_modifier) decl->as.func_decl.invalid_unsafe_extern_order = true;
@@ -3195,6 +3206,10 @@ static AstDecl* parse_func_declaration(Parser* parser, bool is_extern) {
   }
   decl->as.func_decl.properties = props_head;
   decl->as.func_decl.is_extern = is_extern;
+  if (decl->as.func_decl.is_blocking && !is_extern) {
+    parser_error(parser, name_token,
+                 "'blocking' is valid only on an extern declaration: it marks a C call that may wait");
+  }
   decl->as.func_decl.is_unsafe = is_unsafe;
   if (is_unsafe && !is_extern) parser->uses_unsafe_checks = true;
 
