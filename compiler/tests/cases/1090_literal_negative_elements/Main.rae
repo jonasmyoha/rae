@@ -1,0 +1,62 @@
+# In a literal written one element per line, an element that starts with a
+# minus is the next element, never a subtraction from the line above: a
+# binary operator at the start of a line ends the element (inside brackets
+# within the element, lines continue as anywhere else). The formatter writes
+# literals of five or more items one per line, so the one-line form with
+# negative elements formats to the vertical one and means the same.
+type Point {
+  x: Float
+  y: Float
+}
+
+func listed(values: view List(Float)) ret String {
+  var text: String = ""
+  loop var i: Int = 0, i < values.length, ++i {
+    text = "{text} {values.copyAtDefault(index: i)}"
+  }
+  ret "{values.length}:{text}"
+}
+
+func main() {
+  let typed: List(Float) = List(Float) {
+    0.5
+    -0.25
+    0.125
+    1.5
+    -0.75
+  }
+  log("typed {listed(values: typed)}")
+  let untyped: List(Float) = {
+    -1.0
+    -2.0
+    3.0
+    -4.0
+    5.0
+  }
+  log("untyped {listed(values: untyped)}")
+  let short: List(Float) = { 0.5, -0.25, 0.125, -1.5 }
+  log("one line {listed(values: short)}")
+  let integers: List(Int) = {
+    1
+    -1
+    2
+    -2
+    -3
+  }
+  log(
+    "integers {integers.length}: {integers.copyAtDefault(index: 1) + integers.copyAtDefault(
+      index: 4
+    )}"
+  )
+  # Inside parentheses the next line still continues the expression
+  let grouped: List(Float) = {
+    (0.5 - 0.25)
+    1.0
+    2.0
+    3.0
+    4.0
+  }
+  log("grouped {listed(values: grouped)}")
+  let point: Point = { x: -1.5, y: -2.5 }
+  log("point {point.x} {point.y}")
+}

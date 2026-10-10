@@ -42,6 +42,10 @@ place; `--check-format` / `RAE_FORMAT=check` refuse and fail). The rules:
     comment keeps its place (before what it precedes, trailing a one-line
     statement, below a statement that went vertical); `# ` prose wraps at 100.
 *   `# raefmt: off` / `# raefmt: on` fence a verbatim region (rare).
+*   In a literal written one element per line, a binary operator at the start
+    of a line ENDS the element above it: `0.5` / `-0.25` on two lines are two
+    elements, never `0.5 - 0.25` (fixtures 1090, 1091). An element that
+    continues over lines keeps its operator inside parentheses (`(a` / `- b)`).
 
 ```rae
 func three(a: copy Int, b: copy Int, c: copy Int) ret Int {
