@@ -166,11 +166,24 @@ masked tail (docs/float4-design.md §9), written once:
   elements in groups of 64 writes exactly `count` results and nothing past
   them (a 1 088-word buffer of sentinels, read back each time). The same
   kernel without the guard writes 63 words past a count of 65.
+- **Grass compute uses it** (0.1.267):
+  - `lib/grass_compute.wgsl` reads the blade count from the bounds uniform,
+    and its own bindings are 1–3;
+  - the lib default composition lists `lib/gpu/computeBounds.wgsl` first;
+  - `GrassCompute` dispatches with `recordBoundedCompute`, adding the
+    workgroup-size override to the app's constants itself.
+
+  An app that declares its own grass composition lists the bounds file first
+  too (a deliberate break, maintainer's choice: every part stays listed where
+  it is used). Example 114 draws the same grass: 1 632 of 65 536 blades
+  visible, before and after.
+- **A part says what it is written against:** a leading comment line
+  `// compose-after: lib/gpu/computeBounds.wgsl` makes the composer require
+  that part EARLIER in the same composition. A composition without it stops
+  the build with "shader part 'lib/grass_compute.wgsl' is written against
+  'lib/gpu/computeBounds.wgsl', which must come earlier …" (fixture 1093),
+  not with naga's "no definition in scope". Nothing is added implicitly.
 - **Not converted:**
-  - **grass compute:** apps declare their own grass compositions ending in
-    lib/grass_compute.wgsl (`grassSetComputeShader`), and moving its
-    bindings would break each of them at build time (queued with that
-    constraint);
   - **the water FFT and readback, the raytracers:** two-dimensional
     dispatches over a grid;
   - **example 51:** the older `Gpu` module, guarding with `arrayLength`,

@@ -90,6 +90,43 @@ bool shader_compose(Arena* arena,
     lengths[i] = len;
     total += strlen("// --- ") + strlen(p) + 1 + len + 1;
   }
+  /* A part names the parts it is written against in its leading comment
+   * lines, `// compose-after: lib/gpu/computeBounds.wgsl`: each must come
+   * EARLIER in the composition. The composition stays declared (nothing is
+   * added for it); a missing part is said by name, not left to naga's
+   * "no definition in scope". */
+  for (size_t i = 0; i < path_count; i++) {
+    const char* cursor = contents[i];
+    const char* end = contents[i] + lengths[i];
+    while (cursor < end) {
+      const char* line_end = memchr(cursor, '\n', (size_t)(end - cursor));
+      if (!line_end) line_end = end;
+      const char* q = cursor;
+      while (q < line_end && (*q == ' ' || *q == '\t')) q++;
+      if (line_end - q < 2 || q[0] != '/' || q[1] != '/') break;  /* past the header comments */
+      static const char marker[] = "// compose-after:";
+      size_t marker_len = sizeof marker - 1;
+      if ((size_t)(line_end - q) > marker_len && strncmp(q, marker, marker_len) == 0) {
+        const char* need = q + marker_len;
+        while (need < line_end && (*need == ' ' || *need == '\t')) need++;
+        size_t need_len = (size_t)(line_end - need);
+        while (need_len > 0 && (need[need_len - 1] == ' ' || need[need_len - 1] == '\r')) need_len--;
+        bool earlier = false;
+        for (size_t j = 0; j < i && !earlier; j++) {
+          size_t written = strlen(paths[j]);
+          if (written >= need_len && strncmp(paths[j] + written - need_len, need, need_len) == 0) earlier = true;
+        }
+        if (!earlier) {
+          snprintf(err, err_cap,
+                   "shader part '%s' is written against '%.*s', which must come earlier in the composition: "
+                   "list it first, shader(files: [\"%.*s\", ...])",
+                   paths[i], (int)need_len, need, (int)need_len, need);
+          return false;
+        }
+      }
+      cursor = line_end < end ? line_end + 1 : end;
+    }
+  }
   char* text = arena_alloc(arena, total + 1);
   size_t pos = 0;
   int line = 1;
