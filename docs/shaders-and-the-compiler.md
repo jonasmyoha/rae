@@ -138,6 +138,44 @@ app binds, feature limits); those stay run-time errors, but they are a much
 smaller class, and they are the app's own mistakes rather than a lib file
 drifting from its neighbour.
 
+### A compute kernel's bounds (gpu/GpuCompute, 2026-10-10)
+
+A one-dimensional compute kernel over `count` elements runs in workgroups of
+`workgroupSize` invocations. `ceil(count / workgroupSize)` groups are
+dispatched, so the last one is usually partial, and every such kernel starts
+with `if (index >= count) { return; }`. This is the GPU form of a SIMD loop's
+masked tail (docs/float4-design.md §9), written once:
+
+- **`lib/gpu/computeBounds.wgsl`, composed first**
+  (`shader(files: ["lib/gpu/computeBounds.wgsl", "<kernel>.wgsl"])`):
+  - the count uniform at `@group(0) @binding(0)`, so the kernel's own
+    resources start at binding 1;
+  - the `computeWorkgroupSize` override, for `@workgroup_size(computeWorkgroupSize)`;
+  - `computeElementInRange(globalId)` and `computeElementIndex(globalId)`.
+- **`lib/gpu/GpuCompute.rae`** (Rae over the bindings, no renderer C):
+  - `createComputeBounds(workgroupSize:)` makes the 16-byte uniform;
+  - `createBoundedComputePipeline` sets the override to that same size, so
+    the dispatch and the kernel count with one number;
+  - `createBoundedBindGroup` puts the uniform at binding 0;
+  - `recordBoundedCompute(elementCount:)` writes the count and dispatches
+    `workgroupCountFor(elementCount:, workgroupSize:)` groups (none for 0,
+    false past one dimension's 65 535).
+- **One `ComputeBounds` per dispatch in a submission:** the count is written
+  to its buffer before the work runs.
+- **Fixture 1092** runs it on the GPU. A kernel over 1, 63, 64, 65 and 1000
+  elements in groups of 64 writes exactly `count` results and nothing past
+  them (a 1 088-word buffer of sentinels, read back each time). The same
+  kernel without the guard writes 63 words past a count of 65.
+- **Not converted:**
+  - **grass compute:** apps declare their own grass compositions ending in
+    lib/grass_compute.wgsl (`grassSetComputeShader`), and moving its
+    bindings would break each of them at build time (queued with that
+    constraint);
+  - **the water FFT and readback, the raytracers:** two-dimensional
+    dispatches over a grid;
+  - **example 51:** the older `Gpu` module, guarding with `arrayLength`,
+    which is the right bound when the buffer is exactly the data.
+
 ## Hot reload
 
 Two speeds, one declaration.
