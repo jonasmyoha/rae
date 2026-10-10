@@ -527,7 +527,7 @@ style configuration. The policy (full design: `docs/rae-format-design.md`):
   run) and the example gate all run in CHECK mode (`RAE_FORMAT=check`) — an
   unformatted file fails them instead of being rewritten under the runner.
   The only deliberately non-canonical inputs are the format fixtures (200–208,
-  568, 786, 810–813, 829, 830, 1055), the expected-parse-error fixtures, the lexer
+  568, 786, 810–813, 829, 830, 1055, 1091), the expected-parse-error fixtures, the lexer
   fixtures whose token columns are the test (006, 015, 019) and the CRLF /
   missing-final-newline fixtures (345, 346, 348 — the runner sets
   `RAE_FORMAT=off` for them); the generated `lib/webgpu` bindings are a

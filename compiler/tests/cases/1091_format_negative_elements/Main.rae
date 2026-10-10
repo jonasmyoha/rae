@@ -1,0 +1,17 @@
+# A literal of five or more items is written one per line, and an element
+# that starts with a minus stays its own element there: this input once made
+# the formatter stop with "non-equivalent output (internal error)". The
+# grouped element continues across lines inside its parentheses.
+func main() {
+  let values: List(Float) = { 0.5, -0.25, 0.125, 1.5, -0.75 }
+  let integers: List(Int) = { -1, 2, -3, 4, -5, 6 }
+  let grouped: List(Float) = {
+    (0.5
+      - 0.25)
+    -1.0
+    2.0
+    -3.0
+    4.0
+  }
+  log("{values.length} {integers.length} {grouped.length}")
+}
