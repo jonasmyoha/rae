@@ -840,56 +840,54 @@ compute-bound items (about 90 ns each), with no data, so nothing is copied.
   (the S3b policy), the program ran 6.4x at 512 leaves and 5.2–5.5x at
   32 768; with it helping, 7.0x and 6.4–6.8x.
 
-### 14.2 Lending a `view` to a task (a proposal: needs the maintainer)
+### 14.2 Lending a `view` to a task (done, 0.1.254)
 
-**The problem.** Fork-join over data is bound by copying, not by tasks:
+**The problem.** Fork-join over data was bound by copying, not by tasks:
 
-- The 16 M sum stays at 0.06x of sequential on the pool, because one copy of
-  the input costs more than the whole sequential sum (§10, §12).
+- The 16 M sum stayed at 0.06x of sequential on the pool, because one copy
+  of the input costs more than the whole sequential sum (§10, §12).
 - The same sum through `parallelLoop`, whose iterations read the shared list
-  in place, is 5x faster than sequential.
+  in place, is faster than sequential.
 
-A spawn copies (or moves) every argument, and a `view` argument of a list or
-struct makes the call run synchronously (docs/concurrency-model.md), because
-nothing guarantees the borrowed place outlives the task or stays unchanged
-while it runs. §3.1's sketch therefore does not run in parallel:
+A spawn copies (or moves) every argument. A `view` argument of a list or
+struct was rejected (docs/concurrency-model.md), because nothing guaranteed
+that the borrowed place outlives the task or stays unchanged while it runs.
 
-```rae
-func parallelSum(numbers: view List(Int), start: copy Int, count: copy Int) ret Int {
-  if count < 4096 {
-    ret sequentialSum(numbers: numbers, start: start, count: count)
-  }
-  let half: Int = count / 2
-  let left: Task(Int) = spawn parallelSum(numbers: numbers, start: start, count: half)
-  let right: Int = parallelSum(numbers: numbers, start: start + half, count: count - half)
-  ret left.get() + right
-}
-```
-
-**The proposed rule (new semantics: not implemented).** Inside a `taskScope
+**The rule (approved by the maintainer 2026-10-10).** Inside a `taskScope
 { }`, a `spawn` may pass a `view` of a place that outlives the scope:
 
 1. **What may be lent.** A local declared before the scope, a parameter of
    the enclosing function (a `view` parameter's own referent outlives the
-   call), or a path into one of those. Never a value made inside the scope.
-2. **The lent place is frozen for the scope.** From the spawn to the end of
-   the scope, the compiler rejects every write to the lent place (and to
-   anything it is part of or contains): assignment, a mutating method, a
-   `mod` argument, a move (`own`).
+   call), a path into one of those (`a.b`, `a[i]`), or a string literal.
+   Never a value made inside the scope: that is the old error, with a hint.
+2. **The lent place is frozen until the scope ends.** From the spawn to the
+   end of the scope, the compiler rejects every write to the lent local:
+   assignment, a mutating method, a `mod` argument, a move (`own`). The
+   error names the spawn's line.
    - This is the frozen-`let` check (docs/let-is-frozen.md), applied to a
-     `var` for the extent of the scope; a `let` is frozen already.
-   - Reads stay allowed, in the scope and in the tasks: they are all
-     reads, so there is no race.
-3. **The tasks cannot leave the scope.** A Task from such a spawn is a local
-   of the scope. It can be `get()`, `isDone()` and `tryGet()`, and that is
-   all: it is not returned, stored in a struct or container, or passed on.
-   `taskScope` already joins its tasks at its end, so every borrow ends
-   before the lent place can change again.
-4. **Only `view`.** A `mod` argument to a spawn stays sequential: two tasks
-   writing the same place would race. Writing disjoint parts in parallel is
-   `parallelLoop`'s job, with its own rules.
+     `var` for the rest of the scope; a `let` is frozen already.
+   - Reads stay allowed, in the scope and in the tasks: they are all reads,
+     so there is no race.
+3. **The scope waits for its borrowers.** Each taskScope that lends keeps a
+   task group (`RaeTaskGroup`, a count). A lending spawn adds one to it, its
+   task subtracts one as its last act, and the scope waits for zero at its
+   end and before a `ret`, `break` or `continue` leaves it. The waiting
+   thread helps run tasks meanwhile, as `get` does (§14.1).
+4. **Only `view`.** A `mod` argument of non-scalar data is still rejected:
+   two tasks writing the same place would race. Writing disjoint parts in
+   parallel is `parallelLoop`'s job, with its own rules.
+5. **Outside a `taskScope` nothing is lent**, not even a `let` (the question
+   (b) below): with no scope, nothing bounds where the task's borrow ends.
 
-With the rule, the sketch is written:
+**One change from the proposal.** The proposal bounded the borrow by
+forbidding a lending Task to leave the scope (no return, no container). The
+group wait (3) bounds it instead: the scope waits for every task that
+borrows from it, wherever its handle went, so the escape check is not
+needed. It is just as safe and allows the common form, Tasks collected in a
+`List(Task(T))` and joined in a loop. A handle that does outlive the scope
+holds a finished task, and its `get()` returns at once.
+
+The sketch of §3.1 is now written:
 
 ```rae
 func parallelSum(numbers: view List(Int), start: copy Int, count: copy Int) ret Int {
@@ -907,32 +905,45 @@ func parallelSum(numbers: view List(Int), start: copy Int, count: copy Int) ret 
 }
 ```
 
-**What it costs and gives.**
+**How it is built.**
 
-- **Codegen:** a lent view becomes a pointer in the task's arguments, with
-  no copy. The task runs on the pool like any other, and resumable twins
-  (§13) are unaffected.
-- **Sema:** the work is the scope-long freeze and the non-escape check.
-- **Effect:** the copy goes away, so the sum should approach
-  `parallelLoop`'s 5x. Rust needs `std::thread::scope` (or rayon's `join`)
-  for exactly this, because its `spawn` demands `'static` data. The freeze
-  is what Rust's borrow checker gives rayon for free.
-- **No new syntax:** only a spawn that is rejected today (made sequential)
-  becomes parallel, inside `taskScope`.
+- **Sema** (`sema_spawn_lends`): a stack of the open taskScopes and the
+  scope depth each opened at. A spawn lends when each non-scalar `view`
+  argument roots in a symbol declared at or above that depth. It marks the
+  symbol `lent_line`, which `expr_roots_in_let` treats like a `let` until the
+  scope pops.
+- **Codegen** (`c_lend.c`): a lent view is the pointer a normal call passes.
+  Each lent-to function gets an argument pack whose fields have the
+  parameters' own C types. The spawn site emits the normal call's text with
+  the function swapped for the pack's constructor, so every argument is
+  lowered exactly as for a call. The task runs on the pool when it may
+  (`may_wait_spawn_on_pool`), otherwise on a thread. A resumable twin (§13)
+  does not suspend inside a lending scope: tasks borrow its C locals.
+- Fixtures: `1077_spawn_lend_view` (fork-join, `ret`/`break`/`continue`
+  out of the scope, a lent String, a task that lends in turn; also under
+  TSan) and `1078_reject_spawn_lend`.
 
-**Alternatives.**
+**Measured** with `benchmarks/spawn`'s `sum` mode (new metric
+`lentForkJoinMs`): 16 M integers, 8 workers, load 4.5, median of 5.
 
-- Keep copying: the status quo, where fork-join over data is slower than
-  one core.
+| leaves | 1 | 8 | 64 | 1 024 | 4 096 |
+|---|---|---|---|---|---|
+| sequential | 2.3 ms | 2.6 ms | 2.9 ms | 2.6 ms | 2.7 ms |
+| fork-join, copying | 12.5 ms | 31.1 ms | 37.6 ms | 40.1 ms | 46.3 ms |
+| fork-join, lent | 2.3 ms | 1.4 ms | 1.5 ms | 1.9 ms | 1.9 ms |
+| `parallelLoop` | 1.4 ms | 1.4 ms | 1.4 ms | 1.4 ms | 1.4 ms |
+
+- **The copy is gone.** Lending is 20–25x faster than copying and matches
+  `parallelLoop`.
+- This sum is bound by memory bandwidth (one add per 8 bytes), so neither
+  form gets far past 2x of sequential. For a compute-bound fork-join, see
+  the 7x of §14.1.
+
+**Alternatives that were weighed.**
+
+- Keep copying: fork-join over data stays slower than one core.
 - A shared immutable value type (reference-counted, like Rust's `Arc`): a
   new type and runtime machinery, and data has to be put into it first.
 - A parallel-calls construct (F9): new syntax, and it still needs the same
   freeze to share data.
-
-**Questions for the maintainer:**
-
-- (a) Approve the rule as written?
-- (b) Should a `let` be lendable outside a `taskScope` too, since it is
-  frozen already? The open point is then only the Task escaping (rule 3);
-  `taskScope` is what bounds it today.
 

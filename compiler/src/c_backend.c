@@ -2109,7 +2109,8 @@ bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* 
        * runtime's before anything can spawn or run a parallelLoop */
       if (core_function_mangled(ctx, "schedulerWorkerLoop")) {
           fprintf(out, "  rae_sched_install(rae_sched_hook_worker_loop, rae_sched_hook_task_wait, "
-                       "rae_sched_hook_worker_count, rae_sched_hook_chunk_size, rae_sched_hook_wake);\n");
+                       "rae_sched_hook_worker_count, rae_sched_hook_chunk_size, rae_sched_hook_wake, "
+                       "rae_sched_hook_group_wait);\n");
       }
   } else {
       fprintf(out, "RAE_UNUSED static %s %s(", rt, mangled); emit_param_list(&tctx, f->params, out, false); fprintf(out, ") {\n");
@@ -2650,8 +2651,10 @@ static void emit_scheduler_hooks(CompilerContext* ctx, FILE* out) {
   const char* worker_count = core_function_mangled(ctx, "schedulerWorkerCount");
   const char* chunk_size = core_function_mangled(ctx, "parallelChunkSize");
   const char* wake = core_function_mangled(ctx, "schedulerWake");
-  if (!worker_loop || !task_wait || !worker_count || !chunk_size || !wake) return;
+  const char* group_wait = core_function_mangled(ctx, "schedulerGroupWait");
+  if (!worker_loop || !task_wait || !worker_count || !chunk_size || !wake || !group_wait) return;
   fprintf(out, "RAE_UNUSED static void rae_sched_hook_wake(int64_t task) { %s(task); }\n", wake);
+  fprintf(out, "RAE_UNUSED static void rae_sched_hook_group_wait(int64_t group) { %s(group); }\n", group_wait);
   fprintf(out, "RAE_UNUSED static void rae_sched_hook_worker_loop(int64_t index) { %s(index); }\n", worker_loop);
   fprintf(out, "RAE_UNUSED static void rae_sched_hook_task_wait(int64_t task) { %s(task); }\n", task_wait);
   fprintf(out, "RAE_UNUSED static int64_t rae_sched_hook_worker_count(void) { return %s(); }\n", worker_count);
@@ -4469,6 +4472,9 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       for (int k = 0; k < pi; k++) { if (k) fprintf(out, ", "); fprintf(out, "__a->f%d", k); }
       fprintf(out, ");\n  rae_task_complete(__a->__task); free(__a); return ((void*)0);\n}\n");
   }
+
+  // The argument packs and thunks of spawns that lend views (c_lend.c)
+  c_lend_emit_helpers(ctx, module, out);
 
   // Resumable twins (c_twin.c), then a root step per spawned twin: it makes
   // the task's frame from the spawn's arguments on the first step and steps

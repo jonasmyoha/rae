@@ -83,6 +83,14 @@ This is not a stylistic choice — it matches what the runtime physically does
 today (the spawn arg transfer is a shallow pointer-move; see *Current state*),
 so a borrowed capture would alias the parent's heap across threads.
 
+**The one exception: a `taskScope` lends `view`s (0.1.254,
+docs/lightweight-spawn-design.md §14.2).** Inside `taskScope { }`, a spawn may
+pass a `view` of a local declared before the scope, of a parameter, or of a
+path into one. The lent local is frozen (no write, mutating call, `mod`
+argument or move) until the scope ends, and the scope waits for every task
+that borrows from it before it ends or is left by `ret`/`break`/`continue`.
+A `mod` capture is still an error.
+
 ### 2b. Scoped parallel work — **may borrow**
 
 ```rae

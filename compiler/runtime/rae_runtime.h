@@ -98,7 +98,16 @@ void rae_frame_slots_free(void** slots, int count);
  * the prelude) the runtime keeps its own C fallbacks. */
 void rae_sched_install(void (*worker_loop)(int64_t index), void (*task_wait)(int64_t task),
                        int64_t (*default_workers)(void), int64_t (*chunk_size)(int64_t total, int64_t workers),
-                       void (*wake)(int64_t task));
+                       void (*wake)(int64_t task), void (*group_wait)(int64_t group));
+/* A taskScope whose spawns lend views (docs/lightweight-spawn-design.md
+ * §14.2) counts the tasks that borrow from it and waits for them before it
+ * ends, wherever their handles went */
+typedef struct { _Atomic int64_t pending; } RaeTaskGroup;
+static inline void rae_group_add(RaeTaskGroup* g) {
+  atomic_fetch_add_explicit(&g->pending, 1, memory_order_relaxed);
+}
+void rae_group_done(RaeTaskGroup* g);
+void rae_group_wait(RaeTaskGroup* g);
 /* parallelLoop (runtime_threads.c): run body(captures, first, end) over
  * [start, end) in chunks on the worker pool, returning when all are done. */
 typedef void (*RaeParallelBody)(void* captures, int64_t first, int64_t end);

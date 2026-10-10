@@ -1531,9 +1531,14 @@ static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     // is included in the branch's drop range (and unregistered with it), so
     // its heap is released exactly where its scope ends.
     size_t saved_locals_then = ctx->local_count - (owned_bind ? 1 : 0);
+    // A taskScope whose spawns lend views waits for those tasks before it
+    // ends (c_lend.c)
+    bool lends = stmt->as.if_stmt.lends_views;
+    if (lends) c_lend_open_group(ctx, out);
     if (stmt->as.if_stmt.then_block) {
         for (const AstStmt* s = stmt->as.if_stmt.then_block->first; s; s = s->next) emit_stmt(ctx, s, out);
     }
+    if (lends) c_lend_close_group(ctx, out);
     emit_implicit_drops_for_body(ctx, out, saved_locals_then);
     ctx->local_count = saved_locals_then;
     fprintf(out, "  }");
@@ -4024,6 +4029,8 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 emit_stmt_temp_drops_chain(ctx, out, NULL);
                 ctx->stmt_temps = own_temps;
             }
+            // Tasks borrowing from an enclosing taskScope finish first
+            c_lend_wait_groups(ctx, out, false);
             if (ctx->defer_stack.count > 0) emit_defers(ctx, 0, out);
             if (ctx->func_first_let_idx != (size_t)-1) {
                 emit_implicit_drops_for_body(ctx, out, ctx->func_first_let_idx);
@@ -4126,6 +4133,9 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             // loop body up to here (reverse-construction order), then jump.
             // Sema has already rejected these outside a loop; guard anyway.
             if (ctx->loop_depth > 0) {
+                // A taskScope inside the loop ends here: its borrowing tasks
+                // finish first
+                c_lend_wait_groups(ctx, out, true);
                 // #886: temporaries of every enclosing statement up to the loop
                 // (an `if` condition's, the loop condition's) die on this path too.
                 emit_stmt_temp_drops_chain(ctx, out, ctx->loop_temps[ctx->loop_depth - 1]);

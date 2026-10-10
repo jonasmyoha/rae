@@ -1,0 +1,111 @@
+# Spawns inside a taskScope lend a view of data that outlives the scope
+# (docs/lightweight-spawn-design.md §14.2): fork-join over one list with no
+# copy, a ret / break / continue out of the scope (each waits for the
+# borrowing tasks first), a lent String and string literal, a task that
+# lends in turn, and the list written again once the scope has ended.
+func sumRange(numbers: view List(Int), start: copy Int, end: copy Int) ret Int {
+  var total: Int = 0
+  loop var i: Int = start, i < end, ++i {
+    total = total + numbers.copyAtFallback(index: i, fallback: 0)
+  }
+  ret total
+}
+
+# Fork-join: the tasks go into a List declared inside the scope
+func parallelSum(numbers: view List(Int), parts: copy Int) ret Int {
+  var total: Int = 0
+  taskScope {
+    var tasks: List(Task(Int)) = {}
+    let size: Int = numbers.length / parts
+    loop var i: Int = 0, i < parts, ++i {
+      tasks.add(value: spawn sumRange(numbers: numbers, start: i * size, end: (i + 1) * size))
+    }
+    loop var i: Int = 0, i < tasks.length, ++i {
+      if let task: Task(Int) = tasks.copyAt(index: i) {
+        total = total + task.get()
+      }
+    }
+  }
+  ret total
+}
+
+func matches(text: view String, expected: view String) ret Int {
+  if text is expected {
+    ret 1
+  }
+  ret 0
+}
+
+# A ret inside the scope waits for the borrowing tasks first
+func firstHalf(numbers: view List(Int)) ret Int {
+  taskScope {
+    let half: Task(Int) = spawn sumRange(numbers: numbers, start: 0, end: numbers.length / 2)
+    let other: Task(Int) = spawn sumRange(
+      numbers: numbers
+      start: numbers.length / 2
+      end: numbers.length
+    )
+    ret half.get()
+  }
+  ret -1
+}
+
+# A taskScope inside a loop, left by break and continue
+func loopScopes(numbers: view List(Int)) ret Int {
+  var total: Int = 0
+  loop var round: Int = 0, round < 10, ++round {
+    taskScope {
+      let part: Task(Int) = spawn sumRange(numbers: numbers, start: 0, end: round)
+      if round is 2 {
+        continue
+      }
+      if round is 6 {
+        break
+      }
+      total = total + part.get()
+    }
+  }
+  ret total
+}
+
+# A task spawned by a task lends too
+func nested(numbers: view List(Int)) ret Int {
+  var total: Int = 0
+  taskScope {
+    let left: Task(Int) = spawn sumRange(numbers: numbers, start: 0, end: 500)
+    let right: Task(Int) = spawn sumRange(numbers: numbers, start: 500, end: 1000)
+    total = left.get() + right.get()
+  }
+  ret total
+}
+
+func outer(count: copy Int) ret Int {
+  var numbers: List(Int) = {}
+  loop var i: Int = 0, i < count, ++i {
+    numbers.add(value: i)
+  }
+  ret nested(numbers: numbers)
+}
+
+func main() {
+  var numbers: List(Int) = {}
+  loop var i: Int = 0, i < 1000, ++i {
+    numbers.add(value: i)
+  }
+  log("fork-join: {parallelSum(numbers: numbers, parts: 4)}")
+  log("first half: {firstHalf(numbers: numbers)}")
+  log("loop scopes: {loopScopes(numbers: numbers)}")
+  let text: String = "a lent string"
+  var length: Int = 0
+  taskScope {
+    let counted: Task(Int) = spawn matches(text: text, expected: "a lent string")
+    length = counted.get()
+  }
+  log("string: {length}")
+  taskScope {
+    let spawned: Task(Int) = spawn outer(count: 1000)
+    log("from a task: {spawned.get()}")
+  }
+  numbers.add(value: 1)
+  log("after the scope: {numbers.length}")
+}

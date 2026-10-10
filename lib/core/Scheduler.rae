@@ -49,6 +49,13 @@ func nativeSchedulerHelpEnter() unsafe extern("rae_ext_Scheduler_helpEnter") ret
 
 func nativeSchedulerHelpLeave() unsafe extern("rae_ext_Scheduler_helpLeave")
 
+func nativeSchedulerGroupPending(group: Int) unsafe extern("rae_ext_Scheduler_groupPending") ret Int
+
+func nativeSchedulerWaitGroup(
+  group: Int
+  timeoutNs: Int
+) unsafe extern("rae_ext_Scheduler_waitGroup")
+
 func nativeSchedulerParkEpoch() unsafe extern("rae_ext_Scheduler_parkEpoch") ret Int
 
 func nativeSchedulerPark(epoch: Int, timeoutNs: Int) unsafe extern("rae_ext_Scheduler_park")
@@ -411,6 +418,38 @@ func schedulerTaskWait(task: view Int) {
       if not schedulerRunOne(index: worker) {
         nativeSchedulerWaitDone(task: task, timeoutNs: schedulerHelpWaitNs)
       }
+    }
+  }
+}
+
+# Wait until every task of a taskScope's group is done: the tasks that
+# borrow a view from outside the scope (docs/lightweight-spawn-design.md
+# §14.2), wherever their handles went. Like a task wait: the thread runs
+# other tasks meanwhile (off the pool at most schedulerOffPoolHelpDepth deep),
+# watches the group, and blocks only when there is nothing to run.
+func schedulerGroupWait(group: view Int) {
+  unsafe {
+    if nativeSchedulerGroupPending(group: group) is 0 {
+      ret
+    }
+    let worker: Int = nativeSchedulerCurrentWorker()
+    var index: Int = worker
+    var depth: Int = 0
+    if worker <= 0 {
+      index = 0
+      depth = nativeSchedulerHelpEnter()
+    }
+    var spinUntil: Int = nowNs() + schedulerOffPoolSpinNs
+    loop nativeSchedulerGroupPending(group: group) > 0 {
+      let mayHelp: Bool = worker > 0 or depth <= schedulerOffPoolHelpDepth
+      if mayHelp and schedulerRunOne(index: index) {
+        spinUntil = nowNs() + schedulerOffPoolSpinNs
+      } else if nowNs() >= spinUntil {
+        nativeSchedulerWaitGroup(group: group, timeoutNs: schedulerHelpWaitNs)
+      }
+    }
+    if worker <= 0 {
+      nativeSchedulerHelpLeave()
     }
   }
 }

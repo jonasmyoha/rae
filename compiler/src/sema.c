@@ -404,6 +404,9 @@ struct Symbol {
     AstDecl* decl;
     TypeInfo* type;
     int scope_depth;
+    /* Lent to a task by a spawn at this line, inside a taskScope still open:
+     * frozen until the scope ends (docs/lightweight-spawn-design.md §14.2) */
+    int lent_line;
     bool is_immutable;
     BindKind bind_kind;
     /* The own-argument rule (docs/value-aggregates-and-ownership.md §2.2):
@@ -476,6 +479,7 @@ static Symbol* symbol_table_define(SymbolTable* table, Arena* arena, Str name, A
     sym->decl = decl;
     sym->type = type;
     sym->scope_depth = table->current_depth;
+    sym->lent_line = 0;
     sym->is_immutable = is_immutable;
     // Default: an immutable symbol is a read-only borrow (view param) unless a
     // caller refines it to BIND_LET / BIND_CONST.
@@ -1067,6 +1071,21 @@ static void sema_reject_view_to_mod_unbound(AstModule* module, SymbolTable* symb
 static void sema_reject_view_to_mod(AstModule* module, SymbolTable* symbols, const AstParam* p, const AstExpr* value);
 static bool expr_roots_in_let(SymbolTable* symbols, const AstExpr* e, Str* base);
 static void sema_report_let_write(AstModule* module, int line, int column, Str root, const char* action);
+static int s_let_root_lent_line = 0;  /* the spawn that lent the root expr_roots_in_let found, 0: not lent */
+
+/* The open taskScopes (docs/lightweight-spawn-design.md §14.2): the symbol
+ * depth just outside each, and the places its spawns lent (frozen until it
+ * ends) */
+#define SEMA_MAX_TASK_SCOPES 16
+typedef struct {
+    int outer_depth;
+    AstStmt* stmt;
+    Symbol* lent[64];
+    int lent_count;
+} SemaTaskScope;
+static SemaTaskScope s_task_scopes[SEMA_MAX_TASK_SCOPES];
+static int s_task_scope_count = 0;
+static bool sema_spawn_lends(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* spawn, AstExpr* call);
 static void sema_render_access(const AstExpr* e, char* out, size_t cap);
 static void sema_warn_let_receiver(AstModule* module, SymbolTable* symbols, const AstExpr* call);
 static bool expr_is_owning(SymbolTable* symbols, const AstExpr* e);
@@ -4819,10 +4838,23 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                 }
             }
             if (stmt->as.if_stmt.then_block) {
+                /* A taskScope: its spawns may lend views of what lives
+                 * outside it, frozen until here (sema_task_scope_*) */
+                bool task_scope = stmt->as.if_stmt.is_task_scope && s_task_scope_count < SEMA_MAX_TASK_SCOPES;
+                if (task_scope) {
+                    SemaTaskScope* scope = &s_task_scopes[s_task_scope_count++];
+                    scope->outer_depth = symbols->current_depth;
+                    scope->stmt = stmt;
+                    scope->lent_count = 0;
+                }
                 symbol_table_push_scope(symbols);
                 AstStmt* s = stmt->as.if_stmt.then_block->first;
                 while (s) { sema_analyze_stmt(ctx, module, symbols, s, current_return_type); s = s->next; }
                 symbol_table_pop_scope(symbols);
+                if (task_scope) {
+                    SemaTaskScope* scope = &s_task_scopes[--s_task_scope_count];
+                    for (int i = 0; i < scope->lent_count; i++) scope->lent[i]->lent_line = 0;
+                }
             }
             if (stmt->as.if_stmt.else_block) {
                 symbol_table_push_scope(symbols);
@@ -5056,7 +5088,14 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                         || (sym->type->kind == TYPE_OPT && sym->type->as.opt.base
                             && sym->type->as.opt.base->kind == TYPE_REF
                             && sym->type->as.opt.base->as.ref.is_mod));
-                if (sym && sym->is_immutable && !is_mod_alias) {
+                if (sym && sym->lent_line > 0) {
+                    s_let_root_lent_line = sym->lent_line;
+                    char action[200];
+                    snprintf(action, sizeof action, "cannot reassign '%.*s'",
+                             (int)stmt->as.assign_stmt.target->as.ident.len, stmt->as.assign_stmt.target->as.ident.data);
+                    sema_report_let_write(module, (int)stmt->line, (int)stmt->column,
+                                          stmt->as.assign_stmt.target->as.ident, action);
+                } else if (sym && sym->is_immutable && !is_mod_alias) {
                     char buffer[200];
                     int nl = (int)stmt->as.assign_stmt.target->as.ident.len;
                     const char* nm = stmt->as.assign_stmt.target->as.ident.data;
@@ -6340,7 +6379,12 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                 if (sp_call && sp_call->kind == AST_EXPR_CALL) {
                     for (AstCallArg* sa = sp_call->as.call.args; sa; sa = sa->next) sa->moves_local = false;
                 }
-                if (sp_call && sp_call->kind == AST_EXPR_CALL && sp_call->decl_link &&
+                /* Inside a taskScope, `view` arguments of places that outlive
+                 * it are lent instead (docs/lightweight-spawn-design.md
+                 * §14.2): checked, and frozen, here */
+                bool lends = sp_call && sp_call->kind == AST_EXPR_CALL &&
+                    sema_spawn_lends(ctx, module, symbols, expr, sp_call);
+                if (!lends && sp_call && sp_call->kind == AST_EXPR_CALL && sp_call->decl_link &&
                     sp_call->decl_link->kind == AST_DECL_FUNC) {
                     for (AstParam* p = sp_call->decl_link->as.func_decl.params; p; p = p->next) {
                         if (!p->type || !(p->type->is_view || p->type->is_mod)) continue;
@@ -6360,8 +6404,10 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                             char buf[256];
                             snprintf(buf, sizeof(buf),
                                 "cannot spawn: parameter '%.*s' is a %s of non-scalar data, "
-                                "which would be shared across the task boundary; pass it as own or copy",
-                                (int)p->name.len, p->name.data, p->type->is_mod ? "mod" : "view");
+                                "which would be shared across the task boundary; pass it as own or copy%s",
+                                (int)p->name.len, p->name.data, p->type->is_mod ? "mod" : "view",
+                                p->type->is_mod ? "" : " (inside a taskScope, a view of a local declared before "
+                                "it, or of a parameter, may be lent)");
                             diag_error(sema_diag_file(module), (int)expr->line, (int)expr->column, buf);
                             module->had_error = true;
                         }
@@ -8309,6 +8355,16 @@ static bool expr_roots_in_let(SymbolTable* symbols, const AstExpr* e, Str* base)
     }
     if (!e || e->kind != AST_EXPR_IDENT) return false;
     Symbol* sym = symbol_table_lookup(symbols, e->as.ident);
+    /* A place lent to a task is frozen too, whatever its binding, until its
+     * taskScope ends: a `var`, or a `mod` parameter whose storage a task
+     * reads */
+    if (sym && sym->lent_line > 0) {
+        if (base) *base = e->as.ident;
+        s_let_root_decl_line = sym->decl_line;
+        s_let_root_lent_line = sym->lent_line;
+        return true;
+    }
+    s_let_root_lent_line = 0;
     if (!sym || sym->bind_kind != BIND_LET || !sym->is_immutable || !sym->type) return false;
     const TypeInfo* t = sym->type;
     if (t->kind == TYPE_OPT && t->as.opt.base) t = t->as.opt.base;
@@ -8342,6 +8398,15 @@ static void sema_render_access(const AstExpr* e, char* out, size_t cap) {
  * 'a.b'", "cannot pass 'a' to 'mod' parameter 'x'"). */
 static void sema_report_let_write(AstModule* module, int line, int column, Str root, const char* action) {
     char buffer[400];
+    if (s_let_root_lent_line > 0) {
+        snprintf(buffer, sizeof buffer,
+                 "%s: '%.*s' is lent to a task by the spawn at line %d, so it is frozen until its taskScope "
+                 "ends (docs/lightweight-spawn-design.md §14.2)",
+                 action, (int)root.len, root.data, s_let_root_lent_line);
+        diag_error(sema_diag_file(module), line, column, buffer);
+        module->had_error = true;
+        return;
+    }
     snprintf(buffer, sizeof buffer,
              "%s: '%.*s' (declared at line %d) is a 'let', which is frozen (docs/let-is-frozen.md); declare it 'var'",
              action, (int)root.len, root.data, s_let_root_decl_line);
@@ -8522,6 +8587,12 @@ static void sema_check_own_args(CompilerContext* ctx, AstModule* module, SymbolT
                 /* An alias handed to `own` is COPIED (the codegen's
                  * own_takes_copy), so it is not consumed. */
                 if (sym && !sym->is_non_owning && !is_alias && sym->scope_depth > 0) a->moves_local = true;
+                if (sym && sym->lent_line > 0) {
+                    s_let_root_lent_line = sym->lent_line;
+                    char action[200];
+                    snprintf(action, sizeof action, "cannot move '%.*s'", (int)moved->as.ident.len, moved->as.ident.data);
+                    sema_report_let_write(module, (int)a->value->line, (int)a->value->column, moved->as.ident, action);
+                }
             }
         }
         /* A non-owning place handed to `own` (a view parameter, a global,
@@ -9043,3 +9114,63 @@ bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
     pointer_set_free(processed);
     return !module->had_error;
 }
+
+/* Whether a borrowed parameter of type `p` is a value at the C level (a
+ * scalar or an enum): a spawn copies those whatever their mode */
+static bool sema_param_is_value(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstParam* p) {
+    TypeInfo* bt = sema_resolve_type_internal(ctx, module, symbols, p->type);
+    if (bt && bt->kind == TYPE_REF) bt = bt->as.ref.base;
+    if (bt && (bt->kind == TYPE_INT || bt->kind == TYPE_FLOAT || bt->kind == TYPE_BOOL || bt->kind == TYPE_CHAR)) return true;
+    if (p->type->parts && p->type->parts->text.len > 0) {
+        Symbol* tsym = symbol_table_lookup(symbols, p->type->parts->text);
+        if (tsym && tsym->decl && tsym->decl->kind == AST_DECL_ENUM) return true;
+    }
+    return false;
+}
+
+/* A spawn inside a taskScope may LEND a `view` of non-scalar data to its task
+ * (docs/lightweight-spawn-design.md §14.2) when every such argument is a path
+ * into a local declared before the scope, or a parameter: those outlive it.
+ * The scope waits for the task before it ends (the backend's task group),
+ * and the lent places are frozen until then: no write, mutating call, `mod`
+ * argument or move (expr_roots_in_let). A `mod` of non-scalar data is never
+ * lent: two tasks writing one place would race. */
+static bool sema_spawn_lends(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* spawn, AstExpr* call) {
+    if (s_task_scope_count == 0) return false;
+    if (!call->decl_link || call->decl_link->kind != AST_DECL_FUNC) return false;
+    AstFuncDecl* func = &call->decl_link->as.func_decl;
+    if (func->generic_params || func->is_extern) return false;
+    SemaTaskScope* scope = &s_task_scopes[s_task_scope_count - 1];
+    Symbol* roots[32];
+    int root_count = 0;
+    int lent_count = 0;
+    /* Arguments are written in the parameters' order */
+    const AstCallArg* arg = call->as.call.args;
+    for (AstParam* p = func->params; p; p = p->next, arg = arg ? arg->next : NULL) {
+        if (!p->type || !(p->type->is_view || p->type->is_mod)) continue;
+        if (sema_param_is_value(ctx, module, symbols, p)) continue;
+        if (p->type->is_mod || !arg || root_count >= 32) return false;
+        lent_count++;
+        const AstExpr* place = arg->value;
+        /* A string literal is static: it outlives every task */
+        if (place && place->kind == AST_EXPR_STRING) continue;
+        while (place && (place->kind == AST_EXPR_MEMBER || place->kind == AST_EXPR_INDEX)) {
+            place = place->kind == AST_EXPR_MEMBER ? place->as.member.object : place->as.index.target;
+        }
+        if (!place || place->kind != AST_EXPR_IDENT) return false;
+        Symbol* sym = symbol_table_lookup(symbols, place->as.ident);
+        if (!sym || sym->scope_depth <= 0 || sym->scope_depth > scope->outer_depth) return false;
+        roots[root_count++] = sym;
+    }
+    if (lent_count == 0) return false;
+    for (int i = 0; i < root_count; i++) {
+        if (roots[i]->lent_line > 0) continue;   /* frozen already, by this scope or an outer one */
+        if (scope->lent_count >= 64) return false;
+        roots[i]->lent_line = (int)spawn->line;
+        scope->lent[scope->lent_count++] = roots[i];
+    }
+    spawn->as.unary.spawn_lends = true;
+    scope->stmt->as.if_stmt.lends_views = true;
+    return true;
+}
+

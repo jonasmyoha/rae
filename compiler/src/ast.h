@@ -230,6 +230,11 @@ struct AstExpr {
     struct {
       AstExpr* operand;
       AstUnaryOp op;
+      /* A `spawn` inside a taskScope that lends a `view` of non-scalar
+       * data to its task (docs/lightweight-spawn-design.md §14.2): sema
+       * froze the lent places until the scope ends, and the scope waits for
+       * the task */
+      bool spawn_lends;
     } unary;
     /* `value as Type`. Rae has NO implicit numeric conversions, so every
      * change of numeric representation is one of these nodes. */
@@ -369,6 +374,7 @@ struct AstStmt {
       // statement in a C block so the name does not outlive the construct.
       AstStmt* binding;
       bool is_task_scope;  // spelled `taskScope { }` in source (desugared to `if true`)
+      bool lends_views;    // a taskScope whose spawns borrow from outside it (spawn_lends)
     } if_stmt;
     struct {
       AstStmt* init;

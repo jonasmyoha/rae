@@ -1,0 +1,32 @@
+# What a taskScope spawn may not lend, and the freeze on what it lends
+# (docs/lightweight-spawn-design.md §14.2)
+func sumAll(numbers: view List(Int)) ret Int {
+  ret numbers.length
+}
+
+func grow(numbers: mod List(Int)) ret Int {
+  numbers.add(value: 1)
+  ret numbers.length
+}
+
+func main() {
+  var numbers: List(Int) = {}
+  taskScope {
+    let total: Task(Int) = spawn sumAll(numbers: numbers)
+    # Frozen while the task borrows it
+    numbers.add(value: 1)
+    numbers = {}
+    let first: Task(Int) = spawn sumAll(numbers: numbers)
+    log(total.get())
+  }
+  numbers.add(value: 2)
+  taskScope {
+    # Declared inside the scope: it would die before the scope's wait
+    var inner: List(Int) = {}
+    let counted: Task(Int) = spawn sumAll(numbers: inner)
+    # A mod is never lent
+    let grown: Task(Int) = spawn grow(numbers: numbers)
+  }
+  # Outside a taskScope nothing is lent
+  let outside: Task(Int) = spawn sumAll(numbers: numbers)
+}
