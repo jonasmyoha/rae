@@ -1,12 +1,18 @@
 # Readiness polling over many sockets (docs/server-benchmarks-design.md §9 G2,
 # §1.2): which of the watched sockets can be read or written now.
 #
-# The policy is Rae over the one-call kqueue shim in lib/net/NetSystem.rae:
-# what an interest change means, retrying a wait a signal interrupted, and
-# turning raw (handle, filter, flags) events into `Readiness` values. The API
-# is the same whatever the kernel mechanism: kqueue on macOS today; epoll is
-# added behind it later (decision F8), and until then a poller elsewhere
-# answers `unsupported`.
+# The policy is Rae over the one-call shims in lib/net/NetSystem.rae: what an
+# interest change means, retrying a wait a signal interrupted, and turning raw
+# events into `Readiness` values. The API is the same whatever the kernel
+# mechanism: kqueue on Apple and the BSDs, epoll on a Linux kernel (decision
+# F8); elsewhere a poller answers `unsupported`.
+#
+# epoll keeps ONE interest mask per descriptor, where kqueue keeps one per
+# direction. So an epoll poller is two queues: one for reading, one for
+# writing, the writing queue watched inside the reading one (an epoll queue is
+# itself readable when it has events). Watching or forgetting a direction is
+# then one change on that direction's queue, exactly as with kqueue, and no
+# table of masks has to be kept (closing a socket leaves both queues).
 #
 # A wait allocates nothing: the poller owns its raw-event buffer, made once,
 # and `pollWait` refills the caller's `List(Readiness)` (cleared, its capacity
@@ -16,8 +22,10 @@ open net/NetSystem
 open net/Tcp
 
 type Poller {
-  # The kernel queue's handle, -1 when there is none
+  # The kernel queue's handle, -1 when there is none (epoll: the read queue)
   handle: Int
+  # epoll only: the write queue, watched inside `handle`; -1 otherwise
+  writeHandle: Int
   status: NetStatus
   # (handle, filter, flags) per raw event of the last wait
   rawEvents: List(Int)
@@ -37,7 +45,7 @@ type Readiness {
 }
 
 func noPoller(status: view NetStatus) ret Poller {
-  ret Poller { handle: -1, status: status, rawEvents: {} }
+  ret Poller { handle: -1, writeHandle: -1, status: status, rawEvents: {} }
 }
 
 # A new poller watching nothing. Its `status` says why there is none.
@@ -52,6 +60,37 @@ func createPoller() ret Poller {
       let maxEvents: Int = netConstant(which: pollMaxWaitEvents)
       ret Poller {
         handle: code
+        writeHandle: -1
+        status: NetStatus.ok
+        rawEvents: List.create(Int, cap: maxEvents * 3)
+      }
+    }
+  } else when hasEpoll {
+    unsafe {
+      let readQueue: Int = systemEpollCreate()
+      if readQueue < 0 {
+        ret noPoller(status: netStatusFromCode(code: readQueue))
+      }
+      let writeQueue: Int = systemEpollCreate()
+      if writeQueue < 0 {
+        let closed: Int = systemClose(handle: readQueue)
+        ret noPoller(status: netStatusFromCode(code: writeQueue))
+      }
+      let nested: Int = systemEpollControl(
+        queue: readQueue
+        operation: netConstant(which: epollAdd)
+        handle: writeQueue
+        events: netConstant(which: epollIn)
+      )
+      if nested < 0 {
+        let closedRead: Int = systemClose(handle: readQueue)
+        let closedWrite: Int = systemClose(handle: writeQueue)
+        ret noPoller(status: netStatusFromCode(code: nested))
+      }
+      let maxEvents: Int = netConstant(which: pollMaxWaitEvents)
+      ret Poller {
+        handle: readQueue
+        writeHandle: writeQueue
         status: NetStatus.ok
         rawEvents: List.create(Int, cap: maxEvents * 3)
       }
@@ -60,17 +99,26 @@ func createPoller() ret Poller {
   ret noPoller(status: NetStatus.unsupported)
 }
 
-# One interest change, retried if a signal interrupted it
+# One interest change in one direction, retried if a signal interrupted it:
+# `reading` picks the direction, `adding` whether to watch or forget it
 func changeInterest(
   poller: view Poller
   socketId: view SocketId
-  filter: view Int
-  change: view Int
+  reading: view Bool
+  adding: view Bool
 ) ret NetStatus {
   if poller.handle < 0 {
     ret poller.status
   }
   when hasKqueue {
+    var filter: Int = pollFilterWrite
+    if reading {
+      filter = pollFilterRead
+    }
+    var change: Int = pollChangeDelete
+    if adding {
+      change = pollChangeAdd
+    }
     unsafe {
       loop {
         let code: Int = systemPollerChange(
@@ -80,6 +128,35 @@ func changeInterest(
           flags: netConstant(which: change)
         )
         if code >= 0 {
+          ret NetStatus.ok
+        }
+        if not isError(code: code, which: errorInterrupted) {
+          ret netStatusFromCode(code: code)
+        }
+      }
+    }
+  } else when hasEpoll {
+    # The direction's own queue; reading also wants the peer's hang-up
+    var queue: Int = poller.writeHandle
+    var events: Int = netConstant(which: epollOut)
+    if reading {
+      queue = poller.handle
+      events = netConstant(which: epollIn) bitor netConstant(which: epollReadHangUp)
+    }
+    var operation: Int = netConstant(which: epollDelete)
+    if adding {
+      operation = netConstant(which: epollAdd)
+    }
+    unsafe {
+      loop {
+        let code: Int = systemEpollControl(
+          queue: queue
+          operation: operation
+          handle: socketId.handle
+          events: events
+        )
+        # Watched already in this direction: as with kqueue's EV_ADD, fine
+        if code >= 0 or (adding and isError(code: code, which: errorExists)) {
           ret NetStatus.ok
         }
         if not isError(code: code, which: errorInterrupted) {
@@ -103,8 +180,8 @@ func pollerWatch(
     let status: NetStatus = changeInterest(
       poller: poller
       socketId: socketId
-      filter: pollFilterRead
-      change: pollChangeAdd
+      reading: true
+      adding: true
     )
     if status is not NetStatus.ok {
       ret status
@@ -114,8 +191,8 @@ func pollerWatch(
     ret changeInterest(
       poller: poller
       socketId: socketId
-      filter: pollFilterWrite
-      change: pollChangeAdd
+      reading: false
+      adding: true
     )
   }
   ret NetStatus.ok
@@ -134,16 +211,16 @@ func pollerForget(
     status = changeInterest(
       poller: poller
       socketId: socketId
-      filter: pollFilterRead
-      change: pollChangeDelete
+      reading: true
+      adding: false
     )
   }
   if writable {
     let writeStatus: NetStatus = changeInterest(
       poller: poller
       socketId: socketId
-      filter: pollFilterWrite
-      change: pollChangeDelete
+      reading: false
+      adding: false
     )
     if status is NetStatus.ok {
       status = writeStatus
@@ -160,6 +237,71 @@ func pollWait(poller: mod Poller, ready: mod List(Readiness), timeoutMs: view In
   if poller.handle < 0 {
     ret poller.status
   }
+  when hasKqueue {
+    let count: Int = kqueueWait(poller: poller, timeoutMs: timeoutMs)
+    if count < 0 {
+      ret netStatusFromCode(code: count)
+    }
+    let readFilter: Int = netConstant(which: pollFilterRead)
+    let writeFilter: Int = netConstant(which: pollFilterWrite)
+    let endOfFile: Int = netConstant(which: pollFlagEndOfFile)
+    let errorFlag: Int = netConstant(which: pollFlagError)
+    loop var i: Int = 0, i < count, ++i {
+      let handle: Int = poller.rawEvents.copyAtFallback(index: i * 3, fallback: -1)
+      let filter: Int = poller.rawEvents.copyAtFallback(index: i * 3 + 1, fallback: 0)
+      let flags: Int = poller.rawEvents.copyAtFallback(index: i * 3 + 2, fallback: 0)
+      ready.add(value: Readiness {
+        socketId: SocketId { handle: handle }
+        readable: filter is readFilter
+        writable: filter is writeFilter
+        closed: (flags bitand endOfFile) is not 0
+        failed: (flags bitand errorFlag) is not 0
+      })
+    }
+    ret NetStatus.ok
+  } else when hasEpoll {
+    # The read queue reports its sockets and, when the write queue has events,
+    # the write queue itself: then take those without waiting
+    let count: Int = epollWait(poller: poller, queue: poller.handle, timeoutMs: timeoutMs)
+    if count < 0 {
+      ret netStatusFromCode(code: count)
+    }
+    var writesPending: Bool = false
+    loop var i: Int = 0, i < count, ++i {
+      let handle: Int = poller.rawEvents.copyAtFallback(index: i * 3, fallback: -1)
+      if handle is poller.writeHandle {
+        writesPending = true
+      } else {
+        addEpollReadiness(
+          ready: ready
+          handle: handle
+          events: poller.rawEvents.copyAtFallback(index: i * 3 + 1, fallback: 0)
+          writeQueue: false
+        )
+      }
+    }
+    if writesPending {
+      let writes: Int = epollWait(poller: poller, queue: poller.writeHandle, timeoutMs: 0)
+      if writes < 0 {
+        ret netStatusFromCode(code: writes)
+      }
+      loop var i: Int = 0, i < writes, ++i {
+        addEpollReadiness(
+          ready: ready
+          handle: poller.rawEvents.copyAtFallback(index: i * 3, fallback: -1)
+          events: poller.rawEvents.copyAtFallback(index: i * 3 + 1, fallback: 0)
+          writeQueue: true
+        )
+      }
+    }
+    ret NetStatus.ok
+  }
+  ret NetStatus.unsupported
+}
+
+# One kqueue wait into the raw-event buffer, retried after a signal: the
+# event count, or a negated errno
+func kqueueWait(poller: mod Poller, timeoutMs: view Int) ret Int {
   let maxEvents: Int = poller.rawEvents.cap / 3
   var count: Int = 0
   when hasKqueue {
@@ -176,31 +318,62 @@ func pollWait(poller: mod Poller, ready: mod List(Readiness), timeoutMs: view In
         }
       }
     }
-  } else {
-    ret NetStatus.unsupported
   }
   if count < 0 {
     poller.rawEvents.length = 0
-    ret netStatusFromCode(code: count)
+    ret count
   }
   poller.rawEvents.length = count * 3
-  let readFilter: Int = netConstant(which: pollFilterRead)
-  let writeFilter: Int = netConstant(which: pollFilterWrite)
-  let endOfFile: Int = netConstant(which: pollFlagEndOfFile)
-  let errorFlag: Int = netConstant(which: pollFlagError)
-  loop var i: Int = 0, i < count, ++i {
-    let handle: Int = poller.rawEvents.copyAtFallback(index: i * 3, fallback: -1)
-    let filter: Int = poller.rawEvents.copyAtFallback(index: i * 3 + 1, fallback: 0)
-    let flags: Int = poller.rawEvents.copyAtFallback(index: i * 3 + 2, fallback: 0)
-    ready.add(value: Readiness {
-      socketId: SocketId { handle: handle }
-      readable: filter is readFilter
-      writable: filter is writeFilter
-      closed: (flags bitand endOfFile) is not 0
-      failed: (flags bitand errorFlag) is not 0
-    })
+  ret count
+}
+
+# One epoll wait on `queue` into the raw-event buffer, retried after a signal:
+# the event count, or a negated errno
+func epollWait(poller: mod Poller, queue: view Int, timeoutMs: view Int) ret Int {
+  let maxEvents: Int = poller.rawEvents.cap / 3
+  var count: Int = 0
+  when hasEpoll {
+    unsafe {
+      loop {
+        count = systemEpollWait(
+          queue: queue
+          events: poller.rawEvents.data
+          maxEvents: maxEvents
+          timeoutMs: timeoutMs
+        )
+        if count >= 0 or not isError(code: count, which: errorInterrupted) {
+          break
+        }
+      }
+    }
   }
-  ret NetStatus.ok
+  if count < 0 {
+    poller.rawEvents.length = 0
+    ret count
+  }
+  poller.rawEvents.length = count * 3
+  ret count
+}
+
+# One epoll event as a Readiness. A hang-up or an error makes a read-queue
+# socket readable too, so its owner reads and meets the end of the stream or
+# the error, as a kqueue EOF read event does.
+func addEpollReadiness(
+  ready: mod List(Readiness)
+  handle: view Int
+  events: view Int
+  writeQueue: view Bool
+) {
+  let hangUp: Int = netConstant(which: epollReadHangUp) bitor netConstant(which: epollHangUp)
+  let failed: Bool = (events bitand netConstant(which: epollError)) is not 0
+  let closed: Bool = (events bitand hangUp) is not 0
+  ready.add(value: Readiness {
+    socketId: SocketId { handle: handle }
+    readable: not writeQueue
+    writable: writeQueue
+    closed: closed
+    failed: failed
+  })
 }
 
 # Release the kernel queue (the sockets it watched stay open). A wait on the
@@ -211,6 +384,12 @@ func closePoller(poller: mod Poller) {
       let code: Int = systemClose(handle: poller.handle)
     }
     poller.handle = -1
+  }
+  if poller.writeHandle >= 0 {
+    unsafe {
+      let code: Int = systemClose(handle: poller.writeHandle)
+    }
+    poller.writeHandle = -1
   }
   poller.status = NetStatus.failed
 }

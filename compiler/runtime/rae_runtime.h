@@ -40,6 +40,14 @@
 #define RAE_HAS_POSIX_SOCKETS 1
 #endif
 
+/* The C twin of `hasEpoll` (lib/net/NetSystem.rae) and `hasInotify`
+ * (lib/FileNotify.rae), both Target.isLinuxKernel: the epoll poller shims of
+ * runtime_net.c and the inotify shims of runtime_file_notify.c */
+#if defined(__linux__) && !defined(__wasm__) && !defined(__EMSCRIPTEN__)
+#define RAE_HAS_EPOLL 1
+#define RAE_HAS_INOTIFY 1
+#endif
+
 /* Ptr lowers directly to void* in ordinary declarations. Generic storage also
  * needs an identifier-safe spelling because the concrete type is embedded in
  * generated List/function names. This is the canonical TypeInfo spelling for

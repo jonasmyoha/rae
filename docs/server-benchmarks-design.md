@@ -20,7 +20,7 @@ physics); does it hold up, and at what cost, for a server?
 | capability | today | consequence |
 |---|---|---|
 | TCP sockets | **none**: no `socket`/`listen`/`accept` anywhere in `lib/` or the runtime | phase 1 cannot start until a `net` module exists (gap G1) |
-| readiness polling (kqueue / epoll) | `lib/FileNotify` is Rae over one-call kqueue shims too (runtime audit row 10) | the poller (G2, landed) is a kqueue shim plus Rae bookkeeping (§1.2), `lib/net/Poller.rae`; epoll is not there yet (F8) |
+| readiness polling (kqueue / epoll) | `lib/FileNotify` is Rae over one-call kqueue shims too (runtime audit row 10) | the poller (G2, landed) is a kqueue shim plus Rae bookkeeping (§1.2), `lib/net/Poller.rae`; epoll behind the same API since 0.1.268 (F8; compiled for Linux, not yet run there) |
 | threads | `spawn f(...)` → `Task(T)` on real OS threads; `Channel(T)` (MPSC, non-blocking, any value-type payload since #969); `Parallel.workerCount()` | enough to run one event loop (or one World) per core and hand accepted sockets (plain value handles) to workers over a channel; a `Task` can be asked "done?" without joining (`isDone` / `tryGet`, gap T1, done 2026-10-08) |
 | ECS | `lib/ecs`: `EntityAllocator` (`allocEntity` / `freeEntity`), `ComponentTable(T)` (sparse set, O(1) lookup), query loops over one to three tables, zero-field tag components, `EventQueue(T)`, an ordered `Schedule` | everything the ECS-style servers need already exists; only the server components and systems are new (G8) |
 | bytes | `List(UInt8)`, `Buffer(T)`, `String` is byte-indexed (`byteAt`, `sub`, `indexOf`, `startsWith`, `split`) | an HTTP parser can be written in plain Rae; the reusable read/write byte buffer is `lib/net/ByteBuffer.rae` (G3, landed) |
@@ -611,6 +611,19 @@ decided.
    but the first pass implements kqueue only. Linux and epoll come when a
    Linux machine is in use; `taskset`-pinned Linux runs then become the
    reference numbers.
+   **epoll landed 0.1.268** behind the same Rae API. An epoll poller is
+   TWO queues: one for reading, one for writing, with the write queue
+   watched inside the read one. That way watching or forgetting a direction
+   is one change on its own queue, as with kqueue's per-filter interest, and
+   Rae keeps no table of masks (epoll keeps one mask per descriptor).
+   - `pollWait` waits on the read queue and drains the write queue without
+     waiting when it shows up among the events;
+   - a hang-up or an error makes a read-queue socket readable, so its owner
+     meets the end of the stream as with kqueue's EOF event;
+   - three one-call shims: `epollCreate` / `epollControl` / `epollWait`.
+
+   It compiles for x86-64 and arm64 Linux (zig cc). It has not RUN on Linux
+   yet; that is queued with the fixtures.
 9. **F9 Requests are EVENTS, not entities** (maintainer, §7). The rule is
    lifetime, not count: a request lives one frame, so it goes in an
    `EventQueue(HttpRequest)`; connections are the entities. A request that
