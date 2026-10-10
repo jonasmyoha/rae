@@ -14,11 +14,11 @@
 #
 # Each prints `RESULT,rae,<benchmark>,<parameter>,<metric>,<value>` lines.
 #
-# A spawn cannot share read-only data today: a `view` of a list makes the
-# call run synchronously (docs/concurrency-model.md). So the fork-join halves
-# get their own copy (`own`), and the copying is part of what is measured. The
-# `parallelLoop` sum, whose iterations may read shared data on the worker pool,
-# is the reference for what sharing would give.
+# A spawn shares read-only data only inside a `taskScope`, which lends it a
+# `view` (docs/lightweight-spawn-design.md §14.2). The `sum` mode measures both:
+# fork-join halves that get their own copy (`own`, the copying is part of what
+# is measured) and halves that are lent the list. The `parallelLoop` sum, whose
+# iterations read shared data on the worker pool, is the reference.
 import Time
 
 func result(
@@ -288,6 +288,37 @@ func parallelSum(numbers: own List(Int), leaf: copy Int) ret Int {
   ret left.get() + right
 }
 
+# The same split, the list LENT to the left half instead of copied: a spawn in a
+# taskScope may pass a view of what outlives the scope (§14.2)
+func lentSum(
+  numbers: view List(Int)
+  start: copy Int
+  count: copy Int
+  leaf: copy Int
+) ret Int {
+  if count <= leaf {
+    ret sequentialSum(numbers: numbers, start: start, count: count)
+  }
+  let half: Int = count / 2
+  var total: Int = 0
+  taskScope {
+    let left: Task(Int) = spawn lentSum(
+      numbers: numbers
+      start: start
+      count: half
+      leaf: leaf
+    )
+    let right: Int = lentSum(
+      numbers: numbers
+      start: start + half
+      count: count - half
+      leaf: leaf
+    )
+    total = left.get() + right
+  }
+  ret total
+}
+
 func copiedSum(numbers: view List(Int), leaf: view Int) ret Int {
   ret parallelSum(numbers: sliceOf(numbers: numbers, start: 0, count: numbers.length), leaf: leaf)
 }
@@ -318,6 +349,7 @@ func sum(count: view Int, leaf: view Int) {
   var sequentialTimes: List(Float64) = {}
   var copyTimes: List(Float64) = {}
   var forkTimes: List(Float64) = {}
+  var lentTimes: List(Float64) = {}
   var poolTimes: List(Float64) = {}
   var wrong: Int = 0
   loop var round: Int = 0, round < 6, ++round {
@@ -336,6 +368,16 @@ func sum(count: view Int, leaf: view Int) {
     }
     let forkMs: Float64 = elapsedMs(startNs: start)
     start = nowNs()
+    if lentSum(
+      numbers: numbers
+      start: 0
+      count: count
+      leaf: leaf
+    ) is not expected {
+      wrong = wrong + 1
+    }
+    let lentMs: Float64 = elapsedMs(startNs: start)
+    start = nowNs()
     if poolSum(numbers: numbers, chunks: 64) is not expected {
       wrong = wrong + 1
     }
@@ -345,6 +387,7 @@ func sum(count: view Int, leaf: view Int) {
       sequentialTimes.add(value: sequentialMs)
       copyTimes.add(value: copyMs)
       forkTimes.add(value: forkMs)
+      lentTimes.add(value: lentMs)
       poolTimes.add(value: poolMs)
     }
   }
@@ -365,6 +408,12 @@ func sum(count: view Int, leaf: view Int) {
     parameter: leaf
     metric: "forkJoinMs"
     value: median(values: forkTimes)
+  )
+  result(
+    benchmark: "sum"
+    parameter: leaf
+    metric: "lentForkJoinMs"
+    value: median(values: lentTimes)
   )
   result(
     benchmark: "sum"

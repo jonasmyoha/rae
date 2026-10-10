@@ -1,0 +1,15 @@
+tests/cases/1078_reject_spawn_lend/Main.rae:17:16: cannot call mutating method 'add' on 'numbers': 'numbers' is lent to a task by the spawn at line 15, so it is frozen until its taskScope ends (docs/lightweight-spawn-design.md §14.2)
+    17 |     numbers.add(value: 1)
+       |                ^~~~
+tests/cases/1078_reject_spawn_lend/Main.rae:18:13: cannot reassign 'numbers': 'numbers' is lent to a task by the spawn at line 15, so it is frozen until its taskScope ends (docs/lightweight-spawn-design.md §14.2)
+    18 |     numbers = {}
+       |             ^~~~
+tests/cases/1078_reject_spawn_lend/Main.rae:26:30: cannot spawn: parameter 'numbers' is a view of non-scalar data, which would be shared across the task boundary; pass it as own or copy (inside a taskScope, a view of a local declared before it, or of a parameter, may be lent)
+    26 |     let counted: Task(Int) = spawn sumAll(numbers: inner)
+       |                              ^~~~
+tests/cases/1078_reject_spawn_lend/Main.rae:28:28: cannot spawn: parameter 'numbers' is a mod of non-scalar data, which would be shared across the task boundary; pass it as own or copy
+    28 |     let grown: Task(Int) = spawn grow(numbers: numbers)
+       |                            ^~~~
+tests/cases/1078_reject_spawn_lend/Main.rae:31:28: cannot spawn: parameter 'numbers' is a view of non-scalar data, which would be shared across the task boundary; pass it as own or copy (inside a taskScope, a view of a local declared before it, or of a parameter, may be lent)
+    31 |   let outside: Task(Int) = spawn sumAll(numbers: numbers)
+       |                            ^~~~

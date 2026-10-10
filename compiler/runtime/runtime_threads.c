@@ -412,6 +412,7 @@ static struct {
   int64_t (*default_workers)(void);
   int64_t (*chunk_size)(int64_t total, int64_t workers);
   void (*wake)(int64_t task);
+  void (*group_wait)(int64_t group);
 } g_sched_hooks;
 /* How long a worker spins after a job before it sleeps. A solver step runs a
  * few hundred parallelLoops a few microseconds apart, and a worker that fell
@@ -544,12 +545,13 @@ static int64_t rae_pool_now_ns(void) {
 
 void rae_sched_install(void (*worker_loop)(int64_t index), void (*task_wait)(int64_t task),
                        int64_t (*default_workers)(void), int64_t (*chunk_size)(int64_t total, int64_t workers),
-                       void (*wake)(int64_t task)) {
+                       void (*wake)(int64_t task), void (*group_wait)(int64_t group)) {
   g_sched_hooks.worker_loop = worker_loop;
   g_sched_hooks.task_wait = task_wait;
   g_sched_hooks.default_workers = default_workers;
   g_sched_hooks.chunk_size = chunk_size;
   g_sched_hooks.wake = wake;
+  g_sched_hooks.group_wait = group_wait;
 }
 
 typedef struct {
@@ -787,6 +789,41 @@ void rae_task_complete(RaeTask* t) {
   atomic_store_explicit(&t->done, 1, memory_order_release);
   if (waiter > 0 && g_sched_hooks.wake) g_sched_hooks.wake((int64_t)waiter);
   rae_sched_wake_blocked();
+}
+
+/* A lending task finished (its last act: the group may end right after) */
+void rae_group_done(RaeTaskGroup* g) {
+  if (atomic_fetch_sub_explicit(&g->pending, 1, memory_order_acq_rel) == 1) rae_sched_wake_blocked();
+}
+
+int64_t rae_ext_Scheduler_groupPending(int64_t group) {
+  RaeTaskGroup* g = (RaeTaskGroup*)(intptr_t)group;
+  return g ? atomic_load_explicit(&g->pending, memory_order_acquire) : 0;
+}
+
+/* Block until the group's tasks are done, or (timeout_ns >= 0) that long */
+void rae_ext_Scheduler_waitGroup(int64_t group, int64_t timeout_ns) {
+  RaeTaskGroup* g = (RaeTaskGroup*)(intptr_t)group;
+  if (!g) return;
+  struct timespec deadline;
+  if (timeout_ns >= 0) rae_sched_deadline(&deadline, timeout_ns);
+  pthread_mutex_lock(&g_sched_done_lock);
+  atomic_fetch_add(&g_sched_done_waiters, 1);
+  while (atomic_load_explicit(&g->pending, memory_order_acquire) > 0) {
+    if (timeout_ns < 0) {
+      pthread_cond_wait(&g_sched_done_cond, &g_sched_done_lock);
+    } else if (pthread_cond_timedwait(&g_sched_done_cond, &g_sched_done_lock, &deadline) != 0) {
+      break;
+    }
+  }
+  atomic_fetch_sub(&g_sched_done_waiters, 1);
+  pthread_mutex_unlock(&g_sched_done_lock);
+}
+
+void rae_group_wait(RaeTaskGroup* g) {
+  if (atomic_load_explicit(&g->pending, memory_order_acquire) == 0) return;
+  if (g_sched_hooks.group_wait) g_sched_hooks.group_wait((int64_t)(intptr_t)g);
+  else rae_ext_Scheduler_waitGroup((int64_t)(intptr_t)g, -1);
 }
 
 int rae_sched_wait_task(RaeTask* t) {
@@ -1149,14 +1186,19 @@ static struct {
 } g_sched_hooks;
 void rae_sched_install(void (*worker_loop)(int64_t index), void (*task_wait)(int64_t task),
                        int64_t (*default_workers)(void), int64_t (*chunk_size)(int64_t total, int64_t workers),
-                       void (*wake)(int64_t task)) {
-  (void)worker_loop; (void)default_workers; (void)chunk_size; (void)wake;
+                       void (*wake)(int64_t task), void (*group_wait)(int64_t group)) {
+  (void)worker_loop; (void)default_workers; (void)chunk_size; (void)wake; (void)group_wait;
   g_sched_hooks.task_wait = task_wait;
 }
 /* No pool: a resumable task never runs (its spawn stays a thread, which a
  * build without threads runs on its caller), so nothing suspends */
 void rae_task_complete(RaeTask* t) { atomic_store_explicit(&t->done, 1, memory_order_release); }
 int rae_sched_wait_task(RaeTask* t) { (void)t; return 0; }
+/* No threads: a lending task ran on its spawner */
+void rae_group_done(RaeTaskGroup* g) { atomic_fetch_sub(&g->pending, 1); }
+void rae_group_wait(RaeTaskGroup* g) { (void)g; }
+int64_t rae_ext_Scheduler_groupPending(int64_t group) { (void)group; return 0; }
+void rae_ext_Scheduler_waitGroup(int64_t group, int64_t timeout_ns) { (void)group; (void)timeout_ns; }
 int rae_sched_sleep_until(int64_t deadline_ns) { (void)deadline_ns; return 0; }
 int64_t rae_sched_now_ns(void) {
   struct timespec now;

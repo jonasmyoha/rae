@@ -165,6 +165,11 @@ typedef struct {
   bool twin_args_from_frame;
   Str twin_hoist_temps[16];
   int twin_hoist_count;
+  // The open taskScopes whose spawns lend views (c_lend.c): their task
+  // groups (`__rae_group<id>`) and the loop depth each opened at
+  int lend_group_ids[8];
+  int lend_group_loop_depth[8];
+  int lend_group_count;
 } CFuncContext;
 
 typedef struct CStmtTemps {
@@ -282,6 +287,12 @@ bool c_spawn_threadable(CFuncContext* ctx, const AstFuncDecl* f);
 /* True when a spawn of this function runs as a task on the scheduler's
  * worker pool (lib/core/Scheduler.rae) instead of a thread (c_backend.c) */
 bool c_spawn_on_pool(CFuncContext* ctx, const AstDecl* callee_decl);
+/* Spawns that lend views (c_lend.c) */
+void c_lend_emit_helpers(CompilerContext* ctx, const AstModule* module, FILE* out);
+bool c_lend_emit_spawn(CFuncContext* ctx, const AstExpr* spawn, FILE* out);
+void c_lend_open_group(CFuncContext* ctx, FILE* out);
+void c_lend_close_group(CFuncContext* ctx, FILE* out);
+void c_lend_wait_groups(CFuncContext* ctx, FILE* out, bool loop_exit);
 /* Resumable twins (c_twin.c) */
 void c_twins_plan(CompilerContext* ctx, const AstModule* module);
 void c_twins_emit(CompilerContext* ctx, const AstModule* module, FILE* out);

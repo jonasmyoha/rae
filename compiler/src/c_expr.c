@@ -954,6 +954,8 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
             case AST_UNARY_POST_DEC: emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, true, false); fprintf(out, "--"); break;
             case AST_UNARY_SPAWN: {
                 const AstExpr* callexpr = expr->as.unary.operand;
+                // A spawn inside a taskScope that lends views (c_lend.c)
+                if (expr->as.unary.spawn_lends && c_lend_emit_spawn(ctx, expr, out)) break;
                 TypeInfo* resT = (expr->resolved_type && expr->resolved_type->kind == TYPE_TASK)
                                      ? expr->resolved_type->as.task.base : NULL;
                 bool is_void = !resT || resT->kind == TYPE_VOID;
