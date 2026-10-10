@@ -148,6 +148,12 @@ systems, app, physics world, scene; the renderer's GPU handles are moved in
 under `unsafe`, never copied), and the body polls for close and runs
 `runPlaygroundFrame`. Its headless modes stay plain code in `main`.
 
+In the browser each frame first runs the spawned tasks that can go on (a
+sleep that ended, a task they waited on that finished), for at most 4 ms. A
+spawned task that waits therefore runs between frames instead of holding
+the page (docs/lightweight-spawn-design.md §16, checked by
+`examples/zz_web_task_check` in headless Chrome).
+
 ## 6. The browser build of a mainLoop program
 
 The build sees the generated loop (its `RAE_FRAME_CALLBACK_ENTRY` marker)

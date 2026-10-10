@@ -2111,7 +2111,9 @@ bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* 
           fprintf(out, "  rae_sched_install(rae_sched_hook_worker_loop, rae_sched_hook_task_wait, "
                        "rae_sched_hook_worker_count, rae_sched_hook_chunk_size, rae_sched_hook_wake, "
                        "rae_sched_hook_group_wait);\n");
-          if (core_function_mangled(ctx, "schedulerIoLoop")) fprintf(out, "  rae_sched_install_io(rae_sched_hook_io_loop);\n");
+          if (core_function_mangled(ctx, "schedulerIoLoop") && core_function_mangled(ctx, "schedulerRunReady")) {
+              fprintf(out, "  rae_sched_install_io(rae_sched_hook_io_loop, rae_sched_hook_frame);\n");
+          }
       }
   } else {
       fprintf(out, "RAE_UNUSED static %s %s(", rt, mangled); emit_param_list(&tctx, f->params, out, false); fprintf(out, ") {\n");
@@ -2657,7 +2659,11 @@ static void emit_scheduler_hooks(CompilerContext* ctx, FILE* out) {
   fprintf(out, "RAE_UNUSED static void rae_sched_hook_wake(int64_t task) { %s(task); }\n", wake);
   fprintf(out, "RAE_UNUSED static void rae_sched_hook_group_wait(int64_t group) { %s(group); }\n", group_wait);
   const char* io_loop = core_function_mangled(ctx, "schedulerIoLoop");
-  if (io_loop) fprintf(out, "RAE_UNUSED static void rae_sched_hook_io_loop(void) { %s(); }\n", io_loop);
+  const char* frame = core_function_mangled(ctx, "schedulerRunReady");
+  if (io_loop && frame) {
+    fprintf(out, "RAE_UNUSED static void rae_sched_hook_io_loop(void) { %s(); }\n", io_loop);
+    fprintf(out, "RAE_UNUSED static void rae_sched_hook_frame(void) { %s(); }\n", frame);
+  }
   fprintf(out, "RAE_UNUSED static void rae_sched_hook_worker_loop(int64_t index) { %s(index); }\n", worker_loop);
   fprintf(out, "RAE_UNUSED static void rae_sched_hook_task_wait(int64_t task) { %s(task); }\n", task_wait);
   fprintf(out, "RAE_UNUSED static int64_t rae_sched_hook_worker_count(void) { return %s(); }\n", worker_count);

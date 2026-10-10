@@ -346,8 +346,8 @@ inserts. The options (fork F3):
    two. S3a, the scheduler, is done (0.1.251, §12):** spawns that wait only on
    other tasks run M:N on the pool, with the policy in Rae. **S3b**, the frame
    and step codegen, makes `get()` and `sleep` suspend: done (0.1.252, §13).
-4. Socket and poller waits (after G2) and the browser path. **Socket waits:
-   done (0.1.256, §15).**
+4. Socket and poller waits (after G2) and the browser path. **Done: socket
+   waits 0.1.256 (§15), the browser 0.1.257 (§16).**
 5. The extern-blocking and fairness choices (F2, F3).
 
 ## 9. Decisions for the maintainer
@@ -1008,5 +1008,52 @@ the call runs with its own timeout, as in the normal function.
   `RAE_SCHED_IO_SUSPENDS` is 0, and a spawn that can reach a socket wait
   stays a thread, as before S4 (the spawn site tests the constant, which
   the C compiler folds away).
-- **The browser:** tasks interleaving with `mainLoop`'s frames.
+- **The browser:** done in §16.
+
+## 16. Tasks between the browser's frames (S4, 2026-10-10)
+
+A browser build has one thread, and it may not block: the page's frames
+run on it. Before this change a spawn there ran to its end on the spawner,
+and the sleeps of a resumable task did not suspend; they were skipped,
+because the build without threads had no timers. Now a waiting task runs
+between frames, as §4.3 planned.
+
+**The policy** (Scheduler.rae, where `rae_ext_Scheduler_inBrowser` says so; a
+platform constant, since the prelude cannot count on `Target` being loaded):
+
+- **A spawn** runs the task until it first waits, then returns. A task that
+  never waits therefore finishes inside its spawn, as before.
+- **Each frame of `mainLoop`** first runs the tasks that can go on
+  (`schedulerRunReady`): those whose timer is due, and those whose task
+  finished. It stops after 4 ms (`schedulerFrameBudgetNs`), so a frame is
+  never held up for long.
+- **A `get()` in a frame** on an unfinished task runs the ready tasks until
+  that one is done. Like a wait on `main` natively (decision F5), it blocks
+  the frame: the page should test `isDone()` first, as the check page does.
+
+**The kernel without threads** (`runtime_sched_single.c`, split out of
+`runtime_threads.c` with the timer heap, `runtime_sched_timers.c`, which both
+builds share):
+
+- one queue, first in, first out;
+- the timer heap, so a sleep suspends;
+- the waiter hand-off of `rae_task_complete`, so a `get()` suspends;
+- a park that does not sleep: a wait for a task on a timer looks again at
+  once.
+
+The generated frame callback calls `rae_sched_frame()` before the body.
+
+A wasi build (`wasm_smoke.sh`) has no frames, so it keeps the drive of
+`RAE_WORKERS=1`: the spawner runs the task to its end through its timers.
+
+**Checked** by `examples/zz_web_task_check`: a task sleeps five times
+20 ms while a `mainLoop` counts frames. `compiler/tools/wasm_webgpu_smoke.sh`
+builds it for the browser and runs it in headless Chrome: "TASK OK: 5 sleeps
+of 20 ms while 10 frames ran". Before this change the task finished before
+the first frame, with no sleep at all. Natively the same page passes, with
+the task on the pool.
+
+**Not in the browser:** sockets (the page has none; fetch and WebSocket
+would be their own waits) and threads (`RAE_WASM_THREADS` builds keep the
+threaded kernel).
 
