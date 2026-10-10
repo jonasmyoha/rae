@@ -2866,9 +2866,20 @@ static bool gcc_link_c_to_binary(const char* entry_rae_file,
   if (!extra_cflags) extra_cflags = "";
   char box3d_flags[PATH_MAX * 2 + 64];
   if (!box3d_link_flags(c_path, box3d_flags, sizeof(box3d_flags))) return false;
+  // Rae builds from source for the machine it runs on, so an x86-64 CPU with
+  // AVX2 compiles with it: lib/Float8 is then one 256-bit register
+  // (runtime_float8.h, docs/float4-design.md §10). The choice is the
+  // compiler's, at build time; there is no runtime dispatch. RAE_X86_AVX2=0
+  // builds without it (to compare). Floats are unchanged: -ffp-contract=off
+  // still keeps a * b + c unfused.
+  const char* cpu_flags = "";
+#if defined(__x86_64__) || defined(_M_X64)
+  const char* avx2_setting = getenv("RAE_X86_AVX2");
+  if (__builtin_cpu_supports("avx2") && !(avx2_setting && strcmp(avx2_setting, "0") == 0)) cpu_flags = " -mavx2";
+#endif
   char cmd[PATH_MAX * 6];
-  snprintf(cmd, sizeof(cmd), "gcc -std=c11 %s%s %s -w %s %s -I%s -I/opt/homebrew/include -L/opt/homebrew/lib -framework Foundation -framework ImageIO -framework CoreGraphics %s %s/rae_runtime.c%s %s -o %s",
-           opt_flags, g_float4_scalar ? " -DRAE_FLOAT4_SCALAR" : "", extra_cflags, sdl3_flags, wgpu_flags, runtime_dir,
+  snprintf(cmd, sizeof(cmd), "gcc -std=c11 %s%s%s %s -w %s %s -I%s -I/opt/homebrew/include -L/opt/homebrew/lib -framework Foundation -framework ImageIO -framework CoreGraphics %s %s/rae_runtime.c%s %s -o %s",
+           opt_flags, g_float4_scalar ? " -DRAE_FLOAT4_SCALAR" : "", cpu_flags, extra_cflags, sdl3_flags, wgpu_flags, runtime_dir,
            c_path, runtime_dir, extra_c_files, box3d_flags, out_bin);
 
   long long cc_started_ms = rae_now_ms();

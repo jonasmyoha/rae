@@ -84,6 +84,13 @@ if [ -f tools/benchmarks-compile-check.sh ]; then
   if bash tools/benchmarks-compile-check.sh; then BENCH_CHECK=0; fi
   echo
 fi
+# lib/Float8's x86-64 and wasm lowerings (tools/float8-lowerings-check.sh):
+# one more pre-suite "case".
+FLOAT8_CHECK=1
+if [ -f tools/float8-lowerings-check.sh ]; then
+  if bash tools/float8-lowerings-check.sh; then FLOAT8_CHECK=0; fi
+  echo
+fi
 # The memory-boundary fixtures under AddressSanitizer (tools/asan-check.sh):
 # one more pre-suite "case" (SKIP without an ASan runtime).
 ASAN_CHECK=1
@@ -143,6 +150,7 @@ if [ "$TERMS_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)
 if [ "$STRESS_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$TSAN_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$ASAN_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
+if [ "$FLOAT8_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$BENCH_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$SERVER_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$TARGETS_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
