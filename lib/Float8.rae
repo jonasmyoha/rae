@@ -1,0 +1,511 @@
+# Float8 — eight Float lanes for SIMD code (docs/float4-design.md §10).
+#
+#   import Float8
+#   let half: Float8 = Float8.splat(value: 0.5)
+#   let scaled: Float8 = Float8.mulAdd(a: values, b: half, c: half)  # a * b + c
+#   let small: Mask8 = Float8.less(a: scaled, b: half)
+#
+# Float4's API and rules at twice the width: the same named functions, the
+# same scalar definitions, the same bits on every lowering. One Float8 is one
+# AVX2 register on an x86-64 build that targets AVX2, and two NEON / SSE2 /
+# wasm SIMD128 registers (two Float4 operations) everywhere else
+# (compiler/runtime/runtime_float8.h). Fixture 1088_float8_bit_exact checks
+# every function against its scalar definition (1089 with --float4-scalar).
+# Use Float8 where a kernel's data comes in eights and the target is AVX2; on
+# a 128-bit machine it is Float4 twice, no faster (§10's measurement).
+#
+# Lanes read like fields (`values.lane3`). Mask8 is a comparison's result: a
+# lane is true when any of its bits is set. Not in the prelude.
+type Float8 {
+  lane0: Float
+  lane1: Float
+  lane2: Float
+  lane3: Float
+  lane4: Float
+  lane5: Float
+  lane6: Float
+  lane7: Float
+}
+
+type Mask8 {
+  bits0: UInt32
+  bits1: UInt32
+  bits2: UInt32
+  bits3: UInt32
+  bits4: UInt32
+  bits5: UInt32
+  bits6: UInt32
+  bits7: UInt32
+}
+
+func nativeSplat(value: Float) unsafe extern("rae_f8_splat") ret Float8
+
+func nativeAdd(a: view Float8, b: view Float8) unsafe extern("rae_f8_add") ret Float8
+
+func nativeSub(a: view Float8, b: view Float8) unsafe extern("rae_f8_sub") ret Float8
+
+func nativeMul(a: view Float8, b: view Float8) unsafe extern("rae_f8_mul") ret Float8
+
+func nativeDiv(a: view Float8, b: view Float8) unsafe extern("rae_f8_div") ret Float8
+
+func nativeMin(a: view Float8, b: view Float8) unsafe extern("rae_f8_min") ret Float8
+
+func nativeMax(a: view Float8, b: view Float8) unsafe extern("rae_f8_max") ret Float8
+
+func nativeMulAdd(
+  a: view Float8
+  b: view Float8
+  c: view Float8
+) unsafe extern("rae_f8_mul_add") ret Float8
+
+func nativeSqrt(value: view Float8) unsafe extern("rae_f8_sqrt") ret Float8
+
+func nativeNegate(value: view Float8) unsafe extern("rae_f8_negate") ret Float8
+
+func nativeAbs(value: view Float8) unsafe extern("rae_f8_abs") ret Float8
+
+func nativeClampSymmetric(
+  value: view Float8
+  limit: view Float8
+) unsafe extern("rae_f8_clamp_symmetric") ret Float8
+
+func nativeLess(a: view Float8, b: view Float8) unsafe extern("rae_f8_less") ret Mask8
+
+func nativeGreater(a: view Float8, b: view Float8) unsafe extern("rae_f8_greater") ret Mask8
+
+func nativeLessOrEqual(
+  a: view Float8
+  b: view Float8
+) unsafe extern("rae_f8_less_or_equal") ret Mask8
+
+func nativeGreaterOrEqual(
+  a: view Float8
+  b: view Float8
+) unsafe extern("rae_f8_greater_or_equal") ret Mask8
+
+func nativeEqual(a: view Float8, b: view Float8) unsafe extern("rae_f8_equal") ret Mask8
+
+func nativeSelect(
+  mask: view Mask8
+  ifTrue: view Float8
+  ifFalse: view Float8
+) unsafe extern("rae_f8_select") ret Float8
+
+func nativeBoth(a: view Mask8, b: view Mask8) unsafe extern("rae_m8_both") ret Mask8
+
+func nativeEither(a: view Mask8, b: view Mask8) unsafe extern("rae_m8_either") ret Mask8
+
+func nativeInvert(mask: view Mask8) unsafe extern("rae_m8_invert") ret Mask8
+
+func nativeAnyLane(mask: view Mask8) unsafe extern("rae_m8_any_lane") ret Bool
+
+func nativeAllLanes(mask: view Mask8) unsafe extern("rae_m8_all_lanes") ret Bool
+
+func nativeSum(value: view Float8) unsafe extern("rae_f8_sum") ret Float
+
+func nativeHorizontalMin(value: view Float8) unsafe extern("rae_f8_horizontal_min") ret Float
+
+func nativeHorizontalMax(value: view Float8) unsafe extern("rae_f8_horizontal_max") ret Float
+
+func nativeLoad(data: Buffer(Float), index: Int) unsafe extern("rae_f8_load") ret Float8
+
+func nativeStore(data: Buffer(Float), index: Int, value: view Float8) unsafe extern("rae_f8_store")
+
+func nativeLoadPartial(
+  data: Buffer(Float)
+  index: Int
+  count: Int
+) unsafe extern("rae_f8_load_partial") ret Float8
+
+func nativeStorePartial(
+  data: Buffer(Float)
+  index: Int
+  value: view Float8
+  count: Int
+) unsafe extern("rae_f8_store_partial")
+
+func nativeStoreMasked(
+  data: Buffer(Float)
+  index: Int
+  value: view Float8
+  mask: view Mask8
+  count: Int
+) unsafe extern("rae_f8_store_masked")
+
+func nativeLowering() unsafe extern("rae_f8_lowering") ret Int
+
+# The lowering this program was compiled with: "avx2", "neon", "sse2",
+# "wasm" (the last three: two Float4 registers) or "scalar"
+func lowering() ret String {
+  var code: Int = 0
+  unsafe {
+    code = nativeLowering()
+  }
+  if code is 4 {
+    ret "avx2"
+  }
+  if code is 1 {
+    ret "neon"
+  }
+  if code is 2 {
+    ret "sse2"
+  }
+  if code is 3 {
+    ret "wasm"
+  }
+  ret "scalar"
+}
+
+# Every lane `value`.
+func splat(value: view Float) ret Float8 {
+  unsafe {
+    ret nativeSplat(value: value)
+  }
+}
+
+# a + b, lane by lane
+func add(a: view Float8, b: view Float8) ret Float8 {
+  unsafe {
+    ret nativeAdd(a: a, b: b)
+  }
+}
+
+# a - b, lane by lane
+func sub(a: view Float8, b: view Float8) ret Float8 {
+  unsafe {
+    ret nativeSub(a: a, b: b)
+  }
+}
+
+# a * b, lane by lane
+func mul(a: view Float8, b: view Float8) ret Float8 {
+  unsafe {
+    ret nativeMul(a: a, b: b)
+  }
+}
+
+# a / b, lane by lane
+func div(a: view Float8, b: view Float8) ret Float8 {
+  unsafe {
+    ret nativeDiv(a: a, b: b)
+  }
+}
+
+# a * b + c: a multiply, then an add (two roundings, never fused)
+func mulAdd(a: view Float8, b: view Float8, c: view Float8) ret Float8 {
+  unsafe {
+    ret nativeMulAdd(a: a, b: b, c: c)
+  }
+}
+
+# The square root of each lane
+func sqrt(value: view Float8) ret Float8 {
+  unsafe {
+    ret nativeSqrt(value: value)
+  }
+}
+
+# -value: the sign bit flipped
+func negate(value: view Float8) ret Float8 {
+  unsafe {
+    ret nativeNegate(value: value)
+  }
+}
+
+# value < 0 ? -value : value (keeps -0 and a NaN's sign)
+func abs(value: view Float8) ret Float8 {
+  unsafe {
+    ret nativeAbs(value: value)
+  }
+}
+
+# a <= b ? a : b, lane by lane
+func min(a: view Float8, b: view Float8) ret Float8 {
+  unsafe {
+    ret nativeMin(a: a, b: b)
+  }
+}
+
+# a >= b ? a : b, lane by lane
+func max(a: view Float8, b: view Float8) ret Float8 {
+  unsafe {
+    ret nativeMax(a: a, b: b)
+  }
+}
+
+# value clamped to [-limit, limit] (min with limit, then max with -limit)
+func clampSymmetric(value: view Float8, limit: view Float8) ret Float8 {
+  unsafe {
+    ret nativeClampSymmetric(value: value, limit: limit)
+  }
+}
+
+# A lane is true where a < b (false where either is a NaN)
+func less(a: view Float8, b: view Float8) ret Mask8 {
+  unsafe {
+    ret nativeLess(a: a, b: b)
+  }
+}
+
+# A lane is true where a > b (false where either is a NaN)
+func greater(a: view Float8, b: view Float8) ret Mask8 {
+  unsafe {
+    ret nativeGreater(a: a, b: b)
+  }
+}
+
+# A lane is true where a <= b (false where either is a NaN)
+func lessOrEqual(a: view Float8, b: view Float8) ret Mask8 {
+  unsafe {
+    ret nativeLessOrEqual(a: a, b: b)
+  }
+}
+
+# A lane is true where a >= b (false where either is a NaN)
+func greaterOrEqual(a: view Float8, b: view Float8) ret Mask8 {
+  unsafe {
+    ret nativeGreaterOrEqual(a: a, b: b)
+  }
+}
+
+# A lane is true where a == b (false where either is a NaN)
+func equal(a: view Float8, b: view Float8) ret Mask8 {
+  unsafe {
+    ret nativeEqual(a: a, b: b)
+  }
+}
+
+# mask ? ifTrue : ifFalse, bit by bit
+func select(mask: view Mask8, ifTrue: view Float8, ifFalse: view Float8) ret Float8 {
+  unsafe {
+    ret nativeSelect(mask: mask, ifTrue: ifTrue, ifFalse: ifFalse)
+  }
+}
+
+# a and b, bit by bit
+func both(a: view Mask8, b: view Mask8) ret Mask8 {
+  unsafe {
+    ret nativeBoth(a: a, b: b)
+  }
+}
+
+# a or b, bit by bit
+func either(a: view Mask8, b: view Mask8) ret Mask8 {
+  unsafe {
+    ret nativeEither(a: a, b: b)
+  }
+}
+
+# Every bit flipped
+func invert(mask: view Mask8) ret Mask8 {
+  unsafe {
+    ret nativeInvert(mask: mask)
+  }
+}
+
+# Whether any lane is true
+func anyLane(mask: view Mask8) ret Bool {
+  unsafe {
+    ret nativeAnyLane(mask: mask)
+  }
+}
+
+# Whether every lane is true
+func allLanes(mask: view Mask8) ret Bool {
+  unsafe {
+    ret nativeAllLanes(mask: mask)
+  }
+}
+
+# ((((((lane0 + lane1) + lane2) + lane3) + lane4) + lane5) + lane6) + lane7
+func sum(value: view Float8) ret Float {
+  unsafe {
+    ret nativeSum(value: value)
+  }
+}
+
+# The smallest lane, taken in lane order with min's rule
+func horizontalMin(value: view Float8) ret Float {
+  unsafe {
+    ret nativeHorizontalMin(value: value)
+  }
+}
+
+# The largest lane, taken in lane order with max's rule
+func horizontalMax(value: view Float8) ret Float {
+  unsafe {
+    ret nativeHorizontalMax(value: value)
+  }
+}
+
+# The eight Floats from `index` on, or none unless index + 7 < from.length.
+func load(from: view List(Float), index: view Int) ret opt Float8 {
+  if index < 0 or index + 7 >= from.length {
+    ret none
+  }
+  unsafe {
+    ret nativeLoad(data: from.data, index: index)
+  }
+}
+
+# Writes the eight lanes to `into` from `index` on. Out of range (unless
+# index + 7 < into.length) it is ignored with a warning, like List.set.
+func store(into: mod List(Float), index: view Int, value: view Float8) {
+  if index < 0 or index + 7 >= into.length {
+    runtimeWarning(message: "Float8.store: index {index} is out of range for length {into.length}")
+    ret
+  }
+  unsafe {
+    nativeStore(data: into.data, index: index, value: value)
+  }
+}
+
+# ----- the masked tail (docs/float4-design.md §9) ---------------------------
+
+# How many lanes from `start` on are in a list of `length` elements, at most
+# `count` and at most eight (0 when start is outside the list)
+func lanesInRange(start: view Int, count: view Int, length: view Int) ret Int {
+  if start < 0 or start >= length or count <= 0 {
+    ret 0
+  }
+  var lanes: Int = count
+  if lanes > 8 {
+    lanes = 8
+  }
+  if start + lanes > length {
+    lanes = length - start
+  }
+  ret lanes
+}
+
+# The first `count` Floats of `list` from `start` on, the other lanes 0.0.
+# Only elements inside the list are read.
+func loadPartial(list: view List(Float), start: view Int, count: view Int) ret Float8 {
+  let lanes: Int = lanesInRange(start: start, count: count, length: list.length)
+  if lanes is 0 {
+    ret splat(value: 0.0)
+  }
+  unsafe {
+    ret nativeLoadPartial(data: list.data, index: start, count: lanes)
+  }
+}
+
+# Writes the first `count` lanes of `value` to `into` from `start` on. A lane
+# that would land past the list's end is not written, with a warning.
+func storePartial(
+  into: mod List(Float)
+  start: view Int
+  value: view Float8
+  count: view Int
+) {
+  let lanes: Int = lanesInRange(start: start, count: count, length: into.length)
+  var asked: Int = count
+  if asked > 8 {
+    asked = 8
+  }
+  if lanes < asked {
+    runtimeWarning(
+      message: "Float8.storePartial: {asked} lanes from {start} do not fit a length of {into.length}"
+    )
+  }
+  if lanes is 0 {
+    ret
+  }
+  unsafe {
+    nativeStorePartial(
+      data: into.data
+      index: start
+      value: value
+      count: lanes
+    )
+  }
+}
+
+# The number of the last true lane of `mask`, counted from 1 (0: none)
+func lastTrueLane(mask: view Mask8) ret Int {
+  let lanes: List(UInt32) = {
+    mask.bits0
+    mask.bits1
+    mask.bits2
+    mask.bits3
+    mask.bits4
+    mask.bits5
+    mask.bits6
+    mask.bits7
+  }
+  loop var lane: Int = 8, lane > 0, --lane {
+    if lanes.copyAtFallback(index: lane - 1, fallback: 0 as UInt32) is not 0 {
+      ret lane
+    }
+  }
+  ret 0
+}
+
+# Writes the lanes of `value` whose `mask` lane is true to `into` from
+# `start` on. A true lane past the list's end is not written, with a warning.
+func storeMasked(
+  into: mod List(Float)
+  start: view Int
+  value: view Float8
+  mask: view Mask8
+) {
+  let lanes: Int = lanesInRange(start: start, count: 8, length: into.length)
+  if lanes < lastTrueLane(mask: mask) {
+    runtimeWarning(
+      message: "Float8.storeMasked: a true lane from {start} is past a length of {into.length}"
+    )
+  }
+  if lanes is 0 {
+    ret
+  }
+  unsafe {
+    nativeStoreMasked(
+      data: into.data
+      index: start
+      value: value
+      mask: mask
+      count: lanes
+    )
+  }
+}
+
+# The mask whose first `count` lanes are true (all bits set), the rest false
+func firstLanes(count: view Int) ret Mask8 {
+  let allBits: UInt32 = 4294967295 as UInt32
+  let noBits: UInt32 = 0 as UInt32
+  var mask: Mask8 = {
+    bits0: noBits
+    bits1: noBits
+    bits2: noBits
+    bits3: noBits
+    bits4: noBits
+    bits5: noBits
+    bits6: noBits
+    bits7: noBits
+  }
+  if count > 0 {
+    mask.bits0 = allBits
+  }
+  if count > 1 {
+    mask.bits1 = allBits
+  }
+  if count > 2 {
+    mask.bits2 = allBits
+  }
+  if count > 3 {
+    mask.bits3 = allBits
+  }
+  if count > 4 {
+    mask.bits4 = allBits
+  }
+  if count > 5 {
+    mask.bits5 = allBits
+  }
+  if count > 6 {
+    mask.bits6 = allBits
+  }
+  if count > 7 {
+    mask.bits7 = allBits
+  }
+  ret mask
+}

@@ -422,3 +422,95 @@ multiple of four with copies of point 0, as Box3D does. That padding is part
 of their bit-for-bit agreement with Box3D's support search (the tie rule of
 `embedIndex`), so it stays.
 
+## 10. Float8: eight lanes, native on AVX2 (2026-10-10)
+
+Float4 is the native width of NEON and wasm SIMD128, which are 128 bits
+wide. On x86-64 with AVX2 it is half the native width. lib/Float8 adds eight
+lanes (after linebender/fearless_simd).
+
+**The API.** `Float8` (`lane0` … `lane7`) and `Mask8` (`bits0` … `bits7`)
+have Float4's named functions, minus the two Box3D-specific ones
+(`embedIndex`, `minLaneIndex`):
+
+- arithmetic: `splat`, `add`, `sub`, `mul`, `div`, `mulAdd`, `sqrt`,
+  `negate`, `abs`, `min`, `max`, `clampSymmetric`;
+- comparisons and masks: `less`, `greater`, `lessOrEqual`, `greaterOrEqual`,
+  `equal`, `select`, `both`, `either`, `invert`, `anyLane`, `allLanes`;
+- reductions: `sum`, `horizontalMin`, `horizontalMax`;
+- memory: `load`, `store`, and §9's masked tail (`loadPartial`,
+  `storePartial`, `storeMasked`, `firstLanes`).
+
+The scalar definitions are the same, and so is the bit-exactness rule (§4).
+The horizontal operations go in lane order, `((((((x0 + x1) + x2) + x3) + x4) + x5) + x6) + x7`.
+
+**The lowering** (compiler/runtime/runtime_float8.h):
+
+- **AVX2** on an x86-64 build that targets it: one 256-bit register.
+  `_mm256_cmp_ps` with the ordered predicates gives `<` / `<=` / `==`'s
+  NaN behaviour, select is and / andnot / or (not `blendv`, which reads
+  only the sign bit), and min / max / abs are compare-and-select.
+- **Everywhere else** Float8 is two Float4 operations on the halves:
+  Float4's own NEON / SSE2 / wasm / scalar functions. Their bits are
+  Float4's by construction. On NEON and wasm, two registers are the native
+  width for eight lanes.
+- **Choosing AVX2.** Rae builds from source for the machine it runs on, so
+  the choice is made at compile time, with no runtime dispatch. `rae` adds
+  `-mavx2` to a native build on an x86-64 CPU that has AVX2;
+  `RAE_X86_AVX2=0` builds without it. `-ffp-contract=off` still keeps
+  `a * b + c` unfused, so AVX2's FMA never changes a result.
+- `--float4-scalar` forces the scalar definitions for both types.
+
+**Checked:**
+
+- **Fixtures 1088 / 1089** (`--float4-scalar`) are 967's test at eight
+  lanes, every function bit for bit against its scalar definition, plus the
+  masked tail over 0, 1, 7, 8, 9 and 103 elements. On this machine (NEON
+  pairs) and the scalar path both print 1088's output.
+- **`compiler/tools/float8-lowerings-check.sh`** (`make float8-lowerings`,
+  a pre-suite case):
+  - builds 1088 for wasm SIMD128 and runs it under Node: bit-exact;
+  - builds it for x86-64 with and without AVX2, without warnings; the AVX2
+    build uses ymm registers (2 011 instructions in it).
+
+  On an x86-64 machine it also runs both builds against 1088's output.
+- **Not yet run:** this machine is an M1 Max without Rosetta, so the x86-64
+  builds have only been compiled. Running them on an x86-64 machine is
+  queued.
+
+**Measured** (`benchmarks/float8_kernel`, M1 Max at load 7.7): a degree-8
+Horner polynomial over 1 048 576 Floats, best of 20 rounds.
+
+| form | NEON build | `--float4-scalar` build |
+|---|---|---|
+| scalar loop | 0.40 ms | 0.40 ms |
+| Float4 | 0.45 ms | 0.45 ms |
+| Float8 (two NEON registers) | 0.43 ms | 0.43 ms |
+
+- **On a 128-bit machine Float8 brings little:** 1.04x Float4, from two
+  independent registers per step.
+- **clang vectorizes the plain loop itself** here, and the scalar
+  definitions as well, so all three are within 13%. The explicit types pay
+  where the compiler does not vectorize: kernels with masks and selects,
+  struct-of-lanes data like the physics solver (§5).
+- The AVX2 comparison waits for an x86-64 machine (`sh
+  benchmarks/float8_kernel/run.sh` there, and with `RAE_X86_AVX2=0`).
+
+**Decision: Float4 and Float8 stay explicit. No width-generic spelling.**
+
+- **A kernel's lane count is part of its shape.** It sets the chunk step,
+  the masked tail, the horizontal reduction's order (so the bits of every
+  sum), and how struct-of-lanes data is laid out (the physics solver packs
+  four bodies per FloatWide). A generic width would change all of these
+  per machine, so a result would no longer be the same on every machine.
+  That is §4's rule, which a generic width would break.
+- **Rae has no generics over a number** (a `FloatN(N)`). fearless_simd's
+  width-generic code rests on Rust traits and monomorphisation over SIMD
+  levels, machinery Rae deliberately does not have (AGENTS.md: few special
+  cases, analysable).
+- **What a generic width would buy is one spelling for "the native width"**
+  in kernels where results may depend on it. If a measured kernel needs
+  that, the cheap form is a `when`-selected type alias (`FloatNative` =
+  Float8 where AVX2 is targeted, else Float4) in the kernel's own module,
+  not a language feature. No kernel needs it today: the x86 measurement
+  above decides whether any will.
+

@@ -83,6 +83,12 @@ if [ -z "$TEST_NAME_FILTER" ] && [ -f "tools/benchmarks-compile-check.sh" ]; the
   if ! bash tools/benchmarks-compile-check.sh; then BENCH_CHECK_FAILED=1; fi
   echo
 fi
+# lib/Float8's x86-64 and wasm lowerings (tools/float8-lowerings-check.sh).
+FLOAT8_CHECK_FAILED=0
+if [ -z "$TEST_NAME_FILTER" ] && [ -f "tools/float8-lowerings-check.sh" ]; then
+  if ! bash tools/float8-lowerings-check.sh; then FLOAT8_CHECK_FAILED=1; fi
+  echo
+fi
 # The memory-boundary fixtures under AddressSanitizer (tools/asan-check.sh).
 ASAN_CHECK_FAILED=0
 if [ -z "$TEST_NAME_FILTER" ] && [ -f "tools/asan-check.sh" ]; then
@@ -634,6 +640,7 @@ if [ "$TERMS_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$STRESS_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$TSAN_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$ASAN_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
+if [ "$FLOAT8_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$BENCH_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$SERVER_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$TARGETS_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
