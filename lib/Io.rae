@@ -4,7 +4,7 @@
 # essentials. This module keeps line/char input, reached via the `io` namespace
 # (Io.readLine() / Io.readChar()).
 # One line from stdin as read, its newline included; empty at end of input
-func rae_io_read_line_raw() unsafe extern ret String
+func rae_io_read_line_raw() blocking unsafe extern ret String
 
 # `text` cut to its first `length` bytes in place, without a copy
 func rae_ext_rae_str_shorten(text: mod String, length: Int) unsafe extern
@@ -15,7 +15,7 @@ func rae_ext_rae_str_len(s: String) unsafe extern ret Int
 
 func rae_ext_rae_str_byte_at(s: String, index: Int) unsafe extern ret Int
 
-func rae_io_read_char() unsafe extern ret Char32
+func rae_io_read_char() blocking unsafe extern ret Char32
 
 # The next line of stdin without its line ending (a "\n", or "\r\n"); a last
 # line with no newline is read whole. Empty at end of input.

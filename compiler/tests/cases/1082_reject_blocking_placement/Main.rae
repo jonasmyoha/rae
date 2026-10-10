@@ -1,0 +1,14 @@
+# `blocking` marks a C call that may wait: it is written before
+# `unsafe extern`, and only on an extern (docs/lightweight-spawn-design.md
+# §4.4)
+func readSlowly(path: view String) blocking ret Int {
+  ret 0
+}
+
+func nativeWait(ms: Int) unsafe extern blocking ret Int
+
+func main() {
+  # `blocking` stays an ordinary name everywhere else
+  let blocking: Int = readSlowly(path: "x")
+  log(blocking)
+}

@@ -43,6 +43,60 @@ rae_Bool rae_ext_Scheduler_inBrowser(void) {
 #endif
 }
 
+#if !defined(__wasm__) || defined(RAE_WASM_THREADS)
+
+/* A call to a `blocking` extern from a resumable task (c_blocking.c, §17):
+ * it runs on a thread of its own while the task suspends, and wakes the task
+ * when it returned. One thread per call: pthread_create is the platform call
+ * this needs, and a pool of such threads is policy to add (in Rae) when it is
+ * measured to matter. */
+typedef struct {
+  void (*run)(void* args);
+  void* args;
+  RaeTask* task;
+} RaeBlockingCall;
+
+static void* rae_sched_blocking_thread(void* argument) {
+  RaeBlockingCall* call = (RaeBlockingCall*)argument;
+  rae_thread_install_altstack();
+  call->run(call->args);
+  RaeTask* task = call->task;
+  free(call);
+  g_sched_hooks.wake((int64_t)(intptr_t)task);
+  return NULL;
+}
+
+/* Inside a resumable task: run `run(args)` on a blocking-call thread and
+ * suspend (1), or 0 when there is no task or no thread (the caller runs it) */
+int rae_sched_blocking_call(void (*run)(void* args), void* args) {
+  RaeTask* current = g_sched_current_task;
+  if (!current || !g_sched_hooks.wake) return 0;
+  RaeBlockingCall* call = (RaeBlockingCall*)malloc(sizeof(RaeBlockingCall));
+  if (!call) return 0;
+  call->run = run;
+  call->args = args;
+  call->task = current;
+  pthread_attr_t attributes;
+  pthread_attr_init(&attributes);
+  pthread_attr_setdetachstate(&attributes, PTHREAD_CREATE_DETACHED);
+  int error = pthread_create(&(pthread_t){0}, &attributes, rae_sched_blocking_thread, call);
+  pthread_attr_destroy(&attributes);
+  if (error != 0) {
+    free(call);
+    return 0;
+  }
+  return 1;
+}
+
+#else
+
+int rae_sched_blocking_call(void (*run)(void* args), void* args) {
+  (void)run; (void)args;
+  return 0;
+}
+
+#endif
+
 #if defined(RAE_HAS_KQUEUE)
 #include <sys/event.h>
 #include <poll.h>

@@ -83,6 +83,8 @@ A function declaration must follow this exact order:
 *   Modifiers appear after the parameter list and before `ret`.
 *   No colon (`:`) is allowed between the parameter list and the `ret` clause.
 *   `extern` is now a function-level modifier, not a prefix to the `func` keyword.
+*   A foreign function is `unsafe extern`; one whose C call may wait for long
+    is `blocking unsafe extern` (`blocking` first, on externs only).
 
 ## 3. Generic Syntax
 

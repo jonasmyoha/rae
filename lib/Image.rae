@@ -18,7 +18,7 @@ func nativeSavePng(
   pixels: view Buffer(Int)
   width: Int
   height: Int
-) unsafe extern("rae_ext_Image_savePng") ret Bool
+) blocking unsafe extern("rae_ext_Image_savePng") ret Bool
 
 func savePng(
   path: view String
@@ -47,7 +47,7 @@ func nativeLoadPng(
   path: view String
   width: mod Int
   height: mod Int
-) unsafe extern("rae_ext_Image_loadPng") ret Buffer(Int)
+) blocking unsafe extern("rae_ext_Image_loadPng") ret Buffer(Int)
 
 func loadPng(path: view String, width: mod Int, height: mod Int) ret Buffer(Int) {
   unsafe {

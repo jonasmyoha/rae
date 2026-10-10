@@ -287,6 +287,9 @@ bool c_spawn_threadable(CFuncContext* ctx, const AstFuncDecl* f);
 /* True when a spawn of this function runs as a task on the scheduler's
  * worker pool (lib/core/Scheduler.rae) instead of a thread (c_backend.c) */
 bool c_spawn_on_pool(CFuncContext* ctx, const AstDecl* callee_decl);
+/* Calls to `blocking` externs from a task (c_blocking.c) */
+void c_blocking_emit_helpers(CompilerContext* ctx, const AstModule* module, FILE* out);
+bool c_blocking_find_call(const char* text, const char* symbol, size_t* start, size_t* end);
 /* Spawns that lend views (c_lend.c) */
 void c_lend_emit_helpers(CompilerContext* ctx, const AstModule* module, FILE* out);
 bool c_lend_emit_spawn(CFuncContext* ctx, const AstExpr* spawn, FILE* out);
