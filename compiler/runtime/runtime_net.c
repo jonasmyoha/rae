@@ -46,6 +46,9 @@
 #ifdef RAE_HAS_KQUEUE
 #include <sys/event.h>
 #endif
+#ifdef RAE_HAS_EPOLL
+#include <sys/epoll.h>
+#endif
 
 /* The constants lib/net needs, by the index NetSystem.rae names them with */
 int64_t rae_ext_NetSys_constant(int64_t which) {
@@ -93,6 +96,16 @@ int64_t rae_ext_NetSys_constant(int64_t which) {
     case 31: return EV_ERROR;
 #endif
     case 32: return RAE_NET_MAX_WAIT_EVENTS;
+#ifdef RAE_HAS_EPOLL
+    case 33: return EPOLLIN;
+    case 34: return EPOLLOUT;
+    case 35: return EPOLLRDHUP;
+    case 36: return EPOLLHUP;
+    case 37: return EPOLLERR;
+    case 38: return EPOLL_CTL_ADD;
+    case 39: return EPOLL_CTL_DEL;
+#endif
+    case 40: return EEXIST;
     default: return -1;
   }
 }
@@ -242,6 +255,42 @@ int64_t rae_ext_NetSys_pollerWait(int64_t queue, int64_t* events, int64_t maxEve
     events[i * 3] = (int64_t)ready[i].ident;
     events[i * 3 + 1] = (int64_t)ready[i].filter;
     events[i * 3 + 2] = (int64_t)ready[i].flags;
+  }
+  return count;
+}
+#endif
+
+/* The readiness poller on a Linux kernel (lib/net/Poller.rae, `hasEpoll`):
+ * the same Rae API over epoll. Rae owns the policy (a read queue and a write
+ * queue per poller, the write queue nested in the read one, what an event
+ * means); each function here is one epoll call. */
+#ifdef RAE_HAS_EPOLL
+int64_t rae_ext_NetSys_epollCreate(void) {
+  int queue = epoll_create1(EPOLL_CLOEXEC);
+  return queue >= 0 ? queue : -errno;
+}
+
+/* One epoll_ctl: `operation` (add / delete, from the constant table) of `fd`
+ * with `events` */
+int64_t rae_ext_NetSys_epollControl(int64_t queue, int64_t operation, int64_t fd, int64_t events) {
+  struct epoll_event event;
+  memset(&event, 0, sizeof event);
+  event.events = (uint32_t)events;
+  event.data.fd = (int)fd;
+  return epoll_ctl((int)queue, (int)operation, (int)fd, &event) == 0 ? 0 : -errno;
+}
+
+/* Wait up to `timeoutMs` (negative: forever) for up to `maxEvents` events and
+ * write each as (fd, events, 0) into `events`: their count, or -errno */
+int64_t rae_ext_NetSys_epollWait(int64_t queue, int64_t* events, int64_t maxEvents, int64_t timeoutMs) {
+  struct epoll_event ready[RAE_NET_MAX_WAIT_EVENTS];
+  int capacity = maxEvents < RAE_NET_MAX_WAIT_EVENTS ? (int)maxEvents : RAE_NET_MAX_WAIT_EVENTS;
+  int count = epoll_wait((int)queue, ready, capacity, timeoutMs < 0 ? -1 : (int)timeoutMs);
+  if (count < 0) return -errno;
+  for (int i = 0; i < count; i++) {
+    events[i * 3] = (int64_t)ready[i].data.fd;
+    events[i * 3 + 1] = (int64_t)ready[i].events;
+    events[i * 3 + 2] = 0;
   }
   return count;
 }

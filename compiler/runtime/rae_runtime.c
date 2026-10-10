@@ -1,3 +1,10 @@
+/* glibc hides the GNU extensions the runtime uses (pthread_getattr_np,
+ * REG_RSP / REG_RIP in the crash handler, memmem) under a strict -std=c11
+ * unless they are asked for, before the first header: without this the
+ * runtime does not compile on Linux at all */
+#if defined(__linux__) && !defined(_GNU_SOURCE)
+#define _GNU_SOURCE 1
+#endif
 #include "rae_runtime.h"
 
 #include <stdio.h>
