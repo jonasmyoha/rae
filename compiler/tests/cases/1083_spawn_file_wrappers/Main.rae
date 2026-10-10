@@ -1,0 +1,66 @@
+# Tasks read files through lib/Sys's wrappers (docs/lightweight-spawn-design
+# .md §18): the `blocking` externs under them run on blocking-call threads,
+# and the wrappers' String, opt String and Bool results are handed back to
+# the task across the suspension. 32 tasks on two workers, with at most four
+# spawn threads: they all run on the pool (a task that were a thread past
+# the cap would print the runtime's notice), and a String result also comes
+# back through an `if let`, and a `view` result through a `=>` binding.
+open Sys
+
+type Shelf {
+  label: String
+}
+
+# A `view` result handed back across a suspension: it points into the
+# caller's frame, which stays put
+func labelOf(shelf: view Shelf) ret view String {
+  sleep(ms: 1)
+  ret shelf.label
+}
+
+func roundTrip(index: copy Int) ret Int {
+  let path: String = "/tmp/rae_file_wrappers_{index}.txt"
+  let content: String = "line {index} of the file"
+  if not writeFile(path: path, content: content) {
+    ret -1
+  }
+  var good: Int = 0
+  if let text: String = readFile(path: path) {
+    if text is content {
+      good = good + 1
+    }
+  }
+  let range: String = readFileTextRange(path: path, offset: 0, len: 4)
+  if range is "line" {
+    good = good + 1
+  }
+  let missingPath: String = "{path}.missing"
+  let missing: opt String = readFile(path: missingPath)
+  if missing is none {
+    good = good + 1
+  }
+  if delete(path: path) {
+    good = good + 1
+  }
+  let shelf: Shelf = { label: content }
+  let label: view String => labelOf(shelf: shelf)
+  if label is content {
+    good = good + 1
+  }
+  ret good
+}
+
+func main() {
+  let count: Int = 32
+  var tasks: List(Task(Int)) = {}
+  loop var i: Int = 0, i < count, ++i {
+    tasks.add(value: spawn roundTrip(index: i))
+  }
+  var good: Int = 0
+  loop var i: Int = 0, i < tasks.length, ++i {
+    if let task: Task(Int) = tasks.copyAt(index: i) {
+      good = good + task.get()
+    }
+  }
+  log("file round trips: {good} of {count * 5} checks")
+}
