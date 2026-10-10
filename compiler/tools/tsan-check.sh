@@ -31,7 +31,8 @@ CASES="511_spawn_raytracer_bands 512_spawn_string_workers 513_spawn_own_list_cop
 944_parallel_loop_results 946_parallel_chunk_scratch \
 997_physics_parallel_step 1033_task_try_get 1036_file_notify_rae 1040_net_ecs_http 1061_spawn_thread_cap 1062_ret_opt_passthrough 1064_task_get_temporary \
 1073_spawn_pool_fork_join 1074_spawn_pool_many 1075_spawn_resumable 1076_spawn_resumable_one_worker \
-1077_spawn_lend_view 1080_spawn_socket_waits"
+1077_spawn_lend_view 1080_spawn_socket_waits \
+1081_spawn_blocking_extern"
 if [ -n "${RAE_TSAN_FILTER:-}" ]; then CASES="$RAE_TSAN_FILTER"; fi
 
 # The toolchain probe: a compiler without the TSan runtime cannot run this gate.
@@ -56,10 +57,13 @@ for name in $CASES; do
     echo "FAIL: tsan $name (emit failed)"; sed 's/^/    /' "$work/emit.log" | tail -5
     failed=$((failed + 1)); continue
   fi
+  # A case's own C beside its Main.rae (as `rae run` links it)
+  case_c=()
+  for c_file in "$dir"/*.c; do [ -f "$c_file" ] && case_c+=("$c_file"); done
   # -O1 -g: TSan's recommended level; -fno-omit-frame-pointer for its stacks.
   # shellcheck disable=SC2086
   if ! perl -e 'alarm shift; exec @ARGV' 300 "$CC" -std=c11 -O1 -g -fno-omit-frame-pointer \
-      -fsanitize=thread -ffp-contract=off -w "$work/out.c" "$work/rae_runtime.c" \
+      -fsanitize=thread -ffp-contract=off -w "$work/out.c" "$work/rae_runtime.c" ${case_c[@]+"${case_c[@]}"} \
       -I"$work" -I/opt/homebrew/include $FRAMEWORKS -lm -lpthread \
       -o "$work/app" > "$work/cc.log" 2>&1; then
     echo "FAIL: tsan $name (TSan build failed)"; sed 's/^/    /' "$work/cc.log" | tail -5

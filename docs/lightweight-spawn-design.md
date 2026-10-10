@@ -277,6 +277,7 @@ func nativeRead(handle: Int, buffer: Buffer(UInt8), offset: Int, maxBytes: Int) 
   nothing, and the call just runs.
 - **Rules:** sema rejects `blocking` on a non-extern function; `rae format`
   prints it; it is part of the extern's declaration, not of its type.
+- **Implemented in 0.1.258 (§17).**
 
 ### 4.5 Fairness
 
@@ -289,6 +290,9 @@ inserts. The options (fork F3):
   machine.
 - (b) The compiler inserts a cheap "yield if your slice is used up" check at
   loop back-edges in resumable functions.
+
+**Kept cooperative (S5, §17):** no measurement so far shows a task starved by
+another's computation, so there are no yield checks.
 
 ## 5. What it does not change
 
@@ -348,7 +352,8 @@ inserts. The options (fork F3):
    and step codegen, makes `get()` and `sleep` suspend: done (0.1.252, §13).
 4. Socket and poller waits (after G2) and the browser path. **Done: socket
    waits 0.1.256 (§15), the browser 0.1.257 (§16).**
-5. The extern-blocking and fairness choices (F2, F3).
+5. The extern-blocking and fairness choices (F2, F3). **Done (0.1.258, §17):
+   `blocking` is implemented; fairness stays cooperative.**
 
 ## 9. Decisions for the maintainer
 
@@ -359,6 +364,7 @@ inserts. The options (fork F3):
    keyword on extern declarations (§4.4).
 3. **F3 Fairness:** cooperative only first (recommended), with loop
    back-edge yield checks as a later option if measurements show starvation.
+   Cooperative it stays (§17): nothing measured shows starvation.
 4. **F4 One keyword:** `spawn` becomes lightweight and stays the only spelling
    (recommended, as Go has only `go`), or keep a separate OS-thread spawn for
    special cases.
@@ -1056,4 +1062,78 @@ the task on the pool.
 **Not in the browser:** sockets (the page has none; fetch and WebSocket
 would be their own waits) and threads (`RAE_WASM_THREADS` builds keep the
 threaded kernel).
+
+## 17. Blocking externs and fairness (S5, 2026-10-10)
+
+**`blocking` is implemented** as §4.4 decided:
+`func name(...) blocking unsafe extern(...)`.
+
+- **The modifier:** it is a modifier word in the modifier position, not a
+  reserved word, so `blocking` stays an ordinary name elsewhere. The parser
+  rejects it on a function that is not an extern, and after `unsafe extern`
+  (fixture 1082). `rae format` prints it where it was written.
+- **Outside a task** it changes nothing: the call runs and blocks its thread.
+- **Inside a resumable task** a call to a `blocking` extern is a wait point
+  of the twin (`c_twin.c`, `c_blocking.c`):
+  1. the arguments are packed by the normal call's own argument text, with
+     the function swapped for the extern's pack;
+  2. the task suspends while a blocking-call thread runs the call
+     (`rae_sched_blocking_call`);
+  3. the thread stores the result and wakes the task, which reads the
+     result where the call stood.
+
+  The result has the C function's own type (`__typeof__` of the call), so a
+  Rae declaration that wraps it (`opt String`) still lowers as before.
+- **The may-wait analysis** counts a `blocking` extern as a wait, like a
+  sleep. A spawn reaching one goes on the pool when its function is a twin,
+  and stays a thread otherwise (for example when the call sits where the
+  transform cannot suspend).
+- **One thread per call:** pthread_create is the platform call this needs. A
+  pool of blocking threads is policy, to add in Rae when it is measured to
+  matter. When no thread can be had, the call runs on the worker.
+
+**What lib/ marks `blocking`** (audited):
+
+- file contents: `rae_sys_read_file`, `rae_sys_write_file`,
+  `rae_sys_read_file_bytes`, `rae_sys_read_file_text`, the
+  `rae_ext_rae_sys_read_file` of HotReload and Scene3dFile;
+- `rae_sys_lock_file`, which may wait on another process's lock;
+- standard input: `rae_io_read_line_raw`, `rae_io_read_char`;
+- PNG files: `nativeSavePng`, `nativeLoadPng`;
+- the name lookup: `systemResolve` (getaddrinfo). A task that connects
+  (`tcpConnect`) can therefore go on the pool, which §15 had to leave to a
+  thread;
+- child processes: the Spotify bridge's `osascript` and `curl` calls.
+
+**What lib/ does not mark:** quick metadata calls (`exists`, `mtime`,
+`rename`, `delete`, `makeDir`, directory listing). They return at once on a
+local disk, and a thread per call would cost more than it saves. Also not
+marked: everything that does not wait (the String, math, channel and GPU
+calls).
+
+**Fixture `1081_spawn_blocking_extern`.** It runs on two workers, with at
+most four spawn threads (`RAE_SPAWN_THREAD_CAP=4`).
+
+- 32 tasks each call a C function (the case's `hold.c`) that holds its
+  thread for 200 ms. Meanwhile 100 quick tasks run.
+- **Marked `blocking`:** the 32 calls overlap, and the quick tasks finish
+  while the calls block.
+- **Unmarked (tried):** the tasks are spawn threads, capped at four. Neither
+  holds.
+- It also writes eight files and reads them back from tasks, with a String
+  argument and a String result.
+- It is leak-checked and on the TSan list. `tsan-check.sh` now also compiles
+  a case's own `.c` files.
+
+**Fairness (F3): cooperative.** §4.5 left back-edge yield checks for when
+measurements show starvation. None of S3's measurements (§12–§14), nor the
+servers', showed a task starved by another's computation. Every worker
+runs, and a fork-join keeps them all busy. So no yield check is added. The
+case for one would be a long computation without waits next to
+latency-sensitive tasks on a pool smaller than the computations.
+
+**Still open:** a String or `opt` result of a twin *child call* is not
+handed over (§13). So a task that reads a file through a Rae wrapper
+returning `String` (`readFile`) is still a thread; a direct call to the
+extern in the task suspends.
 

@@ -4,7 +4,8 @@
  * suspends at a wait instead of holding its worker.
  *
  *   typedef struct F__frame { int state; RaePoolSave pool; void* child;
- *                             void* slots[N]; int64_t hold[4]; RetT result; } F__frame;
+ *                             void* slots[N]; int64_t hold[4]; void* blocking;
+ *                             RetT result; } F__frame;
  *   static int F__step(F__frame* __rae_frame);   1: finished, 0: suspended
  *
  * The step function is the normal body, emitted by the normal statement
@@ -27,6 +28,9 @@
  *     socket is ready or the timeout passes (the scheduler's readiness
  *     thread wakes it), and the call then runs with a timeout of 0, so it
  *     answers what is ready without waiting;
+ *   - a call to a `blocking` extern (C that may wait long): its arguments are
+ *     packed, the call runs on a blocking-call thread while the task
+ *     suspends, and the call reads as its result (c_blocking.c);
  *   - a call to another twin: a child frame is stepped until it finishes,
  *     the parent suspending whenever the child does; the call reads as the
  *     child's result.
@@ -166,7 +170,7 @@ static void emit_restore_all(CFuncContext* ctx, FILE* out) {
 
 /* ----- finding the waits of a statement --------------------------------- */
 
-typedef enum { POINT_JOIN, POINT_SLEEP, POINT_POLL, POINT_CALL } PointKind;
+typedef enum { POINT_JOIN, POINT_SLEEP, POINT_POLL, POINT_BLOCKING, POINT_CALL } PointKind;
 
 typedef struct {
   PointKind kind;
@@ -320,6 +324,17 @@ static void scan_expr(CFuncContext* ctx, const AstExpr* expr, bool hoistable, Tw
     }
     case AST_EXPR_CALL: {
       const AstDecl* target = call_target(expr);
+      if (target && target->as.func_decl.is_extern && target->as.func_decl.is_blocking &&
+          !target->as.func_decl.generic_params) {
+        TwinPoint point = { POINT_BLOCKING, expr, hoistable, false, target };
+        bool simple = true;
+        for (const AstCallArg* arg = expr->as.call.args; arg; arg = arg->next) {
+          if (!expr_is_simple(arg->value)) simple = false;
+        }
+        if (!simple && expr != s_stmt_value) point.hoistable = false;
+        add_point(points, point);
+        return;
+      }
       if (poll_wait_of(target)) {
         TwinPoint point = { POINT_POLL, expr, hoistable, false, target };
         bool simple = true;
@@ -559,6 +574,58 @@ static void emit_poll(CFuncContext* ctx, const TwinPoint* point, FILE* out) {
   add_override(ctx, point->expr, text);
 }
 
+/* A call to a `blocking` extern (c_blocking.c): the arguments are packed by
+ * the normal call's own argument text, the call goes to a blocking-call
+ * thread (rae_sched_blocking_call) while the task suspends, and the call
+ * reads as the result it stored. Where no thread can be had it runs here. */
+static void emit_blocking(CFuncContext* ctx, const TwinPoint* point, FILE* out) {
+  int state = ++ctx->twin_state;
+  const char* symbol = rae_mangle_function(ctx->compiler_ctx, &point->callee->as.func_decl);
+  char* text = NULL;
+  size_t length = 0;
+  FILE* text_out = open_memstream(&text, &length);
+  emit_expr(ctx, point->expr, text_out, PREC_LOWEST, false, false);
+  fclose(text_out);
+  size_t start = 0, end = 0;
+  /* A temporary the call takes the address of would not outlive this step */
+  if (!text || !c_blocking_find_call(text, symbol, &start, &end) || strstr(text, "__rae_pw_") || temps_alive(ctx)) {
+    ctx->twin_failed = true;
+    free(text);
+    return;
+  }
+  size_t symbol_length = strlen(symbol);
+  fprintf(out, "  /* resumable: blocking call */\n  {\n  __rae_frame->blocking = __raeblock_pack_%s(", symbol);
+  fwrite(text + start + symbol_length + 1, 1, end - start - symbol_length - 1, out);
+  fprintf(out, ";\n");
+  emit_save_all(ctx, out);
+  char call[512];
+  snprintf(call, sizeof call, "rae_sched_blocking_call(__raeblock_run_%s, __rae_frame->blocking)", symbol);
+  emit_register_and_suspend(out, state, call);
+  fprintf(out, "  __raeblock_run_%s(__rae_frame->blocking);\n  }\n  case %d: ;\n", symbol, state);
+  emit_restore_all(ctx, out);
+  bool has_result = point->callee->as.func_decl.returns != NULL;
+  char name[48];
+  snprintf(name, sizeof name, "__rae_wait%d", state);
+  if (has_result) {
+    fprintf(out, "  __typeof__(((__raeblock_args_%s*)0)->result) %s = ((__raeblock_args_%s*)__rae_frame->blocking)->result;\n",
+            symbol, name, symbol);
+  }
+  fprintf(out, "  free(__rae_frame->blocking);\n  __rae_frame->blocking = NULL;\n");
+  /* The call reads as its result, inside whatever the normal emission wraps
+   * around it */
+  char override[256];
+  const char* value = has_result ? name : "((void)0)";
+  if (start + strlen(value) + (length - end) + 1 > sizeof override) {
+    ctx->twin_failed = true;
+    free(text);
+    return;
+  }
+  snprintf(override, sizeof override, "%.*s%s%s", (int)start, text, value, text + end);
+  add_override(ctx, point->expr, override);
+  if (has_result && ctx->twin_hoist_count < 16) ctx->twin_hoist_temps[ctx->twin_hoist_count++] = str_from_cstr(strdup(name));
+  free(text);
+}
+
 static void emit_child_call(CFuncContext* ctx, const TwinPoint* point, FILE* out) {
   int state = ++ctx->twin_state;
   TwinEntry* callee = twin_entry(ctx->compiler_ctx, point->callee);
@@ -623,7 +690,7 @@ void c_twin_before_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
   bool can_suspend = ctx->twin_no_suspend == 0 && !temps_alive(ctx) && twin_locals_saveable(ctx);
   for (int i = 0; i < points.count; i++) {
     const TwinPoint* point = &points.items[i];
-    bool reaches_sleep = point->kind == POINT_SLEEP || point->kind == POINT_POLL ||
+    bool reaches_sleep = point->kind == POINT_SLEEP || point->kind == POINT_POLL || point->kind == POINT_BLOCKING ||
         (point->kind == POINT_CALL && twin_entry(ctx->compiler_ctx, point->callee)->reaches_sleep);
     if (!can_suspend || !point->hoistable) {
       /* A get keeps the help-first wait; a call runs the normal function.
@@ -635,6 +702,7 @@ void c_twin_before_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
       case POINT_JOIN: emit_join(ctx, point, out); break;
       case POINT_SLEEP: emit_sleep(ctx, point, out); break;
       case POINT_POLL: emit_poll(ctx, point, out); break;
+      case POINT_BLOCKING: emit_blocking(ctx, point, out); break;
       case POINT_CALL: emit_child_call(ctx, point, out); break;
     }
   }
@@ -732,7 +800,7 @@ static bool twin_emit_one(CompilerContext* ctx, const AstModule* module, TwinEnt
     FILE* out = decls;
     const char* mangled = entry->mangled;
     int slot_count = slots->count > 0 ? slots->count : 1;
-    fprintf(out, "struct %s__frame { int state; RaePoolSave pool; void* child; void* slots[%d]; int64_t hold[4];", mangled, slot_count);
+    fprintf(out, "struct %s__frame { int state; RaePoolSave pool; void* child; void* slots[%d]; int64_t hold[4]; void* blocking;", mangled, slot_count);
     if (!is_void) fprintf(out, " %s result;", returns);
     fprintf(out, " };\n");
     fprintf(out, "RAE_UNUSED static %s__frame* %s__frame_new(", mangled, mangled);
