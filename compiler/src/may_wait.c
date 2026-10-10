@@ -511,6 +511,13 @@ static void walk_expr(WalkContext* walk, const AstExpr* expr) {
       }
       walk_expr(walk, expr->as.unary.operand);
       break;
+    /* `own x`, a box and an unbox evaluate their operand (an owned `if let`
+     * wraps its value in one) */
+    case AST_EXPR_OWN:
+    case AST_EXPR_BOX:
+    case AST_EXPR_UNBOX:
+      walk_expr(walk, expr->as.unary.operand);
+      break;
     case AST_EXPR_CAST:
       walk_expr(walk, expr->as.cast.operand);
       break;
@@ -796,7 +803,9 @@ void may_wait_free(WaitGraph* graph) {
 }
 
 /* An extern the scheduler's workers may call: the runtime's own (lib/core,
- * Math, Parallel, Time, Channel, String), which never blocks for long, and lib/net's
+ * Math, Parallel, Time, Channel, String; and the file modules Sys, Io, Files,
+ * Filesystem, Image, whose calls that can wait are `blocking`), which never
+ * blocks for long, and lib/net's
  * system calls, which are non-blocking (a socket answers `wouldBlock`) —
  * minus the waits: sleeps, socket waits and `blocking` externs (the name
  * lookup among them) suspend a task (S3b, S4, S5) */
@@ -806,7 +815,9 @@ static bool extern_is_pool_safe(const WaitGraph* graph, const AstDecl* decl) {
   if (!is_stdlib(graph, decl)) return false;
   const char* path = short_lib_path(decl->origin_file);
   static const char* const safe[] = { "lib/core/", "lib/Math.rae", "lib/Parallel.rae", "lib/Time.rae",
-                                      "lib/Channel.rae", "lib/String.rae", "lib/net/NetSystem.rae", "lib/net/ByteBuffer.rae" };
+                                      "lib/Channel.rae", "lib/String.rae", "lib/net/NetSystem.rae", "lib/net/ByteBuffer.rae",
+                                      "lib/Sys.rae", "lib/Io.rae", "lib/Files.rae", "lib/Filesystem.rae",
+                                      "lib/Image.rae" };
   for (size_t i = 0; i < sizeof safe / sizeof safe[0]; i++) {
     if (strncmp(path, safe[i], strlen(safe[i])) == 0) return true;
   }

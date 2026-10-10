@@ -867,7 +867,16 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                             && (sa->value->kind == AST_EXPR_IDENT
                                 || sa->value->kind == AST_EXPR_MEMBER
                                 || sa->value->kind == AST_EXPR_INDEX);
-                        if (string_place && sa->value->kind == AST_EXPR_IDENT) {
+                        // A resumable twin building a child frame
+                        // (c_twin.c): a `view String` of a local points at
+                        // the local's frame slot, which never moves, where a
+                        // copy in a statement temporary would die before the
+                        // child resumes
+                        bool string_view_slot = ctx->twin_args_from_frame && sp->type->is_view
+                            && !sp->type->is_mod && str_eq_cstr(pbase_concrete, "String") && sa->value
+                            && sa->value->kind == AST_EXPR_IDENT && get_local_type_ref(ctx, sa->value->as.ident);
+                        if (string_view_slot) string_place = true;
+                        if (string_place && !string_view_slot && sa->value->kind == AST_EXPR_IDENT) {
                             // Even a literal-initialized local can own heap
                             // after the callee replaces it; enable scope drop.
                             for (int li = (int)ctx->local_count - 1; li >= 0; --li) {
@@ -1114,7 +1123,18 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 && str_eq_cstr(get_base_type_name(wrap_pt), "String") && a->value
                 && (a->value->kind == AST_EXPR_IDENT || a->value->kind == AST_EXPR_MEMBER
                     || a->value->kind == AST_EXPR_INDEX);
-            if (use_string_place) {
+            // The twin's child-frame argument above: the view of the slot
+            bool use_string_view_slot = ctx->twin_args_from_frame && wrap_pt && wrap_pt->is_view && !wrap_pt->is_mod
+                && str_eq_cstr(get_base_type_name(wrap_pt), "String") && a->value
+                && a->value->kind == AST_EXPR_IDENT && get_local_type_ref(ctx, a->value->as.ident)
+                && !(infer_expr_type_ref(ctx, a->value) && (infer_expr_type_ref(ctx, a->value)->is_view
+                                                          || infer_expr_type_ref(ctx, a->value)->is_mod));
+            if (use_string_view_slot) {
+                fprintf(out, "(rae_View_String){ .ptr = &(");
+                emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
+                fprintf(out, ") }");
+                needs_prim_wrap = false;
+            } else if (use_string_place) {
                 fprintf(out, "(rae_Mod_String){ .ptr = &(");
                 emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
                 fprintf(out, ") }");
@@ -1411,9 +1431,10 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                     a->value->kind == AST_EXPR_INTERP ||
                     a->value->kind == AST_EXPR_OBJECT ||
                     member_of_rvalue_call);
-            if (use_hoisted_temp || use_string_place) {
+            if (use_hoisted_temp || use_string_place || use_string_view_slot) {
                 /* The wrapper was emitted above, pointing either to its
-                 * hoisted view temporary or the mutable caller slot. Skip
+                 * hoisted view temporary, the mutable caller slot or a twin's
+                 * frame slot. Skip
                  * the rvalue-temp / addr / deref / box / emit_expr
                  * branches below. */
             } else if (needs_rvalue_temp) {

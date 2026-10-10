@@ -741,8 +741,9 @@ static int F__step(F__frame* __rae_frame);   /* 1: finished, 0: suspended */
   - on the right of `and` / `or`, or in a match arm;
   - while a statement temporary is alive, or with an alias local (`=>`, a
     `view` / `mod` let) in scope;
-  - a twin call with arguments that call or build things, or with a String
-    result.
+  - a twin call with arguments that call or build things, or with an `Any`
+    or `mod` result (a String, `opt` or `view` result is handed over since
+    §18).
 
   There a `get()` keeps S3a's help-first wait, and a twin call runs the
   normal function. When such a wait can reach a sleep, the function is not
@@ -1132,8 +1133,66 @@ runs, and a fork-join keeps them all busy. So no yield check is added. The
 case for one would be a long computation without waits next to
 latency-sensitive tasks on a pool smaller than the computations.
 
-**Still open:** a String or `opt` result of a twin *child call* is not
-handed over (§13). So a task that reads a file through a Rae wrapper
-returning `String` (`readFile`) is still a thread; a direct call to the
-extern in the task suspends.
+**Was open, done in §18:** a String or `opt` result of a twin *child call*
+was not handed over (§13), so a task reading a file through a Rae wrapper
+(`readFile`) was a thread.
+
+## 18. String, opt and view results of a twin call (2026-10-10)
+
+A twin calling another twin used to suspend through it only when the result
+was a plain value. A function returning `String`, `opt T` or a `view` ran as
+the normal function instead, and blocked the worker. Its caller stopped
+being a twin when the callee could wait. So a task that read a file through
+lib/Sys's wrappers (`readFile`, `readFileTextRange`, `writeFile`) stayed a
+thread, although the externs under them are `blocking` (§17).
+
+**Why it needed no new mechanism:**
+
+- **A String result** goes back the way a normal call returns it. The
+  child's `ret` registers it on the running thread's String pool
+  (`rae_string_pool_register_owned`). The parent resumes on that thread, so
+  the String is among the parent's pool entries, which move with its frame
+  across later suspensions (§13). The statement then takes it as it would
+  from a call.
+- **An `opt` result** is a plain struct, copied out of the child frame.
+- **A `view` result** points into what the caller passed. In a twin that is
+  the caller's frame slot, or the heap behind it, and neither moves.
+
+Still not handed over: an `Any` result (a box) and a `mod` result.
+
+**Two fixes this needed:**
+
+- **`view String` arguments of a child frame.** A `let` String passed to a
+  `view String` parameter is copied into a statement temporary
+  (`__rae_pw_`), and the view points at the copy. The twin refused that
+  call, since the temporary dies before the child resumes. When a twin
+  builds a child frame, such a view now points straight at the local's
+  frame slot (`c_call.c`). Every wrapper taking `path: view String` hit
+  this.
+- **Calls inside `own`, `box` and `unbox`** were invisible to the may-wait
+  analysis and to the twin transform. An owned `if let x: T = f()` wraps its
+  value in one. So such a call to a function that waits was neither an edge
+  of the call graph nor a wait point: the caller could become a pool task
+  whose wait blocked a worker. Both walks now look inside.
+
+**The file modules on the pool.** `lib/Sys`, `Io`, `Files`, `Filesystem`
+and `Image` joined the externs a pool task may call. Their calls that can
+wait are `blocking` (§17); the rest return at once.
+
+**Fixture `1083_spawn_file_wrappers`** (two workers, at most four spawn
+threads; TSan, leak-checked). 32 tasks each make five checks:
+
+- write a file (`writeFile`, Bool);
+- read it back through an `if let` (`readFile`, `opt String`);
+- read a range of it (`readFileTextRange`, `String`);
+- read a missing file (`opt String` none);
+- delete it;
+- and bind a `view String` result with `=>`.
+
+All 160 checks pass, and no task is a thread: one past the cap would print
+the runtime's notice.
+
+**Still a limit:** an argument that builds a value
+(`readFile(path: "{path}.missing")`) keeps the call from suspending (§13).
+Bind it to a local first.
 
