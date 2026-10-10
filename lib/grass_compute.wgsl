@@ -1,3 +1,4 @@
+// compose-after: lib/gpu/computeBounds.wgsl
 struct DrawU {
   model: mat4x4<f32>,
   prevModel: mat4x4<f32>,
@@ -19,9 +20,12 @@ struct Indirect {
   firstVertex: u32,
   firstInstance: u32,
 };
-@group(0) @binding(0) var<uniform> G: GrassU;
-@group(0) @binding(1) var<storage, read_write> outBuf: array<DrawU>;
-@group(0) @binding(2) var<storage, read_write> indirect: Indirect;
+// Binding 0 is the bounds uniform of lib/gpu/computeBounds.wgsl (the blade
+// count), which every composition lists before this file
+// (lib/gpu/GpuCompute.rae, docs/shaders-and-the-compiler.md).
+@group(0) @binding(1) var<uniform> G: GrassU;
+@group(0) @binding(2) var<storage, read_write> outBuf: array<DrawU>;
+@group(0) @binding(3) var<storage, read_write> indirect: Indirect;
 fn hashWord(v0: u32) -> u32 {
   var h = v0;
   h = h ^ (h >> 16u);
@@ -100,11 +104,10 @@ fn mRotZ(a: f32) -> mat4x4<f32> {
 fn swayModel(pos: vec3<f32>, yaw: f32, tiltX: f32, tiltY: f32, scale: vec3<f32>) -> mat4x4<f32> {
   return mTranslate(pos) * (mRotZ(yaw) * (mRotX(tiltX) * (mRotY(tiltY) * mScale3(scale))));
 }
-@compute @workgroup_size(64)
+@compute @workgroup_size(computeWorkgroupSize)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-  let i = gid.x;
-  let count = u32(G.b.x);
-  if (i >= count) { return; }
+  if (!computeElementInRange(gid)) { return; }
+  let i = computeElementIndex(gid);
   let side = u32(sqrt(G.b.x));
   let gx = i % side;
   let gy = i / side;
