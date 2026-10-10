@@ -1,0 +1,211 @@
+# The masked tail of a Float4 loop (docs/float4-design.md §9): full chunks
+# of four with `load` / `store`, the last length % 4 elements with
+# `loadPartial` / `storePartial` / `storeMasked` and `firstLanes`, against
+# the plain scalar loop, BIT FOR BIT, over lengths 0, 1, 3, 4, 5 and 103.
+# Every list is allocated with its exact length as capacity, so a read or
+# write past the end is a heap overflow: compiler/tools/asan-check.sh runs
+# this case under AddressSanitizer. 1086_float4_masked_tail_scalar runs the
+# same program with `--float4-scalar`. Keep the two Main.rae files identical.
+import Math
+import Float4
+
+# Values from a 32-bit linear congruential sequence, in [-2, 2)
+func valuesOf(count: view Int, seed: view Int) ret List(Float) {
+  var values: List(Float) = List.create(Float, cap: count)
+  var state: Int = seed
+  loop var i: Int = 0, i < count, ++i {
+    state = (state * 1664525 + 1013904223) bitand 4294967295
+    values.add(value: ((state % 4000) - 2000) as Float / 1000.0)
+  }
+  ret values
+}
+
+# y = a * x + y, scalar: the multiply, then the add (mulAdd's definition)
+func scaledAddScalar(scale: view Float, xs: view List(Float), ys: mod List(Float)) {
+  loop var i: Int = 0, i < ys.length, ++i {
+    let product: Float = scale * xs.copyAtFallback(index: i, fallback: 0.0)
+    ys.set(index: i, value: product + ys.copyAtFallback(index: i, fallback: 0.0))
+  }
+}
+
+# The same with Float4: full chunks, then one masked tail
+func scaledAddWide(scale: view Float, xs: view List(Float), ys: mod List(Float)) {
+  let scaleWide: Float4 = Float4.splat(value: scale)
+  let length: Int = ys.length
+  var i: Int = 0
+  loop i + 4 <= length {
+    if let x: Float4 = Float4.load(from: xs, index: i) {
+      if let y: Float4 = Float4.load(from: ys, index: i) {
+        Float4.store(into: ys, index: i, value: Float4.mulAdd(a: scaleWide, b: x, c: y))
+      }
+    }
+    i = i + 4
+  }
+  let rest: Int = length - i
+  if rest > 0 {
+    let x: Float4 = Float4.loadPartial(list: xs, start: i, count: rest)
+    let y: Float4 = Float4.loadPartial(list: ys, start: i, count: rest)
+    Float4.storePartial(
+      into: ys
+      start: i
+      value: Float4.mulAdd(a: scaleWide, b: x, c: y)
+      count: rest
+    )
+  }
+}
+
+# A dot product in four lane sums, added in Float4.sum's order: the scalar
+# loop accumulates lane i % 4 the way the wide loop does
+func dotScalar(xs: view List(Float), ys: view List(Float)) ret Float {
+  var lanes: List(Float) = { 0.0, 0.0, 0.0, 0.0 }
+  loop var i: Int = 0, i < xs.length, ++i {
+    let product: Float = xs.copyAtFallback(index: i, fallback: 0.0) * ys.copyAtFallback(
+      index: i
+      fallback: 0.0
+    )
+    let lane: Int = i % 4
+    lanes.set(index: lane, value: lanes.copyAtFallback(index: lane, fallback: 0.0) + product)
+  }
+  ret ((lanes.copyAtFallback(index: 0, fallback: 0.0) + lanes.copyAtFallback(
+    index: 1
+    fallback: 0.0
+  )) + lanes.copyAtFallback(index: 2, fallback: 0.0)) + lanes.copyAtFallback(
+    index: 3
+    fallback: 0.0
+  )
+}
+
+# The tail's missing lanes are 0.0, so they add nothing (0.0 * 0.0 + sum)
+func dotWide(xs: view List(Float), ys: view List(Float)) ret Float {
+  var sums: Float4 = Float4.splat(value: 0.0)
+  let length: Int = xs.length
+  var i: Int = 0
+  loop i + 4 <= length {
+    if let x: Float4 = Float4.load(from: xs, index: i) {
+      if let y: Float4 = Float4.load(from: ys, index: i) {
+        sums = Float4.mulAdd(a: x, b: y, c: sums)
+      }
+    }
+    i = i + 4
+  }
+  if length - i > 0 {
+    let x: Float4 = Float4.loadPartial(list: xs, start: i, count: length - i)
+    let y: Float4 = Float4.loadPartial(list: ys, start: i, count: length - i)
+    sums = Float4.mulAdd(a: x, b: y, c: sums)
+  }
+  ret Float4.sum(value: sums)
+}
+
+# Negative values become 0.0, scalar
+func clampNegativeScalar(values: mod List(Float)) {
+  loop var i: Int = 0, i < values.length, ++i {
+    if values.copyAtFallback(index: i, fallback: 0.0) < 0.0 {
+      values.set(index: i, value: 0.0)
+    }
+  }
+}
+
+# The same writing only the lanes that change: `storeMasked` with the
+# comparison, and in the tail also `firstLanes`, so a lane past the end
+# (loaded as 0.0, not negative anyway) is never a candidate
+func clampNegativeWide(values: mod List(Float)) {
+  let zero: Float4 = Float4.splat(value: 0.0)
+  let length: Int = values.length
+  var i: Int = 0
+  loop i < length {
+    let rest: Int = length - i
+    let chunk: Float4 = Float4.loadPartial(list: values, start: i, count: rest)
+    let negative: Mask4 = Float4.both(
+      a: Float4.less(a: chunk, b: zero)
+      b: Float4.firstLanes(count: rest)
+    )
+    Float4.storeMasked(
+      into: values
+      start: i
+      value: zero
+      mask: negative
+    )
+    i = i + 4
+  }
+}
+
+func sameValues(left: view List(Float), right: view List(Float)) ret Bool {
+  if left.length is not right.length {
+    ret false
+  }
+  loop var i: Int = 0, i < left.length, ++i {
+    if left.copyAtFallback(index: i, fallback: 0.0) is not right.copyAtFallback(
+      index: i
+      fallback: 1.0
+    ) {
+      ret false
+    }
+  }
+  ret true
+}
+
+func main() {
+  let lengths: List(Int) = {
+    0
+    1
+    3
+    4
+    5
+    103
+  }
+  loop var k: Int = 0, k < lengths.length, ++k {
+    let length: Int = lengths.copyAtFallback(index: k, fallback: 0)
+    let xs: List(Float) = valuesOf(count: length, seed: 7 + length)
+    var scalarYs: List(Float) = valuesOf(count: length, seed: 11 + length)
+    var wideYs: List(Float) = valuesOf(count: length, seed: 11 + length)
+    scaledAddScalar(scale: 1.5, xs: xs, ys: scalarYs)
+    scaledAddWide(scale: 1.5, xs: xs, ys: wideYs)
+    let dotBits: Int = Math.floatBits(value: dotScalar(xs: xs, ys: scalarYs))
+    let dotSame: Bool = dotBits is Math.floatBits(value: dotWide(xs: xs, ys: scalarYs))
+    var scalarClamped: List(Float) = valuesOf(count: length, seed: 13 + length)
+    var wideClamped: List(Float) = valuesOf(count: length, seed: 13 + length)
+    clampNegativeScalar(values: scalarClamped)
+    clampNegativeWide(values: wideClamped)
+    let scaledSame: Bool = sameValues(left: scalarYs, right: wideYs)
+    let clampedSame: Bool = sameValues(left: scalarClamped, right: wideClamped)
+    log("length {length}: scaled add {scaledSame}, dot {dotSame}, clamp {clampedSame}")
+  }
+  # The edges: a lane past the end reads as 0.0, a start outside the list
+  # reads nothing, and the masks
+  let three: List(Float) = { 1.0, 2.0, 3.0 }
+  let past: Float4 = Float4.loadPartial(list: three, start: 2, count: 4)
+  log("from 2, 4 asked: {past.x} {past.y} {past.z} {past.w}")
+  let outside: Float4 = Float4.loadPartial(list: three, start: 5, count: 2)
+  log("from 5: {outside.x} {outside.y} {outside.z} {outside.w}")
+  # Four lanes asked from 2 in a list of three: the one that fits is
+  # written, the call warns, and nothing past the end is touched
+  var target: List(Float) = List.create(Float, cap: 3)
+  target.add(value: 0.0)
+  target.add(value: 0.0)
+  target.add(value: 0.0)
+  Float4.storePartial(
+    into: target
+    start: 2
+    value: Float4.splat(value: 9.0)
+    count: 4
+  )
+  Float4.storeMasked(
+    into: target
+    start: 1
+    value: Float4.splat(value: 8.0)
+    mask: Float4.firstLanes(count: 1)
+  )
+  log(
+    "stored: {target.copyAtFallback(index: 0, fallback: -1.0)} {target.copyAtFallback(
+      index: 1
+      fallback: -1.0
+    )} {target.copyAtFallback(index: 2, fallback: -1.0)}"
+  )
+  let mask: Mask4 = Float4.firstLanes(count: 3)
+  log("firstLanes 3: {mask.bitsX} {mask.bitsY} {mask.bitsZ} {mask.bitsW}")
+  log(
+    "firstLanes 0 any: {Float4.anyLane(mask: Float4.firstLanes(count: 0))}, 4 all: {Float4.allLanes(
+      mask: Float4.firstLanes(count: 4)
+    )}"
+  )
+}

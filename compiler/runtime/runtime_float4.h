@@ -335,6 +335,35 @@ RAE_F4_INLINE void rae_f4_store(void* data, int64_t index, const void* value) {
   memcpy((float*)data + index, value, 4 * sizeof(float));
 }
 
+/* The masked tail of a loop (docs/float4-design.md §9): only the first
+ * `count` lanes (0..4, checked by lib/Float4.rae against the list's length)
+ * touch memory, so nothing past the end is read or written. A memory move,
+ * not arithmetic: one definition gives the same bits on every lowering. */
+/* Lane by lane with constant-size copies (inlined; a variable-length memcpy
+ * would be a library call), bits unchanged, NaN payloads included */
+RAE_F4_INLINE void rae_f4_load_partial_impl(float* out, const void* data, int64_t index, int64_t count) {
+  const float* source = (const float*)data + index;
+  out[0] = 0.0f; out[1] = 0.0f; out[2] = 0.0f; out[3] = 0.0f;
+  if (count >= 4) { memcpy(out, source, 4 * sizeof(float)); return; }
+  if (count >= 3) memcpy(&out[2], &source[2], sizeof(float));
+  if (count >= 2) memcpy(&out[1], &source[1], sizeof(float));
+  if (count >= 1) memcpy(&out[0], &source[0], sizeof(float));
+}
+RAE_F4_INLINE void rae_f4_store_partial(void* data, int64_t index, const void* value, int64_t count) {
+  float* target = (float*)data + index; const float* v = value;
+  if (count >= 4) { memcpy(target, v, 4 * sizeof(float)); return; }
+  if (count >= 3) memcpy(&target[2], &v[2], sizeof(float));
+  if (count >= 2) memcpy(&target[1], &v[1], sizeof(float));
+  if (count >= 1) memcpy(&target[0], &v[0], sizeof(float));
+}
+/* The lanes of `mask` that are true (any bit set), among the first `count` */
+RAE_F4_INLINE void rae_f4_store_masked(void* data, int64_t index, const void* value, const void* mask, int64_t count) {
+  const float* v = value; const uint32_t* m = mask; float* d = (float*)data + index;
+  for (int64_t lane = 0; lane < count; ++lane) {
+    if (m[lane] != 0) memcpy(&d[lane], &v[lane], sizeof(float));
+  }
+}
+
 /* ---- The entry points the generated code calls -------------------------
  * `struct rae_Float4` / `struct rae_Mask4` are declared by the generated
  * code (lib/Float4.rae's types); a macro names them at the call site. */
@@ -358,6 +387,8 @@ RAE_F4_INLINE void rae_f4_store(void* data, int64_t index, const void* value) {
 #define rae_f4_embed_index(a, base_index, bit_count) \
   RAE_F4_RESULT(rae_f4_embed_index_impl((float*)&rae_f4_result__, (a), (base_index), (bit_count)))
 #define rae_f4_load(data, index) RAE_F4_RESULT(rae_f4_load_impl((float*)&rae_f4_result__, (data), (index)))
+#define rae_f4_load_partial(data, index, count) \
+  RAE_F4_RESULT(rae_f4_load_partial_impl((float*)&rae_f4_result__, (data), (index), (count)))
 #define rae_f4_less(a, b) RAE_M4_RESULT(rae_f4_less_impl((uint32_t*)&rae_m4_result__, (a), (b)))
 #define rae_f4_greater(a, b) RAE_M4_RESULT(rae_f4_greater_impl((uint32_t*)&rae_m4_result__, (a), (b)))
 #define rae_f4_less_or_equal(a, b) RAE_M4_RESULT(rae_f4_less_or_equal_impl((uint32_t*)&rae_m4_result__, (a), (b)))
