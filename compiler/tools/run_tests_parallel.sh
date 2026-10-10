@@ -190,6 +190,11 @@ if [ -f tools/test-files-io.sh ]; then
   echo
   if bash tools/test-files-io.sh; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 fi
+# Where `rae build --emit-c --out` writes: new folders, and errors that say why
+if [ -f tools/test-build-out.sh ]; then
+  echo
+  if bash tools/test-build-out.sh; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
+fi
 echo
 echo "=========================================="
 echo "Results: $PASSED passed, $FAILED failed"

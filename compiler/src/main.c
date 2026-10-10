@@ -2700,7 +2700,8 @@ static bool build_c_backend_output(const char* entry_file,
 
   int errs_before_emit = diag_error_count();
   progress_phase(PROGRESS_EMIT);
-  bool ok = c_backend_emit_module(&ctx, &merged, out_file);
+  /* `--out a/b/out.c`: the folders are made, as for every other output */
+  bool ok = ensure_parent_directory(out_file) && c_backend_emit_module(&ctx, &merged, out_file);
   /* The backend reports semantic errors it can only see with full type
    * information (a reference returned to a temporary, for one). Emission
    * still writes a file, so without this the pipeline would hand invalid

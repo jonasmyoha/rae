@@ -7,6 +7,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <errno.h>
 #include <string.h>
 #include <stdint.h>
 
@@ -2716,7 +2717,11 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   discovery_progress_window(EMIT_STAGE_DISCOVER_LO, EMIT_STAGE_DISCOVER_HI);
   collect_type_refs_module(ctx);
 
-  FILE* out = fopen(out_path, "w"); if (!out) return false;
+  FILE* out = fopen(out_path, "w");
+  if (!out) {
+    fprintf(stderr, "error: cannot write '%s': %s\n", out_path, strerror(errno));
+    return false;
+  }
   fprintf(out, "#include \"rae_runtime.h\"\n");
   // The int/Bool/Char text wrappers the header's rae_ext_rae_str dispatch
   // names: declared first, because type toString helpers emitted before the
