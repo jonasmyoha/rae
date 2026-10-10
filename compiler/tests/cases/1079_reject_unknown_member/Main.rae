@@ -1,0 +1,19 @@
+# A member the type does not have is a compile error, not invalid C: a
+# struct field that does not exist, a field on a String (its length is the
+# method length()), on a number, and through a view.
+type Point {
+  x: Int
+}
+
+func size(text: view String) ret Int {
+  ret text.length
+}
+
+func main() {
+  let point: Point = { x: 1 }
+  log(point.y)
+  let count: Int = 3
+  log(count.size)
+  log(point.x)
+  log(size(text: "abc"))
+}
