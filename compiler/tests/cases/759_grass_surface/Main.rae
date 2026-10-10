@@ -1,5 +1,6 @@
 # The grass compute shader is a DECLARED composition (docs/shaders-and-the-
-# compiler.md): the lib default lists noise + biome + the grass pass, and an
+# compiler.md): the lib default lists the compute bounds + noise + biome +
+# the grass pass, and an
 # app supplies its own surface as a composition of its own, set whole. The
 # island size is no longer text in the shader — it is an `override` pair
 # handed to the pipeline (WorldBiome.islandConstants).
@@ -10,13 +11,13 @@ func main() ret Int {
   let standard: Shader = GrassCompute.defaultGrassComputeShader()
   log(standard.text.contains(sub: "override RAE_BIOME_ISLAND_RADIUS"))
   log(standard.text.contains(sub: "// --- lib/grass_compute.wgsl"))
-  log(standard.sources.length() is 3)
+  log(standard.sources.length() is 4)
   let constants: List(ShaderConstant) = WorldBiome.islandConstants()
   log(constants.length() is 2)
   var grassCompute: GrassCompute = GrassCompute.createGrassCompute()
   log(not grassCompute.computeShaderSet)
   GrassCompute.grassSetComputeShader(grass: grassCompute, shader: standard)
   log(grassCompute.computeShaderSet)
-  log(grassCompute.computeShader.sources.length() is 3)
+  log(grassCompute.computeShader.sources.length() is 4)
   ret 0
 }

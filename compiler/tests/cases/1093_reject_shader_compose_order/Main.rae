@@ -1,0 +1,11 @@
+# A shader part names the parts it is written against in its leading
+# comments (`// compose-after: lib/gpu/computeBounds.wgsl`); a composition
+# that leaves one out, or lists it later, is an error naming the part, not
+# naga's "no definition in scope". This is the grass composition apps wrote
+# before lib/grass_compute.wgsl moved onto the bounded dispatch (0.1.267).
+func main() {
+  let grass: Shader = shader(
+    files: ["lib/noise.wgsl", "lib/world_biome.wgsl", "lib/grass_compute.wgsl"]
+  )
+  log("{grass.generation}")
+}

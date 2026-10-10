@@ -21,6 +21,7 @@
 # counts on one bounds buffer would both see the last. Rae over the WebGPU
 # bindings (gpu/GpuResources, gpu/GpuLifetime); no renderer C.
 open webgpu/WebgpuEnums
+open gpu/GpuIds
 open gpu/GpuResources
 open gpu/GpuLifetime
 
@@ -31,6 +32,29 @@ const maxWorkgroupsPerDimension: Int = 65535
 type ComputeBounds {
   buffer: BufferId
   workgroupSize: Int
+}
+
+# A blank ComputeBounds (no buffer yet), for a value made before the GPU
+func noComputeBounds(workgroupSize: view Int) ret ComputeBounds {
+  ret ComputeBounds { buffer: noBufferId(), workgroupSize: workgroupSize }
+}
+
+# `constants` plus the `computeWorkgroupSize` override, for a pipeline made
+# from a Shader value with other overrides of its own
+func computeConstantsFor(
+  bounds: view ComputeBounds
+  constants: view List(ShaderConstant)
+) ret List(ShaderConstant) {
+  var all: List(ShaderConstant) = List.create(ShaderConstant, cap: constants.length + 1)
+  loop var i: Int = 0, i < constants.length, ++i {
+    if let constant: ShaderConstant = constants.copyAt(index: i) {
+      all.add(value: constant)
+    }
+  }
+  all.add(
+    value: ShaderConstant { name: "computeWorkgroupSize", value: bounds.workgroupSize.toFloat() }
+  )
+  ret all
 }
 
 # ceil(elementCount / workgroupSize): 0 for no elements
@@ -67,15 +91,11 @@ func createBoundedComputePipeline(
   entryPoint: view String
   bounds: view ComputeBounds
 ) ret opt PipelineId {
-  var constants: List(ShaderConstant) = List.create(ShaderConstant, cap: 1)
-  constants.add(
-    value: ShaderConstant { name: "computeWorkgroupSize", value: bounds.workgroupSize.toFloat() }
-  )
   ret createComputePipelineSource(
     resources: resources
     wgsl: wgsl
     entryPoint: entryPoint
-    constants: constants
+    constants: computeConstantsFor(bounds: bounds, constants: noShaderConstants())
   )
 }
 

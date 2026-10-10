@@ -26,6 +26,7 @@ open webgpu/Context
 open webgpu/WebgpuEnums
 open gpu/GpuResources
 open gpu/GpuLifetime
+open gpu/GpuCompute
 open gpu/GpuReadback
 open gpu/GpuRender
 open gpu/GpuRenderPass
@@ -41,6 +42,9 @@ import WorldBiome
 # shader derives side = sqrt(count). 256 x 256 = 65536 candidate blades; GPU
 # culling keeps only the visible subset (indirect draw).
 const grassGpuBladeCount: Int = 65536
+
+# The compute kernel's workgroup size (its `computeWorkgroupSize` override)
+const grassWorkgroupSize: Int = 64
 
 const grassRecordBytes: Int = 160  # 40 floats per DrawU
 
@@ -80,6 +84,8 @@ type GrassCompute {
   diagFrame: Int
   visibleCache: Int
   computePipeline: PipelineId
+  # The blade count the kernel's bounds check reads (lib/gpu/GpuCompute)
+  bounds: ComputeBounds
   renderPipeline: RenderPipelineId
   instances: BufferId
   uniform: BufferId
@@ -103,6 +109,7 @@ func createGrassCompute() ret GrassCompute {
     diagFrame: 0
     visibleCache: 0
     computePipeline: noPipelineId()
+    bounds: noComputeBounds(workgroupSize: grassWorkgroupSize)
     renderPipeline: noRenderPipelineId()
     instances: noBufferId()
     uniform: noBufferId()
@@ -120,12 +127,20 @@ func createGrassCompute() ret GrassCompute {
 # validated at build (docs/shaders-and-the-compiler.md). The island size is
 # the `override` pair WorldBiome.islandConstants() sets at pipeline creation.
 func defaultGrassComputeShader() ret Shader {
-  ret shader(files: ["lib/noise.wgsl", "lib/world_biome.wgsl", "lib/grass_compute.wgsl"])
+  ret shader(
+    files: [
+      "lib/gpu/computeBounds.wgsl"
+      "lib/noise.wgsl"
+      "lib/world_biome.wgsl"
+      "lib/grass_compute.wgsl"
+    ]
+  )
 }
 
-# Use an app's own compute shader — a declared composition whose earlier parts
-# define the surface (raeTerrainHeight / raeBiomeSample) and whose last part is
-# lib/grass_compute.wgsl. Declared in the app so a surface that drifts from
+# Use an app's own compute shader — a declared composition that starts with
+# lib/gpu/computeBounds.wgsl (the bounds check, since 0.1.267), whose next
+# parts define the surface (raeTerrainHeight / raeBiomeSample) and whose last
+# part is lib/grass_compute.wgsl. Declared in the app so a surface that drifts from
 # the grass pass fails the app's build, not its first frame.
 func grassSetComputeShader(grass: mod GrassCompute, shader: own Shader) {
   grassSetComputeShaderWithConstants(
@@ -159,7 +174,7 @@ func grassComputePipeline(
       resources: resources
       shader: grass.computeShader
       entryPoint: "main"
-      constants: grass.computeConstants
+      constants: computeConstantsFor(bounds: grass.bounds, constants: grass.computeConstants)
     )
   }
   let computeShader: Shader = defaultGrassComputeShader()
@@ -167,7 +182,7 @@ func grassComputePipeline(
     resources: resources
     shader: computeShader
     entryPoint: "main"
-    constants: WorldBiome.islandConstants()
+    constants: computeConstantsFor(bounds: grass.bounds, constants: WorldBiome.islandConstants())
   )
 }
 
@@ -215,6 +230,7 @@ func releaseGrassGpu(grass: mod GrassCompute, resources: mod GpuResources) {
   retireBuffer(resources: resources, id: grass.uniform)
   retireBuffer(resources: resources, id: grass.indirect)
   retireBuffer(resources: resources, id: grass.staging)
+  retireBuffer(resources: resources, id: grass.bounds.buffer)
   releaseExternal(resources: resources, id: grass.frameUniform)
   grass.drawBind = noBindGroupId()
   grass.computeBind = noBindGroupId()
@@ -224,6 +240,7 @@ func releaseGrassGpu(grass: mod GrassCompute, resources: mod GpuResources) {
   grass.uniform = noBufferId()
   grass.indirect = noBufferId()
   grass.staging = noBufferId()
+  grass.bounds = noComputeBounds(workgroupSize: grassWorkgroupSize)
   grass.frameUniform = noExternalId()
   grass.drawBindMade = false
 }
@@ -277,9 +294,16 @@ func ensureGrassGpu(grass: mod GrassCompute, resources: mod GpuResources) {
   # terrain-height definition with everything else that touches the ground.
   # Carrying its own copy is what left blades standing on a height field the
   # terrain had already moved off.
+  if let bounds: ComputeBounds = createComputeBounds(
+    resources: resources
+    workgroupSize: grassWorkgroupSize
+  ) {
+    grass.bounds = bounds
+  }
   if let computePipeline: PipelineId = grassComputePipeline(grass: grass, resources: resources) {
     grass.computePipeline = computePipeline
-    var entries: List(ResourceRef) = List.create(ResourceRef, cap: 3)
+    var entries: List(ResourceRef) = List.create(ResourceRef, cap: 4)
+    entries.add(value: bufferRef(id: grass.bounds.buffer))
     entries.add(value: bufferRef(id: grass.uniform))
     entries.add(value: bufferRef(id: grass.instances))
     entries.add(value: bufferRef(id: grass.indirect))
@@ -463,16 +487,17 @@ func grassGenerate(
     offset: 0
   )
 
-  let groups: Int = (grassGpuBladeCount + 63) / 64
-  let command: ComputeCommand = computeCommand(
-    pipeline: grass.computePipeline
-    bindGroup: grass.computeBind
-    workgroupsX: groups
-    workgroupsY: 1
-    workgroupsZ: 1
-  )
+  # ceil(blades / 64) workgroups; the kernel's bounds check skips the last
+  # group's extra invocations (lib/gpu/GpuCompute)
   if var recording: Recording = beginRecording(resources: resources) {
-    if recordComputeCommand(recording: recording, resources: resources, command: command) {
+    if recordBoundedCompute(
+      recording: recording
+      resources: resources
+      pipeline: grass.computePipeline
+      bindGroup: grass.computeBind
+      bounds: grass.bounds
+      elementCount: grassGpuBladeCount
+    ) {
       trackSubmission(inFlight: grass.inFlight, resources: resources, recording: recording)
     }
   }
