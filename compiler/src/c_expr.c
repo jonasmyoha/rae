@@ -508,6 +508,19 @@ static bool emit_list_fast_access(CFuncContext* ctx, const AstExpr* expr, FILE* 
   return true;
 }
 
+
+/* One side of a String `is`: a call that returns a `view` / `mod` String
+ * gives the reference (rae_View_String), and the comparison wants the
+ * String it points at. A view local is already read through by emit_expr. */
+static void emit_string_eq_operand(CFuncContext* ctx, const AstExpr* operand, FILE* out) {
+    const AstTypeRef* type = infer_expr_type_ref(ctx, operand);
+    bool reference_call = type && (type->is_view || type->is_mod) && !type->is_opt
+        && (operand->kind == AST_EXPR_CALL || operand->kind == AST_EXPR_METHOD_CALL);
+    if (reference_call) fprintf(out, "(*(");
+    emit_expr(ctx, operand, out, PREC_LOWEST, false, false);
+    if (reference_call) fprintf(out, ").ptr)");
+}
+
 bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_prec, bool is_lvalue, bool suppress_deref) {
   if (!expr) return true;
   /* A wait a resumable twin hoisted before the statement: its result */
@@ -734,9 +747,9 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
           if (lhs_is_string || rhs_is_string_lit || lhs_is_tostring) {
               if (expr->as.binary.op == AST_BIN_NEQ) fprintf(out, "(bool)(!rae_ext_rae_str_eq(");
               else fprintf(out, "(bool)rae_ext_rae_str_eq(");
-              emit_expr(ctx, expr->as.binary.lhs, out, PREC_LOWEST, false, false);
+              emit_string_eq_operand(ctx, expr->as.binary.lhs, out);
               fprintf(out, ", ");
-              emit_expr(ctx, expr->as.binary.rhs, out, PREC_LOWEST, false, false);
+              emit_string_eq_operand(ctx, expr->as.binary.rhs, out);
               if (expr->as.binary.op == AST_BIN_NEQ) fprintf(out, "))");
               else fprintf(out, ")");
               break;
