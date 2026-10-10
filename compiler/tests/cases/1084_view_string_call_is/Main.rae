@@ -1,0 +1,62 @@
+# `is` / `is not` on a call that returns a `view` / `mod` String compares
+# the String it refers to: on either side, against a literal or another
+# such call, from a method, and inside a spawned task whose call suspends.
+type Shelf {
+  label: String
+}
+
+func labelOf(shelf: view Shelf) ret view String {
+  ret shelf.label
+}
+
+func shelfLabel(this: view Shelf) ret view String {
+  ret this.label
+}
+
+func editableLabel(shelf: mod Shelf) ret mod String {
+  ret shelf.label
+}
+
+func slowLabel(shelf: view Shelf) ret view String {
+  sleep(ms: 1)
+  ret shelf.label
+}
+
+func checkInTask(index: copy Int) ret Int {
+  let shelf: Shelf = { label: "shelf {index}" }
+  sleep(ms: 1)
+  if slowLabel(shelf: shelf) is "shelf {index}" {
+    ret 1
+  }
+  ret 0
+}
+
+func main() {
+  var shelf: Shelf = { label: "x" }
+  if labelOf(shelf: shelf) is "x" {
+    log("view call is a literal")
+  }
+  if "x" is labelOf(shelf: shelf) {
+    log("a literal is a view call")
+  }
+  if labelOf(shelf: shelf) is not "y" {
+    log("view call is not another literal")
+  }
+  if labelOf(shelf: shelf) is shelf.shelfLabel() {
+    log("two view calls, one a method")
+  }
+  if editableLabel(shelf: shelf) is "x" {
+    log("mod call is a literal")
+  }
+  var tasks: List(Task(Int)) = {}
+  loop var i: Int = 0, i < 4, ++i {
+    tasks.add(value: spawn checkInTask(index: i))
+  }
+  var matched: Int = 0
+  loop var i: Int = 0, i < tasks.length, ++i {
+    if let task: Task(Int) = tasks.copyAt(index: i) {
+      matched = matched + task.get()
+    }
+  }
+  log("in tasks: {matched} of 4")
+}
