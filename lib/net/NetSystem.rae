@@ -62,9 +62,9 @@ const unsupportedCode: Int = 24
 
 const listenBacklogMax: Int = 25
 
-# The poller's kqueue constants (macOS; -1 elsewhere until epoll, F8): the
-# read / write filters, the add / delete change flags, the end-of-file and
-# error event flags, and the most events one wait reports
+# The poller's kqueue constants (Apple, the BSDs; -1 elsewhere): the read /
+# write filters, the add / delete change flags, the end-of-file and error
+# event flags, and the most events one wait reports
 const pollFilterRead: Int = 26
 
 const pollFilterWrite: Int = 27
@@ -78,6 +78,25 @@ const pollFlagEndOfFile: Int = 30
 const pollFlagError: Int = 31
 
 const pollMaxWaitEvents: Int = 32
+
+# The poller's epoll constants (a Linux kernel, decision F8; -1 elsewhere):
+# the event bits, the add / delete operations, and EEXIST (a socket already
+# watched in that direction)
+const epollIn: Int = 33
+
+const epollOut: Int = 34
+
+const epollReadHangUp: Int = 35
+
+const epollHangUp: Int = 36
+
+const epollError: Int = 37
+
+const epollAdd: Int = 38
+
+const epollDelete: Int = 39
+
+const errorExists: Int = 40
 
 # The socket calls, as a capability (docs/platform-conditional-code.md §3.1
 # layer 3): POSIX sockets on Apple, the BSDs and a Linux kernel. Elsewhere (the
@@ -279,8 +298,7 @@ when hasPosixSockets {
 # The kernel readiness queues, as capabilities (docs/platform-conditional-code.md
 # §3.1 layer 3): kqueue on Apple and the BSDs, epoll on a Linux kernel. Each
 # shim below exists only where its queue does; elsewhere lib/net/Poller.rae
-# and lib/FileNotify.rae answer `unsupported` in Rae. (epoll's shim lands with
-# the Linux task; until then `hasEpoll` selects nothing.)
+# and lib/FileNotify.rae answer `unsupported` in Rae.
 const hasKqueue: Bool = Target.isApple or Target.isBsd
 
 const hasEpoll: Bool = Target.isLinuxKernel
@@ -304,6 +322,27 @@ when hasKqueue {
     maxEvents: Int
     timeoutMs: Int
   ) unsafe extern("rae_ext_NetSys_pollerWait") ret Int
+}
+
+when hasEpoll {
+  # The readiness poller on a Linux kernel: create an epoll queue; one
+  # epoll_ctl; one wait that writes (handle, events, 0) per event into
+  # `events` and answers how many
+  func systemEpollCreate() unsafe extern("rae_ext_NetSys_epollCreate") ret Int
+
+  func systemEpollControl(
+    queue: Int
+    operation: Int
+    handle: Int
+    events: Int
+  ) unsafe extern("rae_ext_NetSys_epollControl") ret Int
+
+  func systemEpollWait(
+    queue: Int
+    events: Buffer(Int)
+    maxEvents: Int
+    timeoutMs: Int
+  ) unsafe extern("rae_ext_NetSys_epollWait") ret Int
 }
 
 # Not a system call: allocating a String from bytes is the compiler's string
