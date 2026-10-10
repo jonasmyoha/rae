@@ -68,6 +68,12 @@ typedef struct {
    * task waiting on this one, 0 when none, -1 once this one finished */
   int (*step)(void* args);
   _Atomic intptr_t waiter;
+  /* A resumable task suspended on a socket (runtime_sched_io.c): what it
+   * registered, under the scheduler's io lock */
+  int io_armed;
+  int io_filter;
+  int io_timer;
+  int64_t io_fd;
 } RaeTask;
 
 RaeTask* rae_task_new(size_t result_size);
@@ -87,6 +93,18 @@ int rae_sched_wait_task(RaeTask* t);
 /* Inside a resumable task: suspend until the monotonic clock reaches
  * `deadline_ns` (1), or 0 when it has */
 int rae_sched_sleep_until(int64_t deadline_ns);
+/* Inside a resumable task: suspend until `fd` is ready (`events`: poll bits,
+ * -1 readable) or `timeout_ms` passes (1), or 0 when it cannot suspend
+ * (runtime_sched_io.c) */
+int rae_sched_io_wait(int64_t fd, int64_t events, int64_t timeout_ms);
+void rae_sched_install_io(void (*io_loop)(void));
+/* Whether a socket wait suspends a task here: a spawn that can reach one goes
+ * on the pool only then (else it is a thread, its waits blocking it) */
+#ifdef RAE_HAS_KQUEUE
+#define RAE_SCHED_IO_SUSPENDS 1
+#else
+#define RAE_SCHED_IO_SUSPENDS 0
+#endif
 int64_t rae_sched_now_ns(void);
 /* A resumable frame's saved local: storage of `size` bytes that never moves */
 void* rae_frame_slot(void** slot, size_t size);

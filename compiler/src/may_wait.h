@@ -25,14 +25,20 @@ void may_wait_free(struct WaitGraph* graph);
  * scheduler's worker pool: nothing it can reach waits except through task
  * joins (`get`, a Task dropped at scope end, a taskScope), and every extern it
  * can reach is the runtime's own non-blocking kind (lib/core, Math, Parallel,
- * Time and Channel, minus the sleeps). With `allow_sleep` (the spawned
- * function has a resumable twin, c_twin.c) its sleeps may be reached too,
- * since they suspend. A task that waits on a socket or calls other C stays a
- * thread until its wait can suspend (S4) or is marked `blocking` (S5). */
+ * Time, Channel, String and lib/net's system calls, minus the waits and the
+ * name lookup). With `allow_sleep` (the spawned function has a resumable
+ * twin, c_twin.c) its sleeps and socket waits may be reached too, since they
+ * suspend. A task that calls other C stays a thread until such calls are
+ * marked `blocking` (S5). */
 bool may_wait_spawn_on_pool(struct WaitGraph* graph, const AstDecl* decl, bool allow_sleep);
 
-/* Whether a sleep (sleep, Time.waitUntil) can be reached from `decl` */
+/* Whether a wait that holds its thread unless the task suspends — a sleep
+ * (sleep, Time.waitUntil) or a socket / poller wait — can be reached from
+ * `decl` */
 bool may_wait_reaches_sleep(struct WaitGraph* graph, const AstDecl* decl);
+/* Whether a socket / poller wait can be reached from `decl` (it suspends
+ * only where the runtime has a readiness poller: RAE_SCHED_IO_SUSPENDS) */
+bool may_wait_reaches_socket(struct WaitGraph* graph, const AstDecl* decl);
 /* Whether `decl` may wait at all */
 bool may_wait_decl_may_wait(struct WaitGraph* graph, const AstDecl* decl);
 /* Whether `decl` may wait and is reachable from a spawn: a candidate for a
