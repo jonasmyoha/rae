@@ -160,7 +160,7 @@ typedef struct {
   int twin_state;
   struct TwinSlots* twin_slots;
   const void* twin_override_expr[16];
-  char twin_override_text[16][48];
+  char twin_override_text[16][256];
   int twin_override_count;
   bool twin_args_from_frame;
   Str twin_hoist_temps[16];

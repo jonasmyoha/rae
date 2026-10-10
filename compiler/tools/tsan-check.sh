@@ -31,7 +31,7 @@ CASES="511_spawn_raytracer_bands 512_spawn_string_workers 513_spawn_own_list_cop
 944_parallel_loop_results 946_parallel_chunk_scratch \
 997_physics_parallel_step 1033_task_try_get 1036_file_notify_rae 1040_net_ecs_http 1061_spawn_thread_cap 1062_ret_opt_passthrough 1064_task_get_temporary \
 1073_spawn_pool_fork_join 1074_spawn_pool_many 1075_spawn_resumable 1076_spawn_resumable_one_worker \
-1077_spawn_lend_view"
+1077_spawn_lend_view 1080_spawn_socket_waits"
 if [ -n "${RAE_TSAN_FILTER:-}" ]; then CASES="$RAE_TSAN_FILTER"; fi
 
 # The toolchain probe: a compiler without the TSan runtime cannot run this gate.

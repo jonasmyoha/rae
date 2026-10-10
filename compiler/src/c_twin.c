@@ -4,7 +4,7 @@
  * suspends at a wait instead of holding its worker.
  *
  *   typedef struct F__frame { int state; RaePoolSave pool; void* child;
- *                             void* slots[N]; RetT result; } F__frame;
+ *                             void* slots[N]; int64_t hold[4]; RetT result; } F__frame;
  *   static int F__step(F__frame* __rae_frame);   1: finished, 0: suspended
  *
  * The step function is the normal body, emitted by the normal statement
@@ -22,6 +22,11 @@
  *     statement then runs unchanged on a task that is done;
  *   - a sleep extern (Core.sleep's, Time.waitUntil's): suspend until the
  *     deadline; the call itself then reads as 0;
+ *   - a socket / poller wait (lib/net's systemPollOne, systemPollerWait):
+ *     its arguments are held in the frame, the task suspends until the
+ *     socket is ready or the timeout passes (the scheduler's readiness
+ *     thread wakes it), and the call then runs with a timeout of 0, so it
+ *     answers what is ready without waiting;
  *   - a call to another twin: a child frame is stepped until it finishes,
  *     the parent suspending whenever the child does; the call reads as the
  *     child's result.
@@ -161,7 +166,7 @@ static void emit_restore_all(CFuncContext* ctx, FILE* out) {
 
 /* ----- finding the waits of a statement --------------------------------- */
 
-typedef enum { POINT_JOIN, POINT_SLEEP, POINT_CALL } PointKind;
+typedef enum { POINT_JOIN, POINT_SLEEP, POINT_POLL, POINT_CALL } PointKind;
 
 typedef struct {
   PointKind kind;
@@ -227,6 +232,34 @@ static const char* sleep_symbol(const AstDecl* decl) {
   return NULL;
 }
 
+/* A socket / poller wait: which argument is the descriptor, which the poll
+ * events (-1: wait until readable) and which the timeout in milliseconds */
+typedef struct {
+  const char* symbol;
+  int descriptor;
+  int events;
+  int timeout;
+} PollWait;
+
+static const PollWait poll_waits[] = {
+  { "rae_ext_NetSys_pollOne", 0, 1, 2 },
+  { "rae_ext_NetSys_pollerWait", 0, -1, 3 },
+};
+
+static const PollWait* poll_wait_of(const AstDecl* decl) {
+  if (!decl || !decl->as.func_decl.is_extern || !decl->as.func_decl.extern_symbol) return NULL;
+  for (size_t i = 0; i < sizeof poll_waits / sizeof poll_waits[0]; i++) {
+    if (strcmp(decl->as.func_decl.extern_symbol, poll_waits[i].symbol) == 0) return &poll_waits[i];
+  }
+  return NULL;
+}
+
+/* The value the statement being scanned computes as a whole (a `let`'s, an
+ * assignment's, an expression statement's, a one-value `ret`'s): a wait that
+ * is this value runs after everything else the statement evaluates, so
+ * hoisting it with all its arguments changes no order */
+static const AstExpr* s_stmt_value = NULL;
+
 static void add_point(TwinPoints* points, TwinPoint point) {
   if (points->count >= 16) {
     points->overflow = true;
@@ -287,6 +320,17 @@ static void scan_expr(CFuncContext* ctx, const AstExpr* expr, bool hoistable, Tw
     }
     case AST_EXPR_CALL: {
       const AstDecl* target = call_target(expr);
+      if (poll_wait_of(target)) {
+        TwinPoint point = { POINT_POLL, expr, hoistable, false, target };
+        bool simple = true;
+        for (const AstCallArg* arg = expr->as.call.args; arg; arg = arg->next) {
+          if (!expr_is_simple(arg->value)) simple = false;
+        }
+        /* Its arguments are evaluated once, before the suspension */
+        if (!simple && expr != s_stmt_value) point.hoistable = false;
+        add_point(points, point);
+        return;
+      }
       const char* sleep = sleep_symbol(target);
       if (sleep) {
         TwinPoint point = { POINT_SLEEP, expr, hoistable, strcmp(sleep, "rae_ext_Time_sleepNs") == 0, target };
@@ -352,6 +396,20 @@ static void scan_expr(CFuncContext* ctx, const AstExpr* expr, bool hoistable, Tw
 /* The statement's own expressions (not those of the blocks it holds): the
  * ones it evaluates once before anything else runs are hoistable */
 static void scan_stmt(CFuncContext* ctx, const AstStmt* stmt, TwinPoints* points) {
+  s_stmt_value = NULL;
+  switch (stmt->kind) {
+    case AST_STMT_LET: s_stmt_value = stmt->as.let_stmt.value; break;
+    case AST_STMT_EXPR: s_stmt_value = stmt->as.expr_stmt; break;
+    case AST_STMT_ASSIGN:
+      if (stmt->as.assign_stmt.target && stmt->as.assign_stmt.target->kind == AST_EXPR_IDENT) {
+        s_stmt_value = stmt->as.assign_stmt.value;
+      }
+      break;
+    case AST_STMT_RET:
+      if (stmt->as.ret_stmt.values && !stmt->as.ret_stmt.values->next) s_stmt_value = stmt->as.ret_stmt.values->value;
+      break;
+    default: break;
+  }
   switch (stmt->kind) {
     case AST_STMT_LET:
       scan_expr(ctx, stmt->as.let_stmt.value, true, points);
@@ -452,6 +510,55 @@ static void emit_sleep(CFuncContext* ctx, const TwinPoint* point, FILE* out) {
   add_override(ctx, point->expr, func->returns ? "((int64_t)0)" : "((void)0)");
 }
 
+/* A socket / poller wait: the arguments go into the frame's `hold`, the task
+ * waits with the scheduler's readiness thread (rae_sched_io_wait), and the
+ * call reads as itself with the held arguments and a timeout of 0. When the
+ * task cannot suspend (a platform without kqueue, a timeout of 0) it is the
+ * call with its own timeout, as in the normal function. */
+static void emit_poll(CFuncContext* ctx, const TwinPoint* point, FILE* out) {
+  const PollWait* wait = poll_wait_of(point->callee);
+  const AstFuncDecl* func = &point->callee->as.func_decl;
+  int state = ++ctx->twin_state;
+  int count = 0;
+  bool is_pointer[4] = { false, false, false, false };
+  fprintf(out, "  /* resumable: socket wait */\n  {\n");
+  const AstParam* param = func->params;
+  for (const AstCallArg* arg = point->expr->as.call.args; arg; arg = arg->next, count++) {
+    if (count >= 4 || !param) {
+      ctx->twin_failed = true;
+      return;
+    }
+    Str type_name = get_base_type_name(param->type);
+    is_pointer[count] = str_eq_cstr(type_name, "Buffer") || str_eq_cstr(type_name, "Ptr");
+    fprintf(out, "  __rae_frame->hold[%d] = (int64_t)%s(", count, is_pointer[count] ? "(intptr_t)" : "");
+    emit_expr(ctx, arg->value, out, PREC_LOWEST, false, false);
+    fprintf(out, ");\n");
+    param = param->next;
+  }
+  fprintf(out, "  int64_t __rae_timeout%d = __rae_frame->hold[%d];\n", state, wait->timeout);
+  fprintf(out, "  __rae_frame->hold[%d] = 0;\n", wait->timeout);
+  emit_save_all(ctx, out);
+  char call[160];
+  if (wait->events >= 0) {
+    snprintf(call, sizeof call, "rae_sched_io_wait(__rae_frame->hold[%d], __rae_frame->hold[%d], __rae_timeout%d)",
+             wait->descriptor, wait->events, state);
+  } else {
+    snprintf(call, sizeof call, "rae_sched_io_wait(__rae_frame->hold[%d], -1, __rae_timeout%d)", wait->descriptor,
+             state);
+  }
+  emit_register_and_suspend(out, state, call);
+  fprintf(out, "  __rae_frame->hold[%d] = __rae_timeout%d;\n  }\n  case %d: ;\n", wait->timeout, state, state);
+  emit_restore_all(ctx, out);
+  char text[256];
+  int length = snprintf(text, sizeof text, "%s(", func->extern_symbol);
+  for (int i = 0; i < count && length < (int)sizeof text; i++) {
+    length += snprintf(text + length, sizeof text - (size_t)length, "%s%s__rae_frame->hold[%d]", i ? ", " : "",
+                       is_pointer[i] ? "(void*)(intptr_t)" : "", i);
+  }
+  if (length < (int)sizeof text) snprintf(text + length, sizeof text - (size_t)length, ")");
+  add_override(ctx, point->expr, text);
+}
+
 static void emit_child_call(CFuncContext* ctx, const TwinPoint* point, FILE* out) {
   int state = ++ctx->twin_state;
   TwinEntry* callee = twin_entry(ctx->compiler_ctx, point->callee);
@@ -516,7 +623,7 @@ void c_twin_before_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
   bool can_suspend = ctx->twin_no_suspend == 0 && !temps_alive(ctx) && twin_locals_saveable(ctx);
   for (int i = 0; i < points.count; i++) {
     const TwinPoint* point = &points.items[i];
-    bool reaches_sleep = point->kind == POINT_SLEEP ||
+    bool reaches_sleep = point->kind == POINT_SLEEP || point->kind == POINT_POLL ||
         (point->kind == POINT_CALL && twin_entry(ctx->compiler_ctx, point->callee)->reaches_sleep);
     if (!can_suspend || !point->hoistable) {
       /* A get keeps the help-first wait; a call runs the normal function.
@@ -527,6 +634,7 @@ void c_twin_before_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     switch (point->kind) {
       case POINT_JOIN: emit_join(ctx, point, out); break;
       case POINT_SLEEP: emit_sleep(ctx, point, out); break;
+      case POINT_POLL: emit_poll(ctx, point, out); break;
       case POINT_CALL: emit_child_call(ctx, point, out); break;
     }
   }
@@ -624,7 +732,7 @@ static bool twin_emit_one(CompilerContext* ctx, const AstModule* module, TwinEnt
     FILE* out = decls;
     const char* mangled = entry->mangled;
     int slot_count = slots->count > 0 ? slots->count : 1;
-    fprintf(out, "struct %s__frame { int state; RaePoolSave pool; void* child; void* slots[%d];", mangled, slot_count);
+    fprintf(out, "struct %s__frame { int state; RaePoolSave pool; void* child; void* slots[%d]; int64_t hold[4];", mangled, slot_count);
     if (!is_void) fprintf(out, " %s result;", returns);
     fprintf(out, " };\n");
     fprintf(out, "RAE_UNUSED static %s__frame* %s__frame_new(", mangled, mangled);

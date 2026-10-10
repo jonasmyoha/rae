@@ -346,7 +346,8 @@ inserts. The options (fork F3):
    two. S3a, the scheduler, is done (0.1.251, §12):** spawns that wait only on
    other tasks run M:N on the pool, with the policy in Rae. **S3b**, the frame
    and step codegen, makes `get()` and `sleep` suspend: done (0.1.252, §13).
-4. Socket and poller waits (after G2) and the browser path.
+4. Socket and poller waits (after G2) and the browser path. **Socket waits:
+   done (0.1.256, §15).**
 5. The extern-blocking and fairness choices (F2, F3).
 
 ## 9. Decisions for the maintainer
@@ -750,7 +751,7 @@ static int F__step(F__frame* __rae_frame);   /* 1: finished, 0: suspended */
 - Rae has no cancellation: a frame is only freed after it finished, by its
   own code, so "dropping a suspended frame" never happens. Dropping a Task
   whose task is suspended joins it, as for any Task (fixture 1075).
-- Socket and poller waits are S4; C calls that block need the `blocking`
+- Socket and poller waits suspend since S4 (§15); C calls that block need the `blocking`
   keyword (S5). A spawn reaching either is still a thread.
 
 **The scheduler side** (S3a's kernel, policy in `lib/core/Scheduler.rae`):
@@ -946,4 +947,66 @@ func parallelSum(numbers: view List(Int), start: copy Int, count: copy Int) ret 
   new type and runtime machinery, and data has to be put into it first.
 - A parallel-calls construct (F9): new syntax, and it still needs the same
   freeze to share data.
+
+## 15. Socket waits suspend (S4, 2026-10-10)
+
+A task waiting on a socket now suspends where it held its worker. The waits
+are lib/net's two: `systemPollOne` (one socket, used by
+`socketWaitReadable` and by `tcpConnect` while a connection is in progress)
+and `systemPollerWait` (a whole poller, `pollWait`).
+
+**In a twin** (`c_twin.c`), such a call is hoisted like a sleep:
+
+1. Its arguments are evaluated once and held in the frame (`hold[4]`).
+   They may be calls (`netConstant(which: pollReadable)`) when the wait is
+   the statement's whole value, so nothing else of the statement is moved.
+2. The task registers its interest and suspends (`rae_sched_io_wait`).
+3. Resumed, the call runs with its held arguments and a timeout of 0. It
+   answers what is ready, or 0 when the wait timed out, so the code after it
+   needs no change.
+
+When the task cannot suspend (a timeout of 0, a platform without kqueue),
+the call runs with its own timeout, as in the normal function.
+
+**In the runtime** (`runtime_sched_io.c`), the scheduler owns one kqueue.
+
+- **A wait** is two one-shot registrations carrying the task: the socket's
+  read or write filter, and a timer when there is a timeout. A poller wait
+  watches the poller's own descriptor, which is readable when it has events.
+- **The readiness thread** runs `schedulerIoLoop` (Scheduler.rae). It is
+  started by the first task that waits. It takes one ready task at a time,
+  and puts it on the injection queue as `schedulerWake` does for any woken
+  task.
+- **No double wake.** Taking a task deletes its other registration before
+  the task is queued. A lock orders a registration against the taking of its
+  task, and an `io_armed` flag tells a live wait from one whose registration
+  failed. So a socket and its timeout firing together wake the task once.
+- **One task per socket direction.** kqueue keys an interest by descriptor
+  and filter, so two tasks waiting to read the same socket would replace
+  each other's interest. Reading one socket from two tasks is a bug anyway.
+
+**What a pool task may now reach** (`may_wait.c`):
+
+- lib/net's system calls, which are non-blocking (a socket answers
+  `wouldBlock`);
+- lib/String's externs.
+- Not the name lookup (`systemResolve`, getaddrinfo): a DNS query can wait
+  for seconds, so a task that resolves a name (`tcpConnect`) stays a thread
+  until the `blocking` keyword (S5) runs that call on its own thread.
+
+**Measured** with fixture `1080_spawn_socket_waits` on two workers:
+
+- Main spawns 64 handler tasks, oldest first. Each waits for its client, and
+  main asks the newest client first.
+- With socket waits that held the worker, the two oldest handlers held both
+  workers until their 2 s timeout: 1 of 64 answered, in 44 s.
+- With suspending waits, 64 of 64 answered in 2 s, including the build.
+
+**Not yet:**
+
+- **Linux:** its readiness poller (epoll) is not written yet. There
+  `RAE_SCHED_IO_SUSPENDS` is 0, and a spawn that can reach a socket wait
+  stays a thread, as before S4 (the spawn site tests the constant, which
+  the C compiler folds away).
+- **The browser:** tasks interleaving with `mainLoop`'s frames.
 

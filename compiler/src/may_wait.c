@@ -792,15 +792,18 @@ void may_wait_free(WaitGraph* graph) {
 }
 
 /* An extern the scheduler's workers may call: the runtime's own (lib/core,
- * Math, Parallel, Time, Channel), which never blocks for long, minus the
- * sleeps (they wait; S3b makes them suspend) */
+ * Math, Parallel, Time, Channel, String), which never blocks for long, and lib/net's
+ * system calls, which are non-blocking (a socket answers `wouldBlock`) —
+ * minus the waits (sleeps and socket waits suspend, S3b / S4) and the name
+ * lookup (getaddrinfo may wait on DNS: a `blocking` extern once S5 lands) */
 static bool extern_is_pool_safe(const WaitGraph* graph, const AstDecl* decl) {
   const AstFuncDecl* func = &decl->as.func_decl;
   if (extern_wait_kind(func) != WAIT_NONE) return false;
   if (!is_stdlib(graph, decl)) return false;
+  if (func->extern_symbol && strcmp(func->extern_symbol, "rae_ext_NetSys_resolve") == 0) return false;
   const char* path = short_lib_path(decl->origin_file);
   static const char* const safe[] = { "lib/core/", "lib/Math.rae", "lib/Parallel.rae", "lib/Time.rae",
-                                      "lib/Channel.rae" };
+                                      "lib/Channel.rae", "lib/String.rae", "lib/net/NetSystem.rae", "lib/net/ByteBuffer.rae" };
   for (size_t i = 0; i < sizeof safe / sizeof safe[0]; i++) {
     if (strncmp(path, safe[i], strlen(safe[i])) == 0) return true;
   }
@@ -831,19 +834,20 @@ static bool reach_any(WaitGraph* graph, int start, bool (*bad)(WaitGraph*, const
   return found;
 }
 
+/* A wait that holds its thread unless the task suspends there: a sleep or a
+ * socket / poller wait */
 static bool node_sleeps(WaitGraph* graph, const WaitNode* node, bool flag) {
   (void)graph; (void)flag;
-  return node->direct == WAIT_SLEEP;
+  return node->direct == WAIT_SLEEP || node->direct == WAIT_SOCKET;
 }
 
-/* A node a pool task must not reach: a socket wait, C that may block, and a
- * sleep unless it can suspend (`allow_sleep`) */
+/* A node a pool task must not reach: C that may block, and a sleep or socket
+ * wait unless it can suspend (`allow_sleep`) */
 static bool node_off_pool(WaitGraph* graph, const WaitNode* node, bool allow_sleep) {
-  if (node->direct == WAIT_SOCKET) return true;
-  if (node->direct == WAIT_SLEEP && !allow_sleep) return true;
+  if ((node->direct == WAIT_SLEEP || node->direct == WAIT_SOCKET) && !allow_sleep) return true;
   const AstFuncDecl* func = &node->decl->as.func_decl;
   if (func->is_extern) {
-    if (extern_wait_kind(func) == WAIT_SLEEP) return !allow_sleep;
+    if (extern_wait_kind(func) != WAIT_NONE) return !allow_sleep;
     return !extern_is_pool_safe(graph, node->decl);
   }
   return false;
@@ -857,6 +861,16 @@ static int decl_node(WaitGraph* graph, const AstDecl* decl) {
 bool may_wait_reaches_sleep(WaitGraph* graph, const AstDecl* decl) {
   int start = decl_node(graph, decl);
   return start >= 0 && reach_any(graph, start, node_sleeps, false);
+}
+
+static bool node_waits_on_socket(WaitGraph* graph, const WaitNode* node, bool flag) {
+  (void)graph; (void)flag;
+  return node->direct == WAIT_SOCKET;
+}
+
+bool may_wait_reaches_socket(WaitGraph* graph, const AstDecl* decl) {
+  int start = decl_node(graph, decl);
+  return start >= 0 && reach_any(graph, start, node_waits_on_socket, false);
 }
 
 bool may_wait_decl_may_wait(WaitGraph* graph, const AstDecl* decl) {

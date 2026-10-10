@@ -1,0 +1,135 @@
+# Socket waits suspend a task (docs/lightweight-spawn-design.md §15): an
+# acceptor task waits on its listener and spawns a handler task per
+# connection, each waiting for its client; then main spawns 64 handlers and
+# asks the newest first. On two workers that completes only because the
+# waiting handlers do not hold them (with waits that block, one of 64
+# answered, in 44 s).
+open net/Tcp
+
+# A handler task: read one line from its connection, answer it, close it.
+# Its reads wait for the client through suspending socket waits.
+func handle(socketId: copy SocketId) ret Int {
+  var bytes: List(UInt8) = {}
+  var reading: Bool = true
+  loop reading {
+    let result: IoResult = socketRead(socketId: socketId, bytes: bytes, maxBytes: 256)
+    if result.status is NetStatus.wouldBlock {
+      if not socketWaitReadable(socketId: socketId, timeoutMs: 2000) {
+        socketClose(socketId: socketId)
+        ret -1
+      }
+    } else if result.status is not NetStatus.ok {
+      socketClose(socketId: socketId)
+      ret -1
+    } else if bytes.copyAtFallback(index: bytes.length - 1, fallback: 0) is 10 {
+      reading = false
+    }
+  }
+  let request: String = textFromBytes(bytes: bytes, start: 0, count: bytes.length - 1)
+  let written: IoResult = socketWriteText(socketId: socketId, text: "pong {request}\n")
+  socketClose(socketId: socketId)
+  ret written.bytes
+}
+
+# The acceptor task: accept `count` connections, a handler task for each, and
+# join them
+func acceptAll(listenerSocketId: copy SocketId, count: copy Int) ret Int {
+  var handlers: List(Task(Int)) = {}
+  loop handlers.length < count {
+    let accepted: SocketResult = tcpAccept(listenerSocketId: listenerSocketId)
+    if accepted.status is NetStatus.wouldBlock {
+      if not socketWaitReadable(socketId: listenerSocketId, timeoutMs: 5000) {
+        ret -1
+      }
+    } else if accepted.status is NetStatus.ok {
+      handlers.add(value: spawn handle(socketId: accepted.socketId))
+    } else {
+      ret -1
+    }
+  }
+  var total: Int = 0
+  loop var i: Int = 0, i < handlers.length, ++i {
+    if let handler: Task(Int) = handlers.copyAt(index: i) {
+      total = total + handler.get()
+    }
+  }
+  ret total
+}
+
+func readLine(socketId: view SocketId) ret String {
+  var bytes: List(UInt8) = {}
+  loop {
+    let result: IoResult = socketRead(socketId: socketId, bytes: bytes, maxBytes: 256)
+    if result.status is NetStatus.wouldBlock {
+      if not socketWaitReadable(socketId: socketId, timeoutMs: 1000) {
+        ret "timeout"
+      }
+    } else if result.status is not NetStatus.ok {
+      ret "closed"
+    } else if bytes.copyAtFallback(index: bytes.length - 1, fallback: 0) is 10 {
+      ret textFromBytes(bytes: bytes, start: 0, count: bytes.length - 1)
+    }
+  }
+  ret "unreachable"
+}
+
+# Clients `count` connections to `port`, then the last asks first: the
+# answer of client i comes only after every client after it was answered
+func askInReverse(clients: view List(SocketId)) ret Int {
+  var answered: Int = 0
+  loop var i: Int = clients.length - 1, i >= 0, --i {
+    if let client: SocketId = clients.copyAt(index: i) {
+      let sent: IoResult = socketWriteText(socketId: client, text: "ping {i}\n")
+      if readLine(socketId: client) is "pong ping {i}" {
+        answered = answered + 1
+      }
+      socketClose(socketId: client)
+    }
+  }
+  ret answered
+}
+
+func connectAll(port: view Int, count: view Int) ret List(SocketId) {
+  var clients: List(SocketId) = {}
+  loop var i: Int = 0, i < count, ++i {
+    let connected: SocketResult = tcpConnect(host: "127.0.0.1", port: port, timeoutMs: 2000)
+    clients.add(value: connected.socketId)
+  }
+  ret clients
+}
+
+func main() {
+  let count: Int = 64
+  let listener: SocketResult = tcpListen(host: "127.0.0.1", port: 0, backlog: 128)
+  let port: Int = socketLocalPort(socketId: listener.socketId)
+
+  # An acceptor task waits on the listener and spawns a handler per
+  # connection
+  let acceptor: Task(Int) = spawn acceptAll(listenerSocketId: listener.socketId, count: count)
+  let first: List(SocketId) = connectAll(port: port, count: count)
+  log("acceptor task: answered {askInReverse(clients: first)} of {count}")
+  log("handler bytes: {acceptor.get()}")
+
+  # Handlers spawned here, oldest first onto the pool, all waiting for their
+  # client, while the newest is asked first: with waits that held a worker,
+  # the oldest two would hold both workers and the rest would never run
+  let second: List(SocketId) = connectAll(port: port, count: count)
+  var handlers: List(Task(Int)) = {}
+  loop handlers.length < count {
+    let accepted: SocketResult = tcpAccept(listenerSocketId: listener.socketId)
+    if accepted.status is NetStatus.ok {
+      handlers.add(value: spawn handle(socketId: accepted.socketId))
+    } else if not socketWaitReadable(socketId: listener.socketId, timeoutMs: 2000) {
+      break
+    }
+  }
+  log("handlers spawned by main: answered {askInReverse(clients: second)} of {count}")
+  var total: Int = 0
+  loop var i: Int = 0, i < handlers.length, ++i {
+    if let handler: Task(Int) = handlers.copyAt(index: i) {
+      total = total + handler.get()
+    }
+  }
+  log("handler bytes: {total}")
+  socketClose(socketId: listener.socketId)
+}
