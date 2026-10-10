@@ -160,7 +160,7 @@ func createJointGrid(world: mod PhysicsWorld, bodies: mod List(BodyId)) {
   var jointDef: SphericalJointDef = defaultSphericalJointDef(lengthUnitsPerMeter: 1.0)
   var bodyDef: BodyDef = defaultBodyDef(lengthUnitsPerMeter: 1.0)
   bodyDef.enableSleep = false
-  let grid: List(BodyId) = List.create(BodyId, cap: n * n)
+  var grid: List(BodyId) = List.create(BodyId, cap: n * n)
   loop var k: Int = 0, k < n, ++k {
     loop var i: Int = 0, i < n, ++i {
       if i is 0 {
@@ -247,7 +247,7 @@ func positionChecksum(world: view PhysicsWorld, bodies: view List(BodyId)) ret U
 
 func runScene(scene: view String, workers: view Int) {
   var world: PhysicsWorld = benchWorld(workers: workers)
-  let bodies: List(BodyId) = List.create(BodyId, cap: 16384)
+  var bodies: List(BodyId) = List.create(BodyId, cap: 16384)
   var stepCount: Int = 0
   var rain: RainState = { humans: List.create(Human, cap: 0), columnCount: 0, columnIndex: 0 }
   let isRain: Bool = scene is "rain"

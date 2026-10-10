@@ -52,7 +52,7 @@ func unitFloat(state: view Int) ret Float {
 
 func main() {
   var state: Int = 12345
-  let bodies: List(BodyState) = List.create(BodyState, cap: bodyCount)
+  var bodies: List(BodyState) = List.create(BodyState, cap: bodyCount)
   loop var i: Int = 0, i < bodyCount, ++i {
     state = nextState(state: state)
     let velocity: Float = unitFloat(state: state)
@@ -67,7 +67,7 @@ func main() {
       invInertia: 0.5
     })
   }
-  let constraints: List(ContactConstraint) = List.create(ContactConstraint, cap: constraintCount)
+  var constraints: List(ContactConstraint) = List.create(ContactConstraint, cap: constraintCount)
   loop var i: Int = 0, i < constraintCount, ++i {
     state = nextState(state: state)
     let bodyA: Int = state % bodyCount

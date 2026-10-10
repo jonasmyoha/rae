@@ -77,6 +77,13 @@ if [ -f tools/tsan-check.sh ]; then
   if bash tools/tsan-check.sh; then TSAN_CHECK=0; fi
   echo
 fi
+# Every benchmark program still compiles (tools/benchmarks-compile-check.sh):
+# one more pre-suite "case"; their run.sh builds are not run on every change.
+BENCH_CHECK=1
+if [ -f tools/benchmarks-compile-check.sh ]; then
+  if bash tools/benchmarks-compile-check.sh; then BENCH_CHECK=0; fi
+  echo
+fi
 # The memory-boundary fixtures under AddressSanitizer (tools/asan-check.sh):
 # one more pre-suite "case" (SKIP without an ASan runtime).
 ASAN_CHECK=1
@@ -136,6 +143,7 @@ if [ "$TERMS_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)
 if [ "$STRESS_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$TSAN_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$ASAN_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
+if [ "$BENCH_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$SERVER_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$TARGETS_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$WARNINGS_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
