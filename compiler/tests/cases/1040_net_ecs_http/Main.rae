@@ -217,8 +217,25 @@ func main() ret Int {
     idleFrames = idleFrames + 1
   }
   log("idle connection closed: {not allocatorIsAlive(this: server.entities, entityId: pipelined)}")
-  # Six buffers came back (bad, closing, this one); at most four were reused
-  log("closed connections' buffers pooled: {server.bufferPool.free.length >= 2}")
+  # A closed connection's two buffers go back to the pool. Measured on a probe
+  # connection of its own: which idle connections time out, and when, depends
+  # on where the clock's second boundaries fall (and on load), so counting the
+  # pool across the whole test was not deterministic. Other connections timing
+  # out meanwhile only add to the pool.
+  let probe: EntityId = openConnection(server: server, socketId: noSocket())
+  let pooledBefore: Int = server.bufferPool.free.length
+  injectInput(
+    server: server
+    entityId: probe
+    text: "GET /plaintext HTTP/1.1\r\nConnection: close\r\n\r\n"
+  )
+  var probeFrames: Int = 0
+  loop allocatorIsAlive(this: server.entities, entityId: probe) and probeFrames < 100 {
+    frame(router: router, server: server)
+    dropOutput(server: server, entityId: probe)
+    probeFrames = probeFrames + 1
+  }
+  log("closed connections' buffers pooled: {server.bufferPool.free.length >= pooledBefore + 2}")
   log("requests routed: {router.routed}")
   closeHttpServer(server: server)
   log("open after close: {allocatorAliveCount(this: server.entities)}")
