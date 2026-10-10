@@ -1,0 +1,161 @@
+# gpu/GpuCompute — a one-dimensional compute dispatch with the standard
+# bounds check (after linebender/fearless_simd's remainder handling).
+#
+# A kernel over `count` elements runs in workgroups of `workgroupSize`
+# invocations: ceil(count / workgroupSize) groups are dispatched, and the last
+# one is usually partial. The GPU form of a SIMD loop's masked tail is the
+# guard every such kernel starts with, `if (index >= count) { return; }`.
+# Here that is written once:
+#
+#   - lib/gpu/computeBounds.wgsl, composed first into the kernel's shader,
+#     declares the count uniform (binding 0), the `computeWorkgroupSize`
+#     override and `computeElementInRange` / `computeElementIndex`;
+#   - createComputeBounds makes the uniform; createBoundedComputePipeline sets
+#     the override to the same workgroup size; createBoundedBindGroup puts the
+#     uniform at binding 0 before the kernel's own buffers;
+#   - recordBoundedCompute writes the count and dispatches the groups it
+#     needs. A count of 0 dispatches nothing.
+#
+# One ComputeBounds per dispatch in a submission: the count is written to its
+# buffer before the work runs, so two dispatches recorded with different
+# counts on one bounds buffer would both see the last. Rae over the WebGPU
+# bindings (gpu/GpuResources, gpu/GpuLifetime); no renderer C.
+open webgpu/WebgpuEnums
+open gpu/GpuResources
+open gpu/GpuLifetime
+
+# The most workgroups one dimension may dispatch (WebGPU's default limit)
+const maxWorkgroupsPerDimension: Int = 65535
+
+# The uniform the bounds include reads, and the workgroup size it pairs with
+type ComputeBounds {
+  buffer: BufferId
+  workgroupSize: Int
+}
+
+# ceil(elementCount / workgroupSize): 0 for no elements
+func workgroupCountFor(elementCount: view Int, workgroupSize: view Int) ret Int {
+  if elementCount <= 0 or workgroupSize <= 0 {
+    ret 0
+  }
+  ret (elementCount + workgroupSize - 1) / workgroupSize
+}
+
+# The bounds uniform (16 bytes) for kernels of `workgroupSize` invocations
+func createComputeBounds(
+  resources: mod GpuResources
+  workgroupSize: view Int
+) ret opt ComputeBounds {
+  if workgroupSize < 1 {
+    ret none
+  }
+  if let buffer: BufferId = createBuffer(
+    resources: resources
+    size: 16
+    usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst
+  ) {
+    ret ComputeBounds { buffer: buffer, workgroupSize: workgroupSize }
+  }
+  ret none
+}
+
+# A compute pipeline whose `computeWorkgroupSize` override is the bounds'
+# workgroup size. `wgsl` is the composed shader (computeBounds.wgsl first).
+func createBoundedComputePipeline(
+  resources: mod GpuResources
+  wgsl: view String
+  entryPoint: view String
+  bounds: view ComputeBounds
+) ret opt PipelineId {
+  var constants: List(ShaderConstant) = List.create(ShaderConstant, cap: 1)
+  constants.add(
+    value: ShaderConstant { name: "computeWorkgroupSize", value: bounds.workgroupSize.toFloat() }
+  )
+  ret createComputePipelineSource(
+    resources: resources
+    wgsl: wgsl
+    entryPoint: entryPoint
+    constants: constants
+  )
+}
+
+# A bind group with the bounds uniform at binding 0 and `buffers` after it
+# (binding 1 on), then the texture views and samplers as createBindGroup
+# numbers them
+func createBoundedBindGroup(
+  resources: mod GpuResources
+  pipeline: view PipelineId
+  bounds: view ComputeBounds
+  buffers: view List(BufferId)
+  textureViews: view List(TextureViewId)
+  samplers: view List(SamplerId)
+) ret opt BindGroupId {
+  var allBuffers: List(BufferId) = List.create(BufferId, cap: buffers.length + 1)
+  allBuffers.add(value: bounds.buffer)
+  loop var i: Int = 0, i < buffers.length, ++i {
+    if let buffer: BufferId = buffers.copyAt(index: i) {
+      allBuffers.add(value: buffer)
+    }
+  }
+  ret createBindGroup(
+    resources: resources
+    pipeline: pipeline
+    buffers: allBuffers
+    textureViews: textureViews
+    samplers: samplers
+  )
+}
+
+# The bounds uniform's bytes: count, workgroup count, two reserved words
+func boundsBytes(elementCount: view Int, workgroups: view Int) ret List(UInt8) {
+  var bytes: List(UInt8) = List.create(UInt8, cap: 16)
+  let words: List(Int) = { elementCount, workgroups, 0, 0 }
+  loop var w: Int = 0, w < 4, ++w {
+    let word: Int = words.copyAtDefault(index: w)
+    loop var b: Int = 0, b < 4, ++b {
+      bytes.add(value: ((word shr (b * 8)) bitand 255) as UInt8)
+    }
+  }
+  ret bytes
+}
+
+# Writes `elementCount` to the bounds and records the dispatch of the
+# workgroups it needs: true when recorded (or, for 0 elements, when there
+# was nothing to do). False when the count needs more than one dimension's
+# 65 535 workgroups, or when writing or recording fails.
+func recordBoundedCompute(
+  recording: mod Recording
+  resources: view GpuResources
+  pipeline: view PipelineId
+  bindGroup: view BindGroupId
+  bounds: view ComputeBounds
+  elementCount: view Int
+) ret Bool {
+  let workgroups: Int = workgroupCountFor(
+    elementCount: elementCount
+    workgroupSize: bounds.workgroupSize
+  )
+  if workgroups is 0 {
+    ret true
+  }
+  if workgroups > maxWorkgroupsPerDimension {
+    ret false
+  }
+  if writeBuffer(
+    resources: resources
+    id: bounds.buffer
+    offset: 0
+    bytes: boundsBytes(elementCount: elementCount, workgroups: workgroups)
+  ) is false {
+    ret false
+  }
+  ret recordCompute(
+    recording: recording
+    resources: resources
+    pipeline: pipeline
+    bindGroup: bindGroup
+    workgroupsX: workgroups
+    workgroupsY: 1
+    workgroupsZ: 1
+  )
+}
