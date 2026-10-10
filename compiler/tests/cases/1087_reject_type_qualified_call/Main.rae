@@ -1,0 +1,20 @@
+# A type before the dot passes the type as the function's type argument
+# (`T.default()`, `List.create(Int, ...)`). A function that takes no type
+# argument is qualified by its MODULE, so `Mask4.firstLanes(...)` (Mask4 a
+# type of lib/Float4, firstLanes a Float4 function) is an error naming the
+# right call, not C that does not compile.
+import Float4
+
+type Counter {
+  value: Int
+}
+
+func startingAt(value: view Int) ret Counter {
+  ret Counter { value: value }
+}
+
+func main() {
+  let mask: Mask4 = Mask4.firstLanes(count: 2)
+  let counter: Counter = Counter.startingAt(value: 3)
+  log("{Float4.anyLane(mask: mask)} {counter.value}")
+}

@@ -351,8 +351,9 @@ forms that must agree bit for bit. lib/Float4 now has a masked tail instead
 
 A store never writes past the list's end. Asked to, it writes the lanes that
 fit and warns, as `store` warns. `firstLanes` is a function of the Float4
-module, called `Float4.firstLanes` like every other Float4 function; a
-type-qualified `Mask4.firstLanes(...)` call is not lowered yet (queued).
+module, called `Float4.firstLanes` like every other Float4 function.
+`Mask4.firstLanes(...)` is an error that says so (a type before the dot is
+a type argument, fixture 1087).
 
 **The loop shape:**
 

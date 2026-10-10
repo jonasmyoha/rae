@@ -7178,6 +7178,51 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                     break;
                 }
             }
+            // `Type.f(...)` passes the type as f's type argument (`T.default()`,
+            // `List.create(Int, ...)`). When no `f` takes one, the type was
+            // meant as a qualifier: Rae qualifies a function by its MODULE, so
+            // say which, instead of emitting a call to an f(Type, ...) that
+            // does not exist (the C compiler was the first to notice).
+            if (expr->as.method_call.object->kind == AST_EXPR_IDENT
+                && sema_type_qualifier_type(ctx, module, symbols, expr->as.method_call.object)) {
+                Str method_name = expr->as.method_call.method_name;
+                const AstDecl* plain = NULL;
+                bool takes_type = false;
+                /* This module's functions of that name, then each import's */
+                const AstImport* imp = module->imports;
+                for (const AstModule* m = module; m; m = imp ? imp->module : NULL, imp = imp ? imp->next : NULL) {
+                    size_t named = module_index_function_count(m, method_name);
+                    for (size_t k = 0; k < named; k++) {
+                        const AstDecl* candidate = module_index_function_at(m, method_name, named, k);
+                        if (candidate->as.func_decl.generic_params) takes_type = true;
+                        else if (!plain) plain = candidate;
+                    }
+                }
+                if (plain && !takes_type) {
+                    Str type_name = expr->as.method_call.object->as.ident;
+                    const char* owner = plain->module_name;
+                    const char* slash = owner ? strrchr(owner, '/') : NULL;
+                    char qualified[256];
+                    bool same_file = plain->origin_file && s_current_decl_origin
+                        && strcmp(plain->origin_file, s_current_decl_origin) == 0;
+                    if (owner && !same_file) {
+                        snprintf(qualified, sizeof qualified, "; call it through its module: '%s.%.*s(...)'",
+                                 slash ? slash + 1 : owner, (int)method_name.len, method_name.data);
+                    } else {
+                        snprintf(qualified, sizeof qualified, "; call it unqualified: '%.*s(...)'", (int)method_name.len,
+                                 method_name.data);
+                    }
+                    char message[640];
+                    snprintf(message, sizeof message,
+                             "'%.*s' is a type, so '%.*s.%.*s(...)' would pass it as the type argument of '%.*s', "
+                             "which takes none%s",
+                             (int)type_name.len, type_name.data, (int)type_name.len, type_name.data,
+                             (int)method_name.len, method_name.data, (int)method_name.len, method_name.data, qualified);
+                    diag_error(sema_diag_file(module), (int)expr->line, (int)expr->column, message);
+                    module->had_error = true;
+                    break;
+                }
+            }
             // #970: by here the module-qualified / Type.create rewrites have
             // broken out, so a bare-identifier receiver of a UFCS/method call
             // is a VALUE — resolve it like any other identifier. An undeclared
