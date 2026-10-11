@@ -18,11 +18,10 @@ pack ViewIntoGrowingList {
     }
   }
   stress: {
-    verdict: "footgun"
+    verdict: "handles"
     expect: {
-      outcome: "run"
-      exitCode: 0
-      stdoutMatches: "^item -?[0-9]+\nlength 65$"
+      outcome: "compile-error"
+      diagnostic: "cannot mutate a List while a `viewAt`/`modAt` binding aliases one of its elements"
     }
     elsewhere: {
       python: "runs; ints are values, the call reads the number it was given"
@@ -32,6 +31,6 @@ pack ViewIntoGrowingList {
       rust: "compile error: cannot borrow `numbers` as mutable because it is also borrowed as immutable"
       c: "undefined behaviour: the pointer into the realloc'd array dangles"
     }
-    fixedBy: ""
+    fixedBy: "0.2.4: a call argument that passes the borrowed List as `mod` counts as a change to it (sema_arg_lends_collection_mod)"
   }
 }

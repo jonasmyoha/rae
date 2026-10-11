@@ -2991,6 +2991,55 @@ static bool sema_same_place_expr(const AstExpr* left, const AstExpr* right) {
     return false;
 }
 
+/* The module whose functions a borrow check looks callees up in (set by the
+ * two checks around their scan; NULL leaves only the spelled `mod` form). */
+static const AstModule* s_mutation_module = NULL;
+
+/* Does the `index`-th parameter of every function this call could reach
+ * take `mod`? The call is matched by name and argument count, as
+ * sema_call_returns_reference does, since the scan runs before the borrowed
+ * branch is analysed and its calls are linked. */
+static bool sema_call_param_is_mod(const AstExpr* call, size_t index) {
+    const AstExpr* callee = call->as.call.callee;
+    size_t argCount = 0;
+    for (const AstCallArg* a = call->as.call.args; a; a = a->next) argCount++;
+    const AstDecl* linked = call->decl_link;
+    if (linked && linked->kind == AST_DECL_FUNC) {
+        const AstParam* p = linked->as.func_decl.params;
+        for (size_t i = 0; p && i < index; i++) p = p->next;
+        return p && p->type && p->type->is_mod;
+    }
+    if (!callee || callee->kind != AST_EXPR_IDENT || !s_mutation_module) return false;
+    bool found = false;
+    for (const AstDecl* d = s_mutation_module->decls; d; d = d->next) {
+        if (d->kind != AST_DECL_FUNC || !str_eq(d->as.func_decl.name, callee->as.ident)) continue;
+        if (d->as.func_decl.specialization_args || d->as.func_decl.generic_params) continue;
+        size_t paramCount = 0;
+        for (const AstParam* p = d->as.func_decl.params; p; p = p->next) paramCount++;
+        if (paramCount != argCount) continue;
+        const AstParam* p = d->as.func_decl.params;
+        for (size_t i = 0; p && i < index; i++) p = p->next;
+        if (!(p && p->type && p->type->is_mod)) return false;
+        found = true;
+    }
+    return found;
+}
+
+/* A call argument that hands `collection` itself to the callee as `mod`:
+ * spelled `mod list` (or `mod shelf.list`), or a bare `list` for a `mod`
+ * parameter. The callee may grow it, so it is a change like `list.add(...)`.
+ * A place that merely CONTAINS the list (`mod shelf`) is not counted yet:
+ * see QUEUE.md, the containing-struct borrow question. */
+static bool sema_arg_lends_collection_mod(const AstExpr* call, size_t index,
+                                          const AstExpr* value, const AstExpr* collection) {
+    if (!value) return false;
+    if (value->kind == AST_EXPR_UNARY && value->as.unary.op == AST_UNARY_MOD) {
+        return sema_same_place_expr(value->as.unary.operand, collection);
+    }
+    return call->kind == AST_EXPR_CALL && sema_same_place_expr(value, collection)
+        && sema_call_param_is_mod(call, index);
+}
+
 static bool sema_expr_mutates_collection(const AstExpr* expr,
                                          const AstExpr* collection) {
     if (!expr) return false;
@@ -3005,7 +3054,9 @@ static bool sema_expr_mutates_collection(const AstExpr* expr,
             return true;
         }
         if (sema_expr_mutates_collection(expr->as.method_call.object, collection)) return true;
-        for (const AstCallArg* arg = expr->as.method_call.args; arg; arg = arg->next) {
+        size_t index = 0;
+        for (const AstCallArg* arg = expr->as.method_call.args; arg; arg = arg->next, index++) {
+            if (sema_arg_lends_collection_mod(expr, index, arg->value, collection)) return true;
             if (sema_expr_mutates_collection(arg->value, collection)) return true;
         }
         return false;
@@ -3025,12 +3076,15 @@ static bool sema_expr_mutates_collection(const AstExpr* expr,
         case AST_EXPR_INDEX:
             return sema_expr_mutates_collection(expr->as.index.target, collection)
                 || sema_expr_mutates_collection(expr->as.index.index, collection);
-        case AST_EXPR_CALL:
+        case AST_EXPR_CALL: {
             if (sema_expr_mutates_collection(expr->as.call.callee, collection)) return true;
-            for (const AstCallArg* arg = expr->as.call.args; arg; arg = arg->next) {
+            size_t index = 0;
+            for (const AstCallArg* arg = expr->as.call.args; arg; arg = arg->next, index++) {
+                if (sema_arg_lends_collection_mod(expr, index, arg->value, collection)) return true;
                 if (sema_expr_mutates_collection(arg->value, collection)) return true;
             }
             return false;
+        }
         default:
             return false;
     }
@@ -4847,7 +4901,10 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                     for (const AstStmt* s = stmt->as.if_stmt.then_block
                              ? stmt->as.if_stmt.then_block->first : NULL;
                          s; s = s->next) {
-                        if (sema_stmt_mutates_collection(s, aliased)) {
+                        s_mutation_module = module;
+                        bool mutates = sema_stmt_mutates_collection(s, aliased);
+                        s_mutation_module = NULL;
+                        if (mutates) {
                             const AstExpr* err_expr = s->kind == AST_STMT_EXPR
                                 ? s->as.expr_stmt : NULL;
                             int err_line = (int)(err_expr ? err_expr->line : s->line);
@@ -4963,8 +5020,11 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
              if (stmt->as.loop_stmt.body) {
                  AstStmt* s = stmt->as.loop_stmt.body->first;
                  while (s) {
-                     if (stmt->as.loop_stmt.is_range
-                         && sema_stmt_mutates_collection(s, stmt->as.loop_stmt.condition)) {
+                     s_mutation_module = module;
+                     bool loop_mutates = stmt->as.loop_stmt.is_range
+                         && sema_stmt_mutates_collection(s, stmt->as.loop_stmt.condition);
+                     s_mutation_module = NULL;
+                     if (loop_mutates) {
                          const AstExpr* error_expr = s->kind == AST_STMT_EXPR
                              ? s->as.expr_stmt : NULL;
                          int error_line = (int)(error_expr ? error_expr->line : s->line);
