@@ -4,7 +4,8 @@
 
 ![Metaballs, deferred rendering — SDF metaballs under a physical sky](docs/screenshots/112_metaballs_deferred.2.png)
 
-A minimalistic language for code that humans and AI agents both have to read.
+A minimalistic, high-performance programming language that aims to be as readable and clear
+in its syntax as possible.
 
 Few concepts, few special cases, and nothing implicit. What a function does to
 your data is in its signature; what a call means is at the call site. That suits
@@ -27,8 +28,10 @@ with explicit parameter modes, method-call syntax, an optional result, and
 interpolation, all in one file.
 
 ```rae
-import core
-
+# A small taste of the language: a type, a list of it, functions with explicit
+# parameter modes, method-call syntax, an optional result, and interpolation —
+# most of what a Rae program is made of, in one file. No graphics, no runtime
+# specifics; just the language.
 type Track {
   title: String
   seconds: Int
@@ -67,7 +70,9 @@ func longest(tracks: view List(Track)) ret opt view Track {
   loop var i: Int = 1, i < tracks.length, ++i {
     if let candidate: view Track => tracks.viewAt(index: i) {
       if let best: view Track => tracks.viewAt(index: bestIndex) {
-        if candidate.seconds > best.seconds { bestIndex = i }
+        if candidate.seconds > best.seconds {
+          bestIndex = i
+        }
       }
     }
   }
@@ -75,9 +80,9 @@ func longest(tracks: view List(Track)) ret opt view Track {
 }
 
 func main() {
-  # `let` because the binding is never reassigned — the list is still mutable
-  # through it (adding an element is not rebinding the name).
-  let tracks: List(Track) = createList(Track, cap: 3)
+  # `var`, because `add` changes the list: a `let` is frozen as a whole, so
+  # nothing in it may change after this line.
+  var tracks: List(Track) = List.create(Track, cap: 3)
   tracks.add(value: Track { title: "Intro", seconds: 95, plays: 0 })
   tracks.add(value: Track { title: "Middle Eight", seconds: 212, plays: 0 })
   tracks.add(value: Track { title: "Outro", seconds: 143, plays: 0 })
@@ -129,17 +134,17 @@ type Library {
 }
 
 # An optional REFERENCE: a view of a track the library owns, or nothing at all.
-func nowPlaying(lib: view Library) ret opt view Track {
-  if lib.playing is false {
+func nowPlaying(library: view Library) ret opt view Track {
+  if library.playing is false {
     ret none
   }
-  ret view lib.current
+  ret view library.current
 }
 
 # `if let` narrows it to a reference for the branch. `=>` binds — required
 # here because the optional holds a reference, and `=` never produces a
 # shared handle.
-if let track: view Track => nowPlaying(lib: view lib) {
+if let track: view Track => nowPlaying(library: view library) {
   log("playing {track.title} — {formatDuration(seconds: track.seconds)}")
 } else {
   log("nothing playing")
@@ -148,8 +153,9 @@ if let track: view Track => nowPlaying(lib: view lib) {
 
 ```
 playing Middle Eight — 3m 32s
-nothing playing
 ```
+
+(or `nothing playing`, when the library is not playing.)
 
 An optional reference costs a nullable pointer — the same eight bytes as a plain
 one, with no box and no allocation — so `nowPlaying` hands back a window onto the
@@ -178,7 +184,7 @@ states its type:
 ```rae
 let count: Int = 5
 let track: Track = loadTrack(path: path)
-let pos: Vec2 = { x: 1.0, y: 2.0 }     # struct: type on the left, fields on the right
+let pos: Vec2 = { x: 1.0, y: 2.0 }  # struct: type on the left, fields on the right
 ```
 
 `let count = 5` or `let track = loadTrack(...)` is a **compile error**, not a
@@ -265,18 +271,19 @@ In Rae the operator carries the meaning, so the meaning survives the refactor:
 
 ```rae
 func process(x: view Track) ret Track {
-  var y: Track = x     # still a copy — `=` copies, whatever the type
-  y.value = 42         # mutates the copy only
-  ret x                # x is untouched, same as the Int version
+  var y: Track = x  # still a copy — `=` copies, whatever the type
+  y.value = 42  # mutates the copy only
+  ret x  # x is untouched, same as the Int version
 }
 ```
 
 If aliasing is what you want, you have to say so — and saying so propagates:
 
 ```rae
-func process(x: mod Track) ret Track {   # the signature must say mod
-  let y: mod Track => x                  # `=>` binds; `=` would refuse
-  y.value = 42                           # writes to the caller's track
+func process(x: mod Track) ret Track {
+  # the signature must say mod
+  let y: mod Track => x  # `=>` binds; `=` would refuse
+  y.value = 42  # writes to the caller's track
   ret x
 }
 ```
@@ -303,21 +310,22 @@ Rae is close to memory-safe, and it gets there **without a borrow checker** — 
 lifetime annotations, no `'a`, no solver to fight. One rule does most of the
 work:
 
-**References don't escape functions.** `view` and `mod` are non-owning
-references, and they are *function-scoped*: you cannot store one in a struct,
-return one, or otherwise let it outlive the call it is a parameter of. The owner
-— a `List(T)`, a `Track`, whatever — lives in some enclosing scope; a reference
-borrows it for the duration of one call and no longer. The lifetime **is** the
-function.
+**References don't outlive what they point at.** `view` and `mod` are
+non-owning references. A struct cannot store one (a compile error), and a
+function can hand one back only when it points into data the caller already
+owns — a parameter, or something reached through one — never into the
+function's own locals (*reference escapes local storage*). The owner — a
+`List(T)`, a `Track`, whatever — lives in some enclosing scope; a reference
+borrows it and never outlives it.
 
 That single rule removes the largest family of memory bugs by construction:
 
 - **No dangling references.** A `view Track` cannot be kept somewhere the
-  `Track` isn't. Since it can't be stored or returned, it cannot outlive the
-  value it points into — there is no "reference that survived its owner."
-- **No use-after-free across scopes.** A borrow cannot be held across a
-  reallocation, a drop, or a container resize that happens in *another* scope,
-  because it never reaches another scope.
+  `Track` isn't. It cannot be stored, and it can only be returned toward the
+  owner's own scope, so it cannot outlive the value it points into — there is no
+  "reference that survived its owner."
+- **No use-after-free across scopes.** A borrow cannot be held in a struct or
+  carried past its owner, so a drop elsewhere cannot leave it dangling.
 - **No aliased-mutation surprises.** `=` copies — always, whatever the type
   (see above); aliasing is spelled `=>`, and only where the signature already
   admits `mod`. A read-only `view` can't be promoted to a writer, and writing
@@ -326,7 +334,7 @@ That single rule removes the largest family of memory bugs by construction:
 Rust guarantees the same absence of dangling references, but pays for it with a
 borrow checker and lifetime annotations — a real, learnable, non-trivial cost.
 Rae buys most of that guarantee with a rule you can hold in your head: *a
-reference is a parameter, and it dies at the return.* Ownership itself is
+reference is never stored, and never outlives its owner.* Ownership itself is
 explicit — `own` moves a value, the compiler tracks the move and frees at scope
 exit, and using a moved-from value is a compile error — so there is no garbage
 collector either.
@@ -334,10 +342,11 @@ collector either.
 **The honest "almost."** This is not a proof of memory safety, and Rae does not
 claim one:
 
-- Within a *single* function you can still mutate a container while a `view`
-  into it is live (resize a `List` you hold a `view` of). It is a local,
-  visible pattern — one function, in the diff — not action at a distance, but
-  the compiler does not stop it today.
+- Within a function the compiler stops you from changing a `List` while a
+  `viewAt`/`modAt` binding or a collection loop borrows one of its elements.
+  It does not yet stop passing the list as `mod` together with a `view` of one
+  of its elements into the same call, where the callee could grow the list
+  under that view.
 - `extern`/FFI and the raw `Ptr` type are unchecked, exactly as in any systems
   language — that is the escape hatch to C and the GPU.
 - Cross-thread sharing is a separate story the concurrency model is still
@@ -355,8 +364,9 @@ correctly — which is the whole point of Rae.
 **Compiled** is the default: the compiler emits C and links a native binary.
 
 **Browser WASM** builds the same source into an SDL3 + WebGPU bundle with
-Emscripten, or a headless WASI module for programs that only print. 52 of the 67
-examples run in a browser.
+Emscripten (`rae build --target wasm`), or a headless WASI module for programs
+that only print (`compiler/tools/wasm_build.sh`). Many of the examples run in a
+browser, and the dashboard below opens them there with a click.
 
 Built on top, all in Rae except the raw GPU and platform calls:
 
@@ -381,14 +391,14 @@ Built on top, all in Rae except the raw GPU and platform calls:
     <img src="docs/screenshots/106_mobile_ui.2.png" alt="Mobile UI — now-playing screen" width="300" />
   </p>
 
-- **Standard library** — 107 modules: containers, strings, JSON, files, maths,
+- **Standard library** — about 400 modules: containers, strings, JSON, files, maths,
   time, a calendar, crypto, PNG and DEFLATE written in Rae rather than bound.
 
 ## Getting started
 
 ```sh
 make -C compiler                                     # builds compiler/bin/rae
-./compiler/bin/rae run examples/01_hello/main.rae    # from the repo root
+./compiler/bin/rae run examples/01_hello/Main.rae    # from the repo root
 ```
 
 Run examples from the repo root: the ones that load assets resolve their paths
@@ -396,7 +406,7 @@ from there.
 
 `rae run` builds and runs; `rae build --target wasm --out app.html …` produces a
 browser bundle; `rae watch` rebuilds and restarts on save, and an app using
-`lib/hot_reload` keeps its state across the restart. `rae init` scaffolds a
+`lib/HotReload` keeps its state across the restart. `rae init` scaffolds a
 project.
 
 On a terminal, `rae run` and `rae build` show a two-line progress display
@@ -437,7 +447,8 @@ func createRenderer(
 }
 ```
 
-Run the test suite with `make -C compiler test` — 318 cases.
+Run the test suite with `bash compiler/tools/watch-tests.sh` (it wraps
+`make -C compiler test` and streams the run to the dashboard) — about 750 cases.
 
 ## Devtools Web: the best way to see this
 
@@ -456,18 +467,20 @@ Start on the **Featured** tab — a cross-section of what the language can do:
 |---|---|
 | **Metaballs (deferred rendering)** | the 3D renderer, with a settings panel and a sky that moves with the time of day |
 | **3D Renderer — Walker Character** | a skinned, animated glTF character |
-| **Physics Playground — Box3D** | six physics scenes on Rae's physics engine, upstream Box3D's C library, from a 10k-box pyramid to a hinged bridge; fly around and machine-gun balls into them |
+| **Physics Playground — Box3D** | six physics scenes on Rae's physics engine, upstream Box3D's C library, from a pyramid of up to 10k boxes to a hinged bridge; fly around and machine-gun balls into them |
 | **Vehicle — Box3D** | Box3D's Driving car on a height-field course: suspension, steering, a torque split, a ramp to jump, light crates to scatter and a stunt park |
 | **Mobile UI — GPU2D** | a phone-shaped application at real app scale |
 | **UI Editor — .raescene viewer** | opens any authored `.raescene` and shows it as the UI system renders it, with a live inspector |
 | **2D Renderer — Animated shapes** | the 2D shape pipeline in motion, with a sound-style EQ visualizer |
 | **Raytracer — GPU + MTSDF text** | a path tracer on the GPU with a crisp text overlay |
-| **Pong** and **Tetris 2D** | complete little games |
+| **3D Renderer — Ocean** | an FFT ocean in cascades, with a free camera |
+| **Procedural Props** | rocks, trees and textures generated in code |
+| **Tetris 2D** | a complete little game |
 | **Playlist** | the taste above, as a runnable program — most of the language, no graphics |
 | **Functions and interpolation** | one step past hello world, no graphics |
 
-![Pong — a complete little game](docs/screenshots/91_pong_implicit.png)
 ![Tetris 2D — a complete little game](docs/screenshots/94_tetris2d.png)
+![Pong — another little game, in the examples list](docs/screenshots/91_pong_implicit.png)
 
 The two UI examples are worth opening next: `104_ui_hello` is a value and three
 buttons — the smallest thing that is still an application — and `105_ui_counter`
@@ -481,8 +494,8 @@ also run in an embedded WebGPU canvas.
 | | |
 |---|---|
 | `spec/rae.md` | the language spec |
-| `docs/` | 72 design notes, including the ownership model and the renderer architecture |
-| `examples/` | 63 active programs, from hello world up; retired integrations live under `examples/legacy/` |
+| `docs/` | about 140 design notes, including the ownership model and the renderer architecture |
+| `examples/` | over 80 programs, from hello world up; retired integrations live under `examples/legacy/` |
 
 ## License
 
