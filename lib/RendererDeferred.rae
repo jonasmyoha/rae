@@ -169,9 +169,14 @@ func createRenderPasses() ret RenderPasses {
 # and binds (~40), the geometry frame's 4 targets + views, 2 buffers, the SDF
 # clusters' buffers + binds (~30), the shadow cascades' texture, 5 views,
 # sampler, 3 pipelines, 8 uniforms + queue buffers, 8 caster binds and up to
-# 8 x 4 metaball uniform + bind slots (~90), plus a few in-flight submissions;
-# retired slots are reused, so 256 leaves headroom.
-const deferredManagerCapacity: Int = 256
+# 8 x 4 metaball uniform + bind slots (~90), plus a few in-flight submissions
+# (~160 in all) — and two buffers (vertex + index) for every static and skinned
+# mesh uploaded through the MeshStore / SkinStore, which is what grows with the
+# app: a venue of ~60 static meshes plus a character in ~10 parts, uploaded once
+# per colour variant, already passes 256. A full table makes createBuffer return
+# none, and the frame then draws nothing with no error, so this is sized for
+# hundreds of meshes; a slot is a few Ints per table.
+const deferredManagerCapacity: Int = 1024
 
 func ensureRendererResources(renderer: mod DeferredRenderer) pub {
   if let existing: view GpuResources => renderer.gpuResources {
