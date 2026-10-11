@@ -203,3 +203,13 @@ The pre-fix case reproduced an allocator abort (exit 1, empty stdout) and its
 footgun expectation was verified before being flipped in the fix. The fixed
 expectation is exit 0, `value2`, and empty stderr. See the case README for the
 observed failure and cross-language lifetime comparison.
+
+## A view into a list grown through a call (case 11)
+
+`11_viewIntoGrowingList` hands a `view` of a list element to a function
+together with the list as `mod`; the function grows the list, so the backing
+storage moves, then reads the view. Rae already refuses `add` on the list
+while a `viewAt`/`modAt` binding or a collection loop borrows it, but did not
+count a `mod` argument of a call as a change. On the **footgun** shelf it
+asserts that the program compiles and prints an `item` line (whatever the
+old address holds).
