@@ -349,7 +349,7 @@ func dispatchFft(
   )
   if var recording: Recording = beginRecording(resources: resources) {
     if recordComputeCommand(recording: recording, resources: resources, command: command) {
-      waterSubmit(waterSystem: waterSystem, resources: resources, recording: recording)
+      waterSubmit(inFlight: mod waterSystem.inFlight, resources: resources, recording: recording)
     }
   }
 }
@@ -808,7 +808,7 @@ func waterFftUpdate(waterSystem: mod WaterSystem, resources: mod GpuResources, t
         )
       }
       if let submission: SubmissionId = waterSubmit(
-        waterSystem: waterSystem
+        inFlight: mod waterSystem.inFlight
         resources: resources
         recording: recording
       ) {

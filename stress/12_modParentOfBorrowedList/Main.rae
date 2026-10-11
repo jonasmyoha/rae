@@ -1,0 +1,25 @@
+# Foot gun: holding a view into a list inside a struct, and handing the whole
+# struct to a function as `mod`.
+#
+# `first` points into `shelf.numbers`' storage. `grow` takes the shelf and
+# adds to its list until it reallocates; the read of `first` afterwards would
+# go through freed memory. You cannot `mod` a parent while you hold one of
+# its members.
+type Shelf {
+  numbers: List(Int)
+}
+
+func grow(shelf: mod Shelf) {
+  loop var i: Int = 0, i < 64, ++i {
+    shelf.numbers.add(value: i)
+  }
+}
+
+func main() {
+  var shelf: Shelf = { numbers: List.create(Int, cap: 1) }
+  shelf.numbers.add(value: 7)
+  if let first: view Int => shelf.numbers.viewAt(index: 0) {
+    grow(shelf: mod shelf)
+    log("first {first}")
+  }
+}

@@ -1,0 +1,36 @@
+pack ModParentOfBorrowedList {
+  format: "raepack"
+  version: 1
+  defaultTarget: compiled
+  name: "Mod the parent of a borrowed list"
+  description: "A view into a list inside a struct, while the whole struct is handed to a call as mod; the call grows the list."
+  category: "Stress"
+  targets: {
+    target compiled: {
+      label: "Compiled"
+      entry: "Main.rae"
+      sources: {
+        source: {
+          path: "."
+          emit: compiled
+        }
+      }
+    }
+  }
+  stress: {
+    verdict: "handles"
+    expect: {
+      outcome: "compile-error"
+      diagnostic: "cannot mutate a List while a `viewAt`/`modAt` binding aliases one of its elements"
+    }
+    elsewhere: {
+      python: "runs; the int was copied out of the list, nothing dangles"
+      javascript: "runs; numbers are values"
+      java: "runs; the Integer object is not owned by the list's array"
+      go: "runs; the pointer keeps the old backing array alive, so it reads a stale 7"
+      rust: "compile error: cannot borrow `shelf` as mutable because `shelf.numbers` is also borrowed as immutable"
+      c: "undefined behaviour: the pointer into the realloc'd array dangles"
+    }
+    fixedBy: "0.2.5: passing or assigning a place that CONTAINS the borrowed List counts as a change to it (sema_place_contains)"
+  }
+}
