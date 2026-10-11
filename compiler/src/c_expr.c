@@ -129,6 +129,26 @@ static const char* rae_int_formatter(Str base) {
     return NULL;
 }
 
+/* The value a formatter reads: a call that returns a (non-optional) `view` /
+ * `mod` reference hands back the reference — a rae_View_* / rae_Mod_*
+ * wrapper for a primitive or String, a plain pointer for the rest — so it is
+ * read through (`(*(call).ptr)` / `(*(call))`), as a String `is` does. A view
+ * local is already read through by emit_expr. `ref_type` is the operand's
+ * unsubstituted type. */
+static void emit_to_string_value(CFuncContext* ctx, const AstExpr* operand,
+                                 const AstTypeRef* ref_type, FILE* out) {
+    bool reference_call = ref_type && (ref_type->is_view || ref_type->is_mod) && !ref_type->is_opt
+        && (operand->kind == AST_EXPR_CALL || operand->kind == AST_EXPR_METHOD_CALL);
+    if (!reference_call) {
+        emit_expr(ctx, operand, out, PREC_LOWEST, false, false);
+        return;
+    }
+    bool wrapper = c_primitive_ref_has_wrapper(get_base_type_name(ref_type));
+    fprintf(out, "(*(");
+    emit_expr(ctx, operand, out, PREC_LOWEST, false, false);
+    fprintf(out, wrapper ? ").ptr)" : "))");
+}
+
 void emit_to_string_expr(CFuncContext* ctx, const AstExpr* operand, FILE* out) {
     const AstTypeRef* tr = infer_expr_type_ref(ctx, operand);
     // In a generic body the operand's type may be the parameter `T`: the
@@ -162,7 +182,7 @@ void emit_to_string_expr(CFuncContext* ctx, const AstExpr* operand, FILE* out) {
     // so ClipKind.walk.toString() is "walk", not the ordinal "1".
     if (base.len > 0 && !(tr && tr->is_opt) && find_enum_decl(ctx, ctx->module, base) != NULL) {
         fprintf(out, "rae_enum_toString_%.*s((int64_t)(", (int)base.len, base.data);
-        emit_expr(ctx, operand, out, PREC_LOWEST, false, false);
+        emit_to_string_value(ctx, operand, tr, out);
         fprintf(out, "))");
         return;
     }
@@ -288,15 +308,15 @@ void emit_to_string_expr(CFuncContext* ctx, const AstExpr* operand, FILE* out) {
     if (is_user_struct) {
         const char* mangled = rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = base}});
         fprintf(out, "rae_to_str_%s_(&(", mangled);
-        emit_expr(ctx, operand, out, PREC_LOWEST, false, false);
+        emit_to_string_value(ctx, operand, tr, out);
         fprintf(out, "))");
     } else if (int_formatter) {
         fprintf(out, "%s((", int_formatter);
-        emit_expr(ctx, operand, out, PREC_LOWEST, false, false);
+        emit_to_string_value(ctx, operand, tr, out);
         fprintf(out, "))");
     } else {
         fprintf(out, "rae_ext_rae_str((");
-        emit_expr(ctx, operand, out, PREC_LOWEST, false, false);
+        emit_to_string_value(ctx, operand, tr, out);
         fprintf(out, "))");
     }
 }
@@ -509,7 +529,7 @@ static bool emit_list_fast_access(CFuncContext* ctx, const AstExpr* expr, FILE* 
 }
 
 
-/* One side of a String `is`: a call that returns a `view` / `mod` String
+/* One side of a String `is` or `+`: a call that returns a `view` / `mod` String
  * gives the reference (rae_View_String), and the comparison wants the
  * String it points at. A view local is already read through by emit_expr. */
 static void emit_string_eq_operand(CFuncContext* ctx, const AstExpr* operand, FILE* out) {
@@ -793,10 +813,12 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
       if (expr->as.binary.op == AST_BIN_ADD) {
           if (expr_is_string_typed(ctx, expr->as.binary.lhs) &&
               expr_is_string_typed(ctx, expr->as.binary.rhs)) {
+              // A call returning a `view` / `mod` String is read through
+              // its reference, as for `is`
               fprintf(out, "rae_ext_rae_str_concat(");
-              emit_expr(ctx, expr->as.binary.lhs, out, PREC_LOWEST, false, false);
+              emit_string_eq_operand(ctx, expr->as.binary.lhs, out);
               fprintf(out, ", ");
-              emit_expr(ctx, expr->as.binary.rhs, out, PREC_LOWEST, false, false);
+              emit_string_eq_operand(ctx, expr->as.binary.rhs, out);
               fprintf(out, ")");
               ctx->suppress_opt_unbox = saved_unbox;
               break;
