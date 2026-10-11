@@ -240,6 +240,14 @@ Each is one file per phase, the same behaviour as the spec, the language's
 normal way, not micro-tuned. Optional later: `uWebSockets.js` as a "how fast
 can JS go" ceiling.
 
+**Replaced by tuned versions on 2026-10-11**, to measure how much of Rae's
+lead came from effort (benchmarks/servers/README.md, "How fair are these
+numbers?"): Rust's WebSocket and game room on our own framing over `tokio`
+(`rust/src/ws.rs`: frames encoded once, output corked, a precise tick
+clock), hyper set up as in its TechEmpower entries, Node on `uWebSockets.js`
+for all three phases, and Bun's HTTP on its native `routes` table. The
+idiomatic versions stay in the git history.
+
 ## 5. Two Rae styles, one experiment
 
 Every Rae server exists twice: **eventLoop** (§6) and **ecs** (§7). The

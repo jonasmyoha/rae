@@ -1,32 +1,44 @@
-// Phase 2 WebSocket reference (benchmarks/servers/spec/WebSocket.md): the
-// `ws` package on Node, one process (one worker, as the spec asks). PORT
-// (default 8080).
+// Phase 2 WebSocket reference (benchmarks/servers/spec/WebSocket.md), tuned:
+// Node with uWebSockets.js, one thread (one worker, as the spec asks). PORT
+// (default 8080). A broadcast is a publish to a topic every client subscribes
+// to: encoded once, written to each socket by the C++ side.
 "use strict";
-const { WebSocketServer } = require("ws");
+const uWS = require("uWebSockets.js");
 
 const port = Number(process.env.PORT || 8080);
-const server = new WebSocketServer({ host: "127.0.0.1", port, path: "/ws", perMessageDeflate: false });
+const decoder = new TextDecoder();
 
-server.on("connection", (socket) => {
-  socket.on("message", (data, isBinary) => {
+const app = uWS.App().ws("/ws", {
+  compression: uWS.DISABLED,
+  maxPayloadLength: 16 * 1024 * 1024,
+  maxBackpressure: 16 * 1024 * 1024,
+  closeOnBackpressureLimit: false,
+  open(socket) {
+    socket.subscribe("all");
+  },
+  message(socket, data, isBinary) {
     if (isBinary) return;
     let message;
     try {
-      message = JSON.parse(data);
+      message = JSON.parse(decoder.decode(data));
     } catch {
       return;
     }
     if (message.type === "echo") {
-      socket.send(data, { binary: false });
+      socket.send(data, false);
     } else if (message.type === "broadcast") {
-      const broadcast = JSON.stringify({ type: "broadcast", payload: message.payload });
-      let listenCount = 0;
-      for (const client of server.clients) {
-        client.send(broadcast);
-        listenCount++;
-      }
-      socket.send(JSON.stringify({ type: "broadcastResult", payload: message.payload, listenCount }));
+      // The payload is serialised once, for both messages
+      const payload = JSON.stringify(message.payload);
+      app.publish("all", '{"type":"broadcast","payload":' + payload + "}", false);
+      const listenCount = app.numSubscribers("all");
+      socket.send('{"type":"broadcastResult","payload":' + payload + ',"listenCount":' + listenCount + "}", false);
     }
-  });
+  },
 });
-server.on("listening", () => console.log(`listening on ${port}`));
+app.any("/*", (response) => {
+  response.writeStatus("404 Not Found").writeHeader("Server", "Node").end("Not Found");
+});
+app.listen("127.0.0.1", port, (listening) => {
+  if (!listening) process.exit(1);
+  console.log(`listening on ${port}`);
+});
