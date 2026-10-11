@@ -40,7 +40,8 @@ Dependencies: the Rust toolchain, Node with npm, Bun, `python3` and `curl`.
 The HTTP load tools are pinned in `external.lock`: `oha`, and `wrk` for the
 pipelined case only. `fetch.sh` builds them into `~/.cache/rae/servers`. The
 WebSocket load client is ours (`loadClient/`, Rust, built by `run.sh`), and
-`run.sh` installs Node's `ws` from the lockfile (`npm ci`) when it is missing.
+`run.sh` installs Node's uWebSockets.js from the lockfile (`npm ci`) when it
+is missing.
 
 ## What runs
 
@@ -48,9 +49,9 @@ WebSocket load client is ours (`loadClient/`, Rust, built by `run.sh`), and
 |---|---|---|
 | `rae-eventLoop` | `rae/eventLoop/http/Main.rae` | `WORKERS` threads, each a poll loop over a `List(Connection)` |
 | `rae-ecs` | `rae/ecs/http/Main.rae` | `WORKERS` threads, each an `HttpServer` World run by `lib/net/ecs`'s systems |
-| `rust` | `rust/src/bin/http.rs` | hyper 1 on tokio (current-thread, or `WORKERS` worker threads) |
-| `node` | `javascript/node/Http.js` | `node:http`; `node:cluster` with `WORKERS` processes |
-| `bun` | `javascript/bun/Http.js` | `Bun.serve`; `WORKERS` processes with `reusePort` |
+| `rust` | `rust/src/bin/http.rs` | hyper 1 on tokio (current-thread, or `WORKERS` worker threads); static headers, no writev, mimalloc |
+| `node` | `javascript/node/Http.js` | uWebSockets.js; `WORKERS` worker threads fed by an acceptor app |
+| `bun` | `javascript/bun/Http.js` | `Bun.serve` with its native `routes` table; `WORKERS` processes with `reusePort` |
 
 - **Shared code.** Both Rae servers use the same `lib/net` (sockets, poller,
   byte buffers) and `lib/http` (parser, encoder), all Rae over one-call
@@ -65,8 +66,8 @@ Phase 2, WebSocket (one worker each, see the spec):
 |---|---|---|
 | `rae-eventLoop` | `rae/eventLoop/webSocket/Main.rae` | the HTTP loop's shape; an upgraded connection's input is frames; output written once per poll |
 | `rae-ecs` | `rae/ecs/webSocket/Main.rae` | `lib/net/ecs`'s upgrade and frame systems plus one message system |
-| `rust` | `rust/src/bin/webSocket.rs` | tokio-tungstenite, current-thread runtime, a writer task per connection |
-| `node` | `javascript/node/WebSocket.js` | the `ws` package |
+| `rust` | `rust/src/bin/webSocket.rs` | `rust/src/ws.rs` on a current-thread tokio runtime: frames encoded once, output corked and written once per client per batch; the payload passed through as raw JSON |
+| `node` | `javascript/node/WebSocket.js` | uWebSockets.js, broadcast as `publish` to one topic |
 | `bun` | `javascript/bun/WebSocket.js` | `Bun.serve` websockets, broadcast as `publish` to one topic |
 
 Both Rae servers use `lib/webSocket` (upgrade, frame decoder and encoder) and
@@ -80,8 +81,8 @@ Phase 3, game room (one worker, one room; see the spec):
 |---|---|---|
 | `rae-eventLoop` | `rae/eventLoop/gameRoom/Main.rae` | the player lives on its connection; an input is applied when decoded; the tick encodes one snapshot and copies it to each connection |
 | `rae-ecs` | `rae/ecs/gameRoom/Main.rae` | `PlayerState` table, `PlayerInputEvent` queue, membership / tick / snapshot systems on `lib/net/ecs` |
-| `rust` | `rust/src/bin/gameRoom.rs` | tokio interval (missed ticks skipped), one `Bytes` snapshot shared by every writer task |
-| `node` | `javascript/node/GameRoom.js` | `ws`, a setTimeout chain aimed at each deadline |
+| `rust` | `rust/src/bin/gameRoom.rs` | `rust/src/ws.rs`; a clock thread sleeps to each deadline in halving steps and wakes the tick, which queues one shared snapshot on every player |
+| `node` | `javascript/node/GameRoom.js` | uWebSockets.js, a setTimeout chain aimed at each deadline |
 | `bun` | `javascript/bun/GameRoom.js` | `Bun.serve` websockets, the same setTimeout chain |
 
 Both Rae servers wait for each tick's deadline with `Time.waitUntil` (G4) and
@@ -171,18 +172,30 @@ implementations in these languages", not "Rae is faster than Rust".
     Around 18 commits worked on it, and its numbers were looked at and
     improved in response. For example, when the ECS server measured 2×
     slower than the event loop, the cause was found and fixed (0.1.250).
-  - **Rust, Node and Bun:** each server is one small file written once
-    (3 commits in total), under the rule "idiomatic, the language's normal
-    way, not micro-tuned" (docs/server-benchmarks-design.md §4). Nobody
-    went back to speed one up after it lost.
-- **Some Rust results show how its server is written, not Rust itself.**
-  - **WebSocket:** an unbounded channel plus a writer task per connection,
-    a common tokio pattern. It is the reason for the 1.5 GB RSS and part
-    of the slower broadcast.
-  - **Game room:** tokio's millisecond interval on a current-thread
-    runtime, which falls behind at 2 000 players.
+  - **Rust, Node and Bun:** first written once, under the rule
+    "idiomatic, the language's normal way, not micro-tuned"
+    (docs/server-benchmarks-design.md §4). On 2026-10-11 they were
+    replaced by **tuned** versions, to see how much of Rae's lead was
+    effort (the idiomatic ones are in the git history, results of
+    2026-10-08 and 2026-10-11 before this note):
+    - **Rust WebSocket and game room:** the idiomatic versions gave each
+      connection an unbounded channel and a writer task
+      (tokio-tungstenite), and the game room used tokio's millisecond
+      interval, which fell 19–37 ms behind at 2 000 players. The tuned ones
+      share `rust/src/ws.rs`: frames encoded once, output corked like
+      uWebSockets (queued, then written once per client per batch of ready
+      tasks), the broadcast payload passed through as raw JSON, and a
+      clock thread that sleeps to each tick's deadline in halving steps.
+    - **Rust HTTP:** hyper as its TechEmpower entries set it up: static
+      header values, no writev, mimalloc.
+    - **Node:** uWebSockets.js (the C++ server Bun is built on, as a
+      native addon) in place of `node:http` and `ws`, the fastest way to
+      serve from Node.
+    - **Bun:** already on uWebSockets; HTTP routes go through Bun's
+      native `routes` table, and the broadcast payload is serialised once.
 
-  A tuned Rust server would likely close much of the gap.
+    Still written by us, in the Rae repository: the gap in effort is
+    smaller, the author is the same.
 - **One author for all**, writing inside the Rae project, with the
   incentives that implies.
 - **The same in reverse elsewhere:** the same would hold for a benchmark
@@ -194,16 +207,15 @@ implementations in these languages", not "Rae is faster than Rust".
 
 | | our code | what does the work |
 |---|---|---|
-| Bun 1.3.5 | 37–83 lines of JS | Bun's runtime is Zig; its HTTP / WebSocket server is uWebSockets (C++). Close to off-the-shelf Bun |
-| Node 26.5 | 30–75 lines of JS | built-in `node:http` (llhttp in C, libuv) and the `ws` package |
-| Rust 1.93 | 73–151 lines | `hyper` 1.x, `tokio`, `tokio-tungstenite`; the connection handling is ours |
+| Bun 1.3.5 | 39–83 lines of JS | Bun's runtime is Zig; its HTTP / WebSocket server is uWebSockets (C++). Close to off-the-shelf Bun |
+| Node 26.5 | 44–86 lines of JS | uWebSockets.js (uWebSockets, C++, as a native addon) |
+| Rust 1.93 | 80 lines (HTTP); 88–166 lines plus the shared 340-line `ws.rs` | `hyper` 1.x and `tokio` for HTTP; for WebSocket our own framing on `tokio`, with `httparse` for the upgrade request |
 | Rae | 99–613 lines per server, plus `lib/net`, `lib/http`, `lib/webSocket` | all written in this repository |
 
 **What would make them fairer:**
 
 - Rust, Node and Bun servers written or reviewed by people fluent in
-  those stacks, or the most tuned public implementations of the same
-  protocols.
+  those stacks (the tuned versions are our best effort, not theirs).
 - A second machine for the load generator: the 8-worker HTTP numbers
   measure it, not the servers.
 

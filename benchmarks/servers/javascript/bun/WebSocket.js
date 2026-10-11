@@ -27,9 +27,11 @@ const server = Bun.serve({
       if (message.type === "echo") {
         socket.send(data);
       } else if (message.type === "broadcast") {
-        server.publish("all", JSON.stringify({ type: "broadcast", payload: message.payload }));
+        // The payload is serialised once, for both messages
+        const payload = JSON.stringify(message.payload);
+        server.publish("all", '{"type":"broadcast","payload":' + payload + "}");
         const listenCount = server.subscriberCount("all");
-        socket.send(JSON.stringify({ type: "broadcastResult", payload: message.payload, listenCount }));
+        socket.send('{"type":"broadcastResult","payload":' + payload + ',"listenCount":' + listenCount + "}");
       }
     },
   },

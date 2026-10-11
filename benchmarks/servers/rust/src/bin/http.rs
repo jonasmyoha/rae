@@ -1,18 +1,24 @@
-// Phase 1 HTTP reference (benchmarks/servers/spec/Http.md): hyper 1.x on tokio.
-// PORT (default 8080) and WORKERS (default 1: a current-thread runtime;
-// more: a multi-thread runtime with that many worker threads).
+// Phase 1 HTTP reference (benchmarks/servers/spec/Http.md), tuned: hyper 1.x
+// on tokio, as the hyper entries of the TechEmpower benchmarks set it up:
+// static header values, responses written as one buffer (no writev),
+// pipelined replies flushed together, mimalloc. PORT (default 8080) and
+// WORKERS (default 1: a current-thread runtime; more: a multi-thread runtime
+// with that many worker threads).
 use std::convert::Infallible;
 use std::net::SocketAddr;
 
 use bytes::Bytes;
 use http_body_util::Full;
-use hyper::header::{CONTENT_LENGTH, CONTENT_TYPE, SERVER};
+use hyper::header::{HeaderValue, CONTENT_LENGTH, CONTENT_TYPE, SERVER};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use serde::Serialize;
 use tokio::net::TcpListener;
+
+#[global_allocator]
+static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 #[derive(Serialize)]
 struct Message {
@@ -24,8 +30,8 @@ fn response(status: StatusCode, content_type: &'static str, body: Bytes) -> Resp
     let mut response = Response::new(Full::new(body));
     *response.status_mut() = status;
     let headers = response.headers_mut();
-    headers.insert(SERVER, "hyper".parse().unwrap());
-    headers.insert(CONTENT_TYPE, content_type.parse().unwrap());
+    headers.insert(SERVER, HeaderValue::from_static("hyper"));
+    headers.insert(CONTENT_TYPE, HeaderValue::from_static(content_type));
     headers.insert(CONTENT_LENGTH, length.into());
     response
 }
@@ -54,6 +60,7 @@ async fn serve(port: u16) {
         tokio::spawn(async move {
             let _ = http1::Builder::new()
                 .pipeline_flush(true)
+                .writev(false)
                 .serve_connection(TokioIo::new(stream), service_fn(handle))
                 .await;
         });

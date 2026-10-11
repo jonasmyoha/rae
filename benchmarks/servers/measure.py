@@ -64,7 +64,7 @@ SOURCES = {
 WS_SOURCES = {
     "rae-eventLoop": "rae/eventLoop/webSocket/Main.rae",
     "rae-ecs": "rae/ecs/webSocket/Main.rae",
-    "rust": "rust/src/bin/webSocket.rs",
+    "rust": "rust/src/bin/webSocket.rs rust/src/ws.rs",
     "node": "javascript/node/WebSocket.js",
     "bun": "javascript/bun/WebSocket.js",
 }
@@ -72,7 +72,7 @@ WS_SOURCES = {
 ROOM_SOURCES = {
     "rae-eventLoop": "rae/eventLoop/gameRoom/Main.rae",
     "rae-ecs": "rae/ecs/gameRoom/Main.rae",
-    "rust": "rust/src/bin/gameRoom.rs",
+    "rust": "rust/src/bin/gameRoom.rs rust/src/ws.rs",
     "node": "javascript/node/GameRoom.js",
     "bun": "javascript/bun/GameRoom.js",
 }
@@ -320,15 +320,17 @@ def ratio(ecs, event_loop, key):
     return ecs[key]["median"] / event_loop[key]["median"]
 
 
-def source_lines(path):
+def source_lines(paths):
+    # One file, or several separated by spaces (a server and the module it shares)
     code = 0
     total = 0
-    with open(os.path.join(HERE, path)) as source:
-        for line in source:
-            total += 1
-            stripped = line.strip()
-            if stripped and not stripped.startswith(("#", "//")):
-                code += 1
+    for path in paths.split():
+        with open(os.path.join(HERE, path)) as source:
+            for line in source:
+                total += 1
+                stripped = line.strip()
+                if stripped and not stripped.startswith(("#", "//")):
+                    code += 1
     return {"lines": total, "codeLines": code}
 
 
@@ -371,7 +373,8 @@ def metadata(load_before):
             "workers": WORKERS,
         },
         "limits": "load generator on the same machine (competes for cores); macOS, no pinning; "
-        "Bun's reusePort does not balance connections across processes on macOS",
+        "Bun's reusePort does not balance connections across processes on macOS; "
+        "the Rust, Node and Bun references are the tuned versions (2026-10-11)",
     }
 
 
