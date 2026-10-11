@@ -21,15 +21,22 @@ enum ClipKind { idle, walk, walkFast, run }
 
 # the walk clip at 1.6x, not a fourth asset
 
-# The locomotion clip a controller's movement implies: idle when stopped, walk
-# with the walk modifier, else run. Shared by the hero and any controlled crowd
-# member (#546) so switching control does not change how movement reads.
-func locomotionClipFor(controller: view ThirdPersonController) ret Int {
-  if not controller.moving {
+# The clip a character's mover implies, from its actual horizontal speed:
+# idle when it stands, walk / walkFast / run by speed, so a character pushing
+# against something reads as pushing, not running in place. In the air it is
+# the run clip (played slowed: there is no jump clip).
+func moverClipFor(speed: view Float, grounded: view Bool) ret Int {
+  if grounded is false {
+    ret ClipKind.run as Int
+  }
+  if speed < standSpeed {
     ret ClipKind.idle as Int
   }
-  if controller.walking {
+  if speed < walkSpeedLimit {
     ret ClipKind.walk as Int
+  }
+  if speed < walkFastSpeedLimit {
+    ret ClipKind.walkFast as Int
   }
   ret ClipKind.run as Int
 }

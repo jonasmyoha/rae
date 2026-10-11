@@ -10,6 +10,7 @@ open ecs/Entity
 open ecs/ComponentTable
 open ecs/Transform
 import Vec3
+open box3d/ecs/Physics
 import Sys
 open GbufferInstanced
 open Particles
@@ -188,42 +189,84 @@ func updateApp(app: mod App) {
 
   app.characterSystem.prevModel = app.characterSystem.model
   var characterMoved: Bool = false
+  let controlledEntityId: EntityId = rosterControlledEntityId(
+    players: app.players
+    characterSystem: app.characterSystem
+  )
+  # Devices -> intent (input.rae), then the CONTROLLED character's mover gets it
+  # as a throttle (and the jump); every other character stands. A remote
+  # player's intent would arrive from net.rae instead; the drive is the same.
+  var intent: InputIntent = {
+    moveX: 0.0
+    moveY: 0.0
+    walking: false
+    jump: false
+    actions: 0
+  }
   if app.cameraSystem.rig.mode is CameraRigMode.character {
-    # Devices -> intent (input.rae), then apply it to the CONTROLLED character.
-    # A remote player's intent would arrive from net.rae instead; the apply is
-    # the same. Non-controlled characters run their own AI animation elsewhere.
-    let intent: InputIntent = inputUpdate(
+    intent = inputUpdate(
       moveStick: app.inputSystem.moveStick
       joyActive: joyActive
       allowKeys: uiPointerCaptured(input: app.inputSystem.ui) is false and app.characterSystem.playing
     )
+  }
+  # The controller's heading and position before the physics steps, to tell
+  # whether the character moved this frame
+  let before: Vec3 = controllerOf(world: app.world, entityId: controlledEntityId).position
+  let headingBefore: Float = controllerOf(world: app.world, entityId: controlledEntityId).heading
+  driveCharacters(
+    physicsSystem: app.physicsSystem
+    controlledEntityId: controlledEntityId
+    controller: controllerOf(world: app.world, entityId: controlledEntityId)
+    intent: intent
+    cameraYaw: app.cameraSystem.rig.viewYaw
+    speedScale: app.characterSystem.speed
+  )
+  # Fixed-timestep physics (#553, lib/box3d/ecs): the movers, then the bodies,
+  # at 60 Hz from the frame time, decoupled from render; it writes every
+  # character's controller and every cube's Transform3D.
+  let physicsSteps: Int = stepPhysicsFrame(
+    physicsSystem: app.physicsSystem
+    world: app.world
+    groundZ: app.characterSystem.groundZ
+    frameTime: deltaTime
+  )
+  let after: view ThirdPersonController => controllerOf(
+    world: app.world
+    entityId: controlledEntityId
+  )
+  characterMoved = physicsSteps > 0 and (after.position.x is not before.x or after.position.y is not before.y or after.position.z is not before.z or after.heading is not headingBefore)
+  let grounded: Bool = characterGrounded(
+    physicsSystem: app.physicsSystem
+    entityId: controlledEntityId
+  )
+  let controlledClip: Int = moverClipFor(
+    speed: characterSpeed(physicsSystem: app.physicsSystem, entityId: controlledEntityId)
+    grounded: grounded
+  )
+  if rosterControlledIsHero(roster: app.players) {
+    app.characterSystem.airborne = grounded is false
+  } else {
+    app.characterSystem.airborne = characterGrounded(
+      physicsSystem: app.physicsSystem
+      entityId: app.characterSystem.heroEntityId
+    ) is false
+  }
+  # The hero's model follows its controller whenever the physics moved it (it
+  # can be pushed or fall even when the player drives someone else)
+  app.characterSystem.model = walkerWorldModel(
+    baseModel: app.characterSystem.basePartModel
+    controller: controllerOf(world: app.world, entityId: app.characterSystem.heroEntityId)
+  )
+  if characterMoved {
+    app.persist.stateDirty = true
+  }
+  if app.cameraSystem.rig.mode is CameraRigMode.character {
     if rosterControlledIsHero(roster: app.players) {
-      # Drive the hero's controller IN PLACE through the world's controllers table
-      # (write-through componentMod, #721) — no copy-out/set-back.
-      let heroE: EntityId = app.characterSystem.heroEntityId
-      let heroCtrl: mod ThirdPersonController => componentMod(
-        this: app.world.controllers
-        entityId: heroE
-      )
-      characterMoved = updateWalkerMovement(
-        controller: heroCtrl
-        intent: intent
-        cameraYaw: app.cameraSystem.rig.viewYaw
-        deltaTime: deltaTime * app.characterSystem.speed
-      )
-      groundWalker(controller: heroCtrl, groundZ: app.characterSystem.groundZ)
-      if characterMoved {
-        app.characterSystem.model = walkerWorldModel(
-          baseModel: app.characterSystem.basePartModel
-          controller: heroCtrl
-        )
-        app.persist.stateDirty = true
-      }
-      let heroClip: Int = locomotionClipFor(controller: heroCtrl)
-      if heroClip is not app.characterSystem.clipIndex {
+      if controlledClip is not app.characterSystem.clipIndex {
         app.characterSystem.transitionFrom = captureSkeletonPose(sk: app.characterSystem.skeleton)
         app.characterSystem.transitionElapsed = 0.0
-        app.characterSystem.clipIndex = heroClip
+        app.characterSystem.clipIndex = controlledClip
         app.characterSystem.animTime = 0.0
         setPanelSelection(
           panel: app.inputSystem.clipPanel
@@ -233,30 +276,16 @@ func updateApp(app: mod App) {
         )
       }
     } else {
-      # The player drives a crowd member: step its controller entity IN PLACE and
-      # set its animation clip — both write-through componentMod, no copy/set-back.
-      let idx: Int = rosterControlledCrowdIndex(roster: app.players)
-      if let crowdE: EntityId = app.characterSystem.crowdEntities.copyAt(index: idx) {
-        let drivenCtrl: mod ThirdPersonController => componentMod(
-          this: app.world.controllers
-          entityId: crowdE
-        )
-        characterMoved = updateWalkerMovement(
-          controller: drivenCtrl
-          intent: intent
-          cameraYaw: app.cameraSystem.rig.viewYaw
-          deltaTime: deltaTime * app.characterSystem.speed
-        )
-        groundWalker(controller: drivenCtrl, groundZ: app.characterSystem.groundZ)
-        let drivenClip: Int = locomotionClipFor(controller: drivenCtrl)
-        let drivenAnim: mod AnimationState => componentMod(
-          this: app.world.animStates
-          entityId: crowdE
-        )
-        drivenAnim.clipIndex = drivenClip
-        if characterMoved {
-          app.persist.stateDirty = true
-        }
+      # The player drives a crowd member: its clip follows its mover, slowed
+      # in the air, written IN PLACE (componentMod, no copy/set-back).
+      let drivenAnim: mod AnimationState => componentMod(
+        this: app.world.animStates
+        entityId: controlledEntityId
+      )
+      drivenAnim.clipIndex = controlledClip
+      drivenAnim.playbackScale = 1.0
+      if grounded is false {
+        drivenAnim.playbackScale = airborneClipScale
       }
       # The hero, no longer player-driven, stands idle.
       app.characterSystem.clipIndex = ClipKind.idle as Int
@@ -289,15 +318,6 @@ func updateApp(app: mod App) {
     playerPosition: followPos
   )
 
-  # Fixed-timestep physics seam (#553): accumulate frame time and step at a fixed
-  # rate, decoupled from render. physicsStepWorld iterates the (empty) body table until a physics
-  # backend
-  # lands; the loop shape does not change then.
-  app.physicsSystem.accumulator = app.physicsSystem.accumulator + deltaTime
-  loop app.physicsSystem.accumulator >= physicsFixedStep {
-    physicsStepWorld(world: app.world, fixedDt: physicsFixedStep)
-    app.physicsSystem.accumulator = app.physicsSystem.accumulator - physicsFixedStep
-  }
   netPublishIntent(netSystem: app.netSystem, world: app.world)
 
   let resized: Bool = Gpu2d.windowResized()
@@ -332,7 +352,10 @@ func updateApp(app: mod App) {
   # dies out, or the wait-loop would freeze them mid-air when you stop wading (#84,
   # the "feed animation sources into the loop" lesson in AGENTS.md).
   let splashesAlive: Bool = app.splashes.list.length > 0
-  var needsRender: Bool = app.characterSystem.playing or transitionActive or settingsChanged or cameraMoved or characterMoved or terrainWrapped or grassWrapped or splashesAlive or hadUiEvents or logChanged or resized or scrolled or app.frame.renderedOnce is false
+  # Bodies still moving (a toppling stack, a character in the air) are an
+  # animation source too; the venue's static body is never awake
+  let physicsAwake: Bool = physicsCounters(physics: app.physicsSystem.physics).awakeBodyCount > 0 or characterMoved
+  var needsRender: Bool = app.characterSystem.playing or transitionActive or settingsChanged or cameraMoved or characterMoved or terrainWrapped or grassWrapped or splashesAlive or physicsAwake or hadUiEvents or logChanged or resized or scrolled or app.frame.renderedOnce is false
   if app.frame.taaSettleFrames > 0 {
     needsRender = true  # only meaningful with TAA on
   }

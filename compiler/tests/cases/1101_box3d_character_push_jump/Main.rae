@@ -1,0 +1,220 @@
+# The pattern example 114 uses for a character in a physics world, on
+# upstream Box3D's C library (lib/box3d/ecs): a Z-up height-field ground (the
+# grid stood up by a quarter turn about x), a stack of loose cubes, and a
+# character mover. The stack must settle and sleep on its own; the character
+# walks into it until a cube moves; then it jumps and must leave the ground
+# and land again. Prints what held.
+import Math
+import Vec2
+import Vec3
+import Quat
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open ecs/Transform
+open box3d/ecs/PhysicsTypes
+open box3d/ecs/Physics
+open box3d/ecs/PhysicsComponents
+open box3d/ecs/PhysicsSpawn
+open box3d/ecs/PhysicsSystems
+open box3d/ecs/VenueMesh
+
+type Scene {
+  allocator: EntityAllocator
+  transforms: ComponentTable(Transform3D)
+  rigidBodies: ComponentTable(RigidBody)
+  colliders: ComponentTable(Collider)
+  characters: ComponentTable(CharacterBody)
+  physics: Physics
+  cubeIds: List(EntityId)
+  characterId: EntityId
+}
+
+# Gently rolling ground (a few centimetres), so the stack stands on a real
+# height field rather than a plane
+func groundHeight(x: view Float, y: view Float) ret Float {
+  ret 0.05 * Math.sin(x: x * 0.3) * Math.cos(x: y * 0.2)
+}
+
+func addGround(scene: mod Scene) ret Bool {
+  let count: Int = 41
+  let spacing: Float = 1.0
+  let half: Float = spacing * (((count - 1) / 2) as Float)
+  var heights: List(Float) = List.create(Float, cap: count * count)
+  loop var row: Int = 0, row < count, ++row {
+    loop var column: Int = 0, column < count, ++column {
+      heights.add(
+        value: groundHeight(
+          x: -half + (column as Float) * spacing
+          y: half - (row as Float) * spacing
+        )
+      )
+    }
+  }
+  if let shapeId: ShapeId = addVenueHeightField(
+    physics: scene.physics
+    heights: heights
+    countX: count
+    countZ: count
+    scale: Vec3 { x: spacing, y: 1.0, z: spacing }
+    transform: Transform {
+      position: Vec3 { x: -half, y: half, z: 0.0 }
+      rotation: Quat.fromAxisAngle(axis: Vec3 { x: 1.0, y: 0.0, z: 0.0 }, angle: Math.pi * 0.5)
+    }
+    def: defaultShapeDef(lengthUnitsPerMeter: 1.0)
+  ) {
+    ret true
+  }
+  ret false
+}
+
+func addCube(scene: mod Scene, center: view Vec3, halfSize: view Float) {
+  let entityId: EntityId = allocEntity(this: scene.allocator)
+  var bodyDef: BodyDef = defaultBodyDef(lengthUnitsPerMeter: 1.0)
+  bodyDef.bodyType = BodyType.dynamicBody
+  bodyDef.position = center
+  let bodyId: BodyId = spawnRigidBody(
+    physics: scene.physics
+    rigidBodies: scene.rigidBodies
+    transforms: scene.transforms
+    entityId: entityId
+    def: bodyDef
+  )
+  var shapeDef: ShapeDef = defaultShapeDef(lengthUnitsPerMeter: 1.0)
+  shapeDef.density = 200.0
+  let shapeId: ShapeId = addBoxCollider(
+    physics: scene.physics
+    rigidBodies: scene.rigidBodies
+    colliders: scene.colliders
+    entityId: entityId
+    def: shapeDef
+    halfExtents: Vec3 { x: halfSize, y: halfSize, z: halfSize }
+    transform: transformIdentity()
+  )
+  scene.cubeIds.add(value: entityId)
+}
+
+func step(scene: mod Scene) {
+  physicsFixedStep(
+    physics: scene.physics
+    rigidBodies: scene.rigidBodies
+    characters: scene.characters
+    transforms: scene.transforms
+  )
+}
+
+# How far the cube that moved most is from `starts`
+func largestMove(scene: view Scene, starts: view List(Vec3)) ret Float {
+  var largest: Float = 0.0
+  loop var i: Int = 0, i < scene.cubeIds.length, ++i {
+    if let cubeId: EntityId = scene.cubeIds.copyAt(index: i) {
+      let position: Vec3 = componentView(this: scene.transforms, entityId: cubeId).position
+      let start: Vec3 = starts.copyAtFallback(
+        index: i
+        fallback: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+      )
+      largest = Math.max(a: largest, b: Vec3.vlen(a: Vec3.vsub(a: position, b: start)))
+    }
+  }
+  ret largest
+}
+
+func cubePositions(scene: view Scene) ret List(Vec3) {
+  var positions: List(Vec3) = List.create(Vec3, cap: scene.cubeIds.length)
+  loop let cubeId: view EntityId in scene.cubeIds {
+    positions.add(value: componentView(this: scene.transforms, entityId: cubeId).position)
+  }
+  ret positions
+}
+
+func main() {
+  var def: WorldDef = defaultPhysicsWorldDef()
+  def.workerCount = 1
+  var scene: Scene = {
+    allocator: createEntityAllocator()
+    transforms: createComponentTable(Transform3D)
+    rigidBodies: createComponentTable(RigidBody)
+    colliders: createComponentTable(Collider)
+    characters: createComponentTable(CharacterBody)
+    physics: createPhysics(def: def, fixedStep: 1.0 / 60.0, subSteps: 4)
+    cubeIds: List.create(EntityId, cap: 12)
+    characterId: noEntity()
+  }
+  log("ground: {addGround(scene: scene)}")
+  # A 2 x 2 x 3 stack of 0.5 m cubes, 4 m ahead of the character (+y)
+  loop var layer: Int = 0, layer < 3, ++layer {
+    loop var row: Int = 0, row < 2, ++row {
+      loop var column: Int = 0, column < 2, ++column {
+        let x: Float = -0.25 + 0.5 * (column as Float)
+        let y: Float = 3.75 + 0.5 * (row as Float)
+        addCube(
+          scene: scene
+          center: Vec3 { x: x, y: y, z: groundHeight(x: x, y: y) + 0.27 + 0.5 * (layer as Float) }
+          halfSize: 0.25
+        )
+      }
+    }
+  }
+  # The character's capsule centre rests 1.4 m above its feet
+  scene.characterId = allocEntity(this: scene.allocator)
+  componentSet(
+    this: scene.characters
+    entityId: scene.characterId
+    data: createCharacterBody(
+      position: Vec3 { x: 0.0, y: 0.0, z: groundHeight(x: 0.0, y: 0.0) + 1.4 }
+    )
+  )
+
+  # The stack settles and sleeps without toppling
+  let placed: List(Vec3) = cubePositions(scene: scene)
+  var settleSteps: Int = 0
+  loop settleSteps < 600 and physicsCounters(physics: scene.physics).awakeBodyCount > 0 {
+    step(scene: scene)
+    settleSteps = settleSteps + 1
+  }
+  log("stack sleeps: {physicsCounters(physics: scene.physics).awakeBodyCount is 0}")
+  log("stack stands: {largestMove(scene: scene, starts: placed) < 0.1}")
+
+  # Walk along +y into the stack at 4 m/s until a cube moves
+  let rested: List(Vec3) = cubePositions(scene: scene)
+  let walker: mod CharacterBody => componentMod(this: scene.characters, entityId: scene.characterId)
+  walker.forward = Vec3 { x: 0.0, y: 1.0, z: 0.0 }
+  walker.right = Vec3 { x: 1.0, y: 0.0, z: 0.0 }
+  walker.throttle = Vec2 { x: 4.0 / 6.0, y: 0.0 }
+  var walkSteps: Int = 0
+  loop walkSteps < 300 and largestMove(scene: scene, starts: rested) < 0.05 {
+    step(scene: scene)
+    walkSteps = walkSteps + 1
+  }
+  log("walking into the stack moves a cube: {largestMove(scene: scene, starts: rested) >= 0.05}")
+
+  # Stand, then jump once
+  let stander: mod CharacterBody => componentMod(
+    this: scene.characters
+    entityId: scene.characterId
+  )
+  stander.throttle = Vec2 { x: 0.0, y: 0.0 }
+  loop var i: Int = 0, i < 60, ++i {
+    step(scene: scene)
+  }
+  log(
+    "standing on the ground: {componentView(this: scene.characters, entityId: scene.characterId).grounded}"
+  )
+  let jumper: mod CharacterBody => componentMod(this: scene.characters, entityId: scene.characterId)
+  jumper.jump = true
+  var leftGround: Bool = false
+  var landed: Bool = false
+  var jumpSteps: Int = 0
+  loop jumpSteps < 180 and landed is false {
+    step(scene: scene)
+    jumpSteps = jumpSteps + 1
+    if componentView(this: scene.characters, entityId: scene.characterId).grounded is false {
+      leftGround = true
+    } else if leftGround {
+      landed = true
+    }
+  }
+  log("the jump leaves the ground: {leftGround}")
+  log("and lands: {landed}")
+  destroyPhysics(physics: scene.physics)
+}
