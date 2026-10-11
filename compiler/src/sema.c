@@ -2910,13 +2910,37 @@ static bool sema_expr_is_temporary(const AstExpr* e) {
  * therefore fires for every target. It used to exist only in the VM compiler,
  * which meant the Compiled path silently emitted a dangling pointer (or, for
  * a returned value, C that would not even build). */
-static void sema_check_returned_ref(CompilerContext* ctx, AstModule* module,
-                                    SymbolTable* symbols, AstExpr* value) {
-    (void)ctx;
-    if (!value || value->kind != AST_EXPR_UNARY) return;
-    if (value->as.unary.op != AST_UNARY_VIEW && value->as.unary.op != AST_UNARY_MOD) return;
+/* A `view` parameter of a number, Bool or Char is passed to C by value (the
+ * callee holds its own copy), so it names no storage of the caller's and a
+ * reference to it dies at `ret` like a local's. (`mod` ones, Strings, enums
+ * and structs are passed by pointer.) */
+static bool sema_type_is_by_value_view(const TypeInfo* type) {
+    if (!type || type->kind != TYPE_REF || type->as.ref.is_mod) return false;
+    const TypeInfo* base = type->as.ref.base;
+    if (!base) return false;
+    return base->kind == TYPE_BOOL || base->kind == TYPE_INT || base->kind == TYPE_FLOAT
+           || base->kind == TYPE_FLOAT64 || base->kind == TYPE_CHAR;
+}
 
-    const AstExpr* base = value->as.unary.operand;
+static void sema_check_returned_ref(CompilerContext* ctx, AstModule* module,
+                                    SymbolTable* symbols, AstExpr* value, bool returns_ref) {
+    (void)ctx;
+    if (!value) return;
+    /* `ret view x` / `ret mod x`, or a bare `ret x` / `ret x.field` from a
+     * function that returns a reference: the bare form hands back the same
+     * reference (spec §4.3.1), so it obeys the same rule. */
+    const AstExpr* base = NULL;
+    if (value->kind == AST_EXPR_UNARY
+        && (value->as.unary.op == AST_UNARY_VIEW || value->as.unary.op == AST_UNARY_MOD)) {
+        base = value->as.unary.operand;
+    } else if (returns_ref
+               && (value->kind == AST_EXPR_IDENT || value->kind == AST_EXPR_MEMBER
+                   || value->kind == AST_EXPR_INDEX)) {
+        base = value;
+    } else {
+        return;
+    }
+    bool names_itself = base->kind == AST_EXPR_IDENT;
     while (base && (base->kind == AST_EXPR_MEMBER || base->kind == AST_EXPR_INDEX)) {
         base = (base->kind == AST_EXPR_MEMBER) ? base->as.member.object
                                                : base->as.index.target;
@@ -2929,6 +2953,18 @@ static void sema_check_returned_ref(CompilerContext* ctx, AstModule* module,
         if (sym && sym->is_local_storage) {
             diag_report(file, (int)value->line, (int)value->column,
                         "reference escapes local storage");
+            if (module) module->had_error = true;
+        } else if (sym && names_itself && !sym->is_local_storage
+                   && sema_type_is_by_value_view(sym->type)) {
+            Str type_name = sym->type->as.ref.base->name;
+            char message[512];
+            snprintf(message, sizeof(message),
+                     "cannot return a reference to '%.*s': a 'view %.*s' parameter is passed by "
+                     "value, so the reference would outlive the copy; declare the function "
+                     "'ret %.*s' and return the value, or take the parameter as 'mod'",
+                     (int)base->as.ident.len, base->as.ident.data,
+                     (int)type_name.len, type_name.data, (int)type_name.len, type_name.data);
+            diag_report(file, (int)value->line, (int)value->column, message);
             if (module) module->had_error = true;
         }
         return;
@@ -4668,7 +4704,8 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                                    "('let source: view T => ...'), then 'ret source'");
                         module->had_error = true;
                     }
-                    sema_check_returned_ref(ctx, module, symbols, arg->value);
+                    sema_check_returned_ref(ctx, module, symbols, arg->value,
+                                            ret_base && ret_base->kind == TYPE_REF);
                     if (current_return_type) ensure_type_match(ctx, current_return_type, &arg->value);
                 }
                 arg = arg->next;

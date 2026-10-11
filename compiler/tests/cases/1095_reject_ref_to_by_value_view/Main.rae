@@ -1,0 +1,26 @@
+# A `view` number, Bool or Char parameter is passed by value: the callee
+# holds a copy, so a reference to it would outlive the copy, bare or spelled
+# with `view`. A bare `ret local` from a reference-returning function is the
+# same escape as `ret view local`.
+type Track {
+  value: Int
+}
+
+func pickInt(number: view Int) ret view Int {
+  ret number
+}
+
+func pickFloat(number: view Float) ret view Float {
+  ret view number
+}
+
+func pickLocal() ret view Track {
+  let local: Track = { value: 3 }
+  ret local
+}
+
+func main() {
+  let number: Int = 42
+  let numberView: view Int => pickInt(number: number)
+  log("{numberView}")
+}

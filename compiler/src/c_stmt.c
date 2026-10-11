@@ -3885,7 +3885,42 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 // affected — nested/wrapped literals fall back to deep-copy.
                 ctx->return_value_expr = ret_val;
 
-                if (is_prim_ref_return && !ret_type->is_opt) {
+                /* `ret x` where `x` is itself a reference binding (a
+                 * `view`/`mod` parameter or a `=>` local) and the function
+                 * returns a reference: `x` already IS the C value to hand
+                 * back — a pointer, or a rae_View_* wrapper for a primitive
+                 * or String — so it is returned as it stands. The paths
+                 * below build a reference from a PLACE (`&place`, or
+                 * `{ .ptr = &place }`); applied to `x` they took the
+                 * address of the parameter slot itself and returned
+                 * garbage. `ret view x` reaches the same result through the
+                 * view operator. */
+                bool ret_ident_is_ref = false;
+                /* An `opt view T` of a struct / container is a nullable
+                 * pointer of the same C type, so a non-optional reference
+                 * of it is returned as is too; a primitive or String one is
+                 * a different wrapper and keeps the path below. */
+                bool opt_ref_is_pointer = ret_type && ret_type->is_opt && !is_prim_ref_return
+                                          && !str_eq_cstr(get_base_type_name(ret_type), "String");
+                /* An `opt view` primitive or String is a raw nullable pointer
+                 * while the binding is a rae_View_* / rae_Mod_* wrapper:
+                 * hand back the wrapper's `.ptr`. */
+                bool opt_ref_unwraps = ret_type && ret_type->is_opt && !opt_ref_is_pointer;
+                if (is_ref_return && ret_val->kind == AST_EXPR_IDENT) {
+                    Str ret_name = ret_val->as.ident;
+                    for (int i = (int)ctx->local_count - 1; i >= 0; i--) {
+                        if (str_eq(ctx->locals[i], ret_name)) {
+                            const AstTypeRef* lt = ctx->local_type_refs[i];
+                            ret_ident_is_ref = lt && (lt->is_view || lt->is_mod) && !lt->is_opt;
+                            break;
+                        }
+                    }
+                }
+
+                if (ret_ident_is_ref) {
+                    emit_expr(ctx, ret_val, out, PREC_CALL, true, true);
+                    if (opt_ref_unwraps) fprintf(out, ".ptr");
+                } else if (is_prim_ref_return && !ret_type->is_opt) {
                     // #663: a call returning `opt view/mod prim` (viewAt/modAt,
                     // or a user `ret opt view/mod prim`) already hands back a
                     // RAW nullable pointer; install it into `.ptr` directly.
