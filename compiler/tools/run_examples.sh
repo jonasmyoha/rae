@@ -1185,6 +1185,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # UI is DRAWN, not only created: the corner menu button is a dark
           # square in the top-left. The "panel buttons" log line kept passing
           # while the frame loop rendered an empty UiSystems and no UI showed.
+          # The 154 shadow casters are the scene's 130 plus the 24 physics cubes.
           SHOT="$TMP_OUT/walker.bmp"
           if (cd .. && RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SHOT" \
                 perl -e 'alarm shift; exec @ARGV' 45 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
@@ -1197,7 +1198,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              && [ "$(grep -c "skinned parts: 12" "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c "panel buttons: 4 clip, 0 transport" "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c "\[water\] toon lake: 2 bodies" "$TMP_OUT/render.log")" -eq 1 ] \
-             && [ "$(grep -c "\[shadow\] casters 130, 3 cascades" "$TMP_OUT/render.log")" -eq 1 ] \
+             && [ "$(grep -c "\[shadow\] casters 154, 3 cascades" "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c "\[seamtest\] .* netOk=true physicsOk=true" "$TMP_OUT/render.log")" -eq 1 ] \
              && (cd .. && RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=90000 RAE_MEM_STATS=1 RAE_MEM_STATS_EVERY_MS=10000 \
                 perl -e 'alarm shift; exec @ARGV' 150 "$TMP_OUT/app") > "$TMP_OUT/live-growth.log" 2>&1 \

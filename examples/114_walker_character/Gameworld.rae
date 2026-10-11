@@ -27,6 +27,10 @@ open app3d/CharacterController
 type AnimationState {
   clipIndex: Int
   animTime: Float
+  # The clip's playback speed on top of its own rate: 1, or slower while the
+  # character is in the air (there is no jump clip: a slowed run stride
+  # stands in for the leap)
+  playbackScale: Float
 }
 
 # One skinned body-mesh part (#740): its uploaded mesh-handle id + surface
@@ -77,10 +81,10 @@ type GameWorld {
   parents: ComponentTable(Parent)
   childrens: ComponentTable(Children)
   hierarchyOrder: HierarchyOrder
-  # #746: the physics + multiplayer seams now have a real ECS home. A physics
-  # body and a joined remote player are each an ENTITY carrying a component,
-  # spawned/despawned through the generational allocator (#704) — not List stubs.
-  physicsBodies: ComponentTable(PhysicsBody)
+  # #746: a joined remote player is an ENTITY carrying a NetPlayer, spawned /
+  # despawned through the generational allocator (#704). The physics bodies'
+  # tables (rigid bodies, colliders, characters, cubes) are the PhysicsSystem's
+  # own; their poses are in `transforms` here.
   netPlayers: ComponentTable(NetPlayer)
   # #789: per-frame splash animation counter (was the module-global gSplashTick
   # in splash.rae). A plain resource on the world — the ComponentTable(any) field
@@ -104,7 +108,6 @@ func createGameWorld() ret GameWorld {
     parents: ComponentTable.create(Parent)
     childrens: ComponentTable.create(Children)
     hierarchyOrder: createHierarchyOrder()
-    physicsBodies: ComponentTable.create(PhysicsBody)
     netPlayers: ComponentTable.create(NetPlayer)
     splashTick: 0
   }
