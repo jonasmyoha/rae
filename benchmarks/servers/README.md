@@ -183,41 +183,47 @@ How to read it:
     requests/s, with some errors).
   - Both are recorded as measured.
 
-### WebSocket baseline, 2026-10-09
+### WebSocket baseline, 2026-10-11
 
-Same machine, one worker each, 3 ramps per server (load average 2.75 at the
-start), re-run after the ECS write-order fix (0.1.250). Broadcast round trip
-in ms, p50 / p99 (median of the ramps that got there), and the client count
-each ramp reached with p99 under 250 ms (cap 15 000):
+Same machine, one worker each, 3 ramps per server, load average 2.88 at the
+start (run.sh's gate is 3.0), rae 0.1.268. Broadcast round trip in ms,
+p50 / p99 (median of the ramps that got there), and the client count each
+ramp reached with p99 under 250 ms (cap 15 000):
 
 | clients | rae-eventLoop | rae-ecs | rust | node | bun |
 |---|---|---|---|---|---|
-| 1 000 | 4.5 / 16.0 | 4.6 / 14.9 | 13.9 / 28.6 | 17.1 / 39.5 | 4.9 / 16.1 |
-| 5 000 | 21.4 / 23.6 | 21.5 / 25.6 | 70.3 / 142.3 | 84.8 / 195.3 | 23.6 / 28.2 |
-| 10 000 | 42.6 / 45.0 | 43.3 / 47.1 | 142.5 / 283.7 | — | 47.4 / 52.6 |
-| 15 000 | 128.2 / 978.4 (1 ramp) | 65.4 / 70.6 (2 ramps) | — | — | 140.5 / 637.0 |
-| reached | 13 000 (13 000–14 000) | 15 000 (13 000–15 000) | 9 000 (8 000–9 000) | 6 000 | 14 000 (14 000–15 000) |
-| peak RSS | 336 MB | 273 MB | 1 429 MB | 163 MB | 47 MB |
+| 1 000 | 4.3 / 15.5 | 4.3 / 14.2 | 13.3 / 25.9 | 15.9 / 36.4 | 4.5 / 17.6 |
+| 5 000 | 20.5 / 23.2 | 20.6 / 22.9 | 69.7 / 132.6 | 81.5 / 186.2 | 22.7 / 25.1 |
+| 10 000 | 41.4 / 44.1 | 41.3 / 45.2 | 140.0 / 237.8 (2 ramps) | — | 46.2 / 49.1 |
+| 15 000 | 63.4 / 69.8 (2 ramps) | 62.7 / 65.5 | — | — | 69.4 / 72.9 |
+| reached | 15 000 (13 000–15 000) | 15 000 (all 3) | 9 000 (8 000–10 000) | 6 000 | 15 000 (14 000–15 000) |
+| peak RSS | 336 MB | 275 MB | 1 494 MB | 158 MB | 47 MB |
+| allocations / message | 101 | 171 | — | — | — |
 
 How to read it:
 
-- **ECS against the event loop: no measurable difference** from 5 000 to
-  13 000 clients (p50 ratio 1.00–1.02, overlapping ranges). The round trip
-  grows linearly with the fan-out, about 4.3 ms per 1 000 clients, for both.
-- The first baseline that morning had ECS at 2× the event loop. The cause was
-  `writeSystem`'s order, not ECS: it wrote the `Sending` connections
-  newest-first, so the senders' broadcastResults went out after every other
-  client's copy. It now writes oldest-first, like the event loop's slot order.
-- **Near the 15 000 cap the ramps get noisy** for every fast server. Single
-  broadcasts stall for hundreds of ms (rae-eventLoop and Bun here; in the
-  morning run it was rae-ecs that stopped early). Read "reached" above 13 000
-  as the edge of this machine, not a ranking.
-- Rust's RSS is its unbounded per-connection channels holding the broadcast
-  backlog.
-- Allocations per message (rae-eventLoop 101, rae-ecs 171) include every
-  client's connection setup in the ramp, so they are not a per-message cost.
-- Bun reported 7 wrong listenCounts at 1 000 clients (its `subscriberCount`
-  during the ramp); every other count was right.
+- **ECS against the event loop: no measurable difference** at any step
+  (p50 ratio 0.99–1.04). The round trip grows linearly with the fan-out,
+  about 4.1 ms per 1 000 clients, for both, and both now reach the 15 000
+  cap with p99 under 70 ms.
+- **The ECS write order matters.** The first 2026-10-09 baseline had ECS at
+  2× the event loop. The cause was `writeSystem` writing the `Sending`
+  connections newest-first, so the senders' broadcastResults went out after
+  every other client's copy. It writes oldest-first since 0.1.250, like the
+  event loop's slot order.
+- **Near the cap single broadcasts can stall** for hundreds of ms. One
+  rae-eventLoop ramp stopped at 13 000 (p99 707 ms at 14 000) and one Bun
+  ramp at 14 000 (p99 928 ms at 15 000). Read "reached" above 13 000 as the
+  edge of this machine (the load client shares its cores), not a ranking.
+- **Rust's RSS** is its unbounded per-connection channels holding the
+  broadcast backlog.
+- **Allocations per message** include every client's connection setup in
+  the ramp, so they are not a per-message cost.
+- **Every listenCount was right** in this run (the 2026-10-09 run had 7
+  wrong Bun counts at 1 000 clients).
+
+The previous baseline (2026-10-09, load 2.75, rae 0.1.250) gave the same
+picture within a few percent; it is in git history.
 
 ### Game room baseline, 2026-10-09
 
