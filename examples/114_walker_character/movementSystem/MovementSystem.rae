@@ -1,7 +1,7 @@
-# MovementSystem — apply a movement intent to a controller, gate it against the
-# terrain (walk/wade), snap it to the ground, and compose its world model matrix.
-# Split out of the old character.rae (#743). Takes narrow state: a controller +
-# an InputIntent, not the App.
+# MovementSystem — the terrain gates a character moves under (land, wadable
+# water), the spawn onto land, and its world model matrix. The movement itself
+# is the character's Box3D mover (PhysicsSystem), which keeps deep water a wall
+# through terrainWadable. Split out of the old character.rae (#743).
 import Math
 import Vec3
 import Quat
@@ -47,49 +47,6 @@ func spawnOnLand(controller: mod ThirdPersonController, groundZ: view Float) {
   controller.position.x = spot.x
   controller.position.y = spot.y
   groundWalker(controller: controller, groundZ: groundZ)
-}
-
-# The DEEP water is a wall, not the shoreline — a character wades into the
-# shallows (#84) and is only stopped where the sea drops off past waist depth
-# (terrainWadable). The step is taken first and undone if it ended in deep water,
-# which keeps the turn — a character walking into the drop-off still faces the way
-# you pushed, it just does not advance. Each axis is tested separately so wading
-# along the drop-off at an angle SLIDES along it instead of sticking.
-func updateWalkerMovement(
-  controller: mod ThirdPersonController
-  intent: view InputIntent
-  cameraYaw: view Float
-  deltaTime: view Float
-) ret Bool {
-  let fromX: Float = controller.position.x
-  let fromY: Float = controller.position.y
-  let moved: Bool = stepThirdPersonController(
-    controller: controller
-    inputRight: intent.moveX
-    inputForward: intent.moveY
-    walking: intent.walking
-    cameraYaw: cameraYaw
-    deltaTime: deltaTime
-  )
-  if moved is false {
-    ret moved
-  }
-  let toX: Float = controller.position.x
-  let toY: Float = controller.position.y
-  if terrainWadable(x: toX, y: toY) {
-    ret moved
-  }
-  if terrainWadable(x: toX, y: fromY) {
-    controller.position.y = fromY
-    ret moved
-  }
-  if terrainWadable(x: fromX, y: toY) {
-    controller.position.x = fromX
-    ret moved
-  }
-  controller.position.x = fromX
-  controller.position.y = fromY
-  ret moved
 }
 
 # Blender is Z-up but does not mandate one object-facing axis. This asset's

@@ -76,9 +76,10 @@ func netPublishIntent(netSystem: mod NetSystem, world: mod GameWorld) {
 # Spawn/despawn smoke test for the ECS seams (#746 Verify). Proves generational
 # recycling: spawn three remote players, drop the middle, spawn a fourth — the
 # fourth REUSES the freed slot's index with generation+1, and the departed
-# handle reads dead. Then spawns a physics body, steps it, and checks it moved.
-# Everything it creates is despawned again, so the persistent world is untouched.
-func seamSelfTest(world: mod GameWorld) {
+# handle reads dead. Then spawns a Box3D body high above the island, steps the
+# bodies, and checks the pull system moved its Transform3D. Everything it
+# creates is despawned again, so the persistent world is untouched.
+func seamSelfTest(world: mod GameWorld, physicsSystem: mod PhysicsSystem) {
   let a: EntityId = netJoin(world: world, remoteId: 101, role: 2)
   let b: EntityId = netJoin(world: world, remoteId: 102, role: 2)
   let c: EntityId = netJoin(world: world, remoteId: 103, role: 2)
@@ -89,25 +90,33 @@ func seamSelfTest(world: mod GameWorld) {
   let departedDead: Bool = allocatorIsAlive(this: world.allocator, entityId: b) is false
   let netOk: Bool = recycledIndex and bumpedGeneration and departedDead
 
-  let body: EntityId = spawnPhysicsBody(
+  let body: EntityId = spawnPhysicsCube(
+    physicsSystem: physicsSystem
     world: world
-    position: Vec3.create(x: 0.0, y: 0.0, z: 10.0)
-    velocity: Vec3.create(x: 1.0, y: 0.0, z: 0.0)
-    gravityScale: 1.0
+    center: Vec3.create(x: 0.0, y: 0.0, z: 200.0)
+    halfSize: 0.5
+    color: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
   )
-  # The position BEFORE the step, as plain values: a view would read the row
-  # after the step moved it.
+  setBodyVelocity(
+    physicsSystem: physicsSystem
+    entityId: body
+    velocity: Vec3.create(x: 1.0, y: 0.0, z: 0.0)
+  )
+  # The position BEFORE the steps, as plain values: a view would read the row
+  # after the steps moved it.
   let beforeX: Float = componentView(this: world.transforms, entityId: body).position.x
   let beforeZ: Float = componentView(this: world.transforms, entityId: body).position.z
-  physicsStepWorld(world: world, fixedDt: 0.1)
+  loop var step: Int = 0, step < 6, ++step {
+    stepPhysicsBodies(physicsSystem: physicsSystem, world: world)
+  }
   let after: view Transform3D => componentView(this: world.transforms, entityId: body)
-  # x advances by velocity*dt, z falls under gravity — both must have moved.
+  # x advances with the velocity, z falls under gravity — both must have moved.
   let physicsOk: Bool = after.position.x > beforeX and after.position.z < beforeZ
 
   netLeave(world: world, entityId: a)
   netLeave(world: world, entityId: c)
   netLeave(world: world, entityId: d)
-  despawnPhysicsBody(world: world, entityId: body)
+  despawnPhysicsCube(physicsSystem: physicsSystem, world: world, entityId: body)
   log(
     "[seamtest] net recycle idx={b.index} gen {b.generation}->{d.generation} netOk={netOk} physicsOk={physicsOk}"
   )

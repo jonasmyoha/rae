@@ -66,6 +66,72 @@ type RenderSystem {
   renderer: DeferredRenderer
   drs: RenderScaleController
   shadowLogged: Bool
+  # The physics cubes, one instanced draw (the unit box, scaled per cube)
+  cubeBatch: InstanceBatch
+}
+
+# A clip plays this much slower while its character is in the air: there is
+# no jump clip, so a slowed run stride stands in for the leap
+const airborneClipScale: Float = 0.3
+
+# The physics cubes into the G-buffer: one instanced draw of the unit box.
+func drawPhysicsCubes(
+  cache: mod GbufferCache
+  resources: mod GpuResources
+  batch: mod InstanceBatch
+  physicsSystem: view PhysicsSystem
+  world: view GameWorld
+  toon: view Bool
+) {
+  resetInstanceBatch(batch: batch)
+  loop var i: Int = 0, i < componentCount(this: physicsSystem.cubes), ++i {
+    let cubeId: EntityId = componentEntityAt(this: physicsSystem.cubes, i: i)
+    if componentHas(this: world.transforms, entityId: cubeId) is false {
+      continue
+    }
+    let cube: view PhysicsCube => componentView(this: physicsSystem.cubes, entityId: cubeId)
+    let model: Mat4 = physicsCubeModel(
+      transform: componentView(this: world.transforms, entityId: cubeId)
+      cube: cube
+    )
+    let material: Material3d = {
+      baseColor: cube.color
+      metallic: 0.0
+      roughness: 0.7
+      emission: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+      toon: toon
+    }
+    addInstance(
+      batch: batch
+      model: model
+      prevModel: model
+      material: material
+    )
+  }
+  drawInstances(cache: cache, resources: resources, batch: batch)
+}
+
+# The physics cubes into the shadow map.
+func drawPhysicsCubesShadow(
+  renderer: mod DeferredRenderer
+  batch: view InstanceBatch
+  physicsSystem: view PhysicsSystem
+  world: view GameWorld
+) {
+  let cubeMesh: MeshHandle = meshHandle(id: batch.meshId, generation: 1)
+  loop var i: Int = 0, i < componentCount(this: physicsSystem.cubes), ++i {
+    let cubeId: EntityId = componentEntityAt(this: physicsSystem.cubes, i: i)
+    if componentHas(this: world.transforms, entityId: cubeId) {
+      castKind(
+        renderer: renderer
+        mesh: cubeMesh
+        model: physicsCubeModel(
+          transform: componentView(this: world.transforms, entityId: cubeId)
+          cube: componentView(this: physicsSystem.cubes, entityId: cubeId)
+        )
+      )
+    }
+  }
 }
 
 # The shadow pass: fit cascades to this frame, then rasterise every caster
@@ -78,6 +144,7 @@ func renderShadowPass(
   renderSystem: mod RenderSystem
   terrainSystem: mod TerrainSystem
   world: mod GameWorld
+  physicsSystem: view PhysicsSystem
   aspect: copy Float
   palette: view List(Float)
 ) {
@@ -104,6 +171,12 @@ func renderShadowPass(
     drawTerrainPropsShadow(
       renderer: renderSystem.renderer
       terrainSystem: terrainSystem
+      world: world
+    )
+    drawPhysicsCubesShadow(
+      renderer: renderSystem.renderer
+      batch: renderSystem.cubeBatch
+      physicsSystem: physicsSystem
       world: world
     )
     # Each caster's shadow samples the SAME palette slot its G-buffer instance
@@ -160,6 +233,8 @@ func renderGbufferPass(
   splashes: mod ParticleSystem
   terrainSystem: mod TerrainSystem
   world: mod GameWorld
+  physicsSystem: view PhysicsSystem
+  cubeBatch: mod InstanceBatch
   aspect: copy Float
   palette: view List(Float)
   t: copy Float
@@ -222,6 +297,14 @@ func renderGbufferPass(
     resources: rendererResources
     terrainSystem: terrainSystem
     world: world
+  )
+  drawPhysicsCubes(
+    cache: cache
+    resources: rendererResources
+    batch: cubeBatch
+    physicsSystem: physicsSystem
+    world: world
+    toon: characterSystem.toon
   )
   # Palettes (hero slot 0 + one per crowd member) were uploaded in renderApp;
   # the hero's is re-written here into the cache's palette (slot 0).
@@ -308,6 +391,7 @@ func renderApp(
   inputSystem: mod InputSystem
   renderSystem: mod RenderSystem
   world: mod GameWorld
+  physicsSystem: view PhysicsSystem
   terrainSystem: mod TerrainSystem
   splashes: mod ParticleSystem
   waterSystem: mod WaterSystem
@@ -323,6 +407,9 @@ func renderApp(
   var clipRate: Float = 1.0
   if characterSystem.clipIndex is ClipKind.walkFast {
     clipRate = 1.6
+  }
+  if characterSystem.airborne {
+    clipRate = clipRate * airborneClipScale
   }
   if characterSystem.playing {
     characterSystem.animTime = characterSystem.animTime + deltaTime * characterSystem.speed * clipRate
@@ -390,7 +477,7 @@ func renderApp(
     if let member: EntityId = characterSystem.crowdEntities.copyAt(index: crowdSlot) {
       # Advance this member's AnimationState IN PLACE (#739) — no copy/set-back.
       let anim: mod AnimationState => componentMod(this: world.animStates, entityId: member)
-      anim.animTime = anim.animTime + deltaTime * clipPlaybackRate(clipIndex: anim.clipIndex)
+      anim.animTime = anim.animTime + deltaTime * clipPlaybackRate(clipIndex: anim.clipIndex) * anim.playbackScale
       let memberClip: Int = anim.clipIndex
       let memberTime: Float = anim.animTime
       let crowdPalette: List(Float) = poseCharacterPalette(
@@ -431,6 +518,7 @@ func renderApp(
           renderSystem: renderSystem
           terrainSystem: terrainSystem
           world: world
+          physicsSystem: physicsSystem
           aspect: aspect
           palette: palette
         )
@@ -446,6 +534,8 @@ func renderApp(
             splashes: splashes
             terrainSystem: terrainSystem
             world: world
+            physicsSystem: physicsSystem
+            cubeBatch: renderSystem.cubeBatch
             aspect: aspect
             palette: palette
             t: t

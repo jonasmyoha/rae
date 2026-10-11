@@ -146,6 +146,9 @@ type CharacterSystem {
   crowdEntities: List(EntityId)
   crowdBatch: InstanceBatch
   groundZ: Float
+  # The hero is in the air (a jump, a fall): its run clip plays slowed, as
+  # there is no jump clip
+  airborne: Bool
 }
 
 # Window-geometry + hot-reload persistence. (#555)
@@ -411,6 +414,12 @@ func createApp() ret App {
     var crowdEntities: List(EntityId) = List.create(EntityId, cap: cloneCount)
     let firstPart: MeshHandle = meshHandle(id: firstPartId, generation: 1)
     var characterClones: InstanceBatch = createInstanceBatch(mesh: firstPart, capacity: cloneCount)
+    # The physics cubes: one unit box, scaled per cube (PhysicsSystem)
+    let cubeMesh: MeshHandle = uploadMeshDataForTerrain(
+      renderer: renderer
+      mesh: makeBox(size: 1.0)
+    )
+    var cubeBatch: InstanceBatch = createInstanceBatch(mesh: cubeMesh, capacity: 64)
 
     var camera: Camera3d = defaultCamera3d()
     let hosekData: HosekDataset = loadDefaultHosekDataset()
@@ -605,6 +614,7 @@ func createApp() ret App {
         anim: AnimationState {
           clipIndex: crowdClipFor(index: cloneIndex)
           animTime: cloneIndex.toFloat() * 0.4
+          playbackScale: 1.0
         }
       )
       gameWorldSetTransform(
@@ -625,9 +635,37 @@ func createApp() ret App {
       world: gameWorld
       playerPosition: characterController.position
     )
+    # Physics (lib/box3d/ecs): the island's height field, a mover for the hero and
+    # each crowd member, and the cube stacks near the hero.
+    var physicsSystem: PhysicsSystem = createPhysicsSystem()
+    if addIslandGround(physicsSystem: physicsSystem, groundZ: groundZ) is false {
+      log("[physics] Box3D refused the island height field")
+    }
+    addCharacterBody(
+      physicsSystem: physicsSystem
+      entityId: heroEntityId
+      feet: controllerFeet(controller: characterController, groundZ: groundZ)
+    )
+    loop let crowdEntityId: view EntityId in crowdEntities {
+      addCharacterBody(
+        physicsSystem: physicsSystem
+        entityId: crowdEntityId
+        feet: controllerFeet(
+          controller: controllerOf(world: gameWorld, entityId: crowdEntityId)
+          groundZ: groundZ
+        )
+      )
+    }
+    let cubeCount: Int = spawnCubeStacks(
+      physicsSystem: physicsSystem
+      world: gameWorld
+      spawnPoint: controllerFeet(controller: characterController, groundZ: groundZ)
+      groundZ: groundZ
+    )
+    log("[physics] Box3D: the island height field, {1 + cloneCount} movers, {cubeCount} cubes")
     # #746: exercise the physics/net ECS seams once at startup — spawn/despawn via
-    # generational entities, iterate a physics body. Leaves the world untouched.
-    seamSelfTest(world: gameWorld)
+    # generational entities, step a Box3D body. Leaves the world untouched.
+    seamSelfTest(world: gameWorld, physicsSystem: physicsSystem)
     if rig.mode is CameraRigMode.character {
       camera.target = thirdPersonCameraTarget(
         controller: characterController
@@ -795,13 +833,19 @@ func createApp() ret App {
         crowdEntities: own crowdEntities
         crowdBatch: own characterClones
         groundZ: groundZ
+        airborne: false
       }
       terrainSystem: own terrainSystem
       grassSystem: own grass
-      renderSystem: { renderer: own renderer, drs: own drs, shadowLogged: false }
+      renderSystem: {
+        renderer: own renderer
+        drs: own drs
+        shadowLogged: false
+        cubeBatch: own cubeBatch
+      }
       profiler: Profile.createProfiler()
       grassCompute: createGrassCompute()
-      physicsSystem: { accumulator: 0.0, worldHandle: 0 }
+      physicsSystem: own physicsSystem
       netSystem: { role: 0, tick: 0 }
       players: createPlayerRoster(count: 1 + cloneCount)
       persist: { windowGeometry: own windowGeometry, lastStateSave: startT, stateDirty: false }
@@ -832,7 +876,19 @@ func runWalkerApp() ret Int {
     )} parts + hero + crowd + terrain + grass)"
   )
   Profile.maybeAutoStart(profiler: app.profiler)
-  loop not Gpu2d.pollClose() {
+  # RAE_114_PHYSICS_TEST=1: drive the hero into a cube stack and jump, report,
+  # and quit (PhysicsSelfTest), instead of the window loop
+  let physicsTest: Bool = Sys.getEnv(name: "RAE_114_PHYSICS_TEST").length() > 0
+  var exitCode: Int = 0
+  if physicsTest {
+    exitCode = runPhysicsSelfTest(
+      physicsSystem: app.physicsSystem
+      world: app.world
+      heroEntityId: app.characterSystem.heroEntityId
+      groundZ: app.characterSystem.groundZ
+    )
+  }
+  loop not physicsTest and not Gpu2d.pollClose() {
     frameBegin(app: app)
     updateApp(app: app)
     if Gpu2d.shouldRenderFrame(appNeedsRender: app.frame.needsRender) is false {
@@ -855,6 +911,7 @@ func runWalkerApp() ret Int {
           inputSystem: app.inputSystem
           renderSystem: app.renderSystem
           world: app.world
+          physicsSystem: app.physicsSystem
           terrainSystem: app.terrainSystem
           splashes: app.splashes
           waterSystem: app.waterSystem
@@ -874,8 +931,9 @@ func runWalkerApp() ret Int {
     shutdown(resources: resources)
   }
   shutdownDeferredRenderer(renderer: app.renderSystem.renderer)  # #904: the renderer-owned GPU manager, before the C shutdown
+  destroyPhysicsSystem(physicsSystem: app.physicsSystem)
   skinShutdown()
   shutdown()
   Gpu2d.closeWindow()
-  ret 0
+  ret exitCode
 }
