@@ -1,30 +1,40 @@
-// Phase 3 game room reference (benchmarks/servers/spec/GameRoom.md): the
-// `ws` package on Node, one process (one worker, one room). PORT (default
+// Phase 3 game room reference (benchmarks/servers/spec/GameRoom.md), tuned:
+// Node with uWebSockets.js, one thread (one worker, one room). PORT (default
 // 8080). An input is applied to its player when it arrives; the 30 Hz tick is
 // a setTimeout chain aimed at each deadline (start + k × period), which
-// encodes one snapshot Buffer and sends it to every player whose socket does
-// not still hold more than one snapshot.
+// encodes one snapshot and sends it to every player whose socket does not
+// still hold more than one snapshot.
 "use strict";
-const { WebSocketServer } = require("ws");
+const uWS = require("uWebSockets.js");
 
 const port = Number(process.env.PORT || 8080);
 const periodMs = 1000 / 30;
-const server = new WebSocketServer({ host: "127.0.0.1", port, path: "/ws", perMessageDeflate: false });
 const players = new Map(); // socket -> player, in join order
 let nextPlayerId = 1;
 
 const clamp = (value, limit) => Math.max(-limit, Math.min(limit, value));
 
-server.on("connection", (socket) => {
-  const player = { id: nextPlayerId++, x: 0, y: 0, lastSequence: 0 };
-  players.set(socket, player);
-  socket.on("message", (data, isBinary) => {
-    if (!isBinary || data.length !== 32) return;
-    player.lastSequence = data.readUInt32LE(0);
-    player.x = clamp(player.x + clamp(data.readInt32LE(4), 1000), 1000000);
-    player.y = clamp(player.y + clamp(data.readInt32LE(8), 1000), 1000000);
-  });
-  socket.on("close", () => players.delete(socket));
+const app = uWS.App().ws("/ws", {
+  compression: uWS.DISABLED,
+  maxBackpressure: 16 * 1024 * 1024,
+  closeOnBackpressureLimit: false,
+  open(socket) {
+    players.set(socket, { id: nextPlayerId++, x: 0, y: 0, lastSequence: 0 });
+  },
+  message(socket, data, isBinary) {
+    if (!isBinary || data.byteLength !== 32) return;
+    const player = players.get(socket);
+    const view = new DataView(data);
+    player.lastSequence = view.getUint32(0, true);
+    player.x = clamp(player.x + clamp(view.getInt32(4, true), 1000), 1000000);
+    player.y = clamp(player.y + clamp(view.getInt32(8, true), 1000), 1000000);
+  },
+  close(socket) {
+    players.delete(socket);
+  },
+});
+app.any("/*", (response) => {
+  response.writeStatus("404 Not Found").writeHeader("Server", "Node").end("Not Found");
 });
 
 const start = performance.now();
@@ -47,29 +57,30 @@ function tick() {
     nextIndex++;
     missed++;
   }
-  const snapshot = Buffer.allocUnsafe(24 + 16 * players.size);
-  snapshot.writeUInt32LE(index, 0);
-  snapshot.writeUInt32LE(players.size, 4);
-  snapshot.writeUInt32LE(Math.round(lateness * 1000), 8);
-  snapshot.writeUInt32LE(Math.round(previousMs * 1000), 12);
-  snapshot.writeUInt32LE(missed, 16);
-  snapshot.writeUInt32LE(0, 20);
+  const snapshot = new Uint8Array(24 + 16 * players.size);
+  const view = new DataView(snapshot.buffer);
+  view.setUint32(0, index, true);
+  view.setUint32(4, players.size, true);
+  view.setUint32(8, Math.round(lateness * 1000), true);
+  view.setUint32(12, Math.round(previousMs * 1000), true);
+  view.setUint32(16, missed, true);
   let at = 24;
   for (const player of players.values()) {
-    snapshot.writeUInt32LE(player.id, at);
-    snapshot.writeInt32LE(player.x, at + 4);
-    snapshot.writeInt32LE(player.y, at + 8);
-    snapshot.writeUInt32LE(player.lastSequence, at + 12);
+    view.setUint32(at, player.id, true);
+    view.setInt32(at + 4, player.x, true);
+    view.setInt32(at + 8, player.y, true);
+    view.setUint32(at + 12, player.lastSequence, true);
     at += 16;
   }
   for (const socket of players.keys()) {
-    if (socket.bufferedAmount <= snapshot.length) socket.send(snapshot, { binary: true });
+    if (socket.getBufferedAmount() <= snapshot.length) socket.send(snapshot, true);
   }
   previousMs = performance.now() - tickStart;
   setTimeout(tick, Math.max(0, start + nextIndex * periodMs - performance.now()));
 }
 
-server.on("listening", () => {
+app.listen("127.0.0.1", port, (listening) => {
+  if (!listening) process.exit(1);
   console.log(`listening on ${port}`);
   setTimeout(tick, 0);
 });

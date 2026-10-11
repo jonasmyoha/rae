@@ -1,80 +1,82 @@
-// Phase 2 WebSocket reference (benchmarks/servers/spec/WebSocket.md):
-// tokio-tungstenite on a current-thread tokio runtime (one worker, as the spec
-// asks). PORT (default 8080). Every connection has a writer task fed by a
-// channel; a broadcast puts the same message (its bytes shared, not copied)
-// on every connection's channel.
+// Phase 2 WebSocket reference (benchmarks/servers/spec/WebSocket.md), tuned:
+// the shared WebSocket layer (src/ws.rs) on a current-thread tokio runtime
+// (one worker, as the spec asks). PORT (default 8080). A broadcast encodes its
+// frame once and queues it on every client in accept order (the Hub writes
+// them after the batch); the payload is passed through as raw JSON, never
+// re-serialised.
+use std::borrow::Cow;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::rc::Rc;
 
-use futures_util::{SinkExt, StreamExt};
-use serde_json::{json, Value};
+use serde::Deserialize;
+use serde_json::value::RawValue;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
-use tokio_tungstenite::tungstenite::Message;
 
-type Clients = Rc<RefCell<HashMap<u64, UnboundedSender<Message>>>>;
+#[path = "../ws.rs"]
+mod ws;
 
-async fn connection(stream: TcpStream, id: u64, clients: Clients) {
-    let _ = stream.set_nodelay(true);
-    let Ok(socket) = tokio_tungstenite::accept_async(stream).await else {
+#[global_allocator]
+static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
+type Clients = Rc<RefCell<BTreeMap<u64, Rc<ws::Connection>>>>;
+
+#[derive(Deserialize)]
+struct Incoming<'a> {
+    #[serde(rename = "type", borrow)]
+    kind: Cow<'a, str>,
+    #[serde(borrow)]
+    payload: Option<&'a RawValue>,
+}
+
+async fn connection(stream: TcpStream, id: u64, clients: Clients, hub: Rc<ws::Hub>) {
+    let Some((connection, mut reader)) = ws::accept(stream, &hub).await else {
         return;
     };
-    let (mut writer, mut reader) = socket.split();
-    let (sender, mut outbox) = unbounded_channel::<Message>();
-    clients.borrow_mut().insert(id, sender.clone());
-    let writing = tokio::task::spawn_local(async move {
-        while let Some(message) = outbox.recv().await {
-            if writer.send(message).await.is_err() {
-                break;
-            }
+    clients.borrow_mut().insert(id, connection.clone());
+    while let Some((opcode, message)) = reader.next(&connection).await {
+        if opcode != ws::TEXT {
+            continue;
         }
-    });
-    while let Some(Ok(message)) = reader.next().await {
-        let Message::Text(text) = message else {
+        let Ok(incoming) = serde_json::from_slice::<Incoming>(&message) else {
             continue;
         };
-        let Ok(value) = serde_json::from_str::<Value>(text.as_str()) else {
-            continue;
-        };
-        match value.get("type").and_then(Value::as_str) {
-            Some("echo") => {
-                let _ = sender.send(Message::Text(text));
-            }
-            Some("broadcast") => {
-                let payload = value.get("payload").cloned().unwrap_or(Value::Null);
-                let broadcast = Message::text(json!({"type": "broadcast", "payload": payload}).to_string());
+        let payload = incoming.payload.map_or("null", RawValue::get);
+        match incoming.kind.as_ref() {
+            "echo" => connection.send(&ws::frame(ws::TEXT, &message)),
+            "broadcast" => {
+                let broadcast = ws::frame(ws::TEXT, format!(r#"{{"type":"broadcast","payload":{payload}}}"#).as_bytes());
                 let listen_count = {
                     let clients = clients.borrow();
                     for client in clients.values() {
-                        let _ = client.send(broadcast.clone());
+                        client.send(&broadcast);
                     }
                     clients.len()
                 };
-                let result = json!({"type": "broadcastResult", "payload": payload, "listenCount": listen_count});
-                let _ = sender.send(Message::text(result.to_string()));
+                let result = format!(r#"{{"type":"broadcastResult","payload":{payload},"listenCount":{listen_count}}}"#);
+                connection.send(&ws::frame(ws::TEXT, result.as_bytes()));
             }
             _ => {}
         }
     }
     clients.borrow_mut().remove(&id);
-    drop(sender);
-    let _ = writing.await;
+    connection.finish().await;
 }
 
 async fn serve(port: u16) {
     let address = SocketAddr::from(([127, 0, 0, 1], port));
     let listener = TcpListener::bind(address).await.expect("bind");
     println!("listening on {port}");
-    let clients: Clients = Rc::new(RefCell::new(HashMap::new()));
+    let clients: Clients = Rc::new(RefCell::new(BTreeMap::new()));
+    let hub = ws::Hub::new();
     let mut next_id = 0u64;
     loop {
         let Ok((stream, _)) = listener.accept().await else {
             continue;
         };
         next_id += 1;
-        tokio::task::spawn_local(connection(stream, next_id, clients.clone()));
+        tokio::task::spawn_local(connection(stream, next_id, clients.clone(), hub.clone()));
     }
 }
 

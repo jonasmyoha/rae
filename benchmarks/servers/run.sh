@@ -74,7 +74,7 @@ run_with_timeout 900 cargo build --quiet --release --locked \
   --manifest-path "$HERE/rust/Cargo.toml" --target-dir "$BUILD/rust"
 run_with_timeout 900 cargo build --quiet --release --locked \
   --manifest-path "$HERE/loadClient/Cargo.toml" --target-dir "$BUILD/loadClient"
-if [ ! -d "$HERE/javascript/node/node_modules/ws" ]; then
+if [ ! -d "$HERE/javascript/node/node_modules/uWebSockets.js" ]; then
   run_with_timeout 300 npm ci --silent --prefix "$HERE/javascript/node"
 fi
 # Thousands of WebSocket clients: the servers and loadClient need the room
