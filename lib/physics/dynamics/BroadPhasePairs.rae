@@ -84,7 +84,7 @@ func shouldCreatePair(world: view PhysicsWorld, shapeIdA: view Int, shapeIdB: vi
 # batch is dropped when the pair fails the gauntlet.
 func emitCompoundPairs(
   world: view PhysicsWorld
-  context: mod PairContext
+  pairKeys: mod List(UInt64)
   compoundShapeId: view Int
   otherShapeId: view Int
 ) {
@@ -103,7 +103,7 @@ func emitCompoundPairs(
     body: bodyAt(world: world, bodyId: compoundShape.bodyId)
   )
   let localBox: Aabb = transformAabb(transform: invert(transform: compoundTransform), box: otherBox)
-  let startCount: Int = context.pairKeys.length
+  let startCount: Int = pairKeys.length
   if let compound: view CompoundData => world.compounds.viewAt(index: compoundShape.compoundIndex) {
     let children: List(Int) = queryCompound(compound: compound, bounds: localBox)
     loop let childIndex: view Int in children {
@@ -113,17 +113,17 @@ func emitCompoundPairs(
         child: childIndex
       )
       if pairSetContains(set: world.broadPhase.pairSet, key: key) is false {
-        context.pairKeys.add(value: key)
+        pairKeys.add(value: key)
       }
     }
   }
-  if context.pairKeys.length > startCount and shouldCreatePair(
+  if pairKeys.length > startCount and shouldCreatePair(
     world: world
     shapeIdA: compoundShapeId
     shapeIdB: otherShapeId
   ) is false {
-    loop context.pairKeys.length > startCount {
-      context.pairKeys.removeLast()
+    loop pairKeys.length > startCount {
+      pairKeys.removeLast()
     }
   }
 }
@@ -133,8 +133,7 @@ func emitCompoundPairs(
 # when they pass the gauntlet. (Box3D culls the whole batch, then filters
 # it; one pass keeps the same order.)
 func flushCandidatePairs(world: view PhysicsWorld, context: mod PairContext) {
-  # The context's plain list, moved out (emitCompoundPairs takes the
-  # context) and back at the end
+  # The context's plain list, moved out and back at the end
   var plain: List(CandidatePair) = own context.plain
   plain.clear()
   loop let candidate: view CandidatePair in context.batch {
@@ -145,7 +144,7 @@ func flushCandidatePairs(world: view PhysicsWorld, context: mod PairContext) {
         # Compound against compound is not supported
         emitCompoundPairs(
           world: world
-          context: context
+          pairKeys: mod context.pairKeys
           compoundShapeId: candidate.shapeIdA
           otherShapeId: candidate.shapeIdB
         )
@@ -154,7 +153,7 @@ func flushCandidatePairs(world: view PhysicsWorld, context: mod PairContext) {
       if compoundB {
         emitCompoundPairs(
           world: world
-          context: context
+          pairKeys: mod context.pairKeys
           compoundShapeId: candidate.shapeIdB
           otherShapeId: candidate.shapeIdA
         )

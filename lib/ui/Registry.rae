@@ -304,10 +304,17 @@ func applyComponentInto(
 # a correctness bug — fail loudly, naming scene, node and component; under
 # `report` (#996, a tool opening other people's scenes) it is a
 # SceneDiagnostic and the node keeps the components it has.
-func reportUnknownComponent(world: mod UiWorld, pending: view PendingComponent) {
-  if world.scenePolicy.unknownComponents is UnknownComponentPolicy.report {
+# It takes the two parts of the world it uses, not the world: its caller is
+# looping over the world's pendingComponents, which a `mod` of the whole
+# world would be free to change under the loop.
+func reportUnknownComponent(
+  policy: view ScenePolicy
+  diagnostics: mod List(SceneDiagnostic)
+  pending: view PendingComponent
+) {
+  if policy.unknownComponents is UnknownComponentPolicy.report {
     reportSceneDiagnostic(
-      diagnostics: world.sceneDiagnostics
+      diagnostics: diagnostics
       sceneId: pending.sceneId
       nodeId: pending.nodeId
       kind: SceneDiagnosticKind.unknownComponent
@@ -335,7 +342,11 @@ func uiFrameEnd(world: mod UiWorld, uiSystems: mod UiSystems) {
 # and right after a load whose verdict the caller wants immediately.
 func reportPendingComponents(world: mod UiWorld) {
   loop let pending: view PendingComponent in world.pendingComponents {
-    reportUnknownComponent(world: world, pending: pending)
+    reportUnknownComponent(
+      policy: world.scenePolicy
+      diagnostics: mod world.sceneDiagnostics
+      pending: pending
+    )
   }
   world.pendingComponents.clear()
 }

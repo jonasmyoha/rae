@@ -2991,6 +2991,17 @@ static bool sema_same_place_expr(const AstExpr* left, const AstExpr* right) {
     return false;
 }
 
+/* Is `inner` the place `outer` names, or a field reached through it
+ * (`shelf.numbers` inside `shelf`)? Handing `outer` as a whole to a `mod`
+ * parameter, or assigning it, can change everything inside it: you cannot
+ * `mod` a parent while you hold one of its members. */
+static bool sema_place_contains(const AstExpr* outer, const AstExpr* inner) {
+    for (const AstExpr* e = inner; e; e = (e->kind == AST_EXPR_MEMBER) ? e->as.member.object : NULL) {
+        if (sema_same_place_expr(outer, e)) return true;
+    }
+    return false;
+}
+
 /* The module whose functions a borrow check looks callees up in (set by the
  * two checks around their scan; NULL leaves only the spelled `mod` form). */
 static const AstModule* s_mutation_module = NULL;
@@ -3025,18 +3036,17 @@ static bool sema_call_param_is_mod(const AstExpr* call, size_t index) {
     return found;
 }
 
-/* A call argument that hands `collection` itself to the callee as `mod`:
- * spelled `mod list` (or `mod shelf.list`), or a bare `list` for a `mod`
- * parameter. The callee may grow it, so it is a change like `list.add(...)`.
- * A place that merely CONTAINS the list (`mod shelf`) is not counted yet:
- * see QUEUE.md, the containing-struct borrow question. */
+/* A call argument that hands `collection` — or a place containing it, such
+ * as the struct whose field it is — to the callee as `mod`: spelled
+ * `mod list` / `mod shelf`, or bare for a `mod` parameter. The callee may
+ * grow it, so it is a change like `list.add(...)`. */
 static bool sema_arg_lends_collection_mod(const AstExpr* call, size_t index,
                                           const AstExpr* value, const AstExpr* collection) {
     if (!value) return false;
     if (value->kind == AST_EXPR_UNARY && value->as.unary.op == AST_UNARY_MOD) {
-        return sema_same_place_expr(value->as.unary.operand, collection);
+        return sema_place_contains(value->as.unary.operand, collection);
     }
-    return call->kind == AST_EXPR_CALL && sema_same_place_expr(value, collection)
+    return call->kind == AST_EXPR_CALL && sema_place_contains(value, collection)
         && sema_call_param_is_mod(call, index);
 }
 
@@ -3099,7 +3109,7 @@ static bool sema_stmt_mutates_collection(const AstStmt* stmt,
         case AST_STMT_LET:
             return sema_expr_mutates_collection(stmt->as.let_stmt.value, collection);
         case AST_STMT_ASSIGN:
-            return sema_same_place_expr(stmt->as.assign_stmt.target, collection)
+            return sema_place_contains(stmt->as.assign_stmt.target, collection)
                 || sema_expr_mutates_collection(stmt->as.assign_stmt.value, collection);
         case AST_STMT_IF:
             if (stmt->as.if_stmt.binding

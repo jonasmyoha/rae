@@ -211,10 +211,14 @@ func spawnCrates(world: mod VehicleWorld, course: view VehicleCourse) {
 }
 
 func despawnCrates(world: mod VehicleWorld) {
-  loop let crateId: view EntityId in world.crateIds {
+  # The ids are moved out of the world first: despawnBody changes the world,
+  # so a loop cannot borrow a list inside it across the call
+  var crateIds: List(EntityId) = own world.crateIds
+  loop let crateId: view EntityId in crateIds {
     despawnBody(world: world, entityId: crateId)
   }
-  world.crateIds.clear()
+  crateIds.clear()
+  world.crateIds = own crateIds
 }
 
 # The car at its start: the chassis, the four wheels and their joints, and
@@ -299,10 +303,13 @@ func spawnVehicle(world: mod VehicleWorld, car: view VehicleDescription) {
 
 # Remove the car (its joints go with its bodies).
 func despawnVehicle(world: mod VehicleWorld) {
-  loop let wheelId: view EntityId in world.wheelIds {
+  # Moved out first, as in despawnCrates
+  var wheelIds: List(EntityId) = own world.wheelIds
+  loop let wheelId: view EntityId in wheelIds {
     despawnBody(world: world, entityId: wheelId)
   }
-  world.wheelIds.clear()
+  wheelIds.clear()
+  world.wheelIds = own wheelIds
   world.wheelJoints.clear()
   if isNone(this: world.chassisId) is false {
     despawnBody(world: world, entityId: world.chassisId)

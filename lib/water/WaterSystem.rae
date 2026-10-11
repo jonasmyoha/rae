@@ -214,12 +214,15 @@ func createWaterSystem(renderer: mod DeferredRenderer, body: view WaterBody) ret
 }
 
 # ----- submissions (gpu/GpuIds helpers over this system's own list) --------
+# Submit and track on the water system's in-flight list. It takes that list,
+# not the whole WaterSystem, so a caller may hold a reference into another
+# part of the system (a cascade's cache) across the call.
 func waterSubmit(
-  waterSystem: mod WaterSystem
+  inFlight: mod List(SubmissionId)
   resources: mod GpuResources
   recording: mod Recording
 ) ret opt SubmissionId {
-  ret trackSubmission(inFlight: waterSystem.inFlight, resources: resources, recording: recording)
+  ret trackSubmission(inFlight: inFlight, resources: resources, recording: recording)
 }
 
 func waterPollSubmissions(waterSystem: mod WaterSystem, resources: mod GpuResources) {
@@ -760,7 +763,7 @@ func drawWaterBody(
         )
       }
       if let submission: SubmissionId = waterSubmit(
-        waterSystem: waterSystem
+        inFlight: mod waterSystem.inFlight
         resources: resources
         recording: recording
       ) {

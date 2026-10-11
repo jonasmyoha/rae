@@ -1,0 +1,31 @@
+# You cannot `mod` a parent while you hold one of its members: handing a
+# struct that CONTAINS a borrowed List to a `mod` parameter (spelled or
+# bare), or assigning it, counts as changing the list, like
+# `shelf.numbers.add(...)` — the callee may grow the list under the borrow.
+type Shelf {
+  numbers: List(Int)
+  label: String
+}
+
+type Room {
+  shelf: Shelf
+}
+
+func grow(shelf: mod Shelf) {
+  shelf.numbers.add(value: 1)
+}
+
+func main() {
+  var shelf: Shelf = { numbers: List.create(Int, cap: 1), label: "a" }
+  shelf.numbers.add(value: 7)
+  if let first: view Int => shelf.numbers.viewAt(index: 0) {
+    grow(shelf: mod shelf)
+    grow(shelf: shelf)
+    shelf = { numbers: List.create(Int, cap: 1), label: "b" }
+  }
+  var room: Room = { shelf: { numbers: List.create(Int, cap: 1), label: "c" } }
+  room.shelf.numbers.add(value: 7)
+  loop let item: view Int in room.shelf.numbers {
+    grow(shelf: mod room.shelf)
+  }
+}

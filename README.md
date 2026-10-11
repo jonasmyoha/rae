@@ -342,11 +342,6 @@ collector either.
 **The honest "almost."** This is not a proof of memory safety, and Rae does not
 claim one:
 
-- Within a function the compiler stops you from changing a `List` — by its
-  own methods, or by passing it to a call as `mod` — while a `viewAt`/`modAt`
-  binding or a collection loop borrows one of its elements. It does not yet
-  follow the borrow to a struct that CONTAINS the list: passing `mod shelf`
-  while viewing an element of `shelf.numbers` is not caught.
 - `extern`/FFI and the raw `Ptr` type are unchecked, exactly as in any systems
   language — that is the escape hatch to C and the GPU.
 - Cross-thread sharing is a separate story the concurrency model is still
