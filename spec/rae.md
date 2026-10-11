@@ -525,13 +525,21 @@ A function that returns `view T` or `mod T` hands the caller a reference, so
 whatever it names **MUST** still exist after the function returns. Three
 things satisfy that, and only those three:
 
-*   a **parameter** (the caller owns that storage),
+*   a **parameter** (the caller owns that storage) — except a `view` number,
+    `Bool` or `Char`, which is passed by value: the callee holds a copy, so a
+    reference to it is an error like one to a local (declare the function
+    `ret Int` and return the value, or take the parameter as `mod`),
 *   a **global**, and
 *   anything reached through one of those — a field, an element, or a
     reference returned by another function and forwarded on.
 
 A `let`/`var` in the function's own body does not: its storage dies at `ret`.
 Returning a reference to one is an error — *reference escapes local storage*.
+
+In a function that returns a reference, a bare `ret x` (or `ret x.field`)
+means `ret view x` (`ret mod x` for a `ret mod` function): when `x` is itself
+a reference binding, that reference is handed back as it is, and the same
+rules apply to both spellings.
 
 Neither does a **temporary** — a value produced by the expression itself,
 with no storage of its own. So a reference to a value-returning call is an

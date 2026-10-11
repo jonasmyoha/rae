@@ -1,0 +1,93 @@
+# A function that returns a reference may return a reference binding by its
+# bare name: `ret x` for a `view T` parameter means `ret view x`. It used to
+# return the address of the parameter slot itself, so the caller read
+# garbage (Int 0, an empty String). Every shape: a struct (direct call, `=>`,
+# `if let`, `mod`), a List, a String, the optional forms and a forwarded
+# local reference.
+type Track {
+  value: Int
+  title: String
+}
+
+type Shelf {
+  tracks: List(Track)
+}
+
+func pick(track: view Track) ret view Track {
+  ret track
+}
+
+func pickMod(track: mod Track) ret mod Track {
+  ret track
+}
+
+func pickOptional(track: view Track, present: view Bool) ret opt view Track {
+  if present {
+    ret track
+  }
+  ret none
+}
+
+func pickOptionalMod(track: mod Track) ret opt mod Track {
+  ret track
+}
+
+func pickList(tracks: view List(Track)) ret view List(Track) {
+  ret tracks
+}
+
+func pickOptionalList(tracks: view List(Track)) ret opt view List(Track) {
+  ret tracks
+}
+
+func pickShelfList(shelf: view Shelf) ret view List(Track) {
+  ret shelf.tracks
+}
+
+func pickText(text: view String) ret view String {
+  ret text
+}
+
+func pickOptionalText(text: view String) ret opt view String {
+  ret text
+}
+
+func forward(track: view Track) ret view Track {
+  let forwarded: view Track => pick(track: track)
+  ret forwarded
+}
+
+func main() {
+  var track: Track = { value: 3, title: "Intro" }
+  log("direct {pick(track: track).value} {pick(track: track).title}")
+  let picked: view Track => pick(track: track)
+  log("bound {picked.value} {picked.title}")
+  if let present: view Track => pickOptional(track: track, present: true) {
+    log("present {present.value} {present.title}")
+  }
+  if let missing: view Track => pickOptional(track: track, present: false) {
+    log("missing {missing.value}")
+  } else {
+    log("absent")
+  }
+  let changed: mod Track => pickMod(track: mod track)
+  changed.value = 9
+  log("mod {track.value}")
+  if let changedAgain: mod Track => pickOptionalMod(track: mod track) {
+    changedAgain.value = 10
+  }
+  log("optional mod {track.value}")
+  var shelf: Shelf = { tracks: List.create(Track, cap: 2) }
+  shelf.tracks.add(value: Track { value: 5, title: "Outro" })
+  log("list {pickList(tracks: shelf.tracks).length} {pickShelfList(shelf: shelf).length}")
+  if let tracks: view List(Track) => pickOptionalList(tracks: shelf.tracks) {
+    log("optional list {tracks.length}")
+  }
+  let text: String = "hello"
+  let textView: view String => pickText(text: text)
+  log("text {textView}")
+  if let found: view String => pickOptionalText(text: text) {
+    log("optional text {found}")
+  }
+  log("forward {forward(track: track).title}")
+}
