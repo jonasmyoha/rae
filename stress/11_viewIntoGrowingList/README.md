@@ -1,7 +1,8 @@
 # 11 — View into a growing list
 
-**Verdict: `footgun`** — it compiles, and the call reads through a reference
-into storage it has just reallocated.
+**Verdict: `handles`** — the call is a compile error. (Flipped from
+`footgun`: it compiled, and the call read through a reference into storage
+it had just reallocated.)
 
 ## The foot gun
 
@@ -16,10 +17,17 @@ if let first: view Int => numbers.viewAt(index: 0) {
 
 ## What Rae does
 
-It compiles and runs; `grow` prints whatever is at the old address (often
-still 7, sometimes not). Rae already refuses `numbers.add(...)` while `first`
-is live in the same function, and a collection loop's borrow the same way,
-but a `mod` argument of a call was not counted as a change to the list.
+```
+Main.rae:20:9: cannot mutate a List while a `viewAt`/`modAt` binding aliases one of its elements
+    20 |     grow(numbers: mod numbers, item: first)
+```
+
+Passing the list as `mod` (spelled `mod numbers`, or a bare `numbers` for a
+`mod` parameter) counts as a change to it, like `numbers.add(...)`, while a
+`viewAt`/`modAt` binding or a collection loop borrows one of its elements:
+the callee may grow it. Before 0.2.4 it compiled and `grow` printed whatever
+was at the old address (often still 7, sometimes not). Pass the element by
+value, or bind it after the call.
 
 ## Elsewhere
 

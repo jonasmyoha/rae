@@ -208,8 +208,9 @@ observed failure and cross-language lifetime comparison.
 
 `11_viewIntoGrowingList` hands a `view` of a list element to a function
 together with the list as `mod`; the function grows the list, so the backing
-storage moves, then reads the view. Rae already refuses `add` on the list
-while a `viewAt`/`modAt` binding or a collection loop borrows it, but did not
-count a `mod` argument of a call as a change. On the **footgun** shelf it
-asserts that the program compiles and prints an `item` line (whatever the
-old address holds).
+storage moves, then reads the view. It is on the **handles** shelf since
+0.2.4: a call argument that passes the borrowed list as `mod` (spelled, or
+bare for a `mod` parameter) counts as a change to it, the same compile error
+as `numbers.add(...)` while a `viewAt`/`modAt` binding or a collection loop
+borrows an element. Its footgun expectation (it compiled and printed an
+`item` line) was committed first and verified before the flip.

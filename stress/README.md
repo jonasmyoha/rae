@@ -93,5 +93,5 @@ source before releasing the previous destination. It prints `value2` after
 all loop-local sources have left scope (`handles`).
 
 Case `11_viewIntoGrowingList` passes a list as `mod` together with a view of
-one of its elements into a call that grows the list (`footgun`: it compiles,
-and the call reads through a dangling reference).
+one of its elements into a call that grows the list (`handles` since 0.2.4:
+a compile error; it used to read through a dangling reference).
