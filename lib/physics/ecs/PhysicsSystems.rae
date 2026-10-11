@@ -188,11 +188,11 @@ func physicsEventSystem(physics: mod Physics) {
   # index does not name (getContactEvents)
   if physics.world.endEventArrayIndex is 1 {
     loop let event: view ContactEndTouchEvent in physics.world.contactEndEvents0 {
-      sendContactEnded(physics: physics, event: event)
+      sendContactEnded(contactEnded: mod physics.contactEnded, physics: physics, event: event)
     }
   } else {
     loop let event: view ContactEndTouchEvent in physics.world.contactEndEvents1 {
-      sendContactEnded(physics: physics, event: event)
+      sendContactEnded(contactEnded: mod physics.contactEnded, physics: physics, event: event)
     }
   }
   loop let event: view ContactHitEvent in physics.world.contactHitEvents {
@@ -224,18 +224,24 @@ func physicsEventSystem(physics: mod Physics) {
   }
   if physics.world.endEventArrayIndex is 1 {
     loop let event: view SensorEndTouchEvent in physics.world.sensorEndEvents0 {
-      sendSensorEnded(physics: physics, event: event)
+      sendSensorEnded(sensorEnded: mod physics.sensorEnded, physics: physics, event: event)
     }
   } else {
     loop let event: view SensorEndTouchEvent in physics.world.sensorEndEvents1 {
-      sendSensorEnded(physics: physics, event: event)
+      sendSensorEnded(sensorEnded: mod physics.sensorEnded, physics: physics, event: event)
     }
   }
 }
 
-func sendContactEnded(physics: mod Physics, event: view ContactEndTouchEvent) {
+# It changes only the queue it sends to: its caller is looping over one of
+# the world's end-event lists, which a `mod` of the whole Physics could change.
+func sendContactEnded(
+  contactEnded: mod EventQueue(PhysicsContactEvent)
+  physics: view Physics
+  event: view ContactEndTouchEvent
+) {
   eventSend(
-    this: physics.contactEnded
+    this: contactEnded
     value: PhysicsContactEvent {
       entityIdA: entityOfShape(physics: physics, shapeId: event.shapeIdA)
       entityIdB: entityOfShape(physics: physics, shapeId: event.shapeIdB)
@@ -245,9 +251,14 @@ func sendContactEnded(physics: mod Physics, event: view ContactEndTouchEvent) {
   )
 }
 
-func sendSensorEnded(physics: mod Physics, event: view SensorEndTouchEvent) {
+# Like sendContactEnded, it changes only the queue it sends to
+func sendSensorEnded(
+  sensorEnded: mod EventQueue(PhysicsSensorEvent)
+  physics: view Physics
+  event: view SensorEndTouchEvent
+) {
   eventSend(
-    this: physics.sensorEnded
+    this: sensorEnded
     value: PhysicsSensorEvent {
       sensorEntityId: entityOfShape(physics: physics, shapeId: event.sensorShapeId)
       visitorEntityId: entityOfShape(physics: physics, shapeId: event.visitorShapeId)

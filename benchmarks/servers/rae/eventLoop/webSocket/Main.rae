@@ -603,7 +603,9 @@ func main() ret Int {
       log("stats worker=0 requests={worker.messages} allocations={Sys.allocationCount()}")
     }
     loop var i: Int = 0, i < worker.ready.length, ++i {
-      if let readiness: view Readiness => worker.ready.viewAt(index: i) {
+      # A copy (a socket id and flags): handleReady changes the worker, so it
+      # cannot be handed a view into the worker's own ready list
+      if let readiness: Readiness = worker.ready.copyAt(index: i) {
         handleReady(worker: worker, readiness: readiness)
       }
     }

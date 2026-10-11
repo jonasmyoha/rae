@@ -1,0 +1,36 @@
+# What the parent rule still allows: while a member list is borrowed, a call
+# may take a DIFFERENT member as `mod` (the narrowest part it changes), and
+# a list moved out of its struct may be looped while the struct is passed on
+# (moved back after). lib/ui Registry, lib/water and the vehicle spawns use
+# these two shapes.
+type Shelf {
+  numbers: List(Int)
+  log: List(String)
+}
+
+func note(log: mod List(String), shelf: view Shelf, item: view Int) {
+  log.add(value: "item {item} of {shelf.numbers.length}")
+}
+
+func clearOne(shelf: mod Shelf, item: view Int) {
+  shelf.log.add(value: "cleared {item}")
+}
+
+func main() {
+  var shelf: Shelf = { numbers: List.create(Int, cap: 2), log: List.create(String, cap: 2) }
+  shelf.numbers.add(value: 7)
+  shelf.numbers.add(value: 8)
+  loop let item: view Int in shelf.numbers {
+    note(log: mod shelf.log, shelf: shelf, item: item)
+  }
+  var numbers: List(Int) = own shelf.numbers
+  loop let item: view Int in numbers {
+    clearOne(shelf: mod shelf, item: item)
+  }
+  numbers.clear()
+  shelf.numbers = own numbers
+  loop let line: view String in shelf.log {
+    log(line)
+  }
+  log("numbers {shelf.numbers.length}")
+}

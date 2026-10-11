@@ -104,7 +104,11 @@ func main() {
 
   # What no system claimed is reported — under `report`, a diagnostic.
   loop let pending: view PendingComponent in kept {
-    reportUnknownComponent(world: world, pending: pending)
+    reportUnknownComponent(
+      policy: world.scenePolicy
+      diagnostics: mod world.sceneDiagnostics
+      pending: pending
+    )
   }
   world.pendingComponents.clear()
   log("diagnostics after report: {world.sceneDiagnostics.length}")

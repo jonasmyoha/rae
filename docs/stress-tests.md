@@ -214,3 +214,14 @@ bare for a `mod` parameter) counts as a change to it, the same compile error
 as `numbers.add(...)` while a `viewAt`/`modAt` binding or a collection loop
 borrows an element. Its footgun expectation (it compiled and printed an
 `item` line) was committed first and verified before the flip.
+
+## Mod the parent of a borrowed list (case 12)
+
+`12_modParentOfBorrowedList` holds a view into `shelf.numbers` and hands the
+whole `shelf` to a function as `mod`; the function grows the list. It is on
+the **handles** shelf since 0.2.5: you cannot `mod` a parent while you hold
+one of its members, so passing (or assigning) a place that contains the
+borrowed list counts as changing it. Before the fix it compiled and printed
+5196 where the list held 7. The rule moved the lib sites it caught to the narrowest
+parameter (a callee takes the field it changes, not the whole struct) or to
+moving a list out of its struct for the loop.
