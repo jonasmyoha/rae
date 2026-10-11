@@ -3930,11 +3930,17 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     // narrowing (#662): the pointer may be null (none) — no
                     // trap, as Rae has none.
                     bool src_raw_ptr = ref_bind_value_returns_opt_ref(ctx, ret_val);
-                    fprintf(out, "("); emit_type_ref_as_c_type(ctx, ret_type, out, false);
-                    fprintf(out, "){ .ptr = ");
+                    /* The reference is the return variable's own C type:
+                     * a rae_View_* / rae_Mod_* wrapper (spelled through
+                     * __typeof__, since the declared type is what
+                     * c_return_type names — `view Char` returns a
+                     * rae_View_Char32), or for a fixed-width integer
+                     * (UInt64, Int32, ...) a plain pointer. */
+                    bool wrapper = c_primitive_ref_has_wrapper(get_base_type_name(ret_type));
+                    if (wrapper) fprintf(out, "(__typeof__(__ret_val)){ .ptr = ");
                     if (!src_raw_ptr) fprintf(out, "&");
-                    emit_expr(ctx, ret_val, out, PREC_LOWEST, true, true);
-                    fprintf(out, " }");
+                    emit_expr(ctx, ret_val, out, wrapper ? PREC_LOWEST : PREC_UNARY, true, true);
+                    if (wrapper) fprintf(out, " }");
                 } else if (is_ref_return) {
                     /* Taking the address of a Rae function's result is
                      * wrong in both directions, and which way depends on

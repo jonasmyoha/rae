@@ -1,0 +1,104 @@
+# A call that returns a `view` / `mod` reference to a number, Bool, Char,
+# String, enum or struct formats as the value it points at, in an
+# interpolation, `.toString()` and String `+`; binding it first was the only
+# way that built. A `ret view` / `ret mod` of a Char or fixed-width integer
+# field builds too (it named the wrong wrapper / built one for a plain
+# pointer).
+enum Mood { calm, loud }
+
+type Track {
+  plays: Int
+  rating: Float
+  liked: Bool
+  initial: Char
+  bytes: UInt64
+  small: Int32
+  title: String
+  mood: Mood
+}
+
+type Shelf {
+  first: Track
+}
+
+func playsOf(track: view Track) ret view Int {
+  ret track.plays
+}
+
+func ratingOf(track: view Track) ret view Float {
+  ret track.rating
+}
+
+func likedOf(track: view Track) ret view Bool {
+  ret track.liked
+}
+
+func initialOf(track: view Track) ret view Char {
+  ret track.initial
+}
+
+func bytesOf(track: view Track) ret view UInt64 {
+  ret track.bytes
+}
+
+func smallOf(track: mod Track) ret mod Int32 {
+  ret track.small
+}
+
+func titleOf(track: view Track) ret view String {
+  ret track.title
+}
+
+func moodOf(track: view Track) ret view Mood {
+  ret track.mood
+}
+
+func firstOf(shelf: view Shelf) ret view Track {
+  ret shelf.first
+}
+
+func playsMod(track: mod Track) ret mod Int {
+  ret track.plays
+}
+
+func titleIfLiked(track: view Track) ret opt view String {
+  if track.liked {
+    ret track.title
+  }
+  ret none
+}
+
+func main() {
+  var track: Track = {
+    plays: 3
+    rating: 4.5
+    liked: true
+    initial: 'I'
+    bytes: 1024
+    small: 7
+    title: "Intro"
+    mood: Mood.loud
+  }
+  log(
+    "{playsOf(track: track)} {ratingOf(track: track)} {likedOf(track: track)} {initialOf(
+      track: track
+    )}"
+  )
+  log("{bytesOf(track: track)} {titleOf(track: track)} {moodOf(track: track)}")
+  log("method {track.titleOf()} {track.playsOf()}")
+  log("toString {titleOf(track: track).toString()} {playsOf(track: track).toString()}")
+  log("mod {playsMod(track: mod track)}")
+  let small: mod Int32 => smallOf(track: mod track)
+  small = 9
+  log("int32 {track.small} {smallOf(track: mod track)}")
+  let initial: view Char => initialOf(track: track)
+  log("bound char {initial}")
+  let shelf: Shelf = { first: track }
+  log("struct {firstOf(shelf: shelf)}")
+  if let title: view String => titleIfLiked(track: track) {
+    log("if let {title} {title.length()}")
+  }
+  let text: String = "concat " + titleOf(track: track)
+  let twice: String = titleOf(track: track) + titleOf(track: track) + "!"
+  log("{text} {twice}")
+}

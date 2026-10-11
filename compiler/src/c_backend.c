@@ -1070,7 +1070,10 @@ const char* c_return_type(CFuncContext* ctx, const AstFuncDecl* func) {
         if (str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float32")) return is_ptr ? (is_mod ? "rae_Mod_Float" : "rae_View_Float") : "float";
         if (str_eq_cstr(base, "Float64")) return is_ptr ? (is_mod ? "rae_Mod_Float64" : "rae_View_Float64") : "double";
         if (str_eq_cstr(base, "Bool")) return is_ptr ? (is_mod ? "rae_Mod_Bool" : "rae_View_Bool") : "rae_Bool";
-        if (str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32")) return is_ptr ? (is_mod ? "rae_Mod_Char32" : "rae_View_Char32") : "uint32_t";
+        // The same names emit_type_ref_as_c_type gives a binding of the type,
+        // so a `view Char` result initialises a `view Char` local
+        if (str_eq_cstr(base, "Char")) return is_ptr ? (is_mod ? "rae_Mod_Char" : "rae_View_Char") : "uint32_t";
+        if (str_eq_cstr(base, "Char32")) return is_ptr ? (is_mod ? "rae_Mod_Char32" : "rae_View_Char32") : "uint32_t";
         if (str_eq_cstr(base, "String")) return is_ptr ? (is_mod ? "rae_Mod_String" : "rae_View_String") : "rae_String";
     }
     // Buffer(T) is a raw pointer (no wrapper struct), like rae_ext_rae_buf_alloc's
