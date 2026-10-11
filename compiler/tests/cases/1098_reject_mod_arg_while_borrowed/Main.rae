@@ -1,0 +1,33 @@
+# Passing a List to a call as `mod` while a `viewAt`/`modAt` binding or a
+# collection loop borrows one of its elements is a change to it, like
+# `numbers.add(...)`: the callee may grow the list and leave the borrow
+# dangling. Spelled (`mod numbers`) or bare for a `mod` parameter, the
+# borrowed element passed along or not, a field list too.
+type Shelf {
+  numbers: List(Int)
+}
+
+func grow(numbers: mod List(Int), item: view Int) {
+  numbers.add(value: item)
+}
+
+func growAll(numbers: mod List(Int)) {
+  numbers.add(value: 1)
+}
+
+func main() {
+  var numbers: List(Int) = List.create(Int, cap: 1)
+  numbers.add(value: 7)
+  if let first: view Int => numbers.viewAt(index: 0) {
+    grow(numbers: mod numbers, item: first)
+    grow(numbers: numbers, item: first)
+  }
+  loop let item: view Int in numbers {
+    growAll(numbers: mod numbers)
+  }
+  var shelf: Shelf = { numbers: List.create(Int, cap: 1) }
+  shelf.numbers.add(value: 7)
+  if let changed: mod Int => shelf.numbers.modAt(index: 0) {
+    growAll(numbers: mod shelf.numbers)
+  }
+}
