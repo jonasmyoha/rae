@@ -91,3 +91,7 @@ stress: {
 Case `10_stringAssignAlias` verifies that String reassignment copies a stored
 source before releasing the previous destination. It prints `value2` after
 all loop-local sources have left scope (`handles`).
+
+Case `11_viewIntoGrowingList` passes a list as `mod` together with a view of
+one of its elements into a call that grows the list (`footgun`: it compiles,
+and the call reads through a dangling reference).

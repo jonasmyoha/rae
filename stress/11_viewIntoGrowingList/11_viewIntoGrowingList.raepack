@@ -1,0 +1,37 @@
+pack ViewIntoGrowingList {
+  format: "raepack"
+  version: 1
+  defaultTarget: compiled
+  name: "View into a growing list"
+  description: "A view of a list element passed to a call together with the list as mod; the call grows the list and reads the view."
+  category: "Stress"
+  targets: {
+    target compiled: {
+      label: "Compiled"
+      entry: "Main.rae"
+      sources: {
+        source: {
+          path: "."
+          emit: compiled
+        }
+      }
+    }
+  }
+  stress: {
+    verdict: "footgun"
+    expect: {
+      outcome: "run"
+      exitCode: 0
+      stdoutMatches: "^item -?[0-9]+\nlength 65$"
+    }
+    elsewhere: {
+      python: "runs; ints are values, the call reads the number it was given"
+      javascript: "runs; numbers are values, nothing dangles"
+      java: "runs; the Integer is a value object the list does not own"
+      go: "runs; a pointer into the old backing array keeps that array alive"
+      rust: "compile error: cannot borrow `numbers` as mutable because it is also borrowed as immutable"
+      c: "undefined behaviour: the pointer into the realloc'd array dangles"
+    }
+    fixedBy: ""
+  }
+}

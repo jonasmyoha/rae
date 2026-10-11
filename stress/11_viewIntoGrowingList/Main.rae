@@ -1,0 +1,23 @@
+# Foot gun: a view of a list element handed to a function together with the
+# list itself, which the function grows.
+#
+# `first` points into `numbers`' storage. `grow` adds enough elements that
+# the list reallocates, then reads `item`: the memory `first` pointed at may
+# have been freed. Rae refuses `numbers.add(...)` while `first` is live in
+# the same function; the question is whether it sees the same change made
+# through a `mod` argument of a call.
+func grow(numbers: mod List(Int), item: view Int) {
+  loop var i: Int = 0, i < 64, ++i {
+    numbers.add(value: i)
+  }
+  log("item {item}")
+}
+
+func main() {
+  var numbers: List(Int) = List.create(Int, cap: 1)
+  numbers.add(value: 7)
+  if let first: view Int => numbers.viewAt(index: 0) {
+    grow(numbers: mod numbers, item: first)
+  }
+  log("length {numbers.length}")
+}
