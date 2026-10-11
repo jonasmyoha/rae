@@ -92,6 +92,33 @@ static bool arg_is_addressable_lvalue(CFuncContext* ctx, const AstExpr* e) {
     }
 }
 
+/* The variable a call-site `mod` argument names, when it names one: `x`,
+ * `mod x`, `x.field` or `mod x.field`, rooted at a variable. A number or
+ * String passed this way to a `mod` parameter gets the place's own address,
+ * so the callee's writes land in it and a `ret mod` result may point at it.
+ * `*is_reference` is set when the place is itself a `view`/`mod` binding
+ * spelled `mod x`: that is passed on as the reference it already is (the
+ * bare `x` takes the existing pass-through path, so it is not a place
+ * here). NULL for anything else. */
+static const AstExpr* c_mod_arg_place(CFuncContext* ctx, const AstExpr* value, bool* is_reference) {
+    *is_reference = false;
+    bool spelled = false;
+    if (value && value->kind == AST_EXPR_UNARY
+        && (value->as.unary.op == AST_UNARY_VIEW || value->as.unary.op == AST_UNARY_MOD)) {
+        value = value->as.unary.operand;
+        spelled = true;
+    }
+    const AstExpr* root = value;
+    while (root && root->kind == AST_EXPR_MEMBER) root = root->as.member.object;
+    if (!root || root->kind != AST_EXPR_IDENT || !arg_is_addressable_lvalue(ctx, value)) return NULL;
+    const AstTypeRef* root_type = get_local_type_ref(ctx, root->as.ident);
+    if (root_type && (root_type->is_view || root_type->is_mod) && root == value) {
+        if (!spelled) return NULL;
+        *is_reference = true;
+    }
+    return value;
+}
+
 bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     // #960: `enumFromName(E, name: s)` -> the `opt E` whose member is spelled
     // `s`. One statement-expression: look the name up through the enum's
@@ -890,10 +917,32 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                         // `view T`(=String) arg is scheduled for the ref-wrapper
                         // path (rae_View_String), not the raw &(T){...} address-of
                         // that only fits a struct pointer.
+                        /* A `mod` number or String naming a variable or field
+                         * (with or without the call-site `mod`) is passed as
+                         * that place's address below, never through a hoisted
+                         * copy: a copy lost the callee's writes when the
+                         * keyword was spelled, and a `ret mod` result pointed
+                         * at the dead copy. */
+                        bool place_is_reference = false;
+                        const AstExpr* place = (sp->type->is_mod
+                                                && (is_num_prim || str_eq_cstr(pbase_concrete, "String")))
+                            ? c_mod_arg_place(ctx, sa->value, &place_is_reference) : NULL;
+                        bool mod_place = place != NULL;
+                        if (mod_place && str_eq_cstr(pbase_concrete, "String")
+                            && !string_place && !place_is_reference) {
+                            if (place->kind == AST_EXPR_IDENT) {
+                                for (int li = (int)ctx->local_count - 1; li >= 0; --li) {
+                                    if (str_eq(ctx->locals[li], place->as.ident)) {
+                                        ctx->local_struct_owns_heap[li] = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
                         if (is_primitive_type(pbase_concrete)
                             && !str_eq_cstr(pbase_concrete, "Buffer")
                             && !str_eq_cstr(pbase_concrete, "Any")
-                            && !view_is_value && !string_place) {
+                            && !view_is_value && !string_place && !mod_place) {
                             int slot = wrap_count++;
                             wrap_idx[ai] = slot;
                             if (str_eq_cstr(pbase_concrete, "String") && sa->value
@@ -1129,7 +1178,37 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 && a->value->kind == AST_EXPR_IDENT && get_local_type_ref(ctx, a->value->as.ident)
                 && !(infer_expr_type_ref(ctx, a->value) && (infer_expr_type_ref(ctx, a->value)->is_view
                                                           || infer_expr_type_ref(ctx, a->value)->is_mod));
-            if (use_string_view_slot) {
+            /* The `mod` place argument of the hoisting pass above */
+            const AstExpr* mod_place = NULL;
+            bool mod_place_is_reference = false;
+            if (wrap_pt && wrap_pt->is_mod && a->value
+                && !(infer_expr_type_ref(ctx, a->value)
+                     && (infer_expr_type_ref(ctx, a->value)->is_view
+                         || infer_expr_type_ref(ctx, a->value)->is_mod))) {
+                Str place_base = get_base_type_name(wrap_pt);
+                if (is_scalar_primitive_type(place_base) || str_eq_cstr(place_base, "String")) {
+                    mod_place = c_mod_arg_place(ctx, a->value, &mod_place_is_reference);
+                }
+            }
+            if (mod_place && mod_place_is_reference) {
+                // `mod x` of a reference binding: hand the reference on
+                emit_expr(ctx, mod_place, out, PREC_LOWEST, false, true);
+                needs_prim_wrap = false;
+            } else if (mod_place) {
+                if (c_primitive_ref_has_wrapper(get_base_type_name(wrap_pt))) {
+                    fprintf(out, "(");
+                    emit_type_ref_as_c_type(ctx, wrap_pt, out, false);
+                    fprintf(out, "){ .ptr = &(");
+                    emit_expr(ctx, mod_place, out, PREC_LOWEST, false, false);
+                    fprintf(out, ") }");
+                } else {
+                    // A fixed-width integer reference is a plain pointer.
+                    fprintf(out, "&(");
+                    emit_expr(ctx, mod_place, out, PREC_LOWEST, false, false);
+                    fprintf(out, ")");
+                }
+                needs_prim_wrap = false;
+            } else if (use_string_view_slot) {
                 fprintf(out, "(rae_View_String){ .ptr = &(");
                 emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
                 fprintf(out, ") }");
@@ -1431,10 +1510,10 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                     a->value->kind == AST_EXPR_INTERP ||
                     a->value->kind == AST_EXPR_OBJECT ||
                     member_of_rvalue_call);
-            if (use_hoisted_temp || use_string_place || use_string_view_slot) {
+            if (use_hoisted_temp || use_string_place || use_string_view_slot || mod_place) {
                 /* The wrapper was emitted above, pointing either to its
-                 * hoisted view temporary, the mutable caller slot or a twin's
-                 * frame slot. Skip
+                 * hoisted view temporary, the mutable caller slot (a `mod`
+                 * String or number place) or a twin's frame slot. Skip
                  * the rvalue-temp / addr / deref / box / emit_expr
                  * branches below. */
             } else if (needs_rvalue_temp) {
