@@ -176,8 +176,8 @@ implementations in these languages", not "Rae is faster than Rust".
     "idiomatic, the language's normal way, not micro-tuned"
     (docs/server-benchmarks-design.md §4). On 2026-10-11 they were
     replaced by **tuned** versions, to see how much of Rae's lead was
-    effort (the idiomatic ones are in the git history, results of
-    2026-10-08 and 2026-10-11 before this note):
+    effort (the idiomatic versions and their numbers are in git history;
+    the results below are the tuned ones):
     - **Rust WebSocket and game room:** the idiomatic versions gave each
       connection an unbounded channel and a writer task
       (tokio-tungstenite), and the game room used tokio's millisecond
@@ -246,127 +246,130 @@ a Linux container: see the queued Linux task). There Rae would be measured
 on independent hardware against entries tuned by their own communities,
 which is the comparison these numbers cannot give.
 
-### Baseline, 2026-10-08
+### Baseline with the tuned references, 2026-10-11
 
-Apple M1 Max (8 performance cores), macOS, the Rae of this commit. metadata.json
-says 0.1.222-dev+dirty because the build came before the bump to 0.1.223.
+Apple M1 Max (8 performance cores), macOS 27, rae 0.1.268 (commit 68132e3b),
+rustc 1.93.1, Node 26.5.1 with uWebSockets.js 20.71.0, Bun 1.3.5. One run of
+every phase, the servers interleaved as always.
+
+**The machine was not idle.** The load average was 5.3 at the start (and
+about 11 at the end, the run's own load included), above run.sh's gate of
+3.0, which was overridden (`BENCH_ALLOW_LOAD=1`): the desktop apps running
+would not let it drop. Every server ran under the same load, so the
+comparison holds, but absolute numbers may sit a few percent low. The
+idiomatic references' numbers (2026-10-08 HTTP, 2026-10-09 game room,
+2026-10-11 WebSocket, all on an idle machine) are in git history.
+
+**The short version: Rae is in the same range as tuned Rust, Node and Bun.**
+It leads single-core HTTP throughput by about 10%, ties on WebSocket fan-out,
+and keeps game-room ticks on time; tuned Rust has the best HTTP p99, the
+shortest game-room tick and the least memory.
+
+#### HTTP
+
 Medians of 5 × 15 s runs at 256 connections, in requests/s, with p99 latency
 in ms where measured:
 
-| case | rae-eventLoop | rae-ecs | rust (hyper) | node | bun |
+| case | rae-eventLoop | rae-ecs | rust (hyper) | node (uWS.js) | bun |
 |---|---|---|---|---|---|
-| 1 worker, plaintext | 133 762 (3.70) | 137 801 (3.00) | 123 805 (2.77) | 46 504 (9.27) | 93 978 (4.47) |
-| 1 worker, json | 128 422 (3.47) | 133 424 (2.91) | 122 297 (2.44) | 45 573 (6.58) | 89 908 (3.83) |
-| 1 worker, pipelined ×16 | 1 226 861 | 1 244 420 | 1 073 868 | 80 297 * | 18 024 * |
-| 8 workers, plaintext | 151 062 (2.23) | 152 896 (2.19) | 154 040 (2.47) | 154 990 (5.53) | 87 295 (3.45) |
-| 8 workers, json | 150 858 (2.36) | 151 626 (2.32) | 153 710 (2.61) | 152 625 (7.37) | 86 200 (3.73) |
-| 8 workers, pipelined ×16 | 1 860 308 | 1 898 463 | 1 741 135 | 259 204 * | 15 314 * |
+| 1 worker, plaintext | 129 202 (3.32) | 135 932 (3.69) | 121 893 (2.35) | 117 162 (3.30) | 99 063 (3.02) |
+| 1 worker, json | 128 655 (3.30) | 134 519 (3.71) | 121 335 (2.35) | 116 001 (2.71) | 96 999 (3.04) |
+| 1 worker, pipelined ×16 | 1 395 001 | 1 384 049 | 1 169 410 | 756 015 | 19 833 * |
+| 8 workers, plaintext | 156 914 (4.63) | 153 129 (1.93) | 157 832 (2.06) | 149 389 (2.09) | 102 838 (3.02) |
+| 8 workers, json | 147 765 (5.49) | 146 746 (2.12) | 150 239 (2.35) | 143 917 (2.45) | 98 119 (3.74) |
+| 8 workers, pipelined ×16 | 2 247 832 | 2 400 198 | 2 348 722 | 2 153 392 | 17 153 * |
 
 How to read it:
 
-- **ECS against the event loop: 1.01–1.04×** in requests/s, and inside the
-  run-to-run spread in five of the six cases. In the sixth (1 worker, json),
-  ECS is 4% faster.
-  - ECS uses 1.3–1.5× the RSS (about 15–24 MB against 12–17 MB) for its
-    component tables.
-- **Allocations per request:** 0 for plaintext and pipelined, 2 for json in
-  both styles: the per-request `toJson` serialisation (G7 measures that cost).
-- **Source size (code lines):** the ECS server is 82, because its machinery is
-  `lib/net/ecs`. The event-loop server is 285, because it carries its own
-  loop. Rust is 63, Node 30, Bun 40.
-- **8 workers:** every implementation except Bun stops near 150k requests/s.
-  That is the 4-thread load generator on the same machine, not the servers.
-  Per-core numbers there need a second machine.
-- **\* marks the pipelining errors:**
-  - Node answers pipelined requests with many errors (190 859 at 1 worker).
-  - Bun answers 16-deep pipelining very slowly on macOS (about 18k
-    requests/s, with some errors).
-  - Both are recorded as measured.
+- **1 worker:** Rae 1.06–1.12× tuned Rust, 1.10–1.16× Node on
+  uWebSockets.js, 1.3–1.4× Bun. Rust's p99 is the lowest (2.35 ms against
+  Rae's 3.3–3.7 ms). Pipelined, Rae is 1.2× Rust and 1.8× Node.
+- **Node moved most with tuning:** uWebSockets.js in place of `node:http`
+  took it from 46k to 117k requests/s on one worker, and pipelined from 80k
+  (with errors) to 756k (no errors).
+- **8 workers:** everyone but Bun lands at 144k–158k requests/s plain and
+  2.2M–2.4M pipelined, the ceiling of the 4-thread load generator on the same
+  machine, not of the servers. rae-eventLoop's 8-worker p99 (4.6–5.5 ms) is
+  the one clear tail-latency outlier; rae-ecs does not have it.
+- **ECS against the event loop:** 0.98–1.07× in requests/s, as before.
+- **\* Bun** answers 16-deep pipelining very slowly on macOS (about 18k
+  requests/s), as in every earlier run; Bun's multi-process `reusePort` does
+  not spread connections on macOS, so its 8-worker numbers are one process.
+- No errors in any case this time.
+- Source size (code lines): rae-eventLoop 285, rae-ecs 82, Rust 65, Node 46,
+  Bun 37.
 
-### WebSocket baseline, 2026-10-11
+#### WebSocket
 
-Same machine, one worker each, 3 ramps per server, load average 2.88 at the
-start (run.sh's gate is 3.0), rae 0.1.268. Broadcast round trip in ms,
-p50 / p99 (median of the ramps that got there), and the client count each
-ramp reached with p99 under 250 ms (cap 15 000):
+One worker each, 3 ramps per server. Broadcast round trip in ms, p50 / p99
+(median of the ramps), and the client count each ramp reached with p99
+under 250 ms (cap 15 000):
 
-| clients | rae-eventLoop | rae-ecs | rust | node | bun |
+| clients | rae-eventLoop | rae-ecs | rust (tuned) | node (uWS.js) | bun |
 |---|---|---|---|---|---|
-| 1 000 | 4.3 / 15.5 | 4.3 / 14.2 | 13.3 / 25.9 | 15.9 / 36.4 | 4.5 / 17.6 |
-| 5 000 | 20.5 / 23.2 | 20.6 / 22.9 | 69.7 / 132.6 | 81.5 / 186.2 | 22.7 / 25.1 |
-| 10 000 | 41.4 / 44.1 | 41.3 / 45.2 | 140.0 / 237.8 (2 ramps) | — | 46.2 / 49.1 |
-| 15 000 | 63.4 / 69.8 (2 ramps) | 62.7 / 65.5 | — | — | 69.4 / 72.9 |
-| reached | 15 000 (13 000–15 000) | 15 000 (all 3) | 9 000 (8 000–10 000) | 6 000 | 15 000 (14 000–15 000) |
-| peak RSS | 336 MB | 275 MB | 1 494 MB | 158 MB | 47 MB |
-| allocations / message | 101 | 171 | — | — | — |
+| 1 000 | 4.5 / 14.9 | 4.6 / 13.8 | 5.3 / 16.0 | 4.9 / 15.1 | 4.8 / 15.1 |
+| 5 000 | 21.8 / 23.4 | 21.8 / 23.9 | 23.2 / 24.4 | 22.9 / 26.0 | 23.9 / 26.5 |
+| 10 000 | 43.5 / 45.5 | 44.6 / 47.4 | 45.2 / 50.1 | 46.1 / 49.7 | 48.3 / 50.4 |
+| 15 000 | 66.6 / 72.4 | 67.3 / 70.0 | 70.0 / 77.2 | 73.7 / 182.1 (2 ramps) | 72.7 / 236.9 (2 ramps) |
+| reached | 15 000 (14 000–15 000) | 15 000 (all 3) | 15 000 (14 000–15 000) | 14 000 (13 000–15 000) | 14 000 (13 000–15 000) |
+| peak RSS | 336 MB | 273 MB | 318 MB | 64 MB | 46 MB |
 
 How to read it:
 
-- **ECS against the event loop: no measurable difference** at any step
-  (p50 ratio 0.99–1.04). The round trip grows linearly with the fan-out,
-  about 4.1 ms per 1 000 clients, for both, and both now reach the 15 000
-  cap with p99 under 70 ms.
-- **The ECS write order matters.** The first 2026-10-09 baseline had ECS at
-  2× the event loop. The cause was `writeSystem` writing the `Sending`
-  connections newest-first, so the senders' broadcastResults went out after
-  every other client's copy. It writes oldest-first since 0.1.250, like the
-  event loop's slot order.
-- **Near the cap single broadcasts can stall** for hundreds of ms. One
-  rae-eventLoop ramp stopped at 13 000 (p99 707 ms at 14 000) and one Bun
-  ramp at 14 000 (p99 928 ms at 15 000). Read "reached" above 13 000 as the
-  edge of this machine (the load client shares its cores), not a ranking.
-- **Rust's RSS** is its unbounded per-connection channels holding the
-  broadcast backlog.
-- **Allocations per message** include every client's connection setup in
-  the ramp, so they are not a per-message cost.
-- **Every listenCount was right** in this run (the 2026-10-09 run had 7
-  wrong Bun counts at 1 000 clients).
+- **All five are within about 10% of each other** up to 10 000 clients:
+  each broadcast costs 4.3–4.8 ms per 1 000 clients. Rae is a few percent
+  ahead; the idiomatic Rust (70 ms at 5 000, 1.5 GB) and `ws` Node (82 ms)
+  were 3–4× behind, and that gap was all in how they were written.
+- **What closed it for Rust** was corking: queueing a broadcast's frame on
+  every connection and writing each one once per batch of ready tasks (as
+  uWebSockets and Rae do), instead of one channel message, task wake-up and
+  write per client per broadcast.
+- **Near the cap single broadcasts stall** for hundreds of ms on every
+  server (p99 max 270–430 ms at 14 000–15 000); "reached" above 13 000 is
+  the edge of this machine, whose cores the load client shares.
+- **Memory:** Bun and Node (uWebSockets underneath) use 4–7× less than Rae
+  and Rust at 15 000 clients.
+- Node and Bun each had 7–8 wrong listenCounts at the 1 000-client step
+  (clients counted while their connection was still being set up); none
+  later, and none for Rae or Rust.
 
-The previous baseline (2026-10-09, load 2.75, rae 0.1.250) gave the same
-picture within a few percent; it is in git history.
+#### Game room
 
-### Game room baseline, 2026-10-09
+One worker each, 3 runs of 10 s per room size. Medians of the runs; each cell
+is p50 / p99 in ms:
 
-Same session, one worker each, 3 runs of 10 s per room size. Medians of the
-runs; each cell is p50 / p99 in ms:
-
-| players | metric | rae-eventLoop | rae-ecs | rust | node | bun |
+| players | metric | rae-eventLoop | rae-ecs | rust (tuned) | node (uWS.js) | bun |
 |---|---|---|---|---|---|---|
-| 100 | tick lateness | 0.43 / 0.64 | 0.37 / 0.63 | 1.13 / 2.04 | 0.70 / 1.36 | 0.61 / 1.21 |
-| | tick duration | 0.03 / 0.05 | 0.03 / 0.07 | 0.02 / 0.04 | 0.48 / 0.72 | 0.41 / 0.51 |
-| | arrival jitter | 0.15 / 0.63 | 0.21 / 0.65 | 0.43 / 1.60 | 0.55 / 1.28 | 0.43 / 0.93 |
-| 1 000 | tick lateness | 0.50 / 0.66 | 0.47 / 0.65 | 1.02 / 2.03 | 0.79 / 1.68 | 0.67 / 1.22 |
-| | tick duration | 0.68 / 0.85 | 0.68 / 0.85 | 0.13 / 0.23 | 6.21 / 7.58 | 5.59 / 7.05 |
-| | arrival jitter | 0.46 / 3.24 | 0.37 / 3.79 | 0.58 / 2.15 | 0.60 / 3.30 | 0.65 / 4.03 |
-| 2 000 | tick lateness | 0.48 / 0.65 | 0.46 / 0.66 | 19.2 / 36.7 | 0.61 / 5.04 | 0.65 / 1.23 |
-| | tick duration | 1.23 / 1.55 | 1.21 / 1.46 | 0.23 / 0.35 | 18.1 / 21.2 | 16.3 / 19.3 |
-| | arrival jitter | 0.34 / 4.45 | 0.34 / 3.54 | 3.09 / 20.8 | 0.65 / 4.66 | 0.49 / 2.89 |
-| | missed ticks | 0 | 0 | 25 | 0 | 0 |
-| | peak RSS | 115 MB | 122 MB | 510 MB | 145 MB | 39 MB |
+| 100 | tick lateness | 0.41 / 0.62 | 0.43 / 0.62 | 0.27 / 0.53 | 0.62 / 1.35 | 0.65 / 1.21 |
+| | tick duration | 0.03 / 0.04 | 0.03 / 0.04 | 0.01 / 0.01 | 0.40 / 0.51 | 0.41 / 0.53 |
+| | arrival jitter | 0.20 / 0.74 | 0.17 / 0.61 | 0.14 / 0.56 | 0.34 / 1.34 | 0.45 / 1.00 |
+| 1 000 | tick lateness | 0.43 / 0.65 | 0.48 / 0.66 | 0.21 / 0.52 | 0.70 / 1.65 | 0.68 / 1.23 |
+| | tick duration | 0.67 / 0.76 | 0.65 / 0.73 | 0.04 / 0.06 | 4.84 / 6.17 | 4.85 / 6.26 |
+| | arrival jitter | 0.95 / 3.32 | 0.87 / 3.06 | 1.00 / 3.75 | 0.98 / 3.79 | 0.97 / 3.45 |
+| 2 000 | tick lateness | 0.46 / 0.65 | 0.46 / 0.66 | 0.26 / 0.52 | 0.70 / 1.66 | 0.65 / 1.21 |
+| | tick duration | 1.20 / 1.36 | 1.21 / 1.35 | 0.07 / 0.11 | 15.3 / 16.3 | 15.7 / 16.8 |
+| | arrival jitter | 0.22 / 1.34 | 0.22 / 1.32 | 0.26 / 1.58 | 0.52 / 2.01 | 0.47 / 1.99 |
+| | peak RSS | 112 MB | 122 MB | 47 MB | 60 MB | 59 MB |
 
-No server dropped a snapshot or sent a wrong one at these sizes.
+No server missed a tick, dropped a snapshot or sent a wrong one.
 
 How to read it:
 
-- **Tick lateness:** both Rae servers start every tick within 0.7 ms of its
-  deadline (`Time.waitUntil`, p99) at every size. Node and Bun stay near 1 ms
-  until Node's 2 000-player ticks.
-- Rust's tokio interval runs on millisecond timers. At 2 000 players its
-  current-thread runtime falls behind: ticks start 19–37 ms late and 25 are
-  missed in 10 s.
-- **Tick duration** is the snapshot's encode and fan-out:
-  - Rae copies the snapshot into each connection's buffer, about 0.6 ms per
-    1 000 players at 1 000;
-  - Rust shares one `Bytes` buffer and only queues it, so its tick is shorter,
-    but the writes happen after it;
-  - Node and Bun send per socket inside the tick, so their tick is 9–15× Rae's.
-- **ECS against the event loop: no measurable difference** in tick duration
-  at any size (ratio 1.23, 1.00 and 0.98). The ECS style's extra machinery
-  (an input event queue, membership, a component table) costs nothing visible
-  next to the N² fan-out.
-- Allocations per tick (rae-eventLoop 3 / 29 / 52, rae-ecs 5 / 45 / 100)
-  include the players' connection setup during the run.
+- **Everyone keeps time now.** The idiomatic Rust started its ticks 19–37 ms
+  late at 2 000 players (tokio's millisecond interval) and missed 25 in
+  10 s; the tuned one, a clock thread sleeping to each deadline in halving
+  steps, starts them 0.2–0.5 ms late, slightly earlier than Rae's
+  `Time.waitUntil` (0.4–0.7 ms). Node and Bun stay under 1.7 ms.
+- **What players feel**, the snapshot arrival jitter, is the same for Rae
+  and Rust (p99 1.3–1.6 ms at 2 000) and a little higher for Node and Bun.
+- **Tick duration** measures different work: Rust only queues one shared
+  buffer per player (the writes come right after the tick); Rae copies the
+  snapshot into each connection's buffer (about 0.6 ms per 1 000 players);
+  Node and Bun send per socket inside the tick, so theirs is 7–13× Rae's.
+- **Memory:** tuned Rust uses less than half of Rae's at 2 000 players
+  (47 MB against 112–122 MB); Rae holds a copy of the snapshot per
+  connection.
+- **ECS against the event loop: no measurable difference.**
 - Above about 2 500 players this machine's loopback runs out of kernel
   network memory for every server, so 5 000 needs a second machine
   (spec/GameRoom.md).
-
