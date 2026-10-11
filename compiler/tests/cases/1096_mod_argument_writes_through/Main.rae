@@ -1,0 +1,69 @@
+# A number or String passed to a `mod` parameter is passed by the variable's
+# address, whether the call spells the keyword (`bump(number: mod number)`)
+# or not. The spelled form used to hand the callee a copy, so its writes
+# were silently lost, and a `ret mod` result pointed at the dead copy.
+type Counter {
+  count: Int
+  label: String
+}
+
+func bump(number: mod Int) {
+  number = number + 1
+}
+
+func scale(number: mod Float) {
+  number = number * 2.0
+}
+
+func flip(flag: mod Bool) {
+  flag = not flag
+}
+
+func shout(text: mod String) {
+  text = "{text}!"
+}
+
+func bumpTwice(number: mod Int) {
+  bump(number: mod number)
+  bump(number: number)
+}
+
+func shoutTwice(text: mod String) {
+  shout(text: mod text)
+  shout(text: text)
+}
+
+func counterOf(number: mod Int) ret mod Int {
+  ret number
+}
+
+func main() {
+  var number: Int = 42
+  bump(number: mod number)
+  log("spelled {number}")
+  bump(number: number)
+  log("bare {number}")
+  var ratio: Float = 1.5
+  scale(number: mod ratio)
+  log("float {ratio}")
+  var flag: Bool = false
+  flip(flag: mod flag)
+  log("bool {flag}")
+  var text: String = "hey"
+  shout(text: mod text)
+  shout(text: text)
+  log("string {text}")
+  bumpTwice(number: mod number)
+  shoutTwice(text: mod text)
+  log("forwarded {number} {text}")
+  var counter: Counter = { count: 1, label: "a" }
+  bump(number: mod counter.count)
+  shout(text: mod counter.label)
+  log("field {counter.count} {counter.label}")
+  let reference: mod Int => counterOf(number: mod number)
+  reference = 100
+  log("ret mod {number}")
+  let bareReference: mod Int => counterOf(number: number)
+  bareReference = 200
+  log("ret mod bare {number}")
+}
