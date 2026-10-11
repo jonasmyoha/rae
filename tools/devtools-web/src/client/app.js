@@ -4579,6 +4579,22 @@ const BENCHMARK_SUITES = {
     title: "Physics scaling results",
     hint: "The playground pyramid on both physics tracks: step ms against bodies (1k-20k) and workers (1-8). Regenerate with <code>benchmarks/physics_scaling/run.sh</code>.",
   },
+  // The server benchmarks are one suite with a page per phase
+  servers_http: {
+    page: "servers/http.html",
+    title: "HTTP server benchmark results",
+    hint: "Rae vs tuned Rust, Node and Bun: requests per second. Regenerate with <code>benchmarks/servers/run.sh</code> and <code>generateSite.py</code>.",
+  },
+  servers_webSocket: {
+    page: "servers/webSocket.html",
+    title: "WebSocket server benchmark results",
+    hint: "Rae vs tuned Rust, Node and Bun: broadcast time as clients join. Regenerate with <code>benchmarks/servers/run.sh</code> and <code>generateSite.py</code>.",
+  },
+  servers_gameRoom: {
+    page: "servers/gameRoom.html",
+    title: "Game server benchmark results",
+    hint: "Rae vs tuned Rust, Node and Bun: 30 Hz tick timing, 100-2000 players. Regenerate with <code>benchmarks/servers/run.sh</code> and <code>generateSite.py</code>.",
+  },
 };
 const BENCHMARK_SUITE_KEY = "rae-devtools-benchmark-suite";
 let benchmarksWired = false;
@@ -4595,14 +4611,14 @@ function showBenchmarkSuite(suite) {
     button.setAttribute("aria-selected", button.dataset.benchmarkSuite === name ? "true" : "false");
   });
   if (hint) hint.innerHTML = entry.hint;
-  if (link) link.setAttribute("href", `/benchmarks/${name}/`);
+  const src = `/benchmarks/${entry.page ?? `${name}/`}`;
+  if (link) link.setAttribute("href", src);
   frame.setAttribute("title", entry.title);
   try {
     localStorage.setItem(BENCHMARK_SUITE_KEY, name);
   } catch (_) {
     // Storage may be unavailable; the choice just is not remembered
   }
-  const src = `/benchmarks/${name}/`;
   if (frame.getAttribute("src") !== src) frame.setAttribute("src", src);
 }
 
