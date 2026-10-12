@@ -66,7 +66,7 @@ func rectTypeChar(inspectorSystem: mod InspectorSystem, character: view String) 
   if character is "-" and draft.length() > 0 {
     ret
   }
-  if character is "." and draft.indexOf(sub: ".") >= 0 {
+  if character is "." and draft.indexOf(sub: ".") is not none {
     ret
   }
   inspectorSystem.rectDraft = "{draft}{character}"
@@ -363,20 +363,21 @@ func runRectScript(
       }
       continue
     }
-    let equals: Int = token.indexOf(sub: "=")
-    if equals > 0 {
-      if let field: RectField = rectFieldFromName(name: token.sub(start: 0, len: equals)) {
-        rectFocus(inspectorSystem: inspectorSystem, field: field)
-        let text: String = token.sub(start: equals + 1, len: token.length() - equals - 1)
-        loop var i: Int = 0, i < text.length(), ++i {
-          rectTypeChar(inspectorSystem: inspectorSystem, character: text.sub(start: i, len: 1))
+    if let equals: Int = token.indexOf(sub: "=") {
+      if equals > 0 {
+        if let field: RectField = rectFieldFromName(name: token.sub(start: 0, len: equals)) {
+          rectFocus(inspectorSystem: inspectorSystem, field: field)
+          let text: String = token.sub(start: equals + 1, len: token.length() - equals - 1)
+          loop var i: Int = 0, i < text.length(), ++i {
+            rectTypeChar(inspectorSystem: inspectorSystem, character: text.sub(start: i, len: 1))
+          }
+          written = written + rectEnter(
+            inspectorSystem: inspectorSystem
+            world: world
+            uiSystems: uiSystems
+          )
+          continue
         }
-        written = written + rectEnter(
-          inspectorSystem: inspectorSystem
-          world: world
-          uiSystems: uiSystems
-        )
-        continue
       }
     }
     log("[ui-editor] rect script: unknown step {token}")

@@ -77,11 +77,10 @@ func scenePackageFile(root: view String, sceneId: view String) ret String {
 
 # The directory of a scene file, with its trailing slash (`./` for a bare name).
 func sceneFileDirectory(path: view String) ret String {
-  let slash: Int = path.lastIndexOf(sub: "/")
-  if slash < 0 {
-    ret "./"
+  if let slash: Int = path.lastIndexOf(sub: "/") {
+    ret path.sub(start: 0, len: slash + 1)
   }
-  ret path.sub(start: 0, len: slash + 1)
+  ret "./"
 }
 
 # The top-level `import` array of a parsed scene (empty when absent).

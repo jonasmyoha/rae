@@ -37,16 +37,14 @@ func packDisplayName(packPath: view String) ret String {
     loop let line: view String in lines {
       let trimmed: String = line.trim()
       if trimmed.startsWith(prefix: "name:") {
-        let open: Int = trimmed.indexOf(sub: "\"")
-        if open < 0 {
+        if let open: Int = trimmed.indexOf(sub: "\"") {
+          let rest: String = trimmed.sub(start: open + 1, len: trimmed.length() - open - 1)
+          if let close: Int = rest.indexOf(sub: "\"") {
+            ret rest.sub(start: 0, len: close)
+          }
           ret ""
         }
-        let rest: String = trimmed.sub(start: open + 1, len: trimmed.length() - open - 1)
-        let close: Int = rest.indexOf(sub: "\"")
-        if close < 0 {
-          ret ""
-        }
-        ret rest.sub(start: 0, len: close)
+        ret ""
       }
     }
   }
@@ -69,16 +67,14 @@ func packSceneRoot(packPath: view String) ret String {
         continue
       }
       if inScenes and trimmed.startsWith(prefix: "root:") {
-        let open: Int = trimmed.indexOf(sub: "\"")
-        if open < 0 {
+        if let open: Int = trimmed.indexOf(sub: "\"") {
+          let rest: String = trimmed.sub(start: open + 1, len: trimmed.length() - open - 1)
+          if let close: Int = rest.indexOf(sub: "\"") {
+            ret rest.sub(start: 0, len: close)
+          }
           ret ""
         }
-        let rest: String = trimmed.sub(start: open + 1, len: trimmed.length() - open - 1)
-        let close: Int = rest.indexOf(sub: "\"")
-        if close < 0 {
-          ret ""
-        }
-        ret rest.sub(start: 0, len: close)
+        ret ""
       }
       if inScenes and trimmed is "\}" {
         inScenes = false

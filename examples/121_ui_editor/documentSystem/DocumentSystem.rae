@@ -137,19 +137,17 @@ func resolveSceneRoot(scenePath: view String) ret String {
 }
 
 func directoryOf(path: view String) ret String {
-  let slash: Int = path.lastIndexOf(sub: "/")
-  if slash < 0 {
-    ret "./"
+  if let slash: Int = path.lastIndexOf(sub: "/") {
+    ret path.sub(start: 0, len: slash + 1)
   }
-  ret path.sub(start: 0, len: slash + 1)
+  ret "./"
 }
 
 func fileNameOf(path: view String) ret String {
-  let slash: Int = path.lastIndexOf(sub: "/")
-  if slash < 0 {
-    ret "{path}"
+  if let slash: Int = path.lastIndexOf(sub: "/") {
+    ret path.sub(start: slash + 1, len: path.length() - slash - 1)
   }
-  ret path.sub(start: slash + 1, len: path.length() - slash - 1)
+  ret "{path}"
 }
 
 # ONE opener for every input — the boot argument / RAE_UI_EDITOR_SCENE, a
@@ -323,13 +321,14 @@ func documentDesignSize(document: mod SceneDocument) {
     }
   }
   let override: String = getEnv(name: "RAE_UI_EDITOR_DESIGN")
-  let x: Int = override.indexOf(sub: "x")
-  if x > 0 {
-    let w: Int = override.sub(start: 0, len: x).toInt()
-    let h: Int = override.sub(start: x + 1, len: override.length() - x - 1).toInt()
-    if w > 0 and h > 0 {
-      document.designW = w.toFloat()
-      document.designH = h.toFloat()
+  if let x: Int = override.indexOf(sub: "x") {
+    if x > 0 {
+      let w: Int = override.sub(start: 0, len: x).toInt()
+      let h: Int = override.sub(start: x + 1, len: override.length() - x - 1).toInt()
+      if w > 0 and h > 0 {
+        document.designW = w.toFloat()
+        document.designH = h.toFloat()
+      }
     }
   }
   document.columnW = document.designW

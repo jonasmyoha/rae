@@ -466,8 +466,8 @@ func contains(T: type, this: view List(T), value: view T) ret Bool {
   }
 }
 
-# Returns the first index of `value`, or -1 if not found.
-func indexOf(T: type, this: view List(T), value: view T) ret Int {
+# The first index of `value`, or none when the list does not hold it.
+func indexOf(T: type, this: view List(T), value: view T) ret opt Int {
   unsafe {
     var i: Int = 0
     loop i < this.length {
@@ -477,6 +477,6 @@ func indexOf(T: type, this: view List(T), value: view T) ret Int {
       }
       i = i + 1
     }
-    ret -1
+    ret none
   }
 }

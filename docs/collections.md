@@ -56,6 +56,19 @@ files use them, and they are the first of a family of containers that will grow.
 Keeping them in the prelude would auto-load a map into every compile unit that
 never asked for one. `List` earns its prelude seat; a hash map does not.
 
+## Searching: `indexOf` answers `opt Int`
+
+`list.indexOf(value:)` is the index of the first element equal to `value`, or
+`none` when the list does not hold it — the same honest reply as a read that
+misses, never a `-1` to remember to check (String's `indexOf` / `lastIndexOf`
+answer the same way, docs/strings.md):
+
+```rae
+if let index: Int = names.indexOf(value: "Outro") {
+  log("Outro is at {index}")
+}
+```
+
 ## Out-of-range access: reads miss, writes are ignored with a warning
 
 `List` has two answers for an index that does not exist, and they are not the

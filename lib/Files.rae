@@ -59,23 +59,21 @@ func path(this: view File) ret String {
 # returns "gz"); callers needing the longer-form ext can use
 # `stem()` to peel.
 func extension(this: view File) ret String {
-  let dot: Int = this.name.lastIndexOf(sub: ".")
-  if dot < 0 {
-    ret ""
+  if let dot: Int = this.name.lastIndexOf(sub: ".") {
+    let nameLen: Int = this.name.length()
+    let raw: String = this.name.sub(start: dot + 1, len: nameLen - dot - 1)
+    ret raw.toLower()
   }
-  let nameLen: Int = this.name.length()
-  let raw: String = this.name.sub(start: dot + 1, len: nameLen - dot - 1)
-  ret raw.toLower()
+  ret ""
 }
 
 # Base name without the trailing extension: "track.jpg" -> "track".
 # Files without an extension are returned unchanged.
 func stem(this: view File) ret String {
-  let dot: Int = this.name.lastIndexOf(sub: ".")
-  if dot < 0 {
-    ret this.name
+  if let dot: Int = this.name.lastIndexOf(sub: ".") {
+    ret this.name.sub(start: 0, len: dot)
   }
-  ret this.name.sub(start: 0, len: dot)
+  ret this.name
 }
 
 # True if `name` starts with a dot. Hidden files like `.DS_Store`

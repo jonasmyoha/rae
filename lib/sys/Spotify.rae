@@ -383,11 +383,13 @@ func artworkUrlFromItunesResponse(body: view String) ret String {
     idx: field(doc: doc, this: first, key: "artworkUrl100")
   )
   let url: String = jsonString(this: thumb, fallback: "")
-  let size: Int = url.indexOf(sub: "100x100")
-  if size < 0 {
-    ret url
+  if let size: Int = url.indexOf(sub: "100x100") {
+    ret "{url.sub(start: 0, len: size)}600x600{url.sub(
+      start: size + 7
+      len: url.length() - size - 7
+    )}"
   }
-  ret "{url.sub(start: 0, len: size)}600x600{url.sub(start: size + 7, len: url.length() - size - 7)}"
+  ret url
 }
 
 # iTunes Search API fallback for album art: queries
