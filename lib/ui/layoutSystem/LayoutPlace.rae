@@ -13,6 +13,20 @@ open ecs/ComponentTable
 open ecs/hierarchySystem/HierarchySystem
 open ui/UiSystems
 
+# A size on `axis` clamped to the axis's optional `min` / `max` (-1: none).
+# Fill takes the space it is given through this, so a Fill axis honours its
+# clamps as a Fixed or Hug one does (resolveAxisFromSize).
+func clampToSizeAxis(axis: view SizeAxis, value: view Float) ret Float {
+  var result: Float = value
+  if axis.min >= 0 and result < axis.min.toFloat() {
+    result = axis.min.toFloat()
+  }
+  if axis.max >= 0 and result > axis.max.toFloat() {
+    result = axis.max.toFloat()
+  }
+  ret result
+}
+
 # Write `entityId`'s ComputedRect from a parent-relative position (plus its
 # own Offset, a post-layout shift) and its already-resolved own size. This
 # is what the placement helpers now do for each child instead of recursing:
@@ -279,7 +293,7 @@ func placeHorizontal(
       let size: Size = entitySize(world: world, entityId: cid)
       var childW: Float = 0.0
       if size.w.mode is SizeMode.fill {
-        childW = fillSize
+        childW = clampToSizeAxis(axis: size.w, value: fillSize)
       } else {
         let r: Vec2 = resolveOwnSize(
           world: world
@@ -294,7 +308,7 @@ func placeHorizontal(
       childW = applyConstraintsW(world: world, entityId: cid, w: childW)
       var childH: Float = 0.0
       if size.h.mode is SizeMode.fill {
-        childH = contentH
+        childH = clampToSizeAxis(axis: size.h, value: contentH)
       } else {
         let r: Vec2 = resolveOwnSize(
           world: world
@@ -403,7 +417,7 @@ func placeVertical(
       let size: Size = entitySize(world: world, entityId: cid)
       var childH: Float = 0.0
       if size.h.mode is SizeMode.fill {
-        childH = fillSize
+        childH = clampToSizeAxis(axis: size.h, value: fillSize)
       } else {
         let r: Vec2 = resolveOwnSize(
           world: world
@@ -418,7 +432,7 @@ func placeVertical(
       childH = applyConstraintsH(world: world, entityId: cid, h: childH)
       var childW: Float = 0.0
       if size.w.mode is SizeMode.fill {
-        childW = contentW
+        childW = clampToSizeAxis(axis: size.w, value: contentW)
       } else {
         let r: Vec2 = resolveOwnSize(
           world: world
@@ -527,10 +541,10 @@ func placeGrid(
           var cellW: Float = childSize.x
           var cellH: Float = childSize.y
           if size.w.mode is SizeMode.fill {
-            cellW = colW
+            cellW = clampToSizeAxis(axis: size.w, value: colW)
           }
           if size.h.mode is SizeMode.fill {
-            cellH = rowH
+            cellH = clampToSizeAxis(axis: size.h, value: rowH)
           }
           writeComputedRect(
             world: world
