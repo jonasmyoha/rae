@@ -26,6 +26,12 @@ open ui/Frames
 open ui/Ecs
 open ui/UiSystems
 open app3d/UiShell
+open ui/DebugOverlay
+open ui/Components
+open ui/Transform
+open ui/inputSystem/InputSystem
+open ecs/Entity
+open ecs/ComponentTable
 
 # The scene's frames and states as applied: the scene (they are read from
 # it), the main pointer the frames were chosen for, the mode, whether the
@@ -143,4 +149,43 @@ func updateUiModes(world: mod UiWorld, uiSystems: mod UiSystems, uiModes: mod Ui
   uiModes.generation = uiModes.generation + 1
   applyUiModes(world: world, uiSystems: uiSystems, uiModes: uiModes)
   ret true
+}
+
+# The debug readout (lib/ui DebugOverlay: its button, fps and memory lines) is
+# about this tall (pt), and keeps this far from the "..." button
+const uiModeReadoutHeight: Float = 80.0
+
+const uiModeReadoutGap: Float = 8.0
+
+# Place the debug readout by the scene's "..." button (node `buttonNodeId`),
+# which holds the window's top-right corner in both modes: in the corner itself
+# when the top row leaves room above it (a phone upright, under its notch),
+# else just left of the button, level with it. Call after layout, every frame.
+func placeDebugOverlayByModeButton(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  debugOverlay: mod DebugOverlay
+  buttonNodeId: view String
+) {
+  let button: EntityId = nodeEntityFor(world: world, nodeId: buttonNodeId)
+  if isNone(this: button) or uiEntityActive(world: world, entityId: button) is false or componentHas(
+    this: uiSystems.transform2d.worldTransforms
+    entityId: button
+  ) is false {
+    placeDebugOverlay(debugOverlay: debugOverlay, right: 0.0, top: 0.0)
+    ret
+  }
+  let placed: view WorldTransform2D => componentView(
+    this: uiSystems.transform2d.worldTransforms
+    entityId: button
+  )
+  if placed.position.y < uiModeReadoutHeight {
+    placeDebugOverlay(
+      debugOverlay: debugOverlay
+      right: placed.position.x - uiModeReadoutGap
+      top: placed.position.y
+    )
+  } else {
+    placeDebugOverlay(debugOverlay: debugOverlay, right: 0.0, top: 0.0)
+  }
 }

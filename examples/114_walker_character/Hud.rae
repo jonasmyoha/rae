@@ -2,6 +2,7 @@
 # debug overlays) and the settings-panel show/hide. Kept out of main.rae to
 # respect the 1000-line file cap.
 import Gpu2d
+open app3d/UiModes
 open ui/CornerMenuButton
 open RendererDeferred
 open app3d/SettingsDialog
@@ -24,6 +25,7 @@ func updateWalkerTouch(
   moveStick: mod VirtualJoystick
   world: mod UiWorld
   uiSystems: mod UiSystems
+  enabled: view Bool
 ) pub ret Bool {
   # Feed the OS safe-area insets (notch / home indicator, design units) into the
   # ECS so UiRoot's padding reserves them — the whole UI, top bar included, sits
@@ -35,6 +37,19 @@ func updateWalkerTouch(
     b: Gpu2d.safeBottom()
   }
   safeAreaSystem(world: world, uiSystems: uiSystems, insets: safe)
+  # The stick is GAME mode's: in EDITOR it is left alone and the camera gets
+  # every finger
+  if enabled is false {
+    setCameraTouch(
+      rig: rig
+      excludeId: 0 - 1
+      joystickActive: false
+      zoneX: 0.0
+      zoneY: 0.0
+      zoneR: 0.0 - 1.0
+    )
+    ret false
+  }
   let active: Bool = updateVirtualJoystick(joy: moveStick)
   # Hand the camera the joystick's exclusion zone (same radius the stick grabs
   # with) + the owned finger id: a press inside the zone is the stick's, outside
@@ -86,20 +101,21 @@ func drawWalkerHud(
   canvas: mod Gpu2dCanvas
   dbg: mod DebugOverlay
   moveStick: view VirtualJoystick
-  panelOpen: view Bool
+  editor: view Bool
 ) pub {
-  # Joystick hides while the settings panel is open (it would otherwise draw over
-  # the panel — the panel is the higher layer).
-  if panelOpen is false {
+  # GAME mode: the touch stick; EDITOR: the log strip. The debug readout is
+  # both modes'.
+  if editor {
+    drawLogOverlay(
+      ov: logOverlay
+      canvas: canvas
+      font: gpuUi.textFont
+      screenW: windowExtentW()
+      screenH: windowExtentH()
+    )
+  } else {
     drawVirtualJoystick(joy: moveStick, canvas: canvas)
   }
-  drawLogOverlay(
-    ov: logOverlay
-    canvas: canvas
-    font: gpuUi.textFont
-    screenW: windowExtentW()
-    screenH: windowExtentH()
-  )
   # Debug D last, so it is above everything else.
   drawDebugOverlay(
     debugOverlay: dbg

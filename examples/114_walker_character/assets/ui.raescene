@@ -34,7 +34,7 @@
       },
       "Children": [
         "MainColumn",
-        "SidePanel"
+        "EditorSide"
       ]
     },
     "ControlPanel": {
@@ -253,14 +253,104 @@
         }
       },
       "Children": [
-        "CornerMenuSlot",
-        "CameraBarSlot"
+        "EditorBar",
+        "TopSpacer",
+        "ModeButton"
       ],
       "Padding": {
         "l": "spaceS",
         "t": "spaceS",
         "r": "spaceL",
         "b": "spaceS"
+      }
+    },
+    "EditorBar": {
+      "Layout": {
+        "type": "Horizontal",
+        "gap": "spaceS",
+        "alignCross": "Center"
+      },
+      "Size": {
+        "w": {
+          "mode": "Hug"
+        },
+        "h": {
+          "mode": "Hug"
+        }
+      },
+      "Active": {
+        "value": false
+      },
+      "Children": [
+        "CornerMenuSlot",
+        "CameraBarSlot"
+      ]
+    },
+    "TopSpacer": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 10,
+        "h": 1
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      }
+    },
+    "ModeButton": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 44,
+        "h": 44
+      },
+      "Size": {
+        "w": {
+          "mode": "Fixed"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "surface",
+        "radius": 22
+      },
+      "OnClick": {
+        "actionId": "ui.mode"
+      },
+      "Children": [
+        "ModeLabel"
+      ]
+    },
+    "ModeLabel": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 44,
+        "h": 44
+      },
+      "Text": {
+        "text": "...",
+        "styleId": "panelButton"
+      },
+      "OpticalAlign": {
+        "centerX": true,
+        "centerY": true
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fill"
+        }
       }
     },
     "MainColumn": {
@@ -320,6 +410,27 @@
         "actionId": "ui.surface"
       }
     },
+    "EditorSide": {
+      "Layout": {
+        "type": "Vertical",
+        "alignMain": "Start",
+        "alignCross": "Start"
+      },
+      "Size": {
+        "w": {
+          "mode": "Hug"
+        },
+        "h": {
+          "mode": "Fill"
+        }
+      },
+      "Active": {
+        "value": false
+      },
+      "Children": [
+        "SidePanel"
+      ]
+    },
     "SidePanelBody": {
       "Layout": {
         "type": "Vertical",
@@ -362,6 +473,22 @@
         "SettingsDialogSlot",
         "ControlPanel"
       ]
+    }
+  },
+  "states": {
+    "editor": {
+      "nodes": {
+        "EditorBar": {
+          "Active": {
+            "value": true
+          }
+        },
+        "EditorSide": {
+          "Active": {
+            "value": true
+          }
+        }
+      }
     }
   }
 }

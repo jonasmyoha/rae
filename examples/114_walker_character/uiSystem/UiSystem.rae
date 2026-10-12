@@ -18,6 +18,7 @@ import Gpu2d
 import Vec3
 import Sys
 import app3d/RenderScale
+open app3d/UiModes
 open GbufferInstanced
 open GrassCompute
 import GrassConfig
@@ -77,6 +78,19 @@ func uiUpdate(
   now: copy Float64
 ) ret UiTick {
   updateUiInput(input: inputSystem.ui, world: inputSystem.world, uiSystems: uiSystems)
+  # GAME / EDITOR: the "..." button, a rotation, a change of pointer
+  let modesChanged: Bool = updateUiModes(
+    world: inputSystem.world
+    uiSystems: uiSystems
+    uiModes: inputSystem.uiModes
+  ) or toggleUiMode(world: inputSystem.world, uiSystems: uiSystems, uiModes: inputSystem.uiModes)
+  # The debug readout, the same in both modes, by the "..." button
+  placeDebugOverlayByModeButton(
+    world: inputSystem.world
+    uiSystems: uiSystems
+    debugOverlay: inputSystem.dbg
+    buttonNodeId: "ModeButton"
+  )
   # The corner menu is a UI-world node, so its press is an action and the
   # action->layout gate below lays out the panel it toggles. (As an overlay
   # button its toggle ran no layout; that only went unnoticed because the
@@ -278,7 +292,7 @@ func uiUpdate(
   # and only transformSystem (inside runUiSystems) turns that into screen
   # positions. Without it the wheel moved nothing until the next
   # relayout — again masked by the time-of-day animation while it runs.
-  if uiActionCount(world: inputSystem.world) > 0 or settingsChanged or scrolled {
+  if uiActionCount(world: inputSystem.world) > 0 or settingsChanged or scrolled or modesChanged {
     runUiSystems(world: inputSystem.world, uiSystems: uiSystems, res: inputSystem.gpuUi)
   }
   ret UiTick { settingsChanged: settingsChanged, scrolled: scrolled }
