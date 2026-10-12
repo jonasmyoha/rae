@@ -398,6 +398,12 @@ func draw(scene: view Scene, highlight: opt view Track)
 let sel: opt view Track => selected(list: playlist)
 ```
 
+An `opt view T` / `opt mod T` parameter takes `none`, a `T` (`view x`,
+`mod x`), another optional reference, or an optional VALUE (`opt T`): the
+callee's reference names the optional's payload when there is one and is
+`none` when there is not — so a `mod` writes into the payload in place. The
+same holds for every `T`, numbers, `Bool` and `String` included.
+
 An earlier version of this specification prohibited these types, citing hidden
 lifetime complexity. That rationale did not hold: the complexity it named is
 handled by §4.3, and forbidding them made optionality behave differently

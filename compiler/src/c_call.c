@@ -119,6 +119,107 @@ static const AstExpr* c_mod_arg_place(CFuncContext* ctx, const AstExpr* value, b
     return value;
 }
 
+/* An argument for an OPTIONAL REFERENCE parameter (`opt view T` / `opt mod T`,
+ * spec 4.1). The parameter is a nullable reference: a `rae_View_*` /
+ * `rae_Mod_*` wrapper with a null `.ptr` for a number or String, a raw
+ * nullable `T*` for a struct. Every argument becomes that reference:
+ *   - `none` is the null reference;
+ *   - an optional reference (a binding, a parameter, a call) is passed on;
+ *   - an optional VALUE (`opt T`) passes its payload's address, or null when
+ *     it is none — never the address of the `{ has, value }` box itself;
+ *   - a plain number or String passes its address (a variable or a field
+ *     directly, anything else through a statement temporary).
+ * Returns false for a plain struct value, whose existing path already passes
+ * its address. */
+static bool c_is_place(const AstExpr* value) {
+    const AstExpr* root = value;
+    while (root && root->kind == AST_EXPR_MEMBER) root = root->as.member.object;
+    return root && root->kind == AST_EXPR_IDENT;
+}
+
+static bool emit_opt_ref_arg(CFuncContext* ctx, const AstTypeRef* param_type,
+                             const AstExpr* value, FILE* out) {
+    Str base = get_base_type_name(param_type);
+    bool wrapped = c_primitive_ref_has_wrapper(base);
+    const AstExpr* inner = value;
+    if (inner && inner->kind == AST_EXPR_UNARY
+        && (inner->as.unary.op == AST_UNARY_VIEW || inner->as.unary.op == AST_UNARY_MOD))
+        inner = inner->as.unary.operand;
+    const AstTypeRef* arg_type = infer_expr_type_ref(ctx, inner);
+    bool arg_is_ref = arg_type && (arg_type->is_view || arg_type->is_mod);
+    bool arg_is_opt = arg_type && arg_type->is_opt;
+    if (inner->kind != AST_EXPR_NONE && !arg_is_opt && !wrapped) return false;
+
+    /* The parameter resolves as REF(OPT(T)): the optional and its payload
+     * are the types under the reference */
+    TypeInfo* opt_info = param_type->resolved_type;
+    if (opt_info && opt_info->kind == TYPE_REF) opt_info = opt_info->as.ref.base;
+    TypeInfo* payload_info = (opt_info && opt_info->kind == TYPE_OPT) ? opt_info->as.opt.base : NULL;
+    AstTypeRef value_type = *param_type;
+    value_type.is_view = false; value_type.is_mod = false; value_type.is_opt = false;
+    value_type.resolved_type = payload_info;
+    AstTypeRef opt_type = value_type; opt_type.is_opt = true;
+    opt_type.resolved_type = (opt_info && opt_info->kind == TYPE_OPT) ? opt_info : NULL;
+    if (wrapped) {
+        fprintf(out, "(");
+        emit_type_ref_as_c_type(ctx, param_type, out, false);
+        fprintf(out, "){ .ptr = ");
+    }
+    bool had_expected = ctx->has_expected_type; AstTypeRef saved_expected = ctx->expected_type;
+    ctx->has_expected_type = false;
+    if (inner->kind == AST_EXPR_NONE) {
+        fprintf(out, "NULL");
+    } else if (arg_is_opt && arg_is_ref) {
+        /* A call answering an optional reference returns the raw pointer;
+         * a binding or parameter holding one is the wrapper. */
+        bool raw = !wrapped || inner->kind == AST_EXPR_CALL || inner->kind == AST_EXPR_METHOD_CALL;
+        fprintf(out, "(");
+        emit_expr(ctx, inner, out, PREC_LOWEST, false, true);
+        fprintf(out, raw ? ")" : ").ptr");
+    } else if (arg_is_opt) {
+        const char* opt_c = rae_opt_type_name(ctx, &opt_type);
+        fprintf(out, "rae_opt_payload_ptr(");
+        if (c_is_place(inner)) {
+            fprintf(out, "&(");
+            emit_expr(ctx, inner, out, PREC_LOWEST, false, false);
+            fprintf(out, ")");
+        } else {
+            int tmp_id = register_stmt_temp(ctx, &opt_type, c_stmt_temp_value_owns(ctx, inner));
+            if (tmp_id >= 0) {
+                fprintf(out, "((__rae_stmt_tmp%d = (", tmp_id);
+                emit_expr(ctx, inner, out, PREC_LOWEST, false, false);
+                fprintf(out, ")), (__rae_stmt_tmp%d_set = 1), &__rae_stmt_tmp%d)", tmp_id, tmp_id);
+            } else {
+                fprintf(out, "(%s[1]){ ", opt_c);
+                emit_expr(ctx, inner, out, PREC_LOWEST, false, false);
+                fprintf(out, " }");
+            }
+        }
+        fprintf(out, ", offsetof(%s, value))", opt_c);
+    } else if (c_is_place(inner) || param_type->is_mod) {
+        fprintf(out, "&(");
+        emit_expr(ctx, inner, out, PREC_LOWEST, false, false);
+        fprintf(out, ")");
+    } else {
+        bool fresh_string = str_eq_cstr(base, "String");
+        int tmp_id = register_stmt_temp(ctx, &value_type, fresh_string);
+        if (tmp_id >= 0) {
+            fprintf(out, "((__rae_stmt_tmp%d = %s(", tmp_id, fresh_string ? "rae_string_pool_take" : "");
+            emit_expr(ctx, inner, out, PREC_LOWEST, false, false);
+            fprintf(out, ")), (__rae_stmt_tmp%d_set = 1), &__rae_stmt_tmp%d)", tmp_id, tmp_id);
+        } else {
+            fprintf(out, "(");
+            emit_type_ref_as_c_type(ctx, &value_type, out, false);
+            fprintf(out, "[1]){ ");
+            emit_expr(ctx, inner, out, PREC_LOWEST, false, false);
+            fprintf(out, " }");
+        }
+    }
+    ctx->has_expected_type = had_expected; ctx->expected_type = saved_expected;
+    if (wrapped) fprintf(out, " }");
+    return true;
+}
+
 bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     // #960: `enumFromName(E, name: s)` -> the `opt E` whose member is spelled
     // `s`. One statement-expression: look the name up through the enum's
@@ -862,7 +963,8 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             const AstParam* sp = fd->params;
             int ai = 0;
             while (sa && ai < RAE_MAX_PRIM_WRAP) {
-                if (sp && sp->type && (sp->type->is_view || sp->type->is_mod)) {
+                if (sp && sp->type && (sp->type->is_view || sp->type->is_mod)
+                    && !sp->type->is_opt) {
                     const AstTypeRef* arg_tr = infer_expr_type_ref(ctx, sa->value);
                     if (!(arg_tr && (arg_tr->is_view || arg_tr->is_mod))) {
                         Str pbase = get_base_type_name(sp->type);
@@ -1070,6 +1172,18 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                     } else {
                         mark_expr_moved_if_local(ctx, a->value);
                     }
+                }
+            }
+            if (p && p->type && p->type->is_opt && (p->type->is_view || p->type->is_mod) && a->value) {
+                const AstTypeRef* opt_pt = p->type;
+                if (fd->generic_params && concrete)
+                    opt_pt = substitute_type_ref(ctx->compiler_ctx, fd->generic_params, concrete, p->type);
+                if (emit_opt_ref_arg(ctx, opt_pt, a->value, out)) {
+                    if (close_live_flag) fprintf(out, ")");
+                    if (a->next) fprintf(out, ", ");
+                    a = a->next; p = p->next;
+                    arg_index++;
+                    continue;
                 }
             }
             bool needs_addr = false; bool needs_deref = false; bool needs_prim_wrap = false; bool needs_box = false;

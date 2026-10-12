@@ -13,6 +13,7 @@
 #pragma STDC FP_CONTRACT OFF
 #endif
 
+#include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <math.h>
@@ -419,6 +420,13 @@ typedef struct { const uint32_t* ptr; } rae_View_Char;
 typedef struct { uint32_t* ptr; } rae_Mod_Char;
 typedef struct { const rae_String* ptr; } rae_View_String;
 typedef struct { rae_String* ptr; } rae_Mod_String;
+
+/* An optional VALUE handed to an optional REFERENCE parameter (spec 4.1): the
+ * address of the payload of a `rae_opt_<T> { rae_Bool has; T value; }`, or NULL
+ * when it is none. `opt` is evaluated once, so it may be a call's temporary. */
+RAE_UNUSED static inline void* rae_opt_payload_ptr(const void* opt, size_t value_offset) {
+    return *(const rae_Bool*)opt ? (void*)((const char*)opt + value_offset) : NULL;
+}
 
 RAE_UNUSED static RaeAny rae_any_view_int64(rae_View_Int64 v) { return rae_any_view(v.ptr, RAE_TYPE_INT64); }
 RAE_UNUSED static RaeAny rae_any_mod_int64(rae_Mod_Int64 v) { return rae_any_mod(v.ptr, RAE_TYPE_INT64); }

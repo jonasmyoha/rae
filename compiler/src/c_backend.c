@@ -766,6 +766,7 @@ bool c_spawn_threadable(CFuncContext* ctx, const AstFuncDecl* f) {
   for (const AstParam* p = f->params; p; p = p->next) {
     if (!p->type) return false;
     if (p->type->is_mod) return false;            // mod = pointer into parent
+    if (p->type->is_opt && p->type->is_view) return false;  // an optional reference points into the parent
     Str base = get_base_type_name(p->type);
     bool is_scalar = str_eq_cstr(base, "Int") || str_eq_cstr(base, "Int64")
                   || str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float32") || str_eq_cstr(base, "Float64")
@@ -1006,7 +1007,8 @@ void emit_param_c_type(CFuncContext* ctx, const AstParam* p, FILE* out, bool is_
         // a ref under view/mod because String owns heap.
         bool is_num_prim = is_scalar_primitive_type(base);
         bool view_or_mod = is_view || is_mod;
-        if (is_num_prim && view_or_mod && !is_mod) {
+        /* An optional reference stays a reference: its null pointer is `none` */
+        if (is_num_prim && view_or_mod && !is_mod && !p->type->is_opt) {
             // view-on-primitive collapses to bare T at the C level.
             is_view = false;
             view_or_mod = false;
