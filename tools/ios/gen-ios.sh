@@ -39,6 +39,14 @@ disp=${3:-${RAE_IOS_NAME:-$name}}
 # The oldest iOS the app runs on. 15.0 is the oldest current Xcode builds for
 # (Xcode 27 refuses anything older); RAE_IOS_DEPLOYMENT_TARGET overrides it.
 deployment_target=${RAE_IOS_DEPLOYMENT_TARGET:-15.0}
+# The app icon: RAE_IOS_ICON names a square PNG, 1024x1024 and opaque (the App
+# Store refuses alpha). It becomes the AppIcon set of an asset catalog, in the
+# single-size form (Xcode makes every other size from it). Unset, the app has
+# the system's blank icon.
+icon=${RAE_IOS_ICON:-}
+if [ -n "$icon" ] && [ ! -f "$icon" ]; then
+  echo "error: RAE_IOS_ICON is not a file: $icon" >&2; exit 1
+fi
 orientations=${RAE_IOS_ORIENTATIONS:-portrait}
 portrait='<string>UIInterfaceOrientationPortrait</string>'
 upsideDown='<string>UIInterfaceOrientationPortraitUpsideDown</string>'
@@ -148,6 +156,27 @@ done <<EOF
 $(find "$stage" -type f)
 EOF
 
+# The icon's asset catalog, compiled by Xcode's actool into the bundle (a
+# RESOURCE of the target), named by ASSETCATALOG_COMPILER_APPICON_NAME.
+icon_source=""; icon_properties=""
+if [ -n "$icon" ]; then
+  catalog="$gen/Assets.xcassets"
+  rm -rf "$catalog"; mkdir -p "$catalog/AppIcon.appiconset"
+  cp "$icon" "$catalog/AppIcon.appiconset/AppIcon-1024.png"
+  printf '{ "info": { "author": "rae", "version": 1 } }\n' > "$catalog/Contents.json"
+  cat > "$catalog/AppIcon.appiconset/Contents.json" <<EOF
+{
+  "images": [
+    { "filename": "AppIcon-1024.png", "idiom": "universal", "platform": "ios", "size": "1024x1024" }
+  ],
+  "info": { "author": "rae", "version": 1 }
+}
+EOF
+  icon_source="  \"$catalog\"\n"
+  icon_properties="set_target_properties(\${APP} PROPERTIES RESOURCE \"$catalog\"
+  XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME \"AppIcon\")\n"
+fi
+
 # 3. Emit CMakeLists.
 cat > "$gen/CMakeLists.txt" <<EOF
 cmake_minimum_required(VERSION 3.28)
@@ -160,7 +189,7 @@ add_executable(\${APP} MACOSX_BUNDLE
   "$gen/app_ios.c"
   "$runtime_dir/rae_runtime.c"
   "$here/ios_bootstrap.c"
-$(printf "%b" "$box3d_sources")$(printf "%b" "$asset_lines"))
+$(printf "%b" "$box3d_sources")$(printf "%b" "$icon_source")$(printf "%b" "$asset_lines"))
 
 $(printf "%b" "${pkg_lines:-}")
 
@@ -195,6 +224,7 @@ set_target_properties(\${APP} PROPERTIES
   XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
   XCODE_ATTRIBUTE_CODE_SIGN_STYLE "Automatic"
   XCODE_ATTRIBUTE_IPHONEOS_DEPLOYMENT_TARGET "$deployment_target")
+$(printf "%b" "$icon_properties")
 EOF
 
 # 4. Configure the Xcode project.

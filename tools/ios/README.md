@@ -33,6 +33,12 @@ entry), bundles the example's `assets/` preserving relative paths, and writes a
 CMake `-G Xcode` project. `ios_bootstrap.c` `chdir`s to the bundle at launch so
 relative asset reads resolve.
 
+Options, as environment variables: `RAE_IOS_BUNDLE_ID` / `RAE_IOS_NAME`,
+`RAE_IOS_ORIENTATIONS=portrait|any`, `RAE_IOS_DEPLOYMENT_TARGET` (15.0),
+`RAE_IOS_ENTRY`, and `RAE_IOS_ICON=<square 1024x1024 opaque PNG>` — the app
+icon, made the AppIcon set of a generated asset catalog (single-size; Xcode
+makes the rest).
+
 ## Status / next
 
 - `build-wgpu-ios.sh`, `build-sdl3-ios.sh`, `gen-ios.sh`, `ios_bootstrap.c`: done.
