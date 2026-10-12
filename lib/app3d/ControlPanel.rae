@@ -137,7 +137,7 @@ func addPanelButton(
   labelList.add(value: "{label}")
 }
 
-func panelIndexOf(panel: view ControlPanel, id: view String) pub ret Int {
+func panelIndexOf(panel: view ControlPanel, id: view String) ret opt Int {
   var i: Int = 0
   loop i < panel.ids.length {
     if panelStringAt(values: panel.ids, index: i) is id {
@@ -145,7 +145,7 @@ func panelIndexOf(panel: view ControlPanel, id: view String) pub ret Int {
     }
     i = i + 1
   }
-  ret -1
+  ret none
 }
 
 # Create the entities and attach them to the host node's children.
@@ -268,16 +268,14 @@ func setPanelButtonLabel(
   id: view String
   label: view String
 ) pub {
-  let idx: Int = panelIndexOf(panel: panel, id: id)
-  if idx < 0 {
-    ret
+  if let idx: Int = panelIndexOf(panel: panel, id: id) {
+    let entityId: EntityId = panelEntityAt(values: panel.labelEntities, index: idx)
+    if componentHas(this: world.texts, entityId: entityId) is false {
+      ret
+    }
+    let text: mod Text => componentMod(this: world.texts, entityId: entityId)
+    text.text = "{label}"
   }
-  let entityId: EntityId = panelEntityAt(values: panel.labelEntities, index: idx)
-  if componentHas(this: world.texts, entityId: entityId) is false {
-    ret
-  }
-  let text: mod Text => componentMod(this: world.texts, entityId: entityId)
-  text.text = "{label}"
 }
 
 # Select `id` within its group, repainting every button in that group.
@@ -324,19 +322,17 @@ func setPanelButtonOn(
   id: view String
   on: view Bool
 ) pub {
-  let idx: Int = panelIndexOf(panel: panel, id: id)
-  if idx < 0 {
-    ret
-  }
-  let entityId: EntityId = panelEntityAt(values: panel.buttonEntities, index: idx)
-  if componentHas(this: world.shapes, entityId: entityId) is false {
-    ret
-  }
-  let shape: mod Shape => componentMod(this: world.shapes, entityId: entityId)
-  if on {
-    shape.fillSlot = panelSlotSelected
-  } else {
-    shape.fillSlot = panelSlotIdle
+  if let idx: Int = panelIndexOf(panel: panel, id: id) {
+    let entityId: EntityId = panelEntityAt(values: panel.buttonEntities, index: idx)
+    if componentHas(this: world.shapes, entityId: entityId) is false {
+      ret
+    }
+    let shape: mod Shape => componentMod(this: world.shapes, entityId: entityId)
+    if on {
+      shape.fillSlot = panelSlotSelected
+    } else {
+      shape.fillSlot = panelSlotIdle
+    }
   }
 }
 

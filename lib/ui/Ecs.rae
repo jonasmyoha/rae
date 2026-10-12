@@ -389,12 +389,12 @@ func findNodeInPage(world: view UiWorld, pageId: view String, nodeId: view Strin
 # right only until a slot is recycled — after the first page re-mount every
 # scene node resolved to a stale handle, so the Home page's data adapters
 # attached their tiles to dead entities and the page rendered empty. A never-
-# allocated index yields a handle no table matches (generation -1).
-func nodeEntityId(world: view UiWorld, index: view Int) pub ret EntityId {
-  ret EntityId {
-    index: index
-    generation: allocatorGeneration(this: world.allocator, index: index)
+# allocated index yields `noEntity()`, a handle no table matches.
+func nodeEntityId(world: view UiWorld, index: view Int) ret EntityId {
+  if let generation: Int = allocatorGeneration(this: world.allocator, index: index) {
+    ret EntityId { index: index, generation: generation }
   }
+  ret noEntity()
 }
 
 # Walk Parent up from `entityId` until we hit a `PageRoot`, then return

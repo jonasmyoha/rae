@@ -125,9 +125,10 @@ func main() {
   log("pipelined: {completes} complete, in order {inOrder}")
   httpParseConsumed(state: pipeState, buffer: pipeBuffer)
   log("after consume: {byteBufferLength(buffer: pipeBuffer)} bytes left")
-  let firstResponseEnd: Int = byteBufferIndexOf(buffer: output, pattern: "Hello, World!", from: 0) + 13
-  log("first response:")
-  log(byteBufferText(buffer: output, start: 0, count: firstResponseEnd))
+  if let bodyStart: Int = byteBufferIndexOf(buffer: output, pattern: "Hello, World!", from: 0) {
+    log("first response:")
+    log(byteBufferText(buffer: output, start: 0, count: bodyStart + 13))
+  }
 
   # Keep-alive rules
   log(

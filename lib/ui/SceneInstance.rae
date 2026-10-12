@@ -80,8 +80,8 @@ func registerScene(reg: mod SceneRegistry, key: own String, scene: own Scene) {
   scenesList.add(value: scene)
 }
 
-# Returns the index of `key` in the registry, or -1 if not present.
-func sceneRegistryIndex(reg: view SceneRegistry, key: view String) ret Int {
+# Returns the index of `key` in the registry, or none if not present.
+func sceneRegistryIndex(reg: view SceneRegistry, key: view String) ret opt Int {
   let n: Int = reg.ids.length
   var i: Int = 0
   loop i < n {
@@ -92,11 +92,11 @@ func sceneRegistryIndex(reg: view SceneRegistry, key: view String) ret Int {
     }
     i = i + 1
   }
-  ret -1
+  ret none
 }
 
 func sceneRegistryHas(reg: view SceneRegistry, key: view String) ret Bool {
-  ret sceneRegistryIndex(reg: reg, key: key) >= 0
+  ret sceneRegistryIndex(reg: reg, key: key) is not none
 }
 
 # Return a view onto the i'th scene. Caller is responsible for bounds
@@ -386,148 +386,147 @@ func mountSceneInstanceImpl(
     # The scene's own `bundles` block (the imports' set is world.bundles).
     var ownBundles: BundleSet = createBundleSet()
     parseBundlesInto(out: ownBundles, scene: scene)
-    let rootIdx: Int = sceneNodeIndex(this: scene, nodeId: scene.rootNodeId)
-    if rootIdx < 0 {
-      ret noEntity()
-    }
-
-    # Pass 1: allocate entities. The scene's root maps to `mountEntityId`;
-    # every other node gets a fresh entity.
-    var entitiesByNodeIndex: List(EntityId) = List.create(EntityId, cap: nodeCount)
-    let nodeIdsMap: mod StringMap(Int) => world.nodeIds
-    var i: Int = 0
-    loop i < nodeCount {
-      let node: view SceneNode => nodeAt(this: scene, idx: i)
-      # Explicit struct construction (not `let entity: EntityId =
-      # mountEntity`) — the Live VM treats the latter as a view-ref
-      # bind and then refuses the reassignment on the next branch.
-      var entityId: EntityId = { index: mountEntityId.index, generation: mountEntityId.generation }
-      if i is not rootIdx {
-        entityId = createEntity(world: world)
-      }
-      appendEntityListSI(lst: entitiesByNodeIndex, value: entityId)
-      if pageId.length() is 0 {
-        nodeIdsMap.set(k: node.nodeId, value: entityId.index)
-      } else {
-        let key: String = pageScopedKey(pageId: pageId, nodeId: node.nodeId)
-        nodeIdsMap.set(k: key, value: entityId.index)
-      }
-      i = i + 1
-    }
-
-    # NOTE: tagging mountEntity with PageRoot moved out of here in
-    # slice 4b — callers tag explicitly when they own the page.
-
-    # Pass 2: apply components. For the scene's root node we skip
-    # placement components — those belong to the mount entity. Other
-    # nodes get all their components applied via `applyComponentByName`.
-    let docView: view JsonDoc => scene.doc
-    var j: Int = 0
-    loop j < nodeCount {
-      let node: view SceneNode => nodeAt(this: scene, idx: j)
-      let entityId: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: j)
-      let isRoot: Bool = j is rootIdx
-      let source: SceneSource = {
-        sceneId: "{scene.sceneId}"
-        nodeId: "{node.nodeId}"
-        root: isRoot and markSourceRoot
-      }
-      componentSet(this: world.sceneSources, entityId: entityId, data: source)
-
-      let bag: JsonValue = Json.jsonValueAt(doc: docView, idx: node.componentsValueIdx)
-      let keyCount: Int = Json.objectLen(this: bag)
-      var k: Int = 0
-      # A node listing `bundles` mounts its EXPANSION (ui/SceneBundles) instead
-      # of its bare bag; the root's placement is skipped the same way.
-      if Json.field(doc: docView, this: bag, key: bundlesKey) >= 0 {
-        applyExpandedBag(
-          world: world
-          entityId: entityId
-          local: ownBundles
-          doc: docView
-          bag: bag
-          sceneId: scene.sceneId
-          nodeId: node.nodeId
-          skipPlacement: isRoot and keepRootPlacement is false
-        )
-        k = keyCount
-      }
-      loop k < keyCount {
-        let key: String = Json.objectKeyAt(doc: docView, this: bag, idx: k)
-        let childrenKey: String = "Children"
-        var skip: Bool = false
-        if key is childrenKey {
-          skip = true
+    if let rootIdx: Int = sceneNodeIndex(this: scene, nodeId: scene.rootNodeId) {
+      # Pass 1: allocate entities. The scene's root maps to `mountEntityId`;
+      # every other node gets a fresh entity.
+      var entitiesByNodeIndex: List(EntityId) = List.create(EntityId, cap: nodeCount)
+      let nodeIdsMap: mod StringMap(Int) => world.nodeIds
+      var i: Int = 0
+      loop i < nodeCount {
+        let node: view SceneNode => nodeAt(this: scene, idx: i)
+        # Explicit struct construction (not `let entity: EntityId =
+        # mountEntity`) — the Live VM treats the latter as a view-ref
+        # bind and then refuses the reassignment on the next branch.
+        var entityId: EntityId = {
+          index: mountEntityId.index
+          generation: mountEntityId.generation
         }
-        if isRoot and keepRootPlacement is false {
-          if isPlacementComponent(name: key) {
-            skip = true
-          }
+        if i is not rootIdx {
+          entityId = createEntity(world: world)
         }
-        if skip is false {
-          let valueAtKey: JsonValue = Json.objectValueAt(doc: docView, this: bag, idx: k)
-          applyComponentByName(
+        appendEntityListSI(lst: entitiesByNodeIndex, value: entityId)
+        if pageId.length() is 0 {
+          nodeIdsMap.set(k: node.nodeId, value: entityId.index)
+        } else {
+          let key: String = pageScopedKey(pageId: pageId, nodeId: node.nodeId)
+          nodeIdsMap.set(k: key, value: entityId.index)
+        }
+        i = i + 1
+      }
+
+      # NOTE: tagging mountEntity with PageRoot moved out of here in
+      # slice 4b — callers tag explicitly when they own the page.
+
+      # Pass 2: apply components. For the scene's root node we skip
+      # placement components — those belong to the mount entity. Other
+      # nodes get all their components applied via `applyComponentByName`.
+      let docView: view JsonDoc => scene.doc
+      var j: Int = 0
+      loop j < nodeCount {
+        let node: view SceneNode => nodeAt(this: scene, idx: j)
+        let entityId: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: j)
+        let isRoot: Bool = j is rootIdx
+        let source: SceneSource = {
+          sceneId: "{scene.sceneId}"
+          nodeId: "{node.nodeId}"
+          root: isRoot and markSourceRoot
+        }
+        componentSet(this: world.sceneSources, entityId: entityId, data: source)
+
+        let bag: JsonValue = Json.jsonValueAt(doc: docView, idx: node.componentsValueIdx)
+        let keyCount: Int = Json.objectLen(this: bag)
+        var k: Int = 0
+        # A node listing `bundles` mounts its EXPANSION (ui/SceneBundles) instead
+        # of its bare bag; the root's placement is skipped the same way.
+        if Json.field(doc: docView, this: bag, key: bundlesKey) >= 0 {
+          applyExpandedBag(
             world: world
             entityId: entityId
-            name: key
+            local: ownBundles
             doc: docView
-            val: valueAtKey
+            bag: bag
             sceneId: scene.sceneId
             nodeId: node.nodeId
+            skipPlacement: isRoot and keepRootPlacement is false
           )
+          k = keyCount
         }
-        k = k + 1
-      }
-      j = j + 1
-    }
-
-    # Pass 3: build hierarchy (Children + Parent).
-    var p: Int = 0
-    loop p < nodeCount {
-      let node: view SceneNode => nodeAt(this: scene, idx: p)
-      let parentEntityId: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: p)
-      let kn: Int = node.childrenIds.length
-      var q: Int = 0
-      loop q < kn {
-        if let childId: String = node.childrenIds.copyAt(index: q) {
-          let childIdx: Int = sceneNodeIndex(this: scene, nodeId: childId)
-          if childIdx >= 0 {
-            let childEntityId: EntityId = rae_ext_rae_buf_get(
-              buf: entitiesByNodeIndex.data
-              index: childIdx
-            )
-            # #726: set only Parent; HierarchySystem.setParent keeps the derived
-            # Children cache in lock-step (authored order via call order).
-            setParent(
-              parents: uiSystems.hierarchy.parents
-              childrens: world.childrens
-              child: childEntityId
-              parent: parentEntityId
+        loop k < keyCount {
+          let key: String = Json.objectKeyAt(doc: docView, this: bag, idx: k)
+          let childrenKey: String = "Children"
+          var skip: Bool = false
+          if key is childrenKey {
+            skip = true
+          }
+          if isRoot and keepRootPlacement is false {
+            if isPlacementComponent(name: key) {
+              skip = true
+            }
+          }
+          if skip is false {
+            let valueAtKey: JsonValue = Json.objectValueAt(doc: docView, this: bag, idx: k)
+            applyComponentByName(
+              world: world
+              entityId: entityId
+              name: key
+              doc: docView
+              val: valueAtKey
+              sceneId: scene.sceneId
+              nodeId: node.nodeId
             )
           }
+          k = k + 1
         }
-        q = q + 1
+        j = j + 1
       }
-      p = p + 1
-    }
 
-    # Pass 4: apply overrides.
-    let on: Int = overrides.length
-    var oi: Int = 0
-    loop oi < on {
-      let o: SceneOverride = rae_ext_rae_buf_get(buf: overrides.data, index: oi)
-      let nodeIdx: Int = sceneNodeIndex(this: scene, nodeId: o.nodeId)
-      if nodeIdx >= 0 {
-        let targetEntityId: EntityId = rae_ext_rae_buf_get(
-          buf: entitiesByNodeIndex.data
-          index: nodeIdx
-        )
-        applyOverride(world: world, entityId: targetEntityId, override: o)
+      # Pass 3: build hierarchy (Children + Parent).
+      var p: Int = 0
+      loop p < nodeCount {
+        let node: view SceneNode => nodeAt(this: scene, idx: p)
+        let parentEntityId: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: p)
+        let kn: Int = node.childrenIds.length
+        var q: Int = 0
+        loop q < kn {
+          if let childId: String = node.childrenIds.copyAt(index: q) {
+            if let childIdx: Int = sceneNodeIndex(this: scene, nodeId: childId) {
+              let childEntityId: EntityId = rae_ext_rae_buf_get(
+                buf: entitiesByNodeIndex.data
+                index: childIdx
+              )
+              # #726: set only Parent; HierarchySystem.setParent keeps the derived
+              # Children cache in lock-step (authored order via call order).
+              setParent(
+                parents: uiSystems.hierarchy.parents
+                childrens: world.childrens
+                child: childEntityId
+                parent: parentEntityId
+              )
+            }
+          }
+          q = q + 1
+        }
+        p = p + 1
       }
-      oi = oi + 1
-    }
 
-    ret mountEntityId
+      # Pass 4: apply overrides.
+      let on: Int = overrides.length
+      var oi: Int = 0
+      loop oi < on {
+        let o: SceneOverride = rae_ext_rae_buf_get(buf: overrides.data, index: oi)
+        if let nodeIdx: Int = sceneNodeIndex(this: scene, nodeId: o.nodeId) {
+          let targetEntityId: EntityId = rae_ext_rae_buf_get(
+            buf: entitiesByNodeIndex.data
+            index: nodeIdx
+          )
+          applyOverride(world: world, entityId: targetEntityId, override: o)
+        }
+        oi = oi + 1
+      }
+
+      ret mountEntityId
+    }
+    ret noEntity()
   }
 }
 

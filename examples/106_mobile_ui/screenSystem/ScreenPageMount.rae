@@ -23,8 +23,20 @@ func mountScreenPage(
 ) ret EntityId {
   let pageIdCopy: String = "{page.pageId}"
   let overrides: List(SceneOverride) = emptyOverrides()
-  let sceneIndex: Int = sceneRegistryIndex(reg: scenes.pages, key: page.pageId)
-  if sceneIndex < 0 {
+  if let sceneIndex: Int = sceneRegistryIndex(reg: scenes.pages, key: page.pageId) {
+    let scene: view Scene => sceneRegistryGet(reg: scenes.pages, idx: sceneIndex)
+    ret mountPageOrError(
+      world: world
+      uiSystems: uiSystems
+      pageId: own pageIdCopy
+      scene: scene
+      overrides: overrides
+      w: viewport.areaDuW
+      h: viewport.areaDuH
+      sceneLabel: page.label
+      subScenes: scenes.subScenes
+    )
+  } else {
     log("[scene-error] no page scene registered for {page.pageId}")
     let missing: Scene = parseScene(source: "")
     ret mountPageOrError(
@@ -39,16 +51,4 @@ func mountScreenPage(
       subScenes: scenes.subScenes
     )
   }
-  let scene: view Scene => sceneRegistryGet(reg: scenes.pages, idx: sceneIndex)
-  ret mountPageOrError(
-    world: world
-    uiSystems: uiSystems
-    pageId: own pageIdCopy
-    scene: scene
-    overrides: overrides
-    w: viewport.areaDuW
-    h: viewport.areaDuH
-    sceneLabel: page.label
-    subScenes: scenes.subScenes
-  )
 }

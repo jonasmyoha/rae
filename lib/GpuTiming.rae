@@ -18,7 +18,7 @@
 # does not support timestamps inside an encoder, only at pass begin/end).
 #
 # Usage per render/compute pass:
-#   let tsIdx = passBegin(name: "gbuffer")
+#   let tsIdx: opt Int = passBegin(timing: timing, name: "gbuffer")
 #   let rpDesc = { ...attachments..., timestampWrites: writesPtr() }
 #   ... begin pass, draw, end pass ...
 #   resolve(enc: enc, idx: tsIdx)               # before finish
@@ -134,16 +134,16 @@ func frameBegin(timing: mod GpuTiming) pub {
 }
 
 # Claim a pass slot and point the shared timestampWrites at its two query indices.
-# Returns the pass index for resolve, or -1 when disabled / budget full.
+# Returns the pass index for resolve, or none when disabled / budget full.
 # Call immediately before building the pass descriptor.
-func passBegin(timing: mod GpuTiming, name: view String) pub ret Int {
+func passBegin(timing: mod GpuTiming, name: view String) ret opt Int {
   unsafe {
     if timing.enabled is false {
-      ret -1
+      ret none
     }
     let idx: Int = timing.count
     if idx >= gtMaxPasses {
-      ret -1
+      ret none
     }
     timing.names.add(value: "{name}")
     timing.tsw.set(
@@ -173,19 +173,21 @@ func writesPtr(timing: view GpuTiming) pub ret Ptr {
 # Resolve a pass's timestamp pair into the resolve buffer. Recorded on that pass's
 # encoder after the pass ends, before finish. (Resolve is a normal encoder command
 # and needs no inside-encoder feature.)
-func resolve(timing: view GpuTiming, enc: copy Ptr, idx: copy Int) pub {
+func resolve(timing: view GpuTiming, enc: copy Ptr, idx: opt copy Int) {
   unsafe {
-    if timing.enabled is false or idx < 0 {
+    if timing.enabled is false {
       ret
     }
-    wgpuCommandEncoderResolveQuerySet(
-      commandEncoder: enc
-      querySet: timing.querySet
-      firstQuery: (idx * 2) as UInt32
-      queryCount: 2 as UInt32
-      destination: timing.resolveBuffer
-      destinationOffset: (idx * 16) as UInt64
-    )
+    if let passIdx: view Int => idx {
+      wgpuCommandEncoderResolveQuerySet(
+        commandEncoder: enc
+        querySet: timing.querySet
+        firstQuery: (passIdx * 2) as UInt32
+        queryCount: 2 as UInt32
+        destination: timing.resolveBuffer
+        destinationOffset: (passIdx * 16) as UInt64
+      )
+    }
   }
 }
 

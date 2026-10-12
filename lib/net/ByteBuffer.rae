@@ -198,12 +198,12 @@ func byteBufferClear(buffer: mod ByteBuffer) {
 }
 
 # Where `pattern`'s bytes first occur in the unread bytes at or after `from`
-# (an unread index), -1 when they do not. An empty pattern is found at `from`.
-func byteBufferIndexOf(buffer: view ByteBuffer, pattern: view String, from: view Int) ret Int {
+# (an unread index), none when they do not. An empty pattern is found at `from`.
+func byteBufferIndexOf(buffer: view ByteBuffer, pattern: view String, from: view Int) ret opt Int {
   let length: Int = byteBufferLength(buffer: buffer)
   let patternLength: Int = pattern.length()
   if from < 0 or from > length {
-    ret -1
+    ret none
   }
   if patternLength is 0 {
     ret from
@@ -224,7 +224,7 @@ func byteBufferIndexOf(buffer: view ByteBuffer, pattern: view String, from: view
     }
     position = position + 1
   }
-  ret -1
+  ret none
 }
 
 # `count` unread bytes from `start` (an unread index) as a String; "" when the

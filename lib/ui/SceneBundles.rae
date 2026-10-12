@@ -100,13 +100,13 @@ func cloneBundleSet(set: view BundleSet) ret BundleSet {
   ret duplicate
 }
 
-func bundleIndex(set: view BundleSet, name: view String) ret Int {
+func bundleIndex(set: view BundleSet, name: view String) ret opt Int {
   loop var i: Int = 0, i < set.names.length, ++i {
     if set.names.copyAtFallback(index: i, fallback: "") is name {
       ret i
     }
   }
-  ret -1
+  ret none
 }
 
 # Add every bundle of the scene's top-level `bundles` block that `out` does not
@@ -125,7 +125,7 @@ func parseBundlesInto(out: mod BundleSet, scene: view Scene) {
   let count: Int = Json.objectLen(this: block)
   loop var i: Int = 0, i < count, ++i {
     let name: String = Json.objectKeyAt(doc: doc, this: block, idx: i)
-    if bundleIndex(set: out, name: name) >= 0 {
+    if bundleIndex(set: out, name: name) is not none {
       continue
     }
     let value: JsonValue = Json.objectValueAt(doc: doc, this: block, idx: i)
@@ -147,8 +147,7 @@ func sceneImportedBundles(
   parseBundlesInto(out: set, scene: entry)
   loop var i: Int = 0, i < assets.importedIds.length, ++i {
     if let importId: String = assets.importedIds.copyAt(index: i) {
-      let idx: Int = sceneRegistryIndex(reg: registry, key: importId)
-      if idx >= 0 {
+      if let idx: Int = sceneRegistryIndex(reg: registry, key: importId) {
         let imported: view Scene => sceneRegistryGet(reg: registry, idx: idx)
         parseBundlesInto(out: set, scene: imported)
       }
@@ -179,13 +178,13 @@ func createExpandedComponents() ret ExpandedComponents {
   }
 }
 
-func expandedIndex(expanded: view ExpandedComponents, name: view String) ret Int {
+func expandedIndex(expanded: view ExpandedComponents, name: view String) ret opt Int {
   loop var i: Int = 0, i < expanded.names.length, ++i {
     if expanded.names.copyAtFallback(index: i, fallback: "") is name {
       ret i
     }
   }
-  ret -1
+  ret none
 }
 
 # Merge `object` (a component's JSON object) into the expansion, top-level
@@ -198,68 +197,68 @@ func mergeComponentObject(
   object: view JsonValue
   fromBundle: view Bool
 ) {
-  let existing: Int = expandedIndex(expanded: expanded, name: name)
-  if existing < 0 {
+  if let existing: Int = expandedIndex(expanded: expanded, name: name) {
+    # Field-wise: the existing fields, each replaced by `object`'s when it has
+    # the key, then `object`'s new keys appended. A non-object value (a token
+    # string such as `"Padding": "insetPill"`) replaces the whole component.
+    let baseDoc: JsonDoc = Json.parseJson(
+      source: expanded.jsons.copyAtFallback(index: existing, fallback: "\{\}")
+    )
+    let base: JsonValue = Json.root(doc: baseDoc)
+    var merged: String = ""
+    if Json.objectLen(this: object) is 0 and object.kind is not JsonKind.object {
+      merged = Json.stringify(doc: doc, value: object)
+    } else if base.kind is not JsonKind.object {
+      merged = Json.stringify(doc: doc, value: object)
+    } else {
+      var builder: JsonBuilder = Json.jbObject()
+      let baseCount: Int = Json.objectLen(this: base)
+      loop var i: Int = 0, i < baseCount, ++i {
+        let key: String = Json.objectKeyAt(doc: baseDoc, this: base, idx: i)
+        let overrideIdx: Int = Json.field(doc: doc, this: object, key: key)
+        if overrideIdx >= 0 {
+          Json.jbField(
+            builder: builder
+            key: key
+            valueJson: Json.stringify(doc: doc, value: Json.jsonValueAt(doc: doc, idx: overrideIdx))
+          )
+        } else {
+          Json.jbField(
+            builder: builder
+            key: key
+            valueJson: Json.stringify(
+              doc: baseDoc
+              value: Json.objectValueAt(doc: baseDoc, this: base, idx: i)
+            )
+          )
+        }
+      }
+      let objectCount: Int = Json.objectLen(this: object)
+      loop var i: Int = 0, i < objectCount, ++i {
+        let key: String = Json.objectKeyAt(doc: doc, this: object, idx: i)
+        if Json.field(doc: baseDoc, this: base, key: key) < 0 {
+          Json.jbField(
+            builder: builder
+            key: key
+            valueJson: Json.stringify(
+              doc: doc
+              value: Json.objectValueAt(doc: doc, this: object, idx: i)
+            )
+          )
+        }
+      }
+      merged = Json.jbEndObject(builder: builder)
+    }
+    expanded.jsons.set(index: existing, value: merged)
+    if fromBundle is false {
+      expanded.overridden.set(index: existing, value: true)
+    }
+  } else {
     expanded.names.add(value: "{name}")
     expanded.jsons.add(value: Json.stringify(doc: doc, value: object))
     expanded.inherited.add(value: fromBundle)
     expanded.overridden.add(value: false)
     ret
-  }
-  # Field-wise: the existing fields, each replaced by `object`'s when it has
-  # the key, then `object`'s new keys appended. A non-object value (a token
-  # string such as `"Padding": "insetPill"`) replaces the whole component.
-  let baseDoc: JsonDoc = Json.parseJson(
-    source: expanded.jsons.copyAtFallback(index: existing, fallback: "\{\}")
-  )
-  let base: JsonValue = Json.root(doc: baseDoc)
-  var merged: String = ""
-  if Json.objectLen(this: object) is 0 and object.kind is not JsonKind.object {
-    merged = Json.stringify(doc: doc, value: object)
-  } else if base.kind is not JsonKind.object {
-    merged = Json.stringify(doc: doc, value: object)
-  } else {
-    var builder: JsonBuilder = Json.jbObject()
-    let baseCount: Int = Json.objectLen(this: base)
-    loop var i: Int = 0, i < baseCount, ++i {
-      let key: String = Json.objectKeyAt(doc: baseDoc, this: base, idx: i)
-      let overrideIdx: Int = Json.field(doc: doc, this: object, key: key)
-      if overrideIdx >= 0 {
-        Json.jbField(
-          builder: builder
-          key: key
-          valueJson: Json.stringify(doc: doc, value: Json.jsonValueAt(doc: doc, idx: overrideIdx))
-        )
-      } else {
-        Json.jbField(
-          builder: builder
-          key: key
-          valueJson: Json.stringify(
-            doc: baseDoc
-            value: Json.objectValueAt(doc: baseDoc, this: base, idx: i)
-          )
-        )
-      }
-    }
-    let objectCount: Int = Json.objectLen(this: object)
-    loop var i: Int = 0, i < objectCount, ++i {
-      let key: String = Json.objectKeyAt(doc: doc, this: object, idx: i)
-      if Json.field(doc: baseDoc, this: base, key: key) < 0 {
-        Json.jbField(
-          builder: builder
-          key: key
-          valueJson: Json.stringify(
-            doc: doc
-            value: Json.objectValueAt(doc: doc, this: object, idx: i)
-          )
-        )
-      }
-    }
-    merged = Json.jbEndObject(builder: builder)
-  }
-  expanded.jsons.set(index: existing, value: merged)
-  if fromBundle is false {
-    expanded.overridden.set(index: existing, value: true)
   }
 }
 
@@ -300,12 +299,12 @@ func expandBundleInto(
     ret
   }
   var json: String = ""
-  let ownIdx: Int = bundleIndex(set: local, name: name)
-  if ownIdx >= 0 {
+  if let ownIdx: Int = bundleIndex(set: local, name: name) {
     json = local.jsons.copyAtFallback(index: ownIdx, fallback: "")
   } else {
-    let importedIdx: Int = bundleIndex(set: imported, name: name)
-    if importedIdx < 0 {
+    if let importedIdx: Int = bundleIndex(set: imported, name: name) {
+      json = imported.jsons.copyAtFallback(index: importedIdx, fallback: "")
+    } else {
       reportSceneDiagnostic(
         diagnostics: diagnostics
         sceneId: sceneId
@@ -316,7 +315,6 @@ func expandBundleInto(
       )
       ret
     }
-    json = imported.jsons.copyAtFallback(index: importedIdx, fallback: "")
   }
   let doc: JsonDoc = Json.parseJson(source: json)
   let object: JsonValue = Json.root(doc: doc)

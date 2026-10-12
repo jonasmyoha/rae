@@ -160,52 +160,51 @@ func createComputePipelineSource(
   if wgsl.length() is 0 or entryPoint.length() is 0 {
     ret none
   }
-  let slot: Int = findFreeSlot(table: resources.pipelines, capacity: resources.capacity)
-  if slot < 0 {
-    ret none
-  }
-  unsafe {
-    let sourceC: Buffer(Any) = wgsl.toCStr()
-    var sourceList: List(WGPUShaderSourceWGSL) = List.create(WGPUShaderSourceWGSL, cap: 1)
-    sourceList.add(
-      value: {
-        chain: { sType: WGPUSType_ShaderSourceWGSL }
-        code: { data: sourceC, length: WGPU_STRLEN }
+  if let slot: Int = findFreeSlot(table: resources.pipelines, capacity: resources.capacity) {
+    unsafe {
+      let sourceC: Buffer(Any) = wgsl.toCStr()
+      var sourceList: List(WGPUShaderSourceWGSL) = List.create(WGPUShaderSourceWGSL, cap: 1)
+      sourceList.add(
+        value: {
+          chain: { sType: WGPUSType_ShaderSourceWGSL }
+          code: { data: sourceC, length: WGPU_STRLEN }
+        }
+      )
+      let moduleDescriptor: WGPUShaderModuleDescriptor = { nextInChain: sourceList.data }
+      let shaderModule: Ptr = wgpuDeviceCreateShaderModule(
+        device: webgpuDevice()
+        descriptor: moduleDescriptor
+      )
+      if shaderModule is webgpuNull() {
+        ret none
       }
-    )
-    let moduleDescriptor: WGPUShaderModuleDescriptor = { nextInChain: sourceList.data }
-    let shaderModule: Ptr = wgpuDeviceCreateShaderModule(
-      device: webgpuDevice()
-      descriptor: moduleDescriptor
-    )
-    if shaderModule is webgpuNull() {
-      ret none
-    }
-    let entryC: Buffer(Any) = entryPoint.toCStr()
-    let entries: List(WGPUConstantEntry) = shaderConstantEntries(constants: constants)
-    let pipelineDescriptor: WGPUComputePipelineDescriptor = {
-      compute: {
-        module: shaderModule
-        entryPoint: { data: entryC, length: WGPU_STRLEN }
-        constantCount: entries.length as UInt64
-        constants: entries.data
+      let entryC: Buffer(Any) = entryPoint.toCStr()
+      let entries: List(WGPUConstantEntry) = shaderConstantEntries(constants: constants)
+      let pipelineDescriptor: WGPUComputePipelineDescriptor = {
+        compute: {
+          module: shaderModule
+          entryPoint: { data: entryC, length: WGPU_STRLEN }
+          constantCount: entries.length as UInt64
+          constants: entries.data
+        }
       }
+      let handle: Ptr = wgpuDeviceCreateComputePipeline(
+        device: webgpuDevice()
+        descriptor: pipelineDescriptor
+      )
+      wgpuShaderModuleRelease(shaderModule: shaderModule)
+      if handle is webgpuNull() {
+        ret none
+      }
+      storeHandle(table: resources.pipelines, slot: slot, handle: handle)
     }
-    let handle: Ptr = wgpuDeviceCreateComputePipeline(
-      device: webgpuDevice()
-      descriptor: pipelineDescriptor
-    )
-    wgpuShaderModuleRelease(shaderModule: shaderModule)
-    if handle is webgpuNull() {
-      ret none
+    ret PipelineId {
+      managerTag: resources.managerTag
+      slot: slot
+      generation: slotGeneration(table: resources.pipelines, slot: slot)
     }
-    storeHandle(table: resources.pipelines, slot: slot, handle: handle)
   }
-  ret PipelineId {
-    managerTag: resources.managerTag
-    slot: slot
-    generation: slotGeneration(table: resources.pipelines, slot: slot)
-  }
+  ret none
 }
 
 func retirePipeline(resources: mod GpuResources, id: view PipelineId) ret Bool {
@@ -239,130 +238,132 @@ func createBindGroup(
   if isValidPipeline(resources: resources, id: pipeline) is false {
     ret none
   }
-  let slot: Int = findFreeSlot(table: resources.bindGroups, capacity: resources.capacity)
-  if slot < 0 {
-    ret none
-  }
-  let start: Int = resources.depKinds.length
-  appendDep(
-    resources: resources
-    kind: kindPipeline
-    slot: pipeline.slot
-    generation: pipeline.generation
-  )
-  var entries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: 4)
-  var binding: Int = 0
-  var i: Int = 0
-  loop i < buffers.length {
-    if let buffer: BufferId = buffers.copyAt(index: i) {
-      if isValidBuffer(resources: resources, id: buffer) is false {
-        ret none
-      }
-      appendDep(
-        resources: resources
-        kind: kindBuffer
-        slot: buffer.slot
-        generation: buffer.generation
-      )
-      unsafe {
-        entries.add(
-          value: {
-            binding: binding as UInt32
-            buffer: slotHandle(table: resources.buffers, slot: buffer.slot)
-            size: bufferSize(resources: resources, id: buffer) as UInt64
-          }
-        )
-      }
-      binding = binding + 1
-    }
-    i = i + 1
-  }
-  i = 0
-  loop i < textureViews.length {
-    if let textureView: TextureViewId = textureViews.copyAt(index: i) {
-      if isValidTextureView(resources: resources, id: textureView) is false {
-        ret none
-      }
-      appendDep(
-        resources: resources
-        kind: kindTextureView
-        slot: textureView.slot
-        generation: textureView.generation
-      )
-      let parent: Int = intAt(list: resources.textureViews.parentSlot, index: textureView.slot)
-      if parent >= 0 {
+  if let slot: Int = findFreeSlot(table: resources.bindGroups, capacity: resources.capacity) {
+    let start: Int = resources.depKinds.length
+    appendDep(
+      resources: resources
+      kind: kindPipeline
+      slot: pipeline.slot
+      generation: pipeline.generation
+    )
+    var entries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: 4)
+    var binding: Int = 0
+    var i: Int = 0
+    loop i < buffers.length {
+      if let buffer: BufferId = buffers.copyAt(index: i) {
+        if isValidBuffer(resources: resources, id: buffer) is false {
+          ret none
+        }
         appendDep(
           resources: resources
-          kind: kindTexture
-          slot: parent
-          generation: intAt(list: resources.textureViews.parentGeneration, index: textureView.slot)
+          kind: kindBuffer
+          slot: buffer.slot
+          generation: buffer.generation
         )
+        unsafe {
+          entries.add(
+            value: {
+              binding: binding as UInt32
+              buffer: slotHandle(table: resources.buffers, slot: buffer.slot)
+              size: bufferSize(resources: resources, id: buffer) as UInt64
+            }
+          )
+        }
+        binding = binding + 1
       }
-      unsafe {
-        entries.add(
-          value: {
-            binding: binding as UInt32
-            textureView: slotHandle(table: resources.textureViews, slot: textureView.slot)
-          }
+      i = i + 1
+    }
+    i = 0
+    loop i < textureViews.length {
+      if let textureView: TextureViewId = textureViews.copyAt(index: i) {
+        if isValidTextureView(resources: resources, id: textureView) is false {
+          ret none
+        }
+        appendDep(
+          resources: resources
+          kind: kindTextureView
+          slot: textureView.slot
+          generation: textureView.generation
         )
+        let parent: Int = intAt(list: resources.textureViews.parentSlot, index: textureView.slot)
+        if parent >= 0 {
+          appendDep(
+            resources: resources
+            kind: kindTexture
+            slot: parent
+            generation: intAt(
+              list: resources.textureViews.parentGeneration
+              index: textureView.slot
+            )
+          )
+        }
+        unsafe {
+          entries.add(
+            value: {
+              binding: binding as UInt32
+              textureView: slotHandle(table: resources.textureViews, slot: textureView.slot)
+            }
+          )
+        }
+        binding = binding + 1
       }
-      binding = binding + 1
+      i = i + 1
     }
-    i = i + 1
-  }
-  i = 0
-  loop i < samplers.length {
-    if let sampler: SamplerId = samplers.copyAt(index: i) {
-      if isValidSampler(resources: resources, id: sampler) is false {
-        ret none
-      }
-      appendDep(
-        resources: resources
-        kind: kindSampler
-        slot: sampler.slot
-        generation: sampler.generation
-      )
-      unsafe {
-        entries.add(
-          value: {
-            binding: binding as UInt32
-            sampler: slotHandle(table: resources.samplers, slot: sampler.slot)
-          }
+    i = 0
+    loop i < samplers.length {
+      if let sampler: SamplerId = samplers.copyAt(index: i) {
+        if isValidSampler(resources: resources, id: sampler) is false {
+          ret none
+        }
+        appendDep(
+          resources: resources
+          kind: kindSampler
+          slot: sampler.slot
+          generation: sampler.generation
         )
+        unsafe {
+          entries.add(
+            value: {
+              binding: binding as UInt32
+              sampler: slotHandle(table: resources.samplers, slot: sampler.slot)
+            }
+          )
+        }
+        binding = binding + 1
       }
-      binding = binding + 1
+      i = i + 1
     }
-    i = i + 1
-  }
-  let count: Int = resources.depKinds.length - start
-  if sliceIsLive(resources: resources, start: start, count: count) is false {
-    ret none
-  }
-  unsafe {
-    let layout: Ptr = wgpuComputePipelineGetBindGroupLayout(
-      computePipeline: slotHandle(table: resources.pipelines, slot: pipeline.slot)
-      groupIndex: 0 as UInt32
-    )
-    let descriptor: WGPUBindGroupDescriptor = {
-      layout: layout
-      entryCount: entries.length as UInt64
-      entries: entries.data
-    }
-    let handle: Ptr = wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: descriptor)
-    wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
-    if handle is webgpuNull() {
+    let count: Int = resources.depKinds.length - start
+    if sliceIsLive(resources: resources, start: start, count: count) is false {
       ret none
     }
-    storeHandle(table: resources.bindGroups, slot: slot, handle: handle)
+    unsafe {
+      let layout: Ptr = wgpuComputePipelineGetBindGroupLayout(
+        computePipeline: slotHandle(table: resources.pipelines, slot: pipeline.slot)
+        groupIndex: 0 as UInt32
+      )
+      let descriptor: WGPUBindGroupDescriptor = {
+        layout: layout
+        entryCount: entries.length as UInt64
+        entries: entries.data
+      }
+      let handle: Ptr = wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: descriptor)
+      wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
+      if handle is webgpuNull() {
+        ret none
+      }
+      storeHandle(table: resources.bindGroups, slot: slot, handle: handle)
+    }
+    resources.bindGroups.depStart.set(index: slot, value: start)
+    resources.bindGroups.depCount.set(index: slot, value: count)
+    pinSlice(resources: resources, start: start, count: count)
+    ret BindGroupId {
+      managerTag: resources.managerTag
+      slot: slot
+      generation: slotGeneration(table: resources.bindGroups, slot: slot)
+    }
   }
-  resources.bindGroups.depStart.set(index: slot, value: start)
-  resources.bindGroups.depCount.set(index: slot, value: count)
-  pinSlice(resources: resources, start: start, count: count)
-  ret BindGroupId {
-    managerTag: resources.managerTag
-    slot: slot
-    generation: slotGeneration(table: resources.bindGroups, slot: slot)
-  }
+  ret none
 }
 
 # A bind group is usable only while every dependency is still live: a group
@@ -765,54 +766,53 @@ func submit(resources: mod GpuResources, recording: mod Recording) ret opt Submi
     }
     i = i + 1
   }
-  let slot: Int = findFreeSlot(table: resources.submissions, capacity: resources.capacity)
-  if slot < 0 {
-    ret none
-  }
-  let start: Int = resources.depKinds.length
-  i = 0
-  loop i < recording.useKinds.length {
-    appendDep(
-      resources: resources
-      kind: intAt(list: recording.useKinds, index: i)
-      slot: intAt(list: recording.useSlots, index: i)
-      generation: intAt(list: recording.useGenerations, index: i)
-    )
-    i = i + 1
-  }
-  let count: Int = recording.useKinds.length
-  var nativeIndex: Int = 0
-  unsafe {
-    let bufferDescriptor: WGPUCommandBufferDescriptor = { nextInChain: webgpuNull() }
-    let commandBuffer: Ptr = wgpuCommandEncoderFinish(
-      commandEncoder: recording.encoder
-      descriptor: bufferDescriptor
-    )
-    wgpuCommandEncoderRelease(commandEncoder: recording.encoder)
-    recording.encoder = webgpuNull()
-    if commandBuffer is webgpuNull() {
-      ret none
+  if let slot: Int = findFreeSlot(table: resources.submissions, capacity: resources.capacity) {
+    let start: Int = resources.depKinds.length
+    i = 0
+    loop i < recording.useKinds.length {
+      appendDep(
+        resources: resources
+        kind: intAt(list: recording.useKinds, index: i)
+        slot: intAt(list: recording.useSlots, index: i)
+        generation: intAt(list: recording.useGenerations, index: i)
+      )
+      i = i + 1
     }
-    var commands: List(Ptr) = List.create(Ptr, cap: 1)
-    commands.add(value: commandBuffer)
-    nativeIndex = wgpuQueueSubmitForIndex(
-      queue: webgpuQueue()
-      commandCount: 1 as UInt64
-      commands: commands.data
-    ) as Int
-    wgpuCommandBufferRelease(commandBuffer: commandBuffer)
-    webgpuWatchSubmission(index: nativeIndex as UInt64)
-    storeHandle(table: resources.submissions, slot: slot, handle: webgpuNull())
+    let count: Int = recording.useKinds.length
+    var nativeIndex: Int = 0
+    unsafe {
+      let bufferDescriptor: WGPUCommandBufferDescriptor = { nextInChain: webgpuNull() }
+      let commandBuffer: Ptr = wgpuCommandEncoderFinish(
+        commandEncoder: recording.encoder
+        descriptor: bufferDescriptor
+      )
+      wgpuCommandEncoderRelease(commandEncoder: recording.encoder)
+      recording.encoder = webgpuNull()
+      if commandBuffer is webgpuNull() {
+        ret none
+      }
+      var commands: List(Ptr) = List.create(Ptr, cap: 1)
+      commands.add(value: commandBuffer)
+      nativeIndex = wgpuQueueSubmitForIndex(
+        queue: webgpuQueue()
+        commandCount: 1 as UInt64
+        commands: commands.data
+      ) as Int
+      wgpuCommandBufferRelease(commandBuffer: commandBuffer)
+      webgpuWatchSubmission(index: nativeIndex as UInt64)
+      storeHandle(table: resources.submissions, slot: slot, handle: webgpuNull())
+    }
+    resources.submissions.nativeIndex.set(index: slot, value: nativeIndex)
+    resources.submissions.depStart.set(index: slot, value: start)
+    resources.submissions.depCount.set(index: slot, value: count)
+    pinSlice(resources: resources, start: start, count: count)
+    ret SubmissionId {
+      managerTag: resources.managerTag
+      slot: slot
+      generation: slotGeneration(table: resources.submissions, slot: slot)
+    }
   }
-  resources.submissions.nativeIndex.set(index: slot, value: nativeIndex)
-  resources.submissions.depStart.set(index: slot, value: start)
-  resources.submissions.depCount.set(index: slot, value: count)
-  pinSlice(resources: resources, start: start, count: count)
-  ret SubmissionId {
-    managerTag: resources.managerTag
-    slot: slot
-    generation: slotGeneration(table: resources.submissions, slot: slot)
-  }
+  ret none
 }
 
 # Nonblocking: -1 for an invalid ID, 0 while in flight, 1 once complete. The

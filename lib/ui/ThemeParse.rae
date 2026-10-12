@@ -494,13 +494,7 @@ func themeMergedTextChain(theme: view ResolvedTheme, name: view String) ret List
   var steps: Int = 0
   var walking: Bool = true
   loop walking {
-    let index: Int = themeTextStyleIndex(theme: theme, styleId: currentName)
-    if index < 0 {
-      if steps > 0 {
-        log("[theme] text style '{name}' extends unknown '{currentName}' — chain truncated")
-      }
-      walking = false
-    } else {
+    if let index: Int = themeTextStyleIndex(theme: theme, styleId: currentName) {
       up.add(value: index)
       seen.add(value: "{currentName}")
       var parentName: String = ""
@@ -519,6 +513,11 @@ func themeMergedTextChain(theme: view ResolvedTheme, name: view String) ret List
         steps = steps + 1
         currentName = "{parentName}"
       }
+    } else {
+      if steps > 0 {
+        log("[theme] text style '{name}' extends unknown '{currentName}' — chain truncated")
+      }
+      walking = false
     }
   }
   ret themeReverseIntList(src: up)
