@@ -87,19 +87,7 @@ func resolveAxisFromSize(
   }
   # Apply optional min/max clamps. -1 is the "no clamp" sentinel
   # (see components.rae's SizeAxis docstring).
-  if axis.min >= 0 {
-    let minF: Float = axis.min.toFloat()
-    if result < minF {
-      result = minF
-    }
-  }
-  if axis.max >= 0 {
-    let maxF: Float = axis.max.toFloat()
-    if result > maxF {
-      result = maxF
-    }
-  }
-  ret result
+  ret LayoutPlace.clampToSizeAxis(axis: axis, value: result)
 }
 
 # Apply Constraints (independent of Size) — width clamp.
