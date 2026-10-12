@@ -1,0 +1,146 @@
+# Two UI modes for an app's HUD scene: GAME (the default at every launch: the
+# play view, the touch stick, the app's own HUD) and EDITOR (the debugging
+# chrome — a camera bar, a settings panel, a log strip), switched by a "..."
+# button the scene puts in both. The mode is the scene's `editor` STATE (lib/ui
+# Frames S5): one state overlay turns the editor chrome on and the game layer
+# off, so no node is toggled by hand. Applied together with the scene's
+# pointer frames (`"when": { "pointer": "coarse" }` for a finger) and a `short`
+# state for a low window (a phone on its side) — every time one of them
+# changes.
+#
+#   let uiModes: UiModes = createUiModes(world: w, uiSystems: s, path: "assets/ui.raescene")
+#   ...each frame, before layout:
+#   if updateUiModes(world: w, uiSystems: s, uiModes: uiModes) or toggleUiMode(world: w,
+#      uiSystems: s, uiModes: uiModes) { ...lay the UI out again... }
+#   if uiModes.editor { ...draw the editor-only overlays... }
+#
+# Applying frames and states resets the nodes they name to the scene's authored
+# components, so an app that writes those nodes at run time writes them again
+# when `generation` moves. RAE_UI_MODE=editor starts in EDITOR, RAE_UI_FRAME=<id>
+# forces a frame (both for screenshots).
+import Sys
+open Device
+open ui/Scene
+open ui/SceneFile
+open ui/Frames
+open ui/Ecs
+open ui/UiSystems
+open app3d/UiShell
+
+# The scene's frames and states as applied: the scene (they are read from
+# it), the main pointer the frames were chosen for, the mode, whether the
+# window is short, and how many times they have been applied.
+type UiModes {
+  scene: Scene
+  pointer: Pointer
+  # EDITOR mode on: the scene's `editor` state is active
+  editor: Bool
+  # A low window (a phone on its side): the scene's `short` state is active
+  short: Bool
+  generation: Int
+}
+
+# The "..." button's action id
+const uiModeActionId: String = "ui.mode"
+
+const uiModeEditorState: String = "editor"
+
+const uiModeShortState: String = "short"
+
+# A window under this many points tall gets the `short` state
+const uiModeShortWindowPoints: Float = 520.0
+
+# Is a window `height` points tall short (a phone on its side)?
+func isShortWindowHeight(height: view Float) ret Bool {
+  ret height > 0.0 and height < uiModeShortWindowPoints
+}
+
+# The scene states active for a mode and window shape.
+func uiModeStates(editor: view Bool, short: view Bool) ret List(String) {
+  var states: List(String) = List.create(String, cap: 2)
+  if editor {
+    states.add(value: uiModeEditorState)
+  }
+  if short {
+    states.add(value: uiModeShortState)
+  }
+  ret states
+}
+
+# Apply the scene's frames (for the main pointer) and its states (the mode,
+# the window shape).
+func applyUiModes(world: mod UiWorld, uiSystems: mod UiSystems, uiModes: view UiModes) {
+  let frameIndex: Int = applySceneFramesToPageWithStates(
+    world: world
+    uiSystems: uiSystems
+    scene: uiModes.scene
+    pageId: ""
+    windowPtW: world.layoutW
+    forcedFrameId: Sys.getEnv(name: "RAE_UI_FRAME")
+    activeStates: uiModeStates(editor: uiModes.editor, short: uiModes.short)
+  )
+}
+
+# Read `path`'s frames and states and apply them for now: GAME mode (EDITOR
+# under RAE_UI_MODE=editor), the main pointer, the window's shape.
+func createUiModes(world: mod UiWorld, uiSystems: mod UiSystems, path: view String) ret UiModes {
+  let scene: Scene = loadSceneFile(path: path)
+  let uiModes: UiModes = {
+    scene: own scene
+    pointer: primaryPointer()
+    editor: Sys.getEnv(name: "RAE_UI_MODE") is "editor"
+    short: isShortWindowHeight(height: world.layoutH)
+    generation: 1
+  }
+  applyUiModes(world: world, uiSystems: uiSystems, uiModes: uiModes)
+  ret uiModes
+}
+
+# Switch to the other mode now (and apply it).
+func setUiModeEditor(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  uiModes: mod UiModes
+  editor: view Bool
+) {
+  uiModes.editor = editor
+  uiModes.generation = uiModes.generation + 1
+  applyUiModes(world: world, uiSystems: uiSystems, uiModes: uiModes)
+}
+
+# The "..." button was tapped this frame: the other mode, applied. True when it
+# was (the caller lays the UI out again).
+func toggleUiMode(world: mod UiWorld, uiSystems: mod UiSystems, uiModes: mod UiModes) ret Bool {
+  var tapped: Bool = false
+  loop var i: Int = 0, i < uiActionCount(world: world), ++i {
+    if uiActionAt(world: world, index: i) is uiModeActionId {
+      tapped = true
+    }
+  }
+  if tapped is false {
+    ret false
+  }
+  setUiModeEditor(
+    world: world
+    uiSystems: uiSystems
+    uiModes: uiModes
+    editor: uiModes.editor is false
+  )
+  ret true
+}
+
+# The main pointer changed (a trackpad case on an iPad), or the window turned
+# short or tall (a phone rotated): apply the frames and states again. True when
+# it did (the caller lays the UI out again).
+func updateUiModes(world: mod UiWorld, uiSystems: mod UiSystems, uiModes: mod UiModes) ret Bool {
+  let pointer: Pointer = primaryPointer()
+  let short: Bool = isShortWindowHeight(height: world.layoutH)
+  if pointer is uiModes.pointer and short is uiModes.short {
+    ret false
+  }
+  uiModes.pointer = pointer
+  uiModes.short = short
+  uiModes.generation = uiModes.generation + 1
+  applyUiModes(world: world, uiSystems: uiSystems, uiModes: uiModes)
+  ret true
+}
