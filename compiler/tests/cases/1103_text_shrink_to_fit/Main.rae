@@ -1,0 +1,60 @@
+import String
+import ui/Components
+open ui/TextStyle
+open ui/Ecs
+open ui/Scene
+open ui/SceneLoader
+open ui/UiSystems
+open ecs/Entity
+open ecs/ComponentTable
+
+# `"shrinkToFit": true` on a Text: a single line wider than its node is drawn
+# smaller so it fits (UIKit's adjustsFontSizeToFitWidth), down to
+# textShrinkMinScale of its style's size; past that it overflows as before. A
+# line that already fits keeps its size. For labels and table rows on a narrow
+# screen; wrapping is WrapWidthMode.
+func buildScene() ret String {
+  var s: String = ""
+  s = s.concat(other: "\{")
+  s = s.concat(
+    other: "\"type\":\"Scene\",\"version\":2,\"sceneId\":\"shrink-test\",\"root\":\"Root\","
+  )
+  s = s.concat(other: "\"nodes\":\{")
+  s = s.concat(other: "\"Root\":\{\"Children\":[\"Fits\",\"Plain\"]\},")
+  s = s.concat(
+    other: "\"Fits\":\{\"Text\":\{\"text\":\"A long results line\",\"styleId\":\"body\",\"shrinkToFit\":true\}\},"
+  )
+  s = s.concat(other: "\"Plain\":\{\"Text\":\{\"text\":\"A title\",\"styleId\":\"body\"\}\}")
+  s = s.concat(other: "\}")
+  s = s.concat(other: "\}")
+  ret s
+}
+
+func shrinkOf(world: view UiWorld, pageId: view String, nodeId: view String) ret Bool {
+  if let raw: Int = findNodeInPage(world: world, pageId: pageId, nodeId: nodeId) {
+    let entityId: EntityId = nodeEntityId(world: world, index: raw)
+    ret componentView(this: world.texts, entityId: entityId).shrinkToFit
+  }
+  ret false
+}
+
+func main() {
+  # The rule
+  log("fits: {shrinkTextSizeToFit(size: 16.0, naturalWidth: 100.0, boxWidth: 200.0)}")
+  log("exactly: {shrinkTextSizeToFit(size: 16.0, naturalWidth: 200.0, boxWidth: 200.0)}")
+  log("a quarter too wide: {shrinkTextSizeToFit(size: 16.0, naturalWidth: 250.0, boxWidth: 200.0)}")
+  log("twice too wide: {shrinkTextSizeToFit(size: 16.0, naturalWidth: 400.0, boxWidth: 200.0)}")
+  log("no box: {shrinkTextSizeToFit(size: 16.0, naturalWidth: 400.0, boxWidth: 0.0)}")
+  # The scene key
+  let scene: Scene = parseScene(source: buildScene())
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  let root: EntityId = loadSceneIntoPage(
+    world: world
+    uiSystems: uiSystems
+    scene: scene
+    pageId: "p"
+  )
+  log("Fits shrinks: {shrinkOf(world: world, pageId: "p", nodeId: "Fits")}")
+  log("Plain shrinks: {shrinkOf(world: world, pageId: "p", nodeId: "Plain")}")
+}

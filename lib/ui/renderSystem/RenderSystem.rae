@@ -467,6 +467,17 @@ func paintTextG(
   size = size * wt.scale.x
   let boxW: Float = cr.size.x * wt.scale.x
   let boxH: Float = cr.size.y * wt.scale.y
+  if t.shrinkToFit and t.wrapWidthMode is WrapWidthMode.none {
+    let natural: SdfTextBounds = visualBoundsAt(
+      world: world
+      entityId: entityId
+      text: t.text
+      isIcon: false
+      sizePx: size
+      res: res
+    )
+    size = TextStyle.shrinkTextSizeToFit(size: size, naturalWidth: natural.advance, boxWidth: boxW)
+  }
   let col: RgbaColor = g2dChain(color: baseCol, chain255: chain255)
   var boldWidth: Float = 0.0
   if weight > 450.0 {
