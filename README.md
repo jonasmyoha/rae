@@ -122,13 +122,17 @@ Intro rated 5 stars
 longest: Middle Eight (3m 32s)
 ```
 
-## Absence, and references
+## Optionals: a value that may be missing
 
-`opt T` says a value may not be there — in the type, not in a convention. `none`
+An **optional**, written `opt T`, is either a `T` or `none`. The type itself
+says the value may be missing, so it is never a matter of convention. `none`
 exists only where a type says `opt`: a plain `Track` is always a track, and an
 `opt Track` must be checked with `if let` before it can be used, so a caller
 cannot forget the empty case. That is the difference from `null` in most
 languages, where any reference may be null and nothing makes you check.
+
+An optional can hold a reference too: `opt view Track` is either `none` or a
+view of a track that already exists, as below.
 
 ```rae
 type Library {
