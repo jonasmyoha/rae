@@ -521,8 +521,17 @@ func paintTextG(
   var drawX: Float = wt.position.x
   var drawY: Float = wt.position.y + size
   if resolveTextIsVCentered(theme: res.theme, styleId: t.styleId) {
-    # The style centres its line box [top, top + size] in the node's box.
-    drawY = wt.position.y + (boxH - size) / 2.0 + size
+    # The style centres the font's capitals in the node's box: the baseline
+    # half a cap height (measured off "H") below the middle, so a label reads
+    # centred whatever its letters, with descenders hanging below. Centring a
+    # line box [top, top + size] with the baseline at its bottom left the
+    # capitals about 0.15 of the size low.
+    let capital: SdfTextBounds = SdfText.sdfMeasureTextBounds(
+      font: res.textFont
+      text: "H"
+      sizePx: size
+    )
+    drawY = wt.position.y + boxH / 2.0 - (capital.top + capital.bottom) / 2.0
   }
   if centerX or rightX {
     let bounds: SdfTextBounds = visualBoundsAt(
