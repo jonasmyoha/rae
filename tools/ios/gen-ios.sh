@@ -92,7 +92,35 @@ done
 # ...). Bundle the whole lib/*.wgsl set: a missing one does not fail gracefully —
 # the composed shader loses its entry point and wgpu-native ABORTS at pipeline
 # creation (this is what crashed 114 on device: only noise.wgsl was shipped).
-mkdir -p "$stage/lib"; cp "$root"/lib/*.wgsl "$stage/lib/" 2>/dev/null || true
+# Every lib/**/*.wgsl, at its own relative path (lib/gpu/..., lib/water/...):
+# a stdlib read tries the CWD-relative "lib/..." first, and on a device there
+# is no $RAE_STDLIB to fall back on.
+(cd "$root" && find lib -name '*.wgsl') | while IFS= read -r wgsl; do
+  mkdir -p "$stage/$(dirname "$wgsl")"; cp "$root/$wgsl" "$stage/$wgsl"
+done
+
+# Box3D (the C-library physics track, lib/box3d): on the desktop `rae` links
+# the host's prebuilt libbox3d.a, which is no use on a device, so an app whose
+# C includes box3d compiles the pinned Box3D sources (tools/box3d/build.sh's
+# clone) and the Rae glue into the iOS target instead.
+box3d_sources=""; box3d_includes=""
+if grep -q 'box3d/box3d.h' "$gen/app.c"; then
+  . "$root/tools/box3d/pin"
+  box3d_cache=${RAE_BOX3D_CACHE:-$HOME/.cache/rae/box3d}
+  box3d_install=${RAE_BOX3D:-$box3d_cache/install}
+  box3d_src="$box3d_cache/src"
+  if [ ! -d "$box3d_src/src" ] || [ ! -f "$box3d_install/include/box3d/rae_glue.h" ]; then
+    echo "error: this app imports box3d; run tools/box3d/build.sh first (clones the pinned Box3D)" >&2; exit 1
+  fi
+  if [ "$(git -C "$box3d_src" rev-parse --short=7 HEAD)" != "$BOX3D_COMMIT" ]; then
+    echo "error: $box3d_src is not at the Box3D pin $BOX3D_COMMIT; run tools/box3d/build.sh" >&2; exit 1
+  fi
+  echo "gen-ios: compiling Box3D $BOX3D_COMMIT from source into the app"
+  for file in "$box3d_src"/src/*.c "$root/tools/box3d/rae_glue.c"; do
+    box3d_sources="${box3d_sources}  \"$file\"\n"
+  done
+  box3d_includes="  \"$box3d_install/include\"\n  \"$box3d_src/src\"\n"
+fi
 
 asset_lines=""; pkg_lines=""
 while IFS= read -r f; do
@@ -114,7 +142,7 @@ add_executable(\${APP} MACOSX_BUNDLE
   "$gen/app_ios.c"
   "$runtime_dir/rae_runtime.c"
   "$here/ios_bootstrap.c"
-$(printf "%b" "$asset_lines"))
+$(printf "%b" "$box3d_sources")$(printf "%b" "$asset_lines"))
 
 $(printf "%b" "${pkg_lines:-}")
 
@@ -125,7 +153,8 @@ target_include_directories(\${APP} PRIVATE
   "$frameworks/SDL3.xcframework/ios-arm64/Headers"
   "$frameworks/SDL3.xcframework/ios-arm64-simulator/Headers"
   "$frameworks/wgpu_native.xcframework/ios-arm64/Headers"
-  "$frameworks/wgpu_native.xcframework/ios-arm64-simulator/Headers")
+  "$frameworks/wgpu_native.xcframework/ios-arm64-simulator/Headers"
+$(printf "%b" "$box3d_includes"))
 
 target_link_libraries(\${APP}
   "$frameworks/SDL3.xcframework"
