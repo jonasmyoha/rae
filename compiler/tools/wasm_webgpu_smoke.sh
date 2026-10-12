@@ -9,22 +9,34 @@ command -v emcc >/dev/null 2>&1 || { echo "SKIP wasm_webgpu_smoke: emcc not foun
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-perl -e 'alarm shift; exec @ARGV' 240 compiler/bin/rae build \
+# One `rae build` with its own timeout. Its output (the "built WASM browser
+# bundle" notices, which the compiler writes to stderr) goes to a log that is
+# shown only when the build fails, so a passing run prints just the PASS line.
+build_quietly() {
+  local seconds="$1"
+  shift
+  if ! perl -e 'alarm shift; exec @ARGV' "$seconds" compiler/bin/rae build "$@" >"$TMP/build.log" 2>&1; then
+    cat "$TMP/build.log" >&2
+    return 1
+  fi
+}
+
+build_quietly 240 \
   --target wasm --profile dev \
   --project examples/109_gpu3d_pbr \
   --out "$TMP/index.html" \
-  examples/109_gpu3d_pbr/Main.rae >/dev/null
+  examples/109_gpu3d_pbr/Main.rae
 
 test -s "$TMP/index.html"
 test -s "$TMP/index.js"
 test -s "$TMP/index.wasm"
 grep -q 'id="canvas"' "$TMP/index.html"
 
-perl -e 'alarm shift; exec @ARGV' 240 compiler/bin/rae build \
+build_quietly 240 \
   --target wasm --profile dev \
   --project examples/112_metaballs_deferred \
   --out "$TMP/ui.html" \
-  examples/112_metaballs_deferred/Main.rae >/dev/null
+  examples/112_metaballs_deferred/Main.rae
 
 test -s "$TMP/ui.html"
 test -s "$TMP/ui.js"
@@ -32,11 +44,11 @@ test -s "$TMP/ui.wasm"
 test -s "$TMP/ui.data"
 grep -q 'id="canvas"' "$TMP/ui.html"
 
-perl -e 'alarm shift; exec @ARGV' 240 compiler/bin/rae build \
+build_quietly 240 \
   --target wasm --profile dev \
   --project examples/109_gpu3d_pbr \
   --out "$TMP/app.mjs" \
-  examples/109_gpu3d_pbr/Main.rae >/dev/null
+  examples/109_gpu3d_pbr/Main.rae
 
 test -s "$TMP/app.mjs"
 test -s "$TMP/app.wasm"
@@ -48,11 +60,11 @@ grep -q 'createRaeApp' "$TMP/app.mjs"
 box3d_note=""
 BOX3D_WEB_LIB="${RAE_BOX3D:-$HOME/.cache/rae/box3d/install}/lib/emscripten/libbox3d.a"
 if [ -f "$BOX3D_WEB_LIB" ]; then
-  perl -e 'alarm shift; exec @ARGV' 300 compiler/bin/rae build \
+  build_quietly 300 \
     --target wasm --profile dev \
     --project examples/125_vehicle_c \
     --out "$TMP/box3d/index.html" \
-    examples/125_vehicle_c/Main.rae >/dev/null
+    examples/125_vehicle_c/Main.rae
   test -s "$TMP/box3d/index.wasm"
   box3d_note="; the Box3D C track's browser build"
 fi
@@ -63,22 +75,22 @@ fi
 # copy out of a mapped buffer was refused without a word. Built always; run in
 # headless Chrome when Chrome is installed (skipped otherwise, and when the
 # browser offers no WebGPU).
-perl -e 'alarm shift; exec @ARGV' 240 compiler/bin/rae build \
+build_quietly 240 \
   --target wasm --profile dev \
   --project examples/zz_web_readback_check \
   --out "$TMP/readback/index.html" \
-  examples/zz_web_readback_check/Main.rae >/dev/null
+  examples/zz_web_readback_check/Main.rae
 test -s "$TMP/readback/index.wasm"
 
 # A spawned task that sleeps runs between the frames of a mainLoop: it
 # suspends at each sleep and the frames carry it on
 # (docs/lightweight-spawn-design.md §16). Built always; run in headless
 # Chrome when Chrome is installed.
-perl -e 'alarm shift; exec @ARGV' 240 compiler/bin/rae build \
+build_quietly 240 \
   --target wasm --profile dev \
   --project examples/zz_web_task_check \
   --out "$TMP/task/index.html" \
-  examples/zz_web_task_check/Main.rae >/dev/null
+  examples/zz_web_task_check/Main.rae
 test -s "$TMP/task/index.wasm"
 
 CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
