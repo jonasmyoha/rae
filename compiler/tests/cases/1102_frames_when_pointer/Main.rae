@@ -1,0 +1,64 @@
+import Json
+import String
+open ui/Scene
+open ui/SceneLoader
+open ui/Frames
+open Device
+
+# A frame's `when` may name the main pointer as well as a width: `"pointer":
+# "coarse"` is a finger (a phone, an iPad alone), "fine" a mouse or trackpad,
+# "none" no pointer (a TV, a headless run) — Device.primaryPointer, the CSS
+# `pointer` media query's split. A frame applies when every condition it names
+# holds; the frame naming more conditions wins, then the wider minPtW, then the
+# default. A scene whose frames only name widths selects exactly as before.
+func buildScene() ret String {
+  var s: String = ""
+  s = s.concat(other: "\{")
+  s = s.concat(
+    other: "\"type\":\"Scene\",\"version\":2,\"sceneId\":\"pointer-test\",\"root\":\"Root\","
+  )
+  s = s.concat(other: "\"nodes\":\{\"Root\":\{\"Children\":[]\}\},")
+  s = s.concat(other: "\"frames\":\{")
+  s = s.concat(other: "\"Base\":\{\"default\":true,\"nodes\":\{\}\},")
+  s = s.concat(other: "\"Wide\":\{\"when\":\{\"minPtW\":700\},\"nodes\":\{\}\},")
+  s = s.concat(other: "\"Touch\":\{\"when\":\{\"pointer\":\"coarse\"\},\"nodes\":\{\}\},")
+  s = s.concat(
+    other: "\"TouchWide\":\{\"when\":\{\"minPtW\":700,\"pointer\":\"coarse\"\},\"nodes\":\{\}\},"
+  )
+  s = s.concat(other: "\"Mouse\":\{\"when\":\{\"pointer\":\"fine\"\},\"nodes\":\{\}\}")
+  s = s.concat(other: "\}")
+  s = s.concat(other: "\}")
+  ret s
+}
+
+func selected(frames: view FrameSet, width: view Float, pointer: view Pointer) ret String {
+  let index: Int = selectFrameIndexFor(
+    frames: frames
+    windowPtW: width
+    pointer: pointer
+    forcedFrameId: ""
+  )
+  if let name: String = frames.names.copyAt(index: index) {
+    ret name
+  }
+  ret "none"
+}
+
+func main() {
+  let scene: Scene = parseScene(source: buildScene())
+  let frames: FrameSet = parseFrames(scene: scene)
+  log("frames: {frames.count}")
+  log("phone, finger: {selected(frames: frames, width: 390.0, pointer: Pointer.coarse)}")
+  log("tablet, finger: {selected(frames: frames, width: 820.0, pointer: Pointer.coarse)}")
+  log("laptop, trackpad: {selected(frames: frames, width: 1280.0, pointer: Pointer.fine)}")
+  log("narrow window, mouse: {selected(frames: frames, width: 500.0, pointer: Pointer.fine)}")
+  log("tv, no pointer: {selected(frames: frames, width: 1920.0, pointer: Pointer.none)}")
+  log("small tv, no pointer: {selected(frames: frames, width: 500.0, pointer: Pointer.none)}")
+  let forced: Int = selectFrameIndexFor(
+    frames: frames
+    windowPtW: 390.0
+    pointer: Pointer.coarse
+    forcedFrameId: "Mouse"
+  )
+  log("forced: {frames.names.copyAtFallback(index: forced, fallback: "none")}")
+}
