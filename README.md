@@ -60,9 +60,9 @@ func rate(track: mod Track, stars: view Int) {
   track.rating = stars
 }
 
-# `opt view Track` is a result that is either nothing or a VIEW into an existing
-# track — no null, no sentinel, and no copy of the track. The caller handles the
-# empty case; `if let` binds the view when there is one.
+# `opt view Track` is either `none` or a VIEW into an existing track (never a
+# copy of it). The caller must check which before using it: `if let` binds the
+# view when there is one.
 func longest(tracks: view List(Track)) ret opt view Track {
   if tracks.length is 0 {
     ret none
@@ -124,8 +124,11 @@ longest: Middle Eight (3m 32s)
 
 ## Absence, and references
 
-`opt T` says a value may not be there — in the type, not in a convention. There
-is no null and no sentinel, so a caller cannot forget the empty case.
+`opt T` says a value may not be there — in the type, not in a convention. `none`
+exists only where a type says `opt`: a plain `Track` is always a track, and an
+`opt Track` must be checked with `if let` before it can be used, so a caller
+cannot forget the empty case. That is the difference from `null` in most
+languages, where any reference may be null and nothing makes you check.
 
 ```rae
 type Library {
