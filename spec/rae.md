@@ -404,6 +404,15 @@ handled by §4.3, and forbidding them made optionality behave differently
 depending on whether its payload was a value or a reference — the type-dependent
 rule §2.3 exists to rule out.
 
+An optional is never used as the value inside it. Reading a field of an `opt T`
+or `opt view T`, calling a method on it, passing it to a parameter that is not
+`opt`, using it in arithmetic or binding it to a non-optional name is a compile
+error; narrow it first (§4.2) — a stored optional with `if let x: view T =>`, a
+call's optional value with `if let x: T =`, or `match let`. What needs no
+narrowing: comparing it with `none` (`is none` / `is not none`), formatting it
+(`"{x}"`, `x.toString()`, which write `none`), and passing it to an `opt`
+parameter.
+
 ### 4.2 Binding the payload of an optional (`if let`)
 
 `if let` conditionally introduces a binding to the value inside an optional, for
