@@ -127,9 +127,10 @@ func characterPaletteBase(slot: view Int, jointCount: view Int) pub ret Int {
 #
 #   var arena: PaletteArena = createPaletteArena()   # once
 #   resetPaletteArena(arena: arena)                  # each frame
-#   let base: Int = paletteReserve(arena: arena, jointCount: jc)
-#   uploadPaletteAt(rows: pose, jointCount: jc, baseRow: base)
-#   ... drawSkinnedInstance(..., paletteBase: base)
+#   if let base: Int = paletteReserve(arena: arena, jointCount: jointCount) {
+#     uploadPaletteAt(rows: pose, jointCount: jointCount, baseRow: base)
+#     ... drawSkinnedInstance(..., paletteBase: base)
+#   }
 #
 # The old slot API stays; existing callers are untouched.
 type PaletteArena {
@@ -155,15 +156,15 @@ func resetPaletteArena(arena: mod PaletteArena) pub {
 }
 
 # Reserve room for one posed skeleton. Returns the vec4 row to upload at and to
-# pass as `paletteBase`, or -1 when the shared buffer is full.
-func paletteReserve(arena: mod PaletteArena, jointCount: copy Int) pub ret Int {
+# pass as `paletteBase`, or none when the shared buffer is full.
+func paletteReserve(arena: mod PaletteArena, jointCount: copy Int) ret opt Int {
   if jointCount <= 0 {
-    ret -1
+    ret none
   }
   let need: Int = jointCount * paletteRowsPerJoint
   if arena.cursor + need > arena.capacity {
     arena.overflow = true
-    ret -1
+    ret none
   }
   let base: Int = arena.cursor
   arena.cursor = arena.cursor + need

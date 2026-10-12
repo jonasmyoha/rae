@@ -163,10 +163,10 @@ func intAt(list: view List(Int), index: view Int) ret Int {
   ret 0
 }
 
-# First slot that is neither live nor retired-and-pinned, or -1 (exhaustion).
+# First slot that is neither live nor retired-and-pinned, or none (exhaustion).
 # A retired slot still holding a pinned handle is not free. Nothing is marked
 # here: a create marks the slot live only after the native allocation succeeded.
-func findFreeSlot(table: view SlotTable, capacity: view Int) ret Int {
+func findFreeSlot(table: view SlotTable, capacity: view Int) ret opt Int {
   var slot: Int = 0
   loop slot < capacity {
     if intAt(list: table.live, index: slot) is 0 and intAt(list: table.retired, index: slot) is 0 {
@@ -174,7 +174,7 @@ func findFreeSlot(table: view SlotTable, capacity: view Int) ret Int {
     }
     slot = slot + 1
   }
-  ret -1
+  ret none
 }
 
 func slotIsLive(
@@ -658,23 +658,22 @@ func createBuffer(
   if usage is (0 as UInt64) {
     ret none
   }
-  let slot: Int = findFreeSlot(table: resources.buffers, capacity: resources.capacity)
-  if slot < 0 {
-    ret none
-  }
-  unsafe {
-    let descriptor: WGPUBufferDescriptor = { size: size as UInt64, usage: usage }
-    let handle: Ptr = wgpuDeviceCreateBuffer(device: webgpuDevice(), descriptor: descriptor)
-    if handle is webgpuNull() {
-      ret none
+  if let slot: Int = findFreeSlot(table: resources.buffers, capacity: resources.capacity) {
+    unsafe {
+      let descriptor: WGPUBufferDescriptor = { size: size as UInt64, usage: usage }
+      let handle: Ptr = wgpuDeviceCreateBuffer(device: webgpuDevice(), descriptor: descriptor)
+      if handle is webgpuNull() {
+        ret none
+      }
+      storeHandle(table: resources.buffers, slot: slot, handle: handle)
     }
-    storeHandle(table: resources.buffers, slot: slot, handle: handle)
+    ret BufferId {
+      managerTag: resources.managerTag
+      slot: slot
+      generation: slotGeneration(table: resources.buffers, slot: slot)
+    }
   }
-  ret BufferId {
-    managerTag: resources.managerTag
-    slot: slot
-    generation: slotGeneration(table: resources.buffers, slot: slot)
-  }
+  ret none
 }
 
 # The authoritative size, re-queried from the native buffer. -1 for an invalid ID.
@@ -821,30 +820,29 @@ func createTexture(
   if usage is (0 as UInt64) {
     ret none
   }
-  let slot: Int = findFreeSlot(table: resources.textures, capacity: resources.capacity)
-  if slot < 0 {
-    ret none
-  }
-  unsafe {
-    let descriptor: WGPUTextureDescriptor = {
-      usage: usage
-      dimension: WGPUTextureDimension_2D
-      size: { width: width as UInt32, height: height as UInt32, depthOrArrayLayers: 1 as UInt32 }
-      format: format
-      mipLevelCount: 1 as UInt32
-      sampleCount: 1 as UInt32
+  if let slot: Int = findFreeSlot(table: resources.textures, capacity: resources.capacity) {
+    unsafe {
+      let descriptor: WGPUTextureDescriptor = {
+        usage: usage
+        dimension: WGPUTextureDimension_2D
+        size: { width: width as UInt32, height: height as UInt32, depthOrArrayLayers: 1 as UInt32 }
+        format: format
+        mipLevelCount: 1 as UInt32
+        sampleCount: 1 as UInt32
+      }
+      let handle: Ptr = wgpuDeviceCreateTexture(device: webgpuDevice(), descriptor: descriptor)
+      if handle is webgpuNull() {
+        ret none
+      }
+      storeHandle(table: resources.textures, slot: slot, handle: handle)
     }
-    let handle: Ptr = wgpuDeviceCreateTexture(device: webgpuDevice(), descriptor: descriptor)
-    if handle is webgpuNull() {
-      ret none
+    ret TextureId {
+      managerTag: resources.managerTag
+      slot: slot
+      generation: slotGeneration(table: resources.textures, slot: slot)
     }
-    storeHandle(table: resources.textures, slot: slot, handle: handle)
   }
-  ret TextureId {
-    managerTag: resources.managerTag
-    slot: slot
-    generation: slotGeneration(table: resources.textures, slot: slot)
-  }
+  ret none
 }
 
 func textureWidth(resources: view GpuResources, id: view TextureId) ret Int {
@@ -887,34 +885,33 @@ func createTextureView(resources: mod GpuResources, texture: view TextureId) ret
   if isValidTexture(resources: resources, id: texture) is false {
     ret none
   }
-  let slot: Int = findFreeSlot(table: resources.textureViews, capacity: resources.capacity)
-  if slot < 0 {
-    ret none
-  }
-  unsafe {
-    let textureHandle: Ptr = slotHandle(table: resources.textures, slot: texture.slot)
-    let descriptor: WGPUTextureViewDescriptor = {
-      format: wgpuTextureGetFormat(texture: textureHandle)
-      dimension: WGPUTextureViewDimension_2D
-      baseMipLevel: 0 as UInt32
-      mipLevelCount: 1 as UInt32
-      baseArrayLayer: 0 as UInt32
-      arrayLayerCount: 1 as UInt32
-      aspect: WGPUTextureAspect_All
+  if let slot: Int = findFreeSlot(table: resources.textureViews, capacity: resources.capacity) {
+    unsafe {
+      let textureHandle: Ptr = slotHandle(table: resources.textures, slot: texture.slot)
+      let descriptor: WGPUTextureViewDescriptor = {
+        format: wgpuTextureGetFormat(texture: textureHandle)
+        dimension: WGPUTextureViewDimension_2D
+        baseMipLevel: 0 as UInt32
+        mipLevelCount: 1 as UInt32
+        baseArrayLayer: 0 as UInt32
+        arrayLayerCount: 1 as UInt32
+        aspect: WGPUTextureAspect_All
+      }
+      let handle: Ptr = wgpuTextureCreateView(texture: textureHandle, descriptor: descriptor)
+      if handle is webgpuNull() {
+        ret none
+      }
+      storeHandle(table: resources.textureViews, slot: slot, handle: handle)
     }
-    let handle: Ptr = wgpuTextureCreateView(texture: textureHandle, descriptor: descriptor)
-    if handle is webgpuNull() {
-      ret none
+    resources.textureViews.parentSlot.set(index: slot, value: texture.slot)
+    resources.textureViews.parentGeneration.set(index: slot, value: texture.generation)
+    ret TextureViewId {
+      managerTag: resources.managerTag
+      slot: slot
+      generation: slotGeneration(table: resources.textureViews, slot: slot)
     }
-    storeHandle(table: resources.textureViews, slot: slot, handle: handle)
   }
-  resources.textureViews.parentSlot.set(index: slot, value: texture.slot)
-  resources.textureViews.parentGeneration.set(index: slot, value: texture.generation)
-  ret TextureViewId {
-    managerTag: resources.managerTag
-    slot: slot
-    generation: slotGeneration(table: resources.textureViews, slot: slot)
-  }
+  ret none
 }
 
 func retireTextureView(resources: mod GpuResources, id: view TextureViewId) ret Bool {
@@ -940,34 +937,33 @@ func createSampler(resources: mod GpuResources) ret opt SamplerId {
 # A linear sampler with one address mode on every axis (Repeat for tiling
 # maps such as water's FFT cascades, ClampToEdge for screen-space reads).
 func createSamplerWith(resources: mod GpuResources, addressMode: view Int32) ret opt SamplerId {
-  let slot: Int = findFreeSlot(table: resources.samplers, capacity: resources.capacity)
-  if slot < 0 {
-    ret none
-  }
-  unsafe {
-    let descriptor: WGPUSamplerDescriptor = {
-      addressModeU: addressMode
-      addressModeV: addressMode
-      addressModeW: addressMode
-      magFilter: WGPUFilterMode_Linear
-      minFilter: WGPUFilterMode_Linear
-      mipmapFilter: WGPUMipmapFilterMode_Nearest
-      lodMinClamp: 0.0
-      lodMaxClamp: 32.0
-      compare: WGPUCompareFunction_Undefined
-      maxAnisotropy: 1 as UInt16
+  if let slot: Int = findFreeSlot(table: resources.samplers, capacity: resources.capacity) {
+    unsafe {
+      let descriptor: WGPUSamplerDescriptor = {
+        addressModeU: addressMode
+        addressModeV: addressMode
+        addressModeW: addressMode
+        magFilter: WGPUFilterMode_Linear
+        minFilter: WGPUFilterMode_Linear
+        mipmapFilter: WGPUMipmapFilterMode_Nearest
+        lodMinClamp: 0.0
+        lodMaxClamp: 32.0
+        compare: WGPUCompareFunction_Undefined
+        maxAnisotropy: 1 as UInt16
+      }
+      let handle: Ptr = wgpuDeviceCreateSampler(device: webgpuDevice(), descriptor: descriptor)
+      if handle is webgpuNull() {
+        ret none
+      }
+      storeHandle(table: resources.samplers, slot: slot, handle: handle)
     }
-    let handle: Ptr = wgpuDeviceCreateSampler(device: webgpuDevice(), descriptor: descriptor)
-    if handle is webgpuNull() {
-      ret none
+    ret SamplerId {
+      managerTag: resources.managerTag
+      slot: slot
+      generation: slotGeneration(table: resources.samplers, slot: slot)
     }
-    storeHandle(table: resources.samplers, slot: slot, handle: handle)
   }
-  ret SamplerId {
-    managerTag: resources.managerTag
-    slot: slot
-    generation: slotGeneration(table: resources.samplers, slot: slot)
-  }
+  ret none
 }
 
 func retireSampler(resources: mod GpuResources, id: view SamplerId) ret Bool {

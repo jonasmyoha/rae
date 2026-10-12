@@ -17,42 +17,46 @@ func main() {
 
   let spaceM: Int = themeSpaceValue(theme: theme, name: "spaceM", fallback: 0.0).toInt()
   let radiusCard: Int = themeRadiusValue(theme: theme, name: "radiusCard", fallback: 0.0).toInt()
-  let hasAccent: Bool = themePaletteIndex(theme: theme, slot: "accent") >= 0
+  let hasAccent: Bool = themePaletteIndex(theme: theme, slot: "accent") is not none
   log("spaceM={spaceM} radiusCard={radiusCard} accent={hasAccent}")
 
   # miniMuted flattens: font inherited from body, own size, own color,
   # shadow + align inherited from miniTitle (center=1).
-  let mi: Int = themeTextStyleIndex(theme: theme, styleId: "miniMuted")
-  var align: Int = 0
-  if let alignVal: Int = theme.textAligns.copyAt(index: mi) {
-    align = alignVal
-  }
-  let size: Int = theme.textSizes.copyAt(index: mi).toInt()
-  if let font: String = theme.textFonts.copyAt(index: mi) {
-    if let slot: String = theme.textColorSlots.copyAt(index: mi) {
-      if let shadow: String = theme.textShadowNames.copyAt(index: mi) {
-        log("miniMuted font={font} size={size} color={slot} shadow={shadow} align={align}")
+  if let mi: Int = themeTextStyleIndex(theme: theme, styleId: "miniMuted") {
+    var align: Int = 0
+    if let alignVal: Int = theme.textAligns.copyAt(index: mi) {
+      align = alignVal
+    }
+    let size: Int = theme.textSizes.copyAt(index: mi).toInt()
+    if let font: String = theme.textFonts.copyAt(index: mi) {
+      if let slot: String = theme.textColorSlots.copyAt(index: mi) {
+        if let shadow: String = theme.textShadowNames.copyAt(index: mi) {
+          log("miniMuted font={font} size={size} color={slot} shadow={shadow} align={align}")
+        }
       }
     }
   }
 
   # 'softer' inherits offset+softness from 'soft', overrides alpha.
-  let si: Int = themeShadowIndex(theme: theme, name: "softer")
-  var sa: Int = 0
-  if let shadowAVal: Int = theme.shadowA.copyAt(index: si) {
-    sa = shadowAVal
+  if let si: Int = themeShadowIndex(theme: theme, name: "softer") {
+    var sa: Int = 0
+    if let shadowAVal: Int = theme.shadowA.copyAt(index: si) {
+      sa = shadowAVal
+    }
+    let sox: Int = theme.shadowOffX.copyAt(index: si).toInt()
+    let ssoft: Int = theme.shadowSoft.copyAt(index: si).toInt()
+    log("softer a={sa} offX={sox} soft={ssoft}")
   }
-  let sox: Int = theme.shadowOffX.copyAt(index: si).toInt()
-  let ssoft: Int = theme.shadowSoft.copyAt(index: si).toInt()
-  log("softer a={sa} offX={sox} soft={ssoft}")
 
   # cycle + unknown-parent styles still resolve (truncated), not hang.
-  let ca: Int = themeTextStyleIndex(theme: theme, styleId: "cycleA")
-  let caSize: Int = theme.textSizes.copyAt(index: ca).toInt()
-  log("cycleA size={caSize}")
-  let oi: Int = themeTextStyleIndex(theme: theme, styleId: "orphan")
-  let oSize: Int = theme.textSizes.copyAt(index: oi).toInt()
-  log("orphan size={oSize}")
+  if let ca: Int = themeTextStyleIndex(theme: theme, styleId: "cycleA") {
+    let caSize: Int = theme.textSizes.copyAt(index: ca).toInt()
+    log("cycleA size={caSize}")
+  }
+  if let oi: Int = themeTextStyleIndex(theme: theme, styleId: "orphan") {
+    let oSize: Int = theme.textSizes.copyAt(index: oi).toInt()
+    log("orphan size={oSize}")
+  }
 
   # A page style may inherit a style appended later from an imported scene.
   let pageScene: Scene = parseScene(
@@ -65,14 +69,15 @@ func main() {
   parseThemeInto(out: merged, scene: pageScene)
   parseThemeInto(out: merged, scene: importedScene)
   resolveThemeTextExtends(theme: merged)
-  let pageTitleIndex: Int = themeTextStyleIndex(theme: merged, styleId: "pageTitle")
-  let pageTitleFont: String = merged.textFonts.copyAtDefault(index: pageTitleIndex)
-  let pageTitleSize: Int = merged.textSizes.copyAtDefault(index: pageTitleIndex).toInt()
-  let pageTitleWeight: Int = merged.textWeights.copyAtDefault(index: pageTitleIndex).toInt()
-  let pageTitleColor: String = merged.textColorSlots.copyAtDefault(index: pageTitleIndex)
-  log(
-    "cross-file font={pageTitleFont} size={pageTitleSize} weight={pageTitleWeight} color={pageTitleColor}"
-  )
+  if let pageTitleIndex: Int = themeTextStyleIndex(theme: merged, styleId: "pageTitle") {
+    let pageTitleFont: String = merged.textFonts.copyAtDefault(index: pageTitleIndex)
+    let pageTitleSize: Int = merged.textSizes.copyAtDefault(index: pageTitleIndex).toInt()
+    let pageTitleWeight: Int = merged.textWeights.copyAtDefault(index: pageTitleIndex).toInt()
+    let pageTitleColor: String = merged.textColorSlots.copyAtDefault(index: pageTitleIndex)
+    log(
+      "cross-file font={pageTitleFont} size={pageTitleSize} weight={pageTitleWeight} color={pageTitleColor}"
+    )
+  }
 
   # Custom application roles must resolve beyond the standard palette slots.
   let roleScene: Scene = parseScene(

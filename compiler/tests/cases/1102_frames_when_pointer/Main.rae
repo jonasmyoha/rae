@@ -32,14 +32,15 @@ func buildScene() ret String {
 }
 
 func selected(frames: view FrameSet, width: view Float, pointer: view Pointer) ret String {
-  let index: Int = selectFrameIndexFor(
+  if let index: Int = selectFrameIndexFor(
     frames: frames
     windowPtW: width
     pointer: pointer
     forcedFrameId: ""
-  )
-  if let name: String = frames.names.copyAt(index: index) {
-    ret name
+  ) {
+    if let name: String = frames.names.copyAt(index: index) {
+      ret name
+    }
   }
   ret "none"
 }
@@ -54,11 +55,12 @@ func main() {
   log("narrow window, mouse: {selected(frames: frames, width: 500.0, pointer: Pointer.fine)}")
   log("tv, no pointer: {selected(frames: frames, width: 1920.0, pointer: Pointer.none)}")
   log("small tv, no pointer: {selected(frames: frames, width: 500.0, pointer: Pointer.none)}")
-  let forced: Int = selectFrameIndexFor(
+  if let forced: Int = selectFrameIndexFor(
     frames: frames
     windowPtW: 390.0
     pointer: Pointer.coarse
     forcedFrameId: "Mouse"
-  )
-  log("forced: {frames.names.copyAtFallback(index: forced, fallback: "none")}")
+  ) {
+    log("forced: {frames.names.copyAtFallback(index: forced, fallback: "none")}")
+  }
 }

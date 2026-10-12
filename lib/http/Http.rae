@@ -290,157 +290,163 @@ func httpParseNext(
   if begin >= length {
     ret HttpParseResult.needMore
   }
-  let headerEnd: Int = byteBufferIndexOf(buffer: buffer, pattern: "\r\n\r\n", from: begin)
-  if headerEnd < 0 {
-    if length - begin > maxHeaderBytes {
+  if let headerEnd: Int = byteBufferIndexOf(buffer: buffer, pattern: "\r\n\r\n", from: begin) {
+    if headerEnd - begin > maxHeaderBytes {
       ret HttpParseResult.badRequest
     }
-    ret HttpParseResult.needMore
-  }
-  if headerEnd - begin > maxHeaderBytes {
-    ret HttpParseResult.badRequest
-  }
-  let headerFirst: Int = state.headers.length
+    let headerFirst: Int = state.headers.length
 
-  # Request line: METHOD SP target SP HTTP/1.x
-  let lineEnd: Int = byteBufferIndexOf(buffer: buffer, pattern: "\r\n", from: begin)
-  let methodEnd: Int = findByte(
-    buffer: buffer
-    byte: 32
-    start: begin
-    end: lineEnd
-  )
-  if methodEnd < 0 or not isToken(buffer: buffer, start: begin, end: methodEnd) {
-    ret rejectRequest(state: state, headerFirst: headerFirst)
-  }
-  let targetEnd: Int = findByte(
-    buffer: buffer
-    byte: 32
-    start: methodEnd + 1
-    end: lineEnd
-  )
-  if targetEnd < 0 or targetEnd is methodEnd + 1 {
-    ret rejectRequest(state: state, headerFirst: headerFirst)
-  }
-  loop var i: Int = methodEnd + 1, i < targetEnd, ++i {
-    let byte: Int = byteBufferAt(buffer: buffer, index: i)
-    if byte <= 32 or byte is 127 {
-      ret rejectRequest(state: state, headerFirst: headerFirst)
+    # Request line: METHOD SP target SP HTTP/1.x
+    # The "\r\n\r\n" at headerEnd bounds every line end: one is always found.
+    var lineEnd: Int = headerEnd
+    if let found: Int = byteBufferIndexOf(buffer: buffer, pattern: "\r\n", from: begin) {
+      lineEnd = found
     }
-  }
-  let version: ByteRange = { start: targetEnd + 1, count: lineEnd - targetEnd - 1 }
-  var minorVersion: Int = 1
-  if rangeEquals(
-    buffer: buffer
-    range: version
-    text: "HTTP/1.0"
-    ignoreCase: false
-  ) {
-    minorVersion = 0
-  } else if not rangeEquals(
-    buffer: buffer
-    range: version
-    text: "HTTP/1.1"
-    ignoreCase: false
-  ) {
-    ret rejectRequest(state: state, headerFirst: headerFirst)
-  }
-  let methodText: ByteRange = { start: begin, count: methodEnd - begin }
-
-  # Header lines: name ":" OWS value OWS
-  var keepAlive: Bool = minorVersion is 1
-  var contentLength: Int = 0
-  var position: Int = lineEnd + 2
-  loop position < headerEnd + 2 {
-    let headerLineEnd: Int = byteBufferIndexOf(buffer: buffer, pattern: "\r\n", from: position)
-    let colon: Int = findByte(
+    let methodEnd: Int = findByte(
       buffer: buffer
-      byte: 58
-      start: position
-      end: headerLineEnd
+      byte: 32
+      start: begin
+      end: lineEnd
     )
-    if colon < 0 or not isToken(buffer: buffer, start: position, end: colon) {
+    if methodEnd < 0 or not isToken(buffer: buffer, start: begin, end: methodEnd) {
       ret rejectRequest(state: state, headerFirst: headerFirst)
     }
-    var valueStart: Int = colon + 1
-    loop valueStart < headerLineEnd and isSpaceOrTab(
-      byte: byteBufferAt(buffer: buffer, index: valueStart)
-    ) {
-      valueStart = valueStart + 1
-    }
-    var valueEnd: Int = headerLineEnd
-    loop valueEnd > valueStart and isSpaceOrTab(
-      byte: byteBufferAt(buffer: buffer, index: valueEnd - 1)
-    ) {
-      valueEnd = valueEnd - 1
-    }
-    if state.headers.length - headerFirst >= maxHeaders {
+    let targetEnd: Int = findByte(
+      buffer: buffer
+      byte: 32
+      start: methodEnd + 1
+      end: lineEnd
+    )
+    if targetEnd < 0 or targetEnd is methodEnd + 1 {
       ret rejectRequest(state: state, headerFirst: headerFirst)
     }
-    let header: HttpHeader = {
-      name: ByteRange { start: position, count: colon - position }
-      value: ByteRange { start: valueStart, count: valueEnd - valueStart }
-    }
-    if rangeEquals(
-      buffer: buffer
-      range: header.name
-      text: "connection"
-      ignoreCase: true
-    ) {
-      if rangeEquals(
-        buffer: buffer
-        range: header.value
-        text: "close"
-        ignoreCase: true
-      ) {
-        keepAlive = false
-      } else if rangeEquals(
-        buffer: buffer
-        range: header.value
-        text: "keep-alive"
-        ignoreCase: true
-      ) {
-        keepAlive = true
-      }
-    } else if rangeEquals(
-      buffer: buffer
-      range: header.name
-      text: "content-length"
-      ignoreCase: true
-    ) {
-      contentLength = decimalIn(buffer: buffer, range: header.value)
-      if contentLength < 0 {
+    loop var i: Int = methodEnd + 1, i < targetEnd, ++i {
+      let byte: Int = byteBufferAt(buffer: buffer, index: i)
+      if byte <= 32 or byte is 127 {
         ret rejectRequest(state: state, headerFirst: headerFirst)
       }
-    } else if rangeEquals(
+    }
+    let version: ByteRange = { start: targetEnd + 1, count: lineEnd - targetEnd - 1 }
+    var minorVersion: Int = 1
+    if rangeEquals(
       buffer: buffer
-      range: header.name
-      text: "transfer-encoding"
-      ignoreCase: true
+      range: version
+      text: "HTTP/1.0"
+      ignoreCase: false
+    ) {
+      minorVersion = 0
+    } else if not rangeEquals(
+      buffer: buffer
+      range: version
+      text: "HTTP/1.1"
+      ignoreCase: false
     ) {
       ret rejectRequest(state: state, headerFirst: headerFirst)
     }
-    state.headers.add(value: header)
-    position = headerLineEnd + 2
-  }
+    let methodText: ByteRange = { start: begin, count: methodEnd - begin }
 
-  # The body
-  let bodyStart: Int = headerEnd + 4
-  if bodyStart + contentLength > length {
-    state.headers.truncate(len: headerFirst)
-    ret HttpParseResult.needMore
+    # Header lines: name ":" OWS value OWS
+    var keepAlive: Bool = minorVersion is 1
+    var contentLength: Int = 0
+    var position: Int = lineEnd + 2
+    loop position < headerEnd + 2 {
+      var headerLineEnd: Int = headerEnd
+      if let found: Int = byteBufferIndexOf(buffer: buffer, pattern: "\r\n", from: position) {
+        headerLineEnd = found
+      }
+      let colon: Int = findByte(
+        buffer: buffer
+        byte: 58
+        start: position
+        end: headerLineEnd
+      )
+      if colon < 0 or not isToken(buffer: buffer, start: position, end: colon) {
+        ret rejectRequest(state: state, headerFirst: headerFirst)
+      }
+      var valueStart: Int = colon + 1
+      loop valueStart < headerLineEnd and isSpaceOrTab(
+        byte: byteBufferAt(buffer: buffer, index: valueStart)
+      ) {
+        valueStart = valueStart + 1
+      }
+      var valueEnd: Int = headerLineEnd
+      loop valueEnd > valueStart and isSpaceOrTab(
+        byte: byteBufferAt(buffer: buffer, index: valueEnd - 1)
+      ) {
+        valueEnd = valueEnd - 1
+      }
+      if state.headers.length - headerFirst >= maxHeaders {
+        ret rejectRequest(state: state, headerFirst: headerFirst)
+      }
+      let header: HttpHeader = {
+        name: ByteRange { start: position, count: colon - position }
+        value: ByteRange { start: valueStart, count: valueEnd - valueStart }
+      }
+      if rangeEquals(
+        buffer: buffer
+        range: header.name
+        text: "connection"
+        ignoreCase: true
+      ) {
+        if rangeEquals(
+          buffer: buffer
+          range: header.value
+          text: "close"
+          ignoreCase: true
+        ) {
+          keepAlive = false
+        } else if rangeEquals(
+          buffer: buffer
+          range: header.value
+          text: "keep-alive"
+          ignoreCase: true
+        ) {
+          keepAlive = true
+        }
+      } else if rangeEquals(
+        buffer: buffer
+        range: header.name
+        text: "content-length"
+        ignoreCase: true
+      ) {
+        contentLength = decimalIn(buffer: buffer, range: header.value)
+        if contentLength < 0 {
+          ret rejectRequest(state: state, headerFirst: headerFirst)
+        }
+      } else if rangeEquals(
+        buffer: buffer
+        range: header.name
+        text: "transfer-encoding"
+        ignoreCase: true
+      ) {
+        ret rejectRequest(state: state, headerFirst: headerFirst)
+      }
+      state.headers.add(value: header)
+      position = headerLineEnd + 2
+    }
+
+    # The body
+    let bodyStart: Int = headerEnd + 4
+    if bodyStart + contentLength > length {
+      state.headers.truncate(len: headerFirst)
+      ret HttpParseResult.needMore
+    }
+    request.method = methodFrom(buffer: buffer, range: methodText)
+    request.methodText = methodText
+    request.target = ByteRange { start: methodEnd + 1, count: targetEnd - methodEnd - 1 }
+    request.minorVersion = minorVersion
+    request.headerFirst = headerFirst
+    request.headerCount = state.headers.length - headerFirst
+    request.body = ByteRange { start: bodyStart, count: contentLength }
+    request.keepAlive = keepAlive
+    request.whole = ByteRange { start: begin, count: bodyStart + contentLength - begin }
+    state.position = bodyStart + contentLength
+    ret HttpParseResult.complete
   }
-  request.method = methodFrom(buffer: buffer, range: methodText)
-  request.methodText = methodText
-  request.target = ByteRange { start: methodEnd + 1, count: targetEnd - methodEnd - 1 }
-  request.minorVersion = minorVersion
-  request.headerFirst = headerFirst
-  request.headerCount = state.headers.length - headerFirst
-  request.body = ByteRange { start: bodyStart, count: contentLength }
-  request.keepAlive = keepAlive
-  request.whole = ByteRange { start: begin, count: bodyStart + contentLength - begin }
-  state.position = bodyStart + contentLength
-  ret HttpParseResult.complete
+  if length - begin > maxHeaderBytes {
+    ret HttpParseResult.badRequest
+  }
+  ret HttpParseResult.needMore
 }
 
 # The requests parsed so far are handled: drop their bytes from the buffer and

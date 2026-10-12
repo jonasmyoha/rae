@@ -333,14 +333,14 @@ func beginPlaygroundFrame(app: mod PlaygroundApp, uiWorld: mod UiWorld, uiSystem
   app.sliderMoved = updatePlaygroundUiInput(ui: app.ui, world: uiWorld, systems: uiSystems)
 }
 
-# The scene a number key selects (keys 1-6), or -1.
-func sceneKeyPressed() ret Int {
+# The scene a number key selects (keys 1-6), or none.
+func sceneKeyPressed() ret opt Int {
   loop var index: Int = 0, index < sceneCount, ++index {
     if Sdl3.isKeyPressed(key: Keys.key1 + index) {
       ret index
     }
   }
-  ret -1
+  ret none
 }
 
 # Keys 1-6, R, the slider let go at a new count, the scene cycle, and T
@@ -351,8 +351,7 @@ func readPlaygroundControls(
   uiSystems: mod UiSystems
 ) ret Bool {
   var rebuild: Bool = false
-  let keyScene: Int = sceneKeyPressed()
-  if keyScene >= 0 {
+  if let keyScene: Int = sceneKeyPressed() {
     app.sceneIndex = keyScene
     rebuild = true
   }

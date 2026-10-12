@@ -72,16 +72,14 @@ func query2(
   if countA <= countB {
     loop var i: Int = 0, i < countA, ++i {
       let entityId: EntityId = componentEntityAt(this: tableA, i: i)
-      let idxB: Int = componentIndexOf(this: tableB, entityId: entityId)
-      if idxB >= 0 {
+      if let idxB: Int = componentIndexOf(this: tableB, entityId: entityId) {
         matches.add(value: Query2Match { entityId: entityId, indexA: i, indexB: idxB })
       }
     }
   } else {
     loop var i: Int = 0, i < countB, ++i {
       let entityId: EntityId = componentEntityAt(this: tableB, i: i)
-      let idxA: Int = componentIndexOf(this: tableA, entityId: entityId)
-      if idxA >= 0 {
+      if let idxA: Int = componentIndexOf(this: tableA, entityId: entityId) {
         matches.add(value: Query2Match { entityId: entityId, indexA: idxA, indexB: i })
       }
     }
@@ -114,34 +112,34 @@ func query3(
   if countA <= countB and countA <= countC {
     loop var i: Int = 0, i < countA, ++i {
       let entityId: EntityId = componentEntityAt(this: tableA, i: i)
-      let idxB: Int = componentIndexOf(this: tableB, entityId: entityId)
-      let idxC: Int = componentIndexOf(this: tableC, entityId: entityId)
-      if idxB >= 0 and idxC >= 0 {
-        matches.add(
-          value: Query3Match { entityId: entityId, indexA: i, indexB: idxB, indexC: idxC }
-        )
+      if let idxB: Int = componentIndexOf(this: tableB, entityId: entityId) {
+        if let idxC: Int = componentIndexOf(this: tableC, entityId: entityId) {
+          matches.add(
+            value: Query3Match { entityId: entityId, indexA: i, indexB: idxB, indexC: idxC }
+          )
+        }
       }
     }
   } else if countB <= countA and countB <= countC {
     loop var i: Int = 0, i < countB, ++i {
       let entityId: EntityId = componentEntityAt(this: tableB, i: i)
-      let idxA: Int = componentIndexOf(this: tableA, entityId: entityId)
-      let idxC: Int = componentIndexOf(this: tableC, entityId: entityId)
-      if idxA >= 0 and idxC >= 0 {
-        matches.add(
-          value: Query3Match { entityId: entityId, indexA: idxA, indexB: i, indexC: idxC }
-        )
+      if let idxA: Int = componentIndexOf(this: tableA, entityId: entityId) {
+        if let idxC: Int = componentIndexOf(this: tableC, entityId: entityId) {
+          matches.add(
+            value: Query3Match { entityId: entityId, indexA: idxA, indexB: i, indexC: idxC }
+          )
+        }
       }
     }
   } else {
     loop var i: Int = 0, i < countC, ++i {
       let entityId: EntityId = componentEntityAt(this: tableC, i: i)
-      let idxA: Int = componentIndexOf(this: tableA, entityId: entityId)
-      let idxB: Int = componentIndexOf(this: tableB, entityId: entityId)
-      if idxA >= 0 and idxB >= 0 {
-        matches.add(
-          value: Query3Match { entityId: entityId, indexA: idxA, indexB: idxB, indexC: i }
-        )
+      if let idxA: Int = componentIndexOf(this: tableA, entityId: entityId) {
+        if let idxB: Int = componentIndexOf(this: tableB, entityId: entityId) {
+          matches.add(
+            value: Query3Match { entityId: entityId, indexA: idxA, indexB: idxB, indexC: i }
+          )
+        }
       }
     }
   }
@@ -284,65 +282,69 @@ func query4(
   if countA <= countB and countA <= countC and countA <= countD {
     loop var i: Int = 0, i < countA, ++i {
       let entityId: EntityId = componentEntityAt(this: tableA, i: i)
-      let idxB: Int = componentIndexOf(this: tableB, entityId: entityId)
-      let idxC: Int = componentIndexOf(this: tableC, entityId: entityId)
-      let idxD: Int = componentIndexOf(this: tableD, entityId: entityId)
-      if idxB >= 0 and idxC >= 0 and idxD >= 0 {
-        matches.add(value: Query4Match {
-          entityId: entityId
-          indexA: i
-          indexB: idxB
-          indexC: idxC
-          indexD: idxD
-        })
+      if let idxB: Int = componentIndexOf(this: tableB, entityId: entityId) {
+        if let idxC: Int = componentIndexOf(this: tableC, entityId: entityId) {
+          if let idxD: Int = componentIndexOf(this: tableD, entityId: entityId) {
+            matches.add(value: Query4Match {
+              entityId: entityId
+              indexA: i
+              indexB: idxB
+              indexC: idxC
+              indexD: idxD
+            })
+          }
+        }
       }
     }
   } else if countB <= countA and countB <= countC and countB <= countD {
     loop var i: Int = 0, i < countB, ++i {
       let entityId: EntityId = componentEntityAt(this: tableB, i: i)
-      let idxA: Int = componentIndexOf(this: tableA, entityId: entityId)
-      let idxC: Int = componentIndexOf(this: tableC, entityId: entityId)
-      let idxD: Int = componentIndexOf(this: tableD, entityId: entityId)
-      if idxA >= 0 and idxC >= 0 and idxD >= 0 {
-        matches.add(value: Query4Match {
-          entityId: entityId
-          indexA: idxA
-          indexB: i
-          indexC: idxC
-          indexD: idxD
-        })
+      if let idxA: Int = componentIndexOf(this: tableA, entityId: entityId) {
+        if let idxC: Int = componentIndexOf(this: tableC, entityId: entityId) {
+          if let idxD: Int = componentIndexOf(this: tableD, entityId: entityId) {
+            matches.add(value: Query4Match {
+              entityId: entityId
+              indexA: idxA
+              indexB: i
+              indexC: idxC
+              indexD: idxD
+            })
+          }
+        }
       }
     }
   } else if countC <= countA and countC <= countB and countC <= countD {
     loop var i: Int = 0, i < countC, ++i {
       let entityId: EntityId = componentEntityAt(this: tableC, i: i)
-      let idxA: Int = componentIndexOf(this: tableA, entityId: entityId)
-      let idxB: Int = componentIndexOf(this: tableB, entityId: entityId)
-      let idxD: Int = componentIndexOf(this: tableD, entityId: entityId)
-      if idxA >= 0 and idxB >= 0 and idxD >= 0 {
-        matches.add(value: Query4Match {
-          entityId: entityId
-          indexA: idxA
-          indexB: idxB
-          indexC: i
-          indexD: idxD
-        })
+      if let idxA: Int = componentIndexOf(this: tableA, entityId: entityId) {
+        if let idxB: Int = componentIndexOf(this: tableB, entityId: entityId) {
+          if let idxD: Int = componentIndexOf(this: tableD, entityId: entityId) {
+            matches.add(value: Query4Match {
+              entityId: entityId
+              indexA: idxA
+              indexB: idxB
+              indexC: i
+              indexD: idxD
+            })
+          }
+        }
       }
     }
   } else {
     loop var i: Int = 0, i < countD, ++i {
       let entityId: EntityId = componentEntityAt(this: tableD, i: i)
-      let idxA: Int = componentIndexOf(this: tableA, entityId: entityId)
-      let idxB: Int = componentIndexOf(this: tableB, entityId: entityId)
-      let idxC: Int = componentIndexOf(this: tableC, entityId: entityId)
-      if idxA >= 0 and idxB >= 0 and idxC >= 0 {
-        matches.add(value: Query4Match {
-          entityId: entityId
-          indexA: idxA
-          indexB: idxB
-          indexC: idxC
-          indexD: i
-        })
+      if let idxA: Int = componentIndexOf(this: tableA, entityId: entityId) {
+        if let idxB: Int = componentIndexOf(this: tableB, entityId: entityId) {
+          if let idxC: Int = componentIndexOf(this: tableC, entityId: entityId) {
+            matches.add(value: Query4Match {
+              entityId: entityId
+              indexA: idxA
+              indexB: idxB
+              indexC: idxC
+              indexD: i
+            })
+          }
+        }
       }
     }
   }
@@ -406,91 +408,101 @@ func query5(
   if countA <= countB and countA <= countC and countA <= countD and countA <= countE {
     loop var i: Int = 0, i < countA, ++i {
       let entityId: EntityId = componentEntityAt(this: tableA, i: i)
-      let idxB: Int = componentIndexOf(this: tableB, entityId: entityId)
-      let idxC: Int = componentIndexOf(this: tableC, entityId: entityId)
-      let idxD: Int = componentIndexOf(this: tableD, entityId: entityId)
-      let idxE: Int = componentIndexOf(this: tableE, entityId: entityId)
-      if idxB >= 0 and idxC >= 0 and idxD >= 0 and idxE >= 0 {
-        matches.add(value: Query5Match {
-          entityId: entityId
-          indexA: i
-          indexB: idxB
-          indexC: idxC
-          indexD: idxD
-          indexE: idxE
-        })
+      if let idxB: Int = componentIndexOf(this: tableB, entityId: entityId) {
+        if let idxC: Int = componentIndexOf(this: tableC, entityId: entityId) {
+          if let idxD: Int = componentIndexOf(this: tableD, entityId: entityId) {
+            if let idxE: Int = componentIndexOf(this: tableE, entityId: entityId) {
+              matches.add(value: Query5Match {
+                entityId: entityId
+                indexA: i
+                indexB: idxB
+                indexC: idxC
+                indexD: idxD
+                indexE: idxE
+              })
+            }
+          }
+        }
       }
     }
   } else if countB <= countA and countB <= countC and countB <= countD and countB <= countE {
     loop var i: Int = 0, i < countB, ++i {
       let entityId: EntityId = componentEntityAt(this: tableB, i: i)
-      let idxA: Int = componentIndexOf(this: tableA, entityId: entityId)
-      let idxC: Int = componentIndexOf(this: tableC, entityId: entityId)
-      let idxD: Int = componentIndexOf(this: tableD, entityId: entityId)
-      let idxE: Int = componentIndexOf(this: tableE, entityId: entityId)
-      if idxA >= 0 and idxC >= 0 and idxD >= 0 and idxE >= 0 {
-        matches.add(value: Query5Match {
-          entityId: entityId
-          indexA: idxA
-          indexB: i
-          indexC: idxC
-          indexD: idxD
-          indexE: idxE
-        })
+      if let idxA: Int = componentIndexOf(this: tableA, entityId: entityId) {
+        if let idxC: Int = componentIndexOf(this: tableC, entityId: entityId) {
+          if let idxD: Int = componentIndexOf(this: tableD, entityId: entityId) {
+            if let idxE: Int = componentIndexOf(this: tableE, entityId: entityId) {
+              matches.add(value: Query5Match {
+                entityId: entityId
+                indexA: idxA
+                indexB: i
+                indexC: idxC
+                indexD: idxD
+                indexE: idxE
+              })
+            }
+          }
+        }
       }
     }
   } else if countC <= countA and countC <= countB and countC <= countD and countC <= countE {
     loop var i: Int = 0, i < countC, ++i {
       let entityId: EntityId = componentEntityAt(this: tableC, i: i)
-      let idxA: Int = componentIndexOf(this: tableA, entityId: entityId)
-      let idxB: Int = componentIndexOf(this: tableB, entityId: entityId)
-      let idxD: Int = componentIndexOf(this: tableD, entityId: entityId)
-      let idxE: Int = componentIndexOf(this: tableE, entityId: entityId)
-      if idxA >= 0 and idxB >= 0 and idxD >= 0 and idxE >= 0 {
-        matches.add(value: Query5Match {
-          entityId: entityId
-          indexA: idxA
-          indexB: idxB
-          indexC: i
-          indexD: idxD
-          indexE: idxE
-        })
+      if let idxA: Int = componentIndexOf(this: tableA, entityId: entityId) {
+        if let idxB: Int = componentIndexOf(this: tableB, entityId: entityId) {
+          if let idxD: Int = componentIndexOf(this: tableD, entityId: entityId) {
+            if let idxE: Int = componentIndexOf(this: tableE, entityId: entityId) {
+              matches.add(value: Query5Match {
+                entityId: entityId
+                indexA: idxA
+                indexB: idxB
+                indexC: i
+                indexD: idxD
+                indexE: idxE
+              })
+            }
+          }
+        }
       }
     }
   } else if countD <= countA and countD <= countB and countD <= countC and countD <= countE {
     loop var i: Int = 0, i < countD, ++i {
       let entityId: EntityId = componentEntityAt(this: tableD, i: i)
-      let idxA: Int = componentIndexOf(this: tableA, entityId: entityId)
-      let idxB: Int = componentIndexOf(this: tableB, entityId: entityId)
-      let idxC: Int = componentIndexOf(this: tableC, entityId: entityId)
-      let idxE: Int = componentIndexOf(this: tableE, entityId: entityId)
-      if idxA >= 0 and idxB >= 0 and idxC >= 0 and idxE >= 0 {
-        matches.add(value: Query5Match {
-          entityId: entityId
-          indexA: idxA
-          indexB: idxB
-          indexC: idxC
-          indexD: i
-          indexE: idxE
-        })
+      if let idxA: Int = componentIndexOf(this: tableA, entityId: entityId) {
+        if let idxB: Int = componentIndexOf(this: tableB, entityId: entityId) {
+          if let idxC: Int = componentIndexOf(this: tableC, entityId: entityId) {
+            if let idxE: Int = componentIndexOf(this: tableE, entityId: entityId) {
+              matches.add(value: Query5Match {
+                entityId: entityId
+                indexA: idxA
+                indexB: idxB
+                indexC: idxC
+                indexD: i
+                indexE: idxE
+              })
+            }
+          }
+        }
       }
     }
   } else {
     loop var i: Int = 0, i < countE, ++i {
       let entityId: EntityId = componentEntityAt(this: tableE, i: i)
-      let idxA: Int = componentIndexOf(this: tableA, entityId: entityId)
-      let idxB: Int = componentIndexOf(this: tableB, entityId: entityId)
-      let idxC: Int = componentIndexOf(this: tableC, entityId: entityId)
-      let idxD: Int = componentIndexOf(this: tableD, entityId: entityId)
-      if idxA >= 0 and idxB >= 0 and idxC >= 0 and idxD >= 0 {
-        matches.add(value: Query5Match {
-          entityId: entityId
-          indexA: idxA
-          indexB: idxB
-          indexC: idxC
-          indexD: idxD
-          indexE: i
-        })
+      if let idxA: Int = componentIndexOf(this: tableA, entityId: entityId) {
+        if let idxB: Int = componentIndexOf(this: tableB, entityId: entityId) {
+          if let idxC: Int = componentIndexOf(this: tableC, entityId: entityId) {
+            if let idxD: Int = componentIndexOf(this: tableD, entityId: entityId) {
+              matches.add(value: Query5Match {
+                entityId: entityId
+                indexA: idxA
+                indexB: idxB
+                indexC: idxC
+                indexD: idxD
+                indexE: i
+              })
+            }
+          }
+        }
       }
     }
   }
@@ -555,7 +567,7 @@ func without(
   let matches: List(QueryMatch) = List.create(QueryMatch, cap: 16)
   loop var i: Int = 0, i < count, ++i {
     let entityId: EntityId = componentEntityAt(this: dataTable, i: i)
-    if componentIndexOf(this: tagTable, entityId: entityId) < 0 {
+    if componentIndexOf(this: tagTable, entityId: entityId) is none {
       matches.add(value: QueryMatch { entityId: entityId, index: i })
     }
   }

@@ -36,7 +36,7 @@ func registerMaterial3d(reg: mod MaterialRegistry3d, key: view String, index: vi
   reg.indices.add(value: index)
 }
 
-func materialRegistry3dGet(reg: view MaterialRegistry3d, key: view String) ret Int {
+func materialRegistry3dGet(reg: view MaterialRegistry3d, key: view String) ret opt Int {
   var i: Int = 0
   loop i < reg.keys.length {
     if let candidate: String = reg.keys.copyAt(index: i) {
@@ -48,14 +48,14 @@ func materialRegistry3dGet(reg: view MaterialRegistry3d, key: view String) ret I
     }
     i = i + 1
   }
-  ret -1
+  ret none
 }
 
 func createMeshRegistry3d() pub ret MeshRegistry3d {
   ret MeshRegistry3d { keys: List.create(String, cap: 8), handles: List.create(MeshHandle, cap: 8) }
 }
 
-func meshRegistry3dIndex(reg: view MeshRegistry3d, key: view String) pub ret Int {
+func meshRegistry3dIndex(reg: view MeshRegistry3d, key: view String) ret opt Int {
   var i: Int = 0
   loop i < reg.keys.length {
     if let candidate: String = reg.keys.copyAt(index: i) {
@@ -65,12 +65,11 @@ func meshRegistry3dIndex(reg: view MeshRegistry3d, key: view String) pub ret Int
     }
     i = i + 1
   }
-  ret -1
+  ret none
 }
 
 func registerMesh3d(reg: mod MeshRegistry3d, key: view String, handle: view MeshHandle) pub {
-  let existing: Int = meshRegistry3dIndex(reg: reg, key: key)
-  if existing >= 0 {
+  if let existing: Int = meshRegistry3dIndex(reg: reg, key: key) {
     reg.handles.set(index: existing, value: handle)
     ret
   }
@@ -83,12 +82,11 @@ func registerMesh3d(reg: mod MeshRegistry3d, key: view String, handle: view Mesh
 }
 
 func meshRegistry3dGet(reg: view MeshRegistry3d, key: view String) pub ret MeshHandle {
-  let idx: Int = meshRegistry3dIndex(reg: reg, key: key)
-  if idx < 0 {
+  if let idx: Int = meshRegistry3dIndex(reg: reg, key: key) {
+    if let handle: MeshHandle = reg.handles.copyAt(index: idx) {
+      ret handle
+    }
     ret meshHandleNone()
-  }
-  if let handle: MeshHandle = reg.handles.copyAt(index: idx) {
-    ret handle
   }
   ret meshHandleNone()
 }
@@ -263,33 +261,33 @@ func parseWorld3dAsset(source: view String, meshes: view MeshRegistry3d) pub ret
           failWorld3dAsset(asset: asset, message: "MeshRenderer references an unknown mesh key")
           ret asset
         }
-        let materialIdx: Int = materialRegistry3dGet(reg: materials, key: materialKey)
-        if materialIdx < 0 {
+        if let materialIdx: Int = materialRegistry3dGet(reg: materials, key: materialKey) {
+          var visible: Bool = true
+          let visibleValue: JsonValue = objectField(doc: doc, object: renderer, key: "visible")
+          if visibleValue.kind is JsonKind.bool and visibleValue.asBool is false {
+            visible = false
+          }
+          let entityId: EntityId = world3dAddEntity(world: asset.world)
+          world3dSetTransform(world: asset.world, entityId: entityId, transform: transform)
+          # The MeshRenderer's legacy `material` Int field is ignored by the World3d
+          # renderer (it reads the Material3d component); it carries the material
+          # index for parity with the old bridge.
+          world3dSetMeshRenderer(
+            world: asset.world
+            entityId: entityId
+            renderer: MeshRenderer { mesh: mesh, material: materialIdx, visible: visible }
+          )
+          if let material: Material3d = materialValues.copyAt(index: materialIdx) {
+            world3dSetMaterial(world: asset.world, entityId: entityId, material: material)
+          }
+          addWorldAssetEntity(asset: asset, nodeId: node.nodeId, entityId: entityId)
+        } else {
           failWorld3dAsset(
             asset: asset
             message: "MeshRenderer references an unknown material node"
           )
           ret asset
         }
-        var visible: Bool = true
-        let visibleValue: JsonValue = objectField(doc: doc, object: renderer, key: "visible")
-        if visibleValue.kind is JsonKind.bool and visibleValue.asBool is false {
-          visible = false
-        }
-        let entityId: EntityId = world3dAddEntity(world: asset.world)
-        world3dSetTransform(world: asset.world, entityId: entityId, transform: transform)
-        # The MeshRenderer's legacy `material` Int field is ignored by the World3d
-        # renderer (it reads the Material3d component); it carries the material
-        # index for parity with the old bridge.
-        world3dSetMeshRenderer(
-          world: asset.world
-          entityId: entityId
-          renderer: MeshRenderer { mesh: mesh, material: materialIdx, visible: visible }
-        )
-        if let material: Material3d = materialValues.copyAt(index: materialIdx) {
-          world3dSetMaterial(world: asset.world, entityId: entityId, material: material)
-        }
-        addWorldAssetEntity(asset: asset, nodeId: node.nodeId, entityId: entityId)
       } else {
         let sdf: JsonValue = nodeComponent(doc: doc, node: node, name: "SdfPrimitive")
         if sdf.kind is not JsonKind.object {
@@ -329,48 +327,48 @@ func parseWorld3dAsset(source: view String, meshes: view MeshRegistry3d) pub ret
           ret asset
         }
         let materialKey: String = readStringField(doc: doc, object: sdf, key: "material")
-        let materialIdx: Int = materialRegistry3dGet(reg: materials, key: materialKey)
-        if materialIdx < 0 {
+        if let materialIdx: Int = materialRegistry3dGet(reg: materials, key: materialKey) {
+          var noise: Float = 0.0
+          let noiseValue: JsonValue = objectField(doc: doc, object: sdf, key: "noise")
+          if noiseValue.kind is JsonKind.number {
+            noise = noiseValue.asNumber
+          }
+          # Optional: which blob this primitive belongs to, and how sticky that blob
+          # is. Defaults keep single-cluster scenes rendering exactly as before.
+          var cluster: Int = 0
+          let clusterValue: JsonValue = objectField(doc: doc, object: sdf, key: "cluster")
+          if clusterValue.kind is JsonKind.number {
+            cluster = clusterValue.asNumber.toInt()
+          }
+          var smoothing: Float = 0.62
+          let smoothingValue: JsonValue = objectField(doc: doc, object: sdf, key: "smoothing")
+          if smoothingValue.kind is JsonKind.number {
+            smoothing = smoothingValue.asNumber
+          }
+          let entityId: EntityId = world3dAddEntity(world: asset.world)
+          world3dSetTransform(world: asset.world, entityId: entityId, transform: transform)
+          world3dSetSdf(
+            world: asset.world
+            entityId: entityId
+            sdf: SdfPrimitive {
+              shape: shape
+              material: materialIdx
+              noise: noise
+              cluster: cluster
+              smoothing: smoothing
+            }
+          )
+          if let material: Material3d = materialValues.copyAt(index: materialIdx) {
+            world3dSetMaterial(world: asset.world, entityId: entityId, material: material)
+          }
+          addWorldAssetEntity(asset: asset, nodeId: node.nodeId, entityId: entityId)
+        } else {
           failWorld3dAsset(
             asset: asset
             message: "SdfPrimitive references an unknown material node"
           )
           ret asset
         }
-        var noise: Float = 0.0
-        let noiseValue: JsonValue = objectField(doc: doc, object: sdf, key: "noise")
-        if noiseValue.kind is JsonKind.number {
-          noise = noiseValue.asNumber
-        }
-        # Optional: which blob this primitive belongs to, and how sticky that blob
-        # is. Defaults keep single-cluster scenes rendering exactly as before.
-        var cluster: Int = 0
-        let clusterValue: JsonValue = objectField(doc: doc, object: sdf, key: "cluster")
-        if clusterValue.kind is JsonKind.number {
-          cluster = clusterValue.asNumber.toInt()
-        }
-        var smoothing: Float = 0.62
-        let smoothingValue: JsonValue = objectField(doc: doc, object: sdf, key: "smoothing")
-        if smoothingValue.kind is JsonKind.number {
-          smoothing = smoothingValue.asNumber
-        }
-        let entityId: EntityId = world3dAddEntity(world: asset.world)
-        world3dSetTransform(world: asset.world, entityId: entityId, transform: transform)
-        world3dSetSdf(
-          world: asset.world
-          entityId: entityId
-          sdf: SdfPrimitive {
-            shape: shape
-            material: materialIdx
-            noise: noise
-            cluster: cluster
-            smoothing: smoothing
-          }
-        )
-        if let material: Material3d = materialValues.copyAt(index: materialIdx) {
-          world3dSetMaterial(world: asset.world, entityId: entityId, material: material)
-        }
-        addWorldAssetEntity(asset: asset, nodeId: node.nodeId, entityId: entityId)
       }
     }
 

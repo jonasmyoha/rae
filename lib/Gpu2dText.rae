@@ -65,8 +65,7 @@ func emitRange(
     var i: Int = start
     loop i < end {
       let cp: Int = text.at(index: i).toInt()
-      let gi: Int = SdfText.sdfGlyphIndex(font: font, cp: cp)
-      if gi >= 0 {
+      if let gi: Int = SdfText.sdfGlyphIndex(font: font, cp: cp) {
         let g: SdfGlyph = rae_ext_rae_buf_get(buf: font.glyphs.data, index: gi)
         if g.hasBounds {
           let sx0: Float = pen + g.planeLeft * scale
@@ -115,12 +114,11 @@ func emitRange(
 
 func glyphAdvance(font: view SdfFont, cp: view Int, sizePx: view Float) ret Float {
   unsafe {
-    let gi: Int = SdfText.sdfGlyphIndex(font: font, cp: cp)
-    if gi < 0 {
-      ret 0.0
+    if let gi: Int = SdfText.sdfGlyphIndex(font: font, cp: cp) {
+      let glyph: SdfGlyph = rae_ext_rae_buf_get(buf: font.glyphs.data, index: gi)
+      ret glyph.advance * (sizePx / font.emSize)
     }
-    let glyph: SdfGlyph = rae_ext_rae_buf_get(buf: font.glyphs.data, index: gi)
-    ret glyph.advance * (sizePx / font.emSize)
+    ret 0.0
   }
 }
 

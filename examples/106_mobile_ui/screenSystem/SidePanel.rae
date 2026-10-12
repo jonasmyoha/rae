@@ -63,34 +63,33 @@ func mountSidePanel(
   if viewport.sidePanelDuW <= 0.0 {
     ret noEntity()
   }
-  let sceneIndex: Int = sceneRegistryIndex(reg: scenes.pages, key: libraryPageId)
-  if sceneIndex < 0 {
-    ret noEntity()
-  }
-  let scene: view Scene => sceneRegistryGet(reg: scenes.pages, idx: sceneIndex)
-  let pageIdCopy: String = "{sidePanelPageId}"
-  let root: EntityId = mountPageOrError(
-    world: world
-    uiSystems: uiSystems
-    pageId: own pageIdCopy
-    scene: scene
-    overrides: emptyOverrides()
-    w: viewport.sidePanelDuW
-    h: viewport.areaDuH
-    sceneLabel: "Side panel"
-    subScenes: scenes.subScenes
-  )
-  if isNone(this: root) {
+  if let sceneIndex: Int = sceneRegistryIndex(reg: scenes.pages, key: libraryPageId) {
+    let scene: view Scene => sceneRegistryGet(reg: scenes.pages, idx: sceneIndex)
+    let pageIdCopy: String = "{sidePanelPageId}"
+    let root: EntityId = mountPageOrError(
+      world: world
+      uiSystems: uiSystems
+      pageId: own pageIdCopy
+      scene: scene
+      overrides: emptyOverrides()
+      w: viewport.sidePanelDuW
+      h: viewport.areaDuH
+      sceneLabel: "Side panel"
+      subScenes: scenes.subScenes
+    )
+    if isNone(this: root) {
+      ret root
+    }
+    # The page scene centres itself; the panel sits at the left edge
+    let anchor: ExtentAnchor = { h: HExtent.left }
+    componentSet(this: world.extentAnchors, entityId: root, data: anchor)
+    setGridColumns(
+      world: world
+      pageId: sidePanelPageId
+      nodeId: coverGridNodeId
+      columns: 1
+    )
     ret root
   }
-  # The page scene centres itself; the panel sits at the left edge
-  let anchor: ExtentAnchor = { h: HExtent.left }
-  componentSet(this: world.extentAnchors, entityId: root, data: anchor)
-  setGridColumns(
-    world: world
-    pageId: sidePanelPageId
-    nodeId: coverGridNodeId
-    columns: 1
-  )
-  ret root
+  ret noEntity()
 }

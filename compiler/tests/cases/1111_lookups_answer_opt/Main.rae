@@ -1,0 +1,72 @@
+# A lookup that may find nothing answers `opt Int`, never a -1 the caller can
+# forget to check (#28002543, after String.indexOf in #89112121). Each library
+# lookup below is asked once for something it has and once for something it
+# does not: the miss is `none`, and `if let` is how a caller reads the hit.
+import Json
+open ui/Scene
+open ui/SceneLoader
+open ui/SceneInstance
+open ui/Frames
+open ui/ThemeResolved
+open ui/ThemeParse
+open ecs/World
+open ecs/ComponentTable
+open net/ByteBuffer
+open Scene3dFile
+
+type Position {
+  x: Int
+}
+
+func describe(label: view String, answer: opt copy Int) {
+  if let index: view Int => answer {
+    log("{label}: {index}")
+  } else {
+    log("{label}: none")
+  }
+}
+
+func main() {
+  let source: String = r#"{ "type": "Scene", "version": 2, "sceneId": "lookups", "root": "Root", "nodes": { "Root": { "Children": ["Title"] }, "Title": {} }, "palette": { "accent": {"r":1,"g":2,"b":3,"a":255} }, "shadow": { "soft": {"color":{"r":0,"g":0,"b":0,"a":90}} }, "text": { "body": {"size":14.0} }, "frames": { "Phone": { "default": true, "nodes": {} }, "Wide": { "when": { "minPtW": 700 }, "nodes": {} } } }"#
+  let scene: Scene = parseScene(source: source)
+  let theme: ResolvedTheme = parseTheme(scene: scene)
+  describe(label: "palette accent", answer: themePaletteIndex(theme: theme, slot: "accent"))
+  describe(label: "palette missing", answer: themePaletteIndex(theme: theme, slot: "missing"))
+  describe(label: "text body", answer: themeTextStyleIndex(theme: theme, styleId: "body"))
+  describe(label: "text missing", answer: themeTextStyleIndex(theme: theme, styleId: "missing"))
+  describe(label: "shadow soft", answer: themeShadowIndex(theme: theme, name: "soft"))
+  describe(label: "shadow missing", answer: themeShadowIndex(theme: theme, name: "missing"))
+  describe(label: "container missing", answer: themeContainerIndex(theme: theme, name: "missing"))
+
+  describe(label: "node Title", answer: sceneNodeIndex(this: scene, nodeId: "Title"))
+  describe(label: "node missing", answer: sceneNodeIndex(this: scene, nodeId: "missing"))
+
+  let frames: FrameSet = parseFrames(scene: scene)
+  describe(label: "frame Wide", answer: frameIndexByName(frames: frames, name: "Wide"))
+  describe(label: "frame missing", answer: frameIndexByName(frames: frames, name: "missing"))
+
+  var registry: SceneRegistry = createSceneRegistry()
+  registerScene(reg: registry, key: "lookups", scene: parseScene(source: source))
+  describe(label: "registry lookups", answer: sceneRegistryIndex(reg: registry, key: "lookups"))
+  describe(label: "registry missing", answer: sceneRegistryIndex(reg: registry, key: "missing"))
+
+  var allocator: EntityAllocator = createEntityAllocator()
+  let first: EntityId = allocEntity(this: allocator)
+  let second: EntityId = allocEntity(this: allocator)
+  var positions: ComponentTable(Position) = createComponentTable(Position)
+  componentSet(this: positions, entityId: second, data: { x: 7 })
+  describe(label: "component second", answer: componentIndexOf(this: positions, entityId: second))
+  describe(label: "component first", answer: componentIndexOf(this: positions, entityId: first))
+  describe(label: "generation of slot 1", answer: allocatorGeneration(this: allocator, index: 1))
+  describe(label: "generation of slot 9", answer: allocatorGeneration(this: allocator, index: 9))
+
+  var buffer: ByteBuffer = createByteBuffer(capacity: 16)
+  appendText(buffer: buffer, text: "key: value\r\n")
+  describe(label: "bytes colon", answer: byteBufferIndexOf(buffer: buffer, pattern: ":", from: 0))
+  describe(label: "bytes tab", answer: byteBufferIndexOf(buffer: buffer, pattern: "\t", from: 0))
+
+  var materials: MaterialRegistry3d = createMaterialRegistry3d()
+  registerMaterial3d(reg: materials, key: "stone", index: 4)
+  describe(label: "material stone", answer: materialRegistry3dGet(reg: materials, key: "stone"))
+  describe(label: "material glass", answer: materialRegistry3dGet(reg: materials, key: "glass"))
+}

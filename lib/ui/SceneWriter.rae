@@ -242,7 +242,6 @@ func writeNode(
     freshEntityId = nodeEntityId(world: fresh, index: index)
   }
   let doc: view JsonDoc => scene.doc
-  let sourceIndex: Int = sceneNodeIndex(this: scene, nodeId: nodeId)
   var members: List(String) = List.create(String, cap: 12)
   var written: List(String) = List.create(String, cap: 12)
   # Where the author wrote Children (-1: they did not; it goes last).
@@ -255,7 +254,7 @@ func writeNode(
     }
   }
   # 1. The authored bag, in the author's order: verbatim when unchanged.
-  if sourceIndex >= 0 {
+  if let sourceIndex: Int = sceneNodeIndex(this: scene, nodeId: nodeId) {
     let node: view SceneNode => nodeAt(this: scene, idx: sourceIndex)
     let bag: JsonValue = Json.jsonValueAt(doc: doc, idx: node.componentsValueIdx)
     let count: Int = Json.objectLen(this: bag)

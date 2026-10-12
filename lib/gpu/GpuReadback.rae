@@ -78,46 +78,45 @@ func startReadback(
   if bufferIsMapped(resources: resources, bufferSlot: buffer.slot) {
     ret none
   }
-  let slot: Int = findFreeSlot(table: resources.readbacks, capacity: resources.capacity)
-  if slot < 0 {
-    ret none
-  }
-  # Start the native map and adopt it into the slot in one unsafe region so no
-  # raw request pointer escapes; a rejected start is released and reported none.
-  var started: Bool = false
-  unsafe {
-    let request: Ptr = startRead(
-      buffer: slotHandle(table: resources.buffers, slot: buffer.slot)
-      offset: offset as UInt64
-      size: size as UInt64
+  if let slot: Int = findFreeSlot(table: resources.readbacks, capacity: resources.capacity) {
+    # Start the native map and adopt it into the slot in one unsafe region so no
+    # raw request pointer escapes; a rejected start is released and reported none.
+    var started: Bool = false
+    unsafe {
+      let request: Ptr = startRead(
+        buffer: slotHandle(table: resources.buffers, slot: buffer.slot)
+        offset: offset as UInt64
+        size: size as UInt64
+      )
+      if readStartStatus(request: request) is not -1 {
+        storeHandle(table: resources.readbacks, slot: slot, handle: request)
+        started = true
+      } else {
+        let released: Ptr = releaseRead(request: request)
+      }
+    }
+    if started is false {
+      ret none
+    }
+    let start: Int = resources.depKinds.length
+    appendDep(
+      resources: resources
+      kind: kindBuffer
+      slot: buffer.slot
+      generation: buffer.generation
     )
-    if readStartStatus(request: request) is not -1 {
-      storeHandle(table: resources.readbacks, slot: slot, handle: request)
-      started = true
-    } else {
-      let released: Ptr = releaseRead(request: request)
+    resources.readbacks.nativeIndex.set(index: slot, value: size)
+    resources.readbacks.completed.set(index: slot, value: 0)
+    resources.readbacks.depStart.set(index: slot, value: start)
+    resources.readbacks.depCount.set(index: slot, value: 1)
+    pinSlice(resources: resources, start: start, count: 1)
+    ret ReadbackId {
+      managerTag: resources.managerTag
+      slot: slot
+      generation: slotGeneration(table: resources.readbacks, slot: slot)
     }
   }
-  if started is false {
-    ret none
-  }
-  let start: Int = resources.depKinds.length
-  appendDep(
-    resources: resources
-    kind: kindBuffer
-    slot: buffer.slot
-    generation: buffer.generation
-  )
-  resources.readbacks.nativeIndex.set(index: slot, value: size)
-  resources.readbacks.completed.set(index: slot, value: 0)
-  resources.readbacks.depStart.set(index: slot, value: start)
-  resources.readbacks.depCount.set(index: slot, value: 1)
-  pinSlice(resources: resources, start: start, count: 1)
-  ret ReadbackId {
-    managerTag: resources.managerTag
-    slot: slot
-    generation: slotGeneration(table: resources.readbacks, slot: slot)
-  }
+  ret none
 }
 
 # Nonblocking: -1 invalid, 0 pending, 1 success (bytes available), 2 failure.

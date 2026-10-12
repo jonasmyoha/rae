@@ -64,8 +64,8 @@ func emptyScene() ret Scene {
 }
 
 # Linear lookup of a SceneNode by id. Scenes are typically <100 nodes
-# so a hash map isn't worth it. Returns -1 if missing.
-func sceneNodeIndex(this: view Scene, nodeId: view String) ret Int {
+# so a hash map isn't worth it. Returns none if missing.
+func sceneNodeIndex(this: view Scene, nodeId: view String) ret opt Int {
   let n: Int = this.nodes.length
   var i: Int = 0
   loop i < n {
@@ -75,7 +75,7 @@ func sceneNodeIndex(this: view Scene, nodeId: view String) ret Int {
     }
     i = i + 1
   }
-  ret -1
+  ret none
 }
 
 func nodeAt(this: view Scene, idx: view Int) ret view SceneNode {
@@ -200,7 +200,7 @@ func parseScene(source: view String) ret Scene {
   }
 
   # Validate `root` references an existing node.
-  if sceneNodeIndex(this: scene, nodeId: scene.rootNodeId) < 0 {
+  if sceneNodeIndex(this: scene, nodeId: scene.rootNodeId) is none {
     scene.errorMsg = "root node not found in nodes"
     ret scene
   }
@@ -214,7 +214,7 @@ func parseScene(source: view String) ret Scene {
     var k: Int = 0
     loop k < kn {
       if let childId: String = n.childrenIds.copyAt(index: k) {
-        if sceneNodeIndex(this: scene, nodeId: childId) < 0 {
+        if sceneNodeIndex(this: scene, nodeId: childId) is none {
           scene.errorMsg = childId.concat(other: " referenced by Children but not defined")
           ret scene
         }

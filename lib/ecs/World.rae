@@ -126,23 +126,26 @@ func retireEntity(this: mod EntityAllocator, entityId: view EntityId) {
   setIntListAt(lst: this.aliveSlot, index: idx, value: -1)
 }
 
-# The current generation of a slot, or -1 if the index was never allocated.
-func allocatorGeneration(this: view EntityAllocator, index: view Int) ret Int {
+# The current generation of a slot, or none if the index was never allocated.
+func allocatorGeneration(this: view EntityAllocator, index: view Int) ret opt Int {
   if index < 0 {
-    ret -1
+    ret none
   }
   if index >= this.generations.length {
-    ret -1
+    ret none
   }
   ret intListAt(lst: this.generations, index: index)
 }
 
 # O(1) liveness: a handle is alive iff its slot's current generation still
 # matches the handle's. A freed slot has a bumped generation and a never-
-# allocated/out-of-range index reads -1, so both compare unequal — noEntity()
-# (index -1) and stale handles read false without touching the alive list.
+# allocated/out-of-range index has none, so noEntity() (index -1) and stale
+# handles read false without touching the alive list.
 func allocatorIsAlive(this: view EntityAllocator, entityId: view EntityId) ret Bool {
-  ret allocatorGeneration(this: this, index: entityId.index) is entityId.generation
+  if let generation: Int = allocatorGeneration(this: this, index: entityId.index) {
+    ret generation is entityId.generation
+  }
+  ret false
 }
 
 # How many entities are currently alive (the dense set's length).
