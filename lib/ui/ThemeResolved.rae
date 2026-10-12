@@ -248,7 +248,7 @@ func themeRadiusValue(
   }
 }
 
-func themePaletteIndex(theme: view ResolvedTheme, slot: view String) pub ret Int {
+func themePaletteIndex(theme: view ResolvedTheme, slot: view String) ret opt Int {
   unsafe {
     var i: Int = 0
     loop i < theme.palNames.length {
@@ -258,11 +258,11 @@ func themePaletteIndex(theme: view ResolvedTheme, slot: view String) pub ret Int
       }
       i = i + 1
     }
-    ret -1
+    ret none
   }
 }
 
-func themeTextStyleIndex(theme: view ResolvedTheme, styleId: view String) pub ret Int {
+func themeTextStyleIndex(theme: view ResolvedTheme, styleId: view String) ret opt Int {
   unsafe {
     var i: Int = 0
     loop i < theme.textNames.length {
@@ -272,11 +272,11 @@ func themeTextStyleIndex(theme: view ResolvedTheme, styleId: view String) pub re
       }
       i = i + 1
     }
-    ret -1
+    ret none
   }
 }
 
-func themeShadowIndex(theme: view ResolvedTheme, name: view String) pub ret Int {
+func themeShadowIndex(theme: view ResolvedTheme, name: view String) ret opt Int {
   unsafe {
     var i: Int = 0
     loop i < theme.shadowNames.length {
@@ -286,7 +286,7 @@ func themeShadowIndex(theme: view ResolvedTheme, name: view String) pub ret Int 
       }
       i = i + 1
     }
-    ret -1
+    ret none
   }
 }
 
@@ -294,9 +294,9 @@ func themeShadowIndex(theme: view ResolvedTheme, name: view String) pub ret Int 
 # Parse
 # -----------------------------------------------------------------
 
-# Index of a container style in the ResolvedTheme's container table, or -1. The
+# Index of a container style in the ResolvedTheme's container table, or none. The
 # field getters below read the parallel lists at that index (#237, M6).
-func themeContainerIndex(theme: view ResolvedTheme, name: view String) pub ret Int {
+func themeContainerIndex(theme: view ResolvedTheme, name: view String) ret opt Int {
   var i: Int = 0
   loop i < theme.containerNames.length {
     if let n: String = theme.containerNames.copyAt(index: i) {
@@ -306,7 +306,7 @@ func themeContainerIndex(theme: view ResolvedTheme, name: view String) pub ret I
     }
     i = i + 1
   }
-  ret -1
+  ret none
 }
 
 func themeContainerBgSlotAt(theme: view ResolvedTheme, index: view Int) pub ret String {

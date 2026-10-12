@@ -106,26 +106,25 @@ func authoredFieldValue(
   found = false
   componentAuthored = false
   fieldAuthored = false
-  let index: Int = sceneNodeIndex(this: scene, nodeId: nodeId)
-  if index < 0 {
-    ret missingAuthoredValue()
+  if let index: Int = sceneNodeIndex(this: scene, nodeId: nodeId) {
+    found = true
+    let doc: view JsonDoc => scene.doc
+    let node: view SceneNode => nodeAt(this: scene, idx: index)
+    let bag: JsonValue = Json.jsonValueAt(doc: doc, idx: node.componentsValueIdx)
+    let componentIdx: Int = Json.field(doc: doc, this: bag, key: component)
+    if componentIdx < 0 {
+      ret missingAuthoredValue()
+    }
+    componentAuthored = true
+    let componentValue: JsonValue = Json.jsonValueAt(doc: doc, idx: componentIdx)
+    let fieldIdx: Int = Json.field(doc: doc, this: componentValue, key: field)
+    if fieldIdx < 0 {
+      ret missingAuthoredValue()
+    }
+    fieldAuthored = true
+    ret authoredScalarText(value: Json.jsonValueAt(doc: doc, idx: fieldIdx))
   }
-  found = true
-  let doc: view JsonDoc => scene.doc
-  let node: view SceneNode => nodeAt(this: scene, idx: index)
-  let bag: JsonValue = Json.jsonValueAt(doc: doc, idx: node.componentsValueIdx)
-  let componentIdx: Int = Json.field(doc: doc, this: bag, key: component)
-  if componentIdx < 0 {
-    ret missingAuthoredValue()
-  }
-  componentAuthored = true
-  let componentValue: JsonValue = Json.jsonValueAt(doc: doc, idx: componentIdx)
-  let fieldIdx: Int = Json.field(doc: doc, this: componentValue, key: field)
-  if fieldIdx < 0 {
-    ret missingAuthoredValue()
-  }
-  fieldAuthored = true
-  ret authoredScalarText(value: Json.jsonValueAt(doc: doc, idx: fieldIdx))
+  ret missingAuthoredValue()
 }
 
 # The verdict for one field, and the authored text a caller can show beside an
@@ -197,53 +196,52 @@ func fieldProvenance(
     ret FieldProvenance { source: FieldSource.unknown, authoredText: "" }
   }
   let source: view SceneSource => componentView(this: world.sceneSources, entityId: entityId)
-  let sourceIndex: Int = sceneRegistryIndex(reg: sources, key: source.sceneId)
-  if sourceIndex < 0 {
-    ret FieldProvenance { source: FieldSource.unknown, authoredText: "" }
-  }
-  let scene: view Scene => sceneRegistryGet(reg: sources, idx: sourceIndex)
-  var found: Bool = false
-  var componentAuthored: Bool = false
-  var fieldAuthored: Bool = false
-  let authored: AuthoredValue = authoredFieldValue(
-    scene: scene
-    nodeId: source.nodeId
-    component: component
-    field: field
-    found: found
-    componentAuthored: componentAuthored
-    fieldAuthored: fieldAuthored
-  )
-  if found is false {
-    ret FieldProvenance { source: FieldSource.unknown, authoredText: "" }
-  }
-  if componentAuthored is false {
-    ret FieldProvenance { source: FieldSource.computed, authoredText: "" }
-  }
-  if fieldAuthored is false {
-    ret FieldProvenance { source: FieldSource.defaulted, authoredText: "" }
-  }
-  if authored.readable and sameValueText(live: liveText, authored: authored.text) {
-    ret FieldProvenance { source: FieldSource.authored, authoredText: "" }
-  }
-  let decoded: AuthoredValue = decodedFieldValue(
-    sourceWorld: sourceWorld
-    sceneId: source.sceneId
-    nodeId: source.nodeId
-    component: component
-    field: field
-  )
-  if decoded.readable and sameValueText(live: liveText, authored: decoded.text) {
-    if authored.readable {
-      ret FieldProvenance { source: FieldSource.resolved, authoredText: "{authored.text}" }
+  if let sourceIndex: Int = sceneRegistryIndex(reg: sources, key: source.sceneId) {
+    let scene: view Scene => sceneRegistryGet(reg: sources, idx: sourceIndex)
+    var found: Bool = false
+    var componentAuthored: Bool = false
+    var fieldAuthored: Bool = false
+    let authored: AuthoredValue = authoredFieldValue(
+      scene: scene
+      nodeId: source.nodeId
+      component: component
+      field: field
+      found: found
+      componentAuthored: componentAuthored
+      fieldAuthored: fieldAuthored
+    )
+    if found is false {
+      ret FieldProvenance { source: FieldSource.unknown, authoredText: "" }
     }
-    ret FieldProvenance { source: FieldSource.authored, authoredText: "" }
+    if componentAuthored is false {
+      ret FieldProvenance { source: FieldSource.computed, authoredText: "" }
+    }
+    if fieldAuthored is false {
+      ret FieldProvenance { source: FieldSource.defaulted, authoredText: "" }
+    }
+    if authored.readable and sameValueText(live: liveText, authored: authored.text) {
+      ret FieldProvenance { source: FieldSource.authored, authoredText: "" }
+    }
+    let decoded: AuthoredValue = decodedFieldValue(
+      sourceWorld: sourceWorld
+      sceneId: source.sceneId
+      nodeId: source.nodeId
+      component: component
+      field: field
+    )
+    if decoded.readable and sameValueText(live: liveText, authored: decoded.text) {
+      if authored.readable {
+        ret FieldProvenance { source: FieldSource.resolved, authoredText: "{authored.text}" }
+      }
+      ret FieldProvenance { source: FieldSource.authored, authoredText: "" }
+    }
+    var sourceText: String = "authored value"
+    if authored.readable {
+      sourceText = "{authored.text}"
+    }
+    ret FieldProvenance { source: FieldSource.overridden, authoredText: own sourceText }
   }
-  var sourceText: String = "authored value"
-  if authored.readable {
-    sourceText = "{authored.text}"
-  }
-  ret FieldProvenance { source: FieldSource.overridden, authoredText: own sourceText }
+  ret FieldProvenance { source: FieldSource.unknown, authoredText: "" }
 }
 
 # The tag shown after the value. An OVERRIDDEN field names what the author

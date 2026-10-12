@@ -44,7 +44,7 @@ func appendPath(haystack: view String, path: view String) ret String {
   ret haystack.concat(other: path).concat(other: "|")
 }
 
-func index(reg: view ImageRegistry, key: view String) pub ret Int {
+func index(reg: view ImageRegistry, key: view String) ret opt Int {
   unsafe {
     var i: Int = 0
     loop i < reg.items.length {
@@ -54,7 +54,7 @@ func index(reg: view ImageRegistry, key: view String) pub ret Int {
       }
       i = i + 1
     }
-    ret -1
+    ret none
   }
 }
 
@@ -64,8 +64,7 @@ func imageRegistryHas(
   key: view String
 ) pub ret Bool {
   unsafe {
-    let idx: Int = index(reg: reg, key: key)
-    if idx >= 0 {
+    if let idx: Int = index(reg: reg, key: key) {
       let item: ImageResource = rae_ext_rae_buf_get(buf: reg.items.data, index: idx)
       if item.status is ImageLoadStatus.loaded {
         ret true
@@ -103,8 +102,7 @@ func markFired(reg: mod ImageRegistry, path: view String) pub {
 
 func markPending(reg: mod ImageRegistry, key: view String, path: view String) pub {
   unsafe {
-    let idx: Int = index(reg: reg, key: key)
-    if idx >= 0 {
+    if let idx: Int = index(reg: reg, key: key) {
       let item: ImageResource = rae_ext_rae_buf_get(buf: reg.items.data, index: idx)
       let updated: ImageResource = {
         key: "{item.key}"
@@ -140,8 +138,7 @@ func upsertResult(
     if handle > 0 {
       status = ImageLoadStatus.loaded
     }
-    let idx: Int = index(reg: reg, key: key)
-    if idx >= 0 {
+    if let idx: Int = index(reg: reg, key: key) {
       let item: ImageResource = rae_ext_rae_buf_get(buf: reg.items.data, index: idx)
       var attempts: Int = item.attempts
       if handle <= 0 {
@@ -185,8 +182,7 @@ func load(
 ) pub ret Int {
   unsafe {
     if imageRegistryHas(reg: reg, canvas: canvas, key: key) {
-      let idx: Int = index(reg: reg, key: key)
-      if idx >= 0 {
+      if let idx: Int = index(reg: reg, key: key) {
         let item: ImageResource = rae_ext_rae_buf_get(buf: reg.items.data, index: idx)
         ret item.handle
       }

@@ -292,8 +292,7 @@ func followSceneImports(
         continue
       }
       let path: String = scenePackageFile(root: root, sceneId: importId)
-      var registryIdx: Int = sceneRegistryIndex(reg: registry, key: importId)
-      if registryIdx < 0 {
+      if sceneRegistryIndex(reg: registry, key: importId) is none {
         if not exists(path: path) {
           reportSceneDiagnostic(
             diagnostics: diagnostics
@@ -325,27 +324,28 @@ func followSceneImports(
         )
         let key: String = "{importId}"
         registerScene(reg: registry, key: own key, scene: own loaded)
-        registryIdx = sceneRegistryIndex(reg: registry, key: importId)
       }
-      assets.importedIds.add(value: "{importId}")
-      assets.importedPaths.add(value: path)
-      let imported: view Scene => sceneRegistryGet(reg: registry, idx: registryIdx)
-      collectSceneAssetsBlock(
-        assets: assets
-        scene: imported
-        directory: sceneFileDirectory(path: path)
-        sceneLabel: importId
-        diagnostics: diagnostics
-      )
-      followSceneImports(
-        assets: assets
-        scene: imported
-        root: root
-        registry: registry
-        diagnostics: diagnostics
-        sceneLabel: importId
-        depth: depth + 1
-      )
+      if let registryIdx: Int = sceneRegistryIndex(reg: registry, key: importId) {
+        assets.importedIds.add(value: "{importId}")
+        assets.importedPaths.add(value: path)
+        let imported: view Scene => sceneRegistryGet(reg: registry, idx: registryIdx)
+        collectSceneAssetsBlock(
+          assets: assets
+          scene: imported
+          directory: sceneFileDirectory(path: path)
+          sceneLabel: importId
+          diagnostics: diagnostics
+        )
+        followSceneImports(
+          assets: assets
+          scene: imported
+          root: root
+          registry: registry
+          diagnostics: diagnostics
+          sceneLabel: importId
+          depth: depth + 1
+        )
+      }
     }
   }
 }
@@ -584,8 +584,7 @@ func sceneImportedTheme(
   parseThemeInto(out: theme, scene: entry)
   loop var i: Int = 0, i < assets.importedIds.length, ++i {
     if let importId: String = assets.importedIds.copyAt(index: i) {
-      let idx: Int = sceneRegistryIndex(reg: registry, key: importId)
-      if idx >= 0 {
+      if let idx: Int = sceneRegistryIndex(reg: registry, key: importId) {
         let imported: view Scene => sceneRegistryGet(reg: registry, idx: idx)
         parseThemeInto(out: theme, scene: imported)
       }

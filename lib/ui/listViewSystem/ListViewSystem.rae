@@ -109,8 +109,8 @@ func listViewDistinctNodeIds(lv: view ListView) ret List(String) {
   }
 }
 
-# Index of `nodeId` within the distinct list (its child slot in a row), or -1.
-func listViewNodeSlot(distinct: view List(String), nodeId: view String) ret Int {
+# Index of `nodeId` within the distinct list (its child slot in a row), or none.
+func listViewNodeSlot(distinct: view List(String), nodeId: view String) ret opt Int {
   var i: Int = 0
   loop i < distinct.length {
     if let existing: String = distinct.copyAt(index: i) {
@@ -120,7 +120,7 @@ func listViewNodeSlot(distinct: view List(String), nodeId: view String) ret Int 
     }
     i = i + 1
   }
-  ret -1
+  ret none
 }
 
 # Write one binding onto its child entity from the row's data.
@@ -379,8 +379,7 @@ func listViewBuildRow(
     h: SizeAxis { mode: SizeMode.fixed, min: -1, max: -1 }
   }
   componentSet(this: world.sizes, entityId: rowRoot, data: size)
-  if listViewUsesScene(lv: lv, scenes: scenes) {
-    let idx: Int = sceneRegistryIndex(reg: scenes, key: lv.itemSceneId)
+  if let idx: Int = sceneRegistryIndex(reg: scenes, key: lv.itemSceneId) {
     let scene: view Scene => sceneRegistryGet(reg: scenes, idx: idx)
     let overrides: List(SceneOverride) = emptyOverrides()
     mountSceneInstanceIntoPage(
@@ -457,15 +456,16 @@ func listViewApplyRow(
     var b: Int = 0
     loop b < bn {
       let binding: ListViewBinding = rae_ext_rae_buf_get(buf: lv.bindings.data, index: b)
-      let slot: Int = listViewNodeSlot(distinct: distinct, nodeId: binding.nodeId)
-      if slot >= 0 and slot < kids.length {
-        let child: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: slot)
-        listViewApplyBinding(
-          world: world
-          child: child
-          binding: binding
-          row: row
-        )
+      if let slot: Int = listViewNodeSlot(distinct: distinct, nodeId: binding.nodeId) {
+        if slot < kids.length {
+          let child: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: slot)
+          listViewApplyBinding(
+            world: world
+            child: child
+            binding: binding
+            row: row
+          )
+        }
       }
       b = b + 1
     }
@@ -724,8 +724,7 @@ func listViewBuildFlowRow(
   let rowRoot: EntityId = createEntity(world: world)
   let identity: ListViewRowKey = { key: "{key}", sceneId: "{sceneId}" }
   componentSet(this: world.listViewRowKeys, entityId: rowRoot, data: identity)
-  if sceneId.length() > 0 and sceneRegistryHas(reg: scenes, key: sceneId) {
-    let idx: Int = sceneRegistryIndex(reg: scenes, key: sceneId)
+  if let idx: Int = sceneRegistryIndex(reg: scenes, key: sceneId) {
     let scene: view Scene => sceneRegistryGet(reg: scenes, idx: idx)
     # The row root IS the scene's root (#990, host-less): its authored
     # placement — `Size`, `Align`, `Layout` — applies, the container's
@@ -945,15 +944,16 @@ func listViewApplyFlowRow(
     var b: Int = 0
     loop b < bn {
       let binding: ListViewBinding = rae_ext_rae_buf_get(buf: lv.bindings.data, index: b)
-      let slot: Int = listViewNodeSlot(distinct: distinct, nodeId: binding.nodeId)
-      if slot >= 0 and slot < kids.length {
-        let child: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: slot)
-        listViewApplyBinding(
-          world: world
-          child: child
-          binding: binding
-          row: row
-        )
+      if let slot: Int = listViewNodeSlot(distinct: distinct, nodeId: binding.nodeId) {
+        if slot < kids.length {
+          let child: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: slot)
+          listViewApplyBinding(
+            world: world
+            child: child
+            binding: binding
+            row: row
+          )
+        }
       }
       b = b + 1
     }

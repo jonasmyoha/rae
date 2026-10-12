@@ -456,15 +456,15 @@ func socketWaitReadable(socketId: view SocketId, timeoutMs: view Int) ret Bool {
   ret false
 }
 
-# The local port the socket is bound to; -1 when it has none
-func socketLocalPort(socketId: view SocketId) ret Int {
+# The local port the socket is bound to; none when it has none
+func socketLocalPort(socketId: view SocketId) ret opt Int {
   if socketId.handle < 0 {
-    ret -1
+    ret none
   }
   unsafe {
     let port: Int = systemLocalPort(handle: socketId.handle)
     if port < 0 {
-      ret -1
+      ret none
     }
     ret port
   }

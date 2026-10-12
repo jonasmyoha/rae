@@ -81,7 +81,7 @@ func hierarchyWouldCycle(
 
 # Re-derive the ACTIVE hierarchy of the page-scoped instance from the
 # authored scene plus frame `frameIdx`'s Parent/order directives, then
-# rewrite the instance's Children/Parent components. `frameIdx < 0`
+# rewrite the instance's Children/Parent components. No `frameIdx`
 # (or a directive-free frame) restores the authored hierarchy — the
 # derivation always starts from authored, which is what makes frame
 # switching reversible with stable entity identity.
@@ -95,194 +95,190 @@ func deriveActiveHierarchy(
   uiSystems: mod UiSystems
   scene: view Scene
   frames: view FrameSet
-  frameIdx: view Int
+  frameIdx: opt copy Int
   pageId: view String
 ) {
   let doc: view JsonDoc => scene.doc
   let nodeCount: Int = scene.nodes.length
-  let rootIdx: Int = sceneNodeIndex(this: scene, nodeId: scene.rootNodeId)
-  if rootIdx < 0 {
-    ret
-  }
-
-  # Raw entity value per scene node (-1 = not mounted in this page).
-  var entityVals: List(Int) = List.create(Int, cap: nodeCount)
-  var e: Int = 0
-  loop e < nodeCount {
-    let node: view SceneNode => nodeAt(this: scene, idx: e)
-    var raw: Int = -1
-    if let entityRaw: Int = findNodeInPage(world: world, pageId: pageId, nodeId: node.nodeId) {
-      raw = entityRaw
-    }
-    entityVals.add(value: raw)
-    e = e + 1
-  }
-
-  # Authored parent map + within-parent sort keys.
-  var parentIdxs: List(Int) = List.create(Int, cap: nodeCount)
-  var sortKeys: List(Float) = List.create(Float, cap: nodeCount)
-  var z: Int = 0
-  loop z < nodeCount {
-    parentIdxs.add(value: -1)
-    sortKeys.add(value: 0.0)
-    z = z + 1
-  }
-  var a: Int = 0
-  loop a < nodeCount {
-    let node: view SceneNode => nodeAt(this: scene, idx: a)
-    let kn: Int = node.childrenIds.length
-    var q: Int = 0
-    loop q < kn {
-      if let childId: String = node.childrenIds.copyAt(index: q) {
-        let childIdx: Int = sceneNodeIndex(this: scene, nodeId: childId)
-        if childIdx >= 0 {
-          parentIdxs.set(index: childIdx, value: a)
-          sortKeys.set(index: childIdx, value: q.toFloat())
-        }
+  if let rootIdx: Int = sceneNodeIndex(this: scene, nodeId: scene.rootNodeId) {
+    # Raw entity value per scene node (-1 = not mounted in this page).
+    var entityVals: List(Int) = List.create(Int, cap: nodeCount)
+    var e: Int = 0
+    loop e < nodeCount {
+      let node: view SceneNode => nodeAt(this: scene, idx: e)
+      var raw: Int = -1
+      if let entityRaw: Int = findNodeInPage(world: world, pageId: pageId, nodeId: node.nodeId) {
+        raw = entityRaw
       }
-      q = q + 1
+      entityVals.add(value: raw)
+      e = e + 1
     }
-    a = a + 1
-  }
 
-  # Apply the active frame's directives in declared order.
-  if frameIdx >= 0 {
-    var nodesIdx: Int = -1
-    if let value: Int = frames.nodesValueIdxs.copyAt(index: frameIdx) {
-      nodesIdx = value
+    # Authored parent map + within-parent sort keys.
+    var parentIdxs: List(Int) = List.create(Int, cap: nodeCount)
+    var sortKeys: List(Float) = List.create(Float, cap: nodeCount)
+    var z: Int = 0
+    loop z < nodeCount {
+      parentIdxs.add(value: -1)
+      sortKeys.add(value: 0.0)
+      z = z + 1
     }
-    if nodesIdx >= 0 {
-      let nodesVal: JsonValue = Json.jsonValueAt(doc: doc, idx: nodesIdx)
-      if nodesVal.kind is JsonKind.object {
-        let dn: Int = Json.objectLen(this: nodesVal)
-        var d: Int = 0
-        loop d < dn {
-          let dirNodeId: String = Json.objectKeyAt(doc: doc, this: nodesVal, idx: d)
-          let bag: JsonValue = Json.objectValueAt(doc: doc, this: nodesVal, idx: d)
-          applyHierarchyDirective(
-            scene: scene
-            doc: doc
-            bag: bag
-            dirNodeId: dirNodeId
-            rootIdx: rootIdx
-            nodeCount: nodeCount
-            seq: d
-            parentIdxs: parentIdxs
-            sortKeys: sortKeys
-          )
-          d = d + 1
-        }
-      }
-    }
-  }
-
-  # #726: rebuild the active hierarchy through HierarchySystem — the UI sets only
-  # Parent, and setParent maintains the derived Children cache. Since this is a
-  # full rebuild, first DETACH every mounted non-root node (clears its Parent and
-  # unlinks it from its parent's Children); then the loop below re-links each node
-  # under its active parent. Detach-first guarantees a clean rebuild: a node that
-  # got reordered, orphaned, or unmounted this frame never lingers in a stale
-  # Children list. The scene root keeps its OUTER-hierarchy Parent (rootIdx is
-  # never a scene child, so it is skipped here and never re-linked below).
-  var detachIdx: Int = 0
-  loop detachIdx < nodeCount {
-    if detachIdx is not rootIdx {
-      var detachRaw: Int = -1
-      if let value: Int = entityVals.copyAt(index: detachIdx) {
-        detachRaw = value
-      }
-      if detachRaw >= 0 {
-        let detachEntityId: EntityId = nodeEntityId(world: world, index: detachRaw)
-        if componentHas(this: uiSystems.hierarchy.parents, entityId: detachEntityId) {
-          setParent(
-            parents: uiSystems.hierarchy.parents
-            childrens: world.childrens
-            child: detachEntityId
-            parent: noEntity()
-          )
-        }
-      }
-    }
-    detachIdx = detachIdx + 1
-  }
-
-  var b: Int = 0
-  loop b < nodeCount {
-    var parentRaw: Int = -1
-    if let value: Int = entityVals.copyAt(index: b) {
-      parentRaw = value
-    }
-    if parentRaw >= 0 {
-      let parentEntityId: EntityId = nodeEntityId(world: world, index: parentRaw)
-      # Gather b's mounted children, selection-sorted by sort key.
-      var unsorted: List(Int) = List.create(Int, cap: 8)
-      var c: Int = 0
-      loop c < nodeCount {
-        if parentIdxs.copyAt(index: c) is b {
-          if entityVals.copyAt(index: c) >= 0 {
-            unsorted.add(value: c)
+    var a: Int = 0
+    loop a < nodeCount {
+      let node: view SceneNode => nodeAt(this: scene, idx: a)
+      let kn: Int = node.childrenIds.length
+      var q: Int = 0
+      loop q < kn {
+        if let childId: String = node.childrenIds.copyAt(index: q) {
+          if let childIdx: Int = sceneNodeIndex(this: scene, nodeId: childId) {
+            parentIdxs.set(index: childIdx, value: a)
+            sortKeys.set(index: childIdx, value: q.toFloat())
           }
         }
-        c = c + 1
+        q = q + 1
       }
-      let childCount: Int = unsorted.length
-      if childCount > 0 {
-        var used: List(Int) = List.create(Int, cap: childCount)
-        var w: Int = 0
-        loop w < childCount {
-          used.add(value: 0)
-          w = w + 1
+      a = a + 1
+    }
+
+    # Apply the active frame's directives in declared order.
+    if let activeFrameIdx: view Int => frameIdx {
+      var nodesIdx: Int = -1
+      if let value: Int = frames.nodesValueIdxs.copyAt(index: activeFrameIdx) {
+        nodesIdx = value
+      }
+      if nodesIdx >= 0 {
+        let nodesVal: JsonValue = Json.jsonValueAt(doc: doc, idx: nodesIdx)
+        if nodesVal.kind is JsonKind.object {
+          let dn: Int = Json.objectLen(this: nodesVal)
+          var d: Int = 0
+          loop d < dn {
+            let dirNodeId: String = Json.objectKeyAt(doc: doc, this: nodesVal, idx: d)
+            let bag: JsonValue = Json.objectValueAt(doc: doc, this: nodesVal, idx: d)
+            applyHierarchyDirective(
+              scene: scene
+              doc: doc
+              bag: bag
+              dirNodeId: dirNodeId
+              rootIdx: rootIdx
+              nodeCount: nodeCount
+              seq: d
+              parentIdxs: parentIdxs
+              sortKeys: sortKeys
+            )
+            d = d + 1
+          }
         }
-        var t: Int = 0
-        loop t < childCount {
-          var bestSlot: Int = -1
-          var bestKey: Float = 0.0
-          var u: Int = 0
-          loop u < childCount {
-            if used.copyAt(index: u) is 0 {
-              if let candIdx: Int = unsorted.copyAt(index: u) {
-                if let candKey: Float = sortKeys.copyAt(index: candIdx) {
-                  var better: Bool = false
-                  if bestSlot < 0 {
-                    better = true
-                  } else {
-                    if candKey < bestKey {
+      }
+    }
+
+    # #726: rebuild the active hierarchy through HierarchySystem — the UI sets only
+    # Parent, and setParent maintains the derived Children cache. Since this is a
+    # full rebuild, first DETACH every mounted non-root node (clears its Parent and
+    # unlinks it from its parent's Children); then the loop below re-links each node
+    # under its active parent. Detach-first guarantees a clean rebuild: a node that
+    # got reordered, orphaned, or unmounted this frame never lingers in a stale
+    # Children list. The scene root keeps its OUTER-hierarchy Parent (rootIdx is
+    # never a scene child, so it is skipped here and never re-linked below).
+    var detachIdx: Int = 0
+    loop detachIdx < nodeCount {
+      if detachIdx is not rootIdx {
+        var detachRaw: Int = -1
+        if let value: Int = entityVals.copyAt(index: detachIdx) {
+          detachRaw = value
+        }
+        if detachRaw >= 0 {
+          let detachEntityId: EntityId = nodeEntityId(world: world, index: detachRaw)
+          if componentHas(this: uiSystems.hierarchy.parents, entityId: detachEntityId) {
+            setParent(
+              parents: uiSystems.hierarchy.parents
+              childrens: world.childrens
+              child: detachEntityId
+              parent: noEntity()
+            )
+          }
+        }
+      }
+      detachIdx = detachIdx + 1
+    }
+
+    var b: Int = 0
+    loop b < nodeCount {
+      var parentRaw: Int = -1
+      if let value: Int = entityVals.copyAt(index: b) {
+        parentRaw = value
+      }
+      if parentRaw >= 0 {
+        let parentEntityId: EntityId = nodeEntityId(world: world, index: parentRaw)
+        # Gather b's mounted children, selection-sorted by sort key.
+        var unsorted: List(Int) = List.create(Int, cap: 8)
+        var c: Int = 0
+        loop c < nodeCount {
+          if parentIdxs.copyAt(index: c) is b {
+            if entityVals.copyAt(index: c) >= 0 {
+              unsorted.add(value: c)
+            }
+          }
+          c = c + 1
+        }
+        let childCount: Int = unsorted.length
+        if childCount > 0 {
+          var used: List(Int) = List.create(Int, cap: childCount)
+          var w: Int = 0
+          loop w < childCount {
+            used.add(value: 0)
+            w = w + 1
+          }
+          var t: Int = 0
+          loop t < childCount {
+            var bestSlot: Int = -1
+            var bestKey: Float = 0.0
+            var u: Int = 0
+            loop u < childCount {
+              if used.copyAt(index: u) is 0 {
+                if let candIdx: Int = unsorted.copyAt(index: u) {
+                  if let candKey: Float = sortKeys.copyAt(index: candIdx) {
+                    var better: Bool = false
+                    if bestSlot < 0 {
                       better = true
+                    } else {
+                      if candKey < bestKey {
+                        better = true
+                      }
                     }
-                  }
-                  if better {
-                    bestSlot = u
-                    bestKey = candKey
+                    if better {
+                      bestSlot = u
+                      bestKey = candKey
+                    }
                   }
                 }
               }
+              u = u + 1
             }
-            u = u + 1
+            used.set(index: bestSlot, value: 1)
+            var childNodeIdx: Int = -1
+            if let value: Int = unsorted.copyAt(index: bestSlot) {
+              childNodeIdx = value
+            }
+            var childEntityRaw: Int = -1
+            if let value: Int = entityVals.copyAt(index: childNodeIdx) {
+              childEntityRaw = value
+            }
+            let childEntityId: EntityId = nodeEntityId(world: world, index: childEntityRaw)
+            # #726: link via setParent. The children are visited in sort-key order,
+            # so setParent's append rebuilds the derived Children cache in exactly
+            # that order — matching the old hand-built, hand-sorted list.
+            setParent(
+              parents: uiSystems.hierarchy.parents
+              childrens: world.childrens
+              child: childEntityId
+              parent: parentEntityId
+            )
+            t = t + 1
           }
-          used.set(index: bestSlot, value: 1)
-          var childNodeIdx: Int = -1
-          if let value: Int = unsorted.copyAt(index: bestSlot) {
-            childNodeIdx = value
-          }
-          var childEntityRaw: Int = -1
-          if let value: Int = entityVals.copyAt(index: childNodeIdx) {
-            childEntityRaw = value
-          }
-          let childEntityId: EntityId = nodeEntityId(world: world, index: childEntityRaw)
-          # #726: link via setParent. The children are visited in sort-key order,
-          # so setParent's append rebuilds the derived Children cache in exactly
-          # that order — matching the old hand-built, hand-sorted list.
-          setParent(
-            parents: uiSystems.hierarchy.parents
-            childrens: world.childrens
-            child: childEntityId
-            parent: parentEntityId
-          )
-          t = t + 1
         }
       }
+      b = b + 1
     }
-    b = b + 1
   }
 }
 
@@ -300,63 +296,63 @@ func applyHierarchyDirective(
   parentIdxs: mod List(Int)
   sortKeys: mod List(Float)
 ) {
-  let nodeIdx: Int = sceneNodeIndex(this: scene, nodeId: dirNodeId)
-  if nodeIdx < 0 {
-    ret
-  }
+  if let nodeIdx: Int = sceneNodeIndex(this: scene, nodeId: dirNodeId) {
+    var newParentIdx: Int = -1
+    var hasParentDirective: Bool = false
+    let parentFieldIdx: Int = Json.field(doc: doc, this: bag, key: "Parent")
+    if parentFieldIdx >= 0 {
+      hasParentDirective = true
+      let pv: JsonValue = Json.jsonValueAt(doc: doc, idx: parentFieldIdx)
+      let noName: String = ""
+      let parentName: String = Json.jsonString(this: pv, fallback: noName)
+      if let parentIdx: Int = sceneNodeIndex(this: scene, nodeId: parentName) {
+        newParentIdx = parentIdx
+      } else {
+        log(
+          "[frames] Parent directive on '{dirNodeId}' names unknown node '{parentName}' — skipped"
+        )
+        ret
+      }
+    }
 
-  var newParentIdx: Int = -1
-  var hasParentDirective: Bool = false
-  let parentFieldIdx: Int = Json.field(doc: doc, this: bag, key: "Parent")
-  if parentFieldIdx >= 0 {
-    hasParentDirective = true
-    let pv: JsonValue = Json.jsonValueAt(doc: doc, idx: parentFieldIdx)
-    let noName: String = ""
-    let parentName: String = Json.jsonString(this: pv, fallback: noName)
-    newParentIdx = sceneNodeIndex(this: scene, nodeId: parentName)
-    if newParentIdx < 0 {
-      log("[frames] Parent directive on '{dirNodeId}' names unknown node '{parentName}' — skipped")
+    var orderVal: Int = -1
+    let orderFieldIdx: Int = Json.field(doc: doc, this: bag, key: "order")
+    if orderFieldIdx >= 0 {
+      let ov: JsonValue = Json.jsonValueAt(doc: doc, idx: orderFieldIdx)
+      let noOrder: Int = -1
+      orderVal = Json.jsonInt(this: ov, fallback: noOrder)
+    }
+
+    if hasParentDirective is false {
+      if orderVal < 0 {
+        ret
+      }
+    }
+
+    if nodeIdx is rootIdx {
+      log("[frames] hierarchy directive on scene root '{dirNodeId}' — skipped")
       ret
     }
-  }
 
-  var orderVal: Int = -1
-  let orderFieldIdx: Int = Json.field(doc: doc, this: bag, key: "order")
-  if orderFieldIdx >= 0 {
-    let ov: JsonValue = Json.jsonValueAt(doc: doc, idx: orderFieldIdx)
-    let noOrder: Int = -1
-    orderVal = Json.jsonInt(this: ov, fallback: noOrder)
-  }
-
-  if hasParentDirective is false {
-    if orderVal < 0 {
-      ret
+    if hasParentDirective {
+      if hierarchyWouldCycle(
+        parentIdxs: parentIdxs
+        nodeIdx: nodeIdx
+        candidateParent: newParentIdx
+        nodeCount: nodeCount
+      ) {
+        log("[frames] Parent directive on '{dirNodeId}' would create a cycle — skipped")
+        ret
+      }
+      parentIdxs.set(index: nodeIdx, value: newParentIdx)
     }
-  }
 
-  if nodeIdx is rootIdx {
-    log("[frames] hierarchy directive on scene root '{dirNodeId}' — skipped")
-    ret
-  }
-
-  if hasParentDirective {
-    if hierarchyWouldCycle(
-      parentIdxs: parentIdxs
-      nodeIdx: nodeIdx
-      candidateParent: newParentIdx
-      nodeCount: nodeCount
-    ) {
-      log("[frames] Parent directive on '{dirNodeId}' would create a cycle — skipped")
-      ret
+    # Position within the (possibly new) parent: before the authored
+    # child at index `order`, or appended past all authored children.
+    var key: Float = 1000000.0 + seq.toFloat()
+    if orderVal >= 0 {
+      key = orderVal.toFloat() - 0.5 + seq.toFloat() * 0.0001
     }
-    parentIdxs.set(index: nodeIdx, value: newParentIdx)
+    sortKeys.set(index: nodeIdx, value: key)
   }
-
-  # Position within the (possibly new) parent: before the authored
-  # child at index `order`, or appended past all authored children.
-  var key: Float = 1000000.0 + seq.toFloat()
-  if orderVal >= 0 {
-    key = orderVal.toFloat() - 0.5 + seq.toFloat() * 0.0001
-  }
-  sortKeys.set(index: nodeIdx, value: key)
 }

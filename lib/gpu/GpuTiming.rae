@@ -146,14 +146,14 @@ func beginTimingFrame(timing: mod GpuTiming) {
 }
 
 # Claims a pass slot and points the shared timestampWrites at its two query
-# indices. Returns the pass index, or -1 when unavailable or the budget is full.
-func timedPass(timing: mod GpuTiming) ret Int {
+# indices. Returns the pass index, or none when unavailable or the budget is full.
+func timedPass(timing: mod GpuTiming) ret opt Int {
   if timing.available is false {
-    ret -1
+    ret none
   }
   let index: Int = timing.passCount
   if index >= timing.maxPasses {
-    ret -1
+    ret none
   }
   unsafe {
     timing.writes.set(
@@ -317,7 +317,7 @@ func recordTimingMark(
   if isValidPipeline(resources: resources, id: pipeline) is false {
     ret false
   }
-  if timedPass(timing: timing) < 0 {
+  if timedPass(timing: timing) is none {
     ret false
   }
   unsafe {

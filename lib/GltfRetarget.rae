@@ -71,8 +71,8 @@ func jointNameAliasKey(key: view String) ret String {
   ret ""
 }
 
-# Index of the joint in `sk` whose name matches `key`, or -1.
-func findJointByKey(sk: view Skeleton, key: view String) ret Int {
+# Index of the joint in `sk` whose name matches `key`, or none.
+func findJointByKey(sk: view Skeleton, key: view String) ret opt Int {
   var n: Int = 0
   loop n < sk.nodeNames.length {
     if let nodeName: String = sk.nodeNames.copyAt(index: n) {
@@ -82,7 +82,7 @@ func findJointByKey(sk: view Skeleton, key: view String) ret Int {
     }
     n = n + 1
   }
-  ret -1
+  ret none
 }
 
 # Read/write a quaternion packed at slot `i` of a flat `x,y,z,w` List(Float).
@@ -273,11 +273,14 @@ func retargetClip(
         skip = true
       }
       if skip is false {
-        s = findJointByKey(sk: from, key: key)
-        if s < 0 {
+        if let found: Int = findJointByKey(sk: from, key: key) {
+          s = found
+        } else {
           let aliasKey: String = jointNameAliasKey(key: key)
           if aliasKey.length() > 0 {
-            s = findJointByKey(sk: from, key: aliasKey)
+            if let aliasFound: Int = findJointByKey(sk: from, key: aliasKey) {
+              s = aliasFound
+            }
           }
         }
       }
@@ -430,14 +433,10 @@ func retargetedChannelCount(c: view Clip, from: view Skeleton, to: view Skeleton
     ) is pathRotation {
       if let srcName: String = from.nodeNames.copyAt(index: srcNode) {
         let key: String = jointNameKey(name: srcName)
-        var hit: Int = findJointByKey(sk: to, key: key)
-        if hit < 0 {
-          let aliasKey: String = jointNameAliasKey(key: key)
-          if aliasKey.length() > 0 {
-            hit = findJointByKey(sk: to, key: aliasKey)
-          }
-        }
-        if hit >= 0 {
+        let aliasKey: String = jointNameAliasKey(key: key)
+        if findJointByKey(sk: to, key: key) is not none {
+          kept = kept + 1
+        } else if aliasKey.length() > 0 and findJointByKey(sk: to, key: aliasKey) is not none {
           kept = kept + 1
         }
       }

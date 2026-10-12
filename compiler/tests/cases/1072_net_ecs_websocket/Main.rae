@@ -136,16 +136,23 @@ func masked(buffer: view ByteBuffer, count: view Int) ret String {
   var out: ByteBuffer = createByteBuffer(capacity: 256)
   var position: Int = 0
   loop {
-    let found: Int = byteBufferIndexOf(buffer: buffer, pattern: "Date: ", from: position)
-    if found < 0 or found >= count {
+    if let found: Int = byteBufferIndexOf(buffer: buffer, pattern: "Date: ", from: position) {
+      if found >= count {
+        break
+      }
+      appendText(
+        buffer: out
+        text: byteBufferText(buffer: buffer, start: position, count: found + 6 - position)
+      )
+      appendText(buffer: out, text: "<date>")
+      if let lineEnd: Int = byteBufferIndexOf(buffer: buffer, pattern: "\r\n", from: found) {
+        position = lineEnd
+      } else {
+        break
+      }
+    } else {
       break
     }
-    appendText(
-      buffer: out
-      text: byteBufferText(buffer: buffer, start: position, count: found + 6 - position)
-    )
-    appendText(buffer: out, text: "<date>")
-    position = byteBufferIndexOf(buffer: buffer, pattern: "\r\n", from: found)
   }
   appendText(
     buffer: out
@@ -170,18 +177,35 @@ func showBuffer(
   log("--- {label} ({length} bytes)")
   var httpEnd: Int = 0
   loop {
-    if byteBufferIndexOf(buffer: writeBuffer.buffer, pattern: "HTTP/1.1 ", from: httpEnd) is not httpEnd {
+    if let start: Int = byteBufferIndexOf(
+      buffer: writeBuffer.buffer
+      pattern: "HTTP/1.1 "
+      from: httpEnd
+    ) {
+      if start is not httpEnd {
+        break
+      }
+    } else {
       break
     }
     let responseStart: Int = httpEnd
-    httpEnd = byteBufferIndexOf(buffer: writeBuffer.buffer, pattern: "\r\n\r\n", from: httpEnd) + 4
-    let body: Int = byteBufferIndexOf(
+    if let headerEnd: Int = byteBufferIndexOf(
+      buffer: writeBuffer.buffer
+      pattern: "\r\n\r\n"
+      from: httpEnd
+    ) {
+      httpEnd = headerEnd + 4
+    } else {
+      break
+    }
+    if let body: Int = byteBufferIndexOf(
       buffer: writeBuffer.buffer
       pattern: "Content-Length: "
       from: responseStart
-    )
-    if body >= 0 and body < httpEnd {
-      httpEnd = httpEnd + contentLength(buffer: writeBuffer.buffer, at: body + 16)
+    ) {
+      if body < httpEnd {
+        httpEnd = httpEnd + contentLength(buffer: writeBuffer.buffer, at: body + 16)
+      }
     }
   }
   if httpEnd > 0 {

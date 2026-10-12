@@ -39,8 +39,11 @@ func runFrame(
 ) ret Bool {
   unsafe {
     beginTimingFrame(timing: timing)
-    let passA: Int = timedPass(timing: timing)
-    if passA is not 0 {
+    if let passA: Int = timedPass(timing: timing) {
+      if passA is not 0 {
+        ret fail(message: "timedPass 0")
+      }
+    } else {
       ret fail(message: "timedPass 0")
     }
     if var recording: Recording = beginRecording(resources: resources) {
@@ -56,8 +59,11 @@ func runFrame(
       ) is false {
         ret fail(message: "timed pass A")
       }
-      let passB: Int = timedPass(timing: timing)
-      if passB is not 1 {
+      if let passB: Int = timedPass(timing: timing) {
+        if passB is not 1 {
+          ret fail(message: "timedPass 1")
+        }
+      } else {
         ret fail(message: "timedPass 1")
       }
       if recordComputeTimed(

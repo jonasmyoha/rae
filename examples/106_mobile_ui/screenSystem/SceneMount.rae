@@ -154,8 +154,18 @@ func mountRegistrySubSceneOrError(
   w: view Float
   h: view Float
 ) ret EntityId {
-  let idx: Int = sceneRegistryIndex(reg: reg, key: sceneId)
-  if idx < 0 {
+  if let idx: Int = sceneRegistryIndex(reg: reg, key: sceneId) {
+    let scene: view Scene => sceneRegistryGet(reg: reg, idx: idx)
+    ret mountSubSceneOrError(
+      world: world
+      uiSystems: uiSystems
+      scene: scene
+      sceneLabel: sceneId
+      overrides: overrides
+      w: w
+      h: h
+    )
+  } else {
     let label: String = sceneId
     log("[scene-error] no sub-scene registered as {label}")
     let sentinel: EntityId = createEntity(world: world)
@@ -173,16 +183,6 @@ func mountRegistrySubSceneOrError(
     )
     ret sentinel
   }
-  let scene: view Scene => sceneRegistryGet(reg: reg, idx: idx)
-  ret mountSubSceneOrError(
-    world: world
-    uiSystems: uiSystems
-    scene: scene
-    sceneLabel: sceneId
-    overrides: overrides
-    w: w
-    h: h
-  )
 }
 
 # Mount a scene under a fresh entity sized w x h. No overrides. `label`

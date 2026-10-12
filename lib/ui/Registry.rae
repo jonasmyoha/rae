@@ -170,7 +170,7 @@ func applyComponentByName(
   if name is containerStyle {
     let empty: String = ""
     let styleName: String = Json.jsonString(this: val, fallback: empty)
-    if themeContainerIndex(theme: world.theme.resolved, name: styleName) < 0 {
+    if themeContainerIndex(theme: world.theme.resolved, name: styleName) is none {
       # An unknown style is a token miss like any other (#1000): recorded,
       # and the node keeps whatever Shape / Padding it authored itself.
       reportSceneDiagnostic(

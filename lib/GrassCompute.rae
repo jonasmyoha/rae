@@ -548,11 +548,11 @@ func grassGeneratedCount() ret Int {
 # the indirect draw's instanceCount (u32 #1 of the 4-word args) to the number of
 # survivors. Copy the args into the MapRead staging buffer and read it through a
 # manager ReadbackId. BLOCKING — it waits for the GPU, so call it throttled
-# (every N frames), not per frame. Returns -1 before the grass GPU exists or
+# (every N frames), not per frame. Returns none before the grass GPU exists or
 # when the readback failed.
-func grassReadVisible(grass: mod GrassCompute, resources: mod GpuResources) ret Int {
+func grassReadVisible(grass: mod GrassCompute, resources: mod GpuResources) ret opt Int {
   if not isValidBuffer(resources: resources, id: grass.staging) {
-    ret -1
+    ret none
   }
   var copied: Bool = false
   if var recording: Recording = beginRecording(resources: resources) {
@@ -575,10 +575,10 @@ func grassReadVisible(grass: mod GrassCompute, resources: mod GpuResources) ret 
     }
   }
   if not copied {
-    ret -1
+    ret none
   }
   pollSubmissions(inFlight: grass.inFlight, resources: resources)
-  var visible: Int = -1
+  var visible: opt Int = none
   if let read: ReadbackId = startReadback(
     resources: resources
     buffer: grass.staging
@@ -593,12 +593,13 @@ func grassReadVisible(grass: mod GrassCompute, resources: mod GpuResources) ret 
       if copyReadback(resources: resources, id: read, destination: bytes) {
         # args = {vertexCount:u32, instanceCount:u32, ...}: instanceCount is
         # little-endian bytes 4..7.
-        visible = 0
+        var count: Int = 0
         var i: Int = 7
         loop i >= 4 {
-          visible = visible * 256 + (bytes.copyAtFallback(index: i, fallback: 0 as UInt8) as Int)
+          count = count * 256 + (bytes.copyAtFallback(index: i, fallback: 0 as UInt8) as Int)
           i = i - 1
         }
+        visible = count
       }
     }
     retireReadback(resources: resources, id: read)
@@ -623,8 +624,7 @@ func grassDiagTick(grass: mod GrassCompute, resources: mod GpuResources, profile
   }
   grass.diagFrame = grass.diagFrame + 1
   if grass.diagFrame % 10 is 0 {
-    let visible: Int = grassReadVisible(grass: grass, resources: resources)
-    if visible >= 0 {
+    if let visible: Int = grassReadVisible(grass: grass, resources: resources) {
       grass.visibleCache = visible
     }
   }

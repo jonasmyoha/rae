@@ -120,16 +120,15 @@ func themeSlotOr(
   slot: view String
   fallback: view RgbaColor
 ) ret RgbaColor {
-  let idx: Int = themePaletteIndex(theme: theme, slot: slot)
-  if idx < 0 {
-    ret RgbaColor { r: fallback.r, g: fallback.g, b: fallback.b, a: fallback.a }
+  if let idx: Int = themePaletteIndex(theme: theme, slot: slot) {
+    ret RgbaColor {
+      r: theme.palR.copyAt(index: idx)
+      g: theme.palG.copyAt(index: idx)
+      b: theme.palB.copyAt(index: idx)
+      a: theme.palA.copyAt(index: idx)
+    }
   }
-  ret RgbaColor {
-    r: theme.palR.copyAt(index: idx)
-    g: theme.palG.copyAt(index: idx)
-    b: theme.palB.copyAt(index: idx)
-    a: theme.palA.copyAt(index: idx)
-  }
+  ret RgbaColor { r: fallback.r, g: fallback.g, b: fallback.b, a: fallback.a }
 }
 
 # Load the two fallback MSDF fonts used when a scene package does not declare

@@ -113,32 +113,32 @@ func sizeOutlinePool(
     changed = true
   }
   if have < wanted {
-    let idx: Int = sceneRegistryIndex(reg: scenes, key: itemSceneId)
-    if idx < 0 {
+    if let idx: Int = sceneRegistryIndex(reg: scenes, key: itemSceneId) {
+      let scene: view Scene => sceneRegistryGet(reg: scenes, idx: idx)
+      loop have < wanted {
+        let item: EntityId = createEntity(world: world)
+        let rect: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: 0.0, y: 0.0 } }
+        componentSet(this: world.rects, entityId: item, data: rect)
+        setParent(
+          parents: uiSystems.hierarchy.parents
+          childrens: world.childrens
+          child: item
+          parent: pool
+        )
+        let overrides: List(SceneOverride) = emptyOverrides()
+        mountSceneInstanceIntoPage(
+          world: world
+          uiSystems: uiSystems
+          mountEntityId: item
+          scene: scene
+          overrides: overrides
+          pageId: "guides"
+        )
+        have = have + 1
+        changed = true
+      }
+    } else {
       ret changed
-    }
-    let scene: view Scene => sceneRegistryGet(reg: scenes, idx: idx)
-    loop have < wanted {
-      let item: EntityId = createEntity(world: world)
-      let rect: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: 0.0, y: 0.0 } }
-      componentSet(this: world.rects, entityId: item, data: rect)
-      setParent(
-        parents: uiSystems.hierarchy.parents
-        childrens: world.childrens
-        child: item
-        parent: pool
-      )
-      let overrides: List(SceneOverride) = emptyOverrides()
-      mountSceneInstanceIntoPage(
-        world: world
-        uiSystems: uiSystems
-        mountEntityId: item
-        scene: scene
-        overrides: overrides
-        pageId: "guides"
-      )
-      have = have + 1
-      changed = true
     }
   }
   ret changed

@@ -33,34 +33,31 @@ import ui/ThemeResolved
 const styleBodySize: Float = 43.373493975903614
 
 func resolveTextSize(theme: view ResolvedTheme, styleId: view String) pub ret Float {
-  let i: Int = themeTextStyleIndex(theme: theme, styleId: styleId)
-  if i < 0 {
+  if let i: Int = themeTextStyleIndex(theme: theme, styleId: styleId) {
+    if let sz: Float = theme.textSizes.copyAt(index: i) {
+      ret sz
+    }
     ret styleBodySize
-  }
-  if let sz: Float = theme.textSizes.copyAt(index: i) {
-    ret sz
   }
   ret styleBodySize
 }
 
 func resolveTextWeight(theme: view ResolvedTheme, styleId: view String) pub ret Float {
-  let i: Int = themeTextStyleIndex(theme: theme, styleId: styleId)
-  if i < 0 {
+  if let i: Int = themeTextStyleIndex(theme: theme, styleId: styleId) {
+    if let weight: Float = theme.textWeights.copyAt(index: i) {
+      ret weight
+    }
     ret 400.0
-  }
-  if let weight: Float = theme.textWeights.copyAt(index: i) {
-    ret weight
   }
   ret 400.0
 }
 
 func resolveTextLineHeight(theme: view ResolvedTheme, styleId: view String) pub ret Float {
-  let i: Int = themeTextStyleIndex(theme: theme, styleId: styleId)
-  if i < 0 {
+  if let i: Int = themeTextStyleIndex(theme: theme, styleId: styleId) {
+    if let lineHeight: Float = theme.textLineHeights.copyAt(index: i) {
+      ret lineHeight
+    }
     ret 1.0
-  }
-  if let lineHeight: Float = theme.textLineHeights.copyAt(index: i) {
-    ret lineHeight
   }
   ret 1.0
 }
@@ -71,41 +68,39 @@ func resolveTextColor(
   active: view Theme
 ) pub ret RgbaColor {
   unsafe {
-    let i: Int = themeTextStyleIndex(theme: theme, styleId: styleId)
-    if i < 0 {
-      ret colorByName(theme: active, name: "textPrimary")
+    if let i: Int = themeTextStyleIndex(theme: theme, styleId: styleId) {
+      let slot: String = rae_ext_rae_buf_get(buf: theme.textColorSlots.data, index: i)
+      if slot.length() > 0 {
+        ret paletteColor(active: active, tokens: theme, name: slot)
+      }
+      var r: Int = 0
+      var g: Int = 0
+      var b: Int = 0
+      var a: Int = 255
+      if let colorRVal: Int = theme.textColorR.copyAt(index: i) {
+        r = colorRVal
+      }
+      if let colorGVal: Int = theme.textColorG.copyAt(index: i) {
+        g = colorGVal
+      }
+      if let colorBVal: Int = theme.textColorB.copyAt(index: i) {
+        b = colorBVal
+      }
+      if let colorAVal: Int = theme.textColorA.copyAt(index: i) {
+        a = colorAVal
+      }
+      ret RgbaColor { r: r, g: g, b: b, a: a }
     }
-    let slot: String = rae_ext_rae_buf_get(buf: theme.textColorSlots.data, index: i)
-    if slot.length() > 0 {
-      ret paletteColor(active: active, tokens: theme, name: slot)
-    }
-    var r: Int = 0
-    var g: Int = 0
-    var b: Int = 0
-    var a: Int = 255
-    if let colorRVal: Int = theme.textColorR.copyAt(index: i) {
-      r = colorRVal
-    }
-    if let colorGVal: Int = theme.textColorG.copyAt(index: i) {
-      g = colorGVal
-    }
-    if let colorBVal: Int = theme.textColorB.copyAt(index: i) {
-      b = colorBVal
-    }
-    if let colorAVal: Int = theme.textColorA.copyAt(index: i) {
-      a = colorAVal
-    }
-    ret RgbaColor { r: r, g: g, b: b, a: a }
+    ret colorByName(theme: active, name: "textPrimary")
   }
 }
 
 func resolveTextIsCentered(theme: view ResolvedTheme, styleId: view String) pub ret Bool {
-  let i: Int = themeTextStyleIndex(theme: theme, styleId: styleId)
-  if i < 0 {
+  if let i: Int = themeTextStyleIndex(theme: theme, styleId: styleId) {
+    if let al: Int = theme.textAligns.copyAt(index: i) {
+      ret al is themeAlignCenter
+    }
     ret false
-  }
-  if let al: Int = theme.textAligns.copyAt(index: i) {
-    ret al is themeAlignCenter
   }
   ret false
 }
@@ -114,23 +109,21 @@ func resolveTextIsCentered(theme: view ResolvedTheme, styleId: view String) pub 
 # (`"vAlign": "center"`: the capitals' middle on the box's); false = the
 # baseline sits at top + size.
 func resolveTextIsVCentered(theme: view ResolvedTheme, styleId: view String) pub ret Bool {
-  let i: Int = themeTextStyleIndex(theme: theme, styleId: styleId)
-  if i < 0 {
+  if let i: Int = themeTextStyleIndex(theme: theme, styleId: styleId) {
+    if let vertical: Int = theme.textVAligns.copyAt(index: i) {
+      ret vertical is themeVAlignCenter
+    }
     ret false
-  }
-  if let vertical: Int = theme.textVAligns.copyAt(index: i) {
-    ret vertical is themeVAlignCenter
   }
   ret false
 }
 
 func resolveTextIsRightAligned(theme: view ResolvedTheme, styleId: view String) pub ret Bool {
-  let i: Int = themeTextStyleIndex(theme: theme, styleId: styleId)
-  if i < 0 {
+  if let i: Int = themeTextStyleIndex(theme: theme, styleId: styleId) {
+    if let al: Int = theme.textAligns.copyAt(index: i) {
+      ret al is themeAlignEnd
+    }
     ret false
-  }
-  if let al: Int = theme.textAligns.copyAt(index: i) {
-    ret al is themeAlignEnd
   }
   ret false
 }
@@ -143,12 +136,11 @@ func resolveTextIsRightAligned(theme: view ResolvedTheme, styleId: view String) 
 # every entity.
 func resolveTextShadowName(theme: view ResolvedTheme, styleId: view String) pub ret String {
   unsafe {
-    let i: Int = themeTextStyleIndex(theme: theme, styleId: styleId)
-    if i < 0 {
-      ret ""
+    if let i: Int = themeTextStyleIndex(theme: theme, styleId: styleId) {
+      let name: String = rae_ext_rae_buf_get(buf: theme.textShadowNames.data, index: i)
+      ret name
     }
-    let name: String = rae_ext_rae_buf_get(buf: theme.textShadowNames.data, index: i)
-    ret name
+    ret ""
   }
 }
 

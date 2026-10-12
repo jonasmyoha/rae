@@ -272,7 +272,7 @@ func loadSdfFont(jsonPath: view String, rawAtlasPath: view String) ret SdfFont {
   }
 }
 
-func sdfGlyphIndex(font: view SdfFont, cp: view Int) ret Int {
+func sdfGlyphIndex(font: view SdfFont, cp: view Int) ret opt Int {
   unsafe {
     let n: Int = font.glyphs.length
     var i: Int = 0
@@ -283,7 +283,7 @@ func sdfGlyphIndex(font: view SdfFont, cp: view Int) ret Int {
       }
       i = i + 1
     }
-    ret -1
+    ret none
   }
 }
 
@@ -312,8 +312,7 @@ func sdfMeasureText(font: view SdfFont, text: view String, sizePx: view Float) r
     var i: Int = 0
     loop i < n {
       let cp: Int = text.at(index: i).toInt()
-      let gi: Int = sdfGlyphIndex(font: font, cp: cp)
-      if gi >= 0 {
+      if let gi: Int = sdfGlyphIndex(font: font, cp: cp) {
         let g: SdfGlyph = rae_ext_rae_buf_get(buf: font.glyphs.data, index: gi)
         total = total + g.advance * scale
       }
@@ -343,8 +342,7 @@ func sdfMeasureTextBounds(
     var i: Int = 0
     loop i < n {
       let cp: Int = text.at(index: i).toInt()
-      let gi: Int = sdfGlyphIndex(font: font, cp: cp)
-      if gi >= 0 {
+      if let gi: Int = sdfGlyphIndex(font: font, cp: cp) {
         let g: SdfGlyph = rae_ext_rae_buf_get(buf: font.glyphs.data, index: gi)
         if g.hasBounds {
           let gx0: Float = pen + g.planeLeft * scale
@@ -414,8 +412,7 @@ func sdfDrawText(
     var i: Int = 0
     loop i < n {
       let cp: Int = text.at(index: i).toInt()
-      let gi: Int = sdfGlyphIndex(font: font, cp: cp)
-      if gi >= 0 {
+      if let gi: Int = sdfGlyphIndex(font: font, cp: cp) {
         let g: SdfGlyph = rae_ext_rae_buf_get(buf: font.glyphs.data, index: gi)
         if g.hasBounds {
           let sx0: Float = pen + g.planeLeft * scale

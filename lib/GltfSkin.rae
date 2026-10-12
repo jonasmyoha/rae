@@ -599,7 +599,7 @@ func emptyClip() ret Clip {
 
 # Find a node in the skeleton by name. Linear, but this runs once per
 # channel at LOAD, never per frame.
-func nodeByName(sk: view Skeleton, name: view String) ret Int {
+func nodeByName(sk: view Skeleton, name: view String) ret opt Int {
   var i: Int = 0
   loop i < sk.nodeNames.length {
     if let nodeName: String = sk.nodeNames.copyAt(index: i) {
@@ -609,7 +609,7 @@ func nodeByName(sk: view Skeleton, name: view String) ret Int {
     }
     i = i + 1
   }
-  ret -1
+  ret none
 }
 
 # Load an animation, RETARGETED onto `sk` by joint name.
@@ -682,8 +682,7 @@ func loadClip(glb: view Glb, animIndex: view Int, sk: view Skeleton) pub ret Cli
         this: objField(glb: glb, obj: clipNodeObj, key: "name")
         fallback: ""
       )
-      let skNode: Int = nodeByName(sk: sk, name: clipName)
-      if skNode >= 0 {
+      if let skNode: Int = nodeByName(sk: sk, name: clipName) {
         let samplerIdx: Int = intField(
           glb: glb
           obj: ch

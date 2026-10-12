@@ -62,16 +62,20 @@ func masked(text: view String) ret String {
   var out: ByteBuffer = createByteBuffer(capacity: 256)
   var position: Int = 0
   loop {
-    let found: Int = byteBufferIndexOf(buffer: buffer, pattern: "Date: ", from: position)
-    if found < 0 {
+    if let found: Int = byteBufferIndexOf(buffer: buffer, pattern: "Date: ", from: position) {
+      appendText(
+        buffer: out
+        text: byteBufferText(buffer: buffer, start: position, count: found + 6 - position)
+      )
+      appendText(buffer: out, text: "<date>")
+      if let lineEnd: Int = byteBufferIndexOf(buffer: buffer, pattern: "\r\n", from: found) {
+        position = lineEnd
+      } else {
+        break
+      }
+    } else {
       break
     }
-    appendText(
-      buffer: out
-      text: byteBufferText(buffer: buffer, start: position, count: found + 6 - position)
-    )
-    appendText(buffer: out, text: "<date>")
-    position = byteBufferIndexOf(buffer: buffer, pattern: "\r\n", from: found)
   }
   appendText(
     buffer: out

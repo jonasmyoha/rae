@@ -294,8 +294,7 @@ func documentDesignSize(document: mod SceneDocument) {
       key: "unitScale"
       fallback: 0.0
     )
-    let rootIdx: Int = sceneNodeIndex(this: scene, nodeId: scene.rootNodeId)
-    if rootIdx >= 0 {
+    if let rootIdx: Int = sceneNodeIndex(this: scene, nodeId: scene.rootNodeId) {
       let node: view SceneNode => nodeAt(this: scene, idx: rootIdx)
       let bag: JsonValue = Json.jsonValueAt(doc: scene.doc, idx: node.componentsValueIdx)
       let rectIdx: Int = Json.field(doc: scene.doc, this: bag, key: "Rect")

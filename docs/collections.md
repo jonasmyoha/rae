@@ -69,6 +69,13 @@ if let index: Int = names.indexOf(value: "Outro") {
 }
 ```
 
+The rest of `lib/` follows the same rule (0.2.9): a lookup a caller must check
+— `componentIndexOf`, `sceneNodeIndex`, `sceneRegistryIndex`, the theme
+`theme*Index` lookups, `frameIndexByName`, `byteBufferIndexOf`,
+`socketLocalPort`, a GPU table's free slot — answers `opt Int`. `-1` stays only
+where it is not a missing answer: an ordering (`String.compare`), a status code,
+a parser's private helper, or a ported algorithm's internal mark.
+
 ## Out-of-range access: reads miss, writes are ignored with a warning
 
 `List` has two answers for an index that does not exist, and they are not the

@@ -27,30 +27,29 @@ func createTextureMipped(
   if usage is (0 as UInt64) {
     ret none
   }
-  let slot: Int = findFreeSlot(table: resources.textures, capacity: resources.capacity)
-  if slot < 0 {
-    ret none
-  }
-  unsafe {
-    let descriptor: WGPUTextureDescriptor = {
-      usage: usage
-      dimension: WGPUTextureDimension_2D
-      size: { width: width as UInt32, height: height as UInt32, depthOrArrayLayers: 1 as UInt32 }
-      format: format
-      mipLevelCount: mipLevels as UInt32
-      sampleCount: 1 as UInt32
+  if let slot: Int = findFreeSlot(table: resources.textures, capacity: resources.capacity) {
+    unsafe {
+      let descriptor: WGPUTextureDescriptor = {
+        usage: usage
+        dimension: WGPUTextureDimension_2D
+        size: { width: width as UInt32, height: height as UInt32, depthOrArrayLayers: 1 as UInt32 }
+        format: format
+        mipLevelCount: mipLevels as UInt32
+        sampleCount: 1 as UInt32
+      }
+      let handle: Ptr = wgpuDeviceCreateTexture(device: webgpuDevice(), descriptor: descriptor)
+      if handle is webgpuNull() {
+        ret none
+      }
+      storeHandle(table: resources.textures, slot: slot, handle: handle)
     }
-    let handle: Ptr = wgpuDeviceCreateTexture(device: webgpuDevice(), descriptor: descriptor)
-    if handle is webgpuNull() {
-      ret none
+    ret TextureId {
+      managerTag: resources.managerTag
+      slot: slot
+      generation: slotGeneration(table: resources.textures, slot: slot)
     }
-    storeHandle(table: resources.textures, slot: slot, handle: handle)
   }
-  ret TextureId {
-    managerTag: resources.managerTag
-    slot: slot
-    generation: slotGeneration(table: resources.textures, slot: slot)
-  }
+  ret none
 }
 
 # A 2D view over mip level `mip` of `texture` (the texture's own format);
@@ -63,37 +62,36 @@ func createTextureViewMip(
   if isValidTexture(resources: resources, id: texture) is false or mip < 0 {
     ret none
   }
-  let slot: Int = findFreeSlot(table: resources.textureViews, capacity: resources.capacity)
-  if slot < 0 {
-    ret none
-  }
-  unsafe {
-    let textureHandle: Ptr = slotHandle(table: resources.textures, slot: texture.slot)
-    if mip >= (wgpuTextureGetMipLevelCount(texture: textureHandle) as Int) {
-      ret none
+  if let slot: Int = findFreeSlot(table: resources.textureViews, capacity: resources.capacity) {
+    unsafe {
+      let textureHandle: Ptr = slotHandle(table: resources.textures, slot: texture.slot)
+      if mip >= (wgpuTextureGetMipLevelCount(texture: textureHandle) as Int) {
+        ret none
+      }
+      let descriptor: WGPUTextureViewDescriptor = {
+        format: wgpuTextureGetFormat(texture: textureHandle)
+        dimension: WGPUTextureViewDimension_2D
+        baseMipLevel: mip as UInt32
+        mipLevelCount: 1 as UInt32
+        baseArrayLayer: 0 as UInt32
+        arrayLayerCount: 1 as UInt32
+        aspect: WGPUTextureAspect_All
+      }
+      let handle: Ptr = wgpuTextureCreateView(texture: textureHandle, descriptor: descriptor)
+      if handle is webgpuNull() {
+        ret none
+      }
+      storeHandle(table: resources.textureViews, slot: slot, handle: handle)
     }
-    let descriptor: WGPUTextureViewDescriptor = {
-      format: wgpuTextureGetFormat(texture: textureHandle)
-      dimension: WGPUTextureViewDimension_2D
-      baseMipLevel: mip as UInt32
-      mipLevelCount: 1 as UInt32
-      baseArrayLayer: 0 as UInt32
-      arrayLayerCount: 1 as UInt32
-      aspect: WGPUTextureAspect_All
+    resources.textureViews.parentSlot.set(index: slot, value: texture.slot)
+    resources.textureViews.parentGeneration.set(index: slot, value: texture.generation)
+    ret TextureViewId {
+      managerTag: resources.managerTag
+      slot: slot
+      generation: slotGeneration(table: resources.textureViews, slot: slot)
     }
-    let handle: Ptr = wgpuTextureCreateView(texture: textureHandle, descriptor: descriptor)
-    if handle is webgpuNull() {
-      ret none
-    }
-    storeHandle(table: resources.textureViews, slot: slot, handle: handle)
   }
-  resources.textureViews.parentSlot.set(index: slot, value: texture.slot)
-  resources.textureViews.parentGeneration.set(index: slot, value: texture.generation)
-  ret TextureViewId {
-    managerTag: resources.managerTag
-    slot: slot
-    generation: slotGeneration(table: resources.textureViews, slot: slot)
-  }
+  ret none
 }
 
 # A view over the WHOLE mip chain of `texture` — what a sampler with a mipmap
@@ -107,34 +105,33 @@ func createTextureViewMips(
   if isValidTexture(resources: resources, id: texture) is false {
     ret none
   }
-  let slot: Int = findFreeSlot(table: resources.textureViews, capacity: resources.capacity)
-  if slot < 0 {
-    ret none
-  }
-  unsafe {
-    let textureHandle: Ptr = slotHandle(table: resources.textures, slot: texture.slot)
-    let descriptor: WGPUTextureViewDescriptor = {
-      format: wgpuTextureGetFormat(texture: textureHandle)
-      dimension: WGPUTextureViewDimension_2D
-      baseMipLevel: 0 as UInt32
-      mipLevelCount: wgpuTextureGetMipLevelCount(texture: textureHandle)
-      baseArrayLayer: 0 as UInt32
-      arrayLayerCount: 1 as UInt32
-      aspect: WGPUTextureAspect_All
+  if let slot: Int = findFreeSlot(table: resources.textureViews, capacity: resources.capacity) {
+    unsafe {
+      let textureHandle: Ptr = slotHandle(table: resources.textures, slot: texture.slot)
+      let descriptor: WGPUTextureViewDescriptor = {
+        format: wgpuTextureGetFormat(texture: textureHandle)
+        dimension: WGPUTextureViewDimension_2D
+        baseMipLevel: 0 as UInt32
+        mipLevelCount: wgpuTextureGetMipLevelCount(texture: textureHandle)
+        baseArrayLayer: 0 as UInt32
+        arrayLayerCount: 1 as UInt32
+        aspect: WGPUTextureAspect_All
+      }
+      let handle: Ptr = wgpuTextureCreateView(texture: textureHandle, descriptor: descriptor)
+      if handle is webgpuNull() {
+        ret none
+      }
+      storeHandle(table: resources.textureViews, slot: slot, handle: handle)
     }
-    let handle: Ptr = wgpuTextureCreateView(texture: textureHandle, descriptor: descriptor)
-    if handle is webgpuNull() {
-      ret none
+    resources.textureViews.parentSlot.set(index: slot, value: texture.slot)
+    resources.textureViews.parentGeneration.set(index: slot, value: texture.generation)
+    ret TextureViewId {
+      managerTag: resources.managerTag
+      slot: slot
+      generation: slotGeneration(table: resources.textureViews, slot: slot)
     }
-    storeHandle(table: resources.textureViews, slot: slot, handle: handle)
   }
-  resources.textureViews.parentSlot.set(index: slot, value: texture.slot)
-  resources.textureViews.parentGeneration.set(index: slot, value: texture.generation)
-  ret TextureViewId {
-    managerTag: resources.managerTag
-    slot: slot
-    generation: slotGeneration(table: resources.textureViews, slot: slot)
-  }
+  ret none
 }
 
 # A trilinear sampler (linear between mip levels too) with one address mode on
@@ -142,34 +139,33 @@ func createTextureViewMips(
 # point-sample (the water cascades). `createSamplerWith` stays nearest-mip for
 # the single-level textures everything else reads.
 func createSamplerMipped(resources: mod GpuResources, addressMode: view Int32) ret opt SamplerId {
-  let slot: Int = findFreeSlot(table: resources.samplers, capacity: resources.capacity)
-  if slot < 0 {
-    ret none
-  }
-  unsafe {
-    let descriptor: WGPUSamplerDescriptor = {
-      addressModeU: addressMode
-      addressModeV: addressMode
-      addressModeW: addressMode
-      magFilter: WGPUFilterMode_Linear
-      minFilter: WGPUFilterMode_Linear
-      mipmapFilter: WGPUMipmapFilterMode_Linear
-      lodMinClamp: 0.0
-      lodMaxClamp: 32.0
-      compare: WGPUCompareFunction_Undefined
-      maxAnisotropy: 1 as UInt16
+  if let slot: Int = findFreeSlot(table: resources.samplers, capacity: resources.capacity) {
+    unsafe {
+      let descriptor: WGPUSamplerDescriptor = {
+        addressModeU: addressMode
+        addressModeV: addressMode
+        addressModeW: addressMode
+        magFilter: WGPUFilterMode_Linear
+        minFilter: WGPUFilterMode_Linear
+        mipmapFilter: WGPUMipmapFilterMode_Linear
+        lodMinClamp: 0.0
+        lodMaxClamp: 32.0
+        compare: WGPUCompareFunction_Undefined
+        maxAnisotropy: 1 as UInt16
+      }
+      let handle: Ptr = wgpuDeviceCreateSampler(device: webgpuDevice(), descriptor: descriptor)
+      if handle is webgpuNull() {
+        ret none
+      }
+      storeHandle(table: resources.samplers, slot: slot, handle: handle)
     }
-    let handle: Ptr = wgpuDeviceCreateSampler(device: webgpuDevice(), descriptor: descriptor)
-    if handle is webgpuNull() {
-      ret none
+    ret SamplerId {
+      managerTag: resources.managerTag
+      slot: slot
+      generation: slotGeneration(table: resources.samplers, slot: slot)
     }
-    storeHandle(table: resources.samplers, slot: slot, handle: handle)
   }
-  ret SamplerId {
-    managerTag: resources.managerTag
-    slot: slot
-    generation: slotGeneration(table: resources.samplers, slot: slot)
-  }
+  ret none
 }
 
 # The native texture handle (null for an invalid ID), for a raw encode that
@@ -210,34 +206,33 @@ func createTextureArray(
   if usage is (0 as UInt64) {
     ret none
   }
-  let slot: Int = findFreeSlot(table: resources.textures, capacity: resources.capacity)
-  if slot < 0 {
-    ret none
-  }
-  unsafe {
-    let descriptor: WGPUTextureDescriptor = {
-      usage: usage
-      dimension: WGPUTextureDimension_2D
-      size: {
-        width: width as UInt32
-        height: height as UInt32
-        depthOrArrayLayers: layers as UInt32
+  if let slot: Int = findFreeSlot(table: resources.textures, capacity: resources.capacity) {
+    unsafe {
+      let descriptor: WGPUTextureDescriptor = {
+        usage: usage
+        dimension: WGPUTextureDimension_2D
+        size: {
+          width: width as UInt32
+          height: height as UInt32
+          depthOrArrayLayers: layers as UInt32
+        }
+        format: format
+        mipLevelCount: 1 as UInt32
+        sampleCount: 1 as UInt32
       }
-      format: format
-      mipLevelCount: 1 as UInt32
-      sampleCount: 1 as UInt32
+      let handle: Ptr = wgpuDeviceCreateTexture(device: webgpuDevice(), descriptor: descriptor)
+      if handle is webgpuNull() {
+        ret none
+      }
+      storeHandle(table: resources.textures, slot: slot, handle: handle)
     }
-    let handle: Ptr = wgpuDeviceCreateTexture(device: webgpuDevice(), descriptor: descriptor)
-    if handle is webgpuNull() {
-      ret none
+    ret TextureId {
+      managerTag: resources.managerTag
+      slot: slot
+      generation: slotGeneration(table: resources.textures, slot: slot)
     }
-    storeHandle(table: resources.textures, slot: slot, handle: handle)
   }
-  ret TextureId {
-    managerTag: resources.managerTag
-    slot: slot
-    generation: slotGeneration(table: resources.textures, slot: slot)
-  }
+  ret none
 }
 
 # The view descriptor both array views share; `dimension` is 2D (one layer,
@@ -252,37 +247,36 @@ func makeLayerView(
   if isValidTexture(resources: resources, id: texture) is false or baseLayer < 0 or layerCount < 1 {
     ret none
   }
-  let slot: Int = findFreeSlot(table: resources.textureViews, capacity: resources.capacity)
-  if slot < 0 {
-    ret none
-  }
-  unsafe {
-    let textureHandle: Ptr = slotHandle(table: resources.textures, slot: texture.slot)
-    if baseLayer + layerCount > (wgpuTextureGetDepthOrArrayLayers(texture: textureHandle) as Int) {
-      ret none
+  if let slot: Int = findFreeSlot(table: resources.textureViews, capacity: resources.capacity) {
+    unsafe {
+      let textureHandle: Ptr = slotHandle(table: resources.textures, slot: texture.slot)
+      if baseLayer + layerCount > (wgpuTextureGetDepthOrArrayLayers(texture: textureHandle) as Int) {
+        ret none
+      }
+      let descriptor: WGPUTextureViewDescriptor = {
+        format: wgpuTextureGetFormat(texture: textureHandle)
+        dimension: dimension
+        baseMipLevel: 0 as UInt32
+        mipLevelCount: 1 as UInt32
+        baseArrayLayer: baseLayer as UInt32
+        arrayLayerCount: layerCount as UInt32
+        aspect: WGPUTextureAspect_All
+      }
+      let handle: Ptr = wgpuTextureCreateView(texture: textureHandle, descriptor: descriptor)
+      if handle is webgpuNull() {
+        ret none
+      }
+      storeHandle(table: resources.textureViews, slot: slot, handle: handle)
     }
-    let descriptor: WGPUTextureViewDescriptor = {
-      format: wgpuTextureGetFormat(texture: textureHandle)
-      dimension: dimension
-      baseMipLevel: 0 as UInt32
-      mipLevelCount: 1 as UInt32
-      baseArrayLayer: baseLayer as UInt32
-      arrayLayerCount: layerCount as UInt32
-      aspect: WGPUTextureAspect_All
+    resources.textureViews.parentSlot.set(index: slot, value: texture.slot)
+    resources.textureViews.parentGeneration.set(index: slot, value: texture.generation)
+    ret TextureViewId {
+      managerTag: resources.managerTag
+      slot: slot
+      generation: slotGeneration(table: resources.textureViews, slot: slot)
     }
-    let handle: Ptr = wgpuTextureCreateView(texture: textureHandle, descriptor: descriptor)
-    if handle is webgpuNull() {
-      ret none
-    }
-    storeHandle(table: resources.textureViews, slot: slot, handle: handle)
   }
-  resources.textureViews.parentSlot.set(index: slot, value: texture.slot)
-  resources.textureViews.parentGeneration.set(index: slot, value: texture.generation)
-  ret TextureViewId {
-    managerTag: resources.managerTag
-    slot: slot
-    generation: slotGeneration(table: resources.textureViews, slot: slot)
-  }
+  ret none
 }
 
 # A 2D view over ONE array layer (a render attachment).
@@ -319,32 +313,31 @@ func createTextureViewArray(
 # the depth test and the bilinear filter together, so one
 # textureSampleCompare is a 2x2 PCF tap. Clamp to edge, no mips.
 func createComparisonSampler(resources: mod GpuResources) ret opt SamplerId {
-  let slot: Int = findFreeSlot(table: resources.samplers, capacity: resources.capacity)
-  if slot < 0 {
-    ret none
-  }
-  unsafe {
-    let descriptor: WGPUSamplerDescriptor = {
-      addressModeU: WGPUAddressMode_ClampToEdge
-      addressModeV: WGPUAddressMode_ClampToEdge
-      addressModeW: WGPUAddressMode_ClampToEdge
-      magFilter: WGPUFilterMode_Linear
-      minFilter: WGPUFilterMode_Linear
-      mipmapFilter: WGPUMipmapFilterMode_Nearest
-      lodMinClamp: 0.0
-      lodMaxClamp: 1.0
-      compare: WGPUCompareFunction_Less
-      maxAnisotropy: 1 as UInt16
+  if let slot: Int = findFreeSlot(table: resources.samplers, capacity: resources.capacity) {
+    unsafe {
+      let descriptor: WGPUSamplerDescriptor = {
+        addressModeU: WGPUAddressMode_ClampToEdge
+        addressModeV: WGPUAddressMode_ClampToEdge
+        addressModeW: WGPUAddressMode_ClampToEdge
+        magFilter: WGPUFilterMode_Linear
+        minFilter: WGPUFilterMode_Linear
+        mipmapFilter: WGPUMipmapFilterMode_Nearest
+        lodMinClamp: 0.0
+        lodMaxClamp: 1.0
+        compare: WGPUCompareFunction_Less
+        maxAnisotropy: 1 as UInt16
+      }
+      let handle: Ptr = wgpuDeviceCreateSampler(device: webgpuDevice(), descriptor: descriptor)
+      if handle is webgpuNull() {
+        ret none
+      }
+      storeHandle(table: resources.samplers, slot: slot, handle: handle)
     }
-    let handle: Ptr = wgpuDeviceCreateSampler(device: webgpuDevice(), descriptor: descriptor)
-    if handle is webgpuNull() {
-      ret none
+    ret SamplerId {
+      managerTag: resources.managerTag
+      slot: slot
+      generation: slotGeneration(table: resources.samplers, slot: slot)
     }
-    storeHandle(table: resources.samplers, slot: slot, handle: handle)
   }
-  ret SamplerId {
-    managerTag: resources.managerTag
-    slot: slot
-    generation: slotGeneration(table: resources.samplers, slot: slot)
-  }
+  ret none
 }
