@@ -1,0 +1,70 @@
+import String
+open ui/Components
+open ui/Ecs
+open ui/Scene
+open ui/SceneLoader
+open ui/UiSystems
+open ui/layoutSystem/LayoutSystem
+open ecs/Entity
+open ecs/ComponentTable
+
+# A Fill axis honours its Size `min` / `max` like a Fixed or Hug one: `"w": {
+# "mode": "Fill", "max": 440 }` is as wide as the parent allows, but never
+# wider than 440 — the card that fills a phone and stays a card on a desktop.
+# Along a layout's main axis the clamped child leaves the slack to alignment;
+# across it, the clamped child is aligned by alignCross.
+func buildScene() ret String {
+  var s: String = ""
+  s = s.concat(other: "\{")
+  s = s.concat(
+    other: "\"type\":\"Scene\",\"version\":2,\"sceneId\":\"fill-max\",\"root\":\"Root\","
+  )
+  s = s.concat(other: "\"nodes\":\{")
+  s = s.concat(
+    other: "\"Root\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":1000,\"h\":600\},\"Layout\":\{\"type\":\"Vertical\",\"alignCross\":\"Center\"\},\"Children\":[\"Card\",\"Row\",\"Narrow\"]\},"
+  )
+  s = s.concat(
+    other: "\"Card\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":10,\"h\":100\},\"Size\":\{\"w\":\{\"mode\":\"Fill\",\"max\":440\},\"h\":\{\"mode\":\"Fixed\"\}\}\},"
+  )
+  s = s.concat(
+    other: "\"Row\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":1000,\"h\":200\},\"Size\":\{\"w\":\{\"mode\":\"Fixed\"\},\"h\":\{\"mode\":\"Fixed\"\}\},\"Layout\":\{\"type\":\"Horizontal\"\},\"Children\":[\"Cell\"]\},"
+  )
+  s = s.concat(
+    other: "\"Cell\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":10,\"h\":10\},\"Size\":\{\"w\":\{\"mode\":\"Fill\",\"max\":300\},\"h\":\{\"mode\":\"Fill\",\"max\":50\}\}\},"
+  )
+  s = s.concat(
+    other: "\"Narrow\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":10,\"h\":10\},\"Size\":\{\"w\":\{\"mode\":\"Fill\",\"min\":1200\},\"h\":\{\"mode\":\"Fixed\"\}\}\}"
+  )
+  s = s.concat(other: "\}")
+  s = s.concat(other: "\}")
+  ret s
+}
+
+func dump(world: view UiWorld, uiSystems: view UiSystems, nodeId: view String) {
+  if let raw: Int = findNodeInPage(world: world, pageId: "p", nodeId: nodeId) {
+    let entityId: EntityId = nodeEntityId(world: world, index: raw)
+    let rect: view ComputedRect => componentView(
+      this: uiSystems.layout.computedRects
+      entityId: entityId
+    )
+    log("{nodeId}: x {rect.position.x} w {rect.size.x} h {rect.size.y}")
+  }
+}
+
+func main() {
+  let scene: Scene = parseScene(source: buildScene())
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 1000.0
+  world.layoutH = 600.0
+  let root: EntityId = loadSceneIntoPage(
+    world: world
+    uiSystems: uiSystems
+    scene: scene
+    pageId: "p"
+  )
+  layoutSystem(world: world, uiSystems: uiSystems)
+  dump(world: world, uiSystems: uiSystems, nodeId: "Card")
+  dump(world: world, uiSystems: uiSystems, nodeId: "Cell")
+  dump(world: world, uiSystems: uiSystems, nodeId: "Narrow")
+}
