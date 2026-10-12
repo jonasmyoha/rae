@@ -1185,9 +1185,11 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # UI is DRAWN, not only created: the corner menu button is a dark
           # square in the top-left. The "panel buttons" log line kept passing
           # while the frame loop rendered an empty UiSystems and no UI showed.
+          # The corner menu is EDITOR chrome (lib/app3d/UiModes; GAME is the
+          # default), so the shot is taken in EDITOR mode.
           # The 154 shadow casters are the scene's 130 plus the 24 physics cubes.
           SHOT="$TMP_OUT/walker.bmp"
-          if (cd .. && RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SHOT" \
+          if (cd .. && RAE_UI_MODE=editor RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SHOT" \
                 perl -e 'alarm shift; exec @ARGV' 45 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
              && python3 tools/assert_nonblank_bmp.py "$SHOT" --min-colors=20 > "$TMP_OUT/shot.log" 2>&1 \
              && python3 tools/assert_bmp_region_dark.py "$SHOT" 70 70 150 150 0.5 >> "$TMP_OUT/shot.log" 2>&1 \

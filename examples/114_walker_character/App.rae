@@ -26,6 +26,7 @@ import Math
 import Profile
 import Gpu2d
 import Quat
+open app3d/UiModes
 open ecs/Entity
 open ecs/ComponentTable
 open ecs/Transform
@@ -112,6 +113,9 @@ type InputSystem {
   dbg: DebugOverlay
   logOverlay: LogOverlay
   lastLogRevision: Int
+  # GAME (the default) or EDITOR, with the scene's pointer frames and `short`
+  # state (lib/app3d/UiModes); the "..." button switches the mode
+  uiModes: UiModes
 }
 
 # CameraSystem + cameraUpdate live in CameraSystem/ (#548, foldered #743).
@@ -223,6 +227,11 @@ func createApp() ret App {
       uiSystems: uiSystems
       path: "{assets}ui.raescene"
       res: gpuUi
+    )
+    let uiModes: UiModes = createUiModes(
+      world: uiWorld
+      uiSystems: uiSystems
+      path: "{assets}ui.raescene"
     )
     var uiInput: UiInput = createUiInput()
     var logOverlay: LogOverlay = createLogOverlay(
@@ -802,6 +811,7 @@ func createApp() ret App {
         settings: own settings
         panelScroll: panelScroll
         dbg: own dbg
+        uiModes: own uiModes
         logOverlay: own logOverlay
         lastLogRevision: -1
       }
