@@ -340,7 +340,7 @@ func charSub(this: view String, start: view Int, count: view Int) ret String {
 }
 
 func contains(this: view String, sub: view String) ret Bool {
-  ret this.indexOf(sub: sub) is not -1
+  ret this.indexOf(sub: sub) is not none
 }
 
 func startsWith(this: view String, prefix: view String) ret Bool {
@@ -382,17 +382,17 @@ func endsWith(this: view String, suffix: view String) ret Bool {
   }
 }
 
-# The byte index of the first occurrence of `sub`, or -1; 0 for an empty
-# `sub`. Jumps between occurrences of `sub`'s first byte (memchr) and
-# compares the rest there (memcmp): no allocation.
-func indexOf(this: view String, sub: view String) ret Int {
+# The byte index of the first occurrence of `sub`, or none when there is
+# none; 0 for an empty `sub`. Jumps between occurrences of `sub`'s first byte
+# (memchr) and compares the rest there (memcmp): no allocation.
+func indexOf(this: view String, sub: view String) ret opt Int {
   let needleLength: Int = sub.length()
   if needleLength is 0 {
     ret 0
   }
   let lastStart: Int = this.length() - needleLength
   if lastStart < 0 {
-    ret -1
+    ret none
   }
   let first: Int = sub.byteAt(index: 0)
   unsafe {
@@ -410,15 +410,15 @@ func indexOf(this: view String, sub: view String) ret Int {
       position = rae_ext_rae_str_find_byte(s: this, value: first, from: position + 1)
     }
   }
-  ret -1
+  ret none
 }
 
-# The byte index of the last occurrence of `sub`, or -1 (also -1 for an
-# empty `sub`). Scans back from the end; no allocation.
-func lastIndexOf(this: view String, sub: view String) ret Int {
+# The byte index of the last occurrence of `sub`, or none when there is none
+# (also none for an empty `sub`). Scans back from the end; no allocation.
+func lastIndexOf(this: view String, sub: view String) ret opt Int {
   let needleLength: Int = sub.length()
   if needleLength is 0 {
-    ret -1
+    ret none
   }
   let first: Int = sub.byteAt(index: 0)
   var position: Int = this.length() - needleLength
@@ -436,7 +436,7 @@ func lastIndexOf(this: view String, sub: view String) ret Int {
       position = position - 1
     }
   }
-  ret -1
+  ret none
 }
 
 func lowerAsciiByte(ch: view String) ret String {
@@ -570,17 +570,17 @@ func split(this: view String, sep: view String) ret List(String) {
   }
   var remaining: String = this
   loop true {
-    let idx: Int = remaining.indexOf(sub: sep)
-    if idx is -1 {
+    if let index: Int = remaining.indexOf(sub: sep) {
+      let part: String = remaining.sub(start: 0, len: index)
+      result.add(value: part)
+      remaining = remaining.sub(
+        start: index + sep.length()
+        len: remaining.length() - index - sep.length()
+      )
+    } else {
       result.add(value: remaining)
       ret result
     }
-    let part: String = remaining.sub(start: 0, len: idx)
-    result.add(value: part)
-    remaining = remaining.sub(
-      start: idx + sep.length()
-      len: remaining.length() - idx - sep.length()
-    )
   }
   ret result
 }

@@ -44,12 +44,11 @@ func parseUInt(text: view String) ret Int {
   var acc: Int = 0
   loop i < n {
     let ch: String = text.sub(start: i, len: 1)
-    let d: Int = digits.indexOf(sub: ch)
-    if d < 0 {
-      ret acc
+    if let d: Int = digits.indexOf(sub: ch) {
+      acc = acc * 10 + d
+      i = i + 1
     }
-    acc = acc * 10 + d
-    i = i + 1
+    ret acc
   }
   ret acc
 }
@@ -144,15 +143,16 @@ func loadRestoredState(fallback: view RestoredState) pub ret RestoredState {
   let trimmed: String = prior.trim()
   let parts: List(String) = trimmed.split(sep: ";")
   loop let kv: view String in parts {
-    let sepIndex: Int = kv.indexOf(sub: "=")
-    if sepIndex > 0 {
-      let key: String = kv.sub(start: 0, len: sepIndex)
-      let val: String = kv.sub(start: sepIndex + 1, len: kv.length() - sepIndex - 1)
-      if key is "screen" {
-        result.screen = intToScreen(value: parseSignedInt(text: val))
-      }
-      if key is "scroll" {
-        result.scrollY = parseSignedInt(text: val).toFloat()
+    if let sepIndex: Int = kv.indexOf(sub: "=") {
+      if sepIndex > 0 {
+        let key: String = kv.sub(start: 0, len: sepIndex)
+        let val: String = kv.sub(start: sepIndex + 1, len: kv.length() - sepIndex - 1)
+        if key is "screen" {
+          result.screen = intToScreen(value: parseSignedInt(text: val))
+        }
+        if key is "scroll" {
+          result.scrollY = parseSignedInt(text: val).toFloat()
+        }
       }
     }
   }

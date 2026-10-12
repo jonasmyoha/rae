@@ -50,11 +50,10 @@ func authoredEnumText(name: view String) ret String {
 func upperAscii(letter: view String) ret String {
   let lower: String = "abcdefghijklmnopqrstuvwxyz"
   let upper: String = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-  let index: Int = lower.indexOf(sub: letter)
-  if index < 0 {
-    ret "{letter}"
+  if let index: Int = lower.indexOf(sub: letter) {
+    ret upper.sub(start: index, len: 1)
   }
-  ret upper.sub(start: index, len: 1)
+  ret "{letter}"
 }
 
 func encodeRgba(color: view RgbaColor) ret String {

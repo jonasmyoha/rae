@@ -198,7 +198,10 @@ func templateCommand(entry: view ActionEntry, payload: view String) ret AppComma
     ret command
   }
   if entry.kind is ActionKind.playTrack {
-    let dot: Int = payload.indexOf(sub: ".")
+    var dot: Int = 0
+    if let found: Int = payload.indexOf(sub: ".") {
+      dot = found
+    }
     if dot > 0 {
       command.index = payload.sub(start: 0, len: dot).toInt()
       command.text = payload.sub(start: dot + 1, len: payload.length() - dot - 1)

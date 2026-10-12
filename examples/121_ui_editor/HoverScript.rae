@@ -56,9 +56,16 @@ func runTestHoverCycle(app: mod App, script: view String) {
   if script.length() is 0 {
     ret
   }
-  let firstComma: Int = script.indexOf(sub: ",")
+  # A comma at 0 is as malformed as a missing one: both are rejected below
+  var firstComma: Int = 0
+  if let found: Int = script.indexOf(sub: ",") {
+    firstComma = found
+  }
   let rest: String = script.sub(start: firstComma + 1, len: script.length() - firstComma - 1)
-  let secondComma: Int = rest.indexOf(sub: ",")
+  var secondComma: Int = 0
+  if let found: Int = rest.indexOf(sub: ",") {
+    secondComma = found
+  }
   if firstComma <= 0 or secondComma <= 0 {
     log("[ui-editor] hover cycle: expected <nodeA>,<nodeB>,<count>, got {script}")
     ret

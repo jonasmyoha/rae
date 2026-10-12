@@ -450,7 +450,10 @@ func hexDigitAt(jsonParser: view JsonParser, pos: view Int) ret Int {
   if one.length() is not 1 {
     ret -1
   }
-  ret digits.indexOf(sub: one)
+  if let digit: Int = digits.indexOf(sub: one) {
+    ret digit
+  }
+  ret -1
 }
 
 # The four hex digits starting at `pos` as a code unit, or -1.

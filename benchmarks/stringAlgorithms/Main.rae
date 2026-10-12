@@ -71,7 +71,9 @@ func main() ret Int {
   checksum = 0
   started = nowNs()
   loop var i: Int = 0, i < 20000, ++i {
-    checksum = checksum + longText.indexOf(sub: "needle")
+    if let index: Int = longText.indexOf(sub: "needle") {
+      checksum = checksum + index
+    }
   }
   report(
     name: "indexOf (1 KB, match at end)"
