@@ -109,45 +109,41 @@ func join(a: view String, b: view String) ret String {
 # Last path segment after "/".
 func baseName(path: view String) ret String {
   let clean: String = trimTrailingSeparators(path: path)
-  let slash: Int = clean.lastIndexOf(sub: "/")
-  if slash < 0 {
-    ret clean
+  if let slash: Int = clean.lastIndexOf(sub: "/") {
+    ret clean.sub(start: slash + 1, len: clean.length() - slash - 1)
   }
-  ret clean.sub(start: slash + 1, len: clean.length() - slash - 1)
+  ret clean
 }
 
 # Parent directory before the last "/". Relative single-segment paths return
 # ".". Rooted single-segment paths return "/".
 func dirName(path: view String) ret String {
   let clean: String = trimTrailingSeparators(path: path)
-  let slash: Int = clean.lastIndexOf(sub: "/")
-  if slash < 0 {
-    ret "."
+  if let slash: Int = clean.lastIndexOf(sub: "/") {
+    if slash is 0 {
+      ret "/"
+    }
+    ret clean.sub(start: 0, len: slash)
   }
-  if slash is 0 {
-    ret "/"
-  }
-  ret clean.sub(start: 0, len: slash)
+  ret "."
 }
 
 # Extension without the leading dot, or "" if there is no extension.
 func ext(path: view String) ret String {
   let name: String = baseName(path: path)
-  let dot: Int = name.lastIndexOf(sub: ".")
-  if dot < 0 {
-    ret ""
+  if let dot: Int = name.lastIndexOf(sub: ".") {
+    ret name.sub(start: dot + 1, len: name.length() - dot - 1).toLower()
   }
-  ret name.sub(start: dot + 1, len: name.length() - dot - 1).toLower()
+  ret ""
 }
 
 # Base name without its final extension.
 func stem(path: view String) ret String {
   let name: String = baseName(path: path)
-  let dot: Int = name.lastIndexOf(sub: ".")
-  if dot < 0 {
-    ret name
+  if let dot: Int = name.lastIndexOf(sub: ".") {
+    ret name.sub(start: 0, len: dot)
   }
-  ret name.sub(start: 0, len: dot)
+  ret name
 }
 
 # Zero-pad an Int to (at least) 4 digits.

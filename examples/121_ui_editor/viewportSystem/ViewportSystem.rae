@@ -95,13 +95,14 @@ func envSizeOr(name: view String, fallbackW: view Int, fallbackH: view Int) ret 
     designH: fallbackH.toFloat()
   }
   let text: String = getEnv(name: name)
-  let x: Int = text.indexOf(sub: "x")
-  if x > 0 {
-    let w: Int = text.sub(start: 0, len: x).toInt()
-    let h: Int = text.sub(start: x + 1, len: text.length() - x - 1).toInt()
-    if w > 0 and h > 0 {
-      viewportSystem.windowW = w
-      viewportSystem.windowH = h
+  if let x: Int = text.indexOf(sub: "x") {
+    if x > 0 {
+      let w: Int = text.sub(start: 0, len: x).toInt()
+      let h: Int = text.sub(start: x + 1, len: text.length() - x - 1).toInt()
+      if w > 0 and h > 0 {
+        viewportSystem.windowW = w
+        viewportSystem.windowH = h
+      }
     }
   }
   ret viewportSystem

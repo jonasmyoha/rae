@@ -30,12 +30,11 @@ func parseIntOrZero(text: view String) ret Int {
   var acc: Int = 0
   loop i < n {
     let ch: String = text.sub(start: i, len: 1)
-    let d: Int = digits.indexOf(sub: ch)
-    if d < 0 {
-      ret acc
+    if let d: Int = digits.indexOf(sub: ch) {
+      acc = acc * 10 + d
+      i = i + 1
     }
-    acc = acc * 10 + d
-    i = i + 1
+    ret acc
   }
   ret acc
 }

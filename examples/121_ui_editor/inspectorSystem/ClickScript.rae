@@ -82,19 +82,23 @@ func runTestClick(
 ) {
   var mode: SelectMode = SelectMode.replace
   var rest: String = "{step}"
-  let colon: Int = step.indexOf(sub: ":")
-  if colon > 0 {
-    let head: String = step.sub(start: 0, len: colon)
-    if head is not "at" {
-      mode = selectModeFromName(name: head)
-      rest = step.sub(start: colon + 1, len: step.length() - colon - 1)
+  if let colon: Int = step.indexOf(sub: ":") {
+    if colon > 0 {
+      let head: String = step.sub(start: 0, len: colon)
+      if head is not "at" {
+        mode = selectModeFromName(name: head)
+        rest = step.sub(start: colon + 1, len: step.length() - colon - 1)
+      }
     }
   }
   var x: Float = 0.0
   var y: Float = 0.0
   if rest.startsWith(prefix: "at:") {
     let point: String = rest.sub(start: 3, len: rest.length() - 3)
-    let comma: Int = point.indexOf(sub: ",")
+    var comma: Int = 0
+    if let found: Int = point.indexOf(sub: ",") {
+      comma = found
+    }
     if comma <= 0 {
       log("[ui-editor] click: expected at:<x>,<y>, got {rest}")
       ret
@@ -207,15 +211,16 @@ func runTestMarquee(
   var mode: SelectMode = SelectMode.replace
   var rest: String = "{step}"
   var preview: Bool = false
-  let colon: Int = step.indexOf(sub: ":")
-  if colon > 0 {
-    let head: String = step.sub(start: 0, len: colon)
-    if head is "preview" {
-      preview = true
-    } else {
-      mode = selectModeFromName(name: head)
+  if let colon: Int = step.indexOf(sub: ":") {
+    if colon > 0 {
+      let head: String = step.sub(start: 0, len: colon)
+      if head is "preview" {
+        preview = true
+      } else {
+        mode = selectModeFromName(name: head)
+      }
+      rest = step.sub(start: colon + 1, len: step.length() - colon - 1)
     }
-    rest = step.sub(start: colon + 1, len: step.length() - colon - 1)
   }
   if rest is "small" or step is "small" {
     beginMarquee(
@@ -327,14 +332,15 @@ func runTestTreeClick(
 ) {
   var mode: SelectMode = SelectMode.replace
   var rest: String = "{step}"
-  let colon: Int = step.indexOf(sub: ":")
-  if colon > 0 {
-    mode = selectModeFromName(name: step.sub(start: 0, len: colon))
-    rest = step.sub(start: colon + 1, len: step.length() - colon - 1)
-    # The tree spends Shift on a RANGE, not an add — the one place the two
-    # surfaces read the same modifier differently.
-    if mode is SelectMode.add {
-      mode = SelectMode.range
+  if let colon: Int = step.indexOf(sub: ":") {
+    if colon > 0 {
+      mode = selectModeFromName(name: step.sub(start: 0, len: colon))
+      rest = step.sub(start: colon + 1, len: step.length() - colon - 1)
+      # The tree spends Shift on a RANGE, not an add — the one place the two
+      # surfaces read the same modifier differently.
+      if mode is SelectMode.add {
+        mode = SelectMode.range
+      }
     }
   }
   let target: EntityId = findNodeByIdIn(world: world, entityId: sceneRoot, nodeId: rest)
@@ -553,7 +559,10 @@ func runTestComponent(
   if script.length() is 0 {
     ret
   }
-  let colon: Int = script.indexOf(sub: ":")
+  var colon: Int = 0
+  if let found: Int = script.indexOf(sub: ":") {
+    colon = found
+  }
   if colon <= 0 {
     log("[ui-editor] component: expected add:/remove:/filter:/scroll:<value>, got {script}")
     ret

@@ -27,7 +27,7 @@ Fixtures 1025 and 1026.
 | `length()` | the number of **bytes**. `"héllo👋".length()` is 10 (`é` is 2 bytes, the emoji 4). |
 | `byteAt(index:)` | the raw byte at a byte index (0..255; -1 out of range) |
 | `at(index:)` | the character (`Char32`) whose UTF-8 sequence **starts** at a byte index |
-| `indexOf` / `lastIndexOf` / `startsWith` / `endsWith` / `contains` / `split` | byte-indexed searches; positions they return are byte offsets |
+| `indexOf` / `lastIndexOf` / `startsWith` / `endsWith` / `contains` / `split` | byte-indexed searches; positions they return are byte offsets. `indexOf` and `lastIndexOf` return `opt Int`: `none` when `sub` is not there (narrow with `if let`) |
 | `sub(start:, len:)` | a substring by **byte** range — never cut inside a character, see below |
 
 ### `sub` never cuts a character

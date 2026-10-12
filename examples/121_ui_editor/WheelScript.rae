@@ -37,7 +37,10 @@ func runTestWheelStep(
   area: view EditAreaRect
   step: view String
 ) {
-  let colon: Int = step.indexOf(sub: ":")
+  var colon: Int = 0
+  if let found: Int = step.indexOf(sub: ":") {
+    colon = found
+  }
   if colon <= 0 {
     log("[ui-editor] wheel: expected <nodeId>:<delta>, got {step}")
     ret
@@ -128,9 +131,8 @@ func runTestWheel(
   }
   var rest: String = "{script}"
   loop rest.length() > 0 {
-    let space: Int = rest.indexOf(sub: " ")
     var step: String = "{rest}"
-    if space >= 0 {
+    if let space: Int = rest.indexOf(sub: " ") {
       step = rest.sub(start: 0, len: space)
       rest = rest.sub(start: space + 1, len: rest.length() - space - 1)
     } else {

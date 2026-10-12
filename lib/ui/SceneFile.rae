@@ -9,10 +9,10 @@ import ui/Scene
 # callers replace this with the full root-relative identity they already used
 # to resolve the file.
 func sceneIdentityFromFilePath(path: view String) ret String {
-  let slash: Int = path.lastIndexOf(sub: "/")
-  var start: Int = slash + 1
-  if start < 0 {
-    start = 0
+  # The name starts after the last "/", or at 0 when there is none
+  var start: Int = 0
+  if let slash: Int = path.lastIndexOf(sub: "/") {
+    start = slash + 1
   }
   var length: Int = path.length() - start
   if path.endsWith(suffix: ".raescene") {

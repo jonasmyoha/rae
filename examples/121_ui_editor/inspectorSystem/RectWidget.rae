@@ -417,7 +417,10 @@ func applyRectEdit(
   selection: view List(EntityId)
   edit: view String
 ) ret Int {
-  let separator: Int = edit.indexOf(sub: "=")
+  var separator: Int = 0
+  if let found: Int = edit.indexOf(sub: "=") {
+    separator = found
+  }
   if separator <= 0 {
     log("[ui-editor] rect set: expected <field>=<value>, got {edit}")
     ret 0

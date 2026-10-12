@@ -118,14 +118,13 @@ func fileNotifyActive(fileNotify: view FileNotify) ret Bool {
 
 # The directory of `path`: "." when it names none, "/" for a file at the root
 func parentDirectory(path: view String) ret String {
-  let slash: Int = path.lastIndexOf(sub: "/")
-  if slash < 0 {
-    ret "."
+  if let slash: Int = path.lastIndexOf(sub: "/") {
+    if slash is 0 {
+      ret "/"
+    }
+    ret path.sub(start: 0, len: slash)
   }
-  if slash is 0 {
-    ret "/"
-  }
-  ret path.sub(start: 0, len: slash)
+  ret "."
 }
 
 # Watch one path unless this watcher already does. Whether it is watched.

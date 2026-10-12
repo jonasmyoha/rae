@@ -38,12 +38,11 @@ func cachedArtworkPath(imageHash: view String) pub ret String {
 
 func cachedArtworkHashFromUrl(url: view String) pub ret String {
   let slash: String = "/"
-  let i: Int = url.lastIndexOf(sub: slash)
-  if i < 0 {
-    ret "{url}"
+  if let i: Int = url.lastIndexOf(sub: slash) {
+    let n: Int = url.length()
+    ret url.sub(start: i + 1, len: n - i - 1)
   }
-  let n: Int = url.length()
-  ret url.sub(start: i + 1, len: n - i - 1)
+  ret "{url}"
 }
 
 func cachedArtworkKeyFromUrl(url: view String) pub ret String {
