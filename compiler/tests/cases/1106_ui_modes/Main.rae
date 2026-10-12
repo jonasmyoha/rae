@@ -1,0 +1,36 @@
+# GAME and EDITOR UI modes (lib/app3d/UiModes.rae): which scene states each
+# mode and window shape turns on, and what counts as a short window (a phone
+# on its side). Applying them needs a window and a scene, which the examples
+# cover.
+open app3d/UiModes
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func main() ret Int {
+  check(
+    label: "GAME on a tall window: no states"
+    ok: uiModeStates(editor: false, short: false).length is 0
+  )
+  let editor: List(String) = uiModeStates(editor: true, short: false)
+  check(
+    label: "EDITOR: the editor state"
+    ok: editor.length is 1 and editor.copyAtFallback(index: 0, fallback: "") is "editor"
+  )
+  let both: List(String) = uiModeStates(editor: true, short: true)
+  check(
+    label: "EDITOR on a short window: both"
+    ok: both.length is 2 and both.copyAtFallback(index: 1, fallback: "") is "short"
+  )
+  check(label: "a phone on its side is short", ok: isShortWindowHeight(height: 390.0))
+  check(label: "a phone upright is not", ok: isShortWindowHeight(height: 844.0) is false)
+  check(label: "a desktop window is not", ok: isShortWindowHeight(height: 800.0) is false)
+  check(label: "no window yet is not", ok: isShortWindowHeight(height: 0.0) is false)
+  check(label: "the button's action id", ok: uiModeActionId is "ui.mode")
+  ret 0
+}

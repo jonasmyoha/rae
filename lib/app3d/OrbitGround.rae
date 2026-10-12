@@ -1,0 +1,63 @@
+# Keep an orbit camera's eye above the ground — a game's camera, which a drag
+# must not swing under the floor or the terrain (an editor's may). The eye sits
+# at target + distance * (cos pitch sin yaw, -cos pitch cos yaw, sin pitch)
+# (Math3d `orbitEye`), so its height over the ground is the target's plus
+# distance * sin(pitch); the lowest pitch that keeps it `clearance` over the
+# ground follows from the distance — zoomed out the camera cannot look up from
+# as low, close in it can.
+#
+#   # each frame, after updateCameraRig, with the ground's height under the
+#   # target and under the current eye (the higher of the two on a slope):
+#   if keepOrbitAboveGround(rig: rig, focusHeight: target.z - groundHeight, clearance: 0.3) {
+#   ...moved... }
+import Math
+open app3d/CameraRig
+
+# The eye's height over the ground, looking at a target `focusHeight` over it
+# from `distance` away at `pitch` (radians, up is positive).
+func orbitEyeHeight(focusHeight: view Float, distance: view Float, pitch: view Float) ret Float {
+  ret focusHeight + distance * Math.sin(x: pitch)
+}
+
+# The lowest pitch that keeps the eye `clearance` over the ground.
+func minimumOrbitPitch(
+  focusHeight: view Float
+  distance: view Float
+  clearance: view Float
+) ret Float {
+  if distance <= 0.0 {
+    ret 0.0
+  }
+  let lowest: Float = (clearance - focusHeight) / distance
+  ret Math.asin(x: Math.max(a: 0.0 - 1.0, b: Math.min(a: 1.0, b: lowest)))
+}
+
+# Raise the rig's pitch — the one being eased toward (at `distance`) and the
+# eased one (at `viewDistance`) — to the lowest that keeps the eye `clearance`
+# over ground `focusHeight` below the target. True when it changed either.
+func keepOrbitAboveGround(
+  rig: mod CameraRig
+  focusHeight: view Float
+  clearance: view Float
+) ret Bool {
+  let lowest: Float = minimumOrbitPitch(
+    focusHeight: focusHeight
+    distance: rig.distance
+    clearance: clearance
+  )
+  let lowestView: Float = minimumOrbitPitch(
+    focusHeight: focusHeight
+    distance: rig.viewDistance
+    clearance: clearance
+  )
+  var changed: Bool = false
+  if rig.orbitPitch < lowest {
+    rig.orbitPitch = lowest
+    changed = true
+  }
+  if rig.viewOrbitPitch < lowestView {
+    rig.viewOrbitPitch = lowestView
+    changed = true
+  }
+  ret changed
+}

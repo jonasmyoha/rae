@@ -1,0 +1,69 @@
+# An orbit camera kept above the ground (lib/app3d/OrbitGround.rae): the eye's
+# height for a pitch, the lowest pitch for a clearance at a distance, and the
+# rig raised to it — the target and the eased pitch, each at its own distance.
+import Math
+open app3d/CameraRig
+open Scene3d
+open app3d/OrbitGround
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func near(a: view Float, b: view Float) ret Bool {
+  ret Math.abs(value: a - b) < 0.001
+}
+
+func main() ret Int {
+  check(
+    label: "level, the eye is at the focus's height"
+    ok: near(a: orbitEyeHeight(focusHeight: 1.9, distance: 7.0, pitch: 0.0), b: 1.9)
+  )
+  check(
+    label: "pitched well down from 7 m, it is under the ground"
+    ok: orbitEyeHeight(focusHeight: 1.9, distance: 7.0, pitch: 0.0 - 0.5) < 0.0
+  )
+  let lowest: Float = minimumOrbitPitch(focusHeight: 1.9, distance: 7.0, clearance: 0.3)
+  check(
+    label: "at the lowest pitch the eye is just clear"
+    ok: near(a: orbitEyeHeight(focusHeight: 1.9, distance: 7.0, pitch: lowest), b: 0.3)
+  )
+  check(
+    label: "zoomed out, it cannot look up from as low"
+    ok: minimumOrbitPitch(focusHeight: 1.9, distance: 14.0, clearance: 0.3) > minimumOrbitPitch(
+      focusHeight: 1.9
+      distance: 4.0
+      clearance: 0.3
+    )
+  )
+  check(
+    label: "looking at the ground, it stays above it"
+    ok: minimumOrbitPitch(focusHeight: 0.1, distance: 7.0, clearance: 0.3) > 0.0
+  )
+  var rig: CameraRig = createCameraRig(camera: defaultCamera3d())
+  rig.distance = 7.0
+  rig.viewDistance = 5.0
+  rig.orbitPitch = 0.0 - 1.4
+  rig.viewOrbitPitch = 0.0 - 1.4
+  check(
+    label: "a rig pitched under the ground is raised"
+    ok: keepOrbitAboveGround(rig: rig, focusHeight: 1.9, clearance: 0.3)
+  )
+  check(
+    label: "the target pitch, at its distance"
+    ok: near(a: orbitEyeHeight(focusHeight: 1.9, distance: 7.0, pitch: rig.orbitPitch), b: 0.3)
+  )
+  check(
+    label: "the eased pitch, at its own"
+    ok: near(a: orbitEyeHeight(focusHeight: 1.9, distance: 5.0, pitch: rig.viewOrbitPitch), b: 0.3)
+  )
+  check(
+    label: "a rig already above is left alone"
+    ok: keepOrbitAboveGround(rig: rig, focusHeight: 1.9, clearance: 0.3) is false
+  )
+  ret 0
+}
