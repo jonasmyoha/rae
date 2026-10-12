@@ -54,5 +54,24 @@ func main() ret Int {
   check(label: "fps rounds to whole frames", ok: formatDebugFps(fps: 59.6) is "fps: 60")
   # Never negative: the window can be degenerate before the second frame lands.
   check(label: "fps never reads negative", ok: formatDebugFps(fps: 0.0 - 3.0) is "fps: 0")
+
+  # Placement: the window's top-right corner, `margin` in, until the app
+  # anchors it (under its own chrome); (0, 0) puts it back.
+  d.screenW = 800.0
+  check(
+    label: "the button sits in the window's corner"
+    ok: debugButtonX(debugOverlay: d) is 768.0 and debugTop(debugOverlay: d) is 12.0
+  )
+  placeDebugOverlay(debugOverlay: d, right: 700.0, top: 90.0)
+  check(
+    label: "an anchored button's top-right is the anchor"
+    ok: debugButtonX(debugOverlay: d) is 680.0 and debugTop(debugOverlay: d) is 90.0
+  )
+  check(
+    label: "the dialog opens under an anchored button, right-aligned"
+    ok: debugDialogX(debugOverlay: d) is 440.0 and debugDialogY(debugOverlay: d) is 118.0
+  )
+  placeDebugOverlay(debugOverlay: d, right: 0.0, top: 0.0)
+  check(label: "a zero anchor is the corner again", ok: debugButtonX(debugOverlay: d) is 768.0)
   ret 0
 }

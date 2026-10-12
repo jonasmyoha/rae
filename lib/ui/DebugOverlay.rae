@@ -63,6 +63,11 @@ type DebugOverlay {
   screenH: Float
   buttonSize: Float
   margin: Float
+  # Where the button's top-right corner sits, when the app places it (an app
+  # whose own chrome holds that corner puts the widget under it): 0 = the
+  # window's top-right corner, `margin` in from each edge
+  anchorRight: Float
+  anchorTop: Float
 
   # Absolute epoch stamps, and Float64 DELIBERATELY: in f32 at epoch magnitude
   # two consecutive frames round to the same value (~128 s apart), the window
@@ -103,6 +108,8 @@ func createDebugOverlay(
     screenH: 0.0
     buttonSize: 20.0
     margin: 12.0
+    anchorRight: 0.0
+    anchorTop: 0.0
     customLine: ""
     frameTimes: List.create(Float64, cap: 256)
     fpsWindowSec: 2.0
@@ -117,8 +124,31 @@ func debugTextWidth(text: view String, sizePx: view Float) ret Float {
   ret text.length().toFloat() * sizePx * debugGlyphWidthRatio
 }
 
+# The right edge and the top of the widget: the app's anchor, else the
+# window's top-right corner.
+func debugRight(debugOverlay: view DebugOverlay) ret Float {
+  if debugOverlay.anchorRight > 0.0 {
+    ret debugOverlay.anchorRight
+  }
+  ret debugOverlay.screenW - debugOverlay.margin
+}
+
+func debugTop(debugOverlay: view DebugOverlay) ret Float {
+  if debugOverlay.anchorTop > 0.0 {
+    ret debugOverlay.anchorTop
+  }
+  ret debugOverlay.margin
+}
+
+# Put the widget's top-right corner at (`right`, `top`) — under the app's own
+# chrome, say; (0, 0) puts it back in the window's corner.
+func placeDebugOverlay(debugOverlay: mod DebugOverlay, right: view Float, top: view Float) {
+  debugOverlay.anchorRight = right
+  debugOverlay.anchorTop = top
+}
+
 func debugButtonX(debugOverlay: view DebugOverlay) ret Float {
-  ret debugOverlay.screenW - debugOverlay.buttonSize - debugOverlay.margin
+  ret debugRight(debugOverlay: debugOverlay) - debugOverlay.buttonSize
 }
 
 func debugPointInRect(
@@ -217,7 +247,7 @@ func updateDebugOverlay(
     px: px
     py: py
     x: debugButtonX(debugOverlay: debugOverlay)
-    y: debugOverlay.margin
+    y: debugTop(debugOverlay: debugOverlay)
     w: debugOverlay.buttonSize
     h: debugOverlay.buttonSize
   ) {
@@ -241,11 +271,11 @@ const debugDialogTitleH: Float = 44.0
 const debugDialogRows: Int = 3
 
 func debugDialogX(debugOverlay: view DebugOverlay) ret Float {
-  ret debugOverlay.screenW - debugDialogW - debugOverlay.margin
+  ret debugRight(debugOverlay: debugOverlay) - debugDialogW
 }
 
 func debugDialogY(debugOverlay: view DebugOverlay) ret Float {
-  ret debugOverlay.margin + debugOverlay.buttonSize + 8.0
+  ret debugTop(debugOverlay: debugOverlay) + debugOverlay.buttonSize + 8.0
 }
 
 func debugDialogH() ret Float {
@@ -474,7 +504,7 @@ func drawDebugButton(debugOverlay: view DebugOverlay, canvas: mod Gpu2dCanvas, f
   Gpu2d.drawBox(
     canvas: canvas
     x: x
-    y: debugOverlay.margin
+    y: debugTop(debugOverlay: debugOverlay)
     w: debugOverlay.buttonSize
     h: debugOverlay.buttonSize
     radius: debugOverlay.buttonSize * 0.5
@@ -489,7 +519,7 @@ func drawDebugButton(debugOverlay: view DebugOverlay, canvas: mod Gpu2dCanvas, f
   # small — measured at 10px of gap on the left against 5px on the right.
   let bearing: Float = glyphSize * 0.09
   let gx: Float = x + (debugOverlay.buttonSize - glyphW) * 0.5 - bearing
-  let gy: Float = debugOverlay.margin + debugOverlay.buttonSize * 0.5 + glyphSize * 0.36
+  let gy: Float = debugTop(debugOverlay: debugOverlay) + debugOverlay.buttonSize * 0.5 + glyphSize * 0.36
   Gpu2dText.drawText(
     canvas: canvas
     font: font
@@ -509,7 +539,7 @@ func drawDebugReadouts(
   let fontSize: Float = 14.0
   let lineH: Float = 18.0
   let rightEdge: Float = debugButtonX(debugOverlay: debugOverlay) + debugOverlay.buttonSize
-  var y: Float = debugOverlay.margin + debugOverlay.buttonSize + 8.0 + fontSize
+  var y: Float = debugTop(debugOverlay: debugOverlay) + debugOverlay.buttonSize + 8.0 + fontSize
   if debugOverlay.open {
     # The dialog occupies that space; put the readouts under it rather than
     # behind it.
