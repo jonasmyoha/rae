@@ -1,0 +1,46 @@
+# What an optional allows without narrowing — a `none` test, interpolation,
+# toString — and the narrowings the
+# unnarrowed-use error suggests: a stored optional by reference
+# (`if let present: view T => name`), a call's result by taking it.
+type Track {
+  title: String
+  seconds: Int
+}
+
+func maybe(present: view Bool) ret opt Track {
+  if present {
+    ret Track { title: "Intro", seconds: 95 }
+  }
+  ret none
+}
+
+func maybeText() ret opt String {
+  ret "hello"
+}
+
+func pick(tracks: view List(Track)) ret opt view Track {
+  ret tracks.viewAt(index: 0)
+}
+
+func main() {
+  let missing: opt Track = maybe(present: false)
+  let track: opt Track = maybe(present: true)
+  let text: opt String = maybeText()
+  log("missing is none: {missing is none}")
+  log("text {text}, as text {text.toString()}")
+  if let present: view Track => track {
+    log("stored: {present.title} {present.seconds}")
+  }
+  if let present: view String => text {
+    log("length {present.length()}")
+  }
+  if let present: Track = maybe(present: true) {
+    log("taken: {present.title}")
+  }
+  var tracks: List(Track) = List.create(Track, cap: 1)
+  tracks.add(value: Track { title: "Outro", seconds: 143 })
+  let first: opt view Track => pick(tracks: tracks)
+  if let present: view Track => first {
+    log("view: {present.title}")
+  }
+}

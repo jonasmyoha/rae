@@ -26,12 +26,12 @@ func describe(t: opt view Track) ret String {
   ret "a track"
 }
 
-# Writes through an optional mod reference must reach the original.
+# Writes through an optional mod reference must reach the original. The
+# optional is narrowed first: a field of an unchecked `opt` is an error (4.1).
 func bump(t: opt mod Track) {
-  if t is none {
-    ret
+  if let present: mod Track => t {
+    present.seconds = present.seconds + 1
   }
-  t.seconds = t.seconds + 1
 }
 
 func selected(lib: view Library) ret opt view Track {
