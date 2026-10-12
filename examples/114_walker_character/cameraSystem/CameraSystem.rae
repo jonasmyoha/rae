@@ -14,6 +14,8 @@ import Profile
 import Gpu2d
 import Vec3
 import Quat
+open app3d/UiModes
+open app3d/OrbitGround
 open ecs/Entity
 open ecs/ComponentTable
 open ecs/Transform
@@ -163,6 +165,9 @@ type CameraTick {
   cameraMoved: Bool
 }
 
+# The GAME camera's eye stays this far over the terrain (m)
+const cameraGroundClearance: Float = 0.3
+
 # #743: consumes the narrow state it needs — the CameraSystem, the input/UI
 # bundle, the persist dirty flag, and the world + hero entity to read the
 # followed controller — not the whole App.
@@ -173,6 +178,7 @@ func cameraUpdate(
   persist: mod PersistState
   world: view GameWorld
   heroEntityId: view EntityId
+  groundZ: view Float
   deltaTime: copy Float
 ) ret CameraTick {
   let previousMode: CameraRigMode = cameraSystem.rig.mode
@@ -199,14 +205,40 @@ func cameraUpdate(
     moveStick: inputSystem.moveStick
     world: inputSystem.world
     uiSystems: uiSystems
+    enabled: inputSystem.uiModes.editor is false
   )
-  let cameraMoved: Bool = updateCameraRig(
+  var cameraMoved: Bool = updateCameraRig(
     rig: cameraSystem.rig
     camera: cameraSystem.camera
     allowInput: uiPointerCaptured(input: inputSystem.ui) is false
     wheel: uiWheelUnclaimed(input: inputSystem.ui)
     deltaTime: deltaTime
   )
+  # The GAME camera stays above the terrain (lib/app3d/OrbitGround), over the
+  # higher of the ground under its target and under its eye (a slope behind
+  # it); the editor's orbits freely
+  if inputSystem.uiModes.editor is false and cameraSystem.rig.mode is CameraRigMode.character {
+    let target: Vec3 = cameraSystem.camera.target
+    let eye: Vec3 = orbitEye(
+      targetX: target.x
+      targetY: target.y
+      targetZ: target.z
+      yaw: cameraSystem.rig.viewYaw
+      pitch: cameraSystem.rig.viewOrbitPitch
+      dist: cameraSystem.rig.viewDistance
+    )
+    let ground: Float = Math.max(
+      a: terrainHeightAt(x: target.x, y: target.y, groundZ: groundZ)
+      b: terrainHeightAt(x: eye.x, y: eye.y, groundZ: groundZ)
+    )
+    if keepOrbitAboveGround(
+      rig: cameraSystem.rig
+      focusHeight: target.z - ground
+      clearance: cameraGroundClearance
+    ) {
+      cameraMoved = true
+    }
+  }
   if cameraMoved {
     persist.stateDirty = true
   }
