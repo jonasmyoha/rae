@@ -1,0 +1,48 @@
+# An optional must be checked before it is used as the value it may hold.
+# Each use below is a Rae error that names the binding and the narrowing to
+# write; the field and method forms used to reach the C compiler ("no member
+# named 'title' in 'struct rae_opt_rae_Track'"), or build and read the empty
+# payload of a none.
+type Track {
+  title: String
+  seconds: Int
+}
+
+func maybe() ret opt Track {
+  ret none
+}
+
+func maybeNumber() ret opt Int {
+  ret 3
+}
+
+func maybeText() ret opt String {
+  ret "x"
+}
+
+func seconds(track: view Track) ret Int {
+  ret track.seconds
+}
+
+func pick(tracks: view List(Track)) ret opt view Track {
+  ret tracks.viewAt(index: 0)
+}
+
+func main() {
+  let track: opt Track = maybe()
+  let number: opt Int = maybeNumber()
+  let text: opt String = maybeText()
+  var tracks: List(Track) = List.create(Track, cap: 1)
+  let first: opt view Track => pick(tracks: tracks)
+  # A field, a method, a String method, a field through an optional view, a
+  # field of a call's optional result
+  log(track.title)
+  log("{track.seconds()}")
+  log("{text.length()}")
+  log(first.title)
+  log(maybe().title)
+  # An argument, an operator, a plain binding
+  log("{seconds(track: track)}")
+  let doubled: Int = number + 1
+  let plain: Int = number
+}

@@ -6318,7 +6318,91 @@ static void sema_receiver_display(const TypeInfo* type, char* buf, size_t cap) {
     }
 }
 
+/* An `opt T` value read as if it were a T: a field (`track.title`) or a
+ * method (`track.seconds()`, `text.length()`) on an optional the code has
+ * not narrowed. It used to reach the C compiler ("no member named 'title' in
+ * 'struct rae_opt_rae_Track'"), or worse, build and read the empty payload of
+ * a `none` (0, ""), or read through a null `opt view`. The error names the
+ * binding and the narrowing to write. A method is fine when the receiver
+ * really is optional for it: `toString` (it formats `none`), or a function of
+ * that name whose first parameter is itself `opt`. */
+static bool sema_method_takes_opt_receiver(const AstModule* module, Str method) {
+    if (str_eq_cstr(method, "toString")) return true;
+    size_t count = module_index_function_count(module, method);
+    for (size_t k = 0; k < count; k++) {
+        const AstDecl* d = module_index_function_at(module, method, count, k);
+        const AstParam* first = d ? d->as.func_decl.params : NULL;
+        if (first && first->type && first->type->is_opt) return true;
+    }
+    return false;
+}
+
+static void sema_check_unnarrowed_opt(AstModule* module, const AstExpr* expr) {
+    const AstExpr* receiver = NULL;
+    bool is_method = false;
+    if (expr->kind == AST_EXPR_MEMBER) {
+        receiver = expr->as.member.object;
+    } else if (expr->kind == AST_EXPR_METHOD_CALL) {
+        receiver = expr->as.method_call.object;
+        is_method = true;
+    } else {
+        return;
+    }
+    if (!receiver || !receiver->resolved_type) return;
+    /* `opt T` is OPT(T); `opt view T` / `opt mod T` resolve as REF(OPT(T)) */
+    const TypeInfo* type = receiver->resolved_type;
+    bool reference = false;
+    bool is_mod = false;
+    if (type->kind == TYPE_REF && type->as.ref.base && type->as.ref.base->kind == TYPE_OPT) {
+        reference = true;
+        is_mod = type->as.ref.is_mod;
+        type = type->as.ref.base;
+    }
+    if (type->kind != TYPE_OPT) return;
+    if (is_method && sema_method_takes_opt_receiver(module, expr->as.method_call.method_name)) return;
+    const TypeInfo* target = type->as.opt.base;
+    if (target && target->kind == TYPE_REF) {
+        reference = true;
+        is_mod = target->as.ref.is_mod;
+        target = target->as.ref.base;
+    }
+    Str type_name = target ? target->name : str_from_cstr("T");
+    Str used = is_method ? expr->as.method_call.method_name : expr->as.member.member;
+    const char* opt_mode = reference ? (is_mod ? "mod " : "view ") : "";
+    char message[768];
+    if (receiver->kind == AST_EXPR_IDENT) {
+        /* A stored optional is narrowed by reference (spec 4.2): a `mod`
+         * optional keeps `mod`, everything else is a `view` */
+        Str name = receiver->as.ident;
+        snprintf(message, sizeof message,
+                 "'%.*s' is optional (opt %s%.*s) and may be none: check it before using the %s '%.*s' — "
+                 "`if let present: %s%.*s => %.*s { ... }`",
+                 (int)name.len, name.data, opt_mode, (int)type_name.len, type_name.data,
+                 is_method ? "method" : "field", (int)used.len, used.data,
+                 is_mod ? "mod " : "view ", (int)type_name.len, type_name.data,
+                 (int)name.len, name.data);
+    } else {
+        /* A produced optional (a call's result) is narrowed by taking it */
+        snprintf(message, sizeof message,
+                 "this value is optional (opt %s%.*s) and may be none: check it before using the %s '%.*s' — "
+                 "`if let present: %s%.*s %s <the call> { ... }`",
+                 opt_mode, (int)type_name.len, type_name.data,
+                 is_method ? "method" : "field", (int)used.len, used.data,
+                 opt_mode, (int)type_name.len, type_name.data, reference ? "=>" : "=");
+    }
+    diag_error(sema_diag_file(module), (int)expr->line, (int)expr->column, message);
+    module->had_error = true;
+}
+
+static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr, bool is_value_pos);
+
 static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr, bool is_value_pos) {
+    if (!expr) return;
+    sema_analyze_expr_inner(ctx, module, symbols, expr, is_value_pos);
+    sema_check_unnarrowed_opt(module, expr);
+}
+
+static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr, bool is_value_pos) {
     if (!expr) return;
     switch (expr->kind) {
         case AST_EXPR_IDENT: {
