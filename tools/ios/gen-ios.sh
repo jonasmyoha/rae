@@ -32,6 +32,19 @@ name=$(basename "$ex_dir")
 # carry a project's chosen id), else a default derived from the dir name.
 bundle_id=${2:-${RAE_IOS_BUNDLE_ID:-com.rae.$(printf '%s' "$name" | tr -cd 'a-zA-Z0-9')}}
 disp=${3:-${RAE_IOS_NAME:-$name}}
+# The orientations the app turns to (Info.plist): `portrait` (the default:
+# phone upright, iPad either way up) or `any` (portrait and both landscapes,
+# phone and iPad). SDL follows the device within them; the window is
+# resizable, so the app sees a resize and re-lays out.
+orientations=${RAE_IOS_ORIENTATIONS:-portrait}
+portrait='<string>UIInterfaceOrientationPortrait</string>'
+upsideDown='<string>UIInterfaceOrientationPortraitUpsideDown</string>'
+landscape='<string>UIInterfaceOrientationLandscapeLeft</string><string>UIInterfaceOrientationLandscapeRight</string>'
+case "$orientations" in
+  portrait) phone_orientations="$portrait"; pad_orientations="$portrait$upsideDown" ;;
+  any) phone_orientations="$portrait$upsideDown$landscape"; pad_orientations="$portrait$upsideDown$landscape" ;;
+  *) echo "error: RAE_IOS_ORIENTATIONS is portrait or any, not '$orientations'" >&2; exit 1 ;;
+esac
 
 rae="$root/compiler/bin/rae"
 runtime_dir="$root/compiler/runtime"
@@ -138,6 +151,8 @@ cmake_minimum_required(VERSION 3.28)
 project(RaeApp C)
 
 set(APP RaeApp)
+set(RAE_IOS_PHONE_ORIENTATIONS "$phone_orientations")
+set(RAE_IOS_PAD_ORIENTATIONS "$pad_orientations")
 add_executable(\${APP} MACOSX_BUNDLE
   "$gen/app_ios.c"
   "$runtime_dir/rae_runtime.c"
