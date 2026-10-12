@@ -322,6 +322,49 @@ void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
       return;
     }
   }
+  /* `=` COPIES (spec 2.3, #79484806), an optional too (#93440860): a value
+   * that reads an existing `opt T` place (a binding, a field, an element)
+   * whose payload owns heap is deep-copied when present. Passing the struct
+   * through aliased the source's buffers, and both owners dropped them: a
+   * `let`, a `ret` of a stored optional and a struct-literal field all did
+   * (#56441898); an assignment had its own copy of this. */
+  if (opt_type && !(opt_type->is_view || opt_type->is_mod)
+      && rae_opt_is_struct_rep(ctx, opt_type)
+      && (value->kind == AST_EXPR_IDENT || value->kind == AST_EXPR_MEMBER
+          || value->kind == AST_EXPR_INDEX)) {
+    const AstTypeRef* value_tr = infer_expr_type_ref(ctx, value);
+    AstTypeRef payload = {0};
+    AstTypeRef* substituted = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
+                                                  ctx->generic_args, (AstTypeRef*)opt_type);
+    payload = substituted ? *substituted : *opt_type;
+    payload.is_opt = false;
+    payload.next = NULL;
+    payload.resolved_type = NULL;
+    /* A local the statement MOVES (`ret text`: marked moved before its
+     * value is emitted) hands its heap over; copying it would leak */
+    bool moved_local = false;
+    if (value->kind == AST_EXPR_IDENT) {
+      int local = local_index_by_name(ctx, value->as.ident);
+      moved_local = local >= 0 && ctx->local_moved[local];
+    }
+    if (!moved_local && value_tr && value_tr->is_opt && !(value_tr->is_view || value_tr->is_mod)
+        && type_needs_deep_copy(ctx->compiler_ctx, ctx->module, &payload, 0)) {
+      const char* opt_c = rae_opt_type_name(ctx, opt_type);
+      int tmpn = ctx->temp_counter++;
+      fprintf(out, "(__extension__ ({ %s __dc%d = {0}; const %s* __dcs%d = ", opt_c, tmpn, opt_c, tmpn);
+      emit_deep_copy_source(ctx, value, out);
+      fprintf(out, "; if (__dcs%d->has) { __dc%d.has = 1; ", tmpn, tmpn);
+      if (c_type_is_plain_string(&payload)) {
+        fprintf(out, "__dc%d.value = rae_string_copy(__dcs%d->value);", tmpn, tmpn);
+      } else {
+        const char* payload_c = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params,
+                                                            ctx->generic_args, &payload);
+        fprintf(out, "rae_deep_copy_%s(&__dc%d.value, &__dcs%d->value);", payload_c, tmpn, tmpn);
+      }
+      fprintf(out, " } __dc%d; }))", tmpn);
+      return;
+    }
+  }
   /* Pass-throughs: the value is ALREADY an optional (a RaeAny box), so the
    * box transfers as-is. Suppress the call emitter's auto-unbox — without
    * this, an opt-returning call in opt-field position emitted
@@ -2902,6 +2945,22 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                         // Don't box if value is already RaeAny (e.g. another opt result)
                         if (!str_eq_cstr(val_base, "Any") && val_base.len > 0) needs_box = true;
                     }
+                    // `let b: opt T = a` from a stored optional (a binding, a
+                    // field, an element) whose payload owns heap: the emitter
+                    // deep-copies it (`=` copies, spec 2.3). A plain struct
+                    // copy here aliased the payload, and both bindings dropped it.
+                    const AstExpr* let_value = stmt->as.let_stmt.value;
+                    if (val_tr && val_tr->is_opt && !(val_tr->is_view || val_tr->is_mod)
+                        && (let_value->kind == AST_EXPR_IDENT || let_value->kind == AST_EXPR_MEMBER
+                            || let_value->kind == AST_EXPR_INDEX)) {
+                        AstTypeRef let_payload = *stmt->as.let_stmt.type;
+                        let_payload.is_opt = false;
+                        let_payload.next = NULL;
+                        let_payload.resolved_type = NULL;
+                        if (type_needs_deep_copy(ctx->compiler_ctx, ctx->module, &let_payload, 0)) {
+                            needs_box = true;
+                        }
+                    }
                     // A bare struct literal `{ x: 1, y: 2 }` into an `opt Pair`
                     // binding has no inferable type of its own — its type is the
                     // opt payload from the LHS. Box it so it becomes the opt's
@@ -3450,42 +3509,9 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                         && rae_opt_is_struct_rep(ctx, target_tr);
                     const char* opt_c = opt_struct ? rae_opt_type_name(ctx, target_tr) : "RaeAny";
                     fprintf(out, "{ %s __asg%d = ", opt_c, tmpn);
-                    // `=` COPIES (#79484806) for an optional too (#93440860): an
-                    // RHS that reads an existing `opt T` location whose payload
-                    // owns heap lands as a deep copy. Passing the struct through
-                    // aliased the source's buffers, so the source's own drop
-                    // left the target dangling.
-                    const AstExpr* orhs = stmt->as.assign_stmt.value;
-                    const AstTypeRef* orhs_tr = (orhs->kind == AST_EXPR_IDENT
-                        || orhs->kind == AST_EXPR_MEMBER || orhs->kind == AST_EXPR_INDEX)
-                        ? infer_expr_type_ref(ctx, orhs) : NULL;
-                    AstTypeRef opayload = {0};
-                    if (target_tr) {
-                        AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
-                                                              ctx->generic_args, (AstTypeRef*)target_tr);
-                        opayload = sub ? *sub : *target_tr;
-                        opayload.is_opt = false;
-                        opayload.next = NULL;
-                        opayload.resolved_type = NULL;
-                    }
-                    if (opt_struct && orhs_tr && orhs_tr->is_opt
-                        && type_needs_deep_copy(ctx->compiler_ctx, ctx->module, &opayload, 0)) {
-                        fprintf(out, "(__extension__ ({ %s __dc%d = {0}; const %s* __dcs%d = ",
-                                opt_c, tmpn, opt_c, tmpn);
-                        emit_deep_copy_source(ctx, orhs, out);
-                        fprintf(out, "; if (__dcs%d->has) { __dc%d.has = 1; ", tmpn, tmpn);
-                        if (c_type_is_plain_string(&opayload)) {
-                            fprintf(out, "__dc%d.value = rae_string_copy(__dcs%d->value);", tmpn, tmpn);
-                        } else {
-                            const char* pm = rae_mangle_type_specialized(
-                                ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, &opayload);
-                            fprintf(out, "rae_deep_copy_%s(&__dc%d.value, &__dcs%d->value);",
-                                    pm, tmpn, tmpn);
-                        }
-                        fprintf(out, " } __dc%d; }))", tmpn);
-                    } else {
-                        emit_optional_boxed_expr(ctx, target_tr, orhs, out);
-                    }
+                    // `=` copies an optional too: emit_optional_boxed_expr deep-
+                    // copies a stored `opt T` whose payload owns heap.
+                    emit_optional_boxed_expr(ctx, target_tr, stmt->as.assign_stmt.value, out);
                     fprintf(out, "; %s* __asgp%d = &(", opt_c, tmpn);
                     emit_expr(ctx, stmt->as.assign_stmt.target, out,
                               PREC_LOWEST, true, false);

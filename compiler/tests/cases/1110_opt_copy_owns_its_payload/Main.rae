@@ -1,0 +1,77 @@
+# `=` copies (spec 2.3), an optional too: copying an `opt T` whose payload
+# owns heap (a String, a struct holding one, a List) gives the copy its own
+# payload. A `let` copy, a field copy and a `ret` of a stored optional used to
+# copy only the optional's struct, so both owners dropped the same heap and
+# the program failed at exit. Both sides are read after every copy; the
+# suite's leak check covers the frees. A returned local still moves.
+type Track {
+  title: String
+  seconds: Int
+}
+
+type Holder {
+  text: opt String
+}
+
+func maybeText() ret opt String {
+  ret "hello {3}"
+}
+
+func maybeTrack() ret opt Track {
+  ret Track { title: "Intro {1}", seconds: 95 }
+}
+
+func maybeList() ret opt List(Int) {
+  var numbers: List(Int) = List.create(Int, cap: 2)
+  numbers.add(value: 1)
+  numbers.add(value: 2)
+  ret numbers
+}
+
+func textOf(holder: view Holder) ret opt String {
+  ret holder.text
+}
+
+func madeHere() ret opt String {
+  let text: opt String = maybeText()
+  ret text
+}
+
+func main() {
+  let text: opt String = maybeText()
+  let copied: opt String = text
+  log("let copy: {text} / {copied}")
+
+  let track: opt Track = maybeTrack()
+  let trackCopy: opt Track = track
+  if let present: view Track => trackCopy {
+    log("struct copy: {present.title}")
+  }
+  if let present: view Track => track {
+    log("struct source: {present.title}")
+  }
+
+  var assigned: opt String = none
+  assigned = text
+  assigned = text
+  log("assigned: {assigned} / {text}")
+
+  let holder: Holder = { text: maybeText() }
+  let fromField: opt String = holder.text
+  let returned: opt String = textOf(holder: holder)
+  log("field: {fromField}, returned: {returned}, source: {holder.text}")
+
+  let another: Holder = { text: holder.text }
+  log("literal field: {another.text} / {holder.text}")
+
+  log("returned local: {madeHere()}")
+
+  let numbers: opt List(Int) = maybeList()
+  let numbersCopy: opt List(Int) = numbers
+  if let present: view List(Int) => numbersCopy {
+    log("list copy: {present.length}")
+  }
+  if let present: view List(Int) => numbers {
+    log("list source: {present.length}")
+  }
+}
