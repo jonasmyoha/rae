@@ -1,0 +1,46 @@
+# A ComponentTable keeps at most one row per entity INDEX. Indices are reused
+# only after an entity is freed, so a row under the same index with another
+# generation is a dead entity's row left behind: componentSet replaces it in
+# place rather than appending a second row. Appending orphaned it, and a copy
+# that walks a table holding both (a previous-frame snapshot of transforms)
+# then appended on every visit, growing without bound.
+open ecs/Entity
+open ecs/ComponentTable
+
+type Thing {
+  value: Int
+}
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func main() ret Int {
+  var table: ComponentTable(Thing) = ComponentTable.create(Thing)
+  let first: EntityId = { index: 7, generation: 0 }
+  let second: EntityId = { index: 7, generation: 1 }
+  let other: EntityId = { index: 3, generation: 0 }
+  componentSet(this: table, entityId: other, data: Thing { value: 30 })
+  componentSet(this: table, entityId: first, data: Thing { value: 70 })
+  componentSet(this: table, entityId: second, data: Thing { value: 71 })
+  check(label: "the index's dead row is replaced, not joined", ok: componentCount(this: table) is 2)
+  check(label: "the live entity has its row", ok: componentHas(this: table, entityId: second))
+  check(label: "the dead one has none", ok: componentHas(this: table, entityId: first) is false)
+  check(label: "with its data", ok: componentView(this: table, entityId: second).value is 71)
+  check(
+    label: "other rows are untouched"
+    ok: componentView(this: table, entityId: other).value is 30
+  )
+  # Visiting both handles in turn, as a copy over a table that still held both
+  # would, settles on one row
+  loop var i: Int = 0, i < 10, ++i {
+    componentSet(this: table, entityId: first, data: Thing { value: i })
+    componentSet(this: table, entityId: second, data: Thing { value: i })
+  }
+  check(label: "alternating handles do not grow the table", ok: componentCount(this: table) is 2)
+  ret 0
+}

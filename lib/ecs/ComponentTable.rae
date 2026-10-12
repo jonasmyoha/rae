@@ -214,6 +214,28 @@ func componentSet(
       rae_ext_rae_buf_set(buf: this.denseStamps.data, index: existing, value: this.generation)
       ret
     }
+    # The index's row belongs to a dead entity (another generation: indices
+    # are reused only after a free) — take it over in place. Appending would
+    # orphan that row, and a copy that walks a table holding both handles (a
+    # previous-frame snapshot) then appended again on every visit.
+    let key0: Int = entityId.index
+    if key0 >= 0 and key0 < this.sparse.length {
+      let staleIdx: Int = rae_ext_rae_buf_get(buf: this.sparse.data, index: key0)
+      if staleIdx >= 0 and staleIdx < this.denseEntities.length {
+        let staleEntity: EntityId = rae_ext_rae_buf_get(
+          buf: this.denseEntities.data
+          index: staleIdx
+        )
+        if staleEntity.index is key0 {
+          rae_ext_rae_buf_drop_at(buf: this.denseData.data, index: staleIdx)
+          rae_ext_rae_buf_set(buf: this.denseData.data, index: staleIdx, value: data)
+          rae_ext_rae_buf_set(buf: this.denseEntities.data, index: staleIdx, value: entityId)
+          this.generation = this.generation + 1
+          rae_ext_rae_buf_set(buf: this.denseStamps.data, index: staleIdx, value: this.generation)
+          ret
+        }
+      }
+    }
     # New entity: append to all dense lists (denseStamps in lockstep) and
     # point its sparse slot at the new tail index.
     let newIdx: Int = this.denseEntities.length
