@@ -1,0 +1,180 @@
+# An optional reference parameter (`opt view T` / `opt mod T`, spec 4.1) takes
+# `none`, a plain value, or an optional VALUE: the callee sees the payload when
+# it is there and `none` when it is not. Numbers, Bool and String used to be
+# unusable here (rejected, then miscompiled), and a struct's `opt T` argument
+# handed the callee the optional's box instead of its payload, so the callee
+# read the wrong fields (#79721154). Each type is passed a local, a field, a
+# call's result and `none`, through a view and through a mod.
+type Track {
+  title: String
+  seconds: Int
+}
+
+type Settings {
+  count: opt Int
+  volume: opt Float
+  muted: opt Bool
+  name: opt String
+  track: opt Track
+}
+
+func someCount(present: view Bool) ret opt Int {
+  if present {
+    ret 7
+  }
+  ret none
+}
+
+func someName(present: view Bool) ret opt String {
+  if present {
+    ret "fresh {7}"
+  }
+  ret none
+}
+
+func someTrack(present: view Bool) ret opt Track {
+  if present {
+    ret Track { title: "Outro", seconds: 143 }
+  }
+  ret none
+}
+
+func showCount(label: view String, count: opt view Int) {
+  if let present: view Int => count {
+    log("{label}: count {present}")
+  } else {
+    log("{label}: no count")
+  }
+}
+
+func showVolume(label: view String, volume: opt view Float) {
+  if let present: view Float => volume {
+    log("{label}: volume {present}")
+  } else {
+    log("{label}: no volume")
+  }
+}
+
+func showMuted(label: view String, muted: opt view Bool) {
+  if let present: view Bool => muted {
+    log("{label}: muted {present}")
+  } else {
+    log("{label}: no muted")
+  }
+}
+
+func showName(label: view String, name: opt view String) {
+  if let present: view String => name {
+    log("{label}: name {present}")
+  } else {
+    log("{label}: no name")
+  }
+}
+
+func showTrack(label: view String, track: opt view Track) {
+  if let present: view Track => track {
+    log("{label}: track {present.title} {present.seconds}")
+  } else {
+    log("{label}: no track")
+  }
+}
+
+# An optional reference handed on to another optional reference parameter
+func forwardCount(count: opt view Int) {
+  showCount(label: "forwarded", count: count)
+}
+
+func bumpCount(count: opt mod Int) {
+  if let present: mod Int => count {
+    present = present + 1
+  }
+  showCount(label: "inside bump", count: count)
+}
+
+# A call answering an optional reference, handed straight to a parameter
+func pickCount(counts: view List(Int), index: view Int) ret opt view Int {
+  ret counts.viewAt(index: index)
+}
+
+func louder(volume: opt mod Float) {
+  if let present: mod Float => volume {
+    present = present * 2.0
+  }
+}
+
+func toggle(muted: opt mod Bool) {
+  if let present: mod Bool => muted {
+    present = not present
+  }
+}
+
+func rename(name: opt mod String) {
+  if let present: mod String => name {
+    present = "{present} (edited)"
+  }
+}
+
+func lengthen(track: opt mod Track) {
+  if let present: mod Track => track {
+    present.seconds = present.seconds + 10
+  }
+}
+
+func main() {
+  # Int
+  var count: opt Int = 3
+  var plainCount: Int = 11
+  showCount(label: "local", count: count)
+  showCount(label: "plain", count: view plainCount)
+  showCount(label: "call", count: someCount(present: true))
+  showCount(label: "empty call", count: someCount(present: false))
+  showCount(label: "none", count: none)
+  forwardCount(count: count)
+  bumpCount(count: count)
+  bumpCount(count: mod plainCount)
+  bumpCount(count: none)
+  showCount(label: "bumped local", count: count)
+  showCount(label: "bumped plain", count: view plainCount)
+  let counts: List(Int) = List(Int) { 21, 22 }
+  showCount(label: "picked", count: pickCount(counts: counts, index: 1))
+  showCount(label: "picked past the end", count: pickCount(counts: counts, index: 5))
+
+  # Float, Bool, String and a struct, in fields
+  var settings: Settings = {
+    count: none
+    volume: 0.25
+    muted: false
+    name: "Rae"
+    track: Track { title: "Intro", seconds: 95 }
+  }
+  showCount(label: "field", count: settings.count)
+  showVolume(label: "field", volume: settings.volume)
+  showMuted(label: "field", muted: settings.muted)
+  showName(label: "field", name: settings.name)
+  showTrack(label: "field", track: settings.track)
+  louder(volume: settings.volume)
+  toggle(muted: settings.muted)
+  rename(name: settings.name)
+  lengthen(track: settings.track)
+  bumpCount(count: settings.count)
+  showVolume(label: "changed field", volume: settings.volume)
+  showMuted(label: "changed field", muted: settings.muted)
+  showName(label: "changed field", name: settings.name)
+  showTrack(label: "changed field", track: settings.track)
+  showCount(label: "still none", count: settings.count)
+
+  # Call results own their payload: borrowed for the call, then released
+  showName(label: "call", name: someName(present: true))
+  showName(label: "empty call", name: someName(present: false))
+  showTrack(label: "call", track: someTrack(present: true))
+  showTrack(label: "empty call", track: someTrack(present: false))
+
+  # Locals and none for the other types
+  var name: opt String = "local name"
+  rename(name: name)
+  showName(label: "local", name: name)
+  showVolume(label: "none", volume: none)
+  showMuted(label: "none", muted: none)
+  showName(label: "none", name: none)
+  showTrack(label: "none", track: none)
+}

@@ -6030,7 +6030,13 @@ static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr*
         AstExpr* unbox = arena_alloc(ctx->ast_arena, sizeof(AstExpr));
         *unbox = (AstExpr){.kind = AST_EXPR_UNBOX, .resolved_type = expected, .line = expr->line, .column = expr->column};
         unbox->as.unary.operand = expr; *expr_ptr = unbox;
-    } else if (expected->kind != TYPE_OPT && expr->resolved_type->kind == TYPE_OPT) {
+    } else if (expected->kind != TYPE_OPT && expr->resolved_type->kind == TYPE_OPT
+               && (s_in_if_let_binding
+                   || !(expected->kind == TYPE_REF && expected->as.ref.base
+                        && expected->as.ref.base->kind == TYPE_OPT))) {
+        /* (outside an `if let`, an `opt view T` / `opt mod T` target is
+         * REF(OPT(T)) and takes the optional as it is: the backend passes the
+         * payload's address, or null — only a non-optional target narrows) */
         if (s_in_if_let_binding) {
             /* An `if let <name>: T = <opt T>` binding: the optional is
              * narrowed here — the name is the unwrapped value inside the
