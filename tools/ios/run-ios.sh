@@ -40,9 +40,14 @@ sh "$here/gen-ios.sh" "$ex" >/dev/null
 
 # 2. Pick the device: arg > RAE_IOS_DEVICE > first "available" from devicectl.
 device=${2:-${RAE_IOS_DEVICE:-}}
+# The first real device that is up: Xcode 16 lists it "available (paired)",
+# Xcode 27 "connected" (with simulators "simulated" in the same list and an
+# empty hostname column), so the line is matched by its state and the
+# device's identifier (a UDID or a CoreDevice UUID) taken out of it.
 if [ -z "$device" ]; then
   device=$(xcrun devicectl list devices 2>/dev/null \
-    | awk -F'  +' '/available/ && !/unavailable/ {print $3; exit}')
+    | grep -vE 'unavailable|simulated' | grep -E 'available|connected' \
+    | grep -oE '[0-9A-F]{8}-[0-9A-F]{16}|[0-9A-F]{8}(-[0-9A-F]{4}){3}-[0-9A-F]{12}' | head -1)
 fi
 [ -n "$device" ] || { echo "error: no available iOS device (plug one in / trust it)" >&2; exit 1; }
 echo "run-ios: $name → device $device (team $team)"
