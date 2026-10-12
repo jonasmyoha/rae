@@ -298,3 +298,29 @@ func isRightAligned(styleId: view String) pub ret Bool {
   }
   ret false
 }
+
+# ================================================================
+# Shrink to fit (`Text.shrinkToFit`): a single line wider than its node
+# is drawn at a smaller size so it fits — UIKit's
+# adjustsFontSizeToFitWidth — but never below this share of its style's
+# size; past that it overflows, as a line without the flag does.
+const textShrinkMinScale: Float = 0.6
+
+# The size to draw a `size` line whose natural width is `naturalWidth`
+# in a node `boxWidth` wide: unchanged when it fits (or there is no box
+# yet), else scaled down to fit, to at least textShrinkMinScale.
+func shrinkTextSizeToFit(
+  size: view Float
+  naturalWidth: view Float
+  boxWidth: view Float
+) ret Float {
+  if boxWidth <= 0.0 or naturalWidth <= boxWidth {
+    ret size
+  }
+  let fitted: Float = size * boxWidth / naturalWidth
+  let smallest: Float = size * textShrinkMinScale
+  if fitted < smallest {
+    ret smallest
+  }
+  ret fitted
+}
