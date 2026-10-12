@@ -5,7 +5,8 @@
 type Track {
   title: String
   seconds: Int
-  plays: Int
+  # Stars out of 5; 0 until the listener rates it
+  rating: Int
 }
 
 # Parameter modes are always written out. `view` reads, `mod` may write back,
@@ -23,9 +24,10 @@ func formatDuration(seconds: view Int) ret String {
 }
 
 # `mod Track` means this function may change the caller's track. It is called
-# below as `track.play()` — method-call syntax is sugar for `play(track: track)`.
-func play(track: mod Track) {
-  track.plays = track.plays + 1
+# below as `first.rate(stars: 5)` — method-call syntax is sugar for
+# `rate(track: first, stars: 5)`.
+func rate(track: mod Track, stars: view Int) {
+  track.rating = stars
 }
 
 # `opt view Track` is a result that is either nothing or a VIEW into an existing
@@ -53,9 +55,9 @@ func main() {
   # `var`, because `add` changes the list: a `let` is frozen as a whole, so
   # nothing in it may change after this line.
   var tracks: List(Track) = List.create(Track, cap: 3)
-  tracks.add(value: Track { title: "Intro", seconds: 95, plays: 0 })
-  tracks.add(value: Track { title: "Middle Eight", seconds: 212, plays: 0 })
-  tracks.add(value: Track { title: "Outro", seconds: 143, plays: 0 })
+  tracks.add(value: Track { title: "Intro", seconds: 95, rating: 0 })
+  tracks.add(value: Track { title: "Middle Eight", seconds: 212, rating: 0 })
+  tracks.add(value: Track { title: "Outro", seconds: 143, rating: 0 })
 
   # Arguments are named at the call site, and "{}" is how a value becomes text.
   log("{tracks.length} tracks, {formatDuration(seconds: totalSeconds(tracks: tracks))}")
@@ -64,13 +66,12 @@ func main() {
     log("  {track.title} — {formatDuration(seconds: track.seconds)}")
   }
 
-  # `modAt` hands back a mutable window; `play` writes through it, into the list.
+  # `modAt` hands back a mutable window; `rate` writes through it, into the list.
   if let first: mod Track => tracks.modAt(index: 0) {
-    first.play()
-    first.play()
+    first.rate(stars: 5)
   }
   if let first: view Track => tracks.viewAt(index: 0) {
-    log("{first.title} played {first.plays} times")
+    log("{first.title} rated {first.rating} stars")
   }
 
   # The optional view, handled with `if let` — `=>` binds it, no copy.
