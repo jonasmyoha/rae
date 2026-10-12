@@ -36,6 +36,9 @@ disp=${3:-${RAE_IOS_NAME:-$name}}
 # phone upright, iPad either way up) or `any` (portrait and both landscapes,
 # phone and iPad). SDL follows the device within them; the window is
 # resizable, so the app sees a resize and re-lays out.
+# The oldest iOS the app runs on. 15.0 is the oldest current Xcode builds for
+# (Xcode 27 refuses anything older); RAE_IOS_DEPLOYMENT_TARGET overrides it.
+deployment_target=${RAE_IOS_DEPLOYMENT_TARGET:-15.0}
 orientations=${RAE_IOS_ORIENTATIONS:-portrait}
 portrait='<string>UIInterfaceOrientationPortrait</string>'
 upsideDown='<string>UIInterfaceOrientationPortraitUpsideDown</string>'
@@ -191,7 +194,7 @@ set_target_properties(\${APP} PROPERTIES
   XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "$bundle_id"
   XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
   XCODE_ATTRIBUTE_CODE_SIGN_STYLE "Automatic"
-  XCODE_ATTRIBUTE_IPHONEOS_DEPLOYMENT_TARGET "13.0")
+  XCODE_ATTRIBUTE_IPHONEOS_DEPLOYMENT_TARGET "$deployment_target")
 EOF
 
 # 4. Configure the Xcode project.
@@ -199,7 +202,7 @@ echo "gen-ios: configuring Xcode project..."
 cmake -S "$gen" -B "$gen/proj" -G Xcode \
   -DCMAKE_SYSTEM_NAME=iOS \
   -DCMAKE_OSX_ARCHITECTURES=arm64 \
-  -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 >/dev/null
+  -DCMAKE_OSX_DEPLOYMENT_TARGET="$deployment_target" >/dev/null
 
 # 5. Metadata for run-ios.sh (bundle id, project, signed .app path).
 cat > "$gen/meta.env" <<EOF
