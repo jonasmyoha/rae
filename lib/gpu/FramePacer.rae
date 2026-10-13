@@ -1,0 +1,161 @@
+# gpu/FramePacer — how long the CPU waits for the GPU at the end of a frame.
+#
+# Two frames in flight: after frame N is submitted and presented, wait only
+# until frame N-1's GPU work is done, never on the frame just submitted. The
+# CPU then records frame N+1 while the GPU still runs frame N, so a frame costs
+# max(CPU, GPU) instead of CPU + GPU (the old end-of-frame blocking poll in the
+# C present waited for everything, and on Fifo a frame over 16.7 ms of CPU +
+# GPU halved the rate to 30).
+#
+# The bound of two keeps what that blocking poll protected:
+# - A hidden / minimised / occluded window acquires no drawable, so nothing
+#   paces the loop to vsync. Without a wait, a CPU frame cheaper than its GPU
+#   frame submits faster than the GPU retires and the backlog grows without
+#   bound (measured once: 2.1 GB of IOAccelerator memory after 90 s hidden).
+#   Waiting on the previous frame caps the backlog at two frames.
+# - wgpu-native retires a presented frame's surface submission only when a
+#   poll observes it complete; a non-blocking poll never caught up (~7 KB per
+#   presented frame, about 2 GB over 15 minutes). The blocking wait on frame
+#   N-1 retires it one frame later.
+# Per-frame data the CPU writes (uniforms, instance records, palettes) goes
+# through wgpuQueueWriteBuffer, which the queue orders after the work already
+# submitted, so frame N+1's writes never land under frame N's GPU reads.
+#
+# Each frame ends with an empty submission whose index marks "everything this
+# frame submitted": submissions complete in order, so that mark being done
+# means the whole frame is. C only submits, waits on an index and polls; which
+# index to wait on, and when, is decided here.
+#
+# RAE_FRAMES_IN_FLIGHT=1 restores the old behaviour (wait on the frame just
+# submitted), for comparison. RAE_FRAME_TIMING=1 prints, every 120 frames, the
+# average frame time split into the CPU's own work, the present (where the
+# drawable acquire waits for vsync) and the wait for the GPU here.
+import Sys
+open webgpu/Webgpu
+open webgpu/Context
+
+type FramePacer {
+  framesInFlight: Int  # 2, or 1 under RAE_FRAMES_IN_FLIGHT=1
+  # the end mark of the frame before this one (a Bool beside it, not `opt UInt64`:
+  # a narrowed optional fixed-width integer reaches C as an undereferenced
+  # pointer — queued compiler bug)
+  hasPreviousEnd: Bool
+  previousEnd: UInt64
+  timing: Bool  # RAE_FRAME_TIMING: print frame / CPU / present / GPU-wait averages
+  frameStart: Float64  # when the previous pace returned: this frame's start
+  presentStart: Float64  # when this frame's present began (notePresentStart)
+  timedFrames: Int
+  frameSeconds: Float64  # summed over the timed frames
+  presentSeconds: Float64  # in the present: the drawable acquire waits for vsync
+  waitSeconds: Float64  # in paceFrame, waiting for the GPU
+}
+
+const timingWindow: Int = 120
+
+func nativeFrameClock() unsafe extern("rae_ext_Gpu2d_nowSeconds") ret Float64
+
+func frameClock() ret Float64 {
+  unsafe {
+    ret nativeFrameClock()
+  }
+}
+
+func webgpuWaitSubmission(index: UInt64) unsafe extern("rae_wgpu_wait_submission")
+
+func createFramePacer() ret FramePacer {
+  var framesInFlight: Int = 2
+  if Sys.getEnv(name: "RAE_FRAMES_IN_FLIGHT") is "1" {
+    framesInFlight = 1
+  }
+  ret FramePacer {
+    framesInFlight: framesInFlight
+    hasPreviousEnd: false
+    previousEnd: 0 as UInt64
+    timing: Sys.getEnv(name: "RAE_FRAME_TIMING").length() > 0
+    frameStart: 0.0
+    presentStart: 0.0
+    timedFrames: 0
+    frameSeconds: 0.0
+    presentSeconds: 0.0
+    waitSeconds: 0.0
+  }
+}
+
+# Call right before the frame's present, so the timing print can tell the
+# present's vsync wait apart from the CPU's own work.
+func notePresentStart(pacer: mod FramePacer) {
+  if pacer.timing {
+    pacer.presentStart = frameClock()
+  }
+}
+
+# Call once per frame, right after the frame is submitted and presented.
+func paceFrame(pacer: mod FramePacer) {
+  var frameEnd: UInt64 = 0 as UInt64
+  unsafe {
+    # No device (a renderer exercised without one, as the old C present
+    # allowed): nothing was submitted, so there is nothing to wait for
+    if webgpuQueue() is webgpuNull() {
+      ret
+    }
+    frameEnd = wgpuQueueSubmitForIndex(
+      queue: webgpuQueue()
+      commandCount: 0 as UInt64
+      commands: webgpuNull()
+    )
+  }
+  let waitStart: Float64 = frameClock()
+  if pacer.framesInFlight <= 1 {
+    unsafe {
+      webgpuWaitSubmission(index: frameEnd)
+    }
+  } else if pacer.hasPreviousEnd {
+    unsafe {
+      webgpuWaitSubmission(index: pacer.previousEnd)
+    }
+  } else {
+    unsafe {
+      webgpuPoll(wait: 0)
+    }
+  }
+  pacer.previousEnd = frameEnd
+  pacer.hasPreviousEnd = true
+  let waitEnd: Float64 = frameClock()
+  if pacer.timing {
+    recordFrameTiming(pacer: pacer, waitStart: waitStart, waitEnd: waitEnd)
+  }
+  pacer.frameStart = waitEnd
+}
+
+func recordFrameTiming(pacer: mod FramePacer, waitStart: view Float64, waitEnd: view Float64) {
+  if pacer.frameStart > 0.0 {
+    pacer.timedFrames = pacer.timedFrames + 1
+    pacer.frameSeconds = pacer.frameSeconds + (waitEnd - pacer.frameStart)
+    pacer.waitSeconds = pacer.waitSeconds + (waitEnd - waitStart)
+    if pacer.presentStart > 0.0 {
+      pacer.presentSeconds = pacer.presentSeconds + (waitStart - pacer.presentStart)
+    }
+  }
+  pacer.presentStart = 0.0
+  if pacer.timedFrames < timingWindow {
+    ret
+  }
+  let count: Float64 = pacer.timedFrames as Float64
+  let frameMs: Float64 = pacer.frameSeconds / count * 1000.0
+  let presentMs: Float64 = pacer.presentSeconds / count * 1000.0
+  let waitMs: Float64 = pacer.waitSeconds / count * 1000.0
+  let cpuMs: Float64 = frameMs - presentMs - waitMs
+  log(
+    "[frame] {pacer.framesInFlight} in flight: frame {roundTenth(value: frameMs)} ms = cpu {roundTenth(
+      value: cpuMs
+    )} + present {roundTenth(value: presentMs)} + gpu wait {roundTenth(value: waitMs)}"
+  )
+  pacer.timedFrames = 0
+  pacer.frameSeconds = 0.0
+  pacer.presentSeconds = 0.0
+  pacer.waitSeconds = 0.0
+}
+
+func roundTenth(value: view Float64) ret Float64 {
+  ret ((value * 10.0 + 0.5) as Int) as Float64 / 10.0
+}

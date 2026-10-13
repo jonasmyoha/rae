@@ -224,37 +224,9 @@ void rae_g2d_present(void* texture, int64_t width, int64_t height) {
     } else {
         rae_present_note_skip("gpu2d", "window-not-visible");
     }
-    /* wgpu-native retires deferred object destruction and presentation work
-     * from device polling. A NON-blocking poll retires the per-frame instance
-     * buffers and bind groups released above — that is why an occluded or
-     * headless window (present skipped) holds steady RSS.
-     *
-     * But the surface-present submission is different: wgpu-native does not
-     * retire ITS resources until that submission completes, and under Fifo
-     * that is at the next vsync — one frame later. A non-blocking poll never
-     * catches up, so on every presented frame ~7 KB is left queued and RSS
-     * climbs about 0.4 MB/s while animating (~2 GB over 15 minutes). Only a
-     * busy render loop that presents every frame hits this; an event-driven
-     * UI that idles in waitEvents presents rarely and barely shows it, which
-     * is why it went unnoticed until the animated example.
-     *
-     * On a presented frame, poll with wait=true so that submission is
-     * retired here. This does NOT cost frame rate: Fifo already paces the
-     * loop to vsync, and blocking here simply moves the wait that would
-     * otherwise happen inside the next wgpuSurfaceGetCurrentTexture.
-     *
-     * When nothing presented (hidden / minimised / occluded / headless) the
-     * wait matters MORE, not less: without a drawable there is no vsync, so
-     * nothing paces the frame loop at all. A game whose CPU frame is cheaper
-     * than its GPU frame then submits faster than the GPU retires, and the
-     * backlog of in-flight command buffers grows without bound — measured on
-     * a hidden window: ~23 Metal command buffers/s kept alive, 2.1 GB of
-     * IOAccelerator memory after 90 s, while every Rae-side counter stayed
-     * flat. A non-blocking poll only retires what already finished, so it
-     * cannot stop that. Waiting here is bounded by one frame's GPU work (no
-     * vsync is involved), and it is the backpressure a presenting frame gets
-     * from Fifo: the loop runs no faster than the GPU finishes frames. */
-    rae_wgpu_poll_frame_end();
+    /* No wait here: frame pacing (the bound of two frames in flight, the
+     * backpressure a hidden window needs, retiring the present submission) is
+     * Rae's, in lib/gpu/FramePacer.rae, which the caller runs next. */
 }
 
 rae_Bool rae_ext_Gpu2d_lastPresentOk(void) {
