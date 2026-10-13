@@ -1,0 +1,114 @@
+# The dynamic-resolution controller's 30 fps bottom rung must lift. While the
+# cap holds, capFrameSleep pads every frame to 33 ms, so the padded dt is always
+# over budget; judged by dt, the controller never saw a good frame and an app
+# that dipped once stayed at 30 fps until restarted. A capped frame is judged by
+# its WORK time (recorded before the padding sleep) instead, and a cap the heat
+# forced lifts when the thermal state falls again.
+open app3d/RenderScale
+
+const nominal: Int = 0
+
+const critical: Int = 3
+
+# One frame: the work it took, and the dt the loop saw (padded under the cap)
+func frame(drs: mod RenderScaleController, workSec: view Float, therm: view Int) {
+  var deltaTime: Float = workSec
+  if drs.capFps < 60.0 {
+    deltaTime = 1.0 / drs.capFps
+    if workSec > deltaTime {
+      deltaTime = workSec
+    }
+    recordFrameWork(drs: drs, workSec: workSec)
+  }
+  stepRenderScale(drs: drs, deltaTime: deltaTime, therm: therm)
+}
+
+func frames(
+  drs: mod RenderScaleController
+  count: view Int
+  workSec: view Float
+  therm: view Int
+) {
+  loop var i: Int = 0, i < count, ++i {
+    frame(drs: drs, workSec: workSec, therm: therm)
+  }
+}
+
+func show(label: view String, drs: view RenderScaleController) {
+  let percent: Int = (drs.scale * 100.0 + 0.5).toInt()
+  log("{label}: scale {percent}% cap {drs.capFps.toInt()} fps")
+}
+
+# Slow frames (40 ms) until the scale bottoms out and the cap drops to 30
+func driveToCap(drs: mod RenderScaleController) {
+  frames(
+    drs: drs
+    count: 400
+    workSec: 0.040
+    therm: nominal
+  )
+}
+
+func main() {
+  # A light scene after the dip: 10 ms of work, padded to 33 ms
+  var recovering: RenderScaleController = createRenderScaleController(targetFps: 60.0)
+  driveToCap(drs: recovering)
+  show(label: "after the dip", drs: recovering)
+  frames(
+    drs: recovering
+    count: 179
+    workSec: 0.010
+    therm: nominal
+  )
+  show(label: "179 light frames", drs: recovering)
+  frames(
+    drs: recovering
+    count: 1
+    workSec: 0.010
+    therm: nominal
+  )
+  show(label: "180 light frames", drs: recovering)
+  # then the resolution climbs back, one rung per ~3 s of good frames
+  frames(
+    drs: recovering
+    count: 30 + 180
+    workSec: 0.010
+    therm: nominal
+  )
+  show(label: "3 s later", drs: recovering)
+
+  # Genuinely slow work (30 ms) keeps the cap
+  var slow: RenderScaleController = createRenderScaleController(targetFps: 60.0)
+  driveToCap(drs: slow)
+  frames(
+    drs: slow
+    count: 600
+    workSec: 0.030
+    therm: nominal
+  )
+  show(label: "slow work, 10 s later", drs: slow)
+
+  # A cap the heat forced lifts when the heat falls, not on frame times
+  var hot: RenderScaleController = createRenderScaleController(targetFps: 60.0)
+  frames(
+    drs: hot
+    count: 10
+    workSec: 0.010
+    therm: critical
+  )
+  show(label: "critical", drs: hot)
+  frames(
+    drs: hot
+    count: 600
+    workSec: 0.010
+    therm: critical
+  )
+  show(label: "still critical, 10 s later", drs: hot)
+  frames(
+    drs: hot
+    count: 31
+    workSec: 0.010
+    therm: nominal
+  )
+  show(label: "cooled down", drs: hot)
+}
