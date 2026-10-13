@@ -162,8 +162,11 @@ void emit_to_string_expr(CFuncContext* ctx, const AstExpr* operand, FILE* out) {
         if (substituted) {
             // T = opt X through a `view T` parameter: the instantiation passes
             // the struct-rep opt by value, so format it as the value it is.
+            // Only when the `opt` came from T: an `opt view T` written as such
+            // (a narrowed `if let x: view T =>` binding) is a reference.
             substituted_local = *substituted;
-            if (substituted_local.is_opt && (substituted_local.is_view || substituted_local.is_mod)
+            if (!tr->is_opt && substituted_local.is_opt
+                && (substituted_local.is_view || substituted_local.is_mod)
                 && rae_opt_is_struct_rep(ctx, &substituted_local)) {
                 substituted_local.is_view = false; substituted_local.is_mod = false;
             }
@@ -301,6 +304,23 @@ void emit_to_string_expr(CFuncContext* ctx, const AstExpr* operand, FILE* out) {
         && !has_property(d->as.type_decl.properties, "c_struct")
         && !d->as.type_decl.generic_params
         && !(tr && tr->is_opt);
+    /* An optional REFERENCE to a user struct (`opt view Track` — what an
+     * `if let x: view Track =>` binding is registered as) is a nullable
+     * `const rae_Track*`: format the struct when it is there, `none` when it
+     * is not. It used to reach the generic text macro and fail to compile. */
+    bool is_opt_struct_ref = d && d->kind == AST_DECL_TYPE
+        && !has_property(d->as.type_decl.properties, "c_struct")
+        && !d->as.type_decl.generic_params
+        && tr && tr->is_opt && (tr->is_view || tr->is_mod);
+    if (is_opt_struct_ref) {
+        const char* mangled = rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = base}});
+        int rid = ctx->temp_counter++;
+        fprintf(out, "(__extension__ ({ const %s* __sref%d = (", mangled, rid);
+        emit_expr(ctx, operand, out, PREC_LOWEST, false, true);
+        fprintf(out, "); __sref%d ? rae_to_str_%s_(__sref%d) : (rae_String){(uint8_t*)\"none\", 4}; }))",
+                rid, mangled, rid);
+        return;
+    }
     // Integers by their Rae type (rae_int_to_str_expr): the _Generic below sees
     // only C types, where UInt32 is Char's uint32_t and Int8 may be Bool's
     // int8_t.
