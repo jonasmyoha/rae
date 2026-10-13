@@ -6,7 +6,7 @@ collapses (measured on 114: `present` tripled from ~15 ms to ~50 ms after ~18 s,
 dropping 60→16 fps — see `docs/profiling.md`). The fix is to keep the *sustained*
 frame under budget by shedding work automatically. This is that system.
 
-It is a quality **ladder** driven by a controller (`lib/app3d/render_scale.rae`),
+It is a quality **ladder** driven by a controller (`lib/app3d/RenderScale.rae`),
 plus the renderer plumbing that makes each rung cheap.
 
 ## The ladder (highest quality first)
@@ -26,9 +26,12 @@ step at a time, never above the current thermal ceiling.
 
 ## The controller
 
-`createRenderScaleController(targetFps:)` once; `updateRenderScale(drs:, dt:)`
-each frame; `capFrameSleep(drs:, frameStartSec:)` at the end of the render branch;
-`drsShadowRes(drs:)` feeds `fitShadowCascades(resolution:)`.
+`createRenderScaleController(targetFps:)` once; `updateRenderScale(drs:,
+deltaTime:, profiler:)` each frame; `capFrameSleep(drs:, frameStartSec:)` at the
+end of the render branch; `drsShadowRes(drs:)` feeds
+`fitShadowCascades(resolution:)`. The decisions are one pure function,
+`stepRenderScale(drs:, deltaTime:, therm:)`, which `updateRenderScale` calls with
+the OS thermal state; a test drives it frame by frame (fixture 1117).
 
 Two inputs drive it:
 
@@ -37,10 +40,18 @@ Two inputs drive it:
   >25% over the target period, raise after ~3 s of good frames, 30-frame cooldown
   between moves so it can't oscillate. When real per-pass **GPU ms (#528)** lands,
   swap `dt` for measured GPU time for a tighter, predictive loop.
+  **Under the 30 fps cap a frame is judged by its WORK time**, not by `dt`:
+  `capFrameSleep` pads every capped frame to 33 ms, so the padded `dt` is always
+  over budget, and judged by it the cap could never lift (an app that dipped once
+  stayed at 30 fps until restarted). `capFrameSleep` records the time from the
+  frame's start to just before its padding sleep, and the next update judges the
+  frame by that: 180 frames of light work restore 60 fps.
 - **`ProcessInfo.thermalState`** — proactive. `thermalState()` (Apple: nominal /
   fair / serious / critical) caps the scale *ceiling* before frames drop —
   serious → 0.7, critical → 0.5 + forced 30 fps. Reacting only to dropped frames
-  means the device is already hot; the OS tells us sooner.
+  means the device is already hot; the OS tells us sooner. A cap the heat forced
+  lifts when the state falls below critical again (after the cooldown), not on
+  frame times — the frames did not cause it.
 
 ## The renderer plumbing
 
@@ -66,10 +77,10 @@ Two inputs drive it:
 ## Reusing in another app
 
 ```rae
-import app3d/render_scale
-var drs = createRenderScaleController(targetFps: 60.0)   # once
-# each frame, after computing dt and before rendering:
-updateRenderScale(drs: drs, dt: dt)
+open app3d/RenderScale
+var drs: RenderScaleController = createRenderScaleController(targetFps: 60.0)   # once
+# each frame, after computing deltaTime and before rendering:
+updateRenderScale(drs: drs, deltaTime: deltaTime, profiler: profiler)
 # feed drsShadowRes(drs: drs) to fitShadowCascades(resolution:) if you cast shadows
 # at the end of the render branch:
 capFrameSleep(drs: drs, frameStartSec: frameStart)

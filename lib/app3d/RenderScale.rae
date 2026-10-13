@@ -10,8 +10,16 @@
 # a long good stretch, with a cooldown so it can't oscillate. When real per-pass
 # GPU timing (#528) lands, swap `dt` for measured GPU ms for a tighter loop.
 #
-#   var drs = createRenderScaleController(targetFps: 60.0)   # once
-#   updateRenderScale(drs: drs, dt: dt)                       # each frame
+# While the 30 fps cap holds, dt is the PADDED period (capFrameSleep sleeps
+# every frame up to 33 ms), which is always over budget — judged by dt, a capped
+# frame could never count as good and the cap never lifted. So a capped frame is
+# judged by its WORK time instead: the time from the frame's start to just
+# before the padding sleep, which capFrameSleep records on the controller.
+#
+#   var drs: RenderScaleController = createRenderScaleController(targetFps: 60.0)
+#   updateRenderScale(drs: drs, deltaTime: deltaTime, profiler: profiler)
+#   ...render...
+#   capFrameSleep(drs: drs, frameStartSec: frameStart)        # end of the frame
 import Gpu2d
 import Profile
 
@@ -68,9 +76,12 @@ type RenderScaleController {
   overFrames: Int  # consecutive missed frames
   goodFrames: Int  # consecutive good frames
   cooldown: Int  # frames to wait after a change (anti-oscillation)
+  workSec: Float  # the last capped frame's work time, before the cap's padding
+  workMeasured: Bool  # capFrameSleep measured workSec and no update used it yet
+  thermalCap: Bool  # the 30 fps cap was forced by a critical thermal state
 }
 
-func createRenderScaleController(targetFps: copy Float) pub ret RenderScaleController {
+func createRenderScaleController(targetFps: copy Float) ret RenderScaleController {
   var fps: Float = targetFps
   if fps < 1.0 {
     fps = 60.0
@@ -86,32 +97,28 @@ func createRenderScaleController(targetFps: copy Float) pub ret RenderScaleContr
     overFrames: 0
     goodFrames: 0
     cooldown: 0
+    workSec: 0.0
+    workMeasured: false
+    thermalCap: false
   }
 }
 
-# Feed one frame's dt (seconds). Walks the ladder in place: drop fast after 4
-# missed frames, restore one rung after ~3s good, 30-frame cooldown between moves.
+# Feed one frame's dt (seconds). Reads the OS thermal state, walks the ladder
+# (stepRenderScale) and pushes a changed scale to the renderer.
 func updateRenderScale(
   drs: mod RenderScaleController
   deltaTime: copy Float
   profiler: mod Profiler
-) pub {
+) {
+  let therm: Int = thermalState()
+  let previousScale: Float = drs.scale
+  stepRenderScale(drs: drs, deltaTime: deltaTime, therm: therm)
+  if drs.scale is not previousScale {
+    setRenderScale(s: drs.scale as Float64)
+  }
+  # Surface the current tier in profile captures: render.scale (percent), the
+  # frame cap, and the OS thermal state, plotted alongside fps / per-pass GPU ms.
   unsafe {
-    # Proactive OS-thermal ceiling: snap the scale down (and force the 30fps cap at
-    # critical) the moment the OS reports heat, without waiting for missed frames.
-    let therm: Int = thermalState()
-    let ceiling: Float = thermalCeiling(therm: therm)
-    if drs.scale > ceiling and drs.cooldown <= 0 {
-      drs.scale = ceiling
-      setRenderScale(s: drs.scale as Float64)
-      drs.cooldown = 30
-    }
-    if therm >= 3 {
-      drs.capFps = 30.0
-    }
-
-    # Surface the current tier in profile captures: render.scale (percent), the
-    # frame cap, and the OS thermal state, plotted alongside fps / per-pass GPU ms.
     Profile.counter(
       profiler: profiler
       name: "render.scale"
@@ -122,47 +129,79 @@ func updateRenderScale(
       name: "render.capFps"
       value: rae_float_to_int(f: drs.capFps)
     )
-    Profile.counter(profiler: profiler, name: "thermal.state", value: therm)
+  }
+  Profile.counter(profiler: profiler, name: "thermal.state", value: therm)
+}
 
-    if deltaTime > drs.overBudgetSec {
-      drs.overFrames = drs.overFrames + 1
-      drs.goodFrames = 0
-    } else {
-      drs.goodFrames = drs.goodFrames + 1
+# One frame of the ladder, given the frame's dt and the OS thermal state (0
+# nominal .. 3 critical). Drop fast after 4 missed frames, restore one rung after
+# ~3 s good, 30-frame cooldown between moves. Pure — no native call — so a test
+# can drive it frame by frame.
+func stepRenderScale(drs: mod RenderScaleController, deltaTime: view Float, therm: view Int) {
+  # Proactive OS-thermal ceiling: snap the scale down (and force the 30fps cap at
+  # critical) the moment the OS reports heat, without waiting for missed frames.
+  let ceiling: Float = thermalCeiling(therm: therm)
+  if drs.scale > ceiling and drs.cooldown <= 0 {
+    drs.scale = ceiling
+    drs.cooldown = 30
+  }
+  if therm >= 3 and drs.capFps > 30.0 {
+    drs.capFps = 30.0
+    drs.thermalCap = true
+  }
+
+  # Under the cap, judge the frame by its work time, not by the padded dt
+  var frameSec: Float = deltaTime
+  if drs.capFps < 60.0 and drs.workMeasured {
+    frameSec = drs.workSec
+  }
+  drs.workMeasured = false
+  if frameSec > drs.overBudgetSec {
+    drs.overFrames = drs.overFrames + 1
+    drs.goodFrames = 0
+  } else {
+    drs.goodFrames = drs.goodFrames + 1
+    drs.overFrames = 0
+  }
+  if drs.cooldown > 0 {
+    drs.cooldown = drs.cooldown - 1
+    ret
+  }
+  # A cap the heat forced lifts when the heat falls, not on frame times: the
+  # frames did not cause it
+  if drs.thermalCap and therm < 3 {
+    drs.capFps = 60.0
+    drs.thermalCap = false
+    drs.cooldown = 30
+    drs.goodFrames = 0
+    drs.overFrames = 0
+    ret
+  }
+  if drs.overFrames >= 4 {
+    if drs.scale > drs.minScale {
+      drs.scale = drs.scale - drs.step
+      if drs.scale < drs.minScale {
+        drs.scale = drs.minScale
+      }
+      drs.cooldown = 30
+      drs.overFrames = 0
+    } else if drs.capFps > 30.0 {
+      drs.capFps = 30.0  # bottom rung: cap to 30
+      drs.cooldown = 30
       drs.overFrames = 0
     }
-    if drs.cooldown > 0 {
-      drs.cooldown = drs.cooldown - 1
-      ret
-    }
-    if drs.overFrames >= 4 {
-      if drs.scale > drs.minScale {
-        drs.scale = drs.scale - drs.step
-        if drs.scale < drs.minScale {
-          drs.scale = drs.minScale
-        }
-        setRenderScale(s: drs.scale as Float64)
-        drs.cooldown = 30
-        drs.overFrames = 0
-      } else if drs.capFps > 30.0 {
-        drs.capFps = 30.0  # bottom rung: cap to 30
-        drs.cooldown = 30
-        drs.overFrames = 0
+  } else if drs.goodFrames >= 180 {
+    if drs.capFps < 60.0 and therm < 3 {
+      drs.capFps = 60.0  # restore the rate before the resolution
+      drs.cooldown = 30
+      drs.goodFrames = 0
+    } else if drs.scale < ceiling {
+      drs.scale = drs.scale + drs.step
+      if drs.scale > ceiling {
+        drs.scale = ceiling
       }
-    } else if drs.goodFrames >= 180 {
-      if drs.capFps < 60.0 and therm < 3 {
-        drs.capFps = 60.0  # restore the rate before the resolution
-        drs.cooldown = 30
-        drs.goodFrames = 0
-      } else if drs.scale < ceiling {
-        drs.scale = drs.scale + drs.step
-        if drs.scale > ceiling {
-          drs.scale = ceiling
-        }
-        setRenderScale(s: drs.scale as Float64)
-        drs.cooldown = 30
-        drs.goodFrames = 0
-      }
+      drs.cooldown = 30
+      drs.goodFrames = 0
     }
   }
 }
@@ -185,16 +224,24 @@ func drsShadowRes(drs: view RenderScaleController) pub ret Int {
 
 # Pad the current frame to the cap period by sleeping any slack (only meaningful
 # at the 30fps rung; a no-op at 60 since vsync already paces there). Call at the
-# end of the render branch with the frame's start time.
-func capFrameSleep(drs: view RenderScaleController, frameStartSec: copy Float64) pub {
+# end of the render branch with the frame's start time. The frame's work time —
+# start to here, before the sleep — is recorded for the next updateRenderScale.
+func capFrameSleep(drs: mod RenderScaleController, frameStartSec: copy Float64) {
   unsafe {
     if drs.capFps >= 60.0 {
       ret
     }
     let period: Float = 1.0 / drs.capFps
     let elapsed: Float = (Gpu2d.nowSeconds() - frameStartSec) as Float
+    recordFrameWork(drs: drs, workSec: elapsed)
     if elapsed < period {
       sleep(ms: rae_float_to_int(f: (period - elapsed) * 1000.0))
     }
   }
+}
+
+# The frame's work time, start to just before the cap's padding sleep
+func recordFrameWork(drs: mod RenderScaleController, workSec: view Float) {
+  drs.workSec = workSec
+  drs.workMeasured = true
 }
