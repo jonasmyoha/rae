@@ -44,6 +44,47 @@ func main() ret Int {
   debugRecordFrame(debugOverlay: d, now: t + 5.0, didRealWork: false)
   check(label: "idle frames do not count as work", ok: debugOverlayFps(debugOverlay: d) is before)
 
+  # The steady rate a frame loop runs at: a display-locked 60 Hz with a hitch
+  # twice a second reads 60, not 59 (a mean over the window says 59.0)
+  var paced: DebugOverlay = createDebugOverlay(
+    button: false
+    fps: true
+    memory: false
+    heartbeat: false
+  )
+  var at: Float64 = 2000.0
+  loop var frame: Int = 0, frame < 120, ++frame {
+    debugRecordFrame(debugOverlay: paced, now: at, didRealWork: true)
+    if frame % 30 is 15 {
+      at = at + 2.0 / 60.0
+    } else {
+      at = at + 1.0 / 60.0
+    }
+  }
+  check(
+    label: "a 60 Hz pace with hitches reads 60"
+    ok: formatDebugFps(fps: debugOverlayFps(debugOverlay: paced)) is "fps: 60"
+  )
+  # ...and a 30 Hz one (every other refresh) reads 30, not 29
+  var halved: DebugOverlay = createDebugOverlay(
+    button: false
+    fps: true
+    memory: false
+    heartbeat: false
+  )
+  loop var frame: Int = 0, frame < 60, ++frame {
+    debugRecordFrame(debugOverlay: halved, now: at, didRealWork: true)
+    if frame % 15 is 7 {
+      at = at + 3.0 / 60.0
+    } else {
+      at = at + 2.0 / 60.0
+    }
+  }
+  check(
+    label: "a 30 Hz pace with hitches reads 30"
+    ok: formatDebugFps(fps: debugOverlayFps(debugOverlay: halved)) is "fps: 30"
+  )
+
   # Memory is one decimal of MB: enough to watch a leak, not so much that the
   # last digit twitches every frame.
   check(label: "one megabyte formats", ok: formatDebugMem(kb: 1024) is "mem: 1.0 MB")
