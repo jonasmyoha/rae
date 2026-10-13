@@ -273,3 +273,12 @@ func anchorUiToExtent(
   # The side panel owns the right edge, full height — the same shape 113 uses,
   # so the two examples read as one app family rather than two demos.
 }
+
+# Show or hide the settings side panel: the panel itself (its full-height
+# backdrop), not only the dialog inside it — hiding just the dialog left an
+# empty dark panel over the right edge of the scene. Same as 114's
+# applyWalkerPanel.
+func applyDemoPanel(world: mod UiWorld, open: view Bool) {
+  setNodeActive(world: world, nodeId: "SidePanel", value: open)
+  applySettingsPanelOpen(world: world, open: open)
+}

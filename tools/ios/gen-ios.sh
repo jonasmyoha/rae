@@ -32,10 +32,11 @@ name=$(basename "$ex_dir")
 # carry a project's chosen id), else a default derived from the dir name.
 bundle_id=${2:-${RAE_IOS_BUNDLE_ID:-com.rae.$(printf '%s' "$name" | tr -cd 'a-zA-Z0-9')}}
 disp=${3:-${RAE_IOS_NAME:-$name}}
-# The orientations the app turns to (Info.plist): `portrait` (the default:
-# phone upright, iPad either way up) or `any` (portrait and both landscapes,
-# phone and iPad). SDL follows the device within them; the window is
-# resizable, so the app sees a resize and re-lays out.
+# The orientations the app turns to (Info.plist): `any` (the default: portrait
+# and both landscapes, phone and iPad — the app follows how the device is held)
+# or `portrait` (phone upright only, iPad either way up), for an app designed
+# for one shape. SDL follows the device within them; the window is resizable,
+# so the app sees a resize and re-lays out.
 # The oldest iOS the app runs on. 15.0 is the oldest current Xcode builds for
 # (Xcode 27 refuses anything older); RAE_IOS_DEPLOYMENT_TARGET overrides it.
 deployment_target=${RAE_IOS_DEPLOYMENT_TARGET:-15.0}
@@ -85,7 +86,7 @@ extra_plist="$extra_plist<key>NSMicrophoneUsageDescription</key><string>$microph
 # declares what the runtime and SDL3 do; RAE_IOS_PRIVACY_MANIFEST replaces it.
 privacy_manifest=${RAE_IOS_PRIVACY_MANIFEST:-$here/PrivacyInfo.xcprivacy}
 [ -f "$privacy_manifest" ] || { echo "error: no privacy manifest at $privacy_manifest" >&2; exit 1; }
-orientations=${RAE_IOS_ORIENTATIONS:-portrait}
+orientations=${RAE_IOS_ORIENTATIONS:-any}
 portrait='<string>UIInterfaceOrientationPortrait</string>'
 upsideDown='<string>UIInterfaceOrientationPortraitUpsideDown</string>'
 landscape='<string>UIInterfaceOrientationLandscapeLeft</string><string>UIInterfaceOrientationLandscapeRight</string>'
@@ -150,6 +151,20 @@ for shared in lib/app3d/scenes lib/data; do
     dst="$stage/$(dirname "$shared")"; mkdir -p "$dst"; cp -R "$root/$shared" "$dst/"
   fi
 done
+# Assets an app reads from ANOTHER in-repo example (118/119 draw their debug
+# HUD with 114's font): every string the C names under examples/<x>/assets/ is
+# staged at its repo-root path. A path built by interpolation is only a prefix
+# in the C ("examples/114_walker_character/assets/Roboto-Regular" + ".mtsdf.json"),
+# so every file starting with it is copied. On the desktop the CWD is the repo
+# root and these resolve on their own; on a device only bundled files exist.
+grep -oE '"examples/[A-Za-z0-9_]+/assets/[^"]*"' "$gen/app.c" | tr -d '"' | sort -u \
+  | while IFS= read -r ref; do
+      for found in "$root/$ref"*; do
+        [ -e "$found" ] || continue
+        rel=${found#"$root/"}
+        mkdir -p "$stage/$(dirname "$rel")"; cp -R "$found" "$stage/$rel"
+      done
+    done
 # Shared WGSL that examples compose at RUNTIME (noise, world_biome, terrain_splat,
 # ...). Bundle the whole lib/*.wgsl set: a missing one does not fail gracefully —
 # the composed shader loses its entry point and wgpu-native ABORTS at pipeline
