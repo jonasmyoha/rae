@@ -51,6 +51,21 @@ xcodebuild -project "$RAE_IOS_PROJ" -scheme RaeApp -configuration Release \
 [ -d "$RAE_IOS_ARCHIVE/Products/Applications" ] \
   || { echo "error: the archive has no app in Products/Applications (a generic archive)" >&2; exit 1; }
 
+# The debug symbols: Xcode writes the dSYM where CMake's project builds
+# (CONFIGURATION_BUILD_DIR), outside the archive, so it is copied into the
+# archive's dSYMs if it belongs to the archived binary (the same UUIDs) - for
+# crash reports, TestFlight's too, that name the functions.
+archived="$RAE_IOS_ARCHIVE/Products/Applications/RaeApp.app/RaeApp"
+built_dsym="$(dirname "$RAE_IOS_APP")/RaeApp.app.dSYM"
+if [ -z "$(ls -A "$RAE_IOS_ARCHIVE/dSYMs" 2>/dev/null)" ] && [ -d "$built_dsym" ]; then
+  if [ "$(dwarfdump --uuid "$archived" | cut -d' ' -f2 | sort)" = "$(dwarfdump --uuid "$built_dsym" | cut -d' ' -f2 | sort)" ]; then
+    mkdir -p "$RAE_IOS_ARCHIVE/dSYMs"
+    cp -R "$built_dsym" "$RAE_IOS_ARCHIVE/dSYMs/"
+  else
+    echo "upload-ios: warning: $built_dsym is not the archived binary's; uploading without symbols" >&2
+  fi
+fi
+
 # 3. Export for App Store Connect, uploading unless told not to.
 destination=upload
 if [ "${RAE_IOS_UPLOAD:-1}" = "0" ]; then

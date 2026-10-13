@@ -221,7 +221,7 @@ $(printf "%b" "$box3d_sources")$(printf "%b" "$icon_source")$(printf "%b" "$asse
 $(printf "%b" "${pkg_lines:-}")
 
 target_compile_definitions(\${APP} PRIVATE RAE_HAS_SDL3 RAE_HAS_WEBGPU)
-target_compile_options(\${APP} PRIVATE -w -ffp-contract=off)
+target_compile_options(\${APP} PRIVATE -w -ffp-contract=off -g)
 target_include_directories(\${APP} PRIVATE
   "$runtime_dir"
   "$frameworks/SDL3.xcframework/ios-arm64/Headers"
@@ -254,6 +254,10 @@ set_target_properties(\${APP} PROPERTIES
   XCODE_ATTRIBUTE_CURRENT_PROJECT_VERSION "$build_number"
   # An archive keeps the app only if it is installed into Applications
   XCODE_ATTRIBUTE_SKIP_INSTALL "NO"
+  # Debug symbols beside the app, so crash reports (TestFlight's too) name
+  # the functions
+  XCODE_ATTRIBUTE_DEBUG_INFORMATION_FORMAT "dwarf-with-dsym"
+  XCODE_ATTRIBUTE_GCC_GENERATE_DEBUGGING_SYMBOLS "YES"
   XCODE_ATTRIBUTE_INSTALL_PATH "\$(LOCAL_APPS_DIR)"
   XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "$bundle_id"
   XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
