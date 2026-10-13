@@ -74,6 +74,7 @@ enum RenderTag {
   transparentForward
   waterFft
   underwater
+  antialias
 }
 
 # writes surface attributes, no lighting
@@ -139,6 +140,7 @@ type RenderPasses {
   ao: AoPassCache
   light: LightPassCache
   taa: TaaPassCache
+  antialias: AntialiasPassCache  # FXAA at the scene resolution, before the upscale
   pyr: PyrPassCache
   inspect: ViewPassCache
   gbuffer: GbufferCache
@@ -155,6 +157,7 @@ func createRenderPasses() ret RenderPasses {
       ao: createAoPassCache()
       light: createLightPassCache()
       taa: createTaaPassCache()
+      antialias: createAntialiasPassCache()
       pyr: createPyrPassCache()
       inspect: createViewPassCache()
       gbuffer: createGbufferCache()
@@ -435,6 +438,7 @@ func shutdownDeferredRenderer(renderer: mod DeferredRenderer) pub {
       pyr: renderer.passes.pyr
       resources: resources
     )
+    antialiasPassShutdown(cache: renderer.passes.antialias, resources: resources)
     inspectorShutdown(cache: renderer.passes.inspect, resources: resources)
     transparentShutdown(cache: renderer.passes.transparent, resources: resources)
     underwaterShutdown(cache: renderer.passes.underwater, resources: resources)
@@ -699,6 +703,15 @@ func renderDeferredPassWith(
       gbuffer: renderer.passes.gbuffer
     )
   }
+  if tag is RenderTag.antialias {
+    antialiasPass(
+      cache: renderer.passes.antialias
+      resources: resources
+      targets: renderer.passes.targets
+      gbuffer: renderer.passes.gbuffer
+      exposure: light.exposure
+    )
+  }
   if tag is RenderTag.transparentForward {
     transparentPass(
       cache: renderer.passes.transparent
@@ -813,6 +826,9 @@ func renderTagName(tag: view Int) ret String {
     }
     case RenderTag.underwater {
       ret "underwater"
+    }
+    case RenderTag.antialias {
+      ret "antialias (FXAA)"
     }
   }
   if tag is passTimingCopyTag {

@@ -46,6 +46,12 @@ type DeferredTargets {
   litView: TextureViewId
   litCopy: TextureId
   litCopyView: TextureViewId
+  # The anti-aliased scene (the antialias pass, FXAA before the upscale): same
+  # extent and format as lit. `aaWritten` says this frame's pass wrote it, so
+  # an app that never runs the pass composites the lit image as before.
+  antialiased: TextureId
+  antialiasedView: TextureViewId
+  aaWritten: Bool
   ao: TextureId
   aoView: TextureViewId
   taa: List(TextureId)  # ping-pong slots 0/1
@@ -88,6 +94,9 @@ func createDeferredTargets() ret DeferredTargets {
     litView: noTextureViewId()
     litCopy: noTextureId()
     litCopyView: noTextureViewId()
+    antialiased: noTextureId()
+    antialiasedView: noTextureViewId()
+    aaWritten: false
     ao: noTextureId()
     aoView: noTextureViewId()
     taa: fillTextureIds(count: 2)
@@ -119,7 +128,10 @@ func targetsReady(targets: view DeferredTargets, resources: view GpuResources) r
   ret isValidTextureView(resources: resources, id: targets.litView) and isValidTextureView(
     resources: resources
     id: targets.litCopyView
-  ) and isValidTextureView(resources: resources, id: targets.aoView)
+  ) and isValidTextureView(resources: resources, id: targets.aoView) and isValidTextureView(
+    resources: resources
+    id: targets.antialiasedView
+  )
 }
 
 func retireDeferredTargets(targets: mod DeferredTargets, resources: mod GpuResources) {
@@ -129,6 +141,8 @@ func retireDeferredTargets(targets: mod DeferredTargets, resources: mod GpuResou
   retireTexture(resources: resources, id: targets.litCopy)
   retireTextureView(resources: resources, id: targets.aoView)
   retireTexture(resources: resources, id: targets.ao)
+  retireTextureView(resources: resources, id: targets.antialiasedView)
+  retireTexture(resources: resources, id: targets.antialiased)
   retireTextureViewIds(resources: resources, list: targets.taaViews)
   retireTextureIds(resources: resources, list: targets.taa)
   retireTextureViewIds(resources: resources, list: targets.pyramidViews)
@@ -140,6 +154,9 @@ func retireDeferredTargets(targets: mod DeferredTargets, resources: mod GpuResou
   targets.litCopyView = noTextureViewId()
   targets.ao = noTextureId()
   targets.aoView = noTextureViewId()
+  targets.antialiased = noTextureId()
+  targets.antialiasedView = noTextureViewId()
+  targets.aaWritten = false
   targets.taa = fillTextureIds(count: 2)
   targets.taaViews = fillTextureViewIds(count: 2)
   targets.pyramid = noTextureId()
@@ -224,6 +241,19 @@ func ensureDeferredTargets(
       usage: WGPUTextureUsage_CopyDst + WGPUTextureUsage_TextureBinding
       texture: targets.litCopy
       textureView: targets.litCopyView
+    )
+  }
+  # The anti-aliased scene: written by the antialias pass, sampled by the
+  # composite.
+  if ok {
+    ok = makeTarget(
+      resources: resources
+      width: w
+      height: h
+      format: targets.litFormat
+      usage: attach
+      texture: targets.antialiased
+      textureView: targets.antialiasedView
     )
   }
   # AO (#387): full resolution r8unorm — one byte per pixel, and a fragment
@@ -378,9 +408,15 @@ func taaViewRef(targets: view DeferredTargets, slot: copy Int) ret ResourceRef {
 
 # What the composite samples: the TAA resolve when it ran (the slot written
 # this frame), else the raw lit radiance; the index keys the composite's bind.
+# What the composite upscales: the TAA resolve, else this frame's
+# anti-aliased scene, else the lit image (an app that never ran the antialias
+# pass).
 func compositeSourceRef(targets: view DeferredTargets) ret ResourceRef {
   if targets.taaEnabled {
     ret taaViewRef(targets: targets, slot: targets.taaCur)
+  }
+  if targets.aaWritten {
+    ret textureViewRef(id: targets.antialiasedView)
   }
   ret textureViewRef(id: targets.litView)
 }
@@ -388,6 +424,9 @@ func compositeSourceRef(targets: view DeferredTargets) ret ResourceRef {
 func compositeSourceIndex(targets: view DeferredTargets) ret Int {
   if targets.taaEnabled {
     ret targets.taaCur
+  }
+  if targets.aaWritten {
+    ret 3
   }
   ret 2
 }
