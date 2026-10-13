@@ -99,32 +99,64 @@ type CharacterMover {
   groundNormal: b3Vec3
 }
 
-# The sample's capsule: half height 0.5 along the up axis, radius 0.3.
-func moverCapsule(up: view UpAxis) ret b3Capsule {
+# A mover's capsule: its radius, and how far each sphere's centre is from
+# its middle along the up axis. A bigger or smaller character carries its own;
+# the pogo spring scales with it (it holds the lower sphere three radii over
+# the ground).
+type MoverSize {
+  radius: Float
+  halfHeight: Float
+}
+
+# The sample's: radius 0.3, the spheres' centres 0.5 m either side of the
+# middle (a character about 2 m tall).
+func sampleMoverSize() ret MoverSize {
+  ret MoverSize { radius: 0.3, halfHeight: 0.5 }
+}
+
+# How high a standing mover's capsule middle rests over the ground: the pogo
+# spring's rest length (three radii) to the lower sphere's centre, then half
+# the capsule. 1.4 m for the sample's.
+func moverRestHeight(size: view MoverSize) ret Float {
+  ret 3.0 * size.radius + size.halfHeight
+}
+
+# A capsule of `size` along the up axis.
+func moverCapsuleSized(up: view UpAxis, size: view MoverSize) ret b3Capsule {
   if up is UpAxis.zUp {
     ret toB3Capsule(
       capsule: Capsule {
-        center1: Vec3 { x: 0.0, y: 0.0, z: -0.5 }
-        center2: Vec3 { x: 0.0, y: 0.0, z: 0.5 }
-        radius: 0.3
+        center1: Vec3 { x: 0.0, y: 0.0, z: 0.0 - size.halfHeight }
+        center2: Vec3 { x: 0.0, y: 0.0, z: size.halfHeight }
+        radius: size.radius
       }
     )
   }
   ret toB3Capsule(
     capsule: Capsule {
-      center1: Vec3 { x: 0.0, y: -0.5, z: 0.0 }
-      center2: Vec3 { x: 0.0, y: 0.5, z: 0.0 }
-      radius: 0.3
+      center1: Vec3 { x: 0.0, y: 0.0 - size.halfHeight, z: 0.0 }
+      center2: Vec3 { x: 0.0, y: size.halfHeight, z: 0.0 }
+      radius: size.radius
     }
   )
 }
 
-func createCharacterMoverWithUp(position: view Vec3, up: view UpAxis) ret CharacterMover {
+# The sample's capsule: half height 0.5 along the up axis, radius 0.3.
+func moverCapsule(up: view UpAxis) ret b3Capsule {
+  ret moverCapsuleSized(up: up, size: sampleMoverSize())
+}
+
+# A mover of `size` at `position` (its capsule's middle).
+func createCharacterMoverSized(
+  position: view Vec3
+  up: view UpAxis
+  size: view MoverSize
+) ret CharacterMover {
   ret CharacterMover {
     up: up
     transform: toB3Transform(transform: Transform { position: position, rotation: quatIdentity() })
     velocity: toB3Vector(vector: zeroVector())
-    capsule: moverCapsule(up: up)
+    capsule: moverCapsuleSized(up: up, size: size)
     planes: List.create(b3CollisionPlane, cap: planeCapacity)
     planePoints: List.create(b3Vec3, cap: planeCapacity)
     planeShapeIds: List.create(b3ShapeId, cap: planeCapacity)
@@ -134,6 +166,10 @@ func createCharacterMoverWithUp(position: view Vec3, up: view UpAxis) ret Charac
     sprint: false
     groundNormal: toB3Vector(vector: zeroVector())
   }
+}
+
+func createCharacterMoverWithUp(position: view Vec3, up: view UpAxis) ret CharacterMover {
+  ret createCharacterMoverSized(position: position, up: up, size: sampleMoverSize())
 }
 
 # CharacterMover::Initialize: Y-up, as the sample.

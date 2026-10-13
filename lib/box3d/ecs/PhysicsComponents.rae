@@ -37,8 +37,14 @@ type CharacterBody {
 
 # A Z-up character standing at `position` (its capsule's center), facing +x.
 func createCharacterBody(position: view Vec3) ret CharacterBody {
+  ret createCharacterBodySized(position: position, size: sampleMoverSize())
+}
+
+# A Z-up character of `size` (CharacterMover MoverSize), its capsule's middle
+# at `position`.
+func createCharacterBodySized(position: view Vec3, size: view MoverSize) ret CharacterBody {
   ret CharacterBody {
-    mover: createCharacterMoverWithUp(position: position, up: UpAxis.zUp)
+    mover: createCharacterMoverSized(position: position, up: UpAxis.zUp, size: size)
     throttle: Vec2 { x: 0.0, y: 0.0 }
     forward: Vec3 { x: 1.0, y: 0.0, z: 0.0 }
     right: Vec3 { x: 0.0, y: -1.0, z: 0.0 }
