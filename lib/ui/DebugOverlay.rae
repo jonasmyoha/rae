@@ -180,23 +180,20 @@ func debugPruneFrames(debugOverlay: mod DebugOverlay, now: view Float64) {
   }
 }
 
-# Frames per second over a moving window rather than 1/dt: a single slow frame
-# should not make the readout jump, and the number is there to show a trend.
+# Frames per second over a moving window rather than 1/dt, as the frame
+# loop's steady rate: one over the MEDIAN frame interval in the window. A
+# display-locked loop reads 60 (or 30), not 59 (or 29) because a few frames in
+# the window were late, and a single slow frame does not make it jump.
 func debugRecordFrame(debugOverlay: mod DebugOverlay, now: view Float64, didRealWork: view Bool) {
   if didRealWork {
     let times: mod List(Float64) => debugOverlay.frameTimes
     times.add(value: now)
     debugPruneFrames(debugOverlay: debugOverlay, now: now)
   }
-  let n: Int = debugOverlay.frameTimes.length
   var fps: Float = 0.0
-  if n > 1 {
-    let span: Float = (debugOverlay.frameTimes.copyAt(index: n - 1) - debugOverlay.frameTimes.copyAt(
-      index: 0
-    )) as Float
-    if span > 0.0 {
-      fps = (n - 1).toFloat() / span
-    }
+  let median: Float = debugMedianInterval(times: debugOverlay.frameTimes)
+  if median > 0.0 {
+    fps = 1.0 / median
   }
   debugOverlay.lastFps = fps
   if (now - debugOverlay.rssSampledAt) as Float >= 0.5 {
@@ -336,6 +333,31 @@ func debugDialogPress(debugOverlay: mod DebugOverlay, px: view Float, py: view F
     ret true
   }
   ret true
+}
+
+# The median of the intervals between `times` (seconds; 0 with fewer than two).
+func debugMedianInterval(times: view List(Float64)) ret Float {
+  if times.length < 2 {
+    ret 0.0
+  }
+  var intervals: List(Float) = List.create(Float, cap: times.length - 1)
+  loop var i: Int = 1, i < times.length, ++i {
+    let interval: Float = (times.copyAt(index: i) - times.copyAt(index: i - 1)) as Float
+    # Insertion keeps the list sorted (a window holds a few hundred at most)
+    var at: Int = intervals.length
+    loop at > 0 and intervals.copyAtFallback(index: at - 1, fallback: 0.0) > interval {
+      at = at - 1
+    }
+    intervals.insert(index: at, value: interval)
+  }
+  let count: Int = intervals.length
+  if count % 2 is 1 {
+    ret intervals.copyAtFallback(index: count / 2, fallback: 0.0)
+  }
+  ret (intervals.copyAtFallback(index: count / 2 - 1, fallback: 0.0) + intervals.copyAtFallback(
+    index: count / 2
+    fallback: 0.0
+  )) * 0.5
 }
 
 # ----- formatting -----------------------------------------------------
