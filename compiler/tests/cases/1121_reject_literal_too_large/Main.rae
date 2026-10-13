@@ -1,0 +1,16 @@
+# An integer literal takes the type its context gives it, but only when it
+# FITS: one past a type's maximum used to compile and wrap silently
+# (`let big: UInt8 = 300` printed 44). Each fixed-width type, one past its
+# maximum, and a literal past UInt64 itself.
+func main() {
+  let int8High: Int8 = 128
+  let int16High: Int16 = 32768
+  let int32High: Int32 = 2147483648
+  let intHigh: Int = 9223372036854775808
+  let int64High: Int64 = 9223372036854775808
+  let uint8High: UInt8 = 256
+  let uint16High: UInt16 = 65536
+  let uint32High: UInt32 = 4294967296
+  let uint64High: UInt64 = 18446744073709551616
+  let hexHigh: UInt8 = 0x100
+}

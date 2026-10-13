@@ -1,0 +1,28 @@
+# The fit check holds wherever a literal takes a type from its context: a
+# binding, an assignment, an argument, a return, a struct literal field, a
+# list literal element (typed or untyped) and the operand of arithmetic with a
+# typed integer on the other side.
+type Pixel {
+  red: UInt8
+}
+
+func takeSmall(value: view UInt8) ret UInt8 {
+  ret value
+}
+
+func giveSmall() ret UInt8 {
+  ret 300
+}
+
+func main() {
+  let bound: UInt8 = 300
+  var assigned: Int8 = 0 as Int8
+  assigned = 200
+  let argument: UInt8 = takeSmall(value: 256)
+  let pixel: Pixel = { red: 999 }
+  let typedList: List(UInt8) = List(UInt8) { 1, 2, 300 }
+  let untypedList: List(UInt8) = { 4, 500 }
+  let small: UInt8 = 5 as UInt8
+  let sum: UInt8 = small + 400
+  let difference: UInt8 = 600 - small
+}
