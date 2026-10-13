@@ -70,6 +70,7 @@ func frameBegin(app: mod App) {
   app.frame.now = now
   # NO CLAMP before DRS: the scale controller reacts to the true frame time.
   updateRenderScale(drs: app.renderSystem.drs, deltaTime: deltaTime, profiler: app.profiler)
+  setDynamicRenderScale(renderer: app.renderSystem.renderer, scale: app.renderSystem.drs.scale)
   # Negative dt is a clock going backwards, not a long frame; refuse it.
   if deltaTime < 0.0 {
     deltaTime = 0.0

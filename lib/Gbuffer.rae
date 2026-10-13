@@ -68,6 +68,7 @@ open GbufferSdf
 open GbufferNative
 open GbufferResources
 open gpu/FramePacer
+open RenderResolution
 
 # ----- geometry-pass begin (#503, manager-owned since #906) -------------------
 # The frame is the GbufferCache's: manager targets (rebuilt to the offscreen
@@ -101,6 +102,13 @@ type GbufferCache {
   targetWidth: Int
   targetHeight: Int
   targetsGen: Int  # bumped per rebuild; the post passes re-fit on it
+  # The scene resolution (lib/RenderResolution): the dynamic scale, the app's
+  # ceiling (0 x 0 = native) and the scale the targets were last built at,
+  # which the composite upscales by.
+  dynamicScale: Float
+  ceilingWidth: Int
+  ceilingHeight: Int
+  sceneScale: Float
   frameUniform: BufferId
   draws: BufferId
   frameFloats: List(Float)  # the frame uniform's 36 floats (viewProj, prevViewProj, jitter)
@@ -148,6 +156,22 @@ type GbufferCache {
   sdf: SdfPassCache  # #922: the metaball clusters' pipeline / uniforms / binds
 }
 
+# A ceiling forced by RAE_RENDER_CEILING applies to every deferred renderer;
+# without it the app sets one (setRenderCeiling) or the scene is native.
+func envCeilingWidth() ret Int {
+  if let ceiling: RenderCeiling = renderCeilingFromEnv() {
+    ret ceiling.width
+  }
+  ret 0
+}
+
+func envCeilingHeight() ret Int {
+  if let ceiling: RenderCeiling = renderCeilingFromEnv() {
+    ret ceiling.height
+  }
+  ret 0
+}
+
 func createGbufferCache() pub ret GbufferCache {
   unsafe {
     ret GbufferCache {
@@ -156,6 +180,10 @@ func createGbufferCache() pub ret GbufferCache {
       targetWidth: 0
       targetHeight: 0
       targetsGen: 0
+      dynamicScale: renderScaleFromEnv()
+      ceilingWidth: envCeilingWidth()
+      ceilingHeight: envCeilingHeight()
+      sceneScale: 1.0
       frameUniform: noBufferId()
       draws: noBufferId()
       frameFloats: List.create(Float, cap: gbufferFrameFloats)

@@ -1257,15 +1257,11 @@ void rae_gb_sprite_array_write(int64_t layer, const int64_t* pixels, int64_t w, 
 void rae_gb_submit(void* cmd);
 /* #906/#923: the whole deferred frame (G-buffer targets, frame uniform, draws,
  * a Recording per frame, the post-pass targets / uniforms / pipelines) is Rae
- * manager state; C keeps the WGSL sources, the offscreen size and the
- * render scale. rae_Mat4 is forward-declared for the remaining Mat4 externs. */
+ * manager state, and so is the scene resolution (lib/RenderResolution.rae);
+ * C keeps the WGSL sources and reports the surface size. rae_Mat4 is
+ * forward-declared for the remaining Mat4 externs. */
 struct rae_Mat4;
 int64_t rae_gb_prepare(void);
-int64_t rae_gb_offscreen_w(void);
-int64_t rae_gb_offscreen_h(void);
-/* Dynamic resolution (#530). */
-void   rae_gb_set_render_scale(double s);
-double rae_gb_render_scale(void);
 /* Render pipelines + WGSL shader modules created in Rae (#503). */
 /* G-buffer inspector built in Rae (#503). */
 int64_t rae_g2d_format(void);

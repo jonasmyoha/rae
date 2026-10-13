@@ -346,7 +346,7 @@ unchanged. `Gpu2d.closeWindow` releases no Rae-owned object any more (surface
 + cursors only); `canvasShutdown` retires the target after draining the
 in-flight submissions. Removed from C: `g_g2d_off_tex/off_view/off_w/off_h`,
 `rae_g2d_off_view`, `rae_g2d_off_view_ready`, `rae_g2d_present_and_cleanup`;
-`rae_gb_offscreen_w/h`, the forward prepass target size and the deferred /
+the forward prepass target size and the deferred /
 tonemap readiness checks read the surface instead. Teardown equivalence
 (RAE_WGPU_REPORT live-object counts flat across 120 frames, the occluded path,
 the headless screenshot path) is a window run the queue cannot do — it is the
@@ -382,7 +382,8 @@ geometry frame is the Rae `GbufferCache`'s (`lib/Gbuffer.rae`,
 `lib/GbufferResources.rae`), on the DeferredRenderer-owned manager. The four
 G-buffer targets (A rgb10a2, B/C rgba8, depth32) + their views are manager
 `TextureId`/`TextureViewId`s rebuilt by `ensureTargets` to the offscreen size
-(`rae_gb_offscreen_w/h` — the surface at the render scale, C glue) with a Rae
+(the surface at the scene scale, both decided in `lib/RenderResolution.rae`;
+`rae_gb_offscreen_w/h` are gone) with a Rae
 `targetsGen`; the frame uniform and the draws storage buffer are manager
 `BufferId`s (`ensureGbBuffers`, `gbufferMaxDraws = 4096`,
 `gbufferFrameFloats = 36`) with the draw cursor `drawCount` in Rae; each frame

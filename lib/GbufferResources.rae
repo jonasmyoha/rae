@@ -22,6 +22,7 @@ open gpu/GpuRender
 open gpu/GpuIds
 open GbufferNative
 open Gbuffer
+open RenderResolution
 
 # The G-buffer's four attachments (A, B, C, depth) and their formats.
 const gbufferTargetCount: Int = 4
@@ -119,15 +120,25 @@ func retireTargets(cache: mod GbufferCache, resources: mod GpuResources) {
   cache.targetHeight = 0
 }
 
-# (Re)create the three colour targets + depth when the offscreen size (the
-# surface at the render scale, C glue) changes; the generation bumps so every
-# consumer re-fits its bind groups.
+# (Re)create the three colour targets + depth when the scene size changes:
+# the surface at the scene scale (the app's ceiling times the dynamic scale,
+# lib/RenderResolution), re-derived every frame so a resize or a rotation
+# re-fits it. The generation bumps so every consumer re-fits its bind groups.
 func ensureTargets(cache: mod GbufferCache, resources: mod GpuResources) {
-  let w: Int = gbOffscreenW()
-  let h: Int = gbOffscreenH()
-  if w <= 0 or h <= 0 {
+  let surfaceWidth: Int = gbSurfaceWidth()
+  let surfaceHeight: Int = gbSurfaceHeight()
+  if surfaceWidth <= 0 or surfaceHeight <= 0 {
     ret
   }
+  let ceiling: Float = ceilingScale(
+    surfaceWidth: surfaceWidth
+    surfaceHeight: surfaceHeight
+    ceilingWidth: cache.ceilingWidth
+    ceilingHeight: cache.ceilingHeight
+  )
+  cache.sceneScale = effectiveRenderScale(dynamicScale: cache.dynamicScale, ceiling: ceiling)
+  let w: Int = scaledDimension(full: surfaceWidth, scale: cache.sceneScale)
+  let h: Int = scaledDimension(full: surfaceHeight, scale: cache.sceneScale)
   if w is cache.targetWidth and h is cache.targetHeight and gbufferTargetsReady(
     cache: cache
     resources: resources
