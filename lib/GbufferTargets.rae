@@ -59,6 +59,9 @@ type DeferredTargets {
   pyramid: TextureId
   pyramidViews: List(TextureViewId)  # one per mip level
   pyramidMips: Int
+  # A consumer asked for the pyramid (requestDepthPyramid). Until one does,
+  # the pyramid is neither allocated nor built.
+  pyramidWanted: Bool
   # frame state
   taaEnabled: Bool
   taaCur: Int  # the slot the resolve writes this frame (the composite reads it)
@@ -104,6 +107,7 @@ func createDeferredTargets() ret DeferredTargets {
     pyramid: noTextureId()
     pyramidViews: List.create(TextureViewId, cap: pyramidMaxMips)
     pyramidMips: 0
+    pyramidWanted: false
     taaEnabled: false  # #20: FXAA by default, TAA opt-in (setTaaEnabled)
     taaCur: 0
     taaHaveHistory: false
@@ -143,11 +147,8 @@ func retireDeferredTargets(targets: mod DeferredTargets, resources: mod GpuResou
   retireTexture(resources: resources, id: targets.ao)
   retireTextureView(resources: resources, id: targets.antialiasedView)
   retireTexture(resources: resources, id: targets.antialiased)
-  retireTextureViewIds(resources: resources, list: targets.taaViews)
-  retireTextureIds(resources: resources, list: targets.taa)
-  retireTextureViewIds(resources: resources, list: targets.pyramidViews)
-  targets.pyramidViews.clear()
-  retireTexture(resources: resources, id: targets.pyramid)
+  retireTaaTargets(targets: targets, resources: resources)
+  retirePyramidTarget(targets: targets, resources: resources)
   targets.lit = noTextureId()
   targets.litView = noTextureViewId()
   targets.litCopy = noTextureId()
@@ -157,11 +158,6 @@ func retireDeferredTargets(targets: mod DeferredTargets, resources: mod GpuResou
   targets.antialiased = noTextureId()
   targets.antialiasedView = noTextureViewId()
   targets.aaWritten = false
-  targets.taa = fillTextureIds(count: 2)
-  targets.taaViews = fillTextureViewIds(count: 2)
-  targets.pyramid = noTextureId()
-  targets.pyramidMips = 0
-  targets.taaHaveHistory = false
   targets.width = 0
   targets.height = 0
   targets.gen = -1
@@ -269,69 +265,6 @@ func ensureDeferredTargets(
       textureView: targets.aoView
     )
   }
-  # TAA history, same format as radiance: the resolve accumulates LINEAR HDR,
-  # before the composite's tone curve.
-  loop var i: Int = 0, i < 2, ++i {
-    if ok {
-      var texture: TextureId = noTextureId()
-      var slotView: TextureViewId = noTextureViewId()
-      ok = makeTarget(
-        resources: resources
-        width: w
-        height: h
-        format: targets.litFormat
-        usage: attach
-        texture: texture
-        textureView: slotView
-      )
-      targets.taa.set(index: i, value: texture)
-      targets.taaViews.set(index: i, value: slotView)
-    }
-  }
-  # The depth pyramid: half res, a MIN mip chain down to 1x1 (bounded).
-  if ok {
-    var pw: Int = w / 2
-    var ph: Int = h / 2
-    if pw < 1 {
-      pw = 1
-    }
-    if ph < 1 {
-      ph = 1
-    }
-    var mips: Int = 1
-    var m: Int = pw
-    if ph > m {
-      m = ph
-    }
-    loop m > 1 and mips < pyramidMaxMips {
-      m = m / 2
-      mips = mips + 1
-    }
-    if let pyramid: TextureId = createTextureMipped(
-      resources: resources
-      width: pw
-      height: ph
-      format: WGPUTextureFormat_R32Float
-      usage: attach
-      mipLevels: mips
-    ) {
-      targets.pyramid = pyramid
-      loop var level: Int = 0, level < mips, ++level {
-        if let mipView: TextureViewId = createTextureViewMip(
-          resources: resources
-          texture: pyramid
-          mip: level
-        ) {
-          targets.pyramidViews.add(value: mipView)
-        } else {
-          ok = false
-        }
-      }
-      targets.pyramidMips = mips
-    } else {
-      ok = false
-    }
-  }
   if not ok {
     retireDeferredTargets(targets: targets, resources: resources)
     ret false
@@ -397,6 +330,121 @@ func pyramidViewRef(targets: view DeferredTargets, level: copy Int) ret Resource
     ret textureViewRef(id: levelView)
   }
   ret noRef()
+}
+
+# The TAA history: two ping-pong slots at the scene size, in the radiance
+# format (the resolve accumulates LINEAR HDR, before the composite's tone
+# curve). They are made when TAA is on (postPassReady), not with the other
+# targets: an app on FXAA never pays for two HDR targets. Once made they stay
+# until the next resize, because the TAA and composite passes keep bind groups
+# that point at them.
+func ensureTaaTargets(targets: mod DeferredTargets, resources: mod GpuResources) ret Bool {
+  if taaTargetsMade(targets: targets, resources: resources) {
+    ret true
+  }
+  retireTaaTargets(targets: targets, resources: resources)
+  var ok: Bool = true
+  loop var i: Int = 0, i < 2, ++i {
+    if ok {
+      var texture: TextureId = noTextureId()
+      var slotView: TextureViewId = noTextureViewId()
+      ok = makeTarget(
+        resources: resources
+        width: targets.width
+        height: targets.height
+        format: targets.litFormat
+        usage: WGPUTextureUsage_RenderAttachment + WGPUTextureUsage_TextureBinding
+        texture: texture
+        textureView: slotView
+      )
+      targets.taa.set(index: i, value: texture)
+      targets.taaViews.set(index: i, value: slotView)
+    }
+  }
+  if not ok {
+    retireTaaTargets(targets: targets, resources: resources)
+  }
+  ret ok
+}
+
+func taaTargetsMade(targets: view DeferredTargets, resources: view GpuResources) ret Bool {
+  loop let slotView: TextureViewId in targets.taaViews {
+    if not isValidTextureView(resources: resources, id: slotView) {
+      ret false
+    }
+  }
+  ret true
+}
+
+func retireTaaTargets(targets: mod DeferredTargets, resources: mod GpuResources) {
+  retireTextureViewIds(resources: resources, list: targets.taaViews)
+  retireTextureIds(resources: resources, list: targets.taa)
+  targets.taa = fillTextureIds(count: 2)
+  targets.taaViews = fillTextureViewIds(count: 2)
+  targets.taaHaveHistory = false
+}
+
+# The depth pyramid: half the scene size, a MIN mip chain down to 1x1
+# (bounded). Made by the first pyramid pass a consumer asked for; it stays
+# until the next resize, like the TAA history.
+func ensurePyramidTarget(targets: mod DeferredTargets, resources: mod GpuResources) ret Bool {
+  if targets.pyramidMips > 0 {
+    ret true
+  }
+  var pw: Int = targets.width / 2
+  var ph: Int = targets.height / 2
+  if pw < 1 {
+    pw = 1
+  }
+  if ph < 1 {
+    ph = 1
+  }
+  var mips: Int = 1
+  var m: Int = pw
+  if ph > m {
+    m = ph
+  }
+  loop m > 1 and mips < pyramidMaxMips {
+    m = m / 2
+    mips = mips + 1
+  }
+  var ok: Bool = false
+  if let pyramid: TextureId = createTextureMipped(
+    resources: resources
+    width: pw
+    height: ph
+    format: WGPUTextureFormat_R32Float
+    usage: WGPUTextureUsage_RenderAttachment + WGPUTextureUsage_TextureBinding
+    mipLevels: mips
+  ) {
+    targets.pyramid = pyramid
+    ok = true
+    loop var level: Int = 0, level < mips, ++level {
+      if let mipView: TextureViewId = createTextureViewMip(
+        resources: resources
+        texture: pyramid
+        mip: level
+      ) {
+        targets.pyramidViews.add(value: mipView)
+      } else {
+        ok = false
+      }
+    }
+  }
+  if not ok {
+    retirePyramidTarget(targets: targets, resources: resources)
+    ret false
+  }
+  targets.pyramidMips = mips
+  ret true
+}
+
+func retirePyramidTarget(targets: mod DeferredTargets, resources: mod GpuResources) {
+  retireTextureViewIds(resources: resources, list: targets.pyramidViews)
+  targets.pyramidViews.clear()
+  retireTexture(resources: resources, id: targets.pyramid)
+  targets.pyramid = noTextureId()
+  targets.pyramidMips = 0
 }
 
 func taaViewRef(targets: view DeferredTargets, slot: copy Int) ret ResourceRef {

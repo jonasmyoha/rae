@@ -42,6 +42,11 @@ type DeferredPassTiming {
   spans: List(Int)
   # Frames read back so far
   samples: Int
+  # The pass tags and summed microseconds of the frames read back since the
+  # last report (RendererDeferred logs the averages every few frames)
+  reportTags: List(Int)
+  reportSums: List(Int)
+  reportFrames: Int
 }
 
 func createDeferredPassTiming() ret DeferredPassTiming {
@@ -62,6 +67,9 @@ func createDeferredPassTiming() ret DeferredPassTiming {
       lastMicroseconds: List.create(Int, cap: passTimingMaxMarks)
       spans: List.create(Int, cap: passTimingMaxMarks)
       samples: 0
+      reportTags: List.create(Int, cap: passTimingMaxMarks)
+      reportSums: List.create(Int, cap: passTimingMaxMarks)
+      reportFrames: 0
     }
   }
 }
@@ -108,6 +116,7 @@ func passTimingFrameBegin(passTiming: mod DeferredPassTiming, resources: mod Gpu
           passTiming.lastMicroseconds.add(value: passTiming.spans.copyAtDefault(index: i))
         }
         passTiming.samples = passTiming.samples + 1
+        addToPassTimingReport(passTiming: passTiming)
       }
       ret
     }
@@ -169,6 +178,40 @@ func passTimingMark(
       }
     }
   }
+}
+
+# Add the frame just read back to the report sums. A frame with a different
+# pass list (a pass appeared or the graph changed) starts the sums again.
+func addToPassTimingReport(passTiming: mod DeferredPassTiming) {
+  var same: Bool = passTiming.reportTags.length is passTiming.lastTags.length
+  loop var i: Int = 0, same and i < passTiming.lastTags.length, ++i {
+    if passTiming.reportTags.copyAtDefault(index: i) is not passTiming.lastTags.copyAtDefault(
+      index: i
+    ) {
+      same = false
+    }
+  }
+  if not same {
+    clearPassTimingReport(passTiming: passTiming)
+    loop var i: Int = 0, i < passTiming.lastTags.length, ++i {
+      passTiming.reportTags.add(value: passTiming.lastTags.copyAtDefault(index: i))
+      passTiming.reportSums.add(value: 0)
+    }
+  }
+  loop var i: Int = 0, i < passTiming.lastMicroseconds.length, ++i {
+    let sum: Int = passTiming.reportSums.copyAtDefault(index: i)
+    passTiming.reportSums.set(
+      index: i
+      value: sum + passTiming.lastMicroseconds.copyAtDefault(index: i)
+    )
+  }
+  passTiming.reportFrames = passTiming.reportFrames + 1
+}
+
+func clearPassTimingReport(passTiming: mod DeferredPassTiming) {
+  passTiming.reportTags.clear()
+  passTiming.reportSums.clear()
+  passTiming.reportFrames = 0
 }
 
 func passTimingShutdown(passTiming: mod DeferredPassTiming, resources: mod GpuResources) {

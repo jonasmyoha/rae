@@ -319,9 +319,11 @@ func main() ret Int {
 
     let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
     if renderFrame {
+      gpuPassTimingBegin(renderer: renderer)
       var passIndex: Int = 0
       loop passIndex < deferredOrderLength(renderer: renderer) {
         let tag: Int = deferredTagAt(renderer: renderer, i: passIndex)
+        gpuPassMark(renderer: renderer, tag: tag)
         if tag is RenderTag.waterFft {
           # In the test frame the sea is frozen at t = 2 s so the frame repeats.
           # Wave time is absolute elapsed time, independent of the camera's
@@ -448,6 +450,7 @@ func main() ret Int {
         )
         passIndex = passIndex + 1
       }
+      gpuPassTimingEnd(renderer: renderer)
       world3dPrevTransformSystem(world: sceneWorld)
       if tierCheck and oceanFrames > 0 and oceanFrames % waterCheckStageFrames is 0 {
         if let resources: mod GpuResources => gpuManager {

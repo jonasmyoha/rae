@@ -8,7 +8,8 @@
 #
 # WHAT IS ACTUALLY RUNNING. The full chain: the geometry pass writes
 # surface attributes and performs no lighting; the depth pyramid reduces
-# depth with MIN into a mip chain; one fullscreen lighting pass evaluates
+# depth with MIN into a mip chain (built on request: nothing samples it yet); one fullscreen
+# lighting pass evaluates
 # the BRDF over the G-buffer into linear HDR; the composite tonemaps that
 # to the presentable target. Lighting cost is per pixel, not per
 # object-pixel — the point of the whole split.
@@ -177,6 +178,9 @@ func main() ret Int {
     minorSegs: 48
   )
   var renderer: DeferredRenderer = createDeferredRenderer()
+  # No pass samples the depth pyramid yet, so the renderer builds it only on
+  # request. This example shows the whole chain, so it asks.
+  requestDepthPyramid(renderer: renderer)
 
   let sphere: MeshHandle = uploadMeshData(renderer: renderer, meshData: sphereData)
   let ground: MeshHandle = uploadMeshData(renderer: renderer, meshData: planeData)
@@ -201,6 +205,7 @@ func main() ret Int {
   var lastY: Float = 0.0
   var dragging: Bool = false
   let startT: Float64 = Gpu2d.nowSeconds()
+  var pyramidLogged: Bool = false
 
   loop not Gpu2d.pollClose() {
     let px: Float = Gpu2d.pointerX()
@@ -249,6 +254,10 @@ func main() ret Int {
         light: light
         aspect: aspect
       )
+      if not pyramidLogged and deferredPyramidMips(renderer: renderer) > 0 {
+        log("depth pyramid: {deferredPyramidMips(renderer: renderer)} mips")
+        pyramidLogged = true
+      }
     }
   }
   shutdownDeferredRenderer(renderer: renderer)  # #904: the renderer-owned GPU manager, before the C shutdown

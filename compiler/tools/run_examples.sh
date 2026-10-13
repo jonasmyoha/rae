@@ -1253,16 +1253,17 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # Order is DERIVED from the graph's resource edges, never written,
           # and the pyramid must actually have been built — a silently
           # skipped pass would still leave a correct-looking lit image,
-          # since nothing reads the pyramid yet. Every declared pass now
-          # executes (renderer_deferred.rae), so the pyramid's presence in
-          # the derived pass order (`4: depthPyramid`; waterFft leads since #831) is the built signal —
-          # the old per-build `depth pyramid: N mips` debug log was removed.
+          # since nothing reads the pyramid yet. The renderer builds it only
+          # on request (render-perf-5); 110 requests it and logs
+          # `depth pyramid: N mips` once it exists. The pass itself sits at
+          # `4: depthPyramid` in the derived order (waterFft leads since #831).
           if [ "$GB_OK" = "1" ] \
              && [ "$(grep -c '  0: waterFft' "$TMP_OUT/gb-lit.log")" -ge 1 ] \
              && [ "$(grep -c '  1: shadow' "$TMP_OUT/gb-lit.log")" -ge 1 ] \
              && [ "$(grep -c '  2: gbuffer' "$TMP_OUT/gb-lit.log")" -ge 1 ] \
              && [ "$(grep -c '  3: ssao' "$TMP_OUT/gb-lit.log")" -ge 1 ] \
              && [ "$(grep -c '  4: depthPyramid' "$TMP_OUT/gb-lit.log")" -ge 1 ] \
+             && [ "$(grep -c 'depth pyramid: [1-9][0-9]* mips' "$TMP_OUT/gb-lit.log")" -ge 1 ] \
              && [ "$(grep -c '  6: transparentForward' "$TMP_OUT/gb-lit.log")" -ge 1 ] \
              && [ "$(grep -c '  7: underwater' "$TMP_OUT/gb-lit.log")" -ge 1 ] \
              && [ "$(grep -c '  8: taa' "$TMP_OUT/gb-lit.log")" -ge 1 ] \

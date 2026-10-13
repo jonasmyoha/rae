@@ -23,7 +23,8 @@
 # read, and the reference engine shares one pyramid between them rather
 # than building two. Declaring it now means the slice's dependency edges
 # are the real ones, so when culling arrives it slots in rather than
-# reshaping the frame.
+# reshaping the frame. Nothing samples it yet, so the pass runs only after
+# requestDepthPyramid (render-perf-5); the edges stay declared.
 #
 # ALLOCATION-FREE PER OBJECT is the acceptance criterion (#356), which is
 # why transforms flow through the #354 value types: a Mat4 is 16 floats by
@@ -767,6 +768,28 @@ func gpuPassTimingBegin(renderer: mod DeferredRenderer) {
   if let resources: mod GpuResources => renderer.gpuResources {
     passTimingFrameBegin(passTiming: renderer.passTiming, resources: resources)
   }
+  if renderer.passTiming.reportFrames >= passTimingReportFrames {
+    logPassTimingReport(passTiming: renderer.passTiming)
+  }
+}
+
+# Frames averaged into one "[gpu passes]" log line
+const passTimingReportFrames: Int = 60
+
+# One line: each pass's average GPU time in microseconds over the report's
+# frames, then the frame's total.
+func logPassTimingReport(passTiming: mod DeferredPassTiming) {
+  let frames: Int = passTiming.reportFrames
+  var line: String = "[gpu passes] average of {frames} frames, us:"
+  var total: Int = 0
+  loop var i: Int = 0, i < passTiming.reportTags.length, ++i {
+    let tag: Int = passTiming.reportTags.copyAtDefault(index: i)
+    let average: Int = passTiming.reportSums.copyAtDefault(index: i) / frames
+    total = total + average
+    line = "{line} {renderTagName(tag: tag)} {average} |"
+  }
+  log("{line} total {total}")
+  clearPassTimingReport(passTiming: passTiming)
 }
 
 func gpuPassMark(renderer: mod DeferredRenderer, tag: view Int) {
@@ -868,9 +891,18 @@ func deferredDrawCount(renderer: view DeferredRenderer) pub ret Int {
   ret passDrawCount(cache: renderer.passes.gbuffer)
 }
 
-# Mip levels in the depth pyramid built by the last frame.
-func deferredPyramidMips(renderer: view DeferredRenderer) pub ret Int {
+# Mip levels in the depth pyramid built by the last frame (0 until a
+# consumer asked for it).
+func deferredPyramidMips(renderer: view DeferredRenderer) ret Int {
   ret renderer.passes.targets.pyramidMips
+}
+
+# Ask for the depth pyramid. The depthPyramid pass builds it (and allocates
+# it) only after this call: no current pass samples it, so building it every
+# frame was wasted GPU time (render-perf-5). A pass that starts sampling the
+# pyramid (Hi-Z culling, SSAO's coarse steps) calls this once.
+func requestDepthPyramid(renderer: mod DeferredRenderer) {
+  renderer.passes.targets.pyramidWanted = true
 }
 
 # The underwater pass's parameters for this frame (#855): set by the water

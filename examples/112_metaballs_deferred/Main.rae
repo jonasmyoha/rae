@@ -751,9 +751,11 @@ func main() ret Int {
       # writes the colour target, the UI overlay MODIFIES it (load-preserving),
       # present reads it. The passes are declared backwards in
       # createRenderer3dWithUi; this loop runs them in dependency order.
+      gpuPassTimingBegin(renderer: renderer)
       var pi3: Int = 0
       loop pi3 < deferredOrderLength(renderer: renderer) {
         let tag: Int = deferredTagAt(renderer: renderer, i: pi3)
+        gpuPassMark(renderer: renderer, tag: tag)
         if tag is RenderTag.shadow {
           # Fit the cascades to THIS frame's camera and sun, then
           # rasterise every visible mesh into them (#382). The graph put
@@ -896,10 +898,11 @@ func main() ret Int {
           lastLogRevision = logOverlay.revision
         }
         if tag is RenderTag.present {
-          Gpu2d.endFrame(canvas: renderer.canvas)
+          endUiFrameTimed(renderer: renderer)
         }
         pi3 = pi3 + 1
       }
+      gpuPassTimingEnd(renderer: renderer)
       # Frame history for motion vectors (#336): PrevTransformSystem (#735) makes
       # the ACTIVE scene's current transforms its previous-frame set. Inactive
       # scenes are not advanced — they aren't rendered, so they have no frame

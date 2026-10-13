@@ -329,8 +329,8 @@ func drawTransparentBatch(
 }
 
 # The render graph's transparentForward step: snapshot, then draw this frame's
-# batch, then reset it for the next frame. With nothing queued only the
-# snapshot runs — the pass costs no GPU work until a client uses it.
+# batch, then reset it for the next frame. With nothing queued (and no early
+# snapshot) the pass does no GPU work at all.
 # Take the opaque snapshot EARLY, before something refractive (the water, #832)
 # draws and reads litCopy. An app that draws refracting surfaces calls this
 # first, then its draws, then transparentPass; an app without them just calls
@@ -357,7 +357,10 @@ func transparentPass(
     cache.batch.count = 0
     ret
   }
-  if not cache.snapshotDone {
+  # The snapshot is for the transparents drawn now; with nothing queued it
+  # would be a full-screen copy nobody reads (render-perf-5). The underwater
+  # pass takes its own, and a refracting app takes it early (transparentSnapshot).
+  if not cache.snapshotDone and cache.batch.count > 0 {
     copyOpaqueRadiance(resources: resources, targets: targets)
   }
   cache.snapshotDone = false
