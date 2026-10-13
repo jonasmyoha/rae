@@ -738,13 +738,8 @@ static void rae_g3d_present_offscreen(WGPUTexture tex, int width, int height) {
      * then apply status-specific recovery (occlusion does not reconfigure). */
     if (st.texture) wgpuTextureRelease(st.texture);
     if (!presented) rae_present_recover("gpu3d", st.status);
-    /* Blocking poll on a presented frame retires the surface-present
-     * submission's resources, which a non-blocking poll leaves queued until
-     * they complete at the next vsync — a ~7 KB/frame RSS climb while busy-
-     * rendering. Same fix and rationale as the 2D endFrame; Fifo already
-     * paces to vsync so it costs no frame rate. Occluded/headless frames
-     * (nothing presented) keep the cheap non-blocking poll. */
-    if (presented) rae_wgpu_poll_frame_end(); else rae_wgpu_poll(0);
+    /* No wait here: frame pacing is Rae's (lib/gpu/FramePacer.rae), run by
+     * the caller next — same as the 2D present. */
 }
 
 /* Present the tonemapped offscreen (#514): advance the virtual clock and copy

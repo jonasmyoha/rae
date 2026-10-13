@@ -67,6 +67,7 @@ open SkinStore
 open GbufferSdf
 open GbufferNative
 open GbufferResources
+open gpu/FramePacer
 
 # ----- geometry-pass begin (#503, manager-owned since #906) -------------------
 # The frame is the GbufferCache's: manager targets (rebuilt to the offscreen
@@ -512,6 +513,7 @@ func gbMeshIcount(cache: view GbufferCache, mesh: copy Int) ret Int {
 func nativePresent(texture: Ptr, width: Int, height: Int) unsafe extern("rae_ext_Gbuffer_present")
 
 func present(canvas: mod Gpu2dCanvas) {
+  notePresentStart(pacer: canvas.framePacer)
   unsafe {
     nativePresent(
       texture: canvasOffscreenTexture(canvas: canvas)
@@ -519,6 +521,7 @@ func present(canvas: mod Gpu2dCanvas) {
       height: canvas.offscreenHeight
     )
   }
+  paceFrame(pacer: canvas.framePacer)
 }
 
 func nativeShutdown() unsafe extern("rae_ext_Gbuffer_shutdown")

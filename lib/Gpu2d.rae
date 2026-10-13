@@ -20,6 +20,7 @@ open Gpu2dCanvasText
 open Gpu2dCanvasFrame
 open webgpu/Webgpu
 open webgpu/Context
+open gpu/FramePacer
 
 # --- Window + surface ----------------------------------------------------
 # Open a GPU-presenting window (Metal layer wrapped as a wgpu surface) and
@@ -427,8 +428,9 @@ func g2dFrameReset() {
 }
 
 # Present (#920): C copies the canvas's offscreen texture into the surface
-# drawable, presents and polls (skipped while the window is dark — no drawable
-# is acquired), and in a headless run reads the texture back for the
+# drawable and presents (skipped while the window is dark — no drawable is
+# acquired; the wait for the GPU is gpu/FramePacer's, run after it), and in a headless run reads
+# the texture back for the
 # RAE_GPU2D_SCREENSHOT capture. The texture is the canvas's; C only borrows it.
 func nativeG2dPresent(texture: Ptr, width: Int, height: Int) unsafe extern("rae_g2d_present")
 
@@ -515,7 +517,9 @@ func endFrameSubmit(canvas: mod Gpu2dCanvas) ret Bool {
 }
 
 func endFramePresent(canvas: mod Gpu2dCanvas) {
+  notePresentStart(pacer: canvas.framePacer)
   g2dPresent(canvas: canvas)
+  paceFrame(pacer: canvas.framePacer)
   boxFrameEnd(canvas: canvas)
 }
 
