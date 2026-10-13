@@ -78,7 +78,7 @@ func main() {
   log("ground: {addFlatGround(scene: scene)}")
   var allocator: EntityAllocator = createEntityAllocator()
   let sample: MoverSize = sampleMoverSize()
-  let small: MoverSize = { radius: 0.22, halfHeight: 0.37 }
+  let small: MoverSize = { radius: 0.22, halfHeight: 0.37, restLength: 0.66 }
   let sampleId: EntityId = allocEntity(this: allocator)
   let smallId: EntityId = allocEntity(this: allocator)
   # Both dropped a little over where they rest
@@ -138,5 +138,22 @@ func main() {
   }
   log("both jump: {samplePeak > 0.5 and smallPeak > 0.5}")
   log("just as high: {near(a: samplePeak, b: smallPeak, within: 0.05)}")
+  # Resized where it stands: the same size as the sample's, its feet kept
+  let feetBefore: Float = centerHeight(scene: scene, id: smallId) - moverRestHeight(size: small)
+  resizeCharacterMover(
+    mover: componentMod(this: scene.characters, entityId: smallId).mover
+    size: sample
+  )
+  let feetAfter: Float = centerHeight(scene: scene, id: smallId) - moverRestHeight(size: sample)
+  let resized: MoverSize = moverSizeOf(
+    mover: componentView(this: scene.characters, entityId: smallId).mover
+  )
+  log(
+    "resized, its feet kept: {near(a: feetBefore, b: feetAfter, within: 0.0001) and near(
+      a: resized.radius
+      b: 0.3
+      within: 0.0001
+    ) and near(a: resized.restLength, b: 0.9, within: 0.0001)}"
+  )
   destroyPhysics(physics: scene.physics)
 }

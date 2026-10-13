@@ -93,32 +93,59 @@ type CharacterMover {
   planePoints: List(b3Vec3)
   planeShapeIds: List(b3ShapeId)
   totalIterations: Int
+  # How far over the ground the pogo spring holds the lower sphere's centre
+  pogoRestLength: Float
   pogoVelocity: Float
   onGround: Bool
   sprint: Bool
   groundNormal: b3Vec3
 }
 
-# A mover's capsule: its radius, and how far each sphere's centre is from
-# its middle along the up axis. A bigger or smaller character carries its own;
-# the pogo spring scales with it (it holds the lower sphere three radii over
-# the ground).
+# A mover's size: its capsule's radius, how far each sphere's centre is from
+# its middle along the up axis, and how far over the ground the pogo spring
+# holds the lower sphere's centre (`restLength`; the sample's is three radii,
+# so the capsule's lowest point floats two radii up). A bigger or smaller
+# character carries its own.
 type MoverSize {
   radius: Float
   halfHeight: Float
+  restLength: Float
 }
 
 # The sample's: radius 0.3, the spheres' centres 0.5 m either side of the
-# middle (a character about 2 m tall).
+# middle, held 0.9 m up (a character about 2 m tall).
 func sampleMoverSize() ret MoverSize {
-  ret MoverSize { radius: 0.3, halfHeight: 0.5 }
+  ret MoverSize { radius: 0.3, halfHeight: 0.5, restLength: 0.9 }
 }
 
 # How high a standing mover's capsule middle rests over the ground: the pogo
-# spring's rest length (three radii) to the lower sphere's centre, then half
-# the capsule. 1.4 m for the sample's.
+# spring's rest length to the lower sphere's centre, then half the capsule.
+# 1.4 m for the sample's.
 func moverRestHeight(size: view MoverSize) ret Float {
-  ret 3.0 * size.radius + size.halfHeight
+  ret size.restLength + size.halfHeight
+}
+
+# A mover's size, read off it.
+func moverSizeOf(mover: view CharacterMover) ret MoverSize {
+  ret MoverSize {
+    radius: mover.capsule.radius
+    halfHeight: (upComponent(vector: mover.capsule.center2, up: mover.up) - upComponent(
+      vector: mover.capsule.center1
+      up: mover.up
+    )) * 0.5
+    restLength: mover.pogoRestLength
+  }
+}
+
+# Make `mover` `size`, its feet where they were: its capsule and its pogo
+# spring change, and its middle moves to the new rest height over them.
+func resizeCharacterMover(mover: mod CharacterMover, size: view MoverSize) {
+  let feet: Float = upComponent(vector: mover.transform.p, up: mover.up) - moverRestHeight(
+    size: moverSizeOf(mover: mover)
+  )
+  mover.capsule = moverCapsuleSized(up: mover.up, size: size)
+  mover.pogoRestLength = size.restLength
+  setUpComponent(vector: mover.transform.p, up: mover.up, value: feet + moverRestHeight(size: size))
 }
 
 # A capsule of `size` along the up axis.
@@ -161,6 +188,7 @@ func createCharacterMoverSized(
     planePoints: List.create(b3Vec3, cap: planeCapacity)
     planeShapeIds: List.create(b3ShapeId, cap: planeCapacity)
     totalIterations: 0
+    pogoRestLength: size.restLength
     pogoVelocity: 0.0
     onGround: false
     sprint: false
@@ -279,7 +307,7 @@ func accelerateCharacter(
 # soft spring (4 Hz, damping 0.7) holds the mover at three radii above it.
 func updatePogo(mover: mod CharacterMover, worldId: view b3WorldId, timeStep: view Float) {
   unsafe {
-    let pogoRestLength: Float = 3.0 * mover.capsule.radius
+    let pogoRestLength: Float = mover.pogoRestLength
     let rayLength: Float = pogoRestLength + mover.capsule.radius
     let rayOrigin: b3Vec3 = b3TransformWorldPoint(t: mover.transform, p: mover.capsule.center1)
     let rayTranslation: b3Vec3 = b3MulSV(s: -rayLength, a: upVector(up: mover.up))
