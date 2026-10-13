@@ -1,0 +1,14 @@
+# `Module.name(...)` resolves ONLY in that module. lib/Math has no `log` (its
+# natural log is `naturalLog`), and `Math.log(x: 3.0)` used to resolve quietly
+# to the global logging builtin `log`: the `x:` label went unchecked and the
+# build died in clang on `double * void`. A name the module does not declare
+# is an error naming the module, whatever exists elsewhere under that name.
+import Math
+
+func gaussianHeight(uniform: view Float) ret Float {
+  ret 2.0 * Math.log(x: uniform)
+}
+
+func main() {
+  log("{gaussianHeight(uniform: 0.5)}")
+}
