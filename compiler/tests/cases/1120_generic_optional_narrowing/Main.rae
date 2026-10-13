@@ -1,0 +1,63 @@
+# Narrowing an optional inside a GENERIC function (#61453872). In a
+# specialisation the binding is still written `view T` / `mod T`, so the
+# narrowing took the struct path and pointed at the whole `{ has, value }`
+# optional (`int64_t present = &maybe;`), declared a T = Int reference as a
+# plain `int64_t`, tested it as a pointer, and formatted it as an optional
+# again. Copying an `opt T` (`var held: opt T = maybe`) aliased a String
+# payload, and an `opt T` local was never dropped. Each is checked for T = Int,
+# UInt64, Bool, String and a struct. Formatting a narrowed struct reference
+# (`"{present}"`, generic or not) also failed to compile; it prints the struct.
+type Track {
+  title: String
+  seconds: Int
+}
+
+func describe(T: type, maybe: opt copy T) ret String {
+  if let present: view T => maybe {
+    ret "some {present}"
+  }
+  ret "none"
+}
+
+func describeLocal(T: type, value: copy T) ret String {
+  let maybe: opt T = value
+  if let present: view T => maybe {
+    ret "local {present}"
+  }
+  ret "none"
+}
+
+func replaced(T: type, maybe: opt copy T, replacement: copy T) ret opt T {
+  var held: opt T = maybe
+  if let present: mod T => held {
+    present = replacement
+  }
+  ret held
+}
+
+func trackSeconds(track: view Track) ret Int {
+  ret track.seconds
+}
+
+func main() {
+  log(describe(Int, maybe: 3))
+  log(describe(Int, maybe: none))
+  log(describe(UInt64, maybe: 4 as UInt64))
+  log(describe(Bool, maybe: true))
+  log(describe(String, maybe: "text"))
+  log(describeLocal(Int, value: 5))
+  log(describeLocal(String, value: "local text"))
+  log("replaced {replaced(Int, maybe: 1, replacement: 2)}")
+  log("replaced none {replaced(Int, maybe: none, replacement: 2)}")
+  log("replaced wide {replaced(UInt64, maybe: 7 as UInt64, replacement: 8 as UInt64)}")
+  log("replaced text {replaced(String, maybe: "old", replacement: "new")}")
+  let track: Track = { title: "Intro", seconds: 95 }
+  log(describe(Track, maybe: track))
+  if let kept: Track = replaced(
+    Track
+    maybe: track
+    replacement: Track { title: "Outro", seconds: 143 }
+  ) {
+    log("replaced track {kept.title} {trackSeconds(track: kept)}")
+  }
+}

@@ -1334,8 +1334,13 @@ static void emit_local_drop(CFuncContext* ctx, FILE* out, size_t idx,
   // "no heap" and silently leaked the value). Alias-classified locals
   // (`let val: T = rae_ext_rae_buf_get(...)`) keep skipping as before:
   // they borrow a container slot the container drops.
-  if (ctx->generic_params && ctx->generic_args && !type->is_opt
-      && !type->generic_args && ctx->local_struct_owns_heap[idx]) {
+  // An `opt T` local the same: substituted, it is `opt String` / `opt Track`
+  // and its drop releases the payload when present. (An optional local
+  // always owns its payload — the drop below does not consult the alias
+  // classification for it — and that classification, made on `opt T`,
+  // reads as "no heap".)
+  if (ctx->generic_params && ctx->generic_args
+      && !type->generic_args && (ctx->local_struct_owns_heap[idx] || type->is_opt)) {
     Str tb = get_base_type_name(type);
     bool is_param = false;
     for (const AstIdentifierPart* gp = ctx->generic_params; gp; gp = gp->next)
@@ -2606,6 +2611,15 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             bool let_did_deep_copy = false;
             bool is_ref_bind = stmt->as.let_stmt.is_bind && stmt->as.let_stmt.type &&
                                (stmt->as.let_stmt.type->is_view || stmt->as.let_stmt.type->is_mod);
+            /* A reference binding in a generic specialisation is written
+             * `view T` / `opt view T`: declare and register it as the
+             * substituted type, so a T = Int binding is the `rae_View_Int64`
+             * reference its narrowing and its readers expect, not the
+             * by-value `int64_t` a `view Int` parameter lowers to. */
+            const AstTypeRef* ref_decl_type = stmt->as.let_stmt.type;
+            if (is_ref_bind && ctx->generic_params && ctx->generic_args)
+                ref_decl_type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
+                                                    ctx->generic_args, (AstTypeRef*)ref_decl_type);
 
             // A `=>` onto a produced value. Two very different cases meet
             // here (spec 2.3.1):
@@ -2684,7 +2698,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             }
 
             fprintf(out, "  ");
-            emit_type_ref_as_c_type(ctx, stmt->as.let_stmt.type, out, false);
+            emit_type_ref_as_c_type(ctx, is_ref_bind ? ref_decl_type : stmt->as.let_stmt.type, out, false);
             fprintf(out, " %.*s = ", (int)stmt->as.let_stmt.name.len, stmt->as.let_stmt.name.data);
             if (materialised_id >= 0) {
                 fprintf(out, "&__rae_bind%d;\n", materialised_id);
@@ -2701,7 +2715,14 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 break;
             }
             if (is_ref_bind) {
-                Str base = get_base_type_name(stmt->as.let_stmt.type);
+                /* In a generic specialisation the written type is still `view
+                 * T`: decide the lowering on the substituted type, or a T =
+                 * Int / String binding takes the struct path below. */
+                const AstTypeRef* bind_type = stmt->as.let_stmt.type;
+                if (ctx->generic_params && ctx->generic_args)
+                    bind_type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
+                                                    ctx->generic_args, (AstTypeRef*)bind_type);
+                Str base = get_base_type_name(bind_type);
                 // Does the source ident ALREADY lower to a reference — a
                 // view/mod param or an earlier alias binding? Then it is a
                 // pointer (struct) or a .ptr handle (primitive), and `&` on
@@ -2841,8 +2862,26 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                                 (int)stmt->as.let_stmt.value->as.ident.len,
                                 stmt->as.let_stmt.value->as.ident.data);
                     } else {
-                        fprintf(out, "&");
-                        emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_LOWEST, false, true);
+                        /* A stored STRUCT-REP optional narrowed by reference
+                         * (`if let x: view T => maybe` where sema left no
+                         * UNBOX, as in a generic specialisation): point at
+                         * the payload when present, NULL when not — never at
+                         * the `{ has, value }` box itself. */
+                        const AstExpr* opt_src = stmt->as.let_stmt.value;
+                        const AstTypeRef* opt_src_tr = infer_expr_type_ref(ctx, opt_src);
+                        if (opt_src_tr && opt_src_tr->is_opt
+                            && !(opt_src_tr->is_view || opt_src_tr->is_mod)
+                            && rae_opt_is_struct_rep(ctx, opt_src_tr)) {
+                            int oid = ctx->temp_counter++;
+                            fprintf(out, "(");
+                            emit_type_ref_as_c_type(ctx, bind_type, out, false);
+                            fprintf(out, ")({ __auto_type __ov%d = &(", oid);
+                            emit_expr(ctx, opt_src, out, PREC_LOWEST, true, false);
+                            fprintf(out, "); __ov%d->has ? &__ov%d->value : NULL; })", oid, oid);
+                        } else {
+                            fprintf(out, "&");
+                            emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_LOWEST, false, true);
+                        }
                     }
                 }
             } else if (stmt->as.let_stmt.value && stmt->as.let_stmt.value->kind == AST_EXPR_COLLECTION_LITERAL) {
@@ -2953,7 +2992,13 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     if (val_tr && val_tr->is_opt && !(val_tr->is_view || val_tr->is_mod)
                         && (let_value->kind == AST_EXPR_IDENT || let_value->kind == AST_EXPR_MEMBER
                             || let_value->kind == AST_EXPR_INDEX)) {
-                        AstTypeRef let_payload = *stmt->as.let_stmt.type;
+                        /* substituted: in a generic body the payload is `T`,
+                         * which on its own never needs a deep copy */
+                        const AstTypeRef* let_declared = stmt->as.let_stmt.type;
+                        if (ctx->generic_params && ctx->generic_args)
+                            let_declared = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
+                                                               ctx->generic_args, (AstTypeRef*)let_declared);
+                        AstTypeRef let_payload = *let_declared;
                         let_payload.is_opt = false;
                         let_payload.next = NULL;
                         let_payload.resolved_type = NULL;
@@ -3094,7 +3139,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 ctx->local_is_mod[ctx->local_count] = false;
                 ctx->locals[ctx->local_count] = stmt->as.let_stmt.name;
                 ctx->local_types[ctx->local_count] = str_from_cstr(tn);
-                ctx->local_type_refs[ctx->local_count] = stmt->as.let_stmt.type;
+                ctx->local_type_refs[ctx->local_count] = is_ref_bind ? ref_decl_type : stmt->as.let_stmt.type;
                 // #902: a slot index is REUSED across sibling scopes (an
                 // if-let/loop body's locals pop back to `saved_locals` on
                 // scope exit, so the next sibling scope's first local claims
