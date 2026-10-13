@@ -86,7 +86,7 @@ func notePresentStart(pacer: mod FramePacer) {
 
 # Call once per frame, right after the frame is submitted and presented.
 func paceFrame(pacer: mod FramePacer) {
-  var frameEnd: UInt64 = 0 as UInt64
+  var frameEnd: UInt64 = 0
   unsafe {
     # No device (a renderer exercised without one, as the old C present
     # allowed): nothing was submitted, so there is nothing to wait for
@@ -95,7 +95,7 @@ func paceFrame(pacer: mod FramePacer) {
     }
     frameEnd = wgpuQueueSubmitForIndex(
       queue: webgpuQueue()
-      commandCount: 0 as UInt64
+      commandCount: 0
       commands: webgpuNull()
     )
   }

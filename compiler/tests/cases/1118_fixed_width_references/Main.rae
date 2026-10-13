@@ -15,18 +15,18 @@ type Holder {
 }
 
 func twice(value: copy UInt64) ret UInt64 {
-  ret value * (2 as UInt64)
+  ret value * 2
 }
 
 func viaParam(value: view UInt64) ret UInt64 {
-  ret value + (1 as UInt64)
+  ret value + 1
 }
 
 func narrowParam(maybe: opt copy UInt64) ret UInt64 {
   if let present: view UInt64 => maybe {
-    ret present * (3 as UInt64)
+    ret present * 3
   }
-  ret 0 as UInt64
+  ret 0
 }
 
 func pick(flag: view Bool) ret opt UInt32 {
@@ -47,41 +47,41 @@ func main() {
     let copied: UInt64 = present
     log("copy {copied}")
     log("argument {twice(value: present)}")
-    log("arithmetic {present + (2 as UInt64)}")
+    log("arithmetic {present + 2}")
     log("comparison {present > (10 as UInt64)}")
     log("interpolation {present}")
   }
   if let present: view UInt8 => holder.small {
     let copied: UInt8 = present
-    log("small {copied} {present + (1 as UInt8)} {present is (7 as UInt8)}")
+    log("small {copied} {present + 1} {present is (7 as UInt8)}")
   }
   if let present: view Int32 => holder.signed {
-    log("signed {present} {present * (2 as Int32)}")
+    log("signed {present} {present * 2}")
   }
   if let present: view UInt32 => holder.mid {
     let copied: UInt32 = present
     log("mid {copied} {present < (10 as UInt32)}")
   }
   if let present: mod UInt64 => holder.wide {
-    present = present + (2 as UInt64)
+    present = present + 2
   }
   if let present: view UInt64 => holder.wide {
     log("written through mod {present}")
   }
 
-  let base: UInt64 = 10 as UInt64
+  let base: UInt64 = 10
   let baseView: view UInt64 => base
-  log("view local {baseView} {baseView + (1 as UInt64)}")
+  log("view local {baseView} {baseView + 1}")
   log("view parameter {viaParam(value: base)} {viaParam(value: baseView)}")
   let four: opt UInt64 = 4 as UInt64
   log("narrowed parameter {narrowParam(maybe: four)} {narrowParam(maybe: none)}")
   if let taken: UInt32 = pick(flag: true) {
-    log("taken {taken} {taken + (1 as UInt32)}")
+    log("taken {taken} {taken + 1}")
   }
   var values: List(UInt64) = List.create(UInt64, cap: 2)
   values.add(value: 6 as UInt64)
   values.add(value: 7 as UInt64)
-  var sum: UInt64 = 0 as UInt64
+  var sum: UInt64 = 0
   loop let value: view UInt64 in values {
     sum = sum + value
   }

@@ -445,6 +445,16 @@ If the task turns out to be larger than expected, split it and explain.
   it did not, and it spread to 199 places across 87 files before anyone asked
   why (#61593435); the tree is now clean of it, apart from one fixture where
   folding a constant EXPRESSION is the test's subject. Do not reintroduce it.
+- **A literal is not cast to the type it already gets.** A bare numeric
+  literal takes its context's type — a binding, an assignment, an argument, a
+  return, a struct or list literal field, the typed side of `+ - * / %` — so
+  write `var frameEnd: UInt64 = 0`, `takeWide(count: 7)`, `small + 1`, never
+  `0 as UInt64` there. The compiler rejects the redundant cast ("the literal
+  already is a UInt64 here; drop `as UInt64`", 0.2.19; 213 were swept from the
+  tree). A cast that converts (`count as Float`), a literal cast with no
+  context (`"{5 as UInt32}"`) and a cast on the LEFT of an operator
+  (`(0.0 as Float64) - x`: the expression takes its left operand's type) stay. And a literal must FIT the type it lands
+  in (`let big: UInt8 = 300` is an error, 0.2.18).
 - **Rule of thumb for packages**: If an app or example doesn't strictly need a `.raepack` file (or isn't specifically demonstrating `.raepack` features), do NOT include one. Default compiler behavior should be preferred whenever possible.
 
 Compiler code should favor:

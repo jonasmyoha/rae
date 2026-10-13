@@ -32,10 +32,10 @@ func createTextureMipped(
       let descriptor: WGPUTextureDescriptor = {
         usage: usage
         dimension: WGPUTextureDimension_2D
-        size: { width: width as UInt32, height: height as UInt32, depthOrArrayLayers: 1 as UInt32 }
+        size: { width: width as UInt32, height: height as UInt32, depthOrArrayLayers: 1 }
         format: format
         mipLevelCount: mipLevels as UInt32
-        sampleCount: 1 as UInt32
+        sampleCount: 1
       }
       let handle: Ptr = wgpuDeviceCreateTexture(device: webgpuDevice(), descriptor: descriptor)
       if handle is webgpuNull() {
@@ -72,9 +72,9 @@ func createTextureViewMip(
         format: wgpuTextureGetFormat(texture: textureHandle)
         dimension: WGPUTextureViewDimension_2D
         baseMipLevel: mip as UInt32
-        mipLevelCount: 1 as UInt32
-        baseArrayLayer: 0 as UInt32
-        arrayLayerCount: 1 as UInt32
+        mipLevelCount: 1
+        baseArrayLayer: 0
+        arrayLayerCount: 1
         aspect: WGPUTextureAspect_All
       }
       let handle: Ptr = wgpuTextureCreateView(texture: textureHandle, descriptor: descriptor)
@@ -111,10 +111,10 @@ func createTextureViewMips(
       let descriptor: WGPUTextureViewDescriptor = {
         format: wgpuTextureGetFormat(texture: textureHandle)
         dimension: WGPUTextureViewDimension_2D
-        baseMipLevel: 0 as UInt32
+        baseMipLevel: 0
         mipLevelCount: wgpuTextureGetMipLevelCount(texture: textureHandle)
-        baseArrayLayer: 0 as UInt32
-        arrayLayerCount: 1 as UInt32
+        baseArrayLayer: 0
+        arrayLayerCount: 1
         aspect: WGPUTextureAspect_All
       }
       let handle: Ptr = wgpuTextureCreateView(texture: textureHandle, descriptor: descriptor)
@@ -151,7 +151,7 @@ func createSamplerMipped(resources: mod GpuResources, addressMode: view Int32) r
         lodMinClamp: 0.0
         lodMaxClamp: 32.0
         compare: WGPUCompareFunction_Undefined
-        maxAnisotropy: 1 as UInt16
+        maxAnisotropy: 1
       }
       let handle: Ptr = wgpuDeviceCreateSampler(device: webgpuDevice(), descriptor: descriptor)
       if handle is webgpuNull() {
@@ -217,8 +217,8 @@ func createTextureArray(
           depthOrArrayLayers: layers as UInt32
         }
         format: format
-        mipLevelCount: 1 as UInt32
-        sampleCount: 1 as UInt32
+        mipLevelCount: 1
+        sampleCount: 1
       }
       let handle: Ptr = wgpuDeviceCreateTexture(device: webgpuDevice(), descriptor: descriptor)
       if handle is webgpuNull() {
@@ -256,8 +256,8 @@ func makeLayerView(
       let descriptor: WGPUTextureViewDescriptor = {
         format: wgpuTextureGetFormat(texture: textureHandle)
         dimension: dimension
-        baseMipLevel: 0 as UInt32
-        mipLevelCount: 1 as UInt32
+        baseMipLevel: 0
+        mipLevelCount: 1
         baseArrayLayer: baseLayer as UInt32
         arrayLayerCount: layerCount as UInt32
         aspect: WGPUTextureAspect_All
@@ -325,7 +325,7 @@ func createComparisonSampler(resources: mod GpuResources) ret opt SamplerId {
         lodMinClamp: 0.0
         lodMaxClamp: 1.0
         compare: WGPUCompareFunction_Less
-        maxAnisotropy: 1 as UInt16
+        maxAnisotropy: 1
       }
       let handle: Ptr = wgpuDeviceCreateSampler(device: webgpuDevice(), descriptor: descriptor)
       if handle is webgpuNull() {

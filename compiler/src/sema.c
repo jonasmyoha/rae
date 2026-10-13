@@ -5536,6 +5536,36 @@ static bool sema_check_int_literal_fits(const AstExpr* e, const TypeInfo* want) 
     return false;
 }
 
+/* A numeric literal already takes the type its context gives it (a binding, a
+ * parameter, a field, a list element, the typed operand of arithmetic), so
+ * `0 as UInt64` there is noise: one spelling, like `-1` over `0 - 1`. A cast
+ * to exactly the context's type is an error (decision 2026-10-13:
+ * an error, not a warning — warnings pile up). A cast that converts, or a
+ * literal cast where no context gives the literal a type, stays legal. An
+ * integer literal can take any numeric type; a float literal only a float
+ * type, so `1.5 as Int` is a real conversion. */
+static bool sema_check_redundant_literal_cast(const AstExpr* e, const TypeInfo* context) {
+    if (!e || e->kind != AST_EXPR_CAST || !context || !e->resolved_type) return true;
+    if (!sema_is_numeric_kind(context->kind)) return true;
+    const AstExpr* literal = e->as.cast.operand;
+    while (literal && literal->kind == AST_EXPR_UNARY && literal->as.unary.op == AST_UNARY_NEG)
+        literal = literal->as.unary.operand;
+    if (!literal || (literal->kind != AST_EXPR_INTEGER && literal->kind != AST_EXPR_FLOAT)) return true;
+    if (e->resolved_type != context) return true;
+    if (literal->kind == AST_EXPR_FLOAT && context->kind != TYPE_FLOAT && context->kind != TYPE_FLOAT64)
+        return true;
+    Str written = (e->as.cast.target && e->as.cast.target->parts) ? e->as.cast.target->parts->text
+                                                                  : context->name;
+    const char* article = (written.len > 0 && written.data[0] == 'I') ? "an" : "a";
+    char message[200];
+    snprintf(message, sizeof message, "the literal already is %s %.*s here; drop `as %.*s`",
+             article, (int)written.len, written.data, (int)written.len, written.data);
+    const char* err_file = s_current_decl_origin ? s_current_decl_origin : NULL;
+    diag_error(err_file, (int)e->line, (int)e->column, message);
+    if (s_current_module) s_current_module->had_error = true;
+    return false;
+}
+
 /* Every integer literal element of a `{ ... }` / `List(T) { ... }` literal
  * must fit the list's element type. */
 static void sema_check_collection_literal_ints(const AstExpr* e, const TypeInfo* list_type) {
@@ -5545,7 +5575,10 @@ static void sema_check_collection_literal_ints(const AstExpr* e, const TypeInfo*
     if (list_type->name.len < 4 || memcmp(list_type->name.data, "List", 4) != 0) return;
     const TypeInfo* element = list_type->as.structure.generic_args[0];
     for (const AstCollectionElement* el = e->as.collection.elements; el; el = el->next)
-        if (el->value) sema_check_int_literal_fits(el->value, element);
+        if (el->value) {
+            sema_check_int_literal_fits(el->value, element);
+            sema_check_redundant_literal_cast(el->value, element);
+        }
 }
 
 /* See through `view T` / `mod T` for the numeric-conversion check.
@@ -5897,6 +5930,7 @@ static void sema_check_object_literal_fields(TypeInfo* structType, AstObjectFiel
             if (field_type && f->value && s_lifecycle_ctx && s_lifecycle_symbols && s_current_module) {
                 TypeInfo* ft = sema_resolve_type_internal(s_lifecycle_ctx, s_current_module, s_lifecycle_symbols, field_type);
                 sema_check_int_literal_fits(f->value, sema_strip_ref(ft));
+                sema_check_redundant_literal_cast(f->value, sema_strip_ref(ft));
             }
             if (field_type && sema_is_pending_create(f->value) && s_lifecycle_ctx && s_lifecycle_symbols && s_current_module) {
                 TypeInfo* ft = sema_resolve_type_internal(s_lifecycle_ctx, s_current_module, s_lifecycle_symbols, field_type);
@@ -6028,6 +6062,7 @@ static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr*
     TypeInfo* want_num = sema_strip_ref(expected);
     TypeInfo* got_num = sema_strip_ref(expr->resolved_type);
     if (!sema_check_int_literal_fits(expr, want_num)) return;
+    if (!sema_check_redundant_literal_cast(expr, want_num)) return;
     if (want_num && got_num &&
         sema_is_numeric_kind(want_num->kind) &&
         sema_is_numeric_kind(got_num->kind) &&
@@ -6653,6 +6688,12 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                 bool rhs_literal = sema_is_numeric_literal(expr->as.binary.rhs);
                 if (rhs_literal && !lhs_literal) sema_check_int_literal_fits(expr->as.binary.rhs, lhs_type);
                 else if (lhs_literal && !rhs_literal) sema_check_int_literal_fits(expr->as.binary.lhs, rhs_type);
+                /* `small + (1 as UInt8)`: the left side already types a literal
+                 * on the right. Not the other way round: the expression takes
+                 * its LEFT operand's type, so in `(0.0 as Float64) - x` the
+                 * cast is what makes the whole expression Float64. */
+                bool lhs_typed = !lhs_literal && expr->as.binary.lhs->kind != AST_EXPR_CAST;
+                if (lhs_typed) sema_check_redundant_literal_cast(expr->as.binary.rhs, lhs_type);
             }
             /* A divisor that is a compile-time integer zero is an error here,
              * not a trap later: `x / 0`, `x % 0`, `x / (1 - 1)`, `x / zeroConst`

@@ -159,7 +159,7 @@ func fullscreenPostPass(
     )
     postAtt.add(value: att)
     let rpDesc: WGPURenderPassDescriptor = {
-      colorAttachmentCount: 1 as UInt64
+      colorAttachmentCount: 1
       colorAttachments: postAtt.data
     }
     let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
@@ -168,17 +168,17 @@ func fullscreenPostPass(
     wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: pipeline)
     wgpuRenderPassEncoderSetBindGroup(
       renderPassEncoder: pass
-      groupIndex: 0 as UInt32
+      groupIndex: 0
       group: bind
-      dynamicOffsetCount: 0 as UInt64
+      dynamicOffsetCount: 0
       dynamicOffsets: webgpuNull()
     )
     wgpuRenderPassEncoderDraw(
       renderPassEncoder: pass
-      vertexCount: 3 as UInt32
-      instanceCount: 1 as UInt32
-      firstVertex: 0 as UInt32
-      firstInstance: 0 as UInt32
+      vertexCount: 3
+      instanceCount: 1
+      firstVertex: 0
+      firstInstance: 0
     )
     wgpuRenderPassEncoderEnd(renderPassEncoder: pass)
     let cbDesc: WGPUCommandBufferDescriptor = { nextInChain: webgpuNull() }
@@ -266,7 +266,7 @@ func beginForward(
     depthAtts.add(value: depthAtt)
 
     let rpDesc: WGPURenderPassDescriptor = {
-      colorAttachmentCount: 4 as UInt64
+      colorAttachmentCount: 4
       colorAttachments: colorAtts.data
       depthStencilAttachment: depthAtts.data
     }
@@ -276,9 +276,9 @@ func beginForward(
     wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: g3dPipeline())
     wgpuRenderPassEncoderSetBindGroup(
       renderPassEncoder: pass
-      groupIndex: 0 as UInt32
+      groupIndex: 0
       group: g3dBind()
-      dynamicOffsetCount: 0 as UInt64
+      dynamicOffsetCount: 0
       dynamicOffsets: webgpuNull()
     )
     g3dSetFrame(enc: enc, pass: pass)
@@ -331,24 +331,24 @@ func draw(
     }
     wgpuRenderPassEncoderSetVertexBuffer(
       renderPassEncoder: pass
-      slot: 0 as UInt32
+      slot: 0
       buffer: vbuf
-      offset: 0 as UInt64
+      offset: 0
       size: wgpuBufferGetSize(buffer: vbuf)
     )
     wgpuRenderPassEncoderSetIndexBuffer(
       renderPassEncoder: pass
       buffer: ibuf
       format: WGPUIndexFormat_Uint32
-      offset: 0 as UInt64
+      offset: 0
       size: wgpuBufferGetSize(buffer: ibuf)
     )
     wgpuRenderPassEncoderDrawIndexed(
       renderPassEncoder: pass
       indexCount: icount as UInt32
-      instanceCount: 1 as UInt32
-      firstIndex: 0 as UInt32
-      baseVertex: 0 as Int32
+      instanceCount: 1
+      firstIndex: 0
+      baseVertex: 0
       firstInstance: slot as UInt32
     )
   }
@@ -389,25 +389,25 @@ func drawMetaballs(
     wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: g3dSdfPipeline())
     wgpuRenderPassEncoderSetBindGroup(
       renderPassEncoder: pass
-      groupIndex: 0 as UInt32
+      groupIndex: 0
       group: g3dSdfBind(slot: slot)
-      dynamicOffsetCount: 0 as UInt64
+      dynamicOffsetCount: 0
       dynamicOffsets: webgpuNull()
     )
     wgpuRenderPassEncoderDraw(
       renderPassEncoder: pass
-      vertexCount: 3 as UInt32
-      instanceCount: 1 as UInt32
-      firstVertex: 0 as UInt32
-      firstInstance: 0 as UInt32
+      vertexCount: 3
+      instanceCount: 1
+      firstVertex: 0
+      firstInstance: 0
     )
     # Restore the geometry pipeline/bind for subsequent mesh draws.
     wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: g3dPipeline())
     wgpuRenderPassEncoderSetBindGroup(
       renderPassEncoder: pass
-      groupIndex: 0 as UInt32
+      groupIndex: 0
       group: g3dBind()
-      dynamicOffsetCount: 0 as UInt64
+      dynamicOffsetCount: 0
       dynamicOffsets: webgpuNull()
     )
   }
@@ -821,40 +821,40 @@ func drawSkinned(
     wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: g3dSkinPipeline())
     wgpuRenderPassEncoderSetBindGroup(
       renderPassEncoder: pass
-      groupIndex: 0 as UInt32
+      groupIndex: 0
       group: g3dSkinBind()
-      dynamicOffsetCount: 0 as UInt64
+      dynamicOffsetCount: 0
       dynamicOffsets: webgpuNull()
     )
     wgpuRenderPassEncoderSetVertexBuffer(
       renderPassEncoder: pass
-      slot: 0 as UInt32
+      slot: 0
       buffer: vbuf
-      offset: 0 as UInt64
+      offset: 0
       size: wgpuBufferGetSize(buffer: vbuf)
     )
     wgpuRenderPassEncoderSetIndexBuffer(
       renderPassEncoder: pass
       buffer: ibuf
       format: WGPUIndexFormat_Uint32
-      offset: 0 as UInt64
+      offset: 0
       size: wgpuBufferGetSize(buffer: ibuf)
     )
     wgpuRenderPassEncoderDrawIndexed(
       renderPassEncoder: pass
       indexCount: icount as UInt32
-      instanceCount: 1 as UInt32
-      firstIndex: 0 as UInt32
-      baseVertex: 0 as Int32
+      instanceCount: 1
+      firstIndex: 0
+      baseVertex: 0
       firstInstance: slot as UInt32
     )
     # Restore the geometry pipeline/bind for subsequent static draws.
     wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: g3dPipeline())
     wgpuRenderPassEncoderSetBindGroup(
       renderPassEncoder: pass
-      groupIndex: 0 as UInt32
+      groupIndex: 0
       group: g3dBind()
-      dynamicOffsetCount: 0 as UInt64
+      dynamicOffsetCount: 0
       dynamicOffsets: webgpuNull()
     )
   }
