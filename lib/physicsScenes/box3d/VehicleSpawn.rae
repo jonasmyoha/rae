@@ -318,41 +318,65 @@ func despawnVehicle(world: mod VehicleWorld) {
 }
 
 # Apply the driver's `command` at the car's current speed for a frame of
-# `frameTime` seconds: each wheel's steering target, spin speed and torque,
-# and the air and rolling resistance; a car being driven is woken (a new motor target alone does not
-# wake it).
+# `frameTime` seconds (driveVehicleBodies, on this world's car).
 func driveVehicle(
   world: mod VehicleWorld
   car: view VehicleDescription
   command: view VehicleCommand
   frameTime: view Float
 ) {
-  let pose: Transform3D = chassisTransform(world: world)
-  let speed: Float = forwardSpeed(
-    velocity: chassisVelocity(world: world)
-    chassisRotation: pose.rotation
+  driveVehicleBodies(
+    physics: world.physics
+    rigidBodies: world.rigidBodies
+    chassisId: world.chassisId
+    wheelJoints: world.wheelJoints
+    car: car
+    command: command
+    chassisRotation: chassisTransform(world: world).rotation
+    frameTime: frameTime
   )
+}
+
+# Apply the driver's `command` to a car built from `car` whose chassis is
+# `chassisId` (turned by `chassisRotation`) and whose wheel joints are
+# `wheelJoints`, in `car.wheels` order, at its current speed for a frame of
+# `frameTime` seconds: each wheel's steering target, spin speed and torque,
+# and the air and rolling resistance; a car being driven is woken (a new
+# motor target alone does not wake it). Over the physics tables alone, so an
+# app that keeps its car's bodies in its own world drives it the same way.
+func driveVehicleBodies(
+  physics: mod Physics
+  rigidBodies: mod ComponentTable(RigidBody)
+  chassisId: view EntityId
+  wheelJoints: view List(JointId)
+  car: view VehicleDescription
+  command: view VehicleCommand
+  chassisRotation: view Quat
+  frameTime: view Float
+) {
+  let velocity: Vec3 = entityLinearVelocity(
+    physics: physics
+    rigidBodies: rigidBodies
+    entityId: chassisId
+  )
+  let speed: Float = forwardSpeed(velocity: velocity, chassisRotation: chassisRotation)
   let targets: List(VehicleWheelTarget) = wheelTargets(car: car, command: command, speed: speed)
-  loop var i: Int = 0, i < world.wheelJoints.length, ++i {
-    let jointId: JointId = world.wheelJoints.copyAtDefault(index: i)
+  loop var i: Int = 0, i < wheelJoints.length, ++i {
+    let jointId: JointId = wheelJoints.copyAtDefault(index: i)
     let target: VehicleWheelTarget = targets.copyAtDefault(index: i)
-    setWheelSteering(physics: world.physics, jointId: jointId, radians: target.steeringAngle)
-    setWheelSpinSpeed(physics: world.physics, jointId: jointId, speed: target.spinSpeed)
-    setWheelMaxSpinTorque(physics: world.physics, jointId: jointId, torque: target.maxSpinTorque)
+    setWheelSteering(physics: physics, jointId: jointId, radians: target.steeringAngle)
+    setWheelSpinSpeed(physics: physics, jointId: jointId, speed: target.spinSpeed)
+    setWheelMaxSpinTorque(physics: physics, jointId: jointId, torque: target.maxSpinTorque)
   }
   if command.throttle is not 0.0 or command.steer is not 0.0 {
-    wakeEntity(physics: world.physics, rigidBodies: world.rigidBodies, entityId: world.chassisId)
+    wakeEntity(physics: physics, rigidBodies: rigidBodies, entityId: chassisId)
   }
   # Air and rolling resistance, which Box3D does not model
   applyEntityImpulse(
-    physics: world.physics
-    rigidBodies: world.rigidBodies
-    entityId: world.chassisId
-    impulse: resistanceImpulse(
-      car: car
-      velocity: chassisVelocity(world: world)
-      frameTime: frameTime
-    )
+    physics: physics
+    rigidBodies: rigidBodies
+    entityId: chassisId
+    impulse: resistanceImpulse(car: car, velocity: velocity, frameTime: frameTime)
   )
 }
 
