@@ -1007,7 +1007,10 @@ needs the display on (queued).
 
 The wait itself is worth noting. The frame-end poll waits until the GPU has
 finished the frame, so frame N+1's CPU work never overlaps frame N's GPU
-work, and each frame pays CPU record + GPU tail + the wake-up. With vsync on
+work, and each frame pays CPU record + GPU tail + the wake-up. (Since 0.2.13
+that wait is `lib/gpu/FramePacer.rae`: each frame waits only on the previous
+frame's GPU work, two frames in flight, so this overlap now happens —
+docs/runtime-c-audit.md row 14 has the before/after times.) With vsync on
 a visible window the swap chain paces anyway. Overlapping CPU and GPU (one
 frame in flight) is the lever if a frame is ever CPU+GPU bound rather than
 vsync bound.

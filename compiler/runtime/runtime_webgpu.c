@@ -46,17 +46,6 @@ static void rae_wgpu_poll(int wait) {
 #endif
 }
 
-/* The end of a presented frame: natively a blocking poll, the backpressure
- * that retires the frame's submissions. A browser frame callback
- * (RAE_WEB_FRAME_CALLBACK, docs/web-frame-loop.md) is already paced by the
- * browser and has no stack to unwind, so it only processes events. */
-static void rae_wgpu_poll_frame_end(void) {
-#if defined(__EMSCRIPTEN__) && defined(RAE_WEB_FRAME_CALLBACK)
-    rae_wgpu_poll(0);
-#else
-    rae_wgpu_poll(1);
-#endif
-}
 
 static WGPUStringView rae_wgpu_sv(const char* s) { WGPUStringView v; v.data = s; v.length = WGPU_STRLEN; return v; }
 
@@ -163,6 +152,24 @@ void rae_wgpu_watch_submission(uint64_t index) {
     ci.callback = rae_wgpu_on_work_done;
     ci.userdata1 = (void*)(uintptr_t)index;
     wgpuQueueOnSubmittedWorkDone(g_wgpu_queue, ci);
+}
+/* Block until submission `index` is done (lib/gpu/FramePacer.rae waits on the
+ * PREVIOUS frame here, so two frames are in flight; which index, and when, is
+ * Rae's). Natively one wgpuDevicePoll on that index. The browser cannot block:
+ * a frame callback (RAE_WEB_FRAME_CALLBACK, docs/web-frame-loop.md) is paced
+ * by the browser and only processes events; the Asyncify loop yields first. */
+void rae_wgpu_wait_submission(uint64_t index) {
+#ifdef __EMSCRIPTEN__
+    (void)index;
+#ifdef RAE_WEB_FRAME_CALLBACK
+    rae_wgpu_poll(0);
+#else
+    rae_wgpu_poll(1);
+#endif
+#else
+    WGPUSubmissionIndex wait_for = (WGPUSubmissionIndex)index;
+    if (g_wgpu_dev) wgpuDevicePoll(g_wgpu_dev, 1, &wait_for);
+#endif
 }
 /* Nonblocking: pumps callbacks, then answers for this index. The queue-empty
  * flag stays as a second yes — when nothing at all is in flight, everything
