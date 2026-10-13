@@ -95,6 +95,70 @@ static int rae_fault_is_stack_overflow(int sig, siginfo_t* info, void* uctx) {
 /* Async-signal-safe: write(2) only, strings precomputed or constant. */
 static void rae_crash_write(const char* s) { if (s) write(STDERR_FILENO, s, strlen(s)); }
 
+/* A value as 0x + 16 hex digits, async-signal-safe. */
+static void rae_crash_write_hex(uintptr_t value) {
+  char text[19];
+  text[0] = '0';
+  text[1] = 'x';
+  for (int i = 0; i < 16; i++) {
+    unsigned digit = (unsigned)((value >> ((15 - i) * 4)) & 0xF);
+    text[2 + i] = (char)(digit < 10 ? '0' + digit : 'a' + digit - 10);
+  }
+  text[18] = '\0';
+  rae_crash_write(text);
+}
+
+static void rae_crash_write_named(const char* name, uintptr_t value) {
+  rae_crash_write(name);
+  rae_crash_write("=");
+  rae_crash_write_hex(value);
+}
+
+/* What faulted: the address the access tried, the instruction's address, the
+ * stack pointer, the main thread's recorded stack and (where known) the
+ * general registers — enough to tell a null or freed pointer from a stack
+ * overflow, and to find the instruction with `atos` / a disassembly, on a
+ * device where no debugger is attached. */
+static void rae_crash_write_context(siginfo_t* info, void* uctx) {
+  rae_crash_write("[rae crash] ");
+  rae_crash_write_named("fault address", info ? (uintptr_t)info->si_addr : 0);
+  rae_crash_write(" ");
+  rae_crash_write_named("sp", rae_context_sp(uctx));
+  rae_crash_write(" ");
+  rae_crash_write_named("main stack", g_rae_main_stack_lo);
+  rae_crash_write("..");
+  rae_crash_write_hex(g_rae_main_stack_hi);
+  rae_crash_write("\n");
+#if defined(__APPLE__) && defined(__aarch64__)
+  if (uctx) {
+    ucontext_t* uc = (ucontext_t*)uctx;
+    rae_crash_write("[rae crash] ");
+    rae_crash_write_named("pc", (uintptr_t)uc->uc_mcontext->__ss.__pc);
+    rae_crash_write(" ");
+    rae_crash_write_named("lr", (uintptr_t)uc->uc_mcontext->__ss.__lr);
+    rae_crash_write(" ");
+    rae_crash_write_named("fp", (uintptr_t)uc->uc_mcontext->__ss.__fp);
+    rae_crash_write("\n");
+    static const char* names[29] = {
+      "x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11", "x12", "x13",
+      "x14", "x15", "x16", "x17", "x18", "x19", "x20", "x21", "x22", "x23", "x24", "x25",
+      "x26", "x27", "x28"};
+    for (int i = 0; i < 29; i++) {
+      rae_crash_write(i % 4 == 0 ? "[rae crash] " : " ");
+      rae_crash_write_named(names[i], (uintptr_t)uc->uc_mcontext->__ss.__x[i]);
+      if (i % 4 == 3 || i == 28) rae_crash_write("\n");
+    }
+  }
+#elif defined(__APPLE__) && defined(__x86_64__)
+  if (uctx) {
+    ucontext_t* uc = (ucontext_t*)uctx;
+    rae_crash_write("[rae crash] ");
+    rae_crash_write_named("pc", (uintptr_t)uc->uc_mcontext->__ss.__rip);
+    rae_crash_write("\n");
+  }
+#endif
+}
+
 static void rae_crash_handler(int sig, siginfo_t* info, void* uctx) {
   /* A stack overflow gets ONE plain line and no backtrace: the frames are
    * ten thousand copies of the same function, and the handler is running
@@ -128,8 +192,10 @@ static void rae_crash_handler(int sig, siginfo_t* info, void* uctx) {
   const char* prefix = "\n[rae crash] caught ";
   write(STDERR_FILENO, prefix, strlen(prefix));
   write(STDERR_FILENO, name, strlen(name));
+  rae_crash_write("\n");
+  rae_crash_write_context(info, uctx);
   const char* suffix =
-    "\n[rae crash] C-level backtrace (Rae source lines are not in here;\n"
+    "[rae crash] C-level backtrace (Rae source lines are not in here;\n"
     "[rae crash] cross-reference symbols via `atos` or `addr2line` on the\n"
     "[rae crash] generated binary if you need the call site):\n";
   write(STDERR_FILENO, suffix, strlen(suffix));
