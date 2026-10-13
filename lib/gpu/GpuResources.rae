@@ -688,7 +688,7 @@ func bufferSize(resources: view GpuResources, id: view BufferId) ret Int {
 
 func bufferUsage(resources: view GpuResources, id: view BufferId) ret UInt64 {
   if isValidBuffer(resources: resources, id: id) is false {
-    ret 0 as UInt64
+    ret 0
   }
   unsafe {
     ret wgpuBufferGetUsage(buffer: slotHandle(table: resources.buffers, slot: id.slot))
@@ -758,7 +758,7 @@ func writeBuffer(
       data: bytes.data
       size: bytes.length as UInt64
     )
-    wgpuQueueSubmit(queue: webgpuQueue(), commandCount: 0 as UInt64, commands: webgpuNull())
+    wgpuQueueSubmit(queue: webgpuQueue(), commandCount: 0, commands: webgpuNull())
   }
   ret true
 }
@@ -825,10 +825,10 @@ func createTexture(
       let descriptor: WGPUTextureDescriptor = {
         usage: usage
         dimension: WGPUTextureDimension_2D
-        size: { width: width as UInt32, height: height as UInt32, depthOrArrayLayers: 1 as UInt32 }
+        size: { width: width as UInt32, height: height as UInt32, depthOrArrayLayers: 1 }
         format: format
-        mipLevelCount: 1 as UInt32
-        sampleCount: 1 as UInt32
+        mipLevelCount: 1
+        sampleCount: 1
       }
       let handle: Ptr = wgpuDeviceCreateTexture(device: webgpuDevice(), descriptor: descriptor)
       if handle is webgpuNull() {
@@ -891,10 +891,10 @@ func createTextureView(resources: mod GpuResources, texture: view TextureId) ret
       let descriptor: WGPUTextureViewDescriptor = {
         format: wgpuTextureGetFormat(texture: textureHandle)
         dimension: WGPUTextureViewDimension_2D
-        baseMipLevel: 0 as UInt32
-        mipLevelCount: 1 as UInt32
-        baseArrayLayer: 0 as UInt32
-        arrayLayerCount: 1 as UInt32
+        baseMipLevel: 0
+        mipLevelCount: 1
+        baseArrayLayer: 0
+        arrayLayerCount: 1
         aspect: WGPUTextureAspect_All
       }
       let handle: Ptr = wgpuTextureCreateView(texture: textureHandle, descriptor: descriptor)
@@ -949,7 +949,7 @@ func createSamplerWith(resources: mod GpuResources, addressMode: view Int32) ret
         lodMinClamp: 0.0
         lodMaxClamp: 32.0
         compare: WGPUCompareFunction_Undefined
-        maxAnisotropy: 1 as UInt16
+        maxAnisotropy: 1
       }
       let handle: Ptr = wgpuDeviceCreateSampler(device: webgpuDevice(), descriptor: descriptor)
       if handle is webgpuNull() {

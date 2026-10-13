@@ -1,0 +1,18 @@
+# A cast that CONVERTS stays legal (`count as Float`, a float literal to an
+# integer type), and so does a literal cast where no context gives the literal
+# a type: a string interpolation, an arithmetic operand whose other side is a
+# literal too, or a literal on the LEFT of an operator — the expression takes
+# its left operand's type, so `(0.0 as Float64) - epoch` needs its cast. Only a cast to the type
+# the context already gives is
+# rejected (fixture 1125).
+func main() {
+  let count: Int = 7
+  let asFloat: Float = count as Float
+  let truncated: Int = 2.75 as Int
+  let half: Float = (3 as Float) / 2
+  let wide: UInt64 = 4
+  let widened: UInt64 = wide + (count as UInt64)
+  let epoch: Float64 = 2.5
+  let negated: Float64 = (0.0 as Float64) - epoch
+  log("{asFloat} {truncated} {half} {widened} {negated} {5 as UInt32} {2 as Float}")
+}
