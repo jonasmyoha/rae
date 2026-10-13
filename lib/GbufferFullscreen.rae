@@ -32,7 +32,7 @@ func fullscreenPipelineSpec(format: copy Int32) ret RenderPipelineSpec {
     colorFormats: own colorFormats
     alphaBlend: false
     premultiplied: false
-    depthFormat: 0 as Int32
+    depthFormat: 0
     depthWrite: false
     depthCompare: WGPUCompareFunction_Always
     cullMode: WGPUCullMode_None
@@ -72,10 +72,7 @@ func beginFullscreen(target: copy Ptr) unsafe ret FullscreenPass {
         storeOp: WGPUStoreOp_Store
       }
     )
-    let rpDesc: WGPURenderPassDescriptor = {
-      colorAttachmentCount: 1 as UInt64
-      colorAttachments: atts.data
-    }
+    let rpDesc: WGPURenderPassDescriptor = { colorAttachmentCount: 1, colorAttachments: atts.data }
     let pass: Ptr = wgpuCommandEncoderBeginRenderPass(commandEncoder: enc, descriptor: rpDesc)
     ret FullscreenPass { encoder: enc, pass: pass }
   }
@@ -154,10 +151,7 @@ func runFullscreenInBatch(
         storeOp: WGPUStoreOp_Store
       }
     )
-    let rpDesc: WGPURenderPassDescriptor = {
-      colorAttachmentCount: 1 as UInt64
-      colorAttachments: atts.data
-    }
+    let rpDesc: WGPURenderPassDescriptor = { colorAttachmentCount: 1, colorAttachments: atts.data }
     let pass: Ptr = wgpuCommandEncoderBeginRenderPass(commandEncoder: encoder, descriptor: rpDesc)
     let drawn: Bool = recordDrawInPass(
       resources: resources

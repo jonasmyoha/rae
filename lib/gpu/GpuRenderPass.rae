@@ -109,15 +109,15 @@ func recordDrawIndirectInPass(
     )
     wgpuRenderPassEncoderSetBindGroup(
       renderPassEncoder: pass
-      groupIndex: 0 as UInt32
+      groupIndex: 0
       group: slotHandle(table: resources.bindGroups, slot: bindGroup.slot)
-      dynamicOffsetCount: 0 as UInt64
+      dynamicOffsetCount: 0
       dynamicOffsets: webgpuNull()
     )
     wgpuRenderPassEncoderDrawIndirect(
       renderPassEncoder: pass
       indirectBuffer: refHandle(resources: resources, ref: indirect)
-      indirectOffset: 0 as UInt64
+      indirectOffset: 0
     )
   }
   ret true
@@ -152,9 +152,9 @@ func recordDrawInPass(
     )
     wgpuRenderPassEncoderSetBindGroup(
       renderPassEncoder: pass
-      groupIndex: 0 as UInt32
+      groupIndex: 0
       group: slotHandle(table: resources.bindGroups, slot: bindGroup.slot)
-      dynamicOffsetCount: 0 as UInt64
+      dynamicOffsetCount: 0
       dynamicOffsets: webgpuNull()
     )
     wgpuRenderPassEncoderDraw(
@@ -198,9 +198,9 @@ func recordDrawInPassExternal(
     )
     wgpuRenderPassEncoderSetBindGroup(
       renderPassEncoder: pass
-      groupIndex: 0 as UInt32
+      groupIndex: 0
       group: slotHandle(table: resources.bindGroups, slot: bindGroup.slot)
-      dynamicOffsetCount: 0 as UInt64
+      dynamicOffsetCount: 0
       dynamicOffsets: webgpuNull()
     )
     wgpuRenderPassEncoderDraw(
@@ -249,31 +249,31 @@ func recordDrawIndexedInPass(
     )
     wgpuRenderPassEncoderSetBindGroup(
       renderPassEncoder: pass
-      groupIndex: 0 as UInt32
+      groupIndex: 0
       group: slotHandle(table: resources.bindGroups, slot: bindGroup.slot)
-      dynamicOffsetCount: 0 as UInt64
+      dynamicOffsetCount: 0
       dynamicOffsets: webgpuNull()
     )
     wgpuRenderPassEncoderSetVertexBuffer(
       renderPassEncoder: pass
-      slot: 0 as UInt32
+      slot: 0
       buffer: vertexBuffer
-      offset: 0 as UInt64
+      offset: 0
       size: wgpuBufferGetSize(buffer: vertexBuffer)
     )
     wgpuRenderPassEncoderSetIndexBuffer(
       renderPassEncoder: pass
       buffer: indexBuffer
       format: WGPUIndexFormat_Uint32
-      offset: 0 as UInt64
+      offset: 0
       size: wgpuBufferGetSize(buffer: indexBuffer)
     )
     wgpuRenderPassEncoderDrawIndexed(
       renderPassEncoder: pass
       indexCount: indexCount as UInt32
       instanceCount: instanceCount as UInt32
-      firstIndex: 0 as UInt32
-      baseVertex: 0 as Int32
+      firstIndex: 0
+      baseVertex: 0
       firstInstance: firstInstance as UInt32
     )
   }
@@ -305,9 +305,9 @@ func recordBindInPass(
     )
     wgpuRenderPassEncoderSetBindGroup(
       renderPassEncoder: pass
-      groupIndex: 0 as UInt32
+      groupIndex: 0
       group: slotHandle(table: resources.bindGroups, slot: bindGroup.slot)
-      dynamicOffsetCount: 0 as UInt64
+      dynamicOffsetCount: 0
       dynamicOffsets: webgpuNull()
     )
   }
@@ -400,7 +400,7 @@ func beginRenderPass(
         )
       }
       let descriptor: WGPURenderPassDescriptor = {
-        colorAttachmentCount: 1 as UInt64
+        colorAttachmentCount: 1
         colorAttachments: colorAttachments.data
         depthStencilAttachment: depthAttachments.data
       }
@@ -410,7 +410,7 @@ func beginRenderPass(
       )
     }
     let descriptor: WGPURenderPassDescriptor = {
-      colorAttachmentCount: 1 as UInt64
+      colorAttachmentCount: 1
       colorAttachments: colorAttachments.data
     }
     ret wgpuCommandEncoderBeginRenderPass(commandEncoder: recording.encoder, descriptor: descriptor)

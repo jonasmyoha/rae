@@ -6,7 +6,7 @@ open webgpu/ReadRequest
 
 func createBuffer(usage: copy UInt64) ret Ptr {
   unsafe {
-    let descriptor: WGPUBufferDescriptor = { size: 32 as UInt64, usage: usage }
+    let descriptor: WGPUBufferDescriptor = { size: 32, usage: usage }
     ret wgpuDeviceCreateBuffer(device: webgpuDevice(), descriptor: descriptor)
   }
 }
@@ -20,11 +20,11 @@ func createReadPair(firstBuffer: copy Ptr, secondBuffer: copy Ptr) ret opt ReadP
   unsafe {
     if let first: ReadRequest = ReadRequest.create(
       buffer: firstBuffer
-      range: { offset: 8 as UInt64, size: 16 as UInt64 }
+      range: { offset: 8, size: 16 }
     ) {
       if let second: ReadRequest = ReadRequest.create(
         buffer: secondBuffer
-        range: { offset: 0 as UInt64, size: 32 as UInt64 }
+        range: { offset: 0, size: 32 }
       ) {
         ret ReadPair { first: own first, second: own second }
       }
@@ -54,7 +54,7 @@ func checkListCleanup() ret Bool {
     var requests: List(ReadRequest) = List.create(ReadRequest, cap: 2)
     if let first: ReadRequest = ReadRequest.create(
       buffer: firstBuffer
-      range: { offset: 0 as UInt64, size: 32 as UInt64 }
+      range: { offset: 0, size: 32 }
     ) {
       requests.add(value: own first)
     } else {
@@ -64,7 +64,7 @@ func checkListCleanup() ret Bool {
     }
     if let second: ReadRequest = ReadRequest.create(
       buffer: secondBuffer
-      range: { offset: 0 as UInt64, size: 32 as UInt64 }
+      range: { offset: 0, size: 32 }
     ) {
       requests.add(value: own second)
     } else {
@@ -104,9 +104,9 @@ func checkCycle() ret Bool {
     wgpuQueueWriteBuffer(
       queue: webgpuQueue()
       buffer: source
-      bufferOffset: 0 as UInt64
+      bufferOffset: 0
       data: input.data
-      size: 32 as UInt64
+      size: 32
     )
     let encoderDescriptor: WGPUCommandEncoderDescriptor = {}
     let encoder: Ptr = wgpuDeviceCreateCommandEncoder(
@@ -116,18 +116,18 @@ func checkCycle() ret Bool {
     wgpuCommandEncoderCopyBufferToBuffer(
       commandEncoder: encoder
       source: source
-      sourceOffset: 0 as UInt64
+      sourceOffset: 0
       destination: first
-      destinationOffset: 0 as UInt64
-      size: 32 as UInt64
+      destinationOffset: 0
+      size: 32
     )
     wgpuCommandEncoderCopyBufferToBuffer(
       commandEncoder: encoder
       source: source
-      sourceOffset: 0 as UInt64
+      sourceOffset: 0
       destination: second
-      destinationOffset: 0 as UInt64
-      size: 32 as UInt64
+      destinationOffset: 0
+      size: 32
     )
     let commandDescriptor: WGPUCommandBufferDescriptor = {}
     let command: Ptr = wgpuCommandEncoderFinish(
@@ -204,15 +204,12 @@ func main() ret Int {
     }
     log("owner fields, transfer and List cleanup OK")
     let buffer: Ptr = createBuffer(usage: WGPUBufferUsage_MapRead + WGPUBufferUsage_CopyDst)
-    if let invalid: ReadRequest = ReadRequest.create(
-      buffer: buffer
-      range: { offset: 8 as UInt64, size: 32 as UInt64 }
-    ) {
+    if let invalid: ReadRequest = ReadRequest.create(buffer: buffer, range: { offset: 8, size: 32 }) {
       ret 2
     }
     if var cancelled: ReadRequest = ReadRequest.create(
       buffer: buffer
-      range: { offset: 0 as UInt64, size: 32 as UInt64 }
+      range: { offset: 0, size: 32 }
     ) {
       cancelled.drop()
     } else {
@@ -224,7 +221,7 @@ func main() ret Int {
     loop i < 32 {
       if let request: ReadRequest = ReadRequest.create(
         buffer: buffer
-        range: { offset: 0 as UInt64, size: 32 as UInt64 }
+        range: { offset: 0, size: 32 }
       ) {
         if waitForRead(request: request) is not 1 {
           ret 3
@@ -236,7 +233,7 @@ func main() ret Int {
     }
     if let transferred: ReadRequest = ReadRequest.create(
       buffer: buffer
-      range: { offset: 0 as UInt64, size: 32 as UInt64 }
+      range: { offset: 0, size: 32 }
     ) {
       if not consumeCompleted(request: own transferred) {
         ret 3
@@ -245,7 +242,7 @@ func main() ret Int {
       ret 3
     }
     let blockingOutput: List(Int) = { 1, 1, 1, 1 }
-    if webgpuMapRead(buffer: buffer, size: 32 as UInt64, dst: blockingOutput.data) is not 1 {
+    if webgpuMapRead(buffer: buffer, size: 32, dst: blockingOutput.data) is not 1 {
       ret 5
     }
     if blockingOutput.copyAtFallback(index: 3, fallback: -1) is not 0 {
@@ -254,7 +251,7 @@ func main() ret Int {
     log("existing blocking read diagnostic OK")
     if let destroyed: ReadRequest = ReadRequest.create(
       buffer: buffer
-      range: { offset: 0 as UInt64, size: 32 as UInt64 }
+      range: { offset: 0, size: 32 }
     ) {
       wgpuBufferDestroy(buffer: buffer)
       if waitForRead(request: destroyed) is not -1 {

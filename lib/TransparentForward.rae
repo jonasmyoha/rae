@@ -132,7 +132,7 @@ func copyOpaqueRadiance(resources: view GpuResources, targets: view DeferredTarg
     let extent: WGPUExtent3D = {
       width: wgpuTextureGetWidth(texture: texture)
       height: wgpuTextureGetHeight(texture: texture)
-      depthOrArrayLayers: 1 as UInt32
+      depthOrArrayLayers: 1
     }
     wgpuCommandEncoderCopyTextureToTexture(
       commandEncoder: encoder
@@ -300,7 +300,7 @@ func drawTransparentBatch(
       }
     )
     let rpDesc: WGPURenderPassDescriptor = {
-      colorAttachmentCount: 1 as UInt64
+      colorAttachmentCount: 1
       colorAttachments: colorAtts.data
       depthStencilAttachment: depthAtts.data
     }

@@ -158,7 +158,7 @@ func recordDrawIndexedTimed(
         )
       }
       let descriptor: WGPURenderPassDescriptor = {
-        colorAttachmentCount: 1 as UInt64
+        colorAttachmentCount: 1
         colorAttachments: colorAttachments.data
         depthStencilAttachment: depthAttachments.data
         timestampWrites: timestampWrites
@@ -169,7 +169,7 @@ func recordDrawIndexedTimed(
       )
     } else {
       let descriptor: WGPURenderPassDescriptor = {
-        colorAttachmentCount: 1 as UInt64
+        colorAttachmentCount: 1
         colorAttachments: colorAttachments.data
         timestampWrites: timestampWrites
       }
@@ -187,17 +187,17 @@ func recordDrawIndexedTimed(
     )
     wgpuRenderPassEncoderSetBindGroup(
       renderPassEncoder: pass
-      groupIndex: 0 as UInt32
+      groupIndex: 0
       group: slotHandle(table: resources.bindGroups, slot: bindGroup.slot)
-      dynamicOffsetCount: 0 as UInt64
+      dynamicOffsetCount: 0
       dynamicOffsets: webgpuNull()
     )
     let vertexHandle: Ptr = refHandle(resources: resources, ref: vertexBuffer)
     wgpuRenderPassEncoderSetVertexBuffer(
       renderPassEncoder: pass
-      slot: 0 as UInt32
+      slot: 0
       buffer: vertexHandle
-      offset: 0 as UInt64
+      offset: 0
       size: wgpuBufferGetSize(buffer: vertexHandle)
     )
     let indexHandle: Ptr = refHandle(resources: resources, ref: indexBuffer)
@@ -205,16 +205,16 @@ func recordDrawIndexedTimed(
       renderPassEncoder: pass
       buffer: indexHandle
       format: WGPUIndexFormat_Uint32
-      offset: 0 as UInt64
+      offset: 0
       size: wgpuBufferGetSize(buffer: indexHandle)
     )
     wgpuRenderPassEncoderDrawIndexed(
       renderPassEncoder: pass
       indexCount: indexCount as UInt32
-      instanceCount: 1 as UInt32
-      firstIndex: 0 as UInt32
-      baseVertex: 0 as Int32
-      firstInstance: 0 as UInt32
+      instanceCount: 1
+      firstIndex: 0
+      baseVertex: 0
+      firstInstance: 0
     )
     wgpuRenderPassEncoderEnd(renderPassEncoder: pass)
     wgpuRenderPassEncoderRelease(renderPassEncoder: pass)
@@ -340,22 +340,18 @@ func recordCopyTextureToBuffer(
   unsafe {
     let source: WGPUTexelCopyTextureInfo = {
       texture: slotHandle(table: resources.textures, slot: texture.slot)
-      mipLevel: 0 as UInt32
-      origin: { x: 0 as UInt32, y: 0 as UInt32, z: 0 as UInt32 }
+      mipLevel: 0
+      origin: { x: 0, y: 0, z: 0 }
       aspect: WGPUTextureAspect_All
     }
     let destination: WGPUTexelCopyBufferInfo = {
-      layout: {
-        offset: 0 as UInt64
-        bytesPerRow: bytesPerRow as UInt32
-        rowsPerImage: height as UInt32
-      }
+      layout: { offset: 0, bytesPerRow: bytesPerRow as UInt32, rowsPerImage: height as UInt32 }
       buffer: slotHandle(table: resources.buffers, slot: buffer.slot)
     }
     let size: WGPUExtent3D = {
       width: width as UInt32
       height: height as UInt32
-      depthOrArrayLayers: 1 as UInt32
+      depthOrArrayLayers: 1
     }
     wgpuCommandEncoderCopyTextureToBuffer(
       commandEncoder: recording.encoder
@@ -466,7 +462,7 @@ func writeTextureFromPtr(
     let extent: WGPUExtent3D = {
       width: (bytesPerRow / 4) as UInt32
       height: rows as UInt32
-      depthOrArrayLayers: 1 as UInt32
+      depthOrArrayLayers: 1
     }
     wgpuQueueWriteTexture(
       queue: webgpuQueue()

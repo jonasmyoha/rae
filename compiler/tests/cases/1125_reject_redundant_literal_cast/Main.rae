@@ -1,0 +1,28 @@
+# A numeric literal already takes the type its context gives it, so casting it
+# to exactly that type is noise and an error (one spelling, like `-1` over
+# `0 - 1`): in a binding, an assignment, an argument, a return, a struct
+# literal field, a list literal element and an arithmetic operand whose other
+# side is typed. Integer and float literals alike.
+type Extent {
+  width: UInt32
+}
+
+func takeWide(count: view UInt64) ret UInt64 {
+  ret count
+}
+
+func zero() ret UInt64 {
+  ret 0 as UInt64
+}
+
+func main() {
+  var frameEnd: UInt64 = 0 as UInt64
+  frameEnd = 5 as UInt64
+  let argument: UInt64 = takeWide(count: 7 as UInt64)
+  let extent: Extent = { width: 640 as UInt32 }
+  let bytes: List(UInt8) = List(UInt8) { 1 as UInt8, 2 }
+  let small: UInt8 = 3
+  let sum: UInt8 = small + (1 as UInt8)
+  let ratio: Float = 0.5 as Float
+  let negative: Int32 = -1 as Int32
+}

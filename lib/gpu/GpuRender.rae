@@ -188,7 +188,7 @@ func refBufferSize(resources: view GpuResources, ref: view ResourceRef) ret Int 
 
 func refBufferUsage(resources: view GpuResources, ref: view ResourceRef) ret UInt64 {
   if refIsBuffer(resources: resources, ref: ref) is false {
-    ret 0 as UInt64
+    ret 0
   }
   unsafe {
     ret wgpuBufferGetUsage(buffer: refHandle(resources: resources, ref: ref))
@@ -613,7 +613,7 @@ func createRenderPipelineSource(
             frontFace: WGPUFrontFace_CCW
             cullMode: spec.cullMode
           }
-          multisample: { count: 1 as UInt32, mask: 4294967295 as UInt32 }
+          multisample: { count: 1, mask: 4294967295 }
           fragment: fragments.data
         }
         handle = wgpuDeviceCreateRenderPipeline(device: webgpuDevice(), descriptor: descriptor)
@@ -633,7 +633,7 @@ func createRenderPipelineSource(
             cullMode: spec.cullMode
           }
           depthStencil: depths.data
-          multisample: { count: 1 as UInt32, mask: 4294967295 as UInt32 }
+          multisample: { count: 1, mask: 4294967295 }
           fragment: fragments.data
         }
         handle = wgpuDeviceCreateRenderPipeline(device: webgpuDevice(), descriptor: descriptor)
@@ -787,7 +787,7 @@ func createRenderBindGroup(
     unsafe {
       let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(
         renderPipeline: slotHandle(table: resources.renderPipelines, slot: pipeline.slot)
-        groupIndex: 0 as UInt32
+        groupIndex: 0
       )
       ret finishBindGroup(
         resources: resources
@@ -834,7 +834,7 @@ func createRenderBindGroupExternal(
     unsafe {
       let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(
         renderPipeline: slotHandle(table: resources.externals, slot: pipeline.slot)
-        groupIndex: 0 as UInt32
+        groupIndex: 0
       )
       ret finishBindGroup(
         resources: resources
@@ -880,7 +880,7 @@ func createComputeBindGroupOrdered(
     unsafe {
       let layout: Ptr = wgpuComputePipelineGetBindGroupLayout(
         computePipeline: slotHandle(table: resources.pipelines, slot: pipeline.slot)
-        groupIndex: 0 as UInt32
+        groupIndex: 0
       )
       ret finishBindGroup(
         resources: resources

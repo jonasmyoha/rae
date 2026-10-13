@@ -82,6 +82,22 @@ ordinary identifiers elsewhere; see `docs/module-namespacing.md`.)
 * **Boolean:** `true false`
 * **None literal:** `none`
 
+A numeric literal takes the type its context gives it: a binding
+(`let small: UInt8 = 200`), an assignment, an argument, a return, a struct or
+list literal field, or the typed operand on the other side of `+ - * / %`
+(`small + 55` is `UInt8` arithmetic). Two rules follow:
+
+* A literal must **fit** that type: `let big: UInt8 = 300` is an error
+  ("300 does not fit UInt8 (0 to 255)"), never a value that wraps.
+* A literal is **not cast to the type it already gets**: `var frameEnd: UInt64
+  = 0 as UInt64` is an error ("the literal already is a UInt64 here; drop `as
+  UInt64`"); write `var frameEnd: UInt64 = 0`. A cast that converts
+  (`count as Float`, `2.75 as Int`) and a literal cast where no context gives
+  the literal a type (`"{5 as UInt32}"`, `(3 as Float) / 2`) stay legal. An
+  operator's RIGHT operand is typed by its left one (`small + 1`); a literal on
+  the LEFT is not — the expression takes the left operand's type — so
+  `(0.0 as Float64) - x` keeps its cast.
+
 ### 1.5 Operators and Punctuation
 
 ```

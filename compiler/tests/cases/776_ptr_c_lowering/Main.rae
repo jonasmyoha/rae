@@ -37,19 +37,19 @@ func makeOwner(byteCount: copy UInt64, marker: copy Int) ret NativeOwner {
 }
 
 func main() {
-  var owner: NativeOwner = makeOwner(byteCount: 8 as UInt64, marker: 7)
+  var owner: NativeOwner = makeOwner(byteCount: 8, marker: 7)
   unsafe {
     log("owner {owner}")
   }
 
   unsafe {
-    replace(pointer: owner.pointer, replacement: allocate(byteCount: 16 as UInt64))
+    replace(pointer: owner.pointer, replacement: allocate(byteCount: 16))
   }
 
   var pointers: List(Ptr) = List.create(Ptr, cap: 2)
   unsafe {
-    pointers.add(value: allocate(byteCount: 24 as UInt64))
-    pointers.add(value: allocate(byteCount: 32 as UInt64))
+    pointers.add(value: allocate(byteCount: 24))
+    pointers.add(value: allocate(byteCount: 32))
   }
   log("count {pointers.length}")
   log("copy count {pointerCount(pointers: pointers)}")

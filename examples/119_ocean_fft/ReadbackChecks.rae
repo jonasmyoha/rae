@@ -10,7 +10,7 @@ open gpu/GpuResources
 open gpu/GpuLifetime
 
 func drainWaterCache(waterSystem: mod WaterSystem, resources: mod GpuResources) ret Bool {
-  let deadline: Float64 = Gpu2d.nowSeconds() + 2.0 as Float64
+  let deadline: Float64 = Gpu2d.nowSeconds() + 2.0
   loop Gpu2d.nowSeconds() < deadline {
     updateWaterReadback(waterSystem: waterSystem, resources: resources)
     var complete: Bool = waterSystem.surfaceCache.activeCount is waterSystem.fftAllocatedCount

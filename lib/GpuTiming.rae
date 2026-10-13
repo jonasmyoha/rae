@@ -183,7 +183,7 @@ func resolve(timing: view GpuTiming, enc: copy Ptr, idx: opt copy Int) {
         commandEncoder: enc
         querySet: timing.querySet
         firstQuery: (passIdx * 2) as UInt32
-        queryCount: 2 as UInt32
+        queryCount: 2
         destination: timing.resolveBuffer
         destinationOffset: (passIdx * 16) as UInt64
       )
@@ -215,9 +215,9 @@ func collect(timing: mod GpuTiming, profiler: mod Profiler) {
     wgpuCommandEncoderCopyBufferToBuffer(
       commandEncoder: commandEncoder
       source: timing.resolveBuffer
-      sourceOffset: 0 as UInt64
+      sourceOffset: 0
       destination: staging
-      destinationOffset: 0 as UInt64
+      destinationOffset: 0
       size: bytes as UInt64
     )
     let commandDescriptor: WGPUCommandBufferDescriptor = {}

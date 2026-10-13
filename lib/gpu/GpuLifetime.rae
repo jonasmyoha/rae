@@ -340,7 +340,7 @@ func createBindGroup(
     unsafe {
       let layout: Ptr = wgpuComputePipelineGetBindGroupLayout(
         computePipeline: slotHandle(table: resources.pipelines, slot: pipeline.slot)
-        groupIndex: 0 as UInt32
+        groupIndex: 0
       )
       let descriptor: WGPUBindGroupDescriptor = {
         layout: layout
@@ -579,9 +579,9 @@ func recordCompute(
     )
     wgpuComputePassEncoderSetBindGroup(
       computePassEncoder: pass
-      groupIndex: 0 as UInt32
+      groupIndex: 0
       group: slotHandle(table: resources.bindGroups, slot: bindGroup.slot)
-      dynamicOffsetCount: 0 as UInt64
+      dynamicOffsetCount: 0
       dynamicOffsets: webgpuNull()
     )
     wgpuComputePassEncoderDispatchWorkgroups(
@@ -663,9 +663,9 @@ func recordComputeTimed(
     )
     wgpuComputePassEncoderSetBindGroup(
       computePassEncoder: pass
-      groupIndex: 0 as UInt32
+      groupIndex: 0
       group: slotHandle(table: resources.bindGroups, slot: bindGroup.slot)
-      dynamicOffsetCount: 0 as UInt64
+      dynamicOffsetCount: 0
       dynamicOffsets: webgpuNull()
     )
     wgpuComputePassEncoderDispatchWorkgroups(
@@ -795,7 +795,7 @@ func submit(resources: mod GpuResources, recording: mod Recording) ret opt Submi
       commands.add(value: commandBuffer)
       nativeIndex = wgpuQueueSubmitForIndex(
         queue: webgpuQueue()
-        commandCount: 1 as UInt64
+        commandCount: 1
         commands: commands.data
       ) as Int
       wgpuCommandBufferRelease(commandBuffer: commandBuffer)
@@ -829,7 +829,7 @@ func pollSubmission(resources: mod GpuResources, id: view SubmissionId) ret Int 
   # Not `wgpuDevicePoll`: its return value is "the queue is empty", which a
   # consumer submitting every frame next to a busy renderer never sees, so its
   # submissions never retired and its manager slots filled up (#938).
-  var done: UInt32 = 0 as UInt32
+  var done: UInt32 = 0
   unsafe {
     done = webgpuSubmissionDone(
       index: intAt(list: resources.submissions.nativeIndex, index: id.slot) as UInt64
