@@ -1,0 +1,19 @@
+# A call to a function that returns nothing has no value: using one in
+# arithmetic, a binding or an argument is an error in Rae, not a `void` that
+# reaches the C compiler. As a statement of its own, or under `spawn`, it is
+# fine.
+func note(text: view String) {
+  log(text)
+}
+
+func twice(value: view Int) ret Int {
+  ret value * 2
+}
+
+func main() {
+  let bound: Int = note(text: "a")
+  let sum: Int = 1 + note(text: "b")
+  let passed: Int = twice(value: note(text: "c"))
+  let scaled: Float = 2.0 * log("d")
+  note(text: "a statement is fine")
+}

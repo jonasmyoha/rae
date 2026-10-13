@@ -50,6 +50,10 @@ static struct SymbolTable* s_lifecycle_symbols = NULL;  /* #880: the module's sy
  * Set/restored around the binding analysis in the AST_STMT_IF arm. */
 static bool s_in_if_let_binding = false;
 
+/* The one expression that may be a call returning nothing: the root of an
+ * expression statement, or the call a `spawn` runs (sema_check_void_value). */
+static const AstExpr* s_void_ok_expr = NULL;
+
 /* Loop nesting depth during statement analysis, so `break`/`continue`
  * can be rejected outside any loop. Balanced increment/decrement around
  * each loop body; there are no nested function bodies, so it returns to
@@ -4524,7 +4528,12 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
     if (!stmt) return;
     switch (stmt->kind) {
         case AST_STMT_EXPR: {
-            if (stmt->as.expr_stmt) sema_analyze_expr(ctx, module, symbols, stmt->as.expr_stmt, true);
+            if (stmt->as.expr_stmt) {
+                const AstExpr* saved_void_ok = s_void_ok_expr;
+                s_void_ok_expr = stmt->as.expr_stmt;
+                sema_analyze_expr(ctx, module, symbols, stmt->as.expr_stmt, true);
+                s_void_ok_expr = saved_void_ok;
+            }
             // #880/#881/#885: stray `create(...)` and use after `x.drop()` are
             // reported by sema_lifecycle_post_pass over the whole body.
             break;
@@ -6257,15 +6266,20 @@ static size_t sema_edit_distance(Str a, Str b) {
 // Track the closest candidate name to `typed` across a scan, keeping the one
 // with the smallest edit distance that is still a plausible typo (within a
 // third of the longer length, and at least a prefix/suffix near-miss when the
-// names are short). `*best_dist` starts at SIZE_MAX.
+// names are short); a prefix/suffix near-miss outranks any other. `*best_dist`
+// starts at SIZE_MAX.
 static void sema_consider_suggestion(Str candidate, Str typed, Str* best, size_t* best_dist) {
     if (candidate.len == 0) return;
     size_t d = sema_edit_distance(candidate, typed);
     if (d == 0) return;  // exact match is not a "did you mean"
     size_t longer = candidate.len > typed.len ? candidate.len : typed.len;
     size_t threshold = longer / 3 + 1;
-    if (d > threshold && !sema_name_near(candidate, typed)) return;
-    if (d < *best_dist) { *best_dist = d; *best = candidate; }
+    bool near = sema_name_near(candidate, typed);
+    if (d > threshold && !near) return;
+    /* A name that holds the typed one whole (`log` -> `naturalLog`) outranks
+     * a mere spelling neighbour (`log` -> `cos`) */
+    size_t rank = near ? d : d + 1000;
+    if (rank < *best_dist) { *best_dist = rank; *best = candidate; }
 }
 
 // #927: does ANY visible function named `name` exist (this module or an
@@ -6283,6 +6297,23 @@ static bool sema_any_function_named(AstModule* module, Str name) {
     return false;
 }
 
+
+// Does module `qualifier` itself declare a function `name` (any arity)? The
+// same qualifier forms resolve_qualified_function accepts: the module path,
+// a project folder namespace, or a package module's file component. A
+// `Module.name(...)` call resolves ONLY there — a global or builtin of that
+// name (`log`) is never what `Math.log(...)` means (#61963793).
+static bool sema_module_has_function(AstModule* module, Str qualifier, Str name) {
+    for (AstDecl* d = module->decls; d; d = d->next) {
+        if (d->kind != AST_DECL_FUNC || !str_eq(d->as.func_decl.name, name)) continue;
+        if (d->module_name && str_eq_cstr(qualifier, d->module_name)) return true;
+        char ns[256]; sema_project_namespace(d, ns, sizeof ns);
+        if (ns[0] != '\0' && str_eq_cstr(qualifier, ns)) return true;
+        const char* slash = d->module_name ? strrchr(d->module_name, '/') : NULL;
+        if (slash && str_eq_cstr(qualifier, slash + 1)) return true;
+    }
+    return false;
+}
 
 // The template base name of a type: "List" for a specialized `List_int64_t`,
 // the plain name otherwise. Method receivers are declared against the template
@@ -6402,10 +6433,36 @@ static void sema_check_unnarrowed_opt(AstModule* module, const AstExpr* expr) {
 
 static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr, bool is_value_pos);
 
+/* A call returning nothing, anywhere but s_void_ok_expr, is used as a value —
+ * in arithmetic, a binding, an argument — and has none to give (#61963793:
+ * `2.0 * Math.log(x: 3.0)` reached clang as `double * void`). */
+
+static void sema_check_void_value(AstModule* module, const AstExpr* expr) {
+    if (expr == s_void_ok_expr) return;
+    if (expr->kind != AST_EXPR_CALL && expr->kind != AST_EXPR_METHOD_CALL) return;
+    /* A call bound to a function with no `ret` type; such a call is left
+     * without a resolved type (or typed void) */
+    bool returns_nothing = expr->decl_link && expr->decl_link->kind == AST_DECL_FUNC
+        && !expr->decl_link->as.func_decl.returns
+        && (!expr->resolved_type || expr->resolved_type->kind == TYPE_VOID);
+    if (!returns_nothing) return;
+    Str name = {0};
+    if (expr->kind == AST_EXPR_METHOD_CALL) name = expr->as.method_call.method_name;
+    else if (expr->as.call.callee && expr->as.call.callee->kind == AST_EXPR_IDENT) name = expr->as.call.callee->as.ident;
+    char message[320];
+    snprintf(message, sizeof message,
+             "'%.*s' returns nothing, so its call has no value to use here; "
+             "call it as a statement of its own",
+             (int)name.len, name.data ? name.data : "");
+    diag_error(sema_diag_file(module), (int)expr->line, (int)expr->column, message);
+    module->had_error = true;
+}
+
 static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr, bool is_value_pos) {
     if (!expr) return;
     sema_analyze_expr_inner(ctx, module, symbols, expr, is_value_pos);
     sema_check_unnarrowed_opt(module, expr);
+    sema_check_void_value(module, expr);
 }
 
 static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr, bool is_value_pos) {
@@ -6550,7 +6607,12 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
             break;
         }
         case AST_EXPR_UNARY:
-            sema_analyze_expr(ctx, module, symbols, expr->as.unary.operand, true);
+            {
+                const AstExpr* saved_void_ok = s_void_ok_expr;
+                if (expr->as.unary.op == AST_UNARY_SPAWN) s_void_ok_expr = expr->as.unary.operand;
+                sema_analyze_expr(ctx, module, symbols, expr->as.unary.operand, true);
+                s_void_ok_expr = saved_void_ok;
+            }
             if (expr->as.unary.op == AST_UNARY_NOT) expr->resolved_type = type_get_bool(ctx->type_registry);
             else if (expr->as.unary.op == AST_UNARY_VIEW || expr->as.unary.op == AST_UNARY_MOD) {
                 if (expr->as.unary.operand->resolved_type) expr->resolved_type = type_get_ref(ctx->type_registry, expr->as.unary.operand->resolved_type, expr->as.unary.op == AST_UNARY_MOD);
@@ -7872,8 +7934,13 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                     || str_eq_cstr(fname, "toJson") || str_eq_cstr(fname, "toString")
                     || str_eq_cstr(fname, "fromJson") || str_eq_cstr(fname, "get")
                     || str_eq_cstr(fname, "default");   // #959 `T.default()`
-                if (!is_value && (modname.data || is_type) && !is_intrinsic
-                    && !sema_any_function_named(module, fname)) {
+                /* A module qualifier names that module's functions only; a type
+                 * used as a namespace may still reach a method declared
+                 * anywhere, so it keeps the any-function test */
+                bool unknown = (modname.data && !is_type)
+                    ? !sema_module_has_function(module, modname, fname)
+                    : !sema_any_function_named(module, fname);
+                if (!is_value && (modname.data || is_type) && !is_intrinsic && unknown) {
                     Str suggestion = {0}; size_t best_dist = (size_t)-1;
                     // Candidates: functions of the qualified module (a bare
                     // ident matches its module_name suffix), and `this`-methods
