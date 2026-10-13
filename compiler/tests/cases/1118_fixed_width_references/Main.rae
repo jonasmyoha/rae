@@ -1,0 +1,92 @@
+# A fixed-width integer reference (UInt64, UInt32, Int32, UInt8, ...) has no
+# `{ .ptr }` wrapper in C: it is a plain pointer. A `mod` one was read through
+# it, a `view` LOCAL was not — so the payload an `if let` narrowed out of an
+# `opt UInt64` reached C as the pointer itself: `uint64_t copied = present;`
+# and every argument, sum, comparison and interpolation of it failed to
+# compile (#93852273). A `view` PARAMETER of a number is passed by value and
+# stays as it was. Also: a UInt32 EXPRESSION (`a + b`) was formatted by the
+# uint32_t arm of the generic macro, which is Char, and printed a control
+# character instead of the number.
+type Holder {
+  wide: opt UInt64
+  small: opt UInt8
+  signed: opt Int32
+  mid: opt UInt32
+}
+
+func twice(value: copy UInt64) ret UInt64 {
+  ret value * (2 as UInt64)
+}
+
+func viaParam(value: view UInt64) ret UInt64 {
+  ret value + (1 as UInt64)
+}
+
+func narrowParam(maybe: opt copy UInt64) ret UInt64 {
+  if let present: view UInt64 => maybe {
+    ret present * (3 as UInt64)
+  }
+  ret 0 as UInt64
+}
+
+func pick(flag: view Bool) ret opt UInt32 {
+  if flag {
+    ret 5 as UInt32
+  }
+  ret none
+}
+
+func main() {
+  var holder: Holder = {
+    wide: 40 as UInt64
+    small: 7 as UInt8
+    signed: -3 as Int32
+    mid: 9 as UInt32
+  }
+  if let present: view UInt64 => holder.wide {
+    let copied: UInt64 = present
+    log("copy {copied}")
+    log("argument {twice(value: present)}")
+    log("arithmetic {present + (2 as UInt64)}")
+    log("comparison {present > (10 as UInt64)}")
+    log("interpolation {present}")
+  }
+  if let present: view UInt8 => holder.small {
+    let copied: UInt8 = present
+    log("small {copied} {present + (1 as UInt8)} {present is (7 as UInt8)}")
+  }
+  if let present: view Int32 => holder.signed {
+    log("signed {present} {present * (2 as Int32)}")
+  }
+  if let present: view UInt32 => holder.mid {
+    let copied: UInt32 = present
+    log("mid {copied} {present < (10 as UInt32)}")
+  }
+  if let present: mod UInt64 => holder.wide {
+    present = present + (2 as UInt64)
+  }
+  if let present: view UInt64 => holder.wide {
+    log("written through mod {present}")
+  }
+
+  let base: UInt64 = 10 as UInt64
+  let baseView: view UInt64 => base
+  log("view local {baseView} {baseView + (1 as UInt64)}")
+  log("view parameter {viaParam(value: base)} {viaParam(value: baseView)}")
+  let four: opt UInt64 = 4 as UInt64
+  log("narrowed parameter {narrowParam(maybe: four)} {narrowParam(maybe: none)}")
+  if let taken: UInt32 = pick(flag: true) {
+    log("taken {taken} {taken + (1 as UInt32)}")
+  }
+  var values: List(UInt64) = List.create(UInt64, cap: 2)
+  values.add(value: 6 as UInt64)
+  values.add(value: 7 as UInt64)
+  var sum: UInt64 = 0 as UInt64
+  loop let value: view UInt64 in values {
+    sum = sum + value
+  }
+  log("loop sum {sum}")
+  if let second: view UInt64 => values.viewAt(index: 1) {
+    log("viewAt {second} {second > (6 as UInt64)}")
+  }
+}

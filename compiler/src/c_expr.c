@@ -305,6 +305,18 @@ void emit_to_string_expr(CFuncContext* ctx, const AstExpr* operand, FILE* out) {
     // only C types, where UInt32 is Char's uint32_t and Int8 may be Bool's
     // int8_t.
     const char* int_formatter = (tr && !tr->is_opt) ? rae_int_formatter(base) : NULL;
+    /* An integer EXPRESSION (`a + b`) has no type name here; its resolved type
+     * still knows the width. Without this a UInt32 sum reached the _Generic
+     * macro's uint32_t arm, which is Char, and printed a control character. */
+    if (!int_formatter && !(tr && tr->is_opt) && operand->resolved_type
+        && operand->resolved_type->kind == TYPE_INT) {
+        int bits = operand->resolved_type->as.integer.bits;
+        bool is_unsigned = operand->resolved_type->as.integer.is_unsigned;
+        if (bits == 8) int_formatter = is_unsigned ? "rae_str_uint8" : "rae_str_int8";
+        else if (bits == 16) int_formatter = is_unsigned ? "rae_str_uint16" : "rae_str_int16";
+        else if (bits == 32) int_formatter = is_unsigned ? "rae_str_uint32" : "rae_str_int32";
+        else if (bits == 64 && is_unsigned) int_formatter = "rae_str_uint64";
+    }
     if (is_user_struct) {
         const char* mangled = rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = base}});
         fprintf(out, "rae_to_str_%s_(&(", mangled);
@@ -626,10 +638,20 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
             if (!str_eq_cstr(vb, "Buffer") && !str_eq_cstr(vb, "List") && !str_eq_cstr(vb, "Any") && !is_num_prim) {
                 is_struct_view = true;
             }
-            // `mod` of a fixed-width integer (UInt64, Int32, ...) has no
+            // A fixed-width integer (UInt64, Int32, ...) reference has no
             // `{ .ptr }` wrapper: it is a plain `T*`, read through `(*name)`.
-            if (is_num_prim && tr->is_mod && !c_primitive_ref_has_wrapper(vb_concrete)) {
-                is_struct_view = true;
+            // That holds for every `mod`, and for a `view` LOCAL — a
+            // `let x: view UInt64 =>` binding or the payload an `if let`
+            // narrowed out of an `opt UInt64`. A `view` PARAMETER of a number
+            // is passed by value (locals start at func_first_let_idx).
+            if (is_num_prim && !c_primitive_ref_has_wrapper(vb_concrete)) {
+                bool is_local = false;
+                if (ctx->func_first_let_idx != (size_t)-1) {
+                    for (size_t li = ctx->func_first_let_idx; li < ctx->local_count; li++) {
+                        if (str_eq(ctx->locals[li], expr->as.ident)) { is_local = true; break; }
+                    }
+                }
+                if (tr->is_mod || is_local) is_struct_view = true;
             }
         }
 
