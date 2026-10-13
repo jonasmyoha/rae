@@ -63,6 +63,24 @@ extra_plist=""
 if [ "${RAE_IOS_EXEMPT_ENCRYPTION:-0}" = "1" ]; then
   extra_plist='<key>ITSAppUsesNonExemptEncryption</key><false/>'
 fi
+# Purpose strings. SDL3 links the camera (AVCaptureDevice), Bluetooth
+# (CBCentralManager, for controllers) and microphone recording, and App Store
+# Connect refuses a build whose binary references those without a purpose
+# string in Info.plist (ITMS-90683): the build is dropped after upload and
+# never reaches TestFlight. iOS shows one only if the app actually asks for
+# that access. RAE_IOS_BLUETOOTH_USAGE / RAE_IOS_CAMERA_USAGE /
+# RAE_IOS_MICROPHONE_USAGE word them for the app (plain text, no < & >).
+bluetooth_usage=${RAE_IOS_BLUETOOTH_USAGE:-Bluetooth connects game controllers.}
+camera_usage=${RAE_IOS_CAMERA_USAGE:-The camera is used only when you turn on a feature that needs it.}
+microphone_usage=${RAE_IOS_MICROPHONE_USAGE:-The microphone is used only when you turn on a feature that needs it.}
+for usage in "$bluetooth_usage" "$camera_usage" "$microphone_usage"; do
+  case "$usage" in
+    *'<'*|*'>'*|*'&'*|*'"'*) echo "error: a purpose string may not contain < > & or \": $usage" >&2; exit 1 ;;
+  esac
+done
+extra_plist="$extra_plist<key>NSBluetoothAlwaysUsageDescription</key><string>$bluetooth_usage</string>"
+extra_plist="$extra_plist<key>NSCameraUsageDescription</key><string>$camera_usage</string>"
+extra_plist="$extra_plist<key>NSMicrophoneUsageDescription</key><string>$microphone_usage</string>"
 # The privacy manifest (PrivacyInfo.xcprivacy): Rae's own by default, which
 # declares what the runtime and SDL3 do; RAE_IOS_PRIVACY_MANIFEST replaces it.
 privacy_manifest=${RAE_IOS_PRIVACY_MANIFEST:-$here/PrivacyInfo.xcprivacy}
