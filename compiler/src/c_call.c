@@ -1174,6 +1174,35 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                     }
                 }
             }
+            /* A plain value for a VALUE optional parameter (`opt copy T` /
+             * `opt own T`) becomes that optional, built like a `let x: opt T =
+             * value` (emit_optional_boxed_expr: a String or heap payload is
+             * copied, or moved when the argument gives the local away — the
+             * move was marked above). Passing the bare value handed C a
+             * `T` where the parameter is a `rae_opt_T`. An optional or `none`
+             * argument already is the parameter's type and goes on below. */
+            if (p && p->type && p->type->is_opt && !(p->type->is_view || p->type->is_mod)
+                && a->value && a->value->kind != AST_EXPR_NONE) {
+                const AstExpr* plain = a->value;
+                if (plain->kind == AST_EXPR_OWN) plain = plain->as.unary.operand;
+                const AstTypeRef* arg_tr = infer_expr_type_ref(ctx, plain);
+                bool arg_is_opt = (arg_tr && arg_tr->is_opt)
+                    || (plain->resolved_type && plain->resolved_type->kind == TYPE_OPT)
+                    || plain->kind == AST_EXPR_UNBOX;
+                Str arg_base = arg_tr ? get_base_type_name(arg_tr) : (Str){0};
+                bool arg_is_any = str_eq_cstr(arg_base, "Any") || str_eq_cstr(arg_base, "RaeAny");
+                const AstTypeRef* opt_pt = p->type;
+                if (fd->generic_params && concrete)
+                    opt_pt = substitute_type_ref(ctx->compiler_ctx, fd->generic_params, concrete, p->type);
+                if (!arg_is_opt && !arg_is_any && rae_opt_is_struct_rep(ctx, opt_pt)) {
+                    emit_optional_boxed_expr(ctx, opt_pt, plain, out);
+                    if (close_live_flag) fprintf(out, ")");
+                    if (a->next) fprintf(out, ", ");
+                    a = a->next; p = p->next;
+                    arg_index++;
+                    continue;
+                }
+            }
             if (p && p->type && p->type->is_opt && (p->type->is_view || p->type->is_mod) && a->value) {
                 const AstTypeRef* opt_pt = p->type;
                 if (fd->generic_params && concrete)
