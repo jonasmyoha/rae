@@ -36,11 +36,7 @@ open webgpu/Context
 
 type FramePacer {
   framesInFlight: Int  # 2, or 1 under RAE_FRAMES_IN_FLIGHT=1
-  # the end mark of the frame before this one (a Bool beside it, not `opt UInt64`:
-  # a narrowed optional fixed-width integer reaches C as an undereferenced
-  # pointer — queued compiler bug)
-  hasPreviousEnd: Bool
-  previousEnd: UInt64
+  previousEnd: opt UInt64  # the end mark of the frame before this one
   timing: Bool  # RAE_FRAME_TIMING: print frame / CPU / present / GPU-wait averages
   frameStart: Float64  # when the previous pace returned: this frame's start
   presentStart: Float64  # when this frame's present began (notePresentStart)
@@ -69,8 +65,7 @@ func createFramePacer() ret FramePacer {
   }
   ret FramePacer {
     framesInFlight: framesInFlight
-    hasPreviousEnd: false
-    previousEnd: 0 as UInt64
+    previousEnd: none
     timing: Sys.getEnv(name: "RAE_FRAME_TIMING").length() > 0
     frameStart: 0.0
     presentStart: 0.0
@@ -109,9 +104,9 @@ func paceFrame(pacer: mod FramePacer) {
     unsafe {
       webgpuWaitSubmission(index: frameEnd)
     }
-  } else if pacer.hasPreviousEnd {
+  } else if let previous: view UInt64 => pacer.previousEnd {
     unsafe {
-      webgpuWaitSubmission(index: pacer.previousEnd)
+      webgpuWaitSubmission(index: previous)
     }
   } else {
     unsafe {
@@ -119,7 +114,6 @@ func paceFrame(pacer: mod FramePacer) {
     }
   }
   pacer.previousEnd = frameEnd
-  pacer.hasPreviousEnd = true
   let waitEnd: Float64 = frameClock()
   if pacer.timing {
     recordFrameTiming(pacer: pacer, waitStart: waitStart, waitEnd: waitEnd)

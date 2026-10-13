@@ -38,18 +38,18 @@ func main() {
     hour: 12.0
     skyModel: SettingsSkyModel.hosek
   )
-  # The panel is a panel, not a dialog: it is showing to begin with, and one
-  # action toggles it. There is no separate close, because the button that hides
-  # it is the button that shows it — and that button stays visible either way,
-  # or there would be no way back.
-  check(label: "starts showing", ok: settingsState.open)
+  # The panel is a panel, not a dialog: it starts closed, so the scene is not
+  # covered at launch, and one action toggles it. There is no separate close,
+  # because the button that shows it is the button that hides it — and that
+  # button stays visible either way, or there would be no way back.
+  check(label: "starts hidden", ok: settingsState.open is false)
   check(
-    label: "toggles hidden"
-    ok: settingsHandleAction(settingsState: settingsState, actionId: "settings.open") and settingsState.open is false
+    label: "toggles showing"
+    ok: settingsHandleAction(settingsState: settingsState, actionId: "settings.open") and settingsState.open
   )
   check(
     label: "toggles back"
-    ok: settingsHandleAction(settingsState: settingsState, actionId: "settings.open") and settingsState.open
+    ok: settingsHandleAction(settingsState: settingsState, actionId: "settings.open") and settingsState.open is false
   )
 
   # An action nobody here owns must be ignored, not mistaken for a change: the
