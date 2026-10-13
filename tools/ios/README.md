@@ -29,12 +29,15 @@ In Xcode: **Signing & Capabilities → Team** (Automatic), pick your plugged
 device, **Run**. Signing needs your Apple ID/team and can't be scripted.
 
 The generator: emits the app C, prepends `<SDL3/SDL_main.h>` (so SDL owns the iOS
-entry), bundles the example's `assets/` preserving relative paths, and writes a
+entry), bundles the example's `assets/` preserving relative paths (plus any
+`examples/<other>/assets/...` file the app reads from another example, e.g. 118's
+HUD font from 114), and writes a
 CMake `-G Xcode` project. `ios_bootstrap.c` `chdir`s to the bundle at launch so
 relative asset reads resolve.
 
 Options, as environment variables: `RAE_IOS_BUNDLE_ID` / `RAE_IOS_NAME`,
-`RAE_IOS_ORIENTATIONS=portrait|any`, `RAE_IOS_DEPLOYMENT_TARGET` (15.0),
+`RAE_IOS_ORIENTATIONS=any|portrait` (default `any`: the app follows how the
+device is held; `portrait` locks a phone upright), `RAE_IOS_DEPLOYMENT_TARGET` (15.0),
 `RAE_IOS_ENTRY`, and `RAE_IOS_ICON=<square 1024x1024 opaque PNG>` — the app
 icon, made the AppIcon set of a generated asset catalog (single-size; Xcode
 makes the rest).

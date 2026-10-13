@@ -107,9 +107,11 @@ if changed_fraction < 0.01:
     fail(f"only {changed_fraction:.2%} of sampled pixels differ from the background")
 
 if gpu3d_ui:
-    # Prove that this is the composed 110 frame rather than merely a non-blank
-    # 3D target. The top-left HUD contains bright MSDF text over a dark card,
-    # and the top-right settings control contains a saturated teal icon plate.
+    # Prove that this is the composed frame rather than merely a non-blank 3D
+    # target. The top-left HUD contains bright MSDF text over a dark card, and
+    # the camera bar beside it has saturated teal "Mouse" / "Keys" pills. (The
+    # teal used to be sampled top-right, on the settings panel; the panel now
+    # starts closed, so the always-shown camera bar carries the check.)
     bright_counts = [0, 0]
     teal_counts = [0, 0]
     # Runtime screenshots have existed with both BMP row orientations. Check
@@ -124,9 +126,9 @@ if gpu3d_ui:
                 # visually white glyphs are around 80 rather than 255.
                 if min(red, green, blue) > 35 and max(red, green, blue) - min(red, green, blue) < 25:
                     bright_counts[orientation] += 1
-        for y in range(height * 3 // 100, height * 15 // 100, max(1, height // 300)):
+        for y in range(height * 3 // 100, height * 11 // 100, max(1, height // 300)):
             storage_y = y if orientation == 0 else height - 1 - y
-            for x in range(width * 88 // 100, width * 99 // 100, max(1, width // 400)):
+            for x in range(width * 15 // 100, width * 35 // 100, max(1, width // 400)):
                 red, green, blue = rgb_pixel(x, storage_y)
                 if green > red + 10 and blue > red + 10:
                     teal_counts[orientation] += 1
@@ -135,7 +137,7 @@ if gpu3d_ui:
     if bright_hud < 8:
         fail(f"GPU3D UI HUD text missing: only {bright_hud} bright samples")
     if teal_control < 8:
-        fail(f"GPU3D UI settings control missing: only {teal_control} teal samples")
+        fail(f"GPU3D UI camera bar missing: only {teal_control} teal samples")
 
 print(
     f"non-blank BMP {width}x{height}: {len(colors)}+ colors, "

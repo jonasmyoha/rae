@@ -289,7 +289,7 @@ func main() ret Int {
     logWarnLine(ov: logOverlay, text: "settings dialog failed to mount")
   }
   settingsApplyToWorld(settingsState: settings, world: uiWorld, uiSystems: uiSystems)
-  applySettingsPanelOpen(world: uiWorld, open: settings.open)
+  applyDemoPanel(world: uiWorld, open: settings.open)
   var camera: Camera3d = scene1.camera
   var cameraRig: CameraRig = createCameraRig(camera: camera)
   # Restore before the test-state hook, so an explicit env override still
@@ -595,7 +595,7 @@ func main() ret Int {
       # of this example reads.
       uiState.paused = settings.playing is false
       settingsApplyToWorld(settingsState: settings, world: uiWorld, uiSystems: uiSystems)
-      applySettingsPanelOpen(world: uiWorld, open: settings.open)
+      applyDemoPanel(world: uiWorld, open: settings.open)
       stateDirty = true
     }
     let uiLayoutDirty: Bool = syncDemoUi(world: uiWorld, state: uiState)
