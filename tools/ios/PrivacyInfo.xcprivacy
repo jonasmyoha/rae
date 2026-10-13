@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The privacy manifest every generated Rae iOS app ships (gen-ios.sh bundles
+     it; RAE_IOS_PRIVACY_MANIFEST replaces it). It declares what the Rae
+     runtime and SDL3 themselves do, which the App Store requires of "required
+     reason" APIs (ITMS-91053 otherwise):
+     - stat / fstat (file timestamp APIs): reading the app's own bundled assets
+       and the files it writes in its container - reason C617.1;
+     - mach_absolute_time (system boot time APIs): frame timing, elapsed time
+       inside the app - reason 35F9.1.
+     No tracking, no tracking domains, no collected data. An app that adds its
+     own (networking, analytics, user defaults ...) supplies its own manifest. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>NSPrivacyTracking</key>
+  <false/>
+  <key>NSPrivacyTrackingDomains</key>
+  <array/>
+  <key>NSPrivacyCollectedDataTypes</key>
+  <array/>
+  <key>NSPrivacyAccessedAPITypes</key>
+  <array>
+    <dict>
+      <key>NSPrivacyAccessedAPIType</key>
+      <string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+      <key>NSPrivacyAccessedAPITypeReasons</key>
+      <array>
+        <string>C617.1</string>
+      </array>
+    </dict>
+    <dict>
+      <key>NSPrivacyAccessedAPIType</key>
+      <string>NSPrivacyAccessedAPICategorySystemBootTime</string>
+      <key>NSPrivacyAccessedAPITypeReasons</key>
+      <array>
+        <string>35F9.1</string>
+      </array>
+    </dict>
+  </array>
+</dict>
+</plist>

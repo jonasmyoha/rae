@@ -39,6 +39,28 @@ Options, as environment variables: `RAE_IOS_BUNDLE_ID` / `RAE_IOS_NAME`,
 icon, made the AppIcon set of a generated asset catalog (single-size; Xcode
 makes the rest).
 
+## Upload to App Store Connect (TestFlight)
+
+```sh
+RAE_IOS_TEAM=<team-id> RAE_IOS_BUNDLE_ID=<id> RAE_IOS_VERSION=0.1.0 RAE_IOS_BUILD=7 \
+  sh tools/ios/upload-ios.sh <project-dir>
+```
+
+Archives with automatic signing (Xcode makes the Apple Distribution
+certificate and the App Store profile when the account may) and exports
+straight to App Store Connect, as the Apple ID in Xcode → Settings → Accounts
+or an App Store Connect API key (`RAE_IOS_ASC_KEY_PATH`, `RAE_IOS_ASC_KEY_ID`,
+`RAE_IOS_ASC_ISSUER_ID`). Needs an explicit App ID and an App Store Connect app
+for the bundle id first. `RAE_IOS_BUILD` must grow with every upload of a
+version; `RAE_IOS_UPLOAD=0` stops at the `.ipa`.
+
+Every generated app ships `PrivacyInfo.xcprivacy` (what the runtime and SDL3
+use: file timestamps in the app's container, elapsed time; no tracking, no
+collected data) — `RAE_IOS_PRIVACY_MANIFEST` replaces it.
+`RAE_IOS_EXEMPT_ENCRYPTION=1` writes `ITSAppUsesNonExemptEncryption` NO (the
+app's own declaration), and `RAE_IOS_VERSION` / `RAE_IOS_BUILD` set
+`CFBundleShortVersionString` / `CFBundleVersion` (default 1.0 / 1).
+
 ## Status / next
 
 - `build-wgpu-ios.sh`, `build-sdl3-ios.sh`, `gen-ios.sh`, `ios_bootstrap.c`: done.

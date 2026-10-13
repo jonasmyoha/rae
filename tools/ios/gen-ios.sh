@@ -47,6 +47,26 @@ icon=${RAE_IOS_ICON:-}
 if [ -n "$icon" ] && [ ! -f "$icon" ]; then
   echo "error: RAE_IOS_ICON is not a file: $icon" >&2; exit 1
 fi
+# The version the App Store shows (CFBundleShortVersionString, e.g. 0.1.0) and
+# the build number (CFBundleVersion), which must grow with every upload of the
+# same version.
+version=${RAE_IOS_VERSION:-1.0}
+build_number=${RAE_IOS_BUILD:-1}
+printf '%s' "$version" | grep -Eq '^[0-9]+(\.[0-9]+){0,2}$' \
+  || { echo "error: RAE_IOS_VERSION is one to three numbers with dots, not '$version'" >&2; exit 1; }
+printf '%s' "$build_number" | grep -Eq '^[0-9]+(\.[0-9]+){0,2}$' \
+  || { echo "error: RAE_IOS_BUILD is one to three numbers with dots, not '$build_number'" >&2; exit 1; }
+# RAE_IOS_EXEMPT_ENCRYPTION=1 declares that the app uses no encryption beyond
+# what is exempt (none, or the system's HTTPS): ITSAppUsesNonExemptEncryption
+# NO, so App Store Connect stops asking at every upload. The app's own call.
+extra_plist=""
+if [ "${RAE_IOS_EXEMPT_ENCRYPTION:-0}" = "1" ]; then
+  extra_plist='<key>ITSAppUsesNonExemptEncryption</key><false/>'
+fi
+# The privacy manifest (PrivacyInfo.xcprivacy): Rae's own by default, which
+# declares what the runtime and SDL3 do; RAE_IOS_PRIVACY_MANIFEST replaces it.
+privacy_manifest=${RAE_IOS_PRIVACY_MANIFEST:-$here/PrivacyInfo.xcprivacy}
+[ -f "$privacy_manifest" ] || { echo "error: no privacy manifest at $privacy_manifest" >&2; exit 1; }
 orientations=${RAE_IOS_ORIENTATIONS:-portrait}
 portrait='<string>UIInterfaceOrientationPortrait</string>'
 upsideDown='<string>UIInterfaceOrientationPortraitUpsideDown</string>'
@@ -158,6 +178,10 @@ EOF
 
 # The icon's asset catalog, compiled by Xcode's actool into the bundle (a
 # RESOURCE of the target), named by ASSETCATALOG_COMPILER_APPICON_NAME.
+# The privacy manifest goes to the bundle's root.
+mkdir -p "$gen/privacy"
+cp "$privacy_manifest" "$gen/privacy/PrivacyInfo.xcprivacy"
+resources="$gen/privacy/PrivacyInfo.xcprivacy"
 icon_source=""; icon_properties=""
 if [ -n "$icon" ]; then
   catalog="$gen/Assets.xcassets"
@@ -173,7 +197,8 @@ if [ -n "$icon" ]; then
 }
 EOF
   icon_source="  \"$catalog\"\n"
-  icon_properties="set_target_properties(\${APP} PROPERTIES RESOURCE \"$catalog\"
+  resources="$resources;$catalog"
+  icon_properties="set_target_properties(\${APP} PROPERTIES
   XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME \"AppIcon\")\n"
 fi
 
@@ -185,10 +210,12 @@ project(RaeApp C)
 set(APP RaeApp)
 set(RAE_IOS_PHONE_ORIENTATIONS "$phone_orientations")
 set(RAE_IOS_PAD_ORIENTATIONS "$pad_orientations")
+set(RAE_IOS_EXTRA_PLIST "$extra_plist")
 add_executable(\${APP} MACOSX_BUNDLE
   "$gen/app_ios.c"
   "$runtime_dir/rae_runtime.c"
   "$here/ios_bootstrap.c"
+  "$gen/privacy/PrivacyInfo.xcprivacy"
 $(printf "%b" "$box3d_sources")$(printf "%b" "$icon_source")$(printf "%b" "$asset_lines"))
 
 $(printf "%b" "${pkg_lines:-}")
@@ -220,6 +247,14 @@ set_target_properties(\${APP} PROPERTIES
   MACOSX_BUNDLE_GUI_IDENTIFIER "$bundle_id"
   MACOSX_BUNDLE_BUNDLE_NAME "$disp"
   MACOSX_BUNDLE_INFO_PLIST "$here/Info.plist.in"
+  MACOSX_BUNDLE_SHORT_VERSION_STRING "$version"
+  MACOSX_BUNDLE_BUNDLE_VERSION "$build_number"
+  RESOURCE "$resources"
+  XCODE_ATTRIBUTE_MARKETING_VERSION "$version"
+  XCODE_ATTRIBUTE_CURRENT_PROJECT_VERSION "$build_number"
+  # An archive keeps the app only if it is installed into Applications
+  XCODE_ATTRIBUTE_SKIP_INSTALL "NO"
+  XCODE_ATTRIBUTE_INSTALL_PATH "\$(LOCAL_APPS_DIR)"
   XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "$bundle_id"
   XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
   XCODE_ATTRIBUTE_CODE_SIGN_STYLE "Automatic"
@@ -240,6 +275,7 @@ RAE_IOS_NAME="$name"
 RAE_IOS_BUNDLE_ID="$bundle_id"
 RAE_IOS_PROJ="$gen/proj/RaeApp.xcodeproj"
 RAE_IOS_APP="$gen/proj/Release-iphoneos/RaeApp.app"
+RAE_IOS_ARCHIVE="$gen/RaeApp.xcarchive"
 EOF
 
 echo ""
