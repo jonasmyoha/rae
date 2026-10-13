@@ -1,0 +1,142 @@
+# A character mover of any size on upstream Box3D's C library: the sample's
+# capsule (radius 0.3, sphere centres 0.5 m either side of the middle) stays
+# the default, and a sized one (a smaller character) carries its own
+# capsule. Each stands on the ground with its capsule's middle at its own
+# rest height (moverRestHeight: the pogo spring holds the lower sphere three
+# radii up), and both jump just as high - the jump is a speed, not a size.
+import Math
+import Vec2
+import Vec3
+import Quat
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open ecs/Transform
+open box3d/ecs/PhysicsTypes
+open box3d/ecs/Physics
+open box3d/ecs/PhysicsComponents
+open box3d/ecs/PhysicsSystems
+open box3d/ecs/CharacterMover
+open box3d/ecs/VenueMesh
+
+type Scene {
+  transforms: ComponentTable(Transform3D)
+  rigidBodies: ComponentTable(RigidBody)
+  characters: ComponentTable(CharacterBody)
+  physics: Physics
+}
+
+func addFlatGround(scene: mod Scene) ret Bool {
+  let count: Int = 21
+  var heights: List(Float) = List.create(Float, cap: count * count)
+  loop var i: Int = 0, i < count * count, ++i {
+    heights.add(value: 0.0)
+  }
+  if let shapeId: ShapeId = addVenueHeightField(
+    physics: scene.physics
+    heights: heights
+    countX: count
+    countZ: count
+    scale: Vec3 { x: 1.0, y: 1.0, z: 1.0 }
+    transform: Transform {
+      position: Vec3 { x: -10.0, y: 10.0, z: 0.0 }
+      rotation: Quat.fromAxisAngle(axis: Vec3 { x: 1.0, y: 0.0, z: 0.0 }, angle: Math.pi * 0.5)
+    }
+    def: defaultShapeDef(lengthUnitsPerMeter: 1.0)
+  ) {
+    ret true
+  }
+  ret false
+}
+
+func step(scene: mod Scene) {
+  physicsFixedStep(
+    physics: scene.physics
+    rigidBodies: scene.rigidBodies
+    characters: scene.characters
+    transforms: scene.transforms
+  )
+}
+
+func centerHeight(scene: view Scene, id: view EntityId) ret Float {
+  ret componentView(this: scene.characters, entityId: id).mover.transform.p.z
+}
+
+func near(a: view Float, b: view Float, within: view Float) ret Bool {
+  ret Math.abs(value: a - b) < within
+}
+
+func main() {
+  var def: WorldDef = defaultPhysicsWorldDef()
+  def.workerCount = 1
+  var scene: Scene = {
+    transforms: createComponentTable(Transform3D)
+    rigidBodies: createComponentTable(RigidBody)
+    characters: createComponentTable(CharacterBody)
+    physics: createPhysics(def: def, fixedStep: 1.0 / 60.0, subSteps: 4)
+  }
+  log("ground: {addFlatGround(scene: scene)}")
+  var allocator: EntityAllocator = createEntityAllocator()
+  let sample: MoverSize = sampleMoverSize()
+  let small: MoverSize = { radius: 0.22, halfHeight: 0.37 }
+  let sampleId: EntityId = allocEntity(this: allocator)
+  let smallId: EntityId = allocEntity(this: allocator)
+  # Both dropped a little over where they rest
+  componentSet(
+    this: scene.characters
+    entityId: sampleId
+    data: createCharacterBody(
+      position: Vec3 { x: -3.0, y: 0.0, z: moverRestHeight(size: sample) + 0.2 }
+    )
+  )
+  componentSet(
+    this: scene.characters
+    entityId: smallId
+    data: createCharacterBodySized(
+      position: Vec3 { x: 3.0, y: 0.0, z: moverRestHeight(size: small) + 0.2 }
+      size: small
+    )
+  )
+  log(
+    "the default is the sample's: {near(a: moverRestHeight(size: sample), b: 1.4, within: 0.0001)}"
+  )
+  let smallCapsule: b3Capsule = componentView(this: scene.characters, entityId: smallId).mover.capsule
+  log(
+    "the sized one carries its own capsule: {near(a: smallCapsule.radius, b: 0.22, within: 0.0001) and near(
+      a: smallCapsule.center2.z - smallCapsule.center1.z
+      b: 0.74
+      within: 0.0001
+    )}"
+  )
+  loop var i: Int = 0, i < 120, ++i {
+    step(scene: scene)
+  }
+  log(
+    "the sample rests at its height: {near(
+      a: centerHeight(scene: scene, id: sampleId)
+      b: moverRestHeight(size: sample)
+      within: 0.05
+    )}"
+  )
+  log(
+    "the small one at its own: {near(
+      a: centerHeight(scene: scene, id: smallId)
+      b: moverRestHeight(size: small)
+      within: 0.05
+    )}"
+  )
+  let sampleRest: Float = centerHeight(scene: scene, id: sampleId)
+  let smallRest: Float = centerHeight(scene: scene, id: smallId)
+  componentMod(this: scene.characters, entityId: sampleId).jump = true
+  componentMod(this: scene.characters, entityId: smallId).jump = true
+  var samplePeak: Float = 0.0
+  var smallPeak: Float = 0.0
+  loop var i: Int = 0, i < 90, ++i {
+    step(scene: scene)
+    samplePeak = Math.max(a: samplePeak, b: centerHeight(scene: scene, id: sampleId) - sampleRest)
+    smallPeak = Math.max(a: smallPeak, b: centerHeight(scene: scene, id: smallId) - smallRest)
+  }
+  log("both jump: {samplePeak > 0.5 and smallPeak > 0.5}")
+  log("just as high: {near(a: samplePeak, b: smallPeak, within: 0.05)}")
+  destroyPhysics(physics: scene.physics)
+}
