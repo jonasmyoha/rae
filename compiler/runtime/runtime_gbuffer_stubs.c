@@ -25,8 +25,6 @@ _Static_assert(sizeof(rae_Mat4) == 16 * sizeof(float),
 #endif
 
 int64_t rae_gb_prepare(void){ return 0; }
-int64_t rae_gb_offscreen_w(void)        { return 0; }
-int64_t rae_gb_offscreen_h(void)        { return 0; }
 void rae_gb_submit(void* cmd)           { (void)cmd; }
 int64_t rae_g2d_format(void)        { return 0; }
 void rae_ext_Gbuffer_present(void* texture, int64_t width, int64_t height) { (void)texture; (void)width; (void)height; }

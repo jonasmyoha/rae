@@ -1,0 +1,75 @@
+# The deferred renderer's scene resolution (lib/RenderResolution, render-perf-3):
+# a ceiling of scene pixels sets the scale for the window it is in, long side
+# against long side so a rotation keeps it, and the dynamic scale is a fraction
+# of that. A desktop with no ceiling draws at native size.
+open RenderResolution
+
+func rounded(value: view Float) ret Float {
+  ret ((value * 1000.0 + 0.5).toInt()).toFloat() / 1000.0
+}
+
+func show(
+  label: view String
+  width: view Int
+  height: view Int
+  ceilingWidth: view Int
+  ceilingHeight: view Int
+) {
+  let scale: Float = ceilingScale(
+    surfaceWidth: width
+    surfaceHeight: height
+    ceilingWidth: ceilingWidth
+    ceilingHeight: ceilingHeight
+  )
+  let targetWidth: Int = scaledDimension(full: width, scale: scale)
+  let targetHeight: Int = scaledDimension(full: height, scale: scale)
+  log(
+    "{label}: {width}x{height} -> scale {rounded(value: scale)}, scene {targetWidth}x{targetHeight}"
+  )
+}
+
+func main() {
+  show(
+    label: "iPhone 15 Pro landscape"
+    width: 2556
+    height: 1179
+    ceilingWidth: 1600
+    ceilingHeight: 720
+  )
+  show(
+    label: "rotated to portrait"
+    width: 1179
+    height: 2556
+    ceilingWidth: 1600
+    ceilingHeight: 720
+  )
+  show(
+    label: "desktop, no ceiling"
+    width: 1280
+    height: 800
+    ceilingWidth: 0
+    ceilingHeight: 0
+  )
+  show(
+    label: "small window under the ceiling"
+    width: 800
+    height: 600
+    ceilingWidth: 1600
+    ceilingHeight: 720
+  )
+  show(
+    label: "retina desktop at a phone ceiling"
+    width: 2560
+    height: 1600
+    ceilingWidth: 1600
+    ceilingHeight: 720
+  )
+  # the dynamic scale works inside the ceiling, never below a quarter
+  log(
+    "dynamic 0.5 of 0.611: {rounded(value: effectiveRenderScale(dynamicScale: 0.5, ceiling: 0.611))}"
+  )
+  log(
+    "dynamic 1.0 at native: {rounded(value: effectiveRenderScale(dynamicScale: 1.0, ceiling: 1.0))}"
+  )
+  log("floor: {rounded(value: effectiveRenderScale(dynamicScale: 0.3, ceiling: 0.5))}")
+}

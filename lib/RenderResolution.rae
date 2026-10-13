@@ -1,0 +1,115 @@
+# The resolution the deferred renderer draws the 3D scene at (render-perf-3).
+#
+# The scene is drawn into targets SMALLER than the window and the composite
+# pass upscales them to the window's native size; the UI, the composite's
+# output and the present stay native. Two things set the size:
+#
+# - The CEILING: the most scene pixels an app wants, e.g. 1600x720 on a phone
+#   (an iPhone 15 Pro's 2556x1179 drawable is ~3 MP at ~34 bytes per pixel of
+#   render targets). Its long side is matched to the window's long side, so a
+#   rotation keeps the same scale. No ceiling (0x0) means native size.
+# - The DYNAMIC scale (app3d/RenderScale's controller, or RAE_RENDER_SCALE):
+#   a fraction of the ceiling, lowered when frames miss.
+#
+# The scene scale is the product, kept in [0.25, 1]. All of this is decided
+# here in Rae; C only reports the surface size and creates textures of the
+# sizes it is given.
+import Sys
+import String
+
+const minimumRenderScale: Float = 0.25
+
+# The largest scale <= 1 at which a surface fits the ceiling, its long side
+# against the ceiling's long side and short against short. 1.0 when there is
+# no ceiling, the surface is unknown, or it already fits.
+func ceilingScale(
+  surfaceWidth: view Int
+  surfaceHeight: view Int
+  ceilingWidth: view Int
+  ceilingHeight: view Int
+) ret Float {
+  if ceilingWidth <= 0 or ceilingHeight <= 0 or surfaceWidth <= 0 or surfaceHeight <= 0 {
+    ret 1.0
+  }
+  var surfaceLong: Int = surfaceWidth
+  var surfaceShort: Int = surfaceHeight
+  if surfaceHeight > surfaceWidth {
+    surfaceLong = surfaceHeight
+    surfaceShort = surfaceWidth
+  }
+  var ceilingLong: Int = ceilingWidth
+  var ceilingShort: Int = ceilingHeight
+  if ceilingHeight > ceilingWidth {
+    ceilingLong = ceilingHeight
+    ceilingShort = ceilingWidth
+  }
+  var scale: Float = 1.0
+  let longScale: Float = ceilingLong.toFloat() / surfaceLong.toFloat()
+  let shortScale: Float = ceilingShort.toFloat() / surfaceShort.toFloat()
+  if longScale < scale {
+    scale = longScale
+  }
+  if shortScale < scale {
+    scale = shortScale
+  }
+  ret scale
+}
+
+# The scene scale: the dynamic fraction of the ceiling's scale, in [0.25, 1].
+func effectiveRenderScale(dynamicScale: view Float, ceiling: view Float) ret Float {
+  var scale: Float = dynamicScale * ceiling
+  if scale < minimumRenderScale {
+    scale = minimumRenderScale
+  }
+  if scale > 1.0 {
+    scale = 1.0
+  }
+  ret scale
+}
+
+# One side of the scene targets: the surface side at the scale, at least 1.
+func scaledDimension(full: view Int, scale: view Float) ret Int {
+  let scaled: Int = (full.toFloat() * scale + 0.5).toInt()
+  if scaled < 1 {
+    ret 1
+  }
+  ret scaled
+}
+
+# RAE_RENDER_SCALE=<0.25..1> forces the dynamic scale (headless checks,
+# eyeballing a quality trade); anything else or unset is 1.0.
+func renderScaleFromEnv() ret Float {
+  let text: String = Sys.getEnv(name: "RAE_RENDER_SCALE")
+  if text.length() is 0 {
+    ret 1.0
+  }
+  let value: Float = text.toFloat()
+  if value < minimumRenderScale or value > 1.0 {
+    ret 1.0
+  }
+  ret value
+}
+
+# A ceiling as width x height pixels; 0 x 0 is none (native size).
+type RenderCeiling {
+  width: Int
+  height: Int
+}
+
+func noRenderCeiling() ret RenderCeiling {
+  ret RenderCeiling { width: 0, height: 0 }
+}
+
+# RAE_RENDER_CEILING=<width>x<height> forces a ceiling (a phone's on a
+# desktop, for screenshots and frame times); none when unset or malformed.
+func renderCeilingFromEnv() ret opt RenderCeiling {
+  let text: String = Sys.getEnv(name: "RAE_RENDER_CEILING")
+  if let cross: Int = text.indexOf(sub: "x") {
+    let width: Int = text.sub(start: 0, len: cross).toInt()
+    let height: Int = text.sub(start: cross + 1, len: text.length() - cross - 1).toInt()
+    if width > 0 and height > 0 {
+      ret RenderCeiling { width: width, height: height }
+    }
+  }
+  ret none
+}

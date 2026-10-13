@@ -36,21 +36,21 @@ func gbPrepare() ret Int {
 # The presentable target's format (the composite / inspector pipelines write it).
 func nativeG2dFormat() unsafe extern("rae_g2d_format") ret Int
 
-# The offscreen size the targets are built to: the configured surface at the
-# dynamic render scale (#530) — C surface glue.
-func nativeGbOffscreenW() unsafe extern("rae_gb_offscreen_w") ret Int
+# The configured surface's physical size (C surface glue). The scene targets
+# are this at the scene scale, which lib/RenderResolution decides.
+func nativeGbSurfaceWidth() unsafe extern("rae_g2d_surface_width") ret Int
 
-func gbOffscreenW() ret Int {
+func gbSurfaceWidth() ret Int {
   unsafe {
-    ret nativeGbOffscreenW()
+    ret nativeGbSurfaceWidth()
   }
 }
 
-func nativeGbOffscreenH() unsafe extern("rae_gb_offscreen_h") ret Int
+func nativeGbSurfaceHeight() unsafe extern("rae_g2d_surface_height") ret Int
 
-func gbOffscreenH() ret Int {
+func gbSurfaceHeight() ret Int {
   unsafe {
-    ret nativeGbOffscreenH()
+    ret nativeGbSurfaceHeight()
   }
 }
 
