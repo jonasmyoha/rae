@@ -26,13 +26,3 @@ func nativeGbDeferredPrepare() unsafe extern("rae_gb_deferred_prepare") ret Int
 
 # The pass WGSL sources stay C string constants; read as NUL-terminated C
 # strings and copied into a String for the manager's createRenderPipeline.
-
-# Dynamic resolution (#530): the current render scale (the upscale sampler is
-# a manager sampler on the composite cache).
-func nativeGbRenderScale() unsafe extern("rae_gb_render_scale") ret Float64
-
-func gbRenderScale() ret Float64 {
-  unsafe {
-    ret nativeGbRenderScale()
-  }
-}

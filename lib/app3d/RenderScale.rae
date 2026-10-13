@@ -20,17 +20,10 @@
 #   updateRenderScale(drs: drs, deltaTime: deltaTime, profiler: profiler)
 #   ...render...
 #   capFrameSleep(drs: drs, frameStartSec: frameStart)        # end of the frame
+#   setDynamicRenderScale(renderer: renderer, scale: drs.scale)   # the renderer draws at it
 import Gpu2d
 import Profile
-
-# Push the render scale to the deferred renderer (#530). C clamps to [0.25, 1.0].
-func nativeSetRenderScale(s: Float64) unsafe extern("rae_gb_set_render_scale")
-
-func setRenderScale(s: copy Float64) {
-  unsafe {
-    nativeSetRenderScale(s: s)
-  }
-}
+open RenderResolution
 
 # OS thermal pressure (Apple's NSProcessInfo, runtime_platform_apple.c): 0
 # nominal, 1 fair, 2 serious, 3 critical. Other platforms have no such API, so
@@ -69,6 +62,7 @@ func thermalCeiling(therm: view Int) ret Float {
 # rate first, then the resolution.
 type RenderScaleController {
   scale: Float
+  maxScale: Float  # 1.0, or what RAE_RENDER_SCALE forces: the ladder never climbs above it
   minScale: Float
   step: Float
   capFps: Float  # 60 normally; 30 = bottom rung frame cap
@@ -88,8 +82,10 @@ func createRenderScaleController(targetFps: copy Float) ret RenderScaleControlle
   }
   # Missed = 25% over the target period (e.g. >20.8ms for 60fps) — clearly not
   # holding the rate, not just jitter.
+  let maxScale: Float = renderScaleFromEnv()
   ret RenderScaleController {
-    scale: 1.0
+    scale: maxScale
+    maxScale: maxScale
     minScale: 0.5
     step: 0.1
     capFps: 60.0
@@ -103,19 +99,17 @@ func createRenderScaleController(targetFps: copy Float) ret RenderScaleControlle
   }
 }
 
-# Feed one frame's dt (seconds). Reads the OS thermal state, walks the ladder
-# (stepRenderScale) and pushes a changed scale to the renderer.
+# Feed one frame's dt (seconds). Reads the OS thermal state and walks the
+# ladder (stepRenderScale); the app hands drs.scale to the renderer
+# (setDynamicRenderScale), which draws its scene at that fraction of the
+# render-resolution ceiling (lib/RenderResolution).
 func updateRenderScale(
   drs: mod RenderScaleController
   deltaTime: copy Float
   profiler: mod Profiler
 ) {
   let therm: Int = thermalState()
-  let previousScale: Float = drs.scale
   stepRenderScale(drs: drs, deltaTime: deltaTime, therm: therm)
-  if drs.scale is not previousScale {
-    setRenderScale(s: drs.scale as Float64)
-  }
   # Surface the current tier in profile captures: render.scale (percent), the
   # frame cap, and the OS thermal state, plotted alongside fps / per-pass GPU ms.
   unsafe {
@@ -140,7 +134,10 @@ func updateRenderScale(
 func stepRenderScale(drs: mod RenderScaleController, deltaTime: view Float, therm: view Int) {
   # Proactive OS-thermal ceiling: snap the scale down (and force the 30fps cap at
   # critical) the moment the OS reports heat, without waiting for missed frames.
-  let ceiling: Float = thermalCeiling(therm: therm)
+  var ceiling: Float = thermalCeiling(therm: therm)
+  if drs.maxScale < ceiling {
+    ceiling = drs.maxScale
+  }
   if drs.scale > ceiling and drs.cooldown <= 0 {
     drs.scale = ceiling
     drs.cooldown = 30
@@ -244,4 +241,19 @@ func capFrameSleep(drs: mod RenderScaleController, frameStartSec: copy Float64) 
 func recordFrameWork(drs: mod RenderScaleController, workSec: view Float) {
   drs.workSec = workSec
   drs.workMeasured = true
+}
+
+# The render-resolution ceiling for this kind of device: a phone or tablet OS
+# draws its 3D scene at most 1600x720 (an iPhone 15 Pro's 2556x1179 drawable
+# then renders at ~0.61, about 1.15 MP instead of 3); a desktop draws at native
+# size. Decided at runtime (Target), so the same app build picks its own;
+# RAE_RENDER_CEILING forces one anywhere.
+func defaultRenderCeiling() ret RenderCeiling {
+  if let forced: RenderCeiling = renderCeilingFromEnv() {
+    ret forced
+  }
+  if Target.isMobileOs {
+    ret RenderCeiling { width: 1600, height: 720 }
+  }
+  ret noRenderCeiling()
 }

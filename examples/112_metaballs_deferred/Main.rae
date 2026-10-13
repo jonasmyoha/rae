@@ -69,6 +69,7 @@ open Shadow3d
 open app3d/UiShell
 open Gpu2dCanvas
 open ui/UiSystems
+open app3d/RenderScale
 
 type DemoUiResource {
   paused: Bool
@@ -131,6 +132,8 @@ func main() ret Int {
   # #905: the renderer owns the mesh store, so it exists before the uploads; the
   # sky is applied below once the settings are loaded.
   var renderer: DeferredRenderer = createDeferredRendererWithUi()
+  # A phone draws the ray-marched scene at most 1600x720; a desktop at native size
+  setRenderCeiling(renderer: renderer, ceiling: defaultRenderCeiling())
   let sphere: MeshHandle = uploadMeshData(renderer: renderer, mesh: sphereData)
   let torus: MeshHandle = uploadMeshData(renderer: renderer, mesh: torusData)
   let ground: MeshHandle = uploadMeshData(renderer: renderer, mesh: planeData)

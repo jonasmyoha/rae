@@ -55,13 +55,27 @@ Two inputs drive it:
 
 ## The renderer plumbing
 
-- `rae_gb_set_render_scale(s)` / `RAE_RENDER_SCALE` env — the scale knob.
-  `rae_gb_offscreen_w/h` return `drawable × scale`, so every deferred target
+- The scale lives in Rae (`lib/RenderResolution.rae`, state on the renderer's
+  `GbufferCache`): the app's controller hands its scale to the renderer
+  (`setDynamicRenderScale(renderer:, scale: drs.scale)`) each frame, and
+  `RAE_RENDER_SCALE` forces it (it is also the controller's maximum).
+  `ensureTargets` sizes every deferred target to the surface
+  (`rae_g2d_surface_width/height`, the only C involved) at the scene scale and
   re-fits through the existing generation check. The **presentable offscreen
   stays full-size** (the present is a same-size `CopyTextureToTexture`).
+- **The render-resolution ceiling** (render-perf-3): the most scene pixels an
+  app wants, e.g. 1600x720 on a phone (`app3d/RenderScale.defaultRenderCeiling`:
+  a mobile OS gets 1600x720, a desktop none), set with
+  `setRenderCeiling(renderer:, ceiling:)`. Its long side is matched to the
+  window's long side, so a rotation keeps the scale; an iPhone 15 Pro's
+  2556x1179 renders at 0.61 (1561x720). The scene scale is the dynamic scale
+  times the ceiling's, in [0.25, 1]; `RAE_RENDER_CEILING=1600x720` forces a
+  ceiling for screenshots. Measured headless at 2560x1600 (scale 0.45): 114
+  5.6 -> 2.4 ms, 112 9.5 -> 2.7 ms, 119 6.6 -> 3.2 ms per frame. Fixture 1127.
 - The **composite** fullscreen pass upscales: `GB_COMPOSITE_WGSL` samples the
   reduced lit/TAA source with a linear sampler at `uv = pos.xy*scale/sourceDims`
-  (identical to a 1:1 fetch at scale 1.0). See `lib/gbuffer_passes.rae`.
+  (identical to a 1:1 fetch at scale 1.0); the scale is the cache's
+  `sceneScale`. See `lib/GbufferPasses.rae`.
 - Aspect is computed from the full drawable, and targets scale uniformly, so the
   projection is unchanged.
 

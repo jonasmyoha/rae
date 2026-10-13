@@ -188,32 +188,10 @@ int64_t rae_gb_prepare(void) {
  * source, the resize check, the release, and the commit of the size + gen
  * counter; Rae builds the WGPUTextureDescriptor / view for each attachment and
  * stores the handles back here so every downstream pass reads them unchanged. */
-/* Dynamic resolution (#530): the deferred targets (g-buffer, depth, pyramid,
- * lit, ao, taa) are sized to a FRACTION of the drawable, then the composite pass
- * upscales the reduced lit/taa source into the full-size presentable offscreen
- * (which must stay drawable-size for the same-size present copy). The scale is a
- * pure per-frame knob; changing it re-fits every target via the usual generation
- * check. Fewer shaded pixels = less GPU load, the main thermal lever on mobile. */
-static double gb_render_scale = -1.0;
-static double rae_gb_get_scale(void) {
-    if (gb_render_scale < 0.0) {          /* lazy default; env for headless tests */
-        gb_render_scale = 1.0;
-        const char* e = getenv("RAE_RENDER_SCALE");
-        if (e) { double v = atof(e); if (v >= 0.25 && v <= 1.0) gb_render_scale = v; }
-    }
-    return gb_render_scale;
-}
-void   rae_gb_set_render_scale(double s) {
-    if (s < 0.25) s = 0.25; if (s > 1.0) s = 1.0; gb_render_scale = s;
-}
-double rae_gb_render_scale(void) { return rae_gb_get_scale(); }
-static int rae_gb_scale_dim(int full) {
-    int v = (int)((double)full * rae_gb_get_scale() + 0.5);
-    return v < 1 ? 1 : v;
-}
-/* #920: the presentable target is the canvas's, built to the surface size. */
-int64_t rae_gb_offscreen_w(void)  { return (int64_t)rae_gb_scale_dim(g_sdl_w); }
-int64_t rae_gb_offscreen_h(void)  { return (int64_t)rae_gb_scale_dim(g_sdl_h); }
+/* Dynamic resolution and the render-resolution ceiling are Rae
+ * (lib/RenderResolution.rae): the scene targets are the surface size
+ * (rae_g2d_surface_width/height) at a scale Rae decides, and the composite
+ * upscales them into the full-size presentable offscreen. C holds no scale. */
 /* #923: the frame uniform data (jitter, previous view-projection) is Rae math
  * on the GbufferCache; rae_gb_frame_data is gone. */
 

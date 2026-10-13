@@ -54,6 +54,7 @@ open gpu/GpuResources
 open gpu/GpuLifetime
 open Gpu2dCanvas
 open RendererPassTiming
+open RenderResolution
 
 # ----- pass tags ------------------------------------------------------
 # Which pass of the deferred frame this is. An enum (not Int consts) so the
@@ -454,6 +455,23 @@ func shutdownDeferredRenderer(renderer: mod DeferredRenderer) pub {
 # RendererDeferredGraph.buildDeferredGraph (#855 split for the 1000-line cap).
 func rendererPathName() pub ret String {
   ret "deferred"
+}
+
+# The scene resolution (lib/RenderResolution): the dynamic scale is a fraction
+# of the ceiling (app3d/RenderScale's controller sets it each frame), the
+# ceiling is the most scene pixels the app wants (app3d defaultRenderCeiling).
+# The UI, the composite's output and the present stay at native size.
+func setDynamicRenderScale(renderer: mod DeferredRenderer, scale: view Float) {
+  renderer.passes.gbuffer.dynamicScale = scale
+}
+
+# A ceiling forced by RAE_RENDER_CEILING (screenshots, frame times) wins.
+func setRenderCeiling(renderer: mod DeferredRenderer, ceiling: view RenderCeiling) {
+  if renderCeilingFromEnv() is not none {
+    ret
+  }
+  renderer.passes.gbuffer.ceilingWidth = ceiling.width
+  renderer.passes.gbuffer.ceilingHeight = ceiling.height
 }
 
 func createDeferredRenderer() pub ret DeferredRenderer {
