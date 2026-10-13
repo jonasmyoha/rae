@@ -41,9 +41,7 @@ fn vibrance(c: vec3<f32>, amount: f32) -> vec3<f32> {
   return mix(vec3<f32>(luma(c)), c, 1.0 + amount * w);
 }
 // The lit target has one mip, so the explicit level 0 samples exactly what
-// textureSample would, and needs no derivatives: FXAA calls shade() after an
-// early return, which strict WGSL (Dawn in the browser) rejects for
-// textureSample as non-uniform control flow.
+// textureSample would, without derivatives.
 fn shade(uv: vec2<f32>) -> vec3<f32> {
   let hdr = textureSampleLevel(litTex, litSamp, uv, 0.0).rgb;
   let exposed = hdr * P.p0.x;
@@ -59,29 +57,12 @@ fn shade(uv: vec2<f32>) -> vec3<f32> {
   c = c + P.p2.rgb * (sw * P.p1.z) + P.p3.rgb * (hw * P.p1.w);
   return clamp(c, vec3<f32>(0.0), vec3<f32>(1.0));
 }
+// Anti-aliasing ran before this, at the scene resolution (the antialias pass,
+// deferred_antialias.wgsl); the composite only tone-maps, grades and upscales,
+// one shade() per native pixel.
 @fragment
 fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
   let dims = vec2<f32>(textureDimensions(litTex));
   let uv = (pos.xy * P.p0.y) / dims;
-  let center = shade(uv);
-  if (P.p2.w < 0.5) { return vec4<f32>(center, 1.0); }
-  let texel = P.p0.y / dims;
-  let lM  = luma(center);
-  let lNW = luma(shade(uv + vec2<f32>(-texel.x, -texel.y)));
-  let lNE = luma(shade(uv + vec2<f32>( texel.x, -texel.y)));
-  let lSW = luma(shade(uv + vec2<f32>(-texel.x,  texel.y)));
-  let lSE = luma(shade(uv + vec2<f32>( texel.x,  texel.y)));
-  let lMin = min(lM, min(min(lNW, lNE), min(lSW, lSE)));
-  let lMax = max(lM, max(max(lNW, lNE), max(lSW, lSE)));
-  let range = lMax - lMin;
-  if (range < max(0.0312, lMax * 0.125)) { return vec4<f32>(center, 1.0); }
-  var dir = vec2<f32>(-((lNW + lNE) - (lSW + lSE)), ((lNW + lSW) - (lNE + lSE)));
-  let dirReduce = max((lNW + lNE + lSW + lSE) * 0.25 * 0.125, 0.0078125);
-  let rcpDirMin = 1.0 / (min(abs(dir.x), abs(dir.y)) + dirReduce);
-  dir = clamp(dir * rcpDirMin, vec2<f32>(-8.0), vec2<f32>(8.0)) * texel;
-  let rgbA = 0.5 * (shade(uv + dir * (1.0 / 3.0 - 0.5)) + shade(uv + dir * (2.0 / 3.0 - 0.5)));
-  let rgbB = rgbA * 0.5 + 0.25 * (shade(uv + dir * -0.5) + shade(uv + dir * 0.5));
-  let lB = luma(rgbB);
-  if (lB < lMin || lB > lMax) { return vec4<f32>(rgbA, 1.0); }
-  return vec4<f32>(rgbB, 1.0);
+  return vec4<f32>(shade(uv), 1.0);
 }

@@ -155,6 +155,16 @@ func buildDeferredGraph(withUi: view Bool) ret DeferredRenderer {
       sizing: sizeFull
       lifetime: lifePersistent
     )
+    # The anti-aliased scene (FXAA at the scene resolution): written by the
+    # antialias pass, upscaled by the composite.
+    let antialiasedId: Int = addResource(
+      renderGraph: renderGraph
+      name: "aaColor"
+      kind: resTexture2d
+      format: 0
+      sizing: sizeFull
+      lifetime: lifeTransient
+    )
     let shadowId: Int = addResource(
       renderGraph: renderGraph
       name: "shadowMap"
@@ -176,6 +186,12 @@ func buildDeferredGraph(withUi: view Bool) ret DeferredRenderer {
       name: "composite"
       kind: passRaster
       tag: RenderTag.composite
+    )
+    let antialiasP: Int = addPass(
+      renderGraph: renderGraph
+      name: "antialias"
+      kind: passRaster
+      tag: RenderTag.antialias
     )
     let lighting: Int = addPass(
       renderGraph: renderGraph
@@ -453,6 +469,29 @@ func buildDeferredGraph(withUi: view Bool) ret DeferredRenderer {
       pass: taaP
       resource: taaId
       access: accAttachmentWrite
+    )
+
+    # FXAA at the scene resolution (render-perf-4) reads the final lit image —
+    # after the transparents and the underwater fog, like TAA — and writes the
+    # anti-aliased scene the composite upscales: lighting -> ... -> antialias
+    # -> composite. (With TAA on it does nothing; the composite reads taaColor.)
+    passReads(
+      renderGraph: renderGraph
+      pass: antialiasP
+      resource: litId
+      access: accSampledRead
+    )
+    passWrites(
+      renderGraph: renderGraph
+      pass: antialiasP
+      resource: antialiasedId
+      access: accAttachmentWrite
+    )
+    passReads(
+      renderGraph: renderGraph
+      pass: composite
+      resource: antialiasedId
+      access: accSampledRead
     )
 
     # Composite is the only writer of the presentable target.

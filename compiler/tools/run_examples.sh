@@ -1266,7 +1266,8 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              && [ "$(grep -c '  6: transparentForward' "$TMP_OUT/gb-lit.log")" -ge 1 ] \
              && [ "$(grep -c '  7: underwater' "$TMP_OUT/gb-lit.log")" -ge 1 ] \
              && [ "$(grep -c '  8: taa' "$TMP_OUT/gb-lit.log")" -ge 1 ] \
-             && [ "$(grep -c '  10: present' "$TMP_OUT/gb-lit.log")" -ge 1 ]; then
+             && [ "$(grep -c '  9: antialias' "$TMP_OUT/gb-lit.log")" -ge 1 ] \
+             && [ "$(grep -c '  11: present' "$TMP_OUT/gb-lit.log")" -ge 1 ]; then
             echo "PASS: $EXAMPLE_NAME (lit frame + 4 G-buffer channels, pyramid built, derived pass order)"
             ((PASSED++))
           else
