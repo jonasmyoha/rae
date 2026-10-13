@@ -1,0 +1,130 @@
+# A plain value passed to a VALUE optional parameter (`opt copy T`, `opt own
+# T`) becomes that optional, as a `let x: opt T = value` does. It used to be
+# passed bare, so C got a `T` where the parameter is a `rae_opt_T` and the build
+# failed in clang, for every payload (#53696563). Each payload here — Int,
+# UInt64, Bool, String, a struct — is passed a literal, a local, a field, a
+# call's result and `none`; an `opt own` argument moves the local it names, a
+# copy stays independent of the caller's value, and an argument that already
+# is optional still passes through.
+type Track {
+  title: String
+  seconds: Int
+}
+
+type Holder {
+  count: Int
+  name: String
+  track: Track
+}
+
+func showInt(maybe: opt copy Int) {
+  if let present: view Int => maybe {
+    log("int {present}")
+  } else {
+    log("int none")
+  }
+}
+
+func showWide(maybe: opt copy UInt64) {
+  if let present: view UInt64 => maybe {
+    log("wide {present}")
+  } else {
+    log("wide none")
+  }
+}
+
+func showFlag(maybe: opt copy Bool) {
+  if let present: view Bool => maybe {
+    log("flag {present}")
+  } else {
+    log("flag none")
+  }
+}
+
+func showName(maybe: opt copy String) {
+  if let present: view String => maybe {
+    log("name {present}")
+  } else {
+    log("name none")
+  }
+}
+
+func showTrack(maybe: opt copy Track) {
+  if let present: view Track => maybe {
+    log("track {present.title} {present.seconds}")
+  } else {
+    log("track none")
+  }
+}
+
+func keepName(maybe: opt own String) {
+  if let present: view String => maybe {
+    log("kept {present}")
+  }
+}
+
+func makeCount() ret Int {
+  ret 9
+}
+
+func makeName() ret String {
+  ret "made {1 + 1}"
+}
+
+func makeTrack() ret Track {
+  ret Track { title: "Made", seconds: 3 }
+}
+
+type Shelf {
+  tracks: List(Track)
+  label: opt String
+}
+
+func keepTrack(shelf: mod Shelf, maybe: opt own Track) {
+  if let present: view Track => maybe {
+    shelf.tracks.add(value: present)
+  }
+}
+
+func relabel(shelf: mod Shelf, label: opt copy String) {
+  shelf.label = label
+}
+
+func main() {
+  let count: Int = 5
+  let holder: Holder = { count: 7, name: "held", track: Track { title: "Held", seconds: 2 } }
+  showInt(maybe: 4)
+  showInt(maybe: count)
+  showInt(maybe: holder.count)
+  showInt(maybe: makeCount())
+  showInt(maybe: none)
+  let wide: UInt64 = 40 as UInt64
+  showWide(maybe: wide)
+  showWide(maybe: 41 as UInt64)
+  showFlag(maybe: true)
+  let name: String = "local"
+  showName(maybe: "literal")
+  showName(maybe: name)
+  showName(maybe: holder.name)
+  showName(maybe: makeName())
+  let track: Track = { title: "Local", seconds: 1 }
+  showTrack(maybe: track)
+  showTrack(maybe: holder.track)
+  showTrack(maybe: makeTrack())
+  keepName(maybe: makeName())
+  log("still {name} {track.title}")
+
+  # stored, moved and passed-through optionals
+  var shelf: Shelf = { tracks: List.create(Track, cap: 2), label: none }
+  let given: Track = { title: "Given", seconds: 4 }
+  keepTrack(shelf: shelf, maybe: given)
+  keepTrack(shelf: shelf, maybe: Track { title: "Fresh", seconds: 5 })
+  let label: String = "first"
+  relabel(shelf: shelf, label: label)
+  relabel(shelf: shelf, label: "second")
+  log("label {shelf.label} still {label}")
+  log("shelf {shelf.tracks.length}")
+  let optional: opt String = "already optional"
+  showName(maybe: optional)
+  showName(maybe: shelf.label)
+}
