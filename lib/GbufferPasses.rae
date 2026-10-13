@@ -59,7 +59,7 @@ type CompositePassCache {
   pipeline: RenderPipelineId
   uniform: BufferId
   sampler: SamplerId
-  binds: List(BindGroupId)  # per source slot: TAA 0/1, no-TAA lit 2
+  binds: List(BindGroupId)  # per source slot: TAA 0/1, no-TAA lit 2, anti-aliased 3
   bindGen: Int
   args: ArgWriter
 }
@@ -80,6 +80,31 @@ type LightPassCache {
 type TaaPassCache {
   binds: List(BindGroupId)  # per ping-pong slot
   bindGen: Int
+}
+
+# The antialias pass (FXAA at the scene resolution, before the upscale): its
+# pipeline is built for the lit target's format, so it is made at the first
+# frame that has targets.
+type AntialiasPassCache {
+  pipeMade: Bool
+  pipeline: RenderPipelineId
+  uniform: BufferId
+  sampler: SamplerId
+  bind: BindGroupId
+  bindGen: Int
+  args: ArgWriter
+}
+
+func createAntialiasPassCache() ret AntialiasPassCache {
+  ret AntialiasPassCache {
+    pipeMade: false
+    pipeline: noRenderPipelineId()
+    uniform: noBufferId()
+    sampler: noSamplerId()
+    bind: noBindGroupId()
+    bindGen: -1
+    args: createArgs(uniform: true)
+  }
 }
 
 type PyrPassCache {
@@ -219,12 +244,6 @@ func composite(
   if grade.pbrNeutral {
     opFlag = 1.0
   }
-  # p2.w = FXAA flag (#20): on exactly when TAA is off, so the aliasing TAA used
-  # to resolve gets a spatial pass instead. Identity when TAA is enabled.
-  var fxaaFlag: Float = 0.0
-  if not targets.taaEnabled {
-    fxaaFlag = 1.0
-  }
   resetArgs(writer: cache.args)
   pushVec4F(
     writer: cache.args
@@ -246,7 +265,7 @@ func composite(
     x: grade.shadowTint.x
     y: grade.shadowTint.y
     z: grade.shadowTint.z
-    w: fxaaFlag
+    w: 0.0  # unused: FXAA runs before the composite (the antialias pass)
   )
   pushVec4F(
     writer: cache.args
@@ -272,6 +291,8 @@ func composite(
       )
     }
   }
+  # the next frame's antialias pass writes it again
+  targets.aaWritten = false
 }
 
 # Public wrapper: the render graph's composite step (was gbuffer.compositePass).
@@ -544,6 +565,99 @@ func lightingPass(
 # TAA resolve (#390): this frame's radiance + last frame's history, reprojected
 # through the G-buffer's motion channel, into the slot the composite then
 # reads. A no-op with TAA off (#20).
+# FXAA at the SCENE resolution (render-perf-4): reads the lit image, writes
+# the anti-aliased one the composite then upscales. It used to run inside the
+# composite, after the upscale, where edges were already smeared and every
+# native pixel was shaded five to nine times. A no-op with TAA on: TAA
+# resolves the aliasing and the composite reads its history.
+func antialiasPass(
+  cache: mod AntialiasPassCache
+  resources: mod GpuResources
+  targets: mod DeferredTargets
+  gbuffer: view GbufferCache
+  exposure: view Float
+) {
+  if targets.taaEnabled {
+    ret
+  }
+  if not postPassReady(targets: targets, resources: resources, gbuffer: gbuffer) {
+    ret
+  }
+  if not cache.pipeMade {
+    cache.pipeMade = true
+    let antialiasShader: Shader = shader(files: ["lib/deferred_antialias.wgsl"])
+    cache.pipeline = createFullscreenPipeline(
+      resources: resources
+      shader: antialiasShader
+      format: targets.litFormat
+    )
+    if let uniform: BufferId = createBuffer(
+      resources: resources
+      size: 16
+      usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst
+    ) {
+      cache.uniform = uniform
+    }
+    if let sampler: SamplerId = createSampler(resources: resources) {
+      cache.sampler = sampler
+    }
+  }
+  if not isValidRenderPipeline(resources: resources, id: cache.pipeline) {
+    ret
+  }
+  if not (targets.gen is cache.bindGen) or not bindGroupIsUsable(
+    resources: resources
+    id: cache.bind
+  ) {
+    cache.bindGen = targets.gen
+    retireBindGroup(resources: resources, id: cache.bind)
+    var entries: List(ResourceRef) = List.create(ResourceRef, cap: 3)
+    entries.add(value: bufferRef(id: cache.uniform))
+    entries.add(value: textureViewRef(id: targets.litView))
+    entries.add(value: samplerRef(id: cache.sampler))
+    if let bind: BindGroupId = createRenderBindGroup(
+      resources: resources
+      pipeline: cache.pipeline
+      entries: entries
+    ) {
+      cache.bind = bind
+    }
+  }
+  resetArgs(writer: cache.args)
+  pushVec4F(
+    writer: cache.args
+    x: exposure
+    y: 0.0
+    z: 0.0
+    w: 0.0
+  )
+  let uploaded: Bool = uploadArgs(
+    writer: cache.args
+    resources: resources
+    buffer: cache.uniform
+    offset: 0
+  )
+  if bindGroupIsUsable(resources: resources, id: cache.bind) {
+    unsafe {
+      runFullscreen(
+        resources: resources
+        pipeline: cache.pipeline
+        bind: cache.bind
+        target: textureViewHandle(resources: resources, id: targets.antialiasedView)
+      )
+    }
+    targets.aaWritten = true
+  }
+}
+
+func antialiasPassShutdown(cache: mod AntialiasPassCache, resources: mod GpuResources) {
+  retireBindGroup(resources: resources, id: cache.bind)
+  retireRenderPipeline(resources: resources, id: cache.pipeline)
+  retireBuffer(resources: resources, id: cache.uniform)
+  retireSampler(resources: resources, id: cache.sampler)
+  cache = createAntialiasPassCache()
+}
+
 func taaPass(
   cache: mod TaaPassCache
   resources: mod GpuResources

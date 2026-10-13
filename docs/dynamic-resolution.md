@@ -76,6 +76,15 @@ Two inputs drive it:
   reduced lit/TAA source with a linear sampler at `uv = pos.xy*scale/sourceDims`
   (identical to a 1:1 fetch at scale 1.0); the scale is the cache's
   `sceneScale`. See `lib/GbufferPasses.rae`.
+- **FXAA runs before the upscale** (render-perf-4), as its own `antialias`
+  pass at the scene size (`lib/deferred_antialias.wgsl`, `antialiasPass`): it
+  reads the lit image and writes `targets.antialiased`, which the composite
+  then samples. The composite only tone-maps, grades and upscales. FXAA used to
+  run inside the composite, after the bilinear upscale: the edges it looked at
+  were already smeared, so stair steps survived, and it ran at native size.
+  With TAA on, the pass is skipped. Measured headless at 2560x1600, scale 0.6:
+  112 4.05 -> 3.8 ms, 119 3.65 -> 3.5 ms, 114 2.8 -> 2.9 ms per frame, and
+  the cube and boat edges in 112/119 lose their visible stair steps.
 - Aspect is computed from the full drawable, and targets scale uniformly, so the
   projection is unchanged.
 
