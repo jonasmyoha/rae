@@ -66,6 +66,13 @@ if [ -z "$(ls -A "$RAE_IOS_ARCHIVE/dSYMs" 2>/dev/null)" ] && [ -d "$built_dsym" 
   fi
 fi
 
+# Archiving leaves the build products' RaeApp.app as a link into Xcode's
+# archive intermediates, which the next development build (run-ios.sh) cannot
+# build over: take it away.
+if [ -L "$RAE_IOS_APP" ]; then
+  rm "$RAE_IOS_APP"
+fi
+
 # 3. Export for App Store Connect, uploading unless told not to.
 destination=upload
 if [ "${RAE_IOS_UPLOAD:-1}" = "0" ]; then
