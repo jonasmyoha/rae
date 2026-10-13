@@ -119,6 +119,30 @@ RenderGraph (data-driven; nodes from ECS + config)
 Mobile tier prunes nodes (no depth prepass / cluster step; simpler shadows;
 FXAA instead of MSAA+TAA). The graph makes that a data decision.
 
+**A declared pass does no GPU work it does not need to (render-perf-5).** In
+the deferred renderer as built:
+
+- `transparentForward` copies the lit image into `litCopy` only when
+  transparents are queued. A refracting app (the water in 118/119) takes the
+  copy itself with `snapshotOpaque`, and the underwater pass takes its own.
+- `depthPyramid` stays in the graph, but no shader samples the pyramid yet.
+  It is allocated and built only after `requestDepthPyramid(renderer:)`
+  (110 asks, to show the whole chain).
+- The two TAA history targets are allocated when TAA is on (the first post
+  pass after `setTaaEnabled(on: true)`), not with the other targets. They
+  stay until the next resize.
+- Still to do: the composite and UI draw into the canvas's target, which is
+  then copied into the drawable (`rae_g2d_present`, about 0.15 ms at
+  2560x1600). Each pass is also still its own encoder and submit. Both are
+  queued as follow-up tasks.
+
+Measure with `RAE_GPU_PASS_TIMING=1` (112, 114, 118 and 119 log a
+`[gpu passes]` line every 60 frames). A span is the time between two
+timestamp marks that are submitted between the passes. On Apple GPUs work
+from separate submissions overlaps, so a pass's time can show up in a
+neighbouring span. Compare the total and `RAE_FRAME_TIMING=1`, not single
+spans.
+
 ---
 
 ## 5. Lighting, shadows, AA, SSAO

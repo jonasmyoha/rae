@@ -194,6 +194,11 @@ func postPassReady(
     ret false
   }
   ensureDeferredPipelines(targets: targets, resources: resources)
+  # The TAA history exists only while TAA is on; without it the TAA pass and
+  # the composite's TAA source have nothing to bind and are skipped.
+  if targets.taaEnabled {
+    let taaReady: Bool = ensureTaaTargets(targets: targets, resources: resources)
+  }
   ret true
 }
 
@@ -710,14 +715,22 @@ func taaPass(
 
 # The depth pyramid: a MIN mip chain — level 0 reduces the G-buffer depth,
 # every later level the one above, one single-entry fullscreen pass each (a
-# level cannot be read until the pass that produced it finished).
+# level cannot be read until the pass that produced it finished). No shader
+# samples it yet, so it is built only after a consumer called
+# requestDepthPyramid; until then the pass costs nothing (render-perf-5).
 func buildDepthPyramid(
   cache: mod PyrPassCache
   resources: mod GpuResources
   targets: mod DeferredTargets
   gbuffer: view GbufferCache
 ) pub {
+  if not targets.pyramidWanted {
+    ret
+  }
   if not postPassReady(targets: targets, resources: resources, gbuffer: gbuffer) {
+    ret
+  }
+  if not ensurePyramidTarget(targets: targets, resources: resources) {
     ret
   }
   if not isValidRenderPipeline(resources: resources, id: targets.pyrReduce) {

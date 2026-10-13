@@ -505,8 +505,10 @@ func renderApp(
   let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
   let t: Float = (now - frame.startT) as Float
 
+  gpuPassTimingBegin(renderer: renderSystem.renderer)
   loop var oi: Int = 0, oi < deferredOrderLength(renderer: renderSystem.renderer), ++oi {
     let tag: Int = deferredTagAt(renderer: renderSystem.renderer, i: oi)
+    gpuPassMark(renderer: renderSystem.renderer, tag: tag)
     Profile.zoneBegin(profiler: profiler, name: (tag as RenderTag).toString())
     # Exhaustive over RenderTag: adding a pass is a compile error here until it is
     # handled (#624). Each pass is a helper/one-liner; the five generic passes
@@ -668,10 +670,11 @@ func renderApp(
         )
       }
       case RenderTag.present {
-        Gpu2d.endFrame(canvas: renderSystem.renderer.canvas)
+        endUiFrameTimed(renderer: renderSystem.renderer)
       }
     }
     Profile.zoneEnd(profiler: profiler, name: (tag as RenderTag).toString())
   }
+  gpuPassTimingEnd(renderer: renderSystem.renderer)
   capFrameSleep(drs: renderSystem.drs, frameStartSec: now)
 }

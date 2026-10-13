@@ -276,9 +276,11 @@ func main() ret Int {
 
     let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
     if renderFrame {
+      gpuPassTimingBegin(renderer: renderer)
       var passIndex: Int = 0
       loop passIndex < deferredOrderLength(renderer: renderer) {
         let tag: Int = deferredTagAt(renderer: renderer, i: passIndex)
+        gpuPassMark(renderer: renderer, tag: tag)
         if tag is RenderTag.waterFft {
           if let resources: mod GpuResources => gpuManager {
             waterFftStep(waterSystem: waterSystem, resources: resources)
@@ -338,6 +340,7 @@ func main() ret Int {
         )
         passIndex = passIndex + 1
       }
+      gpuPassTimingEnd(renderer: renderer)
       world3dPrevTransformSystem(world: sceneWorld)
     }
   }

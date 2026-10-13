@@ -289,7 +289,9 @@ func buildDeferredGraph(withUi: view Bool) ret DeferredRenderer {
     )
 
     # Lighting consumes every G-buffer attachment plus the pyramid, and is
-    # the only writer of radiance.
+    # the only writer of radiance. (The pyramid edge is declared for the
+    # consumers that will sample it; the pass builds it only after
+    # requestDepthPyramid, render-perf-5.)
     # SSAO reads what the G-buffer wrote and lighting reads the AO, so the
     # graph derives gbuffer -> ssao -> lighting with nobody stating it.
     passReads(
