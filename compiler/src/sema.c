@@ -5469,6 +5469,85 @@ static bool sema_is_numeric_literal(const AstExpr* e) {
     return false;
 }
 
+/* An integer literal takes the type its context gives it (a binding, a
+ * parameter, the typed side of an operator) — but only when its value FITS.
+ * `let big: UInt8 = 300` used to compile and wrap to 44, `let n: UInt64 = -1`
+ * to 18446744073709551615. A direct literal or a negated one is checked here
+ * against the width and signedness of `want`; a literal that does not fit is
+ * an error naming the value, the type and its range. Reports and returns
+ * false on a misfit. */
+static bool sema_int_literal_value(const AstExpr* e, bool* negative, unsigned long long* magnitude,
+                                   bool* past_uint64, Str* text_out) {
+    *negative = false;
+    *past_uint64 = false;
+    while (e && e->kind == AST_EXPR_UNARY && e->as.unary.op == AST_UNARY_NEG) {
+        *negative = !*negative;
+        e = e->as.unary.operand;
+    }
+    if (!e || e->kind != AST_EXPR_INTEGER) return false;
+    Str text = e->as.integer;
+    *text_out = text;
+    char digits[80]; size_t n = 0;
+    for (size_t i = 0; i < text.len && n + 1 < sizeof digits; i++)
+        if (text.data[i] != '_') digits[n++] = text.data[i];
+    digits[n] = '\0';
+    int base = 10;
+    const char* start = digits;
+    if (n > 2 && digits[0] == '0' && (digits[1] == 'x' || digits[1] == 'X')) { base = 16; start += 2; }
+    else if (n > 2 && digits[0] == '0' && (digits[1] == 'b' || digits[1] == 'B')) { base = 2; start += 2; }
+    errno = 0;
+    char* end = NULL;
+    unsigned long long value = strtoull(start, &end, base);
+    if (errno == ERANGE) *past_uint64 = true;  /* past UInt64: certainly does not fit */
+    if (end == start) return false;
+    *magnitude = value;
+    return true;
+}
+
+static bool sema_check_int_literal_fits(const AstExpr* e, const TypeInfo* want) {
+    if (!want || want->kind != TYPE_INT) return true;
+    bool negative = false;
+    unsigned long long magnitude = 0;
+    bool past_uint64 = false;
+    Str text = {0};
+    if (!sema_int_literal_value(e, &negative, &magnitude, &past_uint64, &text)) return true;
+    int bits = want->as.integer.bits;
+    bool is_unsigned = want->as.integer.is_unsigned;
+    if (bits <= 0 || bits > 64) return true;
+    unsigned long long unsigned_max = bits == 64 ? ~0ULL : ((1ULL << bits) - 1ULL);
+    unsigned long long signed_max = (1ULL << (bits - 1)) - 1ULL;
+    bool fits;
+    if (past_uint64) fits = false;
+    else if (is_unsigned) fits = !negative || magnitude == 0 ? magnitude <= unsigned_max : false;
+    else fits = negative ? magnitude <= signed_max + 1ULL : magnitude <= signed_max;
+    if (fits) return true;
+    char type_name[16];
+    snprintf(type_name, sizeof type_name, "%s%s%d", is_unsigned ? "UInt" : "Int", "", bits);
+    if (!is_unsigned && bits == 64) snprintf(type_name, sizeof type_name, "Int");
+    char range[64];
+    if (is_unsigned) snprintf(range, sizeof range, "0 to %llu", unsigned_max);
+    else snprintf(range, sizeof range, "-%llu to %llu", signed_max + 1ULL, signed_max);
+    char message[200];
+    snprintf(message, sizeof message, "%s%.*s does not fit %s (%s)",
+             negative ? "-" : "", (int)text.len, text.data, type_name, range);
+    const char* err_file = s_current_decl_origin ? s_current_decl_origin : NULL;
+    diag_error(err_file, (int)e->line, (int)e->column, message);
+    if (s_current_module) s_current_module->had_error = true;
+    return false;
+}
+
+/* Every integer literal element of a `{ ... }` / `List(T) { ... }` literal
+ * must fit the list's element type. */
+static void sema_check_collection_literal_ints(const AstExpr* e, const TypeInfo* list_type) {
+    if (!e || e->kind != AST_EXPR_COLLECTION_LITERAL || !list_type) return;
+    if (list_type->kind != TYPE_STRUCT && list_type->kind != TYPE_GENERIC_INST) return;
+    if (list_type->as.structure.generic_count != 1 || !list_type->as.structure.generic_args) return;
+    if (list_type->name.len < 4 || memcmp(list_type->name.data, "List", 4) != 0) return;
+    const TypeInfo* element = list_type->as.structure.generic_args[0];
+    for (const AstCollectionElement* el = e->as.collection.elements; el; el = el->next)
+        if (el->value) sema_check_int_literal_fits(el->value, element);
+}
+
 /* See through `view T` / `mod T` for the numeric-conversion check.
  *
  * A reference-mode parameter's TypeInfo is TYPE_REF wrapping the numeric
@@ -5814,6 +5893,11 @@ static void sema_check_object_literal_fields(TypeInfo* structType, AstObjectFiel
             AstTypeRef* field_type = tf ? tf->type : NULL;
             if (field_type && inst_args)
                 field_type = substitute_type_ref(s_lifecycle_ctx, td->generic_params, inst_args, field_type);
+            /* An integer literal must fit the field it initialises */
+            if (field_type && f->value && s_lifecycle_ctx && s_lifecycle_symbols && s_current_module) {
+                TypeInfo* ft = sema_resolve_type_internal(s_lifecycle_ctx, s_current_module, s_lifecycle_symbols, field_type);
+                sema_check_int_literal_fits(f->value, sema_strip_ref(ft));
+            }
             if (field_type && sema_is_pending_create(f->value) && s_lifecycle_ctx && s_lifecycle_symbols && s_current_module) {
                 TypeInfo* ft = sema_resolve_type_internal(s_lifecycle_ctx, s_current_module, s_lifecycle_symbols, field_type);
                 if (ft) sema_resolve_create(s_lifecycle_ctx, s_current_module, s_lifecycle_symbols, f->value, ft);
@@ -5904,6 +5988,11 @@ static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr*
             s_current_decl_origin ? s_current_decl_origin : (s_current_module ? s_current_module->file_path : NULL));
     }
     AstExpr* expr = *expr_ptr;
+    /* An untyped `{ ... }` list literal has no type of its own (so the checks
+     * below return early); its integer elements must fit the destination's
+     * element type. A typed one is checked at its own analysis. */
+    if (expr->kind == AST_EXPR_COLLECTION_LITERAL && !expr->as.collection.type)
+        sema_check_collection_literal_ints(expr, sema_strip_ref(expected));
     /* #880: a pending `create(...)` takes its constructor from the expected type. */
     if (sema_is_pending_create(expr) && s_lifecycle_symbols && s_current_module) {
         if (!sema_resolve_create(ctx, s_current_module, s_lifecycle_symbols, expr, expected)) return;
@@ -5938,6 +6027,7 @@ static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr*
      * in the destination type, not converted. */
     TypeInfo* want_num = sema_strip_ref(expected);
     TypeInfo* got_num = sema_strip_ref(expr->resolved_type);
+    if (!sema_check_int_literal_fits(expr, want_num)) return;
     if (want_num && got_num &&
         sema_is_numeric_kind(want_num->kind) &&
         sema_is_numeric_kind(got_num->kind) &&
@@ -6552,6 +6642,17 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                     sema_mark_f32_literal(expr->as.binary.lhs);
                 if (sema_is_numeric_literal(expr->as.binary.rhs) && sema_expr_is_f32_value(expr->as.binary.lhs))
                     sema_mark_f32_literal(expr->as.binary.rhs);
+            }
+            /* An integer literal beside a typed integer operand takes that
+             * operand's type (`small + 400` is UInt8 arithmetic), so it must
+             * fit it. */
+            if (expr->as.binary.op >= AST_BIN_ADD && expr->as.binary.op <= AST_BIN_MOD) {
+                const TypeInfo* lhs_type = sema_strip_ref(expr->as.binary.lhs->resolved_type);
+                const TypeInfo* rhs_type = sema_strip_ref(expr->as.binary.rhs->resolved_type);
+                bool lhs_literal = sema_is_numeric_literal(expr->as.binary.lhs);
+                bool rhs_literal = sema_is_numeric_literal(expr->as.binary.rhs);
+                if (rhs_literal && !lhs_literal) sema_check_int_literal_fits(expr->as.binary.rhs, lhs_type);
+                else if (lhs_literal && !rhs_literal) sema_check_int_literal_fits(expr->as.binary.lhs, rhs_type);
             }
             /* A divisor that is a compile-time integer zero is an error here,
              * not a trap later: `x / 0`, `x % 0`, `x / (1 - 1)`, `x / zeroConst`
@@ -8068,6 +8169,7 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
              * inner call to the component-wise multiply). */
             for (AstCollectionElement* el = expr->as.collection.elements; el; el = el->next)
                 if (el->value) sema_analyze_expr(ctx, module, symbols, el->value, true);
+            if (expr->as.collection.type) sema_check_collection_literal_ints(expr, expr->resolved_type);
             break;
         case AST_EXPR_LIST:
             for (AstExprList* item = expr->as.list; item; item = item->next)

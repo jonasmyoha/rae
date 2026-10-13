@@ -57,6 +57,17 @@ removed the same month: `Array` dynamic-index checks compiled out of release
 (never approved; `docs/value-aggregates-and-ownership.md` §1.7) and the
 dev-only overflow trap above.
 
+## Literals must fit their type
+
+An integer literal takes the type its context gives it: a binding
+(`let small: UInt8 = 200`), an assignment, an argument, a return, a struct or
+list literal field, or the typed operand on the other side of `+ - * / %`
+(`small + 55` is `UInt8` arithmetic). A literal that does not fit that type is
+a compile error that names the value, the type and its range — `300 does not
+fit UInt8 (0 to 255)`, `-1 does not fit UInt64 (0 to 18446744073709551615)` —
+never a value that wraps silently (0.2.18; fixtures 1121-1124). An explicit
+`300 as UInt8` is a conversion the program asked for and is not checked.
+
 ## What is NOT covered (yet)
 
 - The helpers apply to `Int` (`Int64`). `Int32`, `Int8`, `UInt64` and the
