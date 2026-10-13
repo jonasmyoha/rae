@@ -30,10 +30,10 @@ trap cleanup EXIT
 mkdir -p "$WORK/assets/scenes"
 printf '{ "title": "before" }\n' > "$WORK/assets/scenes/Menu.raescene"
 cat > "$WORK/Main.rae" <<'RAE'
-import Files
+import Sys
 
 func main() {
-  if let source: String = Files.readFile(path: "assets/scenes/Menu.raescene") {
+  if let source: String = Sys.readFile(path: "assets/scenes/Menu.raescene") {
     log("scene: {source.trim()}")
   } else {
     log("scene: missing")
