@@ -102,7 +102,14 @@ func stringValue(v: own String) ret JsonValue {
 
 # ---------- pool primitives (raw buf calls; List.get returns RaeAny for struct types in compiled)
 # ----------
+# The value at `idx` in the value pool, or null outside it: `field` answers -1
+# for a missing key, and callers chain the two (glTF leaves most keys out), so
+# an index outside the pool must never reach the raw read — the bytes beside
+# the pool are mapped on one machine and a fresh, unmapped page on another.
 func valueAt(doc: view JsonDoc, idx: view Int) ret JsonValue {
+  if idx < 0 or idx >= doc.values.length {
+    ret Json.jsonNull()
+  }
   unsafe {
     let v: JsonValue = rae_ext_rae_buf_get(buf: doc.values.data, index: idx)
     ret v
@@ -282,11 +289,8 @@ func field(doc: view JsonDoc, this: view JsonValue, key: view String) ret Int {
 }
 
 # Resolve a value-pool index into a JsonValue (for callers chaining off
-# `field`). Returns null-shaped if idx is out of range.
+# `field`). Null if idx is out of range — as valueAt itself now is.
 func jsonValueAt(doc: view JsonDoc, idx: view Int) ret JsonValue {
-  if idx < 0 or idx >= doc.values.length {
-    ret Json.jsonNull()
-  }
   ret Json.valueAt(doc: doc, idx: idx)
 }
 

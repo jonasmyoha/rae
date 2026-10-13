@@ -1,0 +1,34 @@
+# A missing object key, and an index outside the value pool, read as JSON
+# null — never as whatever memory lies beside the pool. glTF nodes leave most
+# keys out ("matrix", "children", "rotation", "scale"), and the loader's
+# objField used to read the pool's entry -1 for each: harmless where the bytes
+# before the pool happen to be mapped, a segmentation fault where the pool
+# starts a fresh page (an iPhone).
+open Json
+
+func kindName(value: view JsonValue) ret String {
+  if value.kind is JsonKind.null {
+    ret "null"
+  }
+  ret "not null"
+}
+
+func main() ret Int {
+  let doc: JsonDoc = parseJson(
+    source: "\{\"nodes\": [\{\"mesh\": 0, \"name\": \"bowl\", \"translation\": [1, 2, 3]\}]\}"
+  )
+  let nodes: JsonValue = valueAt(doc: doc, idx: field(doc: doc, this: root(doc: doc), key: "nodes"))
+  let node: JsonValue = arrayAt(doc: doc, this: nodes, idx: 0)
+  log(
+    "matrix: {kindName(value: valueAt(doc: doc, idx: field(doc: doc, this: node, key: "matrix")))}"
+  )
+  log("before the pool: {kindName(value: valueAt(doc: doc, idx: -1))}")
+  log("past the pool: {kindName(value: valueAt(doc: doc, idx: doc.values.length + 1000000))}")
+  log(
+    "name: {jsonString(
+      this: valueAt(doc: doc, idx: field(doc: doc, this: node, key: "name"))
+      fallback: ""
+    )}"
+  )
+  ret 0
+}
