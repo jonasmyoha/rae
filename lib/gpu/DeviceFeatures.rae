@@ -1,0 +1,54 @@
+# DeviceFeatures — which optional WebGPU features the device is created with
+# (render-perf-12; was decided in C, runtime_webgpu.c). WebGPU rejects the
+# whole device request if one requested feature is missing, so each is asked
+# for only when the adapter has it, and every user keeps a fallback:
+# - rg11b10ufloat-renderable: 4-byte HDR targets (#370; else rgba16float);
+# - timestamp-query: per-pass GPU timing (#528; else none);
+# - shader-f16: 16-bit floats in the renderer's shaders (render-perf-12; else
+#   the same shaders with `half` = f32). RAE_SHADER_F16=0 leaves it out, for
+#   comparisons.
+# Gpu2d.initWindow calls chooseDeviceFeatures before the device exists.
+import Sys
+open webgpu/Webgpu
+open webgpu/Context
+
+func nativeAdapterReady() unsafe extern("rae_wgpu_ctx_adapter_ready") ret Ptr
+
+func nativeSetDeviceFeatures(
+  features: Ptr
+  count: Int
+) unsafe extern("rae_wgpu_set_device_features")
+
+func chooseDeviceFeatures() {
+  unsafe {
+    let adapter: Ptr = nativeAdapterReady()
+    if adapter is webgpuNull() {
+      ret
+    }
+    var wanted: List(Int32) = List.create(Int32, cap: 3)
+    wanted.add(value: WGPUFeatureName_RG11B10UfloatRenderable)
+    wanted.add(value: WGPUFeatureName_TimestampQuery)
+    if Sys.getEnv(name: "RAE_SHADER_F16") is not "0" {
+      wanted.add(value: WGPUFeatureName_ShaderF16)
+    }
+    var features: List(Int32) = List.create(Int32, cap: 3)
+    loop let feature: Int32 in wanted {
+      if wgpuAdapterHasFeature(adapter: adapter, feature: feature) is not 0 {
+        features.add(value: feature)
+      }
+    }
+    nativeSetDeviceFeatures(features: features.data, count: features.length)
+  }
+}
+
+# The device has 16-bit shader floats: the renderer then builds its
+# precision-tolerant passes from the f16 variant of their shaders.
+func deviceHasShaderF16() ret Bool {
+  unsafe {
+    let device: Ptr = webgpuDevice()
+    if device is webgpuNull() {
+      ret false
+    }
+    ret wgpuDeviceHasFeature(device: device, feature: WGPUFeatureName_ShaderF16) is not 0
+  }
+}
