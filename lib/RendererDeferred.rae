@@ -516,9 +516,13 @@ func setDebugView(renderer: mod DeferredRenderer, mode: view Int) pub {
 # suppressed. TAA is opt-in (the shared settings pane has a toggle) because the
 # current resolve blurs/ghosts on detailed top-down terrain and crowd motion;
 # its quality fixes are POSTPONED queue tasks.
-func setTaaEnabled(renderer: mod DeferredRenderer, on: copy Bool) pub {
-  renderer.passes.targets.taaEnabled = on
-  renderer.passes.gbuffer.taaEnabled = on  # the geometry jitter follows the switch
+func setTaaEnabled(renderer: mod DeferredRenderer, on: copy Bool) {
+  var enabled: Bool = on
+  if renderer.passes.targets.taaOverride >= 0 {
+    enabled = renderer.passes.targets.taaOverride is 1  # RAE_TAA wins
+  }
+  renderer.passes.targets.taaEnabled = enabled
+  renderer.passes.gbuffer.taaEnabled = enabled  # the geometry jitter follows the switch
 }
 
 # SMAA 1x (the default) or FXAA when TAA is off (render-perf-9); TAA, when

@@ -107,7 +107,8 @@ fn fs(in: VsOut) -> FsOut {
   let botCol = d.albedoMetallic.rgb;
   let topCol = botCol * GW.g.w;
   let albedo = mix(botCol, topCol, clamp(in.height, 0.0, 1.0));
-  o.gba = vec4<f32>(oct.x, oct.y, 0.5, d.params.z);
+  // z = 1: TAA-reactive (render-perf-10): thin, wind-blown blades ghost on history
+  o.gba = vec4<f32>(oct.x, oct.y, 1.0, d.params.z);
   o.gbb = vec4<f32>(albedo, rough);
   o.gbc = vec4<f32>(mEnc.x, mEnc.y, clamp(d.albedoMetallic.a, 0.0, 1.0), d.params.y);
   return o;

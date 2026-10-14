@@ -76,6 +76,7 @@ type LightPassCache {
 type TaaPassCache {
   binds: List(BindGroupId)  # per ping-pong slot
   bindGen: Int
+  sampler: SamplerId  # the history's Catmull-Rom fetch (linear, clamped)
 }
 
 # The antialias pass (FXAA at the scene resolution, before the upscale): its
@@ -314,9 +315,11 @@ func composite(
       )
     }
   }
-  # the next frame's antialias and bloom passes write them again
+  # the next frame's antialias and bloom passes write them again, and the
+  # next opaque snapshot is the next frame's
   targets.aaWritten = false
   targets.bloomWritten = false
+  targets.litCopyFresh = false
   # The composite ends the renderer's part of the frame: submit every post
   # pass recorded since the frame began, before the UI's own submit.
   flushPostPasses(targets: targets, resources: resources)
@@ -651,6 +654,11 @@ func taaPass(
   if not isValidRenderPipeline(resources: resources, id: targets.taaPipeline) {
     ret
   }
+  if not isValidSampler(resources: resources, id: cache.sampler) {
+    if let sampler: SamplerId = createSampler(resources: resources) {
+      cache.sampler = sampler
+    }
+  }
   let cur: Int = taaBegin(targets: targets, resources: resources)
   let gen: Int = targets.gen
   if not (gen is cache.bindGen) {
@@ -658,11 +666,15 @@ func taaPass(
     retireBindGroupIds(resources: resources, list: cache.binds)
   }
   if not bindSlotUsable(resources: resources, binds: cache.binds, idx: cur) {
-    var entries: List(ResourceRef) = List.create(ResourceRef, cap: 4)
+    var entries: List(ResourceRef) = List.create(ResourceRef, cap: 7)
     entries.add(value: textureViewRef(id: targets.litView))
     entries.add(value: taaViewRef(targets: targets, slot: 1 - cur))
     entries.add(value: gbufferTargetRef(cache: gbuffer, index: gbufferTargetC))
     entries.add(value: bufferRef(id: targets.taaUniform))
+    # The reactive flag (gba.z) and the opaque snapshot (render-perf-10)
+    entries.add(value: gbufferTargetRef(cache: gbuffer, index: gbufferTargetA))
+    entries.add(value: textureViewRef(id: targets.litCopyView))
+    entries.add(value: samplerRef(id: cache.sampler))
     if let bind: BindGroupId = createRenderBindGroup(
       resources: resources
       pipeline: targets.taaPipeline
@@ -782,6 +794,7 @@ func postPassesShutdown(
   retireBindGroup(resources: resources, id: light.bindGroup)
   light = createLightPassCache()
   retireBindGroupIds(resources: resources, list: taa.binds)
+  retireSampler(resources: resources, id: taa.sampler)
   taa = createTaaPassCache()
   retireBindGroupIds(resources: resources, list: pyr.binds)
   pyr = createPyrPassCache()

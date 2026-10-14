@@ -496,6 +496,38 @@ matter most.
 
 ---
 
+**TAA as built (render-perf-10, `lib/deferred_taa.wgsl`).**
+
+- **Resolve:** in YCoCg on Reinhard-compressed colour.
+- **History:** clipped toward the 3x3 neighbourhood mean, inside a box of
+  one standard deviation (variance clipping). It is fetched with a 5-tap
+  Catmull-Rom filter, not the nearest texel.
+- **Current-frame weight:** 0.05 when still, rising to 0.2 at 8 pixels of
+  motion.
+- **Reactive pixels** weigh at least 0.6. Two sources mark them:
+  - the G-buffer writes `gba.z = 1` (this channel was unused) for geometry
+    whose motion vectors miss part of its movement: the wind-blown grass
+    (`grass_render.wgsl`) and the deforming metaballs (`gbuffer_sdf.wgsl`);
+  - the TAA finds the pixels a transparent surface drew over this frame
+    (the water) by comparing the lit image with the opaque snapshot,
+    when one was taken (`targets.litCopyFresh`).
+- **Override:** `RAE_TAA=1` / `RAE_TAA=0` forces TAA on or off over the
+  app's choice.
+
+Measured with 120 fixed-step frames while the camera turns 0.02 rad per
+frame, against the same frame without TAA (pixels more than 24 levels of
+luma off):
+
+| example | old TAA | new TAA |
+|---|---|---|
+| 114 | 0.71% | 0.44% |
+| 112 | 0.34% | 0.21% |
+| 119 | 10.0% | 3.3% |
+
+The old TAA left a stepped double edge behind 112's moving metaball and
+smeared 119's water detail into streaks. The new one keeps a single edge
+and the water's detail.
+
 ## 10. Difficult geometry classes (and why they do not veto anything)
 
 The prior draft let skinned meshes weigh too heavily. The correct framing:
