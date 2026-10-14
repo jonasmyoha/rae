@@ -7456,10 +7456,15 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                 // is a NAMESPACE here, not a value, so it must NOT block the module
                 // qualifier: `GpuTiming.gpuTimingCollect(...)` where a `type GpuTiming`
                 // also exists resolves to the module function. (#777 module==type name)
+                // A parameter or local carries no decl, and is a value all the
+                // same: `src.copyAt()` with a parameter `src` calls the method
+                // on it even where a module named `src` exists. A same-named
+                // FUNCTION is not a value either (as for member access).
                 Symbol* nsShadow = symbol_table_lookup(symbols, lhs);
-                bool valueShadows = nsShadow && nsShadow->decl
-                    && nsShadow->decl->kind != AST_DECL_TYPE
-                    && nsShadow->decl->kind != AST_DECL_ENUM;
+                bool valueShadows = nsShadow && !(nsShadow->decl
+                    && (nsShadow->decl->kind == AST_DECL_TYPE
+                        || nsShadow->decl->kind == AST_DECL_ENUM
+                        || nsShadow->decl->kind == AST_DECL_FUNC));
                 // The LHS is a namespace qualifier if it is a module name, or an
                 // `import/open X as lhs` alias resolving to module X. (Aliases are
                 // per-file; auto-loaded modules need no directive.)
@@ -8043,9 +8048,10 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                 && expr->as.method_call.object->kind == AST_EXPR_IDENT) {
                 Str lhs = expr->as.method_call.object->as.ident;
                 Symbol* lsym = symbol_table_lookup(symbols, lhs);
-                bool is_value = lsym && lsym->decl
-                    && lsym->decl->kind != AST_DECL_TYPE
-                    && lsym->decl->kind != AST_DECL_ENUM;
+                bool is_value = lsym && !(lsym->decl
+                    && (lsym->decl->kind == AST_DECL_TYPE
+                        || lsym->decl->kind == AST_DECL_ENUM
+                        || lsym->decl->kind == AST_DECL_FUNC));
                 bool is_type = lsym && lsym->decl
                     && (lsym->decl->kind == AST_DECL_TYPE || lsym->decl->kind == AST_DECL_ENUM);
                 // A BUILTIN type name (`Ptr`, `Int`, `String`, ...) has no
