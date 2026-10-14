@@ -150,6 +150,12 @@ the deferred renderer as built:
   first pass that writes the frame, so the full-screen copy (about 0.15 ms
   at 2560x1600) is gone. Headless runs, screenshots, a hidden window and
   `RAE_DIRECT_PRESENT=0` keep the offscreen target and the copy.
+  Measured on an iPhone 15 Pro (render-perf-11c, 2026-10-14; `RAE_FRAME_TIMING`
+  lines of 120 frames, direct vs `RAE_DIRECT_PRESENT=0`, two runs of 114): the
+  copy took 0.4-0.7 ms of 114's frame and 0.2-0.3 ms of 112's; direct present
+  takes 0-0.1 ms. The frame rate did not change: 114 holds 60 fps (16.7 ms)
+  either way, with an occasional window of misses in both modes, and 112 is
+  GPU-bound at ~30 fps (32-35 ms, 7-14 ms waiting for the GPU) in both.
 
 Measure with `RAE_GPU_PASS_TIMING=1` (112, 114, 118 and 119 log a
 `[gpu passes]` line every 60 frames). A span is the time between two
