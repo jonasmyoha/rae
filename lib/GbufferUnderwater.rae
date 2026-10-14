@@ -203,11 +203,11 @@ func underwaterPass(
   cache: mod UnderwaterPassCache
   resources: mod GpuResources
   gbuffer: view GbufferCache
-  targets: view DeferredTargets
+  targets: mod DeferredTargets
   camera: view Camera3d
   aspect: copy Float
   params: view UnderwaterParams
-) pub {
+) {
   if not params.active {
     ret
   }
@@ -287,7 +287,9 @@ func underwaterPass(
   # surfaces used, free again now that they have drawn.
   copyOpaqueRadiance(resources: resources, targets: targets)
   unsafe {
-    runFullscreen(
+    let encoder: Ptr = postEncoder(targets: targets, resources: resources)
+    runFullscreenInBatch(
+      encoder: encoder
       resources: resources
       pipeline: cache.pipeline
       bind: cache.bindGroup

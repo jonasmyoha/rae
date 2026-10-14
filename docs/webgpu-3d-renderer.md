@@ -131,10 +131,23 @@ the deferred renderer as built:
 - The two TAA history targets are allocated when TAA is on (the first post
   pass after `setTaaEnabled(on: true)`), not with the other targets. They
   stay until the next resize.
+- The post passes share encoders (render-perf-5b): SSAO, the pyramid,
+  lighting, the transparent copy and draw, underwater, TAA, antialias and the
+  composite record into one open recording on `DeferredTargets.post`. It is
+  submitted after lighting, after the composite, before an app draws with its
+  own encoder (`snapshotOpaque`) and at present. That is usually two submits
+  instead of five or six. An app that does its own GPU work in the middle of
+  the graph, on the renderer's targets, calls `flushDeferredWork(renderer:)`
+  first.
+- Fewer submits is not always faster. Lighting is submitted early so the GPU
+  starts on it while the CPU records the rest; batching it with the cheap
+  passes after it made 112 slower. Recording the shadow cascades into the
+  same submit made 114 5.3 -> 5.5 ms and 112 8.5 -> 9.0 ms, because the GPU
+  no longer worked on them while the CPU recorded the G-buffer. So the shadow
+  pass and the G-buffer pass keep their own submits.
 - Still to do: the composite and UI draw into the canvas's target, which is
   then copied into the drawable (`rae_g2d_present`, about 0.15 ms at
-  2560x1600). Each pass is also still its own encoder and submit. Both are
-  queued as follow-up tasks.
+  2560x1600), queued as render-perf-11b.
 
 Measure with `RAE_GPU_PASS_TIMING=1` (112, 114, 118 and 119 log a
 `[gpu passes]` line every 60 frames). A span is the time between two

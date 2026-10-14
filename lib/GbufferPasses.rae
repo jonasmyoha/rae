@@ -288,7 +288,9 @@ func composite(
 
   if let bind: BindGroupId = cache.binds.copyAt(index: idx) {
     unsafe {
-      runFullscreen(
+      let encoder: Ptr = postEncoder(targets: targets, resources: resources)
+      runFullscreenInBatch(
+        encoder: encoder
         resources: resources
         pipeline: cache.pipeline
         bind: bind
@@ -298,6 +300,9 @@ func composite(
   }
   # the next frame's antialias pass writes it again
   targets.aaWritten = false
+  # The composite ends the renderer's part of the frame: submit every post
+  # pass recorded since the frame began, before the UI's own submit.
+  flushPostPasses(targets: targets, resources: resources)
 }
 
 # Public wrapper: the render graph's composite step (was gbuffer.compositePass).
@@ -390,7 +395,9 @@ func ssaoPass(
     }
   }
   unsafe {
-    runFullscreen(
+    let encoder: Ptr = postEncoder(targets: targets, resources: resources)
+    runFullscreenInBatch(
+      encoder: encoder
       resources: resources
       pipeline: cache.pipeline
       bind: cache.bindGroup
@@ -478,13 +485,18 @@ func lighting(
     }
   }
   unsafe {
-    runFullscreen(
+    let encoder: Ptr = postEncoder(targets: targets, resources: resources)
+    runFullscreenInBatch(
+      encoder: encoder
       resources: resources
       pipeline: targets.lightPipeline
       bind: cache.bindGroup
       target: textureViewHandle(resources: resources, id: targets.litView)
     )
   }
+  # Lighting is the frame's heaviest pass: submit it (with SSAO before it) now,
+  # so the GPU starts on it while the CPU records the rest of the frame.
+  flushPostPasses(targets: targets, resources: resources)
 }
 
 # Public: lighting with a bound sky environment (Hosek ambient + background).
@@ -644,7 +656,9 @@ func antialiasPass(
   )
   if bindGroupIsUsable(resources: resources, id: cache.bind) {
     unsafe {
-      runFullscreen(
+      let encoder: Ptr = postEncoder(targets: targets, resources: resources)
+      runFullscreenInBatch(
+        encoder: encoder
         resources: resources
         pipeline: cache.pipeline
         bind: cache.bind
@@ -701,7 +715,9 @@ func taaPass(
   if let bind: BindGroupId = cache.binds.copyAt(index: cur) {
     if let target: TextureViewId = targets.taaViews.copyAt(index: cur) {
       unsafe {
-        runFullscreen(
+        let encoder: Ptr = postEncoder(targets: targets, resources: resources)
+        runFullscreenInBatch(
+          encoder: encoder
           resources: resources
           pipeline: targets.taaPipeline
           bind: bind
@@ -745,9 +761,9 @@ func buildDepthPyramid(
   loop cache.binds.length < mips {
     cache.binds.add(value: noBindGroupId())
   }
-  # Every mip is its own render pass, all in one command buffer
+  # Every mip is its own render pass, recorded into the frame's post recording
   unsafe {
-    let encoder: Ptr = beginFullscreenBatchEncoder()
+    let encoder: Ptr = postEncoder(targets: targets, resources: resources)
     var i: Int = 0
     loop i < mips {
       var pipeline: RenderPipelineId = targets.pyrReduce
@@ -766,8 +782,7 @@ func buildDepthPyramid(
         ) {
           cache.binds.set(index: i, value: bind)
         } else {
-          # Submit the mips already recorded; the rest wait for a later frame
-          submitFullscreenBatch(encoder: encoder)
+          # The mips already recorded stay; the rest wait for a later frame
           ret
         }
       }
@@ -784,7 +799,6 @@ func buildDepthPyramid(
       }
       i = i + 1
     }
-    submitFullscreenBatch(encoder: encoder)
   }
 }
 

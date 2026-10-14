@@ -81,6 +81,15 @@ type DeferredTargets {
   args: ArgWriter
   columns: List(Float)
   hosek: List(Float)  # the cooked Hosek-Wilkie state (36 floats) for the light uniform
+  # The post passes of a frame (ssao, the pyramid, lighting, the transparent
+  # copy and draw, underwater, taa, antialias, composite) record into an open
+  # recording instead of an encoder and a submit each (render-perf-5b). It is
+  # submitted by flushPostPasses: after lighting (the heaviest pass, so the
+  # GPU starts on it early), after the composite, before an app draws with
+  # its own encoder in the middle of the graph (snapshotOpaque), and at
+  # present. Usually two submits: ssao + lighting, then the rest.
+  post: opt Recording
+  postInFlight: List(SubmissionId)
 }
 
 func createDeferredTargets() ret DeferredTargets {
@@ -88,43 +97,48 @@ func createDeferredTargets() ret DeferredTargets {
   loop hosek.length < 36 {
     hosek.add(value: 0.0)
   }
-  ret DeferredTargets {
-    gen: -1
-    width: 0
-    height: 0
-    litFormat: WGPUTextureFormat_RGBA16Float
-    lit: noTextureId()
-    litView: noTextureViewId()
-    litCopy: noTextureId()
-    litCopyView: noTextureViewId()
-    antialiased: noTextureId()
-    antialiasedView: noTextureViewId()
-    aaWritten: false
-    ao: noTextureId()
-    aoView: noTextureViewId()
-    taa: fillTextureIds(count: 2)
-    taaViews: fillTextureViewIds(count: 2)
-    pyramid: noTextureId()
-    pyramidViews: List.create(TextureViewId, cap: pyramidMaxMips)
-    pyramidMips: 0
-    pyramidWanted: false
-    taaEnabled: false  # #20: FXAA by default, TAA opt-in (setTaaEnabled)
-    taaCur: 0
-    taaHaveHistory: false
-    fogOn: false
-    fogColor: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
-    fogStart: 0.0
-    fogEnd: 0.0
-    lightUniform: noBufferId()
-    taaUniform: noBufferId()
-    lightPipeline: noRenderPipelineId()
-    taaPipeline: noRenderPipelineId()
-    pyrFromDepth: noRenderPipelineId()
-    pyrReduce: noRenderPipelineId()
-    pipesMade: false
-    args: createArgs(uniform: true)
-    columns: List.create(Float, cap: 16)
-    hosek: own hosek
+  # The open post recording holds a raw encoder Ptr
+  unsafe {
+    ret DeferredTargets {
+      gen: -1
+      width: 0
+      height: 0
+      litFormat: WGPUTextureFormat_RGBA16Float
+      lit: noTextureId()
+      litView: noTextureViewId()
+      litCopy: noTextureId()
+      litCopyView: noTextureViewId()
+      antialiased: noTextureId()
+      antialiasedView: noTextureViewId()
+      aaWritten: false
+      ao: noTextureId()
+      aoView: noTextureViewId()
+      taa: fillTextureIds(count: 2)
+      taaViews: fillTextureViewIds(count: 2)
+      pyramid: noTextureId()
+      pyramidViews: List.create(TextureViewId, cap: pyramidMaxMips)
+      pyramidMips: 0
+      pyramidWanted: false
+      taaEnabled: false  # #20: FXAA by default, TAA opt-in (setTaaEnabled)
+      taaCur: 0
+      taaHaveHistory: false
+      fogOn: false
+      fogColor: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+      fogStart: 0.0
+      fogEnd: 0.0
+      lightUniform: noBufferId()
+      taaUniform: noBufferId()
+      lightPipeline: noRenderPipelineId()
+      taaPipeline: noRenderPipelineId()
+      pyrFromDepth: noRenderPipelineId()
+      pyrReduce: noRenderPipelineId()
+      pipesMade: false
+      args: createArgs(uniform: true)
+      columns: List.create(Float, cap: 16)
+      hosek: own hosek
+      post: none
+      postInFlight: List.create(SubmissionId, cap: 4)
+    }
   }
 }
 
@@ -206,6 +220,8 @@ func ensureDeferredTargets(
   if not gbufferTargetsReady(cache: gbuffer, resources: resources) {
     ret false
   }
+  # The open post recording may still name the targets about to be retired
+  flushPostPasses(targets: targets, resources: resources)
   retireDeferredTargets(targets: targets, resources: resources)
   let w: Int = gbuffer.targetWidth
   let h: Int = gbuffer.targetHeight
@@ -697,8 +713,50 @@ func uploadLightUniform(
   )
 }
 
+# The encoder of the frame's open post recording, opened on first use. A
+# post pass records its render passes and copies into it; nothing reaches the
+# GPU until flushPostPasses. Null when no encoder could be made.
+func postEncoder(targets: mod DeferredTargets, resources: mod GpuResources) ret Ptr {
+  if let recording: view Recording => targets.post {
+    if recordingIsOpen(recording: recording, resources: resources) {
+      unsafe {
+        ret recording.encoder
+      }
+    }
+  }
+  if var recording: Recording = beginRecording(resources: resources) {
+    unsafe {
+      let encoder: Ptr = recording.encoder
+      targets.post = own recording
+      ret encoder
+    }
+  }
+  unsafe {
+    ret webgpuNull()
+  }
+}
+
+# Submit the open post recording, if any (one submit for every post pass
+# recorded since the last flush). Every post pass writes its own uniform
+# once per frame, so the queue's buffer writes, which all land before the
+# submit, give each pass the values it uploaded; the one shared buffer, the
+# light uniform, gets the same camera matrices from SSAO and lighting.
+func flushPostPasses(targets: mod DeferredTargets, resources: mod GpuResources) {
+  if let recording: mod Recording => targets.post {
+    let tracked: opt SubmissionId = trackSubmission(
+      inFlight: targets.postInFlight
+      resources: resources
+      recording: recording
+    )
+  }
+  targets.post = none
+  pollSubmissions(inFlight: targets.postInFlight, resources: resources)
+}
+
 # Retire everything (renderer shutdown).
 func deferredTargetsShutdown(targets: mod DeferredTargets, resources: mod GpuResources) {
+  flushPostPasses(targets: targets, resources: resources)
+  drainSubmissions(inFlight: targets.postInFlight, resources: resources)
   retireDeferredTargets(targets: targets, resources: resources)
   retireBuffer(resources: resources, id: targets.lightUniform)
   retireBuffer(resources: resources, id: targets.taaUniform)
