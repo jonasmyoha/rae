@@ -44,6 +44,7 @@ open GbufferInspector
 open GbufferPasses
 open GbufferAo
 open GbufferBloom
+open GbufferSmaa
 open GbufferFullscreen
 open TransparentForward
 open GbufferUnderwater
@@ -146,6 +147,7 @@ type RenderPasses {
   taa: TaaPassCache
   antialias: AntialiasPassCache  # FXAA at the scene resolution, before the upscale
   bloom: BloomPassCache  # half-size bloom the composite adds (render-perf-8), off by default
+  smaa: SmaaPassCache  # SMAA 1x, the default anti-aliasing (render-perf-9); holds the mode
   pyr: PyrPassCache
   inspect: ViewPassCache
   gbuffer: GbufferCache
@@ -164,6 +166,7 @@ func createRenderPasses() ret RenderPasses {
       taa: createTaaPassCache()
       antialias: createAntialiasPassCache()
       bloom: createBloomPassCache()
+      smaa: createSmaaPassCache()
       pyr: createPyrPassCache()
       inspect: createViewPassCache()
       gbuffer: createGbufferCache()
@@ -452,6 +455,7 @@ func shutdownDeferredRenderer(renderer: mod DeferredRenderer) {
     )
     antialiasPassShutdown(cache: renderer.passes.antialias, resources: resources)
     bloomPassShutdown(cache: renderer.passes.bloom, resources: resources)
+    smaaPassShutdown(cache: renderer.passes.smaa, resources: resources)
     inspectorShutdown(cache: renderer.passes.inspect, resources: resources)
     transparentShutdown(cache: renderer.passes.transparent, resources: resources)
     underwaterShutdown(cache: renderer.passes.underwater, resources: resources)
@@ -515,6 +519,12 @@ func setDebugView(renderer: mod DeferredRenderer, mode: view Int) pub {
 func setTaaEnabled(renderer: mod DeferredRenderer, on: copy Bool) pub {
   renderer.passes.targets.taaEnabled = on
   renderer.passes.gbuffer.taaEnabled = on  # the geometry jitter follows the switch
+}
+
+# SMAA 1x (the default) or FXAA when TAA is off (render-perf-9); TAA, when
+# on, replaces both.
+func setAntialiasMode(renderer: mod DeferredRenderer, mode: view AntialiasMode) {
+  renderer.passes.smaa.mode = mode
 }
 
 func taaIsEnabled(renderer: view DeferredRenderer) pub ret Bool {
@@ -726,7 +736,15 @@ func renderDeferredPassWith(
       exposure: light.exposure
     )
   }
-  if tag is RenderTag.antialias {
+  if tag is RenderTag.antialias and effectiveAntialiasMode(cache: renderer.passes.smaa) is AntialiasMode.smaa {
+    smaaPass(
+      cache: renderer.passes.smaa
+      resources: resources
+      targets: renderer.passes.targets
+      gbuffer: renderer.passes.gbuffer
+      exposure: light.exposure
+    )
+  } else if tag is RenderTag.antialias {
     antialiasPass(
       cache: renderer.passes.antialias
       resources: resources
