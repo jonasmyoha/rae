@@ -1,24 +1,20 @@
-# 3D Renderer — FORWARD path, with the same ECS/.raescene UI as example 112.
+# 3D Renderer — FORWARD path, the twin of example 112 (forward-rae-2).
 #
-# THE TWIN OF 112. Same three scenes, same panel, same controls; the renderer
-# underneath is the whole difference, which is what makes the pair useful — open
-# both and the only variable is the lighting path.
+# Same three scenes, same panel, same controls as 112; the main pass is the
+# whole difference. 112 writes a G-buffer and lights it in a fullscreen pass;
+# this draws the scene with createForwardRendererWithUi (lib/RendererForward):
+# one 4x MSAA pass that shades every surface, metaballs included, with the
+# same shadeSurface the deferred lighting runs, then bloom, the composite's
+# tone map and upscale, the UI and present. No SSAO, TAA, FXAA or SMAA: MSAA
+# is the antialiasing (README.md lists every difference).
 #
-# THE SKY IS THE SAME SKY (#418). It used to be missing here: the sky shaders
-# lived inside the deferred lighting pass, so this example rendered against a
-# flat clear colour and the panel's sky buttons did nothing. The shader now sits
-# in runtime_sky_wgsl.h and both renderers include it, so Hosek, Preetham,
-# stylised and solid all look the same on either path.
+# Until forward-rae-2 this example drew through the C forward renderer
+# (runtime_gpu3d*.c via Gpu3d / Renderer3d). It is now Rae over the WebGPU
+# bindings, like 112.
 #
-# WHERE IT IS DRAWN is the difference, and it is forced by the architecture: the
-# deferred twin computes the sky for every pixel its G-buffer left empty, while
-# this path has no G-buffer to ask and instead draws it as a fullscreen triangle
-# at the start of the scene pass, writing no depth. One call, Gpu3d.drawSky,
-# between beginScene and the geometry.
-#
-# Frame ownership is explicit: the World3d renders first, Gpu3d.endPass submits
-# without presenting, GPU2D loads the resolved color target and paints UiWorld,
-# then GPU2D presents once. UI hit-testing has priority over orbit input.
+# Frame ownership is explicit: the scene renders first, the composite writes
+# the canvas, GPU2D loads it and paints UiWorld, then presents once. UI
+# hit-testing has priority over orbit input.
 #
 # RESPONSIVE, NOT SCALED: the design resolution tracks the window's logical
 # size, so the design->pixel transform is identity. Fonts keep their
@@ -43,12 +39,16 @@
 import Gpu2d
 import Math
 import SdfText
+import RenderSystem
 import Sdl3
 import Vec3
 open Gpu3d
-open Gpu3dSky
-open Gpu3dWorld
-open Renderer3d
+open RendererDeferred
+open RendererForward
+open gpu/GpuResources
+open Sky
+open SkyHosek
+open Gbuffer
 open Math3d
 open Mesh3d
 open Scene3d
@@ -69,20 +69,20 @@ open ui/LogOverlay
 open ui/WindowGeometry
 open ui/scrollRootSystem/ScrollRootSystem
 open ui/DebugOverlay
-open ui/CornerMenuButton
 open HotReload
 import String
 import ui/Scene
+open ui/CornerMenuButton
 import app3d/Slider
+open GbufferWorld
 open app3d/CameraRig
 open app3d/CameraBar
 open app3d/SettingsDialog
 open Shadow3d
 open app3d/UiShell
-open Sky
 open Gpu2dCanvas
-open SkyHosek
 open ui/UiSystems
+open app3d/RenderScale
 
 type DemoUiResource {
   paused: Bool
@@ -93,9 +93,9 @@ type DemoUiResource {
   appliedRevision: Int
 }
 
-func uploadMeshData(renderer: mod Renderer3d, mesh: view MeshData) ret MeshHandle {
+func uploadMeshData(renderer: mod DeferredRenderer, mesh: view MeshData) ret MeshHandle {
   ret uploadMesh(
-    r: renderer
+    renderer: renderer
     verts: mesh.verts
     vertCount: mesh.vertCount
     indices: mesh.indices
@@ -108,7 +108,10 @@ func main() ret Int {
     height: 800
     title: "Rae 3D — Metaballs ({rendererPathName()} rendering)"
   )
-  var canvas: Gpu2dCanvas = createGpu2dCanvas()  # #907: the app-owned 2D canvas (box + image passes)
+  # The 2D UI draws on the RENDERER's canvas (#920): the deferred composite
+  # writes the scene into that canvas's offscreen target, and the UI frame
+  # loads it and paints over it - a separate app canvas would present an
+  # offscreen the scene was never composited into (a black viewport).
   # Remember where the user put the window, across restarts. Opt-in, and the
   # app picks the file: the hot-reload channel dir is per app, so two examples
   # running at once do not share one window position.
@@ -139,56 +142,72 @@ func main() ret Int {
   # three face normals). Scene 1 uses it for the voxel mountains and the
   # two spinning cubes.
   let boxData: MeshData = makeBox(size: 1.0)
-  var renderer: Renderer3d = createRenderer3dWithUi()
-
+  # #905: the renderer owns the mesh store, so it exists before the uploads; the
+  # sky is applied below once the settings are loaded.
+  var renderer: DeferredRenderer = createForwardRendererWithUi()
+  # Bloom on the specular highlights (render-perf-8): the library's
+  # threshold (1.0, just above white), so only what is brighter glows.
+  setBloomEnabled(renderer: renderer, on: true)
   let sphere: MeshHandle = uploadMeshData(renderer: renderer, mesh: sphereData)
   let torus: MeshHandle = uploadMeshData(renderer: renderer, mesh: torusData)
   let ground: MeshHandle = uploadMeshData(renderer: renderer, mesh: planeData)
   let boxMesh: MeshHandle = uploadMeshData(renderer: renderer, mesh: boxData)
-  # THIS EXAMPLE'S OWN assets. It pointed at 112's for a while, left over from
-  # this example being created as a copy of it. Natively that still worked --
-  # the path resolves from the repo root, 112 is right there, and the two asset
-  # sets are identical -- so nothing looked wrong. In the browser it is fatal:
-  # the WASM bundle preloads only the entry example's assets directory, so the
-  # scene load failed, the app shut down before its first frame, and what showed
-  # was the page behind the canvas.
   let base: String = "examples/111_metaballs_forward/assets/"
   var meshRegistry: MeshRegistry3d = createMeshRegistry3d()
   registerMesh3d(reg: meshRegistry, key: "sphere", handle: sphere)
   registerMesh3d(reg: meshRegistry, key: "torus", handle: torus)
   registerMesh3d(reg: meshRegistry, key: "ground", handle: ground)
   registerMesh3d(reg: meshRegistry, key: "box", handle: boxMesh)
-  # #795: load straight into ECS World3ds. loadWorld3dFile parses the .raescene
-  # and converts to a World3d, so this forward example authors nothing through
-  # the legacy Scene3d SoA — mirroring the deferred twin 112.
-  var scene1: World3dAsset = loadWorld3dFile(path: "{base}scene1.raescene", meshes: meshRegistry)
-  var scene2: World3dAsset = loadWorld3dFile(path: "{base}scene2.raescene", meshes: meshRegistry)
-  var scene3: World3dAsset = loadWorld3dFile(path: "{base}scene3.raescene", meshes: meshRegistry)
-  if scene1.ok is false {
-    log("[scene3d] scene 1 failed: {scene1.errorMsg}")
+  # #737: load straight into ECS World3ds. loadWorld3dFile parses the .raescene
+  # and converts it to a World3d (component tables) + camera/light/node-id map;
+  # the hand-rolled Scene3d SoA lives and dies inside that loader, so 111 never
+  # touches it — its 3D state, animation and rendering are all ECS.
+  var asset1: World3dAsset = loadWorld3dFile(path: "{base}scene1.raescene", meshes: meshRegistry)
+  var asset2: World3dAsset = loadWorld3dFile(path: "{base}scene2.raescene", meshes: meshRegistry)
+  var asset3: World3dAsset = loadWorld3dFile(path: "{base}scene3.raescene", meshes: meshRegistry)
+  if asset1.ok is false {
+    log("[scene3d] scene 1 failed: {asset1.errorMsg}")
     shutdown()
     Gpu2d.closeWindow()
     ret 1
   }
-  if scene2.ok is false {
-    log("[scene3d] scene 2 failed: {scene2.errorMsg}")
+  if asset2.ok is false {
+    log("[scene3d] scene 2 failed: {asset2.errorMsg}")
     shutdown()
     Gpu2d.closeWindow()
     ret 1
   }
-  if scene3.ok is false {
-    log("[scene3d] scene 3 failed: {scene3.errorMsg}")
+  if asset3.ok is false {
+    log("[scene3d] scene 3 failed: {asset3.errorMsg}")
     shutdown()
     Gpu2d.closeWindow()
     ret 1
   }
 
-  # Scene 1's named props, resolved once to their World3d entities so the
-  # animator can spin them in place each frame (the World3d analogue of the
-  # nodeId->Int lookup the Scene3d asset used).
-  let cubeAEntityId: EntityId = world3dAssetEntityId(asset: scene1, nodeId: "spinCubeA")
-  let cubeBEntityId: EntityId = world3dAssetEntityId(asset: scene1, nodeId: "spinCubeB")
-  let torusEntityId: EntityId = world3dAssetEntityId(asset: scene1, nodeId: "heroTorus")
+  # Capture per-scene metadata (node anchors, initial camera, per-scene lights)
+  # before moving the worlds out of their assets.
+  let cubeAEntityId: EntityId = world3dAssetEntityId(asset: asset1, nodeId: "spinCubeA")
+  let cubeBEntityId: EntityId = world3dAssetEntityId(asset: asset1, nodeId: "spinCubeB")
+  let torusEntityId: EntityId = world3dAssetEntityId(asset: asset1, nodeId: "heroTorus")
+  let initialCamera: Camera3d = asset1.camera
+  let light1: Light3d = asset1.light
+  let light2: Light3d = asset2.light
+  let light3: Light3d = asset3.light
+  # The World3d stays owned by its asset (asset1.world) — copying it out would
+  # double-free the component tables; every call passes asset1.world by ref.
+  log(
+    "[ecs] World3d: scene1 {world3dEntityCount(world: asset1.world)}, scene2 {world3dEntityCount(
+      world: asset2.world
+    )}, scene3 {world3dEntityCount(world: asset3.world)} entities (#737)"
+  )
+  # #734: per-cluster marker tags, classified once from the (renderer-owned)
+  # cluster field. The animators query these tag tables instead of an
+  # `if sdf.cluster is N` ladder. Clusters never change, so build once here.
+  let clusters1: ClusterTags = buildClusterTags(world: asset1.world)
+  let clusters2: ClusterTags = buildClusterTags(world: asset2.world)
+  # #736: the RenderSystem's SDF pass queries per-cluster tags, so every scene
+  # that draws metaballs needs them (scene 3 is one cluster of 40 spheres).
+  let clusters3: ClusterTags = buildClusterTags(world: asset3.world)
 
   # Fonts + theme through the shared loader, which also bridges the
   # theme's PALETTE into the active theme — the step that was missing
@@ -289,8 +308,15 @@ func main() ret Int {
     logWarnLine(ov: logOverlay, text: "settings dialog failed to mount")
   }
   settingsApplyToWorld(settingsState: settings, world: uiWorld, uiSystems: uiSystems)
+  # The settings pane's TAA switch does nothing here: MSAA is the forward
+  # frame's antialiasing (setTaaEnabled keeps TAA off on a forward renderer)
+  setTaaEnabled(renderer: renderer, on: settings.taa)
   applyDemoPanel(world: uiWorld, open: settings.open)
-  var camera: Camera3d = scene1.camera
+  # The legacy in-scene "Settings" button is superseded by the shared corner
+  # menu button (#546 UI unification), so hide it — one settings affordance, the
+  # same one example 114 uses.
+  setNodeActive(world: uiWorld, nodeId: "SettingsButton", value: false)
+  var camera: Camera3d = initialCamera
   var cameraRig: CameraRig = createCameraRig(camera: camera)
   # Restore before the test-state hook, so an explicit env override still
   # wins over whatever the previous run left behind.
@@ -344,7 +370,7 @@ func main() ret Int {
   }
   syncCameraBar(world: uiWorld, rig: cameraRig, camera: camera)
 
-  var light: Light3d = scene1.light
+  var light: Light3d = light1
   var simTime: Float = 0.0
   # Epoch seconds must stay Float64 (see docs/primitive-types.md); only the
   # small per-frame delta is narrowed to Float.
@@ -356,24 +382,21 @@ func main() ret Int {
   # same interface.
   # The fitted table, read once. Cooking a sky from it afterwards is
   # arithmetic, which is what lets the time-of-day slider drive it per frame.
-  # Same numbers as the deferred twin, or the pair would be comparing skies
-  # rather than renderers.
   let hosekData: HosekDataset = loadDefaultHosekDataset()
   let skyTurbidity: Float = 2.5
   let skyGroundAlbedo: Float = 0.25
-  # HELD BY THE APP, not by the renderer. The deferred twin hands its sky to
-  # createDeferredRendererWithUiSky because its lighting pass needs it from
-  # inside the frame graph; here the sky is one draw the app makes itself, so it
-  # sits next to `light` — the other thing the panel drives every frame.
-  var sky: Sky = settingsBuildSky(
+  renderer.sky = settingsBuildSky(
     settingsState: settings
     data: hosekData
     turbidity: skyTurbidity
     groundAlbedo: skyGroundAlbedo
   )
+  renderer.hasSky = true
+  # The sun the sky was built for drives the shadows too, or the visible sun and
+  # the cast shadows disagree.
   light.sunDir = settingsSunDir(settingsState: settings)
   light.sunColor = settingsSunColor(settingsState: settings)
-  let gstatus: Int = compileRenderer(r: renderer)
+  let gstatus: Int = compileDeferred(renderer: renderer)
   if gstatus is not 0 {
     log("render graph invalid: {gstatus}")
     ret 1
@@ -487,6 +510,10 @@ func main() ret Int {
     ) {
       suppressUiPress(input: uiInput, world: uiWorld)
     }
+    # Shared corner menu button, mounted beside the camera bar — its press is an
+    # ordinary UI action; the panel open/close applies below where
+    # settingsChanged is set.
+    let menuTapped: Bool = menuToggleTapped(world: uiWorld)
     # RE-CENTRE ON SWITCHING TO ORBIT. The rig recovers the orbit target by
     # walking `distance` along the free camera's view direction, so the view
     # never jumps -- the right library default. But after flying around in WASD
@@ -515,8 +542,7 @@ func main() ret Int {
     )
     # The shared dialog sees every action and ignores what it does not own.
     var settingsChanged: Bool = false
-    # Shared corner menu button, mounted beside the camera bar (same as 112/114).
-    if menuToggleTapped(world: uiWorld) {
+    if menuTapped {
       settings.open = settings.open is false
       settingsChanged = true
     }
@@ -529,6 +555,9 @@ func main() ret Int {
         settingsChanged = true
       }
       sa = sa + 1
+    }
+    if settingsChanged {
+      setTaaEnabled(renderer: renderer, on: settings.taa)  # no effect: forward has no TAA
     }
     if settingsUpdatePointer(
       settingsState: settings
@@ -581,9 +610,11 @@ func main() ret Int {
       }
     }
     if settingsChanged {
-      # The sky is REBUILT, not nudged: a Hosek sky is a cook, and the panel can
-      # move turbidity's inputs (sun height) as well as the sun itself.
-      sky = settingsBuildSky(
+      # Sky model and time of day both feed this, so one rebuild covers both.
+      # Assigned on the local rather than through setRendererSky: writing a
+      # nested struct field through a `mod` parameter does not reliably land,
+      # and the failure is silent (see renderer_deferred's note).
+      renderer.sky = settingsBuildSky(
         settingsState: settings
         data: hosekData
         turbidity: skyTurbidity
@@ -690,13 +721,13 @@ func main() ret Int {
       applyCameraRig(rig: cameraRig, camera: camera)
       syncCameraBar(world: uiWorld, rig: cameraRig, camera: camera)
       if uiState.activeScene is 1 {
-        light = scene1.light
+        light = light1
       }
       if uiState.activeScene is 2 {
-        light = scene2.light
+        light = light2
       }
       if uiState.activeScene is 3 {
-        light = scene3.light
+        light = light3
       }
       # AFTER the scene's own light is restored, not before: this runs every
       # frame, so setting the sun anywhere earlier is silently undone here and
@@ -711,34 +742,41 @@ func main() ret Int {
       light.sunColor = settingsSunColor(settingsState: settings)
       if uiState.activeScene is 1 {
         animateScene1(
-          world: scene1.world
+          world: asset1.world
           cubeA: cubeAEntityId
           cubeB: cubeBEntityId
           torus: torusEntityId
+          tags: clusters1
           time: simTime
         )
       }
       if uiState.activeScene is 2 {
-        animateScene(world: scene2.world, sceneId: 2, time: simTime)
-        animateMetaballLab(world: scene2.world, time: simTime)
+        animateScene(world: asset2.world, sceneId: 2, time: simTime)
+        animateMetaballLab(world: asset2.world, tags: clusters2, time: simTime)
       }
       if uiState.activeScene is 3 {
-        animateScene3(world: scene3.world, time: simTime)
+        animateScene3(world: asset3.world, time: simTime)
       }
 
       let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
+      # Rendering reads the active World3d directly through the RenderSystem's
+      # ECS queries (mesh + per-cluster sdf). The generic passes below go through
+      # renderDeferredPassWorld; bloom/composite never read the world, so any
+      # live world satisfies the signature — asset1.world is passed.
       # Frame order is DERIVED by the render graph (#331/#332): scene3d
       # writes the colour target, the UI overlay MODIFIES it (load-preserving),
       # present reads it. The passes are declared backwards in
       # createRenderer3dWithUi; this loop runs them in dependency order.
-      # Frame order is DERIVED by the render graph, same as the deferred twin;
-      # the forward path simply declares fewer passes. gpu3d exports the scene
-      # pass, SSAO, TAA and tonemap, and the app owns shadows and the UI overlay
-      # for the same layering reason as in 112.
+      gpuPassTimingBegin(renderer: renderer)
       var pi3: Int = 0
-      loop pi3 < frameOrderLength(r: renderer) {
-        let tag: Int = frameTagAt(r: renderer, i: pi3)
-        if tag is tagShadow {
+      loop pi3 < deferredOrderLength(renderer: renderer) {
+        let tag: Int = deferredTagAt(renderer: renderer, i: pi3)
+        gpuPassMark(renderer: renderer, tag: tag)
+        if tag is RenderTag.shadow {
+          # Fit the cascades to THIS frame's camera and sun, then
+          # rasterise every visible mesh into them (#382). The graph put
+          # this before the scene pass because the scene pass declares a
+          # read of what it writes.
           let cascades: ShadowCascades = fitShadowCascades(
             camPos: camera.position
             camTarget: camera.target
@@ -752,86 +790,111 @@ func main() ret Int {
             lambda: 0.7
             backExtent: 30.0
           )
-          beginShadowPass(r: renderer, c: cascades)
-          # SHADOWS OFF means filling no cascades — an empty cascade set renders
-          # unshadowed, which is what a frame with no shadow pass should look
-          # like, and needs no renderer flag.
-          if settings.shadows and uiState.activeScene is 1 {
-            renderSceneShadowWorldWith(r: renderer, world: scene1.world)
-            renderSceneShadowSdfWorldWith(r: renderer, world: scene1.world)
+          beginShadowPass(renderer: renderer, c: cascades)
+          # SHADOWS OFF means filling no cascades. renderer_deferred's note says
+          # an app that skips the shadow pass renders unshadowed, which is what a
+          # frame with no shadow pass should look like — so the toggle is simply
+          # not doing the work, with no renderer flag to thread through.
+          if settings.shadows {
+            if uiState.activeScene is 1 {
+              renderSceneShadowWorldWith(renderer: renderer, world: asset1.world)
+              renderSdfShadow(renderer: renderer, world: asset1.world, tags: clusters1)
+            }
+            if uiState.activeScene is 2 {
+              renderSceneShadowWorldWith(renderer: renderer, world: asset2.world)
+              renderSdfShadow(renderer: renderer, world: asset2.world, tags: clusters2)
+            }
+            if uiState.activeScene is 3 {
+              renderSceneShadowWorldWith(renderer: renderer, world: asset3.world)
+              renderSdfShadow(renderer: renderer, world: asset3.world, tags: clusters3)
+            }
           }
-          if settings.shadows and uiState.activeScene is 2 {
-            renderSceneShadowWorldWith(r: renderer, world: scene2.world)
-            renderSceneShadowSdfWorldWith(r: renderer, world: scene2.world)
-          }
-          if settings.shadows and uiState.activeScene is 3 {
-            renderSceneShadowWorldWith(r: renderer, world: scene3.world)
-            renderSceneShadowSdfWorldWith(r: renderer, world: scene3.world)
-          }
-          endShadowPass(r: renderer)
+          endShadowPass(renderer: renderer)
           if shadowLogged is false {
             log(
-              "[shadow] casters {shadowCasterCount(r: renderer)}, {cascades.count} cascades at {cascades.resolution}"
+              "[shadow] casters {shadowCasterCount(renderer: renderer)}, {cascades.count} cascades at {cascades.resolution}"
             )
             shadowLogged = true
           }
         }
-        if tag is tagScenePass {
-          # ONE pass writes lit colour here, where the deferred twin writes a
-          # G-buffer and lights it later. No qualification needed: this example
-          # opens gpu3d and not gbuffer, which is exactly the ambiguity 112's
-          # comment warns about.
-          #
-          # Two submits over the World3d now: renderSceneWorld draws the meshes
-          # and renderSceneSdfWorld (gpu3dWorld) raymarches the metaball clusters
-          # into the same forward pass — the World3d split of what the Scene3d
-          # renderScene did in one call. The deferred twin instead writes SDFs to
-          # its G-buffer via renderSceneSdfWorld in gbufferWorld.
-          beginSceneWith(
-            r: renderer
+        if tag is RenderTag.forward {
+          # The ACTIVE scene, drawn by the app into the forward pass: the
+          # meshes and every metaball cluster, shaded in one 4x MSAA pass.
+          beginForwardPass(
+            renderer: renderer
             camera: camera
             light: light
             aspect: aspect
-            time: simTime
           )
-          # BEFORE the geometry, and writing no depth, so everything drawn
-          # after it covers it normally. It is the background, not a backdrop
-          # object at the far plane.
-          drawSky(sky: sky, light: light)
-          if uiState.activeScene is 1 {
-            renderSceneWorldWith(r: renderer, world: scene1.world)
-            renderSceneSdfWorld(world: scene1.world)
+          if let resources: mod GpuResources => renderer.gpuResources {
+            if uiState.activeScene is 1 {
+              GbufferWorld.renderSceneWorld(
+                cache: renderer.passes.gbuffer
+                resources: resources
+                world: asset1.world
+              )
+              renderSdfScene(
+                cache: renderer.passes.gbuffer
+                resources: resources
+                world: asset1.world
+                tags: clusters1
+                camera: camera
+              )
+            }
+            if uiState.activeScene is 2 {
+              GbufferWorld.renderSceneWorld(
+                cache: renderer.passes.gbuffer
+                resources: resources
+                world: asset2.world
+              )
+              renderSdfScene(
+                cache: renderer.passes.gbuffer
+                resources: resources
+                world: asset2.world
+                tags: clusters2
+                camera: camera
+              )
+            }
+            if uiState.activeScene is 3 {
+              GbufferWorld.renderSceneWorld(
+                cache: renderer.passes.gbuffer
+                resources: resources
+                world: asset3.world
+              )
+              renderSdfScene(
+                cache: renderer.passes.gbuffer
+                resources: resources
+                world: asset3.world
+                tags: clusters3
+                camera: camera
+              )
+            }
           }
-          if uiState.activeScene is 2 {
-            renderSceneWorldWith(r: renderer, world: scene2.world)
-            renderSceneSdfWorld(world: scene2.world)
-          }
-          if uiState.activeScene is 3 {
-            renderSceneWorldWith(r: renderer, world: scene3.world)
-            renderSceneSdfWorld(world: scene3.world)
-          }
+          endForwardPass(renderer: renderer)
         }
-        if tag is tagSsao {
-          ssaoPass()
+        # The scene-independent passes of the forward frame
+        if tag is RenderTag.bloom or tag is RenderTag.composite {
+          renderDeferredPassWorld(
+            renderer: renderer
+            tag: tag
+            world: asset1.world
+            camera: camera
+            light: light
+            aspect: aspect
+          )
         }
-        if tag is tagTaa {
-          taaPass()
-        }
-        if tag is tagTonemap {
-          tonemapPass(canvas: canvas)
-        }
-        if tag is tagUiOverlay {
-          Gpu2d.beginFrameLoad(canvas: canvas)
+        if tag is RenderTag.uiOverlay {
+          Gpu2d.beginFrameLoad(canvas: renderer.canvas)
           renderSystemGpu2d(
             world: uiWorld
             uiSystems: uiSystems
             res: gpuUi
-            canvas: canvas
+            canvas: renderer.canvas
           )
           # After the app UI, so the diagnostic is never what gets covered up.
           drawLogOverlay(
             ov: logOverlay
-            canvas: canvas
+            canvas: renderer.canvas
             font: gpuUi.textFont
             screenW: extentW
             screenH: extentH
@@ -839,29 +902,30 @@ func main() ret Int {
           # LAST, so it is above the scene, the UI world and the log.
           drawDebugOverlay(
             debugOverlay: dbg
-            canvas: canvas
+            canvas: renderer.canvas
             font: gpuUi.textFont
             didRealWork: dbgDidWork
           )
           lastLogRevision = logOverlay.revision
         }
-        if tag is tagPresent {
-          Gpu2d.endFrame(canvas: canvas)
+        if tag is RenderTag.present {
+          endUiFrameTimed(renderer: renderer)
         }
         pi3 = pi3 + 1
       }
-      # Frame history for motion vectors (#336): the ACTIVE scene's current
-      # transforms become its previous-frame set. Inactive scenes are not
-      # snapshotted — they aren't rendered, so they have no frame history to
-      # advance, and their first frame back re-syncs on the next snapshot.
+      gpuPassTimingEnd(renderer: renderer)
+      # Frame history for motion vectors (#336): PrevTransformSystem (#735) makes
+      # the ACTIVE scene's current transforms its previous-frame set. Inactive
+      # scenes are not advanced — they aren't rendered, so they have no frame
+      # history to keep, and their first frame back re-syncs on the next run.
       if uiState.activeScene is 1 {
-        world3dPrevTransformSystem(world: scene1.world)
+        world3dPrevTransformSystem(world: asset1.world)
       }
       if uiState.activeScene is 2 {
-        world3dPrevTransformSystem(world: scene2.world)
+        world3dPrevTransformSystem(world: asset2.world)
       }
       if uiState.activeScene is 3 {
-        world3dPrevTransformSystem(world: scene3.world)
+        world3dPrevTransformSystem(world: asset3.world)
       }
     }
     # Frame end: report the authored components no lib table matched (this app
@@ -877,8 +941,9 @@ func main() ret Int {
       state: serialize111State(ui: uiState, rig: cameraRig, camera: camera)
     )
   }
+  shutdownDeferredRenderer(renderer: renderer)  # #904: the renderer-owned GPU manager, before the C shutdown
   shutdown()
-  canvasShutdown(canvas: canvas)
+  # The renderer's canvas is shut down by shutdownDeferredRenderer.
   Gpu2d.closeWindow()
   ret 0
 }

@@ -32,6 +32,15 @@ static void rae_ios_bootstrap(void) {
          * (RAE_PROFILE set, e.g. by run-ios.sh --profile) and no explicit output
          * path was given, default it to the writable Documents dir so the trace
          * lands next to rae.log and is pulled the same way. */
+        /* A headless screenshot (RAE_GPU2D_SCREENSHOT) given as a bare file
+         * name lands in Documents too, pullable like rae.log: the only way to
+         * see what an iPhone run drew is to look at that image. */
+        const char *shot = getenv("RAE_GPU2D_SCREENSHOT");
+        if (shot && *shot && shot[0] != '/') {
+            char shotPath[1024];
+            snprintf(shotPath, sizeof(shotPath), "%s/Documents/%s", home, shot);
+            setenv("RAE_GPU2D_SCREENSHOT", shotPath, 1);
+        }
         if (getenv("RAE_PROFILE") && !getenv("RAE_PROFILE_OUT")) {
             char out[1024];
             snprintf(out, sizeof(out), "%s/Documents/rae_profile.json", home);

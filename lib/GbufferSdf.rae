@@ -51,6 +51,14 @@ type SdfPassCache {
   args: ArgWriter
   columns: List(Float)  # mat4 scratch for the uniform writes
   testLogged: Bool  # the RAE_GPU3D_SDF_TEST_LOG line, once
+  # The forward main pass's metaball material (forward-rae-2, made by
+  # ForwardMain): its pipeline, a bind per cluster slot, and the lighting
+  # inputs those binds add after the cluster's own four (the light uniform,
+  # the cascades' uniform, view and sampler). ForwardMain retires the binds
+  # when those inputs are recreated.
+  forwardPipeline: RenderPipelineId
+  forwardBinds: List(BindGroupId)
+  forwardInputs: List(ResourceRef)
 }
 
 func createSdfPassCache() ret SdfPassCache {
@@ -67,6 +75,9 @@ func createSdfPassCache() ret SdfPassCache {
     args: createArgs(uniform: true)
     columns: List.create(Float, cap: 16)
     testLogged: false
+    forwardPipeline: noRenderPipelineId()
+    forwardBinds: fillBindGroupIds(count: sdfMaxGroups)
+    forwardInputs: List.create(ResourceRef, cap: 4)
   }
 }
 
@@ -83,7 +94,9 @@ func ensureSdfObjects(sdf: mod SdfPassCache, resources: mod GpuResources) {
     ret
   }
   sdf.pipeMade = true
-  let sdfShader: Shader = shader(files: ["lib/gbuffer_octahedral.wgsl", "lib/gbuffer_sdf.wgsl"])
+  let sdfShader: Shader = shader(
+    files: ["lib/gbuffer_octahedral.wgsl", "lib/sdf_surface.wgsl", "lib/gbuffer_sdf.wgsl"]
+  )
   # The geometry pass's 3 targets + reverse-Z depth, no vertex buffer, no cull:
   # a fullscreen triangle that writes its own frag_depth.
   if let pipeline: RenderPipelineId = createRenderPipeline(
@@ -169,6 +182,45 @@ func ensureSdfBind(sdf: mod SdfPassCache, resources: mod GpuResources, gi: copy 
     ret true
   }
   ret false
+}
+
+# The forward bind of cluster slot `gi`: the cluster's four buffers, then the
+# lighting inputs (forwardInputs, binding 4 on)
+func ensureSdfForwardBind(
+  sdf: mod SdfPassCache
+  resources: mod GpuResources
+  gi: copy Int
+) ret Bool {
+  if let existing: BindGroupId = sdf.forwardBinds.copyAt(index: gi) {
+    if bindGroupIsUsable(resources: resources, id: existing) {
+      ret true
+    }
+  }
+  if sdf.forwardInputs.length < 4 {
+    ret false
+  }
+  var entries: List(ResourceRef) = List.create(ResourceRef, cap: 8)
+  entries.add(value: bufferRef(id: sdf.frameUniform))
+  entries.add(value: bufferRef(id: sdf.balls.copyAtFallback(index: gi, fallback: noBufferId())))
+  entries.add(value: bufferRef(id: sdf.params.copyAtFallback(index: gi, fallback: noBufferId())))
+  entries.add(value: bufferRef(id: sdf.colors.copyAtFallback(index: gi, fallback: noBufferId())))
+  loop let input: ResourceRef in sdf.forwardInputs {
+    entries.add(value: input)
+  }
+  if let bind: BindGroupId = createRenderBindGroup(
+    resources: resources
+    pipeline: sdf.forwardPipeline
+    entries: entries
+  ) {
+    sdf.forwardBinds.set(index: gi, value: bind)
+    ret true
+  }
+  ret false
+}
+
+# Drop the forward binds (their lighting inputs were recreated)
+func retireSdfForwardBinds(sdf: mod SdfPassCache, resources: mod GpuResources) {
+  retireBindGroupIds(resources: resources, list: sdf.forwardBinds)
 }
 
 func sdfFrameFloat(cache: view GbufferCache, index: copy Int) ret Float {
@@ -264,7 +316,7 @@ func drawMetaballs(
   emG: copy Float
   emB: copy Float
 ) pub {
-  if not gbufferFrameActive(cache: cache) or cache.forwardFrame or count < 1 {
+  if not gbufferFrameActive(cache: cache) or count < 1 {
     ret
   }
   var balls: Int = count
@@ -354,8 +406,19 @@ func drawMetaballs(
     buffer: cache.sdf.params.copyAtFallback(index: gi, fallback: noBufferId())
     offset: 0
   )
-  if not ensureSdfBind(sdf: cache.sdf, resources: resources, gi: gi) {
+  # A forward frame draws with the forward material (ForwardMain made it)
+  var pipeline: RenderPipelineId = cache.sdf.pipeline
+  if cache.forwardFrame {
+    pipeline = cache.sdf.forwardPipeline
+    if not ensureSdfForwardBind(sdf: cache.sdf, resources: resources, gi: gi) {
+      ret
+    }
+  } else if not ensureSdfBind(sdf: cache.sdf, resources: resources, gi: gi) {
     ret
+  }
+  var bind: BindGroupId = cache.sdf.binds.copyAtFallback(index: gi, fallback: noBindGroupId())
+  if cache.forwardFrame {
+    bind = cache.sdf.forwardBinds.copyAtFallback(index: gi, fallback: noBindGroupId())
   }
   cache.sdf.group = gi + 1
   # The same diagnostic line and env gate as the forward path, so 112's gate
@@ -368,8 +431,8 @@ func drawMetaballs(
     let drawn: Bool = recordDrawInPass(
       resources: resources
       pass: cache.pass
-      pipeline: cache.sdf.pipeline
-      bindGroup: cache.sdf.binds.copyAtFallback(index: gi, fallback: noBindGroupId())
+      pipeline: pipeline
+      bindGroup: bind
       vertexCount: 3
       instanceCount: 1
       firstVertex: 0
@@ -383,8 +446,12 @@ func drawMetaballs(
 # every bind drawn this frame, so retiring one is deferred behind the GPU.
 func sdfRecordUses(sdf: view SdfPassCache, recording: mod Recording, resources: view GpuResources) {
   recordRenderPipelineUse(recording: recording, resources: resources, id: sdf.pipeline)
+  recordRenderPipelineUse(recording: recording, resources: resources, id: sdf.forwardPipeline)
   loop var i: Int = 0, i < sdf.group, ++i {
     if let bind: BindGroupId = sdf.binds.copyAt(index: i) {
+      recordBindGroupUse(recording: recording, resources: resources, id: bind)
+    }
+    if let bind: BindGroupId = sdf.forwardBinds.copyAt(index: i) {
       recordBindGroupUse(recording: recording, resources: resources, id: bind)
     }
   }
@@ -393,6 +460,7 @@ func sdfRecordUses(sdf: view SdfPassCache, recording: mod Recording, resources: 
 # Retire the SDF objects (renderer shutdown).
 func sdfShutdown(sdf: mod SdfPassCache, resources: mod GpuResources) {
   retireBindGroupIds(resources: resources, list: sdf.binds)
+  retireBindGroupIds(resources: resources, list: sdf.forwardBinds)
   retireBufferIds(resources: resources, list: sdf.balls)
   retireBufferIds(resources: resources, list: sdf.colors)
   retireBufferIds(resources: resources, list: sdf.params)

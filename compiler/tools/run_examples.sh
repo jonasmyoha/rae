@@ -1278,24 +1278,23 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             ((FAILED++))
           fi
         elif [ "$EXAMPLE_NAME" = "111_metaballs_forward" ]; then
-          # 111 is now ALSO the forward-path host of the runtime draw-limit guard
-          # (rae_g3d_push_draw_record): a second run under RAE_GPU3D_DRAW_LIMIT=1
-          # must log "[gpu3d] ERROR: draw limit exceeded". This moved here from the
-          # retired 113_gltf_character (its glTF loading coverage lives in 114).
-          # The forward twin: one screenshot is enough. 112 owns the deep
-          # coverage (scene switching, pause, settings, free camera); repeating
-          # all of it here would double the slowest example in the suite to
-          # re-test the UI rather than the renderer, which is the only thing
-          # that differs.
+          # The forward twin of 112, on the Rae forward main pass since
+          # forward-rae-2 (lib/RendererForward: one 4x MSAA pass). One
+          # screenshot is enough: 112 owns the deep coverage (scene switching,
+          # pause, settings, free camera), and the renderer is the only thing
+          # that differs. The metaball line proves the forward metaball
+          # material drew; the shadow line that the cascades were filled.
+          # (This gate used to also fire the C forward renderer's draw-limit
+          # guard; 111 no longer uses that renderer, which forward-rae-3
+          # deletes.)
           SCREENSHOT="$TMP_OUT/gpu3d-ui-forward.bmp"
-          if (cd .. && RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
+          if (cd .. && RAE_GPU3D_SDF_TEST_LOG=1 RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
              perl -e 'alarm shift; exec @ARGV' 35 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
              && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --gpu3d-ui > "$TMP_OUT/screenshot.log" 2>&1 \
-             && [ "$(grep -c '\[shadow\] casters 17, 3 cascades' "$TMP_OUT/render.log")" -eq 1 ] \
-             && (cd .. && RAE_GPU3D_DRAW_LIMIT=1 RAE_SDL_HEADLESS_MS=800 \
-                   perl -e 'alarm shift; exec @ARGV' 35 "$TMP_OUT/app") > "$TMP_OUT/drawlimit.log" 2>&1 \
-             && [ "$(grep -c "\[gpu3d\] ERROR: draw limit exceeded" "$TMP_OUT/drawlimit.log")" -ge 1 ]; then
-            echo "PASS: $EXAMPLE_NAME (forward path, lit frame + shadow cascades, draw-limit guard fires)"
+             && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=2000 >> "$TMP_OUT/screenshot.log" 2>&1 \
+             && [ "$(grep -c '\[gpu3d\] SDF metaballs: count=5' "$TMP_OUT/render.log")" -eq 1 ] \
+             && [ "$(grep -c '\[shadow\] casters 17, 3 cascades' "$TMP_OUT/render.log")" -eq 1 ]; then
+            echo "PASS: $EXAMPLE_NAME (Rae forward pass: lit frame with metaballs + shadow cascades)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (forward 3D/UI screenshot)"
