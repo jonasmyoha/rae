@@ -62,6 +62,8 @@ type CompositePassCache {
   sampler: SamplerId
   binds: List(BindGroupId)  # per source slot: TAA 0/1, no-TAA lit 2, anti-aliased 3
   bindGen: Int
+  # The bloom the binds were built over: targets.bloomGen, -1 for none
+  bloomKey: Int
   args: ArgWriter
 }
 
@@ -197,6 +199,14 @@ func postPassReady(
 }
 
 # Composite the lit/TAA result into the presentable target with exposure.
+# What the composite multiplies the bloom by: 0 when bloom did not run.
+func bloomStrength(targets: view DeferredTargets) ret Float {
+  if targets.bloomWritten {
+    ret targets.bloomIntensity
+  }
+  ret 0.0
+}
+
 func composite(
   cache: mod CompositePassCache
   resources: mod GpuResources
@@ -216,17 +226,29 @@ func composite(
 
   # The source bind is per TAA slot (0/1) or the no-TAA lit slot (2), rebuilt
   # when the targets change (the source views were re-created then).
+  # Bloom off or not run: the bloom slot holds the source again (bound, never
+  # read), and the binds are rebuilt whenever that changes.
+  var bloomKey: Int = -1
+  if targets.bloomWritten {
+    bloomKey = targets.bloomGen
+  }
   let gen: Int = targets.gen
-  if not (gen is cache.bindGen) {
+  if not (gen is cache.bindGen) or not (bloomKey is cache.bloomKey) {
     cache.bindGen = gen
+    cache.bloomKey = bloomKey
     retireBindGroupIds(resources: resources, list: cache.binds)
   }
   let idx: Int = compositeSourceIndex(targets: targets)
   if not bindSlotUsable(resources: resources, binds: cache.binds, idx: idx) {
-    var entries: List(ResourceRef) = List.create(ResourceRef, cap: 3)
+    var entries: List(ResourceRef) = List.create(ResourceRef, cap: 4)
     entries.add(value: bufferRef(id: cache.uniform))
     entries.add(value: compositeSourceRef(targets: targets))
     entries.add(value: samplerRef(id: cache.sampler))
+    if targets.bloomWritten {
+      entries.add(value: textureViewRef(id: targets.bloomView))
+    } else {
+      entries.add(value: compositeSourceRef(targets: targets))
+    }
     if let bind: BindGroupId = createRenderBindGroup(
       resources: resources
       pipeline: cache.pipeline
@@ -264,7 +286,7 @@ func composite(
     x: grade.shadowTint.x
     y: grade.shadowTint.y
     z: grade.shadowTint.z
-    w: 0.0  # unused: FXAA runs before the composite (the antialias pass)
+    w: bloomStrength(targets: targets)
   )
   pushVec4F(
     writer: cache.args
@@ -292,8 +314,9 @@ func composite(
       )
     }
   }
-  # the next frame's antialias pass writes it again
+  # the next frame's antialias and bloom passes write them again
   targets.aaWritten = false
+  targets.bloomWritten = false
   # The composite ends the renderer's part of the frame: submit every post
   # pass recorded since the frame began, before the UI's own submit.
   flushPostPasses(targets: targets, resources: resources)

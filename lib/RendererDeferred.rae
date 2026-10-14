@@ -43,6 +43,7 @@ open GbufferTerrain
 open GbufferInspector
 open GbufferPasses
 open GbufferAo
+open GbufferBloom
 open GbufferFullscreen
 open TransparentForward
 open GbufferUnderwater
@@ -77,6 +78,7 @@ enum RenderTag {
   waterFft
   underwater
   antialias
+  bloom
 }
 
 # writes surface attributes, no lighting
@@ -143,6 +145,7 @@ type RenderPasses {
   light: LightPassCache
   taa: TaaPassCache
   antialias: AntialiasPassCache  # FXAA at the scene resolution, before the upscale
+  bloom: BloomPassCache  # half-size bloom the composite adds (render-perf-8), off by default
   pyr: PyrPassCache
   inspect: ViewPassCache
   gbuffer: GbufferCache
@@ -160,6 +163,7 @@ func createRenderPasses() ret RenderPasses {
       light: createLightPassCache()
       taa: createTaaPassCache()
       antialias: createAntialiasPassCache()
+      bloom: createBloomPassCache()
       pyr: createPyrPassCache()
       inspect: createViewPassCache()
       gbuffer: createGbufferCache()
@@ -447,6 +451,7 @@ func shutdownDeferredRenderer(renderer: mod DeferredRenderer) {
       resources: resources
     )
     antialiasPassShutdown(cache: renderer.passes.antialias, resources: resources)
+    bloomPassShutdown(cache: renderer.passes.bloom, resources: resources)
     inspectorShutdown(cache: renderer.passes.inspect, resources: resources)
     transparentShutdown(cache: renderer.passes.transparent, resources: resources)
     underwaterShutdown(cache: renderer.passes.underwater, resources: resources)
@@ -712,6 +717,15 @@ func renderDeferredPassWith(
       gbuffer: renderer.passes.gbuffer
     )
   }
+  if tag is RenderTag.bloom {
+    bloomPass(
+      cache: renderer.passes.bloom
+      resources: resources
+      targets: renderer.passes.targets
+      gbuffer: renderer.passes.gbuffer
+      exposure: light.exposure
+    )
+  }
   if tag is RenderTag.antialias {
     antialiasPass(
       cache: renderer.passes.antialias
@@ -783,25 +797,6 @@ func gpuPassTimingBegin(renderer: mod DeferredRenderer) {
   }
 }
 
-# Frames averaged into one "[gpu passes]" log line
-const passTimingReportFrames: Int = 60
-
-# One line: each pass's average GPU time in microseconds over the report's
-# frames, then the frame's total.
-func logPassTimingReport(passTiming: mod DeferredPassTiming) {
-  let frames: Int = passTiming.reportFrames
-  var line: String = "[gpu passes] average of {frames} frames, us:"
-  var total: Int = 0
-  loop var i: Int = 0, i < passTiming.reportTags.length, ++i {
-    let tag: Int = passTiming.reportTags.copyAtDefault(index: i)
-    let average: Int = passTiming.reportSums.copyAtDefault(index: i) / frames
-    total = total + average
-    line = "{line} {renderTagName(tag: tag)} {average} |"
-  }
-  log("{line} total {total}")
-  clearPassTimingReport(passTiming: passTiming)
-}
-
 func gpuPassMark(renderer: mod DeferredRenderer, tag: view Int) {
   if let resources: mod GpuResources => renderer.gpuResources {
     passTimingMark(
@@ -825,55 +820,6 @@ func endUiFrameTimed(renderer: mod DeferredRenderer) {
 
 func gpuPassTimingEnd(renderer: mod DeferredRenderer) {
   gpuPassMark(renderer: renderer, tag: -1)
-}
-
-# A graph pass's name, for reports.
-func renderTagName(tag: view Int) ret String {
-  match tag {
-    case RenderTag.gbuffer {
-      ret "gbuffer"
-    }
-    case RenderTag.depthPyramid {
-      ret "depth pyramid"
-    }
-    case RenderTag.ssao {
-      ret "ssao"
-    }
-    case RenderTag.lighting {
-      ret "lighting"
-    }
-    case RenderTag.composite {
-      ret "composite"
-    }
-    case RenderTag.present {
-      ret "present: 2D submit (UI flush)"
-    }
-    case RenderTag.uiOverlay {
-      ret "ui overlay"
-    }
-    case RenderTag.taa {
-      ret "taa"
-    }
-    case RenderTag.shadow {
-      ret "shadow cascades"
-    }
-    case RenderTag.transparentForward {
-      ret "transparent forward"
-    }
-    case RenderTag.waterFft {
-      ret "water fft"
-    }
-    case RenderTag.underwater {
-      ret "underwater"
-    }
-    case RenderTag.antialias {
-      ret "antialias (FXAA)"
-    }
-  }
-  if tag is passTimingCopyTag {
-    ret "present: copy to drawable, present"
-  }
-  ret "pass {tag}"
 }
 
 # #794: the World3d twin of renderDeferredFrame — walk the derived graph order and
@@ -905,6 +851,22 @@ func renderDeferredFrameWorld(
 # How many instances the G-buffer pass submitted last frame.
 func deferredDrawCount(renderer: view DeferredRenderer) pub ret Int {
   ret passDrawCount(cache: renderer.passes.gbuffer)
+}
+
+# Bloom (render-perf-8, GbufferBloom): on/off, threshold and knee in the
+# exposed scene's units, intensity. Off (the default) costs nothing.
+func setBloom(renderer: mod DeferredRenderer, settings: view BloomSettings) {
+  renderer.passes.bloom.settings = settings
+}
+
+# Bloom on or off with the current threshold, knee and intensity (the
+# library's defaults until setBloom changed them).
+func setBloomEnabled(renderer: mod DeferredRenderer, on: copy Bool) {
+  renderer.passes.bloom.settings.enabled = on
+}
+
+func bloomSettings(renderer: view DeferredRenderer) ret BloomSettings {
+  ret renderer.passes.bloom.settings
 }
 
 # Mip levels in the depth pyramid built by the last frame (0 until a
