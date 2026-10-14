@@ -153,9 +153,8 @@ static void rae_g2d_save_screenshot(const char* path, WGPUTexture tex, int w, in
 
 /* Called by Rae's endFrame AFTER the frame was submitted through the manager.
  * #920: the presentable target is the canvas's texture, passed in (C borrows
- * it for the copy / readback and owns nothing of it). This is the platform
- * tail: the optional headless screenshot, the best-effort copy into the
- * surface drawable + present, and the device poll. */
+ * it for the readback and owns nothing of it): the optional headless
+ * screenshot. The drawable is Rae's to acquire (rae_surface_acquire). */
 void rae_g2d_tick(void) {
     if (g_g2d_test_pointer_state >= 2) g_g2d_test_pointer_paints++;
     rae_g2d_tick_virtual_clock();
@@ -177,56 +176,73 @@ void rae_g2d_present(void* texture, int64_t width, int64_t height) {
         if (shot) rae_g2d_save_screenshot(shot, tex, (int)width, (int)height);
     }
 
-    /* Present best-effort: copy the offscreen image into the surface drawable
-     * and present. If the OS won't vend a drawable (window occluded / display
-     * asleep / headless), skip — the frame already rendered + screenshotted.
-     *
-     * DO NOT acquire a drawable while the window is hidden / minimized /
-     * occluded. On macOS the CAMetalLayer stops recycling its drawable pool once
-     * the app is backgrounded and hands out a fresh IOSurface-backed texture per
-     * frame — which wgpu still reports as SuccessOptimal, and whose submissions
-     * retire normally — so nothing signals a problem while RSS balloons ~100
-     * textures/frame after each app switch. Skipping the acquire entirely while
-     * dark is the only thing that keeps the drawable count flat (matches ImGui's
-     * Metal backend and bevy's occlusion handling). */
-    int presented = 0;
-    if (g_g2d_surface && rae_g2d_window_visible()) {
-        WGPUSurfaceTexture st; memset(&st, 0, sizeof(st));
-        wgpuSurfaceGetCurrentTexture(g_g2d_surface, &st);
-        if (st.texture &&
-            (st.status == WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal ||
-             st.status == WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal)) {
-            WGPUCommandEncoder penc = wgpuDeviceCreateCommandEncoder(g_wgpu_dev, NULL);
-            WGPUTexelCopyTextureInfo cs; memset(&cs, 0, sizeof(cs)); cs.texture = tex; cs.aspect = WGPUTextureAspect_All;
-            WGPUTexelCopyTextureInfo cd; memset(&cd, 0, sizeof(cd)); cd.texture = st.texture; cd.aspect = WGPUTextureAspect_All;
-            /* the target is built to the configured size; copy the smaller of the two */
-            uint32_t cw = (uint32_t)(width < g_sdl_w ? width : g_sdl_w);
-            uint32_t ch = (uint32_t)(height < g_sdl_h ? height : g_sdl_h);
-            WGPUExtent3D ext; ext.width = cw; ext.height = ch; ext.depthOrArrayLayers = 1;
-            wgpuCommandEncoderCopyTextureToTexture(penc, &cs, &cd, &ext);
-            WGPUCommandBuffer pcb = wgpuCommandEncoderFinish(penc, NULL);
-            wgpuQueueSubmit(g_wgpu_queue, 1, &pcb);
-            wgpuCommandBufferRelease(pcb); wgpuCommandEncoderRelease(penc);
-#ifndef __EMSCRIPTEN__
-            /* Browser WebGPU presents the canvas texture when control returns to
-             * the browser; Emdawn rejects explicit wgpuSurfacePresent calls. */
-            wgpuSurfacePresent(g_g2d_surface);
-            g_rae_presented_any = 1;
-#endif
-            g_g2d_last_present_ok = 1;
-            presented = 1;
-            rae_present_note_ok();
-        }
-        /* SDL visibility can precede native visibility. Release the drawable
-         * first, then apply status-specific recovery (not always configure). */
-        if (st.texture) wgpuTextureRelease(st.texture);
-        if (!presented) rae_present_recover("gpu2d", st.status);
-    } else {
-        rae_present_note_skip("gpu2d", "window-not-visible");
+    /* The drawable is acquired and presented by Rae afterwards
+     * (lib/gpu/Surface.rae, render-perf-11), through the two shims below: WHEN
+     * to acquire is Rae's decision. */
+}
+
+/* Acquire the surface drawable: one wgpuSurfaceGetCurrentTexture. NULL when
+ * there is no surface, the window is not visible, or no drawable is vended
+ * (then the drawable is released and the status-specific recovery runs).
+ *
+ * DO NOT acquire a drawable while the window is hidden / minimized /
+ * occluded. On macOS the CAMetalLayer stops recycling its drawable pool once
+ * the app is backgrounded and hands out a fresh IOSurface-backed texture per
+ * frame -- which wgpu still reports as SuccessOptimal, and whose submissions
+ * retire normally -- so nothing signals a problem while RSS balloons ~100
+ * textures/frame after each app switch. Skipping the acquire entirely while
+ * dark is the only thing that keeps the drawable count flat (matches ImGui's
+ * Metal backend and bevy's occlusion handling).
+ *
+ * The visibility gate and the recovery are existing policy, kept here as they
+ * were; moving them to Rae is queued (docs/runtime-c-audit.md row 16). */
+void* rae_surface_acquire(void) {
+    if (!g_g2d_surface || !g_wgpu_dev) return NULL;
+    if (!rae_g2d_window_visible()) {
+        rae_present_note_skip("present", "window-not-visible");
+        return NULL;
     }
-    /* No wait here: frame pacing (the bound of two frames in flight, the
-     * backpressure a hidden window needs, retiring the present submission) is
-     * Rae's, in lib/gpu/FramePacer.rae, which the caller runs next. */
+    WGPUSurfaceTexture st; memset(&st, 0, sizeof(st));
+    wgpuSurfaceGetCurrentTexture(g_g2d_surface, &st);
+    if (st.texture &&
+        (st.status == WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal ||
+         st.status == WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal)) {
+        return st.texture;
+    }
+    /* SDL visibility can precede native visibility. Release the drawable
+     * first, then apply status-specific recovery (not always configure). */
+    if (st.texture) wgpuTextureRelease(st.texture);
+    rae_present_recover("present", st.status);
+    return NULL;
+}
+
+/* Copy the offscreen image into an acquired drawable, present it and release
+ * it (one copy, one submit, one present). The browser presents the canvas
+ * texture when control returns to it; Emdawn rejects wgpuSurfacePresent. */
+void rae_surface_present(void* drawable, void* offscreen, int64_t width, int64_t height) {
+    WGPUTexture dst = (WGPUTexture)drawable;
+    WGPUTexture tex = (WGPUTexture)offscreen;
+    if (!dst) return;
+    if (tex && g_wgpu_dev) {
+        WGPUCommandEncoder penc = wgpuDeviceCreateCommandEncoder(g_wgpu_dev, NULL);
+        WGPUTexelCopyTextureInfo cs; memset(&cs, 0, sizeof(cs)); cs.texture = tex; cs.aspect = WGPUTextureAspect_All;
+        WGPUTexelCopyTextureInfo cd; memset(&cd, 0, sizeof(cd)); cd.texture = dst; cd.aspect = WGPUTextureAspect_All;
+        /* the target is built to the configured size; copy the smaller of the two */
+        uint32_t cw = (uint32_t)(width < g_sdl_w ? width : g_sdl_w);
+        uint32_t ch = (uint32_t)(height < g_sdl_h ? height : g_sdl_h);
+        WGPUExtent3D ext; ext.width = cw; ext.height = ch; ext.depthOrArrayLayers = 1;
+        wgpuCommandEncoderCopyTextureToTexture(penc, &cs, &cd, &ext);
+        WGPUCommandBuffer pcb = wgpuCommandEncoderFinish(penc, NULL);
+        wgpuQueueSubmit(g_wgpu_queue, 1, &pcb);
+        wgpuCommandBufferRelease(pcb); wgpuCommandEncoderRelease(penc);
+#ifndef __EMSCRIPTEN__
+        wgpuSurfacePresent(g_g2d_surface);
+#endif
+        g_rae_presented_any = 1;
+        g_g2d_last_present_ok = 1;
+        rae_present_note_ok();
+    }
+    wgpuTextureRelease(dst);
 }
 
 rae_Bool rae_ext_Gpu2d_lastPresentOk(void) {

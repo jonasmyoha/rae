@@ -685,67 +685,25 @@ int64_t rae_g3d_tonemap_pending(void) { return g3d_tonemap_pending ? 1 : 0; }
  * does not have to call into renderer3d's frame logic to show anything.
  */
 static void rae_g3d_present_offscreen(WGPUTexture tex, int width, int height) {
-    if (!tex) { rae_wgpu_poll(0); return; }
+    if (!tex) return;
     rae_wgpu_report_periodic();
     /* A frame's pixels exist by this point whether or not there is a surface to
      * show them on, so mark it here rather than at wgpuSurfacePresent -- headless
-     * returns before ever presenting. */
+     * never presents. */
     g_rae_presented_any = 1;
     if (g_sdl_headless_ms > 0 || g_sdl_headless_frames > 0) {
         const char* shot = getenv("RAE_GPU2D_SCREENSHOT");
         if (shot) rae_g2d_save_screenshot(shot, tex, width, height);
     }
-
-    /* NO WINDOW MEANS NOTHING TO PRESENT TO. An offscreen-only frame (the
-     * headless zero-alloc tests, and any future render-to-texture caller)
-     * never creates a surface, and wgpuSurfaceGetCurrentTexture aborts the
-     * process on a null one rather than reporting a status we could skip
-     * on. The screenshot above has already captured the frame, which is the
-     * whole point of running headless, so returning here loses nothing. */
-    if (!g_g2d_surface) { rae_wgpu_poll(0); return; }
-    if (!rae_g2d_window_visible()) {
-        rae_present_note_skip("gpu3d", "window-not-visible");
-        rae_wgpu_poll(0);
-        return;
-    }
-
-    /* Present best-effort: copy the resolved offscreen image into the
-     * surface drawable (same policy as the 2D endFrame). */
-    WGPUSurfaceTexture st; memset(&st, 0, sizeof(st));
-    wgpuSurfaceGetCurrentTexture(g_g2d_surface, &st);
-    int presented = 0;
-    if (st.texture &&
-        (st.status == WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal ||
-         st.status == WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal)) {
-        WGPUCommandEncoder penc = wgpuDeviceCreateCommandEncoder(g_wgpu_dev, NULL);
-        WGPUTexelCopyTextureInfo cs; memset(&cs, 0, sizeof(cs)); cs.texture = tex; cs.aspect = WGPUTextureAspect_All;
-        WGPUTexelCopyTextureInfo cd; memset(&cd, 0, sizeof(cd)); cd.texture = st.texture; cd.aspect = WGPUTextureAspect_All;
-        uint32_t cw = (uint32_t)(width < g_sdl_w ? width : g_sdl_w);
-        uint32_t ch = (uint32_t)(height < g_sdl_h ? height : g_sdl_h);
-        WGPUExtent3D ext; ext.width = cw; ext.height = ch; ext.depthOrArrayLayers = 1;
-        wgpuCommandEncoderCopyTextureToTexture(penc, &cs, &cd, &ext);
-        WGPUCommandBuffer pcb = wgpuCommandEncoderFinish(penc, NULL);
-        wgpuQueueSubmit(g_wgpu_queue, 1, &pcb);
-        wgpuCommandBufferRelease(pcb); wgpuCommandEncoderRelease(penc);
-#ifndef __EMSCRIPTEN__
-        wgpuSurfacePresent(g_g2d_surface);
-#endif
-        g_g2d_last_present_ok = 1;
-        presented = 1;
-        rae_present_note_ok();
-    }
-    /* No usable drawable — the black-screen case. Release the drawable first,
-     * then apply status-specific recovery (occlusion does not reconfigure). */
-    if (st.texture) wgpuTextureRelease(st.texture);
-    if (!presented) rae_present_recover("gpu3d", st.status);
-    /* No wait here: frame pacing is Rae's (lib/gpu/FramePacer.rae), run by
-     * the caller next — same as the 2D present. */
+    /* The drawable is acquired and presented by Rae afterwards
+     * (lib/gpu/Surface.rae over rae_surface_acquire / rae_surface_present,
+     * render-perf-11), the same as the 2D present. No surface (an
+     * offscreen-only frame) simply acquires nothing. */
 }
 
-/* Present the tonemapped offscreen (#514): advance the virtual clock and copy
- * to the drawable. The scene-pass finish and the tonemap-if-pending fallback
- * move to the Rae end() wrapper; rae_g3d_present_offscreen is genuine platform
- * copy-to-drawable, so it stays C (same class as rae_ext_Gbuffer_present). */
+/* The tonemapped offscreen's platform tail (#514): advance the virtual clock
+ * and take the headless screenshot. The scene-pass finish, the tonemap
+ * fallback and the drawable (lib/gpu/Surface.rae) are Rae's. */
 void rae_g3d_present_frame(void* texture, int64_t width, int64_t height) {
     rae_g2d_tick_virtual_clock();
     rae_g3d_present_offscreen((WGPUTexture)texture, (int)width, (int)height);
