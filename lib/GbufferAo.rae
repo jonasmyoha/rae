@@ -1,0 +1,245 @@
+# GbufferAo — the deferred renderer's SSAO at HALF the scene size
+# (render-perf-6). Four fullscreen passes, recorded into the frame's post
+# recording (GbufferTargets.postEncoder):
+#   1. depth: the half-size depth, a checkerboard of each 2x2 block's nearest
+#      and farthest sample plus which one was kept (deferred_ao_depth.wgsl);
+#   2. ao: the horizon march over that depth, with a 4x4 interleaved pattern
+#      of slice directions (deferred_ao.wgsl);
+#   3. blur x, 4. blur y: a separable depth-aware blur at half size
+#      (deferred_ao_blur.wgsl), back into the ao target.
+# Lighting then upsamples the result with depth-aware weights
+# (deferred_light.wgsl). The full-size version marched every pixel and
+# lighting filtered it with 9 AO + 9 depth loads per pixel.
+open Gbuffer
+open Scene3d
+open webgpu/Webgpu
+open webgpu/Context
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuRender
+open gpu/GpuIds
+open gpu/GpuTextures
+open GbufferResources
+open GbufferTargets
+open GbufferFullscreen
+open GbufferPasses
+
+type AoPassCache {
+  pipeMade: Bool
+  depthPipeline: RenderPipelineId
+  pipeline: RenderPipelineId
+  blurXPipeline: RenderPipelineId
+  blurYPipeline: RenderPipelineId
+  depthBind: BindGroupId
+  bindGroup: BindGroupId
+  blurXBind: BindGroupId
+  blurYBind: BindGroupId
+  bindGen: Int
+}
+
+func createAoPassCache() ret AoPassCache {
+  ret AoPassCache {
+    pipeMade: false
+    depthPipeline: noRenderPipelineId()
+    pipeline: noRenderPipelineId()
+    blurXPipeline: noRenderPipelineId()
+    blurYPipeline: noRenderPipelineId()
+    depthBind: noBindGroupId()
+    bindGroup: noBindGroupId()
+    blurXBind: noBindGroupId()
+    blurYBind: noBindGroupId()
+    bindGen: -1
+  }
+}
+
+func ensureAoPipelines(cache: mod AoPassCache, resources: mod GpuResources) {
+  if cache.pipeMade {
+    ret
+  }
+  cache.pipeMade = true
+  let depthShader: Shader = shader(files: ["lib/deferred_ao_depth.wgsl"])
+  let aoShader: Shader = shader(files: ["lib/gbuffer_octahedral.wgsl", "lib/deferred_ao.wgsl"])
+  let blurXShader: Shader = shader(
+    files: ["lib/deferred_ao_blur_x.wgsl", "lib/deferred_ao_blur.wgsl"]
+  )
+  let blurYShader: Shader = shader(
+    files: ["lib/deferred_ao_blur_y.wgsl", "lib/deferred_ao_blur.wgsl"]
+  )
+  cache.depthPipeline = createFullscreenPipeline(
+    resources: resources
+    shader: depthShader
+    format: WGPUTextureFormat_RG32Float
+  )
+  cache.pipeline = createFullscreenPipeline(
+    resources: resources
+    shader: aoShader
+    format: WGPUTextureFormat_R8Unorm
+  )
+  cache.blurXPipeline = createFullscreenPipeline(
+    resources: resources
+    shader: blurXShader
+    format: WGPUTextureFormat_R8Unorm
+  )
+  cache.blurYPipeline = createFullscreenPipeline(
+    resources: resources
+    shader: blurYShader
+    format: WGPUTextureFormat_R8Unorm
+  )
+}
+
+func aoPipelinesValid(cache: view AoPassCache, resources: view GpuResources) ret Bool {
+  ret isValidRenderPipeline(resources: resources, id: cache.depthPipeline) and isValidRenderPipeline(
+    resources: resources
+    id: cache.pipeline
+  ) and isValidRenderPipeline(resources: resources, id: cache.blurXPipeline) and isValidRenderPipeline(
+    resources: resources
+    id: cache.blurYPipeline
+  )
+}
+
+# A bind group over `entries` (in binding order), or no ID when it failed.
+func aoBind(
+  resources: mod GpuResources
+  pipeline: view RenderPipelineId
+  entries: view List(ResourceRef)
+) ret BindGroupId {
+  if let bind: BindGroupId = createRenderBindGroup(
+    resources: resources
+    pipeline: pipeline
+    entries: entries
+  ) {
+    ret bind
+  }
+  ret noBindGroupId()
+}
+
+# The four bind groups, rebuilt when the targets are re-created (resize).
+func ensureAoBinds(
+  cache: mod AoPassCache
+  resources: mod GpuResources
+  targets: view DeferredTargets
+  gbuffer: view GbufferCache
+) {
+  let gen: Int = targets.gen
+  if not (gen is cache.bindGen) {
+    cache.bindGen = gen
+    retireAoBinds(cache: cache, resources: resources)
+  }
+  if not bindGroupIsUsable(resources: resources, id: cache.depthBind) {
+    var entries: List(ResourceRef) = List.create(ResourceRef, cap: 1)
+    entries.add(value: gbufferTargetRef(cache: gbuffer, index: gbufferTargetDepth))
+    cache.depthBind = aoBind(resources: resources, pipeline: cache.depthPipeline, entries: entries)
+  }
+  if not bindGroupIsUsable(resources: resources, id: cache.bindGroup) {
+    var entries: List(ResourceRef) = List.create(ResourceRef, cap: 3)
+    entries.add(value: bufferRef(id: targets.lightUniform))
+    entries.add(value: gbufferTargetRef(cache: gbuffer, index: gbufferTargetA))
+    entries.add(value: textureViewRef(id: targets.aoDepthView))
+    cache.bindGroup = aoBind(resources: resources, pipeline: cache.pipeline, entries: entries)
+  }
+  if not bindGroupIsUsable(resources: resources, id: cache.blurXBind) {
+    var entries: List(ResourceRef) = List.create(ResourceRef, cap: 2)
+    entries.add(value: textureViewRef(id: targets.aoView))
+    entries.add(value: textureViewRef(id: targets.aoDepthView))
+    cache.blurXBind = aoBind(resources: resources, pipeline: cache.blurXPipeline, entries: entries)
+  }
+  if not bindGroupIsUsable(resources: resources, id: cache.blurYBind) {
+    var entries: List(ResourceRef) = List.create(ResourceRef, cap: 2)
+    entries.add(value: textureViewRef(id: targets.aoBlurView))
+    entries.add(value: textureViewRef(id: targets.aoDepthView))
+    cache.blurYBind = aoBind(resources: resources, pipeline: cache.blurYPipeline, entries: entries)
+  }
+}
+
+func aoBindsUsable(cache: view AoPassCache, resources: view GpuResources) ret Bool {
+  ret bindGroupIsUsable(resources: resources, id: cache.depthBind) and bindGroupIsUsable(
+    resources: resources
+    id: cache.bindGroup
+  ) and bindGroupIsUsable(resources: resources, id: cache.blurXBind) and bindGroupIsUsable(
+    resources: resources
+    id: cache.blurYBind
+  )
+}
+
+func retireAoBinds(cache: mod AoPassCache, resources: mod GpuResources) {
+  retireBindGroup(resources: resources, id: cache.depthBind)
+  retireBindGroup(resources: resources, id: cache.bindGroup)
+  retireBindGroup(resources: resources, id: cache.blurXBind)
+  retireBindGroup(resources: resources, id: cache.blurYBind)
+  cache.depthBind = noBindGroupId()
+  cache.bindGroup = noBindGroupId()
+  cache.blurXBind = noBindGroupId()
+  cache.blurYBind = noBindGroupId()
+}
+
+# The render graph's ssao step: depth, ao, blur x, blur y into targets.ao.
+func ssaoPass(
+  cache: mod AoPassCache
+  resources: mod GpuResources
+  targets: mod DeferredTargets
+  gbuffer: view GbufferCache
+  camera: view Camera3d
+) {
+  if not postPassReady(targets: targets, resources: resources, gbuffer: gbuffer) {
+    ret
+  }
+  ensureAoPipelines(cache: cache, resources: resources)
+  if not aoPipelinesValid(cache: cache, resources: resources) {
+    ret
+  }
+  let uploaded: Bool = uploadSsaoUniform(
+    targets: targets
+    resources: resources
+    gbuffer: gbuffer
+    camera: camera
+  )
+  ensureAoBinds(
+    cache: cache
+    resources: resources
+    targets: targets
+    gbuffer: gbuffer
+  )
+  if not aoBindsUsable(cache: cache, resources: resources) {
+    ret
+  }
+  unsafe {
+    let encoder: Ptr = postEncoder(targets: targets, resources: resources)
+    runFullscreenInBatch(
+      encoder: encoder
+      resources: resources
+      pipeline: cache.depthPipeline
+      bind: cache.depthBind
+      target: textureViewHandle(resources: resources, id: targets.aoDepthView)
+    )
+    runFullscreenInBatch(
+      encoder: encoder
+      resources: resources
+      pipeline: cache.pipeline
+      bind: cache.bindGroup
+      target: textureViewHandle(resources: resources, id: targets.aoView)
+    )
+    runFullscreenInBatch(
+      encoder: encoder
+      resources: resources
+      pipeline: cache.blurXPipeline
+      bind: cache.blurXBind
+      target: textureViewHandle(resources: resources, id: targets.aoBlurView)
+    )
+    runFullscreenInBatch(
+      encoder: encoder
+      resources: resources
+      pipeline: cache.blurYPipeline
+      bind: cache.blurYBind
+      target: textureViewHandle(resources: resources, id: targets.aoView)
+    )
+  }
+}
+
+func aoPassShutdown(cache: mod AoPassCache, resources: mod GpuResources) {
+  retireAoBinds(cache: cache, resources: resources)
+  retireRenderPipeline(resources: resources, id: cache.depthPipeline)
+  retireRenderPipeline(resources: resources, id: cache.pipeline)
+  retireRenderPipeline(resources: resources, id: cache.blurXPipeline)
+  retireRenderPipeline(resources: resources, id: cache.blurYPipeline)
+  cache = createAoPassCache()
+}
