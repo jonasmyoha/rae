@@ -64,6 +64,13 @@ extra_plist=""
 if [ "${RAE_IOS_EXEMPT_ENCRYPTION:-0}" = "1" ]; then
   extra_plist='<key>ITSAppUsesNonExemptEncryption</key><false/>'
 fi
+# RAE_IOS_HIGH_REFRESH=1 lets the app present above 60 Hz on a ProMotion
+# iPhone (CADisableMinimumFrameDurationOnPhone): iOS otherwise holds every
+# app to 60. Off by default (it costs battery); used to measure GPU headroom
+# that a 60 Hz cap hides (forward-rae-4).
+if [ "${RAE_IOS_HIGH_REFRESH:-0}" = "1" ]; then
+  extra_plist="$extra_plist<key>CADisableMinimumFrameDurationOnPhone</key><true/>"
+fi
 # Purpose strings. SDL3 links the camera (AVCaptureDevice), Bluetooth
 # (CBCentralManager, for controllers) and microphone recording, and App Store
 # Connect refuses a build whose binary references those without a purpose

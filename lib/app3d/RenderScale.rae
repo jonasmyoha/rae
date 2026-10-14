@@ -30,6 +30,7 @@
 #   setDynamicRenderScale(renderer: renderer, scale: drs.scale)   # the renderer draws at it
 import Gpu2d
 import Profile
+import Sys
 open RenderResolution
 
 # OS thermal pressure (Apple's NSProcessInfo, runtime_platform_apple.c): 0
@@ -102,6 +103,10 @@ type RenderScaleController {
   workSec: Float  # the last capped frame's work time, before the cap's padding
   workMeasured: Bool  # capFrameSleep measured workSec and no update used it yet
   thermalCap: Bool  # the 30 fps cap was forced by a critical thermal state
+  # RAE_DRS=off: the ladder never moves (the scale stays at its maximum, 60
+  # fps), so two runs compare at the same resolution whatever their frames do
+  fixed: Bool
+  lastThermal: Int  # the OS thermal state last logged (-1: none yet)
 }
 
 func createRenderScaleController(targetFps: copy Float) ret RenderScaleController {
@@ -130,6 +135,8 @@ func createRenderScaleController(targetFps: copy Float) ret RenderScaleControlle
     workSec: 0.0
     workMeasured: false
     thermalCap: false
+    fixed: Sys.getEnv(name: "RAE_DRS") is "off"
+    lastThermal: -1
   }
 }
 
@@ -143,6 +150,12 @@ func updateRenderScale(
   profiler: mod Profiler
 ) {
   let therm: Int = thermalState()
+  # Every change of the OS thermal state is logged: two measured runs are
+  # comparable only at the same one
+  if therm is not drs.lastThermal {
+    drs.lastThermal = therm
+    log("[drs] thermal state {therm}")
+  }
   let scaleBefore: Float = drs.scale
   let capBefore: Float = drs.capFps
   stepRenderScale(drs: drs, deltaTime: deltaTime, therm: therm)
@@ -174,6 +187,9 @@ func updateRenderScale(
 # call — so a test
 # can drive it frame by frame.
 func stepRenderScale(drs: mod RenderScaleController, deltaTime: view Float, therm: view Int) {
+  if drs.fixed {
+    ret
+  }
   # Proactive OS-thermal ceiling: snap the scale down (and force the 30fps cap at
   # critical) the moment the OS reports heat, without waiting for missed frames.
   var ceiling: Float = thermalCeiling(therm: therm)

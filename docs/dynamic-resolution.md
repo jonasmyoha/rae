@@ -52,7 +52,10 @@ Two inputs drive it:
   holds 10 s brings the wait back to 3 s. Without that, a scene that misses only
   at the higher rung climbed back every 3 s and missed again (seen on 114).
   Each rung change logs `[drs] render scale N%, cap N fps`, and under
-  `RAE_FRAME_TIMING=1` every frame over 22 ms is logged with its split. When
+  `RAE_FRAME_TIMING=1` every frame over 22 ms is logged with its split. Every
+  change of the OS thermal state logs `[drs] thermal state N`, and `RAE_DRS=off`
+  holds the ladder still (full scale, 60 fps) so two runs compare at the same
+  resolution (forward-rae-4's iPhone comparison). When
   real per-pass **GPU ms (#528)** lands, swap `dt` for measured GPU time for a
   tighter, predictive loop.
   **Under the 30 fps cap a frame is judged by its WORK time**, not by `dt`:

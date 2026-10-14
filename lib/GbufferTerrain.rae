@@ -16,6 +16,7 @@ open gpu/GpuResources
 open gpu/GpuLifetime
 open gpu/GpuRender
 open gpu/GpuIds
+open ForwardMaterial
 
 # Force a terrain-pipeline rebuild on the next draw. The island radius is an
 # `override` set at pipeline creation (islandConstants), so growing the island
@@ -170,6 +171,40 @@ func defaultTerrainShader() ret Shader {
   ])
 }
 
+# The terrain in the FORWARD main pass (forward-rae-4): the same parts after
+# the shading prelude, with forward_entry.wgsl last (fragment entry
+# fsForward). An app with its own palette declares its forward composition
+# too (terrainSetForwardShader), listing its parts the same way, so both
+# frames paint the same ground. f32 shading only.
+func defaultForwardTerrainShader() ret Shader {
+  ret shader(files: [
+    "lib/precision_f32.wgsl"
+    "lib/sky_hosek.wgsl"
+    "lib/deferred_uniforms.wgsl"
+    "lib/deferred_shade.wgsl"
+    "lib/noise.wgsl"
+    "lib/world_biome.wgsl"
+    "lib/terrain_palette.wgsl"
+    "lib/terrain_grass.wgsl"
+    "lib/terrain_detail.wgsl"
+    "lib/terrain_splat.wgsl"
+    "lib/forward_entry.wgsl"
+  ])
+}
+
+# Use an app's own FORWARD terrain shader (see defaultForwardTerrainShader)
+func terrainSetForwardShader(
+  cache: mod GbufferCache
+  resources: mod GpuResources
+  shader: own Shader
+) {
+  cache.forward.terrainShader = shader
+  cache.forward.terrainShaderSet = true
+  let retired: Bool = retireRenderPipeline(resources: resources, id: cache.forward.terrainPipeline)
+  cache.forward.terrainPipeline = noRenderPipelineId()
+  cache.forward.terrainPipelineFormat = 0
+}
+
 # Use an app's own terrain shader — the same six-part composition with the
 # app's grade-calibrated palette (a copy of lib/terrain_palette.wgsl) and/or
 # its grass style (`terrainGrassColor(position, variation) -> vec3<f32>`) in
@@ -274,6 +309,85 @@ func ensureTerrainPipeline(cache: mod GbufferCache, resources: mod GpuResources)
   }
 }
 
+# The terrain's FORWARD material: its pipeline (made at the first forward
+# frame, for the lit format) and its bind (the terrain bind's entries + the
+# lighting inputs), rebuilt when the tile or the lighting inputs change
+func ensureTerrainForward(cache: mod GbufferCache, resources: mod GpuResources) {
+  let materials: mod ForwardMaterials => cache.forward
+  if materials.litFormat is (0 as Int32) {
+    ret
+  }
+  if not (materials.terrainPipelineFormat is materials.litFormat) {
+    let retiredBind: Bool = retireBindGroup(resources: resources, id: materials.terrainBind)
+    let retired: Bool = retireRenderPipeline(resources: resources, id: materials.terrainPipeline)
+    materials.terrainBind = noBindGroupId()
+    materials.terrainPipeline = noRenderPipelineId()
+    materials.terrainPipelineFormat = materials.litFormat
+    var constants: List(ShaderConstant) = islandConstants()
+    if cache.terrainShaderSet {
+      constants = cache.terrainConstants
+    }
+    var forwardShader: Shader = defaultForwardTerrainShader()
+    if materials.terrainShaderSet {
+      forwardShader = materials.terrainShader
+    }
+    if let pipeline: RenderPipelineId = createRenderPipelineWithConstants(
+      resources: resources
+      shader: forwardShader
+      vertexEntry: "vs"
+      fragmentEntry: "fsForward"
+      spec: forwardMaterialSpec(
+        litFormat: materials.litFormat
+        stride: 32
+        attributes: gbufferStaticAttributes()
+        depthWrite: true
+        depthCompare: WGPUCompareFunction_Greater
+        cullMode: WGPUCullMode_Back
+      )
+      constants: constants
+    ) {
+      materials.terrainPipeline = pipeline
+    }
+  }
+  let gen: Int = gbTerrainTexGen() * 100000 + materials.inputsGen
+  if gen is materials.terrainBindGen and bindGroupIsUsable(
+    resources: resources
+    id: materials.terrainBind
+  ) {
+    ret
+  }
+  let retiredBind: Bool = retireBindGroup(resources: resources, id: materials.terrainBind)
+  materials.terrainBind = noBindGroupId()
+  releaseExternalIds(resources: resources, list: materials.terrainAdopted)
+  if not isValidBuffer(resources: resources, id: cache.frameUniform) {
+    ret
+  }
+  var entries: List(ResourceRef) = List.create(ResourceRef, cap: 16)
+  entries.add(value: bufferRef(id: cache.frameUniform))
+  entries.add(value: bufferRef(id: cache.draws))
+  unsafe {
+    entries.add(
+      value: adoptTextureViewRef(
+        resources: resources
+        adopted: materials.terrainAdopted
+        handle: gbTerrainArrayView()
+      )
+    )
+  }
+  entries.add(value: samplerRef(id: cache.terrainSampler))
+  if not addForwardInputs(entries: entries, inputs: materials.inputs) {
+    ret
+  }
+  if let bind: BindGroupId = createRenderBindGroup(
+    resources: resources
+    pipeline: materials.terrainPipeline
+    entries: entries
+  ) {
+    materials.terrainBind = bind
+    materials.terrainBindGen = gen
+  }
+}
+
 # Draw one ground-tile mesh with the biome-splat pipeline (#533): its shader
 # ignores the per-draw colour and samples the biome field per vertex, so the
 # ground shows grass/sand/mud/rock/water. Restores the static pipeline after so a
@@ -297,6 +411,13 @@ func drawTerrainMesh(
 ) pub {
   unsafe {
     ensureTerrainPipeline(cache: cache, resources: resources)
+    var pipeline: RenderPipelineId = cache.terrainPipeline
+    var bind: BindGroupId = cache.terrainBind
+    if cache.forwardFrame {
+      ensureTerrainForward(cache: cache, resources: resources)
+      pipeline = cache.forward.terrainPipeline
+      bind = cache.forward.terrainBind
+    }
     if gbMeshReady(cache: cache, resources: resources, mesh: mesh) is 0 {
       ret
     }
@@ -329,8 +450,8 @@ func drawTerrainMesh(
     gbIssueInstanced(
       cache: cache
       resources: resources
-      pipeline: cache.terrainPipeline
-      bind: cache.terrainBind
+      pipeline: pipeline
+      bind: bind
       vbuf: gbMeshVbuf(cache: cache, resources: resources, mesh: mesh)
       ibuf: gbMeshIbuf(cache: cache, resources: resources, mesh: mesh)
       icount: gbMeshIcount(cache: cache, mesh: mesh)

@@ -70,6 +70,7 @@ open GbufferResources
 open gpu/FramePacer
 open Gpu2dCanvasFrame
 open RenderResolution
+open ForwardMaterial
 
 # ----- geometry-pass begin (#503, manager-owned since #906) -------------------
 # The frame is the GbufferCache's: manager targets (rebuilt to the offscreen
@@ -135,9 +136,10 @@ type GbufferCache {
   # The pipeline + bind the static draws of THIS frame use: the G-buffer ones,
   # or the forward main pass's (ForwardMain.rae) in a forward frame, which
   # draws the same meshes and records into a 4x MSAA colour target instead.
-  # A forward frame skips the draw kinds that only write the G-buffer
-  # (skinned, terrain, metaballs, sprites, grass) until they have a forward
-  # material.
+  # Every draw kind picks the pipeline of its frame: the static meshes these,
+  # the skinned meshes and the terrain their ForwardMaterials ones, the
+  # metaballs and the grass their own. Sprites have no forward material and
+  # skip a forward frame (gbufferAttributePass).
   forwardFrame: Bool
   drawPipeline: RenderPipelineId
   drawBind: BindGroupId
@@ -164,6 +166,7 @@ type GbufferCache {
   meshes: MeshStore  # #905: the static mesh store (vertex/index buffers per MeshHandle)
   skins: SkinStore  # #921: the skinned meshes + the joint palette buffer
   sdf: SdfPassCache  # #922: the metaball clusters' pipeline / uniforms / binds
+  forward: ForwardMaterials  # the skinned / terrain forward materials (forward-rae-4)
 }
 
 # Every deferred renderer starts at the device's default ceiling
@@ -219,6 +222,7 @@ func createGbufferCache() ret GbufferCache {
       meshes: createMeshStore()
       skins: createSkinStore()
       sdf: createSdfPassCache()
+      forward: createForwardMaterials()
     }
   }
 }
@@ -473,10 +477,6 @@ func gbIssueInstanced(
   records: copy Ptr
 ) {
   unsafe {
-    # A forward frame draws only the static meshes (see forwardFrame)
-    if cache.forwardFrame and not (pipeline.slot is cache.drawPipeline.slot and pipeline.generation is cache.drawPipeline.generation) {
-      ret
-    }
     let strideBytes: Int = instanceRecordFloats * 4
     if not writeBufferFromPtr(
       resources: resources
@@ -916,6 +916,7 @@ func gbufferShutdown(cache: mod GbufferCache, resources: mod GpuResources) pub {
   retireBuffer(resources: resources, id: cache.draws)
   retireTargets(cache: cache, resources: resources)
   sdfShutdown(sdf: cache.sdf, resources: resources)
+  shutdownForwardMaterials(materials: cache.forward, resources: resources)
   cache.staticBind = noBindGroupId()
   cache.skinBind = noBindGroupId()
   cache.staticPipeline = noRenderPipelineId()

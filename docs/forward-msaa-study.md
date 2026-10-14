@@ -267,3 +267,85 @@ deferred apps, and no example uses it yet.
   moved to `ShadowMaps.renderSceneShadowWorld`.
 - **Forward renderer:** `lib/RendererForward.rae` is now the only forward frame.
   Fixture 553 pins its derived pass order.
+
+## 7. The walker in forward mode (forward-rae-4, 2026-10-15)
+
+`RAE_RENDER_PATH=forward` starts 114 on `createForwardRendererWithUi`, and the
+walker's own scene drawing runs inside `beginForwardPass` / `endForwardPass`.
+Deferred stays the default.
+
+**Forward versions of the G-buffer materials.** For this, the G-buffer materials
+got forward versions without a second copy of their code:
+
+- Each material's fragment code is now `gbufferSurface(in) -> FsOut` (skinned
+  meshes, terrain, grass). Its G-buffer entry `fs` writes that.
+- `lib/forward_entry.wgsl` adds `fsForward`. It decodes the same output the way
+  the deferred lighting does, rebuilds the position from the fragment position
+  (the scene size rides in the light uniform's spare `sunDir.w` /
+  `ambGround.w`) and calls `shadeSurface`.
+- `lib/ForwardMaterial.rae` holds the forward pipelines and binds. The lighting
+  inputs sit at bindings 12..15.
+- The terrain's forward composition is declared by the app
+  (`rendererSetForwardTerrainShader`), like its G-buffer one, so both frames
+  paint the same palette.
+
+**Off in forward mode:** SSAO, TAA / FXAA / SMAA (MSAA is the antialiasing), the
+water (sea, river and lake: the water surface reads the scene depth, which the
+forward pass never stores), the splash droplets (the same transparent pass), the
+underwater fog, sprites, and metaball silhouettes' antialiasing. Everything else
+draws: terrain, grass, the skinned walker and crowd, props, physics cubes,
+shadows, bloom and the UI.
+
+**Images saved on the phone** (iPhone 15 Pro, headless screenshot,
+`RAE_GPU2D_SCREENSHOT` into the app's Documents) show the same scene in both,
+without the water in forward. Kept outside the repository:
+`~/Pictures/rae/forward-rae-4/walker-{forward,deferred}-iphone.png`.
+
+**Measured on the iPhone 15 Pro.** Landscape, `RAE_FRAME_TIMING=1`, dynamic
+resolution held still (`RAE_DRS=off`), last 10 windows of 65 s runs, run back to
+back in alternating order. Every row compares runs at the same thermal state.
+iOS holds apps to 60 Hz, which hides the GPU cost (both modes wait about 10 ms a
+frame for the display). So the main numbers come from a build allowed to present
+at 120 Hz (`RAE_IOS_HIGH_REFRESH=1`, new in `tools/ios/gen-ios.sh`, off by
+default). "Deferred, same work" is deferred with `RAE_DEFERRED_MATCH_FORWARD=1`
+(skips SSAO, the water FFT, the transparent pass and the underwater fog) and
+`RAE_AA=fxaa`: the image is wrong, but the work matches forward's.
+
+| render size | display | deferred (full) | deferred, same work | forward 4x MSAA |
+|---|---|---|---|---|
+| 1600x720 (phone ceiling) | 60 Hz | 16.7 ms (60 fps, ~10 ms idle) | — | 16.7 ms (60 fps, ~10 ms idle) |
+| 2556x1179 (native) | 60 Hz | 16.7 / 17.0 ms | — | 16.7 ms |
+| 1600x720 | 120 Hz | 16.2 ms (62 fps) | 10.7 / 11.7 ms | 10.8 / 11.4 ms |
+| 2556x1179 | 120 Hz | 16.7 / 16.7 ms | 12.1 / 12.1 ms | 11.4 / 11.4 ms |
+| 800x360 (scale 0.5) | 120 Hz | — | 8.3 ms (at the 120 Hz limit) | 8.3 ms (at the limit) |
+
+Two values in a cell are two runs. Thermal states: 0–1 in the 60 Hz rows;
+1–2 in the 120 Hz rows, the same within each row.
+
+**What the numbers say:**
+
+- **The main pass is not the difference.** With the same work, deferred and
+  forward cost the same at the phone's render ceiling (10.7–11.7 vs
+  10.8–11.4 ms). Forward is 0.7 ms (6%) faster at native size, where the
+  G-buffer's bandwidth starts to show.
+- **The full deferred frame's extra ~5 ms is its features.** SSAO, the water
+  (FFT and the transparent pass) and SMAA cost that much. The forward mode is
+  faster only because it does not draw them.
+- **Resolution matters little here.** 1600x720 → native adds about 1 ms. The
+  walker's GPU frame is dominated by fixed work (three 2048² shadow cascades,
+  the grass compute and draw, bloom), not by shaded pixels.
+- **At the shipped 60 Hz both hold 60 fps** with about 10 ms to spare.
+
+**Recommendation: the walker stays deferred.**
+
+- **Forward gains nothing measurable:** 0–0.7 ms on the same work.
+- **Forward would lose too much:** the water is a large part of the scene
+  (river, lake, sea) and needs a stored depth, and SSAO grounds the characters
+  and props.
+- **Where the frame time is:** the 5 ms the features cost, and the fixed
+  shadow / grass work. If the walker needs more headroom (120 Hz, a slower
+  phone), make those rungs of the dynamic-resolution ladder (SSAO off, FXAA for
+  SMAA, a cheaper water). Changing the main pass would not help.
+
+Keep the forward mode as a measurement tool and as the path for scenes with
+neither water nor SSAO (111).
