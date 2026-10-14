@@ -115,7 +115,12 @@ type MoverSize {
 # The sample's: radius 0.3, the spheres' centres 0.5 m either side of the
 # middle, held 0.9 m up (a character about 2 m tall).
 func sampleMoverSize() ret MoverSize {
-  ret MoverSize { radius: 0.3, halfHeight: 0.5, restLength: 0.9 }
+  # The rest length is COMPUTED as three radii, as the sample and the Rae port
+  # of Box3D do: 3.0 * 0.3 in Float is 0.90000004, the literal 0.9 is
+  # 0.89999998, and that one bit changes the terrain walk, which both physics
+  # tracks are held to with one golden (tools/box3d-oracle/goldens).
+  let radius: Float = 0.3
+  ret MoverSize { radius: radius, halfHeight: 0.5, restLength: 3.0 * radius }
 }
 
 # How high a standing mover's capsule middle rests over the ground: the pogo
