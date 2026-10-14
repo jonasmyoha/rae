@@ -696,8 +696,7 @@ static void rae_g3d_present_offscreen(WGPUTexture tex, int width, int height) {
         if (shot) rae_g2d_save_screenshot(shot, tex, width, height);
     }
     /* The drawable is acquired and presented by Rae afterwards
-     * (lib/gpu/Surface.rae over rae_surface_acquire / rae_surface_present,
-     * render-perf-11), the same as the 2D present. No surface (an
+     * (lib/gpu/Surface.rae, render-perf-11b), the same as the 2D present. No surface (an
      * offscreen-only frame) simply acquires nothing. */
 }
 

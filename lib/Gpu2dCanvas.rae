@@ -37,6 +37,7 @@ open gpu/GpuRenderTransfer
 open gpu/GpuRenderPass
 open gpu/GpuIds
 open gpu/FramePacer
+open gpu/Surface
 open Gpu2dCanvasImage
 open Gpu2dCanvasClip
 
@@ -152,6 +153,7 @@ type Gpu2dCanvas {
   framePass: Ptr  # the open frame's render pass into the offscreen target
   inFlight: List(SubmissionId)  # submitted frames not yet retired
   framePacer: FramePacer  # waits on the previous frame's GPU work (gpu/FramePacer)
+  frameTarget: FrameTarget  # the drawable or the offscreen this frame (gpu/Surface)
   # --- the offscreen presentable target (#920: was C's g_g2d_off_tex) ---
   offscreenTexture: TextureId  # RenderAttachment | CopySrc, the surface format, rebuilt on resize
   offscreenView: TextureViewId
@@ -226,6 +228,7 @@ func createGpu2dCanvas() ret Gpu2dCanvas {
       framePass: webgpuNull()
       inFlight: List.create(SubmissionId, cap: 4)
       framePacer: createFramePacer()
+      frameTarget: createFrameTarget()
       offscreenTexture: noTextureId()
       offscreenView: noTextureViewId()
       offscreenWidth: 0
@@ -492,16 +495,46 @@ func canvasEnsureOffscreen(canvas: mod Gpu2dCanvas) ret Bool {
 # The raw view handle for a pass that targets the offscreen image (the 3D
 # renderer's tonemap / composite / inspector fullscreen passes); null when no
 # surface is configured yet.
-func canvasOffscreenView(canvas: mod Gpu2dCanvas) unsafe ret Ptr {
+# The frame target's view, for a pass that WRITES the whole frame (the
+# deferred composite, the forward tonemap, the inspector): the drawable when
+# this frame renders straight into it (render-perf-11b, gpu/Surface), else
+# the offscreen. The first call of a frame chooses.
+func canvasFrameTargetView(canvas: mod Gpu2dCanvas) unsafe ret Ptr {
   unsafe {
     if not canvasEnsureOffscreen(canvas: canvas) {
       ret webgpuNull()
+    }
+    if canvasChooseTarget(canvas: canvas, loads: false) {
+      ret canvas.frameTarget.drawableView
     }
     if let resources: view GpuResources => canvas.gpuResources {
       ret refHandle(resources: resources, ref: textureViewRef(id: canvas.offscreenView))
     }
     ret webgpuNull()
   }
+}
+
+# The frame target as a render-pass reference (the 2D frame's own pass);
+# `loads`: the pass keeps what the frame's target already holds.
+func canvasFrameTargetRef(canvas: mod Gpu2dCanvas, loads: view Bool) ret ResourceRef {
+  if canvasChooseTarget(canvas: canvas, loads: loads) {
+    ret frameTargetRef(target: canvas.frameTarget)
+  }
+  ret textureViewRef(id: canvas.offscreenView)
+}
+
+func canvasChooseTarget(canvas: mod Gpu2dCanvas, loads: view Bool) ret Bool {
+  if let resources: mod GpuResources => canvas.gpuResources {
+    ret chooseFrameTarget(
+      target: canvas.frameTarget
+      resources: resources
+      pacer: canvas.framePacer
+      width: canvas.offscreenWidth
+      height: canvas.offscreenHeight
+      loads: loads
+    )
+  }
+  ret false
 }
 
 # The raw texture handle present copies from (null when there is none).

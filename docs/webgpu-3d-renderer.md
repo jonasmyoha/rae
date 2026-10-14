@@ -145,9 +145,11 @@ the deferred renderer as built:
   same submit made 114 5.3 -> 5.5 ms and 112 8.5 -> 9.0 ms, because the GPU
   no longer worked on them while the CPU recorded the G-buffer. So the shadow
   pass and the G-buffer pass keep their own submits.
-- Still to do: the composite and UI draw into the canvas's target, which is
-  then copied into the drawable (`rae_g2d_present`, about 0.15 ms at
-  2560x1600), queued as render-perf-11b.
+- The composite and the UI draw straight into the window's drawable
+  (render-perf-11b, `lib/gpu/Surface.rae`): the canvas acquires it at the
+  first pass that writes the frame, so the full-screen copy (about 0.15 ms
+  at 2560x1600) is gone. Headless runs, screenshots, a hidden window and
+  `RAE_DIRECT_PRESENT=0` keep the offscreen target and the copy.
 
 Measure with `RAE_GPU_PASS_TIMING=1` (112, 114, 118 and 119 log a
 `[gpu passes]` line every 60 frames). A span is the time between two
