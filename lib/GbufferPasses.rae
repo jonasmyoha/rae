@@ -28,6 +28,7 @@ open GbufferTargets
 open gpu/GpuTextures
 open GbufferPassesNative
 open GbufferFullscreen
+open GbufferAo
 open ShadowMaps
 
 # Presentable target + resize generation (also declared in gbuffer_inspector;
@@ -62,13 +63,6 @@ type CompositePassCache {
   binds: List(BindGroupId)  # per source slot: TAA 0/1, no-TAA lit 2, anti-aliased 3
   bindGen: Int
   args: ArgWriter
-}
-
-type AoPassCache {
-  pipeMade: Bool
-  pipeline: RenderPipelineId
-  bindGroup: BindGroupId
-  bindGen: Int
 }
 
 type LightPassCache {
@@ -347,65 +341,6 @@ func compositePassGraded(
   )
 }
 
-# SSAO (#387): reads the G-buffer normal (A) + depth, writes the R8 AO target.
-# Its uniform (inverse jittered viewProj + camera) is the light uniform's head,
-# written here since it runs before lighting.
-func ssaoPass(
-  cache: mod AoPassCache
-  resources: mod GpuResources
-  targets: mod DeferredTargets
-  gbuffer: view GbufferCache
-  camera: view Camera3d
-) pub {
-  if not postPassReady(targets: targets, resources: resources, gbuffer: gbuffer) {
-    ret
-  }
-  if not cache.pipeMade {
-    cache.pipeMade = true
-    let aoShader: Shader = shader(files: ["lib/gbuffer_octahedral.wgsl", "lib/deferred_ao.wgsl"])
-    cache.pipeline = createFullscreenPipeline(
-      resources: resources
-      shader: aoShader
-      format: WGPUTextureFormat_R8Unorm
-    )
-  }
-  let uploaded: Bool = uploadSsaoUniform(
-    targets: targets
-    resources: resources
-    gbuffer: gbuffer
-    camera: camera
-  )
-  let gen: Int = targets.gen
-  if not (gen is cache.bindGen) {
-    cache.bindGen = gen
-    retireBindGroup(resources: resources, id: cache.bindGroup)
-    cache.bindGroup = noBindGroupId()
-  }
-  if not bindGroupIsUsable(resources: resources, id: cache.bindGroup) {
-    var entries: List(ResourceRef) = List.create(ResourceRef, cap: 3)
-    entries.add(value: bufferRef(id: targets.lightUniform))
-    entries.add(value: gbufferTargetRef(cache: gbuffer, index: gbufferTargetA))
-    entries.add(value: gbufferTargetRef(cache: gbuffer, index: gbufferTargetDepth))
-    if let bind: BindGroupId = createRenderBindGroup(
-      resources: resources
-      pipeline: cache.pipeline
-      entries: entries
-    ) {
-      cache.bindGroup = bind
-    }
-  }
-  unsafe {
-    let encoder: Ptr = postEncoder(targets: targets, resources: resources)
-    runFullscreenInBatch(
-      encoder: encoder
-      resources: resources
-      pipeline: cache.pipeline
-      bind: cache.bindGroup
-      target: textureViewHandle(resources: resources, id: targets.aoView)
-    )
-  }
-}
-
 # Low-level lighting: upload the uniform, build the bind (rebuilt on resize
 # and when the shadow cascades are recreated) and run the fullscreen pass into
 # the lit target. The whole G-buffer + AO + the shadow cascades (the
@@ -466,7 +401,7 @@ func lighting(
     cache.bindGroup = noBindGroupId()
   }
   if not bindGroupIsUsable(resources: resources, id: cache.bindGroup) {
-    var entries: List(ResourceRef) = List.create(ResourceRef, cap: 9)
+    var entries: List(ResourceRef) = List.create(ResourceRef, cap: 10)
     entries.add(value: bufferRef(id: targets.lightUniform))
     entries.add(value: gbufferTargetRef(cache: gbuffer, index: gbufferTargetA))
     entries.add(value: gbufferTargetRef(cache: gbuffer, index: gbufferTargetB))
@@ -476,6 +411,7 @@ func lighting(
     entries.add(value: bufferRef(id: shadow.frameUniform))
     entries.add(value: textureViewRef(id: shadow.arrayView))
     entries.add(value: samplerRef(id: shadow.sampler))
+    entries.add(value: textureViewRef(id: targets.aoDepthView))
     if let bind: BindGroupId = createRenderBindGroup(
       resources: resources
       pipeline: targets.lightPipeline
@@ -819,9 +755,7 @@ func postPassesShutdown(
   retireBuffer(resources: resources, id: composite.uniform)
   retireSampler(resources: resources, id: composite.sampler)
   composite = createCompositePassCache()
-  retireBindGroup(resources: resources, id: ao.bindGroup)
-  retireRenderPipeline(resources: resources, id: ao.pipeline)
-  ao = createAoPassCache()
+  aoPassShutdown(cache: ao, resources: resources)
   retireBindGroup(resources: resources, id: light.bindGroup)
   light = createLightPassCache()
   retireBindGroupIds(resources: resources, list: taa.binds)

@@ -512,6 +512,27 @@ ssaoBlur:  reads aoRaw, depth           writes ao     (edge-aware)
   consumer of the queued noise library (#320).
 - Temporal filtering comes free once TAA exists.
 
+**As built (render-perf-6, `lib/GbufferAo.rae`).** The `ssao` graph step
+runs four fullscreen passes at half the scene size:
+
+1. `deferred_ao_depth.wgsl` makes a half-size depth. Each texel keeps one
+   of its 2x2 full-size depths, in a checkerboard: the nearest in even
+   cells, the farthest in odd cells. It also stores which of the four it
+   kept, so the SSAO reads that texel's normal and its true position.
+2. `deferred_ao.wgsl` marches 3 slices x 6 steps over that depth. The slice
+   rotation follows a 4x4 Bayer pattern (16 rotations per 4x4 block).
+3. `deferred_ao_blur.wgsl` blurs along x, then along y: 5 taps, weighted by
+   relative depth difference.
+4. Lighting upsamples with the 4 half texels around each pixel (bilinear
+   weights times depth similarity). Before, it used a 3x3 filter at full
+   size: 9 AO and 9 depth loads per pixel.
+
+Headless at 2560x1600 (scale 1.0), frame time: 114 5.2 -> 4.3 ms, 112
+8.7 -> 7.3 ms. The mean brightness of the contact regions (114: feet and
+box bases, 112: an inside corner and the floor under the torus and the
+sphere) changed by 0.1% or less, and the AO is smoother: the full-size
+version showed its noise pattern.
+
 ---
 
 ## 12. SSGI's role — decided

@@ -52,8 +52,15 @@ type DeferredTargets {
   antialiased: TextureId
   antialiasedView: TextureViewId
   aaWritten: Bool
+  # The SSAO at HALF the scene size (render-perf-6, GbufferAo): `ao` is the
+  # result lighting upsamples, `aoBlur` the blur's middle step, `aoDepth`
+  # the half-size depth with the index of the full-size texel each kept.
   ao: TextureId
   aoView: TextureViewId
+  aoBlur: TextureId
+  aoBlurView: TextureViewId
+  aoDepth: TextureId
+  aoDepthView: TextureViewId
   taa: List(TextureId)  # ping-pong slots 0/1
   taaViews: List(TextureViewId)
   pyramid: TextureId
@@ -113,6 +120,10 @@ func createDeferredTargets() ret DeferredTargets {
       aaWritten: false
       ao: noTextureId()
       aoView: noTextureViewId()
+      aoBlur: noTextureId()
+      aoBlurView: noTextureViewId()
+      aoDepth: noTextureId()
+      aoDepthView: noTextureViewId()
       taa: fillTextureIds(count: 2)
       taaViews: fillTextureViewIds(count: 2)
       pyramid: noTextureId()
@@ -148,6 +159,9 @@ func targetsReady(targets: view DeferredTargets, resources: view GpuResources) r
     id: targets.litCopyView
   ) and isValidTextureView(resources: resources, id: targets.aoView) and isValidTextureView(
     resources: resources
+    id: targets.aoBlurView
+  ) and isValidTextureView(resources: resources, id: targets.aoDepthView) and isValidTextureView(
+    resources: resources
     id: targets.antialiasedView
   )
 }
@@ -159,6 +173,10 @@ func retireDeferredTargets(targets: mod DeferredTargets, resources: mod GpuResou
   retireTexture(resources: resources, id: targets.litCopy)
   retireTextureView(resources: resources, id: targets.aoView)
   retireTexture(resources: resources, id: targets.ao)
+  retireTextureView(resources: resources, id: targets.aoBlurView)
+  retireTexture(resources: resources, id: targets.aoBlur)
+  retireTextureView(resources: resources, id: targets.aoDepthView)
+  retireTexture(resources: resources, id: targets.aoDepth)
   retireTextureView(resources: resources, id: targets.antialiasedView)
   retireTexture(resources: resources, id: targets.antialiased)
   retireTaaTargets(targets: targets, resources: resources)
@@ -169,6 +187,10 @@ func retireDeferredTargets(targets: mod DeferredTargets, resources: mod GpuResou
   targets.litCopyView = noTextureViewId()
   targets.ao = noTextureId()
   targets.aoView = noTextureViewId()
+  targets.aoBlur = noTextureId()
+  targets.aoBlurView = noTextureViewId()
+  targets.aoDepth = noTextureId()
+  targets.aoDepthView = noTextureViewId()
   targets.antialiased = noTextureId()
   targets.antialiasedView = noTextureViewId()
   targets.aaWritten = false
@@ -268,17 +290,42 @@ func ensureDeferredTargets(
       textureView: targets.antialiasedView
     )
   }
-  # AO (#387): full resolution r8unorm — one byte per pixel, and a fragment
-  # pass can write r8unorm as a colour attachment.
+  # AO (#387) at half the scene size (render-perf-6), rounded up so every
+  # full-size pixel has a half texel: r8unorm results (one byte, writable as
+  # a colour attachment) and the rg32float half depth (depth + kept index).
+  let halfWidth: Int = (w + 1) / 2
+  let halfHeight: Int = (h + 1) / 2
   if ok {
     ok = makeTarget(
       resources: resources
-      width: w
-      height: h
+      width: halfWidth
+      height: halfHeight
       format: WGPUTextureFormat_R8Unorm
       usage: attach
       texture: targets.ao
       textureView: targets.aoView
+    )
+  }
+  if ok {
+    ok = makeTarget(
+      resources: resources
+      width: halfWidth
+      height: halfHeight
+      format: WGPUTextureFormat_R8Unorm
+      usage: attach
+      texture: targets.aoBlur
+      textureView: targets.aoBlurView
+    )
+  }
+  if ok {
+    ok = makeTarget(
+      resources: resources
+      width: halfWidth
+      height: halfHeight
+      format: WGPUTextureFormat_RG32Float
+      usage: attach
+      texture: targets.aoDepth
+      textureView: targets.aoDepthView
     )
   }
   if not ok {
