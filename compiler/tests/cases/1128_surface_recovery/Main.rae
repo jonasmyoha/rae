@@ -1,0 +1,35 @@
+# The present's recovery policy (lib/gpu/SurfaceRecovery.rae, render-perf-11b;
+# was the C test present_recovery.c over the C block it replaces): Occluded
+# and Timeout never reconfigure, a presented frame resets the streak, a real
+# surface error reconfigures on the first frames and then every 120th.
+open gpu/SurfaceRecovery
+
+func countReconfigures(recovery: mod SurfaceRecovery, status: view Int, frames: view Int) ret Int {
+  var count: Int = 0
+  loop var i: Int = 0, i < frames, ++i {
+    if surfaceAcquireFailed(recovery: recovery, status: status) {
+      count = count + 1
+    }
+  }
+  ret count
+}
+
+func main() {
+  var recovery: SurfaceRecovery = createSurfaceRecovery()
+  log("196609 is {surfaceStatusName(status: 196609)}, 4 is {surfaceStatusName(status: 4)}")
+  log(
+    "occluded x1000 reconfigures {countReconfigures(
+      recovery: recovery
+      status: 196609
+      frames: 1000
+    )}"
+  )
+  noteSurfacePresented(recovery: recovery)
+  log("streak after a present {recovery.skipStreak}")
+  log("timeout x1000 reconfigures {countReconfigures(recovery: recovery, status: 3, frames: 1000)}")
+  noteSurfacePresented(recovery: recovery)
+  log("outdated x1 reconfigures {countReconfigures(recovery: recovery, status: 4, frames: 1)}")
+  noteSurfacePresented(recovery: recovery)
+  log("lost x240 reconfigures {countReconfigures(recovery: recovery, status: 5, frames: 240)}")
+  noteSurfacePresented(recovery: recovery)
+}

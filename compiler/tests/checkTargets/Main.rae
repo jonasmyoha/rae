@@ -13,6 +13,7 @@ import sys/Spotify
 import Raylib
 import Device
 import Display
+import gpu/Surface
 
 func main() {
   log(Sha1.hexText(bytes: Sha1.sha1Text(text: "abc")))
@@ -24,5 +25,6 @@ func main() {
   )
   FileNotify.closeFileNotify(fileNotify: watcher)
   log("pointer {Device.primaryPointer()}, scale {Display.scale()}")
+  log("direct present allowed {Surface.createFrameTarget().directAllowed}")
   log("thermal {RenderScale.thermalState()}, spotify {Spotify.hasSpotifyBridge}")
 }

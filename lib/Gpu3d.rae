@@ -65,7 +65,7 @@ open Gpu3dNative
 open Gpu3dSky
 open Gpu3dTemporal
 open gpu/FramePacer
-open gpu/Surface
+open Gpu2dCanvasFrame
 
 # ----- raw C ABI (implementation detail; prefer the typed API below) ---
 # The LDR offscreen the window presents is the app's Gpu2dCanvas's target
@@ -653,7 +653,7 @@ func tonemapPass(canvas: mod Gpu2dCanvas) pub {
     if slot < 0 {
       ret
     }
-    let target: Ptr = canvasOffscreenView(canvas: canvas)
+    let target: Ptr = canvasFrameTargetView(canvas: canvas)
     if target is webgpuNull() {
       ret
     }
