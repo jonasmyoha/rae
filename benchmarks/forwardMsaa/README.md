@@ -33,7 +33,11 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
 Settings (environment): `RAE_FM_SIZE=WxH` (1920x1080), `RAE_FM_SIDE` (spheres
 per grid side, 30), `RAE_FM_FRAMES` (timed frames per variant, 200),
 `RAE_FM_BATCH` (frames per submit, 8), `RAE_FM_TIMESTAMPS=0` (clock only),
-`RAE_FM_IMAGES=<dir>`.
+`RAE_FM_IMAGES=<dir>` (`documents` = the app's Documents folder, for the
+iPhone: copy the PNGs back with `xcrun devicectl device copy from`).
+
+The benchmark draws only into its own textures and never to the window, so
+the app's screen stays black while it runs; save the PNGs to see what it drew.
 
 The variants take turns over 5 rounds after a warm-up, so a GPU clock change
 affects all of them. The reported "clock" is the time of one submit of
