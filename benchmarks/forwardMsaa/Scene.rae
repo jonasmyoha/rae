@@ -1,0 +1,241 @@
+# The study's scene (benchmarks/forwardMsaa): the sphere mesh, the instances,
+# the frame uniform and the settings.
+import Sys
+import Math
+open webgpu/Webgpu
+open webgpu/WebgpuEnums
+open webgpu/WebgpuTypes
+open webgpu/Context
+open Math3d
+
+type BenchmarkSize {
+  width: Int
+  height: Int
+}
+
+# The GPU objects every variant shares
+type SceneGpu {
+  vertexBuffer: Ptr
+  indexBuffer: Ptr
+  indexCount: Int
+  frameBuffer: Ptr
+  instanceBuffer: Ptr
+  instanceCount: Int
+  sceneModule: Ptr
+  lightingModule: Ptr
+}
+
+# The attachments of one variant, created at the benchmark size
+func createEmptyScene() ret SceneGpu {
+  unsafe {
+    ret SceneGpu {
+      vertexBuffer: webgpuNull()
+      indexBuffer: webgpuNull()
+      indexCount: 0
+      frameBuffer: webgpuNull()
+      instanceBuffer: webgpuNull()
+      instanceCount: 0
+      sceneModule: webgpuNull()
+      lightingModule: webgpuNull()
+    }
+  }
+}
+
+func readSize() ret BenchmarkSize {
+  let text: String = Sys.getEnv(name: "RAE_FM_SIZE")
+  if let split: Int = text.indexOf(sub: "x") {
+    let width: Int = text.sub(start: 0, len: split).toInt()
+    let height: Int = text.sub(start: split + 1, len: text.length() - split - 1).toInt()
+    if width > 0 and height > 0 {
+      ret BenchmarkSize { width: width, height: height }
+    }
+  }
+  ret BenchmarkSize { width: 1920, height: 1080 }
+}
+
+func envInt(name: view String, fallback: view Int) ret Int {
+  let value: Int = Sys.getEnv(name: name).toInt()
+  if value > 0 {
+    ret value
+  }
+  ret fallback
+}
+
+func createGpuBuffer(size: view Int, usage: view UInt64) unsafe ret Ptr {
+  unsafe {
+    let descriptor: WGPUBufferDescriptor = { usage: usage, size: size as UInt64 }
+    ret wgpuDeviceCreateBuffer(device: webgpuDevice(), descriptor: descriptor)
+  }
+}
+
+func uploadFloats(buffer: copy Ptr, values: view List(Float)) unsafe {
+  unsafe {
+    wgpuQueueWriteBuffer(
+      queue: webgpuQueue()
+      buffer: buffer
+      bufferOffset: 0
+      data: values.data
+      size: (values.length * 4) as UInt64
+    )
+  }
+}
+
+func createShaderModule(wgsl: view String) unsafe ret Ptr {
+  unsafe {
+    let sourceC: Buffer(Any) = wgsl.toCStr()
+    var sourceList: List(WGPUShaderSourceWGSL) = List.create(WGPUShaderSourceWGSL, cap: 1)
+    sourceList.add(
+      value: {
+        chain: { sType: WGPUSType_ShaderSourceWGSL }
+        code: { data: sourceC, length: WGPU_STRLEN }
+      }
+    )
+    let descriptor: WGPUShaderModuleDescriptor = { nextInChain: sourceList.data }
+    ret wgpuDeviceCreateShaderModule(device: webgpuDevice(), descriptor: descriptor)
+  }
+}
+
+# A UV sphere of radius 1: position + normal per vertex (24 bytes)
+func createSphere(scene: mod SceneGpu, segments: view Int, rings: view Int) {
+  var vertices: List(Float) = List.create(Float, cap: (segments + 1) * (rings + 1) * 6)
+  var ring: Int = 0
+  loop ring <= rings {
+    let theta: Float = Math.pi * ring as Float / rings as Float
+    var segment: Int = 0
+    loop segment <= segments {
+      let phi: Float = 2.0 * Math.pi * segment as Float / segments as Float
+      let x: Float = Math.sin(x: theta) * Math.cos(x: phi)
+      let y: Float = Math.sin(x: theta) * Math.sin(x: phi)
+      let z: Float = Math.cos(x: theta)
+      vertices.add(value: x)
+      vertices.add(value: y)
+      vertices.add(value: z)
+      vertices.add(value: x)
+      vertices.add(value: y)
+      vertices.add(value: z)
+      segment = segment + 1
+    }
+    ring = ring + 1
+  }
+  var indices: List(UInt32) = List.create(UInt32, cap: segments * rings * 6)
+  ring = 0
+  loop ring < rings {
+    var segment: Int = 0
+    loop segment < segments {
+      # A vertex on this ring and the one below it on the next ring
+      let upper: Int = ring * (segments + 1) + segment
+      let lower: Int = upper + segments + 1
+      indices.add(value: upper as UInt32)
+      indices.add(value: lower as UInt32)
+      indices.add(value: (upper + 1) as UInt32)
+      indices.add(value: (upper + 1) as UInt32)
+      indices.add(value: lower as UInt32)
+      indices.add(value: (lower + 1) as UInt32)
+      segment = segment + 1
+    }
+    ring = ring + 1
+  }
+  unsafe {
+    scene.vertexBuffer = createGpuBuffer(
+      size: vertices.length * 4
+      usage: WGPUBufferUsage_Vertex + WGPUBufferUsage_CopyDst
+    )
+    uploadFloats(buffer: scene.vertexBuffer, values: vertices)
+    scene.indexBuffer = createGpuBuffer(
+      size: indices.length * 4
+      usage: WGPUBufferUsage_Index + WGPUBufferUsage_CopyDst
+    )
+    wgpuQueueWriteBuffer(
+      queue: webgpuQueue()
+      buffer: scene.indexBuffer
+      bufferOffset: 0
+      data: indices.data
+      size: (indices.length * 4) as UInt64
+    )
+  }
+  scene.indexCount = indices.length
+}
+
+# The ground (a huge sphere whose top is flat at z = 0) and a grid of
+# side x side spheres, two vec4 per instance: position + scale, colour +
+# roughness
+func createInstances(scene: mod SceneGpu, side: view Int) {
+  var values: List(Float) = List.create(Float, cap: (side * side + 1) * 8)
+  values.add(value: 0.0)
+  values.add(value: 0.0)
+  values.add(value: -1000.0)
+  values.add(value: 1000.0)
+  values.add(value: 0.45)
+  values.add(value: 0.42)
+  values.add(value: 0.38)
+  values.add(value: 0.9)
+  var row: Int = 0
+  loop row < side {
+    var column: Int = 0
+    loop column < side {
+      let hue: Float = (row * 7 + column * 13) as Float * 0.37
+      values.add(value: (column as Float - side as Float * 0.5) * 1.0)
+      values.add(value: row as Float * 1.0 + 2.0)
+      values.add(value: 0.45)
+      values.add(value: 0.45)
+      values.add(value: 0.5 + 0.45 * Math.sin(x: hue))
+      values.add(value: 0.5 + 0.45 * Math.sin(x: hue + 2.1))
+      values.add(value: 0.5 + 0.45 * Math.sin(x: hue + 4.2))
+      values.add(value: 0.25 + 0.6 * (0.5 + 0.5 * Math.sin(x: hue * 3.0)))
+      column = column + 1
+    }
+    row = row + 1
+  }
+  scene.instanceCount = side * side + 1
+  unsafe {
+    scene.instanceBuffer = createGpuBuffer(
+      size: values.length * 4
+      usage: WGPUBufferUsage_Storage + WGPUBufferUsage_CopyDst
+    )
+    uploadFloats(buffer: scene.instanceBuffer, values: values)
+  }
+}
+
+func addMatrix(values: mod List(Float), matrix: view Mat4) {
+  var i: Int = 0
+  loop i < 16 {
+    values.add(value: mat4Get(m: matrix, i: i))
+    i = i + 1
+  }
+}
+
+# The frame uniform: viewProj, its inverse, the camera and the sun
+func uploadFrame(scene: view SceneGpu, size: view BenchmarkSize) {
+  let projection: Mat4 = mat4Perspective(
+    fovYDeg: 55.0
+    aspect: size.width as Float / size.height as Float
+    near: 0.1
+    far: 200.0
+  )
+  let viewMatrix: Mat4 = mat4LookAt(
+    eyeX: 0.0
+    eyeY: -4.0
+    eyeZ: 2.2
+    atX: 0.0
+    atY: 14.0
+    atZ: 0.0
+    upX: 0.0
+    upY: 0.0
+    upZ: 1.0
+  )
+  let viewProjection: Mat4 = mat4Mul(a: projection, b: viewMatrix)
+  var values: List(Float) = List.create(Float, cap: 40)
+  addMatrix(values: values, matrix: viewProjection)
+  addMatrix(values: values, matrix: mat4Inverse(a: viewProjection))
+  values.add(value: 0.0)
+  values.add(value: -4.0)
+  values.add(value: 2.2)
+  values.add(value: 1.0)
+  values.add(value: -0.4)
+  values.add(value: 0.5)
+  values.add(value: -0.75)
+  values.add(value: 0.0)
+  unsafe {
+    uploadFloats(buffer: scene.frameBuffer, values: values)
+  }
+}

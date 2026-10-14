@@ -1,0 +1,649 @@
+# The forward + MSAA study's prototype (render-perf-14, docs/forward-msaa-study.md).
+# Not a renderer: one synthetic scene drawn by several main-pass designs over
+# the raw WebGPU bindings, each timed with GPU timestamps on the same frames.
+#
+# The scene is a grid of instanced spheres over a ground, seen from a low
+# camera so near spheres hide far ones (the overdraw a walker's street has).
+# The lighting is one sun with GGX specular and a hemisphere ambient, the SAME
+# WGSL function in every variant (scene.wgsl), so the variants differ only in
+# where it runs and how the samples are stored:
+# - deferred: G-buffer pass (3 targets + depth, stored), then a fullscreen
+#   lighting pass that reads them;
+# - forward 1x: one pass, depth pre-pass draws then shading draws (depth Equal);
+# - forward 4x: the same pass with 4x MSAA, resolved on store, the MSAA colour
+#   and depth discarded (with and without TransientAttachment = memoryless);
+# - forward 4x, no pre-pass: shading draws with depth Less only.
+#
+# Settings: RAE_FM_SIZE=WxH (default 1920x1080), RAE_FM_FRAMES (default 200),
+# RAE_FM_SIDE (spheres per grid side, default 30), RAE_FM_IMAGES=<dir> saves
+# one PNG per variant for the image comparison.
+import Sys
+import Image
+open webgpu/Webgpu
+open webgpu/WebgpuEnums
+open webgpu/WebgpuTypes
+open webgpu/Context
+open gpu/DeviceFeatures
+open Scene
+open Variants
+
+const maxTimedPasses: Int = 2
+
+const warmUpFrames: Int = 30
+
+type Timestamps {
+  # The adapter offers timestamp queries (else the frames are timed by the clock)
+  available: Bool
+  querySet: Ptr
+  resolve: Ptr
+  period: Float
+  # One timestampWrites per timed pass (the first and the second)
+  firstWrites: List(WGPUPassTimestampWrites)
+  secondWrites: List(WGPUPassTimestampWrites)
+}
+
+func drawScene(
+  pass: copy Ptr
+  scene: view SceneGpu
+  pipeline: copy Ptr
+  bindGroup: copy Ptr
+) unsafe {
+  unsafe {
+    wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: pipeline)
+    wgpuRenderPassEncoderSetBindGroup(
+      renderPassEncoder: pass
+      groupIndex: 0
+      group: bindGroup
+      dynamicOffsetCount: 0
+      dynamicOffsets: webgpuNull()
+    )
+    wgpuRenderPassEncoderSetVertexBuffer(
+      renderPassEncoder: pass
+      slot: 0
+      buffer: scene.vertexBuffer
+      offset: 0
+      size: WGPU_WHOLE_SIZE
+    )
+    wgpuRenderPassEncoderSetIndexBuffer(
+      renderPassEncoder: pass
+      buffer: scene.indexBuffer
+      format: WGPUIndexFormat_Uint32
+      offset: 0
+      size: WGPU_WHOLE_SIZE
+    )
+    wgpuRenderPassEncoderDrawIndexed(
+      renderPassEncoder: pass
+      indexCount: scene.indexCount as UInt32
+      instanceCount: scene.instanceCount as UInt32
+      firstIndex: 0
+      baseVertex: 0
+      firstInstance: 0
+    )
+  }
+}
+
+func createTimestamps() ret Timestamps {
+  unsafe {
+    # RAE_FM_TIMESTAMPS=0 times by the clock only (the iPhone's Metal
+    # timestamps come back with the end before the beginning)
+    let available: Bool = webgpuHaveTimestamp() is 1 and Sys.getEnv(name: "RAE_FM_TIMESTAMPS") is not "0"
+    let queryDescriptor: WGPUQuerySetDescriptor = {
+      type_: WGPUQueryType_Timestamp
+      count: (maxTimedPasses * 2) as UInt32
+    }
+    var firstWrites: List(WGPUPassTimestampWrites) = List.create(WGPUPassTimestampWrites, cap: 1)
+    var secondWrites: List(WGPUPassTimestampWrites) = List.create(WGPUPassTimestampWrites, cap: 1)
+    var querySet: Ptr = webgpuNull()
+    if available {
+      querySet = wgpuDeviceCreateQuerySet(device: webgpuDevice(), descriptor: queryDescriptor)
+    }
+    firstWrites.add(
+      value: { querySet: querySet, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 }
+    )
+    secondWrites.add(
+      value: { querySet: querySet, beginningOfPassWriteIndex: 2, endOfPassWriteIndex: 3 }
+    )
+    ret Timestamps {
+      available: available
+      querySet: querySet
+      resolve: createGpuBuffer(
+        size: maxTimedPasses * 16
+        usage: WGPUBufferUsage_QueryResolve + WGPUBufferUsage_CopySrc
+      )
+      period: wgpuQueueGetTimestampPeriod(queue: webgpuQueue())
+      firstWrites: own firstWrites
+      secondWrites: own secondWrites
+    }
+  }
+}
+
+# One frame of a variant, recorded into `encoder`; answers the timed passes
+func recordFrame(
+  encoder: copy Ptr
+  scene: view SceneGpu
+  targets: view VariantTargets
+  pipelines: view VariantPipelines
+  variant: view Int
+  firstWrites: copy Ptr
+  secondWrites: copy Ptr
+) unsafe ret Int {
+  unsafe {
+    var colours: List(WGPURenderPassColorAttachment) = List.create(
+      WGPURenderPassColorAttachment
+      cap: 3
+    )
+    var depths: List(WGPURenderPassDepthStencilAttachment) = List.create(
+      WGPURenderPassDepthStencilAttachment
+      cap: 1
+    )
+    let skyColour: WGPUColor = { r: 0.3, g: 0.4, b: 0.55, a: 1.0 }
+    let blank: WGPUColor = { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }
+    if variant is variantDeferred {
+      colours.add(value: {
+        view_: targets.normalView
+        depthSlice: WGPU_DEPTH_SLICE_UNDEFINED as UInt32
+        loadOp: WGPULoadOp_Clear
+        storeOp: WGPUStoreOp_Store
+        clearValue: blank
+      })
+      colours.add(value: {
+        view_: targets.albedoView
+        depthSlice: WGPU_DEPTH_SLICE_UNDEFINED as UInt32
+        loadOp: WGPULoadOp_Clear
+        storeOp: WGPUStoreOp_Store
+        clearValue: blank
+      })
+      colours.add(value: {
+        view_: targets.materialView
+        depthSlice: WGPU_DEPTH_SLICE_UNDEFINED as UInt32
+        loadOp: WGPULoadOp_Clear
+        storeOp: WGPUStoreOp_Store
+        clearValue: blank
+      })
+      depths.add(
+        value: {
+          view_: targets.depthView
+          depthLoadOp: WGPULoadOp_Clear
+          depthStoreOp: WGPUStoreOp_Store
+          depthClearValue: 1.0
+        }
+      )
+      let geometryDescriptor: WGPURenderPassDescriptor = {
+        colorAttachmentCount: 3
+        colorAttachments: colours.data
+        depthStencilAttachment: depths.data
+        timestampWrites: firstWrites
+      }
+      let geometryPass: Ptr = wgpuCommandEncoderBeginRenderPass(
+        commandEncoder: encoder
+        descriptor: geometryDescriptor
+      )
+      drawScene(
+        pass: geometryPass
+        scene: scene
+        pipeline: pipelines.geometry
+        bindGroup: pipelines.geometryBindGroup
+      )
+      wgpuRenderPassEncoderEnd(renderPassEncoder: geometryPass)
+      wgpuRenderPassEncoderRelease(renderPassEncoder: geometryPass)
+      var lit: List(WGPURenderPassColorAttachment) = List.create(
+        WGPURenderPassColorAttachment
+        cap: 1
+      )
+      lit.add(value: {
+        view_: targets.outputView
+        depthSlice: WGPU_DEPTH_SLICE_UNDEFINED as UInt32
+        loadOp: WGPULoadOp_Clear
+        storeOp: WGPUStoreOp_Store
+        clearValue: skyColour
+      })
+      let lightingDescriptor: WGPURenderPassDescriptor = {
+        colorAttachmentCount: 1
+        colorAttachments: lit.data
+        timestampWrites: secondWrites
+      }
+      let lightingPass: Ptr = wgpuCommandEncoderBeginRenderPass(
+        commandEncoder: encoder
+        descriptor: lightingDescriptor
+      )
+      wgpuRenderPassEncoderSetPipeline(renderPassEncoder: lightingPass, pipeline: pipelines.shading)
+      wgpuRenderPassEncoderSetBindGroup(
+        renderPassEncoder: lightingPass
+        groupIndex: 0
+        group: pipelines.shadingBindGroup
+        dynamicOffsetCount: 0
+        dynamicOffsets: webgpuNull()
+      )
+      wgpuRenderPassEncoderDraw(
+        renderPassEncoder: lightingPass
+        vertexCount: 3
+        instanceCount: 1
+        firstVertex: 0
+        firstInstance: 0
+      )
+      wgpuRenderPassEncoderEnd(renderPassEncoder: lightingPass)
+      wgpuRenderPassEncoderRelease(renderPassEncoder: lightingPass)
+      ret 2
+    }
+    # Forward: one pass; a multisampled one resolves into the output and
+    # throws its samples away
+    if variantSamples(variant: variant) > 1 {
+      colours.add(value: {
+        view_: targets.multisampleColourView
+        depthSlice: WGPU_DEPTH_SLICE_UNDEFINED as UInt32
+        resolveTarget: targets.outputView
+        loadOp: WGPULoadOp_Clear
+        storeOp: WGPUStoreOp_Discard
+        clearValue: skyColour
+      })
+    } else {
+      colours.add(value: {
+        view_: targets.outputView
+        depthSlice: WGPU_DEPTH_SLICE_UNDEFINED as UInt32
+        loadOp: WGPULoadOp_Clear
+        storeOp: WGPUStoreOp_Store
+        clearValue: skyColour
+      })
+    }
+    depths.add(
+      value: {
+        view_: targets.depthView
+        depthLoadOp: WGPULoadOp_Clear
+        depthStoreOp: WGPUStoreOp_Discard
+        depthClearValue: 1.0
+      }
+    )
+    let descriptor: WGPURenderPassDescriptor = {
+      colorAttachmentCount: 1
+      colorAttachments: colours.data
+      depthStencilAttachment: depths.data
+      timestampWrites: firstWrites
+    }
+    let pass: Ptr = wgpuCommandEncoderBeginRenderPass(
+      commandEncoder: encoder
+      descriptor: descriptor
+    )
+    if pipelines.geometry is not webgpuNull() {
+      drawScene(
+        pass: pass
+        scene: scene
+        pipeline: pipelines.geometry
+        bindGroup: pipelines.geometryBindGroup
+      )
+    }
+    drawScene(
+      pass: pass
+      scene: scene
+      pipeline: pipelines.shading
+      bindGroup: pipelines.shadingBindGroup
+    )
+    wgpuRenderPassEncoderEnd(renderPassEncoder: pass)
+    wgpuRenderPassEncoderRelease(renderPassEncoder: pass)
+    ret 1
+  }
+}
+
+func submit(encoder: copy Ptr) unsafe {
+  unsafe {
+    let bufferDescriptor: WGPUCommandBufferDescriptor = { nextInChain: webgpuNull() }
+    let commandBuffer: Ptr = wgpuCommandEncoderFinish(
+      commandEncoder: encoder
+      descriptor: bufferDescriptor
+    )
+    var commands: List(Ptr) = List.create(Ptr, cap: 1)
+    commands.add(value: commandBuffer)
+    wgpuQueueSubmit(queue: webgpuQueue(), commandCount: 1, commands: commands.data)
+    wgpuCommandBufferRelease(commandBuffer: commandBuffer)
+    wgpuCommandEncoderRelease(commandEncoder: encoder)
+  }
+}
+
+func newEncoder() unsafe ret Ptr {
+  unsafe {
+    let descriptor: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
+    ret wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: descriptor)
+  }
+}
+
+# Copy `bytes` of `source` to a fresh MapRead buffer and read them into `into`
+# (blocking until the GPU finished everything submitted before)
+func readBack(
+  encoder: copy Ptr
+  source: copy Ptr
+  bytes: view Int
+  into: mod List(Int)
+) ret Bool {
+  unsafe {
+    let staging: Ptr = createGpuBuffer(
+      size: bytes
+      usage: WGPUBufferUsage_CopyDst + WGPUBufferUsage_MapRead
+    )
+    wgpuCommandEncoderCopyBufferToBuffer(
+      commandEncoder: encoder
+      source: source
+      sourceOffset: 0
+      destination: staging
+      destinationOffset: 0
+      size: bytes as UInt64
+    )
+    submit(encoder: encoder)
+    into.clear()
+    into.addDefaults(count: (bytes + 7) / 8)
+    let mapped: Int = webgpuMapRead(buffer: staging, size: bytes as UInt64, dst: into.data)
+    wgpuBufferRelease(buffer: staging)
+    ret mapped is 1
+  }
+}
+
+func median(values: mod List(Int)) ret Int {
+  if values.length is 0 {
+    ret -1
+  }
+  values.sort()
+  ret values.copyAtDefault(index: values.length / 2)
+}
+
+# The low (part 0) or high (part 1) 32 bits of a read-back word
+func wordPart(word: view Int, part: view Int) ret Int {
+  if part is 0 {
+    ret word bitand 4294967295
+  }
+  ret (word shr 32) bitand 4294967295
+}
+
+# Read the output image back and save it as a PNG
+func saveOutput(
+  targets: view VariantTargets
+  size: view BenchmarkSize
+  path: view String
+) ret Bool {
+  let bytesPerRow: Int = ((size.width * 4 + 255) / 256) * 256
+  let bytes: Int = bytesPerRow * size.height
+  var words: List(Int) = List.create(Int, cap: bytes / 8)
+  unsafe {
+    let encoder: Ptr = newEncoder()
+    let buffer: Ptr = createGpuBuffer(
+      size: bytes
+      usage: WGPUBufferUsage_CopyDst + WGPUBufferUsage_CopySrc
+    )
+    let source: WGPUTexelCopyTextureInfo = {
+      texture: targets.output
+      mipLevel: 0
+      origin: { x: 0, y: 0, z: 0 }
+      aspect: WGPUTextureAspect_All
+    }
+    let destination: WGPUTexelCopyBufferInfo = {
+      layout: { offset: 0, bytesPerRow: bytesPerRow as UInt32, rowsPerImage: size.height as UInt32 }
+      buffer: buffer
+    }
+    let extent: WGPUExtent3D = {
+      width: size.width as UInt32
+      height: size.height as UInt32
+      depthOrArrayLayers: 1
+    }
+    wgpuCommandEncoderCopyTextureToBuffer(
+      commandEncoder: encoder
+      source: source
+      destination: destination
+      copySize: extent
+    )
+    let read: Bool = readBack(
+      encoder: encoder
+      source: buffer
+      bytes: bytes
+      into: words
+    )
+    wgpuBufferRelease(buffer: buffer)
+    if not read {
+      ret false
+    }
+  }
+  var pixels: List(Int) = List.create(Int, cap: size.width * size.height)
+  var y: Int = 0
+  loop y < size.height {
+    var x: Int = 0
+    loop x < size.width {
+      let byteOffset: Int = y * bytesPerRow + x * 4
+      let rgba: Int = wordPart(
+        word: words.copyAtDefault(index: byteOffset / 8)
+        part: (byteOffset % 8) / 4
+      )
+      let red: Int = rgba bitand 255
+      let green: Int = (rgba shr 8) bitand 255
+      let blue: Int = (rgba shr 16) bitand 255
+      pixels.add(value: red * 65536 + green * 256 + blue)
+      x = x + 1
+    }
+    y = y + 1
+  }
+  ret Image.savePng(
+    path: path
+    pixels: pixels.data
+    width: size.width
+    height: size.height
+  )
+}
+
+# RAE_FM_BATCH: the frames a submit renders back to back (default 8). The clock time of the submit
+# divided by them is the throughput (consecutive frames overlap on the GPU,
+# as they do in a running app); the timestamps time only the last frame,
+# whose passes overlap the frame before, so they read higher. Back to back
+# also keeps the GPU from idling (an idle GPU clocks down).
+
+# Rounds the variants take turns in, so a clock change hits all of them
+const rounds: Int = 5
+
+# One measured submit of `variant`: its GPU time in `total` and the first
+# pass's in `first` (both -1 without timestamps), and in `wall` the clock
+# time per frame from the start of recording to the GPU finishing the submit
+func measureFrame(
+  scene: view SceneGpu
+  targets: view VariantTargets
+  pipelines: view VariantPipelines
+  variant: view Int
+  timestamps: view Timestamps
+  words: mod List(Int)
+  total: mod Int
+  first: mod Int
+  wall: mod Int
+  framesPerSubmit: view Int
+) {
+  total = -1
+  first = -1
+  let started: Int = nowNs()
+  unsafe {
+    let encoder: Ptr = newEncoder()
+    var passes: Int = 0
+    var repeat: Int = 0
+    loop repeat < framesPerSubmit {
+      var firstWrites: Ptr = webgpuNull()
+      var secondWrites: Ptr = webgpuNull()
+      if timestamps.available and repeat is framesPerSubmit - 1 {
+        firstWrites = timestamps.firstWrites.data
+        secondWrites = timestamps.secondWrites.data
+      }
+      passes = recordFrame(
+        encoder: encoder
+        scene: scene
+        targets: targets
+        pipelines: pipelines
+        variant: variant
+        firstWrites: firstWrites
+        secondWrites: secondWrites
+      )
+      repeat = repeat + 1
+    }
+    if not timestamps.available {
+      submit(encoder: encoder)
+      webgpuPoll(wait: 1)
+      wall = (nowNs() - started) / 1000 / framesPerSubmit
+      ret
+    }
+    wgpuCommandEncoderResolveQuerySet(
+      commandEncoder: encoder
+      querySet: timestamps.querySet
+      firstQuery: 0
+      queryCount: (passes * 2) as UInt32
+      destination: timestamps.resolve
+      destinationOffset: 0
+    )
+    let read: Bool = readBack(
+      encoder: encoder
+      source: timestamps.resolve
+      bytes: passes * 16
+      into: words
+    )
+    wall = (nowNs() - started) / 1000 / framesPerSubmit
+    if not read {
+      ret
+    }
+    total = 0
+    var pass: Int = 0
+    loop pass < passes {
+      let ticks: Int = words.copyAtDefault(index: pass * 2 + 1) - words.copyAtDefault(
+        index: pass * 2
+      )
+      let microseconds: Int = (ticks as Float * timestamps.period / 1000.0) as Int
+      if pass is 0 {
+        first = microseconds
+      }
+      total = total + microseconds
+      pass = pass + 1
+    }
+  }
+}
+
+# The median of `count` samples starting at `start` in `samples`
+func medianOf(samples: view List(Int), start: view Int, count: view Int) ret Int {
+  var slice: List(Int) = List.create(Int, cap: count)
+  var i: Int = 0
+  loop i < count {
+    slice.add(value: samples.copyAtDefault(index: start + i))
+    i = i + 1
+  }
+  ret median(values: slice)
+}
+
+func main() {
+  chooseDeviceFeatures()
+  unsafe {
+    if webgpuBootstrap() is 0 {
+      log("no GPU")
+      ret
+    }
+  }
+  let size: BenchmarkSize = readSize()
+  let frames: Int = envInt(name: "RAE_FM_FRAMES", fallback: 200)
+  let side: Int = envInt(name: "RAE_FM_SIDE", fallback: 30)
+  let framesPerSubmit: Int = envInt(name: "RAE_FM_BATCH", fallback: 8)
+  let imageDirectory: String = Sys.getEnv(name: "RAE_FM_IMAGES")
+  let sceneShader: Shader = shader(files: ["scene.wgsl"])
+  let lightingShader: Shader = shader(files: ["scene.wgsl", "lighting.wgsl"])
+  var scene: SceneGpu = createEmptyScene()
+  unsafe {
+    scene.frameBuffer = createGpuBuffer(
+      size: 160
+      usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst
+    )
+    scene.sceneModule = createShaderModule(wgsl: sceneShader.text)
+    scene.lightingModule = createShaderModule(wgsl: lightingShader.text)
+  }
+  createSphere(scene: scene, segments: 32, rings: 24)
+  createInstances(scene: scene, side: side)
+  uploadFrame(scene: scene, size: size)
+  let timestamps: Timestamps = createTimestamps()
+  let framesPerRound: Int = (frames + rounds - 1) / rounds
+  let perVariant: Int = framesPerRound * rounds
+  log(
+    "forward + MSAA study: {size.width}x{size.height}, {scene.instanceCount} instances x {scene.indexCount / 3} triangles, {perVariant} timed frames per variant"
+  )
+  var allTargets: List(VariantTargets) = List.create(VariantTargets, cap: variantCount)
+  var allPipelines: List(VariantPipelines) = List.create(VariantPipelines, cap: variantCount)
+  var variant: Int = 0
+  loop variant < variantCount {
+    let targets: VariantTargets = createVariantTargets(size: size, variant: variant)
+    allPipelines.add(
+      value: createVariantPipelines(scene: scene, targets: targets, variant: variant)
+    )
+    allTargets.add(value: targets)
+    variant = variant + 1
+  }
+  var gpuSamples: List(Int) = List.create(Int, cap: variantCount * perVariant)
+  gpuSamples.addDefaults(count: variantCount * perVariant)
+  var firstSamples: List(Int) = List.create(Int, cap: variantCount * perVariant)
+  firstSamples.addDefaults(count: variantCount * perVariant)
+  var wallSamples: List(Int) = List.create(Int, cap: variantCount * perVariant)
+  wallSamples.addDefaults(count: variantCount * perVariant)
+  var words: List(Int) = List.create(Int, cap: maxTimedPasses * 2)
+  var total: Int = 0
+  var first: Int = 0
+  var wall: Int = 0
+  var round: Int = 0
+  loop round < rounds {
+    variant = 0
+    loop variant < variantCount {
+      if let targets: view VariantTargets => allTargets.viewAt(index: variant) {
+        if let pipelines: view VariantPipelines => allPipelines.viewAt(index: variant) {
+          var frame: Int = 0
+          loop frame < warmUpFrames + framesPerRound {
+            measureFrame(
+              scene: scene
+              targets: targets
+              pipelines: pipelines
+              variant: variant
+              timestamps: timestamps
+              words: words
+              total: total
+              first: first
+              wall: wall
+              framesPerSubmit: framesPerSubmit
+            )
+            if frame >= warmUpFrames {
+              let index: Int = variant * perVariant + round * framesPerRound + frame - warmUpFrames
+              gpuSamples.set(index: index, value: total)
+              firstSamples.set(index: index, value: first)
+              wallSamples.set(index: index, value: wall)
+            }
+            frame = frame + 1
+          }
+        }
+      }
+      variant = variant + 1
+    }
+    round = round + 1
+  }
+  variant = 0
+  loop variant < variantCount {
+    if let targets: view VariantTargets => allTargets.viewAt(index: variant) {
+      let gpu: Int = medianOf(samples: gpuSamples, start: variant * perVariant, count: perVariant)
+      let firstPass: Int = medianOf(
+        samples: firstSamples
+        start: variant * perVariant
+        count: perVariant
+      )
+      let frameTime: Int = medianOf(
+        samples: wallSamples
+        start: variant * perVariant
+        count: perVariant
+      )
+      log(
+        "{variantName(variant: variant)}: gpu {gpu} us (first pass {firstPass} us), clock {frameTime} us per frame, targets {targets.bytes / 1048576} MB"
+      )
+      if imageDirectory.length() > 0 {
+        let saved: Bool = saveOutput(
+          targets: targets
+          size: size
+          path: "{imageDirectory}/{variantFile(variant: variant)}.png"
+        )
+        if not saved {
+          log("  image not saved")
+        }
+      }
+      releaseVariantTargets(targets: targets)
+    }
+    if let pipelines: view VariantPipelines => allPipelines.viewAt(index: variant) {
+      releaseVariantPipelines(pipelines: pipelines)
+    }
+    variant = variant + 1
+  }
+}

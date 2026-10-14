@@ -1,0 +1,524 @@
+# The study's variants (benchmarks/forwardMsaa): their attachments and
+# pipelines, created at the benchmark size over the raw WebGPU bindings.
+open webgpu/Webgpu
+open webgpu/WebgpuEnums
+open webgpu/WebgpuTypes
+open webgpu/Context
+open Scene
+
+# Memoryless ("transient") attachments. wgpu-native 29 hands the usage bits
+# to wgpu-core unchanged, where TRANSIENT is bit 17; the header's
+# WGPUTextureUsage_TransientAttachment (0x20) is not a wgpu-core bit and
+# panics in wgpuDeviceCreateTexture.
+const wgpuCoreTransient: UInt64 = 131072
+
+const variantDeferred: Int = 0
+
+const variantForward1xPrepass: Int = 1
+
+const variantForward1x: Int = 2
+
+const variantForward4xPrepass: Int = 3
+
+const variantForward4x: Int = 4
+
+const variantForward4xStored: Int = 5
+
+const variantCount: Int = 6
+
+type VariantTargets {
+  # The single-sampled 8-bit image every variant ends in
+  output: Ptr
+  outputView: Ptr
+  depth: Ptr
+  depthView: Ptr
+  normal: Ptr
+  normalView: Ptr
+  albedo: Ptr
+  albedoView: Ptr
+  material: Ptr
+  materialView: Ptr
+  multisampleColour: Ptr
+  multisampleColourView: Ptr
+  # Bytes the variant keeps in memory (memoryless attachments count 0)
+  bytes: Int
+}
+
+type VariantPipelines {
+  geometry: Ptr
+  geometryBindGroup: Ptr
+  shading: Ptr
+  shadingBindGroup: Ptr
+}
+
+func variantName(variant: view Int) ret String {
+  match variant {
+    case variantDeferred {
+      ret "deferred (G-buffer + lighting)"
+    }
+    case variantForward1xPrepass {
+      ret "forward 1x, depth pre-pass"
+    }
+    case variantForward1x {
+      ret "forward 1x"
+    }
+    case variantForward4xPrepass {
+      ret "forward 4x MSAA, depth pre-pass, memoryless"
+    }
+    case variantForward4x {
+      ret "forward 4x MSAA, memoryless"
+    }
+    default {
+      ret "forward 4x MSAA, stored samples"
+    }
+  }
+}
+
+func variantFile(variant: view Int) ret String {
+  match variant {
+    case variantDeferred {
+      ret "deferred"
+    }
+    case variantForward1xPrepass {
+      ret "forward1xPrepass"
+    }
+    case variantForward1x {
+      ret "forward1x"
+    }
+    case variantForward4xPrepass {
+      ret "forward4xPrepass"
+    }
+    case variantForward4x {
+      ret "forward4x"
+    }
+    default {
+      ret "forward4xStored"
+    }
+  }
+}
+
+func variantSamples(variant: view Int) ret Int {
+  if variant >= variantForward4xPrepass {
+    ret 4
+  }
+  ret 1
+}
+
+# Forward variants that draw every object twice: depth first, then shading
+# with depth Equal (so each pixel is shaded once)
+func variantHasPrepass(variant: view Int) ret Bool {
+  ret variant is variantForward1xPrepass or variant is variantForward4xPrepass
+}
+
+# The multisampled colour and depth exist only on the tile (TRANSIENT)
+func variantMemoryless(variant: view Int) ret Bool {
+  ret variant is variantForward4xPrepass or variant is variantForward4x
+}
+
+func createTarget(
+  size: view BenchmarkSize
+  format: view Int32
+  usage: view UInt64
+  samples: view Int
+) unsafe ret Ptr {
+  unsafe {
+    let descriptor: WGPUTextureDescriptor = {
+      usage: usage
+      dimension: WGPUTextureDimension_2D
+      size: { width: size.width as UInt32, height: size.height as UInt32, depthOrArrayLayers: 1 }
+      format: format
+      mipLevelCount: 1
+      sampleCount: samples as UInt32
+    }
+    ret wgpuDeviceCreateTexture(device: webgpuDevice(), descriptor: descriptor)
+  }
+}
+
+func createView(texture: copy Ptr, format: view Int32) unsafe ret Ptr {
+  unsafe {
+    let descriptor: WGPUTextureViewDescriptor = {
+      format: format
+      dimension: WGPUTextureViewDimension_2D
+      baseMipLevel: 0
+      mipLevelCount: 1
+      baseArrayLayer: 0
+      arrayLayerCount: 1
+      aspect: WGPUTextureAspect_All
+    }
+    ret wgpuTextureCreateView(texture: texture, descriptor: descriptor)
+  }
+}
+
+func createVariantTargets(size: view BenchmarkSize, variant: view Int) ret VariantTargets {
+  let samples: Int = variantSamples(variant: variant)
+  let pixels: Int = size.width * size.height
+  unsafe {
+    let output: Ptr = createTarget(
+      size: size
+      format: WGPUTextureFormat_RGBA8Unorm
+      usage: WGPUTextureUsage_RenderAttachment + WGPUTextureUsage_CopySrc
+      samples: 1
+    )
+    var targets: VariantTargets = {
+      output: output
+      outputView: createView(texture: output, format: WGPUTextureFormat_RGBA8Unorm)
+      depth: webgpuNull()
+      depthView: webgpuNull()
+      normal: webgpuNull()
+      normalView: webgpuNull()
+      albedo: webgpuNull()
+      albedoView: webgpuNull()
+      material: webgpuNull()
+      materialView: webgpuNull()
+      multisampleColour: webgpuNull()
+      multisampleColourView: webgpuNull()
+      bytes: pixels * 4
+    }
+    var attachmentUsage: UInt64 = WGPUTextureUsage_RenderAttachment
+    if variantMemoryless(variant: variant) {
+      attachmentUsage = attachmentUsage + wgpuCoreTransient
+    }
+    if variant is variantDeferred {
+      attachmentUsage = attachmentUsage + WGPUTextureUsage_TextureBinding
+    }
+    targets.depth = createTarget(
+      size: size
+      format: WGPUTextureFormat_Depth32Float
+      usage: attachmentUsage
+      samples: samples
+    )
+    targets.depthView = createView(texture: targets.depth, format: WGPUTextureFormat_Depth32Float)
+    if not variantMemoryless(variant: variant) {
+      targets.bytes = targets.bytes + pixels * 4 * samples
+    }
+    if variant is variantDeferred {
+      targets.normal = createTarget(
+        size: size
+        format: WGPUTextureFormat_RGB10A2Unorm
+        usage: attachmentUsage
+        samples: 1
+      )
+      targets.normalView = createView(
+        texture: targets.normal
+        format: WGPUTextureFormat_RGB10A2Unorm
+      )
+      targets.albedo = createTarget(
+        size: size
+        format: WGPUTextureFormat_RGBA8Unorm
+        usage: attachmentUsage
+        samples: 1
+      )
+      targets.albedoView = createView(texture: targets.albedo, format: WGPUTextureFormat_RGBA8Unorm)
+      targets.material = createTarget(
+        size: size
+        format: WGPUTextureFormat_RGBA8Unorm
+        usage: attachmentUsage
+        samples: 1
+      )
+      targets.materialView = createView(
+        texture: targets.material
+        format: WGPUTextureFormat_RGBA8Unorm
+      )
+      targets.bytes = targets.bytes + pixels * 12
+    }
+    if samples > 1 {
+      targets.multisampleColour = createTarget(
+        size: size
+        format: WGPUTextureFormat_RGBA8Unorm
+        usage: attachmentUsage
+        samples: samples
+      )
+      targets.multisampleColourView = createView(
+        texture: targets.multisampleColour
+        format: WGPUTextureFormat_RGBA8Unorm
+      )
+      if not variantMemoryless(variant: variant) {
+        targets.bytes = targets.bytes + pixels * 4 * samples
+      }
+    }
+    ret targets
+  }
+}
+
+func releaseTexture(texture: copy Ptr, textureView: copy Ptr) unsafe {
+  unsafe {
+    if textureView is not webgpuNull() {
+      wgpuTextureViewRelease(textureView: textureView)
+    }
+    if texture is not webgpuNull() {
+      wgpuTextureRelease(texture: texture)
+    }
+  }
+}
+
+func releaseVariantTargets(targets: view VariantTargets) {
+  unsafe {
+    releaseTexture(texture: targets.output, textureView: targets.outputView)
+    releaseTexture(texture: targets.depth, textureView: targets.depthView)
+    releaseTexture(texture: targets.normal, textureView: targets.normalView)
+    releaseTexture(texture: targets.albedo, textureView: targets.albedoView)
+    releaseTexture(texture: targets.material, textureView: targets.materialView)
+    releaseTexture(texture: targets.multisampleColour, textureView: targets.multisampleColourView)
+  }
+}
+
+# A pipeline over the scene mesh (vertexBuffers true) or a fullscreen
+# triangle, with an automatic layout. `colourFormats` are its targets;
+# `writeMask` 0 makes a depth-only pipeline that still fits a colour pass.
+func createPipeline(
+  module: copy Ptr
+  vertexEntry: view String
+  fragmentEntry: view String
+  colourFormats: view List(Int32)
+  writeMask: view UInt64
+  depthCompare: view Int32
+  depthWrite: view Bool
+  samples: view Int
+  vertexBuffers: view Bool
+) unsafe ret Ptr {
+  unsafe {
+    var attributes: List(WGPUVertexAttribute) = List.create(WGPUVertexAttribute, cap: 2)
+    attributes.add(value: { format: WGPUVertexFormat_Float32x3, offset: 0, shaderLocation: 0 })
+    attributes.add(value: { format: WGPUVertexFormat_Float32x3, offset: 12, shaderLocation: 1 })
+    var layouts: List(WGPUVertexBufferLayout) = List.create(WGPUVertexBufferLayout, cap: 1)
+    layouts.add(
+      value: {
+        stepMode: WGPUVertexStepMode_Vertex
+        arrayStride: 24
+        attributeCount: 2
+        attributes: attributes.data
+      }
+    )
+    var bufferCount: UInt64 = 0
+    if vertexBuffers {
+      bufferCount = 1
+    }
+    var targets: List(WGPUColorTargetState) = List.create(
+      WGPUColorTargetState
+      cap: colourFormats.length
+    )
+    var i: Int = 0
+    loop i < colourFormats.length {
+      targets.add(value: { format: colourFormats.copyAtDefault(index: i), writeMask: writeMask })
+      i = i + 1
+    }
+    let vertexC: Buffer(Any) = vertexEntry.toCStr()
+    let fragmentC: Buffer(Any) = fragmentEntry.toCStr()
+    var fragments: List(WGPUFragmentState) = List.create(WGPUFragmentState, cap: 1)
+    fragments.add(
+      value: {
+        module: module
+        entryPoint: { data: fragmentC, length: WGPU_STRLEN }
+        targetCount: targets.length as UInt64
+        targets: targets.data
+      }
+    )
+    var writeFlag: Int32 = WGPUOptionalBool_False
+    if depthWrite {
+      writeFlag = WGPUOptionalBool_True
+    }
+    var depths: List(WGPUDepthStencilState) = List.create(WGPUDepthStencilState, cap: 1)
+    depths.add(value: {
+      format: WGPUTextureFormat_Depth32Float
+      depthWriteEnabled: writeFlag
+      depthCompare: depthCompare
+      stencilFront: {
+        compare: WGPUCompareFunction_Always
+        failOp: WGPUStencilOperation_Keep
+        depthFailOp: WGPUStencilOperation_Keep
+        passOp: WGPUStencilOperation_Keep
+      }
+      stencilBack: {
+        compare: WGPUCompareFunction_Always
+        failOp: WGPUStencilOperation_Keep
+        depthFailOp: WGPUStencilOperation_Keep
+        passOp: WGPUStencilOperation_Keep
+      }
+      stencilReadMask: 4294967295
+      stencilWriteMask: 4294967295
+    })
+    if vertexBuffers {
+      let descriptor: WGPURenderPipelineDescriptor = {
+        vertex: {
+          module: module
+          entryPoint: { data: vertexC, length: WGPU_STRLEN }
+          bufferCount: bufferCount
+          buffers: layouts.data
+        }
+        primitive: {
+          topology: WGPUPrimitiveTopology_TriangleList
+          frontFace: WGPUFrontFace_CCW
+          cullMode: WGPUCullMode_Back
+        }
+        depthStencil: depths.data
+        multisample: { count: samples as UInt32, mask: 4294967295 }
+        fragment: fragments.data
+      }
+      ret wgpuDeviceCreateRenderPipeline(device: webgpuDevice(), descriptor: descriptor)
+    }
+    let descriptor: WGPURenderPipelineDescriptor = {
+      vertex: { module: module, entryPoint: { data: vertexC, length: WGPU_STRLEN } }
+      primitive: {
+        topology: WGPUPrimitiveTopology_TriangleList
+        frontFace: WGPUFrontFace_CCW
+        cullMode: WGPUCullMode_None
+      }
+      multisample: { count: 1, mask: 4294967295 }
+      fragment: fragments.data
+    }
+    ret wgpuDeviceCreateRenderPipeline(device: webgpuDevice(), descriptor: descriptor)
+  }
+}
+
+# The bind group of a pipeline's automatic layout: the frame uniform, then the
+# instances (scene pipelines) or the G-buffer views (the lighting pipeline)
+func createBindGroup(
+  pipeline: copy Ptr
+  scene: view SceneGpu
+  targets: view VariantTargets
+  lighting: view Bool
+) unsafe ret Ptr {
+  unsafe {
+    var entries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: 5)
+    entries.add(value: { binding: 0, buffer: scene.frameBuffer, offset: 0, size: 160 })
+    if lighting {
+      entries.add(value: { binding: 2, textureView: targets.normalView })
+      entries.add(value: { binding: 3, textureView: targets.albedoView })
+      entries.add(value: { binding: 4, textureView: targets.materialView })
+      entries.add(value: { binding: 5, textureView: targets.depthView })
+    } else {
+      entries.add(
+        value: {
+          binding: 1
+          buffer: scene.instanceBuffer
+          offset: 0
+          size: (scene.instanceCount * 32) as UInt64
+        }
+      )
+    }
+    let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: pipeline, groupIndex: 0)
+    let descriptor: WGPUBindGroupDescriptor = {
+      layout: layout
+      entryCount: entries.length as UInt64
+      entries: entries.data
+    }
+    let group: Ptr = wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: descriptor)
+    wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
+    ret group
+  }
+}
+
+func createVariantPipelines(
+  scene: view SceneGpu
+  targets: view VariantTargets
+  variant: view Int
+) ret VariantPipelines {
+  let samples: Int = variantSamples(variant: variant)
+  var output: List(Int32) = List.create(Int32, cap: 1)
+  output.add(value: WGPUTextureFormat_RGBA8Unorm)
+  unsafe {
+    if variant is variantDeferred {
+      var gbuffer: List(Int32) = List.create(Int32, cap: 3)
+      gbuffer.add(value: WGPUTextureFormat_RGB10A2Unorm)
+      gbuffer.add(value: WGPUTextureFormat_RGBA8Unorm)
+      gbuffer.add(value: WGPUTextureFormat_RGBA8Unorm)
+      let geometry: Ptr = createPipeline(
+        module: scene.sceneModule
+        vertexEntry: "vsScene"
+        fragmentEntry: "fsGbuffer"
+        colourFormats: gbuffer
+        writeMask: WGPUColorWriteMask_All
+        depthCompare: WGPUCompareFunction_Less
+        depthWrite: true
+        samples: 1
+        vertexBuffers: true
+      )
+      let shading: Ptr = createPipeline(
+        module: scene.lightingModule
+        vertexEntry: "vsFullscreen"
+        fragmentEntry: "fsLighting"
+        colourFormats: output
+        writeMask: WGPUColorWriteMask_All
+        depthCompare: WGPUCompareFunction_Always
+        depthWrite: false
+        samples: 1
+        vertexBuffers: false
+      )
+      ret VariantPipelines {
+        geometry: geometry
+        geometryBindGroup: createBindGroup(
+          pipeline: geometry
+          scene: scene
+          targets: targets
+          lighting: false
+        )
+        shading: shading
+        shadingBindGroup: createBindGroup(
+          pipeline: shading
+          scene: scene
+          targets: targets
+          lighting: true
+        )
+      }
+    }
+    var shadingCompare: Int32 = WGPUCompareFunction_Equal
+    var shadingWrites: Bool = false
+    var geometry: Ptr = webgpuNull()
+    var geometryBindGroup: Ptr = webgpuNull()
+    if not variantHasPrepass(variant: variant) {
+      shadingCompare = WGPUCompareFunction_Less
+      shadingWrites = true
+    } else {
+      geometry = createPipeline(
+        module: scene.sceneModule
+        vertexEntry: "vsScene"
+        fragmentEntry: "fsDepthOnly"
+        colourFormats: output
+        writeMask: WGPUColorWriteMask_None
+        depthCompare: WGPUCompareFunction_Less
+        depthWrite: true
+        samples: samples
+        vertexBuffers: true
+      )
+      geometryBindGroup = createBindGroup(
+        pipeline: geometry
+        scene: scene
+        targets: targets
+        lighting: false
+      )
+    }
+    let shading: Ptr = createPipeline(
+      module: scene.sceneModule
+      vertexEntry: "vsScene"
+      fragmentEntry: "fsForward"
+      colourFormats: output
+      writeMask: WGPUColorWriteMask_All
+      depthCompare: shadingCompare
+      depthWrite: shadingWrites
+      samples: samples
+      vertexBuffers: true
+    )
+    ret VariantPipelines {
+      geometry: geometry
+      geometryBindGroup: geometryBindGroup
+      shading: shading
+      shadingBindGroup: createBindGroup(
+        pipeline: shading
+        scene: scene
+        targets: targets
+        lighting: false
+      )
+    }
+  }
+}
+
+func releaseVariantPipelines(pipelines: view VariantPipelines) {
+  unsafe {
+    if pipelines.geometry is not webgpuNull() {
+      wgpuBindGroupRelease(bindGroup: pipelines.geometryBindGroup)
+      wgpuRenderPipelineRelease(renderPipeline: pipelines.geometry)
+    }
+    wgpuBindGroupRelease(bindGroup: pipelines.shadingBindGroup)
+    wgpuRenderPipelineRelease(renderPipeline: pipelines.shading)
+  }
+}
