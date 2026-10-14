@@ -299,7 +299,11 @@ func beginShadowPass(renderer: mod DeferredRenderer, c: view ShadowCascades) pub
   }
 }
 
-func endShadowPass(renderer: mod DeferredRenderer) pub {
+# The cascades are their own submit, on purpose: the GPU starts on them while
+# the CPU still records the G-buffer. Recording them into the post passes'
+# shared submit (render-perf-5b) saved a submit but made the frame slower
+# (114: 5.3 -> 5.5 ms, 112: 8.5 -> 9.0 ms headless).
+func endShadowPass(renderer: mod DeferredRenderer) {
   if let resources: mod GpuResources => renderer.gpuResources {
     shadowEnd(shadow: renderer.passes.shadow, resources: resources)
   }
@@ -429,8 +433,10 @@ func updateMeshVerts(
 # still be valid while their bind groups are released, and the device must
 # still be up for the releases. The geometry frame (#906) drains its in-flight
 # submissions and retires the targets first; C forgets the borrowed views.
-func shutdownDeferredRenderer(renderer: mod DeferredRenderer) pub {
+func shutdownDeferredRenderer(renderer: mod DeferredRenderer) {
   if let resources: mod GpuResources => renderer.gpuResources {
+    # Anything still recorded goes to the GPU before its objects are retired
+    flushPostPasses(targets: renderer.passes.targets, resources: resources)
     postPassesShutdown(
       composite: renderer.passes.composite
       ao: renderer.passes.ao
@@ -633,6 +639,7 @@ func renderDeferredPass(
   # Present copies the canvas's offscreen target into the drawable (C glue,
   # #920); with a UI the 2D endFrame does it after the overlay.
   if tag is RenderTag.present {
+    flushDeferredWork(renderer: renderer)
     if renderer.hasUi {
       endUiFrameTimed(renderer: renderer)
     } else {
@@ -746,6 +753,8 @@ func renderDeferredPassWith(
         grade: renderer.grade
       )
     } else {
+      # The inspector submits on its own; the post passes go first
+      flushPostPasses(targets: renderer.passes.targets, resources: resources)
       inspect(
         cache: renderer.passes.inspect
         resources: resources
@@ -794,13 +803,19 @@ func logPassTimingReport(passTiming: mod DeferredPassTiming) {
 
 func gpuPassMark(renderer: mod DeferredRenderer, tag: view Int) {
   if let resources: mod GpuResources => renderer.gpuResources {
-    passTimingMark(passTiming: renderer.passTiming, resources: resources, tag: tag)
+    passTimingMark(
+      passTiming: renderer.passTiming
+      resources: resources
+      targets: renderer.passes.targets
+      tag: tag
+    )
   }
 }
 
 # The UI-overlay frame's end (Gpu2d.endFrame) with a timing mark between the
 # 2D submit and the copy into the drawable, so the two are timed apart.
 func endUiFrameTimed(renderer: mod DeferredRenderer) {
+  flushDeferredWork(renderer: renderer)
   if Gpu2d.endFrameSubmit(canvas: renderer.canvas) {
     gpuPassMark(renderer: renderer, tag: passTimingCopyTag)
     Gpu2d.endFramePresent(canvas: renderer.canvas)
@@ -917,14 +932,26 @@ func rendererIsUnderwater(renderer: view DeferredRenderer) pub ret Bool {
 
 # The opaque snapshot BEFORE a refracting surface draws (#832): apps call this
 # at the transparentForward tag before their water, then the renderer's pass.
-func snapshotOpaque(renderer: mod DeferredRenderer) pub {
+func snapshotOpaque(renderer: mod DeferredRenderer) {
   ensureRendererResources(renderer: renderer)
-  if let resources: view GpuResources => renderer.gpuResources {
+  if let resources: mod GpuResources => renderer.gpuResources {
     transparentSnapshot(
       cache: renderer.passes.transparent
       resources: resources
       targets: renderer.passes.targets
     )
+  }
+}
+
+# Submit the post passes recorded so far (render-perf-5b: they share one
+# encoder, submitted at the composite). An app that does its OWN GPU work in
+# the middle of the graph that reads or writes the renderer's targets calls
+# this first, so that work lands after the passes before it. snapshotOpaque
+# does it for the refracting surfaces; the composite and present do it at
+# the end of the frame.
+func flushDeferredWork(renderer: mod DeferredRenderer) {
+  if let resources: mod GpuResources => renderer.gpuResources {
+    flushPostPasses(targets: renderer.passes.targets, resources: resources)
   }
 }
 

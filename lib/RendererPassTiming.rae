@@ -12,6 +12,7 @@ open gpu/GpuResources
 open gpu/GpuLifetime
 open gpu/GpuTiming
 open gpu/GpuIds
+open GbufferTargets
 
 # The mark between the UI frame's 2D submit and its copy into the drawable
 # (RendererDeferred.endUiFrameTimed): not a graph pass, so outside RenderTag
@@ -130,15 +131,22 @@ func passTimingFrameBegin(passTiming: mod DeferredPassTiming, resources: mod Gpu
 }
 
 # A mark before the pass of `tag` (the end of the frame passes -1 and
-# resolves). Each mark is its own small submission, so it lands between the
+# resolves). While the renderer's post passes share one open recording
+# (render-perf-5b) the mark is recorded into it, between the passes around
+# it; otherwise it is its own small submission, which lands between the
 # submissions of the passes around it.
 func passTimingMark(
   passTiming: mod DeferredPassTiming
   resources: mod GpuResources
+  targets: mod DeferredTargets
   tag: view Int
 ) {
   if passTiming.marking is false {
     ret
+  }
+  if tag < 0 {
+    # The resolve reads every mark, so the recorded ones go first
+    flushPostPasses(targets: targets, resources: resources)
   }
   var pipeline: PipelineId = { managerTag: 0, slot: -1, generation: 0 }
   if let made: view PipelineId => passTiming.markPipeline {
@@ -148,6 +156,21 @@ func passTimingMark(
     ret
   }
   if let timing: mod GpuTiming => passTiming.timing {
+    if let open: mod Recording => targets.post {
+      if recordingIsOpen(recording: open, resources: resources) {
+        if recordTimingMark(
+          timing: timing
+          recording: open
+          resources: resources
+          pipeline: pipeline
+        ) is false {
+          passTiming.marking = false
+          ret
+        }
+        passTiming.markTags.add(value: tag)
+        ret
+      }
+    }
     if var recording: Recording = beginRecording(resources: resources) {
       if recordTimingMark(
         timing: timing

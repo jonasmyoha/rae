@@ -115,19 +115,9 @@ func runFullscreen(
   }
 }
 
-# Several fullscreen passes in ONE command buffer (the depth pyramid's mips):
-# beginFullscreenBatchEncoder, then runFullscreenInBatch per pass, then
-# submitFullscreenBatch. Each pass is still its own render pass, so a pass may
-# sample what the one before it wrote; what goes is a submission per pass,
-# whose fixed cost on the GPU's timeline was most of the pyramid's time
-# (docs/physics-performance-plan.md §10i).
-func beginFullscreenBatchEncoder() ret Ptr {
-  unsafe {
-    let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
-    ret wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
-  }
-}
-
+# One fullscreen pass recorded into an open encoder (the frame's post
+# recording, GbufferTargets.postEncoder): its own render pass, so it may
+# sample what the pass before it wrote, but no encoder or submit of its own.
 func runFullscreenInBatch(
   encoder: copy Ptr
   resources: view GpuResources
@@ -165,19 +155,6 @@ func runFullscreenInBatch(
     )
     wgpuRenderPassEncoderEnd(renderPassEncoder: pass)
     wgpuRenderPassEncoderRelease(renderPassEncoder: pass)
-  }
-}
-
-func submitFullscreenBatch(encoder: copy Ptr) unsafe {
-  unsafe {
-    if encoder is webgpuNull() {
-      ret
-    }
-    let cbDesc: WGPUCommandBufferDescriptor = { nextInChain: webgpuNull() }
-    let cmd: Ptr = wgpuCommandEncoderFinish(commandEncoder: encoder, descriptor: cbDesc)
-    gbSubmit(cmd: cmd)
-    wgpuCommandBufferRelease(commandBuffer: cmd)
-    wgpuCommandEncoderRelease(commandEncoder: encoder)
   }
 }
 
