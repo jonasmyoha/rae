@@ -110,20 +110,18 @@ func addTransparentInstance(
   cache.batch.count = cache.batch.count + 1
 }
 
-func copyOpaqueRadiance(resources: view GpuResources, targets: view DeferredTargets) {
+func copyOpaqueRadiance(resources: mod GpuResources, targets: mod DeferredTargets) {
   unsafe {
     let texture: Ptr = textureHandle(resources: resources, id: targets.lit)
     let copyTexture: Ptr = textureHandle(resources: resources, id: targets.litCopy)
     if texture is webgpuNull() or copyTexture is webgpuNull() {
       ret
     }
-    # Geometry has already submitted its encoder. Like the fullscreen post
-    # passes, submit on the same queue to preserve graph execution order.
-    let encoderDescriptor: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
-    let encoder: Ptr = wgpuDeviceCreateCommandEncoder(
-      device: webgpuDevice()
-      descriptor: encoderDescriptor
-    )
+    # Recorded into the frame's post recording, after the passes before it
+    let encoder: Ptr = postEncoder(targets: targets, resources: resources)
+    if encoder is webgpuNull() {
+      ret
+    }
     let source: WGPUTexelCopyTextureInfo = { texture: texture, aspect: WGPUTextureAspect_All }
     let destination: WGPUTexelCopyTextureInfo = {
       texture: copyTexture
@@ -140,14 +138,6 @@ func copyOpaqueRadiance(resources: view GpuResources, targets: view DeferredTarg
       destination: destination
       copySize: extent
     )
-    let bufferDescriptor: WGPUCommandBufferDescriptor = { nextInChain: webgpuNull() }
-    let commandBuffer: Ptr = wgpuCommandEncoderFinish(
-      commandEncoder: encoder
-      descriptor: bufferDescriptor
-    )
-    gbSubmit(cmd: commandBuffer)
-    wgpuCommandBufferRelease(commandBuffer: commandBuffer)
-    wgpuCommandEncoderRelease(commandEncoder: encoder)
   }
 }
 
@@ -237,7 +227,7 @@ func drawTransparentBatch(
   cache: mod TransparentPassCache
   resources: mod GpuResources
   gbuffer: mod GbufferCache
-  targets: view DeferredTargets
+  targets: mod DeferredTargets
 ) {
   unsafe {
     let mesh: Int = cache.batch.meshId
@@ -269,8 +259,10 @@ func drawTransparentBatch(
     ) {
       ret
     }
-    let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
-    let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
+    let enc: Ptr = postEncoder(targets: targets, resources: resources)
+    if enc is webgpuNull() {
+      ret
+    }
     var colorAtts: List(WGPURenderPassColorAttachment) = List.create(
       WGPURenderPassColorAttachment
       cap: 1
@@ -319,12 +311,7 @@ func drawTransparentBatch(
       gbAdvanceDraws(cache: gbuffer, count: count)
     }
     wgpuRenderPassEncoderEnd(renderPassEncoder: pass)
-    let cbDesc: WGPUCommandBufferDescriptor = { nextInChain: webgpuNull() }
-    let cmd: Ptr = wgpuCommandEncoderFinish(commandEncoder: enc, descriptor: cbDesc)
-    gbSubmit(cmd: cmd)
-    wgpuCommandBufferRelease(commandBuffer: cmd)
     wgpuRenderPassEncoderRelease(renderPassEncoder: pass)
-    wgpuCommandEncoderRelease(commandEncoder: enc)
   }
 }
 
@@ -337,22 +324,25 @@ func drawTransparentBatch(
 # transparentPass, which snapshots on its own.
 func transparentSnapshot(
   cache: mod TransparentPassCache
-  resources: view GpuResources
-  targets: view DeferredTargets
-) pub {
+  resources: mod GpuResources
+  targets: mod DeferredTargets
+) {
   if not targetsReady(targets: targets, resources: resources) {
     ret
   }
   copyOpaqueRadiance(resources: resources, targets: targets)
   cache.snapshotDone = true
+  # The app draws its refracting surface next with its own encoder and
+  # submit, so everything recorded so far (lighting, this copy) goes first.
+  flushPostPasses(targets: targets, resources: resources)
 }
 
 func transparentPass(
   cache: mod TransparentPassCache
   resources: mod GpuResources
   gbuffer: mod GbufferCache
-  targets: view DeferredTargets
-) pub {
+  targets: mod DeferredTargets
+) {
   if not targetsReady(targets: targets, resources: resources) {
     cache.batch.count = 0
     ret
