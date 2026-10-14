@@ -216,6 +216,7 @@ static void g3d_sdf_init_pipeline(void) {
     pd.multisample.count = 1; pd.multisample.mask = 0xFFFFFFFFu;
     pd.fragment = &fs;
     g3d_sdf_pipeline = wgpuDeviceCreateRenderPipeline(g_wgpu_dev, &pd);
+    g_c_pipelines_created++;
     wgpuShaderModuleRelease(mod);
     if (!g3d_sdf_pipeline) { fprintf(stderr, "[gpu3d] SDF pipeline creation FAILED\n"); return; }
 

@@ -541,6 +541,34 @@ func lightingPass(
   )
 }
 
+# The FXAA pipeline, uniform and sampler, once (also the renderer's warm-up)
+func ensureAntialiasObjects(
+  cache: mod AntialiasPassCache
+  resources: mod GpuResources
+  format: copy Int32
+) {
+  if cache.pipeMade {
+    ret
+  }
+  cache.pipeMade = true
+  let antialiasShader: Shader = shader(files: ["lib/deferred_antialias.wgsl"])
+  cache.pipeline = createFullscreenPipeline(
+    resources: resources
+    shader: antialiasShader
+    format: format
+  )
+  if let uniform: BufferId = createBuffer(
+    resources: resources
+    size: 16
+    usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst
+  ) {
+    cache.uniform = uniform
+  }
+  if let sampler: SamplerId = createSampler(resources: resources) {
+    cache.sampler = sampler
+  }
+}
+
 # TAA resolve (#390): this frame's radiance + last frame's history, reprojected
 # through the G-buffer's motion channel, into the slot the composite then
 # reads. A no-op with TAA off (#20).
@@ -562,25 +590,7 @@ func antialiasPass(
   if not postPassReady(targets: targets, resources: resources, gbuffer: gbuffer) {
     ret
   }
-  if not cache.pipeMade {
-    cache.pipeMade = true
-    let antialiasShader: Shader = shader(files: ["lib/deferred_antialias.wgsl"])
-    cache.pipeline = createFullscreenPipeline(
-      resources: resources
-      shader: antialiasShader
-      format: targets.litFormat
-    )
-    if let uniform: BufferId = createBuffer(
-      resources: resources
-      size: 16
-      usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst
-    ) {
-      cache.uniform = uniform
-    }
-    if let sampler: SamplerId = createSampler(resources: resources) {
-      cache.sampler = sampler
-    }
-  }
+  ensureAntialiasObjects(cache: cache, resources: resources, format: targets.litFormat)
   if not isValidRenderPipeline(resources: resources, id: cache.pipeline) {
     ret
   }

@@ -63,3 +63,6 @@ void* rae_sdf_atlas_pixels(int64_t handle) { (void)handle; return (void*)0; }
 int64_t rae_sdf_atlas_width(int64_t handle) { (void)handle; return 0; }
 int64_t rae_sdf_atlas_height(int64_t handle) { (void)handle; return 0; }
 void rae_ext_Gpu2d_closeWindow(void) {}
+
+/* No window: no frame is ever presented (lib/gpu/PipelineWatch.rae). */
+rae_Bool rae_frame_presented_any(void) { return 0; }
