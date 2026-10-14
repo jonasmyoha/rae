@@ -1,0 +1,25 @@
+# A parameter named like a module (here `src`, the project's own src/ folder
+# module) is a value: `src.copyAt(index:)` calls the method on the parameter,
+# not a function of the module. A local shadows a module the same way.
+func reversed(src: view List(Int)) ret List(Int) {
+  var out: List(Int) = List.create(Int, cap: src.length)
+  var i: Int = src.length - 1
+  loop i >= 0 {
+    if let value: Int = src.copyAt(index: i) {
+      out.add(value: value)
+    }
+    i = i - 1
+  }
+  ret out
+}
+
+func main() {
+  let numbers: List(Int) = { 1, 2, 3 }
+  let back: List(Int) = reversed(src: numbers)
+  log(
+    "reversed: {back.copyAtDefault(index: 0)} {back.copyAtDefault(index: 1)} {back.copyAtDefault(
+      index: 2
+    )}"
+  )
+  log("helper: {helperValue()}")
+}
