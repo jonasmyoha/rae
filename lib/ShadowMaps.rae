@@ -28,7 +28,7 @@
 #     ambient darkening). Unused slots stay zero and cfg.x carries the live
 #     count, so an app that never runs the pass simply gets 1.0.
 #
-# Owned by the renderer (RenderPasses.shadow / Renderer3d.shadow); the
+# Owned by the renderer (RenderPasses.shadow); the
 # metaball casters are ShadowMapsSdf.rae.
 import String
 import Math
@@ -48,6 +48,9 @@ open gpu/GpuRenderPass
 open gpu/GpuRenderTransfer
 open gpu/GpuIds
 open ShadowMapsSdf
+open GbufferRecord
+open ecs/Entity
+open ecs/ComponentTable
 
 const shadowMaxCascades: Int = 4
 
@@ -806,4 +809,32 @@ func shadowShutdown(shadow: mod ShadowCache, resources: mod GpuResources) {
   retireRenderPipeline(resources: resources, id: shadow.skinPipeline)
   let casterBias: ShadowCasterBias = shadow.casterBias
   shadow = createShadowCacheWith(casterBias: casterBias)
+}
+
+# Every visible mesh of a World3d as a static caster: each mesh entity's
+# Transform3d through the ECS queries (#793; was Gpu3d.renderSceneShadowWorld,
+# moved here when the C forward renderer was deleted, forward-rae-3)
+func renderSceneShadowWorld(
+  shadow: mod ShadowCache
+  meshes: view MeshStore
+  resources: view GpuResources
+  world: view World3d
+) {
+  loop var j: Int = 0, j < componentCount(this: world.meshRenderers), ++j {
+    let entityId: EntityId = componentEntityAt(this: world.meshRenderers, i: j)
+    let meshRenderer: view MeshRenderer => componentView(
+      this: world.meshRenderers
+      entityId: entityId
+    )
+    if meshRenderer.visible {
+      let transform: view Transform3d => componentView(this: world.transforms, entityId: entityId)
+      drawShadowCaster(
+        shadow: shadow
+        meshes: meshes
+        resources: resources
+        mesh: meshRenderer.mesh
+        model: modelMatrixOf(t: transform)
+      )
+    }
+  }
 }

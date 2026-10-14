@@ -874,8 +874,8 @@ func retireSubmission(resources: mod GpuResources, id: view SubmissionId) ret Bo
 # as finished so deferred releases proceed, and the manager's references are
 # dropped by its destructor. Nothing callback-reachable is freed here.
 # The same as shutdown(resources:) under a name no renderer module shadows
-# (Gbuffer / Gpu3d have their own bare `shutdown()`; a module that opens one of
-# them and this cannot spell the manager's bare call unambiguously — #905).
+# (Gbuffer has its own bare `shutdown()`; a module that opens it
+# and this cannot spell the manager's bare call unambiguously — #905).
 func shutdownManager(resources: mod GpuResources) {
   shutdown(resources: resources)
 }

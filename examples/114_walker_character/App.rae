@@ -43,7 +43,6 @@ open GrassCompute
 import GrassConfig
 import app3d/Slider
 open Scene3d
-open Gpu3d
 open RendererDeferred
 open Sky
 open Gbuffer
@@ -941,7 +940,6 @@ func runWalkerApp() ret Int {
   }
   shutdownDeferredRenderer(renderer: app.renderSystem.renderer)  # #904: the renderer-owned GPU manager, before the C shutdown
   destroyPhysicsSystem(physicsSystem: app.physicsSystem)
-  skinShutdown()
   shutdown()
   Gpu2d.closeWindow()
   ret exitCode

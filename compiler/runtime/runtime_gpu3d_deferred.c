@@ -1,12 +1,9 @@
-#include "runtime_sky_state.h"
 
 /* Deferred frame — depth pyramid, lighting, composite (#356, Track B).
  *
  * The passes that consume what runtime_gpu3d_gbuffer.c produces. Split
  * into its own file because the geometry pass and the passes that read it
- * are separate concerns that change for different reasons, and because
- * runtime_gpu3d.c is already the cautionary tale for letting a renderer
- * family accumulate in one file (queue #364).
+ * are separate concerns that change for different reasons (queue #364).
  *
  * DEPTH PYRAMID. A mip chain of depth reduced to the NEAREST value, not an
  * average. The consumer is occlusion: "is anything in this screen region

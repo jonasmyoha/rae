@@ -972,20 +972,6 @@ rae_String rae_ext_rae_str_cstr_ptr(const char** s); // Legacy/helper
 int64_t rae_ext_nextTick(void);
 int64_t rae_ext_nowMs(void);
 
-/* Cooked Hosek-Wilkie coefficients, pushed from Rae. index 0..35, laid out
- * three vec4 per channel. Two entry points, ONE table (runtime_sky_state.h):
- * the deferred sky is bound through lib/gbuffer.rae and the forward one
- * through lib/gpu3d.rae, and a Rae extern's C name follows its module. */
-void rae_ext_Gbuffer_skyHosekPush(int64_t index, float value);
-void rae_ext_Gpu3d_skyHosekPush(int64_t index, float value);
-/* The forward background. Called between gpu3d.begin and the geometry; takes
- * no camera because the frame's own is used. */
-void rae_ext_Gpu3d_skyDraw(float skyKind, float turbidity, float skyExposure, float sunSizeRad,
-                           float sunX, float sunY, float sunZ,
-                           float sunR, float sunG, float sunB,
-                           float zenR, float zenG, float zenB, float bands,
-                           float horR, float horG, float horB, float discI,
-                           float clearR, float clearG, float clearB);
 int64_t rae_ext_nowNs(void);
 void rae_ext_rae_sleep(int64_t ms);
 int64_t rae_ext_Time_sleepNs(int64_t ns);  /* one nanosleep (lib/Time.rae waitUntil) */
@@ -1298,7 +1284,6 @@ void* rae_gb_lit_texture(void);
 void* rae_gb_lit_copy_texture(void);
 void* rae_gb_lit_copy_view(void);
 int64_t rae_gb_lit_format(void);
-void rae_ext_Gbuffer_skyHosekPush(int64_t index, float value);
 /* TAA pass in Rae (#504). */
 int64_t rae_gb_taa_ready(void);
 int64_t rae_gb_taa_begin(void);
@@ -1316,10 +1301,6 @@ void* rae_gb_pyr_from_depth_pipeline(void);
 void* rae_gb_pyr_reduce_pipeline(void);
 void* rae_gb_pyr_src_view(int64_t i);
 void* rae_gb_pyr_rt_view(int64_t i);
-/* Shadow cascades (#925): the ShadowCache (lib/ShadowMaps.rae) owns the targets,
- * pipelines, queue and passes; C keeps the WGSL and receives the three sampled
- * inputs BORROWED for the forward scene / skin binds. */
-void rae_g3d_set_shadow_inputs(void* frame_ubuf, void* array_view, void* sampler);
 /* gpu2d frame lifecycle in Rae (#504). */
 void rae_g2d_frame_reset(void);
 void rae_g2d_present(void* texture, int64_t width, int64_t height);
@@ -1342,63 +1323,5 @@ void* rae_sdf_atlas_pixels(int64_t handle);
 int64_t rae_sdf_atlas_width(int64_t handle);
 int64_t rae_sdf_atlas_height(int64_t handle);
 /* Procedural texture registration (#539): upload RGBA pixels generated in Rae. */
-/* Forward renderer (#514): frame prepare + handle accessors for the Rae-side
- * forward render pass (gpu3d.beginForward). Mirrors the rae_gb_* deferred set. */
-int   rae_g3d_frame_prepare(const float* frame, int64_t count);
-void* rae_g3d_hdr_view(void);
-void* rae_g3d_normal_view(void);
-void* rae_g3d_velocity_view(void);
-void* rae_g3d_ambient_view(void);
-void* rae_g3d_depth_view(void);
-void* rae_g3d_pipeline(void);
-void* rae_g3d_bind(void);
-void  rae_g3d_set_frame(void* enc, void* pass);
-void* rae_g3d_pass(void);
-void* rae_g3d_encoder(void);
-int64_t rae_g3d_frame_active(void);
-void  rae_g3d_clear_frame(void);
-void  rae_g3d_submit_cmd(void* cmd);
-int   rae_g3d_tonemap_prepare(void);
-void* rae_g3d_tonemap_pipeline(void);
-void* rae_g3d_tonemap_bind(int64_t slot);
-int64_t rae_g3d_tonemap_pending(void);
-void  rae_g3d_present_frame(void* texture, int64_t width, int64_t height);
-int   rae_g3d_taa_prepare(void);
-void* rae_g3d_taa_pipeline(void);
-void* rae_g3d_taa_bind(int64_t slot);
-void* rae_g3d_taa_view(int64_t slot);
-int   rae_g3d_ssao_prepare(void);
-int64_t rae_g3d_ssao_enabled(void);
-int64_t rae_g3d_ao_debug_on(void);
-void* rae_g3d_ssao_pipeline(void);
-void* rae_g3d_ssao_bind(void);
-void* rae_g3d_ao_view(void);
-void* rae_g3d_ao_apply_pipeline(void);
-void* rae_g3d_ao_apply_bind(void);
-void* rae_g3d_ao_debug_pipeline(void);
-void* rae_g3d_ao_debug_bind(void);
-void  rae_g3d_clear_ao(void);
-int   rae_g3d_sky_prepare(float skyKind, float turbidity, float skyExposure, float sunSizeRad,
-                          float sunX, float sunY, float sunZ,
-                          float sunR, float sunG, float sunB,
-                          float zenR, float zenG, float zenB, float bands,
-                          float horR, float horG, float horB, float discI,
-                          float clearR, float clearG, float clearB);
-void* rae_g3d_sky_pipeline(void);
-void* rae_g3d_sky_bind(void);
-int   rae_g3d_push_draw_record(int64_t mesh, const struct rae_Mat4* model, const struct rae_Mat4* prevModel,
-                               float r, float g, float b, float metallic,
-                               float emR, float emG, float emB, float roughness);
-int   rae_g3d_push_metaball_cluster(const float* packedBalls, int64_t count,
-                                    const float* packedColors, float smoothing,
-                                    float metallic, float roughness,
-                                    float emR, float emG, float emB);
-void* rae_g3d_sdf_pipeline(void);
-void* rae_g3d_sdf_bind(int64_t slot);
-int   rae_g3d_push_skinned_draw(int64_t mesh, const struct rae_Mat4* model,
-                                float r, float g, float b, float metallic, float roughness,
-                                void* palette);   /* #921: the SkinStore palette, borrowed */
-void* rae_g3d_skin_pipeline(void);
-void* rae_g3d_skin_bind(void);
 
 #endif
