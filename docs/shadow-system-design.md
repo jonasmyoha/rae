@@ -157,8 +157,32 @@ fixed):
 | Snap each cascade's ortho centre to whole shadow-map texels in world space | Shadows crawl and shimmer as the camera moves — the single most-noticed shadow artefact, and exactly the "pixelation" complaint |
 | Fit cascades to the frustum slice bounding sphere, not the frustum corners | Shadow map resolution changes with camera yaw, so shimmer returns on rotation |
 | Overlap cascades and dither the transition using the same blue noise | A hard cascade boundary is visible as a line where blur width changes |
-| Normal-offset bias (offset along the geometric normal by ~1 texel world size), not just depth bias | Depth bias alone causes peter-panning, which detaches contact shadows — the very bug we are fixing |
+| A receiver-plane bias (each PCF tap compared against the receiving surface's plane), plus a small depth bias. In the deferred renderer this REPLACED the normal-offset bias (render-perf-7); the forward renderer still offsets along the normal | A large depth bias, front-face culling or a normal offset each push the shadow away from the contact, so feet float over their shadow (peter-panning) |
 | **Do not** use reverse-Z for the cascades | Reverse-Z buys precision from the float exponent against perspective's 1/z. Ortho depth is linear, so it buys nothing and only risks disagreeing with the main pass's convention. Worth stating so nobody "fixes" the inconsistency later. |
+
+**As built in the deferred renderer (render-perf-7, 2026-10-14).** The
+casters cull back faces like the G-buffer, so the lit faces cast
+(`backFaceShadowCasterBias` in `lib/ShadowMaps.rae`: depth bias 1, slope
+1.5). The lighting (`sunVisibility` in `lib/deferred_light.wgsl`) has no
+normal offset. Instead it computes the receiving surface's light-space
+depth slope from its G-buffer normal and the cascade matrix, and compares
+each tap against the depth of that plane. `dpdx`/`dpdy` would give the same
+plane, but the lighting's early returns make its control flow non-uniform.
+The slope is clamped at 8 texel-depths per texel (grazing light), and a
+bias of half a texel-depth plus 0.75 texel of slope covers the hardware
+2x2 compare. The filter is 4 taps of the 2x2 compare, 0.75 texel either
+side. It replaced the A2 blocker search + 12-tap Poisson PCF, about 20 taps
+per pixel.
+
+- Contacts now stay attached: a metaball's shadow touches where it meets
+  the floor, and boxes, rocks and the tree's tiers get their contact
+  shadows. 114 and 112 show no new acne on slopes or in a low (7:00) sun.
+- The cost: a constant ~3.5-texel penumbra. A2's penumbra that widens with
+  the blocker distance (requirement R1) is gone. To bring it back, add the
+  blocker search again with the receiver-plane bias kept, so the cost
+  returns but the contacts stay attached.
+- Measured headless at 2560x1600, frame time: 114 4.2 -> 4.0 ms, 112
+  7.4 -> 7.0 ms.
 
 ### Layer B — screen-space contact shadows
 
