@@ -31,6 +31,7 @@
 # average frame time split into the CPU's own work, the present (and, inside
 # it, the drawable acquire, which waits for vsync) and the wait for the GPU here.
 import Sys
+open gpu/PipelineWatch
 open webgpu/Webgpu
 open webgpu/Context
 
@@ -47,6 +48,7 @@ type FramePacer {
   acquireThisFrame: Float64
   acquireStartedAt: Float64
   waitSeconds: Float64  # in paceFrame, waiting for the GPU
+  cPipelines: CPipelineWatch  # a C pipeline created mid-game is logged (render-perf-13)
 }
 
 const timingWindow: Int = 120
@@ -79,6 +81,7 @@ func createFramePacer() ret FramePacer {
     acquireThisFrame: 0.0
     acquireStartedAt: 0.0
     waitSeconds: 0.0
+    cPipelines: createCPipelineWatch()
   }
 }
 
@@ -102,6 +105,7 @@ func noteAcquireTime(pacer: mod FramePacer, seconds: view Float64, startedAt: vi
 
 # Call once per frame, right after the frame is submitted and presented.
 func paceFrame(pacer: mod FramePacer) {
+  checkCPipelines(watch: pacer.cPipelines)
   var frameEnd: UInt64 = 0
   unsafe {
     # No device (a renderer exercised without one, as the old C present

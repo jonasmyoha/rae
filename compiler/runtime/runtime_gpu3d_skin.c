@@ -276,6 +276,7 @@ static void g3d_skin_init_pipeline(void) {
     pd.multisample.count = 1; pd.multisample.mask = 0xFFFFFFFFu;
     pd.fragment = &fs;
     g3d_skin_pipeline = wgpuDeviceCreateRenderPipeline(g_wgpu_dev, &pd);
+    g_c_pipelines_created++;
     wgpuShaderModuleRelease(mod);
     if (!g3d_skin_pipeline) { fprintf(stderr, "[skin] pipeline creation FAILED\n"); return; }
 

@@ -215,6 +215,7 @@ static void g3d_init_pipeline(void) {
     pd.multisample.count = 1; pd.multisample.mask = 0xFFFFFFFFu;
     pd.fragment = &fs;
     g3d_pipeline = wgpuDeviceCreateRenderPipeline(g_wgpu_dev, &pd);
+    g_c_pipelines_created++;
     wgpuShaderModuleRelease(mod);
     if (!g3d_pipeline) { fprintf(stderr, "[gpu3d] render pipeline creation FAILED\n"); return; }
 
@@ -275,6 +276,7 @@ static void g3d_init_tonemap_pipeline(void) {
     pd.multisample.count = 1; pd.multisample.mask = 0xFFFFFFFFu;
     pd.fragment = &fs;
     g3d_tonemap_pipeline = wgpuDeviceCreateRenderPipeline(g_wgpu_dev, &pd);
+    g_c_pipelines_created++;
     wgpuShaderModuleRelease(mod);
     if (!g3d_tonemap_pipeline) fprintf(stderr, "[gpu3d] tonemap pipeline creation FAILED\n");
 }
@@ -303,6 +305,7 @@ static void g3d_init_taa_pipeline(void) {
     pd.multisample.count = 1; pd.multisample.mask = 0xFFFFFFFFu;
     pd.fragment = &fs;
     g3d_taa_pipeline = wgpuDeviceCreateRenderPipeline(g_wgpu_dev, &pd);
+    g_c_pipelines_created++;
     wgpuShaderModuleRelease(mod);
     if (!g3d_taa_pipeline) { fprintf(stderr, "[gpu3d] TAA pipeline creation FAILED\n"); return; }
     WGPUSamplerDescriptor sd; memset(&sd, 0, sizeof(sd));

@@ -398,6 +398,7 @@ static WGPURenderPipeline g3d_make_fullscreen_pipeline(const char* wgsl, WGPUTex
     pd.multisample.count = 1; pd.multisample.mask = 0xFFFFFFFFu;
     pd.fragment = &fs;
     WGPURenderPipeline pl = wgpuDeviceCreateRenderPipeline(g_wgpu_dev, &pd);
+    g_c_pipelines_created++;
     wgpuShaderModuleRelease(mod);
     if (!pl) fprintf(stderr, "[gpu3d] %s pipeline creation FAILED\n", label);
     return pl;

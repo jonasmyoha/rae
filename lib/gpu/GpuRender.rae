@@ -23,6 +23,7 @@ open webgpu/WebgpuEnums
 open webgpu/WebgpuTypes
 open gpu/GpuResources
 open gpu/GpuLifetime
+open gpu/PipelineWatch
 open gpu/GpuRenderPass
 open gpu/GpuRenderTransfer
 
@@ -642,6 +643,7 @@ func createRenderPipelineSource(
       if handle is webgpuNull() {
         ret none
       }
+      notePipelineCreated(kind: "render pipeline", wgsl: wgsl)
       storeHandle(table: resources.renderPipelines, slot: slot, handle: handle)
     }
     ret RenderPipelineId {

@@ -45,6 +45,7 @@ open GbufferPasses
 open GbufferAo
 open GbufferBloom
 open GbufferSmaa
+open GbufferWarmUp
 open GbufferFullscreen
 open TransparentForward
 open GbufferUnderwater
@@ -155,6 +156,7 @@ type RenderPasses {
   underwater: UnderwaterPassCache
   targets: DeferredTargets  # #923: the post-pass targets, uniforms, pipelines + frame state
   shadow: ShadowCache  # #925: the sun cascades — targets, pipelines, caster queue, passes
+  warmedUp: Bool  # every pipeline was created (GbufferWarmUp, render-perf-13)
 }
 
 func createRenderPasses() ret RenderPasses {
@@ -174,6 +176,7 @@ func createRenderPasses() ret RenderPasses {
       underwater: createUnderwaterPassCache()
       targets: createDeferredTargets()
       shadow: createShadowCacheWith(casterBias: backFaceShadowCasterBias())
+      warmedUp: false
     }
   }
 }
@@ -698,6 +701,28 @@ func renderDeferredPassWith(
   light: view Light3d
   aspect: view Float
 ) {
+  # Every pipeline before the first frame is presented (render-perf-13)
+  if not renderer.passes.warmedUp and postPassReady(
+    targets: renderer.passes.targets
+    resources: resources
+    gbuffer: renderer.passes.gbuffer
+  ) {
+    renderer.passes.warmedUp = true
+    warmUpDeferredPipelines(
+      resources: resources
+      targets: renderer.passes.targets
+      gbuffer: renderer.passes.gbuffer
+      composite: renderer.passes.composite
+      ao: renderer.passes.ao
+      antialias: renderer.passes.antialias
+      smaa: renderer.passes.smaa
+      bloom: renderer.passes.bloom
+      inspect: renderer.passes.inspect
+      transparent: renderer.passes.transparent
+      underwater: renderer.passes.underwater
+      shadow: renderer.passes.shadow
+    )
+  }
   if tag is RenderTag.depthPyramid {
     buildDepthPyramid(
       cache: renderer.passes.pyr

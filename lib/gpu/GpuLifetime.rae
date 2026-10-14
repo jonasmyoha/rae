@@ -28,6 +28,7 @@ open webgpu/Readback
 open gpu/GpuResources
 open gpu/GpuDependencies
 open gpu/GpuReadback
+open gpu/PipelineWatch
 
 type PipelineId {
   managerTag: Int
@@ -196,6 +197,7 @@ func createComputePipelineSource(
       if handle is webgpuNull() {
         ret none
       }
+      notePipelineCreated(kind: "compute pipeline", wgsl: wgsl)
       storeHandle(table: resources.pipelines, slot: slot, handle: handle)
     }
     ret PipelineId {

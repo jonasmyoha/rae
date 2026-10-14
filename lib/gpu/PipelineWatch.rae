@@ -1,0 +1,64 @@
+# PipelineWatch — no pipeline should be created once the game runs
+# (render-perf-13): creating one compiles shaders and can stall the frame it
+# happens in (a first-time-draw hitch). Renderers create theirs during their
+# warm-up, before the first frame; this logs any that is created after a
+# frame has been presented, so a late one is visible:
+#   [pipeline] render pipeline created after the first frame: <its shader>
+# Rae's own creation functions (gpu/GpuRender, GpuRenderDepth, GpuLifetime)
+# call notePipelineCreated. The few pipelines C still creates are counted in
+# C (rae_c_pipelines_created) and checked here once per frame (checkCPipelines).
+import String
+
+func nativeFramePresentedAny() unsafe extern("rae_frame_presented_any") ret Bool
+
+func nativeCPipelinesCreated() unsafe extern("rae_c_pipelines_created") ret Int
+
+func framePresentedAny() ret Bool {
+  unsafe {
+    ret nativeFramePresentedAny()
+  }
+}
+
+# The shader's first comment line (most say what the shader is), skipping
+# the precision prelude composed in front
+func pipelineLabel(wgsl: view String) ret String {
+  let lines: List(String) = wgsl.split(sep: "\n")
+  loop let line: String in lines {
+    let trimmed: String = line.trim()
+    if trimmed.startsWith(prefix: "//") and not trimmed.contains(sub: "prelude") {
+      ret trimmed.sub(start: 0, len: 100)
+    }
+  }
+  ret "(no comment line; {wgsl.length()} bytes of WGSL)"
+}
+
+func notePipelineCreated(kind: view String, wgsl: view String) {
+  if framePresentedAny() {
+    log("[pipeline] {kind} created after the first frame: {pipelineLabel(wgsl: wgsl)}")
+  }
+}
+
+# C's pipeline count at the previous check: a frame that ends with more than
+# that, after the first frame, created a C pipeline mid-game
+type CPipelineWatch {
+  seen: Int
+  # The first check only records: the pipelines made during the first
+  # frame were made before it was presented
+  checked: Bool
+}
+
+func createCPipelineWatch() ret CPipelineWatch {
+  ret CPipelineWatch { seen: 0, checked: false }
+}
+
+func checkCPipelines(watch: mod CPipelineWatch) {
+  var created: Int = 0
+  unsafe {
+    created = nativeCPipelinesCreated()
+  }
+  if watch.checked and created > watch.seen and framePresentedAny() {
+    log("[pipeline] {created - watch.seen} C pipeline(s) created after the first frame")
+  }
+  watch.seen = created
+  watch.checked = framePresentedAny()
+}
