@@ -480,7 +480,8 @@ func rendererPathName() pub ret String {
 
 # The scene resolution (lib/RenderResolution): the dynamic scale is a fraction
 # of the ceiling (app3d/RenderScale's controller sets it each frame), the
-# ceiling is the most scene pixels the app wants (app3d defaultRenderCeiling).
+# ceiling is the most scene pixels the app wants (by default the device's,
+# RenderResolution.defaultRenderCeiling).
 # The UI, the composite's output and the present stay at native size.
 func setDynamicRenderScale(renderer: mod DeferredRenderer, scale: view Float) {
   renderer.passes.gbuffer.dynamicScale = scale
@@ -493,6 +494,13 @@ func setRenderCeiling(renderer: mod DeferredRenderer, ceiling: view RenderCeilin
   }
   renderer.passes.gbuffer.ceilingWidth = ceiling.width
   renderer.passes.gbuffer.ceilingHeight = ceiling.height
+}
+
+# Opt out of the default ceiling: draw the 3D scene at the drawable's full
+# size (a still-image tool, a reference capture). The dynamic scale still
+# applies; RAE_RENDER_CEILING still wins.
+func renderAtNativeResolution(renderer: mod DeferredRenderer) {
+  setRenderCeiling(renderer: renderer, ceiling: noRenderCeiling())
 }
 
 func createDeferredRenderer() pub ret DeferredRenderer {
