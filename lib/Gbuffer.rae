@@ -157,23 +157,12 @@ type GbufferCache {
   sdf: SdfPassCache  # #922: the metaball clusters' pipeline / uniforms / binds
 }
 
-# A ceiling forced by RAE_RENDER_CEILING applies to every deferred renderer;
-# without it the app sets one (setRenderCeiling) or the scene is native.
-func envCeilingWidth() ret Int {
-  if let ceiling: RenderCeiling = renderCeilingFromEnv() {
-    ret ceiling.width
-  }
-  ret 0
-}
-
-func envCeilingHeight() ret Int {
-  if let ceiling: RenderCeiling = renderCeilingFromEnv() {
-    ret ceiling.height
-  }
-  ret 0
-}
-
-func createGbufferCache() pub ret GbufferCache {
+# Every deferred renderer starts at the device's default ceiling
+# (RenderResolution.defaultRenderCeiling: 1600x720 on a phone, 2560x1440 on a
+# desktop; RAE_RENDER_CEILING forces one); an app can set another or opt out
+# with renderAtNativeResolution.
+func createGbufferCache() ret GbufferCache {
+  let ceiling: RenderCeiling = defaultRenderCeiling()
   unsafe {
     ret GbufferCache {
       targets: fillTextureIds(count: gbufferTargetCount)
@@ -182,8 +171,8 @@ func createGbufferCache() pub ret GbufferCache {
       targetHeight: 0
       targetsGen: 0
       dynamicScale: renderScaleFromEnv()
-      ceilingWidth: envCeilingWidth()
-      ceilingHeight: envCeilingHeight()
+      ceilingWidth: ceiling.width
+      ceilingHeight: ceiling.height
       sceneScale: 1.0
       frameUniform: noBufferId()
       draws: noBufferId()
