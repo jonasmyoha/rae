@@ -190,12 +190,16 @@ func updateHttpDate(cache: mod HttpDateCache, epochSeconds: view Int) ret Bool {
 # ----- deadlines ------------------------------------------------------
 func nativeSleepNs(ns: Int) unsafe extern("rae_ext_Time_sleepNs") ret Int
 
-# Sleep until the monotonic clock (`nowNs()`) reaches `deadlineNs`, to well
-# under a millisecond. The OS may let a sleep run long by a share of its length
-# (macOS timer coalescing: a 33 ms sleep wakes ~4 ms late), so a long wait
-# sleeps 7/8 of what is left, reads the clock, and repeats; the last sleeps are
-# short and so is their slack. A signal that cuts a sleep short only makes it
-# read the clock again.
+# Sleep until the monotonic clock (`nowNs()`) reaches `deadlineNs`; never
+# returns early, and late by well under a millisecond. The OS lets a sleep run
+# long by a share of its length (macOS timer coalescing: up to about half of
+# it, measured 2026-10-14 in C: a 4 ms nanosleep woke 2 ms late, a 33 ms one
+# 7.5 ms), so a wait sleeps HALF of what is left, reads the clock, and
+# repeats; with less than 0.2 ms left it sleeps the rest. About eight sleeps
+# for a 33 ms wait. (It used to sleep 7/8 of what was left, which overshoots
+# as soon as the slack passes 1/8: 33 ms waits were 4.4 ms late at the
+# median; halving gives 0.05 ms idle and 0.15 ms with 12 busy processes.) A
+# signal that cuts a sleep short only makes it read the clock again.
 func waitUntil(deadlineNs: view Int) {
   loop {
     let remaining: Int = deadlineNs - nowNs()
@@ -203,8 +207,8 @@ func waitUntil(deadlineNs: view Int) {
       ret
     }
     var step: Int = remaining
-    if remaining > 1000000 {
-      step = remaining - remaining / 8
+    if remaining > 200000 {
+      step = remaining / 2
     }
     unsafe {
       let code: Int = nativeSleepNs(ns: step)
