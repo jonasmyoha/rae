@@ -21,6 +21,7 @@ open Gpu2dCanvasFrame
 open webgpu/Webgpu
 open webgpu/Context
 open gpu/FramePacer
+open gpu/DeviceFeatures
 
 # --- Window + surface ----------------------------------------------------
 # Open a GPU-presenting window (Metal layer wrapped as a wgpu surface) and
@@ -34,6 +35,7 @@ func nativeInitWindow(
 ) unsafe extern("rae_ext_Gpu2d_initWindow")
 
 func initWindow(width: copy Int, height: copy Int, title: copy String) {
+  chooseDeviceFeatures()  # before the device exists (gpu/DeviceFeatures)
   unsafe {
     nativeInitWindow(width: width, height: height, title: title)
   }

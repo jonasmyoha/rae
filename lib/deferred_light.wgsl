@@ -106,38 +106,37 @@ fn sunVisibility(wpos: vec3<f32>, N: vec3<f32>, viewDepth: f32) -> f32 {
   }
   return sum * 0.25;
 }
-const PI: f32 = 3.14159265;
-const RAE_RIM_STRENGTH: f32 = 0.55;
-const RAE_RIM_POWER: f32 = 3.2;
-const RAE_AO_CONTACT: f32 = 0.5;
-fn toonBand(x: f32, bands: f32) -> f32 {
-  let s = clamp(x, 0.0, 1.0) * bands;
-  let i = floor(s);
-  let f = s - i;
-  return (i + smoothstep(0.4, 0.6, f)) / bands;
-}
+// render-perf-12: colour and shading arithmetic is `half` (the precision
+// prelude composed in front: f16 with shader-f16, else f32). Depth, the
+// world-position reconstruction, shadows, the AO upsample weights, the sky and
+// the GGX specular term stay f32: GGX reaches ~7.8e4 for a smooth surface,
+// above f16's 65504, and its small-roughness terms underflow.
+const PI = 3.14159265;
+const RAE_RIM_STRENGTH = 0.55;
+const RAE_RIM_POWER = 3.2;
+const RAE_AO_CONTACT = 0.5;
 fn dGGX(NoH: f32, rough: f32) -> f32 {
   let a = rough * rough;
   let a2 = a * a;
   let d = NoH * NoH * (a2 - 1.0) + 1.0;
   return a2 / (PI * d * d + 1e-5);
 }
-fn gSmith(NoV: f32, NoL: f32, rough: f32) -> f32 {
+fn gSmith(NoV: half, NoL: half, rough: half) -> half {
   let k = (rough + 1.0) * (rough + 1.0) / 8.0;
   let gv = NoV / (NoV * (1.0 - k) + k);
   let gl = NoL / (NoL * (1.0 - k) + k);
   return gv * gl;
 }
-fn fresnel(VoH: f32, f0: vec3<f32>) -> vec3<f32> {
-  return f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - VoH, 5.0);
+fn fresnel(VoH: half, f0: half3) -> half3 {
+  return f0 + (half3(1.0) - f0) * pow(1.0 - VoH, 5.0);
 }
-fn envBrdf(f0: vec3<f32>, rough: f32, NoV: f32) -> vec3<f32> {
-  let c0 = vec4<f32>(-1.0, -0.0275, -0.572, 0.022);
-  let c1 = vec4<f32>(1.0, 0.0425, 1.04, -0.04);
+fn envBrdf(f0: half3, rough: half, NoV: half) -> half3 {
+  let c0 = half4(-1.0, -0.0275, -0.572, 0.022);
+  let c1 = half4(1.0, 0.0425, 1.04, -0.04);
   let r = rough * c0 + c1;
   let a004 = min(r.x * r.x, exp2(-9.28 * NoV)) * r.x + r.y;
-  let ab = vec2<f32>(-1.04, 1.04) * a004 + r.zw;
-  return f0 * ab.x + vec3<f32>(ab.y);
+  let ab = half2(-1.04, 1.04) * a004 + r.zw;
+  return f0 * ab.x + half3(ab.y);
 }
 @fragment
 fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
@@ -152,14 +151,14 @@ fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     return vec4<f32>(skyColor(dirF), 1.0);
   }
   let gbb = textureLoad(gbbTex, px, 0);
-  let albedo = gbb.rgb;
+  let albedo = half3(gbb.rgb);
   let gba = textureLoad(gbaTex, px, 0);
   let mode = gba.w;
   let isEmissive = mode > 0.16 && mode < 0.5;
   let isUnlit = mode > 0.5 && mode < 0.83;
   let isToon = mode > 0.83;
   if (isUnlit) {
-    return vec4<f32>(albedo, 1.0);
+    return vec4<f32>(gbb.rgb, 1.0);
   }
   let dim = vec2<f32>(textureDimensions(gbbTex, 0));
   let uv = (vec2<f32>(px) + vec2<f32>(0.5)) / dim;
@@ -168,41 +167,48 @@ fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
   let wpos = wpos4.xyz / wpos4.w;
   let N = octDecode(gba.xy);
   let gbc = textureLoad(gbcTex, px, 0);
-  let metallic = clamp(gbc.z, 0.0, 1.0);
-  let rough = clamp(gbb.a, 0.045, 1.0);
-  var ao = gbc.w;
-  var emissive = 0.0;
+  let metallic = half(clamp(gbc.z, 0.0, 1.0));
+  let roughF = clamp(gbb.a, 0.045, 1.0);
+  let rough = half(roughF);
+  var ao = half(gbc.w);
+  var emissive = half(0.0);
   if (isEmissive) {
-    emissive = exp(ao * 6.91) - 1.0;
+    emissive = half(exp(gbc.w * 6.91) - 1.0);
     ao = 1.0;
   }
   let V = normalize(L.camPos.xyz - wpos);
   let Ldir = normalize(-L.sunDir.xyz);
   let H = normalize(V + Ldir);
-  let NoV = max(dot(N, V), 1e-4);
-  let NoL = max(dot(N, Ldir), 0.0);
+  let NoVf = max(dot(N, V), 1e-4);
+  let NoLf = max(dot(N, Ldir), 0.0);
+  let NoV = half(NoVf);
+  let NoL = half(NoLf);
   let NoH = max(dot(N, H), 0.0);
-  let VoH = max(dot(V, H), 0.0);
-  let f0 = mix(vec3<f32>(0.04), albedo, metallic);
+  let VoH = half(max(dot(V, H), 0.0));
+  let Nh = half3(N);
+  let f0 = mix(half3(0.04), albedo, metallic);
   let Fs = fresnel(VoH, f0);
-  let spec = dGGX(NoH, rough) * gSmith(NoV, NoL, rough) * Fs
-           / max(4.0 * NoV * NoL, 1e-4);
-  let kd = (vec3<f32>(1.0) - Fs) * (1.0 - metallic);
-  let sunVis = sunVisibility(wpos, N, length(L.camPos.xyz - wpos));
-  let direct = (kd * albedo / PI + spec) * L.sunColor.rgb * NoL * sunVis;
-  let hemi = mix(L.ambGround.rgb, L.ambSky.rgb, N.z * 0.5 + 0.5);
+  // The specular lobe in f32 (see above), clamped like the radiance before
+  // it joins the half sum
+  let specF = dGGX(NoH, roughF) * f32(gSmith(NoV, NoL, rough)) * vec3<f32>(Fs) / max(4.0 * NoVf * NoLf, 1e-4);
+  let kd = (half3(1.0) - Fs) * (1.0 - metallic);
+  let sunVisF = sunVisibility(wpos, N, length(L.camPos.xyz - wpos));
+  let sunVis = half(sunVisF);
+  let directF = (vec3<f32>(kd * albedo) / PI + specF) * L.sunColor.rgb * NoLf * sunVisF;
+  let direct = half3(min(directF, vec3<f32>(60000.0)));
+  let hemi = mix(half3(L.ambGround.rgb), half3(L.ambSky.rgb), Nh.z * 0.5 + 0.5);
   let ambF = envBrdf(f0, rough, NoV);
-  let hl = dot(N, Ldir) * 0.5 + 0.5;
-  let toonT1 = smoothstep(0.0, 0.03, clamp(hl - 0.50, 0.0, 1.0));
-  let toonT2 = smoothstep(0.0, 0.07, clamp(hl - 0.62, 0.0, 1.0));
-  let shadeTint = mix(vec3<f32>(1.0), normalize(max(L.ambSky.rgb, vec3<f32>(0.001))) * 1.732, 0.5);
+  let hl = half(dot(N, Ldir) * 0.5 + 0.5);
+  let toonT1 = smoothstep(half(0.0), half(0.03), clamp(hl - 0.50, 0.0, 1.0));
+  let toonT2 = smoothstep(half(0.0), half(0.07), clamp(hl - 0.62, 0.0, 1.0));
+  let shadeTint = mix(half3(1.0), half3(normalize(max(L.ambSky.rgb, vec3<f32>(0.001))) * 1.732), half(0.5));
   let toonLit = albedo;
   let toonMid = albedo * 0.62 * shadeTint;
   let toonDeep = albedo * 0.34 * shadeTint;
   var toonCol = mix(toonMid, toonLit, toonT2);
   toonCol = mix(toonDeep, toonCol, toonT1);
-  toonCol = mix(toonDeep, toonCol, mix(1.0, sunVis, 0.85));
-  let toonLight = L.sunColor.rgb * 0.34 + hemi * 0.75;
+  toonCol = mix(toonDeep, toonCol, mix(half(1.0), sunVis, half(0.85)));
+  let toonLight = half3(L.sunColor.rgb) * 0.34 + hemi * 0.75;
   let toonShaded = toonCol * toonLight;
   // The SSAO is half resolution (render-perf-6): upsample it from the four
   // half texels around this pixel, bilinear weights times depth similarity,
@@ -224,18 +230,18 @@ fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     aoSum = aoSum + textureLoad(aoTex, q, 0).r * w;
     aoW = aoW + w;
   }
-  var ssao = 1.0;
-  if (aoW > 0.0) { ssao = aoSum / aoW; }
+  var ssao = half(1.0);
+  if (aoW > 0.0) { ssao = half(aoSum / aoW); }
   let ambient = (hemi * albedo * (1.0 - metallic) + hemi * ambF) * ao * ssao;
   let emit = albedo * emissive;
-  let rimF = pow(clamp(1.0 - NoV, 0.0, 1.0), RAE_RIM_POWER);
-  let rimUp = 1.0 - clamp(N.z, 0.0, 1.0);
-  let rim = L.ambSky.rgb * (rimF * rimUp * RAE_RIM_STRENGTH);
-  let contactAO = mix(1.0, ao * ssao, RAE_AO_CONTACT);
-  let castShadowAmb = mix(1.0, sunVis, SH.shadowCfg.z);
+  let rimF = pow(clamp(1.0 - NoV, half(0.0), half(1.0)), half(RAE_RIM_POWER));
+  let rimUp = 1.0 - clamp(Nh.z, half(0.0), half(1.0));
+  let rim = half3(L.ambSky.rgb) * (rimF * rimUp * RAE_RIM_STRENGTH);
+  let contactAO = mix(half(1.0), ao * ssao, half(RAE_AO_CONTACT));
+  let castShadowAmb = mix(half(1.0), sunVis, half(SH.shadowCfg.z));
   var lit = direct * contactAO + ambient * castShadowAmb + emit + rim;
-  if (isToon) { lit = toonShaded * mix(1.0, ao * ssao, 0.6); }
-  let radiance = clamp(lit, vec3<f32>(0.0), vec3<f32>(64000.0));
+  if (isToon) { lit = toonShaded * mix(half(1.0), ao * ssao, half(0.6)); }
+  let radiance = clamp(vec3<f32>(lit), vec3<f32>(0.0), vec3<f32>(64000.0));
   if (L.clearColor.w > 0.5) {
     let fogDist = length(L.camPos.xyz - wpos);
     let fogT = clamp((fogDist - L.sunColor.w) / max(L.ambSky.w - L.sunColor.w, 0.001), 0.0, 1.0);
