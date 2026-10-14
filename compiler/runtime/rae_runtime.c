@@ -86,7 +86,6 @@ void rae_set_live_frame(rae_Bool (*frame)(void*), void* state) {
     g_rae_live_frame_fn = frame;
     g_rae_live_frame_state = state;
 }
-#include "runtime_sky_state.c"
 #include "runtime_platform_apple.c"
 #include "runtime_image_sdl3.c"
 #ifdef RAE_HAS_SDL3
@@ -102,28 +101,19 @@ void rae_set_live_frame(rae_Bool (*frame)(void*), void* state) {
 #include "runtime_gpu2d_text.c"
 #include "runtime_gpu2d_image.c"
 #include "runtime_gpu2d_frame.c"
-#include "runtime_gpu3d.c"
-/* Both come after runtime_gpu3d.c and build on it. Skinning shares its
- * frame uniform, its open render pass and its static pipeline, switching
- * pipeline between draws; the deferred geometry pass shares mesh storage
- * (an asset, not a frame resource) and the platform present. */
-#include "runtime_gpu3d_skin.c"
-/* Shadows read both mesh tables, so they come after skin (#382). */
-#include "runtime_gpu3d_shadow.c"
 #include "runtime_gpu3d_gbuffer.c"
 /* After the G-buffer: the pyramid, lighting and composite all read what it
  * produced, and reuse its targets' generation counter. */
 #include "runtime_gpu3d_deferred.c"
 #else
 #include "runtime_gpu2d_stubs.c"
-#include "runtime_gpu3d_stubs.c"
 #endif /* RAE_HAS_SDL3 */
 #endif /* RAE_HAS_WEBGPU */
 
 /* The deferred G-buffer's CPU path (transform building through Mat4) is
  * meaningful without a GPU, so its stubs cover every build that did not
  * compile the real pass — including builds with no WebGPU at all, which
- * the gpu2d/gpu3d stubs above deliberately do not. */
+ * the gpu2d stubs above deliberately do not. */
 #if !defined(RAE_HAS_WEBGPU) || !defined(RAE_HAS_SDL3)
 #include "runtime_gbuffer_stubs.c"
 /* The event-loop waker (#950, lib/ui/EventLoop.rae `wake`) is meaningful to

@@ -186,7 +186,7 @@ func mat4RotateZ(angle: view Float) pub ret Mat4 {
 # This is a SEPARATE function rather than a change to mat4Perspective on
 # purpose. The forward frame and every pass reading its depth assume the
 # standard convention; flipping it globally would silently invert every
-# depth comparison in renderer3d. A caller opts in, and its pipeline must
+# depth comparison of a caller that expects it. A caller opts in, and its pipeline must
 # then clear depth to 0.0 and compare with Greater.
 func mat4PerspectiveReverseZ(
   fovYDeg: view Float
@@ -475,8 +475,8 @@ func orbitEye(
 
 # Element `index` of the base-`base` Halton sequence in 0.0 ..< 1.0: the
 # digits of `index` in that base, mirrored behind the point. A low-discrepancy
-# walk, so successive indices spread out instead of clumping: the TAA jitter of
-# both renderers (Gbuffer, Gpu3dTemporal).
+# walk, so successive indices spread out instead of clumping: the deferred
+# renderer's TAA jitter (Gbuffer).
 func halton(index: view Int, base: view Int) ret Float {
   var digitWeight: Float = 1.0
   var value: Float = 0.0

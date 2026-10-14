@@ -2,8 +2,8 @@
 # and index buffers are manager buffers with typed IDs, indexed by the 1-based
 # MeshHandle id the scene code already carries. Was C's g3d_mesh_vbuf/ibuf/
 # icount tables (rae_ext_Gpu3d_meshCreate / meshUpdate and the rae_gb_mesh_* /
-# rae_g3d_mesh_* accessors). The owner is the renderer object (DeferredRenderer
-# and Renderer3d each hold one): uploads go through it, every geometry /
+# rae_g3d_mesh_* accessors). The owner is the renderer object (the
+# DeferredRenderer holds one): uploads go through it, every geometry /
 # shadow / transparent / water pass resolves a handle to its BufferIds here,
 # and the renderer's shutdown retires the buffers with everything else.
 #
@@ -237,7 +237,7 @@ func meshStoreShutdown(store: mod MeshStore, resources: mod GpuResources) {
 }
 
 # Drop a renderer's manager after its meshes are retired (a wrapper so a
-# renderer module that also opens Gbuffer/Gpu3d — each with its own bare
+# renderer module that also opens Gbuffer — with its own bare
 # `shutdown()` — reaches the manager's unambiguously).
 func meshStoreDropManager(resources: mod GpuResources) {
   shutdownManager(resources: resources)

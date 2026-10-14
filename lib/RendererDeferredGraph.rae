@@ -20,9 +20,8 @@ open RendererPassTiming
 # Declare the deferred frame. Pass declaration order here is deliberately
 # scrambled — present first, gbuffer last — so that a regression to
 # insertion order is visible immediately in the derived sequence.
-# ONE builder, parameterised. renderer3d.rae has two near-identical copies
-# of its graph (with and without the UI overlay) and they have to be kept
-# in step by hand; this does not repeat that.
+# ONE builder, parameterised by the UI overlay, so the two variants cannot
+# drift apart.
 func buildDeferredGraph(withUi: view Bool) ret DeferredRenderer {
   unsafe {
     var renderGraph: RenderGraph = createRenderGraph()
@@ -611,6 +610,3 @@ func buildDeferredGraph(withUi: view Bool) ret DeferredRenderer {
     ret renderer
   }
 }
-
-# See the note on renderer3d.rae's version: same name, so migrating an
-# example flips the word with no edit at the call site.

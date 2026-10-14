@@ -255,3 +255,15 @@ deferred apps, and no example uses it yet.
   The table and every difference from 112 are in
   `examples/111_metaballs_forward/README.md`.
 
+
+**forward-rae-3 (2026-10-15):**
+
+- **Deleted:** the C forward renderer, with no user left. That is
+  `runtime_gpu3d.c` and its shader, metaball, sky, skinning, SSAO, shadow and
+  stub files, the shared sky table, and the Rae modules over them (`Gpu3d`,
+  `Gpu3dNative`, `Gpu3dSky`, `Gpu3dWorld`, `Gpu3dTemporal`, `Renderer3d`). About
+  2,900 lines of C and 2,560 lines of Rae are gone.
+- **Kept:** the only piece other code used, the world shadow-caster walk. It
+  moved to `ShadowMaps.renderSceneShadowWorld`.
+- **Forward renderer:** `lib/RendererForward.rae` is now the only forward frame.
+  Fixture 553 pins its derived pass order.
