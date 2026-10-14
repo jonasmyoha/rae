@@ -61,11 +61,13 @@ Two inputs drive it:
   `RAE_RENDER_SCALE` forces it (it is also the controller's maximum).
   `ensureTargets` sizes every deferred target to the surface
   (`rae_g2d_surface_width/height`, the only C involved) at the scene scale and
-  re-fits through the existing generation check. The **presentable offscreen
-  stays full-size** (the present is a same-size `CopyTextureToTexture`).
+  re-fits through the existing generation check. The frame's **output
+  stays full-size**: the composite upscales into the window's drawable (or the
+  full-size offscreen fallback, render-perf-11b).
 - **The render-resolution ceiling** (render-perf-3): the most scene pixels an
   app wants, e.g. 1600x720 on a phone (`app3d/RenderScale.defaultRenderCeiling`:
-  a mobile OS gets 1600x720, a desktop none), set with
+  a mobile OS gets 1600x720, a desktop 2560x1440 so a Retina / UHD drawable is
+  not shaded at full size), set with
   `setRenderCeiling(renderer:, ceiling:)`. Its long side is matched to the
   window's long side, so a rotation keeps the scale; an iPhone 15 Pro's
   2556x1179 renders at 0.61 (1561x720). The scene scale is the dynamic scale
