@@ -11,6 +11,7 @@ import Gpu2d
 import Gpu2dText
 import SdfText
 import ui/Components
+import ui/DebugOverlay
 open ecs/ComponentTable
 open ecs/hierarchySystem/HierarchySystem
 open Gpu2dCanvas
@@ -373,12 +374,9 @@ func formatMemMBGpu2d(kb: view Int) ret String {
   ret "{whole}.{frac} MB"
 }
 
+# Snapped to a display rate like the shared overlay (ui/DebugOverlay.displayFps)
 func formatFpsGpu2d(fps: view Float) ret String {
-  var rounded: Int = (fps + 0.5).toInt()
-  if rounded < 0 {
-    rounded = 0
-  }
-  ret "fps: {rounded}"
+  ret "fps: {DebugOverlay.displayFps(fps: fps)}"
 }
 
 func drawDebugHeartbeatGpu2d(

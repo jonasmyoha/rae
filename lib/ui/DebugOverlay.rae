@@ -361,12 +361,41 @@ func debugMedianInterval(times: view List(Float64)) ret Float {
 }
 
 # ----- formatting -----------------------------------------------------
-func formatDebugFps(fps: view Float) ret String {
-  var rounded: Int = (fps + 0.5).toInt()
-  if rounded < 0 {
-    rounded = 0
+# The fps the readout shows: a value within 3% (and at least 1.5 fps) of a
+# common display rate shows AS that rate. A display-paced app measures 59.4 or
+# 29.8 from frame-timing jitter, and "59" all the time reads like a missed
+# frame when nothing was missed; a real drop (55, 45) still shows as itself.
+func displayFps(fps: view Float) ret Int {
+  if fps <= 0.0 {
+    ret 0
   }
-  ret "fps: {rounded}"
+  let rates: List(Int) = List(Int) {
+    24
+    30
+    48
+    60
+    72
+    90
+    120
+    144
+    165
+    240
+  }
+  loop let rate: Int in rates {
+    var tolerance: Float = rate.toFloat() * 0.03
+    if tolerance < 1.5 {
+      tolerance = 1.5
+    }
+    let distance: Float = fps - rate.toFloat()
+    if distance <= tolerance and distance >= -tolerance {
+      ret rate
+    }
+  }
+  ret (fps + 0.5).toInt()
+}
+
+func formatDebugFps(fps: view Float) ret String {
+  ret "fps: {displayFps(fps: fps)}"
 }
 
 # One decimal, computed in integers: megabytes to one place is the resolution
