@@ -68,6 +68,7 @@ open GbufferSdf
 open GbufferNative
 open GbufferResources
 open gpu/FramePacer
+open gpu/Surface
 open RenderResolution
 
 # ----- geometry-pass begin (#503, manager-owned since #906) -------------------
@@ -548,6 +549,7 @@ func present(canvas: mod Gpu2dCanvas) {
       width: canvas.offscreenWidth
       height: canvas.offscreenHeight
     )
+    presentCanvasToSurface(canvas: canvas)
   }
   paceFrame(pacer: canvas.framePacer)
 }

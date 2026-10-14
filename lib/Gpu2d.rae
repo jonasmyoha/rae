@@ -21,6 +21,7 @@ open Gpu2dCanvasFrame
 open webgpu/Webgpu
 open webgpu/Context
 open gpu/FramePacer
+open gpu/Surface
 
 # --- Window + surface ----------------------------------------------------
 # Open a GPU-presenting window (Metal layer wrapped as a wgpu surface) and
@@ -434,13 +435,14 @@ func g2dFrameReset() {
 # RAE_GPU2D_SCREENSHOT capture. The texture is the canvas's; C only borrows it.
 func nativeG2dPresent(texture: Ptr, width: Int, height: Int) unsafe extern("rae_g2d_present")
 
-func g2dPresent(canvas: view Gpu2dCanvas) {
+func g2dPresent(canvas: mod Gpu2dCanvas) {
   unsafe {
     let texture: Ptr = canvasOffscreenTexture(canvas: canvas)
     if texture is webgpuNull() {
       ret
     }
     nativeG2dPresent(texture: texture, width: canvas.offscreenWidth, height: canvas.offscreenHeight)
+    presentCanvasToSurface(canvas: canvas)  # the drawable last (render-perf-11)
   }
 }
 

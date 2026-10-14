@@ -1319,6 +1319,8 @@ void rae_g3d_set_shadow_inputs(void* frame_ubuf, void* array_view, void* sampler
 /* gpu2d frame lifecycle in Rae (#504). */
 void rae_g2d_frame_reset(void);
 void rae_g2d_present(void* texture, int64_t width, int64_t height);
+void* rae_surface_acquire(void);
+void rae_surface_present(void* drawable, void* offscreen, int64_t width, int64_t height);
 void rae_g2d_tick(void);
 /* #915: the design->physical transform (8 floats = 2*vec4) the canvas writes
  * into its viewport uniform each flush; batches, clips and scissor are Rae. */

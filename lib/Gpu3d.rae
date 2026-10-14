@@ -65,6 +65,7 @@ open Gpu3dNative
 open Gpu3dSky
 open Gpu3dTemporal
 open gpu/FramePacer
+open gpu/Surface
 
 # ----- raw C ABI (implementation detail; prefer the typed API below) ---
 # The LDR offscreen the window presents is the app's Gpu2dCanvas's target
@@ -591,6 +592,7 @@ func end(canvas: mod Gpu2dCanvas) pub {
       width: canvas.offscreenWidth
       height: canvas.offscreenHeight
     )
+    presentCanvasToSurface(canvas: canvas)
   }
   paceFrame(pacer: canvas.framePacer)
 }
