@@ -7,6 +7,9 @@ struct CompositeU {
 @group(0) @binding(0) var<uniform> P: CompositeU;
 @group(0) @binding(1) var litTex: texture_2d<f32>;
 @group(0) @binding(2) var litSamp: sampler;
+// The half-size bloom (GbufferBloom, render-perf-8), added before exposure
+// with strength P.p2.w; 0 means bloom is off and the texture is not read.
+@group(0) @binding(3) var bloomTex: texture_2d<f32>;
 @vertex
 fn vs(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4<f32> {
   var points = array<vec2<f32>, 3>(
@@ -43,7 +46,10 @@ fn vibrance(c: vec3<f32>, amount: f32) -> vec3<f32> {
 // The lit target has one mip, so the explicit level 0 samples exactly what
 // textureSample would, without derivatives.
 fn shade(uv: vec2<f32>) -> vec3<f32> {
-  let hdr = textureSampleLevel(litTex, litSamp, uv, 0.0).rgb;
+  var hdr = textureSampleLevel(litTex, litSamp, uv, 0.0).rgb;
+  if (P.p2.w > 0.0) {
+    hdr = hdr + textureSampleLevel(bloomTex, litSamp, uv, 0.0).rgb * P.p2.w;
+  }
   let exposed = hdr * P.p0.x;
   var c = aces(exposed);
   if (P.p0.z > 0.5) { c = pbrNeutral(exposed); }

@@ -165,6 +165,16 @@ func buildDeferredGraph(withUi: view Bool) ret DeferredRenderer {
       sizing: sizeFull
       lifetime: lifeTransient
     )
+    # Bloom (render-perf-8): a half-size downsample/upsample chain of the
+    # composite's source, added by the composite before tone mapping.
+    let bloomId: Int = addResource(
+      renderGraph: renderGraph
+      name: "bloomColor"
+      kind: resTexture2d
+      format: 0
+      sizing: sizeHalf
+      lifetime: lifeTransient
+    )
     let shadowId: Int = addResource(
       renderGraph: renderGraph
       name: "shadowMap"
@@ -186,6 +196,12 @@ func buildDeferredGraph(withUi: view Bool) ret DeferredRenderer {
       name: "composite"
       kind: passRaster
       tag: RenderTag.composite
+    )
+    let bloomP: Int = addPass(
+      renderGraph: renderGraph
+      name: "bloom"
+      kind: passRaster
+      tag: RenderTag.bloom
     )
     let antialiasP: Int = addPass(
       renderGraph: renderGraph
@@ -493,6 +509,34 @@ func buildDeferredGraph(withUi: view Bool) ret DeferredRenderer {
       renderGraph: renderGraph
       pass: composite
       resource: antialiasedId
+      access: accSampledRead
+    )
+
+    # Bloom reads what the composite will tone-map (the anti-aliased scene,
+    # or the TAA result) and writes the glow the composite adds:
+    # antialias / taa -> bloom -> composite. Off, it does nothing.
+    passReads(
+      renderGraph: renderGraph
+      pass: bloomP
+      resource: antialiasedId
+      access: accSampledRead
+    )
+    passReads(
+      renderGraph: renderGraph
+      pass: bloomP
+      resource: taaId
+      access: accSampledRead
+    )
+    passWrites(
+      renderGraph: renderGraph
+      pass: bloomP
+      resource: bloomId
+      access: accAttachmentWrite
+    )
+    passReads(
+      renderGraph: renderGraph
+      pass: composite
+      resource: bloomId
       access: accSampledRead
     )
 
