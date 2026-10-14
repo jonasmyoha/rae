@@ -367,53 +367,75 @@ func compositePassGraded(
   )
 }
 
-# Low-level lighting: upload the uniform, build the bind (rebuilt on resize
-# and when the shadow cascades are recreated) and run the fullscreen pass into
-# the lit target. The whole G-buffer + AO + the shadow cascades (the
-# renderer's ShadowCache, #925 — its default targets when no shadow pass ran)
-# are read once per pixel.
-func lighting(
+# The light uniform both main passes read (LightU in deferred_uniforms.wgsl):
+# the sun, the ambient hemisphere and the sky. With a bound sky its
+# irradiance is the ambient, desaturated by the sky's own setting: a
+# physically blue daylight sky lights every surface blue (a white ground
+# albedo came out (0.59, 0.71, 0.96)), which makes warm materials unreachable;
+# the default 1.0 is a no-op and the visible sky is untouched either way. A
+# renderer without a bound sky passes createSkyNone. False when it could not
+# be written.
+func uploadSceneLight(
+  targets: mod DeferredTargets
+  resources: mod GpuResources
+  gbuffer: view GbufferCache
+  camera: view Camera3d
+  light: view Light3d
+  sky: view Sky
+) ret Bool {
+  let up: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
+  let down: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: -1.0)
+  let skyC: Vec3 = desaturate(c: irradiance(sky: sky, normal: up), sat: sky.ambientSaturation)
+  let gndC: Vec3 = desaturate(c: irradiance(sky: sky, normal: down), sat: sky.ambientSaturation)
+  setHosekChannel(targets: targets, c: sky.hosek.r, base: 0)
+  setHosekChannel(targets: targets, c: sky.hosek.g, base: 12)
+  setHosekChannel(targets: targets, c: sky.hosek.b, base: 24)
+  ret uploadLightUniform(
+    targets: targets
+    resources: resources
+    gbuffer: gbuffer
+    camera: camera
+    exposure: light.exposure
+    sunDir: light.sunDir
+    sunColor: light.sunColor
+    skyAmbient: skyC
+    groundAmbient: gndC
+    skyKind: kindCode(sky: sky)
+    turbidity: sky.turbidity
+    skyExposure: sky.exposure
+    sunSizeRad: sky.sunAngularRadius
+    zenith: sky.zenithColor
+    bands: sky.bands
+    horizon: sky.horizonColor
+    discIntensity: sky.sunDiscIntensity
+  )
+}
+
+# The deferred lighting pass: upload the light uniform, build the bind
+# (rebuilt on resize and when the shadow cascades are recreated) and run the
+# fullscreen pass into the lit target. The whole G-buffer + AO + the shadow
+# cascades (the renderer's ShadowCache, #925 — its default targets when no
+# shadow pass ran) are read once per pixel.
+func lightingPassSky(
   cache: mod LightPassCache
   resources: mod GpuResources
   targets: mod DeferredTargets
   gbuffer: view GbufferCache
   shadow: mod ShadowCache
   camera: view Camera3d
-  exposure: copy Float
-  sunDir: view Vec3
-  sunColor: view Vec3
-  skyAmbient: view Vec3
-  groundAmbient: view Vec3
-  skyKind: copy Float
-  turbidity: copy Float
-  skyExposure: copy Float
-  sunSizeRad: copy Float
-  zenith: view Vec3
-  bands: copy Float
-  horizon: view Vec3
-  discIntensity: copy Float
-) {
+  light: view Light3d
+  sky: view Sky
+) pub {
   if not postPassReady(targets: targets, resources: resources, gbuffer: gbuffer) {
     ret
   }
-  let uploaded: Bool = uploadLightUniform(
+  let uploaded: Bool = uploadSceneLight(
     targets: targets
     resources: resources
     gbuffer: gbuffer
     camera: camera
-    exposure: exposure
-    sunDir: sunDir
-    sunColor: sunColor
-    skyAmbient: skyAmbient
-    groundAmbient: groundAmbient
-    skyKind: skyKind
-    turbidity: turbidity
-    skyExposure: skyExposure
-    sunSizeRad: sunSizeRad
-    zenith: zenith
-    bands: bands
-    horizon: horizon
-    discIntensity: discIntensity
+    light: light
+    sky: sky
   )
   ensureShadowDefaults(shadow: shadow, resources: resources)
   if not shadowTargetsReady(shadow: shadow, resources: resources) {
@@ -459,86 +481,6 @@ func lighting(
   # Lighting is the frame's heaviest pass: submit it (with SSAO before it) now,
   # so the GPU starts on it while the CPU records the rest of the frame.
   flushPostPasses(targets: targets, resources: resources)
-}
-
-# Public: lighting with a bound sky environment (Hosek ambient + background).
-func lightingPassSky(
-  cache: mod LightPassCache
-  resources: mod GpuResources
-  targets: mod DeferredTargets
-  gbuffer: view GbufferCache
-  shadow: mod ShadowCache
-  camera: view Camera3d
-  light: view Light3d
-  sky: view Sky
-) pub {
-  let up: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
-  let down: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0 - 1.0)
-  # DESATURATED BY THE SKY'S OWN SETTING. The sky's irradiance is THE ambient
-  # term here, so a physically blue daylight sky lights every surface blue --
-  # measured, a white ground albedo came out (0.59, 0.71, 0.96), which makes warm
-  # materials unreachable at any albedo. Default is 1.0, so this is a no-op for
-  # every existing caller; the visible sky is untouched either way.
-  let skyC: Vec3 = desaturate(c: irradiance(sky: sky, normal: up), sat: sky.ambientSaturation)
-  let gndC: Vec3 = desaturate(c: irradiance(sky: sky, normal: down), sat: sky.ambientSaturation)
-  setHosekChannel(targets: targets, c: sky.hosek.r, base: 0)
-  setHosekChannel(targets: targets, c: sky.hosek.g, base: 12)
-  setHosekChannel(targets: targets, c: sky.hosek.b, base: 24)
-  lighting(
-    cache: cache
-    resources: resources
-    targets: targets
-    gbuffer: gbuffer
-    shadow: shadow
-    camera: camera
-    exposure: light.exposure
-    sunDir: light.sunDir
-    sunColor: light.sunColor
-    skyAmbient: skyC
-    groundAmbient: gndC
-    skyKind: kindCode(sky: sky)
-    turbidity: sky.turbidity
-    skyExposure: sky.exposure
-    sunSizeRad: sky.sunAngularRadius
-    zenith: sky.zenithColor
-    bands: sky.bands
-    horizon: sky.horizonColor
-    discIntensity: sky.sunDiscIntensity
-  )
-}
-
-# Public: lighting with the authored ambient hemisphere, no sky.
-func lightingPass(
-  cache: mod LightPassCache
-  resources: mod GpuResources
-  targets: mod DeferredTargets
-  gbuffer: view GbufferCache
-  shadow: mod ShadowCache
-  camera: view Camera3d
-  light: view Light3d
-) pub {
-  let zero: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
-  lighting(
-    cache: cache
-    resources: resources
-    targets: targets
-    gbuffer: gbuffer
-    shadow: shadow
-    camera: camera
-    exposure: light.exposure
-    sunDir: light.sunDir
-    sunColor: light.sunColor
-    skyAmbient: light.ambSky
-    groundAmbient: light.ambGround
-    skyKind: 0.0
-    turbidity: 3.0
-    skyExposure: 1.0
-    sunSizeRad: 0.0047
-    zenith: zero
-    bands: 1.0
-    horizon: zero
-    discIntensity: 0.0
-  )
 }
 
 # The FXAA pipeline, uniform and sampler, once (also the renderer's warm-up)

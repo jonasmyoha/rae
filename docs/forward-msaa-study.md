@@ -192,3 +192,48 @@ forward-only part of the wrappers without adding a second main pass to maintain.
    without TAA blur, or memory pressure on a smaller phone where 50 MB of
    targets matters. Then forward + 4x MSAA with memoryless targets is the
    design, and these numbers are its starting point.
+
+## 6. The forward main pass in lib/ (forward-rae-1)
+
+The first step of the Rae-first forward renderer has landed. It changes nothing for
+deferred apps, and no example uses it yet.
+
+- **Using it:** `createForwardRenderer()` (or `…WithUi()` / `…WithUiSky(sky:)`,
+  `lib/RendererForward.rae`) returns the same `DeferredRenderer`, with the same
+  frame calls (`compileDeferred`, `renderDeferredFrameWorld` or the per-tag
+  `renderDeferredPassWorld`, the shadow pass, bloom, the render ceiling, the
+  dynamic scale, direct present). Its graph is `shadow -> forward -> bloom ->
+  composite -> [ui] -> present`.
+- **The pass:** `lib/ForwardMain.rae`. It runs one render pass at 4x MSAA with
+  memoryless (TRANSIENT) 4x colour and depth, and resolves into the lit image
+  when the pass ends. There is no depth pre-pass. The sky is drawn last with
+  depth Equal at the far plane, so only uncovered samples evaluate it.
+  `RenderPipelineSpec.sampleCount`, `createTextureSampled`,
+  `addResolvedColorTarget` and `RenderTargetSet.depthDiscard` are the GPU-layer
+  pieces it needs.
+- **The same shading:** the deferred lighting's per-pixel code is now
+  `shadeSurface` in `lib/deferred_shade.wgsl`. The lighting pass
+  (`deferred_light.wgsl`) calls it with what the G-buffer holds, and the forward
+  material (`forward_static.wgsl`) calls it with what it just computed. Both use
+  one uniform layout (`deferred_uniforms.wgsl`) and one light upload
+  (`uploadSceneLight`). The static mesh's vertex stage and its brick, roof and
+  emblem patterns are shared too (`gbuffer_static_surface.wgsl`).
+- **Checked by:** fixture 1130 renders a toon sphere over a lit ground with both
+  renderers on the GPU and reads back their lit images. The sphere and the sky
+  are equal. The ground is within 0.7%, because the deferred image has SSAO and
+  G-buffer rounding.
+- **The deferred image after the split:** 112 and 114 screenshots at a fixed
+  frame match the previous build. About 1.6–5% of pixels differ, by at most 3
+  of 255 levels (the GPU compiler orders the arithmetic differently). The
+  pixels that differ by more are at the run-to-run noise level of an unchanged
+  build.
+- **Not in this step:**
+  - No SSAO, TAA, FXAA or SMAA (MSAA is the antialiasing).
+  - No transparents, water or underwater fog: they read the G-buffer depth.
+  - Skinned meshes, terrain, metaballs, sprites and grass have no forward
+    material yet. A forward frame skips them (`GbufferCache.forwardFrame`).
+  - The renderer still allocates the G-buffer and the deferred post targets:
+    the G-buffer sets the scene size, and the post passes share the target set.
+
+  The metaballs are forward-rae-2, the C forward path's removal forward-rae-3,
+  and the walker's forward mode forward-rae-4.
