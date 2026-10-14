@@ -524,6 +524,16 @@ func medianOf(samples: view List(Int), start: view Int, count: view Int) ret Int
   ret median(values: slice)
 }
 
+# RAE_FM_IMAGES: the directory for the PNGs, or "documents" for the app's
+# Documents folder (an iOS app runs in its read-only bundle)
+func imagesDirectory() ret String {
+  let setting: String = Sys.getEnv(name: "RAE_FM_IMAGES")
+  if setting is "documents" {
+    ret "{Sys.getEnv(name: "HOME")}/Documents"
+  }
+  ret setting
+}
+
 func main() {
   chooseDeviceFeatures()
   unsafe {
@@ -536,7 +546,7 @@ func main() {
   let frames: Int = envInt(name: "RAE_FM_FRAMES", fallback: 200)
   let side: Int = envInt(name: "RAE_FM_SIDE", fallback: 30)
   let framesPerSubmit: Int = envInt(name: "RAE_FM_BATCH", fallback: 8)
-  let imageDirectory: String = Sys.getEnv(name: "RAE_FM_IMAGES")
+  let imageDirectory: String = imagesDirectory()
   let sceneShader: Shader = shader(files: ["scene.wgsl"])
   let lightingShader: Shader = shader(files: ["scene.wgsl", "lighting.wgsl"])
   var scene: SceneGpu = createEmptyScene()
