@@ -93,8 +93,10 @@ struct FsOut {
   @location(1) gbb: vec4<f32>,
   @location(2) gbc: vec4<f32>,
 };
-@fragment
-fn fs(in: VsOut) -> FsOut {
+// The surface at this fragment, in the G-buffer encoding: the G-buffer
+// entry below writes it, the forward main pass's fsForward
+// (forward_entry.wgsl) decodes and shades it.
+fn gbufferSurface(in: VsOut) -> FsOut {
   let d = draws[in.inst];
   let n = normalize(in.nrm);
   let oct = octEncode(n);
@@ -112,4 +114,8 @@ fn fs(in: VsOut) -> FsOut {
   o.gbb = vec4<f32>(albedo, rough);
   o.gbc = vec4<f32>(mEnc.x, mEnc.y, clamp(d.albedoMetallic.a, 0.0, 1.0), d.params.y);
   return o;
+}
+@fragment
+fn fs(in: VsOut) -> FsOut {
+  return gbufferSurface(in);
 }
