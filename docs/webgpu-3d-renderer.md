@@ -218,6 +218,26 @@ notice, and the licence is in `lib/LICENSE-smaa.md`.
   time: 114 2.0 -> 2.1 ms, 112 2.5 -> 2.6, 119 3.0 -> 3.1 (about 0.1 ms
   more than FXAA).
 
+**Half precision (render-perf-12, 0.2.34).** The device asks for
+shader-f16 when the adapter has it (`lib/gpu/DeviceFeatures.rae`). Shaders
+written for it compose a precision prelude FIRST: `lib/precision_f16.wgsl`
+(`enable f16;`, `alias half = f16`) or `lib/precision_f32.wgsl` (`half` =
+f32), chosen at pipeline creation with `deviceHasShaderF16()`, so one WGSL
+file serves both. The lighting pass (`deferred_light.wgsl`) does its colour
+and shading arithmetic in `half`. Depth, the world-position reconstruction,
+shadows, the AO upsample, the sky and the GGX specular lobe stay f32, because
+GGX reaches about 7.8e4 on a smooth surface, above f16's 65504.
+
+- **Images:** on 119's deterministic frame, f16 changes 1.9% of the pixels by
+  at most 14 levels, and 0.001% by more than 8. On 114 and 112 the
+  differences are no larger than two f32 runs differ from each other.
+- **GPU time on the Mac** (2560x1600, no ceiling, two runs each): no
+  measurable change. Frame time is the same within noise; Apple's Mac GPUs
+  run f32 at the same rate as f16 for most math.
+- **Not converted:** composite, SSAO, bloom and AA. They are mostly texture
+  reads and depth reconstruction. They are converted only if the iPhone
+  measurement shows that lighting gains.
+
 ## 6. Optional global illumination — prototype, then pick
 
 GI is **optional and tiered**; we prototype a few and choose per project:

@@ -27,6 +27,7 @@ open gpu/GpuLifetime
 open gpu/GpuRender
 open gpu/GpuArgs
 open gpu/GpuIds
+open gpu/DeviceFeatures
 open Gbuffer
 open GbufferResources
 open GbufferPassesNative
@@ -379,9 +380,25 @@ func ensureDeferredPipelines(targets: mod DeferredTargets, resources: mod GpuRes
     ret
   }
   targets.pipesMade = true
-  let lightShader: Shader = shader(
-    files: ["lib/gbuffer_octahedral.wgsl", "lib/sky_hosek.wgsl", "lib/deferred_light.wgsl"]
+  # The f16 variant when the device has shader-f16 (render-perf-12)
+  var lightShader: Shader = shader(
+    files: [
+      "lib/precision_f32.wgsl"
+      "lib/gbuffer_octahedral.wgsl"
+      "lib/sky_hosek.wgsl"
+      "lib/deferred_light.wgsl"
+    ]
   )
+  if deviceHasShaderF16() {
+    lightShader = shader(
+      files: [
+        "lib/precision_f16.wgsl"
+        "lib/gbuffer_octahedral.wgsl"
+        "lib/sky_hosek.wgsl"
+        "lib/deferred_light.wgsl"
+      ]
+    )
+  }
   let taaShader: Shader = shader(files: ["lib/deferred_taa.wgsl"])
   let pyramidFromDepthShader: Shader = shader(files: ["lib/deferred_pyramid_from_depth.wgsl"])
   let pyramidReduceShader: Shader = shader(files: ["lib/deferred_pyramid_reduce.wgsl"])

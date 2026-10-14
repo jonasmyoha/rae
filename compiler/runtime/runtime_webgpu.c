@@ -67,9 +67,12 @@ static void rae_wgpu_on_map(WGPUMapAsyncStatus st, WGPUStringView m, void* u1, v
     (void)st;(void)m;(void)u1;(void)u2; g_wgpu_map_done = 1;
 }
 
-static int rae_wgpu_init(void) {
-    if (g_wgpu_dev) return 1;
-    g_wgpu_inst = wgpuCreateInstance(NULL);
+/* The adapter, once: the callback-driven request (instance + adapter) Rae
+ * cannot make itself. Rae asks it which features it has (wgpuAdapterHasFeature
+ * over the bindings) before the device exists. */
+static int rae_wgpu_adapter_init(void) {
+    if (g_wgpu_adapter) return 1;
+    if (!g_wgpu_inst) g_wgpu_inst = wgpuCreateInstance(NULL);
     if (!g_wgpu_inst) { fprintf(stderr, "[wgpu] no instance\n"); return 0; }
     WGPURequestAdapterOptions ao; memset(&ao, 0, sizeof(ao));
     WGPURequestAdapterCallbackInfo aci; memset(&aci, 0, sizeof(aci));
@@ -77,40 +80,40 @@ static int rae_wgpu_init(void) {
     wgpuInstanceRequestAdapter(g_wgpu_inst, &ao, aci);
     while (!g_wgpu_adapter_done) rae_wgpu_poll(1);
     if (!g_wgpu_adapter) { fprintf(stderr, "[wgpu] no adapter\n"); return 0; }
-    /* Optional device features, requested only when the adapter reports
-     * them. WebGPU rejects the whole device request if you ask for a
-     * feature that is not there, so this must be negotiated rather than
-     * assumed — and everything downstream must have a fallback path,
-     * because a mobile or WASM adapter legitimately may not offer these.
-     *
-     * rg11b10ufloat-renderable lets an HDR target be 4 bytes/pixel instead
-     * of 8 (#370). Renderers that need it check g_wgpu_have_rg11b10 and
-     * fall back to rgba16float. */
-    WGPUFeatureName want[4];
-    size_t want_n = 0;
-    if (wgpuAdapterHasFeature(g_wgpu_adapter, WGPUFeatureName_RG11B10UfloatRenderable)) {
-        want[want_n++] = WGPUFeatureName_RG11B10UfloatRenderable;
-        g_wgpu_have_rg11b10 = 1;
-    }
-    /* GPU timestamp queries (#528) drive per-pass GPU timing + dynamic
-     * resolution. We use pass-descriptor timestampWrites (begin/end of each
-     * render/compute pass), which Metal supports — unlike writing timestamps
-     * INSIDE an encoder, which Metal (hence iPhone) does not. So only the base
-     * TimestampQuery feature is needed; skip GPU timing when the adapter lacks
-     * it (a WASM adapter legitimately may). */
-    if (wgpuAdapterHasFeature(g_wgpu_adapter, (WGPUFeatureName)WGPUFeatureName_TimestampQuery)) {
-        want[want_n++] = (WGPUFeatureName)WGPUFeatureName_TimestampQuery;
-        g_wgpu_have_timestamp = 1;
-    }
+    return 1;
+}
+
+/* The device features to request: Rae chooses them (lib/webgpu/Context.rae
+ * chooseDeviceFeatures, only ones the adapter has) and passes them in before
+ * the device exists. A device created first by a C entry point (the old
+ * compute helpers) requests none. */
+#define RAE_WGPU_MAX_FEATURES 8
+static WGPUFeatureName g_wgpu_features[RAE_WGPU_MAX_FEATURES];
+static size_t g_wgpu_feature_count = 0;
+void rae_wgpu_set_device_features(const int32_t* features, int64_t count) {
+    g_wgpu_feature_count = 0;
+    for (int64_t i = 0; i < count && i < RAE_WGPU_MAX_FEATURES; i++)
+        g_wgpu_features[g_wgpu_feature_count++] = (WGPUFeatureName)features[i];
+}
+void* rae_wgpu_ctx_adapter_ready(void) { return rae_wgpu_adapter_init() ? (void*)g_wgpu_adapter : NULL; }
+
+static int rae_wgpu_init(void) {
+    if (g_wgpu_dev) return 1;
+    if (!rae_wgpu_adapter_init()) return 0;
     WGPUDeviceDescriptor dd; memset(&dd, 0, sizeof(dd));
-    dd.requiredFeatureCount = want_n;
-    dd.requiredFeatures = want_n ? want : NULL;
+    dd.requiredFeatureCount = g_wgpu_feature_count;
+    dd.requiredFeatures = g_wgpu_feature_count ? g_wgpu_features : NULL;
     WGPURequestDeviceCallbackInfo dci; memset(&dci, 0, sizeof(dci));
     dci.mode = WGPUCallbackMode_AllowProcessEvents; dci.callback = rae_wgpu_on_device;
     wgpuAdapterRequestDevice(g_wgpu_adapter, &dd, dci);
     while (!g_wgpu_device_done) rae_wgpu_poll(1);
     if (!g_wgpu_dev) { fprintf(stderr, "[wgpu] no device\n"); return 0; }
     g_wgpu_queue = wgpuDeviceGetQueue(g_wgpu_dev);
+    /* What the device has, for the renderers' fallbacks: rg11b10ufloat
+     * renderable HDR targets (#370, else rgba16float), timestamp queries
+     * (#528, else no GPU timing). */
+    g_wgpu_have_rg11b10 = wgpuDeviceHasFeature(g_wgpu_dev, WGPUFeatureName_RG11B10UfloatRenderable) ? 1 : 0;
+    g_wgpu_have_timestamp = wgpuDeviceHasFeature(g_wgpu_dev, (WGPUFeatureName)WGPUFeatureName_TimestampQuery) ? 1 : 0;
     return 1;
 }
 

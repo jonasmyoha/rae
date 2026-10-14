@@ -1213,6 +1213,8 @@ void rae_ext_drawTextWithFont(int64_t slot, rae_String text, float x, float y, f
  * assume `int` return and truncate the returned 64-bit handle pointers. */
 int   rae_wgpu_ctx_bootstrap(void);
 void* rae_wgpu_ctx_device(void);
+void rae_wgpu_set_device_features(const int32_t* features, int64_t count);
+void* rae_wgpu_ctx_adapter_ready(void);
 void* rae_wgpu_ctx_queue(void);
 void* rae_wgpu_ctx_adapter(void);
 void* rae_wgpu_ctx_instance(void);
