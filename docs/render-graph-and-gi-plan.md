@@ -423,6 +423,44 @@ gpu2d overlay behaviour.
 
 ---
 
+**Bloom as built (render-perf-8, `lib/GbufferBloom.rae`).** The `bloom`
+graph pass runs between the anti-aliasing and the composite. It reads what
+the composite will tone-map (the anti-aliased scene or the TAA result) and
+builds a chain of up to 6 half-size levels (1/2 down to 1/64 of the scene),
+in the lit format (rg11b10ufloat):
+
+- **First level:** 13 taps with a Karis average against fireflies, then a
+  soft-knee threshold on the EXPOSED brightness (`bloom_prefilter.wgsl`).
+- **Next levels down:** 13 taps each (`bloom_down.wgsl`).
+- **Back up:** each level's downsample plus a tent-filtered upsample of the
+  level below, into separate textures, so no blend state is needed
+  (`bloom_up.wgsl`).
+- **Composite:** adds intensity x bloom to the HDR colour before exposure
+  and tone mapping.
+
+Apps control it with `setBloom(renderer:, settings: BloomSettings { enabled,
+threshold, knee, intensity })` or `setBloomEnabled(renderer:, on:)`.
+`RAE_BLOOM=1` / `RAE_BLOOM=0` forces it on or off for comparisons. Off (the
+default), the pass returns at once, nothing is allocated, and the
+composite skips the sample.
+
+- **Default threshold 1.0, not ~0.3.** With exposure 1.0 the scene units
+  are the exposed units. A threshold of 0.3 is mid-grey after tone mapping,
+  so it made the whole 112 frame (floor, sky) glow. At 1.0 only what is
+  brighter than white glows. The defaults are knee 0.5 and intensity 0.2.
+- **Per example:**
+  - 112 turns bloom on: its specular highlights glow.
+  - 114 leaves it off: looking toward the sun, the bright sky glows over
+    the characters and the trees and lowers the contrast.
+  - 119 leaves it off: its sun glints are tiny and only a little above
+    white, so after the blur they add almost nothing (a mean of +0.2
+    levels, even with threshold 0.8 and intensity 0.3). Bloom on the ocean
+    needs the water shader to make its glints much brighter than white.
+- **Cost** at a phone's scene size (`RAE_RENDER_CEILING=1600x720`, 112, on
+  the Mac): frame 2.3 -> 2.8 ms; the bloom span is about 0.42 ms over the
+  timing marks' own ~0.1 ms. That is 11 passes for 6 levels. On a phone,
+  measure, and consider fewer levels.
+
 ## 9. Depth, normals, velocity, and TAA
 
 **Decision: TAA. MSAA is dropped.**

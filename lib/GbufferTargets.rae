@@ -52,6 +52,14 @@ type DeferredTargets {
   antialiased: TextureId
   antialiasedView: TextureViewId
   aaWritten: Bool
+  # This frame's bloom (GbufferBloom, render-perf-8): the half-size glow the
+  # composite adds before tone mapping, how strongly, and the generation of
+  # the bloom targets (the composite rebuilds its binds when it changes).
+  # `bloomWritten` is false when bloom is off or did not run.
+  bloomView: TextureViewId
+  bloomWritten: Bool
+  bloomIntensity: Float
+  bloomGen: Int
   # The SSAO at HALF the scene size (render-perf-6, GbufferAo): `ao` is the
   # result lighting upsamples, `aoBlur` the blur's middle step, `aoDepth`
   # the half-size depth with the index of the full-size texel each kept.
@@ -118,6 +126,10 @@ func createDeferredTargets() ret DeferredTargets {
       antialiased: noTextureId()
       antialiasedView: noTextureViewId()
       aaWritten: false
+      bloomView: noTextureViewId()
+      bloomWritten: false
+      bloomIntensity: 0.0
+      bloomGen: -1
       ao: noTextureId()
       aoView: noTextureViewId()
       aoBlur: noTextureId()

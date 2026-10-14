@@ -13,6 +13,7 @@ open gpu/GpuLifetime
 open gpu/GpuTiming
 open gpu/GpuIds
 open GbufferTargets
+open RendererDeferred
 
 # The mark between the UI frame's 2D submit and its copy into the drawable
 # (RendererDeferred.endUiFrameTimed): not a graph pass, so outside RenderTag
@@ -250,4 +251,75 @@ func passTimingShutdown(passTiming: mod DeferredPassTiming, resources: mod GpuRe
   passTiming.timingMade = false
   passTiming.marking = false
   passTiming.resolvePending = false
+}
+
+# Frames averaged into one "[gpu passes]" log line
+const passTimingReportFrames: Int = 60
+
+# One line: each pass's average GPU time in microseconds over the report's
+# frames, then the frame's total.
+func logPassTimingReport(passTiming: mod DeferredPassTiming) {
+  let frames: Int = passTiming.reportFrames
+  var line: String = "[gpu passes] average of {frames} frames, us:"
+  var total: Int = 0
+  loop var i: Int = 0, i < passTiming.reportTags.length, ++i {
+    let tag: Int = passTiming.reportTags.copyAtDefault(index: i)
+    let average: Int = passTiming.reportSums.copyAtDefault(index: i) / frames
+    total = total + average
+    line = "{line} {renderTagName(tag: tag)} {average} |"
+  }
+  log("{line} total {total}")
+  clearPassTimingReport(passTiming: passTiming)
+}
+
+# A graph pass's name, for reports.
+func renderTagName(tag: view Int) ret String {
+  match tag {
+    case RenderTag.gbuffer {
+      ret "gbuffer"
+    }
+    case RenderTag.depthPyramid {
+      ret "depth pyramid"
+    }
+    case RenderTag.ssao {
+      ret "ssao"
+    }
+    case RenderTag.lighting {
+      ret "lighting"
+    }
+    case RenderTag.composite {
+      ret "composite"
+    }
+    case RenderTag.present {
+      ret "present: 2D submit (UI flush)"
+    }
+    case RenderTag.uiOverlay {
+      ret "ui overlay"
+    }
+    case RenderTag.taa {
+      ret "taa"
+    }
+    case RenderTag.shadow {
+      ret "shadow cascades"
+    }
+    case RenderTag.transparentForward {
+      ret "transparent forward"
+    }
+    case RenderTag.waterFft {
+      ret "water fft"
+    }
+    case RenderTag.underwater {
+      ret "underwater"
+    }
+    case RenderTag.bloom {
+      ret "bloom"
+    }
+    case RenderTag.antialias {
+      ret "antialias (FXAA)"
+    }
+  }
+  if tag is passTimingCopyTag {
+    ret "present: copy to drawable, present"
+  }
+  ret "pass {tag}"
 }
