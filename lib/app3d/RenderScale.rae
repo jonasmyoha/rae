@@ -7,7 +7,14 @@
 # Signal: wall-clock frame time (dt). Under vsync this is coarse (≈16.7ms at 60,
 # ≈33ms at 30), so the loop reacts to DROPPED frames rather than fine headroom:
 # drop scale fast on consecutive over-budget frames, raise it one slow step after
-# a long good stretch, with a cooldown so it can't oscillate. When real per-pass
+# a long good stretch, with a cooldown so it can't oscillate.
+#
+# Missed frames that never come 4 in a row (a GPU frame just over the period
+# gives 16.7 / 33 ms alternately, or a slow frame every few) also lower the
+# scale: the controller keeps which of the last missWindow frames missed, and
+# steps down when missWindowLimit of them did. Only the resolution reacts to
+# that; the 30 fps cap still needs the streak, since scattered misses at 60
+# still beat a steady 30. When real per-pass
 # GPU timing (#528) lands, swap `dt` for measured GPU ms for a tighter loop.
 #
 # While the 30 fps cap holds, dt is the PADDED period (capFrameSleep sleeps
@@ -60,6 +67,23 @@ func thermalCeiling(therm: view Int) ret Float {
 # the frame-rate cap to 30 (halving the GPU duty cycle so the SoC cools — a clean
 # divisor is smoother than a jittery throttled ~20 too). Recovery restores the
 # rate first, then the resolution.
+# The frames the miss window looks back over, and the misses in it that step
+# the scale down (10%: a 2 s stretch of about 54 fps or worse)
+const missWindow: Int = 60
+
+const missWindowLimit: Int = 6
+
+# Good frames in a row before a rung is restored (3 s), and the most that wait
+# grows to (60 s). A raise followed by a drop within raiseHoldFrames (10 s) was
+# too early: the next raise waits twice as long. A raise that holds 10 s brings
+# the wait back to 3 s. Without this, a scene that misses only at the higher
+# rung climbs back every 3 s and starts missing again.
+const baseRaiseFrames: Int = 180
+
+const maxRaiseFrames: Int = 3600
+
+const raiseHoldFrames: Int = 600
+
 type RenderScaleController {
   scale: Float
   maxScale: Float  # 1.0, or what RAE_RENDER_SCALE forces: the ladder never climbs above it
@@ -69,6 +93,11 @@ type RenderScaleController {
   overBudgetSec: Float  # a frame slower than this counts as "missed"
   overFrames: Int  # consecutive missed frames
   goodFrames: Int  # consecutive good frames
+  missBits: Int  # bit i set = the frame i frames ago missed (the last missWindow frames)
+  windowFrames: Int  # frames in the window so far (up to missWindow)
+  windowMisses: Int  # set bits in missBits
+  raiseFrames: Int  # good frames in a row the next raise needs (backs off)
+  sinceRaise: Int  # frames since the last raise, up to raiseHoldFrames
   cooldown: Int  # frames to wait after a change (anti-oscillation)
   workSec: Float  # the last capped frame's work time, before the cap's padding
   workMeasured: Bool  # capFrameSleep measured workSec and no update used it yet
@@ -92,6 +121,11 @@ func createRenderScaleController(targetFps: copy Float) ret RenderScaleControlle
     overBudgetSec: 1.25 / fps
     overFrames: 0
     goodFrames: 0
+    missBits: 0
+    windowFrames: 0
+    windowMisses: 0
+    raiseFrames: baseRaiseFrames
+    sinceRaise: raiseHoldFrames
     cooldown: 0
     workSec: 0.0
     workMeasured: false
@@ -109,7 +143,13 @@ func updateRenderScale(
   profiler: mod Profiler
 ) {
   let therm: Int = thermalState()
+  let scaleBefore: Float = drs.scale
+  let capBefore: Float = drs.capFps
   stepRenderScale(drs: drs, deltaTime: deltaTime, therm: therm)
+  if drs.scale is not scaleBefore or drs.capFps is not capBefore {
+    let percent: Int = (drs.scale * 100.0 + 0.5).toInt()
+    log("[drs] render scale {percent}%, cap {drs.capFps.toInt()} fps, thermal state {therm}")
+  }
   # Surface the current tier in profile captures: render.scale (percent), the
   # frame cap, and the OS thermal state, plotted alongside fps / per-pass GPU ms.
   unsafe {
@@ -128,8 +168,10 @@ func updateRenderScale(
 }
 
 # One frame of the ladder, given the frame's dt and the OS thermal state (0
-# nominal .. 3 critical). Drop fast after 4 missed frames, restore one rung after
-# ~3 s good, 30-frame cooldown between moves. Pure — no native call — so a test
+# nominal .. 3 critical). Drop fast after 4 missed frames in a row or 6 of the
+# last 60 (the scale only), restore one rung after ~3 s good (longer after a
+# raise that did not hold, see baseRaiseFrames), 30-frame cooldown between moves. Pure — no native
+# call — so a test
 # can drive it frame by frame.
 func stepRenderScale(drs: mod RenderScaleController, deltaTime: view Float, therm: view Int) {
   # Proactive OS-thermal ceiling: snap the scale down (and force the 30fps cap at
@@ -153,12 +195,20 @@ func stepRenderScale(drs: mod RenderScaleController, deltaTime: view Float, ther
     frameSec = drs.workSec
   }
   drs.workMeasured = false
-  if frameSec > drs.overBudgetSec {
+  let missed: Bool = frameSec > drs.overBudgetSec
+  if missed {
     drs.overFrames = drs.overFrames + 1
     drs.goodFrames = 0
   } else {
     drs.goodFrames = drs.goodFrames + 1
     drs.overFrames = 0
+  }
+  noteWindowFrame(drs: drs, missed: missed)
+  if drs.sinceRaise < raiseHoldFrames {
+    drs.sinceRaise = drs.sinceRaise + 1
+    if drs.sinceRaise is raiseHoldFrames {
+      drs.raiseFrames = baseRaiseFrames
+    }
   }
   if drs.cooldown > 0 {
     drs.cooldown = drs.cooldown - 1
@@ -174,33 +224,86 @@ func stepRenderScale(drs: mod RenderScaleController, deltaTime: view Float, ther
     drs.overFrames = 0
     ret
   }
+  if drs.overFrames < 4 and windowMissesTooMany(drs: drs) and drs.scale > drs.minScale {
+    drs.scale = drs.scale - drs.step
+    if drs.scale < drs.minScale {
+      drs.scale = drs.minScale
+    }
+    noteDrop(drs: drs)
+    ret
+  }
   if drs.overFrames >= 4 {
     if drs.scale > drs.minScale {
       drs.scale = drs.scale - drs.step
       if drs.scale < drs.minScale {
         drs.scale = drs.minScale
       }
-      drs.cooldown = 30
-      drs.overFrames = 0
+      noteDrop(drs: drs)
     } else if drs.capFps > 30.0 {
       drs.capFps = 30.0  # bottom rung: cap to 30
-      drs.cooldown = 30
-      drs.overFrames = 0
+      noteDrop(drs: drs)
     }
-  } else if drs.goodFrames >= 180 {
+  } else if drs.goodFrames >= drs.raiseFrames {
     if drs.capFps < 60.0 and therm < 3 {
       drs.capFps = 60.0  # restore the rate before the resolution
-      drs.cooldown = 30
-      drs.goodFrames = 0
+      noteRaise(drs: drs)
     } else if drs.scale < ceiling {
       drs.scale = drs.scale + drs.step
       if drs.scale > ceiling {
         drs.scale = ceiling
       }
-      drs.cooldown = 30
-      drs.goodFrames = 0
+      noteRaise(drs: drs)
     }
   }
+}
+
+# A rung went down: wait out the cooldown, start a fresh miss window, and if
+# the last raise was under raiseHoldFrames ago, make the next one wait longer
+func noteDrop(drs: mod RenderScaleController) {
+  drs.cooldown = 30
+  drs.overFrames = 0
+  clearWindow(drs: drs)
+  if drs.sinceRaise < raiseHoldFrames {
+    drs.raiseFrames = drs.raiseFrames * 2
+    if drs.raiseFrames > maxRaiseFrames {
+      drs.raiseFrames = maxRaiseFrames
+    }
+    drs.sinceRaise = raiseHoldFrames
+  }
+}
+
+func noteRaise(drs: mod RenderScaleController) {
+  drs.cooldown = 30
+  drs.goodFrames = 0
+  drs.sinceRaise = 0
+}
+
+# Push one frame into the miss window, dropping the one missWindow frames ago
+func noteWindowFrame(drs: mod RenderScaleController, missed: view Bool) {
+  if drs.windowFrames >= missWindow {
+    if (drs.missBits shr (missWindow - 1)) bitand 1 is 1 {
+      drs.windowMisses = drs.windowMisses - 1
+    }
+  } else {
+    drs.windowFrames = drs.windowFrames + 1
+  }
+  drs.missBits = (drs.missBits shl 1) bitand ((1 shl missWindow) - 1)
+  if missed {
+    drs.missBits = drs.missBits bitor 1
+    drs.windowMisses = drs.windowMisses + 1
+  }
+}
+
+# A full window with missWindowLimit or more misses
+func windowMissesTooMany(drs: view RenderScaleController) ret Bool {
+  ret drs.windowFrames >= missWindow and drs.windowMisses >= missWindowLimit
+}
+
+# After a move, the frames before it no longer say anything about the new rung
+func clearWindow(drs: mod RenderScaleController) {
+  drs.missBits = 0
+  drs.windowFrames = 0
+  drs.windowMisses = 0
 }
 
 # Shadow-map resolution for the current tier. DRS scales the deferred targets but
