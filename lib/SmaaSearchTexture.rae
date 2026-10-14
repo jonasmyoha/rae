@@ -1,0 +1,86 @@
+# Ported from SMAA: Copyright (c) 2013 Jorge Jimenez et al., MIT License (lib/LICENSE-smaa.md)
+# SMAA's search texture (render-perf-9), generated in Rae instead of bundled:
+# Scripts/SearchTex.py. The blending-weight pass's line searches fetch four
+# edges at once with one bilinear access; this 64 x 16 table says, for the
+# value such a fetch returns, how many pixels the last search step adds
+# (0, 1 or 2, stored as 0, 127, 254). Byte for byte the reference
+# Textures/SearchTex.h (checked when this was written).
+
+# The four edges [e0, e1, e2, e3] (bits 0-3) whose bilinear fetch is n / 32:
+# n = e0 + 3 e1 + 7 e2 + 21 e3; -1 when no combination gives n.
+func searchEdges(n: view Int) ret Int {
+  loop var bits: Int = 0, bits < 16, ++bits {
+    let sum: Int = (bits bitand 1) + 3 * ((bits shr 1) bitand 1) + 7 * ((bits shr 2) bitand 1) + 21 * ((bits shr 3) bitand 1)
+    if sum is n {
+      ret bits
+    }
+  }
+  ret -1
+}
+
+func edgeBit(edges: view Int, index: view Int) ret Bool {
+  ret ((edges shr index) bitand 1) is 1
+}
+
+# How far to continue a search to the left (deltaLeft)
+func searchDeltaLeft(left: view Int, top: view Int) ret Int {
+  var d: Int = 0
+  if edgeBit(edges: top, index: 3) {
+    d = d + 1
+  }
+  if d is 1 and edgeBit(edges: top, index: 2) and not edgeBit(edges: left, index: 1) and not edgeBit(
+    edges: left
+    index: 3
+  ) {
+    d = d + 1
+  }
+  ret d
+}
+
+# How far to continue a search to the right (deltaRight)
+func searchDeltaRight(left: view Int, top: view Int) ret Int {
+  var d: Int = 0
+  if edgeBit(edges: top, index: 3) and not edgeBit(edges: left, index: 1) and not edgeBit(
+    edges: left
+    index: 3
+  ) {
+    d = d + 1
+  }
+  if d is 1 and edgeBit(edges: top, index: 2) and not edgeBit(edges: left, index: 0) and not edgeBit(
+    edges: left
+    index: 2
+  ) {
+    d = d + 1
+  }
+  ret d
+}
+
+# The texture as RGBA8 rows (the value in red), 64 x 16. The script computes
+# a 66 x 33 image (left deltas in columns 0-32, right deltas in 33-65), crops
+# rows 17-32 and flips them: row r of the result is row 32 - r.
+func smaaSearchTextureRgba() ret List(UInt8) {
+  var bytes: List(UInt8) = List.create(UInt8, cap: 64 * 16 * 4)
+  loop var row: Int = 0, row < 16, ++row {
+    let top: Int = searchEdges(n: 32 - row)
+    loop var column: Int = 0, column < 64, ++column {
+      var value: Int = 0
+      var leftIndex: Int = column
+      if column >= 33 {
+        leftIndex = column - 33
+      }
+      let left: Int = searchEdges(n: leftIndex)
+      if left >= 0 and top >= 0 {
+        if column < 33 {
+          value = 127 * searchDeltaLeft(left: left, top: top)
+        } else {
+          value = 127 * searchDeltaRight(left: left, top: top)
+        }
+      }
+      bytes.add(value: value as UInt8)
+      bytes.add(value: 0)
+      bytes.add(value: 0)
+      bytes.add(value: 255)
+    }
+  }
+  ret bytes
+}
