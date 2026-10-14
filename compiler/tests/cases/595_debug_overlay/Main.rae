@@ -95,6 +95,16 @@ func main() ret Int {
   check(label: "fps rounds to whole frames", ok: formatDebugFps(fps: 59.6) is "fps: 60")
   # Never negative: the window can be degenerate before the second frame lands.
   check(label: "fps never reads negative", ok: formatDebugFps(fps: 0.0 - 3.0) is "fps: 0")
+  check(
+    label: "fps near a display rate shows the rate"
+    ok: formatDebugFps(fps: 59.0) is "fps: 60" and formatDebugFps(fps: 29.0) is "fps: 30" and formatDebugFps(
+      fps: 118.0
+    ) is "fps: 120"
+  )
+  check(
+    label: "fps away from a display rate shows itself"
+    ok: formatDebugFps(fps: 55.0) is "fps: 55" and formatDebugFps(fps: 45.0) is "fps: 45"
+  )
 
   # Placement: the window's top-right corner, `margin` in, until the app
   # anchors it (under its own chrome); (0, 0) puts it back.
