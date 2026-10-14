@@ -278,6 +278,9 @@ func texelBytes(format: view Int32) ret Int {
   if (format is WGPUTextureFormat_RGBA8Unorm) or (format is WGPUTextureFormat_BGRA8Unorm) or (format is WGPUTextureFormat_R32Float) {
     ret 4
   }
+  if (format is WGPUTextureFormat_RG11B10Ufloat) {
+    ret 4  # the renderers' HDR lit format (#370)
+  }
   if (format is WGPUTextureFormat_RGBA16Float) or (format is WGPUTextureFormat_RG32Float) {
     ret 8
   }

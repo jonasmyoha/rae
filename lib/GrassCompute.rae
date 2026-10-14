@@ -216,6 +216,7 @@ func gbufferProceduralPipelineSpec() ret RenderPipelineSpec {
     depthWrite: true
     depthCompare: WGPUCompareFunction_Greater
     cullMode: WGPUCullMode_None
+    sampleCount: 1
   }
 }
 
@@ -524,7 +525,7 @@ func grassDraw(
     gbufferResources: gbufferResources
   )
   unsafe {
-    let pass: Ptr = gbuffer.pass
+    let pass: Ptr = gbufferAttributePass(cache: gbuffer)
     if pass is webgpuNull() {
       ret
     }

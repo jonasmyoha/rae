@@ -1,0 +1,453 @@
+# ForwardMain — the forward main pass (forward-rae-1; docs/forward-msaa-study.md,
+# measured in benchmarks/forwardMsaa). The deferred renderer's other choice
+# for its main pass: instead of a G-buffer pass and a fullscreen lighting pass,
+# ONE render pass shades every surface in its material's fragment entry and
+# writes the lit radiance the post passes (bloom, the composite's tone map and
+# upscale, present) read as usual.
+#
+# - 4x MSAA, resolved into the lit target when the pass ends. The 4x colour
+#   and depth are memoryless (TRANSIENT): on a tile GPU they never leave tile
+#   memory, so the frame keeps 4 bytes a pixel where the G-buffer kept 20.
+#   MSAA is the antialiasing; the frame has no TAA, FXAA or SMAA.
+# - No depth pre-pass: Apple GPUs remove hidden pixels themselves, and the
+#   study measured a pre-pass 6-89% slower.
+# - The shading is the deferred lighting's shadeSurface
+#   (deferred_shade.wgsl), so both paths light a surface the same way; the
+#   light uniform and the sun cascades are the deferred ones.
+# - No SSAO: the depth never leaves the tile. Skinned meshes, terrain,
+#   metaballs, sprites and grass have no forward material yet, so a forward
+#   frame skips them (GbufferCache.forwardFrame).
+#
+# The draws are the G-buffer pass's (the mesh store, the draw records, the
+# World3d query): a forward frame opens the GbufferCache's pass on these
+# targets with the forward pipeline, and the same draw calls fill it.
+open Vec3
+open Math3d
+open Scene3d
+open Sky
+open Gbuffer
+open GbufferTargets
+open GbufferPasses
+open ShadowMaps
+open webgpu/Webgpu
+open webgpu/Context
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuRender
+open gpu/GpuRenderPass
+open gpu/GpuIds
+open gpu/DeviceFeatures
+
+# The memoryless usage for the 4x targets. wgpu-native 29 hands texture
+# usage bits to wgpu-core unchanged, and there TRANSIENT is bit 17; the
+# header's WGPUTextureUsage_TransientAttachment (0x20) is not a wgpu-core bit
+# and panics in wgpuDeviceCreateTexture. The browser's WebGPU takes the
+# header's value.
+when Target.isNative {
+  const transientAttachmentUsage: UInt64 = 131072
+} else {
+  const transientAttachmentUsage: UInt64 = 32
+}
+
+const forwardSampleCount: Int = 4
+
+type ForwardMainCache {
+  pipelinesMade: Bool
+  pipelineFormat: Int32  # the lit format the pipelines were made for
+  staticPipeline: RenderPipelineId
+  skyPipeline: RenderPipelineId
+  staticBind: BindGroupId
+  skyBind: BindGroupId
+  bindTargetsGen: Int  # the post targets' and cascades' generations the binds point at
+  bindShadowGen: Int
+  colour: TextureId  # 4x, memoryless, resolved into the lit target
+  colourView: TextureViewId
+  depth: TextureId  # 4x, memoryless, reverse-Z
+  depthView: TextureViewId
+  width: Int
+  height: Int
+}
+
+func createForwardMainCache() ret ForwardMainCache {
+  ret ForwardMainCache {
+    pipelinesMade: false
+    pipelineFormat: 0
+    staticPipeline: noRenderPipelineId()
+    skyPipeline: noRenderPipelineId()
+    staticBind: noBindGroupId()
+    skyBind: noBindGroupId()
+    bindTargetsGen: -1
+    bindShadowGen: -1
+    colour: noTextureId()
+    colourView: noTextureViewId()
+    depth: noTextureId()
+    depthView: noTextureViewId()
+    width: 0
+    height: 0
+  }
+}
+
+# The static material and the sky background at 4x, for the lit format. The
+# f16 shading when the device has shader-f16, like the deferred lighting.
+func ensureForwardPipelines(
+  forward: mod ForwardMainCache
+  resources: mod GpuResources
+  litFormat: view Int32
+) {
+  if forward.pipelinesMade and forward.pipelineFormat is litFormat {
+    ret
+  }
+  retireForwardPipelines(forward: forward, resources: resources)
+  forward.pipelinesMade = true
+  forward.pipelineFormat = litFormat
+  var staticShader: Shader = shader(files: [
+    "lib/precision_f32.wgsl"
+    "lib/gbuffer_octahedral.wgsl"
+    "lib/sky_hosek.wgsl"
+    "lib/deferred_uniforms.wgsl"
+    "lib/deferred_shade.wgsl"
+    "lib/gbuffer_static_surface.wgsl"
+    "lib/forward_static.wgsl"
+  ])
+  if deviceHasShaderF16() {
+    staticShader = shader(files: [
+      "lib/precision_f16.wgsl"
+      "lib/gbuffer_octahedral.wgsl"
+      "lib/sky_hosek.wgsl"
+      "lib/deferred_uniforms.wgsl"
+      "lib/deferred_shade.wgsl"
+      "lib/gbuffer_static_surface.wgsl"
+      "lib/forward_static.wgsl"
+    ])
+  }
+  let skyShader: Shader = shader(
+    files: ["lib/sky_hosek.wgsl", "lib/deferred_uniforms.wgsl", "lib/forward_sky.wgsl"]
+  )
+  if let pipeline: RenderPipelineId = createRenderPipeline(
+    resources: resources
+    shader: staticShader
+    vertexEntry: "vs"
+    fragmentEntry: "fs"
+    spec: forwardPipelineSpec(
+      litFormat: litFormat
+      stride: 32
+      attributes: gbufferStaticAttributes()
+      depthWrite: true
+      depthCompare: WGPUCompareFunction_Greater
+      cullMode: WGPUCullMode_Back
+    )
+  ) {
+    forward.staticPipeline = pipeline
+  }
+  # The background: a far-plane triangle where the depth is still clear
+  if let pipeline: RenderPipelineId = createRenderPipeline(
+    resources: resources
+    shader: skyShader
+    vertexEntry: "vs"
+    fragmentEntry: "fs"
+    spec: forwardPipelineSpec(
+      litFormat: litFormat
+      stride: 0
+      attributes: List.create(VertexAttributeSpec, cap: 0)
+      depthWrite: false
+      depthCompare: WGPUCompareFunction_Equal
+      cullMode: WGPUCullMode_None
+    )
+  ) {
+    forward.skyPipeline = pipeline
+  }
+}
+
+# One 4x pipeline into the lit format with a reverse-Z depth32
+func forwardPipelineSpec(
+  litFormat: view Int32
+  stride: view Int
+  attributes: own List(VertexAttributeSpec)
+  depthWrite: view Bool
+  depthCompare: view Int32
+  cullMode: view Int32
+) ret RenderPipelineSpec {
+  var colorFormats: List(Int32) = List.create(Int32, cap: 1)
+  colorFormats.add(value: litFormat)
+  ret RenderPipelineSpec {
+    vertexStride: stride
+    attributes: own attributes
+    colorFormats: own colorFormats
+    alphaBlend: false
+    premultiplied: false
+    depthFormat: WGPUTextureFormat_Depth32Float
+    depthWrite: depthWrite
+    depthCompare: depthCompare
+    cullMode: cullMode
+    sampleCount: forwardSampleCount
+  }
+}
+
+# The 4x colour and depth at the scene size (the G-buffer cache's target
+# size, which the render ceiling and the dynamic scale set). False when they
+# could not be made.
+func ensureForwardTargets(
+  forward: mod ForwardMainCache
+  resources: mod GpuResources
+  width: view Int
+  height: view Int
+  litFormat: view Int32
+) ret Bool {
+  let made: Bool = isValidTextureView(resources: resources, id: forward.colourView) and isValidTextureView(
+    resources: resources
+    id: forward.depthView
+  )
+  if made and forward.width is width and forward.height is height and forward.pipelineFormat is litFormat {
+    ret true
+  }
+  retireForwardTargets(forward: forward, resources: resources)
+  let usage: UInt64 = WGPUTextureUsage_RenderAttachment + transientAttachmentUsage
+  if let colour: TextureId = createTextureSampled(
+    resources: resources
+    width: width
+    height: height
+    format: litFormat
+    usage: usage
+    samples: forwardSampleCount
+  ) {
+    forward.colour = colour
+    if let colourView: TextureViewId = createTextureView(resources: resources, texture: colour) {
+      forward.colourView = colourView
+    }
+  }
+  if let depth: TextureId = createTextureSampled(
+    resources: resources
+    width: width
+    height: height
+    format: WGPUTextureFormat_Depth32Float
+    usage: usage
+    samples: forwardSampleCount
+  ) {
+    forward.depth = depth
+    if let depthView: TextureViewId = createTextureView(resources: resources, texture: depth) {
+      forward.depthView = depthView
+    }
+  }
+  forward.width = width
+  forward.height = height
+  ret isValidTextureView(resources: resources, id: forward.colourView) and isValidTextureView(
+    resources: resources
+    id: forward.depthView
+  )
+}
+
+# The binds: the static material reads the frame uniform, the draws, the
+# light uniform and the cascades; the sky reads the light uniform. Rebuilt
+# when the post targets or the cascades are recreated.
+func ensureForwardBinds(
+  forward: mod ForwardMainCache
+  resources: mod GpuResources
+  gbuffer: view GbufferCache
+  targets: view DeferredTargets
+  shadow: view ShadowCache
+) {
+  if not (targets.gen is forward.bindTargetsGen) or not (shadow.gen is forward.bindShadowGen) {
+    forward.bindTargetsGen = targets.gen
+    forward.bindShadowGen = shadow.gen
+    let staticRetired: Bool = retireBindGroup(resources: resources, id: forward.staticBind)
+    let skyRetired: Bool = retireBindGroup(resources: resources, id: forward.skyBind)
+    forward.staticBind = noBindGroupId()
+    forward.skyBind = noBindGroupId()
+  }
+  if not bindGroupIsUsable(resources: resources, id: forward.staticBind) {
+    var entries: List(ResourceRef) = List.create(ResourceRef, cap: 6)
+    entries.add(value: bufferRef(id: gbuffer.frameUniform))
+    entries.add(value: bufferRef(id: gbuffer.draws))
+    entries.add(value: bufferRef(id: targets.lightUniform))
+    entries.add(value: bufferRef(id: shadow.frameUniform))
+    entries.add(value: textureViewRef(id: shadow.arrayView))
+    entries.add(value: samplerRef(id: shadow.sampler))
+    if let bind: BindGroupId = createRenderBindGroup(
+      resources: resources
+      pipeline: forward.staticPipeline
+      entries: entries
+    ) {
+      forward.staticBind = bind
+    }
+  }
+  if not bindGroupIsUsable(resources: resources, id: forward.skyBind) {
+    var entries: List(ResourceRef) = List.create(ResourceRef, cap: 1)
+    entries.add(value: bufferRef(id: targets.lightUniform))
+    if let bind: BindGroupId = createRenderBindGroup(
+      resources: resources
+      pipeline: forward.skyPipeline
+      entries: entries
+    ) {
+      forward.skyBind = bind
+    }
+  }
+}
+
+# Open the forward main pass for this frame's camera and light. The draws
+# then go through the GbufferCache as usual (renderSceneWorld, drawRecords,
+# drawInstances), and endForwardMain closes it. Does nothing when the device,
+# the targets or the pipelines are not ready; the frame then draws nothing.
+func beginForwardMain(
+  forward: mod ForwardMainCache
+  gbuffer: mod GbufferCache
+  targets: mod DeferredTargets
+  shadow: mod ShadowCache
+  resources: mod GpuResources
+  camera: view Camera3d
+  light: view Light3d
+  sky: view Sky
+  aspect: view Float
+) {
+  if not prepareGeometryFrame(
+    cache: gbuffer
+    resources: resources
+    viewProj: reverseZViewProj(camera: camera, aspect: aspect)
+    clearR: light.clearColor.x
+    clearG: light.clearColor.y
+    clearB: light.clearColor.z
+  ) {
+    ret
+  }
+  if not postPassReady(targets: targets, resources: resources, gbuffer: gbuffer) {
+    ret
+  }
+  let lightUploaded: Bool = uploadSceneLight(
+    targets: targets
+    resources: resources
+    gbuffer: gbuffer
+    camera: camera
+    light: light
+    sky: sky
+  )
+  ensureShadowDefaults(shadow: shadow, resources: resources)
+  if not shadowTargetsReady(shadow: shadow, resources: resources) {
+    ret
+  }
+  ensureForwardPipelines(forward: forward, resources: resources, litFormat: targets.litFormat)
+  if not ensureForwardTargets(
+    forward: forward
+    resources: resources
+    width: gbuffer.targetWidth
+    height: gbuffer.targetHeight
+    litFormat: targets.litFormat
+  ) {
+    ret
+  }
+  ensureForwardBinds(
+    forward: forward
+    resources: resources
+    gbuffer: gbuffer
+    targets: targets
+    shadow: shadow
+  )
+  var passTargets: RenderTargetSet = createRenderTargetSet(clear: true)
+  let added: Bool = addResolvedColorTarget(
+    targets: passTargets
+    colorView: textureViewRef(id: forward.colourView)
+    resolveView: textureViewRef(id: targets.litView)
+    r: light.clearColor.x
+    g: light.clearColor.y
+    b: light.clearColor.z
+    a: 1.0
+  )
+  setDepthTarget(
+    targets: passTargets
+    depthView: textureViewRef(id: forward.depthView)
+    clear: true
+    clearValue: 0.0
+    readOnly: false
+  )
+  passTargets.depthDiscard = true
+  openGeometryPass(
+    cache: gbuffer
+    resources: resources
+    targets: passTargets
+    forward: true
+    pipeline: forward.staticPipeline
+    bind: forward.staticBind
+  )
+}
+
+# Draw the sky where nothing was drawn, then close and submit the pass: the
+# 4x samples resolve into the lit target and are thrown away.
+func endForwardMain(
+  forward: view ForwardMainCache
+  gbuffer: mod GbufferCache
+  resources: mod GpuResources
+) {
+  if not gbufferFrameActive(cache: gbuffer) or not gbuffer.forwardFrame {
+    ret
+  }
+  unsafe {
+    let skyDrawn: Bool = recordDrawInPass(
+      resources: resources
+      pass: gbuffer.pass
+      pipeline: forward.skyPipeline
+      bindGroup: forward.skyBind
+      vertexCount: 3
+      instanceCount: 1
+      firstVertex: 0
+      firstInstance: 0
+    )
+  }
+  if let recording: mod Recording => gbuffer.recording {
+    recordRenderPipelineUse(recording: recording, resources: resources, id: forward.skyPipeline)
+    recordBindGroupUse(recording: recording, resources: resources, id: forward.skyBind)
+  }
+  end(cache: gbuffer, resources: resources)
+}
+
+# The rasterised view-projection: the deferred one (reverse-Z, Z-up)
+func reverseZViewProj(camera: view Camera3d, aspect: view Float) ret Mat4 {
+  let viewMatrix: Mat4 = mat4LookAt(
+    eyeX: camera.position.x
+    eyeY: camera.position.y
+    eyeZ: camera.position.z
+    atX: camera.target.x
+    atY: camera.target.y
+    atZ: camera.target.z
+    upX: 0.0
+    upY: 0.0
+    upZ: 1.0
+  )
+  let projection: Mat4 = mat4PerspectiveReverseZ(
+    fovYDeg: camera.fovYDeg
+    aspect: aspect
+    near: camera.nearZ
+    far: camera.farZ
+  )
+  ret mat4Mul(a: projection, b: viewMatrix)
+}
+
+func retireForwardTargets(forward: mod ForwardMainCache, resources: mod GpuResources) {
+  let colourViewRetired: Bool = retireTextureView(resources: resources, id: forward.colourView)
+  let colourRetired: Bool = retireTexture(resources: resources, id: forward.colour)
+  let depthViewRetired: Bool = retireTextureView(resources: resources, id: forward.depthView)
+  let depthRetired: Bool = retireTexture(resources: resources, id: forward.depth)
+  forward.colour = noTextureId()
+  forward.colourView = noTextureViewId()
+  forward.depth = noTextureId()
+  forward.depthView = noTextureViewId()
+  forward.width = 0
+  forward.height = 0
+}
+
+func retireForwardPipelines(forward: mod ForwardMainCache, resources: mod GpuResources) {
+  let staticBindRetired: Bool = retireBindGroup(resources: resources, id: forward.staticBind)
+  let skyBindRetired: Bool = retireBindGroup(resources: resources, id: forward.skyBind)
+  let staticRetired: Bool = retireRenderPipeline(resources: resources, id: forward.staticPipeline)
+  let skyRetired: Bool = retireRenderPipeline(resources: resources, id: forward.skyPipeline)
+  forward.staticBind = noBindGroupId()
+  forward.skyBind = noBindGroupId()
+  forward.staticPipeline = noRenderPipelineId()
+  forward.skyPipeline = noRenderPipelineId()
+  forward.bindTargetsGen = -1
+  forward.bindShadowGen = -1
+  forward.pipelinesMade = false
+}
+
+# Everything the forward pass owns, at the renderer's shutdown
+func shutdownForwardMain(forward: mod ForwardMainCache, resources: mod GpuResources) {
+  retireForwardTargets(forward: forward, resources: resources)
+  retireForwardPipelines(forward: forward, resources: resources)
+}
