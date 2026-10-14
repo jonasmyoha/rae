@@ -4,6 +4,15 @@
 # that dipped once stayed at 30 fps until restarted. A capped frame is judged by
 # its WORK time (recorded before the padding sleep) instead, and a cap the heat
 # forced lifts when the thermal state falls again.
+#
+# Missed frames that never come 4 in a row must lower the scale too: a GPU
+# frame just over the period alternates 16.7 / 33 ms, and the old streak rule
+# never engaged on it. 6 misses in the last 60 frames step the scale down; a
+# steady 16.7 ms, or a slow frame one time in 20, must not.
+#
+# A scene that misses only at full scale (114 on a warm iPhone) must not climb
+# back to it every 3 s: a raise that a drop follows within 10 s makes the next
+# raise wait twice as long.
 open app3d/RenderScale
 
 const nominal: Int = 0
@@ -32,6 +41,35 @@ func frames(
   loop var i: Int = 0, i < count, ++i {
     frame(drs: drs, workSec: workSec, therm: therm)
   }
+}
+
+# `count` frames where every `every`-th one takes 33 ms and the rest 16.7 ms
+func scattered(drs: mod RenderScaleController, count: view Int, every: view Int) {
+  loop var i: Int = 1, i <= count, ++i {
+    var workSec: Float = 0.0167
+    if i % every is 0 {
+      workSec = 0.033
+    }
+    frame(drs: drs, workSec: workSec, therm: nominal)
+  }
+}
+
+# One minute of a scene where every 6th frame takes 33 ms at full scale and
+# every frame takes 16.7 ms below it; answers the raises back to full scale
+func missesAtFullScale(drs: mod RenderScaleController) ret Int {
+  var raises: Int = 0
+  loop var i: Int = 1, i <= 3600, ++i {
+    let before: Float = drs.scale
+    var workSec: Float = 0.0167
+    if drs.scale > 0.95 and i % 6 is 0 {
+      workSec = 0.033
+    }
+    frame(drs: drs, workSec: workSec, therm: nominal)
+    if drs.scale > 0.95 and before < 0.95 {
+      raises = raises + 1
+    }
+  }
+  ret raises
 }
 
 func show(label: view String, drs: view RenderScaleController) {
@@ -111,4 +149,38 @@ func main() {
     therm: nominal
   )
   show(label: "cooled down", drs: hot)
+
+  # 16.7 / 33 ms alternately: never 4 misses in a row, half the frames missed
+  var alternating: RenderScaleController = createRenderScaleController(targetFps: 60.0)
+  scattered(drs: alternating, count: 59, every: 2)
+  show(label: "alternating, 59 frames", drs: alternating)
+  scattered(drs: alternating, count: 1, every: 2)
+  show(label: "alternating, 60 frames", drs: alternating)
+  scattered(drs: alternating, count: 600, every: 2)
+  show(label: "alternating, 10 s later", drs: alternating)
+
+  # A slow frame one time in 8 (12%) steps down; one in 20 (5%) does not
+  var oneInEight: RenderScaleController = createRenderScaleController(targetFps: 60.0)
+  scattered(drs: oneInEight, count: 60, every: 8)
+  show(label: "one slow frame in 8, 60 frames", drs: oneInEight)
+  var oneInTwenty: RenderScaleController = createRenderScaleController(targetFps: 60.0)
+  scattered(drs: oneInTwenty, count: 600, every: 20)
+  show(label: "one slow frame in 20, 10 s", drs: oneInTwenty)
+
+  # A steady 16.7 ms never steps down
+  var steady: RenderScaleController = createRenderScaleController(targetFps: 60.0)
+  frames(
+    drs: steady
+    count: 600
+    workSec: 0.0167
+    therm: nominal
+  )
+  show(label: "steady 16.7 ms, 10 s", drs: steady)
+
+  # Misses only at full scale: back to it 4 times in a minute (after 3, 6, 12
+  # and 24 s of good frames), not 12
+  var warm: RenderScaleController = createRenderScaleController(targetFps: 60.0)
+  let raises: Int = missesAtFullScale(drs: warm)
+  log("misses only at full scale, 60 s: {raises} raises back to 100%")
+  show(label: "misses only at full scale, 60 s", drs: warm)
 }

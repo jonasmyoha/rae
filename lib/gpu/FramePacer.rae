@@ -29,7 +29,8 @@
 # RAE_FRAMES_IN_FLIGHT=1 restores the old behaviour (wait on the frame just
 # submitted), for comparison. RAE_FRAME_TIMING=1 prints, every 120 frames, the
 # average frame time split into the CPU's own work, the present (and, inside
-# it, the drawable acquire, which waits for vsync) and the wait for the GPU here.
+# it, the drawable acquire, which waits for vsync) and the wait for the GPU here,
+# and logs each frame over 22 ms on its own line, split the same way.
 import Sys
 open gpu/PipelineWatch
 open webgpu/Webgpu
@@ -52,6 +53,11 @@ type FramePacer {
 }
 
 const timingWindow: Int = 120
+
+# Under RAE_FRAME_TIMING a frame slower than this is also logged on its own
+# line, split the same way: a late frame at 60 fps takes 25 ms on a 120 Hz
+# screen and 33 ms on a 60 Hz one
+const slowFrameSeconds: Float64 = 0.022
 
 func nativeFrameClock() unsafe extern("rae_ext_Gpu2d_nowSeconds") ret Float64
 
@@ -143,17 +149,30 @@ func paceFrame(pacer: mod FramePacer) {
 
 func recordFrameTiming(pacer: mod FramePacer, waitStart: view Float64, waitEnd: view Float64) {
   if pacer.frameStart > 0.0 {
-    pacer.timedFrames = pacer.timedFrames + 1
-    pacer.frameSeconds = pacer.frameSeconds + (waitEnd - pacer.frameStart)
-    pacer.waitSeconds = pacer.waitSeconds + (waitEnd - waitStart)
+    let frame: Float64 = waitEnd - pacer.frameStart
+    let wait: Float64 = waitEnd - waitStart
+    var present: Float64 = 0.0
     if pacer.presentStart > 0.0 {
-      var present: Float64 = waitStart - pacer.presentStart
+      present = waitStart - pacer.presentStart
       if pacer.acquireThisFrame > 0.0 and pacer.acquireStartedAt >= pacer.presentStart {
         present = present - pacer.acquireThisFrame  # the acquire is reported apart
       }
-      pacer.presentSeconds = pacer.presentSeconds + present
     }
+    pacer.timedFrames = pacer.timedFrames + 1
+    pacer.frameSeconds = pacer.frameSeconds + frame
+    pacer.waitSeconds = pacer.waitSeconds + wait
+    pacer.presentSeconds = pacer.presentSeconds + present
     pacer.acquireSeconds = pacer.acquireSeconds + pacer.acquireThisFrame
+    if frame > slowFrameSeconds {
+      let cpu: Float64 = frame - present - wait - pacer.acquireThisFrame
+      log(
+        "[frame] slow: {roundTenth(value: frame * 1000.0)} ms = cpu {roundTenth(value: cpu * 1000.0)} + drawable acquire {roundTenth(
+          value: pacer.acquireThisFrame * 1000.0
+        )} + present {roundTenth(value: present * 1000.0)} + gpu wait {roundTenth(
+          value: wait * 1000.0
+        )}"
+      )
+    }
   }
   pacer.presentStart = 0.0
   pacer.acquireThisFrame = 0.0

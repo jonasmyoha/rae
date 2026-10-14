@@ -31,15 +31,30 @@ deltaTime:, profiler:)` each frame; `capFrameSleep(drs:, frameStartSec:)` at the
 end of the render branch; `drsShadowRes(drs:)` feeds
 `fitShadowCascades(resolution:)`. The decisions are one pure function,
 `stepRenderScale(drs:, deltaTime:, therm:)`, which `updateRenderScale` calls with
-the OS thermal state; a test drives it frame by frame (fixture 1117).
+the OS thermal state; a test drives it frame by frame (fixture 1117, which also
+holds the miss-window cases).
 
 Two inputs drive it:
 
 - **Frame time (`dt`)** — reactive. Under vsync `dt` is coarse (≈16.7/33.3 ms), so
   the loop reacts to *dropped frames*: drop a rung after 4 consecutive frames
   >25% over the target period, raise after ~3 s of good frames, 30-frame cooldown
-  between moves so it can't oscillate. When real per-pass **GPU ms (#528)** lands,
-  swap `dt` for measured GPU time for a tighter, predictive loop.
+  between moves so it can't oscillate. **Misses that never come 4 in a row**
+  lower the scale too: the controller keeps which of the last 60 frames missed
+  and steps the scale down one rung when 6 of them did (10%, about 54 fps or
+  worse over 2 s). A GPU frame just over the period gives 16.7 / 33 ms
+  alternately, and the streak rule alone never engaged on it (measured on 114,
+  iPhone 15 Pro, 2026-10-14: warm 2 s windows of 18-19.8 ms, up to one frame in
+  6 dropped, never 4 in a row). Only the resolution reacts to the window; the
+  30 fps cap still needs the streak, since scattered misses at 60 beat a steady
+  30. A raise that a drop follows within 10 s was too early, so the next raise
+  waits twice as long (3, 6, 12 ... up to 60 s of good frames); a raise that
+  holds 10 s brings the wait back to 3 s. Without that, a scene that misses only
+  at the higher rung climbed back every 3 s and missed again (seen on 114).
+  Each rung change logs `[drs] render scale N%, cap N fps`, and under
+  `RAE_FRAME_TIMING=1` every frame over 22 ms is logged with its split. When
+  real per-pass **GPU ms (#528)** lands, swap `dt` for measured GPU time for a
+  tighter, predictive loop.
   **Under the 30 fps cap a frame is judged by its WORK time**, not by `dt`:
   `capFrameSleep` pads every capped frame to 33 ms, so the padded `dt` is always
   over budget, and judged by it the cap could never lift (an app that dipped once
