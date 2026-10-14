@@ -25,14 +25,19 @@ func main() {
   let next: Bool = Time.updateHttpDate(cache: cache, epochSeconds: 784111778)
   log("cache: first {first}, same second {same}, next second {next}: {cache.text}")
 
-  # Deadlines to well under a millisecond. What is checked is the mechanism,
-  # not the machine's load: a wait is never early, and the BEST of 15 waits
-  # of 33 ms lands within 0.5 ms. One undisturbed wait is enough to show that
-  # waitUntil reads the clock and finishes with short sleeps; plain
-  # `sleep(ms: 33)` never gets there on macOS (timer coalescing: 0.6-1.5 ms at
-  # best, 3-4 ms typically, measured 2026-10-08). The MEDIAN is not checked:
-  # under the parallel suite's load most waits are delayed by scheduling, and
-  # a median under 2 ms failed there while the mechanism was fine.
+  # Deadlines. Two things are checked:
+  # - a wait is never early: waitUntil re-reads the clock and returns only
+  #   once the deadline has passed, so this holds on any machine;
+  # - the MEDIAN of 15 waits of 33 ms is under 1 ms late. That separates
+  #   waitUntil from a plain sleep by a wide margin even under load
+  #   (measured 2026-10-14, 40 waits each, idle / 12 busy processes:
+  #   waitUntil 0.05 / 0.15 ms at the median, the earlier 7/8-step version
+  #   4.4 / 1.5 ms, a plain 33 ms sleep 5-8 ms).
+  # It used to check the BEST of 15 within 0.5 ms. That failed under the
+  # suite's load, and proved little: a plain sleep also landed within
+  # 0.5 ms now and then (3 of 100 idle, 8 of 100 loaded). What the median
+  # check cannot prove is a bound on a single wait: one wait can always be
+  # delayed by the scheduler, so no case here asserts a maximum.
   var lateness: List(Int) = {}
   var early: Bool = false
   loop var i: Int = 0, i < 15, ++i {
@@ -46,7 +51,9 @@ func main() {
   }
   lateness.sort()
   log("deadline never early: {early is false}")
-  log("best of 15 waits within 0.5 ms: {lateness.copyAtFallback(index: 0, fallback: 0) < 500000}")
+  log(
+    "median of 15 waits under 1 ms late: {lateness.copyAtFallback(index: 7, fallback: 0) < 1000000}"
+  )
 
   # A 30 Hz tick: 30 ticks take a second, not a second plus 30 delays
   var ticker: Ticker = Time.createTicker(hertz: 30)
