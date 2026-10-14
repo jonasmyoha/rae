@@ -132,6 +132,15 @@ type GbufferCache {
   skinPipeline: RenderPipelineId
   staticBind: BindGroupId
   skinBind: BindGroupId
+  # The pipeline + bind the static draws of THIS frame use: the G-buffer ones,
+  # or the forward main pass's (ForwardMain.rae) in a forward frame, which
+  # draws the same meshes and records into a 4x MSAA colour target instead.
+  # A forward frame skips the draw kinds that only write the G-buffer
+  # (skinned, terrain, metaballs, sprites, grass) until they have a forward
+  # material.
+  forwardFrame: Bool
+  drawPipeline: RenderPipelineId
+  drawBind: BindGroupId
   drawScratch: List(Float)
   # terrain-splat pass pipeline/bind cache (#764: was gbuffer_terrain gTerrain* globals)
   terrainPipeMade: Bool
@@ -193,6 +202,9 @@ func createGbufferCache() ret GbufferCache {
       skinPipeline: noRenderPipelineId()
       staticBind: noBindGroupId()
       skinBind: noBindGroupId()
+      forwardFrame: false
+      drawPipeline: noRenderPipelineId()
+      drawBind: noBindGroupId()
       drawScratch: List.create(Float, cap: instanceRecordFloats)
       terrainPipeMade: false
       terrainBindGen: -1
@@ -228,20 +240,7 @@ func begin(
   clearG: copy Float
   clearB: copy Float
 ) pub {
-  if gbPrepare() is 0 {
-    ret
-  }
-  if gbufferFrameActive(cache: cache) {
-    ret
-  }
-  ensurePipelines(cache: cache, resources: resources)
-  ensureTargets(cache: cache, resources: resources)
-  if not gbufferTargetsReady(cache: cache, resources: resources) {
-    ret
-  }
-  ensureGbBuffers(cache: cache, resources: resources)
-  ensureStaticBind(cache: cache, resources: resources)
-  if not uploadFrameUniform(
+  if not prepareGeometryFrame(
     cache: cache
     resources: resources
     viewProj: viewProj
@@ -251,8 +250,6 @@ func begin(
   ) {
     ret
   }
-  cache.drawCount = 0
-  sdfFrameReset(sdf: cache.sdf)
   # A: octahedral normal + shading mode. (0.5, 0.5) decodes to +Z, mode 0 = lit.
   # B: albedo, cleared to the sky/background colour.
   # C: material/motion. Motion clears to the biased zero (no movement).
@@ -290,6 +287,70 @@ func begin(
     clearValue: 0.0
     readOnly: false
   )
+  openGeometryPass(
+    cache: cache
+    resources: resources
+    targets: targets
+    forward: false
+    pipeline: cache.staticPipeline
+    bind: cache.staticBind
+  )
+}
+
+# Everything a geometry frame needs before its pass opens: the device, the
+# G-buffer pipelines and targets (their size is the scene size every pass
+# derives from), the draw buffers and this frame's uniform. False when the
+# frame cannot be drawn (no device yet, a frame already open, no targets).
+func prepareGeometryFrame(
+  cache: mod GbufferCache
+  resources: mod GpuResources
+  viewProj: view Mat4
+  clearR: copy Float
+  clearG: copy Float
+  clearB: copy Float
+) ret Bool {
+  if gbPrepare() is 0 {
+    ret false
+  }
+  if gbufferFrameActive(cache: cache) {
+    ret false
+  }
+  ensurePipelines(cache: cache, resources: resources)
+  ensureTargets(cache: cache, resources: resources)
+  if not gbufferTargetsReady(cache: cache, resources: resources) {
+    ret false
+  }
+  ensureGbBuffers(cache: cache, resources: resources)
+  ensureStaticBind(cache: cache, resources: resources)
+  if not uploadFrameUniform(
+    cache: cache
+    resources: resources
+    viewProj: viewProj
+    clearR: clearR
+    clearG: clearG
+    clearB: clearB
+  ) {
+    ret false
+  }
+  cache.drawCount = 0
+  sdfFrameReset(sdf: cache.sdf)
+  ret true
+}
+
+# Open the frame's geometry pass on `targets`, its static draws on
+# `pipeline` / `bind`. Every draw binds its own pipeline + group
+# (gbIssueInstanced), so the pass opens with nothing bound.
+func openGeometryPass(
+  cache: mod GbufferCache
+  resources: mod GpuResources
+  targets: view RenderTargetSet
+  forward: view Bool
+  pipeline: view RenderPipelineId
+  bind: view BindGroupId
+) {
+  cache.forwardFrame = forward
+  cache.drawPipeline = pipeline
+  cache.drawBind = bind
   if var recording: Recording = beginRecording(resources: resources) {
     unsafe {
       cache.pass = beginRenderPassMulti(
@@ -300,8 +361,17 @@ func begin(
     }
     cache.recording = own recording
   }
-  # Every draw binds its own pipeline + group (gbIssueInstanced), so the pass
-  # opens with nothing bound; the SDF draw binds its own too.
+}
+
+# The open pass, for a draw that writes the G-buffer's attributes (sprites,
+# grass): null between frames and in a forward frame, which has no G-buffer.
+func gbufferAttributePass(cache: view GbufferCache) unsafe ret Ptr {
+  unsafe {
+    if cache.forwardFrame {
+      ret webgpuNull()
+    }
+    ret cache.pass
+  }
 }
 
 # The frame uniform (#397/#906; Rae math since #923): viewProj, the previous
@@ -403,6 +473,10 @@ func gbIssueInstanced(
   records: copy Ptr
 ) {
   unsafe {
+    # A forward frame draws only the static meshes (see forwardFrame)
+    if cache.forwardFrame and not (pipeline.slot is cache.drawPipeline.slot and pipeline.generation is cache.drawPipeline.generation) {
+      ret
+    }
     let strideBytes: Int = instanceRecordFloats * 4
     if not writeBufferFromPtr(
       resources: resources
@@ -459,8 +533,8 @@ func drawRecords(
     gbIssueInstanced(
       cache: cache
       resources: resources
-      pipeline: cache.staticPipeline
-      bind: cache.staticBind
+      pipeline: cache.drawPipeline
+      bind: cache.drawBind
       vbuf: gbMeshVbuf(cache: cache, resources: resources, mesh: mesh)
       ibuf: gbMeshIbuf(cache: cache, resources: resources, mesh: mesh)
       icount: gbMeshIcount(cache: cache, mesh: mesh)
@@ -669,8 +743,8 @@ func draw(
     gbIssueInstanced(
       cache: cache
       resources: resources
-      pipeline: cache.staticPipeline
-      bind: cache.staticBind
+      pipeline: cache.drawPipeline
+      bind: cache.drawBind
       vbuf: gbMeshVbuf(cache: cache, resources: resources, mesh: mesh)
       ibuf: gbMeshIbuf(cache: cache, resources: resources, mesh: mesh)
       icount: gbMeshIcount(cache: cache, mesh: mesh)
@@ -739,6 +813,7 @@ func end(cache: mod GbufferCache, resources: mod GpuResources) pub {
     endRenderPass(pass: cache.pass)
     cache.pass = webgpuNull()
   }
+  cache.forwardFrame = false
   if let recording: mod Recording => cache.recording {
     recordRenderPipelineUse(recording: recording, resources: resources, id: cache.staticPipeline)
     recordRenderPipelineUse(recording: recording, resources: resources, id: cache.skinPipeline)
@@ -746,6 +821,8 @@ func end(cache: mod GbufferCache, resources: mod GpuResources) pub {
     recordBindGroupUse(recording: recording, resources: resources, id: cache.staticBind)
     recordBindGroupUse(recording: recording, resources: resources, id: cache.skinBind)
     recordBindGroupUse(recording: recording, resources: resources, id: cache.terrainBind)
+    recordRenderPipelineUse(recording: recording, resources: resources, id: cache.drawPipeline)
+    recordBindGroupUse(recording: recording, resources: resources, id: cache.drawBind)
     sdfRecordUses(sdf: cache.sdf, recording: recording, resources: resources)
     let tracked: opt SubmissionId = trackSubmission(
       inFlight: cache.inFlight

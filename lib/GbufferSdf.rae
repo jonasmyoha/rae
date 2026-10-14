@@ -143,6 +143,7 @@ func sdfPipelineSpec() ret RenderPipelineSpec {
     depthWrite: true
     depthCompare: WGPUCompareFunction_Greater
     cullMode: WGPUCullMode_None
+    sampleCount: 1
   }
 }
 
@@ -263,7 +264,7 @@ func drawMetaballs(
   emG: copy Float
   emB: copy Float
 ) pub {
-  if not gbufferFrameActive(cache: cache) or count < 1 {
+  if not gbufferFrameActive(cache: cache) or cache.forwardFrame or count < 1 {
     ret
   }
   var balls: Int = count

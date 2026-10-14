@@ -423,6 +423,10 @@ func beginRenderPass(
 # depth; a single-target pass uses RenderTarget above.
 type RenderTargetSet {
   colorViews: List(ResourceRef)
+  # Per colour view: the 1x view a multisampled one resolves into at the end
+  # of the pass (noRef = no resolve). A resolved view's samples are discarded,
+  # not stored, so a TRANSIENT (memoryless) MSAA target never leaves the tile.
+  resolveViews: List(ResourceRef)
   clearValues: List(Float)  # 4 per colour view (r g b a)
   clear: Bool  # Clear every colour view (else Load)
   hasDepth: Bool
@@ -430,6 +434,7 @@ type RenderTargetSet {
   depthClear: Bool  # Clear the depth view (else Load); ignored when read-only
   depthClearValue: Float
   depthReadOnly: Bool
+  depthDiscard: Bool  # throw the depth away at the end (a memoryless MSAA depth)
 }
 
 const renderTargetSetMaxColors: Int = 4
@@ -437,6 +442,7 @@ const renderTargetSetMaxColors: Int = 4
 func createRenderTargetSet(clear: copy Bool) ret RenderTargetSet {
   ret RenderTargetSet {
     colorViews: List.create(ResourceRef, cap: renderTargetSetMaxColors)
+    resolveViews: List.create(ResourceRef, cap: renderTargetSetMaxColors)
     clearValues: List.create(Float, cap: renderTargetSetMaxColors * 4)
     clear: clear
     hasDepth: false
@@ -444,6 +450,7 @@ func createRenderTargetSet(clear: copy Bool) ret RenderTargetSet {
     depthClear: false
     depthClearValue: 0.0
     depthReadOnly: true
+    depthDiscard: false
   }
 }
 
@@ -460,10 +467,36 @@ func addColorTarget(
     ret false
   }
   targets.colorViews.add(value: colorView)
+  targets.resolveViews.add(value: noRef())
   targets.clearValues.add(value: r)
   targets.clearValues.add(value: g)
   targets.clearValues.add(value: b)
   targets.clearValues.add(value: a)
+  ret true
+}
+
+# A multisampled colour attachment resolved into `resolveView` (1x) at the end
+# of the pass; its samples are discarded. False past the limit.
+func addResolvedColorTarget(
+  targets: mod RenderTargetSet
+  colorView: view ResourceRef
+  resolveView: view ResourceRef
+  r: copy Float
+  g: copy Float
+  b: copy Float
+  a: copy Float
+) ret Bool {
+  if not addColorTarget(
+    targets: targets
+    colorView: colorView
+    r: r
+    g: g
+    b: b
+    a: a
+  ) {
+    ret false
+  }
+  targets.resolveViews.set(index: targets.resolveViews.length - 1, value: resolveView)
   ret true
 }
 
@@ -514,6 +547,14 @@ func beginRenderPassMulti(
         }
       }
     }
+    loop let resolveView: ResourceRef in targets.resolveViews {
+      if resolveView.slot >= 0 and (isValidRef(resources: resources, ref: resolveView) is false or refIsTextureView(
+        resources: resources
+        ref: resolveView
+      ) is false) {
+        ret webgpuNull()
+      }
+    }
     if targets.hasDepth {
       if isValidRef(resources: resources, ref: targets.depthView) is false or refIsTextureView(
         resources: resources
@@ -538,11 +579,28 @@ func beginRenderPassMulti(
           slot: colorView.slot
           generation: colorView.generation
         )
+        let resolveView: ResourceRef = targets.resolveViews.copyAtFallback(
+          index: i
+          fallback: noRef()
+        )
+        var resolveHandle: Ptr = webgpuNull()
+        var storeOp: Int32 = WGPUStoreOp_Store
+        if resolveView.slot >= 0 {
+          recordUse(
+            recording: recording
+            kind: refDepKind(ref: resolveView)
+            slot: resolveView.slot
+            generation: resolveView.generation
+          )
+          resolveHandle = refHandle(resources: resources, ref: resolveView)
+          storeOp = WGPUStoreOp_Discard
+        }
         colorAttachments.add(value: {
           view_: refHandle(resources: resources, ref: colorView)
           depthSlice: WGPU_DEPTH_SLICE_UNDEFINED as UInt32
+          resolveTarget: resolveHandle
           loadOp: loadOp
-          storeOp: WGPUStoreOp_Store
+          storeOp: storeOp
           clearValue: {
             r: clearValueAt(targets: targets, index: i * 4)
             g: clearValueAt(targets: targets, index: i * 4 + 1)
@@ -590,10 +648,14 @@ func beginRenderPassMulti(
       if targets.depthClear {
         depthLoadOp = WGPULoadOp_Clear
       }
+      var depthStoreOp: Int32 = WGPUStoreOp_Store
+      if targets.depthDiscard {
+        depthStoreOp = WGPUStoreOp_Discard
+      }
       depthAttachments.add(value: {
         view_: refHandle(resources: resources, ref: targets.depthView)
         depthLoadOp: depthLoadOp
-        depthStoreOp: WGPUStoreOp_Store
+        depthStoreOp: depthStoreOp
         depthClearValue: targets.depthClearValue as Float32
         depthReadOnly: 0 as UInt32
       })

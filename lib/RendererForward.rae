@@ -1,0 +1,259 @@
+# RendererForward — the deferred renderer with a FORWARD main pass
+# (forward-rae-1; docs/forward-msaa-study.md). The same DeferredRenderer,
+# the same app-facing calls (renderDeferredFrameWorld, renderDeferredPassWorld,
+# setRendererSky, the shadow pass, bloom, the render ceiling, the dynamic
+# scale, direct present), but its graph is
+#
+#   shadow -> forward -> bloom -> composite -> [ui] -> present
+#
+# where `forward` (ForwardMain) shades the scene in one 4x MSAA pass into the
+# lit image the composite tone-maps and upscales. There is no G-buffer pass,
+# no SSAO, no lighting pass, no TAA and no FXAA/SMAA: MSAA is the
+# antialiasing. Transparents, water and underwater fog need the G-buffer's
+# depth and are not in this frame yet.
+import Gpu2d
+import Vec3
+open Rendergraph
+open Scene3d
+open Sky
+open Gbuffer
+open GbufferWorld
+open GbufferPasses
+open GbufferFullscreen
+open GbufferUnderwater
+open Gpu2dCanvas
+open gpu/GpuResources
+open RendererDeferred
+open RendererPasses
+open RendererPassTiming
+open ForwardMain
+
+# A renderer whose main pass is forward + 4x MSAA
+func createForwardRenderer() ret DeferredRenderer {
+  ret buildForwardGraph(withUi: false)
+}
+
+# The same with the load-preserving 2D UI overlay (Gpu2d draws over the frame)
+func createForwardRendererWithUi() ret DeferredRenderer {
+  ret buildForwardGraph(withUi: true)
+}
+
+func createForwardRendererWithUiSky(sky: view Sky) ret DeferredRenderer {
+  var renderer: DeferredRenderer = buildForwardGraph(withUi: true)
+  renderer.sky = sky
+  renderer.hasSky = true
+  ret renderer
+}
+
+# The renderer draws its scene with the forward main pass
+func isForwardRenderer(renderer: view DeferredRenderer) ret Bool {
+  ret renderer.passes.forwardMain
+}
+
+# The forward frame's graph. Declared backwards on purpose, like the deferred
+# one: the order is derived from the edges.
+func buildForwardGraph(withUi: view Bool) ret DeferredRenderer {
+  var renderGraph: RenderGraph = createRenderGraph()
+  let colorId: Int = addResource(
+    renderGraph: renderGraph
+    name: "sceneColor"
+    kind: resTexture2d
+    format: 0
+    sizing: sizeFull
+    lifetime: lifeExternal
+  )
+  let litId: Int = addResource(
+    renderGraph: renderGraph
+    name: "litColor"
+    kind: resTexture2d
+    format: 0
+    sizing: sizeFull
+    lifetime: lifeTransient
+  )
+  let bloomId: Int = addResource(
+    renderGraph: renderGraph
+    name: "bloomColor"
+    kind: resTexture2d
+    format: 0
+    sizing: sizeHalf
+    lifetime: lifeTransient
+  )
+  let shadowId: Int = addResource(
+    renderGraph: renderGraph
+    name: "shadowMap"
+    kind: resDepth
+    format: 0
+    sizing: sizeFull
+    lifetime: lifeTransient
+  )
+  let present: Int = addPass(
+    renderGraph: renderGraph
+    name: "present"
+    kind: passRaster
+    tag: RenderTag.present
+  )
+  let composite: Int = addPass(
+    renderGraph: renderGraph
+    name: "composite"
+    kind: passRaster
+    tag: RenderTag.composite
+  )
+  let bloom: Int = addPass(
+    renderGraph: renderGraph
+    name: "bloom"
+    kind: passRaster
+    tag: RenderTag.bloom
+  )
+  let forward: Int = addPass(
+    renderGraph: renderGraph
+    name: "forward"
+    kind: passRaster
+    tag: RenderTag.forward
+  )
+  let shadow: Int = addPass(
+    renderGraph: renderGraph
+    name: "shadow"
+    kind: passRaster
+    tag: RenderTag.shadow
+  )
+  passWrites(
+    renderGraph: renderGraph
+    pass: shadow
+    resource: shadowId
+    access: accAttachmentWrite
+  )
+  # The forward pass shades with the cascades and writes the lit image
+  passReads(
+    renderGraph: renderGraph
+    pass: forward
+    resource: shadowId
+    access: accSampledRead
+  )
+  passWrites(
+    renderGraph: renderGraph
+    pass: forward
+    resource: litId
+    access: accAttachmentWrite
+  )
+  passReads(
+    renderGraph: renderGraph
+    pass: bloom
+    resource: litId
+    access: accSampledRead
+  )
+  passWrites(
+    renderGraph: renderGraph
+    pass: bloom
+    resource: bloomId
+    access: accAttachmentWrite
+  )
+  passReads(
+    renderGraph: renderGraph
+    pass: composite
+    resource: litId
+    access: accSampledRead
+  )
+  passReads(
+    renderGraph: renderGraph
+    pass: composite
+    resource: bloomId
+    access: accSampledRead
+  )
+  passWrites(
+    renderGraph: renderGraph
+    pass: composite
+    resource: colorId
+    access: accAttachmentWrite
+  )
+  var ui: Int = -1
+  if withUi {
+    ui = addPass(
+      renderGraph: renderGraph
+      name: "uiOverlay"
+      kind: passRaster
+      tag: RenderTag.uiOverlay
+    )
+    passModifies(
+      renderGraph: renderGraph
+      pass: ui
+      resource: colorId
+      access: accAttachmentRead
+    )
+  }
+  passReads(
+    renderGraph: renderGraph
+    pass: present
+    resource: colorId
+    access: accSampledRead
+  )
+  var passes: RenderPasses = createRenderPasses()
+  passes.forwardMain = true
+  # MSAA is the antialiasing: no TAA (and so no jitter), whatever RAE_TAA says
+  passes.targets.taaEnabled = false
+  passes.gbuffer.taaEnabled = false
+  unsafe {
+    ret DeferredRenderer {
+      graph: renderGraph
+      gbufferPass: forward
+      pyramidPass: -1
+      lightingPass: forward
+      compositePass: composite
+      presentPass: present
+      uiPass: ui
+      hasUi: withUi
+      debugView: viewLit
+      sky: createSkyNone(
+        light: defaultLight3d()
+        clearColor: Vec3.create(x: 0.02, y: 0.02, z: 0.03)
+      )
+      hasSky: false
+      grade: neutralGrade()
+      passes: own passes
+      idIssuer: IdIssuer.create()
+      gpuResources: none
+      canvas: createGpu2dCanvas()
+      underwater: noUnderwater()
+      passTiming: createDeferredPassTiming()
+    }
+  }
+}
+
+# The forward pass from a World3d: the static meshes of the world's mesh
+# query, shaded in one 4x MSAA pass (renderDeferredPassWorld calls this for
+# RenderTag.forward)
+func renderForwardPassWorld(
+  renderer: mod DeferredRenderer
+  world: view World3d
+  camera: view Camera3d
+  light: view Light3d
+  aspect: view Float
+) {
+  ensureRendererResources(renderer: renderer)
+  var sky: Sky = createSkyNone(light: light, clearColor: light.clearColor)
+  if renderer.hasSky {
+    sky = renderer.sky
+  }
+  if let resources: mod GpuResources => renderer.gpuResources {
+    beginForwardMain(
+      forward: renderer.passes.forward
+      gbuffer: renderer.passes.gbuffer
+      targets: renderer.passes.targets
+      shadow: renderer.passes.shadow
+      resources: resources
+      camera: camera
+      light: light
+      sky: sky
+      aspect: aspect
+    )
+    GbufferWorld.renderSceneWorld(
+      cache: renderer.passes.gbuffer
+      resources: resources
+      world: world
+    )
+    endForwardMain(
+      forward: renderer.passes.forward
+      gbuffer: renderer.passes.gbuffer
+      resources: resources
+    )
+  }
+}

@@ -419,6 +419,9 @@ type RenderPipelineSpec {
   depthWrite: Bool
   depthCompare: Int32
   cullMode: Int32
+  # Samples per pixel of the colour and depth targets: 1, or 4 for an MSAA
+  # pass (the forward main pass, ForwardMain.rae)
+  sampleCount: Int
 }
 
 # A render pipeline from a DECLARED shader (`shader(files: [...])`).
@@ -476,6 +479,9 @@ func createRenderPipelineSource(
     ret none
   }
   if spec.colorFormats.length < 1 {
+    ret none
+  }
+  if spec.sampleCount is not 1 and spec.sampleCount is not 4 {
     ret none
   }
   if let slot: Int = findFreeSlot(table: resources.renderPipelines, capacity: resources.capacity) {
@@ -614,7 +620,7 @@ func createRenderPipelineSource(
             frontFace: WGPUFrontFace_CCW
             cullMode: spec.cullMode
           }
-          multisample: { count: 1, mask: 4294967295 }
+          multisample: { count: spec.sampleCount as UInt32, mask: 4294967295 }
           fragment: fragments.data
         }
         handle = wgpuDeviceCreateRenderPipeline(device: webgpuDevice(), descriptor: descriptor)
@@ -634,7 +640,7 @@ func createRenderPipelineSource(
             cullMode: spec.cullMode
           }
           depthStencil: depths.data
-          multisample: { count: 1, mask: 4294967295 }
+          multisample: { count: spec.sampleCount as UInt32, mask: 4294967295 }
           fragment: fragments.data
         }
         handle = wgpuDeviceCreateRenderPipeline(device: webgpuDevice(), descriptor: descriptor)

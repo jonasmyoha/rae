@@ -1,0 +1,65 @@
+# RendererPasses — the per-pass caches a deferred renderer owns, aggregated
+# (split out of RendererDeferred for the 1000-line cap, forward-rae-1).
+open GbufferPasses
+open GbufferAo
+open GbufferBloom
+open GbufferSmaa
+open GbufferInspector
+open GbufferFullscreen
+open GbufferTargets
+open GbufferUnderwater
+open TransparentForward
+open Gbuffer
+open ShadowMaps
+open Shadow3d
+open ForwardMain
+
+# The Rae-side deferred-pass caches, aggregated. Fields hold each pass's "have I
+# built the pipeline/bind, and at which target generation" state — one struct so
+# a DeferredRenderer carries all of it.
+type RenderPasses {
+  composite: CompositePassCache
+  ao: AoPassCache
+  light: LightPassCache
+  taa: TaaPassCache
+  antialias: AntialiasPassCache  # FXAA at the scene resolution, before the upscale
+  bloom: BloomPassCache  # half-size bloom the composite adds (render-perf-8), off by default
+  smaa: SmaaPassCache  # SMAA 1x, the default anti-aliasing (render-perf-9); holds the mode
+  pyr: PyrPassCache
+  inspect: ViewPassCache
+  gbuffer: GbufferCache
+  transparent: TransparentPassCache
+  underwater: UnderwaterPassCache
+  targets: DeferredTargets  # #923: the post-pass targets, uniforms, pipelines + frame state
+  shadow: ShadowCache  # #925: the sun cascades — targets, pipelines, caster queue, passes
+  warmedUp: Bool  # every pipeline was created (GbufferWarmUp, render-perf-13)
+  # The forward main pass (ForwardMain, forward-rae-1): a renderer made by
+  # createForwardRenderer draws its scene through it instead of the G-buffer
+  # and the lighting pass
+  forward: ForwardMainCache
+  forwardMain: Bool
+}
+
+func createRenderPasses() ret RenderPasses {
+  unsafe {
+    ret RenderPasses {
+      composite: createCompositePassCache()
+      ao: createAoPassCache()
+      light: createLightPassCache()
+      taa: createTaaPassCache()
+      antialias: createAntialiasPassCache()
+      bloom: createBloomPassCache()
+      smaa: createSmaaPassCache()
+      pyr: createPyrPassCache()
+      inspect: createViewPassCache()
+      gbuffer: createGbufferCache()
+      transparent: createTransparentPassCache(capacity: 256)
+      underwater: createUnderwaterPassCache()
+      targets: createDeferredTargets()
+      shadow: createShadowCacheWith(casterBias: backFaceShadowCasterBias())
+      warmedUp: false
+      forward: createForwardMainCache()
+      forwardMain: false
+    }
+  }
+}

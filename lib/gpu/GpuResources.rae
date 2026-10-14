@@ -806,13 +806,31 @@ func retireBuffer(resources: mod GpuResources, id: view BufferId) ret Bool {
   ret true
 }
 
-# ----- textures, views, samplers ---------------------------------------
+# ----- textures (createTextureSampled: 1, or 4 for MSAA), views, samplers -----
 func createTexture(
   resources: mod GpuResources
   width: view Int
   height: view Int
   format: view Int32
   usage: view UInt64
+) ret opt TextureId {
+  ret createTextureSampled(
+    resources: resources
+    width: width
+    height: height
+    format: format
+    usage: usage
+    samples: 1
+  )
+}
+
+func createTextureSampled(
+  resources: mod GpuResources
+  width: view Int
+  height: view Int
+  format: view Int32
+  usage: view UInt64
+  samples: view Int
 ) ret opt TextureId {
   if width < 1 or height < 1 {
     ret none
@@ -828,7 +846,7 @@ func createTexture(
         size: { width: width as UInt32, height: height as UInt32, depthOrArrayLayers: 1 }
         format: format
         mipLevelCount: 1
-        sampleCount: 1
+        sampleCount: samples as UInt32
       }
       let handle: Ptr = wgpuDeviceCreateTexture(device: webgpuDevice(), descriptor: descriptor)
       if handle is webgpuNull() {

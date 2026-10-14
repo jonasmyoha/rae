@@ -1,0 +1,320 @@
+# The forward main pass (forward-rae-1, lib/ForwardMain.rae) on the GPU: a
+# forward renderer builds its graph (shadow -> forward -> bloom -> composite
+# -> present), its 4x pipelines and memoryless 4x targets, and renders a
+# sphere over a ground headless. Its lit image is read back and compared with
+# the deferred renderer's on the same scene (the sphere toon-shaded, the
+# ground lit): both shade with shadeSurface
+# (lib/deferred_shade.wgsl), so a lit surface, the ground and the sky must
+# come out the same, within what the deferred path rounds into its G-buffer
+# and the forward one has no SSAO for.
+import Gpu2d
+import Math
+import Vec3
+open Gbuffer
+open Gpu3d
+open Mesh3d
+open Rendergraph
+open RendererDeferred
+open RendererForward
+open RendererPasses
+open RendererPassTiming
+open ForwardMain
+open GbufferTargets
+open Scene3d
+open webgpu/WebgpuEnums
+open webgpu/ReadRequest
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuRender
+open gpu/GpuRenderTransfer
+
+const width: Int = 320
+
+const height: Int = 200
+
+const frames: Int = 3
+
+func uploadMeshData(renderer: mod DeferredRenderer, meshData: view MeshData) ret MeshHandle {
+  ret uploadMesh(
+    renderer: renderer
+    verts: meshData.verts
+    vertCount: meshData.vertCount
+    indices: meshData.indices
+  )
+}
+
+func buildScene(renderer: mod DeferredRenderer) ret World3d {
+  let sphere: MeshHandle = uploadMeshData(
+    renderer: renderer
+    meshData: makeSphere(rings: 24, segments: 32)
+  )
+  let ground: MeshHandle = uploadMeshData(
+    renderer: renderer
+    meshData: makePlane(size: 40.0, segments: 1)
+  )
+  var world: World3d = create()
+  let noEmission: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  let noRotation: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  let sphereEntityId: EntityId = world3dAddMeshInstance(
+    world: world
+    mesh: sphere
+    material: Material3d {
+      baseColor: Vec3.create(x: 0.8, y: 0.3, z: 0.2)
+      metallic: 0.0
+      roughness: 0.5
+      emission: noEmission
+      toon: true
+    }
+    position: Vec3.create(x: 0.0, y: 0.0, z: 1.5)
+    rotation: noRotation
+    scale: Vec3.create(x: 1.5, y: 1.5, z: 1.5)
+  )
+  let groundEntityId: EntityId = world3dAddMeshInstance(
+    world: world
+    mesh: ground
+    material: Material3d {
+      baseColor: Vec3.create(x: 0.3, y: 0.35, z: 0.3)
+      metallic: 0.0
+      roughness: 0.9
+      emission: noEmission
+      toon: false
+    }
+    position: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    rotation: noRotation
+    scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
+  )
+  ret world
+}
+
+# A 5-bit-exponent unsigned float with `mantissaBits` of mantissa (the
+# rg11b10ufloat channels)
+func smallFloat(bits: view Int, mantissaBits: view Int) ret Float {
+  let mantissa: Int = bits bitand ((1 shl mantissaBits) - 1)
+  let exponent: Int = (bits shr mantissaBits) bitand 31
+  let fraction: Float = mantissa.toFloat() / (1 shl mantissaBits).toFloat()
+  if exponent is 0 {
+    ret fraction * Math.pow(base: 2.0, exp: -14.0)
+  }
+  ret (1.0 + fraction) * Math.pow(base: 2.0, exp: (exponent - 15).toFloat())
+}
+
+# A half float's value
+func halfFloat(bits: view Int) ret Float {
+  let value: Float = smallFloat(bits: bits bitand 32767, mantissaBits: 10)
+  if (bits shr 15) bitand 1 is 1 {
+    ret -value
+  }
+  ret value
+}
+
+# The luminance of one pixel of the read-back lit image
+func pixelLuminance(
+  bytes: view List(UInt8)
+  bytesPerRow: view Int
+  texel: view Int
+  x: view Int
+  y: view Int
+) ret Float {
+  let base: Int = y * bytesPerRow + x * texel
+  var red: Float = 0.0
+  var green: Float = 0.0
+  var blue: Float = 0.0
+  if texel is 4 {
+    var word: Int = 0
+    loop var b: Int = 3, b >= 0, --b {
+      word = word * 256 + (bytes.copyAtDefault(index: base + b) as Int)
+    }
+    red = smallFloat(bits: word bitand 2047, mantissaBits: 6)
+    green = smallFloat(bits: (word shr 11) bitand 2047, mantissaBits: 6)
+    blue = smallFloat(bits: (word shr 22) bitand 1023, mantissaBits: 5)
+  } else {
+    red = halfFloat(
+      bits: (bytes.copyAtDefault(index: base) as Int) + (bytes.copyAtDefault(index: base + 1) as Int) * 256
+    )
+    green = halfFloat(
+      bits: (bytes.copyAtDefault(index: base + 2) as Int) + (bytes.copyAtDefault(index: base + 3) as Int) * 256
+    )
+    blue = halfFloat(
+      bits: (bytes.copyAtDefault(index: base + 4) as Int) + (bytes.copyAtDefault(index: base + 5) as Int) * 256
+    )
+  }
+  ret 0.2126 * red + 0.7152 * green + 0.0722 * blue
+}
+
+# Read the lit image back: the luminance at the sphere, the ground and the
+# sky (a pixel the scene does not cover), in that order. Empty when it could
+# not be read.
+func readLit(renderer: mod DeferredRenderer) ret List(Float) {
+  var samples: List(Float) = List.create(Float, cap: 3)
+  let targets: view DeferredTargets => renderer.passes.targets
+  var texel: Int = 8
+  if (targets.litFormat is WGPUTextureFormat_RG11B10Ufloat) {
+    texel = 4
+  }
+  let litWidth: Int = renderer.passes.gbuffer.targetWidth
+  let litHeight: Int = renderer.passes.gbuffer.targetHeight
+  let bytesPerRow: Int = ((litWidth * texel + 255) / 256) * 256
+  if let resources: mod GpuResources => renderer.gpuResources {
+    if let buffer: BufferId = createBuffer(
+      resources: resources
+      size: bytesPerRow * litHeight
+      usage: WGPUBufferUsage_CopyDst + WGPUBufferUsage_MapRead
+    ) {
+      if var recording: Recording = beginRecording(resources: resources) {
+        if recordCopyTextureToBuffer(
+          recording: recording
+          resources: resources
+          texture: renderer.passes.targets.lit
+          buffer: buffer
+          bytesPerRow: bytesPerRow
+        ) {
+          if let submission: SubmissionId = submit(resources: resources, recording: recording) {
+            var status: Int = 0
+            loop var spins: Int = 0, status is 0 and spins < 10000000, ++spins {
+              status = pollSubmission(resources: resources, id: submission)
+            }
+            let retired: Bool = retireSubmission(resources: resources, id: submission)
+            if let request: ReadRequest = readBuffer(
+              resources: resources
+              id: buffer
+              offset: 0
+              size: bytesPerRow * litHeight
+            ) {
+              var readStatus: Int = 0
+              loop var spins: Int = 0, readStatus is 0 and spins < 10000000, ++spins {
+                readStatus = poll(this: request)
+              }
+              var bytes: List(UInt8) = List.create(UInt8, cap: bytesPerRow * litHeight)
+              loop var i: Int = 0, i < bytesPerRow * litHeight, ++i {
+                bytes.add(value: 0)
+              }
+              if readStatus is 1 and copyToBytes(this: request, destination: bytes) {
+                samples.add(value: pixelLuminance(
+                  bytes: bytes
+                  bytesPerRow: bytesPerRow
+                  texel: texel
+                  x: litWidth / 2
+                  y: litHeight / 2
+                ))
+                samples.add(value: pixelLuminance(
+                  bytes: bytes
+                  bytesPerRow: bytesPerRow
+                  texel: texel
+                  x: litWidth / 8
+                  y: litHeight - litHeight / 8
+                ))
+                samples.add(value: pixelLuminance(
+                  bytes: bytes
+                  bytesPerRow: bytesPerRow
+                  texel: texel
+                  x: litWidth / 2
+                  y: litHeight / 20
+                ))
+              }
+            }
+          }
+        }
+      }
+      let bufferRetired: Bool = retireBuffer(resources: resources, id: buffer)
+    }
+  }
+  ret samples
+}
+
+# `frames` frames of the renderer's graph. Without `present` the present
+# step is left out: the reference frames of the deferred renderer are drawn
+# first and must not present, or the forward renderer's pipelines, created at
+# its first frame, would count as created mid-game (PipelineWatch).
+func renderFrames(renderer: mod DeferredRenderer, world: view World3d, present: view Bool) {
+  var camera: Camera3d = defaultCamera3d()
+  camera.position = Vec3.create(x: 6.0, y: -8.0, z: 4.0)
+  camera.target = Vec3.create(x: 0.0, y: 0.0, z: 1.2)
+  let light: Light3d = defaultLight3d()
+  loop var frame: Int = 0, frame < frames, ++frame {
+    loop var i: Int = 0, i < deferredOrderLength(renderer: renderer), ++i {
+      let tag: Int = deferredTagAt(renderer: renderer, i: i)
+      if present or tag is not RenderTag.present {
+        renderDeferredPassWorld(
+          renderer: renderer
+          tag: tag
+          world: world
+          camera: camera
+          light: light
+          aspect: width.toFloat() / height.toFloat()
+        )
+      }
+    }
+  }
+}
+
+func describeOrder(renderer: view DeferredRenderer) ret String {
+  var names: String = ""
+  loop var i: Int = 0, i < deferredOrderLength(renderer: renderer), ++i {
+    let tag: Int = deferredTagAt(renderer: renderer, i: i)
+    if i > 0 {
+      names = "{names} -> "
+    }
+    names = "{names}{renderTagName(tag: tag)}"
+  }
+  ret names
+}
+
+# Within 10% of each other (or both nearly black)
+func close(forward: view Float, deferred: view Float) ret Bool {
+  let largest: Float = Math.max(a: Math.abs(value: forward), b: Math.abs(value: deferred))
+  if largest < 0.001 {
+    ret true
+  }
+  ret Math.abs(value: forward - deferred) / largest < 0.1
+}
+
+func main() ret Int {
+  Gpu2d.initWindow(width: width, height: height, title: "forward main pass")
+  var deferredRenderer: DeferredRenderer = createDeferredRenderer()
+  let deferredStatus: Int = compileDeferred(renderer: deferredRenderer)
+  var deferredWorld: World3d = buildScene(renderer: deferredRenderer)
+  renderFrames(renderer: deferredRenderer, world: deferredWorld, present: false)
+  let deferredLit: List(Float) = readLit(renderer: deferredRenderer)
+  shutdownDeferredRenderer(renderer: deferredRenderer)
+
+  var forwardRenderer: DeferredRenderer = createForwardRenderer()
+  log("graph status: {compileDeferred(renderer: forwardRenderer)}")
+  log("forward order: {describeOrder(renderer: forwardRenderer)}")
+  log("forward renderer: {isForwardRenderer(renderer: forwardRenderer)}")
+  var forwardWorld: World3d = buildScene(renderer: forwardRenderer)
+  renderFrames(renderer: forwardRenderer, world: forwardWorld, present: true)
+  let forwardCache: view ForwardMainCache => forwardRenderer.passes.forward
+  if let resources: view GpuResources => forwardRenderer.gpuResources {
+    log(
+      "forward pipelines made: {isValidRenderPipeline(
+        resources: resources
+        id: forwardCache.staticPipeline
+      ) and isValidRenderPipeline(resources: resources, id: forwardCache.skyPipeline)}"
+    )
+    log(
+      "4x targets made: {isValidTextureView(resources: resources, id: forwardCache.colourView) and isValidTextureView(
+        resources: resources
+        id: forwardCache.depthView
+      )}"
+    )
+  }
+  log("instances drawn: {deferredDrawCount(renderer: forwardRenderer)}")
+  let forwardLit: List(Float) = readLit(renderer: forwardRenderer)
+  shutdownDeferredRenderer(renderer: forwardRenderer)
+
+  log("lit image read: {forwardLit.length is 3 and deferredLit.length is 3}")
+  let names: List(String) = ["sphere", "ground", "sky"]
+  loop var i: Int = 0, i < forwardLit.length and i < deferredLit.length, ++i {
+    let forwardValue: Float = forwardLit.copyAtDefault(index: i)
+    let deferredValue: Float = deferredLit.copyAtDefault(index: i)
+    log(
+      "{names.copyAtDefault(index: i)}: lit {forwardValue > 0.001}, same as deferred {close(
+        forward: forwardValue
+        deferred: deferredValue
+      )}"
+    )
+  }
+  Gbuffer.shutdownAll()
+  Gpu2d.closeWindow()
+  ret 0
+}
