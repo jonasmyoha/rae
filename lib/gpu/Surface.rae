@@ -1,0 +1,64 @@
+# Surface — getting a finished frame onto the window (render-perf-11).
+#
+# The frame is rendered into the canvas's offscreen texture; this acquires the
+# window's drawable, copies the frame into it and presents. Acquiring is the
+# step that can block: on a vsync'd surface it waits until the display hands
+# back a free drawable. So it is done LAST, after every pass of the frame was
+# recorded and submitted, and the CPU never sits waiting on a drawable while
+# it still has work to record. C makes the two calls (rae_surface_acquire: one
+# wgpuSurfaceGetCurrentTexture, which also keeps the no-acquire-while-hidden
+# rule and the recovery; rae_surface_present: the copy and the present); when
+# to make them is decided here.
+open webgpu/Webgpu
+open webgpu/Context
+open gpu/FramePacer
+open Gpu2dCanvas
+
+func nativeSurfaceAcquire() unsafe extern("rae_surface_acquire") ret Ptr
+
+func nativeSurfacePresent(
+  drawable: Ptr
+  offscreen: Ptr
+  width: Int
+  height: Int
+) unsafe extern("rae_surface_present")
+
+# Acquire the drawable, copy `offscreen` into it and present; the pacer times
+# the acquire. Nothing happens without a drawable (no surface, a hidden
+# window, a headless run).
+func presentToSurface(
+  offscreen: copy Ptr
+  width: view Int
+  height: view Int
+  pacer: mod FramePacer
+) {
+  unsafe {
+    if offscreen is webgpuNull() {
+      ret
+    }
+    let acquireStart: Float64 = frameClock()
+    let drawable: Ptr = nativeSurfaceAcquire()
+    noteAcquireTime(pacer: pacer, seconds: frameClock() - acquireStart)
+    if drawable is webgpuNull() {
+      ret
+    }
+    nativeSurfacePresent(
+      drawable: drawable
+      offscreen: offscreen
+      width: width
+      height: height
+    )
+  }
+}
+
+# The canvas's frame (its offscreen target), timed on its pacer
+func presentCanvasToSurface(canvas: mod Gpu2dCanvas) {
+  unsafe {
+    presentToSurface(
+      offscreen: canvasOffscreenTexture(canvas: canvas)
+      width: canvas.offscreenWidth
+      height: canvas.offscreenHeight
+      pacer: canvas.framePacer
+    )
+  }
+}
