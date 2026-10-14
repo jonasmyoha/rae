@@ -65,10 +65,12 @@ Two inputs drive it:
   stays full-size**: the composite upscales into the window's drawable (or the
   full-size offscreen fallback, render-perf-11b).
 - **The render-resolution ceiling** (render-perf-3): the most scene pixels an
-  app wants, e.g. 1600x720 on a phone (`app3d/RenderScale.defaultRenderCeiling`:
-  a mobile OS gets 1600x720, a desktop 2560x1440 so a Retina / UHD drawable is
-  not shaded at full size), set with
-  `setRenderCeiling(renderer:, ceiling:)`. Its long side is matched to the
+  app wants. EVERY deferred renderer starts at the device's default
+  (`RenderResolution.defaultRenderCeiling`: a mobile OS gets 1600x720, a
+  desktop 2560x1440, so a Retina / UHD drawable is not shaded at full size;
+  1080p and smaller stay native). An app sets another with
+  `setRenderCeiling(renderer:, ceiling:)` or opts out with
+  `renderAtNativeResolution(renderer:)`. Its long side is matched to the
   window's long side, so a rotation keeps the scale; an iPhone 15 Pro's
   2556x1179 renders at 0.61 (1561x720). The scene scale is the dynamic scale
   times the ceiling's, in [0.25, 1]; `RAE_RENDER_CEILING=1600x720` forces a

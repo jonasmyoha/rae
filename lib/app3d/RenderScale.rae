@@ -242,20 +242,3 @@ func recordFrameWork(drs: mod RenderScaleController, workSec: view Float) {
   drs.workSec = workSec
   drs.workMeasured = true
 }
-
-# The render-resolution ceiling for this kind of device: a phone or tablet OS
-# draws its 3D scene at most 1600x720 (an iPhone 15 Pro's 2556x1179 drawable
-# then renders at ~0.61, about 1.15 MP instead of 3); a desktop at most
-# 2560x1440, so a Retina / UHD drawable is not shaded at full size (3840x2160
-# renders at 0.67, 5120x2880 at 0.5; 1080p and smaller stay native). The UI
-# stays at the drawable's full size either way. Decided at runtime (Target),
-# so the same app build picks its own; RAE_RENDER_CEILING forces one anywhere.
-func defaultRenderCeiling() ret RenderCeiling {
-  if let forced: RenderCeiling = renderCeilingFromEnv() {
-    ret forced
-  }
-  if Target.isMobileOs {
-    ret RenderCeiling { width: 1600, height: 720 }
-  }
-  ret RenderCeiling { width: 2560, height: 1440 }
-}
