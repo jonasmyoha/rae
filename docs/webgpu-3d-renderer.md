@@ -174,6 +174,42 @@ spans.
 
 ---
 
+**As built (render-perf-9): SMAA 1x is the deferred renderer's default
+AA.** It runs in the graph's `antialias` step at the scene resolution,
+before the composite's upscale (`lib/GbufferSmaa.rae`). It has three
+passes, all recorded into the post recording:
+
+- `smaa_edges.wgsl`: luma edges, using the luma of the tone-mapped,
+  gamma-encoded colour;
+- `smaa_weights.wgsl`: blending weights with diagonal and corner
+  detection, the "high" preset (16 search steps, 8 diagonal, corner
+  rounding 25);
+- `smaa_blend.wgsl`: neighbourhood blending in HDR, into the anti-aliased
+  target the composite reads.
+
+The lookup tables are generated, not bundled. The area texture is made
+once by a GPU pass (`smaa_area.wgsl`). It is only the 160 x 80
+subsample-0 band, which is all SMAA 1x reads. The search texture is made
+in Rae (`lib/SmaaSearchTexture.rae`). Both match the reference
+`Textures/AreaTex.h` / `SearchTex.h` exactly: every texel of the band (the
+area mapping checked against the reference script's functions) and every
+search byte. These files are ports of SMAA (MIT): they carry the one-line
+notice, and the licence is in `lib/LICENSE-smaa.md`.
+
+- **Selecting the mode:** FXAA stays selectable with
+  `setAntialiasMode(renderer:, mode: AntialiasMode.fxaa)`, and TAA
+  (`setTaaEnabled`) replaces both. `RAE_AA=fxaa` / `RAE_AA=smaa` override
+  the app's choice for comparisons.
+- **Measured** at 2560x1600, on frozen 112 frames: the edge zig-zag (lower
+  is smoother) is 0.19-0.20 for SMAA vs 0.26 for FXAA on a metaball, and
+  0.19-0.49 vs 0.38-0.92 on a cube edge, over a three-frame sequence of
+  the moving scene. On the red sphere the two are equal. SMAA keeps
+  texture detail that FXAA blurs (114's characters). SMAA 1x uses no
+  previous frames, so it cannot ghost.
+- **Cost** at a phone's scene size (`RAE_RENDER_CEILING=1600x720`), frame
+  time: 114 2.0 -> 2.1 ms, 112 2.5 -> 2.6, 119 3.0 -> 3.1 (about 0.1 ms
+  more than FXAA).
+
 ## 6. Optional global illumination — prototype, then pick
 
 GI is **optional and tiered**; we prototype a few and choose per project:
