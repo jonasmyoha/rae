@@ -234,9 +234,16 @@ GGX reaches about 7.8e4 on a smooth surface, above f16's 65504.
 - **GPU time on the Mac** (2560x1600, no ceiling, two runs each): no
   measurable change. Frame time is the same within noise; Apple's Mac GPUs
   run f32 at the same rate as f16 for most math.
-- **Not converted:** composite, SSAO, bloom and AA. They are mostly texture
-  reads and depth reconstruction. They are converted only if the iPhone
-  measurement shows that lighting gains.
+- **GPU time on the iPhone 15 Pro** (render-perf-12b): no change either. On
+  112, which is GPU-bound there, f16 and f32 runs were alternated with the
+  phone at the same temperature (2 runs each, 17 windows of 120 frames per
+  mode): 33.4 ms per frame and 7.5 / 7.6 ms waiting for the GPU in both. The
+  phone heats up over a series (the first run was at 23 ms), so only
+  interleaved runs are comparable.
+- **Decision:** f16 does not pay on Apple GPUs here (M-series Mac, A17 Pro),
+  so composite, SSAO, bloom and AA stay f32. The mechanism stays: the
+  lighting pass's half path costs nothing and matches the f32 image, and a
+  GPU with faster f16 math (some Android GPUs) would use it.
 
 **Pipelines at load (render-perf-13).** Creating a pipeline compiles its
 shaders and can stall the frame it happens in, so the deferred renderer
