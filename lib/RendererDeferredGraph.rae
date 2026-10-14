@@ -582,7 +582,7 @@ func buildDeferredGraph(withUi: view Bool) ret DeferredRenderer {
       access: accSampledRead
     )
 
-    ret DeferredRenderer {
+    var renderer: DeferredRenderer = {
       graph: renderGraph
       gbufferPass: gbuffer
       pyramidPass: pyramid
@@ -605,6 +605,9 @@ func buildDeferredGraph(withUi: view Bool) ret DeferredRenderer {
       underwater: noUnderwater()
       passTiming: createDeferredPassTiming()
     }
+    # TAA starts off (the app opts in); RAE_TAA=1 turns it on from the start
+    setTaaEnabled(renderer: renderer, on: false)
+    ret renderer
   }
 }
 

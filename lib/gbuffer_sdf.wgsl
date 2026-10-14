@@ -116,7 +116,9 @@ fn fs(in: VsOut) -> FsOut {
     mode = 0.33333333;
   }
   var o: FsOut;
-  o.gba = vec4<f32>(oct.x, oct.y, 0.5, mode);
+  // z = 1: TAA-reactive (render-perf-10): the motion above is the camera's
+  // only, the deforming balls themselves would trail on history
+  o.gba = vec4<f32>(oct.x, oct.y, 1.0, mode);
   o.gbb = vec4<f32>(albedo, rough);
   o.gbc = vec4<f32>(mEnc.x, mEnc.y, clamp(P.baseColorMetallic.a, 0.0, 1.0), emissive);
   o.depth = clamp(clip.z / clip.w, 0.0, 1.0);

@@ -13,6 +13,7 @@
 # ping-pong slot + "history exists" flag, the fog block (#57) and the TAA
 # switch (#20, mirrored onto the GbufferCache so the geometry jitter follows).
 import Math
+import Sys
 open Scene3d
 open Math3d
 open Vec3
@@ -60,6 +61,13 @@ type DeferredTargets {
   bloomWritten: Bool
   bloomIntensity: Float
   bloomGen: Int
+  # litCopy holds THIS frame's opaque snapshot (a transparent pass or the
+  # underwater fog took it): the TAA compares the lit image with it to find
+  # the pixels a transparent surface drew over (render-perf-10)
+  litCopyFresh: Bool
+  # RAE_TAA=1 / 0 forces TAA on / off over the app's choice (frame
+  # sequences for ghosting checks); -1 when unset
+  taaOverride: Int
   # The SSAO at HALF the scene size (render-perf-6, GbufferAo): `ao` is the
   # result lighting upsamples, `aoBlur` the blur's middle step, `aoDepth`
   # the half-size depth with the index of the full-size texel each kept.
@@ -130,6 +138,8 @@ func createDeferredTargets() ret DeferredTargets {
       bloomWritten: false
       bloomIntensity: 0.0
       bloomGen: -1
+      litCopyFresh: false
+      taaOverride: taaOverrideFromEnv()
       ao: noTextureId()
       aoView: noTextureViewId()
       aoBlur: noTextureId()
@@ -163,6 +173,17 @@ func createDeferredTargets() ret DeferredTargets {
       postInFlight: List.create(SubmissionId, cap: 4)
     }
   }
+}
+
+func taaOverrideFromEnv() ret Int {
+  let text: String = Sys.getEnv(name: "RAE_TAA")
+  if text is "1" {
+    ret 1
+  }
+  if text is "0" {
+    ret 0
+  }
+  ret -1
 }
 
 func targetsReady(targets: view DeferredTargets, resources: view GpuResources) ret Bool {
@@ -562,11 +583,15 @@ func taaBegin(targets: mod DeferredTargets, resources: mod GpuResources) ret Int
   if targets.taaHaveHistory {
     history = 1.0
   }
+  var litCopyFresh: Float = 0.0
+  if targets.litCopyFresh {
+    litCopyFresh = 1.0
+  }
   resetArgs(writer: targets.args)
   pushVec4F(
     writer: targets.args
     x: history
-    y: 0.0
+    y: litCopyFresh
     z: 0.0
     w: 0.0
   )
