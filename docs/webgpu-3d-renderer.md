@@ -238,6 +238,18 @@ GGX reaches about 7.8e4 on a smooth surface, above f16's 65504.
   reads and depth reconstruction. They are converted only if the iPhone
   measurement shows that lighting gains.
 
+**Pipelines at load (render-perf-13).** Creating a pipeline compiles its
+shaders and can stall the frame it happens in, so the deferred renderer
+creates all of its pipelines up front (`lib/GbufferWarmUp.rae`), the first
+time its post passes are ready, still in the first frame. This covers the
+optional ones too: TAA, FXAA, SMAA, bloom, the G-buffer debug views,
+metaballs, the transparent and underwater passes and the terrain.
+`lib/gpu/PipelineWatch.rae` logs `[pipeline] … created after the first
+frame` for any Rae pipeline created later, and checks C's pipeline count
+once per frame. None is created after the first frame on 114, 112, 111 or
+119; on 119 that includes 2346 frames under the water with spray on. Before
+this change, 119 created the transparent-forward pipeline mid-game.
+
 ## 6. Optional global illumination — prototype, then pick
 
 GI is **optional and tiered**; we prototype a few and choose per project:

@@ -1214,6 +1214,8 @@ void rae_ext_drawTextWithFont(int64_t slot, rae_String text, float x, float y, f
 int   rae_wgpu_ctx_bootstrap(void);
 void* rae_wgpu_ctx_device(void);
 void rae_wgpu_set_device_features(const int32_t* features, int64_t count);
+int64_t rae_c_pipelines_created(void);
+rae_Bool rae_frame_presented_any(void);
 void* rae_wgpu_ctx_adapter_ready(void);
 void* rae_wgpu_ctx_queue(void);
 void* rae_wgpu_ctx_adapter(void);

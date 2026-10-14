@@ -1,0 +1,58 @@
+# GbufferWarmUp — every pipeline the deferred renderer may need, created up
+# front (render-perf-13). Creating a pipeline compiles its shaders and can
+# stall the frame it happens in, so none should be created once the game
+# runs (gpu/PipelineWatch logs any that is). The renderer calls this once,
+# the first time its post passes are ready (the lit format is chosen with
+# the targets), still inside the first frame. It covers the optional paths
+# too, so turning TAA, FXAA, SMAA or bloom on, opening a G-buffer debug view,
+# a metaball or a refracting surface appearing later, or the camera going
+# under the water creates nothing. Not covered: an app's own caches (sprites,
+# grass, water), which create theirs at their own setup.
+open Gbuffer
+open GbufferResources
+open GbufferTargets
+open GbufferPasses
+open GbufferFullscreen
+open GbufferAo
+open GbufferBloom
+open GbufferSmaa
+open GbufferSdf
+open GbufferTerrain
+open GbufferInspector
+open GbufferUnderwater
+open TransparentForward
+open ShadowMaps
+open ShadowMapsSdf
+open gpu/GpuResources
+
+func warmUpDeferredPipelines(
+  resources: mod GpuResources
+  targets: mod DeferredTargets
+  gbuffer: mod GbufferCache
+  composite: mod CompositePassCache
+  ao: mod AoPassCache
+  antialias: mod AntialiasPassCache
+  smaa: mod SmaaPassCache
+  bloom: mod BloomPassCache
+  inspect: mod ViewPassCache
+  transparent: mod TransparentPassCache
+  underwater: mod UnderwaterPassCache
+  shadow: mod ShadowCache
+) {
+  let format: Int32 = targets.litFormat
+  ensurePipelines(cache: gbuffer, resources: resources)
+  ensureSdfObjects(sdf: gbuffer.sdf, resources: resources)
+  if gbuffer.terrainShaderSet {
+    ensureTerrainPipeline(cache: gbuffer, resources: resources)
+  }
+  ensureShadowObjects(shadow: shadow, resources: resources)
+  ensureShadowSdfObjects(sdf: shadow.sdf, resources: resources)
+  ensureCompositeObjects(cache: composite, resources: resources)
+  ensureAoPipelines(cache: ao, resources: resources)
+  ensureAntialiasObjects(cache: antialias, resources: resources, format: format)
+  ensureSmaaObjects(cache: smaa, resources: resources, litFormat: format)
+  ensureBloomObjects(cache: bloom, resources: resources, format: format)
+  ensureViewPipeline(cache: inspect, resources: resources)
+  ensureTransparentPipeline(cache: transparent, resources: resources, litFormat: format)
+  ensureUnderwaterObjects(cache: underwater, resources: resources, litFormat: format)
+}

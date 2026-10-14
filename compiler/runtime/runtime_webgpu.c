@@ -97,6 +97,12 @@ void rae_wgpu_set_device_features(const int32_t* features, int64_t count) {
 }
 void* rae_wgpu_ctx_adapter_ready(void) { return rae_wgpu_adapter_init() ? (void*)g_wgpu_adapter : NULL; }
 
+/* Pipelines the C runtime created (the forward renderer's and the old compute
+ * helpers'): lib/gpu/PipelineWatch.rae compares it each frame to spot one
+ * created after the first frame (render-perf-13). */
+static int64_t g_c_pipelines_created = 0;
+int64_t rae_c_pipelines_created(void) { return g_c_pipelines_created; }
+
 static int rae_wgpu_init(void) {
     if (g_wgpu_dev) return 1;
     if (!rae_wgpu_adapter_init()) return 0;
@@ -315,6 +321,7 @@ void rae_ext_Webgpu_raytrace(const float* scene, int64_t sceneLen, int64_t* fb,
     WGPUComputePipelineDescriptor cpd; memset(&cpd, 0, sizeof(cpd));
     cpd.compute.module = mod; cpd.compute.entryPoint = rae_wgpu_sv("main");
     WGPUComputePipeline pipe = wgpuDeviceCreateComputePipeline(g_wgpu_dev, &cpd);
+    g_c_pipelines_created++;
     if (!pipe) { fprintf(stderr, "[wgpu] pipeline failed\n"); free(sf); return; }
 
     WGPUBindGroupLayout bgl = wgpuComputePipelineGetBindGroupLayout(pipe, 0);
@@ -447,6 +454,7 @@ int64_t rae_ext_Gpu_kernel(rae_String wgsl, rae_String entry) {
     cpd.compute.module = mod;
     cpd.compute.entryPoint = rae_wgpu_sv(entry.data ? (const char*)entry.data : "main");
     WGPUComputePipeline pipe = wgpuDeviceCreateComputePipeline(g_wgpu_dev, &cpd);
+    g_c_pipelines_created++;
     wgpuShaderModuleRelease(mod);
     if (!pipe) { fprintf(stderr, "[gpu] kernel compile failed\n"); return 0; }
     g_gpu_pipe[g_gpu_pipe_n] = pipe;
