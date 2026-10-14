@@ -28,6 +28,8 @@ struct ShadowU {
 @group(0) @binding(6) var<uniform> SH: ShadowU;
 @group(0) @binding(7) var shadowTex: texture_depth_2d_array;
 @group(0) @binding(8) var shadowSamp: sampler_comparison;
+// The SSAO's half-resolution depth (deferred_ao_depth.wgsl), for the upsample.
+@group(0) @binding(9) var aoDepthTex: texture_2d<f32>;
 @vertex
 fn vs(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4<f32> {
   var points = array<vec2<f32>, 3>(
@@ -208,18 +210,25 @@ fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
   toonCol = mix(toonDeep, toonCol, mix(1.0, sunVis, 0.85));
   let toonLight = L.sunColor.rgb * 0.34 + hemi * 0.75;
   let toonShaded = toonCol * toonLight;
+  // The SSAO is half resolution (render-perf-6): upsample it from the four
+  // half texels around this pixel, bilinear weights times depth similarity,
+  // so the AO of a surface does not bleed onto the one in front of it.
   var aoSum = 0.0;
   var aoW = 0.0;
   let dims = vec2<i32>(textureDimensions(aoTex));
-  for (var dy = -1; dy <= 1; dy = dy + 1) {
-    for (var dx = -1; dx <= 1; dx = dx + 1) {
-      let q = clamp(px + vec2<i32>(dx, dy), vec2<i32>(0), dims - vec2<i32>(1));
-      let qd = textureLoad(depthTex, q, 0);
-      if (qd <= 0.0) { continue; }
-      let w = 1.0 / (1.0 + abs(qd - depth) * 800.0);
-      aoSum = aoSum + textureLoad(aoTex, q, 0).r * w;
-      aoW = aoW + w;
-    }
+  let halfPos = (vec2<f32>(px) + vec2<f32>(0.5)) * 0.5 - vec2<f32>(0.5);
+  let halfBase = vec2<i32>(floor(halfPos));
+  let halfFrac = halfPos - floor(halfPos);
+  for (var i = 0; i < 4; i = i + 1) {
+    let o = vec2<i32>(i & 1, i >> 1u);
+    let q = clamp(halfBase + o, vec2<i32>(0), dims - vec2<i32>(1));
+    let qd = textureLoad(aoDepthTex, q, 0).x;
+    if (qd <= 0.0) { continue; }
+    let bx = select(1.0 - halfFrac.x, halfFrac.x, o.x == 1);
+    let by = select(1.0 - halfFrac.y, halfFrac.y, o.y == 1);
+    let w = (bx * by + 1e-3) / (1.0 + abs(qd - depth) / depth * 40.0);
+    aoSum = aoSum + textureLoad(aoTex, q, 0).r * w;
+    aoW = aoW + w;
   }
   var ssao = 1.0;
   if (aoW > 0.0) { ssao = aoSum / aoW; }
