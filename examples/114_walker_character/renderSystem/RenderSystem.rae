@@ -28,6 +28,7 @@ import GrassConfig
 import app3d/Slider
 open Scene3d
 open RendererDeferred
+open RendererForward
 open Sky
 open Gbuffer
 import GbufferSkinned
@@ -69,6 +70,16 @@ type RenderSystem {
   shadowLogged: Bool
   # The physics cubes, one instanced draw (the unit box, scaled per cube)
   cubeBatch: InstanceBatch
+  # RAE_DEFERRED_MATCH_FORWARD=1 (measurements only, forward-rae-4): the
+  # deferred frame skips what the forward one lacks (SSAO, the water FFT,
+  # the transparent pass with the water and splashes, the underwater fog),
+  # so the two main passes compare on the same work. The image is wrong.
+  matchForward: Bool
+}
+
+# The deferred passes a forward frame does not have (see matchForward)
+func skippedToMatchForward(tag: view Int) ret Bool {
+  ret tag is RenderTag.ssao or tag is RenderTag.waterFft or tag is RenderTag.transparentForward or tag is RenderTag.underwater
 }
 
 # A clip plays this much slower while its character is in the air: there is
@@ -243,6 +254,7 @@ func renderGbufferPass(
   profiler: mod Profiler
   grassCompute: mod GrassCompute
   resources: mod GpuResources
+  openPass: copy Bool
 ) {
   var grassToonGen: Int = 0
   if characterSystem.toon {
@@ -279,13 +291,16 @@ func renderGbufferPass(
   grassDiagTick(grass: grassCompute, resources: resources, profiler: profiler)
   # #912: the geometry pass's pipelines/binds live in the RENDERER's manager
   # (rendererResources); the grass compute objects stay in the App's (resources).
-  Gbuffer.beginPass(
-    cache: cache
-    resources: rendererResources
-    camera: cameraSystem.camera
-    light: cameraSystem.light
-    aspect: aspect
-  )
+  # The forward frame opens its pass itself (RenderTag.forward)
+  if openPass {
+    Gbuffer.beginPass(
+      cache: cache
+      resources: rendererResources
+      camera: cameraSystem.camera
+      light: cameraSystem.light
+      aspect: aspect
+    )
+  }
   drawTerrainGround(
     cache: cache
     resources: rendererResources
@@ -380,7 +395,9 @@ func renderGbufferPass(
     world: world
     deltaTime: deltaTime
   )
-  Gbuffer.endPass(cache: cache, resources: rendererResources)
+  if openPass {
+    Gbuffer.endPass(cache: cache, resources: rendererResources)
+  }
 }
 
 # ----- render phase: animation sample + render-graph walk ------------------
@@ -507,6 +524,9 @@ func renderApp(
   gpuPassTimingBegin(renderer: renderSystem.renderer)
   loop var oi: Int = 0, oi < deferredOrderLength(renderer: renderSystem.renderer), ++oi {
     let tag: Int = deferredTagAt(renderer: renderSystem.renderer, i: oi)
+    if renderSystem.matchForward and skippedToMatchForward(tag: tag) {
+      continue
+    }
     gpuPassMark(renderer: renderSystem.renderer, tag: tag)
     Profile.zoneBegin(profiler: profiler, name: (tag as RenderTag).toString())
     # Exhaustive over RenderTag: adding a pass is a compile error here until it is
@@ -546,12 +566,41 @@ func renderApp(
             profiler: profiler
             grassCompute: grassCompute
             resources: resources
+            openPass: true
           )
         }
       }
       case RenderTag.forward {
-        # The walker renders deferred; its forward mode is a later step
-        # (forward-rae-4), so its graph has no forward pass
+        # RAE_RENDER_PATH=forward: the same scene draws into the forward main
+        # pass (4x MSAA), opened and closed here
+        beginForwardPass(
+          renderer: renderSystem.renderer
+          camera: cameraSystem.camera
+          light: cameraSystem.light
+          aspect: aspect
+        )
+        if let rendererResources: mod GpuResources => renderSystem.renderer.gpuResources {
+          renderGbufferPass(
+            cache: renderSystem.renderer.passes.gbuffer
+            rendererResources: rendererResources
+            cameraSystem: cameraSystem
+            characterSystem: characterSystem
+            splashes: splashes
+            terrainSystem: terrainSystem
+            world: world
+            physicsSystem: physicsSystem
+            cubeBatch: renderSystem.cubeBatch
+            aspect: aspect
+            palette: palette
+            t: t
+            deltaTime: deltaTime
+            profiler: profiler
+            grassCompute: grassCompute
+            resources: resources
+            openPass: false
+          )
+        }
+        endForwardPass(renderer: renderSystem.renderer)
       }
       case RenderTag.ssao {
         renderDeferredPass(

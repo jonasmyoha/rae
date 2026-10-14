@@ -35,6 +35,8 @@ open gpu/GpuIds
 import Profile
 import GrassConfig
 open Gbuffer
+open ForwardMaterial
+open gpu/DeviceFeatures
 import String
 import WorldBiome
 
@@ -95,6 +97,15 @@ type GrassCompute {
   drawBind: BindGroupId
   frameUniform: ExternalId
   inFlight: List(SubmissionId)
+  # The grass in the forward main pass (forward-rae-4): its pipeline for the
+  # lit format, its bind (the draw bind's entries + the renderer's lighting
+  # inputs, adopted into this manager) and the inputs generation it was
+  # built for
+  forwardPipeline: RenderPipelineId
+  forwardPipelineFormat: Int32
+  forwardBind: BindGroupId
+  forwardBindGen: Int
+  forwardAdopted: List(ExternalId)
 }
 
 func createGrassCompute() ret GrassCompute {
@@ -119,6 +130,11 @@ func createGrassCompute() ret GrassCompute {
     drawBind: noBindGroupId()
     frameUniform: noExternalId()
     inFlight: List.create(SubmissionId, cap: 4)
+    forwardPipeline: noRenderPipelineId()
+    forwardPipelineFormat: 0
+    forwardBind: noBindGroupId()
+    forwardBindGen: -1
+    forwardAdopted: List.create(ExternalId, cap: 4)
   }
 }
 
@@ -244,6 +260,127 @@ func releaseGrassGpu(grass: mod GrassCompute, resources: mod GpuResources) {
   grass.bounds = noComputeBounds(workgroupSize: grassWorkgroupSize)
   grass.frameUniform = noExternalId()
   grass.drawBindMade = false
+  retireBindGroup(resources: resources, id: grass.forwardBind)
+  retireRenderPipeline(resources: resources, id: grass.forwardPipeline)
+  releaseExternalIds(resources: resources, list: grass.forwardAdopted)
+  grass.forwardBind = noBindGroupId()
+  grass.forwardPipeline = noRenderPipelineId()
+  grass.forwardPipelineFormat = 0
+  grass.forwardBindGen = -1
+}
+
+# The grass in the FORWARD main pass: the grass composition after the shading
+# prelude, with forward_entry.wgsl last, 4x into the lit format; and its bind,
+# the draw bind's three entries + the renderer's lighting inputs, adopted into
+# this manager. Rebuilt when the lighting inputs are recreated.
+func ensureGrassForward(
+  grass: mod GrassCompute
+  resources: mod GpuResources
+  gbuffer: view GbufferCache
+  gbufferResources: view GpuResources
+) {
+  let litFormat: Int32 = gbuffer.forward.litFormat
+  if litFormat is (0 as Int32) or not grass.drawBindMade {
+    ret
+  }
+  if not (grass.forwardPipelineFormat is litFormat) {
+    retireBindGroup(resources: resources, id: grass.forwardBind)
+    retireRenderPipeline(resources: resources, id: grass.forwardPipeline)
+    grass.forwardBind = noBindGroupId()
+    grass.forwardPipeline = noRenderPipelineId()
+    grass.forwardPipelineFormat = litFormat
+    var grassShader: Shader = shader(files: [
+      "lib/precision_f32.wgsl"
+      "lib/sky_hosek.wgsl"
+      "lib/deferred_uniforms.wgsl"
+      "lib/deferred_shade.wgsl"
+      "lib/grass_render.wgsl"
+      "lib/forward_entry.wgsl"
+    ])
+    if deviceHasShaderF16() {
+      grassShader = shader(files: [
+        "lib/precision_f16.wgsl"
+        "lib/sky_hosek.wgsl"
+        "lib/deferred_uniforms.wgsl"
+        "lib/deferred_shade.wgsl"
+        "lib/grass_render.wgsl"
+        "lib/forward_entry.wgsl"
+      ])
+    }
+    if let pipeline: RenderPipelineId = createRenderPipeline(
+      resources: resources
+      shader: grassShader
+      vertexEntry: "vs"
+      fragmentEntry: "fsForward"
+      spec: forwardMaterialSpec(
+        litFormat: litFormat
+        stride: 0
+        attributes: List.create(VertexAttributeSpec, cap: 0)
+        depthWrite: true
+        depthCompare: WGPUCompareFunction_Greater
+        cullMode: WGPUCullMode_None
+      )
+    ) {
+      grass.forwardPipeline = pipeline
+    }
+  }
+  let inputsGen: Int = gbuffer.forward.inputsGen
+  if grass.forwardBindGen is inputsGen and bindGroupIsUsable(
+    resources: resources
+    id: grass.forwardBind
+  ) {
+    ret
+  }
+  retireBindGroup(resources: resources, id: grass.forwardBind)
+  grass.forwardBind = noBindGroupId()
+  releaseExternalIds(resources: resources, list: grass.forwardAdopted)
+  if gbuffer.forward.inputs.length < 4 {
+    ret
+  }
+  # The inputs are the renderer's manager objects: adopt them here
+  var adopted: List(ResourceRef) = List.create(ResourceRef, cap: 4)
+  unsafe {
+    loop var i: Int = 0, i < 4, ++i {
+      let input: ResourceRef = gbuffer.forward.inputs.copyAtFallback(index: i, fallback: noRef())
+      let handle: Ptr = refHandle(resources: gbufferResources, ref: input)
+      if i < 2 {
+        adopted.add(
+          value: adoptBufferRef(resources: resources, adopted: grass.forwardAdopted, handle: handle)
+        )
+      } else if i is 2 {
+        adopted.add(
+          value: adoptTextureViewRef(
+            resources: resources
+            adopted: grass.forwardAdopted
+            handle: handle
+          )
+        )
+      } else {
+        adopted.add(
+          value: adoptSamplerRef(
+            resources: resources
+            adopted: grass.forwardAdopted
+            handle: handle
+          )
+        )
+      }
+    }
+  }
+  var entries: List(ResourceRef) = List.create(ResourceRef, cap: 16)
+  entries.add(value: externalRef(id: grass.frameUniform))
+  entries.add(value: bufferRef(id: grass.instances))
+  entries.add(value: bufferRef(id: grass.uniform))
+  if not addForwardInputs(entries: entries, inputs: adopted) {
+    ret
+  }
+  if let bind: BindGroupId = createRenderBindGroup(
+    resources: resources
+    pipeline: grass.forwardPipeline
+    entries: entries
+  ) {
+    grass.forwardBind = bind
+    grass.forwardBindGen = inputsGen
+  }
 }
 
 # Create the instance buffer, uniform, compute pipeline, compute bind group and
@@ -524,17 +661,28 @@ func grassDraw(
     gbuffer: gbuffer
     gbufferResources: gbufferResources
   )
+  var pipeline: RenderPipelineId = grass.renderPipeline
+  var bind: BindGroupId = grass.drawBind
+  if gbuffer.forwardFrame {
+    ensureGrassForward(
+      grass: grass
+      resources: resources
+      gbuffer: gbuffer
+      gbufferResources: gbufferResources
+    )
+    pipeline = grass.forwardPipeline
+    bind = grass.forwardBind
+  }
   unsafe {
-    let pass: Ptr = gbufferAttributePass(cache: gbuffer)
-    if pass is webgpuNull() {
+    if not gbufferFrameActive(cache: gbuffer) {
       ret
     }
     # No static re-bind after: every G-buffer draw binds its own pipeline (#912).
     recordDrawIndirectInPass(
       resources: resources
-      pass: pass
-      pipeline: grass.renderPipeline
-      bindGroup: grass.drawBind
+      pass: gbuffer.pass
+      pipeline: pipeline
+      bindGroup: bind
       indirect: bufferRef(id: grass.indirect)
     )
   }

@@ -1,0 +1,126 @@
+# ForwardMaterial — the forward main pass's versions of the G-buffer
+# materials (forward-rae-4). A G-buffer material's fragment code is
+# `gbufferSurface(in) -> FsOut`; its G-buffer entry `fs` writes that, and the
+# forward entry `fsForward` (lib/forward_entry.wgsl, composed after the
+# material and the shading prelude) decodes it the way the deferred lighting
+# does and shades it with shadeSurface. So a material written for the
+# G-buffer draws in the forward pass with no forward code of its own: its
+# forward pipeline is the same composition plus the prelude and the entry,
+# its forward bind its own entries plus the four lighting inputs at bindings
+# 12..15.
+#
+# The GbufferCache holds one ForwardMaterials. ForwardMain fills `inputs`
+# (bumping `inputsGen` when they are recreated) and `litFormat` each forward
+# frame; each material rebuilds its forward bind when its gen is behind.
+# The skinned meshes and the terrain keep their forward pipelines here; the
+# grass keeps its own in GrassCompute (it lives in the app's GPU manager).
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuRender
+open gpu/GpuIds
+open webgpu/Webgpu
+
+# The first binding of the lighting inputs, above every material's own
+const forwardInputBinding: Int = 12
+
+const forwardMaterialSamples: Int = 4
+
+type ForwardMaterials {
+  litFormat: Int32  # the forward pass's colour format (0 until a forward frame)
+  # The light uniform, the cascades' uniform, their array view and their
+  # comparison sampler, in the renderer's GPU manager
+  inputs: List(ResourceRef)
+  inputsGen: Int  # bumped whenever `inputs` are recreated
+  skinPipeline: RenderPipelineId
+  skinPipelineFormat: Int32
+  skinBind: BindGroupId
+  skinBindGen: Int
+  terrainPipeline: RenderPipelineId
+  terrainPipelineFormat: Int32
+  terrainBind: BindGroupId
+  terrainBindGen: Int
+  terrainAdopted: List(ExternalId)
+  # The app's forward terrain composition (rendererSetForwardTerrainShader);
+  # unset = the lib default parts
+  terrainShader: Shader
+  terrainShaderSet: Bool
+}
+
+func createForwardMaterials() ret ForwardMaterials {
+  ret ForwardMaterials {
+    litFormat: 0
+    inputs: List.create(ResourceRef, cap: 4)
+    inputsGen: 0
+    skinPipeline: noRenderPipelineId()
+    skinPipelineFormat: 0
+    skinBind: noBindGroupId()
+    skinBindGen: -1
+    terrainPipeline: noRenderPipelineId()
+    terrainPipelineFormat: 0
+    terrainBind: noBindGroupId()
+    terrainBindGen: -1
+    terrainAdopted: List.create(ExternalId, cap: 4)
+    terrainShader: { text: "", sources: List.create(String, cap: 0), generation: 0 }
+    terrainShaderSet: false
+  }
+}
+
+# The forward pass's spec for a material: its vertex layout, depth test and
+# culling, into the one 4x lit target with a reverse-Z depth32
+func forwardMaterialSpec(
+  litFormat: view Int32
+  stride: view Int
+  attributes: own List(VertexAttributeSpec)
+  depthWrite: view Bool
+  depthCompare: view Int32
+  cullMode: view Int32
+) ret RenderPipelineSpec {
+  var colorFormats: List(Int32) = List.create(Int32, cap: 1)
+  colorFormats.add(value: litFormat)
+  ret RenderPipelineSpec {
+    vertexStride: stride
+    attributes: own attributes
+    colorFormats: own colorFormats
+    alphaBlend: false
+    premultiplied: false
+    depthFormat: WGPUTextureFormat_Depth32Float
+    depthWrite: depthWrite
+    depthCompare: depthCompare
+    cullMode: cullMode
+    sampleCount: forwardMaterialSamples
+  }
+}
+
+# A material's forward bind entries: its own (bindings 0..), then gaps up to
+# forwardInputBinding, then the lighting inputs. False when the inputs are
+# not there yet (no forward frame has set them).
+func addForwardInputs(entries: mod List(ResourceRef), inputs: view List(ResourceRef)) ret Bool {
+  if inputs.length < 4 {
+    ret false
+  }
+  loop entries.length < forwardInputBinding {
+    entries.add(value: skipRef())
+  }
+  loop let input: ResourceRef in inputs {
+    entries.add(value: input)
+  }
+  ret true
+}
+
+# The forward pipelines, binds and adoptions (renderer shutdown)
+func shutdownForwardMaterials(materials: mod ForwardMaterials, resources: mod GpuResources) {
+  let skinBindRetired: Bool = retireBindGroup(resources: resources, id: materials.skinBind)
+  let terrainBindRetired: Bool = retireBindGroup(resources: resources, id: materials.terrainBind)
+  releaseExternalIds(resources: resources, list: materials.terrainAdopted)
+  let skinRetired: Bool = retireRenderPipeline(resources: resources, id: materials.skinPipeline)
+  let terrainRetired: Bool = retireRenderPipeline(
+    resources: resources
+    id: materials.terrainPipeline
+  )
+  materials.skinBind = noBindGroupId()
+  materials.terrainBind = noBindGroupId()
+  materials.skinPipeline = noRenderPipelineId()
+  materials.terrainPipeline = noRenderPipelineId()
+  materials.skinBindGen = -1
+  materials.terrainBindGen = -1
+}

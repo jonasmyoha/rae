@@ -27,6 +27,7 @@ open RendererDeferred
 open RendererPasses
 open RendererPassTiming
 open ForwardMain
+open GbufferTerrain
 
 # A renderer whose main pass is forward + 4x MSAA
 func createForwardRenderer() ret DeferredRenderer {
@@ -43,6 +44,17 @@ func createForwardRendererWithUiSky(sky: view Sky) ret DeferredRenderer {
   renderer.sky = sky
   renderer.hasSky = true
   ret renderer
+}
+
+# The app's terrain composition for the forward pass (GbufferTerrain's
+# defaultForwardTerrainShader shows the parts): the app's palette and grass
+# style after the shading prelude, with lib/forward_entry.wgsl last. Without
+# it, a forward frame paints the terrain with the lib palette.
+func rendererSetForwardTerrainShader(renderer: mod DeferredRenderer, shader: own Shader) {
+  ensureRendererResources(renderer: renderer)
+  if let resources: mod GpuResources => renderer.gpuResources {
+    terrainSetForwardShader(cache: renderer.passes.gbuffer, resources: resources, shader: shader)
+  }
 }
 
 # The renderer draws its scene with the forward main pass

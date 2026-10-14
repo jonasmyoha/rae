@@ -301,8 +301,16 @@ func ensureForwardBinds(
     gbuffer.sdf.forwardInputs.add(value: bufferRef(id: shadow.frameUniform))
     gbuffer.sdf.forwardInputs.add(value: textureViewRef(id: shadow.arrayView))
     gbuffer.sdf.forwardInputs.add(value: samplerRef(id: shadow.sampler))
+    # And the G-buffer materials' forward binds (ForwardMaterial)
+    gbuffer.forward.inputs.clear()
+    gbuffer.forward.inputs.add(value: bufferRef(id: targets.lightUniform))
+    gbuffer.forward.inputs.add(value: bufferRef(id: shadow.frameUniform))
+    gbuffer.forward.inputs.add(value: textureViewRef(id: shadow.arrayView))
+    gbuffer.forward.inputs.add(value: samplerRef(id: shadow.sampler))
+    gbuffer.forward.inputsGen = gbuffer.forward.inputsGen + 1
   }
   gbuffer.sdf.forwardPipeline = forward.sdfPipeline
+  gbuffer.forward.litFormat = targets.litFormat
   if not bindGroupIsUsable(resources: resources, id: forward.staticBind) {
     var entries: List(ResourceRef) = List.create(ResourceRef, cap: 6)
     entries.add(value: bufferRef(id: gbuffer.frameUniform))

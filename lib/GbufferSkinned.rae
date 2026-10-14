@@ -19,6 +19,8 @@ open MeshStore
 open SkinStore
 open Gbuffer
 open GbufferResources
+open ForwardMaterial
+open gpu/DeviceFeatures
 
 # Skin bind group: frame uniform @0, draws @1, the joint palette @2 — all the
 # cache's manager buffers. The palette exists from the first upload on, so a
@@ -46,13 +48,115 @@ func ensureSkinBind(cache: mod GbufferCache, resources: mod GpuResources) {
   }
 }
 
+# The skinned FORWARD material (forward-rae-4): the skin composition plus the
+# shading prelude and forward_entry.wgsl, 4x into the lit format, and its bind
+# (the skin bind's three buffers + the lighting inputs). Made at the first
+# forward frame; the bind is rebuilt when the lighting inputs are recreated.
+func ensureSkinForward(cache: mod GbufferCache, resources: mod GpuResources) {
+  let materials: mod ForwardMaterials => cache.forward
+  if materials.litFormat is (0 as Int32) {
+    ret
+  }
+  if not (materials.skinPipelineFormat is materials.litFormat) {
+    let retiredBind: Bool = retireBindGroup(resources: resources, id: materials.skinBind)
+    let retired: Bool = retireRenderPipeline(resources: resources, id: materials.skinPipeline)
+    materials.skinBind = noBindGroupId()
+    materials.skinPipeline = noRenderPipelineId()
+    materials.skinPipelineFormat = materials.litFormat
+    var skinShader: Shader = shader(files: [
+      "lib/precision_f32.wgsl"
+      "lib/sky_hosek.wgsl"
+      "lib/deferred_uniforms.wgsl"
+      "lib/deferred_shade.wgsl"
+      "lib/gbuffer_octahedral.wgsl"
+      "lib/gbuffer_skinned.wgsl"
+      "lib/forward_entry.wgsl"
+    ])
+    if deviceHasShaderF16() {
+      skinShader = shader(files: [
+        "lib/precision_f16.wgsl"
+        "lib/sky_hosek.wgsl"
+        "lib/deferred_uniforms.wgsl"
+        "lib/deferred_shade.wgsl"
+        "lib/gbuffer_octahedral.wgsl"
+        "lib/gbuffer_skinned.wgsl"
+        "lib/forward_entry.wgsl"
+      ])
+    }
+    var attributes: List(VertexAttributeSpec) = gbufferStaticAttributes()
+    attributes.add(value: { format: WGPUVertexFormat_Float32x4, offset: 32, location: 3 })
+    attributes.add(value: { format: WGPUVertexFormat_Float32x4, offset: 48, location: 4 })
+    attributes.add(value: { format: WGPUVertexFormat_Float32x4, offset: 64, location: 5 })
+    if let pipeline: RenderPipelineId = createRenderPipeline(
+      resources: resources
+      shader: skinShader
+      vertexEntry: "vs"
+      fragmentEntry: "fsForward"
+      spec: forwardMaterialSpec(
+        litFormat: materials.litFormat
+        stride: 80
+        attributes: own attributes
+        depthWrite: true
+        depthCompare: WGPUCompareFunction_Greater
+        cullMode: WGPUCullMode_Back
+      )
+    ) {
+      materials.skinPipeline = pipeline
+    }
+  }
+  if materials.skinBindGen is materials.inputsGen and bindGroupIsUsable(
+    resources: resources
+    id: materials.skinBind
+  ) {
+    ret
+  }
+  if not skinStorePaletteReady(store: cache.skins, resources: resources) {
+    ret
+  }
+  let retiredBind: Bool = retireBindGroup(resources: resources, id: materials.skinBind)
+  materials.skinBind = noBindGroupId()
+  var entries: List(ResourceRef) = List.create(ResourceRef, cap: 16)
+  entries.add(value: bufferRef(id: cache.frameUniform))
+  entries.add(value: bufferRef(id: cache.draws))
+  entries.add(value: bufferRef(id: cache.skins.palette))
+  if not addForwardInputs(entries: entries, inputs: materials.inputs) {
+    ret
+  }
+  if let bind: BindGroupId = createRenderBindGroup(
+    resources: resources
+    pipeline: materials.skinPipeline
+    entries: entries
+  ) {
+    materials.skinBind = bind
+    materials.skinBindGen = materials.inputsGen
+  }
+}
+
+# This frame's skin pipeline + bind: the G-buffer material, or the forward one
+# in a forward frame (made on demand)
+func skinFramePipeline(cache: mod GbufferCache, resources: mod GpuResources) ret RenderPipelineId {
+  if cache.forwardFrame {
+    ensureSkinForward(cache: cache, resources: resources)
+    ret cache.forward.skinPipeline
+  }
+  ensureSkinBind(cache: cache, resources: resources)
+  ret cache.skinPipeline
+}
+
+func skinFrameBind(cache: view GbufferCache) ret BindGroupId {
+  if cache.forwardFrame {
+    ret cache.forward.skinBind
+  }
+  ret cache.skinBind
+}
+
 # "May this skinned mesh draw into the CURRENT pass": the pass is open, the
-# bind exists and the mesh's buffers are live.
+# frame's bind exists and the mesh's buffers are live.
 func gbSkinReady(cache: view GbufferCache, resources: view GpuResources, mesh: copy Int) ret Bool {
   if not gbufferFrameActive(cache: cache) {
     ret false
   }
-  if not bindGroupIsUsable(resources: resources, id: cache.skinBind) {
+  if not bindGroupIsUsable(resources: resources, id: skinFrameBind(cache: cache)) {
     ret false
   }
   ret skinStoreReady(store: cache.skins, resources: resources, mesh: mesh)
@@ -77,7 +181,7 @@ func drawSkinned(
   toon: copy Int
 ) pub {
   unsafe {
-    ensureSkinBind(cache: cache, resources: resources)
+    let pipeline: RenderPipelineId = skinFramePipeline(cache: cache, resources: resources)
     if not gbSkinReady(cache: cache, resources: resources, mesh: mesh) {
       ret
     }
@@ -103,8 +207,8 @@ func drawSkinned(
     gbIssueInstanced(
       cache: cache
       resources: resources
-      pipeline: cache.skinPipeline
-      bind: cache.skinBind
+      pipeline: pipeline
+      bind: skinFrameBind(cache: cache)
       vbuf: skinStoreVbufHandle(store: cache.skins, resources: resources, mesh: mesh)
       ibuf: skinStoreIbufHandle(store: cache.skins, resources: resources, mesh: mesh)
       icount: skinStoreIndexCount(store: cache.skins, mesh: mesh)
@@ -130,7 +234,7 @@ func drawSkinnedRecords(
   count: copy Int
 ) pub {
   unsafe {
-    ensureSkinBind(cache: cache, resources: resources)
+    let pipeline: RenderPipelineId = skinFramePipeline(cache: cache, resources: resources)
     if not gbSkinReady(cache: cache, resources: resources, mesh: mesh) {
       ret
     }
@@ -146,8 +250,8 @@ func drawSkinnedRecords(
     gbIssueInstanced(
       cache: cache
       resources: resources
-      pipeline: cache.skinPipeline
-      bind: cache.skinBind
+      pipeline: pipeline
+      bind: skinFrameBind(cache: cache)
       vbuf: skinStoreVbufHandle(store: cache.skins, resources: resources, mesh: mesh)
       ibuf: skinStoreIbufHandle(store: cache.skins, resources: resources, mesh: mesh)
       icount: skinStoreIndexCount(store: cache.skins, mesh: mesh)
