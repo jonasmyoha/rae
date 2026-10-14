@@ -42,9 +42,10 @@ type FramePacer {
   presentStart: Float64  # when this frame's present began (notePresentStart)
   timedFrames: Int
   frameSeconds: Float64  # summed over the timed frames
-  presentSeconds: Float64  # in the present (the screenshot, the acquire, the copy)
-  acquireSeconds: Float64  # of that, waiting for the drawable (gpu/Surface)
+  presentSeconds: Float64  # in the present (the screenshot, a copy, the present)
+  acquireSeconds: Float64  # waiting for the drawable (gpu/Surface), wherever it happened
   acquireThisFrame: Float64
+  acquireStartedAt: Float64
   waitSeconds: Float64  # in paceFrame, waiting for the GPU
 }
 
@@ -76,6 +77,7 @@ func createFramePacer() ret FramePacer {
     presentSeconds: 0.0
     acquireSeconds: 0.0
     acquireThisFrame: 0.0
+    acquireStartedAt: 0.0
     waitSeconds: 0.0
   }
 }
@@ -88,10 +90,13 @@ func notePresentStart(pacer: mod FramePacer) {
   }
 }
 
-# The time this frame's drawable acquire took (gpu/Surface.presentToSurface).
-func noteAcquireTime(pacer: mod FramePacer, seconds: view Float64) {
+# The time this frame's drawable acquire took (gpu/Surface), and when it
+# began: inside the present (the copy fallback) or before it (a frame drawn
+# straight into the drawable).
+func noteAcquireTime(pacer: mod FramePacer, seconds: view Float64, startedAt: view Float64) {
   if pacer.timing {
     pacer.acquireThisFrame = seconds
+    pacer.acquireStartedAt = startedAt
   }
 }
 
@@ -138,12 +143,17 @@ func recordFrameTiming(pacer: mod FramePacer, waitStart: view Float64, waitEnd: 
     pacer.frameSeconds = pacer.frameSeconds + (waitEnd - pacer.frameStart)
     pacer.waitSeconds = pacer.waitSeconds + (waitEnd - waitStart)
     if pacer.presentStart > 0.0 {
-      pacer.presentSeconds = pacer.presentSeconds + (waitStart - pacer.presentStart)
+      var present: Float64 = waitStart - pacer.presentStart
+      if pacer.acquireThisFrame > 0.0 and pacer.acquireStartedAt >= pacer.presentStart {
+        present = present - pacer.acquireThisFrame  # the acquire is reported apart
+      }
+      pacer.presentSeconds = pacer.presentSeconds + present
     }
     pacer.acquireSeconds = pacer.acquireSeconds + pacer.acquireThisFrame
   }
   pacer.presentStart = 0.0
   pacer.acquireThisFrame = 0.0
+  pacer.acquireStartedAt = 0.0
   if pacer.timedFrames < timingWindow {
     ret
   }
@@ -152,11 +162,11 @@ func recordFrameTiming(pacer: mod FramePacer, waitStart: view Float64, waitEnd: 
   let presentMs: Float64 = pacer.presentSeconds / count * 1000.0
   let waitMs: Float64 = pacer.waitSeconds / count * 1000.0
   let acquireMs: Float64 = pacer.acquireSeconds / count * 1000.0
-  let cpuMs: Float64 = frameMs - presentMs - waitMs
+  let cpuMs: Float64 = frameMs - presentMs - waitMs - acquireMs
   log(
     "[frame] {pacer.framesInFlight} in flight: frame {roundTenth(value: frameMs)} ms = cpu {roundTenth(
       value: cpuMs
-    )} + present {roundTenth(value: presentMs)} (drawable acquire {roundTenth(value: acquireMs)}) + gpu wait {roundTenth(
+    )} + drawable acquire {roundTenth(value: acquireMs)} + present {roundTenth(value: presentMs)} + gpu wait {roundTenth(
       value: waitMs
     )}"
   )

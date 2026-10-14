@@ -1,64 +1,277 @@
-# Surface — getting a finished frame onto the window (render-perf-11).
+# Surface — getting a finished frame onto the window (render-perf-11,
+# render-perf-11b). All of it is Rae over the WebGPU bindings; C only reports
+# the surface handle and the window's visibility, reconfigures the surface
+# and sets the "presented" flags its own code reads.
 #
-# The frame is rendered into the canvas's offscreen texture; this acquires the
-# window's drawable, copies the frame into it and presents. Acquiring is the
-# step that can block: on a vsync'd surface it waits until the display hands
-# back a free drawable. So it is done LAST, after every pass of the frame was
-# recorded and submitted, and the CPU never sits waiting on a drawable while
-# it still has work to record. C makes the two calls (rae_surface_acquire: one
-# wgpuSurfaceGetCurrentTexture, which also keeps the no-acquire-while-hidden
-# rule and the recovery; rae_surface_present: the copy and the present); when
-# to make them is decided here.
+# A frame is drawn STRAIGHT INTO the window's drawable when it can be: the
+# canvas asks for its frame target at the first pass that writes it (the
+# deferred composite, the forward tonemap, or a 2D app's beginFrame) and gets
+# the drawable's view, acquired then. That is late: every 3D pass before it was
+# already recorded. Present then only presents. The offscreen target and a
+# full-screen copy are the fallback:
+# - no drawable is vended (headless, a hidden window, a stuck surface);
+# - the frame's first use LOADS the target (nothing wrote this frame yet, so
+#   the content to keep is the offscreen one);
+# - the drawable is not the canvas's size (a resize in flight);
+# - a screenshot is asked for (RAE_GPU2D_SCREENSHOT reads the offscreen), or
+#   RAE_DIRECT_PRESENT=0 (comparisons).
+#
+# Never acquire while the window is hidden / minimized / occluded: on macOS
+# the CAMetalLayer then hands out a fresh IOSurface per frame, which wgpu
+# still reports as SuccessOptimal, and memory balloons after each app switch.
+# Skipping the acquire entirely while dark keeps the drawable count flat.
+import Sys
 open webgpu/Webgpu
 open webgpu/Context
+open gpu/GpuResources
+open gpu/GpuRender
+open gpu/GpuIds
 open gpu/FramePacer
-open Gpu2dCanvas
+open gpu/SurfaceRecovery
 
-func nativeSurfaceAcquire() unsafe extern("rae_surface_acquire") ret Ptr
+func nativeSurfaceHandle() unsafe extern("rae_surface_handle") ret Ptr
 
-func nativeSurfacePresent(
+func nativeSurfaceWindowVisible() unsafe extern("rae_surface_window_visible") ret Int
+
+func nativeSurfaceReconfigure() unsafe extern("rae_surface_reconfigure")
+
+func nativeSurfaceNotePresented() unsafe extern("rae_surface_note_presented")
+
+# One frame's choice of target, and what was acquired for it
+type FrameTarget {
+  # Direct rendering is allowed at all (no screenshot asked, not disabled)
+  directAllowed: Bool
+  # This frame's target was chosen (at its first use)
+  chosen: Bool
+  # The frame renders into the drawable (else into the offscreen target)
+  direct: Bool
+  # An acquire was tried this frame (a failed one is not retried)
+  acquireTried: Bool
+  # The acquired drawable, and its view adopted for render passes
   drawable: Ptr
-  offscreen: Ptr
-  width: Int
-  height: Int
-) unsafe extern("rae_surface_present")
+  drawableView: Ptr
+  viewId: opt ExternalId
+  recovery: SurfaceRecovery
+}
 
-# Acquire the drawable, copy `offscreen` into it and present; the pacer times
-# the acquire. Nothing happens without a drawable (no surface, a hidden
-# window, a headless run).
-func presentToSurface(
+func createFrameTarget() ret FrameTarget {
+  let screenshot: Bool = Sys.getEnv(name: "RAE_GPU2D_SCREENSHOT").length() > 0
+  let disabled: Bool = Sys.getEnv(name: "RAE_DIRECT_PRESENT") is "0"
+  unsafe {
+    ret FrameTarget {
+      directAllowed: not screenshot and not disabled
+      chosen: false
+      direct: false
+      acquireTried: false
+      drawable: webgpuNull()
+      drawableView: webgpuNull()
+      viewId: none
+      recovery: createSurfaceRecovery()
+    }
+  }
+}
+
+# Acquire the drawable, once per frame: null when there is no surface, the
+# window is dark, or none is vended (the recovery then counts the skip and
+# may reconfigure). The pacer times the wait.
+func acquireDrawable(target: mod FrameTarget, pacer: mod FramePacer) unsafe ret Ptr {
+  unsafe {
+    if target.acquireTried {
+      ret target.drawable
+    }
+    target.acquireTried = true
+    let surface: Ptr = nativeSurfaceHandle()
+    if surface is webgpuNull() {
+      ret webgpuNull()
+    }
+    if nativeSurfaceWindowVisible() is 0 {
+      noteSurfaceSkipped(recovery: target.recovery, reason: "window-not-visible")
+      ret webgpuNull()
+    }
+    let started: Float64 = frameClock()
+    var surfaceTexture: WGPUSurfaceTexture = {
+      nextInChain: webgpuNull()
+      texture: webgpuNull()
+      status: 0
+    }
+    wgpuSurfaceGetCurrentTexture(surface: surface, surfaceTexture: surfaceTexture)
+    noteAcquireTime(pacer: pacer, seconds: frameClock() - started, startedAt: started)
+    let status: Int = surfaceTexture.status as Int
+    if surfaceTexture.texture is not webgpuNull() and (status is WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal as Int or status is WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal as Int) {
+      target.drawable = surfaceTexture.texture
+      ret target.drawable
+    }
+    # Release first, then the status-specific recovery
+    if surfaceTexture.texture is not webgpuNull() {
+      wgpuTextureRelease(texture: surfaceTexture.texture)
+    }
+    if surfaceAcquireFailed(recovery: target.recovery, status: status) {
+      nativeSurfaceReconfigure()
+    }
+    ret webgpuNull()
+  }
+}
+
+# Choose this frame's target at its first use: the drawable when one is
+# vended at `width` x `height` and the use does not need earlier content
+# (`loads`), else the offscreen. Answers whether the frame is direct.
+func chooseFrameTarget(
+  target: mod FrameTarget
+  resources: mod GpuResources
+  pacer: mod FramePacer
+  width: view Int
+  height: view Int
+  loads: view Bool
+) ret Bool {
+  if target.chosen {
+    ret target.direct
+  }
+  target.chosen = true
+  if not target.directAllowed or loads {
+    ret false
+  }
+  unsafe {
+    let drawable: Ptr = acquireDrawable(target: target, pacer: pacer)
+    if drawable is webgpuNull() {
+      ret false
+    }
+    if wgpuTextureGetWidth(texture: drawable) as Int is not width or wgpuTextureGetHeight(
+      texture: drawable
+    ) as Int is not height {
+      ret false
+    }
+    let viewDescriptor: WGPUTextureViewDescriptor = {
+      format: wgpuTextureGetFormat(texture: drawable)
+      dimension: WGPUTextureViewDimension_2D
+      baseMipLevel: 0
+      mipLevelCount: 1
+      baseArrayLayer: 0
+      arrayLayerCount: 1
+      aspect: WGPUTextureAspect_All
+    }
+    target.drawableView = wgpuTextureCreateView(texture: drawable, descriptor: viewDescriptor)
+    if target.drawableView is webgpuNull() {
+      ret false
+    }
+    target.viewId = adoptExternalTextureView(resources: resources, handle: target.drawableView)
+    target.direct = true
+    ret true
+  }
+}
+
+# The frame's drawable view as a render-target reference (only when direct)
+func frameTargetRef(target: view FrameTarget) ret ResourceRef {
+  if let viewId: view ExternalId => target.viewId {
+    ret externalRef(id: viewId)
+  }
+  ret noRef()
+}
+
+# Present the frame: the drawable it was drawn into, or the offscreen image
+# copied into one (acquired now if the frame did not). Then the next frame
+# chooses again.
+func presentFrameTarget(
+  target: mod FrameTarget
+  resources: mod GpuResources
+  pacer: mod FramePacer
   offscreen: copy Ptr
   width: view Int
   height: view Int
-  pacer: mod FramePacer
 ) {
+  unsafe {
+    var drawable: Ptr = target.drawable
+    if not target.direct and drawable is webgpuNull() {
+      drawable = acquireDrawable(target: target, pacer: pacer)
+    }
+    if drawable is not webgpuNull() {
+      if not target.direct {
+        copyIntoDrawable(
+          offscreen: offscreen
+          drawable: drawable
+          width: width
+          height: height
+        )
+      }
+      when Target.isNative {
+        # The browser presents the canvas texture when control returns to
+        # it; Emdawn rejects an explicit present
+        let presented: Int32 = wgpuSurfacePresent(surface: nativeSurfaceHandle())
+      }
+      nativeSurfaceNotePresented()
+      noteSurfacePresented(recovery: target.recovery)
+    }
+    endFrameTarget(target: target, resources: resources)
+  }
+}
+
+# The full-screen copy of the offscreen image into the drawable (the smaller
+# of the two sizes)
+func copyIntoDrawable(
+  offscreen: copy Ptr
+  drawable: copy Ptr
+  width: view Int
+  height: view Int
+) unsafe {
   unsafe {
     if offscreen is webgpuNull() {
       ret
     }
-    let acquireStart: Float64 = frameClock()
-    let drawable: Ptr = nativeSurfaceAcquire()
-    noteAcquireTime(pacer: pacer, seconds: frameClock() - acquireStart)
-    if drawable is webgpuNull() {
-      ret
+    var copyWidth: Int = wgpuTextureGetWidth(texture: drawable) as Int
+    var copyHeight: Int = wgpuTextureGetHeight(texture: drawable) as Int
+    if width < copyWidth {
+      copyWidth = width
     }
-    nativeSurfacePresent(
-      drawable: drawable
-      offscreen: offscreen
-      width: width
-      height: height
+    if height < copyHeight {
+      copyHeight = height
+    }
+    let encoderDescriptor: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
+    let encoder: Ptr = wgpuDeviceCreateCommandEncoder(
+      device: webgpuDevice()
+      descriptor: encoderDescriptor
     )
+    let source: WGPUTexelCopyTextureInfo = { texture: offscreen, aspect: WGPUTextureAspect_All }
+    let destination: WGPUTexelCopyTextureInfo = { texture: drawable, aspect: WGPUTextureAspect_All }
+    let extent: WGPUExtent3D = {
+      width: copyWidth as UInt32
+      height: copyHeight as UInt32
+      depthOrArrayLayers: 1
+    }
+    wgpuCommandEncoderCopyTextureToTexture(
+      commandEncoder: encoder
+      source: source
+      destination: destination
+      copySize: extent
+    )
+    let bufferDescriptor: WGPUCommandBufferDescriptor = { nextInChain: webgpuNull() }
+    let commandBuffer: Ptr = wgpuCommandEncoderFinish(
+      commandEncoder: encoder
+      descriptor: bufferDescriptor
+    )
+    var commands: List(Ptr) = List.create(Ptr, cap: 1)
+    commands.add(value: commandBuffer)
+    wgpuQueueSubmit(queue: webgpuQueue(), commandCount: 1, commands: commands.data)
+    wgpuCommandBufferRelease(commandBuffer: commandBuffer)
+    wgpuCommandEncoderRelease(commandEncoder: encoder)
   }
 }
 
-# The canvas's frame (its offscreen target), timed on its pacer
-func presentCanvasToSurface(canvas: mod Gpu2dCanvas) {
+# Drop this frame's drawable (presented, or abandoned) and start over
+func endFrameTarget(target: mod FrameTarget, resources: mod GpuResources) {
   unsafe {
-    presentToSurface(
-      offscreen: canvasOffscreenTexture(canvas: canvas)
-      width: canvas.offscreenWidth
-      height: canvas.offscreenHeight
-      pacer: canvas.framePacer
-    )
+    if let viewId: view ExternalId => target.viewId {
+      let released: Bool = releaseExternal(resources: resources, id: viewId)
+    }
+    target.viewId = none
+    if target.drawableView is not webgpuNull() {
+      wgpuTextureViewRelease(textureView: target.drawableView)
+    }
+    if target.drawable is not webgpuNull() {
+      wgpuTextureRelease(texture: target.drawable)
+    }
+    target.drawableView = webgpuNull()
+    target.drawable = webgpuNull()
+    target.chosen = false
+    target.direct = false
+    target.acquireTried = false
   }
 }

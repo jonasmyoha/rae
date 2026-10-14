@@ -21,18 +21,20 @@ or recreate the device merely because no frame was presented.
 
 ## Verification
 
-Run separately, through the shared test log:
+The policy is Rae since render-perf-11b (`lib/gpu/SurfaceRecovery.rae`, used
+by `lib/gpu/Surface.rae`; C keeps the one-call `rae_surface_reconfigure`, which
+also skips a zero window size). Fixture `1128_surface_recovery` checks repeated
+Occluded/Timeout (no reconfigure), the streak reset after a presented frame,
+and the bounded retries of a real error; it runs in the normal suite. It does
+not simulate the actual window server:
 
 ```sh
-MAKEFLAGS='TEST_RUNNER=tools/test_present_recovery.sh' perl -e 'alarm shift; exec @ARGV' 120 bash compiler/tools/watch-tests.sh
 MAKEFLAGS='TEST_RUNNER=tools/run_examples.sh' RAE_EXAMPLE_FILTER='118_water_lake' perl -e 'alarm shift; exec @ARGV' 300 bash compiler/tools/watch-tests.sh
 ```
 
-The C test compiles the production recovery section with mocked SDL/configuration
-calls. It checks repeated Occluded/Timeout, successful recovery, drawable-size
-configuration, bounded retries, and zero-size protection. It does not simulate
-the actual window server. The 118 screenshot gate reads the offscreen texture,
-so passing it does not prove that presentation to the window succeeded.
+The 118 screenshot gate reads the offscreen texture (a screenshot run never
+draws into the drawable), so passing it does not prove that presentation to
+the window succeeded.
 
 Manual window-server check: run 118 normally, minimize and restore it, cover and
 uncover it, and switch Spaces/back. The image should resume without restarting

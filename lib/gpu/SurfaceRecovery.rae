@@ -1,0 +1,101 @@
+# SurfaceRecovery — what the present does when the window surface vends no
+# drawable (render-perf-11b; was C's PRESENT RECOVERY block in
+# runtime_gpu2d_frame.c). Pure policy: it counts the frames in a row that
+# reached nothing, says when that streak is worth a log line, and says when
+# to reconfigure the surface. lib/gpu/Surface.rae acts on the answers.
+#
+# - A skip of 1-2 frames at startup is normal (the drawable size settles a
+#   frame after the window appears), so nothing is logged until the streak
+#   reaches surfaceSkipAlarm, then frames 3-12 and every 120th.
+# - Occluded and Timeout leave the surface valid: retry next frame, never
+#   reconfigure (that would steal focus and rebuild a working swapchain).
+# - Outdated, Lost and Error reconfigure the surface at the window's size on
+#   the first frames of the streak and then every 120th, so a failure a
+#   reconfigure cannot repair is not retried every frame.
+
+# The skip count at which a run of skipped frames looks stuck
+const surfaceSkipAlarm: Int = 3
+
+# wgpu-native's Occluded status, an extension the shared header lacks
+const surfaceStatusOccluded: Int = 196609
+
+type SurfaceRecovery {
+  # Frames in a row that presented nothing
+  skipStreak: Int
+}
+
+func createSurfaceRecovery() ret SurfaceRecovery {
+  ret SurfaceRecovery { skipStreak: 0 }
+}
+
+func surfaceStatusName(status: view Int) ret String {
+  match status {
+    case 0 {
+      ret "none(0)"
+    }
+    case 1 {
+      ret "SuccessOptimal"
+    }
+    case 2 {
+      ret "SuccessSuboptimal"
+    }
+    case 3 {
+      ret "Timeout"
+    }
+    case 4 {
+      ret "Outdated"
+    }
+    case 5 {
+      ret "Lost"
+    }
+    case 6 {
+      ret "Error"
+    }
+    case surfaceStatusOccluded {
+      ret "Occluded"
+    }
+    default {
+      ret "unknown"
+    }
+  }
+}
+
+# A drawable was presented: report a recovery if the frames had been stuck.
+func noteSurfacePresented(recovery: mod SurfaceRecovery) {
+  if recovery.skipStreak >= surfaceSkipAlarm {
+    log("[present] surface recovered after {recovery.skipStreak} skipped frame(s)")
+  }
+  recovery.skipStreak = 0
+}
+
+# A frame presented nothing while a surface exists (`reason`: a status name
+# or "window-not-visible").
+func noteSurfaceSkipped(recovery: mod SurfaceRecovery, reason: view String) {
+  recovery.skipStreak = recovery.skipStreak + 1
+  let streak: Int = recovery.skipStreak
+  if streak < surfaceSkipAlarm {
+    ret
+  }
+  if streak <= 12 or streak % 120 is 0 {
+    log(
+      "[present] nothing presented for {streak} frame(s) - surface status={reason}. Retrying presentation; this alone does not mean the surface is lost."
+    )
+  }
+}
+
+# The acquire returned no usable drawable with `status`: true when the
+# surface should be reconfigured now.
+func surfaceAcquireFailed(recovery: mod SurfaceRecovery, status: view Int) ret Bool {
+  if status is surfaceStatusOccluded or status is 3 {
+    recovery.skipStreak = recovery.skipStreak + 1
+    if recovery.skipStreak is surfaceSkipAlarm {
+      log(
+        "[present] {surfaceStatusName(status: status)}({status}); keeping the surface, retrying when a drawable is available"
+      )
+    }
+    ret false
+  }
+  noteSurfaceSkipped(recovery: recovery, reason: "{surfaceStatusName(status: status)}({status})")
+  let streak: Int = recovery.skipStreak
+  ret streak <= surfaceSkipAlarm or streak % 120 is 0
+}

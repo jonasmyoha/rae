@@ -15,6 +15,7 @@ open gpu/GpuDependencies
 open gpu/GpuRender
 open gpu/GpuRenderPass
 open gpu/GpuIds
+open gpu/Surface
 open Gpu2dCanvas
 open Gpu2dCanvasImage
 open Gpu2dCanvasClip
@@ -45,10 +46,12 @@ func canvasOpenFrame(
   if not canvasEnsureOffscreen(canvas: canvas) {
     ret
   }
+  # The drawable when this frame renders straight into it (gpu/Surface)
+  let colorView: ResourceRef = canvasFrameTargetRef(canvas: canvas, loads: not clear)
   if let resources: mod GpuResources => canvas.gpuResources {
     if var recording: Recording = beginRecording(resources: resources) {
       let target: RenderTarget = renderTarget(
-        colorView: textureViewRef(id: canvas.offscreenView)
+        colorView: colorView
         clear: clear
         r: r
         g: g
@@ -145,3 +148,20 @@ func boxFrameEnd(canvas: mod Gpu2dCanvas) {
 
 # Retire every manager object and drop the manager (app shutdown, BEFORE
 # Gpu2d.closeWindow releases the adopted C viewport uniform).
+
+# Present the canvas's frame (gpu/Surface): the drawable it was drawn into,
+# or the offscreen image copied into one; timed on the canvas's pacer.
+func presentCanvasToSurface(canvas: mod Gpu2dCanvas) {
+  if let resources: mod GpuResources => canvas.gpuResources {
+    unsafe {
+      presentFrameTarget(
+        target: canvas.frameTarget
+        resources: resources
+        pacer: canvas.framePacer
+        offscreen: canvasOffscreenTexture(canvas: canvas)
+        width: canvas.offscreenWidth
+        height: canvas.offscreenHeight
+      )
+    }
+  }
+}

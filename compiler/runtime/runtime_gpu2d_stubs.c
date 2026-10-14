@@ -44,8 +44,10 @@ float rae_ext_Gpu2d_dpr(void){ return 1.0; }
 /* Frame lifecycle moved to Rae (#504); these back it, no-op without a GPU. */
 void rae_g2d_frame_reset(void) {}
 void rae_g2d_present(void* texture, int64_t width, int64_t height) { (void)texture; (void)width; (void)height; }
-void* rae_surface_acquire(void) { return (void*)0; }
-void rae_surface_present(void* drawable, void* offscreen, int64_t width, int64_t height) { (void)drawable; (void)offscreen; (void)width; (void)height; }
+void* rae_surface_handle(void) { return (void*)0; }
+int64_t rae_surface_window_visible(void) { return 0; }
+void rae_surface_reconfigure(void) {}
+void rae_surface_note_presented(void) {}
 int64_t rae_g2d_surface_ready(void) { return 0; }
 int64_t rae_g2d_surface_width(void) { return 0; }
 int64_t rae_g2d_surface_height(void) { return 0; }
