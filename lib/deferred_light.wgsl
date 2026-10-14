@@ -36,20 +36,6 @@ fn vs(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4<f32> {
     vec2<f32>(-1.0, -1.0), vec2<f32>(3.0, -1.0), vec2<f32>(-1.0, 3.0));
   return vec4<f32>(points[vi], 0.0, 1.0);
 }
-const SUN_TAN_HALF: f32 = 0.00463;
-fn poissonDisc(i: i32) -> vec2<f32> {
-  var p = array<vec2<f32>, 12>(
-    vec2<f32>(-0.326, -0.406), vec2<f32>(-0.840, -0.074),
-    vec2<f32>(-0.696,  0.457), vec2<f32>(-0.203,  0.621),
-    vec2<f32>( 0.962, -0.195), vec2<f32>( 0.473, -0.480),
-    vec2<f32>( 0.519,  0.767), vec2<f32>( 0.185, -0.893),
-    vec2<f32>( 0.507,  0.064), vec2<f32>( 0.896,  0.412),
-    vec2<f32>(-0.322, -0.933), vec2<f32>(-0.792, -0.598));
-  return p[i];
-}
-fn shadowNoise(pix: vec2<f32>) -> f32 {
-  return fract(52.9829189 * fract(dot(pix, vec2<f32>(0.06711056, 0.00583715))));
-}
 fn shadowCascadeIndex(viewDepth: f32, count: i32) -> i32 {
   var c = 0;
   if (viewDepth > SH.splitFar.x) { c = 1; }
@@ -69,48 +55,56 @@ fn cascadeDepthRange(c: i32) -> f32 {
   if (c == 3) { return SH.depthRange.w; }
   return SH.depthRange.x;
 }
-fn sunVisibility(wpos: vec3<f32>, N: vec3<f32>, viewDepth: f32, pix: vec2<f32>) -> f32 {
+// The receiving surface's light-space depth slope (render-perf-7): the plane
+// through the pixel with its G-buffer normal, mapped by the cascade's
+// orthographic (so linear) view-projection, as d(depth)/d(uv). Each PCF tap
+// compares against the depth of that plane under the tap rather than the
+// pixel's own depth, so a slope does not shadow itself and no normal offset
+// is needed: contacts stay attached. (dpdx/dpdy would give the same plane,
+// but the lighting's early returns make the control flow non-uniform.)
+fn receiverSlope(c: i32, N: vec3<f32>, maxSlope: f32) -> vec2<f32> {
+  var t1 = cross(N, vec3<f32>(0.0, 0.0, 1.0));
+  if (dot(t1, t1) < 1e-6) { t1 = cross(N, vec3<f32>(1.0, 0.0, 0.0)); }
+  t1 = normalize(t1);
+  let t2 = cross(N, t1);
+  let m = SH.lightViewProj[c];
+  let a = (m * vec4<f32>(t1, 0.0)).xyz;
+  let b = (m * vec4<f32>(t2, 0.0)).xyz;
+  let n = cross(a, b);
+  if (abs(n.z) < 1e-8) { return vec2<f32>(0.0); }
+  // ndc.x = 2u - 1 and ndc.y = 1 - 2v
+  let slope = vec2<f32>(-2.0 * n.x / n.z, 2.0 * n.y / n.z);
+  let length2 = dot(slope, slope);
+  if (length2 > maxSlope * maxSlope) { return slope * (maxSlope / sqrt(length2)); }
+  return slope;
+}
+// Four taps of the hardware 2x2 compare, 0.75 texel either side: a smooth
+// footprint of about 3.5 texels for 4 lookups (the PCSS filter was 8 blocker
+// + 12 PCF taps per pixel).
+fn sunVisibility(wpos: vec3<f32>, N: vec3<f32>, viewDepth: f32) -> f32 {
   let count = i32(SH.shadowCfg.x);
   if (count <= 0) { return 1.0; }
   let c = shadowCascadeIndex(viewDepth, count);
   if (c >= count) { return 1.0; }
-  let texel = cascadeTexel(c);
-  let offset = wpos + N * (texel * 1.5);
-  let lp = SH.lightViewProj[c] * vec4<f32>(offset, 1.0);
+  let lp = SH.lightViewProj[c] * vec4<f32>(wpos, 1.0);
   let ndc = lp.xyz / lp.w;
   let uv = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
   if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || ndc.z > 1.0) { return 1.0; }
   let res = SH.shadowCfg.y;
-  let extent = texel * res;
-  let searchTexels = 4.0;
-  let searchUv = searchTexels / res;
-  var blockerSum = 0.0;
-  var blockerCount = 0.0;
-  let ang = shadowNoise(pix) * 6.2831853;
-  let ca = cos(ang);
-  let sa = sin(ang);
-  for (var i = 0; i < 8; i = i + 1) {
-    let d0 = poissonDisc(i);
-    let d = vec2<f32>(d0.x * ca - d0.y * sa, d0.x * sa + d0.y * ca) * searchUv;
-    let t = uv + d;
-    if (t.x < 0.0 || t.x > 1.0 || t.y < 0.0 || t.y > 1.0) { continue; }
-    let px = vec2<i32>(i32(t.x * res), i32(t.y * res));
-    let z = textureLoad(shadowTex, px, c, 0);
-    if (z < ndc.z) { blockerSum = blockerSum + z; blockerCount = blockerCount + 1.0; }
-  }
-  if (blockerCount < 0.5) { return 1.0; }
-  let blockerZ = blockerSum / blockerCount;
-  let gapWorld = (ndc.z - blockerZ) * cascadeDepthRange(c);
-  let penumbraWorld = gapWorld * SUN_TAN_HALF * 2.0;
-  var radiusUv = penumbraWorld / max(extent, 1e-4);
-  radiusUv = clamp(radiusUv, 1.0 / res, 16.0 / res);
+  // One texel of world size, in this cascade's depth units
+  let texelDepth = cascadeTexel(c) / max(cascadeDepthRange(c), 1e-4);
+  // At most a slope of 8 texel-depths per texel (grazing light)
+  let slope = receiverSlope(c, N, 8.0 * texelDepth * res);
+  // The hardware compare reads 2x2 texels around each tap, up to 0.7 texel
+  // off the tap, where the plane is already deeper or shallower.
+  let bias = 0.5 * texelDepth + 0.75 * length(slope) / res;
   var sum = 0.0;
-  for (var i = 0; i < 12; i = i + 1) {
-    let d0 = poissonDisc(i);
-    let d = vec2<f32>(d0.x * ca - d0.y * sa, d0.x * sa + d0.y * ca) * radiusUv;
-    sum = sum + textureSampleCompareLevel(shadowTex, shadowSamp, uv + d, c, ndc.z);
+  for (var i = 0; i < 4; i = i + 1) {
+    let d = (vec2<f32>(f32(i & 1), f32(i >> 1u)) * 1.5 - vec2<f32>(0.75)) / res;
+    let reference = ndc.z + dot(slope, d) - bias;
+    sum = sum + textureSampleCompareLevel(shadowTex, shadowSamp, uv + d, c, reference);
   }
-  return sum / 12.0;
+  return sum * 0.25;
 }
 const PI: f32 = 3.14159265;
 const RAE_RIM_STRENGTH: f32 = 0.55;
@@ -194,7 +188,7 @@ fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
   let spec = dGGX(NoH, rough) * gSmith(NoV, NoL, rough) * Fs
            / max(4.0 * NoV * NoL, 1e-4);
   let kd = (vec3<f32>(1.0) - Fs) * (1.0 - metallic);
-  let sunVis = sunVisibility(wpos, N, length(L.camPos.xyz - wpos), vec2<f32>(px));
+  let sunVis = sunVisibility(wpos, N, length(L.camPos.xyz - wpos));
   let direct = (kd * albedo / PI + spec) * L.sunColor.rgb * NoL * sunVis;
   let hemi = mix(L.ambGround.rgb, L.ambSky.rgb, N.z * 0.5 + 0.5);
   let ambF = envBrdf(f0, rough, NoV);

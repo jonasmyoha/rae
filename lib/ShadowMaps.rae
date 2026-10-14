@@ -14,8 +14,11 @@
 #   * PIPELINES: one depth-only pipeline per vertex format — static (32 B)
 #     and skinned (80 B, palette-posed in the vertex stage) — from the WGSL C
 #     keeps (rae_sm_wgsl_*). NOT reverse-Z: cascades are orthographic, where
-#     depth is linear, so standard Less, clear to 1.0. Front-face culling and
-#     a rasteriser bias (constant 2, slope 2.5) handle the acne.
+#     depth is linear, so standard Less, clear to 1.0. The cull mode and the
+#     rasteriser bias are the cache's ShadowCasterBias: the deferred renderer
+#     culls back faces like its G-buffer, with a small bias, and its lighting
+#     adds a receiver-plane bias (render-perf-7); the forward renderer keeps
+#     front-face culling with constant 2 / slope 2.5 and its normal offset.
 #   * THE CASTER QUEUE: the shadow pass runs BEFORE the scene pass, so it
 #     needs its own walk of the scene; casters are queued (model matrix,
 #     buffers, palette base) between shadowBegin and shadowEnd, uploaded once
@@ -64,8 +67,33 @@ const shadowDefaultCascades: Int = 3
 
 const shadowSkinnedKeyBit: Int = 1099511627776  # 1 << 40: the skinned half of a batch key
 
+# How the casters are rasterised into the cascades: which faces are culled
+# and the rasteriser's depth bias (constant, and scaled by the triangle's
+# depth slope).
+type ShadowCasterBias {
+  cullMode: Int32
+  depthBias: Int
+  slopeScale: Float
+}
+
+# The forward renderer's: front faces culled (the back faces cast), a large
+# bias, and the lighting pushes each receiver 1.5 texels along its normal.
+# Robust against acne, but a contact detaches: feet float over their shadow.
+func frontFaceShadowCasterBias() ret ShadowCasterBias {
+  ret ShadowCasterBias { cullMode: WGPUCullMode_Front, depthBias: 2, slopeScale: 2.5 }
+}
+
+# The deferred renderer's (render-perf-7): the G-buffer's own back-face
+# culling (the lit faces cast), a small constant and a moderate slope bias.
+# The lighting needs no normal offset: it compares each tap against the
+# receiving surface's plane, so contacts stay attached.
+func backFaceShadowCasterBias() ret ShadowCasterBias {
+  ret ShadowCasterBias { cullMode: WGPUCullMode_Back, depthBias: 1, slopeScale: 1.5 }
+}
+
 type ShadowCache {
   objectsMade: Bool
+  casterBias: ShadowCasterBias
   texture: TextureId
   arrayView: TextureViewId
   layerViews: List(TextureViewId)
@@ -100,8 +128,13 @@ type ShadowCache {
 }
 
 func createShadowCache() ret ShadowCache {
+  ret createShadowCacheWith(casterBias: frontFaceShadowCasterBias())
+}
+
+func createShadowCacheWith(casterBias: view ShadowCasterBias) ret ShadowCache {
   ret ShadowCache {
     objectsMade: false
+    casterBias: casterBias
     texture: noTextureId()
     arrayView: noTextureViewId()
     layerViews: fillTextureViewIds(count: shadowMaxCascades)
@@ -155,7 +188,7 @@ func shadowTargetsReady(shadow: view ShadowCache, resources: view GpuResources) 
   ret isValidBuffer(resources: resources, id: shadow.frameUniform)
 }
 
-func casterPipelineSpec(skinned: copy Bool) ret DepthPipelineSpec {
+func casterPipelineSpec(skinned: copy Bool, bias: view ShadowCasterBias) ret DepthPipelineSpec {
   var attributes: List(VertexAttributeSpec) = List.create(VertexAttributeSpec, cap: 3)
   attributes.add(value: { format: WGPUVertexFormat_Float32x3, offset: 0, location: 0 })
   var stride: Int = 32
@@ -169,9 +202,9 @@ func casterPipelineSpec(skinned: copy Bool) ret DepthPipelineSpec {
     attributes: own attributes
     fragmentEntry: ""
     depthFormat: WGPUTextureFormat_Depth32Float
-    cullMode: WGPUCullMode_Front
-    depthBias: 2
-    depthBiasSlopeScale: 2.5
+    cullMode: bias.cullMode
+    depthBias: bias.depthBias
+    depthBiasSlopeScale: bias.slopeScale
   }
 }
 
@@ -187,7 +220,7 @@ func ensureShadowObjects(shadow: mod ShadowCache, resources: mod GpuResources) {
     resources: resources
     shader: staticShader
     vertexEntry: "vs"
-    spec: casterPipelineSpec(skinned: false)
+    spec: casterPipelineSpec(skinned: false, bias: shadow.casterBias)
   ) {
     shadow.staticPipeline = pipeline
   }
@@ -195,7 +228,7 @@ func ensureShadowObjects(shadow: mod ShadowCache, resources: mod GpuResources) {
     resources: resources
     shader: skinnedShader
     vertexEntry: "vs"
-    spec: casterPipelineSpec(skinned: true)
+    spec: casterPipelineSpec(skinned: true, bias: shadow.casterBias)
   ) {
     shadow.skinPipeline = pipeline
   }
@@ -771,5 +804,6 @@ func shadowShutdown(shadow: mod ShadowCache, resources: mod GpuResources) {
   retireBuffer(resources: resources, id: shadow.frameUniform)
   retireRenderPipeline(resources: resources, id: shadow.staticPipeline)
   retireRenderPipeline(resources: resources, id: shadow.skinPipeline)
-  shadow = createShadowCache()
+  let casterBias: ShadowCasterBias = shadow.casterBias
+  shadow = createShadowCacheWith(casterBias: casterBias)
 }
