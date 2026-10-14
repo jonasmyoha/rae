@@ -341,7 +341,7 @@ EMSCRIPTEN_KEEPALIVE void rae_browser_request_stop(void) {
 }
 #endif
 
-/* Defined in runtime_gpu2d_frame.c / runtime_gpu3d.c: has any frame reached the
+/* Set by runtime_gpu2d_frame.c / runtime_gpu3d_gbuffer.c: has any frame reached the
  * surface yet? Used only to explain a headless run that drew nothing. */
 extern rae_Bool rae_frame_presented_any(void);
 

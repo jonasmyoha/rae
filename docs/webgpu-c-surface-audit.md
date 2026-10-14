@@ -1,5 +1,7 @@
 # WebGPU C-surface audit + gate (#505)
 
+> **2026-10-15 (forward-rae-3):** the C forward renderer described here (`runtime_gpu3d*.c`, `lib/Gpu3d.rae`, `lib/Renderer3d.rae` and their helpers) has been deleted. The forward frame is now Rae over the WebGPU bindings: `lib/RendererForward.rae` and `lib/ForwardMain.rae` (docs/forward-msaa-study.md §6). Read the sections below as history.
+
 Close-out of the WebGPU bindings epic (#496). This enumerates every renderer
 `rae_ext_*` C entry point, classifies each as **permanent ABI/platform** vs
 **renderer logic that belongs in Rae**, records the zero-copy upload path, and

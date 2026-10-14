@@ -2,14 +2,12 @@
 # half of #905 split off): every skinned mesh's vertex/index buffers are
 # manager buffers (a MeshStore over the 20-float skinned layout) and the joint
 # PALETTE — the storage buffer every skinned pipeline reads (the deferred skin
-# pass, the skinned shadow casters, the forward skin pass) — is one manager
+# pass, the skinned shadow casters) — is one manager
 # BufferId created on the first upload. Was C's g3d_skin_vbuf/ibuf/icount +
 # g3d_skin_palette_sbuf (rae_ext_Gpu3d_skinnedMeshCreate / setPalette, the
 # rae_gb_skin_* / rae_g3d_skin_* accessors). The owner is the renderer object
-# (GbufferCache.skins for the deferred frame, Renderer3d.skins for forward):
-# uploads and palette writes go through it, the passes resolve a handle to
-# its buffers here, and the still-C readers (the shadow caster binds, the
-# forward skin bind) BORROW the palette handle per call.
+# (GbufferCache.skins): uploads and palette writes go through it, and the
+# passes resolve a handle to its buffers here.
 #
 # Palette layout (unchanged from C): 12 Floats per joint — three vec4 rows of
 # an affine transform — for up to skinMaxJoints joints per palette and

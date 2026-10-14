@@ -1,5 +1,7 @@
 # Unified 3D renderer — evaluation and architecture
 
+> **2026-10-15 (forward-rae-3):** the C forward renderer described here (`runtime_gpu3d*.c`, `lib/Gpu3d.rae`, `lib/Renderer3d.rae` and their helpers) has been deleted. The forward frame is now Rae over the WebGPU bindings: `lib/RendererForward.rae` and `lib/ForwardMain.rae` (docs/forward-msaa-study.md §6). Read the sections below as history.
+
 Three 3D renderer prototypes were authored independently (one per LLM) and
 landed as examples 107, 108 and 109. This document records the evaluation,
 the unification decision, and what is deliberately *not* unified.

@@ -909,8 +909,7 @@ static bool copy_runtime_assets(const char* out_dir) {
   while ((ent = readdir(runtime_dir)) != NULL) {
     const char* name = ent->d_name;
     size_t len = strlen(name);
-    // Both .c and .h: runtime modules may share a header (runtime_sky_wgsl.h
-    // holds the sky shader source used by the forward and deferred paths), and
+    // Both .c and .h: runtime modules may share a header, and
     // an emitted project that got the .c files but not their headers fails to
     // compile with a missing-include error that points at the copy step rather
     // than at anything the user wrote.

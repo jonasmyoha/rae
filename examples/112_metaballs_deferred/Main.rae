@@ -1,8 +1,8 @@
 # 3D Renderer — PBR scene with persistent ECS/.raescene UI.
 #
-# Frame ownership is explicit: the World3d renders first, Gpu3d.endPass submits
-# without presenting, GPU2D loads the resolved color target and paints UiWorld,
-# then GPU2D presents once. UI hit-testing has priority over orbit input.
+# Frame ownership is explicit: the scene renders first, the composite writes
+# the canvas, GPU2D loads it and paints UiWorld, then presents once. UI hit-testing has priority
+# over orbit input.
 #
 # RESPONSIVE, NOT SCALED: the design resolution tracks the window's logical
 # size, so the design->pixel transform is identity. Fonts keep their
@@ -30,7 +30,6 @@ import SdfText
 import RenderSystem
 import Sdl3
 import Vec3
-open Gpu3d
 open RendererDeferred
 open gpu/GpuResources
 open Sky
@@ -803,11 +802,7 @@ func main() ret Int {
           }
         }
         if tag is RenderTag.gbuffer {
-          # App-owned so the ACTIVE scene is the one submitted. Qualified
-          # calls: gpu3d and gbuffer both export beginPass/endPass and this
-          # example opens both, so an unqualified call silently picks the
-          # forward path's — which leaves the G-buffer unsubmitted and
-          # renders a black frame with a working UI (found in 113).
+          # App-owned so the ACTIVE scene is the one submitted.
           # #912: the geometry pass draws from the renderer-owned GPU manager.
           ensureRendererResources(renderer: renderer)
           if let resources: mod GpuResources => renderer.gpuResources {

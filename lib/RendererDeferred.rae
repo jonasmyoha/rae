@@ -1,12 +1,10 @@
 # renderer_deferred — the deferred frame, declared as a render graph.
 #
-# Track B (#356). This is NOT a port of the forward prototype in
-# renderer3d.rae. That one computes lighting inside each material's
-# fragment shader, so shading cost scales with (objects x lights) and every
-# lit pixel is shaded whether or not it survives depth. The deferred frame
-# separates the two: the G-buffer pass writes surface attributes once per
-# visible pixel, and lighting reads them once per pixel regardless of how
-# many objects contributed.
+# Track B (#356). A forward frame computes lighting inside each material's
+# fragment shader (RendererForward / ForwardMain do, with this renderer's
+# post passes). The deferred frame separates the two: the G-buffer pass
+# writes surface attributes once per visible pixel, and lighting reads them
+# once per pixel regardless of how many objects contributed.
 #
 # The frame is:
 #
@@ -31,7 +29,6 @@
 # value and modelMatrix no longer allocates, so a frame's per-object data
 # path touches the allocator zero times.
 import Gpu2d
-import Gpu3d
 open Rendergraph
 open Math3d
 open Scene3d
@@ -67,8 +64,7 @@ open RendererForward
 # ----- pass tags ------------------------------------------------------
 # Which pass of the deferred frame this is. An enum (not Int consts) so the
 # render-graph walk can `match` on it exhaustively — adding a pass then forces
-# every walker to handle it. The enum namespaces the names too, so there is no
-# longer a clash with renderer3d's forward tags (the old `…D` suffix's job).
+# every walker to handle it. The enum namespaces the names too.
 enum RenderTag {
   gbuffer
   depthPyramid
@@ -298,7 +294,7 @@ func setShadowAmbient(renderer: mod DeferredRenderer, strength: copy Float) pub 
 # renderer's MeshStore.
 func renderSceneShadowWorldWith(renderer: mod DeferredRenderer, world: view World3d) pub {
   if let resources: view GpuResources => renderer.gpuResources {
-    Gpu3d.renderSceneShadowWorld(
+    ShadowMaps.renderSceneShadowWorld(
       shadow: renderer.passes.shadow
       meshes: renderer.passes.gbuffer.meshes
       resources: resources
@@ -403,7 +399,7 @@ func updateMeshVerts(
 }
 
 # Retire every manager object the passes hold and drop the manager. Call BEFORE
-# Gbuffer.shutdownAll() / Gpu3d.shutdown(): the adopted C-owned handles must
+# Gbuffer.shutdownAll(): the adopted C-owned handles must
 # still be valid while their bind groups are released, and the device must
 # still be up for the releases. The geometry frame (#906) drains its in-flight
 # submissions and retires the targets first; C forgets the borrowed views.
@@ -549,8 +545,8 @@ func describeDeferred(renderer: view DeferredRenderer) pub ret String {
 # ordering here to disagree with the declaration: adding an edge in
 # createDeferredRenderer changes what runs when, and this function does not
 # need editing for that to take effect. Rae has no first-class function
-# references, so dispatch is a tag switch, the same pattern renderer3d and
-# lib/ui/registry.rae use; the graph never inspects a tag, so that
+# references, so dispatch is a tag switch, the same pattern
+# lib/ui/registry.rae uses; the graph never inspects a tag, so that
 # constraint stays out of it.
 
 # ----- app-driven dispatch (#389) -------------------------------------
@@ -558,7 +554,6 @@ func describeDeferred(renderer: view DeferredRenderer) pub ret String {
 # UI layer. So an app that has a UI walks the DERIVED order itself and
 # dispatches every non-UI tag through the helper below — order still comes
 # from the graph; only the switch moves to where the UI knowledge is.
-# Same seam renderer3d.rae opened for the forward frame.
 func deferredOrderLength(renderer: view DeferredRenderer) pub ret Int {
   ret renderer.graph.order.length
 }

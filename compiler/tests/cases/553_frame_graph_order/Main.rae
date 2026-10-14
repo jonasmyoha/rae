@@ -1,26 +1,24 @@
 # #332: the frame's execution order is DERIVED from declared resource
 # dependencies, not from the order passes were added.
 #
-# renderer3d declares `present` BEFORE `scene3d`, but present reads the
-# colour target scene3d writes, so the graph must order them scene->present.
-# If this ever prints present first, the port has silently regressed to
-# insertion order.
-open Rendergraph
-open Renderer3d
+# The forward renderer (lib/RendererForward, since forward-rae-3 the only
+# forward frame) declares `present` FIRST and `shadow` last, but every pass
+# reads what an earlier one writes, so the graph must order them shadow ->
+# forward -> bloom -> composite -> present. If this ever prints present
+# first, the graph has silently regressed to insertion order.
+open RendererDeferred
+open RendererForward
 
 func main() {
-  var r: Renderer3d = createRenderer3d()
-  let st: Int = compileRenderer(r: r)
-  log("status={statusName(status: st)}")
-  log("{describeFrame(r: r)}")
+  var renderer: DeferredRenderer = createForwardRenderer()
+  log("status={compileDeferred(renderer: renderer)}")
+  log("{describeDeferred(renderer: renderer)}")
 
-  # Three-pass frame with a load-preserving UI overlay. Declared
-  # present -> ui -> scene, i.e. exactly backwards. The overlay MODIFIES
-  # the colour target (read-modify-write), which must order it after the
-  # scene that writes it and before the present that reads it — and must
-  # NOT be rejected as a second writer.
-  var ru: Renderer3d = createRenderer3dWithUi()
-  let stu: Int = compileRenderer(r: ru)
-  log("ui-status={statusName(status: stu)}")
-  log("{describeFrame(r: ru)}")
+  # With a load-preserving UI overlay. The overlay MODIFIES the colour target
+  # (read-modify-write), which must order it after the composite that writes
+  # it and before the present that reads it, and must NOT be rejected as a
+  # second writer.
+  var withUi: DeferredRenderer = createForwardRendererWithUi()
+  log("ui-status={compileDeferred(renderer: withUi)}")
+  log("{describeDeferred(renderer: withUi)}")
 }

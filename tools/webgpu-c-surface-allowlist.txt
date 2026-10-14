@@ -103,13 +103,13 @@
 # (#830's rae_gb_water_set / _get / _release slot store was REMOVED by #873: water's GPU objects are
 #   typed IDs in the App-owned gpu/GpuResources manager; the gbuffer frame resources it draws with are
 #   adopted externals, not C slots.)
+# (forward-rae-3, 2026-10-15: the LEGACY forward renderer is deleted — runtime_gpu3d.c and its
+#   _shaders/_sdf/_sky/_skin/_ssao/_shadow/_stubs files, the shared runtime_sky_state.* and
+#   runtime_sky_wgsl.h, and every rae_g3d_* accessor. The forward frame is Rae over the bindings
+#   (lib/ForwardMain.rae). rae_ext_Gpu3d_{shutdown,skinDrawCount,skinFrameBegin,skinShutdown,
+#   skyHosekPush} are gone (allowlist -5).)
 # present: no-UI final blit to the swapchain; reached from Rae as
 # gbuffer.present(canvas:) -> presentFrame(canvas:) -> renderDeferredPass. Platform copy-to-drawable
 # of the CANVAS-owned offscreen texture it is handed (#920); C owns nothing of the target.
 rae_ext_Gbuffer_present
 rae_ext_Gbuffer_shutdown
-rae_ext_Gpu3d_shutdown
-rae_ext_Gpu3d_skinDrawCount
-rae_ext_Gpu3d_skinFrameBegin
-rae_ext_Gpu3d_skinShutdown
-rae_ext_Gpu3d_skyHosekPush

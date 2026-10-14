@@ -6,11 +6,8 @@
 # - SDF pass queries each per-cluster tag (#734) with tagged over the sdfs
 #   table, packs that cluster's spheres, and issues one metaball draw.
 #
-# The low-level draw primitives (Gbuffer.drawInstance / Gbuffer.drawMetaballs for
-# the deferred G-buffer, Gpu3d.drawShadowCaster / Gpu3d.shadowMetaballs for the
-# shadow map) stay in lib and are called QUALIFIED — gpu3d and gbuffer both
-# export drawInstance/drawMetaballs (forward vs deferred), so an unqualified call
-# would silently pick the forward path.
+# The low-level draw primitives (Gbuffer.drawInstance / GbufferSdf.drawMetaballs
+# for the G-buffer, shadowMetaballsWith for the shadow map) stay in lib.
 #
 # Parity with the old path is by construction: it reads the same World3d data
 # (#733 proved the derived Scene3d matched it) grouped by the same tags (#734
@@ -21,7 +18,6 @@
 # is order-independent.
 import Scene3d
 import SceneAnimation
-import Gpu3d
 open RendererDeferred
 open Gbuffer
 open GbufferSdf

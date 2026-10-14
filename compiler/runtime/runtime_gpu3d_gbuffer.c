@@ -1,14 +1,9 @@
 /* gbuffer — the deferred frame's geometry pass (#356, Track B).
  *
- * This is NOT the forward pass with lighting deleted. The forward pass
- * (runtime_gpu3d.c) shades inside the material shader, so its cost scales
- * with objects x lights and every lit pixel is shaded whether or not it
- * survives depth. This pass writes SURFACE ATTRIBUTES only; lighting later
- * reads them once per pixel, independent of how many objects contributed.
- * The two frames share meshes (an asset) and the platform present path (a
- * copy into the drawable) and nothing else — separate pipelines, separate
- * targets, separate uniforms. Mixing them would make the deferred frame's
- * cost model a fiction.
+ * The geometry pass writes SURFACE ATTRIBUTES only; lighting later reads them
+ * once per pixel, independent of how many objects contributed. The pass itself
+ * is Rae (lib/Gbuffer.rae); this file keeps the platform pieces it needs (the
+ * device check, the asset-upload arrays, the present's platform tail).
  *
  * WHAT THE G-BUFFER HOLDS, AND WHY IT IS PACKED THIS WAY (#366). Three
  * targets plus depth, 16 bytes per pixel. Channels are packed across
@@ -154,17 +149,6 @@
  * presentable target's format + view; Rae rebuilds the bind (which samples the
  * G-buffer views) when gb_targets_gen changes. */
 int64_t rae_g2d_format(void)        { return (int64_t)g_g2d_fmt; }
-
-/* Mirror of the Rae-side `Mat4` layout for the extern boundary; see the
- * long note in runtime_gpu3d.c. The include guard makes this a no-op when
- * that file was compiled into the same TU first. */
-#ifndef RAE_GPU3D_MAT4_FFI
-#define RAE_GPU3D_MAT4_FFI
-typedef struct { float v[16]; } rae_Array_float_16;
-typedef struct rae_Mat4 { rae_Array_float_16 m; } rae_Mat4;
-_Static_assert(sizeof(rae_Mat4) == 16 * sizeof(float),
-               "Rae Mat4 must stay 16 contiguous floats for the gpu3d extern boundary");
-#endif
 
 /* Begin the geometry pass. Takes the view-projection BY VALUE as a Mat4
  * (#354) rather than a packed Float list: the caller builds it from value
@@ -369,12 +353,21 @@ void rae_gb_submit(void* cmd) {
 /* Write one G-buffer channel into the presentable target. */
 /* The debug-view pass moved to Rae (lib/gbuffer_inspector.rae debugView, #503). */
 
-/* Present the composed frame. Shares the platform copy-to-drawable with
- * the forward frame — see rae_g3d_present_offscreen. Reached from Rae as
- * gbuffer.present() -> presentFrame() -> renderDeferredPass (no-UI present). */
+/* Present the composed frame's platform tail: advance the virtual clock, mark
+ * that a frame exists (headless never presents) and take the headless
+ * screenshot. The drawable is acquired and presented by Rae afterwards
+ * (lib/gpu/Surface.rae); no surface simply acquires nothing. Reached from Rae
+ * as gbuffer.present() -> presentFrame() -> renderDeferredPass (no-UI present). */
 void rae_ext_Gbuffer_present(void* texture, int64_t width, int64_t height) {
     rae_g2d_tick_virtual_clock();
-    rae_g3d_present_offscreen((WGPUTexture)texture, (int)width, (int)height);
+    WGPUTexture tex = (WGPUTexture)texture;
+    if (!tex) return;
+    rae_wgpu_report_periodic();
+    g_rae_presented_any = 1;
+    if (g_sdl_headless_ms > 0 || g_sdl_headless_frames > 0) {
+        const char* shot = getenv("RAE_GPU2D_SCREENSHOT");
+        if (shot) rae_g2d_save_screenshot(shot, tex, (int)width, (int)height);
+    }
 }
 
 /* #906: C owns nothing of the geometry frame any more; this forgets the

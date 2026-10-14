@@ -29,7 +29,6 @@ import Gpu2d
 import Vec3
 open Scene3d
 open ecs/Entity
-open Gpu3d
 open RendererDeferred
 open Math3d
 open Mesh3d
@@ -244,7 +243,7 @@ func main() ret Int {
     }
   }
   shutdownDeferredRenderer(renderer: renderer)  # #904: the renderer-owned GPU manager, before the C shutdown
-  shutdown()
+  Gbuffer.shutdown()
   Gpu2d.closeWindow()
   ret 0
 }
