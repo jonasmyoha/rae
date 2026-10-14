@@ -218,12 +218,12 @@ func buildForwardGraph(withUi: view Bool) ret DeferredRenderer {
   }
 }
 
-# The forward pass from a World3d: the static meshes of the world's mesh
-# query, shaded in one 4x MSAA pass (renderDeferredPassWorld calls this for
-# RenderTag.forward)
-func renderForwardPassWorld(
+# Open the forward main pass for this frame (the RenderTag.forward step of an
+# app that draws its own scene): then draw through renderer.passes.gbuffer as
+# for the G-buffer (GbufferWorld.renderSceneWorld, drawInstance, drawRecords,
+# GbufferSdf.drawMetaballs) and close it with endForwardPass.
+func beginForwardPass(
   renderer: mod DeferredRenderer
-  world: view World3d
   camera: view Camera3d
   light: view Light3d
   aspect: view Float
@@ -245,15 +245,42 @@ func renderForwardPassWorld(
       sky: sky
       aspect: aspect
     )
-    GbufferWorld.renderSceneWorld(
-      cache: renderer.passes.gbuffer
-      resources: resources
-      world: world
-    )
+  }
+}
+
+# Draw the sky behind the scene and submit the forward pass
+func endForwardPass(renderer: mod DeferredRenderer) {
+  if let resources: mod GpuResources => renderer.gpuResources {
     endForwardMain(
       forward: renderer.passes.forward
       gbuffer: renderer.passes.gbuffer
       resources: resources
     )
   }
+}
+
+# The forward pass from a World3d: the static meshes of the world's mesh
+# query, shaded in one 4x MSAA pass (renderDeferredPassWorld calls this for
+# RenderTag.forward)
+func renderForwardPassWorld(
+  renderer: mod DeferredRenderer
+  world: view World3d
+  camera: view Camera3d
+  light: view Light3d
+  aspect: view Float
+) {
+  beginForwardPass(
+    renderer: renderer
+    camera: camera
+    light: light
+    aspect: aspect
+  )
+  if let resources: mod GpuResources => renderer.gpuResources {
+    GbufferWorld.renderSceneWorld(
+      cache: renderer.passes.gbuffer
+      resources: resources
+      world: world
+    )
+  }
+  endForwardPass(renderer: renderer)
 }

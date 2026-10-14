@@ -15,8 +15,9 @@
 #   (deferred_shade.wgsl), so both paths light a surface the same way; the
 #   light uniform and the sun cascades are the deferred ones.
 # - No SSAO: the depth never leaves the tile. Skinned meshes, terrain,
-#   metaballs, sprites and grass have no forward material yet, so a forward
-#   frame skips them (GbufferCache.forwardFrame).
+#   sprites and grass have no forward material yet, so a forward frame skips
+#   them (GbufferCache.forwardFrame). The metaballs have one (forward_sdf.wgsl,
+#   forward-rae-2): drawMetaballs draws them with sdfPipeline.
 #
 # The draws are the G-buffer pass's (the mesh store, the draw records, the
 # World3d query): a forward frame opens the GbufferCache's pass on these
@@ -26,6 +27,7 @@ open Math3d
 open Scene3d
 open Sky
 open Gbuffer
+open GbufferSdf
 open GbufferTargets
 open GbufferPasses
 open ShadowMaps
@@ -56,6 +58,7 @@ type ForwardMainCache {
   pipelineFormat: Int32  # the lit format the pipelines were made for
   staticPipeline: RenderPipelineId
   skyPipeline: RenderPipelineId
+  sdfPipeline: RenderPipelineId  # the metaballs (drawMetaballs uses it in a forward frame)
   staticBind: BindGroupId
   skyBind: BindGroupId
   bindTargetsGen: Int  # the post targets' and cascades' generations the binds point at
@@ -74,6 +77,7 @@ func createForwardMainCache() ret ForwardMainCache {
     pipelineFormat: 0
     staticPipeline: noRenderPipelineId()
     skyPipeline: noRenderPipelineId()
+    sdfPipeline: noRenderPipelineId()
     staticBind: noBindGroupId()
     skyBind: noBindGroupId()
     bindTargetsGen: -1
@@ -120,6 +124,26 @@ func ensureForwardPipelines(
       "lib/forward_static.wgsl"
     ])
   }
+  var sdfShader: Shader = shader(files: [
+    "lib/precision_f32.wgsl"
+    "lib/gbuffer_octahedral.wgsl"
+    "lib/sky_hosek.wgsl"
+    "lib/deferred_uniforms.wgsl"
+    "lib/deferred_shade.wgsl"
+    "lib/sdf_surface.wgsl"
+    "lib/forward_sdf.wgsl"
+  ])
+  if deviceHasShaderF16() {
+    sdfShader = shader(files: [
+      "lib/precision_f16.wgsl"
+      "lib/gbuffer_octahedral.wgsl"
+      "lib/sky_hosek.wgsl"
+      "lib/deferred_uniforms.wgsl"
+      "lib/deferred_shade.wgsl"
+      "lib/sdf_surface.wgsl"
+      "lib/forward_sdf.wgsl"
+    ])
+  }
   let skyShader: Shader = shader(
     files: ["lib/sky_hosek.wgsl", "lib/deferred_uniforms.wgsl", "lib/forward_sky.wgsl"]
   )
@@ -138,6 +162,23 @@ func ensureForwardPipelines(
     )
   ) {
     forward.staticPipeline = pipeline
+  }
+  # The metaballs: a fullscreen raymarch that writes its own depth
+  if let pipeline: RenderPipelineId = createRenderPipeline(
+    resources: resources
+    shader: sdfShader
+    vertexEntry: "vs"
+    fragmentEntry: "fs"
+    spec: forwardPipelineSpec(
+      litFormat: litFormat
+      stride: 0
+      attributes: List.create(VertexAttributeSpec, cap: 0)
+      depthWrite: true
+      depthCompare: WGPUCompareFunction_Greater
+      cullMode: WGPUCullMode_None
+    )
+  ) {
+    forward.sdfPipeline = pipeline
   }
   # The background: a far-plane triangle where the depth is still clear
   if let pipeline: RenderPipelineId = createRenderPipeline(
@@ -242,7 +283,7 @@ func ensureForwardTargets(
 func ensureForwardBinds(
   forward: mod ForwardMainCache
   resources: mod GpuResources
-  gbuffer: view GbufferCache
+  gbuffer: mod GbufferCache
   targets: view DeferredTargets
   shadow: view ShadowCache
 ) {
@@ -253,7 +294,15 @@ func ensureForwardBinds(
     let skyRetired: Bool = retireBindGroup(resources: resources, id: forward.skyBind)
     forward.staticBind = noBindGroupId()
     forward.skyBind = noBindGroupId()
+    # The metaballs' forward binds add the same lighting inputs
+    retireSdfForwardBinds(sdf: gbuffer.sdf, resources: resources)
+    gbuffer.sdf.forwardInputs.clear()
+    gbuffer.sdf.forwardInputs.add(value: bufferRef(id: targets.lightUniform))
+    gbuffer.sdf.forwardInputs.add(value: bufferRef(id: shadow.frameUniform))
+    gbuffer.sdf.forwardInputs.add(value: textureViewRef(id: shadow.arrayView))
+    gbuffer.sdf.forwardInputs.add(value: samplerRef(id: shadow.sampler))
   }
+  gbuffer.sdf.forwardPipeline = forward.sdfPipeline
   if not bindGroupIsUsable(resources: resources, id: forward.staticBind) {
     var entries: List(ResourceRef) = List.create(ResourceRef, cap: 6)
     entries.add(value: bufferRef(id: gbuffer.frameUniform))
@@ -437,10 +486,12 @@ func retireForwardPipelines(forward: mod ForwardMainCache, resources: mod GpuRes
   let skyBindRetired: Bool = retireBindGroup(resources: resources, id: forward.skyBind)
   let staticRetired: Bool = retireRenderPipeline(resources: resources, id: forward.staticPipeline)
   let skyRetired: Bool = retireRenderPipeline(resources: resources, id: forward.skyPipeline)
+  let sdfRetired: Bool = retireRenderPipeline(resources: resources, id: forward.sdfPipeline)
   forward.staticBind = noBindGroupId()
   forward.skyBind = noBindGroupId()
   forward.staticPipeline = noRenderPipelineId()
   forward.skyPipeline = noRenderPipelineId()
+  forward.sdfPipeline = noRenderPipelineId()
   forward.bindTargetsGen = -1
   forward.bindShadowGen = -1
   forward.pipelinesMade = false

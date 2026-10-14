@@ -237,3 +237,21 @@ deferred apps, and no example uses it yet.
 
   The metaballs are forward-rae-2, the C forward path's removal forward-rae-3,
   and the walker's forward mode forward-rae-4.
+
+**forward-rae-2 (2026-10-15):**
+
+- **What moved:** 111 draws through this pass, no longer through the C
+  renderer. Its program is 112's, with `createForwardRendererWithUi` and a
+  `RenderTag.forward` step (`beginForwardPass`, the scene's draws,
+  `endForwardPass`).
+- **Metaballs:** they have a forward material (`forward_sdf.wgsl` over the
+  shared raymarch `sdf_surface.wgsl`). `GbufferSdf.drawMetaballs` uses it in a
+  forward frame. Their silhouettes are not antialiased: the raymarch runs once
+  per pixel.
+- **Measured at the default render ceilings:**
+  - Mac: 111 takes 6.1 ms a frame, 112 takes 6.7 ms.
+  - iPhone 15 Pro: 111 takes 28.4 ms (35 fps), 112 takes 32.3 ms (31 fps).
+
+  The table and every difference from 112 are in
+  `examples/111_metaballs_forward/README.md`.
+
