@@ -1,0 +1,450 @@
+# All placement and material choices belong to this example. Shared generators
+# and renderer defaults are untouched. Every visible object is a World3d entity.
+import Math
+open Vec3
+open Noise
+open Mesh3d
+open Scene3d
+open RendererDeferred
+open GroveGeometry
+open ecs/Entity
+
+func paint(red: view Float, green: view Float, blue: view Float) ret Material3d {
+  ret Material3d {
+    baseColor: Vec3.create(x: red, y: green, z: blue)
+    metallic: 0
+    roughness: 1
+    emission: Vec3.create(x: 0, y: 0, z: 0)
+    toon: true
+  }
+}
+
+func place(
+  world: mod World3d
+  renderer: mod DeferredRenderer
+  mesh: view MeshData
+  material: view Material3d
+  position: view Vec3
+  scale: view Vec3
+  rotation: view Float
+) {
+  let handle: MeshHandle = uploadMesh(
+    renderer: renderer
+    verts: mesh.verts
+    vertCount: mesh.vertCount
+    indices: mesh.indices
+  )
+  let entityId: EntityId = world3dAddMeshInstance(
+    world: world
+    mesh: handle
+    material: material
+    position: position
+    rotation: Vec3.create(x: 0, y: 0, z: rotation)
+    scale: scale
+  )
+}
+
+func foliagePaint(species: view Int, tone: view Int) ret Material3d {
+  let variation: Float = 0.85 + tone.toFloat() * 0.13
+  if species is 0 {
+    ret paint(red: 0.86 * variation, green: 0.39 * variation, blue: 0.022)
+  }
+  if species is 1 {
+    ret paint(red: 0.72 * variation, green: 0.13 * variation, blue: 0.025)
+  }
+  if species is 2 {
+    ret paint(red: 0.28 * variation, green: 0.42 * variation, blue: 0.045)
+  }
+  ret paint(red: 0.33 * variation, green: 0.035 * variation, blue: 0.022)
+}
+
+func plantTree(
+  world: mod World3d
+  renderer: mod DeferredRenderer
+  position: view Vec3
+  height: view Float
+  width: view Float
+  seed: view Int
+  species: view Int
+) {
+  let wood: MeshData = treeWood(seed: seed, height: height, width: width)
+  place(
+    world: world
+    renderer: renderer
+    mesh: wood
+    material: paint(red: 0.16, green: 0.073, blue: 0.039)
+    position: position
+    scale: Vec3.create(x: 1, y: 1, z: 1)
+    rotation: 0
+  )
+  loop var tone: Int = 0, tone < 3, ++tone {
+    let leaves: MeshData = treeLeaves(
+      seed: seed
+      height: height
+      width: width
+      tone: tone
+    )
+    place(
+      world: world
+      renderer: renderer
+      mesh: leaves
+      material: foliagePaint(species: species, tone: tone)
+      position: position
+      scale: Vec3.create(x: 1, y: 1, z: 1)
+      rotation: 0
+    )
+  }
+}
+
+func pathCenter(distance: view Float) ret Float {
+  ret Math.sin(x: distance * 0.27) * 1.8 + 0.8
+}
+
+func groundHeight(x: view Float, y: view Float) ret Float {
+  let radius: Float = Math.sqrt(x: x * x / 190.44 + (y - 2) * (y - 2) / 156.25)
+  let base: Float = 0.12 * Math.sin(x: x * 0.36) * Math.sin(x: y * 0.3)
+  if radius > 0.9167 {
+    ret base * (1 - (radius - 0.9167) * 12) - 0.35 * (radius - 0.9167) * 12
+  }
+  ret base
+}
+
+func islandPoint(ring: view Int, index: view Int) ret Vec3 {
+  let angle: Float = index.toFloat() * 6.2831853 / 128
+  let fraction: Float = ring.toFloat() / 12
+  let x: Float = Math.cos(x: angle) * 13.8 * fraction
+  let y: Float = 2.0 + Math.sin(x: angle) * 12.5 * fraction
+  var height: Float = groundHeight(x: x, y: y)
+  if ring is 12 {
+    height = -0.35
+  }
+  ret Vec3.create(x: x, y: y, z: height)
+}
+
+func gardenGround() ret MeshData {
+  var mesh: MeshData = emptyMesh()
+  loop var ring: Int = 0, ring < 12, ++ring {
+    loop var i: Int = 0, i < 128, ++i {
+      let first: Vec3 = islandPoint(ring: ring, index: i)
+      let second: Vec3 = islandPoint(ring: ring + 1, index: i)
+      let third: Vec3 = islandPoint(ring: ring, index: i + 1)
+      let fourth: Vec3 = islandPoint(ring: ring + 1, index: i + 1)
+      face(
+        mesh: mesh
+        first: first
+        second: second
+        third: third
+      )
+      face(
+        mesh: mesh
+        first: third
+        second: second
+        third: fourth
+      )
+    }
+  }
+  ret mesh
+}
+
+func gardenEdge() ret MeshData {
+  var mesh: MeshData = emptyMesh()
+  loop var i: Int = 0, i < 128, ++i {
+    let top: Vec3 = islandPoint(ring: 12, index: i)
+    let next: Vec3 = islandPoint(ring: 12, index: i + 1)
+    let bottom: Vec3 = Vec3.create(x: top.x * 0.99, y: top.y, z: -1.15)
+    let bottomNext: Vec3 = Vec3.create(x: next.x * 0.99, y: next.y, z: -1.15)
+    face(
+      mesh: mesh
+      first: top
+      second: bottom
+      third: next
+    )
+    face(
+      mesh: mesh
+      first: next
+      second: bottom
+      third: bottomNext
+    )
+  }
+  ret mesh
+}
+
+func gardenPath() ret MeshData {
+  var mesh: MeshData = emptyMesh()
+  loop var i: Int = 0, i < 48, ++i {
+    let front: Float = i.toFloat() * 0.5 - 10.4
+    let back: Float = front + 0.5
+    let left: Float = pathCenter(distance: front) - 0.9
+    let right: Float = pathCenter(distance: back) - 0.9
+    let first: Vec3 = Vec3.create(x: left, y: front, z: groundHeight(x: left, y: front) + 0.025)
+    let second: Vec3 = Vec3.create(
+      x: left + 1.8
+      y: front
+      z: groundHeight(x: left + 1.8, y: front) + 0.025
+    )
+    let third: Vec3 = Vec3.create(x: right, y: back, z: groundHeight(x: right, y: back) + 0.025)
+    let fourth: Vec3 = Vec3.create(
+      x: right + 1.8
+      y: back
+      z: groundHeight(x: right + 1.8, y: back) + 0.025
+    )
+    face(
+      mesh: mesh
+      first: first
+      second: second
+      third: third
+    )
+    face(
+      mesh: mesh
+      first: third
+      second: second
+      third: fourth
+    )
+  }
+  ret mesh
+}
+
+func stoneSize(index: view Int) ret Float {
+  if index < 5 {
+    ret 1.25 + hash2(x: index, y: 2, seed: 891) * 0.55
+  }
+  ret 0.35 + hash2(x: index, y: 1, seed: 891) * 0.55
+}
+
+func stonePosition(index: view Int) ret Vec3 {
+  let angle: Float = index.toFloat() * 2.39996
+  var x: Float = -4.6 + Math.cos(x: angle) * 3.0
+  var y: Float = -2.8 + Math.sin(x: angle) * 1.8
+  if index < 5 {
+    x = -5.5 + index.toFloat() * 0.65
+    y = -1.7 + Math.sin(x: angle) * 0.55
+  }
+  ret Vec3.create(x: x, y: y, z: groundHeight(x: x, y: y) - 0.08)
+}
+
+# Generation-time exclusion uses the same placements as the stone entities.
+# No grass can poke through a slab when the camera moves closer.
+func insideStone(x: view Float, y: view Float) ret Bool {
+  loop var i: Int = 0, i < 22, ++i {
+    let position: Vec3 = stonePosition(index: i)
+    let size: Float = stoneSize(index: i)
+    let angle: Float = i.toFloat() * 2.39996
+    let offsetX: Float = x - position.x
+    let offsetY: Float = y - position.y
+    let localX: Float = (offsetX * Math.cos(x: angle) + offsetY * Math.sin(x: angle)) / (size * 1.65)
+    let localY: Float = (offsetY * Math.cos(x: angle) - offsetX * Math.sin(x: angle)) / (size * 1.18)
+    if localX * localX + localY * localY < 1 {
+      ret true
+    }
+  }
+  ret false
+}
+
+# Clumped, broad grass blades. Sparse bare ground is intentional; the path
+# stays clear. One mesh per colour keeps the draw count independent of blades.
+func meadow(tone: view Int) ret MeshData {
+  var mesh: MeshData = emptyMesh()
+  loop var i: Int = 0, i < 5500, ++i {
+    if i % 3 is not tone {
+      continue
+    }
+    let x: Float = hash2(x: i, y: 12, seed: 761) * 28 - 14
+    let y: Float = hash2(x: i, y: 13, seed: 761) * 23 - 10
+    if x * x / 169 + (y - 2) * (y - 2) / 121 > 0.93 {
+      continue
+    }
+    if Math.abs(value: x - pathCenter(distance: y)) < 1.0 {
+      continue
+    }
+    if insideStone(x: x, y: y) {
+      continue
+    }
+    let height: Float = 0.12 + hash2(x: i, y: 14, seed: 761) * 0.28
+    loop var blade: Int = 0, blade < 4, ++blade {
+      let angle: Float = blade.toFloat() * 2.4 + i.toFloat()
+      let side: Vec3 = Vec3.create(
+        x: Math.cos(x: angle) * 0.045
+        y: Math.sin(x: angle) * 0.045
+        z: 0
+      )
+      let base: Vec3 = Vec3.create(x: x, y: y, z: groundHeight(x: x, y: y))
+      let tip: Vec3 = Vec3.create(
+        x: x + Math.sin(x: angle) * height * 0.5
+        y: y + Math.cos(x: angle) * height * 0.5
+        z: base.z + height
+      )
+      face(
+        mesh: mesh
+        first: vsub(a: base, b: side)
+        second: vadd(a: base, b: side)
+        third: tip
+      )
+      face(
+        mesh: mesh
+        first: vadd(a: base, b: side)
+        second: vsub(a: base, b: side)
+        third: tip
+      )
+    }
+  }
+  ret mesh
+}
+
+func buildGrove(renderer: mod DeferredRenderer) ret World3d {
+  var world: World3d = create()
+  let origin: Vec3 = Vec3.create(x: 0, y: 0, z: 0)
+  let unit: Vec3 = Vec3.create(x: 1, y: 1, z: 1)
+  let backdrop: MeshData = makePlane(size: 1000, segments: 1)
+  place(
+    world: world
+    renderer: renderer
+    mesh: backdrop
+    material: paint(red: 0.11, green: 0.25, blue: 0.29)
+    position: Vec3.create(x: 0, y: 0, z: -1.2)
+    scale: unit
+    rotation: 0
+  )
+  let edge: MeshData = gardenEdge()
+  place(
+    world: world
+    renderer: renderer
+    mesh: edge
+    material: paint(red: 0.20, green: 0.16, blue: 0.085)
+    position: origin
+    scale: unit
+    rotation: 0
+  )
+  let ground: MeshData = gardenGround()
+  place(
+    world: world
+    renderer: renderer
+    mesh: ground
+    material: paint(red: 0.13, green: 0.23, blue: 0.055)
+    position: origin
+    scale: unit
+    rotation: 0
+  )
+  let path: MeshData = gardenPath()
+  place(
+    world: world
+    renderer: renderer
+    mesh: path
+    material: paint(red: 0.48, green: 0.32, blue: 0.16)
+    position: origin
+    scale: unit
+    rotation: 0
+  )
+  loop var tone: Int = 0, tone < 3, ++tone {
+    let grass: MeshData = meadow(tone: tone)
+    place(
+      world: world
+      renderer: renderer
+      mesh: grass
+      material: paint(
+        red: 0.15 + tone.toFloat() * 0.035
+        green: 0.25 + tone.toFloat() * 0.035
+        blue: 0.07
+      )
+      position: origin
+      scale: unit
+      rotation: 0
+    )
+  }
+  plantTree(
+    world: world
+    renderer: renderer
+    position: Vec3.create(x: -4.8, y: 2, z: 0)
+    height: 4.7
+    width: 2.05
+    seed: 501
+    species: 0
+  )
+  plantTree(
+    world: world
+    renderer: renderer
+    position: Vec3.create(x: 4.2, y: 4, z: 0)
+    height: 5.8
+    width: 1.8
+    seed: 605
+    species: 1
+  )
+  plantTree(
+    world: world
+    renderer: renderer
+    position: Vec3.create(x: -0.9, y: 8, z: 0)
+    height: 6.4
+    width: 1.7
+    seed: 710
+    species: 0
+  )
+  plantTree(
+    world: world
+    renderer: renderer
+    position: Vec3.create(x: -8.1, y: 7.5, z: 0)
+    height: 4.2
+    width: 1.8
+    seed: 301
+    species: 3
+  )
+  plantTree(
+    world: world
+    renderer: renderer
+    position: Vec3.create(x: 7.5, y: 9, z: 0)
+    height: 5.2
+    width: 2.1
+    seed: 903
+    species: 2
+  )
+  plantTree(
+    world: world
+    renderer: renderer
+    position: Vec3.create(x: 5.8, y: -1.8, z: 0)
+    height: 2.6
+    width: 1.15
+    seed: 217
+    species: 0
+  )
+  # A low outcrop, with large flat slabs and a skirt of smaller fallen stones.
+  loop var i: Int = 0, i < 22, ++i {
+    let seed: Int = 230 + i * 17
+    let rock: MeshData = stone(seed: seed)
+    let angle: Float = i.toFloat() * 2.39996
+    let size: Float = stoneSize(index: i)
+    let position: Vec3 = stonePosition(index: i)
+    let tint: Float = hash2(x: i, y: 4, seed: 891) * 0.07
+    place(
+      world: world
+      renderer: renderer
+      mesh: rock
+      material: paint(red: 0.14 + tint, green: 0.17 + tint, blue: 0.145 + tint)
+      position: position
+      scale: Vec3.create(x: size * 1.4, y: size, z: size * 0.65)
+      rotation: angle
+    )
+  }
+  # Low scarlet shrubs balance the trees and tie the stone group into the grove.
+  loop var i: Int = 0, i < 7, ++i {
+    var shrub: MeshData = emptyMesh()
+    crown(
+      mesh: shrub
+      center: Vec3.create(x: 0, y: 0, z: 0.45)
+      radius: Vec3.create(x: 0.85, y: 0.65, z: 0.6)
+      seed: 913 + i * 47
+      tone: i % 3
+    )
+    place(
+      world: world
+      renderer: renderer
+      mesh: shrub
+      material: foliagePaint(species: 3, tone: i % 3)
+      position: Vec3.create(
+        x: -7.0 + i.toFloat() * 2.2
+        y: 4.5 + Math.sin(x: i.toFloat() * 2) * 2
+        z: 0
+      )
+      scale: unit
+      rotation: 0
+    )
+  }
+  ret world
+}

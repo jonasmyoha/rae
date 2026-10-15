@@ -1581,17 +1581,24 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             ((FAILED++))
           fi
         elif [ "$EXAMPLE_NAME" = "138_procgen_showcase" ]; then
-          # The procgen scene (trees, rocks, the texture swatches over it) must
-          # come out SHADED: thousands of colours, not a swatch strip over black.
-          SCREENSHOT="$TMP_OUT/procgen.bmp"
-          if (cd .. && RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
-             perl -e 'alarm shift; exec @ARGV' 45 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
-             && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=2000 > "$TMP_OUT/screenshot.log" 2>&1; then
-            echo "PASS: $EXAMPLE_NAME (shaded procgen scene + texture swatches)"
+          # Inspect the composed grove and both close-up camera presets.
+          GROVE_OK=1
+          for GROVE_VIEW in grove trees rocks; do
+            SCREENSHOT="$TMP_OUT/procgen-$GROVE_VIEW.bmp"
+            if ! (cd .. && RAE_GROVE_VIEW="$GROVE_VIEW" RAE_DEBUG_OVERLAY=0 \
+               RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=2500 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
+               perl -e 'alarm shift; exec @ARGV' 45 "$TMP_OUT/app") > "$TMP_OUT/render-$GROVE_VIEW.log" 2>&1 \
+               || ! python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=2000 \
+                  > "$TMP_OUT/screenshot-$GROVE_VIEW.log" 2>&1; then
+              GROVE_OK=0
+              cat "$TMP_OUT/render-$GROVE_VIEW.log" "$TMP_OUT/screenshot-$GROVE_VIEW.log" 2>/dev/null | sed 's/^/  /'
+            fi
+          done
+          if [ "$GROVE_OK" = 1 ]; then
+            echo "PASS: $EXAMPLE_NAME (autumn grove, leaf crowns and stone close-up)"
             ((PASSED++))
           else
-            echo "FAIL: $EXAMPLE_NAME (procgen screenshot)"
-            cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" 2>/dev/null | sed 's/^/  /'
+            echo "FAIL: $EXAMPLE_NAME (grove inspection views)"
             ((FAILED++))
           fi
         else
