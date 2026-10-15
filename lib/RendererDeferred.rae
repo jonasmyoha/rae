@@ -290,6 +290,14 @@ func setShadowAmbient(renderer: mod DeferredRenderer, strength: copy Float) pub 
   ShadowMaps.setShadowAmbient(shadow: renderer.passes.shadow, strength: strength)
 }
 
+# Paint the sun cascades for debugging (example 142): each cascade's area is
+# tinted in its own colour (red, green, blue, yellow from the camera out), each
+# shadow map's square is outlined in that colour, and a line in the same colour
+# marks where the cascade ends. The last line is where the shadows stop.
+func setShadowCascadeDebug(renderer: mod DeferredRenderer, on: copy Bool) {
+  renderer.passes.shadow.debugCascades = on
+}
+
 # Every visible mesh of a World3d as a static caster, resolved in this
 # renderer's MeshStore.
 func renderSceneShadowWorldWith(renderer: mod DeferredRenderer, world: view World3d) pub {

@@ -576,6 +576,24 @@ func nodeRectW(world: view UiWorld, nodeId: view String) ret Float {
   ret r.size.x
 }
 
+# The width the layout gave a node in its last pass (its ComputedRect). A
+# node's Rect is only what the scene authored, so a Hug or Fill node's real
+# width is this one; 0 before the first layout.
+func nodeLayoutW(world: view UiWorld, uiSystems: view UiSystems, nodeId: view String) ret Float {
+  let entityId: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
+  if isNone(this: entityId) {
+    ret 0.0
+  }
+  if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) is false {
+    ret 0.0
+  }
+  let computed: view ComputedRect => componentView(
+    this: uiSystems.layout.computedRects
+    entityId: entityId
+  )
+  ret computed.size.x
+}
+
 func nodeRectH(world: view UiWorld, nodeId: view String) ret Float {
   let entityId: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
   if isNone(this: entityId) {

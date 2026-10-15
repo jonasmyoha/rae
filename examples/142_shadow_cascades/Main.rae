@@ -1,0 +1,504 @@
+# Shadow cascades — the debugging ground for the sun's cascaded shadow maps.
+#
+# The cascade debug view (setShadowCascadeDebug) paints each cascade in its own
+# colour, red, green, blue, yellow from the camera out: its area tinted, its
+# shadow map's square outlined, and a line where it ends. The last line is
+# where shadows stop. The camera starts where a game camera follows its player
+# (the orange marker), with the walker's (136) cascade fit, so the place where
+# the first cascade hands over to the second is on screen.
+#
+# The standard editor panel is the chrome. Its top bar has a Cascades button
+# (debug colours on/off). The side panel (menu button) has the fit: shadow
+# distance, split lambda, cascade count, map resolution and back extent, and a
+# readout of the split distances; the shared settings set the sun.
+#
+# For agents, every setting has an environment override, so a headless
+# screenshot can show any fit: RAE_SHADOW_FAR (m), RAE_SHADOW_LAMBDA,
+# RAE_SHADOW_COUNT, RAE_SHADOW_RES, RAE_SHADOW_BACK (m), RAE_SHADOW_DEBUG=0
+# (debug colours off), RAE_SHADOW_HOUR (sun), RAE_SHADOW_VIEW=follow | high |
+# low, RAE_SHADOW_PANEL=1 (side panel open). Every fit is logged as a
+# "[shadow] ..." line with its split distances and texel sizes.
+import Gpu2d
+import Sys
+import Vec3
+open Scene3d
+open RendererDeferred
+open Rendergraph
+open Math3d
+open Shadow3d
+open ShadowScene
+open app3d/CameraRig
+open app3d/ControlPanel
+open app3d/EditorPanel
+open app3d/SettingsDialog
+
+# The default sun is an afternoon one, so the shadows are long
+const defaultSunHour: Float = 15.5
+
+# defaultLight3d's sun strength (3.2), for the settings' sun of at most 1.0
+const sunStrength: Float = 3.2
+
+# The choices each fit button steps through
+func distanceChoices() ret List(Float) {
+  ret List(Float) {
+    24.0
+    50.0
+    100.0
+    200.0
+    400.0
+  }
+}
+
+func lambdaChoices() ret List(Float) {
+  ret List(Float) { 0.5, 0.75, 0.9, 0.95 }
+}
+
+func countChoices() ret List(Int) {
+  ret List(Int) { 2, 3, 4 }
+}
+
+func resolutionChoices() ret List(Int) {
+  ret List(Int) { 1024, 2048, 4096 }
+}
+
+func backExtentChoices() ret List(Float) {
+  ret List(Float) { 12.0, 50.0, 200.0 }
+}
+
+# The cascade fit the frame uses. The defaults are the walker's (136).
+type CascadeFit {
+  far: Float
+  lambda: Float
+  count: Int
+  resolution: Int
+  backExtent: Float
+  debugColors: Bool
+}
+
+func envFloat(name: view String, fallback: view Float) ret Float {
+  let value: String = Sys.getEnv(name: name)
+  if value.length() > 0 {
+    ret value.toFloat()
+  }
+  ret fallback
+}
+
+func envInt(name: view String, fallback: view Int) ret Int {
+  let value: String = Sys.getEnv(name: name)
+  if value.length() > 0 {
+    ret value.toInt()
+  }
+  ret fallback
+}
+
+func initialFit() ret CascadeFit {
+  ret CascadeFit {
+    far: envFloat(name: "RAE_SHADOW_FAR", fallback: 24.0)
+    lambda: envFloat(name: "RAE_SHADOW_LAMBDA", fallback: 0.75)
+    count: envInt(name: "RAE_SHADOW_COUNT", fallback: 3)
+    resolution: envInt(name: "RAE_SHADOW_RES", fallback: 2048)
+    backExtent: envFloat(name: "RAE_SHADOW_BACK", fallback: 12.0)
+    debugColors: Sys.getEnv(name: "RAE_SHADOW_DEBUG") is not "0"
+  }
+}
+
+# The choice after `current` (the first when it is the last or not a choice)
+func nextFloatChoice(choices: view List(Float), current: view Float) ret Float {
+  loop var i: Int = 0, i < choices.length, ++i {
+    if let choice: Float = choices.copyAt(index: i) {
+      if choice > current + 0.0001 {
+        ret choice
+      }
+    }
+  }
+  ret choices.copyAtFallback(index: 0, fallback: current)
+}
+
+func nextIntChoice(choices: view List(Int), current: view Int) ret Int {
+  loop var i: Int = 0, i < choices.length, ++i {
+    if let choice: Int = choices.copyAt(index: i) {
+      if choice > current {
+        ret choice
+      }
+    }
+  }
+  ret choices.copyAtFallback(index: 0, fallback: current)
+}
+
+# `value` with one decimal
+func oneDecimal(value: view Float) ret String {
+  let tenths: Int = (value * 10.0 + 0.5).toInt()
+  ret "{tenths / 10}.{tenths % 10}"
+}
+
+# `value` with two decimals
+func twoDecimals(value: view Float) ret String {
+  let hundredths: Int = (value * 100.0 + 0.5).toInt()
+  ret "{hundredths / 100}.{hundredths / 10 % 10}{hundredths % 10}"
+}
+
+# The split distances, "2.5 · 6.9 · 24.0 m"
+func splitsText(cascades: view ShadowCascades) ret String {
+  var text: String = ""
+  loop var i: Int = 0, i < cascades.count, ++i {
+    if i > 0 {
+      text = "{text} / "
+    }
+    text = "{text}{oneDecimal(value: cascades.splitFar.copyAtFallback(index: i, fallback: 0.0))}"
+  }
+  ret "{text} m"
+}
+
+# The world size of one shadow texel per cascade, "0.6 · 1.4 · 4.0 cm"
+func texelsText(cascades: view ShadowCascades) ret String {
+  var text: String = ""
+  loop var i: Int = 0, i < cascades.count, ++i {
+    if i > 0 {
+      text = "{text} / "
+    }
+    let texel: Float = cascades.texelWorld.copyAtFallback(index: i, fallback: 0.0)
+    text = "{text}{oneDecimal(value: texel * 100.0)}"
+  }
+  ret "{text} cm"
+}
+
+func fitCascades(
+  fit: view CascadeFit
+  camera: view Camera3d
+  light: view Light3d
+  aspect: view Float
+) ret ShadowCascades {
+  ret fitShadowCascades(
+    camPos: camera.position
+    camTarget: camera.target
+    fovYDeg: camera.fovYDeg
+    aspect: aspect
+    near: camera.nearZ
+    far: fit.far
+    sunDir: light.sunDir
+    count: fit.count
+    resolution: fit.resolution
+    lambda: fit.lambda
+    backExtent: fit.backExtent
+  )
+}
+
+# The fit buttons in the side panel and the Cascades switch in the top bar
+func createFitPanel() ret ControlPanel {
+  var panel: ControlPanel = createControlPanel(hostNodeId: editorAppPanelNodeId)
+  panel.buttonW = 250.0
+  addPanelButton(
+    panel: panel
+    id: "far"
+    label: ""
+    actionId: "shadow.far"
+    group: 0
+  )
+  addPanelButton(
+    panel: panel
+    id: "lambda"
+    label: ""
+    actionId: "shadow.lambda"
+    group: 0
+  )
+  addPanelButton(
+    panel: panel
+    id: "count"
+    label: ""
+    actionId: "shadow.count"
+    group: 0
+  )
+  addPanelButton(
+    panel: panel
+    id: "resolution"
+    label: ""
+    actionId: "shadow.resolution"
+    group: 0
+  )
+  addPanelButton(
+    panel: panel
+    id: "back"
+    label: ""
+    actionId: "shadow.back"
+    group: 0
+  )
+  ret panel
+}
+
+func createDebugBar() ret ControlPanel {
+  var panel: ControlPanel = createControlPanel(hostNodeId: editorAppBarNodeId)
+  panel.buttonW = 110.0
+  addPanelButton(
+    panel: panel
+    id: "debug"
+    label: "Cascades"
+    actionId: "shadow.debug"
+    group: 0
+  )
+  ret panel
+}
+
+type ShadowState {
+  renderer: DeferredRenderer
+  sceneWorld: World3d
+  light: Light3d
+  camera: Camera3d
+  cameraRig: CameraRig
+  editorPanel: EditorPanel
+  fitPanel: ControlPanel
+  debugBar: ControlPanel
+  fit: CascadeFit
+  # The last fit's split distances, logged and shown when they change
+  splits: String
+  lastTime: Float64
+}
+
+# The camera views: `follow` is a game camera behind its player (the rig's
+# defaults, as in 136), `high` looks down the avenue from above, `low` from
+# eye height
+func setShadowView(camera: mod Camera3d, cameraRig: mod CameraRig, viewName: view String) {
+  cameraRig.mode = CameraRigMode.orbit
+  camera.target = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
+  cameraRig.yaw = 0.0
+  cameraRig.orbitPitch = 0.38
+  cameraRig.distance = 12.5
+  if viewName is "high" {
+    cameraRig.orbitPitch = 0.75
+    cameraRig.distance = 60.0
+    camera.target = Vec3.create(x: 0.0, y: 40.0, z: 0.0)
+  } else if viewName is "low" {
+    cameraRig.orbitPitch = 0.08
+    cameraRig.distance = 6.0
+  }
+  snapCameraRigView(rig: cameraRig)
+  applyCameraRig(rig: cameraRig, camera: camera)
+}
+
+func createShadowState() ret ShadowState {
+  Gpu2d.initWindow(width: 1280, height: 800, title: "Rae 3D — shadow cascades")
+  var renderer: DeferredRenderer = createDeferredRendererWithUi()
+  let sceneWorld: World3d = buildShadowScene(renderer: renderer)
+  let fit: CascadeFit = initialFit()
+  setShadowCascadeDebug(renderer: renderer, on: fit.debugColors)
+
+  var settings: SettingsState = createSettingsState(
+    scene: 1
+    sceneCount: 1
+    speed: 1.0
+    toon: false
+    hour: envFloat(name: "RAE_SHADOW_HOUR", fallback: defaultSunHour)
+    skyModel: SettingsSkyModel.preetham
+  )
+  settings.animateTime = false
+  settings.open = Sys.getEnv(name: "RAE_SHADOW_PANEL") is "1"
+  var editorPanel: EditorPanel = createEditorPanel(
+    assetBase: "examples/136_walker_character/assets/"
+    settings: settings
+  )
+  var fitPanel: ControlPanel = createFitPanel()
+  var debugBar: ControlPanel = createDebugBar()
+  let fitBuilt: Bool = buildEditorPanelControls(editorPanel: editorPanel, panel: fitPanel)
+  let barBuilt: Bool = buildEditorPanelControls(editorPanel: editorPanel, panel: debugBar)
+  var light: Light3d = defaultLight3d()
+  applyEditorPanelSettings(
+    editorPanel: editorPanel
+    renderer: renderer
+    light: light
+    sunStrength: sunStrength
+  )
+
+  var camera: Camera3d = defaultCamera3d()
+  camera.farZ = 1500.0
+  var cameraRig: CameraRig = createCameraRig(camera: camera)
+  cameraRig.maxDistance = 200.0
+  setShadowView(camera: camera, cameraRig: cameraRig, viewName: Sys.getEnv(name: "RAE_SHADOW_VIEW"))
+  # The state takes the renderer's GPU handles with it: moved, never copied
+  unsafe {
+    var state: ShadowState = {
+      renderer: own renderer
+      sceneWorld: own sceneWorld
+      light: light
+      camera: camera
+      cameraRig: cameraRig
+      editorPanel: own editorPanel
+      fitPanel: own fitPanel
+      debugBar: own debugBar
+      fit: fit
+      splits: ""
+      lastTime: Gpu2d.nowSeconds()
+    }
+    showFit(state: state)
+    ret state
+  }
+}
+
+# The fit onto the buttons' labels and the debug switch
+func showFit(state: mod ShadowState) {
+  let fit: view CascadeFit => state.fit
+  let world: mod UiWorld => state.editorPanel.world
+  setPanelButtonLabel(
+    panel: state.fitPanel
+    world: world
+    id: "far"
+    label: "Shadow distance {fit.far.toInt()} m"
+  )
+  setPanelButtonLabel(
+    panel: state.fitPanel
+    world: world
+    id: "lambda"
+    label: "Split lambda {twoDecimals(value: fit.lambda)}"
+  )
+  setPanelButtonLabel(
+    panel: state.fitPanel
+    world: world
+    id: "count"
+    label: "Cascades {fit.count}"
+  )
+  setPanelButtonLabel(
+    panel: state.fitPanel
+    world: world
+    id: "resolution"
+    label: "Map {fit.resolution} px"
+  )
+  setPanelButtonLabel(
+    panel: state.fitPanel
+    world: world
+    id: "back"
+    label: "Back extent {fit.backExtent.toInt()} m"
+  )
+  setPanelButtonOn(
+    panel: state.debugBar
+    world: world
+    id: "debug"
+    on: fit.debugColors
+  )
+  setShadowCascadeDebug(renderer: state.renderer, on: fit.debugColors)
+}
+
+# A fit button: step that setting to its next choice
+func handleFitClick(state: mod ShadowState, clicked: view String) {
+  if clicked is "far" {
+    state.fit.far = nextFloatChoice(choices: distanceChoices(), current: state.fit.far)
+  } else if clicked is "lambda" {
+    state.fit.lambda = nextFloatChoice(choices: lambdaChoices(), current: state.fit.lambda)
+  } else if clicked is "count" {
+    state.fit.count = nextIntChoice(choices: countChoices(), current: state.fit.count)
+  } else if clicked is "resolution" {
+    state.fit.resolution = nextIntChoice(
+      choices: resolutionChoices()
+      current: state.fit.resolution
+    )
+  } else if clicked is "back" {
+    state.fit.backExtent = nextFloatChoice(
+      choices: backExtentChoices()
+      current: state.fit.backExtent
+    )
+  }
+  showFit(state: state)
+}
+
+func runShadowFrame(state: mod ShadowState) {
+  let now: Float64 = Gpu2d.nowSeconds()
+  let deltaTime: Float = (now - state.lastTime) as Float
+  state.lastTime = now
+  let renderFrame: Bool = Gpu2d.renderGate()
+  let panelFrame: EditorPanelFrame = updateEditorPanel(
+    editorPanel: state.editorPanel
+    cameraRig: state.cameraRig
+    camera: state.camera
+    now: now
+    deltaTime: deltaTime
+    resized: Gpu2d.windowResized()
+    rendered: renderFrame
+  )
+  if panelFrame.settingsChanged {
+    applyEditorPanelSettings(
+      editorPanel: state.editorPanel
+      renderer: state.renderer
+      light: state.light
+      sunStrength: sunStrength
+    )
+  }
+  let fitClicked: String = panelClickedId(panel: state.fitPanel, world: state.editorPanel.world)
+  if fitClicked.length() > 0 {
+    handleFitClick(state: state, clicked: fitClicked)
+  }
+  if panelClickedId(panel: state.debugBar, world: state.editorPanel.world) is "debug" {
+    state.fit.debugColors = state.fit.debugColors is false
+    showFit(state: state)
+  }
+  if not renderFrame {
+    ret
+  }
+
+  let renderer: mod DeferredRenderer => state.renderer
+  let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
+  gpuPassTimingBegin(renderer: renderer)
+  loop var passIndex: Int = 0, passIndex < deferredOrderLength(renderer: renderer), ++passIndex {
+    let tag: Int = deferredTagAt(renderer: renderer, i: passIndex)
+    gpuPassMark(renderer: renderer, tag: tag)
+    if tag is RenderTag.shadow {
+      let cascades: ShadowCascades = fitCascades(
+        fit: state.fit
+        camera: state.camera
+        light: state.light
+        aspect: aspect
+      )
+      beginShadowPass(renderer: renderer, c: cascades)
+      if state.editorPanel.settings.shadows {
+        renderSceneShadowWorldWith(renderer: renderer, world: state.sceneWorld)
+      }
+      endShadowPass(renderer: renderer)
+      let splits: String = splitsText(cascades: cascades)
+      if splits is not state.splits {
+        state.splits = splits
+        log(
+          "[shadow] distance {state.fit.far} m, lambda {state.fit.lambda}, {cascades.count} cascades at {cascades.resolution} px, back extent {state.fit.backExtent} m: splits {splits}, texel {texelsText(
+            cascades: cascades
+          )}, casters {shadowCasterCount(renderer: renderer)}"
+        )
+        setEditorPanelAppSection(
+          editorPanel: state.editorPanel
+          title: "Shadow cascades"
+          readout: "Splits {splits}"
+        )
+      }
+    } else if tag is RenderTag.uiOverlay {
+      drawEditorPanel(editorPanel: state.editorPanel, canvas: renderer.canvas)
+    } else {
+      renderDeferredPassWorld(
+        renderer: renderer
+        tag: tag
+        world: state.sceneWorld
+        camera: state.camera
+        light: state.light
+        aspect: aspect
+      )
+    }
+  }
+  gpuPassTimingEnd(renderer: renderer)
+  world3dPrevTransformSystem(world: state.sceneWorld)
+}
+
+func endShadowState(state: mod ShadowState) {
+  shutdownDeferredRenderer(renderer: state.renderer)
+  Gbuffer.shutdownAll()
+  Gpu2d.closeWindow()
+}
+
+func main() ret Int {
+  var state: ShadowState = createShadowState()
+  let graphStatus: Int = compileDeferred(renderer: state.renderer)
+  if graphStatus is not 0 {
+    log("render graph invalid: {statusName(status: graphStatus)}")
+    ret 1
+  }
+  mainLoop state {
+    if Gpu2d.pollClose() {
+      endShadowState(state: state)
+      break
+    }
+    runShadowFrame(state: state)
+  }
+  ret 0
+}

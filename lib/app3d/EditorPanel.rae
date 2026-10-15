@@ -35,6 +35,14 @@ open app3d/UiShell
 open app3d/CameraRig
 open app3d/CameraBar
 open app3d/SettingsDialog
+open app3d/ControlPanel
+
+# The two places an app adds its own controls (buildEditorPanelControls): the
+# top bar after the camera bar, and the side panel under the settings, which
+# also has a title and a one-line readout (setEditorPanelAppSection)
+const editorAppBarNodeId: String = "AppBar"
+
+const editorAppPanelNodeId: String = "AppPanelButtons"
 
 # The side panel's width in the scene; the camera bar sheds readouts that do
 # not fit beside it
@@ -116,7 +124,14 @@ func createEditorPanel(assetBase: view String, settings: view SettingsState) ret
   }
   settingsApplyToWorld(settingsState: settings, world: world, uiSystems: uiSystems)
   applyEditorPanelOpen(world: world, open: settings.open)
-  fitEditorPanelToWindow(world: world, uiSystems: uiSystems, res: gpuUi)
+  # The app section shows once an app gives it a title
+  setNodeActive(world: world, nodeId: "AppPanel", value: false)
+  fitEditorPanelToWindow(
+    world: world
+    uiSystems: uiSystems
+    res: gpuUi
+    panelOpen: settings.open
+  )
   # The side panel scrolls when its content outgrows the window: the scene
   # authors a ScrollRoot on SidePanelContent, the lib system seeds its state
   var scrollMemory: ScrollMemory = createScrollMemory()
@@ -147,7 +162,12 @@ func applyEditorPanelOpen(world: mod UiWorld, open: view Bool) {
 }
 
 # Size the chrome to the window's logical size and lay it out
-func fitEditorPanelToWindow(world: mod UiWorld, uiSystems: mod UiSystems, res: view Gpu2dUi) {
+func fitEditorPanelToWindow(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  res: view Gpu2dUi
+  panelOpen: view Bool
+) {
   let width: Float = windowExtentW()
   let height: Float = windowExtentH()
   world.layoutW = width
@@ -160,7 +180,16 @@ func fitEditorPanelToWindow(world: mod UiWorld, uiSystems: mod UiSystems, res: v
     w: width
     h: height
   )
-  var barWidth: Float = width - editorSidePanelWidth - editorTopRowReserve
+  # The app's own top-bar buttons take their laid-out width
+  var barWidth: Float = width - editorTopRowReserve - nodeLayoutW(
+    world: world
+    uiSystems: uiSystems
+    nodeId: editorAppBarNodeId
+  )
+  # The open side panel takes its width from the top row
+  if panelOpen {
+    barWidth = barWidth - editorSidePanelWidth
+  }
   if barWidth < 200.0 {
     barWidth = 200.0
   }
@@ -288,11 +317,58 @@ func updateEditorPanel(
       world: editorPanel.world
       uiSystems: editorPanel.uiSystems
       res: editorPanel.gpuUi
+      panelOpen: editorPanel.settings.open
     )
   }
   # Report the components no table matched and recycle destroyed entities
   uiFrameEnd(world: editorPanel.world, uiSystems: editorPanel.uiSystems)
   ret EditorPanelFrame { settingsChanged: settingsChanged, cameraMoved: cameraMoved }
+}
+
+# Build an app's ControlPanel into the panel: a panel created with
+# createControlPanel(hostNodeId: editorAppBarNodeId) sits in the top bar, one
+# with editorAppPanelNodeId in the side panel. Read its clicks after
+# updateEditorPanel with panelClickedId(panel:, world: editorPanel.world).
+func buildEditorPanelControls(editorPanel: mod EditorPanel, panel: mod ControlPanel) ret Bool {
+  let built: Bool = buildControlPanel(
+    panel: panel
+    world: editorPanel.world
+    uiSystems: editorPanel.uiSystems
+    res: editorPanel.gpuUi
+  )
+  # Twice: the first layout measures the new buttons, the second fits the
+  # camera bar beside them
+  fitEditorPanelToWindow(
+    world: editorPanel.world
+    uiSystems: editorPanel.uiSystems
+    res: editorPanel.gpuUi
+    panelOpen: editorPanel.settings.open
+  )
+  fitEditorPanelToWindow(
+    world: editorPanel.world
+    uiSystems: editorPanel.uiSystems
+    res: editorPanel.gpuUi
+    panelOpen: editorPanel.settings.open
+  )
+  ret built
+}
+
+# The app's section of the side panel: a title and a one-line readout. An
+# empty title hides the section.
+func setEditorPanelAppSection(
+  editorPanel: mod EditorPanel
+  title: view String
+  readout: view String
+) {
+  setNodeActive(world: editorPanel.world, nodeId: "AppPanel", value: title.length() > 0)
+  setNodeText(world: editorPanel.world, nodeId: "AppPanelTitle", value: title)
+  setNodeText(world: editorPanel.world, nodeId: "AppPanelReadout", value: readout)
+  fitEditorPanelToWindow(
+    world: editorPanel.world
+    uiSystems: editorPanel.uiSystems
+    res: editorPanel.gpuUi
+    panelOpen: editorPanel.settings.open
+  )
 }
 
 # Show another scene in the settings' scene chooser (an app that also picks
@@ -308,6 +384,7 @@ func selectEditorPanelScene(editorPanel: mod EditorPanel, scene: view Int) {
       world: editorPanel.world
       uiSystems: editorPanel.uiSystems
       res: editorPanel.gpuUi
+      panelOpen: editorPanel.settings.open
     )
   }
 }
