@@ -1,18 +1,10 @@
-# Procedural props showcase (#539/#540/#541): five faceted rocks, five
-# low-poly trees and five material textures, all generated in Rae code
-# (lib/procgen/*). No external mesh or texture assets.
-#
-# Rendered on the deferred path under the Preetham sky, with the
-# sun's cascaded shadows. The camera is the shared app3d camera rig: drag to
-# orbit, wheel to zoom, Tab for the free WASD camera. The debug HUD (top right)
-# shows the frame rate. The texture swatches are drawn on the renderer's UI
-# overlay along the bottom of the window.
-#
-# Headless screenshot:
-#   RAE_SDL_HEADLESS_MS=2000 RAE_GPU2D_SCREENSHOT=/tmp/procgen.bmp \
-#     rae run examples/138_procgen_showcase/Main.rae
+# A seeded autumn grove: leaf geometry, branching trees, stratified stones and meadow.
+# Drag to orbit, wheel to zoom, Tab for a free camera. All geometry is authored in Rae.
 import Gpu2d
 import Vec3
+import Keys
+import Sdl3
+import Sys
 open Scene3d
 open ecs/Entity
 open RendererDeferred
@@ -21,232 +13,13 @@ open Math3d
 open Mesh3d
 open Shadow3d
 open Sky
-open procgen/Rock
-open procgen/Tree
-open procgen/Texture
+open GroveScene
 open Gpu2dCanvas
 open app3d/CameraRig
 open app3d/DebugHud
 open app3d/UiShell
 open ui/WindowGeometry
 open HotReload
-
-const propCount: Int = 5
-
-const propSpacing: Float = 3.2
-
-const textureResolution: Int = 128
-
-const swatchSize: Float = 150.0
-
-const swatchGap: Float = 18.0
-
-const swatchMargin: Float = 40.0
-
-# Mid-morning: a warm, slanted sun, so the facets and the shadows both read
-const sunHour: Float = 9.5
-
-# The names the textures are registered under, in TextureKind order
-func textureNames() ret List(String) {
-  ret List(String) {
-    "grass"
-    "sand"
-    "rock"
-    "mud"
-    "water"
-  }
-}
-
-# The five biome-material albedo textures, generated in Rae and registered as
-# gpu2d images so they can be drawn as swatches over the 3D scene.
-func registerTextures(canvas: mod Gpu2dCanvas) {
-  let names: List(String) = textureNames()
-  loop var i: Int = 0, i < names.length, ++i {
-    let pixels: List(Int) = generateAlbedo(
-      kind: i
-      resolution: textureResolution
-      tiling: 4.0
-      seed: 700 + i * 17
-    )
-    if let name: String = names.copyAt(index: i) {
-      let imageHandle: Int = Gpu2d.registerImageRgba(
-        canvas: canvas
-        key: "texture.{name}"
-        pixels: pixels.data
-        w: textureResolution
-        h: textureResolution
-      )
-    }
-  }
-}
-
-# The five swatches in a row along the bottom of the window, in the window's
-# logical size (the design resolution follows it on resize)
-func drawTextureSwatches(canvas: mod Gpu2dCanvas, windowHeight: view Float) {
-  let names: List(String) = textureNames()
-  let top: Float = windowHeight - swatchSize - swatchMargin
-  loop var i: Int = 0, i < names.length, ++i {
-    if let name: String = names.copyAt(index: i) {
-      Gpu2d.drawImageKey(
-        canvas: canvas
-        key: "texture.{name}"
-        x: swatchMargin + i.toFloat() * (swatchSize + swatchGap)
-        y: top
-        w: swatchSize
-        h: swatchSize
-        radius: 10.0
-        tint: 0xFFFFFFFF
-      )
-    }
-  }
-}
-
-func uploadMeshData(renderer: mod DeferredRenderer, meshData: view MeshData) ret MeshHandle {
-  ret uploadMesh(
-    renderer: renderer
-    verts: meshData.verts
-    vertCount: meshData.vertCount
-    indices: meshData.indices
-  )
-}
-
-# The generated meshes, uploaded into the renderer's mesh store
-type PropMeshes {
-  rocks: List(MeshHandle)
-  treeTrunks: List(MeshHandle)
-  treeCanopies: List(MeshHandle)
-  ground: MeshHandle
-}
-
-# Five rock variants (seed, slice count, irregularity) and five tree variants
-# (seed, branch depth, canopy size), each deterministic from its seed
-func generatePropMeshes(renderer: mod DeferredRenderer) ret PropMeshes {
-  var rocks: List(MeshHandle) = List.create(MeshHandle, cap: propCount)
-  var treeTrunks: List(MeshHandle) = List.create(MeshHandle, cap: propCount)
-  var treeCanopies: List(MeshHandle) = List.create(MeshHandle, cap: propCount)
-  loop var i: Int = 0, i < propCount, ++i {
-    let rockMesh: MeshData = generateRock(
-      subdivision: 5
-      sliceCount: 3 + i
-      size: 1.0 + i.toFloat() * 0.12
-      seed: 1000 + i * 37
-      irregularity: 0.28 + i.toFloat() * 0.05
-    )
-    rocks.add(value: uploadMeshData(renderer: renderer, meshData: rockMesh))
-    let tree: TreeMesh = generateTree(
-      branchDepth: 2 + i % 2
-      trunkHeight: 3.0 + i.toFloat() * 0.3
-      taper: 1.0
-      canopySize: 1.1 + i.toFloat() * 0.12
-      leafDensity: 1 + i % 3
-      seed: 500 + i * 53
-    )
-    treeTrunks.add(value: uploadMeshData(renderer: renderer, meshData: tree.trunk))
-    treeCanopies.add(value: uploadMeshData(renderer: renderer, meshData: tree.canopy))
-  }
-  let groundData: MeshData = makePlane(size: 40.0, segments: 1)
-  ret PropMeshes {
-    rocks: own rocks
-    treeTrunks: own treeTrunks
-    treeCanopies: own treeCanopies
-    ground: uploadMeshData(renderer: renderer, meshData: groundData)
-  }
-}
-
-func plainMaterial(
-  red: view Float
-  green: view Float
-  blue: view Float
-  roughness: view Float
-) ret Material3d {
-  ret Material3d {
-    baseColor: Vec3.create(x: red, y: green, z: blue)
-    metallic: 0.0
-    roughness: roughness
-    emission: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
-    toon: false
-  }
-}
-
-func addProp(
-  world: mod World3d
-  mesh: view MeshHandle
-  material: view Material3d
-  position: view Vec3
-) ret EntityId {
-  ret world3dAddMeshInstance(
-    world: world
-    mesh: mesh
-    material: material
-    position: position
-    rotation: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
-    scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
-  )
-}
-
-# The ground, the rocks in the front row and the trees (trunk + canopy) in the
-# back row, as World3d entities the renderer's queries draw
-func buildScene(meshes: view PropMeshes) ret World3d {
-  var sceneWorld: World3d = create()
-  let groundMaterial: Material3d = plainMaterial(
-    red: 0.30
-    green: 0.34
-    blue: 0.24
-    roughness: 0.95
-  )
-  let rockMaterial: Material3d = plainMaterial(
-    red: 0.44
-    green: 0.45
-    blue: 0.47
-    roughness: 0.9
-  )
-  let barkMaterial: Material3d = plainMaterial(
-    red: 0.36
-    green: 0.23
-    blue: 0.13
-    roughness: 0.85
-  )
-  let leafMaterial: Material3d = plainMaterial(
-    red: 0.20
-    green: 0.42
-    blue: 0.16
-    roughness: 0.8
-  )
-  let groundEntityId: EntityId = addProp(
-    world: sceneWorld
-    mesh: meshes.ground
-    material: groundMaterial
-    position: Vec3.create(x: 0.0, y: 0.0, z: -0.6)
-  )
-  loop var i: Int = 0, i < propCount, ++i {
-    let x: Float = (i.toFloat() - 2.0) * propSpacing
-    if let rockMesh: MeshHandle = meshes.rocks.copyAt(index: i) {
-      let rockEntityId: EntityId = addProp(
-        world: sceneWorld
-        mesh: rockMesh
-        material: rockMaterial
-        position: Vec3.create(x: x, y: 0.0, z: 0.0)
-      )
-    }
-    if let trunkMesh: MeshHandle = meshes.treeTrunks.copyAt(index: i) {
-      let trunkEntityId: EntityId = addProp(
-        world: sceneWorld
-        mesh: trunkMesh
-        material: barkMaterial
-        position: Vec3.create(x: x, y: 6.0, z: 0.0)
-      )
-    }
-    if let canopyMesh: MeshHandle = meshes.treeCanopies.copyAt(index: i) {
-      let canopyEntityId: EntityId = addProp(
-        world: sceneWorld
-        mesh: canopyMesh
-        material: leafMaterial
-        position: Vec3.create(x: x, y: 6.0, z: 0.0)
-      )
-    }
-  }
-  ret sceneWorld
-}
 
 # The sun's three cascades, fitted to this frame's camera, with every mesh of
 # the world as a caster
@@ -281,7 +54,6 @@ func renderShadows(
 # loop.
 type ShowcaseState {
   renderer: DeferredRenderer
-  meshes: PropMeshes
   sceneWorld: World3d
   light: Light3d
   camera: Camera3d
@@ -292,28 +64,29 @@ type ShowcaseState {
   lastTime: Float64
 }
 
-# The window, the generated props and textures, the sky and the camera
+# The window, the generated grove, the sky and the camera
 func createShowcase() ret ShowcaseState {
-  Gpu2d.initWindow(width: 1280, height: 800, title: "Rae 3D — procedural rocks, trees & textures")
+  Gpu2d.initWindow(
+    width: 1280
+    height: 800
+    title: "Autumn Grove | 1 Overview  2 Trees  3 Rocks | Drag to orbit"
+  )
   # Remember where the user put the window, across restarts
   var windowGeometry: WindowGeometry = createWindowGeometry(
     dir: dir()
     name: "window.138_procgen_showcase.geometry"
   )
   restoreWindowGeometry(windowGeometry: windowGeometry)
-  # The design resolution is the window's logical size, so the swatches keep
-  # their size and stay on the bottom edge when the window is resized
+  # Keep the shared HUD in logical window coordinates on resize.
   let windowHeight: Float = windowExtentH()
   Gpu2d.setDesignResolution(width: windowExtentW(), height: windowHeight, fit: 0)
 
   var renderer: DeferredRenderer = createDeferredRendererWithUi()
-  let meshes: PropMeshes = generatePropMeshes(renderer: renderer)
-  registerTextures(canvas: renderer.canvas)
-  let sceneWorld: World3d = buildScene(meshes: meshes)
+  let sceneWorld: World3d = buildGrove(renderer: renderer)
 
   # The Preetham sky, and the same sun lights the scene and casts the shadows
-  let sunDirection: Vec3 = sunDirForHour(hour: sunHour)
-  let sunColor: Vec3 = sunColorForHour(hour: sunHour)
+  let sunDirection: Vec3 = Vec3.vnorm(a: Vec3.create(x: -0.6, y: 0.25, z: -0.8))
+  let sunColor: Vec3 = Vec3.create(x: 3.1, y: 2.85, z: 2.5)
   setRendererSky(
     renderer: renderer
     sky: createSkyProcedural(sunDir: sunDirection, sunColor: sunColor, turbidity: 2.5)
@@ -321,22 +94,22 @@ func createShowcase() ret ShowcaseState {
   var light: Light3d = defaultLight3d()
   light.sunDir = sunDirection
   light.sunColor = sunColor
+  light.ambSky = Vec3.create(x: 0.30, y: 0.37, z: 0.42)
+  light.ambGround = Vec3.create(x: 0.15, y: 0.12, z: 0.09)
 
   var camera: Camera3d = defaultCamera3d()
-  camera.target = Vec3.create(x: 0.0, y: 3.0, z: 1.0)
+  camera.target = Vec3.create(x: 0.0, y: 3.0, z: 1.7)
+  camera.fovYDeg = 42
+  camera.farZ = 600
   var cameraRig: CameraRig = createCameraRig(camera: camera)
-  cameraRig.yaw = 0.35
-  cameraRig.orbitPitch = 0.45
-  cameraRig.distance = 20.0
-  cameraRig.maxDistance = 40.0
-  snapCameraRigView(rig: cameraRig)
-  applyCameraRig(rig: cameraRig, camera: camera)
+  cameraRig.maxDistance = 55
+  let initialView: String = Sys.getEnv(name: "RAE_GROVE_VIEW")
+  setGroveView(camera: camera, cameraRig: cameraRig, viewName: initialView)
 
   # The state takes the renderer's GPU handles with it: moved, never copied
   unsafe {
     ret ShowcaseState {
       renderer: own renderer
-      meshes: meshes
       sceneWorld: own sceneWorld
       light: light
       camera: camera
@@ -348,6 +121,28 @@ func createShowcase() ret ShowcaseState {
       lastTime: Gpu2d.nowSeconds()
     }
   }
+}
+
+# Presets are also the visual gate's reproducible inspection angles.
+func setGroveView(camera: mod Camera3d, cameraRig: mod CameraRig, viewName: view String) {
+  cameraRig.mode = CameraRigMode.orbit
+  camera.target = Vec3.create(x: 0, y: 3, z: 1.7)
+  cameraRig.yaw = 0.10
+  cameraRig.orbitPitch = 0.48
+  cameraRig.distance = 34
+  if viewName is "trees" {
+    camera.target = Vec3.create(x: -4.8, y: 2, z: 3.4)
+    cameraRig.yaw = -0.5
+    cameraRig.orbitPitch = 0.15
+    cameraRig.distance = 13
+  } else if viewName is "rocks" {
+    camera.target = Vec3.create(x: -4.6, y: -2.2, z: 0.6)
+    cameraRig.yaw = 0.6
+    cameraRig.orbitPitch = 0.55
+    cameraRig.distance = 12
+  }
+  snapCameraRigView(rig: cameraRig)
+  applyCameraRig(rig: cameraRig, camera: camera)
 }
 
 # One frame: input, the camera, then the deferred graph's passes in their
@@ -370,6 +165,15 @@ func runShowcaseFrame(state: mod ShowcaseState) {
     now: now
     rendered: renderFrame
   )
+  if not debugInputTaken {
+    if Sdl3.isKeyPressed(key: Keys.key1) {
+      setGroveView(camera: state.camera, cameraRig: state.cameraRig, viewName: "grove")
+    } else if Sdl3.isKeyPressed(key: Keys.key2) {
+      setGroveView(camera: state.camera, cameraRig: state.cameraRig, viewName: "trees")
+    } else if Sdl3.isKeyPressed(key: Keys.key3) {
+      setGroveView(camera: state.camera, cameraRig: state.cameraRig, viewName: "rocks")
+    }
+  }
   let cameraMoved: Bool = updateCameraRig(
     rig: state.cameraRig
     camera: state.camera
@@ -398,7 +202,6 @@ func runShowcaseFrame(state: mod ShowcaseState) {
       )
     } else if tag is RenderTag.uiOverlay {
       drawDebugHud(debugHud: state.debugHud, canvas: renderer.canvas)
-      drawTextureSwatches(canvas: renderer.canvas, windowHeight: state.windowHeight)
     } else {
       renderDeferredPassWorld(
         renderer: renderer
