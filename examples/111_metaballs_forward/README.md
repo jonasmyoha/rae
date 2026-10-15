@@ -3,7 +3,7 @@
 The forward twin of [112](../112_metaballs_deferred). It has the same three scenes,
 the same panel and the same controls, so the only difference is the main pass.
 112 writes a G-buffer and lights it in a fullscreen pass. 111 shades every
-surface in one 4x MSAA pass (`createForwardRendererWithUi`,
+surface in one 4x MSAA pass (`createForwardRendererWithSsao`,
 `lib/RendererForward.rae` and `lib/ForwardMain.rae`; docs/forward-msaa-study.md).
 Both call the same `shadeSurface` (`lib/deferred_shade.wgsl`), so a surface is
 lit the same way in both.
@@ -16,10 +16,10 @@ bindings, like 112.
 
 | | 111 (forward) | 112 (deferred) |
 |---|---|---|
-| main pass | one 4x MSAA pass; colour and depth memoryless, resolved into the lit image | G-buffer pass (3 targets + depth), then a fullscreen lighting pass |
+| main pass | a 1x pre-pass for the SSAO, then one 4x MSAA pass; colour and depth memoryless, resolved into the lit image | G-buffer pass (3 targets + depth), then a fullscreen lighting pass |
 | antialiasing | 4x MSAA on triangle edges | SMAA by default; TAA from the settings pane |
 | metaball silhouettes | not antialiased: the raymarch runs once per pixel and writes one depth for all 4 samples | smoothed by SMAA / TAA |
-| SSAO | none (the depth never leaves the tile) | half-resolution SSAO: darker corners and contacts |
+| SSAO | half-resolution SSAO over a 1x depth + normal pre-pass (the scene is drawn twice) | half-resolution SSAO over the G-buffer |
 | settings pane TAA switch | no effect | turns TAA on |
 | sky | drawn last, only where nothing was drawn | computed by the lighting pass where the G-buffer is empty |
 | shadows, bloom, render ceiling, composite, UI, present | the same | the same |
@@ -28,7 +28,7 @@ bindings, like 112.
 The renderer still allocates the G-buffer and the deferred post targets, because
 the G-buffer sets the scene size. So 111 does not yet save that memory.
 
-## Measured (2026-10-15, forward-rae-2)
+## Measured (2026-10-15, forward-rae-2, before the SSAO pre-pass)
 
 `RAE_FRAME_TIMING=1`, both at their default render ceiling (2560x1440 on the
 desktop, 1600x720 on a phone), scene 1:

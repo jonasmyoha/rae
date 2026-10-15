@@ -197,3 +197,24 @@ func renderSdfShadow(renderer: mod DeferredRenderer, world: view World3d, tags: 
   renderSdfClusterShadow(renderer: renderer, world: world, clusterTable: tags.c5)
   renderSdfClusterShadow(renderer: renderer, world: world, clusterTable: tags.c6)
 }
+
+# One scene's draws into the open pass: its meshes, then every metaball
+# cluster. The same draws go into the 1x pre-pass (Gbuffer.beginPass, for the
+# SSAO) and into the forward pass (beginForwardPass); the pass picks the
+# material.
+func drawScene(
+  cache: mod GbufferCache
+  resources: mod GpuResources
+  world: view World3d
+  tags: view ClusterTags
+  camera: view Camera3d
+) {
+  GbufferWorld.renderSceneWorld(cache: cache, resources: resources, world: world)
+  renderSdfScene(
+    cache: cache
+    resources: resources
+    world: world
+    tags: tags
+    camera: camera
+  )
+}
