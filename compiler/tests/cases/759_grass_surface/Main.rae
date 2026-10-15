@@ -3,7 +3,8 @@
 # the grass pass, and an
 # app supplies its own surface as a composition of its own, set whole. The
 # island size is no longer text in the shader — it is an `override` pair
-# handed to the pipeline (WorldBiome.islandConstants).
+# handed to the pipeline (WorldBiome.islandConstants). An app's surface may
+# also bring data of its own (grassSetSurfaceField).
 import GrassCompute
 import WorldBiome
 
@@ -19,5 +20,13 @@ func main() ret Int {
   GrassCompute.grassSetComputeShader(grass: grassCompute, shader: standard)
   log(grassCompute.computeShaderSet)
   log(grassCompute.computeShader.sources.length() is 4)
+  # An app's own surface data: none by default; set, it is kept for the GPU
+  # (bound at @binding(4)) and the pipeline is rebuilt
+  log(grassCompute.surfaceField.length() is 0)
+  grassCompute.made = true
+  GrassCompute.grassSetSurfaceField(grass: grassCompute, values: [1.5, -2.0, 3.25])
+  log(grassCompute.surfaceField.length() is 3)
+  log(grassCompute.surfaceField.copyAtFallback(index: 1, fallback: 0.0) is -2.0)
+  log(not grassCompute.made)
   ret 0
 }
