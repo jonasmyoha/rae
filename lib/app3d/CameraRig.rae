@@ -99,6 +99,11 @@ type CameraRig {
   # button does something else in the view (the physics playground fires with
   # it). Off by default; the touch path ignores it.
   lookWithRightButton: Bool
+  # Turn the other way for a drag: by default a drag carries the eye around
+  # the subject (orbit) or the world past the eye (fly); an app whose players
+  # expect the view to follow the finger instead sets this, and both axes turn
+  # the other way. Off by default.
+  reverseDrag: Bool
   # Touch/pointer input tracking (#764: was module-level gCam* globals). A
   # rig that never calls setCameraTouch keeps camTouchOn=false and the desktop
   # mouse path, so 110/113 behave as before.
@@ -248,6 +253,7 @@ func createCameraRig(camera: view Camera3d) pub ret CameraRig {
     lastX: 0.0
     lastY: 0.0
     lookWithRightButton: false
+    reverseDrag: false
     camTouchOn: false
     camExcludeId: -1
     camJoyActive: false
@@ -467,6 +473,11 @@ func updateCameraRig(
         # to orbit, where the drag carries the eye around the subject.
         mouseYaw = 0.0 - (px - rig.lastX) * rig.dragSpeed
         mouseFreePitch = 0.0 - (py - rig.lastY) * rig.dragSpeed
+      }
+      if rig.reverseDrag {
+        mouseYaw = 0.0 - mouseYaw
+        mouseOrbitPitch = 0.0 - mouseOrbitPitch
+        mouseFreePitch = 0.0 - mouseFreePitch
       }
     }
     rig.dragging = true
