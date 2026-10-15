@@ -87,7 +87,8 @@ The focused example gate takes roughly a minute on this machine; use a bounded
 run and keep it exclusive with other test runs:
 
 ```sh
-MAKEFLAGS='TEST_RUNNER=tools/run_examples.sh' RAE_EXAMPLE_FILTER='114_walker_character 118_water_lake 119_ocean_fft zz_gpu_timing_check' perl -e 'alarm shift; exec @ARGV' 300 bash compiler/tools/watch-tests.sh
+MAKEFLAGS='TEST_RUNNER=tools/run_examples.sh' RAE_EXAMPLE_FILTER='136_walker_character 140_water_lake 141_ocean_fft' perl -e 'alarm shift; exec @ARGV' 300 bash compiler/tools/watch-tests.sh
+RAE_CHECK_FILTER=gpuTiming perl -e 'alarm shift; exec @ARGV' 300 bash checks/run.sh
 ```
 
 ## Gameplay readback (#858)

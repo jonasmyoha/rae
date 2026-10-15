@@ -1,0 +1,35 @@
+pack MetaballsForward {
+  format: "raepack"
+  version: 1
+  defaultTarget: compiled
+  name: "Metaballs (forward rendering)"
+  description: "The FORWARD-rendered twin of example 134. Same scenes, same ECS UI, same controls; the main pass is the difference. 135 shades every surface, metaballs included, in one 4x MSAA pass on the Rae forward renderer (lib/RendererForward), with the same shading function the deferred lighting uses. Open both to compare the two paths on identical content; README.md lists every difference."
+  category: "3D Renderer"
+  wasmWebApp: "true"
+  display: {
+    width: 1280
+    height: 800
+  }
+  targets: {
+    target compiled: {
+      label: "Compiled"
+      entry: "Main.rae"
+      sources: {
+        source: {
+          path: "."
+          emit: compiled
+        }
+      }
+    }
+    target wasm: {
+      label: "WASM (WebGPU)"
+      entry: "Main.rae"
+      sources: {
+        source: {
+          path: "."
+          emit: compiled
+        }
+      }
+    }
+  }
+}

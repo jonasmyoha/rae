@@ -137,7 +137,7 @@ in an `unsafe { ... }` block), this records the disposition of every remaining
 hand-written GPU/render/water foreign consumer. No silent module exemptions.
 
 **Migrated in #876 (done, verified):**
-- `examples/zz_readback_check` and `examples/zz_gpu_timing_check` — the raw
+- `checks/readRequest` and `checks/gpuTiming` — the raw
   (pre-manager) readback and GPU-timing hardware checks: extern → `unsafe
   extern`, every webgpu call / raw-Ptr op wrapped at its source site. Both run
   green on hardware.
@@ -513,7 +513,7 @@ objects are all retired by `shutdownDeferredRenderer` (live wgpu counts flat
 across 240 headless frames in 110/118). The legacy blocking
 `lib/GpuTiming.rae` keeps its query set + buffers as owner fields now: the
 last C slot store (`g_gt_handles` / `rae_gt_set/get`) is deleted; it remains
-the raw-encoder harness of zz_gpu_timing_check beside the manager's
+the raw-encoder harness of checks/gpuTiming beside the manager's
 nonblocking `gpu/GpuTiming` (not merged into it — different contracts,
 blocking vs tracked readback).
 

@@ -90,7 +90,7 @@ Run the headless hardware check (requires the native WebGPU and SDL3 libraries;
 SDL3 links the existing single-command submission ABI, but creates no window):
 
 ```sh
-perl -e 'alarm shift; exec @ARGV' 120 compiler/bin/rae run --target compiled examples/zz_readback_check/Main.rae
+perl -e 'alarm shift; exec @ARGV' 120 compiler/bin/rae run --target compiled checks/readRequest/Main.rae
 ```
 
 Verified on Apple M1 Max / Metal: 32 pairs of independent reads with known Int

@@ -10,7 +10,8 @@ import {
   getTestsRoot,
   loadConfig,
   resolveCompilerPath,
-  getStressRoot
+  getStressRoot,
+  getChecksRoot
 } from "./config";
 import type { RaeDevtoolsConfig } from "./config";
 import type { ClientEvent, ExampleRunMode, ServerEvent } from "../shared/types";
@@ -28,6 +29,7 @@ import {
   resolveExampleAction,
   writeExampleFile,
   listStressCases,
+  listCheckCases,
   setExtraExampleRoots
 } from "./examples";
 import { ExampleRunner } from "./exampleRunner";
@@ -63,7 +65,8 @@ const testsRoot = getTestsRoot(CONFIG);
 const syntaxSummaryPath = getSyntaxSummaryPath(CONFIG);
 const examplesRoot = getExamplesRoot(CONFIG);
 const stressRoot = getStressRoot(CONFIG);
-setExtraExampleRoots([stressRoot]);
+const checksRoot = getChecksRoot(CONFIG);
+setExtraExampleRoots([stressRoot, checksRoot]);
 const testHistoryPath = getTestHistoryPath(CONFIG);
 const compilerBinPath = resolveCompilerPath(CONFIG, "compiler/bin/rae");
 const compilerMetricsPath = path.resolve(
@@ -482,11 +485,12 @@ const server = Bun.serve<SocketData>({
     }
 
     if (url.pathname === "/api/examples" && req.method === "GET") {
-      // The stress cases ride along as records with origin "stress"; the
-      // client sorts them into their own tab.
+      // The stress cases and the hardware checks ride along as records with
+      // origin "stress" / "checks"; the client sorts each into its own tab.
       const examples = [
         ...(await listExamples(examplesRoot, compilerBinPath)),
-        ...(await listStressCases(stressRoot, examplesRoot, compilerBinPath))
+        ...(await listStressCases(stressRoot, examplesRoot, compilerBinPath)),
+        ...(await listCheckCases(checksRoot, examplesRoot, compilerBinPath))
       ];
       return new Response(JSON.stringify({ examples }), {
         headers: { "Content-Type": "application/json" }

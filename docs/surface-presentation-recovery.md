@@ -29,7 +29,7 @@ and the bounded retries of a real error; it runs in the normal suite. It does
 not simulate the actual window server:
 
 ```sh
-MAKEFLAGS='TEST_RUNNER=tools/run_examples.sh' RAE_EXAMPLE_FILTER='118_water_lake' perl -e 'alarm shift; exec @ARGV' 300 bash compiler/tools/watch-tests.sh
+MAKEFLAGS='TEST_RUNNER=tools/run_examples.sh' RAE_EXAMPLE_FILTER='140_water_lake' perl -e 'alarm shift; exec @ARGV' 300 bash compiler/tools/watch-tests.sh
 ```
 
 The 118 screenshot gate reads the offscreen texture (a screenshot run never

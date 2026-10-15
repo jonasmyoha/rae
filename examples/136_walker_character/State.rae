@@ -1,0 +1,93 @@
+# Hot-reload state for example 136. Kept out of main because persistence is a
+# separate domain from loading, controlling and rendering the character.
+open Scene3d
+open app3d/CameraRig
+open app3d/CharacterController
+open app3d/Playback
+
+const state136Version: Int = 6
+
+const state136AppId: String = "136_walker_character"
+
+const state136OwnFields: Int = 8
+
+func state136Part(parts: view List(String), index: view Int) ret String {
+  if let value: String = parts.copyAt(index: index) {
+    ret value
+  }
+  ret ""
+}
+
+func serialize136State(
+  clipIndex: view Int
+  playing: view Bool
+  speed: view Float
+  toon: view Bool
+  controller: view ThirdPersonController
+  rig: view CameraRig
+  camera: view Camera3d
+) ret String {
+  var playingNum: Int = 0
+  if playing {
+    playingNum = 1
+  }
+  var toonNum: Int = 0
+  if toon {
+    toonNum = 1
+  }
+  ret "{state136Version} {clipIndex} {playingNum} {speed} {toonNum} {controller.position.x} {controller.position.y} {controller.heading} {stateString(
+    rig: rig
+    camera: camera
+  )}"
+}
+
+func restore136State(
+  raw: view String
+  clipIndex: mod Int
+  playing: mod Bool
+  speed: mod Float
+  toon: mod Bool
+  controller: mod ThirdPersonController
+  rig: mod CameraRig
+  camera: mod Camera3d
+) ret Bool {
+  if raw.length() < 1 {
+    ret false
+  }
+  let parts: List(String) = raw.trim().split(sep: " ")
+  if parts.length < state136OwnFields {
+    ret false
+  }
+  if state136Part(parts: parts, index: 0).trim().toInt() is not state136Version {
+    ret false
+  }
+  clipIndex = state136Part(parts: parts, index: 1).trim().toInt()
+  if clipIndex < 0 {
+    clipIndex = 0
+  }
+  if clipIndex > 3 {
+    clipIndex = 3
+  }
+  playing = state136Part(parts: parts, index: 2).trim().toInt() is 1
+  speed = state136Part(parts: parts, index: 3).trim().toFloat()
+  if speed < speedMin {
+    speed = speedMin
+  }
+  if speed > speedMax {
+    speed = speedMax
+  }
+  toon = state136Part(parts: parts, index: 4).trim().toInt() is 1
+  controller.position.x = state136Part(parts: parts, index: 5).trim().toFloat()
+  controller.position.y = state136Part(parts: parts, index: 6).trim().toFloat()
+  controller.heading = state136Part(parts: parts, index: 7).trim().toFloat()
+  if applyCameraRigState(
+    parts: parts
+    offset: state136OwnFields
+    rig: rig
+    camera: camera
+  ) is false {
+    ret false
+  }
+  # Window geometry has a separate runtime-owned persistence channel.
+  ret true
+}

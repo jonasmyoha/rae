@@ -249,7 +249,7 @@ is now a declared composition, and the runtime opens no `.wgsl` file:
   add `constants: view List(ShaderConstant)` — the `override` values, passed
   through as `WGPUConstantEntry` on the compute / vertex / fragment stage.
   The text primitives survive as `create*PipelineSource(wgsl: view String, …)`
-  for a program that genuinely builds WGSL at run time (the `zz_gpu_*`
+  for a program that genuinely builds WGSL at run time (the `checks/gpu*`
   self-tests); `Gpu.kernelShader(shader:, entry:)` is the compute wrapper's
   form. `ShaderConstant { name, value }` and `noShaderConstants()` are core.
 - **Runtime parameters are `override`s.** `world_biome.wgsl` declares

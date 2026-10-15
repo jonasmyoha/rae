@@ -1042,7 +1042,7 @@ each timing sample was dropped. Emscripten's allocator has
 CSS pixels at DPR 1) the playground then reports per-pass GPU time like
 native: GPU whole frame 2.9 ms over 100 sampled frames, with the
 copy/present span at 0.1 ms. There it is real GPU time, since a browser
-frame has no blocking end-of-frame poll. `examples/zz_web_readback_check`
+frame has no blocking end-of-frame poll. `checks/webReadback`
 (a readback polled once per mainLoop frame, bytes checked) guards it:
 `compiler/tools/wasm_webgpu_smoke.sh` builds it and, with Chrome installed,
 runs it headless and requires `READBACK OK`. It failed on the old runtime.

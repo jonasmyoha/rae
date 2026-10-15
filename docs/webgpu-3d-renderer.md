@@ -1,8 +1,8 @@
 # Rae WebGPU 3D Renderer — Design (future / high-level)
 
 **Status:** Active implementation, with compute raymarch seeds in
-`examples/107_gpu3d_raymarch` and `examples/108_gpu3d_procedural`, and the
-raster foundation in `examples/109_gpu3d_pbr`. This document describes the
+`examples/130_gpu3d_raymarch` and `examples/131_gpu3d_procedural`, and the
+raster foundation in `examples/132_gpu3d_pbr`. This document describes the
 long-term raster path; the concrete Assembly demo progression is in
 `docs/assembly-2026-demo-plan.md`.
 Sequenced **after** the 2D/UI renderer Tier 0–1.
@@ -15,9 +15,9 @@ The browser path is a first-class Compiled deployment target:
 
 ```sh
 compiler/bin/rae build --target wasm --profile release \
-  --project examples/109_gpu3d_pbr \
-  --out examples/109_gpu3d_pbr/build/web/index.html \
-  examples/109_gpu3d_pbr/main.rae
+  --project examples/132_gpu3d_pbr \
+  --out examples/132_gpu3d_pbr/build/web/index.html \
+  examples/132_gpu3d_pbr/main.rae
 ```
 
 This emits `index.html`, `index.js`, and `index.wasm` through Emscripten. SDL3

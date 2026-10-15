@@ -87,8 +87,9 @@ export type ExampleDescriptor = {
   /** Which root the record was scanned from. A "stress" record is a foot-gun
    * case (docs/stress-tests.md): its file paths are relative to the examples
    * root like every other record (`../stress/<id>/…`), and `stress` carries
-   * the pack's verdict + expectation. */
-  origin?: "examples" | "stress";
+   * the pack's verdict + expectation. A "checks" record is a hardware check
+   * (checks/README.md), scanned the same way from `../checks/<id>/…`. */
+  origin?: "examples" | "stress" | "checks";
   stress?: StressInfo;
 };
 

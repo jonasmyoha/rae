@@ -115,7 +115,7 @@ Two inputs drive it:
 - **Profile capture** (`docs/profiling.md`): the controller emits `render.scale`
   (percent), `render.capFps`, and `thermal.state` counters — plot them alongside
   `fps` and per-pass GPU ms to watch the ladder engage as the device heats.
-- **Fixed scale**: `RAE_RENDER_SCALE=0.6 ./compiler/bin/rae run examples/114_walker_character`
+- **Fixed scale**: `RAE_RENDER_SCALE=0.6 ./compiler/bin/rae run examples/136_walker_character`
   forces a scale for eyeballing the quality/perf trade (validated headless: 0.6
   upscales the scene cleanly, UI crisp, no validation errors).
 

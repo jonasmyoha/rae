@@ -113,7 +113,7 @@ else
 TEST_RUNNER = tools/run_tests_parallel.sh
 endif
 
-.PHONY: c-warnings-gate all build test test-examples stress clean smoke install uninstall c-surface-gate FORCE
+.PHONY: c-warnings-gate all build test test-examples checks stress clean smoke install uninstall c-surface-gate FORCE
 
 all: build
 
@@ -193,6 +193,11 @@ test: build
 test-examples: build
 	@chmod +x tools/run_examples.sh
 	@RAE_RUN_EXAMPLES=1 ./tools/run_examples.sh
+
+# The hardware checks (checks/README.md): programs that test the GPU layer on
+# a real GPU and exit 0 when they pass. `make test-examples` runs them too.
+checks: build
+	@bash ../checks/run.sh
 
 # The stress cases (docs/stress-tests.md) on their own; `make test` runs them
 # as one pre-suite case too.

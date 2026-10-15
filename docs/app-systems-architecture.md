@@ -1,6 +1,6 @@
 # App / systems architecture (reference: example 114)
 
-Status: largely implemented in 114 (`examples/114_walker_character`), the first
+Status: largely implemented in 114 (`examples/136_walker_character`), the first
 adopter. The file-level split has landed — each system (ui, camera, character,
 terrain, grass, render, physics, net) lives in its own sibling file and
 `app.rae` is back well under the 1000-line cap. Still open: the input-intent
@@ -11,7 +11,7 @@ over time.
 
 ## Why
 
-`examples/114_walker_character/main.rae` grew to the hard 1000-line cap doing
+`examples/136_walker_character/main.rae` grew to the hard 1000-line cap doing
 setup + per-frame orchestration + inline system logic in one function. The cap is
 a smell: the app has no structure, so "add a feature" means "make the monolith
 bigger." We want a structure that a real game keeps — distinct systems that own
@@ -173,7 +173,7 @@ Offline today. The pieces that make it viable are already in the design:
 intent-based movement + a character roster with `owner` + deterministic fixed-step
 physics (enables prediction/reconciliation).
 
-## Files (`examples/114_walker_character/`)
+## Files (`examples/136_walker_character/`)
 
 Plain, generic filenames (no `walker_`/`sys_` prefix) — matches the tetris3d house
 style, and these files are candidates to graduate to `lib` (#419). Several already

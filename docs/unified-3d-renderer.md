@@ -169,6 +169,6 @@ raymarch hosts, but adopt 107's split-buffer update policy.
 ## Example roles (kept separate on purpose)
 
 Three examples, one renderer library — not one oversized example:
-`107_gpu3d_raymarch` (SDF/procedural features), `108_gpu3d_procedural`
-(data-oriented procedural scene), `109_gpu3d_pbr` (minimal raster
+`130_gpu3d_raymarch` (SDF/procedural features), `131_gpu3d_procedural`
+(data-oriented procedural scene), `132_gpu3d_pbr` (minimal raster
 correctness + material study).

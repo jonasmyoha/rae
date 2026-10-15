@@ -888,7 +888,7 @@ a project as "game proto1" (or similar) instead.
 **Warning-free C gate.** The C the compiler generates must compile without
 warnings, although `rae run` compiles it with `-w`.
 `compiler/tools/c-warnings-gate.sh` (`make c-warnings-gate`) emits the C of
-121, 106, 122 and the browser-smoke apps (109, 112, 125) and compiles it with
+121, 106, 122 and the browser-smoke apps (132, 134, 125) and compiles it with
 `-Wall -Wextra -Werror` (unused-*, sign-compare and
 missing-field-initializers off); it runs as one pre-suite case of every full
 run. The rules it holds: a `view` is `const` in every position (parameter,
@@ -910,6 +910,13 @@ scope) runs as one pre-suite case of every full run right after the
 banned-terms gate; a `footgun` that stops reproducing FAILS as `FIXED?` on
 purpose — flip it to `handles` in the same commit as the compiler fix, with
 `fixedBy` filled in. Never "fix" a FIXED? by loosening its expect.
+
+**Hardware checks (checks/README.md).** `checks/<name>/Main.rae` holds
+programs that test one part of the GPU layer on a real GPU (or the browser
+runtime) and exit 0 when they pass — they are not examples and do not go in
+`examples/`. `checks/run.sh` (`make -C compiler checks`, `RAE_CHECK_FILTER`
+to scope) runs them; a full `make test-examples` runs them too, and the
+devtools page lists them in its Checks tab.
 
 **naga is a test-suite dependency (2026-09-19).** A declared shader
 (`shader(files: [...])`, docs/shaders-and-the-compiler.md) is validated with
