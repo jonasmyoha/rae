@@ -2,8 +2,8 @@
 # rae in #552). The scene draws in the forward renderer's `forward` step:
 # beginForwardPass, the same draws 114 makes into its G-buffer (terrain, props,
 # physics cubes, the skinned walker and crowd, grass), endForwardPass. There is
-# no water, splash or underwater step. With SSAO (RAE_FORWARD_SSAO=1) the same
-# draws also fill a 1x depth + normal pre-pass at the `gbuffer` step, for `ssao`.
+# no water, splash or underwater step. The same draws also fill a 1x depth +
+# normal pre-pass at the `gbuffer` step, which the `ssao` step reads.
 #
 # The three render functions — the shadow pass, the G-buffer pass, and renderApp
 # (animation sample + render-graph walk) — moved verbatim from rae with no
@@ -245,8 +245,7 @@ func renderScenePass(
   resources: mod GpuResources
   generateGrass: copy Bool
 ) {
-  # The grass field is generated once a frame: in the pre-pass when SSAO has
-  # one, else here
+  # The grass field is generated once a frame, in the pre-pass
   if generateGrass {
     var grassToonGen: Int = 0
     if characterSystem.toon {
@@ -514,9 +513,9 @@ func renderApp(
         )
       }
       case RenderTag.gbuffer {
-        # With SSAO (forward-rae-6), the 1x depth + normal pre-pass: the same
-        # draws into the G-buffer pass, of which only the depth and normals are
-        # kept for the SSAO. Without SSAO the graph has no such step.
+        # The 1x depth + normal pre-pass (forward-rae-6): the same draws into
+        # the G-buffer pass, of which only the depth and normals are kept, for
+        # the SSAO
         ensureRendererResources(renderer: renderSystem.renderer)
         if let rendererResources: mod GpuResources => renderSystem.renderer.gpuResources {
           Gbuffer.beginPass(
@@ -572,7 +571,7 @@ func renderApp(
             profiler: profiler
             grassCompute: grassCompute
             resources: resources
-            generateGrass: not renderSystem.renderer.passes.gbuffer.forward.ssao
+            generateGrass: false
           )
         }
         endForwardPass(renderer: renderSystem.renderer)

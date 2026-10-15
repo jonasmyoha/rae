@@ -401,7 +401,7 @@ The study's earlier finding holds: a depth pre-pass costs more on Apple GPUs
 than it saves. In deferred, SSAO gets its depth and normals for free from the
 G-buffer.
 
-**Decision taken here:** the option stays in the lib, off by default. In 126 it
-is opt-in (`RAE_FORWARD_SSAO=1`, also covered by 126's example gate), so no
-slower path ships. Whether to keep it, make the pre-pass cheaper, or remove it
-is asked in the queue.
+**Decision (2026-10-15):** 126 is the forward example with SSAO, so it always
+uses `createForwardRendererWithSsao`. It is slower than 114 on the iPhone, and
+that is recorded here and in its README, not a reason to switch SSAO off. The
+other forward constructors stay without SSAO (111).

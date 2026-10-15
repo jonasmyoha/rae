@@ -1230,24 +1230,18 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # terrain, grass, props and cubes in one 4x MSAA pass, no water. A
           # shaded frame (thousands of colours), all 12 skinned parts loaded,
           # the forward path taken and the same 154 shadow casters as 114.
-          # RAE_FORWARD_SSAO=1 (forward-rae-6): the pre-pass + SSAO frame draws too.
           SHOT="$TMP_OUT/walker-forward.bmp"
-          SSAO_SHOT="$TMP_OUT/walker-forward-ssao.bmp"
           if (cd .. && RAE_UI_MODE=editor RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SHOT" \
                 perl -e 'alarm shift; exec @ARGV' 45 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
              && python3 tools/assert_nonblank_bmp.py "$SHOT" --min-colors=2000 > "$TMP_OUT/shot.log" 2>&1 \
-             && [ "$(grep -c "\[render\] path: forward" "$TMP_OUT/render.log")" -eq 1 ] \
+             && [ "$(grep -c "\[render\] path: forward (4x MSAA) with SSAO" "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c "skinned parts: 12" "$TMP_OUT/render.log")" -eq 1 ] \
-             && [ "$(grep -c "\[shadow\] casters 154, 3 cascades" "$TMP_OUT/render.log")" -eq 1 ] \
-             && (cd .. && RAE_FORWARD_SSAO=1 RAE_UI_MODE=editor RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SSAO_SHOT" \
-                perl -e 'alarm shift; exec @ARGV' 45 "$TMP_OUT/app") > "$TMP_OUT/ssao.log" 2>&1 \
-             && python3 tools/assert_nonblank_bmp.py "$SSAO_SHOT" --min-colors=2000 >> "$TMP_OUT/shot.log" 2>&1 \
-             && [ "$(grep -c "\[render\] path: forward (4x MSAA), SSAO true" "$TMP_OUT/ssao.log")" -eq 1 ]; then
-            echo "PASS: $EXAMPLE_NAME (forward walker: shaded frame, 12 skinned parts, shadow casters; SSAO pre-pass frame)"
+             && [ "$(grep -c "\[shadow\] casters 154, 3 cascades" "$TMP_OUT/render.log")" -eq 1 ]; then
+            echo "PASS: $EXAMPLE_NAME (forward walker with SSAO: shaded frame, 12 skinned parts, shadow casters)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (forward walker)"
-            cat "$TMP_OUT/render.log" "$TMP_OUT/shot.log" "$TMP_OUT/ssao.log" 2>/dev/null | sed 's/^/  /'
+            cat "$TMP_OUT/render.log" "$TMP_OUT/shot.log" 2>/dev/null | sed 's/^/  /'
             ((FAILED++))
           fi
         elif [ "$EXAMPLE_NAME" = "110_deferred_gbuffer" ]; then
