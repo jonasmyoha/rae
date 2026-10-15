@@ -11,6 +11,7 @@ second example uses it without copying anything.
 | `ui_shell.rae` | window extent, fonts + theme, world/scene bootstrap, named-node access |
 | `control_panel.rae` | a panel an app fills with its own buttons; radio groups |
 | `camera_bar.rae` + `scenes/camera_bar.raescene` | the camera readout bar |
+| `EditorPanel.rae` + `scenes/editor_panel.raescene` | the whole editor chrome: corner menu, camera bar, settings side panel, debug overlay, camera rig update |
 
 ## Using a shared component
 

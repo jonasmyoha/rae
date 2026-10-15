@@ -1,5 +1,8 @@
 # A seeded autumn grove: leaf geometry, branching trees, stratified stones and meadow.
-# Drag to orbit, wheel to zoom, Tab for a free camera. All geometry is authored in Rae.
+# All geometry is authored in Rae. The shared editor panel (app3d/EditorPanel)
+# is the chrome: drag to orbit, wheel to zoom, the camera bar's mode button for
+# the free WASD camera, the menu button for the settings (sky, time of day,
+# shadows, the three views). Keys 1 / 2 / 3 pick the views too.
 import Gpu2d
 import Vec3
 import Keys
@@ -16,19 +19,22 @@ open Sky
 open GroveScene
 open Gpu2dCanvas
 open app3d/CameraRig
-open app3d/DebugHud
+open app3d/EditorPanel
+open app3d/SettingsDialog
 open app3d/UiShell
 open ui/WindowGeometry
 open HotReload
 
 # The sun's three cascades, fitted to this frame's camera, with every mesh of
-# the world as a caster
+# the world as a caster. Without `castShadows` (the panel's shadow switch) the
+# cascades stay empty, which is a frame without shadows.
 func renderShadows(
   renderer: mod DeferredRenderer
   world: view World3d
   camera: view Camera3d
   light: view Light3d
   aspect: view Float
+  castShadows: view Bool
 ) {
   let cascades: ShadowCascades = fitShadowCascades(
     camPos: camera.position
@@ -44,7 +50,9 @@ func renderShadows(
     backExtent: 30.0
   )
   beginShadowPass(renderer: renderer, c: cascades)
-  renderSceneShadowWorldWith(renderer: renderer, world: world)
+  if castShadows {
+    renderSceneShadowWorldWith(renderer: renderer, world: world)
+  }
   endShadowPass(renderer: renderer)
 }
 
@@ -58,9 +66,8 @@ type ShowcaseState {
   light: Light3d
   camera: Camera3d
   cameraRig: CameraRig
-  debugHud: DebugHud
+  editorPanel: EditorPanel
   windowGeometry: WindowGeometry
-  windowHeight: Float
   lastTime: Float64
 }
 
@@ -77,23 +84,32 @@ func createShowcase() ret ShowcaseState {
     name: "window.138_procgen_showcase.geometry"
   )
   restoreWindowGeometry(windowGeometry: windowGeometry)
-  # Keep the shared HUD in logical window coordinates on resize.
-  let windowHeight: Float = windowExtentH()
-  Gpu2d.setDesignResolution(width: windowExtentW(), height: windowHeight, fit: 0)
-
   var renderer: DeferredRenderer = createDeferredRendererWithUi()
   let sceneWorld: World3d = buildGrove(renderer: renderer)
 
-  # The Preetham sky, and the same sun lights the scene and casts the shadows
-  let sunDirection: Vec3 = Vec3.vnorm(a: Vec3.create(x: -0.6, y: 0.25, z: -0.8))
-  let sunColor: Vec3 = Vec3.create(x: 3.1, y: 2.85, z: 2.5)
-  setRendererSky(
-    renderer: renderer
-    sky: createSkyProcedural(sunDir: sunDirection, sunColor: sunColor, turbidity: 2.5)
+  # The settings start on the Preetham sky at a fixed mid-morning hour (the
+  # clock runs from the panel), and the panel's scene chooser is the three views
+  let initialView: Int = groveViewNumber(viewName: Sys.getEnv(name: "RAE_GROVE_VIEW"))
+  var settings: SettingsState = createSettingsState(
+    scene: initialView
+    sceneCount: 3
+    speed: 1.0
+    toon: true
+    hour: 10.0
+    skyModel: SettingsSkyModel.preetham
+  )
+  settings.animateTime = false
+  let editorPanel: EditorPanel = createEditorPanel(
+    assetBase: "examples/136_walker_character/assets/"
+    settings: settings
   )
   var light: Light3d = defaultLight3d()
-  light.sunDir = sunDirection
-  light.sunColor = sunColor
+  applyEditorPanelSettings(
+    editorPanel: editorPanel
+    renderer: renderer
+    light: light
+    sunStrength: groveSunStrength
+  )
   light.ambSky = Vec3.create(x: 0.30, y: 0.37, z: 0.42)
   light.ambGround = Vec3.create(x: 0.15, y: 0.12, z: 0.09)
 
@@ -103,8 +119,7 @@ func createShowcase() ret ShowcaseState {
   camera.farZ = 600
   var cameraRig: CameraRig = createCameraRig(camera: camera)
   cameraRig.maxDistance = 55
-  let initialView: String = Sys.getEnv(name: "RAE_GROVE_VIEW")
-  setGroveView(camera: camera, cameraRig: cameraRig, viewName: initialView)
+  setGroveView(camera: camera, cameraRig: cameraRig, groveView: initialView)
 
   # The state takes the renderer's GPU handles with it: moved, never copied
   unsafe {
@@ -114,28 +129,40 @@ func createShowcase() ret ShowcaseState {
       light: light
       camera: camera
       cameraRig: cameraRig
-      # The shared widget font atlas, read in place
-      debugHud: createDebugHud(fontBase: "examples/136_walker_character/assets/Roboto-Regular")
+      editorPanel: own editorPanel
       windowGeometry: own windowGeometry
-      windowHeight: windowHeight
       lastTime: Gpu2d.nowSeconds()
     }
   }
 }
 
+# The grove's materials are authored for a bright sun
+const groveSunStrength: Float = 3.1
+
+# The view RAE_GROVE_VIEW names: 1 the grove, 2 the trees, 3 the rocks
+func groveViewNumber(viewName: view String) ret Int {
+  if viewName is "trees" {
+    ret 2
+  }
+  if viewName is "rocks" {
+    ret 3
+  }
+  ret 1
+}
+
 # Presets are also the visual gate's reproducible inspection angles.
-func setGroveView(camera: mod Camera3d, cameraRig: mod CameraRig, viewName: view String) {
+func setGroveView(camera: mod Camera3d, cameraRig: mod CameraRig, groveView: view Int) {
   cameraRig.mode = CameraRigMode.orbit
   camera.target = Vec3.create(x: 0, y: 3, z: 1.7)
   cameraRig.yaw = 0.10
   cameraRig.orbitPitch = 0.48
   cameraRig.distance = 34
-  if viewName is "trees" {
+  if groveView is 2 {
     camera.target = Vec3.create(x: -4.8, y: 2, z: 3.4)
     cameraRig.yaw = -0.5
     cameraRig.orbitPitch = 0.15
     cameraRig.distance = 13
-  } else if viewName is "rocks" {
+  } else if groveView is 3 {
     camera.target = Vec3.create(x: -4.6, y: -2.2, z: 0.6)
     cameraRig.yaw = 0.6
     cameraRig.orbitPitch = 0.55
@@ -154,34 +181,40 @@ func runShowcaseFrame(state: mod ShowcaseState) {
 
   let resized: Bool = Gpu2d.windowResized()
   updateWindowGeometry(windowGeometry: state.windowGeometry, now: now, resized: resized)
-  if resized and windowExtentH() > 0.0 {
-    state.windowHeight = windowExtentH()
-    Gpu2d.setDesignResolution(width: windowExtentW(), height: state.windowHeight, fit: 0)
-  }
-
   let renderFrame: Bool = Gpu2d.renderGate()
-  let debugInputTaken: Bool = updateDebugHud(
-    debugHud: state.debugHud
+  let shownView: Int = state.editorPanel.settings.scene
+  let panelFrame: EditorPanelFrame = updateEditorPanel(
+    editorPanel: state.editorPanel
+    cameraRig: state.cameraRig
+    camera: state.camera
     now: now
+    deltaTime: deltaTime
+    resized: resized
     rendered: renderFrame
   )
-  if not debugInputTaken {
-    if Sdl3.isKeyPressed(key: Keys.key1) {
-      setGroveView(camera: state.camera, cameraRig: state.cameraRig, viewName: "grove")
-    } else if Sdl3.isKeyPressed(key: Keys.key2) {
-      setGroveView(camera: state.camera, cameraRig: state.cameraRig, viewName: "trees")
-    } else if Sdl3.isKeyPressed(key: Keys.key3) {
-      setGroveView(camera: state.camera, cameraRig: state.cameraRig, viewName: "rocks")
-    }
+  if panelFrame.settingsChanged {
+    applyEditorPanelSettings(
+      editorPanel: state.editorPanel
+      renderer: state.renderer
+      light: state.light
+      sunStrength: groveSunStrength
+    )
   }
-  let cameraMoved: Bool = updateCameraRig(
-    rig: state.cameraRig
-    camera: state.camera
-    allowInput: not debugInputTaken
-    wheel: Gpu2d.wheelMove()
-    deltaTime: deltaTime
-  )
-  applyCameraRig(rig: state.cameraRig, camera: state.camera)
+  # The views from the keys, kept in step with the panel's scene chooser
+  if Sdl3.isKeyPressed(key: Keys.key1) {
+    selectEditorPanelScene(editorPanel: state.editorPanel, scene: 1)
+  } else if Sdl3.isKeyPressed(key: Keys.key2) {
+    selectEditorPanelScene(editorPanel: state.editorPanel, scene: 2)
+  } else if Sdl3.isKeyPressed(key: Keys.key3) {
+    selectEditorPanelScene(editorPanel: state.editorPanel, scene: 3)
+  }
+  if state.editorPanel.settings.scene is not shownView {
+    setGroveView(
+      camera: state.camera
+      cameraRig: state.cameraRig
+      groveView: state.editorPanel.settings.scene
+    )
+  }
   if not renderFrame {
     ret
   }
@@ -199,9 +232,10 @@ func runShowcaseFrame(state: mod ShowcaseState) {
         camera: state.camera
         light: state.light
         aspect: aspect
+        castShadows: state.editorPanel.settings.shadows
       )
     } else if tag is RenderTag.uiOverlay {
-      drawDebugHud(debugHud: state.debugHud, canvas: renderer.canvas)
+      drawEditorPanel(editorPanel: state.editorPanel, canvas: renderer.canvas)
     } else {
       renderDeferredPassWorld(
         renderer: renderer
