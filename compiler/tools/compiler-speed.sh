@@ -7,13 +7,13 @@
 #
 # which the devtools test-log tailer records as `compiler.lines_per_s` (the
 # Statistics tab's "Compiler speed" graph). The standard program is
-# 119_ocean_fft: featured, mid-sized (~39 000 lines with the stdlib), and on
+# 141_ocean_fft (119_ocean_fft until 2026-10-15): featured, mid-sized (~39 000 lines with the stdlib), and on
 # the graph's history since 2026-09-17. The emit is superlinear in program
 # size, so the number is only comparable for the SAME program; change it only
 # with a note on the graph. Never fails the suite: it measures.
 set -u
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
-EXAMPLE="${RAE_SPEED_EXAMPLE:-119_ocean_fft}"
+EXAMPLE="${RAE_SPEED_EXAMPLE:-141_ocean_fft}"
 OUT="$(mktemp -d)"
 trap 'rm -rf "$OUT"' EXIT
 best_ms=""; lines=""

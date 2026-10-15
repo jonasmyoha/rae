@@ -20,7 +20,7 @@ writes the trace when the window elapses:
 
 ```bash
 RAE_PROFILE=1 RAE_PROFILE_SECONDS=30 RAE_PROFILE_OUT=/tmp/rae_profile.json \
-  ./compiler/bin/rae run examples/114_walker_character
+  ./compiler/bin/rae run examples/136_walker_character
 ```
 
 Walk around, let the sun set (the case where 114 drops from 60→~20 fps), and at
@@ -37,7 +37,7 @@ Walk around, let the sun set (the case where 114 drops from 60→~20 fps), and a
 Pick **iOS device (profiler)** in the devtools target dropdown, or run:
 
 ```bash
-RAE_IOS_PROFILE=30 sh tools/ios/run-ios.sh examples/114_walker_character
+RAE_IOS_PROFILE=30 sh tools/ios/run-ios.sh examples/136_walker_character
 ```
 
 It builds + installs + launches with the capture on, prints `PLAY NOW`, and you

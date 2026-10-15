@@ -559,7 +559,7 @@ three calls deep), 1042 (a generic that waits only for some T) and 1043
 | server, event loop (`benchmarks/servers/rae/eventLoop/http`) | 10 + 446 | 2 + 10 | 1 | 1 + 2 | `serve -> pollWait -> systemPollerWait` |
 | server, ECS (`benchmarks/servers/rae/ecs/http`) | 4 + 790 | 2 + 16 | 1 | 1 + 7 | `serve -> httpServerFrame(BenchRouter) -> pollSystem -> pollWait`; `closeSystem -> destroyConnection -> joinAwaiting` (the `AwaitingResult` join) |
 | `benchmarks/spawn` | 26 + 333 | 12 + 5 | 7 | 4 + 4 | the sleepers, `waitUntil`, and the fork-join recursions (task joins) |
-| 114_walker_character, 97_tetris3d, 124_vehicle_port | — | — | 0 | 0 | no spawns |
+| 136_walker_character, 97_tetris3d, 124_vehicle_port | — | — | 0 | 0 | no spawns |
 
 **What the numbers say for S3:**
 
@@ -1053,7 +1053,7 @@ The generated frame callback calls `rae_sched_frame()` before the body.
 A wasi build (`wasm_smoke.sh`) has no frames, so it keeps the drive of
 `RAE_WORKERS=1`: the spawner runs the task to its end through its timers.
 
-**Checked** by `examples/zz_web_task_check`: a task sleeps five times
+**Checked** by `checks/webTask`: a task sleeps five times
 20 ms while a `mainLoop` counts frames. `compiler/tools/wasm_webgpu_smoke.sh`
 builds it for the browser and runs it in headless Chrome: "TASK OK: 5 sleeps
 of 20 ms while 10 frames ran". Before this change the task finished before

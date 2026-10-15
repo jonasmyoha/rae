@@ -2,7 +2,7 @@
 
 [![XKCD 927: Standards](docs/screenshots/xkcd_927_standards.png)](https://xkcd.com/927/)
 
-![Metaballs, deferred rendering — SDF metaballs under a physical sky](docs/screenshots/112_metaballs_deferred.2.png)
+![Metaballs, deferred rendering — SDF metaballs under a physical sky](docs/screenshots/134_metaballs_deferred.2.png)
 
 A minimalistic, high-performance programming language that aims to be as readable and clear
 in its syntax as possible.
@@ -382,8 +382,8 @@ Built on top, all in Rae except the raw GPU and platform calls:
   materials, cascaded shadows, SSAO, TAA, SDF metaballs, glTF loading and
   skinned animation, and a physical sky (Preetham and Hosek-Wilkie).
 
-  ![3D renderer — metaballs scene](docs/screenshots/112_metaballs_deferred.png)
-  ![3D renderer — skinned, animated glTF walker character](docs/screenshots/114_walker_character.png)
+  ![3D renderer — metaballs scene](docs/screenshots/134_metaballs_deferred.png)
+  ![3D renderer — skinned, animated glTF walker character](docs/screenshots/136_walker_character.png)
   ![Raytracer — a GPU path tracer with a crisp MTSDF text overlay](docs/screenshots/53_raytracer_webgpu_text.png)
 
 - **UI** — an ECS whose widgets are entities and whose layout is a `.raescene`

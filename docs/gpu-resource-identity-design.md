@@ -2,7 +2,7 @@
 
 Status: **approved contract (approval 2026-09-11: all four
 recommendations taken as written). Implemented by #869 in
-`lib/gpu/GpuResources.rae`; hardware check `examples/zz_gpu_resources_check`.** Executable model:
+`lib/gpu/GpuResources.rae`; hardware check `checks/gpuResources`.** Executable model:
 `compiler/tests/cases/794_gpu_identity_model` (deterministic, no GPU).
 
 This is library design over the shipped lifecycle (`create`/`drop`/`copy`,
@@ -320,7 +320,7 @@ flat dependency arena and a view's texture as its recorded indirect dependency.
 - Checks: `compiler/tests/cases/795_gpu_lifetime_model` (deterministic, no GPU:
   early retirement, old bind group, abandoned recording, refused submit,
   repeated submissions, submission exhaustion, independent managers) and
-  `examples/zz_gpu_lifetime_check` on hardware (a real compute dispatch and
+  `checks/gpuLifetime` on hardware (a real compute dispatch and
   copy with byte-exact readback, polling, early retirement, old bind group,
   abandoned/refused recordings, repeated submissions, independent managers,
   shutdown). #871 layers `ReadbackId` on `readBuffer`; explicit `.drop()` of a
@@ -368,9 +368,9 @@ renderer C was added; everything is Rae over the generated bindings and the
 - Checks: `compiler/tests/cases/796_readback_lifetime_model` (deterministic, no
   GPU: success/failure/cancel, exclusive mapping, bounded staging, reuse, device
   loss and exact-once release counting) and on hardware
-  `examples/zz_gpu_readback_check` (two concurrent requests, exclusive mapping,
+  `checks/gpuReadback` (two concurrent requests, exclusive mapping,
   busy-defer, byte-exact copies, deferred release, reuse, cancellation,
-  exact-once shutdown) and `examples/zz_gpu_manager_timing` (five frames of
+  exact-once shutdown) and `checks/gpuManagerTiming` (five frames of
   nonblocking two-pass GPU timing with real timestamps, then shutdown).
 
 ## Implementation notes (#872): checked argument packing
@@ -407,7 +407,7 @@ bindings, with no new reflection syntax or bindless promises.
   `List(Float)` with hand-counted offsets); it adopts this packer when it moves
   onto the manager. Checks: `compiler/tests/cases/797_gpu_args_layout`
   (deterministic offsets and exact bytes for scalar/vec2/vec3/vec4/mat4/u32/i32)
-  and on hardware `examples/zz_gpu_args_check` (pack a known struct, upload,
+  and on hardware `checks/gpuArgs` (pack a known struct, upload,
   read every field back through the shader's own std140 layout, and confirm the
   bit patterns match — a mismatch between the Rae offsets and WGSL would fail).
 
@@ -456,7 +456,7 @@ surface. It exists so a render surface such as water's can be manager-owned
   dependencies) becomes a use of the recording, re-validated at submit and
   pinned until completion. `recordCopyTextureToBuffer` is the pixel path back
   into a buffer (row pitch a multiple of 256) for readbacks and screenshots.
-- **Verified on hardware** by `examples/zz_gpu_render_check`: a manager render
+- **Verified on hardware** by `checks/gpuRender`: a manager render
   pipeline draws a clip-space triangle over a 4x4 RGBA8 manager texture, the
   fragment colour comes from an ADOPTED uniform buffer the check owns, the
   texture is copied to a buffer and read through a `ReadbackId`, every pixel

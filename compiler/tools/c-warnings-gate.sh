@@ -19,7 +19,7 @@ if ! command -v "$CC" >/dev/null 2>&1; then
 fi
 WG="${WGPU_NATIVE:-$HOME/.local/wgpu-native}"
 B3="$HOME/.cache/rae/box3d/install/include"
-APPS="121_ui_editor 106_mobile_ui 122_physics_playground_port 109_gpu3d_pbr 112_metaballs_deferred 125_vehicle_c"
+APPS="121_ui_editor 106_mobile_ui 122_physics_playground_port 132_gpu3d_pbr 134_metaballs_deferred 125_vehicle_c"
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 

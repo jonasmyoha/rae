@@ -161,8 +161,8 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" 2>/dev/null | sed 's/^/  /'
             ((FAILED++))
           fi
-        elif [ "$EXAMPLE_NAME" = "109_gpu3d_pbr" ]; then
-          # 109 was migrated from the forward renderer to the DEFERRED path
+        elif [ "$EXAMPLE_NAME" = "132_gpu3d_pbr" ]; then
+          # 132 (109 until 2026-10-15) was migrated from the forward renderer to the DEFERRED path
           # (#514). The forward draw-limit guard (RAE_GPU3D_DRAW_LIMIT, via
           # rae_g3d_push_draw_record) therefore no longer fires here — deferred
           # draws never take that path — so this gate verifies the deferred PBR
@@ -180,7 +180,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" 2>/dev/null | sed 's/^/  /'
             ((FAILED++))
           fi
-        elif [ "$EXAMPLE_NAME" = "117_transparent_pass" ]; then
+        elif [ "$EXAMPLE_NAME" = "139_transparent_pass" ]; then
           # The transparent forward pass in isolation (#845): the log line
           # proves the pass ran with instances queued on every rendered frame;
           # the non-blank shot proves a frame came out. Whether the cubes
@@ -1108,7 +1108,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" "$TMP_OUT/idle.log" "$TMP_OUT/drag.log" "$TMP_OUT/spotify.log" "$TMP_OUT/hero.log" "$TMP_OUT/hero-shot.log" 2>/dev/null | grep -av '^\[present\]' | sed 's/^/  /'
             ((FAILED++))
           fi
-        elif [ "$EXAMPLE_NAME" = "119_ocean_fft" ]; then
+        elif [ "$EXAMPLE_NAME" = "141_ocean_fft" ]; then
           # The realistic water tier on its own (#851): the log line proves the
           # FFT baked and the ocean drew. Then cycle all size/count combinations
           # on hardware, checking exact cadence, wave times and FFT readbacks.
@@ -1150,7 +1150,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/run.log" | sed 's/^/  /'
             ((FAILED++))
           fi
-        elif [ "$EXAMPLE_NAME" = "118_water_lake" ]; then
+        elif [ "$EXAMPLE_NAME" = "140_water_lake" ]; then
           # The toon water on its own (#853): the log line proves the lake was
           # drawn on every rendered frame under the deferred graph; the shot
           # proves a frame came out. Runs from the repo root (lib/*.wgsl).
@@ -1172,7 +1172,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" 2>/dev/null | sed 's/^/  /'
             ((FAILED++))
           fi
-        elif [ "$EXAMPLE_NAME" = "114_walker_character" ]; then
+        elif [ "$EXAMPLE_NAME" = "136_walker_character" ]; then
           # The multi-primitive gate, plus the skinning and colour chain.
           # 6717 verts / 3465 triangles is every primitive of all 10 meshes
           # merged; loading only the first would report a fraction of that
@@ -1225,11 +1225,11 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             grep -a '^\[mem:live\]' "$TMP_OUT/live-growth.log" 2>/dev/null | sed 's/^/  /'
             ((FAILED++))
           fi
-        elif [ "$EXAMPLE_NAME" = "126_walker_forward" ]; then
-          # The forward twin of 114 (forward-rae-5): the same walker, crowd,
+        elif [ "$EXAMPLE_NAME" = "137_walker_forward" ]; then
+          # The forward twin of 136 (forward-rae-5): the same walker, crowd,
           # terrain, grass, props and cubes in one 4x MSAA pass, no water. A
           # shaded frame (thousands of colours), all 12 skinned parts loaded,
-          # the forward path taken and the same 154 shadow casters as 114.
+          # the forward path taken and the same 154 shadow casters as 136.
           SHOT="$TMP_OUT/walker-forward.bmp"
           if (cd .. && RAE_UI_MODE=editor RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SHOT" \
                 perl -e 'alarm shift; exec @ARGV' 45 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
@@ -1244,7 +1244,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render.log" "$TMP_OUT/shot.log" 2>/dev/null | sed 's/^/  /'
             ((FAILED++))
           fi
-        elif [ "$EXAMPLE_NAME" = "110_deferred_gbuffer" ]; then
+        elif [ "$EXAMPLE_NAME" = "133_deferred_gbuffer" ]; then
           # The deferred G-buffer (#356). Each channel is checked separately
           # because they fail differently: a broken albedo write still leaves
           # plausible normals, and a broken normal transform still leaves
@@ -1273,7 +1273,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # and the pyramid must actually have been built — a silently
           # skipped pass would still leave a correct-looking lit image,
           # since nothing reads the pyramid yet. The renderer builds it only
-          # on request (render-perf-5); 110 requests it and logs
+          # on request (render-perf-5); 133 requests it and logs
           # `depth pyramid: N mips` once it exists. The pass itself sits at
           # `4: depthPyramid` in the derived order (waterFft leads since #831).
           if [ "$GB_OK" = "1" ] \
@@ -1296,15 +1296,15 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT"/gb-*.log 2>/dev/null | sed 's/^/  /'
             ((FAILED++))
           fi
-        elif [ "$EXAMPLE_NAME" = "111_metaballs_forward" ]; then
-          # The forward twin of 112, on the Rae forward main pass since
+        elif [ "$EXAMPLE_NAME" = "135_metaballs_forward" ]; then
+          # The forward twin of 134, on the Rae forward main pass since
           # forward-rae-2 (lib/RendererForward: one 4x MSAA pass). One
-          # screenshot is enough: 112 owns the deep coverage (scene switching,
+          # screenshot is enough: 134 owns the deep coverage (scene switching,
           # pause, settings, free camera), and the renderer is the only thing
           # that differs. The metaball line proves the forward metaball
           # material drew; the shadow line that the cascades were filled.
           # (This gate used to also fire the C forward renderer's draw-limit
-          # guard; 111 no longer uses that renderer, which forward-rae-3
+          # guard; 135 no longer uses that renderer, which forward-rae-3
           # deletes.)
           SCREENSHOT="$TMP_OUT/gpu3d-ui-forward.bmp"
           if (cd .. && RAE_GPU3D_SDF_TEST_LOG=1 RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
@@ -1313,14 +1313,14 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=2000 >> "$TMP_OUT/screenshot.log" 2>&1 \
              && [ "$(grep -c '\[gpu3d\] SDF metaballs: count=5' "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c '\[shadow\] casters 17, 3 cascades' "$TMP_OUT/render.log")" -eq 1 ]; then
-            echo "PASS: $EXAMPLE_NAME (Rae forward pass: lit frame with metaballs + shadow cascades)"
+            echo "PASS: $EXAMPLE_NAME (Rae forward pass with SSAO: lit frame with metaballs + shadow cascades)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (forward 3D/UI screenshot)"
             cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" 2>/dev/null | sed 's/^/  /'
             ((FAILED++))
           fi
-        elif [ "$EXAMPLE_NAME" = "112_metaballs_deferred" ]; then
+        elif [ "$EXAMPLE_NAME" = "134_metaballs_deferred" ]; then
           # The free-camera shot must also be a SHADED SCENE (thousands of
           # colours): a black viewport under an intact UI passed the UI-only
           # check for the #920..#921 slices (the UI drew on a canvas the scene
@@ -1580,7 +1580,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             echo "FAIL: $EXAMPLE_NAME (vehicle gate)"
             ((FAILED++))
           fi
-        elif [ "$EXAMPLE_NAME" = "115_procgen_showcase" ]; then
+        elif [ "$EXAMPLE_NAME" = "138_procgen_showcase" ]; then
           # The procgen scene (trees, rocks, the texture swatches over it) must
           # come out SHADED: thousands of colours, not a swatch strip over black.
           SCREENSHOT="$TMP_OUT/procgen.bmp"
@@ -1614,6 +1614,16 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
     ((FAILED++))
   fi
 done
+
+# The hardware checks (checks/README.md) were zz_ examples once; a full run
+# still runs them, a filtered run leaves them to RAE_CHECK_FILTER.
+if [ -z "${RAE_EXAMPLE_FILTER:-}" ]; then
+  if bash ../checks/run.sh; then
+    ((PASSED++))
+  else
+    ((FAILED++))
+  fi
+fi
 
 echo
 echo "=========================================="

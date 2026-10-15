@@ -181,7 +181,7 @@ member, stray `default`, a non-opt subject, and `case none` on a plain `match`).
 
 ### 1. Dispatch tags should be enums → exhaustive match (no new syntax, real safety)
 
-The deferred render-graph walk (`examples/114_walker_character/app.rae`) is an
+The deferred render-graph walk (`examples/136_walker_character/app.rae`) is an
 `if`-chain because the pass tags are plain `Int` consts
 (`lib/renderer_deferred.rae`: `const tagGbuffer: Int = 10`, …):
 

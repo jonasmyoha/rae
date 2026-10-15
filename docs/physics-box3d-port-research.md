@@ -249,7 +249,7 @@ How option B would look:
 - Write the integration in Rae, in `lib/physics/`:
   - a `PhysicsBody` component holding the `b3BodyId`;
   - spawn and despawn systems that create and destroy bodies with their entities;
-  - a step system on the existing fixed-timestep seam (`examples/114_walker_character/physicsSystem`);
+  - a step system on the existing fixed-timestep seam (`examples/136_walker_character/physicsSystem`);
   - a write-back system from body poses to `Transform3D`;
   - systems that copy contact, sensor and body events into ECS events;
   - query helpers for rays and overlaps.

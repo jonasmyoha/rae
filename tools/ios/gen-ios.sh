@@ -132,8 +132,8 @@ echo "gen-ios: emitting C for $name..."
 # 2. Enumerate bundled assets (the example's assets/ tree). Each file is added to
 #    the bundle at the SAME relative path so the emitted relative reads resolve
 #    after the chdir shim.
-# Rae examples read assets by two conventions: repo-root-relative (e.g. 114's
-# "examples/114_walker_character/assets/...", "lib/data/...") and {dir}/CWD-
+# Rae examples read assets by two conventions: repo-root-relative (e.g. 136's
+# "examples/136_walker_character/assets/...", "lib/data/...") and {dir}/CWD-
 # relative ("assets/..."). The chdir shim makes the bundle root the CWD, so we
 # STAGE resources under both layouts and bundle them preserving those relative
 # paths (mirrors the emcc --preload-file @/path scheme). Shared lib data that
@@ -149,7 +149,7 @@ if [ -d "$ex_dir/assets" ]; then
   # absolute path and bury the bundle under it — skip the repo-root layer there.
   case "$ex_dir/" in
     "$root"/*)
-      ex_rel=${ex_dir#"$root/"}                 # examples/114_walker_character
+      ex_rel=${ex_dir#"$root/"}                 # examples/136_walker_character
       mkdir -p "$stage/$ex_rel"; cp -R "$ex_dir/assets" "$stage/$ex_rel/" ;;
   esac
 fi
@@ -159,9 +159,9 @@ for shared in lib/app3d/scenes lib/data; do
   fi
 done
 # Assets an app reads from ANOTHER in-repo example (118/119 draw their debug
-# HUD with 114's font): every string the C names under examples/<x>/assets/ is
+# HUD with 136's font): every string the C names under examples/<x>/assets/ is
 # staged at its repo-root path. A path built by interpolation is only a prefix
-# in the C ("examples/114_walker_character/assets/Roboto-Regular" + ".mtsdf.json"),
+# in the C ("examples/136_walker_character/assets/Roboto-Regular" + ".mtsdf.json"),
 # so every file starting with it is copied. On the desktop the CWD is the repo
 # root and these resolve on their own; on a device only bundled files exist.
 grep -oE '"examples/[A-Za-z0-9_]+/assets/[^"]*"' "$gen/app.c" | tr -d '"' | sort -u \
@@ -175,7 +175,7 @@ grep -oE '"examples/[A-Za-z0-9_]+/assets/[^"]*"' "$gen/app.c" | tr -d '"' | sort
 # Shared WGSL that examples compose at RUNTIME (noise, world_biome, terrain_splat,
 # ...). Bundle the whole lib/*.wgsl set: a missing one does not fail gracefully —
 # the composed shader loses its entry point and wgpu-native ABORTS at pipeline
-# creation (this is what crashed 114 on device: only noise.wgsl was shipped).
+# creation (this is what crashed 136 on device: only noise.wgsl was shipped).
 # Every lib/**/*.wgsl, at its own relative path (lib/gpu/..., lib/water/...):
 # a stdlib read tries the CWD-relative "lib/..." first, and on a device there
 # is no $RAE_STDLIB to fall back on.

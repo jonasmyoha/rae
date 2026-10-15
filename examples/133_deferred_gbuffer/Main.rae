@@ -1,0 +1,266 @@
+# Deferred renderer — the G-buffer pass (#356, Track B).
+#
+# The deferred frame rendering a real scene: the same authored `scene3d`
+# components example 132 uses, driven through `renderer_deferred`'s graph
+# instead of `renderer3d`'s. The two frames coexist — this one does not
+# replace or reuse the forward path, and neither shares a resource with the
+# other.
+#
+# WHAT IS ACTUALLY RUNNING. The full chain: the geometry pass writes
+# surface attributes and performs no lighting; the depth pyramid reduces
+# depth with MIN into a mip chain (built on request: nothing samples it yet); one fullscreen
+# lighting pass evaluates
+# the BRDF over the G-buffer into linear HDR; the composite tonemaps that
+# to the presentable target. Lighting cost is per pixel, not per
+# object-pixel — the point of the whole split.
+#
+# `RAE_GBUFFER_VIEW=albedo|normal|material|depth` swaps the composite for
+# the G-buffer inspector, which is permanent equipment rather than
+# scaffolding: when a lit image is wrong, the first question is always
+# which attribute is wrong. Unset (or `lit`) gives the lit frame.
+#
+# ORDER IS DERIVED. Nothing here says gbuffer-then-composite-then-present.
+# renderDeferredFrame walks the sequence the graph computed from the
+# resource edges declared in lib/rendererDeferred.rae. Test 572 pins that
+# sequence; this example is what proves the same declaration also drives
+# real GPU work.
+#
+# PER-OBJECT COST. Transforms flow through `Mat4` value types, so a frame's
+# per-object path allocates nothing regardless of object count. Test 573 is
+# the standing assertion; this is the scene it was modelled on.
+#
+# WORLD CONVENTION: right-handed Z-up (Blender), docs/coordinate-system.md.
+#
+# Controls: drag to orbit, wheel to zoom.
+# Compiled-target only; needs wgpu-native + SDL3.
+#   rae run --target compiled main.rae
+# Headless screenshot:
+#   RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT=/tmp/lit.bmp \
+#     rae run --target compiled main.rae
+#   RAE_GBUFFER_VIEW=normal ... (same, but the normal channel)
+import Math
+import Sys
+import Gpu2d
+import Vec3
+open Scene3d
+open ecs/Entity
+open Gbuffer
+open RendererDeferred
+open Rendergraph
+open Math3d
+open Mesh3d
+
+func uploadMeshData(renderer: mod DeferredRenderer, meshData: view MeshData) ret MeshHandle {
+  ret uploadMesh(
+    renderer: renderer
+    verts: meshData.verts
+    vertCount: meshData.vertCount
+    indices: meshData.indices
+  )
+}
+
+# A metallic x roughness sphere grid plus a ground plane. Deliberately the
+# same material study as 132: the G-buffer's whole job is to carry these
+# two parameters to the lighting pass intact, so a scene that sweeps both
+# is what makes a wrong material channel visible rather than plausible.
+func buildScene(
+  sphere: view MeshHandle
+  ground: view MeshHandle
+  torus: view MeshHandle
+) ret World3d {
+  var world: World3d = create()
+  let noEmit: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  let noRot: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  let unit: Vec3 = Vec3.create(x: 1.0, y: 1.0, z: 1.0)
+
+  loop var row: Int = 0, row < 5, ++row {
+    loop var col: Int = 0, col < 5, ++col {
+      let metallic: Float = row.toFloat() / 4.0
+      var roughness: Float = col.toFloat() / 4.0
+      if roughness < 0.05 {
+        roughness = 0.05
+      }
+      # Hue varies across the grid so the albedo channel is legible as
+      # something other than one flat colour.
+      let mat: Material3d = {
+        baseColor: Vec3.create(
+          x: 0.85
+          y: 0.2 + row.toFloat() * 0.15
+          z: 0.25 + col.toFloat() * 0.15
+        )
+        metallic: metallic
+        roughness: roughness
+        emission: noEmit
+        toon: false
+      }
+      let pos: Vec3 = Vec3.create(
+        x: (col.toFloat() - 2.0) * 2.4
+        y: (row.toFloat() - 2.0) * 2.4
+        z: 0.5
+      )
+      let e: EntityId = world3dAddMeshInstance(
+        world: world
+        mesh: sphere
+        material: mat
+        position: pos
+        rotation: noRot
+        scale: unit
+      )
+    }
+  }
+
+  # An EMITTER, to exercise the G-buffer's shading-mode field and the
+  # logarithmic emissive channel (#366). Its base colour is the colour it
+  # emits — the G-buffer stores one intensity scalar and lighting tints by
+  # albedo, so an emitter is authored by setting both. A value above 1
+  # is the point: it proves the log encoding carries HDR range that a
+  # plain 8-bit channel could not.
+  let emitMat: Material3d = {
+    baseColor: Vec3.create(x: 0.35, y: 0.7, z: 1.0)
+    metallic: 0.0
+    roughness: 0.5
+    emission: Vec3.create(x: 4.0, y: 4.0, z: 4.0)
+    toon: false
+  }
+  let torusE: EntityId = world3dAddMeshInstance(
+    world: world
+    mesh: torus
+    material: emitMat
+    position: Vec3.create(x: 0.0, y: 0.0, z: 3.6)
+    rotation: noRot
+    scale: unit
+  )
+
+  let groundMat: Material3d = {
+    baseColor: Vec3.create(x: 0.42, y: 0.43, z: 0.45)
+    metallic: 0.0
+    roughness: 0.9
+    emission: noEmit
+    toon: false
+  }
+  let groundE: EntityId = world3dAddMeshInstance(
+    world: world
+    mesh: ground
+    material: groundMat
+    position: Vec3.create(x: 0.0, y: 0.0, z: 0.0 - 0.7)
+    rotation: noRot
+    scale: unit
+  )
+  ret world
+}
+
+# Channel selection by name. Defaults to the lit frame; the G-buffer
+# channels are opt-in for inspection.
+func selectedView() ret Int {
+  let v: String = Sys.getEnv(name: "RAE_GBUFFER_VIEW")
+  if v is "normal" {
+    ret viewNormal
+  }
+  if v is "material" {
+    ret viewMaterial
+  }
+  if v is "depth" {
+    ret viewDepth
+  }
+  ret viewLit
+}
+
+func main() ret Int {
+  Gpu2d.initWindow(width: 1280, height: 800, title: "Rae 3D — deferred G-buffer (Z-up)")
+
+  let sphereData: MeshData = makeSphere(rings: 32, segments: 48)
+  let planeData: MeshData = makePlane(size: 40.0, segments: 1)
+  let torusData: MeshData = makeTorus(
+    majorR: 1.0
+    minorR: 0.35
+    majorSegs: 96
+    minorSegs: 48
+  )
+  var renderer: DeferredRenderer = createDeferredRenderer()
+  # No pass samples the depth pyramid yet, so the renderer builds it only on
+  # request. This example shows the whole chain, so it asks.
+  requestDepthPyramid(renderer: renderer)
+
+  let sphere: MeshHandle = uploadMeshData(renderer: renderer, meshData: sphereData)
+  let ground: MeshHandle = uploadMeshData(renderer: renderer, meshData: planeData)
+  let torus: MeshHandle = uploadMeshData(renderer: renderer, meshData: torusData)
+
+  var world: World3d = buildScene(sphere: sphere, ground: ground, torus: torus)
+  var camera: Camera3d = defaultCamera3d()
+  var light: Light3d = defaultLight3d()
+
+  let gs: Int = compileDeferred(renderer: renderer)
+  if gs is not 0 {
+    log("deferred graph invalid: {statusName(status: gs)}")
+    ret 1
+  }
+  setDebugView(renderer: renderer, mode: selectedView())
+  log("{describeDeferred(renderer: renderer)}")
+
+  var yaw: Float = 0.0
+  var pitch: Float = 0.35
+  var dist: Float = 14.0
+  var lastX: Float = 0.0
+  var lastY: Float = 0.0
+  var dragging: Bool = false
+  let startT: Float64 = Gpu2d.nowSeconds()
+  var pyramidLogged: Bool = false
+
+  loop not Gpu2d.pollClose() {
+    let px: Float = Gpu2d.pointerX()
+    let py: Float = Gpu2d.pointerY()
+    if Gpu2d.pointerDown() {
+      if dragging {
+        yaw = yaw + (px - lastX) * 0.008
+        pitch = pitch - (py - lastY) * 0.008
+        if pitch > 1.45 {
+          pitch = 1.45
+        }
+        if pitch < 0.05 {
+          pitch = 0.05
+        }
+      }
+      dragging = true
+    } else {
+      dragging = false
+    }
+    lastX = px
+    lastY = py
+    dist = dist - Gpu2d.wheelMove() * 0.8
+    if dist < 4.0 {
+      dist = 4.0
+    }
+    if dist > 40.0 {
+      dist = 40.0
+    }
+
+    let t: Float = (Gpu2d.nowSeconds() - startT) as Float
+    camera.position = orbitEye(
+      targetX: camera.target.x
+      targetY: camera.target.y
+      targetZ: camera.target.z
+      yaw: yaw
+      pitch: pitch
+      dist: dist
+    )
+
+    let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
+    if Gpu2d.renderGate() {
+      renderDeferredFrameWorld(
+        renderer: renderer
+        world: world
+        camera: camera
+        light: light
+        aspect: aspect
+      )
+      if not pyramidLogged and deferredPyramidMips(renderer: renderer) > 0 {
+        log("depth pyramid: {deferredPyramidMips(renderer: renderer)} mips")
+        pyramidLogged = true
+      }
+    }
+  }
+  shutdownDeferredRenderer(renderer: renderer)  # #904: the renderer-owned GPU manager, before the C shutdown
+  Gbuffer.shutdownAll()
+  Gpu2d.closeWindow()
+  ret 0
+}

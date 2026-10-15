@@ -142,7 +142,7 @@ backgrounded the `CAMetalLayer` stops recycling its drawable pool and hands out
 a fresh IOSurface-backed texture every frame (wgpu still reports
 `SuccessOptimal`, and submissions retire normally, so nothing looks wrong), and
 the deferred pipeline's per-frame driver allocations pile up. Measured on
-`114_walker_character`: **~170 MB → 1.4 GB across a handful of app switches**,
+`136_walker_character`: **~170 MB → 1.4 GB across a handful of app switches**,
 `IOAccelerator (graphics)` allocations 614 → 35 076 after a single hide/show.
 Prior art: bevy #5856, wgpu-native #614, ImGui's Metal backend skips
 `nextDrawable` when occluded.

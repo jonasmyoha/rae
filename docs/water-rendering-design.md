@@ -12,7 +12,7 @@ grass-style C handle slots, one draw of a unit grid through the transparent pass
 and `waterSurface.wgsl` (Gerstner vertex waves; Roystan toon fragment: depth-gradient
 colour from the G-buffer depth, posterised noise ripples + shoreline foam, Fresnel sky
 tint from the stylised hemisphere, stepped sun highlight). Landed as the lake at the
-biome water plane in example 114 and on its own in 118_water_lake. #847 added the
+biome water plane in example 114 and on its own in 140_water_lake. #847 added the
 toon tier knobs (`WaterBody.gridSegments`, `waveCount`), vertex-shader-panned noise
 coordinates (the Roystan mobile trick), and many bodies per `WaterSystem` sharing
 one unit-grid mesh (`waterAddBody`; each body is one uniform upload + one submitted
@@ -104,7 +104,7 @@ foam kept, smooth shading and a sharp sun glint instead of the toon steps — bo
 six more textures on the surface bind group; `lib/water/ClipMap.rae` is the
 camera-centred radial LOD grid (ring spacing grows geometrically, re-snapped to the
 camera each frame, one draw) and `WaterBody.meshMode` 2 places it; example
-119_ocean_fft is the gated showcase. #831 slice 1 is in: the `waterFft` compute node + three persistent
+141_ocean_fft is the gated showcase. #831 slice 1 is in: the `waterFft` compute node + three persistent
 fixed-size cascade resources are declared in the graph (derived `waterFft ->
 transparentForward`), `WaterBody` carries the tier (`fftSize`, `cascadeCount`,
 `cascadeTile0..2`, `updateRate`) and `waterFftStep` allocates the cascade maps
@@ -146,7 +146,7 @@ Focused verification (from the repository root, one command at a time):
 ```sh
 TEST=572 RAE_TEST_NO_HISTORY=1 perl -e 'alarm shift; exec @ARGV' 180 bash compiler/tools/watch-tests.sh
 TEST=580 RAE_TEST_NO_HISTORY=1 perl -e 'alarm shift; exec @ARGV' 180 bash compiler/tools/watch-tests.sh
-MAKEFLAGS='TEST_RUNNER=tools/run_examples.sh' RAE_EXAMPLE_FILTER='112_metaballs_deferred 114_walker_character' perl -e 'alarm shift; exec @ARGV' 420 bash compiler/tools/watch-tests.sh
+MAKEFLAGS='TEST_RUNNER=tools/run_examples.sh' RAE_EXAMPLE_FILTER='134_metaballs_deferred 136_walker_character' perl -e 'alarm shift; exec @ARGV' 420 bash compiler/tools/watch-tests.sh
 sh tools/webgpu-c-surface-gate.sh
 ```
 
@@ -349,7 +349,7 @@ depth + hdrColor copy, alpha-blend into hdrColor, between `lighting` and
 `taa`. The walker's splash particles are its first client (#844):
 `lib/Particles.rae` now queues each droplet as a constant-size cube with
 alpha = remaining-life fraction, drawn at the transparentForward tag instead
-of shrinking in the G-buffer — the #829 validation. `examples/117_transparent_pass`
+of shrinking in the G-buffer — the #829 validation. `examples/139_transparent_pass`
 (#845) proves the pass in isolation: a lit deferred scene with a row of alpha
 cubes 0.1 -> 0.9 and one half-sunk into the ground, gated in run_examples
 (log line + non-blank); the blend itself remains a human check on hardware.
