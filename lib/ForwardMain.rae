@@ -28,6 +28,7 @@ open Scene3d
 open Sky
 open Gbuffer
 open GbufferSdf
+open ForwardMaterial
 open GbufferTargets
 open GbufferPasses
 open ShadowMaps
@@ -97,6 +98,7 @@ func ensureForwardPipelines(
   forward: mod ForwardMainCache
   resources: mod GpuResources
   litFormat: view Int32
+  ssao: view Bool
 ) {
   if forward.pipelinesMade and forward.pipelineFormat is litFormat {
     ret
@@ -110,6 +112,7 @@ func ensureForwardPipelines(
     "lib/sky_hosek.wgsl"
     "lib/deferred_uniforms.wgsl"
     "lib/deferred_shade.wgsl"
+    "lib/ssao_upsample.wgsl"
     "lib/gbuffer_static_surface.wgsl"
     "lib/forward_static.wgsl"
   ])
@@ -120,6 +123,7 @@ func ensureForwardPipelines(
       "lib/sky_hosek.wgsl"
       "lib/deferred_uniforms.wgsl"
       "lib/deferred_shade.wgsl"
+      "lib/ssao_upsample.wgsl"
       "lib/gbuffer_static_surface.wgsl"
       "lib/forward_static.wgsl"
     ])
@@ -130,6 +134,7 @@ func ensureForwardPipelines(
     "lib/sky_hosek.wgsl"
     "lib/deferred_uniforms.wgsl"
     "lib/deferred_shade.wgsl"
+    "lib/ssao_upsample.wgsl"
     "lib/sdf_surface.wgsl"
     "lib/forward_sdf.wgsl"
   ])
@@ -140,6 +145,7 @@ func ensureForwardPipelines(
       "lib/sky_hosek.wgsl"
       "lib/deferred_uniforms.wgsl"
       "lib/deferred_shade.wgsl"
+      "lib/ssao_upsample.wgsl"
       "lib/sdf_surface.wgsl"
       "lib/forward_sdf.wgsl"
     ])
@@ -147,7 +153,7 @@ func ensureForwardPipelines(
   let skyShader: Shader = shader(
     files: ["lib/sky_hosek.wgsl", "lib/deferred_uniforms.wgsl", "lib/forward_sky.wgsl"]
   )
-  if let pipeline: RenderPipelineId = createRenderPipeline(
+  if let pipeline: RenderPipelineId = createRenderPipelineWithConstants(
     resources: resources
     shader: staticShader
     vertexEntry: "vs"
@@ -160,11 +166,12 @@ func ensureForwardPipelines(
       depthCompare: WGPUCompareFunction_Greater
       cullMode: WGPUCullMode_Back
     )
+    constants: forwardSsaoConstants(ssao: ssao)
   ) {
     forward.staticPipeline = pipeline
   }
   # The metaballs: a fullscreen raymarch that writes its own depth
-  if let pipeline: RenderPipelineId = createRenderPipeline(
+  if let pipeline: RenderPipelineId = createRenderPipelineWithConstants(
     resources: resources
     shader: sdfShader
     vertexEntry: "vs"
@@ -177,6 +184,7 @@ func ensureForwardPipelines(
       depthCompare: WGPUCompareFunction_Greater
       cullMode: WGPUCullMode_None
     )
+    constants: forwardSsaoConstants(ssao: ssao)
   ) {
     forward.sdfPipeline = pipeline
   }
@@ -301,12 +309,16 @@ func ensureForwardBinds(
     gbuffer.sdf.forwardInputs.add(value: bufferRef(id: shadow.frameUniform))
     gbuffer.sdf.forwardInputs.add(value: textureViewRef(id: shadow.arrayView))
     gbuffer.sdf.forwardInputs.add(value: samplerRef(id: shadow.sampler))
+    gbuffer.sdf.forwardInputs.add(value: textureViewRef(id: targets.aoView))
+    gbuffer.sdf.forwardInputs.add(value: textureViewRef(id: targets.aoDepthView))
     # And the G-buffer materials' forward binds (ForwardMaterial)
     gbuffer.forward.inputs.clear()
     gbuffer.forward.inputs.add(value: bufferRef(id: targets.lightUniform))
     gbuffer.forward.inputs.add(value: bufferRef(id: shadow.frameUniform))
     gbuffer.forward.inputs.add(value: textureViewRef(id: shadow.arrayView))
     gbuffer.forward.inputs.add(value: samplerRef(id: shadow.sampler))
+    gbuffer.forward.inputs.add(value: textureViewRef(id: targets.aoView))
+    gbuffer.forward.inputs.add(value: textureViewRef(id: targets.aoDepthView))
     gbuffer.forward.inputsGen = gbuffer.forward.inputsGen + 1
   }
   gbuffer.sdf.forwardPipeline = forward.sdfPipeline
@@ -319,6 +331,8 @@ func ensureForwardBinds(
     entries.add(value: bufferRef(id: shadow.frameUniform))
     entries.add(value: textureViewRef(id: shadow.arrayView))
     entries.add(value: samplerRef(id: shadow.sampler))
+    entries.add(value: textureViewRef(id: targets.aoView))
+    entries.add(value: textureViewRef(id: targets.aoDepthView))
     if let bind: BindGroupId = createRenderBindGroup(
       resources: resources
       pipeline: forward.staticPipeline
@@ -380,7 +394,12 @@ func beginForwardMain(
   if not shadowTargetsReady(shadow: shadow, resources: resources) {
     ret
   }
-  ensureForwardPipelines(forward: forward, resources: resources, litFormat: targets.litFormat)
+  ensureForwardPipelines(
+    forward: forward
+    resources: resources
+    litFormat: targets.litFormat
+    ssao: gbuffer.forward.ssao
+  )
   if not ensureForwardTargets(
     forward: forward
     resources: resources

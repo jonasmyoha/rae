@@ -291,6 +291,12 @@ func begin(
     clearValue: 0.0
     readOnly: false
   )
+  # The forward renderer's SSAO pre-pass (forward-rae-6) is this pass: SSAO
+  # reads its depth and target A only, so B and C are not stored
+  if cache.forward.ssao {
+    discardColorTarget(targets: targets, index: gbufferTargetB)
+    discardColorTarget(targets: targets, index: gbufferTargetC)
+  }
   openGeometryPass(
     cache: cache
     resources: resources

@@ -182,6 +182,7 @@ func defaultForwardTerrainShader() ret Shader {
     "lib/sky_hosek.wgsl"
     "lib/deferred_uniforms.wgsl"
     "lib/deferred_shade.wgsl"
+    "lib/ssao_upsample.wgsl"
     "lib/noise.wgsl"
     "lib/world_biome.wgsl"
     "lib/terrain_palette.wgsl"
@@ -326,6 +327,9 @@ func ensureTerrainForward(cache: mod GbufferCache, resources: mod GpuResources) 
     var constants: List(ShaderConstant) = islandConstants()
     if cache.terrainShaderSet {
       constants = cache.terrainConstants
+    }
+    loop let ssaoConstant: ShaderConstant in forwardSsaoConstants(ssao: materials.ssao) {
+      constants.add(value: ssaoConstant)
     }
     var forwardShader: Shader = defaultForwardTerrainShader()
     if materials.terrainShaderSet {

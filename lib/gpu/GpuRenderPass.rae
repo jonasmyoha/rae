@@ -427,6 +427,9 @@ type RenderTargetSet {
   # of the pass (noRef = no resolve). A resolved view's samples are discarded,
   # not stored, so a TRANSIENT (memoryless) MSAA target never leaves the tile.
   resolveViews: List(ResourceRef)
+  # Per colour view: its contents are thrown away when the pass ends (a target
+  # this pass writes but nobody reads afterwards)
+  discards: List(Bool)
   clearValues: List(Float)  # 4 per colour view (r g b a)
   clear: Bool  # Clear every colour view (else Load)
   hasDepth: Bool
@@ -443,6 +446,7 @@ func createRenderTargetSet(clear: copy Bool) ret RenderTargetSet {
   ret RenderTargetSet {
     colorViews: List.create(ResourceRef, cap: renderTargetSetMaxColors)
     resolveViews: List.create(ResourceRef, cap: renderTargetSetMaxColors)
+    discards: List.create(Bool, cap: renderTargetSetMaxColors)
     clearValues: List.create(Float, cap: renderTargetSetMaxColors * 4)
     clear: clear
     hasDepth: false
@@ -468,6 +472,7 @@ func addColorTarget(
   }
   targets.colorViews.add(value: colorView)
   targets.resolveViews.add(value: noRef())
+  targets.discards.add(value: false)
   targets.clearValues.add(value: r)
   targets.clearValues.add(value: g)
   targets.clearValues.add(value: b)
@@ -498,6 +503,13 @@ func addResolvedColorTarget(
   }
   targets.resolveViews.set(index: targets.resolveViews.length - 1, value: resolveView)
   ret true
+}
+
+# Throw colour view `index`'s contents away at the end of the pass
+func discardColorTarget(targets: mod RenderTargetSet, index: view Int) {
+  if index >= 0 and index < targets.discards.length {
+    targets.discards.set(index: index, value: true)
+  }
 }
 
 func setDepthTarget(
@@ -593,6 +605,9 @@ func beginRenderPassMulti(
             generation: resolveView.generation
           )
           resolveHandle = refHandle(resources: resources, ref: resolveView)
+          storeOp = WGPUStoreOp_Discard
+        }
+        if targets.discards.copyAtDefault(index: i) {
           storeOp = WGPUStoreOp_Discard
         }
         colorAttachments.add(value: {

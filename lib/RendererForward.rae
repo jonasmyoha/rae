@@ -7,10 +7,18 @@
 #   shadow -> forward -> bloom -> composite -> [ui] -> present
 #
 # where `forward` (ForwardMain) shades the scene in one 4x MSAA pass into the
-# lit image the composite tone-maps and upscales. There is no G-buffer pass,
-# no SSAO, no lighting pass, no TAA and no FXAA/SMAA: MSAA is the
-# antialiasing. Transparents, water and underwater fog need the G-buffer's
-# depth and are not in this frame yet.
+# lit image the composite tone-maps and upscales. No lighting pass, no TAA and
+# no FXAA/SMAA: MSAA is the antialiasing. Transparents, water and underwater
+# fog need the scene's depth and are not in this frame.
+#
+# With SSAO (createForwardRendererWithSsao, forward-rae-6) the frame is
+#
+#   shadow -> gbuffer -> ssao -> forward -> bloom -> composite -> [ui] -> present
+#
+# where `gbuffer` is the deferred geometry pass used as a 1x depth + normal
+# PRE-PASS (the same draws; only its depth and target A are stored), `ssao`
+# the deferred half-resolution SSAO over it, and the forward pass reads the
+# AO (forwardSsao in the forward shaders).
 import Gpu2d
 import Vec3
 open Rendergraph
@@ -31,16 +39,24 @@ open GbufferTerrain
 
 # A renderer whose main pass is forward + 4x MSAA
 func createForwardRenderer() ret DeferredRenderer {
-  ret buildForwardGraph(withUi: false)
+  ret buildForwardGraph(withUi: false, ssao: false)
 }
 
 # The same with the load-preserving 2D UI overlay (Gpu2d draws over the frame)
 func createForwardRendererWithUi() ret DeferredRenderer {
-  ret buildForwardGraph(withUi: true)
+  ret buildForwardGraph(withUi: true, ssao: false)
+}
+
+# A forward renderer with SSAO: a 1x depth + normal pre-pass (the scene drawn
+# twice) feeds the deferred SSAO, which the forward pass reads. An app that
+# draws its own scene draws it at the `gbuffer` step too (Gbuffer.beginPass /
+# the draws / Gbuffer.endPass), as a deferred app does.
+func createForwardRendererWithSsao(withUi: view Bool) ret DeferredRenderer {
+  ret buildForwardGraph(withUi: withUi, ssao: true)
 }
 
 func createForwardRendererWithUiSky(sky: view Sky) ret DeferredRenderer {
-  var renderer: DeferredRenderer = buildForwardGraph(withUi: true)
+  var renderer: DeferredRenderer = buildForwardGraph(withUi: true, ssao: false)
   renderer.sky = sky
   renderer.hasSky = true
   ret renderer
@@ -64,7 +80,7 @@ func isForwardRenderer(renderer: view DeferredRenderer) ret Bool {
 
 # The forward frame's graph. Declared backwards on purpose, like the deferred
 # one: the order is derived from the edges.
-func buildForwardGraph(withUi: view Bool) ret DeferredRenderer {
+func buildForwardGraph(withUi: view Bool, ssao: view Bool) ret DeferredRenderer {
   var renderGraph: RenderGraph = createRenderGraph()
   let colorId: Int = addResource(
     renderGraph: renderGraph
@@ -198,8 +214,85 @@ func buildForwardGraph(withUi: view Bool) ret DeferredRenderer {
     resource: colorId
     access: accSampledRead
   )
+  if ssao {
+    # The pre-pass writes the depth and normals SSAO reads; the forward pass
+    # reads the AO
+    let depthId: Int = addResource(
+      renderGraph: renderGraph
+      name: "prepassDepth"
+      kind: resDepth
+      format: 0
+      sizing: sizeFull
+      lifetime: lifeTransient
+    )
+    let normalId: Int = addResource(
+      renderGraph: renderGraph
+      name: "prepassNormal"
+      kind: resTexture2d
+      format: 0
+      sizing: sizeFull
+      lifetime: lifeTransient
+    )
+    let aoId: Int = addResource(
+      renderGraph: renderGraph
+      name: "aoTex"
+      kind: resTexture2d
+      format: 0
+      sizing: sizeHalf
+      lifetime: lifeTransient
+    )
+    let ssaoPass: Int = addPass(
+      renderGraph: renderGraph
+      name: "ssao"
+      kind: passRaster
+      tag: RenderTag.ssao
+    )
+    let prepass: Int = addPass(
+      renderGraph: renderGraph
+      name: "gbuffer"
+      kind: passRaster
+      tag: RenderTag.gbuffer
+    )
+    passWrites(
+      renderGraph: renderGraph
+      pass: prepass
+      resource: depthId
+      access: accAttachmentWrite
+    )
+    passWrites(
+      renderGraph: renderGraph
+      pass: prepass
+      resource: normalId
+      access: accAttachmentWrite
+    )
+    passReads(
+      renderGraph: renderGraph
+      pass: ssaoPass
+      resource: depthId
+      access: accSampledRead
+    )
+    passReads(
+      renderGraph: renderGraph
+      pass: ssaoPass
+      resource: normalId
+      access: accSampledRead
+    )
+    passWrites(
+      renderGraph: renderGraph
+      pass: ssaoPass
+      resource: aoId
+      access: accAttachmentWrite
+    )
+    passReads(
+      renderGraph: renderGraph
+      pass: forward
+      resource: aoId
+      access: accSampledRead
+    )
+  }
   var passes: RenderPasses = createRenderPasses()
   passes.forwardMain = true
+  passes.gbuffer.forward.ssao = ssao
   # MSAA is the antialiasing: no TAA (and so no jitter), whatever RAE_TAA says
   passes.targets.taaEnabled = false
   passes.gbuffer.taaEnabled = false

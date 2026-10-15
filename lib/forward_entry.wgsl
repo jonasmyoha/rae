@@ -4,14 +4,20 @@
 // (deferred_light.wgsl) and shades it with shadeSurface, in the forward
 // pass. Composed AFTER the material (its VsOut, FsOut and gbufferSurface)
 // and after the shading prelude (precision, sky_hosek.wgsl,
-// deferred_uniforms.wgsl, deferred_shade.wgsl). The lighting bindings sit at
-// 12..15, above every material's own. The world position is rebuilt from
+// deferred_uniforms.wgsl, deferred_shade.wgsl, ssao_upsample.wgsl). The lighting
+// bindings sit at 12..17, above every material's own. The world position is rebuilt from
 // the fragment's position with the scene size the light uniform carries in
-// sunDir.w / ambGround.w (uploadLightUniform). No SSAO here: ssao is 1.
+// sunDir.w / ambGround.w (uploadLightUniform). The SSAO is read only with forwardSsao (else 1).
 @group(0) @binding(12) var<uniform> L: LightU;
 @group(0) @binding(13) var<uniform> SH: ShadowU;
 @group(0) @binding(14) var shadowTex: texture_depth_2d_array;
 @group(0) @binding(15) var shadowSamp: sampler_comparison;
+// SSAO (forward-rae-6): the AO of the 1x depth + normal pre-pass, when the
+// renderer has it (forwardSsao 1, set at pipeline creation; 0 compiles the
+// read out). Composed after ssao_upsample.wgsl.
+@group(0) @binding(16) var aoTex: texture_2d<f32>;
+@group(0) @binding(17) var aoDepthTex: texture_2d<f32>;
+override forwardSsao: f32 = 0.0;
 // gbuffer_octahedral.wgsl's octDecode under its own name: not every material
 // composes that file, and some define their own octEncode
 fn forwardOctDecode(e: vec2<f32>) -> vec3<f32> {
@@ -47,5 +53,8 @@ fn fsForward(in: VsOut) -> @location(0) vec4<f32> {
     surface.ao = 1.0;
   }
   surface.ssao = 1.0;
+  if (forwardSsao > 0.5) {
+    surface.ssao = ssaoAt(vec2<i32>(in.pos.xy), in.pos.z);
+  }
   return vec4<f32>(shadeSurface(surface), 1.0);
 }

@@ -7,6 +7,12 @@
 @group(0) @binding(5) var<uniform> SH: ShadowU;
 @group(0) @binding(6) var shadowTex: texture_depth_2d_array;
 @group(0) @binding(7) var shadowSamp: sampler_comparison;
+// SSAO (forward-rae-6): the AO of the 1x depth + normal pre-pass, when the
+// renderer has it (forwardSsao 1, set at pipeline creation; 0 compiles the
+// read out). Composed after ssao_upsample.wgsl.
+@group(0) @binding(8) var aoTex: texture_2d<f32>;
+@group(0) @binding(9) var aoDepthTex: texture_2d<f32>;
+override forwardSsao: f32 = 0.0;
 struct ForwardOut {
   @location(0) colour: vec4<f32>,
   @builtin(frag_depth) depth: f32,
@@ -29,8 +35,11 @@ fn fs(in: VsOut) -> ForwardOut {
     surface.emissive = emitPeak;
     surface.mode = 0.33333333;
   }
-  surface.ssao = 1.0;
   let clip = F.viewProj * vec4<f32>(march.worldPos, 1.0);
+  surface.ssao = 1.0;
+  if (forwardSsao > 0.5) {
+    surface.ssao = ssaoAt(vec2<i32>(in.pos.xy), clamp(clip.z / clip.w, 0.0, 1.0));
+  }
   var o: ForwardOut;
   o.colour = vec4<f32>(shadeSurface(surface), 1.0);
   o.depth = clamp(clip.z / clip.w, 0.0, 1.0);

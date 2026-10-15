@@ -11,7 +11,8 @@
 #
 # The GbufferCache holds one ForwardMaterials. ForwardMain fills `inputs`
 # (bumping `inputsGen` when they are recreated) and `litFormat` each forward
-# frame; each material rebuilds its forward bind when its gen is behind.
+# frame; each material rebuilds its forward bind when its gen is behind. With
+# `ssao` the forward shaders read the AO of the 1x pre-pass (forward-rae-6).
 # The skinned meshes and the terrain keep their forward pipelines here; the
 # grass keeps its own in GrassCompute (it lives in the app's GPU manager).
 open gpu/GpuResources
@@ -25,11 +26,30 @@ const forwardInputBinding: Int = 12
 
 const forwardMaterialSamples: Int = 4
 
+# The lighting inputs a forward bind adds (see ForwardMaterials.inputs)
+const forwardInputCount: Int = 6
+
+# The pipeline constants of a forward material: forwardSsao 1 when the frame
+# reads SSAO (forward_entry.wgsl / forward_static.wgsl / forward_sdf.wgsl)
+func forwardSsaoConstants(ssao: view Bool) ret List(ShaderConstant) {
+  var constants: List(ShaderConstant) = List.create(ShaderConstant, cap: 1)
+  var value: Float = 0.0
+  if ssao {
+    value = 1.0
+  }
+  constants.add(value: { name: "forwardSsao", value: value })
+  ret constants
+}
+
 type ForwardMaterials {
   litFormat: Int32  # the forward pass's colour format (0 until a forward frame)
-  # The light uniform, the cascades' uniform, their array view and their
-  # comparison sampler, in the renderer's GPU manager
+  # The light uniform, the cascades' uniform, their array view, their
+  # comparison sampler, the AO and the AO pass's half-size depth, in the
+  # renderer's GPU manager
   inputs: List(ResourceRef)
+  # The forward frame reads SSAO (forward-rae-6): its pipelines are made with
+  # forwardSsao 1. Set when the renderer is created, before any pipeline.
+  ssao: Bool
   inputsGen: Int  # bumped whenever `inputs` are recreated
   skinPipeline: RenderPipelineId
   skinPipelineFormat: Int32
@@ -49,7 +69,8 @@ type ForwardMaterials {
 func createForwardMaterials() ret ForwardMaterials {
   ret ForwardMaterials {
     litFormat: 0
-    inputs: List.create(ResourceRef, cap: 4)
+    inputs: List.create(ResourceRef, cap: 6)
+    ssao: false
     inputsGen: 0
     skinPipeline: noRenderPipelineId()
     skinPipelineFormat: 0
@@ -95,7 +116,7 @@ func forwardMaterialSpec(
 # forwardInputBinding, then the lighting inputs. False when the inputs are
 # not there yet (no forward frame has set them).
 func addForwardInputs(entries: mod List(ResourceRef), inputs: view List(ResourceRef)) ret Bool {
-  if inputs.length < 4 {
+  if inputs.length < forwardInputCount {
     ret false
   }
   loop entries.length < forwardInputBinding {
