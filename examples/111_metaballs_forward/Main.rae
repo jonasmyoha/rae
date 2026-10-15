@@ -2,11 +2,12 @@
 #
 # Same three scenes, same panel, same controls as 112; the main pass is the
 # whole difference. 112 writes a G-buffer and lights it in a fullscreen pass;
-# this draws the scene with createForwardRendererWithUi (lib/RendererForward):
-# one 4x MSAA pass that shades every surface, metaballs included, with the
-# same shadeSurface the deferred lighting runs, then bloom, the composite's
-# tone map and upscale, the UI and present. No SSAO, TAA, FXAA or SMAA: MSAA
-# is the antialiasing (README.md lists every difference).
+# this draws the scene with createForwardRendererWithSsao (lib/RendererForward):
+# a 1x depth + normal pre-pass for the half-resolution SSAO, then one 4x MSAA
+# pass that shades every surface, metaballs included, with the same
+# shadeSurface the deferred lighting runs, then bloom, the composite's tone
+# map and upscale, the UI and present. No TAA, FXAA or SMAA: MSAA is the
+# antialiasing (README.md lists every difference).
 #
 # Until forward-rae-2 this example drew through the C forward renderer
 # (runtime_gpu3d*.c via Gpu3d / Renderer3d). It is now Rae over the WebGPU
@@ -102,11 +103,7 @@ func uploadMeshData(renderer: mod DeferredRenderer, mesh: view MeshData) ret Mes
 }
 
 func main() ret Int {
-  Gpu2d.initWindow(
-    width: 1280
-    height: 800
-    title: "Rae 3D — Metaballs ({rendererPathName()} rendering)"
-  )
+  Gpu2d.initWindow(width: 1280, height: 800, title: "Rae 3D — Metaballs (forward rendering)")
   # The 2D UI draws on the RENDERER's canvas (#920): the deferred composite
   # writes the scene into that canvas's offscreen target, and the UI frame
   # loads it and paints over it - a separate app canvas would present an
@@ -143,7 +140,7 @@ func main() ret Int {
   let boxData: MeshData = makeBox(size: 1.0)
   # #905: the renderer owns the mesh store, so it exists before the uploads; the
   # sky is applied below once the settings are loaded.
-  var renderer: DeferredRenderer = createForwardRendererWithUi()
+  var renderer: DeferredRenderer = createForwardRendererWithSsao(withUi: true)
   # Bloom on the specular highlights (render-perf-8): the library's
   # threshold (1.0, just above white), so only what is brighter glows.
   setBloomEnabled(renderer: renderer, on: true)
@@ -816,23 +813,21 @@ func main() ret Int {
             shadowLogged = true
           }
         }
-        if tag is RenderTag.forward {
-          # The ACTIVE scene, drawn by the app into the forward pass: the
-          # meshes and every metaball cluster, shaded in one 4x MSAA pass.
-          beginForwardPass(
-            renderer: renderer
-            camera: camera
-            light: light
-            aspect: aspect
-          )
+        if tag is RenderTag.gbuffer {
+          # The 1x depth + normal pre-pass for the SSAO: the ACTIVE scene's
+          # draws into the G-buffer pass, of which only the depth and normals
+          # are kept
+          ensureRendererResources(renderer: renderer)
           if let resources: mod GpuResources => renderer.gpuResources {
+            Gbuffer.beginPass(
+              cache: renderer.passes.gbuffer
+              resources: resources
+              camera: camera
+              light: light
+              aspect: aspect
+            )
             if uiState.activeScene is 1 {
-              GbufferWorld.renderSceneWorld(
-                cache: renderer.passes.gbuffer
-                resources: resources
-                world: asset1.world
-              )
-              renderSdfScene(
+              drawScene(
                 cache: renderer.passes.gbuffer
                 resources: resources
                 world: asset1.world
@@ -841,12 +836,7 @@ func main() ret Int {
               )
             }
             if uiState.activeScene is 2 {
-              GbufferWorld.renderSceneWorld(
-                cache: renderer.passes.gbuffer
-                resources: resources
-                world: asset2.world
-              )
-              renderSdfScene(
+              drawScene(
                 cache: renderer.passes.gbuffer
                 resources: resources
                 world: asset2.world
@@ -855,12 +845,46 @@ func main() ret Int {
               )
             }
             if uiState.activeScene is 3 {
-              GbufferWorld.renderSceneWorld(
+              drawScene(
                 cache: renderer.passes.gbuffer
                 resources: resources
                 world: asset3.world
+                tags: clusters3
+                camera: camera
               )
-              renderSdfScene(
+            }
+            Gbuffer.endPass(cache: renderer.passes.gbuffer, resources: resources)
+          }
+        }
+        if tag is RenderTag.forward {
+          # The same draws, shaded in one 4x MSAA pass that reads the SSAO
+          beginForwardPass(
+            renderer: renderer
+            camera: camera
+            light: light
+            aspect: aspect
+          )
+          if let resources: mod GpuResources => renderer.gpuResources {
+            if uiState.activeScene is 1 {
+              drawScene(
+                cache: renderer.passes.gbuffer
+                resources: resources
+                world: asset1.world
+                tags: clusters1
+                camera: camera
+              )
+            }
+            if uiState.activeScene is 2 {
+              drawScene(
+                cache: renderer.passes.gbuffer
+                resources: resources
+                world: asset2.world
+                tags: clusters2
+                camera: camera
+              )
+            }
+            if uiState.activeScene is 3 {
+              drawScene(
                 cache: renderer.passes.gbuffer
                 resources: resources
                 world: asset3.world
@@ -872,7 +896,7 @@ func main() ret Int {
           endForwardPass(renderer: renderer)
         }
         # The scene-independent passes of the forward frame
-        if tag is RenderTag.bloom or tag is RenderTag.composite {
+        if tag is RenderTag.ssao or tag is RenderTag.bloom or tag is RenderTag.composite {
           renderDeferredPassWorld(
             renderer: renderer
             tag: tag
