@@ -2,7 +2,7 @@
 # low-poly trees and five material textures, all generated in Rae code
 # (lib/procgen/*). No external mesh or texture assets.
 #
-# Rendered on the deferred path under a physical (Hosek-Wilkie) sky, with the
+# Rendered on the deferred path under the Preetham sky, with the
 # sun's cascaded shadows. The camera is the shared app3d camera rig: drag to
 # orbit, wheel to zoom, Tab for the free WASD camera. The debug HUD (top right)
 # shows the frame rate. The texture swatches are drawn on the renderer's UI
@@ -21,7 +21,6 @@ open Math3d
 open Mesh3d
 open Shadow3d
 open Sky
-open SkyHosek
 open procgen/Rock
 open procgen/Tree
 open procgen/Texture
@@ -312,18 +311,12 @@ func createShowcase() ret ShowcaseState {
   registerTextures(canvas: renderer.canvas)
   let sceneWorld: World3d = buildScene(meshes: meshes)
 
-  # A physical sky, and the same sun lights the scene and casts the shadows
+  # The Preetham sky, and the same sun lights the scene and casts the shadows
   let sunDirection: Vec3 = sunDirForHour(hour: sunHour)
   let sunColor: Vec3 = sunColorForHour(hour: sunHour)
   setRendererSky(
     renderer: renderer
-    sky: createSkyHosek(
-      data: loadDefaultHosekDataset()
-      sunDir: sunDirection
-      sunColor: sunColor
-      turbidity: 2.5
-      groundAlbedo: 0.25
-    )
+    sky: createSkyProcedural(sunDir: sunDirection, sunColor: sunColor, turbidity: 2.5)
   )
   var light: Light3d = defaultLight3d()
   light.sunDir = sunDirection
