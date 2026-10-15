@@ -104,7 +104,7 @@ the toolchain end-to-end), then Track B for breadth.
   `app.c`, links `RaeRuntime` + `SDL3` + `wgpu_native.xcframework` + the kept
   frameworks, and bundles the example's `assets/` (+ shared lib runtime data).
 - **The "launcher" is Xcode's scheme dropdown** — the developer picks
-  `114_walker_character`, `102_gpu2d_animated`, … and hits Run. No custom launcher
+  `136_walker_character`, `102_gpu2d_animated`, … and hits Run. No custom launcher
   code; N schemes = the picker. This is the pragmatic dev-harness "launcher".
 
 Why not one app target that bundles many examples? Each generated `app.c` has its
@@ -203,7 +203,7 @@ works for any example *or* a future self-contained app repo:
    (device + simulator). `tools/ios/build-deps.sh` + `fetch-deps.sh`. *This is the
    gating unknown — everything else is straightforward once these exist.*
 2. **Hand "hello iPhone".** One example (start simple: `102_gpu2d_animated`;
-   then `114_walker_character` for the GPU3D/grass perf test) compiled into a single
+   then `136_walker_character` for the GPU3D/grass perf test) compiled into a single
    hand-written iOS app target, run on device. Proves clang-for-iOS + static SDL3 +
    wgpu Metal surface + one WGSL shader on real hardware, and shakes out §6/§7.
 3. **The generator.** `tools/ios/gen.sh` + CMakeLists producing `RaeExamples.xcodeproj`

@@ -71,7 +71,7 @@ excluded), 928 files:
   (840→1296), `lib/ui/legacyRaylib/Render.rae` (992→1270), `lib/GbufferPasses.rae`
   (683→1266), `lib/gpu/GpuLifetime.rae` (694→1202), `lib/ui/Registry.rae`
   (975→1140), `lib/water/WaterFft.rae` (713→1116), `examples/106_mobile_ui/
-  ScreenRouter.rae` (962→1076), `examples/114_walker_character/App.rae`
+  ScreenRouter.rae` (962→1076), `examples/136_walker_character/App.rae`
   (753→1050), `examples/106_mobile_ui/Main.rae` (994→1044), `lib/ui/Frames.rae`
   (903→1034), `lib/ui/ThemeResolved.rae` (898→1005), `examples/106_mobile_ui/
   DebugGpu2dLocal.rae` (806→1003).
@@ -104,9 +104,9 @@ are refused (`file exceeds the hard cap`) — the split list for #918 grew from
 `lib/gpu/GpuLifetime` (1308), `examples/106_mobile_ui/DebugGpu2dLocal` (1231),
 `lib/water/WaterFft` (1221), `lib/ui/ThemeResolved` (1156),
 `examples/106_mobile_ui/ScreenRouter` (1118), `lib/ui/Frames` (1098),
-`examples/114_walker_character/App` (1097), `examples/106_mobile_ui/Main`
-(1088), `examples/112_metaballs_deferred/Main` (1080),
-`lib/ui/legacyRaylib/Debug` (1063), `examples/111_metaballs_forward/Main`
+`examples/136_walker_character/App` (1097), `examples/106_mobile_ui/Main`
+(1088), `examples/134_metaballs_deferred/Main` (1080),
+`lib/ui/legacyRaylib/Debug` (1063), `examples/135_metaballs_forward/Main`
 (1054), `lib/webgpu/Webgpu` (1022), `lib/GltfSkin` (1006). 102 files still have
 a line over 100 columns after formatting — long binary expressions, string
 literals and generated symbol names, which the policy leaves alone.

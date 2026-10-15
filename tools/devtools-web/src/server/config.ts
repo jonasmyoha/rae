@@ -32,6 +32,8 @@ export type RaeDevtoolsConfig = {
   examplesPath?: string;
   /** The stress cases (docs/stress-tests.md), a sibling of examplesPath. */
   stressPath?: string;
+  /** The hardware checks (checks/README.md), a sibling of examplesPath. */
+  checksPath?: string;
   targets: TargetConfig[];
   defaultTarget: string;
   exampleCategories?: ExampleCategoryConfig[];
@@ -141,6 +143,7 @@ const DEFAULT_CONFIG: RaeDevtoolsConfig = {
   syntaxSummaryPath: "docs/rae_syntax.json",
   examplesPath: "examples",
   stressPath: "stress",
+  checksPath: "checks",
   targets: DEFAULT_TARGETS,
   defaultTarget: DEFAULT_TARGETS[0]!.id
 };
@@ -221,6 +224,7 @@ function normalizeConfig(parsed: PartialConfig = {}): RaeDevtoolsConfig {
     syntaxSummaryPath: parsed.syntaxSummaryPath ?? DEFAULT_CONFIG.syntaxSummaryPath,
     examplesPath: parsed.examplesPath ?? DEFAULT_CONFIG.examplesPath,
     stressPath: parsed.stressPath ?? DEFAULT_CONFIG.stressPath,
+    checksPath: parsed.checksPath ?? DEFAULT_CONFIG.checksPath,
     targets: [],
     defaultTarget: parsed.defaultTarget ?? DEFAULT_CONFIG.defaultTarget,
     exampleCategories: parsed.exampleCategories
@@ -305,6 +309,10 @@ export function getExamplesRoot(config: RaeDevtoolsConfig): string {
 
 export function getStressRoot(config: RaeDevtoolsConfig): string {
   return resolveCompilerPath(config, config.stressPath ?? "stress");
+}
+
+export function getChecksRoot(config: RaeDevtoolsConfig): string {
+  return resolveCompilerPath(config, config.checksPath ?? "checks");
 }
 
 export function getTestHistoryPath(config: RaeDevtoolsConfig): string {

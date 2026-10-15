@@ -35,11 +35,11 @@ const gtMaxPasses: Int = 16
 
 # #764: the GPU-timing ring (query set indices, per-frame pass names, the readback
 # buffer, the timestamp period) was a set of module-level gt* globals. It is a
-# resource an app owns (only zz_gpu_timing_check drives it today); every entry
+# resource an app owns (only checks/gpuTiming drives it today); every entry
 # point takes it. #923: the three WGPU handles are fields of this owner too —
 # the last C slot store (rae_gt_set/get) is gone. This is the raw-encoder,
 # BLOCKING capture harness; the manager's nonblocking timing is gpu/GpuTiming
-# (zz_gpu_manager_timing drives that one, the water perf captures use it).
+# (checks/gpuManagerTiming drives that one, the water perf captures use it).
 type GpuTiming {
   enabled: Bool
   inited: Bool

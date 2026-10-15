@@ -253,7 +253,7 @@ deferred apps, and no example uses it yet.
   - iPhone 15 Pro: 111 takes 28.4 ms (35 fps), 112 takes 32.3 ms (31 fps).
 
   The table and every difference from 112 are in
-  `examples/111_metaballs_forward/README.md`.
+  `examples/135_metaballs_forward/README.md`.
 
 
 **forward-rae-3 (2026-10-15):**
@@ -270,7 +270,7 @@ deferred apps, and no example uses it yet.
 
 ## 7. The walker in forward rendering (forward-rae-4 and -5, 2026-10-15)
 
-The forward walker is its own example: **examples/126_walker_forward**, the
+The forward walker is its own example: **examples/137_walker_forward**, the
 forward twin of 114 (as 111 is of 112), on `createForwardRendererWithUi`. Its
 scene drawing runs inside `beginForwardPass` / `endForwardPass`. 114 stays
 deferred and has no forward switch. (The measurements below were taken with a

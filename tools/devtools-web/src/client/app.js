@@ -238,7 +238,7 @@ const EXAMPLE_COLLECTIONS = {
   },
   renderer3d: {
     title: "3D renderer",
-    subtitle: "Seed examples for the Rae WebGPU 3D renderer (docs/webgpu-3d-renderer.md): raymarch and native-raster PBR."
+    subtitle: "The Rae WebGPU 3D renderer (docs/webgpu-3d-renderer.md), from the first raymarch and PBR seeds to the deferred renderer, its forward twins (metaballs and the walker, each deferred then forward), procedural generation and water."
   },
   raytracer: {
     title: "Raytracer",
@@ -247,6 +247,13 @@ const EXAMPLE_COLLECTIONS = {
   // The foot-gun cases (docs/stress-tests.md). Membership is the record's
   // origin (scanned from stress/), not a category; the subtitle is the
   // scoreboard, rendered by renderStressScoreboard.
+  // The hardware checks (checks/README.md): programs that test the GPU layer
+  // on a real GPU or in a browser and exit 0 when they pass. Membership is the
+  // record's origin (scanned from checks/), like the stress cases.
+  checks: {
+    title: "Checks",
+    subtitle: "Hardware checks, not examples: each one tests a part of the GPU layer on a real GPU (or the browser runtime) and exits 0 when it passes. Run all of them with checks/run.sh."
+  },
   stress: {
     title: "Stress",
     subtitle: "Small programs that poke one classic language foot gun each — and say in the open whether Rae handles it or still gets it wrong."
@@ -2007,6 +2014,9 @@ function exampleBelongsToCollection(example, collection) {
   // Stress cases live in their own tab and nowhere else.
   if (collection === "stress") return example.origin === "stress";
   if (example.origin === "stress") return false;
+  // Hardware checks too, so they never show up as examples.
+  if (collection === "checks") return example.origin === "checks";
+  if (example.origin === "checks") return false;
   const cats = COLLECTION_CATEGORIES[collection];
   if (cats) return cats.includes(example.category);
   // Default "examples" collection: everything NOT owned by another collection.
@@ -2082,6 +2092,9 @@ function renderExampleList() {
     // Stress: two shelves, the wins first. The label carries the count.
     if (currentExampleCollection === "stress") {
       category = ex.stress?.verdict === "footgun" ? STRESS_GROUP_FOOTGUN : STRESS_GROUP_HANDLES;
+    }
+    if (currentExampleCollection === "checks") {
+      category = ex.id.startsWith("web") ? "Web runtime" : "GPU layer";
     }
     
     if (!category) {
@@ -4675,7 +4688,9 @@ function stressVerdictBadge(verdict) {
 // The entry (Main.rae) first for a stress case — the pack file is not what
 // the reader came for. Other examples keep their first listed file.
 function defaultExampleFile(example) {
-  if (example.origin === "stress" && example.entry) return example.entry;
+  if ((example.origin === "stress" || example.origin === "checks") && example.entry) {
+    return example.entry;
+  }
   return example.files[0]?.path ?? null;
 }
 

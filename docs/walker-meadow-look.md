@@ -1,7 +1,7 @@
 # Walker meadow material
 
 Example 114 uses a local palette and a local grass-colour shader, selected in
-`examples/114_walker_character/App.rae`. The terrain still uses the shared biome
+`examples/136_walker_character/App.rae`. The terrain still uses the shared biome
 field, road overlay, shoreline blending and deferred lighting. The split-sum
 ambient BRDF remains in place.
 

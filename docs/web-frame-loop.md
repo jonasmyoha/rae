@@ -152,7 +152,7 @@ In the browser each frame first runs the spawned tasks that can go on (a
 sleep that ended, a task they waited on that finished), for at most 4 ms. A
 spawned task that waits therefore runs between frames instead of holding
 the page (docs/lightweight-spawn-design.md §16, checked by
-`examples/zz_web_task_check` in headless Chrome).
+`checks/webTask` in headless Chrome).
 
 ## 6. The browser build of a mainLoop program
 

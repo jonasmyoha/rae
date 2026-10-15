@@ -214,11 +214,23 @@ export async function listStressCases(
   return scanExampleRoot(stressRoot, compilerBinPath, relative + "/", "stress");
 }
 
+/** The hardware checks (checks/README.md): the same scan over the checks
+ * root, paths relative to the examples root (`../checks/<id>/…`) as for the
+ * stress cases. */
+export async function listCheckCases(
+  checksRoot: string,
+  examplesRoot: string,
+  compilerBinPath: string
+): Promise<ExampleDescriptor[]> {
+  const relative = path.relative(examplesRoot, checksRoot).split(path.sep).join(path.posix.sep);
+  return scanExampleRoot(checksRoot, compilerBinPath, relative + "/", "checks");
+}
+
 async function scanExampleRoot(
   root: string,
   compilerBinPath: string,
   pathPrefix: string,
-  origin: "examples" | "stress"
+  origin: "examples" | "stress" | "checks"
 ): Promise<ExampleDescriptor[]> {
   const entries = await safeReadDir(root);
   const examples: ExampleDescriptor[] = [];
@@ -228,6 +240,8 @@ async function scanExampleRoot(
     if (entry.name === "legacy") continue; // Skip legacy folder
     // A stress case is a numbered folder; the README and run.sh are not cases.
     if (origin === "stress" && !(entry.isDirectory() && /^\d/.test(entry.name))) continue;
+    // A check is a folder; the README and run.sh are not checks.
+    if (origin === "checks" && !entry.isDirectory()) continue;
     const relativePath = pathPrefix + entry.name;
     const fullPath = path.join(root, entry.name);
 
@@ -503,7 +517,7 @@ async function safeReadDir(dir: string) {
 }
 
 /** Roots a relative example path may resolve into besides the examples root
- * itself: the stress root (its records' paths are `../stress/<id>/…`). */
+ * itself: the stress and checks roots (their records' paths are `../stress/<id>/…`). */
 let EXTRA_ROOTS: string[] = [];
 export function setExtraExampleRoots(roots: string[]) {
   EXTRA_ROOTS = roots.map((root) => path.resolve(root));

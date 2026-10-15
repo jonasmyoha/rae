@@ -23,9 +23,9 @@ build_quietly() {
 
 build_quietly 240 \
   --target wasm --profile dev \
-  --project examples/109_gpu3d_pbr \
+  --project examples/132_gpu3d_pbr \
   --out "$TMP/index.html" \
-  examples/109_gpu3d_pbr/Main.rae
+  examples/132_gpu3d_pbr/Main.rae
 
 test -s "$TMP/index.html"
 test -s "$TMP/index.js"
@@ -34,9 +34,9 @@ grep -q 'id="canvas"' "$TMP/index.html"
 
 build_quietly 240 \
   --target wasm --profile dev \
-  --project examples/112_metaballs_deferred \
+  --project examples/134_metaballs_deferred \
   --out "$TMP/ui.html" \
-  examples/112_metaballs_deferred/Main.rae
+  examples/134_metaballs_deferred/Main.rae
 
 test -s "$TMP/ui.html"
 test -s "$TMP/ui.js"
@@ -46,9 +46,9 @@ grep -q 'id="canvas"' "$TMP/ui.html"
 
 build_quietly 240 \
   --target wasm --profile dev \
-  --project examples/109_gpu3d_pbr \
+  --project examples/132_gpu3d_pbr \
   --out "$TMP/app.mjs" \
-  examples/109_gpu3d_pbr/Main.rae
+  examples/132_gpu3d_pbr/Main.rae
 
 test -s "$TMP/app.mjs"
 test -s "$TMP/app.wasm"
@@ -70,16 +70,16 @@ if [ -f "$BOX3D_WEB_LIB" ]; then
 fi
 
 # A nonblocking GPU readback completes in the browser and copies the right
-# bytes (examples/zz_web_readback_check). It once never produced a sample:
+# bytes (checks/webReadback). It once never produced a sample:
 # the runtime's allocation-size check answered 0 under Emscripten, so every
 # copy out of a mapped buffer was refused without a word. Built always; run in
 # headless Chrome when Chrome is installed (skipped otherwise, and when the
 # browser offers no WebGPU).
 build_quietly 240 \
   --target wasm --profile dev \
-  --project examples/zz_web_readback_check \
+  --project checks/webReadback \
   --out "$TMP/readback/index.html" \
-  examples/zz_web_readback_check/Main.rae
+  checks/webReadback/Main.rae
 test -s "$TMP/readback/index.wasm"
 
 # A spawned task that sleeps runs between the frames of a mainLoop: it
@@ -88,9 +88,9 @@ test -s "$TMP/readback/index.wasm"
 # Chrome when Chrome is installed.
 build_quietly 240 \
   --target wasm --profile dev \
-  --project examples/zz_web_task_check \
+  --project checks/webTask \
   --out "$TMP/task/index.html" \
-  examples/zz_web_task_check/Main.rae
+  checks/webTask/Main.rae
 test -s "$TMP/task/index.wasm"
 
 CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
@@ -137,4 +137,4 @@ if [ "$have_chrome" = 1 ]; then
   fi
 fi
 
-echo "PASS wasm_webgpu_smoke: 109 and composed 110 browser pages plus embeddable module built$box3d_note; $readback_note; $task_note"
+echo "PASS wasm_webgpu_smoke: 132 and composed 134 browser pages plus embeddable module built$box3d_note; $readback_note; $task_note"

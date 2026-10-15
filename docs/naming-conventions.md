@@ -85,7 +85,7 @@ renaming.
 
 ## App members name their system (folder-per-system apps, #822)
 
-In a folder-per-system app (the reference shape is `examples/114_walker_character`),
+In a folder-per-system app (the reference shape is `examples/136_walker_character`),
 the composition-root `App` struct should read as the list of systems. The rule:
 
 - **A system's `App` member is named for its folder and typed as that folder's
