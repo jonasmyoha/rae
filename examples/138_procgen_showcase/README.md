@@ -6,8 +6,12 @@ clumped grass and a winding path on a raised garden base.
 - **1** restores the complete grove.
 - **2** frames the branching wood and leaf crowns.
 - **3** frames the stone outcrop.
-- Drag to orbit, scroll to zoom, or press **Tab** for the free WASD camera.
-- The shared debug widget shows frame rate and memory.
+- Drag to orbit, scroll to zoom. The camera bar's **Orbit** button switches to
+  the free WASD camera (Q/E down/up, shift to boost) and back.
+- The menu button opens the settings panel: the three views (Scene 1-3), sky
+  model, time of day and date, shadows and TAA.
+- The chrome is the shared editor panel (`lib/app3d/EditorPanel.rae`); the
+  debug widget on top shows frame rate and memory.
 
 Run from the repository root:
 

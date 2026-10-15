@@ -1,0 +1,360 @@
+# app3d/EditorPanel — the editor chrome of a 3D example in one piece.
+#
+# The top row holds the corner menu button and the camera bar; the bar's mode
+# button switches the camera rig between orbit and the free WASD camera, and
+# its two smoothing buttons ease mouse and key motion. The menu button opens
+# the side panel with the shared settings section (sky model, time of day and
+# date, shadows, TAA, animation speed, the scene chooser). The debug overlay
+# (frame rate, memory) sits on top.
+#
+# Examples 134-137 wire these shared components one by one in each app. This
+# module is the same wiring, written once: the chrome comes from
+# scenes/editor_panel.raescene, and an app calls createEditorPanel once,
+# updateEditorPanel every frame (it runs the camera rig too) and
+# drawEditorPanel at RenderTag.uiOverlay. The settings stay readable on
+# `editorPanel.settings`; applyEditorPanelSettings puts the sky, the sun and
+# TAA onto the renderer and the light.
+import Gpu2d
+import SdfText
+import Vec3
+open Scene3d
+open Sky
+open SkyHosek
+open RendererDeferred
+open Gpu2dCanvas
+open ecs/Entity
+open ui/Ecs
+open ui/Registry
+open ui/UiSystems
+open ui/inputSystem/InputSystem
+open ui/renderSystem/RenderSystem
+open ui/scrollRootSystem/ScrollRootSystem
+open ui/DebugOverlay
+open ui/CornerMenuButton
+open app3d/UiShell
+open app3d/CameraRig
+open app3d/CameraBar
+open app3d/SettingsDialog
+
+# The side panel's width in the scene; the camera bar sheds readouts that do
+# not fit beside it
+const editorSidePanelWidth: Float = 320.0
+
+# Room kept free beside the camera bar for the menu button and the padding
+const editorTopRowReserve: Float = 160.0
+
+# The sky the settings build: a clear day, a mid-grey ground
+const editorSkyTurbidity: Float = 2.5
+
+const editorSkyGroundAlbedo: Float = 0.25
+
+type EditorPanel {
+  gpuUi: Gpu2dUi
+  world: UiWorld
+  uiSystems: UiSystems
+  input: UiInput
+  scrollMemory: ScrollMemory
+  panelScroll: EntityId
+  debugOverlay: DebugOverlay
+  settings: SettingsState
+  # The fitted Hosek-Wilkie table, read once; a sky is built from it whenever
+  # the settings pick that model
+  hosekData: HosekDataset
+}
+
+# What one frame of the panel changed
+type EditorPanelFrame {
+  # The settings changed (a control, a slider drag or the running clock):
+  # apply them (applyEditorPanelSettings) and read editorPanel.settings
+  settingsChanged: Bool
+  # The camera rig moved the camera
+  cameraMoved: Bool
+}
+
+# Load the fonts and theme from `assetBase` (Roboto-Regular.mtsdf.* and
+# Theme.raescene), mount the chrome and put `settings` on it
+func createEditorPanel(assetBase: view String, settings: view SettingsState) ret EditorPanel {
+  let gpuUi: Gpu2dUi = loadUiAssets(
+    dir: assetBase
+    textFontName: "Roboto-Regular"
+    iconFontName: ""
+    themeFile: "Theme.raescene"
+  )
+  Gpu2d.setDesignResolution(width: windowExtentW(), height: windowExtentH(), fit: 0)
+  var world: UiWorld = create()
+  var uiSystems: UiSystems = createUiSystems()
+  seedWorldTheme(world: world, res: gpuUi)
+  let root: EntityId = mountUiScene(
+    world: world
+    uiSystems: uiSystems
+    path: "{app3dSceneDir()}editor_panel.raescene"
+    res: gpuUi
+  )
+  if mountCornerMenuButton(
+    world: world
+    uiSystems: uiSystems
+    res: gpuUi
+    hostNodeId: "CornerMenuSlot"
+  ) is false {
+    log("[editor panel] the corner menu button did not mount")
+  }
+  if mountCameraBar(
+    world: world
+    uiSystems: uiSystems
+    res: gpuUi
+    hostNodeId: "CameraBarSlot"
+  ) is false {
+    log("[editor panel] the camera bar did not mount")
+  }
+  if mountSettingsDialog(
+    world: world
+    uiSystems: uiSystems
+    res: gpuUi
+    hostNodeId: "SettingsDialogSlot"
+  ) is false {
+    log("[editor panel] the settings section did not mount")
+  }
+  settingsApplyToWorld(settingsState: settings, world: world, uiSystems: uiSystems)
+  applyEditorPanelOpen(world: world, open: settings.open)
+  fitEditorPanelToWindow(world: world, uiSystems: uiSystems, res: gpuUi)
+  # The side panel scrolls when its content outgrows the window: the scene
+  # authors a ScrollRoot on SidePanelContent, the lib system seeds its state
+  var scrollMemory: ScrollMemory = createScrollMemory()
+  scrollRootSystem(world: world, uiSystems: uiSystems, memory: scrollMemory)
+  let panelScroll: EntityId = findScrollRoot(world: world, uiSystems: uiSystems)
+  ret EditorPanel {
+    gpuUi: own gpuUi
+    world: own world
+    uiSystems: own uiSystems
+    input: createUiInput()
+    scrollMemory: own scrollMemory
+    panelScroll: panelScroll
+    debugOverlay: createDebugOverlay(
+      button: true
+      fps: true
+      memory: true
+      heartbeat: true
+    )
+    settings: settings
+    hosekData: loadDefaultHosekDataset()
+  }
+}
+
+# The whole side panel shows or hides, not only the settings inside it
+func applyEditorPanelOpen(world: mod UiWorld, open: view Bool) {
+  setNodeActive(world: world, nodeId: "SidePanel", value: open)
+  applySettingsPanelOpen(world: world, open: open)
+}
+
+# Size the chrome to the window's logical size and lay it out
+func fitEditorPanelToWindow(world: mod UiWorld, uiSystems: mod UiSystems, res: view Gpu2dUi) {
+  let width: Float = windowExtentW()
+  let height: Float = windowExtentH()
+  world.layoutW = width
+  world.layoutH = height
+  setNodeRect(
+    world: world
+    nodeId: "UiRoot"
+    x: 0.0
+    y: 0.0
+    w: width
+    h: height
+  )
+  var barWidth: Float = width - editorSidePanelWidth - editorTopRowReserve
+  if barWidth < 200.0 {
+    barWidth = 200.0
+  }
+  fitCameraBar(
+    world: world
+    uiSystems: uiSystems
+    res: res
+    hostNodeId: "CameraBarSlot"
+    availW: barWidth
+  )
+  runUiSystems(world: world, uiSystems: uiSystems, res: res)
+}
+
+# One frame of the chrome and the camera: UI input, the panel's scroll, the
+# debug overlay, the camera bar, the settings, then the camera rig with the
+# pointer and wheel the UI did not take. `resized` is this frame's
+# Gpu2d.windowResized() (it is cleared on read, so the app reads it once).
+# `rendered` is whether the app draws this frame (the overlay's work meter).
+func updateEditorPanel(
+  editorPanel: mod EditorPanel
+  cameraRig: mod CameraRig
+  camera: mod Camera3d
+  now: view Float64
+  deltaTime: view Float
+  resized: view Bool
+  rendered: view Bool
+) ret EditorPanelFrame {
+  var layoutChanged: Bool = false
+  if resized and windowExtentW() > 0.0 and windowExtentH() > 0.0 {
+    Gpu2d.setDesignResolution(width: windowExtentW(), height: windowExtentH(), fit: 0)
+    layoutChanged = true
+  }
+  updateUiInput(
+    input: editorPanel.input
+    world: editorPanel.world
+    uiSystems: editorPanel.uiSystems
+  )
+  if updateScrollRoot(
+    world: editorPanel.world
+    uiSystems: editorPanel.uiSystems
+    entityId: editorPanel.panelScroll
+    input: editorPanel.input
+  ) {
+    layoutChanged = true
+  }
+  # The debug button sits over the side panel, so a press it takes is
+  # withdrawn from the UI world, or the same click works the control beneath
+  let debugTookPointer: Bool = updateDebugOverlay(
+    debugOverlay: editorPanel.debugOverlay
+    screenW: windowExtentW()
+    screenH: windowExtentH()
+    now: now
+    didRealWork: rendered
+  )
+  if debugTookPointer {
+    suppressUiPress(input: editorPanel.input, world: editorPanel.world)
+  }
+
+  # The camera bar: orbit / free mode and the two smoothing switches
+  if handleCameraBar(world: editorPanel.world, rig: cameraRig, camera: camera) {
+    layoutChanged = true
+  }
+  # The settings see every action and ignore what they do not own
+  var settingsChanged: Bool = false
+  if menuToggleTapped(world: editorPanel.world) {
+    editorPanel.settings.open = editorPanel.settings.open is false
+    settingsChanged = true
+  }
+  loop var i: Int = 0, i < uiActionCount(world: editorPanel.world), ++i {
+    if settingsHandleAction(
+      settingsState: editorPanel.settings
+      actionId: uiActionAt(world: editorPanel.world, index: i)
+    ) {
+      settingsChanged = true
+    }
+  }
+  if settingsUpdatePointer(
+    settingsState: editorPanel.settings
+    world: editorPanel.world
+    uiSystems: editorPanel.uiSystems
+    input: editorPanel.input
+  ) {
+    settingsChanged = true
+  }
+  if settingsUpdateLatitudePointer(
+    settingsState: editorPanel.settings
+    world: editorPanel.world
+    uiSystems: editorPanel.uiSystems
+    input: editorPanel.input
+  ) {
+    settingsChanged = true
+  }
+  if settingsUpdateDatePointer(
+    settingsState: editorPanel.settings
+    world: editorPanel.world
+    uiSystems: editorPanel.uiSystems
+    input: editorPanel.input
+  ) {
+    settingsChanged = true
+  }
+  if settingsAdvanceTime(settingsState: editorPanel.settings, deltaTime: deltaTime) {
+    settingsChanged = true
+  }
+  if settingsChanged {
+    settingsApplyToWorld(
+      settingsState: editorPanel.settings
+      world: editorPanel.world
+      uiSystems: editorPanel.uiSystems
+    )
+    applyEditorPanelOpen(world: editorPanel.world, open: editorPanel.settings.open)
+    layoutChanged = true
+  }
+
+  let cameraMoved: Bool = updateCameraRig(
+    rig: cameraRig
+    camera: camera
+    allowInput: not debugTookPointer and not uiPointerCaptured(input: editorPanel.input)
+    wheel: uiWheelUnclaimed(input: editorPanel.input)
+    deltaTime: deltaTime
+  )
+  applyCameraRig(rig: cameraRig, camera: camera)
+  syncCameraBar(world: editorPanel.world, rig: cameraRig, camera: camera)
+  if layoutChanged or cameraMoved {
+    fitEditorPanelToWindow(
+      world: editorPanel.world
+      uiSystems: editorPanel.uiSystems
+      res: editorPanel.gpuUi
+    )
+  }
+  # Report the components no table matched and recycle destroyed entities
+  uiFrameEnd(world: editorPanel.world, uiSystems: editorPanel.uiSystems)
+  ret EditorPanelFrame { settingsChanged: settingsChanged, cameraMoved: cameraMoved }
+}
+
+# Show another scene in the settings' scene chooser (an app that also picks
+# scenes from keys keeps the chooser in step)
+func selectEditorPanelScene(editorPanel: mod EditorPanel, scene: view Int) {
+  if settingsSelectScene(settingsState: editorPanel.settings, scene: scene) {
+    settingsApplyToWorld(
+      settingsState: editorPanel.settings
+      world: editorPanel.world
+      uiSystems: editorPanel.uiSystems
+    )
+    fitEditorPanelToWindow(
+      world: editorPanel.world
+      uiSystems: editorPanel.uiSystems
+      res: editorPanel.gpuUi
+    )
+  }
+}
+
+# The settings onto the frame: the sky they pick, the same sun on the light
+# (so the visible sun, the lighting and the shadows agree) and TAA.
+# `sunStrength` scales the settings' sun (at most 1.0 at noon) to the light
+# level the app's materials were authored for; 1.0 is the settings' own.
+func applyEditorPanelSettings(
+  editorPanel: view EditorPanel
+  renderer: mod DeferredRenderer
+  light: mod Light3d
+  sunStrength: view Float
+) {
+  let settingsSun: Vec3 = settingsSunColor(settingsState: editorPanel.settings)
+  let sunColor: Vec3 = Vec3.create(
+    x: settingsSun.x * sunStrength
+    y: settingsSun.y * sunStrength
+    z: settingsSun.z * sunStrength
+  )
+  var sky: Sky = settingsBuildSky(
+    settingsState: editorPanel.settings
+    data: editorPanel.hosekData
+    turbidity: editorSkyTurbidity
+    groundAlbedo: editorSkyGroundAlbedo
+  )
+  sky.sunColor = sunColor
+  setRendererSky(renderer: renderer, sky: sky)
+  light.sunDir = settingsSunDir(settingsState: editorPanel.settings)
+  light.sunColor = sunColor
+  setTaaEnabled(renderer: renderer, on: editorPanel.settings.taa)
+}
+
+# Draw the chrome and the debug overlay over the frame (RenderTag.uiOverlay)
+func drawEditorPanel(editorPanel: mod EditorPanel, canvas: mod Gpu2dCanvas) {
+  Gpu2d.beginFrameLoad(canvas: canvas)
+  renderSystemGpu2d(
+    world: editorPanel.world
+    uiSystems: editorPanel.uiSystems
+    res: editorPanel.gpuUi
+    canvas: canvas
+  )
+  # Last, so nothing paints over the frame rate
+  drawDebugOverlay(
+    debugOverlay: editorPanel.debugOverlay
+    canvas: canvas
+    font: editorPanel.gpuUi.textFont
+    didRealWork: true
+  )
+}
