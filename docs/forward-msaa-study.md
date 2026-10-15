@@ -268,11 +268,15 @@ deferred apps, and no example uses it yet.
 - **Forward renderer:** `lib/RendererForward.rae` is now the only forward frame.
   Fixture 553 pins its derived pass order.
 
-## 7. The walker in forward mode (forward-rae-4, 2026-10-15)
+## 7. The walker in forward rendering (forward-rae-4 and -5, 2026-10-15)
 
-`RAE_RENDER_PATH=forward` starts 114 on `createForwardRendererWithUi`, and the
-walker's own scene drawing runs inside `beginForwardPass` / `endForwardPass`.
-Deferred stays the default.
+The forward walker is its own example: **examples/126_walker_forward**, the
+forward twin of 114 (as 111 is of 112), on `createForwardRendererWithUi`. Its
+scene drawing runs inside `beginForwardPass` / `endForwardPass`. 114 stays
+deferred and has no forward switch. (The measurements below were taken with a
+forward mode built into 114 by forward-rae-4, `RAE_RENDER_PATH=forward`;
+forward-rae-5 moved it into 126 and removed it from 114. A 126-vs-114 check
+gave the same numbers, see 126's README.)
 
 **Forward versions of the G-buffer materials.** For this, the G-buffer materials
 got forward versions without a second copy of their code:
@@ -289,7 +293,7 @@ got forward versions without a second copy of their code:
   (`rendererSetForwardTerrainShader`), like its G-buffer one, so both frames
   paint the same palette.
 
-**Off in forward mode:** SSAO, TAA / FXAA / SMAA (MSAA is the antialiasing), the
+**Off in the forward walker:** SSAO (forward-rae-6 adds it), TAA / FXAA / SMAA (MSAA is the antialiasing), the
 water (sea, river and lake: the water surface reads the scene depth, which the
 forward pass never stores), the splash droplets (the same transparent pass), the
 underwater fog, sprites, and metaball silhouettes' antialiasing. Everything else
@@ -299,7 +303,8 @@ shadows, bloom and the UI.
 **Images saved on the phone** (iPhone 15 Pro, headless screenshot,
 `RAE_GPU2D_SCREENSHOT` into the app's Documents) show the same scene in both,
 without the water in forward. Kept outside the repository:
-`~/Pictures/rae/forward-rae-4/walker-{forward,deferred}-iphone.png`.
+`~/Pictures/rae/forward-rae-4/walker-{forward,deferred}-iphone.png` (forward-rae-4's
+114 mode) and `walker-forward-126-{iphone,mac}.png` (126).
 
 **Measured on the iPhone 15 Pro.** Landscape, `RAE_FRAME_TIMING=1`, dynamic
 resolution held still (`RAE_DRS=off`), last 10 windows of 65 s runs, run back to
@@ -307,9 +312,9 @@ back in alternating order. Every row compares runs at the same thermal state.
 iOS holds apps to 60 Hz, which hides the GPU cost (both modes wait about 10 ms a
 frame for the display). So the main numbers come from a build allowed to present
 at 120 Hz (`RAE_IOS_HIGH_REFRESH=1`, new in `tools/ios/gen-ios.sh`, off by
-default). "Deferred, same work" is deferred with `RAE_DEFERRED_MATCH_FORWARD=1`
-(skips SSAO, the water FFT, the transparent pass and the underwater fog) and
-`RAE_AA=fxaa`: the image is wrong, but the work matches forward's.
+default). "Deferred, same work" was 114 with a measurement switch since removed
+(it skipped SSAO, the water FFT, the transparent pass and the underwater fog)
+and `RAE_AA=fxaa`: the image was wrong, but the work matched forward's.
 
 | render size | display | deferred (full) | deferred, same work | forward 4x MSAA |
 |---|---|---|---|---|
@@ -347,5 +352,5 @@ Two values in a cell are two runs. Thermal states: 0–1 in the 60 Hz rows;
   phone), make those rungs of the dynamic-resolution ladder (SSAO off, FXAA for
   SMAA, a cheaper water). Changing the main pass would not help.
 
-Keep the forward mode as a measurement tool and as the path for scenes with
-neither water nor SSAO (111).
+The forward walker lives on as its own example (126), alongside 111 for scenes
+that suit a forward frame.
