@@ -1580,6 +1580,38 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             echo "FAIL: $EXAMPLE_NAME (vehicle gate)"
             ((FAILED++))
           fi
+        elif [ "$EXAMPLE_NAME" = "142_shadow_cascades" ]; then
+          # The cascade debug view twice: the walker's fit from the follow
+          # camera with the side panel open (its fit section mounted), and four
+          # cascades out to 200 m from above. The [shadow] line proves the fit
+          # ran with its casters; the screenshots that the frame drew.
+          CASCADES_OK=1
+          for CASCADE_RUN in walker far; do
+            SCREENSHOT="$TMP_OUT/cascades-$CASCADE_RUN.bmp"
+            if [ "$CASCADE_RUN" = walker ]; then
+              CASCADE_ENV="RAE_SHADOW_PANEL=1"
+              CASCADE_LINE='3 cascades at 2048 px, back extent 12 m: splits 2.5 / 6.9 / 24.0 m'
+            else
+              CASCADE_ENV="RAE_SHADOW_FAR=200 RAE_SHADOW_COUNT=4 RAE_SHADOW_LAMBDA=0.9 RAE_SHADOW_VIEW=high"
+              CASCADE_LINE='4 cascades at 2048 px, back extent 12 m: splits 5.6 / 14.0 / 41.9 / 200.0 m'
+            fi
+            if ! (cd .. && env $CASCADE_ENV RAE_SDL_HEADLESS_MS=2500 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
+               perl -e 'alarm shift; exec @ARGV' 45 "$TMP_OUT/app") > "$TMP_OUT/render-$CASCADE_RUN.log" 2>&1 \
+               || ! grep -q "$CASCADE_LINE" "$TMP_OUT/render-$CASCADE_RUN.log" \
+               || ! grep -q 'casters 770' "$TMP_OUT/render-$CASCADE_RUN.log" \
+               || ! python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=2000 \
+                  > "$TMP_OUT/screenshot-$CASCADE_RUN.log" 2>&1; then
+              CASCADES_OK=0
+              cat "$TMP_OUT/render-$CASCADE_RUN.log" "$TMP_OUT/screenshot-$CASCADE_RUN.log" 2>/dev/null | sed 's/^/  /'
+            fi
+          done
+          if [ "$CASCADES_OK" = 1 ]; then
+            echo "PASS: $EXAMPLE_NAME (cascade debug view: walker fit with the panel open, 4 cascades to 200 m)"
+            ((PASSED++))
+          else
+            echo "FAIL: $EXAMPLE_NAME (shadow cascade runs)"
+            ((FAILED++))
+          fi
         elif [ "$EXAMPLE_NAME" = "138_procgen_showcase" ]; then
           # Inspect the composed grove and both close-up camera presets.
           GROVE_OK=1

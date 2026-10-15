@@ -125,6 +125,9 @@ type ShadowCache {
   casterIbufs: List(BufferId)
   casterIcounts: List(Int)
   shadowAmbient: Float
+  # Paint each cascade's area, its map's square and its split distance in
+  # its own colour (shadowCfg.w; example 142)
+  debugCascades: Bool
   sdf: ShadowSdfCache
   inFlight: List(SubmissionId)
   scratch: List(Float)
@@ -166,6 +169,7 @@ func createShadowCacheWith(casterBias: view ShadowCasterBias) ret ShadowCache {
     casterIbufs: List.create(BufferId, cap: 64)
     casterIcounts: List.create(Int, cap: 64)
     shadowAmbient: 0.0
+    debugCascades: false
     sdf: createShadowSdfCache()
     inFlight: List.create(SubmissionId, cap: 4)
     scratch: List.create(Float, cap: shadowFrameFloats)
@@ -421,7 +425,7 @@ func shadowBegin(
   # The frame uniform: [0..63] the cascade matrices, [64+i] splits, [68+i]
   # texel world sizes, [72+i] depth ranges, [76] count, [77] resolution (so
   # the shader turns a UV radius into texels without a second uniform),
-  # [78] ambient darkening.
+  # [78] ambient darkening, [79] the cascade debug colours (1 = on).
   shadow.scratch.clear()
   loop var f: Int = 0, f < shadowFrameFloats, ++f {
     shadow.scratch.add(value: 0.0)
@@ -437,6 +441,9 @@ func shadowBegin(
   shadow.scratch.set(index: 76, value: count as Float)
   shadow.scratch.set(index: 77, value: resolution as Float)
   shadow.scratch.set(index: 78, value: shadow.shadowAmbient)
+  if shadow.debugCascades {
+    shadow.scratch.set(index: 79, value: 1.0)
+  }
   unsafe {
     let wroteFrame: Bool = writeBufferFromPtr(
       resources: resources

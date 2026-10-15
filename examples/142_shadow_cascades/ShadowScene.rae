@@ -1,0 +1,152 @@
+# The test ground for the sun's shadow cascades: a character-sized marker at
+# the origin (where a game's player stands and the camera looks), rings of
+# short posts every metre out to 16 m around it (the near cascades), an avenue
+# of posts every 10 m out to 400 m along +y with a tall red mast every 50 m
+# (the far cascades and where shadows stop), and a sparse field of cubes on a
+# 20 m grid, so every distance has something casting onto the ground.
+import Math
+import Vec3
+open Scene3d
+open Mesh3d
+open ecs/Entity
+open RendererDeferred
+
+const avenueLength: Float = 400.0
+
+const fieldSpacing: Float = 20.0
+
+func uploadMeshData(renderer: mod DeferredRenderer, meshData: view MeshData) ret MeshHandle {
+  ret uploadMesh(
+    renderer: renderer
+    verts: meshData.verts
+    vertCount: meshData.vertCount
+    indices: meshData.indices
+  )
+}
+
+func plainMaterial(red: view Float, green: view Float, blue: view Float) ret Material3d {
+  ret Material3d {
+    baseColor: Vec3.create(x: red, y: green, z: blue)
+    metallic: 0.0
+    roughness: 0.85
+    emission: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    toon: false
+  }
+}
+
+# One box: centred at x, y and standing on the ground, `width` square and
+# `height` tall
+func addPost(
+  world: mod World3d
+  box: view MeshHandle
+  material: view Material3d
+  x: view Float
+  y: view Float
+  width: view Float
+  height: view Float
+) ret EntityId {
+  ret world3dAddMeshInstance(
+    world: world
+    mesh: box
+    material: material
+    position: Vec3.create(x: x, y: y, z: height * 0.5)
+    rotation: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    scale: Vec3.create(x: width, y: width, z: height)
+  )
+}
+
+func buildShadowScene(renderer: mod DeferredRenderer) ret World3d {
+  var world: World3d = create()
+  let box: MeshHandle = uploadMeshData(renderer: renderer, meshData: makeBox(size: 1.0))
+  let ground: MeshHandle = uploadMeshData(
+    renderer: renderer
+    meshData: makePlane(size: 2000.0, segments: 1)
+  )
+  let groundMaterial: Material3d = plainMaterial(red: 0.3, green: 0.3, blue: 0.29)
+  let postMaterial: Material3d = plainMaterial(red: 0.6, green: 0.6, blue: 0.58)
+  let mastMaterial: Material3d = plainMaterial(red: 0.8, green: 0.15, blue: 0.12)
+  let cubeMaterial: Material3d = plainMaterial(red: 0.25, green: 0.32, blue: 0.45)
+  let characterMaterial: Material3d = plainMaterial(red: 0.95, green: 0.55, blue: 0.15)
+  let groundEntityId: EntityId = world3dAddMeshInstance(
+    world: world
+    mesh: ground
+    material: groundMaterial
+    position: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    rotation: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
+  )
+  # The character: 0.5 m wide, 1.8 m tall
+  let characterEntityId: EntityId = addPost(
+    world: world
+    box: box
+    material: characterMaterial
+    x: 0.0
+    y: 0.0
+    width: 0.5
+    height: 1.8
+  )
+  # Rings every 2 m out to 16 m, a post about every metre along each ring
+  loop var ring: Int = 1, ring <= 8, ++ring {
+    let radius: Float = ring.toFloat() * 2.0
+    let posts: Int = (radius * 2.0 * Math.pi).toInt()
+    loop var i: Int = 0, i < posts, ++i {
+      let angle: Float = i.toFloat() / posts.toFloat() * 2.0 * Math.pi
+      let ringPostEntityId: EntityId = addPost(
+        world: world
+        box: box
+        material: postMaterial
+        x: Math.cos(x: angle) * radius
+        y: Math.sin(x: angle) * radius
+        width: 0.12
+        height: 0.6
+      )
+    }
+  }
+  # The avenue: a post on each side every 10 m, a red mast every 50 m
+  loop var step: Int = 1, step * 10 <= avenueLength.toInt(), ++step {
+    let y: Float = step.toFloat() * 10.0
+    var material: Material3d = postMaterial
+    var height: Float = 3.0
+    var width: Float = 0.4
+    if step % 5 is 0 {
+      material = mastMaterial
+      height = 8.0
+      width = 0.8
+    }
+    let leftPostEntityId: EntityId = addPost(
+      world: world
+      box: box
+      material: material
+      x: -5.0
+      y: y
+      width: width
+      height: height
+    )
+    let rightPostEntityId: EntityId = addPost(
+      world: world
+      box: box
+      material: material
+      x: 5.0
+      y: y
+      width: width
+      height: height
+    )
+  }
+  # The field: a 2 m cube every 20 m, x -100..100, y -60..400, off the avenue
+  loop var column: Int = -5, column <= 5, ++column {
+    loop var row: Int = -3, row * fieldSpacing <= avenueLength, ++row {
+      if column is not 0 {
+        let cubeEntityId: EntityId = addPost(
+          world: world
+          box: box
+          material: cubeMaterial
+          x: column.toFloat() * fieldSpacing
+          y: row.toFloat() * fieldSpacing
+          width: 2.0
+          height: 2.0
+        )
+      }
+    }
+  }
+  ret world
+}
