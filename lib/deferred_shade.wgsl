@@ -76,6 +76,46 @@ fn sunVisibility(wpos: vec3<f32>, N: vec3<f32>, viewDepth: f32) -> f32 {
   }
   return sum * 0.25;
 }
+// The cascade debug view (SH.shadowCfg.w, setShadowCascadeDebug): red, green,
+// blue and yellow from the camera out
+fn cascadeDebugColor(c: i32) -> vec3<f32> {
+  if (c == 1) { return vec3<f32>(0.25, 0.95, 0.3); }
+  if (c == 2) { return vec3<f32>(0.3, 0.55, 1.0); }
+  if (c == 3) { return vec3<f32>(1.0, 0.85, 0.2); }
+  return vec3<f32>(1.0, 0.3, 0.25);
+}
+fn cascadeSplitAt(c: i32) -> f32 {
+  if (c == 1) { return SH.splitFar.y; }
+  if (c == 2) { return SH.splitFar.z; }
+  if (c == 3) { return SH.splitFar.w; }
+  return SH.splitFar.x;
+}
+// Each cascade's area tinted in its colour, a line in that colour where the
+// cascade ends (the cascade switch; the last line is where shadows stop) and
+// each shadow map's square outlined in its colour, 3 of its texels wide
+fn shadowCascadeDebug(radiance: vec3<f32>, wpos: vec3<f32>, viewDepth: f32) -> vec3<f32> {
+  let count = i32(SH.shadowCfg.x);
+  if (count <= 0) { return radiance; }
+  var color = radiance;
+  let c = shadowCascadeIndex(viewDepth, count);
+  // A colour filter, so the shading and the shadows still read under it
+  if (c < count) { color = radiance * (vec3<f32>(0.15) + 0.85 * cascadeDebugColor(c)); }
+  let lineWidth = max(viewDepth * 0.004, 0.03);
+  for (var i = 0; i < 4; i = i + 1) {
+    if (i < count && abs(viewDepth - cascadeSplitAt(i)) < lineWidth) { color = cascadeDebugColor(i) * 0.7; }
+  }
+  let res = SH.shadowCfg.y;
+  for (var i = 0; i < 4; i = i + 1) {
+    if (i < count) {
+      let lp = SH.lightViewProj[i] * vec4<f32>(wpos, 1.0);
+      let ndc = lp.xyz / lp.w;
+      let uv = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+      let edge = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
+      if (edge >= 0.0 && edge * res < 3.0) { color = cascadeDebugColor(i) * 0.7; }
+    }
+  }
+  return color;
+}
 // render-perf-12: colour and shading arithmetic is `half` (the precision
 // prelude composed in front: f16 with shader-f16, else f32). Depth, the
 // world-position reconstruction, shadows, the AO upsample weights, the sky and
@@ -182,7 +222,10 @@ fn shadeSurface(s: ShadedSurface) -> vec3<f32> {
   let castShadowAmb = mix(half(1.0), sunVis, half(SH.shadowCfg.z));
   var lit = direct * contactAO + ambient * castShadowAmb + emit + rim;
   if (isToon) { lit = toonShaded * mix(half(1.0), ao * ssao, half(0.6)); }
-  let radiance = clamp(vec3<f32>(lit), vec3<f32>(0.0), vec3<f32>(64000.0));
+  var radiance = clamp(vec3<f32>(lit), vec3<f32>(0.0), vec3<f32>(64000.0));
+  if (SH.shadowCfg.w > 0.5) {
+    radiance = shadowCascadeDebug(radiance, wpos, length(L.camPos.xyz - wpos));
+  }
   if (L.clearColor.w > 0.5) {
     let fogDist = length(L.camPos.xyz - wpos);
     let fogT = clamp((fogDist - L.sunColor.w) / max(L.ambSky.w - L.sunColor.w, 0.001), 0.0, 1.0);
