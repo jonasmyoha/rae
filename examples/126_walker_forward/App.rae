@@ -2,8 +2,9 @@
 # on the forward renderer (createForwardRendererWithUi, lib/RendererForward),
 # the way 111 is the forward twin of 112. The scene is 114's without its water
 # (lake, river, sea), splash droplets and underwater fog: the forward pass keeps
-# no scene depth for them. MSAA (4x) is the antialiasing. SSAO is the next step
-# (forward-rae-6). README.md lists every difference from 114. The assets are
+# no scene depth for them. MSAA (4x) is the antialiasing. SSAO is opt-in
+# (RAE_FORWARD_SSAO=1): a 1x depth + normal pre-pass (forward-rae-6). README.md lists every
+# difference from 114. The assets are
 # 114's, read in place.
 #
 # CONVENTION (#822): the `App` struct IS the system list. Each system's `App`
@@ -325,8 +326,15 @@ func createApp() ret App {
     # #905/#921: the renderer owns the mesh + skin stores the walker parts,
     # terrain and grass meshes are uploaded into, so it exists first. The
     # forward renderer: one 4x MSAA pass (docs/forward-msaa-study.md).
+    # RAE_FORWARD_SSAO=1 adds SSAO (forward-rae-6): a 1x depth + normal
+    # pre-pass feeds it. Off by default: on the iPhone 15 Pro it made the frame
+    # slower than 114's deferred one (README.md, docs/forward-msaa-study.md §8).
+    let forwardSsao: Bool = Sys.getEnv(name: "RAE_FORWARD_SSAO") is "1"
     var renderer: DeferredRenderer = createForwardRendererWithUi()
-    log("[render] path: forward (4x MSAA)")
+    if forwardSsao {
+      renderer = createForwardRendererWithSsao(withUi: true)
+    }
+    log("[render] path: forward (4x MSAA), SSAO {forwardSsao}")
 
     let pngBytes: List(Int) = Sys.readFileBytes(path: "{assets}walker_palette.png")
     var atlasW: Int = 0
@@ -404,6 +412,7 @@ func createApp() ret App {
         "lib/sky_hosek.wgsl"
         "lib/deferred_uniforms.wgsl"
         "lib/deferred_shade.wgsl"
+        "lib/ssao_upsample.wgsl"
         "lib/noise.wgsl"
         "lib/world_biome.wgsl"
         "assets/terrain_palette.wgsl"

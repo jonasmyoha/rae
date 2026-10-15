@@ -2,7 +2,8 @@
 # rae in #552). The scene draws in the forward renderer's `forward` step:
 # beginForwardPass, the same draws 114 makes into its G-buffer (terrain, props,
 # physics cubes, the skinned walker and crowd, grass), endForwardPass. There is
-# no water, splash or underwater step; SSAO comes with forward-rae-6.
+# no water, splash or underwater step. With SSAO (RAE_FORWARD_SSAO=1) the same
+# draws also fill a 1x depth + normal pre-pass at the `gbuffer` step, for `ssao`.
 #
 # The three render functions — the shadow pass, the G-buffer pass, and renderApp
 # (animation sample + render-graph walk) — moved verbatim from rae with no
@@ -242,43 +243,48 @@ func renderScenePass(
   profiler: mod Profiler
   grassCompute: mod GrassCompute
   resources: mod GpuResources
+  generateGrass: copy Bool
 ) {
-  var grassToonGen: Int = 0
-  if characterSystem.toon {
-    grassToonGen = 1
+  # The grass field is generated once a frame: in the pre-pass when SSAO has
+  # one, else here
+  if generateGrass {
+    var grassToonGen: Int = 0
+    if characterSystem.toon {
+      grassToonGen = 1
+    }
+    var grassView: GrassViewSettings = GrassConfig.grassThirdPersonSettings(
+      groundColor: walkerGroundColor()
+    )
+    # Low, broad tufts accent the painted ground instead of hiding it.
+    grassView.bladeHeightScale = 0.55
+    grassView.bladeWidthScale = 1.8
+    grassView.densityScale = 0.55
+    grassView.clusterStrength = 0.8
+    grassView.tipLighten = 1.25
+    grassView.windStrength = 0.45
+    let heroPos: Vec3 = controllerOf(world: world, entityId: characterSystem.heroEntityId).position
+    grassGenerate(
+      grass: grassCompute
+      resources: resources
+      playerX: heroPos.x
+      playerY: heroPos.y
+      groundZ: characterSystem.groundZ
+      time: t
+      deltaTime: deltaTime
+      toon: grassToonGen
+      camX: cameraSystem.camera.position.x
+      camY: cameraSystem.camera.position.y
+      camZ: cameraSystem.camera.position.z
+      fwdX: cameraSystem.camera.target.x - cameraSystem.camera.position.x
+      fwdY: cameraSystem.camera.target.y - cameraSystem.camera.position.y
+      fwdZ: cameraSystem.camera.target.z - cameraSystem.camera.position.z
+      settings: grassView
+    )
+    grassDiagTick(grass: grassCompute, resources: resources, profiler: profiler)
   }
-  var grassView: GrassViewSettings = GrassConfig.grassThirdPersonSettings(
-    groundColor: walkerGroundColor()
-  )
-  # Low, broad tufts accent the painted ground instead of hiding it.
-  grassView.bladeHeightScale = 0.55
-  grassView.bladeWidthScale = 1.8
-  grassView.densityScale = 0.55
-  grassView.clusterStrength = 0.8
-  grassView.tipLighten = 1.25
-  grassView.windStrength = 0.45
-  let heroPos: Vec3 = controllerOf(world: world, entityId: characterSystem.heroEntityId).position
-  grassGenerate(
-    grass: grassCompute
-    resources: resources
-    playerX: heroPos.x
-    playerY: heroPos.y
-    groundZ: characterSystem.groundZ
-    time: t
-    deltaTime: deltaTime
-    toon: grassToonGen
-    camX: cameraSystem.camera.position.x
-    camY: cameraSystem.camera.position.y
-    camZ: cameraSystem.camera.position.z
-    fwdX: cameraSystem.camera.target.x - cameraSystem.camera.position.x
-    fwdY: cameraSystem.camera.target.y - cameraSystem.camera.position.y
-    fwdZ: cameraSystem.camera.target.z - cameraSystem.camera.position.z
-    settings: grassView
-  )
-  grassDiagTick(grass: grassCompute, resources: resources, profiler: profiler)
   # #912: the geometry pass's pipelines/binds live in the RENDERER's manager
   # (rendererResources); the grass compute objects stay in the App's (resources).
-  # The forward pass is open (RenderTag.forward in renderApp)
+  # A pass is open: the forward pass, or the SSAO pre-pass (renderApp)
   drawTerrainGround(
     cache: cache
     resources: rendererResources
@@ -508,7 +514,38 @@ func renderApp(
         )
       }
       case RenderTag.gbuffer {
-        # No G-buffer: the scene draws in the forward step
+        # With SSAO (forward-rae-6), the 1x depth + normal pre-pass: the same
+        # draws into the G-buffer pass, of which only the depth and normals are
+        # kept for the SSAO. Without SSAO the graph has no such step.
+        ensureRendererResources(renderer: renderSystem.renderer)
+        if let rendererResources: mod GpuResources => renderSystem.renderer.gpuResources {
+          Gbuffer.beginPass(
+            cache: renderSystem.renderer.passes.gbuffer
+            resources: rendererResources
+            camera: cameraSystem.camera
+            light: cameraSystem.light
+            aspect: aspect
+          )
+          renderScenePass(
+            cache: renderSystem.renderer.passes.gbuffer
+            rendererResources: rendererResources
+            cameraSystem: cameraSystem
+            characterSystem: characterSystem
+            terrainSystem: terrainSystem
+            world: world
+            physicsSystem: physicsSystem
+            cubeBatch: renderSystem.cubeBatch
+            aspect: aspect
+            palette: palette
+            t: t
+            deltaTime: deltaTime
+            profiler: profiler
+            grassCompute: grassCompute
+            resources: resources
+            generateGrass: true
+          )
+          Gbuffer.endPass(cache: renderSystem.renderer.passes.gbuffer, resources: rendererResources)
+        }
       }
       case RenderTag.forward {
         # The scene, shaded in one 4x MSAA pass (lib/RendererForward)
@@ -535,13 +572,20 @@ func renderApp(
             profiler: profiler
             grassCompute: grassCompute
             resources: resources
+            generateGrass: not renderSystem.renderer.passes.gbuffer.forward.ssao
           )
         }
         endForwardPass(renderer: renderSystem.renderer)
       }
       case RenderTag.ssao {
-        # SSAO needs a stored depth the forward pass does not keep: forward-rae-6
-        # adds it (a depth + normal pre-pass), and its step goes here
+        # The deferred half-resolution SSAO over the pre-pass (forward-rae-6)
+        renderDeferredPass(
+          renderer: renderSystem.renderer
+          tag: tag
+          camera: cameraSystem.camera
+          light: cameraSystem.light
+          aspect: aspect
+        )
       }
       case RenderTag.depthPyramid {
         # Not in the forward frame

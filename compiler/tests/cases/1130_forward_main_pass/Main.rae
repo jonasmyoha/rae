@@ -6,7 +6,10 @@
 # ground lit): both shade with shadeSurface
 # (lib/deferred_shade.wgsl), so a lit surface, the ground and the sky must
 # come out the same, within what the deferred path rounds into its G-buffer
-# and the forward one has no SSAO for.
+# and the forward one has no SSAO for. A third renderer is forward WITH SSAO
+# (forward-rae-6: a 1x pre-pass feeds the deferred SSAO, the forward pass
+# reads it): it darkens the contact under the sphere about as much as the
+# deferred SSAO does, and nothing else.
 import Gpu2d
 import Math
 import Vec3
@@ -209,6 +212,18 @@ func readLit(renderer: mod DeferredRenderer) ret List(Float) {
                   x: litWidth / 2
                   y: litHeight / 20
                 ))
+                # Then every 4th pixel of every 4th row (the SSAO case)
+                loop var gridY: Int = 0, gridY < litHeight / 4, ++gridY {
+                  loop var gridX: Int = 0, gridX < litWidth / 4, ++gridX {
+                    samples.add(value: pixelLuminance(
+                      bytes: bytes
+                      bytesPerRow: bytesPerRow
+                      texel: texel
+                      x: gridX * 4
+                      y: gridY * 4
+                    ))
+                  }
+                }
               }
             }
           }
@@ -276,6 +291,16 @@ func main() ret Int {
   let deferredLit: List(Float) = readLit(renderer: deferredRenderer)
   shutdownDeferredRenderer(renderer: deferredRenderer)
 
+  # The forward renderer with SSAO (forward-rae-6): the pre-pass + SSAO darken
+  # the contacts and creases and nothing else. Drawn before any frame presents.
+  var ssaoRenderer: DeferredRenderer = createForwardRendererWithSsao(withUi: false)
+  let ssaoStatus: Int = compileDeferred(renderer: ssaoRenderer)
+  log("ssao order: {describeOrder(renderer: ssaoRenderer)}")
+  var ssaoWorld: World3d = buildScene(renderer: ssaoRenderer)
+  renderFrames(renderer: ssaoRenderer, world: ssaoWorld, present: false)
+  let ssaoLit: List(Float) = readLit(renderer: ssaoRenderer)
+  shutdownDeferredRenderer(renderer: ssaoRenderer)
+
   var forwardRenderer: DeferredRenderer = createForwardRenderer()
   log("graph status: {compileDeferred(renderer: forwardRenderer)}")
   log("forward order: {describeOrder(renderer: forwardRenderer)}")
@@ -301,9 +326,9 @@ func main() ret Int {
   let forwardLit: List(Float) = readLit(renderer: forwardRenderer)
   shutdownDeferredRenderer(renderer: forwardRenderer)
 
-  log("lit image read: {forwardLit.length is 3 and deferredLit.length is 3}")
+  log("lit image read: {forwardLit.length > 3 and deferredLit.length > 3 and ssaoLit.length > 3}")
   let names: List(String) = ["sphere", "ground", "sky"]
-  loop var i: Int = 0, i < forwardLit.length and i < deferredLit.length, ++i {
+  loop var i: Int = 0, i < 3 and i < forwardLit.length and i < deferredLit.length, ++i {
     let forwardValue: Float = forwardLit.copyAtDefault(index: i)
     let deferredValue: Float = deferredLit.copyAtDefault(index: i)
     log(
@@ -313,6 +338,36 @@ func main() ret Int {
       )}"
     )
   }
+  # With SSAO: some samples darker (the contact under the sphere, its lower
+  # half), none brighter, the sky unchanged
+  var darker: Int = 0
+  var brighter: Int = 0
+  loop var i: Int = 3, i < ssaoLit.length and i < forwardLit.length, ++i {
+    let withAo: Float = ssaoLit.copyAtDefault(index: i)
+    let without: Float = forwardLit.copyAtDefault(index: i)
+    if withAo < without * 0.97 {
+      darker = darker + 1
+    }
+    if withAo > without * 1.01 + 0.0005 {
+      brighter = brighter + 1
+    }
+  }
+  var deferredDarker: Int = 0
+  loop var i: Int = 3, i < deferredLit.length and i < forwardLit.length, ++i {
+    if deferredLit.copyAtDefault(index: i) < forwardLit.copyAtDefault(index: i) * 0.97 {
+      deferredDarker = deferredDarker + 1
+    }
+  }
+  log(
+    "ssao: as much darkened as by the deferred SSAO {darker * 2 > deferredDarker and deferredDarker * 2 > darker}"
+  )
+  log("ssao: some samples darker {darker > 0}, none brighter {brighter is 0}")
+  log(
+    "ssao: sky unchanged {close(
+      forward: ssaoLit.copyAtDefault(index: 2)
+      deferred: forwardLit.copyAtDefault(index: 2)
+    )}"
+  )
   Gbuffer.shutdownAll()
   Gpu2d.closeWindow()
   ret 0

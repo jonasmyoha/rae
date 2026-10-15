@@ -354,3 +354,54 @@ Two values in a cell are two runs. Thermal states: 0–1 in the 60 Hz rows;
 
 The forward walker lives on as its own example (126), alongside 111 for scenes
 that suit a forward frame.
+
+## 8. SSAO in the forward pass (forward-rae-6, 2026-10-15)
+
+SSAO needs a stored depth and normal per pixel. The forward pass keeps neither:
+its 4x depth is memoryless, and WebGPU cannot resolve depth. So the forward
+renderer has SSAO as an OPTION, `createForwardRendererWithSsao(withUi:)`, off
+in every other constructor. With it the frame is
+
+    shadow -> gbuffer -> ssao -> forward -> bloom -> composite -> [ui] -> present
+
+- **The pre-pass is the deferred G-buffer pass.** It makes the same draws with
+  the same materials. Only its depth and target A (the normals) are stored,
+  which is all the SSAO reads; targets B and C are discarded
+  (`discardColorTarget`).
+- **The SSAO pass is the deferred one,** at half resolution.
+- **The forward shaders read the AO** with the deferred lighting's upsample,
+  now shared as `lib/ssao_upsample.wgsl`. The override constant `forwardSsao`
+  is 0 unless the renderer has SSAO, so without it the read is compiled out
+  and nothing changes for 111.
+- **Checked by fixture 1130:** the forward SSAO image darkens the contact under
+  the sphere about as much as the deferred SSAO does (56 vs 69 darkened
+  samples of 16,000), nothing gets brighter, and the sky is unchanged. 114's
+  deferred image is unchanged by the shared upsample (fixed-frame screenshot at
+  the noise level).
+
+**Measured on the iPhone 15 Pro** (126 vs 114, `RAE_DRS=off`, the default
+render ceiling, last 10 windows of 65 s runs, alternating, the same thermal
+state per pair):
+
+| display | 114 deferred | 126 forward + pre-pass + SSAO | 126 forward, no SSAO |
+|---|---|---|---|
+| 120 Hz build (`RAE_IOS_HIGH_REFRESH=1`) | 16.0 / 16.0 ms | 19.6 / 20.2 ms | 11.0 / 11.4 ms |
+| 60 Hz (shipped build) | 16.8 ms (60 fps) | 20.4 ms (~49 fps, 207 late frames in 65 s) | 16.7 ms (60 fps) |
+
+- **SSAO with the pre-pass costs about 9 ms.** It makes the forward walker
+  about 4 ms slower than the deferred one, and it drops below 60 fps at 60 Hz.
+- **The grass is not the cost:** a pre-pass without the grass was no faster
+  (20.8–20.9 ms, measured as a temporary local change at thermal state 2).
+- **Where the cost is not yet known.** Drawing the whole scene a second time
+  (terrain splat, skinned crowd, props) and the SSAO pass itself are the
+  candidates. The iPhone's GPU timestamps are unusable, so the split between
+  them was not measured.
+
+The study's earlier finding holds: a depth pre-pass costs more on Apple GPUs
+than it saves. In deferred, SSAO gets its depth and normals for free from the
+G-buffer.
+
+**Decision taken here:** the option stays in the lib, off by default. In 126 it
+is opt-in (`RAE_FORWARD_SSAO=1`, also covered by 126's example gate), so no
+slower path ships. Whether to keep it, make the pre-pass cheaper, or remove it
+is asked in the queue.

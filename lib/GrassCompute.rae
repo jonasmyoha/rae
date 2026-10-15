@@ -294,6 +294,7 @@ func ensureGrassForward(
       "lib/sky_hosek.wgsl"
       "lib/deferred_uniforms.wgsl"
       "lib/deferred_shade.wgsl"
+      "lib/ssao_upsample.wgsl"
       "lib/grass_render.wgsl"
       "lib/forward_entry.wgsl"
     ])
@@ -303,11 +304,12 @@ func ensureGrassForward(
         "lib/sky_hosek.wgsl"
         "lib/deferred_uniforms.wgsl"
         "lib/deferred_shade.wgsl"
+        "lib/ssao_upsample.wgsl"
         "lib/grass_render.wgsl"
         "lib/forward_entry.wgsl"
       ])
     }
-    if let pipeline: RenderPipelineId = createRenderPipeline(
+    if let pipeline: RenderPipelineId = createRenderPipelineWithConstants(
       resources: resources
       shader: grassShader
       vertexEntry: "vs"
@@ -320,6 +322,7 @@ func ensureGrassForward(
         depthCompare: WGPUCompareFunction_Greater
         cullMode: WGPUCullMode_None
       )
+      constants: forwardSsaoConstants(ssao: gbuffer.forward.ssao)
     ) {
       grass.forwardPipeline = pipeline
     }
@@ -334,20 +337,21 @@ func ensureGrassForward(
   retireBindGroup(resources: resources, id: grass.forwardBind)
   grass.forwardBind = noBindGroupId()
   releaseExternalIds(resources: resources, list: grass.forwardAdopted)
-  if gbuffer.forward.inputs.length < 4 {
+  if gbuffer.forward.inputs.length < forwardInputCount {
     ret
   }
   # The inputs are the renderer's manager objects: adopt them here
-  var adopted: List(ResourceRef) = List.create(ResourceRef, cap: 4)
+  # (two buffers, the cascades' view, their sampler, the two AO views)
+  var adopted: List(ResourceRef) = List.create(ResourceRef, cap: forwardInputCount)
   unsafe {
-    loop var i: Int = 0, i < 4, ++i {
+    loop var i: Int = 0, i < forwardInputCount, ++i {
       let input: ResourceRef = gbuffer.forward.inputs.copyAtFallback(index: i, fallback: noRef())
       let handle: Ptr = refHandle(resources: gbufferResources, ref: input)
       if i < 2 {
         adopted.add(
           value: adoptBufferRef(resources: resources, adopted: grass.forwardAdopted, handle: handle)
         )
-      } else if i is 2 {
+      } else if i is not 3 {
         adopted.add(
           value: adoptTextureViewRef(
             resources: resources

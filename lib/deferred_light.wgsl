@@ -55,27 +55,6 @@ fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     surface.emissive = exp(gbc.w * 6.91) - 1.0;
     surface.ao = 1.0;
   }
-  // The SSAO is half resolution (render-perf-6): upsample it from the four
-  // half texels around this pixel, bilinear weights times depth similarity,
-  // so the AO of a surface does not bleed onto the one in front of it.
-  var aoSum = 0.0;
-  var aoW = 0.0;
-  let dims = vec2<i32>(textureDimensions(aoTex));
-  let halfPos = (vec2<f32>(px) + vec2<f32>(0.5)) * 0.5 - vec2<f32>(0.5);
-  let halfBase = vec2<i32>(floor(halfPos));
-  let halfFrac = halfPos - floor(halfPos);
-  for (var i = 0; i < 4; i = i + 1) {
-    let o = vec2<i32>(i & 1, i >> 1u);
-    let q = clamp(halfBase + o, vec2<i32>(0), dims - vec2<i32>(1));
-    let qd = textureLoad(aoDepthTex, q, 0).x;
-    if (qd <= 0.0) { continue; }
-    let bx = select(1.0 - halfFrac.x, halfFrac.x, o.x == 1);
-    let by = select(1.0 - halfFrac.y, halfFrac.y, o.y == 1);
-    let w = (bx * by + 1e-3) / (1.0 + abs(qd - depth) / depth * 40.0);
-    aoSum = aoSum + textureLoad(aoTex, q, 0).r * w;
-    aoW = aoW + w;
-  }
-  surface.ssao = 1.0;
-  if (aoW > 0.0) { surface.ssao = aoSum / aoW; }
+  surface.ssao = ssaoAt(px, depth);
   return vec4<f32>(shadeSurface(surface), 1.0);
 }
