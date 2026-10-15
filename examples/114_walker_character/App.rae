@@ -44,7 +44,6 @@ import GrassConfig
 import app3d/Slider
 open Scene3d
 open RendererDeferred
-open RendererForward
 open Sky
 open Gbuffer
 open Rendergraph
@@ -325,15 +324,7 @@ func createApp() ret App {
     var light: Light3d = defaultLight3d()
     # #905/#921: the renderer owns the mesh + skin stores the walker parts,
     # terrain / grass / water meshes are uploaded into, so it exists first.
-    # RAE_RENDER_PATH=forward draws the scene with the forward main pass
-    # (forward-rae-4, docs/forward-msaa-study.md): one 4x MSAA pass, no SSAO,
-    # TAA, water or splash droplets. Deferred is the default.
-    let forwardPath: Bool = Sys.getEnv(name: "RAE_RENDER_PATH") is "forward"
     var renderer: DeferredRenderer = createDeferredRendererWithUi()
-    if forwardPath {
-      renderer = createForwardRendererWithUi()
-      log("[render] path: forward (4x MSAA)")
-    }
 
     let pngBytes: List(Int) = Sys.readFileBytes(path: "{assets}walker_palette.png")
     var atlasW: Int = 0
@@ -414,26 +405,6 @@ func createApp() ret App {
         "lib/terrain_splat.wgsl"
       ])
     )
-    if forwardPath {
-      # The same ground in the forward pass: the parts after the shading
-      # prelude, the forward entry last
-      rendererSetForwardTerrainShader(
-        renderer: renderer
-        shader: shader(files: [
-          "lib/precision_f32.wgsl"
-          "lib/sky_hosek.wgsl"
-          "lib/deferred_uniforms.wgsl"
-          "lib/deferred_shade.wgsl"
-          "lib/noise.wgsl"
-          "lib/world_biome.wgsl"
-          "assets/terrain_palette.wgsl"
-          "assets/terrain_grass.wgsl"
-          "lib/terrain_detail.wgsl"
-          "lib/terrain_splat.wgsl"
-          "lib/forward_entry.wgsl"
-        ])
-      )
-    }
     var terrainSystem: TerrainSystem = createTerrainSystem(
       renderer: renderer
       world: gameWorld
@@ -879,7 +850,6 @@ func createApp() ret App {
         drs: own drs
         shadowLogged: false
         cubeBatch: own cubeBatch
-        matchForward: Sys.getEnv(name: "RAE_DEFERRED_MATCH_FORWARD") is "1"
       }
       profiler: Profile.createProfiler()
       grassCompute: createGrassCompute()

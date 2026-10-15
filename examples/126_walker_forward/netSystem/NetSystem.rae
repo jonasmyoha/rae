@@ -1,0 +1,123 @@
+# Multiplayer seam for the walker example (#554, ECS seam #746).
+#
+# Offline today; both hooks still no-op the wire, but they now operate over the
+# ECS: a JOINED remote player is an ENTITY carrying a NetPlayer component, and
+# join/leave spawn/despawn it through the generational allocator (#704) — a real
+# ECS home for multiplayer, not a List stub. updateApp calls netApplyRemote
+# before the local sim and netPublishIntent after it, so wiring a transport in
+# later needs no changes to updateApp's shape: it fills in the loop bodies that
+# already iterate the NetPlayer table.
+import Vec3
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Transform
+open ecs/World
+
+# role: 0 = offline, 1 = server, 2 = client. tick counts published local frames.
+type NetSystem {
+  role: Int
+  tick: Int
+}
+
+# A joined remote player. `remoteId` is the transport-assigned peer id; `role`
+# mirrors NetSystem.role for that peer; `controlled` is the character ENTITY this
+# remote player drives (noEntity until it is assigned one). A remote player's
+# input will arrive here instead of from a local device.
+type NetPlayer {
+  remoteId: Int
+  role: Int
+  controlled: EntityId
+}
+
+# A player joins: spawn a NetPlayer entity. Generational — a slot freed by an
+# earlier leave is recycled with a bumped generation.
+func netJoin(world: mod GameWorld, remoteId: view Int, role: view Int) ret EntityId {
+  let entityId: EntityId = gameWorldAddEntity(world: world)
+  componentSet(
+    this: world.netPlayers
+    entityId: entityId
+    data: NetPlayer { remoteId: remoteId, role: role, controlled: noEntity() }
+  )
+  ret entityId
+}
+
+# A player leaves: drop the NetPlayer component, then free the entity slot so a
+# later join recycles it (and stale handles to the departed player read dead).
+func netLeave(world: mod GameWorld, entityId: view EntityId) {
+  # #760: clear every component row for the leaving entity (generic reflection
+  # sweep) so a recycled index can never read stale data from ANY table, then
+  # free the slot. Replaces the single hand-listed netPlayers remove.
+  clearEntityComponents(world: world, entityId: entityId)
+  freeEntity(this: world.allocator, entityId: entityId)
+}
+
+# Count of joined remote players (live NetPlayer entities).
+func netPlayerCount(world: view GameWorld) ret Int {
+  ret componentCount(this: world.netPlayers)
+}
+
+# Pull remote players' intents in before the local sim. Iterates the NetPlayer
+# table — a real system. Offline there are no joined players, so it is a no-op;
+# a transport fills the loop body (apply each peer's intent to its `controlled`).
+func netApplyRemote(netSystem: mod NetSystem, world: mod GameWorld) {
+  loop var i: Int = 0, i < componentCount(this: world.netPlayers), ++i {
+    # Offline: no wire, so nothing to apply. A transport reads the i-th
+    # NetPlayer's latest intent here and drives its `controlled` character
+    # entity — same seam the local device drives via InputIntent.
+  }
+}
+
+# Publish the local player's intent after the sim. Offline: just advance the
+# tick so the seam is observably live.
+func netPublishIntent(netSystem: mod NetSystem, world: mod GameWorld) {
+  netSystem.tick = netSystem.tick + 1
+}
+
+# Spawn/despawn smoke test for the ECS seams (#746 Verify). Proves generational
+# recycling: spawn three remote players, drop the middle, spawn a fourth — the
+# fourth REUSES the freed slot's index with generation+1, and the departed
+# handle reads dead. Then spawns a Box3D body high above the island, steps the
+# bodies, and checks the pull system moved its Transform3D. Everything it
+# creates is despawned again, so the persistent world is untouched.
+func seamSelfTest(world: mod GameWorld, physicsSystem: mod PhysicsSystem) {
+  let a: EntityId = netJoin(world: world, remoteId: 101, role: 2)
+  let b: EntityId = netJoin(world: world, remoteId: 102, role: 2)
+  let c: EntityId = netJoin(world: world, remoteId: 103, role: 2)
+  netLeave(world: world, entityId: b)
+  let d: EntityId = netJoin(world: world, remoteId: 104, role: 2)
+  let recycledIndex: Bool = d.index is b.index
+  let bumpedGeneration: Bool = d.generation is b.generation + 1
+  let departedDead: Bool = allocatorIsAlive(this: world.allocator, entityId: b) is false
+  let netOk: Bool = recycledIndex and bumpedGeneration and departedDead
+
+  let body: EntityId = spawnPhysicsCube(
+    physicsSystem: physicsSystem
+    world: world
+    center: Vec3.create(x: 0.0, y: 0.0, z: 200.0)
+    halfSize: 0.5
+    color: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
+  )
+  setBodyVelocity(
+    physicsSystem: physicsSystem
+    entityId: body
+    velocity: Vec3.create(x: 1.0, y: 0.0, z: 0.0)
+  )
+  # The position BEFORE the steps, as plain values: a view would read the row
+  # after the steps moved it.
+  let beforeX: Float = componentView(this: world.transforms, entityId: body).position.x
+  let beforeZ: Float = componentView(this: world.transforms, entityId: body).position.z
+  loop var step: Int = 0, step < 6, ++step {
+    stepPhysicsBodies(physicsSystem: physicsSystem, world: world)
+  }
+  let after: view Transform3D => componentView(this: world.transforms, entityId: body)
+  # x advances with the velocity, z falls under gravity — both must have moved.
+  let physicsOk: Bool = after.position.x > beforeX and after.position.z < beforeZ
+
+  netLeave(world: world, entityId: a)
+  netLeave(world: world, entityId: c)
+  netLeave(world: world, entityId: d)
+  despawnPhysicsCube(physicsSystem: physicsSystem, world: world, entityId: body)
+  log(
+    "[seamtest] net recycle idx={b.index} gen {b.generation}->{d.generation} netOk={netOk} physicsOk={physicsOk}"
+  )
+}

@@ -1,0 +1,126 @@
+# Walker HUD: the on-screen overlays (touch joystick, corner menu button, log +
+# debug overlays) and the settings-panel show/hide. Kept out of main.rae to
+# respect the 1000-line file cap.
+import Gpu2d
+open app3d/UiModes
+open ui/CornerMenuButton
+open RendererDeferred
+open app3d/SettingsDialog
+open app3d/UiShell
+open ui/Ecs
+open ui/inputSystem/InputSystem
+open ui/LogOverlay
+open ui/DebugOverlay
+open ui/renderSystem/RenderSystem
+open ui/VirtualJoystick
+open app3d/CameraRig
+open ui/safeAreaSystem/SafeAreaSystem
+open Gpu2dCanvas
+open ui/UiSystems
+
+# Update the touch stick AND tell the camera rig to exclude its region, so on a
+# phone one finger drives the joystick while another rotates the camera (#526).
+func updateWalkerTouch(
+  rig: mod CameraRig
+  moveStick: mod VirtualJoystick
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  enabled: view Bool
+) pub ret Bool {
+  # Feed the OS safe-area insets (notch / home indicator, design units) into the
+  # ECS so UiRoot's padding reserves them — the whole UI, top bar included, sits
+  # inside the safe area. Runs before layout (renderSystemGpu2d) this frame.
+  let safe: Insets = {
+    l: Gpu2d.safeLeft()
+    t: Gpu2d.safeTop()
+    r: Gpu2d.safeRight()
+    b: Gpu2d.safeBottom()
+  }
+  safeAreaSystem(world: world, uiSystems: uiSystems, insets: safe)
+  # The stick is GAME mode's: in EDITOR it is left alone and the camera gets
+  # every finger
+  if enabled is false {
+    setCameraTouch(
+      rig: rig
+      excludeId: 0 - 1
+      joystickActive: false
+      zoneX: 0.0
+      zoneY: 0.0
+      zoneR: 0.0 - 1.0
+    )
+    ret false
+  }
+  let active: Bool = updateVirtualJoystick(joy: moveStick)
+  # Hand the camera the joystick's exclusion zone (same radius the stick grabs
+  # with) + the owned finger id: a press inside the zone is the stick's, outside
+  # is the camera's, and each holds its finger for the whole drag.
+  setCameraTouch(
+    rig: rig
+    excludeId: moveStick.grabbedId
+    joystickActive: active
+    zoneX: moveStick.baseX
+    zoneY: moveStick.baseY
+    zoneR: zoneRadius(joy: moveStick)
+  )
+  ret active
+}
+
+# Fully show/hide the settings side panel. 114 hides the WHOLE panel when closed
+# (not just the body) and reopens it from the corner menu button, so the panel
+# header never sits under the debug "D" at the top-right.
+# Hide the camera bar's "Mouse"/"Keys" smoothing toggles — not needed, and they
+# crowd the top bar on a phone. (Their smoothing defaults still apply.)
+func walkerHideCameraChrome(world: mod UiWorld) pub {
+  setNodeActive(world: world, nodeId: "CameraSmoothMouseButton", value: false)
+  setNodeActive(world: world, nodeId: "CameraSmoothKeysButton", value: false)
+}
+
+func applyWalkerPanel(world: mod UiWorld, open: view Bool) pub {
+  setNodeActive(world: world, nodeId: "SidePanel", value: open)
+  # The in-panel "Settings" header button is redundant once the hamburger opens
+  # the panel — hide it while open.
+  setNodeActive(world: world, nodeId: "SettingsButton", value: open is false)
+  applySettingsPanelOpen(world: world, open: open)
+}
+
+func toggleWalkerPanel(settings: mod SettingsState, world: mod UiWorld) pub {
+  settings.open = settings.open is false
+  applyWalkerPanel(world: world, open: settings.open)
+}
+
+# The corner menu (hamburger) is the shared lib/ui widget, mounted as an ECS
+# node beside the camera bar (App.rae), so its press arrives as a UI action.
+func walkerMenuTapped(world: view UiWorld) pub ret Bool {
+  ret menuToggleTapped(world: world)
+}
+
+# All HUD overlays, drawn inside the 2D overlay pass (after the ECS UI world).
+func drawWalkerHud(
+  logOverlay: view LogOverlay
+  gpuUi: view Gpu2dUi
+  canvas: mod Gpu2dCanvas
+  dbg: mod DebugOverlay
+  moveStick: view VirtualJoystick
+  editor: view Bool
+) pub {
+  # GAME mode: the touch stick; EDITOR: the log strip. The debug readout is
+  # both modes'.
+  if editor {
+    drawLogOverlay(
+      ov: logOverlay
+      canvas: canvas
+      font: gpuUi.textFont
+      screenW: windowExtentW()
+      screenH: windowExtentH()
+    )
+  } else {
+    drawVirtualJoystick(joy: moveStick, canvas: canvas)
+  }
+  # Debug D last, so it is above everything else.
+  drawDebugOverlay(
+    debugOverlay: dbg
+    canvas: canvas
+    font: gpuUi.textFont
+    didRealWork: true
+  )
+}

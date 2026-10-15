@@ -1189,9 +1189,6 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # default), so the shot is taken in EDITOR mode.
           # The 154 shadow casters are the scene's 130 plus the 24 physics cubes.
           SHOT="$TMP_OUT/walker.bmp"
-          # RAE_RENDER_PATH=forward (forward-rae-4): the same scene in the forward
-          # main pass must draw too (a shaded frame with the skinned parts)
-          FORWARD_SHOT="$TMP_OUT/walker-forward.bmp"
           if (cd .. && RAE_UI_MODE=editor RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SHOT" \
                 perl -e 'alarm shift; exec @ARGV' 45 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
              && python3 tools/assert_nonblank_bmp.py "$SHOT" --min-colors=20 > "$TMP_OUT/shot.log" 2>&1 \
@@ -1205,11 +1202,6 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              && [ "$(grep -c "\[water\] toon lake: 2 bodies" "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c "\[shadow\] casters 154, 3 cascades" "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c "\[seamtest\] .* netOk=true physicsOk=true" "$TMP_OUT/render.log")" -eq 1 ] \
-             && (cd .. && RAE_RENDER_PATH=forward RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$FORWARD_SHOT" \
-                perl -e 'alarm shift; exec @ARGV' 45 "$TMP_OUT/app") > "$TMP_OUT/forward.log" 2>&1 \
-             && python3 tools/assert_nonblank_bmp.py "$FORWARD_SHOT" --min-colors=2000 >> "$TMP_OUT/shot.log" 2>&1 \
-             && [ "$(grep -c "\[render\] path: forward" "$TMP_OUT/forward.log")" -eq 1 ] \
-             && [ "$(grep -c "skinned parts: 12" "$TMP_OUT/forward.log")" -eq 1 ] \
              && (cd .. && RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=90000 RAE_MEM_STATS=1 RAE_MEM_STATS_EVERY_MS=10000 \
                 perl -e 'alarm shift; exec @ARGV' 150 "$TMP_OUT/app") > "$TMP_OUT/live-growth.log" 2>&1 \
              && awk '
@@ -1225,12 +1217,31 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
                   }
                   END { exit !(based && lastT >= 80000 && lastBufs - baseBufs <= 4 && lastBytes - baseBytes <= 262144) }
                 ' "$TMP_OUT/live-growth.log"; then
-            echo "PASS: $EXAMPLE_NAME (12 skinned parts + ground casting shadows, clip retargeted, atlas decoded, forward path draws, memory flat while running)"
+            echo "PASS: $EXAMPLE_NAME (12 skinned parts + ground casting shadows, clip retargeted, atlas decoded, memory flat while running)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (walker character)"
-            cat "$TMP_OUT/render.log" "$TMP_OUT/shot.log" "$TMP_OUT/forward.log" 2>/dev/null | sed 's/^/  /'
+            cat "$TMP_OUT/render.log" "$TMP_OUT/shot.log" 2>/dev/null | sed 's/^/  /'
             grep -a '^\[mem:live\]' "$TMP_OUT/live-growth.log" 2>/dev/null | sed 's/^/  /'
+            ((FAILED++))
+          fi
+        elif [ "$EXAMPLE_NAME" = "126_walker_forward" ]; then
+          # The forward twin of 114 (forward-rae-5): the same walker, crowd,
+          # terrain, grass, props and cubes in one 4x MSAA pass, no water. A
+          # shaded frame (thousands of colours), all 12 skinned parts loaded,
+          # the forward path taken and the same 154 shadow casters as 114.
+          SHOT="$TMP_OUT/walker-forward.bmp"
+          if (cd .. && RAE_UI_MODE=editor RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SHOT" \
+                perl -e 'alarm shift; exec @ARGV' 45 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
+             && python3 tools/assert_nonblank_bmp.py "$SHOT" --min-colors=2000 > "$TMP_OUT/shot.log" 2>&1 \
+             && [ "$(grep -c "\[render\] path: forward" "$TMP_OUT/render.log")" -eq 1 ] \
+             && [ "$(grep -c "skinned parts: 12" "$TMP_OUT/render.log")" -eq 1 ] \
+             && [ "$(grep -c "\[shadow\] casters 154, 3 cascades" "$TMP_OUT/render.log")" -eq 1 ]; then
+            echo "PASS: $EXAMPLE_NAME (forward walker: shaded frame, 12 skinned parts, shadow casters)"
+            ((PASSED++))
+          else
+            echo "FAIL: $EXAMPLE_NAME (forward walker)"
+            cat "$TMP_OUT/render.log" "$TMP_OUT/shot.log" 2>/dev/null | sed 's/^/  /'
             ((FAILED++))
           fi
         elif [ "$EXAMPLE_NAME" = "110_deferred_gbuffer" ]; then
