@@ -1,0 +1,315 @@
+# Seeded geometry for the grove: leaf silhouettes, branching wood and broad stone faces.
+import Math
+open Vec3
+open Mesh3d
+open Noise
+
+func emptyMesh() ret MeshData {
+  ret MeshData {
+    verts: List.create(Float, cap: 8192)
+    indices: List.create(Int, cap: 4096)
+    vertCount: 0
+  }
+}
+
+func vertex(mesh: mod MeshData, point: view Vec3, normal: view Vec3) {
+  pushVert(
+    verts: mesh.verts
+    px: point.x
+    py: point.y
+    pz: point.z
+    nx: normal.x
+    ny: normal.y
+    nz: normal.z
+    u: 0
+    value: 0
+  )
+  mesh.vertCount = mesh.vertCount + 1
+}
+
+func face(
+  mesh: mod MeshData
+  first: view Vec3
+  second: view Vec3
+  third: view Vec3
+) {
+  let normal: Vec3 = vnorm(a: vcross(a: vsub(a: second, b: first), b: vsub(a: third, b: first)))
+  let base: Int = mesh.vertCount
+  vertex(mesh: mesh, point: first, normal: normal)
+  vertex(mesh: mesh, point: second, normal: normal)
+  vertex(mesh: mesh, point: third, normal: normal)
+  mesh.indices.add(value: base)
+  mesh.indices.add(value: base + 1)
+  mesh.indices.add(value: base + 2)
+}
+
+func basis(direction: view Vec3) ret Vec3 {
+  if Math.abs(value: direction.z) > 0.9 {
+    ret vnorm(a: vcross(a: direction, b: Vec3.create(x: 0, y: 1, z: 0)))
+  }
+  ret vnorm(a: vcross(a: direction, b: Vec3.create(x: 0, y: 0, z: 1)))
+}
+
+func branch(
+  mesh: mod MeshData
+  start: view Vec3
+  end: view Vec3
+  radius: view Float
+  endRadius: view Float
+) {
+  let direction: Vec3 = vnorm(a: vsub(a: end, b: start))
+  let side: Vec3 = basis(direction: direction)
+  let across: Vec3 = vcross(a: direction, b: side)
+  loop var i: Int = 0, i < 9, ++i {
+    let angle: Float = i.toFloat() * 6.2831853 / 9
+    let next: Float = (i + 1).toFloat() * 6.2831853 / 9
+    let radial: Vec3 = vadd(
+      a: vscale(a: side, s: Math.cos(x: angle))
+      b: vscale(a: across, s: Math.sin(x: angle))
+    )
+    let nextRadial: Vec3 = vadd(
+      a: vscale(a: side, s: Math.cos(x: next))
+      b: vscale(a: across, s: Math.sin(x: next))
+    )
+    let lower: Vec3 = vadd(a: start, b: vscale(a: radial, s: radius))
+    let lowerNext: Vec3 = vadd(a: start, b: vscale(a: nextRadial, s: radius))
+    let upper: Vec3 = vadd(a: end, b: vscale(a: radial, s: endRadius))
+    let upperNext: Vec3 = vadd(a: end, b: vscale(a: nextRadial, s: endRadius))
+    face(
+      mesh: mesh
+      first: lower
+      second: lowerNext
+      third: upper
+    )
+    face(
+      mesh: mesh
+      first: upper
+      second: lowerNext
+      third: upperNext
+    )
+  }
+}
+
+# Six-sided leaves give a broken silhouette without alpha textures. Their
+# normals follow the crown envelope, so the small leaves shade as one volume.
+func leaf(
+  mesh: mod MeshData
+  center: view Vec3
+  normal: view Vec3
+  size: view Float
+  angle: view Float
+) {
+  let side: Vec3 = Vec3.create(
+    x: Math.cos(x: angle)
+    y: Math.sin(x: angle)
+    z: Math.sin(x: angle * 1.7) * 0.8
+  )
+  let across: Vec3 = vnorm(a: vcross(a: side, b: normal))
+  let base: Int = mesh.vertCount
+  loop var i: Int = 0, i < 6, ++i {
+    let phase: Float = i.toFloat() * 6.2831853 / 6
+    let point: Vec3 = vadd(
+      a: center
+      b: vadd(
+        a: vscale(a: side, s: Math.cos(x: phase) * size)
+        b: vscale(a: across, s: Math.sin(x: phase) * size * 0.65)
+      )
+    )
+    vertex(mesh: mesh, point: point, normal: normal)
+  }
+  loop var i: Int = 1, i < 5, ++i {
+    mesh.indices.add(value: base)
+    mesh.indices.add(value: base + i)
+    mesh.indices.add(value: base + i + 1)
+    mesh.indices.add(value: base)
+    mesh.indices.add(value: base + i + 1)
+    mesh.indices.add(value: base + i)
+  }
+}
+
+func crown(
+  mesh: mod MeshData
+  center: view Vec3
+  radius: view Vec3
+  seed: view Int
+  tone: view Int
+) {
+  loop var i: Int = 0, i < 1250, ++i {
+    if i % 3 is not tone {
+      continue
+    }
+    let vertical: Float = hash2(x: i, y: 1, seed: seed) * 2 - 1
+    let angle: Float = hash2(x: i, y: 2, seed: seed) * 6.2831853
+    let radial: Float = Math.sqrt(x: 1.0 - vertical * vertical)
+    let depth: Float = 0.50 + 0.50 * hash2(x: i, y: 3, seed: seed)
+    let direction: Vec3 = Vec3.create(
+      x: radial * Math.cos(x: angle)
+      y: radial * Math.sin(x: angle)
+      z: vertical
+    )
+    let point: Vec3 = vadd(
+      a: center
+      b: Vec3.create(
+        x: direction.x * radius.x * depth
+        y: direction.y * radius.y * depth
+        z: direction.z * radius.z * depth
+      )
+    )
+    let normal: Vec3 = vnorm(a: Vec3.create(x: direction.x, y: direction.y, z: direction.z + 0.45))
+    leaf(
+      mesh: mesh
+      center: point
+      normal: normal
+      size: 0.065 + hash2(x: i, y: 4, seed: seed) * 0.065
+      angle: angle * 3
+    )
+  }
+}
+
+func treeWood(seed: view Int, height: view Float, width: view Float) ret MeshData {
+  var mesh: MeshData = emptyMesh()
+  var previous: Vec3 = Vec3.create(x: 0, y: 0, z: 0)
+  loop var i: Int = 0, i < 6, ++i {
+    let fraction: Float = (i + 1).toFloat() / 6
+    let point: Vec3 = Vec3.create(
+      x: Math.sin(x: fraction * 2.6) * 0.24
+      y: fraction * fraction * 0.18
+      z: height * fraction
+    )
+    branch(
+      mesh: mesh
+      start: previous
+      end: point
+      radius: 0.22 * (1 - fraction) + 0.035
+      endRadius: 0.18 * (1 - fraction) + 0.018
+    )
+    previous = point
+  }
+  loop var i: Int = 0, i < 11, ++i {
+    let angle: Float = i.toFloat() * 2.39996 + hash2(x: i, y: 8, seed: seed) * 0.35
+    let level: Float = 0.42 + i.toFloat() * 0.042
+    let spread: Float = width * (1.15 - level) * 1.2
+    let start: Vec3 = Vec3.create(x: 0.15, y: 0, z: height * level)
+    let elbow: Vec3 = Vec3.create(
+      x: Math.cos(x: angle) * spread * 0.65
+      y: Math.sin(x: angle) * spread * 0.65
+      z: height * level + 0.35
+    )
+    let end: Vec3 = Vec3.create(
+      x: Math.cos(x: angle) * spread
+      y: Math.sin(x: angle) * spread
+      z: height * level + 1.0
+    )
+    branch(
+      mesh: mesh
+      start: start
+      end: elbow
+      radius: 0.09 * (1 - level) + 0.025
+      endRadius: 0.035
+    )
+    branch(
+      mesh: mesh
+      start: elbow
+      end: end
+      radius: 0.035
+      endRadius: 0.009
+    )
+  }
+  loop var i: Int = 0, i < 5, ++i {
+    let angle: Float = i.toFloat() * 1.2566
+    branch(
+      mesh: mesh
+      start: Vec3.create(x: Math.cos(x: angle) * 0.65, y: Math.sin(x: angle) * 0.65, z: 0.02)
+      end: Vec3.create(x: 0, y: 0, z: 0.48)
+      radius: 0.035
+      endRadius: 0.14
+    )
+  }
+  ret mesh
+}
+
+func treeLeaves(
+  seed: view Int
+  height: view Float
+  width: view Float
+  tone: view Int
+) ret MeshData {
+  var mesh: MeshData = emptyMesh()
+  loop var i: Int = 0, i < 11, ++i {
+    let angle: Float = i.toFloat() * 2.39996 + hash2(x: i, y: 8, seed: seed) * 0.35
+    let level: Float = 0.42 + i.toFloat() * 0.042
+    let spread: Float = width * (1.15 - level) * 1.2
+    crown(
+      mesh: mesh
+      center: Vec3.create(
+        x: Math.cos(x: angle) * spread
+        y: Math.sin(x: angle) * spread
+        z: height * level + 1.0
+      )
+      radius: Vec3.create(x: width * 0.58, y: width * 0.52, z: height * 0.23)
+      seed: seed + i * 71
+      tone: tone
+    )
+  }
+  crown(
+    mesh: mesh
+    center: Vec3.create(x: 0.2, y: 0.15, z: height + 0.4)
+    radius: Vec3.create(x: width * 0.48, y: width * 0.48, z: height * 0.25)
+    seed: seed + 901
+    tone: tone
+  )
+  ret mesh
+}
+
+# Three offset octagonal rings form broad stratified faces, with a flat foot.
+func stonePoint(ring: view Int, index: view Int, seed: view Int) ret Vec3 {
+  let angle: Float = index.toFloat() * 6.2831853 / 8
+  let radius: Float = 0.82 + hash2(x: index, y: 9, seed: seed) * 0.26
+  var scale: Float = 1
+  var height: Float = 0.08
+  if ring is 1 {
+    height = 0.62
+  }
+  if ring is 2 {
+    height = 1.0
+    scale = 0.72
+  }
+  ret Vec3.create(
+    x: Math.cos(x: angle) * radius * scale + height * 0.16
+    y: Math.sin(x: angle) * radius * scale
+    z: height + hash2(x: index, y: ring, seed: seed) * 0.11
+  )
+}
+
+func stone(seed: view Int) ret MeshData {
+  var mesh: MeshData = emptyMesh()
+  loop var ring: Int = 0, ring < 2, ++ring {
+    loop var i: Int = 0, i < 8, ++i {
+      let first: Vec3 = stonePoint(ring: ring, index: i, seed: seed)
+      let second: Vec3 = stonePoint(ring: ring, index: (i + 1) % 8, seed: seed)
+      let third: Vec3 = stonePoint(ring: ring + 1, index: i, seed: seed)
+      let fourth: Vec3 = stonePoint(ring: ring + 1, index: (i + 1) % 8, seed: seed)
+      face(
+        mesh: mesh
+        first: first
+        second: second
+        third: third
+      )
+      face(
+        mesh: mesh
+        first: third
+        second: second
+        third: fourth
+      )
+    }
+  }
+  loop var i: Int = 0, i < 8, ++i {
+    face(
+      mesh: mesh
+      first: Vec3.create(x: 0.16, y: 0, z: 1.04)
+      second: stonePoint(ring: 2, index: i, seed: seed)
+      third: stonePoint(ring: 2, index: (i + 1) % 8, seed: seed)
+    )
+  }
+  ret mesh
+}
