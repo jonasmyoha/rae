@@ -68,6 +68,7 @@ func ensureSkinForward(cache: mod GbufferCache, resources: mod GpuResources) {
       "lib/sky_hosek.wgsl"
       "lib/deferred_uniforms.wgsl"
       "lib/deferred_shade.wgsl"
+      "lib/ssao_upsample.wgsl"
       "lib/gbuffer_octahedral.wgsl"
       "lib/gbuffer_skinned.wgsl"
       "lib/forward_entry.wgsl"
@@ -78,6 +79,7 @@ func ensureSkinForward(cache: mod GbufferCache, resources: mod GpuResources) {
         "lib/sky_hosek.wgsl"
         "lib/deferred_uniforms.wgsl"
         "lib/deferred_shade.wgsl"
+        "lib/ssao_upsample.wgsl"
         "lib/gbuffer_octahedral.wgsl"
         "lib/gbuffer_skinned.wgsl"
         "lib/forward_entry.wgsl"
@@ -87,7 +89,7 @@ func ensureSkinForward(cache: mod GbufferCache, resources: mod GpuResources) {
     attributes.add(value: { format: WGPUVertexFormat_Float32x4, offset: 32, location: 3 })
     attributes.add(value: { format: WGPUVertexFormat_Float32x4, offset: 48, location: 4 })
     attributes.add(value: { format: WGPUVertexFormat_Float32x4, offset: 64, location: 5 })
-    if let pipeline: RenderPipelineId = createRenderPipeline(
+    if let pipeline: RenderPipelineId = createRenderPipelineWithConstants(
       resources: resources
       shader: skinShader
       vertexEntry: "vs"
@@ -100,6 +102,7 @@ func ensureSkinForward(cache: mod GbufferCache, resources: mod GpuResources) {
         depthCompare: WGPUCompareFunction_Greater
         cullMode: WGPUCullMode_Back
       )
+      constants: forwardSsaoConstants(ssao: materials.ssao)
     ) {
       materials.skinPipeline = pipeline
     }

@@ -2,12 +2,18 @@
 // vertex stage and surface (gbuffer_static_surface.wgsl) shaded in place with
 // shadeSurface (deferred_shade.wgsl), the same function the deferred lighting
 // pass runs, so the two paths shade the same. Drawn into a 4x MSAA target with
-// no depth pre-pass. There is no SSAO in the forward pass (its depth never
-// leaves the tile), so `ssao` is 1.
+// no depth pre-pass of its own; with SSAO (forward-rae-6) a 1x pre-pass feeds
+// the AO, read here, else `ssao` is 1.
 @group(0) @binding(2) var<uniform> L: LightU;
 @group(0) @binding(3) var<uniform> SH: ShadowU;
 @group(0) @binding(4) var shadowTex: texture_depth_2d_array;
 @group(0) @binding(5) var shadowSamp: sampler_comparison;
+// SSAO (forward-rae-6): the AO of the 1x depth + normal pre-pass, when the
+// renderer has it (forwardSsao 1, set at pipeline creation; 0 compiles the
+// read out). Composed after ssao_upsample.wgsl.
+@group(0) @binding(6) var aoTex: texture_2d<f32>;
+@group(0) @binding(7) var aoDepthTex: texture_2d<f32>;
+override forwardSsao: f32 = 0.0;
 @fragment
 fn fs(in: VsOut) -> @location(0) vec4<f32> {
   let d = draws[in.inst];
@@ -26,5 +32,8 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     surface.ao = 1.0;
   }
   surface.ssao = 1.0;
+  if (forwardSsao > 0.5) {
+    surface.ssao = ssaoAt(vec2<i32>(in.pos.xy), in.pos.z);
+  }
   return vec4<f32>(shadeSurface(surface), 1.0);
 }
