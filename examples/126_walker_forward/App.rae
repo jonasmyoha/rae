@@ -2,10 +2,9 @@
 # on the forward renderer (createForwardRendererWithUi, lib/RendererForward),
 # the way 111 is the forward twin of 112. The scene is 114's without its water
 # (lake, river, sea), splash droplets and underwater fog: the forward pass keeps
-# no scene depth for them. MSAA (4x) is the antialiasing. SSAO is opt-in
-# (RAE_FORWARD_SSAO=1): a 1x depth + normal pre-pass (forward-rae-6). README.md lists every
-# difference from 114. The assets are
-# 114's, read in place.
+# no scene depth for them. MSAA (4x) is the antialiasing. SSAO comes from a 1x
+# depth + normal pre-pass (forward-rae-6). README.md lists every difference
+# from 114. The assets are 114's, read in place.
 #
 # CONVENTION (#822): the `App` struct IS the system list. Each system's `App`
 # member is named for its folder and typed as that folder's `<Folder>System`
@@ -325,16 +324,10 @@ func createApp() ret App {
     var light: Light3d = defaultLight3d()
     # #905/#921: the renderer owns the mesh + skin stores the walker parts,
     # terrain and grass meshes are uploaded into, so it exists first. The
-    # forward renderer: one 4x MSAA pass (docs/forward-msaa-study.md).
-    # RAE_FORWARD_SSAO=1 adds SSAO (forward-rae-6): a 1x depth + normal
-    # pre-pass feeds it. Off by default: on the iPhone 15 Pro it made the frame
-    # slower than 114's deferred one (README.md, docs/forward-msaa-study.md §8).
-    let forwardSsao: Bool = Sys.getEnv(name: "RAE_FORWARD_SSAO") is "1"
-    var renderer: DeferredRenderer = createForwardRendererWithUi()
-    if forwardSsao {
-      renderer = createForwardRendererWithSsao(withUi: true)
-    }
-    log("[render] path: forward (4x MSAA), SSAO {forwardSsao}")
+    # forward renderer: one 4x MSAA pass (docs/forward-msaa-study.md), with
+    # SSAO fed by a 1x depth + normal pre-pass (forward-rae-6).
+    var renderer: DeferredRenderer = createForwardRendererWithSsao(withUi: true)
+    log("[render] path: forward (4x MSAA) with SSAO")
 
     let pngBytes: List(Int) = Sys.readFileBytes(path: "{assets}walker_palette.png")
     var atlasW: Int = 0
