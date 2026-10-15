@@ -79,6 +79,11 @@ type GrassCompute {
   # plain setter keeps the lib island pair for a surface built on
   # lib/world_biome.wgsl.
   computeConstants: List(ShaderConstant)
+  # The app's own surface data (grassSetSurfaceField): read-only f32 values the
+  # compute shader's surface part reads at @binding(4) — a baked height and
+  # grass map, say. Empty: no such binding.
+  surfaceField: List(Float)
+  surfaceFieldBuffer: BufferId
   made: Bool
   drawBindMade: Bool
   uniformArgs: ArgWriter
@@ -113,6 +118,8 @@ func createGrassCompute() ret GrassCompute {
     computeShaderSet: false
     computeShader: { text: "", sources: List.create(String, cap: 0), generation: 0 }
     computeConstants: List.create(ShaderConstant, cap: 0)
+    surfaceField: List.create(Float, cap: 0)
+    surfaceFieldBuffer: noBufferId()
     made: false
     drawBindMade: false
     uniformArgs: createArgs(uniform: true)
@@ -177,6 +184,16 @@ func grassSetComputeShaderWithConstants(
   grass.computeShader = shader
   grass.computeConstants = constants
   grass.computeShaderSet = true
+  resetGrassPipeline(grass: grass)
+}
+
+# Give the app's compute shader its own data: `values` go to the GPU once, as a
+# read-only storage buffer at @binding(4), which the surface part declares as
+# `var<storage, read> ...: array<f32>` and reads — the lib's grass pass never
+# does. For a surface no formula describes: a modelled venue's ground heights
+# and where grass grows, baked on the CPU. Rebuilds the pipeline.
+func grassSetSurfaceField(grass: mod GrassCompute, values: own List(Float)) {
+  grass.surfaceField = values
   resetGrassPipeline(grass: grass)
 }
 
@@ -247,6 +264,7 @@ func releaseGrassGpu(grass: mod GrassCompute, resources: mod GpuResources) {
   retireBuffer(resources: resources, id: grass.uniform)
   retireBuffer(resources: resources, id: grass.indirect)
   retireBuffer(resources: resources, id: grass.staging)
+  retireBuffer(resources: resources, id: grass.surfaceFieldBuffer)
   retireBuffer(resources: resources, id: grass.bounds.buffer)
   releaseExternal(resources: resources, id: grass.frameUniform)
   grass.drawBind = noBindGroupId()
@@ -257,6 +275,7 @@ func releaseGrassGpu(grass: mod GrassCompute, resources: mod GpuResources) {
   grass.uniform = noBufferId()
   grass.indirect = noBufferId()
   grass.staging = noBufferId()
+  grass.surfaceFieldBuffer = noBufferId()
   grass.bounds = noComputeBounds(workgroupSize: grassWorkgroupSize)
   grass.frameUniform = noExternalId()
   grass.drawBindMade = false
@@ -449,6 +468,10 @@ func ensureGrassGpu(grass: mod GrassCompute, resources: mod GpuResources) {
     entries.add(value: bufferRef(id: grass.uniform))
     entries.add(value: bufferRef(id: grass.instances))
     entries.add(value: bufferRef(id: grass.indirect))
+    if grass.surfaceField.length > 0 {
+      ensureGrassSurfaceField(grass: grass, resources: resources)
+      entries.add(value: bufferRef(id: grass.surfaceFieldBuffer))
+    }
     if let computeBind: BindGroupId = createComputeBindGroupOrdered(
       resources: resources
       pipeline: computePipeline
@@ -472,6 +495,27 @@ func ensureGrassGpu(grass: mod GrassCompute, resources: mod GpuResources) {
     id: grass.renderPipeline
   ) {
     log("[grass] GPU objects could not be created; grass is not drawn")
+  }
+}
+
+# Upload the app's surface field (grassSetSurfaceField) into its storage buffer.
+func ensureGrassSurfaceField(grass: mod GrassCompute, resources: mod GpuResources) {
+  if let buffer: BufferId = createBuffer(
+    resources: resources
+    size: grass.surfaceField.length * 4
+    usage: WGPUBufferUsage_Storage + WGPUBufferUsage_CopyDst
+  ) {
+    grass.surfaceFieldBuffer = buffer
+    var writer: ArgWriter = createArgs(uniform: false)
+    loop let value: view Float in grass.surfaceField {
+      pushF32(writer: writer, value: value)
+    }
+    let uploaded: Bool = uploadArgs(
+      writer: writer
+      resources: resources
+      buffer: buffer
+      offset: 0
+    )
   }
 }
 
