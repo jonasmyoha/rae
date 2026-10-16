@@ -25,7 +25,7 @@ The default is the complete grove. The example gate renders all three views.
 
 ## Geometry and shading
 
-`GroveGeometry.rae` builds seeded mesh data in Rae. Five trees have ordinary
+The lib's `procgen/Foliage` builds seeded mesh data in Rae. Five trees have ordinary
 wood: a straight, slightly leaning trunk with a flared foot, a leader that
 carries on up, and three or four main limbs that each fork in two. Every part
 is one continuous tapered tube: the segments share their rings, so a limb

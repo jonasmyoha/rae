@@ -7,7 +7,7 @@ open Noise
 open Mesh3d
 open Scene3d
 open RendererDeferred
-open GroveGeometry
+open procgen/Foliage
 open GroveGrass
 open procgen/Rock
 open ecs/Entity
@@ -69,8 +69,8 @@ func foliagePaint(species: view Int, tone: view Int) ret Material3d {
 }
 
 # One tree: the wood, then its leaves in three tones. `palm` keeps the
-# palm-style stem (treeWood); every other tree has ordinary branching wood
-# (groveTree).
+# palm-style stem (palmWood); every other tree has ordinary branching wood
+# (broadleafTree).
 func plantTree(
   world: mod World3d
   renderer: mod DeferredRenderer
@@ -84,7 +84,7 @@ func plantTree(
   let bark: Material3d = paint(red: 0.16, green: 0.073, blue: 0.039)
   let unit: Vec3 = Vec3.create(x: 1, y: 1, z: 1)
   if palm {
-    let wood: MeshData = treeWood(seed: seed, height: height, width: width)
+    let wood: MeshData = palmWood(seed: seed, height: height, width: width)
     place(
       world: world
       renderer: renderer
@@ -95,11 +95,12 @@ func plantTree(
       rotation: 0
     )
     loop var tone: Int = 0, tone < 3, ++tone {
-      let leaves: MeshData = treeLeaves(
+      let leaves: MeshData = palmLeaves(
         seed: seed
         height: height
         width: width
         tone: tone
+        leafCount: fullLeafCount
       )
       place(
         world: world
@@ -113,7 +114,7 @@ func plantTree(
     }
     ret
   }
-  let tree: GroveTree = groveTree(seed: seed, height: height, width: width)
+  let tree: BroadleafTree = broadleafTree(seed: seed, height: height, width: width)
   place(
     world: world
     renderer: renderer
@@ -124,12 +125,13 @@ func plantTree(
     rotation: 0
   )
   loop var tone: Int = 0, tone < 3, ++tone {
-    let leaves: MeshData = groveTreeLeaves(
+    let leaves: MeshData = broadleafLeaves(
       tips: tree.tips
       seed: seed
       height: height
       width: width
       tone: tone
+      leafCount: fullLeafCount
     )
     place(
       world: world
@@ -169,20 +171,20 @@ func islandPoint(ring: view Int, index: view Int) ret Vec3 {
 }
 
 func gardenGround() ret MeshData {
-  var mesh: MeshData = emptyMesh()
+  var mesh: MeshData = foliageMesh()
   loop var ring: Int = 0, ring < 12, ++ring {
     loop var i: Int = 0, i < 128, ++i {
       let first: Vec3 = islandPoint(ring: ring, index: i)
       let second: Vec3 = islandPoint(ring: ring + 1, index: i)
       let third: Vec3 = islandPoint(ring: ring, index: i + 1)
       let fourth: Vec3 = islandPoint(ring: ring + 1, index: i + 1)
-      face(
+      foliageFace(
         mesh: mesh
         first: first
         second: second
         third: third
       )
-      face(
+      foliageFace(
         mesh: mesh
         first: third
         second: second
@@ -194,19 +196,19 @@ func gardenGround() ret MeshData {
 }
 
 func gardenEdge() ret MeshData {
-  var mesh: MeshData = emptyMesh()
+  var mesh: MeshData = foliageMesh()
   loop var i: Int = 0, i < 128, ++i {
     let top: Vec3 = islandPoint(ring: 12, index: i)
     let next: Vec3 = islandPoint(ring: 12, index: i + 1)
     let bottom: Vec3 = Vec3.create(x: top.x * 0.99, y: top.y, z: -1.15)
     let bottomNext: Vec3 = Vec3.create(x: next.x * 0.99, y: next.y, z: -1.15)
-    face(
+    foliageFace(
       mesh: mesh
       first: top
       second: bottom
       third: next
     )
-    face(
+    foliageFace(
       mesh: mesh
       first: next
       second: bottom
@@ -217,7 +219,7 @@ func gardenEdge() ret MeshData {
 }
 
 func gardenPath() ret MeshData {
-  var mesh: MeshData = emptyMesh()
+  var mesh: MeshData = foliageMesh()
   loop var i: Int = 0, i < 48, ++i {
     let front: Float = i.toFloat() * 0.5 - 10.4
     let back: Float = front + 0.5
@@ -235,13 +237,13 @@ func gardenPath() ret MeshData {
       y: back
       z: groundHeight(x: right + 1.8, y: back) + 0.025
     )
-    face(
+    foliageFace(
       mesh: mesh
       first: first
       second: second
       third: third
     )
-    face(
+    foliageFace(
       mesh: mesh
       first: third
       second: second
@@ -574,13 +576,14 @@ func buildGrove(renderer: mod DeferredRenderer) ret Grove {
   }
   # Low scarlet shrubs balance the trees and tie the stone group into the grove.
   loop var i: Int = 0, i < 7, ++i {
-    var shrub: MeshData = emptyMesh()
-    crown(
+    var shrub: MeshData = foliageMesh()
+    leafCrown(
       mesh: shrub
       center: Vec3.create(x: 0, y: 0, z: 0.45)
       radius: Vec3.create(x: 0.85, y: 0.65, z: 0.6)
       seed: 913 + i * 47
       tone: i % 3
+      leafCount: fullLeafCount
     )
     place(
       world: world

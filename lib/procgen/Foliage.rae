@@ -1,11 +1,28 @@
-# Seeded geometry for the grove: leaf silhouettes and branching wood. The rocks
-# are the lib's faceted rocks (procgen/Rock), placed by GroveScene.
+# procgen/Foliage — stylised low-poly trees, palms and shrubs made of many small
+# six-sided leaves (no alpha textures) over continuous tube wood. Z-up: a tree
+# grows along +Z from its foot at the origin. Every generator is deterministic
+# from its seed.
+#
+#   broadleafTree(seed:, height:, width:)  the wood (a flared trunk, a leader,
+#     three or four forking limbs) and the limb tips where its crowns go
+#   broadleafLeaves(tips:, seed:, height:, width:, tone:, leafCount:)  its
+#     leaf crowns, one mesh per tone (0..2: draw each in its own shade)
+#   palmWood / palmLeaves  a bending palm-style stem with a ring of fronds
+#   leafCrown(mesh:, center:, radius:, seed:, tone:, leafCount:)  one round
+#     crown of leaves, also a shrub on its own
+#
+# `leafCount` is the leaves in one crown over all three tones (fullLeafCount
+# is the detailed look); fewer leaves are drawn bigger so the crown keeps its
+# cover, which is the knob for a cheaper level of detail far away.
 import Math
 open Vec3
 open Mesh3d
 open Noise
 
-func emptyMesh() ret MeshData {
+# The leaves in one detailed crown, over its three tones
+const fullLeafCount: Int = 1250
+
+func foliageMesh() ret MeshData {
   ret MeshData {
     verts: List.create(Float, cap: 8192)
     indices: List.create(Int, cap: 4096)
@@ -13,7 +30,7 @@ func emptyMesh() ret MeshData {
   }
 }
 
-func vertex(mesh: mod MeshData, point: view Vec3, normal: view Vec3) {
+func foliageVertex(mesh: mod MeshData, point: view Vec3, normal: view Vec3) {
   pushVert(
     verts: mesh.verts
     px: point.x
@@ -28,7 +45,7 @@ func vertex(mesh: mod MeshData, point: view Vec3, normal: view Vec3) {
   mesh.vertCount = mesh.vertCount + 1
 }
 
-func face(
+func foliageFace(
   mesh: mod MeshData
   first: view Vec3
   second: view Vec3
@@ -36,22 +53,22 @@ func face(
 ) {
   let normal: Vec3 = vnorm(a: vcross(a: vsub(a: second, b: first), b: vsub(a: third, b: first)))
   let base: Int = mesh.vertCount
-  vertex(mesh: mesh, point: first, normal: normal)
-  vertex(mesh: mesh, point: second, normal: normal)
-  vertex(mesh: mesh, point: third, normal: normal)
+  foliageVertex(mesh: mesh, point: first, normal: normal)
+  foliageVertex(mesh: mesh, point: second, normal: normal)
+  foliageVertex(mesh: mesh, point: third, normal: normal)
   mesh.indices.add(value: base)
   mesh.indices.add(value: base + 1)
   mesh.indices.add(value: base + 2)
 }
 
-func basis(direction: view Vec3) ret Vec3 {
+func foliageBasis(direction: view Vec3) ret Vec3 {
   if Math.abs(value: direction.z) > 0.9 {
     ret vnorm(a: vcross(a: direction, b: Vec3.create(x: 0, y: 1, z: 0)))
   }
   ret vnorm(a: vcross(a: direction, b: Vec3.create(x: 0, y: 0, z: 1)))
 }
 
-func branch(
+func foliageBranch(
   mesh: mod MeshData
   start: view Vec3
   end: view Vec3
@@ -59,7 +76,7 @@ func branch(
   endRadius: view Float
 ) {
   let direction: Vec3 = vnorm(a: vsub(a: end, b: start))
-  let side: Vec3 = basis(direction: direction)
+  let side: Vec3 = foliageBasis(direction: direction)
   let across: Vec3 = vcross(a: direction, b: side)
   loop var i: Int = 0, i < 9, ++i {
     let angle: Float = i.toFloat() * 6.2831853 / 9
@@ -76,13 +93,13 @@ func branch(
     let lowerNext: Vec3 = vadd(a: start, b: vscale(a: nextRadial, s: radius))
     let upper: Vec3 = vadd(a: end, b: vscale(a: radial, s: endRadius))
     let upperNext: Vec3 = vadd(a: end, b: vscale(a: nextRadial, s: endRadius))
-    face(
+    foliageFace(
       mesh: mesh
       first: lower
       second: lowerNext
       third: upper
     )
-    face(
+    foliageFace(
       mesh: mesh
       first: upper
       second: lowerNext
@@ -93,7 +110,7 @@ func branch(
 
 # Six-sided leaves give a broken silhouette without alpha textures. Their
 # normals follow the crown envelope, so the small leaves shade as one volume.
-func leaf(
+func foliageLeaf(
   mesh: mod MeshData
   center: view Vec3
   normal: view Vec3
@@ -116,7 +133,7 @@ func leaf(
         b: vscale(a: across, s: Math.sin(x: phase) * size * 0.65)
       )
     )
-    vertex(mesh: mesh, point: point, normal: normal)
+    foliageVertex(mesh: mesh, point: point, normal: normal)
   }
   loop var i: Int = 1, i < 5, ++i {
     mesh.indices.add(value: base)
@@ -128,14 +145,21 @@ func leaf(
   }
 }
 
-func crown(
+func leafCrown(
   mesh: mod MeshData
   center: view Vec3
   radius: view Vec3
   seed: view Int
   tone: view Int
+  leafCount: view Int
 ) {
-  loop var i: Int = 0, i < 1250, ++i {
+  # Fewer leaves, each bigger, so the crown keeps its cover
+  var drawn: Int = leafCount
+  if drawn < 1 {
+    drawn = 1
+  }
+  let leafScale: Float = Math.sqrt(x: fullLeafCount.toFloat() / drawn.toFloat())
+  loop var i: Int = 0, i < leafCount, ++i {
     if i % 3 is not tone {
       continue
     }
@@ -157,11 +181,11 @@ func crown(
       )
     )
     let normal: Vec3 = vnorm(a: Vec3.create(x: direction.x, y: direction.y, z: direction.z + 0.45))
-    leaf(
+    foliageLeaf(
       mesh: mesh
       center: point
       normal: normal
-      size: 0.065 + hash2(x: i, y: 4, seed: seed) * 0.065
+      size: (0.065 + hash2(x: i, y: 4, seed: seed) * 0.065) * leafScale
       angle: angle * 3
     )
   }
@@ -169,8 +193,8 @@ func crown(
 
 # The palm-style wood: a bending stem of short cylinders with a ring of
 # branches near the top. One tree in the grove keeps it as its own species.
-func treeWood(seed: view Int, height: view Float, width: view Float) ret MeshData {
-  var mesh: MeshData = emptyMesh()
+func palmWood(seed: view Int, height: view Float, width: view Float) ret MeshData {
+  var mesh: MeshData = foliageMesh()
   var previous: Vec3 = Vec3.create(x: 0, y: 0, z: 0)
   loop var i: Int = 0, i < 6, ++i {
     let fraction: Float = (i + 1).toFloat() / 6
@@ -179,7 +203,7 @@ func treeWood(seed: view Int, height: view Float, width: view Float) ret MeshDat
       y: fraction * fraction * 0.18
       z: height * fraction
     )
-    branch(
+    foliageBranch(
       mesh: mesh
       start: previous
       end: point
@@ -203,14 +227,14 @@ func treeWood(seed: view Int, height: view Float, width: view Float) ret MeshDat
       y: Math.sin(x: angle) * spread
       z: height * level + 1.0
     )
-    branch(
+    foliageBranch(
       mesh: mesh
       start: start
       end: elbow
       radius: 0.09 * (1 - level) + 0.025
       endRadius: 0.035
     )
-    branch(
+    foliageBranch(
       mesh: mesh
       start: elbow
       end: end
@@ -220,7 +244,7 @@ func treeWood(seed: view Int, height: view Float, width: view Float) ret MeshDat
   }
   loop var i: Int = 0, i < 5, ++i {
     let angle: Float = i.toFloat() * 1.2566
-    branch(
+    foliageBranch(
       mesh: mesh
       start: Vec3.create(x: Math.cos(x: angle) * 0.65, y: Math.sin(x: angle) * 0.65, z: 0.02)
       end: Vec3.create(x: 0, y: 0, z: 0.48)
@@ -231,18 +255,19 @@ func treeWood(seed: view Int, height: view Float, width: view Float) ret MeshDat
   ret mesh
 }
 
-func treeLeaves(
+func palmLeaves(
   seed: view Int
   height: view Float
   width: view Float
   tone: view Int
+  leafCount: view Int
 ) ret MeshData {
-  var mesh: MeshData = emptyMesh()
+  var mesh: MeshData = foliageMesh()
   loop var i: Int = 0, i < 11, ++i {
     let angle: Float = i.toFloat() * 2.39996 + hash2(x: i, y: 8, seed: seed) * 0.35
     let level: Float = 0.42 + i.toFloat() * 0.042
     let spread: Float = width * (1.15 - level) * 1.2
-    crown(
+    leafCrown(
       mesh: mesh
       center: Vec3.create(
         x: Math.cos(x: angle) * spread
@@ -252,21 +277,23 @@ func treeLeaves(
       radius: Vec3.create(x: width * 0.58, y: width * 0.52, z: height * 0.23)
       seed: seed + i * 71
       tone: tone
+      leafCount: leafCount
     )
   }
-  crown(
+  leafCrown(
     mesh: mesh
     center: Vec3.create(x: 0.2, y: 0.15, z: height + 0.4)
     radius: Vec3.create(x: width * 0.48, y: width * 0.48, z: height * 0.25)
     seed: seed + 901
     tone: tone
+    leafCount: leafCount
   )
   ret mesh
 }
 
 # The direction a path of points runs at point `index`: through its two
 # neighbours, one-sided at the ends
-func tangentAt(points: view List(Vec3), index: view Int) ret Vec3 {
+func foliageTangentAt(points: view List(Vec3), index: view Int) ret Vec3 {
   let last: Int = points.length - 1
   var before: Int = index - 1
   var after: Int = index + 1
@@ -286,7 +313,7 @@ func tangentAt(points: view List(Vec3), index: view Int) ret Vec3 {
 # radial normals, so a limb tapers and bends without a step at any joint. The
 # ring's orientation is carried along the path (each ring's side is the previous
 # one with its along-the-path part removed), so a bending limb does not twist.
-func tube(
+func foliageTube(
   mesh: mod MeshData
   points: view List(Vec3)
   radii: view List(Float)
@@ -296,9 +323,9 @@ func tube(
     ret
   }
   let first: Int = mesh.vertCount
-  var side: Vec3 = basis(direction: tangentAt(points: points, index: 0))
+  var side: Vec3 = foliageBasis(direction: foliageTangentAt(points: points, index: 0))
   loop var i: Int = 0, i < points.length, ++i {
-    let tangent: Vec3 = tangentAt(points: points, index: i)
+    let tangent: Vec3 = foliageTangentAt(points: points, index: i)
     side = vnorm(a: vsub(a: side, b: vscale(a: tangent, s: vdot(a: side, b: tangent))))
     let across: Vec3 = vcross(a: tangent, b: side)
     let centre: Vec3 = points.copyAtFallback(index: i, fallback: Vec3.create(x: 0, y: 0, z: 0))
@@ -309,7 +336,11 @@ func tube(
         a: vscale(a: side, s: Math.cos(x: angle))
         b: vscale(a: across, s: Math.sin(x: angle))
       )
-      vertex(mesh: mesh, point: vadd(a: centre, b: vscale(a: radial, s: radius)), normal: radial)
+      foliageVertex(
+        mesh: mesh
+        point: vadd(a: centre, b: vscale(a: radial, s: radius))
+        normal: radial
+      )
     }
   }
   loop var i: Int = 0, i < points.length - 1, ++i {
@@ -331,14 +362,14 @@ func tube(
 # fork in two. Every part is one continuous tube, and each limb starts inside
 # its parent at the parent's thickness. `tips` are the limb ends, where the
 # leaf crowns go.
-type GroveTree {
+type BroadleafTree {
   wood: MeshData
   tips: List(Vec3)
 }
 
 # One limb: a curve that leaves `start` along `direction` and bends upward by
 # `rise` of its length, tapering from `startRadius` to `endRadius`
-func limbPoint(
+func foliageLimbPoint(
   start: view Vec3
   direction: view Vec3
   length: view Float
@@ -351,7 +382,7 @@ func limbPoint(
   )
 }
 
-func limb(
+func foliageLimb(
   mesh: mod MeshData
   start: view Vec3
   direction: view Vec3
@@ -365,7 +396,7 @@ func limb(
   var radii: List(Float) = List.create(Float, cap: 6)
   loop var i: Int = 0, i < 6, ++i {
     let t: Float = i.toFloat() / 5
-    points.add(value: limbPoint(
+    points.add(value: foliageLimbPoint(
       start: start
       direction: direction
       length: length
@@ -374,7 +405,7 @@ func limb(
     ))
     radii.add(value: startRadius + (endRadius - startRadius) * t)
   }
-  tube(
+  foliageTube(
     mesh: mesh
     points: points
     radii: radii
@@ -383,7 +414,7 @@ func limb(
 }
 
 # A horizontal direction at `angle`, raised by `elevation` (radians)
-func raisedDirection(angle: view Float, elevation: view Float) ret Vec3 {
+func foliageRaisedDirection(angle: view Float, elevation: view Float) ret Vec3 {
   ret Vec3.create(
     x: Math.cos(x: angle) * Math.cos(x: elevation)
     y: Math.sin(x: angle) * Math.cos(x: elevation)
@@ -391,8 +422,8 @@ func raisedDirection(angle: view Float, elevation: view Float) ret Vec3 {
   )
 }
 
-func groveTree(seed: view Int, height: view Float, width: view Float) ret GroveTree {
-  var mesh: MeshData = emptyMesh()
+func broadleafTree(seed: view Int, height: view Float, width: view Float) ret BroadleafTree {
+  var mesh: MeshData = foliageMesh()
   var tips: List(Vec3) = List.create(Vec3, cap: 12)
   let trunkRadius: Float = 0.1 + width * 0.06
   let trunkHeight: Float = height * 0.52
@@ -430,7 +461,7 @@ func groveTree(seed: view Int, height: view Float, width: view Float) ret GroveT
     )
     trunkRadii.add(value: trunkRadius * flare.copyAtFallback(index: i, fallback: 1))
   }
-  tube(
+  foliageTube(
     mesh: mesh
     points: trunk
     radii: trunkRadii
@@ -443,7 +474,7 @@ func groveTree(seed: view Int, height: view Float, width: view Float) ret GroveT
     a: Vec3.create(x: Math.cos(x: leanAngle) * 0.12, y: Math.sin(x: leanAngle) * 0.12, z: 1)
   )
   let leaderStart: Vec3 = vsub(a: top, b: Vec3.create(x: 0, y: 0, z: trunkRadius))
-  limb(
+  foliageLimb(
     mesh: mesh
     start: leaderStart
     direction: leaderDirection
@@ -465,11 +496,11 @@ func groveTree(seed: view Int, height: view Float, width: view Float) ret GroveT
       seed: seed
     ) - 0.5) * 0.6
     let elevation: Float = 0.5 + hash2(x: k, y: 4, seed: seed) * 0.35
-    let direction: Vec3 = raisedDirection(angle: angle, elevation: elevation)
+    let direction: Vec3 = foliageRaisedDirection(angle: angle, elevation: elevation)
     let length: Float = height * (0.26 + hash2(x: k, y: 5, seed: seed) * 0.1) * (0.7 + width * 0.18)
     let along: Float = 0.62 + k.toFloat() / limbCount.toFloat() * 0.34
     let start: Vec3 = vsub(
-      a: limbPoint(
+      a: foliageLimbPoint(
         start: leaderStart
         direction: leaderDirection
         length: trunkHeight
@@ -480,7 +511,7 @@ func groveTree(seed: view Int, height: view Float, width: view Float) ret GroveT
     )
     let startRadius: Float = trunkRadius * (0.62 - k.toFloat() * 0.04)
     let rise: Float = 0.22
-    limb(
+    foliageLimb(
       mesh: mesh
       start: start
       direction: direction
@@ -490,7 +521,7 @@ func groveTree(seed: view Int, height: view Float, width: view Float) ret GroveT
       endRadius: startRadius * 0.3
       sides: 7
     )
-    tips.add(value: limbPoint(
+    tips.add(value: foliageLimbPoint(
       start: start
       direction: direction
       length: length
@@ -498,7 +529,7 @@ func groveTree(seed: view Int, height: view Float, width: view Float) ret GroveT
       t: 1
     ))
     # Two forks from 60% along the limb, turned either way and steeper
-    let forkStart: Vec3 = limbPoint(
+    let forkStart: Vec3 = foliageLimbPoint(
       start: start
       direction: direction
       length: length
@@ -508,9 +539,12 @@ func groveTree(seed: view Int, height: view Float, width: view Float) ret GroveT
     let forkRadius: Float = (startRadius + (startRadius * 0.3 - startRadius) * 0.6) * 0.8
     loop var fork: Int = 0, fork < 2, ++fork {
       let turn: Float = (fork.toFloat() * 2 - 1) * (0.55 + hash2(x: k, y: 6 + fork, seed: seed) * 0.3)
-      let forkDirection: Vec3 = raisedDirection(angle: angle + turn, elevation: elevation + 0.25)
+      let forkDirection: Vec3 = foliageRaisedDirection(
+        angle: angle + turn
+        elevation: elevation + 0.25
+      )
       let forkLength: Float = length * (0.45 + hash2(x: k, y: 8 + fork, seed: seed) * 0.15)
-      limb(
+      foliageLimb(
         mesh: mesh
         start: forkStart
         direction: forkDirection
@@ -520,7 +554,7 @@ func groveTree(seed: view Int, height: view Float, width: view Float) ret GroveT
         endRadius: forkRadius * 0.3
         sides: 6
       )
-      tips.add(value: limbPoint(
+      tips.add(value: foliageLimbPoint(
         start: forkStart
         direction: forkDirection
         length: forkLength
@@ -529,25 +563,26 @@ func groveTree(seed: view Int, height: view Float, width: view Float) ret GroveT
       ))
     }
   }
-  ret GroveTree { wood: own mesh, tips: own tips }
+  ret BroadleafTree { wood: own mesh, tips: own tips }
 }
 
 # The leaf crowns of a groveTree: one round crown on every limb tip, one
 # bigger on the leader's
-func groveTreeLeaves(
+func broadleafLeaves(
   tips: view List(Vec3)
   seed: view Int
   height: view Float
   width: view Float
   tone: view Int
+  leafCount: view Int
 ) ret MeshData {
-  var mesh: MeshData = emptyMesh()
+  var mesh: MeshData = foliageMesh()
   loop var i: Int = 0, i < tips.length, ++i {
     var scale: Float = 1.0
     if i is 0 {
       scale = 1.25
     }
-    crown(
+    leafCrown(
       mesh: mesh
       center: tips.copyAtFallback(index: i, fallback: Vec3.create(x: 0, y: 0, z: height))
       radius: Vec3.create(
@@ -557,6 +592,7 @@ func groveTreeLeaves(
       )
       seed: seed + i * 71
       tone: tone
+      leafCount: leafCount
     )
   }
   ret mesh
