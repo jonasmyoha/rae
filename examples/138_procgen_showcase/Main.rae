@@ -1,5 +1,6 @@
-# A seeded autumn grove: leaf geometry, branching trees, stratified stones and meadow.
-# All geometry is authored in Rae. The shared editor panel (app3d/EditorPanel)
+# A seeded autumn grove: leaf crowns on branching trees (one palm-style), the
+# lib's faceted rocks in groups over the island, and the lib's GPU grass
+# (GroveGrass). All geometry is authored in Rae. The shared editor panel (app3d/EditorPanel)
 # is the chrome: drag to orbit, wheel to zoom, the camera bar's mode button for
 # the free WASD camera, the menu button for the settings (sky, time of day,
 # shadows, the three views). Keys 1 / 2 / 3 pick the views too.
@@ -17,6 +18,11 @@ open Mesh3d
 open Shadow3d
 open Sky
 open GroveScene
+open GroveGrass
+open GrassCompute
+open GbufferWorld
+open gpu/GpuResources
+open gpu/GpuLifetime
 open Gpu2dCanvas
 open app3d/CameraRig
 open app3d/EditorPanel
@@ -68,6 +74,11 @@ type ShowcaseState {
   cameraRig: CameraRig
   editorPanel: EditorPanel
   windowGeometry: WindowGeometry
+  # The app's GPU manager: the grass's compute pass, buffers and pipelines
+  # live in it (the renderer's mesh store lives in the renderer's)
+  gpuResources: opt GpuResources
+  grass: GrassCompute
+  time: Float
   lastTime: Float64
 }
 
@@ -85,7 +96,8 @@ func createShowcase() ret ShowcaseState {
   )
   restoreWindowGeometry(windowGeometry: windowGeometry)
   var renderer: DeferredRenderer = createDeferredRendererWithUi()
-  let sceneWorld: World3d = buildGrove(renderer: renderer)
+  let grove: Grove = buildGrove(renderer: renderer)
+  var idIssuer: IdIssuer = IdIssuer.create()
 
   # The settings start on the Preetham sky at a fixed mid-morning hour (the
   # clock runs from the panel), and the panel's scene chooser is the three views
@@ -125,12 +137,15 @@ func createShowcase() ret ShowcaseState {
   unsafe {
     ret ShowcaseState {
       renderer: own renderer
-      sceneWorld: own sceneWorld
+      sceneWorld: own grove.world
       light: light
       camera: camera
       cameraRig: cameraRig
       editorPanel: own editorPanel
       windowGeometry: own windowGeometry
+      gpuResources: GpuResources.create(issuer: idIssuer, capacity: 32)
+      grass: createGroveGrass(obstacles: grove.obstacles)
+      time: 0.0
       lastTime: Gpu2d.nowSeconds()
     }
   }
@@ -178,6 +193,7 @@ func runShowcaseFrame(state: mod ShowcaseState) {
   let now: Float64 = Gpu2d.nowSeconds()
   let deltaTime: Float = (now - state.lastTime) as Float
   state.lastTime = now
+  state.time = state.time + deltaTime
 
   let resized: Bool = Gpu2d.windowResized()
   updateWindowGeometry(windowGeometry: state.windowGeometry, now: now, resized: resized)
@@ -234,6 +250,8 @@ func runShowcaseFrame(state: mod ShowcaseState) {
         aspect: aspect
         castShadows: state.editorPanel.settings.shadows
       )
+    } else if tag is RenderTag.gbuffer {
+      renderGroveGeometry(state: state, aspect: aspect, deltaTime: deltaTime)
     } else if tag is RenderTag.uiOverlay {
       drawEditorPanel(editorPanel: state.editorPanel, canvas: renderer.canvas)
     } else {
@@ -251,7 +269,51 @@ func runShowcaseFrame(state: mod ShowcaseState) {
   world3dPrevTransformSystem(world: state.sceneWorld)
 }
 
+# The G-buffer pass: the grove's meshes, then the grass, whose blades the
+# compute pass generated just before
+func renderGroveGeometry(state: mod ShowcaseState, aspect: view Float, deltaTime: view Float) {
+  let renderer: mod DeferredRenderer => state.renderer
+  if let resources: mod GpuResources => state.gpuResources {
+    generateGroveGrass(
+      grass: state.grass
+      resources: resources
+      camera: state.camera
+      groundColor: Vec3.create(x: groveGroundRed, y: groveGroundGreen, z: groveGroundBlue)
+      time: state.time
+      deltaTime: deltaTime
+    )
+  }
+  ensureRendererResources(renderer: renderer)
+  if let rendererResources: mod GpuResources => renderer.gpuResources {
+    Gbuffer.beginPass(
+      cache: renderer.passes.gbuffer
+      resources: rendererResources
+      camera: state.camera
+      light: state.light
+      aspect: aspect
+    )
+    renderSceneWorld(
+      cache: renderer.passes.gbuffer
+      resources: rendererResources
+      world: state.sceneWorld
+    )
+    if let resources: mod GpuResources => state.gpuResources {
+      grassDraw(
+        grass: state.grass
+        resources: resources
+        gbuffer: renderer.passes.gbuffer
+        gbufferResources: rendererResources
+      )
+    }
+    Gbuffer.endPass(cache: renderer.passes.gbuffer, resources: rendererResources)
+  }
+}
+
 func endShowcase(state: mod ShowcaseState) {
+  if let resources: mod GpuResources => state.gpuResources {
+    grassShutdown(grass: state.grass, resources: resources)
+    shutdown(resources: resources)
+  }
   shutdownDeferredRenderer(renderer: state.renderer)
   Gbuffer.shutdownAll()
   Gpu2d.closeWindow()

@@ -1,0 +1,95 @@
+# The grove's grass: the standard lib GPU grass (lib/GrassCompute.rae, the
+# walker's), on the grove's own ground. assets/grove_surface.wgsl gives the
+# grass pass the island's height and where grass grows; the rocks and trunks
+# go to it as obstacle circles in the surface field, so no blade stands
+# inside a stone or a trunk.
+import GrassConfig
+import Vec3
+open GrassCompute
+open Gbuffer
+open Scene3d
+open gpu/GpuResources
+open gpu/GpuLifetime
+
+# The island's centre: the grass grid is centred here, not on the camera, so
+# the whole island has blades from every view
+const groveGrassCentreX: Float = 0.0
+
+const groveGrassCentreY: Float = 2.0
+
+# The grid's span: wide enough that the edge fade starts past the island's rim
+const groveGrassExtent: Float = 48.0
+
+# An obstacle the grass keeps out of: a rock's or a trunk's footprint
+type GroveObstacle {
+  x: Float
+  y: Float
+  radius: Float
+}
+
+# The surface field grove_surface.wgsl reads: the count, then x, y, radius
+func groveObstacleField(obstacles: view List(GroveObstacle)) ret List(Float) {
+  var field: List(Float) = List.create(Float, cap: 1 + obstacles.length * 3)
+  field.add(value: obstacles.length.toFloat())
+  loop let obstacle: view GroveObstacle in obstacles {
+    field.add(value: obstacle.x)
+    field.add(value: obstacle.y)
+    field.add(value: obstacle.radius)
+  }
+  ret field
+}
+
+func createGroveGrass(obstacles: view List(GroveObstacle)) ret GrassCompute {
+  var grass: GrassCompute = createGrassCompute()
+  grassSetComputeShaderWithConstants(
+    grass: grass
+    shader: shader(
+      files: ["lib/gpu/computeBounds.wgsl", "assets/grove_surface.wgsl", "lib/grass_compute.wgsl"]
+    )
+    constants: List.create(ShaderConstant, cap: 0)
+  )
+  grassSetSurfaceField(grass: grass, values: groveObstacleField(obstacles: obstacles))
+  ret grass
+}
+
+# The walker's tuned look (136): low, broad tufts in clusters over the
+# painted ground, a gentle wind
+func groveGrassSettings(groundColor: view Vec3) ret GrassViewSettings {
+  var settings: GrassViewSettings = GrassConfig.grassThirdPersonSettings(groundColor: groundColor)
+  settings.extent = groveGrassExtent
+  settings.bladeHeightScale = 0.55
+  settings.bladeWidthScale = 1.8
+  settings.densityScale = 0.55
+  settings.clusterStrength = 0.8
+  settings.tipLighten = 1.25
+  settings.windStrength = 0.45
+  ret settings
+}
+
+# Generate this frame's blades (the compute pass); before the G-buffer pass
+func generateGroveGrass(
+  grass: mod GrassCompute
+  resources: mod GpuResources
+  camera: view Camera3d
+  groundColor: view Vec3
+  time: view Float
+  deltaTime: view Float
+) {
+  grassGenerate(
+    grass: grass
+    resources: resources
+    playerX: groveGrassCentreX
+    playerY: groveGrassCentreY
+    groundZ: 0.0
+    time: time
+    deltaTime: deltaTime
+    toon: 1
+    camX: camera.position.x
+    camY: camera.position.y
+    camZ: camera.position.z
+    fwdX: camera.target.x - camera.position.x
+    fwdY: camera.target.y - camera.position.y
+    fwdZ: camera.target.z - camera.position.z
+    settings: groveGrassSettings(groundColor: groundColor)
+  )
+}
