@@ -1,0 +1,101 @@
+# The cascade split rule with a focus (lib/Shadow3d.rae cascadeSplitAround):
+# the first cascade reaches the focus distance, the rest spread from there to
+# the shadow distance with the practical scheme, and without a focus nothing
+# changes. A follow camera's subject (here 12.5 m from the camera) then sits
+# inside the first cascade instead of on a split.
+import Vec3
+open Shadow3d
+
+# `value` in tenths, as a whole number of decimetres
+func tenths(value: view Float) ret Int {
+  ret (value * 10.0 + 0.5).toInt()
+}
+
+func splitsLine(
+  near: view Float
+  far: view Float
+  focus: view Float
+  count: view Int
+  lambda: view Float
+) ret String {
+  var line: String = ""
+  loop var i: Int = 0, i < count, ++i {
+    let split: Float = cascadeSplitAround(
+      near: near
+      far: far
+      focus: focus
+      i: i
+      count: count
+      lambda: lambda
+    )
+    line = "{line} {tenths(value: split)}"
+  }
+  ret line
+}
+
+func main() {
+  # No focus: exactly the plain scheme (the walker's old fit)
+  var same: Bool = true
+  loop var i: Int = 0, i < 3, ++i {
+    let plain: Float = cascadeSplit(
+      near: 0.1
+      far: 24.0
+      i: i
+      count: 3
+      lambda: 0.75
+    )
+    let around: Float = cascadeSplitAround(
+      near: 0.1
+      far: 24.0
+      focus: 0.0
+      i: i
+      count: 3
+      lambda: 0.75
+    )
+    if plain is not around {
+      same = false
+    }
+  }
+  log("no focus is the plain scheme: {same}")
+  log("plain, 3 to 24 m (decimetres):{splitsLine(
+    near: 0.1
+    far: 24.0
+    focus: 0.0
+    count: 3
+    lambda: 0.75
+  )}")
+  log("focus 16.5, 4 to 150 m (decimetres):{splitsLine(
+    near: 0.1
+    far: 150.0
+    focus: 16.5
+    count: 4
+    lambda: 0.75
+  )}")
+  # A focus outside near..far is ignored
+  log("focus past far, 3 to 24 m:{splitsLine(
+    near: 0.1
+    far: 24.0
+    focus: 30.0
+    count: 3
+    lambda: 0.75
+  )}")
+  # The fitted cascades carry the same splits
+  let cascades: ShadowCascades = fitShadowCascadesAround(
+    camPos: Vec3.create(x: 0.0, y: -12.5, z: 5.0)
+    camTarget: Vec3.create(x: 0.0, y: 0.0, z: 1.0)
+    fovYDeg: 50.0
+    aspect: 1.6
+    near: 0.1
+    far: 150.0
+    focus: 16.5
+    sunDir: Vec3.create(x: -0.4, y: 0.3, z: -1.0)
+    count: 4
+    resolution: 2048
+    lambda: 0.75
+    backExtent: 12.0
+  )
+  let first: Float = cascades.splitFar.copyAtFallback(index: 0, fallback: 0.0)
+  log(
+    "first cascade reaches {tenths(value: first)} dm; the subject at 125 dm is inside it: {first > 12.5}"
+  )
+}

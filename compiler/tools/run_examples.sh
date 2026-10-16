@@ -1200,7 +1200,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              && [ "$(grep -c "skinned parts: 12" "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c "panel buttons: 4 clip, 0 transport" "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c "\[water\] toon lake: 2 bodies" "$TMP_OUT/render.log")" -eq 1 ] \
-             && [ "$(grep -c "\[shadow\] casters 154, 3 cascades" "$TMP_OUT/render.log")" -eq 1 ] \
+             && [ "$(grep -c "\[shadow\] casters 154, 4 cascades" "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c "\[seamtest\] .* netOk=true physicsOk=true" "$TMP_OUT/render.log")" -eq 1 ] \
              && (cd .. && RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=90000 RAE_MEM_STATS=1 RAE_MEM_STATS_EVERY_MS=10000 \
                 perl -e 'alarm shift; exec @ARGV' 150 "$TMP_OUT/app") > "$TMP_OUT/live-growth.log" 2>&1 \
@@ -1236,7 +1236,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              && python3 tools/assert_nonblank_bmp.py "$SHOT" --min-colors=2000 > "$TMP_OUT/shot.log" 2>&1 \
              && [ "$(grep -c "\[render\] path: forward (4x MSAA) with SSAO" "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c "skinned parts: 12" "$TMP_OUT/render.log")" -eq 1 ] \
-             && [ "$(grep -c "\[shadow\] casters 154, 3 cascades" "$TMP_OUT/render.log")" -eq 1 ]; then
+             && [ "$(grep -c "\[shadow\] casters 154, 4 cascades" "$TMP_OUT/render.log")" -eq 1 ]; then
             echo "PASS: $EXAMPLE_NAME (forward walker with SSAO: shaded frame, 12 skinned parts, shadow casters)"
             ((PASSED++))
           else
@@ -1581,19 +1581,21 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             ((FAILED++))
           fi
         elif [ "$EXAMPLE_NAME" = "142_shadow_cascades" ]; then
-          # The cascade debug view twice: the walker's fit from the follow
-          # camera with the side panel open (its fit section mounted), and four
-          # cascades out to 200 m from above. The [shadow] line proves the fit
+          # The cascade debug view twice: the default fit (the walkers' since
+          # #54718940: four cascades to 120 m, the first reaching 4 m past the
+          # camera target) from the follow camera with the side panel open (its
+          # fit section mounted), and four cascades to 200 m from above with the
+          # focus off (the plain split scheme). The [shadow] line proves the fit
           # ran with its casters; the screenshots that the frame drew.
           CASCADES_OK=1
           for CASCADE_RUN in walker far; do
             SCREENSHOT="$TMP_OUT/cascades-$CASCADE_RUN.bmp"
             if [ "$CASCADE_RUN" = walker ]; then
               CASCADE_ENV="RAE_SHADOW_PANEL=1"
-              CASCADE_LINE='3 cascades at 2048 px, back extent 12 m: splits 2.5 / 6.9 / 24.0 m'
+              CASCADE_LINE='4 cascades at 2048 px, back extent 12 m, focus true: splits 16.5 / 36.7 / 67.8 / 120.0 m'
             else
-              CASCADE_ENV="RAE_SHADOW_FAR=200 RAE_SHADOW_COUNT=4 RAE_SHADOW_LAMBDA=0.9 RAE_SHADOW_VIEW=high"
-              CASCADE_LINE='4 cascades at 2048 px, back extent 12 m: splits 5.6 / 14.0 / 41.9 / 200.0 m'
+              CASCADE_ENV="RAE_SHADOW_FAR=200 RAE_SHADOW_COUNT=4 RAE_SHADOW_LAMBDA=0.9 RAE_SHADOW_VIEW=high RAE_SHADOW_FOCUS=0"
+              CASCADE_LINE='4 cascades at 2048 px, back extent 12 m, focus false: splits 5.6 / 14.0 / 41.9 / 200.0 m'
             fi
             if ! (cd .. && env $CASCADE_ENV RAE_SDL_HEADLESS_MS=2500 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
                perl -e 'alarm shift; exec @ARGV' 45 "$TMP_OUT/app") > "$TMP_OUT/render-$CASCADE_RUN.log" 2>&1 \
@@ -1606,7 +1608,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             fi
           done
           if [ "$CASCADES_OK" = 1 ]; then
-            echo "PASS: $EXAMPLE_NAME (cascade debug view: walker fit with the panel open, 4 cascades to 200 m)"
+            echo "PASS: $EXAMPLE_NAME (cascade debug view: focused walker fit with the panel open, unfocused 4 cascades to 200 m)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (shadow cascade runs)"
