@@ -33,7 +33,7 @@ import Profile
 import Gpu2d
 import Quat
 open app3d/UiModes
-open app3d/EdgeTab
+open app3d/EditorPanel
 open ecs/Entity
 open ecs/ComponentTable
 open ecs/Transform
@@ -60,7 +60,6 @@ open Png
 open app3d/CameraRig
 open app3d/CharacterController
 open app3d/SettingsDialog
-open ui/CornerMenuButton
 open ui/Registry
 open SkyHosek
 open app3d/UiShell
@@ -730,25 +729,6 @@ func createApp() ret App {
     var panelScrollMemory: ScrollMemory = createScrollMemory()
     scrollRootSystem(world: uiWorld, uiSystems: uiSystems, memory: panelScrollMemory)
     var panelScroll: EntityId = findScrollRoot(world: uiWorld, uiSystems: uiSystems)
-    let barOk: Bool = mountCameraBar(
-      world: uiWorld
-      uiSystems: uiSystems
-      res: gpuUi
-      hostNodeId: "CameraBarSlot"
-    )
-    walkerHideCameraChrome(world: uiWorld)
-    # The settings panel's edge tab, in the slot between the main column and
-    # the panel (app3d/EdgeTab)
-    if mountEdgeTab(
-      world: uiWorld
-      uiSystems: uiSystems
-      hostNodeId: "SettingsTabSlot"
-      name: walkerSettingsTab().name
-      actionId: "settings.open"
-      side: walkerSettingsTab().side
-    ) is none {
-      logWarnLine(ov: logOverlay, text: "settings edge tab failed to mount")
-    }
     var settings: SettingsState = createSettingsState(
       scene: 1
       sceneCount: 1
@@ -759,17 +739,15 @@ func createApp() ret App {
     )
     # The settings pane's TAA switch has no effect here: MSAA is the forward
     # frame's antialiasing
-    let settingsOk: Bool = mountSettingsDialog(
-      world: uiWorld
-      uiSystems: uiSystems
-      res: gpuUi
-      hostNodeId: "SettingsDialogSlot"
-    )
-    if settingsOk is false {
-      logWarnLine(ov: logOverlay, text: "settings dialog failed to mount")
+    # The camera bar, the settings panel's edge tab (in the slot between the
+    # main column and the panel) and the settings (app3d/EditorPanel)
+    let chromeMounted: Bool = mountEditorChrome(world: uiWorld, uiSystems: uiSystems, res: gpuUi)
+    if chromeMounted is false {
+      logWarnLine(ov: logOverlay, text: "editor chrome failed to mount")
     }
+    walkerHideCameraChrome(world: uiWorld)
     settingsApplyToWorld(settingsState: settings, world: uiWorld, uiSystems: uiSystems)
-    applyWalkerPanel(world: uiWorld, open: settings.open)
+    applyEditorPanelOpen(world: uiWorld, open: settings.open)
     setRendererSky(
       renderer: renderer
       sky: settingsBuildSky(
@@ -782,7 +760,7 @@ func createApp() ret App {
     light.sunDir = settingsSunDir(settingsState: settings)
     light.sunColor = settingsSunColor(settingsState: settings)
     log(
-      "[ui] panel buttons: {clipPanel.buttonEntities.length} clip, {transport.buttonEntities.length} transport, camera bar {barOk}"
+      "[ui] panel buttons: {clipPanel.buttonEntities.length} clip, {transport.buttonEntities.length} transport, editor chrome {chromeMounted}"
     )
 
     let startT: Float64 = Gpu2d.nowSeconds()
