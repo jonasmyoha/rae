@@ -91,20 +91,18 @@ func uiUpdate(
     input: inputSystem.ui
     rig: cameraSystem.rig
   )
-  # The debug readout, the same in both modes, by the "..." button
+  # The debug readout, the same in both modes, by the corner's buttons: left
+  # of the "..." button, or in EDITOR left of the "Settings" button beside it
+  var readoutBeside: String = "ModeButton"
+  if inputSystem.uiModes.editor {
+    readoutBeside = "PanelButton"
+  }
   placeDebugOverlayByModeButton(
     world: inputSystem.world
     uiSystems: uiSystems
     debugOverlay: inputSystem.dbg
-    buttonNodeId: "ModeButton"
+    buttonNodeId: readoutBeside
   )
-  # The corner menu is a UI-world node, so its press is an action and the
-  # action->layout gate below lays out the panel it toggles. (As an overlay
-  # button its toggle ran no layout; that only went unnoticed because the
-  # time-of-day animation flags settingsChanged every frame while it is on.)
-  if walkerMenuTapped(world: inputSystem.world) {
-    toggleWalkerPanel(settings: inputSystem.settings, world: inputSystem.world)
-  }
   let scrolled: Bool = updateScrollRoot(
     world: inputSystem.world
     uiSystems: uiSystems
@@ -221,8 +219,13 @@ func uiUpdate(
       settingsChanged = true
     }
   }
+  # The top bar's "Settings" button (settings.open) opens and closes the
+  # panel; a mode switch applies it again (the editor state resets the button)
+  if settingsChanged or modesChanged {
+    applyWalkerPanel(world: inputSystem.world, open: inputSystem.settings.open)
+  }
   if settingsChanged {
-    setTaaEnabled(renderer: renderSystem.renderer, on: inputSystem.settings.taa)  # TAA opt-in; FXAA when off
+    setTaaEnabled(renderer: renderSystem.renderer, on: inputSystem.settings.taa)  # TAA opt-in; SMAA when off
   }
   if settingsUpdatePointer(
     settingsState: inputSystem.settings
