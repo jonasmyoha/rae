@@ -10,10 +10,10 @@
 # whatever the editor chrome does: the button and the menu in an overlay over
 # the whole HUD, pinned to the top-right corner, with the top row and the
 # editor's side panel keeping clear of it. The menu is the corner's own; an
-# editor panel has its own open/close button beside it (in the walker
-# examples, a hamburger-look "Settings" button beside it in the corner),
-# never inside the menu. The scene's
-# `editor` state may restyle the menu like the editor's panels: applying a
+# editor's side panel opens from its own edge tab (app3d/EdgeTab), never from
+# the menu. An app without modes (app3d/EditorPanel) puts only the camera
+# item in it and calls updateModeMenuItems. The scene's `editor` state may restyle the menu like
+# the editor's panels: applying a
 # state resets those nodes, so the menu's open/close and the camera item's
 # text are written again whenever the modes' generation moves.
 #
@@ -110,11 +110,6 @@ func updateModeMenu(
 ) ret Bool {
   let openEditor: Bool = modeMenuTapped(world: world, actionId: modeMenuEditorActionId)
   let backToGame: Bool = modeMenuTapped(world: world, actionId: modeMenuGameActionId)
-  let cameraTapped: Bool = modeMenuTapped(world: world, actionId: modeMenuCameraRotationActionId)
-  let pressedElsewhere: Bool = input.pointer.pressed and isModeMenuPressNode(
-    world: world
-    entityId: input.pressedEntityId
-  ) is false
   var changed: Bool = false
   if openEditor or backToGame {
     setUiModeEditor(
@@ -125,17 +120,49 @@ func updateModeMenu(
     )
     changed = true
   }
+  if updateModeMenuItems(
+    world: world
+    menu: uiModes.modeMenu
+    generation: uiModes.generation
+    input: input
+    rig: rig
+    modeChosen: openEditor or backToGame
+  ) {
+    changed = true
+  }
+  ret changed
+}
+
+# The menu without the modes (an app with no GAME / EDITOR modes, whose
+# menu has only the camera item): reverse the camera's drag, open or close
+# it. `generation` is the modes' (any number that stays put when nothing is
+# applied), `modeChosen` whether a mode item was chosen this frame. True when
+# the UI must be laid out again.
+func updateModeMenuItems(
+  world: mod UiWorld
+  menu: mod ModeMenuState
+  generation: view Int
+  input: view UiInput
+  rig: mod CameraRig
+  modeChosen: view Bool
+) ret Bool {
+  let cameraTapped: Bool = modeMenuTapped(world: world, actionId: modeMenuCameraRotationActionId)
+  let pressedElsewhere: Bool = input.pointer.pressed and isModeMenuPressNode(
+    world: world
+    entityId: input.pressedEntityId
+  ) is false
+  var changed: Bool = false
   if cameraTapped {
     rig.reverseDrag = rig.reverseDrag is false
   }
   # A frame or state applied since: its nodes are back to their authored
   # components, so write the menu's again
-  let rewrite: Bool = uiModes.menuGeneration is not uiModes.generation
-  uiModes.menuGeneration = uiModes.generation
+  let rewrite: Bool = menu.generation is not generation
+  menu.generation = generation
   # The camera item says what the rig does (an app may start it reversed)
-  if rewrite or uiModes.cameraLabelReversed is not rig.reverseDrag or uiModes.cameraLabelWritten is false {
-    uiModes.cameraLabelReversed = rig.reverseDrag
-    uiModes.cameraLabelWritten = true
+  if rewrite or menu.cameraLabelReversed is not rig.reverseDrag or menu.cameraLabelWritten is false {
+    menu.cameraLabelReversed = rig.reverseDrag
+    menu.cameraLabelWritten = true
     setNodeText(
       world: world
       nodeId: modeMenuCameraLabelNodeId
@@ -144,13 +171,13 @@ func updateModeMenu(
     changed = true
   }
   let open: Bool = modeMenuOpenAfter(
-    open: uiModes.menuOpen
+    open: menu.open
     buttonTapped: modeMenuTapped(world: world, actionId: modeMenuToggleActionId)
-    itemChosen: openEditor or backToGame or cameraTapped
+    itemChosen: modeChosen or cameraTapped
     pressedElsewhere: pressedElsewhere
   )
-  if rewrite or open is not uiModes.menuOpen {
-    uiModes.menuOpen = open
+  if rewrite or open is not menu.open {
+    menu.open = open
     setNodeActive(world: world, nodeId: modeMenuNodeId, value: open)
     changed = true
   }

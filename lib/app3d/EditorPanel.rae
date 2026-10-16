@@ -1,14 +1,15 @@
 # app3d/EditorPanel — the editor chrome of a 3D example in one piece.
 #
-# The top row holds the corner menu button and the camera bar; the bar's mode
-# button switches the camera rig between orbit and the free WASD camera, and
-# its two smoothing buttons ease mouse and key motion. The menu button opens
-# the side panel with the shared settings section (sky model, time of day and
-# date, shadows, TAA, animation speed, the scene chooser). The debug overlay
-# (frame rate, memory) sits on top.
+# The top row holds the camera bar; the bar's mode button switches the camera
+# rig between orbit and the free WASD camera, and its two smoothing buttons
+# ease mouse and key motion. The top-right corner is the "..." menu
+# (app3d/ModeMenu, with the one item "Reverse camera rotation"), the debug
+# readout (frame rate, memory) just left of it. The side panel with the shared
+# settings section (sky model, time of day and date, shadows, TAA, animation
+# speed, the scene chooser) sits under the corner and opens and closes from
+# the edge tab on its left edge (app3d/EdgeTab).
 #
-# Examples 134-137 wire these shared components one by one in each app. This
-# module is the same wiring, written once: the chrome comes from
+# This is the shared editor layout of the 3D examples, written once: the chrome comes from
 # scenes/editor_panel.raescene, and an app calls createEditorPanel once,
 # updateEditorPanel every frame (it runs the camera rig too) and
 # drawEditorPanel at RenderTag.uiOverlay. The settings stay readable on
@@ -30,12 +31,14 @@ open ui/inputSystem/InputSystem
 open ui/renderSystem/RenderSystem
 open ui/scrollRootSystem/ScrollRootSystem
 open ui/DebugOverlay
-open ui/CornerMenuButton
 open app3d/UiShell
 open app3d/CameraRig
 open app3d/CameraBar
 open app3d/SettingsDialog
 open app3d/ControlPanel
+open app3d/EdgeTab
+open app3d/ModeMenu
+open app3d/UiModes
 
 # The two places an app adds its own controls (buildEditorPanelControls): the
 # top bar after the camera bar, and the side panel under the settings, which
@@ -48,8 +51,12 @@ const editorAppPanelNodeId: String = "AppPanelButtons"
 # not fit beside it
 const editorSidePanelWidth: Float = 320.0
 
-# Room kept free beside the camera bar for the menu button and the padding
-const editorTopRowReserve: Float = 160.0
+# Room kept free beside the camera bar for the padding, the edge tab and the
+# debug readout left of the "..." button
+const editorTopRowReserve: Float = 260.0
+
+# The side panel's edge tab (app3d/EdgeTab), on the panel's left edge
+const editorSettingsTabName: String = "settingsTab"
 
 # The sky the settings build: a clear day, a mid-grey ground
 const editorSkyTurbidity: Float = 2.5
@@ -64,7 +71,14 @@ type EditorPanel {
   scrollMemory: ScrollMemory
   panelScroll: EntityId
   debugOverlay: DebugOverlay
+  # The "..." menu in the corner
+  modeMenu: ModeMenuState
   settings: SettingsState
+  # Where Orbit re-centres on every switch back from the WASD camera, when
+  # `recentresOrbit` (setEditorPanelOrbitHome). Off, the rig's own no-jump
+  # default holds: the target is wherever the free camera looked.
+  orbitHome: Vec3
+  recentresOrbit: Bool
   # The fitted Hosek-Wilkie table, read once; a sky is built from it whenever
   # the settings pick that model
   hosekData: HosekDataset
@@ -77,6 +91,9 @@ type EditorPanelFrame {
   settingsChanged: Bool
   # The camera rig moved the camera
   cameraMoved: Bool
+  # The chrome changed (a tap, the menu, a scroll, a resize): an app that
+  # draws only when something changed draws this frame
+  layoutChanged: Bool
 }
 
 # Load the fonts and theme from `assetBase` (Roboto-Regular.mtsdf.* and
@@ -98,13 +115,15 @@ func createEditorPanel(assetBase: view String, settings: view SettingsState) ret
     path: "{app3dSceneDir()}editor_panel.raescene"
     res: gpuUi
   )
-  if mountCornerMenuButton(
+  if mountEdgeTab(
     world: world
     uiSystems: uiSystems
-    res: gpuUi
-    hostNodeId: "CornerMenuSlot"
-  ) is false {
-    log("[editor panel] the corner menu button did not mount")
+    hostNodeId: "SettingsTabSlot"
+    name: editorSettingsTab().name
+    actionId: "settings.open"
+    side: editorSettingsTab().side
+  ) is none {
+    log("[editor panel] the settings edge tab did not mount")
   }
   if mountCameraBar(
     world: world
@@ -150,15 +169,25 @@ func createEditorPanel(assetBase: view String, settings: view SettingsState) ret
       memory: true
       heartbeat: true
     )
+    modeMenu: createModeMenuState()
     settings: settings
+    orbitHome: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    recentresOrbit: false
     hosekData: loadDefaultHosekDataset()
   }
 }
 
-# The whole side panel shows or hides, not only the settings inside it
+# The side panel's edge tab
+func editorSettingsTab() ret EdgeTab {
+  ret EdgeTab { name: editorSettingsTabName, side: EdgeSide.right }
+}
+
+# The whole side panel shows or hides, not only the settings inside it, and
+# the edge tab's arrow turns
 func applyEditorPanelOpen(world: mod UiWorld, open: view Bool) {
-  setNodeActive(world: world, nodeId: "SidePanel", value: open)
+  setNodeActive(world: world, nodeId: "SidePanelColumn", value: open)
   applySettingsPanelOpen(world: world, open: open)
+  setEdgeTabOpen(world: world, tab: editorSettingsTab(), open: open)
 }
 
 # Size the chrome to the window's logical size and lay it out
@@ -249,15 +278,28 @@ func updateEditorPanel(
   }
 
   # The camera bar: orbit / free mode and the two smoothing switches
+  # (before and after, as the bar also reports the smoothing switches)
+  let wasOrbit: Bool = cameraRig.mode is CameraRigMode.orbit
   if handleCameraBar(world: editorPanel.world, rig: cameraRig, camera: camera) {
     layoutChanged = true
   }
-  # The settings see every action and ignore what they do not own
-  var settingsChanged: Bool = false
-  if menuToggleTapped(world: editorPanel.world) {
-    editorPanel.settings.open = editorPanel.settings.open is false
-    settingsChanged = true
+  if editorPanel.recentresOrbit and wasOrbit is false and cameraRig.mode is CameraRigMode.orbit {
+    camera.target = editorPanel.orbitHome
   }
+  # The "..." menu: reverse the camera's drag, open or close
+  if updateModeMenuItems(
+    world: editorPanel.world
+    menu: editorPanel.modeMenu
+    generation: 1
+    input: editorPanel.input
+    rig: cameraRig
+    modeChosen: false
+  ) {
+    layoutChanged = true
+  }
+  # The settings see every action (the edge tab's "settings.open" too) and
+  # ignore what they do not own
+  var settingsChanged: Bool = false
   loop var i: Int = 0, i < uiActionCount(world: editorPanel.world), ++i {
     if settingsHandleAction(
       settingsState: editorPanel.settings
@@ -320,9 +362,27 @@ func updateEditorPanel(
       panelOpen: editorPanel.settings.open
     )
   }
+  placeDebugOverlayByModeButton(
+    world: editorPanel.world
+    uiSystems: editorPanel.uiSystems
+    debugOverlay: editorPanel.debugOverlay
+    buttonNodeId: modeMenuButtonNodeId
+  )
   # Report the components no table matched and recycle destroyed entities
   uiFrameEnd(world: editorPanel.world, uiSystems: editorPanel.uiSystems)
-  ret EditorPanelFrame { settingsChanged: settingsChanged, cameraMoved: cameraMoved }
+  ret EditorPanelFrame {
+    settingsChanged: settingsChanged
+    cameraMoved: cameraMoved
+    layoutChanged: layoutChanged
+  }
+}
+
+# Re-centre Orbit on `target` whenever the camera bar switches back from the
+# WASD camera, so "Orbit" means "back on the subject" rather than a spin
+# around wherever the free camera looked
+func setEditorPanelOrbitHome(editorPanel: mod EditorPanel, target: view Vec3) {
+  editorPanel.orbitHome = target
+  editorPanel.recentresOrbit = true
 }
 
 # Build an app's ControlPanel into the panel: a panel created with
