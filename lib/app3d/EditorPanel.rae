@@ -9,6 +9,10 @@
 # speed, the scene chooser) sits under the corner and opens and closes from
 # the edge tab on its left edge (app3d/EdgeTab).
 #
+# An app with a HUD scene of its own (GAME / EDITOR modes, the walker
+# examples) authors the same slots and uses the parts that work on any UI
+# world: mountEditorChrome, updateEditorSettings and applyEditorPanelOpen.
+#
 # This is the shared editor layout of the 3D examples, written once: the chrome comes from
 # scenes/editor_panel.raescene, and an app calls createEditorPanel once,
 # updateEditorPanel every frame (it runs the camera rig too) and
@@ -115,32 +119,7 @@ func createEditorPanel(assetBase: view String, settings: view SettingsState) ret
     path: "{app3dSceneDir()}editor_panel.raescene"
     res: gpuUi
   )
-  if mountEdgeTab(
-    world: world
-    uiSystems: uiSystems
-    hostNodeId: "SettingsTabSlot"
-    name: editorSettingsTab().name
-    actionId: "settings.open"
-    side: editorSettingsTab().side
-  ) is none {
-    log("[editor panel] the settings edge tab did not mount")
-  }
-  if mountCameraBar(
-    world: world
-    uiSystems: uiSystems
-    res: gpuUi
-    hostNodeId: "CameraBarSlot"
-  ) is false {
-    log("[editor panel] the camera bar did not mount")
-  }
-  if mountSettingsDialog(
-    world: world
-    uiSystems: uiSystems
-    res: gpuUi
-    hostNodeId: "SettingsDialogSlot"
-  ) is false {
-    log("[editor panel] the settings section did not mount")
-  }
+  mountEditorChrome(world: world, uiSystems: uiSystems, res: gpuUi)
   settingsApplyToWorld(settingsState: settings, world: world, uiSystems: uiSystems)
   applyEditorPanelOpen(world: world, open: settings.open)
   # The app section shows once an app gives it a title
@@ -182,12 +161,106 @@ func editorSettingsTab() ret EdgeTab {
   ret EdgeTab { name: editorSettingsTabName, side: EdgeSide.right }
 }
 
+# The editor chrome in any app's UI world: the camera bar, the side panel's
+# edge tab and the settings section, mounted into the scene's slots
+# CameraBarSlot, SettingsTabSlot and SettingsDialogSlot. The scene also names
+# SidePanel (shown while the panel is open). An app with its own HUD scene
+# (GAME / EDITOR modes) authors those nodes and calls this, then
+# updateEditorSettings every frame; EditorPanel does both for an app without
+# a HUD. False when a part did not mount (each is logged).
+func mountEditorChrome(world: mod UiWorld, uiSystems: mod UiSystems, res: view Gpu2dUi) ret Bool {
+  var mounted: Bool = true
+  if mountCameraBar(
+    world: world
+    uiSystems: uiSystems
+    res: res
+    hostNodeId: "CameraBarSlot"
+  ) is false {
+    log("[editor panel] the camera bar did not mount")
+    mounted = false
+  }
+  if mountEdgeTab(
+    world: world
+    uiSystems: uiSystems
+    hostNodeId: "SettingsTabSlot"
+    name: editorSettingsTab().name
+    actionId: "settings.open"
+    side: editorSettingsTab().side
+  ) is none {
+    log("[editor panel] the settings edge tab did not mount")
+    mounted = false
+  }
+  if mountSettingsDialog(
+    world: world
+    uiSystems: uiSystems
+    res: res
+    hostNodeId: "SettingsDialogSlot"
+  ) is false {
+    log("[editor panel] the settings section did not mount")
+    mounted = false
+  }
+  ret mounted
+}
+
 # The whole side panel shows or hides, not only the settings inside it, and
-# the edge tab's arrow turns
+# the edge tab's arrow turns. An app whose scene states reset these nodes
+# (a GAME / EDITOR switch) calls it again after one.
 func applyEditorPanelOpen(world: mod UiWorld, open: view Bool) {
-  setNodeActive(world: world, nodeId: "SidePanelColumn", value: open)
+  setNodeActive(world: world, nodeId: "SidePanel", value: open)
   applySettingsPanelOpen(world: world, open: open)
   setEdgeTabOpen(world: world, tab: editorSettingsTab(), open: open)
+}
+
+# This frame's settings: every UI action (the edge tab's "settings.open"
+# too; the settings ignore what they do not own), the time, latitude and date
+# sliders, the running clock. When they changed, the panel is written again
+# and the result is true: the app applies them (its sky, sun, TAA) and lays
+# its UI out again.
+func updateEditorSettings(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  input: view UiInput
+  settings: mod SettingsState
+  deltaTime: view Float
+) ret Bool {
+  var settingsChanged: Bool = false
+  loop var i: Int = 0, i < uiActionCount(world: world), ++i {
+    if settingsHandleAction(settingsState: settings, actionId: uiActionAt(world: world, index: i)) {
+      settingsChanged = true
+    }
+  }
+  if settingsUpdatePointer(
+    settingsState: settings
+    world: world
+    uiSystems: uiSystems
+    input: input
+  ) {
+    settingsChanged = true
+  }
+  if settingsUpdateLatitudePointer(
+    settingsState: settings
+    world: world
+    uiSystems: uiSystems
+    input: input
+  ) {
+    settingsChanged = true
+  }
+  if settingsUpdateDatePointer(
+    settingsState: settings
+    world: world
+    uiSystems: uiSystems
+    input: input
+  ) {
+    settingsChanged = true
+  }
+  if settingsAdvanceTime(settingsState: settings, deltaTime: deltaTime) {
+    settingsChanged = true
+  }
+  if settingsChanged {
+    settingsApplyToWorld(settingsState: settings, world: world, uiSystems: uiSystems)
+    applyEditorPanelOpen(world: world, open: settings.open)
+  }
+  ret settingsChanged
 }
 
 # Size the chrome to the window's logical size and lay it out
@@ -297,51 +370,14 @@ func updateEditorPanel(
   ) {
     layoutChanged = true
   }
-  # The settings see every action (the edge tab's "settings.open" too) and
-  # ignore what they do not own
-  var settingsChanged: Bool = false
-  loop var i: Int = 0, i < uiActionCount(world: editorPanel.world), ++i {
-    if settingsHandleAction(
-      settingsState: editorPanel.settings
-      actionId: uiActionAt(world: editorPanel.world, index: i)
-    ) {
-      settingsChanged = true
-    }
-  }
-  if settingsUpdatePointer(
-    settingsState: editorPanel.settings
+  let settingsChanged: Bool = updateEditorSettings(
     world: editorPanel.world
     uiSystems: editorPanel.uiSystems
     input: editorPanel.input
-  ) {
-    settingsChanged = true
-  }
-  if settingsUpdateLatitudePointer(
-    settingsState: editorPanel.settings
-    world: editorPanel.world
-    uiSystems: editorPanel.uiSystems
-    input: editorPanel.input
-  ) {
-    settingsChanged = true
-  }
-  if settingsUpdateDatePointer(
-    settingsState: editorPanel.settings
-    world: editorPanel.world
-    uiSystems: editorPanel.uiSystems
-    input: editorPanel.input
-  ) {
-    settingsChanged = true
-  }
-  if settingsAdvanceTime(settingsState: editorPanel.settings, deltaTime: deltaTime) {
-    settingsChanged = true
-  }
+    settings: editorPanel.settings
+    deltaTime: deltaTime
+  )
   if settingsChanged {
-    settingsApplyToWorld(
-      settingsState: editorPanel.settings
-      world: editorPanel.world
-      uiSystems: editorPanel.uiSystems
-    )
-    applyEditorPanelOpen(world: editorPanel.world, open: editorPanel.settings.open)
     layoutChanged = true
   }
 
