@@ -74,6 +74,10 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
     switch (expr->kind) {
         case AST_EXPR_CALL: {
             const AstExpr* callee = expr->as.call.callee;
+            // The resolved callee, kept so the argument recursion below can set
+            // each argument's expected type from the parameter's declared type
+            // (so an untyped struct / list literal argument knows what it is).
+            const AstFuncDecl* call_decl = NULL;
             if (callee->kind == AST_EXPR_IDENT) {
                 uint16_t param_count = 0; for (const AstCallArg* a = expr->as.call.args; a; a = a->next) param_count++;
                 // Receiver-aware overload selection: when the callee has a "this" first
@@ -118,6 +122,7 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
                 }
                 if (!d) d = find_function_overload(ctx->module, ctx, callee->as.ident, NULL, param_count, false, expr);
                 if (!d) d = find_function_overload(ctx->module, ctx, callee->as.ident, NULL, param_count, true, expr);
+                call_decl = d;
                 if ((str_eq_cstr(callee->as.ident, "sizeof") || str_eq_cstr(callee->as.ident, "__buf_alloc") || str_eq_cstr(callee->as.ident, "__buf_free") || str_eq_cstr(callee->as.ident, "__buf_copy")) && expr->as.call.generic_args) {
                     AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, expr->as.call.generic_args); register_generic_type(ctx->compiler_ctx, sub);
                 }
@@ -163,7 +168,47 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
                     if (inferred_args) register_function_specialization(ctx->compiler_ctx, d, inferred_args);
                 }
             }
-            for (const AstCallArg* a = expr->as.call.args; a; a = a->next) discover_specializations_expr_impl(ctx, a->value);
+            {
+                // Recurse into each argument with the parameter's declared type
+                // as the expected type, so an untyped struct or collection
+                // literal argument (`foo(k: { parts: { ... } })`) propagates
+                // into its fields and the nested List(T) createList/add get
+                // registered. Only for a resolved NON-GENERIC callee: a generic
+                // parameter's type still carries the callee's own type params
+                // (`List(T)`), which are not concrete here — those args keep the
+                // ambient expected type, as before.
+                bool propagate = call_decl && !call_decl->generic_params && call_decl->params;
+                uint16_t arg_index = 0;
+                bool saved_has = ctx->has_expected_type;
+                AstTypeRef saved_exp = ctx->expected_type;
+                for (const AstCallArg* a = expr->as.call.args; a; a = a->next, arg_index++) {
+                    const AstTypeRef* param_tr = NULL;
+                    if (propagate) {
+                        if (a->name.len > 0) {
+                            for (const AstParam* p = call_decl->params; p; p = p->next) {
+                                if (str_eq(p->name, a->name)) { param_tr = p->type; break; }
+                            }
+                        } else {
+                            const AstParam* p = call_decl->params;
+                            for (uint16_t i = 0; i < arg_index && p; i++) p = p->next;
+                            if (p) param_tr = p->type;
+                        }
+                    }
+                    if (param_tr) {
+                        AstTypeRef* sub = ctx->generic_params && ctx->generic_args
+                            ? substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)param_tr)
+                            : (AstTypeRef*)param_tr;
+                        ctx->expected_type = *sub;
+                        ctx->expected_type.next = NULL;
+                        ctx->has_expected_type = true;
+                    } else {
+                        ctx->has_expected_type = false;
+                    }
+                    discover_specializations_expr_impl(ctx, a->value);
+                }
+                ctx->has_expected_type = saved_has;
+                ctx->expected_type = saved_exp;
+            }
             break;
         }
         case AST_EXPR_METHOD_CALL: {
@@ -373,13 +418,18 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
                 // Recurse into each element. A nested collection literal element
                 // (`[[7]]` inside `[[[7]]]`) is discovered with the ELEMENT type
                 // as its expected type, so its own createList/add/drop register
-                // for the RIGHT level; a non-list element keeps the ambient
-                // expected type so we don't stamp a list element type onto an
-                // unrelated sub-expression (which mis-registered spurious
-                // generic specializations).
+                // for the RIGHT level; a struct-literal element (`{ parts: {…} }`
+                // in a `List(Lod)` literal) likewise, so the list fields IT holds
+                // are discovered against the element struct. Any other element
+                // keeps the ambient expected type so we don't stamp a list
+                // element type onto an unrelated sub-expression (which
+                // mis-registered spurious generic specializations).
                 AstTypeRef saved_exp = ctx->expected_type; bool saved_has = ctx->has_expected_type;
                 for (const AstCollectionElement* e = expr->as.collection.elements; e; e = e->next) {
-                    if (e->value && e->value->kind == AST_EXPR_COLLECTION_LITERAL) {
+                    bool typed_elem = e->value
+                        && (e->value->kind == AST_EXPR_COLLECTION_LITERAL
+                            || (e->value->kind == AST_EXPR_OBJECT && !e->value->as.object_literal.type));
+                    if (typed_elem) {
                         ctx->expected_type = *elem_type; ctx->expected_type.next = NULL; ctx->has_expected_type = true;
                         discover_specializations_expr_impl(ctx, e->value);
                         ctx->expected_type = saved_exp; ctx->has_expected_type = saved_has;
