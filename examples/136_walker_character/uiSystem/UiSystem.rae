@@ -48,6 +48,7 @@ open HotReload
 open ui/LogOverlay
 open ui/WindowGeometry
 open ui/scrollRootSystem/ScrollRootSystem
+open app3d/EditorPanel
 open ui/EventLoop
 open ui/DebugOverlay
 open ui/VirtualJoystick
@@ -205,51 +206,21 @@ func uiUpdate(
       characterSystem: characterSystem
     )
   }
-  var settingsChanged: Bool = false
-  loop var ai: Int = 0, ai < uiActionCount(world: inputSystem.world), ++ai {
-    if settingsHandleAction(
-      settingsState: inputSystem.settings
-      actionId: uiActionAt(world: inputSystem.world, index: ai)
-    ) {
-      settingsChanged = true
-    }
-  }
-  # The settings panel's edge tab (settings.open) opens and closes the
-  # panel; a mode switch applies it again (the editor state resets the button)
-  if settingsChanged or modesChanged {
-    applyWalkerPanel(world: inputSystem.world, open: inputSystem.settings.open)
+  # The shared settings (app3d/EditorPanel): every action (the edge tab's
+  # settings.open too), the sliders, the running clock
+  let settingsChanged: Bool = updateEditorSettings(
+    world: inputSystem.world
+    uiSystems: uiSystems
+    input: inputSystem.ui
+    settings: inputSystem.settings
+    deltaTime: deltaTime
+  )
+  # A mode switch resets the panel's nodes: apply its open/close again
+  if modesChanged {
+    applyEditorPanelOpen(world: inputSystem.world, open: inputSystem.settings.open)
   }
   if settingsChanged {
     setTaaEnabled(renderer: renderSystem.renderer, on: inputSystem.settings.taa)  # TAA opt-in; SMAA when off
-  }
-  if settingsUpdatePointer(
-    settingsState: inputSystem.settings
-    world: inputSystem.world
-    uiSystems: uiSystems
-    input: inputSystem.ui
-  ) {
-    settingsChanged = true
-  }
-  if settingsUpdateLatitudePointer(
-    settingsState: inputSystem.settings
-    world: inputSystem.world
-    uiSystems: uiSystems
-    input: inputSystem.ui
-  ) {
-    settingsChanged = true
-  }
-  if settingsUpdateDatePointer(
-    settingsState: inputSystem.settings
-    world: inputSystem.world
-    uiSystems: uiSystems
-    input: inputSystem.ui
-  ) {
-    settingsChanged = true
-  }
-  if settingsAdvanceTime(settingsState: inputSystem.settings, deltaTime: deltaTime) {
-    settingsChanged = true
-  }
-  if settingsChanged {
     renderSystem.renderer.sky = settingsBuildSky(
       settingsState: inputSystem.settings
       data: cameraSystem.hosek
@@ -271,12 +242,6 @@ func uiUpdate(
     }
     let pctS: Int = speedPercent(value: characterSystem.speed)
     setNodeText(world: inputSystem.world, nodeId: "SpeedLabel", value: "Speed {pctS}%")
-    settingsApplyToWorld(
-      settingsState: inputSystem.settings
-      world: inputSystem.world
-      uiSystems: uiSystems
-    )
-    applyWalkerPanel(world: inputSystem.world, open: inputSystem.settings.open)
     persist.stateDirty = true
   }
   if clipHit.length() > 0 or transportHit.length() > 0 {
@@ -287,7 +252,7 @@ func uiUpdate(
       world: inputSystem.world
       uiSystems: uiSystems
     )
-    applyWalkerPanel(world: inputSystem.world, open: inputSystem.settings.open)
+    applyEditorPanelOpen(world: inputSystem.world, open: inputSystem.settings.open)
     persist.stateDirty = true
   }
   if terrainSystem.toon is not characterSystem.toon {

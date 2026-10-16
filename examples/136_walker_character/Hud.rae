@@ -2,9 +2,7 @@
 # debug overlays) and the settings-panel show/hide. Kept out of main.rae to
 # respect the 1000-line file cap.
 import Gpu2d
-open app3d/EdgeTab
 open app3d/UiModes
-open ui/CornerMenuButton
 open RendererDeferred
 open app3d/SettingsDialog
 open app3d/UiShell
@@ -74,19 +72,6 @@ func updateWalkerTouch(
 func walkerHideCameraChrome(world: mod UiWorld) pub {
   setNodeActive(world: world, nodeId: "CameraSmoothMouseButton", value: false)
   setNodeActive(world: world, nodeId: "CameraSmoothKeysButton", value: false)
-}
-
-# The settings panel's edge tab (app3d/EdgeTab): on the panel's left edge, the
-# window's right edge while it is closed
-func walkerSettingsTab() ret EdgeTab {
-  ret EdgeTab { name: "settingsTab", side: EdgeSide.right }
-}
-
-func applyWalkerPanel(world: mod UiWorld, open: view Bool) pub {
-  setNodeActive(world: world, nodeId: "SidePanel", value: open)
-  # Its edge tab points the way the panel goes, lit while open
-  setEdgeTabOpen(world: world, tab: walkerSettingsTab(), open: open)
-  applySettingsPanelOpen(world: world, open: open)
 }
 
 # All HUD overlays, drawn inside the 2D overlay pass (after the ECS UI world).
