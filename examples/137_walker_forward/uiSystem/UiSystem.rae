@@ -19,6 +19,7 @@ import Vec3
 import Sys
 import app3d/RenderScale
 open app3d/UiModes
+open app3d/ModeMenu
 open GbufferInstanced
 open GrassCompute
 import GrassConfig
@@ -77,12 +78,19 @@ func uiUpdate(
   now: copy Float64
 ) ret UiTick {
   updateUiInput(input: inputSystem.ui, world: inputSystem.world, uiSystems: uiSystems)
-  # GAME / EDITOR: the "..." button, a rotation, a change of pointer
+  # GAME / EDITOR: the "..." button's menu (app3d/ModeMenu), a rotation, a
+  # change of pointer
   let modesChanged: Bool = updateUiModes(
     world: inputSystem.world
     uiSystems: uiSystems
     uiModes: inputSystem.uiModes
-  ) or toggleUiMode(world: inputSystem.world, uiSystems: uiSystems, uiModes: inputSystem.uiModes)
+  ) or updateModeMenu(
+    world: inputSystem.world
+    uiSystems: uiSystems
+    uiModes: inputSystem.uiModes
+    input: inputSystem.ui
+    rig: cameraSystem.rig
+  )
   # The debug readout, the same in both modes, by the "..." button
   placeDebugOverlayByModeButton(
     world: inputSystem.world
