@@ -148,16 +148,6 @@
       },
       "Children": []
     },
-    "CornerMenuSlot": {
-      "Size": {
-        "w": {
-          "mode": "Hug"
-        },
-        "h": {
-          "mode": "Hug"
-        }
-      }
-    },
     "CameraBarSlot": {
       "Rect": {
         "x": 0,
@@ -181,57 +171,6 @@
         },
         "h": {
           "mode": "Hug"
-        }
-      }
-    },
-    "SettingsButton": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 104,
-        "h": 40
-      },
-      "Shape": {
-        "kind": "RoundedRect",
-        "fill": "accent",
-        "radius": "radiusPill"
-      },
-      "OnClick": {
-        "actionId": "settings.open"
-      },
-      "Children": [
-        "SettingsButtonLabel"
-      ],
-      "Size": {
-        "w": {
-          "mode": "Fill"
-        },
-        "h": {
-          "mode": "Fixed"
-        }
-      }
-    },
-    "SettingsButtonLabel": {
-      "Rect": {
-        "x": 0,
-        "y": 0,
-        "w": 104,
-        "h": 40
-      },
-      "Text": {
-        "text": "Settings",
-        "styleId": "panelButton"
-      },
-      "OpticalAlign": {
-        "centerX": true,
-        "centerY": true
-      },
-      "Size": {
-        "w": {
-          "mode": "Fill"
-        },
-        "h": {
-          "mode": "Fill"
         }
       }
     },
@@ -279,7 +218,6 @@
         "value": false
       },
       "Children": [
-        "CornerMenuSlot",
         "CameraBarSlot"
       ]
     },
@@ -400,7 +338,6 @@
         "radius": "radiusCard"
       },
       "Children": [
-        "SettingsButton",
         "SidePanelBody"
       ],
       "OnClick": {
@@ -429,7 +366,7 @@
       ],
       "Padding": {
         "l": 0,
-        "t": 52,
+        "t": 90,
         "r": 0,
         "b": 0
       }
@@ -499,7 +436,7 @@
     "MenuOverlay": {
       "Layout": {
         "type": "Vertical",
-        "gap": "spaceS",
+        "gap": 36,
         "alignMain": "Start",
         "alignCross": "End"
       },
@@ -518,7 +455,7 @@
         "b": 0
       },
       "Children": [
-        "ModeButton",
+        "CornerRow",
         "ContextMenu"
       ]
     },
@@ -729,6 +666,79 @@
       "OpticalAlign": {
         "centerY": true
       }
+    },
+    "PanelButton": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 104,
+        "h": 40
+      },
+      "Size": {
+        "w": {
+          "mode": "Fixed"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "surface",
+        "radius": "radiusPill"
+      },
+      "Active": {
+        "value": false
+      },
+      "OnClick": {
+        "actionId": "settings.open"
+      },
+      "Children": [
+        "PanelButtonLabel"
+      ]
+    },
+    "PanelButtonLabel": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 104,
+        "h": 40
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fill"
+        }
+      },
+      "Text": {
+        "text": "Settings",
+        "styleId": "panelButton"
+      },
+      "OpticalAlign": {
+        "centerX": true,
+        "centerY": true
+      }
+    },
+    "CornerRow": {
+      "Layout": {
+        "type": "Horizontal",
+        "gap": "spaceS",
+        "alignCross": "Center"
+      },
+      "Size": {
+        "w": {
+          "mode": "Hug"
+        },
+        "h": {
+          "mode": "Hug"
+        }
+      },
+      "Children": [
+        "PanelButton",
+        "ModeButton"
+      ]
     }
   },
   "states": {
@@ -757,6 +767,19 @@
         "MenuGameItem": {
           "Active": {
             "value": true
+          }
+        },
+        "PanelButton": {
+          "Active": {
+            "value": true
+          }
+        },
+        "TopRow": {
+          "Padding": {
+            "l": "spaceS",
+            "t": "spaceS",
+            "r": 168,
+            "b": "spaceS"
           }
         }
       }
