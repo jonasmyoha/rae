@@ -11,10 +11,12 @@ With **Cascades** on (the top bar), each cascade has its own colour: red,
 green, blue, yellow from the camera out.
 
 - The ground and objects a cascade shadows are tinted in its colour.
-- A line in its colour is drawn where the cascade ends. The shader switches
-  to the next cascade there, so this is the line where shadow sharpness
-  changes. The last line is where shadows stop: past it nothing is tinted
-  and nothing casts.
+- A line in its colour is drawn where the cascade ends. Over the last 12% of
+  each cascade's range the shader mixes its shadow with the next cascade's,
+  and the tint blends into the next colour the same way, so the change in
+  shadow sharpness is a gradient ending at the line, not a step. The last
+  cascade fades out to no shadow across its band; past its line nothing is
+  tinted and nothing casts.
 - Each shadow map's square is outlined in its colour. Shadows outside the
   square are cut off even before the split line.
 

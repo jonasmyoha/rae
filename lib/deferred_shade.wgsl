@@ -48,14 +48,29 @@ fn receiverSlope(c: i32, N: vec3<f32>, maxSlope: f32) -> vec2<f32> {
   if (length2 > maxSlope * maxSlope) { return slope * (maxSlope / sqrt(length2)); }
   return slope;
 }
+// The fraction of each cascade's depth range over which it hands over to the
+// next one (or, for the last, fades out to unshadowed)
+const CASCADE_BLEND_BAND = 0.12;
+// Where cascade c's depth range starts: the previous split, 0 for the first
+fn cascadeStartAt(c: i32) -> f32 {
+  if (c == 1) { return SH.splitFar.x; }
+  if (c == 2) { return SH.splitFar.y; }
+  if (c == 3) { return SH.splitFar.z; }
+  return 0.0;
+}
+// How far into cascade c's hand-over band `viewDepth` is: 0 before the band,
+// 1 at the split. The band is the last CASCADE_BLEND_BAND of the cascade's
+// range, so a near cascade blends over a short distance and a far one over a
+// long one.
+fn cascadeBlend(c: i32, viewDepth: f32) -> f32 {
+  let far = cascadeSplitAt(c);
+  let band = (far - cascadeStartAt(c)) * CASCADE_BLEND_BAND;
+  return clamp((viewDepth - (far - band)) / max(band, 1e-4), 0.0, 1.0);
+}
 // Four taps of the hardware 2x2 compare, 0.75 texel either side: a smooth
 // footprint of about 3.5 texels for 4 lookups (the PCSS filter was 8 blocker
-// + 12 PCF taps per pixel).
-fn sunVisibility(wpos: vec3<f32>, N: vec3<f32>, viewDepth: f32) -> f32 {
-  let count = i32(SH.shadowCfg.x);
-  if (count <= 0) { return 1.0; }
-  let c = shadowCascadeIndex(viewDepth, count);
-  if (c >= count) { return 1.0; }
+// + 12 PCF taps per pixel). 1 (lit) outside the cascade's map.
+fn cascadeVisibility(c: i32, wpos: vec3<f32>, N: vec3<f32>) -> f32 {
   let lp = SH.lightViewProj[c] * vec4<f32>(wpos, 1.0);
   let ndc = lp.xyz / lp.w;
   let uv = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
@@ -75,6 +90,22 @@ fn sunVisibility(wpos: vec3<f32>, N: vec3<f32>, viewDepth: f32) -> f32 {
     sum = sum + textureSampleCompareLevel(shadowTex, shadowSamp, uv + d, c, reference);
   }
   return sum * 0.25;
+}
+// The sun's visibility at a surface point: its cascade's lookup, mixed with
+// the next cascade's across the hand-over band (a second lookup only there),
+// so the change in shadow sharpness at a split is a gradient, not a line. The
+// last cascade fades to lit across its band instead of stopping at an edge.
+fn sunVisibility(wpos: vec3<f32>, N: vec3<f32>, viewDepth: f32) -> f32 {
+  let count = i32(SH.shadowCfg.x);
+  if (count <= 0) { return 1.0; }
+  let c = shadowCascadeIndex(viewDepth, count);
+  if (c >= count) { return 1.0; }
+  let visibility = cascadeVisibility(c, wpos, N);
+  let blend = cascadeBlend(c, viewDepth);
+  if (blend <= 0.0) { return visibility; }
+  var next = 1.0;
+  if (c + 1 < count) { next = cascadeVisibility(c + 1, wpos, N); }
+  return mix(visibility, next, blend);
 }
 // The cascade debug view (SH.shadowCfg.w, setShadowCascadeDebug): red, green,
 // blue and yellow from the camera out
@@ -99,7 +130,15 @@ fn shadowCascadeDebug(radiance: vec3<f32>, wpos: vec3<f32>, viewDepth: f32) -> v
   var color = radiance;
   let c = shadowCascadeIndex(viewDepth, count);
   // A colour filter, so the shading and the shadows still read under it
-  if (c < count) { color = radiance * (vec3<f32>(0.15) + 0.85 * cascadeDebugColor(c)); }
+  if (c < count) {
+    // Across the hand-over band the tint blends into the next cascade's
+    // colour (into none after the last), as the shadow lookup does
+    var tint = cascadeDebugColor(c);
+    var nextTint = vec3<f32>(1.0);
+    if (c + 1 < count) { nextTint = cascadeDebugColor(c + 1); }
+    tint = mix(tint, nextTint, cascadeBlend(c, viewDepth));
+    color = radiance * (vec3<f32>(0.15) + 0.85 * tint);
+  }
   let lineWidth = max(viewDepth * 0.004, 0.03);
   for (var i = 0; i < 4; i = i + 1) {
     if (i < count && abs(viewDepth - cascadeSplitAt(i)) < lineWidth) { color = cascadeDebugColor(i) * 0.7; }
