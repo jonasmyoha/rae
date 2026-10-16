@@ -15,6 +15,22 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+// Is `operand` (the side of `x is none` that is not `none`) a call whose
+// result is a fresh optional the comparison alone holds: a non-extern
+// function returning an owning (not view/mod) `opt T` whose payload needs a
+// drop?
+static bool none_compare_owns_call_result(CFuncContext* ctx, const AstExpr* operand,
+                                          const AstTypeRef* opt_type) {
+  if (!operand || (operand->kind != AST_EXPR_CALL && operand->kind != AST_EXPR_METHOD_CALL))
+    return false;
+  if (!operand->decl_link || operand->decl_link->kind != AST_DECL_FUNC) return false;
+  const AstFuncDecl* fd = &operand->decl_link->as.func_decl;
+  if (fd->is_extern || !fd->returns || !fd->returns->type) return false;
+  const AstTypeRef* rt = fd->returns->type;
+  if (!rt->is_opt || rt->is_view || rt->is_mod) return false;
+  return type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, opt_type, 0);
+}
 #include <limits.h>
 #include <errno.h>
 #include "lexer.h"
@@ -769,6 +785,29 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                   emit_expr(ctx, operand, out, PREC_LOWEST, true, true);
               }
               fprintf(out, expr->as.binary.op == AST_BIN_NEQ ? " != NULL))" : " == NULL))");
+              ctx->suppress_opt_unbox = saved_unbox;
+              break;
+          }
+          // A call that hands back an OWNING optional (`mountTab() is none`):
+          // nothing else holds the result, so test it and free it here. Emitted
+          // as before, the temporary was never dropped, and an optional whose
+          // payload carries a String leaked one String per call (the editor
+          // panel's `mountEdgeTab(...) is none`, fixture 1133).
+          if (otr && otr->is_opt && !(otr->is_view || otr->is_mod)
+              && none_compare_owns_call_result(ctx, operand, otr)) {
+              static int none_tmp_id = 0;
+              int id = none_tmp_id++;
+              bool struct_rep = rae_opt_is_struct_rep(ctx, otr);
+              const char* tname = struct_rep ? rae_opt_type_name(ctx, otr) : "RaeAny";
+              char tmp[48];
+              snprintf(tmp, sizeof tmp, "__rae_nonetmp%d", id);
+              fprintf(out, "((bool)(__extension__ ({ %s %s = ", tname, tmp);
+              emit_expr(ctx, operand, out, PREC_LOWEST, false, false);
+              if (struct_rep) fprintf(out, "; bool %s_has = %s.has;\n", tmp, tmp);
+              else fprintf(out, "; bool %s_has = !rae_any_is_none(%s);\n", tmp, tmp);
+              emit_drop_for_value(ctx, out, otr, tmp, true);
+              fprintf(out, "  %s%s_has; })))",
+                      expr->as.binary.op == AST_BIN_NEQ ? "" : "!", tmp);
               ctx->suppress_opt_unbox = saved_unbox;
               break;
           }
