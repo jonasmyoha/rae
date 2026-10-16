@@ -11,7 +11,9 @@ second example uses it without copying anything.
 | `ui_shell.rae` | window extent, fonts + theme, world/scene bootstrap, named-node access |
 | `control_panel.rae` | a panel an app fills with its own buttons; radio groups |
 | `camera_bar.rae` + `scenes/camera_bar.raescene` | the camera readout bar |
-| `EditorPanel.rae` + `scenes/editor_panel.raescene` | the whole editor chrome: corner menu, camera bar, settings side panel, debug overlay, camera rig update |
+| `EditorPanel.rae` + `scenes/editor_panel.raescene` | the whole editor chrome: camera bar, the "..." menu (`ModeMenu`), settings side panel with its edge tab (`EdgeTab`), debug overlay, camera rig update; used by 134, 135, 138, 142 |
+| `ModeMenu.rae` | the "..." menu in the top-right corner: GAME / EDITOR (with `UiModes.rae`) and "Reverse camera rotation" |
+| `EdgeTab.rae` + `scenes/edge_tab.raescene` | the tab on a side panel's edge that opens and closes it |
 
 ## Using a shared component
 

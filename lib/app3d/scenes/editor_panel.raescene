@@ -11,10 +11,17 @@
         "h": 800
       },
       "Children": [
-        "ContentRow"
+        "ContentRow",
+        "MenuOverlay"
       ],
       "Layout": {
         "type": "Stack"
+      },
+      "Padding": {
+        "l": "spaceL",
+        "t": "spaceL",
+        "r": "spaceL",
+        "b": "spaceL"
       }
     },
     "ContentRow": {
@@ -33,14 +40,9 @@
       },
       "Children": [
         "MainColumn",
-        "SidePanel"
-      ],
-      "Padding": {
-        "l": "spaceL",
-        "t": "spaceL",
-        "r": "spaceL",
-        "b": "spaceL"
-      }
+        "SettingsTabColumn",
+        "SidePanelColumn"
+      ]
     },
     "MainColumn": {
       "Layout": {
@@ -78,24 +80,13 @@
       "Padding": {
         "l": "spaceS",
         "t": "spaceS",
-        "r": "spaceM",
+        "r": 56,
         "b": "spaceS"
       },
       "Children": [
-        "CornerMenuSlot",
         "CameraBarSlot",
         "AppBar"
       ]
-    },
-    "CornerMenuSlot": {
-      "Size": {
-        "w": {
-          "mode": "Hug"
-        },
-        "h": {
-          "mode": "Hug"
-        }
-      }
     },
     "CameraBarSlot": {
       "Rect": {
@@ -141,6 +132,14 @@
       ],
       "OnClick": {
         "actionId": "ui.surface"
+      },
+      "Size": {
+        "w": {
+          "mode": "Fixed"
+        },
+        "h": {
+          "mode": "Fill"
+        }
       }
     },
     "SidePanelBody": {
@@ -283,6 +282,228 @@
         }
       },
       "Children": []
+    },
+    "SettingsTabColumn": {
+      "Layout": {
+        "type": "Vertical",
+        "alignMain": "Center",
+        "alignCross": "Center"
+      },
+      "Size": {
+        "w": {
+          "mode": "Hug"
+        },
+        "h": {
+          "mode": "Fill"
+        }
+      },
+      "Children": [
+        "SettingsTabSlot"
+      ]
+    },
+    "SettingsTabSlot": {
+      "Size": {
+        "w": {
+          "mode": "Hug"
+        },
+        "h": {
+          "mode": "Hug"
+        }
+      }
+    },
+    "SidePanelColumn": {
+      "Layout": {
+        "type": "Vertical",
+        "alignMain": "Start",
+        "alignCross": "Start"
+      },
+      "Size": {
+        "w": {
+          "mode": "Hug"
+        },
+        "h": {
+          "mode": "Fill"
+        }
+      },
+      "Padding": {
+        "l": 0,
+        "t": 90,
+        "r": 0,
+        "b": 0
+      },
+      "Children": [
+        "SidePanel"
+      ]
+    },
+    "MenuOverlay": {
+      "Layout": {
+        "type": "Vertical",
+        "gap": 36,
+        "alignMain": "Start",
+        "alignCross": "End"
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fill"
+        }
+      },
+      "Padding": {
+        "l": 0,
+        "t": 10,
+        "r": 4,
+        "b": 0
+      },
+      "Children": [
+        "ModeButton",
+        "ContextMenu"
+      ]
+    },
+    "ModeButton": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 44,
+        "h": 44
+      },
+      "Size": {
+        "w": {
+          "mode": "Fixed"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "surface",
+        "radius": 22
+      },
+      "OnClick": {
+        "actionId": "modeMenu.toggle"
+      },
+      "Children": [
+        "ModeLabel"
+      ]
+    },
+    "ModeLabel": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 44,
+        "h": 44
+      },
+      "Text": {
+        "text": "...",
+        "styleId": "panelButton"
+      },
+      "OpticalAlign": {
+        "centerX": true,
+        "centerY": true
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fill"
+        }
+      }
+    },
+    "ContextMenu": {
+      "Layout": {
+        "type": "Vertical",
+        "gap": 4,
+        "alignCross": "Stretch"
+      },
+      "Size": {
+        "w": {
+          "mode": "Fixed"
+        },
+        "h": {
+          "mode": "Hug"
+        }
+      },
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 300,
+        "h": 120
+      },
+      "Padding": {
+        "l": 8,
+        "t": 8,
+        "r": 8,
+        "b": 8
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "surface",
+        "radius": "radiusCard"
+      },
+      "Active": {
+        "value": false
+      },
+      "Children": [
+        "MenuCameraItem"
+      ]
+    },
+    "MenuCameraItem": {
+      "Layout": {
+        "type": "Horizontal",
+        "alignCross": "Center"
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Hug"
+        }
+      },
+      "Padding": {
+        "l": 12,
+        "t": 0,
+        "r": 12,
+        "b": 0
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "surfaceAlt",
+        "radius": "radiusPill"
+      },
+      "OnClick": {
+        "actionId": "menu.cameraRotation"
+      },
+      "Children": [
+        "MenuCameraLabel"
+      ]
+    },
+    "MenuCameraLabel": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 260,
+        "h": 40
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Text": {
+        "text": "Reverse camera rotation: off",
+        "styleId": "panelButton",
+        "shrinkToFit": true
+      },
+      "OpticalAlign": {
+        "centerY": true
+      }
     }
   }
 }
