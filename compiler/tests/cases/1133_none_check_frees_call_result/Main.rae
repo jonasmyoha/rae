@@ -1,0 +1,46 @@
+# `call() is none` / `call() is not none` on a call that returns an owning
+# optional: nothing else holds the result, so the comparison frees it. It used
+# to leak the payload's String once per call (the editor panel's
+# `mountEdgeTab(...) is none` left one String at exit in every 3D example that
+# used it). The run's leak check at exit is the assertion; the lines check
+# that the tests still answer right.
+type Tab {
+  name: String
+  side: Int
+}
+
+func makeTab(name: view String, mounted: view Bool) ret opt Tab {
+  if not mounted {
+    ret none
+  }
+  let tab: Tab = { name: name, side: 1 }
+  ret tab
+}
+
+func optionalName(name: view String, present: view Bool) ret opt String {
+  if not present {
+    ret none
+  }
+  ret "{name}"
+}
+
+func main() {
+  if makeTab(name: "settingsTab", mounted: true) is none {
+    log("wrong: a mounted tab is none")
+  }
+  if makeTab(name: "other", mounted: true) is not none {
+    log("a mounted tab is some")
+  }
+  if makeTab(name: "absent", mounted: false) is none {
+    log("an absent tab is none")
+  }
+  loop var i: Int = 0, i < 3, ++i {
+    if optionalName(name: "name {i}", present: true) is none {
+      log("wrong: a present name is none")
+    }
+  }
+  if optionalName(name: "gone", present: false) is none {
+    log("an absent name is none")
+  }
+  log("done")
+}
