@@ -141,9 +141,6 @@ func main() ret Int {
   # #905: the renderer owns the mesh store, so it exists before the uploads; the
   # sky is applied below once the settings are loaded.
   var renderer: DeferredRenderer = createForwardRendererWithSsao(withUi: true)
-  # Bloom on the specular highlights (render-perf-8): the library's
-  # threshold (1.0, just above white), so only what is brighter glows.
-  setBloomEnabled(renderer: renderer, on: true)
   let sphere: MeshHandle = uploadMeshData(renderer: renderer, mesh: sphereData)
   let torus: MeshHandle = uploadMeshData(renderer: renderer, mesh: torusData)
   let ground: MeshHandle = uploadMeshData(renderer: renderer, mesh: planeData)
