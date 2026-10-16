@@ -1,0 +1,187 @@
+# Writes into a PropField (lib/app3d/PropField) that lives inside another
+# struct land in that struct (#86983155). A downstream builder reported that
+# placements added through `holder.propField` in match arms inside two nested
+# loops were lost and finishPropField then exited; the exact code from that
+# report, rebuilt later, wrote everything on the compiler of that day and on
+# this one. This case keeps the reported shapes under test:
+# - the field moved into a holder with `own`, then nested `loop var` loops
+#   with `continue`s and a `match` whose arms call a seven-argument
+#   `place(field: holder.propField, kind: holder.treeKinds.copyAtFallback(…), …)`;
+# - the same through a function that takes `holder: mod Holder`;
+# - the same through a `mod` alias, `let field: mod PropField => holder.propField`;
+# then finishPropField over the holder's field.
+import Vec3
+open Scene3d
+open app3d/PropField
+
+enum PickKind { tree, rock, none }
+
+type Holder {
+  propField: PropField
+  treeKinds: List(Int)
+  rockKinds: List(Int)
+  trees: Int
+  rocks: Int
+}
+
+func paint() ret Material3d {
+  ret Material3d {
+    baseColor: Vec3.create(x: 0.3, y: 0.5, z: 0.2)
+    metallic: 0.0
+    roughness: 1.0
+    emission: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    toon: false
+  }
+}
+
+func part(id: view Int) ret PropPart {
+  ret PropPart { mesh: MeshHandle { id: id, generation: 0 }, material: paint() }
+}
+
+func place(
+  field: mod PropField
+  kind: view Int
+  x: view Float
+  y: view Float
+  z: view Float
+  yaw: view Float
+  scale: view Float
+) {
+  addPropPlacement(
+    field: field
+    placement: { kind: kind, position: Vec3.create(x: x, y: y, z: z), yaw: yaw, scale: scale }
+  )
+}
+
+func pickAt(row: view Int, column: view Int) ret PickKind {
+  let mix: Int = (row * 7 + column * 13) % 5
+  if mix is 0 or mix is 1 {
+    ret PickKind.tree
+  }
+  if mix is 2 {
+    ret PickKind.rock
+  }
+  ret PickKind.none
+}
+
+# Through the holder, as a `mod Holder` parameter
+func plantEdge(holder: mod Holder) {
+  loop var i: Int = 0, i < 24, ++i {
+    place(
+      field: holder.propField
+      kind: holder.rockKinds.copyAtFallback(index: 0, fallback: 0)
+      x: i.toFloat() * 3.0 - 36.0
+      y: -45.0
+      z: 0.0
+      yaw: 0.0
+      scale: 1.0
+    )
+    holder.rocks = holder.rocks + 1
+  }
+}
+
+func main() {
+  var field: PropField = createPropField(
+    originX: -50.0
+    originY: -50.0
+    size: 100.0
+    cellSize: 10.0
+  )
+  var treeKinds: List(Int) = List.create(Int, cap: 1)
+  treeKinds.add(
+    value: addPropKind(
+      field: field
+      kind: {
+        lods: {
+          { parts: { part(id: 1), part(id: 2) }, maxDistance: 30.0, castsShadow: true, facesCamera: false }
+        }
+        radius: 2.0
+        centerHeight: 2.0
+      }
+    )
+  )
+  var rockKinds: List(Int) = List.create(Int, cap: 1)
+  rockKinds.add(
+    value: addPropKind(
+      field: field
+      kind: {
+        lods: {
+          { parts: { part(id: 3) }, maxDistance: 40.0, castsShadow: true, facesCamera: false }
+        }
+        radius: 1.0
+        centerHeight: 0.5
+      }
+    )
+  )
+  var holder: Holder = {
+    propField: own field
+    treeKinds: own treeKinds
+    rockKinds: own rockKinds
+    trees: 0
+    rocks: 0
+  }
+  var expected: Int = 0
+  loop var row: Int = 0, row < 60, ++row {
+    loop var column: Int = 0, column < 60, ++column {
+      if (row + column) % 4 is 0 {
+        continue
+      }
+      let pick: PickKind = pickAt(row: row, column: column)
+      if pick is PickKind.none {
+        continue
+      }
+      match pick {
+        case PickKind.tree {
+          place(
+            field: holder.propField
+            kind: holder.treeKinds.copyAtFallback(index: 0, fallback: 0)
+            x: column.toFloat() * 1.5 - 45.0
+            y: row.toFloat() * 1.5 - 45.0
+            z: 0.0
+            yaw: 0.5
+            scale: 1.0
+          )
+          holder.trees = holder.trees + 1
+        }
+        case PickKind.rock {
+          place(
+            field: holder.propField
+            kind: holder.rockKinds.copyAtFallback(index: 0, fallback: 0)
+            x: column.toFloat() * 1.5 - 45.0
+            y: row.toFloat() * 1.5 - 45.0
+            z: 0.0
+            yaw: 0.0
+            scale: 0.8
+          )
+          holder.rocks = holder.rocks + 1
+        }
+        case PickKind.none {
+        }
+      }
+      expected = expected + 1
+    }
+  }
+  log("the loops counted {expected}, the field holds {holder.propField.placements.length}")
+  plantEdge(holder: holder)
+  expected = expected + 24
+  log("with the edge: expected {expected}, the field holds {holder.propField.placements.length}")
+  # Through a `mod` alias to the member (`=>`)
+  let heldField: mod PropField => holder.propField
+  loop var i: Int = 0, i < 10, ++i {
+    place(
+      field: heldField
+      kind: holder.treeKinds.copyAtFallback(index: 0, fallback: 0)
+      x: i.toFloat() * 4.0 - 20.0
+      y: 45.0
+      z: 0.0
+      yaw: 0.0
+      scale: 1.0
+    )
+  }
+  expected = expected + 10
+  log("with the alias: expected {expected}, the field holds {holder.propField.placements.length}")
+  finishPropField(field: holder.propField)
+  log(
+    "finished: {holder.propField.finished}, {holder.propField.placements.length} placements in {holder.propField.batches.length} batches"
+  )
+}
