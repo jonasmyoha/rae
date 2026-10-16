@@ -1,0 +1,116 @@
+# app3d/EdgeTab — a slim tab on a window's edge that opens and closes a side
+# panel, as design tools put one on a panel's edge. Closed, it stands at the
+# window's edge with an arrow pointing in ("pull the panel out"); open, it rides
+# the panel's inner edge with the arrow pointing back out, so the control that
+# closes a panel is on the panel. Lit (the theme's `accent`) while open.
+#
+# The tab is lib/app3d/scenes/edge_tab.raescene: a 28 x 88 card holding two
+# dotted chevrons (the UI has no rotated shapes and the font no arrows), one
+# of which shows. An app authors a host slot where the tab goes — between its
+# main column and the panel, so the tab follows the panel's edge — and mounts
+# the tab into it under its own name, so a left and a right panel can each have
+# one. Its press is an ordinary UI action (the app's own action id); the app
+# toggles its panel and calls setEdgeTabOpen.
+#
+#   let tab: EdgeTab = mountEdgeTab(world: w, uiSystems: s, res: ui, hostNodeId: "SettingsTabSlot",
+#     name: "settingsTab", actionId: "settings.open", side: EdgeSide.right) ?? ...
+#   ...when the panel opens or closes: setEdgeTabOpen(world: w, tab: tab, open: open)
+open ecs/Entity
+open ui/Ecs
+open ui/Scene
+open ui/SceneFile
+open ui/SceneInstance
+open ui/UiSystems
+open app3d/UiShell
+open app3d/CameraBar
+
+# Which window edge the panel (and its tab) is on
+enum EdgeSide { left, right }
+
+# A mounted tab: the name its nodes are scoped under, and its panel's side
+type EdgeTab {
+  name: String
+  side: EdgeSide
+}
+
+const edgeTabRootNodeId: String = "EdgeTab"
+
+const edgeTabArrowLeftNodeId: String = "EdgeTabArrowLeft"
+
+const edgeTabArrowRightNodeId: String = "EdgeTabArrowRight"
+
+# Does the arrow point left? A right-edge panel's tab points in (left) while
+# the panel is closed and out (right) while open; a left-edge panel's, the
+# mirror.
+func edgeTabArrowPointsLeft(side: view EdgeSide, open: view Bool) ret Bool {
+  if side is EdgeSide.right {
+    ret open is false
+  }
+  ret open
+}
+
+# The key a mounted tab's node is found by: its node id under the tab's name
+func edgeTabNodeKey(tab: view EdgeTab, nodeId: view String) ret String {
+  ret pageScopedKey(pageId: tab.name, nodeId: nodeId)
+}
+
+# Mount a tab into the app's host node `hostNodeId`, its nodes scoped under
+# `name`, its press the UI action `actionId`, closed. None when the host is
+# not in the world or the scene file is missing.
+func mountEdgeTab(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  hostNodeId: view String
+  name: view String
+  actionId: view String
+  side: view EdgeSide
+) ret opt EdgeTab {
+  let host: EntityId = nodeEntityFor(world: world, nodeId: hostNodeId)
+  if isNone(this: host) {
+    ret none
+  }
+  let scene: Scene = loadSceneFile(path: "{app3dSceneDir()}edge_tab.raescene")
+  if scene.ok is false {
+    ret none
+  }
+  var overrides: List(SceneOverride) = List.create(SceneOverride, cap: 1)
+  addOnClickActionOverride(list: overrides, nodeId: edgeTabRootNodeId, value: actionId)
+  let root: EntityId = mountSceneInstanceIntoPage(
+    world: world
+    uiSystems: uiSystems
+    mountEntityId: host
+    scene: scene
+    overrides: overrides
+    pageId: name
+  )
+  if isNone(this: root) {
+    ret none
+  }
+  let tab: EdgeTab = { name: name, side: side }
+  setEdgeTabOpen(world: world, tab: tab, open: false)
+  ret tab
+}
+
+# Show the panel as open or closed: the arrow's way, and lit while open.
+func setEdgeTabOpen(world: mod UiWorld, tab: view EdgeTab, open: view Bool) {
+  let pointsLeft: Bool = edgeTabArrowPointsLeft(side: tab.side, open: open)
+  setNodeActive(
+    world: world
+    nodeId: edgeTabNodeKey(tab: tab, nodeId: edgeTabArrowLeftNodeId)
+    value: pointsLeft
+  )
+  setNodeActive(
+    world: world
+    nodeId: edgeTabNodeKey(tab: tab, nodeId: edgeTabArrowRightNodeId)
+    value: pointsLeft is false
+  )
+  var fill: String = "surface"
+  if open {
+    fill = "accent"
+  }
+  setNodeFillSlot(
+    world: world
+    nodeId: edgeTabNodeKey(tab: tab, nodeId: edgeTabRootNodeId)
+    slot: fill
+  )
+}
