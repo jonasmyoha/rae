@@ -46,15 +46,32 @@ type UiModes {
   # A low window (a phone on its side): the scene's `short` state is active
   short: Bool
   generation: Int
-  # The "..." mode menu (app3d/ModeMenu): open or not, and the camera item's
-  # text as written (whether it says reversed, and whether it was written yet)
-  menuOpen: Bool
+  # The "..." mode menu (app3d/ModeMenu)
+  modeMenu: ModeMenuState
+}
+
+# The "..." menu's own state (app3d/ModeMenu): open or not, and the camera
+# item's text as written (whether it says reversed, and whether it was
+# written yet). Kept apart from the modes so an app without GAME / EDITOR
+# modes (app3d/EditorPanel) has the same menu.
+type ModeMenuState {
+  open: Bool
   cameraLabelReversed: Bool
   cameraLabelWritten: Bool
   # The generation the menu's nodes were last written under: applying a frame
   # or state resets the nodes it names (the menu, restyled for EDITOR), so
-  # the menu writes them again when `generation` moves
-  menuGeneration: Int
+  # the menu writes them again when the modes' `generation` moves
+  generation: Int
+}
+
+# Closed (open under RAE_UI_MENU=open, for screenshots), nothing written yet
+func createModeMenuState() ret ModeMenuState {
+  ret ModeMenuState {
+    open: Sys.getEnv(name: "RAE_UI_MENU") is "open"
+    cameraLabelReversed: false
+    cameraLabelWritten: false
+    generation: 0
+  }
 }
 
 const uiModeEditorState: String = "editor"
@@ -105,10 +122,7 @@ func createUiModes(world: mod UiWorld, uiSystems: mod UiSystems, path: view Stri
     editor: Sys.getEnv(name: "RAE_UI_MODE") is "editor"
     short: isShortWindowHeight(height: world.layoutH)
     generation: 1
-    menuOpen: Sys.getEnv(name: "RAE_UI_MENU") is "open"
-    cameraLabelReversed: false
-    cameraLabelWritten: false
-    menuGeneration: 0
+    modeMenu: createModeMenuState()
   }
   applyUiModes(world: world, uiSystems: uiSystems, uiModes: uiModes)
   ret uiModes
