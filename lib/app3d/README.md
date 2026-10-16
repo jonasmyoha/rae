@@ -14,6 +14,7 @@ second example uses it without copying anything.
 | `EditorPanel.rae` + `scenes/editor_panel.raescene` | the whole editor chrome: camera bar, the "..." menu (`ModeMenu`), settings side panel with its edge tab (`EdgeTab`), debug overlay, camera rig update; used by 134, 135, 138, 142 |
 | `ModeMenu.rae` | the "..." menu in the top-right corner: GAME / EDITOR (with `UiModes.rae`) and "Reverse camera rotation" |
 | `EdgeTab.rae` + `scenes/edge_tab.raescene` | the tab on a side panel's edge that opens and closes it |
+| `PropField.rae` | thousands of static props (trees, bushes, rocks) in a cell grid: only cells and props near the eye and in view are drawn, one instanced draw per kind, level of detail and part; levels have their own distance, shadows and camera facing (billboards) |
 
 ## Using a shared component
 
