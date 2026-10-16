@@ -74,7 +74,10 @@ Where it differs from the text above:
   the C compiler may swap the operands of a commutative `x + y` even in plain
   scalar code (the fixture's first run caught exactly that). The result is
   then a quiet NaN equal to one of the NaN inputs; everything else is
-  bit-exact.
+  bit-exact. For `mulAdd` the product counts as an input: when `a * b` is NaN
+  while only `c` is (infinity times zero, say), the add sees two NaNs. The
+  x86-64 SSE2 build under Rosetta returned `c` there and the scalar reference
+  the product (2026-10-17, float8-lowerings-check's first run on x86-64).
 - **Added:** `negate` (FloatWide needs it), `embedIndex` (the other half of
   `minLaneIndex`, Box3D's b3EmbedIndexW) and `lowering()` (which path the
   program was compiled with).
