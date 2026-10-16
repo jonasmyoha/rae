@@ -72,7 +72,7 @@ open ui/DebugOverlay
 open HotReload
 import String
 import ui/Scene
-open ui/CornerMenuButton
+open app3d/EditorPanel
 import app3d/Slider
 open GbufferWorld
 open app3d/CameraRig
@@ -202,53 +202,6 @@ func main() ret Int {
   # that draws metaballs needs them (scene 3 is one cluster of 40 spheres).
   let clusters3: ClusterTags = buildClusterTags(world: asset3.world)
 
-  # Fonts + theme through the shared loader, which also bridges the
-  # theme's PALETTE into the active theme — the step that was missing
-  # here and is why a slot-coloured component would otherwise render in
-  # the built-in light palette.
-  let gpuUi: Gpu2dUi = loadUiAssets(
-    dir: base
-    textFontName: "Roboto-Regular"
-    iconFontName: "MaterialIconsRound-Regular"
-    themeFile: "Theme.raescene"
-  )
-
-  var uiWorld: UiWorld = create()
-
-  var uiSystems: UiSystems = createUiSystems()
-  # #764: install the app's theme (palette + scene tokens) onto this world.
-  seedWorldTheme(world: uiWorld, res: gpuUi)
-  uiWorld.layoutW = extentW
-  uiWorld.layoutH = extentH
-  let uiScene: Scene = loadSceneFile(path: "{base}ui.raescene")
-  let uiRoot: EntityId = loadScene(world: uiWorld, uiSystems: uiSystems, scene: uiScene)
-  # The camera readout bar is the SHARED component; this scene supplies
-  # only the slot it mounts into. Example 136 mounts the same one.
-  # The menu button is an ECS node in the same top row as the camera bar, so
-  # the two hug to one height and resize together (lib/ui/CornerMenuButton).
-  mountCornerMenuButton(
-    world: uiWorld
-    uiSystems: uiSystems
-    res: gpuUi
-    hostNodeId: "CornerMenuSlot"
-  )
-  mountCameraBar(
-    world: uiWorld
-    uiSystems: uiSystems
-    res: gpuUi
-    hostNodeId: "CameraBarSlot"
-  )
-  anchorUiToExtent(
-    world: uiWorld
-    uiSystems: uiSystems
-    res: gpuUi
-    w: extentW
-    h: extentH
-  )
-  layoutSystem(world: uiWorld, uiSystems: uiSystems)
-  transformSystem(world: uiWorld, uiSystems: uiSystems)
-  visualBoundsSystem(world: uiWorld, uiSystems: uiSystems, res: gpuUi)
-
   # Diagnostic log overlay (lib/ui/LogOverlay.rae), bottom-left here and
   # top-left in the mobile UI example — same widget, different corner.
   var logOverlay: LogOverlay = createLogOverlay(
@@ -256,14 +209,6 @@ func main() ret Int {
     maxLines: 10
     anchor: logAnchorBottomLeft
     fontSize: 14.0
-  )
-  # Shared debug instrumentation: amber button top right, fps/memory readouts
-  # and the moving update indicator. One line to opt in per feature.
-  var dbg: DebugOverlay = createDebugOverlay(
-    button: true
-    fps: true
-    memory: true
-    heartbeat: true
   )
   # This example PARKS when nothing moves, so "did real work" is the previous
   # frame's render decision — it is not known yet this early in the frame.
@@ -280,11 +225,11 @@ func main() ret Int {
     logWarnLine(ov: logOverlay, text: "TAA disabled (RAE_NO_TAA) - edges will alias")
   }
 
-  var uiInput: UiInput = createUiInput()
   var uiState: DemoUiResource = createDemoUiResource()
-  # The shared dialog (lib/app3d/settings_dialog). Three scenes here, so its
-  # scene chooser is live; 136 mounts the same dialog with sceneCount 1.
-  var settings: SettingsState = createSettingsState(
+  # The shared editor chrome (lib/app3d/EditorPanel): the camera bar, the "..."
+  # menu, the settings side panel and its edge tab, the debug readout. Three
+  # scenes here, so the settings' scene chooser is live.
+  let settings: SettingsState = createSettingsState(
     scene: uiState.activeScene
     sceneCount: 3
     speed: 1.0
@@ -292,23 +237,14 @@ func main() ret Int {
     hour: 12.0
     skyModel: SettingsSkyModel.preetham
   )
-  if mountSettingsDialog(
-    world: uiWorld
-    uiSystems: uiSystems
-    res: gpuUi
-    hostNodeId: "SettingsDialogSlot"
-  ) is false {
-    logWarnLine(ov: logOverlay, text: "settings dialog failed to mount")
-  }
-  settingsApplyToWorld(settingsState: settings, world: uiWorld, uiSystems: uiSystems)
+  var editorPanel: EditorPanel = createEditorPanel(assetBase: base, settings: settings)
   # The settings pane's TAA switch does nothing here: MSAA is the forward
   # frame's antialiasing (setTaaEnabled keeps TAA off on a forward renderer)
-  setTaaEnabled(renderer: renderer, on: settings.taa)
-  applyDemoPanel(world: uiWorld, open: settings.open)
-  # The legacy in-scene "Settings" button is superseded by the shared corner
-  # menu button (#546 UI unification), so hide it — one settings affordance, the
-  # same one example 136 uses.
-  setNodeActive(world: uiWorld, nodeId: "SettingsButton", value: false)
+  # Where "Orbit" re-centres on every switch back from the WASD camera
+  setEditorPanelOrbitHome(
+    editorPanel: editorPanel
+    target: Vec3.create(x: 0.0, y: 0.0, z: orbitFocusZ)
+  )
   var camera: Camera3d = initialCamera
   var cameraRig: CameraRig = createCameraRig(camera: camera)
   # Restore before the test-state hook, so an explicit env override still
@@ -355,40 +291,22 @@ func main() ret Int {
   if testState is "free" {
     toggleCameraRigMode(rig: cameraRig, camera: camera)
   }
-  let initialUiLayoutDirty: Bool = syncDemoUi(world: uiWorld, state: uiState)
-  if initialUiLayoutDirty {
-    layoutSystem(world: uiWorld, uiSystems: uiSystems)
-    transformSystem(world: uiWorld, uiSystems: uiSystems)
-    visualBoundsSystem(world: uiWorld, uiSystems: uiSystems, res: gpuUi)
-  }
-  syncCameraBar(world: uiWorld, rig: cameraRig, camera: camera)
-
+  selectEditorPanelScene(editorPanel: editorPanel, scene: uiState.activeScene)
   var light: Light3d = light1
   var simTime: Float = 0.0
   # Epoch seconds must stay Float64 (see docs/primitive-types.md); only the
   # small per-frame delta is narrowed to Float.
   # Frame declared as a render graph with a load-preserving UI overlay.
   # A REAL sky (#400): Preetham, from the same sun the scene is lit by,
-  # so the visible sun and the shadows agree. Turbidity 2.5 is a clear
-  # day. This example is the renderer's realistic end; 136 is the
-  # stylised one, and they deliberately use different kinds behind the
-  # same interface.
-  # The fitted table, read once. Cooking a sky from it afterwards is
-  # arithmetic, which is what lets the time-of-day slider drive it per frame.
-  let hosekData: HosekDataset = loadDefaultHosekDataset()
-  let skyTurbidity: Float = 2.5
-  let skyGroundAlbedo: Float = 0.25
-  renderer.sky = settingsBuildSky(
-    settingsState: settings
-    data: hosekData
-    turbidity: skyTurbidity
-    groundAlbedo: skyGroundAlbedo
+  # so the visible sun and the shadows agree. This example is the renderer's
+  # realistic end; 136 is the stylised one, and they deliberately use
+  # different kinds behind the same interface.
+  applyEditorPanelSettings(
+    editorPanel: editorPanel
+    renderer: renderer
+    light: light
+    sunStrength: 1.0
   )
-  renderer.hasSky = true
-  # The sun the sky was built for drives the shadows too, or the visible sun and
-  # the cast shadows disagree.
-  light.sunDir = settingsSunDir(settingsState: settings)
-  light.sunColor = settingsSunColor(settingsState: settings)
   let gstatus: Int = compileDeferred(renderer: renderer)
   if gstatus is not 0 {
     log("render graph invalid: {gstatus}")
@@ -405,15 +323,7 @@ func main() ret Int {
   # rendered frame, so an idle app touches neither.
   # What the settings panel's scene chooser last read, so a change made IN the
   # panel can be told apart from the panel merely holding a stale value.
-  var lastSettingsScene: Int = settings.scene
-  # The panel outgrew its space once the rendering toggles landed, so it
-  # scrolls: wheel when the pointer is over it, drag anywhere inside it.
-  # The scene authors a `ScrollRoot` on SidePanelContent (the Hug content inside
-  # the clipped SidePanelBody); the lib system seeds its state, and the floor is
-  # the laid-out overflow.
-  var panelScrollMemory: ScrollMemory = createScrollMemory()
-  scrollRootSystem(world: uiWorld, uiSystems: uiSystems, memory: panelScrollMemory)
-  var panelScroll: EntityId = findScrollRoot(world: uiWorld, uiSystems: uiSystems)
+  var lastSettingsScene: Int = editorPanel.settings.scene
   var renderedOnce: Bool = false
   var lastLogRevision: Int = -1
   # Once, not per frame: this is a gate assertion, not a readout.
@@ -460,194 +370,74 @@ func main() ret Int {
       deltaTime = 0.0
     }
 
-    # Re-anchor on resize. The window's logical size is the layout extent,
-    # so a resize re-runs placement instead of rescaling a fixed canvas.
-    var extentChanged: Bool = false
+    # The panel lays itself out again on a resize; the log overlay reads the
+    # extent.
     let resized: Bool = Gpu2d.windowResized()
     updateWindowGeometry(windowGeometry: windowGeometry, now: now, resized: resized)
     if resized {
       extentW = windowExtentW()
       extentH = windowExtentH()
-      if extentW > 0.0 and extentH > 0.0 {
-        Gpu2d.setDesignResolution(width: extentW, height: extentH, fit: 0)
-        uiWorld.layoutW = extentW
-        uiWorld.layoutH = extentH
-        anchorUiToExtent(
-          world: uiWorld
-          uiSystems: uiSystems
-          res: gpuUi
-          w: extentW
-          h: extentH
-        )
-        extentChanged = true
-      }
     }
+    let extentChanged: Bool = resized
 
-    # Refresh the readout about once a second. This is deliberately the
-
-    updateUiInput(input: uiInput, world: uiWorld, uiSystems: uiSystems)
-    let scrolled: Bool = updateScrollRoot(
-      world: uiWorld
-      uiSystems: uiSystems
-      entityId: panelScroll
-      input: uiInput
-    )
-    # The debug button sits over the side panel, so a press it takes has to be
-    # withdrawn from the UI world or the same click works the control beneath.
-    if updateDebugOverlay(
-      debugOverlay: dbg
-      screenW: windowExtentW()
-      screenH: windowExtentH()
+    # The chrome, then the camera rig with the pointer and wheel the UI did
+    # not take. Pause freezes the SIMULATION, not the camera: being able to
+    # orbit a frozen frame is the main reason to pause at all.
+    let panelFrame: EditorPanelFrame = updateEditorPanel(
+      editorPanel: editorPanel
+      cameraRig: cameraRig
+      camera: camera
       now: now
-      didRealWork: dbgDidWork
-    ) {
-      suppressUiPress(input: uiInput, world: uiWorld)
-    }
-    # Shared corner menu button, mounted beside the camera bar — its press is an
-    # ordinary UI action; the panel open/close applies below where
-    # settingsChanged is set.
-    let menuTapped: Bool = menuToggleTapped(world: uiWorld)
-    # RE-CENTRE ON SWITCHING TO ORBIT. The rig recovers the orbit target by
-    # walking `distance` along the free camera's view direction, so the view
-    # never jumps -- the right library default. But after flying around in WASD
-    # mode that lands the target wherever you happened to be looking, and
-    # "Orbit" then spins around a point in empty space with the scene off to
-    # one side. Here the switch should mean "put me back on the subject".
-    #
-    # AN APP CHOICE, not a rig behaviour: leaving these lines out gets the
-    # no-jump default back. Setting the target is the whole fix, because orbit
-    # derives the eye from target + yaw/pitch/distance and the look direction
-    # follows it.
-    #
-    # Before-and-after, because handleCameraBar also returns true for its two
-    # smoothing buttons -- the return value does not mean "the mode changed".
-    let wasOrbit: Bool = cameraRig.mode is CameraRigMode.orbit
-    handleCameraBar(world: uiWorld, rig: cameraRig, camera: camera)
-    if wasOrbit is false and cameraRig.mode is CameraRigMode.orbit {
-      camera.target = Vec3.create(x: 0.0, y: 0.0, z: orbitFocusZ)
-    }
-    let hadUiEvents: Bool = uiActionCount(world: uiWorld) > 0
+      deltaTime: deltaTime
+      resized: resized
+      rendered: dbgDidWork
+    )
+    let cameraMoved: Bool = panelFrame.cameraMoved
+    let settingsChanged: Bool = panelFrame.settingsChanged
+    let uiLayoutDirty: Bool = panelFrame.layoutChanged
+    let hadUiEvents: Bool = uiActionCount(world: editorPanel.world) > 0
     dispatchUiActions(
-      world: uiWorld
+      world: editorPanel.world
       state: uiState
       rig: cameraRig
       camera: camera
     )
-    # The shared dialog sees every action and ignores what it does not own.
-    var settingsChanged: Bool = false
-    if menuTapped {
-      settings.open = settings.open is false
-      settingsChanged = true
-    }
-    var sa: Int = 0
-    loop sa < uiActionCount(world: uiWorld) {
-      if settingsHandleAction(
-        settingsState: settings
-        actionId: uiActionAt(world: uiWorld, index: sa)
-      ) {
-        settingsChanged = true
-      }
-      sa = sa + 1
-    }
-    if settingsChanged {
-      setTaaEnabled(renderer: renderer, on: settings.taa)  # no effect: forward has no TAA
-    }
-    if settingsUpdatePointer(
-      settingsState: settings
-      world: uiWorld
-      uiSystems: uiSystems
-      input: uiInput
-    ) {
-      settingsChanged = true
-    }
-    if settingsUpdateLatitudePointer(
-      settingsState: settings
-      world: uiWorld
-      uiSystems: uiSystems
-      input: uiInput
-    ) {
-      settingsChanged = true
-    }
-    if settingsUpdateDatePointer(
-      settingsState: settings
-      world: uiWorld
-      uiSystems: uiSystems
-      input: uiInput
-    ) {
-      settingsChanged = true
-    }
     # The clock, if it is running. This example PARKS in waitEvents when nothing
     # is moving, so a running clock has to be declared as motion below or it
     # starves to the heartbeat rate and the sky steps once a second.
-    let timeAnimating: Bool = settingsAdvanceTime(settingsState: settings, deltaTime: deltaTime)
-    if timeAnimating {
-      settingsChanged = true
-    }
-    # The scene chooser exists in both places here: the debug panel's own
-    # buttons and the dialog's. Keep them one value rather than two.
+    let timeAnimating: Bool = editorPanel.settings.playing and editorPanel.settings.animateTime and editorPanel.settings.timeDragging is false
+    # The scene chooser exists in both places here: the debug state's and the
+    # panel's. Keep them one value rather than two.
     #
-    # THE DIALOG WINS ONLY WHEN THE DIALOG ACTUALLY MOVED. This used to key off
+    # THE PANEL WINS ONLY WHEN THE PANEL ACTUALLY MOVED. This used to key off
     # `settingsChanged`, which meant "the user touched the panel" until the
-    # time-of-day clock started setting it every frame — after which the dialog
+    # time-of-day clock started setting it every frame — after which the panel
     # won always, and silently reverted any scene chosen anywhere else. It ate
     # both the RAE_GPU3D_UI_TEST_STATE=scene3 override and a restored snapshot,
     # so the app opened on scene 1 whatever it had been told.
-    if settings.scene is not lastSettingsScene {
-      uiState.activeScene = settings.scene
+    if editorPanel.settings.scene is not lastSettingsScene {
+      uiState.activeScene = editorPanel.settings.scene
       uiState.revision = uiState.revision + 1
-      lastSettingsScene = settings.scene
+      lastSettingsScene = editorPanel.settings.scene
     } else {
-      if uiState.activeScene is not settings.scene {
-        settings.scene = uiState.activeScene
+      if uiState.activeScene is not editorPanel.settings.scene {
+        selectEditorPanelScene(editorPanel: editorPanel, scene: uiState.activeScene)
         lastSettingsScene = uiState.activeScene
       }
     }
     if settingsChanged {
-      # Sky model and time of day both feed this, so one rebuild covers both.
-      # Assigned on the local rather than through setRendererSky: writing a
-      # nested struct field through a `mod` parameter does not reliably land,
-      # and the failure is silent (see renderer_deferred's note).
-      renderer.sky = settingsBuildSky(
-        settingsState: settings
-        data: hosekData
-        turbidity: skyTurbidity
-        groundAlbedo: skyGroundAlbedo
+      # Sky model and time of day both feed this, so one rebuild covers both
+      applyEditorPanelSettings(
+        editorPanel: editorPanel
+        renderer: renderer
+        light: light
+        sunStrength: 1.0
       )
-      light.sunDir = settingsSunDir(settingsState: settings)
-      light.sunColor = settingsSunColor(settingsState: settings)
-      # Pause is the shared control now; uiState still owns the flag the rest
-      # of this example reads.
-      uiState.paused = settings.playing is false
-      settingsApplyToWorld(settingsState: settings, world: uiWorld, uiSystems: uiSystems)
-      applyDemoPanel(world: uiWorld, open: settings.open)
+      # Pause is the shared control; uiState still owns the flag the rest of
+      # this example reads.
+      uiState.paused = editorPanel.settings.playing is false
       stateDirty = true
     }
-    let uiLayoutDirty: Bool = syncDemoUi(world: uiWorld, state: uiState)
-    # `settingsChanged` too: a slider DRAG produces no action and does not dirty
-    # the demo UI, so without it the knob's new rect only reached the screen when
-    # the release finally produced one (see 136 for the same gate).
-    # `scrolled` too: updateScrollRoot writes the new position into a
-    # RuntimeOffset, and only transformSystem turns that into screen positions —
-    # without it the wheel moved nothing until the next relayout.
-    if uiLayoutDirty or extentChanged or settingsChanged or scrolled {
-      layoutSystem(world: uiWorld, uiSystems: uiSystems)
-      transformSystem(world: uiWorld, uiSystems: uiSystems)
-      visualBoundsSystem(world: uiWorld, uiSystems: uiSystems, res: gpuUi)
-    }
-
-    # Pause freezes the SIMULATION, not the camera. With no modal dialog
-    # over the scene there is nothing for a pointer-block to protect, and
-    # being able to orbit a frozen frame is the main reason to pause at
-    # all. `cameraMoved` already forces a redraw, so the idle wait-loop
-    # still wakes for it.
-    let cameraInput: Bool = uiPointerCaptured(input: uiInput) is false
-    let cameraMoved: Bool = updateCameraRig(
-      rig: cameraRig
-      camera: camera
-      allowInput: cameraInput
-      wheel: uiWheelUnclaimed(input: uiInput)
-      deltaTime: deltaTime
-    )
 
     # The frame is only worth drawing if something it depends on changed.
     # While paused the 3D scene is frozen, so the presented image is still
@@ -663,7 +453,7 @@ func main() ret Int {
       lastSavedScene = uiState.activeScene
     }
     let logChanged: Bool = logOverlay.revision is not lastLogRevision
-    var needsRender: Bool = sceneAnimating or cameraMoved or uiLayoutDirty or extentChanged or hadUiEvents or logChanged or timeAnimating or scrolled or renderedOnce is false
+    var needsRender: Bool = sceneAnimating or cameraMoved or uiLayoutDirty or extentChanged or hadUiEvents or logChanged or timeAnimating or renderedOnce is false
     if taaSettleFrames > 0 {
       needsRender = true
     }
@@ -708,11 +498,9 @@ func main() ret Int {
         var motionScale: Float = 1.0
         # Was a half-speed TOGGLE; now the shared percentage, so 135 and 136
         # express animation speed the same way (settings_dialog).
-        motionScale = motionScale * settings.speed
+        motionScale = motionScale * editorPanel.settings.speed
         simTime = simTime + deltaTime * motionScale
       }
-      applyCameraRig(rig: cameraRig, camera: camera)
-      syncCameraBar(world: uiWorld, rig: cameraRig, camera: camera)
       if uiState.activeScene is 1 {
         light = light1
       }
@@ -731,8 +519,8 @@ func main() ret Int {
       # owned the sun (#328). It won every frame, so the time-of-day slider did
       # nothing at all — and because it keyed off simTime, PAUSING froze the sun
       # solid, which is how the bug was noticed.
-      light.sunDir = settingsSunDir(settingsState: settings)
-      light.sunColor = settingsSunColor(settingsState: settings)
+      light.sunDir = settingsSunDir(settingsState: editorPanel.settings)
+      light.sunColor = settingsSunColor(settingsState: editorPanel.settings)
       if uiState.activeScene is 1 {
         animateScene1(
           world: asset1.world
@@ -788,7 +576,7 @@ func main() ret Int {
           # an app that skips the shadow pass renders unshadowed, which is what a
           # frame with no shadow pass should look like — so the toggle is simply
           # not doing the work, with no renderer flag to thread through.
-          if settings.shadows {
+          if editorPanel.settings.shadows {
             if uiState.activeScene is 1 {
               renderSceneShadowWorldWith(renderer: renderer, world: asset1.world)
               renderSdfShadow(renderer: renderer, world: asset1.world, tags: clusters1)
@@ -904,27 +692,14 @@ func main() ret Int {
           )
         }
         if tag is RenderTag.uiOverlay {
-          Gpu2d.beginFrameLoad(canvas: renderer.canvas)
-          renderSystemGpu2d(
-            world: uiWorld
-            uiSystems: uiSystems
-            res: gpuUi
-            canvas: renderer.canvas
-          )
-          # After the app UI, so the diagnostic is never what gets covered up.
+          # The chrome and the debug readout, then the log over the scene
+          drawEditorPanel(editorPanel: editorPanel, canvas: renderer.canvas)
           drawLogOverlay(
             ov: logOverlay
             canvas: renderer.canvas
-            font: gpuUi.textFont
+            font: editorPanel.gpuUi.textFont
             screenW: extentW
             screenH: extentH
-          )
-          # LAST, so it is above the scene, the UI world and the log.
-          drawDebugOverlay(
-            debugOverlay: dbg
-            canvas: renderer.canvas
-            font: gpuUi.textFont
-            didRealWork: dbgDidWork
           )
           lastLogRevision = logOverlay.revision
         }
@@ -948,9 +723,6 @@ func main() ret Int {
         world3dPrevTransformSystem(world: asset3.world)
       }
     }
-    # Frame end: report the authored components no lib table matched (this app
-    # has no tables of its own) and recycle the indices of destroyed entities.
-    uiFrameEnd(world: uiWorld, uiSystems: uiSystems)
   }
   # Final flush: the throttle may have a pending change when the loop ends.
   # Headless runs neither read nor write the snapshot — a smoke test must
