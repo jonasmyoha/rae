@@ -91,17 +91,12 @@ func uiUpdate(
     input: inputSystem.ui
     rig: cameraSystem.rig
   )
-  # The debug readout, the same in both modes, by the corner's buttons: left
-  # of the "..." button, or in EDITOR left of the settings button beside it
-  var readoutBeside: String = "ModeButton"
-  if inputSystem.uiModes.editor {
-    readoutBeside = "PanelButton"
-  }
+  # The debug readout, the same in both modes, left of the "..." button
   placeDebugOverlayByModeButton(
     world: inputSystem.world
     uiSystems: uiSystems
     debugOverlay: inputSystem.dbg
-    buttonNodeId: readoutBeside
+    buttonNodeId: "ModeButton"
   )
   let scrolled: Bool = updateScrollRoot(
     world: inputSystem.world
@@ -219,7 +214,7 @@ func uiUpdate(
       settingsChanged = true
     }
   }
-  # The corner's settings button (the hamburger) (settings.open) opens and closes the
+  # The settings panel's edge tab (settings.open) opens and closes the
   # panel; a mode switch applies it again (the editor state resets the button)
   if settingsChanged or modesChanged {
     applyWalkerPanel(world: inputSystem.world, open: inputSystem.settings.open)
