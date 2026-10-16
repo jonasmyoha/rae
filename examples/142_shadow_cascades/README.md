@@ -22,8 +22,14 @@ green, blue, yellow from the camera out.
 
 The orange marker is a 1.8 m character at the camera target. The camera
 starts where a game camera follows its player (12.5 m behind, as in 136),
-with the walker's fit (24 m, lambda 0.75, 3 cascades, 2048 px, back extent
-12 m). Posts stand every metre in rings out to 16 m, every 10 m along the
+with the walkers' fit: 4 cascades to 120 m, lambda 0.75, 2048 px, back
+extent 12 m, and the FOCUS on: the first cascade reaches 4 m past the camera
+target (`fitShadowCascadesAround` with `followFocus`, lib/Shadow3d.rae), so
+the marker and the ground around it are in one cascade (red), the rest
+spread from there to 120 m. Turn the focus off to see the plain split scheme
+from the near plane, where a follow camera's player stands on a split.
+`RAE_SHADOW_FAR=24 RAE_SHADOW_COUNT=3 RAE_SHADOW_FOCUS=0` is the walkers'
+fit before the focus (shadows ended at 24 m). Posts stand every metre in rings out to 16 m, every 10 m along the
 avenue out to 400 m (a tall red mast every 50 m), and cubes on a 20 m grid.
 
 ## Controls
@@ -33,8 +39,10 @@ The standard editor panel (`lib/app3d/EditorPanel.rae`):
 - drag to orbit, wheel to zoom, the camera bar's **Orbit** button for the free
   WASD camera;
 - **Cascades** in the top bar: the debug colours on and off;
+- the side panel's **Focus on the target** switch: the focus on and off;
 - the menu button opens the side panel. Its first section is the fit: each
-  button steps one setting (shadow distance 24 / 50 / 100 / 200 / 400 m,
+  button steps one setting (shadow distance 24 / 50 / 100 / 120 / 150 / 200 /
+  400 m,
   split lambda 0.5 / 0.75 / 0.9 / 0.95, cascades 2 / 3 / 4, map 1024 / 2048 /
   4096 px, back extent 12 / 50 / 200 m), and the readout shows the split
   distances. Below it are the shared settings: the sun's time of day and date,
@@ -54,9 +62,10 @@ RAE_SHADOW_FAR=200 RAE_SHADOW_COUNT=4 RAE_SHADOW_LAMBDA=0.9 RAE_SHADOW_VIEW=high
 
 | variable | meaning | default |
 |---|---|---|
-| `RAE_SHADOW_FAR` | shadow distance (m), the last split | 24 |
+| `RAE_SHADOW_FAR` | shadow distance (m), the last split | 120 |
 | `RAE_SHADOW_LAMBDA` | split scheme: 0 uniform, 1 logarithmic | 0.75 |
-| `RAE_SHADOW_COUNT` | cascades, 1-4 | 3 |
+| `RAE_SHADOW_COUNT` | cascades, 1-4 | 4 |
+| `RAE_SHADOW_FOCUS` | `0`: no focus (splits from the near plane) | on |
 | `RAE_SHADOW_RES` | shadow map size (px) | 2048 |
 | `RAE_SHADOW_BACK` | how far behind the view the light's box reaches (m) | 12 |
 | `RAE_SHADOW_DEBUG` | `0` turns the debug colours off | on |

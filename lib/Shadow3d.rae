@@ -75,6 +75,42 @@ func cascadeSplit(
   ret lambda * logSplit + (1.0 - lambda) * uniform
 }
 
+# The far end of cascade `i` with a FOCUS: the first cascade reaches `focus`
+# (a distance from the camera, past the subject the camera follows), and the
+# rest spread from there to `far` with the practical scheme. Without a focus
+# (0, or one outside near..far) it is cascadeSplit from the near plane. A
+# follow camera's player stands about its orbit distance from the camera; the
+# plain scheme puts the first splits a few metres from the near plane, so the
+# player stood on a cascade boundary and its shadow changed sharpness there.
+func cascadeSplitAround(
+  near: view Float
+  far: view Float
+  focus: view Float
+  i: view Int
+  count: view Int
+  lambda: view Float
+) pub ret Float {
+  if count < 2 or focus <= near or focus >= far {
+    ret cascadeSplit(
+      near: near
+      far: far
+      i: i
+      count: count
+      lambda: lambda
+    )
+  }
+  if i is 0 {
+    ret focus
+  }
+  ret cascadeSplit(
+    near: focus
+    far: far
+    i: i - 1
+    count: count - 1
+    lambda: lambda
+  )
+}
+
 # Fit `count` cascades to the camera frustum for a sun pointing along
 # `sunDir` (the direction light TRAVELS, so a sun overhead is (0,0,-1)).
 #
@@ -90,6 +126,47 @@ func fitShadowCascades(
   aspect: view Float
   near: view Float
   far: view Float
+  sunDir: view Vec3
+  count: view Int
+  resolution: view Int
+  lambda: view Float
+  backExtent: view Float
+) pub ret ShadowCascades {
+  ret fitShadowCascadesAround(
+    camPos: camPos
+    camTarget: camTarget
+    fovYDeg: fovYDeg
+    aspect: aspect
+    near: near
+    far: far
+    focus: 0.0
+    sunDir: sunDir
+    count: count
+    resolution: resolution
+    lambda: lambda
+    backExtent: backExtent
+  )
+}
+
+# The focus for a camera that follows a subject at its target: the camera's
+# distance to the target plus `margin`, so the first cascade reaches a little
+# past the subject (fitShadowCascadesAround)
+func followFocus(camPos: view Vec3, camTarget: view Vec3, margin: view Float) ret Float {
+  ret Vec3.vlen(a: Vec3.vsub(a: camTarget, b: camPos)) + margin
+}
+
+# fitShadowCascades with a focus distance (cascadeSplitAround): the first
+# cascade reaches `focus` from the camera, so a follow camera's subject and
+# the ground around it are in one cascade, and the rest spread out to `far`.
+# A follow camera passes its distance to the subject plus a margin.
+func fitShadowCascadesAround(
+  camPos: view Vec3
+  camTarget: view Vec3
+  fovYDeg: view Float
+  aspect: view Float
+  near: view Float
+  far: view Float
+  focus: view Float
   sunDir: view Vec3
   count: view Int
   resolution: view Int
@@ -120,9 +197,10 @@ func fitShadowCascades(
   var i: Int = 0
   var sliceNear: Float = near
   loop i < count {
-    let sliceFar: Float = cascadeSplit(
+    let sliceFar: Float = cascadeSplitAround(
       near: near
       far: far
+      focus: focus
       i: i
       count: count
       lambda: lambda

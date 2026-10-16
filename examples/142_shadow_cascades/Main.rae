@@ -4,8 +4,8 @@
 # colour, red, green, blue, yellow from the camera out: its area tinted, its
 # shadow map's square outlined, and a line where it ends. The last line is
 # where shadows stop. The camera starts where a game camera follows its player
-# (the orange marker), with the walker's (136) cascade fit, so the place where
-# the first cascade hands over to the second is on screen.
+# (the orange marker), with the walkers' (136/137) cascade fit: four cascades
+# to 120 m, the first reaching past the marker (the focus).
 #
 # The standard editor panel is the chrome. Its top bar has a Cascades button
 # (debug colours on/off). The side panel (menu button) has the fit: shadow
@@ -13,7 +13,7 @@
 # readout of the split distances; the shared settings set the sun.
 #
 # For agents, every setting has an environment override, so a headless
-# screenshot can show any fit: RAE_SHADOW_FAR (m), RAE_SHADOW_LAMBDA,
+# screenshot can show any fit: RAE_SHADOW_FAR (m), RAE_SHADOW_FOCUS=0, RAE_SHADOW_LAMBDA,
 # RAE_SHADOW_COUNT, RAE_SHADOW_RES, RAE_SHADOW_BACK (m), RAE_SHADOW_DEBUG=0
 # (debug colours off), RAE_SHADOW_HOUR (sun), RAE_SHADOW_VIEW=follow | high |
 # low, RAE_SHADOW_PANEL=1 (side panel open). Every fit is logged as a
@@ -32,6 +32,9 @@ open app3d/ControlPanel
 open app3d/EditorPanel
 open app3d/SettingsDialog
 
+# How far past the camera target the first cascade reaches, with the focus on
+const focusMargin: Float = 4.0
+
 # The default sun is an afternoon one, so the shadows are long
 const defaultSunHour: Float = 15.5
 
@@ -44,6 +47,8 @@ func distanceChoices() ret List(Float) {
     24.0
     50.0
     100.0
+    120.0
+    150.0
     200.0
     400.0
   }
@@ -72,6 +77,9 @@ type CascadeFit {
   count: Int
   resolution: Int
   backExtent: Float
+  # The first cascade reaches past the camera target (fitShadowCascadesAround
+  # with followFocus): the marker and the ground around it in one cascade
+  focus: Bool
   debugColors: Bool
 }
 
@@ -93,11 +101,12 @@ func envInt(name: view String, fallback: view Int) ret Int {
 
 func initialFit() ret CascadeFit {
   ret CascadeFit {
-    far: envFloat(name: "RAE_SHADOW_FAR", fallback: 24.0)
+    far: envFloat(name: "RAE_SHADOW_FAR", fallback: 120.0)
     lambda: envFloat(name: "RAE_SHADOW_LAMBDA", fallback: 0.75)
-    count: envInt(name: "RAE_SHADOW_COUNT", fallback: 3)
+    count: envInt(name: "RAE_SHADOW_COUNT", fallback: 4)
     resolution: envInt(name: "RAE_SHADOW_RES", fallback: 2048)
     backExtent: envFloat(name: "RAE_SHADOW_BACK", fallback: 12.0)
+    focus: Sys.getEnv(name: "RAE_SHADOW_FOCUS") is not "0"
     debugColors: Sys.getEnv(name: "RAE_SHADOW_DEBUG") is not "0"
   }
 }
@@ -168,13 +177,18 @@ func fitCascades(
   light: view Light3d
   aspect: view Float
 ) ret ShadowCascades {
-  ret fitShadowCascades(
+  var focus: Float = 0.0
+  if fit.focus {
+    focus = followFocus(camPos: camera.position, camTarget: camera.target, margin: focusMargin)
+  }
+  ret fitShadowCascadesAround(
     camPos: camera.position
     camTarget: camera.target
     fovYDeg: camera.fovYDeg
     aspect: aspect
     near: camera.nearZ
     far: fit.far
+    focus: focus
     sunDir: light.sunDir
     count: fit.count
     resolution: fit.resolution
@@ -187,6 +201,13 @@ func fitCascades(
 func createFitPanel() ret ControlPanel {
   var panel: ControlPanel = createControlPanel(hostNodeId: editorAppPanelNodeId)
   panel.buttonW = 250.0
+  addPanelButton(
+    panel: panel
+    id: "focus"
+    label: ""
+    actionId: "shadow.focus"
+    group: 0
+  )
   addPanelButton(
     panel: panel
     id: "far"
@@ -336,6 +357,16 @@ func createShadowState() ret ShadowState {
 func showFit(state: mod ShadowState) {
   let fit: view CascadeFit => state.fit
   let world: mod UiWorld => state.editorPanel.world
+  var focusText: String = "off"
+  if fit.focus {
+    focusText = "on"
+  }
+  setPanelButtonLabel(
+    panel: state.fitPanel
+    world: world
+    id: "focus"
+    label: "Focus on the target: {focusText}"
+  )
   setPanelButtonLabel(
     panel: state.fitPanel
     world: world
@@ -377,7 +408,9 @@ func showFit(state: mod ShadowState) {
 
 # A fit button: step that setting to its next choice
 func handleFitClick(state: mod ShadowState, clicked: view String) {
-  if clicked is "far" {
+  if clicked is "focus" {
+    state.fit.focus = state.fit.focus is false
+  } else if clicked is "far" {
     state.fit.far = nextFloatChoice(choices: distanceChoices(), current: state.fit.far)
   } else if clicked is "lambda" {
     state.fit.lambda = nextFloatChoice(choices: lambdaChoices(), current: state.fit.lambda)
@@ -453,7 +486,7 @@ func runShadowFrame(state: mod ShadowState) {
       if splits is not state.splits {
         state.splits = splits
         log(
-          "[shadow] distance {state.fit.far} m, lambda {state.fit.lambda}, {cascades.count} cascades at {cascades.resolution} px, back extent {state.fit.backExtent} m: splits {splits}, texel {texelsText(
+          "[shadow] distance {state.fit.far} m, lambda {state.fit.lambda}, {cascades.count} cascades at {cascades.resolution} px, back extent {state.fit.backExtent} m, focus {state.fit.focus}: splits {splits}, texel {texelsText(
             cascades: cascades
           )}, casters {shadowCasterCount(renderer: renderer)}"
         )
