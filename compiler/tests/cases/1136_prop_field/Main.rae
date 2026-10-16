@@ -43,34 +43,29 @@ func main() ret Int {
     cellSize: 10.0
   )
   # A tree: near, its wood and leaves with shadows to 30 m; then its leaves
-  # alone to 80 m. A card: one quad, facing the eye, to 40 m. (The lists are
-  # built step by step: a list literal nested in a struct literal argument
-  # does not get its List functions generated yet.)
-  var nearParts: List(PropPart) = List.create(PropPart, cap: 2)
-  nearParts.add(value: part(id: 1))
-  nearParts.add(value: part(id: 2))
-  var farParts: List(PropPart) = List.create(PropPart, cap: 1)
-  farParts.add(value: part(id: 3))
-  var treeLods: List(PropLod) = List.create(PropLod, cap: 2)
-  treeLods.add(
-    value: { parts: own nearParts, maxDistance: 30.0, castsShadow: true, facesCamera: false }
-  )
-  treeLods.add(
-    value: { parts: own farParts, maxDistance: 80.0, castsShadow: false, facesCamera: false }
-  )
+  # alone to 80 m. A card: one quad, facing the eye, to 40 m. The whole kind is
+  # one nested literal — a list literal (the parts) inside a list literal (the
+  # levels) inside the struct the call takes — and its List(PropLod) /
+  # List(PropPart) functions are generated even though nothing else in the
+  # program names those lists (#31175069).
   let tree: Int = addPropKind(
     field: field
-    kind: { lods: own treeLods, radius: 2.0, centerHeight: 2.0 }
-  )
-  var cardParts: List(PropPart) = List.create(PropPart, cap: 1)
-  cardParts.add(value: part(id: 4))
-  var cardLods: List(PropLod) = List.create(PropLod, cap: 1)
-  cardLods.add(
-    value: { parts: own cardParts, maxDistance: 40.0, castsShadow: false, facesCamera: true }
+    kind: {
+      lods: {
+        { parts: { part(id: 1), part(id: 2) }, maxDistance: 30.0, castsShadow: true, facesCamera: false }
+        { parts: { part(id: 3) }, maxDistance: 80.0, castsShadow: false, facesCamera: false }
+      }
+      radius: 2.0
+      centerHeight: 2.0
+    }
   )
   let card: Int = addPropKind(
     field: field
-    kind: { lods: own cardLods, radius: 1.0, centerHeight: 1.0 }
+    kind: {
+      lods: { { parts: { part(id: 4) }, maxDistance: 40.0, castsShadow: false, facesCamera: true } }
+      radius: 1.0
+      centerHeight: 1.0
+    }
   )
   let foot: Float = 0.0
   # Near ahead, far ahead, behind, beside, past the field's edge; a card ahead

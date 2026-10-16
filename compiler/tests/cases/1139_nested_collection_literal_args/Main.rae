@@ -1,0 +1,60 @@
+# A list literal nested inside a struct literal that is a call argument, and a
+# list literal that is itself a call argument, get their List(T) functions
+# generated even though nothing else in the program names those lists
+# (#31175069). Before the fix, sema passed and clang then failed with "call to
+# undeclared function rae_core_List_createList_rae_Part_...". The run's leak
+# check at exit covers that the lists are dropped.
+type Part {
+  id: Int
+}
+
+type Lod {
+  parts: List(Part)
+  far: Float
+}
+
+type Kind {
+  lods: List(Lod)
+  radius: Float
+}
+
+func part(id: view Int) ret Part {
+  ret Part { id: id }
+}
+
+# Takes a struct whose fields are lists; the argument is a nested literal
+func kindDepth(kind: view Kind) ret Int {
+  var deepest: Int = 0
+  loop let lod: view Lod in kind.lods {
+    if lod.parts.length > deepest {
+      deepest = lod.parts.length
+    }
+  }
+  ret deepest
+}
+
+# Takes a bare list directly as an argument
+func idSum(parts: view List(Part)) ret Int {
+  var total: Int = 0
+  loop let p: view Part in parts {
+    total = total + p.id
+  }
+  ret total
+}
+
+func main() {
+  # A list (parts) inside a list (lods) inside the struct the call takes
+  let deepest: Int = kindDepth(
+    kind: {
+      lods: {
+        { parts: { part(id: 1), part(id: 2), part(id: 3) }, far: 30.0 }
+        { parts: { part(id: 4) }, far: 80.0 }
+      }
+      radius: 2.0
+    }
+  )
+  log("deepest level has {deepest} parts")
+  # A bare list literal as the argument
+  let total: Int = idSum(parts: { part(id: 10), part(id: 20), part(id: 30) })
+  log("ids sum to {total}")
+}
