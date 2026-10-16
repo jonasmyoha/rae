@@ -18,7 +18,8 @@
 # Applying frames and states resets the nodes they name to the scene's authored
 # components, so an app that writes those nodes at run time writes them again
 # when `generation` moves. RAE_UI_MODE=editor starts in EDITOR, RAE_UI_FRAME=<id>
-# forces a frame (both for screenshots).
+# forces a frame, RAE_UI_MENU=open starts with the "..." menu open (all for
+# screenshots).
 import Sys
 open Device
 open ui/Scene
@@ -50,6 +51,10 @@ type UiModes {
   menuOpen: Bool
   cameraLabelReversed: Bool
   cameraLabelWritten: Bool
+  # The generation the menu's nodes were last written under: applying a frame
+  # or state resets the nodes it names (the menu, restyled for EDITOR), so
+  # the menu writes them again when `generation` moves
+  menuGeneration: Int
 }
 
 const uiModeEditorState: String = "editor"
@@ -100,9 +105,10 @@ func createUiModes(world: mod UiWorld, uiSystems: mod UiSystems, path: view Stri
     editor: Sys.getEnv(name: "RAE_UI_MODE") is "editor"
     short: isShortWindowHeight(height: world.layoutH)
     generation: 1
-    menuOpen: false
+    menuOpen: Sys.getEnv(name: "RAE_UI_MENU") is "open"
     cameraLabelReversed: false
     cameraLabelWritten: false
+    menuGeneration: 0
   }
   applyUiModes(world: world, uiSystems: uiSystems, uiModes: uiModes)
   ret uiModes

@@ -729,17 +729,6 @@ func createApp() ret App {
     var panelScrollMemory: ScrollMemory = createScrollMemory()
     scrollRootSystem(world: uiWorld, uiSystems: uiSystems, memory: panelScrollMemory)
     var panelScroll: EntityId = findScrollRoot(world: uiWorld, uiSystems: uiSystems)
-    # The menu button is an ECS node in the same top row as the camera bar, so the
-    # two hug to one height and resize together (lib/ui/CornerMenuButton).
-    let menuOk: Bool = mountCornerMenuButton(
-      world: uiWorld
-      uiSystems: uiSystems
-      res: gpuUi
-      hostNodeId: "CornerMenuSlot"
-    )
-    if menuOk is false {
-      logWarnLine(ov: logOverlay, text: "corner menu button failed to mount")
-    }
     let barOk: Bool = mountCameraBar(
       world: uiWorld
       uiSystems: uiSystems

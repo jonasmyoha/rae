@@ -9,7 +9,12 @@
 # The scene names the nodes below. A layout that keeps the button on screen
 # whatever the editor chrome does: the button and the menu in an overlay over
 # the whole HUD, pinned to the top-right corner, with the top row and the
-# editor's side panel keeping clear of it.
+# editor's side panel keeping clear of it. The menu is the corner's own; an
+# editor panel has its own open/close button beside it (in the walker
+# examples, "Settings" in the top bar), never inside the menu. The scene's
+# `editor` state may restyle the menu like the editor's panels: applying a
+# state resets those nodes, so the menu's open/close and the camera item's
+# text are written again whenever the modes' generation moves.
 #
 #   ...each frame, after updateUiInput, before layout:
 #   if updateUiModes(world: w, uiSystems: s, uiModes: m) or updateModeMenu(world: w,
@@ -121,8 +126,12 @@ func updateModeMenu(
   if cameraTapped {
     rig.reverseDrag = rig.reverseDrag is false
   }
+  # A frame or state applied since: its nodes are back to their authored
+  # components, so write the menu's again
+  let rewrite: Bool = uiModes.menuGeneration is not uiModes.generation
+  uiModes.menuGeneration = uiModes.generation
   # The camera item says what the rig does (an app may start it reversed)
-  if uiModes.cameraLabelReversed is not rig.reverseDrag or uiModes.cameraLabelWritten is false {
+  if rewrite or uiModes.cameraLabelReversed is not rig.reverseDrag or uiModes.cameraLabelWritten is false {
     uiModes.cameraLabelReversed = rig.reverseDrag
     uiModes.cameraLabelWritten = true
     setNodeText(
@@ -138,7 +147,7 @@ func updateModeMenu(
     itemChosen: openEditor or backToGame or cameraTapped
     pressedElsewhere: pressedElsewhere
   )
-  if open is not uiModes.menuOpen {
+  if rewrite or open is not uiModes.menuOpen {
     uiModes.menuOpen = open
     setNodeActive(world: world, nodeId: modeMenuNodeId, value: open)
     changed = true
