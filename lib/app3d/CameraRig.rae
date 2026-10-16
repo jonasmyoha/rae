@@ -99,10 +99,11 @@ type CameraRig {
   # button does something else in the view (the physics playground fires with
   # it). Off by default; the touch path ignores it.
   lookWithRightButton: Bool
-  # Turn the other way for a drag: by default a drag carries the eye around
-  # the subject (orbit) or the world past the eye (fly); an app whose players
-  # expect the view to follow the finger instead sets this, and both axes turn
-  # the other way. Off by default.
+  # Turn the other way for a drag. By default the view follows the drag, as in
+  # a third-person game (drag right to look right, drag up to look up); with
+  # this a drag carries the eye around the subject (orbit) or the world past
+  # the eye (fly), both axes the other way. Off by default; the "..." mode
+  # menu (app3d/ModeMenu) switches it.
   reverseDrag: Bool
   # Touch/pointer input tracking (#764: was module-level gCam* globals). A
   # rig that never calls setCameraTouch keeps camTouchOn=false and the desktop
@@ -465,14 +466,16 @@ func updateCameraRig(
     # no previous position to difference against, and using the stale one
     # snaps the view by the distance the pointer travelled while up.
     if rig.dragging {
+      # The view follows the drag, as in a third-person game: drag right to
+      # look right, drag up to look up. (reverseDrag: the other way.)
       if rig.mode is not CameraRigMode.free {
-        mouseYaw = (px - rig.lastX) * rig.dragSpeed
-        mouseOrbitPitch = 0.0 - (py - rig.lastY) * rig.dragSpeed
-      } else {
-        # Fly mode drags the WORLD past a fixed eye, so yaw runs opposite
-        # to orbit, where the drag carries the eye around the subject.
         mouseYaw = 0.0 - (px - rig.lastX) * rig.dragSpeed
-        mouseFreePitch = 0.0 - (py - rig.lastY) * rig.dragSpeed
+        mouseOrbitPitch = (py - rig.lastY) * rig.dragSpeed
+      } else {
+        # Fly mode turns the eye itself, so its yaw runs opposite to orbit,
+        # where the drag carries the eye around the subject.
+        mouseYaw = (px - rig.lastX) * rig.dragSpeed
+        mouseFreePitch = (py - rig.lastY) * rig.dragSpeed
       }
       if rig.reverseDrag {
         mouseYaw = 0.0 - mouseYaw
