@@ -99,11 +99,12 @@ type CameraRig {
   # button does something else in the view (the physics playground fires with
   # it). Off by default; the touch path ignores it.
   lookWithRightButton: Bool
-  # Turn the other way for a drag. By default the view follows the drag, as in
-  # a third-person game (drag right to look right, drag up to look up); with
-  # this a drag carries the eye around the subject (orbit) or the world past
-  # the eye (fly), both axes the other way. Off by default; the "..." mode
-  # menu (app3d/ModeMenu) switches it.
+  # Turn the ORBIT camera the other way for a drag. By default the view
+  # follows the drag, as in a third-person game (drag right to look right, drag
+  # up to look up); with this a drag carries the eye around the subject, both
+  # axes the other way. The game camera's preference: the "..." mode menu
+  # (app3d/ModeMenu) switches it. The free (WASD) camera ignores it and always
+  # looks where the drag goes, as an editor's fly camera does (dragTurn).
   reverseDrag: Bool
   # Touch/pointer input tracking (#764: was module-level gCam* globals). A
   # rig that never calls setCameraTouch keeps camTouchOn=false and the desktop
@@ -414,6 +415,35 @@ func toggleCameraRigMode(rig: mod CameraRig, camera: mod Camera3d) pub {
   snapCameraRigView(rig: rig)
 }
 
+# What a drag of (dx, dy) pointer units turns: the yaw, and the orbit or the
+# free camera's pitch. Both cameras use the same yaw (a larger yaw turns the
+# view LEFT: the orbit eye goes round to the right of the subject, the free
+# camera's forward swings left), and the pointer's y grows downward.
+# - Orbit: the view follows the drag (drag right to look right, drag up to
+#   look up), or the other way with reverseDrag, the game camera's setting.
+# - Free (WASD): the view always follows the drag, as an editor's fly camera
+#   does; reverseDrag is the game camera's preference and does not reach it.
+type DragTurn {
+  yaw: Float
+  orbitPitch: Float
+  freePitch: Float
+}
+
+func dragTurn(rig: view CameraRig, dx: view Float, dy: view Float) ret DragTurn {
+  if rig.mode is CameraRigMode.free {
+    ret DragTurn { yaw: -dx * rig.dragSpeed, orbitPitch: 0.0, freePitch: -dy * rig.dragSpeed }
+  }
+  var direction: Float = 1.0
+  if rig.reverseDrag {
+    direction = -1.0
+  }
+  ret DragTurn {
+    yaw: -dx * rig.dragSpeed * direction
+    orbitPitch: dy * rig.dragSpeed * direction
+    freePitch: 0.0
+  }
+}
+
 # Read pointer, wheel and keyboard into the rig. Returns whether anything
 # actually moved, which is what an idle-aware render loop gates on.
 #
@@ -466,22 +496,10 @@ func updateCameraRig(
     # no previous position to difference against, and using the stale one
     # snaps the view by the distance the pointer travelled while up.
     if rig.dragging {
-      # The view follows the drag, as in a third-person game: drag right to
-      # look right, drag up to look up. (reverseDrag: the other way.)
-      if rig.mode is not CameraRigMode.free {
-        mouseYaw = 0.0 - (px - rig.lastX) * rig.dragSpeed
-        mouseOrbitPitch = (py - rig.lastY) * rig.dragSpeed
-      } else {
-        # Fly mode turns the eye itself, so its yaw runs opposite to orbit,
-        # where the drag carries the eye around the subject.
-        mouseYaw = (px - rig.lastX) * rig.dragSpeed
-        mouseFreePitch = (py - rig.lastY) * rig.dragSpeed
-      }
-      if rig.reverseDrag {
-        mouseYaw = 0.0 - mouseYaw
-        mouseOrbitPitch = 0.0 - mouseOrbitPitch
-        mouseFreePitch = 0.0 - mouseFreePitch
-      }
+      let turn: DragTurn = dragTurn(rig: rig, dx: px - rig.lastX, dy: py - rig.lastY)
+      mouseYaw = turn.yaw
+      mouseOrbitPitch = turn.orbitPitch
+      mouseFreePitch = turn.freePitch
     }
     rig.dragging = true
   } else {

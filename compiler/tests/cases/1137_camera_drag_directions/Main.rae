@@ -1,0 +1,88 @@
+# Which way a drag turns the camera rig's view (lib/app3d/CameraRig.rae
+# dragTurn), measured on the view itself rather than on the signs of the yaw
+# and pitch, which is where the free camera went wrong once: a comment said the
+# free camera's yaw runs opposite to orbit's, both cameras in fact share the
+# yaw (a larger yaw turns the view left), and the WASD camera came out looking
+# left for a drag right and down for a drag up.
+#
+# - Orbit (the game camera): the view follows the drag; reverseDrag (the "..."
+#   menu's "Reverse camera rotation") turns it the other way.
+# - Free (the editor's WASD camera): the view always follows the drag,
+#   whatever reverseDrag says.
+#
+# The view looks along +y with +x to its right and +z up; the pointer's y
+# grows downward, so a drag up is a negative dy.
+import Vec3
+open Math3d
+open Scene3d
+open app3d/CameraRig
+
+# Where the view looks after the rig takes a drag of (dx, dy) from yaw 0,
+# pitch 0
+func viewAfterDrag(
+  mode: view CameraRigMode
+  reverse: view Bool
+  dx: view Float
+  dy: view Float
+) ret Vec3 {
+  var camera: Camera3d = defaultCamera3d()
+  camera.target = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  var rig: CameraRig = createCameraRig(camera: camera)
+  rig.mode = mode
+  rig.reverseDrag = reverse
+  rig.yaw = 0.0
+  rig.orbitPitch = 0.0
+  rig.freePitch = 0.0
+  let turn: DragTurn = dragTurn(rig: rig, dx: dx, dy: dy)
+  rig.yaw = rig.yaw + turn.yaw
+  rig.orbitPitch = rig.orbitPitch + turn.orbitPitch
+  rig.freePitch = rig.freePitch + turn.freePitch
+  snapCameraRigView(rig: rig)
+  applyCameraRig(rig: rig, camera: camera)
+  ret Vec3.vnorm(a: Vec3.vsub(a: camera.target, b: camera.position))
+}
+
+func turnName(direction: view Vec3) ret String {
+  var horizontal: String = "straight"
+  if direction.x > 0.01 {
+    horizontal = "right"
+  } else if direction.x < -0.01 {
+    horizontal = "left"
+  }
+  ret horizontal
+}
+
+func tiltName(direction: view Vec3) ret String {
+  var vertical: String = "level"
+  if direction.z > 0.01 {
+    vertical = "up"
+  } else if direction.z < -0.01 {
+    vertical = "down"
+  }
+  ret vertical
+}
+
+func report(name: view String, mode: view CameraRigMode, reverse: view Bool) {
+  let right: Vec3 = viewAfterDrag(
+    mode: mode
+    reverse: reverse
+    dx: 40.0
+    dy: 0.0
+  )
+  let up: Vec3 = viewAfterDrag(
+    mode: mode
+    reverse: reverse
+    dx: 0.0
+    dy: -40.0
+  )
+  log(
+    "{name}: drag right looks {turnName(direction: right)}, drag up looks {tiltName(direction: up)}"
+  )
+}
+
+func main() {
+  report(name: "orbit", mode: CameraRigMode.orbit, reverse: false)
+  report(name: "orbit reversed", mode: CameraRigMode.orbit, reverse: true)
+  report(name: "free", mode: CameraRigMode.free, reverse: false)
+  report(name: "free with reverseDrag on", mode: CameraRigMode.free, reverse: true)
+}
