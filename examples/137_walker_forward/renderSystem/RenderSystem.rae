@@ -150,15 +150,23 @@ func renderShadowPass(
   aspect: copy Float
   palette: view List(Float)
 ) {
-  let cascades: ShadowCascades = fitShadowCascades(
+  # Four cascades to 120 m, the first reaching 4 m past the camera target (the
+  # walker), so the walker and the ground around it are in one cascade
+  # (examples/142_shadow_cascades shows the fit)
+  let cascades: ShadowCascades = fitShadowCascadesAround(
     camPos: cameraSystem.camera.position
     camTarget: cameraSystem.camera.target
     fovYDeg: cameraSystem.camera.fovYDeg
     aspect: aspect
     near: cameraSystem.camera.nearZ
-    far: 24.0
+    far: 120.0
+    focus: followFocus(
+      camPos: cameraSystem.camera.position
+      camTarget: cameraSystem.camera.target
+      margin: 4.0
+    )
     sunDir: cameraSystem.light.sunDir
-    count: 3
+    count: 4
     resolution: drsShadowRes(drs: renderSystem.drs)
     lambda: 0.75
     backExtent: 12.0
