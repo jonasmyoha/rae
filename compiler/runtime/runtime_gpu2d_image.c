@@ -103,6 +103,39 @@ static int rae_g2d_decode_rgba(const char* path, unsigned char** out_rgba,
     return 0;
 }
 
+/* The app's icon from a PNG or JPEG at `path`: on macOS the Dock's and the
+ * app switcher's, for a bare executable too (SDL sets the application icon
+ * image); elsewhere what SDL does with a window icon, or nothing (iOS takes
+ * its icon from the bundle). Returns 1 when it was set, 0 (logged) when
+ * there is no window or the file does not decode. */
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+int64_t rae_ext_Gpu2d_setWindowIcon(rae_String path) {
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    (void)path;
+    return 0;  /* the bundle's icon, and the file is not in the bundle */
+#else
+    if (!g_sdl_win || !path.data) return 0;
+    unsigned char* rgba = NULL; unsigned uw = 0, uh = 0;
+    const char* cpath = (const char*)path.data;
+    const char* why = "decode failed";
+    if (!rae_g2d_decode_rgba(cpath, &rgba, &uw, &uh, &why)) {
+        fprintf(stderr, "[gpu2d] window icon decode failed (%s): %s\n", cpath, why);
+        return 0;
+    }
+    SDL_Surface* surface = SDL_CreateSurfaceFrom((int)uw, (int)uh, SDL_PIXELFORMAT_RGBA32, rgba, (int)uw * 4);
+    int set = 0;
+    if (surface) {
+        set = SDL_SetWindowIcon(g_sdl_win, surface) ? 1 : 0;
+        SDL_DestroySurface(surface);
+    }
+    if (!set) fprintf(stderr, "[gpu2d] window icon not set: %s\n", SDL_GetError());
+    free(rgba);
+    return set;
+#endif
+}
+
 /* Device-free decode probe (#228): run the exact decode + error
  * policy of gpu2d.loadImage without needing a WebGPU device, so the
  * corrupt-file behaviour is testable in the headless suite. Returns
