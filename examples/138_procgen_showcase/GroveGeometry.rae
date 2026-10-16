@@ -1,4 +1,5 @@
-# Seeded geometry for the grove: leaf silhouettes, branching wood and broad stone faces.
+# Seeded geometry for the grove: leaf silhouettes and branching wood. The rocks
+# are the lib's faceted rocks (procgen/Rock), placed by GroveScene.
 import Math
 open Vec3
 open Mesh3d
@@ -166,6 +167,8 @@ func crown(
   }
 }
 
+# The palm-style wood: a bending stem of short cylinders with a ring of
+# branches near the top. One tree in the grove keeps it as its own species.
 func treeWood(seed: view Int, height: view Float, width: view Float) ret MeshData {
   var mesh: MeshData = emptyMesh()
   var previous: Vec3 = Vec3.create(x: 0, y: 0, z: 0)
@@ -261,54 +264,299 @@ func treeLeaves(
   ret mesh
 }
 
-# Three offset octagonal rings form broad stratified faces, with a flat foot.
-func stonePoint(ring: view Int, index: view Int, seed: view Int) ret Vec3 {
-  let angle: Float = index.toFloat() * 6.2831853 / 8
-  let radius: Float = 0.82 + hash2(x: index, y: 9, seed: seed) * 0.26
-  var scale: Float = 1
-  var height: Float = 0.08
-  if ring is 1 {
-    height = 0.62
+# The direction a path of points runs at point `index`: through its two
+# neighbours, one-sided at the ends
+func tangentAt(points: view List(Vec3), index: view Int) ret Vec3 {
+  let last: Int = points.length - 1
+  var before: Int = index - 1
+  var after: Int = index + 1
+  if before < 0 {
+    before = 0
   }
-  if ring is 2 {
-    height = 1.0
-    scale = 0.72
+  if after > last {
+    after = last
   }
-  ret Vec3.create(
-    x: Math.cos(x: angle) * radius * scale + height * 0.16
-    y: Math.sin(x: angle) * radius * scale
-    z: height + hash2(x: index, y: ring, seed: seed) * 0.11
+  let from: Vec3 = points.copyAtFallback(index: before, fallback: Vec3.create(x: 0, y: 0, z: 0))
+  let to: Vec3 = points.copyAtFallback(index: after, fallback: Vec3.create(x: 0, y: 0, z: 1))
+  ret vnorm(a: vsub(a: to, b: from))
+}
+
+# A continuous tube along `points` with one radius per point. Each point has one
+# ring of `sides` vertices that the segments on both sides share, with smooth
+# radial normals, so a limb tapers and bends without a step at any joint. The
+# ring's orientation is carried along the path (each ring's side is the previous
+# one with its along-the-path part removed), so a bending limb does not twist.
+func tube(
+  mesh: mod MeshData
+  points: view List(Vec3)
+  radii: view List(Float)
+  sides: view Int
+) {
+  if points.length < 2 {
+    ret
+  }
+  let first: Int = mesh.vertCount
+  var side: Vec3 = basis(direction: tangentAt(points: points, index: 0))
+  loop var i: Int = 0, i < points.length, ++i {
+    let tangent: Vec3 = tangentAt(points: points, index: i)
+    side = vnorm(a: vsub(a: side, b: vscale(a: tangent, s: vdot(a: side, b: tangent))))
+    let across: Vec3 = vcross(a: tangent, b: side)
+    let centre: Vec3 = points.copyAtFallback(index: i, fallback: Vec3.create(x: 0, y: 0, z: 0))
+    let radius: Float = radii.copyAtFallback(index: i, fallback: 0.01)
+    loop var k: Int = 0, k < sides, ++k {
+      let angle: Float = k.toFloat() * 6.2831853 / sides.toFloat()
+      let radial: Vec3 = vadd(
+        a: vscale(a: side, s: Math.cos(x: angle))
+        b: vscale(a: across, s: Math.sin(x: angle))
+      )
+      vertex(mesh: mesh, point: vadd(a: centre, b: vscale(a: radial, s: radius)), normal: radial)
+    }
+  }
+  loop var i: Int = 0, i < points.length - 1, ++i {
+    loop var k: Int = 0, k < sides, ++k {
+      let lower: Int = first + i * sides + k
+      let lowerNext: Int = first + i * sides + (k + 1) % sides
+      mesh.indices.add(value: lower)
+      mesh.indices.add(value: lowerNext)
+      mesh.indices.add(value: lower + sides)
+      mesh.indices.add(value: lower + sides)
+      mesh.indices.add(value: lowerNext)
+      mesh.indices.add(value: lowerNext + sides)
+    }
+  }
+}
+
+# A tree with ordinary wood: a straight, slightly leaning trunk with a flared
+# foot, a leader that carries on up, and three or four main limbs that each
+# fork in two. Every part is one continuous tube, and each limb starts inside
+# its parent at the parent's thickness. `tips` are the limb ends, where the
+# leaf crowns go.
+type GroveTree {
+  wood: MeshData
+  tips: List(Vec3)
+}
+
+# One limb: a curve that leaves `start` along `direction` and bends upward by
+# `rise` of its length, tapering from `startRadius` to `endRadius`
+func limbPoint(
+  start: view Vec3
+  direction: view Vec3
+  length: view Float
+  rise: view Float
+  t: view Float
+) ret Vec3 {
+  ret vadd(
+    a: vadd(a: start, b: vscale(a: direction, s: length * t))
+    b: Vec3.create(x: 0, y: 0, z: rise * length * t * t)
   )
 }
 
-func stone(seed: view Int) ret MeshData {
+func limb(
+  mesh: mod MeshData
+  start: view Vec3
+  direction: view Vec3
+  length: view Float
+  rise: view Float
+  startRadius: view Float
+  endRadius: view Float
+  sides: view Int
+) {
+  var points: List(Vec3) = List.create(Vec3, cap: 6)
+  var radii: List(Float) = List.create(Float, cap: 6)
+  loop var i: Int = 0, i < 6, ++i {
+    let t: Float = i.toFloat() / 5
+    points.add(value: limbPoint(
+      start: start
+      direction: direction
+      length: length
+      rise: rise
+      t: t
+    ))
+    radii.add(value: startRadius + (endRadius - startRadius) * t)
+  }
+  tube(
+    mesh: mesh
+    points: points
+    radii: radii
+    sides: sides
+  )
+}
+
+# A horizontal direction at `angle`, raised by `elevation` (radians)
+func raisedDirection(angle: view Float, elevation: view Float) ret Vec3 {
+  ret Vec3.create(
+    x: Math.cos(x: angle) * Math.cos(x: elevation)
+    y: Math.sin(x: angle) * Math.cos(x: elevation)
+    z: Math.sin(x: elevation)
+  )
+}
+
+func groveTree(seed: view Int, height: view Float, width: view Float) ret GroveTree {
   var mesh: MeshData = emptyMesh()
-  loop var ring: Int = 0, ring < 2, ++ring {
-    loop var i: Int = 0, i < 8, ++i {
-      let first: Vec3 = stonePoint(ring: ring, index: i, seed: seed)
-      let second: Vec3 = stonePoint(ring: ring, index: (i + 1) % 8, seed: seed)
-      let third: Vec3 = stonePoint(ring: ring + 1, index: i, seed: seed)
-      let fourth: Vec3 = stonePoint(ring: ring + 1, index: (i + 1) % 8, seed: seed)
-      face(
-        mesh: mesh
-        first: first
-        second: second
-        third: third
+  var tips: List(Vec3) = List.create(Vec3, cap: 12)
+  let trunkRadius: Float = 0.1 + width * 0.06
+  let trunkHeight: Float = height * 0.52
+  let leanAngle: Float = hash2(x: 1, y: 1, seed: seed) * 6.2831853
+  let lean: Float = 0.12 + hash2(x: 1, y: 2, seed: seed) * 0.18
+  # The trunk: the foot flares out and sinks a little into the ground
+  var trunk: List(Vec3) = List.create(Vec3, cap: 7)
+  var trunkRadii: List(Float) = List.create(Float, cap: 7)
+  let heights: List(Float) = List(Float) {
+    0.0
+    0.06
+    0.2
+    0.4
+    0.6
+    0.8
+    1.0
+  }
+  let flare: List(Float) = List(Float) {
+    1.75
+    1.3
+    1.08
+    1.0
+    0.92
+    0.84
+    0.76
+  }
+  loop var i: Int = 0, i < heights.length, ++i {
+    let t: Float = heights.copyAtFallback(index: i, fallback: 0)
+    trunk.add(
+      value: Vec3.create(
+        x: Math.cos(x: leanAngle) * lean * t * t
+        y: Math.sin(x: leanAngle) * lean * t * t
+        z: trunkHeight * t - 0.15 * (1 - t)
       )
-      face(
-        mesh: mesh
-        first: third
-        second: second
-        third: fourth
+    )
+    trunkRadii.add(value: trunkRadius * flare.copyAtFallback(index: i, fallback: 1))
+  }
+  tube(
+    mesh: mesh
+    points: trunk
+    radii: trunkRadii
+    sides: 9
+  )
+  let top: Vec3 = trunk.copyAtFallback(index: 6, fallback: Vec3.create(x: 0, y: 0, z: trunkHeight))
+  # The leader carries the trunk on up to the crown's top
+  let leaderLength: Float = height * 0.42
+  let leaderDirection: Vec3 = vnorm(
+    a: Vec3.create(x: Math.cos(x: leanAngle) * 0.12, y: Math.sin(x: leanAngle) * 0.12, z: 1)
+  )
+  let leaderStart: Vec3 = vsub(a: top, b: Vec3.create(x: 0, y: 0, z: trunkRadius))
+  limb(
+    mesh: mesh
+    start: leaderStart
+    direction: leaderDirection
+    length: leaderLength
+    rise: 0
+    startRadius: trunkRadius * 0.74
+    endRadius: trunkRadius * 0.18
+    sides: 7
+  )
+  tips.add(value: vadd(a: leaderStart, b: vscale(a: leaderDirection, s: leaderLength)))
+  # The main limbs leave the upper trunk at staggered heights, spread evenly
+  # around it, and each forks in two past its middle
+  let limbCount: Int = 3 + (seed % 2)
+  let firstAngle: Float = hash2(x: 2, y: 1, seed: seed) * 6.2831853
+  loop var k: Int = 0, k < limbCount, ++k {
+    let angle: Float = firstAngle + k.toFloat() * 6.2831853 / limbCount.toFloat() + (hash2(
+      x: k
+      y: 3
+      seed: seed
+    ) - 0.5) * 0.6
+    let elevation: Float = 0.5 + hash2(x: k, y: 4, seed: seed) * 0.35
+    let direction: Vec3 = raisedDirection(angle: angle, elevation: elevation)
+    let length: Float = height * (0.26 + hash2(x: k, y: 5, seed: seed) * 0.1) * (0.7 + width * 0.18)
+    let along: Float = 0.62 + k.toFloat() / limbCount.toFloat() * 0.34
+    let start: Vec3 = vsub(
+      a: limbPoint(
+        start: leaderStart
+        direction: leaderDirection
+        length: trunkHeight
+        rise: 0
+        t: along - 0.62
       )
+      b: vscale(a: direction, s: trunkRadius * 0.5)
+    )
+    let startRadius: Float = trunkRadius * (0.62 - k.toFloat() * 0.04)
+    let rise: Float = 0.22
+    limb(
+      mesh: mesh
+      start: start
+      direction: direction
+      length: length
+      rise: rise
+      startRadius: startRadius
+      endRadius: startRadius * 0.3
+      sides: 7
+    )
+    tips.add(value: limbPoint(
+      start: start
+      direction: direction
+      length: length
+      rise: rise
+      t: 1
+    ))
+    # Two forks from 60% along the limb, turned either way and steeper
+    let forkStart: Vec3 = limbPoint(
+      start: start
+      direction: direction
+      length: length
+      rise: rise
+      t: 0.6
+    )
+    let forkRadius: Float = (startRadius + (startRadius * 0.3 - startRadius) * 0.6) * 0.8
+    loop var fork: Int = 0, fork < 2, ++fork {
+      let turn: Float = (fork.toFloat() * 2 - 1) * (0.55 + hash2(x: k, y: 6 + fork, seed: seed) * 0.3)
+      let forkDirection: Vec3 = raisedDirection(angle: angle + turn, elevation: elevation + 0.25)
+      let forkLength: Float = length * (0.45 + hash2(x: k, y: 8 + fork, seed: seed) * 0.15)
+      limb(
+        mesh: mesh
+        start: forkStart
+        direction: forkDirection
+        length: forkLength
+        rise: 0.18
+        startRadius: forkRadius
+        endRadius: forkRadius * 0.3
+        sides: 6
+      )
+      tips.add(value: limbPoint(
+        start: forkStart
+        direction: forkDirection
+        length: forkLength
+        rise: 0.18
+        t: 1
+      ))
     }
   }
-  loop var i: Int = 0, i < 8, ++i {
-    face(
+  ret GroveTree { wood: own mesh, tips: own tips }
+}
+
+# The leaf crowns of a groveTree: one round crown on every limb tip, one
+# bigger on the leader's
+func groveTreeLeaves(
+  tips: view List(Vec3)
+  seed: view Int
+  height: view Float
+  width: view Float
+  tone: view Int
+) ret MeshData {
+  var mesh: MeshData = emptyMesh()
+  loop var i: Int = 0, i < tips.length, ++i {
+    var scale: Float = 1.0
+    if i is 0 {
+      scale = 1.25
+    }
+    crown(
       mesh: mesh
-      first: Vec3.create(x: 0.16, y: 0, z: 1.04)
-      second: stonePoint(ring: 2, index: i, seed: seed)
-      third: stonePoint(ring: 2, index: (i + 1) % 8, seed: seed)
+      center: tips.copyAtFallback(index: i, fallback: Vec3.create(x: 0, y: 0, z: height))
+      radius: Vec3.create(
+        x: width * 0.46 * scale
+        y: width * 0.42 * scale
+        z: height * 0.17 * scale
+      )
+      seed: seed + i * 71
+      tone: tone
     )
   }
   ret mesh

@@ -1,5 +1,6 @@
 # All placement and material choices belong to this example. Shared generators
-# and renderer defaults are untouched. Every visible object is a World3d entity.
+# and renderer defaults are untouched. Every visible object is a World3d entity;
+# the grass is the lib GPU grass (GroveGrass), kept out of the rocks and trunks.
 import Math
 open Vec3
 open Noise
@@ -7,7 +8,16 @@ open Mesh3d
 open Scene3d
 open RendererDeferred
 open GroveGeometry
+open GroveGrass
+open procgen/Rock
 open ecs/Entity
+
+# The island's grass-ground colour; the GPU grass's blades grow from it
+const groveGroundRed: Float = 0.13
+
+const groveGroundGreen: Float = 0.23
+
+const groveGroundBlue: Float = 0.055
 
 func paint(red: view Float, green: view Float, blue: view Float) ret Material3d {
   ret Material3d {
@@ -58,6 +68,9 @@ func foliagePaint(species: view Int, tone: view Int) ret Material3d {
   ret paint(red: 0.33 * variation, green: 0.035 * variation, blue: 0.022)
 }
 
+# One tree: the wood, then its leaves in three tones. `palm` keeps the
+# palm-style stem (treeWood); every other tree has ordinary branching wood
+# (groveTree).
 func plantTree(
   world: mod World3d
   renderer: mod DeferredRenderer
@@ -66,19 +79,53 @@ func plantTree(
   width: view Float
   seed: view Int
   species: view Int
+  palm: view Bool
 ) {
-  let wood: MeshData = treeWood(seed: seed, height: height, width: width)
+  let bark: Material3d = paint(red: 0.16, green: 0.073, blue: 0.039)
+  let unit: Vec3 = Vec3.create(x: 1, y: 1, z: 1)
+  if palm {
+    let wood: MeshData = treeWood(seed: seed, height: height, width: width)
+    place(
+      world: world
+      renderer: renderer
+      mesh: wood
+      material: bark
+      position: position
+      scale: unit
+      rotation: 0
+    )
+    loop var tone: Int = 0, tone < 3, ++tone {
+      let leaves: MeshData = treeLeaves(
+        seed: seed
+        height: height
+        width: width
+        tone: tone
+      )
+      place(
+        world: world
+        renderer: renderer
+        mesh: leaves
+        material: foliagePaint(species: species, tone: tone)
+        position: position
+        scale: unit
+        rotation: 0
+      )
+    }
+    ret
+  }
+  let tree: GroveTree = groveTree(seed: seed, height: height, width: width)
   place(
     world: world
     renderer: renderer
-    mesh: wood
-    material: paint(red: 0.16, green: 0.073, blue: 0.039)
+    mesh: tree.wood
+    material: bark
     position: position
-    scale: Vec3.create(x: 1, y: 1, z: 1)
+    scale: unit
     rotation: 0
   )
   loop var tone: Int = 0, tone < 3, ++tone {
-    let leaves: MeshData = treeLeaves(
+    let leaves: MeshData = groveTreeLeaves(
+      tips: tree.tips
       seed: seed
       height: height
       width: width
@@ -90,7 +137,7 @@ func plantTree(
       mesh: leaves
       material: foliagePaint(species: species, tone: tone)
       position: position
-      scale: Vec3.create(x: 1, y: 1, z: 1)
+      scale: unit
       rotation: 0
     )
   }
@@ -204,94 +251,240 @@ func gardenPath() ret MeshData {
   ret mesh
 }
 
-func stoneSize(index: view Int) ret Float {
-  if index < 5 {
-    ret 1.25 + hash2(x: index, y: 2, seed: 891) * 0.55
-  }
-  ret 0.35 + hash2(x: index, y: 1, seed: 891) * 0.55
+# A tree's place and shape
+type GroveTreeSpot {
+  x: Float
+  y: Float
+  height: Float
+  width: Float
+  seed: Int
+  species: Int
+  palm: Bool
 }
 
-func stonePosition(index: view Int) ret Vec3 {
-  let angle: Float = index.toFloat() * 2.39996
-  var x: Float = -4.6 + Math.cos(x: angle) * 3.0
-  var y: Float = -2.8 + Math.sin(x: angle) * 1.8
-  if index < 5 {
-    x = -5.5 + index.toFloat() * 0.65
-    y = -1.7 + Math.sin(x: angle) * 0.55
-  }
-  ret Vec3.create(x: x, y: y, z: groundHeight(x: x, y: y) - 0.08)
-}
-
-# Generation-time exclusion uses the same placements as the stone entities.
-# No grass can poke through a slab when the camera moves closer.
-func insideStone(x: view Float, y: view Float) ret Bool {
-  loop var i: Int = 0, i < 22, ++i {
-    let position: Vec3 = stonePosition(index: i)
-    let size: Float = stoneSize(index: i)
-    let angle: Float = i.toFloat() * 2.39996
-    let offsetX: Float = x - position.x
-    let offsetY: Float = y - position.y
-    let localX: Float = (offsetX * Math.cos(x: angle) + offsetY * Math.sin(x: angle)) / (size * 1.65)
-    let localY: Float = (offsetY * Math.cos(x: angle) - offsetX * Math.sin(x: angle)) / (size * 1.18)
-    if localX * localX + localY * localY < 1 {
-      ret true
+func groveTreeSpots() ret List(GroveTreeSpot) {
+  ret List(GroveTreeSpot) {
+    {
+      x: -4.8
+      y: 2
+      height: 4.7
+      width: 2.05
+      seed: 501
+      species: 0
+      palm: false
+    }
+    {
+      x: 4.2
+      y: 4
+      height: 5.8
+      width: 1.8
+      seed: 605
+      species: 1
+      palm: false
+    }
+    {
+      x: -0.9
+      y: 8
+      height: 6.4
+      width: 1.7
+      seed: 710
+      species: 0
+      palm: false
+    }
+    {
+      x: -8.1
+      y: 7.5
+      height: 4.2
+      width: 1.8
+      seed: 301
+      species: 3
+      palm: false
+    }
+    {
+      x: 7.5
+      y: 9
+      height: 5.2
+      width: 2.1
+      seed: 903
+      species: 2
+      palm: true
+    }
+    {
+      x: 5.8
+      y: -1.8
+      height: 2.6
+      width: 1.15
+      seed: 217
+      species: 0
+      palm: false
     }
   }
-  ret false
 }
 
-# Clumped, broad grass blades. Sparse bare ground is intentional; the path
-# stays clear. One mesh per colour keeps the draw count independent of blades.
-func meadow(tone: view Int) ret MeshData {
-  var mesh: MeshData = emptyMesh()
-  loop var i: Int = 0, i < 5500, ++i {
-    if i % 3 is not tone {
-      continue
-    }
-    let x: Float = hash2(x: i, y: 12, seed: 761) * 28 - 14
-    let y: Float = hash2(x: i, y: 13, seed: 761) * 23 - 10
-    if x * x / 169 + (y - 2) * (y - 2) / 121 > 0.93 {
-      continue
-    }
-    if Math.abs(value: x - pathCenter(distance: y)) < 1.0 {
-      continue
-    }
-    if insideStone(x: x, y: y) {
-      continue
-    }
-    let height: Float = 0.12 + hash2(x: i, y: 14, seed: 761) * 0.28
-    loop var blade: Int = 0, blade < 4, ++blade {
-      let angle: Float = blade.toFloat() * 2.4 + i.toFloat()
-      let side: Vec3 = Vec3.create(
-        x: Math.cos(x: angle) * 0.045
-        y: Math.sin(x: angle) * 0.045
-        z: 0
+# A rock's place: its centre on the ground, its size (about its radius) and
+# the seed of its shape
+type GroveRock {
+  x: Float
+  y: Float
+  size: Float
+  seed: Int
+}
+
+# Groups of rocks around the island: one big rock with smaller ones around
+# it. `cx`, `cy` the group's centre, `size` the big rock's.
+func addRockGroup(
+  rocks: mod List(GroveRock)
+  cx: view Float
+  cy: view Float
+  size: view Float
+  smallCount: view Int
+  seed: view Int
+) {
+  rocks.add(value: { x: cx, y: cy, size: size, seed: seed })
+  loop var i: Int = 0, i < smallCount, ++i {
+    let angle: Float = i.toFloat() * 2.39996 + hash2(x: i, y: 1, seed: seed) * 0.8
+    let distance: Float = size * (1.25 + hash2(x: i, y: 2, seed: seed) * 0.7)
+    rocks.add(
+      value: {
+        x: cx + Math.cos(x: angle) * distance
+        y: cy + Math.sin(x: angle) * distance
+        size: size * (0.28 + hash2(x: i, y: 3, seed: seed) * 0.3)
+        seed: seed + 13 + i * 7
+      }
+    )
+  }
+}
+
+func groveRocks() ret List(GroveRock) {
+  var rocks: List(GroveRock) = List.create(GroveRock, cap: 64)
+  # The outcrop by the path, the biggest group
+  addRockGroup(
+    rocks: rocks
+    cx: -5.2
+    cy: -2.6
+    size: 1.6
+    smallCount: 5
+    seed: 230
+  )
+  addRockGroup(
+    rocks: rocks
+    cx: -3.5
+    cy: -1.4
+    size: 0.85
+    smallCount: 2
+    seed: 247
+  )
+  # Smaller groups spread over the island, clear of the path and the trees
+  addRockGroup(
+    rocks: rocks
+    cx: 8.0
+    cy: 2.4
+    size: 0.85
+    smallCount: 3
+    seed: 311
+  )
+  addRockGroup(
+    rocks: rocks
+    cx: -10.0
+    cy: 2.4
+    size: 0.75
+    smallCount: 3
+    seed: 359
+  )
+  addRockGroup(
+    rocks: rocks
+    cx: 2.8
+    cy: 11.4
+    size: 0.7
+    smallCount: 3
+    seed: 401
+  )
+  addRockGroup(
+    rocks: rocks
+    cx: -4.4
+    cy: 10.6
+    size: 0.55
+    smallCount: 2
+    seed: 443
+  )
+  addRockGroup(
+    rocks: rocks
+    cx: 10.6
+    cy: 6.0
+    size: 0.65
+    smallCount: 2
+    seed: 487
+  )
+  addRockGroup(
+    rocks: rocks
+    cx: 3.6
+    cy: -6.8
+    size: 0.8
+    smallCount: 3
+    seed: 521
+  )
+  addRockGroup(
+    rocks: rocks
+    cx: -4.2
+    cy: -7.6
+    size: 0.6
+    smallCount: 2
+    seed: 563
+  )
+  addRockGroup(
+    rocks: rocks
+    cx: 9.0
+    cy: -3.6
+    size: 0.5
+    smallCount: 2
+    seed: 601
+  )
+  # Pebbles: single small rocks wherever the ground is clear
+  var placed: Int = 0
+  loop var i: Int = 0, i < 400 and placed < 18, ++i {
+    let x: Float = hash2(x: i, y: 21, seed: 977) * 24 - 12
+    let y: Float = hash2(x: i, y: 22, seed: 977) * 20 - 8
+    if groundIsClear(x: x, y: y, rocks: rocks) {
+      rocks.add(
+        value: { x: x, y: y, size: 0.18 + hash2(x: i, y: 23, seed: 977) * 0.2, seed: 1000 + i }
       )
-      let base: Vec3 = Vec3.create(x: x, y: y, z: groundHeight(x: x, y: y))
-      let tip: Vec3 = Vec3.create(
-        x: x + Math.sin(x: angle) * height * 0.5
-        y: y + Math.cos(x: angle) * height * 0.5
-        z: base.z + height
-      )
-      face(
-        mesh: mesh
-        first: vsub(a: base, b: side)
-        second: vadd(a: base, b: side)
-        third: tip
-      )
-      face(
-        mesh: mesh
-        first: vadd(a: base, b: side)
-        second: vsub(a: base, b: side)
-        third: tip
-      )
+      placed = placed + 1
     }
   }
-  ret mesh
+  ret rocks
 }
 
-func buildGrove(renderer: mod DeferredRenderer) ret World3d {
+# Inside the island's rim, off the path, away from the trunks and the rocks
+func groundIsClear(x: view Float, y: view Float, rocks: view List(GroveRock)) ret Bool {
+  if x * x / 169 + (y - 2) * (y - 2) / 121 > 0.8 {
+    ret false
+  }
+  if Math.abs(value: x - pathCenter(distance: y)) < 1.6 {
+    ret false
+  }
+  loop let spot: view GroveTreeSpot in groveTreeSpots() {
+    if (x - spot.x) * (x - spot.x) + (y - spot.y) * (y - spot.y) < 1.4 * 1.4 {
+      ret false
+    }
+  }
+  loop let rock: view GroveRock in rocks {
+    let reach: Float = rock.size * 1.6 + 0.4
+    if (x - rock.x) * (x - rock.x) + (y - rock.y) * (y - rock.y) < reach * reach {
+      ret false
+    }
+  }
+  ret true
+}
+
+# The grove: its World3d, and the obstacles the grass keeps out of
+type Grove {
+  world: World3d
+  obstacles: List(GroveObstacle)
+}
+
+func buildGrove(renderer: mod DeferredRenderer) ret Grove {
   var world: World3d = create()
+  var obstacles: List(GroveObstacle) = List.create(GroveObstacle, cap: 80)
   let origin: Vec3 = Vec3.create(x: 0, y: 0, z: 0)
   let unit: Vec3 = Vec3.create(x: 1, y: 1, z: 1)
   let backdrop: MeshData = makePlane(size: 1000, segments: 1)
@@ -319,7 +512,7 @@ func buildGrove(renderer: mod DeferredRenderer) ret World3d {
     world: world
     renderer: renderer
     mesh: ground
-    material: paint(red: 0.13, green: 0.23, blue: 0.055)
+    material: paint(red: groveGroundRed, green: groveGroundGreen, blue: groveGroundBlue)
     position: origin
     scale: unit
     rotation: 0
@@ -334,93 +527,50 @@ func buildGrove(renderer: mod DeferredRenderer) ret World3d {
     scale: unit
     rotation: 0
   )
-  loop var tone: Int = 0, tone < 3, ++tone {
-    let grass: MeshData = meadow(tone: tone)
-    place(
+  loop let spot: view GroveTreeSpot in groveTreeSpots() {
+    plantTree(
       world: world
       renderer: renderer
-      mesh: grass
-      material: paint(
-        red: 0.15 + tone.toFloat() * 0.035
-        green: 0.25 + tone.toFloat() * 0.035
-        blue: 0.07
-      )
-      position: origin
-      scale: unit
-      rotation: 0
+      position: Vec3.create(x: spot.x, y: spot.y, z: 0)
+      height: spot.height
+      width: spot.width
+      seed: spot.seed
+      species: spot.species
+      palm: spot.palm
     )
+    obstacles.add(value: { x: spot.x, y: spot.y, radius: 0.45 })
   }
-  plantTree(
-    world: world
-    renderer: renderer
-    position: Vec3.create(x: -4.8, y: 2, z: 0)
-    height: 4.7
-    width: 2.05
-    seed: 501
-    species: 0
-  )
-  plantTree(
-    world: world
-    renderer: renderer
-    position: Vec3.create(x: 4.2, y: 4, z: 0)
-    height: 5.8
-    width: 1.8
-    seed: 605
-    species: 1
-  )
-  plantTree(
-    world: world
-    renderer: renderer
-    position: Vec3.create(x: -0.9, y: 8, z: 0)
-    height: 6.4
-    width: 1.7
-    seed: 710
-    species: 0
-  )
-  plantTree(
-    world: world
-    renderer: renderer
-    position: Vec3.create(x: -8.1, y: 7.5, z: 0)
-    height: 4.2
-    width: 1.8
-    seed: 301
-    species: 3
-  )
-  plantTree(
-    world: world
-    renderer: renderer
-    position: Vec3.create(x: 7.5, y: 9, z: 0)
-    height: 5.2
-    width: 2.1
-    seed: 903
-    species: 2
-  )
-  plantTree(
-    world: world
-    renderer: renderer
-    position: Vec3.create(x: 5.8, y: -1.8, z: 0)
-    height: 2.6
-    width: 1.15
-    seed: 217
-    species: 0
-  )
-  # A low outcrop, with large flat slabs and a skirt of smaller fallen stones.
-  loop var i: Int = 0, i < 22, ++i {
-    let seed: Int = 230 + i * 17
-    let rock: MeshData = stone(seed: seed)
-    let angle: Float = i.toFloat() * 2.39996
-    let size: Float = stoneSize(index: i)
-    let position: Vec3 = stonePosition(index: i)
-    let tint: Float = hash2(x: i, y: 4, seed: 891) * 0.07
+  # The lib's faceted rocks, flattened a little and sunk into the ground so
+  # they sit in it rather than on it
+  loop let rock: view GroveRock in groveRocks() {
+    let shape: MeshData = generateRock(
+      subdivision: 5
+      sliceCount: 4 + rock.seed % 3
+      size: 1.0
+      seed: rock.seed
+      irregularity: 0.12
+    )
+    let tint: Float = hash2(x: rock.seed, y: 4, seed: 891) * 0.07
+    let stretch: Float = 1.0 + hash2(x: rock.seed, y: 5, seed: 891) * 0.35
+    # Big rocks stand up; pebbles lie flatter
+    var height: Float = 0.8
+    if rock.size > 0.7 {
+      height = 1.0
+    }
     place(
       world: world
       renderer: renderer
-      mesh: rock
-      material: paint(red: 0.14 + tint, green: 0.17 + tint, blue: 0.145 + tint)
-      position: position
-      scale: Vec3.create(x: size * 1.4, y: size, z: size * 0.65)
-      rotation: angle
+      mesh: shape
+      material: paint(red: 0.15 + tint, green: 0.16 + tint, blue: 0.155 + tint)
+      position: Vec3.create(
+        x: rock.x
+        y: rock.y
+        z: groundHeight(x: rock.x, y: rock.y) - rock.size * 0.2
+      )
+      scale: Vec3.create(x: rock.size * stretch, y: rock.size, z: rock.size * height)
+      rotation: hash2(x: rock.seed, y: 6, seed: 891) * 6.2831853
     )
+    obstacles.add(value: { x: rock.x, y: rock.y, radius: rock.size * stretch * 0.95 })
   }
   # Low scarlet shrubs balance the trees and tie the stone group into the grove.
   loop var i: Int = 0, i < 7, ++i {
@@ -446,5 +596,5 @@ func buildGrove(renderer: mod DeferredRenderer) ret World3d {
       rotation: 0
     )
   }
-  ret world
+  ret Grove { world: own world, obstacles: own obstacles }
 }
