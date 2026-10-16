@@ -197,6 +197,22 @@ func overlapSphereEntities(
   ret List.create(EntityId, cap: 0)
 }
 
+# The angular velocity of the entity's body (rad/s about each world axis;
+# zero when it has no body): how fast a vehicle is turning.
+func entityAngularVelocity(
+  physics: view Physics
+  rigidBodies: view ComponentTable(RigidBody)
+  entityId: view EntityId
+) ret Vec3 {
+  let bodyId: BodyId = entityBodyId(rigidBodies: rigidBodies, entityId: entityId)
+  if bodyId.index1 is 0 {
+    ret Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+  }
+  unsafe {
+    ret fromB3Vector(vector: b3Body_GetAngularVelocity(bodyId: toB3BodyId(bodyId: bodyId)))
+  }
+}
+
 # The linear velocity of the entity's body's centre of mass (zero when it has
 # no body): a vehicle's speed readout.
 func entityLinearVelocity(
