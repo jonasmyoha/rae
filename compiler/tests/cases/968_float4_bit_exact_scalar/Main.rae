@@ -280,7 +280,6 @@ func main() {
         let y: Float = lane(value: b, index: k)
         let z: Float = lane(value: c, index: k)
         let pair: List(Float) = { x, y }
-        let triple: List(Float) = { x, y, z }
         checkArithmetic(
           tally: addTally
           actual: lane(value: sum, index: k)
@@ -305,11 +304,15 @@ func main() {
           expected: x / y
           inputs: pair
         )
+        # mulAdd's add sees the product and c: a product that is NaN while
+        # only c is (infinity * 0, say) is two NaNs at the add, where IEEE
+        # leaves the result's NaN open, so the product counts as an input
+        let mulAddInputs: List(Float) = { x, y, z, x * y }
         checkArithmetic(
           tally: mulAddTally
           actual: lane(value: fused, index: k)
           expected: scalarMulAdd(a: x, b: y, c: z)
-          inputs: triple
+          inputs: mulAddInputs
         )
         checkFloat(tally: sqrtTally, actual: lane(value: root, index: k), expected: Math.sqrt(x: x))
         checkFloat(tally: negateTally, actual: lane(value: negated, index: k), expected: -x)
