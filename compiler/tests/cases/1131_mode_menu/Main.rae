@@ -1,0 +1,78 @@
+# The "..." mode menu (lib/app3d/ModeMenu.rae): when it is open, and what its
+# camera item says. Taps and layout need a window and a scene, which the
+# walker examples cover.
+open app3d/ModeMenu
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func main() ret Int {
+  check(
+    label: "a tap on the button opens the menu"
+    ok: modeMenuOpenAfter(
+      open: false
+      buttonTapped: true
+      itemChosen: false
+      pressedElsewhere: false
+    )
+  )
+  check(
+    label: "a second tap closes it"
+    ok: modeMenuOpenAfter(
+      open: true
+      buttonTapped: true
+      itemChosen: false
+      pressedElsewhere: false
+    ) is false
+  )
+  check(
+    label: "choosing an item closes it"
+    ok: modeMenuOpenAfter(
+      open: true
+      buttonTapped: false
+      itemChosen: true
+      pressedElsewhere: false
+    ) is false
+  )
+  check(
+    label: "a press anywhere else closes it"
+    ok: modeMenuOpenAfter(
+      open: true
+      buttonTapped: false
+      itemChosen: false
+      pressedElsewhere: true
+    ) is false
+  )
+  check(
+    label: "a press elsewhere does not open a closed one"
+    ok: modeMenuOpenAfter(
+      open: false
+      buttonTapped: false
+      itemChosen: false
+      pressedElsewhere: true
+    ) is false
+  )
+  check(
+    label: "nothing pressed: open stays open"
+    ok: modeMenuOpenAfter(
+      open: true
+      buttonTapped: false
+      itemChosen: false
+      pressedElsewhere: false
+    )
+  )
+  check(
+    label: "the camera item, not reversed"
+    ok: cameraRotationItemText(reversed: false) is "Reverse camera rotation: off"
+  )
+  check(
+    label: "the camera item, reversed"
+    ok: cameraRotationItemText(reversed: true) is "Reverse camera rotation: on"
+  )
+  ret 0
+}

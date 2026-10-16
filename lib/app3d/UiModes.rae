@@ -1,7 +1,8 @@
 # Two UI modes for an app's HUD scene: GAME (the default at every launch: the
 # play view, the touch stick, the app's own HUD) and EDITOR (the debugging
-# chrome — a camera bar, a settings panel, a log strip), switched by a "..."
-# button the scene puts in both. The mode is the scene's `editor` STATE (lib/ui
+# chrome — a camera bar, a settings panel, a log strip), switched from the "..."
+# button's menu the scene puts in both (app3d/ModeMenu). The mode is the scene's `editor` STATE
+# (lib/ui
 # Frames S5): one state overlay turns the editor chrome on and the game layer
 # off, so no node is toggled by hand. Applied together with the scene's
 # pointer frames (`"when": { "pointer": "coarse" }` for a finger) and a `short`
@@ -10,8 +11,8 @@
 #
 #   let uiModes: UiModes = createUiModes(world: w, uiSystems: s, path: "assets/ui.raescene")
 #   ...each frame, before layout:
-#   if updateUiModes(world: w, uiSystems: s, uiModes: uiModes) or toggleUiMode(world: w,
-#      uiSystems: s, uiModes: uiModes) { ...lay the UI out again... }
+#   if updateUiModes(world: w, uiSystems: s, uiModes: uiModes) or updateModeMenu(world: w,
+#      uiSystems: s, uiModes: uiModes, input: ui, rig: rig) { ...lay the UI out again... }
 #   if uiModes.editor { ...draw the editor-only overlays... }
 #
 # Applying frames and states resets the nodes they name to the scene's authored
@@ -44,10 +45,12 @@ type UiModes {
   # A low window (a phone on its side): the scene's `short` state is active
   short: Bool
   generation: Int
+  # The "..." mode menu (app3d/ModeMenu): open or not, and the camera item's
+  # text as written (whether it says reversed, and whether it was written yet)
+  menuOpen: Bool
+  cameraLabelReversed: Bool
+  cameraLabelWritten: Bool
 }
-
-# The "..." button's action id
-const uiModeActionId: String = "ui.mode"
 
 const uiModeEditorState: String = "editor"
 
@@ -97,6 +100,9 @@ func createUiModes(world: mod UiWorld, uiSystems: mod UiSystems, path: view Stri
     editor: Sys.getEnv(name: "RAE_UI_MODE") is "editor"
     short: isShortWindowHeight(height: world.layoutH)
     generation: 1
+    menuOpen: false
+    cameraLabelReversed: false
+    cameraLabelWritten: false
   }
   applyUiModes(world: world, uiSystems: uiSystems, uiModes: uiModes)
   ret uiModes
@@ -112,27 +118,6 @@ func setUiModeEditor(
   uiModes.editor = editor
   uiModes.generation = uiModes.generation + 1
   applyUiModes(world: world, uiSystems: uiSystems, uiModes: uiModes)
-}
-
-# The "..." button was tapped this frame: the other mode, applied. True when it
-# was (the caller lays the UI out again).
-func toggleUiMode(world: mod UiWorld, uiSystems: mod UiSystems, uiModes: mod UiModes) ret Bool {
-  var tapped: Bool = false
-  loop var i: Int = 0, i < uiActionCount(world: world), ++i {
-    if uiActionAt(world: world, index: i) is uiModeActionId {
-      tapped = true
-    }
-  }
-  if tapped is false {
-    ret false
-  }
-  setUiModeEditor(
-    world: world
-    uiSystems: uiSystems
-    uiModes: uiModes
-    editor: uiModes.editor is false
-  )
-  ret true
 }
 
 # The main pointer changed (a trackpad case on an iPad), or the window turned

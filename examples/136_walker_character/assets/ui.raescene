@@ -11,9 +11,7 @@
         "h": 800
       },
       "Layout": {
-        "type": "Horizontal",
-        "alignMain": "Start",
-        "alignCross": "Start"
+        "type": "Stack"
       },
       "Padding": {
         "l": "spaceL",
@@ -33,8 +31,8 @@
         }
       },
       "Children": [
-        "MainColumn",
-        "EditorSide"
+        "ContentRow",
+        "MenuOverlay"
       ]
     },
     "ControlPanel": {
@@ -254,13 +252,12 @@
       },
       "Children": [
         "EditorBar",
-        "TopSpacer",
-        "ModeButton"
+        "TopSpacer"
       ],
       "Padding": {
         "l": "spaceS",
         "t": "spaceS",
-        "r": "spaceL",
+        "r": 56,
         "b": "spaceS"
       }
     },
@@ -323,7 +320,7 @@
         "radius": 22
       },
       "OnClick": {
-        "actionId": "ui.mode"
+        "actionId": "menu.toggle"
       },
       "Children": [
         "ModeLabel"
@@ -429,7 +426,13 @@
       },
       "Children": [
         "SidePanel"
-      ]
+      ],
+      "Padding": {
+        "l": 0,
+        "t": 52,
+        "r": 0,
+        "b": 0
+      }
     },
     "SidePanelBody": {
       "Layout": {
@@ -473,6 +476,259 @@
         "SettingsDialogSlot",
         "ControlPanel"
       ]
+    },
+    "ContentRow": {
+      "Layout": {
+        "type": "Horizontal",
+        "alignMain": "Start",
+        "alignCross": "Start"
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fill"
+        }
+      },
+      "Children": [
+        "MainColumn",
+        "EditorSide"
+      ]
+    },
+    "MenuOverlay": {
+      "Layout": {
+        "type": "Vertical",
+        "gap": "spaceS",
+        "alignMain": "Start",
+        "alignCross": "End"
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fill"
+        }
+      },
+      "Padding": {
+        "l": 0,
+        "t": 10,
+        "r": 4,
+        "b": 0
+      },
+      "Children": [
+        "ModeButton",
+        "ContextMenu"
+      ]
+    },
+    "ContextMenu": {
+      "Layout": {
+        "type": "Vertical",
+        "gap": 4,
+        "alignCross": "Stretch"
+      },
+      "Size": {
+        "w": {
+          "mode": "Fixed"
+        },
+        "h": {
+          "mode": "Hug"
+        }
+      },
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 300,
+        "h": 120
+      },
+      "Padding": {
+        "l": 8,
+        "t": 8,
+        "r": 8,
+        "b": 8
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "surface",
+        "radius": "radiusCard"
+      },
+      "Active": {
+        "value": false
+      },
+      "Children": [
+        "MenuEditorItem",
+        "MenuCameraItem",
+        "MenuGameItem"
+      ]
+    },
+    "MenuEditorItem": {
+      "Layout": {
+        "type": "Horizontal",
+        "alignCross": "Center"
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Hug"
+        }
+      },
+      "Padding": {
+        "l": 12,
+        "t": 0,
+        "r": 12,
+        "b": 0
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "surfaceAlt",
+        "radius": "radiusPill"
+      },
+      "OnClick": {
+        "actionId": "menu.editor"
+      },
+      "Children": [
+        "MenuEditorLabel"
+      ]
+    },
+    "MenuEditorLabel": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 260,
+        "h": 40
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Text": {
+        "text": "Open editor",
+        "styleId": "panelButton",
+        "shrinkToFit": true
+      },
+      "OpticalAlign": {
+        "centerY": true
+      }
+    },
+    "MenuCameraItem": {
+      "Layout": {
+        "type": "Horizontal",
+        "alignCross": "Center"
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Hug"
+        }
+      },
+      "Padding": {
+        "l": 12,
+        "t": 0,
+        "r": 12,
+        "b": 0
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "surfaceAlt",
+        "radius": "radiusPill"
+      },
+      "OnClick": {
+        "actionId": "menu.cameraRotation"
+      },
+      "Children": [
+        "MenuCameraLabel"
+      ]
+    },
+    "MenuCameraLabel": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 260,
+        "h": 40
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Text": {
+        "text": "Reverse camera rotation: off",
+        "styleId": "panelButton",
+        "shrinkToFit": true
+      },
+      "OpticalAlign": {
+        "centerY": true
+      }
+    },
+    "MenuGameItem": {
+      "Layout": {
+        "type": "Horizontal",
+        "alignCross": "Center"
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Hug"
+        }
+      },
+      "Padding": {
+        "l": 12,
+        "t": 0,
+        "r": 12,
+        "b": 0
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "surfaceAlt",
+        "radius": "radiusPill"
+      },
+      "OnClick": {
+        "actionId": "menu.game"
+      },
+      "Children": [
+        "MenuGameLabel"
+      ],
+      "Active": {
+        "value": false
+      }
+    },
+    "MenuGameLabel": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 260,
+        "h": 40
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Text": {
+        "text": "Back to game",
+        "styleId": "panelButton",
+        "shrinkToFit": true
+      },
+      "OpticalAlign": {
+        "centerY": true
+      }
     }
   },
   "states": {
@@ -484,6 +740,21 @@
           }
         },
         "EditorSide": {
+          "Active": {
+            "value": true
+          }
+        },
+        "MenuEditorItem": {
+          "Active": {
+            "value": false
+          }
+        },
+        "MenuCameraItem": {
+          "Active": {
+            "value": false
+          }
+        },
+        "MenuGameItem": {
           "Active": {
             "value": true
           }
