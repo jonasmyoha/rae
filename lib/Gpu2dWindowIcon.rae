@@ -1,0 +1,15 @@
+# Gpu2dWindowIcon — the app's icon for the Gpu2d window. Split from
+# Gpu2d.rae, which is at the 1,000-line cap; the extern is in
+# runtime_gpu2d_image.c, next to the image decoder it uses.
+
+# The app's icon from a PNG or JPEG file, after Gpu2d.initWindow: on macOS the
+# Dock's and the app switcher's, also for an executable started from a
+# terminal (there is no app bundle to take it from); on iOS the bundle's icon
+# stays and this returns false. True when it was set.
+func nativeSetWindowIcon(path: String) unsafe extern("rae_ext_Gpu2d_setWindowIcon") ret Int
+
+func setWindowIcon(path: copy String) ret Bool {
+  unsafe {
+    ret nativeSetWindowIcon(path: path) is 1
+  }
+}
