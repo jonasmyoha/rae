@@ -33,6 +33,7 @@ import Profile
 import Gpu2d
 import Quat
 open app3d/UiModes
+open app3d/EdgeTab
 open ecs/Entity
 open ecs/ComponentTable
 open ecs/Transform
@@ -736,6 +737,18 @@ func createApp() ret App {
       hostNodeId: "CameraBarSlot"
     )
     walkerHideCameraChrome(world: uiWorld)
+    # The settings panel's edge tab, in the slot between the main column and
+    # the panel (app3d/EdgeTab)
+    if mountEdgeTab(
+      world: uiWorld
+      uiSystems: uiSystems
+      hostNodeId: "SettingsTabSlot"
+      name: walkerSettingsTab().name
+      actionId: "settings.open"
+      side: walkerSettingsTab().side
+    ) is none {
+      logWarnLine(ov: logOverlay, text: "settings edge tab failed to mount")
+    }
     var settings: SettingsState = createSettingsState(
       scene: 1
       sceneCount: 1

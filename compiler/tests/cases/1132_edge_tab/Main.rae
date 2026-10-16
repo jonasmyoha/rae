@@ -1,0 +1,37 @@
+# The edge tab (lib/app3d/EdgeTab.rae): which way its arrow points, and the
+# key its nodes are found by. Mounting and drawing need a window and a scene,
+# which the walker examples cover.
+open app3d/EdgeTab
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func main() ret Int {
+  check(
+    label: "a closed right panel's tab points in (left)"
+    ok: edgeTabArrowPointsLeft(side: EdgeSide.right, open: false)
+  )
+  check(
+    label: "an open right panel's tab points out (right)"
+    ok: edgeTabArrowPointsLeft(side: EdgeSide.right, open: true) is false
+  )
+  check(
+    label: "a closed left panel's tab points in (right)"
+    ok: edgeTabArrowPointsLeft(side: EdgeSide.left, open: false) is false
+  )
+  check(
+    label: "an open left panel's tab points out (left)"
+    ok: edgeTabArrowPointsLeft(side: EdgeSide.left, open: true)
+  )
+  let tab: EdgeTab = { name: "settingsTab", side: EdgeSide.right }
+  check(
+    label: "a tab's nodes are scoped under its name"
+    ok: edgeTabNodeKey(tab: tab, nodeId: "EdgeTab") is "settingsTab/EdgeTab"
+  )
+  ret 0
+}
