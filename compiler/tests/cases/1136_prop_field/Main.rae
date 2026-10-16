@@ -1,0 +1,196 @@
+# The prop field (lib/app3d/PropField.rae) without a GPU: its cells, its view
+# test, which level of detail a distance picks, and what one gather puts in
+# its batches. Drawing needs a window; an app's screenshots cover it.
+import Vec3
+open Scene3d
+open GbufferInstanced
+open app3d/PropField
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func paint() ret Material3d {
+  ret Material3d {
+    baseColor: Vec3.create(x: 0.3, y: 0.5, z: 0.2)
+    metallic: 0.0
+    roughness: 1.0
+    emission: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    toon: false
+  }
+}
+
+func part(id: view Int) ret PropPart {
+  ret PropPart { mesh: MeshHandle { id: id, generation: 0 }, material: paint() }
+}
+
+func batchCount(field: view PropField, index: view Int) ret Int {
+  if let batch: view InstanceBatch => field.batches.viewAt(index: index) {
+    ret batch.count
+  }
+  ret 0 - 1
+}
+
+func main() ret Int {
+  var field: PropField = createPropField(
+    originX: -50.0
+    originY: -50.0
+    size: 100.0
+    cellSize: 10.0
+  )
+  # A tree: near, its wood and leaves with shadows to 30 m; then its leaves
+  # alone to 80 m. A card: one quad, facing the eye, to 40 m. (The lists are
+  # built step by step: a list literal nested in a struct literal argument
+  # does not get its List functions generated yet.)
+  var nearParts: List(PropPart) = List.create(PropPart, cap: 2)
+  nearParts.add(value: part(id: 1))
+  nearParts.add(value: part(id: 2))
+  var farParts: List(PropPart) = List.create(PropPart, cap: 1)
+  farParts.add(value: part(id: 3))
+  var treeLods: List(PropLod) = List.create(PropLod, cap: 2)
+  treeLods.add(
+    value: { parts: own nearParts, maxDistance: 30.0, castsShadow: true, facesCamera: false }
+  )
+  treeLods.add(
+    value: { parts: own farParts, maxDistance: 80.0, castsShadow: false, facesCamera: false }
+  )
+  let tree: Int = addPropKind(
+    field: field
+    kind: { lods: own treeLods, radius: 2.0, centerHeight: 2.0 }
+  )
+  var cardParts: List(PropPart) = List.create(PropPart, cap: 1)
+  cardParts.add(value: part(id: 4))
+  var cardLods: List(PropLod) = List.create(PropLod, cap: 1)
+  cardLods.add(
+    value: { parts: own cardParts, maxDistance: 40.0, castsShadow: false, facesCamera: true }
+  )
+  let card: Int = addPropKind(
+    field: field
+    kind: { lods: own cardLods, radius: 1.0, centerHeight: 1.0 }
+  )
+  let foot: Float = 0.0
+  # Near ahead, far ahead, behind, beside, past the field's edge; a card ahead
+  addPropPlacement(
+    field: field
+    placement: { kind: tree, position: Vec3.create(x: 0.0, y: 10.0, z: foot), yaw: 0.0, scale: 1.0 }
+  )
+  addPropPlacement(
+    field: field
+    placement: { kind: tree, position: Vec3.create(x: 0.0, y: 40.0, z: foot), yaw: 0.0, scale: 1.0 }
+  )
+  addPropPlacement(
+    field: field
+    placement: {
+      kind: tree
+      position: Vec3.create(x: 0.0, y: -25.0, z: foot)
+      yaw: 0.0
+      scale: 1.0
+    }
+  )
+  addPropPlacement(
+    field: field
+    placement: {
+      kind: tree
+      position: Vec3.create(x: 40.0, y: -4.0, z: foot)
+      yaw: 0.0
+      scale: 1.0
+    }
+  )
+  addPropPlacement(
+    field: field
+    placement: {
+      kind: tree
+      position: Vec3.create(x: 0.0, y: 120.0, z: foot)
+      yaw: 0.0
+      scale: 1.0
+    }
+  )
+  addPropPlacement(
+    field: field
+    placement: { kind: card, position: Vec3.create(x: 3.0, y: 12.0, z: foot), yaw: 0.0, scale: 1.0 }
+  )
+  finishPropField(field: field)
+  check(
+    label: "a point past the field's edge goes to its edge cell"
+    ok: propCellOf(field: field, x: 0.0, y: 120.0) is propCellOf(field: field, x: 0.0, y: 49.0)
+  )
+  check(label: "the draw distance is the farthest level's", ok: field.drawDistance is 80.0)
+  check(label: "one batch per kind, level and part (3 + 1)", ok: field.batches.length is 4)
+  check(
+    label: "only the near level's batches cast shadows"
+    ok: field.batchCastsShadow.copyAtFallback(index: 0, fallback: false) and field.batchCastsShadow.copyAtFallback(
+      index: 1
+      fallback: false
+    ) and field.batchCastsShadow.copyAtFallback(index: 2, fallback: true) is false
+  )
+  let treeKind: PropKind = field.kinds.copyAtDefault(index: tree)
+  check(label: "15 m away: the near level", ok: propLodAt(kind: treeKind, distance: 15.0) is 0)
+  check(label: "45 m away: the far level", ok: propLodAt(kind: treeKind, distance: 45.0) is 1)
+  check(label: "past 80 m: not drawn", ok: propLodAt(kind: treeKind, distance: 90.0) is none)
+  # The eye 5 m behind the origin, 1.7 m up, looking down +y
+  let camera: Camera3d = {
+    position: Vec3.create(x: 0.0, y: -5.0, z: 1.7)
+    target: Vec3.create(x: 0.0, y: 5.0, z: 1.7)
+    fovYDeg: 50.0
+    nearZ: 0.1
+    farZ: 500.0
+  }
+  let propView: PropView = propViewOf(camera: camera, aspect: 1.6)
+  check(
+    label: "a sphere straight ahead is in view"
+    ok: propSphereInView(
+      propView: propView
+      center: Vec3.create(x: 0.0, y: 20.0, z: 1.7)
+      radius: 1.0
+    )
+  )
+  check(
+    label: "one behind the eye is not"
+    ok: propSphereInView(
+      propView: propView
+      center: Vec3.create(x: 0.0, y: -25.0, z: 1.7)
+      radius: 1.0
+    ) is false
+  )
+  check(
+    label: "one the eye is inside is"
+    ok: propSphereInView(
+      propView: propView
+      center: Vec3.create(x: 0.0, y: -5.0, z: 2.0)
+      radius: 1.0
+    )
+  )
+  gatherPropField(field: field, propView: propView, toon: true)
+  check(
+    label: "the gather draws the near tree, the far tree and the card ({field.visibleCount})"
+    ok: field.visibleCount is 3
+  )
+  check(
+    label: "the near tree in both near batches"
+    ok: batchCount(field: field, index: 0) is 1 and batchCount(field: field, index: 1) is 1
+  )
+  check(label: "the far tree in the far batch", ok: batchCount(field: field, index: 2) is 1)
+  check(label: "the card in its batch", ok: batchCount(field: field, index: 3) is 1)
+  check(
+    label: "not every cell is looked into ({field.cellsVisited} of {field.columns * field.rows})"
+    ok: field.cellsVisited > 0 and field.cellsVisited < 20
+  )
+  # A second gather from far away draws nothing, and empties the batches
+  let away: Camera3d = {
+    position: Vec3.create(x: -45.0, y: -45.0, z: 300.0)
+    target: Vec3.create(x: -45.0, y: -40.0, z: 300.0)
+    fovYDeg: 50.0
+    nearZ: 0.1
+    farZ: 500.0
+  }
+  gatherPropField(field: field, propView: propViewOf(camera: away, aspect: 1.6), toon: true)
+  check(
+    label: "from far away nothing is drawn"
+    ok: field.visibleCount is 0 and batchCount(field: field, index: 0) is 0
+  )
+  ret 0
+}

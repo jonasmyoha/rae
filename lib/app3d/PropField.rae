@@ -1,0 +1,485 @@
+# app3d/PropField — many static props (trees, bushes, rocks, …) placed over a
+# world, drawn as few instanced draws, only those near the eye and in view.
+#
+# A KIND is one shape at one or more levels of detail. Each level has its mesh
+# parts (a mesh and a material each: a tree is its wood and its leaves in three
+# shades), the distance it is drawn out to, whether it casts a shadow, and
+# whether it turns to face the eye every frame (a billboard). The next level
+# takes over past a level's distance; past the last, the prop is not drawn. A
+# PLACEMENT is one prop of a kind: its foot, its turn about +Z and its scale.
+#
+# The placements are sorted into square cells. Each frame gatherPropField
+# looks only at the cells within the draw distance and in the view (a cone
+# round the camera's view, a sphere round each cell), then at their props, and
+# fills one instance batch per kind, level and part; drawPropField and
+# drawPropFieldShadows draw them (the G-buffer pass, the shadow pass). So a
+# field can hold thousands of props and cost only what is near and in front.
+#
+#   var field: PropField = createPropField(originX: -500, originY: -500, size: 1000, cellSize: 32)
+#   let tree: Int = addPropKind(field: field, kind: { lods: …, radius: 3, centerHeight: 3 })
+#   addPropPlacement(field: field, placement: { kind: tree, position: …, yaw: 0, scale: 1 })
+#   finishPropField(field: field)
+#   ...each frame: gatherPropField(field: field, propView: propViewOf(camera:, aspect:), toon:)
+#   ...G-buffer: drawPropField(cache:, resources:, field:); shadows: drawPropFieldShadows
+import Math
+import Vec3
+open Scene3d
+open Math3d
+open GbufferRecord
+open GbufferInstanced
+open Gbuffer
+open gpu/GpuResources
+open RendererDeferred
+
+# One mesh of a level of detail, in its material
+type PropPart {
+  mesh: MeshHandle
+  material: Material3d
+}
+
+# One level of detail of a kind
+type PropLod {
+  parts: List(PropPart)
+  # Drawn while the prop is at most this far from the eye (m)
+  maxDistance: Float
+  castsShadow: Bool
+  # Turned about +Z toward the eye every frame (a billboard)
+  facesCamera: Bool
+}
+
+# One shape, at its levels of detail (nearest first). `radius` and
+# `centerHeight` are a sphere round the shape at scale 1, its centre that
+# high over the foot: what the view test sees.
+type PropKind {
+  lods: List(PropLod)
+  radius: Float
+  centerHeight: Float
+}
+
+# One prop: its kind (addPropKind's index), its foot, its turn about +Z
+# (radians) and its uniform scale
+type PropPlacement {
+  kind: Int
+  position: Vec3
+  yaw: Float
+  scale: Float
+}
+
+# What the gather sees from: the eye, the unit direction it looks, and the
+# half angle of a cone round the whole view (its corners included)
+type PropView {
+  eye: Vec3
+  forward: Vec3
+  halfAngle: Float
+}
+
+type PropField {
+  kinds: List(PropKind)
+  placements: List(PropPlacement)
+  # Per placement once finished: its model matrix
+  models: List(Mat4)
+  # The cell grid: its corner, its cell size (m) and its size in cells
+  originX: Float
+  originY: Float
+  cellSize: Float
+  columns: Int
+  rows: Int
+  # Once finished, the placements are in cell order: cell c holds placements
+  # cellStart[c] .. cellStart[c + 1] - 1; a sphere round each cell's props
+  cellStart: List(Int)
+  cellCenterZ: List(Float)
+  cellRadius: List(Float)
+  # One instance batch per kind, level and part; `lodFirstBatch` is each
+  # (kind, level)'s first, by kindFirstLod[kind] + level
+  batches: List(InstanceBatch)
+  batchMeshes: List(MeshHandle)
+  batchMaterials: List(Material3d)
+  batchCastsShadow: List(Bool)
+  lodFirstBatch: List(Int)
+  kindFirstLod: List(Int)
+  # The farthest any level is drawn (m)
+  drawDistance: Float
+  finished: Bool
+  # The last gather: props drawn, cells looked into
+  visibleCount: Int
+  cellsVisited: Int
+}
+
+# An empty field over the square from (`originX`, `originY`) `size` metres on a
+# side, in cells of `cellSize` metres. Placements outside it go to its edge
+# cells.
+func createPropField(
+  originX: view Float
+  originY: view Float
+  size: view Float
+  cellSize: view Float
+) ret PropField {
+  var count: Int = (size / cellSize).toInt()
+  if count < 1 {
+    count = 1
+  }
+  ret PropField {
+    kinds: List.create(PropKind, cap: 8)
+    placements: List.create(PropPlacement, cap: 256)
+    models: List.create(Mat4, cap: 256)
+    originX: originX
+    originY: originY
+    cellSize: cellSize
+    columns: count
+    rows: count
+    cellStart: List.create(Int, cap: count * count + 1)
+    cellCenterZ: List.create(Float, cap: count * count)
+    cellRadius: List.create(Float, cap: count * count)
+    batches: List.create(InstanceBatch, cap: 16)
+    batchMeshes: List.create(MeshHandle, cap: 16)
+    batchMaterials: List.create(Material3d, cap: 16)
+    batchCastsShadow: List.create(Bool, cap: 16)
+    lodFirstBatch: List.create(Int, cap: 16)
+    kindFirstLod: List.create(Int, cap: 8)
+    drawDistance: 0.0
+    finished: false
+    visibleCount: 0
+    cellsVisited: 0
+  }
+}
+
+# Add a kind; returns its index for placements.
+func addPropKind(field: mod PropField, kind: view PropKind) ret Int {
+  field.kinds.add(value: kind)
+  ret field.kinds.length - 1
+}
+
+# Add one prop (before finishPropField).
+func addPropPlacement(field: mod PropField, placement: view PropPlacement) {
+  field.placements.add(value: placement)
+}
+
+# The cell holding (`x`, `y`): an edge cell for a point outside the field.
+func propCellOf(field: view PropField, x: view Float, y: view Float) ret Int {
+  var column: Int = Math.floor(x: (x - field.originX) / field.cellSize).toInt()
+  var row: Int = Math.floor(x: (y - field.originY) / field.cellSize).toInt()
+  if column < 0 {
+    column = 0
+  }
+  if column >= field.columns {
+    column = field.columns - 1
+  }
+  if row < 0 {
+    row = 0
+  }
+  if row >= field.rows {
+    row = field.rows - 1
+  }
+  ret row * field.columns + column
+}
+
+# The sphere round a placement of `kind`: its centre and its radius
+func propCenter(kind: view PropKind, placement: view PropPlacement) ret Vec3 {
+  ret Vec3.create(
+    x: placement.position.x
+    y: placement.position.y
+    z: placement.position.z + kind.centerHeight * placement.scale
+  )
+}
+
+func propRadius(kind: view PropKind, placement: view PropPlacement) ret Float {
+  ret kind.radius * placement.scale
+}
+
+func propModel(placement: view PropPlacement, yaw: view Float) ret Mat4 {
+  ret modelMatrixOf(
+    t: Transform3d {
+      position: placement.position
+      rotation: Vec3.create(x: 0.0, y: 0.0, z: yaw)
+      scale: Vec3.create(x: placement.scale, y: placement.scale, z: placement.scale)
+    }
+  )
+}
+
+# Sort the placements into their cells, make their model matrices and the
+# instance batches (each as big as its kind's placements). Call once, after
+# the last placement.
+func finishPropField(field: mod PropField) {
+  let cellCount: Int = field.columns * field.rows
+  # Count per cell, then each cell's start, then place every placement
+  var counts: List(Int) = List.create(Int, cap: cellCount)
+  loop var c: Int = 0, c < cellCount, ++c {
+    counts.add(value: 0)
+  }
+  loop let placement: view PropPlacement in field.placements {
+    let cell: Int = propCellOf(field: field, x: placement.position.x, y: placement.position.y)
+    counts.set(index: cell, value: counts.copyAtFallback(index: cell, fallback: 0) + 1)
+  }
+  field.cellStart = List.create(Int, cap: cellCount + 1)
+  var next: List(Int) = List.create(Int, cap: cellCount)
+  var running: Int = 0
+  loop var c: Int = 0, c < cellCount, ++c {
+    field.cellStart.add(value: running)
+    next.add(value: running)
+    running = running + counts.copyAtFallback(index: c, fallback: 0)
+  }
+  field.cellStart.add(value: running)
+  var sorted: List(PropPlacement) = List.create(PropPlacement, cap: field.placements.length)
+  loop var i: Int = 0, i < field.placements.length, ++i {
+    sorted.add(value: field.placements.copyAtDefault(index: 0))
+  }
+  loop let placement: view PropPlacement in field.placements {
+    let cell: Int = propCellOf(field: field, x: placement.position.x, y: placement.position.y)
+    let slot: Int = next.copyAtFallback(index: cell, fallback: 0)
+    sorted.set(index: slot, value: placement)
+    next.set(index: cell, value: slot + 1)
+  }
+  field.placements = sorted
+  # Model matrices, and a sphere round each cell's props
+  field.models = List.create(Mat4, cap: field.placements.length)
+  loop let placement: view PropPlacement in field.placements {
+    field.models.add(value: propModel(placement: placement, yaw: placement.yaw))
+  }
+  field.cellCenterZ = List.create(Float, cap: cellCount)
+  field.cellRadius = List.create(Float, cap: cellCount)
+  let halfDiagonal: Float = field.cellSize * 0.7072
+  loop var c: Int = 0, c < cellCount, ++c {
+    let first: Int = field.cellStart.copyAtFallback(index: c, fallback: 0)
+    let last: Int = field.cellStart.copyAtFallback(index: c + 1, fallback: 0)
+    var low: Float = 0.0
+    var high: Float = 0.0
+    var reach: Float = 0.0
+    loop var i: Int = first, i < last, ++i {
+      let placement: PropPlacement = field.placements.copyAtDefault(index: i)
+      var center: Vec3 = placement.position
+      var radius: Float = 0.0
+      if let kind: view PropKind => field.kinds.viewAt(index: placement.kind) {
+        center = propCenter(kind: kind, placement: placement)
+        radius = propRadius(kind: kind, placement: placement)
+      }
+      if i is first or center.z - radius < low {
+        low = center.z - radius
+      }
+      if i is first or center.z + radius > high {
+        high = center.z + radius
+      }
+      reach = Math.max(a: reach, b: radius)
+    }
+    let halfHeight: Float = (high - low) * 0.5
+    field.cellCenterZ.add(value: (low + high) * 0.5)
+    field.cellRadius.add(
+      value: Math.sqrt(x: halfDiagonal * halfDiagonal + halfHeight * halfHeight) + reach
+    )
+  }
+  # The batches: per kind, per level, per part, as many as the kind's props
+  field.drawDistance = 0.0
+  loop var k: Int = 0, k < field.kinds.length, ++k {
+    var kindCount: Int = 0
+    loop let placement: view PropPlacement in field.placements {
+      if placement.kind is k {
+        kindCount = kindCount + 1
+      }
+    }
+    field.kindFirstLod.add(value: field.lodFirstBatch.length)
+    let kind: PropKind = field.kinds.copyAtDefault(index: k)
+    loop let lod: view PropLod in kind.lods {
+      field.lodFirstBatch.add(value: field.batches.length)
+      field.drawDistance = Math.max(a: field.drawDistance, b: lod.maxDistance)
+      loop let part: view PropPart in lod.parts {
+        field.batches.add(value: createInstanceBatch(mesh: part.mesh, capacity: kindCount))
+        field.batchMeshes.add(value: part.mesh)
+        field.batchMaterials.add(value: part.material)
+        field.batchCastsShadow.add(value: lod.castsShadow)
+      }
+    }
+  }
+  field.finished = true
+}
+
+# The view from a camera, `aspect` its width over its height.
+func propViewOf(camera: view Camera3d, aspect: view Float) ret PropView {
+  let along: Vec3 = Vec3.vsub(a: camera.target, b: camera.position)
+  var forward: Vec3 = Vec3.create(x: 0.0, y: 1.0, z: 0.0)
+  if Vec3.vlen(a: along) > 0.0001 {
+    forward = Vec3.vnorm(a: along)
+  }
+  # The view's corner: the vertical half angle's tangent, widened by the aspect
+  let halfTan: Float = Math.tan(x: camera.fovYDeg * 0.008726646259971648)
+  let cornerTan: Float = halfTan * Math.sqrt(x: 1.0 + aspect * aspect)
+  ret PropView { eye: camera.position, forward: forward, halfAngle: Math.atan(x: cornerTan) }
+}
+
+# Is a sphere at `center` of `radius` in the view's cone?
+func propSphereInView(propView: view PropView, center: view Vec3, radius: view Float) ret Bool {
+  let toward: Vec3 = Vec3.vsub(a: center, b: propView.eye)
+  let distance: Float = Vec3.vlen(a: toward)
+  if distance <= radius {
+    ret true
+  }
+  var cosine: Float = Vec3.vdot(a: toward, b: propView.forward) / distance
+  if cosine > 1.0 {
+    cosine = 1.0
+  }
+  if cosine < 0.0 - 1.0 {
+    cosine = 0.0 - 1.0
+  }
+  ret Math.acos(x: cosine) <= propView.halfAngle + Math.asin(x: radius / distance)
+}
+
+# The level of detail a prop `distance` metres from the eye is drawn at;
+# none past the last level's distance.
+func propLodAt(kind: view PropKind, distance: view Float) ret opt Int {
+  loop var l: Int = 0, l < kind.lods.length, ++l {
+    if distance <= kind.lods.copyAtDefault(index: l).maxDistance {
+      ret l
+    }
+  }
+  ret none
+}
+
+# Fill the batches with this frame's props: only cells within the draw
+# distance and in the view, and in them only props in the view, each at the
+# level of detail its distance picks. `toon` is the frame's shading.
+func gatherPropField(field: mod PropField, propView: view PropView, toon: view Bool) {
+  loop var b: Int = 0, b < field.batches.length, ++b {
+    if let batch: mod InstanceBatch => field.batches.modAt(index: b) {
+      resetInstanceBatch(batch: batch)
+    }
+  }
+  field.visibleCount = 0
+  field.cellsVisited = 0
+  if field.finished is false {
+    ret
+  }
+  let reach: Float = field.drawDistance + field.cellSize
+  let first: Int = propCellOf(field: field, x: propView.eye.x - reach, y: propView.eye.y - reach)
+  let last: Int = propCellOf(field: field, x: propView.eye.x + reach, y: propView.eye.y + reach)
+  let firstColumn: Int = first % field.columns
+  let firstRow: Int = first / field.columns
+  let lastColumn: Int = last % field.columns
+  let lastRow: Int = last / field.columns
+  loop var row: Int = firstRow, row <= lastRow, ++row {
+    loop var column: Int = firstColumn, column <= lastColumn, ++column {
+      let cell: Int = row * field.columns + column
+      let start: Int = field.cellStart.copyAtFallback(index: cell, fallback: 0)
+      let end: Int = field.cellStart.copyAtFallback(index: cell + 1, fallback: 0)
+      if start >= end {
+        continue
+      }
+      let cellCenter: Vec3 = Vec3.create(
+        x: field.originX + (column.toFloat() + 0.5) * field.cellSize
+        y: field.originY + (row.toFloat() + 0.5) * field.cellSize
+        z: field.cellCenterZ.copyAtFallback(index: cell, fallback: 0.0)
+      )
+      let cellRadius: Float = field.cellRadius.copyAtFallback(index: cell, fallback: 0.0)
+      if Vec3.vlen(a: Vec3.vsub(a: cellCenter, b: propView.eye)) - cellRadius > field.drawDistance {
+        continue
+      }
+      if propSphereInView(propView: propView, center: cellCenter, radius: cellRadius) is false {
+        continue
+      }
+      field.cellsVisited = field.cellsVisited + 1
+      loop var i: Int = start, i < end, ++i {
+        gatherProp(
+          field: field
+          propView: propView
+          index: i
+          toon: toon
+        )
+      }
+    }
+  }
+}
+
+# Where a prop goes this frame: the first batch of its level, how many parts,
+# its model matrix; `drawn` false when it is out of reach or out of view
+type PropDraw {
+  drawn: Bool
+  firstBatch: Int
+  partCount: Int
+  model: Mat4
+}
+
+func propDrawOf(field: view PropField, propView: view PropView, index: view Int) ret PropDraw {
+  let placement: PropPlacement = field.placements.copyAtDefault(index: index)
+  var result: PropDraw = {
+    drawn: false
+    firstBatch: 0
+    partCount: 0
+    model: field.models.copyAtDefault(index: index)
+  }
+  if let kind: view PropKind => field.kinds.viewAt(index: placement.kind) {
+    let center: Vec3 = propCenter(kind: kind, placement: placement)
+    let distance: Float = Vec3.vlen(a: Vec3.vsub(a: center, b: propView.eye))
+    if let lodIndex: Int = propLodAt(kind: kind, distance: distance) {
+      if propSphereInView(
+        propView: propView
+        center: center
+        radius: propRadius(kind: kind, placement: placement)
+      ) {
+        if let lod: view PropLod => kind.lods.viewAt(index: lodIndex) {
+          result.drawn = true
+          result.partCount = lod.parts.length
+          result.firstBatch = field.lodFirstBatch.copyAtFallback(
+            index: field.kindFirstLod.copyAtFallback(index: placement.kind, fallback: 0) + lodIndex
+            fallback: 0
+          )
+          if lod.facesCamera {
+            result.model = propModel(
+              placement: placement
+              yaw: Math.atan2(
+                y: propView.eye.y - placement.position.y
+                x: propView.eye.x - placement.position.x
+              )
+            )
+          }
+        }
+      }
+    }
+  }
+  ret result
+}
+
+# One prop into its batches, if it is in reach and in the view.
+func gatherProp(
+  field: mod PropField
+  propView: view PropView
+  index: view Int
+  toon: view Bool
+) {
+  let draw: PropDraw = propDrawOf(field: field, propView: propView, index: index)
+  if draw.drawn is false {
+    ret
+  }
+  loop var p: Int = 0, p < draw.partCount, ++p {
+    var material: Material3d = field.batchMaterials.copyAtDefault(index: draw.firstBatch + p)
+    material.toon = toon
+    if let batch: mod InstanceBatch => field.batches.modAt(index: draw.firstBatch + p) {
+      addInstance(
+        batch: batch
+        model: draw.model
+        prevModel: draw.model
+        material: material
+      )
+    }
+  }
+  field.visibleCount = field.visibleCount + 1
+}
+
+# This frame's props into the G-buffer: one instanced draw per batch.
+func drawPropField(cache: mod GbufferCache, resources: mod GpuResources, field: view PropField) {
+  loop let batch: view InstanceBatch in field.batches {
+    drawInstances(cache: cache, resources: resources, batch: batch)
+  }
+}
+
+# This frame's props that cast shadows (their level says so) into the shadow
+# pass.
+func drawPropFieldShadows(renderer: mod DeferredRenderer, field: view PropField) {
+  loop var b: Int = 0, b < field.batches.length, ++b {
+    if field.batchCastsShadow.copyAtFallback(index: b, fallback: false) {
+      if let batch: view InstanceBatch => field.batches.viewAt(index: b) {
+        drawShadowCasterBatchWith(
+          renderer: renderer
+          mesh: field.batchMeshes.copyAtDefault(index: b)
+          batch: batch
+        )
+      }
+    }
+  }
+}
