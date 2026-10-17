@@ -36,7 +36,7 @@ struct Water {
   wave1b: vec4<f32>,
   tuning: vec4<f32>,        // x = distortion, y = waveCount (0..2), z = river mode, w = flow speed (m/s)
   refract: vec4<f32>,       // x = refraction on (1) / off (0), y = strength, zw = lit target size
-  absorb: vec4<f32>,        // rgb = Beer-Lambert absorption per metre
+  absorb: vec4<f32>,        // rgb = Beer-Lambert absorption per metre, w = daylight (0 night .. 1 day)
   cascades: vec4<f32>,      // xyz = cascade tile sizes (m), w = realistic path (1) / toon (0)
   centre: vec4<f32>,        // xy = camera position snapped to metres (mesh mode 2), z = cascade count, w = grid cell (m, lakes)
   ssr: vec4<f32>,           // x = screen-space reflections on (1) / off (0), y = march steps, z = hit thickness (m), w = max ray distance (m)
@@ -369,6 +369,9 @@ fn fs(i: VsOut) -> @location(0) vec4<f32> {
   }
   colour = mix(colour, vec3<f32>(0.96, 0.98, 1.0), foam * 0.85);
   alpha = max(alpha, foam * 0.9);
+  // The body colour and the foam are paint lit by the day: they darken with
+  // the sky at sunset (the reflected sky and the sun glint below already do).
+  colour *= W.absorb.w;
 
   // Reflection: the two-sample sky approximation along the reflected view ray,
   // weighted by Schlick Fresnel (F0 = 0.02, water's normal-incidence reflectance).
@@ -418,7 +421,7 @@ fn fs(i: VsOut) -> @location(0) vec4<f32> {
   if (W.refract.x > 0.5) {
     // Refracting surface: it composes its own background, so it is opaque.
     let foamMix = foam * 0.85;
-    colour = mix(mix(underwater, skyTint, fresnel), vec3<f32>(0.96, 0.98, 1.0), foamMix);
+    colour = mix(mix(underwater, skyTint, fresnel), vec3<f32>(0.96, 0.98, 1.0) * W.absorb.w, foamMix);
     alpha = 1.0;
   } else if (realisticPath) {
     colour = mix(colour, skyTint, fresnel);
