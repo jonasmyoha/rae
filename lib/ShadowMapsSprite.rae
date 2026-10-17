@@ -1,0 +1,296 @@
+# ShadowMapsSprite — billboard sprites (GbufferSprite's pictures, the far
+# level of app3d/PropField) as shadow CASTERS, on the ShadowCache. A sprite
+# has no triangles in the mesh store: each is a procedural quad standing on
+# its foot, turned to face the sun (shadow_sprite.wgsl), drawn depth-only
+# into every cascade with its picture's alpha cutting the outline. Like the
+# metaball casters (ShadowMapsSdf), it is queued between shadowBegin and
+# shadowEnd and drawn into each cascade's open pass.
+#
+# The pictures are the sprite pass's texture array (the C asset upload,
+# rae_gb_sprite_array_*), adopted here as an external view and re-adopted
+# when the array is made again.
+import Math
+open Math3d
+open webgpu/Webgpu
+open webgpu/Context
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuRender
+open gpu/GpuRenderDepth
+open gpu/GpuRenderPass
+open gpu/GpuRenderTransfer
+open gpu/GpuIds
+open ShadowMaps
+
+# The sprite array, read through the same C accessors as GbufferSprite
+func shadowSpriteArrayView() unsafe extern("rae_gb_sprite_array_view") ret Ptr
+
+func shadowSpriteArrayGen() unsafe extern("rae_gb_sprite_tex_gen") ret Int
+
+# The most sprites one frame's shadow pass draws
+const shadowSpriteMax: Int = 8192
+
+# Per sprite: two vec4 (foot and height, layer)
+const shadowSpriteFloats: Int = 8
+
+const shadowSpriteBytes: Int = 262144  # shadowSpriteMax * 32
+
+type ShadowSpriteCache {
+  pipeMade: Bool
+  pipeline: RenderPipelineId
+  sprites: BufferId
+  params: BufferId
+  sampler: SamplerId
+  arrayView: ExternalId
+  # The sprite array generation the binds were built over
+  arrayGen: Int
+  binds: List(BindGroupId)  # per cascade
+  # Queued this frame: shadowSpriteFloats per sprite, and the pictures'
+  # aspect and alpha cutoff
+  count: Int
+  floats: List(Float)
+  aspect: Float
+  cutoff: Float
+}
+
+func createShadowSpriteCache() ret ShadowSpriteCache {
+  ret ShadowSpriteCache {
+    pipeMade: false
+    pipeline: noRenderPipelineId()
+    sprites: noBufferId()
+    params: noBufferId()
+    sampler: noSamplerId()
+    arrayView: noExternalId()
+    arrayGen: -1
+    binds: fillBindGroupIds(count: shadowMaxCascades)
+    count: 0
+    floats: List.create(Float, cap: 1024)
+    aspect: 1.0
+    cutoff: 0.5
+  }
+}
+
+func shadowSpriteReset(sprites: mod ShadowSpriteCache) {
+  sprites.count = 0
+  sprites.floats.clear()
+}
+
+func spriteCasterPipelineSpec() ret DepthPipelineSpec {
+  ret DepthPipelineSpec {
+    vertexStride: 0
+    attributes: List.create(VertexAttributeSpec, cap: 1)
+    fragmentEntry: "fs"
+    depthFormat: WGPUTextureFormat_Depth32Float
+    cullMode: WGPUCullMode_None
+    depthBias: 0
+    depthBiasSlopeScale: 0.0
+  }
+}
+
+func ensureShadowSpriteObjects(sprites: mod ShadowSpriteCache, resources: mod GpuResources) {
+  if sprites.pipeMade {
+    ret
+  }
+  sprites.pipeMade = true
+  let spriteShader: Shader = shader(files: ["lib/shadow_sprite.wgsl"])
+  if let pipeline: RenderPipelineId = createDepthPipeline(
+    resources: resources
+    shader: spriteShader
+    vertexEntry: "vs"
+    spec: spriteCasterPipelineSpec()
+  ) {
+    sprites.pipeline = pipeline
+  }
+  if let buffer: BufferId = createBuffer(
+    resources: resources
+    size: shadowSpriteBytes
+    usage: WGPUBufferUsage_Storage + WGPUBufferUsage_CopyDst
+  ) {
+    sprites.sprites = buffer
+  }
+  if let params: BufferId = createBuffer(
+    resources: resources
+    size: 16
+    usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst
+  ) {
+    sprites.params = params
+  }
+  if let sampler: SamplerId = createSampler(resources: resources) {
+    sprites.sampler = sampler
+  }
+}
+
+# Queue billboards as casters (between shadowBegin and shadowEnd): the first
+# `count` records of `records`, `stride` floats each — GbufferSprite's DrawU
+# records, the model's translation the foot, its scale times the roughness
+# slot the height, slot 39 the picture layer. `aspect` and `cutoff` are the
+# pictures' (as GbufferSprite's spriteSetParams has them).
+func shadowQueueSprites(
+  shadow: mod ShadowCache
+  records: view List(Float)
+  stride: view Int
+  count: view Int
+  aspect: view Float
+  cutoff: view Float
+) {
+  if not shadow.enabled {
+    ret
+  }
+  shadow.sprites.aspect = aspect
+  shadow.sprites.cutoff = cutoff
+  loop var record: Int = 0, record < count and shadow.sprites.count < shadowSpriteMax, ++record {
+    let base: Int = record * stride
+    let scaleX: Float = records.copyAtFallback(index: base, fallback: 1.0)
+    let scaleY: Float = records.copyAtFallback(index: base + 1, fallback: 0.0)
+    let scaleZ: Float = records.copyAtFallback(index: base + 2, fallback: 0.0)
+    let scale: Float = Math.sqrt(x: scaleX * scaleX + scaleY * scaleY + scaleZ * scaleZ)
+    shadow.sprites.floats.add(value: records.copyAtFallback(index: base + 12, fallback: 0.0))
+    shadow.sprites.floats.add(value: records.copyAtFallback(index: base + 13, fallback: 0.0))
+    shadow.sprites.floats.add(value: records.copyAtFallback(index: base + 14, fallback: 0.0))
+    shadow.sprites.floats.add(
+      value: records.copyAtFallback(index: base + 36, fallback: 1.0) * scale
+    )
+    shadow.sprites.floats.add(value: records.copyAtFallback(index: base + 39, fallback: 0.0))
+    shadow.sprites.floats.add(value: 0.0)
+    shadow.sprites.floats.add(value: 0.0)
+    shadow.sprites.floats.add(value: 0.0)
+    shadow.sprites.count = shadow.sprites.count + 1
+  }
+}
+
+# Upload the queued sprites and their parameters (shadowEnd, before the
+# cascade passes), and make sure every cascade's bind is over the current
+# sprite array. False when there is nothing to draw.
+func shadowSpritePrepare(shadow: mod ShadowCache, resources: mod GpuResources) ret Bool {
+  if shadow.sprites.count < 1 {
+    ret false
+  }
+  ensureShadowSpriteObjects(sprites: shadow.sprites, resources: resources)
+  if not isValidRenderPipeline(resources: resources, id: shadow.sprites.pipeline) {
+    ret false
+  }
+  var hasArray: Bool = false
+  var gen: Int = 0
+  unsafe {
+    hasArray = shadowSpriteArrayView() is not webgpuNull()
+    gen = shadowSpriteArrayGen()
+  }
+  if hasArray is false {
+    ret false
+  }
+  if gen is not shadow.sprites.arrayGen {
+    shadow.sprites.arrayGen = gen
+    retireBindGroupIds(resources: resources, list: shadow.sprites.binds)
+    shadow.sprites.binds = fillBindGroupIds(count: shadowMaxCascades)
+    let released: Bool = releaseExternal(resources: resources, id: shadow.sprites.arrayView)
+    shadow.sprites.arrayView = noExternalId()
+    unsafe {
+      if let arrayView: ExternalId = adoptExternalTextureView(
+        resources: resources
+        handle: shadowSpriteArrayView()
+      ) {
+        shadow.sprites.arrayView = arrayView
+      }
+    }
+  }
+  var params: List(Float) = List.create(Float, cap: 4)
+  params.add(value: shadow.sprites.aspect)
+  params.add(value: shadow.sprites.cutoff)
+  params.add(value: 0.0)
+  params.add(value: 0.0)
+  var wrote: Bool = false
+  unsafe {
+    wrote = writeBufferFromPtr(
+      resources: resources
+      id: shadow.sprites.sprites
+      offset: 0
+      data: shadow.sprites.floats.data
+      size: shadow.sprites.count * shadowSpriteFloats * 4
+    ) and writeBufferFromPtr(
+      resources: resources
+      id: shadow.sprites.params
+      offset: 0
+      data: params.data
+      size: 16
+    )
+  }
+  if not wrote {
+    ret false
+  }
+  loop var c: Int = 0, c < shadow.layers, ++c {
+    if not bindGroupIsUsable(
+      resources: resources
+      id: shadow.sprites.binds.copyAtFallback(index: c, fallback: noBindGroupId())
+    ) {
+      var entries: List(ResourceRef) = List.create(ResourceRef, cap: 5)
+      entries.add(
+        value: bufferRef(
+          id: shadow.cascadeUniforms.copyAtFallback(index: c, fallback: noBufferId())
+        )
+      )
+      entries.add(value: bufferRef(id: shadow.sprites.sprites))
+      entries.add(value: bufferRef(id: shadow.sprites.params))
+      entries.add(value: externalRef(id: shadow.sprites.arrayView))
+      entries.add(value: samplerRef(id: shadow.sprites.sampler))
+      if let bind: BindGroupId = createRenderBindGroup(
+        resources: resources
+        pipeline: shadow.sprites.pipeline
+        entries: entries
+      ) {
+        shadow.sprites.binds.set(index: c, value: bind)
+      }
+    }
+  }
+  ret true
+}
+
+# The queued sprites into one cascade's open pass: one instanced draw.
+func shadowSpriteDraw(
+  shadow: view ShadowCache
+  resources: view GpuResources
+  cascade: copy Int
+  pass: copy Ptr
+) {
+  if shadow.sprites.count < 1 {
+    ret
+  }
+  unsafe {
+    let drawn: Bool = recordDrawInPass(
+      resources: resources
+      pass: pass
+      pipeline: shadow.sprites.pipeline
+      bindGroup: shadow.sprites.binds.copyAtFallback(index: cascade, fallback: noBindGroupId())
+      vertexCount: 6
+      instanceCount: shadow.sprites.count
+      firstVertex: 0
+      firstInstance: 0
+    )
+  }
+}
+
+# The sprite pipeline and binds as submission uses (shadowEnd)
+func shadowSpriteRecordUses(
+  sprites: view ShadowSpriteCache
+  recording: mod Recording
+  resources: view GpuResources
+) {
+  recordRenderPipelineUse(recording: recording, resources: resources, id: sprites.pipeline)
+  loop let bind: view BindGroupId in sprites.binds {
+    recordBindGroupUse(recording: recording, resources: resources, id: bind)
+  }
+}
+
+# How many sprites the last pass cast
+func shadowSpriteCount(shadow: view ShadowCache) ret Int {
+  ret shadow.sprites.count
+}
+
+func shadowSpriteShutdown(sprites: mod ShadowSpriteCache, resources: mod GpuResources) {
+  retireBindGroupIds(resources: resources, list: sprites.binds)
+  retireBuffer(resources: resources, id: sprites.sprites)
+  retireBuffer(resources: resources, id: sprites.params)
+  retireSampler(resources: resources, id: sprites.sampler)
+  retireRenderPipeline(resources: resources, id: sprites.pipeline)
+  let released: Bool = releaseExternal(resources: resources, id: sprites.arrayView)
+  sprites = createShadowSpriteCache()
+}
