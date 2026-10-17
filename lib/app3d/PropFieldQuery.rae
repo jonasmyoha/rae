@@ -1,0 +1,109 @@
+# app3d/PropFieldQuery — what stands near a point in a PropField: the field's
+# own placements and every group's within a reach (on the ground plane), each
+# with its kind's sphere, looked up in the cells only. For an app that puts
+# colliders on the props near a walker, or slows a walker inside a bush.
+import Math
+import Vec3
+open app3d/PropField
+
+# A placement near the point: which kind, where, the sphere round it (its
+# kind's, scaled) and how far it is from the point on the ground plane
+type PropNear {
+  kind: Int
+  placement: PropPlacement
+  center: Vec3
+  radius: Float
+  distance: Float
+}
+
+# Every placement whose foot is within `reach` of (`x`, `y`), the field's own
+# and its groups', unsorted.
+func propsNear(
+  field: view PropField
+  x: view Float
+  y: view Float
+  reach: view Float
+) ret List(PropNear) {
+  var near: List(PropNear) = List.create(PropNear, cap: 32)
+  let first: Int = propCellOf(field: field, x: x - reach, y: y - reach)
+  let last: Int = propCellOf(field: field, x: x + reach, y: y + reach)
+  let firstColumn: Int = first % field.columns
+  let firstRow: Int = first / field.columns
+  let lastColumn: Int = last % field.columns
+  let lastRow: Int = last / field.columns
+  loop var row: Int = firstRow, row <= lastRow, ++row {
+    loop var column: Int = firstColumn, column <= lastColumn, ++column {
+      addPropsNearInCell(
+        field: field
+        group: -1
+        cell: row * field.columns + column
+        x: x
+        y: y
+        reach: reach
+        near: near
+      )
+    }
+  }
+  loop var g: Int = 0, g < field.groups.length, ++g {
+    if let held: view PropGroup => field.groups.viewAt(index: g) {
+      if held.used {
+        let fromRow: Int = Math.max(a: firstRow.toFloat(), b: held.firstRow.toFloat()).toInt()
+        let toRow: Int = Math.min(
+          a: lastRow.toFloat()
+          b: (held.firstRow + held.rows - 1).toFloat()
+        ).toInt()
+        let fromColumn: Int = Math.max(a: firstColumn.toFloat(), b: held.firstColumn.toFloat()).toInt()
+        let toColumn: Int = Math.min(
+          a: lastColumn.toFloat()
+          b: (held.firstColumn + held.columns - 1).toFloat()
+        ).toInt()
+        loop var row: Int = fromRow, row <= toRow, ++row {
+          loop var column: Int = fromColumn, column <= toColumn, ++column {
+            addPropsNearInCell(
+              field: field
+              group: g
+              cell: (row - held.firstRow) * held.columns + column - held.firstColumn
+              x: x
+              y: y
+              reach: reach
+              near: near
+            )
+          }
+        }
+      }
+    }
+  }
+  ret near
+}
+
+# One cell's placements (the field's own, `group` -1, or a group's) within
+# `reach` of (`x`, `y`), onto `near`
+func addPropsNearInCell(
+  field: view PropField
+  group: view Int
+  cell: view Int
+  x: view Float
+  y: view Float
+  reach: view Float
+  near: mod List(PropNear)
+) {
+  let range: PropCellRange = propCellRange(field: field, group: group, cell: cell)
+  loop var i: Int = range.start, i < range.end, ++i {
+    let placement: PropPlacement = propPlacementAt(field: field, group: group, index: i)
+    let dx: Float = placement.position.x - x
+    let dy: Float = placement.position.y - y
+    let distance: Float = Math.sqrt(x: dx * dx + dy * dy)
+    if distance > reach {
+      continue
+    }
+    if let kind: view PropKind => field.kinds.viewAt(index: placement.kind) {
+      near.add(value: {
+        kind: placement.kind
+        placement: placement
+        center: propCenter(kind: kind, placement: placement)
+        radius: propRadius(kind: kind, placement: placement)
+        distance: distance
+      })
+    }
+  }
+}
