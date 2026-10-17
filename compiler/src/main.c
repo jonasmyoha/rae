@@ -251,6 +251,7 @@ static bool g_report_waits_lib = false;  /* --report-waits-lib: lib/'s counts to
 static const char* g_target_os = NULL;
 static const char* g_target_arch = NULL;
 static bool g_target_check_only = false;  /* a faked target: type-check, emit nothing */
+static bool g_emit_c_written = false;     /* `--emit-c` on the command line itself */
 static bool g_print_target = false;       /* --print-target: print Target's values, emit nothing */
 static bool g_check_targets = false;      /* --check-targets: check-only build per real target */
 static bool g_quiet_check = false;        /* no "checked for" line (--check-targets prints its own) */
@@ -303,6 +304,14 @@ static const char* host_target_arch(void) {
 #else
   return "arm64";
 #endif
+}
+
+/* Whether this host can hand C emitted for `os` to a toolchain that builds
+ * it: an Apple OS's C on a macOS host goes into Xcode (tools/ios). */
+static bool host_builds_target_c(const char* os) {
+  if (strcmp(host_target_os(), "macos") != 0) return false;
+  return strcmp(os, "ios") == 0 || strcmp(os, "tvos") == 0 || strcmp(os, "watchos") == 0 ||
+         strcmp(os, "visionos") == 0;
 }
 
 static bool target_name_known(const char* name, const char* const* names, size_t count) {
@@ -576,6 +585,7 @@ static bool parse_build_args(int argc, char** argv, BuildOptions* opts) {
     }
     if (strcmp(arg, "--emit-c") == 0) {
       opts->emit_c = true;
+      g_emit_c_written = true;
       i += 1;
       continue;
     }
@@ -2291,7 +2301,8 @@ static void print_usage(const char* prog) {
           "                           --report-waits-lib adds lib/'s counts)\n");
   fprintf(stderr,
           "                           --target-os <os> --target-arch <arch> (type-check\n"
-          "                           for another target, lib/Target.rae; emits nothing),\n"
+          "                           for another target, lib/Target.rae; emits nothing,\n"
+          "                           except an Apple OS's C with --emit-c on macOS),\n"
           "                           --print-target (print Target's values; emits nothing),\n"
           "                           --check-targets (type-check for every real target)\n");
   fprintf(stderr,
@@ -4385,12 +4396,18 @@ static int run_command(const char* cmd, int argc, char** argv) {
     /* The build's target (lib/Target.rae). A wasm build is web/wasm32; a
      * native one is the host. --target-os/--target-arch that name another
      * target make a check-only build: it type-checks against that target
-     * and emits nothing, since this toolchain cannot produce its binary. */
+     * and emits nothing, since this toolchain cannot produce its binary.
+     * The exception is a compiled build that writes `--emit-c` for a target
+     * whose C this host's tools build (an Apple OS on macOS, through Xcode):
+     * it emits that target's C, so Target says what the app runs on. */
     {
       const char* native_os = build_opts.target == BUILD_TARGET_WASM ? "web" : host_target_os();
       const char* native_arch = build_opts.target == BUILD_TARGET_WASM ? "wasm32" : host_target_arch();
       if ((g_target_os && strcmp(g_target_os, native_os) != 0) || (g_target_arch && strcmp(g_target_arch, native_arch) != 0))
         g_target_check_only = true;
+      if (g_target_check_only && g_emit_c_written && !g_print_target && !g_quiet_check &&
+          build_opts.target == BUILD_TARGET_COMPILED && g_target_os && host_builds_target_c(g_target_os))
+        g_target_check_only = false;
       /* --check-targets' children are check-only, the host's included */
       if (g_quiet_check) g_target_check_only = true;
       if (!g_target_os) g_target_os = native_os;
