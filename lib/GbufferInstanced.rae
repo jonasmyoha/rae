@@ -425,6 +425,74 @@ func drawInstances(
   )
 }
 
+# drawRecords for a part of the mesh: `indexCount` indices from `firstIndex`
+# on, clamped to the mesh's indices (one region of a mesh that holds many,
+# without drawing the rest).
+func drawRecordsRange(
+  cache: mod GbufferCache
+  resources: mod GpuResources
+  mesh: copy Int
+  firstIndex: copy Int
+  indexCount: copy Int
+  records: copy Ptr
+  count: copy Int
+) {
+  unsafe {
+    if gbMeshReady(cache: cache, resources: resources, mesh: mesh) is 0 {
+      ret
+    }
+    let total: Int = gbMeshIcount(cache: cache, mesh: mesh)
+    var indices: Int = indexCount
+    if firstIndex + indices > total {
+      indices = total - firstIndex
+    }
+    let base: Int = gbDrawCount(cache: cache)
+    var n: Int = count
+    if n > gbufferMaxDraws - base {
+      n = gbufferMaxDraws - base
+    }
+    if firstIndex < 0 or indices <= 0 or n <= 0 {
+      ret
+    }
+    gbIssueInstancedRange(
+      cache: cache
+      resources: resources
+      pipeline: cache.drawPipeline
+      bind: cache.drawBind
+      vbuf: gbMeshVbuf(cache: cache, resources: resources, mesh: mesh)
+      ibuf: gbMeshIbuf(cache: cache, resources: resources, mesh: mesh)
+      firstIndex: firstIndex
+      icount: indices
+      base: base
+      count: n
+      records: records
+    )
+  }
+}
+
+# drawInstances for `indexCount` of the mesh's indices from `firstIndex` on
+# (drawRecordsRange).
+func drawInstancesRange(
+  cache: mod GbufferCache
+  resources: mod GpuResources
+  batch: view InstanceBatch
+  firstIndex: copy Int
+  indexCount: copy Int
+) {
+  if batch.count <= 0 {
+    ret
+  }
+  drawRecordsRange(
+    cache: cache
+    resources: resources
+    mesh: batch.meshId
+    firstIndex: firstIndex
+    indexCount: indexCount
+    records: batch.records.data
+    count: batch.count
+  )
+}
+
 # Draw the batch as one instanced SKINNED DrawIndexed. All copies share the one
 # joint palette (one pose) — see drawSkinnedRecords. Set the batch mesh to the
 # skinned part being drawn (setInstanceBatchMesh) before calling; a multi-part

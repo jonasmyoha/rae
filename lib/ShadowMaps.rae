@@ -126,6 +126,7 @@ type ShadowCache {
   casterVbufs: List(BufferId)
   casterIbufs: List(BufferId)
   casterIcounts: List(Int)
+  casterFirstIndices: List(Int)
   shadowAmbient: Float
   # Paint each cascade's area, its map's square and its split distance in
   # its own colour (shadowCfg.w; example 142)
@@ -171,6 +172,7 @@ func createShadowCacheWith(casterBias: view ShadowCasterBias) ret ShadowCache {
     casterVbufs: List.create(BufferId, cap: 64)
     casterIbufs: List.create(BufferId, cap: 64)
     casterIcounts: List.create(Int, cap: 64)
+    casterFirstIndices: List.create(Int, cap: 64)
     shadowAmbient: 0.0
     debugCascades: false
     sdf: createShadowSdfCache()
@@ -376,6 +378,7 @@ func shadowBegin(
   shadow.casterVbufs.clear()
   shadow.casterIbufs.clear()
   shadow.casterIcounts.clear()
+  shadow.casterFirstIndices.clear()
   shadowSdfReset(sdf: shadow.sdf)
   shadowSpriteReset(sprites: shadow.sprites)
   if cascades.count < 1 or cascades.viewProj.length < cascades.count * 16 {
@@ -485,6 +488,7 @@ func shadowQueue(
   shadow.casterVbufs.add(value: vbuf)
   shadow.casterIbufs.add(value: ibuf)
   shadow.casterIcounts.add(value: icount)
+  shadow.casterFirstIndices.add(value: 0)
   shadow.drawCount = shadow.drawCount + 1
 }
 
@@ -511,6 +515,47 @@ func drawShadowCaster(
     model: model
     paletteBase: 0
   )
+}
+
+# drawShadowCaster for a part of the mesh: `indexCount` indices from
+# `firstIndex` on, clamped to the mesh's indices. Queued after a caster of
+# the same mesh, it is a draw of its own unless it has the same range.
+func drawShadowCasterRange(
+  shadow: mod ShadowCache
+  meshes: view MeshStore
+  resources: view GpuResources
+  mesh: view MeshHandle
+  firstIndex: copy Int
+  indexCount: copy Int
+  model: view Mat4
+) {
+  if not meshHandleIsValid(h: mesh) {
+    ret
+  }
+  if not meshStoreReady(store: meshes, resources: resources, mesh: mesh.id) {
+    ret
+  }
+  let total: Int = meshStoreIndexCount(store: meshes, mesh: mesh.id)
+  var indices: Int = indexCount
+  if firstIndex + indices > total {
+    indices = total - firstIndex
+  }
+  if firstIndex < 0 or indices < 1 {
+    ret
+  }
+  let first: Int = shadow.drawCount
+  shadowQueue(
+    shadow: shadow
+    key: mesh.id
+    vbuf: meshStoreVbuf(store: meshes, mesh: mesh.id)
+    ibuf: meshStoreIbuf(store: meshes, mesh: mesh.id)
+    icount: indices
+    model: model
+    paletteBase: 0
+  )
+  if shadow.drawCount > first {
+    shadow.casterFirstIndices.set(index: first, value: firstIndex)
+  }
 }
 
 # Many static casters of one mesh at once: the first `count` records of
@@ -542,6 +587,7 @@ func shadowQueueRecords(
     shadow.casterVbufs.add(value: vbuf)
     shadow.casterIbufs.add(value: ibuf)
     shadow.casterIcounts.add(value: icount)
+    shadow.casterFirstIndices.add(value: 0)
     shadow.drawCount = shadow.drawCount + 1
   }
 }
@@ -657,6 +703,21 @@ func ensureShadowBinds(shadow: mod ShadowCache, resources: mod GpuResources) {
 }
 
 # The queued casters into one cascade's open pass: INSTANCED batching (#118).
+# Whether queued caster `at` joins the run of a caster of `key` drawing
+# `indexCount` indices from `firstIndex`: the same mesh and the same range.
+func shadowSameDraw(
+  shadow: view ShadowCache
+  at: copy Int
+  key: copy Int
+  firstIndex: copy Int
+  indexCount: copy Int
+) ret Bool {
+  ret shadow.casterKeys.copyAtFallback(index: at, fallback: -1) is key and shadow.casterFirstIndices.copyAtFallback(
+    index: at
+    fallback: 0
+  ) is firstIndex and shadow.casterIcounts.copyAtFallback(index: at, fallback: 0) is indexCount
+}
+
 # Casters sharing a mesh sit consecutively in the queue (every alive walker
 # for one body part) and the model + palette-base buffers are indexed by
 # instance_index (the queue position), so a RUN of equal keys is ONE
@@ -670,8 +731,16 @@ func drawShadowCasters(
   var i: Int = 0
   loop i < shadow.drawCount {
     let key: Int = shadow.casterKeys.copyAtFallback(index: i, fallback: -1)
+    let firstIndex: Int = shadow.casterFirstIndices.copyAtFallback(index: i, fallback: 0)
+    let indexCount: Int = shadow.casterIcounts.copyAtFallback(index: i, fallback: 0)
     var runEnd: Int = i + 1
-    loop runEnd < shadow.drawCount and shadow.casterKeys.copyAtFallback(index: runEnd, fallback: -1) is key {
+    loop runEnd < shadow.drawCount and shadowSameDraw(
+      shadow: shadow
+      at: runEnd
+      key: key
+      firstIndex: firstIndex
+      indexCount: indexCount
+    ) {
       runEnd = runEnd + 1
     }
     var pipeline: RenderPipelineId = shadow.staticPipeline
@@ -684,7 +753,7 @@ func drawShadowCasters(
       bind = shadow.skinBinds.copyAtFallback(index: cascade, fallback: noBindGroupId())
     }
     unsafe {
-      let drawn: Bool = recordDrawIndexedInPass(
+      let drawn: Bool = recordDrawIndexedRangeInPass(
         resources: resources
         pass: pass
         pipeline: pipeline
@@ -697,7 +766,8 @@ func drawShadowCasters(
           resources: resources
           ref: bufferRef(id: shadow.casterIbufs.copyAtFallback(index: i, fallback: noBufferId()))
         )
-        indexCount: shadow.casterIcounts.copyAtFallback(index: i, fallback: 0)
+        firstIndex: firstIndex
+        indexCount: indexCount
         instanceCount: runEnd - i
         firstInstance: i
       )

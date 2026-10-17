@@ -230,13 +230,43 @@ func recordDrawIndexedInPass(
   instanceCount: view Int
   firstInstance: view Int
 ) unsafe ret Bool {
+  unsafe {
+    ret recordDrawIndexedRangeInPass(
+      resources: resources
+      pass: pass
+      pipeline: pipeline
+      bindGroup: bindGroup
+      vertexBuffer: vertexBuffer
+      indexBuffer: indexBuffer
+      firstIndex: 0
+      indexCount: indexCount
+      instanceCount: instanceCount
+      firstInstance: firstInstance
+    )
+  }
+}
+
+# recordDrawIndexedInPass for `indexCount` indices from `firstIndex` on: a
+# part of a mesh, such as one region of a mesh made of many.
+func recordDrawIndexedRangeInPass(
+  resources: view GpuResources
+  pass: copy Ptr
+  pipeline: view RenderPipelineId
+  bindGroup: view BindGroupId
+  vertexBuffer: copy Ptr
+  indexBuffer: copy Ptr
+  firstIndex: view Int
+  indexCount: view Int
+  instanceCount: view Int
+  firstInstance: view Int
+) unsafe ret Bool {
   if isValidRenderPipeline(resources: resources, id: pipeline) is false {
     ret false
   }
   if bindGroupIsUsable(resources: resources, id: bindGroup) is false {
     ret false
   }
-  if indexCount < 1 or instanceCount < 1 or firstInstance < 0 {
+  if firstIndex < 0 or indexCount < 1 or instanceCount < 1 or firstInstance < 0 {
     ret false
   }
   unsafe {
@@ -272,7 +302,7 @@ func recordDrawIndexedInPass(
       renderPassEncoder: pass
       indexCount: indexCount as UInt32
       instanceCount: instanceCount as UInt32
-      firstIndex: 0
+      firstIndex: firstIndex as UInt32
       baseVertex: 0
       firstInstance: firstInstance as UInt32
     )
