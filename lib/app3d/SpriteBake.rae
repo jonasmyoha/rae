@@ -15,11 +15,13 @@
 #
 #   let picture: SpritePicture = bakeSpritePicture(parts: meshes, colors: colors, width: 96,
 #   height: 128, aspect: 0.75)
-#   spriteUploadLayer(layer: 0, pixels: picture.pixels.data, w: picture.width, h: picture.height)
+#   spriteInitArray(w: 96, h: 128, layers: 1, mips: spriteMipCount(w: 96, h: 128))
+#   uploadSpritePicture(layer: 0, picture: picture, mips: spriteMipCount(w: 96, h: 128))
 #   ...and the world height of the picture is picture.top (times the prop's scale)
 import Math
 import Vec3
 open Mesh3d
+open GbufferSprite
 
 # One baked picture: its pixels (row by row from the top, each packed red +
 # green * 256 + blue * 65536 + alpha * 16777216, the sprite array's layout),
@@ -215,4 +217,88 @@ func bakeSpritePicture(
     }
   }
   ret SpritePicture { pixels: own canvas.colors, width: width, height: height, top: top }
+}
+
+# ----- the mip chain ----------------------------------------------------
+# A far billboard covers few screen pixels; sampled from the full picture it
+# shimmers as it moves. The sprite array keeps a mip chain, each level half
+# the one before (GbufferSprite's sampler blends between them).
+
+# The next level's size: half, at least 1 (as the GPU sizes mip levels)
+func spriteHalfSize(size: view Int) ret Int {
+  ret Math.max(a: size / 2, b: 1)
+}
+
+# The picture at half its size. Each new pixel covers a block of the old
+# ones: its alpha is their average (so the share of pixels the cutout keeps
+# stays the same), and its colour is the average of the COVERED pixels,
+# weighted by their alpha — see-through pixels hold no colour, and counting
+# them would darken the outline.
+func halveSpritePicture(picture: view SpritePicture) ret SpritePicture {
+  let width: Int = spriteHalfSize(size: picture.width)
+  let height: Int = spriteHalfSize(size: picture.height)
+  var pixels: List(Int) = List.create(Int, cap: width * height)
+  loop var row: Int = 0, row < height, ++row {
+    let firstRow: Int = row * picture.height / height
+    let lastRow: Int = Math.max(a: (row + 1) * picture.height / height, b: firstRow + 1)
+    loop var column: Int = 0, column < width, ++column {
+      let firstColumn: Int = column * picture.width / width
+      let lastColumn: Int = Math.max(a: (column + 1) * picture.width / width, b: firstColumn + 1)
+      var red: Int = 0
+      var green: Int = 0
+      var blue: Int = 0
+      var alpha: Int = 0
+      var count: Int = 0
+      loop var sourceRow: Int = firstRow, sourceRow < lastRow, ++sourceRow {
+        loop var sourceColumn: Int = firstColumn, sourceColumn < lastColumn, ++sourceColumn {
+          let pixel: Int = picture.pixels.copyAtFallback(
+            index: sourceRow * picture.width + sourceColumn
+            fallback: 0
+          )
+          let pixelAlpha: Int = pixel / 16777216 % 256
+          red = red + pixel % 256 * pixelAlpha
+          green = green + pixel / 256 % 256 * pixelAlpha
+          blue = blue + pixel / 65536 % 256 * pixelAlpha
+          alpha = alpha + pixelAlpha
+          count = count + 1
+        }
+      }
+      if alpha is 0 {
+        pixels.add(value: 0)
+      } else {
+        let averageAlpha: Int = (alpha + count / 2) / count
+        pixels.add(
+          value: (red + alpha / 2) / alpha + (green + alpha / 2) / alpha * 256 + (blue + alpha / 2) / alpha * 65536 + averageAlpha * 16777216
+        )
+      }
+    }
+  }
+  ret SpritePicture { pixels: own pixels, width: width, height: height, top: picture.top }
+}
+
+# Upload `picture` and its first `mips` - 1 halvings as levels 0 .. mips - 1
+# of layer `layer` of the sprite array (made with spriteInitArray and the
+# same `mips`)
+func uploadSpritePicture(layer: view Int, picture: view SpritePicture, mips: view Int) {
+  spriteUploadLayer(
+    layer: layer
+    mip: 0
+    pixels: picture.pixels.data
+    w: picture.width
+    h: picture.height
+  )
+  if mips < 2 {
+    ret
+  }
+  var level: SpritePicture = halveSpritePicture(picture: picture)
+  loop var mip: Int = 1, mip < mips, ++mip {
+    spriteUploadLayer(
+      layer: layer
+      mip: mip
+      pixels: level.pixels.data
+      w: level.width
+      h: level.height
+    )
+    level = halveSpritePicture(picture: level)
+  }
 }

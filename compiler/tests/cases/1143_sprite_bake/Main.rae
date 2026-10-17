@@ -4,6 +4,7 @@
 import Vec3
 open Mesh3d
 open app3d/SpriteBake
+open GbufferSprite
 
 func check(label: view String, ok: view Bool) {
   if ok {
@@ -145,5 +146,51 @@ func main() ret Int {
     label: "the far left edge beyond the red panel is see-through"
     ok: alphaOf(picture: picture, column: 0, row: 2) is 0
   )
+  # The mip chain: a 4 x 2 picture whose left 2 x 2 block is half blue and
+  # half see-through, and whose right block is solid red, halves to 2 x 1:
+  # the left pixel keeps the full blue (see-through pixels hold no colour)
+  # at half alpha, the right one stays solid red
+  let blue: Int = spritePixel(color: Vec3.create(x: 0.0, y: 0.0, z: 1.0), alpha: 255)
+  let red: Int = spritePixel(color: Vec3.create(x: 1.0, y: 0.0, z: 0.0), alpha: 255)
+  let small: SpritePicture = {
+    pixels: {
+      blue
+      0
+      red
+      red
+      0
+      blue
+      red
+      red
+    }
+    width: 4
+    height: 2
+    top: 1.0
+  }
+  let half: SpritePicture = halveSpritePicture(picture: small)
+  check(label: "halving 4 x 2 gives 2 x 1", ok: half.width is 2 and half.height is 1)
+  check(
+    label: "a half-covered block keeps its colour at half alpha ({alphaOf(
+      picture: half
+      column: 0
+      row: 0
+    )})"
+    ok: blueOf(picture: half, column: 0, row: 0) is 255 and alphaOf(
+      picture: half
+      column: 0
+      row: 0
+    ) is 128
+  )
+  check(
+    label: "a covered block keeps its colour and alpha"
+    ok: redOf(picture: half, column: 1, row: 0) is 255 and alphaOf(picture: half, column: 1, row: 0) is 255
+  )
+  let quarter: SpritePicture = halveSpritePicture(picture: half)
+  let last: SpritePicture = halveSpritePicture(picture: quarter)
+  check(
+    label: "the chain ends at 1 x 1"
+    ok: quarter.width is 1 and quarter.height is 1 and last.width is 1 and last.height is 1
+  )
+  check(label: "192 x 128 has 8 levels", ok: spriteMipCount(w: 192, h: 128) is 8)
   ret 0
 }

@@ -1238,8 +1238,8 @@ void rae_gb_terrain_array_init(int64_t w, int64_t h, int64_t layers);
 void rae_gb_terrain_array_write(int64_t layer, const int64_t* pixels, int64_t w, int64_t h);
 void* rae_gb_sprite_array_view(void);
 int64_t rae_gb_sprite_tex_gen(void);
-void rae_gb_sprite_array_init(int64_t w, int64_t h, int64_t layers);
-void rae_gb_sprite_array_write(int64_t layer, const int64_t* pixels, int64_t w, int64_t h);
+void rae_gb_sprite_array_init(int64_t w, int64_t h, int64_t layers, int64_t mips);
+void rae_gb_sprite_array_write(int64_t layer, int64_t mip, const int64_t* pixels, int64_t w, int64_t h);
 /* G-buffer metaball clusters are Rae manager objects (#922); C keeps the WGSL. */
 /* #921: the skinned meshes + palette are the Rae SkinStore's (no rae_gb_skin_* accessors). */
 /* One-command-buffer submit for the raw-encoder passes (shadow, fullscreen,

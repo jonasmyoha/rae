@@ -17,12 +17,14 @@ open GbufferInstanced
 open GbufferRecord
 open Math3d
 import Vec3
+import Math
 open GbufferResources
 open Scene3d
 open webgpu/Webgpu
 open webgpu/Context
 open GrassCompute
 open gpu/GpuResources
+open gpu/GpuTextures
 open gpu/GpuLifetime
 open gpu/GpuRender
 open gpu/GpuRenderPass
@@ -36,10 +38,16 @@ func gbSpriteArrayView() unsafe extern("rae_gb_sprite_array_view") ret Ptr
 
 func gbSpriteTexGen() unsafe extern("rae_gb_sprite_tex_gen") ret Int
 
-func gbSpriteArrayInit(w: Int, h: Int, layers: Int) unsafe extern("rae_gb_sprite_array_init")
+func gbSpriteArrayInit(
+  w: Int
+  h: Int
+  layers: Int
+  mips: Int
+) unsafe extern("rae_gb_sprite_array_init")
 
 func gbSpriteArrayWrite(
   layer: Int
+  mip: Int
   pixels: view Buffer(Int)
   w: Int
   h: Int
@@ -71,16 +79,30 @@ const spriteUniformBytes: Int = 32  # two vec4 (SpriteU)
 
 const spriteRecordFloats: Int = 40  # DrawU, same as the instanced path
 
-# Create the sprite image array (one layer per prop kind) + upload a layer. The
-# game calls these once with plate-cut RGBA sprites (straight alpha for the cutout).
-func spriteInitArray(w: copy Int, h: copy Int, layers: copy Int) {
+# Create the sprite image array (one layer per prop kind, `mips` levels each:
+# 1 for none, spriteMipCount for the full chain) + upload one level of a
+# layer (level `mip` is w >> mip by h >> mip, at least 1). The game calls
+# these once with plate-cut RGBA sprites (straight alpha for the cutout);
+# app3d/SpriteBake builds and uploads a picture's whole chain.
+func spriteInitArray(
+  w: copy Int
+  h: copy Int
+  layers: copy Int
+  mips: copy Int
+) {
   unsafe {
-    gbSpriteArrayInit(w: w, h: h, layers: layers)
+    gbSpriteArrayInit(
+      w: w
+      h: h
+      layers: layers
+      mips: mips
+    )
   }
 }
 
 func spriteUploadLayer(
   layer: copy Int
+  mip: copy Int
   pixels: view Buffer(Int)
   w: copy Int
   h: copy Int
@@ -88,11 +110,23 @@ func spriteUploadLayer(
   unsafe {
     gbSpriteArrayWrite(
       layer: layer
+      mip: mip
       pixels: pixels
       w: w
       h: h
     )
   }
+}
+
+# The levels of a full mip chain for a `w` x `h` picture: halved down to 1 x 1
+func spriteMipCount(w: view Int, h: view Int) ret Int {
+  var size: Int = Math.max(a: w, b: h)
+  var levels: Int = 1
+  loop size > 1 {
+    size = size / 2
+    levels = levels + 1
+  }
+  ret levels
 }
 
 # The SpriteU uniform buffer — created on demand so spriteSetParams can write it
@@ -111,22 +145,32 @@ func ensureSpriteUniform(cache: mod SpriteCache, resources: mod GpuResources) {
   }
 }
 
-# Sampler (clamp — a sprite is not tiled), the SpriteU uniform buffer, and a 1x1
+# Sampler (clamp — a sprite is not tiled; linear between mip levels, so a far
+# billboard averages its picture instead of shimmering), the SpriteU uniform buffer, and a 1x1
 # transparent default array so the bind group is always valid before upload.
 func ensureSpriteDefaults(cache: mod SpriteCache, resources: mod GpuResources) {
   if not isValidSampler(resources: resources, id: cache.sampler) {
-    if let sampler: SamplerId = createSampler(resources: resources) {
+    if let sampler: SamplerId = createSamplerMipped(
+      resources: resources
+      addressMode: WGPUAddressMode_ClampToEdge
+    ) {
       cache.sampler = sampler
     }
   }
   ensureSpriteUniform(cache: cache, resources: resources)
   unsafe {
     if gbSpriteArrayView() is webgpuNull() {
-      gbSpriteArrayInit(w: 1, h: 1, layers: 1)
+      gbSpriteArrayInit(
+        w: 1
+        h: 1
+        layers: 1
+        mips: 1
+      )
       var one: List(Int) = List.create(Int, cap: 1)
       one.add(value: 0)  # transparent -> alpha-tested away; never visible
       gbSpriteArrayWrite(
         layer: 0
+        mip: 0
         pixels: one.data
         w: 1
         h: 1

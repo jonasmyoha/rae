@@ -461,7 +461,14 @@ func addForestKinds(
   renderer: mod DeferredRenderer
   sprites: mod SpriteCache
 ) {
-  spriteInitArray(w: spritePictureWidth, h: spritePictureHeight, layers: treeSpeciesCount)
+  # Every layer with its full mip chain, so far billboards do not shimmer
+  let mips: Int = spriteMipCount(w: spritePictureWidth, h: spritePictureHeight)
+  spriteInitArray(
+    w: spritePictureWidth
+    h: spritePictureHeight
+    layers: treeSpeciesCount
+    mips: mips
+  )
   RendererDeferred.ensureRendererResources(renderer: renderer)
   if let resources: mod GpuResources => renderer.gpuResources {
     spriteSetParams(
@@ -516,12 +523,7 @@ func addForestKinds(
       kind: { lods: own lods, radius: radius, centerHeight: centerHeight }
     )
     let picture: SpritePicture = speciesPicture(species: species)
-    spriteUploadLayer(
-      layer: species
-      pixels: picture.pixels.data
-      w: picture.width
-      h: picture.height
-    )
+    uploadSpritePicture(layer: species, picture: picture, mips: mips)
     setPropKindSprite(
       field: field
       kind: kind
