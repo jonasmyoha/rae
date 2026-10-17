@@ -126,7 +126,7 @@ mkdir -p "$gen"
 # 1. Emit the app C, then prepend <SDL3/SDL_main.h> so the generated `int main`
 #    becomes SDL_main and SDL owns the iOS UIApplication entry.
 echo "gen-ios: emitting C for $name..."
-"$rae" build --entry "$entry" --project "$ex_dir" --out "$gen/app.c" --target compiled --emit-c
+"$rae" build --entry "$entry" --project "$ex_dir" --out "$gen/app.c" --target compiled --emit-c --target-os ios --target-arch arm64
 { printf '#include <SDL3/SDL_main.h>\n'; cat "$gen/app.c"; } > "$gen/app_ios.c"
 
 # 2. Enumerate bundled assets (the example's assets/ tree). Each file is added to
