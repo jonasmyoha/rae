@@ -1,0 +1,12 @@
+# A string with many interpolations (more than 64 parts, literal pieces and
+# values together) comes out whole: no part after the 64th dropped, its
+# values converted and freed like the first ones.
+func main() {
+  let a: Int = 15
+  let b: Int = 7
+  let forty: String = "START v0={a} v1={a} v2={a} v3={a} v4={a} v5={a} v6={a} v7={a} v8={a} v9={a} v10={a} v11={a} v12={a} v13={a} v14={a} v15={a} v16={a} v17={a} v18={a} v19={a} v20={a} v21={a} v22={a} v23={a} v24={a} v25={a} v26={a} v27={a} v28={a} v29={a} v30={a} v31={a} v32={a} v33={a} v34={a} v35={a} v36={a} v37={a} v38={a} v39={a} END"
+  log(forty)
+  log("{forty.length()} characters")
+  let hundred: String = "{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}{b}"
+  log("{hundred.length()} sevens, the last {hundred.sub(start: 99, len: 1)}")
+}
