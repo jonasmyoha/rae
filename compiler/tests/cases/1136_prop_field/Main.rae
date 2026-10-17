@@ -187,5 +187,43 @@ func main() ret Int {
     label: "from far away nothing is drawn"
     ok: field.visibleCount is 0 and batchCount(field: field, index: 0) is 0
   )
+  # A batch limit caps every batch's size, however many props a kind has
+  var limited: PropField = createPropField(
+    originX: -50.0
+    originY: -50.0
+    size: 100.0
+    cellSize: 10.0
+  )
+  limited.batchLimit = 2
+  let bush: Int = addPropKind(
+    field: limited
+    kind: {
+      lods: {
+        { parts: { part(id: 5) }, maxDistance: 40.0, castsShadow: false, facesCamera: false }
+      }
+      radius: 1.0
+      centerHeight: 0.5
+    }
+  )
+  loop var i: Int = 0, i < 5, ++i {
+    addPropPlacement(
+      field: limited
+      placement: {
+        kind: bush
+        position: Vec3.create(x: i.toFloat() * 2.0, y: 10.0, z: foot)
+        yaw: 0.0
+        scale: 1.0
+      }
+    )
+  }
+  finishPropField(field: limited)
+  var capacity: Int = 0
+  if let batch: view InstanceBatch => limited.batches.viewAt(index: 0) {
+    capacity = batch.capacity
+  }
+  check(
+    label: "the batch limit caps a batch at 2 of the kind's 5 props ({capacity})"
+    ok: capacity is 2
+  )
   ret 0
 }

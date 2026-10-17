@@ -1,0 +1,123 @@
+# Input system for the walker example (#545).
+#
+# inputUpdate turns devices into an INTENT rather than moving the character
+# directly: the touch stick when active, else WASD/arrows (+ shift = walk), and
+# Space or F to jump. The intent becomes the controlled character's mover input
+# (PhysicsSystem driveCharacters) — which is what makes multiplayer and
+# input-switching cheap: a remote player's intent can arrive from net.rae
+# instead of a device, and the drive applies whichever intent it is given.
+#
+# InputState (the moveStick + UI input + intent bundle in the plan) is a later
+# refinement; today the intent is a per-frame value threaded through updateApp,
+# and the input/UI devices still live in app.rae's InputSystem. Example-114 files are
+# siblings that merge into one module. import block is app.rae's + sdl3.
+
+#   physics.rae (fixed-step seam) · net.rae (multiplayer seam) · state.rae
+#   (hot-reload + window persistence).
+# app.rae keeps the App / state types, createApp, the loop, updateApp, frameBegin.
+# Still to come: the input-intent split (#545) and turning the single character
+# into a multiplayer-ready roster (#546/#547).
+import Math
+import Profile
+import Gpu2d
+import Vec3
+import Sys
+import app3d/RenderScale
+open GbufferInstanced
+open GrassCompute
+import GrassConfig
+import app3d/Slider
+import ui/VirtualJoystick
+import ui/Ecs
+import ui/inputSystem/InputSystem
+import ui/renderSystem/RenderSystem
+open Scene3d
+open RendererDeferred
+open Sky
+open Gbuffer
+open Rendergraph
+open Math3d
+open Mesh3d
+open Gltf
+open GltfSkin
+open SdfText
+open Png
+open app3d/CameraRig
+open app3d/CharacterController
+open app3d/SettingsDialog
+open SkyHosek
+open app3d/UiShell
+open app3d/ControlPanel
+open app3d/CameraBar
+open Shadow3d
+open app3d/Playback
+open HotReload
+open ui/LogOverlay
+open ui/WindowGeometry
+open ui/EventLoop
+open ui/DebugOverlay
+import Sdl3
+import Keys
+
+# A frame's movement intent. moveX/moveY are analog in [-1, 1] (right+/forward+);
+# walking = the shift-to-walk modifier the controller expects (default is run);
+# jump = Space or F went down this frame (a press, not held: one jump per
+# press); actions is a reserved bitset for discrete button intents (unused
+# today).
+type InputIntent {
+  moveX: Float
+  moveY: Float
+  walking: Bool
+  jump: Bool
+  actions: Int
+}
+
+# Space, or F under the WASD hand (Space alone is awkward to reach), pressed
+# this frame
+func jumpPressed(allowKeys: view Bool) ret Bool {
+  if allowKeys is false {
+    ret false
+  }
+  ret Sdl3.isKeyPressed(key: Keys.keySpace) or Sdl3.isKeyPressed(key: Keys.keyF)
+}
+
+func inputUpdate(
+  moveStick: view VirtualJoystick
+  joyActive: view Bool
+  allowKeys: view Bool
+) ret InputIntent {
+  if joyActive {
+    ret InputIntent {
+      moveX: moveStick.valueX
+      moveY: moveStick.valueY
+      walking: false
+      jump: jumpPressed(allowKeys: allowKeys)
+      actions: 0
+    }
+  }
+  var moveX: Float = 0.0
+  var moveY: Float = 0.0
+  var walking: Bool = false
+  if allowKeys {
+    if Sdl3.isKeyDown(key: Keys.keyD) or Sdl3.isKeyDown(key: Keys.keyRight) {
+      moveX = moveX + 1.0
+    }
+    if Sdl3.isKeyDown(key: Keys.keyA) or Sdl3.isKeyDown(key: Keys.keyLeft) {
+      moveX = moveX - 1.0
+    }
+    if Sdl3.isKeyDown(key: Keys.keyW) or Sdl3.isKeyDown(key: Keys.keyUp) {
+      moveY = moveY + 1.0
+    }
+    if Sdl3.isKeyDown(key: Keys.keyS) or Sdl3.isKeyDown(key: Keys.keyDown) {
+      moveY = moveY - 1.0
+    }
+    walking = Sdl3.isKeyDown(key: Keys.keyLShift)
+  }
+  ret InputIntent {
+    moveX: moveX
+    moveY: moveY
+    walking: walking
+    jump: jumpPressed(allowKeys: allowKeys)
+    actions: 0
+  }
+}

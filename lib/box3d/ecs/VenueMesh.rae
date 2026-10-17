@@ -75,12 +75,34 @@ func addVenueHeightField(
     bodyDef.position = transform.position
     bodyDef.rotation = transform.rotation
     let bodyId: b3BodyId = b3CreateBody(worldId: physics.world, def: toB3BodyDef(def: bodyDef))
-    ret fromB3ShapeId(
+    let shapeId: ShapeId = fromB3ShapeId(
       shapeId: rae_b3CreateHeightFieldShape(
         bodyId: bodyId
         def: toB3ShapeDef(def: def)
         heightField: heightField
       )
     )
+    physics.heightFieldShapes.add(value: shapeId)
+    ret shapeId
   }
+}
+
+# Remove a height field addVenueHeightField made: its body (and so its shape)
+# and its height data. For ground that moves with a player over a world too
+# big for one field: add the next field, then remove the last. False when
+# `shapeId` is not one of this world's height fields.
+func removeVenueHeightField(physics: mod Physics, shapeId: view ShapeId) ret Bool {
+  loop var i: Int = 0, i < physics.heightFieldShapes.length, ++i {
+    let held: ShapeId = physics.heightFieldShapes.copyAtDefault(index: i)
+    if held.index1 is shapeId.index1 and held.world0 is shapeId.world0 and held.generation is shapeId.generation {
+      unsafe {
+        b3DestroyBody(bodyId: b3Shape_GetBody(shapeId: toB3ShapeId(shapeId: shapeId)))
+        rae_b3DestroyHeightField(heightField: physics.heightFields.copyAtDefault(index: i))
+      }
+      physics.heightFields.remove(index: i)
+      physics.heightFieldShapes.remove(index: i)
+      ret true
+    }
+  }
+  ret false
 }
