@@ -19,6 +19,9 @@ open GbufferInstanced
 open procgen/FluffyFoliage
 open procgen/Foliage
 open app3d/PropField
+open app3d/SpriteBake
+open GbufferSprite
+open gpu/GpuResources
 
 # One instanced prop draw: its mesh, its material, and a pre-sized batch refilled
 # each frame. The material is a value (not a scene index) so terrain owns no
@@ -243,13 +246,22 @@ const nearPatches: Int = 48
 
 const midPatches: Int = 14
 
-const farPatches: Int = 5
-
 const nearLeaves: Int = 500
 
 const midLeaves: Int = 110
 
-const farLeaves: Int = 28
+# The far level is a billboard: a picture of the tree (app3d/SpriteBake)
+# drawn on one camera-facing quad. Every species' picture is this many pixels
+# and this wide for its height (GbufferSprite has one aspect for every layer,
+# wide enough for the umbrella pine's crown).
+const spritePictureWidth: Int = 192
+
+const spritePictureHeight: Int = 128
+
+const spritePictureAspect: Float = 1.5
+
+# Below this alpha a picture's pixel is see-through
+const spriteCutoff: Float = 0.5
 
 const nearTreeDistance: Float = 30.0
 
@@ -298,57 +310,51 @@ func widenMesh(mesh: mod MeshData, factor: view Float) {
 }
 
 # A species' wood, uploaded
-func speciesWood(renderer: mod DeferredRenderer, species: view Int) ret MeshHandle {
+func speciesWoodMesh(species: view Int) ret MeshData {
   let seed: Int = 501 + species * 104
   if species is speciesPalm {
-    ret uploadFoliage(
-      renderer: renderer
-      mesh: palmWood(seed: seed, height: autumnReferenceHeight, width: 2.0)
-    )
+    ret palmWood(seed: seed, height: autumnReferenceHeight, width: 2.0)
   }
   if species >= speciesOrange {
     let tree: BroadleafTree = broadleafTree(seed: seed, height: autumnReferenceHeight, width: 2.0)
-    ret uploadFoliage(renderer: renderer, mesh: tree.wood)
+    ret tree.wood
   }
   var wood: MeshData = fluffyWood(form: treeSpeciesForm(species: species), seed: 73)
   widenMesh(mesh: wood, factor: speciesWidth(species: species))
-  ret uploadFoliage(renderer: renderer, mesh: wood)
+  ret wood
+}
+
+func speciesWood(renderer: mod DeferredRenderer, species: view Int) ret MeshHandle {
+  ret uploadFoliage(renderer: renderer, mesh: speciesWoodMesh(species: species))
 }
 
 # A species' leaves in one tone at a level's detail (`patches` for the
-# leaf-patch forms, `leaves` for the autumn trees and the palm), uploaded
-func speciesLeaves(
-  renderer: mod DeferredRenderer
+# leaf-patch forms, `leaves` for the autumn trees and the palm)
+func speciesLeavesMesh(
   species: view Int
   tone: view Int
   patches: view Int
   leaves: view Int
-) ret MeshHandle {
+) ret MeshData {
   let seed: Int = 501 + species * 104
   if species is speciesPalm {
-    ret uploadFoliage(
-      renderer: renderer
-      mesh: palmLeaves(
-        seed: seed
-        height: autumnReferenceHeight
-        width: 2.0
-        tone: tone
-        leafCount: leaves
-      )
+    ret palmLeaves(
+      seed: seed
+      height: autumnReferenceHeight
+      width: 2.0
+      tone: tone
+      leafCount: leaves
     )
   }
   if species >= speciesOrange {
     let tree: BroadleafTree = broadleafTree(seed: seed, height: autumnReferenceHeight, width: 2.0)
-    ret uploadFoliage(
-      renderer: renderer
-      mesh: broadleafLeaves(
-        tips: tree.tips
-        seed: seed
-        height: autumnReferenceHeight
-        width: 2.0
-        tone: tone
-        leafCount: leaves
-      )
+    ret broadleafLeaves(
+      tips: tree.tips
+      seed: seed
+      height: autumnReferenceHeight
+      width: 2.0
+      tone: tone
+      leafCount: leaves
     )
   }
   var crown: MeshData = fluffyLeaves(
@@ -358,7 +364,25 @@ func speciesLeaves(
     tone: tone
   )
   widenMesh(mesh: crown, factor: speciesWidth(species: species))
-  ret uploadFoliage(renderer: renderer, mesh: crown)
+  ret crown
+}
+
+func speciesLeaves(
+  renderer: mod DeferredRenderer
+  species: view Int
+  tone: view Int
+  patches: view Int
+  leaves: view Int
+) ret MeshHandle {
+  ret uploadFoliage(
+    renderer: renderer
+    mesh: speciesLeavesMesh(
+      species: species
+      tone: tone
+      patches: patches
+      leaves: leaves
+    )
+  )
 }
 
 func speciesLeafColor(species: view Int, tone: view Int) ret Vec3 {
@@ -402,10 +426,53 @@ func speciesLod(
   }
 }
 
+# A species' picture for its billboard: its wood and full leaves, each in its
+# colour, drawn from the side
+func speciesPicture(species: view Int) ret SpritePicture {
+  var parts: List(MeshData) = List.create(MeshData, cap: 4)
+  var colors: List(Vec3) = List.create(Vec3, cap: 4)
+  parts.add(value: speciesWoodMesh(species: species))
+  colors.add(value: Vec3.create(x: 0.13, y: 0.075, z: 0.04))
+  loop var tone: Int = 0, tone < 3, ++tone {
+    parts.add(value: speciesLeavesMesh(
+      species: species
+      tone: tone
+      patches: nearPatches
+      leaves: nearLeaves
+    ))
+    colors.add(value: speciesLeafColor(species: species, tone: tone))
+  }
+  ret bakeSpritePicture(
+    parts: parts
+    colors: colors
+    width: spritePictureWidth
+    height: spritePictureHeight
+    aspect: spritePictureAspect
+  )
+}
+
 # Every tree species as a PropField kind (kind index = species) at three
 # levels of detail: full crowns near, sparser crowns of bigger patches or
-# leaves out to the shadows' reach, and a few big patches beyond
-func addForestKinds(field: mod PropField, renderer: mod DeferredRenderer) {
+# leaves out to the shadows' reach, and beyond that a billboard of the
+# species' picture (a layer of the sprite array, made here)
+func addForestKinds(
+  field: mod PropField
+  renderer: mod DeferredRenderer
+  sprites: mod SpriteCache
+) {
+  spriteInitArray(w: spritePictureWidth, h: spritePictureHeight, layers: treeSpeciesCount)
+  RendererDeferred.ensureRendererResources(renderer: renderer)
+  if let resources: mod GpuResources => renderer.gpuResources {
+    spriteSetParams(
+      cache: sprites
+      resources: resources
+      heightK: 1.0
+      aspect: spritePictureAspect
+      cutoff: spriteCutoff
+      time: 0.0
+      tilt: 0.0
+    )
+  }
   loop var species: Int = 0, species < treeSpeciesCount, ++species {
     let wood: MeshHandle = speciesWood(renderer: renderer, species: species)
     var lods: List(PropLod) = List.create(PropLod, cap: 3)
@@ -427,15 +494,14 @@ func addForestKinds(field: mod PropField, renderer: mod DeferredRenderer) {
       maxDistance: midTreeDistance
       castsShadow: true
     ))
-    lods.add(value: speciesLod(
-      renderer: renderer
-      species: species
-      wood: wood
-      patches: farPatches
-      leaves: farLeaves
-      maxDistance: farTreeDistance
-      castsShadow: false
-    ))
+    lods.add(
+      value: {
+        parts: List.create(PropPart, cap: 0)
+        maxDistance: farTreeDistance
+        castsShadow: false
+        facesCamera: true
+      }
+    )
     # The sphere round the tree at scale 1: the leaf-patch forms are unit
     # height, the others autumnReferenceHeight
     var radius: Float = 0.6 * speciesWidth(species: species) + 0.1
@@ -447,6 +513,19 @@ func addForestKinds(field: mod PropField, renderer: mod DeferredRenderer) {
     let kind: Int = addPropKind(
       field: field
       kind: { lods: own lods, radius: radius, centerHeight: centerHeight }
+    )
+    let picture: SpritePicture = speciesPicture(species: species)
+    spriteUploadLayer(
+      layer: species
+      pixels: picture.pixels.data
+      w: picture.width
+      h: picture.height
+    )
+    setPropKindSprite(
+      field: field
+      kind: kind
+      layer: species
+      height: picture.top
     )
   }
 }

@@ -36,6 +36,7 @@ import Sys
 open GbufferInstanced
 open Particles
 open water/Water
+open GbufferSprite
 open water/WaterSystem
 open water/WaterFft
 open gpu/GpuResources
@@ -942,6 +943,7 @@ func runWalkerApp() ret Int {
   if let resources: mod GpuResources => app.gpuResources {
     grassShutdown(grass: app.grassCompute, resources: resources)
     waterShutdown(waterSystem: app.waterSystem, resources: resources)
+    spriteShutdown(cache: app.terrainSystem.sprites, resources: resources)
     shutdown(resources: resources)
   }
   shutdownDeferredRenderer(renderer: app.renderSystem.renderer)  # #904: the renderer-owned GPU manager, before the C shutdown

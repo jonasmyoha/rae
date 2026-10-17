@@ -26,7 +26,7 @@ struct DrawU {
   model: mat4x4<f32>,
   prevModel: mat4x4<f32>,
   albedoMetallic: vec4<f32>,
-  params: vec4<f32>,   // sprite: x=per-instance world height, w=layer (slot 39)
+  params: vec4<f32>,   // sprite: x=per-instance world height, y=emissive, z=mode, w=layer (slot 39)
 };
 struct SpriteU {
   // a.y = sprite aspect (w/h), a.z = alpha cutoff, a.w = time. (a.x unused —
@@ -57,6 +57,7 @@ struct VsOut {
   @location(2) clipNow: vec4<f32>,
   @location(3) clipPrev: vec4<f32>,
   @location(4) @interpolate(flat) emissive: f32,
+  @location(5) @interpolate(flat) mode: f32,
 };
 
 // vertex_index 0..5 -> two triangles of a unit quad, u01 in 0..1, v01 in 0..1.
@@ -108,6 +109,9 @@ fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut
   o.uv = vec2<f32>(c.x, 1.0 - c.y);
   o.layer = i32(max(d.params.w, 0.0));
   o.emissive = d.params.y;
+  // The shading mode (lit / emissive / toon) as the mesh instances carry it,
+  // so a billboard standing in for a toon mesh is shaded toon too
+  o.mode = d.params.z;
   o.pos = vec4<f32>(o.pos.xy + F.jitter.xy * o.pos.w, o.pos.zw);
   return o;
 }
@@ -132,7 +136,7 @@ fn fs(in: VsOut) -> FsOut {
   let motion = (now - prev) * vec2<f32>(0.5, -0.5);
   let mEnc = clamp(motion, vec2<f32>(-0.5), vec2<f32>(0.5)) + vec2<f32>(0.50196078);
   var o: FsOut;
-  o.gba = vec4<f32>(oct.x, oct.y, 0.5, 0.0);          // mode 0 = standard lit
+  o.gba = vec4<f32>(oct.x, oct.y, 0.5, in.mode);      // the instance's mode (0 = lit)
   o.gbb = vec4<f32>(texel.rgb, 0.9);                  // albedo, high roughness
   o.gbc = vec4<f32>(mEnc.x, mEnc.y, 0.0, in.emissive);
   return o;
