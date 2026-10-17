@@ -1187,8 +1187,10 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # while the frame loop rendered an empty UiSystems and no UI showed.
           # The corner menu is EDITOR chrome (lib/app3d/UiModes; GAME is the
           # default), so the shot is taken in EDITOR mode.
-          # The 190 shadow casters are the scene's 166 (each tree is its wood and
-          # three leaf tones, each bush three tones) plus the 24 physics cubes.
+          # The 222 shadow casters are the scene's 198 (two trees per terrain
+          # cell, each its wood and three leaf tones, each bush three tones)
+          # plus the 24 physics cubes. The river is gone: the sea is the only
+          # water body.
           # The physics check (RAE_114_PHYSICS_TEST) settles the cube stacks,
           # walks the hero into one and jumps, then checks the tree trunks: a
           # ray hits one, the hero stops at its bark, and it follows its tree.
@@ -1203,8 +1205,8 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              && [ "$(grep -c "palette atlas 512x512" "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c "skinned parts: 12" "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c "panel buttons: 4 clip, 0 transport" "$TMP_OUT/render.log")" -eq 1 ] \
-             && [ "$(grep -c "\[water\] toon lake: 2 bodies" "$TMP_OUT/render.log")" -eq 1 ] \
-             && [ "$(grep -c "\[shadow\] casters 190, 4 cascades" "$TMP_OUT/render.log")" -eq 1 ] \
+             && [ "$(grep -c "\[water\] toon lake: 1 bodies" "$TMP_OUT/render.log")" -eq 1 ] \
+             && [ "$(grep -c "\[shadow\] casters 222, 4 cascades" "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c "\[seamtest\] .* netOk=true physicsOk=true" "$TMP_OUT/render.log")" -eq 1 ] \
              && (cd .. && RAE_114_PHYSICS_TEST=1 RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=60000 \
                 perl -e 'alarm shift; exec @ARGV' 60 "$TMP_OUT/app") > "$TMP_OUT/physics.log" 2>&1 \

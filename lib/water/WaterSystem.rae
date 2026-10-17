@@ -466,7 +466,19 @@ func uploadWaterUniform(
     var sunColor: Vec3 = light.sunColor
     var zenith: Vec3 = light.ambSky
     var horizon: Vec3 = light.ambGround
+    # How much daylight falls on the water: the body colour and the foam are
+    # paint lit by it, so the water darkens at sunset with the ground. Like the
+    # ground, it is the sky's light (its exposure, which the settings fade to
+    # dark at night; never above 1, so a scene that brightens its sky does not
+    # brighten its water's paint) times the direct sun, which fades out as the
+    # sun sinks to the horizon (its elevation below about 20 degrees).
+    var daylight: Float = 1.0
     if hasSky {
+      let exposure: Float = Math.min(a: Math.max(a: sky.exposure, b: 0.0), b: 1.0)
+      # sunDir points FROM the sun, so the sine of its elevation is -z
+      let elevation: Float = Math.min(a: Math.max(a: sky.sunDir.z / -0.35, b: 0.0), b: 1.0)
+      let direct: Float = elevation * elevation * (3.0 - 2.0 * elevation)
+      daylight = exposure * (0.3 + 0.7 * direct)
       sunDir = sky.sunDir
       sunColor = sky.sunColor
       zenith = sky.zenithColor
@@ -583,7 +595,7 @@ func uploadWaterUniform(
       x: body.absorbColor.x
       y: body.absorbColor.y
       z: body.absorbColor.z
-      w: 0.0
+      w: daylight
     )
     # Realistic path (#851): the cascade tiles and the flag; the camera-centred
     # mesh is snapped to whole metres so its vertices never swim under the camera.
