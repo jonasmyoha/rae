@@ -1,5 +1,9 @@
 # Shared mesh handles: generate/upload each species once, reuse for every plant.
 # These are ordinary World3d instances; forest batching/LOD selection is separate.
+# The rows by the camphor are the inspection views; the woodland spreads the
+# same species over the rest of the island.
+import Math
+open Noise
 open procgen/FluffyFoliage
 open RendererDeferred
 open Scene3d
@@ -32,6 +36,78 @@ func fluffyMaterial(form: view FluffyForm, tone: view Int) ret Material3d {
   }
 }
 
+# One species' uploaded meshes: the wood, then the leaves in three tones
+func uploadFluffySpecies(
+  renderer: mod DeferredRenderer
+  form: view FluffyForm
+  handles: mod List(MeshHandle)
+  species: view Int
+) {
+  let wood: MeshData = fluffyWood(form: form, seed: 73)
+  var woodHandle: MeshHandle = meshHandleNone()
+  if wood.vertCount > 0 {
+    woodHandle = uploadMesh(
+      renderer: renderer
+      verts: wood.verts
+      vertCount: wood.vertCount
+      indices: wood.indices
+    )
+  }
+  handles.add(value: woodHandle)
+  loop var tone: Int = 0, tone < 3, ++tone {
+    let leaves: MeshData = fluffyLeaves(
+      form: form
+      seed: 73
+      patchCount: 48
+      tone: tone
+    )
+    handles.add(value: uploadMesh(
+      renderer: renderer
+      verts: leaves.verts
+      vertCount: leaves.vertCount
+      indices: leaves.indices
+    ))
+    log(
+      "fluffy species={species} tone={tone} vertices={leaves.vertCount} triangles={leaves.indices.length / 3}"
+    )
+  }
+}
+
+# One plant of species `species` (its four handles start at species * 4):
+# the forms are unit-sized, so `width` scales x and y and `height` z
+func plantFluffy(
+  world: mod World3d
+  handles: view List(MeshHandle)
+  form: view FluffyForm
+  species: view Int
+  position: view Vec3
+  width: view Float
+  height: view Float
+  yaw: view Float
+) {
+  loop var part: Int = 0, part < 4, ++part {
+    if form is FluffyForm.bush and part is 0 {
+      continue
+    }
+    let meshHandle: MeshHandle = handles.copyAtFallback(
+      index: species * 4 + part
+      fallback: meshHandleNone()
+    )
+    var material: Material3d = fluffyMaterial(form: form, tone: part - 1)
+    if part is 0 {
+      material.baseColor = Vec3.create(x: 0.13, y: 0.075, z: 0.04)
+    }
+    let entityId: EntityId = world3dAddMeshInstance(
+      world: world
+      mesh: meshHandle
+      material: material
+      position: position
+      rotation: Vec3.create(x: 0, y: 0, z: yaw)
+      scale: Vec3.create(x: width, y: width, z: height)
+    )
+  }
+}
+
 func addFluffyGrove(
   world: mod World3d
   renderer: mod DeferredRenderer
@@ -44,37 +120,18 @@ func addFluffyGrove(
     FluffyForm.bush
     FluffyForm.spruce
   }
+  var handles: List(MeshHandle) = List.create(MeshHandle, cap: forms.length * 4)
+  loop var species: Int = 0, species < forms.length, ++species {
+    uploadFluffySpecies(
+      renderer: renderer
+      form: forms.copyAtFallback(index: species, fallback: FluffyForm.broadleaf)
+      handles: handles
+      species: species
+    )
+  }
+  # The inspection rows (views 4-6)
   loop var species: Int = 0, species < forms.length, ++species {
     let form: FluffyForm = forms.copyAtFallback(index: species, fallback: FluffyForm.broadleaf)
-    var handles: List(MeshHandle) = List.create(MeshHandle, cap: 4)
-    let wood: MeshData = fluffyWood(form: form, seed: 73)
-    var woodHandle: MeshHandle = meshHandleNone()
-    if wood.vertCount > 0 {
-      woodHandle = uploadMesh(
-        renderer: renderer
-        verts: wood.verts
-        vertCount: wood.vertCount
-        indices: wood.indices
-      )
-    }
-    handles.add(value: woodHandle)
-    loop var tone: Int = 0, tone < 3, ++tone {
-      let leaves: MeshData = fluffyLeaves(
-        form: form
-        seed: 73
-        patchCount: 48
-        tone: tone
-      )
-      handles.add(value: uploadMesh(
-        renderer: renderer
-        verts: leaves.verts
-        vertCount: leaves.vertCount
-        indices: leaves.indices
-      ))
-      log(
-        "fluffy species={species} tone={tone} vertices={leaves.vertCount} triangles={leaves.indices.length / 3}"
-      )
-    }
     var plantCount: Int = 3
     if form is FluffyForm.cypress {
       plantCount = 6
@@ -120,24 +177,191 @@ func addFluffyGrove(
         )
       }
       obstacles.add(value: { x: position.x, y: position.y, radius: widthScale * 0.065 })
-      loop var part: Int = 0, part < 4, ++part {
-        if form is FluffyForm.bush and part is 0 {
-          continue
-        }
-        let meshHandle: MeshHandle = handles.copyAtFallback(index: part, fallback: meshHandleNone())
-        var material: Material3d = fluffyMaterial(form: form, tone: part - 1)
-        if part is 0 {
-          material.baseColor = Vec3.create(x: 0.13, y: 0.075, z: 0.04)
-        }
-        let entityId: EntityId = world3dAddMeshInstance(
-          world: world
-          mesh: meshHandle
-          material: material
-          position: position
-          rotation: Vec3.create(x: 0, y: 0, z: plant.toFloat() * 1.7)
-          scale: Vec3.create(x: widthScale, y: widthScale, z: height)
-        )
-      }
+      plantFluffy(
+        world: world
+        handles: handles
+        form: form
+        species: species
+        position: position
+        width: widthScale
+        height: height
+        yaw: plant.toFloat() * 1.7
+      )
     }
   }
+  addFluffyWoodland(
+    world: world
+    handles: handles
+    forms: forms
+    obstacles: obstacles
+  )
+}
+
+# A woodland plant already placed: where it stands and how far its crown reaches
+type WoodlandPlant {
+  x: Float
+  y: Float
+  reach: Float
+}
+
+# Is (x, y) off both paths (GroveScene's gardenPath and camphorPath) by `margin`?
+func offThePaths(x: view Float, y: view Float, margin: view Float) ret Bool {
+  if y > -11.0 - margin and y < 14.0 + margin {
+    if Math.abs(value: x - Math.sin(x: y * 0.27) * 1.8 - 0.8) < 0.9 + margin {
+      ret false
+    }
+  }
+  if x >= -34.0 - margin and x <= margin {
+    let fraction: Float = Math.min(a: Math.max(a: x / -34.0, b: 0.0), b: 1.0)
+    let centre: Float = -9.5 + 13.5 * fraction - 5.0 * Math.sin(x: fraction * 3.14159265)
+    if Math.abs(value: y - centre) < 0.65 + margin {
+      ret false
+    }
+  }
+  ret true
+}
+
+# Is there room for a plant of crown reach `reach` at (x, y): clear of every
+# trunk and rock (the obstacles), of the woodland so far, of the camphor's
+# clearing, of the shrub row by the path and of the spruce view's sight line?
+func woodlandRoom(
+  x: view Float
+  y: view Float
+  reach: view Float
+  obstacles: view List(GroveObstacle)
+  planted: view List(WoodlandPlant)
+) ret Bool {
+  if offThePaths(x: x, y: y, margin: reach + 0.6) is false {
+    ret false
+  }
+  if Math.sqrt(x: (x + 34.0) * (x + 34.0) + (y - 9.0) * (y - 9.0)) < 13.0 + reach {
+    ret false
+  }
+  if x > -9.0 - reach and x < 8.0 + reach and y > 1.5 - reach and y < 7.5 + reach {
+    ret false
+  }
+  # The spruce view (6) looks from (23, -13) at the spruce row; keep that
+  # sight line open
+  let along: Float = Math.min(
+    a: Math.max(a: ((x - 23.0) * -11.0 + (y + 13.0) * 19.0) / 482.0, b: 0.0)
+    b: 1.0
+  )
+  let offX: Float = x - 23.0 + 11.0 * along
+  let offY: Float = y + 13.0 - 19.0 * along
+  if Math.sqrt(x: offX * offX + offY * offY) < 4.0 + reach {
+    ret false
+  }
+  loop let obstacle: view GroveObstacle in obstacles {
+    let gapX: Float = x - obstacle.x
+    let gapY: Float = y - obstacle.y
+    if Math.sqrt(x: gapX * gapX + gapY * gapY) < obstacle.radius + reach + 1.2 {
+      ret false
+    }
+  }
+  loop let plant: view WoodlandPlant in planted {
+    let gapX: Float = x - plant.x
+    let gapY: Float = y - plant.y
+    if Math.sqrt(x: gapX * gapX + gapY * gapY) < (plant.reach + reach) * 0.8 {
+      ret false
+    }
+  }
+  ret true
+}
+
+# The species (an index into `forms`) of woodland plant number `index`: a
+# third broadleaf, then spruce, umbrella pine and cypress; the open lawn in
+# front of the overview camera only gets bushes, so the grove stays in view.
+func woodlandSpecies(index: view Int, x: view Float, y: view Float) ret Int {
+  if y < -5.0 and x > -30.0 and x < 14.0 {
+    ret 3
+  }
+  let pick: Float = hash2(x: index, y: 3, seed: 4177)
+  if pick < 0.12 {
+    ret 3
+  }
+  if pick < 0.42 {
+    ret 0
+  }
+  if pick < 0.68 {
+    ret 4
+  }
+  if pick < 0.84 {
+    ret 2
+  }
+  ret 1
+}
+
+# Scatter the fluffy species over the island's free ground: seeded spots
+# inside its rim, each kept only when there is room for its crown, so the
+# woodland fills the gaps around the older trees, rocks and paths.
+func addFluffyWoodland(
+  world: mod World3d
+  handles: view List(MeshHandle)
+  forms: view List(FluffyForm)
+  obstacles: mod List(GroveObstacle)
+) {
+  var planted: List(WoodlandPlant) = List.create(WoodlandPlant, cap: 64)
+  var trees: Int = 0
+  var bushes: Int = 0
+  loop var candidate: Int = 0, candidate < 600, ++candidate {
+    let angle: Float = hash2(x: candidate, y: 1, seed: 4177) * 6.2831853
+    let rim: Float = Math.sqrt(x: 0.04 + hash2(x: candidate, y: 2, seed: 4177) * 0.70)
+    let x: Float = -15.0 + Math.cos(x: angle) * 43.0 * rim
+    let y: Float = 6.0 + Math.sin(x: angle) * 28.0 * rim
+    let species: Int = woodlandSpecies(index: candidate, x: x, y: y)
+    let form: FluffyForm = forms.copyAtFallback(index: species, fallback: FluffyForm.broadleaf)
+    let size: Float = hash2(x: candidate, y: 4, seed: 4177)
+    var height: Float = 4.6 + size * 2.2
+    var width: Float = height
+    if form is FluffyForm.bush {
+      height = 1.7 + size * 0.9
+      width = height * 1.15
+    } else if form is FluffyForm.cypress {
+      height = 8.0 + size * 3.0
+      width = height * 0.85
+    } else if form is FluffyForm.umbrella {
+      height = 5.6 + size * 1.6
+      width = height * 1.1
+    } else if form is FluffyForm.spruce {
+      height = 5.4 + size * 2.6
+      width = height
+    }
+    var reach: Float = width * 0.42
+    if form is FluffyForm.cypress {
+      reach = width * 0.2
+    }
+    if form is FluffyForm.bush and bushes >= 18 {
+      continue
+    }
+    if form is not FluffyForm.bush and trees >= 38 {
+      continue
+    }
+    if woodlandRoom(
+      x: x
+      y: y
+      reach: reach
+      obstacles: obstacles
+      planted: planted
+    ) is false {
+      continue
+    }
+    planted.add(value: { x: x, y: y, reach: reach })
+    if form is FluffyForm.bush {
+      bushes = bushes + 1
+    } else {
+      trees = trees + 1
+      obstacles.add(value: { x: x, y: y, radius: width * 0.065 })
+    }
+    plantFluffy(
+      world: world
+      handles: handles
+      form: form
+      species: species
+      position: Vec3.create(x: x, y: y, z: -0.06)
+      width: width
+      height: height
+      yaw: hash2(x: candidate, y: 5, seed: 4177) * 6.2831853
+    )
+  }
+  log("fluffy woodland: {trees} trees, {bushes} bushes")
 }

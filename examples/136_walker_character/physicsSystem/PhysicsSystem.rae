@@ -12,6 +12,9 @@
 #   loose bodies and jumps. The controller of the character (its feet, heading
 #   and gait) is read back from the mover after each step.
 # - A few stacks of cubes near the spawn are dynamic bodies.
+# - Every tree's trunk is a static capsule. The trees are streamed with the
+#   terrain, so the push system moves each trunk with its tree's Transform3D
+#   when the terrain re-places it.
 #
 # This is the pattern a game copies for a character in a physics world: its
 # own props are more `spawnPhysicsCube` calls, its own ground another venue.
@@ -34,6 +37,7 @@ open box3d/ecs/VenueMesh
 open box3d/Box3d
 open box3d/Box3dTypes
 open ecs/World
+open terrainSystem/WalkerTrees
 
 const walkerPhysicsStep: Float = 1.0 / 60.0
 
@@ -297,6 +301,47 @@ func characterSpeed(physicsSystem: view PhysicsSystem, entityId: view EntityId) 
   let velocityX: Float = character.mover.velocity.x
   let velocityY: Float = character.mover.velocity.y
   ret Math.sqrt(x: velocityX * velocityX + velocityY * velocityY)
+}
+
+# ----- tree trunks -------------------------------------------------------
+# A static body with a trunk capsule for every tree entity (every row of the
+# GameWorld's TreeVariant table), at its tree's current pose. The trunk is the
+# same for every species and size (WalkerTrees.treeTrunkRadius / Height), so a
+# tree re-placed into another cell only needs its body moved, which the push
+# system does when updateInfiniteTerrain writes the new Transform3D. The
+# number of trunks.
+func addTreeTrunks(physicsSystem: mod PhysicsSystem, world: mod GameWorld) ret Int {
+  var trunks: Int = 0
+  loop var i: Int = 0, i < componentCount(this: world.treeVariants), ++i {
+    let entityId: EntityId = componentEntityAt(this: world.treeVariants, i: i)
+    var bodyDef: BodyDef = defaultBodyDef(lengthUnitsPerMeter: 1.0)
+    bodyDef.bodyType = BodyType.staticBody
+    bodyDef.position = componentView(this: world.transforms, entityId: entityId).position
+    bodyDef.rotation = componentView(this: world.transforms, entityId: entityId).rotation
+    let bodyId: BodyId = spawnRigidBody(
+      physics: physicsSystem.physics
+      rigidBodies: physicsSystem.rigidBodies
+      transforms: world.transforms
+      entityId: entityId
+      def: bodyDef
+    )
+    var shapeDef: ShapeDef = defaultShapeDef(lengthUnitsPerMeter: 1.0)
+    shapeDef.baseMaterial.friction = 0.6
+    let shapeId: ShapeId = addCapsuleCollider(
+      physics: physicsSystem.physics
+      rigidBodies: physicsSystem.rigidBodies
+      colliders: physicsSystem.colliders
+      entityId: entityId
+      def: shapeDef
+      capsule: {
+        center1: Vec3 { x: 0.0, y: 0.0, z: treeTrunkRadius }
+        center2: Vec3 { x: 0.0, y: 0.0, z: treeTrunkHeight }
+        radius: treeTrunkRadius
+      }
+    )
+    trunks = trunks + 1
+  }
+  ret trunks
 }
 
 # ----- loose cubes -------------------------------------------------------
