@@ -1,0 +1,147 @@
+# What stands near a point in a prop field (lib/app3d/PropFieldQuery.rae):
+# the field's own placements and every group's within a reach, each with
+# the sphere round it (its kind's, scaled), as an app placing colliders on
+# the props near a walker needs them.
+import Vec3
+open Scene3d
+open app3d/PropField
+open app3d/PropFieldQuery
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func paint() ret Material3d {
+  ret Material3d {
+    baseColor: Vec3.create(x: 0.3, y: 0.5, z: 0.2)
+    metallic: 0.0
+    roughness: 1.0
+    emission: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    toon: false
+  }
+}
+
+func rockKind() ret PropKind {
+  ret PropKind {
+    lods: {
+      {
+        parts: { PropPart { mesh: MeshHandle { id: 1, generation: 0 }, material: paint() } }
+        maxDistance: 40.0
+        castsShadow: false
+        facesCamera: false
+      }
+    }
+    radius: 1.0
+    centerHeight: 0.5
+  }
+}
+
+func rockAt(
+  kind: view Int
+  x: view Float
+  y: view Float
+  scale: view Float
+) ret PropPlacement {
+  ret PropPlacement {
+    kind: kind
+    position: Vec3.create(x: x, y: y, z: 2.0)
+    yaw: 0.0
+    scale: scale
+  }
+}
+
+func main() ret Int {
+  var field: PropField = createPropField(
+    originX: -50.0
+    originY: -50.0
+    size: 100.0
+    cellSize: 10.0
+  )
+  let rock: Int = addPropKind(field: field, kind: rockKind())
+  addPropPlacement(
+    field: field
+    placement: rockAt(
+      kind: rock
+      x: 3.0
+      y: 0.0
+      scale: 2.0
+    )
+  )
+  addPropPlacement(
+    field: field
+    placement: rockAt(
+      kind: rock
+      x: 30.0
+      y: 0.0
+      scale: 1.0
+    )
+  )
+  finishPropField(field: field)
+  var tile: List(PropPlacement) = List.create(PropPlacement, cap: 2)
+  tile.add(value: rockAt(
+    kind: rock
+    x: 0.0
+    y: -6.0
+    scale: 1.0
+  ))
+  tile.add(value: rockAt(
+    kind: rock
+    x: -9.0
+    y: 9.0
+    scale: 1.0
+  ))
+  setPropGroup(field: field, group: 2, placements: tile)
+  let near: List(PropNear) = propsNear(
+    field: field
+    x: 0.0
+    y: 0.0
+    reach: 10.0
+  )
+  check(
+    label: "the field's own and a group's props within the reach ({near.length})"
+    ok: near.length is 2
+  )
+  var ownFound: Bool = false
+  var groupFound: Bool = false
+  loop let prop: view PropNear in near {
+    if prop.placement.position.x is 3.0 {
+      ownFound = prop.kind is rock and prop.center.z is 3.0 and prop.radius is 2.0 and prop.distance is 3.0
+    }
+    if prop.placement.position.y is -6.0 {
+      groupFound = prop.center.z is 2.5 and prop.radius is 1.0 and prop.distance is 6.0
+    }
+  }
+  check(
+    label: "each with its sphere (its kind's, scaled) and its distance"
+    ok: ownFound and groupFound
+  )
+  check(
+    label: "a wider reach finds the far ones too ({propsNear(
+      field: field
+      x: 0.0
+      y: 0.0
+      reach: 31.0
+    ).length})"
+    ok: propsNear(
+      field: field
+      x: 0.0
+      y: 0.0
+      reach: 31.0
+    ).length is 4
+  )
+  clearPropGroup(field: field, group: 2)
+  check(
+    label: "a cleared group's props are not near anything"
+    ok: propsNear(
+      field: field
+      x: 0.0
+      y: -6.0
+      reach: 1.0
+    ).length is 0
+  )
+  ret 0
+}

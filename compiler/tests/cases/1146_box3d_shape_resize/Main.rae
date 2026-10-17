@@ -1,0 +1,129 @@
+# A body's sphere or capsule changed in place (lib/box3d/ecs/PhysicsSpawn
+# setSphereShape, setCapsuleShape): an app with a fixed pool of static
+# bodies moves them onto the props near a walker and gives each the size of
+# the prop it stands for, without making shapes again. A ray finds each
+# shape where its new size puts its surface.
+import Vec3
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open ecs/Transform
+open box3d/ecs/PhysicsTypes
+open box3d/ecs/Physics
+open box3d/ecs/PhysicsComponents
+open box3d/ecs/PhysicsSpawn
+open box3d/ecs/PhysicsQueries
+
+func staticBody(
+  physics: mod Physics
+  rigidBodies: mod ComponentTable(RigidBody)
+  transforms: mod ComponentTable(Transform3D)
+  entityId: view EntityId
+  position: view Vec3
+) {
+  var def: BodyDef = defaultBodyDef(lengthUnitsPerMeter: 1.0)
+  def.bodyType = BodyType.staticBody
+  def.position = position
+  let bodyId: BodyId = spawnRigidBody(
+    physics: physics
+    rigidBodies: rigidBodies
+    transforms: transforms
+    entityId: entityId
+    def: def
+  )
+}
+
+# Where a ray along +x at height `z` from x = -20 first meets something
+func hitX(physics: view Physics, y: view Float, z: view Float) ret Float {
+  let hit: PhysicsHit = raycastClosest(
+    physics: physics
+    origin: Vec3 { x: -20.0, y: y, z: z }
+    translation: Vec3 { x: 60.0, y: 0.0, z: 0.0 }
+    filter: defaultQueryFilter()
+  )
+  if hit.hit {
+    ret hit.point.x
+  }
+  ret 999.0
+}
+
+func near(a: view Float, b: view Float) ret Bool {
+  ret a - b < 0.001 and b - a < 0.001
+}
+
+func main() {
+  var allocator: EntityAllocator = createEntityAllocator()
+  var transforms: ComponentTable(Transform3D) = createComponentTable(Transform3D)
+  var rigidBodies: ComponentTable(RigidBody) = createComponentTable(RigidBody)
+  var colliders: ComponentTable(Collider) = createComponentTable(Collider)
+  var physics: Physics = createPhysics(
+    def: defaultPhysicsWorldDef()
+    fixedStep: 1.0 / 60.0
+    subSteps: 4
+  )
+  let rockId: EntityId = allocEntity(this: allocator)
+  staticBody(
+    physics: physics
+    rigidBodies: rigidBodies
+    transforms: transforms
+    entityId: rockId
+    position: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+  )
+  let sphere: ShapeId = addSphereCollider(
+    physics: physics
+    rigidBodies: rigidBodies
+    colliders: colliders
+    entityId: rockId
+    def: defaultShapeDef(lengthUnitsPerMeter: 1.0)
+    sphere: Sphere { center: Vec3 { x: 0.0, y: 0.0, z: 0.0 }, radius: 1.0 }
+  )
+  let trunkId: EntityId = allocEntity(this: allocator)
+  staticBody(
+    physics: physics
+    rigidBodies: rigidBodies
+    transforms: transforms
+    entityId: trunkId
+    position: Vec3 { x: 0.0, y: 10.0, z: 0.0 }
+  )
+  let capsule: ShapeId = addCapsuleCollider(
+    physics: physics
+    rigidBodies: rigidBodies
+    colliders: colliders
+    entityId: trunkId
+    def: defaultShapeDef(lengthUnitsPerMeter: 1.0)
+    capsule: Capsule {
+      center1: Vec3 { x: 0.0, y: 0.0, z: 0.3 }
+      center2: Vec3 { x: 0.0, y: 0.0, z: 2.0 }
+      radius: 0.3
+    }
+  )
+  log("sphere of 1 m: the ray meets it at x {hitX(physics: physics, y: 0.0, z: 0.0)}")
+  setSphereShape(
+    physics: physics
+    shapeId: sphere
+    sphere: Sphere { center: Vec3 { x: 0.0, y: 0.0, z: 0.0 }, radius: 2.5 }
+  )
+  log(
+    "made 2.5 m: at x {hitX(physics: physics, y: 0.0, z: 0.0)} ({near(
+      a: hitX(physics: physics, y: 0.0, z: 0.0)
+      b: -2.5
+    )})"
+  )
+  log("capsule of 0.3 m at 1 m up: at x {hitX(physics: physics, y: 10.0, z: 1.0)}")
+  setCapsuleShape(
+    physics: physics
+    shapeId: capsule
+    capsule: Capsule {
+      center1: Vec3 { x: 0.0, y: 0.0, z: 0.8 }
+      center2: Vec3 { x: 0.0, y: 0.0, z: 4.0 }
+      radius: 0.8
+    }
+  )
+  log(
+    "made 0.8 m and 4 m tall: at x {hitX(physics: physics, y: 10.0, z: 1.0)} ({near(
+      a: hitX(physics: physics, y: 10.0, z: 1.0)
+      b: -0.8
+    )}), and at 4.5 m up {hitX(physics: physics, y: 10.0, z: 4.5)}"
+  )
+  destroyPhysics(physics: physics)
+}

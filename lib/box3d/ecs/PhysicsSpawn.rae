@@ -165,6 +165,24 @@ func addCapsuleCollider(
   ret shapeId
 }
 
+# A sphere collider made another size or moved on its body, in place: a
+# fixed pool of bodies can stand for props of every size without making
+# shapes again. `physics` is the world the shape is in.
+func setSphereShape(physics: mod Physics, shapeId: view ShapeId, sphere: view Sphere) {
+  let shape: b3Sphere = toB3Sphere(sphere: sphere)
+  unsafe {
+    b3Shape_SetSphere(shapeId: toB3ShapeId(shapeId: shapeId), sphere: shape)
+  }
+}
+
+# A capsule collider made another size or moved on its body, in place.
+func setCapsuleShape(physics: mod Physics, shapeId: view ShapeId, capsule: view Capsule) {
+  let shape: b3Capsule = toB3Capsule(capsule: capsule)
+  unsafe {
+    b3Shape_SetCapsule(shapeId: toB3ShapeId(shapeId: shapeId), capsule: shape)
+  }
+}
+
 func addHullCollider(
   physics: mod Physics
   rigidBodies: view ComponentTable(RigidBody)
