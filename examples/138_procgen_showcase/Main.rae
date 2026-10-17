@@ -3,7 +3,7 @@
 # (GroveGrass). All geometry is authored in Rae. The shared editor panel (app3d/EditorPanel)
 # is the chrome: drag to orbit, wheel to zoom, the camera bar's mode button for
 # the free WASD camera, the menu button for the settings (sky, time of day,
-# shadows, the three views). Keys 1 / 2 / 3 pick the views too.
+# shadows, the five views). Keys 1 / 2 / 3 / 4 / 5 pick the views too.
 import Gpu2d
 import Vec3
 import Keys
@@ -87,7 +87,7 @@ func createShowcase() ret ShowcaseState {
   Gpu2d.initWindow(
     width: 1280
     height: 800
-    title: "Autumn Grove | 1 Overview  2 Trees  3 Rocks | Drag to orbit"
+    title: "Autumn Grove | 1 Overview  2 Trees  3 Rocks  4 Fluffy  5 Evergreen | Drag to orbit"
   )
   # Remember where the user put the window, across restarts
   var windowGeometry: WindowGeometry = createWindowGeometry(
@@ -100,11 +100,11 @@ func createShowcase() ret ShowcaseState {
   var idIssuer: IdIssuer = IdIssuer.create()
 
   # The settings start on the Preetham sky at a fixed mid-morning hour (the
-  # clock runs from the panel), and the panel's scene chooser is the three views
+  # clock runs from the panel), and the panel's scene chooser is the five views
   let initialView: Int = groveViewNumber(viewName: Sys.getEnv(name: "RAE_GROVE_VIEW"))
   var settings: SettingsState = createSettingsState(
     scene: initialView
-    sceneCount: 3
+    sceneCount: 5
     speed: 1.0
     toon: true
     hour: 10.0
@@ -130,7 +130,7 @@ func createShowcase() ret ShowcaseState {
   camera.fovYDeg = 42
   camera.farZ = 600
   var cameraRig: CameraRig = createCameraRig(camera: camera)
-  cameraRig.maxDistance = 55
+  cameraRig.maxDistance = 80
   setGroveView(camera: camera, cameraRig: cameraRig, groveView: initialView)
 
   # The state takes the renderer's GPU handles with it: moved, never copied
@@ -154,7 +154,7 @@ func createShowcase() ret ShowcaseState {
 # The grove's materials are authored for a bright sun
 const groveSunStrength: Float = 3.1
 
-# The view RAE_GROVE_VIEW names: 1 the grove, 2 the trees, 3 the rocks
+# RAE_GROVE_VIEW: grove, trees, rocks, fluffy, evergreen
 func groveViewNumber(viewName: view String) ret Int {
   if viewName is "trees" {
     ret 2
@@ -162,16 +162,22 @@ func groveViewNumber(viewName: view String) ret Int {
   if viewName is "rocks" {
     ret 3
   }
+  if viewName is "fluffy" {
+    ret 4
+  }
+  if viewName is "evergreen" {
+    ret 5
+  }
   ret 1
 }
 
 # Presets are also the visual gate's reproducible inspection angles.
 func setGroveView(camera: mod Camera3d, cameraRig: mod CameraRig, groveView: view Int) {
   cameraRig.mode = CameraRigMode.orbit
-  camera.target = Vec3.create(x: 0, y: 3, z: 1.7)
+  camera.target = Vec3.create(x: 0, y: 6, z: 2.5)
   cameraRig.yaw = 0.10
   cameraRig.orbitPitch = 0.48
-  cameraRig.distance = 34
+  cameraRig.distance = 54
   if groveView is 2 {
     camera.target = Vec3.create(x: -4.8, y: 2, z: 3.4)
     cameraRig.yaw = -0.5
@@ -182,6 +188,16 @@ func setGroveView(camera: mod Camera3d, cameraRig: mod CameraRig, groveView: vie
     cameraRig.yaw = 0.6
     cameraRig.orbitPitch = 0.55
     cameraRig.distance = 12
+  }
+  if groveView is 4 {
+    camera.target = Vec3.create(x: -14, y: 14, z: 3.4)
+    cameraRig.distance = 17
+    cameraRig.orbitPitch = 0.15
+  } else if groveView is 5 {
+    camera.target = Vec3.create(x: -2, y: 18, z: 4.2)
+    cameraRig.yaw = 1.3
+    cameraRig.distance = 25
+    cameraRig.orbitPitch = 0.16
   }
   snapCameraRigView(rig: cameraRig)
   applyCameraRig(rig: cameraRig, camera: camera)
@@ -223,6 +239,12 @@ func runShowcaseFrame(state: mod ShowcaseState) {
     selectEditorPanelScene(editorPanel: state.editorPanel, scene: 2)
   } else if Sdl3.isKeyPressed(key: Keys.key3) {
     selectEditorPanelScene(editorPanel: state.editorPanel, scene: 3)
+  }
+  if Sdl3.isKeyPressed(key: Keys.key4) {
+    selectEditorPanelScene(editorPanel: state.editorPanel, scene: 4)
+  }
+  if Sdl3.isKeyPressed(key: Keys.key5) {
+    selectEditorPanelScene(editorPanel: state.editorPanel, scene: 5)
   }
   if state.editorPanel.settings.scene is not shownView {
     setGroveView(
