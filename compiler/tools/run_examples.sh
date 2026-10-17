@@ -1187,9 +1187,9 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # while the frame loop rendered an empty UiSystems and no UI showed.
           # The corner menu is EDITOR chrome (lib/app3d/UiModes; GAME is the
           # default), so the shot is taken in EDITOR mode.
-          # The 222 shadow casters are the scene's 198 (two trees per terrain
-          # cell, each its wood and three leaf tones, each bush three tones)
-          # plus the 24 physics cubes. The river is gone: the sea is the only
+          # The 1362 shadow casters are the scene's 1338 (the island's 300-tree
+          # forest, each tree its wood and three leaf tones, each bush three
+          # tones) plus the 24 physics cubes. The river is gone: the sea is the only
           # water body.
           # The physics check (RAE_114_PHYSICS_TEST) settles the cube stacks,
           # walks the hero into one and jumps, then checks the tree trunks: a
@@ -1206,7 +1206,8 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              && [ "$(grep -c "skinned parts: 12" "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c "panel buttons: 4 clip, 0 transport" "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c "\[water\] toon lake: 1 bodies" "$TMP_OUT/render.log")" -eq 1 ] \
-             && [ "$(grep -c "\[shadow\] casters 222, 4 cascades" "$TMP_OUT/render.log")" -eq 1 ] \
+             && [ "$(grep -c "\[shadow\] casters 1362, 4 cascades" "$TMP_OUT/render.log")" -eq 1 ] \
+             && [ "$(grep -c "\[terrain\] 300 trees planted on the island" "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c "\[seamtest\] .* netOk=true physicsOk=true" "$TMP_OUT/render.log")" -eq 1 ] \
              && (cd .. && RAE_114_PHYSICS_TEST=1 RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=60000 \
                 perl -e 'alarm shift; exec @ARGV' 60 "$TMP_OUT/app") > "$TMP_OUT/physics.log" 2>&1 \

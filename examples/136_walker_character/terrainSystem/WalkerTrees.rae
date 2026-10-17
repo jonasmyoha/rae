@@ -6,6 +6,7 @@
 # three leaf tones alone. The leaf-patch forms are unit-sized, so a
 # placement's scale is their width (x, y) and height (z) in metres; the autumn
 # trees and the palm are built at autumnReferenceHeight and scaled uniformly.
+import Math
 import Vec3
 import RendererDeferred
 open Noise
@@ -58,6 +59,9 @@ const speciesPalm: Int = 8
 
 const treeSpeciesCount: Int = 9
 
+# How many trees the island's forest has (terrainSystem/Forest)
+const forestSize: Int = 300
+
 # The height (m) the autumn trees and the palm are built at; a placement
 # scales them from it
 const autumnReferenceHeight: Float = 5.5
@@ -88,11 +92,10 @@ func treeSpeciesForm(species: view Int) ret FluffyForm {
   ret FluffyForm.broadleaf
 }
 
-# Which species tree `index` (0 or 1) of a cell is: the leaf-patch broadleaf
-# and spruce most, then the autumn trees, the umbrella pine and cypress, and
-# now and then a palm
-func treeSpeciesAt(cellX: view Int, cellY: view Int, index: view Int) ret Int {
-  let pick: Float = hash2(x: cellX, y: cellY, seed: 131 + index * 57)
+# The species a pick in 0..1 stands for: the leaf-patch broadleaf and spruce
+# most, then the autumn trees, the umbrella pine and cypress, and with
+# `palms` now and then a palm
+func speciesForPick(pick: view Float, palms: view Bool) ret Int {
   if pick < 0.18 {
     ret speciesBroadleaf
   }
@@ -111,7 +114,7 @@ func treeSpeciesAt(cellX: view Int, cellY: view Int, index: view Int) ret Int {
   if pick < 0.78 {
     ret speciesRed
   }
-  if pick < 0.88 {
+  if pick < 0.88 or palms is false {
     ret speciesGold
   }
   if pick < 0.96 {
@@ -120,16 +123,24 @@ func treeSpeciesAt(cellX: view Int, cellY: view Int, index: view Int) ret Int {
   ret speciesPalm
 }
 
-# A tree's scale in a cell (Transform3D.scale). For a leaf-patch form it is
+# Which species tree number `number`, at (x, y), is. Trees of a kind stand
+# together: each 36 m block of the island has one main species, so a forest
+# patch is a stand of spruces, of red maples or of cypresses; three trees in
+# ten are mixed in from any species, the odd palm among them.
+func treeSpeciesAt(x: view Float, y: view Float, number: view Int) ret Int {
+  let blockX: Int = Math.floor(x: x / 36.0).toInt()
+  let blockY: Int = Math.floor(x: y / 36.0).toInt()
+  if hash2(x: number, y: 1, seed: 733) < 0.3 {
+    ret speciesForPick(pick: hash2(x: number, y: 2, seed: 977), palms: true)
+  }
+  ret speciesForPick(pick: hash2(x: blockX, y: blockY, seed: 131), palms: false)
+}
+
+# Tree number `number`'s scale (Transform3D.scale). For a leaf-patch form it is
 # its width (x, y) and height (z) in metres; an autumn tree or the palm is
 # scaled uniformly from autumnReferenceHeight.
-func treeScaleAt(
-  species: view Int
-  cellX: view Int
-  cellY: view Int
-  index: view Int
-) ret Vec3 {
-  let size: Float = hash2(x: cellX, y: cellY, seed: 109 + index * 57)
+func treeScaleAt(species: view Int, number: view Int) ret Vec3 {
+  let size: Float = hash2(x: number, y: 3, seed: 109)
   if species >= speciesOrange {
     var height: Float = 4.2 + size * 2.6
     if species is speciesPalm {

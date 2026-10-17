@@ -12,9 +12,9 @@
 #   loose bodies and jumps. The controller of the character (its feet, heading
 #   and gait) is read back from the mover after each step.
 # - A few stacks of cubes near the spawn are dynamic bodies.
-# - Every tree's trunk is a static capsule. The trees are streamed with the
-#   terrain, so the push system moves each trunk with its tree's Transform3D
-#   when the terrain re-places it.
+# - Every tree's trunk is a static capsule (the island's forest, planted once
+#   by terrainSystem/Forest). Should a tree's Transform3D change, the push
+#   system moves its trunk with it.
 #
 # This is the pattern a game copies for a character in a physics world: its
 # own props are more `spawnPhysicsCube` calls, its own ground another venue.
@@ -307,9 +307,8 @@ func characterSpeed(physicsSystem: view PhysicsSystem, entityId: view EntityId) 
 # A static body with a trunk capsule for every tree entity (every row of the
 # GameWorld's TreeVariant table), at its tree's current pose. The trunk is the
 # same for every species and size (WalkerTrees.treeTrunkRadius / Height), so a
-# tree re-placed into another cell only needs its body moved, which the push
-# system does when updateInfiniteTerrain writes the new Transform3D. The
-# number of trunks.
+# tree that moves only needs its body moved, which the push system does when
+# its Transform3D changes. The number of trunks.
 func addTreeTrunks(physicsSystem: mod PhysicsSystem, world: mod GameWorld) ret Int {
   var trunks: Int = 0
   loop var i: Int = 0, i < componentCount(this: world.treeVariants), ++i {
