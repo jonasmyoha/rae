@@ -1,0 +1,63 @@
+# One landmark tree in its own clearing. Meshes are uploaded once, not per frame.
+open procgen/Camphor
+open procgen/CamphorGeometry
+open procgen/Foliage
+open RendererDeferred
+open Scene3d
+open Mesh3d
+open Vec3
+open ecs/Entity
+open GroveGrass
+
+func addCamphorGrove(
+  world: mod World3d
+  renderer: mod DeferredRenderer
+  obstacles: mod List(GroveObstacle)
+) {
+  # Measured crown top: 27.246 m; this gives 27.93 m, 1 m above the tall cypress.
+  let tree: CamphorTree = camphorTree(seed: 219)
+  obstacles.add(value: { x: -34, y: 9, radius: 6.5 })
+  loop var part: Int = 0, part < 5, ++part {
+    var mesh: MeshData = foliageMesh()
+    var color: Vec3 = Vec3.create(x: 0.19, y: 0.115, z: 0.065)
+    if part is 0 {
+      mesh = tree.wood
+    } else if part is 4 {
+      mesh = camphorMoss(wood: tree.wood)
+      color = Vec3.create(x: 0.12, y: 0.19, z: 0.045)
+    } else {
+      mesh = camphorLeaves(
+        crowns: tree.crowns
+        seed: 219
+        tone: part - 1
+        leafCount: 800
+      )
+      color = Vec3.create(
+        x: 0.065 + part.toFloat() * 0.015
+        y: 0.19 + part.toFloat() * 0.025
+        z: 0.055 + part.toFloat() * 0.008
+      )
+    }
+    let meshHandle: MeshHandle = uploadMesh(
+      renderer: renderer
+      verts: mesh.verts
+      vertCount: mesh.vertCount
+      indices: mesh.indices
+    )
+    let entityId: EntityId = world3dAddMeshInstance(
+      world: world
+      mesh: meshHandle
+      material: {
+        baseColor: color
+        metallic: 0
+        roughness: 1
+        emission: { x: 0, y: 0, z: 0 }
+        toon: true
+      }
+      position: { x: -34, y: 9, z: 0 }
+      rotation: { x: 0, y: 0, z: 0 }
+      scale: { x: 1, y: 1, z: 1.025 }
+    )
+    log("camphor part={part} vertices={mesh.vertCount} triangles={mesh.indices.length / 3}")
+  }
+}
