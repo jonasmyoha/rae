@@ -1,0 +1,218 @@
+# app3d/SpriteBake — a picture of a prop for a billboard (GbufferSprite's
+# textured, alpha-cut sprite pass): its mesh parts drawn from the side into
+# an RGBA image, with see-through pixels wherever no part is. A far level of
+# detail (app3d/PropField's sprite level) draws the picture instead of the
+# meshes: one quad per prop.
+#
+# It is drawn on the CPU, once, with a plain triangle rasteriser and a depth
+# buffer, so it needs no GPU pass and the same parts always give the same
+# picture. The view looks along +y (from -y) with x to the right and z up,
+# orthographic. The picture's bottom row is the prop's foot (z = 0) and its
+# top row the prop's highest point; x = 0 is its middle column, and the
+# picture is `aspect` times as wide as it is tall. A part's colour is lit by
+# a fixed light from the upper left and the front, so the crown keeps its
+# volume once the deferred pass lights the sprite (which faces its normal up).
+#
+#   let picture: SpritePicture = bakeSpritePicture(parts: meshes, colors: colors, width: 96,
+#   height: 128, aspect: 0.75)
+#   spriteUploadLayer(layer: 0, pixels: picture.pixels.data, w: picture.width, h: picture.height)
+#   ...and the world height of the picture is picture.top (times the prop's scale)
+import Math
+import Vec3
+open Mesh3d
+
+# One baked picture: its pixels (row by row from the top, each packed red +
+# green * 256 + blue * 65536 + alpha * 16777216, the sprite array's layout),
+# its size, and the height (in the parts' units) its top row stands for
+type SpritePicture {
+  pixels: List(Int)
+  width: Int
+  height: Int
+  top: Float
+}
+
+# The light the picture is baked with: from the upper left, toward the eye
+func spriteBakeLight() ret Vec3 {
+  ret Vec3.vnorm(a: Vec3.create(x: -0.45, y: -0.55, z: 0.7))
+}
+
+# Pack a colour (0..1 each) and an alpha (0..255) into one sprite pixel
+func spritePixel(color: view Vec3, alpha: view Int) ret Int {
+  let red: Int = Math.min(a: Math.max(a: (color.x * 255.0 + 0.5).toInt(), b: 0), b: 255)
+  let green: Int = Math.min(a: Math.max(a: (color.y * 255.0 + 0.5).toInt(), b: 0), b: 255)
+  let blue: Int = Math.min(a: Math.max(a: (color.z * 255.0 + 0.5).toInt(), b: 0), b: 255)
+  ret red + green * 256 + blue * 65536 + alpha * 16777216
+}
+
+# A vertex of a part: its position (8 floats per vertex: position, normal, uv)
+func bakeVertex(mesh: view MeshData, index: view Int) ret Vec3 {
+  let base: Int = index * 8
+  ret Vec3.create(
+    x: mesh.verts.copyAtFallback(index: base, fallback: 0.0)
+    y: mesh.verts.copyAtFallback(index: base + 1, fallback: 0.0)
+    z: mesh.verts.copyAtFallback(index: base + 2, fallback: 0.0)
+  )
+}
+
+func bakeNormal(mesh: view MeshData, index: view Int) ret Vec3 {
+  let base: Int = index * 8
+  ret Vec3.create(
+    x: mesh.verts.copyAtFallback(index: base + 3, fallback: 0.0)
+    y: mesh.verts.copyAtFallback(index: base + 4, fallback: 0.0)
+    z: mesh.verts.copyAtFallback(index: base + 5, fallback: 1.0)
+  )
+}
+
+# The highest point of all the parts (at least a little above the foot)
+func partsTop(parts: view List(MeshData)) ret Float {
+  var top: Float = 0.001
+  loop let mesh: view MeshData in parts {
+    loop var vertex: Int = 0, vertex < mesh.vertCount, ++vertex {
+      top = Math.max(a: top, b: bakeVertex(mesh: mesh, index: vertex).z)
+    }
+  }
+  ret top
+}
+
+# The picture as it is being drawn: colours and the depth of what each pixel
+# shows (smaller y is nearer the eye)
+type SpriteCanvas {
+  colors: List(Int)
+  depths: List(Float)
+  width: Int
+  height: Int
+  # Picture pixels per unit, and where x = 0 and z = 0 fall
+  pixelsPerUnit: Float
+  centreColumn: Float
+  footRow: Float
+}
+
+# One triangle into the canvas, in `color` (already lit)
+func bakeTriangle(
+  canvas: mod SpriteCanvas
+  first: view Vec3
+  second: view Vec3
+  third: view Vec3
+  color: view Int
+) {
+  # Picture coordinates: column right, row down
+  let ax: Float = canvas.centreColumn + first.x * canvas.pixelsPerUnit
+  let ay: Float = canvas.footRow - first.z * canvas.pixelsPerUnit
+  let bx: Float = canvas.centreColumn + second.x * canvas.pixelsPerUnit
+  let by: Float = canvas.footRow - second.z * canvas.pixelsPerUnit
+  let cx: Float = canvas.centreColumn + third.x * canvas.pixelsPerUnit
+  let cy: Float = canvas.footRow - third.z * canvas.pixelsPerUnit
+  let area: Float = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
+  if Math.abs(value: area) < 0.000001 {
+    ret
+  }
+  let minColumn: Int = Math.max(
+    a: Math.floor(x: Math.min(a: ax, b: Math.min(a: bx, b: cx))).toInt()
+    b: 0
+  )
+  let maxColumn: Int = Math.min(
+    a: Math.ceil(x: Math.max(a: ax, b: Math.max(a: bx, b: cx))).toInt()
+    b: canvas.width - 1
+  )
+  let minRow: Int = Math.max(
+    a: Math.floor(x: Math.min(a: ay, b: Math.min(a: by, b: cy))).toInt()
+    b: 0
+  )
+  let maxRow: Int = Math.min(
+    a: Math.ceil(x: Math.max(a: ay, b: Math.max(a: by, b: cy))).toInt()
+    b: canvas.height - 1
+  )
+  loop var row: Int = minRow, row <= maxRow, ++row {
+    let py: Float = row.toFloat() + 0.5
+    loop var column: Int = minColumn, column <= maxColumn, ++column {
+      let px: Float = column.toFloat() + 0.5
+      # Barycentric weights: all the same sign inside the triangle
+      let weightA: Float = ((bx - px) * (cy - py) - (by - py) * (cx - px)) / area
+      let weightB: Float = ((cx - px) * (ay - py) - (cy - py) * (ax - px)) / area
+      let weightC: Float = 1.0 - weightA - weightB
+      if weightA >= 0.0 and weightB >= 0.0 and weightC >= 0.0 {
+        let depth: Float = weightA * first.y + weightB * second.y + weightC * third.y
+        let pixel: Int = row * canvas.width + column
+        if depth < canvas.depths.copyAtFallback(index: pixel, fallback: 0.0) {
+          canvas.depths.set(index: pixel, value: depth)
+          canvas.colors.set(index: pixel, value: color)
+        }
+      }
+    }
+  }
+}
+
+# Bake the picture of `parts`, each in its colour (`colors`, same order),
+# `width` x `height` pixels, `aspect` (its width over its height in the
+# parts' units) wide.
+func bakeSpritePicture(
+  parts: view List(MeshData)
+  colors: view List(Vec3)
+  width: view Int
+  height: view Int
+  aspect: view Float
+) ret SpritePicture {
+  let top: Float = partsTop(parts: parts)
+  var canvas: SpriteCanvas = {
+    colors: List.create(Int, cap: width * height)
+    depths: List.create(Float, cap: width * height)
+    width: width
+    height: height
+    pixelsPerUnit: height.toFloat() / top
+    centreColumn: width.toFloat() * 0.5
+    footRow: height.toFloat()
+  }
+  # The picture is `aspect` units wide per unit of height: stretch the columns
+  # so the whole width maps onto `width` pixels
+  let columnScale: Float = width.toFloat() / (height.toFloat() * aspect)
+  loop var pixel: Int = 0, pixel < width * height, ++pixel {
+    canvas.colors.add(value: 0)
+    canvas.depths.add(value: 1000000.0)
+  }
+  let light: Vec3 = spriteBakeLight()
+  loop var part: Int = 0, part < parts.length, ++part {
+    if let mesh: view MeshData => parts.viewAt(index: part) {
+      let base: Vec3 = colors.copyAtFallback(
+        index: part
+        fallback: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
+      )
+      var triangle: Int = 0
+      loop triangle + 2 < mesh.indices.length {
+        let first: Int = mesh.indices.copyAtFallback(index: triangle, fallback: 0)
+        let second: Int = mesh.indices.copyAtFallback(index: triangle + 1, fallback: 0)
+        let third: Int = mesh.indices.copyAtFallback(index: triangle + 2, fallback: 0)
+        # The face's light from its vertices' normals, turned toward the eye
+        # (leaves are two-sided)
+        var normal: Vec3 = Vec3.vnorm(
+          a: Vec3.vadd(
+            a: bakeNormal(mesh: mesh, index: first)
+            b: Vec3.vadd(
+              a: bakeNormal(mesh: mesh, index: second)
+              b: bakeNormal(mesh: mesh, index: third)
+            )
+          )
+        )
+        if normal.y > 0.0 {
+          normal = Vec3.create(x: normal.x, y: -normal.y, z: normal.z)
+        }
+        let lit: Float = 0.62 + 0.48 * Math.max(a: Vec3.vdot(a: normal, b: light), b: 0.0)
+        let color: Int = spritePixel(color: Vec3.vscale(a: base, s: lit), alpha: 255)
+        var firstPoint: Vec3 = bakeVertex(mesh: mesh, index: first)
+        var secondPoint: Vec3 = bakeVertex(mesh: mesh, index: second)
+        var thirdPoint: Vec3 = bakeVertex(mesh: mesh, index: third)
+        firstPoint.x = firstPoint.x * columnScale
+        secondPoint.x = secondPoint.x * columnScale
+        thirdPoint.x = thirdPoint.x * columnScale
+        bakeTriangle(
+          canvas: canvas
+          first: firstPoint
+          second: secondPoint
+          third: thirdPoint
+          color: color
+        )
+        triangle = triangle + 3
+      }
+    }
+  }
+  ret SpritePicture { pixels: own canvas.colors, width: width, height: height, top: top }
+}

@@ -21,6 +21,12 @@
 #   finishPropField(field: field)
 #   ...each frame: gatherPropField(field: field, propView: propViewOf(camera:, aspect:), toon:)
 #   ...G-buffer: drawPropField(cache:, resources:, field:); shadows: drawPropFieldShadows
+#
+# A level with no parts that faces the camera is a SPRITE level: instead of
+# meshes, each prop there is one billboard quad showing its kind's picture
+# (setPropKindSprite: a layer of GbufferSprite's image array, made with
+# app3d/SpriteBake). The field's sprites go into one batch, drawn with
+# drawPropFieldSprites in the G-buffer pass. They cast no shadow.
 import Math
 import Vec3
 open Scene3d
@@ -30,6 +36,7 @@ open GbufferInstanced
 open Gbuffer
 open gpu/GpuResources
 open RendererDeferred
+open GbufferSprite
 
 # One mesh of a level of detail, in its material
 type PropPart {
@@ -89,6 +96,12 @@ type PropField {
   cellStart: List(Int)
   cellCenterZ: List(Float)
   cellRadius: List(Float)
+  # Per kind: the sprite array layer of its picture (-1: none) and the
+  # picture's world height at scale 1 (setPropKindSprite)
+  spriteLayers: List(Int)
+  spriteHeights: List(Float)
+  # This frame's billboards of every kind's sprite level
+  spriteBatch: InstanceBatch
   # One instance batch per kind, level and part; `lodFirstBatch` is each
   # (kind, level)'s first, by kindFirstLod[kind] + level
   batches: List(InstanceBatch)
@@ -136,6 +149,9 @@ func createPropField(
     cellStart: List.create(Int, cap: count * count + 1)
     cellCenterZ: List.create(Float, cap: count * count)
     cellRadius: List.create(Float, cap: count * count)
+    spriteLayers: List.create(Int, cap: 8)
+    spriteHeights: List.create(Float, cap: 8)
+    spriteBatch: createInstanceBatch(mesh: meshHandleNone(), capacity: 0)
     batches: List.create(InstanceBatch, cap: 16)
     batchMeshes: List.create(MeshHandle, cap: 16)
     batchMaterials: List.create(Material3d, cap: 16)
@@ -152,8 +168,28 @@ func createPropField(
 
 # Add a kind; returns its index for placements.
 func addPropKind(field: mod PropField, kind: view PropKind) ret Int {
+  field.spriteLayers.add(value: -1)
+  field.spriteHeights.add(value: 0.0)
   field.kinds.add(value: kind)
   ret field.kinds.length - 1
+}
+
+# Give kind `kind` its picture for its sprite level: layer `layer` of the
+# sprite image array, `height` tall in the world at scale 1 (the baked
+# picture's top). A sprite level is one with no parts that faces the camera.
+func setPropKindSprite(
+  field: mod PropField
+  kind: view Int
+  layer: view Int
+  height: view Float
+) {
+  field.spriteLayers.set(index: kind, value: layer)
+  field.spriteHeights.set(index: kind, value: height)
+}
+
+# Is `lod` a sprite level (a billboard of its kind's picture)?
+func propLodIsSprite(lod: view PropLod) ret Bool {
+  ret lod.facesCamera and lod.parts.length is 0
 }
 
 # Add one prop (before finishPropField).
@@ -299,6 +335,31 @@ func finishPropField(field: mod PropField) {
       }
     }
   }
+  # The sprite batch: as many as the props of kinds with a sprite level (at
+  # most batchLimit per such kind when it is set)
+  var spriteCapacity: Int = 0
+  loop var k: Int = 0, k < field.kinds.length, ++k {
+    let kind: PropKind = field.kinds.copyAtDefault(index: k)
+    var hasSprite: Bool = false
+    loop let lod: view PropLod in kind.lods {
+      if propLodIsSprite(lod: lod) {
+        hasSprite = true
+      }
+    }
+    if hasSprite {
+      var kindCount: Int = 0
+      loop let placement: view PropPlacement in field.placements {
+        if placement.kind is k {
+          kindCount = kindCount + 1
+        }
+      }
+      if field.batchLimit > 0 and kindCount > field.batchLimit {
+        kindCount = field.batchLimit
+      }
+      spriteCapacity = spriteCapacity + kindCount
+    }
+  }
+  field.spriteBatch = createInstanceBatch(mesh: meshHandleNone(), capacity: spriteCapacity)
   field.finished = true
 }
 
@@ -352,6 +413,7 @@ func gatherPropField(field: mod PropField, propView: view PropView, toon: view B
       resetInstanceBatch(batch: batch)
     }
   }
+  resetInstanceBatch(batch: field.spriteBatch)
   field.visibleCount = 0
   field.cellsVisited = 0
   if field.finished is false {
@@ -401,6 +463,8 @@ func gatherPropField(field: mod PropField, propView: view PropView, toon: view B
 # its model matrix; `drawn` false when it is out of reach or out of view
 type PropDraw {
   drawn: Bool
+  # At its kind's sprite level: a billboard, not meshes
+  sprite: Bool
   firstBatch: Int
   partCount: Int
   model: Mat4
@@ -410,6 +474,7 @@ func propDrawOf(field: view PropField, propView: view PropView, index: view Int)
   let placement: PropPlacement = field.placements.copyAtDefault(index: index)
   var result: PropDraw = {
     drawn: false
+    sprite: false
     firstBatch: 0
     partCount: 0
     model: field.models.copyAtDefault(index: index)
@@ -425,6 +490,7 @@ func propDrawOf(field: view PropField, propView: view PropView, index: view Int)
       ) {
         if let lod: view PropLod => kind.lods.viewAt(index: lodIndex) {
           result.drawn = true
+          result.sprite = propLodIsSprite(lod: lod)
           result.partCount = lod.parts.length
           result.firstBatch = field.lodFirstBatch.copyAtFallback(
             index: field.kindFirstLod.copyAtFallback(index: placement.kind, fallback: 0) + lodIndex
@@ -457,6 +523,18 @@ func gatherProp(
   if draw.drawn is false {
     ret
   }
+  if draw.sprite {
+    let placement: PropPlacement = field.placements.copyAtDefault(index: index)
+    addSpriteInstance(
+      batch: field.spriteBatch
+      position: placement.position
+      height: field.spriteHeights.copyAtFallback(index: placement.kind, fallback: 1.0) * placement.scale
+      layer: field.spriteLayers.copyAtFallback(index: placement.kind, fallback: 0)
+      toon: toon
+    )
+    field.visibleCount = field.visibleCount + 1
+    ret
+  }
   loop var p: Int = 0, p < draw.partCount, ++p {
     var material: Material3d = field.batchMaterials.copyAtDefault(index: draw.firstBatch + p)
     material.toon = toon
@@ -476,6 +554,28 @@ func gatherProp(
 func drawPropField(cache: mod GbufferCache, resources: mod GpuResources, field: view PropField) {
   loop let batch: view InstanceBatch in field.batches {
     drawInstances(cache: cache, resources: resources, batch: batch)
+  }
+}
+
+# This frame's billboards (the sprite levels) into the G-buffer: one draw of
+# the sprite pass, `sprites` its pipeline and image array
+func drawPropFieldSprites(
+  cache: mod GbufferCache
+  resources: mod GpuResources
+  field: view PropField
+  sprites: mod SpriteCache
+) {
+  if field.spriteBatch.count <= 0 {
+    ret
+  }
+  unsafe {
+    drawSpriteInstances(
+      cache: sprites
+      resources: resources
+      gbuffer: cache
+      records: field.spriteBatch.records.data
+      count: field.spriteBatch.count
+    )
   }
 }
 

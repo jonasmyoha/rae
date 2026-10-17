@@ -30,6 +30,7 @@ open ecs/Query
 open ecs/Transform
 open terrainSystem/WalkerTrees
 open app3d/PropField
+open GbufferSprite
 
 # Single source of truth for the ground colour: the terrain ground material AND
 # the GPU grass gradient's bottom both read this, so the grass roots match ground.
@@ -153,6 +154,8 @@ type TerrainSystem {
   # at three levels of detail, its placements in cells; only what is near and
   # in view is drawn, one instanced draw per species, level and part
   forest: PropField
+  # The sprite pass the forest's far level (its billboards) is drawn with
+  sprites: SpriteCache
   # The bush's three leaf tones
   bushParts: List(PropInstancer)
 }
@@ -499,12 +502,18 @@ func gatherTerrainProps(terrainSystem: mod TerrainSystem, world: view GameWorld)
 func drawTerrainProps(
   cache: mod GbufferCache
   resources: mod GpuResources
-  terrainSystem: view TerrainSystem
+  terrainSystem: mod TerrainSystem
 ) {
   drawInstances(cache: cache, resources: resources, batch: terrainSystem.rockProp.batch)
   drawInstances(cache: cache, resources: resources, batch: terrainSystem.flowerProp.batch)
   drawInstances(cache: cache, resources: resources, batch: terrainSystem.grassProp.batch)
   drawPropField(cache: cache, resources: resources, field: terrainSystem.forest)
+  drawPropFieldSprites(
+    cache: cache
+    resources: resources
+    field: terrainSystem.forest
+    sprites: terrainSystem.sprites
+  )
   loop let part: view PropInstancer in terrainSystem.bushParts {
     drawInstances(cache: cache, resources: resources, batch: part.batch)
   }
@@ -680,7 +689,8 @@ func createTerrainSystem(
 
   # The forest's kinds now; its trees are planted once the spawn is known
   # (Forest.plantForest)
-  var forest: PropField = createForestField(renderer: renderer)
+  var sprites: SpriteCache = createSpriteCache()
+  var forest: PropField = createForestField(renderer: renderer, sprites: sprites)
   var terrainSystem: TerrainSystem = {
     centreCellX: 1000000000
     centreCellY: 1000000000
@@ -699,6 +709,7 @@ func createTerrainSystem(
       capacity: terrainCellCount * 2
     )
     forest: own forest
+    sprites: own sprites
     bushParts: own createBushParts(renderer: renderer, capacity: terrainCellCount)
   }
   ret own terrainSystem

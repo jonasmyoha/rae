@@ -18,6 +18,7 @@ import Noise
 import Vec3
 open terrainSystem/WalkerTrees
 open app3d/PropField
+open GbufferSprite
 
 # The side of the forested square (m), round the origin
 const forestExtent: Float = 1200.0
@@ -45,8 +46,9 @@ func forestDensity(x: view Float, y: view Float) ret Float {
   ret Noise.value2(x: x / 90.0, y: y / 90.0, seed: 401)
 }
 
-# The empty forest field: its kinds, no trees yet
-func createForestField(renderer: mod DeferredRenderer) ret PropField {
+# The empty forest field: its kinds, no trees yet (the far level's
+# billboard pictures go into `sprites`' image array)
+func createForestField(renderer: mod DeferredRenderer, sprites: mod SpriteCache) ret PropField {
   var field: PropField = createPropField(
     originX: forestExtent * -0.5
     originY: forestExtent * -0.5
@@ -54,7 +56,7 @@ func createForestField(renderer: mod DeferredRenderer) ret PropField {
     cellSize: forestCellSize
   )
   field.batchLimit = forestBatchLimit
-  addForestKinds(field: field, renderer: renderer)
+  addForestKinds(field: field, renderer: renderer, sprites: sprites)
   ret field
 }
 
