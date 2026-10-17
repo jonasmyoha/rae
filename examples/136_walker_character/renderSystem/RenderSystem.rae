@@ -512,6 +512,9 @@ func renderApp(
   let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
   let t: Float = (now - frame.startT) as Float
 
+  # The forest's trees near and in view, at their levels of detail, for both
+  # the shadow pass and the G-buffer pass below
+  gatherForest(terrainSystem: terrainSystem, camera: cameraSystem.camera, aspect: aspect)
   gpuPassTimingBegin(renderer: renderSystem.renderer)
   loop var oi: Int = 0, oi < deferredOrderLength(renderer: renderSystem.renderer), ++oi {
     let tag: Int = deferredTagAt(renderer: renderSystem.renderer, i: oi)

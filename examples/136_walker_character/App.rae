@@ -581,6 +581,7 @@ func createApp() ret App {
     spawnOnLand(controller: characterController, groundZ: groundZ)
     # The island's forest, with a clearing around the spawn for the cube stacks
     let treeCount: Int = plantForest(
+      terrainSystem: terrainSystem
       world: gameWorld
       spawnX: characterController.position.x
       spawnY: characterController.position.y
@@ -869,7 +870,7 @@ func runWalkerApp() ret Int {
   var app: App = createApp()
   # #739/#740/#741: the GameWorld holds the hero + crowd (controllers), the
   # skinned body parts (PartRoughness), and the terrain props + heightfield tiles
-  # (PropKind) — all recycled ECS entities.
+  # (TerrainProp) — all recycled ECS entities.
   log(
     "[ecs] GameWorld: {gameWorldEntityCount(world: app.world)} entities ({gameWorldPartCount(
       world: app.world

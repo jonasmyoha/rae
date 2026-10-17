@@ -1187,9 +1187,12 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # while the frame loop rendered an empty UiSystems and no UI showed.
           # The corner menu is EDITOR chrome (lib/app3d/UiModes; GAME is the
           # default), so the shot is taken in EDITOR mode.
-          # The 1362 shadow casters are the scene's 1338 (the island's 300-tree
-          # forest, each tree its wood and three leaf tones, each bush three
-          # tones) plus the 24 physics cubes. The river is gone: the sea is the only
+          # The shadow casters (about 650) are the small props one by one, the
+          # island's 300-tree forest as instanced batches (one per species,
+          # near or middle level and part, PropField; how many depends on what
+          # is in view) and the 24 physics cubes. Drawn one tree part at a
+          # time the forest alone was over 1300, so more than 800 means the
+          # forest lost its batching. The river is gone: the sea is the only
           # water body.
           # The physics check (RAE_114_PHYSICS_TEST) settles the cube stacks,
           # walks the hero into one and jumps, then checks the tree trunks: a
@@ -1206,7 +1209,8 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              && [ "$(grep -c "skinned parts: 12" "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c "panel buttons: 4 clip, 0 transport" "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c "\[water\] toon lake: 1 bodies" "$TMP_OUT/render.log")" -eq 1 ] \
-             && [ "$(grep -c "\[shadow\] casters 1362, 4 cascades" "$TMP_OUT/render.log")" -eq 1 ] \
+             && CASTERS="$(sed -n 's/.*\[shadow\] casters \([0-9]*\), 4 cascades.*/\1/p' "$TMP_OUT/render.log" | head -1)" \
+             && [ -n "$CASTERS" ] && [ "$CASTERS" -ge 400 ] && [ "$CASTERS" -le 800 ] \
              && [ "$(grep -c "\[terrain\] 300 trees planted on the island" "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c "\[seamtest\] .* netOk=true physicsOk=true" "$TMP_OUT/render.log")" -eq 1 ] \
              && (cd .. && RAE_114_PHYSICS_TEST=1 RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=60000 \
