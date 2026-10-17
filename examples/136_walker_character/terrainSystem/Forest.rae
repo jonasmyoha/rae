@@ -1,0 +1,113 @@
+# The island's forest: forestSize trees (WalkerTrees) planted ONCE over the
+# whole island at startup. The island is small (lib/WorldBiome's 60 m radius
+# and its shore) and does not change, so its trees are not streamed with the
+# small props: every tree is one entity with one Box3D trunk
+# (PhysicsSystem.addTreeTrunks) for the whole run.
+#
+# Seeded spots are tried over the island; a spot gets a tree when it is grassy
+# land, outside the spawn clearing, where the forest-density noise says
+# forest, and not closer than forestSpacing to a tree already planted. The
+# density noise leaves meadows between woods; the close spacing presses the
+# crowns into each other; and the species come in stands (treeSpeciesAt).
+import Math
+import Noise
+import Vec3
+import Quat
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Transform
+open terrainSystem/WalkerTrees
+
+# The grass a tree wants under it: less than the small props, so woods reach
+# onto drier ground, but never the beach or bare rock
+const forestGrassMin: Float = 0.12
+
+# No tree grows this close (m) to the spawn, where the cube stacks stand
+const spawnClearingRadius: Float = 11.0
+
+# The closest two trunks stand (m): the crowns (4 to 7 m wide) overlap
+const forestSpacing: Float = 2.2
+
+# The square searched for spots: the island and its shore fit inside ±90 m
+const forestReach: Float = 90.0
+
+# Spots tried before giving up (the island holds forestSize long before)
+const forestAttempts: Int = 100000
+
+# How much forest grows at (x, y), 0 to 1: value noise about 45 m across,
+# so dense woods, thin woods and open meadows each span a few dozen metres
+func forestDensity(x: view Float, y: view Float) ret Float {
+  ret Noise.value2(x: x / 45.0, y: y / 45.0, seed: 401)
+}
+
+# Plant the forest around a spawn at (spawnX, spawnY). The number of trees.
+func plantForest(
+  world: mod GameWorld
+  spawnX: view Float
+  spawnY: view Float
+  groundZ: view Float
+) ret Int {
+  var planted: List(Vec3) = List.create(Vec3, cap: forestSize)
+  loop var attempt: Int = 0, attempt < forestAttempts and planted.length < forestSize, ++attempt {
+    let x: Float = (Noise.hash2(x: attempt, y: 1, seed: 811) * 2.0 - 1.0) * forestReach
+    let y: Float = (Noise.hash2(x: attempt, y: 2, seed: 811) * 2.0 - 1.0) * forestReach
+    # Thinner where the density is low: a spot is kept with the chance the
+    # density gives, so meadows keep only the odd lone tree
+    let chance: Float = Math.min(
+      a: Math.max(a: (forestDensity(x: x, y: y) - 0.1) * 3.0, b: 0.06)
+      b: 1.0
+    )
+    if Noise.hash2(x: attempt, y: 3, seed: 811) > chance {
+      continue
+    }
+    let gapX: Float = x - spawnX
+    let gapY: Float = y - spawnY
+    if gapX * gapX + gapY * gapY < spawnClearingRadius * spawnClearingRadius {
+      continue
+    }
+    if terrainPropAllowed(x: x, y: y, minGrass: forestGrassMin) is false {
+      continue
+    }
+    var crowded: Bool = false
+    loop let tree: view Vec3 in planted {
+      let apartX: Float = tree.x - x
+      let apartY: Float = tree.y - y
+      if apartX * apartX + apartY * apartY < forestSpacing * forestSpacing {
+        crowded = true
+        break
+      }
+    }
+    if crowded {
+      continue
+    }
+    let number: Int = planted.length
+    let position: Vec3 = Vec3.create(
+      x: x
+      y: y
+      z: terrainHeightAt(x: x, y: y, groundZ: groundZ) - 0.05
+    )
+    planted.add(value: position)
+    let species: Int = treeSpeciesAt(x: x, y: y, number: number)
+    let treeEntityId: EntityId = spawnProp(world: world, kind: kindTree, slot: number)
+    componentSet(
+      this: world.transforms
+      entityId: treeEntityId
+      data: Transform3D {
+        position: position
+        rotation: Quat.fromAxisAngle(
+          axis: Vec3.create(x: 0.0, y: 0.0, z: 1.0)
+          angle: Noise.hash2(x: number, y: 4, seed: 811) * 6.2831853
+        )
+        scale: treeScaleAt(species: species, number: number)
+      }
+    )
+    componentSet(
+      this: world.treeVariants
+      entityId: treeEntityId
+      data: TreeVariant { species: species }
+    )
+    let kind: mod PropKind => componentMod(this: world.propKinds, entityId: treeEntityId)
+    kind.active = true
+  }
+  ret planted.length
+}
