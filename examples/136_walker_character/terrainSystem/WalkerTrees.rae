@@ -1,0 +1,199 @@
+# The walker's trees and bushes: the lib's leaf-patch forms
+# (lib/procgen/FluffyFoliage.rae, the trees of Autumn Grove), generated once
+# and drawn instanced. A tree is four parts — its wood and its leaves in three
+# tones — and a bush is the three leaf tones alone. Every form is unit-sized,
+# so a placement's scale is its width (x, y) and its height (z).
+import Vec3
+import RendererDeferred
+open Noise
+open Scene3d
+open Mesh3d
+open GbufferInstanced
+open procgen/FluffyFoliage
+
+# One instanced prop draw: its mesh, its material, and a pre-sized batch refilled
+# each frame. The material is a value (not a scene index) so terrain owns no
+# Scene3d state.
+type PropInstancer {
+  mesh: MeshHandle
+  material: Material3d
+  batch: InstanceBatch
+}
+
+func createPropInstancer(
+  mesh: view MeshHandle
+  material: view Material3d
+  capacity: copy Int
+) ret PropInstancer {
+  ret PropInstancer {
+    mesh: mesh
+    material: material
+    batch: own createInstanceBatch(mesh: mesh, capacity: capacity)
+  }
+}
+
+# The tree species (TreeVariant.species), in the order of their parts
+const speciesBroadleaf: Int = 0
+
+const speciesUmbrella: Int = 1
+
+const speciesCypress: Int = 2
+
+const speciesSpruce: Int = 3
+
+const treeSpeciesCount: Int = 4
+
+# Parts per tree: the wood, then three leaf tones
+const treePartCount: Int = 4
+
+# The trunk the physics gives every tree, whatever its species: a capsule from
+# the foot up into the crown, a little wider than the widest trunk
+const treeTrunkRadius: Float = 0.3
+
+const treeTrunkHeight: Float = 3.2
+
+func treeSpeciesForm(species: view Int) ret FluffyForm {
+  if species is speciesUmbrella {
+    ret FluffyForm.umbrella
+  }
+  if species is speciesCypress {
+    ret FluffyForm.cypress
+  }
+  if species is speciesSpruce {
+    ret FluffyForm.spruce
+  }
+  ret FluffyForm.broadleaf
+}
+
+# Which species grows in a cell: broadleaf and spruce most, then umbrella pine
+# and cypress
+func treeSpeciesAt(cellX: view Int, cellY: view Int) ret Int {
+  let pick: Float = hash2(x: cellX, y: cellY, seed: 131)
+  if pick < 0.36 {
+    ret speciesBroadleaf
+  }
+  if pick < 0.64 {
+    ret speciesSpruce
+  }
+  if pick < 0.82 {
+    ret speciesUmbrella
+  }
+  ret speciesCypress
+}
+
+# A tree's size in a cell: x and y its width, z its height (metres)
+func treeSizeAt(species: view Int, cellX: view Int, cellY: view Int) ret Vec3 {
+  let size: Float = hash2(x: cellX, y: cellY, seed: 109)
+  if species is speciesCypress {
+    let height: Float = 8.0 + size * 3.5
+    ret Vec3.create(x: height * 0.85, y: height * 0.85, z: height)
+  }
+  if species is speciesUmbrella {
+    let height: Float = 5.6 + size * 1.8
+    ret Vec3.create(x: height * 1.1, y: height * 1.1, z: height)
+  }
+  if species is speciesSpruce {
+    let height: Float = 5.5 + size * 3.0
+    ret Vec3.create(x: height, y: height, z: height)
+  }
+  let height: Float = 4.8 + size * 2.4
+  ret Vec3.create(x: height, y: height, z: height)
+}
+
+# The leaves' colour per form and tone (as Autumn Grove paints them)
+func leafColor(form: view FluffyForm, tone: view Int) ret Vec3 {
+  let variation: Float = 0.86 + tone.toFloat() * 0.12
+  var color: Vec3 = Vec3.create(x: 0.18, y: 0.35, z: 0.055)
+  if form is FluffyForm.cypress {
+    color = Vec3.create(x: 0.025, y: 0.10, z: 0.055)
+  }
+  if form is FluffyForm.umbrella {
+    color = Vec3.create(x: 0.055, y: 0.19, z: 0.09)
+  }
+  if form is FluffyForm.spruce {
+    color = Vec3.create(x: 0.035, y: 0.15, z: 0.075)
+  }
+  if form is FluffyForm.bush {
+    color = Vec3.create(x: 0.28, y: 0.39, z: 0.075)
+  }
+  ret Vec3.vscale(a: color, s: variation)
+}
+
+func foliageMaterial(color: view Vec3) ret Material3d {
+  ret Material3d {
+    baseColor: color
+    metallic: 0.0
+    roughness: 1.0
+    emission: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    toon: true
+  }
+}
+
+func uploadFoliage(renderer: mod DeferredRenderer, mesh: view MeshData) ret MeshHandle {
+  ret RendererDeferred.uploadMesh(
+    renderer: renderer
+    verts: mesh.verts
+    vertCount: mesh.vertCount
+    indices: mesh.indices
+  )
+}
+
+# The leaf tones of `form`, one instancer each, added to `parts`
+func addLeafParts(
+  parts: mod List(PropInstancer)
+  renderer: mod DeferredRenderer
+  form: view FluffyForm
+  capacity: view Int
+) {
+  loop var tone: Int = 0, tone < 3, ++tone {
+    let leaves: MeshData = fluffyLeaves(
+      form: form
+      seed: 73
+      patchCount: 48
+      tone: tone
+    )
+    parts.add(
+      value: createPropInstancer(
+        mesh: uploadFoliage(renderer: renderer, mesh: leaves)
+        material: foliageMaterial(color: leafColor(form: form, tone: tone))
+        capacity: capacity
+      )
+    )
+  }
+}
+
+# Every tree species' parts, species by species (part i of species s is at
+# s * treePartCount + i)
+func createTreeParts(renderer: mod DeferredRenderer, capacity: view Int) ret List(PropInstancer) {
+  var parts: List(PropInstancer) = List.create(PropInstancer, cap: treeSpeciesCount * treePartCount)
+  let bark: Material3d = foliageMaterial(color: Vec3.create(x: 0.13, y: 0.075, z: 0.04))
+  loop var species: Int = 0, species < treeSpeciesCount, ++species {
+    let form: FluffyForm = treeSpeciesForm(species: species)
+    parts.add(
+      value: createPropInstancer(
+        mesh: uploadFoliage(renderer: renderer, mesh: fluffyWood(form: form, seed: 73))
+        material: bark
+        capacity: capacity
+      )
+    )
+    addLeafParts(
+      parts: parts
+      renderer: renderer
+      form: form
+      capacity: capacity
+    )
+  }
+  ret parts
+}
+
+# The bush's three leaf tones
+func createBushParts(renderer: mod DeferredRenderer, capacity: view Int) ret List(PropInstancer) {
+  var parts: List(PropInstancer) = List.create(PropInstancer, cap: 3)
+  addLeafParts(
+    parts: parts
+    renderer: renderer
+    form: FluffyForm.bush
+    capacity: capacity
+  )
+  ret parts
+}

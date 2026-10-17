@@ -670,7 +670,10 @@ func createApp() ret App {
       spawnPoint: controllerFeet(controller: characterController, groundZ: groundZ)
       groundZ: groundZ
     )
-    log("[physics] Box3D: the island height field, {1 + cloneCount} movers, {cubeCount} cubes")
+    let trunkCount: Int = addTreeTrunks(physicsSystem: physicsSystem, world: gameWorld)
+    log(
+      "[physics] Box3D: the island height field, {1 + cloneCount} movers, {cubeCount} cubes, {trunkCount} tree trunks"
+    )
     # #746: exercise the physics/net ECS seams once at startup — spawn/despawn via
     # generational entities, step a Box3D body. Leaves the world untouched.
     seamSelfTest(world: gameWorld, physicsSystem: physicsSystem)
