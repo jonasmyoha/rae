@@ -1,0 +1,149 @@
+# app3d/SpriteBake without a GPU: a part is drawn where it is and nowhere
+# else, the nearer of two parts wins, the picture's top is the parts' top,
+# and the pixels pack red + green * 256 + blue * 65536 + alpha * 16777216.
+import Vec3
+open Mesh3d
+open app3d/SpriteBake
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+# A flat upright rectangle from (left, depth, 0) to (right, depth, top),
+# facing the eye (-y)
+func panel(
+  left: view Float
+  right: view Float
+  top: view Float
+  depth: view Float
+) ret MeshData {
+  var mesh: MeshData = {
+    verts: List.create(Float, cap: 32)
+    indices: List.create(Int, cap: 6)
+    vertCount: 0
+  }
+  pushVert(
+    verts: mesh.verts
+    px: left
+    py: depth
+    pz: 0.0
+    nx: 0.0
+    ny: -1.0
+    nz: 0.0
+    u: 0.0
+    value: 0.0
+  )
+  pushVert(
+    verts: mesh.verts
+    px: right
+    py: depth
+    pz: 0.0
+    nx: 0.0
+    ny: -1.0
+    nz: 0.0
+    u: 1.0
+    value: 0.0
+  )
+  pushVert(
+    verts: mesh.verts
+    px: right
+    py: depth
+    pz: top
+    nx: 0.0
+    ny: -1.0
+    nz: 0.0
+    u: 1.0
+    value: 1.0
+  )
+  pushVert(
+    verts: mesh.verts
+    px: left
+    py: depth
+    pz: top
+    nx: 0.0
+    ny: -1.0
+    nz: 0.0
+    u: 0.0
+    value: 1.0
+  )
+  mesh.vertCount = 4
+  mesh.indices.add(value: 0)
+  mesh.indices.add(value: 1)
+  mesh.indices.add(value: 2)
+  mesh.indices.add(value: 0)
+  mesh.indices.add(value: 2)
+  mesh.indices.add(value: 3)
+  ret mesh
+}
+
+func alphaOf(picture: view SpritePicture, column: view Int, row: view Int) ret Int {
+  ret picture.pixels.copyAtFallback(index: row * picture.width + column, fallback: 0) / 16777216
+}
+
+func redOf(picture: view SpritePicture, column: view Int, row: view Int) ret Int {
+  ret picture.pixels.copyAtFallback(index: row * picture.width + column, fallback: 0) % 256
+}
+
+func blueOf(picture: view SpritePicture, column: view Int, row: view Int) ret Int {
+  ret picture.pixels.copyAtFallback(index: row * picture.width + column, fallback: 0) / 65536 % 256
+}
+
+func main() ret Int {
+  # A red panel 2 units tall from x = -0.75 to the middle, and a blue one 1 unit tall
+  # over the middle, nearer the eye
+  var parts: List(MeshData) = List.create(MeshData, cap: 2)
+  parts.add(value: panel(
+    left: -0.75
+    right: 0.0
+    top: 2.0
+    depth: 0.5
+  ))
+  parts.add(value: panel(
+    left: -0.5
+    right: 0.5
+    top: 1.0
+    depth: -0.5
+  ))
+  var colors: List(Vec3) = List.create(Vec3, cap: 2)
+  colors.add(value: Vec3.create(x: 1.0, y: 0.0, z: 0.0))
+  colors.add(value: Vec3.create(x: 0.0, y: 0.0, z: 1.0))
+  # 16 x 16 pixels, as wide as tall: 8 pixels a unit, x = 0 at column 8
+  let picture: SpritePicture = bakeSpritePicture(
+    parts: parts
+    colors: colors
+    width: 16
+    height: 16
+    aspect: 1.0
+  )
+  check(label: "the top is the parts' top ({picture.top})", ok: picture.top is 2.0)
+  check(label: "one pixel per cell", ok: picture.pixels.length is 256)
+  check(
+    label: "the red panel's upper part is solid red"
+    ok: alphaOf(picture: picture, column: 4, row: 2) is 255 and redOf(
+      picture: picture
+      column: 4
+      row: 2
+    ) > 100
+  )
+  check(
+    label: "the nearer blue panel wins where they overlap"
+    ok: blueOf(picture: picture, column: 6, row: 12) > 100 and redOf(
+      picture: picture
+      column: 6
+      row: 12
+    ) is 0
+  )
+  check(
+    label: "the right of the picture above the blue panel is see-through"
+    ok: alphaOf(picture: picture, column: 12, row: 2) is 0
+  )
+  check(
+    label: "the far left edge beyond the red panel is see-through"
+    ok: alphaOf(picture: picture, column: 0, row: 2) is 0
+  )
+  ret 0
+}

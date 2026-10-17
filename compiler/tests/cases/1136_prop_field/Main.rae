@@ -225,5 +225,54 @@ func main() ret Int {
     label: "the batch limit caps a batch at 2 of the kind's 5 props ({capacity})"
     ok: capacity is 2
   )
+  # A sprite level: no parts, facing the camera — the prop becomes one
+  # billboard in the field's sprite batch, its kind's picture layer in record
+  # slot 39 and its world height (picture height times scale) in slot 36
+  var billboards: PropField = createPropField(
+    originX: -50.0
+    originY: -50.0
+    size: 100.0
+    cellSize: 10.0
+  )
+  var spriteLods: List(PropLod) = List.create(PropLod, cap: 2)
+  spriteLods.add(
+    value: { parts: { part(id: 6) }, maxDistance: 20.0, castsShadow: true, facesCamera: false }
+  )
+  spriteLods.add(
+    value: {
+      parts: List.create(PropPart, cap: 0)
+      maxDistance: 200.0
+      castsShadow: false
+      facesCamera: true
+    }
+  )
+  let pine: Int = addPropKind(
+    field: billboards
+    kind: { lods: own spriteLods, radius: 2.0, centerHeight: 2.0 }
+  )
+  setPropKindSprite(
+    field: billboards
+    kind: pine
+    layer: 3
+    height: 5.0
+  )
+  addPropPlacement(
+    field: billboards
+    placement: { kind: pine, position: Vec3.create(x: 0.0, y: 60.0, z: foot), yaw: 0.0, scale: 2.0 }
+  )
+  finishPropField(field: billboards)
+  gatherPropField(field: billboards, propView: propView, toon: true)
+  let records: view List(Float) => billboards.spriteBatch.records
+  check(
+    label: "a far prop at a sprite level is one billboard, not meshes"
+    ok: billboards.spriteBatch.count is 1 and batchCount(field: billboards, index: 0) is 0
+  )
+  check(
+    label: "its record carries the picture layer (3) and height times scale (10)"
+    ok: records.copyAtFallback(index: 39, fallback: 0.0) is 3.0 and records.copyAtFallback(
+      index: 36
+      fallback: 0.0
+    ) is 10.0
+  )
   ret 0
 }

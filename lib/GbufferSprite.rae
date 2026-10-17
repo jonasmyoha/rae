@@ -7,9 +7,15 @@
 # sampler are typed IDs in the App-owned manager (SpriteCache holds them); the
 # sprite image ARRAY stays a C asset-upload ABI (rae_gb_sprite_array_*) and
 # its view is adopted as an external, re-adopted when the array is rebuilt.
-# (drawSpriteInstances has no active-example caller today; it keeps the
-# resource shape so a future sprite pass threads a cache like every other pass.)
+# app3d/PropField draws its sprite levels with it (drawPropFieldSprites): the
+# far trees of examples 136 and 143 are billboards of pictures baked with
+# app3d/SpriteBake. The instance's mode (lit / toon) is carried like a mesh
+# instance's. Sprites cast no shadow yet.
 open Gbuffer
+open GbufferInstanced
+open GbufferRecord
+open Math3d
+import Vec3
 open GbufferResources
 open Scene3d
 open webgpu/Webgpu
@@ -169,7 +175,7 @@ func ensureSpritePipeline(
       cache.arrayView = arrayView
     }
   }
-  let entries: List(ResourceRef) = List.create(ResourceRef, cap: 5)
+  var entries: List(ResourceRef) = List.create(ResourceRef, cap: 5)
   entries.add(value: bufferRef(id: gbuffer.frameUniform))
   entries.add(value: bufferRef(id: gbuffer.draws))
   entries.add(value: bufferRef(id: cache.uniform))
@@ -219,6 +225,44 @@ func spriteSetParams(
     buffer: cache.uniform
     offset: 0
   )
+}
+
+# One billboard instance into `batch`: standing at `position` (its foot),
+# `height` tall in the world, showing layer `layer` of the sprite array, with
+# the instance mode of a `toon` (or lit) mesh. The record is the shared DrawU:
+# the model is a translation and a uniform `scale` (the shader reads the
+# height per unit scale from params.x, the roughness slot, and the layer from
+# slot 39, the skinned path's palette base — a billboard is never skinned).
+func addSpriteInstance(
+  batch: mod InstanceBatch
+  position: view Vec3
+  height: view Float
+  layer: view Int
+  toon: view Bool
+) {
+  if batch.count >= batch.capacity {
+    ret
+  }
+  var toonFlag: Int = 0
+  if toon {
+    toonFlag = 1
+  }
+  let model: Mat4 = mat4Translate(x: position.x, y: position.y, z: position.z)
+  packInstanceRecord(
+    records: batch.records
+    slot: batch.count
+    model: model
+    prevModel: model
+    r: 1.0
+    g: 1.0
+    b: 1.0
+    metallic: 0.0
+    roughness: height
+    emissive: 0.0
+    toon: toonFlag
+    paletteBase: layer
+  )
+  batch.count = batch.count + 1
 }
 
 # Draw a batch of billboard instances from packed DrawU `records` (count of them):
