@@ -248,10 +248,17 @@ int rae_string_pool_contains(void* ptr) {
 rae_String rae_ext_rae_str_interp(int n, ...) {
   if (n <= 0) return (rae_String){NULL, 0, 0, 0};
   va_list args;
-  // Collect parts.
-  enum { MAX_PARTS = 64 };
-  if (n > MAX_PARTS) n = MAX_PARTS;
-  rae_String parts[MAX_PARTS];
+  // Collect parts: on the stack up to STACK_PARTS, on the heap past that.
+  // Every part is read, joined and (when owned) freed: a long line with
+  // many interpolations must not lose its tail, nor leak the tail's
+  // converted values.
+  enum { STACK_PARTS = 64 };
+  rae_String stack_parts[STACK_PARTS];
+  rae_String* parts = stack_parts;
+  if (n > STACK_PARTS) {
+    parts = malloc(sizeof(rae_String) * (size_t)n);
+    if (!parts) return (rae_String){NULL, 0, 0, 0};
+  }
   int64_t total = 0;
   va_start(args, n);
   for (int i = 0; i < n; i++) {
@@ -287,6 +294,7 @@ rae_String rae_ext_rae_str_interp(int n, ...) {
     }
   }
 
+  if (parts != stack_parts) free(parts);
   rae_String result = {buf, total, total + 1, 1};
   rae_string_pool_register(buf);
   return result;
