@@ -17,6 +17,9 @@ func fluffyMaterial(form: view FluffyForm, tone: view Int) ret Material3d {
   if form is FluffyForm.umbrella {
     color = Vec3.create(x: 0.055, y: 0.19, z: 0.09)
   }
+  if form is FluffyForm.spruce {
+    color = Vec3.create(x: 0.035, y: 0.15, z: 0.075)
+  }
   if form is FluffyForm.bush {
     color = Vec3.create(x: 0.28, y: 0.39, z: 0.075)
   }
@@ -39,8 +42,9 @@ func addFluffyGrove(
     FluffyForm.cypress
     FluffyForm.umbrella
     FluffyForm.bush
+    FluffyForm.spruce
   }
-  loop var species: Int = 0, species < 4, ++species {
+  loop var species: Int = 0, species < forms.length, ++species {
     let form: FluffyForm = forms.copyAtFallback(index: species, fallback: FluffyForm.broadleaf)
     var handles: List(MeshHandle) = List.create(MeshHandle, cap: 4)
     let wood: MeshData = fluffyWood(form: form, seed: 73)
@@ -71,7 +75,14 @@ func addFluffyGrove(
         "fluffy species={species} tone={tone} vertices={leaves.vertCount} triangles={leaves.indices.length / 3}"
       )
     }
-    loop var plant: Int = 0, plant < 3, ++plant {
+    var plantCount: Int = 3
+    if form is FluffyForm.cypress {
+      plantCount = 6
+    }
+    if form is FluffyForm.spruce {
+      plantCount = 1
+    }
+    loop var plant: Int = 0, plant < plantCount, ++plant {
       var position: Vec3 = Vec3.create(
         x: -14.0 + species.toFloat() * 8.5 + plant.toFloat() * 1.1
         y: 13.0 + plant.toFloat() * 3.8
@@ -88,7 +99,20 @@ func addFluffyGrove(
         position = Vec3.create(x: -12.0 + plant.toFloat() * 3.0, y: -6, z: 0)
         height = 2.2 + plant.toFloat() * 0.2
       }
-      obstacles.add(value: { x: position.x, y: position.y, radius: 0.6 })
+      if form is FluffyForm.cypress and plant >= 3 {
+        let giantIndex: Int = plant - 3
+        height = (7.5 + giantIndex.toFloat() * 0.7) * 3
+        position = Vec3.create(
+          x: -11.0 + giantIndex.toFloat() * 5.0
+          y: 22.0 + giantIndex.toFloat()
+          z: 0
+        )
+      }
+      if form is FluffyForm.spruce {
+        height = 28
+        position = Vec3.create(x: 12, y: 20, z: 0)
+      }
+      obstacles.add(value: { x: position.x, y: position.y, radius: height * 0.065 })
       loop var part: Int = 0, part < 4, ++part {
         if form is FluffyForm.bush and part is 0 {
           continue

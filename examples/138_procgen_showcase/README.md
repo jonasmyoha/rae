@@ -1,6 +1,6 @@
 # Autumn Grove
 
-A procedural prop showcase with fifteen trees (including the six original
+A procedural prop showcase with nineteen trees (including the six original
 autumn trees), rock groups across the island, low shrubs, the standard GPU grass
 and a winding path on a raised garden base.
 
@@ -9,9 +9,10 @@ and a winding path on a raised garden base.
 - **3** frames the stone outcrop.
 - **4** frames the broad, fluffy leaf patches.
 - **5** frames the cypress and umbrella pine group.
+- **6** frames the giant spruce and three extra-tall cypresses.
 - Drag to orbit, scroll to zoom. The camera bar's **Orbit** button switches to
   the free WASD camera (Q/E down/up, shift to boost) and back.
-- The menu button opens the settings panel: the five views (Scene 1-5), sky
+- The menu button opens the settings panel: the six views (Scene 1-6), sky
   model, time of day and date, shadows and TAA.
 - The chrome is the shared editor panel (`lib/app3d/EditorPanel.rae`); the
   debug widget on top shows frame rate and memory.
@@ -115,7 +116,24 @@ and [clustered shells with silhouette leaves](https://cremuss.artstation.com/pro
 The generator is original Rae code; no meshes, textures or shader code were
 copied from those examples.
 
-Validation: fixture `1141_fluffy_foliage` checks all four forms at 48/24/12
+Validation: fixture `1141_fluffy_foliage` checks all five forms at 48/24/12
 patches per crown, deterministic vertex output and valid indices. The 138
-example gate renders all five views. Captures are inspected separately and
+example gate renders all six views. Captures are inspected separately and
 stored above; `RAE_MEM_STATS=1` runs check tracked String/Buffer cleanup.
+
+## Landmark evergreens
+
+A 28-metre spruce anchors the right side of the garden. Its thick, tapered
+trunk carries six whorls of five spreading branches, with broad overlapping
+foliage clusters and a narrow leader. It uses the same opaque leaf-patch
+technique with a distinct spruce silhouette and deep green material.
+At 48 patches per cluster its 31 clusters cost 35,712 foliage triangles;
+wood adds 1,590. The lower generation budgets remain available.
+
+Three extra cypresses reuse the existing cypress handles at exactly three
+times each original instance scale: 22.5, 24.6 and 26.7 metres instead of
+7.5, 8.2 and 8.9. Width scales proportionally, with no extra mesh allocation.
+The original three cypresses remain. The overview and shadow range now cover
+the landmark trees; key 6 or `RAE_GROVE_VIEW=giants` inspects their silhouettes.
+
+![Landmark spruce and cypresses](references/Giants.png)
