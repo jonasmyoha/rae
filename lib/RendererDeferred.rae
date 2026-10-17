@@ -51,6 +51,7 @@ open RendererDeferredGraph
 open Sky
 open Shadow3d
 open ShadowMaps
+open ShadowMapsSprite
 open ShadowMapsSdf
 open gpu/GpuResources
 open gpu/GpuLifetime
@@ -347,6 +348,25 @@ func drawShadowCasterBatchWith(
       count: batch.count
     )
   }
+}
+
+# Every billboard of `batch` (GbufferSprite's DrawU records: foot, height,
+# picture layer) as a shadow caster facing the sun, its outline cut by the
+# picture's alpha below `cutoff`; `aspect` is the pictures' width over height.
+func drawShadowSpriteBatchWith(
+  renderer: mod DeferredRenderer
+  batch: view InstanceBatch
+  aspect: view Float
+  cutoff: view Float
+) {
+  shadowQueueSprites(
+    shadow: renderer.passes.shadow
+    records: batch.records
+    stride: instanceRecordFloats
+    count: batch.count
+    aspect: aspect
+    cutoff: cutoff
+  )
 }
 
 # A skinned shadow caster from this renderer's SkinStore; `paletteBase` is its

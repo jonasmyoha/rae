@@ -29,7 +29,8 @@
 #     count, so an app that never runs the pass simply gets 1.0.
 #
 # Owned by the renderer (RenderPasses.shadow); the
-# metaball casters are ShadowMapsSdf.rae.
+# metaball casters are ShadowMapsSdf.rae, the billboard sprite casters
+# ShadowMapsSprite.rae.
 import String
 import Math
 open Scene3d
@@ -48,6 +49,7 @@ open gpu/GpuRenderPass
 open gpu/GpuRenderTransfer
 open gpu/GpuIds
 open ShadowMapsSdf
+open ShadowMapsSprite
 open GbufferRecord
 open ecs/Entity
 open ecs/ComponentTable
@@ -129,6 +131,7 @@ type ShadowCache {
   # its own colour (shadowCfg.w; example 142)
   debugCascades: Bool
   sdf: ShadowSdfCache
+  sprites: ShadowSpriteCache
   inFlight: List(SubmissionId)
   scratch: List(Float)
 }
@@ -171,6 +174,7 @@ func createShadowCacheWith(casterBias: view ShadowCasterBias) ret ShadowCache {
     shadowAmbient: 0.0
     debugCascades: false
     sdf: createShadowSdfCache()
+    sprites: createShadowSpriteCache()
     inFlight: List.create(SubmissionId, cap: 4)
     scratch: List.create(Float, cap: shadowFrameFloats)
   }
@@ -373,6 +377,7 @@ func shadowBegin(
   shadow.casterIbufs.clear()
   shadow.casterIcounts.clear()
   shadowSdfReset(sdf: shadow.sdf)
+  shadowSpriteReset(sprites: shadow.sprites)
   if cascades.count < 1 or cascades.viewProj.length < cascades.count * 16 {
     ret
   }
@@ -732,6 +737,7 @@ func shadowEnd(shadow: mod ShadowCache, resources: mod GpuResources) {
     }
   }
   ensureShadowBinds(shadow: shadow, resources: resources)
+  let spritesReady: Bool = shadowSpritePrepare(shadow: shadow, resources: resources)
   if var recording: Recording = beginRecording(resources: resources) {
     loop var c: Int = 0, c < shadow.cascadeCount, ++c {
       var targets: RenderTargetSet = createRenderTargetSet(clear: false)
@@ -763,6 +769,14 @@ func shadowEnd(shadow: mod ShadowCache, resources: mod GpuResources) {
             cascade: c
             pass: pass
           )
+          if spritesReady {
+            shadowSpriteDraw(
+              shadow: shadow
+              resources: resources
+              cascade: c
+              pass: pass
+            )
+          }
           endRenderPass(pass: pass)
         }
       }
@@ -782,6 +796,7 @@ func shadowEnd(shadow: mod ShadowCache, resources: mod GpuResources) {
       )
     }
     shadowSdfRecordUses(sdf: shadow.sdf, recording: recording, resources: resources)
+    shadowSpriteRecordUses(sprites: shadow.sprites, recording: recording, resources: resources)
     let tracked: opt SubmissionId = trackSubmission(
       inFlight: shadow.inFlight
       resources: resources
@@ -802,6 +817,7 @@ func shadowCasterCount(shadow: view ShadowCache) ret Int {
 func shadowShutdown(shadow: mod ShadowCache, resources: mod GpuResources) {
   drainSubmissions(inFlight: shadow.inFlight, resources: resources)
   shadowSdfShutdown(sdf: shadow.sdf, resources: resources)
+  shadowSpriteShutdown(sprites: shadow.sprites, resources: resources)
   retireBindGroupIds(resources: resources, list: shadow.staticBinds)
   retireBindGroupIds(resources: resources, list: shadow.skinBinds)
   retireTextureViewIds(resources: resources, list: shadow.layerViews)

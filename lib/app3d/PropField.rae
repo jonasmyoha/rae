@@ -26,7 +26,8 @@
 # meshes, each prop there is one billboard quad showing its kind's picture
 # (setPropKindSprite: a layer of GbufferSprite's image array, made with
 # app3d/SpriteBake). The field's sprites go into one batch, drawn with
-# drawPropFieldSprites in the G-buffer pass. They cast no shadow.
+# drawPropFieldSprites in the G-buffer pass, and when a sprite level casts
+# shadows, drawPropFieldSpriteShadows casts them facing the sun.
 import Math
 import Vec3
 open Scene3d
@@ -102,6 +103,8 @@ type PropField {
   spriteHeights: List(Float)
   # This frame's billboards of every kind's sprite level
   spriteBatch: InstanceBatch
+  # Some kind's sprite level casts shadows (finishPropField)
+  spriteCastsShadow: Bool
   # One instance batch per kind, level and part; `lodFirstBatch` is each
   # (kind, level)'s first, by kindFirstLod[kind] + level
   batches: List(InstanceBatch)
@@ -152,6 +155,7 @@ func createPropField(
     spriteLayers: List.create(Int, cap: 8)
     spriteHeights: List.create(Float, cap: 8)
     spriteBatch: createInstanceBatch(mesh: meshHandleNone(), capacity: 0)
+    spriteCastsShadow: false
     batches: List.create(InstanceBatch, cap: 16)
     batchMeshes: List.create(MeshHandle, cap: 16)
     batchMaterials: List.create(Material3d, cap: 16)
@@ -344,6 +348,9 @@ func finishPropField(field: mod PropField) {
     loop let lod: view PropLod in kind.lods {
       if propLodIsSprite(lod: lod) {
         hasSprite = true
+        if lod.castsShadow {
+          field.spriteCastsShadow = true
+        }
       }
     }
     if hasSprite {
@@ -577,6 +584,27 @@ func drawPropFieldSprites(
       count: field.spriteBatch.count
     )
   }
+}
+
+# This frame's billboards into the shadow pass, each facing the sun with its
+# picture's outline (when a kind's sprite level casts shadows; the ones past
+# the cascades' reach fall outside every map). `aspect` and `cutoff` are the
+# pictures' (as GbufferSprite's spriteSetParams has them).
+func drawPropFieldSpriteShadows(
+  renderer: mod DeferredRenderer
+  field: view PropField
+  aspect: view Float
+  cutoff: view Float
+) {
+  if field.spriteCastsShadow is false or field.spriteBatch.count <= 0 {
+    ret
+  }
+  drawShadowSpriteBatchWith(
+    renderer: renderer
+    batch: field.spriteBatch
+    aspect: aspect
+    cutoff: cutoff
+  )
 }
 
 # This frame's props that cast shadows (their level says so) into the shadow
