@@ -87,7 +87,7 @@ func createShowcase() ret ShowcaseState {
   Gpu2d.initWindow(
     width: 1280
     height: 800
-    title: "Autumn Grove | 1 Overview  2 Trees  3 Rocks  4 Fluffy  5 Evergreen  6 Giants | Drag to orbit"
+    title: "Autumn Grove | 1 Overview  2 Trees  3 Rocks  4 Fluffy  5 Evergreen  6 Spruces | Drag to orbit"
   )
   # Remember where the user put the window, across restarts
   var windowGeometry: WindowGeometry = createWindowGeometry(
@@ -154,7 +154,7 @@ func createShowcase() ret ShowcaseState {
 # The grove's materials are authored for a bright sun
 const groveSunStrength: Float = 3.1
 
-# RAE_GROVE_VIEW: grove, trees, rocks, fluffy, evergreen, giants
+# RAE_GROVE_VIEW: grove, trees, rocks, fluffy, evergreen, spruces
 func groveViewNumber(viewName: view String) ret Int {
   if viewName is "trees" {
     ret 2
@@ -168,7 +168,7 @@ func groveViewNumber(viewName: view String) ret Int {
   if viewName is "evergreen" {
     ret 5
   }
-  if viewName is "giants" {
+  if viewName is "spruces" {
     ret 6
   }
   ret 1
@@ -203,9 +203,9 @@ func setGroveView(camera: mod Camera3d, cameraRig: mod CameraRig, groveView: vie
     cameraRig.orbitPitch = 0.16
   }
   if groveView is 6 {
-    camera.target = Vec3.create(x: 7, y: 11, z: 13)
-    cameraRig.distance = 56
-    cameraRig.orbitPitch = 0.10
+    camera.target = Vec3.create(x: 12, y: 6, z: 3.5)
+    cameraRig.distance = 23
+    cameraRig.orbitPitch = 0.20
     cameraRig.yaw = 0.55
   }
   snapCameraRigView(rig: cameraRig)

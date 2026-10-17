@@ -1,6 +1,6 @@
 # Autumn Grove
 
-A procedural prop showcase with nineteen trees (including the six original
+A procedural prop showcase with twenty-four trees (including the six original
 autumn trees), rock groups across the island, low shrubs, the standard GPU grass
 and a winding path on a raised garden base.
 
@@ -9,7 +9,7 @@ and a winding path on a raised garden base.
 - **3** frames the stone outcrop.
 - **4** frames the broad, fluffy leaf patches.
 - **5** frames the cypress and umbrella pine group.
-- **6** frames the giant spruce and three extra-tall cypresses.
+- **6** frames the six layered spruces.
 - Drag to orbit, scroll to zoom. The camera bar's **Orbit** button switches to
   the free WASD camera (Q/E down/up, shift to boost) and back.
 - The menu button opens the settings panel: the six views (Scene 1-6), sky
@@ -117,23 +117,26 @@ The generator is original Rae code; no meshes, textures or shader code were
 copied from those examples.
 
 Validation: fixture `1141_fluffy_foliage` checks all five forms at 48/24/12
-patches per crown, deterministic vertex output and valid indices. The 138
+detail settings, deterministic vertex output and valid indices. The 138
 example gate renders all six views. Captures are inspected separately and
 stored above; `RAE_MEM_STATS=1` runs check tracked String/Buffer cleanup.
 
-## Landmark evergreens
+## Layered spruces and slender cypresses
 
-A 28-metre spruce anchors the right side of the garden. Its thick, tapered
-trunk carries six whorls of five spreading branches, with broad overlapping
-foliage clusters and a narrow leader. It uses the same opaque leaf-patch
-technique with a distinct spruce silhouette and deep green material.
-At 48 patches per cluster its 31 clusters cost 35,712 foliage triangles;
-wood adds 1,590. The lower generation budgets remain available.
+Six normal-sized spruces (6, 6.7 and 7.4 metres, two of each) stand on the
+right side. `procgen/Spruce` builds six continuous scalloped branch skirts
+with smooth upper normals and closed undersides. Broad inter-tier shadows
+replace the dense leaf-on-leaf self-shadowing of the old patch-based spruce.
+Lighting and other species are unchanged; ground shadows remain enabled.
+The giant master-tree experiment is removed.
 
-Three extra cypresses reuse the existing cypress handles at exactly three
-times each original instance scale: 22.5, 24.6 and 26.7 metres instead of
-7.5, 8.2 and 8.9. Width scales proportionally, with no extra mesh allocation.
-The original three cypresses remain. The overview and shadow range now cover
-the landmark trees; key 6 or `RAE_GROVE_VIEW=giants` inspects their silhouettes.
+At detail 48 each spruce has 864 foliage triangles and 444 vertices,
+plus 1,590 wood triangles. Detail 24/12 reduces the radial subdivision.
+All six trees reuse the same uploaded meshes, with different rotations/scales.
+Key 6 or `RAE_GROVE_VIEW=spruces` frames this group.
 
-![Landmark spruce and cypresses](references/Giants.png)
+The three tall cypresses remain 22.5, 24.6 and 26.7 metres tall. Only their
+vertical scale is tripled: foliage width and trunk thickness now match the
+original 7.5, 8.2 and 8.9 metre cypresses. All six reuse the same meshes.
+
+![Layered normal-sized spruces](references/Spruces.png)
