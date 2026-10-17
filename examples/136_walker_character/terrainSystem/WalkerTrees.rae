@@ -241,7 +241,8 @@ func addLeafParts(
 
 # The forest's levels of detail: patches per crown cluster (leaf-patch forms)
 # or leaves per crown and tone (autumn trees and palm), and how far each is
-# drawn. Shadows reach 120 m; the near and middle levels cast them.
+# drawn. Shadows reach 120 m; every level casts them (the far level's
+# billboards face the sun, cut to the picture's outline).
 const nearPatches: Int = 48
 
 const midPatches: Int = 14
@@ -498,7 +499,7 @@ func addForestKinds(
       value: {
         parts: List.create(PropPart, cap: 0)
         maxDistance: farTreeDistance
-        castsShadow: false
+        castsShadow: true
         facesCamera: true
       }
     )
