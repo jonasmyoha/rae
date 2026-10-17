@@ -455,8 +455,8 @@ func createApp() ret App {
     )
     snapCameraRigView(rig: rig)
     # Screenshot camera (#857): RAE_WALKER_CAMERA holds the twelve space-separated
-    # values of CameraRig.stateString, so a headless frame can look at the river
-    # or the lake instead of the spawn (mode 1 is the free camera).
+    # values of CameraRig.stateString, so a headless frame can look at the sea
+    # or the shore instead of the spawn (mode 1 is the free camera).
     let cameraOverride: String = Sys.getEnv(name: "RAE_WALKER_CAMERA")
     if cameraOverride.length() > 0 {
       let overrideParts: List(String) = cameraOverride.split(sep: " ")
@@ -722,12 +722,19 @@ func createApp() ret App {
     var panelScrollMemory: ScrollMemory = createScrollMemory()
     scrollRootSystem(world: uiWorld, uiSystems: uiSystems, memory: panelScrollMemory)
     var panelScroll: EntityId = findScrollRoot(world: uiWorld, uiSystems: uiSystems)
+    # RAE_WALKER_HOUR overrides the start hour (19.5: sunset, 23: night), so a
+    # headless frame can look at the scene at any time of day
+    var startHour: Float = 12.0
+    let hourSetting: String = Sys.getEnv(name: "RAE_WALKER_HOUR")
+    if hourSetting.length() > 0 {
+      startHour = hourSetting.toFloat()
+    }
     var settings: SettingsState = createSettingsState(
       scene: 1
       sceneCount: 1
       speed: speed
       toon: toonShading
-      hour: 12.0
+      hour: startHour
       skyModel: SettingsSkyModel.preetham
     )
     setTaaEnabled(renderer: renderer, on: settings.taa)  # default FXAA; the settings pane toggles TAA
@@ -852,12 +859,6 @@ func createApp() ret App {
 # ----- the loop ------------------------------------------------------------
 func runWalkerApp() ret Int {
   var app: App = createApp()
-  # A stream through the meadow (#833), baked once against the terrain.
-  addMeadowRiver(
-    renderer: app.renderSystem.renderer
-    waterSystem: app.waterSystem
-    groundZ: app.characterSystem.groundZ
-  )
   # #739/#740/#741: the GameWorld holds the hero + crowd (controllers), the
   # skinned body parts (PartRoughness), and the terrain props + heightfield tiles
   # (PropKind) — all recycled ECS entities.
