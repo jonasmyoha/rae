@@ -1,0 +1,274 @@
+# The tree trunks' and the moving ground's part of the physics check (RAE_114_PHYSICS_TEST=1, after
+# PhysicsSelfTest's cubes and jump): the pooled trunk nearest the hero blocks
+# a ray at waist height, the hero walking straight at it stops at its bark
+# instead of passing through, and when the walker is somewhere else (the
+# pool placed round a spot 60 m or more away) the tree nearest that spot has
+# a trunk; and the ground made round a spot 150 m away is there, at the
+# height the renderer draws.
+import Math
+import Vec3
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Transform
+open app3d/CharacterController
+open box3d/ecs/PhysicsTypes
+open box3d/ecs/PhysicsQueries
+open terrainSystem/WalkerTrees
+open app3d/PropField
+
+# Fixed steps the walk at the tree may take (8 s)
+const trunkTestWalkSteps: Int = 480
+
+# The pool trunk standing on a tree nearest to `point`, or none
+func nearestTree(
+  physicsSystem: view PhysicsSystem
+  world: view GameWorld
+  point: view Vec3
+) ret opt EntityId {
+  var nearest: opt EntityId = none
+  var nearestDistance: Float = 1000000.0
+  loop let entityId: view EntityId in physicsSystem.trunks {
+    let position: Vec3 = componentView(this: world.transforms, entityId: entityId).position
+    if position.z > trunkPoolParked * 0.5 {
+      let gapX: Float = position.x - point.x
+      let gapY: Float = position.y - point.y
+      let distance: Float = Math.sqrt(x: gapX * gapX + gapY * gapY)
+      if distance < nearestDistance {
+        nearestDistance = distance
+        nearest = entityId
+      }
+    }
+  }
+  ret nearest
+}
+
+# Is the first thing a ray across `foot` (3 m west to 3 m east, 1.2 m up)
+# hits one of the pool's trunks?
+func rayHitsPool(physicsSystem: view PhysicsSystem, foot: view Vec3) ret Bool {
+  let hit: PhysicsHit = raycastClosest(
+    physics: physicsSystem.physics
+    origin: Vec3.create(x: foot.x - 3.0, y: foot.y, z: foot.z + 1.2)
+    translation: Vec3.create(x: 6.0, y: 0.0, z: 0.0)
+    filter: defaultQueryFilter()
+  )
+  ret hit.hit and physicsSystem.trunks.contains(value: hit.entityId)
+}
+
+# The ground made round a spot 150 m east of the hero (followGround, as the
+# walker walking there would): a ray down there hits it at the height the
+# renderer draws. The ground is made back round the hero after.
+func groundFollows(
+  physicsSystem: mod PhysicsSystem
+  heroFeet: view Vec3
+  groundZ: view Float
+) ret Bool {
+  let spot: Vec3 = Vec3.create(x: heroFeet.x + 150.0, y: heroFeet.y, z: heroFeet.z)
+  let made: Bool = followGround(physicsSystem: physicsSystem, position: spot, groundZ: groundZ)
+  let hit: PhysicsHit = raycastClosest(
+    physics: physicsSystem.physics
+    origin: Vec3.create(x: spot.x, y: spot.y, z: 200.0)
+    translation: Vec3.create(x: 0.0, y: 0.0, z: -400.0)
+    filter: defaultQueryFilter()
+  )
+  let expected: Float = terrainHeightAt(x: spot.x, y: spot.y, groundZ: groundZ)
+  let back: Bool = followGround(physicsSystem: physicsSystem, position: heroFeet, groundZ: groundZ)
+  ret made and back and hit.hit and Math.abs(value: hit.point.z - expected) < 0.3
+}
+
+# The pool placed round a spot away from the hero (60 m east, north, west or
+# south, then 120 m; the first with trees in reach): does the tree nearest
+# that spot have a trunk? The pool is placed back round the hero after.
+func poolFollows(
+  physicsSystem: mod PhysicsSystem
+  world: mod GameWorld
+  forest: view PropField
+  heroFeet: view Vec3
+) ret Bool {
+  var indices: List(Int) = List.create(Int, cap: 256)
+  var distances: List(Float) = List.create(Float, cap: 256)
+  var follows: Bool = false
+  loop var attempt: Int = 0, attempt < 8, ++attempt {
+    let reach: Float = 60.0 * (1 + attempt / 4).toFloat()
+    let turn: Float = (attempt % 4).toFloat() * 1.5707963
+    let spot: Vec3 = Vec3.create(
+      x: heroFeet.x + Math.cos(x: turn) * reach
+      y: heroFeet.y + Math.sin(x: turn) * reach
+      z: heroFeet.z
+    )
+    treesNear(
+      forest: forest
+      x: spot.x
+      y: spot.y
+      indices: indices
+      distances: distances
+    )
+    if indices.length > 0 {
+      var nearest: Int = 0
+      loop var i: Int = 1, i < distances.length, ++i {
+        if distances.copyAtFallback(index: i, fallback: 0.0) < distances.copyAtFallback(
+          index: nearest
+          fallback: 0.0
+        ) {
+          nearest = i
+        }
+      }
+      let tree: Vec3 = forest.placements.copyAtDefault(
+        index: indices.copyAtFallback(index: nearest, fallback: 0)
+      ).position
+      let placed: Bool = updateTrunkPool(
+        physicsSystem: physicsSystem
+        world: world
+        forest: forest
+        focus: spot
+        force: true
+      )
+      stepPhysicsBodies(physicsSystem: physicsSystem, world: world)
+      follows = rayHitsPool(physicsSystem: physicsSystem, foot: tree)
+      break
+    }
+  }
+  let back: Bool = updateTrunkPool(
+    physicsSystem: physicsSystem
+    world: world
+    forest: forest
+    focus: heroFeet
+    force: true
+  )
+  stepPhysicsBodies(physicsSystem: physicsSystem, world: world)
+  ret follows
+}
+
+# Does a ray across `foot` (from 3 m west to 3 m east, `height` above it) hit
+# the tree `treeEntityId` first?
+func rayHitsTree(
+  physicsSystem: view PhysicsSystem
+  treeEntityId: view EntityId
+  foot: view Vec3
+  height: view Float
+) ret Bool {
+  let hit: PhysicsHit = raycastClosest(
+    physics: physicsSystem.physics
+    origin: Vec3.create(x: foot.x - 3.0, y: foot.y, z: foot.z + height)
+    translation: Vec3.create(x: 6.0, y: 0.0, z: 0.0)
+    filter: defaultQueryFilter()
+  )
+  ret hit.hit and hit.entityId is treeEntityId
+}
+
+# A copy of an entity's Transform3D
+func transformOf(world: view GameWorld, entityId: view EntityId) ret Transform3D {
+  let source: view Transform3D => componentView(this: world.transforms, entityId: entityId)
+  ret source
+}
+
+# The horizontal distance between the hero and `point`
+func heroDistance(world: view GameWorld, heroEntityId: view EntityId, point: view Vec3) ret Float {
+  let hero: Vec3 = controllerOf(world: world, entityId: heroEntityId).position
+  let gapX: Float = hero.x - point.x
+  let gapY: Float = hero.y - point.y
+  ret Math.sqrt(x: gapX * gapX + gapY * gapY)
+}
+
+# True when all three hold; logs one [trunktest] line either way
+func runTreeTrunkTest(
+  physicsSystem: mod PhysicsSystem
+  world: mod GameWorld
+  forest: view PropField
+  heroEntityId: view EntityId
+  groundZ: view Float
+) ret Bool {
+  let heroFeet: Vec3 = controllerFeet(
+    controller: controllerOf(world: world, entityId: heroEntityId)
+    groundZ: groundZ
+  )
+  if let treeEntityId: EntityId = nearestTree(
+    physicsSystem: physicsSystem
+    world: world
+    point: heroFeet
+  ) {
+    ret checkTreeTrunk(
+      physicsSystem: physicsSystem
+      world: world
+      forest: forest
+      heroEntityId: heroEntityId
+      groundZ: groundZ
+      treeEntityId: treeEntityId
+    )
+  }
+  log("[trunktest] no placed tree, passed=false")
+  ret false
+}
+
+func checkTreeTrunk(
+  physicsSystem: mod PhysicsSystem
+  world: mod GameWorld
+  forest: view PropField
+  heroEntityId: view EntityId
+  groundZ: view Float
+  treeEntityId: view EntityId
+) ret Bool {
+  let heroFeet: Vec3 = controllerFeet(
+    controller: controllerOf(world: world, entityId: heroEntityId)
+    groundZ: groundZ
+  )
+  let placed: Transform3D = transformOf(world: world, entityId: treeEntityId)
+  let blocksRay: Bool = rayHitsTree(
+    physicsSystem: physicsSystem
+    treeEntityId: treeEntityId
+    foot: placed.position
+    height: 1.2
+  )
+  # Walk straight at the trunk, keeping the closest the hero gets
+  let towardX: Float = placed.position.x - heroFeet.x
+  let towardY: Float = placed.position.y - heroFeet.y
+  let yaw: Float = Math.atan2(y: -towardX, x: towardY)
+  let forward: InputIntent = {
+    moveX: 0.0
+    moveY: 1.0
+    walking: false
+    jump: false
+    actions: 0
+  }
+  var closest: Float = heroDistance(
+    world: world
+    heroEntityId: heroEntityId
+    point: placed.position
+  )
+  loop var step: Int = 0, step < trunkTestWalkSteps, ++step {
+    selfTestStep(
+      physicsSystem: physicsSystem
+      world: world
+      heroEntityId: heroEntityId
+      groundZ: groundZ
+      intent: forward
+      yaw: yaw
+    )
+    closest = Math.min(
+      a: closest
+      b: heroDistance(world: world, heroEntityId: heroEntityId, point: placed.position)
+    )
+  }
+  let stoppedAtBark: Bool = closest > treeTrunkRadius + 0.1 and closest < treeTrunkRadius + 1.2
+  let followed: Bool = poolFollows(
+    physicsSystem: physicsSystem
+    world: world
+    forest: forest
+    heroFeet: controllerFeet(
+      controller: controllerOf(world: world, entityId: heroEntityId)
+      groundZ: groundZ
+    )
+  )
+  let groundMoved: Bool = groundFollows(
+    physicsSystem: physicsSystem
+    heroFeet: controllerFeet(
+      controller: controllerOf(world: world, entityId: heroEntityId)
+      groundZ: groundZ
+    )
+    groundZ: groundZ
+  )
+  let passed: Bool = blocksRay and stoppedAtBark and followed and groundMoved
+  log(
+    "[trunktest] blocksRay={blocksRay}, closest {closest} m from the trunk (stoppedAtBark={stoppedAtBark}), poolFollows={followed}, groundFollows={groundMoved}, passed={passed}"
+  )
+  ret passed
+}

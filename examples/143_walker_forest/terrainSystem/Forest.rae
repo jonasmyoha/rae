@@ -1,0 +1,107 @@
+# The forest: tens of thousands of trees (WalkerTrees) over a square of the
+# world forestExtent metres on a side round the origin, planted ONCE at
+# startup into the TerrainSystem's PropField. The field sorts them into
+# cells, and each frame only the cells and trees near and in view are
+# gathered, each tree at its level of detail, into one instanced draw per
+# species, level and part (the downstream game's nature system works the
+# same way). A tree is a placement, not an entity; the trees nearest the
+# walker get their Box3D trunks from a fixed pool (PhysicsSystem's trunk
+# pool), so physics costs the same however big the forest is.
+#
+# The spots are a jittered grid (forestSpacing apart): a spot gets a tree
+# when the forest-density noise says forest there (dense woods, thin woods
+# and open meadows, each a few hundred metres across), it is grassy land
+# (not lake, beach or bare rock) and it is outside the spawn clearing. The
+# species come in stands (treeSpeciesAt).
+import Math
+import Noise
+import Vec3
+open terrainSystem/WalkerTrees
+open app3d/PropField
+
+# The side of the forested square (m), round the origin
+const forestExtent: Float = 1200.0
+
+# The grid the spots are jittered on (m): the crowns (4 to 7 m wide) overlap
+const forestSpacing: Float = 3.5
+
+# The PropField's cells (m)
+const forestCellSize: Float = 40.0
+
+# The most trees one instanced batch holds: far more than are ever near and
+# in view of one species at one level, far fewer than the forest has
+const forestBatchLimit: Int = 1024
+
+# The grass a tree wants under it: less than the small props, so woods reach
+# onto drier ground, but never the beach or bare rock
+const forestGrassMin: Float = 0.12
+
+# No tree grows this close (m) to the spawn, where the cube stacks stand
+const spawnClearingRadius: Float = 11.0
+
+# How much forest grows at (x, y), 0 to 1: value noise about 90 m across,
+# so the forest is a patchwork of woods and meadows
+func forestDensity(x: view Float, y: view Float) ret Float {
+  ret Noise.value2(x: x / 90.0, y: y / 90.0, seed: 401)
+}
+
+# The empty forest field: its kinds, no trees yet
+func createForestField(renderer: mod DeferredRenderer) ret PropField {
+  var field: PropField = createPropField(
+    originX: forestExtent * -0.5
+    originY: forestExtent * -0.5
+    size: forestExtent
+    cellSize: forestCellSize
+  )
+  field.batchLimit = forestBatchLimit
+  addForestKinds(field: field, renderer: renderer)
+  ret field
+}
+
+# Plant the forest around a spawn at (spawnX, spawnY). The number of trees.
+func plantForest(
+  terrainSystem: mod TerrainSystem
+  spawnX: view Float
+  spawnY: view Float
+  groundZ: view Float
+) ret Int {
+  let side: Int = (forestExtent / forestSpacing).toInt()
+  let origin: Float = forestExtent * -0.5
+  var planted: Int = 0
+  loop var row: Int = 0, row < side, ++row {
+    loop var column: Int = 0, column < side, ++column {
+      let x: Float = origin + (column.toFloat() + 0.5 + (Noise.hash2(x: column, y: row, seed: 811) - 0.5) * 0.8) * forestSpacing
+      let y: Float = origin + (row.toFloat() + 0.5 + (Noise.hash2(x: column, y: row, seed: 812) - 0.5) * 0.8) * forestSpacing
+      # Thinner where the density is low: a spot is kept with the chance the
+      # density gives, so meadows keep only the odd lone tree
+      let chance: Float = Math.min(
+        a: Math.max(a: (forestDensity(x: x, y: y) - 0.3) * 3.0, b: 0.02)
+        b: 1.0
+      )
+      if Noise.hash2(x: column, y: row, seed: 813) > chance {
+        continue
+      }
+      let gapX: Float = x - spawnX
+      let gapY: Float = y - spawnY
+      if gapX * gapX + gapY * gapY < spawnClearingRadius * spawnClearingRadius {
+        continue
+      }
+      if terrainPropAllowed(x: x, y: y, minGrass: forestGrassMin) is false {
+        continue
+      }
+      let species: Int = treeSpeciesAt(x: x, y: y, number: planted)
+      addPropPlacement(
+        field: terrainSystem.forest
+        placement: {
+          kind: species
+          position: Vec3.create(x: x, y: y, z: terrainHeightAt(x: x, y: y, groundZ: groundZ) - 0.05)
+          yaw: Noise.hash2(x: column, y: row, seed: 814) * 6.2831853
+          scale: treeScaleAt(species: species, number: planted)
+        }
+      )
+      planted = planted + 1
+    }
+  }
+  finishPropField(field: terrainSystem.forest)
+  ret planted
+}

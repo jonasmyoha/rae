@@ -73,6 +73,9 @@ type Physics {
   # The venue's meshes and height fields (the glue's handles), owned here
   meshes: List(UInt64)
   heightFields: List(UInt64)
+  # The shape each height field is the ground of (same order), so one can be
+  # removed (VenueMesh.removeVenueHeightField)
+  heightFieldShapes: List(ShapeId)
   # The world's worker threads (the glue's handle, 0 for one worker), owned
   # here: Box3D's built-in scheduler would start them below the stepping
   # thread's QoS class (docs/physics-performance-plan.md §10h)
@@ -115,6 +118,7 @@ func createPhysics(def: view WorldDef, fixedStep: view Float, subSteps: view Int
       venueShapeIds: List.create(ShapeId, cap: 4)
       meshes: List.create(UInt64, cap: 0)
       heightFields: List.create(UInt64, cap: 0)
+      heightFieldShapes: List.create(ShapeId, cap: 0)
       taskSystem: taskSystem
     }
   }
@@ -140,6 +144,7 @@ func destroyPhysics(physics: mod Physics) {
   }
   physics.meshes.clear()
   physics.heightFields.clear()
+  physics.heightFieldShapes.clear()
 }
 
 func setMappedEntity(entities: mod List(EntityId), index: view Int, entityId: view EntityId) {
