@@ -7,7 +7,13 @@ open Noise
 open Mesh3d
 open procgen/Foliage
 
-enum FluffyForm { broadleaf, bush, cypress, umbrella }
+enum FluffyForm {
+  broadleaf
+  bush
+  cypress
+  umbrella
+  spruce
+}
 
 # One shallow, lobed leaf patch: 13 vertices and 24 double-sided triangles.
 # Lighting normals follow the crown rather than the individual flat patch.
@@ -104,7 +110,8 @@ func fluffyCrown(
 }
 
 # Unit-height forms; scale instances uniformly to preserve leaf proportions.
-# broadleaf/umbrella: seven clusters, bush: five, cypress: nine.
+# broadleaf/umbrella: seven clusters, bush: five, cypress: nine, spruce: 31 in six branch tiers and
+# a leader.
 func fluffyLeaves(
   form: view FluffyForm
   seed: view Int
@@ -118,6 +125,9 @@ func fluffyLeaves(
   }
   if form is FluffyForm.cypress {
     clusters = 9
+  }
+  if form is FluffyForm.spruce {
+    clusters = 31
   }
   loop var i: Int = 0, i < clusters, ++i {
     let angle: Float = i.toFloat() * 2.399963 + seed.toFloat()
@@ -146,6 +156,18 @@ func fluffyLeaves(
       center.z = 0.76 + hash2(x: i, y: 12, seed: seed) * 0.08
       radius = Vec3.create(x: 0.28, y: 0.26, z: 0.15)
     }
+    if form is FluffyForm.spruce {
+      let tier: Int = i / 5
+      let fraction: Float = tier.toFloat() / 6
+      let width: Float = 0.30 * (1.0 - fraction * 0.88)
+      let turn: Float = (i % 5).toFloat() * 1.256637 + tier.toFloat() * 0.63
+      center = Vec3.create(
+        x: Math.cos(x: turn) * width * 0.68
+        y: Math.sin(x: turn) * width * 0.68
+        z: 0.27 + fraction * 0.68
+      )
+      radius = Vec3.create(x: width * 0.70, y: width * 0.70, z: 0.10 - fraction * 0.04)
+    }
     fluffyCrown(
       mesh: mesh
       center: center
@@ -161,6 +183,34 @@ func fluffyLeaves(
 func fluffyWood(form: view FluffyForm, seed: view Int) ret MeshData {
   var mesh: MeshData = foliageMesh()
   if form is FluffyForm.bush {
+    ret mesh
+  }
+  if form is FluffyForm.spruce {
+    foliageLimb(
+      mesh: mesh
+      start: Vec3.create(x: 0, y: 0, z: -0.03)
+      direction: Vec3.create(x: 0, y: 0, z: 1)
+      length: 1.0
+      rise: 0
+      startRadius: 0.055
+      endRadius: 0.003
+      sides: 9
+    )
+    loop var branch: Int = 0, branch < 30, ++branch {
+      let tier: Int = branch / 5
+      let fraction: Float = tier.toFloat() / 6
+      let turn: Float = (branch % 5).toFloat() * 1.256637 + tier.toFloat() * 0.63
+      foliageLimb(
+        mesh: mesh
+        start: Vec3.create(x: 0, y: 0, z: 0.27 + fraction * 0.68)
+        direction: Vec3.create(x: Math.cos(x: turn), y: Math.sin(x: turn), z: -0.12)
+        length: 0.30 * (1.0 - fraction * 0.88)
+        rise: 0.20
+        startRadius: 0.018 * (1.0 - fraction * 0.7)
+        endRadius: 0.003
+        sides: 5
+      )
+    }
     ret mesh
   }
   foliageLimb(
