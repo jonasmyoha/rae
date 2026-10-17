@@ -157,6 +157,40 @@ func meshStoreUpdateVerts(
   }
 }
 
+# Rewrite `vertCount` vertices of a mesh in place from vertex `firstVertex`
+# on (pooled geometry sharing one mesh: each pool slot owns a range of its
+# vertices). A write past the mesh's end is clamped to it.
+func meshStoreUpdateVertsRange(
+  store: view MeshStore
+  resources: view GpuResources
+  mesh: view MeshHandle
+  firstVertex: copy Int
+  verts: view List(Float)
+  vertCount: copy Int
+) {
+  if let entry: MeshEntry = meshStoreEntry(store: store, mesh: mesh.id) {
+    if firstVertex < 0 or firstVertex >= entry.vertexCount {
+      ret
+    }
+    var count: Int = vertCount
+    if firstVertex + count > entry.vertexCount {
+      count = entry.vertexCount - firstVertex
+    }
+    if count < 1 or verts.length < count * meshVertexFloats {
+      ret
+    }
+    unsafe {
+      let wrote: Bool = writeBufferFromPtr(
+        resources: resources
+        id: entry.vbuf
+        offset: firstVertex * meshVertexFloats * 4
+        data: verts.data
+        size: count * meshVertexFloats * 4
+      )
+    }
+  }
+}
+
 func meshStoreEntry(store: view MeshStore, mesh: copy Int) ret opt MeshEntry {
   if mesh < 1 or mesh > store.entries.length {
     ret none
