@@ -22,6 +22,12 @@
 #   ...each frame: gatherPropField(field: field, propView: propViewOf(camera:, aspect:), toon:)
 #   ...G-buffer: drawPropField(cache:, resources:, field:); shadows: drawPropFieldShadows
 #
+# A GROUP is placements that come and go together, such as one streamed
+# tile's (setPropGroup, clearPropGroup): each group is sorted into the
+# field's cells on its own, over the window of cells its props stand in, so
+# setting or clearing one sorts only its own props, never the field again.
+# The gather looks into the field's own cells and every group's in reach.
+#
 # A level with no parts that faces the camera is a SPRITE level: instead of
 # meshes, each prop there is one billboard quad showing its kind's picture
 # (setPropKindSprite: a layer of GbufferSprite's image array, made with
@@ -71,6 +77,26 @@ type PropPlacement {
   position: Vec3
   yaw: Float
   scale: Float
+}
+
+# A group's placements sorted into the cells of its window of the field's
+# grid (the columns and rows its props stand in): cell c of the window holds
+# placements cellStart[c] .. cellStart[c + 1] - 1, with their model
+# matrices and a sphere round each cell's props. The field's own placements
+# are sorted the same way, over the whole grid (finishPropField).
+type PropGroup {
+  used: Bool
+  placements: List(PropPlacement)
+  models: List(Mat4)
+  firstColumn: Int
+  firstRow: Int
+  columns: Int
+  rows: Int
+  cellStart: List(Int)
+  cellCenterZ: List(Float)
+  cellRadius: List(Float)
+  # Its props of each kind
+  kindCounts: List(Int)
 }
 
 # What the gather sees from: the eye, the unit direction it looks, and the
@@ -125,6 +151,9 @@ type PropField {
   # The last gather: props drawn, cells looked into
   visibleCount: Int
   cellsVisited: Int
+  # The field's own props of each kind (finishPropField), and the groups
+  kindCounts: List(Int)
+  groups: List(PropGroup)
 }
 
 # An empty field over the square from (`originX`, `originY`) `size` metres on a
@@ -167,6 +196,8 @@ func createPropField(
     finished: false
     visibleCount: 0
     cellsVisited: 0
+    kindCounts: List.create(Int, cap: 8)
+    groups: List.create(PropGroup, cap: 0)
   }
 }
 
@@ -246,53 +277,82 @@ func propModel(placement: view PropPlacement, yaw: view Float) ret Mat4 {
 # Sort the placements into their cells, make their model matrices and the
 # instance batches (each as big as its kind's placements). Call once, after
 # the last placement.
-func finishPropField(field: mod PropField) {
-  let cellCount: Int = field.columns * field.rows
+# `placements` sorted into the cells of the window of the field's grid from
+# (`firstColumn`, `firstRow`), `columns` x `rows` cells (every placement in
+# it: propCellOf), with their model matrices and each cell's sphere.
+func sortPropsIntoCells(
+  field: view PropField
+  placements: view List(PropPlacement)
+  firstColumn: view Int
+  firstRow: view Int
+  columns: view Int
+  rows: view Int
+) ret PropGroup {
+  let cellCount: Int = columns * rows
   # Count per cell, then each cell's start, then place every placement
   var counts: List(Int) = List.create(Int, cap: cellCount)
   loop var c: Int = 0, c < cellCount, ++c {
     counts.add(value: 0)
   }
-  loop let placement: view PropPlacement in field.placements {
-    let cell: Int = propCellOf(field: field, x: placement.position.x, y: placement.position.y)
-    counts.set(index: cell, value: counts.copyAtFallback(index: cell, fallback: 0) + 1)
+  var kindCounts: List(Int) = List.create(Int, cap: field.kinds.length)
+  loop var k: Int = 0, k < field.kinds.length, ++k {
+    kindCounts.add(value: 0)
   }
-  field.cellStart = List.create(Int, cap: cellCount + 1)
+  loop let placement: view PropPlacement in placements {
+    let cell: Int = propWindowCell(
+      field: field
+      placement: placement
+      firstColumn: firstColumn
+      firstRow: firstRow
+      columns: columns
+    )
+    counts.set(index: cell, value: counts.copyAtFallback(index: cell, fallback: 0) + 1)
+    kindCounts.set(
+      index: placement.kind
+      value: kindCounts.copyAtFallback(index: placement.kind, fallback: 0) + 1
+    )
+  }
+  var cellStart: List(Int) = List.create(Int, cap: cellCount + 1)
   var next: List(Int) = List.create(Int, cap: cellCount)
   var running: Int = 0
   loop var c: Int = 0, c < cellCount, ++c {
-    field.cellStart.add(value: running)
+    cellStart.add(value: running)
     next.add(value: running)
     running = running + counts.copyAtFallback(index: c, fallback: 0)
   }
-  field.cellStart.add(value: running)
-  var sorted: List(PropPlacement) = List.create(PropPlacement, cap: field.placements.length)
-  loop var i: Int = 0, i < field.placements.length, ++i {
-    sorted.add(value: field.placements.copyAtDefault(index: 0))
+  cellStart.add(value: running)
+  var sorted: List(PropPlacement) = List.create(PropPlacement, cap: placements.length)
+  loop var i: Int = 0, i < placements.length, ++i {
+    sorted.add(value: placements.copyAtDefault(index: 0))
   }
-  loop let placement: view PropPlacement in field.placements {
-    let cell: Int = propCellOf(field: field, x: placement.position.x, y: placement.position.y)
+  loop let placement: view PropPlacement in placements {
+    let cell: Int = propWindowCell(
+      field: field
+      placement: placement
+      firstColumn: firstColumn
+      firstRow: firstRow
+      columns: columns
+    )
     let slot: Int = next.copyAtFallback(index: cell, fallback: 0)
     sorted.set(index: slot, value: placement)
     next.set(index: cell, value: slot + 1)
   }
-  field.placements = sorted
   # Model matrices, and a sphere round each cell's props
-  field.models = List.create(Mat4, cap: field.placements.length)
-  loop let placement: view PropPlacement in field.placements {
-    field.models.add(value: propModel(placement: placement, yaw: placement.yaw))
+  var models: List(Mat4) = List.create(Mat4, cap: sorted.length)
+  loop let placement: view PropPlacement in sorted {
+    models.add(value: propModel(placement: placement, yaw: placement.yaw))
   }
-  field.cellCenterZ = List.create(Float, cap: cellCount)
-  field.cellRadius = List.create(Float, cap: cellCount)
+  var cellCenterZ: List(Float) = List.create(Float, cap: cellCount)
+  var cellRadius: List(Float) = List.create(Float, cap: cellCount)
   let halfDiagonal: Float = field.cellSize * 0.7072
   loop var c: Int = 0, c < cellCount, ++c {
-    let first: Int = field.cellStart.copyAtFallback(index: c, fallback: 0)
-    let last: Int = field.cellStart.copyAtFallback(index: c + 1, fallback: 0)
+    let first: Int = cellStart.copyAtFallback(index: c, fallback: 0)
+    let last: Int = cellStart.copyAtFallback(index: c + 1, fallback: 0)
     var low: Float = 0.0
     var high: Float = 0.0
     var reach: Float = 0.0
     loop var i: Int = first, i < last, ++i {
-      let placement: PropPlacement = field.placements.copyAtDefault(index: i)
+      let placement: PropPlacement = sorted.copyAtDefault(index: i)
       var center: Vec3 = placement.position
       var radius: Float = 0.0
       if let kind: view PropKind => field.kinds.viewAt(index: placement.kind) {
@@ -308,24 +368,58 @@ func finishPropField(field: mod PropField) {
       reach = Math.max(a: reach, b: radius)
     }
     let halfHeight: Float = (high - low) * 0.5
-    field.cellCenterZ.add(value: (low + high) * 0.5)
-    field.cellRadius.add(
+    cellCenterZ.add(value: (low + high) * 0.5)
+    cellRadius.add(
       value: Math.sqrt(x: halfDiagonal * halfDiagonal + halfHeight * halfHeight) + reach
     )
   }
+  ret PropGroup {
+    used: placements.length > 0
+    placements: own sorted
+    models: own models
+    firstColumn: firstColumn
+    firstRow: firstRow
+    columns: columns
+    rows: rows
+    cellStart: own cellStart
+    cellCenterZ: own cellCenterZ
+    cellRadius: own cellRadius
+    kindCounts: own kindCounts
+  }
+}
+
+# A placement's cell in a window of the field's grid
+func propWindowCell(
+  field: view PropField
+  placement: view PropPlacement
+  firstColumn: view Int
+  firstRow: view Int
+  columns: view Int
+) ret Int {
+  let cell: Int = propCellOf(field: field, x: placement.position.x, y: placement.position.y)
+  ret (cell / field.columns - firstRow) * columns + cell % field.columns - firstColumn
+}
+
+func finishPropField(field: mod PropField) {
+  var sorted: PropGroup = sortPropsIntoCells(
+    field: field
+    placements: field.placements
+    firstColumn: 0
+    firstRow: 0
+    columns: field.columns
+    rows: field.rows
+  )
+  field.placements = sorted.placements
+  field.models = sorted.models
+  field.cellStart = sorted.cellStart
+  field.cellCenterZ = sorted.cellCenterZ
+  field.cellRadius = sorted.cellRadius
+  field.kindCounts = sorted.kindCounts
   # The batches: per kind, per level, per part, as many as the kind's props
   # (at most batchLimit when it is set)
   field.drawDistance = 0.0
   loop var k: Int = 0, k < field.kinds.length, ++k {
-    var kindCount: Int = 0
-    loop let placement: view PropPlacement in field.placements {
-      if placement.kind is k {
-        kindCount = kindCount + 1
-      }
-    }
-    if field.batchLimit > 0 and kindCount > field.batchLimit {
-      kindCount = field.batchLimit
-    }
+    let kindCount: Int = propBatchSize(field: field, kind: k)
     field.kindFirstLod.add(value: field.lodFirstBatch.length)
     let kind: PropKind = field.kinds.copyAtDefault(index: k)
     loop let lod: view PropLod in kind.lods {
@@ -354,20 +448,159 @@ func finishPropField(field: mod PropField) {
       }
     }
     if hasSprite {
-      var kindCount: Int = 0
-      loop let placement: view PropPlacement in field.placements {
-        if placement.kind is k {
-          kindCount = kindCount + 1
-        }
-      }
-      if field.batchLimit > 0 and kindCount > field.batchLimit {
-        kindCount = field.batchLimit
-      }
-      spriteCapacity = spriteCapacity + kindCount
+      spriteCapacity = spriteCapacity + propBatchSize(field: field, kind: k)
     }
   }
   field.spriteBatch = createInstanceBatch(mesh: meshHandleNone(), capacity: spriteCapacity)
   field.finished = true
+}
+
+# How many instances one batch of `kind` holds: its props, the field's own
+# and every group's, at most batchLimit when it is set
+func propBatchSize(field: view PropField, kind: view Int) ret Int {
+  var count: Int = field.kindCounts.copyAtFallback(index: kind, fallback: 0)
+  loop let held: view PropGroup in field.groups {
+    if held.used {
+      count = count + held.kindCounts.copyAtFallback(index: kind, fallback: 0)
+    }
+  }
+  if field.batchLimit > 0 and count > field.batchLimit {
+    ret field.batchLimit
+  }
+  ret count
+}
+
+# Every placement the field holds: its own and its groups'
+func propFieldPlacementCount(field: view PropField) ret Int {
+  var count: Int = field.placements.length
+  loop let held: view PropGroup in field.groups {
+    if held.used {
+      count = count + held.placements.length
+    }
+  }
+  ret count
+}
+
+func emptyPropGroup() ret PropGroup {
+  ret PropGroup {
+    used: false
+    placements: List.create(PropPlacement, cap: 0)
+    models: List.create(Mat4, cap: 0)
+    firstColumn: 0
+    firstRow: 0
+    columns: 0
+    rows: 0
+    cellStart: List.create(Int, cap: 0)
+    cellCenterZ: List.create(Float, cap: 0)
+    cellRadius: List.create(Float, cap: 0)
+    kindCounts: List.create(Int, cap: 0)
+  }
+}
+
+# Group `group` (0 and up) holds `placements` from now on, in place of what
+# it held: only they are sorted, into the cells they stand in. Before or
+# after finishPropField; a batch too small for its kind's props grows.
+func setPropGroup(field: mod PropField, group: view Int, placements: view List(PropPlacement)) {
+  if group < 0 {
+    ret
+  }
+  loop field.groups.length <= group {
+    field.groups.add(value: emptyPropGroup())
+  }
+  if placements.length is 0 {
+    field.groups.set(index: group, value: emptyPropGroup())
+    ret
+  }
+  # The window of cells the props stand in
+  var firstColumn: Int = field.columns
+  var firstRow: Int = field.rows
+  var lastColumn: Int = 0
+  var lastRow: Int = 0
+  loop let placement: view PropPlacement in placements {
+    let cell: Int = propCellOf(field: field, x: placement.position.x, y: placement.position.y)
+    let column: Int = cell % field.columns
+    let row: Int = cell / field.columns
+    if column < firstColumn {
+      firstColumn = column
+    }
+    if column > lastColumn {
+      lastColumn = column
+    }
+    if row < firstRow {
+      firstRow = row
+    }
+    if row > lastRow {
+      lastRow = row
+    }
+  }
+  let sorted: PropGroup = sortPropsIntoCells(
+    field: field
+    placements: placements
+    firstColumn: firstColumn
+    firstRow: firstRow
+    columns: lastColumn - firstColumn + 1
+    rows: lastRow - firstRow + 1
+  )
+  field.groups.set(index: group, value: sorted)
+  growPropBatches(field: field)
+}
+
+# Group `group` holds nothing from now on.
+func clearPropGroup(field: mod PropField, group: view Int) {
+  if group >= 0 and group < field.groups.length {
+    field.groups.set(index: group, value: emptyPropGroup())
+  }
+}
+
+# After a group grew a kind past its batches (once the field is finished):
+# those batches made again, a quarter bigger than needed, so a few more props
+# do not make them again. They never shrink.
+func growPropBatches(field: mod PropField) {
+  if field.finished is false {
+    ret
+  }
+  var spriteCapacity: Int = 0
+  loop var k: Int = 0, k < field.kinds.length, ++k {
+    let size: Int = propBatchSize(field: field, kind: k)
+    var batchIndices: List(Int) = List.create(Int, cap: 8)
+    var hasSprite: Bool = false
+    if let kind: view PropKind => field.kinds.viewAt(index: k) {
+      let firstLod: Int = field.kindFirstLod.copyAtFallback(index: k, fallback: 0)
+      loop var l: Int = 0, l < kind.lods.length, ++l {
+        if let lod: view PropLod => kind.lods.viewAt(index: l) {
+          hasSprite = hasSprite or propLodIsSprite(lod: lod)
+          let first: Int = field.lodFirstBatch.copyAtFallback(index: firstLod + l, fallback: 0)
+          loop var p: Int = 0, p < lod.parts.length, ++p {
+            batchIndices.add(value: first + p)
+          }
+        }
+      }
+    }
+    if hasSprite {
+      spriteCapacity = spriteCapacity + size
+    }
+    loop let b: view Int in batchIndices {
+      var capacity: Int = 0
+      if let batch: view InstanceBatch => field.batches.viewAt(index: b) {
+        capacity = batch.capacity
+      }
+      if capacity < size {
+        field.batches.set(
+          index: b
+          value: createInstanceBatch(
+            mesh: field.batchMeshes.copyAtDefault(index: b)
+            capacity: size + size / 4
+          )
+        )
+      }
+    }
+  }
+  if field.spriteBatch.capacity < spriteCapacity {
+    field.spriteBatch = createInstanceBatch(
+      mesh: meshHandleNone()
+      capacity: spriteCapacity + spriteCapacity / 4
+    )
+  }
 }
 
 # The view from a camera, `aspect` its width over its height.
@@ -435,35 +668,141 @@ func gatherPropField(field: mod PropField, propView: view PropView, toon: view B
   let lastRow: Int = last / field.columns
   loop var row: Int = firstRow, row <= lastRow, ++row {
     loop var column: Int = firstColumn, column <= lastColumn, ++column {
-      let cell: Int = row * field.columns + column
-      let start: Int = field.cellStart.copyAtFallback(index: cell, fallback: 0)
-      let end: Int = field.cellStart.copyAtFallback(index: cell + 1, fallback: 0)
-      if start >= end {
-        continue
-      }
-      let cellCenter: Vec3 = Vec3.create(
-        x: field.originX + (column.toFloat() + 0.5) * field.cellSize
-        y: field.originY + (row.toFloat() + 0.5) * field.cellSize
-        z: field.cellCenterZ.copyAtFallback(index: cell, fallback: 0.0)
+      gatherPropCell(
+        field: field
+        propView: propView
+        toon: toon
+        group: -1
+        cell: row * field.columns + column
+        column: column
+        row: row
       )
-      let cellRadius: Float = field.cellRadius.copyAtFallback(index: cell, fallback: 0.0)
-      if Vec3.vlen(a: Vec3.vsub(a: cellCenter, b: propView.eye)) - cellRadius > field.drawDistance {
-        continue
-      }
-      if propSphereInView(propView: propView, center: cellCenter, radius: cellRadius) is false {
-        continue
-      }
-      field.cellsVisited = field.cellsVisited + 1
-      loop var i: Int = start, i < end, ++i {
-        gatherProp(
+    }
+  }
+  # Each group's cells in reach: its window of the grid, cut to the reach
+  loop var g: Int = 0, g < field.groups.length, ++g {
+    var used: Bool = false
+    var groupColumn: Int = 0
+    var groupRow: Int = 0
+    var groupColumns: Int = 0
+    var groupRows: Int = 0
+    if let held: view PropGroup => field.groups.viewAt(index: g) {
+      used = held.used
+      groupColumn = held.firstColumn
+      groupRow = held.firstRow
+      groupColumns = held.columns
+      groupRows = held.rows
+    }
+    if used is false {
+      continue
+    }
+    let fromRow: Int = Math.max(a: firstRow.toFloat(), b: groupRow.toFloat()).toInt()
+    let toRow: Int = Math.min(a: lastRow.toFloat(), b: (groupRow + groupRows - 1).toFloat()).toInt()
+    let fromColumn: Int = Math.max(a: firstColumn.toFloat(), b: groupColumn.toFloat()).toInt()
+    let toColumn: Int = Math.min(
+      a: lastColumn.toFloat()
+      b: (groupColumn + groupColumns - 1).toFloat()
+    ).toInt()
+    loop var row: Int = fromRow, row <= toRow, ++row {
+      loop var column: Int = fromColumn, column <= toColumn, ++column {
+        gatherPropCell(
           field: field
           propView: propView
-          index: i
           toon: toon
+          group: g
+          cell: (row - groupRow) * groupColumns + column - groupColumn
+          column: column
+          row: row
         )
       }
     }
   }
+}
+
+# One cell's props, of the field's own (`group` -1) or of a group (`cell` in
+# its window), into the batches: when the cell is in reach and in view.
+func gatherPropCell(
+  field: mod PropField
+  propView: view PropView
+  toon: view Bool
+  group: view Int
+  cell: view Int
+  column: view Int
+  row: view Int
+) {
+  let range: PropCellRange = propCellRange(field: field, group: group, cell: cell)
+  if range.start >= range.end {
+    ret
+  }
+  let cellCenter: Vec3 = Vec3.create(
+    x: field.originX + (column.toFloat() + 0.5) * field.cellSize
+    y: field.originY + (row.toFloat() + 0.5) * field.cellSize
+    z: range.centerZ
+  )
+  if Vec3.vlen(a: Vec3.vsub(a: cellCenter, b: propView.eye)) - range.radius > field.drawDistance {
+    ret
+  }
+  if propSphereInView(propView: propView, center: cellCenter, radius: range.radius) is false {
+    ret
+  }
+  field.cellsVisited = field.cellsVisited + 1
+  loop var i: Int = range.start, i < range.end, ++i {
+    gatherProp(
+      field: field
+      propView: propView
+      group: group
+      index: i
+      toon: toon
+    )
+  }
+}
+
+# A cell's placements (start .. end - 1) and the sphere round them
+type PropCellRange {
+  start: Int
+  end: Int
+  centerZ: Float
+  radius: Float
+}
+
+func propCellRange(field: view PropField, group: view Int, cell: view Int) ret PropCellRange {
+  if group < 0 {
+    ret PropCellRange {
+      start: field.cellStart.copyAtFallback(index: cell, fallback: 0)
+      end: field.cellStart.copyAtFallback(index: cell + 1, fallback: 0)
+      centerZ: field.cellCenterZ.copyAtFallback(index: cell, fallback: 0.0)
+      radius: field.cellRadius.copyAtFallback(index: cell, fallback: 0.0)
+    }
+  }
+  if let held: view PropGroup => field.groups.viewAt(index: group) {
+    ret PropCellRange {
+      start: held.cellStart.copyAtFallback(index: cell, fallback: 0)
+      end: held.cellStart.copyAtFallback(index: cell + 1, fallback: 0)
+      centerZ: held.cellCenterZ.copyAtFallback(index: cell, fallback: 0.0)
+      radius: held.cellRadius.copyAtFallback(index: cell, fallback: 0.0)
+    }
+  }
+  ret PropCellRange { start: 0, end: 0, centerZ: 0.0, radius: 0.0 }
+}
+
+# Placement `index` of the field's own (`group` -1) or of a group, and its
+# model matrix
+func propPlacementAt(field: view PropField, group: view Int, index: view Int) ret PropPlacement {
+  if group >= 0 {
+    if let held: view PropGroup => field.groups.viewAt(index: group) {
+      ret held.placements.copyAtDefault(index: index)
+    }
+  }
+  ret field.placements.copyAtDefault(index: index)
+}
+
+func propModelAt(field: view PropField, group: view Int, index: view Int) ret Mat4 {
+  if group >= 0 {
+    if let held: view PropGroup => field.groups.viewAt(index: group) {
+      ret held.models.copyAtDefault(index: index)
+    }
+  }
+  ret field.models.copyAtDefault(index: index)
 }
 
 # Where a prop goes this frame: the first batch of its level, how many parts,
@@ -477,14 +816,18 @@ type PropDraw {
   model: Mat4
 }
 
-func propDrawOf(field: view PropField, propView: view PropView, index: view Int) ret PropDraw {
-  let placement: PropPlacement = field.placements.copyAtDefault(index: index)
+func propDrawOf(
+  field: view PropField
+  propView: view PropView
+  placement: view PropPlacement
+  model: view Mat4
+) ret PropDraw {
   var result: PropDraw = {
     drawn: false
     sprite: false
     firstBatch: 0
     partCount: 0
-    model: field.models.copyAtDefault(index: index)
+    model: model
   }
   if let kind: view PropKind => field.kinds.viewAt(index: placement.kind) {
     let center: Vec3 = propCenter(kind: kind, placement: placement)
@@ -523,15 +866,21 @@ func propDrawOf(field: view PropField, propView: view PropView, index: view Int)
 func gatherProp(
   field: mod PropField
   propView: view PropView
+  group: view Int
   index: view Int
   toon: view Bool
 ) {
-  let draw: PropDraw = propDrawOf(field: field, propView: propView, index: index)
+  let placement: PropPlacement = propPlacementAt(field: field, group: group, index: index)
+  let draw: PropDraw = propDrawOf(
+    field: field
+    propView: propView
+    placement: placement
+    model: propModelAt(field: field, group: group, index: index)
+  )
   if draw.drawn is false {
     ret
   }
   if draw.sprite {
-    let placement: PropPlacement = field.placements.copyAtDefault(index: index)
     addSpriteInstance(
       batch: field.spriteBatch
       position: placement.position
