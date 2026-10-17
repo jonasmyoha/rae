@@ -285,28 +285,30 @@ void* rae_gb_sprite_array_view(void) { return (void*)gb_sprite_array_view; }
 static WGPUTexture gb_sprite_array_tex = NULL;
 static int64_t gb_sprite_tex_gen = 0;
 int64_t rae_gb_sprite_tex_gen(void) { return gb_sprite_tex_gen; }
-void rae_gb_sprite_array_init(int64_t w, int64_t h, int64_t layers) {
+/* `mips` levels per layer (1 = no mip chain); the Rae side builds and writes each level. */
+void rae_gb_sprite_array_init(int64_t w, int64_t h, int64_t layers, int64_t mips) {
     WGPUDevice dev = (WGPUDevice)rae_wgpu_ctx_device();
-    if (!dev || w <= 0 || h <= 0 || layers <= 0) return;
+    if (!dev || w <= 0 || h <= 0 || layers <= 0 || mips <= 0) return;
     if (gb_sprite_array_tex) { wgpuTextureRelease(gb_sprite_array_tex); gb_sprite_array_tex = NULL; }
     WGPUTextureDescriptor td; memset(&td, 0, sizeof(td));
     td.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopyDst;
     td.dimension = WGPUTextureDimension_2D;
     td.size.width = (uint32_t)w; td.size.height = (uint32_t)h;
     td.size.depthOrArrayLayers = (uint32_t)layers;
-    td.format = WGPUTextureFormat_RGBA8Unorm; td.mipLevelCount = 1; td.sampleCount = 1;
+    td.format = WGPUTextureFormat_RGBA8Unorm; td.mipLevelCount = (uint32_t)mips; td.sampleCount = 1;
     gb_sprite_array_tex = wgpuDeviceCreateTexture(dev, &td);
     WGPUTextureViewDescriptor vd; memset(&vd, 0, sizeof(vd));
     vd.format = WGPUTextureFormat_RGBA8Unorm;
     vd.dimension = WGPUTextureViewDimension_2DArray;
-    vd.baseMipLevel = 0; vd.mipLevelCount = 1;
+    vd.baseMipLevel = 0; vd.mipLevelCount = (uint32_t)mips;
     vd.baseArrayLayer = 0; vd.arrayLayerCount = (uint32_t)layers;
     vd.aspect = WGPUTextureAspect_All;
     if (gb_sprite_array_view) { wgpuTextureViewRelease(gb_sprite_array_view); gb_sprite_array_view = NULL; }
     gb_sprite_array_view = wgpuTextureCreateView(gb_sprite_array_tex, &vd);
     gb_sprite_tex_gen++;
 }
-void rae_gb_sprite_array_write(int64_t layer, const int64_t* pixels, int64_t w, int64_t h) {
+/* One mip level `mip` of one layer, `w` x `h` (that level's size). */
+void rae_gb_sprite_array_write(int64_t layer, int64_t mip, const int64_t* pixels, int64_t w, int64_t h) {
     WGPUQueue q = (WGPUQueue)rae_wgpu_ctx_queue();
     if (!q || !gb_sprite_array_tex || !pixels || w <= 0 || h <= 0) return;
     size_t n = (size_t)w * (size_t)h;
@@ -321,7 +323,7 @@ void rae_gb_sprite_array_write(int64_t layer, const int64_t* pixels, int64_t w, 
     }
     WGPUTexelCopyTextureInfo dst; memset(&dst, 0, sizeof(dst));
     dst.texture = gb_sprite_array_tex; dst.aspect = WGPUTextureAspect_All;
-    dst.origin.z = (uint32_t)layer;
+    dst.origin.z = (uint32_t)layer; dst.mipLevel = (uint32_t)mip;
     WGPUTexelCopyBufferLayout layout; memset(&layout, 0, sizeof(layout));
     layout.bytesPerRow = (uint32_t)w * 4; layout.rowsPerImage = (uint32_t)h;
     WGPUExtent3D ext; ext.width = (uint32_t)w; ext.height = (uint32_t)h; ext.depthOrArrayLayers = 1;
