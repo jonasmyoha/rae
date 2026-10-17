@@ -1,0 +1,168 @@
+# Prop field groups (lib/app3d/PropField.rae): placements that come and go
+# together, such as one streamed tile's, each sorted into the field's cells
+# on its own, so setting or clearing one does not sort the field again. A
+# field with groups gathers exactly what one holding every placement does.
+import Vec3
+open Scene3d
+open GbufferInstanced
+open app3d/PropField
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func paint() ret Material3d {
+  ret Material3d {
+    baseColor: Vec3.create(x: 0.3, y: 0.5, z: 0.2)
+    metallic: 0.0
+    roughness: 1.0
+    emission: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    toon: false
+  }
+}
+
+func bushKind() ret PropKind {
+  ret PropKind {
+    lods: {
+      {
+        parts: { PropPart { mesh: MeshHandle { id: 1, generation: 0 }, material: paint() } }
+        maxDistance: 40.0
+        castsShadow: false
+        facesCamera: false
+      }
+    }
+    radius: 1.0
+    centerHeight: 0.5
+  }
+}
+
+func bushAt(kind: view Int, x: view Float, y: view Float) ret PropPlacement {
+  ret PropPlacement {
+    kind: kind
+    position: Vec3.create(x: x, y: y, z: 0.0)
+    yaw: x * 0.1
+    scale: 1.0
+  }
+}
+
+func batchCount(field: view PropField) ret Int {
+  if let batch: view InstanceBatch => field.batches.viewAt(index: 0) {
+    ret batch.count
+  }
+  ret 0 - 1
+}
+
+func batchCapacity(field: view PropField) ret Int {
+  if let batch: view InstanceBatch => field.batches.viewAt(index: 0) {
+    ret batch.capacity
+  }
+  ret 0 - 1
+}
+
+func main() ret Int {
+  # A tile near ahead (three bushes over two cells), one farther ahead with a
+  # bush behind the eye, and one bush the field always has
+  var near: List(PropPlacement) = List.create(PropPlacement, cap: 3)
+  var far: List(PropPlacement) = List.create(PropPlacement, cap: 3)
+  var whole: PropField = createPropField(
+    originX: -50.0
+    originY: -50.0
+    size: 100.0
+    cellSize: 10.0
+  )
+  let wholeBush: Int = addPropKind(field: whole, kind: bushKind())
+  near.add(value: bushAt(kind: wholeBush, x: -6.0, y: 20.0))
+  near.add(value: bushAt(kind: wholeBush, x: 1.0, y: 21.0))
+  near.add(value: bushAt(kind: wholeBush, x: 4.0, y: 22.0))
+  far.add(value: bushAt(kind: wholeBush, x: 0.0, y: 30.0))
+  far.add(value: bushAt(kind: wholeBush, x: 2.0, y: 33.0))
+  far.add(value: bushAt(kind: wholeBush, x: 0.0, y: -25.0))
+  let always: PropPlacement = bushAt(kind: wholeBush, x: 0.0, y: 10.0)
+  addPropPlacement(field: whole, placement: always)
+  loop let placement: view PropPlacement in near {
+    addPropPlacement(field: whole, placement: placement)
+  }
+  loop let placement: view PropPlacement in far {
+    addPropPlacement(field: whole, placement: placement)
+  }
+  finishPropField(field: whole)
+  var grouped: PropField = createPropField(
+    originX: -50.0
+    originY: -50.0
+    size: 100.0
+    cellSize: 10.0
+  )
+  let bush: Int = addPropKind(field: grouped, kind: bushKind())
+  addPropPlacement(field: grouped, placement: always)
+  finishPropField(field: grouped)
+  check(
+    label: "before any group, the batch holds the field's own props ({batchCapacity(field: grouped)})"
+    ok: batchCapacity(field: grouped) is 1
+  )
+  setPropGroup(field: grouped, group: 0, placements: near)
+  setPropGroup(field: grouped, group: 3, placements: far)
+  check(
+    label: "the field counts its own and its groups' props ({propFieldPlacementCount(field: grouped)})"
+    ok: propFieldPlacementCount(field: grouped) is 7 and propFieldPlacementCount(field: whole) is 7
+  )
+  check(
+    label: "the batch grew to hold them all ({batchCapacity(field: grouped)})"
+    ok: batchCapacity(field: grouped) >= 7
+  )
+  # The eye 5 m behind the origin, 1.7 m up, looking down +y
+  let camera: Camera3d = {
+    position: Vec3.create(x: 0.0, y: -5.0, z: 1.7)
+    target: Vec3.create(x: 0.0, y: 5.0, z: 1.7)
+    fovYDeg: 50.0
+    nearZ: 0.1
+    farZ: 500.0
+  }
+  let propView: PropView = propViewOf(camera: camera, aspect: 1.6)
+  gatherPropField(field: whole, propView: propView, toon: true)
+  gatherPropField(field: grouped, propView: propView, toon: true)
+  check(
+    label: "groups gather what one field of every prop does ({grouped.visibleCount} and {whole.visibleCount})"
+    ok: grouped.visibleCount is whole.visibleCount and grouped.visibleCount is 6 and batchCount(
+      field: grouped
+    ) is 6
+  )
+  var sameRecords: Bool = true
+  if let a: view InstanceBatch => whole.batches.viewAt(index: 0) {
+    if let b: view InstanceBatch => grouped.batches.viewAt(index: 0) {
+      # The same props in the same cells, so the same records, in cell order
+      var sumA: Float = 0.0
+      var sumB: Float = 0.0
+      loop var i: Int = 0, i < a.count * instanceRecordFloats, ++i {
+        sumA = sumA + a.records.copyAtFallback(index: i, fallback: 0.0)
+        sumB = sumB + b.records.copyAtFallback(index: i, fallback: 0.0)
+      }
+      sameRecords = sumA - sumB < 0.001 and sumB - sumA < 0.001
+    }
+  }
+  check(label: "...with the same model matrices", ok: sameRecords)
+  # A tile let go: its props are gone, the others stay
+  clearPropGroup(field: grouped, group: 0)
+  gatherPropField(field: grouped, propView: propView, toon: true)
+  check(
+    label: "a cleared group is not drawn ({grouped.visibleCount})"
+    ok: grouped.visibleCount is 3 and propFieldPlacementCount(field: grouped) is 4
+  )
+  # A group set again holds only its new props
+  var moved: List(PropPlacement) = List.create(PropPlacement, cap: 1)
+  moved.add(value: bushAt(kind: bush, x: 10.0, y: 15.0))
+  setPropGroup(field: grouped, group: 3, placements: moved)
+  gatherPropField(field: grouped, propView: propView, toon: true)
+  check(
+    label: "a group set again replaces its props ({grouped.visibleCount})"
+    ok: grouped.visibleCount is 2 and propFieldPlacementCount(field: grouped) is 2
+  )
+  check(
+    label: "only the groups' own cells are looked into ({grouped.cellsVisited})"
+    ok: grouped.cellsVisited > 0 and grouped.cellsVisited <= 4
+  )
+  ret 0
+}
