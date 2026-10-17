@@ -3,13 +3,14 @@
 # #741 rewrite: the terrain props and heightfield tiles are ECS entities in the
 # shared GameWorld (recycled, generational ids) — NOT parallel pool Lists synced
 # by poolIndex, and NOT scale-to-0 culling. Each entity carries a `PropKind`
-# {kind, slot, active}; trees carry a `TreeVariant` {species, index}; tiles carry a
+# {kind, slot, active}; trees carry a `TreeVariant` {species}; tiles carry a
 # `TileMesh` {meshId}. Placement, draw and shadow-cast are all QUERIES over these
 # tables. Transforms are quaternion `Transform3D` (lib/ecs), consistent with the
 # rest of the GameWorld — Euler is only ever an editor-authoring concern.
 #
 # The pool is allocated once; crossing a cell boundary re-places those same
-# entities onto the square of world cells around the character.
+# entities onto the square of world cells around the character. The trees are
+# not in the pool: the island's forest is planted once (terrainSystem/Forest).
 import RendererDeferred
 import Math
 import Noise
@@ -98,12 +99,10 @@ type PropKind {
   active: Bool
 }
 
-# A tree's species (terrainSystem/WalkerTrees: broadleaf, umbrella pine,
-# cypress or spruce), chosen per cell.
+# A tree's species (terrainSystem/WalkerTrees: the leaf-patch forms, the
+# autumn broadleaves or the palm), chosen where it is planted (Forest).
 type TreeVariant {
   species: Int
-  # Which of its cell's two trees it is (0 or 1)
-  index: Int
 }
 
 # A tile entity's unique heightfield mesh (rewritten in place on recycle).
@@ -197,43 +196,6 @@ func propTransform3D(
     position: Vec3.create(x: posX, y: posY, z: terrainHeightAt(x: posX, y: posY, groundZ: groundZ))
     rotation: Quat.fromAxisAngle(axis: Vec3.create(x: 0.0, y: 0.0, z: 1.0), angle: yaw)
     scale: Vec3.create(x: scale, y: scale, z: scale)
-  }
-}
-
-# Tree `index` (0 or 1) of a cell: the first anywhere within 6 m of the cell's
-# centre, the second 7.5 m from it in a seeded direction (kept in the cell), so
-# the two never stand in each other's crown. Its scale is its species' size
-# (WalkerTrees.treeScaleAt).
-func treeTransform(
-  species: view Int
-  index: view Int
-  cellX: view Int
-  cellY: view Int
-  groundZ: view Float
-) ret Transform3D {
-  var offsetX: Float = terrainOffset(cellX: cellX, cellY: cellY, seed: 11)
-  var offsetY: Float = terrainOffset(cellX: cellX, cellY: cellY, seed: 17)
-  if index is 1 {
-    let angle: Float = terrainHash(cellX: cellX, cellY: cellY, seed: 191) * terrainTau
-    offsetX = Math.min(a: Math.max(a: offsetX + Math.cos(x: angle) * 7.5, b: -8.0), b: 8.0)
-    offsetY = Math.min(a: Math.max(a: offsetY + Math.sin(x: angle) * 7.5, b: -8.0), b: 8.0)
-  }
-  let posX: Float = cellX.toFloat() * terrainCellSize + offsetX
-  let posY: Float = cellY.toFloat() * terrainCellSize + offsetY
-  let yaw: Float = terrainHash(cellX: cellX, cellY: cellY, seed: 94 + index * 57) * terrainTau
-  ret Transform3D {
-    position: Vec3.create(
-      x: posX
-      y: posY
-      z: terrainHeightAt(x: posX, y: posY, groundZ: groundZ) - 0.05
-    )
-    rotation: Quat.fromAxisAngle(axis: Vec3.create(x: 0.0, y: 0.0, z: 1.0), angle: yaw)
-    scale: treeScaleAt(
-      species: species
-      cellX: cellX
-      cellY: cellY
-      index: index
-    )
   }
 }
 
@@ -397,6 +359,10 @@ func updateInfiniteTerrain(
   loop var i: Int = 0, i < componentCount(this: world.propKinds), ++i {
     let entityId: EntityId = componentEntityAt(this: world.propKinds, i: i)
     let pk: mod PropKind => queryModAt(table: world.propKinds, denseIndex: i)
+    # The trees are planted once over the whole island (terrainSystem/Forest)
+    if pk.kind is kindTree {
+      continue
+    }
     let ccx: Int = slotCellX(centreCellX: cellX, slot: pk.slot)
     let ccy: Int = slotCellY(centreCellY: cellY, slot: pk.slot)
     if pk.kind is kindTile {
@@ -422,39 +388,17 @@ func updateInfiniteTerrain(
         }
       )
     } else {
-      var transform: Transform3D = kindTransform(
+      let transform: Transform3D = kindTransform(
         kind: pk.kind
         cellX: ccx
         cellY: ccy
         groundZ: terrainSystem.groundZ
       )
-      if pk.kind is kindTree {
-        let index: Int = componentView(this: world.treeVariants, entityId: entityId).index
-        let species: Int = treeSpeciesAt(cellX: ccx, cellY: ccy, index: index)
-        componentSet(
-          this: world.treeVariants
-          entityId: entityId
-          data: TreeVariant { species: species, index: index }
-        )
-        transform = treeTransform(
-          species: species
-          index: index
-          cellX: ccx
-          cellY: ccy
-          groundZ: terrainSystem.groundZ
-        )
-      }
       pk.active = terrainPropAllowed(
         x: transform.position.x
         y: transform.position.y
         minGrass: kindMinGrass(kind: pk.kind)
       )
-      # A tree's trunk is a static body that follows this transform
-      # (PhysicsSystem.addTreeTrunks); one that is not placed goes far below
-      # the island, out of every character's way
-      if pk.active is false {
-        transform.position.z = transform.position.z - 1000.0
-      }
       componentSet(this: world.transforms, entityId: entityId, data: transform)
     }
   }
@@ -695,15 +639,6 @@ func createTerrainSystem(
       data: TileMesh { meshId: tileMesh.id }
     )
 
-    # Two trees per cell
-    loop var treeIndex: Int = 0, treeIndex < 2, ++treeIndex {
-      let treeEntityId: EntityId = spawnProp(world: world, kind: kindTree, slot: slot)
-      componentSet(
-        this: world.treeVariants
-        entityId: treeEntityId
-        data: TreeVariant { species: speciesBroadleaf, index: treeIndex }
-      )
-    }
     let unusedRock: EntityId = spawnProp(world: world, kind: kindRock, slot: slot)
     let unusedBush: EntityId = spawnProp(world: world, kind: kindBush, slot: slot)
     let unusedFlower: EntityId = spawnProp(world: world, kind: kindFlower, slot: slot)
@@ -728,7 +663,7 @@ func createTerrainSystem(
       material: grassMat
       capacity: terrainCellCount * 2
     )
-    treeParts: own createTreeParts(renderer: renderer, capacity: terrainCellCount * 2)
+    treeParts: own createTreeParts(renderer: renderer, capacity: forestSize)
     bushParts: own createBushParts(renderer: renderer, capacity: terrainCellCount)
   }
   ret own terrainSystem

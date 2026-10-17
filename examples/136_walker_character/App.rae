@@ -579,6 +579,14 @@ func createApp() ret App {
     # Nobody starts in the sea. The origin is not guaranteed land — the island mask
     # only guarantees land is SOMEWHERE inside the radius.
     spawnOnLand(controller: characterController, groundZ: groundZ)
+    # The island's forest, with a clearing around the spawn for the cube stacks
+    let treeCount: Int = plantForest(
+      world: gameWorld
+      spawnX: characterController.position.x
+      spawnY: characterController.position.y
+      groundZ: groundZ
+    )
+    log("[terrain] {treeCount} trees planted on the island")
     partModel = walkerWorldModel(baseModel: basePartModel, controller: characterController)
 
     # #739: the hero is an entity carrying its ThirdPersonController + Transform3D.
