@@ -11,15 +11,23 @@ func main() ret Int {
   }
   let counts: List(Int) = { 48, 24, 12 }
   loop let form: FluffyForm in forms {
+    let wood: MeshData = fluffyWood(form: form, seed: 73)
+    loop let index: Int in wood.indices {
+      if index < 0 or index >= wood.vertCount {
+        ret 7
+      }
+    }
+    if form is FluffyForm.spruce {
+      if wood.vertCount is not 954 or wood.indices.length is not 4770 {
+        ret 8
+      }
+    }
     var clusters: Int = 7
     if form is FluffyForm.bush {
       clusters = 5
     }
     if form is FluffyForm.cypress {
       clusters = 9
-    }
-    if form is FluffyForm.spruce {
-      clusters = 31
     }
     loop let count: Int in counts {
       var total: Int = 0
@@ -36,10 +44,16 @@ func main() ret Int {
           patchCount: count
           tone: tone
         )
-        if mesh.vertCount is not clusters * count / 3 * 13 {
+        var expectedVertices: Int = clusters * count / 3 * 13
+        var expectedIndices: Int = clusters * count / 3 * 72
+        if form is FluffyForm.spruce {
+          expectedVertices = 2 * (3 * (count / 2) + 2)
+          expectedIndices = 2 * 6 * (count / 2) * 3
+        }
+        if mesh.vertCount is not expectedVertices {
           ret 1
         }
-        if mesh.indices.length is not clusters * count / 3 * 72 {
+        if mesh.indices.length is not expectedIndices {
           ret 2
         }
         loop var i: Int = 0, i < mesh.verts.length, ++i {
@@ -58,7 +72,11 @@ func main() ret Int {
         }
         total = total + mesh.indices.length / 3
       }
-      if total is not clusters * count * 24 {
+      var expectedTriangles: Int = clusters * count * 24
+      if form is FluffyForm.spruce {
+        expectedTriangles = 6 * 6 * (count / 2)
+      }
+      if total is not expectedTriangles {
         ret 6
       }
     }
