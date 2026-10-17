@@ -1187,7 +1187,11 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # while the frame loop rendered an empty UiSystems and no UI showed.
           # The corner menu is EDITOR chrome (lib/app3d/UiModes; GAME is the
           # default), so the shot is taken in EDITOR mode.
-          # The 154 shadow casters are the scene's 130 plus the 24 physics cubes.
+          # The 190 shadow casters are the scene's 166 (each tree is its wood and
+          # three leaf tones, each bush three tones) plus the 24 physics cubes.
+          # The physics check (RAE_114_PHYSICS_TEST) settles the cube stacks,
+          # walks the hero into one and jumps, then checks the tree trunks: a
+          # ray hits one, the hero stops at its bark, and it follows its tree.
           SHOT="$TMP_OUT/walker.bmp"
           if (cd .. && RAE_UI_MODE=editor RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SHOT" \
                 perl -e 'alarm shift; exec @ARGV' 45 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
@@ -1200,8 +1204,12 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              && [ "$(grep -c "skinned parts: 12" "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c "panel buttons: 4 clip, 0 transport" "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c "\[water\] toon lake: 2 bodies" "$TMP_OUT/render.log")" -eq 1 ] \
-             && [ "$(grep -c "\[shadow\] casters 154, 4 cascades" "$TMP_OUT/render.log")" -eq 1 ] \
+             && [ "$(grep -c "\[shadow\] casters 190, 4 cascades" "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c "\[seamtest\] .* netOk=true physicsOk=true" "$TMP_OUT/render.log")" -eq 1 ] \
+             && (cd .. && RAE_114_PHYSICS_TEST=1 RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=60000 \
+                perl -e 'alarm shift; exec @ARGV' 60 "$TMP_OUT/app") > "$TMP_OUT/physics.log" 2>&1 \
+             && [ "$(grep -c "\[trunktest\] .* passed=true" "$TMP_OUT/physics.log")" -eq 1 ] \
+             && [ "$(grep -c "\[physicstest\] .* passed=true" "$TMP_OUT/physics.log")" -eq 1 ] \
              && (cd .. && RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=90000 RAE_MEM_STATS=1 RAE_MEM_STATS_EVERY_MS=10000 \
                 perl -e 'alarm shift; exec @ARGV' 150 "$TMP_OUT/app") > "$TMP_OUT/live-growth.log" 2>&1 \
              && awk '
@@ -1221,7 +1229,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (walker character)"
-            cat "$TMP_OUT/render.log" "$TMP_OUT/shot.log" 2>/dev/null | sed 's/^/  /'
+            cat "$TMP_OUT/render.log" "$TMP_OUT/shot.log" "$TMP_OUT/physics.log" 2>/dev/null | sed 's/^/  /'
             grep -a '^\[mem:live\]' "$TMP_OUT/live-growth.log" 2>/dev/null | sed 's/^/  /'
             ((FAILED++))
           fi
@@ -1229,7 +1237,8 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # The forward twin of 136 (forward-rae-5): the same walker, crowd,
           # terrain, grass, props and cubes in one 4x MSAA pass, no water. A
           # shaded frame (thousands of colours), all 12 skinned parts loaded,
-          # the forward path taken and the same 154 shadow casters as 136.
+          # the forward path taken and 154 shadow casters (136's
+          # glb trees; 136 itself now has the leaf-patch trees).
           SHOT="$TMP_OUT/walker-forward.bmp"
           if (cd .. && RAE_UI_MODE=editor RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SHOT" \
                 perl -e 'alarm shift; exec @ARGV' 45 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \

@@ -1,8 +1,9 @@
 # Autumn Grove
 
-A procedural prop showcase with twenty-five trees (including the six original
-autumn trees), rock groups across the island, low shrubs, the standard GPU grass
-and a winding path on a raised garden base.
+A procedural prop showcase with about sixty trees (including the six original
+autumn trees and a woodland of the leaf-patch forms over the whole island), rock
+groups across the island, low shrubs, the standard GPU grass and a winding path
+on a raised garden base.
 
 - **1** restores the complete grove.
 - **2** frames the branching wood and leaf crowns.
@@ -108,6 +109,14 @@ renderer. This demonstrates reusable assets, not a benchmark of thousands of
 trees: draw batching, pooled instance updates, distance-selected LODs and
 far billboards remain upstream integration work. Do not render thousands of
 the near-view meshes with individual draw calls.
+
+The same meshes also make the island's woodland (`addFluffyWoodland`): about
+34 broadleaves, spruces, umbrella pines and cypresses and 18 bushes at seeded
+spots inside the rim. A spot is kept only when the plant's crown has room:
+clear of the paths, the camphor's clearing, the shrub row, every trunk and
+rock, the woodland so far and the spruce view's line of sight. The lawn in
+front of the overview camera gets only bushes, so the grove stays in view. The
+walker example (136) streams the same forms over its terrain.
 
 ![Broad leaf patches](references/Fluffy.png)
 

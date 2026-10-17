@@ -3,7 +3,7 @@
 # #741 rewrite: the terrain props and heightfield tiles are ECS entities in the
 # shared GameWorld (recycled, generational ids) — NOT parallel pool Lists synced
 # by poolIndex, and NOT scale-to-0 culling. Each entity carries a `PropKind`
-# {kind, slot, active}; trees carry a `TreeVariant` {broad}; tiles carry a
+# {kind, slot, active}; trees carry a `TreeVariant` {species}; tiles carry a
 # `TileMesh` {meshId}. Placement, draw and shadow-cast are all QUERIES over these
 # tables. Transforms are quaternion `Transform3D` (lib/ecs), consistent with the
 # rest of the GameWorld — Euler is only ever an editor-authoring concern.
@@ -27,6 +27,7 @@ open ecs/Entity
 open ecs/ComponentTable
 open ecs/Query
 open ecs/Transform
+open terrainSystem/WalkerTrees
 
 # Single source of truth for the ground colour: the terrain ground material AND
 # the GPU grass gradient's bottom both read this, so the grass roots match ground.
@@ -97,9 +98,10 @@ type PropKind {
   active: Bool
 }
 
-# A tree's broad-vs-tall choice, replacing the old broadVisible side-table.
+# A tree's species (terrainSystem/WalkerTrees: broadleaf, umbrella pine,
+# cypress or spruce), chosen per cell.
 type TreeVariant {
-  broad: Bool
+  species: Int
 }
 
 # A tile entity's unique heightfield mesh (rewritten in place on recycle).
@@ -108,27 +110,8 @@ type TileMesh {
 }
 
 # ----- instanced prop rendering --------------------------------------
-# One instanced prop draw: its mesh, its material, and a pre-sized batch refilled
-# each frame. The material is a value (not a scene index) so terrain owns no
-# Scene3d state.
-type PropInstancer {
-  mesh: MeshHandle
-  material: Material3d
-  batch: InstanceBatch
-}
-
-func createPropInstancer(
-  mesh: view MeshHandle
-  material: view Material3d
-  capacity: copy Int
-) ret PropInstancer {
-  ret PropInstancer {
-    mesh: mesh
-    material: material
-    batch: own createInstanceBatch(mesh: mesh, capacity: capacity)
-  }
-}
-
+# The trees and bushes are the lib's leaf-patch forms (terrainSystem/WalkerTrees);
+# the rocks, flowers and grass tufts are glb meshes.
 type TerrainSystem {
   centreCellX: Int
   centreCellY: Int
@@ -137,13 +120,12 @@ type TerrainSystem {
   # Reused staging buffer for a tile's per-cell heightfield rewrite.
   scratchVerts: List(Float)
   rockProp: PropInstancer
-  bushProp: PropInstancer
   flowerProp: PropInstancer
   grassProp: PropInstancer
-  broadTrunkProp: PropInstancer
-  broadCrownProp: PropInstancer
-  tallTrunkProp: PropInstancer
-  tallCrownProp: PropInstancer
+  # Each tree species' wood and three leaf tones (WalkerTrees.createTreeParts)
+  treeParts: List(PropInstancer)
+  # The bush's three leaf tones
+  bushParts: List(PropInstancer)
 }
 
 func terrainMesh(renderer: mod DeferredRenderer, path: view String) ret MeshHandle {
@@ -219,34 +201,24 @@ func propTransform3D(
 # The prop transform for a given kind (per-kind scatter seeds + scale range).
 func kindTransform(
   kind: view Int
-  broad: view Bool
+  species: view Int
   cellX: view Int
   cellY: view Int
   groundZ: view Float
 ) ret Transform3D {
   if kind is kindTree {
-    if broad {
-      ret propTransform3D(
-        cellX: cellX
-        cellY: cellY
-        seedX: 11
-        seedY: 17
-        seedScale: 23
-        groundZ: groundZ
-        minScale: 0.30
-        scaleSpread: 0.15
-      )
-    }
-    ret propTransform3D(
+    var transform: Transform3D = propTransform3D(
       cellX: cellX
       cellY: cellY
       seedX: 11
       seedY: 17
-      seedScale: 109
-      groundZ: groundZ
-      minScale: 0.25
-      scaleSpread: 0.14
+      seedScale: 23
+      groundZ: groundZ - 0.05
+      minScale: 1.0
+      scaleSpread: 0.0
     )
+    transform.scale = treeSizeAt(species: species, cellX: cellX, cellY: cellY)
+    ret transform
   }
   if kind is kindRock {
     ret propTransform3D(
@@ -267,9 +239,9 @@ func kindTransform(
       seedX: 47
       seedY: 53
       seedScale: 59
-      groundZ: groundZ
-      minScale: 0.22
-      scaleSpread: 0.16
+      groundZ: groundZ - 0.05
+      minScale: 1.5
+      scaleSpread: 0.9
     )
   }
   if kind is kindFlower {
@@ -426,28 +398,34 @@ func updateInfiniteTerrain(
         }
       )
     } else {
-      var broad: Bool = false
+      var species: Int = speciesBroadleaf
       if pk.kind is kindTree {
-        broad = terrainHash(cellX: ccx, cellY: ccy, seed: 131) < 0.54
+        species = treeSpeciesAt(cellX: ccx, cellY: ccy)
         componentSet(
           this: world.treeVariants
           entityId: entityId
-          data: TreeVariant { broad: broad }
+          data: TreeVariant { species: species }
         )
       }
-      let t: Transform3D = kindTransform(
+      var transform: Transform3D = kindTransform(
         kind: pk.kind
-        broad: broad
+        species: species
         cellX: ccx
         cellY: ccy
         groundZ: terrainSystem.groundZ
       )
-      componentSet(this: world.transforms, entityId: entityId, data: t)
       pk.active = terrainPropAllowed(
-        x: t.position.x
-        y: t.position.y
+        x: transform.position.x
+        y: transform.position.y
         minGrass: kindMinGrass(kind: pk.kind)
       )
+      # A tree's trunk is a static body that follows this transform
+      # (PhysicsSystem.addTreeTrunks); one that is not placed goes far below
+      # the island, out of every character's way
+      if pk.active is false {
+        transform.position.z = transform.position.z - 1000.0
+      }
+      componentSet(this: world.transforms, entityId: entityId, data: transform)
     }
   }
   ret true
@@ -470,13 +448,14 @@ func drawTerrainProps(
   world: view GameWorld
 ) {
   resetInstanceBatch(batch: terrainSystem.rockProp.batch)
-  resetInstanceBatch(batch: terrainSystem.bushProp.batch)
   resetInstanceBatch(batch: terrainSystem.flowerProp.batch)
   resetInstanceBatch(batch: terrainSystem.grassProp.batch)
-  resetInstanceBatch(batch: terrainSystem.broadTrunkProp.batch)
-  resetInstanceBatch(batch: terrainSystem.broadCrownProp.batch)
-  resetInstanceBatch(batch: terrainSystem.tallTrunkProp.batch)
-  resetInstanceBatch(batch: terrainSystem.tallCrownProp.batch)
+  loop let part: mod PropInstancer in terrainSystem.treeParts {
+    resetInstanceBatch(batch: part.batch)
+  }
+  loop let part: mod PropInstancer in terrainSystem.bushParts {
+    resetInstanceBatch(batch: part.batch)
+  }
   loop var i: Int = 0, i < componentCount(this: world.propKinds), ++i {
     let entityId: EntityId = componentEntityAt(this: world.propKinds, i: i)
     let pk: view PropKind => queryViewAt(table: world.propKinds, denseIndex: i)
@@ -488,7 +467,9 @@ func drawTerrainProps(
         gatherKind(prop: terrainSystem.rockProp, model: model)
       }
       if pk.kind is kindBush {
-        gatherKind(prop: terrainSystem.bushProp, model: model)
+        loop let part: mod PropInstancer in terrainSystem.bushParts {
+          gatherKind(prop: part, model: model)
+        }
       }
       if pk.kind is kindFlower {
         gatherKind(prop: terrainSystem.flowerProp, model: model)
@@ -500,24 +481,24 @@ func drawTerrainProps(
         gatherKind(prop: terrainSystem.grassProp, model: model)
       }
       if pk.kind is kindTree {
-        if componentView(this: world.treeVariants, entityId: entityId).broad {
-          gatherKind(prop: terrainSystem.broadTrunkProp, model: model)
-          gatherKind(prop: terrainSystem.broadCrownProp, model: model)
-        } else {
-          gatherKind(prop: terrainSystem.tallTrunkProp, model: model)
-          gatherKind(prop: terrainSystem.tallCrownProp, model: model)
+        let first: Int = componentView(this: world.treeVariants, entityId: entityId).species * treePartCount
+        loop var part: Int = first, part < first + treePartCount, ++part {
+          if let prop: mod PropInstancer => terrainSystem.treeParts.modAt(index: part) {
+            gatherKind(prop: prop, model: model)
+          }
         }
       }
     }
   }
   drawInstances(cache: cache, resources: resources, batch: terrainSystem.rockProp.batch)
-  drawInstances(cache: cache, resources: resources, batch: terrainSystem.bushProp.batch)
   drawInstances(cache: cache, resources: resources, batch: terrainSystem.flowerProp.batch)
   drawInstances(cache: cache, resources: resources, batch: terrainSystem.grassProp.batch)
-  drawInstances(cache: cache, resources: resources, batch: terrainSystem.broadTrunkProp.batch)
-  drawInstances(cache: cache, resources: resources, batch: terrainSystem.broadCrownProp.batch)
-  drawInstances(cache: cache, resources: resources, batch: terrainSystem.tallTrunkProp.batch)
-  drawInstances(cache: cache, resources: resources, batch: terrainSystem.tallCrownProp.batch)
+  loop let part: view PropInstancer in terrainSystem.treeParts {
+    drawInstances(cache: cache, resources: resources, batch: part.batch)
+  }
+  loop let part: view PropInstancer in terrainSystem.bushParts {
+    drawInstances(cache: cache, resources: resources, batch: part.batch)
+  }
 }
 
 func drawTerrainGround(
@@ -568,7 +549,9 @@ func drawTerrainPropsShadow(
         castKind(renderer: renderer, mesh: terrainSystem.rockProp.mesh, model: model)
       }
       if pk.kind is kindBush {
-        castKind(renderer: renderer, mesh: terrainSystem.bushProp.mesh, model: model)
+        loop let part: view PropInstancer in terrainSystem.bushParts {
+          castKind(renderer: renderer, mesh: part.mesh, model: model)
+        }
       }
       if pk.kind is kindFlower {
         castKind(renderer: renderer, mesh: terrainSystem.flowerProp.mesh, model: model)
@@ -580,12 +563,11 @@ func drawTerrainPropsShadow(
         castKind(renderer: renderer, mesh: terrainSystem.grassProp.mesh, model: model)
       }
       if pk.kind is kindTree {
-        if componentView(this: world.treeVariants, entityId: entityId).broad {
-          castKind(renderer: renderer, mesh: terrainSystem.broadTrunkProp.mesh, model: model)
-          castKind(renderer: renderer, mesh: terrainSystem.broadCrownProp.mesh, model: model)
-        } else {
-          castKind(renderer: renderer, mesh: terrainSystem.tallTrunkProp.mesh, model: model)
-          castKind(renderer: renderer, mesh: terrainSystem.tallCrownProp.mesh, model: model)
+        let first: Int = componentView(this: world.treeVariants, entityId: entityId).species * treePartCount
+        loop var part: Int = first, part < first + treePartCount, ++part {
+          if let prop: view PropInstancer => terrainSystem.treeParts.viewAt(index: part) {
+            castKind(renderer: renderer, mesh: prop.mesh, model: model)
+          }
         }
       }
     }
@@ -602,13 +584,14 @@ func setInfiniteTerrainToon(terrainSystem: mod TerrainSystem, toon: view Bool) {
   }
   terrainSystem.toon = toon
   setPropInstancerToon(prop: terrainSystem.rockProp, toon: toon)
-  setPropInstancerToon(prop: terrainSystem.bushProp, toon: toon)
   setPropInstancerToon(prop: terrainSystem.flowerProp, toon: toon)
   setPropInstancerToon(prop: terrainSystem.grassProp, toon: toon)
-  setPropInstancerToon(prop: terrainSystem.broadTrunkProp, toon: toon)
-  setPropInstancerToon(prop: terrainSystem.broadCrownProp, toon: toon)
-  setPropInstancerToon(prop: terrainSystem.tallTrunkProp, toon: toon)
-  setPropInstancerToon(prop: terrainSystem.tallCrownProp, toon: toon)
+  loop let part: mod PropInstancer in terrainSystem.treeParts {
+    setPropInstancerToon(prop: part, toon: toon)
+  }
+  loop let part: mod PropInstancer in terrainSystem.bushParts {
+    setPropInstancerToon(prop: part, toon: toon)
+  }
 }
 
 func terrainMaterial(color: view Vec3, roughness: view Float) ret Material3d {
@@ -640,45 +623,16 @@ func createTerrainSystem(
   groundZ: view Float
 ) ret TerrainSystem {
   let tilePlane: MeshData = makePlane(size: terrainCellSize + 0.04, segments: terrainTileSegments)
-  let broadTrunk: MeshHandle = terrainMesh(
-    renderer: renderer
-    path: "{assets}environment/tree_broad_trunk.glb"
-  )
-  let broadCrown: MeshHandle = terrainMesh(
-    renderer: renderer
-    path: "{assets}environment/tree_broad_crown.glb"
-  )
-  let tallTrunk: MeshHandle = terrainMesh(
-    renderer: renderer
-    path: "{assets}environment/tree_tall_trunk.glb"
-  )
-  let tallCrown: MeshHandle = terrainMesh(
-    renderer: renderer
-    path: "{assets}environment/tree_tall_crown.glb"
-  )
   let rockMesh: MeshHandle = terrainMesh(renderer: renderer, path: "{assets}environment/rock.glb")
-  let bushMesh: MeshHandle = terrainMesh(renderer: renderer, path: "{assets}environment/bush.glb")
   let flowerMesh: MeshHandle = terrainMesh(
     renderer: renderer
     path: "{assets}environment/flower.glb"
   )
   let grassMesh: MeshHandle = terrainMesh(renderer: renderer, path: "{assets}environment/grass.glb")
 
-  let trunkMat: Material3d = terrainMaterial(
-    color: Vec3.create(x: 0.205, y: 0.090, z: 0.032)
-    roughness: 0.92
-  )
-  let crownMat: Material3d = terrainMaterial(
-    color: Vec3.create(x: 0.055, y: 0.255, z: 0.075)
-    roughness: 0.88
-  )
   let rockMat: Material3d = terrainMaterial(
     color: Vec3.create(x: 0.235, y: 0.265, z: 0.285)
     roughness: 0.82
-  )
-  let bushMat: Material3d = terrainMaterial(
-    color: Vec3.create(x: 0.035, y: 0.185, z: 0.105)
-    roughness: 0.90
   )
   let flowerMat: Material3d = terrainMaterial(
     color: Vec3.create(x: 0.92, y: 0.38, z: 0.045)
@@ -715,7 +669,7 @@ func createTerrainSystem(
     componentSet(
       this: world.treeVariants
       entityId: treeEntityId
-      data: TreeVariant { broad: false }
+      data: TreeVariant { species: speciesBroadleaf }
     )
     let unusedRock: EntityId = spawnProp(world: world, kind: kindRock, slot: slot)
     let unusedBush: EntityId = spawnProp(world: world, kind: kindBush, slot: slot)
@@ -731,7 +685,6 @@ func createTerrainSystem(
     toon: true
     scratchVerts: own scratch
     rockProp: own createPropInstancer(mesh: rockMesh, material: rockMat, capacity: terrainCellCount)
-    bushProp: own createPropInstancer(mesh: bushMesh, material: bushMat, capacity: terrainCellCount)
     flowerProp: own createPropInstancer(
       mesh: flowerMesh
       material: flowerMat
@@ -742,26 +695,8 @@ func createTerrainSystem(
       material: grassMat
       capacity: terrainCellCount * 2
     )
-    broadTrunkProp: own createPropInstancer(
-      mesh: broadTrunk
-      material: trunkMat
-      capacity: terrainCellCount
-    )
-    broadCrownProp: own createPropInstancer(
-      mesh: broadCrown
-      material: crownMat
-      capacity: terrainCellCount
-    )
-    tallTrunkProp: own createPropInstancer(
-      mesh: tallTrunk
-      material: trunkMat
-      capacity: terrainCellCount
-    )
-    tallCrownProp: own createPropInstancer(
-      mesh: tallCrown
-      material: crownMat
-      capacity: terrainCellCount
-    )
+    treeParts: own createTreeParts(renderer: renderer, capacity: terrainCellCount)
+    bushParts: own createBushParts(renderer: renderer, capacity: terrainCellCount)
   }
   ret own terrainSystem
 }
