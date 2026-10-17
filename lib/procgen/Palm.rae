@@ -1,0 +1,368 @@
+# procgen/Palm — the two palms of Los Angeles' streets, low-poly, Z-up from
+# their foot at the origin, deterministic from their seed:
+#
+#   PalmForm.fan   a Mexican fan palm (Washingtonia robusta): a very tall,
+#     very slim, slightly curved trunk with a brown skirt of dead fronds under
+#     a round crown of pleated fan leaves on long stalks (20-25 m tall)
+#   PalmForm.date  a date palm (Phoenix): a thicker ringed trunk with a knob
+#     of frond bases at its top and a big crown of long arching feather
+#     fronds that droop at their tips (12-15 m tall)
+#
+#   palmTrunk(form:, seed:, height:)  the trunk (and the fan palm's skirt):
+#     one mesh, drawn in the wood's colour
+#   palmFronds(form:, seed:, height:, tone:, leaflets:)  the fronds of one
+#     tone (0..2, each frond in one of them: draw each in its own shade);
+#     `leaflets` is the leaflet pairs of a feather frond or the wedges of a
+#     fan, the knob for a cheaper level of detail far away
+#   palmCrown(form:, seed:, height:)  the top of the trunk, where the fronds
+#     spring from
+#
+# Leaves are thin triangles with both windings, so they show from below.
+import Math
+open Vec3
+open Mesh3d
+open Noise
+open procgen/Foliage
+
+enum PalmForm { fan, date }
+
+# Fronds in a crown
+func palmFrondCount(form: view PalmForm) ret Int {
+  if form is PalmForm.fan {
+    ret 18
+  }
+  ret 24
+}
+
+# How far the trunk leans over at its top, per metre of height
+func palmLean(form: view PalmForm) ret Float {
+  if form is PalmForm.fan {
+    ret 0.035
+  }
+  ret 0.06
+}
+
+# The trunk's middle `fraction` (0 foot .. 1 top) of the way up: a gentle
+# curve, leaning more the higher it goes, toward the seed's own direction
+func palmTrunkPoint(
+  form: view PalmForm
+  seed: view Int
+  height: view Float
+  fraction: view Float
+) ret Vec3 {
+  let angle: Float = hash2(x: seed, y: 3, seed: seed) * 6.2831853
+  let lean: Float = palmLean(form: form) * height * fraction * fraction
+  ret Vec3.create(x: Math.cos(x: angle) * lean, y: Math.sin(x: angle) * lean, z: height * fraction)
+}
+
+func palmCrown(form: view PalmForm, seed: view Int, height: view Float) ret Vec3 {
+  ret palmTrunkPoint(
+    form: form
+    seed: seed
+    height: height
+    fraction: 1.0
+  )
+}
+
+# The trunk's radius `fraction` of the way up: a flared foot, then slim
+func palmTrunkRadius(form: view PalmForm, fraction: view Float) ret Float {
+  let flare: Float = Math.max(a: 0.0, b: 1.0 - fraction * 12.0)
+  if form is PalmForm.fan {
+    ret 0.16 + 0.05 * (1.0 - fraction) + 0.16 * flare
+  }
+  ret 0.32 + 0.06 * (1.0 - fraction) + 0.14 * flare
+}
+
+func palmTrunk(form: view PalmForm, seed: view Int, height: view Float) ret MeshData {
+  var mesh: MeshData = foliageMesh()
+  var points: List(Vec3) = List.create(Vec3, cap: 40)
+  var radii: List(Float) = List.create(Float, cap: 40)
+  # A point every half metre; the date palm's trunk is ringed (its old frond
+  # bases), the fan palm's smooth
+  let steps: Int = Math.max(a: 8.0, b: Math.floor(x: height / 0.5)).toInt()
+  loop var i: Int = 0, i <= steps, ++i {
+    let fraction: Float = i.toFloat() / steps.toFloat()
+    points.add(value: palmTrunkPoint(
+      form: form
+      seed: seed
+      height: height
+      fraction: fraction
+    ))
+    var radius: Float = palmTrunkRadius(form: form, fraction: fraction)
+    if form is PalmForm.date and i % 2 is 1 {
+      radius = radius + 0.035
+    }
+    radii.add(value: radius)
+  }
+  var sides: Int = 6
+  if form is PalmForm.date {
+    sides = 7
+  }
+  foliageTube(
+    mesh: mesh
+    points: points
+    radii: radii
+    sides: sides
+  )
+  var top: List(Vec3) = List.create(Vec3, cap: 4)
+  var topRadii: List(Float) = List.create(Float, cap: 4)
+  if form is PalmForm.fan {
+    # The skirt: the dead fronds hanging down the trunk under the crown
+    let skirtFractions: List(Float) = {
+      1.0 - 3.2 / height
+      1.0 - 2.2 / height
+      1.0 - 1.0 / height
+      1.0
+    }
+    let skirtRadii: List(Float) = { 0.2, 0.5, 0.62, 0.45 }
+    loop var i: Int = 0, i < skirtFractions.length, ++i {
+      top.add(value: palmTrunkPoint(
+        form: form
+        seed: seed
+        height: height
+        fraction: skirtFractions.copyAtFallback(index: i, fallback: 1.0)
+      ))
+      topRadii.add(value: skirtRadii.copyAtFallback(index: i, fallback: 0.4))
+    }
+  } else {
+    # The knob of frond bases the crown springs from
+    let knobFractions: List(Float) = { 1.0 - 1.4 / height, 1.0 - 0.7 / height, 1.0 }
+    let knobRadii: List(Float) = { 0.34, 0.55, 0.4 }
+    loop var i: Int = 0, i < knobFractions.length, ++i {
+      top.add(value: palmTrunkPoint(
+        form: form
+        seed: seed
+        height: height
+        fraction: knobFractions.copyAtFallback(index: i, fallback: 1.0)
+      ))
+      topRadii.add(value: knobRadii.copyAtFallback(index: i, fallback: 0.4))
+    }
+  }
+  foliageTube(
+    mesh: mesh
+    points: top
+    radii: topRadii
+    sides: sides + 2
+  )
+  ret mesh
+}
+
+# A triangle seen from both sides
+func palmLeafFace(
+  mesh: mod MeshData
+  first: view Vec3
+  second: view Vec3
+  third: view Vec3
+) {
+  foliageFace(
+    mesh: mesh
+    first: first
+    second: second
+    third: third
+  )
+  foliageFace(
+    mesh: mesh
+    first: first
+    second: third
+    third: second
+  )
+}
+
+# Frond `index` of a crown: where it springs from the crown, the way it
+# leaves (its azimuth round the trunk and its rise), how long it is
+type PalmFrondStart {
+  base: Vec3
+  azimuth: Float
+  rise: Float
+  length: Float
+}
+
+func palmFrondStart(
+  form: view PalmForm
+  seed: view Int
+  height: view Float
+  index: view Int
+) ret PalmFrondStart {
+  let count: Int = palmFrondCount(form: form)
+  let crown: Vec3 = palmCrown(form: form, seed: seed, height: height)
+  let azimuth: Float = index.toFloat() * 2.39996 + hash2(x: index, y: 5, seed: seed) * 0.4
+  # The young fronds stand up, the old ones hang: spread over the crown
+  let age: Float = (index.toFloat() + 0.5) / count.toFloat()
+  var rise: Float = 0.95 - age * 1.45
+  var length: Float = 4.2 + hash2(x: index, y: 6, seed: seed) * 1.0
+  if form is PalmForm.fan {
+    rise = 0.75 - age * 1.0
+    length = 1.6 + hash2(x: index, y: 6, seed: seed) * 0.4
+  }
+  ret PalmFrondStart {
+    base: Vec3.create(
+      x: crown.x + Math.cos(x: azimuth) * 0.2
+      y: crown.y + Math.sin(x: azimuth) * 0.2
+      z: crown.z - 0.1
+    )
+    azimuth: azimuth
+    rise: rise
+    length: length
+  }
+}
+
+# The direction along a frond at `azimuth`, `rise` radians above level
+func palmDirection(azimuth: view Float, rise: view Float) ret Vec3 {
+  ret Vec3.create(
+    x: Math.cos(x: azimuth) * Math.cos(x: rise)
+    y: Math.sin(x: azimuth) * Math.cos(x: rise)
+    z: Math.sin(x: rise)
+  )
+}
+
+# A frond's spine from its base: `segments` steps along it, bending down more
+# the farther out (`droop` radians at the tip)
+func palmSpine(start: view PalmFrondStart, segments: view Int, droop: view Float) ret List(Vec3) {
+  var points: List(Vec3) = List.create(Vec3, cap: segments + 1)
+  var point: Vec3 = start.base
+  points.add(value: point)
+  let step: Float = start.length / segments.toFloat()
+  loop var k: Int = 1, k <= segments, ++k {
+    let out: Float = k.toFloat() / segments.toFloat()
+    let direction: Vec3 = palmDirection(
+      azimuth: start.azimuth
+      rise: start.rise - droop * out * Math.sqrt(x: out)
+    )
+    point = vadd(a: point, b: vscale(a: direction, s: step))
+    points.add(value: point)
+  }
+  ret points
+}
+
+func palmFronds(
+  form: view PalmForm
+  seed: view Int
+  height: view Float
+  tone: view Int
+  leaflets: view Int
+) ret MeshData {
+  var mesh: MeshData = foliageMesh()
+  let pairs: Int = Math.max(a: 2.0, b: leaflets.toFloat()).toInt()
+  loop var i: Int = 0, i < palmFrondCount(form: form), ++i {
+    if i % 3 is not tone {
+      continue
+    }
+    let start: PalmFrondStart = palmFrondStart(
+      form: form
+      seed: seed
+      height: height
+      index: i
+    )
+    let side: Vec3 = Vec3.create(
+      x: 0.0 - Math.sin(x: start.azimuth)
+      y: Math.cos(x: start.azimuth)
+      z: 0.0
+    )
+    if form is PalmForm.date {
+      dateFrond(
+        mesh: mesh
+        start: start
+        side: side
+        pairs: pairs
+      )
+    } else {
+      fanFrond(
+        mesh: mesh
+        start: start
+        side: side
+        wedges: pairs
+      )
+    }
+  }
+  ret mesh
+}
+
+# A feather frond: along its arching spine, a pair of long narrow leaflets
+# at each step, longest in the middle, swept forward and up in a V
+func dateFrond(
+  mesh: mod MeshData
+  start: view PalmFrondStart
+  side: view Vec3
+  pairs: view Int
+) {
+  let spine: List(Vec3) = palmSpine(start: start, segments: pairs, droop: 1.15)
+  loop var k: Int = 1, k <= pairs, ++k {
+    let point: Vec3 = spine.copyAtFallback(index: k, fallback: start.base)
+    let before: Vec3 = spine.copyAtFallback(index: k - 1, fallback: start.base)
+    let along: Vec3 = vnorm(a: vsub(a: point, b: before))
+    let up: Vec3 = vnorm(a: vcross(a: side, b: along))
+    let out: Float = k.toFloat() / pairs.toFloat()
+    let width: Float = 0.85 * Math.sin(x: 3.14159265 * Math.min(a: 0.98, b: out * 0.9 + 0.08))
+    loop var s: Int = 0, s < 2, ++s {
+      let sense: Float = 1.0 - 2.0 * s.toFloat()
+      let tip: Vec3 = vadd(
+        a: vadd(a: point, b: vscale(a: side, s: sense * width))
+        b: vadd(a: vscale(a: along, s: width * 0.35), b: vscale(a: up, s: width * 0.3))
+      )
+      palmLeafFace(
+        mesh: mesh
+        first: before
+        second: point
+        third: tip
+      )
+    }
+  }
+}
+
+# A fan frond: a stalk out from the crown, then a pleated fan of `wedges`
+# triangles round its end, its edges hanging down
+func fanFrond(
+  mesh: mod MeshData
+  start: view PalmFrondStart
+  side: view Vec3
+  wedges: view Int
+) {
+  let stalk: List(Vec3) = palmSpine(start: start, segments: 2, droop: 0.35)
+  let hub: Vec3 = stalk.copyAtFallback(index: 2, fallback: start.base)
+  let middle: Vec3 = stalk.copyAtFallback(index: 1, fallback: start.base)
+  # The stalk: a thin strip
+  let edge: Vec3 = vscale(a: side, s: 0.04)
+  palmLeafFace(
+    mesh: mesh
+    first: vsub(a: start.base, b: edge)
+    second: vadd(a: start.base, b: edge)
+    third: middle
+  )
+  palmLeafFace(
+    mesh: mesh
+    first: vsub(a: middle, b: edge)
+    second: vadd(a: middle, b: edge)
+    third: hub
+  )
+  let forward: Vec3 = palmDirection(azimuth: start.azimuth, rise: start.rise - 0.35)
+  let radius: Float = 1.15
+  var previous: Vec3 = hub
+  loop var w: Int = 0, w <= wedges, ++w {
+    let angle: Float = (w.toFloat() / wedges.toFloat() - 0.5) * 2.8
+    let across: Float = Math.sin(x: angle)
+    # Pleats: every other point a little higher; the sides hang lower
+    var lift: Float = 0.0 - 0.45 * radius * across * across
+    if w % 2 is 1 {
+      lift = lift + 0.1
+    }
+    let point: Vec3 = vadd(
+      a: hub
+      b: vadd(
+        a: vadd(
+          a: vscale(a: forward, s: radius * Math.cos(x: angle))
+          b: vscale(a: side, s: radius * across)
+        )
+        b: Vec3.create(x: 0.0, y: 0.0, z: lift)
+      )
+    )
+    if w > 0 {
+      palmLeafFace(
+        mesh: mesh
+        first: hub
+        second: previous
+        third: point
+      )
+    }
+    previous = point
+  }
+}
