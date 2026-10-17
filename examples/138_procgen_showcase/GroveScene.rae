@@ -9,6 +9,7 @@ open Scene3d
 open RendererDeferred
 open procgen/Foliage
 open GroveGrass
+open FluffyGrove
 open procgen/Rock
 open ecs/Entity
 
@@ -150,7 +151,7 @@ func pathCenter(distance: view Float) ret Float {
 }
 
 func groundHeight(x: view Float, y: view Float) ret Float {
-  let radius: Float = Math.sqrt(x: x * x / 190.44 + (y - 2) * (y - 2) / 156.25)
+  let radius: Float = Math.sqrt(x: x * x / 484.0 + (y - 6) * (y - 6) / 400.0)
   let base: Float = 0.12 * Math.sin(x: x * 0.36) * Math.sin(x: y * 0.3)
   if radius > 0.9167 {
     ret base * (1 - (radius - 0.9167) * 12) - 0.35 * (radius - 0.9167) * 12
@@ -161,8 +162,8 @@ func groundHeight(x: view Float, y: view Float) ret Float {
 func islandPoint(ring: view Int, index: view Int) ret Vec3 {
   let angle: Float = index.toFloat() * 6.2831853 / 128
   let fraction: Float = ring.toFloat() / 12
-  let x: Float = Math.cos(x: angle) * 13.8 * fraction
-  let y: Float = 2.0 + Math.sin(x: angle) * 12.5 * fraction
+  let x: Float = Math.cos(x: angle) * 22.0 * fraction
+  let y: Float = 6.0 + Math.sin(x: angle) * 20.0 * fraction
   var height: Float = groundHeight(x: x, y: y)
   if ring is 12 {
     height = -0.35
@@ -599,5 +600,6 @@ func buildGrove(renderer: mod DeferredRenderer) ret Grove {
       rotation: 0
     )
   }
+  addFluffyGrove(world: world, renderer: renderer, obstacles: obstacles)
   ret Grove { world: own world, obstacles: own obstacles }
 }

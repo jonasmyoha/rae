@@ -1,0 +1,64 @@
+open procgen/FluffyFoliage
+open Mesh3d
+
+func main() ret Int {
+  let forms: List(FluffyForm) = {
+    FluffyForm.broadleaf
+    FluffyForm.bush
+    FluffyForm.cypress
+    FluffyForm.umbrella
+  }
+  let counts: List(Int) = { 48, 24, 12 }
+  loop let form: FluffyForm in forms {
+    var clusters: Int = 7
+    if form is FluffyForm.bush {
+      clusters = 5
+    }
+    if form is FluffyForm.cypress {
+      clusters = 9
+    }
+    loop let count: Int in counts {
+      var total: Int = 0
+      loop var tone: Int = 0, tone < 3, ++tone {
+        let mesh: MeshData = fluffyLeaves(
+          form: form
+          seed: 73
+          patchCount: count
+          tone: tone
+        )
+        let repeat: MeshData = fluffyLeaves(
+          form: form
+          seed: 73
+          patchCount: count
+          tone: tone
+        )
+        if mesh.vertCount is not clusters * count / 3 * 13 {
+          ret 1
+        }
+        if mesh.indices.length is not clusters * count / 3 * 72 {
+          ret 2
+        }
+        loop var i: Int = 0, i < mesh.verts.length, ++i {
+          let value: Float = mesh.verts.copyAtFallback(index: i, fallback: -999)
+          if value is not repeat.verts.copyAtFallback(index: i, fallback: -998) {
+            ret 3
+          }
+          if value is not value {
+            ret 4
+          }
+        }
+        loop let index: Int in mesh.indices {
+          if index < 0 or index >= mesh.vertCount {
+            ret 5
+          }
+        }
+        total = total + mesh.indices.length / 3
+      }
+      if total is not clusters * count * 24 {
+        ret 6
+      }
+    }
+  }
+  log("four foliage forms: deterministic, valid indices, three patch budgets")
+  ret 0
+}

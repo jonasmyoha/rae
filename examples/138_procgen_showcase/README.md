@@ -1,15 +1,17 @@
 # Autumn Grove
 
-A procedural prop showcase with six trees (five with branching wood, one
-palm-style), rock groups across the island, low shrubs, the standard GPU grass
+A procedural prop showcase with fifteen trees (including the six original
+autumn trees), rock groups across the island, low shrubs, the standard GPU grass
 and a winding path on a raised garden base.
 
 - **1** restores the complete grove.
 - **2** frames the branching wood and leaf crowns.
 - **3** frames the stone outcrop.
+- **4** frames the broad, fluffy leaf patches.
+- **5** frames the cypress and umbrella pine group.
 - Drag to orbit, scroll to zoom. The camera bar's **Orbit** button switches to
   the free WASD camera (Q/E down/up, shift to boost) and back.
-- The menu button opens the settings panel: the three views (Scene 1-3), sky
+- The menu button opens the settings panel: the five views (Scene 1-5), sky
   model, time of day and date, shadows and TAA.
 - The chrome is the shared editor panel (`lib/app3d/EditorPanel.rae`); the
   debug widget on top shows frame rate and memory.
@@ -61,3 +63,59 @@ and cascaded shadows. The example uses no bitmap textures or imported meshes.
 ![Tree close-up](references/Trees.png)
 
 ![Stone close-up](references/Rocks.png)
+
+## Broad-leaf comparison garden
+
+Keys **4** and **5** (or `RAE_GROVE_VIEW=fluffy` / `evergreen`) inspect the
+new rounded broadleaf and Mediterranean evergreen groups. The island is now
+44 by 40 metres instead of 27.6 by 25, with twelve additional plants: three
+rounded broadleaves, three slender cypresses, three umbrella pines and three
+low lime-green bushes. The original autumn trees remain for comparison.
+
+`lib/procgen/FluffyFoliage.rae` uses fewer, larger, shallow-domed leaf patches
+with softened lobed edges. Their normals follow each crown envelope, giving
+rounded lighting instead of separate flat-card lighting. Seven overlapping
+crowns make a broadleaf or umbrella, nine tapered crowns make a cypress, and
+five make a bush. Dark evergreen colours belong to the example materials.
+All geometry is generated in Rae; no new shaders, runtime C or bitmap assets.
+
+This experiment uses opaque leaf silhouettes. Textured alpha cards can reduce
+triangle counts further, but need matching alpha tests in the shadow pass,
+coverage-preserving mipmaps and an overdraw budget. Opaque patches use the
+existing shadow path and avoid those transparent areas. They trade extra
+vertices for simple shading and a consistent silhouette from every angle.
+
+| Form | Patches | Foliage triangles | Foliage vertices |
+|---|---:|---:|---:|
+| Broadleaf / umbrella | 336 | 8,064 | 4,368 |
+| Cypress | 432 | 10,368 | 5,616 |
+| Bush | 240 | 5,760 | 3,120 |
+
+These counts include reversed triangles for back faces and exclude wood.
+The wood adds 420 triangles for broadleaf/umbrella, 70 for cypress, none for
+bush. `patchCount` is per crown, across all three tones. The showcase uses
+48; 24 and 12 are lower-cost generation budgets tested for deterministic
+output and valid indices. They are not automatic runtime LODs, and their
+transition quality is not yet validated. Bounds change slightly as patches
+get larger, so future culling must use generated mesh bounds.
+
+`FluffyGrove.rae` uploads each form once, then shares its wood and three leaf
+mesh handles among rotated/scaled entities. Mesh ownership remains with the
+renderer. This demonstrates reusable assets, not a benchmark of thousands of
+trees: draw batching, pooled instance updates, distance-selected LODs and
+far billboards remain upstream integration work. Do not render thousands of
+the near-view meshes with individual draw calls.
+
+![Broad leaf patches](references/Fluffy.png)
+
+![Dark evergreen forms](references/Evergreen.png)
+
+Technique references: [radial normals and leaf shading](https://www.aversionofreality.com/blog/2022/8/7/stylized-tree-shader)
+and [clustered shells with silhouette leaves](https://cremuss.artstation.com/projects/Vyz12R).
+The generator is original Rae code; no meshes, textures or shader code were
+copied from those examples.
+
+Validation: fixture `1141_fluffy_foliage` checks all four forms at 48/24/12
+patches per crown, deterministic vertex output and valid indices. The 138
+example gate renders all five views. Captures are inspected separately and
+stored above; `RAE_MEM_STATS=1` runs check tracked String/Buffer cleanup.

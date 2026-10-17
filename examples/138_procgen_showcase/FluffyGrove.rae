@@ -1,0 +1,112 @@
+# Shared mesh handles: generate/upload each species once, reuse for every plant.
+# These are ordinary World3d instances; forest batching/LOD selection is separate.
+open procgen/FluffyFoliage
+open RendererDeferred
+open Scene3d
+open Mesh3d
+open Vec3
+open ecs/Entity
+open GroveGrass
+
+func fluffyMaterial(form: view FluffyForm, tone: view Int) ret Material3d {
+  let variation: Float = 0.86 + tone.toFloat() * 0.12
+  var color: Vec3 = Vec3.create(x: 0.18, y: 0.35, z: 0.055)
+  if form is FluffyForm.cypress {
+    color = Vec3.create(x: 0.025, y: 0.10, z: 0.055)
+  }
+  if form is FluffyForm.umbrella {
+    color = Vec3.create(x: 0.055, y: 0.19, z: 0.09)
+  }
+  if form is FluffyForm.bush {
+    color = Vec3.create(x: 0.28, y: 0.39, z: 0.075)
+  }
+  ret Material3d {
+    baseColor: vscale(a: color, s: variation)
+    metallic: 0
+    roughness: 1
+    emission: Vec3.create(x: 0, y: 0, z: 0)
+    toon: true
+  }
+}
+
+func addFluffyGrove(
+  world: mod World3d
+  renderer: mod DeferredRenderer
+  obstacles: mod List(GroveObstacle)
+) {
+  let forms: List(FluffyForm) = {
+    FluffyForm.broadleaf
+    FluffyForm.cypress
+    FluffyForm.umbrella
+    FluffyForm.bush
+  }
+  loop var species: Int = 0, species < 4, ++species {
+    let form: FluffyForm = forms.copyAtFallback(index: species, fallback: FluffyForm.broadleaf)
+    var handles: List(MeshHandle) = List.create(MeshHandle, cap: 4)
+    let wood: MeshData = fluffyWood(form: form, seed: 73)
+    var woodHandle: MeshHandle = meshHandleNone()
+    if wood.vertCount > 0 {
+      woodHandle = uploadMesh(
+        renderer: renderer
+        verts: wood.verts
+        vertCount: wood.vertCount
+        indices: wood.indices
+      )
+    }
+    handles.add(value: woodHandle)
+    loop var tone: Int = 0, tone < 3, ++tone {
+      let leaves: MeshData = fluffyLeaves(
+        form: form
+        seed: 73
+        patchCount: 48
+        tone: tone
+      )
+      handles.add(value: uploadMesh(
+        renderer: renderer
+        verts: leaves.verts
+        vertCount: leaves.vertCount
+        indices: leaves.indices
+      ))
+      log(
+        "fluffy species={species} tone={tone} vertices={leaves.vertCount} triangles={leaves.indices.length / 3}"
+      )
+    }
+    loop var plant: Int = 0, plant < 3, ++plant {
+      var position: Vec3 = Vec3.create(
+        x: -14.0 + species.toFloat() * 8.5 + plant.toFloat() * 1.1
+        y: 13.0 + plant.toFloat() * 3.8
+        z: 0
+      )
+      var height: Float = 5.0 + plant.toFloat() * 0.65
+      if form is FluffyForm.cypress {
+        height = 7.5 + plant.toFloat() * 0.7
+      }
+      if form is FluffyForm.umbrella {
+        height = 6.0 + plant.toFloat() * 0.5
+      }
+      if form is FluffyForm.bush {
+        position = Vec3.create(x: -12.0 + plant.toFloat() * 3.0, y: -6, z: 0)
+        height = 2.2 + plant.toFloat() * 0.2
+      }
+      obstacles.add(value: { x: position.x, y: position.y, radius: 0.6 })
+      loop var part: Int = 0, part < 4, ++part {
+        if form is FluffyForm.bush and part is 0 {
+          continue
+        }
+        let meshHandle: MeshHandle = handles.copyAtFallback(index: part, fallback: meshHandleNone())
+        var material: Material3d = fluffyMaterial(form: form, tone: part - 1)
+        if part is 0 {
+          material.baseColor = Vec3.create(x: 0.13, y: 0.075, z: 0.04)
+        }
+        let entityId: EntityId = world3dAddMeshInstance(
+          world: world
+          mesh: meshHandle
+          material: material
+          position: position
+          rotation: Vec3.create(x: 0, y: 0, z: plant.toFloat() * 1.7)
+          scale: Vec3.create(x: height, y: height, z: height)
+        )
+      }
+    }
+  }
+}

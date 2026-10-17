@@ -29,7 +29,7 @@ fn grovePathCenter(y: f32) -> f32 {
 }
 
 fn raeTerrainHeight(p: vec2<f32>, groundZ: f32) -> f32 {
-  let radius = sqrt(p.x * p.x / 190.44 + (p.y - 2.0) * (p.y - 2.0) / 156.25);
+  let radius = sqrt(p.x * p.x / 484.0 + (p.y - 6.0) * (p.y - 6.0) / 400.0);
   let base = 0.12 * sin(p.x * 0.36) * sin(p.y * 0.3);
   if (radius > 0.9167) {
     let rim = (radius - 0.9167) * 12.0;
@@ -64,7 +64,7 @@ fn raeBiomeSample(p: vec2<f32>) -> RaeBiome {
   sample.wSand = 0.0;
   sample.wMud = 0.0;
   sample.wRock = 0.0;
-  let insideIsland = p.x * p.x / 169.0 + (p.y - 2.0) * (p.y - 2.0) / 121.0 <= 0.93;
+  let insideIsland = p.x * p.x / 441.0 + (p.y - 6.0) * (p.y - 6.0) / 361.0 <= 0.93;
   sample.wGrass = select(0.0, 1.0, insideIsland && !groveUnderObstacle(p));
   return sample;
 }
