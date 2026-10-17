@@ -1,8 +1,10 @@
 # The island's forest: forestSize trees (WalkerTrees) planted ONCE over the
 # whole island at startup. The island is small (lib/WorldBiome's 60 m radius
 # and its shore) and does not change, so its trees are not streamed with the
-# small props: every tree is one entity with one Box3D trunk
-# (PhysicsSystem.addTreeTrunks) for the whole run.
+# small props: every tree is one placement in the TerrainSystem's PropField
+# (drawn at its level of detail, only when near and in view, instanced) and
+# one entity with one Box3D trunk (PhysicsSystem.addTreeTrunks), for the whole
+# run.
 #
 # Seeded spots are tried over the island; a spot gets a tree when it is grassy
 # land, outside the spawn clearing, where the forest-density noise says
@@ -17,6 +19,7 @@ open ecs/Entity
 open ecs/ComponentTable
 open ecs/Transform
 open terrainSystem/WalkerTrees
+open app3d/PropField
 
 # The grass a tree wants under it: less than the small props, so woods reach
 # onto drier ground, but never the beach or bare rock
@@ -42,6 +45,7 @@ func forestDensity(x: view Float, y: view Float) ret Float {
 
 # Plant the forest around a spawn at (spawnX, spawnY). The number of trees.
 func plantForest(
+  terrainSystem: mod TerrainSystem
   world: mod GameWorld
   spawnX: view Float
   spawnY: view Float
@@ -88,17 +92,20 @@ func plantForest(
     )
     planted.add(value: position)
     let species: Int = treeSpeciesAt(x: x, y: y, number: number)
+    let scale: Float = treeScaleAt(species: species, number: number)
+    let yaw: Float = Noise.hash2(x: number, y: 4, seed: 811) * 6.2831853
+    addPropPlacement(
+      field: terrainSystem.forest
+      placement: { kind: species, position: position, yaw: yaw, scale: scale }
+    )
     let treeEntityId: EntityId = spawnProp(world: world, kind: kindTree, slot: number)
     componentSet(
       this: world.transforms
       entityId: treeEntityId
       data: Transform3D {
         position: position
-        rotation: Quat.fromAxisAngle(
-          axis: Vec3.create(x: 0.0, y: 0.0, z: 1.0)
-          angle: Noise.hash2(x: number, y: 4, seed: 811) * 6.2831853
-        )
-        scale: treeScaleAt(species: species, number: number)
+        rotation: Quat.fromAxisAngle(axis: Vec3.create(x: 0.0, y: 0.0, z: 1.0), angle: yaw)
+        scale: Vec3.create(x: scale, y: scale, z: scale)
       }
     )
     componentSet(
@@ -106,8 +113,9 @@ func plantForest(
       entityId: treeEntityId
       data: TreeVariant { species: species }
     )
-    let kind: mod PropKind => componentMod(this: world.propKinds, entityId: treeEntityId)
+    let kind: mod TerrainProp => componentMod(this: world.propKinds, entityId: treeEntityId)
     kind.active = true
   }
+  finishPropField(field: terrainSystem.forest)
   ret planted.length
 }

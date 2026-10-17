@@ -1,11 +1,14 @@
 # The walker's trees and bushes: every tree of Autumn Grove but its giant
 # camphor — the leaf-patch forms (lib/procgen/FluffyFoliage.rae: broadleaf,
 # umbrella pine, cypress, spruce, bush), the four autumn broadleaves and the
-# palm (lib/procgen/Foliage.rae) — generated once and drawn instanced. A tree
-# is four parts — its wood and its leaves in three tones — and a bush is the
-# three leaf tones alone. The leaf-patch forms are unit-sized, so a
-# placement's scale is their width (x, y) and height (z) in metres; the autumn
-# trees and the palm are built at autumnReferenceHeight and scaled uniformly.
+# palm (lib/procgen/Foliage.rae) — generated once. Each tree species is a
+# PropField kind (lib/app3d/PropField) at three levels of detail, each level
+# its wood and its leaves in three tones: full crowns near, sparser crowns of
+# bigger patches out to the shadows' reach, a few big patches beyond. The
+# leaf-patch forms are unit height (their width is built into their meshes,
+# speciesWidth), so a placement's scale is their height in metres; the autumn
+# trees and the palm are built at autumnReferenceHeight. The bushes are
+# streamed with the small props, one instanced draw per leaf tone.
 import Math
 import Vec3
 import RendererDeferred
@@ -15,6 +18,7 @@ open Mesh3d
 open GbufferInstanced
 open procgen/FluffyFoliage
 open procgen/Foliage
+open app3d/PropField
 
 # One instanced prop draw: its mesh, its material, and a pre-sized batch refilled
 # each frame. The material is a value (not a scene index) so terrain owns no
@@ -65,13 +69,6 @@ const forestSize: Int = 300
 # The height (m) the autumn trees and the palm are built at; a placement
 # scales them from it
 const autumnReferenceHeight: Float = 5.5
-
-# Leaves per autumn crown and tone: the grove's fullLeafCount is for a few
-# trees seen up close, the walker draws a hundred
-const autumnLeafCount: Int = 500
-
-# Parts per tree: the wood, then three leaf tones
-const treePartCount: Int = 4
 
 # The trunk the physics gives every tree, whatever its species: a capsule from
 # the foot up into the crown, a little wider than the widest trunk
@@ -136,33 +133,27 @@ func treeSpeciesAt(x: view Float, y: view Float, number: view Int) ret Int {
   ret speciesForPick(pick: hash2(x: blockX, y: blockY, seed: 131), palms: false)
 }
 
-# Tree number `number`'s scale (Transform3D.scale). For a leaf-patch form it is
-# its width (x, y) and height (z) in metres; an autumn tree or the palm is
-# scaled uniformly from autumnReferenceHeight.
-func treeScaleAt(species: view Int, number: view Int) ret Vec3 {
+# Tree number `number`'s uniform scale: a leaf-patch form's height in metres
+# (its width is in its meshes, speciesWidth); an autumn tree or the palm is
+# scaled from autumnReferenceHeight.
+func treeScaleAt(species: view Int, number: view Int) ret Float {
   let size: Float = hash2(x: number, y: 3, seed: 109)
+  if species is speciesPalm {
+    ret (5.0 + size * 1.5) / autumnReferenceHeight
+  }
   if species >= speciesOrange {
-    var height: Float = 4.2 + size * 2.6
-    if species is speciesPalm {
-      height = 5.0 + size * 1.5
-    }
-    let factor: Float = height / autumnReferenceHeight
-    ret Vec3.create(x: factor, y: factor, z: factor)
+    ret (4.2 + size * 2.6) / autumnReferenceHeight
   }
   if species is speciesCypress {
-    let height: Float = 8.0 + size * 3.5
-    ret Vec3.create(x: height * 0.85, y: height * 0.85, z: height)
+    ret 8.0 + size * 3.5
   }
   if species is speciesUmbrella {
-    let height: Float = 5.6 + size * 1.8
-    ret Vec3.create(x: height * 1.1, y: height * 1.1, z: height)
+    ret 5.6 + size * 1.8
   }
   if species is speciesSpruce {
-    let height: Float = 5.5 + size * 3.0
-    ret Vec3.create(x: height, y: height, z: height)
+    ret 5.5 + size * 3.0
   }
-  let height: Float = 4.8 + size * 2.4
-  ret Vec3.create(x: height, y: height, z: height)
+  ret 4.8 + size * 2.4
 }
 
 # An autumn tree's or the palm's leaf colour per tone (Autumn Grove's paint)
@@ -245,101 +236,217 @@ func addLeafParts(
   }
 }
 
-# Every tree species' parts, species by species (part i of species s is at
-# s * treePartCount + i)
-func createTreeParts(renderer: mod DeferredRenderer, capacity: view Int) ret List(PropInstancer) {
-  var parts: List(PropInstancer) = List.create(PropInstancer, cap: treeSpeciesCount * treePartCount)
-  let bark: Material3d = foliageMaterial(color: Vec3.create(x: 0.13, y: 0.075, z: 0.04))
-  loop var species: Int = 0, species < treeSpeciesCount, ++species {
-    if species >= speciesOrange {
-      addAutumnParts(
-        parts: parts
-        renderer: renderer
-        species: species
-        bark: bark
-        capacity: capacity
-      )
-      continue
-    }
-    let form: FluffyForm = treeSpeciesForm(species: species)
-    parts.add(
-      value: createPropInstancer(
-        mesh: uploadFoliage(renderer: renderer, mesh: fluffyWood(form: form, seed: 73))
-        material: bark
-        capacity: capacity
-      )
-    )
-    addLeafParts(
-      parts: parts
-      renderer: renderer
-      form: form
-      capacity: capacity
-    )
+# The forest's levels of detail: patches per crown cluster (leaf-patch forms)
+# or leaves per crown and tone (autumn trees and palm), and how far each is
+# drawn. Shadows reach 120 m; the near and middle levels cast them.
+const nearPatches: Int = 48
+
+const midPatches: Int = 14
+
+const farPatches: Int = 5
+
+const nearLeaves: Int = 500
+
+const midLeaves: Int = 110
+
+const farLeaves: Int = 28
+
+const nearTreeDistance: Float = 30.0
+
+const midTreeDistance: Float = 90.0
+
+const farTreeDistance: Float = 400.0
+
+# How much wider than a unit form a species is (PropField scales uniformly,
+# so the width is built into its meshes)
+func speciesWidth(species: view Int) ret Float {
+  if species is speciesUmbrella {
+    ret 1.1
   }
-  ret parts
+  if species is speciesCypress {
+    ret 0.85
+  }
+  ret 1.0
 }
 
-# An autumn tree's (or the palm's) wood and three leaf tones, added to `parts`
-func addAutumnParts(
-  parts: mod List(PropInstancer)
-  renderer: mod DeferredRenderer
-  species: view Int
-  bark: view Material3d
-  capacity: view Int
-) {
-  let seed: Int = 501 + species * 104
-  let width: Float = 2.0
-  # The broadleaf's wood and limb tips (the palm has its own wood)
-  let tree: BroadleafTree = broadleafTree(seed: seed, height: autumnReferenceHeight, width: width)
-  if species is speciesPalm {
-    let wood: MeshData = palmWood(seed: seed, height: autumnReferenceHeight, width: width)
-    parts.add(
-      value: createPropInstancer(
-        mesh: uploadFoliage(renderer: renderer, mesh: wood)
-        material: bark
-        capacity: capacity
+# Stretch a mesh across (x and y) by `factor`, its normals the inverse way
+func widenMesh(mesh: mod MeshData, factor: view Float) {
+  if factor is 1.0 {
+    ret
+  }
+  loop var vertex: Int = 0, vertex < mesh.vertCount, ++vertex {
+    let base: Int = vertex * 8
+    mesh.verts.set(
+      index: base
+      value: mesh.verts.copyAtFallback(index: base, fallback: 0.0) * factor
+    )
+    mesh.verts.set(
+      index: base + 1
+      value: mesh.verts.copyAtFallback(index: base + 1, fallback: 0.0) * factor
+    )
+    let normal: Vec3 = Vec3.vnorm(
+      a: Vec3.create(
+        x: mesh.verts.copyAtFallback(index: base + 3, fallback: 0.0) / factor
+        y: mesh.verts.copyAtFallback(index: base + 4, fallback: 0.0) / factor
+        z: mesh.verts.copyAtFallback(index: base + 5, fallback: 1.0)
       )
     )
-  } else {
-    parts.add(
-      value: createPropInstancer(
-        mesh: uploadFoliage(renderer: renderer, mesh: tree.wood)
-        material: bark
-        capacity: capacity
+    mesh.verts.set(index: base + 3, value: normal.x)
+    mesh.verts.set(index: base + 4, value: normal.y)
+    mesh.verts.set(index: base + 5, value: normal.z)
+  }
+}
+
+# A species' wood, uploaded
+func speciesWood(renderer: mod DeferredRenderer, species: view Int) ret MeshHandle {
+  let seed: Int = 501 + species * 104
+  if species is speciesPalm {
+    ret uploadFoliage(
+      renderer: renderer
+      mesh: palmWood(seed: seed, height: autumnReferenceHeight, width: 2.0)
+    )
+  }
+  if species >= speciesOrange {
+    let tree: BroadleafTree = broadleafTree(seed: seed, height: autumnReferenceHeight, width: 2.0)
+    ret uploadFoliage(renderer: renderer, mesh: tree.wood)
+  }
+  var wood: MeshData = fluffyWood(form: treeSpeciesForm(species: species), seed: 73)
+  widenMesh(mesh: wood, factor: speciesWidth(species: species))
+  ret uploadFoliage(renderer: renderer, mesh: wood)
+}
+
+# A species' leaves in one tone at a level's detail (`patches` for the
+# leaf-patch forms, `leaves` for the autumn trees and the palm), uploaded
+func speciesLeaves(
+  renderer: mod DeferredRenderer
+  species: view Int
+  tone: view Int
+  patches: view Int
+  leaves: view Int
+) ret MeshHandle {
+  let seed: Int = 501 + species * 104
+  if species is speciesPalm {
+    ret uploadFoliage(
+      renderer: renderer
+      mesh: palmLeaves(
+        seed: seed
+        height: autumnReferenceHeight
+        width: 2.0
+        tone: tone
+        leafCount: leaves
       )
     )
   }
-  loop var tone: Int = 0, tone < 3, ++tone {
-    var leaves: MeshData = foliageMesh()
-    if species is speciesPalm {
-      leaves = palmLeaves(
-        seed: seed
-        height: autumnReferenceHeight
-        width: width
-        tone: tone
-        leafCount: autumnLeafCount
-      )
-    } else {
-      let tree: BroadleafTree = broadleafTree(
-        seed: seed
-        height: autumnReferenceHeight
-        width: width
-      )
-      leaves = broadleafLeaves(
+  if species >= speciesOrange {
+    let tree: BroadleafTree = broadleafTree(seed: seed, height: autumnReferenceHeight, width: 2.0)
+    ret uploadFoliage(
+      renderer: renderer
+      mesh: broadleafLeaves(
         tips: tree.tips
         seed: seed
         height: autumnReferenceHeight
-        width: width
+        width: 2.0
         tone: tone
-        leafCount: autumnLeafCount
+        leafCount: leaves
       )
+    )
+  }
+  var crown: MeshData = fluffyLeaves(
+    form: treeSpeciesForm(species: species)
+    seed: 73
+    patchCount: patches
+    tone: tone
+  )
+  widenMesh(mesh: crown, factor: speciesWidth(species: species))
+  ret uploadFoliage(renderer: renderer, mesh: crown)
+}
+
+func speciesLeafColor(species: view Int, tone: view Int) ret Vec3 {
+  if species >= speciesOrange {
+    ret autumnLeafColor(species: species, tone: tone)
+  }
+  ret leafColor(form: treeSpeciesForm(species: species), tone: tone)
+}
+
+# One level of a species: its wood and its leaves in three tones
+func speciesLod(
+  renderer: mod DeferredRenderer
+  species: view Int
+  wood: view MeshHandle
+  patches: view Int
+  leaves: view Int
+  maxDistance: view Float
+  castsShadow: view Bool
+) ret PropLod {
+  var parts: List(PropPart) = List.create(PropPart, cap: 4)
+  parts.add(
+    value: { mesh: wood, material: foliageMaterial(color: Vec3.create(x: 0.13, y: 0.075, z: 0.04)) }
+  )
+  loop var tone: Int = 0, tone < 3, ++tone {
+    parts.add(value: {
+      mesh: speciesLeaves(
+        renderer: renderer
+        species: species
+        tone: tone
+        patches: patches
+        leaves: leaves
+      )
+      material: foliageMaterial(color: speciesLeafColor(species: species, tone: tone))
+    })
+  }
+  ret PropLod {
+    parts: own parts
+    maxDistance: maxDistance
+    castsShadow: castsShadow
+    facesCamera: false
+  }
+}
+
+# Every tree species as a PropField kind (kind index = species) at three
+# levels of detail: full crowns near, sparser crowns of bigger patches or
+# leaves out to the shadows' reach, and a few big patches beyond
+func addForestKinds(field: mod PropField, renderer: mod DeferredRenderer) {
+  loop var species: Int = 0, species < treeSpeciesCount, ++species {
+    let wood: MeshHandle = speciesWood(renderer: renderer, species: species)
+    var lods: List(PropLod) = List.create(PropLod, cap: 3)
+    lods.add(value: speciesLod(
+      renderer: renderer
+      species: species
+      wood: wood
+      patches: nearPatches
+      leaves: nearLeaves
+      maxDistance: nearTreeDistance
+      castsShadow: true
+    ))
+    lods.add(value: speciesLod(
+      renderer: renderer
+      species: species
+      wood: wood
+      patches: midPatches
+      leaves: midLeaves
+      maxDistance: midTreeDistance
+      castsShadow: true
+    ))
+    lods.add(value: speciesLod(
+      renderer: renderer
+      species: species
+      wood: wood
+      patches: farPatches
+      leaves: farLeaves
+      maxDistance: farTreeDistance
+      castsShadow: false
+    ))
+    # The sphere round the tree at scale 1: the leaf-patch forms are unit
+    # height, the others autumnReferenceHeight
+    var radius: Float = 0.6 * speciesWidth(species: species) + 0.1
+    var centerHeight: Float = 0.55
+    if species >= speciesOrange {
+      radius = autumnReferenceHeight * 0.65
+      centerHeight = autumnReferenceHeight * 0.55
     }
-    parts.add(
-      value: createPropInstancer(
-        mesh: uploadFoliage(renderer: renderer, mesh: leaves)
-        material: foliageMaterial(color: autumnLeafColor(species: species, tone: tone))
-        capacity: capacity
-      )
+    let kind: Int = addPropKind(
+      field: field
+      kind: { lods: own lods, radius: radius, centerHeight: centerHeight }
     )
   }
 }
