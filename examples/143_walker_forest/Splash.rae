@@ -1,0 +1,146 @@
+# splash.rae — water splashes when the character wades through the shallows (#84).
+#
+# The walker example can now walk into shallow water (character.rae's terrainWadable
+# gate); this adds the visual feedback. Each frame it advances the splash pool, then
+# for the hero plus every moving crowd member that is standing in water
+# (terrainWaterDepth > 0) throws a small burst of pale droplets up from its feet.
+#
+# Purely visual: run in the RENDER path (render.rae), NOT the fixed sim, so it never
+# touches persisted/hot-reload state. Crowd emissions are STRIDED (a member splashes
+# every few frames) so the whole crowd wading does not swamp the pool; the pool caps
+# and drops the oldest, so it is bounded regardless. Siblings merge into one module,
+# so App / terrainWaterDepth resolve cross-file.
+import Vec3
+import Math
+open water/Water
+open WorldBiome
+open Particles
+open ecs/Entity
+open ecs/ComponentTable
+open app3d/CharacterController
+
+const splashMinDepth: Float = 0.03  # world units of water under a unit before it splashes
+
+const splashPerBurst: Int = 3  # droplets per splash
+
+const splashCrowdStride: Int = 3  # a crowd member splashes every Nth frame it wades
+
+# The sea around the meadow (#830): 700 m on a 256 grid, so its 2.7 m cells
+# can still carry the 6 m shore wave (Water.waveGridFactor fades the rest, #857).
+func walkerLake(groundZ: copy Float) ret WaterBody {
+  var lake: WaterBody = createLakeToon(surfaceZ: lakeSurfaceZ(groundZ: groundZ), extent: 700.0)
+  lake.gridSegments = 256
+  # A slow swell the grid can carry: 12 m and 7 m, not the lake default's 6/3.2.
+  lake.waves.first.wavelength = 12.0
+  lake.waves.first.speed = 2.0
+  lake.waves.second.wavelength = 7.0
+  lake.waves.second.speed = 1.5
+  ret lake
+}
+
+# The sea sheet is 700 m across and the world is far bigger: keep it centred
+# on the walker, snapped to its grid's cells so the waves do not slide
+func followSea(waterSystem: mod WaterSystem, position: view Vec3) {
+  if let sea: mod WaterBody => waterSystem.bodies.modAt(index: 0) {
+    let cell: Float = sea.extent / sea.gridSegments.toFloat()
+    sea.centre.x = Math.floor(x: position.x / cell) * cell
+    sea.centre.y = Math.floor(x: position.y / cell) * cell
+  }
+}
+
+# Where the lake surface sits in WORLD space (#830): the biome's flat water plane
+# over the walker's groundZ — the same plane the splashes spray up from. Lives
+# here because this file already opens WorldBiome; App reads it cross-file.
+func lakeSurfaceZ(groundZ: copy Float) ret Float {
+  ret worldWaterZ(groundZ: groundZ, cfg: forestBiomeConfig())
+}
+
+# Pale blue-white water droplet colour (splash spray).
+func colorR() ret Float {
+  ret 0.82
+}
+
+func colorG() ret Float {
+  ret 0.90
+}
+
+func colorB() ret Float {
+  ret 0.99
+}
+
+# One splash burst at the WATER SURFACE under a unit. `waterZ` is the flat water
+# plane in WORLD space (worldWaterZ) — NOT the controller's ground-relative z,
+# which stands ~1 unit high and would spray droplets from the chest. Droplets rise
+# UP from just above the surface so they read.
+func emitSplashAt(
+  sys: mod ParticleSystem
+  x: copy Float
+  y: copy Float
+  waterZ: copy Float
+) {
+  particleBurst(
+    sys: sys
+    x: x
+    y: y
+    z: waterZ + 0.05
+    count: splashPerBurst
+    hVel: 1.7
+    upVel: 3.6
+    life: 0.5
+    size: 0.22
+    r: colorR()
+    g: colorG()
+    b: colorB()
+    phase: x * 0.7 + y * 0.31
+  )
+}
+
+# Advance + emit splashes for everything wading this frame. Call once per frame.
+func splashStep(
+  characterSystem: mod CharacterSystem
+  splashes: mod ParticleSystem
+  world: mod GameWorld
+  deltaTime: copy Float
+) {
+  particleUpdate(sys: splashes, deltaTime: deltaTime)
+  world.splashTick = world.splashTick + 1
+  # The flat water plane in WORLD space — every splash sprays up from HERE, not
+  # from the unit's (ground-relative, chest-high) position z.
+  let waterZ: Float = worldWaterZ(groundZ: characterSystem.groundZ, cfg: forestBiomeConfig())
+  # The hero (always evaluated — the character the player is watching).
+  let heroCtrl: view ThirdPersonController => controllerOf(
+    world: world
+    entityId: characterSystem.heroEntityId
+  )
+  if heroCtrl.moving {
+    let heroDepth: Float = terrainWaterDepth(x: heroCtrl.position.x, y: heroCtrl.position.y)
+    if heroDepth > splashMinDepth {
+      emitSplashAt(
+        sys: splashes
+        x: heroCtrl.position.x
+        y: heroCtrl.position.y
+        waterZ: waterZ
+      )
+    }
+  }
+  # Every moving crowd member in water, strided so the pool is not swamped.
+  loop var i: Int = 0, i < characterSystem.crowdEntities.length, ++i {
+    if let member: EntityId = characterSystem.crowdEntities.copyAt(index: i) {
+      let ctrl: view ThirdPersonController => componentView(
+        this: world.controllers
+        entityId: member
+      )
+      if ctrl.moving and (world.splashTick + i) % splashCrowdStride is 0 {
+        let depth: Float = terrainWaterDepth(x: ctrl.position.x, y: ctrl.position.y)
+        if depth > splashMinDepth {
+          emitSplashAt(
+            sys: splashes
+            x: ctrl.position.x
+            y: ctrl.position.y
+            waterZ: waterZ
+          )
+        }
+      }
+    }
+  }
+}

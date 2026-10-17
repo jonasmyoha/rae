@@ -1,0 +1,269 @@
+# UI system for the walker example (#549).
+#
+# uiUpdate runs the per-frame UI/settings/panel handling — device input into the
+# ECS UI world, the clip + transport panels, the settings dialog, and the UI
+# layout systems — extracted verbatim from updateApp with behaviour unchanged.
+# It returns a UiTick because two of its outcomes (settingsChanged and scrolled)
+# feed the render decision back in updateApp. It mutates character / cam
+# / render as the inline code did.
+#
+# The UI STATE still lives in rae's InputSystem type (input + ui combined); the
+# InputSystem -> InputState/UiState split rides with #545 (input intent), which owns
+# that decomposition. Example-114 files are siblings in one module, so App and
+# the sibling/stdlib helpers resolve cross-file.
+
+import Math
+import Profile
+import Gpu2d
+import Vec3
+import Sys
+import app3d/RenderScale
+open app3d/UiModes
+open app3d/ModeMenu
+open GbufferInstanced
+open GrassCompute
+import GrassConfig
+import app3d/Slider
+open Scene3d
+open RendererDeferred
+open Sky
+open Gbuffer
+open Rendergraph
+open Math3d
+open Mesh3d
+open Gltf
+open GltfSkin
+open SdfText
+open Png
+open app3d/CameraRig
+open app3d/CharacterController
+open app3d/SettingsDialog
+open SkyHosek
+open app3d/UiShell
+open app3d/ControlPanel
+open app3d/CameraBar
+open Shadow3d
+open app3d/Playback
+open HotReload
+open ui/LogOverlay
+open ui/WindowGeometry
+open ui/scrollRootSystem/ScrollRootSystem
+open app3d/EditorPanel
+open ui/EventLoop
+open ui/DebugOverlay
+open ui/VirtualJoystick
+open ui/Ecs
+open ui/Components
+open ui/inputSystem/InputSystem
+open ui/renderSystem/RenderSystem
+open ui/UiSystems
+
+# What a UI tick reports back to updateApp for the render decision.
+type UiTick {
+  settingsChanged: Bool
+  scrolled: Bool
+}
+
+func uiUpdate(
+  uiSystems: mod UiSystems
+  cameraSystem: mod CameraSystem
+  characterSystem: mod CharacterSystem
+  frame: mod Frame
+  inputSystem: mod InputSystem
+  persist: mod PersistState
+  players: mod PlayerRoster
+  renderSystem: mod RenderSystem
+  terrainSystem: mod TerrainSystem
+  world: view GameWorld
+  deltaTime: copy Float
+  now: copy Float64
+) ret UiTick {
+  updateUiInput(input: inputSystem.ui, world: inputSystem.world, uiSystems: uiSystems)
+  # GAME / EDITOR: the "..." button's menu (app3d/ModeMenu), a rotation, a
+  # change of pointer
+  let modesChanged: Bool = updateUiModes(
+    world: inputSystem.world
+    uiSystems: uiSystems
+    uiModes: inputSystem.uiModes
+  ) or updateModeMenu(
+    world: inputSystem.world
+    uiSystems: uiSystems
+    uiModes: inputSystem.uiModes
+    input: inputSystem.ui
+    rig: cameraSystem.rig
+  )
+  # The debug readout, the same in both modes, left of the "..." button
+  placeDebugOverlayByModeButton(
+    world: inputSystem.world
+    uiSystems: uiSystems
+    debugOverlay: inputSystem.dbg
+    buttonNodeId: "ModeButton"
+  )
+  let scrolled: Bool = updateScrollRoot(
+    world: inputSystem.world
+    uiSystems: uiSystems
+    entityId: inputSystem.panelScroll
+    input: inputSystem.ui
+  )
+  if updateDebugOverlay(
+    debugOverlay: inputSystem.dbg
+    screenW: windowExtentW()
+    screenH: windowExtentH()
+    now: now
+    didRealWork: frame.dbgDidWork
+  ) {
+    suppressUiPress(input: inputSystem.ui, world: inputSystem.world)
+  }
+  let clipHit: String = panelClickedId(panel: inputSystem.clipPanel, world: inputSystem.world)
+  if clipHit.length() > 0 and cameraSystem.rig.mode is not CameraRigMode.character {
+    var nextClipIndex: Int = characterSystem.clipIndex
+    if clipHit is "idle" {
+      nextClipIndex = 0
+    }
+    if clipHit is "walk" {
+      nextClipIndex = 1
+    }
+    if clipHit is "walkFast" {
+      nextClipIndex = 2
+    }
+    if clipHit is "run" {
+      nextClipIndex = 3
+    }
+    if nextClipIndex is not characterSystem.clipIndex {
+      characterSystem.transitionFrom = captureSkeletonPose(sk: characterSystem.skeleton)
+      characterSystem.transitionElapsed = 0.0
+      characterSystem.clipIndex = nextClipIndex
+      characterSystem.animTime = 0.0
+      persist.stateDirty = true
+    }
+    setPanelSelection(
+      panel: inputSystem.clipPanel
+      world: inputSystem.world
+      group: 1
+      id: clipHit
+    )
+  }
+  let transportHit: String = panelClickedId(panel: inputSystem.transport, world: inputSystem.world)
+  if transportHit is "play" {
+    characterSystem.playing = not characterSystem.playing
+    var playLabel: String = "Pause"
+    if not characterSystem.playing {
+      playLabel = "Play"
+    }
+    setPanelButtonLabel(
+      panel: inputSystem.transport
+      world: inputSystem.world
+      id: "play"
+      label: playLabel
+    )
+    setPanelButtonOn(
+      panel: inputSystem.transport
+      world: inputSystem.world
+      id: "play"
+      on: characterSystem.playing
+    )
+  }
+  if transportHit is "toon" {
+    characterSystem.toon = not characterSystem.toon
+    setPanelButtonOn(
+      panel: inputSystem.transport
+      world: inputSystem.world
+      id: "toon"
+      on: characterSystem.toon
+    )
+  }
+  if transportHit is "slower" {
+    characterSystem.speed = nextSpeed(current: characterSystem.speed, up: false)
+  }
+  if transportHit is "faster" {
+    characterSystem.speed = nextSpeed(current: characterSystem.speed, up: true)
+  }
+  if transportHit.length() > 0 {
+    let pct: Int = speedPercent(value: characterSystem.speed)
+    setNodeText(world: inputSystem.world, nodeId: "SpeedLabel", value: "Speed {pct}%")
+  }
+  # Character-switch buttons (#546): same effect as Page Up/Down and keys 1/2.
+  let charHit: String = panelClickedId(panel: inputSystem.charPanel, world: inputSystem.world)
+  if charHit is "prev" {
+    rosterSwitchPrev(roster: players)
+    onCharacterSwitched(
+      cameraSystem: cameraSystem
+      inputSystem: inputSystem
+      persist: persist
+      players: players
+      world: world
+      characterSystem: characterSystem
+    )
+  }
+  if charHit is "next" {
+    rosterSwitchNext(roster: players)
+    onCharacterSwitched(
+      cameraSystem: cameraSystem
+      inputSystem: inputSystem
+      persist: persist
+      players: players
+      world: world
+      characterSystem: characterSystem
+    )
+  }
+  # The shared settings (app3d/EditorPanel): every action (the edge tab's
+  # settings.open too), the sliders, the running clock
+  let settingsChanged: Bool = updateEditorSettings(
+    world: inputSystem.world
+    uiSystems: uiSystems
+    input: inputSystem.ui
+    settings: inputSystem.settings
+    deltaTime: deltaTime
+  )
+  # A mode switch resets the panel's nodes: apply its open/close again
+  if modesChanged {
+    applyEditorPanelOpen(world: inputSystem.world, open: inputSystem.settings.open)
+  }
+  if settingsChanged {
+    setTaaEnabled(renderer: renderSystem.renderer, on: inputSystem.settings.taa)  # TAA opt-in; SMAA when off
+    renderSystem.renderer.sky = settingsBuildSky(
+      settingsState: inputSystem.settings
+      data: cameraSystem.hosek
+      turbidity: 3.0
+      groundAlbedo: 0.30
+    )
+    cameraSystem.light.sunDir = settingsSunDir(settingsState: inputSystem.settings)
+    cameraSystem.light.sunColor = settingsSunColor(settingsState: inputSystem.settings)
+    characterSystem.speed = inputSystem.settings.speed
+    characterSystem.playing = inputSystem.settings.playing
+    if characterSystem.toon is not inputSystem.settings.toon {
+      characterSystem.toon = inputSystem.settings.toon
+      setPanelButtonOn(
+        panel: inputSystem.transport
+        world: inputSystem.world
+        id: "toon"
+        on: characterSystem.toon
+      )
+    }
+    let pctS: Int = speedPercent(value: characterSystem.speed)
+    setNodeText(world: inputSystem.world, nodeId: "SpeedLabel", value: "Speed {pctS}%")
+    persist.stateDirty = true
+  }
+  if clipHit.length() > 0 or transportHit.length() > 0 {
+    inputSystem.settings.speed = characterSystem.speed
+    inputSystem.settings.toon = characterSystem.toon
+    settingsApplyToWorld(
+      settingsState: inputSystem.settings
+      world: inputSystem.world
+      uiSystems: uiSystems
+    )
+    applyEditorPanelOpen(world: inputSystem.world, open: inputSystem.settings.open)
+    persist.stateDirty = true
+  }
+  if terrainSystem.toon is not characterSystem.toon {
+    setInfiniteTerrainToon(terrainSystem: terrainSystem, toon: characterSystem.toon)
+  }
+  # `scrolled`: updateScrollRoot writes the new position into a RuntimeOffset,
+  # and only transformSystem (inside runUiSystems) turns that into screen
+  # positions. Without it the wheel moved nothing until the next
+  # relayout — again masked by the time-of-day animation while it runs.
+  if uiActionCount(world: inputSystem.world) > 0 or settingsChanged or scrolled or modesChanged {
+    runUiSystems(world: inputSystem.world, uiSystems: uiSystems, res: inputSystem.gpuUi)
+  }
+  ret UiTick { settingsChanged: settingsChanged, scrolled: scrolled }
+}

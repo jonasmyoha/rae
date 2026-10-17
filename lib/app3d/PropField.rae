@@ -99,6 +99,12 @@ type PropField {
   kindFirstLod: List(Int)
   # The farthest any level is drawn (m)
   drawDistance: Float
+  # The most instances one batch holds (0: as many as its kind has props). A
+  # field of tens of thousands of props sets it: only the near and in-view
+  # ones are drawn, and a batch sized for every prop of a kind would hold
+  # megabytes that are never used. Set before finishPropField; props past it
+  # in a frame are not drawn.
+  batchLimit: Int
   finished: Bool
   # The last gather: props drawn, cells looked into
   visibleCount: Int
@@ -137,6 +143,7 @@ func createPropField(
     lodFirstBatch: List.create(Int, cap: 16)
     kindFirstLod: List.create(Int, cap: 8)
     drawDistance: 0.0
+    batchLimit: 0
     finished: false
     visibleCount: 0
     cellsVisited: 0
@@ -267,6 +274,7 @@ func finishPropField(field: mod PropField) {
     )
   }
   # The batches: per kind, per level, per part, as many as the kind's props
+  # (at most batchLimit when it is set)
   field.drawDistance = 0.0
   loop var k: Int = 0, k < field.kinds.length, ++k {
     var kindCount: Int = 0
@@ -274,6 +282,9 @@ func finishPropField(field: mod PropField) {
       if placement.kind is k {
         kindCount = kindCount + 1
       }
+    }
+    if field.batchLimit > 0 and kindCount > field.batchLimit {
+      kindCount = field.batchLimit
     }
     field.kindFirstLod.add(value: field.lodFirstBatch.length)
     let kind: PropKind = field.kinds.copyAtDefault(index: k)

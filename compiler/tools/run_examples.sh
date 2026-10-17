@@ -1240,6 +1240,29 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             grep -a '^\[mem:live\]' "$TMP_OUT/live-growth.log" 2>/dev/null | sed 's/^/  /'
             ((FAILED++))
           fi
+        elif [ "$EXAMPLE_NAME" = "143_walker_forest" ]; then
+          # The walker on a huge generated terrain: a shaded frame, tens of
+          # thousands of trees planted into the forest's PropField, and the
+          # physics check (cube stacks, jump, a pooled trunk that blocks a ray
+          # and stops the hero, the trunk pool and the ground following the
+          # walker to another spot).
+          SHOT="$TMP_OUT/walker-forest.bmp"
+          if (cd .. && RAE_UI_MODE=editor RAE_SDL_HEADLESS_MS=2000 RAE_GPU2D_SCREENSHOT="$SHOT" \
+                perl -e 'alarm shift; exec @ARGV' 60 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
+             && python3 tools/assert_nonblank_bmp.py "$SHOT" --min-colors=2000 > "$TMP_OUT/shot.log" 2>&1 \
+             && TREES="$(sed -n 's/.*\[forest\] \([0-9]*\) trees planted.*/\1/p' "$TMP_OUT/render.log" | head -1)" \
+             && [ -n "$TREES" ] && [ "$TREES" -ge 20000 ] \
+             && (cd .. && RAE_114_PHYSICS_TEST=1 RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=60000 \
+                perl -e 'alarm shift; exec @ARGV' 60 "$TMP_OUT/app") > "$TMP_OUT/physics.log" 2>&1 \
+             && [ "$(grep -c "\[trunktest\] .* poolFollows=true, groundFollows=true, passed=true" "$TMP_OUT/physics.log")" -eq 1 ] \
+             && [ "$(grep -c "\[physicstest\] .* passed=true" "$TMP_OUT/physics.log")" -eq 1 ]; then
+            echo "PASS: $EXAMPLE_NAME ($TREES trees in a PropField, pooled trunks, ground and sea following the walker)"
+            ((PASSED++))
+          else
+            echo "FAIL: $EXAMPLE_NAME (walker forest)"
+            cat "$TMP_OUT/render.log" "$TMP_OUT/shot.log" "$TMP_OUT/physics.log" 2>/dev/null | sed 's/^/  /'
+            ((FAILED++))
+          fi
         elif [ "$EXAMPLE_NAME" = "137_walker_forward" ]; then
           # The forward twin of 136 (forward-rae-5): the same walker, crowd,
           # terrain, grass, props and cubes in one 4x MSAA pass, no water. A
