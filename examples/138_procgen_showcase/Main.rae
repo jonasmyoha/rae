@@ -3,7 +3,7 @@
 # (GroveGrass). All geometry is authored in Rae. The shared editor panel (app3d/EditorPanel)
 # is the chrome: drag to orbit, wheel to zoom, the camera bar's mode button for
 # the free WASD camera, the menu button for the settings (sky, time of day,
-# shadows, the six views). Keys 1 / 2 / 3 / 4 / 5 / 6 pick the views too.
+# shadows, the eight views). Keys 1 through 8 pick the views too.
 import Gpu2d
 import Vec3
 import Keys
@@ -100,11 +100,11 @@ func createShowcase() ret ShowcaseState {
   var idIssuer: IdIssuer = IdIssuer.create()
 
   # The settings start on the Preetham sky at a fixed mid-morning hour (the
-  # clock runs from the panel), and the panel's scene chooser is the six views
+  # clock runs from the panel), and the panel's scene chooser is the eight views
   let initialView: Int = groveViewNumber(viewName: Sys.getEnv(name: "RAE_GROVE_VIEW"))
   var settings: SettingsState = createSettingsState(
     scene: initialView
-    sceneCount: 6
+    sceneCount: 8
     speed: 1.0
     toon: true
     hour: 10.0
@@ -154,7 +154,7 @@ func createShowcase() ret ShowcaseState {
 # The grove's materials are authored for a bright sun
 const groveSunStrength: Float = 3.1
 
-# RAE_GROVE_VIEW: grove, trees, rocks, fluffy, evergreen, spruces
+# RAE_GROVE_VIEW: grove, trees, rocks, fluffy, evergreen, spruces, camphor, roots
 func groveViewNumber(viewName: view String) ret Int {
   if viewName is "trees" {
     ret 2
@@ -171,16 +171,22 @@ func groveViewNumber(viewName: view String) ret Int {
   if viewName is "spruces" {
     ret 6
   }
+  if viewName is "camphor" {
+    ret 7
+  }
+  if viewName is "roots" {
+    ret 8
+  }
   ret 1
 }
 
 # Presets are also the visual gate's reproducible inspection angles.
 func setGroveView(camera: mod Camera3d, cameraRig: mod CameraRig, groveView: view Int) {
   cameraRig.mode = CameraRigMode.orbit
-  camera.target = Vec3.create(x: 0, y: 6, z: 9)
+  camera.target = Vec3.create(x: -15, y: 6, z: 9)
   cameraRig.yaw = 0.10
   cameraRig.orbitPitch = 0.48
-  cameraRig.distance = 85
+  cameraRig.distance = 100
   if groveView is 2 {
     camera.target = Vec3.create(x: -4.8, y: 2, z: 3.4)
     cameraRig.yaw = -0.5
@@ -207,6 +213,18 @@ func setGroveView(camera: mod Camera3d, cameraRig: mod CameraRig, groveView: vie
     cameraRig.distance = 23
     cameraRig.orbitPitch = 0.20
     cameraRig.yaw = 0.55
+  }
+  if groveView is 7 {
+    camera.target = Vec3.create(x: -34, y: 9, z: 13)
+    cameraRig.distance = 58
+    cameraRig.orbitPitch = 0.15
+    cameraRig.yaw = 0.2
+  }
+  if groveView is 8 {
+    camera.target = Vec3.create(x: -34, y: 9, z: 7)
+    cameraRig.distance = 28
+    cameraRig.orbitPitch = 0.10
+    cameraRig.yaw = -0.6
   }
   snapCameraRigView(rig: cameraRig)
   applyCameraRig(rig: cameraRig, camera: camera)
@@ -257,6 +275,12 @@ func runShowcaseFrame(state: mod ShowcaseState) {
   }
   if Sdl3.isKeyPressed(key: Keys.key6) {
     selectEditorPanelScene(editorPanel: state.editorPanel, scene: 6)
+  }
+  if Sdl3.isKeyPressed(key: Keys.key7) {
+    selectEditorPanelScene(editorPanel: state.editorPanel, scene: 7)
+  }
+  if Sdl3.isKeyPressed(key: Keys.key8) {
+    selectEditorPanelScene(editorPanel: state.editorPanel, scene: 8)
   }
   if state.editorPanel.settings.scene is not shownView {
     setGroveView(
