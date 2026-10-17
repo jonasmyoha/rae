@@ -1,0 +1,204 @@
+# A broad old evergreen: buttressed roots, seven rising scaffold limbs and
+# overlapping irregular crowns. Z-up, dimensions in metres at height 27.7.
+# Geometry is generated once. The caller owns meshes and uploaded handles.
+# leafCount is per crown; decreasing it increases leaf size to preserve cover.
+open procgen/Foliage
+open procgen/CamphorGeometry
+open Mesh3d
+open Vec3
+open Noise
+import Math
+
+type CamphorCrown {
+  center: Vec3
+  radius: Vec3
+}
+
+type CamphorTree {
+  wood: MeshData
+  crowns: List(CamphorCrown)
+}
+
+func camphorTree(seed: view Int) ret CamphorTree {
+  var wood: MeshData = foliageMesh()
+  var crowns: List(CamphorCrown) = List.create(CamphorCrown, cap: 26)
+  let trunkPoints: List(Vec3) = {
+    { x: 0, y: 0, z: -0.15 }
+    { x: 0.1, y: 0, z: 1.4 }
+    { x: 0.4, y: 0.1, z: 4.5 }
+    { x: 0.8, y: 0.3, z: 7.5 }
+    { x: 0.3, y: 0.6, z: 10.5 }
+    { x: -0.4, y: 0.9, z: 15 }
+    { x: -1.0, y: 1.0, z: 21.5 }
+  }
+  let trunkRadii: List(Float) = {
+    3.3
+    2.6
+    2.3
+    1.9
+    1.3
+    0.8
+    0.12
+  }
+  camphorTube(
+    mesh: wood
+    points: trunkPoints
+    radii: trunkRadii
+    sides: 18
+  )
+  # Uneven roots start inside the trunk and sink into the ground at their tips.
+  loop var root: Int = 0, root < 9, ++root {
+    let angle: Float = root.toFloat() * 6.2831853 / 9 + hash2(x: root, y: 1, seed: seed) * 0.3
+    let reach: Float = 4.5 + hash2(x: root, y: 2, seed: seed) * 2.4
+    var points: List(Vec3) = List.create(Vec3, cap: 5)
+    var radii: List(Float) = List.create(Float, cap: 5)
+    loop var step: Int = 0, step < 5, ++step {
+      let fraction: Float = step.toFloat() / 4
+      let distance: Float = 0.8 + reach * fraction
+      let bend: Float = angle + 0.18 * fraction * fraction
+      points.add(
+        value: {
+          x: Math.cos(x: bend) * distance
+          y: Math.sin(x: bend) * distance
+          z: 1.15 * (1.0 - fraction) * (1.0 - fraction) - 0.2
+        }
+      )
+      radii.add(value: 0.65 * (1.0 - fraction) + 0.025)
+    }
+    camphorTube(
+      mesh: wood
+      points: points
+      radii: radii
+      sides: 10
+    )
+  }
+  loop var limb: Int = 0, limb < 7, ++limb {
+    let angle: Float = limb.toFloat() * 2.39996 + hash2(x: limb, y: 3, seed: seed) * 0.4
+    let reach: Float = 7.5 + hash2(x: limb, y: 4, seed: seed) * 3.0
+    let elevation: Float = 12.5 + hash2(x: limb, y: 5, seed: seed) * 3.5
+    let start: Vec3 = Vec3.create(x: 0.5, y: 0.3, z: 4.0 + limb.toFloat() * 0.65)
+    let elbow: Vec3 = Vec3.create(
+      x: Math.cos(x: angle) * reach * 0.54
+      y: Math.sin(x: angle) * reach * 0.54
+      z: elevation * 0.78
+    )
+    let tip: Vec3 = Vec3.create(
+      x: Math.cos(x: angle) * reach
+      y: Math.sin(x: angle) * reach
+      z: elevation
+    )
+    let points: List(Vec3) = {
+      start
+      vadd(a: start, b: Vec3.create(x: Math.cos(x: angle) * 2, y: Math.sin(x: angle) * 2, z: 2.5))
+      elbow
+      vadd(a: elbow, b: vscale(a: vsub(a: tip, b: elbow), s: 0.6))
+      tip
+    }
+    let radii: List(Float) = {
+      1.25
+      1.15
+      0.8
+      0.48
+      0.12
+    }
+    camphorTube(
+      mesh: wood
+      points: points
+      radii: radii
+      sides: 12
+    )
+    loop var fork: Int = 0, fork < 3, ++fork {
+      let forkAngle: Float = angle + (fork.toFloat() - 1) * 0.72
+      let center: Vec3 = vadd(
+        a: tip
+        b: Vec3.create(
+          x: Math.cos(x: forkAngle) * 2.5
+          y: Math.sin(x: forkAngle) * 2.5
+          z: 1.2 + fork.toFloat() * 0.65
+        )
+      )
+      foliageLimb(
+        mesh: wood
+        start: elbow
+        direction: vnorm(a: vsub(a: center, b: elbow))
+        length: Math.sqrt(x: vdot(a: vsub(a: center, b: elbow), b: vsub(a: center, b: elbow)))
+        rise: 0.05
+        startRadius: 0.42
+        endRadius: 0.045
+        sides: 8
+      )
+      crowns.add(
+        value: {
+          center: center
+          radius: { x: 5.8 + hash2(x: limb, y: fork + 10, seed: seed), y: 5.2, z: 4.5 }
+        }
+      )
+    }
+  }
+  crowns.add(value: { center: { x: 0, y: 0, z: 18.8 }, radius: { x: 7.5, y: 6.8, z: 5.5 } })
+  loop var crown: Int = 0, crown < 4, ++crown {
+    let angle: Float = crown.toFloat() * 2.39996
+    crowns.add(
+      value: {
+        center: {
+          x: Math.cos(x: angle) * 3.5
+          y: Math.sin(x: angle) * 3.0
+          z: 22.2 + crown.toFloat() * 0.35
+        }
+        radius: { x: 5.7, y: 5.3, z: 4.0 }
+      }
+    )
+  }
+  ret CamphorTree { wood: own wood, crowns: own crowns }
+}
+
+func camphorLeaves(
+  crowns: view List(CamphorCrown)
+  seed: view Int
+  tone: view Int
+  leafCount: view Int
+) ret MeshData {
+  var mesh: MeshData = foliageMesh()
+  if leafCount < 1 or tone < 0 or tone > 2 {
+    ret mesh
+  }
+  let sizeScale: Float = Math.sqrt(x: 800.0 / leafCount.toFloat())
+  loop var crownIndex: Int = 0, crownIndex < crowns.length, ++crownIndex {
+    let crown: CamphorCrown = crowns.copyAtDefault(index: crownIndex)
+    loop var leaf: Int = 0, leaf < leafCount, ++leaf {
+      if leaf % 3 is not tone {
+        continue
+      }
+      let leafSeed: Int = seed + crownIndex * 137
+      let vertical: Float = hash2(x: leaf, y: 1, seed: leafSeed) * 2 - 1
+      let angle: Float = leaf.toFloat() * 2.39996
+      let horizontal: Float = Math.sqrt(x: 1.0 - vertical * vertical)
+      let direction: Vec3 = Vec3.create(
+        x: Math.cos(x: angle) * horizontal
+        y: Math.sin(x: angle) * horizontal
+        z: vertical
+      )
+      # Broad coherent ripples break the perfect sphere without noisy normals.
+      let ripple: Float = Math.sin(x: angle * 3 + vertical * 4 + crownIndex.toFloat()) * 0.05 + Math.cos(
+        x: angle * 5 - vertical * 3
+      ) * 0.025
+      let depth: Float = 0.86 + hash2(x: leaf, y: 2, seed: leafSeed) * 0.08 + ripple
+      let point: Vec3 = vadd(
+        a: crown.center
+        b: Vec3.create(
+          x: direction.x * crown.radius.x * depth
+          y: direction.y * crown.radius.y * depth
+          z: direction.z * crown.radius.z * depth
+        )
+      )
+      camphorLeaf(
+        mesh: mesh
+        center: point
+        normal: vnorm(a: Vec3.create(x: direction.x, y: direction.y, z: direction.z + 0.6))
+        size: (0.44 + hash2(x: leaf, y: 3, seed: leafSeed) * 0.22) * sizeScale
+        angle: angle
+      )
+    }
+  }
+  ret mesh
+}

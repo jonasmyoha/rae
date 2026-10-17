@@ -1,0 +1,116 @@
+open procgen/Camphor
+open procgen/CamphorGeometry
+open Mesh3d
+open Vec3
+import Math
+
+func validMesh(mesh: view MeshData) ret Bool {
+  if mesh.verts.length is not mesh.vertCount * 8 {
+    ret false
+  }
+  if mesh.indices.length % 3 is not 0 {
+    ret false
+  }
+  loop let index: Int in mesh.indices {
+    if index < 0 or index >= mesh.vertCount {
+      ret false
+    }
+  }
+  loop let value: Float in mesh.verts {
+    if value is not value or value < -100 or value > 100 {
+      ret false
+    }
+  }
+  ret true
+}
+
+func main() ret Int {
+  let middle: Vec3 = camphorCurve(
+    previous: Vec3.create(x: 0, y: 0, z: 0)
+    start: Vec3.create(x: 1, y: 0, z: 0)
+    end: Vec3.create(x: 2, y: 0, z: 0)
+    next: Vec3.create(x: 3, y: 0, z: 0)
+    fraction: 0.25
+  )
+  if Math.abs(value: middle.x - 1.25) > 0.0001 {
+    ret 10
+  }
+  let tree: CamphorTree = camphorTree(seed: 219)
+  let repeat: CamphorTree = camphorTree(seed: 219)
+  let other: CamphorTree = camphorTree(seed: 220)
+  if tree.crowns.length is not 26 or not validMesh(mesh: tree.wood) {
+    ret 1
+  }
+  var changed: Bool = false
+  loop var index: Int = 0, index < tree.wood.verts.length, ++index {
+    let value: Float = tree.wood.verts.copyAtDefault(index: index)
+    if value is not repeat.wood.verts.copyAtDefault(index: index) {
+      ret 2
+    }
+    if value is not other.wood.verts.copyAtDefault(index: index) {
+      changed = true
+    }
+  }
+  if not changed {
+    ret 3
+  }
+  let moss: MeshData = camphorMoss(wood: tree.wood)
+  if moss.vertCount is 0 or not validMesh(mesh: moss) {
+    ret 9
+  }
+  let counts: List(Int) = { 800, 400, 200 }
+  loop let count: Int in counts {
+    var triangles: Int = 0
+    var highest: Float = 0
+    loop var tone: Int = 0, tone < 3, ++tone {
+      let leaves: MeshData = camphorLeaves(
+        crowns: tree.crowns
+        seed: 219
+        tone: tone
+        leafCount: count
+      )
+      let repeatedLeaves: MeshData = camphorLeaves(
+        crowns: tree.crowns
+        seed: 219
+        tone: tone
+        leafCount: count
+      )
+      if not validMesh(mesh: leaves) {
+        ret 4
+      }
+      triangles = triangles + leaves.indices.length / 3
+      loop var index: Int = 0, index < leaves.verts.length, ++index {
+        let value: Float = leaves.verts.copyAtDefault(index: index)
+        if value is not repeatedLeaves.verts.copyAtDefault(index: index) {
+          ret 5
+        }
+        if index % 8 is 2 and value > highest {
+          highest = value
+        }
+      }
+    }
+    if triangles is not 26 * count * 12 {
+      ret 6
+    }
+    if highest < 27 or highest > 29 {
+      ret 7
+    }
+  }
+  let empty: MeshData = camphorLeaves(
+    crowns: tree.crowns
+    seed: 219
+    tone: 0
+    leafCount: 0
+  )
+  let invalidTone: MeshData = camphorLeaves(
+    crowns: tree.crowns
+    seed: 219
+    tone: 3
+    leafCount: 800
+  )
+  if empty.vertCount is not 0 or invalidTone.vertCount is not 0 {
+    ret 8
+  }
+  log("camphor: seeded wood, valid meshes, three leaf budgets, bounded height")
+  ret 0
+}

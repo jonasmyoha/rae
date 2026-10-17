@@ -1,6 +1,6 @@
 # Autumn Grove
 
-A procedural prop showcase with twenty-four trees (including the six original
+A procedural prop showcase with twenty-five trees (including the six original
 autumn trees), rock groups across the island, low shrubs, the standard GPU grass
 and a winding path on a raised garden base.
 
@@ -10,9 +10,11 @@ and a winding path on a raised garden base.
 - **4** frames the broad, fluffy leaf patches.
 - **5** frames the cypress and umbrella pine group.
 - **6** frames the six layered spruces.
+- **7** frames the giant camphor.
+- **8** looks beneath its canopy at the roots and branching trunk.
 - Drag to orbit, scroll to zoom. The camera bar's **Orbit** button switches to
   the free WASD camera (Q/E down/up, shift to boost) and back.
-- The menu button opens the settings panel: the six views (Scene 1-6), sky
+- The menu button opens the settings panel: the eight views (Scene 1-8), sky
   model, time of day and date, shadows and TAA.
 - The chrome is the shared editor panel (`lib/app3d/EditorPanel.rae`); the
   debug widget on top shows frame rate and memory.
@@ -24,7 +26,7 @@ compiler/bin/rae run --project examples/138_procgen_showcase examples/138_procge
 ```
 
 `RAE_GROVE_VIEW=trees` or `rocks` selects a reproducible initial close-up.
-The default is the complete grove. The example gate renders all three views.
+The default is the complete grove. The example gate renders all eight views.
 
 ## Geometry and shading
 
@@ -68,8 +70,8 @@ and cascaded shadows. The example uses no bitmap textures or imported meshes.
 ## Broad-leaf comparison garden
 
 Keys **4** and **5** (or `RAE_GROVE_VIEW=fluffy` / `evergreen`) inspect the
-new rounded broadleaf and Mediterranean evergreen groups. The island is now
-44 by 40 metres instead of 27.6 by 25, with twelve additional plants: three
+new rounded broadleaf and Mediterranean evergreen groups. This group first expanded the island to
+44 by 40 metres from 27.6 by 25, with twelve additional plants: three
 rounded broadleaves, three slender cypresses, three umbrella pines and three
 low lime-green bushes. The original autumn trees remain for comparison.
 
@@ -118,7 +120,7 @@ copied from those examples.
 
 Validation: fixture `1141_fluffy_foliage` checks all five forms at 48/24/12
 detail settings, deterministic vertex output and valid indices. The 138
-example gate renders all six views. Captures are inspected separately and
+example gate renders all eight views. Captures are inspected separately and
 stored above; `RAE_MEM_STATS=1` runs check tracked String/Buffer cleanup.
 
 ## Layered spruces and slender cypresses
@@ -140,3 +142,42 @@ vertical scale is tripled: foliage width and trunk thickness now match the
 original 7.5, 8.2 and 8.9 metre cypresses. All six reuse the same meshes.
 
 ![Layered normal-sized spruces](references/Spruces.png)
+
+## Old camphor clearing
+
+One giant evergreen stands in a new western clearing. The island is now
+86 by 56 metres, centred at (-15, 6), and a narrow curved path joins the old
+path to its roots. CPU ground geometry and the grass surface shader use the
+same ellipse. Existing tree meshes, placements, materials and lighting remain
+unchanged. The grass grid spans 112 metres to cover the expanded island.
+
+The measured camphor crown reaches **27.93 metres** after its 1.025 vertical
+instance scale. The tallest existing cypress reaches 26.92 metres including
+its leaf patches, so the difference is about one metre.
+
+`procgen/Camphor` is an original seeded Rae generator. Its heavy flared trunk,
+nine spreading roots and seven scaffold limbs support 26 overlapping crown
+volumes. Interpolated wood paths soften the bends; coherent crown ripples and
+rounded silhouette leaves break up the outline. Crown-oriented normals and
+three close green tones keep the broad masses readable. A fifth mesh follows
+upward-facing root surfaces with patches of moss. The design studies old
+camphor trunks and wide crowns, including the [municipal tree photograph](https://www.city.takeo.lg.jp/images/takeo/gallery04.jpg).
+No reference images, external meshes or textures are included in the assets.
+
+At 800 leaves per crown, the foliage has 249,600 two-sided triangles and
+166,400 vertices. Wood adds 8,112 triangles; moss adds 462. This is a close-view
+landmark, not the mesh budget for thousands of distant trees. The generator
+also accepts 400/200 leaves per crown (124,800/62,400 foliage triangles), with
+larger leaves maintaining coverage. Automatic LOD selection and billboards
+remain separate work. All five meshes are built/uploaded once and attached to
+World3d entities; nothing is regenerated per frame. No runtime C or shared
+renderer/shading changes are needed.
+
+Fixture `1142_camphor_tree` checks curve interpolation, deterministic seeds, changed output for a
+new seed, indices, finite positions, three leaf budgets, height bounds and
+empty-input handling. Exit-time String/Buffer accounting is also checked.
+Keys 7/8 or `RAE_GROVE_VIEW=camphor` / `roots` select the inspection views.
+
+![Giant camphor](references/Camphor.png)
+
+![Under the canopy](references/Roots.png)

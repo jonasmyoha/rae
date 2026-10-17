@@ -10,6 +10,7 @@ open RendererDeferred
 open procgen/Foliage
 open GroveGrass
 open FluffyGrove
+open CamphorGrove
 open procgen/Rock
 open ecs/Entity
 
@@ -151,21 +152,21 @@ func pathCenter(distance: view Float) ret Float {
 }
 
 func groundHeight(x: view Float, y: view Float) ret Float {
-  let radius: Float = Math.sqrt(x: x * x / 484.0 + (y - 6) * (y - 6) / 400.0)
+  let radius: Float = Math.sqrt(x: (x + 15) * (x + 15) / 1849.0 + (y - 6) * (y - 6) / 784.0)
   let base: Float = 0.12 * Math.sin(x: x * 0.36) * Math.sin(x: y * 0.3)
   if radius > 0.9167 {
-    ret base * (1 - (radius - 0.9167) * 12) - 0.35 * (radius - 0.9167) * 12
+    ret base * (1.0 - (radius - 0.9167) * 12) - 0.35 * (radius - 0.9167) * 12
   }
   ret base
 }
 
 func islandPoint(ring: view Int, index: view Int) ret Vec3 {
   let angle: Float = index.toFloat() * 6.2831853 / 128
-  let fraction: Float = ring.toFloat() / 12
-  let x: Float = Math.cos(x: angle) * 22.0 * fraction
-  let y: Float = 6.0 + Math.sin(x: angle) * 20.0 * fraction
+  let fraction: Float = ring.toFloat() / 48
+  let x: Float = -15.0 + Math.cos(x: angle) * 43.0 * fraction
+  let y: Float = 6.0 + Math.sin(x: angle) * 28.0 * fraction
   var height: Float = groundHeight(x: x, y: y)
-  if ring is 12 {
+  if ring is 48 {
     height = -0.35
   }
   ret Vec3.create(x: x, y: y, z: height)
@@ -173,7 +174,7 @@ func islandPoint(ring: view Int, index: view Int) ret Vec3 {
 
 func gardenGround() ret MeshData {
   var mesh: MeshData = foliageMesh()
-  loop var ring: Int = 0, ring < 12, ++ring {
+  loop var ring: Int = 0, ring < 48, ++ring {
     loop var i: Int = 0, i < 128, ++i {
       let first: Vec3 = islandPoint(ring: ring, index: i)
       let second: Vec3 = islandPoint(ring: ring + 1, index: i)
@@ -199,10 +200,10 @@ func gardenGround() ret MeshData {
 func gardenEdge() ret MeshData {
   var mesh: MeshData = foliageMesh()
   loop var i: Int = 0, i < 128, ++i {
-    let top: Vec3 = islandPoint(ring: 12, index: i)
-    let next: Vec3 = islandPoint(ring: 12, index: i + 1)
-    let bottom: Vec3 = Vec3.create(x: top.x * 0.99, y: top.y, z: -1.15)
-    let bottomNext: Vec3 = Vec3.create(x: next.x * 0.99, y: next.y, z: -1.15)
+    let top: Vec3 = islandPoint(ring: 48, index: i)
+    let next: Vec3 = islandPoint(ring: 48, index: i + 1)
+    let bottom: Vec3 = Vec3.create(x: -15.0 + (top.x + 15) * 0.99, y: top.y, z: -1.15)
+    let bottomNext: Vec3 = Vec3.create(x: -15.0 + (next.x + 15) * 0.99, y: next.y, z: -1.15)
     foliageFace(
       mesh: mesh
       first: top
@@ -214,6 +215,52 @@ func gardenEdge() ret MeshData {
       first: next
       second: bottom
       third: bottomNext
+    )
+  }
+  ret mesh
+}
+
+# A narrow path branches into the old tree's clearing, leaving its roots open.
+func camphorPath() ret MeshData {
+  var mesh: MeshData = foliageMesh()
+  loop var segment: Int = 0, segment < 66, ++segment {
+    let front: Float = segment.toFloat() / 66
+    let back: Float = (segment + 1).toFloat() / 66
+    let firstX: Float = -34.0 * front
+    let secondX: Float = -34.0 * back
+    let firstY: Float = -9.5 + 13.5 * front - 5.0 * Math.sin(x: front * 3.14159265)
+    let secondY: Float = -9.5 + 13.5 * back - 5.0 * Math.sin(x: back * 3.14159265)
+    let first: Vec3 = Vec3.create(
+      x: firstX
+      y: firstY - 0.65
+      z: groundHeight(x: firstX, y: firstY - 0.65) + 0.035
+    )
+    let second: Vec3 = Vec3.create(
+      x: firstX
+      y: firstY + 0.65
+      z: groundHeight(x: firstX, y: firstY + 0.65) + 0.035
+    )
+    let third: Vec3 = Vec3.create(
+      x: secondX
+      y: secondY - 0.65
+      z: groundHeight(x: secondX, y: secondY - 0.65) + 0.035
+    )
+    let fourth: Vec3 = Vec3.create(
+      x: secondX
+      y: secondY + 0.65
+      z: groundHeight(x: secondX, y: secondY + 0.65) + 0.035
+    )
+    foliageFace(
+      mesh: mesh
+      first: first
+      second: second
+      third: third
+    )
+    foliageFace(
+      mesh: mesh
+      first: third
+      second: second
+      third: fourth
     )
   }
   ret mesh
@@ -520,6 +567,15 @@ func buildGrove(renderer: mod DeferredRenderer) ret Grove {
     scale: unit
     rotation: 0
   )
+  place(
+    world: world
+    renderer: renderer
+    mesh: camphorPath()
+    material: paint(red: 0.48, green: 0.32, blue: 0.16)
+    position: origin
+    scale: unit
+    rotation: 0
+  )
   let path: MeshData = gardenPath()
   place(
     world: world
@@ -600,6 +656,7 @@ func buildGrove(renderer: mod DeferredRenderer) ret Grove {
       rotation: 0
     )
   }
+  addCamphorGrove(world: world, renderer: renderer, obstacles: obstacles)
   addFluffyGrove(world: world, renderer: renderer, obstacles: obstacles)
   ret Grove { world: own world, obstacles: own obstacles }
 }
