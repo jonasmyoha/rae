@@ -139,6 +139,21 @@ type WaterBody {
   # Sun caustics on submerged surfaces (#860, desktop): 1 = the underwater fog
   # pass adds a rippling light network when the camera is under this body; 0 = none.
   caustics: Int
+  # Where a camera-centred body (mesh mode 2) exists, in world x/y: an ocean
+  # off one coast, not under the whole world. Outside it nothing is drawn and
+  # the camera is never under it. Unbounded (+-waterUnbounded) by default.
+  boundsMinX: Float
+  boundsMinY: Float
+  boundsMaxX: Float
+  boundsMaxY: Float
+}
+
+# The bounds of a body that has none: farther than any world reaches
+const waterUnbounded: Float = 1000000000.0
+
+# Does world (x, y) lie inside `body`'s bounds?
+func waterBoundsContain(body: view WaterBody, x: view Float, y: view Float) ret Bool {
+  ret x >= body.boundsMinX and x <= body.boundsMaxX and y >= body.boundsMinY and y <= body.boundsMaxY
 }
 
 # A stylised lake with the surface at `surfaceZ`: pale turquoise shallows, a deep
@@ -203,6 +218,10 @@ func createLakeToon(surfaceZ: copy Float, extent: copy Float) ret WaterBody {
     ssrSteps: 0
     spray: 0
     caustics: 0
+    boundsMinX: 0.0 - waterUnbounded
+    boundsMinY: 0.0 - waterUnbounded
+    boundsMaxX: waterUnbounded
+    boundsMaxY: waterUnbounded
   }
 }
 

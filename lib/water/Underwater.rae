@@ -5,7 +5,8 @@
 #
 #   * CONTAINMENT. A lake / pond (meshMode 0) contains the camera when its
 #     xy is inside the body's square extent around the centre; an ocean
-#     (meshMode 2, camera-centred) is unbounded and contains every camera; a
+#     (meshMode 2, camera-centred) contains every camera inside its bounds
+#     (unbounded unless the app set them: Water.waterBoundsContain); a
 #     baked river ribbon (meshMode 1) has no bounds API — its mesh is world-
 #     space geometry the body knows only by id — so it never selects (rivers
 #     are shallow; a river camera is a #833 follow-up, not a guess here).
@@ -52,7 +53,7 @@ const underwaterTintDepth: Float = 2.0
 # The body's xy bounds for the camera test (see the header).
 func waterBodyContains(body: view WaterBody, x: copy Float, y: copy Float) ret Bool {
   if body.meshMode is 2 {
-    ret true
+    ret waterBoundsContain(body: body, x: x, y: y)
   }
   if body.meshMode is not 0 {
     ret false
