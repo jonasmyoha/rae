@@ -399,7 +399,8 @@ const AstDecl* find_enum_decl(CFuncContext* ctx, const AstModule* module, Str na
 void register_decl(CompilerContext* ctx, const AstDecl* decl) {
     if (!decl) return;
     if (decl_index_contains(ctx, decl)) return;
-    if (ctx->all_decl_count < ctx->all_decl_cap) ctx->all_decls[ctx->all_decl_count++] = decl;
+    RAE_GROW1(ctx->all_decls, ctx->all_decl_count, ctx->all_decl_cap);
+    ctx->all_decls[ctx->all_decl_count++] = decl;
 }
 
 void collect_decls_from_module(CompilerContext* ctx, const AstModule* module) {

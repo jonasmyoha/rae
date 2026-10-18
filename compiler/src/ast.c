@@ -19,9 +19,11 @@ void compiler_init(CompilerContext* ctx, Arena* ast_arena) {
     ctx->diags = arena_alloc(ast_arena, sizeof(DiagState));
     diag_init(ctx->diags);
 
-    // Initial capacity for project-wide state
+    // Initial capacity for project-wide state. all_decls GROWS (register_decl,
+    // RAE_GROW1), so it is malloc'd: at a fixed 8192 every declaration past
+    // the 8192th was dropped, and the C it should have declared went missing.
     ctx->all_decl_cap = 8192;
-    ctx->all_decls = arena_alloc(ast_arena, sizeof(AstDecl*) * ctx->all_decl_cap);
+    ctx->all_decls = malloc(sizeof(AstDecl*) * ctx->all_decl_cap);
     
     // generic_types + specialized_funcs GROW dynamically (RAE_GROW1 in c_backend.c),
     // so they are malloc'd, not arena-bumped — no fixed cap, no silent overflow drop.
