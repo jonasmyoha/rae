@@ -268,7 +268,42 @@ fn shadeSurface(s: ShadedSurface) -> vec3<f32> {
   if (L.clearColor.w > 0.5) {
     let fogDist = length(L.camPos.xyz - wpos);
     let fogT = clamp((fogDist - L.sunColor.w) / max(L.ambSky.w - L.sunColor.w, 0.001), 0.0, 1.0);
-    return mix(radiance, L.clearColor.rgb, fogT);
+    radiance = mix(radiance, L.clearColor.rgb, fogT);
+  }
+  if (L.mist.w > 0.5) {
+    radiance = applyMist(radiance, wpos);
   }
   return radiance;
+}
+// The sky's colour in `dir` without the sun's disc (skyColor's sky): what a
+// far surface fades to in the mist, so it meets the sky with no seam
+fn mistSkyColor(dir: vec3<f32>) -> vec3<f32> {
+  let kind = L.skyParams.x;
+  let toSun = normalize(-L.sunDir.xyz);
+  var c = L.clearColor.rgb;
+  if (kind > 1.5 && kind < 2.5) { c = skyProcedural(dir, toSun, L.skyParams.y); }
+  if (kind > 2.5 && kind < 3.5) { c = skyStylised(dir, toSun); }
+  if (kind > 3.5) { c = skyHosek(dir, toSun); }
+  return c * L.skyParams.z;
+}
+// Height mist (RendererMist): its density falls off exponentially with
+// height above a base, so the optical depth along the ray from the eye to
+// `wpos` has a closed form; the surface fades toward the (paler, tinted)
+// sky in the ray's direction, looking no lower than just over the horizon
+fn applyMist(radiance: vec3<f32>, wpos: vec3<f32>) -> vec3<f32> {
+  let toP = wpos - L.camPos.xyz;
+  let d = max(length(toP), 0.001);
+  let dir = toP / d;
+  let falloff = max(L.mist.y, 0.00001);
+  let atEye = L.mist.x * exp(clamp(-falloff * (L.camPos.z - L.mist.z), -40.0, 20.0));
+  let climb = clamp(falloff * toP.z, -20.0, 40.0);
+  var depth = atEye * d;
+  if (abs(climb) > 0.0001) {
+    depth = atEye * d * (1.0 - exp(-climb)) / climb;
+  }
+  let amount = 1.0 - exp(-max(depth, 0.0));
+  let sky = mistSkyColor(normalize(vec3<f32>(dir.xy, max(dir.z, 0.03))));
+  let grey = vec3<f32>(dot(sky, vec3<f32>(0.2126, 0.7152, 0.0722)));
+  let mistColor = mix(sky, grey, L.mistTint.w) * L.mistTint.rgb;
+  return mix(radiance, mistColor, amount);
 }

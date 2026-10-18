@@ -1,0 +1,51 @@
+# RendererMist — a height mist for the deferred renderer: denser low down,
+# thinning with height, so valleys and far lowland haze over while hilltops
+# and towers stand out of it. A surface fades along the view ray toward the
+# sky's own colour in that direction (paler, and tinted), so the far ground
+# meets the sky with no seam and the sky itself stays. Off by default; an
+# app turns it on with setMist (defaultMistSettings is a good start: a light
+# morning-ish haze, a few percent at 100 m, about a third at a kilometre near
+# the base height). Distance fog (setFog) is the older, flat kind.
+import Vec3
+open RendererDeferred
+
+type MistSettings {
+  # The mist's density per metre at the base height (1 / metres of clear
+  # view there: 0.0005 is about a third gone at a kilometre)
+  density: Float
+  # How fast it thins going up, per metre (0.008: halving every ~87 m)
+  falloff: Float
+  # The height (world z) the density is given at: the lowest ground, say
+  baseHeight: Float
+  # A tint on the sky's colour it fades to, and how much of that colour's
+  # saturation it loses (0: the sky's own colour, 1: grey of the same light)
+  tint: Vec3
+  paleness: Float
+}
+
+func defaultMistSettings() ret MistSettings {
+  ret MistSettings {
+    density: 0.0009
+    falloff: 0.01
+    baseHeight: 0.0
+    tint: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
+    paleness: 0.45
+  }
+}
+
+func setMist(renderer: mod DeferredRenderer, mist: view MistSettings) {
+  renderer.passes.targets.mistOn = true
+  renderer.passes.targets.mistDensity = mist.density
+  renderer.passes.targets.mistFalloff = mist.falloff
+  renderer.passes.targets.mistBaseHeight = mist.baseHeight
+  renderer.passes.targets.mistTint = mist.tint
+  renderer.passes.targets.mistPaleness = mist.paleness
+}
+
+func setMistDisabled(renderer: mod DeferredRenderer) {
+  renderer.passes.targets.mistOn = false
+}
+
+func mistIsEnabled(renderer: view DeferredRenderer) ret Bool {
+  ret renderer.passes.targets.mistOn
+}
