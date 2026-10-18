@@ -35,7 +35,7 @@ open GbufferFullscreen
 
 const pyramidMaxMips: Int = 16
 
-const lightUniformFloats: Int = 104  # 416 bytes: LightU in the lighting WGSL
+const lightUniformFloats: Int = 112  # 448 bytes: LightU in the lighting WGSL
 
 const taaUniformBytes: Int = 16
 
@@ -94,6 +94,13 @@ type DeferredTargets {
   fogColor: Vec3
   fogStart: Float
   fogEnd: Float
+  # Height mist (RendererMist): LightU's mist and mistTint
+  mistOn: Bool
+  mistDensity: Float
+  mistFalloff: Float
+  mistBaseHeight: Float
+  mistTint: Vec3
+  mistPaleness: Float
   # uniforms + pipelines (created once, survive resizes)
   lightUniform: BufferId
   taaUniform: BufferId
@@ -160,6 +167,12 @@ func createDeferredTargets() ret DeferredTargets {
       fogColor: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
       fogStart: 0.0
       fogEnd: 0.0
+      mistOn: false
+      mistDensity: 0.0
+      mistFalloff: 0.0
+      mistBaseHeight: 0.0
+      mistTint: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
+      mistPaleness: 0.0
       lightUniform: noBufferId()
       taaUniform: noBufferId()
       lightPipeline: noRenderPipelineId()
@@ -808,6 +821,24 @@ func uploadLightUniform(
       w: hosekAt(targets: targets, index: i * 4 + 3)
     )
   }
+  var mistFlag: Float = 0.0
+  if targets.mistOn {
+    mistFlag = 1.0
+  }
+  pushVec4F(
+    writer: targets.args
+    x: targets.mistDensity
+    y: targets.mistFalloff
+    z: targets.mistBaseHeight
+    w: mistFlag
+  )
+  pushVec4F(
+    writer: targets.args
+    x: targets.mistTint.x
+    y: targets.mistTint.y
+    z: targets.mistTint.z
+    w: targets.mistPaleness
+  )
   ret uploadArgs(
     writer: targets.args
     resources: resources
