@@ -68,7 +68,7 @@ switch is `WaterBody.ssr` / `ssrSteps` (on, 24 steps, for `createOceanRealistic`
 `RAE_WATER_PERF=1` through the new render-pass timestamps (`recordDrawIndexedTimed`,
 `WaterSystem.surfacePerf`) at 2560x1600, 3 cascades of 256, matched camera and sea state:
 the surface draw goes from ~3.6 ms to ~6.0 ms GPU (about +2.4 ms), the FFT compute is
-unchanged (~4 ms). Jacobian spray is in (#859): `lib/water/Spray.rae`, an app-owned
+unchanged (~4 ms). Jacobian spray is in (#859): `lib/waterSpray/Spray.rae`, an app-owned
 `SprayEmitter` over the #858 readback cache and `lib/Particles.rae` (drawn by the
 #844 transparent pass, next to the water). Once per NEW cache snapshot — identified by
 (generation, newest cascade sample time), never per render frame, so a stale sample

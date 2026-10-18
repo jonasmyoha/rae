@@ -41,6 +41,9 @@ struct Water {
   centre: vec4<f32>,        // xy = camera position snapped to metres (mesh mode 2), z = cascade count, w = grid cell (m, lakes)
   ssr: vec4<f32>,           // x = screen-space reflections on (1) / off (0), y = march steps, z = hit thickness (m), w = max ray distance (m)
   grid: vec4<f32>,          // x = radial cell per metre (mesh mode 2), y = its first cell (m), z = cascade map size (texels), w = band hand-over bins
+  bounds: vec4<f32>,        // world xy the body exists in (mesh mode 2): min x, min y, max x, max y
+  mist: vec4<f32>,          // the renderer's height mist: density, falloff, base height, on (1) / off (0)
+  mistTint: vec4<f32>,      // rgb = tint, w = paleness
 };
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var<uniform> W: Water;
@@ -308,8 +311,33 @@ fn ssrTrace(origin: vec3<f32>, dir: vec3<f32>) -> vec4<f32> {
   return vec4<f32>(colour, edgeFade * lengthFade);
 }
 
+// The renderer's height mist (RendererMist; deferred_shade.wgsl's applyMist,
+// same maths), fading toward the water's own two-sample sky in the ray's
+// direction, so the sea meets the misted ground and the sky with no seam.
+fn waterMist(colour: vec3<f32>, wpos: vec3<f32>) -> vec3<f32> {
+  let toP = wpos - W.camera.xyz;
+  let d = max(length(toP), 0.001);
+  let dir = toP / d;
+  let falloff = max(W.mist.y, 0.00001);
+  let atEye = W.mist.x * exp(clamp(-falloff * (W.camera.z - W.mist.z), -40.0, 20.0));
+  let climb = clamp(falloff * toP.z, -20.0, 40.0);
+  var depth = atEye * d;
+  if (abs(climb) > 0.0001) {
+    depth = atEye * d * (1.0 - exp(-climb)) / climb;
+  }
+  let amount = 1.0 - exp(-max(depth, 0.0));
+  let sky = mix(W.horizon.rgb, W.zenith.rgb, clamp(max(dir.z, 0.03), 0.0, 1.0));
+  let grey = vec3<f32>(dot(sky, vec3<f32>(0.2126, 0.7152, 0.0722)));
+  let mistColour = mix(sky, grey, W.mistTint.w) * W.mistTint.rgb;
+  return mix(colour, mistColour, amount);
+}
+
 @fragment
 fn fs(i: VsOut) -> @location(0) vec4<f32> {
+  // Outside its bounds (an ocean off one coast) the body is not there.
+  if (i.gridXy.x < W.bounds.x || i.gridXy.y < W.bounds.y || i.gridXy.x > W.bounds.z || i.gridXy.y > W.bounds.w) {
+    discard;
+  }
   let px = vec2<i32>(i32(i.pos.x), i32(i.pos.y));
   let sceneNdc = textureLoad(depthTex, px, 0);
   let sceneLinear = linearDepth(sceneNdc);
@@ -472,6 +500,9 @@ fn fs(i: VsOut) -> @location(0) vec4<f32> {
     );
     colour = mix(colour, W.horizon.rgb, fog);
     alpha = max(alpha, fog);
+  }
+  if (W.mist.w > 0.5) {
+    colour = waterMist(colour, i.world);
   }
 
   return vec4<f32>(colour, alpha);

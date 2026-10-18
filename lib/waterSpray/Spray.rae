@@ -1,4 +1,4 @@
-# water/Spray — near-camera sea spray from the FFT surface (#859, water Phase 2
+# waterSpray/Spray — near-camera sea spray from the FFT surface (#859, water Phase 2
 # "Jacobian spray"). Where a cascade FOLDS (its signed Jacobian from the #858
 # readback cache drops below the crest threshold) a crest is breaking, and the
 # emitter throws a small burst of droplets from the surface there, drawn by
@@ -22,6 +22,9 @@
 # The emitter is a VALUE the app owns next to its WaterSystem; it borrows the
 # system's cache and clock and never touches the GPU except through the
 # particle pool's mesh (uploaded once into the renderer's store).
+# A package of its own, next to water/: a lib package is loaded whole, so
+# here it does not bring lib/Particles into every program that uses water
+# (one with a particle system of its own would declare its types twice).
 import Math
 import Vec3
 open Scene3d
