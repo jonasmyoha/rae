@@ -1,0 +1,96 @@
+# Fingers leave Gpu2d's touch list however their touch ends: lifted, or
+# cancelled by the OS (a call, the app sent to the background), and every
+# finger still down when the app goes to the background. A cancelled finger
+# used to stay in the list for good: a virtual stick or a camera holding it
+# never let go, so after coming back from the background only taps worked,
+# and every lost finger took one of the list's ten places.
+# Gpu2dSimulatedInput's simulateTouch / simulateEnterBackground push the same SDL events a
+# phone sends, through the same event loop.
+import Gpu2d
+import Gpu2dSimulatedInput
+
+func report(step: view String) {
+  var pressed: Bool = false
+  if Gpu2d.touchCount() > 0 {
+    pressed = Gpu2d.touchPressed(index: 0)
+  }
+  log("{step}: {Gpu2d.touchCount()} fingers, first pressed {pressed}")
+}
+
+func main() {
+  Gpu2d.initWindow(width: 320, height: 200, title: "touch")
+  Gpu2dSimulatedInput.simulateTouch(
+    kind: Gpu2dSimulatedInput.simulatedTouchDown
+    id: 7
+    x: 0.5
+    y: 0.5
+  )
+  let closed0: Bool = Gpu2d.pollClose()
+  report(step: "down")
+  Gpu2dSimulatedInput.simulateTouch(
+    kind: Gpu2dSimulatedInput.simulatedTouchMotion
+    id: 7
+    x: 0.6
+    y: 0.5
+  )
+  let closed1: Bool = Gpu2d.pollClose()
+  report(step: "held")
+  Gpu2dSimulatedInput.simulateTouch(
+    kind: Gpu2dSimulatedInput.simulatedTouchCancel
+    id: 7
+    x: 0.6
+    y: 0.5
+  )
+  let closed2: Bool = Gpu2d.pollClose()
+  report(step: "cancelled")
+  Gpu2dSimulatedInput.simulateTouch(
+    kind: Gpu2dSimulatedInput.simulatedTouchDown
+    id: 8
+    x: 0.2
+    y: 0.8
+  )
+  Gpu2dSimulatedInput.simulateTouch(
+    kind: Gpu2dSimulatedInput.simulatedTouchDown
+    id: 9
+    x: 0.8
+    y: 0.8
+  )
+  let closed3: Bool = Gpu2d.pollClose()
+  report(step: "two down")
+  Gpu2dSimulatedInput.simulateEnterBackground()
+  let closed4: Bool = Gpu2d.pollClose()
+  report(step: "to the background")
+  loop var i: Int = 0, i < 12, ++i {
+    Gpu2dSimulatedInput.simulateTouch(
+      kind: Gpu2dSimulatedInput.simulatedTouchDown
+      id: 20 + i
+      x: 0.5
+      y: 0.5
+    )
+    Gpu2dSimulatedInput.simulateTouch(
+      kind: Gpu2dSimulatedInput.simulatedTouchCancel
+      id: 20 + i
+      x: 0.5
+      y: 0.5
+    )
+    let closed: Bool = Gpu2d.pollClose()
+  }
+  report(step: "twelve cancelled")
+  Gpu2dSimulatedInput.simulateTouch(
+    kind: Gpu2dSimulatedInput.simulatedTouchDown
+    id: 40
+    x: 0.5
+    y: 0.5
+  )
+  let closed5: Bool = Gpu2d.pollClose()
+  report(step: "a new finger")
+  Gpu2dSimulatedInput.simulateTouch(
+    kind: Gpu2dSimulatedInput.simulatedTouchUp
+    id: 40
+    x: 0.5
+    y: 0.5
+  )
+  let closed6: Bool = Gpu2d.pollClose()
+  report(step: "lifted")
+  Gpu2d.closeWindow()
+}

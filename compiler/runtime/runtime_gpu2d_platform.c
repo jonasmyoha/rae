@@ -482,7 +482,14 @@ rae_Bool rae_ext_Gpu2d_pollClose(void) {
                     }
                 }
                 break;
+            /* A finger leaves the list however its touch ends: lifted, or
+             * cancelled by the OS (iOS cancels every touch in progress when
+             * the app goes to the background, or a call or the system's
+             * gesture takes it). A cancelled finger that stayed was held by
+             * a stick or a camera for good, and took one of the list's
+             * places. */
             case SDL_EVENT_FINGER_UP:
+            case SDL_EVENT_FINGER_CANCELED:
                 for (int ti = 0; ti < g_g2d_touch_n; ti++) {
                     if (g_g2d_touch[ti].id == e.tfinger.fingerID) {
                         g_g2d_touch[ti] = g_g2d_touch[g_g2d_touch_n - 1];
@@ -519,7 +526,15 @@ rae_Bool rae_ext_Gpu2d_pollClose(void) {
             case SDL_EVENT_MOUSE_WHEEL:
                 g_g2d_wheel += e.wheel.y;
                 break;
+            /* Going to the background (and losing focus), no touch carries
+             * on: drop every finger, whether or not the OS sent its cancel
+             * before the app was suspended. */
+            case SDL_EVENT_WILL_ENTER_BACKGROUND:
+            case SDL_EVENT_DID_ENTER_BACKGROUND:
+                g_g2d_touch_n = 0;
+                break;
             case SDL_EVENT_WINDOW_FOCUS_LOST:
+                g_g2d_touch_n = 0;
                 memset(g_sdl_keydown, 0, sizeof(g_sdl_keydown));
                 memset(g_sdl_mouse, 0, sizeof(g_sdl_mouse));
                 memset(g_sdl_mouse_pressed, 0, sizeof(g_sdl_mouse_pressed));
@@ -616,6 +631,31 @@ void rae_ext_EventLoop_wake(void){
     SDL_Event ev;
     SDL_zero(ev);
     ev.type = SDL_EVENT_USER;
+    SDL_PushEvent(&ev);
+}
+
+/* Simulated touches (lib/Gpu2dSimulatedInput.rae):
+ * push the SDL events a touch screen and a phone's app lifecycle send, so a
+ * headless test goes through the same event loop as a real finger. */
+void rae_ext_Gpu2d_simulateTouch(int64_t kind, int64_t id, float x, float y){
+    SDL_Event ev;
+    SDL_zero(ev);
+    if (kind == 0) ev.type = SDL_EVENT_FINGER_DOWN;
+    else if (kind == 1) ev.type = SDL_EVENT_FINGER_MOTION;
+    else if (kind == 2) ev.type = SDL_EVENT_FINGER_UP;
+    else ev.type = SDL_EVENT_FINGER_CANCELED;
+    ev.tfinger.touchID = 1;
+    ev.tfinger.fingerID = (SDL_FingerID)id;
+    ev.tfinger.x = x;
+    ev.tfinger.y = y;
+    ev.tfinger.pressure = 1.0f;
+    SDL_PushEvent(&ev);
+}
+
+void rae_ext_Gpu2d_simulateEnterBackground(void){
+    SDL_Event ev;
+    SDL_zero(ev);
+    ev.type = SDL_EVENT_DID_ENTER_BACKGROUND;
     SDL_PushEvent(&ev);
 }
 
