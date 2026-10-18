@@ -53,7 +53,7 @@ open webgpu/Webgpu
 open webgpu/WebgpuEnums
 open webgpu/Context
 
-const waterUniformFloats: Int = 80  # twenty vec4 (see waterSurface.wgsl `Water`)
+const waterUniformFloats: Int = 92  # twenty-three vec4 (see waterSurface.wgsl `Water`)
 
 # SSR march tuning (#854): a hit counts when the ray is behind the scene by
 # less than this many metres (grown with distance in the shader), and rays
@@ -458,9 +458,10 @@ func uploadWaterUniform(
   light: view Light3d
   sky: view Sky
   hasSky: view Bool
-  litWidth: copy Int
-  litHeight: copy Int
+  targets: view DeferredTargets
 ) {
+  let litWidth: Int = targets.width
+  let litHeight: Int = targets.height
   unsafe {
     var sunDir: Vec3 = light.sunDir
     var sunColor: Vec3 = light.sunColor
@@ -651,6 +652,36 @@ func uploadWaterUniform(
       z: fftBody.fftSize.toFloat()
       w: cascadeBandBins
     )
+    # Where a camera-centred body exists, and the renderer's height mist
+    # (RendererMist), so the water fades into the sky with the ground round it
+    put4(
+      uniform: waterSystem.uniform
+      base: 80
+      x: body.boundsMinX
+      y: body.boundsMinY
+      z: body.boundsMaxX
+      w: body.boundsMaxY
+    )
+    var mistFlag: Float = 0.0
+    if targets.mistOn {
+      mistFlag = 1.0
+    }
+    put4(
+      uniform: waterSystem.uniform
+      base: 84
+      x: targets.mistDensity
+      y: targets.mistFalloff
+      z: targets.mistBaseHeight
+      w: mistFlag
+    )
+    put4(
+      uniform: waterSystem.uniform
+      base: 88
+      x: targets.mistTint.x
+      y: targets.mistTint.y
+      z: targets.mistTint.z
+      w: targets.mistPaleness
+    )
     uploadFloats(
       resources: resources
       buffer: waterSystem.surface.uniform
@@ -700,8 +731,7 @@ func drawWaterBody(
   light: view Light3d
   sky: view Sky
   hasSky: view Bool
-  litWidth: copy Int
-  litHeight: copy Int
+  targets: view DeferredTargets
 ) {
   uploadWaterUniform(
     waterSystem: waterSystem
@@ -711,8 +741,7 @@ func drawWaterBody(
     light: light
     sky: sky
     hasSky: hasSky
-    litWidth: litWidth
-    litHeight: litHeight
+    targets: targets
   )
   var mesh: Int = waterSystem.mesh.id
   if body.meshId > 0 {
@@ -844,8 +873,7 @@ func waterDraw(
         light: light
         sky: sky
         hasSky: hasSky
-        litWidth: passes.targets.width
-        litHeight: passes.targets.height
+        targets: passes.targets
       )
     }
     i = i + 1
