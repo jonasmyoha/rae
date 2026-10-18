@@ -9468,7 +9468,7 @@ bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
     }
     SymbolTable symbols = {0};
     s_lifecycle_symbols = &symbols;
- size_t processed_count = 0; PointerSet* processed = pointer_set_create();  /* at most 8192, as the array it replaced */
+ size_t processed_count = 0; PointerSet* processed = pointer_set_create();  /* grows: no cap (one of 8192, left from the array it replaced, made a program past 8192 declarations re-check the rest forever) */
     AstDecl* d = module->decls;
     while (d) {
         Str name = {0}; TypeInfo* t = NULL;
@@ -9553,7 +9553,7 @@ bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
                                (d->kind == AST_DECL_TYPE && d->as.type_decl.generic_params && !d->as.type_decl.specialization_args);
             
             if (!is_template) {
-                if (processed_count < 8192) { pointer_set_add(processed, d); processed_count++; }
+                pointer_set_add(processed, d); processed_count++;
                 found_new = true;
                 progress_work(0.0, 1.0, processed_count, decl_total);
                 
@@ -9569,7 +9569,7 @@ bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
                 // Templates are marked as processed but not analyzed — except for
                 // the #877 by-name unsafe-obligation scan of their bodies.
                 sema_scan_unsafe_template(module, d);
-                if (processed_count < 8192) { pointer_set_add(processed, d); processed_count++; }
+                pointer_set_add(processed, d); processed_count++;
             }
             d = d->next;
         }
