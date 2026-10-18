@@ -1,0 +1,46 @@
+# Gpu2dSimulatedInput — input a headless test can make happen. The calls
+# push the very SDL events a touch screen and a phone's app lifecycle send, so
+# the next Gpu2d.pollClose handles them like real ones (the touch list, the
+# pointer kind) and a test exercises the same event loop as a device.
+# Simulated touches for headless tests: push the same SDL finger event a
+# touch screen sends (`kind` one of the simulatedTouch* below; x, y 0..1 of
+# the window), handled by the next pollClose like a real one.
+const simulatedTouchDown: Int = 0
+
+const simulatedTouchMotion: Int = 1
+
+const simulatedTouchUp: Int = 2
+
+const simulatedTouchCancel: Int = 3
+
+func nativeSimulateTouch(
+  kind: Int
+  id: Int
+  x: Float
+  y: Float
+) unsafe extern("rae_ext_Gpu2d_simulateTouch")
+
+func simulateTouch(
+  kind: copy Int
+  id: copy Int
+  x: copy Float
+  y: copy Float
+) {
+  unsafe {
+    nativeSimulateTouch(
+      kind: kind
+      id: id
+      x: x
+      y: y
+    )
+  }
+}
+
+# ...and the event a phone's app gets as it goes to the background
+func nativeSimulateEnterBackground() unsafe extern("rae_ext_Gpu2d_simulateEnterBackground")
+
+func simulateEnterBackground() {
+  unsafe {
+    nativeSimulateEnterBackground()
+  }
+}
