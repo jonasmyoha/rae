@@ -197,6 +197,43 @@ func grassSetSurfaceField(grass: mod GrassCompute, values: own List(Float)) {
   resetGrassPipeline(grass: grass)
 }
 
+# Rewrite part of the surface field in place — `values` from index `offset`
+# on — for a field that fills in as the app learns more of its ground (a
+# streamed world's tiles, as they load). The field keeps its length; values
+# past its end are dropped. Once the GPU buffer exists only that range is
+# written to it, with no pipeline rebuild; before, the first upload takes
+# the whole field anyway.
+func grassUpdateSurfaceField(
+  grass: mod GrassCompute
+  resources: mod GpuResources
+  offset: view Int
+  values: view List(Float)
+) {
+  var count: Int = values.length
+  if count > grass.surfaceField.length - offset {
+    count = grass.surfaceField.length - offset
+  }
+  if offset < 0 or count <= 0 {
+    ret
+  }
+  loop var i: Int = 0, i < count, ++i {
+    grass.surfaceField.set(index: offset + i, value: values.copyAtDefault(index: i))
+  }
+  if not isValidBuffer(resources: resources, id: grass.surfaceFieldBuffer) {
+    ret
+  }
+  var writer: ArgWriter = createArgs(uniform: false)
+  loop var i: Int = 0, i < count, ++i {
+    pushF32(writer: writer, value: values.copyAtDefault(index: i))
+  }
+  let uploaded: Bool = uploadArgs(
+    writer: writer
+    resources: resources
+    buffer: grass.surfaceFieldBuffer
+    offset: offset * 4
+  )
+}
+
 # The compute pipeline from the app's shader when one was set, else the lib's.
 func grassComputePipeline(
   grass: view GrassCompute
