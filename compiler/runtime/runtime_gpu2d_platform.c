@@ -68,6 +68,9 @@ static int    g_g2d_pointer_kind = 0;
  * runs one frame of it. A frame run from here pumps no events: its
  * waitEvents and pollClose return at once. */
 static void rae_g2d_configure(int pw, int ph);
+/* macOS: the surface's own CAMetalLayer inside SDL's view layer
+ * (rae_presentation_layer), NULL when it presents into SDL's layer */
+static void* g_g2d_presentation_layer = NULL;
 static int g_g2d_at_frame_boundary = 0;
 static int g_g2d_live_frame_depth = 0;
 static bool SDLCALL rae_g2d_live_resize_watch(void* userdata, SDL_Event* e) {
@@ -149,6 +152,13 @@ static void rae_g2d_configure(int pw, int ph) {
     cfg.alphaMode = WGPUCompositeAlphaMode_Auto;
     wgpuSurfaceConfigure(g_g2d_surface, &cfg);
     g_sdl_w = pw; g_sdl_h = ph;
+#if defined(__APPLE__) && TARGET_OS_OSX
+    if (g_g2d_presentation_layer && g_sdl_win) {
+        int pointsW = 0, pointsH = 0;
+        SDL_GetWindowSize(g_sdl_win, &pointsW, &pointsH);
+        rae_presentation_layer_fit(g_g2d_presentation_layer, pointsW, pointsH);
+    }
+#endif
 }
 
 /* The configured surface, for the canvas that owns the presentable target:
@@ -248,6 +258,16 @@ void rae_ext_Gpu2d_initWindow(int64_t width, int64_t height, rae_String title) {
     g_g2d_metal_view = SDL_Metal_CreateView(g_sdl_win);
     if (!g_g2d_metal_view) { fprintf(stderr, "[gpu2d] metal view failed: %s\n", SDL_GetError()); return; }
     void* layer = SDL_Metal_GetLayer(g_g2d_metal_view);
+#if defined(__APPLE__) && TARGET_OS_OSX
+    /* The surface's own layer, so wgpu's stale occlusion check never blacks
+     * the window out (rae_presentation_layer, runtime_platform_apple.c) */
+    {
+        int pointsW = (int)width, pointsH = (int)height;
+        SDL_GetWindowSize(g_sdl_win, &pointsW, &pointsH);
+        layer = rae_presentation_layer(layer, pointsW, pointsH);
+        g_g2d_presentation_layer = (layer != SDL_Metal_GetLayer(g_g2d_metal_view)) ? layer : NULL;
+    }
+#endif
 #endif
 
     if (!rae_wgpu_init()) { fprintf(stderr, "[gpu2d] wgpu init failed\n"); return; }
