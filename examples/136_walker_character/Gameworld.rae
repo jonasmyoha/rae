@@ -86,10 +86,6 @@ type GameWorld {
   # tables (rigid bodies, colliders, characters, cubes) are the PhysicsSystem's
   # own; their poses are in `transforms` here.
   netPlayers: ComponentTable(NetPlayer)
-  # Visual burst clock and optional shore capture, owned by this world.
-  splashFeet: ComponentTable(SplashFeet)
-  splashElapsed: Float
-  splashPreview: SplashPreview
 }
 
 func createGameWorld() ret GameWorld {
@@ -109,8 +105,6 @@ func createGameWorld() ret GameWorld {
     childrens: ComponentTable.create(Children)
     hierarchyOrder: createHierarchyOrder()
     netPlayers: ComponentTable.create(NetPlayer)
-    splashFeet: ComponentTable.create(SplashFeet)
-    splashElapsed: 0.0
   }
 }
 

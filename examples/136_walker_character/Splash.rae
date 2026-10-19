@@ -1,99 +1,105 @@
-# Water spray driven by each rendered foot pose and its water contact.
-# Only the isolated material preview uses a timer.
+# The walker's wading splashes are lib/water/WadeSplash; this file is only
+# what is this app's: the material preview's switches and camera, and the pose
+# check's loop over this app's skeleton and walk clip.
+#
+#   RAE_WALKER_SPLASH_PREVIEW=1      bursts at a shallow shore, camera on it
+#   RAE_WALKER_SPLASH_AGE=0.12       ...one burst frozen at that age
+#   RAE_WALKER_SPLASH_TEST=1         the pose check: one [splash-pose] line
+import Sys
 import Vec3
-import Math
 open WorldBiome
-open Particles
-open WaterParticles
-open water/WaterContact
-open water/WaterSystem
-open ecs/Entity
-open ecs/ComponentTable
-open app3d/CharacterController
+open app3d/CameraRig
+open water/WadeSplash
 
-const splashMinDepth: Float = 0.03  # world units of water under a unit before it splashes
-
-# A small fan: varied droplet sizes and launch speeds, no repeated cube clouds.
-func emitSplashAt(
-  particles: mod ParticleSystem
-  x: copy Float
-  y: copy Float
-  waterZ: copy Float
+# Start the material preview when RAE_WALKER_SPLASH_PREVIEW is set: bursts at
+# the first shallow shore along +x, the orbit camera close on it
+func prepareSplashPreview(
+  wadeSplash: mod WadeSplash
+  cameraSystem: mod CameraSystem
+  groundZ: view Float
 ) {
-  let event: WaterContactEvent = {
-    position: { x: x, y: y, z: waterZ }
-    velocity: { z: -2.0 }
-    strength: 1.0
-  }
-  emitFootSplash(particles: particles, event: event)
-}
-
-func emitFootSplash(particles: mod ParticleSystem, event: view WaterContactEvent) {
-  let count: Int = 3 + (event.strength * 5.0).toInt()
-  let x: Float = event.position.x
-  let y: Float = event.position.y
-  let waterZ: Float = event.position.z
-  loop var index: Int = 0, index < count, ++index {
-    let phase: Float = index.toFloat() * 2.399963 + x * 0.7 + y * 0.31
-    let variation: Float = Math.abs(value: Math.sin(x: phase * 1.7))
-    let speed: Float = (0.35 + variation) * event.strength
-    let lift: Float = (0.7 + variation * 1.2) * Math.sqrt(x: event.strength)
-    particleEmit(
-      sys: particles
-      x: x + Math.cos(x: phase) * 0.12
-      y: y + Math.sin(x: phase) * 0.12
-      z: waterZ + 0.025
-      vx: Math.cos(x: phase) * speed + event.velocity.x * 0.35
-      vy: Math.sin(x: phase) * speed + event.velocity.y * 0.35
-      vz: lift
-      life: 2.0 * lift / particles.gravity
-      size: 0.018 + variation * 0.028
-      r: 0.77
-      g: 0.91
-      b: 0.98
-    )
-  }
-}
-
-# Advance + emit splashes for everything wading this frame. Call once per frame.
-func splashStep(
-  splashes: mod ParticleSystem
-  world: mod GameWorld
-  waterSystem: view WaterSystem
-  deltaTime: copy Float
-) {
-  if world.splashPreview.enabled and world.splashPreview.age >= 0.0 {
-    splashes.list.clear()
-    emitSplashAt(
-      particles: splashes
-      x: world.splashPreview.origin.x
-      y: world.splashPreview.origin.y
-      waterZ: world.splashPreview.origin.z
-    )
-    waterParticleUpdate(particles: splashes, deltaTime: world.splashPreview.age)
+  if Sys.getEnv(name: "RAE_WALKER_SPLASH_PREVIEW").length() is 0 {
     ret
   }
-  waterParticleUpdate(particles: splashes, deltaTime: deltaTime)
-  if world.splashPreview.enabled {
-    world.splashElapsed = world.splashElapsed + deltaTime
-    if world.splashElapsed < 0.12 {
-      ret
+  if let shore: Vec3 = findShallowShore(biome: defaultBiomeConfig(), groundZ: groundZ) {
+    var age: Float = -1.0
+    let ageSetting: String = Sys.getEnv(name: "RAE_WALKER_SPLASH_AGE")
+    if ageSetting.length() > 0 {
+      age = ageSetting.toFloat()
     }
-    # At most one burst after a stall: never catch up with a huge emission spike.
-    world.splashElapsed = world.splashElapsed - Math.floor(x: world.splashElapsed / 0.12) * 0.12
-
-    emitSplashAt(
-      particles: splashes
-      x: world.splashPreview.origin.x
-      y: world.splashPreview.origin.y
-      waterZ: world.splashPreview.origin.z
-    )
+    startWadeSplashPreview(wadeSplash: wadeSplash, origin: shore, age: age)
+    cameraSystem.camera.target = Vec3.create(x: shore.x, y: shore.y, z: shore.z + 0.2)
+    cameraSystem.rig.mode = CameraRigMode.orbit
+    cameraSystem.rig.yaw = 0.0
+    cameraSystem.rig.orbitPitch = 0.22
+    cameraSystem.rig.distance = 2.4
+    snapCameraRigView(rig: cameraSystem.rig)
+    log("[splash-preview] shore {shore.x}, {shore.y}, {shore.z}; age {age}")
     ret
   }
-  splashFeetStep(
-    world: world
-    particles: splashes
-    waterSystem: waterSystem
-    deltaTime: deltaTime
+  log("[splash-preview] no shallow shore found")
+}
+
+# The pose check (WadeSplash.finishWadePoseCheck) on the hero walking for 3 s,
+# the water 12 cm above its feet. 0 when it passed.
+func runSplashPoseTest(
+  characterSystem: mod CharacterSystem
+  world: view GameWorld
+  wadeSplash: mod WadeSplash
+) ret Int {
+  if characterSystem.leftFootNode < 0 or characterSystem.rightFootNode < 0 {
+    ret 1
+  }
+  let heroEntityId: EntityId = characterSystem.heroEntityId
+  let origin: Vec3 = controllerOf(world: world, entityId: heroEntityId).position
+  let level: Float = origin.z + characterSystem.groundZ + 0.12
+  var check: WadePoseCheck = createWadePoseCheck()
+  loop var frame: Int = 0, frame < 180, ++frame {
+    let palette: List(Float) = poseCharacterPalette(
+      characterSystem: characterSystem
+      clipIndex: ClipKind.walk as Int
+      animTime: frame.toFloat() / 60.0
+    )
+    captureCharacterFeet(
+      characterSystem: characterSystem
+      world: world
+      wadeSplash: wadeSplash
+      entityId: heroEntityId
+    )
+    wadePoseCheckFrame(
+      check: check
+      wadeSplash: wadeSplash
+      entityId: heroEntityId
+      level: level
+    )
+  }
+  if finishWadePoseCheck(
+    check: check
+    wadeSplash: wadeSplash
+    entityId: heroEntityId
+    level: level
+  ) {
+    ret 0
+  }
+  ret 1
+}
+
+# Record the feet of `entityId` in the pose the skeleton has now
+func captureCharacterFeet(
+  characterSystem: view CharacterSystem
+  world: view GameWorld
+  wadeSplash: mod WadeSplash
+  entityId: view EntityId
+) {
+  captureWadeFeet(
+    wadeSplash: wadeSplash
+    entityId: entityId
+    model: walkerWorldModel(
+      baseModel: characterSystem.basePartModel
+      controller: controllerOf(world: world, entityId: entityId)
+    )
+    skeleton: characterSystem.skeleton
+    leftFootNode: characterSystem.leftFootNode
+    rightFootNode: characterSystem.rightFootNode
   )
 }

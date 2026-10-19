@@ -38,6 +38,7 @@ open Particles
 open water/Water
 open GbufferSprite
 open water/WaterSystem
+open water/WadeSplash
 open water/IslandSea
 open water/WaterFft
 open gpu/GpuResources
@@ -142,6 +143,9 @@ type InputSystem {
 # They're driven in place via componentMod (no copy-out/mutate/set-back), and
 # each member's render model is derived from its controller (walkerWorldModel).
 type CharacterSystem {
+  # The toe bones the wading splashes follow (lib/water/WadeSplash)
+  leftFootNode: Int
+  rightFootNode: Int
   skeleton: Skeleton
   idleClip: Clip
   walkClip: Clip
@@ -191,7 +195,7 @@ type App {
   netSystem: NetSystem  # multiplayer seam (net.rae, #554)
   players: PlayerRoster  # who the local player controls (players.rae, #546)
   persist: PersistState
-  splashes: ParticleSystem  # water-splash droplets when the character wades (splash.rae, #84)
+  wadeSplash: WadeSplash  # the spray of wading feet (lib/water/WadeSplash)
   waterSystem: WaterSystem  # the FFT sea at the biome water plane (lib/water/IslandSea)
   idIssuer: IdIssuer  # the root's shared ID issuer (#869)
   gpuResources: opt GpuResources  # the App-owned GPU manager water's IDs live in (#873)
@@ -800,7 +804,7 @@ func createApp() ret App {
 
     # #905: the renderer owns the mesh store the water grid and the particle
     # box are uploaded into, so both systems are built before it moves into App.
-    let splashes: ParticleSystem = createParticleSystem(renderer: renderer, cap: 256, gravity: 24.0)
+    let wadeSplash: WadeSplash = createWadeSplash(renderer: renderer, cap: 256)
     let waterSystem: WaterSystem = createWaterSystem(
       renderer: renderer
       body: createIslandSea(renderer: renderer, groundZ: groundZ, biome: forestBiomeConfig())
@@ -847,6 +851,8 @@ func createApp() ret App {
         walkFollow: createWalkFollow()
       }
       characterSystem: {
+        leftFootNode: wadeFootNode(skeleton: sk, name: "mixamorig:LeftToeBase")
+        rightFootNode: wadeFootNode(skeleton: sk, name: "mixamorig:RightToeBase")
         skeleton: own sk
         idleClip: idleClip
         walkClip: walkClip
@@ -882,7 +888,7 @@ func createApp() ret App {
       netSystem: { role: 0, tick: 0 }
       players: createPlayerRoster(count: 1 + cloneCount)
       persist: { windowGeometry: own windowGeometry, lastStateSave: startT, stateDirty: false }
-      splashes: own splashes
+      wadeSplash: own wadeSplash
       waterSystem: own waterSystem
       idIssuer: own idIssuer
       gpuResources: GpuResources.create(issuer: idIssuer, capacity: walkerGpuCapacity)
@@ -902,11 +908,24 @@ func runWalkerApp() ret Int {
       world: app.world
     )} parts + hero + crowd + terrain + grass)"
   )
+  prepareSplashPreview(
+    wadeSplash: app.wadeSplash
+    cameraSystem: app.cameraSystem
+    groundZ: app.characterSystem.groundZ
+  )
   Profile.maybeAutoStart(profiler: app.profiler)
   # RAE_114_PHYSICS_TEST=1: drive the hero into a cube stack and jump, report,
   # and quit (PhysicsSelfTest), instead of the window loop
   let physicsTest: Bool = Sys.getEnv(name: "RAE_114_PHYSICS_TEST").length() > 0
+  let splashTest: Bool = Sys.getEnv(name: "RAE_WALKER_SPLASH_TEST").length() > 0
   var exitCode: Int = 0
+  if splashTest {
+    exitCode = runSplashPoseTest(
+      characterSystem: app.characterSystem
+      world: app.world
+      wadeSplash: app.wadeSplash
+    )
+  }
   if physicsTest {
     exitCode = runPhysicsSelfTest(
       physicsSystem: app.physicsSystem
@@ -916,7 +935,7 @@ func runWalkerApp() ret Int {
       groundZ: app.characterSystem.groundZ
     )
   }
-  loop not physicsTest and not Gpu2d.pollClose() {
+  loop not physicsTest and not splashTest and not Gpu2d.pollClose() {
     frameBegin(app: app)
     updateApp(app: app)
     if Gpu2d.shouldRenderFrame(appNeedsRender: app.frame.needsRender) is false {
@@ -941,7 +960,7 @@ func runWalkerApp() ret Int {
           world: app.world
           physicsSystem: app.physicsSystem
           terrainSystem: app.terrainSystem
-          splashes: app.splashes
+          wadeSplash: app.wadeSplash
           waterSystem: app.waterSystem
           resources: resources
           profiler: app.profiler

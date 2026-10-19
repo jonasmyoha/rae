@@ -1,114 +1,105 @@
-# splash.rae — water splashes when the character wades through the shallows (#84).
+# The walker's wading splashes are lib/water/WadeSplash; this file is only
+# what is this app's: the material preview's switches and camera, and the pose
+# check's loop over this app's skeleton and walk clip.
 #
-# The walker example can now walk into shallow water (character.rae's terrainWadable
-# gate); this adds the visual feedback. Each frame it advances the splash pool, then
-# for the hero plus every moving crowd member that is standing in water
-# (terrainWaterDepth > 0) throws a small burst of pale droplets up from its feet.
-#
-# Purely visual: run in the RENDER path (render.rae), NOT the fixed sim, so it never
-# touches persisted/hot-reload state. Crowd emissions are STRIDED (a member splashes
-# every few frames) so the whole crowd wading does not swamp the pool; the pool caps
-# and drops the oldest, so it is bounded regardless. Siblings merge into one module,
-# so App / terrainWaterDepth resolve cross-file.
+#   RAE_WALKER_SPLASH_PREVIEW=1      bursts at a shallow shore, camera on it
+#   RAE_WALKER_SPLASH_AGE=0.12       ...one burst frozen at that age
+#   RAE_WALKER_SPLASH_TEST=1         the pose check: one [splash-pose] line
+import Sys
 import Vec3
 open WorldBiome
-open Particles
-open ecs/Entity
-open ecs/ComponentTable
-open app3d/CharacterController
+open app3d/CameraRig
+open water/WadeSplash
 
-const splashMinDepth: Float = 0.03  # world units of water under a unit before it splashes
-
-const splashPerBurst: Int = 3  # droplets per splash
-
-const splashCrowdStride: Int = 3  # a crowd member splashes every Nth frame it wades
-
-# Pale blue-white water droplet colour (splash spray).
-func colorR() ret Float {
-  ret 0.82
-}
-
-func colorG() ret Float {
-  ret 0.90
-}
-
-func colorB() ret Float {
-  ret 0.99
-}
-
-# One splash burst at the WATER SURFACE under a unit. `waterZ` is the flat water
-# plane in WORLD space (worldWaterZ) — NOT the controller's ground-relative z,
-# which stands ~1 unit high and would spray droplets from the chest. Droplets rise
-# UP from just above the surface so they read.
-func emitSplashAt(
-  sys: mod ParticleSystem
-  x: copy Float
-  y: copy Float
-  waterZ: copy Float
+# Start the material preview when RAE_WALKER_SPLASH_PREVIEW is set: bursts at
+# the first shallow shore along +x, the orbit camera close on it
+func prepareSplashPreview(
+  wadeSplash: mod WadeSplash
+  cameraSystem: mod CameraSystem
+  groundZ: view Float
 ) {
-  particleBurst(
-    sys: sys
-    x: x
-    y: y
-    z: waterZ + 0.05
-    count: splashPerBurst
-    hVel: 1.7
-    upVel: 3.6
-    life: 0.5
-    size: 0.22
-    r: colorR()
-    g: colorG()
-    b: colorB()
-    phase: x * 0.7 + y * 0.31
-  )
+  if Sys.getEnv(name: "RAE_WALKER_SPLASH_PREVIEW").length() is 0 {
+    ret
+  }
+  if let shore: Vec3 = findShallowShore(biome: forestBiomeConfig(), groundZ: groundZ) {
+    var age: Float = -1.0
+    let ageSetting: String = Sys.getEnv(name: "RAE_WALKER_SPLASH_AGE")
+    if ageSetting.length() > 0 {
+      age = ageSetting.toFloat()
+    }
+    startWadeSplashPreview(wadeSplash: wadeSplash, origin: shore, age: age)
+    cameraSystem.camera.target = Vec3.create(x: shore.x, y: shore.y, z: shore.z + 0.2)
+    cameraSystem.rig.mode = CameraRigMode.orbit
+    cameraSystem.rig.yaw = 0.0
+    cameraSystem.rig.orbitPitch = 0.22
+    cameraSystem.rig.distance = 2.4
+    snapCameraRigView(rig: cameraSystem.rig)
+    log("[splash-preview] shore {shore.x}, {shore.y}, {shore.z}; age {age}")
+    ret
+  }
+  log("[splash-preview] no shallow shore found")
 }
 
-# Advance + emit splashes for everything wading this frame. Call once per frame.
-func splashStep(
+# The pose check (WadeSplash.finishWadePoseCheck) on the hero walking for 3 s,
+# the water 12 cm above its feet. 0 when it passed.
+func runSplashPoseTest(
   characterSystem: mod CharacterSystem
-  splashes: mod ParticleSystem
-  world: mod GameWorld
-  deltaTime: copy Float
+  world: view GameWorld
+  wadeSplash: mod WadeSplash
+) ret Int {
+  if characterSystem.leftFootNode < 0 or characterSystem.rightFootNode < 0 {
+    ret 1
+  }
+  let heroEntityId: EntityId = characterSystem.heroEntityId
+  let origin: Vec3 = controllerOf(world: world, entityId: heroEntityId).position
+  let level: Float = origin.z + characterSystem.groundZ + 0.12
+  var check: WadePoseCheck = createWadePoseCheck()
+  loop var frame: Int = 0, frame < 180, ++frame {
+    let palette: List(Float) = poseCharacterPalette(
+      characterSystem: characterSystem
+      clipIndex: ClipKind.walk as Int
+      animTime: frame.toFloat() / 60.0
+    )
+    captureCharacterFeet(
+      characterSystem: characterSystem
+      world: world
+      wadeSplash: wadeSplash
+      entityId: heroEntityId
+    )
+    wadePoseCheckFrame(
+      check: check
+      wadeSplash: wadeSplash
+      entityId: heroEntityId
+      level: level
+    )
+  }
+  if finishWadePoseCheck(
+    check: check
+    wadeSplash: wadeSplash
+    entityId: heroEntityId
+    level: level
+  ) {
+    ret 0
+  }
+  ret 1
+}
+
+# Record the feet of `entityId` in the pose the skeleton has now
+func captureCharacterFeet(
+  characterSystem: view CharacterSystem
+  world: view GameWorld
+  wadeSplash: mod WadeSplash
+  entityId: view EntityId
 ) {
-  particleUpdate(sys: splashes, deltaTime: deltaTime)
-  world.splashTick = world.splashTick + 1
-  # The flat water plane in WORLD space — every splash sprays up from HERE, not
-  # from the unit's (ground-relative, chest-high) position z.
-  let waterZ: Float = worldWaterZ(groundZ: characterSystem.groundZ, cfg: forestBiomeConfig())
-  # The hero (always evaluated — the character the player is watching).
-  let heroCtrl: view ThirdPersonController => controllerOf(
-    world: world
-    entityId: characterSystem.heroEntityId
+  captureWadeFeet(
+    wadeSplash: wadeSplash
+    entityId: entityId
+    model: walkerWorldModel(
+      baseModel: characterSystem.basePartModel
+      controller: controllerOf(world: world, entityId: entityId)
+    )
+    skeleton: characterSystem.skeleton
+    leftFootNode: characterSystem.leftFootNode
+    rightFootNode: characterSystem.rightFootNode
   )
-  if heroCtrl.moving {
-    let heroDepth: Float = terrainWaterDepth(x: heroCtrl.position.x, y: heroCtrl.position.y)
-    if heroDepth > splashMinDepth {
-      emitSplashAt(
-        sys: splashes
-        x: heroCtrl.position.x
-        y: heroCtrl.position.y
-        waterZ: waterZ
-      )
-    }
-  }
-  # Every moving crowd member in water, strided so the pool is not swamped.
-  loop var i: Int = 0, i < characterSystem.crowdEntities.length, ++i {
-    if let member: EntityId = characterSystem.crowdEntities.copyAt(index: i) {
-      let ctrl: view ThirdPersonController => componentView(
-        this: world.controllers
-        entityId: member
-      )
-      if ctrl.moving and (world.splashTick + i) % splashCrowdStride is 0 {
-        let depth: Float = terrainWaterDepth(x: ctrl.position.x, y: ctrl.position.y)
-        if depth > splashMinDepth {
-          emitSplashAt(
-            sys: splashes
-            x: ctrl.position.x
-            y: ctrl.position.y
-            waterZ: waterZ
-          )
-        }
-      }
-    }
-  }
 }
