@@ -1,0 +1,111 @@
+# Rounded, velocity-stretched droplets over the bounded CPU particle pool.
+# One two-triangle mesh, one instanced draw, no textures or per-frame GPU objects.
+# The renderer owns the mesh. Other ParticleSystem clients retain their box mesh.
+import Vec3
+import Math
+import RendererDeferred
+open Scene3d
+open Mesh3d
+open TransparentForward
+open Particles
+open Math3d
+
+func createWaterParticles(renderer: mod DeferredRenderer, cap: copy Int) ret ParticleSystem {
+  let plane: MeshData = makePlane(size: 1.0, segments: 1)
+  let mesh: MeshHandle = RendererDeferred.uploadMesh(
+    renderer: renderer
+    verts: plane.verts
+    vertCount: plane.vertCount
+    indices: plane.indices
+  )
+  ret ParticleSystem { list: List.create(Particle, cap: cap), mesh: mesh, gravity: 9.8, cap: cap }
+}
+
+# The quad faces the camera. Its long axis follows velocity projected into the
+# view plane; at the arc's apex it becomes round. Stretch is bounded to 2.2x.
+func waterParticleModel(particle: view Particle, camera: view Camera3d) ret Mat4 {
+  var forward: Vec3 = Vec3.vsub(a: camera.target, b: camera.position)
+  if Vec3.vlenSq(a: forward) < 0.000001 {
+    forward = Vec3.create(x: 0.0, y: 1.0, z: 0.0)
+  }
+  forward = Vec3.vnorm(a: forward)
+  var referenceUp: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
+  if Math.abs(value: forward.z) > 0.99 {
+    referenceUp = Vec3.create(x: 0.0, y: 1.0, z: 0.0)
+  }
+  let right: Vec3 = Vec3.vnorm(a: Vec3.vcross(a: forward, b: referenceUp))
+  let up: Vec3 = Vec3.vcross(a: right, b: forward)
+  let velocity: Vec3 = { x: particle.vx, y: particle.vy, z: particle.vz }
+  let horizontal: Float = Vec3.vdot(a: velocity, b: right)
+  let vertical: Float = Vec3.vdot(a: velocity, b: up)
+  let speed: Float = Math.sqrt(x: horizontal * horizontal + vertical * vertical)
+  var along: Vec3 = up
+  if speed > 0.001 {
+    along = Vec3.vadd(
+      a: Vec3.vscale(a: right, s: horizontal / speed)
+      b: Vec3.vscale(a: up, s: vertical / speed)
+    )
+  }
+  let across: Vec3 = Vec3.vcross(a: forward, b: along)
+  let width: Vec3 = Vec3.vscale(a: across, s: particle.size)
+  let stretch: Float = 1.0 + Math.min(a: speed * 0.5, b: 1.2)
+  let height: Vec3 = Vec3.vscale(a: along, s: particle.size * stretch)
+  var model: Mat4 = mat4Identity()
+  model.m.set(index: 0, value: width.x)
+  model.m.set(index: 1, value: width.y)
+  model.m.set(index: 2, value: width.z)
+  model.m.set(index: 4, value: height.x)
+  model.m.set(index: 5, value: height.y)
+  model.m.set(index: 6, value: height.z)
+  model.m.set(index: 12, value: particle.x)
+  model.m.set(index: 13, value: particle.y)
+  model.m.set(index: 14, value: particle.z)
+  ret model
+}
+
+func waterParticleDraw(
+  particles: view ParticleSystem
+  transparent: mod TransparentPassCache
+  camera: view Camera3d
+) {
+  loop let particle: view Particle in particles.list {
+    let age: Float = particle.maxLife - particle.life
+    let fadeIn: Float = Math.min(a: age / 0.025, b: 1.0)
+    let fadeOut: Float = Math.min(a: particle.life / 0.16, b: 1.0)
+    addTransparentMaterialInstance(
+      cache: transparent
+      mesh: particles.mesh
+      model: waterParticleModel(particle: particle, camera: camera)
+      r: particle.r
+      g: particle.g
+      b: particle.b
+      alpha: fadeIn * fadeOut
+      style: 1.0
+    )
+  }
+}
+
+# Exact constant-gravity integration makes a burst's arc independent of frame
+# rate. Compact in place; no fresh List allocation for each rendered frame.
+func waterParticleUpdate(particles: mod ParticleSystem, deltaTime: copy Float) {
+  if deltaTime <= 0.0 {
+    ret
+  }
+  var liveCount: Int = 0
+  loop var index: Int = 0, index < particles.list.length, ++index {
+    if var particle: Particle = particles.list.copyAt(index: index) {
+      particle.life = particle.life - deltaTime
+      if particle.life > 0.0 {
+        particle.x = particle.x + particle.vx * deltaTime
+        particle.y = particle.y + particle.vy * deltaTime
+        particle.z = particle.z + particle.vz * deltaTime - 0.5 * particles.gravity * deltaTime * deltaTime
+        particle.vz = particle.vz - particles.gravity * deltaTime
+        particles.list.set(index: liveCount, value: particle)
+        liveCount = liveCount + 1
+      }
+    }
+  }
+  loop particles.list.length > liveCount {
+    particles.list.removeLast()
+  }
+}

@@ -87,12 +87,35 @@ func addTransparentInstance(
   g: copy Float
   b: copy Float
   alpha: copy Float
-) pub {
+) {
+  addTransparentMaterialInstance(
+    cache: cache
+    mesh: mesh
+    model: modelMatrixOf(t: transform)
+    r: r
+    g: g
+    b: b
+    alpha: alpha
+    style: 0.0
+  )
+}
+
+# style 0 preserves unlit geometry; style 1 is the rounded water-drop impostor.
+# Both use the same single-mesh batch. Do not mix meshes within a frame.
+func addTransparentMaterialInstance(
+  cache: mod TransparentPassCache
+  mesh: view MeshHandle
+  model: view Mat4
+  r: copy Float
+  g: copy Float
+  b: copy Float
+  alpha: copy Float
+  style: copy Float
+) {
   cache.batch.meshId = mesh.id
   if cache.batch.count >= cache.batch.capacity {
     ret
   }
-  let model: Mat4 = modelMatrixOf(t: transform)
   packInstanceRecord(
     records: cache.batch.records
     slot: cache.batch.count
@@ -102,7 +125,7 @@ func addTransparentInstance(
     g: g
     b: b
     metallic: alpha
-    roughness: 0.0
+    roughness: style
     emissive: 0.0
     toon: 0
     paletteBase: 0
