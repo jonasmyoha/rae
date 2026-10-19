@@ -49,9 +49,9 @@ guarded against stays guarded: the present never acquires while SDL reports
 the window hidden, minimized or occluded. Measured: the first frame now
 presents on frame 1 instead of waiting for the flag; window captures show the
 frame, also after the window is created at one size and resized to the saved
-one. `RAE_WGPU_OCCLUSION_CHECK=1` restores the old path for comparison. Drop
-the sublayer once a wgpu-native release contains PR #10302 and the black start
-no longer reproduces without it.
+one. Drop the sublayer once a wgpu-native release contains PR #10302 and the
+black start no longer reproduces without it (the previous path is in git
+history, commit 6e30421b's parent).
 
 ## Verification
 
