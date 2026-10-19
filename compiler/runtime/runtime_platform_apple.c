@@ -119,10 +119,7 @@ int64_t rae_ext_thermalState(void) {
  * nextDrawable while the window is really covered): the present already
  * refuses to acquire while SDL reports the window hidden, minimized or
  * occluded (rae_g2d_window_visible), and SDL's flag follows AppKit's
- * occlusion NOTIFICATIONS, so it never starts out wrong.
- *
- * RAE_WGPU_OCCLUSION_CHECK=1 keeps the old path (wgpu presents into SDL's
- * layer and checks occlusionState itself), to compare. */
+ * occlusion NOTIFICATIONS, so it never starts out wrong. */
 #include <TargetConditionals.h>
 #if TARGET_OS_OSX
 typedef struct { double x, y, width, height; } RaeLayerRect;
@@ -166,11 +163,9 @@ void rae_presentation_layer_fit(void* layer, int width, int height) {
 }
 
 /* The layer the surface presents into: a new CAMetalLayer filling
- * `sdlLayer` (SDL's view layer), its delegate the windowless one above; or
- * `sdlLayer` itself under RAE_WGPU_OCCLUSION_CHECK=1 */
+ * `sdlLayer` (SDL's view layer), its delegate the windowless one above */
 void* rae_presentation_layer(void* sdlLayer, int width, int height) {
-  const char* keep = getenv("RAE_WGPU_OCCLUSION_CHECK");
-  if (!sdlLayer || (keep && keep[0] == '1')) return sdlLayer;
+  if (!sdlLayer) return sdlLayer;
   Class metalLayer = objc_getClass("CAMetalLayer");
   if (!metalLayer) return sdlLayer;
   /* alloc/init, not +layer: there may be no autorelease pool this early */
