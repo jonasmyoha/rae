@@ -58,19 +58,7 @@ open ui/EventLoop
 open ui/DebugOverlay
 import Sdl3
 import Keys
-
-# A frame's movement intent. moveX/moveY are analog in [-1, 1] (right+/forward+);
-# walking = the shift-to-walk modifier the controller expects (default is run);
-# jump = Space or F went down this frame (a press, not held: one jump per
-# press); actions is a reserved bitset for discrete button intents (unused
-# today).
-type InputIntent {
-  moveX: Float
-  moveY: Float
-  walking: Bool
-  jump: Bool
-  actions: Int
-}
+open app3d/WalkerPhysics
 
 # Space, or F under the WASD hand (Space alone is awkward to reach), pressed
 # this frame

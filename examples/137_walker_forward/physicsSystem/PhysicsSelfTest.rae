@@ -1,206 +1,31 @@
-# The physics check that needs no one to play (RAE_126_PHYSICS_TEST=1): on the
-# real island, the cube stacks must settle and sleep, then the hero walks into the nearest cube
-# stack until a cube moves,
-# then jumps, and must leave the ground and land again. It prints one line and
-# returns the exit code (0 when both held). It drives the same systems the
-# frame loop does (driveCharacters, walkerPhysicsTick), at the fixed step.
+# The physics check that needs no one to play (RAE_126_PHYSICS_TEST=1). The
+# steps are app3d/WalkerPhysicsChecks: the cube stacks settle, the hero pushes
+# one and jumps. This file finds this example's own entities and prints
+# the one [physicstest] line the gate greps; the exit code is 0 when all held.
 import Math
 import Vec3
 open ecs/Entity
 open ecs/ComponentTable
 open ecs/Transform
-open app3d/CharacterController
-open box3d/ecs/Physics
-
-# Fixed steps the walk may take (8 s), and the jump (3 s)
-const selfTestWalkSteps: Int = 480
-
-const selfTestJumpSteps: Int = 180
-
-# A cube counts as moved past this (m)
-const selfTestMovedDistance: Float = 0.05
-
-# One fixed step of the hero with `intent`, the camera looking along `yaw`.
-func selfTestStep(
-  physicsSystem: mod PhysicsSystem
-  world: mod GameWorld
-  heroEntityId: view EntityId
-  groundZ: view Float
-  intent: view InputIntent
-  yaw: view Float
-) {
-  driveCharacters(
-    physicsSystem: physicsSystem
-    controlledEntityId: heroEntityId
-    controller: controllerOf(world: world, entityId: heroEntityId)
-    intent: intent
-    cameraYaw: yaw
-    speedScale: 1.0
-  )
-  walkerPhysicsTick(physicsSystem: physicsSystem, world: world, groundZ: groundZ)
-}
-
-# How far the cube that moved most is from where it started.
-func largestCubeMove(
-  physicsSystem: view PhysicsSystem
-  world: view GameWorld
-  starts: view List(Vec3)
-) ret Float {
-  var largest: Float = 0.0
-  loop var i: Int = 0, i < componentCount(this: physicsSystem.cubes), ++i {
-    let cubeId: EntityId = componentEntityAt(this: physicsSystem.cubes, i: i)
-    let start: Vec3 = starts.copyAtFallback(index: i, fallback: Vec3.create(x: 0.0, y: 0.0, z: 0.0))
-    let position: Vec3 = componentView(this: world.transforms, entityId: cubeId).position
-    largest = Math.max(a: largest, b: Vec3.vlen(a: Vec3.vsub(a: position, b: start)))
-  }
-  ret largest
-}
+open app3d/WalkerPhysics
+open app3d/WalkerPhysicsChecks
+open box3d/ecs/NatureBodies
 
 func runPhysicsSelfTest(
-  physicsSystem: mod PhysicsSystem
+  physicsSystem: mod WalkerPhysics
   world: mod GameWorld
   heroEntityId: view EntityId
   groundZ: view Float
 ) ret Int {
-  let still: InputIntent = {
-    moveX: 0.0
-    moveY: 0.0
-    walking: false
-    jump: false
-    actions: 0
-  }
-  # The stacks must settle and sleep on their own (at most 10 s) without
-  # toppling: no cube drifts far from where it was placed
-  var placed: List(Vec3) = List.create(Vec3, cap: componentCount(this: physicsSystem.cubes))
-  loop var i: Int = 0, i < componentCount(this: physicsSystem.cubes), ++i {
-    placed.add(
-      value: componentView(
-        this: world.transforms
-        entityId: componentEntityAt(this: physicsSystem.cubes, i: i)
-      ).position
-    )
-  }
-  var settleSteps: Int = 0
-  loop settleSteps < 600 and physicsCounters(physics: physicsSystem.physics).awakeBodyCount > 0 {
-    selfTestStep(
-      physicsSystem: physicsSystem
-      world: world
-      heroEntityId: heroEntityId
-      groundZ: groundZ
-      intent: still
-      yaw: 0.0
-    )
-    settleSteps = settleSteps + 1
-  }
-  let settleDrift: Float = largestCubeMove(
+  let check: CubeJumpCheck = runCubeJumpCheck(
     physicsSystem: physicsSystem
-    world: world
-    starts: placed
+    transforms: world.transforms
+    controllers: world.controllers
+    bushes: noBushSpots()
+    heroEntityId: heroEntityId
   )
-  let settled: Bool = physicsCounters(physics: physicsSystem.physics).awakeBodyCount is 0 and settleDrift < 0.15
-  # Where every cube rests now, and the top of the tallest stack: the mover
-  # floats on its pogo spring and steps over anything lower than its capsule's
-  # bottom (0.6 m), so only a stack taller than that is pushed
-  let heroFeet: Vec3 = controllerFeet(
-    controller: controllerOf(world: world, entityId: heroEntityId)
-    groundZ: groundZ
-  )
-  var starts: List(Vec3) = List.create(Vec3, cap: componentCount(this: physicsSystem.cubes))
-  var target: Vec3 = heroFeet
-  var targetHeight: Float = -1000000.0
-  loop var i: Int = 0, i < componentCount(this: physicsSystem.cubes), ++i {
-    let cubeId: EntityId = componentEntityAt(this: physicsSystem.cubes, i: i)
-    let position: Vec3 = componentView(this: world.transforms, entityId: cubeId).position
-    starts.add(value: position)
-    let height: Float = position.z - terrainHeightAt(x: position.x, y: position.y, groundZ: groundZ)
-    if height > targetHeight {
-      targetHeight = height
-      target = position
-    }
-  }
-  # Walk at it (the camera yaw that looks along the line to it) until a cube
-  # moves
-  let towardX: Float = target.x - heroFeet.x
-  let towardY: Float = target.y - heroFeet.y
-  let yaw: Float = Math.atan2(y: -towardX, x: towardY)
-  let forward: InputIntent = {
-    moveX: 0.0
-    moveY: 1.0
-    walking: false
-    jump: false
-    actions: 0
-  }
-  var walkSteps: Int = 0
-  var cubeMoved: Bool = false
-  loop walkSteps < selfTestWalkSteps and cubeMoved is false {
-    selfTestStep(
-      physicsSystem: physicsSystem
-      world: world
-      heroEntityId: heroEntityId
-      groundZ: groundZ
-      intent: forward
-      yaw: yaw
-    )
-    walkSteps = walkSteps + 1
-    cubeMoved = largestCubeMove(physicsSystem: physicsSystem, world: world, starts: starts) > selfTestMovedDistance
-  }
-  # Stand, then jump
-  loop var i: Int = 0, i < 60, ++i {
-    selfTestStep(
-      physicsSystem: physicsSystem
-      world: world
-      heroEntityId: heroEntityId
-      groundZ: groundZ
-      intent: still
-      yaw: yaw
-    )
-  }
-  let groundedBefore: Bool = characterGrounded(physicsSystem: physicsSystem, entityId: heroEntityId)
-  let startZ: Float = controllerOf(world: world, entityId: heroEntityId).position.z
-  let jump: InputIntent = {
-    moveX: 0.0
-    moveY: 0.0
-    walking: false
-    jump: true
-    actions: 0
-  }
-  var leftGround: Bool = false
-  var landed: Bool = false
-  var peak: Float = 0.0
-  var jumpSteps: Int = 0
-  loop jumpSteps < selfTestJumpSteps and landed is false {
-    var stepIntent: InputIntent = still
-    if jumpSteps is 0 {
-      stepIntent = jump
-    }
-    selfTestStep(
-      physicsSystem: physicsSystem
-      world: world
-      heroEntityId: heroEntityId
-      groundZ: groundZ
-      intent: stepIntent
-      yaw: yaw
-    )
-    jumpSteps = jumpSteps + 1
-    let grounded: Bool = characterGrounded(physicsSystem: physicsSystem, entityId: heroEntityId)
-    peak = Math.max(
-      a: peak
-      b: controllerOf(world: world, entityId: heroEntityId).position.z - startZ
-    )
-    if grounded is false {
-      leftGround = true
-    } else if leftGround {
-      landed = true
-    }
-  }
-  let passed: Bool = settled and cubeMoved and groundedBefore and leftGround and landed
-  log(
-    "[physicstest] settled={settled} in {settleSteps} steps (drift {settleDrift} m), cubeMoved={cubeMoved} after {walkSteps} steps (moved {largestCubeMove(
-      physicsSystem: physicsSystem
-      world: world
-      starts: starts
-    )} m), jump: leftGround={leftGround} landed={landed} in {jumpSteps} steps, peak {peak} m, passed={passed}"
-  )
+  let passed: Bool = cubeJumpCheckPassed(check: check)
+  log("[physicstest] {cubeJumpCheckText(check: check)}, passed={passed}")
   if passed {
     ret 0
   }

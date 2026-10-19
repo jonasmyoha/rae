@@ -65,6 +65,7 @@ open app3d/RenderScale
 open Gpu2dCanvas
 open ui/UiSystems
 open app3d/WalkerCharacter
+open app3d/WalkerPhysics
 
 # The deferred renderer + dynamic-resolution controller (#552). Lives with the
 # RenderSystem — the App just aggregates it.
@@ -85,7 +86,7 @@ func drawPhysicsCubes(
   cache: mod GbufferCache
   resources: mod GpuResources
   batch: mod InstanceBatch
-  physicsSystem: view PhysicsSystem
+  physicsSystem: view WalkerPhysics
   world: view GameWorld
   toon: view Bool
 ) {
@@ -121,7 +122,7 @@ func drawPhysicsCubes(
 func drawPhysicsCubesShadow(
   renderer: mod DeferredRenderer
   batch: view InstanceBatch
-  physicsSystem: view PhysicsSystem
+  physicsSystem: view WalkerPhysics
   world: view GameWorld
 ) {
   let cubeMesh: MeshHandle = meshHandle(id: batch.meshId, generation: 1)
@@ -150,7 +151,7 @@ func renderShadowPass(
   renderSystem: mod RenderSystem
   terrainSystem: mod TerrainSystem
   world: mod GameWorld
-  physicsSystem: view PhysicsSystem
+  physicsSystem: view WalkerPhysics
   aspect: copy Float
   palette: view List(Float)
 ) {
@@ -246,7 +247,7 @@ func renderGbufferPass(
   characterSystem: mod CharacterSystem
   terrainSystem: mod TerrainSystem
   world: mod GameWorld
-  physicsSystem: view PhysicsSystem
+  physicsSystem: view WalkerPhysics
   cubeBatch: mod InstanceBatch
   aspect: copy Float
   palette: view List(Float)
@@ -395,7 +396,7 @@ func renderApp(
   inputSystem: mod InputSystem
   renderSystem: mod RenderSystem
   world: mod GameWorld
-  physicsSystem: view PhysicsSystem
+  physicsSystem: view WalkerPhysics
   terrainSystem: mod TerrainSystem
   wadeSplash: mod WadeSplash
   waterSystem: mod WaterSystem
