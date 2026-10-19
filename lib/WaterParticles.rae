@@ -63,10 +63,12 @@ func waterParticleModel(particle: view Particle, camera: view Camera3d) ret Mat4
   ret model
 }
 
+# Supply the current waterDaylight each frame; lighting never changes particle lifetime or alpha.
 func waterParticleDraw(
   particles: view ParticleSystem
   transparent: mod TransparentPassCache
   camera: view Camera3d
+  daylight: copy Float
 ) {
   loop let particle: view Particle in particles.list {
     let age: Float = particle.maxLife - particle.life
@@ -76,9 +78,9 @@ func waterParticleDraw(
       cache: transparent
       mesh: particles.mesh
       model: waterParticleModel(particle: particle, camera: camera)
-      r: particle.r
-      g: particle.g
-      b: particle.b
+      r: particle.r * daylight
+      g: particle.g * daylight
+      b: particle.b * daylight
       alpha: fadeIn * fadeOut
       style: 1.0
     )

@@ -19,6 +19,7 @@ open GbufferInstanced
 open Particles
 open WaterParticles
 open TransparentForward
+open water/WaterLighting
 open water/WaterSystem
 open water/WaterFft
 open water/Underwater
@@ -644,6 +645,10 @@ func renderApp(
           particles: splashes
           transparent: renderSystem.renderer.passes.transparent
           camera: cameraSystem.camera
+          daylight: waterDaylight(
+            sky: renderSystem.renderer.sky
+            hasSky: renderSystem.renderer.hasSky
+          )
         )
         renderDeferredPass(
           renderer: renderSystem.renderer
