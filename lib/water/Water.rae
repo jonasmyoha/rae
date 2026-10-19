@@ -113,8 +113,11 @@ type WaterBody {
   fetch: Float  # metres of open water the wind acted on (~250 km)
   waterDepth: Float  # metres; the TMA factor damps long waves in shallow water
   fftAmplitude: Float  # scale displacement and slopes together; 1 preserves the spectrum
-  biomeShoreDepth: Float  # opt-in default WorldBiome coast: full waves at this depth; 0 disables
+  biomeShoreDepth: Float  # opt-in WorldBiome coast: full waves at this depth; 0 disables
   biomeGroundZ: Float  # terrain origin for that coast
+  # The biome field that coast is (the app's, as its terrain uses it): the CPU
+  # damping reads it, and its island size goes to the surface pipeline
+  biome: BiomeConfig
   choppiness: Float  # lateral Gerstner-style displacement scale for the FFT surface (~1.2)
   # FFT size and active cascade count; the toon surface skips these samples.
   fftSize: Int  # 128 / 256 / 512 texels per cascade side
@@ -212,6 +215,7 @@ func createLakeToon(surfaceZ: copy Float, extent: copy Float) ret WaterBody {
     fftAmplitude: 1.0
     biomeShoreDepth: 0.0
     biomeGroundZ: 0.0
+    biome: WorldBiome.defaultBiomeConfig()
     choppiness: 1.2
     fftSize: 256
     cascadeCount: 3
@@ -383,8 +387,10 @@ func createOceanRealistic(surfaceZ: copy Float) ret WaterBody {
   ret body
 }
 
-# Default procedural island only. Arbitrary terrain must supply its own bathymetry.
-# Match the water vertex shader; both lateral and vertical motion fade together.
+# The WorldBiome coast of `body.biome` only; arbitrary terrain must supply its
+# own bathymetry. Match the water vertex shader (its island size comes from the
+# same config, WaterSystem's pipeline constants); both lateral and vertical
+# motion fade together.
 func biomeShoreEnergy(body: view WaterBody, x: view Float, y: view Float) ret Float {
   if body.biomeShoreDepth <= 0.0 {
     ret 1.0
@@ -393,7 +399,7 @@ func biomeShoreEnergy(body: view WaterBody, x: view Float, y: view Float) ret Fl
     x: x
     y: y
     groundZ: body.biomeGroundZ
-    cfg: WorldBiome.defaultBiomeConfig()
+    cfg: body.biome
   )
   ret WorldBiome.smooth01(edge0: 0.0, edge1: body.biomeShoreDepth, x: body.centre.z - ground)
 }

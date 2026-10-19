@@ -59,15 +59,22 @@ const defaultIslandRadius: Float = 60.0
 
 const defaultIslandFalloff: Float = 22.0
 
-# The two island-size values as pipeline-creation constants for the terrain and
-# grass shaders (world_biome.wgsl declares them as `override`s), so the GPU
-# field uses the same radius as the CPU while the composed shader text stays
-# static and validated at build. Set at every pipeline build.
-func islandConstants() ret List(ShaderConstant) {
+# The two island-size values as pipeline-creation constants for the shaders
+# that read the biome field (terrain, grass, the water's shore damping;
+# world_biome.wgsl declares them as `override`s), so the GPU field uses the same
+# radius as the CPU while the composed shader text stays static and validated
+# at build. Set at every pipeline build. The rest of BiomeConfig is fixed in
+# world_biome.wgsl, so only the island's size may differ from the default.
+func islandConstantsFor(cfg: view BiomeConfig) ret List(ShaderConstant) {
   var constants: List(ShaderConstant) = List.create(ShaderConstant, cap: 2)
-  constants.add(value: { name: "RAE_BIOME_ISLAND_RADIUS", value: defaultIslandRadius })
-  constants.add(value: { name: "RAE_BIOME_ISLAND_FALLOFF", value: defaultIslandFalloff })
+  constants.add(value: { name: "RAE_BIOME_ISLAND_RADIUS", value: cfg.islandRadius })
+  constants.add(value: { name: "RAE_BIOME_ISLAND_FALLOFF", value: cfg.islandFalloff })
   ret constants
+}
+
+# The default island's constants
+func islandConstants() ret List(ShaderConstant) {
+  ret islandConstantsFor(cfg: defaultBiomeConfig())
 }
 
 func defaultBiomeConfig() pub ret BiomeConfig {
