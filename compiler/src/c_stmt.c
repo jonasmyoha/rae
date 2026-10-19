@@ -2954,6 +2954,12 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     }
                     // Register generic type for struct emission
                     register_generic_type(ctx->compiler_ctx, list_type);
+                } else if (list_type && !list_type->is_opt
+                           && find_type_decl(ctx, ctx->module, get_base_type_name(list_type))) {
+                    // `let x: T = { }` of a struct: what an uninitialized
+                    // `let x: T` is, its declared field defaults included
+                    emit_auto_init(ctx, list_type, out);
+                    fprintf(out, ";\n");
                 } else {
                     fprintf(out, "{0};\n");
                 }

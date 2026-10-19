@@ -2072,6 +2072,34 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
         }
         ctx->has_expected_type = saved_has_exp;
         ctx->expected_type = saved_exp;
+        // The fields the literal leaves out: their declared defaults (a
+        // nested struct field without one: its own defaults), not zeros.
+        // A field with nothing to apply stays to C's zero.
+        if (struct_decl && struct_decl->kind == AST_DECL_TYPE && !lit_is_c_struct) {
+            bool wrote_any = expr->as.object_literal.fields != NULL;
+            for (const AstTypeField* td = struct_decl->as.type_decl.fields; td; td = td->next) {
+                bool given = false;
+                for (const AstObjectField* f = expr->as.object_literal.fields; f; f = f->next) {
+                    if (str_eq(td->name, f->name)) { given = true; break; }
+                }
+                if (given || !td->type || td->type->is_view || td->type->is_mod) continue;
+                const AstTypeRef* field_tr = substitute_type_ref(ctx->compiler_ctx,
+                    struct_decl->as.type_decl.generic_params, obj_tr ? obj_tr->generic_args : NULL, td->type);
+                if (field_tr && ctx->generic_params && ctx->generic_args)
+                    field_tr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, field_tr);
+                if (!field_tr) continue;
+                const AstDecl* nested = NULL;
+                if (!td->default_value) {
+                    if (field_tr->is_opt) continue;
+                    nested = find_type_decl(ctx, ctx->module, get_base_type_name(field_tr));
+                    if (!nested || !struct_has_field_defaults(ctx, nested, 0)) continue;
+                }
+                fprintf(out, "%s.%.*s = ", wrote_any ? ", " : "", (int)td->name.len, td->name.data);
+                wrote_any = true;
+                if (td->default_value) emit_field_default(ctx, td, field_tr, out);
+                else emit_auto_init(ctx, field_tr, out);
+            }
+        }
         fprintf(out, " }");
         break;
     }
