@@ -9,6 +9,8 @@
 #   sheetCommandSystem    openSheet / closeSheet / libraryRemove: the bottom
 #                         sheet and the curated library.
 #   canvasCommandSystem   canvasToggle / canvasClose: the canvas overlay flag.
+#   settingsCommandSystem settingsOpen / settingsClose / settingsDarkTheme: the
+#                         settings dialog flag and the light / dark theme.
 #   navigationSystem      navigateTab / pushSubPage / pop / openAlbum /
 #                         openPlaylist: the ONLY writer of `AppState.tab`, the
 #                         sub-page stack and the browsed collection. Runs
@@ -21,6 +23,7 @@
 # mid-drain is still seen by the systems after it.
 open sys/Spotify
 open ui/Ecs
+open ui/Theme
 open ecs/Event
 open ecs/Entity
 
@@ -343,6 +346,39 @@ func navigationSystem(commands: view EventQueue(AppCommand), state: mod AppState
   }
 }
 
+# Swap the light and dark themes. Scene colours store slot NAMES and
+# re-resolve against the new active theme on the next paint; code-driven
+# colours still bake into components, so the input phase rebuilds the world
+# when the generation moved (queue #259 to migrate those to slots).
+func toggleAppTheme(state: mod AppState) {
+  if state.theme.active.mode is ThemeMode.dark {
+    state.theme.active = lightTheme()
+  } else {
+    state.theme.active = darkTheme()
+  }
+  state.theme.generation = state.theme.generation + 1
+  log("[theme] -> {state.theme.active.mode.toString()} (gen {state.theme.generation})")
+}
+
+# The settings dialog: the open flag (the input phase re-applies the dialog
+# scene's states when it changed) and its dark-theme switch.
+func settingsCommandSystem(commands: view EventQueue(AppCommand), state: mod AppState) {
+  var i: Int = 0
+  loop i < eventCount(this: commands) {
+    let command: AppCommand = eventAt(this: commands, i: i)
+    if command.kind is ActionKind.settingsOpen {
+      state.settingsOpen = true
+    }
+    if command.kind is ActionKind.settingsClose {
+      state.settingsOpen = false
+    }
+    if command.kind is ActionKind.settingsDarkTheme {
+      toggleAppTheme(state: state)
+    }
+    i = i + 1
+  }
+}
+
 # One frame of commands, in system order, then the queue advances. Returns
 # the visible screen after navigation, which the caller compares against the
 # shown one to decide a switch.
@@ -363,6 +399,7 @@ func runAppCommands(
   )
   sheetCommandSystem(commands: commands, state: state)
   canvasCommandSystem(commands: commands, state: state)
+  settingsCommandSystem(commands: commands, state: state)
   navigationSystem(commands: commands, state: state)
   frameAdvance(this: commands)
   ret visibleScreen(state: state)

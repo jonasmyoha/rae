@@ -122,6 +122,11 @@ func createApp() ret App {
   if canvasEnv is "1" {
     appState.canvasOpen = true
   }
+  # RAE_UI_SETTINGS=1 opens the settings dialog at boot (a screenshot hook,
+  # like RAE_UI_CANVAS). Not persisted.
+  if getEnv(name: "RAE_UI_SETTINGS") is "1" {
+    appState.settingsOpen = true
+  }
   # Persisted recently-played. CDN artwork is re-downloaded lazily in
   # the loop (refetchHistoryArtChunk, a few/frame) so it never blocks.
   restoreHistory(history: appState.playHistory, path: historyFilePath, loader: appState.historyArt)

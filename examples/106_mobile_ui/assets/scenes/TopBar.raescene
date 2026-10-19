@@ -5,6 +5,7 @@
   "import": [
     "Theme"
   ],
+  "_note": "A page's top bar: the centered title between two equal slots. The leading slot holds the debug button's DebugAnchor (ui/DebugPlacement); the trailing slot a page action, hidden unless a page turns it on (Profile: the settings button).",
   "nodes": {
     "TopBar": {
       "Rect": {
@@ -27,8 +28,49 @@
         "alignCross": "Center"
       },
       "Children": [
-        "Title"
+        "Leading",
+        "Title",
+        "Trailing"
       ]
+    },
+    "Leading": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 104.096386,
+        "h": 104.096386
+      },
+      "Size": {
+        "w": {
+          "mode": "Fixed"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Layout": {
+        "type": "Stack",
+        "gap": 0.0,
+        "alignCross": "Start"
+      },
+      "Children": [
+        "DebugSlot"
+      ]
+    },
+    "DebugSlot": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 57.831325,
+        "h": 57.831325
+      },
+      "Align": {
+        "x": "Center",
+        "y": "Center"
+      },
+      "DebugAnchor": {
+        "value": true
+      }
     },
     "Title": {
       "Rect": {
@@ -48,6 +90,52 @@
       "Text": {
         "text": "Page",
         "styleId": "pageTitle"
+      }
+    },
+    "Trailing": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 104.096386,
+        "h": 104.096386
+      },
+      "Size": {
+        "w": {
+          "mode": "Fixed"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Layout": {
+        "type": "Stack",
+        "gap": 0.0,
+        "alignCross": "Start"
+      },
+      "Children": [
+        "MoreButton"
+      ]
+    },
+    "MoreButton": {
+      "Active": {
+        "value": false
+      },
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 78.072289,
+        "h": 78.072289
+      },
+      "Align": {
+        "x": "Center",
+        "y": "Center"
+      },
+      "Sprite": {
+        "textureKey": "mat:more_horiz",
+        "tint": "textPrimary"
+      },
+      "OnClick": {
+        "actionId": ""
       }
     }
   },

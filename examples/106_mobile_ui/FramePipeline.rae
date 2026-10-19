@@ -40,6 +40,7 @@ func runFrameInputDispatch(
 ) pub ret FrameInputDispatchResult {
   var nextScreen: Screen = currentScreen
   let canvasOpenBefore: Bool = appState.canvasOpen
+  let settingsOpenBefore: Bool = appState.settingsOpen
   let hadActions: Bool = eventCount(this: input.uiActions) > 0
 
   if dragJustReleased is false {
@@ -61,6 +62,14 @@ func runFrameInputDispatch(
   }
 
   let canvasChanged: Bool = appState.canvasOpen is not canvasOpenBefore
+  if appState.settingsOpen is not settingsOpenBefore {
+    applySettingsState(
+      world: world
+      uiSystems: uiSystems
+      scenes: scenes
+      state: appState
+    )
+  }
   if canvasChanged {
     applyCanvasState(
       world: world

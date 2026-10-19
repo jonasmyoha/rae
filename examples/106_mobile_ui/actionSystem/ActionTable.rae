@@ -32,6 +32,9 @@ enum ActionKind {
   libraryRemove
   canvasToggle
   canvasClose
+  settingsOpen
+  settingsClose
+  settingsDarkTheme
 }
 
 # No behaviour yet — an authored placeholder (`nav.unset`, the empty id)
@@ -41,6 +44,7 @@ enum ActionKind {
 # playback (playbackCommandSystem)
 # the bottom sheet + the library (sheetCommandSystem)
 # the canvas overlay (canvasCommandSystem)
+# the settings dialog (settingsCommandSystem)
 
 # One row: the id (a template's prefix, without the payload), what it does
 # and its fixed payload.
@@ -159,6 +163,9 @@ func createActionTable() ret ActionTable {
   rows.add(value: plainRow(id: "library.remove", kind: ActionKind.libraryRemove))
   rows.add(value: plainRow(id: "canvas.toggle", kind: ActionKind.canvasToggle))
   rows.add(value: plainRow(id: "canvas.close", kind: ActionKind.canvasClose))
+  rows.add(value: plainRow(id: "settings.open", kind: ActionKind.settingsOpen))
+  rows.add(value: plainRow(id: "settings.close", kind: ActionKind.settingsClose))
+  rows.add(value: plainRow(id: "settings.darkTheme", kind: ActionKind.settingsDarkTheme))
   ret ActionTable { entries: own rows }
 }
 

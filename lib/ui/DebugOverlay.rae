@@ -17,8 +17,8 @@
 # true when it took the pointer, and the app skips its own hit test that frame.
 #
 # ONE WIDGET FOR EVERY APP. The UI apps (106, 121) and the 3D examples all use
-# this widget; an app adds its own settings as switch rows rather than
-# building a debug UI of its own.
+# this widget. It holds debug readouts only: an app's own settings belong in
+# the app's own UI.
 #
 # IMMEDIATE MODE, NOT ECS. A shared overlay cannot assume anything about the
 # host's z-order — 110 and 113 draw a 3D scene, then a UI world, then a log
@@ -30,11 +30,9 @@
 # SIZE. The sizes are points of a desktop window. An app that lays out in other
 # units (106 lays out a 1080-unit-wide phone) sets setDebugOverlayScale once.
 #
-# APP SWITCHES. Below its own three rows (FPS, Memory, Update indicator) the
-# dialog shows the app's switches: addDebugOverlayToggle adds one and returns its
-# index, debugOverlayToggleOn reads it each frame, setDebugOverlayToggle sets it
-# when the app changed the setting some other way (a key). 106's light/dark
-# theme is one.
+# PLACEMENT. The button sits in the window's top-right corner, or where the app
+# puts it (placeDebugOverlay). A UI app whose scene marks a slot with a
+# `DebugAnchor` node lets ui/DebugPlacement put it there each frame.
 import Sys
 import Gpu2d
 import Gpu2dText
@@ -54,6 +52,11 @@ const debugOnFill: Int = 0xFF34C759
 
 const debugOffFill: Int = 0xC0787880
 
+# The button's size and its margin from the window's edges, in points
+const debugButtonPoints: Float = 20.0
+
+const debugMarginPoints: Float = 12.0
+
 # The letter on the amber disc.
 const debugInk: Int = 0xFF101014
 
@@ -63,12 +66,6 @@ const debugInk: Int = 0xFF101014
 # the alternative is threading a metrics API through for two labels.
 const debugGlyphWidthRatio: Float = 0.52
 
-# One of the app's own switches in the dialog
-type DebugOverlayToggle {
-  label: String
-  on: Bool
-}
-
 type DebugOverlay {
   # What the app opted into. The dialog toggles these same fields, so what it
   # shows is the live state rather than a second copy of it.
@@ -76,8 +73,6 @@ type DebugOverlay {
   wantFps: Bool
   wantMemory: Bool
   wantHeartbeat: Bool
-  # The app's own switches, under the three above
-  appToggles: List(DebugOverlayToggle)
   open: Bool
   # Sizes are points times this (setDebugOverlayScale)
   scale: Float
@@ -132,13 +127,12 @@ func createDebugOverlay(
     wantFps: fps and not hidden
     wantMemory: memory and not hidden
     wantHeartbeat: heartbeat and not hidden
-    appToggles: List.create(DebugOverlayToggle, cap: 2)
     open: false
     scale: 1.0
     screenW: 0.0
     screenH: 0.0
-    buttonSize: 20.0
-    margin: 12.0
+    buttonSize: debugButtonPoints
+    margin: debugMarginPoints
     anchorRight: 0.0
     anchorTop: 0.0
     customLine: ""
@@ -155,33 +149,8 @@ func createDebugOverlay(
 # (the button, the margin, the dialog, the text) is points times `scale`
 func setDebugOverlayScale(debugOverlay: mod DebugOverlay, scale: view Float) {
   debugOverlay.scale = scale
-  debugOverlay.buttonSize = 20.0 * scale
-  debugOverlay.margin = 12.0 * scale
-}
-
-# Add an app switch to the dialog, below its own rows, starting `on`; its index
-func addDebugOverlayToggle(
-  debugOverlay: mod DebugOverlay
-  label: own String
-  on: view Bool
-) ret Int {
-  debugOverlay.appToggles.add(value: { label: own label, on: on })
-  ret debugOverlay.appToggles.length - 1
-}
-
-# Is app switch `index` on?
-func debugOverlayToggleOn(debugOverlay: view DebugOverlay, index: view Int) ret Bool {
-  if let toggle: view DebugOverlayToggle => debugOverlay.appToggles.viewAt(index: index) {
-    ret toggle.on
-  }
-  ret false
-}
-
-# Set app switch `index` (when the app changed the setting some other way)
-func setDebugOverlayToggle(debugOverlay: mod DebugOverlay, index: view Int, on: view Bool) {
-  if let toggle: mod DebugOverlayToggle => debugOverlay.appToggles.modAt(index: index) {
-    toggle.on = on
-  }
+  debugOverlay.buttonSize = debugButtonPoints * scale
+  debugOverlay.margin = debugMarginPoints * scale
 }
 
 func debugTextWidth(text: view String, sizePx: view Float) ret Float {
@@ -321,7 +290,7 @@ func updateDebugOverlay(
   ret debugDialogPress(debugOverlay: debugOverlay, px: px, py: py)
 }
 
-# The dialog is a stack of rows (the three own ones, then the app's), so hit
+# The dialog is a fixed stack of rows, so hit
 # testing is the same arithmetic the drawing uses. Both derive from
 # `debugDialogRowY` rather than repeating it. Sizes are points times the scale.
 const debugDialogW: Float = 260.0
@@ -330,8 +299,8 @@ const debugDialogRowH: Float = 38.0
 
 const debugDialogTitleH: Float = 44.0
 
-# The dialog's own rows: FPS, Memory, Update indicator
-const debugDialogOwnRows: Int = 3
+# The dialog's rows: FPS, Memory, Update indicator
+const debugDialogRows: Int = 3
 
 func debugDialogWidth(debugOverlay: view DebugOverlay) ret Float {
   ret debugDialogW * debugOverlay.scale
@@ -341,12 +310,34 @@ func debugDialogRowHeight(debugOverlay: view DebugOverlay) ret Float {
   ret debugDialogRowH * debugOverlay.scale
 }
 
-func debugDialogRows(debugOverlay: view DebugOverlay) ret Int {
-  ret debugDialogOwnRows + debugOverlay.appToggles.length
+# Does the widget open to the right? A button in the left half of the window
+# (an app placed it there) opens its dialog and readouts toward the middle,
+# starting at its left edge; otherwise they end at its right edge.
+func debugOpensRight(debugOverlay: view DebugOverlay) ret Bool {
+  ret debugButtonX(debugOverlay: debugOverlay) + debugOverlay.buttonSize * 0.5 < debugOverlay.screenW * 0.5
 }
 
 func debugDialogX(debugOverlay: view DebugOverlay) ret Float {
+  if debugOpensRight(debugOverlay: debugOverlay) {
+    ret debugButtonX(debugOverlay: debugOverlay)
+  }
   ret debugRight(debugOverlay: debugOverlay) - debugDialogWidth(debugOverlay: debugOverlay)
+}
+
+# Where a readout line starts: at the button's left edge when the widget opens
+# to the right, else right-aligned to its right edge
+func debugReadoutX(
+  debugOverlay: view DebugOverlay
+  text: view String
+  sizePx: view Float
+) ret Float {
+  if debugOpensRight(debugOverlay: debugOverlay) {
+    ret debugButtonX(debugOverlay: debugOverlay)
+  }
+  ret debugButtonX(debugOverlay: debugOverlay) + debugOverlay.buttonSize - debugTextWidth(
+    text: text
+    sizePx: sizePx
+  )
 }
 
 func debugDialogY(debugOverlay: view DebugOverlay) ret Float {
@@ -356,7 +347,7 @@ func debugDialogY(debugOverlay: view DebugOverlay) ret Float {
 func debugDialogH(debugOverlay: view DebugOverlay) ret Float {
   ret (debugDialogTitleH + 12.0) * debugOverlay.scale + debugDialogRowHeight(
     debugOverlay: debugOverlay
-  ) * debugDialogRows(debugOverlay: debugOverlay).toFloat()
+  ) * debugDialogRows.toFloat()
 }
 
 func debugDialogRowY(debugOverlay: view DebugOverlay, index: view Int) ret Float {
@@ -365,7 +356,7 @@ func debugDialogRowY(debugOverlay: view DebugOverlay, index: view Int) ret Float
   )
 }
 
-# Flip row `index`: the own rows first, then the app's switches
+# Flip row `index`
 func debugToggleRow(debugOverlay: mod DebugOverlay, index: view Int) {
   if index is 0 {
     debugOverlay.wantFps = debugOverlay.wantFps is false
@@ -373,13 +364,6 @@ func debugToggleRow(debugOverlay: mod DebugOverlay, index: view Int) {
     debugOverlay.wantMemory = debugOverlay.wantMemory is false
   } else if index is 2 {
     debugOverlay.wantHeartbeat = debugOverlay.wantHeartbeat is false
-  } else {
-    let appIndex: Int = index - debugDialogOwnRows
-    setDebugOverlayToggle(
-      debugOverlay: debugOverlay
-      index: appIndex
-      on: debugOverlayToggleOn(debugOverlay: debugOverlay, index: appIndex) is false
-    )
   }
 }
 
@@ -399,7 +383,7 @@ func debugDialogPress(debugOverlay: mod DebugOverlay, px: view Float, py: view F
     debugOverlay.open = false
     ret true
   }
-  loop var index: Int = 0, index < debugDialogRows(debugOverlay: debugOverlay), ++index {
+  loop var index: Int = 0, index < debugDialogRows, ++index {
     if debugPointInRect(
       px: px
       py: py
@@ -592,18 +576,6 @@ func drawDebugDialog(debugOverlay: view DebugOverlay, canvas: mod Gpu2dCanvas, f
     label: "Update indicator"
     on: debugOverlay.wantHeartbeat
   )
-  loop var appIndex: Int = 0, appIndex < debugOverlay.appToggles.length, ++appIndex {
-    if let toggle: view DebugOverlayToggle => debugOverlay.appToggles.viewAt(index: appIndex) {
-      drawDebugToggleRow(
-        debugOverlay: debugOverlay
-        canvas: canvas
-        font: font
-        index: debugDialogOwnRows + appIndex
-        label: toggle.label
-        on: toggle.on
-      )
-    }
-  }
 }
 
 # A square that steps across the top of the screen once per frame that did real
@@ -685,7 +657,6 @@ func drawDebugReadouts(
   let fontSize: Float = 14.0 * debugOverlay.scale
   let lineH: Float = 18.0 * debugOverlay.scale
   let gap: Float = 8.0 * debugOverlay.scale
-  let rightEdge: Float = debugButtonX(debugOverlay: debugOverlay) + debugOverlay.buttonSize
   var y: Float = debugTop(debugOverlay: debugOverlay) + debugOverlay.buttonSize + gap + fontSize
   if debugOverlay.open {
     # The dialog occupies that space; put the readouts under it rather than
@@ -698,7 +669,7 @@ func drawDebugReadouts(
       canvas: canvas
       font: font
       text: text
-      x: rightEdge - debugTextWidth(text: text, sizePx: fontSize)
+      x: debugReadoutX(debugOverlay: debugOverlay, text: text, sizePx: fontSize)
       y: y
       sizePx: fontSize
       color: debugAmber
@@ -711,7 +682,7 @@ func drawDebugReadouts(
       canvas: canvas
       font: font
       text: text
-      x: rightEdge - debugTextWidth(text: text, sizePx: fontSize)
+      x: debugReadoutX(debugOverlay: debugOverlay, text: text, sizePx: fontSize)
       y: y
       sizePx: fontSize
       color: debugAmber
@@ -724,7 +695,7 @@ func drawDebugReadouts(
       canvas: canvas
       font: font
       text: debugOverlay.customLine
-      x: rightEdge - debugTextWidth(text: debugOverlay.customLine, sizePx: fontSize)
+      x: debugReadoutX(debugOverlay: debugOverlay, text: debugOverlay.customLine, sizePx: fontSize)
       y: y
       sizePx: fontSize
       color: debugAmber

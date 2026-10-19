@@ -37,8 +37,6 @@ type AppSession {
   # The standard debug widget (lib/ui/DebugOverlay), as every Rae UI app has
   # it: drawn on top, outside the UI world, so it persists across rebuilds
   debugOverlay: DebugOverlay
-  # Its "Dark theme" switch (addDebugOverlayToggle's index)
-  themeToggle: Int
   # The last frame rendered (the widget's frame-rate count)
   renderedLastFrame: Bool
   # Drag / wheel / momentum / spring scroll physics (inputSystem/ScrollInput).
@@ -116,18 +114,12 @@ func createAppSession(app: mod App) ret AppSession {
     position: restoredScrollY
   )
   var debugOverlay: DebugOverlay = createBootDebugOverlay()
-  let themeToggle: Int = addDebugOverlayToggle(
-    debugOverlay: debugOverlay
-    label: "Dark theme"
-    on: app.appState.theme.active.mode is ThemeMode.dark
-  )
   ret AppSession {
     running: true
     currentScreen: visibleScreen(state: app.appState)
     watcher: createSceneWatcher()
     reloadWatcher: createReloadSignalWatcher()
     debugOverlay: own debugOverlay
-    themeToggle: themeToggle
     renderedLastFrame: false
     scrollFsm: createScrollFsm(initialScrollY: restoredScrollY)
     scrollMemory: own scrollMemory
