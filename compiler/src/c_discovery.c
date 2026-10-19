@@ -17,6 +17,24 @@
 static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr* expr);
 static void discover_specializations_stmt_impl(CFuncContext* ctx, const AstStmt* stmt);
 
+// The drop() a call argument that makes an owned value will be released
+// with (List(T) -> drop(T)). Codegen holds such a value in a statement
+// temporary and drops it after the statement; registered only then, the
+// drop specialization got its prototype and body AFTER the function using
+// it, and the C named an undeclared function. Registered here, during
+// discovery, it comes first like every other specialization.
+static void register_owned_argument_drop(CFuncContext* ctx, const AstExpr* value) {
+    if (!value || (value->kind != AST_EXPR_CALL && value->kind != AST_EXPR_METHOD_CALL)) return;
+    const AstTypeRef* type = infer_expr_type_ref(ctx, value);
+    if (!type || type->is_view || type->is_mod || type->is_opt) return;
+    if (!is_drop_target_type(type) || !type->generic_args) return;
+    const AstTypeRef* elem_type = type->generic_args;
+    if (ctx->generic_params && ctx->generic_args)
+        elem_type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)elem_type);
+    const AstFuncDecl* drop_fd = find_drop_overload_for(ctx, get_base_type_name(type));
+    if (drop_fd) register_function_specialization(ctx->compiler_ctx, drop_fd, elem_type);
+}
+
 static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr* expr) {
     if (!expr) return;
     // Normalise the new generic-call syntax so the spec-registration
@@ -205,6 +223,7 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
                         ctx->has_expected_type = false;
                     }
                     discover_specializations_expr_impl(ctx, a->value);
+                    register_owned_argument_drop(ctx, a->value);
                 }
                 ctx->has_expected_type = saved_has;
                 ctx->expected_type = saved_exp;
