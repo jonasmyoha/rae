@@ -1,6 +1,6 @@
-# The walker's wading splashes are lib/water/WadeSplash; this file is only
-# what is this app's: the material preview's switches and camera, and the pose
-# check's loop over this app's skeleton and walk clip.
+# app3d/WalkerSplash — the walker's wading splashes (lib/water/WadeSplash):
+# the material preview's switches and camera, the pose check's loop over the
+# walker's skeleton and walk clip, and the feet each frame records.
 #
 #   RAE_WALKER_SPLASH_PREVIEW=1      bursts at a shallow shore, camera on it
 #   RAE_WALKER_SPLASH_AGE=0.12       ...one burst frozen at that age
@@ -12,18 +12,20 @@ open app3d/CameraRig
 open app3d/WalkerWorld
 open water/WadeSplash
 open app3d/WalkerCharacter
+open app3d/WalkerCamera
 
 # Start the material preview when RAE_WALKER_SPLASH_PREVIEW is set: bursts at
 # the first shallow shore along +x, the orbit camera close on it
 func prepareSplashPreview(
   wadeSplash: mod WadeSplash
   cameraSystem: mod WalkerCamera
+  biome: view BiomeConfig
   groundZ: view Float
 ) {
   if Sys.getEnv(name: "RAE_WALKER_SPLASH_PREVIEW").length() is 0 {
     ret
   }
-  if let shore: Vec3 = findShallowShore(biome: defaultBiomeConfig(), groundZ: groundZ) {
+  if let shore: Vec3 = findShallowShore(biome: biome, groundZ: groundZ) {
     var age: Float = -1.0
     let ageSetting: String = Sys.getEnv(name: "RAE_WALKER_SPLASH_AGE")
     if ageSetting.length() > 0 {

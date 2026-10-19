@@ -1,23 +1,18 @@
-# App composition + main loop for the walker example.
+# app3d/WalkerApp — the walker app shell: 136 (the island, deferred), 137 (the
+# island, forward) and 143 (the wide forest, deferred) are each a Main.rae
+# that calls runWalkerApp with its WalkerAppSettings (app3d/WalkerAppSetup).
 #
-# CONVENTION (#822): the `App` struct IS the system list. Each system's `App`
-# member is named for its folder and typed as that folder's `<Folder>System`
-# state — `cameraSystem: WalkerCamera`, `renderSystem: RenderSystem`,
-# `physicsSystem: WalkerPhysics`, `inputSystem: WalkerInput`, … — so reading the
-# `App` fields reads the systems. Cross-cutting DATA and resources stay
-# data-typed and are NOT forced into an `XSystem` wrapper: the per-frame `frame:
-# Frame` scratch, the ECS `world: WalkerWorld`, the `players: PlayerRoster` control
-# roster, and pure resources (`profiler: Profiler`, `grassCompute: GrassCompute`)
-# are not systems. See docs/naming-conventions.md.
-#
-# Structure (#743): the shared walker kit is lib/app3d (WalkerWorld,
-# WalkerInput, WalkerCamera, WalkerUi, WalkerHud, WalkerNet, WalkerCharacter,
-# WalkerPhysics, WalkerTerrain); this example's own systems are its folders
-# (movementSystem/, terrainSystem/, physicsSystem/, renderSystem/). Each system
-# function takes the NARROW state it needs (its own state + the WalkerWorld +
-# specific components), never the whole `App` — the App is a pure aggregate
-# here, built by createApp, sequenced by updateApp / renderApp. This file keeps
-# App + Frame, createApp, the loop, updateApp, frameBegin.
+# CONVENTION (#822): the `WalkerApp` struct IS the system list. Each system's
+# member is named for what it is and typed as that system's state —
+# `cameraSystem: WalkerCamera`, `renderSystem: WalkerRender`, `physicsSystem:
+# WalkerPhysics`, `inputSystem: WalkerInput`, … — so reading the fields reads
+# the systems. Cross-cutting DATA and resources stay data-typed: the per-frame
+# `frame: WalkerFrame` scratch, the ECS `world: WalkerWorld`, the `players:
+# PlayerRoster` control roster, and pure resources (`profiler: Profiler`,
+# `grassCompute: GrassCompute`). Each system function takes the NARROW state
+# it needs, never the whole app; the app is built by createWalkerApp and
+# sequenced by updateWalkerApp (app3d/WalkerAppUpdate) and renderWalkerApp
+# (app3d/WalkerRenderWalk).
 import Math
 import Profile
 import Gpu2d
@@ -31,11 +26,12 @@ import Vec3
 import Sys
 open GbufferInstanced
 open Particles
+open water/WadeSplash
 open water/Water
 open GbufferSprite
 open water/WaterSystem
-open water/WadeSplash
 open water/IslandSea
+open WorldBiome
 open water/WaterFft
 open gpu/GpuResources
 open gpu/GpuLifetime
@@ -88,73 +84,32 @@ open app3d/WalkerHud
 open app3d/WalkerNet
 open app3d/WalkerTerrain
 open app3d/WalkerTerrainBodies
+open app3d/IslandForest
+open app3d/WalkerAppSetup
+open app3d/WalkerRender
+open app3d/WalkerRenderWalk
+open app3d/WalkerAppUpdate
+open app3d/WalkerSplash
+open app3d/WalkerState
+open app3d/WalkerSelfTest
+open RendererForward
 
-const clipTransitionDuration: Float = 0.28
+# The app's GPU manager (#873): with the sea, its three 256 cascades with
+# their mip chains, readbacks and surface (192, as the downstream game sizes
+# its sea), plus what the rest of the walker keeps there; without, the grass
+# compute alone
+const walkerGpuCapacityWithSea: Int = 288
 
-# The App's GPU manager (#873): the sea's three 256 cascades with their mip
-# chains, readbacks and surface (192, as the downstream game sizes its sea),
-# plus what the rest of the walker keeps there
-const walkerGpuCapacity: Int = 288
-
-# Per-frame scratch shared across systems: timing and the render/park decision.
-type Frame {
-  deltaTime: Float
-  now: Float64
-  startT: Float64
-  prevT: Float64
-  time: Float
-  aspect: Float
-  needsRender: Bool
-  dbgDidWork: Bool
-  taaSettleFrames: Int
-  renderedOnce: Bool
-  headless: Bool
-  # The window was resized since the last frame. Gpu2d.windowResized() is
-  # cleared when read, so frameBegin reads it once (resizeUiToWindow) and
-  # the rest of the frame reads this
-  resized: Bool
-}
-
-# WalkerCamera + cameraUpdate live in CameraSystem/ (#548, foldered #743).
-# RenderSystem lives in RenderSystem/; the per-system state types live with their
-# systems. app.rae keeps only the cross-cutting Frame / WalkerInput / CharacterSystem /
-# WalkerPersist that no single system owns.
-type App {
-  # #738: the ECS WalkerWorld — the authoritative gameplay world (EntityAllocator +
-  # Transform3D/WorldTransform3D/Material3D tables); the character, crowd, terrain
-  # and grass live here.
-  world: WalkerWorld
-  frame: Frame
-  inputSystem: WalkerInput
-  cameraSystem: WalkerCamera
-  characterSystem: CharacterSystem
-  terrainSystem: WalkerTerrain
-  renderSystem: RenderSystem
-  profiler: Profiler  # #764: was lib/profile.rae gProf* globals
-  grassCompute: GrassCompute  # #764: was lib/GrassCompute.rae gGrass* globals
-  physicsSystem: WalkerPhysics  # fixed-step sim seam (physics.rae, #553)
-  netSystem: WalkerNet  # multiplayer seam (net.rae, #554)
-  players: PlayerRoster  # who the local player controls (players.rae, #546)
-  persist: WalkerPersist
-  wadeSplash: WadeSplash  # the spray of wading feet (lib/water/WadeSplash)
-  waterSystem: WaterSystem  # the FFT sea at the biome water plane (lib/water/IslandSea)
-  idIssuer: IdIssuer  # the root's shared ID issuer (#869)
-  gpuResources: opt GpuResources  # the App-owned GPU manager water's IDs live in (#873)
-  ok: Bool
-}
+const walkerGpuCapacity: Int = 96
 
 # ----- setup ---------------------------------------------------------------
-func createApp() ret App {
+func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
   unsafe {
-    Gpu2d.initWindow(
-      width: 1280
-      height: 800
-      title: "143: Rae 3D — walker in a huge forest [deferred]"
-    )
+    Gpu2d.initWindow(width: 1280, height: 800, title: settings.title)
     var idIssuer: IdIssuer = IdIssuer.create()
     var windowGeometry: WindowGeometry = createWindowGeometry(
       dir: dir()
-      name: "window.{state143AppId}.geometry"
+      name: "window.{settings.appId}.geometry"
     )
     restoreWindowGeometry(windowGeometry: windowGeometry)
     let extentW: Float = windowExtentW()
@@ -167,7 +122,8 @@ func createApp() ret App {
       radiusFrac: 0.14
     )
 
-    let assets: String = "examples/136_walker_character/assets/"
+    let assets: String = settings.assets
+    let biome: BiomeConfig = walkerBiome(land: settings.land)
     let gpuUi: Gpu2dUi = loadUiAssets(
       dir: assets
       textFontName: "Roboto-Regular"
@@ -253,10 +209,10 @@ func createApp() ret App {
       )} ch / {walkClip.duration}s, run {clipChannelCount(c: runClip)} ch / {runClip.duration}s"
     )
 
-    let groundZ: Float = 0.0 - 1.0
+    let groundZ: Float = -1.0
     var characterController: ThirdPersonController = createThirdPersonController()
     # #739: the WalkerWorld holds the hero + crowd as entities; built here so
-    # createApp can populate it, then moved into the App below.
+    # createWalkerApp can populate it, then moved into the app below.
     var walkerWorld: WalkerWorld = createWalkerWorld()
 
     # #745: quat rotation, not Euler Vec3. The model is authored Z-up-rotated by
@@ -264,15 +220,15 @@ func createApp() ret App {
     # (T*R*S) matches the old modelMatrix for this single-axis case exactly.
     let partTransform: Transform3D = {
       position: Vec3.create(
-        x: 0.0 - midX * modelScale
-        y: 0.0 - midZ * modelScale
+        x: -midX * modelScale
+        y: -midZ * modelScale
         z: groundZ - footY * modelScale
       )
       rotation: Quat.fromAxisAngle(axis: Vec3.create(x: 1.0, y: 0.0, z: 0.0), angle: 1.5707963)
       scale: Vec3.create(x: modelScale, y: modelScale, z: modelScale)
     }
     let basePartModel: Mat4 = transform3dToMatrix(t: partTransform)
-    groundWalker(controller: characterController, groundZ: groundZ, biome: forestBiomeConfig())
+    groundWalker(controller: characterController, groundZ: groundZ, biome: biome)
     var partModel: Mat4 = walkerWorldModel(
       baseModel: basePartModel
       controller: characterController
@@ -281,7 +237,13 @@ func createApp() ret App {
     var light: Light3d = defaultLight3d()
     # #905/#921: the renderer owns the mesh + skin stores the walker parts,
     # terrain / grass / water meshes are uploaded into, so it exists first.
+    # The forward one: one 4x MSAA pass (docs/forward-msaa-study.md), with
+    # SSAO fed by a 1x depth + normal pre-pass (forward-rae-6).
     var renderer: DeferredRenderer = createDeferredRendererWithUi()
+    if settings.forward {
+      renderer = createForwardRendererWithSsao(withUi: true)
+      log("[render] path: forward (4x MSAA) with SSAO")
+    }
 
     let pngBytes: List(Int) = Sys.readFileBytes(path: "{assets}walker_palette.png")
     var atlasW: Int = 0
@@ -348,34 +310,23 @@ func createApp() ret App {
       Sys.exit(code: 1)
     }
 
-    # The ground palette and grass style calibrated for this example's neutral
-    # ACES grade — a painted meadow green, sand that reads as sand rather than
-    # snow — composed with the lib terrain parts and validated at build.
-    rendererSetTerrainShaderWithConstants(
+    setWalkerTerrainShader(renderer: renderer, forward: settings.forward, biome: biome)
+    var terrainSystem: WalkerTerrain = createWalkerTerrain(
       renderer: renderer
-      shader: shader(files: [
-        "lib/noise.wgsl"
-        "lib/world_biome.wgsl"
-        "assets/terrain_palette.wgsl"
-        "lib/terrain_grass_painted.wgsl"
-        "lib/terrain_detail_painted.wgsl"
-        "lib/terrain_splat.wgsl"
-      ])
-      # No island: the shader's island radius is the forest world's
-      constants: forestBiomeConstants()
-    )
-    var terrainSystem: WalkerTerrain = createTerrainSystem(
-      renderer: renderer
-      world: walkerWorld
+      allocator: walkerWorld.allocator
+      transforms: walkerWorld.transforms
+      propKinds: walkerWorld.propKinds
       assets: assets
+      gridSide: walkerGridSide(land: settings.land)
       groundZ: groundZ
+      biome: biome
+      forest: walkerForestSettings(land: settings.land)
     )
 
-    let cloneCount: Int = 5
-    var crowdEntities: List(EntityId) = List.create(EntityId, cap: cloneCount)
+    let cloneCount: Int = walkerCrowdCount
     let firstPart: MeshHandle = meshHandle(id: firstPartId, generation: 1)
     var characterClones: InstanceBatch = createInstanceBatch(mesh: firstPart, capacity: cloneCount)
-    # The physics cubes: one unit box, scaled per cube (PhysicsSystem)
+    # The physics cubes: one unit box, scaled per cube (app3d/WalkerPhysics)
     let cubeMesh: MeshHandle = uploadMeshDataForTerrain(
       renderer: renderer
       mesh: makeBox(size: 1.0)
@@ -408,8 +359,8 @@ func createApp() ret App {
     )
     snapCameraRigView(rig: rig)
     # Screenshot camera (#857): RAE_WALKER_CAMERA holds the twelve space-separated
-    # values of CameraRig.stateString, so a headless frame can look at the sea
-    # or the shore instead of the spawn (mode 1 is the free camera).
+    # values of CameraRig.stateString, so a headless frame can look elsewhere
+    # than the spawn (mode 1 is the free camera).
     let cameraOverride: String = Sys.getEnv(name: "RAE_WALKER_CAMERA")
     if cameraOverride.length() > 0 {
       let overrideParts: List(String) = cameraOverride.split(sep: " ")
@@ -431,87 +382,29 @@ func createApp() ret App {
     var speed: Float = 1.0
     var toonShading: Bool = true
 
-    var clipPanel: ControlPanel = createControlPanel(hostNodeId: "ClipRow")
-    addPanelButton(
-      panel: clipPanel
-      id: "idle"
-      label: "Idle"
-      actionId: "clip.idle"
-      group: 1
-    )
-    addPanelButton(
-      panel: clipPanel
-      id: "walk"
-      label: "Walk"
-      actionId: "clip.walk"
-      group: 1
-    )
-    addPanelButton(
-      panel: clipPanel
-      id: "walkFast"
-      label: "Walk fast"
-      actionId: "clip.walkFast"
-      group: 1
-    )
-    addPanelButton(
-      panel: clipPanel
-      id: "run"
-      label: "Run"
-      actionId: "clip.run"
-      group: 1
-    )
-    buildControlPanel(
-      panel: clipPanel
+    var clipPanel: ControlPanel = createClipPanel(
       world: uiWorld
       uiSystems: uiSystems
-      res: gpuUi
+      gpuUi: gpuUi
     )
-
-    var transport: ControlPanel = createControlPanel(hostNodeId: "TransportRow")
-    transport.buttonW = 84.0
-    buildControlPanel(
-      panel: transport
+    var transport: ControlPanel = createTransportPanel(
       world: uiWorld
       uiSystems: uiSystems
-      res: gpuUi
+      gpuUi: gpuUi
     )
-
-    # Character-switch buttons (#546): Prev / Next cycle the controlled character,
-    # the same as Page Up/Down and keys 1/2. Momentary (group 0), not a selection.
-    var charPanel: ControlPanel = createControlPanel(hostNodeId: "CharacterRow")
-    charPanel.buttonW = 84.0
-    addPanelButton(
-      panel: charPanel
-      id: "prev"
-      label: "< Prev"
-      actionId: "char.prev"
-      group: 0
-    )
-    addPanelButton(
-      panel: charPanel
-      id: "next"
-      label: "Next >"
-      actionId: "char.next"
-      group: 0
-    )
-    buildControlPanel(
-      panel: charPanel
+    var charPanel: ControlPanel = createCharacterPanel(
       world: uiWorld
       uiSystems: uiSystems
-      res: gpuUi
-    )
-    setNodeText(
-      world: uiWorld
-      nodeId: "CharacterReadout"
-      value: "Controlling 1 / {1 + cloneCount}"
+      gpuUi: gpuUi
+      characterCount: 1 + cloneCount
     )
 
     let headless: Bool = Sys.getEnv(name: "RAE_SDL_HEADLESS_MS").length() > 0 or Sys.getEnv(
       name: "RAE_HEADLESS_FRAMES"
     ).length() > 0
     if not headless {
-      let saved: String = readHotReloadStateFor(appId: state143AppId)
-      if restore143State(
+      let saved: String = readHotReloadStateFor(appId: settings.appId)
+      if restoreWalkerState(
         raw: saved
         clipIndex: clipIndex
         playing: playing
@@ -531,15 +424,14 @@ func createApp() ret App {
 
     # Nobody starts in the sea. The origin is not guaranteed land — the island mask
     # only guarantees land is SOMEWHERE inside the radius.
-    spawnOnLand(controller: characterController, groundZ: groundZ, biome: forestBiomeConfig())
-    # The island's forest, with a clearing around the spawn for the cube stacks
-    let treeCount: Int = plantForest(
+    spawnOnLand(controller: characterController, groundZ: groundZ, biome: biome)
+    let treeCount: Int = plantWalkerForest(
+      land: settings.land
       terrainSystem: terrainSystem
+      world: walkerWorld
       spawnX: characterController.position.x
       spawnY: characterController.position.y
-      groundZ: groundZ
     )
-    log("[forest] {treeCount} trees planted")
     partModel = walkerWorldModel(baseModel: basePartModel, controller: characterController)
 
     # #739: the hero is an entity carrying its ThirdPersonController + Transform3D.
@@ -557,46 +449,13 @@ func createApp() ret App {
       transform: controllerTransform3D(controller: characterController)
     )
 
-    loop var cloneIndex: Int = 0, cloneIndex < cloneCount, ++cloneIndex {
-      let spiralAngle: Float = cloneIndex.toFloat() * 2.3999632
-      let spiralRadius: Float = 3.5 + cloneIndex.toFloat() * 0.45
-      let cloneX: Float = characterController.position.x + Math.cos(x: spiralAngle) * spiralRadius
-      let cloneY: Float = characterController.position.y + Math.sin(x: spiralAngle) * spiralRadius
-      let cloneSpot: Vec3 = terrainFindLand(x: cloneX, y: cloneY)
-      let cloneZ: Float = terrainHeightAt(x: cloneSpot.x, y: cloneSpot.y, groundZ: groundZ) - groundZ
-      # Each crowd member gets its OWN controller (so the player can switch to and
-      # drive it, #546) plus its OWN clip + starting phase (#547). A deterministic
-      # mix of walk/run/idle keeps the demo lively without loading extra assets.
-      var cloneController: ThirdPersonController = createThirdPersonController()
-      cloneController.position.x = cloneSpot.x
-      cloneController.position.y = cloneSpot.y
-      cloneController.position.z = cloneZ
-      cloneController.heading = spiralAngle
-      # #739: each crowd member is an entity — controller + AnimationState + a
-      # Transform3D synced from the controller. Its render model is derived from
-      # the controller (walkerWorldModel) at draw time, so no stored model.
-      let cloneEntityId: EntityId = walkerWorldAddEntity(world: walkerWorld)
-      walkerWorldSetController(
-        world: walkerWorld
-        entityId: cloneEntityId
-        controller: cloneController
-      )
-      walkerWorldSetAnim(
-        world: walkerWorld
-        entityId: cloneEntityId
-        anim: AnimationState {
-          clipIndex: crowdClipFor(index: cloneIndex)
-          animTime: cloneIndex.toFloat() * 0.4
-          playbackScale: 1.0
-        }
-      )
-      walkerWorldSetTransform(
-        world: walkerWorld
-        entityId: cloneEntityId
-        transform: controllerTransform3D(controller: cloneController)
-      )
-      crowdEntities.add(value: cloneEntityId)
-    }
+    var crowdEntities: List(EntityId) = spawnWalkerCrowd(
+      world: walkerWorld
+      hero: characterController
+      biome: biome
+      groundZ: groundZ
+      count: cloneCount
+    )
     updateInfiniteTerrain(
       terrainSystem: terrainSystem
       renderer: renderer
@@ -604,60 +463,15 @@ func createApp() ret App {
       transforms: walkerWorld.transforms
       playerPosition: characterController.position
     )
-    # Physics (lib/box3d/ecs): the island's height field, a mover for the hero and
-    # each crowd member, and the cube stacks near the hero.
-    var physicsSystem: WalkerPhysics = createWalkerPhysics(
-      biome: forestBiomeConfig()
+    var physicsSystem: WalkerPhysics = createWalkerAppPhysics(
+      land: settings.land
+      biome: biome
       groundZ: groundZ
-      fieldCount: 161
-      followDistance: 50.0
-    )
-    if addGroundAround(
-      physicsSystem: physicsSystem
-      centre: controllerFeet(controller: characterController, groundZ: groundZ)
-    ) is false {
-      log("[physics] Box3D refused the island height field")
-    }
-    addCharacterBody(
-      physicsSystem: physicsSystem
-      entityId: heroEntityId
-      feet: controllerFeet(controller: characterController, groundZ: groundZ)
-    )
-    loop let crowdEntityId: view EntityId in crowdEntities {
-      addCharacterBody(
-        physicsSystem: physicsSystem
-        entityId: crowdEntityId
-        feet: controllerFeet(
-          controller: controllerOf(world: walkerWorld, entityId: crowdEntityId)
-          groundZ: groundZ
-        )
-      )
-    }
-    let cubeCount: Int = spawnCubeStacks(
-      physicsSystem: physicsSystem
-      allocator: walkerWorld.allocator
-      transforms: walkerWorld.transforms
-      spawnPoint: controllerFeet(controller: characterController, groundZ: groundZ)
-    )
-    let trunkCount: Int = createTrunkPool(
-      physicsSystem: physicsSystem
-      allocator: walkerWorld.allocator
-      transforms: walkerWorld.transforms
-    )
-    let rockCount: Int = placeRockBodies(
-      physicsSystem: physicsSystem
-      propKinds: walkerWorld.propKinds
-      transforms: walkerWorld.transforms
-    )
-    let trunksPlaced: Bool = updateTrunkPool(
-      physicsSystem: physicsSystem
-      transforms: walkerWorld.transforms
-      forest: terrainSystem.forest
-      focus: controllerFeet(controller: characterController, groundZ: groundZ)
-      force: true
-    )
-    log(
-      "[physics] Box3D: a height field round the walker, {1 + cloneCount} movers, {cubeCount} cubes, a pool of {trunkCount} tree trunks ({physicsSystem.trunksOnTrees} on the trees nearest the spawn), {rockCount} rocks"
+      world: walkerWorld
+      terrainSystem: terrainSystem
+      hero: characterController
+      heroEntityId: heroEntityId
+      crowdEntities: crowdEntities
     )
     # #746: exercise the physics/net ECS seams once at startup — spawn/despawn via
     # generational entities, step a Box3D body. Leaves the world untouched.
@@ -714,7 +528,7 @@ func createApp() ret App {
     if hourSetting.length() > 0 {
       startHour = hourSetting.toFloat()
     }
-    var settings: SettingsState = createSettingsState(
+    var settingsState: SettingsState = createSettingsState(
       scene: 1
       sceneCount: 1
       speed: speed
@@ -722,7 +536,11 @@ func createApp() ret App {
       hour: startHour
       skyModel: SettingsSkyModel.preetham
     )
-    setTaaEnabled(renderer: renderer, on: settings.taa)  # default FXAA; the settings pane toggles TAA
+    # Default FXAA, the settings pane toggles TAA; a forward frame has 4x MSAA
+    # and no TAA
+    if not settings.forward {
+      setTaaEnabled(renderer: renderer, on: settingsState.taa)
+    }
     # The camera bar, the settings panel's edge tab (in the slot between the
     # main column and the panel) and the settings (app3d/EditorPanel)
     let chromeMounted: Bool = mountEditorChrome(world: uiWorld, uiSystems: uiSystems, res: gpuUi)
@@ -730,19 +548,19 @@ func createApp() ret App {
       logWarnLine(ov: logOverlay, text: "editor chrome failed to mount")
     }
     walkerHideCameraChrome(world: uiWorld)
-    settingsApplyToWorld(settingsState: settings, world: uiWorld, uiSystems: uiSystems)
-    applyEditorPanelOpen(world: uiWorld, open: settings.open)
+    settingsApplyToWorld(settingsState: settingsState, world: uiWorld, uiSystems: uiSystems)
+    applyEditorPanelOpen(world: uiWorld, open: settingsState.open)
     setRendererSky(
       renderer: renderer
       sky: settingsBuildSky(
-        settingsState: settings
+        settingsState: settingsState
         data: hosekData
         turbidity: 3.0
         groundAlbedo: 0.30
       )
     )
-    light.sunDir = settingsSunDir(settingsState: settings)
-    light.sunColor = settingsSunColor(settingsState: settings)
+    light.sunDir = settingsSunDir(settingsState: settingsState)
+    light.sunColor = settingsSunColor(settingsState: settingsState)
     log(
       "[ui] panel buttons: {clipPanel.buttonEntities.length} clip, {transport.buttonEntities.length} transport, editor chrome {chromeMounted}"
     )
@@ -751,13 +569,30 @@ func createApp() ret App {
     var drs: RenderScaleController = createRenderScaleController(targetFps: 60.0)
 
     # #905: the renderer owns the mesh store the water grid and the particle
-    # box are uploaded into, so both systems are built before it moves into App.
-    let wadeSplash: WadeSplash = createWadeSplash(renderer: renderer, cap: 256)
-    let waterSystem: WaterSystem = createWaterSystem(
-      renderer: renderer
-      body: createIslandSea(renderer: renderer, groundZ: groundZ, biome: forestBiomeConfig())
+    # quad are uploaded into, so both systems are built before it moves into
+    # the app.
+    var wadeSplash: opt WadeSplash = none
+    var waterSystem: opt WaterSystem = none
+    var gpuCapacity: Int = walkerGpuCapacity
+    if walkerHasSea(settings: settings) {
+      wadeSplash = createWadeSplash(renderer: renderer, cap: 256)
+      waterSystem = createWaterSystem(
+        renderer: renderer
+        body: createIslandSea(renderer: renderer, groundZ: groundZ, biome: biome)
+      )
+      gpuCapacity = walkerGpuCapacityWithSea
+    }
+    # The GPU grass grows on the world's terrain: its compute shader gets the
+    # world's island radius
+    var grassCompute: GrassCompute = createGrassCompute()
+    grassSetComputeShaderWithConstants(
+      grass: grassCompute
+      shader: defaultGrassComputeShader()
+      constants: islandConstantsFor(cfg: biome)
     )
-    ret App {
+    ret WalkerApp {
+      settings: settings
+      biome: biome
       world: own walkerWorld
       frame: {
         deltaTime: 0.0
@@ -782,7 +617,7 @@ func createApp() ret App {
         clipPanel: own clipPanel
         transport: own transport
         charPanel: own charPanel
-        settings: own settings
+        settings: own settingsState
         panelScroll: panelScroll
         dbg: own dbg
         uiModes: own uiModes
@@ -830,7 +665,7 @@ func createApp() ret App {
         cubeBatch: own cubeBatch
       }
       profiler: Profile.createProfiler()
-      grassCompute: createForestGrassCompute()
+      grassCompute: own grassCompute
       physicsSystem: own physicsSystem
       netSystem: { role: 0, tick: 0 }
       players: createPlayerRoster(count: 1 + cloneCount)
@@ -838,15 +673,15 @@ func createApp() ret App {
       wadeSplash: own wadeSplash
       waterSystem: own waterSystem
       idIssuer: own idIssuer
-      gpuResources: GpuResources.create(issuer: idIssuer, capacity: walkerGpuCapacity)
+      gpuResources: GpuResources.create(issuer: idIssuer, capacity: gpuCapacity)
       ok: true
     }
   }
 }
 
 # ----- the loop ------------------------------------------------------------
-func runWalkerApp() ret Int {
-  var app: App = createApp()
+func runWalkerApp(settings: view WalkerAppSettings) ret Int {
+  var app: WalkerApp = createWalkerApp(settings: settings)
   # #739/#740/#741: the WalkerWorld holds the hero + crowd (controllers), the
   # skinned body parts (PartRoughness), and the terrain props + heightfield tiles
   # (TerrainProp) — all recycled ECS entities.
@@ -855,36 +690,44 @@ func runWalkerApp() ret Int {
       world: app.world
     )} parts + hero + crowd + terrain)"
   )
-  prepareSplashPreview(
-    wadeSplash: app.wadeSplash
-    cameraSystem: app.cameraSystem
-    groundZ: app.characterSystem.groundZ
-  )
-  Profile.maybeAutoStart(profiler: app.profiler)
-  # RAE_114_PHYSICS_TEST=1: drive the hero into a cube stack and jump, report,
-  # and quit (PhysicsSelfTest), instead of the window loop
-  let physicsTest: Bool = Sys.getEnv(name: "RAE_114_PHYSICS_TEST").length() > 0
-  let splashTest: Bool = Sys.getEnv(name: "RAE_WALKER_SPLASH_TEST").length() > 0
-  var exitCode: Int = 0
-  if splashTest {
-    exitCode = runSplashPoseTest(
-      characterSystem: app.characterSystem
-      world: app.world
-      wadeSplash: app.wadeSplash
-    )
-  }
-  if physicsTest {
-    exitCode = runPhysicsSelfTest(
-      physicsSystem: app.physicsSystem
-      world: app.world
-      forest: app.terrainSystem.forest
-      heroEntityId: app.characterSystem.heroEntityId
+  if let wadeSplash: mod WadeSplash => app.wadeSplash {
+    prepareSplashPreview(
+      wadeSplash: wadeSplash
+      cameraSystem: app.cameraSystem
+      biome: app.biome
       groundZ: app.characterSystem.groundZ
     )
   }
+  Profile.maybeAutoStart(profiler: app.profiler)
+  # RAE_WALKER_PHYSICS_TEST=1: drive the hero into a cube stack and jump, check
+  # the trunks, rocks and bushes, report and quit (app3d/WalkerSelfTest),
+  # instead of the window loop. RAE_WALKER_SPLASH_TEST=1: the wading spray's
+  # pose check (app3d/WalkerSplash), where there is a sea.
+  let physicsTest: Bool = Sys.getEnv(name: "RAE_WALKER_PHYSICS_TEST").length() > 0
+  let splashTest: Bool = Sys.getEnv(name: "RAE_WALKER_SPLASH_TEST").length() > 0
+  var exitCode: Int = 0
+  if splashTest {
+    exitCode = 1
+    if let wadeSplash: mod WadeSplash => app.wadeSplash {
+      exitCode = runSplashPoseTest(
+        characterSystem: app.characterSystem
+        world: app.world
+        wadeSplash: wadeSplash
+      )
+    }
+  }
+  if physicsTest {
+    exitCode = runWalkerSelfTest(
+      physicsSystem: app.physicsSystem
+      world: app.world
+      forest: app.terrainSystem.forest
+      pooledTrunks: app.settings.land is WalkerLand.forest
+      heroEntityId: app.characterSystem.heroEntityId
+    )
+  }
   loop not physicsTest and not splashTest and not Gpu2d.pollClose() {
-    frameBegin(app: app)
-    updateApp(app: app)
+    beginWalkerFrame(app: app)
+    updateWalkerApp(app: app)
     if Gpu2d.shouldRenderFrame(appNeedsRender: app.frame.needsRender) is false {
       # Park until the OS has something to say (shared policy, lib/ui/event_loop).
       Gpu2d.waitEvents(timeoutSec: nextWaitTimeoutSec(
@@ -897,7 +740,7 @@ func runWalkerApp() ret Int {
       ))
     } else {
       if let resources: mod GpuResources => app.gpuResources {
-        renderApp(
+        renderWalkerApp(
           uiSystems: app.inputSystem.uiSystems
           cameraSystem: app.cameraSystem
           characterSystem: app.characterSystem
@@ -909,6 +752,7 @@ func runWalkerApp() ret Int {
           terrainSystem: app.terrainSystem
           wadeSplash: app.wadeSplash
           waterSystem: app.waterSystem
+          biome: app.biome
           resources: resources
           profiler: app.profiler
           grassCompute: app.grassCompute
@@ -921,7 +765,9 @@ func runWalkerApp() ret Int {
   }
   if let resources: mod GpuResources => app.gpuResources {
     grassShutdown(grass: app.grassCompute, resources: resources)
-    waterShutdown(waterSystem: app.waterSystem, resources: resources)
+    if let waterSystem: mod WaterSystem => app.waterSystem {
+      waterShutdown(waterSystem: waterSystem, resources: resources)
+    }
     spriteShutdown(cache: app.terrainSystem.sprites, resources: resources)
     shutdown(resources: resources)
   }

@@ -1,7 +1,7 @@
-# AppUpdate — the walker demo's per-frame update (#918 split of App for the
-# 1000-line cap): frameBegin, the controlled character's position / heading
-# reads, the clip switch and updateApp itself. App keeps createApp (the world
-# and renderer setup) and runWalkerApp (the loop).
+# app3d/WalkerAppUpdate — the walker app shell's per-frame update
+# (app3d/WalkerApp): beginWalkerFrame (timing, resize, dynamic resolution) and
+# updateWalkerApp (input, UI, camera, the controlled character's physics and
+# clip, the terrain streaming, the hot-reload state, the render decision).
 import Math
 import Profile
 import Gpu2d
@@ -13,6 +13,11 @@ import Vec3
 open box3d/ecs/Physics
 import Sys
 open GbufferInstanced
+open Particles
+open water/Water
+open water/WaterSystem
+open water/WadeSplash
+open water/WaterFft
 open gpu/GpuResources
 open gpu/GpuLifetime
 open GrassCompute
@@ -59,10 +64,42 @@ open app3d/WalkerUi
 open app3d/WalkerNet
 open app3d/WalkerTerrain
 open app3d/WalkerTerrainBodies
-open box3d/ecs/NatureBodies
+open app3d/WalkerAppSetup
+open app3d/WalkerRender
+open app3d/WalkerState
+
+# The walker app: the system list (WalkerApp.rae's header has the convention)
+type WalkerApp {
+  # #738: the ECS WalkerWorld — the authoritative gameplay world (EntityAllocator +
+  # Transform3D/WorldTransform3D/Material3D tables); the character, crowd, terrain
+  # and grass live here.
+  settings: WalkerAppSettings
+  # The world's terrain field (walkerBiome of the settings' land)
+  biome: BiomeConfig
+  world: WalkerWorld
+  frame: WalkerFrame
+  inputSystem: WalkerInput
+  cameraSystem: WalkerCamera
+  characterSystem: CharacterSystem
+  terrainSystem: WalkerTerrain
+  renderSystem: WalkerRender
+  profiler: Profiler  # #764: was lib/profile.rae gProf* globals
+  grassCompute: GrassCompute  # #764: was lib/GrassCompute.rae gGrass* globals
+  physicsSystem: WalkerPhysics  # fixed-step sim seam (physics.rae, #553)
+  netSystem: WalkerNet  # multiplayer seam (net.rae, #554)
+  players: PlayerRoster  # who the local player controls (players.rae, #546)
+  persist: WalkerPersist
+  # The spray of wading feet (lib/water/WadeSplash) and the FFT sea at the
+  # biome water plane (lib/water/IslandSea); none in a forward frame
+  wadeSplash: opt WadeSplash
+  waterSystem: opt WaterSystem
+  idIssuer: IdIssuer  # the root's shared ID issuer (#869)
+  gpuResources: opt GpuResources  # the app-owned GPU manager the sea and the grass compute live in (#873)
+  ok: Bool
+}
 
 # ----- per-frame timing + resize -------------------------------------------
-func frameBegin(app: mod App) {
+func beginWalkerFrame(app: mod WalkerApp) {
   Profile.tick(profiler: app.profiler)
   app.frame.resized = resizeUiToWindow(
     world: app.inputSystem.world
@@ -84,7 +121,7 @@ func frameBegin(app: mod App) {
 }
 
 # ----- update phase: input, UI, camera, character, terrain, grass, persist --
-func updateApp(app: mod App) {
+func updateWalkerApp(app: mod WalkerApp) {
   let deltaTime: Float = app.frame.deltaTime
   let now: Float64 = app.frame.now
   # Multiplayer seam (offline no-op today, #554): pull remote intents in before
@@ -271,6 +308,7 @@ func updateApp(app: mod App) {
     transforms: app.world.transforms
     playerPosition: followPos
   )
+  # The reused rock entities moved: give them their new bodies
   if terrainWrapped {
     let rockCount: Int = placeRockBodies(
       physicsSystem: app.physicsSystem
@@ -278,10 +316,27 @@ func updateApp(app: mod App) {
       transforms: app.world.transforms
     )
   }
+  # The wide forest is far bigger than one physics ground: it follows the
+  # walker, and the trunk pool stands on the trees nearest it
+  if app.settings.land is WalkerLand.forest {
+    let feet: Vec3 = Vec3.create(
+      x: followPos.x
+      y: followPos.y
+      z: app.characterSystem.groundZ + followPos.z
+    )
+    let groundMoved: Bool = followGround(physicsSystem: app.physicsSystem, position: feet)
+    let trunksMoved: Bool = updateTrunkPool(
+      physicsSystem: app.physicsSystem
+      transforms: app.world.transforms
+      forest: app.terrainSystem.forest
+      focus: feet
+      force: false
+    )
+  }
 
   netPublishIntent(netSystem: app.netSystem, world: app.world)
 
-  # Read in frameBegin: windowResized() is cleared on read, and reading it
+  # Read in beginWalkerFrame: windowResized() is cleared on read, and reading it
   # again here always gave false, so a resize was never saved
   let resized: Bool = app.frame.resized
   if resized {
@@ -292,8 +347,8 @@ func updateApp(app: mod App) {
   if app.persist.stateDirty and not app.frame.headless {
     if (now - app.persist.lastStateSave) as Float >= 0.25 {
       writeHotReloadStateFor(
-        appId: state137AppId
-        state: serialize137State(
+        appId: app.settings.appId
+        state: serializeWalkerState(
           clipIndex: app.characterSystem.clipIndex
           playing: app.characterSystem.playing
           speed: app.characterSystem.speed
@@ -311,11 +366,31 @@ func updateApp(app: mod App) {
   let hadUiEvents: Bool = uiActionCount(world: app.inputSystem.world) > 0 or app.inputSystem.ui.pointer.down or app.inputSystem.ui.pointer.pressed or app.inputSystem.ui.pointer.released
   let logChanged: Bool = app.inputSystem.logOverlay.revision is not app.inputSystem.lastLogRevision
   let transitionActive: Bool = app.characterSystem.transitionElapsed < clipTransitionDuration
+  # Live splash droplets are an animation source: keep rendering until the last one
+  # dies out, or the wait-loop would freeze them mid-air when you stop wading (#84,
+  # the "feed animation sources into the loop" lesson in AGENTS.md).
+  var splashesAlive: Bool = false
+  if let wadeSplash: view WadeSplash => app.wadeSplash {
+    splashesAlive = wadeSplashAlive(wadeSplash: wadeSplash)
+  }
   # Bodies still moving (a toppling stack, a character in the air) are an
   # animation source too; the venue's static body is never awake
   let physicsAwake: Bool = physicsCounters(physics: app.physicsSystem.physics).awakeBodyCount > 0 or characterMoved
-  var needsRender: Bool = app.characterSystem.playing or transitionActive or settingsChanged or cameraMoved or characterMoved or terrainWrapped or physicsAwake or hadUiEvents or logChanged or resized or scrolled or app.frame.renderedOnce is false
-  # No TAA to settle: the forward frame is final the moment it is drawn
+  var needsRender: Bool = app.characterSystem.playing or transitionActive or settingsChanged or cameraMoved or characterMoved or terrainWrapped or splashesAlive or physicsAwake or hadUiEvents or logChanged or resized or scrolled or app.frame.renderedOnce is false
+  if app.frame.taaSettleFrames > 0 {
+    needsRender = true  # only meaningful with TAA on
+  }
   app.frame.dbgDidWork = needsRender
+  if needsRender {
+    if app.inputSystem.settings.taa is false or app.settings.forward {
+      # FXAA has no history to converge, and a forward frame (4x MSAA) is
+      # final the moment it is drawn
+      app.frame.taaSettleFrames = 0
+    } else if app.characterSystem.playing or settingsChanged or cameraMoved or hadUiEvents or resized {
+      app.frame.taaSettleFrames = 6
+    } else {
+      app.frame.taaSettleFrames = app.frame.taaSettleFrames - 1
+    }
+  }
   app.frame.needsRender = needsRender
 }
