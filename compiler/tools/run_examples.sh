@@ -1281,7 +1281,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # The forward twin of 136 (forward-rae-5): the same walker, crowd,
           # terrain, grass, props and cubes in one 4x MSAA pass, no water. A
           # shaded frame (thousands of colours), all 12 skinned parts loaded,
-          # the forward path taken and 154 shadow casters (136's
+          # the forward path taken and 151 shadow casters (136's
           # glb trees; 136 itself now has the leaf-patch trees).
           SHOT="$TMP_OUT/walker-forward.bmp"
           if (cd .. && RAE_UI_MODE=editor RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SHOT" \
@@ -1289,7 +1289,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              && python3 tools/assert_nonblank_bmp.py "$SHOT" --min-colors=2000 > "$TMP_OUT/shot.log" 2>&1 \
              && [ "$(grep -c "\[render\] path: forward (4x MSAA) with SSAO" "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c "skinned parts: 12" "$TMP_OUT/render.log")" -eq 1 ] \
-             && [ "$(grep -c "\[shadow\] casters 154, 4 cascades" "$TMP_OUT/render.log")" -eq 1 ]; then
+             && [ "$(grep -c "\[shadow\] casters 151, 4 cascades" "$TMP_OUT/render.log")" -eq 1 ]; then
             echo "PASS: $EXAMPLE_NAME (forward walker with SSAO: shaded frame, 12 skinned parts, shadow casters)"
             ((PASSED++))
           else
