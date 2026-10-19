@@ -1,0 +1,328 @@
+{
+  "type": "Scene",
+  "version": 2,
+  "root": "SettingsRoot",
+  "import": [
+    "Theme"
+  ],
+  "_note": "The settings dialog (screenSystem/SettingsView). Hidden at rest; the settingsOpen state shows it, the darkTheme state turns the dark theme switch on.",
+  "nodes": {
+    "SettingsRoot": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 1080.0,
+        "h": 2280.0
+      },
+      "ExtentAnchor": {
+        "h": "Fill"
+      },
+      "Layout": {
+        "type": "Stack",
+        "gap": 0.0,
+        "alignCross": "Start"
+      },
+      "Active": {
+        "value": false
+      },
+      "LayerTag": {
+        "id": "dialog"
+      },
+      "Children": [
+        "SettingsScrim",
+        "SettingsPanel"
+      ]
+    },
+    "SettingsScrim": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 0.0,
+        "h": 0.0
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fill"
+        }
+      },
+      "Shape": {
+        "kind": "Rect",
+        "fill": {
+          "r": 0,
+          "g": 0,
+          "b": 0,
+          "a": 140
+        }
+      },
+      "OnClick": {
+        "actionId": "settings.close"
+      },
+      "PointerEvents": {
+        "enabled": true,
+        "cursor": "default",
+        "blockChildren": false
+      }
+    },
+    "SettingsPanel": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 906.0,
+        "h": 485.4
+      },
+      "Align": {
+        "x": "Center",
+        "y": "Center"
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "surface",
+        "radius": 52.048193
+      },
+      "Padding": {
+        "l": 52.048193,
+        "t": 52.048193,
+        "r": 52.048193,
+        "b": 52.048193
+      },
+      "Layout": {
+        "type": "Vertical",
+        "gap": 34.698795,
+        "alignCross": "Start"
+      },
+      "PointerEvents": {
+        "enabled": true,
+        "cursor": "default",
+        "blockChildren": false
+      },
+      "Children": [
+        "SettingsTitle",
+        "DarkThemeRow",
+        "SettingsDone"
+      ]
+    },
+    "SettingsTitle": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 0.0,
+        "h": 69.39759
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Text": {
+        "text": "Settings",
+        "styleId": "pageTitle"
+      }
+    },
+    "DarkThemeRow": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 0.0,
+        "h": 121.445783
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Layout": {
+        "type": "Horizontal",
+        "gap": 26.024096,
+        "alignCross": "Center"
+      },
+      "Padding": {
+        "l": 26.024096,
+        "t": 17.349398,
+        "r": 26.024096,
+        "b": 17.349398
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": {
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "a": 14
+        },
+        "radius": 26.024096
+      },
+      "OnClick": {
+        "actionId": "settings.darkTheme"
+      },
+      "Children": [
+        "DarkThemeLabel",
+        "DarkThemeSwitch"
+      ]
+    },
+    "DarkThemeLabel": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 0.0,
+        "h": 56.385542
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Text": {
+        "text": "Dark theme",
+        "styleId": "trackTitle"
+      }
+    },
+    "DarkThemeSwitch": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 147.46988,
+        "h": 82.409639
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "outline",
+        "radius": 41.204819
+      },
+      "Layout": {
+        "type": "Stack",
+        "gap": 0.0,
+        "alignCross": "Start"
+      },
+      "Padding": {
+        "l": 8.674699,
+        "t": 8.674699,
+        "r": 8.674699,
+        "b": 8.674699
+      },
+      "OnClick": {
+        "actionId": "settings.darkTheme"
+      },
+      "Children": [
+        "DarkThemeKnob"
+      ]
+    },
+    "DarkThemeKnob": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 65.060241,
+        "h": 65.060241
+      },
+      "Align": {
+        "x": "Start",
+        "y": "Center"
+      },
+      "Shape": {
+        "kind": "Circle",
+        "fill": {
+          "r": 255,
+          "g": 255,
+          "b": 255,
+          "a": 255
+        }
+      }
+    },
+    "SettingsDone": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 0.0,
+        "h": 121.445783
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "accent",
+        "radius": "radiusPill"
+      },
+      "Layout": {
+        "type": "Stack",
+        "gap": 0.0,
+        "alignCross": "Start"
+      },
+      "OnClick": {
+        "actionId": "settings.close"
+      },
+      "Children": [
+        "SettingsDoneLabel"
+      ]
+    },
+    "SettingsDoneLabel": {
+      "Rect": {
+        "x": 0.0,
+        "y": 0.0,
+        "w": 0.0,
+        "h": 56.385542
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Align": {
+        "x": "Center",
+        "y": "Center"
+      },
+      "Text": {
+        "text": "Done",
+        "styleId": "pillLabel"
+      }
+    }
+  },
+  "states": {
+    "settingsOpen": {
+      "nodes": {
+        "SettingsRoot": {
+          "Active": {
+            "value": true
+          }
+        }
+      }
+    },
+    "darkTheme": {
+      "nodes": {
+        "DarkThemeSwitch": {
+          "Shape": {
+            "kind": "RoundedRect",
+            "fill": "accent",
+            "radius": 41.204819
+          }
+        },
+        "DarkThemeKnob": {
+          "Align": {
+            "x": "End",
+            "y": "Center"
+          }
+        }
+      }
+    }
+  },
+  "unitScale": 3
+}

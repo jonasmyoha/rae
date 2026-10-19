@@ -898,7 +898,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             grep -v '^\[present\]' "$TMP_OUT/render-rect.log" 2>/dev/null | sed 's/^/    /'
           fi
           # A .raepack as the PROJECT (projectSystem): 106's pack opens with
-          # its directory as the scene root, all 22 scenes under it scanned
+          # its directory as the scene root, all 23 scenes under it scanned
           # (sorted package paths from the pack's declared `scenes: { root:
           # "assets/scenes" }`, the first — Album — mounted), the chrome's
           # project panel listing them; RAE_UI_EDITOR_TEST_OPEN=9 then opens
@@ -911,7 +911,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              RAE_UI_EDITOR_TEST_OPEN=9 \
              RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
              perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-project.log" 2>&1 \
-             && grep -qE '\[ui-editor\] project examples/106_mobile_ui/106_mobile_ui.raepack: 22 scenes under examples/106_mobile_ui/assets/scenes/' "$TMP_OUT/render-project.log" \
+             && grep -qE '\[ui-editor\] project examples/106_mobile_ui/106_mobile_ui.raepack: 23 scenes under examples/106_mobile_ui/assets/scenes/' "$TMP_OUT/render-project.log" \
              && grep -qE '\[ui-editor\] mounted Album: [1-9][0-9]* nodes' "$TMP_OUT/render-project.log" \
              && grep -qE '\[ui-editor\] frame: iphone-15-pro 1179x2556 column 1080 safe 0,177,0,102' "$TMP_OUT/render-project.log" \
              && grep -qE '\[ui-editor\] open Home \(examples/106_mobile_ui/assets/scenes/Home.raescene\)' "$TMP_OUT/render-project.log" \
@@ -938,7 +938,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
              perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-picker.log" 2>&1 \
              && grep -qE '\[ui-editor\] mounted MainMenu: [1-9][0-9]* nodes, 0 diagnostics' "$TMP_OUT/render-picker.log" \
-             && grep -qE '\[ui-editor\] project examples/106_mobile_ui/106_mobile_ui.raepack: 22 scenes under examples/106_mobile_ui/assets/scenes/' "$TMP_OUT/render-picker.log" \
+             && grep -qE '\[ui-editor\] project examples/106_mobile_ui/106_mobile_ui.raepack: 23 scenes under examples/106_mobile_ui/assets/scenes/' "$TMP_OUT/render-picker.log" \
              && grep -qE '\[ui-editor\] reloaded examples/106_mobile_ui/assets/scenes/Album.raescene \(\+[1-9][0-9]* -[1-9][0-9]* nodes' "$TMP_OUT/render-picker.log" \
              && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=20 \
                 > "$TMP_OUT/screenshot-picker.log" 2>&1; then
@@ -1074,7 +1074,9 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # Finally a Library -> album tap runs the hero transition as an
           # ECS entity (ui/animationSystem/HeroTransitionSystem): the log
           # must show it start (t=0, both rects) and land (done), and the
-          # resting frame after it is non-blank.
+          # resting frame after it is non-blank. Last, the Profile page's
+          # settings button action opens the settings dialog and its switch
+          # flips the theme to light (screenSystem/SettingsView).
           SCREENSHOT="$TMP_OUT/mobile-ui.bmp"
           if (cd .. && RAE_UI_SCREEN=home RAE_UI_NO_SPOTIFY=1 RAE_AUTO_EXIT_SEC=1 \
              RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
@@ -1100,12 +1102,18 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              perl -e 'alarm shift; exec @ARGV' 40 "$TMP_OUT/app") > "$TMP_OUT/hero.log" 2>&1 \
              && grep -aq '\[hero\] start key=bjork_post from=' "$TMP_OUT/hero.log" \
              && grep -aq '\[hero\] done key=bjork_post' "$TMP_OUT/hero.log" \
-             && python3 tools/assert_nonblank_bmp.py "$TMP_OUT/hero.bmp" --min-colors=50 > "$TMP_OUT/hero-shot.log" 2>&1; then
-            echo "PASS: $EXAMPLE_NAME (Home screenshot, action audit clean, idle frame runs 0 app systems, scripted drag springs back to the ScrollRoot floor + Spotify text bound + hero transition flies and lands: $(grep '\[scroll-drag\] settled' "$TMP_OUT/drag.log"))"
+             && python3 tools/assert_nonblank_bmp.py "$TMP_OUT/hero.bmp" --min-colors=50 > "$TMP_OUT/hero-shot.log" 2>&1 \
+             && (cd .. && RAE_UI_SCREEN=profile RAE_UI_SCREEN_SEQ='settings.open,settings.darkTheme' RAE_UI_NO_SPOTIFY=1 \
+             RAE_UI_PAUSED=1 RAE_AUTO_EXIT_SEC=3 RAE_SDL_HEADLESS_MS=3000 RAE_GPU2D_SCREENSHOT="$TMP_OUT/settings.bmp" \
+             perl -e 'alarm shift; exec @ARGV' 40 "$TMP_OUT/app") > "$TMP_OUT/settings.log" 2>&1 \
+             && grep -aq '\[action\] settings.open' "$TMP_OUT/settings.log" \
+             && grep -aq '\[theme\] -> light' "$TMP_OUT/settings.log" \
+             && python3 tools/assert_nonblank_bmp.py "$TMP_OUT/settings.bmp" --min-colors=50 > "$TMP_OUT/settings-shot.log" 2>&1; then
+            echo "PASS: $EXAMPLE_NAME (Home screenshot, action audit clean, idle frame runs 0 app systems, scripted drag springs back to the ScrollRoot floor + Spotify text bound + hero transition flies and lands + settings dialog flips the theme: $(grep '\[scroll-drag\] settled' "$TMP_OUT/drag.log"))"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (mobile UI screenshot / scripted drag gate)"
-            cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" "$TMP_OUT/idle.log" "$TMP_OUT/drag.log" "$TMP_OUT/spotify.log" "$TMP_OUT/hero.log" "$TMP_OUT/hero-shot.log" 2>/dev/null | grep -av '^\[present\]' | sed 's/^/  /'
+            cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" "$TMP_OUT/idle.log" "$TMP_OUT/drag.log" "$TMP_OUT/spotify.log" "$TMP_OUT/hero.log" "$TMP_OUT/hero-shot.log" "$TMP_OUT/settings.log" "$TMP_OUT/settings-shot.log" 2>/dev/null | grep -av '^\[present\]' | sed 's/^/  /'
             ((FAILED++))
           fi
         elif [ "$EXAMPLE_NAME" = "141_ocean_fft" ]; then

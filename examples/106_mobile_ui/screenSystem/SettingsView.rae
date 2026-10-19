@@ -1,0 +1,98 @@
+open ui/Ecs
+# The settings dialog — opened from the three-dots button in the Profile
+# page's top bar (`settings.open`), closed by its Done button or a tap on the
+# scrim (`settings.close`). It holds the app's settings: today the dark theme
+# switch (`settings.darkTheme`).
+#
+# A resident full-screen overlay on the "dialog" layer, like the canvas
+# overlay (CanvasView): the scene's authored base hides it
+# (`SettingsRoot.Active=false`), and two scene STATES carry everything that
+# changes — `settingsOpen` shows it, `darkTheme` turns the switch on (its
+# accent fill, its knob at the end). The input phase re-applies the states
+# after a dispatch that changed `AppState.settingsOpen`; a theme change
+# rebuilds the world, and the mount applies them again.
+import ui/Components
+import ui/Scene
+open ecs/Entity
+open ui/Layer
+open ui/SceneInstance
+open ui/Frames
+open ui/Theme
+open ui/UiSystems
+
+# Re-apply the settings scene's states for the current AppState. Cheap; safe
+# to call any time the page is mounted.
+func applySettingsState(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view AlbumScenes
+  state: view AppState
+) pub {
+  let scene: view Scene => scenes.settings
+  if scene.ok is false {
+    ret
+  }
+  let deviceFrame: DeviceFrame = activeDeviceFrame()
+  let forcedName: String = frameIdName(id: deviceFrame.forcedFrameId)
+  var activeStates: List(String) = List.create(String, cap: 2)
+  if state.settingsOpen {
+    let openState: String = "settingsOpen"
+    activeStates.add(value: openState)
+  }
+  if state.theme.active.mode is ThemeMode.dark {
+    let darkState: String = "darkTheme"
+    activeStates.add(value: darkState)
+  }
+  applySceneFramesToPageWithStates(
+    world: world
+    uiSystems: uiSystems
+    scene: scene
+    pageId: settingsPageId
+    windowPtW: world.layoutW / unitScale
+    forcedFrameId: forcedName
+    activeStates: activeStates
+  )
+}
+
+# Mount the settings overlay once per world (idempotent — a resident page
+# survives screen switches, so later calls just re-apply its states).
+func mountSettingsOverlay(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view AlbumScenes
+  state: view AppState
+) pub ret EntityId {
+  let existing: EntityId = findPageRootEntity(world: world, pageId: settingsPageId)
+  if isNone(this: existing) is false {
+    applySettingsState(
+      world: world
+      uiSystems: uiSystems
+      scenes: scenes
+      state: state
+    )
+    ret existing
+  }
+  let scene: view Scene => scenes.settings
+  if scene.ok is false {
+    ret noEntity()
+  }
+  let pageIdCopy: String = "{settingsPageId}"
+  let mount: EntityId = mountPageOrError(
+    world: world
+    uiSystems: uiSystems
+    pageId: own pageIdCopy
+    scene: scene
+    overrides: emptyOverrides()
+    w: world.layoutW
+    h: world.layoutH
+    sceneLabel: "Settings"
+    subScenes: scenes.subScenes
+  )
+  applySettingsState(
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    state: state
+  )
+  ret mount
+}
