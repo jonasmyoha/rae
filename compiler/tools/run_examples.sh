@@ -1201,7 +1201,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # is in view) and the 24 physics cubes. Drawn one tree part at a
           # time the forest alone was over 1300, so more than 800 means the
           # forest lost its batching. The river is gone: the sea, the FFT ocean
-          # of 141 (WalkerSea), is the only water body.
+          # of 141 (lib/water/IslandSea), is the only water body.
           # The physics check (RAE_114_PHYSICS_TEST) settles the cube stacks,
           # walks the hero into one and jumps, then checks the tree trunks: a
           # ray hits one, the hero stops at its bark, and it follows its tree;
@@ -1259,18 +1259,21 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # thousands of trees planted into the forest's PropField, and the
           # physics check (cube stacks, jump, a pooled trunk that blocks a ray
           # and stops the hero, the trunk pool and the ground following the
-          # walker to another spot).
+          # walker to another spot). The sea is lib/water/IslandSea's FFT ocean
+          # on 143's own biome: its log names the forest world's island radius,
+          # so the shore damping is not the default 60 m island's.
           SHOT="$TMP_OUT/walker-forest.bmp"
           if (cd .. && RAE_UI_MODE=editor RAE_SDL_HEADLESS_MS=2000 RAE_GPU2D_SCREENSHOT="$SHOT" \
                 perl -e 'alarm shift; exec @ARGV' 60 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
              && python3 tools/assert_nonblank_bmp.py "$SHOT" --min-colors=2000 > "$TMP_OUT/shot.log" 2>&1 \
              && TREES="$(sed -n 's/.*\[forest\] \([0-9]*\) trees planted.*/\1/p' "$TMP_OUT/render.log" | head -1)" \
              && [ -n "$TREES" ] && [ "$TREES" -ge 20000 ] \
+             && [ "$(grep -c "\[sea\] FFT ocean at z .* island radius 1e+06 m" "$TMP_OUT/render.log")" -eq 1 ] \
              && (cd .. && RAE_114_PHYSICS_TEST=1 RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=60000 \
                 perl -e 'alarm shift; exec @ARGV' 60 "$TMP_OUT/app") > "$TMP_OUT/physics.log" 2>&1 \
              && [ "$(grep -c "\[trunktest\] .* poolFollows=true, groundFollows=true, passed=true" "$TMP_OUT/physics.log")" -eq 1 ] \
              && [ "$(grep -c "\[physicstest\] .* passed=true" "$TMP_OUT/physics.log")" -eq 1 ]; then
-            echo "PASS: $EXAMPLE_NAME ($TREES trees in a PropField, pooled trunks, ground and sea following the walker)"
+            echo "PASS: $EXAMPLE_NAME ($TREES trees in a PropField, pooled trunks, ground following the walker, FFT sea on its biome)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (walker forest)"

@@ -39,6 +39,8 @@ open WaterParticles
 open water/Water
 open GbufferSprite
 open water/WaterSystem
+open water/IslandSea
+import WorldBiome
 open water/WaterFft
 open gpu/GpuResources
 open gpu/GpuLifetime
@@ -194,7 +196,7 @@ type App {
   players: PlayerRoster  # who the local player controls (players.rae, #546)
   persist: PersistState
   splashes: ParticleSystem  # water-splash droplets when the character wades (splash.rae, #84)
-  waterSystem: WaterSystem  # the FFT sea at the biome water plane (WalkerSea, lib/water)
+  waterSystem: WaterSystem  # the FFT sea at the biome water plane (lib/water/IslandSea)
   idIssuer: IdIssuer  # the root's shared ID issuer (#869)
   gpuResources: opt GpuResources  # the App-owned GPU manager water's IDs live in (#873)
   ok: Bool
@@ -794,7 +796,11 @@ func createApp() ret App {
     let splashes: ParticleSystem = createWaterParticles(renderer: renderer, cap: 256)
     let waterSystem: WaterSystem = createWaterSystem(
       renderer: renderer
-      body: walkerSea(renderer: renderer, groundZ: groundZ)
+      body: createIslandSea(
+        renderer: renderer
+        groundZ: groundZ
+        biome: WorldBiome.defaultBiomeConfig()
+      )
     )
     ret App {
       world: own gameWorld

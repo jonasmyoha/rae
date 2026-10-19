@@ -42,11 +42,14 @@ compiler/bin/rae run examples/143_walker_forest/Main.rae
   walker has moved 2 m, the trees within 16 m are looked up in the forest's
   cells and the nearest get a trunk each, the rest of the pool waits far
   below the ground. Physics costs the same however big the forest is.
-- **The ground and the sea follow the walker.** The physics height field
+- **The ground follows the walker.** The physics height field
   (240 m) is made again round the walker when it is 50 m from the field's
   centre (`followGround`, about 4 ms; the lib's
-  `removeVenueHeightField` frees the old one). The 700 m sea sheet is
-  re-centred on the walker every frame, snapped to its grid.
+  `removeVenueHeightField` frees the old one).
+- **The lakes are the realistic sea.** `lib/water/IslandSea` (the same as
+  136's): the FFT ocean on a grid that follows the camera, its waves fading
+  in shallow water. It is given `forestBiomeConfig()`, so the shore damping
+  knows the forest world's coast, on the CPU and in the surface shader.
 
 ## Checks
 

@@ -39,4 +39,27 @@ func main() {
   log("amplitude matches query {Math.abs(value: scaled - expected * 0.35) < 0.0001}")
   body.centre.z = ground + 4.0
   log("offshore {biomeShoreEnergy(body: body, x: 20.0, y: 0.0) is 1.0}")
+  # A wider island (143's forest world): 150 m out the default island has sunk
+  # into the sea bed, the wide one has not, and the coast follows the body's
+  # biome, not the default
+  var wide: BiomeConfig = WorldBiome.defaultBiomeConfig()
+  wide.islandRadius = 1000000.0
+  let wideGround: Float = WorldBiome.worldTerrainHeight(
+    x: 150.0
+    y: 0.0
+    groundZ: -1.0
+    cfg: wide
+  )
+  let defaultGround: Float = WorldBiome.worldTerrainHeight(
+    x: 150.0
+    y: 0.0
+    groundZ: -1.0
+    cfg: WorldBiome.defaultBiomeConfig()
+  )
+  log("the default island has sunk there {defaultGround < wideGround - 0.5}")
+  body.biome = wide
+  body.centre.z = wideGround - 0.1
+  log("wide island: dry land there {biomeShoreEnergy(body: body, x: 150.0, y: 0.0) is 0.0}")
+  let constants: List(ShaderConstant) = WorldBiome.islandConstantsFor(cfg: wide)
+  log("wide island: shader radius {constants.copyAtDefault(index: 0).value is 1000000.0}")
 }
