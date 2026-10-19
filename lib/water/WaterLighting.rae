@@ -1,0 +1,14 @@
+# Shared illumination for water colour, foam and splash droplets.
+import Math
+import Sky
+
+func waterDaylight(sky: view Sky, hasSky: copy Bool) ret Float {
+  if not hasSky {
+    ret 1.0
+  }
+  let exposure: Float = Math.min(a: Math.max(a: sky.exposure, b: 0.0), b: 1.0)
+  # sunDir points FROM the sun; direct illumination fades below 20 degrees.
+  let elevation: Float = Math.min(a: Math.max(a: sky.sunDir.z / -0.35, b: 0.0), b: 1.0)
+  let direct: Float = elevation * elevation * (3.0 - 2.0 * elevation)
+  ret exposure * (0.3 + 0.7 * direct)
+}

@@ -61,7 +61,9 @@ fn fs(i: VsOut) -> @location(0) vec4<f32> {
     let rim = smoothstep(0.45, 0.96, radius);
     let glint = exp(-32.0 * dot(q - vec2<f32>(-0.30, 0.38), q - vec2<f32>(-0.30, 0.38)));
     let reflection = smoothstep(-0.35, 0.65, q.y);
-    let color = mix(d.albedoMetallic.rgb * 0.45, d.albedoMetallic.rgb, reflection) + vec3<f32>(glint * 0.85);
+    // The instance colour already includes current environmental illumination.
+    // Light the glint too: a constant white addition made droplets glow at night.
+    let color = d.albedoMetallic.rgb * (mix(0.45, 1.0, reflection) + glint * 0.85);
     let alpha = coverage * d.albedoMetallic.w * (0.12 + 0.20 * rim + 0.68 * glint);
     return vec4<f32>(color, alpha);
   }
