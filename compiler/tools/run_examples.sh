@@ -1204,7 +1204,9 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # water body.
           # The physics check (RAE_114_PHYSICS_TEST) settles the cube stacks,
           # walks the hero into one and jumps, then checks the tree trunks: a
-          # ray hits one, the hero stops at its bark, and it follows its tree.
+          # ray hits one, the hero stops at its bark, and it follows its tree;
+          # then a ray hits the nearest rock's sphere, and the hero running out
+          # of a bush is held to the bush's speed limit while inside it.
           SHOT="$TMP_OUT/walker.bmp"
           if (cd .. && RAE_UI_MODE=editor RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SHOT" \
                 perl -e 'alarm shift; exec @ARGV' 45 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
@@ -1224,6 +1226,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              && (cd .. && RAE_114_PHYSICS_TEST=1 RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=60000 \
                 perl -e 'alarm shift; exec @ARGV' 60 "$TMP_OUT/app") > "$TMP_OUT/physics.log" 2>&1 \
              && [ "$(grep -c "\[trunktest\] .* passed=true" "$TMP_OUT/physics.log")" -eq 1 ] \
+             && [ "$(grep -c "\[rockbushtest\] .* passed=true" "$TMP_OUT/physics.log")" -eq 1 ] \
              && [ "$(grep -c "\[physicstest\] .* passed=true" "$TMP_OUT/physics.log")" -eq 1 ] \
              && (cd .. && RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=90000 RAE_MEM_STATS=1 RAE_MEM_STATS_EVERY_MS=10000 \
                 perl -e 'alarm shift; exec @ARGV' 150 "$TMP_OUT/app") > "$TMP_OUT/live-growth.log" 2>&1 \

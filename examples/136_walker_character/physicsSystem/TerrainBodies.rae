@@ -1,0 +1,164 @@
+# The streamed terrain props in the physics world, the way the downstream
+# game treats its nature props:
+#
+# - A rock is a solid static body: a sphere three quarters of the rock's
+#   size round its middle, so a walker stops at it (or steps onto a small
+#   one). The rock entities are reused as the terrain streams, so every
+#   stream gives them new bodies (placeRockBodies).
+# - A bush has no body: walking into it is allowed, only slower. The deeper
+#   a walker is inside a bush's soft radius, the lower its speed limit
+#   (bushSpeedLimitAt); moveCharacters holds every character to it.
+import Math
+import Vec3
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Transform
+open box3d/ecs/PhysicsTypes
+open box3d/ecs/PhysicsComponents
+open box3d/ecs/PhysicsSpawn
+open box3d/Box3dTypes
+open box3d/ecs/CharacterMover
+open Vec2
+
+# A rock's sphere: this share of its mean width (a unit rock is a unit
+# sphere cut flat, so its sides lie inside radius 1)
+const rockColliderShare: Float = 0.75
+
+# A bush's crown reaches about this far from its foot at scale 1
+# (lib/procgen/FluffyFoliage: five clusters 0.12 to 0.22 out, 0.25 round)
+const bushCrownRadius: Float = 0.45
+
+# The soft part of a bush: this share of its crown
+const bushSoftShare: Float = 0.8
+
+# The speed limit (m/s) at a bush's soft edge and at its middle. A walk
+# (1.7 m/s) goes through the edge and slows in the middle; a run (4.2 m/s)
+# slows as soon as it is in.
+const bushEdgeSpeed: Float = 2.6
+
+const bushCoreSpeed: Float = 0.9
+
+# No limit
+const bushNoLimit: Float = 1000.0
+
+# Give every placed rock a static body and sphere at its current pose,
+# dropping the body it had before; a rock not placed (over water) gets none.
+# Call after the terrain streams. The number of rock bodies.
+func placeRockBodies(physicsSystem: mod PhysicsSystem, world: mod GameWorld) ret Int {
+  var rocks: Int = 0
+  loop var i: Int = 0, i < componentCount(this: world.propKinds), ++i {
+    let entityId: EntityId = componentEntityAt(this: world.propKinds, i: i)
+    if componentView(this: world.propKinds, entityId: entityId).kind is kindRock {
+      despawnRigidBody(
+        physics: physicsSystem.physics
+        rigidBodies: physicsSystem.rigidBodies
+        colliders: physicsSystem.colliders
+        entityId: entityId
+      )
+      if componentView(this: world.propKinds, entityId: entityId).active {
+        addRockBody(physicsSystem: physicsSystem, world: world, entityId: entityId)
+        rocks = rocks + 1
+      }
+    }
+  }
+  ret rocks
+}
+
+# One rock's static body and sphere
+func addRockBody(physicsSystem: mod PhysicsSystem, world: mod GameWorld, entityId: view EntityId) {
+  let transform: Transform3D = bodyPose(world: world, entityId: entityId)
+  var bodyDef: BodyDef = defaultBodyDef(lengthUnitsPerMeter: 1.0)
+  bodyDef.bodyType = BodyType.staticBody
+  bodyDef.position = transform.position
+  bodyDef.rotation = transform.rotation
+  let bodyId: BodyId = spawnRigidBody(
+    physics: physicsSystem.physics
+    rigidBodies: physicsSystem.rigidBodies
+    transforms: world.transforms
+    entityId: entityId
+    def: bodyDef
+  )
+  var shapeDef: ShapeDef = defaultShapeDef(lengthUnitsPerMeter: 1.0)
+  shapeDef.baseMaterial.friction = 0.7
+  let shapeId: ShapeId = addSphereCollider(
+    physics: physicsSystem.physics
+    rigidBodies: physicsSystem.rigidBodies
+    colliders: physicsSystem.colliders
+    entityId: entityId
+    def: shapeDef
+    sphere: {
+      center: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+      radius: rockColliderRadius(transform: transform)
+    }
+  )
+}
+
+# A copy of an entity's pose (spawning its body writes the table)
+func bodyPose(world: view GameWorld, entityId: view EntityId) ret Transform3D {
+  let pose: view Transform3D => componentView(this: world.transforms, entityId: entityId)
+  ret Transform3D { position: pose.position, rotation: pose.rotation, scale: pose.scale }
+}
+
+# Hold a character to the bush speed limit `limit` for one step: its
+# horizontal velocity no faster, its throttle no more than the limit asks
+# for (the mover's top speed is CharacterMover.maxSpeed). The throttle as it
+# was, to give back after the step.
+func applyBushLimit(character: mod CharacterBody, limit: view Float) ret Vec2 {
+  let throttle: Vec2 = { x: character.throttle.x, y: character.throttle.y }
+  if limit >= bushNoLimit {
+    ret throttle
+  }
+  let velocityX: Float = character.mover.velocity.x
+  let velocityY: Float = character.mover.velocity.y
+  let speed: Float = Math.sqrt(x: velocityX * velocityX + velocityY * velocityY)
+  if speed > limit {
+    character.mover.velocity.x = velocityX * limit / speed
+    character.mover.velocity.y = velocityY * limit / speed
+  }
+  var topSpeed: Float = maxSpeed
+  if character.mover.sprint {
+    topSpeed = 1.5 * maxSpeed
+  }
+  let asked: Float = Math.sqrt(x: throttle.x * throttle.x + throttle.y * throttle.y) * topSpeed
+  if asked > limit {
+    character.throttle = Vec2 { x: throttle.x * limit / asked, y: throttle.y * limit / asked }
+  }
+  ret throttle
+}
+
+# The radius of a rock's sphere at its placement
+func rockColliderRadius(transform: view Transform3D) ret Float {
+  ret rockColliderShare * (transform.scale.x + transform.scale.y) * 0.5
+}
+
+# The speed limit `distance` from the foot of a bush whose soft radius is
+# `radius`: none outside, bushEdgeSpeed at the edge, down to bushCoreSpeed at
+# the middle
+func bushSpeedLimit(distance: view Float, radius: view Float) ret Float {
+  if radius <= 0.0 or distance >= radius {
+    ret bushNoLimit
+  }
+  let depth: Float = 1.0 - distance / radius
+  ret bushEdgeSpeed + (bushCoreSpeed - bushEdgeSpeed) * depth
+}
+
+# The lowest speed limit of the placed bushes at (`x`, `y`); bushNoLimit
+# when no bush is there
+func bushSpeedLimitAt(world: view GameWorld, x: view Float, y: view Float) ret Float {
+  var limit: Float = bushNoLimit
+  loop var i: Int = 0, i < componentCount(this: world.propKinds), ++i {
+    let entityId: EntityId = componentEntityAt(this: world.propKinds, i: i)
+    let prop: view TerrainProp => componentView(this: world.propKinds, entityId: entityId)
+    if prop.kind is kindBush and prop.active {
+      let transform: view Transform3D => componentView(this: world.transforms, entityId: entityId)
+      let dx: Float = x - transform.position.x
+      let dy: Float = y - transform.position.y
+      let radius: Float = bushCrownRadius * bushSoftShare * transform.scale.x
+      limit = Math.min(
+        a: limit
+        b: bushSpeedLimit(distance: Math.sqrt(x: dx * dx + dy * dy), radius: radius)
+      )
+    }
+  }
+  ret limit
+}

@@ -29,6 +29,7 @@ open ecs/ComponentTable
 open ecs/Query
 open ecs/Transform
 open terrainSystem/WalkerTrees
+open terrainSystem/WalkerRocks
 open app3d/PropField
 open GbufferSprite
 
@@ -99,6 +100,8 @@ type TerrainProp {
   kind: Int
   slot: Int
   active: Bool
+  # Which shape a rock is (terrainSystem/WalkerRocks); 0 for the other kinds
+  variant: Int
 }
 
 # A tree's species (terrainSystem/WalkerTrees: the leaf-patch forms, the
@@ -114,7 +117,8 @@ type TileMesh {
 
 # ----- instanced prop rendering --------------------------------------
 # The trees and bushes are the lib's leaf-patch forms (terrainSystem/WalkerTrees);
-# the rocks, flowers and grass tufts are glb meshes.
+# the rocks are the lib's procedural rocks (terrainSystem/WalkerRocks); the
+# flowers and grass tufts are glb meshes.
 type TerrainSystem {
   centreCellX: Int
   centreCellY: Int
@@ -122,7 +126,8 @@ type TerrainSystem {
   toon: Bool
   # Reused staging buffer for a tile's per-cell heightfield rewrite.
   scratchVerts: List(Float)
-  rockProp: PropInstancer
+  # One instancer per rock shape (TerrainProp.variant)
+  rockParts: List(PropInstancer)
   flowerProp: PropInstancer
   grassProp: PropInstancer
   # The island's forest (terrainSystem/Forest): every tree species as a kind
@@ -205,6 +210,44 @@ func propTransform3D(
   }
 }
 
+# A rock's placement, as Autumn Grove places its rocks: 0.5 to 1.3 m across,
+# stretched along one side, flattened when small, sunk a fifth of its size
+# into the ground and turned at random.
+func rockTransform(cellX: view Int, cellY: view Int, groundZ: view Float) ret Transform3D {
+  let size: Float = 0.5 + terrainHash(cellX: cellX, cellY: cellY, seed: 41) * 0.8
+  let stretch: Float = 1.0 + terrainHash(cellX: cellX, cellY: cellY, seed: 43) * 0.35
+  var height: Float = 0.8
+  if size > 0.7 {
+    height = 1.0
+  }
+  let posX: Float = cellX.toFloat() * terrainCellSize + terrainOffset(
+    cellX: cellX
+    cellY: cellY
+    seed: 31
+  )
+  let posY: Float = cellY.toFloat() * terrainCellSize + terrainOffset(
+    cellX: cellX
+    cellY: cellY
+    seed: 37
+  )
+  let yaw: Float = terrainHash(cellX: cellX, cellY: cellY, seed: 61) * terrainTau
+  ret Transform3D {
+    position: Vec3.create(
+      x: posX
+      y: posY
+      z: terrainHeightAt(x: posX, y: posY, groundZ: groundZ) - size * 0.2
+    )
+    rotation: Quat.fromAxisAngle(axis: Vec3.create(x: 0.0, y: 0.0, z: 1.0), angle: yaw)
+    scale: Vec3.create(x: size * stretch, y: size, z: size * height)
+  }
+}
+
+# Which rock shape stands in a cell
+func rockVariantAt(cellX: view Int, cellY: view Int) ret Int {
+  let pick: Int = (terrainHash(cellX: cellX, cellY: cellY, seed: 67) * rockVariantCount.toFloat()).toInt()
+  ret Math.min(a: pick, b: rockVariantCount - 1)
+}
+
 # The prop transform for a given kind (per-kind scatter seeds + scale range).
 func kindTransform(
   kind: view Int
@@ -213,16 +256,7 @@ func kindTransform(
   groundZ: view Float
 ) ret Transform3D {
   if kind is kindRock {
-    ret propTransform3D(
-      cellX: cellX
-      cellY: cellY
-      seedX: 31
-      seedY: 37
-      seedScale: 41
-      groundZ: groundZ
-      minScale: 0.28
-      scaleSpread: 0.34
-    )
+    ret rockTransform(cellX: cellX, cellY: cellY, groundZ: groundZ)
   }
   if kind is kindBush {
     ret propTransform3D(
@@ -405,6 +439,9 @@ func updateInfiniteTerrain(
         y: transform.position.y
         minGrass: kindMinGrass(kind: pk.kind)
       )
+      if pk.kind is kindRock {
+        pk.variant = rockVariantAt(cellX: ccx, cellY: ccy)
+      }
       componentSet(this: world.transforms, entityId: entityId, data: transform)
     }
   }
@@ -427,7 +464,9 @@ func drawTerrainProps(
   terrainSystem: mod TerrainSystem
   world: view GameWorld
 ) {
-  resetInstanceBatch(batch: terrainSystem.rockProp.batch)
+  loop let part: mod PropInstancer in terrainSystem.rockParts {
+    resetInstanceBatch(batch: part.batch)
+  }
   resetInstanceBatch(batch: terrainSystem.flowerProp.batch)
   resetInstanceBatch(batch: terrainSystem.grassProp.batch)
   loop let part: mod PropInstancer in terrainSystem.bushParts {
@@ -441,7 +480,9 @@ func drawTerrainProps(
         t: componentView(this: world.transforms, entityId: entityId)
       )
       if pk.kind is kindRock {
-        gatherKind(prop: terrainSystem.rockProp, model: model)
+        if let rockPart: mod PropInstancer => terrainSystem.rockParts.modAt(index: pk.variant) {
+          gatherKind(prop: rockPart, model: model)
+        }
       }
       if pk.kind is kindBush {
         loop let part: mod PropInstancer in terrainSystem.bushParts {
@@ -459,7 +500,9 @@ func drawTerrainProps(
       }
     }
   }
-  drawInstances(cache: cache, resources: resources, batch: terrainSystem.rockProp.batch)
+  loop let part: view PropInstancer in terrainSystem.rockParts {
+    drawInstances(cache: cache, resources: resources, batch: part.batch)
+  }
   drawInstances(cache: cache, resources: resources, batch: terrainSystem.flowerProp.batch)
   drawInstances(cache: cache, resources: resources, batch: terrainSystem.grassProp.batch)
   drawPropField(cache: cache, resources: resources, field: terrainSystem.forest)
@@ -519,7 +562,9 @@ func drawTerrainPropsShadow(
         t: componentView(this: world.transforms, entityId: entityId)
       )
       if pk.kind is kindRock {
-        castKind(renderer: renderer, mesh: terrainSystem.rockProp.mesh, model: model)
+        if let rockPart: view PropInstancer => terrainSystem.rockParts.viewAt(index: pk.variant) {
+          castKind(renderer: renderer, mesh: rockPart.mesh, model: model)
+        }
       }
       if pk.kind is kindBush {
         loop let part: view PropInstancer in terrainSystem.bushParts {
@@ -564,7 +609,9 @@ func setInfiniteTerrainToon(terrainSystem: mod TerrainSystem, toon: view Bool) {
     ret
   }
   terrainSystem.toon = toon
-  setPropInstancerToon(prop: terrainSystem.rockProp, toon: toon)
+  loop let part: mod PropInstancer in terrainSystem.rockParts {
+    setPropInstancerToon(prop: part, toon: toon)
+  }
   setPropInstancerToon(prop: terrainSystem.flowerProp, toon: toon)
   setPropInstancerToon(prop: terrainSystem.grassProp, toon: toon)
   loop let part: mod PropInstancer in terrainSystem.bushParts {
@@ -589,7 +636,7 @@ func spawnProp(world: mod GameWorld, kind: view Int, slot: view Int) ret EntityI
   componentSet(
     this: world.propKinds
     entityId: entityId
-    data: TerrainProp { kind: kind, slot: slot, active: false }
+    data: TerrainProp { kind: kind, slot: slot, active: false, variant: 0 }
   )
   ret entityId
 }
@@ -601,17 +648,12 @@ func createTerrainSystem(
   groundZ: view Float
 ) ret TerrainSystem {
   let tilePlane: MeshData = makePlane(size: terrainCellSize + 0.04, segments: terrainTileSegments)
-  let rockMesh: MeshHandle = terrainMesh(renderer: renderer, path: "{assets}environment/rock.glb")
   let flowerMesh: MeshHandle = terrainMesh(
     renderer: renderer
     path: "{assets}environment/flower.glb"
   )
   let grassMesh: MeshHandle = terrainMesh(renderer: renderer, path: "{assets}environment/grass.glb")
 
-  let rockMat: Material3d = terrainMaterial(
-    color: Vec3.create(x: 0.235, y: 0.265, z: 0.285)
-    roughness: 0.82
-  )
   let flowerMat: Material3d = terrainMaterial(
     color: Vec3.create(x: 0.92, y: 0.38, z: 0.045)
     roughness: 0.72
@@ -635,7 +677,7 @@ func createTerrainSystem(
     componentSet(
       this: world.propKinds
       entityId: tileEntityId
-      data: TerrainProp { kind: kindTile, slot: slot, active: true }
+      data: TerrainProp { kind: kindTile, slot: slot, active: true, variant: 0 }
     )
     componentSet(
       this: world.tileMeshes
@@ -666,7 +708,7 @@ func createTerrainSystem(
     groundZ: groundZ
     toon: true
     scratchVerts: own scratch
-    rockProp: own createPropInstancer(mesh: rockMesh, material: rockMat, capacity: terrainCellCount)
+    rockParts: own createRockParts(renderer: renderer, capacity: terrainCellCount)
     flowerProp: own createPropInstancer(
       mesh: flowerMesh
       material: flowerMat

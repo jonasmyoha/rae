@@ -15,6 +15,8 @@
 # - Every tree's trunk is a static capsule (the island's forest, planted once
 #   by terrainSystem/Forest). Should a tree's Transform3D change, the push
 #   system moves its trunk with it.
+# - Every rock is a static sphere, and a bush slows a character inside it
+#   (physicsSystem/TerrainBodies).
 #
 # This is the pattern a game copies for a character in a physics world: its
 # own props are more `spawnPhysicsCube` calls, its own ground another venue.
@@ -38,6 +40,7 @@ open box3d/Box3d
 open box3d/Box3dTypes
 open ecs/World
 open terrainSystem/WalkerTrees
+open physicsSystem/TerrainBodies
 
 const walkerPhysicsStep: Float = 1.0 / 60.0
 
@@ -209,9 +212,10 @@ func driveCharacters(
   }
 }
 
-# Every character one fixed step: its mover, then its feet, heading and gait
-# back into its controller (feet relative to groundZ, as the renderer reads
-# them). Deep water stays a wall: a step that ends where a character cannot
+# Every character one fixed step: its mover (held to the speed limit of a
+# bush it stands in, physicsSystem/TerrainBodies), then its feet, heading and
+# gait back into its controller (feet relative to groundZ, as the renderer
+# reads them). Deep water stays a wall: a step that ends where a character cannot
 # wade is undone per axis, so walking into the drop-off at an angle slides
 # along it, as the old controller did.
 func moveCharacters(physicsSystem: mod PhysicsSystem, world: mod GameWorld, groundZ: view Float) {
@@ -224,11 +228,16 @@ func moveCharacters(physicsSystem: mod PhysicsSystem, world: mod GameWorld, grou
     )
     let fromX: Float = character.mover.transform.p.x
     let fromY: Float = character.mover.transform.p.y
+    let throttle: Vec2 = applyBushLimit(
+      character: character
+      limit: bushSpeedLimitAt(world: world, x: fromX, y: fromY)
+    )
     let center: Vec3 = moveCharacter(
       character: character
       physics: physicsSystem.physics
       ignoreShapeIds: noIgnoredShapes
     )
+    character.throttle = throttle
     if terrainWadable(x: center.x, y: center.y) is false {
       if terrainWadable(x: center.x, y: fromY) {
         character.mover.transform.p.y = fromY
