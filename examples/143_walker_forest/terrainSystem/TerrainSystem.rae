@@ -28,7 +28,8 @@ open ecs/Entity
 open ecs/ComponentTable
 open ecs/Query
 open ecs/Transform
-open terrainSystem/WalkerTrees
+open app3d/GroveTrees
+open app3d/PropInstancer
 open app3d/PropField
 open app3d/TerrainTiles
 open app3d/TerrainRocks
@@ -375,15 +376,6 @@ func updateInfiniteTerrain(
 }
 
 # ----- draw (queries) ------------------------------------------------
-func gatherKind(prop: mod PropInstancer, model: view Mat4) {
-  addInstance(
-    batch: prop.batch
-    model: model
-    prevModel: model
-    material: prop.material
-  )
-}
-
 # Fill the small props' batches for this frame (before the shadow and G-buffer
 # passes, which both draw them)
 func gatherTerrainProps(terrainSystem: mod TerrainSystem, world: view GameWorld) {
@@ -404,22 +396,22 @@ func gatherTerrainProps(terrainSystem: mod TerrainSystem, world: view GameWorld)
       )
       if pk.kind is kindRock {
         if let rockPart: mod PropInstancer => terrainSystem.rockParts.modAt(index: pk.variant) {
-          gatherKind(prop: rockPart, model: model)
+          addPropInstance(prop: rockPart, model: model)
         }
       }
       if pk.kind is kindBush {
         loop let part: mod PropInstancer in terrainSystem.bushParts {
-          gatherKind(prop: part, model: model)
+          addPropInstance(prop: part, model: model)
         }
       }
       if pk.kind is kindFlower {
-        gatherKind(prop: terrainSystem.flowerProp, model: model)
+        addPropInstance(prop: terrainSystem.flowerProp, model: model)
       }
       if pk.kind is kindGrassA {
-        gatherKind(prop: terrainSystem.grassProp, model: model)
+        addPropInstance(prop: terrainSystem.grassProp, model: model)
       }
       if pk.kind is kindGrassB {
-        gatherKind(prop: terrainSystem.grassProp, model: model)
+        addPropInstance(prop: terrainSystem.grassProp, model: model)
       }
     }
   }
@@ -499,10 +491,6 @@ func gatherForest(terrainSystem: mod TerrainSystem, camera: view Camera3d, aspec
   var propView: PropView = propViewOf(camera: camera, aspect: aspect)
   propView.halfAngle = Math.min(a: propView.halfAngle + 0.6, b: 3.0)
   gatherPropField(field: terrainSystem.forest, propView: propView, toon: terrainSystem.toon)
-}
-
-func setPropInstancerToon(prop: mod PropInstancer, toon: view Bool) {
-  prop.material.toon = toon
 }
 
 func setInfiniteTerrainToon(terrainSystem: mod TerrainSystem, toon: view Bool) {

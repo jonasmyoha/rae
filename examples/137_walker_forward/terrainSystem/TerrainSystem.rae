@@ -13,6 +13,7 @@
 import RendererDeferred
 import Math
 import Noise
+open app3d/PropInstancer
 open app3d/TerrainTiles
 open WorldBiome
 import Vec3
@@ -100,27 +101,6 @@ type TreeVariant {
 }
 
 # ----- instanced prop rendering --------------------------------------
-# One instanced prop draw: its mesh, its material, and a pre-sized batch refilled
-# each frame. The material is a value (not a scene index) so terrain owns no
-# Scene3d state.
-type PropInstancer {
-  mesh: MeshHandle
-  material: Material3d
-  batch: InstanceBatch
-}
-
-func createPropInstancer(
-  mesh: view MeshHandle
-  material: view Material3d
-  capacity: copy Int
-) ret PropInstancer {
-  ret PropInstancer {
-    mesh: mesh
-    material: material
-    batch: own createInstanceBatch(mesh: mesh, capacity: capacity)
-  }
-}
-
 type TerrainSystem {
   centreCellX: Int
   centreCellY: Int
@@ -369,15 +349,6 @@ func updateInfiniteTerrain(
 }
 
 # ----- draw (queries) ------------------------------------------------
-func gatherKind(prop: mod PropInstancer, model: view Mat4) {
-  addInstance(
-    batch: prop.batch
-    model: model
-    prevModel: model
-    material: prop.material
-  )
-}
-
 func drawTerrainProps(
   cache: mod GbufferCache
   resources: mod GpuResources
@@ -400,27 +371,27 @@ func drawTerrainProps(
         t: componentView(this: world.transforms, entityId: entityId)
       )
       if pk.kind is kindRock {
-        gatherKind(prop: terrainSystem.rockProp, model: model)
+        addPropInstance(prop: terrainSystem.rockProp, model: model)
       }
       if pk.kind is kindBush {
-        gatherKind(prop: terrainSystem.bushProp, model: model)
+        addPropInstance(prop: terrainSystem.bushProp, model: model)
       }
       if pk.kind is kindFlower {
-        gatherKind(prop: terrainSystem.flowerProp, model: model)
+        addPropInstance(prop: terrainSystem.flowerProp, model: model)
       }
       if pk.kind is kindGrassA {
-        gatherKind(prop: terrainSystem.grassProp, model: model)
+        addPropInstance(prop: terrainSystem.grassProp, model: model)
       }
       if pk.kind is kindGrassB {
-        gatherKind(prop: terrainSystem.grassProp, model: model)
+        addPropInstance(prop: terrainSystem.grassProp, model: model)
       }
       if pk.kind is kindTree {
         if componentView(this: world.treeVariants, entityId: entityId).broad {
-          gatherKind(prop: terrainSystem.broadTrunkProp, model: model)
-          gatherKind(prop: terrainSystem.broadCrownProp, model: model)
+          addPropInstance(prop: terrainSystem.broadTrunkProp, model: model)
+          addPropInstance(prop: terrainSystem.broadCrownProp, model: model)
         } else {
-          gatherKind(prop: terrainSystem.tallTrunkProp, model: model)
-          gatherKind(prop: terrainSystem.tallCrownProp, model: model)
+          addPropInstance(prop: terrainSystem.tallTrunkProp, model: model)
+          addPropInstance(prop: terrainSystem.tallCrownProp, model: model)
         }
       }
     }
@@ -492,10 +463,6 @@ func drawTerrainPropsShadow(
       }
     }
   }
-}
-
-func setPropInstancerToon(prop: mod PropInstancer, toon: view Bool) {
-  prop.material.toon = toon
 }
 
 func setInfiniteTerrainToon(terrainSystem: mod TerrainSystem, toon: view Bool) {

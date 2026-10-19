@@ -28,7 +28,8 @@ open ecs/Entity
 open ecs/ComponentTable
 open ecs/Query
 open ecs/Transform
-open terrainSystem/WalkerTrees
+open app3d/GroveTrees
+open app3d/PropInstancer
 open terrainSystem/WalkerRocks
 open app3d/TerrainRocks
 open app3d/PropField
@@ -346,15 +347,6 @@ func updateInfiniteTerrain(
 }
 
 # ----- draw (queries) ------------------------------------------------
-func gatherKind(prop: mod PropInstancer, model: view Mat4) {
-  addInstance(
-    batch: prop.batch
-    model: model
-    prevModel: model
-    material: prop.material
-  )
-}
-
 func drawTerrainProps(
   cache: mod GbufferCache
   resources: mod GpuResources
@@ -378,22 +370,22 @@ func drawTerrainProps(
       )
       if pk.kind is kindRock {
         if let rockPart: mod PropInstancer => terrainSystem.rockParts.modAt(index: pk.variant) {
-          gatherKind(prop: rockPart, model: model)
+          addPropInstance(prop: rockPart, model: model)
         }
       }
       if pk.kind is kindBush {
         loop let part: mod PropInstancer in terrainSystem.bushParts {
-          gatherKind(prop: part, model: model)
+          addPropInstance(prop: part, model: model)
         }
       }
       if pk.kind is kindFlower {
-        gatherKind(prop: terrainSystem.flowerProp, model: model)
+        addPropInstance(prop: terrainSystem.flowerProp, model: model)
       }
       if pk.kind is kindGrassA {
-        gatherKind(prop: terrainSystem.grassProp, model: model)
+        addPropInstance(prop: terrainSystem.grassProp, model: model)
       }
       if pk.kind is kindGrassB {
-        gatherKind(prop: terrainSystem.grassProp, model: model)
+        addPropInstance(prop: terrainSystem.grassProp, model: model)
       }
     }
   }
@@ -484,10 +476,6 @@ func gatherForest(terrainSystem: mod TerrainSystem, camera: view Camera3d, aspec
   gatherPropField(field: terrainSystem.forest, propView: propView, toon: terrainSystem.toon)
 }
 
-func setPropInstancerToon(prop: mod PropInstancer, toon: view Bool) {
-  prop.material.toon = toon
-}
-
 func setInfiniteTerrainToon(terrainSystem: mod TerrainSystem, toon: view Bool) {
   if terrainSystem.toon is toon {
     ret
@@ -565,7 +553,13 @@ func createTerrainSystem(
     cellSize: 20.0
   )
   var sprites: SpriteCache = createSpriteCache()
-  addForestKinds(field: forest, renderer: renderer, sprites: sprites)
+  addForestKinds(
+    field: forest
+    renderer: renderer
+    sprites: sprites
+    midDistance: forestMidDistance
+    farDistance: forestFarDistance
+  )
   var terrainSystem: TerrainSystem = {
     centreCellX: 1000000000
     centreCellY: 1000000000
