@@ -1,0 +1,57 @@
+# The moon's ephemeris (lib/Moon) against the phases of January 2024, in
+# universal time (longitude 0, so local solar time is UT): new moon 11 Jan
+# 11:57, first quarter 18 Jan 03:53, full moon 25 Jan 17:54, last quarter
+# 2 Feb 23:18. At the full moon it stands opposite the sun (lib/Sky), and its
+# light is 0 while it is set.
+import Vec3
+open Moon
+open Sky
+
+func percentLit(moon: view MoonState) ret Int {
+  ret (moon.illumination * 100.0 + 0.5).toInt()
+}
+
+func report(label: view String, dayOfYear: view Int, hour: view Float) {
+  let moon: MoonState = moonForDate(
+    year: 2024
+    dayOfYear: dayOfYear
+    hour: hour
+    latitudeDeg: 60.17
+    longitudeDeg: 0.0
+  )
+  log("{label}: {moonPhaseName(moon: moon)}, lit about {(percentLit(moon: moon) + 2) / 5 * 5}%")
+}
+
+func main() {
+  report(label: "11 Jan", dayOfYear: 11, hour: 11.95)
+  report(label: "18 Jan", dayOfYear: 18, hour: 3.9)
+  report(label: "25 Jan", dayOfYear: 25, hour: 17.9)
+  report(label: "2 Feb", dayOfYear: 33, hour: 23.3)
+  let full: MoonState = moonForDate(
+    year: 2024
+    dayOfYear: 25
+    hour: 17.9
+    latitudeDeg: 60.17
+    longitudeDeg: 0.0
+  )
+  let sun: Vec3 = sunDirForDate(hour: 17.9, dayOfYear: 25, latitudeDeg: 60.17)
+  log("full moon opposite the sun: {Vec3.vdot(a: full.direction, b: sun) < -0.97}")
+  # Midnight at the full moon: the moon is up, the sun is down
+  let midnight: MoonState = moonForDate(
+    year: 2024
+    dayOfYear: 25
+    hour: 23.9
+    latitudeDeg: 60.17
+    longitudeDeg: 0.0
+  )
+  log("midnight full moon up: {midnight.up > 0.5}, light {moonLightLevel(moon: midnight) > 0.9}")
+  # Noon at the full moon: the moon is set and gives no light
+  let noon: MoonState = moonForDate(
+    year: 2024
+    dayOfYear: 26
+    hour: 12.0
+    latitudeDeg: 60.17
+    longitudeDeg: 0.0
+  )
+  log("noon full moon set: {noon.up < 0.0}, light {moonLightLevel(moon: noon)}")
+}

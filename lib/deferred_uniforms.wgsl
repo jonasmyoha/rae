@@ -21,6 +21,13 @@ struct LightU {
   // saturation the mist loses (mist is paler than the sky)
   mist: vec4<f32>,
   mistTint: vec4<f32>,
+  // The sky's sun (xyz: toward it; w: the moon's angular radius) — the key
+  // light (sunDir) is the moon at night, the sky's sun stays the sun; the moon
+  // (xyz: toward it; w: its disc's intensity, 0 = no moon); the night sky
+  // (x: its moonlight 0..1)
+  skySun: vec4<f32>,
+  moon: vec4<f32>,
+  night: vec4<f32>,
 };
 struct ShadowU {
   lightViewProj: array<mat4x4<f32>, 4>,
