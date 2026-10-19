@@ -20,7 +20,7 @@ func frameRenderSystem(
     uiSystems: app.uiSystems
     gpuUi: app.gpuUi
     canvas: app.textureRegistry.canvas
-    debug: session.debug
+    debugOverlay: session.debugOverlay
     logOverlay: app.logOverlay
     logW: app.viewport.layoutW
     logH: app.viewport.layoutH
@@ -37,6 +37,7 @@ func frameRenderSystem(
   )
   frame.forceRender = frameRender.forceRender
   session.lastRenderTime = frameRender.lastRenderTime
+  session.renderedLastFrame = frameRender.didRender
   # Persistent-world screen switch (screenSystem/ScreenSwitch). On
   # willSwitch: per-page re-mount + Active flip + the hero transition.
   # Otherwise the hot-reload watcher poll, which may request an outer rebuild.
@@ -70,11 +71,4 @@ func frameRenderSystem(
   if switchResult.switching {
     frame.switching = true
   }
-
-  # Frosted-glass cleanup. 106's GPU2D path does not capture a backdrop
-  # texture; this only clears the debug state.
-  if session.debug.menuOpen is false and session.prevMenuOpen {
-    setDebugHasBlur(debug: session.debug, value: false)
-  }
-  session.prevMenuOpen = session.debug.menuOpen
 }

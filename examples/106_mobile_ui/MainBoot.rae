@@ -9,7 +9,9 @@ open ui/WindowGeometry
 open ui/Ecs
 open ui/EventLoop
 open ui/LogOverlay
+open ui/DebugOverlay
 import FileWatch
+import Gpu2d
 import SdfText
 import sys/Spotify
 import ui/renderSystem/RenderSystem
@@ -166,22 +168,33 @@ func createSceneWatcher() ret FileWatcher {
   )
 }
 
-# The debug system with its persisted flag toggles restored, the button in the
-# top-right corner on every screen, and the RAE_UI_DEBUG_MENU snapshot hooks
-# (`open` pre-opens the menu, `labels` pre-enables the FPS / mem read-out) so
-# the snapshot tooling captures those states without scripting a click.
-func createBootDebugSystem(viewport: view Viewport) ret DebugSystem {
-  var debug: DebugSystem = createDebugSystem()
-  restoreDebugFlags(debug: debug, path: debugFlagsFilePath)
-  setDebugScreenSize(debug: debug, w: viewport.layoutW, h: viewport.layoutH)
-  let debugMargin: Float = 34.69879518072289
-  setDebugButtonTopRight(debug: debug, margin: debugMargin)
+# 106 lays out a 1080-unit-wide phone screen: 2.89 units to a point, the size
+# its debug button always had
+const debugOverlayScale: Float = 2.891566265060241
+
+# The standard debug widget (lib/ui/DebugOverlay), set up as every Rae UI app
+# sets it up (the UI editor, 121): the button, the frame rate, the memory and
+# the update indicator — a UI app idles when nothing changes, so a moving
+# square means a repaint that should not have happened — none of it in a
+# headless run. The RAE_UI_DEBUG_MENU snapshot hooks still work: `open` opens
+# the dialog, `labels` shows the readouts.
+func createBootDebugOverlay() ret DebugOverlay {
+  let headless: Bool = Gpu2d.headlessRequested()
+  var debugOverlay: DebugOverlay = createDebugOverlay(
+    button: not headless
+    fps: not headless
+    memory: not headless
+    heartbeat: not headless
+  )
+  setDebugOverlayScale(debugOverlay: debugOverlay, scale: debugOverlayScale)
   let debugMenuEnv: String = getEnv(name: "RAE_UI_DEBUG_MENU")
   if debugMenuEnv is "open" {
-    debug.menuOpen = true
+    debugOverlay.wantButton = true
+    debugOverlay.open = true
   }
   if debugMenuEnv is "labels" {
-    debug.showLabels = true
+    debugOverlay.wantFps = true
+    debugOverlay.wantMemory = true
   }
-  ret debug
+  ret debugOverlay
 }

@@ -196,7 +196,7 @@ each route's world, and hands to every lib call as `uiSystems`.
 
 ### Authored metadata (read at mount, no per-frame system)
 
-`ActionBinding` (id + role — the audit and the debug menu read it),
+`ActionBinding` (id + role — the action audit reads it),
 `DataDependency` (revision-observer metadata).
 
 ---

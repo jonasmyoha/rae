@@ -145,7 +145,7 @@ closed `UiWorld`, so a component was authorable iff it was a lib table.
 
 And the per-system state already exists under ad-hoc names: 121 has
 `EditorCamera`, `GuideState`, `InspectorState`, `TextureSearch`,
-`EditorStatus`; 106 has `PlaybackState`, `DebugSystem`, `InputSystem`,
+`EditorStatus`; 106 has `PlaybackState`, `InputSystem`,
 `MediaLibrarySystem`. `App` in the editor is literally a struct of these.
 This design makes that uniform and lets the system's own tables live there.
 
@@ -366,7 +366,7 @@ Rules:
   not know (`PanelToggle`); the expansion routes it to the pending outbox
   like any unknown key, with the node's field-wise override already merged.
 - **Code-side application** is the same expansion on a live world:
-  `applyBundle(world, entityId, name)` — so `DebugGpu2dMenu` and any code-built
+  `applyBundle(world, entityId, name)` — so any code-built
   UI can use the authored bundles instead of listing components by hand.
 - **`ContainerStyle` is a bundle** whose values are theme tokens; it stays
   as-is (working, tested) and becomes an entry in the theme's `bundles`
