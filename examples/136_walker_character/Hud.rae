@@ -82,9 +82,11 @@ func drawWalkerHud(
   dbg: mod DebugOverlay
   moveStick: view VirtualJoystick
   editor: view Bool
+  touchControls: view Bool
 ) pub {
-  # GAME mode: the touch stick; EDITOR: the log strip. The debug readout is
-  # both modes'.
+  # GAME mode: the touch stick when touch controls are shown (a phone, or the
+  # "..." menu's "Simulate mobile phone"); EDITOR: the log strip. The debug
+  # readout is both modes'.
   if editor {
     drawLogOverlay(
       ov: logOverlay
@@ -93,7 +95,7 @@ func drawWalkerHud(
       screenW: windowExtentW()
       screenH: windowExtentH()
     )
-  } else {
+  } else if touchControls {
     drawVirtualJoystick(joy: moveStick, canvas: canvas)
   }
   # Debug D last, so it is above everything else.
