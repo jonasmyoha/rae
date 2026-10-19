@@ -827,6 +827,8 @@ void rae_ext_rae_chan_free(int64_t ch);
 
 void rae_ext_rae_sys_exit(int64_t code);
 rae_String rae_ext_rae_sys_get_env(rae_String name);
+rae_Bool rae_ext_rae_sys_set_env(rae_String name, rae_String value);
+int64_t rae_ext_rae_sys_restart(void);
 /* #995: program arguments. The emitted main calls rae_runtime_set_args(argc,
  * argv) first thing; the pair below exposes everything AFTER the executable. */
 void rae_runtime_set_args(int argc, char** argv);

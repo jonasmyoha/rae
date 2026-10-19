@@ -1,0 +1,25 @@
+# The "..." menu's Reset (app3d/ModeMenu) is HotReload.restartFresh: the
+# program starts again in place, with its arguments, and reads no saved state.
+# Run 1 saves state, reads it back and restarts fresh; run 2 (the same process,
+# re-executed) must see the fresh start, read nothing and get its arguments.
+import Sys
+open HotReload
+
+const appId: String = "case1156RestartFresh"
+
+func main() ret Int {
+  if freshStart() {
+    log(
+      "run 2: fresh start, saved state [{readHotReloadStateFor(appId: appId)}], argument [{Sys.argAt(
+        index: 0
+      )}]"
+    )
+    let removed: Bool = Sys.delete(path: statePathFor(appId: appId))
+    ret 0
+  }
+  let saved: Bool = writeHotReloadStateFor(appId: appId, state: "built up")
+  log("run 1: saved state [{readHotReloadStateFor(appId: appId)}]")
+  let restarted: Bool = restartFresh()
+  log("run 1: still here, the restart was refused")
+  ret 1
+}
