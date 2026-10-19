@@ -71,6 +71,13 @@ rae_String rae_ext_rae_sys_get_env(rae_String name) {
   return rae_ext_rae_str_from_cstr((void*)val);
 }
 
+/* Set `name` to `value` in this process's environment (Sys.setEnv), which the
+ * programs it starts or execs inherit. Platform reason: setenv. */
+rae_Bool rae_ext_rae_sys_set_env(rae_String name, rae_String value) {
+  if (!name.data) return 0;
+  return setenv((const char*)name.data, value.data ? (const char*)value.data : "", 1) == 0;
+}
+
 rae_String rae_ext_rae_sys_read_file(rae_String path) {
   if (!path.data) return (rae_String){NULL, 0, 0, 0};
   FILE* f = fopen((const char*)path.data, "rb");

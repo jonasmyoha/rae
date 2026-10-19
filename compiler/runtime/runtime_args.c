@@ -6,6 +6,8 @@
 
 static int g_rae_arg_count = 0;
 static char** g_rae_arg_values = NULL;
+/* The whole argv (with the executable), for rae_ext_rae_sys_restart */
+static char** g_rae_argv = NULL;
 
 #ifndef __wasm__
 /* An app started by `rae run` ends when the driver does. The driver forwards
@@ -51,6 +53,7 @@ void rae_runtime_set_args(int argc, char** argv) {
     g_rae_program_name = base;
   }
 #endif
+  g_rae_argv = (argc > 0) ? argv : NULL;
   if (argc > 0 && argv) {
     g_rae_arg_count = argc - 1;
     g_rae_arg_values = argv + 1;
@@ -69,4 +72,21 @@ rae_String rae_ext_rae_sys_arg_at(int64_t index) {
     return rae_str_from_cstr_impl("", RAE_SITE_FROM_CSTR);
   }
   return rae_str_from_cstr_impl(g_rae_arg_values[index], RAE_SITE_FROM_CSTR);
+}
+
+/* Run this program again from its start, in place (Sys.restartProgram): the
+ * same executable and arguments, this process's environment, the same process
+ * id, so `rae run` / `rae watch` keep following it. Platform reason: execvp.
+ * Returns only when the system refuses, with the negated errno. The flush is
+ * there because exec drops whatever stdio still buffers (the last log lines). */
+int64_t rae_ext_rae_sys_restart(void) {
+#ifdef __wasm__
+  return -38;  /* ENOSYS: a browser page has no process to start again */
+#else
+  if (!g_rae_argv || !g_rae_argv[0]) return -EINVAL;
+  fflush(stdout);
+  fflush(stderr);
+  execvp(g_rae_argv[0], g_rae_argv);
+  return -(int64_t)errno;
+#endif
 }

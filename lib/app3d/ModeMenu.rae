@@ -2,7 +2,9 @@
 # corner opens a small menu under it instead of flipping the mode at once. In
 # GAME mode it offers "Open editor" and "Reverse camera rotation: off/on" (the
 # camera rig's reverseDrag, which turns the orbit camera only: the editor's WASD
-# camera always looks where the drag goes); in EDITOR mode "Back to game". Which items show is
+# camera always looks where the drag goes); in EDITOR mode "Back to game"; in
+# both "Reset", which starts the program again with no saved state
+# (HotReload.restartFresh), so it works for any app without code of its own. Which items show is
 # the scene's `editor` state (app3d/UiModes); the menu's own open/close is set
 # here, outside the state bags. Choosing an item, or a press anywhere else,
 # closes it.
@@ -28,6 +30,7 @@ open ui/Ecs
 open ui/UiSystems
 open ui/inputSystem/InputSystem
 open ecs/Entity
+open HotReload
 
 # The button's and the items' action ids
 # (not "menu.toggle", which an older corner button used)
@@ -39,6 +42,8 @@ const modeMenuGameActionId: String = "menu.game"
 
 const modeMenuCameraRotationActionId: String = "menu.cameraRotation"
 
+const modeMenuResetActionId: String = "menu.reset"
+
 # The nodes: the "..." button, the menu, its items and the camera item's label
 const modeMenuButtonNodeId: String = "ModeButton"
 
@@ -47,7 +52,7 @@ const modeMenuNodeId: String = "ContextMenu"
 const modeMenuCameraLabelNodeId: String = "MenuCameraLabel"
 
 # Where a press may land without closing the menu: the button and the items
-const modeMenuPressNodeIds: String = "ModeButton MenuEditorItem MenuCameraItem MenuGameItem"
+const modeMenuPressNodeIds: String = "ModeButton MenuEditorItem MenuCameraItem MenuGameItem MenuResetItem"
 
 # Is the menu open after this frame? A tap on the button opens or closes it;
 # choosing an item, or a press anywhere else, closes it.
@@ -135,8 +140,9 @@ func updateModeMenu(
 }
 
 # The menu without the modes (an app with no GAME / EDITOR modes, whose
-# menu has only the camera item): reverse the camera's drag, open or close
-# it. `generation` is the modes' (any number that stays put when nothing is
+# menu has the camera and reset items): reverse the camera's drag, start the
+# program again, open or close it. `generation` is the modes' (any number that stays put when
+# nothing is
 # applied), `modeChosen` whether a mode item was chosen this frame. True when
 # the UI must be laid out again.
 func updateModeMenuItems(
@@ -156,6 +162,11 @@ func updateModeMenuItems(
   if cameraTapped {
     rig.reverseDrag = rig.reverseDrag is false
   }
+  # Does not come back when the program restarts
+  let resetTapped: Bool = modeMenuTapped(world: world, actionId: modeMenuResetActionId)
+  if resetTapped {
+    let restarted: Bool = restartFresh()
+  }
   # A frame or state applied since: its nodes are back to their authored
   # components, so write the menu's again
   let rewrite: Bool = menu.generation is not generation
@@ -174,7 +185,7 @@ func updateModeMenuItems(
   let open: Bool = modeMenuOpenAfter(
     open: menu.open
     buttonTapped: modeMenuTapped(world: world, actionId: modeMenuToggleActionId)
-    itemChosen: modeChosen or cameraTapped
+    itemChosen: modeChosen or cameraTapped or resetTapped
     pressedElsewhere: pressedElsewhere
   )
   if rewrite or open is not menu.open {
