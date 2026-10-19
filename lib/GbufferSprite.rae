@@ -8,10 +8,12 @@
 # sprite image ARRAY stays a C asset-upload ABI (rae_gb_sprite_array_*) and
 # its view is adopted as an external, re-adopted when the array is rebuilt.
 # app3d/PropField draws its sprite levels with it (drawPropFieldSprites): the
-# far trees of examples 136 and 143 are billboards of pictures baked with
+# far trees of examples 136, 137 and 143 are billboards of pictures baked with
 # app3d/SpriteBake. The instance's mode (lit / toon) is carried like a mesh
 # instance's. Their shadows are ShadowMapsSprite's (the same pictures, each
-# quad turned to face the sun).
+# quad turned to face the sun). In a forward frame (lib/RendererForward) the
+# same quads are drawn with a forward pipeline: the billboard's
+# gbufferSurface shaded by forward_entry.wgsl into the lit target.
 open Gbuffer
 open GbufferInstanced
 open GbufferRecord
@@ -31,6 +33,8 @@ open gpu/GpuRenderPass
 open gpu/GpuRenderTransfer
 open gpu/GpuArgs
 open gpu/GpuIds
+open ForwardMaterial
+open gpu/DeviceFeatures
 
 # C-side sprite texture array (runtime_gpu3d_gbuffer.c): the array texture is a
 # platform upload; its view and generation are read here.
@@ -61,6 +65,16 @@ type SpriteCache {
   uniform: BufferId
   sampler: SamplerId
   arrayView: ExternalId
+  # The forward frame's pipeline (made for the lit format it was made with)
+  # and bind (rebuilt when the sprite array or the lighting inputs change)
+  forwardPipeline: RenderPipelineId
+  forwardPipelineFormat: Int32
+  forwardBind: BindGroupId
+  forwardBindGen: Int
+  forwardInputsGen: Int
+  # The first billboards drawn in a forward frame were logged (the 137 gate
+  # greps the line)
+  forwardDrawLogged: Bool
 }
 
 func createSpriteCache() ret SpriteCache {
@@ -72,6 +86,12 @@ func createSpriteCache() ret SpriteCache {
     uniform: noBufferId()
     sampler: noSamplerId()
     arrayView: noExternalId()
+    forwardPipeline: noRenderPipelineId()
+    forwardPipelineFormat: 0
+    forwardBind: noBindGroupId()
+    forwardBindGen: -1
+    forwardInputsGen: -1
+    forwardDrawLogged: false
   }
 }
 
@@ -310,6 +330,93 @@ func addSpriteInstance(
   batch.count = batch.count + 1
 }
 
+# The sprite FORWARD material: the billboard composition plus the shading
+# prelude and forward_entry.wgsl, 4x into the lit format, and its bind (the
+# sprite bind's five entries + the lighting inputs). Made at the first forward
+# frame that draws a billboard; the bind is rebuilt when the sprite array or
+# the lighting inputs are recreated. Call after ensureSpritePipeline (the
+# array view and the sampler).
+func ensureSpriteForward(
+  cache: mod SpriteCache
+  resources: mod GpuResources
+  gbuffer: view GbufferCache
+) {
+  let materials: view ForwardMaterials => gbuffer.forward
+  if materials.litFormat is (0 as Int32) {
+    ret
+  }
+  if not (cache.forwardPipelineFormat is materials.litFormat) {
+    retireBindGroup(resources: resources, id: cache.forwardBind)
+    retireRenderPipeline(resources: resources, id: cache.forwardPipeline)
+    cache.forwardBind = noBindGroupId()
+    cache.forwardPipeline = noRenderPipelineId()
+    cache.forwardPipelineFormat = materials.litFormat
+    var billboardShader: Shader = shader(files: [
+      "lib/precision_f32.wgsl"
+      "lib/sky_hosek.wgsl"
+      "lib/deferred_uniforms.wgsl"
+      "lib/deferred_shade.wgsl"
+      "lib/ssao_upsample.wgsl"
+      "lib/sprite_billboard.wgsl"
+      "lib/forward_entry.wgsl"
+    ])
+    if deviceHasShaderF16() {
+      billboardShader = shader(files: [
+        "lib/precision_f16.wgsl"
+        "lib/sky_hosek.wgsl"
+        "lib/deferred_uniforms.wgsl"
+        "lib/deferred_shade.wgsl"
+        "lib/ssao_upsample.wgsl"
+        "lib/sprite_billboard.wgsl"
+        "lib/forward_entry.wgsl"
+      ])
+    }
+    if let pipeline: RenderPipelineId = createRenderPipelineWithConstants(
+      resources: resources
+      shader: billboardShader
+      vertexEntry: "vs"
+      fragmentEntry: "fsForward"
+      spec: forwardMaterialSpec(
+        litFormat: materials.litFormat
+        stride: 0
+        attributes: List.create(VertexAttributeSpec, cap: 0)
+        depthWrite: true
+        depthCompare: WGPUCompareFunction_Greater
+        cullMode: WGPUCullMode_None
+      )
+      constants: forwardSsaoConstants(ssao: materials.ssao)
+    ) {
+      cache.forwardPipeline = pipeline
+    }
+  }
+  if cache.forwardBindGen is cache.bindGen and cache.forwardInputsGen is materials.inputsGen and bindGroupIsUsable(
+    resources: resources
+    id: cache.forwardBind
+  ) {
+    ret
+  }
+  retireBindGroup(resources: resources, id: cache.forwardBind)
+  cache.forwardBind = noBindGroupId()
+  var entries: List(ResourceRef) = List.create(ResourceRef, cap: 18)
+  entries.add(value: bufferRef(id: gbuffer.frameUniform))
+  entries.add(value: bufferRef(id: gbuffer.draws))
+  entries.add(value: bufferRef(id: cache.uniform))
+  entries.add(value: externalRef(id: cache.arrayView))
+  entries.add(value: samplerRef(id: cache.sampler))
+  if not addForwardInputs(entries: entries, inputs: materials.inputs) {
+    ret
+  }
+  if let bindGroup: BindGroupId = createRenderBindGroup(
+    resources: resources
+    pipeline: cache.forwardPipeline
+    entries: entries
+  ) {
+    cache.forwardBind = bindGroup
+    cache.forwardBindGen = cache.bindGen
+    cache.forwardInputsGen = materials.inputsGen
+  }
+}
+
 # Draw a batch of billboard instances from packed DrawU `records` (count of them):
 # upload to the shared draws buffer at the running base, draw 6 procedural verts x
 # count with the sprite pipeline. `records` is a raw record
@@ -325,6 +432,13 @@ func drawSpriteInstances(
     ret
   }
   ensurePipelineForDraw(cache: cache, resources: resources, gbuffer: gbuffer)
+  var pipeline: RenderPipelineId = cache.pipeline
+  var bindGroup: BindGroupId = cache.bindGroup
+  if gbuffer.forwardFrame {
+    ensureSpriteForward(cache: cache, resources: resources, gbuffer: gbuffer)
+    pipeline = cache.forwardPipeline
+    bindGroup = cache.forwardBind
+  }
   unsafe {
     let base: Int = gbDrawCount(cache: gbuffer)
     if base + count > gbufferMaxDraws {
@@ -340,22 +454,26 @@ func drawSpriteInstances(
     ) {
       ret
     }
-    let pass: Ptr = gbufferAttributePass(cache: gbuffer)
-    if pass is webgpuNull() {
+    if not gbufferFrameActive(cache: gbuffer) {
       ret
     }
+    let pass: Ptr = gbuffer.pass
     # No static re-bind after: every G-buffer draw binds its own pipeline (#912).
     if recordDrawInPass(
       resources: resources
       pass: pass
-      pipeline: cache.pipeline
-      bindGroup: cache.bindGroup
+      pipeline: pipeline
+      bindGroup: bindGroup
       vertexCount: 6
       instanceCount: count
       firstVertex: 0
       firstInstance: base
     ) {
       gbAdvanceDraws(cache: gbuffer, count: count)
+      if gbuffer.forwardFrame and not cache.forwardDrawLogged {
+        cache.forwardDrawLogged = true
+        log("[sprite] billboards drawn in the forward pass: {count}")
+      }
     }
   }
 }
@@ -371,6 +489,8 @@ func ensurePipelineForDraw(
 # Retire the pass's GPU objects (renderer shutdown); the array texture is the
 # C side's and is released by its shutdown.
 func spriteShutdown(cache: mod SpriteCache, resources: mod GpuResources) {
+  retireBindGroup(resources: resources, id: cache.forwardBind)
+  retireRenderPipeline(resources: resources, id: cache.forwardPipeline)
   retireBindGroup(resources: resources, id: cache.bindGroup)
   retireRenderPipeline(resources: resources, id: cache.pipeline)
   retireBuffer(resources: resources, id: cache.uniform)

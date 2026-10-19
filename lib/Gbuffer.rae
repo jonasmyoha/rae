@@ -138,8 +138,7 @@ type GbufferCache {
   # draws the same meshes and records into a 4x MSAA colour target instead.
   # Every draw kind picks the pipeline of its frame: the static meshes these,
   # the skinned meshes and the terrain their ForwardMaterials ones, the
-  # metaballs and the grass their own. Sprites have no forward material and
-  # skip a forward frame (gbufferAttributePass).
+  # metaballs, the grass and the billboard sprites (GbufferSprite) their own.
   forwardFrame: Bool
   drawPipeline: RenderPipelineId
   drawBind: BindGroupId
@@ -370,17 +369,6 @@ func openGeometryPass(
       )
     }
     cache.recording = own recording
-  }
-}
-
-# The open pass, for a draw that writes the G-buffer's attributes (sprites,
-# grass): null between frames and in a forward frame, which has no G-buffer.
-func gbufferAttributePass(cache: view GbufferCache) unsafe ret Ptr {
-  unsafe {
-    if cache.forwardFrame {
-      ret webgpuNull()
-    }
-    ret cache.pass
   }
 }
 
