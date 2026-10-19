@@ -2648,7 +2648,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 if (!is_opt_bind
                     && (vk == AST_EXPR_CALL || vk == AST_EXPR_METHOD_CALL
                         || vk == AST_EXPR_OBJECT)) {
-                    diag_error(ctx->module ? ctx->module->file_path : NULL,
+                    diag_error(c_source_file(ctx),
                                (int)stmt->line, (int)stmt->column,
                                "cannot bind a reference to a call that returns ownership; "
                                "write 'let name: T = ...' to take the value, or use a reference-returning "
@@ -2657,7 +2657,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 if (is_opt_bind
                     && (vk == AST_EXPR_CALL || vk == AST_EXPR_METHOD_CALL)
                     && bind_value_returns_owned_opt(ctx, stmt->as.let_stmt.value)) {
-                    diag_error(ctx->module ? ctx->module->file_path : NULL,
+                    diag_error(c_source_file(ctx),
                                (int)stmt->line, (int)stmt->column,
                                "this call returns an owned optional; a view/mod binding refuses ownership "
                                "and nothing else would own the value — take it with "
@@ -4058,7 +4058,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     bool forwards_ref = (inner->kind == AST_EXPR_CALL
                                          || inner->kind == AST_EXPR_METHOD_CALL) && yields_ref;
                     if (is_temp_call) {
-                        diag_error(ctx->module ? ctx->module->file_path : NULL,
+                        diag_error(c_source_file(ctx),
                                    (int)ret_val->line, (int)ret_val->column,
                                    "cannot return a reference to a temporary: this call returns a "
                                    "value, which does not outlive the function");

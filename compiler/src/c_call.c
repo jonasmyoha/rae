@@ -1602,8 +1602,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                             snprintf(msg, sizeof(msg),
                                 "cannot copy owning argument for parameter of type '%.*s' because deep-copy is not implemented; use 'view T' to borrow or 'own T' to move",
                                 (int)pbase_copy.len, pbase_copy.data);
-                            diag_error(ctx->module ? ctx->module->file_path
-                                                   : "<unknown>",
+                            diag_error(c_source_file(ctx),
                                        (int)expr->line, (int)expr->column,
                                        msg);
                         }
@@ -1881,8 +1880,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 "cannot resolve call to '%.*s' with %zu value arguments during C lowering; "
                 "check the function's parameter count and generic arguments",
                 (int)callee_name.len, callee_name.data, argument_count);
-            const char* origin = ctx->func_decl ? ctx->func_decl->origin_file : NULL;
-            diag_error(origin ? origin : ctx->module->file_path,
+            diag_error(c_source_file(ctx),
                        (int)expr->line, (int)expr->column, message);
             // Discovery also emits into a scratch stream. Keep walking so
             // other diagnostics remain available; the pipeline rejects the

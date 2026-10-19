@@ -172,6 +172,18 @@ typedef struct {
   int lend_group_count;
 } CFuncContext;
 
+// The source file of the code being lowered, for a diagnostic or a runtime
+// error's location: the function's own file (origin_file survives the module
+// merge and specialization). ctx->module is the module being WRITTEN, whose
+// path is the merged project's last-loaded file, or the entry's while a lib
+// function is emitted: naming it put errors in an unrelated file (#815 fixed
+// the same for sema).
+static inline const char* c_source_file(const CFuncContext* ctx) {
+    if (ctx && ctx->func_decl && ctx->func_decl->origin_file) return ctx->func_decl->origin_file;
+    if (ctx && ctx->module && ctx->module->file_path) return ctx->module->file_path;
+    return "<unknown>";
+}
+
 typedef struct CStmtTemps {
   FILE* decls; char* decls_buf; size_t decls_len;   // "  T __rae_stmt_tmpN; int __rae_stmt_tmpN_set = 0;" lines
   FILE* drops; char* drops_buf; size_t drops_len;   // "  if (__rae_stmt_tmpN_set) { ... drop ... }" lines

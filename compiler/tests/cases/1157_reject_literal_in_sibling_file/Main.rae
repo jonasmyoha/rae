@@ -1,0 +1,12 @@
+# The C backend's diagnostics name the file the code is in. This literal error
+# lives HERE, in the entry file; the sibling below is loaded after it, and the
+# backend used to name the merged module's path (the last-loaded file) for
+# every function it wrote, so the error pointed at Helper.rae's line 9.
+func makePair() ret Pair {
+  ret Pair { first: { 1, 2 }, second: { value: 3 } }
+}
+
+func main() {
+  let pair: Pair = makePair()
+  log("{pair.first.value}")
+}
