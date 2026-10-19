@@ -1200,8 +1200,8 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # near or middle level and part, PropField; how many depends on what
           # is in view) and the 24 physics cubes. Drawn one tree part at a
           # time the forest alone was over 1300, so more than 800 means the
-          # forest lost its batching. The river is gone: the sea is the only
-          # water body.
+          # forest lost its batching. The river is gone: the sea, the FFT ocean
+          # of 141 (WalkerSea), is the only water body.
           # The physics check (RAE_114_PHYSICS_TEST) settles the cube stacks,
           # walks the hero into one and jumps, then checks the tree trunks: a
           # ray hits one, the hero stops at its bark, and it follows its tree;
@@ -1218,7 +1218,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              && [ "$(grep -c "palette atlas 512x512" "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c "skinned parts: 12" "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c "panel buttons: 4 clip, 0 transport" "$TMP_OUT/render.log")" -eq 1 ] \
-             && [ "$(grep -c "\[water\] toon lake: 1 bodies" "$TMP_OUT/render.log")" -eq 1 ] \
+             && [ "$(grep -c "\[sea\] FFT ocean at z" "$TMP_OUT/render.log")" -eq 1 ] \
              && CASTERS="$(sed -n 's/.*\[shadow\] casters \([0-9]*\), 4 cascades.*/\1/p' "$TMP_OUT/render.log" | head -1)" \
              && [ -n "$CASTERS" ] && [ "$CASTERS" -ge 400 ] && [ "$CASTERS" -le 800 ] \
              && [ "$(grep -c "\[terrain\] 300 trees planted on the island" "$TMP_OUT/render.log")" -eq 1 ] \
