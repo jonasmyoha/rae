@@ -40,6 +40,7 @@ open GltfSkin
 open SdfText
 open Png
 open app3d/CameraRig
+open app3d/CameraWalkFollow
 open app3d/CharacterController
 open app3d/SettingsDialog
 open SkyHosek
@@ -73,6 +74,8 @@ type CameraSystem {
   hosek: HosekDataset
   rigEntityId: EntityId
   cameraEntityId: EntityId
+  # The character camera turns after the walker (lib/app3d/CameraWalkFollow)
+  walkFollow: WalkFollow
 }
 
 # The two entity ids of the rig->camera relation. Rae has no lightweight tuple
@@ -213,6 +216,16 @@ func cameraUpdate(
     wheel: uiWheelUnclaimed(input: inputSystem.ui)
     deltaTime: deltaTime
   )
+  # The GAME camera turns after the walker while it walks or runs, leaving the
+  # view where the player turned it for a moment (lib/app3d/CameraWalkFollow)
+  if inputSystem.uiModes.editor is false and cameraSystem.rig.mode is CameraRigMode.character {
+    stepWalkFollow(
+      follow: cameraSystem.walkFollow
+      rig: cameraSystem.rig
+      controller: controllerOf(world: world, entityId: heroEntityId)
+      deltaTime: deltaTime
+    )
+  }
   # The GAME camera stays above the terrain (lib/app3d/OrbitGround), over the
   # higher of the ground under its target and under its eye (a slope behind
   # it); the editor's orbits freely
