@@ -7,10 +7,6 @@
 
 open Calendar
 
-# A whole day in one minute. Fast enough to see dawn and dusk without waiting,
-# slow enough that the sun does not strobe.
-const timeOfDayDaySeconds: Float = 60.0
-
 # The June solstice, so a scene at the Helsinki default opens with the sun
 # actually up: at this latitude the December sun reaches 6 degrees, which is a
 # legitimate but very dark first impression for an example.
@@ -29,6 +25,11 @@ type TimeOfDay {
   # rather than silently restart, and because watching it tick is a small
   # pleasure. lib/Calendar gets the leap years right, so 29 February arrives.
   year: Int
+  # How many seconds of wall time one simulated day takes. A minute by
+  # default: fast enough to see dawn and dusk without waiting, slow enough
+  # that the sun does not strobe. A game sets its own: the walkers' days last
+  # 30 minutes (app3d/WalkerAppSetup).
+  daySeconds: Float = 60.0
 }
 
 func createTimeOfDay(hour: view Float) ret TimeOfDay {
@@ -47,7 +48,7 @@ func timeOfDayAdvance(timeOfDay: mod TimeOfDay, deltaTime: view Float) ret Bool 
   if deltaTime <= 0.0 {
     ret false
   }
-  var h: Float = timeOfDay.hour + deltaTime * 24.0 / timeOfDayDaySeconds
+  var h: Float = timeOfDay.hour + deltaTime * 24.0 / timeOfDay.daySeconds
   var rollYear: Int = timeOfDay.year
   var rollDay: Int = timeOfDay.dayOfYear
   loop h >= 24.0 {
@@ -66,4 +67,10 @@ func timeOfDayAdvance(timeOfDay: mod TimeOfDay, deltaTime: view Float) ret Bool 
 # The date the clock is on.
 func timeOfDayDate(timeOfDay: view TimeOfDay) ret CalendarDate {
   ret dateFromDayOfYear(year: timeOfDay.year, dayOfYear: timeOfDay.dayOfYear)
+}
+
+# Move the clock `hours` ahead at once (the walkers' "Skip 6 hours": past the
+# night), rolling the date and the year as the clock does
+func timeOfDaySkip(timeOfDay: mod TimeOfDay, hours: view Float) ret Bool {
+  ret timeOfDayAdvance(timeOfDay: timeOfDay, deltaTime: hours * timeOfDay.daySeconds / 24.0)
 }
