@@ -1,0 +1,125 @@
+import Vec3
+open water/WaterContact
+
+func sample(
+  contact: mod WaterContact
+  x: copy Float
+  height: copy Float
+  available: copy Bool
+) ret Float {
+  let position: Vec3 = { x: x, y: 0.0, z: height }
+  if let event: WaterContactEvent = stepWaterContact(
+    contact: contact
+    position: position
+    level: 0.0
+    deltaTime: 0.02
+    available: available
+  ) {
+    ret event.strength
+  }
+  ret 0.0
+}
+
+func check(ok: copy Bool, label: view String) {
+  if ok {
+    log("ok {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func main() {
+  var contact: WaterContact = {}
+  check(
+    ok: sample(
+      contact: contact
+      x: 0.0
+      height: 0.1
+      available: true
+    ) is 0.0
+    label: "first pose quiet"
+  )
+  let impact: Float = sample(
+    contact: contact
+    x: 0.0
+    height: -0.02
+    available: true
+  )
+  check(ok: impact > 1.0, label: "downward impact")
+  check(
+    ok: sample(
+      contact: contact
+      x: 0.0
+      height: -0.02
+      available: true
+    ) is 0.0
+    label: "stationary wet quiet"
+  )
+  check(
+    ok: sample(
+      contact: contact
+      x: 0.1
+      height: -0.02
+      available: true
+    ) is 0.0
+    label: "impact cooldown"
+  )
+  loop var index: Int = 0, index < 5, ++index {
+    sample(
+      contact: contact
+      x: 0.1
+      height: -0.02
+      available: true
+    )
+  }
+  let sweep: Float = sample(
+    contact: contact
+    x: 0.3
+    height: -0.02
+    available: true
+  )
+  check(ok: sweep > 0.0 and sweep < impact, label: "underwater sweep weaker")
+  check(
+    ok: sample(
+      contact: contact
+      x: 10.0
+      height: -0.1
+      available: true
+    ) is 0.0
+    label: "teleport quiet"
+  )
+  check(
+    ok: sample(
+      contact: contact
+      x: 10.0
+      height: -0.2
+      available: false
+    ) is 0.0
+    label: "dry ground quiet"
+  )
+  check(
+    ok: sample(
+      contact: contact
+      x: 10.0
+      height: -0.3
+      available: true
+    ) is 0.0
+    label: "reacquisition quiet"
+  )
+  var airborne: WaterContact = {}
+  sample(
+    contact: airborne
+    x: 0.0
+    height: 2.0
+    available: true
+  )
+  check(
+    ok: sample(
+      contact: airborne
+      x: 0.1
+      height: 1.9
+      available: true
+    ) is 0.0
+    label: "airborne quiet"
+  )
+}

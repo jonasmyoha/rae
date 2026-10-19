@@ -240,7 +240,6 @@ func renderGbufferPass(
   rendererResources: mod GpuResources
   cameraSystem: mod CameraSystem
   characterSystem: mod CharacterSystem
-  splashes: mod ParticleSystem
   terrainSystem: mod TerrainSystem
   world: mod GameWorld
   physicsSystem: view PhysicsSystem
@@ -380,15 +379,6 @@ func renderGbufferPass(
     gbuffer: cache
     gbufferResources: rendererResources
   )
-  # Water splashes for anything wading this frame (#84): advance + emit here; the
-  # droplets are DRAWN later, at the transparentForward tag, as alpha-fading
-  # rounded droplets — they never go into this G-buffer pass.
-  splashStep(
-    characterSystem: characterSystem
-    splashes: splashes
-    world: world
-    deltaTime: deltaTime
-  )
   Gbuffer.endPass(cache: cache, resources: rendererResources)
 }
 
@@ -472,6 +462,11 @@ func renderApp(
     )
   }
   let palette: List(Float) = buildPalette(sk: characterSystem.skeleton)
+  captureSplashFeet(
+    characterSystem: characterSystem
+    world: world
+    entityId: characterSystem.heroEntityId
+  )
 
   # Per-character crowd palettes (#547): upload the hero into slot 0 first (this
   # also creates the shared palette buffer on frame 0), then give each crowd
@@ -495,6 +490,7 @@ func renderApp(
         clipIndex: memberClip
         animTime: memberTime
       )
+      captureSplashFeet(characterSystem: characterSystem, world: world, entityId: member)
       ensureRendererResources(renderer: renderSystem.renderer)
       if let rendererResources: mod GpuResources => renderSystem.renderer.gpuResources {
         uploadPaletteSlot(
@@ -508,6 +504,12 @@ func renderApp(
     }
   }
 
+  splashStep(
+    splashes: splashes
+    world: world
+    waterSystem: waterSystem
+    deltaTime: deltaTime
+  )
   applyCameraRigHierarchy(cameraSystem: cameraSystem, world: world)
   syncCameraBar(world: inputSystem.world, rig: cameraSystem.rig, camera: cameraSystem.camera)
   let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
@@ -546,7 +548,6 @@ func renderApp(
             rendererResources: rendererResources
             cameraSystem: cameraSystem
             characterSystem: characterSystem
-            splashes: splashes
             terrainSystem: terrainSystem
             world: world
             physicsSystem: physicsSystem

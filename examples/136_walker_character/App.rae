@@ -141,6 +141,8 @@ type InputSystem {
 # They're driven in place via componentMod (no copy-out/mutate/set-back), and
 # each member's render model is derived from its controller (walkerWorldModel).
 type CharacterSystem {
+  leftFootNode: Int
+  rightFootNode: Int
   skeleton: Skeleton
   idleClip: Clip
   walkClip: Clip
@@ -834,6 +836,8 @@ func createApp() ret App {
         cameraEntityId: rigLink.cameraEntityId
       }
       characterSystem: {
+        leftFootNode: splashFootNode(skeleton: sk, name: "mixamorig:LeftToeBase")
+        rightFootNode: splashFootNode(skeleton: sk, name: "mixamorig:RightToeBase")
         skeleton: own sk
         idleClip: idleClip
         walkClip: walkClip
@@ -898,7 +902,11 @@ func runWalkerApp() ret Int {
   # RAE_114_PHYSICS_TEST=1: drive the hero into a cube stack and jump, report,
   # and quit (PhysicsSelfTest), instead of the window loop
   let physicsTest: Bool = Sys.getEnv(name: "RAE_114_PHYSICS_TEST").length() > 0
+  let splashTest: Bool = Sys.getEnv(name: "RAE_WALKER_SPLASH_TEST").length() > 0
   var exitCode: Int = 0
+  if splashTest {
+    exitCode = runSplashPoseTest(characterSystem: app.characterSystem, world: app.world)
+  }
   if physicsTest {
     exitCode = runPhysicsSelfTest(
       physicsSystem: app.physicsSystem
@@ -907,7 +915,7 @@ func runWalkerApp() ret Int {
       groundZ: app.characterSystem.groundZ
     )
   }
-  loop not physicsTest and not Gpu2d.pollClose() {
+  loop not physicsTest and not splashTest and not Gpu2d.pollClose() {
     frameBegin(app: app)
     updateApp(app: app)
     if Gpu2d.shouldRenderFrame(appNeedsRender: app.frame.needsRender) is false {

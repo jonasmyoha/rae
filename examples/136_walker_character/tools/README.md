@@ -44,11 +44,26 @@ small highlight. Droplets stretch along their projected velocity. No texture
 atlas or additional render pass is needed. This is an inexpensive visual
 approximation, not physical refraction.
 
-A moving character in shallow water emits eight varied droplets every 0.12 s.
-Crowd members alternate across three burst slots. The pool stays at 256 entries;
-a stalled frame emits at most one burst. Constant-gravity integration and an
-in-place update keep the arc independent of render frequency. Emission still
-uses the mean sea plane, as before; it does not follow individual FFT crests.
+Each character owns left/right foot-contact history in an ECS component. The
+rendered toe-bone positions (including animation blending and the physics-driven
+root transform) determine contact and velocity. Entering water emits an impact
+burst; travelling through water emits weaker directed spray. A held pose and
+feet above the surface emit nothing. Launch direction inherits foot motion,
+and impact speed controls the number and upward speed of droplets.
+
+The latest completed FFT height samples are used when younger than 0.15 s.
+Unavailable/stale data uses the mean sea level; changing between those sources
+resets contact history to avoid a false impact. Dry ground skips the FFT query.
+First observations, teleports and frames longer than 0.2 s also reset history.
+This is a visual contact response, not a fluid solver or a change to physics.
+The existing 256-particle cap and allocation-free updates remain.
+
+`RAE_WALKER_SPLASH_TEST=1` runs the actual walking clip through both foot
+contacts, checks that a paused pose and airborne points stay quiet, logs
+`[splash-pose] ... ok=true`, and exits. Run with an explicit 180 s timeout.
+Compiler fixture `1151_water_contact` covers impacts, weaker underwater sweeps,
+cooldown, teleports, dry ground and reacquisition. The material preview below
+intentionally keeps its synthetic timed bursts, isolated from normal play.
 
 To inspect a repeatable burst over the actual shore, run from the repo root:
 
