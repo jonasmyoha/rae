@@ -3,7 +3,8 @@
 Status: **the reference UI application for Rae** (refreshed 2026-09-14 after
 the #946–#950 refactor; docs/ui-ecs-refactor-status.md §3 is the ledger of
 what changed and why). It is a music-player mockup — Home, Search, Library,
-Profile, Album, Now Playing, History, a bottom sheet and a debug menu —
+Profile, Album, Now Playing, History, a bottom sheet and the standard debug
+widget (lib/ui/DebugOverlay, with a "Dark theme" switch of its own) —
 driven by the local Spotify desktop app on macOS and a local album catalogue
 everywhere else.
 
@@ -25,7 +26,7 @@ examples/106_mobile_ui/            the app: ~53 files, one folder per system
   Config, Viewport, WorldHelpers, RenderDecide, RenderCacheGpu2d,
   GpuWindow, Headless, HotReloadGlue, AppSettings, FileIo
   inputSystem/ screenSystem/ historySystem/ playbackSystem/ spotifySystem/
-  debugSystem/ assetSystem/
+  debugSystem/ (the screenshot and stress runners) assetSystem/
   assets/scenes/*.raescene         21 authored scenes + Theme.raescene
   assets/                          MSDF fonts, icons, album art, catalogue
   app_cache/                       runtime state (gitignored): history,

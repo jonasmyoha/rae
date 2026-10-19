@@ -24,7 +24,6 @@ open ui/InputKind
 type RenderActiveDecision {
   active: Bool
   currentHovered: EntityId
-  currentMouseButtons: Int
 }
 
 func decideActive(
@@ -32,12 +31,10 @@ func decideActive(
   uiSystems: view UiSystems
   renderCache: mod RenderCache
   input: view InputSystem
-  debug: view DebugSystem
   forceRender: view Bool
   animating: view Bool
   prevPressed: view EntityId
   prevHovered: view EntityId
-  prevMouseButtons: view Int
   viewport: view Viewport
 ) ret RenderActiveDecision {
   var active: Bool = forceRender
@@ -76,8 +73,7 @@ func decideActive(
   # visual effect on hover (HoverScale, etc.) need a re-render when
   # the cursor enters or leaves their rect. The check below only
   # marks dirty on entity TRANSITIONS, so an idle cursor parked over
-  # the same rect stays at 0 fps. Mouse-button bitfield is only
-  # mirrored when the debug overlay needs it.
+  # the same rect stays at 0 fps.
   let mx: Float = viewportPointerX(viewport: viewport)
   let my: Float = viewportPointerY(viewport: viewport)
   # Hover only for a pointer that hovers: never a finger (it stays where it
@@ -91,35 +87,12 @@ func decideActive(
       y: my
     )
   }
-  var currentMouseButtons: Int = 0
-  if debug.showInputOutlines {
-    # Same bitfield layout as drawDebugLabels' "button:" read-out:
-    # bit 0 left, bit 1 right, bit 2 middle.
-    if uiPointerButtonDown(button: 0) {
-      currentMouseButtons = currentMouseButtons + 1
-    }
-    if uiPointerButtonDown(button: 1) {
-      currentMouseButtons = currentMouseButtons + 2
-    }
-    if uiPointerButtonDown(button: 2) {
-      currentMouseButtons = currentMouseButtons + 4
-    }
-  }
   if active is false {
     if currentHovered is not prevHovered {
       active = true
     }
   }
-  if active is false {
-    if currentMouseButtons is not prevMouseButtons {
-      active = true
-    }
-  }
 
-  let d: RenderActiveDecision = {
-    active: active
-    currentHovered: currentHovered
-    currentMouseButtons: currentMouseButtons
-  }
+  let d: RenderActiveDecision = { active: active, currentHovered: currentHovered }
   ret d
 }

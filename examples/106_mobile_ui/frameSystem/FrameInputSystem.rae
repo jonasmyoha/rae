@@ -2,8 +2,10 @@ open HotReload
 open ui/Ecs
 open ecs/Entity
 open ecs/ComponentTable
+open ecs/Event
 open ui/EventLoop
 open ui/Theme
+open ui/DebugOverlay
 open ui/scrollRootSystem/ScrollRootSystem
 
 # Frame phase 1 — input. The hot-reload signal, the pointer/keyboard input
@@ -32,12 +34,27 @@ func frameInputSystem(
     saveStateAndExit(screen: session.currentScreen, scrollY: scrollFsm.scrollY)
   }
 
+  # The debug widget reads the pointer BEFORE the app hit-tests (the UI
+  # editor does the same): a press on its button or its open dialog never
+  # reaches the page under it, and it repaints the frame.
+  let debugTookPointer: Bool = updateDebugOverlay(
+    debugOverlay: session.debugOverlay
+    screenW: app.viewport.layoutW
+    screenH: app.viewport.layoutH
+    now: uiNowSeconds()
+    didRealWork: session.renderedLastFrame
+  )
   updateInputSystem(
     input: input
     world: world
     uiSystems: app.uiSystems
     viewport: app.viewport
   )
+  if debugTookPointer {
+    eventClear(UiAction, this: input.uiActions)
+    input.pressedEntityId = noEntity()
+    frame.forceRender = true
+  }
   # #976: the frame's keyboard text goes to the active page's search field.
   searchFieldSystem(world: world, uiSystems: app.uiSystems, input: input)
   # Live-window resize. Detected by POLLING the live framebuffer-derived
@@ -59,7 +76,6 @@ func frameInputSystem(
   }
   if extentChanged {
     app.viewport = liveViewport
-    setDebugScreenSize(debug: session.debug, w: app.viewport.layoutW, h: app.viewport.layoutH)
     frame.switching = true
   }
 
@@ -131,7 +147,6 @@ func frameInputSystem(
     appState: appState
     world: world
     uiSystems: app.uiSystems
-    debug: session.debug
     scenes: app.scenes
     actionTable: app.actionTable
     commands: app.commands
@@ -162,28 +177,31 @@ func frameInputSystem(
     reg: app.textureRegistry
   )
 
-  # In-app debug UI: a true return means at least one state bit flipped;
-  # the world rebuild repaints the handful of code-driven colours.
-  if inputDispatch.debugChanged {
-    frame.switching = true
-  }
-
-  # Theme toggle: press T to swap between light and dark. Scene colours store
-  # slot NAMES and re-resolve against the new active theme on the next paint;
-  # code-driven colours still bake into components, so the world rebuild
-  # re-derives them (queue #259 to migrate those to slots).
+  # Theme: the debug dialog's "Dark theme" switch, or T to flip it. Scene
+  # colours store slot NAMES and re-resolve against the new active theme on
+  # the next paint; code-driven colours still bake into components, so the
+  # world rebuild re-derives them (queue #259 to migrate those to slots).
   let keyT: Int = 84
   if uiIsKeyPressed(key: keyT) {
-    let cur: Theme = appState.theme.active
-    if cur.mode is ThemeMode.light {
+    setDebugOverlayToggle(
+      debugOverlay: session.debugOverlay
+      index: session.themeToggle
+      on: appState.theme.active.mode is ThemeMode.light
+    )
+  }
+  let wantDark: Bool = debugOverlayToggleOn(
+    debugOverlay: session.debugOverlay
+    index: session.themeToggle
+  )
+  if wantDark is not (appState.theme.active.mode is ThemeMode.dark) {
+    if wantDark {
       appState.theme.active = darkTheme()
-      appState.theme.generation = appState.theme.generation + 1
-      log("[theme] -> dark (gen {appState.theme.generation})")
+      log("[theme] -> dark (gen {appState.theme.generation + 1})")
     } else {
       appState.theme.active = lightTheme()
-      appState.theme.generation = appState.theme.generation + 1
-      log("[theme] -> light (gen {appState.theme.generation})")
+      log("[theme] -> light (gen {appState.theme.generation + 1})")
     }
+    appState.theme.generation = appState.theme.generation + 1
     frame.switching = true
   }
 

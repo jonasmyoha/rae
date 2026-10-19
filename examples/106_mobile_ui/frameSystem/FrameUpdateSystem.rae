@@ -61,19 +61,17 @@ func frameUpdateSystem(
   )
 
   # Frame-gate decision: does anything warrant a full begin/render/endDrawing
-  # this frame? Inputs: forceRender, dirty caches, input events, hover/button
-  # changes for the debug-outline overlay (RenderDecide.rae).
+  # this frame? Inputs: forceRender, dirty caches, input events, hover
+  # changes (RenderDecide.rae).
   let activeDecision: RenderActiveDecision = decideActive(
     world: world
     uiSystems: app.uiSystems
     renderCache: frame.renderCache
     input: input
-    debug: session.debug
     forceRender: frame.forceRender
     animating: tick.animating
     prevPressed: frame.lastPressed
     prevHovered: session.lastHoveredEntityId
-    prevMouseButtons: session.lastMouseButtons
     viewport: app.viewport
   )
   tick.active = activeDecision.active or session.assetsLoading
@@ -103,7 +101,6 @@ func frameUpdateSystem(
     session.renderUntil = tick.now + 0.5
   }
   session.lastHoveredEntityId = currentHovered
-  session.lastMouseButtons = activeDecision.currentMouseButtons
   frame.lastPressed = input.pressedEntityId
 
   # Render decision trace: whether we'll paint this frame and why. If

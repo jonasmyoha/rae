@@ -58,9 +58,6 @@ func buildSessionWorld(app: mod App, session: mod AppSession) ret UiWorld {
   # resize-detection step painted one glitchy frame: the OLD world laid out
   # at the old extent through the NEW design resolution).
   uiSetDesignResolution(width: app.viewport.layoutW, height: app.viewport.layoutH, fit: 0)
-  # Layer the debug-UI entities (button + optional menu overlay) onto the
-  # world BEFORE layout runs so they participate in measure/place.
-  addDebugLayer(world: world, uiSystems: app.uiSystems, debug: session.debug)
   ret world
 }
 
