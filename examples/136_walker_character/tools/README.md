@@ -44,6 +44,8 @@ small highlight. Droplets stretch along their projected velocity. No texture
 atlas or additional render pass is needed. This is an inexpensive visual
 approximation, not physical refraction.
 
+The splash code is `lib/water/WadeSplash` (143 uses the same); the walker's
+`Splash.rae` keeps only the preview switches and the pose check's loop.
 Each character owns left/right foot-contact history in an ECS component. The
 rendered toe-bone positions (including animation blending and the physics-driven
 root transform) determine contact and velocity. Entering water emits an impact

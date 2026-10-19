@@ -35,7 +35,7 @@ import Vec3
 import Sys
 open GbufferInstanced
 open Particles
-open WaterParticles
+open water/WadeSplash
 open water/Water
 open GbufferSprite
 open water/WaterSystem
@@ -195,7 +195,7 @@ type App {
   netSystem: NetSystem  # multiplayer seam (net.rae, #554)
   players: PlayerRoster  # who the local player controls (players.rae, #546)
   persist: PersistState
-  splashes: ParticleSystem  # water-splash droplets when the character wades (splash.rae, #84)
+  wadeSplash: WadeSplash  # the spray of wading feet (lib/water/WadeSplash)
   waterSystem: WaterSystem  # the FFT sea at the biome water plane (lib/water/IslandSea)
   idIssuer: IdIssuer  # the root's shared ID issuer (#869)
   gpuResources: opt GpuResources  # the App-owned GPU manager water's IDs live in (#873)
@@ -793,7 +793,7 @@ func createApp() ret App {
 
     # #905: the renderer owns the mesh store the water grid and the particle
     # quad are uploaded into, so both systems are built before it moves into App.
-    let splashes: ParticleSystem = createWaterParticles(renderer: renderer, cap: 256)
+    let wadeSplash: WadeSplash = createWadeSplash(renderer: renderer, cap: 256)
     let waterSystem: WaterSystem = createWaterSystem(
       renderer: renderer
       body: createIslandSea(
@@ -844,8 +844,8 @@ func createApp() ret App {
         walkFollow: createWalkFollow()
       }
       characterSystem: {
-        leftFootNode: splashFootNode(skeleton: sk, name: "mixamorig:LeftToeBase")
-        rightFootNode: splashFootNode(skeleton: sk, name: "mixamorig:RightToeBase")
+        leftFootNode: wadeFootNode(skeleton: sk, name: "mixamorig:LeftToeBase")
+        rightFootNode: wadeFootNode(skeleton: sk, name: "mixamorig:RightToeBase")
         skeleton: own sk
         idleClip: idleClip
         walkClip: walkClip
@@ -881,7 +881,7 @@ func createApp() ret App {
       netSystem: { role: 0, tick: 0 }
       players: createPlayerRoster(count: 1 + cloneCount)
       persist: { windowGeometry: own windowGeometry, lastStateSave: startT, stateDirty: false }
-      splashes: own splashes
+      wadeSplash: own wadeSplash
       waterSystem: own waterSystem
       idIssuer: own idIssuer
       gpuResources: GpuResources.create(issuer: idIssuer, capacity: walkerGpuCapacity)
@@ -902,7 +902,7 @@ func runWalkerApp() ret Int {
     )} parts + hero + crowd + terrain + grass)"
   )
   prepareSplashPreview(
-    world: app.world
+    wadeSplash: app.wadeSplash
     cameraSystem: app.cameraSystem
     groundZ: app.characterSystem.groundZ
   )
@@ -913,7 +913,11 @@ func runWalkerApp() ret Int {
   let splashTest: Bool = Sys.getEnv(name: "RAE_WALKER_SPLASH_TEST").length() > 0
   var exitCode: Int = 0
   if splashTest {
-    exitCode = runSplashPoseTest(characterSystem: app.characterSystem, world: app.world)
+    exitCode = runSplashPoseTest(
+      characterSystem: app.characterSystem
+      world: app.world
+      wadeSplash: app.wadeSplash
+    )
   }
   if physicsTest {
     exitCode = runPhysicsSelfTest(
@@ -948,7 +952,7 @@ func runWalkerApp() ret Int {
           world: app.world
           physicsSystem: app.physicsSystem
           terrainSystem: app.terrainSystem
-          splashes: app.splashes
+          wadeSplash: app.wadeSplash
           waterSystem: app.waterSystem
           resources: resources
           profiler: app.profiler

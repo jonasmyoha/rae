@@ -19,6 +19,7 @@ open GbufferInstanced
 open Particles
 open TransparentForward
 open water/WaterSystem
+open water/WadeSplash
 open water/WaterFft
 open water/Underwater
 open gpu/GpuResources
@@ -236,7 +237,6 @@ func renderGbufferPass(
   rendererResources: mod GpuResources
   cameraSystem: mod CameraSystem
   characterSystem: mod CharacterSystem
-  splashes: mod ParticleSystem
   terrainSystem: mod TerrainSystem
   world: mod GameWorld
   physicsSystem: view PhysicsSystem
@@ -371,15 +371,6 @@ func renderGbufferPass(
     gbuffer: cache
     gbufferResources: rendererResources
   )
-  # Water splashes for anything wading this frame (#84): advance + emit here; the
-  # droplets are DRAWN later, at the transparentForward tag, as alpha-fading
-  # cubes (#844) — they no longer go into this G-buffer pass.
-  splashStep(
-    characterSystem: characterSystem
-    splashes: splashes
-    world: world
-    deltaTime: deltaTime
-  )
   Gbuffer.endPass(cache: cache, resources: rendererResources)
 }
 
@@ -394,7 +385,7 @@ func renderApp(
   world: mod GameWorld
   physicsSystem: view PhysicsSystem
   terrainSystem: mod TerrainSystem
-  splashes: mod ParticleSystem
+  wadeSplash: mod WadeSplash
   waterSystem: mod WaterSystem
   resources: mod GpuResources
   profiler: mod Profiler
@@ -463,6 +454,12 @@ func renderApp(
     )
   }
   let palette: List(Float) = buildPalette(sk: characterSystem.skeleton)
+  captureCharacterFeet(
+    characterSystem: characterSystem
+    world: world
+    wadeSplash: wadeSplash
+    entityId: characterSystem.heroEntityId
+  )
 
   # Per-character crowd palettes (#547): upload the hero into slot 0 first (this
   # also creates the shared palette buffer on frame 0), then give each crowd
@@ -486,6 +483,12 @@ func renderApp(
         clipIndex: memberClip
         animTime: memberTime
       )
+      captureCharacterFeet(
+        characterSystem: characterSystem
+        world: world
+        wadeSplash: wadeSplash
+        entityId: member
+      )
       ensureRendererResources(renderer: renderSystem.renderer)
       if let rendererResources: mod GpuResources => renderSystem.renderer.gpuResources {
         uploadPaletteSlot(
@@ -499,6 +502,13 @@ func renderApp(
     }
   }
 
+  # The wading spray: every foot captured above, against this frame's sea
+  wadeSplashStep(
+    wadeSplash: wadeSplash
+    waterSystem: waterSystem
+    biome: forestBiomeConfig()
+    deltaTime: deltaTime
+  )
   applyCameraRigHierarchy(cameraSystem: cameraSystem, world: world)
   syncCameraBar(world: inputSystem.world, rig: cameraSystem.rig, camera: cameraSystem.camera)
   let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
@@ -538,7 +548,6 @@ func renderApp(
             rendererResources: rendererResources
             cameraSystem: cameraSystem
             characterSystem: characterSystem
-            splashes: splashes
             terrainSystem: terrainSystem
             world: world
             physicsSystem: physicsSystem
@@ -616,7 +625,7 @@ func renderApp(
       }
       case RenderTag.transparentForward {
         # Opaque snapshot BEFORE the water so a refracting surface can read it (#832),
-        # then the toon lake (#830), then the splash droplets blend OVER it.
+        # then the FFT sea (lib/water/IslandSea), then the splash droplets blend OVER it.
         snapshotOpaque(renderer: renderSystem.renderer)
         if let meshResources: view GpuResources => renderSystem.renderer.gpuResources {
           waterDraw(
@@ -631,8 +640,14 @@ func renderApp(
             deltaTime: deltaTime
           )
         }
-        # Splash droplets fade by alpha through the transparent pass (#844).
-        particleDraw(sys: splashes, transparent: renderSystem.renderer.passes.transparent)
+        # The wading spray, lit by the day like the water (lib/water/WadeSplash)
+        drawWadeSplash(
+          wadeSplash: wadeSplash
+          transparent: renderSystem.renderer.passes.transparent
+          camera: cameraSystem.camera
+          sky: renderSystem.renderer.sky
+          hasSky: renderSystem.renderer.hasSky
+        )
         renderDeferredPass(
           renderer: renderSystem.renderer
           tag: tag

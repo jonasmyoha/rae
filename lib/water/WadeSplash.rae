@@ -1,0 +1,435 @@
+# water/WadeSplash — water spray where a character's feet go in and out of the
+# water, as the walker examples have it: rounded droplets that catch the light
+# (WaterParticles), thrown when an animated foot bone crosses the water's
+# surface (water/WaterContact, sampled from the FFT sea's surface cache), and
+# lit by the day like the water (water/WaterLighting).
+#
+# An app with wading characters adds it in a few lines:
+#
+#   var wadeSplash: WadeSplash = createWadeSplash(renderer: renderer, cap: 256)
+#   let leftFootNode: Int = wadeFootNode(skeleton: sk, name: "mixamorig:LeftToeBase")
+#   ...each frame, after posing a character's skeleton for its draw:
+#   captureWadeFeet(wadeSplash: w, entityId: id, model: its world model,
+#     skeleton: sk, leftFootNode: l, rightFootNode: r)
+#   ...once per frame, after every character was captured:
+#   wadeSplashStep(wadeSplash: w, waterSystem: water, biome: cfg, deltaTime: dt)
+#   ...in the transparent pass, after the water surface:
+#   drawWadeSplash(wadeSplash: w, transparent: t, camera: c, sky: s, hasSky: h)
+#
+# The splash system owns its table of feet (one row per character it has
+# seen), like every ECS system owns its tables. A character whose pose was not
+# captured this frame (hidden, paused) throws nothing: nothing runs on a timer.
+import Vec3
+import Math
+import RendererDeferred
+open Math3d
+open GltfSkin
+open Scene3d
+open Sky
+open Particles
+open WaterParticles
+open TransparentForward
+open WorldBiome
+open ecs/Entity
+open ecs/ComponentTable
+open water/WaterContact
+open water/WaterSystem
+open water/WaterLighting
+open water/FftSurfaceCache
+
+# World units of water under a foot before it splashes at all
+const wadeSplashMinDepth: Float = 0.03
+
+# The repeating burst of a preview with no fixed age (seconds)
+const wadeSplashPreviewInterval: Float = 0.12
+
+# A character's two feet as last posed, and their water contacts
+type WadeFeet {
+  leftPosition: Vec3
+  rightPosition: Vec3
+  left: WaterContact
+  right: WaterContact
+  # Did the water level come from the FFT surface cache (not the still level)?
+  # A switch restarts the contact, so it is not read as a foot moving.
+  leftCached: Bool
+  rightCached: Bool
+  # Captured this frame
+  sampled: Bool
+}
+
+# A material preview: bursts at one shore point instead of from feet
+type WadeSplashPreview {
+  enabled: Bool
+  # The age one burst is frozen at; below 0, a burst every
+  # wadeSplashPreviewInterval
+  age: Float
+  origin: Vec3
+  elapsed: Float
+}
+
+type WadeSplash {
+  particles: ParticleSystem
+  feet: ComponentTable(WadeFeet)
+  preview: WadeSplashPreview
+}
+
+func createWadeSplash(renderer: mod DeferredRenderer, cap: view Int) ret WadeSplash {
+  ret WadeSplash {
+    particles: createWaterParticles(renderer: renderer, cap: cap)
+    feet: ComponentTable.create(WadeFeet)
+    preview: {
+      enabled: false
+      age: -1.0
+      origin: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+      elapsed: 0.0
+    }
+  }
+}
+
+# The skeleton node of a foot bone, or -1 (logged) when the skeleton has none
+func wadeFootNode(skeleton: view Skeleton, name: view String) ret Int {
+  if let node: Int = nodeByName(sk: skeleton, name: name) {
+    ret node
+  }
+  log("[splash] missing foot bone: {name}")
+  ret -1
+}
+
+# Record where the character `entityId`'s feet are in this frame's pose:
+# `skeleton` as just posed for its draw, `model` its world matrix. Call before
+# the skeleton is reused for another character.
+func captureWadeFeet(
+  wadeSplash: mod WadeSplash
+  entityId: view EntityId
+  model: view Mat4
+  skeleton: view Skeleton
+  leftFootNode: view Int
+  rightFootNode: view Int
+) {
+  if leftFootNode < 0 or rightFootNode < 0 {
+    ret
+  }
+  if not componentHas(this: wadeSplash.feet, entityId: entityId) {
+    componentSet(this: wadeSplash.feet, entityId: entityId, data: WadeFeet {})
+  }
+  let left: Mat4 = mat4Mul(a: model, b: nodeWorldMatrix(sk: skeleton, node: leftFootNode))
+  let right: Mat4 = mat4Mul(a: model, b: nodeWorldMatrix(sk: skeleton, node: rightFootNode))
+  let feet: mod WadeFeet => componentMod(this: wadeSplash.feet, entityId: entityId)
+  feet.leftPosition = Vec3.create(
+    x: mat4Get(m: left, i: 12)
+    y: mat4Get(m: left, i: 13)
+    z: mat4Get(m: left, i: 14)
+  )
+  feet.rightPosition = Vec3.create(
+    x: mat4Get(m: right, i: 12)
+    y: mat4Get(m: right, i: 13)
+    z: mat4Get(m: right, i: 14)
+  )
+  feet.sampled = true
+}
+
+# Where the feet of `entityId` were last captured (for a check), or none
+func wadeFeetOf(wadeSplash: view WadeSplash, entityId: view EntityId) ret opt WadeFeet {
+  ret componentCopy(this: wadeSplash.feet, entityId: entityId)
+}
+
+# The water level under `position`: the FFT surface where its cache is fresh
+# (`cached` true), else the still level
+func wadeFootLevel(waterSystem: view WaterSystem, position: view Vec3, cached: mod Bool) ret Float {
+  loop let body: view WaterBody in waterSystem.bodies {
+    if let sample: FftSurfaceSample = sampleFftSurface(
+      cache: waterSystem.surfaceCache
+      body: body
+      x: position.x
+      y: position.y
+      now: waterSystem.time
+      maxAge: 0.15
+    ) {
+      cached = true
+      ret sample.height
+    }
+    cached = false
+    ret body.centre.z
+  }
+  cached = false
+  ret 0.0
+}
+
+# A small fan for one foot event: varied droplet sizes and launch speeds,
+# carried along with the foot
+func emitWadeSplash(particles: mod ParticleSystem, event: view WaterContactEvent) {
+  let count: Int = 3 + (event.strength * 5.0).toInt()
+  let x: Float = event.position.x
+  let y: Float = event.position.y
+  let waterZ: Float = event.position.z
+  loop var index: Int = 0, index < count, ++index {
+    let phase: Float = index.toFloat() * 2.399963 + x * 0.7 + y * 0.31
+    let variation: Float = Math.abs(value: Math.sin(x: phase * 1.7))
+    let speed: Float = (0.35 + variation) * event.strength
+    let lift: Float = (0.7 + variation * 1.2) * Math.sqrt(x: event.strength)
+    particleEmit(
+      sys: particles
+      x: x + Math.cos(x: phase) * 0.12
+      y: y + Math.sin(x: phase) * 0.12
+      z: waterZ + 0.025
+      vx: Math.cos(x: phase) * speed + event.velocity.x * 0.35
+      vy: Math.sin(x: phase) * speed + event.velocity.y * 0.35
+      vz: lift
+      life: 2.0 * lift / particles.gravity
+      size: 0.018 + variation * 0.028
+      r: 0.77
+      g: 0.91
+      b: 0.98
+    )
+  }
+}
+
+# One burst at a point of the still water (the preview's)
+func emitWadeSplashAt(particles: mod ParticleSystem, position: view Vec3) {
+  let event: WaterContactEvent = {
+    position: { x: position.x, y: position.y, z: position.z }
+    velocity: { z: -2.0 }
+    strength: 1.0
+  }
+  emitWadeSplash(particles: particles, event: event)
+}
+
+# Is there water deeper than the splash minimum at (`x`, `y`) of `biome`?
+func wadeWetGround(biome: view BiomeConfig, x: view Float, y: view Float) ret Bool {
+  ret worldWaterDepth(x: x, y: y, cfg: biome) * worldTerrainAmplitude > wadeSplashMinDepth
+}
+
+# Advance the droplets and throw new ones for every foot that went in or
+# swept through the water since its last capture. Call once per frame, after
+# capturing every character. `biome` is the field the terrain uses.
+func wadeSplashStep(
+  wadeSplash: mod WadeSplash
+  waterSystem: view WaterSystem
+  biome: view BiomeConfig
+  deltaTime: view Float
+) {
+  if wadeSplash.preview.enabled {
+    stepWadeSplashPreview(wadeSplash: wadeSplash, deltaTime: deltaTime)
+    ret
+  }
+  waterParticleUpdate(particles: wadeSplash.particles, deltaTime: deltaTime)
+  loop var index: Int = 0, index < componentCount(this: wadeSplash.feet), ++index {
+    let entityId: EntityId = componentEntityAt(this: wadeSplash.feet, i: index)
+    let feet: mod WadeFeet => componentMod(this: wadeSplash.feet, entityId: entityId)
+    if not feet.sampled {
+      feet.left.initialized = false
+      feet.right.initialized = false
+      continue
+    }
+    feet.sampled = false
+    let leftWetGround: Bool = wadeWetGround(
+      biome: biome
+      x: feet.leftPosition.x
+      y: feet.leftPosition.y
+    )
+    let rightWetGround: Bool = wadeWetGround(
+      biome: biome
+      x: feet.rightPosition.x
+      y: feet.rightPosition.y
+    )
+    if not leftWetGround and not rightWetGround {
+      feet.left.initialized = false
+      feet.right.initialized = false
+      continue
+    }
+    var leftCached: Bool = false
+    var rightCached: Bool = false
+    let leftLevel: Float = wadeFootLevel(
+      waterSystem: waterSystem
+      position: feet.leftPosition
+      cached: leftCached
+    )
+    let rightLevel: Float = wadeFootLevel(
+      waterSystem: waterSystem
+      position: feet.rightPosition
+      cached: rightCached
+    )
+    if leftCached is not feet.leftCached {
+      feet.left.initialized = false
+    }
+    if rightCached is not feet.rightCached {
+      feet.right.initialized = false
+    }
+    feet.leftCached = leftCached
+    feet.rightCached = rightCached
+    if let event: WaterContactEvent = stepWaterContact(
+      contact: feet.left
+      position: feet.leftPosition
+      level: leftLevel
+      deltaTime: deltaTime
+      available: leftWetGround
+    ) {
+      emitWadeSplash(particles: wadeSplash.particles, event: event)
+    }
+    if let event: WaterContactEvent = stepWaterContact(
+      contact: feet.right
+      position: feet.rightPosition
+      level: rightLevel
+      deltaTime: deltaTime
+      available: rightWetGround
+    ) {
+      emitWadeSplash(particles: wadeSplash.particles, event: event)
+    }
+  }
+}
+
+# Are droplets still in the air? (An animation source: keep rendering.)
+func wadeSplashAlive(wadeSplash: view WadeSplash) ret Bool {
+  ret wadeSplash.particles.list.length > 0
+}
+
+# Draw the droplets into the transparent pass, after the water surface, lit
+# by the day as the water is
+func drawWadeSplash(
+  wadeSplash: view WadeSplash
+  transparent: mod TransparentPassCache
+  camera: view Camera3d
+  sky: view Sky
+  hasSky: view Bool
+) {
+  waterParticleDraw(
+    particles: wadeSplash.particles
+    transparent: transparent
+    camera: camera
+    daylight: waterDaylight(sky: sky, hasSky: hasSky)
+  )
+}
+
+# ----- the material preview ------------------------------------------------
+# A repeatable look at the droplets without walking anywhere: bursts at
+# `origin` on the still water, one frozen at `age` seconds (age >= 0) or one
+# every wadeSplashPreviewInterval (age < 0). Feet throw nothing meanwhile.
+func startWadeSplashPreview(wadeSplash: mod WadeSplash, origin: view Vec3, age: view Float) {
+  wadeSplash.preview = { enabled: true, age: age, origin: origin, elapsed: 0.0 }
+}
+
+func stepWadeSplashPreview(wadeSplash: mod WadeSplash, deltaTime: view Float) {
+  let origin: Vec3 = wadeSplash.preview.origin
+  if wadeSplash.preview.age >= 0.0 {
+    wadeSplash.particles.list.clear()
+    emitWadeSplashAt(particles: wadeSplash.particles, position: origin)
+    waterParticleUpdate(particles: wadeSplash.particles, deltaTime: wadeSplash.preview.age)
+    ret
+  }
+  waterParticleUpdate(particles: wadeSplash.particles, deltaTime: deltaTime)
+  wadeSplash.preview.elapsed = wadeSplash.preview.elapsed + deltaTime
+  if wadeSplash.preview.elapsed < wadeSplashPreviewInterval {
+    ret
+  }
+  # At most one burst after a stall: never catch up with a huge emission spike
+  wadeSplash.preview.elapsed = wadeSplash.preview.elapsed - Math.floor(
+    x: wadeSplash.preview.elapsed / wadeSplashPreviewInterval
+  ) * wadeSplashPreviewInterval
+  emitWadeSplashAt(particles: wadeSplash.particles, position: origin)
+}
+
+# A shallow shore point for the preview: the first spot along +x from the
+# origin with 0.2 to 0.5 world units of water, on the still water plane
+func findShallowShore(biome: view BiomeConfig, groundZ: view Float) ret opt Vec3 {
+  let waterZ: Float = worldWaterZ(groundZ: groundZ, cfg: biome)
+  loop var step: Int = 0, step < 1600, ++step {
+    let x: Float = step.toFloat() * 0.25
+    let depth: Float = worldWaterDepth(x: x, y: 0.0, cfg: biome) * worldTerrainAmplitude
+    if depth > 0.2 and depth < 0.5 {
+      ret Vec3.create(x: x, y: 0.0, z: waterZ)
+    }
+  }
+  ret none
+}
+
+# ----- the pose check ------------------------------------------------------
+# Run the real skeleton and walk clip through the contacts, not an estimated
+# walk-cycle phase: the app poses its character for a few seconds, capturing
+# its feet and calling wadePoseCheckFrame each frame, then
+# finishWadePoseCheck. Passes when both feet throw spray while walking, a
+# held pose throws none and a foot in the air throws none.
+type WadePoseCheck {
+  left: WaterContact
+  right: WaterContact
+  leftEvents: Int
+  rightEvents: Int
+}
+
+func createWadePoseCheck() ret WadePoseCheck {
+  let left: WaterContact = {}
+  let right: WaterContact = {}
+  ret WadePoseCheck { left: left, right: right, leftEvents: 0, rightEvents: 0 }
+}
+
+# One posed frame of the walk, the feet of `entityId` captured, the water
+# at `level`
+func wadePoseCheckFrame(
+  check: mod WadePoseCheck
+  wadeSplash: view WadeSplash
+  entityId: view EntityId
+  level: view Float
+) {
+  if let feet: WadeFeet = wadeFeetOf(wadeSplash: wadeSplash, entityId: entityId) {
+    if let event: WaterContactEvent = stepWaterContact(
+      contact: check.left
+      position: feet.leftPosition
+      level: level
+      deltaTime: 1.0 / 60.0
+      available: true
+    ) {
+      check.leftEvents = check.leftEvents + 1
+    }
+    if let event: WaterContactEvent = stepWaterContact(
+      contact: check.right
+      position: feet.rightPosition
+      level: level
+      deltaTime: 1.0 / 60.0
+      available: true
+    ) {
+      check.rightEvents = check.rightEvents + 1
+    }
+  }
+}
+
+# Hold the last pose (no timer may keep throwing spray) and swing a foot in
+# the air, then log one [splash-pose] line. True when it passed.
+func finishWadePoseCheck(
+  check: mod WadePoseCheck
+  wadeSplash: view WadeSplash
+  entityId: view EntityId
+  level: view Float
+) ret Bool {
+  var pausedEvents: Int = 0
+  if let feet: WadeFeet = wadeFeetOf(wadeSplash: wadeSplash, entityId: entityId) {
+    loop var frame: Int = 0, frame < 60, ++frame {
+      if let event: WaterContactEvent = stepWaterContact(
+        contact: check.left
+        position: feet.leftPosition
+        level: level
+        deltaTime: 1.0 / 60.0
+        available: true
+      ) {
+        pausedEvents = pausedEvents + 1
+      }
+    }
+  }
+  var airborneEvents: Int = 0
+  var air: WaterContact = {}
+  loop var frame: Int = 0, frame < 60, ++frame {
+    let position: Vec3 = { x: frame.toFloat() * 0.01, y: 0.0, z: level + 2.0 }
+    if let event: WaterContactEvent = stepWaterContact(
+      contact: air
+      position: position
+      level: level
+      deltaTime: 1.0 / 60.0
+      available: true
+    ) {
+      airborneEvents = airborneEvents + 1
+    }
+  }
+  let ok: Bool = check.leftEvents > 0 and check.rightEvents > 0 and pausedEvents is 0 and airborneEvents is 0
+  log(
+    "[splash-pose] left={check.leftEvents} right={check.rightEvents} paused={pausedEvents} airborne={airborneEvents} ok={ok}"
+  )
+  ret ok
+}
