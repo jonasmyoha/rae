@@ -1,0 +1,128 @@
+# CameraWalkFollow — a third-person camera that turns after its walker, as an
+# adventure game's does: while the character moves on foot, the rig's yaw eases
+# round toward where it is going. Gently, since a character turns on the spot
+# at once and the view should not: it follows only while the character moves,
+# the faster the faster it goes (a walk in proportion to its speed, the full
+# rate at a run); not at all while it heads back at the camera (it would swing
+# round to its back), fading out between 100 and 150 degrees from the view;
+# only once it has kept moving a moment (a step, or turning and stepping off,
+# does not swing the view); and not for a moment after the player has turned
+# the camera by hand.
+#
+# `walkFollowYaw` is the rule, pure; a `WalkFollow` keeps the two clocks it
+# needs and `stepWalkFollow` runs it on a rig for a ThirdPersonController, once
+# a frame after updateCameraRig (character mode). A vehicle's chase camera is
+# the other kind of follow: firmer, and only while driving forward.
+import Math
+open app3d/CameraRig
+open app3d/CharacterController
+
+# The rate (1/s) at a run; a walk follows in proportion to its speed
+const walkFollowRate: Float = 1.2
+
+# The speed (m/s) the full rate is reached at: the controller's run
+const walkFollowFullSpeed: Float = 4.2
+
+# How long a character must have been moving before the camera follows (s),
+# and over how long the follow then comes in
+const walkFollowDelaySeconds: Float = 0.4
+
+const walkFollowRampSeconds: Float = 0.4
+
+# How long the camera leaves the view where the player turned it (s)
+const walkFollowPauseSeconds: Float = 1.2
+
+# Heading this far (rad) from the view the follow starts fading, and this far
+# it is gone: 100 and 150 degrees, a character walking back at the camera
+const walkFollowSideAngle: Float = 1.745
+
+const walkFollowBackAngle: Float = 2.618
+
+# The camera's yaw a frame on, for a character heading `heading` (a character
+# heading, as the camera's yaw is) at `speed` m/s that has been moving for
+# `movingSeconds`, `sinceManualTurn` s after the player last turned the camera.
+func walkFollowYaw(
+  yaw: view Float
+  heading: view Float
+  speed: view Float
+  sinceManualTurn: view Float
+  movingSeconds: view Float
+  deltaTime: view Float
+) ret Float {
+  if speed <= 0.0 or sinceManualTurn < walkFollowPauseSeconds {
+    ret yaw
+  }
+  let gap: Float = wrapCharacterAngle(angle: heading - yaw)
+  let away: Float = Math.abs(value: gap)
+  var facing: Float = 1.0
+  if away >= walkFollowBackAngle {
+    ret yaw
+  }
+  if away > walkFollowSideAngle {
+    let t: Float = (away - walkFollowSideAngle) / (walkFollowBackAngle - walkFollowSideAngle)
+    facing = 1.0 - t * t * (3.0 - 2.0 * t)
+  }
+  let easeIn: Float = Math.max(
+    a: 0.0
+    b: Math.min(a: 1.0, b: (movingSeconds - walkFollowDelaySeconds) / walkFollowRampSeconds)
+  )
+  if easeIn <= 0.0 {
+    ret yaw
+  }
+  let strength: Float = Math.min(a: 1.0, b: speed / walkFollowFullSpeed) * facing * easeIn
+  ret yaw + gap * (1.0 - Math.exp(x: 0.0 - walkFollowRate * strength * deltaTime))
+}
+
+# The follow's clocks: since the player last turned the camera by hand, and
+# how long the walker has been moving
+type WalkFollow {
+  sinceManualTurn: Float
+  movingSeconds: Float
+}
+
+# A follow ready at once: no recent hand turn to wait out
+func createWalkFollow() ret WalkFollow {
+  ret WalkFollow { sinceManualTurn: walkFollowPauseSeconds, movingSeconds: 0.0 }
+}
+
+# The walker's speed for the follow: its walk or its run while it moves
+func walkFollowSpeed(controller: view ThirdPersonController) ret Float {
+  if controller.moving is false {
+    ret 0.0
+  }
+  if controller.walking {
+    ret controller.walkSpeed
+  }
+  ret controller.runSpeed
+}
+
+# One frame: a drag of the rig resets the hand-turn clock, the walker's moving
+# clock runs while it moves, and the rig's yaw turns after it. Call after
+# updateCameraRig, while the rig follows the character on foot; a frame where
+# it should not follow (seated in a vehicle, knocked down, held still) is a
+# frame its controller is not moving
+func stepWalkFollow(
+  follow: mod WalkFollow
+  rig: mod CameraRig
+  controller: view ThirdPersonController
+  deltaTime: view Float
+) {
+  if rig.dragging {
+    follow.sinceManualTurn = 0.0
+  } else {
+    follow.sinceManualTurn = follow.sinceManualTurn + deltaTime
+  }
+  if controller.moving {
+    follow.movingSeconds = follow.movingSeconds + deltaTime
+  } else {
+    follow.movingSeconds = 0.0
+  }
+  rig.yaw = walkFollowYaw(
+    yaw: rig.yaw
+    heading: controller.heading
+    speed: walkFollowSpeed(controller: controller)
+    sinceManualTurn: follow.sinceManualTurn
+    movingSeconds: follow.movingSeconds
+    deltaTime: deltaTime
+  )
+}

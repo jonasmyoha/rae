@@ -1,0 +1,188 @@
+# lib/app3d/CameraWalkFollow: the third-person camera turns after its walker.
+# The rule (walkFollowYaw): gently, the faster the faster it goes, not while it
+# heads back at the camera, only once it has kept moving a moment, not just
+# after a hand turn, the same however the time is cut into frames. And the
+# frame step (stepWalkFollow) on a real rig and controller: its clocks run and
+# reset as the walker moves and the player drags.
+import Math
+open Scene3d
+open app3d/CameraRig
+open app3d/CharacterController
+open app3d/CameraWalkFollow
+
+func near(a: view Float, b: view Float) ret Bool {
+  ret Math.abs(value: a - b) < 0.0001
+}
+
+func main() {
+  let step: Float = 1.0 / 60.0
+  let settled: Float = walkFollowPauseSeconds + 1.0
+  let running: Float = walkFollowYaw(
+    yaw: 0.0
+    heading: 1.0
+    speed: 4.2
+    sinceManualTurn: settled
+    movingSeconds: settled
+    deltaTime: step
+  )
+  let walking: Float = walkFollowYaw(
+    yaw: 0.0
+    heading: 1.0
+    speed: 1.7
+    sinceManualTurn: settled
+    movingSeconds: settled
+    deltaTime: step
+  )
+  log("running sideways it eases after the runner: {running > 0.0 and running < 0.05}")
+  log("walking it follows more gently: {walking > 0.0 and walking < running}")
+  log("standing still it stays: {walkFollowYaw(
+    yaw: 0.0
+    heading: 2.0
+    speed: 0.0
+    sinceManualTurn: settled
+    movingSeconds: settled
+    deltaTime: step
+  ) is 0.0}")
+  log("running straight at the camera it does not spin round: {walkFollowYaw(
+    yaw: 0.0
+    heading: Math.pi
+    speed: 4.2
+    sinceManualTurn: settled
+    movingSeconds: settled
+    deltaTime: step
+  ) is 0.0}")
+  let backish: Float = walkFollowYaw(
+    yaw: 0.0
+    heading: 2.3
+    speed: 4.2
+    sinceManualTurn: settled
+    movingSeconds: settled
+    deltaTime: step
+  )
+  let sideways: Float = walkFollowYaw(
+    yaw: 0.0
+    heading: 1.5
+    speed: 4.2
+    sinceManualTurn: settled
+    movingSeconds: settled
+    deltaTime: step
+  )
+  log(
+    "mostly toward the camera it follows only a little: {backish > 0.0 and backish < sideways * 2.3 / 1.5}"
+  )
+  log("off to the other side it turns the other way: {walkFollowYaw(
+    yaw: 0.0
+    heading: 0.0 - 1.0
+    speed: 4.2
+    sinceManualTurn: settled
+    movingSeconds: settled
+    deltaTime: step
+  ) < 0.0}")
+  log("just set off it waits: {walkFollowYaw(
+    yaw: 0.0
+    heading: 1.0
+    speed: 4.2
+    sinceManualTurn: settled
+    movingSeconds: 0.2
+    deltaTime: step
+  ) is 0.0}")
+  let easingIn: Float = walkFollowYaw(
+    yaw: 0.0
+    heading: 1.0
+    speed: 4.2
+    sinceManualTurn: settled
+    movingSeconds: walkFollowDelaySeconds + walkFollowRampSeconds * 0.5
+    deltaTime: step
+  )
+  log("halfway through the ease-in it follows, not fully: {easingIn > 0.0 and easingIn < running}")
+  log("just after a hand turn it does not follow: {walkFollowYaw(
+    yaw: 0.0
+    heading: 1.0
+    speed: 4.2
+    sinceManualTurn: 0.5
+    movingSeconds: settled
+    deltaTime: step
+  ) is 0.0}")
+  let half: Float = walkFollowYaw(
+    yaw: 0.0
+    heading: 1.0
+    speed: 4.2
+    sinceManualTurn: settled
+    movingSeconds: settled
+    deltaTime: step * 0.5
+  )
+  let twoHalves: Float = walkFollowYaw(
+    yaw: half
+    heading: 1.0
+    speed: 4.2
+    sinceManualTurn: settled
+    movingSeconds: settled
+    deltaTime: step * 0.5
+  )
+  log("two half frames turn it as far as one: {near(a: twoHalves, b: running)}")
+  # The frame step on a rig: a runner heading 1 rad right of the view
+  var rig: CameraRig = createCameraRig(camera: defaultCamera3d())
+  rig.yaw = 0.0
+  var controller: ThirdPersonController = createThirdPersonController()
+  controller.heading = 1.0
+  controller.moving = true
+  var follow: WalkFollow = createWalkFollow()
+  loop var i: Int = 0, i < 15, ++i {
+    stepWalkFollow(
+      follow: follow
+      rig: rig
+      controller: controller
+      deltaTime: step
+    )
+  }
+  log("a quarter second in, the rig has not turned: {rig.yaw is 0.0}")
+  loop var i: Int = 0, i < 75, ++i {
+    stepWalkFollow(
+      follow: follow
+      rig: rig
+      controller: controller
+      deltaTime: step
+    )
+  }
+  let afterRun: Float = rig.yaw
+  log("a second and a half in, it turns after the runner: {afterRun > 0.05 and afterRun < 1.0}")
+  # The player drags: the follow waits walkFollowPauseSeconds
+  rig.dragging = true
+  stepWalkFollow(
+    follow: follow
+    rig: rig
+    controller: controller
+    deltaTime: step
+  )
+  rig.dragging = false
+  let atDrag: Float = rig.yaw
+  loop var i: Int = 0, i < 30, ++i {
+    stepWalkFollow(
+      follow: follow
+      rig: rig
+      controller: controller
+      deltaTime: step
+    )
+  }
+  log("half a second after a drag it leaves the view: {rig.yaw is atDrag}")
+  # Standing: the moving clock goes back to zero and the rig stays
+  controller.moving = false
+  stepWalkFollow(
+    follow: follow
+    rig: rig
+    controller: controller
+    deltaTime: step
+  )
+  let stood: Float = rig.yaw
+  loop var i: Int = 0, i < 120, ++i {
+    stepWalkFollow(
+      follow: follow
+      rig: rig
+      controller: controller
+      deltaTime: step
+    )
+  }
+  log(
+    "standing, it stays and its moving clock is back at zero: {rig.yaw is stood and follow.movingSeconds is 0.0}"
+  )
+}
