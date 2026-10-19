@@ -464,6 +464,41 @@ Compiler code should favor:
 
 ---
 
+## Example families: shared code lives in lib/
+
+Some examples are one program in several forms: the walkers (136 deferred,
+137 forward, 143 in a huge forest), the raytracer tutorial steps (40-53), the
+physics twins (122/123, 124/125), the renderer twins (132/133, 134/135). 137
+and 143 began as copies of 136, and every later 136 improvement (the realistic
+sea, the wading splashes, the terrain look, the rocks and bushes) went into
+136's own files, so the others silently fell behind until it was noticed by
+eye (2026-10-19). The rules:
+
+- **A feature a sibling example would also want goes into `lib/`** and is
+  used from every sibling in the same task. If a sibling cannot be updated in
+  that task, the task queues the port by name (`- [ ] <sibling>: use lib/...`).
+  "It is only an example" is not a reason: the example is where the feature
+  is first proved, and a copy is where it is first forgotten.
+- **An example never forks a lib file to change it.** No `assets/*.wgsl` copy
+  of a lib shader, no copied `.rae` module. Add a parameter, a setting or a
+  named variant to the lib one (`lib/terrain_detail_painted.wgsl` beside
+  `lib/terrain_detail.wgsl`), and keep in the example only what is truly its
+  own (a palette's constants, its scene, its tuning).
+- **Lib functions take the app's config, never assume the default.** A lib
+  function that needs the terrain takes the app's `BiomeConfig` (and passes
+  its island constants to any shader that reads the field); one that calls
+  `defaultBiomeConfig()` itself is wrong for every app with another world
+  (143's coast was, until #78575707).
+- **The gate holds it** (`compiler/tools/example-copy-gate.sh`, one pre-suite
+  case of every full run, `make example-copy-gate` alone): an example file that
+  shares 40 or more meaningful lines, at least half of the smaller file, with
+  another example's file or a `lib/` file fails, unless the pair is in
+  `compiler/tools/example-copy-allowlist.txt` with its reason. The list may
+  only shrink: a pair that is no longer a copy fails as STALE until its line is
+  removed. Moving code into `lib/` is the normal way to make the gate pass;
+  adding a line to the allowlist is the reviewable exception, with a reason
+  the maintainer would accept (a tutorial step, a deliberate twin).
+
 ## UI rendering loops & performance
 
 Hard-won lesson (full postmortem: `rae/docs/ui-render-loop-performance.md`):
@@ -870,6 +905,13 @@ headless `rae build --emit-c` compile-check for pure type/signature changes
 the change could actually alter what is drawn. If you would rather the user run
 it, ending with a note asking them to is still fine — but it is no longer
 required, and "NO VISUAL TESTS" in an older task brief is not a hard bar.
+
+**Example-copy gate.** `compiler/tools/example-copy-gate.sh` (`make
+example-copy-gate`) fails on an example file that is a copy of another
+example's file or of a `lib/` file and is not in
+`compiler/tools/example-copy-allowlist.txt`, or on an allowlist line that is
+no longer a copy (see "Example families" above). It runs as one pre-suite case
+of every full run, right after the banned-terms gate, in well under a second.
 
 **Banned-terms gate (#1016).** A handful of external project/product names
 must never appear in this repository — not in code, docs, `QUEUE.md`, or

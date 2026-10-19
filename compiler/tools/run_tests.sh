@@ -64,6 +64,13 @@ if [ -z "$TEST_NAME_FILTER" ] && [ -f "tools/banned-terms-gate.sh" ]; then
   if ! bash tools/banned-terms-gate.sh; then TERMS_CHECK_FAILED=1; fi
   echo
 fi
+# Example files that copy another example's or a lib/ file, outside the
+# allowlist (tools/example-copy-gate.sh, AGENTS.md "Example families").
+COPY_CHECK_FAILED=0
+if [ -z "$TEST_NAME_FILTER" ] && [ -f "tools/example-copy-gate.sh" ]; then
+  if ! bash tools/example-copy-gate.sh; then COPY_CHECK_FAILED=1; fi
+  echo
+fi
 # The stress cases (docs/stress-tests.md), same place: a "footgun" case that
 # stops reproducing FAILS on purpose (the ratchet).
 STRESS_CHECK_FAILED=0
@@ -637,6 +644,7 @@ fi
 
 if [ "$TREE_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$TERMS_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
+if [ "$COPY_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$STRESS_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$TSAN_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$ASAN_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
