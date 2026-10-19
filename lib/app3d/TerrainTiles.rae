@@ -1,0 +1,246 @@
+# app3d/TerrainTiles — the ground of a streamed WorldBiome terrain: a square
+# of gridSide x gridSide heightfield tiles, cellSize metres each, round the
+# cell the player is in. Each tile owns one mesh, rewritten in place when the
+# tile moves to another cell; its vertices carry the absolute world height of
+# the app's biome field (worldTerrainHeight), so what is drawn is what the
+# physics and the props stand on.
+#
+#   var ground: TerrainTiles = createTerrainTiles(renderer: r, gridSide: 7,
+#     cellSize: 18.0, segments: 24, groundZ: z, biome: cfg)
+#   ...when the player's cell may have changed:
+#   let moved: Bool = updateTerrainTiles(tiles: ground, renderer: r,
+#     cellX: cx, cellY: cy)
+#   ...in the G-buffer (or forward) pass:
+#   drawTerrainTiles(tiles: ground, cache: c, resources: g, time: t)
+#
+# NO SEAMS. Every tile is sampled on one integer lattice (cell * segments +
+# vertex index), so two neighbours compute their shared edge from the same
+# points, and tiles never overlap: overlapping heightfields disagree inside
+# the strip, which showed as depth fighting and dark shadow seams.
+#
+# CHEAP STREAMING. A cell's tile is the one at (cellX mod gridSide, cellY mod
+# gridSide), so when the player crosses into the next cell only the row or
+# column that came into view is rewritten, not the whole grid.
+import Math
+import RendererDeferred
+open Math3d
+open Mesh3d
+open Scene3d
+open WorldBiome
+open GbufferTerrain
+open Gbuffer
+open gpu/GpuResources
+
+# One tile: its mesh and the cell it covers now
+type TerrainTile {
+  meshId: Int
+  cellX: Int
+  cellY: Int
+}
+
+type TerrainTiles {
+  gridSide: Int
+  cellSize: Float
+  segments: Int
+  groundZ: Float
+  biome: BiomeConfig
+  # The cell the grid is centred on (none yet: a far-off sentinel)
+  centreCellX: Int
+  centreCellY: Int
+  # Row-major by (cellX mod gridSide, cellY mod gridSide)
+  tiles: List(TerrainTile)
+  # Reused staging buffer for one tile's vertices
+  scratchVerts: List(Float)
+}
+
+# The pool: gridSide x gridSide tiles of `segments` x `segments` quads, each
+# with its own mesh uploaded into `renderer`; none placed until the first
+# updateTerrainTiles
+func createTerrainTiles(
+  renderer: mod DeferredRenderer
+  gridSide: view Int
+  cellSize: view Float
+  segments: view Int
+  groundZ: view Float
+  biome: view BiomeConfig
+) ret TerrainTiles {
+  let plane: MeshData = makePlane(size: cellSize, segments: segments)
+  var tiles: List(TerrainTile) = List.create(TerrainTile, cap: gridSide * gridSide)
+  loop var i: Int = 0, i < gridSide * gridSide, ++i {
+    let mesh: MeshHandle = RendererDeferred.uploadMesh(
+      renderer: renderer
+      verts: plane.verts
+      vertCount: plane.vertCount
+      indices: plane.indices
+    )
+    tiles.add(value: { meshId: mesh.id, cellX: 1000000000, cellY: 1000000000 })
+  }
+  let floats: Int = (segments + 1) * (segments + 1) * 8
+  var scratch: List(Float) = List.create(Float, cap: floats)
+  loop var i: Int = 0, i < floats, ++i {
+    scratch.add(value: 0.0)
+  }
+  ret TerrainTiles {
+    gridSide: gridSide
+    cellSize: cellSize
+    segments: segments
+    groundZ: groundZ
+    biome: biome
+    centreCellX: 1000000000
+    centreCellY: 1000000000
+    tiles: own tiles
+    scratchVerts: own scratch
+  }
+}
+
+# The ground height at world (`x`, `y`)
+func terrainTilesHeight(tiles: view TerrainTiles, x: view Float, y: view Float) ret Float {
+  ret worldTerrainHeight(
+    x: x
+    y: y
+    groundZ: tiles.groundZ
+    cfg: tiles.biome
+  )
+}
+
+# `value` mod `side`, never negative
+func terrainTileWrap(value: view Int, side: view Int) ret Int {
+  let wrapped: Int = value % side
+  if wrapped < 0 {
+    ret wrapped + side
+  }
+  ret wrapped
+}
+
+# Centre the grid on cell (`cellX`, `cellY`): every tile whose slot now maps
+# to another cell is rewritten for it. True when any tile moved.
+func updateTerrainTiles(
+  tiles: mod TerrainTiles
+  renderer: mod DeferredRenderer
+  cellX: view Int
+  cellY: view Int
+) ret Bool {
+  if cellX is tiles.centreCellX and cellY is tiles.centreCellY {
+    ret false
+  }
+  tiles.centreCellX = cellX
+  tiles.centreCellY = cellY
+  let half: Int = tiles.gridSide / 2
+  var moved: Bool = false
+  loop var row: Int = 0, row < tiles.gridSide, ++row {
+    loop var column: Int = 0, column < tiles.gridSide, ++column {
+      let wantX: Int = cellX - half + column
+      let wantY: Int = cellY - half + row
+      let slot: Int = terrainTileWrap(value: wantY, side: tiles.gridSide) * tiles.gridSide + terrainTileWrap(
+        value: wantX
+        side: tiles.gridSide
+      )
+      # Which mesh is in the slot, and does it cover another cell? (read
+      # first: the reshape below writes `tiles`)
+      var meshId: Int = 0
+      if let tile: view TerrainTile => tiles.tiles.viewAt(index: slot) {
+        if tile.cellX is not wantX or tile.cellY is not wantY {
+          meshId = tile.meshId
+        }
+      }
+      if meshId > 0 {
+        reshapeTerrainTile(
+          tiles: tiles
+          renderer: renderer
+          meshId: meshId
+          cellX: wantX
+          cellY: wantY
+        )
+        if let tile: mod TerrainTile => tiles.tiles.modAt(index: slot) {
+          tile.cellX = wantX
+          tile.cellY = wantY
+        }
+        moved = true
+      }
+    }
+  }
+  ret moved
+}
+
+# Rewrite one tile's mesh for cell (`cellX`, `cellY`): heights from the biome
+# field on the shared lattice, normals from central differences, positions
+# local to the cell's centre (the tile's model matrix is a translation)
+func reshapeTerrainTile(
+  tiles: mod TerrainTiles
+  renderer: mod DeferredRenderer
+  meshId: view Int
+  cellX: view Int
+  cellY: view Int
+) {
+  if meshId < 1 {
+    ret
+  }
+  let segments: Int = tiles.segments
+  let spacing: Float = tiles.cellSize / segments.toFloat()
+  let eps: Float = 0.6
+  loop var yi: Int = 0, yi <= segments, ++yi {
+    let fy: Float = yi.toFloat() / segments.toFloat()
+    let localY: Float = (yi - segments / 2).toFloat() * spacing
+    let worldY: Float = (cellY * segments + yi - segments / 2).toFloat() * spacing
+    loop var xi: Int = 0, xi <= segments, ++xi {
+      let fx: Float = xi.toFloat() / segments.toFloat()
+      let localX: Float = (xi - segments / 2).toFloat() * spacing
+      let worldX: Float = (cellX * segments + xi - segments / 2).toFloat() * spacing
+      let height: Float = terrainTilesHeight(tiles: tiles, x: worldX, y: worldY)
+      let slopeX: Float = (terrainTilesHeight(tiles: tiles, x: worldX + eps, y: worldY) - terrainTilesHeight(
+        tiles: tiles
+        x: worldX - eps
+        y: worldY
+      )) / (eps * 2.0)
+      let slopeY: Float = (terrainTilesHeight(tiles: tiles, x: worldX, y: worldY + eps) - terrainTilesHeight(
+        tiles: tiles
+        x: worldX
+        y: worldY - eps
+      )) / (eps * 2.0)
+      let inverseLength: Float = 1.0 / Math.sqrt(x: slopeX * slopeX + slopeY * slopeY + 1.0)
+      let base: Int = (yi * (segments + 1) + xi) * 8
+      tiles.scratchVerts.set(index: base, value: localX)
+      tiles.scratchVerts.set(index: base + 1, value: localY)
+      tiles.scratchVerts.set(index: base + 2, value: height)
+      tiles.scratchVerts.set(index: base + 3, value: -slopeX * inverseLength)
+      tiles.scratchVerts.set(index: base + 4, value: -slopeY * inverseLength)
+      tiles.scratchVerts.set(index: base + 5, value: inverseLength)
+      tiles.scratchVerts.set(index: base + 6, value: fx)
+      tiles.scratchVerts.set(index: base + 7, value: fy)
+    }
+  }
+  RendererDeferred.updateMeshVerts(
+    renderer: renderer
+    mesh: meshHandle(id: meshId, generation: 0)
+    verts: tiles.scratchVerts
+    vertCount: (segments + 1) * (segments + 1)
+  )
+}
+
+# Draw every placed tile with the terrain material (the G-buffer pass, or the
+# forward pass of a forward frame)
+func drawTerrainTiles(
+  tiles: view TerrainTiles
+  cache: mod GbufferCache
+  resources: mod GpuResources
+  time: view Float
+) {
+  loop let tile: view TerrainTile in tiles.tiles {
+    if tile.meshId >= 1 and tile.cellX is not 1000000000 {
+      let model: Mat4 = mat4Translate(
+        x: tile.cellX.toFloat() * tiles.cellSize
+        y: tile.cellY.toFloat() * tiles.cellSize
+        z: 0.0
+      )
+      drawTerrainMesh(
+        cache: cache
+        resources: resources
+        mesh: tile.meshId
+        model: model
+        prevModel: model
+        roughness: 0.96
+        time: time
+      )
+    }
+  }
+}

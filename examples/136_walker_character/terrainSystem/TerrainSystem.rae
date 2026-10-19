@@ -31,6 +31,7 @@ open ecs/Transform
 open terrainSystem/WalkerTrees
 open terrainSystem/WalkerRocks
 open app3d/PropField
+open app3d/TerrainTiles
 open GbufferSprite
 
 # Single source of truth for the ground colour: the terrain ground material AND
@@ -50,10 +51,6 @@ const terrainCellCount: Int = 49
 const terrainTau: Float = 6.283185307179586
 
 const terrainTileSegments: Int = 24
-
-const terrainTileVerts: Int = (terrainTileSegments + 1) * (terrainTileSegments + 1)
-
-const terrainTileFloats: Int = terrainTileVerts * 8
 
 # Prop kinds (the TerrainProp.kind discriminator).
 const kindTile: Int = 0
@@ -110,11 +107,6 @@ type TreeVariant {
   species: Int
 }
 
-# A tile entity's unique heightfield mesh (rewritten in place on recycle).
-type TileMesh {
-  meshId: Int
-}
-
 # ----- instanced prop rendering --------------------------------------
 # The trees and bushes are the lib's leaf-patch forms (terrainSystem/WalkerTrees);
 # the rocks are the lib's procedural rocks (terrainSystem/WalkerRocks); the
@@ -124,8 +116,8 @@ type TerrainSystem {
   centreCellY: Int
   groundZ: Float
   toon: Bool
-  # Reused staging buffer for a tile's per-cell heightfield rewrite.
-  scratchVerts: List(Float)
+  # The ground: the streamed heightfield tiles (lib/app3d/TerrainTiles)
+  ground: TerrainTiles
   # One instancer per rock shape (TerrainProp.variant)
   rockParts: List(PropInstancer)
   flowerProp: PropInstancer
@@ -323,62 +315,6 @@ func slotCellY(centreCellY: view Int, slot: view Int) ret Int {
   ret centreCellY + (slot / terrainGridSide) - terrainHalfGrid
 }
 
-# Rewrite a tile's mesh so its vertices carry the ABSOLUTE world height of the
-# cell it now covers. Normals from central differences of the height function.
-func reshapeTerrainTile(
-  terrainSystem: mod TerrainSystem
-  renderer: mod DeferredRenderer
-  meshId: view Int
-  cellX: view Int
-  cellY: view Int
-) {
-  if meshId < 1 {
-    ret
-  }
-  # Integer lattice coordinates give both neighbours the same edge samples.
-  # Never overlap heightfield tiles: their triangles disagree inside the strip,
-  # producing depth fighting and dark shadow seams.
-  let spacing: Float = terrainCellSize / terrainTileSegments.toFloat()
-  let eps: Float = 0.6
-  loop var yi: Int = 0, yi <= terrainTileSegments, ++yi {
-    let fy: Float = yi.toFloat() / terrainTileSegments.toFloat()
-    let localY: Float = (yi - terrainTileSegments / 2).toFloat() * spacing
-    let worldY: Float = (cellY * terrainTileSegments + yi - terrainTileSegments / 2).toFloat() * spacing
-    loop var xi: Int = 0, xi <= terrainTileSegments, ++xi {
-      let fx: Float = xi.toFloat() / terrainTileSegments.toFloat()
-      let localX: Float = (xi - terrainTileSegments / 2).toFloat() * spacing
-      let worldX: Float = (cellX * terrainTileSegments + xi - terrainTileSegments / 2).toFloat() * spacing
-      let height: Float = terrainHeightAt(x: worldX, y: worldY, groundZ: terrainSystem.groundZ)
-      let slopeX: Float = (terrainHeightAt(
-        x: worldX + eps
-        y: worldY
-        groundZ: terrainSystem.groundZ
-      ) - terrainHeightAt(x: worldX - eps, y: worldY, groundZ: terrainSystem.groundZ)) / (eps * 2.0)
-      let slopeY: Float = (terrainHeightAt(
-        x: worldX
-        y: worldY + eps
-        groundZ: terrainSystem.groundZ
-      ) - terrainHeightAt(x: worldX, y: worldY - eps, groundZ: terrainSystem.groundZ)) / (eps * 2.0)
-      let inverseLength: Float = 1.0 / Math.sqrt(x: slopeX * slopeX + slopeY * slopeY + 1.0)
-      let base: Int = (yi * (terrainTileSegments + 1) + xi) * 8
-      terrainSystem.scratchVerts.set(index: base, value: localX)
-      terrainSystem.scratchVerts.set(index: base + 1, value: localY)
-      terrainSystem.scratchVerts.set(index: base + 2, value: height)
-      terrainSystem.scratchVerts.set(index: base + 3, value: 0.0 - slopeX * inverseLength)
-      terrainSystem.scratchVerts.set(index: base + 4, value: 0.0 - slopeY * inverseLength)
-      terrainSystem.scratchVerts.set(index: base + 5, value: inverseLength)
-      terrainSystem.scratchVerts.set(index: base + 6, value: fx)
-      terrainSystem.scratchVerts.set(index: base + 7, value: fy)
-    }
-  }
-  RendererDeferred.updateMeshVerts(
-    renderer: renderer
-    mesh: meshHandle(id: meshId, generation: 0)
-    verts: terrainSystem.scratchVerts
-    vertCount: terrainTileVerts
-  )
-}
-
 # ----- streaming -----------------------------------------------------
 # Re-place every prop/tile entity onto the world cell its pool slot now maps to.
 # A single query over the TerrainProp table drives placement; no per-slot,
@@ -396,6 +332,12 @@ func updateInfiniteTerrain(
   }
   terrainSystem.centreCellX = cellX
   terrainSystem.centreCellY = cellY
+  let groundMoved: Bool = updateTerrainTiles(
+    tiles: terrainSystem.ground
+    renderer: renderer
+    cellX: cellX
+    cellY: cellY
+  )
 
   loop var i: Int = 0, i < componentCount(this: world.propKinds), ++i {
     let entityId: EntityId = componentEntityAt(this: world.propKinds, i: i)
@@ -406,45 +348,21 @@ func updateInfiniteTerrain(
     }
     let ccx: Int = slotCellX(centreCellX: cellX, slot: pk.slot)
     let ccy: Int = slotCellY(centreCellY: cellY, slot: pk.slot)
-    if pk.kind is kindTile {
-      let tile: view TileMesh => componentView(this: world.tileMeshes, entityId: entityId)
-      reshapeTerrainTile(
-        terrainSystem: terrainSystem
-        renderer: renderer
-        meshId: tile.meshId
-        cellX: ccx
-        cellY: ccy
-      )
-      componentSet(
-        this: world.transforms
-        entityId: entityId
-        data: Transform3D {
-          position: Vec3.create(
-            x: ccx.toFloat() * terrainCellSize
-            y: ccy.toFloat() * terrainCellSize
-            z: 0.0
-          )
-          rotation: Quat.identity()
-          scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
-        }
-      )
-    } else {
-      let transform: Transform3D = kindTransform(
-        kind: pk.kind
-        cellX: ccx
-        cellY: ccy
-        groundZ: terrainSystem.groundZ
-      )
-      pk.active = terrainPropAllowed(
-        x: transform.position.x
-        y: transform.position.y
-        minGrass: kindMinGrass(kind: pk.kind)
-      )
-      if pk.kind is kindRock {
-        pk.variant = rockVariantAt(cellX: ccx, cellY: ccy)
-      }
-      componentSet(this: world.transforms, entityId: entityId, data: transform)
+    let transform: Transform3D = kindTransform(
+      kind: pk.kind
+      cellX: ccx
+      cellY: ccy
+      groundZ: terrainSystem.groundZ
+    )
+    pk.active = terrainPropAllowed(
+      x: transform.position.x
+      y: transform.position.y
+      minGrass: kindMinGrass(kind: pk.kind)
+    )
+    if pk.kind is kindRock {
+      pk.variant = rockVariantAt(cellX: ccx, cellY: ccy)
     }
+    componentSet(this: world.transforms, entityId: entityId, data: transform)
   }
   ret true
 }
@@ -476,7 +394,7 @@ func drawTerrainProps(
   loop var i: Int = 0, i < componentCount(this: world.propKinds), ++i {
     let entityId: EntityId = componentEntityAt(this: world.propKinds, i: i)
     let pk: view TerrainProp => queryViewAt(table: world.propKinds, denseIndex: i)
-    if pk.active and pk.kind is not kindTile {
+    if pk.active {
       let model: Mat4 = transform3dToMatrix(
         t: componentView(this: world.transforms, entityId: entityId)
       )
@@ -525,25 +443,12 @@ func drawTerrainGround(
   world: view GameWorld
   time: copy Float
 ) {
-  loop var i: Int = 0, i < componentCount(this: world.tileMeshes), ++i {
-    let entityId: EntityId = componentEntityAt(this: world.tileMeshes, i: i)
-    let tile: view TileMesh => queryViewAt(table: world.tileMeshes, denseIndex: i)
-    if tile.meshId >= 1 {
-      # #745: Quat all the way — the tile's authoritative transform is already a
-      # Quat Transform3D; compose it straight to a Mat4 (no Euler Vec3 detour).
-      let q: view Transform3D => componentView(this: world.transforms, entityId: entityId)
-      let model: Mat4 = transform3dToMatrix(t: q)
-      drawTerrainMesh(
-        cache: cache
-        resources: resources
-        mesh: tile.meshId
-        model: model
-        prevModel: model
-        roughness: 0.96
-        time: time
-      )
-    }
-  }
+  drawTerrainTiles(
+    tiles: terrainSystem.ground
+    cache: cache
+    resources: resources
+    time: time
+  )
 }
 
 func castKind(renderer: mod DeferredRenderer, mesh: view MeshHandle, model: view Mat4) {
@@ -558,7 +463,7 @@ func drawTerrainPropsShadow(
   loop var i: Int = 0, i < componentCount(this: world.propKinds), ++i {
     let entityId: EntityId = componentEntityAt(this: world.propKinds, i: i)
     let pk: view TerrainProp => queryViewAt(table: world.propKinds, denseIndex: i)
-    if pk.active and pk.kind is not kindTile {
+    if pk.active {
       let model: Mat4 = transform3dToMatrix(
         t: componentView(this: world.transforms, entityId: entityId)
       )
@@ -648,7 +553,6 @@ func createTerrainSystem(
   assets: view String
   groundZ: view Float
 ) ret TerrainSystem {
-  let tilePlane: MeshData = makePlane(size: terrainCellSize, segments: terrainTileSegments)
   let flowerMesh: MeshHandle = terrainMesh(
     renderer: renderer
     path: "{assets}environment/flower.glb"
@@ -664,28 +568,9 @@ func createTerrainSystem(
     roughness: 0.94
   )
 
-  var scratch: List(Float) = List.create(Float, cap: terrainTileFloats)
-  loop var scratchIndex: Int = 0, scratchIndex < terrainTileFloats, ++scratchIndex {
-    scratch.add(value: 0.0)
-  }
-
   # One entity per pool slot per kind: a tile (with its own heightfield mesh) plus
   # tree/rock/bush/flower/grassA/grassB. Recycled every stream, placed by query.
   loop var slot: Int = 0, slot < terrainCellCount, ++slot {
-    let tileMesh: MeshHandle = uploadMeshDataForTerrain(renderer: renderer, mesh: tilePlane)
-    let tileEntityId: EntityId = gameWorldAddEntity(world: world)
-    componentSet(this: world.transforms, entityId: tileEntityId, data: createTransform3D())
-    componentSet(
-      this: world.propKinds
-      entityId: tileEntityId
-      data: TerrainProp { kind: kindTile, slot: slot, active: true, variant: 0 }
-    )
-    componentSet(
-      this: world.tileMeshes
-      entityId: tileEntityId
-      data: TileMesh { meshId: tileMesh.id }
-    )
-
     let unusedRock: EntityId = spawnProp(world: world, kind: kindRock, slot: slot)
     let unusedBush: EntityId = spawnProp(world: world, kind: kindBush, slot: slot)
     let unusedFlower: EntityId = spawnProp(world: world, kind: kindFlower, slot: slot)
@@ -708,7 +593,14 @@ func createTerrainSystem(
     centreCellY: 1000000000
     groundZ: groundZ
     toon: true
-    scratchVerts: own scratch
+    ground: own createTerrainTiles(
+      renderer: renderer
+      gridSide: terrainGridSide
+      cellSize: terrainCellSize
+      segments: terrainTileSegments
+      groundZ: groundZ
+      biome: defaultBiomeConfig()
+    )
     rockParts: own createRockParts(renderer: renderer, capacity: terrainCellCount)
     flowerProp: own createPropInstancer(
       mesh: flowerMesh
