@@ -1,0 +1,68 @@
+# The sea round the walker's island: Rae's realistic water, the FFT ocean of
+# examples/141_ocean_fft (lib/water createOceanRealistic), as the downstream
+# game has it at its beach. Three wave cascades on a mesh that follows the
+# camera (lib/water/ClipMap), with refraction of the sea bed, shoreline foam,
+# screen-space reflections and whitecaps where the waves fold. The sea is the
+# island biome's flat water plane, so the island's ponds are the same water.
+# A phone gets the mobile tier (one small cascade, no refraction).
+open Mesh3d
+open RendererDeferred
+open WorldBiome
+open water/Water
+open water/WaterSchedule
+open water/ClipMap
+
+# The camera-centred grid the sea is drawn on (141's)
+const seaGridRings: Int = 70
+
+const seaGridSegments: Int = 96
+
+const seaGridGrowth: Float = 1.09
+
+# The sea state: a moderate breeze (m/s at 10 m) over the open ocean, the
+# spectrum damped as by 20 m of depth. 141's 9 m/s sea has waves near 2 m
+# high, which wash far over the island's flat beaches; these are about 0.8 m
+const seaWindSpeed: Float = 6.0
+
+const seaSpectrumDepth: Float = 20.0
+
+const seaChoppiness: Float = 1.0
+
+# Where the sea's still surface sits in WORLD space (#830): the biome's flat
+# water plane over the walker's groundZ, the same plane the splashes spray up
+# from
+func lakeSurfaceZ(groundZ: copy Float) ret Float {
+  ret worldWaterZ(groundZ: groundZ, cfg: defaultBiomeConfig())
+}
+
+# The island's sea: the FFT ocean at the water plane over a camera-centred
+# grid uploaded into `renderer`, in a moderate breeze
+func walkerSea(renderer: mod DeferredRenderer, groundZ: view Float) ret WaterBody {
+  let grid: MeshData = createRadialGridMesh(
+    rings: seaGridRings
+    segments: seaGridSegments
+    firstCell: 1.0
+    growth: seaGridGrowth
+  )
+  let gridMesh: MeshHandle = uploadMesh(
+    renderer: renderer
+    verts: grid.verts
+    vertCount: grid.vertCount
+    indices: grid.indices
+  )
+  var sea: WaterBody = createOceanRealistic(surfaceZ: lakeSurfaceZ(groundZ: groundZ))
+  sea.meshId = gridMesh.id
+  sea.clipCellPerMetre = radialGridCellPerMetre(segments: seaGridSegments, growth: seaGridGrowth)
+  sea.clipFirstCell = 1.0
+  sea.windSpeed = seaWindSpeed
+  sea.waterDepth = seaSpectrumDepth
+  sea.choppiness = seaChoppiness
+  if Target.isMobileOs {
+    useMobileWaterTier(body: sea)
+  }
+  normalizeWaterTier(body: sea)
+  log(
+    "[sea] FFT ocean at z {sea.centre.z}: {sea.cascadeCount} cascades of {sea.fftSize}, wind {sea.windSpeed} m/s"
+  )
+  ret sea
+}

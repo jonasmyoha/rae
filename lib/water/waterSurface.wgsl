@@ -61,6 +61,14 @@ struct Water {
 
 const oceanFogStartFarRatio: f32 = 0.65;
 const oceanFogEndFarRatio: f32 = 0.92;
+// An open ocean has no idea where the land is, so its waves would roll on over
+// a low beach or meadow and stand there as puddles. Water is never drawn on
+// ground higher than the still sea plus this run-up (m)...
+const oceanRunUp: f32 = 0.08;
+// ...judged only where that ground lies this close to the water fragment
+// along the ground (m): the ground under shallow water, seen at a low angle,
+// not a far shore seen past a crest.
+const oceanLandReach: f32 = 20.0;
 const oceanMacroBroadScale: f32 = 1.0 / 1400.0;
 const oceanMacroDetailScale: f32 = 1.0 / 500.0;
 
@@ -343,6 +351,18 @@ fn fs(i: VsOut) -> @location(0) vec4<f32> {
   let sceneLinear = linearDepth(sceneNdc);
   let surfaceLinear = linearDepth(i.pos.z);
   let waterDepth = max(sceneLinear - surfaceLinear, 0.0);
+  // Land above the sea (an open ocean only): the ground just behind this
+  // fragment, along the same view ray, scaled out from the surface by the
+  // ratio of the two view depths. Where it is above the still sea plus the
+  // run-up, the water is not there.
+  var land = 0.0;
+  let ground = W.camera.xyz + (i.world - W.camera.xyz) * (sceneLinear / max(surfaceLinear, 0.0001));
+  if (W.cascades.w > 0.5 && W.tuning.z > 1.5 && length(ground.xy - i.world.xy) < oceanLandReach) {
+    land = smoothstep(oceanRunUp * 0.5, oceanRunUp, ground.z - W.centreExtent.z);
+    if (land > 0.999) {
+      discard;
+    }
+  }
 
   // Depth-gradient body colour.
   let depthT = clamp(waterDepth / max(W.shallow.w, 0.01), 0.0, 1.0);
@@ -391,7 +411,11 @@ fn fs(i: VsOut) -> @location(0) vec4<f32> {
       cascade.z * i.macroEnergy * i.macroEnergy,
       cascade.w * i.macroEnergy
     );
-    let shoreline = smoothstep(-0.03, 0.03, 0.15 - foamT);
+    // Shoreline: broken foam that thickens toward the waterline, not a solid
+    // white line along it.
+    let shoreBand = 1.0 - smoothstep(0.0, 0.45, foamT);
+    // It goes with the water where the water fades off the land.
+    let shoreline = shoreBand * smoothstep(0.5, 0.85, ripple + shoreBand * 0.2) * 0.8 * (1.0 - land);
     let whitecap = clamp(cascade.z, 0.0, 1.0) * smoothstep(0.25, 0.65, ripple);
     foam = max(shoreline, whitecap);
   }
@@ -445,7 +469,8 @@ fn fs(i: VsOut) -> @location(0) vec4<f32> {
   let refrDepth = max(refrSceneLinear - surfaceLinear, 0.0);
   let sceneColour = textureSample(litCopyTex, litSampler, refrUv).rgb;
   let absorption = exp(-refrDepth * W.absorb.rgb);
-  let underwater = sceneColour * absorption + W.deep.rgb * (1.0 - absorption) * 0.7;
+  // The scattered deep colour is paint lit by the day, like the body colour
+  let underwater = sceneColour * absorption + W.deep.rgb * W.absorb.w * (1.0 - absorption) * 0.7;
   if (W.refract.x > 0.5) {
     // Refracting surface: it composes its own background, so it is opaque.
     let foamMix = foam * 0.85;
@@ -503,6 +528,14 @@ fn fs(i: VsOut) -> @location(0) vec4<f32> {
   }
   if (W.mist.w > 0.5) {
     colour = waterMist(colour, i.world);
+  }
+  // Land above the sea (see oceanRunUp): the water fades to the scene behind it
+  if (land > 0.0) {
+    if (W.refract.x > 0.5) {
+      colour = mix(colour, textureSampleLevel(litCopyTex, litSampler, screenUv, 0.0).rgb, land);
+    } else {
+      alpha *= 1.0 - land;
+    }
   }
 
   return vec4<f32>(colour, alpha);
