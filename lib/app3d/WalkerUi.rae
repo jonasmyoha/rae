@@ -1,17 +1,8 @@
-# UI system for the walker example (#549).
-#
-# uiUpdate runs the per-frame UI/settings/panel handling — device input into the
-# ECS UI world, the clip + transport panels, the settings dialog, and the UI
-# layout systems — extracted verbatim from updateApp with behaviour unchanged.
-# It returns a UiTick because two of its outcomes (settingsChanged and scrolled)
-# feed the render decision back in updateApp. It mutates character / cam
-# / render as the inline code did.
-#
-# The UI STATE still lives in rae's InputSystem type (input + ui combined); the
-# InputSystem -> InputState/UiState split rides with #545 (input intent), which owns
-# that decomposition. Example-126 files are siblings in one module, so App and
-# the sibling/stdlib helpers resolve cross-file.
-
+# app3d/WalkerUi — the walker examples' per-frame UI (136, 137, 143):
+# device input into the ECS UI world, the "..." mode menu, the clip,
+# transport and character-switch panels, the settings panel, and the UI
+# layout systems. uiUpdate returns a UiTick because two of its outcomes
+# (settingsChanged and scrolled) feed the app's render decision.
 import Math
 import Profile
 import Gpu2d
@@ -58,10 +49,39 @@ open ui/inputSystem/InputSystem
 open ui/renderSystem/RenderSystem
 open ui/UiSystems
 open app3d/WalkerCharacter
+open app3d/WalkerCamera
+open app3d/WalkerInput
+open app3d/WalkerWorld
+open RendererForward
 open app3d/WalkerTerrain
 open app3d/PlayerRoster
 
-# What a UI tick reports back to updateApp for the render decision.
+# Shared reaction to a character switch (#546), from Page Up/Down, keys 1/2, or
+# the settings-panel Prev/Next buttons: snap the orbit camera behind the new
+# character and update the panel readout.
+func onCharacterSwitched(
+  cameraSystem: mod WalkerCamera
+  inputSystem: mod WalkerInput
+  persist: mod WalkerPersist
+  players: view PlayerRoster
+  world: view WalkerWorld
+  characterSystem: view CharacterSystem
+) {
+  cameraSystem.rig.yaw = controlledHeading(
+    world: world
+    players: players
+    characterSystem: characterSystem
+  )
+  snapCameraRigView(rig: cameraSystem.rig)
+  persist.stateDirty = true
+  setNodeText(
+    world: inputSystem.world
+    nodeId: "CharacterReadout"
+    value: "Controlling {players.controlledIndex + 1} / {players.count}"
+  )
+}
+
+# What a UI tick reports back to the app for the render decision.
 type UiTick {
   settingsChanged: Bool
   scrolled: Bool
@@ -69,15 +89,15 @@ type UiTick {
 
 func uiUpdate(
   uiSystems: mod UiSystems
-  cameraSystem: mod CameraSystem
+  cameraSystem: mod WalkerCamera
   characterSystem: mod CharacterSystem
-  frame: mod Frame
-  inputSystem: mod InputSystem
-  persist: mod PersistState
+  didRealWork: view Bool
+  inputSystem: mod WalkerInput
+  persist: mod WalkerPersist
   players: mod PlayerRoster
-  renderSystem: mod RenderSystem
+  renderer: mod DeferredRenderer
   terrainSystem: mod WalkerTerrain
-  world: view GameWorld
+  world: view WalkerWorld
   deltaTime: copy Float
   now: copy Float64
 ) ret UiTick {
@@ -113,7 +133,7 @@ func uiUpdate(
     screenW: windowExtentW()
     screenH: windowExtentH()
     now: now
-    didRealWork: frame.dbgDidWork
+    didRealWork: didRealWork
   ) {
     suppressUiPress(input: inputSystem.ui, world: inputSystem.world)
   }
@@ -222,9 +242,12 @@ func uiUpdate(
   if modesChanged {
     applyEditorPanelOpen(world: inputSystem.world, open: inputSystem.settings.open)
   }
-  # (No TAA switch to apply: MSAA is the forward frame's antialiasing)
   if settingsChanged {
-    renderSystem.renderer.sky = settingsBuildSky(
+    # TAA opt-in, SMAA when off; a forward frame has 4x MSAA and no TAA
+    if not isForwardRenderer(renderer: renderer) {
+      setTaaEnabled(renderer: renderer, on: inputSystem.settings.taa)
+    }
+    renderer.sky = settingsBuildSky(
       settingsState: inputSystem.settings
       data: cameraSystem.hosek
       turbidity: 3.0

@@ -1,15 +1,15 @@
-# ECS GameWorld for example 137, copied from 136 (#738): the gameplay 3D world — the reusable
-# entity core (EntityAllocator, #706) plus a ComponentTable per core gameplay
-# component, keyed by EntityId.
+# app3d/WalkerWorld — the walker examples' ECS world (136, 137, 143): the
+# reusable entity core (EntityAllocator) plus a ComponentTable per gameplay
+# component, keyed by EntityId. The hero and every crowd member carry a
+# ThirdPersonController and an AnimationState; each skinned body part is an
+# entity with a PartRoughness; the terrain props are WalkerTerrain's
+# TerrainProp / TreeVariant; a joined remote player is a NetPlayer
+# (app3d/WalkerNet). The physics bodies' tables are WalkerPhysics' own, their
+# poses are in `transforms` here.
 #
-# Named `GameWorld`, NOT `World3d`: 136 is a game (walker character, crowd,
-# physics/net seams), and it already imports scene3d whose `World3d` (134's
-# Blender-like scene world, #732) is a DISTINCT type — a second `World3d` would
-# collide. The transform components are lib/ecs's QUATERNION Transform3D /
-# WorldTransform3D (#714/#715) folded by the general TransformSystem (#716), the
-# proper 3D transforms — unlike 134's Euler `Transform3d`. #739-#746 migrate
-# 136's character, crowd, terrain and grass onto this world; the final naming
-# across World2d/World3d/GameWorld is reconciled by #770.
+# The transform components are lib/ecs's quaternion Transform3D /
+# WorldTransform3D folded by the general TransformSystem; the camera rig is a
+# parent/child relation in `parents` / `childrens` (app3d/WalkerCamera).
 import Vec3
 import Quat
 open ecs/Entity
@@ -20,6 +20,10 @@ open ecs/Transform
 open ecs/Hierarchy
 open ecs/hierarchySystem/HierarchySystem
 open app3d/CharacterController
+open app3d/WalkerCharacter
+open app3d/PlayerRoster
+open app3d/WalkerTerrain
+open app3d/WalkerPhysics
 
 # Per-entity animation clip + phase (#739). Replaces the CrowdMember.clipIndex /
 # animTime pair; each crowd (and hero) entity holds its own so members animate
@@ -42,8 +46,8 @@ type PartRoughness {
 }
 
 # A gameplay surface material. Capital-D `Material3D` to match the capital-D
-# lib/ecs Transform3D/WorldTransform3D components; distinct from scene3d's Euler
-# `Material3d` that 136's current renderer still consumes (migrated later).
+# lib/ecs Transform3D/WorldTransform3D components; distinct from scene3d's
+# `Material3d` that the renderer consumes.
 type Material3D {
   baseColor: Vec3
   metallic: Float
@@ -51,7 +55,17 @@ type Material3D {
   emission: Vec3
 }
 
-type GameWorld {
+# A joined remote player. `remoteId` is the transport-assigned peer id; `role`
+# mirrors NetSystem.role for that peer; `controlled` is the character ENTITY this
+# remote player drives (noEntity until it is assigned one). A remote player's
+# input will arrive here instead of from a local device.
+type NetPlayer {
+  remoteId: Int
+  role: Int
+  controlled: EntityId
+}
+
+type WalkerWorld {
   allocator: EntityAllocator
   transforms: ComponentTable(Transform3D)
   worldTransforms: ComponentTable(WorldTransform3D)
@@ -64,15 +78,11 @@ type GameWorld {
   animStates: ComponentTable(AnimationState)
   # #740: skinned body-mesh parts, one entity each.
   partRoughness: ComponentTable(PartRoughness)
-  # #741: infinite-terrain props + heightfield tiles are recycled entities.
-  # TerrainProp identifies the prop (kind + pool slot + placement-active); TreeVariant
-  # records a tree entity's species (lib/app3d/WalkerTerrain).
+  # The terrain's props are recycled entities (app3d/WalkerTerrain):
+  # TerrainProp identifies the prop (kind + pool slot + placement-active);
+  # TreeVariant records a tree entity's species.
   propKinds: ComponentTable(TerrainProp)
   treeVariants: ComponentTable(TreeVariant)
-  # #742: waving-grass blades are entities carrying a GrassBlade descriptor
-  # (base position + yaw/phase/scale + pool slot). The flat instance-stream
-  # buffer is no longer a source of truth — it is derived from these each frame.
-  grassBlades: ComponentTable(GrassBlade)
   # #744: ECS parent/child hierarchy — Parent (cached upward link) + Children
   # (authoritative ordered list) folded into WorldTransform3D by the general
   # TransformSystem, walked in HierarchyOrder. First 3D user is the camera rig
@@ -82,13 +92,13 @@ type GameWorld {
   hierarchyOrder: HierarchyOrder
   # #746: a joined remote player is an ENTITY carrying a NetPlayer, spawned /
   # despawned through the generational allocator (#704). The physics bodies'
-  # tables (rigid bodies, colliders, characters, cubes) are the PhysicsSystem's
+  # tables (rigid bodies, colliders, characters, cubes) are WalkerPhysics'
   # own; their poses are in `transforms` here.
   netPlayers: ComponentTable(NetPlayer)
 }
 
-func createGameWorld() ret GameWorld {
-  ret GameWorld {
+func createWalkerWorld() ret WalkerWorld {
+  ret WalkerWorld {
     allocator: createEntityAllocator()
     transforms: ComponentTable.create(Transform3D)
     worldTransforms: ComponentTable.create(WorldTransform3D)
@@ -98,7 +108,6 @@ func createGameWorld() ret GameWorld {
     partRoughness: ComponentTable.create(PartRoughness)
     propKinds: ComponentTable.create(TerrainProp)
     treeVariants: ComponentTable.create(TreeVariant)
-    grassBlades: ComponentTable.create(GrassBlade)
     parents: ComponentTable.create(Parent)
     childrens: ComponentTable.create(Children)
     hierarchyOrder: createHierarchyOrder()
@@ -107,50 +116,54 @@ func createGameWorld() ret GameWorld {
 }
 
 # Allocate a fresh gameplay entity.
-func gameWorldAddEntity(world: mod GameWorld) ret EntityId {
+func walkerWorldAddEntity(world: mod WalkerWorld) ret EntityId {
   ret allocEntity(this: world.allocator)
 }
 
 # Component setters — thin wrappers so call sites read as intent rather than
 # ComponentTable plumbing (mirrors 134's World3d helpers).
-func gameWorldSetTransform(
-  world: mod GameWorld
+func walkerWorldSetTransform(
+  world: mod WalkerWorld
   entityId: view EntityId
   transform: view Transform3D
 ) {
   componentSet(this: world.transforms, entityId: entityId, data: transform)
 }
 
-func gameWorldSetWorldTransform(
-  world: mod GameWorld
+func walkerWorldSetWorldTransform(
+  world: mod WalkerWorld
   entityId: view EntityId
   worldTransform: view WorldTransform3D
 ) {
   componentSet(this: world.worldTransforms, entityId: entityId, data: worldTransform)
 }
 
-func gameWorldSetMaterial(
-  world: mod GameWorld
+func walkerWorldSetMaterial(
+  world: mod WalkerWorld
   entityId: view EntityId
   material: view Material3D
 ) {
   componentSet(this: world.materials, entityId: entityId, data: material)
 }
 
-func gameWorldSetController(
-  world: mod GameWorld
+func walkerWorldSetController(
+  world: mod WalkerWorld
   entityId: view EntityId
   controller: view ThirdPersonController
 ) {
   componentSet(this: world.controllers, entityId: entityId, data: controller)
 }
 
-func gameWorldSetAnim(world: mod GameWorld, entityId: view EntityId, anim: view AnimationState) {
+func walkerWorldSetAnim(
+  world: mod WalkerWorld
+  entityId: view EntityId
+  anim: view AnimationState
+) {
   componentSet(this: world.animStates, entityId: entityId, data: anim)
 }
 
-func gameWorldSetPartRoughness(
-  world: mod GameWorld
+func walkerWorldSetPartRoughness(
+  world: mod WalkerWorld
   entityId: view EntityId
   part: view PartRoughness
 ) {
@@ -158,11 +171,11 @@ func gameWorldSetPartRoughness(
 }
 
 # The skinned parts, in creation (= upload) order — a query over the part table.
-func gameWorldPartCount(world: view GameWorld) ret Int {
+func walkerWorldPartCount(world: view WalkerWorld) ret Int {
   ret componentCount(this: world.partRoughness)
 }
 
-func gameWorldPartAt(world: view GameWorld, i: view Int) ret view PartRoughness {
+func walkerWorldPartAt(world: view WalkerWorld, i: view Int) ret view PartRoughness {
   ret queryViewAt(table: world.partRoughness, denseIndex: i)
 }
 
@@ -171,9 +184,9 @@ func gameWorldPartAt(world: view GameWorld, i: view Int) ret view PartRoughness 
 # tracks the gameplay controller (later systems — camera rig #744, quat #745 —
 # read this rather than the controller directly).
 # The ThirdPersonController of an entity (hero or crowd member). A narrow
-# GameWorld accessor so systems read a controlled character straight from the
+# WalkerWorld accessor so systems read a controlled character straight from the
 # world without depending on the App aggregate (#743).
-func controllerOf(world: view GameWorld, entityId: view EntityId) ret view ThirdPersonController {
+func controllerOf(world: view WalkerWorld, entityId: view EntityId) ret view ThirdPersonController {
   ret componentView(this: world.controllers, entityId: entityId)
 }
 
@@ -185,6 +198,44 @@ func controllerTransform3D(controller: view ThirdPersonController) ret Transform
   }
 }
 
-func gameWorldEntityCount(world: view GameWorld) ret Int {
+func walkerWorldEntityCount(world: view WalkerWorld) ret Int {
   ret allocatorAliveCount(this: world.allocator)
+}
+
+# The world position / heading of whichever character the local player
+# controls (app3d/PlayerRoster) — the hero or a crowd member. Used to aim the
+# camera and stream the terrain around the ACTIVE character.
+func controlledPosition(
+  world: view WalkerWorld
+  players: view PlayerRoster
+  characterSystem: view CharacterSystem
+) ret Vec3 {
+  ret controllerOf(
+    world: world
+    entityId: rosterControlledEntityId(players: players, characterSystem: characterSystem)
+  ).position
+}
+
+func controlledHeading(
+  world: view WalkerWorld
+  players: view PlayerRoster
+  characterSystem: view CharacterSystem
+) ret Float {
+  ret controllerOf(
+    world: world
+    entityId: rosterControlledEntityId(players: players, characterSystem: characterSystem)
+  ).heading
+}
+
+# Despawn a cube: its body, collider and PhysicsCube row (WalkerPhysics),
+# then every component row of the entity in the world (so a recycled index
+# reads nothing stale), then the entity itself.
+func despawnCubeEntity(
+  physicsSystem: mod WalkerPhysics
+  world: mod WalkerWorld
+  entityId: view EntityId
+) {
+  despawnPhysicsCube(physicsSystem: physicsSystem, entityId: entityId)
+  clearEntityComponents(world: world, entityId: entityId)
+  freeEntity(this: world.allocator, entityId: entityId)
 }

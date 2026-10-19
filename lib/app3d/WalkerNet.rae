@@ -1,4 +1,4 @@
-# Multiplayer seam for the walker example (#554, ECS seam #746).
+# app3d/WalkerNet — the walker examples' multiplayer seam (#554, ECS seam #746).
 #
 # Offline today; both hooks still no-op the wire, but they now operate over the
 # ECS: a JOINED remote player is an ENTITY carrying a NetPlayer component, and
@@ -13,27 +13,18 @@ open ecs/ComponentTable
 open ecs/Transform
 open ecs/World
 open app3d/WalkerPhysics
+open app3d/WalkerWorld
 
 # role: 0 = offline, 1 = server, 2 = client. tick counts published local frames.
-type NetSystem {
+type WalkerNet {
   role: Int
   tick: Int
 }
 
-# A joined remote player. `remoteId` is the transport-assigned peer id; `role`
-# mirrors NetSystem.role for that peer; `controlled` is the character ENTITY this
-# remote player drives (noEntity until it is assigned one). A remote player's
-# input will arrive here instead of from a local device.
-type NetPlayer {
-  remoteId: Int
-  role: Int
-  controlled: EntityId
-}
-
 # A player joins: spawn a NetPlayer entity. Generational — a slot freed by an
 # earlier leave is recycled with a bumped generation.
-func netJoin(world: mod GameWorld, remoteId: view Int, role: view Int) ret EntityId {
-  let entityId: EntityId = gameWorldAddEntity(world: world)
+func netJoin(world: mod WalkerWorld, remoteId: view Int, role: view Int) ret EntityId {
+  let entityId: EntityId = walkerWorldAddEntity(world: world)
   componentSet(
     this: world.netPlayers
     entityId: entityId
@@ -44,7 +35,7 @@ func netJoin(world: mod GameWorld, remoteId: view Int, role: view Int) ret Entit
 
 # A player leaves: drop the NetPlayer component, then free the entity slot so a
 # later join recycles it (and stale handles to the departed player read dead).
-func netLeave(world: mod GameWorld, entityId: view EntityId) {
+func netLeave(world: mod WalkerWorld, entityId: view EntityId) {
   # #760: clear every component row for the leaving entity (generic reflection
   # sweep) so a recycled index can never read stale data from ANY table, then
   # free the slot. Replaces the single hand-listed netPlayers remove.
@@ -53,14 +44,14 @@ func netLeave(world: mod GameWorld, entityId: view EntityId) {
 }
 
 # Count of joined remote players (live NetPlayer entities).
-func netPlayerCount(world: view GameWorld) ret Int {
+func netPlayerCount(world: view WalkerWorld) ret Int {
   ret componentCount(this: world.netPlayers)
 }
 
 # Pull remote players' intents in before the local sim. Iterates the NetPlayer
 # table — a real system. Offline there are no joined players, so it is a no-op;
 # a transport fills the loop body (apply each peer's intent to its `controlled`).
-func netApplyRemote(netSystem: mod NetSystem, world: mod GameWorld) {
+func netApplyRemote(netSystem: mod WalkerNet, world: mod WalkerWorld) {
   loop var i: Int = 0, i < componentCount(this: world.netPlayers), ++i {
     # Offline: no wire, so nothing to apply. A transport reads the i-th
     # NetPlayer's latest intent here and drives its `controlled` character
@@ -70,7 +61,7 @@ func netApplyRemote(netSystem: mod NetSystem, world: mod GameWorld) {
 
 # Publish the local player's intent after the sim. Offline: just advance the
 # tick so the seam is observably live.
-func netPublishIntent(netSystem: mod NetSystem, world: mod GameWorld) {
+func netPublishIntent(netSystem: mod WalkerNet, world: mod WalkerWorld) {
   netSystem.tick = netSystem.tick + 1
 }
 
@@ -80,7 +71,7 @@ func netPublishIntent(netSystem: mod NetSystem, world: mod GameWorld) {
 # handle reads dead. Then spawns a Box3D body high above the island, steps the
 # bodies, and checks the pull system moved its Transform3D. Everything it
 # creates is despawned again, so the persistent world is untouched.
-func seamSelfTest(world: mod GameWorld, physicsSystem: mod WalkerPhysics) {
+func seamSelfTest(world: mod WalkerWorld, physicsSystem: mod WalkerPhysics) {
   let a: EntityId = netJoin(world: world, remoteId: 101, role: 2)
   let b: EntityId = netJoin(world: world, remoteId: 102, role: 2)
   let c: EntityId = netJoin(world: world, remoteId: 103, role: 2)

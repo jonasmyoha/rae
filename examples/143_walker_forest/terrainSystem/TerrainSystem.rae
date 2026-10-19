@@ -5,6 +5,7 @@
 open WorldBiome
 open Scene3d
 open app3d/WalkerTerrain
+open GrassCompute
 
 const terrainGridSide: Int = 17
 
@@ -51,7 +52,7 @@ func terrainPropAllowed(x: view Float, y: view Float, minGrass: view Float) ret 
 # forest not planted yet (Forest.plantForest)
 func createTerrainSystem(
   renderer: mod DeferredRenderer
-  world: mod GameWorld
+  world: mod WalkerWorld
   assets: view String
   groundZ: view Float
 ) ret WalkerTerrain {
@@ -66,4 +67,16 @@ func createTerrainSystem(
     biome: forestBiomeConfig()
     forest: forestFieldSettings()
   )
+}
+
+# The lib GPU grass over the forest world: its compute shader gets the forest
+# world's island radius (no island), so blades grow wherever the ground does
+func createForestGrassCompute() ret GrassCompute {
+  var grass: GrassCompute = createGrassCompute()
+  grassSetComputeShaderWithConstants(
+    grass: grass
+    shader: defaultGrassComputeShader()
+    constants: forestBiomeConstants()
+  )
+  ret grass
 }

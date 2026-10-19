@@ -52,6 +52,11 @@ open app3d/RenderScale
 open app3d/WalkerCharacter
 open app3d/PlayerRoster
 open app3d/WalkerPhysics
+open app3d/WalkerWorld
+open app3d/WalkerInput
+open app3d/WalkerCamera
+open app3d/WalkerUi
+open app3d/WalkerNet
 open app3d/WalkerTerrain
 open app3d/WalkerTerrainBodies
 open box3d/ecs/NatureBodies
@@ -78,56 +83,6 @@ func frameBegin(app: mod App) {
   app.frame.deltaTime = deltaTime
 }
 
-# The world position / heading of whichever character the local player controls
-# (#546) — the hero or a crowd member. Used to aim the camera and stream the
-# terrain/grass around the ACTIVE character rather than always the hero.
-func controlledPosition(
-  world: view GameWorld
-  players: view PlayerRoster
-  characterSystem: view CharacterSystem
-) ret Vec3 {
-  ret controllerOf(
-    world: world
-    entityId: rosterControlledEntityId(players: players, characterSystem: characterSystem)
-  ).position
-}
-
-func controlledHeading(
-  world: view GameWorld
-  players: view PlayerRoster
-  characterSystem: view CharacterSystem
-) ret Float {
-  ret controllerOf(
-    world: world
-    entityId: rosterControlledEntityId(players: players, characterSystem: characterSystem)
-  ).heading
-}
-
-# Shared reaction to a character switch (#546), from Page Up/Down, keys 1/2, or
-# the settings-panel Prev/Next buttons: snap the orbit camera behind the new
-# character and update the panel readout.
-func onCharacterSwitched(
-  cameraSystem: mod CameraSystem
-  inputSystem: mod InputSystem
-  persist: mod PersistState
-  players: view PlayerRoster
-  world: view GameWorld
-  characterSystem: view CharacterSystem
-) {
-  cameraSystem.rig.yaw = controlledHeading(
-    world: world
-    players: players
-    characterSystem: characterSystem
-  )
-  snapCameraRigView(rig: cameraSystem.rig)
-  persist.stateDirty = true
-  setNodeText(
-    world: inputSystem.world
-    nodeId: "CharacterReadout"
-    value: "Controlling {players.controlledIndex + 1} / {players.count}"
-  )
-}
-
 # ----- update phase: input, UI, camera, character, terrain, grass, persist --
 func updateApp(app: mod App) {
   let deltaTime: Float = app.frame.deltaTime
@@ -139,11 +94,11 @@ func updateApp(app: mod App) {
     uiSystems: app.inputSystem.uiSystems
     cameraSystem: app.cameraSystem
     characterSystem: app.characterSystem
-    frame: app.frame
+    didRealWork: app.frame.dbgDidWork
     inputSystem: app.inputSystem
     persist: app.persist
     players: app.players
-    renderSystem: app.renderSystem
+    renderer: app.renderSystem.renderer
     terrainSystem: app.terrainSystem
     world: app.world
     deltaTime: deltaTime
@@ -159,7 +114,7 @@ func updateApp(app: mod App) {
     persist: app.persist
     world: app.world
     heroEntityId: app.characterSystem.heroEntityId
-    groundZ: app.characterSystem.groundZ
+    terrainSystem: app.terrainSystem
     deltaTime: deltaTime
   )
   let joyActive: Bool = camTick.joyActive
@@ -323,11 +278,6 @@ func updateApp(app: mod App) {
       transforms: app.world.transforms
     )
   }
-  let grassWrapped: Bool = updateGrassField(
-    grassSystem: app.grassSystem
-    world: app.world
-    playerPosition: followPos
-  )
 
   netPublishIntent(netSystem: app.netSystem, world: app.world)
 
@@ -364,7 +314,7 @@ func updateApp(app: mod App) {
   # Bodies still moving (a toppling stack, a character in the air) are an
   # animation source too; the venue's static body is never awake
   let physicsAwake: Bool = physicsCounters(physics: app.physicsSystem.physics).awakeBodyCount > 0 or characterMoved
-  var needsRender: Bool = app.characterSystem.playing or transitionActive or settingsChanged or cameraMoved or characterMoved or terrainWrapped or grassWrapped or physicsAwake or hadUiEvents or logChanged or resized or scrolled or app.frame.renderedOnce is false
+  var needsRender: Bool = app.characterSystem.playing or transitionActive or settingsChanged or cameraMoved or characterMoved or terrainWrapped or physicsAwake or hadUiEvents or logChanged or resized or scrolled or app.frame.renderedOnce is false
   # No TAA to settle: the forward frame is final the moment it is drawn
   app.frame.dbgDidWork = needsRender
   app.frame.needsRender = needsRender
