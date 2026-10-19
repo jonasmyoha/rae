@@ -1,6 +1,6 @@
 # The action table — what a tap MEANS, as data (docs/ecs-general-architecture.md).
 #
-# Every `OnClick.actionId` a scene (or a list row, or the debug menu) can fire
+# Every `OnClick.actionId` a scene (or a list row) can fire
 # is a row here: the id, its `ActionKind` and a fixed payload (the screen a
 # nav tab selects). The input phase looks a fired id up (`lookupAction`) and
 # pushes the typed `AppCommand` onto the app's command queue; the command
@@ -32,7 +32,6 @@ enum ActionKind {
   libraryRemove
   canvasToggle
   canvasClose
-  debug
 }
 
 # No behaviour yet — an authored placeholder (`nav.unset`, the empty id)
@@ -42,8 +41,6 @@ enum ActionKind {
 # playback (playbackCommandSystem)
 # the bottom sheet + the library (sheetCommandSystem)
 # the canvas overlay (canvasCommandSystem)
-# the in-app debug UI: consumed by dispatchDebugAction (debugSystem), which
-# keeps its own ids; the row only records that the id is known.
 
 # One row: the id (a template's prefix, without the payload), what it does
 # and its fixed payload.
@@ -162,11 +159,6 @@ func createActionTable() ret ActionTable {
   rows.add(value: plainRow(id: "library.remove", kind: ActionKind.libraryRemove))
   rows.add(value: plainRow(id: "canvas.toggle", kind: ActionKind.canvasToggle))
   rows.add(value: plainRow(id: "canvas.close", kind: ActionKind.canvasClose))
-  rows.add(value: plainRow(id: "debug.toggleMenu", kind: ActionKind.debug))
-  rows.add(value: plainRow(id: "debug.toggleTheme", kind: ActionKind.debug))
-  rows.add(value: plainRow(id: "debug.toggleLabels", kind: ActionKind.debug))
-  rows.add(value: plainRow(id: "debug.toggleInputOutlines", kind: ActionKind.debug))
-  rows.add(value: plainRow(id: "debug.dismiss", kind: ActionKind.debug))
   ret ActionTable { entries: own rows }
 }
 

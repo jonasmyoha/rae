@@ -6,6 +6,7 @@ open ecs/Event
 open ui/fitSystem/FitSystem
 open ui/layoutSystem/LayoutSystem
 open ui/LogOverlay
+open ui/DebugOverlay
 open ui/Transform
 open ui/renderSystem/RenderSystem
 open ui/visualBoundsSystem/VisualBoundsSystem
@@ -22,7 +23,6 @@ type FrameInputDispatchResult {
   nextScreen: Screen
   hadActions: Bool
   canvasChanged: Bool
-  debugChanged: Bool
 }
 
 func runFrameInputDispatch(
@@ -32,7 +32,6 @@ func runFrameInputDispatch(
   appState: mod AppState
   world: mod UiWorld
   uiSystems: mod UiSystems
-  debug: mod DebugSystem
   scenes: view AlbumScenes
   actionTable: view ActionTable
   commands: mod EventQueue(AppCommand)
@@ -77,17 +76,10 @@ func runFrameInputDispatch(
     }
   }
 
-  var debugChanged: Bool = false
-  if dragJustReleased is false {
-    debugChanged = dispatchDebugAction(state: appState, input: input, debug: debug)
-    syncDebugWidgetStates(world: world, debug: debug)
-  }
-
   ret FrameInputDispatchResult {
     nextScreen: nextScreen
     hadActions: hadActions
     canvasChanged: canvasChanged
-    debugChanged: debugChanged
   }
 }
 
@@ -258,7 +250,7 @@ func renderGpu2dFrame(
   uiSystems: view UiSystems
   gpuUi: view Gpu2dUi
   canvas: mod Gpu2dCanvas
-  debug: mod DebugSystem
+  debugOverlay: mod DebugOverlay
   logOverlay: view LogOverlay
   logW: view Float
   logH: view Float
@@ -282,13 +274,6 @@ func renderGpu2dFrame(
       res: gpuUi
       canvas: canvas
     )
-    updateAndRenderDebugOverlayGpu2d(
-      debug: debug
-      canvas: canvas
-      now: now
-      didRealWork: active
-      font: gpuUi.textFont
-    )
     # Shared log overlay (lib/ui/LogOverlay.rae) — top-left here, bottom-left
     # in the 3D example. Drawn last so it is never covered by app UI.
     drawLogOverlay(
@@ -297,6 +282,13 @@ func renderGpu2dFrame(
       font: gpuUi.textFont
       screenW: logW
       screenH: logH
+    )
+    # The debug widget LAST, so it is on top of everything (lib/ui/DebugOverlay)
+    drawDebugOverlay(
+      debugOverlay: debugOverlay
+      canvas: canvas
+      font: gpuUi.textFont
+      didRealWork: true
     )
     uiEndFrame(canvas: canvas)
     cacheDirty(world: world, uiSystems: uiSystems, cache: renderCache)

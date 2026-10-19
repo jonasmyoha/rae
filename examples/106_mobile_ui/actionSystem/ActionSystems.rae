@@ -38,7 +38,7 @@ func actionCommandSystem(
     log("[action] {action.actionId} (entity {action.entityId})")
     let lookup: ActionLookup = lookupAction(actionTable: actionTable, actionId: action.actionId)
     if lookup.found {
-      if lookup.command.kind is not ActionKind.none and lookup.command.kind is not ActionKind.debug {
+      if lookup.command.kind is not ActionKind.none {
         # A fresh command (own strings): the lookup's copy is dropped here.
         let command: AppCommand = {
           kind: lookup.command.kind

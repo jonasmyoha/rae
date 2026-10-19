@@ -5,6 +5,8 @@ open ui/Pipeline
 open ecs/Schedule
 open ecs/Entity
 open ui/EventLoop
+open ui/DebugOverlay
+open ui/Theme
 import FileWatch
 
 # The interactive session's state as RESOURCES (docs/ecs-resources.md): what
@@ -32,11 +34,13 @@ type AppSession {
   watcher: FileWatcher
   # Hot-reload signal from `rae watch` (snapshot state + exit 0 on reload).
   reloadWatcher: ReloadSignalWatcher
-  # Tracks the previous frame's `debug.menuOpen` so the loop can detect
-  # open/close transitions (blurred-backdrop lifecycle).
-  prevMenuOpen: Bool
-  # In-app debug UI; persists across world rebuilds.
-  debug: DebugSystem
+  # The standard debug widget (lib/ui/DebugOverlay), as every Rae UI app has
+  # it: drawn on top, outside the UI world, so it persists across rebuilds
+  debugOverlay: DebugOverlay
+  # Its "Dark theme" switch (addDebugOverlayToggle's index)
+  themeToggle: Int
+  # The last frame rendered (the widget's frame-rate count)
+  renderedLastFrame: Bool
   # Drag / wheel / momentum / spring scroll physics (inputSystem/ScrollInput).
   scrollFsm: ScrollFsm
   # Where every page's scroll is (page id -> position): the lib scrollRootSystem
@@ -56,7 +60,6 @@ type AppSession {
   input: InputSystem
   lastHoveredEntityId: EntityId
   lastCursorKind: Int
-  lastMouseButtons: Int
   # True while album covers / history art are still streaming in.
   assetsLoading: Bool
   # One display frame at the monitor refresh rate; paces the wait + render cap.
@@ -112,13 +115,20 @@ func createAppSession(app: mod App) ret AppSession {
     pageId: pageIdForScreen(screen: visibleScreen(state: app.appState))
     position: restoredScrollY
   )
+  var debugOverlay: DebugOverlay = createBootDebugOverlay()
+  let themeToggle: Int = addDebugOverlayToggle(
+    debugOverlay: debugOverlay
+    label: "Dark theme"
+    on: app.appState.theme.active.mode is ThemeMode.dark
+  )
   ret AppSession {
     running: true
     currentScreen: visibleScreen(state: app.appState)
     watcher: createSceneWatcher()
     reloadWatcher: createReloadSignalWatcher()
-    prevMenuOpen: false
-    debug: createBootDebugSystem(viewport: app.viewport)
+    debugOverlay: own debugOverlay
+    themeToggle: themeToggle
+    renderedLastFrame: false
     scrollFsm: createScrollFsm(initialScrollY: restoredScrollY)
     scrollMemory: own scrollMemory
     cachedAlbumStem: ""
@@ -129,7 +139,6 @@ func createAppSession(app: mod App) ret AppSession {
     input: createInputSystem()
     lastHoveredEntityId: noEntity()
     lastCursorKind: cursorArrow
-    lastMouseButtons: 0
     assetsLoading: true
     targetFrameSec: displayFrameSec()
     lastRenderTime: 0.0
