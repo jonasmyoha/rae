@@ -35,6 +35,7 @@ import Vec3
 import Sys
 open GbufferInstanced
 open Particles
+open WaterParticles
 open water/Water
 open GbufferSprite
 open water/WaterSystem
@@ -786,8 +787,8 @@ func createApp() ret App {
     var drs: RenderScaleController = createRenderScaleController(targetFps: 60.0)
 
     # #905: the renderer owns the mesh store the water grid and the particle
-    # box are uploaded into, so both systems are built before it moves into App.
-    let splashes: ParticleSystem = createParticleSystem(renderer: renderer, cap: 256, gravity: 24.0)
+    # quad are uploaded into, so both systems are built before it moves into App.
+    let splashes: ParticleSystem = createWaterParticles(renderer: renderer, cap: 256)
     let waterSystem: WaterSystem = createWaterSystem(
       renderer: renderer
       body: walkerSea(renderer: renderer, groundZ: groundZ)
@@ -887,6 +888,11 @@ func runWalkerApp() ret Int {
     "[ecs] GameWorld: {gameWorldEntityCount(world: app.world)} entities ({gameWorldPartCount(
       world: app.world
     )} parts + hero + crowd + terrain + grass)"
+  )
+  prepareSplashPreview(
+    world: app.world
+    cameraSystem: app.cameraSystem
+    groundZ: app.characterSystem.groundZ
   )
   Profile.maybeAutoStart(profiler: app.profiler)
   # RAE_114_PHYSICS_TEST=1: drive the hero into a cube stack and jump, report,

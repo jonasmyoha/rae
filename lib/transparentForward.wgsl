@@ -8,8 +8,8 @@
 // It reads the SAME Frame uniform and DrawU records as the G-buffer geometry pass
 // (group 0, bindings 0/1), so a record packed for one pass can go to either.
 // On this pass albedoMetallic.w is the instance ALPHA (there is no metallic on
-// an unlit blend). Unlit on purpose: colour * alpha. Water / particle shading
-// belongs to the clients that follow (#830, #844).
+// an unlit blend). params.x selects an opt-in rounded water-drop impostor.
+// Ordinary transparent geometry keeps its original unlit colour and alpha.
 struct Frame {
   viewProj: mat4x4<f32>,
   prevViewProj: mat4x4<f32>,
@@ -27,6 +27,7 @@ struct DrawU {
 struct VsOut {
   @builtin(position) pos: vec4<f32>,
   @location(0) @interpolate(flat) inst: u32,
+  @location(1) uv: vec2<f32>,
 };
 
 @vertex
@@ -41,11 +42,28 @@ fn vs(@builtin(instance_index) ii: u32,
   // their edges swim against the depth they test and TAA then smears them.
   o.pos = vec4<f32>(o.pos.xy + F.jitter.xy * o.pos.w, o.pos.zw);
   o.inst = ii;
+  o.uv = uv;
   return o;
 }
 
 @fragment
 fn fs(i: VsOut) -> @location(0) vec4<f32> {
   let d = draws[i.inst];
+  if (d.params.x > 0.5) {
+    // Analytic silhouette: no square edges, texture atlas, or per-drop geometry.
+    let q = i.uv * 2.0 - 1.0;
+    let radius = length(q);
+    let edge = max(fwidth(radius), 0.025);
+    let coverage = 1.0 - smoothstep(1.0 - edge, 1.0, radius);
+    if (coverage <= 0.0) { discard; }
+    // A clear centre, blue-grey lower rim and a small sky glint. This is an
+    // inexpensive water impression, not scene refraction or a physical BRDF.
+    let rim = smoothstep(0.45, 0.96, radius);
+    let glint = exp(-32.0 * dot(q - vec2<f32>(-0.30, 0.38), q - vec2<f32>(-0.30, 0.38)));
+    let reflection = smoothstep(-0.35, 0.65, q.y);
+    let color = mix(d.albedoMetallic.rgb * 0.45, d.albedoMetallic.rgb, reflection) + vec3<f32>(glint * 0.85);
+    let alpha = coverage * d.albedoMetallic.w * (0.12 + 0.20 * rim + 0.68 * glint);
+    return vec4<f32>(color, alpha);
+  }
   return vec4<f32>(d.albedoMetallic.rgb, d.albedoMetallic.w);
 }
