@@ -1,5 +1,7 @@
 import Math
 import Vec3
+import Sky
+open water/WaterLighting
 open Particles
 open WaterParticles
 open Scene3d
@@ -81,12 +83,46 @@ func main() {
   waterParticleUpdate(particles: stepped, deltaTime: 0.02)
   check(ok: stepped.list.length is 2, label: "mixed pool compaction")
   var transparent: TransparentPassCache = createTransparentPassCache(capacity: 1)
-  waterParticleDraw(particles: stepped, transparent: transparent, camera: camera)
+  waterParticleDraw(
+    particles: stepped
+    transparent: transparent
+    camera: camera
+    daylight: 1.0
+  )
   check(ok: transparent.batch.count is 1, label: "draw capacity respected")
   check(
     ok: transparent.batch.records.copyAtDefault(index: 36) is 1.0
     label: "water material selected"
   )
+  let dayRed: Float = transparent.batch.records.copyAtDefault(index: 32)
+  let dayAlpha: Float = transparent.batch.records.copyAtDefault(index: 35)
+  var sky: Sky = {}
+  sky.exposure = 1.0
+  sky.sunDir.z = -1.0
+  check(ok: waterDaylight(sky: sky, hasSky: true) is 1.0, label: "noon illumination")
+  sky.sunDir.z = 0.0
+  check(ok: waterDaylight(sky: sky, hasSky: true) is 0.3, label: "sunset illumination")
+  sky.sunDir.z = 1.0
+  sky.exposure = 0.05
+  let night: Float = waterDaylight(sky: sky, hasSky: true)
+  transparent.batch.count = 0
+  waterParticleDraw(
+    particles: stepped
+    transparent: transparent
+    camera: camera
+    daylight: night
+  )
+  check(
+    ok: Math.abs(value: transparent.batch.records.copyAtDefault(index: 32) - dayRed * night) < 0.00001 and night < 0.02
+    label: "night dims droplets"
+  )
+  check(
+    ok: transparent.batch.records.copyAtDefault(index: 35) is dayAlpha
+    label: "lighting preserves opacity"
+  )
+  sky.exposure = 0.0
+  check(ok: waterDaylight(sky: sky, hasSky: true) is 0.0, label: "unlit sky stays dark")
+  check(ok: waterDaylight(sky: sky, hasSky: false) is 1.0, label: "no sky fallback")
   waterParticleUpdate(particles: whole, deltaTime: 1.0)
   waterParticleUpdate(particles: stepped, deltaTime: 1.0)
   check(ok: whole.list.length is 0 and stepped.list.length is 0, label: "expired pool empty")
