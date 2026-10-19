@@ -56,6 +56,7 @@ open ui/renderSystem/RenderSystem
 open app3d/RenderScale
 open app3d/WalkerCharacter
 open app3d/PlayerRoster
+open app3d/WalkerPhysics
 
 # ----- per-frame timing + resize -------------------------------------------
 func frameBegin(app: mod App) {
@@ -230,8 +231,9 @@ func updateApp(app: mod App) {
   # character's controller and every cube's Transform3D.
   let physicsSteps: Int = stepPhysicsFrame(
     physicsSystem: app.physicsSystem
-    world: app.world
-    groundZ: app.characterSystem.groundZ
+    transforms: app.world.transforms
+    controllers: app.world.controllers
+    bushes: bushSpots(world: app.world)
     frameTime: deltaTime
   )
   let after: view ThirdPersonController => controllerOf(

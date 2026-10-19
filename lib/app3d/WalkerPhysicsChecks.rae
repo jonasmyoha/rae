@@ -1,0 +1,532 @@
+# app3d/WalkerPhysicsChecks — the steps of the walkers' physics self-test
+# (RAE_114_PHYSICS_TEST=1 in 136 / 143, the forward twin's in 137): it needs
+# no one to play. It drives the same systems the frame loop does
+# (driveCharacters, walkerPhysicsTick, app3d/WalkerPhysics) at the fixed step:
+#
+# - runCubeJumpCheck: the cube stacks settle and sleep, the hero walks into
+#   the tallest until a cube moves, then jumps and must leave the ground and
+#   land again;
+# - runRockBushCheck: a ray hits the rock nearest the hero, and the hero set
+#   down in a bush and told to run is held to the bush's speed limit;
+# - the trunk and ground pieces (rayHitsEntity, walkClosest, groundFollows,
+#   poolFollows) an app's own trunk check is built from.
+#
+# Each app finds its own entities (the nearest rock, bush, tree) in its own
+# tables and prints the one [physicstest] line its gate greps.
+import Math
+import Vec3
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Transform
+open WorldBiome
+open app3d/CharacterController
+open app3d/WalkerPhysics
+open app3d/PropField
+open box3d/ecs/Physics
+open box3d/ecs/PhysicsTypes
+open box3d/ecs/PhysicsComponents
+open box3d/ecs/PhysicsQueries
+open box3d/ecs/NatureBodies
+
+# Fixed steps the walk at the cubes may take (8 s), and the jump (3 s)
+const checkWalkSteps: Int = 480
+
+const checkJumpSteps: Int = 180
+
+# A cube counts as moved past this (m)
+const checkMovedDistance: Float = 0.05
+
+# Fixed steps of the run out of a bush (0.5 s); only those inside count
+const checkBushRunSteps: Int = 30
+
+func standingIntent() ret InputIntent {
+  ret InputIntent {
+    moveX: 0.0
+    moveY: 0.0
+    walking: false
+    jump: false
+    actions: 0
+  }
+}
+
+func forwardIntent() ret InputIntent {
+  ret InputIntent {
+    moveX: 0.0
+    moveY: 1.0
+    walking: false
+    jump: false
+    actions: 0
+  }
+}
+
+# One fixed step of the hero with `intent`, the camera looking along `yaw`
+func selfTestStep(
+  physicsSystem: mod WalkerPhysics
+  transforms: mod ComponentTable(Transform3D)
+  controllers: mod ComponentTable(ThirdPersonController)
+  bushes: view List(BushSpot)
+  heroEntityId: view EntityId
+  intent: view InputIntent
+  yaw: view Float
+) {
+  driveCharacters(
+    physicsSystem: physicsSystem
+    controlledEntityId: heroEntityId
+    controller: componentView(this: controllers, entityId: heroEntityId)
+    intent: intent
+    cameraYaw: yaw
+    speedScale: 1.0
+  )
+  walkerPhysicsTick(
+    physicsSystem: physicsSystem
+    transforms: transforms
+    controllers: controllers
+    bushes: bushes
+  )
+}
+
+# How far the cube that moved most is from where it started
+func largestCubeMove(
+  physicsSystem: view WalkerPhysics
+  transforms: view ComponentTable(Transform3D)
+  starts: view List(Vec3)
+) ret Float {
+  var largest: Float = 0.0
+  loop var i: Int = 0, i < componentCount(this: physicsSystem.cubes), ++i {
+    let cubeId: EntityId = componentEntityAt(this: physicsSystem.cubes, i: i)
+    let start: Vec3 = starts.copyAtFallback(index: i, fallback: Vec3.create(x: 0.0, y: 0.0, z: 0.0))
+    let position: Vec3 = componentView(this: transforms, entityId: cubeId).position
+    largest = Math.max(a: largest, b: Vec3.vlen(a: Vec3.vsub(a: position, b: start)))
+  }
+  ret largest
+}
+
+# Where every cube is now
+func cubePositions(
+  physicsSystem: view WalkerPhysics
+  transforms: view ComponentTable(Transform3D)
+) ret List(Vec3) {
+  var positions: List(Vec3) = List.create(Vec3, cap: componentCount(this: physicsSystem.cubes))
+  loop var i: Int = 0, i < componentCount(this: physicsSystem.cubes), ++i {
+    positions.add(
+      value: componentView(
+        this: transforms
+        entityId: componentEntityAt(this: physicsSystem.cubes, i: i)
+      ).position
+    )
+  }
+  ret positions
+}
+
+# What the cube and jump check saw
+type CubeJumpCheck {
+  settled: Bool
+  settleSteps: Int
+  settleDrift: Float
+  cubeMoved: Bool
+  walkSteps: Int
+  moved: Float
+  groundedBefore: Bool
+  leftGround: Bool
+  landed: Bool
+  jumpSteps: Int
+  peak: Float
+}
+
+func cubeJumpCheckPassed(check: view CubeJumpCheck) ret Bool {
+  ret check.settled and check.cubeMoved and check.groundedBefore and check.leftGround and check.landed
+}
+
+# The check's part of the [physicstest] line
+func cubeJumpCheckText(check: view CubeJumpCheck) ret String {
+  ret "settled={check.settled} in {check.settleSteps} steps (drift {check.settleDrift} m), cubeMoved={check.cubeMoved} after {check.walkSteps} steps (moved {check.moved} m), jump: leftGround={check.leftGround} landed={check.landed} in {check.jumpSteps} steps, peak {check.peak} m"
+}
+
+# The stacks must settle and sleep on their own (at most 10 s) without
+# toppling; the hero walks into the tallest stack until a cube moves (the
+# mover floats on its pogo spring and steps over anything lower than its
+# capsule's bottom, 0.6 m, so only a taller stack is pushed); then it stands,
+# jumps, and must leave the ground and land again
+func runCubeJumpCheck(
+  physicsSystem: mod WalkerPhysics
+  transforms: mod ComponentTable(Transform3D)
+  controllers: mod ComponentTable(ThirdPersonController)
+  bushes: view List(BushSpot)
+  heroEntityId: view EntityId
+) ret CubeJumpCheck {
+  let still: InputIntent = standingIntent()
+  let placed: List(Vec3) = cubePositions(physicsSystem: physicsSystem, transforms: transforms)
+  var settleSteps: Int = 0
+  loop settleSteps < 600 and physicsCounters(physics: physicsSystem.physics).awakeBodyCount > 0 {
+    selfTestStep(
+      physicsSystem: physicsSystem
+      transforms: transforms
+      controllers: controllers
+      bushes: bushes
+      heroEntityId: heroEntityId
+      intent: still
+      yaw: 0.0
+    )
+    settleSteps = settleSteps + 1
+  }
+  let settleDrift: Float = largestCubeMove(
+    physicsSystem: physicsSystem
+    transforms: transforms
+    starts: placed
+  )
+  let settled: Bool = physicsCounters(physics: physicsSystem.physics).awakeBodyCount is 0 and settleDrift < 0.15
+  let heroFeet: Vec3 = controllerFeet(
+    controller: componentView(this: controllers, entityId: heroEntityId)
+    groundZ: physicsSystem.groundZ
+  )
+  let starts: List(Vec3) = cubePositions(physicsSystem: physicsSystem, transforms: transforms)
+  var target: Vec3 = heroFeet
+  var targetHeight: Float = -1000000.0
+  loop let position: view Vec3 in starts {
+    let ground: Float = worldTerrainHeight(
+      x: position.x
+      y: position.y
+      groundZ: physicsSystem.groundZ
+      cfg: physicsSystem.biome
+    )
+    if position.z - ground > targetHeight {
+      targetHeight = position.z - ground
+      target = position
+    }
+  }
+  let yaw: Float = Math.atan2(y: -(target.x - heroFeet.x), x: target.y - heroFeet.y)
+  let forward: InputIntent = forwardIntent()
+  var walkSteps: Int = 0
+  var cubeMoved: Bool = false
+  loop walkSteps < checkWalkSteps and cubeMoved is false {
+    selfTestStep(
+      physicsSystem: physicsSystem
+      transforms: transforms
+      controllers: controllers
+      bushes: bushes
+      heroEntityId: heroEntityId
+      intent: forward
+      yaw: yaw
+    )
+    walkSteps = walkSteps + 1
+    cubeMoved = largestCubeMove(
+      physicsSystem: physicsSystem
+      transforms: transforms
+      starts: starts
+    ) > checkMovedDistance
+  }
+  loop var i: Int = 0, i < 60, ++i {
+    selfTestStep(
+      physicsSystem: physicsSystem
+      transforms: transforms
+      controllers: controllers
+      bushes: bushes
+      heroEntityId: heroEntityId
+      intent: still
+      yaw: yaw
+    )
+  }
+  let groundedBefore: Bool = characterGrounded(physicsSystem: physicsSystem, entityId: heroEntityId)
+  let startZ: Float = componentView(this: controllers, entityId: heroEntityId).position.z
+  var jump: InputIntent = standingIntent()
+  jump.jump = true
+  var leftGround: Bool = false
+  var landed: Bool = false
+  var peak: Float = 0.0
+  var jumpSteps: Int = 0
+  loop jumpSteps < checkJumpSteps and landed is false {
+    var stepIntent: InputIntent = still
+    if jumpSteps is 0 {
+      stepIntent = jump
+    }
+    selfTestStep(
+      physicsSystem: physicsSystem
+      transforms: transforms
+      controllers: controllers
+      bushes: bushes
+      heroEntityId: heroEntityId
+      intent: stepIntent
+      yaw: yaw
+    )
+    jumpSteps = jumpSteps + 1
+    peak = Math.max(
+      a: peak
+      b: componentView(this: controllers, entityId: heroEntityId).position.z - startZ
+    )
+    if characterGrounded(physicsSystem: physicsSystem, entityId: heroEntityId) is false {
+      leftGround = true
+    } else if leftGround {
+      landed = true
+    }
+  }
+  ret CubeJumpCheck {
+    settled: settled
+    settleSteps: settleSteps
+    settleDrift: settleDrift
+    cubeMoved: cubeMoved
+    walkSteps: walkSteps
+    moved: largestCubeMove(physicsSystem: physicsSystem, transforms: transforms, starts: starts)
+    groundedBefore: groundedBefore
+    leftGround: leftGround
+    landed: landed
+    jumpSteps: jumpSteps
+    peak: peak
+  }
+}
+
+# ----- trunks, rocks and the ground ---------------------------------------
+# Is `entityId` the first thing a ray across `foot` hits (from `halfSpan`
+# west to `halfSpan` east, `height` above it)?
+func rayHitsEntity(
+  physicsSystem: view WalkerPhysics
+  entityId: view EntityId
+  foot: view Vec3
+  height: view Float
+  halfSpan: view Float
+) ret Bool {
+  let hit: PhysicsHit = raycastClosest(
+    physics: physicsSystem.physics
+    origin: Vec3.create(x: foot.x - halfSpan, y: foot.y, z: foot.z + height)
+    translation: Vec3.create(x: halfSpan * 2.0, y: 0.0, z: 0.0)
+    filter: defaultQueryFilter()
+  )
+  ret hit.hit and hit.entityId is entityId
+}
+
+# A copy of an entity's Transform3D
+func transformOf(
+  transforms: view ComponentTable(Transform3D)
+  entityId: view EntityId
+) ret Transform3D {
+  let source: view Transform3D => componentView(this: transforms, entityId: entityId)
+  ret source
+}
+
+# The horizontal distance between the hero and `point`
+func heroDistance(
+  controllers: view ComponentTable(ThirdPersonController)
+  heroEntityId: view EntityId
+  point: view Vec3
+) ret Float {
+  let hero: Vec3 = componentView(this: controllers, entityId: heroEntityId).position
+  let gapX: Float = hero.x - point.x
+  let gapY: Float = hero.y - point.y
+  ret Math.sqrt(x: gapX * gapX + gapY * gapY)
+}
+
+# Walk the hero straight at `target` for `steps` fixed steps; the closest it
+# got (horizontally)
+func walkClosest(
+  physicsSystem: mod WalkerPhysics
+  transforms: mod ComponentTable(Transform3D)
+  controllers: mod ComponentTable(ThirdPersonController)
+  bushes: view List(BushSpot)
+  heroEntityId: view EntityId
+  target: view Vec3
+  steps: view Int
+) ret Float {
+  let heroFeet: Vec3 = controllerFeet(
+    controller: componentView(this: controllers, entityId: heroEntityId)
+    groundZ: physicsSystem.groundZ
+  )
+  let yaw: Float = Math.atan2(y: -(target.x - heroFeet.x), x: target.y - heroFeet.y)
+  let forward: InputIntent = forwardIntent()
+  var closest: Float = heroDistance(
+    controllers: controllers
+    heroEntityId: heroEntityId
+    point: target
+  )
+  loop var step: Int = 0, step < steps, ++step {
+    selfTestStep(
+      physicsSystem: physicsSystem
+      transforms: transforms
+      controllers: controllers
+      bushes: bushes
+      heroEntityId: heroEntityId
+      intent: forward
+      yaw: yaw
+    )
+    closest = Math.min(
+      a: closest
+      b: heroDistance(controllers: controllers, heroEntityId: heroEntityId, point: target)
+    )
+  }
+  ret closest
+}
+
+# Put the hero's mover at rest with its feet on `feet`
+func placeHero(physicsSystem: mod WalkerPhysics, heroEntityId: view EntityId, feet: view Vec3) {
+  let character: mod CharacterBody => componentMod(
+    this: physicsSystem.characters
+    entityId: heroEntityId
+  )
+  character.mover.transform.p.x = feet.x
+  character.mover.transform.p.y = feet.y
+  character.mover.transform.p.z = feet.z + moverCenterAboveFeet
+  character.mover.velocity.x = 0.0
+  character.mover.velocity.y = 0.0
+  character.mover.velocity.z = 0.0
+}
+
+# The rock `rockEntityId` (hasRock) blocks a ray through its middle, and the
+# hero set down at the bush whose foot is `bushFoot` (hasBush) and told to run
+# moves, but while inside no faster than the bush lets it (a run in the open
+# is 4.2 m/s). Logs one [rockbushtest] line; true when both hold.
+func runRockBushCheck(
+  physicsSystem: mod WalkerPhysics
+  transforms: mod ComponentTable(Transform3D)
+  controllers: mod ComponentTable(ThirdPersonController)
+  bushes: view List(BushSpot)
+  heroEntityId: view EntityId
+  hasRock: view Bool
+  rockEntityId: view EntityId
+  hasBush: view Bool
+  bushFoot: view Vec3
+) ret Bool {
+  var rockBlocksRay: Bool = false
+  if hasRock {
+    let rock: Transform3D = transformOf(transforms: transforms, entityId: rockEntityId)
+    rockBlocksRay = rayHitsEntity(
+      physicsSystem: physicsSystem
+      entityId: rockEntityId
+      foot: rock.position
+      height: rockColliderRadius(transform: rock) * 0.5
+      halfSpan: 4.0
+    )
+  }
+  var bushSlows: Bool = false
+  var fastest: Float = 0.0
+  var limit: Float = bushNoLimit
+  var steps: Int = 0
+  var overLimit: Bool = false
+  if hasBush {
+    limit = bushSpeedLimitAmong(bushes: bushes, x: bushFoot.x, y: bushFoot.y)
+    placeHero(physicsSystem: physicsSystem, heroEntityId: heroEntityId, feet: bushFoot)
+    let run: InputIntent = forwardIntent()
+    loop var step: Int = 0, step < checkBushRunSteps, ++step {
+      let heroAt: Vec3 = componentView(this: controllers, entityId: heroEntityId).position
+      let insideLimit: Float = bushSpeedLimitAmong(bushes: bushes, x: heroAt.x, y: heroAt.y)
+      selfTestStep(
+        physicsSystem: physicsSystem
+        transforms: transforms
+        controllers: controllers
+        bushes: bushes
+        heroEntityId: heroEntityId
+        intent: run
+        yaw: 0.0
+      )
+      # The limit where the step began holds the step's speed
+      let speed: Float = characterSpeed(physicsSystem: physicsSystem, entityId: heroEntityId)
+      if insideLimit < bushNoLimit {
+        steps = steps + 1
+        fastest = Math.max(a: fastest, b: speed)
+        if speed > insideLimit + 0.1 {
+          overLimit = true
+        }
+      }
+    }
+    bushSlows = limit < bushEdgeSpeed and steps > 5 and fastest > 0.2 and overLimit is false
+  }
+  let passed: Bool = rockBlocksRay and bushSlows
+  log(
+    "[rockbushtest] rockBlocksRay={rockBlocksRay}, in a bush for {steps} steps: fastest {fastest} m/s, limit {limit} m/s in the middle (bushSlows={bushSlows}), passed={passed}"
+  )
+  ret passed
+}
+
+# Is the first thing a ray across `foot` (3 m west to 3 m east, 1.2 m up) hits
+# one of the trunk pool's trunks?
+func rayHitsPool(physicsSystem: view WalkerPhysics, foot: view Vec3) ret Bool {
+  let hit: PhysicsHit = raycastClosest(
+    physics: physicsSystem.physics
+    origin: Vec3.create(x: foot.x - 3.0, y: foot.y, z: foot.z + 1.2)
+    translation: Vec3.create(x: 6.0, y: 0.0, z: 0.0)
+    filter: defaultQueryFilter()
+  )
+  ret hit.hit and physicsSystem.trunks.contains(value: hit.entityId)
+}
+
+# The ground made round a spot 150 m east of the hero (followGround, as the
+# walker walking there would): a ray down there hits it at the height the
+# renderer draws. The ground is made back round the hero after.
+func groundFollows(physicsSystem: mod WalkerPhysics, heroFeet: view Vec3) ret Bool {
+  let spot: Vec3 = Vec3.create(x: heroFeet.x + 150.0, y: heroFeet.y, z: heroFeet.z)
+  let made: Bool = followGround(physicsSystem: physicsSystem, position: spot)
+  let hit: PhysicsHit = raycastClosest(
+    physics: physicsSystem.physics
+    origin: Vec3.create(x: spot.x, y: spot.y, z: 200.0)
+    translation: Vec3.create(x: 0.0, y: 0.0, z: -400.0)
+    filter: defaultQueryFilter()
+  )
+  let expected: Float = worldTerrainHeight(
+    x: spot.x
+    y: spot.y
+    groundZ: physicsSystem.groundZ
+    cfg: physicsSystem.biome
+  )
+  let back: Bool = followGround(physicsSystem: physicsSystem, position: heroFeet)
+  ret made and back and hit.hit and Math.abs(value: hit.point.z - expected) < 0.3
+}
+
+# The pool placed round a spot away from the hero (60 m east, north, west or
+# south, then 120 m; the first with trees in reach): does the tree nearest
+# that spot have a trunk? The pool is placed back round the hero after.
+func poolFollows(
+  physicsSystem: mod WalkerPhysics
+  transforms: mod ComponentTable(Transform3D)
+  forest: view PropField
+  heroFeet: view Vec3
+) ret Bool {
+  var indices: List(Int) = List.create(Int, cap: 256)
+  var distances: List(Float) = List.create(Float, cap: 256)
+  var follows: Bool = false
+  loop var attempt: Int = 0, attempt < 8, ++attempt {
+    let reach: Float = 60.0 * (1 + attempt / 4).toFloat()
+    let turn: Float = (attempt % 4).toFloat() * 1.5707963
+    let spot: Vec3 = Vec3.create(
+      x: heroFeet.x + Math.cos(x: turn) * reach
+      y: heroFeet.y + Math.sin(x: turn) * reach
+      z: heroFeet.z
+    )
+    treesNear(
+      forest: forest
+      x: spot.x
+      y: spot.y
+      indices: indices
+      distances: distances
+    )
+    if indices.length > 0 {
+      var nearest: Int = 0
+      loop var i: Int = 1, i < distances.length, ++i {
+        if distances.copyAtFallback(index: i, fallback: 0.0) < distances.copyAtFallback(
+          index: nearest
+          fallback: 0.0
+        ) {
+          nearest = i
+        }
+      }
+      let tree: Vec3 = forest.placements.copyAtDefault(
+        index: indices.copyAtFallback(index: nearest, fallback: 0)
+      ).position
+      let placed: Bool = updateTrunkPool(
+        physicsSystem: physicsSystem
+        transforms: transforms
+        forest: forest
+        focus: spot
+        force: true
+      )
+      stepPhysicsBodies(physicsSystem: physicsSystem, transforms: transforms)
+      follows = rayHitsPool(physicsSystem: physicsSystem, foot: tree)
+      break
+    }
+  }
+  let back: Bool = updateTrunkPool(
+    physicsSystem: physicsSystem
+    transforms: transforms
+    forest: forest
+    focus: heroFeet
+    force: true
+  )
+  stepPhysicsBodies(physicsSystem: physicsSystem, transforms: transforms)
+  ret follows
+}

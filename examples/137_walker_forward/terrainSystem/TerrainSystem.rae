@@ -2,7 +2,7 @@
 #
 # #741 rewrite: the terrain props and heightfield tiles are ECS entities in the
 # shared GameWorld (recycled, generational ids) — NOT parallel pool Lists synced
-# by poolIndex, and NOT scale-to-0 culling. Each entity carries a `PropKind`
+# by poolIndex, and NOT scale-to-0 culling. Each entity carries a `TerrainProp`
 # {kind, slot, active}; trees carry a `TreeVariant` {broad}; tiles carry a
 # `TileMesh` {meshId}. Placement, draw and shadow-cast are all QUERIES over these
 # tables. Transforms are quaternion `Transform3D` (lib/ecs), consistent with the
@@ -48,7 +48,7 @@ const terrainTau: Float = 6.283185307179586
 
 const terrainTileSegments: Int = 24
 
-# Prop kinds (the PropKind.kind discriminator).
+# Prop kinds (the TerrainProp.kind discriminator).
 const kindTile: Int = 0
 
 const kindTree: Int = 1
@@ -89,7 +89,7 @@ func terrainPropAllowed(x: view Float, y: view Float, minGrass: view Float) ret 
 # A terrain prop / tile entity: which kind it is, which pool slot it occupies,
 # and whether it is currently placed on valid ground (props over water are
 # inactive and simply not gathered — no scale-to-0).
-type PropKind {
+type TerrainProp {
   kind: Int
   slot: Int
   active: Bool
@@ -299,7 +299,7 @@ func slotCellY(centreCellY: view Int, slot: view Int) ret Int {
 
 # ----- streaming -----------------------------------------------------
 # Re-place every prop/tile entity onto the world cell its pool slot now maps to.
-# A single query over the PropKind table drives placement; no per-slot,
+# A single query over the TerrainProp table drives placement; no per-slot,
 # per-kind list bookkeeping.
 func updateInfiniteTerrain(
   terrainSystem: mod TerrainSystem
@@ -323,7 +323,7 @@ func updateInfiniteTerrain(
 
   loop var i: Int = 0, i < componentCount(this: world.propKinds), ++i {
     let entityId: EntityId = componentEntityAt(this: world.propKinds, i: i)
-    let pk: mod PropKind => queryModAt(table: world.propKinds, denseIndex: i)
+    let pk: mod TerrainProp => queryModAt(table: world.propKinds, denseIndex: i)
     let ccx: Int = slotCellX(centreCellX: cellX, slot: pk.slot)
     let ccy: Int = slotCellY(centreCellY: cellY, slot: pk.slot)
     var broad: Bool = false
@@ -365,7 +365,7 @@ func drawTerrainProps(
   resetInstanceBatch(batch: terrainSystem.tallCrownProp.batch)
   loop var i: Int = 0, i < componentCount(this: world.propKinds), ++i {
     let entityId: EntityId = componentEntityAt(this: world.propKinds, i: i)
-    let pk: view PropKind => queryViewAt(table: world.propKinds, denseIndex: i)
+    let pk: view TerrainProp => queryViewAt(table: world.propKinds, denseIndex: i)
     if pk.active {
       let model: Mat4 = transform3dToMatrix(
         t: componentView(this: world.transforms, entityId: entityId)
@@ -432,7 +432,7 @@ func drawTerrainPropsShadow(
 ) {
   loop var i: Int = 0, i < componentCount(this: world.propKinds), ++i {
     let entityId: EntityId = componentEntityAt(this: world.propKinds, i: i)
-    let pk: view PropKind => queryViewAt(table: world.propKinds, denseIndex: i)
+    let pk: view TerrainProp => queryViewAt(table: world.propKinds, denseIndex: i)
     if pk.active {
       let model: Mat4 = transform3dToMatrix(
         t: componentView(this: world.transforms, entityId: entityId)
@@ -497,7 +497,7 @@ func spawnProp(world: mod GameWorld, kind: view Int, slot: view Int) ret EntityI
   componentSet(
     this: world.propKinds
     entityId: entityId
-    data: PropKind { kind: kind, slot: slot, active: false }
+    data: TerrainProp { kind: kind, slot: slot, active: false }
   )
   ret entityId
 }
