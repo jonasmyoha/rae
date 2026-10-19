@@ -214,6 +214,84 @@ narrows an optional, `=>` binds a `view`/`mod` alias whose type you still write,
 and a struct is built as `let p: Point = { ... }`. What is *never* inferred is
 the type of a binding.)
 
+## No member functions: every function is a free function
+
+Rae has no member functions, no static member functions and no methods inside a
+type. A type is only data. Every function is a free function, written at the top
+level of a module, and the value it works on is an ordinary named parameter:
+
+```rae
+type Track {
+  title: String
+  stars: Int
+}
+
+# A free function. The track it changes is its first parameter.
+func rate(track: mod Track, stars: view Int) {
+  track.stars = stars
+}
+```
+
+The dot is only syntax. `first.rate(stars: 5)` is the same call as
+`rate(track: first, stars: 5)`: the value before the dot becomes the first
+argument. So you can still think of `rate` as a member function of `Track`, or as
+an extension function, because anyone can write such a function for any type, in
+any file.
+
+**All functions look the same.** In a language with classes, you choose every
+time: a member function, a static member function, or a free function? Each
+choice has its own rules for what the function can see and how it is called.
+In Rae there is nothing to choose. A function is a function, and the dot is
+available for all of them.
+
+**No hidden `this`.** A member function gets an extra parameter that is not in
+its parameter list. Inside the function, a field name can mean a field of that
+hidden object, so the function reads data that the call does not show. That
+works a bit like global state, and it makes the function harder to reason about.
+In Rae, everything a function can use is in its parameter list, with its mode:
+`mod Track` says that `rate` may change the track, and that is all it gets. The
+same rule makes the "no globals" rule below work.
+
+**No inheritance either.** For the same reasons, Rae has no inheritance or other
+class-hierarchy features. Use **composition**: put the shared part in its own
+type, and give that type its own functions.
+
+```rae
+type Health {
+  current: Int
+  maximum: Int
+}
+
+type Player {
+  name: String
+  health: Health
+}
+
+type Monster {
+  kind: Int
+  health: Health
+}
+
+func heal(health: mod Health, amount: view Int) {
+  health.current = health.current + amount
+}
+
+# The same function works on both, through the part they share
+player.health.heal(amount: 10)
+monster.health.heal(amount: 5)
+```
+
+When the same code must work for many types, write a **generic function**
+(a template): its type is a parameter, `T: type`. The standard `List` works this
+way. `add` is one function for every element type:
+
+```rae
+func add(T: type, this: mod List(T), value: own T) { ... }
+
+names.add(value: "Ada")  # a List(String)
+scores.add(value: 42)  # a List(Int)
+```
+
 ## No globals: shared state has an owner
 
 There is no hidden, program-wide, mutable channel between functions. Mutable
