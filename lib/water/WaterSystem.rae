@@ -53,7 +53,7 @@ open webgpu/Webgpu
 open webgpu/WebgpuEnums
 open webgpu/Context
 
-const waterUniformFloats: Int = 92  # twenty-three vec4 (see waterSurface.wgsl `Water`)
+const waterUniformFloats: Int = 96  # twenty-four vec4 (see waterSurface.wgsl `Water`)
 
 # SSR march tuning (#854): a hit counts when the ray is behind the scene by
 # less than this many metres (grown with distance in the shader), and rays
@@ -254,7 +254,7 @@ func primaryBody(waterSystem: view WaterSystem) ret WaterBody {
 }
 
 func waterSurfaceShader() ret Shader {
-  ret shader(files: ["lib/noise.wgsl", "lib/water/waterSurface.wgsl"])
+  ret shader(files: ["lib/noise.wgsl", "lib/world_biome.wgsl", "lib/water/waterSurface.wgsl"])
 }
 
 # The surface pipeline: the geometry pass's vertex layout (pos/nrm/uv, stride 32),
@@ -681,6 +681,14 @@ func uploadWaterUniform(
       y: targets.mistTint.y
       z: targets.mistTint.z
       w: targets.mistPaleness
+    )
+    put4(
+      uniform: waterSystem.uniform
+      base: 92
+      x: body.biomeShoreDepth
+      y: body.biomeGroundZ
+      z: body.fftAmplitude
+      w: 0.0
     )
     uploadFloats(
       resources: resources

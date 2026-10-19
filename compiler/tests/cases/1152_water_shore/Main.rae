@@ -1,0 +1,42 @@
+import Math
+import WorldBiome
+open water/Water
+open water/FftSurfaceCache
+
+func main() {
+  var body: WaterBody = createOceanRealistic(surfaceZ: 0.0)
+  let ground: Float = WorldBiome.worldTerrainHeight(
+    x: 20.0
+    y: 0.0
+    groundZ: -1.0
+    cfg: WorldBiome.defaultBiomeConfig()
+  )
+  log("disabled {biomeShoreEnergy(body: body, x: 20.0, y: 0.0) is 1.0}")
+  body.biomeGroundZ = -1.0
+  body.biomeShoreDepth = 2.0
+  body.centre.z = ground - 0.1
+  log("land {biomeShoreEnergy(body: body, x: 20.0, y: 0.0) is 0.0}")
+  body.centre.z = ground
+  log("waterline {biomeShoreEnergy(body: body, x: 20.0, y: 0.0) is 0.0}")
+  body.centre.z = ground + 1.0
+  let energy: Float = biomeShoreEnergy(body: body, x: 20.0, y: 0.0)
+  log("half depth {Math.abs(value: energy - 0.5) < 0.0001}")
+  let queryEnergy: Float = fftSurfaceEnergy(
+    body: body
+    x: 20.0
+    y: 0.0
+    time: 2.0
+  )
+  let expected: Float = oceanMacroEnergy(x: 20.0, y: 0.0, time: 2.0) * energy
+  log("query uses coast {Math.abs(value: queryEnergy - expected) < 0.0001}")
+  body.fftAmplitude = 0.35
+  let scaled: Float = fftSurfaceEnergy(
+    body: body
+    x: 20.0
+    y: 0.0
+    time: 2.0
+  )
+  log("amplitude matches query {Math.abs(value: scaled - expected * 0.35) < 0.0001}")
+  body.centre.z = ground + 4.0
+  log("offshore {biomeShoreEnergy(body: body, x: 20.0, y: 0.0) is 1.0}")
+}

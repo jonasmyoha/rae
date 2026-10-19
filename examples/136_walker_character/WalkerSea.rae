@@ -5,6 +5,7 @@
 # screen-space reflections and whitecaps where the waves fold. The sea is the
 # island biome's flat water plane, so the island's ponds are the same water.
 # A phone gets the mobile tier (one small cascade, no refraction).
+import Vec3
 open Mesh3d
 open RendererDeferred
 open WorldBiome
@@ -19,14 +20,12 @@ const seaGridSegments: Int = 96
 
 const seaGridGrowth: Float = 1.09
 
-# The sea state: a moderate breeze (m/s at 10 m) over the open ocean, the
-# spectrum damped as by 20 m of depth. 141's 9 m/s sea has waves near 2 m
-# high, which wash far over the island's flat beaches; these are about 0.8 m
-const seaWindSpeed: Float = 6.0
+# Sheltered island water: a light breeze, short fetch and gentle lateral motion.
+const seaWindSpeed: Float = 3.5
 
-const seaSpectrumDepth: Float = 20.0
+const seaSpectrumDepth: Float = 4.0
 
-const seaChoppiness: Float = 1.0
+const seaChoppiness: Float = 0.45
 
 # Where the sea's still surface sits in WORLD space (#830): the biome's flat
 # water plane over the walker's groundZ, the same plane the splashes spray up
@@ -57,6 +56,16 @@ func walkerSea(renderer: mod DeferredRenderer, groundZ: view Float) ret WaterBod
   sea.windSpeed = seaWindSpeed
   sea.waterDepth = seaSpectrumDepth
   sea.choppiness = seaChoppiness
+  sea.fftAmplitude = 0.35
+  sea.fetch = 12000.0
+  sea.biomeShoreDepth = 2.5
+  sea.biomeGroundZ = groundZ
+  sea.foamDistance = 0.22
+  sea.refractStrength = 0.008
+  sea.shallowColor = Vec3.create(x: 0.04, y: 0.50, z: 0.32)
+  sea.deepColor = Vec3.create(x: 0.015, y: 0.24, z: 0.22)
+  sea.absorbColor = Vec3.create(x: 0.75, y: 0.15, z: 0.25)
+  sea.spray = 0
   if Target.isMobileOs {
     useMobileWaterTier(body: sea)
   }
