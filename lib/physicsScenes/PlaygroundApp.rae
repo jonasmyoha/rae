@@ -128,8 +128,8 @@ type PlaygroundApp {
   cameraMoved: Bool
 }
 
-# Open the window (before the renderer is created).
-func openPlaygroundWindow(trackName: view String) {
+# Open the window titled `title` (before the renderer is created).
+func openPlaygroundWindow(title: view String) {
   var width: Int = 1280
   var height: Int = 800
   let placement: List(String) = Sys.getEnv(name: "RAE_PLAYGROUND_WINDOW").split(sep: ",")
@@ -137,7 +137,7 @@ func openPlaygroundWindow(trackName: view String) {
     width = placement.copyAtDefault(index: 2).toInt()
     height = placement.copyAtDefault(index: 3).toInt()
   }
-  Gpu2d.initWindow(width: width, height: height, title: "Rae — physics playground ({trackName})")
+  Gpu2d.initWindow(width: width, height: height, title: title)
   if placement.length is 4 {
     Gpu2d.setWindowPosition(
       x: placement.copyAtDefault(index: 0).toInt()
