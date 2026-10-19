@@ -1,0 +1,46 @@
+# Declared field defaults apply wherever a struct value is built without the
+# field: an uninitialized let, a partial keyed literal, an empty { }, a
+# literal in a ret, a nested literal and a struct-typed field of a literal.
+# (examples/16_field_defaults, whose comments say what each line should be;
+# the compiled C used to give 0 / "" / false for all of them.)
+type Vec2 {
+  x: Float = 1.0
+  y: Float = 2.0
+}
+
+type Player {
+  name: String = "Anonymous"
+  pos: Vec2 = { x: 10.0, y: 10.0 }
+  score: Int = 100
+  active: Bool = true
+}
+
+# A field with no default of its own, of a type that has defaults
+type Holder {
+  label: String
+  spot: Vec2
+}
+
+func makePlayer() ret Player {
+  ret Player { name: "Returned" }
+}
+
+func main() {
+  let player: Player
+  log("uninitialized: {player.name} {player.pos.x},{player.pos.y} {player.score} {player.active}")
+  let partial: Player = { name: "Jonas", pos: { x: 0.0 } }
+  log("partial: {partial.name} {partial.pos.x},{partial.pos.y} {partial.score} {partial.active}")
+  let empty: Player = {}
+  log("empty: {empty.name} {empty.score}")
+  let returned: Player = makePlayer()
+  log("returned: {returned.name} {returned.pos.x} {returned.score}")
+  let vector: Vec2
+  log("vector: {vector.x},{vector.y}")
+  let holder: Holder = { label: "h" }
+  log("holder: {holder.label} {holder.spot.x},{holder.spot.y}")
+  let emptySpot: Holder = { label: "e", spot: {} }
+  log("empty spot: {emptySpot.spot.x},{emptySpot.spot.y}")
+  var changed: Player = { score: 7 }
+  changed.active = false
+  log("changed: {changed.name} {changed.score} {changed.active}")
+}

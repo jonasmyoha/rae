@@ -327,6 +327,8 @@ bool c_spawn_arg_deepcopy_aggregate(CFuncContext* ctx, const AstTypeRef* type);
 const char* c_return_type(CFuncContext* ctx, const AstFuncDecl* func);
 bool emit_string_literal(FILE* out, Str literal);
 bool emit_auto_init(CFuncContext* ctx, const AstTypeRef* type, FILE* out);
+void emit_field_default(CFuncContext* ctx, const AstTypeField* field, const AstTypeRef* field_tr, FILE* out);
+bool struct_has_field_defaults(CFuncContext* ctx, const AstDecl* decl, int depth);
 bool emit_struct_auto_init(CFuncContext* ctx, const AstDecl* decl, const AstTypeRef* tr, FILE* out);
 bool emit_type_recursive(CompilerContext* ctx, const AstModule* m, const AstTypeRef* type, FILE* out, EmittedTypeList* emitted, EmittedTypeList* visiting);
 
