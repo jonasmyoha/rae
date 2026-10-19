@@ -73,9 +73,28 @@ fn skyHosek(dir: vec3<f32>, toSun: vec3<f32>) -> vec3<f32> {
   let below = smoothstep(0.0, 0.06, dir.z);
   return mix(L.skyHorizon.rgb, max(vec3<f32>(r, g, b), vec3<f32>(0.0)), below);
 }
+// The moon's disc at `dir`: a sphere lit on the side that faces the sun, so
+// its phase is the geometry of the two directions (full when the sun is
+// behind the viewer, dark when it is behind the moon), plus a faint earthshine
+// on the dark side. 0 off the disc.
+fn moonDisc(dir: vec3<f32>, toMoon: vec3<f32>, toSun: vec3<f32>, radius: f32) -> f32 {
+  let ca = dot(dir, toMoon);
+  let cutoff = cos(radius);
+  if (ca < cutoff) { return 0.0; }
+  let q = (dir - toMoon * ca) / max(sin(radius), 1e-5);
+  let z = sqrt(max(1.0 - dot(q, q), 0.0));
+  let normal = q - toMoon * z;
+  let lit = smoothstep(-0.04, 0.12, dot(normal, toSun));
+  let edge = smoothstep(cutoff, mix(cutoff, 1.0, 0.12), ca);
+  // A little mottling: the maria are darker than the highlands
+  let mare = 0.82 + 0.18 * sin(q.x * 9.0 + 1.3) * sin(q.y * 7.0 - 0.6);
+  return edge * (lit * mare + 0.025);
+}
 fn skyColor(dir: vec3<f32>) -> vec3<f32> {
   let kind = L.skyParams.x;
-  let toSun = normalize(-L.sunDir.xyz);
+  // The sky's own sun; a sky uploaded without one falls back to the key light
+  var toSun = normalize(-L.sunDir.xyz);
+  if (dot(L.skySun.xyz, L.skySun.xyz) > 0.25) { toSun = normalize(L.skySun.xyz); }
   var c = L.clearColor.rgb;
   if (kind > 1.5 && kind < 2.5) { c = skyProcedural(dir, toSun, L.skyParams.y); }
   if (kind > 2.5 && kind < 3.5) { c = skyStylised(dir, toSun); }
@@ -86,5 +105,22 @@ fn skyColor(dir: vec3<f32>) -> vec3<f32> {
     let disc = smoothstep(cutoff, mix(cutoff, 1.0, 0.35), ca);
     c = c + L.sunColor.rgb * disc * L.skyHorizon.w;
   }
-  return c * L.skyParams.z;
+  c = c * L.skyParams.z;
+  // The moon and the night sky come after the daylight fade, so they show at
+  // night: a dark blue night that brightens and glows round the moon with its
+  // light, and the disc, faint by day against the bright sky
+  if (L.moon.w > 0.0 && kind > 1.5) {
+    let toMoon = normalize(L.moon.xyz);
+    let above = smoothstep(-0.01, 0.03, dir.z);
+    let night = 1.0 - clamp(L.skyParams.z, 0.0, 1.0);
+    let moonlight = L.night.x;
+    let height = clamp(dir.z, 0.0, 1.0);
+    let nightSky = mix(vec3<f32>(0.020, 0.028, 0.050), vec3<f32>(0.006, 0.010, 0.026), height)
+      * (0.35 + 2.4 * moonlight);
+    let glow = pow(max(dot(dir, toMoon), 0.0), 48.0) * 0.12 * moonlight;
+    c = c + (nightSky + vec3<f32>(0.55, 0.62, 0.80) * glow) * night * above;
+    let disc = moonDisc(dir, toMoon, toSun, max(L.skySun.w, 0.001));
+    c = c + vec3<f32>(0.92, 0.94, 1.0) * disc * L.moon.w * above;
+  }
+  return c;
 }

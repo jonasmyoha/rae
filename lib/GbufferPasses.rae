@@ -385,8 +385,15 @@ func uploadSceneLight(
 ) ret Bool {
   let up: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
   let down: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: -1.0)
-  let skyC: Vec3 = desaturate(c: irradiance(sky: sky, normal: up), sat: sky.ambientSaturation)
-  let gndC: Vec3 = desaturate(c: irradiance(sky: sky, normal: down), sat: sky.ambientSaturation)
+  # The night sky's moonlit ambient adds to the sky's own, which fades with the sun
+  let skyC: Vec3 = Vec3.vadd(
+    a: desaturate(c: irradiance(sky: sky, normal: up), sat: sky.ambientSaturation)
+    b: sky.nightAmbient
+  )
+  let gndC: Vec3 = Vec3.vadd(
+    a: desaturate(c: irradiance(sky: sky, normal: down), sat: sky.ambientSaturation)
+    b: Vec3.vscale(a: sky.nightAmbient, s: 0.5)
+  )
   setHosekChannel(targets: targets, c: sky.hosek.r, base: 0)
   setHosekChannel(targets: targets, c: sky.hosek.g, base: 12)
   setHosekChannel(targets: targets, c: sky.hosek.b, base: 24)
@@ -408,6 +415,11 @@ func uploadSceneLight(
     bands: sky.bands
     horizon: sky.horizonColor
     discIntensity: sky.sunDiscIntensity
+    skySunDir: sky.sunDir
+    moonDir: sky.moonDir
+    moonRadius: sky.moonAngularRadius
+    moonIntensity: sky.moonDiscIntensity
+    nightLight: sky.nightLight
   )
 }
 

@@ -55,6 +55,24 @@ open app3d/WalkerWorld
 open RendererForward
 open app3d/WalkerTerrain
 open app3d/PlayerRoster
+open app3d/TimeOfDay
+open Moon
+
+# The "..." menu's "Skip 6 hours": a quarter of a day, enough to step from a
+# late evening past the night (21:00 -> 03:00, and dawn follows) without a
+# second tap, short enough not to overshoot a whole day
+const walkerSkipHours: Float = 6.0
+
+# The "..." menu's moon item: whether the moon is on, and while it is, its
+# phase and how much of it is lit
+func walkerMoonItemText(settingsState: view SettingsState) ret String {
+  if settingsState.moon is false {
+    ret "Moon: off"
+  }
+  let moon: MoonState = settingsMoon(settingsState: settingsState)
+  let percent: Int = (moon.illumination * 100.0 + 0.5).toInt()
+  ret "Moon: {moonPhaseName(moon: moon)}, {percent}% lit"
+}
 
 # Shared reaction to a character switch (#546), from Page Up/Down, keys 1/2, or
 # the settings-panel Prev/Next buttons: snap the orbit camera behind the new
@@ -229,15 +247,35 @@ func uiUpdate(
       characterSystem: characterSystem
     )
   }
+  # The "..." menu's clock items: skip the night, switch the moon
+  var clockChanged: Bool = false
+  if modeMenuTapped(world: inputSystem.world, actionId: modeMenuSkipHoursActionId) {
+    let skipped: Bool = timeOfDaySkip(
+      timeOfDay: inputSystem.settings.timeOfDay
+      hours: walkerSkipHours
+    )
+    clockChanged = true
+  }
+  if modeMenuTapped(world: inputSystem.world, actionId: modeMenuMoonActionId) {
+    inputSystem.settings.moon = inputSystem.settings.moon is false
+    clockChanged = true
+  }
   # The shared settings (app3d/EditorPanel): every action (the edge tab's
   # settings.open too), the sliders, the running clock
-  let settingsChanged: Bool = updateEditorSettings(
+  let settingsChanged: Bool = clockChanged or updateEditorSettings(
     world: inputSystem.world
     uiSystems: uiSystems
     input: inputSystem.ui
     settings: inputSystem.settings
     deltaTime: deltaTime
   )
+  # The moon item says what the moon is doing; a mode switch resets the menu's
+  # nodes to their authored text, so it is written again then
+  let moonText: String = walkerMoonItemText(settingsState: inputSystem.settings)
+  if modesChanged or moonText is not inputSystem.moonItemText {
+    setNodeText(world: inputSystem.world, nodeId: "MenuMoonLabel", value: moonText)
+    inputSystem.moonItemText = moonText
+  }
   # A mode switch resets the panel's nodes: apply its open/close again
   if modesChanged {
     applyEditorPanelOpen(world: inputSystem.world, open: inputSystem.settings.open)
@@ -253,8 +291,8 @@ func uiUpdate(
       turbidity: 3.0
       groundAlbedo: 0.30
     )
-    cameraSystem.light.sunDir = settingsSunDir(settingsState: inputSystem.settings)
-    cameraSystem.light.sunColor = settingsSunColor(settingsState: inputSystem.settings)
+    cameraSystem.light.sunDir = settingsKeyLightDir(settingsState: inputSystem.settings)
+    cameraSystem.light.sunColor = settingsKeyLightColor(settingsState: inputSystem.settings)
     characterSystem.speed = inputSystem.settings.speed
     characterSystem.playing = inputSystem.settings.playing
     if characterSystem.toon is not inputSystem.settings.toon {

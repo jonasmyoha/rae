@@ -1,0 +1,19 @@
+# app3d/TimeOfDay with a day of its own length (the walkers' 30 minutes) and
+# the "Skip 6 hours" step: a quarter of the day length moves the clock six
+# hours, a skip past midnight rolls the date, and the default day stays one
+# minute long.
+open app3d/TimeOfDay
+
+func main() {
+  var clock: TimeOfDay = createTimeOfDay(hour: 21.0)
+  log("default day {clock.daySeconds} s")
+  clock.daySeconds = 1800.0
+  let startDay: Int = clock.dayOfYear
+  # 75 s of a 30-minute day is one hour
+  let moved: Bool = timeOfDayAdvance(timeOfDay: clock, deltaTime: 75.0)
+  log("after 75 s: hour {(clock.hour + 0.5).toInt()}, moved {moved}")
+  let skipped: Bool = timeOfDaySkip(timeOfDay: clock, hours: 6.0)
+  log(
+    "after skipping 6 hours: hour {(clock.hour + 0.5).toInt()}, next day {clock.dayOfYear is startDay + 1}"
+  )
+}

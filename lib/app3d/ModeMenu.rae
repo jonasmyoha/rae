@@ -61,7 +61,14 @@ const modeMenuMobileItemNodeId: String = "MenuMobileItem"
 const modeMenuMobileLabelNodeId: String = "MenuMobileLabel"
 
 # Where a press may land without closing the menu: the button and the items
-const modeMenuPressNodeIds: String = "ModeButton MenuEditorItem MenuCameraItem MenuGameItem MenuResetItem MenuMobileItem"
+const modeMenuPressNodeIds: String = "ModeButton MenuEditorItem MenuCameraItem MenuGameItem MenuResetItem MenuMobileItem MenuSkipHoursItem MenuMoonItem"
+
+# The clock items a scene with a sky may add (the walkers do): skip some hours
+# ahead, switch the moon. The menu closes when one is chosen; the app does
+# what it says (app3d/WalkerUi).
+const modeMenuSkipHoursActionId: String = "menu.skipHours"
+
+const modeMenuMoonActionId: String = "menu.moon"
 
 # Is the menu open after this frame? A tap on the button opens or closes it;
 # choosing an item, or a press anywhere else, closes it.
@@ -227,7 +234,10 @@ func updateModeMenuItems(
   let open: Bool = modeMenuOpenAfter(
     open: menu.open
     buttonTapped: modeMenuTapped(world: world, actionId: modeMenuToggleActionId)
-    itemChosen: modeChosen or cameraTapped or resetTapped or mobileTapped
+    itemChosen: modeChosen or cameraTapped or resetTapped or mobileTapped or modeMenuTapped(
+      world: world
+      actionId: modeMenuSkipHoursActionId
+    ) or modeMenuTapped(world: world, actionId: modeMenuMoonActionId)
     pressedElsewhere: pressedElsewhere
   )
   if rewrite or open is not menu.open {

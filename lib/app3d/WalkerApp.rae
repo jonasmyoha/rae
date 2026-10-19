@@ -93,6 +93,8 @@ open app3d/WalkerSplash
 open app3d/WalkerState
 open app3d/WalkerSelfTest
 open RendererForward
+open Moon
+open Calendar
 
 # The app's GPU manager (#873): with the sea, its three 256 cascades with
 # their mip chains, readbacks and surface (192, as the downstream game sizes
@@ -536,6 +538,22 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
       hour: startHour
       skyModel: SettingsSkyModel.preetham
     )
+    settingsState.timeOfDay.daySeconds = walkerDaySeconds
+    # RAE_WALKER_DAY overrides the start day of the year (1..366; 193 in 1995
+    # is a full moon), so a headless frame can look at any phase
+    let daySetting: String = Sys.getEnv(name: "RAE_WALKER_DAY")
+    if daySetting.length() > 0 {
+      settingsState.timeOfDay.dayOfYear = clampDayOfYear(
+        year: settingsState.timeOfDay.year
+        dayOfYear: daySetting.toInt()
+      )
+    }
+    let startMoon: MoonState = settingsMoon(settingsState: settingsState)
+    log(
+      "[moon] {moonPhaseName(moon: startMoon)}, {(startMoon.illumination * 100.0).toInt()}% lit, up {startMoon.up}, light {settingsMoonLight(
+        settingsState: settingsState
+      )}, direction {startMoon.direction.x} {startMoon.direction.y} {startMoon.direction.z}"
+    )
     # Default FXAA, the settings pane toggles TAA; a forward frame has 4x MSAA
     # and no TAA
     if not settings.forward {
@@ -559,8 +577,8 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
         groundAlbedo: 0.30
       )
     )
-    light.sunDir = settingsSunDir(settingsState: settingsState)
-    light.sunColor = settingsSunColor(settingsState: settingsState)
+    light.sunDir = settingsKeyLightDir(settingsState: settingsState)
+    light.sunColor = settingsKeyLightColor(settingsState: settingsState)
     log(
       "[ui] panel buttons: {clipPanel.buttonEntities.length} clip, {transport.buttonEntities.length} transport, editor chrome {chromeMounted}"
     )
@@ -623,6 +641,7 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
         uiModes: own uiModes
         logOverlay: own logOverlay
         lastLogRevision: -1
+        moonItemText: ""
       }
       cameraSystem: {
         camera: camera

@@ -245,6 +245,14 @@ func updateEditorSettings(
   ) {
     settingsChanged = true
   }
+  if settingsUpdateLongitudePointer(
+    settingsState: settings
+    world: world
+    uiSystems: uiSystems
+    input: input
+  ) {
+    settingsChanged = true
+  }
   if settingsUpdateDatePointer(
     settingsState: settings
     world: world
@@ -509,8 +517,14 @@ func applyEditorPanelSettings(
   )
   sky.sunColor = sunColor
   setRendererSky(renderer: renderer, sky: sky)
-  light.sunDir = settingsSunDir(settingsState: editorPanel.settings)
-  light.sunColor = sunColor
+  # The key light: the sun, or the moon at night (app3d/SettingsDialog)
+  let keyColor: Vec3 = settingsKeyLightColor(settingsState: editorPanel.settings)
+  light.sunDir = settingsKeyLightDir(settingsState: editorPanel.settings)
+  light.sunColor = Vec3.create(
+    x: keyColor.x * sunStrength
+    y: keyColor.y * sunStrength
+    z: keyColor.z * sunStrength
+  )
   setTaaEnabled(renderer: renderer, on: editorPanel.settings.taa)
 }
 

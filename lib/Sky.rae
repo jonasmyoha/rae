@@ -107,6 +107,21 @@ type Sky {
   zenithColor: Vec3
   horizonColor: Vec3
   bands: Float
+  # ----- the moon (lib/Moon) -----------------------------------------
+  # Like the sun's disc, drawn over every kind that draws a sky, after the
+  # daylight fade, so it shows at night; lit on the side that faces sunDir,
+  # which is what makes its phase. 0 intensity: no moon (switched off, or a
+  # sky built without one).
+  moonDir: Vec3
+  moonAngularRadius: Float = 0.0115
+  moonDiscIntensity: Float = 0.0
+  # The night sky's moonlight, 0..1 (lib/Moon moonLightLevel): a dark blue
+  # night that brightens and glows round the moon as it waxes; 0 is a moonless
+  # night
+  nightLight: Float = 0.0
+  # Ambient light the night sky adds to the sky's own (which fades out with
+  # the sun): the moonlit sky lighting the scene
+  nightAmbient: Vec3
 }
 
 # The kind, as the number the shader switches on. One place that mapping

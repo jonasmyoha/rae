@@ -35,7 +35,7 @@ open GbufferFullscreen
 
 const pyramidMaxMips: Int = 16
 
-const lightUniformFloats: Int = 112  # 448 bytes: LightU in the lighting WGSL
+const lightUniformFloats: Int = 124  # 496 bytes: LightU in the lighting WGSL
 
 const taaUniformBytes: Int = 16
 
@@ -735,6 +735,11 @@ func uploadLightUniform(
   bands: copy Float
   horizon: view Vec3
   discIntensity: copy Float
+  skySunDir: view Vec3
+  moonDir: view Vec3
+  moonRadius: copy Float
+  moonIntensity: copy Float
+  nightLight: copy Float
 ) ret Bool {
   var fogStart: Float = 0.0
   var fogEnd: Float = 0.0
@@ -838,6 +843,29 @@ func uploadLightUniform(
     y: targets.mistTint.y
     z: targets.mistTint.z
     w: targets.mistPaleness
+  )
+  # The sky's own sun (the key light may be the moon at night) and the moon:
+  # the way TOWARD each, as the sky shader looks
+  pushVec4F(
+    writer: targets.args
+    x: -skySunDir.x
+    y: -skySunDir.y
+    z: -skySunDir.z
+    w: moonRadius
+  )
+  pushVec4F(
+    writer: targets.args
+    x: -moonDir.x
+    y: -moonDir.y
+    z: -moonDir.z
+    w: moonIntensity
+  )
+  pushVec4F(
+    writer: targets.args
+    x: nightLight
+    y: 0.0
+    z: 0.0
+    w: 0.0
   )
   ret uploadArgs(
     writer: targets.args

@@ -1,0 +1,227 @@
+# Moon — where the moon is in the sky and how much of it is lit, for a date, a
+# local solar time, a latitude and a longitude; and how much light it gives.
+#
+# The sun's place comes from lib/Sky (the hour angle of local solar time and
+# the declination of the date). The moon is placed RELATIVE to that sun: its
+# hour angle is the sun's plus the difference of their right ascensions. So
+# the two always agree about each other, which is what the moon's phase is:
+# the lit side of the disc faces the sun the sky shows.
+#
+# The ephemeris is the low-precision one of the Astronomical Almanac (the
+# moon's mean longitude, anomaly, elongation and argument of latitude, with
+# its five largest terms): good to a few tenths of a degree, far inside what a
+# sky needs. The year, the day of the year, the hour and the longitude set the
+# time (the longitude turns local solar time into universal time); the moon
+# moves about 13 degrees a day against the stars, so it rises some 50 minutes
+# later each day and runs through its phases in 29.5 days.
+#
+#   let moon: MoonState = moonForDate(year: 2026, dayOfYear: 290, hour: 22.0,
+#     latitudeDeg: 60.17, longitudeDeg: 24.94)
+#   moon.direction      the way its light travels (Light3d.sunDir's convention)
+#   moon.illumination   0 at new moon .. 1 at full
+#   moonLightLevel(moon: moon)   0 .. 1: the phase, dimmed near the horizon
+import Math
+import Vec3
+open Calendar
+
+const moonPi: Float = 3.14159265358979
+
+# Helsinki, east of Greenwich: the longitude the settings start at, beside
+# lib/Sky's default latitude
+const moonDefaultLongitudeDeg: Float = 24.94
+
+# The disc's angular radius in the sky (rad). The real moon's is 0.0045, the
+# size of the sun's; it is drawn 2.5 times bigger, as games do, so its phase
+# reads on a screen.
+const moonAngularRadius: Float = 0.0115
+
+type MoonState {
+  # The way the moonlight travels: from the moon toward the scene
+  direction: Vec3
+  # Its height in the sky: the sine of its elevation, below 0 when set
+  up: Float
+  # The lit fraction of the disc: 0 at new moon, 1 at full
+  illumination: Float
+  # Growing toward full (true) or shrinking toward new
+  waxing: Bool
+}
+
+func moonRadians(degrees: view Float) ret Float {
+  ret degrees * moonPi / 180.0
+}
+
+# An angle in degrees, wrapped to 0..360 before it loses precision in a Float
+func moonWrapDegrees(degrees: view Float64) ret Float {
+  let turns: Float64 = Math.floor(x: (degrees / 360.0) as Float) as Float64
+  var wrapped: Float64 = degrees - turns * 360.0
+  if wrapped < 0.0 {
+    wrapped = wrapped + 360.0
+  }
+  ret wrapped as Float
+}
+
+# Days since the J2000.0 epoch (1 January 2000, 12:00 universal time) at
+# `utHours` on day `dayOfYear` (1-based) of `year`
+func daysSinceJ2000(year: view Int, dayOfYear: view Int, utHours: view Float) ret Float64 {
+  var days: Float64 = 0.0
+  if year >= 2000 {
+    loop var y: Int = 2000, y < year, ++y {
+      days = days + daysInYear(year: y) as Float64
+    }
+  } else {
+    loop var y: Int = year, y < 2000, ++y {
+      days = days - daysInYear(year: y) as Float64
+    }
+  }
+  ret days + (dayOfYear - 1) as Float64 + (utHours as Float64) / 24.0 - 0.5
+}
+
+# Right ascension and declination (rad) of ecliptic longitude / latitude
+# (degrees) with the obliquity `obliquityDeg`
+type MoonEquatorial {
+  rightAscension: Float
+  declination: Float
+}
+
+func eclipticToEquatorial(
+  longitudeDeg: view Float
+  latitudeDeg: view Float
+  obliquityDeg: view Float
+) ret MoonEquatorial {
+  let lambda: Float = moonRadians(degrees: longitudeDeg)
+  let beta: Float = moonRadians(degrees: latitudeDeg)
+  let epsilon: Float = moonRadians(degrees: obliquityDeg)
+  let x: Float = Math.cos(x: beta) * Math.cos(x: lambda)
+  let y: Float = Math.cos(x: epsilon) * Math.cos(x: beta) * Math.sin(x: lambda) - Math.sin(
+    x: epsilon
+  ) * Math.sin(x: beta)
+  let z: Float = Math.sin(x: epsilon) * Math.cos(x: beta) * Math.sin(x: lambda) + Math.cos(
+    x: epsilon
+  ) * Math.sin(x: beta)
+  ret MoonEquatorial {
+    rightAscension: Math.atan2(y: y, x: x)
+    declination: Math.asin(x: Math.min(a: Math.max(a: z, b: -1.0), b: 1.0))
+  }
+}
+
+# The direction TOWARD a body at hour angle `hourAngle` and declination
+# `declination` (rad), seen from `latitudeDeg`; x east, y north, z up (the
+# same geometry as lib/Sky's sunDirForDeclination)
+func towardHourAngle(
+  hourAngle: view Float
+  declination: view Float
+  latitudeDeg: view Float
+) ret Vec3 {
+  let phi: Float = moonRadians(degrees: Math.min(a: Math.max(a: latitudeDeg, b: -90.0), b: 90.0))
+  let cosD: Float = Math.cos(x: declination)
+  ret Vec3.create(
+    x: -cosD * Math.sin(x: hourAngle)
+    y: Math.sin(x: declination) * Math.cos(x: phi) - cosD * Math.sin(x: phi) * Math.cos(
+      x: hourAngle
+    )
+    z: Math.sin(x: declination) * Math.sin(x: phi) + cosD * Math.cos(x: phi) * Math.cos(
+      x: hourAngle
+    )
+  )
+}
+
+# The moon at `hour` (local solar time, 0..24) on day `dayOfYear` of `year`,
+# seen from `latitudeDeg` north, `longitudeDeg` east
+func moonForDate(
+  year: view Int
+  dayOfYear: view Int
+  hour: view Float
+  latitudeDeg: view Float
+  longitudeDeg: view Float
+) ret MoonState {
+  let d: Float64 = daysSinceJ2000(
+    year: year
+    dayOfYear: dayOfYear
+    utHours: hour - longitudeDeg / 15.0
+  )
+  # The sun's ecliptic longitude
+  let sunAnomaly: Float = moonWrapDegrees(degrees: d * 0.98560028 + 357.529)
+  let sunMean: Float = moonWrapDegrees(degrees: d * 0.98564736 + 280.459)
+  let sunLongitude: Float = sunMean + 1.915 * Math.sin(x: moonRadians(degrees: sunAnomaly)) + 0.020 * Math.sin(
+    x: moonRadians(degrees: 2.0 * sunAnomaly)
+  )
+  # The moon's: its mean longitude, anomaly, elongation, argument of latitude
+  let meanLongitude: Float = moonWrapDegrees(degrees: d * 13.176396 + 218.316)
+  let anomaly: Float = moonRadians(degrees: moonWrapDegrees(degrees: d * 13.064993 + 134.963))
+  let elongation: Float = moonRadians(degrees: moonWrapDegrees(degrees: d * 12.190749 + 297.850))
+  let argument: Float = moonRadians(degrees: moonWrapDegrees(degrees: d * 13.229350 + 93.272))
+  let moonLongitude: Float = meanLongitude + 6.289 * Math.sin(x: anomaly) + 1.274 * Math.sin(
+    x: 2.0 * elongation - anomaly
+  ) + 0.658 * Math.sin(x: 2.0 * elongation) + 0.214 * Math.sin(x: 2.0 * anomaly) - 0.186 * Math.sin(
+    x: moonRadians(degrees: sunAnomaly)
+  )
+  let moonLatitude: Float = 5.128 * Math.sin(x: argument)
+  let obliquity: Float = 23.439
+  let sun: MoonEquatorial = eclipticToEquatorial(
+    longitudeDeg: sunLongitude
+    latitudeDeg: 0.0
+    obliquityDeg: obliquity
+  )
+  let moon: MoonEquatorial = eclipticToEquatorial(
+    longitudeDeg: moonLongitude
+    latitudeDeg: moonLatitude
+    obliquityDeg: obliquity
+  )
+  # The sun's hour angle is local solar time's; the moon's is that plus the
+  # difference of their right ascensions
+  let sunHourAngle: Float = (hour - 12.0) * moonPi / 12.0
+  let toMoon: Vec3 = towardHourAngle(
+    hourAngle: sunHourAngle + sun.rightAscension - moon.rightAscension
+    declination: moon.declination
+    latitudeDeg: latitudeDeg
+  )
+  # The phase: the angle between the moon and the sun seen from the earth
+  let apart: Float = moonRadians(degrees: moonLongitude - sunLongitude)
+  let cosElongation: Float = Math.cos(x: moonRadians(degrees: moonLatitude)) * Math.cos(x: apart)
+  ret MoonState {
+    direction: Vec3.create(x: -toMoon.x, y: -toMoon.y, z: -toMoon.z)
+    up: toMoon.z
+    illumination: (1.0 - cosElongation) * 0.5
+    waxing: Math.sin(x: apart) > 0.0
+  }
+}
+
+# How much light the moon gives, 0..1: its lit fraction (a full moon gives
+# far more than a half, so the fraction is raised to 1.5), faded out as it
+# sinks to the horizon. 0 while it is set.
+func moonLightLevel(moon: view MoonState) ret Float {
+  if moon.up <= 0.0 {
+    ret 0.0
+  }
+  let rise: Float = Math.min(a: Math.max(a: moon.up / 0.15, b: 0.0), b: 1.0)
+  let fullness: Float = Math.pow(
+    base: Math.min(a: Math.max(a: moon.illumination, b: 0.0), b: 1.0)
+    exp: 1.5
+  )
+  ret fullness * rise * rise * (3.0 - 2.0 * rise)
+}
+
+# The phase as words: "new moon", "waxing crescent", ..., "waning crescent"
+func moonPhaseName(moon: view MoonState) ret String {
+  let lit: Float = moon.illumination
+  if lit < 0.03 {
+    ret "new moon"
+  }
+  if lit > 0.97 {
+    ret "full moon"
+  }
+  var side: String = "waning"
+  if moon.waxing {
+    side = "waxing"
+  }
+  if lit < 0.4 {
+    ret "{side} crescent"
+  }
+  if lit < 0.6 {
+    if moon.waxing {
+      ret "first quarter"
+    }
+    ret "last quarter"
+  }
+  ret "{side} gibbous"
+}
