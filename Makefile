@@ -1,4 +1,4 @@
-.PHONY: all dev build test stop setup install-hooks banned-terms-gate stress bench-servers devtools-install devtools-lint devtools-test gemini claude codex llm up
+.PHONY: all dev build test stop setup install-hooks banned-terms-gate example-copy-gate stress bench-servers devtools-install devtools-lint devtools-test gemini claude codex llm up
 
 SESSION_DIR ?= $(HOME)/.ws
 PROJECT_KEY := rae
@@ -56,6 +56,12 @@ setup:
 # suite runs it too; this is the quick standalone form.
 banned-terms-gate:
 	@bash compiler/tools/banned-terms-gate.sh
+
+# Example files that copy another example's file or a lib/ file, outside
+# compiler/tools/example-copy-allowlist.txt (AGENTS.md "Example families").
+# The full test run includes it as one pre-suite case.
+example-copy-gate:
+	@bash compiler/tools/example-copy-gate.sh
 
 # The stress cases (docs/stress-tests.md): every stress/NN_*/ program held to
 # the verdict its pack declares — a "handles" case must show the good
