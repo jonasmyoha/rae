@@ -57,7 +57,7 @@ open app3d/RenderScale
 # ----- per-frame timing + resize -------------------------------------------
 func frameBegin(app: mod App) {
   Profile.tick(profiler: app.profiler)
-  resizeUiToWindow(
+  app.frame.resized = resizeUiToWindow(
     world: app.inputSystem.world
     uiSystems: app.inputSystem.uiSystems
     res: app.inputSystem.gpuUi
@@ -320,7 +320,9 @@ func updateApp(app: mod App) {
 
   netPublishIntent(netSystem: app.netSystem, world: app.world)
 
-  let resized: Bool = Gpu2d.windowResized()
+  # Read in frameBegin: windowResized() is cleared on read, and reading it
+  # again here always gave false, so a resize was never saved
+  let resized: Bool = app.frame.resized
   if resized {
     app.persist.stateDirty = true
   }
