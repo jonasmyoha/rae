@@ -1,18 +1,19 @@
 # The streamed terrain props in the physics world (lib/box3d/ecs/NatureBodies
 # holds the rules): every placed rock is a static sphere, rebuilt after each
 # terrain stream because the rock entities are reused; a bush slows a
-# character inside it (moveCharacters asks bushSpeedLimitAt).
+# character inside it (the physics step gets bushSpots).
 import Math
 open ecs/Entity
 open ecs/ComponentTable
 open ecs/Transform
 open box3d/ecs/PhysicsSpawn
 open box3d/ecs/NatureBodies
+open app3d/WalkerPhysics
 
 # Give every placed rock a static body and sphere at its current pose,
 # dropping the body it had before; a rock not placed (over water) gets none.
 # Call after the terrain streams. The number of rock bodies.
-func placeRockBodies(physicsSystem: mod PhysicsSystem, world: mod GameWorld) ret Int {
+func placeRockBodies(physicsSystem: mod WalkerPhysics, world: mod GameWorld) ret Int {
   var rocks: Int = 0
   loop var i: Int = 0, i < componentCount(this: world.propKinds), ++i {
     let entityId: EntityId = componentEntityAt(this: world.propKinds, i: i)
@@ -38,25 +39,23 @@ func placeRockBodies(physicsSystem: mod PhysicsSystem, world: mod GameWorld) ret
   ret rocks
 }
 
-# The lowest speed limit of the placed bushes at (`x`, `y`); bushNoLimit
-# when no bush is there
-func bushSpeedLimitAt(world: view GameWorld, x: view Float, y: view Float) ret Float {
-  var limit: Float = bushNoLimit
+# The placed bushes as spots for the physics step (each at its foot, with its
+# soft radius): a character inside one is slowed (box3d/ecs/NatureBodies)
+func bushSpots(world: view GameWorld) ret List(BushSpot) {
+  var spots: List(BushSpot) = List.create(BushSpot, cap: 64)
   loop var i: Int = 0, i < componentCount(this: world.propKinds), ++i {
     let entityId: EntityId = componentEntityAt(this: world.propKinds, i: i)
     let prop: view TerrainProp => componentView(this: world.propKinds, entityId: entityId)
     if prop.kind is kindBush and prop.active {
       let transform: view Transform3D => componentView(this: world.transforms, entityId: entityId)
-      let dx: Float = x - transform.position.x
-      let dy: Float = y - transform.position.y
-      limit = Math.min(
-        a: limit
-        b: bushSpeedLimit(
-          distance: Math.sqrt(x: dx * dx + dy * dy)
+      spots.add(
+        value: {
+          x: transform.position.x
+          y: transform.position.y
           radius: bushSoftRadius(scale: transform.scale.x)
-        )
+        }
       )
     }
   }
-  ret limit
+  ret spots
 }

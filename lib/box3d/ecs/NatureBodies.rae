@@ -135,3 +135,32 @@ func applyBushLimit(character: mod CharacterBody, limit: view Float) ret Vec2 {
   }
   ret throttle
 }
+
+# A bush the step should slow characters in: where its foot is and its soft
+# radius (bushSoftRadius of its scale)
+type BushSpot {
+  x: Float
+  y: Float
+  radius: Float
+}
+
+# The lowest bush speed limit at (`x`, `y`) among `bushes`; bushNoLimit when
+# none is there
+func bushSpeedLimitAmong(bushes: view List(BushSpot), x: view Float, y: view Float) ret Float {
+  var limit: Float = bushNoLimit
+  loop let bush: view BushSpot in bushes {
+    let dx: Float = x - bush.x
+    let dy: Float = y - bush.y
+    limit = Math.min(
+      a: limit
+      b: bushSpeedLimit(distance: Math.sqrt(x: dx * dx + dy * dy), radius: bush.radius)
+    )
+  }
+  ret limit
+}
+
+# No bushes (for a step in a world without any)
+func noBushSpots() ret List(BushSpot) {
+  var spots: List(BushSpot) = List.create(BushSpot, cap: 0)
+  ret spots
+}

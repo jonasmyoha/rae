@@ -65,9 +65,9 @@ type GameWorld {
   # #740: skinned body-mesh parts, one entity each.
   partRoughness: ComponentTable(PartRoughness)
   # #741: infinite-terrain props + heightfield tiles are recycled entities.
-  # PropKind identifies the prop (kind + pool slot + placement-active); TreeVariant
+  # TerrainProp identifies the prop (kind + pool slot + placement-active); TreeVariant
   # records a tree's broad/tall choice.
-  propKinds: ComponentTable(PropKind)
+  propKinds: ComponentTable(TerrainProp)
   treeVariants: ComponentTable(TreeVariant)
   # #742: waving-grass blades are entities carrying a GrassBlade descriptor
   # (base position + yaw/phase/scale + pool slot). The flat instance-stream
@@ -96,7 +96,7 @@ func createGameWorld() ret GameWorld {
     controllers: ComponentTable.create(ThirdPersonController)
     animStates: ComponentTable.create(AnimationState)
     partRoughness: ComponentTable.create(PartRoughness)
-    propKinds: ComponentTable.create(PropKind)
+    propKinds: ComponentTable.create(TerrainProp)
     treeVariants: ComponentTable.create(TreeVariant)
     grassBlades: ComponentTable.create(GrassBlade)
     parents: ComponentTable.create(Parent)

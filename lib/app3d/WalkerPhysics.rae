@@ -1,0 +1,883 @@
+# app3d/WalkerPhysics — the walker's physics: upstream Box3D's C library
+# through box3d/ecs (docs/physics-two-implementations.md), on a fixed 60 Hz
+# step taken from the frame's accumulator. The system owns the physics
+# resource and the tables of its bodies (docs/ecs-systems-own-their-tables.md);
+# the pose of every body lives in the app's Transform3D table, which the pull
+# system writes back after each step. Used by the walker examples (136, 137,
+# 143); their differences are settings of createWalkerPhysics.
+#
+# - The ground is a static height field sampled from the app's WorldBiome
+#   terrain (worldTerrainHeight on its BiomeConfig), on the render tiles' 1.5
+#   m lattice: one field over a whole island, or (followDistance > 0) a field
+#   round the walker that is made again when the walker has gone that far.
+# - Every character (the hero, each crowd member) is a CharacterBody: Box3D's
+#   mover (samples/mover.cpp), a capsule that slides along the ground, pushes
+#   loose bodies and jumps; deep water (worldWadable) stays a wall. The
+#   controller of the character (its feet, heading and gait) is read back
+#   from the mover after each step. A bush slows a character inside it
+#   (box3d/ecs/NatureBodies; the app hands the step its bush spots).
+# - A few stacks of cubes near the spawn are dynamic bodies.
+# - Tree trunks are static capsules: one per tree (addTreeTrunk), or a pool of
+#   them moved onto the trees of a PropField nearest the walker
+#   (createTrunkPool / updateTrunkPool) when the forest is too big for one each.
+import Math
+import Vec3
+import Quat
+open Vec2
+open Math3d
+open WorldBiome
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open ecs/Transform
+open app3d/CharacterController
+open app3d/WalkerCharacter
+open app3d/GroveTrees
+open app3d/PropField
+open box3d/ecs/PhysicsTypes
+open box3d/ecs/Physics
+open box3d/ecs/PhysicsComponents
+open box3d/ecs/PhysicsSpawn
+open box3d/ecs/PhysicsSystems
+open box3d/ecs/CharacterMover
+open box3d/ecs/VenueMesh
+open box3d/ecs/NatureBodies
+open box3d/Box3d
+open box3d/Box3dTypes
+
+const walkerPhysicsStep: Float = 1.0 / 60.0
+
+const walkerPhysicsSubSteps: Int = 4
+
+# Fixed steps one frame may take: past this the world slows down instead of
+# spiralling (a stall, a breakpoint)
+const walkerPhysicsMaxSteps: Int = 4
+
+# Where the mover's capsule centre rests above the ground: its pogo spring
+# holds the lower sphere's centre three radii (0.9 m) up, and the capsule's
+# centre is 0.5 m above that (lib/box3d/ecs/CharacterMover updatePogo)
+const moverCenterAboveFeet: Float = 1.4
+
+# The ground's lattice: the render tiles' 1.5 m (18 m cells of 12 segments)
+const walkerGroundSpacing: Float = 1.5
+
+# A loose cube: its half edge and colour (its pose is its Transform3D)
+type PhysicsCube {
+  halfSize: Float
+  color: Vec3
+}
+
+type WalkerPhysics {
+  # Frame time not yet stepped
+  accumulator: Float
+  # The terrain the ground and the wading follow: the app's biome and the
+  # height its ground sits at
+  biome: BiomeConfig
+  groundZ: Float
+  # The ground field: fieldCount x fieldCount points; with followDistance > 0
+  # it is made again round the walker once it is that far from the centre
+  fieldCount: Int
+  followDistance: Float
+  physics: Physics
+  rigidBodies: ComponentTable(RigidBody)
+  colliders: ComponentTable(Collider)
+  characters: ComponentTable(CharacterBody)
+  cubes: ComponentTable(PhysicsCube)
+  # The ground height field now (followGround): its shape, the point it is
+  # centred on, and how many times it has been made
+  groundShape: ShapeId
+  groundCentre: Vec3
+  groundFields: Int
+  # The trunk pool (TrunkPool): static trunk bodies moved onto the trees
+  # nearest the walker, the point they were placed round, and how many stand
+  # on trees now
+  trunks: List(EntityId)
+  trunkFocus: Vec3
+  trunkFocusSet: Bool
+  trunksOnTrees: Int
+}
+
+# The physics of a walker on the terrain of `biome` at `groundZ`, its ground a
+# field of `fieldCount` x `fieldCount` points (231 cover an island of radius
+# 150 m), made again round the walker when it has gone `followDistance` from
+# the field's centre (0: never)
+func createWalkerPhysics(
+  biome: view BiomeConfig
+  groundZ: view Float
+  fieldCount: view Int
+  followDistance: view Float
+) ret WalkerPhysics {
+  ret WalkerPhysics {
+    accumulator: 0.0
+    biome: biome
+    groundZ: groundZ
+    fieldCount: fieldCount
+    followDistance: followDistance
+    physics: createPhysics(
+      def: defaultPhysicsWorldDef()
+      fixedStep: walkerPhysicsStep
+      subSteps: walkerPhysicsSubSteps
+    )
+    rigidBodies: ComponentTable.create(RigidBody)
+    colliders: ComponentTable.create(Collider)
+    characters: ComponentTable.create(CharacterBody)
+    cubes: ComponentTable.create(PhysicsCube)
+    groundShape: nullShapeId()
+    groundCentre: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+    groundFields: 0
+    trunks: List.create(EntityId, cap: 128)
+    trunkFocus: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+    trunkFocusSet: false
+    trunksOnTrees: 0
+  }
+}
+
+func destroyPhysicsSystem(physicsSystem: mod WalkerPhysics) {
+  destroyPhysics(physics: physicsSystem.physics)
+}
+
+# ----- the ground --------------------------------------------------------
+# A static height field (Box3D's is a grid over its local x and z with the
+# heights along local y; a quarter turn about x stands it up, so local column
+# i is world x = left + i * spacing and local row j is world y = top - j *
+# spacing, as lib/physicsScenes' vehicle course does). Every height is
+# terrainHeightAt itself, so what you walk on is what you see.
+func addIslandGround(physicsSystem: mod WalkerPhysics) ret Bool {
+  ret addGroundAround(physicsSystem: physicsSystem, centre: physicsSystem.groundCentre)
+}
+
+# A height field centred on `centre` (snapped to the field's lattice, so
+# every field samples the same points), replacing the one before. True when
+# Box3D took it.
+func addGroundAround(physicsSystem: mod WalkerPhysics, centre: view Vec3) ret Bool {
+  let count: Int = physicsSystem.fieldCount
+  let half: Float = walkerGroundSpacing * (((count - 1) / 2) as Float)
+  let centreX: Float = Math.floor(x: centre.x / walkerGroundSpacing) * walkerGroundSpacing
+  let centreY: Float = Math.floor(x: centre.y / walkerGroundSpacing) * walkerGroundSpacing
+  var heights: List(Float) = List.create(Float, cap: count * count)
+  loop var row: Int = 0, row < count, ++row {
+    loop var column: Int = 0, column < count, ++column {
+      heights.add(value: worldTerrainHeight(
+        x: centreX - half + (column as Float) * walkerGroundSpacing
+        y: centreY + half - (row as Float) * walkerGroundSpacing
+        groundZ: physicsSystem.groundZ
+        cfg: physicsSystem.biome
+      ))
+    }
+  }
+  var groundDef: ShapeDef = defaultShapeDef(lengthUnitsPerMeter: 1.0)
+  groundDef.baseMaterial.friction = 0.8
+  if let shapeId: ShapeId = addVenueHeightField(
+    physics: physicsSystem.physics
+    heights: heights
+    countX: count
+    countZ: count
+    scale: Vec3 { x: walkerGroundSpacing, y: 1.0, z: walkerGroundSpacing }
+    transform: Transform {
+      position: Vec3 { x: centreX - half, y: centreY + half, z: 0.0 }
+      rotation: Quat.fromAxisAngle(axis: Vec3 { x: 1.0, y: 0.0, z: 0.0 }, angle: Math.pi * 0.5)
+    }
+    def: groundDef
+  ) {
+    if physicsSystem.groundFields > 0 {
+      let removed: Bool = removeVenueHeightField(
+        physics: physicsSystem.physics
+        shapeId: physicsSystem.groundShape
+      )
+    }
+    physicsSystem.groundShape = shapeId
+    physicsSystem.groundCentre = Vec3 { x: centreX, y: centreY, z: 0.0 }
+    physicsSystem.groundFields = physicsSystem.groundFields + 1
+    ret true
+  }
+  ret false
+}
+
+# Keep the ground under the walker: once `position` is followDistance from
+# the field's centre, make a new field round it (never when followDistance
+# is 0). True when it did.
+func followGround(physicsSystem: mod WalkerPhysics, position: view Vec3) ret Bool {
+  if physicsSystem.followDistance <= 0.0 {
+    ret false
+  }
+  let gapX: Float = position.x - physicsSystem.groundCentre.x
+  let gapY: Float = position.y - physicsSystem.groundCentre.y
+  let reach: Float = physicsSystem.followDistance
+  if gapX * gapX + gapY * gapY < reach * reach {
+    ret false
+  }
+  ret addGroundAround(physicsSystem: physicsSystem, centre: position)
+}
+
+# ----- characters --------------------------------------------------------
+# Give `entityId` a mover standing with its feet at `feet` (world space).
+func addCharacterBody(physicsSystem: mod WalkerPhysics, entityId: view EntityId, feet: view Vec3) {
+  componentSet(
+    this: physicsSystem.characters
+    entityId: entityId
+    data: createCharacterBody(
+      position: Vec3 { x: feet.x, y: feet.y, z: feet.z + moverCenterAboveFeet }
+    )
+  )
+}
+
+# The world position of a controller's feet (its position is relative to
+# groundZ, as the renderer reads it).
+func controllerFeet(controller: view ThirdPersonController, groundZ: view Float) ret Vec3 {
+  ret Vec3 {
+    x: controller.position.x
+    y: controller.position.y
+    z: groundZ + controller.position.z
+  }
+}
+
+# A frame's movement intent. moveX/moveY are analog in [-1, 1] (right+/forward+);
+# walking = the shift-to-walk modifier the controller expects (default is run);
+# jump = Space or F went down this frame (a press, not held: one jump per
+# press); actions is a reserved bitset for discrete button intents (unused
+# today).
+type InputIntent {
+  moveX: Float
+  moveY: Float
+  walking: Bool
+  jump: Bool
+  actions: Int
+}
+
+# The input for the coming fixed steps. Every character stands still, except
+# `controlledEntityId`, which gets a throttle along the camera's forward and
+# right, scaled so a full stick moves at its controller's run speed (walk
+# speed with the walk modifier), and the jump request. The mover's own speed
+# limit is lib/box3d/ecs's maxSpeed, so the throttle is a fraction of it.
+func driveCharacters(
+  physicsSystem: mod WalkerPhysics
+  controlledEntityId: view EntityId
+  controller: view ThirdPersonController
+  intent: view InputIntent
+  cameraYaw: view Float
+  speedScale: view Float
+) {
+  var inputRight: Float = intent.moveX
+  var inputForward: Float = intent.moveY
+  let lengthSquared: Float = inputRight * inputRight + inputForward * inputForward
+  if lengthSquared > 1.0 {
+    let inverseLength: Float = 1.0 / Math.sqrt(x: lengthSquared)
+    inputRight = inputRight * inverseLength
+    inputForward = inputForward * inverseLength
+  }
+  var speed: Float = controller.runSpeed
+  if intent.walking {
+    speed = controller.walkSpeed
+  }
+  let fraction: Float = speed * speedScale / maxSpeed
+  loop var i: Int = 0, i < componentCount(this: physicsSystem.characters), ++i {
+    let entityId: EntityId = componentEntityAt(this: physicsSystem.characters, i: i)
+    let character: mod CharacterBody => componentMod(
+      this: physicsSystem.characters
+      entityId: entityId
+    )
+    if entityId.index is controlledEntityId.index and entityId.generation is controlledEntityId.generation {
+      # Yaw zero looks from -Y toward +Y, as CameraRig and the old controller
+      character.forward = Vec3 { x: -Math.sin(x: cameraYaw), y: Math.cos(x: cameraYaw), z: 0.0 }
+      character.right = Vec3 { x: Math.cos(x: cameraYaw), y: Math.sin(x: cameraYaw), z: 0.0 }
+      character.throttle = Vec2 { x: inputForward * fraction, y: inputRight * fraction }
+      if intent.jump {
+        character.jump = true
+      }
+    } else {
+      character.throttle = Vec2 { x: 0.0, y: 0.0 }
+    }
+  }
+}
+
+# Every character one fixed step: its mover (held to the speed limit of a
+# bush in `bushes` it stands in), then its feet, heading and gait back into
+# its controller in `controllers` (feet relative to groundZ, as the renderer
+# reads them). Deep water stays a wall: a step that ends where a character
+# cannot wade is undone per axis, so walking into the drop-off at an angle
+# slides along it.
+func moveCharacters(
+  physicsSystem: mod WalkerPhysics
+  controllers: mod ComponentTable(ThirdPersonController)
+  bushes: view List(BushSpot)
+) {
+  let noIgnoredShapes: List(ShapeId) = List.create(ShapeId, cap: 0)
+  let biome: BiomeConfig = physicsSystem.biome
+  let groundZ: Float = physicsSystem.groundZ
+  loop var i: Int = 0, i < componentCount(this: physicsSystem.characters), ++i {
+    let entityId: EntityId = componentEntityAt(this: physicsSystem.characters, i: i)
+    let character: mod CharacterBody => componentMod(
+      this: physicsSystem.characters
+      entityId: entityId
+    )
+    let fromX: Float = character.mover.transform.p.x
+    let fromY: Float = character.mover.transform.p.y
+    let throttle: Vec2 = applyBushLimit(
+      character: character
+      limit: bushSpeedLimitAmong(bushes: bushes, x: fromX, y: fromY)
+    )
+    let center: Vec3 = moveCharacter(
+      character: character
+      physics: physicsSystem.physics
+      ignoreShapeIds: noIgnoredShapes
+    )
+    character.throttle = throttle
+    if worldWadable(x: center.x, y: center.y, cfg: biome) is false {
+      if worldWadable(x: center.x, y: fromY, cfg: biome) {
+        character.mover.transform.p.y = fromY
+        character.mover.velocity.y = 0.0
+      } else if worldWadable(x: fromX, y: center.y, cfg: biome) {
+        character.mover.transform.p.x = fromX
+        character.mover.velocity.x = 0.0
+      } else {
+        character.mover.transform.p.x = fromX
+        character.mover.transform.p.y = fromY
+        character.mover.velocity.x = 0.0
+        character.mover.velocity.y = 0.0
+      }
+    }
+    if componentHas(this: controllers, entityId: entityId) {
+      readController(
+        controller: componentMod(this: controllers, entityId: entityId)
+        character: character
+        groundZ: groundZ
+      )
+    }
+  }
+}
+
+# The controller of a character from its mover: the feet below the capsule,
+# moving / walking from the actual horizontal speed (so a character pushing
+# against something does not run in place), and the heading turned toward
+# the direction it moves at the controller's turn rate.
+func readController(
+  controller: mod ThirdPersonController
+  character: view CharacterBody
+  groundZ: view Float
+) {
+  controller.position = Vec3 {
+    x: character.mover.transform.p.x
+    y: character.mover.transform.p.y
+    z: character.mover.transform.p.z - moverCenterAboveFeet - groundZ
+  }
+  let velocityX: Float = character.mover.velocity.x
+  let velocityY: Float = character.mover.velocity.y
+  let speed: Float = Math.sqrt(x: velocityX * velocityX + velocityY * velocityY)
+  controller.moving = speed > standSpeed
+  controller.walking = controller.moving and speed < walkSpeedLimit
+  if controller.moving {
+    # A +Z rotation turns the model's +Y forward axis into the velocity
+    let desiredHeading: Float = Math.atan2(y: -velocityX, x: velocityY)
+    let headingGap: Float = wrapCharacterAngle(angle: desiredHeading - controller.heading)
+    let turnAmount: Float = 1.0 - Math.exp(x: -controller.turnRate * walkerPhysicsStep)
+    controller.heading = wrapCharacterAngle(angle: controller.heading + headingGap * turnAmount)
+  }
+}
+
+# Is the character standing on something (not in the air)?
+func characterGrounded(physicsSystem: view WalkerPhysics, entityId: view EntityId) ret Bool {
+  if componentHas(this: physicsSystem.characters, entityId: entityId) is false {
+    ret true
+  }
+  ret componentView(this: physicsSystem.characters, entityId: entityId).grounded
+}
+
+# The character's horizontal speed in m/s.
+func characterSpeed(physicsSystem: view WalkerPhysics, entityId: view EntityId) ret Float {
+  if componentHas(this: physicsSystem.characters, entityId: entityId) is false {
+    ret 0.0
+  }
+  let character: view CharacterBody => componentView(
+    this: physicsSystem.characters
+    entityId: entityId
+  )
+  let velocityX: Float = character.mover.velocity.x
+  let velocityY: Float = character.mover.velocity.y
+  ret Math.sqrt(x: velocityX * velocityX + velocityY * velocityY)
+}
+
+# ----- loose cubes -------------------------------------------------------
+# A dynamic cube of half edge `halfSize` at `center`, as a new entity of
+# `allocator`: a body, a box collider, a Transform3D in `transforms` the pull
+# system keeps up to date, and the PhysicsCube the renderer draws.
+func spawnPhysicsCube(
+  physicsSystem: mod WalkerPhysics
+  allocator: mod EntityAllocator
+  transforms: mod ComponentTable(Transform3D)
+  center: view Vec3
+  halfSize: view Float
+  color: view Vec3
+) ret EntityId {
+  let entityId: EntityId = allocEntity(this: allocator)
+  var bodyDef: BodyDef = defaultBodyDef(lengthUnitsPerMeter: 1.0)
+  bodyDef.bodyType = BodyType.dynamicBody
+  bodyDef.position = center
+  let bodyId: BodyId = spawnRigidBody(
+    physics: physicsSystem.physics
+    rigidBodies: physicsSystem.rigidBodies
+    transforms: transforms
+    entityId: entityId
+    def: bodyDef
+  )
+  var shapeDef: ShapeDef = defaultShapeDef(lengthUnitsPerMeter: 1.0)
+  shapeDef.density = 200.0
+  shapeDef.baseMaterial.friction = 0.6
+  let shapeId: ShapeId = addBoxCollider(
+    physics: physicsSystem.physics
+    rigidBodies: physicsSystem.rigidBodies
+    colliders: physicsSystem.colliders
+    entityId: entityId
+    def: shapeDef
+    halfExtents: Vec3 { x: halfSize, y: halfSize, z: halfSize }
+    transform: transformIdentity()
+  )
+  componentSet(
+    this: physicsSystem.cubes
+    entityId: entityId
+    data: PhysicsCube { halfSize: halfSize, color: color }
+  )
+  ret entityId
+}
+
+# Remove a cube's body, collider and PhysicsCube row (the app then clears the
+# entity's other component rows and frees the entity)
+func despawnPhysicsCube(physicsSystem: mod WalkerPhysics, entityId: view EntityId) {
+  despawnRigidBody(
+    physics: physicsSystem.physics
+    rigidBodies: physicsSystem.rigidBodies
+    colliders: physicsSystem.colliders
+    entityId: entityId
+  )
+  componentRemove(this: physicsSystem.cubes, entityId: entityId)
+}
+
+# Set a body's linear velocity (m/s, world space).
+func setBodyVelocity(
+  physicsSystem: mod WalkerPhysics
+  entityId: view EntityId
+  velocity: view Vec3
+) {
+  let bodyId: BodyId = entityBodyId(rigidBodies: physicsSystem.rigidBodies, entityId: entityId)
+  unsafe {
+    b3Body_SetLinearVelocity(
+      bodyId: toB3BodyId(bodyId: bodyId)
+      linearVelocity: toB3Vector(vector: velocity)
+    )
+  }
+}
+
+# One stack: `columns` x `columns` cubes per layer, `layers` high, its centre
+# `offsetX` / `offsetY` from the spawn, resting on the highest ground under it.
+type CubeStack {
+  offsetX: Float
+  offsetY: Float
+  halfSize: Float
+  columns: Int
+  layers: Int
+  color: Vec3
+}
+
+func walkerCubeStacks() ret List(CubeStack) {
+  ret List(CubeStack) {
+    CubeStack {
+      offsetX: 0.0
+      offsetY: 5.0
+      halfSize: 0.25
+      columns: 2
+      layers: 3
+      color: Vec3 { x: 0.85, y: 0.45, z: 0.18 }
+    }
+    CubeStack {
+      offsetX: -4.5
+      offsetY: 2.5
+      halfSize: 0.3
+      columns: 1
+      layers: 3
+      color: Vec3 { x: 0.25, y: 0.5, z: 0.85 }
+    }
+    CubeStack {
+      offsetX: 4.0
+      offsetY: 2.0
+      halfSize: 0.4
+      columns: 2
+      layers: 2
+      color: Vec3 { x: 0.8, y: 0.75, z: 0.3 }
+    }
+    CubeStack {
+      offsetX: 1.5
+      offsetY: -4.0
+      halfSize: 0.5
+      columns: 1
+      layers: 1
+      color: Vec3 { x: 0.55, y: 0.35, z: 0.6 }
+    }
+  }
+}
+
+# The ground under a square footprint of side `span` centred at x / y: its
+# highest point (where the stack rests), its lowest, and whether it is all
+# land. Sampled at the corners and the centre.
+type Footprint {
+  highest: Float
+  lowest: Float
+  onLand: Bool
+}
+
+func footprintAt(
+  physicsSystem: view WalkerPhysics
+  x: view Float
+  y: view Float
+  span: view Float
+) ret Footprint {
+  let biome: BiomeConfig = physicsSystem.biome
+  let groundZ: Float = physicsSystem.groundZ
+  let centerZ: Float = worldTerrainHeight(
+    x: x
+    y: y
+    groundZ: groundZ
+    cfg: biome
+  )
+  var highest: Float = centerZ
+  var lowest: Float = centerZ
+  var onLand: Bool = worldIsLand(x: x, y: y, cfg: biome)
+  loop var corner: Int = 0, corner < 4, ++corner {
+    var cornerX: Float = x - span * 0.5
+    var cornerY: Float = y - span * 0.5
+    if corner % 2 is 1 {
+      cornerX = x + span * 0.5
+    }
+    if corner >= 2 {
+      cornerY = y + span * 0.5
+    }
+    let cornerZ: Float = worldTerrainHeight(
+      x: cornerX
+      y: cornerY
+      groundZ: groundZ
+      cfg: biome
+    )
+    highest = Math.max(a: highest, b: cornerZ)
+    lowest = Math.min(a: lowest, b: cornerZ)
+    onLand = onLand and worldIsLand(x: cornerX, y: cornerY, cfg: biome)
+  }
+  ret Footprint { highest: highest, lowest: lowest, onLand: onLand }
+}
+
+# The stacks around `spawnPoint` (world space). Each takes the flattest land
+# within 3 m of its place (the meadow rolls, and a stack on a slope slides as
+# it settles); a stack with no land there is left out. The count of cubes.
+func spawnCubeStacks(
+  physicsSystem: mod WalkerPhysics
+  allocator: mod EntityAllocator
+  transforms: mod ComponentTable(Transform3D)
+  spawnPoint: view Vec3
+) ret Int {
+  var spawned: Int = 0
+  let stacks: List(CubeStack) = walkerCubeStacks()
+  loop let stack: view CubeStack in stacks {
+    let edge: Float = stack.halfSize * 2.0
+    let span: Float = edge * (stack.columns as Float)
+    var centerX: Float = 0.0
+    var centerY: Float = 0.0
+    var baseZ: Float = 0.0
+    var flattest: Float = 1000000.0
+    loop var candidate: Int = 0, candidate < 25, ++candidate {
+      let x: Float = spawnPoint.x + stack.offsetX + ((candidate % 5 - 2) as Float) * 1.5
+      let y: Float = spawnPoint.y + stack.offsetY + ((candidate / 5 - 2) as Float) * 1.5
+      let footprint: Footprint = footprintAt(
+        physicsSystem: physicsSystem
+        x: x
+        y: y
+        span: span
+      )
+      if footprint.onLand and footprint.highest - footprint.lowest < flattest {
+        flattest = footprint.highest - footprint.lowest
+        centerX = x
+        centerY = y
+        baseZ = footprint.highest
+      }
+    }
+    if flattest >= 1000000.0 {
+      continue
+    }
+    loop var layer: Int = 0, layer < stack.layers, ++layer {
+      loop var row: Int = 0, row < stack.columns, ++row {
+        loop var column: Int = 0, column < stack.columns, ++column {
+          let center: Vec3 = {
+            x: centerX - span * 0.5 + edge * ((column as Float) + 0.5)
+            y: centerY - span * 0.5 + edge * ((row as Float) + 0.5)
+            z: baseZ + 0.01 + edge * ((layer as Float) + 0.5)
+          }
+          let cubeId: EntityId = spawnPhysicsCube(
+            physicsSystem: physicsSystem
+            allocator: allocator
+            transforms: transforms
+            center: center
+            halfSize: stack.halfSize
+            color: stack.color
+          )
+          spawned = spawned + 1
+        }
+      }
+    }
+  }
+  ret spawned
+}
+
+# The model matrix of a cube: its body's pose, scaled from the unit box mesh.
+func physicsCubeModel(transform: view Transform3D, cube: view PhysicsCube) ret Mat4 {
+  ret mat4Mul(
+    a: mat4Translate(x: transform.position.x, y: transform.position.y, z: transform.position.z)
+    b: mat4Mul(a: Quat.toMat4(q: transform.rotation), b: mat4Scale(s: cube.halfSize * 2.0))
+  )
+}
+
+# ----- the fixed step ----------------------------------------------------
+# The bodies' part of a fixed step: hand game-written poses to the bodies,
+# step the world, write the moved poses back, gather the events.
+func stepPhysicsBodies(
+  physicsSystem: mod WalkerPhysics
+  transforms: mod ComponentTable(Transform3D)
+) {
+  physicsPushSystem(
+    physics: physicsSystem.physics
+    rigidBodies: physicsSystem.rigidBodies
+    transforms: transforms
+  )
+  physicsStepSystem(physics: physicsSystem.physics)
+  physicsPullSystem(
+    physics: physicsSystem.physics
+    rigidBodies: physicsSystem.rigidBodies
+    transforms: transforms
+  )
+  physicsEventSystem(physics: physicsSystem.physics)
+}
+
+# One fixed step: the characters first (the mover reads the world as the last
+# step left it, as Box3D's sample does), then the bodies.
+func walkerPhysicsTick(
+  physicsSystem: mod WalkerPhysics
+  transforms: mod ComponentTable(Transform3D)
+  controllers: mod ComponentTable(ThirdPersonController)
+  bushes: view List(BushSpot)
+) {
+  moveCharacters(physicsSystem: physicsSystem, controllers: controllers, bushes: bushes)
+  stepPhysicsBodies(physicsSystem: physicsSystem, transforms: transforms)
+}
+
+# A frame: the fixed steps `frameTime` pays for, at most walkerPhysicsMaxSteps
+# (the rest is dropped, so a long frame slows the world instead of
+# spiralling). The number of steps taken.
+func stepPhysicsFrame(
+  physicsSystem: mod WalkerPhysics
+  transforms: mod ComponentTable(Transform3D)
+  controllers: mod ComponentTable(ThirdPersonController)
+  bushes: view List(BushSpot)
+  frameTime: view Float
+) ret Int {
+  physicsSystem.accumulator = physicsSystem.accumulator + frameTime
+  var steps: Int = 0
+  loop physicsSystem.accumulator >= walkerPhysicsStep {
+    if steps < walkerPhysicsMaxSteps {
+      walkerPhysicsTick(
+        physicsSystem: physicsSystem
+        transforms: transforms
+        controllers: controllers
+        bushes: bushes
+      )
+      steps = steps + 1
+    }
+    physicsSystem.accumulator = physicsSystem.accumulator - walkerPhysicsStep
+  }
+  advancePhysicsEvents(physics: physicsSystem.physics)
+  ret steps
+}
+
+# ----- tree trunks -------------------------------------------------------
+# A static body with a trunk capsule for the tree `entityId` at its pose in
+# `transforms`. The trunk is the same for every species and size
+# (GroveTrees.treeTrunkRadius / Height), so a tree that moves only needs its
+# body moved, which the push system does when its Transform3D changes.
+func addTreeTrunk(
+  physicsSystem: mod WalkerPhysics
+  transforms: mod ComponentTable(Transform3D)
+  entityId: view EntityId
+) {
+  var bodyDef: BodyDef = defaultBodyDef(lengthUnitsPerMeter: 1.0)
+  bodyDef.bodyType = BodyType.staticBody
+  bodyDef.position = componentView(this: transforms, entityId: entityId).position
+  bodyDef.rotation = componentView(this: transforms, entityId: entityId).rotation
+  let bodyId: BodyId = spawnRigidBody(
+    physics: physicsSystem.physics
+    rigidBodies: physicsSystem.rigidBodies
+    transforms: transforms
+    entityId: entityId
+    def: bodyDef
+  )
+  var shapeDef: ShapeDef = defaultShapeDef(lengthUnitsPerMeter: 1.0)
+  shapeDef.baseMaterial.friction = 0.6
+  let shapeId: ShapeId = addCapsuleCollider(
+    physics: physicsSystem.physics
+    rigidBodies: physicsSystem.rigidBodies
+    colliders: physicsSystem.colliders
+    entityId: entityId
+    def: shapeDef
+    capsule: {
+      center1: Vec3 { x: 0.0, y: 0.0, z: treeTrunkRadius }
+      center2: Vec3 { x: 0.0, y: 0.0, z: treeTrunkHeight }
+      radius: treeTrunkRadius
+    }
+  )
+}
+
+# ----- the trunk pool -----------------------------------------------------
+# For a forest with tens of thousands of trees, only the ones near the walker
+# can be touched, so physics has a FIXED number of static trunk capsules
+# (trunkPoolSize) and moves them onto the trees nearest the walker. When the
+# walker has gone trunkPoolMove metres since the last placing, the trees
+# within trunkPoolReach are looked up in the forest's PropField cells, the
+# nearest trunkPoolSize get a trunk each, and the rest of the pool waits far
+# below the ground. Each trunk is an entity whose Transform3D the placing
+# writes; the physics push system moves its body.
+# How many trunk bodies there are
+const trunkPoolSize: Int = 96
+
+# Trees this close to the walker (m) get a trunk
+const trunkPoolReach: Float = 16.0
+
+# The walker moves this far (m) before the trunks are placed again
+const trunkPoolMove: Float = 2.0
+
+# Where an unused trunk waits: this far below the ground
+const trunkPoolParked: Float = -1000.0
+
+# The pool's bodies: static, a trunk capsule each (the same for every species
+# and size, WalkerTrees.treeTrunkRadius / Height), parked until placed. The
+# number of bodies.
+func createTrunkPool(
+  physicsSystem: mod WalkerPhysics
+  allocator: mod EntityAllocator
+  transforms: mod ComponentTable(Transform3D)
+) ret Int {
+  loop var i: Int = 0, i < trunkPoolSize, ++i {
+    let entityId: EntityId = allocEntity(this: allocator)
+    var transform: Transform3D = createTransform3D()
+    transform.position = Vec3.create(x: 0.0, y: 0.0, z: trunkPoolParked)
+    componentSet(this: transforms, entityId: entityId, data: transform)
+    var bodyDef: BodyDef = defaultBodyDef(lengthUnitsPerMeter: 1.0)
+    bodyDef.bodyType = BodyType.staticBody
+    bodyDef.position = transform.position
+    let bodyId: BodyId = spawnRigidBody(
+      physics: physicsSystem.physics
+      rigidBodies: physicsSystem.rigidBodies
+      transforms: transforms
+      entityId: entityId
+      def: bodyDef
+    )
+    var shapeDef: ShapeDef = defaultShapeDef(lengthUnitsPerMeter: 1.0)
+    shapeDef.baseMaterial.friction = 0.6
+    let shapeId: ShapeId = addCapsuleCollider(
+      physics: physicsSystem.physics
+      rigidBodies: physicsSystem.rigidBodies
+      colliders: physicsSystem.colliders
+      entityId: entityId
+      def: shapeDef
+      capsule: {
+        center1: Vec3 { x: 0.0, y: 0.0, z: treeTrunkRadius }
+        center2: Vec3 { x: 0.0, y: 0.0, z: treeTrunkHeight }
+        radius: treeTrunkRadius
+      }
+    )
+    physicsSystem.trunks.add(value: entityId)
+  }
+  ret physicsSystem.trunks.length
+}
+
+# The forest's trees within trunkPoolReach of (x, y): their placement
+# indices in `indices`, their squared distances in `distances`
+func treesNear(
+  forest: view PropField
+  x: view Float
+  y: view Float
+  indices: mod List(Int)
+  distances: mod List(Float)
+) {
+  indices.clear()
+  distances.clear()
+  if forest.finished is false {
+    ret
+  }
+  let first: Int = propCellOf(field: forest, x: x - trunkPoolReach, y: y - trunkPoolReach)
+  let last: Int = propCellOf(field: forest, x: x + trunkPoolReach, y: y + trunkPoolReach)
+  loop var row: Int = first / forest.columns, row <= last / forest.columns, ++row {
+    loop var column: Int = first % forest.columns, column <= last % forest.columns, ++column {
+      let cell: Int = row * forest.columns + column
+      let start: Int = forest.cellStart.copyAtFallback(index: cell, fallback: 0)
+      let end: Int = forest.cellStart.copyAtFallback(index: cell + 1, fallback: 0)
+      loop var i: Int = start, i < end, ++i {
+        if let placement: view PropPlacement => forest.placements.viewAt(index: i) {
+          let gapX: Float = placement.position.x - x
+          let gapY: Float = placement.position.y - y
+          let distance: Float = gapX * gapX + gapY * gapY
+          if distance < trunkPoolReach * trunkPoolReach {
+            indices.add(value: i)
+            distances.add(value: distance)
+          }
+        }
+      }
+    }
+  }
+}
+
+# Place the pool round `focus` (the walker's feet) when the walker has gone
+# trunkPoolMove since the last placing, or `force`. True when it placed.
+func updateTrunkPool(
+  physicsSystem: mod WalkerPhysics
+  transforms: mod ComponentTable(Transform3D)
+  forest: view PropField
+  focus: view Vec3
+  force: view Bool
+) ret Bool {
+  let movedX: Float = focus.x - physicsSystem.trunkFocus.x
+  let movedY: Float = focus.y - physicsSystem.trunkFocus.y
+  if physicsSystem.trunkFocusSet and force is false and movedX * movedX + movedY * movedY < trunkPoolMove * trunkPoolMove {
+    ret false
+  }
+  physicsSystem.trunkFocus = focus
+  physicsSystem.trunkFocusSet = true
+  var indices: List(Int) = List.create(Int, cap: 256)
+  var distances: List(Float) = List.create(Float, cap: 256)
+  treesNear(
+    forest: forest
+    x: focus.x
+    y: focus.y
+    indices: indices
+    distances: distances
+  )
+  # The nearest first: pick the nearest remaining one for each trunk (the
+  # pool is small, so a plain selection is enough)
+  var placed: Int = 0
+  loop var trunk: Int = 0, trunk < physicsSystem.trunks.length, ++trunk {
+    var nearest: Int = -1
+    var nearestDistance: Float = 1000000.0
+    loop var i: Int = 0, i < distances.length, ++i {
+      let distance: Float = distances.copyAtFallback(index: i, fallback: 1000000.0)
+      if distance < nearestDistance {
+        nearestDistance = distance
+        nearest = i
+      }
+    }
+    var position: Vec3 = { x: focus.x, y: focus.y, z: trunkPoolParked }
+    if nearest >= 0 {
+      let placementIndex: Int = indices.copyAtFallback(index: nearest, fallback: 0)
+      position = forest.placements.copyAtDefault(index: placementIndex).position
+      distances.set(index: nearest, value: 2000000.0)
+      placed = placed + 1
+    }
+    let entityId: EntityId = physicsSystem.trunks.copyAtFallback(index: trunk, fallback: noEntity())
+    var transform: Transform3D = createTransform3D()
+    transform.position = position
+    componentSet(this: transforms, entityId: entityId, data: transform)
+  }
+  physicsSystem.trunksOnTrees = placed
+  ret true
+}

@@ -9,7 +9,7 @@
 # CONVENTION (#822): the `App` struct IS the system list. Each system's `App`
 # member is named for its folder and typed as that folder's `<Folder>System`
 # state — `cameraSystem: CameraSystem`, `renderSystem: RenderSystem`,
-# `physicsSystem: PhysicsSystem`, `inputSystem: InputSystem`, … — so reading the
+# `physicsSystem: WalkerPhysics`, `inputSystem: InputSystem`, … — so reading the
 # `App` fields reads the systems. Cross-cutting DATA and resources stay
 # data-typed and are NOT forced into an `XSystem` wrapper: the per-frame `frame:
 # Frame` scratch, the ECS `world: GameWorld`, the `players: PlayerRoster` control
@@ -83,6 +83,7 @@ open app3d/RenderScale
 open ui/UiSystems
 open app3d/WalkerCharacter
 open app3d/PlayerRoster
+open app3d/WalkerPhysics
 
 const clipTransitionDuration: Float = 0.28
 
@@ -152,7 +153,7 @@ type App {
   renderSystem: RenderSystem
   profiler: Profiler  # #764: was lib/profile.rae gProf* globals
   grassCompute: GrassCompute  # #764: was lib/GrassCompute.rae gGrass* globals
-  physicsSystem: PhysicsSystem  # fixed-step sim seam (physics.rae, #553)
+  physicsSystem: WalkerPhysics  # fixed-step sim seam (physics.rae, #553)
   netSystem: NetSystem  # multiplayer seam (net.rae, #554)
   players: PlayerRoster  # who the local player controls (players.rae, #546)
   persist: PersistState
@@ -638,8 +639,13 @@ func createApp() ret App {
     )
     # Physics (lib/box3d/ecs): the island's height field, a mover for the hero and
     # each crowd member, and the cube stacks near the hero.
-    var physicsSystem: PhysicsSystem = createPhysicsSystem()
-    if addIslandGround(physicsSystem: physicsSystem, groundZ: groundZ) is false {
+    var physicsSystem: WalkerPhysics = createWalkerPhysics(
+      biome: WorldBiome.defaultBiomeConfig()
+      groundZ: groundZ
+      fieldCount: 231
+      followDistance: 0.0
+    )
+    if addIslandGround(physicsSystem: physicsSystem) is false {
       log("[physics] Box3D refused the island height field")
     }
     addCharacterBody(
@@ -659,9 +665,9 @@ func createApp() ret App {
     }
     let cubeCount: Int = spawnCubeStacks(
       physicsSystem: physicsSystem
-      world: gameWorld
+      allocator: gameWorld.allocator
+      transforms: gameWorld.transforms
       spawnPoint: controllerFeet(controller: characterController, groundZ: groundZ)
-      groundZ: groundZ
     )
     log("[physics] Box3D: the island height field, {1 + cloneCount} movers, {cubeCount} cubes")
     # #746: exercise the physics/net ECS seams once at startup — spawn/despawn via
@@ -837,7 +843,7 @@ func runWalkerApp() ret Int {
   var app: App = createApp()
   # #739/#740/#741: the GameWorld holds the hero + crowd (controllers), the
   # skinned body parts (PartRoughness), and the terrain props + heightfield tiles
-  # (PropKind) — all recycled ECS entities.
+  # (TerrainProp) — all recycled ECS entities.
   log(
     "[ecs] GameWorld: {gameWorldEntityCount(world: app.world)} entities ({gameWorldPartCount(
       world: app.world

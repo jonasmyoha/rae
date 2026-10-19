@@ -1,224 +1,187 @@
-# The physics check that needs no one to play (RAE_114_PHYSICS_TEST=1): on the
-# real island, the cube stacks must settle and sleep, then the hero walks into the nearest cube
-# stack until a cube moves,
-# then jumps, and must leave the ground and land again; then the tree trunks
-# must hold (TreeTrunkTest). It prints one line and returns the exit code (0
-# when all held). It drives the same systems the
-# frame loop does (driveCharacters, walkerPhysicsTick), at the fixed step.
+# The physics check that needs no one to play (RAE_114_PHYSICS_TEST=1). The
+# steps are app3d/WalkerPhysicsChecks: the cube stacks settle, the hero pushes
+# one and jumps, then the pooled tree trunks and the following ground hold, and the rocks and
+# bushes. This file finds this example's own entities and prints
+# the one [physicstest] line the gate greps; the exit code is 0 when all held.
 import Math
 import Vec3
 open ecs/Entity
 open ecs/ComponentTable
 open ecs/Transform
-open app3d/CharacterController
-open box3d/ecs/Physics
-open physicsSystem/TreeTrunkTest
-open physicsSystem/RockBushTest
+open app3d/WalkerPhysics
+open app3d/WalkerPhysicsChecks
+open app3d/GroveTrees
+open box3d/ecs/NatureBodies
 open app3d/PropField
 
-# Fixed steps the walk may take (8 s), and the jump (3 s)
-const selfTestWalkSteps: Int = 480
+# Fixed steps the walk at a trunk may take (8 s)
+const trunkTestWalkSteps: Int = 480
 
-const selfTestJumpSteps: Int = 180
-
-# A cube counts as moved past this (m)
-const selfTestMovedDistance: Float = 0.05
-
-# One fixed step of the hero with `intent`, the camera looking along `yaw`.
-func selfTestStep(
-  physicsSystem: mod PhysicsSystem
-  world: mod GameWorld
-  heroEntityId: view EntityId
-  groundZ: view Float
-  intent: view InputIntent
-  yaw: view Float
-) {
-  driveCharacters(
-    physicsSystem: physicsSystem
-    controlledEntityId: heroEntityId
-    controller: controllerOf(world: world, entityId: heroEntityId)
-    intent: intent
-    cameraYaw: yaw
-    speedScale: 1.0
-  )
-  walkerPhysicsTick(physicsSystem: physicsSystem, world: world, groundZ: groundZ)
+# The pool trunk standing on a tree nearest to `point`, or none
+func nearestTree(
+  physicsSystem: view WalkerPhysics
+  world: view GameWorld
+  point: view Vec3
+) ret opt EntityId {
+  var nearest: opt EntityId = none
+  var nearestDistance: Float = 1000000.0
+  loop let entityId: view EntityId in physicsSystem.trunks {
+    let position: Vec3 = componentView(this: world.transforms, entityId: entityId).position
+    if position.z > trunkPoolParked * 0.5 {
+      let gap: Vec3 = Vec3.vsub(a: position, b: point)
+      let distance: Float = Math.sqrt(x: gap.x * gap.x + gap.y * gap.y)
+      if distance < nearestDistance {
+        nearestDistance = distance
+        nearest = entityId
+      }
+    }
+  }
+  ret nearest
 }
 
-# How far the cube that moved most is from where it started.
-func largestCubeMove(
-  physicsSystem: view PhysicsSystem
-  world: view GameWorld
-  starts: view List(Vec3)
-) ret Float {
-  var largest: Float = 0.0
-  loop var i: Int = 0, i < componentCount(this: physicsSystem.cubes), ++i {
-    let cubeId: EntityId = componentEntityAt(this: physicsSystem.cubes, i: i)
-    let start: Vec3 = starts.copyAtFallback(index: i, fallback: Vec3.create(x: 0.0, y: 0.0, z: 0.0))
-    let position: Vec3 = componentView(this: world.transforms, entityId: cubeId).position
-    largest = Math.max(a: largest, b: Vec3.vlen(a: Vec3.vsub(a: position, b: start)))
+# The pooled trunk nearest the hero blocks a ray, the hero walking at it
+# stops at its bark, the pool follows the walker somewhere else, and so does
+# the ground. One [trunktest] line.
+func runTreeTrunkTest(
+  physicsSystem: mod WalkerPhysics
+  world: mod GameWorld
+  forest: view PropField
+  heroEntityId: view EntityId
+) ret Bool {
+  let heroFeet: Vec3 = controllerFeet(
+    controller: controllerOf(world: world, entityId: heroEntityId)
+    groundZ: physicsSystem.groundZ
+  )
+  if let treeEntityId: EntityId = nearestTree(
+    physicsSystem: physicsSystem
+    world: world
+    point: heroFeet
+  ) {
+    let placed: Transform3D = transformOf(transforms: world.transforms, entityId: treeEntityId)
+    let blocksRay: Bool = rayHitsEntity(
+      physicsSystem: physicsSystem
+      entityId: treeEntityId
+      foot: placed.position
+      height: 1.2
+      halfSpan: 3.0
+    )
+    let closest: Float = walkClosest(
+      physicsSystem: physicsSystem
+      transforms: world.transforms
+      controllers: world.controllers
+      bushes: bushSpots(world: world)
+      heroEntityId: heroEntityId
+      target: placed.position
+      steps: trunkTestWalkSteps
+    )
+    let stoppedAtBark: Bool = closest > treeTrunkRadius + 0.1 and closest < treeTrunkRadius + 1.2
+    let feetNow: Vec3 = controllerFeet(
+      controller: controllerOf(world: world, entityId: heroEntityId)
+      groundZ: physicsSystem.groundZ
+    )
+    let followed: Bool = poolFollows(
+      physicsSystem: physicsSystem
+      transforms: world.transforms
+      forest: forest
+      heroFeet: feetNow
+    )
+    let groundMoved: Bool = groundFollows(physicsSystem: physicsSystem, heroFeet: feetNow)
+    let passed: Bool = blocksRay and stoppedAtBark and followed and groundMoved
+    log(
+      "[trunktest] blocksRay={blocksRay}, closest {closest} m from the trunk (stoppedAtBark={stoppedAtBark}), poolFollows={followed}, groundFollows={groundMoved}, passed={passed}"
+    )
+    ret passed
   }
-  ret largest
+  log("[trunktest] no pooled trunk on a tree, passed=false")
+  ret false
+}
+
+# The placed prop of `kind` nearest to `point`, or none
+func nearestProp(world: view GameWorld, kind: view Int, point: view Vec3) ret opt EntityId {
+  var nearest: opt EntityId = none
+  var nearestDistance: Float = 1000000.0
+  loop var i: Int = 0, i < componentCount(this: world.propKinds), ++i {
+    let entityId: EntityId = componentEntityAt(this: world.propKinds, i: i)
+    let prop: view TerrainProp => componentView(this: world.propKinds, entityId: entityId)
+    if prop.kind is kind and prop.active {
+      let gap: Vec3 = Vec3.vsub(
+        a: componentView(this: world.transforms, entityId: entityId).position
+        b: point
+      )
+      let distance: Float = Math.sqrt(x: gap.x * gap.x + gap.y * gap.y)
+      if distance < nearestDistance {
+        nearestDistance = distance
+        nearest = entityId
+      }
+    }
+  }
+  ret nearest
+}
+
+# The rock and bush nearest the hero (app3d/WalkerPhysicsChecks.runRockBushCheck)
+func runRockBushTest(
+  physicsSystem: mod WalkerPhysics
+  world: mod GameWorld
+  heroEntityId: view EntityId
+) ret Bool {
+  let heroFeet: Vec3 = controllerFeet(
+    controller: controllerOf(world: world, entityId: heroEntityId)
+    groundZ: physicsSystem.groundZ
+  )
+  var hasRock: Bool = false
+  var rockEntityId: EntityId = noEntity()
+  if let found: EntityId = nearestProp(world: world, kind: kindRock, point: heroFeet) {
+    hasRock = true
+    rockEntityId = found
+  }
+  var hasBush: Bool = false
+  var bushFoot: Vec3 = heroFeet
+  if let found: EntityId = nearestProp(world: world, kind: kindBush, point: heroFeet) {
+    hasBush = true
+    # The bush stands 5 cm into the ground (TerrainSystem.kindTransform)
+    let bush: Vec3 = componentView(this: world.transforms, entityId: found).position
+    bushFoot = Vec3.create(x: bush.x, y: bush.y, z: bush.z + 0.05)
+  }
+  ret runRockBushCheck(
+    physicsSystem: physicsSystem
+    transforms: world.transforms
+    controllers: world.controllers
+    bushes: bushSpots(world: world)
+    heroEntityId: heroEntityId
+    hasRock: hasRock
+    rockEntityId: rockEntityId
+    hasBush: hasBush
+    bushFoot: bushFoot
+  )
 }
 
 func runPhysicsSelfTest(
-  physicsSystem: mod PhysicsSystem
+  physicsSystem: mod WalkerPhysics
   world: mod GameWorld
   forest: view PropField
   heroEntityId: view EntityId
   groundZ: view Float
 ) ret Int {
-  let still: InputIntent = {
-    moveX: 0.0
-    moveY: 0.0
-    walking: false
-    jump: false
-    actions: 0
-  }
-  # The stacks must settle and sleep on their own (at most 10 s) without
-  # toppling: no cube drifts far from where it was placed
-  var placed: List(Vec3) = List.create(Vec3, cap: componentCount(this: physicsSystem.cubes))
-  loop var i: Int = 0, i < componentCount(this: physicsSystem.cubes), ++i {
-    placed.add(
-      value: componentView(
-        this: world.transforms
-        entityId: componentEntityAt(this: physicsSystem.cubes, i: i)
-      ).position
-    )
-  }
-  var settleSteps: Int = 0
-  loop settleSteps < 600 and physicsCounters(physics: physicsSystem.physics).awakeBodyCount > 0 {
-    selfTestStep(
-      physicsSystem: physicsSystem
-      world: world
-      heroEntityId: heroEntityId
-      groundZ: groundZ
-      intent: still
-      yaw: 0.0
-    )
-    settleSteps = settleSteps + 1
-  }
-  let settleDrift: Float = largestCubeMove(
+  let check: CubeJumpCheck = runCubeJumpCheck(
     physicsSystem: physicsSystem
-    world: world
-    starts: placed
+    transforms: world.transforms
+    controllers: world.controllers
+    bushes: bushSpots(world: world)
+    heroEntityId: heroEntityId
   )
-  let settled: Bool = physicsCounters(physics: physicsSystem.physics).awakeBodyCount is 0 and settleDrift < 0.15
-  # Where every cube rests now, and the top of the tallest stack: the mover
-  # floats on its pogo spring and steps over anything lower than its capsule's
-  # bottom (0.6 m), so only a stack taller than that is pushed
-  let heroFeet: Vec3 = controllerFeet(
-    controller: controllerOf(world: world, entityId: heroEntityId)
-    groundZ: groundZ
-  )
-  var starts: List(Vec3) = List.create(Vec3, cap: componentCount(this: physicsSystem.cubes))
-  var target: Vec3 = heroFeet
-  var targetHeight: Float = -1000000.0
-  loop var i: Int = 0, i < componentCount(this: physicsSystem.cubes), ++i {
-    let cubeId: EntityId = componentEntityAt(this: physicsSystem.cubes, i: i)
-    let position: Vec3 = componentView(this: world.transforms, entityId: cubeId).position
-    starts.add(value: position)
-    let height: Float = position.z - terrainHeightAt(x: position.x, y: position.y, groundZ: groundZ)
-    if height > targetHeight {
-      targetHeight = height
-      target = position
-    }
-  }
-  # Walk at it (the camera yaw that looks along the line to it) until a cube
-  # moves
-  let towardX: Float = target.x - heroFeet.x
-  let towardY: Float = target.y - heroFeet.y
-  let yaw: Float = Math.atan2(y: -towardX, x: towardY)
-  let forward: InputIntent = {
-    moveX: 0.0
-    moveY: 1.0
-    walking: false
-    jump: false
-    actions: 0
-  }
-  var walkSteps: Int = 0
-  var cubeMoved: Bool = false
-  loop walkSteps < selfTestWalkSteps and cubeMoved is false {
-    selfTestStep(
-      physicsSystem: physicsSystem
-      world: world
-      heroEntityId: heroEntityId
-      groundZ: groundZ
-      intent: forward
-      yaw: yaw
-    )
-    walkSteps = walkSteps + 1
-    cubeMoved = largestCubeMove(physicsSystem: physicsSystem, world: world, starts: starts) > selfTestMovedDistance
-  }
-  # Stand, then jump
-  loop var i: Int = 0, i < 60, ++i {
-    selfTestStep(
-      physicsSystem: physicsSystem
-      world: world
-      heroEntityId: heroEntityId
-      groundZ: groundZ
-      intent: still
-      yaw: yaw
-    )
-  }
-  let groundedBefore: Bool = characterGrounded(physicsSystem: physicsSystem, entityId: heroEntityId)
-  let startZ: Float = controllerOf(world: world, entityId: heroEntityId).position.z
-  let jump: InputIntent = {
-    moveX: 0.0
-    moveY: 0.0
-    walking: false
-    jump: true
-    actions: 0
-  }
-  var leftGround: Bool = false
-  var landed: Bool = false
-  var peak: Float = 0.0
-  var jumpSteps: Int = 0
-  loop jumpSteps < selfTestJumpSteps and landed is false {
-    var stepIntent: InputIntent = still
-    if jumpSteps is 0 {
-      stepIntent = jump
-    }
-    selfTestStep(
-      physicsSystem: physicsSystem
-      world: world
-      heroEntityId: heroEntityId
-      groundZ: groundZ
-      intent: stepIntent
-      yaw: yaw
-    )
-    jumpSteps = jumpSteps + 1
-    let grounded: Bool = characterGrounded(physicsSystem: physicsSystem, entityId: heroEntityId)
-    peak = Math.max(
-      a: peak
-      b: controllerOf(world: world, entityId: heroEntityId).position.z - startZ
-    )
-    if grounded is false {
-      leftGround = true
-    } else if leftGround {
-      landed = true
-    }
-  }
   let trunksHeld: Bool = runTreeTrunkTest(
     physicsSystem: physicsSystem
     world: world
     forest: forest
     heroEntityId: heroEntityId
-    groundZ: groundZ
   )
   let rocksAndBushesHeld: Bool = runRockBushTest(
     physicsSystem: physicsSystem
     world: world
     heroEntityId: heroEntityId
-    groundZ: groundZ
   )
-  let passed: Bool = settled and cubeMoved and groundedBefore and leftGround and landed and trunksHeld and rocksAndBushesHeld
-  log(
-    "[physicstest] settled={settled} in {settleSteps} steps (drift {settleDrift} m), cubeMoved={cubeMoved} after {walkSteps} steps (moved {largestCubeMove(
-      physicsSystem: physicsSystem
-      world: world
-      starts: starts
-    )} m), jump: leftGround={leftGround} landed={landed} in {jumpSteps} steps, peak {peak} m, passed={passed}"
-  )
+  let passed: Bool = cubeJumpCheckPassed(check: check) and trunksHeld and rocksAndBushesHeld
+  log("[physicstest] {cubeJumpCheckText(check: check)}, passed={passed}")
   if passed {
     ret 0
   }

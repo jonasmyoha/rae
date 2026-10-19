@@ -12,6 +12,7 @@ open ecs/Entity
 open ecs/ComponentTable
 open ecs/Transform
 open ecs/World
+open app3d/WalkerPhysics
 
 # role: 0 = offline, 1 = server, 2 = client. tick counts published local frames.
 type NetSystem {
@@ -79,7 +80,7 @@ func netPublishIntent(netSystem: mod NetSystem, world: mod GameWorld) {
 # handle reads dead. Then spawns a Box3D body high above the island, steps the
 # bodies, and checks the pull system moved its Transform3D. Everything it
 # creates is despawned again, so the persistent world is untouched.
-func seamSelfTest(world: mod GameWorld, physicsSystem: mod PhysicsSystem) {
+func seamSelfTest(world: mod GameWorld, physicsSystem: mod WalkerPhysics) {
   let a: EntityId = netJoin(world: world, remoteId: 101, role: 2)
   let b: EntityId = netJoin(world: world, remoteId: 102, role: 2)
   let c: EntityId = netJoin(world: world, remoteId: 103, role: 2)
@@ -92,7 +93,8 @@ func seamSelfTest(world: mod GameWorld, physicsSystem: mod PhysicsSystem) {
 
   let body: EntityId = spawnPhysicsCube(
     physicsSystem: physicsSystem
-    world: world
+    allocator: world.allocator
+    transforms: world.transforms
     center: Vec3.create(x: 0.0, y: 0.0, z: 200.0)
     halfSize: 0.5
     color: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
@@ -107,7 +109,7 @@ func seamSelfTest(world: mod GameWorld, physicsSystem: mod PhysicsSystem) {
   let beforeX: Float = componentView(this: world.transforms, entityId: body).position.x
   let beforeZ: Float = componentView(this: world.transforms, entityId: body).position.z
   loop var step: Int = 0, step < 6, ++step {
-    stepPhysicsBodies(physicsSystem: physicsSystem, world: world)
+    stepPhysicsBodies(physicsSystem: physicsSystem, transforms: world.transforms)
   }
   let after: view Transform3D => componentView(this: world.transforms, entityId: body)
   # x advances with the velocity, z falls under gravity — both must have moved.
@@ -116,7 +118,7 @@ func seamSelfTest(world: mod GameWorld, physicsSystem: mod PhysicsSystem) {
   netLeave(world: world, entityId: a)
   netLeave(world: world, entityId: c)
   netLeave(world: world, entityId: d)
-  despawnPhysicsCube(physicsSystem: physicsSystem, world: world, entityId: body)
+  despawnCubeEntity(physicsSystem: physicsSystem, world: world, entityId: body)
   log(
     "[seamtest] net recycle idx={b.index} gen {b.generation}->{d.generation} netOk={netOk} physicsOk={physicsOk}"
   )
