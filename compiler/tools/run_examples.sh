@@ -1287,22 +1287,32 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           fi
         elif [ "$EXAMPLE_NAME" = "137_walker_forward" ]; then
           # The forward twin of 136 (forward-rae-5): the same walker, crowd,
-          # terrain, grass, props and cubes in one 4x MSAA pass, no water. A
-          # shaded frame (thousands of colours), all 12 skinned parts loaded,
-          # the forward path taken and 151 shadow casters (136's
-          # glb trees; 136 itself now has the leaf-patch trees).
+          # terrain (lib/app3d/WalkerTerrain: the island forest, procedural
+          # rocks, leaf bushes), grass and cubes in one 4x MSAA pass, no
+          # water. A shaded frame (thousands of colours), all 12 skinned parts
+          # loaded, the forward path taken, the 300 island trees planted and
+          # 400 to 800 shadow casters (the forest batched, as in 136). The
+          # physics check (RAE_126_PHYSICS_TEST) is 136's: the cubes, the
+          # trunks, the rock and the bush.
           SHOT="$TMP_OUT/walker-forward.bmp"
           if (cd .. && RAE_UI_MODE=editor RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SHOT" \
                 perl -e 'alarm shift; exec @ARGV' 45 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
              && python3 tools/assert_nonblank_bmp.py "$SHOT" --min-colors=2000 > "$TMP_OUT/shot.log" 2>&1 \
              && [ "$(grep -c "\[render\] path: forward (4x MSAA) with SSAO" "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c "skinned parts: 12" "$TMP_OUT/render.log")" -eq 1 ] \
-             && [ "$(grep -c "\[shadow\] casters 151, 4 cascades" "$TMP_OUT/render.log")" -eq 1 ]; then
-            echo "PASS: $EXAMPLE_NAME (forward walker with SSAO: shaded frame, 12 skinned parts, shadow casters)"
+             && CASTERS="$(sed -n 's/.*\[shadow\] casters \([0-9]*\), 4 cascades.*/\1/p' "$TMP_OUT/render.log" | head -1)" \
+             && [ -n "$CASTERS" ] && [ "$CASTERS" -ge 400 ] && [ "$CASTERS" -le 800 ] \
+             && [ "$(grep -c "\[terrain\] 300 trees planted on the island" "$TMP_OUT/render.log")" -eq 1 ] \
+             && (cd .. && RAE_126_PHYSICS_TEST=1 RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=60000 \
+                perl -e 'alarm shift; exec @ARGV' 60 "$TMP_OUT/app") > "$TMP_OUT/physics.log" 2>&1 \
+             && [ "$(grep -c "\[trunktest\] .* passed=true" "$TMP_OUT/physics.log")" -eq 1 ] \
+             && [ "$(grep -c "\[rockbushtest\] .* passed=true" "$TMP_OUT/physics.log")" -eq 1 ] \
+             && [ "$(grep -c "\[physicstest\] .* passed=true" "$TMP_OUT/physics.log")" -eq 1 ]; then
+            echo "PASS: $EXAMPLE_NAME (forward walker with SSAO: shaded frame, 12 skinned parts, the island forest batched, trunks, rocks and bushes hold)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (forward walker)"
-            cat "$TMP_OUT/render.log" "$TMP_OUT/shot.log" 2>/dev/null | sed 's/^/  /'
+            cat "$TMP_OUT/render.log" "$TMP_OUT/shot.log" "$TMP_OUT/physics.log" 2>/dev/null | sed 's/^/  /'
             ((FAILED++))
           fi
         elif [ "$EXAMPLE_NAME" = "133_deferred_gbuffer" ]; then

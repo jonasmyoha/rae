@@ -13,9 +13,7 @@ open app3d/WalkerPhysicsChecks
 open app3d/GroveTrees
 open box3d/ecs/NatureBodies
 open app3d/PropField
-
-# Fixed steps the walk at a trunk may take (8 s)
-const trunkTestWalkSteps: Int = 480
+open app3d/WalkerTerrainBodies
 
 # The pool trunk standing on a tree nearest to `point`, or none
 func nearestTree(
@@ -69,7 +67,7 @@ func runTreeTrunkTest(
       physicsSystem: physicsSystem
       transforms: world.transforms
       controllers: world.controllers
-      bushes: bushSpots(world: world)
+      bushes: bushSpots(propKinds: world.propKinds, transforms: world.transforms)
       heroEntityId: heroEntityId
       target: placed.position
       steps: trunkTestWalkSteps
@@ -96,65 +94,6 @@ func runTreeTrunkTest(
   ret false
 }
 
-# The placed prop of `kind` nearest to `point`, or none
-func nearestProp(world: view GameWorld, kind: view Int, point: view Vec3) ret opt EntityId {
-  var nearest: opt EntityId = none
-  var nearestDistance: Float = 1000000.0
-  loop var i: Int = 0, i < componentCount(this: world.propKinds), ++i {
-    let entityId: EntityId = componentEntityAt(this: world.propKinds, i: i)
-    let prop: view TerrainProp => componentView(this: world.propKinds, entityId: entityId)
-    if prop.kind is kind and prop.active {
-      let gap: Vec3 = Vec3.vsub(
-        a: componentView(this: world.transforms, entityId: entityId).position
-        b: point
-      )
-      let distance: Float = Math.sqrt(x: gap.x * gap.x + gap.y * gap.y)
-      if distance < nearestDistance {
-        nearestDistance = distance
-        nearest = entityId
-      }
-    }
-  }
-  ret nearest
-}
-
-# The rock and bush nearest the hero (app3d/WalkerPhysicsChecks.runRockBushCheck)
-func runRockBushTest(
-  physicsSystem: mod WalkerPhysics
-  world: mod GameWorld
-  heroEntityId: view EntityId
-) ret Bool {
-  let heroFeet: Vec3 = controllerFeet(
-    controller: controllerOf(world: world, entityId: heroEntityId)
-    groundZ: physicsSystem.groundZ
-  )
-  var hasRock: Bool = false
-  var rockEntityId: EntityId = noEntity()
-  if let found: EntityId = nearestProp(world: world, kind: kindRock, point: heroFeet) {
-    hasRock = true
-    rockEntityId = found
-  }
-  var hasBush: Bool = false
-  var bushFoot: Vec3 = heroFeet
-  if let found: EntityId = nearestProp(world: world, kind: kindBush, point: heroFeet) {
-    hasBush = true
-    # The bush stands 5 cm into the ground (TerrainSystem.kindTransform)
-    let bush: Vec3 = componentView(this: world.transforms, entityId: found).position
-    bushFoot = Vec3.create(x: bush.x, y: bush.y, z: bush.z + 0.05)
-  }
-  ret runRockBushCheck(
-    physicsSystem: physicsSystem
-    transforms: world.transforms
-    controllers: world.controllers
-    bushes: bushSpots(world: world)
-    heroEntityId: heroEntityId
-    hasRock: hasRock
-    rockEntityId: rockEntityId
-    hasBush: hasBush
-    bushFoot: bushFoot
-  )
-}
-
 func runPhysicsSelfTest(
   physicsSystem: mod WalkerPhysics
   world: mod GameWorld
@@ -166,7 +105,7 @@ func runPhysicsSelfTest(
     physicsSystem: physicsSystem
     transforms: world.transforms
     controllers: world.controllers
-    bushes: bushSpots(world: world)
+    bushes: bushSpots(propKinds: world.propKinds, transforms: world.transforms)
     heroEntityId: heroEntityId
   )
   let trunksHeld: Bool = runTreeTrunkTest(
@@ -177,7 +116,9 @@ func runPhysicsSelfTest(
   )
   let rocksAndBushesHeld: Bool = runRockBushTest(
     physicsSystem: physicsSystem
-    world: world
+    propKinds: world.propKinds
+    transforms: world.transforms
+    controllers: world.controllers
     heroEntityId: heroEntityId
   )
   let passed: Bool = cubeJumpCheckPassed(check: check) and trunksHeld and rocksAndBushesHeld
