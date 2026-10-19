@@ -1,0 +1,29 @@
+import Math
+open WorldBiome
+
+func main() {
+  let config: BiomeConfig = defaultBiomeConfig()
+  let boundary: Float = config.waterLevel + config.beachBand
+  var covered: Bool = true
+  var continuous: Bool = true
+  var previousSand: Float = 1.0
+  loop var index: Int = -100, index <= 500, ++index {
+    let elevation: Float = boundary + index.toFloat() * 0.0001
+    let sample: WorldSample = classifyWeights(
+      elev: elevation
+      moist: 0.0
+      slope: 0.0
+      cfg: config
+    )
+    let sum: Float = sample.wWater + sample.wSand + sample.wMud + sample.wGrass + sample.wRock
+    if Math.abs(value: sum - 1.0) > 0.00001 {
+      covered = false
+    }
+    if Math.abs(value: sample.wSand - previousSand) > 0.01 {
+      continuous = false
+    }
+    previousSand = sample.wSand
+  }
+  log("beach transition fully covered: {covered}")
+  log("beach transition continuous: {continuous}")
+}

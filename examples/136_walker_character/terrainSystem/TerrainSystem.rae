@@ -335,18 +335,19 @@ func reshapeTerrainTile(
   if meshId < 1 {
     ret
   }
-  let tileSize: Float = terrainCellSize + 0.04
-  let centreX: Float = cellX.toFloat() * terrainCellSize
-  let centreY: Float = cellY.toFloat() * terrainCellSize
+  # Integer lattice coordinates give both neighbours the same edge samples.
+  # Never overlap heightfield tiles: their triangles disagree inside the strip,
+  # producing depth fighting and dark shadow seams.
+  let spacing: Float = terrainCellSize / terrainTileSegments.toFloat()
   let eps: Float = 0.6
   loop var yi: Int = 0, yi <= terrainTileSegments, ++yi {
     let fy: Float = yi.toFloat() / terrainTileSegments.toFloat()
-    let localY: Float = (fy - 0.5) * tileSize
-    let worldY: Float = centreY + localY
+    let localY: Float = (yi - terrainTileSegments / 2).toFloat() * spacing
+    let worldY: Float = (cellY * terrainTileSegments + yi - terrainTileSegments / 2).toFloat() * spacing
     loop var xi: Int = 0, xi <= terrainTileSegments, ++xi {
       let fx: Float = xi.toFloat() / terrainTileSegments.toFloat()
-      let localX: Float = (fx - 0.5) * tileSize
-      let worldX: Float = centreX + localX
+      let localX: Float = (xi - terrainTileSegments / 2).toFloat() * spacing
+      let worldX: Float = (cellX * terrainTileSegments + xi - terrainTileSegments / 2).toFloat() * spacing
       let height: Float = terrainHeightAt(x: worldX, y: worldY, groundZ: terrainSystem.groundZ)
       let slopeX: Float = (terrainHeightAt(
         x: worldX + eps
@@ -647,7 +648,7 @@ func createTerrainSystem(
   assets: view String
   groundZ: view Float
 ) ret TerrainSystem {
-  let tilePlane: MeshData = makePlane(size: terrainCellSize + 0.04, segments: terrainTileSegments)
+  let tilePlane: MeshData = makePlane(size: terrainCellSize, segments: terrainTileSegments)
   let flowerMesh: MeshHandle = terrainMesh(
     renderer: renderer
     path: "{assets}environment/flower.glb"

@@ -110,7 +110,9 @@ fn raeBiomeClassify(elev: f32, moist: f32, slope: f32) -> RaeBiome {
   let sandHi = wl + RAE_BIOME_BEACH_BAND;
   let wWater = 1.0 - smoothstep(wl, wl + 0.02, elev);
   let land = 1.0 - wWater;
-  let wSand = land * smoothstep(wl, wl + 0.02, elev) * (1.0 - smoothstep(sandHi - 0.02, sandHi, elev));
+  // One complementary crossfade prevents a zero-weight seam at sandHi.
+  let aboveSand = smoothstep(sandHi, sandHi + 0.04, elev);
+  let wSand = land * smoothstep(wl, wl + 0.02, elev) * (1.0 - aboveSand);
   // SLOPE ALONE MUST NOT MAKE A BEACH INTO ROCK.
   //
   // The shore is the steepest ground on the island by construction -- it is
@@ -125,7 +127,6 @@ fn raeBiomeClassify(elev: f32, moist: f32, slope: f32) -> RaeBiome {
   let notShore = smoothstep(sandHi, sandHi + RAE_BIOME_SHORE_ROCK_FADE, elev);
   let wRock = land * clamp(smoothstep(RAE_BIOME_ROCK_SLOPE, RAE_BIOME_ROCK_SLOPE + 0.12, slope) * notShore
     + smoothstep(0.35, 0.55, elev), 0.0, 1.0);
-  let aboveSand = smoothstep(sandHi, sandHi + 0.04, elev);
   let flat = 1.0 - smoothstep(RAE_BIOME_ROCK_SLOPE * 0.5, RAE_BIOME_ROCK_SLOPE, slope);
   let lowland = 1.0 - smoothstep(0.15, 0.35, elev);
   let wetness = smoothstep(RAE_BIOME_SWAMP_MOIST, RAE_BIOME_SWAMP_MOIST + 0.1, moist);
