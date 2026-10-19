@@ -1,0 +1,93 @@
+import Math
+import Vec3
+open Particles
+open WaterParticles
+open Scene3d
+open Math3d
+open TransparentForward
+
+func check(ok: view Bool, label: view String) {
+  if ok {
+    log("ok {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func main() {
+  let particle: Particle = {
+    x: 1.0
+    y: 2.0
+    z: 0.0
+    vx: 1.0
+    vy: 0.0
+    vz: 2.0
+    life: 0.4
+    maxLife: 0.4
+    size: 0.05
+    r: 0.77
+    g: 0.91
+    b: 0.98
+  }
+  var whole: ParticleSystem = {
+    list: List(Particle) { particle }
+    mesh: { id: -1 }
+    gravity: 9.8
+    cap: 4
+  }
+  var stepped: ParticleSystem = {
+    list: List(Particle) { particle }
+    mesh: { id: -1 }
+    gravity: 9.8
+    cap: 4
+  }
+  waterParticleUpdate(particles: whole, deltaTime: 0.2)
+  loop var index: Int = 0, index < 20, ++index {
+    waterParticleUpdate(particles: stepped, deltaTime: 0.01)
+  }
+  let first: Particle = whole.list.copyAtDefault(index: 0)
+  let second: Particle = stepped.list.copyAtDefault(index: 0)
+  check(ok: Math.abs(value: first.z - second.z) < 0.00001, label: "frame independent arc")
+  check(ok: Math.abs(value: first.z - 0.204) < 0.00001, label: "ballistic height")
+  let camera: Camera3d = {
+    position: { x: 1.0, y: -2.0, z: 0.0 }
+    target: { x: 1.0, y: 2.0, z: 0.0 }
+  }
+  let model: Mat4 = waterParticleModel(particle: first, camera: camera)
+  let width: Vec3 = {
+    x: mat4Get(m: model, i: 0)
+    y: mat4Get(m: model, i: 1)
+    z: mat4Get(m: model, i: 2)
+  }
+  let height: Vec3 = {
+    x: mat4Get(m: model, i: 4)
+    y: mat4Get(m: model, i: 5)
+    z: mat4Get(m: model, i: 6)
+  }
+  check(ok: Math.abs(value: Vec3.vlen(a: width) - first.size) < 0.00001, label: "drop width")
+  check(ok: Math.abs(value: Vec3.vdot(a: width, b: height)) < 0.00001, label: "perpendicular axes")
+  check(ok: Vec3.vlen(a: height) <= first.size * 2.201, label: "bounded stretch")
+  let overhead: Camera3d = { position: { z: 5.0 }, target: { x: 0.0 } }
+  let overheadModel: Mat4 = waterParticleModel(particle: first, camera: overhead)
+  check(
+    ok: mat4Get(m: overheadModel, i: 0) is mat4Get(m: overheadModel, i: 0)
+    label: "overhead finite"
+  )
+  # Mixed lifetimes exercise compaction, and the live value must survive it.
+  var short: Particle = particle
+  short.life = 0.01
+  stepped.list.add(value: short)
+  stepped.list.add(value: particle)
+  waterParticleUpdate(particles: stepped, deltaTime: 0.02)
+  check(ok: stepped.list.length is 2, label: "mixed pool compaction")
+  var transparent: TransparentPassCache = createTransparentPassCache(capacity: 1)
+  waterParticleDraw(particles: stepped, transparent: transparent, camera: camera)
+  check(ok: transparent.batch.count is 1, label: "draw capacity respected")
+  check(
+    ok: transparent.batch.records.copyAtDefault(index: 36) is 1.0
+    label: "water material selected"
+  )
+  waterParticleUpdate(particles: whole, deltaTime: 1.0)
+  waterParticleUpdate(particles: stepped, deltaTime: 1.0)
+  check(ok: whole.list.length is 0 and stepped.list.length is 0, label: "expired pool empty")
+}

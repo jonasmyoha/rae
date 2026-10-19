@@ -1,0 +1,45 @@
+# Optional repeatable shore capture. No effect in normal play.
+# RAE_WALKER_SPLASH_PREVIEW=1; RAE_WALKER_SPLASH_AGE=0.12 freezes one burst.
+import Sys
+import Vec3
+open WorldBiome
+open app3d/CameraRig
+
+type SplashPreview {
+  enabled: Bool
+  age: Float
+  origin: Vec3
+}
+
+func prepareSplashPreview(
+  world: mod GameWorld
+  cameraSystem: mod CameraSystem
+  groundZ: copy Float
+) {
+  if Sys.getEnv(name: "RAE_WALKER_SPLASH_PREVIEW").length() is 0 {
+    ret
+  }
+  let waterZ: Float = worldWaterZ(groundZ: groundZ, cfg: defaultBiomeConfig())
+  loop var step: Int = 0, step < 1600, ++step {
+    let x: Float = step.toFloat() * 0.25
+    let depth: Float = terrainWaterDepth(x: x, y: 0.0)
+    if depth > 0.2 and depth < 0.5 {
+      world.splashPreview.enabled = true
+      world.splashPreview.origin = Vec3.create(x: x, y: 0.0, z: waterZ)
+      world.splashPreview.age = -1.0
+      let age: String = Sys.getEnv(name: "RAE_WALKER_SPLASH_AGE")
+      if age.length() > 0 {
+        world.splashPreview.age = age.toFloat()
+      }
+      cameraSystem.camera.target = Vec3.create(x: x, y: 0.0, z: waterZ + 0.2)
+      cameraSystem.rig.mode = CameraRigMode.orbit
+      cameraSystem.rig.yaw = 0.0
+      cameraSystem.rig.orbitPitch = 0.22
+      cameraSystem.rig.distance = 2.4
+      snapCameraRigView(rig: cameraSystem.rig)
+      log("[splash-preview] shore {x}, 0, {waterZ}; age {world.splashPreview.age}")
+      ret
+    }
+  }
+  log("[splash-preview] no shallow shore found")
+}

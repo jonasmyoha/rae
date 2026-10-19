@@ -17,6 +17,7 @@ open ecs/ComponentTable
 import Sys
 open GbufferInstanced
 open Particles
+open WaterParticles
 open TransparentForward
 open water/WaterSystem
 open water/WaterFft
@@ -381,7 +382,7 @@ func renderGbufferPass(
   )
   # Water splashes for anything wading this frame (#84): advance + emit here; the
   # droplets are DRAWN later, at the transparentForward tag, as alpha-fading
-  # cubes (#844) — they no longer go into this G-buffer pass.
+  # rounded droplets — they never go into this G-buffer pass.
   splashStep(
     characterSystem: characterSystem
     splashes: splashes
@@ -638,7 +639,11 @@ func renderApp(
           )
         }
         # Splash droplets fade by alpha through the transparent pass (#844).
-        particleDraw(sys: splashes, transparent: renderSystem.renderer.passes.transparent)
+        waterParticleDraw(
+          particles: splashes
+          transparent: renderSystem.renderer.passes.transparent
+          camera: cameraSystem.camera
+        )
         renderDeferredPass(
           renderer: renderSystem.renderer
           tag: tag
