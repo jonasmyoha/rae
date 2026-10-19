@@ -243,12 +243,9 @@ func classifyWeights(
   # Water below the level (soft edge); land is the complement.
   let wWater: Float = 1.0 - smooth01(edge0: wl, edge1: wl + 0.02, x: elev)
   let land: Float = 1.0 - wWater
-  # Sand: a band just above water.
-  let wSand: Float = land * smooth01(edge0: wl, edge1: wl + 0.02, x: elev) * (1.0 - smooth01(
-    edge0: sandHi - 0.02
-    edge1: sandHi
-    x: elev
-  ))
+  # Sand and vegetation share one crossfade: no uncovered elevation at sandHi.
+  let aboveSand: Float = smooth01(edge0: sandHi, edge1: sandHi + 0.04, x: elev)
+  let wSand: Float = land * smooth01(edge0: wl, edge1: wl + 0.02, x: elev) * (1.0 - aboveSand)
   # Rock: steep slope or high elevation -- but SLOPE ALONE MUST NOT MAKE A BEACH
   # INTO ROCK. The shore is the steepest ground on the island by construction, so
   # a purely slope-driven term claimed the whole coastal strip: rendering the
@@ -266,7 +263,6 @@ func classifyWeights(
     )
   )
   # Mud/swamp: low, flat, wet.
-  let aboveSand: Float = smooth01(edge0: sandHi, edge1: sandHi + 0.04, x: elev)
   let flat: Float = 1.0 - smooth01(edge0: cfg.rockSlope * 0.5, edge1: cfg.rockSlope, x: slope)
   let lowland: Float = 1.0 - smooth01(edge0: 0.15, edge1: 0.35, x: elev)
   let wetness: Float = smooth01(edge0: cfg.swampMoist, edge1: cfg.swampMoist + 0.1, x: moist)
