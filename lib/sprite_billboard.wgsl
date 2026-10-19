@@ -122,8 +122,10 @@ struct FsOut {
   @location(2) gbc: vec4<f32>,
 };
 
-@fragment
-fn fs(in: VsOut) -> FsOut {
+// The surface at this fragment, in the G-buffer encoding: the G-buffer entry
+// below writes it, the forward main pass's fsForward (forward_entry.wgsl)
+// decodes and shades it. The cutout discards in both.
+fn gbufferSurface(in: VsOut) -> FsOut {
   let texel = textureSample(spriteTex, spriteSamp, in.uv, in.layer);
   if (texel.a < S.a.z) { discard; }   // alpha cutout — no colour, no depth
   // The sprite pixels are already lit (cut from the plate). Face the normal UP so
@@ -140,4 +142,8 @@ fn fs(in: VsOut) -> FsOut {
   o.gbb = vec4<f32>(texel.rgb, 0.9);                  // albedo, high roughness
   o.gbc = vec4<f32>(mEnc.x, mEnc.y, 0.0, in.emissive);
   return o;
+}
+@fragment
+fn fs(in: VsOut) -> FsOut {
+  return gbufferSurface(in);
 }

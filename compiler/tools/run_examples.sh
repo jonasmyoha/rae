@@ -1293,7 +1293,11 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # loaded, the forward path taken, the 300 island trees planted and
           # 400 to 800 shadow casters (the forest batched, as in 136). The
           # physics check (RAE_126_PHYSICS_TEST) is 136's: the cubes, the
-          # trunks, the rock and the bush.
+          # trunks, the rock and the bush. Then a free camera 170 m south of
+          # the island (RAE_WALKER_CAMERA) sees every tree past the middle
+          # distance, so the forest is all billboards: they must be drawn in
+          # the forward pass (GbufferSprite's forward pipeline) and the shot
+          # must be a shaded frame.
           SHOT="$TMP_OUT/walker-forward.bmp"
           if (cd .. && RAE_UI_MODE=editor RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SHOT" \
                 perl -e 'alarm shift; exec @ARGV' 45 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
@@ -1307,12 +1311,17 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
                 perl -e 'alarm shift; exec @ARGV' 60 "$TMP_OUT/app") > "$TMP_OUT/physics.log" 2>&1 \
              && [ "$(grep -c "\[trunktest\] .* passed=true" "$TMP_OUT/physics.log")" -eq 1 ] \
              && [ "$(grep -c "\[rockbushtest\] .* passed=true" "$TMP_OUT/physics.log")" -eq 1 ] \
-             && [ "$(grep -c "\[physicstest\] .* passed=true" "$TMP_OUT/physics.log")" -eq 1 ]; then
-            echo "PASS: $EXAMPLE_NAME (forward walker with SSAO: shaded frame, 12 skinned parts, the island forest batched, trunks, rocks and bushes hold)"
+             && [ "$(grep -c "\[physicstest\] .* passed=true" "$TMP_OUT/physics.log")" -eq 1 ] \
+             && (cd .. && RAE_WALKER_CAMERA="1 0 0.3 -0.12 10 0 -170 30 0 0 0 0" RAE_SDL_HEADLESS_MS=1500 \
+                RAE_GPU2D_SCREENSHOT="$TMP_OUT/walker-billboards.bmp" \
+                perl -e 'alarm shift; exec @ARGV' 45 "$TMP_OUT/app") > "$TMP_OUT/billboards.log" 2>&1 \
+             && python3 tools/assert_nonblank_bmp.py "$TMP_OUT/walker-billboards.bmp" --min-colors=500 >> "$TMP_OUT/shot.log" 2>&1 \
+             && [ "$(grep -c "\[sprite\] billboards drawn in the forward pass: 300" "$TMP_OUT/billboards.log")" -eq 1 ]; then
+            echo "PASS: $EXAMPLE_NAME (forward walker with SSAO: shaded frame, 12 skinned parts, the island forest batched, trunks, rocks and bushes hold, billboards in the forward pass)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (forward walker)"
-            cat "$TMP_OUT/render.log" "$TMP_OUT/shot.log" "$TMP_OUT/physics.log" 2>/dev/null | sed 's/^/  /'
+            cat "$TMP_OUT/render.log" "$TMP_OUT/shot.log" "$TMP_OUT/physics.log" "$TMP_OUT/billboards.log" 2>/dev/null | sed 's/^/  /'
             ((FAILED++))
           fi
         elif [ "$EXAMPLE_NAME" = "133_deferred_gbuffer" ]; then
