@@ -153,6 +153,7 @@ void rae_ext_Gpu2d_closeWindow(void) {
     }
     g_g2d_cursor_kind = -1;
 #ifndef __EMSCRIPTEN__
+    g_g2d_presentation_layer = NULL;  /* it goes with the view */
     if (g_g2d_metal_view) { SDL_Metal_DestroyView(g_g2d_metal_view); g_g2d_metal_view = NULL; }
 #endif
     if (g_sdl_win) { SDL_DestroyWindow(g_sdl_win); g_sdl_win = NULL; }
