@@ -95,6 +95,10 @@ type Frame {
   dbgDidWork: Bool
   renderedOnce: Bool
   headless: Bool
+  # The window was resized since the last frame. Gpu2d.windowResized() is
+  # cleared when read, so frameBegin reads it once (resizeUiToWindow) and
+  # the rest of the frame reads this
+  resized: Bool
 }
 
 # Input devices + the UI world state (panels, dialog, overlays). Split further in
@@ -779,6 +783,7 @@ func createApp() ret App {
         dbgDidWork: true
         renderedOnce: false
         headless: headless
+        resized: false
       }
       inputSystem: {
         moveStick: own moveStick
