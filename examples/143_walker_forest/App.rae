@@ -38,6 +38,7 @@ open Particles
 open water/Water
 open GbufferSprite
 open water/WaterSystem
+open water/IslandSea
 open water/WaterFft
 open gpu/GpuResources
 open gpu/GpuLifetime
@@ -81,6 +82,11 @@ open app3d/RenderScale
 open ui/UiSystems
 
 const clipTransitionDuration: Float = 0.28
+
+# The App's GPU manager (#873): the sea's three 256 cascades with their mip
+# chains, readbacks and surface (192, as the downstream game sizes its sea),
+# plus what the rest of the walker keeps there
+const walkerGpuCapacity: Int = 288
 
 # Per-frame scratch shared across systems: timing and the render/park decision.
 type Frame {
@@ -186,7 +192,7 @@ type App {
   players: PlayerRoster  # who the local player controls (players.rae, #546)
   persist: PersistState
   splashes: ParticleSystem  # water-splash droplets when the character wades (splash.rae, #84)
-  waterSystem: WaterSystem  # the toon lake at the biome water plane (lib/water, #830)
+  waterSystem: WaterSystem  # the FFT sea at the biome water plane (lib/water/IslandSea)
   idIssuer: IdIssuer  # the root's shared ID issuer (#869)
   gpuResources: opt GpuResources  # the App-owned GPU manager water's IDs live in (#873)
   ok: Bool
@@ -797,7 +803,7 @@ func createApp() ret App {
     let splashes: ParticleSystem = createParticleSystem(renderer: renderer, cap: 256, gravity: 24.0)
     let waterSystem: WaterSystem = createWaterSystem(
       renderer: renderer
-      body: walkerLake(groundZ: groundZ)
+      body: createIslandSea(renderer: renderer, groundZ: groundZ, biome: forestBiomeConfig())
     )
     ret App {
       world: own gameWorld
@@ -879,7 +885,7 @@ func createApp() ret App {
       splashes: own splashes
       waterSystem: own waterSystem
       idIssuer: own idIssuer
-      gpuResources: GpuResources.create(issuer: idIssuer, capacity: 96)
+      gpuResources: GpuResources.create(issuer: idIssuer, capacity: walkerGpuCapacity)
       ok: true
     }
   }

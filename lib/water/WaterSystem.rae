@@ -1,4 +1,5 @@
 open water/FftSurfaceCache
+open WorldBiome
 # WaterSystem — the GPU side of the water package (#830). Owned by the app as a
 # resource (`app.waterSystem: WaterSystem`, the #822 convention), it steps wave
 # time, keeps the surface pipeline / uniform buffer / bind group as typed IDs
@@ -290,12 +291,17 @@ func ensureWaterPipeline(
     cullMode: WGPUCullMode_None
     sampleCount: 1
   }
-  if let pipeline: RenderPipelineId = createRenderPipeline(
+  # The shore damping's island size: the primary body's biome (lib/WorldBiome)
+  let biomeConstants: List(ShaderConstant) = islandConstantsFor(
+    cfg: primaryBody(waterSystem: waterSystem).biome
+  )
+  if let pipeline: RenderPipelineId = createRenderPipelineWithConstants(
     resources: resources
     shader: source
     vertexEntry: "vs"
     fragmentEntry: "fs"
     spec: spec
+    constants: biomeConstants
   ) {
     waterSystem.surface.pipeline = pipeline
   }

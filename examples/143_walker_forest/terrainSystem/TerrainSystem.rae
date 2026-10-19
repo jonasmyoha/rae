@@ -83,10 +83,7 @@ func forestBiomeConfig() ret BiomeConfig {
 # The same radius for the terrain and grass shaders (world_biome.wgsl's
 # `override`s), so the GPU ground matches the CPU's
 func forestBiomeConstants() ret List(ShaderConstant) {
-  var constants: List(ShaderConstant) = List.create(ShaderConstant, cap: 2)
-  constants.add(value: { name: "RAE_BIOME_ISLAND_RADIUS", value: forestWorldRadius })
-  constants.add(value: { name: "RAE_BIOME_ISLAND_FALLOFF", value: defaultIslandFalloff })
-  ret constants
+  ret islandConstantsFor(cfg: forestBiomeConfig())
 }
 
 # The height field IS the biome elevation field (lib/world_biome).

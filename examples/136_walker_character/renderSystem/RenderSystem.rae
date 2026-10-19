@@ -605,7 +605,7 @@ func renderApp(
         )
       }
       case RenderTag.waterFft {
-        # The sea's FFT wave cascades for this frame (WalkerSea)
+        # The sea's FFT wave cascades for this frame (lib/water/IslandSea)
         waterFftStep(waterSystem: waterSystem, resources: resources)
       }
       case RenderTag.underwater {
@@ -626,7 +626,7 @@ func renderApp(
       }
       case RenderTag.transparentForward {
         # Opaque snapshot BEFORE the water so a refracting surface can read it (#832),
-        # then the FFT sea (WalkerSea), then the splash droplets blend OVER it.
+        # then the FFT sea (lib/water/IslandSea), then the splash droplets blend OVER it.
         snapshotOpaque(renderer: renderSystem.renderer)
         if let meshResources: view GpuResources => renderSystem.renderer.gpuResources {
           waterDraw(
