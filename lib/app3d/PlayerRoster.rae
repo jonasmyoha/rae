@@ -1,16 +1,14 @@
-# players.rae — the player roster (#546): who controls which character.
-#
-# Today there is one LOCAL player. The roster maps that player to a CONTROLLED
-# character index: 0 = the hero, 1..count-1 = crowd member (index - 1). Switching
-# (Page Up / Page Down, or the settings buttons) moves the local player between
-# characters; the non-controlled characters run their own AI animation. This is
-# the seam multiplayer builds on — a second player would take another index, and
-# a remote player's control would arrive via net.rae instead of a device.
-#
-# Example-126 files are siblings that merge into one module, so this resolves the
-# App/CharacterSystem types cross-file without importing them.
+# app3d/PlayerRoster — who controls which walker character (#546). Today there
+# is one LOCAL player. The roster maps that player to a CONTROLLED character
+# index: 0 = the hero, 1..count-1 = crowd member (index - 1). Switching (Page
+# Up / Page Down, or the settings buttons) moves the local player between
+# characters; the non-controlled characters run their own animation. This is
+# the seam multiplayer builds on: a second player would take another index,
+# and a remote player's control would arrive over the network instead of a
+# device.
 import Keys
 open ecs/Entity
+open app3d/WalkerCharacter
 
 # The local player's id. (Naming: constants are camelCase — #746 fixed the old
 # SHOUTING_SNAKE_CASE `PLAYER_LOCAL`, which the language bans.)

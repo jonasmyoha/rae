@@ -82,6 +82,8 @@ open ui/inputSystem/InputSystem
 open ui/renderSystem/RenderSystem
 open app3d/RenderScale
 open ui/UiSystems
+open app3d/WalkerCharacter
+open app3d/PlayerRoster
 
 const clipTransitionDuration: Float = 0.28
 
@@ -135,40 +137,6 @@ type InputSystem {
 # RenderSystem lives in RenderSystem/; the per-system state types live with their
 # systems. app.rae keeps only the cross-cutting Frame / InputSystem / CharacterSystem /
 # PersistState that no single system owns.
-
-# The animated character: the player-controlled hero plus a `crowd` of
-# independently-animated members. #739: the hero's controller and each crowd
-# member are now ENTITIES in the GameWorld — `heroEntityId` carries the hero's
-# ThirdPersonController; `crowdEntities` are the crowd members, each an entity
-# with a ThirdPersonController + AnimationState{clipIndex,animTime} + Transform3D.
-# They're driven in place via componentMod (no copy-out/mutate/set-back), and
-# each member's render model is derived from its controller (walkerWorldModel).
-type CharacterSystem {
-  leftFootNode: Int
-  rightFootNode: Int
-  skeleton: Skeleton
-  idleClip: Clip
-  walkClip: Clip
-  runClip: Clip
-  bindPose: SkeletonPose
-  transitionFrom: SkeletonPose
-  transitionElapsed: Float
-  heroEntityId: EntityId
-  clipIndex: Int
-  playing: Bool
-  speed: Float
-  animTime: Float
-  toon: Bool
-  basePartModel: Mat4
-  model: Mat4
-  prevModel: Mat4
-  crowdEntities: List(EntityId)
-  crowdBatch: InstanceBatch
-  groundZ: Float
-  # The hero is in the air (a jump, a fall): its run clip plays slowed, as
-  # there is no jump clip
-  airborne: Bool
-}
 
 # Window-geometry + hot-reload persistence. (#555)
 type PersistState {
@@ -331,7 +299,11 @@ func createApp() ret App {
       scale: Vec3.create(x: modelScale, y: modelScale, z: modelScale)
     }
     let basePartModel: Mat4 = transform3dToMatrix(t: partTransform)
-    groundWalker(controller: characterController, groundZ: groundZ)
+    groundWalker(
+      controller: characterController
+      groundZ: groundZ
+      biome: WorldBiome.defaultBiomeConfig()
+    )
     var partModel: Mat4 = walkerWorldModel(
       baseModel: basePartModel
       controller: characterController
@@ -594,7 +566,11 @@ func createApp() ret App {
 
     # Nobody starts in the sea. The origin is not guaranteed land — the island mask
     # only guarantees land is SOMEWHERE inside the radius.
-    spawnOnLand(controller: characterController, groundZ: groundZ)
+    spawnOnLand(
+      controller: characterController
+      groundZ: groundZ
+      biome: WorldBiome.defaultBiomeConfig()
+    )
     # The island's forest, with a clearing around the spawn for the cube stacks
     let treeCount: Int = plantForest(
       terrainSystem: terrainSystem
