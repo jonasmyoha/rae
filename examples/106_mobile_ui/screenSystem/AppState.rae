@@ -90,6 +90,10 @@ type AppState {
   # RAE_UI_CANVAS=1 opens it at boot for headless proofs. Not
   # persisted. See canvas_view.rae.
   canvasOpen: Bool
+  # Whether the settings dialog (Settings.raescene, opened from the Profile
+  # page's top bar) is showing. Flipped by `settings.open` / `settings.close`.
+  # Not persisted. See screenSystem/SettingsView.
+  settingsOpen: Bool
   # #789: progressive-loader cursors that used to be module-global `var`s.
   # Transient (not persisted): the History-artwork scan cursor and the album/
   # avatar asset-registration latches.
@@ -135,6 +139,7 @@ func createAppState(albums: own List(Album), theme: own UiTheme) pub ret AppStat
       bottomSheet: createBottomSheetState()
       settings: createAppSettings()
       canvasOpen: false
+      settingsOpen: false
       historyArt: createHistoryArtLoader()
       artworkFetch: createArtworkFetchQueue()
       assetLoad: createAssetLoad()

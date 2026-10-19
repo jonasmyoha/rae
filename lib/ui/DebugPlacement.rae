@@ -1,0 +1,81 @@
+# ui/DebugPlacement — the shared debug widget (ui/DebugOverlay) on the slot a
+# scene reserves for it. A UI app whose scene has a node with a `DebugAnchor`
+# (lib/ui/Components) gets the debug button there, on that node's laid-out
+# rectangle on screen, instead of in the window's top-right corner: a page whose
+# corner holds a control of its own (106's Profile has its settings button
+# there) keeps it clickable by giving the debug button a slot elsewhere in its
+# layout. A page without a shown anchor gets the corner.
+import ui/Components
+open ui/Ecs
+open ui/UiSystems
+open ui/DebugOverlay
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Transform
+open ecs/hierarchySystem/HierarchySystem
+
+# Is `entityId` shown: it and every parent up to its root active? (A hidden
+# page is an inactive page root; the layers under it keep their last layout,
+# so this walks the Active flags rather than reading the derived visibility.)
+func debugAnchorShown(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+) ret Bool {
+  var current: EntityId = { index: entityId.index, generation: entityId.generation }
+  loop true {
+    if componentHas(this: world.actives, entityId: current) {
+      if componentView(this: world.actives, entityId: current).value is false {
+        ret false
+      }
+    }
+    if componentHas(this: uiSystems.hierarchy.parents, entityId: current) is false {
+      ret true
+    }
+    let link: view Parent => componentView(this: uiSystems.hierarchy.parents, entityId: current)
+    current = { index: link.parent.index, generation: link.parent.generation }
+  }
+  ret true
+}
+
+# Put the debug button on the first shown `DebugAnchor` node: its rectangle on
+# screen (the same one the hit test uses) is the button, its width the
+# button's size. No shown anchor puts it back in the window's corner at its
+# normal size. Call once a frame, before updateDebugOverlay; it reads the
+# layout of the frame before. True when an anchor placed it.
+func followDebugAnchor(
+  debugOverlay: mod DebugOverlay
+  world: view UiWorld
+  uiSystems: view UiSystems
+) ret Bool {
+  loop var i: Int = 0, i < componentCount(this: world.debugAnchors), ++i {
+    let entityId: EntityId = componentEntityAt(this: world.debugAnchors, i: i)
+    let placed: Bool = componentHas(this: uiSystems.transform2d.worldTransforms, entityId: entityId) and componentHas(
+      this: uiSystems.layout.computedRects
+      entityId: entityId
+    )
+    if placed and debugAnchorShown(world: world, uiSystems: uiSystems, entityId: entityId) {
+      let screen: view WorldTransform2D => componentView(
+        this: uiSystems.transform2d.worldTransforms
+        entityId: entityId
+      )
+      let size: view ComputedRect => componentView(
+        this: uiSystems.layout.computedRects
+        entityId: entityId
+      )
+      let width: Float = size.size.x * screen.scale.x
+      if width > 0.0 {
+        debugOverlay.buttonSize = width
+        placeDebugOverlay(
+          debugOverlay: debugOverlay
+          right: screen.position.x + width
+          top: screen.position.y
+        )
+        ret true
+      }
+    }
+  }
+  debugOverlay.buttonSize = debugButtonPoints * debugOverlay.scale
+  placeDebugOverlay(debugOverlay: debugOverlay, right: 0.0, top: 0.0)
+  ret false
+}

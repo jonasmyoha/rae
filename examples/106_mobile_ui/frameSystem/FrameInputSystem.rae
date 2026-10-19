@@ -6,6 +6,7 @@ open ecs/Event
 open ui/EventLoop
 open ui/Theme
 open ui/DebugOverlay
+open ui/DebugPlacement
 open ui/scrollRootSystem/ScrollRootSystem
 
 # Frame phase 1 — input. The hot-reload signal, the pointer/keyboard input
@@ -34,9 +35,17 @@ func frameInputSystem(
     saveStateAndExit(screen: session.currentScreen, scrollY: scrollFsm.scrollY)
   }
 
-  # The debug widget reads the pointer BEFORE the app hit-tests (the UI
-  # editor does the same): a press on its button or its open dialog never
-  # reaches the page under it, and it repaints the frame.
+  let themeGenerationBefore: Int = appState.theme.generation
+  # The debug widget sits on the visible page's `DebugAnchor` slot (the top
+  # bar's leading slot, so the Profile page's settings button stays free), or
+  # in the corner where a page has none. It reads the pointer BEFORE the app
+  # hit-tests (the UI editor does the same): a press on its button or its open
+  # dialog never reaches the page under it, and it repaints the frame.
+  let anchored: Bool = followDebugAnchor(
+    debugOverlay: session.debugOverlay
+    world: world
+    uiSystems: app.uiSystems
+  )
   let debugTookPointer: Bool = updateDebugOverlay(
     debugOverlay: session.debugOverlay
     screenW: app.viewport.layoutW
@@ -177,31 +186,14 @@ func frameInputSystem(
     reg: app.textureRegistry
   )
 
-  # Theme: the debug dialog's "Dark theme" switch, or T to flip it. Scene
-  # colours store slot NAMES and re-resolve against the new active theme on
-  # the next paint; code-driven colours still bake into components, so the
-  # world rebuild re-derives them (queue #259 to migrate those to slots).
+  # T flips the theme too (the settings dialog's switch is the other way).
+  # A theme change rebuilds the world: code-driven colours bake into
+  # components (toggleAppTheme).
   let keyT: Int = 84
   if uiIsKeyPressed(key: keyT) {
-    setDebugOverlayToggle(
-      debugOverlay: session.debugOverlay
-      index: session.themeToggle
-      on: appState.theme.active.mode is ThemeMode.light
-    )
+    toggleAppTheme(state: appState)
   }
-  let wantDark: Bool = debugOverlayToggleOn(
-    debugOverlay: session.debugOverlay
-    index: session.themeToggle
-  )
-  if wantDark is not (appState.theme.active.mode is ThemeMode.dark) {
-    if wantDark {
-      appState.theme.active = darkTheme()
-      log("[theme] -> dark (gen {appState.theme.generation + 1})")
-    } else {
-      appState.theme.active = lightTheme()
-      log("[theme] -> light (gen {appState.theme.generation + 1})")
-    }
-    appState.theme.generation = appState.theme.generation + 1
+  if appState.theme.generation is not themeGenerationBefore {
     frame.switching = true
   }
 

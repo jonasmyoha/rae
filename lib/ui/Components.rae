@@ -430,12 +430,13 @@ type LayerRef {
   layer: EntityId
 }
 
-# `DebugAnchor` marks an entity as a placement slot for the debug
-# button. Nothing reads it today: the shared debug widget
-# (ui/DebugOverlay) sits in the window's top-right corner, or wherever
-# the app puts it with placeDebugOverlay (an app could read an anchor's
-# `Rect` for that). The `value` field is just a presence-tag (Rae has no
-# zero-field structs); it's not read.
+# `DebugAnchor` marks an entity as the placement slot for the shared
+# debug widget's button (ui/DebugOverlay): ui/DebugPlacement's
+# followDebugAnchor puts the button on the first shown anchor's laid-out
+# rectangle each frame, and in the window's top-right corner when no page
+# shows one (106's top bar has one in its leading slot, so a page's own
+# corner control stays clickable). The `value` field is just a presence-tag
+# (Rae has no zero-field structs); it's not read.
 type DebugAnchor {
   value: Bool = true
 }

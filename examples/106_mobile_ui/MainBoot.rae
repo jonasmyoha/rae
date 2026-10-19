@@ -177,7 +177,7 @@ const debugOverlayScale: Float = 2.891566265060241
 # the update indicator — a UI app idles when nothing changes, so a moving
 # square means a repaint that should not have happened — none of it in a
 # headless run. The RAE_UI_DEBUG_MENU snapshot hooks still work: `open` opens
-# the dialog, `labels` shows the readouts.
+# the dialog, `labels` shows the button and its readouts.
 func createBootDebugOverlay() ret DebugOverlay {
   let headless: Bool = Gpu2d.headlessRequested()
   var debugOverlay: DebugOverlay = createDebugOverlay(
@@ -193,6 +193,7 @@ func createBootDebugOverlay() ret DebugOverlay {
     debugOverlay.open = true
   }
   if debugMenuEnv is "labels" {
+    debugOverlay.wantButton = true
     debugOverlay.wantFps = true
     debugOverlay.wantMemory = true
   }
