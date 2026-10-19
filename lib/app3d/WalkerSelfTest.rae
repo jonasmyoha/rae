@@ -1,8 +1,10 @@
-# The physics check that needs no one to play (RAE_114_PHYSICS_TEST=1). The
-# steps are app3d/WalkerPhysicsChecks: the cube stacks settle, the hero pushes
-# one and jumps, then the pooled tree trunks and the following ground hold, and the rocks and
-# bushes. This file finds this example's own entities and prints
-# the one [physicstest] line the gate greps; the exit code is 0 when all held.
+# app3d/WalkerSelfTest — the walker's physics check that needs no one to play
+# (RAE_WALKER_PHYSICS_TEST=1). The steps are app3d/WalkerPhysicsChecks and
+# app3d/WalkerTerrainBodies: the cube stacks settle, the hero pushes one and
+# jumps, then the tree trunks hold (one per island tree, or the pool on the
+# trees nearest the walker, with the ground following it), and the rocks and
+# bushes. It prints the one [physicstest] line the gates grep; the result is
+# 0 when all held.
 import Math
 import Vec3
 open ecs/Entity
@@ -11,13 +13,12 @@ open ecs/Transform
 open app3d/WalkerPhysics
 open app3d/WalkerPhysicsChecks
 open app3d/GroveTrees
-open box3d/ecs/NatureBodies
 open app3d/PropField
 open app3d/WalkerTerrainBodies
 open app3d/WalkerWorld
 
 # The pool trunk standing on a tree nearest to `point`, or none
-func nearestTree(
+func nearestPooledTrunk(
   physicsSystem: view WalkerPhysics
   world: view WalkerWorld
   point: view Vec3
@@ -41,7 +42,7 @@ func nearestTree(
 # The pooled trunk nearest the hero blocks a ray, the hero walking at it
 # stops at its bark, the pool follows the walker somewhere else, and so does
 # the ground. One [trunktest] line.
-func runTreeTrunkTest(
+func runPooledTrunkTest(
   physicsSystem: mod WalkerPhysics
   world: mod WalkerWorld
   forest: view PropField
@@ -51,7 +52,7 @@ func runTreeTrunkTest(
     controller: controllerOf(world: world, entityId: heroEntityId)
     groundZ: physicsSystem.groundZ
   )
-  if let treeEntityId: EntityId = nearestTree(
+  if let treeEntityId: EntityId = nearestPooledTrunk(
     physicsSystem: physicsSystem
     world: world
     point: heroFeet
@@ -95,12 +96,14 @@ func runTreeTrunkTest(
   ret false
 }
 
-func runPhysicsSelfTest(
+# The whole check. `pooledTrunks`: the trunks are WalkerPhysics' pool on
+# `forest` (a wide forest), else one per tree entity (an island).
+func runWalkerSelfTest(
   physicsSystem: mod WalkerPhysics
   world: mod WalkerWorld
   forest: view PropField
+  pooledTrunks: view Bool
   heroEntityId: view EntityId
-  groundZ: view Float
 ) ret Int {
   let check: CubeJumpCheck = runCubeJumpCheck(
     physicsSystem: physicsSystem
@@ -109,12 +112,24 @@ func runPhysicsSelfTest(
     bushes: bushSpots(propKinds: world.propKinds, transforms: world.transforms)
     heroEntityId: heroEntityId
   )
-  let trunksHeld: Bool = runTreeTrunkTest(
-    physicsSystem: physicsSystem
-    world: world
-    forest: forest
-    heroEntityId: heroEntityId
-  )
+  var trunksHeld: Bool = false
+  if pooledTrunks {
+    trunksHeld = runPooledTrunkTest(
+      physicsSystem: physicsSystem
+      world: world
+      forest: forest
+      heroEntityId: heroEntityId
+    )
+  } else {
+    trunksHeld = runIslandTrunkTest(
+      physicsSystem: physicsSystem
+      treeVariants: world.treeVariants
+      propKinds: world.propKinds
+      transforms: world.transforms
+      controllers: world.controllers
+      heroEntityId: heroEntityId
+    )
+  }
   let rocksAndBushesHeld: Bool = runRockBushTest(
     physicsSystem: physicsSystem
     propKinds: world.propKinds

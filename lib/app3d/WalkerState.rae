@@ -1,0 +1,93 @@
+# app3d/WalkerState — the walker examples' hot-reload state: the clip, the
+# playback, the toon switch, the hero's place and heading and the camera rig,
+# one line per app id (HotReload). The window geometry has its own channel
+# (ui/WindowGeometry).
+open Scene3d
+open app3d/CameraRig
+open app3d/CharacterController
+open app3d/Playback
+
+const walkerStateVersion: Int = 6
+
+const walkerStateOwnFields: Int = 8
+
+func walkerStatePart(parts: view List(String), index: view Int) ret String {
+  if let value: String = parts.copyAt(index: index) {
+    ret value
+  }
+  ret ""
+}
+
+func serializeWalkerState(
+  clipIndex: view Int
+  playing: view Bool
+  speed: view Float
+  toon: view Bool
+  controller: view ThirdPersonController
+  rig: view CameraRig
+  camera: view Camera3d
+) ret String {
+  var playingNum: Int = 0
+  if playing {
+    playingNum = 1
+  }
+  var toonNum: Int = 0
+  if toon {
+    toonNum = 1
+  }
+  ret "{walkerStateVersion} {clipIndex} {playingNum} {speed} {toonNum} {controller.position.x} {controller.position.y} {controller.heading} {stateString(
+    rig: rig
+    camera: camera
+  )}"
+}
+
+func restoreWalkerState(
+  raw: view String
+  clipIndex: mod Int
+  playing: mod Bool
+  speed: mod Float
+  toon: mod Bool
+  controller: mod ThirdPersonController
+  rig: mod CameraRig
+  camera: mod Camera3d
+) ret Bool {
+  if raw.length() < 1 {
+    ret false
+  }
+  let parts: List(String) = raw.trim().split(sep: " ")
+  if parts.length < walkerStateOwnFields {
+    ret false
+  }
+  if walkerStatePart(parts: parts, index: 0).trim().toInt() is not walkerStateVersion {
+    ret false
+  }
+  clipIndex = walkerStatePart(parts: parts, index: 1).trim().toInt()
+  if clipIndex < 0 {
+    clipIndex = 0
+  }
+  if clipIndex > 3 {
+    clipIndex = 3
+  }
+  playing = walkerStatePart(parts: parts, index: 2).trim().toInt() is 1
+  speed = walkerStatePart(parts: parts, index: 3).trim().toFloat()
+  if speed < speedMin {
+    speed = speedMin
+  }
+  if speed > speedMax {
+    speed = speedMax
+  }
+  toon = walkerStatePart(parts: parts, index: 4).trim().toInt() is 1
+  controller.position.x = walkerStatePart(parts: parts, index: 5).trim().toFloat()
+  controller.position.y = walkerStatePart(parts: parts, index: 6).trim().toFloat()
+  controller.heading = walkerStatePart(parts: parts, index: 7).trim().toFloat()
+  if applyCameraRigState(
+    parts: parts
+    offset: walkerStateOwnFields
+    rig: rig
+    camera: camera
+  ) is false {
+    ret false
+  }
+  # Window geometry has a separate runtime-owned persistence channel.
+  ret true
+}

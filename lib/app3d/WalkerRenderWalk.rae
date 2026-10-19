@@ -1,0 +1,488 @@
+# app3d/WalkerRenderWalk — the walker app shell's render phase
+# (app3d/WalkerApp): the animation sample (the hero's clip and its blend, a
+# pose per crowd member), the wading feet, then the walk over the renderer's
+# graph. The same walk serves both renderers: the deferred frame's order has
+# the G-buffer, lighting, TAA and water steps, the forward frame's the
+# forward step (and the depth + normal pre-pass at the G-buffer step); a step
+# that is not in the order is never reached. The sea and the spray are drawn
+# when the app has them.
+import Math
+import Profile
+import Gpu2d
+import Vec3
+open app3d/UiModes
+open ecs/Entity
+open ecs/ComponentTable
+import Sys
+open GbufferInstanced
+open Particles
+open water/WadeSplash
+open WorldBiome
+open TransparentForward
+open water/WaterLighting
+open water/WaterSystem
+open water/WaterFft
+open water/Underwater
+open gpu/GpuResources
+open gpu/GpuLifetime
+open GrassCompute
+import GrassConfig
+import app3d/Slider
+open Scene3d
+open RendererDeferred
+open Sky
+open Gbuffer
+import GbufferSkinned
+open Rendergraph
+open Math3d
+open Mesh3d
+open Gltf
+open GltfSkin
+open SdfText
+open Png
+open app3d/CameraRig
+open app3d/CharacterController
+open app3d/SettingsDialog
+open SkyHosek
+open app3d/UiShell
+open app3d/ControlPanel
+open app3d/CameraBar
+open Shadow3d
+open app3d/Playback
+open HotReload
+open ui/LogOverlay
+open ui/WindowGeometry
+open ui/EventLoop
+open ui/DebugOverlay
+open ui/VirtualJoystick
+open app3d/ModeMenu
+open ui/Ecs
+open ui/Components
+open ui/inputSystem/InputSystem
+open ui/renderSystem/RenderSystem
+open app3d/RenderScale
+open Gpu2dCanvas
+open ui/UiSystems
+open app3d/WalkerCharacter
+open app3d/WalkerPhysics
+open app3d/WalkerTerrain
+open app3d/WalkerWorld
+open app3d/WalkerCamera
+open app3d/WalkerHud
+open app3d/WalkerInput
+open app3d/WalkerRender
+open app3d/WalkerSplash
+open RendererForward
+
+# ----- render phase: animation sample + render-graph walk ------------------
+func renderWalkerApp(
+  uiSystems: view UiSystems
+  cameraSystem: mod WalkerCamera
+  characterSystem: mod CharacterSystem
+  frame: mod WalkerFrame
+  inputSystem: mod WalkerInput
+  renderSystem: mod WalkerRender
+  world: mod WalkerWorld
+  physicsSystem: view WalkerPhysics
+  terrainSystem: mod WalkerTerrain
+  wadeSplash: opt mod WadeSplash
+  waterSystem: opt mod WaterSystem
+  biome: view BiomeConfig
+  resources: mod GpuResources
+  profiler: mod Profiler
+  grassCompute: mod GrassCompute
+) {
+  frame.renderedOnce = true
+  inputSystem.lastLogRevision = inputSystem.logOverlay.revision
+  let deltaTime: Float = frame.deltaTime
+  let now: Float64 = frame.now
+
+  var clipRate: Float = 1.0
+  if characterSystem.clipIndex is ClipKind.walkFast {
+    clipRate = 1.6
+  }
+  if characterSystem.airborne {
+    clipRate = clipRate * airborneClipScale
+  }
+  if characterSystem.playing {
+    characterSystem.animTime = characterSystem.animTime + deltaTime * characterSystem.speed * clipRate
+  }
+  applySkeletonPose(sk: characterSystem.skeleton, pose: characterSystem.bindPose)
+  # Which clip feeds the pose. walk and walkFast share the walk clip (walkFast is
+  # it at 1.6x via clipRate above); once or-patterns land (#622) they merge.
+  match characterSystem.clipIndex {
+    case ClipKind.idle {
+      applyClip(
+        sk: characterSystem.skeleton
+        c: characterSystem.idleClip
+        time: characterSystem.animTime
+      )
+    }
+    case ClipKind.walk {
+      applyClip(
+        sk: characterSystem.skeleton
+        c: characterSystem.walkClip
+        time: characterSystem.animTime
+      )
+    }
+    case ClipKind.walkFast {
+      applyClip(
+        sk: characterSystem.skeleton
+        c: characterSystem.walkClip
+        time: characterSystem.animTime
+      )
+    }
+    case ClipKind.run {
+      applyClip(
+        sk: characterSystem.skeleton
+        c: characterSystem.runClip
+        time: characterSystem.animTime
+      )
+    }
+  }
+  let transitionActive: Bool = characterSystem.transitionElapsed < clipTransitionDuration
+  if transitionActive {
+    characterSystem.transitionElapsed = characterSystem.transitionElapsed + deltaTime
+    var blendWeight: Float = characterSystem.transitionElapsed / clipTransitionDuration
+    if blendWeight > 1.0 {
+      blendWeight = 1.0
+    }
+    blendWeight = blendWeight * blendWeight * (3.0 - 2.0 * blendWeight)
+    blendSkeletonPose(
+      sk: characterSystem.skeleton
+      from: characterSystem.transitionFrom
+      weight: blendWeight
+    )
+  }
+  let palette: List(Float) = buildPalette(sk: characterSystem.skeleton)
+  if let splash: mod WadeSplash => wadeSplash {
+    captureCharacterFeet(
+      characterSystem: characterSystem
+      world: world
+      wadeSplash: splash
+      entityId: characterSystem.heroEntityId
+    )
+  }
+
+  # Per-character crowd palettes (#547): upload the hero into slot 0 first (this
+  # also creates the shared palette buffer on frame 0), then give each crowd
+  # member a time-shifted pose in its own slot so ONE instanced skinned draw per
+  # part renders every character in a DISTINCT pose. The hero `palette` above is
+  # untouched — poseCharacterPalette only borrows the skeleton as scratch.
+  # Each crowd member advances its OWN animation and poses into its OWN palette
+  # slot (#547) — independent of the player, so member 2 can idle while member 0
+  # walks. Slot 0 is the hero (uploaded first, which also creates the buffer).
+  let jc: Int = jointCount(sk: characterSystem.skeleton)
+  uploadPalette(renderer: renderSystem.renderer, rows: palette, jointCount: jc)
+  loop var crowdSlot: Int = 0, crowdSlot < characterSystem.crowdEntities.length, ++crowdSlot {
+    if let member: EntityId = characterSystem.crowdEntities.copyAt(index: crowdSlot) {
+      # Advance this member's AnimationState IN PLACE (#739) — no copy/set-back.
+      let anim: mod AnimationState => componentMod(this: world.animStates, entityId: member)
+      anim.animTime = anim.animTime + deltaTime * clipPlaybackRate(clipIndex: anim.clipIndex) * anim.playbackScale
+      let memberClip: Int = anim.clipIndex
+      let memberTime: Float = anim.animTime
+      let crowdPalette: List(Float) = poseCharacterPalette(
+        characterSystem: characterSystem
+        clipIndex: memberClip
+        animTime: memberTime
+      )
+      if let splash: mod WadeSplash => wadeSplash {
+        captureCharacterFeet(
+          characterSystem: characterSystem
+          world: world
+          wadeSplash: splash
+          entityId: member
+        )
+      }
+      ensureRendererResources(renderer: renderSystem.renderer)
+      if let rendererResources: mod GpuResources => renderSystem.renderer.gpuResources {
+        uploadPaletteSlot(
+          cache: renderSystem.renderer.passes.gbuffer
+          resources: rendererResources
+          rows: crowdPalette
+          jointCount: jc
+          slot: crowdSlot + 1
+        )
+      }
+    }
+  }
+
+  # The wading spray: every foot captured above, against this frame's sea
+  if let splash: mod WadeSplash => wadeSplash {
+    if let sea: mod WaterSystem => waterSystem {
+      wadeSplashStep(
+        wadeSplash: splash
+        waterSystem: sea
+        biome: biome
+        deltaTime: deltaTime
+      )
+    }
+  }
+  applyCameraRigHierarchy(cameraSystem: cameraSystem, world: world)
+  syncCameraBar(world: inputSystem.world, rig: cameraSystem.rig, camera: cameraSystem.camera)
+  let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
+  let t: Float = (now - frame.startT) as Float
+
+  # The forest's trees near and in view, at their levels of detail, and the
+  # small props, for both the shadow pass and the scene passes below
+  gatherForest(terrainSystem: terrainSystem, camera: cameraSystem.camera, aspect: aspect)
+  gatherTerrainProps(
+    terrainSystem: terrainSystem
+    propKinds: world.propKinds
+    transforms: world.transforms
+  )
+  # The grass is generated once, before the first scene pass draws it (the
+  # G-buffer pass, or the forward frame's pre-pass or forward pass)
+  var grassGenerated: Bool = false
+  gpuPassTimingBegin(renderer: renderSystem.renderer)
+  loop var oi: Int = 0, oi < deferredOrderLength(renderer: renderSystem.renderer), ++oi {
+    let tag: Int = deferredTagAt(renderer: renderSystem.renderer, i: oi)
+    gpuPassMark(renderer: renderSystem.renderer, tag: tag)
+    Profile.zoneBegin(profiler: profiler, name: (tag as RenderTag).toString())
+    # Exhaustive over RenderTag: adding a pass is a compile error here until it is
+    # handled (#624). Each pass is a helper/one-liner; the five generic passes
+    # defer to renderDeferredPass (or-patterns, #622, will merge them into one arm).
+    match tag {
+      case RenderTag.shadow {
+        renderShadowPass(
+          cameraSystem: cameraSystem
+          characterSystem: characterSystem
+          inputSystem: inputSystem
+          renderSystem: renderSystem
+          terrainSystem: terrainSystem
+          world: world
+          physicsSystem: physicsSystem
+          aspect: aspect
+          palette: palette
+        )
+      }
+      case RenderTag.gbuffer {
+        # The deferred G-buffer pass, or the forward frame's 1x depth + normal
+        # pre-pass (forward-rae-6) the SSAO reads: the same draws
+        if not grassGenerated {
+          generateWalkerGrass(
+            cameraSystem: cameraSystem
+            characterSystem: characterSystem
+            world: world
+            t: t
+            deltaTime: deltaTime
+            profiler: profiler
+            grassCompute: grassCompute
+            resources: resources
+          )
+          grassGenerated = true
+        }
+        ensureRendererResources(renderer: renderSystem.renderer)
+        if let rendererResources: mod GpuResources => renderSystem.renderer.gpuResources {
+          Gbuffer.beginPass(
+            cache: renderSystem.renderer.passes.gbuffer
+            resources: rendererResources
+            camera: cameraSystem.camera
+            light: cameraSystem.light
+            aspect: aspect
+          )
+          drawWalkerScene(
+            cache: renderSystem.renderer.passes.gbuffer
+            rendererResources: rendererResources
+            characterSystem: characterSystem
+            terrainSystem: terrainSystem
+            world: world
+            physicsSystem: physicsSystem
+            cubeBatch: renderSystem.cubeBatch
+            palette: palette
+            t: t
+            grassCompute: grassCompute
+            resources: resources
+          )
+          Gbuffer.endPass(cache: renderSystem.renderer.passes.gbuffer, resources: rendererResources)
+        }
+      }
+      case RenderTag.forward {
+        # The forward frame's scene, shaded in one 4x MSAA pass (lib/RendererForward)
+        if not grassGenerated {
+          generateWalkerGrass(
+            cameraSystem: cameraSystem
+            characterSystem: characterSystem
+            world: world
+            t: t
+            deltaTime: deltaTime
+            profiler: profiler
+            grassCompute: grassCompute
+            resources: resources
+          )
+          grassGenerated = true
+        }
+        beginForwardPass(
+          renderer: renderSystem.renderer
+          camera: cameraSystem.camera
+          light: cameraSystem.light
+          aspect: aspect
+        )
+        if let rendererResources: mod GpuResources => renderSystem.renderer.gpuResources {
+          drawWalkerScene(
+            cache: renderSystem.renderer.passes.gbuffer
+            rendererResources: rendererResources
+            characterSystem: characterSystem
+            terrainSystem: terrainSystem
+            world: world
+            physicsSystem: physicsSystem
+            cubeBatch: renderSystem.cubeBatch
+            palette: palette
+            t: t
+            grassCompute: grassCompute
+            resources: resources
+          )
+        }
+        endForwardPass(renderer: renderSystem.renderer)
+      }
+      case RenderTag.ssao {
+        renderDeferredPass(
+          renderer: renderSystem.renderer
+          tag: tag
+          camera: cameraSystem.camera
+          light: cameraSystem.light
+          aspect: aspect
+        )
+      }
+      case RenderTag.depthPyramid {
+        renderDeferredPass(
+          renderer: renderSystem.renderer
+          tag: tag
+          camera: cameraSystem.camera
+          light: cameraSystem.light
+          aspect: aspect
+        )
+      }
+      case RenderTag.lighting {
+        renderDeferredPass(
+          renderer: renderSystem.renderer
+          tag: tag
+          camera: cameraSystem.camera
+          light: cameraSystem.light
+          aspect: aspect
+        )
+      }
+      case RenderTag.taa {
+        renderDeferredPass(
+          renderer: renderSystem.renderer
+          tag: tag
+          camera: cameraSystem.camera
+          light: cameraSystem.light
+          aspect: aspect
+        )
+      }
+      case RenderTag.waterFft {
+        # The sea's FFT wave cascades for this frame (lib/water/IslandSea)
+        if let sea: mod WaterSystem => waterSystem {
+          waterFftStep(waterSystem: sea, resources: resources)
+        }
+      }
+      case RenderTag.underwater {
+        # Underwater fog (#855): the sea / the lake when the camera dips under.
+        if let sea: mod WaterSystem => waterSystem {
+          waterUnderwaterUpdate(
+            waterSystem: sea
+            renderer: renderSystem.renderer
+            camera: cameraSystem.camera
+            light: cameraSystem.light
+          )
+        }
+        renderDeferredPass(
+          renderer: renderSystem.renderer
+          tag: tag
+          camera: cameraSystem.camera
+          light: cameraSystem.light
+          aspect: aspect
+        )
+      }
+      case RenderTag.transparentForward {
+        # Opaque snapshot BEFORE the water so a refracting surface can read it (#832),
+        # then the FFT sea (lib/water/IslandSea), then the splash droplets blend OVER it.
+        snapshotOpaque(renderer: renderSystem.renderer)
+        if let sea: mod WaterSystem => waterSystem {
+          if let meshResources: view GpuResources => renderSystem.renderer.gpuResources {
+            waterDraw(
+              waterSystem: sea
+              resources: resources
+              passes: renderSystem.renderer.passes
+              meshResources: meshResources
+              camera: cameraSystem.camera
+              light: cameraSystem.light
+              sky: renderSystem.renderer.sky
+              hasSky: renderSystem.renderer.hasSky
+              deltaTime: deltaTime
+            )
+          }
+        }
+        # Splash droplets fade by alpha through the transparent pass (#844).
+        if let splash: view WadeSplash => wadeSplash {
+          drawWadeSplash(
+            wadeSplash: splash
+            transparent: renderSystem.renderer.passes.transparent
+            camera: cameraSystem.camera
+            sky: renderSystem.renderer.sky
+            hasSky: renderSystem.renderer.hasSky
+          )
+        }
+        renderDeferredPass(
+          renderer: renderSystem.renderer
+          tag: tag
+          camera: cameraSystem.camera
+          light: cameraSystem.light
+          aspect: aspect
+        )
+      }
+      case RenderTag.bloom {
+        renderDeferredPass(
+          renderer: renderSystem.renderer
+          tag: tag
+          camera: cameraSystem.camera
+          light: cameraSystem.light
+          aspect: aspect
+        )
+      }
+      case RenderTag.antialias {
+        renderDeferredPass(
+          renderer: renderSystem.renderer
+          tag: tag
+          camera: cameraSystem.camera
+          light: cameraSystem.light
+          aspect: aspect
+        )
+      }
+      case RenderTag.composite {
+        renderDeferredPass(
+          renderer: renderSystem.renderer
+          tag: tag
+          camera: cameraSystem.camera
+          light: cameraSystem.light
+          aspect: aspect
+        )
+      }
+      case RenderTag.uiOverlay {
+        Gpu2d.beginFrameLoad(canvas: renderSystem.renderer.canvas)
+        renderSystemGpu2d(
+          world: inputSystem.world
+          uiSystems: uiSystems
+          res: inputSystem.gpuUi
+          canvas: renderSystem.renderer.canvas
+        )
+        drawWalkerHud(
+          logOverlay: inputSystem.logOverlay
+          gpuUi: inputSystem.gpuUi
+          canvas: renderSystem.renderer.canvas
+          dbg: inputSystem.dbg
+          moveStick: inputSystem.moveStick
+          editor: inputSystem.uiModes.editor
+          touchControls: touchControlsShown(menu: inputSystem.uiModes.modeMenu)
+        )
+      }
+      case RenderTag.present {
+        endUiFrameTimed(renderer: renderSystem.renderer)
+      }
+    }
+    Profile.zoneEnd(profiler: profiler, name: (tag as RenderTag).toString())
+  }
+  gpuPassTimingEnd(renderer: renderSystem.renderer)
+  capFrameSleep(drs: renderSystem.drs, frameStartSec: now)
+}

@@ -1,19 +1,26 @@
-# Walker character — a multi-primitive rigged glTF model, ANIMATED, walking an
-# infinite procedural meadow under a deferred+toon renderer.
+# Walker character on the FORWARD renderer: the walker of 136 on
+# createForwardRendererWithSsao (lib/RendererForward), the way 135 is the
+# forward twin of 134. The scene is 136's without its water (sea, wading
+# spray, underwater fog): the forward pass keeps no scene depth for them. 4x
+# MSAA is the antialiasing; SSAO comes from a 1x depth + normal pre-pass
+# (forward-rae-6). README.md lists every difference from 136.
 #
-# Structure: this file is only the entry point. The app is composed of systems:
-# the shared walker kit in lib/app3d (WalkerWorld, WalkerInput, WalkerCamera,
-# WalkerUi, WalkerHud, WalkerNet, WalkerCharacter, WalkerPhysics,
-# WalkerTerrain) and this example's own folders (movementSystem/,
-# terrainSystem/, physicsSystem/, renderSystem/), sequenced by App.rae's
-# updateApp / renderApp. Rae auto-scans every project file into one compile unit, so main()
-# calls runWalkerApp() (app.rae) directly.
+# The app is the walker app shell lib/app3d/WalkerApp; this example is its
+# settings: the island (WalkerLand.island) on the forward renderer. The
+# assets are 136's, read in place.
 #
 # Compiled-target only; needs wgpu-native + SDL3.
-#   rae run --target compiled main.rae
-# Headless screenshot:
-#   RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT=/tmp/walker.bmp \
-#     rae run --target compiled main.rae
+#   rae run examples/137_walker_forward/Main.rae
+open app3d/WalkerApp
+open app3d/WalkerAppSetup
+
 func main() ret Int {
-  ret runWalkerApp()
+  let settings: WalkerAppSettings = {
+    title: "137: Rae 3D — walker character (animated) [forward]"
+    appId: "137_walker_forward"
+    assets: "examples/136_walker_character/assets/"
+    forward: true
+    land: WalkerLand.island
+  }
+  ret runWalkerApp(settings: settings)
 }
