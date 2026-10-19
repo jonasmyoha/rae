@@ -259,8 +259,10 @@ is now a declared composition, and the runtime opens no `.wgsl` file:
   is static and validated.
 - **An app's palette is a part it lists.** `rendererSetTerrainShader(renderer:,
   shader:)` / `terrainSetShader` take the app's own six-part terrain
-  composition (its `assets/terrain_palette.wgsl` + `assets/terrain_grass.wgsl`
-  in place of the lib parts — example 114); the by-path setter
+  composition (its `assets/terrain_palette.wgsl` in place of the lib palette,
+  and a lib variant such as `lib/terrain_grass_painted.wgsl` +
+  `lib/terrain_detail_painted.wgsl` in place of the default parts — the
+  walkers 136/137/143); the by-path setter
   `rendererSetTerrainPalette` and the cwd-relative `assets/` probe are gone.
   The grass pass's `surfaceShader` text became `grassSetComputeShader(grass:,
   shader:)`, a declared composition ending in `lib/grass_compute.wgsl`; it

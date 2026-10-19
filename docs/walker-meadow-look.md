@@ -24,7 +24,10 @@ invalidates the terrain pipeline. Package the custom WGSL beside the palette.
 This hook changes grass colour only, including the grass fringe; it does not
 change biome classification, roads, water or textured-material overrides.
 
-114's `assets/terrain_grass.wgsl` blends cooler and warmer greens across broad
+The lib ships one such style, `lib/terrain_grass_painted.wgsl` (with its
+ground detail `lib/terrain_detail_painted.wgsl`: warm sand, no surf painted on
+the beach), which the walkers (136, 137, 143) list with only their palette of
+their own. It blends cooler and warmer greens across broad
 patches, then adds soft elongated mottling. Fine variation is intentionally
 subtle. It uses three additional noise octaves per terrain fragment and no
 new texture or render pass. The default material does not pay for those octaves.

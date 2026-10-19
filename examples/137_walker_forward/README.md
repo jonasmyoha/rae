@@ -19,7 +19,7 @@ Every material 136 uses has a forward version (`lib/ForwardMaterial.rae`,
 | water | none: no lake, river or sea, no water FFT, no underwater fog (the water surface reads the scene depth) | toon lake, meadow river, FFT sea, underwater fog |
 | splash droplets | none (they draw in the transparent pass with the water) | when a character wades |
 | shallow water on the ground | still painted by the terrain, and still a wall when deep (it is the island's biome, not the water renderer) | the same, under the water surface |
-| terrain colours | 136's palette and grass style (`assets/terrain_palette.wgsl`, `assets/terrain_grass.wgsl`, copied) in a forward composition (`rendererSetForwardTerrainShader`) | the same parts in the G-buffer composition |
+| terrain colours | 136's palette (`assets/terrain_palette.wgsl`, copied) with the lib's painted ground (`lib/terrain_grass_painted.wgsl`, `lib/terrain_detail_painted.wgsl`) in a forward composition (`rendererSetForwardTerrainShader`) | the same parts in the G-buffer composition |
 | everything else | the same: walker, crowd, controls, camera, grass, props, physics, shadows, bloom, UI, hot-reload state (its own app id), dynamic resolution | |
 
 ## Duplication

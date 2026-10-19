@@ -1,3 +1,7 @@
+// PAINTED MEADOW grass: a variant of lib/terrain_grass.wgsl, chosen by
+// listing this file in place of it in the terrain composition an app hands
+// to rendererSetTerrainShader (the walkers, 136/137/143). Its colours come
+// from the app's terrain_palette.wgsl (RAE_TERRAIN_GRASS).
 // Painted meadow: broad hue patches, then soft elongated leaf-like mottling.
 // All coordinates are world-space, so streaming and camera movement cannot
 // slide the paint. Only three extra noise octaves; no texture allocation.
