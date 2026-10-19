@@ -1,6 +1,5 @@
-# Walker HUD: the on-screen overlays (touch joystick, corner menu button, log +
-# debug overlays) and the settings-panel show/hide. Kept out of main.rae to
-# respect the 1000-line file cap.
+# app3d/WalkerHud — the walker examples' on-screen overlays (136, 137, 143):
+# the touch joystick, the log and debug overlays, and the camera bar chrome.
 import Gpu2d
 open app3d/UiModes
 open RendererDeferred
@@ -25,7 +24,7 @@ func updateWalkerTouch(
   world: mod UiWorld
   uiSystems: mod UiSystems
   enabled: view Bool
-) pub ret Bool {
+) ret Bool {
   # Feed the OS safe-area insets (notch / home indicator, design units) into the
   # ECS so UiRoot's padding reserves them — the whole UI, top bar included, sits
   # inside the safe area. Runs before layout (renderSystemGpu2d) this frame.
@@ -41,11 +40,11 @@ func updateWalkerTouch(
   if enabled is false {
     setCameraTouch(
       rig: rig
-      excludeId: 0 - 1
+      excludeId: -1
       joystickActive: false
       zoneX: 0.0
       zoneY: 0.0
-      zoneR: 0.0 - 1.0
+      zoneR: -1.0
     )
     ret false
   }
@@ -69,7 +68,7 @@ func updateWalkerTouch(
 # top-right corner is the "..." mode menu's alone (app3d/ModeMenu).
 # Hide the camera bar's "Mouse"/"Keys" smoothing toggles — not needed, and they
 # crowd the top bar on a phone. (Their smoothing defaults still apply.)
-func walkerHideCameraChrome(world: mod UiWorld) pub {
+func walkerHideCameraChrome(world: mod UiWorld) {
   setNodeActive(world: world, nodeId: "CameraSmoothMouseButton", value: false)
   setNodeActive(world: world, nodeId: "CameraSmoothKeysButton", value: false)
 }
@@ -83,7 +82,7 @@ func drawWalkerHud(
   moveStick: view VirtualJoystick
   editor: view Bool
   touchControls: view Bool
-) pub {
+) {
   # GAME mode: the touch stick when touch controls are shown (a phone, or the
   # "..." menu's "Simulate mobile phone"); EDITOR: the log strip. The debug
   # readout is both modes'.

@@ -9,6 +9,7 @@ import Sys
 import Vec3
 open WorldBiome
 open app3d/CameraRig
+open app3d/WalkerWorld
 open water/WadeSplash
 open app3d/WalkerCharacter
 
@@ -16,7 +17,7 @@ open app3d/WalkerCharacter
 # the first shallow shore along +x, the orbit camera close on it
 func prepareSplashPreview(
   wadeSplash: mod WadeSplash
-  cameraSystem: mod CameraSystem
+  cameraSystem: mod WalkerCamera
   groundZ: view Float
 ) {
   if Sys.getEnv(name: "RAE_WALKER_SPLASH_PREVIEW").length() is 0 {
@@ -45,7 +46,7 @@ func prepareSplashPreview(
 # the water 12 cm above its feet. 0 when it passed.
 func runSplashPoseTest(
   characterSystem: mod CharacterSystem
-  world: view GameWorld
+  world: view WalkerWorld
   wadeSplash: mod WadeSplash
 ) ret Int {
   if characterSystem.leftFootNode < 0 or characterSystem.rightFootNode < 0 {
@@ -88,7 +89,7 @@ func runSplashPoseTest(
 # Record the feet of `entityId` in the pose the skeleton has now
 func captureCharacterFeet(
   characterSystem: view CharacterSystem
-  world: view GameWorld
+  world: view WalkerWorld
   wadeSplash: mod WadeSplash
   entityId: view EntityId
 ) {

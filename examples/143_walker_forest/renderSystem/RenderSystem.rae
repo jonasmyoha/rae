@@ -65,6 +65,10 @@ open ui/UiSystems
 open app3d/WalkerCharacter
 open app3d/WalkerPhysics
 open app3d/WalkerTerrain
+open app3d/WalkerWorld
+open app3d/WalkerCamera
+open app3d/WalkerHud
+open app3d/WalkerInput
 
 # The deferred renderer + dynamic-resolution controller (#552). Lives with the
 # RenderSystem — the App just aggregates it.
@@ -86,7 +90,7 @@ func drawPhysicsCubes(
   resources: mod GpuResources
   batch: mod InstanceBatch
   physicsSystem: view WalkerPhysics
-  world: view GameWorld
+  world: view WalkerWorld
   toon: view Bool
 ) {
   resetInstanceBatch(batch: batch)
@@ -122,7 +126,7 @@ func drawPhysicsCubesShadow(
   renderer: mod DeferredRenderer
   batch: view InstanceBatch
   physicsSystem: view WalkerPhysics
-  world: view GameWorld
+  world: view WalkerWorld
 ) {
   let cubeMesh: MeshHandle = meshHandle(id: batch.meshId, generation: 1)
   loop var i: Int = 0, i < componentCount(this: physicsSystem.cubes), ++i {
@@ -144,12 +148,12 @@ func drawPhysicsCubesShadow(
 # (ground, props, the character's skinned parts + crowd). Its own function so the
 # match arm stays a one-liner (and the systems refactor #543 gives it a home).
 func renderShadowPass(
-  cameraSystem: mod CameraSystem
+  cameraSystem: mod WalkerCamera
   characterSystem: mod CharacterSystem
-  inputSystem: mod InputSystem
+  inputSystem: mod WalkerInput
   renderSystem: mod RenderSystem
   terrainSystem: mod WalkerTerrain
-  world: mod GameWorld
+  world: mod WalkerWorld
   physicsSystem: view WalkerPhysics
   aspect: copy Float
   palette: view List(Float)
@@ -192,9 +196,9 @@ func renderShadowPass(
     # Each caster's shadow samples the SAME palette slot its G-buffer instance
     # does (#547), so a crowd member casts its own pose. Hero = slot 0.
     let jc: Int = jointCount(sk: characterSystem.skeleton)
-    loop var sp: Int = 0, sp < gameWorldPartCount(world: world), ++sp {
+    loop var sp: Int = 0, sp < walkerWorldPartCount(world: world), ++sp {
       let sh: MeshHandle = meshHandle(
-        id: gameWorldPartAt(world: world, i: sp).meshId
+        id: walkerWorldPartAt(world: world, i: sp).meshId
         generation: 1
       )
       drawShadowCasterSkinnedWith(
@@ -238,10 +242,10 @@ func renderShadowPass(
 func renderGbufferPass(
   cache: mod GbufferCache
   rendererResources: mod GpuResources
-  cameraSystem: mod CameraSystem
+  cameraSystem: mod WalkerCamera
   characterSystem: mod CharacterSystem
   terrainSystem: mod WalkerTerrain
-  world: mod GameWorld
+  world: mod WalkerWorld
   physicsSystem: view WalkerPhysics
   cubeBatch: mod InstanceBatch
   aspect: copy Float
@@ -319,8 +323,8 @@ func renderGbufferPass(
     jointCount: jc
     baseRow: 0
   )
-  loop var p: Int = 0, p < gameWorldPartCount(world: world), ++p {
-    let part: view PartRoughness => gameWorldPartAt(world: world, i: p)
+  loop var p: Int = 0, p < walkerWorldPartCount(world: world), ++p {
+    let part: view PartRoughness => walkerWorldPartAt(world: world, i: p)
     let handle: MeshHandle = meshHandle(id: part.meshId, generation: 1)
     let mat: Material3d = {
       baseColor: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
@@ -379,12 +383,12 @@ func renderGbufferPass(
 # ----- render phase: animation sample + render-graph walk ------------------
 func renderApp(
   uiSystems: view UiSystems
-  cameraSystem: mod CameraSystem
+  cameraSystem: mod WalkerCamera
   characterSystem: mod CharacterSystem
   frame: mod Frame
-  inputSystem: mod InputSystem
+  inputSystem: mod WalkerInput
   renderSystem: mod RenderSystem
-  world: mod GameWorld
+  world: mod WalkerWorld
   physicsSystem: view WalkerPhysics
   terrainSystem: mod WalkerTerrain
   wadeSplash: mod WadeSplash
