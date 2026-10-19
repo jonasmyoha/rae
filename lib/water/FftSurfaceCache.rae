@@ -43,10 +43,11 @@ func fftSurfaceEnergy(
   y: view Float
   time: view Float
 ) ret Float {
+  let energy: Float = body.fftAmplitude * biomeShoreEnergy(body: body, x: x, y: y)
   if body.meshMode is 2 {
-    ret oceanMacroEnergy(x: x, y: y, time: time)
+    ret energy * oceanMacroEnergy(x: x, y: y, time: time)
   }
-  ret 1.0
+  ret energy
 }
 
 func createFftSurfaceCache(body: view WaterBody) ret FftSurfaceCache {

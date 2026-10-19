@@ -44,6 +44,7 @@ struct Water {
   bounds: vec4<f32>,        // world xy the body exists in (mesh mode 2): min x, min y, max x, max y
   mist: vec4<f32>,          // the renderer's height mist: density, falloff, base height, on (1) / off (0)
   mistTint: vec4<f32>,      // rgb = tint, w = paleness
+  shore: vec4<f32>,         // default biome: full-wave depth (0 disables), terrain ground Z, FFT amplitude
 };
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var<uniform> W: Water;
@@ -218,6 +219,11 @@ fn vs(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) uv: vec
   if (centred) { cell = max(W.grid.y, length(p.xy) * W.grid.x); }
   if (realistic) {
     if (centred) { macroEnergy = oceanMacroEnergy(base.xy, t); }
+    if (W.shore.x > 0.0) {
+      let bed = raeTerrainHeight(base.xy, W.shore.y);
+      macroEnergy *= smoothstep(0.0, W.shore.x, W.centreExtent.z - bed);
+    }
+    macroEnergy *= W.shore.z;
     disp = cascadeDisplacement(base.xy, cell) * macroEnergy;
   }
   let world = base + disp;
@@ -415,7 +421,8 @@ fn fs(i: VsOut) -> @location(0) vec4<f32> {
     // white line along it.
     let shoreBand = 1.0 - smoothstep(0.0, 0.45, foamT);
     // It goes with the water where the water fades off the land.
-    let shoreline = shoreBand * smoothstep(0.5, 0.85, ripple + shoreBand * 0.2) * 0.8 * (1.0 - land);
+    let shoreStrength = select(0.8, 0.12, W.shore.x > 0.0);
+    let shoreline = shoreBand * smoothstep(0.5, 0.85, ripple + shoreBand * 0.2) * shoreStrength * (1.0 - land);
     let whitecap = clamp(cascade.z, 0.0, 1.0) * smoothstep(0.25, 0.65, ripple);
     foam = max(shoreline, whitecap);
   }
@@ -470,7 +477,13 @@ fn fs(i: VsOut) -> @location(0) vec4<f32> {
   let sceneColour = textureSample(litCopyTex, litSampler, refrUv).rgb;
   let absorption = exp(-refrDepth * W.absorb.rgb);
   // The scattered deep colour is paint lit by the day, like the body colour
-  let underwater = sceneColour * absorption + W.deep.rgb * W.absorb.w * (1.0 - absorption) * 0.7;
+  // Coastal water has a shallow scattering colour as well as the deep one.
+  // Transmission still reveals the actual bed; it vanishes with zero depth.
+  var scatterColour = W.deep.rgb;
+  if (W.shore.x > 0.0) {
+    scatterColour = mix(W.shallow.rgb, W.deep.rgb, clamp(refrDepth / max(W.shallow.w, 0.01), 0.0, 1.0));
+  }
+  let underwater = sceneColour * absorption + scatterColour * W.absorb.w * (1.0 - absorption) * 0.7;
   if (W.refract.x > 0.5) {
     // Refracting surface: it composes its own background, so it is opaque.
     let foamMix = foam * 0.85;
