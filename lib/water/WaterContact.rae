@@ -1,0 +1,78 @@
+# Visual contact detection from measured animated points, not a gait timer.
+import Vec3
+import Math
+
+type WaterContact {
+  initialized: Bool
+  previous: Vec3
+  previousLevel: Float
+  wet: Bool
+  cooldown: Float
+  sweptDistance: Float
+}
+
+type WaterContactEvent {
+  position: Vec3
+  velocity: Vec3
+  strength: Float
+}
+
+# Entry uses relative vertical speed; submerged strokes accumulate real travel.
+# Reset on first observation, a teleport, or a long frame instead of inventing
+# an impact. Hysteresis and a short cooldown avoid chatter at the water surface.
+func stepWaterContact(
+  contact: mod WaterContact
+  position: view Vec3
+  level: copy Float
+  deltaTime: copy Float
+  available: copy Bool
+) ret opt WaterContactEvent {
+  let travel: Vec3 = Vec3.vsub(a: position, b: contact.previous)
+  let distance: Float = Vec3.vlen(a: travel)
+  if not available or not contact.initialized or deltaTime <= 0.0 or deltaTime > 0.2 or distance > 1.5 {
+    contact.initialized = available
+    contact.previous = position
+    contact.previousLevel = level
+    contact.wet = position.z <= level + 0.02
+    contact.cooldown = 0.0
+    contact.sweptDistance = 0.0
+    ret none
+  }
+  let velocity: Vec3 = Vec3.vscale(a: travel, s: 1.0 / deltaTime)
+  let approach: Float = (level - contact.previousLevel - travel.z) / deltaTime
+  let entering: Bool = not contact.wet and position.z <= level + 0.02
+  contact.previous = position
+  contact.previousLevel = level
+  contact.cooldown = Math.max(a: 0.0, b: contact.cooldown - deltaTime)
+  if position.z > level + 0.06 {
+    contact.wet = false
+    contact.sweptDistance = 0.0
+    ret none
+  }
+  if entering {
+    contact.wet = true
+  }
+  if not contact.wet {
+    ret none
+  }
+  let speed: Float = Vec3.vlen(a: velocity)
+  if speed > 0.35 {
+    contact.sweptDistance = contact.sweptDistance + distance
+  }
+  var strength: Float = 0.0
+  if entering and approach > 0.25 {
+    strength = Math.min(a: 1.8, b: 0.3 + approach * 0.35)
+  } else if contact.sweptDistance >= 0.16 and speed > 0.35 {
+    strength = Math.min(a: 0.65, b: speed * 0.15)
+  }
+  if strength <= 0.0 or contact.cooldown > 0.0 {
+    ret none
+  }
+  contact.cooldown = 0.09
+  contact.sweptDistance = 0.0
+  ret WaterContactEvent {
+    position: { x: position.x, y: position.y, z: level }
+    velocity: velocity
+    strength: strength
+  }
+}

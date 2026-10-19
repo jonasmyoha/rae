@@ -1,10 +1,12 @@
-# Water-surface spray: bounded droplets in timed bursts, independent of frame rate.
-# The flat sea level remains the emission anchor; FFT query integration is separate.
+# Water spray driven by each rendered foot pose and its water contact.
+# Only the isolated material preview uses a timer.
 import Vec3
 import Math
 open WorldBiome
 open Particles
 open WaterParticles
+open water/WaterContact
+open water/WaterSystem
 open ecs/Entity
 open ecs/ComponentTable
 open app3d/CharacterController
@@ -18,18 +20,31 @@ func emitSplashAt(
   y: copy Float
   waterZ: copy Float
 ) {
-  loop var index: Int = 0, index < 8, ++index {
+  let event: WaterContactEvent = {
+    position: { x: x, y: y, z: waterZ }
+    velocity: { z: -2.0 }
+    strength: 1.0
+  }
+  emitFootSplash(particles: particles, event: event)
+}
+
+func emitFootSplash(particles: mod ParticleSystem, event: view WaterContactEvent) {
+  let count: Int = 3 + (event.strength * 5.0).toInt()
+  let x: Float = event.position.x
+  let y: Float = event.position.y
+  let waterZ: Float = event.position.z
+  loop var index: Int = 0, index < count, ++index {
     let phase: Float = index.toFloat() * 2.399963 + x * 0.7 + y * 0.31
     let variation: Float = Math.abs(value: Math.sin(x: phase * 1.7))
-    let speed: Float = 0.55 + variation * 1.0
-    let lift: Float = 1.3 + variation * 1.4
+    let speed: Float = (0.35 + variation) * event.strength
+    let lift: Float = (0.7 + variation * 1.2) * Math.sqrt(x: event.strength)
     particleEmit(
       sys: particles
       x: x + Math.cos(x: phase) * 0.12
       y: y + Math.sin(x: phase) * 0.12
       z: waterZ + 0.025
-      vx: Math.cos(x: phase) * speed
-      vy: Math.sin(x: phase) * speed
+      vx: Math.cos(x: phase) * speed + event.velocity.x * 0.35
+      vy: Math.sin(x: phase) * speed + event.velocity.y * 0.35
       vz: lift
       life: 2.0 * lift / particles.gravity
       size: 0.018 + variation * 0.028
@@ -42,9 +57,9 @@ func emitSplashAt(
 
 # Advance + emit splashes for everything wading this frame. Call once per frame.
 func splashStep(
-  characterSystem: mod CharacterSystem
   splashes: mod ParticleSystem
   world: mod GameWorld
+  waterSystem: view WaterSystem
   deltaTime: copy Float
 ) {
   if world.splashPreview.enabled and world.splashPreview.age >= 0.0 {
@@ -59,14 +74,14 @@ func splashStep(
     ret
   }
   waterParticleUpdate(particles: splashes, deltaTime: deltaTime)
-  world.splashElapsed = world.splashElapsed + deltaTime
-  if world.splashElapsed < 0.12 {
-    ret
-  }
-  # At most one burst after a stall: never catch up with a huge emission spike.
-  world.splashElapsed = world.splashElapsed - Math.floor(x: world.splashElapsed / 0.12) * 0.12
-  world.splashTick = world.splashTick + 1
   if world.splashPreview.enabled {
+    world.splashElapsed = world.splashElapsed + deltaTime
+    if world.splashElapsed < 0.12 {
+      ret
+    }
+    # At most one burst after a stall: never catch up with a huge emission spike.
+    world.splashElapsed = world.splashElapsed - Math.floor(x: world.splashElapsed / 0.12) * 0.12
+
     emitSplashAt(
       particles: splashes
       x: world.splashPreview.origin.x
@@ -75,46 +90,10 @@ func splashStep(
     )
     ret
   }
-  # The flat water plane in WORLD space — every splash sprays up from HERE, not
-  # from the unit's (ground-relative, chest-high) position z.
-  let waterZ: Float = worldWaterZ(groundZ: characterSystem.groundZ, cfg: defaultBiomeConfig())
-  # The hero (always evaluated — the character the player is watching).
-  let heroController: view ThirdPersonController => controllerOf(
+  splashFeetStep(
     world: world
-    entityId: characterSystem.heroEntityId
+    particles: splashes
+    waterSystem: waterSystem
+    deltaTime: deltaTime
   )
-  if heroController.moving {
-    let heroDepth: Float = terrainWaterDepth(
-      x: heroController.position.x
-      y: heroController.position.y
-    )
-    if heroDepth > splashMinDepth {
-      emitSplashAt(
-        particles: splashes
-        x: heroController.position.x
-        y: heroController.position.y
-        waterZ: waterZ
-      )
-    }
-  }
-  # Every moving crowd member in water, strided so the pool is not swamped.
-  loop var i: Int = 0, i < characterSystem.crowdEntities.length, ++i {
-    if let member: EntityId = characterSystem.crowdEntities.copyAt(index: i) {
-      let controller: view ThirdPersonController => componentView(
-        this: world.controllers
-        entityId: member
-      )
-      if controller.moving and (world.splashTick + i) % 3 is 0 {
-        let depth: Float = terrainWaterDepth(x: controller.position.x, y: controller.position.y)
-        if depth > splashMinDepth {
-          emitSplashAt(
-            particles: splashes
-            x: controller.position.x
-            y: controller.position.y
-            waterZ: waterZ
-          )
-        }
-      }
-    }
-  }
 }
