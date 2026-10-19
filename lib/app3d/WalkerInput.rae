@@ -1,0 +1,101 @@
+# app3d/WalkerInput — the walker examples' input (136, 137, 143): the input
+# devices and the UI world state (WalkerInput), the window-geometry and
+# hot-reload persistence (WalkerPersist), and inputUpdate, which turns the
+# devices into an INTENT rather than moving the character directly: the touch
+# stick when active, else WASD/arrows (+ shift = walk), and Space or F to
+# jump. The intent becomes the controlled character's mover input
+# (WalkerPhysics driveCharacters), so a remote player's intent can arrive from
+# app3d/WalkerNet instead of a device.
+import Sdl3
+import Keys
+open ecs/Entity
+open ui/Ecs
+open ui/inputSystem/InputSystem
+open ui/renderSystem/RenderSystem
+open ui/UiSystems
+open ui/VirtualJoystick
+open ui/DebugOverlay
+open ui/LogOverlay
+open ui/WindowGeometry
+open app3d/ControlPanel
+open app3d/SettingsDialog
+open app3d/UiModes
+open app3d/WalkerPhysics
+
+# Input devices + the UI world state (panels, dialog, overlays)
+type WalkerInput {
+  moveStick: VirtualJoystick
+  ui: UiInput
+  world: UiWorld
+  # The lib UI systems' derived tables (ui/UiSystems), next to the world.
+  uiSystems: UiSystems
+  gpuUi: Gpu2dUi
+  clipPanel: ControlPanel
+  transport: ControlPanel
+  charPanel: ControlPanel  # prev/next character-switch buttons (#546)
+  settings: SettingsState
+  panelScroll: EntityId
+  dbg: DebugOverlay
+  logOverlay: LogOverlay
+  lastLogRevision: Int
+  # GAME (the default) or EDITOR, with the scene's pointer frames and `short`
+  # state (lib/app3d/UiModes); the "..." button switches the mode
+  uiModes: UiModes
+}
+
+# Window-geometry + hot-reload persistence. (#555)
+type WalkerPersist {
+  windowGeometry: WindowGeometry
+  lastStateSave: Float64
+  stateDirty: Bool
+}
+
+# Space, or F under the WASD hand (Space alone is awkward to reach), pressed
+# this frame
+func jumpPressed(allowKeys: view Bool) ret Bool {
+  if allowKeys is false {
+    ret false
+  }
+  ret Sdl3.isKeyPressed(key: Keys.keySpace) or Sdl3.isKeyPressed(key: Keys.keyF)
+}
+
+func inputUpdate(
+  moveStick: view VirtualJoystick
+  joyActive: view Bool
+  allowKeys: view Bool
+) ret InputIntent {
+  if joyActive {
+    ret InputIntent {
+      moveX: moveStick.valueX
+      moveY: moveStick.valueY
+      walking: false
+      jump: jumpPressed(allowKeys: allowKeys)
+      actions: 0
+    }
+  }
+  var moveX: Float = 0.0
+  var moveY: Float = 0.0
+  var walking: Bool = false
+  if allowKeys {
+    if Sdl3.isKeyDown(key: Keys.keyD) or Sdl3.isKeyDown(key: Keys.keyRight) {
+      moveX = moveX + 1.0
+    }
+    if Sdl3.isKeyDown(key: Keys.keyA) or Sdl3.isKeyDown(key: Keys.keyLeft) {
+      moveX = moveX - 1.0
+    }
+    if Sdl3.isKeyDown(key: Keys.keyW) or Sdl3.isKeyDown(key: Keys.keyUp) {
+      moveY = moveY + 1.0
+    }
+    if Sdl3.isKeyDown(key: Keys.keyS) or Sdl3.isKeyDown(key: Keys.keyDown) {
+      moveY = moveY - 1.0
+    }
+    walking = Sdl3.isKeyDown(key: Keys.keyLShift)
+  }
+  ret InputIntent {
+    moveX: moveX
+    moveY: moveY
+    walking: walking
+    jump: jumpPressed(allowKeys: allowKeys)
+    actions: 0
+  }
+}

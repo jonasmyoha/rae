@@ -14,11 +14,12 @@ open app3d/GroveTrees
 open box3d/ecs/NatureBodies
 open app3d/PropField
 open app3d/WalkerTerrainBodies
+open app3d/WalkerWorld
 
 # The pool trunk standing on a tree nearest to `point`, or none
 func nearestTree(
   physicsSystem: view WalkerPhysics
-  world: view GameWorld
+  world: view WalkerWorld
   point: view Vec3
 ) ret opt EntityId {
   var nearest: opt EntityId = none
@@ -42,7 +43,7 @@ func nearestTree(
 # the ground. One [trunktest] line.
 func runTreeTrunkTest(
   physicsSystem: mod WalkerPhysics
-  world: mod GameWorld
+  world: mod WalkerWorld
   forest: view PropField
   heroEntityId: view EntityId
 ) ret Bool {
@@ -96,7 +97,7 @@ func runTreeTrunkTest(
 
 func runPhysicsSelfTest(
   physicsSystem: mod WalkerPhysics
-  world: mod GameWorld
+  world: mod WalkerWorld
   forest: view PropField
   heroEntityId: view EntityId
   groundZ: view Float

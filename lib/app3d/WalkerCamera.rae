@@ -1,14 +1,10 @@
-# Camera system for the walker example (#548).
-#
-# CameraSystem (rig + camera + scene light + Hosek dataset) and cameraUpdate,
-# extracted from app.rae with behaviour unchanged. cameraUpdate runs the same
-# operations in the same order as before; it returns a small CameraTick because
-# the touch-stick state it computes (updateWalkerTouch) is consumed by character
-# movement AND the camera-moved flag drives the render decision. joyActive is
-# really input's business — it rides here until #545 splits input out. Example-
-# 137 files are siblings that merge into one module, so App/CharacterSystem/the
-# focus-Z consts (character.rae) and the stdlib helpers all resolve cross-file.
-
+# app3d/WalkerCamera — the walker examples' camera (136, 137, 143): the rig,
+# the camera, the scene light and the Hosek sky data (WalkerCamera), the rig
+# as an ECS parent relation in the WalkerWorld (rig entity -> camera entity),
+# and cameraUpdate: the camera bar, the touch stick, the rig's input, the GAME
+# camera turning after the walker and staying above the terrain. It returns a
+# CameraTick, because the touch stick's state feeds the character's movement
+# and the camera-moved flag the render decision.
 import Math
 import Profile
 import Gpu2d
@@ -62,14 +58,18 @@ open ui/inputSystem/InputSystem
 open ui/renderSystem/RenderSystem
 open ui/UiSystems
 open app3d/WalkerCharacter
+open app3d/WalkerHud
+open app3d/WalkerInput
+open app3d/WalkerTerrain
+open app3d/WalkerWorld
 
 # Camera rig + camera + scene light. (#548)
-# #744: `rigEntityId` and `cameraEntityId` are the two GameWorld entities that express
+# #744: `rigEntityId` and `cameraEntityId` are the two WalkerWorld entities that express
 # the rig as an ECS PARENT relation — camEntity is a child of rigEntity. The rig
 # sits at the focus target oriented by yaw/pitch; the camera hangs a fixed
 # distance behind it. TransformSystem composes the child's world position, which
 # IS the camera eye — replacing the hand-rolled orbitEye trig in applyCameraRig.
-type CameraSystem {
+type WalkerCamera {
   camera: Camera3d
   rig: CameraRig
   light: Light3d
@@ -91,9 +91,9 @@ type CameraRigLink {
 # Create the rig->camera parent relation in the world (call once, at setup).
 # Both entities carry an identity local Transform3D to start; applyCameraRig-
 # Hierarchy rewrites them each frame from the CameraRig's view state.
-func createCameraRigLink(world: mod GameWorld) ret CameraRigLink {
-  let rigEntityId: EntityId = gameWorldAddEntity(world: world)
-  let cameraEntityId: EntityId = gameWorldAddEntity(world: world)
+func createCameraRigLink(world: mod WalkerWorld) ret CameraRigLink {
+  let rigEntityId: EntityId = walkerWorldAddEntity(world: world)
+  let cameraEntityId: EntityId = walkerWorldAddEntity(world: world)
   componentSet(this: world.transforms, entityId: rigEntityId, data: createTransform3D())
   componentSet(this: world.transforms, entityId: cameraEntityId, data: createTransform3D())
   setParent(
@@ -111,7 +111,7 @@ func createCameraRigLink(world: mod GameWorld) ret CameraRigLink {
 # camEntity's local offset is (0, -distance, 0). TransformSystem folds child onto
 # parent, and the composed world translation IS the eye. Free mode has no orbit
 # rig, so it keeps the direct fly-camera placement.
-func applyCameraRigHierarchy(cameraSystem: mod CameraSystem, world: mod GameWorld) {
+func applyCameraRigHierarchy(cameraSystem: mod WalkerCamera, world: mod WalkerWorld) {
   if cameraSystem.rig.mode is not CameraRigMode.free {
     let qz: Quat = Quat.fromAxisAngle(
       axis: Vec3.create(x: 0.0, y: 0.0, z: 1.0)
@@ -119,7 +119,7 @@ func applyCameraRigHierarchy(cameraSystem: mod CameraSystem, world: mod GameWorl
     )
     let qx: Quat = Quat.fromAxisAngle(
       axis: Vec3.create(x: 1.0, y: 0.0, z: 0.0)
-      angle: 0.0 - cameraSystem.rig.viewOrbitPitch
+      angle: -cameraSystem.rig.viewOrbitPitch
     )
     componentSet(
       this: world.transforms
@@ -134,7 +134,7 @@ func applyCameraRigHierarchy(cameraSystem: mod CameraSystem, world: mod GameWorl
       this: world.transforms
       entityId: cameraSystem.cameraEntityId
       data: Transform3D {
-        position: Vec3.create(x: 0.0, y: 0.0 - cameraSystem.rig.viewDistance, z: 0.0)
+        position: Vec3.create(x: 0.0, y: -cameraSystem.rig.viewDistance, z: 0.0)
         rotation: Quat.identity()
         scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
       }
@@ -172,17 +172,17 @@ type CameraTick {
 # The GAME camera's eye stays this far over the terrain (m)
 const cameraGroundClearance: Float = 0.3
 
-# #743: consumes the narrow state it needs — the CameraSystem, the input/UI
-# bundle, the persist dirty flag, and the world + hero entity to read the
-# followed controller — not the whole App.
+# #743: consumes the narrow state it needs — the camera, the input/UI bundle,
+# the persist dirty flag, the world + hero entity to read the followed
+# controller, and the terrain the GAME camera stays above — not the whole App.
 func cameraUpdate(
   uiSystems: mod UiSystems
-  cameraSystem: mod CameraSystem
-  inputSystem: mod InputSystem
-  persist: mod PersistState
-  world: view GameWorld
+  cameraSystem: mod WalkerCamera
+  inputSystem: mod WalkerInput
+  persist: mod WalkerPersist
+  world: view WalkerWorld
   heroEntityId: view EntityId
-  groundZ: view Float
+  terrainSystem: view WalkerTerrain
   deltaTime: copy Float
 ) ret CameraTick {
   let previousMode: CameraRigMode = cameraSystem.rig.mode
@@ -244,8 +244,8 @@ func cameraUpdate(
       dist: cameraSystem.rig.viewDistance
     )
     let ground: Float = Math.max(
-      a: terrainHeightAt(x: target.x, y: target.y, groundZ: groundZ)
-      b: terrainHeightAt(x: eye.x, y: eye.y, groundZ: groundZ)
+      a: walkerTerrainHeight(terrainSystem: terrainSystem, x: target.x, y: target.y)
+      b: walkerTerrainHeight(terrainSystem: terrainSystem, x: eye.x, y: eye.y)
     )
     if keepOrbitAboveGround(
       rig: cameraSystem.rig

@@ -2,26 +2,22 @@
 #
 # CONVENTION (#822): the `App` struct IS the system list. Each system's `App`
 # member is named for its folder and typed as that folder's `<Folder>System`
-# state — `cameraSystem: CameraSystem`, `renderSystem: RenderSystem`,
-# `physicsSystem: WalkerPhysics`, `inputSystem: InputSystem`, … — so reading the
+# state — `cameraSystem: WalkerCamera`, `renderSystem: RenderSystem`,
+# `physicsSystem: WalkerPhysics`, `inputSystem: WalkerInput`, … — so reading the
 # `App` fields reads the systems. Cross-cutting DATA and resources stay
 # data-typed and are NOT forced into an `XSystem` wrapper: the per-frame `frame:
-# Frame` scratch, the ECS `world: GameWorld`, the `players: PlayerRoster` control
+# Frame` scratch, the ECS `world: WalkerWorld`, the `players: PlayerRoster` control
 # roster, and pure resources (`profiler: Profiler`, `grassCompute: GrassCompute`)
 # are not systems. See docs/naming-conventions.md.
 #
-# Structure (#743): every system is its own PascalCase folder + file —
-# InputSystem/ MovementSystem/ AnimationSystem/ TerrainSystem/ GrassSystem/
-# CameraSystem/ RenderSystem/ PhysicsSystem/ NetSystem/ UiSystem/ (plus the
-# reused lib/ecs HierarchySystem + TransformSystem). Each system function takes
-# the NARROW state it needs (its own state + the GameWorld + specific
-# components), never the whole `App` — the App is a pure aggregate here, built by
-# createApp, sequenced by updateApp / renderApp, and never threaded into a
-# system as a God-object. (Rae auto-scans every project file into one compile
-# unit, so the folders are namespaces, not import walls; the decoupling is at the
-# parameter level.) app.rae keeps only App + Frame/InputSystem/CharacterSystem/
-# PersistState, createApp, the loop, updateApp, frameBegin. hud/players/splash/
-# state stay flat as shared helpers.
+# Structure (#743): the shared walker kit is lib/app3d (WalkerWorld,
+# WalkerInput, WalkerCamera, WalkerUi, WalkerHud, WalkerNet, WalkerCharacter,
+# WalkerPhysics, WalkerTerrain); this example's own systems are its folders
+# (movementSystem/, terrainSystem/, physicsSystem/, renderSystem/). Each system
+# function takes the NARROW state it needs (its own state + the WalkerWorld +
+# specific components), never the whole `App` — the App is a pure aggregate
+# here, built by createApp, sequenced by updateApp / renderApp. This file keeps
+# App + Frame, createApp, the loop, updateApp, frameBegin.
 import Math
 import Profile
 import Gpu2d
@@ -85,6 +81,12 @@ open ui/UiSystems
 open app3d/WalkerCharacter
 open app3d/PlayerRoster
 open app3d/WalkerPhysics
+open app3d/WalkerWorld
+open app3d/WalkerInput
+open app3d/WalkerCamera
+open app3d/WalkerUi
+open app3d/WalkerHud
+open app3d/WalkerNet
 open app3d/WalkerTerrain
 open app3d/WalkerTerrainBodies
 open app3d/IslandForest
@@ -115,58 +117,27 @@ type Frame {
   resized: Bool
 }
 
-# Input devices + the UI world state (panels, dialog, overlays). Split further in
-# #545 (input intent) and #549 (UI system).
-type InputSystem {
-  moveStick: VirtualJoystick
-  ui: UiInput
-  world: UiWorld
-  # The lib UI systems' derived tables (ui/UiSystems), next to the world.
-  uiSystems: UiSystems
-  gpuUi: Gpu2dUi
-  clipPanel: ControlPanel
-  transport: ControlPanel
-  charPanel: ControlPanel  # prev/next character-switch buttons (#546)
-  settings: SettingsState
-  panelScroll: EntityId
-  dbg: DebugOverlay
-  logOverlay: LogOverlay
-  lastLogRevision: Int
-  # GAME (the default) or EDITOR, with the scene's pointer frames and `short`
-  # state (lib/app3d/UiModes); the "..." button switches the mode
-  uiModes: UiModes
-}
-
-# CameraSystem + cameraUpdate live in CameraSystem/ (#548, foldered #743).
+# WalkerCamera + cameraUpdate live in CameraSystem/ (#548, foldered #743).
 # RenderSystem lives in RenderSystem/; the per-system state types live with their
-# systems. app.rae keeps only the cross-cutting Frame / InputSystem / CharacterSystem /
-# PersistState that no single system owns.
-
-# Window-geometry + hot-reload persistence. (#555)
-type PersistState {
-  windowGeometry: WindowGeometry
-  lastStateSave: Float64
-  stateDirty: Bool
-}
-
+# systems. app.rae keeps only the cross-cutting Frame / WalkerInput / CharacterSystem /
+# WalkerPersist that no single system owns.
 type App {
-  # #738: the ECS GameWorld — the authoritative gameplay world (EntityAllocator +
+  # #738: the ECS WalkerWorld — the authoritative gameplay world (EntityAllocator +
   # Transform3D/WorldTransform3D/Material3D tables); the character, crowd, terrain
   # and grass live here.
-  world: GameWorld
+  world: WalkerWorld
   frame: Frame
-  inputSystem: InputSystem
-  cameraSystem: CameraSystem
+  inputSystem: WalkerInput
+  cameraSystem: WalkerCamera
   characterSystem: CharacterSystem
   terrainSystem: WalkerTerrain
-  grassSystem: GrassSystem
   renderSystem: RenderSystem
   profiler: Profiler  # #764: was lib/profile.rae gProf* globals
   grassCompute: GrassCompute  # #764: was lib/GrassCompute.rae gGrass* globals
   physicsSystem: WalkerPhysics  # fixed-step sim seam (physics.rae, #553)
-  netSystem: NetSystem  # multiplayer seam (net.rae, #554)
+  netSystem: WalkerNet  # multiplayer seam (net.rae, #554)
   players: PlayerRoster  # who the local player controls (players.rae, #546)
-  persist: PersistState
+  persist: WalkerPersist
   wadeSplash: WadeSplash  # the spray of wading feet (lib/water/WadeSplash)
   waterSystem: WaterSystem  # the FFT sea at the biome water plane (lib/water/IslandSea)
   idIssuer: IdIssuer  # the root's shared ID issuer (#869)
@@ -286,9 +257,9 @@ func createApp() ret App {
 
     let groundZ: Float = 0.0 - 1.0
     var characterController: ThirdPersonController = createThirdPersonController()
-    # #739: the GameWorld holds the hero + crowd as entities; built here so
+    # #739: the WalkerWorld holds the hero + crowd as entities; built here so
     # createApp can populate it, then moved into the App below.
-    var gameWorld: GameWorld = createGameWorld()
+    var walkerWorld: WalkerWorld = createWalkerWorld()
 
     # #745: quat rotation, not Euler Vec3. The model is authored Z-up-rotated by
     # +pi/2 about X; as a quat that is fromAxisAngle(X, pi/2). transform3dToMatrix
@@ -361,9 +332,9 @@ func createApp() ret App {
             indices: part.indices
           )
           if meshHandleIsValid(h: handle) {
-            let partEntityId: EntityId = gameWorldAddEntity(world: gameWorld)
-            gameWorldSetPartRoughness(
-              world: gameWorld
+            let partEntityId: EntityId = walkerWorldAddEntity(world: walkerWorld)
+            walkerWorldSetPartRoughness(
+              world: walkerWorld
               entityId: partEntityId
               part: PartRoughness { meshId: handle.id, roughness: rough }
             )
@@ -375,7 +346,7 @@ func createApp() ret App {
         }
       }
     }
-    let partCount: Int = gameWorldPartCount(world: gameWorld)
+    let partCount: Int = walkerWorldPartCount(world: walkerWorld)
     log("[gltf] skinned parts: {partCount}")
     if partCount is 0 {
       log("[gltf] no skinned primitives uploaded")
@@ -399,13 +370,7 @@ func createApp() ret App {
     )
     var terrainSystem: WalkerTerrain = createTerrainSystem(
       renderer: renderer
-      world: gameWorld
-      assets: assets
-      groundZ: groundZ
-    )
-    var grass: GrassSystem = createGrassSystem(
-      renderer: renderer
-      world: gameWorld
+      world: walkerWorld
       assets: assets
       groundZ: groundZ
     )
@@ -462,8 +427,8 @@ func createApp() ret App {
       }
     }
     # #744: express the camera rig as an ECS parent relation (rig entity -> camera
-    # entity) in the GameWorld; applyCameraRigHierarchy resolves the eye each frame.
-    let rigLink: CameraRigLink = createCameraRigLink(world: gameWorld)
+    # entity) in the WalkerWorld; applyCameraRigHierarchy resolves the eye each frame.
+    let rigLink: CameraRigLink = createCameraRigLink(world: walkerWorld)
 
     var clipIndex: Int = 0
     var playing: Bool = true
@@ -578,10 +543,10 @@ func createApp() ret App {
     # The island's forest, with a clearing around the spawn for the cube stacks
     let treeCount: Int = plantIslandForest(
       terrainSystem: terrainSystem
-      allocator: gameWorld.allocator
-      transforms: gameWorld.transforms
-      propKinds: gameWorld.propKinds
-      treeVariants: gameWorld.treeVariants
+      allocator: walkerWorld.allocator
+      transforms: walkerWorld.transforms
+      propKinds: walkerWorld.propKinds
+      treeVariants: walkerWorld.treeVariants
       spawnX: characterController.position.x
       spawnY: characterController.position.y
     )
@@ -591,14 +556,14 @@ func createApp() ret App {
     # #739: the hero is an entity carrying its ThirdPersonController + Transform3D.
     # Its clip/animTime + motion-vector model stay on CharacterSystem (hero-specific
     # transitions); only the controller moves into the world.
-    let heroEntityId: EntityId = gameWorldAddEntity(world: gameWorld)
-    gameWorldSetController(
-      world: gameWorld
+    let heroEntityId: EntityId = walkerWorldAddEntity(world: walkerWorld)
+    walkerWorldSetController(
+      world: walkerWorld
       entityId: heroEntityId
       controller: characterController
     )
-    gameWorldSetTransform(
-      world: gameWorld
+    walkerWorldSetTransform(
+      world: walkerWorld
       entityId: heroEntityId
       transform: controllerTransform3D(controller: characterController)
     )
@@ -621,10 +586,14 @@ func createApp() ret App {
       # #739: each crowd member is an entity — controller + AnimationState + a
       # Transform3D synced from the controller. Its render model is derived from
       # the controller (walkerWorldModel) at draw time, so no stored model.
-      let cloneEntityId: EntityId = gameWorldAddEntity(world: gameWorld)
-      gameWorldSetController(world: gameWorld, entityId: cloneEntityId, controller: cloneController)
-      gameWorldSetAnim(
-        world: gameWorld
+      let cloneEntityId: EntityId = walkerWorldAddEntity(world: walkerWorld)
+      walkerWorldSetController(
+        world: walkerWorld
+        entityId: cloneEntityId
+        controller: cloneController
+      )
+      walkerWorldSetAnim(
+        world: walkerWorld
         entityId: cloneEntityId
         anim: AnimationState {
           clipIndex: crowdClipFor(index: cloneIndex)
@@ -632,8 +601,8 @@ func createApp() ret App {
           playbackScale: 1.0
         }
       )
-      gameWorldSetTransform(
-        world: gameWorld
+      walkerWorldSetTransform(
+        world: walkerWorld
         entityId: cloneEntityId
         transform: controllerTransform3D(controller: cloneController)
       )
@@ -642,13 +611,8 @@ func createApp() ret App {
     updateInfiniteTerrain(
       terrainSystem: terrainSystem
       renderer: renderer
-      propKinds: gameWorld.propKinds
-      transforms: gameWorld.transforms
-      playerPosition: characterController.position
-    )
-    updateGrassField(
-      grassSystem: grass
-      world: gameWorld
+      propKinds: walkerWorld.propKinds
+      transforms: walkerWorld.transforms
       playerPosition: characterController.position
     )
     # Physics (lib/box3d/ecs): the island's height field, a mover for the hero and
@@ -672,33 +636,33 @@ func createApp() ret App {
         physicsSystem: physicsSystem
         entityId: crowdEntityId
         feet: controllerFeet(
-          controller: controllerOf(world: gameWorld, entityId: crowdEntityId)
+          controller: controllerOf(world: walkerWorld, entityId: crowdEntityId)
           groundZ: groundZ
         )
       )
     }
     let cubeCount: Int = spawnCubeStacks(
       physicsSystem: physicsSystem
-      allocator: gameWorld.allocator
-      transforms: gameWorld.transforms
+      allocator: walkerWorld.allocator
+      transforms: walkerWorld.transforms
       spawnPoint: controllerFeet(controller: characterController, groundZ: groundZ)
     )
     let trunkCount: Int = addTreeTrunks(
       physicsSystem: physicsSystem
-      treeVariants: gameWorld.treeVariants
-      transforms: gameWorld.transforms
+      treeVariants: walkerWorld.treeVariants
+      transforms: walkerWorld.transforms
     )
     let rockCount: Int = placeRockBodies(
       physicsSystem: physicsSystem
-      propKinds: gameWorld.propKinds
-      transforms: gameWorld.transforms
+      propKinds: walkerWorld.propKinds
+      transforms: walkerWorld.transforms
     )
     log(
       "[physics] Box3D: the island height field, {1 + cloneCount} movers, {cubeCount} cubes, {trunkCount} tree trunks, {rockCount} rocks"
     )
     # #746: exercise the physics/net ECS seams once at startup — spawn/despawn via
     # generational entities, step a Box3D body. Leaves the world untouched.
-    seamSelfTest(world: gameWorld, physicsSystem: physicsSystem)
+    seamSelfTest(world: walkerWorld, physicsSystem: physicsSystem)
     if rig.mode is CameraRigMode.character {
       camera.target = thirdPersonCameraTarget(
         controller: characterController
@@ -799,7 +763,7 @@ func createApp() ret App {
       )
     )
     ret App {
-      world: own gameWorld
+      world: own walkerWorld
       frame: {
         deltaTime: 0.0
         now: startT
@@ -864,7 +828,6 @@ func createApp() ret App {
         airborne: false
       }
       terrainSystem: own terrainSystem
-      grassSystem: own grass
       renderSystem: {
         renderer: own renderer
         drs: own drs
@@ -889,13 +852,13 @@ func createApp() ret App {
 # ----- the loop ------------------------------------------------------------
 func runWalkerApp() ret Int {
   var app: App = createApp()
-  # #739/#740/#741: the GameWorld holds the hero + crowd (controllers), the
+  # #739/#740/#741: the WalkerWorld holds the hero + crowd (controllers), the
   # skinned body parts (PartRoughness), and the terrain props + heightfield tiles
   # (TerrainProp) — all recycled ECS entities.
   log(
-    "[ecs] GameWorld: {gameWorldEntityCount(world: app.world)} entities ({gameWorldPartCount(
+    "[ecs] WalkerWorld: {walkerWorldEntityCount(world: app.world)} entities ({walkerWorldPartCount(
       world: app.world
-    )} parts + hero + crowd + terrain + grass)"
+    )} parts + hero + crowd + terrain)"
   )
   prepareSplashPreview(
     wadeSplash: app.wadeSplash
