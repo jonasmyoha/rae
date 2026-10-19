@@ -39,6 +39,8 @@ open box3d/Box3d
 open box3d/Box3dTypes
 open ecs/World
 open terrainSystem/WalkerTrees
+open physicsSystem/TerrainBodies
+open box3d/ecs/NatureBodies
 
 const walkerPhysicsStep: Float = 1.0 / 60.0
 
@@ -288,11 +290,17 @@ func moveCharacters(physicsSystem: mod PhysicsSystem, world: mod GameWorld, grou
     )
     let fromX: Float = character.mover.transform.p.x
     let fromY: Float = character.mover.transform.p.y
+    # A bush slows a character inside it (box3d/ecs/NatureBodies)
+    let throttle: Vec2 = applyBushLimit(
+      character: character
+      limit: bushSpeedLimitAt(world: world, x: fromX, y: fromY)
+    )
     let center: Vec3 = moveCharacter(
       character: character
       physics: physicsSystem.physics
       ignoreShapeIds: noIgnoredShapes
     )
+    character.throttle = throttle
     if terrainWadable(x: center.x, y: center.y) is false {
       if terrainWadable(x: center.x, y: fromY) {
         character.mover.transform.p.y = fromY

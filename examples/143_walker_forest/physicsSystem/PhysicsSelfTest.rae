@@ -13,6 +13,7 @@ open ecs/Transform
 open app3d/CharacterController
 open box3d/ecs/Physics
 open physicsSystem/TreeTrunkTest
+open physicsSystem/RockBushTest
 open app3d/PropField
 
 # Fixed steps the walk may take (8 s), and the jump (3 s)
@@ -204,7 +205,13 @@ func runPhysicsSelfTest(
     heroEntityId: heroEntityId
     groundZ: groundZ
   )
-  let passed: Bool = settled and cubeMoved and groundedBefore and leftGround and landed and trunksHeld
+  let rocksAndBushesHeld: Bool = runRockBushTest(
+    physicsSystem: physicsSystem
+    world: world
+    heroEntityId: heroEntityId
+    groundZ: groundZ
+  )
+  let passed: Bool = settled and cubeMoved and groundedBefore and leftGround and landed and trunksHeld and rocksAndBushesHeld
   log(
     "[physicstest] settled={settled} in {settleSteps} steps (drift {settleDrift} m), cubeMoved={cubeMoved} after {walkSteps} steps (moved {largestCubeMove(
       physicsSystem: physicsSystem

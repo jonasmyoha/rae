@@ -1,0 +1,137 @@
+# box3d/ecs/NatureBodies — terrain props in the physics world, the way the
+# downstream game treats its nature props:
+#
+# - A rock is a solid static body: a sphere three quarters of the rock's
+#   mean width round its middle (addRockBody), so a walker stops at it or
+#   steps onto a small one. An app that reuses rock entities as its terrain
+#   streams gives them new bodies after each stream (despawnRigidBody, then
+#   addRockBody).
+# - A bush has no body: walking into it is allowed, only slower. The deeper a
+#   walker is inside a bush's soft radius (bushSoftRadius), the lower its
+#   speed limit (bushSpeedLimit); applyBushLimit holds a character to it for
+#   one step of its mover.
+import Math
+import Vec3
+open Vec2
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Transform
+open box3d/ecs/PhysicsTypes
+open box3d/ecs/PhysicsComponents
+open box3d/ecs/PhysicsSpawn
+open box3d/ecs/Physics
+open box3d/ecs/CharacterMover
+open box3d/Box3dTypes
+
+# A rock's sphere: this share of its mean width (a unit rock is a unit sphere
+# cut flat, so its sides lie inside radius 1)
+const rockColliderShare: Float = 0.75
+
+# A bush's crown reaches about this far from its foot at scale 1
+# (procgen/FluffyFoliage: five clusters 0.12 to 0.22 out, 0.25 round)
+const bushCrownRadius: Float = 0.45
+
+# The soft part of a bush: this share of its crown
+const bushSoftShare: Float = 0.8
+
+# The speed limit (m/s) at a bush's soft edge and at its middle. A walk
+# (1.7 m/s) goes through the edge and slows in the middle; a run (4.2 m/s)
+# slows as soon as it is in.
+const bushEdgeSpeed: Float = 2.6
+
+const bushCoreSpeed: Float = 0.9
+
+# No limit
+const bushNoLimit: Float = 1000.0
+
+# The radius of the sphere of a rock posed `transform`
+func rockColliderRadius(transform: view Transform3D) ret Float {
+  ret rockColliderShare * (transform.scale.x + transform.scale.y) * 0.5
+}
+
+# A copy of an entity's pose (spawning its body writes the table)
+func natureBodyPose(
+  transforms: view ComponentTable(Transform3D)
+  entityId: view EntityId
+) ret Transform3D {
+  let pose: view Transform3D => componentView(this: transforms, entityId: entityId)
+  ret Transform3D { position: pose.position, rotation: pose.rotation, scale: pose.scale }
+}
+
+# Give the rock `entityId` a static body and its sphere at its current pose
+func addRockBody(
+  physics: mod Physics
+  rigidBodies: mod ComponentTable(RigidBody)
+  colliders: mod ComponentTable(Collider)
+  transforms: mod ComponentTable(Transform3D)
+  entityId: view EntityId
+) {
+  let transform: Transform3D = natureBodyPose(transforms: transforms, entityId: entityId)
+  var bodyDef: BodyDef = defaultBodyDef(lengthUnitsPerMeter: 1.0)
+  bodyDef.bodyType = BodyType.staticBody
+  bodyDef.position = transform.position
+  bodyDef.rotation = transform.rotation
+  let bodyId: BodyId = spawnRigidBody(
+    physics: physics
+    rigidBodies: rigidBodies
+    transforms: transforms
+    entityId: entityId
+    def: bodyDef
+  )
+  var shapeDef: ShapeDef = defaultShapeDef(lengthUnitsPerMeter: 1.0)
+  shapeDef.baseMaterial.friction = 0.7
+  let shapeId: ShapeId = addSphereCollider(
+    physics: physics
+    rigidBodies: rigidBodies
+    colliders: colliders
+    entityId: entityId
+    def: shapeDef
+    sphere: {
+      center: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+      radius: rockColliderRadius(transform: transform)
+    }
+  )
+}
+
+# The soft radius of a bush scaled `scale`
+func bushSoftRadius(scale: view Float) ret Float {
+  ret bushCrownRadius * bushSoftShare * scale
+}
+
+# The speed limit `distance` from the foot of a bush whose soft radius is
+# `radius`: none outside, bushEdgeSpeed at the edge, down to bushCoreSpeed at
+# the middle
+func bushSpeedLimit(distance: view Float, radius: view Float) ret Float {
+  if radius <= 0.0 or distance >= radius {
+    ret bushNoLimit
+  }
+  let depth: Float = 1.0 - distance / radius
+  ret bushEdgeSpeed + (bushCoreSpeed - bushEdgeSpeed) * depth
+}
+
+# Hold a character to the speed limit `limit` for one step: its horizontal
+# velocity no faster, its throttle no more than the limit asks for (the
+# mover's top speed is CharacterMover.maxSpeed). The throttle as it was, to
+# give back after the step.
+func applyBushLimit(character: mod CharacterBody, limit: view Float) ret Vec2 {
+  let throttle: Vec2 = { x: character.throttle.x, y: character.throttle.y }
+  if limit >= bushNoLimit {
+    ret throttle
+  }
+  let velocityX: Float = character.mover.velocity.x
+  let velocityY: Float = character.mover.velocity.y
+  let speed: Float = Math.sqrt(x: velocityX * velocityX + velocityY * velocityY)
+  if speed > limit {
+    character.mover.velocity.x = velocityX * limit / speed
+    character.mover.velocity.y = velocityY * limit / speed
+  }
+  var topSpeed: Float = maxSpeed
+  if character.mover.sprint {
+    topSpeed = 1.5 * maxSpeed
+  }
+  let asked: Float = Math.sqrt(x: throttle.x * throttle.x + throttle.y * throttle.y) * topSpeed
+  if asked > limit {
+    character.throttle = Vec2 { x: throttle.x * limit / asked, y: throttle.y * limit / asked }
+  }
+  ret throttle
+}
