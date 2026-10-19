@@ -1,0 +1,27 @@
+# An empty `{ }` where a struct is expected — a struct-typed field of a
+# literal, written in a `ret` — is that struct's literal with no fields, as
+# `let x: T = { }` is: the field's declared type says what it builds. It used
+# to fail as "a list literal here needs its type written on it".
+type Inner {
+  value: Int
+  label: String
+}
+
+type Pair {
+  first: Inner
+  second: Inner
+  items: List(Int)
+}
+
+func makePair() ret Pair {
+  ret Pair { first: {}, second: { value: 2, label: "two" }, items: {} }
+}
+
+func main() {
+  let pair: Pair = makePair()
+  log("first {pair.first.value} [{pair.first.label}]")
+  log("second {pair.second.value} {pair.second.label}")
+  log("items {pair.items.length}")
+  let nested: Pair = { first: {}, second: {}, items: { 4, 5 } }
+  log("nested {nested.first.value} {nested.second.value} items {nested.items.length}")
+}

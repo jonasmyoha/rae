@@ -66,9 +66,7 @@ static bool bitwise_needs_parens(AstBinaryOp parent, const AstExpr* operand) {
 
 static void emit_c_source_location(CFuncContext* ctx, const AstExpr* expr,
                                    FILE* out) {
-    const char* file = (ctx && ctx->module && ctx->module->file_path)
-                           ? ctx->module->file_path
-                           : "<unknown>";
+    const char* file = c_source_file(ctx);
     fputc('"', out);
     for (const char* p = file; *p; p++) {
         if (*p == '"' || *p == '\\') fputc('\\', out);
@@ -1996,7 +1994,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                         "cannot copy owning field '%.*s' of type '%.*s' because deep-copy is not implemented; use `own` to move or `view` to borrow",
                         (int)f->name.len, f->name.data,
                         (int)fbase.len, fbase.data);
-                    diag_error(ctx->module ? ctx->module->file_path : "<unknown>",
+                    diag_error(c_source_file(ctx),
                                (int)expr->line, (int)expr->column, msg);
                 }
             }
@@ -2078,6 +2076,26 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
         break;
     }
     case AST_EXPR_COLLECTION_LITERAL: {
+        // An empty `{ }` where a struct is expected (a struct-typed field of
+        // a literal, an argument): that struct's literal with no fields, the
+        // same as `let x: T = { }` — the type is written where the value
+        // goes, as Rae wants it. Lowered through the object-literal path, so
+        // it builds exactly what `T { }` would.
+        if (!expr->as.collection.type && !expr->as.collection.elements && ctx->has_expected_type) {
+            Str expectedBase = get_base_type_name(&ctx->expected_type);
+            bool containerType = str_eq_cstr(expectedBase, "List") || str_eq_cstr(expectedBase, "Array")
+                || str_eq_cstr(expectedBase, "Buffer");
+            const AstDecl* expectedDecl = (expectedBase.len > 0 && !containerType)
+                ? find_type_decl(ctx, ctx->module, expectedBase) : NULL;
+            if (expectedDecl && expectedDecl->kind == AST_DECL_TYPE) {
+                AstExpr emptyObject = *expr;
+                emptyObject.kind = AST_EXPR_OBJECT;
+                emptyObject.as.object_literal.type = NULL;
+                emptyObject.as.object_literal.fields = NULL;
+                emit_expr(ctx, &emptyObject, out, parent_prec, is_lvalue, suppress_deref);
+                break;
+            }
+        }
         // Unlike a binding initializer, a returned struct field needs a C
         // expression. Build an owning List in a statement expression and move
         // its value into the field; the enclosing struct owns its cleanup.
@@ -2106,7 +2124,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
             if (str_eq_cstr(function->name, "add")) addFunction = function;
         }
         if (!elementType || !createFunction || !addFunction) {
-            diag_error(ctx->module ? ctx->module->file_path : "<unknown>",
+            diag_error(c_source_file(ctx),
                        expr->line, expr->column,
                        "a list literal here needs its type written on it: `List(T) { ... }` "
                        "(e.g. `ret List(Point) { ... }`); Rae does not infer it");
