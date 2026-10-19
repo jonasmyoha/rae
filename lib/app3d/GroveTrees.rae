@@ -1,14 +1,16 @@
-# The walker's trees and bushes: every tree of Autumn Grove but its giant
-# camphor — the leaf-patch forms (lib/procgen/FluffyFoliage.rae: broadleaf,
-# umbrella pine, cypress, spruce, bush), the four autumn broadleaves and the
-# palm (lib/procgen/Foliage.rae) — generated once. Each tree species is a
-# PropField kind (lib/app3d/PropField) at three levels of detail, each level
-# its wood and its leaves in three tones: full crowns near, sparser crowns of
-# bigger patches out to the shadows' reach, a few big patches beyond. The
+# app3d/GroveTrees — the trees and bushes of Autumn Grove, as a set of
+# species for a forest: every tree of the grove but its giant camphor — the
+# leaf-patch forms (procgen/FluffyFoliage: broadleaf, umbrella pine, cypress,
+# spruce, bush), the four autumn broadleaves and the palm (procgen/Foliage) —
+# generated once. Each tree species becomes an app3d/PropField kind at three
+# levels of detail (addForestKinds), each level its wood and its leaves in
+# three tones: full crowns near, sparser crowns of bigger patches out to the
+# shadows' reach, and a billboard of the species' picture beyond. The
 # leaf-patch forms are unit height (their width is built into their meshes,
 # speciesWidth), so a placement's scale is their height in metres; the autumn
-# trees and the palm are built at autumnReferenceHeight. The bushes are
-# streamed with the small props, one instanced draw per leaf tone.
+# trees and the palm are built at autumnReferenceHeight. Bushes are drawn as
+# app3d/PropInstancer parts, one per leaf tone (createBushParts). Used by the
+# walkers (136, 137, 143).
 import Math
 import Vec3
 import RendererDeferred
@@ -19,32 +21,11 @@ open GbufferInstanced
 open procgen/FluffyFoliage
 open procgen/Foliage
 open app3d/PropField
+open app3d/PropInstancer
 open app3d/SpriteBake
 open GbufferSprite
 open gpu/GpuResources
 
-# One instanced prop draw: its mesh, its material, and a pre-sized batch refilled
-# each frame. The material is a value (not a scene index) so terrain owns no
-# Scene3d state.
-type PropInstancer {
-  mesh: MeshHandle
-  material: Material3d
-  batch: InstanceBatch
-}
-
-func createPropInstancer(
-  mesh: view MeshHandle
-  material: view Material3d
-  capacity: copy Int
-) ret PropInstancer {
-  ret PropInstancer {
-    mesh: mesh
-    material: material
-    batch: own createInstanceBatch(mesh: mesh, capacity: capacity)
-  }
-}
-
-# The tree species (TreeVariant.species), in the order of their parts
 const speciesBroadleaf: Int = 0
 
 const speciesUmbrella: Int = 1
@@ -65,9 +46,6 @@ const speciesCrimson: Int = 7
 const speciesPalm: Int = 8
 
 const treeSpeciesCount: Int = 9
-
-# How many trees the island's forest has (terrainSystem/Forest)
-const forestSize: Int = 300
 
 # The height (m) the autumn trees and the palm are built at; a placement
 # scales them from it
@@ -266,10 +244,6 @@ const spriteCutoff: Float = 0.5
 
 const nearTreeDistance: Float = 30.0
 
-const midTreeDistance: Float = 60.0
-
-const farTreeDistance: Float = 140.0
-
 # How much wider than a unit form a species is (PropField scales uniformly,
 # so the width is built into its meshes)
 func speciesWidth(species: view Int) ret Float {
@@ -455,11 +429,15 @@ func speciesPicture(species: view Int) ret SpritePicture {
 # Every tree species as a PropField kind (kind index = species) at three
 # levels of detail: full crowns near, sparser crowns of bigger patches or
 # leaves out to the shadows' reach, and beyond that a billboard of the
-# species' picture (a layer of the sprite array, made here)
+# species' picture (a layer of the sprite array, made here). `midDistance` is
+# where the sparser crowns end (keep it inside the shadows' reach),
+# `farDistance` where the billboards end.
 func addForestKinds(
   field: mod PropField
   renderer: mod DeferredRenderer
   sprites: mod SpriteCache
+  midDistance: view Float
+  farDistance: view Float
 ) {
   # Every layer with its full mip chain, so far billboards do not shimmer
   let mips: Int = spriteMipCount(w: spritePictureWidth, h: spritePictureHeight)
@@ -499,13 +477,13 @@ func addForestKinds(
       wood: wood
       patches: midPatches
       leaves: midLeaves
-      maxDistance: midTreeDistance
+      maxDistance: midDistance
       castsShadow: true
     ))
     lods.add(
       value: {
         parts: List.create(PropPart, cap: 0)
-        maxDistance: farTreeDistance
+        maxDistance: farDistance
         castsShadow: true
         facesCamera: true
       }

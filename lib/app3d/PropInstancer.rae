@@ -1,0 +1,47 @@
+# app3d/PropInstancer — one instanced prop draw: its mesh, its material and a
+# pre-sized batch refilled each frame. The material is a value (not a scene
+# index), so the system that owns it owns no Scene3d state. For props drawn
+# one batch per mesh (rocks, bush tones, grass tufts); a large static field
+# of props with levels of detail is app3d/PropField instead.
+#
+#   var rocks: PropInstancer = createPropInstancer(mesh: m, material: mat, capacity: 64)
+#   ...each frame: resetInstanceBatch(batch: rocks.batch), then per rock
+#   addPropInstance(prop: rocks, model: its matrix), then
+#   drawInstances(cache: c, resources: g, batch: rocks.batch)
+open Math3d
+open Scene3d
+open GbufferInstanced
+
+type PropInstancer {
+  mesh: MeshHandle
+  material: Material3d
+  batch: InstanceBatch
+}
+
+func createPropInstancer(
+  mesh: view MeshHandle
+  material: view Material3d
+  capacity: copy Int
+) ret PropInstancer {
+  ret PropInstancer {
+    mesh: mesh
+    material: material
+    batch: own createInstanceBatch(mesh: mesh, capacity: capacity)
+  }
+}
+
+# One more prop this frame, at `model` (it does not move, so its previous
+# model is the same)
+func addPropInstance(prop: mod PropInstancer, model: view Mat4) {
+  addInstance(
+    batch: prop.batch
+    model: model
+    prevModel: model
+    material: prop.material
+  )
+}
+
+# Draw the props toon-shaded or not
+func setPropInstancerToon(prop: mod PropInstancer, toon: view Bool) {
+  prop.material.toon = toon
+}

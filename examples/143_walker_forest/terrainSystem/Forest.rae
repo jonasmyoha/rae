@@ -16,9 +16,16 @@
 import Math
 import Noise
 import Vec3
-open terrainSystem/WalkerTrees
+open app3d/GroveTrees
+open app3d/PropInstancer
 open app3d/PropField
 open GbufferSprite
+
+# Where the forest's sparser crowns end and where its billboards end
+# (app3d/GroveTrees.addForestKinds)
+const forestMidDistance: Float = 60.0
+
+const forestFarDistance: Float = 140.0
 
 # The side of the forested square (m), round the origin
 const forestExtent: Float = 1200.0
@@ -56,7 +63,13 @@ func createForestField(renderer: mod DeferredRenderer, sprites: mod SpriteCache)
     cellSize: forestCellSize
   )
   field.batchLimit = forestBatchLimit
-  addForestKinds(field: field, renderer: renderer, sprites: sprites)
+  addForestKinds(
+    field: field
+    renderer: renderer
+    sprites: sprites
+    midDistance: forestMidDistance
+    farDistance: forestFarDistance
+  )
   ret field
 }
 
