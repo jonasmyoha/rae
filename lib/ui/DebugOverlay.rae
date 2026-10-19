@@ -2,7 +2,7 @@
 # 106, in a form any app can add in three lines.
 #
 #     var dbg: DebugOverlay = createDebugOverlay(button: true, fps: true,
-#                                                memory: true, heartbeat: true)
+#                                                memory: true, heartbeat: false)
 #     ...
 #     let dbgTook: Bool = updateDebugOverlay(debugOverlay: dbg, screenW: w, screenH: h,
 #                                            now: now, didRealWork: rendered)
@@ -87,6 +87,13 @@ type DebugOverlay {
   customLine: String
 }
 
+# `heartbeat` is the "Update indicator": a square that steps across the top of
+# the window on every frame that did real work. Turn it on only for an app
+# that idles when nothing changes (a UI app, such as the UI editor), where a
+# moving square means a repaint that should not have happened. An app that
+# renders every frame (a game, a 3D scene) leaves it off: the square would
+# just move all the time. It can still be switched on in the widget's dialog.
+#
 # `RAE_DEBUG_OVERLAY=0` in the environment creates the widget with everything
 # off, whatever the app asked for — a clean frame for screenshots and
 # references without a per-app flag. Any other value (or unset) is the app's
