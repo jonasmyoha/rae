@@ -17,7 +17,8 @@ open ecs/ComponentTable
 import Sys
 open GbufferInstanced
 open Particles
-open WaterParticles
+open water/WadeSplash
+open WorldBiome
 open TransparentForward
 open water/WaterLighting
 open water/WaterSystem
@@ -395,7 +396,7 @@ func renderApp(
   world: mod GameWorld
   physicsSystem: view PhysicsSystem
   terrainSystem: mod TerrainSystem
-  splashes: mod ParticleSystem
+  wadeSplash: mod WadeSplash
   waterSystem: mod WaterSystem
   resources: mod GpuResources
   profiler: mod Profiler
@@ -464,9 +465,10 @@ func renderApp(
     )
   }
   let palette: List(Float) = buildPalette(sk: characterSystem.skeleton)
-  captureSplashFeet(
+  captureCharacterFeet(
     characterSystem: characterSystem
     world: world
+    wadeSplash: wadeSplash
     entityId: characterSystem.heroEntityId
   )
 
@@ -492,7 +494,12 @@ func renderApp(
         clipIndex: memberClip
         animTime: memberTime
       )
-      captureSplashFeet(characterSystem: characterSystem, world: world, entityId: member)
+      captureCharacterFeet(
+        characterSystem: characterSystem
+        world: world
+        wadeSplash: wadeSplash
+        entityId: member
+      )
       ensureRendererResources(renderer: renderSystem.renderer)
       if let rendererResources: mod GpuResources => renderSystem.renderer.gpuResources {
         uploadPaletteSlot(
@@ -506,10 +513,10 @@ func renderApp(
     }
   }
 
-  splashStep(
-    splashes: splashes
-    world: world
+  wadeSplashStep(
+    wadeSplash: wadeSplash
     waterSystem: waterSystem
+    biome: defaultBiomeConfig()
     deltaTime: deltaTime
   )
   applyCameraRigHierarchy(cameraSystem: cameraSystem, world: world)
@@ -642,14 +649,12 @@ func renderApp(
           )
         }
         # Splash droplets fade by alpha through the transparent pass (#844).
-        waterParticleDraw(
-          particles: splashes
+        drawWadeSplash(
+          wadeSplash: wadeSplash
           transparent: renderSystem.renderer.passes.transparent
           camera: cameraSystem.camera
-          daylight: waterDaylight(
-            sky: renderSystem.renderer.sky
-            hasSky: renderSystem.renderer.hasSky
-          )
+          sky: renderSystem.renderer.sky
+          hasSky: renderSystem.renderer.hasSky
         )
         renderDeferredPass(
           renderer: renderSystem.renderer

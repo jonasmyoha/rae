@@ -16,6 +16,7 @@ open GbufferInstanced
 open Particles
 open water/Water
 open water/WaterSystem
+open water/WadeSplash
 open water/WaterFft
 open gpu/GpuResources
 open gpu/GpuLifetime
@@ -356,7 +357,7 @@ func updateApp(app: mod App) {
   # Live splash droplets are an animation source: keep rendering until the last one
   # dies out, or the wait-loop would freeze them mid-air when you stop wading (#84,
   # the "feed animation sources into the loop" lesson in AGENTS.md).
-  let splashesAlive: Bool = app.splashes.list.length > 0
+  let splashesAlive: Bool = wadeSplashAlive(wadeSplash: app.wadeSplash)
   # Bodies still moving (a toppling stack, a character in the air) are an
   # animation source too; the venue's static body is never awake
   let physicsAwake: Bool = physicsCounters(physics: app.physicsSystem.physics).awakeBodyCount > 0 or characterMoved
