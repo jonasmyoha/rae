@@ -84,6 +84,8 @@ open ui/UiSystems
 open app3d/WalkerCharacter
 open app3d/PlayerRoster
 open app3d/WalkerPhysics
+open app3d/WalkerTerrain
+open app3d/WalkerTerrainBodies
 
 const clipTransitionDuration: Float = 0.28
 
@@ -154,7 +156,7 @@ type App {
   inputSystem: InputSystem
   cameraSystem: CameraSystem
   characterSystem: CharacterSystem
-  terrainSystem: TerrainSystem
+  terrainSystem: WalkerTerrain
   grassSystem: GrassSystem
   renderSystem: RenderSystem
   profiler: Profiler  # #764: was lib/profile.rae gProf* globals
@@ -391,7 +393,7 @@ func createApp() ret App {
       # No island: the shader's island radius is the forest world's
       constants: forestBiomeConstants()
     )
-    var terrainSystem: TerrainSystem = createTerrainSystem(
+    var terrainSystem: WalkerTerrain = createTerrainSystem(
       renderer: renderer
       world: gameWorld
       assets: assets
@@ -629,7 +631,8 @@ func createApp() ret App {
     updateInfiniteTerrain(
       terrainSystem: terrainSystem
       renderer: renderer
-      world: gameWorld
+      propKinds: gameWorld.propKinds
+      transforms: gameWorld.transforms
       playerPosition: characterController.position
     )
     updateGrassField(
@@ -677,7 +680,11 @@ func createApp() ret App {
       allocator: gameWorld.allocator
       transforms: gameWorld.transforms
     )
-    let rockCount: Int = placeRockBodies(physicsSystem: physicsSystem, world: gameWorld)
+    let rockCount: Int = placeRockBodies(
+      physicsSystem: physicsSystem
+      propKinds: gameWorld.propKinds
+      transforms: gameWorld.transforms
+    )
     let trunksPlaced: Bool = updateTrunkPool(
       physicsSystem: physicsSystem
       transforms: gameWorld.transforms

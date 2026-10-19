@@ -31,6 +31,7 @@ open Gbuffer
 open gpu/GpuResources
 open Scene3d
 open Mesh3d
+open app3d/WalkerTerrain
 
 const grassPerCell: Int = 10
 
@@ -80,8 +81,8 @@ func placeGrassBlade(
   let hyaw: Float = Noise.hash2(x: cellX, y: cellY, seed: 600 + slotInCell)
   let hphase: Float = Noise.hash2(x: cellX, y: cellY, seed: 800 + slotInCell)
   let hscale: Float = Noise.hash2(x: cellX, y: cellY, seed: 1000 + slotInCell)
-  let baseX: Float = (cellX.toFloat() + hx) * terrainCellSize - terrainCellSize * 0.5
-  let baseY: Float = (cellY.toFloat() + hy) * terrainCellSize - terrainCellSize * 0.5
+  let baseX: Float = (cellX.toFloat() + hx) * walkerCellSize - walkerCellSize * 0.5
+  let baseY: Float = (cellY.toFloat() + hy) * walkerCellSize - walkerCellSize * 0.5
   let baseZ: Float = terrainHeightAt(x: baseX, y: baseY, groundZ: groundZ)
   ret GrassBlade {
     baseX: baseX
@@ -103,8 +104,8 @@ func updateGrassField(
   world: mod GameWorld
   playerPosition: view Vec3
 ) ret Bool {
-  let cellX: Int = Math.floor(x: playerPosition.x / terrainCellSize).toInt()
-  let cellY: Int = Math.floor(x: playerPosition.y / terrainCellSize).toInt()
+  let cellX: Int = Math.floor(x: playerPosition.x / walkerCellSize).toInt()
+  let cellY: Int = Math.floor(x: playerPosition.y / walkerCellSize).toInt()
   if cellX is grassSystem.centreCellX and cellY is grassSystem.centreCellY {
     ret false
   }

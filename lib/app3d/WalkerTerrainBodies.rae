@@ -1,0 +1,270 @@
+# app3d/WalkerTerrainBodies — the walker terrain's props in the physics world
+# (box3d/ecs/NatureBodies holds the rules): every placed rock is a static
+# sphere, rebuilt after each terrain stream because the rock entities are
+# reused; a bush slows a character inside it (the physics step gets
+# bushSpots); a tree entity of the island forest gets one static trunk. And
+# the self-test steps that find these props (the rock and bush, the trunk
+# nearest the hero) for app3d/WalkerPhysicsChecks.
+import Math
+import Vec3
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Query
+open ecs/Transform
+open app3d/CharacterController
+open app3d/GroveTrees
+open app3d/WalkerPhysics
+open app3d/WalkerPhysicsChecks
+open app3d/WalkerTerrain
+open box3d/ecs/PhysicsSpawn
+open box3d/ecs/NatureBodies
+
+# Fixed steps the walk at a trunk may take (8 s)
+const trunkTestWalkSteps: Int = 480
+
+# Give every placed rock a static body and sphere at its current pose,
+# dropping the body it had before; a rock not placed (over water) gets none.
+# Call after the terrain streams. The number of rock bodies.
+func placeRockBodies(
+  physicsSystem: mod WalkerPhysics
+  propKinds: view ComponentTable(TerrainProp)
+  transforms: mod ComponentTable(Transform3D)
+) ret Int {
+  var rocks: Int = 0
+  loop var i: Int = 0, i < componentCount(this: propKinds), ++i {
+    let entityId: EntityId = componentEntityAt(this: propKinds, i: i)
+    let prop: view TerrainProp => queryViewAt(table: propKinds, denseIndex: i)
+    if prop.kind is kindRock {
+      despawnRigidBody(
+        physics: physicsSystem.physics
+        rigidBodies: physicsSystem.rigidBodies
+        colliders: physicsSystem.colliders
+        entityId: entityId
+      )
+      if prop.active {
+        addRockBody(
+          physics: physicsSystem.physics
+          rigidBodies: physicsSystem.rigidBodies
+          colliders: physicsSystem.colliders
+          transforms: transforms
+          entityId: entityId
+        )
+        rocks = rocks + 1
+      }
+    }
+  }
+  ret rocks
+}
+
+# The placed bushes as spots for the physics step (each at its foot, with its
+# soft radius): a character inside one is slowed (box3d/ecs/NatureBodies)
+func bushSpots(
+  propKinds: view ComponentTable(TerrainProp)
+  transforms: view ComponentTable(Transform3D)
+) ret List(BushSpot) {
+  var spots: List(BushSpot) = List.create(BushSpot, cap: 64)
+  loop var i: Int = 0, i < componentCount(this: propKinds), ++i {
+    let entityId: EntityId = componentEntityAt(this: propKinds, i: i)
+    let prop: view TerrainProp => queryViewAt(table: propKinds, denseIndex: i)
+    if prop.kind is kindBush and prop.active {
+      let transform: view Transform3D => componentView(this: transforms, entityId: entityId)
+      spots.add(
+        value: {
+          x: transform.position.x
+          y: transform.position.y
+          radius: bushSoftRadius(scale: transform.scale.x)
+        }
+      )
+    }
+  }
+  ret spots
+}
+
+# A static trunk for every tree entity (every row of `treeVariants`), at its
+# tree's current pose (WalkerPhysics.addTreeTrunk). The number of trunks.
+func addTreeTrunks(
+  physicsSystem: mod WalkerPhysics
+  treeVariants: view ComponentTable(TreeVariant)
+  transforms: mod ComponentTable(Transform3D)
+) ret Int {
+  loop var i: Int = 0, i < componentCount(this: treeVariants), ++i {
+    addTreeTrunk(
+      physicsSystem: physicsSystem
+      transforms: transforms
+      entityId: componentEntityAt(this: treeVariants, i: i)
+    )
+  }
+  ret componentCount(this: treeVariants)
+}
+
+# The placed prop of `kind` nearest to `point`, or none
+func nearestProp(
+  propKinds: view ComponentTable(TerrainProp)
+  transforms: view ComponentTable(Transform3D)
+  kind: view Int
+  point: view Vec3
+) ret opt EntityId {
+  var nearest: opt EntityId = none
+  var nearestDistance: Float = 1000000.0
+  loop var i: Int = 0, i < componentCount(this: propKinds), ++i {
+    let entityId: EntityId = componentEntityAt(this: propKinds, i: i)
+    let prop: view TerrainProp => queryViewAt(table: propKinds, denseIndex: i)
+    if prop.kind is kind and prop.active {
+      let gap: Vec3 = Vec3.vsub(
+        a: componentView(this: transforms, entityId: entityId).position
+        b: point
+      )
+      let distance: Float = Math.sqrt(x: gap.x * gap.x + gap.y * gap.y)
+      if distance < nearestDistance {
+        nearestDistance = distance
+        nearest = entityId
+      }
+    }
+  }
+  ret nearest
+}
+
+# The rock and bush nearest the hero (WalkerPhysicsChecks.runRockBushCheck)
+func runRockBushTest(
+  physicsSystem: mod WalkerPhysics
+  propKinds: view ComponentTable(TerrainProp)
+  transforms: mod ComponentTable(Transform3D)
+  controllers: mod ComponentTable(ThirdPersonController)
+  heroEntityId: view EntityId
+) ret Bool {
+  let heroFeet: Vec3 = controllerFeet(
+    controller: componentView(this: controllers, entityId: heroEntityId)
+    groundZ: physicsSystem.groundZ
+  )
+  var hasRock: Bool = false
+  var rockEntityId: EntityId = noEntity()
+  if let found: EntityId = nearestProp(
+    propKinds: propKinds
+    transforms: transforms
+    kind: kindRock
+    point: heroFeet
+  ) {
+    hasRock = true
+    rockEntityId = found
+  }
+  var hasBush: Bool = false
+  var bushFoot: Vec3 = heroFeet
+  if let found: EntityId = nearestProp(
+    propKinds: propKinds
+    transforms: transforms
+    kind: kindBush
+    point: heroFeet
+  ) {
+    hasBush = true
+    # The bush stands 5 cm into the ground (WalkerTerrain.kindTransform)
+    let bush: Vec3 = componentView(this: transforms, entityId: found).position
+    bushFoot = Vec3.create(x: bush.x, y: bush.y, z: bush.z + 0.05)
+  }
+  ret runRockBushCheck(
+    physicsSystem: physicsSystem
+    transforms: transforms
+    controllers: controllers
+    bushes: bushSpots(propKinds: propKinds, transforms: transforms)
+    heroEntityId: heroEntityId
+    hasRock: hasRock
+    rockEntityId: rockEntityId
+    hasBush: hasBush
+    bushFoot: bushFoot
+  )
+}
+
+# The placed tree entity nearest to `point`, or none
+func nearestIslandTree(
+  treeVariants: view ComponentTable(TreeVariant)
+  propKinds: view ComponentTable(TerrainProp)
+  transforms: view ComponentTable(Transform3D)
+  point: view Vec3
+) ret opt EntityId {
+  var nearest: opt EntityId = none
+  var nearestDistance: Float = 1000000.0
+  loop var i: Int = 0, i < componentCount(this: treeVariants), ++i {
+    let entityId: EntityId = componentEntityAt(this: treeVariants, i: i)
+    if componentView(this: propKinds, entityId: entityId).active {
+      let gap: Vec3 = Vec3.vsub(
+        a: componentView(this: transforms, entityId: entityId).position
+        b: point
+      )
+      let distance: Float = Math.sqrt(x: gap.x * gap.x + gap.y * gap.y)
+      if distance < nearestDistance {
+        nearestDistance = distance
+        nearest = entityId
+      }
+    }
+  }
+  ret nearest
+}
+
+# The island tree nearest the hero blocks a ray at waist height, the hero
+# walking straight at it stops at its bark, and a trunk whose tree gets a new
+# Transform3D is hit where the tree now stands. One [trunktest] line.
+func runIslandTrunkTest(
+  physicsSystem: mod WalkerPhysics
+  treeVariants: view ComponentTable(TreeVariant)
+  propKinds: view ComponentTable(TerrainProp)
+  transforms: mod ComponentTable(Transform3D)
+  controllers: mod ComponentTable(ThirdPersonController)
+  heroEntityId: view EntityId
+) ret Bool {
+  let heroFeet: Vec3 = controllerFeet(
+    controller: componentView(this: controllers, entityId: heroEntityId)
+    groundZ: physicsSystem.groundZ
+  )
+  if let treeEntityId: EntityId = nearestIslandTree(
+    treeVariants: treeVariants
+    propKinds: propKinds
+    transforms: transforms
+    point: heroFeet
+  ) {
+    let placed: Transform3D = transformOf(transforms: transforms, entityId: treeEntityId)
+    let blocksRay: Bool = rayHitsEntity(
+      physicsSystem: physicsSystem
+      entityId: treeEntityId
+      foot: placed.position
+      height: 1.2
+      halfSpan: 3.0
+    )
+    let closest: Float = walkClosest(
+      physicsSystem: physicsSystem
+      transforms: transforms
+      controllers: controllers
+      bushes: bushSpots(propKinds: propKinds, transforms: transforms)
+      heroEntityId: heroEntityId
+      target: placed.position
+      steps: trunkTestWalkSteps
+    )
+    let stoppedAtBark: Bool = closest > treeTrunkRadius + 0.1 and closest < treeTrunkRadius + 1.2
+    # Lift the tree 30 m, as a new placement would move it, and step once:
+    # the trunk must be hit up there and no longer down here
+    var lifted: Transform3D = placed
+    lifted.position.z = placed.position.z + 30.0
+    componentSet(this: transforms, entityId: treeEntityId, data: lifted)
+    stepPhysicsBodies(physicsSystem: physicsSystem, transforms: transforms)
+    let followed: Bool = rayHitsEntity(
+      physicsSystem: physicsSystem
+      entityId: treeEntityId
+      foot: lifted.position
+      height: 1.2
+      halfSpan: 3.0
+    ) and rayHitsEntity(
+      physicsSystem: physicsSystem
+      entityId: treeEntityId
+      foot: placed.position
+      height: 1.2
+      halfSpan: 3.0
+    ) is false
+    componentSet(this: transforms, entityId: treeEntityId, data: placed)
+    stepPhysicsBodies(physicsSystem: physicsSystem, transforms: transforms)
+    let passed: Bool = blocksRay and stoppedAtBark and followed
+    log(
+      "[trunktest] blocksRay={blocksRay}, closest {closest} m from the trunk (stoppedAtBark={stoppedAtBark}), followed={followed}, passed={passed}"
+    )
+    ret passed
+  }
+  log("[trunktest] no placed tree, passed=false")
+  ret false
+}

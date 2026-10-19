@@ -1,0 +1,150 @@
+# app3d/IslandForest — the forest of the walker examples' island (136, 137):
+# islandForestSize trees (app3d/GroveTrees) planted ONCE over the whole
+# island at startup. The island is small (lib/WorldBiome's 60 m radius and its
+# shore) and does not change, so its trees are not streamed with the small
+# props: every tree is one placement in the WalkerTerrain's PropField (drawn
+# at its level of detail, only when near and in view, instanced) and one
+# entity with one Box3D trunk (app3d/WalkerTerrainBodies.addTreeTrunks), for
+# the whole run.
+#
+# Seeded spots are tried over the island; a spot gets a tree when it is grassy
+# land, outside the spawn clearing, where the forest-density noise says
+# forest, and not closer than islandForestSpacing to a tree already planted.
+# The density noise leaves meadows between woods; the close spacing presses
+# the crowns into each other; and the species come in stands (treeSpeciesAt).
+import Math
+import Noise
+import Vec3
+import Quat
+open WorldBiome
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Transform
+open app3d/GroveTrees
+open app3d/PropField
+open app3d/WalkerTerrain
+
+# How many trees the island's forest has
+const islandForestSize: Int = 300
+
+# The grass a tree wants under it: less than the small props, so woods reach
+# onto drier ground, but never the beach or bare rock
+const islandForestGrassMin: Float = 0.12
+
+# No tree grows this close (m) to the spawn, where the cube stacks stand
+const islandSpawnClearing: Float = 11.0
+
+# The closest two trunks stand (m): the crowns (4 to 7 m wide) overlap
+const islandForestSpacing: Float = 2.2
+
+# The square searched for spots: the island and its shore fit inside ±90 m
+const islandForestReach: Float = 90.0
+
+# Spots tried before giving up (the island holds islandForestSize long before)
+const islandForestAttempts: Int = 100000
+
+# The island forest's field: the island and its shore (200 m round the
+# origin) in 20 m cells; the sparser crowns from 90 m, billboards from 400 m
+func islandForestSettings() ret ForestFieldSettings {
+  ret ForestFieldSettings {
+    extent: 200.0
+    cellSize: 20.0
+    batchLimit: 0
+    midDistance: 90.0
+    farDistance: 400.0
+  }
+}
+
+# How much forest grows at (x, y), 0 to 1: value noise about 45 m across,
+# so dense woods, thin woods and open meadows each span a few dozen metres
+func islandForestDensity(x: view Float, y: view Float) ret Float {
+  ret Noise.value2(x: x / 45.0, y: y / 45.0, seed: 401)
+}
+
+# Plant the forest around a spawn at (spawnX, spawnY): a placement in the
+# terrain's forest field and a tree entity (Transform3D, TerrainProp,
+# TreeVariant) per tree. The number of trees.
+func plantIslandForest(
+  terrainSystem: mod WalkerTerrain
+  allocator: mod EntityAllocator
+  transforms: mod ComponentTable(Transform3D)
+  propKinds: mod ComponentTable(TerrainProp)
+  treeVariants: mod ComponentTable(TreeVariant)
+  spawnX: view Float
+  spawnY: view Float
+) ret Int {
+  var planted: List(Vec3) = List.create(Vec3, cap: islandForestSize)
+  loop var attempt: Int = 0, attempt < islandForestAttempts and planted.length < islandForestSize, ++attempt {
+    let x: Float = (Noise.hash2(x: attempt, y: 1, seed: 811) * 2.0 - 1.0) * islandForestReach
+    let y: Float = (Noise.hash2(x: attempt, y: 2, seed: 811) * 2.0 - 1.0) * islandForestReach
+    # Thinner where the density is low: a spot is kept with the chance the
+    # density gives, so meadows keep only the odd lone tree
+    let chance: Float = Math.min(
+      a: Math.max(a: (islandForestDensity(x: x, y: y) - 0.1) * 3.0, b: 0.06)
+      b: 1.0
+    )
+    if Noise.hash2(x: attempt, y: 3, seed: 811) > chance {
+      continue
+    }
+    let gapX: Float = x - spawnX
+    let gapY: Float = y - spawnY
+    if gapX * gapX + gapY * gapY < islandSpawnClearing * islandSpawnClearing {
+      continue
+    }
+    if worldPropAllowed(
+      x: x
+      y: y
+      minGrass: islandForestGrassMin
+      cfg: terrainSystem.biome
+    ) is false {
+      continue
+    }
+    var crowded: Bool = false
+    loop let tree: view Vec3 in planted {
+      let apartX: Float = tree.x - x
+      let apartY: Float = tree.y - y
+      if apartX * apartX + apartY * apartY < islandForestSpacing * islandForestSpacing {
+        crowded = true
+        break
+      }
+    }
+    if crowded {
+      continue
+    }
+    let number: Int = planted.length
+    let position: Vec3 = Vec3.create(
+      x: x
+      y: y
+      z: walkerTerrainHeight(terrainSystem: terrainSystem, x: x, y: y) - 0.05
+    )
+    planted.add(value: position)
+    let species: Int = treeSpeciesAt(x: x, y: y, number: number)
+    let scale: Float = treeScaleAt(species: species, number: number)
+    let yaw: Float = Noise.hash2(x: number, y: 4, seed: 811) * 6.2831853
+    addPropPlacement(
+      field: terrainSystem.forest
+      placement: { kind: species, position: position, yaw: yaw, scale: scale }
+    )
+    let treeEntityId: EntityId = spawnProp(
+      allocator: allocator
+      transforms: transforms
+      propKinds: propKinds
+      kind: kindTree
+      slot: number
+    )
+    componentSet(
+      this: transforms
+      entityId: treeEntityId
+      data: Transform3D {
+        position: position
+        rotation: Quat.fromAxisAngle(axis: Vec3.create(x: 0.0, y: 0.0, z: 1.0), angle: yaw)
+        scale: Vec3.create(x: scale, y: scale, z: scale)
+      }
+    )
+    componentSet(this: treeVariants, entityId: treeEntityId, data: TreeVariant { species: species })
+    let prop: mod TerrainProp => componentMod(this: propKinds, entityId: treeEntityId)
+    prop.active = true
+  }
+  finishPropField(field: terrainSystem.forest)
+  ret planted.length
+}

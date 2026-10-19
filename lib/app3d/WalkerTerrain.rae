@@ -1,0 +1,665 @@
+# app3d/WalkerTerrain — the walker examples' terrain (136, 137, 143): the
+# streamed heightfield tiles (app3d/TerrainTiles), the small props streamed
+# with them (Autumn Grove's procedural rocks, the leaf bushes, the flowers and
+# grass tufts) and the forest (an app3d/PropField the app plants once). Their
+# differences are the arguments of createWalkerTerrain: the window's side in
+# cells, the biome and the forest field's size and distances.
+#
+# The small props are ECS entities in the app's world, NOT parallel pool
+# Lists: each carries a `TerrainProp` {kind, slot, active, ...} and a
+# `Transform3D`. The pool is spawned once (one entity per window cell per
+# kind); when the walker crosses a cell border only the slots whose cell left
+# the window are placed again (the slots wrap, as the tiles do), so a stream
+# moves one row or column of props, not the whole window. A prop over water
+# is inactive and simply not gathered.
+#
+# Each frame: gatherForest and gatherTerrainProps fill the batches once, then
+# the shadow pass (drawTerrainPropsShadow) and the scene pass
+# (drawTerrainGround, drawTerrainProps) both draw them, one instanced draw per
+# batch.
+import RendererDeferred
+import Math
+import Noise
+import Vec3
+import Quat
+import Gbuffer
+open WorldBiome
+open GbufferTerrain
+open gpu/GpuResources
+open Gltf
+open Scene3d
+open Mesh3d
+open GbufferInstanced
+open GbufferSprite
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open ecs/Query
+open ecs/Transform
+open app3d/GroveTrees
+open app3d/PropInstancer
+open app3d/PropField
+open app3d/TerrainTiles
+open app3d/TerrainRocks
+
+# The side of a terrain cell (m): one tile and one prop of each kind
+const walkerCellSize: Float = 18.0
+
+# The quads along a tile's side
+const walkerTileSegments: Int = 24
+
+const terrainTau: Float = 6.283185307179586
+
+# Prop kinds (the TerrainProp.kind discriminator).
+const kindTile: Int = 0
+
+const kindTree: Int = 1
+
+const kindRock: Int = 2
+
+const kindBush: Int = 3
+
+const kindFlower: Int = 4
+
+const kindGrassA: Int = 5
+
+const kindGrassB: Int = 6
+
+# The grass a small prop wants under it (rocks want none)
+const propGrassMin: Float = 0.45
+
+# The single source of truth for the ground colour: the terrain ground
+# material AND the GPU grass gradient's bottom both read this, so the grass
+# roots match the ground.
+func walkerGroundColor() ret Vec3 {
+  ret Vec3.create(x: 0.080, y: 0.245, z: 0.015)
+}
+
+# ----- ECS components ------------------------------------------------
+# A terrain prop entity: which kind it is, which pool slot it occupies, and
+# whether it is placed on valid ground now (props over water are inactive and
+# not gathered).
+type TerrainProp {
+  kind: Int
+  slot: Int
+  active: Bool
+  # The cell it is placed in now, once placed (a slot keeps its cell until
+  # the cell leaves the window)
+  cellX: Int
+  cellY: Int
+  placed: Bool
+  # Which shape a rock is (app3d/TerrainRocks); 0 for the other kinds
+  variant: Int
+}
+
+# A tree's species (app3d/GroveTrees), for a tree that is an entity (one
+# Box3D trunk per tree: app3d/IslandForest)
+type TreeVariant {
+  species: Int
+}
+
+# The forest's PropField: the square round the origin it covers (m), its
+# cells (m), the most trees one batch holds (0: PropField's own limit), and
+# where its sparser crowns and its billboards end (GroveTrees.addForestKinds)
+type ForestFieldSettings {
+  extent: Float
+  cellSize: Float
+  batchLimit: Int
+  midDistance: Float
+  farDistance: Float
+}
+
+type WalkerTerrain {
+  # The streamed window: gridSide x gridSide cells round the walker
+  gridSide: Int
+  cellSize: Float
+  groundZ: Float
+  biome: BiomeConfig
+  centreCellX: Int
+  centreCellY: Int
+  toon: Bool
+  # The ground: the streamed heightfield tiles (app3d/TerrainTiles)
+  ground: TerrainTiles
+  # One instancer per rock shape (TerrainProp.variant)
+  rockParts: List(PropInstancer)
+  flowerProp: PropInstancer
+  grassProp: PropInstancer
+  # The forest: every tree species as a kind at three levels of detail, its
+  # placements in cells; only what is near and in view is drawn, one
+  # instanced draw per species, level and part
+  forest: PropField
+  # The sprite pass the forest's far level (its billboards) is drawn with
+  sprites: SpriteCache
+  # The bush's three leaf tones
+  bushParts: List(PropInstancer)
+}
+
+# The props in the window: one of each kind per cell
+func terrainCellCount(terrainSystem: view WalkerTerrain) ret Int {
+  ret terrainSystem.gridSide * terrainSystem.gridSide
+}
+
+# The height of the terrain's ground at (x, y)
+func walkerTerrainHeight(
+  terrainSystem: view WalkerTerrain
+  x: view Float
+  y: view Float
+) ret Float {
+  ret worldTerrainHeight(
+    x: x
+    y: y
+    groundZ: terrainSystem.groundZ
+    cfg: terrainSystem.biome
+  )
+}
+
+func terrainMesh(renderer: mod DeferredRenderer, path: view String) ret MeshHandle {
+  let model: Glb = loadGlb(path: path)
+  let mesh: MeshData = loadAllPrimitives(glb: model)
+  if mesh.vertCount < 1 {
+    log("[terrain] no mesh data in {path}")
+    ret meshHandleNone()
+  }
+  ret uploadMeshDataForTerrain(renderer: renderer, mesh: mesh)
+}
+
+func uploadMeshDataForTerrain(renderer: mod DeferredRenderer, mesh: view MeshData) ret MeshHandle {
+  ret RendererDeferred.uploadMesh(
+    renderer: renderer
+    verts: mesh.verts
+    vertCount: mesh.vertCount
+    indices: mesh.indices
+  )
+}
+
+func terrainMaterial(color: view Vec3, roughness: view Float) ret Material3d {
+  ret Material3d {
+    baseColor: color
+    metallic: 0.0
+    roughness: roughness
+    emission: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    toon: true
+  }
+}
+
+# Every rock shape (app3d/TerrainRocks) as an instancer of `capacity` rocks
+func createRockParts(renderer: mod DeferredRenderer, capacity: view Int) ret List(PropInstancer) {
+  let shapes: List(RockShape) = createRockShapes(renderer: renderer)
+  var parts: List(PropInstancer) = List.create(PropInstancer, cap: shapes.length)
+  loop let shape: view RockShape in shapes {
+    parts.add(
+      value: createPropInstancer(mesh: shape.mesh, material: shape.material, capacity: capacity)
+    )
+  }
+  ret parts
+}
+
+# The empty forest field of `settings`: its kinds, no trees yet (the far
+# level's billboard pictures go into `sprites`' image array)
+func createForestField(
+  renderer: mod DeferredRenderer
+  sprites: mod SpriteCache
+  settings: view ForestFieldSettings
+) ret PropField {
+  var field: PropField = createPropField(
+    originX: settings.extent * -0.5
+    originY: settings.extent * -0.5
+    size: settings.extent
+    cellSize: settings.cellSize
+  )
+  if settings.batchLimit > 0 {
+    field.batchLimit = settings.batchLimit
+  }
+  addForestKinds(
+    field: field
+    renderer: renderer
+    sprites: sprites
+    midDistance: settings.midDistance
+    farDistance: settings.farDistance
+  )
+  ret field
+}
+
+func terrainHash(cellX: view Int, cellY: view Int, seed: view Int) ret Float {
+  ret Noise.hash2(x: cellX, y: cellY, seed: seed)
+}
+
+func terrainOffset(cellX: view Int, cellY: view Int, seed: view Int) ret Float {
+  ret (terrainHash(cellX: cellX, cellY: cellY, seed: seed) - 0.5) * 12.0
+}
+
+# A small prop's placement in its cell: scattered x/y, the ground's height
+# plus `lift`, a turn about +Z, a uniform scale from `minScale` to
+# `minScale + scaleSpread`
+func propTransform3D(
+  terrainSystem: view WalkerTerrain
+  cellX: view Int
+  cellY: view Int
+  seedX: view Int
+  seedY: view Int
+  seedScale: view Int
+  lift: view Float
+  minScale: view Float
+  scaleSpread: view Float
+) ret Transform3D {
+  let scale: Float = minScale + terrainHash(cellX: cellX, cellY: cellY, seed: seedScale) * scaleSpread
+  let posX: Float = cellX.toFloat() * terrainSystem.cellSize + terrainOffset(
+    cellX: cellX
+    cellY: cellY
+    seed: seedX
+  )
+  let posY: Float = cellY.toFloat() * terrainSystem.cellSize + terrainOffset(
+    cellX: cellX
+    cellY: cellY
+    seed: seedY
+  )
+  let yaw: Float = terrainHash(cellX: cellX, cellY: cellY, seed: seedScale + 71) * terrainTau
+  ret Transform3D {
+    position: Vec3.create(
+      x: posX
+      y: posY
+      z: walkerTerrainHeight(terrainSystem: terrainSystem, x: posX, y: posY) + lift
+    )
+    rotation: Quat.fromAxisAngle(axis: Vec3.create(x: 0.0, y: 0.0, z: 1.0), angle: yaw)
+    scale: Vec3.create(x: scale, y: scale, z: scale)
+  }
+}
+
+# The placement of the prop of `kind` in cell (cellX, cellY): its own
+# scatter seeds and scale range per kind
+func kindTransform(
+  terrainSystem: view WalkerTerrain
+  kind: view Int
+  cellX: view Int
+  cellY: view Int
+) ret Transform3D {
+  if kind is kindRock {
+    ret rockPlacement(
+      cellX: cellX
+      cellY: cellY
+      cellSize: terrainSystem.cellSize
+      groundZ: terrainSystem.groundZ
+      biome: terrainSystem.biome
+    )
+  }
+  if kind is kindBush {
+    # A bush stands 5 cm into the ground
+    ret propTransform3D(
+      terrainSystem: terrainSystem
+      cellX: cellX
+      cellY: cellY
+      seedX: 47
+      seedY: 53
+      seedScale: 59
+      lift: -0.05
+      minScale: 1.5
+      scaleSpread: 0.9
+    )
+  }
+  if kind is kindFlower {
+    ret propTransform3D(
+      terrainSystem: terrainSystem
+      cellX: cellX
+      cellY: cellY
+      seedX: 61
+      seedY: 67
+      seedScale: 71
+      lift: 0.015
+      minScale: 0.35
+      scaleSpread: 0.25
+    )
+  }
+  if kind is kindGrassA {
+    ret propTransform3D(
+      terrainSystem: terrainSystem
+      cellX: cellX
+      cellY: cellY
+      seedX: 73
+      seedY: 79
+      seedScale: 83
+      lift: 0.0
+      minScale: 0.52
+      scaleSpread: 0.30
+    )
+  }
+  # kindGrassB
+  ret propTransform3D(
+    terrainSystem: terrainSystem
+    cellX: cellX
+    cellY: cellY
+    seedX: 89
+    seedY: 97
+    seedScale: 101
+    lift: 0.0
+    minScale: 0.38
+    scaleSpread: 0.27
+  )
+}
+
+# Rocks may stand on bare ground; everything else wants grass under it.
+func kindMinGrass(kind: view Int) ret Float {
+  if kind is kindRock {
+    ret 0.0
+  }
+  ret propGrassMin
+}
+
+# The window cell a slot column (or row) holds. The slots wrap: column
+# `column` always holds the window cell whose index is `column` modulo the
+# grid side, so when the walker crosses a cell border only the one column (or
+# row) of slots that fell out of the window moves to the new edge.
+func wrappedCell(gridSide: view Int, centreCell: view Int, column: view Int) ret Int {
+  let first: Int = centreCell - gridSide / 2
+  ret first + ((column - first) % gridSide + gridSide) % gridSide
+}
+
+# ----- streaming -----------------------------------------------------
+# Place every prop whose slot now maps to another cell, after the walker at
+# `playerPosition` crossed a cell border; reshape the tiles that moved. True
+# when anything was streamed.
+func updateInfiniteTerrain(
+  terrainSystem: mod WalkerTerrain
+  renderer: mod DeferredRenderer
+  propKinds: mod ComponentTable(TerrainProp)
+  transforms: mod ComponentTable(Transform3D)
+  playerPosition: view Vec3
+) ret Bool {
+  let cellX: Int = Math.floor(x: playerPosition.x / terrainSystem.cellSize).toInt()
+  let cellY: Int = Math.floor(x: playerPosition.y / terrainSystem.cellSize).toInt()
+  if cellX is terrainSystem.centreCellX and cellY is terrainSystem.centreCellY {
+    ret false
+  }
+  terrainSystem.centreCellX = cellX
+  terrainSystem.centreCellY = cellY
+  let groundMoved: Bool = updateTerrainTiles(
+    tiles: terrainSystem.ground
+    renderer: renderer
+    cellX: cellX
+    cellY: cellY
+  )
+  let gridSide: Int = terrainSystem.gridSide
+  loop var i: Int = 0, i < componentCount(this: propKinds), ++i {
+    let entityId: EntityId = componentEntityAt(this: propKinds, i: i)
+    let prop: mod TerrainProp => queryModAt(table: propKinds, denseIndex: i)
+    # The trees are planted once (the app's forest), not streamed
+    if prop.kind is kindTree {
+      continue
+    }
+    let propCellX: Int = wrappedCell(
+      gridSide: gridSide
+      centreCell: cellX
+      column: prop.slot % gridSide
+    )
+    let propCellY: Int = wrappedCell(
+      gridSide: gridSide
+      centreCell: cellY
+      column: prop.slot / gridSide
+    )
+    if prop.placed and propCellX is prop.cellX and propCellY is prop.cellY {
+      continue
+    }
+    prop.placed = true
+    prop.cellX = propCellX
+    prop.cellY = propCellY
+    let transform: Transform3D = kindTransform(
+      terrainSystem: terrainSystem
+      kind: prop.kind
+      cellX: propCellX
+      cellY: propCellY
+    )
+    prop.active = worldPropAllowed(
+      x: transform.position.x
+      y: transform.position.y
+      minGrass: kindMinGrass(kind: prop.kind)
+      cfg: terrainSystem.biome
+    )
+    if prop.kind is kindRock {
+      prop.variant = rockShapeAt(cellX: propCellX, cellY: propCellY)
+    }
+    componentSet(this: transforms, entityId: entityId, data: transform)
+  }
+  ret true
+}
+
+# ----- draw ----------------------------------------------------------
+# Fill the small props' batches for this frame (before the shadow and scene
+# passes, which both draw them)
+func gatherTerrainProps(
+  terrainSystem: mod WalkerTerrain
+  propKinds: view ComponentTable(TerrainProp)
+  transforms: view ComponentTable(Transform3D)
+) {
+  loop let part: mod PropInstancer in terrainSystem.rockParts {
+    resetInstanceBatch(batch: part.batch)
+  }
+  resetInstanceBatch(batch: terrainSystem.flowerProp.batch)
+  resetInstanceBatch(batch: terrainSystem.grassProp.batch)
+  loop let part: mod PropInstancer in terrainSystem.bushParts {
+    resetInstanceBatch(batch: part.batch)
+  }
+  loop var i: Int = 0, i < componentCount(this: propKinds), ++i {
+    let entityId: EntityId = componentEntityAt(this: propKinds, i: i)
+    let prop: view TerrainProp => queryViewAt(table: propKinds, denseIndex: i)
+    if prop.active {
+      let model: Mat4 = transform3dToMatrix(t: componentView(this: transforms, entityId: entityId))
+      if prop.kind is kindRock {
+        if let rockPart: mod PropInstancer => terrainSystem.rockParts.modAt(index: prop.variant) {
+          addPropInstance(prop: rockPart, model: model)
+        }
+      }
+      if prop.kind is kindBush {
+        loop let part: mod PropInstancer in terrainSystem.bushParts {
+          addPropInstance(prop: part, model: model)
+        }
+      }
+      if prop.kind is kindFlower {
+        addPropInstance(prop: terrainSystem.flowerProp, model: model)
+      }
+      if prop.kind is kindGrassA or prop.kind is kindGrassB {
+        addPropInstance(prop: terrainSystem.grassProp, model: model)
+      }
+    }
+  }
+}
+
+# Fill the forest's batches for this frame (before the shadow and scene
+# passes, which both draw them). The view cone is widened by about 34
+# degrees, so a tree just outside the picture still casts its shadow into it.
+func gatherForest(terrainSystem: mod WalkerTerrain, camera: view Camera3d, aspect: view Float) {
+  var propView: PropView = propViewOf(camera: camera, aspect: aspect)
+  propView.halfAngle = Math.min(a: propView.halfAngle + 0.6, b: 3.0)
+  gatherPropField(field: terrainSystem.forest, propView: propView, toon: terrainSystem.toon)
+}
+
+# This frame's props and forest (gathered above) into the open scene pass
+func drawTerrainProps(
+  cache: mod GbufferCache
+  resources: mod GpuResources
+  terrainSystem: mod WalkerTerrain
+) {
+  loop let part: view PropInstancer in terrainSystem.rockParts {
+    drawInstances(cache: cache, resources: resources, batch: part.batch)
+  }
+  drawInstances(cache: cache, resources: resources, batch: terrainSystem.flowerProp.batch)
+  drawInstances(cache: cache, resources: resources, batch: terrainSystem.grassProp.batch)
+  drawPropField(cache: cache, resources: resources, field: terrainSystem.forest)
+  drawPropFieldSprites(
+    cache: cache
+    resources: resources
+    field: terrainSystem.forest
+    sprites: terrainSystem.sprites
+  )
+  loop let part: view PropInstancer in terrainSystem.bushParts {
+    drawInstances(cache: cache, resources: resources, batch: part.batch)
+  }
+}
+
+func drawTerrainGround(
+  cache: mod GbufferCache
+  resources: mod GpuResources
+  terrainSystem: view WalkerTerrain
+  time: copy Float
+) {
+  drawTerrainTiles(
+    tiles: terrainSystem.ground
+    cache: cache
+    resources: resources
+    time: time
+  )
+}
+
+# The rocks, the bushes and the forest into the shadow pass, one instanced
+# draw per batch (the flowers and grass tufts are too small to matter)
+func drawTerrainPropsShadow(renderer: mod DeferredRenderer, terrainSystem: view WalkerTerrain) {
+  loop let part: view PropInstancer in terrainSystem.rockParts {
+    RendererDeferred.drawShadowCasterBatchWith(
+      renderer: renderer
+      mesh: part.mesh
+      batch: part.batch
+    )
+  }
+  loop let part: view PropInstancer in terrainSystem.bushParts {
+    RendererDeferred.drawShadowCasterBatchWith(
+      renderer: renderer
+      mesh: part.mesh
+      batch: part.batch
+    )
+  }
+  drawPropFieldShadows(renderer: renderer, field: terrainSystem.forest)
+  drawPropFieldSpriteShadows(
+    renderer: renderer
+    field: terrainSystem.forest
+    aspect: spritePictureAspect
+    cutoff: spriteCutoff
+  )
+}
+
+func setInfiniteTerrainToon(terrainSystem: mod WalkerTerrain, toon: view Bool) {
+  if terrainSystem.toon is toon {
+    ret
+  }
+  terrainSystem.toon = toon
+  loop let part: mod PropInstancer in terrainSystem.rockParts {
+    setPropInstancerToon(prop: part, toon: toon)
+  }
+  setPropInstancerToon(prop: terrainSystem.flowerProp, toon: toon)
+  setPropInstancerToon(prop: terrainSystem.grassProp, toon: toon)
+  loop let part: mod PropInstancer in terrainSystem.bushParts {
+    setPropInstancerToon(prop: part, toon: toon)
+  }
+}
+
+# ----- setup ---------------------------------------------------------
+# Spawn one prop entity of `kind` for pool slot `slot`, not placed yet
+func spawnProp(
+  allocator: mod EntityAllocator
+  transforms: mod ComponentTable(Transform3D)
+  propKinds: mod ComponentTable(TerrainProp)
+  kind: view Int
+  slot: view Int
+) ret EntityId {
+  let entityId: EntityId = allocEntity(this: allocator)
+  componentSet(this: transforms, entityId: entityId, data: createTransform3D())
+  componentSet(
+    this: propKinds
+    entityId: entityId
+    data: TerrainProp {
+      kind: kind
+      slot: slot
+      active: false
+      cellX: 0
+      cellY: 0
+      placed: false
+      variant: 0
+    }
+  )
+  ret entityId
+}
+
+# The terrain of `biome` at `groundZ`: a window of `gridSide` x `gridSide`
+# cells round the walker (its tiles, and one entity of every small prop kind
+# per cell spawned into the app's tables) and an empty forest field of
+# `forest` (the app plants it once the spawn is known). Nothing is placed
+# until the first updateInfiniteTerrain.
+func createWalkerTerrain(
+  renderer: mod DeferredRenderer
+  allocator: mod EntityAllocator
+  transforms: mod ComponentTable(Transform3D)
+  propKinds: mod ComponentTable(TerrainProp)
+  assets: view String
+  gridSide: view Int
+  groundZ: view Float
+  biome: view BiomeConfig
+  forest: view ForestFieldSettings
+) ret WalkerTerrain {
+  let cellCount: Int = gridSide * gridSide
+  let flowerMesh: MeshHandle = terrainMesh(
+    renderer: renderer
+    path: "{assets}environment/flower.glb"
+  )
+  let grassMesh: MeshHandle = terrainMesh(renderer: renderer, path: "{assets}environment/grass.glb")
+  let flowerMaterial: Material3d = terrainMaterial(
+    color: Vec3.create(x: 0.92, y: 0.38, z: 0.045)
+    roughness: 0.72
+  )
+  let grassMaterial: Material3d = terrainMaterial(
+    color: Vec3.create(x: 0.18, y: 0.42, z: 0.055)
+    roughness: 0.94
+  )
+  # One entity per pool slot per small prop kind, placed by updateInfiniteTerrain
+  let streamedKinds: List(Int) = [
+    kindRock
+    kindBush
+    kindFlower
+    kindGrassA
+    kindGrassB
+  ]
+  loop var slot: Int = 0, slot < cellCount, ++slot {
+    loop let kind: view Int in streamedKinds {
+      let unusedEntityId: EntityId = spawnProp(
+        allocator: allocator
+        transforms: transforms
+        propKinds: propKinds
+        kind: kind
+        slot: slot
+      )
+    }
+  }
+  var sprites: SpriteCache = createSpriteCache()
+  var forestField: PropField = createForestField(
+    renderer: renderer
+    sprites: sprites
+    settings: forest
+  )
+  ret WalkerTerrain {
+    gridSide: gridSide
+    cellSize: walkerCellSize
+    groundZ: groundZ
+    biome: biome
+    centreCellX: 1000000000
+    centreCellY: 1000000000
+    toon: true
+    ground: own createTerrainTiles(
+      renderer: renderer
+      gridSide: gridSide
+      cellSize: walkerCellSize
+      segments: walkerTileSegments
+      groundZ: groundZ
+      biome: biome
+    )
+    rockParts: own createRockParts(renderer: renderer, capacity: cellCount)
+    flowerProp: own createPropInstancer(
+      mesh: flowerMesh
+      material: flowerMaterial
+      capacity: cellCount
+    )
+    grassProp: own createPropInstancer(
+      mesh: grassMesh
+      material: grassMaterial
+      capacity: cellCount * 2
+    )
+    forest: own forestField
+    sprites: own sprites
+    bushParts: own createBushParts(renderer: renderer, capacity: cellCount)
+  }
+}

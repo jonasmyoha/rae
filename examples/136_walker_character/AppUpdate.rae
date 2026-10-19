@@ -57,6 +57,8 @@ open app3d/RenderScale
 open app3d/WalkerCharacter
 open app3d/PlayerRoster
 open app3d/WalkerPhysics
+open app3d/WalkerTerrain
+open app3d/WalkerTerrainBodies
 
 # ----- per-frame timing + resize -------------------------------------------
 func frameBegin(app: mod App) {
@@ -233,7 +235,7 @@ func updateApp(app: mod App) {
     physicsSystem: app.physicsSystem
     transforms: app.world.transforms
     controllers: app.world.controllers
-    bushes: bushSpots(world: app.world)
+    bushes: bushSpots(propKinds: app.world.propKinds, transforms: app.world.transforms)
     frameTime: deltaTime
   )
   let after: view ThirdPersonController => controllerOf(
@@ -314,11 +316,16 @@ func updateApp(app: mod App) {
   let terrainWrapped: Bool = updateInfiniteTerrain(
     terrainSystem: app.terrainSystem
     renderer: app.renderSystem.renderer
-    world: app.world
+    propKinds: app.world.propKinds
+    transforms: app.world.transforms
     playerPosition: followPos
   )
   if terrainWrapped {
-    let rockCount: Int = placeRockBodies(physicsSystem: app.physicsSystem, world: app.world)
+    let rockCount: Int = placeRockBodies(
+      physicsSystem: app.physicsSystem
+      propKinds: app.world.propKinds
+      transforms: app.world.transforms
+    )
   }
   let grassWrapped: Bool = updateGrassField(
     grassSystem: app.grassSystem

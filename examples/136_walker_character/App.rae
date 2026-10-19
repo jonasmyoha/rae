@@ -85,6 +85,9 @@ open ui/UiSystems
 open app3d/WalkerCharacter
 open app3d/PlayerRoster
 open app3d/WalkerPhysics
+open app3d/WalkerTerrain
+open app3d/WalkerTerrainBodies
+open app3d/IslandForest
 
 const clipTransitionDuration: Float = 0.28
 
@@ -155,7 +158,7 @@ type App {
   inputSystem: InputSystem
   cameraSystem: CameraSystem
   characterSystem: CharacterSystem
-  terrainSystem: TerrainSystem
+  terrainSystem: WalkerTerrain
   grassSystem: GrassSystem
   renderSystem: RenderSystem
   profiler: Profiler  # #764: was lib/profile.rae gProf* globals
@@ -394,7 +397,7 @@ func createApp() ret App {
         "lib/terrain_splat.wgsl"
       ])
     )
-    var terrainSystem: TerrainSystem = createTerrainSystem(
+    var terrainSystem: WalkerTerrain = createTerrainSystem(
       renderer: renderer
       world: gameWorld
       assets: assets
@@ -573,12 +576,14 @@ func createApp() ret App {
       biome: WorldBiome.defaultBiomeConfig()
     )
     # The island's forest, with a clearing around the spawn for the cube stacks
-    let treeCount: Int = plantForest(
+    let treeCount: Int = plantIslandForest(
       terrainSystem: terrainSystem
-      world: gameWorld
+      allocator: gameWorld.allocator
+      transforms: gameWorld.transforms
+      propKinds: gameWorld.propKinds
+      treeVariants: gameWorld.treeVariants
       spawnX: characterController.position.x
       spawnY: characterController.position.y
-      groundZ: groundZ
     )
     log("[terrain] {treeCount} trees planted on the island")
     partModel = walkerWorldModel(baseModel: basePartModel, controller: characterController)
@@ -637,7 +642,8 @@ func createApp() ret App {
     updateInfiniteTerrain(
       terrainSystem: terrainSystem
       renderer: renderer
-      world: gameWorld
+      propKinds: gameWorld.propKinds
+      transforms: gameWorld.transforms
       playerPosition: characterController.position
     )
     updateGrassField(
@@ -677,8 +683,16 @@ func createApp() ret App {
       transforms: gameWorld.transforms
       spawnPoint: controllerFeet(controller: characterController, groundZ: groundZ)
     )
-    let trunkCount: Int = addTreeTrunks(physicsSystem: physicsSystem, world: gameWorld)
-    let rockCount: Int = placeRockBodies(physicsSystem: physicsSystem, world: gameWorld)
+    let trunkCount: Int = addTreeTrunks(
+      physicsSystem: physicsSystem
+      treeVariants: gameWorld.treeVariants
+      transforms: gameWorld.transforms
+    )
+    let rockCount: Int = placeRockBodies(
+      physicsSystem: physicsSystem
+      propKinds: gameWorld.propKinds
+      transforms: gameWorld.transforms
+    )
     log(
       "[physics] Box3D: the island height field, {1 + cloneCount} movers, {cubeCount} cubes, {trunkCount} tree trunks, {rockCount} rocks"
     )

@@ -64,6 +64,7 @@ open Gpu2dCanvas
 open ui/UiSystems
 open app3d/WalkerCharacter
 open app3d/WalkerPhysics
+open app3d/WalkerTerrain
 
 # The deferred renderer + dynamic-resolution controller (#552). Lives with the
 # RenderSystem — the App just aggregates it.
@@ -127,7 +128,7 @@ func drawPhysicsCubesShadow(
   loop var i: Int = 0, i < componentCount(this: physicsSystem.cubes), ++i {
     let cubeId: EntityId = componentEntityAt(this: physicsSystem.cubes, i: i)
     if componentHas(this: world.transforms, entityId: cubeId) {
-      castKind(
+      drawShadowCasterWith(
         renderer: renderer
         mesh: cubeMesh
         model: physicsCubeModel(
@@ -147,7 +148,7 @@ func renderShadowPass(
   characterSystem: mod CharacterSystem
   inputSystem: mod InputSystem
   renderSystem: mod RenderSystem
-  terrainSystem: mod TerrainSystem
+  terrainSystem: mod WalkerTerrain
   world: mod GameWorld
   physicsSystem: view WalkerPhysics
   aspect: copy Float
@@ -239,7 +240,7 @@ func renderGbufferPass(
   rendererResources: mod GpuResources
   cameraSystem: mod CameraSystem
   characterSystem: mod CharacterSystem
-  terrainSystem: mod TerrainSystem
+  terrainSystem: mod WalkerTerrain
   world: mod GameWorld
   physicsSystem: view WalkerPhysics
   cubeBatch: mod InstanceBatch
@@ -297,7 +298,6 @@ func renderGbufferPass(
     cache: cache
     resources: rendererResources
     terrainSystem: terrainSystem
-    world: world
     time: t
   )
   drawTerrainProps(cache: cache, resources: rendererResources, terrainSystem: terrainSystem)
@@ -386,7 +386,7 @@ func renderApp(
   renderSystem: mod RenderSystem
   world: mod GameWorld
   physicsSystem: view WalkerPhysics
-  terrainSystem: mod TerrainSystem
+  terrainSystem: mod WalkerTerrain
   wadeSplash: mod WadeSplash
   waterSystem: mod WaterSystem
   resources: mod GpuResources
@@ -519,7 +519,11 @@ func renderApp(
   # The forest's trees near and in view, at their levels of detail, for both
   # the shadow pass and the G-buffer pass below
   gatherForest(terrainSystem: terrainSystem, camera: cameraSystem.camera, aspect: aspect)
-  gatherTerrainProps(terrainSystem: terrainSystem, world: world)
+  gatherTerrainProps(
+    terrainSystem: terrainSystem
+    propKinds: world.propKinds
+    transforms: world.transforms
+  )
   gpuPassTimingBegin(renderer: renderSystem.renderer)
   loop var oi: Int = 0, oi < deferredOrderLength(renderer: renderSystem.renderer), ++oi {
     let tag: Int = deferredTagAt(renderer: renderSystem.renderer, i: oi)
