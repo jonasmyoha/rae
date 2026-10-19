@@ -80,3 +80,19 @@ The preview finds shallow water and positions the camera there. Use ages 0.04,
 `RAE_WALKER_SPLASH_AGE` for repeating animated bursts. Neither variable changes
 normal play. Compiler fixture `1150_water_particles` checks the arc, billboard
 basis, stretch bound and pool expiration without a GPU.
+
+### Sheltered coast
+
+The walker uses a 3.5 m/s breeze, 12 km fetch, 4 m spectrum depth and 0.45
+choppiness, with FFT displacement/slopes scaled to 0.35. `biomeShoreDepth = 2.5` fades FFT displacement to zero at the
+procedural island's waterline. It is opt-in and assumes the default WorldBiome
+height field with `biomeGroundZ = groundZ`. CPU surface queries use the same
+smoothstep as the vertex shader, including horizontal displacement inversion.
+This is shallow-water damping, not a breaking-wave or shoreline-flow solver.
+
+The local terrain detail shader uses broad painted patches, fine sand grain,
+warm beach/seabed colours and a modest wet-sand darkening. It does not paint
+animated foam on the terrain. The water surface owns the narrow broken foam
+edge. Green/blue transmission, reduced refraction distortion and the lighter
+seabed give the shallows their clear coastal colour. The 49 streamed ground tiles use 24 subdivisions (0.75 m spacing) for a smoother
+waterline. Shared terrain palettes and the open-ocean example keep their settings.
