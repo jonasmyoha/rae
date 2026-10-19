@@ -1,6 +1,6 @@
 # The forest: tens of thousands of trees (WalkerTrees) over a square of the
 # world forestExtent metres on a side round the origin, planted ONCE at
-# startup into the TerrainSystem's PropField. The field sorts them into
+# startup into the WalkerTerrain's PropField. The field sorts them into
 # cells, and each frame only the cells and trees near and in view are
 # gathered, each tree at its level of detail, into one instanced draw per
 # species, level and part (the downstream game's nature system works the
@@ -17,28 +17,27 @@ import Math
 import Noise
 import Vec3
 open app3d/GroveTrees
-open app3d/PropInstancer
 open app3d/PropField
-open GbufferSprite
+open app3d/WalkerTerrain
 
-# Where the forest's sparser crowns end and where its billboards end
-# (app3d/GroveTrees.addForestKinds)
-const forestMidDistance: Float = 60.0
-
-const forestFarDistance: Float = 140.0
+# The forest's PropField: a square forestExtent on a side round the origin,
+# in 40 m cells, at most 1024 trees per batch; the sparser crowns from 60 m,
+# billboards from 140 m (app3d/GroveTrees.addForestKinds)
+func forestFieldSettings() ret ForestFieldSettings {
+  ret ForestFieldSettings {
+    extent: forestExtent
+    cellSize: 40.0
+    batchLimit: 1024
+    midDistance: 60.0
+    farDistance: 140.0
+  }
+}
 
 # The side of the forested square (m), round the origin
 const forestExtent: Float = 1200.0
 
 # The grid the spots are jittered on (m): the crowns (4 to 7 m wide) overlap
 const forestSpacing: Float = 3.5
-
-# The PropField's cells (m)
-const forestCellSize: Float = 40.0
-
-# The most trees one instanced batch holds: far more than are ever near and
-# in view of one species at one level, far fewer than the forest has
-const forestBatchLimit: Int = 1024
 
 # The grass a tree wants under it: less than the small props, so woods reach
 # onto drier ground, but never the beach or bare rock
@@ -53,29 +52,9 @@ func forestDensity(x: view Float, y: view Float) ret Float {
   ret Noise.value2(x: x / 90.0, y: y / 90.0, seed: 401)
 }
 
-# The empty forest field: its kinds, no trees yet (the far level's
-# billboard pictures go into `sprites`' image array)
-func createForestField(renderer: mod DeferredRenderer, sprites: mod SpriteCache) ret PropField {
-  var field: PropField = createPropField(
-    originX: forestExtent * -0.5
-    originY: forestExtent * -0.5
-    size: forestExtent
-    cellSize: forestCellSize
-  )
-  field.batchLimit = forestBatchLimit
-  addForestKinds(
-    field: field
-    renderer: renderer
-    sprites: sprites
-    midDistance: forestMidDistance
-    farDistance: forestFarDistance
-  )
-  ret field
-}
-
 # Plant the forest around a spawn at (spawnX, spawnY). The number of trees.
 func plantForest(
-  terrainSystem: mod TerrainSystem
+  terrainSystem: mod WalkerTerrain
   spawnX: view Float
   spawnY: view Float
   groundZ: view Float

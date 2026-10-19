@@ -1,15 +1,11 @@
 # The physics check that needs no one to play (RAE_126_PHYSICS_TEST=1). The
-# steps are app3d/WalkerPhysicsChecks: the cube stacks settle, the hero pushes
-# one and jumps. This file finds this example's own entities and prints
+# steps are app3d/WalkerPhysicsChecks and app3d/WalkerTerrainBodies: the cube
+# stacks settle, the hero pushes one and jumps, then the tree trunks hold and
+# the rocks and bushes. This file hands them this example's tables and prints
 # the one [physicstest] line the gate greps; the exit code is 0 when all held.
-import Math
-import Vec3
-open ecs/Entity
-open ecs/ComponentTable
-open ecs/Transform
 open app3d/WalkerPhysics
 open app3d/WalkerPhysicsChecks
-open box3d/ecs/NatureBodies
+open app3d/WalkerTerrainBodies
 
 func runPhysicsSelfTest(
   physicsSystem: mod WalkerPhysics
@@ -21,10 +17,25 @@ func runPhysicsSelfTest(
     physicsSystem: physicsSystem
     transforms: world.transforms
     controllers: world.controllers
-    bushes: List.create(BushSpot, cap: 0)
+    bushes: bushSpots(propKinds: world.propKinds, transforms: world.transforms)
     heroEntityId: heroEntityId
   )
-  let passed: Bool = cubeJumpCheckPassed(check: check)
+  let trunksHeld: Bool = runIslandTrunkTest(
+    physicsSystem: physicsSystem
+    treeVariants: world.treeVariants
+    propKinds: world.propKinds
+    transforms: world.transforms
+    controllers: world.controllers
+    heroEntityId: heroEntityId
+  )
+  let rocksAndBushesHeld: Bool = runRockBushTest(
+    physicsSystem: physicsSystem
+    propKinds: world.propKinds
+    transforms: world.transforms
+    controllers: world.controllers
+    heroEntityId: heroEntityId
+  )
+  let passed: Bool = cubeJumpCheckPassed(check: check) and trunksHeld and rocksAndBushesHeld
   log("[physicstest] {cubeJumpCheckText(check: check)}, passed={passed}")
   if passed {
     ret 0

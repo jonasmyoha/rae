@@ -84,6 +84,10 @@ open ui/UiSystems
 open app3d/WalkerCharacter
 open app3d/PlayerRoster
 open app3d/WalkerPhysics
+open app3d/WalkerTerrain
+open app3d/WalkerTerrainBodies
+open app3d/IslandForest
+open GbufferSprite
 
 const clipTransitionDuration: Float = 0.28
 
@@ -148,7 +152,7 @@ type App {
   inputSystem: InputSystem
   cameraSystem: CameraSystem
   characterSystem: CharacterSystem
-  terrainSystem: TerrainSystem
+  terrainSystem: WalkerTerrain
   grassSystem: GrassSystem
   renderSystem: RenderSystem
   profiler: Profiler  # #764: was lib/profile.rae gProf* globals
@@ -395,7 +399,7 @@ func createApp() ret App {
         "lib/forward_entry.wgsl"
       ])
     )
-    var terrainSystem: TerrainSystem = createTerrainSystem(
+    var terrainSystem: WalkerTerrain = createTerrainSystem(
       renderer: renderer
       world: gameWorld
       assets: assets
@@ -573,6 +577,17 @@ func createApp() ret App {
       groundZ: groundZ
       biome: WorldBiome.defaultBiomeConfig()
     )
+    # The island's forest, with a clearing around the spawn for the cube stacks
+    let treeCount: Int = plantIslandForest(
+      terrainSystem: terrainSystem
+      allocator: gameWorld.allocator
+      transforms: gameWorld.transforms
+      propKinds: gameWorld.propKinds
+      treeVariants: gameWorld.treeVariants
+      spawnX: characterController.position.x
+      spawnY: characterController.position.y
+    )
+    log("[terrain] {treeCount} trees planted on the island")
     partModel = walkerWorldModel(baseModel: basePartModel, controller: characterController)
 
     # #739: the hero is an entity carrying its ThirdPersonController + Transform3D.
@@ -629,7 +644,8 @@ func createApp() ret App {
     updateInfiniteTerrain(
       terrainSystem: terrainSystem
       renderer: renderer
-      world: gameWorld
+      propKinds: gameWorld.propKinds
+      transforms: gameWorld.transforms
       playerPosition: characterController.position
     )
     updateGrassField(
@@ -669,7 +685,19 @@ func createApp() ret App {
       transforms: gameWorld.transforms
       spawnPoint: controllerFeet(controller: characterController, groundZ: groundZ)
     )
-    log("[physics] Box3D: the island height field, {1 + cloneCount} movers, {cubeCount} cubes")
+    let trunkCount: Int = addTreeTrunks(
+      physicsSystem: physicsSystem
+      treeVariants: gameWorld.treeVariants
+      transforms: gameWorld.transforms
+    )
+    let rockCount: Int = placeRockBodies(
+      physicsSystem: physicsSystem
+      propKinds: gameWorld.propKinds
+      transforms: gameWorld.transforms
+    )
+    log(
+      "[physics] Box3D: the island height field, {1 + cloneCount} movers, {cubeCount} cubes, {trunkCount} tree trunks, {rockCount} rocks"
+    )
     # #746: exercise the physics/net ECS seams once at startup — spawn/despawn via
     # generational entities, step a Box3D body. Leaves the world untouched.
     seamSelfTest(world: gameWorld, physicsSystem: physicsSystem)
@@ -899,6 +927,7 @@ func runWalkerApp() ret Int {
   }
   if let resources: mod GpuResources => app.gpuResources {
     grassShutdown(grass: app.grassCompute, resources: resources)
+    spriteShutdown(cache: app.terrainSystem.sprites, resources: resources)
     shutdown(resources: resources)
   }
   shutdownDeferredRenderer(renderer: app.renderSystem.renderer)  # #904: the renderer-owned GPU manager, before the C shutdown

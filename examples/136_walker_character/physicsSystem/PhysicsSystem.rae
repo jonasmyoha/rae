@@ -1,24 +1,11 @@
 # The walker's physics is lib/app3d/WalkerPhysics (the ground, the
-# characters, the cubes, the fixed step, the tree trunks). This file is only what reads this
-# example's own GameWorld.
+# characters, the cubes, the fixed step, the tree trunks) and
+# lib/app3d/WalkerTerrainBodies (the rocks, bushes and trunks of the terrain).
+# This file is only what reads this example's own GameWorld.
 open ecs/Entity
 open ecs/World
 open ecs/ComponentTable
 open app3d/WalkerPhysics
-
-# A static trunk for every tree entity (every row of the GameWorld's
-# TreeVariant table), at its tree's current pose (WalkerPhysics.addTreeTrunk).
-# The number of trunks.
-func addTreeTrunks(physicsSystem: mod WalkerPhysics, world: mod GameWorld) ret Int {
-  loop var i: Int = 0, i < componentCount(this: world.treeVariants), ++i {
-    addTreeTrunk(
-      physicsSystem: physicsSystem
-      transforms: world.transforms
-      entityId: componentEntityAt(this: world.treeVariants, i: i)
-    )
-  }
-  ret componentCount(this: world.treeVariants)
-}
 
 # Despawn a cube: its body, collider and PhysicsCube row
 # (app3d/WalkerPhysics), then every component row of the entity in this
