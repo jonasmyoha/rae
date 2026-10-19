@@ -1138,12 +1138,44 @@ bool emit_auto_init(CFuncContext* ctx, const AstTypeRef* type, FILE* out) {
     return true;
 }
 
+// A field's declared default (`count: Int = 5`), written with the field's
+// type as the expected type so a bare `{ x: 1.0 }` default lowers.
+void emit_field_default(CFuncContext* ctx, const AstTypeField* field, const AstTypeRef* field_tr, FILE* out) {
+    bool saved_has_expected = ctx->has_expected_type;
+    AstTypeRef saved_expected = ctx->expected_type;
+    ctx->expected_type = *field_tr;
+    ctx->has_expected_type = true;
+    emit_expr(ctx, field->default_value, out, PREC_LOWEST, false, false);
+    ctx->has_expected_type = saved_has_expected;
+    ctx->expected_type = saved_expected;
+}
+
+// Does building a `type_decl` value without its fields need more than zeros:
+// a field with a declared default, here or in a nested struct field?
+bool struct_has_field_defaults(CFuncContext* ctx, const AstDecl* decl, int depth) {
+    if (!decl || decl->kind != AST_DECL_TYPE || depth > 8) return false;
+    for (const AstTypeField* f = decl->as.type_decl.fields; f; f = f->next) {
+        if (f->default_value) return true;
+        if (!f->type || f->type->is_opt || f->type->is_view || f->type->is_mod) continue;
+        Str base = get_base_type_name(f->type);
+        const AstDecl* nested = find_type_decl(ctx, ctx->module, base);
+        if (nested && nested != decl && struct_has_field_defaults(ctx, nested, depth + 1)) return true;
+    }
+    return false;
+}
+
+// A struct value with no fields given: each field its declared default, else
+// its type's zero (a nested struct recursively the same).
 bool emit_struct_auto_init(CFuncContext* ctx, const AstDecl* decl, const AstTypeRef* tr, FILE* out) {
     fprintf(out, "{ ");
     for (const AstTypeField* f = decl->as.type_decl.fields; f; f = f->next) {
         fprintf(out, ".%.*s = ", (int)f->name.len, f->name.data);
         AstTypeRef* field_tr = substitute_type_ref(ctx->compiler_ctx, decl->as.type_decl.generic_params, tr->generic_args, f->type);
-        emit_auto_init(ctx, field_tr, out); if (f->next) fprintf(out, ", ");
+        if (f->default_value && field_tr && !field_tr->is_view && !field_tr->is_mod)
+            emit_field_default(ctx, f, field_tr, out);
+        else
+            emit_auto_init(ctx, field_tr, out);
+        if (f->next) fprintf(out, ", ");
     }
     fprintf(out, " }"); return true;
 }
