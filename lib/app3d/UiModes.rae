@@ -58,6 +58,14 @@ type ModeMenuState {
   open: Bool
   cameraLabelReversed: Bool
   cameraLabelWritten: Bool
+  # Show the touch controls (an on-screen joystick) as a phone does: on in a
+  # phone build, where the menu has no item for it; on a desktop off until
+  # the menu's "Simulate mobile phone" turns it on (RAE_SIMULATE_MOBILE=1
+  # starts it on, for screenshots). Read it with touchControlsShown.
+  simulateMobile: Bool
+  # The mobile item's text as written
+  mobileLabelSimulated: Bool
+  mobileLabelWritten: Bool
   # The generation the menu's nodes were last written under: applying a frame
   # or state resets the nodes it names (the menu, restyled for EDITOR), so
   # the menu writes them again when the modes' `generation` moves
@@ -70,6 +78,9 @@ func createModeMenuState() ret ModeMenuState {
     open: Sys.getEnv(name: "RAE_UI_MENU") is "open"
     cameraLabelReversed: false
     cameraLabelWritten: false
+    simulateMobile: Target.isMobileOs or Sys.getEnv(name: "RAE_SIMULATE_MOBILE") is "1"
+    mobileLabelSimulated: false
+    mobileLabelWritten: false
     generation: 0
   }
 }
