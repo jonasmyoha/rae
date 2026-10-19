@@ -4,7 +4,10 @@
 # camera rig's reverseDrag, which turns the orbit camera only: the editor's WASD
 # camera always looks where the drag goes); in EDITOR mode "Back to game"; in
 # both "Reset", which starts the program again with no saved state
-# (HotReload.restartFresh), so it works for any app without code of its own. Which items show is
+# (HotReload.restartFresh), so it works for any app without code of its own;
+# and, in an app with touch controls (its scene has the item), "Simulate
+# mobile phone: off/on", which shows them on a desktop as a phone build always
+# does: the app asks touchControlsShown each frame. Which items show is
 # the scene's `editor` state (app3d/UiModes); the menu's own open/close is set
 # here, outside the state bags. Choosing an item, or a press anywhere else,
 # closes it.
@@ -44,6 +47,8 @@ const modeMenuCameraRotationActionId: String = "menu.cameraRotation"
 
 const modeMenuResetActionId: String = "menu.reset"
 
+const modeMenuMobileActionId: String = "menu.simulateMobile"
+
 # The nodes: the "..." button, the menu, its items and the camera item's label
 const modeMenuButtonNodeId: String = "ModeButton"
 
@@ -51,8 +56,12 @@ const modeMenuNodeId: String = "ContextMenu"
 
 const modeMenuCameraLabelNodeId: String = "MenuCameraLabel"
 
+const modeMenuMobileItemNodeId: String = "MenuMobileItem"
+
+const modeMenuMobileLabelNodeId: String = "MenuMobileLabel"
+
 # Where a press may land without closing the menu: the button and the items
-const modeMenuPressNodeIds: String = "ModeButton MenuEditorItem MenuCameraItem MenuGameItem MenuResetItem"
+const modeMenuPressNodeIds: String = "ModeButton MenuEditorItem MenuCameraItem MenuGameItem MenuResetItem MenuMobileItem"
 
 # Is the menu open after this frame? A tap on the button opens or closes it;
 # choosing an item, or a press anywhere else, closes it.
@@ -80,6 +89,20 @@ func cameraRotationItemText(reversed: view Bool) ret String {
     ret "Reverse camera rotation: on"
   }
   ret "Reverse camera rotation: off"
+}
+
+# The mobile item's text for the menu's simulateMobile
+func simulateMobileItemText(simulated: view Bool) ret String {
+  if simulated {
+    ret "Simulate mobile phone: on"
+  }
+  ret "Simulate mobile phone: off"
+}
+
+# Are the touch controls (an on-screen joystick) shown: always in a phone
+# build, on a desktop while the menu simulates a phone
+func touchControlsShown(menu: view ModeMenuState) ret Bool {
+  ret menu.simulateMobile
 }
 
 func modeMenuTapped(world: view UiWorld, actionId: view String) ret Bool {
@@ -162,6 +185,10 @@ func updateModeMenuItems(
   if cameraTapped {
     rig.reverseDrag = rig.reverseDrag is false
   }
+  let mobileTapped: Bool = modeMenuTapped(world: world, actionId: modeMenuMobileActionId)
+  if mobileTapped {
+    menu.simulateMobile = menu.simulateMobile is false
+  }
   # Does not come back when the program restarts
   let resetTapped: Bool = modeMenuTapped(world: world, actionId: modeMenuResetActionId)
   if resetTapped {
@@ -182,10 +209,25 @@ func updateModeMenuItems(
     )
     changed = true
   }
+  # The mobile item says what the menu does; a phone build has nothing to
+  # simulate, so there it is not shown
+  if rewrite or menu.mobileLabelSimulated is not menu.simulateMobile or menu.mobileLabelWritten is false {
+    menu.mobileLabelSimulated = menu.simulateMobile
+    menu.mobileLabelWritten = true
+    setNodeText(
+      world: world
+      nodeId: modeMenuMobileLabelNodeId
+      value: simulateMobileItemText(simulated: menu.simulateMobile)
+    )
+    if Target.isMobileOs {
+      setNodeActive(world: world, nodeId: modeMenuMobileItemNodeId, value: false)
+    }
+    changed = true
+  }
   let open: Bool = modeMenuOpenAfter(
     open: menu.open
     buttonTapped: modeMenuTapped(world: world, actionId: modeMenuToggleActionId)
-    itemChosen: modeChosen or cameraTapped or resetTapped
+    itemChosen: modeChosen or cameraTapped or resetTapped or mobileTapped
     pressedElsewhere: pressedElsewhere
   )
   if rewrite or open is not menu.open {

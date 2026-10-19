@@ -2,6 +2,7 @@
 # camera item says. Taps and layout need a window and a scene, which the
 # walker examples cover.
 open app3d/ModeMenu
+open app3d/UiModes
 
 func check(label: view String, ok: view Bool) {
   if ok {
@@ -74,5 +75,21 @@ func main() ret Int {
     label: "the camera item, reversed"
     ok: cameraRotationItemText(reversed: true) is "Reverse camera rotation: on"
   )
+  check(
+    label: "the mobile item, off"
+    ok: simulateMobileItemText(simulated: false) is "Simulate mobile phone: off"
+  )
+  check(
+    label: "the mobile item, on"
+    ok: simulateMobileItemText(simulated: true) is "Simulate mobile phone: on"
+  )
+  # A desktop build starts without touch controls; the menu's item turns them on
+  var menu: ModeMenuState = createModeMenuState()
+  check(
+    label: "a desktop build starts without touch controls"
+    ok: touchControlsShown(menu: menu) is false
+  )
+  menu.simulateMobile = true
+  check(label: "simulating a phone shows them", ok: touchControlsShown(menu: menu))
   ret 0
 }
