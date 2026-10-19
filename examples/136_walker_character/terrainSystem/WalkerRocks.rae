@@ -1,49 +1,18 @@
-# The walker's rocks: the lib's faceted procedural rocks (lib/procgen/Rock,
-# the rocks of Autumn Grove), a few variants generated once and drawn
-# instanced. Each variant is a rock of size 1 (a unit sphere cut flat, about
-# 1.6 m across);
-# a placement stretches, flattens and sinks it into the ground
-# (TerrainSystem.rockTransform), as Autumn Grove does.
-import Vec3
-open Noise
+# The walker's rocks: lib/app3d/TerrainRocks' shapes (the faceted procedural
+# rocks of Autumn Grove), one instancer each; TerrainProp.variant says which
+# shape a placed rock is.
 open Scene3d
-open Mesh3d
-open procgen/Rock
+open app3d/TerrainRocks
 open terrainSystem/WalkerTrees
 
-# How many rock shapes there are (TerrainProp.variant picks one)
-const rockVariantCount: Int = 4
-
-# A variant's seed: its shape, and how many flat cuts it has
-func rockVariantSeed(variant: view Int) ret Int {
-  ret 211 + variant * 97
-}
-
-# Every rock variant, one instancer each, in a grey with a little tint of
-# its own
+# Every rock shape as an instancer of `capacity` rocks
 func createRockParts(renderer: mod DeferredRenderer, capacity: view Int) ret List(PropInstancer) {
-  var parts: List(PropInstancer) = List.create(PropInstancer, cap: rockVariantCount)
-  loop var variant: Int = 0, variant < rockVariantCount, ++variant {
-    let seed: Int = rockVariantSeed(variant: variant)
-    let shape: MeshData = generateRock(
-      subdivision: 5
-      sliceCount: 4 + seed % 3
-      size: 1.0
-      seed: seed
-      irregularity: 0.12
+  let shapes: List(RockShape) = createRockShapes(renderer: renderer)
+  var parts: List(PropInstancer) = List.create(PropInstancer, cap: shapes.length)
+  loop let shape: view RockShape in shapes {
+    parts.add(
+      value: createPropInstancer(mesh: shape.mesh, material: shape.material, capacity: capacity)
     )
-    let tint: Float = hash2(x: seed, y: 4, seed: 891) * 0.07
-    parts.add(value: createPropInstancer(
-      mesh: uploadFoliage(renderer: renderer, mesh: shape)
-      material: {
-        baseColor: Vec3.create(x: 0.215 + tint, y: 0.245 + tint, z: 0.265 + tint)
-        metallic: 0.0
-        roughness: 0.85
-        emission: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
-        toon: true
-      }
-      capacity: capacity
-    ))
   }
   ret parts
 }

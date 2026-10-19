@@ -1,0 +1,147 @@
+# The rocks' and bushes' part of the physics check (RAE_114_PHYSICS_TEST=1,
+# after TreeTrunkTest): the placed rock nearest the hero blocks a ray through
+# its middle, and the hero set down in the middle of the nearest bush and
+# told to run moves, but while inside no faster than the bush lets it (a run
+# in the open is 4.2 m/s).
+import Math
+import Vec3
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Transform
+open app3d/CharacterController
+open box3d/ecs/PhysicsTypes
+open box3d/ecs/PhysicsComponents
+open box3d/ecs/PhysicsQueries
+open physicsSystem/TerrainBodies
+open box3d/ecs/NatureBodies
+open physicsSystem/TreeTrunkTest
+
+# Fixed steps of the run out of the bush (0.5 s); only those inside count
+const bushTestRunSteps: Int = 30
+
+# The placed prop of `kind` nearest to `point`, or none
+func nearestProp(world: view GameWorld, kind: view Int, point: view Vec3) ret opt EntityId {
+  var nearest: opt EntityId = none
+  var nearestDistance: Float = 1000000.0
+  loop var i: Int = 0, i < componentCount(this: world.propKinds), ++i {
+    let entityId: EntityId = componentEntityAt(this: world.propKinds, i: i)
+    let prop: view TerrainProp => componentView(this: world.propKinds, entityId: entityId)
+    if prop.kind is kind and prop.active {
+      let position: Vec3 = componentView(this: world.transforms, entityId: entityId).position
+      let gapX: Float = position.x - point.x
+      let gapY: Float = position.y - point.y
+      let distance: Float = Math.sqrt(x: gapX * gapX + gapY * gapY)
+      if distance < nearestDistance {
+        nearestDistance = distance
+        nearest = entityId
+      }
+    }
+  }
+  ret nearest
+}
+
+# Does a ray across the rock's middle (from 4 m west to 4 m east, half its
+# sphere's radius above its centre) hit the rock first?
+func rayHitsRock(
+  physicsSystem: view PhysicsSystem
+  world: view GameWorld
+  rockEntityId: view EntityId
+) ret Bool {
+  let placed: Transform3D = transformOf(world: world, entityId: rockEntityId)
+  let height: Float = rockColliderRadius(transform: placed) * 0.5
+  let hit: PhysicsHit = raycastClosest(
+    physics: physicsSystem.physics
+    origin: Vec3.create(
+      x: placed.position.x - 4.0
+      y: placed.position.y
+      z: placed.position.z + height
+    )
+    translation: Vec3.create(x: 8.0, y: 0.0, z: 0.0)
+    filter: defaultQueryFilter()
+  )
+  ret hit.hit and hit.entityId is rockEntityId
+}
+
+# Put the hero's mover at rest with its feet on `feet`
+func placeHero(physicsSystem: mod PhysicsSystem, heroEntityId: view EntityId, feet: view Vec3) {
+  let character: mod CharacterBody => componentMod(
+    this: physicsSystem.characters
+    entityId: heroEntityId
+  )
+  character.mover.transform.p.x = feet.x
+  character.mover.transform.p.y = feet.y
+  character.mover.transform.p.z = feet.z + moverCenterAboveFeet
+  character.mover.velocity.x = 0.0
+  character.mover.velocity.y = 0.0
+  character.mover.velocity.z = 0.0
+}
+
+# True when both hold; logs one [rockbushtest] line either way
+func runRockBushTest(
+  physicsSystem: mod PhysicsSystem
+  world: mod GameWorld
+  heroEntityId: view EntityId
+  groundZ: view Float
+) ret Bool {
+  let heroFeet: Vec3 = controllerFeet(
+    controller: controllerOf(world: world, entityId: heroEntityId)
+    groundZ: groundZ
+  )
+  var rockBlocksRay: Bool = false
+  if let rockEntityId: EntityId = nearestProp(world: world, kind: kindRock, point: heroFeet) {
+    rockBlocksRay = rayHitsRock(
+      physicsSystem: physicsSystem
+      world: world
+      rockEntityId: rockEntityId
+    )
+  }
+  var bushSlows: Bool = false
+  var fastest: Float = 0.0
+  var limit: Float = bushNoLimit
+  var steps: Int = 0
+  var overLimit: Bool = false
+  if let bushEntityId: EntityId = nearestProp(world: world, kind: kindBush, point: heroFeet) {
+    let bush: Vec3 = transformOf(world: world, entityId: bushEntityId).position
+    limit = bushSpeedLimitAt(world: world, x: bush.x, y: bush.y)
+    # The bush stands 5 cm into the ground (TerrainSystem.kindTransform)
+    placeHero(
+      physicsSystem: physicsSystem
+      heroEntityId: heroEntityId
+      feet: Vec3.create(x: bush.x, y: bush.y, z: bush.z + 0.05)
+    )
+    let run: InputIntent = {
+      moveX: 0.0
+      moveY: 1.0
+      walking: false
+      jump: false
+      actions: 0
+    }
+    loop var step: Int = 0, step < bushTestRunSteps, ++step {
+      let heroAt: Vec3 = controllerOf(world: world, entityId: heroEntityId).position
+      let insideLimit: Float = bushSpeedLimitAt(world: world, x: heroAt.x, y: heroAt.y)
+      selfTestStep(
+        physicsSystem: physicsSystem
+        world: world
+        heroEntityId: heroEntityId
+        groundZ: groundZ
+        intent: run
+        yaw: 0.0
+      )
+      # The limit where the step began holds the step's speed
+      let speed: Float = characterSpeed(physicsSystem: physicsSystem, entityId: heroEntityId)
+      if insideLimit < bushNoLimit {
+        steps = steps + 1
+        fastest = Math.max(a: fastest, b: speed)
+        if speed > insideLimit + 0.1 {
+          overLimit = true
+        }
+      }
+    }
+    bushSlows = limit < bushEdgeSpeed and steps > 5 and fastest > 0.2 and overLimit is false
+  }
+  let passed: Bool = rockBlocksRay and bushSlows
+  log(
+    "[rockbushtest] rockBlocksRay={rockBlocksRay}, in a bush for {steps} steps: fastest {fastest} m/s, limit {limit} m/s in the middle (bushSlows={bushSlows}), passed={passed}"
+  )
+  ret passed
+}

@@ -1,0 +1,62 @@
+# The streamed terrain props in the physics world (lib/box3d/ecs/NatureBodies
+# holds the rules): every placed rock is a static sphere, rebuilt after each
+# terrain stream because the rock entities are reused; a bush slows a
+# character inside it (moveCharacters asks bushSpeedLimitAt).
+import Math
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Transform
+open box3d/ecs/PhysicsSpawn
+open box3d/ecs/NatureBodies
+
+# Give every placed rock a static body and sphere at its current pose,
+# dropping the body it had before; a rock not placed (over water) gets none.
+# Call after the terrain streams. The number of rock bodies.
+func placeRockBodies(physicsSystem: mod PhysicsSystem, world: mod GameWorld) ret Int {
+  var rocks: Int = 0
+  loop var i: Int = 0, i < componentCount(this: world.propKinds), ++i {
+    let entityId: EntityId = componentEntityAt(this: world.propKinds, i: i)
+    if componentView(this: world.propKinds, entityId: entityId).kind is kindRock {
+      despawnRigidBody(
+        physics: physicsSystem.physics
+        rigidBodies: physicsSystem.rigidBodies
+        colliders: physicsSystem.colliders
+        entityId: entityId
+      )
+      if componentView(this: world.propKinds, entityId: entityId).active {
+        addRockBody(
+          physics: physicsSystem.physics
+          rigidBodies: physicsSystem.rigidBodies
+          colliders: physicsSystem.colliders
+          transforms: world.transforms
+          entityId: entityId
+        )
+        rocks = rocks + 1
+      }
+    }
+  }
+  ret rocks
+}
+
+# The lowest speed limit of the placed bushes at (`x`, `y`); bushNoLimit
+# when no bush is there
+func bushSpeedLimitAt(world: view GameWorld, x: view Float, y: view Float) ret Float {
+  var limit: Float = bushNoLimit
+  loop var i: Int = 0, i < componentCount(this: world.propKinds), ++i {
+    let entityId: EntityId = componentEntityAt(this: world.propKinds, i: i)
+    let prop: view TerrainProp => componentView(this: world.propKinds, entityId: entityId)
+    if prop.kind is kindBush and prop.active {
+      let transform: view Transform3D => componentView(this: world.transforms, entityId: entityId)
+      let dx: Float = x - transform.position.x
+      let dy: Float = y - transform.position.y
+      limit = Math.min(
+        a: limit
+        b: bushSpeedLimit(
+          distance: Math.sqrt(x: dx * dx + dy * dy)
+          radius: bushSoftRadius(scale: transform.scale.x)
+        )
+      )
+    }
+  }
+  ret limit
+}

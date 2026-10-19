@@ -1273,11 +1273,12 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              && (cd .. && RAE_114_PHYSICS_TEST=1 RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=60000 \
                 perl -e 'alarm shift; exec @ARGV' 60 "$TMP_OUT/app") > "$TMP_OUT/physics.log" 2>&1 \
              && [ "$(grep -c "\[trunktest\] .* poolFollows=true, groundFollows=true, passed=true" "$TMP_OUT/physics.log")" -eq 1 ] \
+             && [ "$(grep -c "\[rockbushtest\] .* passed=true" "$TMP_OUT/physics.log")" -eq 1 ] \
              && [ "$(grep -c "\[physicstest\] .* passed=true" "$TMP_OUT/physics.log")" -eq 1 ] \
              && (cd .. && RAE_WALKER_SPLASH_TEST=1 RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=30000 \
                 perl -e 'alarm shift; exec @ARGV' 45 "$TMP_OUT/app") > "$TMP_OUT/splash.log" 2>&1 \
              && grep -q '\[splash-pose\].*ok=true' "$TMP_OUT/splash.log"; then
-            echo "PASS: $EXAMPLE_NAME ($TREES trees in a PropField, pooled trunks, ground following the walker, FFT sea on its biome, wading spray from the feet)"
+            echo "PASS: $EXAMPLE_NAME ($TREES trees in a PropField, pooled trunks, ground following the walker, FFT sea on its biome, wading spray from the feet, solid rocks and slowing bushes)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (walker forest)"
