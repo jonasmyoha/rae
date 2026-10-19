@@ -19,19 +19,17 @@ Every material 136 uses has a forward version (`lib/ForwardMaterial.rae`,
 | water | none: no lake, river or sea, no water FFT, no underwater fog (the water surface reads the scene depth) | toon lake, meadow river, FFT sea, underwater fog |
 | splash droplets | none (they draw in the transparent pass with the water) | when a character wades |
 | shallow water on the ground | still painted by the terrain, and still a wall when deep (it is the island's biome, not the water renderer) | the same, under the water surface |
-| terrain colours | 136's palette (`assets/terrain_palette.wgsl`, copied) with the lib's painted ground (`lib/terrain_grass_painted.wgsl`, `lib/terrain_detail_painted.wgsl`) in a forward composition (`rendererSetForwardTerrainShader`) | the same parts in the G-buffer composition |
+| terrain colours | the walker palette (`lib/terrain_palette_walker.wgsl`) with the lib's painted ground (`lib/terrain_grass_painted.wgsl`, `lib/terrain_detail_painted.wgsl`) in a forward composition (`rendererSetForwardTerrainShader`) | the same parts in the G-buffer composition |
 | everything else | the same: walker, crowd, controls, camera, grass, props, physics, shadows, bloom, UI, hot-reload state (its own app id), dynamic resolution | |
 
-## Duplication
+## One program
 
-137 is a copy of 136's program, like 135/134. Of its 5,190 lines of Rae, 5,097
-are identical to 136's; the rest drop the water, splashes and TAA settling and
-draw the scene in the forward step. The two terrain WGSL parts (46 lines) are
-copied because a shader composition resolves its parts next to the declaring
-file. The binary assets (4.6 MB: glTF, textures, fonts, UI scenes) are not
-copied: 137 reads them from `examples/136_walker_character/assets/`, which the
-iOS bundler stages like any cross-example asset path. A change to 136's
-gameplay has to be made in both.
+137 is not a copy of 136: both are the walker app shell (`lib/app3d/WalkerApp`,
+with 143), and `Main.rae` holds only the settings: `forward: true` picks the
+forward renderer (and with it no sea and no wading spray), `WalkerLand.island`
+the island. The binary assets (glTF, textures, fonts, UI scenes) are 136's,
+read from `examples/136_walker_character/assets/`, which the iOS bundler
+stages like any cross-example asset path.
 
 ## Measured (2026-10-15, iPhone 15 Pro)
 

@@ -1,4 +1,5 @@
-// Walker palette: painted greens, warm paths and pale mineral sand.
+// The walker examples' palette (lib/app3d/WalkerApp: 136, 137, 143): painted
+// greens, warm paths and pale mineral sand.
 // Linear albedos; the local detail shader adds restrained spatial variation.
 // The submerged sand stays bright enough to show through turquoise water.
 const RAE_TERRAIN_GRASS: vec3<f32> = vec3<f32>(0.080, 0.245, 0.015);

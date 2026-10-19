@@ -1,0 +1,403 @@
+# app3d/WalkerRender — the walker app shell's renderer state and passes
+# (app3d/WalkerApp): the physics cubes, the shadow pass, the GPU grass and the
+# scene's draws, which the deferred frame makes into its G-buffer pass and the
+# forward frame into its forward pass (and its SSAO pre-pass). The graph walk
+# that calls them is app3d/WalkerRenderWalk.
+import Math
+import Profile
+import Gpu2d
+import Vec3
+open app3d/UiModes
+open ecs/Entity
+open ecs/ComponentTable
+import Sys
+open GbufferInstanced
+open Particles
+open water/WadeSplash
+open WorldBiome
+open TransparentForward
+open water/WaterLighting
+open water/WaterSystem
+open water/WaterFft
+open water/Underwater
+open gpu/GpuResources
+open gpu/GpuLifetime
+open GrassCompute
+import GrassConfig
+import app3d/Slider
+open Scene3d
+open RendererDeferred
+open Sky
+open Gbuffer
+import GbufferSkinned
+open Rendergraph
+open Math3d
+open Mesh3d
+open Gltf
+open GltfSkin
+open SdfText
+open Png
+open app3d/CameraRig
+open app3d/CharacterController
+open app3d/SettingsDialog
+open SkyHosek
+open app3d/UiShell
+open app3d/ControlPanel
+open app3d/CameraBar
+open Shadow3d
+open app3d/Playback
+open HotReload
+open ui/LogOverlay
+open ui/WindowGeometry
+open ui/EventLoop
+open ui/DebugOverlay
+open ui/VirtualJoystick
+open app3d/ModeMenu
+open ui/Ecs
+open ui/Components
+open ui/inputSystem/InputSystem
+open ui/renderSystem/RenderSystem
+open app3d/RenderScale
+open Gpu2dCanvas
+open ui/UiSystems
+open app3d/WalkerCharacter
+open app3d/WalkerPhysics
+open app3d/WalkerTerrain
+open app3d/WalkerWorld
+open app3d/WalkerCamera
+open app3d/WalkerHud
+open app3d/WalkerInput
+
+# The renderer (deferred or forward) + dynamic-resolution controller (#552)
+type WalkerRender {
+  renderer: DeferredRenderer
+  drs: RenderScaleController
+  shadowLogged: Bool
+  # The physics cubes, one instanced draw (the unit box, scaled per cube)
+  cubeBatch: InstanceBatch
+}
+
+# Per-frame scratch shared across systems: timing and the render/park decision.
+type WalkerFrame {
+  deltaTime: Float
+  now: Float64
+  startT: Float64
+  prevT: Float64
+  time: Float
+  aspect: Float
+  needsRender: Bool
+  dbgDidWork: Bool
+  taaSettleFrames: Int
+  renderedOnce: Bool
+  headless: Bool
+  # The window was resized since the last frame. Gpu2d.windowResized() is
+  # cleared when read, so beginWalkerFrame reads it once (resizeUiToWindow) and
+  # the rest of the frame reads this
+  resized: Bool
+}
+
+# A clip plays this much slower while its character is in the air: there is
+# no jump clip, so a slowed run stride stands in for the leap
+const airborneClipScale: Float = 0.3
+
+# A clip switch blends from the old pose over this long (s)
+const clipTransitionDuration: Float = 0.28
+
+# The physics cubes into the G-buffer: one instanced draw of the unit box.
+func drawPhysicsCubes(
+  cache: mod GbufferCache
+  resources: mod GpuResources
+  batch: mod InstanceBatch
+  physicsSystem: view WalkerPhysics
+  world: view WalkerWorld
+  toon: view Bool
+) {
+  resetInstanceBatch(batch: batch)
+  loop var i: Int = 0, i < componentCount(this: physicsSystem.cubes), ++i {
+    let cubeId: EntityId = componentEntityAt(this: physicsSystem.cubes, i: i)
+    if componentHas(this: world.transforms, entityId: cubeId) is false {
+      continue
+    }
+    let cube: view PhysicsCube => componentView(this: physicsSystem.cubes, entityId: cubeId)
+    let model: Mat4 = physicsCubeModel(
+      transform: componentView(this: world.transforms, entityId: cubeId)
+      cube: cube
+    )
+    let material: Material3d = {
+      baseColor: cube.color
+      metallic: 0.0
+      roughness: 0.7
+      emission: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+      toon: toon
+    }
+    addInstance(
+      batch: batch
+      model: model
+      prevModel: model
+      material: material
+    )
+  }
+  drawInstances(cache: cache, resources: resources, batch: batch)
+}
+
+# The physics cubes into the shadow map.
+func drawPhysicsCubesShadow(
+  renderer: mod DeferredRenderer
+  batch: view InstanceBatch
+  physicsSystem: view WalkerPhysics
+  world: view WalkerWorld
+) {
+  let cubeMesh: MeshHandle = meshHandle(id: batch.meshId, generation: 1)
+  loop var i: Int = 0, i < componentCount(this: physicsSystem.cubes), ++i {
+    let cubeId: EntityId = componentEntityAt(this: physicsSystem.cubes, i: i)
+    if componentHas(this: world.transforms, entityId: cubeId) {
+      drawShadowCasterWith(
+        renderer: renderer
+        mesh: cubeMesh
+        model: physicsCubeModel(
+          transform: componentView(this: world.transforms, entityId: cubeId)
+          cube: componentView(this: physicsSystem.cubes, entityId: cubeId)
+        )
+      )
+    }
+  }
+}
+
+# The shadow pass: fit cascades to this frame, then rasterise every caster
+# (ground, props, the character's skinned parts + crowd). Its own function so the
+# match arm stays a one-liner (and the systems refactor #543 gives it a home).
+func renderShadowPass(
+  cameraSystem: mod WalkerCamera
+  characterSystem: mod CharacterSystem
+  inputSystem: mod WalkerInput
+  renderSystem: mod WalkerRender
+  terrainSystem: mod WalkerTerrain
+  world: mod WalkerWorld
+  physicsSystem: view WalkerPhysics
+  aspect: copy Float
+  palette: view List(Float)
+) {
+  # Four cascades to 120 m, the first reaching 4 m past the camera target (the
+  # walker), so the walker and the ground around it are in one cascade
+  # (examples/142_shadow_cascades shows the fit)
+  let cascades: ShadowCascades = fitShadowCascadesAround(
+    camPos: cameraSystem.camera.position
+    camTarget: cameraSystem.camera.target
+    fovYDeg: cameraSystem.camera.fovYDeg
+    aspect: aspect
+    near: cameraSystem.camera.nearZ
+    far: 120.0
+    focus: followFocus(
+      camPos: cameraSystem.camera.position
+      camTarget: cameraSystem.camera.target
+      margin: 4.0
+    )
+    sunDir: cameraSystem.light.sunDir
+    count: 4
+    resolution: drsShadowRes(drs: renderSystem.drs)
+    lambda: 0.75
+    backExtent: 12.0
+  )
+  uploadPalette(
+    renderer: renderSystem.renderer
+    rows: palette
+    jointCount: jointCount(sk: characterSystem.skeleton)
+  )
+  if inputSystem.settings.shadows {
+    beginShadowPass(renderer: renderSystem.renderer, c: cascades)
+    drawTerrainPropsShadow(renderer: renderSystem.renderer, terrainSystem: terrainSystem)
+    drawPhysicsCubesShadow(
+      renderer: renderSystem.renderer
+      batch: renderSystem.cubeBatch
+      physicsSystem: physicsSystem
+      world: world
+    )
+    # Each caster's shadow samples the SAME palette slot its G-buffer instance
+    # does (#547), so a crowd member casts its own pose. Hero = slot 0.
+    let jc: Int = jointCount(sk: characterSystem.skeleton)
+    loop var sp: Int = 0, sp < walkerWorldPartCount(world: world), ++sp {
+      let sh: MeshHandle = meshHandle(
+        id: walkerWorldPartAt(world: world, i: sp).meshId
+        generation: 1
+      )
+      drawShadowCasterSkinnedWith(
+        renderer: renderSystem.renderer
+        mesh: sh
+        model: characterSystem.model
+        paletteBase: 0
+      )
+      loop var shadowClone: Int = 0, shadowClone < characterSystem.crowdEntities.length, ++shadowClone {
+        if let member: EntityId = characterSystem.crowdEntities.copyAt(index: shadowClone) {
+          let ctrl: view ThirdPersonController => componentView(
+            this: world.controllers
+            entityId: member
+          )
+          let cloneModel: Mat4 = walkerWorldModel(
+            baseModel: characterSystem.basePartModel
+            controller: ctrl
+          )
+          drawShadowCasterSkinnedWith(
+            renderer: renderSystem.renderer
+            mesh: sh
+            model: cloneModel
+            paletteBase: characterPaletteBase(slot: shadowClone + 1, jointCount: jc)
+          )
+        }
+      }
+    }
+    endShadowPass(renderer: renderSystem.renderer)
+  }
+  if renderSystem.shadowLogged is false {
+    log(
+      "[shadow] casters {shadowCasterCount(renderer: renderSystem.renderer)}, {cascades.count} cascades at {cascades.resolution}"
+    )
+    renderSystem.shadowLogged = true
+  }
+}
+
+# This frame's GPU grass field (lib/GrassCompute), generated once a frame
+# before the first scene pass draws it
+func generateWalkerGrass(
+  cameraSystem: view WalkerCamera
+  characterSystem: view CharacterSystem
+  world: view WalkerWorld
+  t: copy Float
+  deltaTime: copy Float
+  profiler: mod Profiler
+  grassCompute: mod GrassCompute
+  resources: mod GpuResources
+) {
+  var grassToonGen: Int = 0
+  if characterSystem.toon {
+    grassToonGen = 1
+  }
+  var grassView: GrassViewSettings = GrassConfig.grassThirdPersonSettings(
+    groundColor: walkerGroundColor()
+  )
+  # Low, broad tufts accent the painted ground instead of hiding it.
+  grassView.bladeHeightScale = 0.55
+  grassView.bladeWidthScale = 1.8
+  grassView.densityScale = 0.55
+  grassView.clusterStrength = 0.8
+  grassView.tipLighten = 1.25
+  grassView.windStrength = 0.45
+  let heroPos: Vec3 = controllerOf(world: world, entityId: characterSystem.heroEntityId).position
+  grassGenerate(
+    grass: grassCompute
+    resources: resources
+    playerX: heroPos.x
+    playerY: heroPos.y
+    groundZ: characterSystem.groundZ
+    time: t
+    deltaTime: deltaTime
+    toon: grassToonGen
+    camX: cameraSystem.camera.position.x
+    camY: cameraSystem.camera.position.y
+    camZ: cameraSystem.camera.position.z
+    fwdX: cameraSystem.camera.target.x - cameraSystem.camera.position.x
+    fwdY: cameraSystem.camera.target.y - cameraSystem.camera.position.y
+    fwdZ: cameraSystem.camera.target.z - cameraSystem.camera.position.z
+    settings: grassView
+  )
+  grassDiagTick(grass: grassCompute, resources: resources, profiler: profiler)
+}
+
+# The scene's draws into the open pass (the G-buffer pass, the forward pass,
+# or the forward frame's depth + normal pre-pass): the biome-splat ground,
+# the props and forest, the physics cubes, the character's skinned parts and
+# the crowd, then the grass. #912: the pass's pipelines/binds live in the
+# RENDERER's manager (rendererResources); the grass compute objects stay in
+# the app's (resources).
+func drawWalkerScene(
+  cache: mod GbufferCache
+  rendererResources: mod GpuResources
+  characterSystem: mod CharacterSystem
+  terrainSystem: mod WalkerTerrain
+  world: mod WalkerWorld
+  physicsSystem: view WalkerPhysics
+  cubeBatch: mod InstanceBatch
+  palette: view List(Float)
+  t: copy Float
+  grassCompute: mod GrassCompute
+  resources: mod GpuResources
+) {
+  drawTerrainGround(
+    cache: cache
+    resources: rendererResources
+    terrainSystem: terrainSystem
+    time: t
+  )
+  drawTerrainProps(cache: cache, resources: rendererResources, terrainSystem: terrainSystem)
+  drawPhysicsCubes(
+    cache: cache
+    resources: rendererResources
+    batch: cubeBatch
+    physicsSystem: physicsSystem
+    world: world
+    toon: characterSystem.toon
+  )
+  # Palettes (hero slot 0 + one per crowd member) were uploaded in renderWalkerApp;
+  # the hero's is re-written here into the cache's palette (slot 0).
+  let jc: Int = jointCount(sk: characterSystem.skeleton)
+  uploadPaletteAt(
+    cache: cache
+    resources: rendererResources
+    rows: palette
+    jointCount: jc
+    baseRow: 0
+  )
+  loop var p: Int = 0, p < walkerWorldPartCount(world: world), ++p {
+    let part: view PartRoughness => walkerWorldPartAt(world: world, i: p)
+    let handle: MeshHandle = meshHandle(id: part.meshId, generation: 1)
+    let mat: Material3d = {
+      baseColor: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
+      metallic: 0.0
+      roughness: part.roughness
+      emission: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+      toon: characterSystem.toon
+    }
+    GbufferSkinned.drawSkinnedInstance(
+      cache: cache
+      resources: rendererResources
+      mesh: handle
+      model: characterSystem.model
+      prevModel: characterSystem.prevModel
+      material: mat
+    )
+    setInstanceBatchMesh(batch: characterSystem.crowdBatch, mesh: handle)
+    resetInstanceBatch(batch: characterSystem.crowdBatch)
+    loop var cloneDraw: Int = 0, cloneDraw < characterSystem.crowdEntities.length, ++cloneDraw {
+      if let member: EntityId = characterSystem.crowdEntities.copyAt(index: cloneDraw) {
+        # Each crowd member samples its OWN palette slot (#547) so it holds a
+        # distinct pose in this single instanced skinned draw. Its model is
+        # derived from the entity's controller (#739) — no stored model.
+        let ctrl: view ThirdPersonController => componentView(
+          this: world.controllers
+          entityId: member
+        )
+        let cloneModel: Mat4 = walkerWorldModel(
+          baseModel: characterSystem.basePartModel
+          controller: ctrl
+        )
+        addSkinnedInstance(
+          batch: characterSystem.crowdBatch
+          model: cloneModel
+          prevModel: cloneModel
+          material: mat
+          paletteBase: characterPaletteBase(slot: cloneDraw + 1, jointCount: jc)
+        )
+      }
+    }
+    drawSkinnedInstances(
+      cache: cache
+      resources: rendererResources
+      batch: characterSystem.crowdBatch
+    )
+  }
+  grassDraw(
+    grass: grassCompute
+    resources: resources
+    gbuffer: cache
+    gbufferResources: rendererResources
+  )
+}

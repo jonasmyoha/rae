@@ -1,0 +1,388 @@
+# app3d/WalkerAppSetup — the setup steps of the walker app shell
+# (app3d/WalkerApp) that depend on its settings: what world the walker is on
+# (the island of 136 / 137, the wide forest of 143), the terrain shader of its
+# renderer, the panels, the crowd, the forest and the physics.
+import Math
+import Vec3
+open Scene3d
+open RendererDeferred
+open RendererForward
+open WorldBiome
+open ecs/Entity
+open ecs/ComponentTable
+open ui/Ecs
+open ui/UiSystems
+open ui/renderSystem/RenderSystem
+open app3d/ControlPanel
+open app3d/CharacterController
+open app3d/WalkerCharacter
+open app3d/WalkerPhysics
+open app3d/WalkerTerrain
+open app3d/WalkerTerrainBodies
+open app3d/WalkerWorld
+open app3d/IslandForest
+open app3d/WideForest
+
+# The world the walker is on: the small island in the sea (136, 137), or a
+# wide forest world with lakes and no island (143)
+enum WalkerLand { island, forest }
+
+# What makes one walker app different from another (app3d/WalkerApp)
+type WalkerAppSettings {
+  # The window's title
+  title: String
+  # The hot-reload state and window geometry are kept under this id
+  appId: String
+  # The folder of the walker's model, clips, UI scenes and environment meshes
+  assets: String
+  # The forward renderer (4x MSAA, SSAO from a depth + normal pre-pass)
+  # instead of the deferred one. A forward frame has no water: no sea, no
+  # wading spray.
+  forward: Bool
+  land: WalkerLand
+}
+
+# How many crowd members walk beside the hero
+const walkerCrowdCount: Int = 5
+
+func walkerBiome(land: view WalkerLand) ret BiomeConfig {
+  if land is WalkerLand.forest {
+    ret wideForestBiome()
+  }
+  ret defaultBiomeConfig()
+}
+
+# The streamed terrain window's side in cells: 7 on the island, 17 in the
+# forest (its trees are taller than the island's meadow is wide)
+func walkerGridSide(land: view WalkerLand) ret Int {
+  if land is WalkerLand.forest {
+    ret 17
+  }
+  ret 7
+}
+
+func walkerForestSettings(land: view WalkerLand) ret ForestFieldSettings {
+  if land is WalkerLand.forest {
+    ret wideForestSettings()
+  }
+  ret islandForestSettings()
+}
+
+# The sea and the wading spray are drawn in the deferred frame only
+func walkerHasSea(settings: view WalkerAppSettings) ret Bool {
+  ret not settings.forward
+}
+
+# The painted ground (lib/terrain_grass_painted + terrain_detail_painted:
+# broad meadow patches, warm sand, no surf painted on the beach) in the
+# walker palette (lib/terrain_palette_walker.wgsl), validated at build. The
+# forward one has the shading prelude in front and the forward entry last.
+func setWalkerTerrainShader(
+  renderer: mod DeferredRenderer
+  forward: view Bool
+  biome: view BiomeConfig
+) {
+  if forward {
+    rendererSetForwardTerrainShader(
+      renderer: renderer
+      shader: shader(files: [
+        "lib/precision_f32.wgsl"
+        "lib/sky_hosek.wgsl"
+        "lib/deferred_uniforms.wgsl"
+        "lib/deferred_shade.wgsl"
+        "lib/ssao_upsample.wgsl"
+        "lib/noise.wgsl"
+        "lib/world_biome.wgsl"
+        "lib/terrain_palette_walker.wgsl"
+        "lib/terrain_grass_painted.wgsl"
+        "lib/terrain_detail_painted.wgsl"
+        "lib/terrain_splat.wgsl"
+        "lib/forward_entry.wgsl"
+      ])
+    )
+    ret
+  }
+  rendererSetTerrainShaderWithConstants(
+    renderer: renderer
+    shader: shader(files: [
+      "lib/noise.wgsl"
+      "lib/world_biome.wgsl"
+      "lib/terrain_palette_walker.wgsl"
+      "lib/terrain_grass_painted.wgsl"
+      "lib/terrain_detail_painted.wgsl"
+      "lib/terrain_splat.wgsl"
+    ])
+    # The shader's island radius is the world's (no island in the forest)
+    constants: islandConstantsFor(cfg: biome)
+  )
+}
+
+# The clip buttons: idle, walk, walk fast, run (one selected)
+func createClipPanel(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  gpuUi: view Gpu2dUi
+) ret ControlPanel {
+  var clipPanel: ControlPanel = createControlPanel(hostNodeId: "ClipRow")
+  addPanelButton(
+    panel: clipPanel
+    id: "idle"
+    label: "Idle"
+    actionId: "clip.idle"
+    group: 1
+  )
+  addPanelButton(
+    panel: clipPanel
+    id: "walk"
+    label: "Walk"
+    actionId: "clip.walk"
+    group: 1
+  )
+  addPanelButton(
+    panel: clipPanel
+    id: "walkFast"
+    label: "Walk fast"
+    actionId: "clip.walkFast"
+    group: 1
+  )
+  addPanelButton(
+    panel: clipPanel
+    id: "run"
+    label: "Run"
+    actionId: "clip.run"
+    group: 1
+  )
+  buildControlPanel(
+    panel: clipPanel
+    world: world
+    uiSystems: uiSystems
+    res: gpuUi
+  )
+  ret clipPanel
+}
+
+func createTransportPanel(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  gpuUi: view Gpu2dUi
+) ret ControlPanel {
+  var transport: ControlPanel = createControlPanel(hostNodeId: "TransportRow")
+  transport.buttonW = 84.0
+  buildControlPanel(
+    panel: transport
+    world: world
+    uiSystems: uiSystems
+    res: gpuUi
+  )
+  ret transport
+}
+
+# Character-switch buttons (#546): Prev / Next cycle the controlled character,
+# the same as Page Up/Down and keys 1/2. Momentary (group 0), not a selection.
+func createCharacterPanel(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  gpuUi: view Gpu2dUi
+  characterCount: view Int
+) ret ControlPanel {
+  var charPanel: ControlPanel = createControlPanel(hostNodeId: "CharacterRow")
+  charPanel.buttonW = 84.0
+  addPanelButton(
+    panel: charPanel
+    id: "prev"
+    label: "< Prev"
+    actionId: "char.prev"
+    group: 0
+  )
+  addPanelButton(
+    panel: charPanel
+    id: "next"
+    label: "Next >"
+    actionId: "char.next"
+    group: 0
+  )
+  buildControlPanel(
+    panel: charPanel
+    world: world
+    uiSystems: uiSystems
+    res: gpuUi
+  )
+  setNodeText(world: world, nodeId: "CharacterReadout", value: "Controlling 1 / {characterCount}")
+  ret charPanel
+}
+
+# The crowd: `count` members on a spiral round the hero, each on land, each an
+# entity with its OWN controller (so the player can switch to and drive it,
+# #546), its OWN clip and starting phase (#547) and a Transform3D synced from
+# the controller. Its render model is derived from the controller
+# (walkerWorldModel) at draw time.
+func spawnWalkerCrowd(
+  world: mod WalkerWorld
+  hero: view ThirdPersonController
+  biome: view BiomeConfig
+  groundZ: view Float
+  count: view Int
+) ret List(EntityId) {
+  var crowdEntities: List(EntityId) = List.create(EntityId, cap: count)
+  loop var cloneIndex: Int = 0, cloneIndex < count, ++cloneIndex {
+    let spiralAngle: Float = cloneIndex.toFloat() * 2.3999632
+    let spiralRadius: Float = 3.5 + cloneIndex.toFloat() * 0.45
+    let cloneX: Float = hero.position.x + Math.cos(x: spiralAngle) * spiralRadius
+    let cloneY: Float = hero.position.y + Math.sin(x: spiralAngle) * spiralRadius
+    let cloneSpot: Vec3 = worldFindLand(x: cloneX, y: cloneY, cfg: biome)
+    let cloneZ: Float = worldTerrainHeight(
+      x: cloneSpot.x
+      y: cloneSpot.y
+      groundZ: groundZ
+      cfg: biome
+    ) - groundZ
+    var cloneController: ThirdPersonController = createThirdPersonController()
+    cloneController.position.x = cloneSpot.x
+    cloneController.position.y = cloneSpot.y
+    cloneController.position.z = cloneZ
+    cloneController.heading = spiralAngle
+    let cloneEntityId: EntityId = walkerWorldAddEntity(world: world)
+    walkerWorldSetController(world: world, entityId: cloneEntityId, controller: cloneController)
+    walkerWorldSetAnim(
+      world: world
+      entityId: cloneEntityId
+      anim: AnimationState {
+        clipIndex: crowdClipFor(index: cloneIndex)
+        animTime: cloneIndex.toFloat() * 0.4
+        playbackScale: 1.0
+      }
+    )
+    walkerWorldSetTransform(
+      world: world
+      entityId: cloneEntityId
+      transform: controllerTransform3D(controller: cloneController)
+    )
+    crowdEntities.add(value: cloneEntityId)
+  }
+  ret crowdEntities
+}
+
+# Plant the land's forest round the spawn, with a clearing there for the cube
+# stacks: the island's trees are entities with a trunk each
+# (app3d/IslandForest), the wide forest's are placements only
+# (app3d/WideForest). The number of trees.
+func plantWalkerForest(
+  land: view WalkerLand
+  terrainSystem: mod WalkerTerrain
+  world: mod WalkerWorld
+  spawnX: view Float
+  spawnY: view Float
+) ret Int {
+  if land is WalkerLand.forest {
+    let wideCount: Int = plantWideForest(
+      terrainSystem: terrainSystem
+      spawnX: spawnX
+      spawnY: spawnY
+    )
+    log("[forest] {wideCount} trees planted")
+    ret wideCount
+  }
+  let islandCount: Int = plantIslandForest(
+    terrainSystem: terrainSystem
+    allocator: world.allocator
+    transforms: world.transforms
+    propKinds: world.propKinds
+    treeVariants: world.treeVariants
+    spawnX: spawnX
+    spawnY: spawnY
+  )
+  log("[terrain] {islandCount} trees planted on the island")
+  ret islandCount
+}
+
+# Physics (lib/box3d/ecs): the ground (the island's whole height field, or a
+# field round the walker that follows it), a mover for the hero and each crowd
+# member, the cube stacks near the hero, the tree trunks (one per island tree,
+# or a pool on the forest trees nearest the walker) and the rocks.
+func createWalkerAppPhysics(
+  land: view WalkerLand
+  biome: view BiomeConfig
+  groundZ: view Float
+  world: mod WalkerWorld
+  terrainSystem: view WalkerTerrain
+  hero: view ThirdPersonController
+  heroEntityId: view EntityId
+  crowdEntities: view List(EntityId)
+) ret WalkerPhysics {
+  let forest: Bool = land is WalkerLand.forest
+  var fieldCount: Int = 231
+  var followDistance: Float = 0.0
+  if forest {
+    fieldCount = 161
+    followDistance = 50.0
+  }
+  let heroFeet: Vec3 = controllerFeet(controller: hero, groundZ: groundZ)
+  var physicsSystem: WalkerPhysics = createWalkerPhysics(
+    biome: biome
+    groundZ: groundZ
+    fieldCount: fieldCount
+    followDistance: followDistance
+  )
+  if forest {
+    if addGroundAround(physicsSystem: physicsSystem, centre: heroFeet) is false {
+      log("[physics] Box3D refused the height field round the walker")
+    }
+  } else if addIslandGround(physicsSystem: physicsSystem) is false {
+    log("[physics] Box3D refused the island height field")
+  }
+  addCharacterBody(physicsSystem: physicsSystem, entityId: heroEntityId, feet: heroFeet)
+  loop let crowdEntityId: view EntityId in crowdEntities {
+    addCharacterBody(
+      physicsSystem: physicsSystem
+      entityId: crowdEntityId
+      feet: controllerFeet(
+        controller: controllerOf(world: world, entityId: crowdEntityId)
+        groundZ: groundZ
+      )
+    )
+  }
+  let cubeCount: Int = spawnCubeStacks(
+    physicsSystem: physicsSystem
+    allocator: world.allocator
+    transforms: world.transforms
+    spawnPoint: heroFeet
+  )
+  let movers: Int = 1 + crowdEntities.length
+  if forest {
+    let poolCount: Int = createTrunkPool(
+      physicsSystem: physicsSystem
+      allocator: world.allocator
+      transforms: world.transforms
+    )
+    let forestRocks: Int = placeRockBodies(
+      physicsSystem: physicsSystem
+      propKinds: world.propKinds
+      transforms: world.transforms
+    )
+    let trunksPlaced: Bool = updateTrunkPool(
+      physicsSystem: physicsSystem
+      transforms: world.transforms
+      forest: terrainSystem.forest
+      focus: heroFeet
+      force: true
+    )
+    log(
+      "[physics] Box3D: a height field round the walker, {movers} movers, {cubeCount} cubes, a pool of {poolCount} tree trunks ({physicsSystem.trunksOnTrees} on the trees nearest the spawn), {forestRocks} rocks"
+    )
+  } else {
+    let trunkCount: Int = addTreeTrunks(
+      physicsSystem: physicsSystem
+      treeVariants: world.treeVariants
+      transforms: world.transforms
+    )
+    let islandRocks: Int = placeRockBodies(
+      physicsSystem: physicsSystem
+      propKinds: world.propKinds
+      transforms: world.transforms
+    )
+    log(
+      "[physics] Box3D: the island height field, {movers} movers, {cubeCount} cubes, {trunkCount} tree trunks, {islandRocks} rocks"
+    )
+  }
+  ret physicsSystem
+}

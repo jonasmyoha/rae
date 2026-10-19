@@ -1,19 +1,26 @@
-# Walker character — a multi-primitive rigged glTF model, ANIMATED, walking an
-# infinite procedural meadow under a deferred+toon renderer.
+# Walker in a huge forest: the deferred walker of 136 on a wide generated
+# terrain instead of an island (lib/app3d/WideForest): about 30,000 trees of
+# nine kinds in stands over 1.2 km, with lakes and meadows, drawn from one
+# PropField. Physics stays the same size however big the forest is: a pool
+# of static trunk bodies is moved onto the trees nearest the walker, and the
+# ground height field is made again round the walker as it goes.
 #
-# Structure: this file is only the entry point. The app is composed of systems:
-# the shared walker kit in lib/app3d (WalkerWorld, WalkerInput, WalkerCamera,
-# WalkerUi, WalkerHud, WalkerNet, WalkerCharacter, WalkerPhysics,
-# WalkerTerrain) and this example's own folders (movementSystem/,
-# terrainSystem/, physicsSystem/, renderSystem/), sequenced by App.rae's
-# updateApp / renderApp. Rae auto-scans every project file into one compile unit, so main()
-# calls runWalkerApp() (app.rae) directly.
+# The app is the walker app shell lib/app3d/WalkerApp; this example is its
+# settings: the wide forest (WalkerLand.forest) on the deferred renderer. The
+# assets are 136's, read in place.
 #
 # Compiled-target only; needs wgpu-native + SDL3.
-#   rae run --target compiled main.rae
-# Headless screenshot:
-#   RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT=/tmp/walker.bmp \
-#     rae run --target compiled main.rae
+#   rae run examples/143_walker_forest/Main.rae
+open app3d/WalkerApp
+open app3d/WalkerAppSetup
+
 func main() ret Int {
-  ret runWalkerApp()
+  let settings: WalkerAppSettings = {
+    title: "143: Rae 3D — walker in a huge forest [deferred]"
+    appId: "143_walker_forest"
+    assets: "examples/136_walker_character/assets/"
+    forward: false
+    land: WalkerLand.forest
+  }
+  ret runWalkerApp(settings: settings)
 }

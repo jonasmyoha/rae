@@ -1202,7 +1202,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # time the forest alone was over 1300, so more than 800 means the
           # forest lost its batching. The river is gone: the sea, the FFT ocean
           # of 141 (lib/water/IslandSea), is the only water body.
-          # The physics check (RAE_114_PHYSICS_TEST) settles the cube stacks,
+          # The physics check (RAE_WALKER_PHYSICS_TEST) settles the cube stacks,
           # walks the hero into one and jumps, then checks the tree trunks: a
           # ray hits one, the hero stops at its bark, and it follows its tree;
           # then a ray hits the nearest rock's sphere, and the hero running out
@@ -1223,7 +1223,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              && [ -n "$CASTERS" ] && [ "$CASTERS" -ge 400 ] && [ "$CASTERS" -le 800 ] \
              && [ "$(grep -c "\[terrain\] 300 trees planted on the island" "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c "\[seamtest\] .* netOk=true physicsOk=true" "$TMP_OUT/render.log")" -eq 1 ] \
-             && (cd .. && RAE_114_PHYSICS_TEST=1 RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=60000 \
+             && (cd .. && RAE_WALKER_PHYSICS_TEST=1 RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=60000 \
                 perl -e 'alarm shift; exec @ARGV' 60 "$TMP_OUT/app") > "$TMP_OUT/physics.log" 2>&1 \
              && [ "$(grep -c "\[trunktest\] .* passed=true" "$TMP_OUT/physics.log")" -eq 1 ] \
              && [ "$(grep -c "\[rockbushtest\] .* passed=true" "$TMP_OUT/physics.log")" -eq 1 ] \
@@ -1270,7 +1270,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              && TREES="$(sed -n 's/.*\[forest\] \([0-9]*\) trees planted.*/\1/p' "$TMP_OUT/render.log" | head -1)" \
              && [ -n "$TREES" ] && [ "$TREES" -ge 20000 ] \
              && [ "$(grep -c "\[sea\] FFT ocean at z .* island radius 1e+06 m" "$TMP_OUT/render.log")" -eq 1 ] \
-             && (cd .. && RAE_114_PHYSICS_TEST=1 RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=60000 \
+             && (cd .. && RAE_WALKER_PHYSICS_TEST=1 RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=60000 \
                 perl -e 'alarm shift; exec @ARGV' 60 "$TMP_OUT/app") > "$TMP_OUT/physics.log" 2>&1 \
              && [ "$(grep -c "\[trunktest\] .* poolFollows=true, groundFollows=true, passed=true" "$TMP_OUT/physics.log")" -eq 1 ] \
              && [ "$(grep -c "\[rockbushtest\] .* passed=true" "$TMP_OUT/physics.log")" -eq 1 ] \
@@ -1292,7 +1292,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # water. A shaded frame (thousands of colours), all 12 skinned parts
           # loaded, the forward path taken, the 300 island trees planted and
           # 400 to 800 shadow casters (the forest batched, as in 136). The
-          # physics check (RAE_126_PHYSICS_TEST) is 136's: the cubes, the
+          # physics check (RAE_WALKER_PHYSICS_TEST) is 136's: the cubes, the
           # trunks, the rock and the bush. Then a free camera 170 m south of
           # the island (RAE_WALKER_CAMERA) sees every tree past the middle
           # distance, so the forest is all billboards: they must be drawn in
@@ -1307,7 +1307,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              && CASTERS="$(sed -n 's/.*\[shadow\] casters \([0-9]*\), 4 cascades.*/\1/p' "$TMP_OUT/render.log" | head -1)" \
              && [ -n "$CASTERS" ] && [ "$CASTERS" -ge 400 ] && [ "$CASTERS" -le 800 ] \
              && [ "$(grep -c "\[terrain\] 300 trees planted on the island" "$TMP_OUT/render.log")" -eq 1 ] \
-             && (cd .. && RAE_126_PHYSICS_TEST=1 RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=60000 \
+             && (cd .. && RAE_WALKER_PHYSICS_TEST=1 RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=60000 \
                 perl -e 'alarm shift; exec @ARGV' 60 "$TMP_OUT/app") > "$TMP_OUT/physics.log" 2>&1 \
              && [ "$(grep -c "\[trunktest\] .* passed=true" "$TMP_OUT/physics.log")" -eq 1 ] \
              && [ "$(grep -c "\[rockbushtest\] .* passed=true" "$TMP_OUT/physics.log")" -eq 1 ] \
