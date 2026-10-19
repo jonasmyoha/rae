@@ -313,6 +313,10 @@ func updateApp(app: mod App) {
     world: app.world
     playerPosition: followPos
   )
+  # The reused rock entities moved: give them their new bodies
+  if terrainWrapped {
+    let rockCount: Int = placeRockBodies(physicsSystem: app.physicsSystem, world: app.world)
+  }
   let grassWrapped: Bool = updateGrassField(
     grassSystem: app.grassSystem
     world: app.world

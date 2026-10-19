@@ -701,6 +701,7 @@ func createApp() ret App {
       groundZ: groundZ
     )
     let trunkCount: Int = createTrunkPool(physicsSystem: physicsSystem, world: gameWorld)
+    let rockCount: Int = placeRockBodies(physicsSystem: physicsSystem, world: gameWorld)
     let trunksPlaced: Bool = updateTrunkPool(
       physicsSystem: physicsSystem
       world: gameWorld
@@ -709,7 +710,7 @@ func createApp() ret App {
       force: true
     )
     log(
-      "[physics] Box3D: a height field round the walker, {1 + cloneCount} movers, {cubeCount} cubes, a pool of {trunkCount} tree trunks ({physicsSystem.trunksOnTrees} on the trees nearest the spawn)"
+      "[physics] Box3D: a height field round the walker, {1 + cloneCount} movers, {cubeCount} cubes, a pool of {trunkCount} tree trunks ({physicsSystem.trunksOnTrees} on the trees nearest the spawn), {rockCount} rocks"
     )
     # #746: exercise the physics/net ECS seams once at startup — spawn/despawn via
     # generational entities, step a Box3D body. Leaves the world untouched.

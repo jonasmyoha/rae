@@ -30,6 +30,7 @@ open ecs/Query
 open ecs/Transform
 open terrainSystem/WalkerTrees
 open terrainSystem/WalkerRocks
+open app3d/TerrainRocks
 open app3d/PropField
 open app3d/TerrainTiles
 open GbufferSprite
@@ -202,42 +203,19 @@ func propTransform3D(
   }
 }
 
-# A rock's placement, as Autumn Grove places its rocks: 0.5 to 1.3 m across,
-# stretched along one side, flattened when small, sunk a fifth of its size
-# into the ground and turned at random.
+# The rock of a cell and its shape: lib/app3d/TerrainRocks, on this island
 func rockTransform(cellX: view Int, cellY: view Int, groundZ: view Float) ret Transform3D {
-  let size: Float = 0.5 + terrainHash(cellX: cellX, cellY: cellY, seed: 41) * 0.8
-  let stretch: Float = 1.0 + terrainHash(cellX: cellX, cellY: cellY, seed: 43) * 0.35
-  var height: Float = 0.8
-  if size > 0.7 {
-    height = 1.0
-  }
-  let posX: Float = cellX.toFloat() * terrainCellSize + terrainOffset(
+  ret rockPlacement(
     cellX: cellX
     cellY: cellY
-    seed: 31
+    cellSize: terrainCellSize
+    groundZ: groundZ
+    biome: defaultBiomeConfig()
   )
-  let posY: Float = cellY.toFloat() * terrainCellSize + terrainOffset(
-    cellX: cellX
-    cellY: cellY
-    seed: 37
-  )
-  let yaw: Float = terrainHash(cellX: cellX, cellY: cellY, seed: 61) * terrainTau
-  ret Transform3D {
-    position: Vec3.create(
-      x: posX
-      y: posY
-      z: terrainHeightAt(x: posX, y: posY, groundZ: groundZ) - size * 0.2
-    )
-    rotation: Quat.fromAxisAngle(axis: Vec3.create(x: 0.0, y: 0.0, z: 1.0), angle: yaw)
-    scale: Vec3.create(x: size * stretch, y: size, z: size * height)
-  }
 }
 
-# Which rock shape stands in a cell
 func rockVariantAt(cellX: view Int, cellY: view Int) ret Int {
-  let pick: Int = (terrainHash(cellX: cellX, cellY: cellY, seed: 67) * rockVariantCount.toFloat()).toInt()
-  ret Math.min(a: pick, b: rockVariantCount - 1)
+  ret rockShapeAt(cellX: cellX, cellY: cellY)
 }
 
 # The prop transform for a given kind (per-kind scatter seeds + scale range).

@@ -1,0 +1,18 @@
+# The walker's rocks: lib/app3d/TerrainRocks' shapes (the faceted procedural
+# rocks of Autumn Grove), one instancer each; TerrainProp.variant says which
+# shape a placed rock is.
+open Scene3d
+open app3d/TerrainRocks
+open terrainSystem/WalkerTrees
+
+# Every rock shape as an instancer of `capacity` rocks
+func createRockParts(renderer: mod DeferredRenderer, capacity: view Int) ret List(PropInstancer) {
+  let shapes: List(RockShape) = createRockShapes(renderer: renderer)
+  var parts: List(PropInstancer) = List.create(PropInstancer, cap: shapes.length)
+  loop let shape: view RockShape in shapes {
+    parts.add(
+      value: createPropInstancer(mesh: shape.mesh, material: shape.material, capacity: capacity)
+    )
+  }
+  ret parts
+}

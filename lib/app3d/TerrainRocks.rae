@@ -1,0 +1,116 @@
+# app3d/TerrainRocks — the faceted procedural rocks of Autumn Grove
+# (lib/procgen/Rock) for a streamed WorldBiome terrain: a few rock shapes
+# generated once, and one rock per terrain cell placed as Autumn Grove places
+# its rocks. The physics side (a static sphere per rock) is
+# box3d/ecs/NatureBodies.
+#
+#   let shapes: List(RockShape) = createRockShapes(renderer: r)
+#   ...for the rock of cell (cx, cy):
+#   let pose: Transform3D = rockPlacement(cellX: cx, cellY: cy, cellSize: 18.0,
+#     groundZ: z, biome: cfg)
+#   let shape: Int = rockShapeAt(cellX: cx, cellY: cy)
+#
+# Each shape is a rock of size 1 (a unit sphere cut flat, about 1.6 m across);
+# the placement stretches, flattens and sinks it.
+import Math
+import Vec3
+import Quat
+import Noise
+import RendererDeferred
+open Scene3d
+open Mesh3d
+open WorldBiome
+open ecs/Transform
+open procgen/Rock
+
+# How many rock shapes there are
+const rockShapeCount: Int = 4
+
+# How far a rock may stray from its cell's centre, each way (m)
+const rockScatter: Float = 6.0
+
+# One rock shape: its mesh and its material (a grey with a tint of its own)
+type RockShape {
+  mesh: MeshHandle
+  material: Material3d
+}
+
+# A shape's seed: its form, and how many flat cuts it has
+func rockShapeSeed(shape: view Int) ret Int {
+  ret 211 + shape * 97
+}
+
+# Every rock shape, uploaded into `renderer`
+func createRockShapes(renderer: mod DeferredRenderer) ret List(RockShape) {
+  var shapes: List(RockShape) = List.create(RockShape, cap: rockShapeCount)
+  loop var shape: Int = 0, shape < rockShapeCount, ++shape {
+    let seed: Int = rockShapeSeed(shape: shape)
+    let mesh: MeshData = generateRock(
+      subdivision: 5
+      sliceCount: 4 + seed % 3
+      size: 1.0
+      seed: seed
+      irregularity: 0.12
+    )
+    let tint: Float = Noise.hash2(x: seed, y: 4, seed: 891) * 0.07
+    shapes.add(value: {
+      mesh: RendererDeferred.uploadMesh(
+        renderer: renderer
+        verts: mesh.verts
+        vertCount: mesh.vertCount
+        indices: mesh.indices
+      )
+      material: {
+        baseColor: Vec3.create(x: 0.215 + tint, y: 0.245 + tint, z: 0.265 + tint)
+        metallic: 0.0
+        roughness: 0.85
+        emission: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+        toon: true
+      }
+    })
+  }
+  ret shapes
+}
+
+# A hash of cell (`cellX`, `cellY`) in [0, 1)
+func rockHash(cellX: view Int, cellY: view Int, seed: view Int) ret Float {
+  ret Noise.hash2(x: cellX, y: cellY, seed: seed)
+}
+
+# The rock of cell (`cellX`, `cellY`), as Autumn Grove places its rocks: 0.5
+# to 1.3 m across, stretched along one side, flattened when small, sunk a
+# fifth of its size into the ground of `biome` at `groundZ`, turned at random
+func rockPlacement(
+  cellX: view Int
+  cellY: view Int
+  cellSize: view Float
+  groundZ: view Float
+  biome: view BiomeConfig
+) ret Transform3D {
+  let size: Float = 0.5 + rockHash(cellX: cellX, cellY: cellY, seed: 41) * 0.8
+  let stretch: Float = 1.0 + rockHash(cellX: cellX, cellY: cellY, seed: 43) * 0.35
+  var height: Float = 0.8
+  if size > 0.7 {
+    height = 1.0
+  }
+  let posX: Float = cellX.toFloat() * cellSize + (rockHash(cellX: cellX, cellY: cellY, seed: 31) - 0.5) * rockScatter * 2.0
+  let posY: Float = cellY.toFloat() * cellSize + (rockHash(cellX: cellX, cellY: cellY, seed: 37) - 0.5) * rockScatter * 2.0
+  let yaw: Float = rockHash(cellX: cellX, cellY: cellY, seed: 61) * Math.pi * 2.0
+  let ground: Float = worldTerrainHeight(
+    x: posX
+    y: posY
+    groundZ: groundZ
+    cfg: biome
+  )
+  ret Transform3D {
+    position: Vec3.create(x: posX, y: posY, z: ground - size * 0.2)
+    rotation: Quat.fromAxisAngle(axis: Vec3.create(x: 0.0, y: 0.0, z: 1.0), angle: yaw)
+    scale: Vec3.create(x: size * stretch, y: size, z: size * height)
+  }
+}
+
+# Which rock shape stands in cell (`cellX`, `cellY`)
+func rockShapeAt(cellX: view Int, cellY: view Int) ret Int {
+  let pick: Int = (rockHash(cellX: cellX, cellY: cellY, seed: 67) * rockShapeCount.toFloat()).toInt()
+  ret Math.min(a: pick, b: rockShapeCount - 1)
+}
