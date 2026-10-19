@@ -29,6 +29,7 @@
 # where `<verb>` is `data`, `reload`, or `restart`. The build-id and
 # timestamp are recorded but not consumed by the runtime — they're
 # for log forensics and supervisor-side dedup.
+import Sys
 open FileNotify
 
 # ----- paths ----------------------------------------------------------
@@ -87,6 +88,9 @@ func rae_ext_rae_sys_read_file(path: String) blocking unsafe extern ret String
 # there's nothing to restore; apps check `.length() > 0` before
 # deserializing. The app owns the schema (typically JSON).
 func readHotReloadState() pub ret String {
+  if freshStart() {
+    ret ""
+  }
   unsafe {
     ret rae_ext_rae_sys_read_file(path: statePath())
   }
@@ -113,6 +117,9 @@ func statePathFor(appId: view String) pub ret String {
 }
 
 func readHotReloadStateFor(appId: view String) pub ret String {
+  if freshStart() {
+    ret ""
+  }
   unsafe {
     ret rae_ext_rae_sys_read_file(path: statePathFor(appId: appId))
   }
@@ -121,6 +128,37 @@ func readHotReloadStateFor(appId: view String) pub ret String {
 func writeHotReloadStateFor(appId: view String, state: view String) pub ret Bool {
   makeDir(path: dir())
   ret writeFile(path: statePathFor(appId: appId), content: state)
+}
+
+# ----- fresh start ----------------------------------------------------
+#
+# A program started with RAE_FRESH_START=1 reads no saved state: both readers
+# above answer "" as on a first launch, so the app starts from its defaults.
+# Nothing is deleted; the app's next save simply replaces the old snapshot.
+# The "..." menu's Reset (app3d/ModeMenu) is this: restartFresh starts the
+# program again in place with the variable set. A later `rae watch` reload
+# relaunches from the supervisor's own environment, without it, so reloads
+# restore state again.
+const freshStartVariable: String = "RAE_FRESH_START"
+
+# Was this program started fresh (no saved state read)?
+func freshStart() ret Bool {
+  ret getEnv(name: freshStartVariable) is "1"
+}
+
+# Start this program again from its start with no saved state: what the
+# app had built up is gone, the window comes back where it was (its geometry
+# is not app state). Does not return when it works; false when the system
+# refused to restart the program (logged).
+func restartFresh() ret Bool {
+  if Sys.setEnv(name: freshStartVariable, value: "1") is false {
+    log("[reset] could not set {freshStartVariable}; not restarting")
+    ret false
+  }
+  log("[reset] starting the program again with no saved state")
+  let refused: Int = Sys.restartProgram()
+  log("[reset] the system refused to restart the program (code {refused})")
+  ret false
 }
 
 # ----- launch generation ----------------------------------------------

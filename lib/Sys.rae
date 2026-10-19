@@ -3,6 +3,10 @@ func rae_sys_exit(code: Int) unsafe extern
 
 func rae_sys_get_env(name: String) unsafe extern ret String
 
+func rae_sys_set_env(name: String, value: String) unsafe extern ret Bool
+
+func rae_sys_restart() unsafe extern ret Int
+
 func rae_sys_arg_count() unsafe extern ret Int
 
 func rae_sys_arg_at(index: Int) unsafe extern ret String
@@ -67,6 +71,25 @@ func exit(code: view Int) {
 func getEnv(name: view String) ret String {
   unsafe {
     ret rae_sys_get_env(name: name)
+  }
+}
+
+# Set the environment variable `name` to `value` for this process and every
+# program it starts (or restartProgram becomes). True when it was set.
+func setEnv(name: view String, value: view String) ret Bool {
+  unsafe {
+    ret rae_sys_set_env(name: name, value: value)
+  }
+}
+
+# Run this program again from its start, in place: the same executable and
+# arguments, this process's environment (setEnv included) and the same
+# process id, so `rae run` and `rae watch` keep following it. It does not
+# return when it works. When the system refuses (a browser page has no process
+# to start again) it returns the reason as a negative errno.
+func restartProgram() ret Int {
+  unsafe {
+    ret rae_sys_restart()
   }
 }
 
