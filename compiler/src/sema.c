@@ -9613,6 +9613,71 @@ static void sema_report_duplicate_type(AstModule* module, const AstDecl* first, 
     module->had_error = true;
 }
 
+/* A project function or const with the same name and parameters as one in a
+ * lib module the program loads. It is legal (a bare name in a file that
+ * only imports the module is the project's, `Module.name` the lib's), but in
+ * practice it is usually an old copy of the lib's code that no longer gets
+ * the lib's fixes. One warning per project declaration, at its definition,
+ * unless the declaring file opens that module (an override in plain view),
+ * naming the lib module and the qualified spelling of the lib's. A warning
+ * only: there is no way to mark a copy as deliberate, and no new syntax. */
+static void sema_warn_project_copies(CompilerContext* ctx, AstModule* module, SymbolTable* symbols) {
+    for (const AstDecl* d = module->decls; d; d = d->next) {
+        bool is_func = d->kind == AST_DECL_FUNC;
+        bool is_const = d->kind == AST_DECL_GLOBAL_LET && d->as.let_decl.is_const;
+        if ((!is_func && !is_const) || !d->origin_file) continue;
+        if (is_func && (d->as.func_decl.specialization_args || d->as.func_decl.is_extern)) continue;
+        char pkg[256]; sema_package_token(d->origin_file, pkg, sizeof pkg);
+        if (pkg[0] != '\0') continue;  /* a lib declaration */
+        Str name = is_func ? d->as.func_decl.name : d->as.let_decl.name;
+        if (is_func && str_eq_cstr(name, "main")) continue;
+        for (Symbol* curr = symbol_table_first(symbols, name); curr; curr = curr->sameNext) {
+            const AstDecl* lib = curr->decl;
+            if (!lib || lib == d || lib->kind != d->kind || !lib->origin_file) continue;
+            char lib_pkg[256]; sema_package_token(lib->origin_file, lib_pkg, sizeof lib_pkg);
+            if (lib_pkg[0] == '\0') continue;  /* another project declaration */
+            /* A file that OPENS the module and declares the name again
+             * overrides it in plain view (its own name wins there) */
+            if (sema_file_declares_package(d->origin_file, lib, /*require_open=*/true)) continue;
+            if (is_func) {
+                if (lib->as.func_decl.specialization_args || lib->as.func_decl.is_extern) continue;
+                const AstParam* a = d->as.func_decl.params;
+                const AstParam* b = lib->as.func_decl.params;
+                bool same_labels = true;
+                for (; a && b; a = a->next, b = b->next) if (!str_eq(a->name, b->name)) same_labels = false;
+                if (!same_labels || a || b) continue;
+                if (!sema_same_param_types(ctx, module, symbols, d, lib)) continue;
+            } else if (!lib->as.let_decl.is_const) {
+                continue;
+            }
+            const char* lib_module = lib->module_name ? lib->module_name : lib->origin_file;
+            const char* slash = strrchr(lib_module, '/');
+            const char* qualifier = slash ? slash + 1 : lib_module;
+            char buf[600];
+            if (is_func)
+                snprintf(buf, sizeof buf,
+                         "'%.*s' has the same name and parameters as a function in lib module '%s', which "
+                         "this program loads; if it is an old copy of the lib's, call the lib's "
+                         "(`%s.%.*s(...)`) and delete this one",
+                         (int)name.len, name.data, lib_module, qualifier, (int)name.len, name.data);
+            else if (!slash)
+                snprintf(buf, sizeof buf,
+                         "'%.*s' has the same name as a const in lib module '%s', which this program loads; "
+                         "if it is an old copy of the lib's, read the lib's (`%s.%.*s`) and delete this one",
+                         (int)name.len, name.data, lib_module, qualifier, (int)name.len, name.data);
+            else
+                /* a const of a module inside a package has no qualified
+                 * spelling (sema_resolve_bare_global) */
+                snprintf(buf, sizeof buf,
+                         "'%.*s' has the same name as a const in lib module '%s', which this program loads; "
+                         "if it is an old copy of the lib's, open '%s' and delete this one",
+                         (int)name.len, name.data, lib_module, lib_module);
+            diag_warn(d->origin_file, (int)d->line, (int)d->column, buf);
+            break;
+        }
+    }
+}
+
 bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
     sema_check_struct_field_borrows(ctx, module);
     desugar_typed_create_module(ctx, module);
@@ -9740,6 +9805,7 @@ bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
         }
     }
     pointer_set_free(processed);
+    sema_warn_project_copies(ctx, module, &symbols);
     return !module->had_error;
 }
 

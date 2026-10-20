@@ -96,7 +96,13 @@ module against the prelude. A name declared in the file itself wins.
 Overloads stay legal: other labels or other parameter types, in one module or
 several (`drop(this: mod Event)` beside `drop(this: mod Queue)`). An imported
 (not opened) module never takes part: there the bare name is the project's
-and `Module.name` the lib's (fixtures 1184-1187, 966, 1168).
+and `Module.name` the lib's (fixtures 1184-1187, 966, 1168). Such a project
+copy is legal, but the build WARNS once at it (0.2.99, fixture 1188): a
+project function with the same name and parameters, or a const with the same
+name, as one in a lib module the program loads, where the declaring file does
+not open that module. It is usually an old copy of the lib's code that no
+longer gets its fixes; the warning names the lib module and its qualified
+spelling. It is a warning only, and there is no syntax to silence it.
 
 **Picking one of two project modules.** When two project files declare the
 same name, a bare read of it is ambiguous; a file picks one by opening it by

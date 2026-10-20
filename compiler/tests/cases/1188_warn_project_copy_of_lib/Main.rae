@@ -1,0 +1,12 @@
+# A project function with the same name and parameters as one in a lib module
+# the program loads is legal under `import` (the bare call is the project's,
+# `UiModes.name` the lib's), but it is usually an old copy of the lib's code
+# that no longer gets its fixes, so the build warns once, at the copy. The
+# same name with other parameters is an overload, not a copy: no warning.
+import app3d/UiModes
+
+func main() {
+  log("copy: {isShortWindowHeight(height: 100.0)}")
+  log("other parameters: {isShortWindowHeight(height: 100, slack: 5)}")
+  log("lib's: {UiModes.isShortWindowHeight(height: 100.0)}")
+}
