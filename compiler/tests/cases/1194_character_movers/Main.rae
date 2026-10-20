@@ -1,0 +1,136 @@
+# lib/app3d/CharacterMovers: the mover system's rules that need no physics
+# world. A drive turns a stick into a throttle that reaches the controller's
+# run (or walk) speed, sprinting past the mover's normal cap; a jump is taken
+# only from the ground; a character with no drive stands. A step that ends
+# where the app says one may not be is undone per axis. Parked movers keep
+# their controllers as they are.
+import Math
+import Vec3
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/World
+open ecs/Tag
+open box3d/ecs/PhysicsComponents
+open box3d/ecs/CharacterMover
+open app3d/CharacterController
+open app3d/CharacterMovers
+
+func near(a: view Float, b: view Float) ret Bool {
+  ret Math.abs(value: a - b) < 0.0001
+}
+
+func main() {
+  var allocator: EntityAllocator = createEntityAllocator()
+  var characters: ComponentTable(CharacterBody) = ComponentTable.create(CharacterBody)
+  var controllers: ComponentTable(ThirdPersonController) = ComponentTable.create(
+    ThirdPersonController
+  )
+  var drives: ComponentTable(MoverDrive) = ComponentTable.create(MoverDrive)
+  var parked: ComponentTable(MoverParked) = ComponentTable.create(MoverParked)
+  let runner: EntityId = allocEntity(this: allocator)
+  let stander: EntityId = allocEntity(this: allocator)
+  var both: List(EntityId) = List.create(EntityId, cap: 2)
+  both.add(value: runner)
+  both.add(value: stander)
+  loop let entityId: view EntityId in both {
+    componentSet(
+      this: characters
+      entityId: entityId
+      data: createCharacterBody(position: Vec3.create(x: 0.0, y: 0.0, z: 1.4))
+    )
+    componentSet(this: controllers, entityId: entityId, data: createThirdPersonController())
+  }
+  var drive: MoverDrive = createMoverDrive()
+  drive.intent.moveY = 1.0
+  drive.intent.jump = true
+  componentSet(this: drives, entityId: runner, data: drive)
+  componentMod(this: characters, entityId: stander).throttle.x = 0.7
+  driveMovers(characters: characters, controllers: controllers, drives: drives)
+  let ran: view CharacterBody = componentView(this: characters, entityId: runner)
+  let runSpeed: Float = componentView(this: controllers, entityId: runner).runSpeed
+  log("a full stick runs at the run speed: {near(a: ran.throttle.x * 1.5 * maxSpeed, b: runSpeed)}")
+  log("sprinting: {ran.mover.sprint}")
+  log(
+    "no jump in the air: {ran.jump is false and componentView(this: drives, entityId: runner).tookOff is false}"
+  )
+  log(
+    "no drive, no throttle: {componentView(this: characters, entityId: stander).throttle.x is 0.0}"
+  )
+
+  componentMod(this: characters, entityId: runner).grounded = true
+  componentMod(this: drives, entityId: runner).intent.walking = true
+  driveMovers(characters: characters, controllers: controllers, drives: drives)
+  let walked: view CharacterBody = componentView(this: characters, entityId: runner)
+  let walkSpeed: Float = componentView(this: controllers, entityId: runner).walkSpeed
+  log(
+    "walking at the walk speed, not sprinting: {near(a: walked.throttle.x * maxSpeed, b: walkSpeed) and walked.mover.sprint is false}"
+  )
+  log(
+    "a jump from the ground is taken: {walked.jump and componentView(this: drives, entityId: runner).tookOff}"
+  )
+
+  var underCap: MoverDrive = createMoverDrive()
+  underCap.intent.moveY = 1.0
+  underCap.sprints = false
+  componentSet(this: drives, entityId: runner, data: underCap)
+  driveMovers(characters: characters, controllers: controllers, drives: drives)
+  let jogged: view CharacterBody = componentView(this: characters, entityId: runner)
+  log(
+    "a drive that does not sprint runs under the cap: {near(
+      a: jogged.throttle.x * maxSpeed
+      b: runSpeed
+    ) and jogged.mover.sprint is false}"
+  )
+
+  var stepped: CharacterBody = createCharacterBody(position: Vec3.create(x: 2.0, y: 3.0, z: 1.4))
+  stepped.mover.velocity.x = 1.0
+  stepped.mover.velocity.y = 1.0
+  let from: MoverStep = { fromX: 1.0, fromY: 1.0 }
+  holdMoverWithin(
+    character: stepped
+    step: from
+    insideNow: false
+    insideWithOldY: true
+    insideWithOldX: true
+  )
+  log(
+    "back on y only, keeping x: {near(a: stepped.mover.transform.p.y, b: 1.0) and near(
+      a: stepped.mover.transform.p.x
+      b: 2.0
+    ) and stepped.mover.velocity.y is 0.0}"
+  )
+  var blocked: CharacterBody = createCharacterBody(position: Vec3.create(x: 2.0, y: 3.0, z: 1.4))
+  holdMoverWithin(
+    character: blocked
+    step: from
+    insideNow: false
+    insideWithOldY: false
+    insideWithOldX: false
+  )
+  log(
+    "back on both: {near(a: blocked.mover.transform.p.x, b: 1.0) and near(
+      a: blocked.mover.transform.p.y
+      b: 1.0
+    )}"
+  )
+
+  componentMod(this: characters, entityId: stander).mover.transform.p.x = 5.0
+  componentMod(this: characters, entityId: runner).mover.transform.p.x = 5.0
+  addTag(MoverParked, table: parked, entityId: stander)
+  readMoverControllers(
+    characters: characters
+    controllers: controllers
+    parked: parked
+    groundZ: 0.0
+    fixedStep: 1.0 / 60.0
+  )
+  log(
+    "a parked mover's controller stays: {componentView(this: controllers, entityId: stander).position.x is 0.0}"
+  )
+  log(
+    "the others follow their movers: {near(
+      a: componentView(this: controllers, entityId: runner).position.x
+      b: 5.0
+    )}"
+  )
+}
