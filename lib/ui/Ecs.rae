@@ -19,6 +19,7 @@ open ui/BindingComponents
 open ui/InputComponents
 open collections/StringMap
 open ui/TouchStick
+open ui/NodeBinding
 
 # One semantic UI action produced by the input system when a click resolves to
 # an OnClick's actionId (#943). Drained by the app's UI dispatch through the
@@ -57,6 +58,10 @@ type UiWorld {
   margins: ComponentTable(Margin)
   safeAreas: ComponentTable(SafeArea)
   touchSticks: ComponentTable(TouchStick)
+  # What the app wrote into nodes, written again after a frame or state
+  # apply (ui/NodeBinding, lib/ui/nodeBindingSystem)
+  boundTexts: ComponentTable(BoundText)
+  boundActives: ComponentTable(BoundActive)
   aligns: ComponentTable(Align)
   offsets: ComponentTable(Offset)
   constraints: ComponentTable(Constraints)
@@ -240,6 +245,8 @@ func createUiWorld() ret UiWorld {
     margins: ComponentTable.create(Margin)
     safeAreas: ComponentTable.create(SafeArea)
     touchSticks: ComponentTable.create(TouchStick)
+    boundTexts: ComponentTable.create(BoundText)
+    boundActives: ComponentTable.create(BoundActive)
     aligns: ComponentTable.create(Align)
     offsets: ComponentTable.create(Offset)
     constraints: ComponentTable.create(Constraints)

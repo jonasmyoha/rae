@@ -1,0 +1,15 @@
+# ui/NodeBinding — what an app writes into a scene node, kept so it survives
+# a frame or state change (its system is lib/ui/nodeBindingSystem). Applying
+# a frame or a state resets every node it names to its authored components;
+# the bindings are written again after it.
+# The node's text as the app last wrote it (bindNodeText)
+type BoundText {
+  text: String
+}
+
+# Whether the node shows, as the app last said (bindNodeActive). It is
+# written after the scene's frames and states, so it wins over theirs: bind
+# only a node the app alone shows and hides.
+type BoundActive {
+  value: Bool
+}
