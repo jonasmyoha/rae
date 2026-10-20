@@ -24,20 +24,10 @@ open ui/UiSystems
 func updateTouchControls(
   rig: mod CameraRig
   moveStick: mod VirtualJoystick
-  world: mod UiWorld
-  uiSystems: mod UiSystems
   enabled: view Bool
 ) ret Bool {
-  # Feed the OS safe-area insets (notch / home indicator, design units) into the
-  # ECS so UiRoot's padding reserves them — the whole UI, top bar included, sits
-  # inside the safe area. Runs before layout (renderSystemGpu2d) this frame.
-  let safe: Insets = {
-    l: Gpu2d.safeLeft()
-    t: Gpu2d.safeTop()
-    r: Gpu2d.safeRight()
-    b: Gpu2d.safeBottom()
-  }
-  safeAreaSystem(world: world, uiSystems: uiSystems, insets: safe)
+  # (The screen's safe area is the layout pass's own step: lib/ui/safeAreaSystem
+  # feedSafeArea, run by runUiSystems.)
   # The stick is GAME mode's: in EDITOR it is left alone and the camera gets
   # every finger
   if enabled is false {

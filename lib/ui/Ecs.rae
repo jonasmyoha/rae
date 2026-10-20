@@ -182,6 +182,12 @@ type UiWorld {
   # resource: a world-global singleton, not a per-entity component.
   layoutW: Float
   layoutH: Float
+  # The screen's safe area (notch, home indicator) as a simulator or a layout
+  # test sets it (a phone's on a desktop); while not simulating, the layout
+  # pass reads the OS's (lib/ui/safeAreaSystem feedSafeArea)
+  # resource: a world-global singleton, runtime only.
+  safeInsetsSimulated: Bool = false
+  simulatedSafeInsets: Insets = Insets { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
 
   # #727: cached parent-before-child depth order (HierarchySystem, #713), the
   # iteration order the general TransformSystem folds transforms along. A RUNTIME
