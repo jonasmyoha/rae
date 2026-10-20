@@ -1,0 +1,155 @@
+# GrassBlockField — GPU grass that grows where a world's surfaces say: the
+# grass compute's surface field (GrassCompute grassSetSurfaceField) as a base
+# field (a level's surface map, app3d/SurfaceMap surfaceGrassField) and after
+# it a block per tile of a grid of streamed tiles, `tileCells` x `tileCells`
+# cells each, made by the app the first time its tile loads (queueGrassBlock)
+# and written to the GPU in the next render (flushGrassBlocks, only that
+# range). lib/grass_surface_field.wgsl reads it in the app's grass surface
+# part (groundFieldAt); grassFieldConstants gives that shader its layout.
+import Math
+open core/Core
+open gpu/GpuResources
+open GrassCompute
+
+# A tile's block, made, waiting to go to the GPU
+type GrassBlockPending {
+  block: Int
+  values: List(Float)
+}
+
+# The blocks' grid: where it starts (its first tile's south-west corner), its
+# cells (m) and how many a tile has along each side, its tiles; which blocks
+# are made, and those waiting
+type GrassBlockField {
+  originX: Float
+  originY: Float
+  cellSize: Float
+  tileCells: Int
+  tileColumns: Int
+  tileRows: Int
+  made: List(Bool)
+  pending: List(GrassBlockPending)
+}
+
+# No grass in a cell (as app3d/SurfaceMap's grassFieldNone)
+const grassBlockNone: Float = -100000.0
+
+func createGrassBlockField(
+  originX: view Float
+  originY: view Float
+  cellSize: view Float
+  tileCells: view Int
+  tileColumns: view Int
+  tileRows: view Int
+) ret GrassBlockField {
+  var made: List(Bool) = List.create(Bool, cap: tileColumns * tileRows)
+  loop var i: Int = 0, i < tileColumns * tileRows, ++i {
+    made.add(value: false)
+  }
+  ret GrassBlockField {
+    originX: originX
+    originY: originY
+    cellSize: cellSize
+    tileCells: tileCells
+    tileColumns: tileColumns
+    tileRows: tileRows
+    made: own made
+    pending: List.create(GrassBlockPending, cap: 4)
+  }
+}
+
+# How many values the blocks take, every tile
+func grassBlocksLength(blocks: view GrassBlockField) ret Int {
+  ret blocks.tileColumns * blocks.tileRows * blocks.tileCells * blocks.tileCells
+}
+
+# The block of the grid's tile (`column`, `row`), counted from its first
+# (none outside the grid)
+func grassBlockIndex(blocks: view GrassBlockField, column: view Int, row: view Int) ret opt Int {
+  if column < 0 or column >= blocks.tileColumns or row < 0 or row >= blocks.tileRows {
+    ret none
+  }
+  ret row * blocks.tileColumns + column
+}
+
+# Has `block` been made?
+func grassBlockMade(blocks: view GrassBlockField, block: view Int) ret Bool {
+  ret blocks.made.copyAtFallback(index: block, fallback: true)
+}
+
+# `block`'s cells (row by row, `tileCells` x `tileCells`), made: to the GPU in
+# the next flush
+func queueGrassBlock(blocks: mod GrassBlockField, block: view Int, values: own List(Float)) {
+  blocks.made.set(index: block, value: true)
+  blocks.pending.add(value: GrassBlockPending { block: block, values: own values })
+}
+
+# The whole surface field: the base field, then every block with no grass yet
+func grassFieldWithBlocks(blocks: view GrassBlockField, base: own List(Float)) ret List(Float) {
+  var field: List(Float) = base
+  loop var i: Int = 0, i < grassBlocksLength(blocks: blocks), ++i {
+    field.add(value: grassBlockNone)
+  }
+  ret field
+}
+
+# The made blocks into the grass's surface field, on the CPU and the GPU
+func flushGrassBlocks(
+  blocks: mod GrassBlockField
+  grass: mod GrassCompute
+  resources: mod GpuResources
+) {
+  let offset: Int = grass.surfaceField.length - grassBlocksLength(blocks: blocks)
+  loop let pending: view GrassBlockPending in blocks.pending {
+    grassUpdateSurfaceField(
+      grass: grass
+      resources: resources
+      offset: offset + pending.block * blocks.tileCells * blocks.tileCells
+      values: pending.values
+    )
+  }
+  blocks.pending.clear()
+}
+
+# lib/grass_surface_field.wgsl's layout: the base field (from (`baseOriginX`,
+# `baseOriginY`), `baseCell` m cells, `baseColumns` x `baseRows`) and the
+# blocks after it
+func grassFieldConstants(
+  blocks: view GrassBlockField
+  baseOriginX: view Float
+  baseOriginY: view Float
+  baseCell: view Float
+  baseColumns: view Int
+  baseRows: view Int
+) ret List(ShaderConstant) {
+  var constants: List(ShaderConstant) = List.create(ShaderConstant, cap: 12)
+  constants.add(value: ShaderConstant { name: "RAE_SURFACE_FIELD_ORIGIN_X", value: baseOriginX })
+  constants.add(value: ShaderConstant { name: "RAE_SURFACE_FIELD_ORIGIN_Y", value: baseOriginY })
+  constants.add(value: ShaderConstant { name: "RAE_SURFACE_FIELD_CELL", value: baseCell })
+  constants.add(
+    value: ShaderConstant { name: "RAE_SURFACE_FIELD_COLUMNS", value: baseColumns.toFloat() }
+  )
+  constants.add(value: ShaderConstant { name: "RAE_SURFACE_FIELD_ROWS", value: baseRows.toFloat() })
+  constants.add(
+    value: ShaderConstant {
+      name: "RAE_BLOCK_FIELD_OFFSET"
+      value: (baseColumns * baseRows).toFloat()
+    }
+  )
+  constants.add(value: ShaderConstant { name: "RAE_BLOCK_FIELD_ORIGIN_X", value: blocks.originX })
+  constants.add(value: ShaderConstant { name: "RAE_BLOCK_FIELD_ORIGIN_Y", value: blocks.originY })
+  constants.add(value: ShaderConstant { name: "RAE_BLOCK_FIELD_CELL", value: blocks.cellSize })
+  constants.add(
+    value: ShaderConstant { name: "RAE_BLOCK_FIELD_TILE_CELLS", value: blocks.tileCells.toFloat() }
+  )
+  constants.add(
+    value: ShaderConstant {
+      name: "RAE_BLOCK_FIELD_TILE_COLUMNS"
+      value: blocks.tileColumns.toFloat()
+    }
+  )
+  constants.add(
+    value: ShaderConstant { name: "RAE_BLOCK_FIELD_TILE_ROWS", value: blocks.tileRows.toFloat() }
+  )
+  ret constants
+}
