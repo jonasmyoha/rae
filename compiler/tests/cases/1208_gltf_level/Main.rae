@@ -95,6 +95,13 @@ func main() {
       y: 7.0
     ) is 0 and surfaceCodeAt(map: map, x: 50.0, y: 0.0) is 0
   )
+  check(
+    label: "the surface map's heights: the cube's top at the middle, the plate's at its edge, empty past it"
+    ok: near(a: surfaceHeightAt(map: map, x: 0.5, y: 0.5), b: 12.0) and near(
+      a: surfaceHeightAt(map: map, x: 3.0, y: 3.0)
+      b: 10.0
+    ) and surfaceHeightAt(map: map, x: 50.0, y: 0.0) <= surfaceMapEmptyHeight
+  )
   let field: List(Float) = surfaceGrassField(map: map, grassSurface: 1)
   let middle: Int = 4 * map.columns + 4
   let edge: Int = 5 * map.columns + 5
