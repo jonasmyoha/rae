@@ -40,6 +40,10 @@ typedef struct AstTypeRef {
   size_t column;
   struct AstTypeRef* generic_args; // Head of a linked list of AstTypeRef for generic arguments
   struct AstTypeRef* next; // For linking AstTypeRef nodes in a list (e.g., generic_args list)
+  /* `Module.Type`: the module the type is reached through (an `import`ed or
+   * `open`ed module's last name, or its `as` alias); {0} for a bare type.
+   * Resolved and cleared before sema (type_names.c). */
+  Str qualifier;
 
   /* A compile-time VALUE generic argument — the `cap: 16` in
    * `Array(Float, cap: 16)`. Rae's rule is that type arguments are positional

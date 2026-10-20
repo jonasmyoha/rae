@@ -1,0 +1,11 @@
+# Another module with a different `Point`: the two live side by side.
+type Point {
+  label: String
+}
+
+func rightSummary() ret String {
+  var points: List(Point) = { { label: "a" } }
+  points.add(value: Point { label: "right" })
+  let last: Point = points.copyAtFallback(index: 1, fallback: { label: "" })
+  ret "{points.length} points, last {last.label}, JSON {last.toJson()}"
+}

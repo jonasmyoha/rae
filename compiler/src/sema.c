@@ -335,6 +335,53 @@ static bool sema_decl_visible(const char* file, const AstDecl* d) {
     return sema_file_declares_package(file, d, /*require_open=*/false);
 }
 
+bool sema_decl_bare_visible(const char* file, const AstDecl* d) { return sema_decl_opened(file, d); }
+bool sema_decl_opened_explicitly(const char* file, const AstDecl* d) {
+    return sema_file_declares_package(file, d, /*require_open=*/true);
+}
+bool sema_decl_reachable(const char* file, const AstDecl* d) { return sema_decl_visible(file, d); }
+bool sema_decl_in_lib(const AstDecl* d) {
+    if (!d || !d->origin_file) return false;
+    char pkg[256]; sema_package_token(d->origin_file, pkg, sizeof pkg);
+    return pkg[0] != '\0';
+}
+bool sema_decl_in_prelude(const AstDecl* d) {
+    return d && d->module_name && sema_module_in_prelude(d->module_name);
+}
+bool sema_qualifier_reaches(const char* file, Str qualifier, const AstDecl* d) {
+    if (!d || !d->module_name) return false;
+    const char* mod = d->module_name;
+    size_t mlen = strlen(mod);
+    char pkg[256] = {0};
+    if (d->origin_file) sema_package_token(d->origin_file, pkg, sizeof pkg);
+    bool project_decl = d->origin_file && pkg[0] == '\0';
+    for (AstImport* im = sema_imports_for_file(file); im; im = im->next) {
+        if (!im->path.data) continue;
+        char ip[512]; size_t n = sema_norm_import_path(im->path, ip, sizeof ip);
+        if (n == 0) continue;
+        const char* last = strrchr(ip, '/');
+        last = last ? last + 1 : ip;
+        bool named = im->alias.len ? str_eq(im->alias, qualifier) : str_eq_cstr(qualifier, last);
+        if (!named) continue;
+        if (n == mlen && memcmp(ip, mod, n) == 0) return true;
+        if (project_decl && n < mlen && mod[mlen - n - 1] == '/' && memcmp(mod + mlen - n, ip, n) == 0)
+            return true;
+    }
+    return false;
+}
+
+bool sema_file_names_module(const char* file, Str qualifier) {
+    for (AstImport* im = sema_imports_for_file(file); im; im = im->next) {
+        if (im->alias.len && str_eq(im->alias, qualifier)) return true;
+        if (!im->path.data) continue;
+        size_t start = 0;
+        for (size_t i = 0; i < im->path.len; i++) if (im->path.data[i] == '/') start = i + 1;
+        Str last = { im->path.data + start, im->path.len - start };
+        if (str_eq(last, qualifier)) return true;
+    }
+    return false;
+}
+
 void sema_register_file_imports(Arena* arena, const char* file, AstImport* imports) {
     if (!file) return;
     SemaFileScope* s = arena_alloc(arena, sizeof(SemaFileScope));
@@ -3563,7 +3610,7 @@ static int reflect_metadata_call_kind(const AstExpr* e, Str binding) {
 // spelled — so the name matches how a decoder would branch. Allocated in the
 // AST arena; recurses so a nested `List(List(Int))` renders in full.
 static Str reflect_full_type_name(Arena* arena, const AstTypeRef* tr) {
-    Str base = reflect_base_name(tr);
+    Str base = type_written_name(reflect_base_name(tr));  /* `Point`, not `Point__in_<module>` */
     // Any type argument present (not a value arg like `cap: 16`)?
     const AstTypeRef* first_type_arg = NULL;
     for (const AstTypeRef* a = tr ? tr->generic_args : NULL; a; a = a->next) {
@@ -3602,7 +3649,7 @@ static Str reflect_full_type_name(Arena* arena, const AstTypeRef* tr) {
 static Str reflect_element_type_name(Arena* arena, const AstTypeRef* field_type) {
     if (field_type && field_type->generic_args && !field_type->generic_args->is_value_arg
         && str_eq_cstr(reflect_base_name(field_type), "ComponentTable"))
-        return reflect_base_name(field_type->generic_args);
+        return type_written_name(reflect_base_name(field_type->generic_args));
     return reflect_full_type_name(arena, field_type);
 }
 
@@ -9606,8 +9653,7 @@ static void sema_report_duplicate_type(AstModule* module, const AstDecl* first, 
         : (module && module->file_path ? module->file_path : "<input>");
     char message[1024];
     snprintf(message, sizeof(message),
-        "type '%.*s' is declared twice: here and at %s:%zu:%zu — type names are program-wide, "
-        "so two modules of one program cannot declare the same type name; rename one of them",
+        "type '%.*s' is declared twice in one module: here and at %s:%zu:%zu; rename one of them",
         (int)name.len, name.data, diag_simplify_path(firstFile), first->line, first->column);
     diag_error(secondFile, (int)second->line, (int)second->column, message);
     module->had_error = true;
@@ -9679,6 +9725,7 @@ static void sema_warn_project_copies(CompilerContext* ctx, AstModule* module, Sy
 }
 
 bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
+    sema_separate_clashing_type_names(ctx, module);
     sema_check_struct_field_borrows(ctx, module);
     desugar_typed_create_module(ctx, module);
     s_current_module = module;
