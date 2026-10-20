@@ -1,0 +1,227 @@
+# app3d/Ragdoll and app3d/RagdollRig: a knocked-over character goes limp.
+# The rig is data (the bones a skeleton's ragdoll is made of, by name), so a
+# skeleton of any naming gets one; a Mixamo skeleton's eleven bones are
+# mixamoRagdollBones. Thrown onto a floor in a Box3D world, the ragdoll
+# flies with the hit, lands and comes to rest (app3d/KnockedDown lets it up
+# there); its skeleton follows the bodies; taken apart it leaves no body.
+import Math
+import Vec3
+import Quat
+open Gltf
+open GltfSkin
+open Math3d
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open ecs/Transform
+open box3d/Box3d
+open box3d/Box3dTypes
+open box3d/ecs/PhysicsTypes
+open box3d/ecs/Physics
+open box3d/ecs/PhysicsComponents
+open box3d/ecs/PhysicsSpawn
+open box3d/ecs/PhysicsSystems
+open app3d/RagdollRig
+open app3d/Ragdoll
+open app3d/KnockedDown
+
+func near(a: view Float, b: view Float, within: view Float) ret Bool {
+  ret Math.abs(value: a - b) < within
+}
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func main() {
+  let glb: Glb = loadGlb(path: "../examples/136_walker_character/assets/walker.glb")
+  if glb.ok is false {
+    log("load failed: {glb.errorMsg}")
+    ret
+  }
+  var skeleton: Skeleton = loadSkeleton(glb: glb, skinIndex: 0)
+  # ----- the rig ------------------------------------------------------------
+  let rig: RagdollRig = createRagdollRig(
+    skeleton: skeleton
+    bones: mixamoRagdollBones(prefix: "mixamorig:")
+  )
+  var parentsFirst: Bool = true
+  loop var i: Int = 0, i < ragdollBoneCountOf(rig: rig), ++i {
+    if intAt(list: rig.parentBones, index: i, fallback: 0) >= i {
+      parentsFirst = false
+    }
+  }
+  check(
+    label: "a Mixamo skeleton's rig: eleven bones, the hips the root, every parent before its children"
+    ok: rig.ok and ragdollBoneCountOf(rig: rig) is 11 and intAt(
+      list: rig.parentBones
+      index: 0
+      fallback: 0
+    ) is 0 - 1 and parentsFirst
+  )
+  var otherBones: List(RagdollBone) = List.create(RagdollBone, cap: 2)
+  otherBones.add(value: RagdollBone {
+    name: "mixamorig:Hips"
+    endName: "mixamorig:Spine1"
+    parentBone: 0 - 1
+    radius: 0.15
+    coneAngle: 0.0
+  })
+  otherBones.add(value: RagdollBone {
+    name: "pelvis_l"
+    endName: "knee_l"
+    parentBone: 0
+    radius: 0.09
+    coneAngle: 1.2
+  })
+  check(
+    label: "a rig naming a bone the skeleton does not have is not ok (nobody falls)"
+    ok: createRagdollRig(skeleton: skeleton, bones: otherBones).ok is false
+  )
+  # ----- the rotation of a matrix ------------------------------------------
+  let turn: Quat = Quat.fromAxisAngle(axis: Vec3.create(x: 0.0, y: 0.0, z: 1.0), angle: 0.7)
+  let turned: Mat4 = transform3dToMatrix(
+    t: Transform3D {
+      position: Vec3.create(x: 1.0, y: 2.0, z: 3.0)
+      rotation: turn
+      scale: Vec3.create(x: 1.3, y: 1.3, z: 1.3)
+    }
+  )
+  let back: Quat = rotationOfMatrix(m: turned)
+  check(
+    label: "the rotation of a turned and scaled matrix is the turn"
+    ok: near(a: Math.abs(value: Quat.qdot(a: back, b: turn)), b: 1.0, within: 0.0001)
+  )
+  # ----- thrown onto a floor --------------------------------------------------
+  var allocator: EntityAllocator = createEntityAllocator()
+  var transforms: ComponentTable(Transform3D) = createComponentTable(Transform3D)
+  var rigidBodies: ComponentTable(RigidBody) = createComponentTable(RigidBody)
+  var colliders: ComponentTable(Collider) = createComponentTable(Collider)
+  var ragdolls: ComponentTable(Ragdoll) = createComponentTable(Ragdoll)
+  var knockedDown: ComponentTable(KnockedDown) = createComponentTable(KnockedDown)
+  var physics: Physics = createPhysics(
+    def: defaultPhysicsWorldDef()
+    fixedStep: 1.0 / 60.0
+    subSteps: 4
+  )
+  let floor: EntityId = allocEntity(this: allocator)
+  var floorDef: BodyDef = defaultBodyDef(lengthUnitsPerMeter: 1.0)
+  floorDef.bodyType = BodyType.staticBody
+  floorDef.position = Vec3.create(x: 0.0, y: 0.0, z: -0.5)
+  let floorBody: BodyId = spawnRigidBody(
+    physics: physics
+    rigidBodies: rigidBodies
+    transforms: transforms
+    entityId: floor
+    def: floorDef
+  )
+  let floorShape: ShapeId = addBoxCollider(
+    physics: physics
+    rigidBodies: rigidBodies
+    colliders: colliders
+    entityId: floor
+    def: defaultShapeDef(lengthUnitsPerMeter: 1.0)
+    halfExtents: Vec3.create(x: 50.0, y: 50.0, z: 0.5)
+    transform: transformIdentity()
+  )
+  let character: EntityId = allocEntity(this: allocator)
+  # The skeleton's model space is +Y up; stood up in the world (+Z up)
+  let model: Mat4 = transform3dToMatrix(
+    t: Transform3D {
+      position: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+      rotation: Quat.fromAxisAngle(axis: Vec3.create(x: 1.0, y: 0.0, z: 0.0), angle: 1.5707963)
+      scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
+    }
+  )
+  let fell: Bool = spawnRagdoll(
+    physics: physics
+    rigidBodies: rigidBodies
+    colliders: colliders
+    transforms: transforms
+    allocator: allocator
+    ragdolls: ragdolls
+    rig: rig
+    skeleton: skeleton
+    characterId: character
+    model: model
+    velocity: Vec3.create(x: 6.0, y: 0.0, z: 0.0)
+    radiusScale: 1.0
+    collisionCategory: 1
+  )
+  let hipsStart: Vec3 = ragdollHips(
+    ragdolls: ragdolls
+    transforms: transforms
+    characterId: character
+  )
+  knockDown(
+    knockedDown: knockedDown
+    entityId: character
+    body: ragdollHipsBody(ragdolls: ragdolls, characterId: character)
+    readyAfterSeconds: 1.0
+    bodyAt: hipsStart
+  )
+  check(
+    label: "it falls as eleven bodies, its hips where the skeleton's are"
+    ok: fell and componentView(this: ragdolls, entityId: character).boneEntities.length is 11 and componentCount(
+      this: rigidBodies
+    ) is 12 and hipsStart.z > 0.5
+  )
+  var upAfter: Float = 0.0 - 1.0
+  var restingAt: Vec3 = hipsStart
+  loop var i: Int = 1, i <= 600 and upAfter < 0.0, ++i {
+    physicsStepSystem(physics: physics)
+    physicsPullSystem(physics: physics, rigidBodies: rigidBodies, transforms: transforms)
+    restingAt = ragdollHips(ragdolls: ragdolls, transforms: transforms, characterId: character)
+    let up: List(EntityId) = stepKnockedDown(
+      knockedDown: knockedDown
+      transforms: transforms
+      deltaTime: 1.0 / 60.0
+    )
+    if up.length > 0 {
+      upAfter = i.toFloat() / 60.0
+    }
+  }
+  check(
+    label: "thrown at 6 m/s it flies on, lands on the floor and comes to rest before 5 s, then may get up"
+    ok: restingAt.x > hipsStart.x + 1.0 and restingAt.z < 0.5 and restingAt.z > 0.0 and upAfter > 1.0 and upAfter < getUpLatestSeconds
+  )
+  # Its skeleton follows the bodies: the hips node where the hips body is
+  poseRagdoll(
+    ragdolls: ragdolls
+    transforms: transforms
+    rig: rig
+    skeleton: skeleton
+    characterId: character
+    model: model
+  )
+  let hipsNode: Int = intAt(list: rig.boneNodes, index: 0, fallback: 0)
+  let drawnHips: Vec3 = mat4TransformPoint(
+    m: model
+    p: nodeModelPosition(skeleton: skeleton, node: hipsNode)
+  )
+  check(
+    label: "posed, the skeleton's hips are where the hips body lies"
+    ok: near(a: drawnHips.x, b: restingAt.x, within: 0.001) and near(
+      a: drawnHips.y
+      b: restingAt.y
+      within: 0.001
+    ) and near(a: drawnHips.z, b: restingAt.z, within: 0.001)
+  )
+  let bones: List(EntityId) = removeRagdoll(
+    physics: physics
+    rigidBodies: rigidBodies
+    colliders: colliders
+    ragdolls: ragdolls
+    characterId: character
+  )
+  check(
+    label: "taken apart: its eleven bones given back, no body of it left, only the floor's"
+    ok: bones.length is 11 and componentHas(this: ragdolls, entityId: character) is false and componentCount(
+      this: rigidBodies
+    ) is 1
+  )
+}

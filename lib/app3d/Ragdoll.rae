@@ -1,0 +1,306 @@
+# app3d/Ragdoll — a knocked-over character goes limp. Its rig's bones
+# (app3d/RagdollRig) become Box3D capsule bodies joined by spherical joints
+# with cone and twist limits and a little joint friction, all made from the
+# pose it was in when it was hit and launched with the hit. While it lies its
+# skeleton follows the bodies (poseRagdoll; the bones the ragdoll does not
+# carry keep the pose of the moment it fell). Its own bones never collide
+# with each other (one negative collision group per ragdoll); everything
+# else does. A Ragdoll component on the character holds its bones' entities
+# and the fall pose; app3d/KnockedDown says when it gets up.
+#
+# The bodies are the skeleton's bones in WORLD space: each body's frame is its
+# bone's frame at the fall, so its transform IS the bone's world transform, and
+# posing the skeleton is turning those back into local rotations relative to
+# each bone's parent, in the frame of the character's render model.
+import Vec3
+import Quat
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Transform
+open ecs/World
+open Math3d
+open GltfSkin
+open box3d/ecs/PhysicsTypes
+open box3d/ecs/Physics
+open box3d/ecs/PhysicsComponents
+open box3d/ecs/PhysicsSpawn
+open box3d/Box3d
+open box3d/Box3dTypes
+open app3d/RagdollRig
+
+# Box3D's density for flesh, roughly water (kg/m^3)
+const ragdollDensity: Float = 1000.0
+
+# The joint friction torque (N m): enough that a limb settles rather than
+# flailing, little enough that it still flops
+const ragdollJointFriction: Float = 4.0
+
+const ragdollTwistLimit: Float = 0.6
+
+# One character's ragdoll: the entity of each bone's body (the root, the
+# hips, first) and the pose it fell in
+type Ragdoll {
+  boneEntities: List(EntityId)
+  fallPose: SkeletonPose
+}
+
+# Make `characterId` a ragdoll from `skeleton` as posed now (the caller posed
+# it) under its render model `model`, moving at `velocity` and tipping toward
+# it; its bones' radii times `radiusScale` (the character's size against the
+# rig's), its shapes in `collisionCategory`; each bone a new entity from
+# `allocator`. False when it could not (the rig is not ok).
+func spawnRagdoll(
+  physics: mod Physics
+  rigidBodies: mod ComponentTable(RigidBody)
+  colliders: mod ComponentTable(Collider)
+  transforms: mod ComponentTable(Transform3D)
+  allocator: mod EntityAllocator
+  ragdolls: mod ComponentTable(Ragdoll)
+  rig: view RagdollRig
+  skeleton: view Skeleton
+  characterId: view EntityId
+  model: view Mat4
+  velocity: view Vec3
+  radiusScale: view Float
+  collisionCategory: view Int
+) ret Bool {
+  if rig.ok is false {
+    ret false
+  }
+  let boneCount: Int = ragdollBoneCountOf(rig: rig)
+  let modelRotation: Quat = rotationOfMatrix(m: model)
+  let hipsNode: Int = intAt(list: rig.boneNodes, index: 0, fallback: 0)
+  let hipsAt: Vec3 = mat4TransformPoint(
+    m: model
+    p: nodeModelPosition(skeleton: skeleton, node: hipsNode)
+  )
+  # Tip over toward the push: a spin about the horizontal axis across it
+  let flat: Vec3 = Vec3.create(x: velocity.x, y: velocity.y, z: 0.0)
+  var spin: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  if Vec3.vlen(a: flat) > 0.01 {
+    let along: Vec3 = Vec3.vscale(a: flat, s: 1.0 / Vec3.vlen(a: flat))
+    spin = Vec3.vscale(a: Vec3.create(x: 0.0 - along.y, y: along.x, z: 0.0), s: 3.0)
+  }
+  var boneEntities: List(EntityId) = List.create(EntityId, cap: boneCount)
+  var bonePositions: List(Vec3) = List.create(Vec3, cap: boneCount)
+  var boneRotations: List(Quat) = List.create(Quat, cap: boneCount)
+  loop var i: Int = 0, i < boneCount, ++i {
+    let node: Int = intAt(list: rig.boneNodes, index: i, fallback: 0)
+    let endNode: Int = intAt(list: rig.endNodes, index: i, fallback: 0)
+    let start: Vec3 = mat4TransformPoint(
+      m: model
+      p: nodeModelPosition(skeleton: skeleton, node: node)
+    )
+    let end: Vec3 = mat4TransformPoint(
+      m: model
+      p: nodeModelPosition(skeleton: skeleton, node: endNode)
+    )
+    let rotation: Quat = Quat.qnorm(
+      a: Quat.qmul(a: modelRotation, b: nodeModelRotation(skeleton: skeleton, node: node))
+    )
+    let radius: Float = rig.radii.copyAtFallback(index: i, fallback: 0.0) * radiusScale
+    let boneId: EntityId = allocEntity(this: allocator)
+    var bodyDef: BodyDef = defaultBodyDef(lengthUnitsPerMeter: 1.0)
+    bodyDef.bodyType = BodyType.dynamicBody
+    bodyDef.position = start
+    bodyDef.rotation = rotation
+    # As one rigid body at first: the push, plus the tip about the hips
+    bodyDef.linearVelocity = Vec3.vadd(
+      a: velocity
+      b: Vec3.vcross(a: spin, b: Vec3.vsub(a: start, b: hipsAt))
+    )
+    bodyDef.angularVelocity = spin
+    bodyDef.linearDamping = 0.05
+    bodyDef.angularDamping = 0.6
+    let bodyId: BodyId = spawnRigidBody(
+      physics: physics
+      rigidBodies: rigidBodies
+      transforms: transforms
+      entityId: boneId
+      def: bodyDef
+    )
+    var shapeDef: ShapeDef = defaultShapeDef(lengthUnitsPerMeter: 1.0)
+    shapeDef.filter.categoryBits = collisionCategory
+    shapeDef.density = ragdollDensity
+    shapeDef.baseMaterial.friction = 0.8
+    shapeDef.filter.groupIndex = 0 - (characterId.index + 1)
+    let shapeId: ShapeId = addCapsuleCollider(
+      physics: physics
+      rigidBodies: rigidBodies
+      colliders: colliders
+      entityId: boneId
+      def: shapeDef
+      capsule: Capsule {
+        center1: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+        center2: Quat.rotate(q: Quat.conjugate(a: rotation), v: Vec3.vsub(a: end, b: start))
+        radius: radius
+      }
+    )
+    boneEntities.add(value: boneId)
+    bonePositions.add(value: start)
+    boneRotations.add(value: rotation)
+  }
+  # Each bone joined to its parent at its own start, the joint's two frames
+  # equal at the fall so the limits are measured from the pose it fell in
+  loop var i: Int = 1, i < boneCount, ++i {
+    let parent: Int = intAt(list: rig.parentBones, index: i, fallback: 0)
+    let childAt: Vec3 = bonePositions.copyAtDefault(index: i)
+    let childRotation: Quat = boneRotations.copyAtDefault(index: i)
+    let parentAt: Vec3 = bonePositions.copyAtDefault(index: parent)
+    let parentInverse: Quat = Quat.conjugate(a: boneRotations.copyAtDefault(index: parent))
+    unsafe {
+      var def: b3SphericalJointDef = b3DefaultSphericalJointDef()
+      def.base.bodyIdA = toB3BodyId(
+        bodyId: entityBodyId(
+          rigidBodies: rigidBodies
+          entityId: boneEntities.copyAtDefault(index: parent)
+        )
+      )
+      def.base.bodyIdB = toB3BodyId(
+        bodyId: entityBodyId(
+          rigidBodies: rigidBodies
+          entityId: boneEntities.copyAtDefault(index: i)
+        )
+      )
+      def.base.localFrameA = toB3Transform(
+        transform: Transform {
+          position: Quat.rotate(q: parentInverse, v: Vec3.vsub(a: childAt, b: parentAt))
+          rotation: Quat.qnorm(a: Quat.qmul(a: parentInverse, b: childRotation))
+        }
+      )
+      def.base.localFrameB = toB3Transform(
+        transform: Transform {
+          position: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+          rotation: Quat.identity()
+        }
+      )
+      def.base.collideConnected = false
+      def.enableConeLimit = true
+      def.coneAngle = rig.coneAngles.copyAtFallback(index: i, fallback: 0.0)
+      def.enableTwistLimit = true
+      def.lowerTwistAngle = 0.0 - ragdollTwistLimit
+      def.upperTwistAngle = ragdollTwistLimit
+      def.enableMotor = true
+      def.maxMotorTorque = ragdollJointFriction
+      let jointId: b3JointId = b3CreateSphericalJoint(worldId: physics.world, def: def)
+    }
+  }
+  componentSet(
+    this: ragdolls
+    entityId: characterId
+    data: Ragdoll { boneEntities: own boneEntities, fallPose: captureSkeletonPose(sk: skeleton) }
+  )
+  ret true
+}
+
+# The body of `characterId`'s ragdoll's root bone (the hips): what
+# app3d/KnockedDown watches come to rest
+func ragdollHipsBody(
+  ragdolls: view ComponentTable(Ragdoll)
+  characterId: view EntityId
+) ret EntityId {
+  ret componentView(this: ragdolls, entityId: characterId).boneEntities.copyAtDefault(index: 0)
+}
+
+# The ragdoll's hips, in the world (where the character gets up)
+func ragdollHips(
+  ragdolls: view ComponentTable(Ragdoll)
+  transforms: view ComponentTable(Transform3D)
+  characterId: view EntityId
+) ret Vec3 {
+  ret componentView(
+    this: transforms
+    entityId: ragdollHipsBody(ragdolls: ragdolls, characterId: characterId)
+  ).position
+}
+
+# Pose `skeleton` as `characterId`'s ragdoll lies, under the render model
+# `model`: the fall pose, then each carried bone turned to its body
+func poseRagdoll(
+  ragdolls: view ComponentTable(Ragdoll)
+  transforms: view ComponentTable(Transform3D)
+  rig: view RagdollRig
+  skeleton: mod Skeleton
+  characterId: view EntityId
+  model: view Mat4
+) {
+  let ragdoll: view Ragdoll = componentView(this: ragdolls, entityId: characterId)
+  applySkeletonPose(sk: skeleton, pose: ragdoll.fallPose)
+  let modelInverse: Quat = Quat.conjugate(a: rotationOfMatrix(m: model))
+  let modelToLocal: Mat4 = mat4Inverse(a: model)
+  loop var i: Int = 0, i < ragdollBoneCountOf(rig: rig), ++i {
+    let node: Int = intAt(list: rig.boneNodes, index: i, fallback: 0)
+    let parentNode: Int = intAt(list: skeleton.parent, index: node, fallback: 0 - 1)
+    let body: view Transform3D = componentView(
+      this: transforms
+      entityId: ragdoll.boneEntities.copyAtDefault(index: i)
+    )
+    let target: Quat = Quat.qmul(a: modelInverse, b: body.rotation)
+    var parentRotation: Quat = Quat.identity()
+    if parentNode >= 0 {
+      parentRotation = nodeModelRotation(skeleton: skeleton, node: parentNode)
+    }
+    let local: Quat = Quat.qnorm(a: Quat.qmul(a: Quat.conjugate(a: parentRotation), b: target))
+    skeleton.localR.set(index: node * 4, value: local.x)
+    skeleton.localR.set(index: node * 4 + 1, value: local.y)
+    skeleton.localR.set(index: node * 4 + 2, value: local.z)
+    skeleton.localR.set(index: node * 4 + 3, value: local.w)
+    # The hips also move: where its body is, in its parent's frame
+    if i is 0 {
+      let inModel: Vec3 = mat4TransformPoint(m: modelToLocal, p: body.position)
+      var inParent: Vec3 = inModel
+      if parentNode >= 0 {
+        inParent = mat4TransformPoint(
+          m: mat4Inverse(a: nodeWorldMatrix(sk: skeleton, node: parentNode))
+          p: inModel
+        )
+      }
+      skeleton.localT.set(index: node * 3, value: inParent.x)
+      skeleton.localT.set(index: node * 3 + 1, value: inParent.y)
+      skeleton.localT.set(index: node * 3 + 2, value: inParent.z)
+    }
+  }
+}
+
+# A copy of `characterId`'s ragdoll's bone entities
+func ragdollBoneEntities(
+  ragdolls: view ComponentTable(Ragdoll)
+  characterId: view EntityId
+) ret List(EntityId) {
+  var ids: List(EntityId) = List.create(EntityId, cap: 11)
+  let ragdoll: view Ragdoll = componentView(this: ragdolls, entityId: characterId)
+  loop let boneId: view EntityId in ragdoll.boneEntities {
+    ids.add(value: boneId)
+  }
+  ret ids
+}
+
+# Take `characterId`'s ragdoll apart: its bodies (their joints go with them)
+# and the component. The bones' entities are returned: the app clears its own
+# rows of them (every one: a row left under a reused index grows a table) and
+# frees them.
+func removeRagdoll(
+  physics: mod Physics
+  rigidBodies: mod ComponentTable(RigidBody)
+  colliders: mod ComponentTable(Collider)
+  ragdolls: mod ComponentTable(Ragdoll)
+  characterId: view EntityId
+) ret List(EntityId) {
+  if componentHas(this: ragdolls, entityId: characterId) is false {
+    ret List.create(EntityId, cap: 1)
+  }
+  let boneEntities: List(EntityId) = ragdollBoneEntities(
+    ragdolls: ragdolls
+    characterId: characterId
+  )
+  loop let boneId: view EntityId in boneEntities {
+    despawnRigidBody(
+      physics: physics
+      rigidBodies: rigidBodies
+      colliders: colliders
+      entityId: boneId
+    )
+  }
+  componentRemove(this: ragdolls, entityId: characterId)
+  ret boneEntities
+}

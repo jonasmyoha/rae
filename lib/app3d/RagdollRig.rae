@@ -1,0 +1,239 @@
+# app3d/RagdollRig — which bones of a skeleton a ragdoll is made of, as
+# data: per bone the node it moves, the node its capsule reaches to, its
+# parent bone (-1 for the root, the first), its capsule radius (m, at the
+# skeleton's own size) and how far its joint bends (radians). A skeleton of
+# any naming gets a rig from its own list of RagdollBone; mixamoRagdollBones
+# is the list for a Mixamo skeleton (eleven bones: hips, chest, head, upper
+# and lower arms and legs). Also the rotation maths a ragdoll is posed with.
+import Math
+import Vec3
+import Quat
+open Math3d
+open GltfSkin
+
+# One bone of a ragdoll: its node's and its end node's names, its parent
+# bone's index in the list (-1: the root), its capsule radius and joint bend
+type RagdollBone {
+  name: String
+  endName: String
+  parentBone: Int
+  radius: Float
+  coneAngle: Float
+}
+
+# The rig resolved on a skeleton: its bones' nodes. Not ok when a bone is
+# missing from the skeleton, and then nobody falls as a ragdoll.
+type RagdollRig {
+  ok: Bool
+  boneNodes: List(Int)
+  endNodes: List(Int)
+  parentBones: List(Int)
+  radii: List(Float)
+  coneAngles: List(Float)
+}
+
+func ragdollBoneCountOf(rig: view RagdollRig) ret Int {
+  ret rig.boneNodes.length
+}
+
+# The eleven bones of a Mixamo skeleton whose node names start `prefix`
+# ("mixamorig:"), radii tuned for a 2.0 m character
+func mixamoRagdollBones(prefix: view String) ret List(RagdollBone) {
+  var bones: List(RagdollBone) = List.create(RagdollBone, cap: 11)
+  bones.add(value: RagdollBone {
+    name: "{prefix}Hips"
+    endName: "{prefix}Spine1"
+    parentBone: 0 - 1
+    radius: 0.15
+    coneAngle: 0.0
+  })
+  bones.add(value: RagdollBone {
+    name: "{prefix}Spine1"
+    endName: "{prefix}Neck"
+    parentBone: 0
+    radius: 0.16
+    coneAngle: 0.5
+  })
+  bones.add(value: RagdollBone {
+    name: "{prefix}Head"
+    endName: "{prefix}HeadTop_End"
+    parentBone: 1
+    radius: 0.18
+    coneAngle: 0.7
+  })
+  bones.add(value: RagdollBone {
+    name: "{prefix}LeftArm"
+    endName: "{prefix}LeftForeArm"
+    parentBone: 1
+    radius: 0.06
+    coneAngle: 1.6
+  })
+  bones.add(value: RagdollBone {
+    name: "{prefix}LeftForeArm"
+    endName: "{prefix}LeftHand"
+    parentBone: 3
+    radius: 0.05
+    coneAngle: 1.4
+  })
+  bones.add(value: RagdollBone {
+    name: "{prefix}RightArm"
+    endName: "{prefix}RightForeArm"
+    parentBone: 1
+    radius: 0.06
+    coneAngle: 1.6
+  })
+  bones.add(value: RagdollBone {
+    name: "{prefix}RightForeArm"
+    endName: "{prefix}RightHand"
+    parentBone: 5
+    radius: 0.05
+    coneAngle: 1.4
+  })
+  bones.add(value: RagdollBone {
+    name: "{prefix}LeftUpLeg"
+    endName: "{prefix}LeftLeg"
+    parentBone: 0
+    radius: 0.09
+    coneAngle: 1.2
+  })
+  bones.add(value: RagdollBone {
+    name: "{prefix}LeftLeg"
+    endName: "{prefix}LeftFoot"
+    parentBone: 7
+    radius: 0.07
+    coneAngle: 1.3
+  })
+  bones.add(value: RagdollBone {
+    name: "{prefix}RightUpLeg"
+    endName: "{prefix}RightLeg"
+    parentBone: 0
+    radius: 0.09
+    coneAngle: 1.2
+  })
+  bones.add(value: RagdollBone {
+    name: "{prefix}RightLeg"
+    endName: "{prefix}RightFoot"
+    parentBone: 9
+    radius: 0.07
+    coneAngle: 1.3
+  })
+  ret bones
+}
+
+# The rig of `bones` on `skeleton` (a parent before its children)
+func createRagdollRig(skeleton: view Skeleton, bones: view List(RagdollBone)) ret RagdollRig {
+  var rig: RagdollRig = {
+    ok: true
+    boneNodes: List.create(Int, cap: bones.length)
+    endNodes: List.create(Int, cap: bones.length)
+    parentBones: List.create(Int, cap: bones.length)
+    radii: List.create(Float, cap: bones.length)
+    coneAngles: List.create(Float, cap: bones.length)
+  }
+  loop let bone: view RagdollBone in bones {
+    var found: Bool = false
+    if let node: Int = nodeByName(sk: skeleton, name: bone.name) {
+      if let endNode: Int = nodeByName(sk: skeleton, name: bone.endName) {
+        rig.boneNodes.add(value: node)
+        rig.endNodes.add(value: endNode)
+        rig.parentBones.add(value: bone.parentBone)
+        rig.radii.add(value: bone.radius)
+        rig.coneAngles.add(value: bone.coneAngle)
+        found = true
+      }
+    }
+    if found is false {
+      rig.ok = false
+    }
+  }
+  ret rig
+}
+
+# ----- rotations of the skeleton and the model ------------------------------
+func nodeLocalRotation(skeleton: view Skeleton, node: view Int) ret Quat {
+  ret Quat.create(
+    x: skeleton.localR.copyAtFallback(index: node * 4, fallback: 0.0)
+    y: skeleton.localR.copyAtFallback(index: node * 4 + 1, fallback: 0.0)
+    z: skeleton.localR.copyAtFallback(index: node * 4 + 2, fallback: 0.0)
+    w: skeleton.localR.copyAtFallback(index: node * 4 + 3, fallback: 0.0)
+  )
+}
+
+# A node's rotation in model space: its local rotations from the root down
+# (the skeleton's scales are uniform, so rotations compose on their own).
+func nodeModelRotation(skeleton: view Skeleton, node: view Int) ret Quat {
+  var rotation: Quat = Quat.identity()
+  var current: Int = node
+  var guard: Int = 0
+  loop current >= 0 and guard < skeleton.nodeCount + 1 {
+    rotation = Quat.qmul(a: nodeLocalRotation(skeleton: skeleton, node: current), b: rotation)
+    current = intAt(list: skeleton.parent, index: current, fallback: 0 - 1)
+    guard = guard + 1
+  }
+  ret rotation
+}
+
+func nodeModelPosition(skeleton: view Skeleton, node: view Int) ret Vec3 {
+  ret mat4TransformPoint(
+    m: nodeWorldMatrix(sk: skeleton, node: node)
+    p: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  )
+}
+
+# The rotation of a rotation-and-uniform-scale matrix, as a quaternion.
+func rotationOfMatrix(m: view Mat4) ret Quat {
+  let scaleX: Float = Vec3.vlen(
+    a: Vec3.create(x: mat4Get(m: m, i: 0), y: mat4Get(m: m, i: 1), z: mat4Get(m: m, i: 2))
+  )
+  let scaleY: Float = Vec3.vlen(
+    a: Vec3.create(x: mat4Get(m: m, i: 4), y: mat4Get(m: m, i: 5), z: mat4Get(m: m, i: 6))
+  )
+  let scaleZ: Float = Vec3.vlen(
+    a: Vec3.create(x: mat4Get(m: m, i: 8), y: mat4Get(m: m, i: 9), z: mat4Get(m: m, i: 10))
+  )
+  # Row r, column c is element c * 4 + r (column-major)
+  let m00: Float = mat4Get(m: m, i: 0) / scaleX
+  let m10: Float = mat4Get(m: m, i: 1) / scaleX
+  let m20: Float = mat4Get(m: m, i: 2) / scaleX
+  let m01: Float = mat4Get(m: m, i: 4) / scaleY
+  let m11: Float = mat4Get(m: m, i: 5) / scaleY
+  let m21: Float = mat4Get(m: m, i: 6) / scaleY
+  let m02: Float = mat4Get(m: m, i: 8) / scaleZ
+  let m12: Float = mat4Get(m: m, i: 9) / scaleZ
+  let m22: Float = mat4Get(m: m, i: 10) / scaleZ
+  let trace: Float = m00 + m11 + m22
+  if trace > 0.0 {
+    let s: Float = Math.sqrt(x: trace + 1.0) * 2.0
+    ret Quat.qnorm(a: Quat.create(
+      x: (m21 - m12) / s
+      y: (m02 - m20) / s
+      z: (m10 - m01) / s
+      w: 0.25 * s
+    ))
+  }
+  if m00 > m11 and m00 > m22 {
+    let s: Float = Math.sqrt(x: 1.0 + m00 - m11 - m22) * 2.0
+    ret Quat.qnorm(a: Quat.create(
+      x: 0.25 * s
+      y: (m01 + m10) / s
+      z: (m02 + m20) / s
+      w: (m21 - m12) / s
+    ))
+  }
+  if m11 > m22 {
+    let s: Float = Math.sqrt(x: 1.0 + m11 - m00 - m22) * 2.0
+    ret Quat.qnorm(a: Quat.create(
+      x: (m01 + m10) / s
+      y: 0.25 * s
+      z: (m12 + m21) / s
+      w: (m02 - m20) / s
+    ))
+  }
+  let s: Float = Math.sqrt(x: 1.0 + m22 - m00 - m11) * 2.0
+  ret Quat.qnorm(a: Quat.create(
+    x: (m02 + m20) / s
+    y: (m12 + m21) / s
+    z: 0.25 * s
+    w: (m10 - m01) / s
+  ))
+}
