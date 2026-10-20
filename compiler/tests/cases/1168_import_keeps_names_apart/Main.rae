@@ -1,0 +1,33 @@
+# An app's function or const with the same name as a lib one, where the app
+# only imports the lib module: a bare name is the app's, the module-qualified
+# one the lib's, and the lib's own code keeps calling and reading its own
+# names (the app's never reach into it).
+import app3d/UiModes
+import app3d/Characters
+
+func main() {
+  log("bare call is the app's: {isShortWindowHeight(height: 100.0) is false}")
+  log("qualified call is the lib's: {UiModes.isShortWindowHeight(height: 100.0)}")
+  log("bare const is the app's: {uiModeShortWindowPoints > 9000.0}")
+  log("the lib reads its own const: {UiModes.isShortWindowHeight(height: 600.0) is false}")
+  var anim: AnimationState = { clipIndex: 0, animTime: 0.0, playbackScale: 1.0 }
+  var transition: AnimationTransition = {
+    from: {
+      localT: List.create(Float, cap: 0)
+      localR: List.create(Float, cap: 0)
+      localS: List.create(Float, cap: 0)
+    }
+    elapsed: 0.28
+    duration: 0.28
+    holdClipFirstFrame: false
+  }
+  Characters.stepCharacterClock(
+    anim: anim
+    transition: transition
+    playing: true
+    speed: 1.0
+    rate: 1.0
+    deltaTime: 0.1
+  )
+  log("the lib calls its own function: {transition.elapsed < 0.29}")
+}
