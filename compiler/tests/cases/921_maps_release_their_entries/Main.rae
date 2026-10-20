@@ -26,7 +26,7 @@ func growAndLookUp(count: view Int) ret Int {
   }
   var found: Int = 0
   loop var i: Int = 0, i < count, ++i {
-    if let holder: view Holder => map.viewGet(key: "key {i}") {
+    if let holder: view Holder = map.viewGet(key: "key {i}") {
       if holder.label is "label {i}" {
         found = found + 1
       }
@@ -61,7 +61,7 @@ func overwrite(count: view Int) ret String {
   loop var i: Int = 0, i < count, ++i {
     map.set(k: "same key", value: Holder { label: "label {i}" })
   }
-  if let holder: view Holder => map.viewGet(key: "same key") {
+  if let holder: view Holder = map.viewGet(key: "same key") {
     ret "{holder.label} ({map.length} entry)"
   }
   ret "missing"

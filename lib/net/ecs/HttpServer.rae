@@ -278,7 +278,7 @@ func releaseReadBuffer(
   readBuffers: mod ComponentTable(ReadBuffer)
   entityId: view EntityId
 ) {
-  let readBuffer: mod ReadBuffer => componentMod(this: readBuffers, entityId: entityId)
+  let readBuffer: mod ReadBuffer = componentMod(this: readBuffers, entityId: entityId)
   givePooledBuffer(pool: pool, buffer: own readBuffer.buffer)
 }
 
@@ -287,7 +287,7 @@ func releaseWriteBuffer(
   writeBuffers: mod ComponentTable(WriteBuffer)
   entityId: view EntityId
 ) {
-  let writeBuffer: mod WriteBuffer => componentMod(this: writeBuffers, entityId: entityId)
+  let writeBuffer: mod WriteBuffer = componentMod(this: writeBuffers, entityId: entityId)
   givePooledBuffer(pool: pool, buffer: own writeBuffer.buffer)
 }
 
@@ -337,7 +337,7 @@ func openConnection(server: mod HttpServer, socketId: view SocketId) ret EntityI
 # Wait for an unanswered promoted request's task (a Task is joined by its
 # owner) and drop the reply
 func joinAwaiting(awaitingResults: mod ComponentTable(AwaitingResult), entityId: view EntityId) {
-  let awaiting: mod AwaitingResult => componentMod(this: awaitingResults, entityId: entityId)
+  let awaiting: mod AwaitingResult = componentMod(this: awaitingResults, entityId: entityId)
   let reply: HttpReply = awaiting.task.get()
 }
 
@@ -389,7 +389,7 @@ func appendResponse(
   date: view String
   keepAlive: view Bool
 ) {
-  let writeBuffer: mod WriteBuffer => componentMod(this: writeBuffers, entityId: entityId)
+  let writeBuffer: mod WriteBuffer = componentMod(this: writeBuffers, entityId: entityId)
   httpAppendResponse(
     output: writeBuffer.buffer
     status: status
@@ -405,7 +405,7 @@ func appendBadRequest(
   entityId: view EntityId
   date: view String
 ) {
-  let writeBuffer: mod WriteBuffer => componentMod(this: writeBuffers, entityId: entityId)
+  let writeBuffer: mod WriteBuffer = componentMod(this: writeBuffers, entityId: entityId)
   httpAppendBadRequest(output: writeBuffer.buffer, date: date)
 }
 
@@ -462,7 +462,7 @@ func requestText(
   event: view HttpRequestEvent
   range: view ByteRange
 ) ret String {
-  let readBuffer: view ReadBuffer => componentView(
+  let readBuffer: view ReadBuffer = componentView(
     this: server.readBuffers
     entityId: event.connectionEntityId
   )
@@ -475,7 +475,7 @@ func requestPathIs(
   event: view HttpRequestEvent
   path: view String
 ) ret Bool {
-  let readBuffer: view ReadBuffer => componentView(
+  let readBuffer: view ReadBuffer = componentView(
     this: server.readBuffers
     entityId: event.connectionEntityId
   )
@@ -496,7 +496,7 @@ func takeBufferText(
   writeBuffers: mod ComponentTable(WriteBuffer)
   entityId: view EntityId
 ) ret String {
-  let writeBuffer: mod WriteBuffer => componentMod(this: writeBuffers, entityId: entityId)
+  let writeBuffer: mod WriteBuffer = componentMod(this: writeBuffers, entityId: entityId)
   let text: String = byteBufferText(
     buffer: writeBuffer.buffer
     start: 0
@@ -518,7 +518,7 @@ func appendInputBytes(
   entityId: view EntityId
   bytes: view List(UInt8)
 ) {
-  let readBuffer: mod ReadBuffer => componentMod(this: readBuffers, entityId: entityId)
+  let readBuffer: mod ReadBuffer = componentMod(this: readBuffers, entityId: entityId)
   appendBytes(
     buffer: readBuffer.buffer
     bytes: bytes
@@ -538,6 +538,6 @@ func appendInput(
   entityId: view EntityId
   text: view String
 ) {
-  let readBuffer: mod ReadBuffer => componentMod(this: readBuffers, entityId: entityId)
+  let readBuffer: mod ReadBuffer = componentMod(this: readBuffers, entityId: entityId)
   appendText(buffer: readBuffer.buffer, text: text)
 }

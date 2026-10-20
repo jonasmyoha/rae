@@ -28,10 +28,10 @@ func main() {
   let text: opt String = maybeText()
   log("missing is none: {missing is none}")
   log("text {text}, as text {text.toString()}")
-  if let present: view Track => track {
+  if let present: view Track = track {
     log("stored: {present.title} {present.seconds}")
   }
-  if let present: view String => text {
+  if let present: view String = text {
     log("length {present.length()}")
   }
   if let present: Track = maybe(present: true) {
@@ -39,8 +39,8 @@ func main() {
   }
   var tracks: List(Track) = List.create(Track, cap: 1)
   tracks.add(value: Track { title: "Outro", seconds: 143 })
-  let first: opt view Track => pick(tracks: tracks)
-  if let present: view Track => first {
+  let first: opt view Track = pick(tracks: tracks)
+  if let present: view Track = first {
     log("view: {present.title}")
   }
 }

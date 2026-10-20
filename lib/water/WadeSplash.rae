@@ -114,7 +114,7 @@ func captureWadeFeet(
   }
   let left: Mat4 = mat4Mul(a: model, b: nodeWorldMatrix(sk: skeleton, node: leftFootNode))
   let right: Mat4 = mat4Mul(a: model, b: nodeWorldMatrix(sk: skeleton, node: rightFootNode))
-  let feet: mod WadeFeet => componentMod(this: wadeSplash.feet, entityId: entityId)
+  let feet: mod WadeFeet = componentMod(this: wadeSplash.feet, entityId: entityId)
   feet.leftPosition = Vec3.create(
     x: mat4Get(m: left, i: 12)
     y: mat4Get(m: left, i: 13)
@@ -215,7 +215,7 @@ func wadeSplashStep(
   waterParticleUpdate(particles: wadeSplash.particles, deltaTime: deltaTime)
   loop var index: Int = 0, index < componentCount(this: wadeSplash.feet), ++index {
     let entityId: EntityId = componentEntityAt(this: wadeSplash.feet, i: index)
-    let feet: mod WadeFeet => componentMod(this: wadeSplash.feet, entityId: entityId)
+    let feet: mod WadeFeet = componentMod(this: wadeSplash.feet, entityId: entityId)
     if not feet.sampled {
       feet.left.initialized = false
       feet.right.initialized = false

@@ -125,7 +125,7 @@ func computeSweptShapeAabb(
     )
   }
   if shape.shapeType is ShapeType.hull {
-    if let hull: view Hull => hulls.viewAt(index: shape.hullIndex) {
+    if let hull: view Hull = hulls.viewAt(index: shape.hullIndex) {
       ret computeSweptHullAabb(hull: hull, transform1: transform1, transform2: transform2)
     }
   }
@@ -218,7 +218,7 @@ func sweepSurfaceTriangles(
   query: mod MeshImpactScratch
 ) {
   if shapeA.shapeType is ShapeType.height {
-    if let heightField: view HeightFieldData => heightFields.viewAt(index: shapeA.heightFieldIndex) {
+    if let heightField: view HeightFieldData = heightFields.viewAt(index: shapeA.heightFieldIndex) {
       queryHeightFieldInto(
         heightField: heightField
         bounds: bounds
@@ -242,7 +242,7 @@ func sweepSurfaceTriangles(
     }
     ret
   }
-  if let mesh: view Mesh => meshes.viewAt(index: meshIndex) {
+  if let mesh: view Mesh = meshes.viewAt(index: meshIndex) {
     queryMeshInto(
       mesh: mesh
       bounds: bounds
@@ -412,7 +412,7 @@ func compoundTimeOfImpact(
         output = timeOfImpact(input: toiInput, lengthUnitsPerMeter: lengthUnitsPerMeter)
       }
       case ShapeType.hull {
-        if let hull: view Hull => hulls.viewAt(index: shapeA.hullIndex + child.kindIndex) {
+        if let hull: view Hull = hulls.viewAt(index: shapeA.hullIndex + child.kindIndex) {
           toiInput.proxyA = makeProxy(points: hull.points, radius: 0.0)
         }
         output = timeOfImpact(input: toiInput, lengthUnitsPerMeter: lengthUnitsPerMeter)

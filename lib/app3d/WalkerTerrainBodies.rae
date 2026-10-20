@@ -33,7 +33,7 @@ func placeRockBodies(
   var rocks: Int = 0
   loop var i: Int = 0, i < componentCount(this: propKinds), ++i {
     let entityId: EntityId = componentEntityAt(this: propKinds, i: i)
-    let prop: view TerrainProp => queryViewAt(table: propKinds, denseIndex: i)
+    let prop: view TerrainProp = queryViewAt(table: propKinds, denseIndex: i)
     if prop.kind is kindRock {
       despawnRigidBody(
         physics: physicsSystem.physics
@@ -65,9 +65,9 @@ func bushSpots(
   var spots: List(BushSpot) = List.create(BushSpot, cap: 64)
   loop var i: Int = 0, i < componentCount(this: propKinds), ++i {
     let entityId: EntityId = componentEntityAt(this: propKinds, i: i)
-    let prop: view TerrainProp => queryViewAt(table: propKinds, denseIndex: i)
+    let prop: view TerrainProp = queryViewAt(table: propKinds, denseIndex: i)
     if prop.kind is kindBush and prop.active {
-      let transform: view Transform3D => componentView(this: transforms, entityId: entityId)
+      let transform: view Transform3D = componentView(this: transforms, entityId: entityId)
       spots.add(
         value: {
           x: transform.position.x
@@ -108,7 +108,7 @@ func nearestProp(
   var nearestDistance: Float = 1000000.0
   loop var i: Int = 0, i < componentCount(this: propKinds), ++i {
     let entityId: EntityId = componentEntityAt(this: propKinds, i: i)
-    let prop: view TerrainProp => queryViewAt(table: propKinds, denseIndex: i)
+    let prop: view TerrainProp = queryViewAt(table: propKinds, denseIndex: i)
     if prop.kind is kind and prop.active {
       let gap: Vec3 = Vec3.vsub(
         a: componentView(this: transforms, entityId: entityId).position

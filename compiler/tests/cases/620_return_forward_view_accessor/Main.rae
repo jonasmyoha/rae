@@ -15,8 +15,8 @@ func longest(tracks: view List(Track)) ret opt view Track {
   var bestIndex: Int = 0
   var i: Int = 1
   loop i < tracks.length {
-    if let candidate: view Track => tracks.viewAt(index: i) {
-      if let best: view Track => tracks.viewAt(index: bestIndex) {
+    if let candidate: view Track = tracks.viewAt(index: i) {
+      if let best: view Track = tracks.viewAt(index: bestIndex) {
         if candidate.seconds > best.seconds {
           bestIndex = i
         }
@@ -32,7 +32,7 @@ func main() {
   tracks.add(value: Track { title: "Intro", seconds: 95 })
   tracks.add(value: Track { title: "Middle Eight", seconds: 212 })
   tracks.add(value: Track { title: "Outro", seconds: 143 })
-  if let top: view Track => longest(tracks: tracks) {
+  if let top: view Track = longest(tracks: tracks) {
     log("longest: {top.title} / {top.seconds}")
   } else {
     log("empty")

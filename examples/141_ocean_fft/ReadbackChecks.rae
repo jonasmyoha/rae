@@ -15,7 +15,7 @@ func drainWaterCache(waterSystem: mod WaterSystem, resources: mod GpuResources) 
     updateWaterReadback(waterSystem: waterSystem, resources: resources)
     var complete: Bool = waterSystem.surfaceCache.activeCount is waterSystem.fftAllocatedCount
     loop var i: Int = 0, i < waterSystem.fftAllocatedCount, ++i {
-      if let cascade: view FftCascadeCache => waterSystem.surfaceCache.cascades.viewAt(index: i) {
+      if let cascade: view FftCascadeCache = waterSystem.surfaceCache.cascades.viewAt(index: i) {
         let expectedTime: Float = waterSystem.fftSampleTimes.copyAtFallback(
           index: i
           fallback: -1.0
@@ -33,7 +33,7 @@ func drainWaterCache(waterSystem: mod WaterSystem, resources: mod GpuResources) 
   }
   log("[water cache] timed out generation {waterSystem.surfaceCache.generation}")
   loop var i: Int = 0, i < waterSystem.fftAllocatedCount, ++i {
-    if let cascade: view FftCascadeCache => waterSystem.surfaceCache.cascades.viewAt(index: i) {
+    if let cascade: view FftCascadeCache = waterSystem.surfaceCache.cascades.viewAt(index: i) {
       log(
         "cascade {i}: gen {cascade.generation} time {cascade.sampleTime}, expected {waterSystem.fftSampleTimes.copyAtFallback(
           index: i
@@ -203,7 +203,7 @@ func verifyKnownWaterCache(waterSystem: mod WaterSystem, resources: mod GpuResou
   if not drainWaterCache(waterSystem: waterSystem, resources: resources) {
     ok = false
   }
-  if let cascade: view FftCascadeCache => waterSystem.surfaceCache.cascades.viewAt(index: 0) {
+  if let cascade: view FftCascadeCache = waterSystem.surfaceCache.cascades.viewAt(index: 0) {
     var minimum: Float = 1.0
     loop var texel: Int = 0, texel < fftCacheSize * fftCacheSize, ++texel {
       let jacobian: Float = cascade.values.copyAtFallback(index: texel * 4 + 3, fallback: 1.0)

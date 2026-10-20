@@ -48,14 +48,14 @@ func cursorKindForEntity(world: view UiWorld, entityId: view EntityId) ret Int {
   }
 
   if componentHas(this: world.widgetStates, entityId: entityId) {
-    let state: view WidgetState => componentView(this: world.widgetStates, entityId: entityId)
+    let state: view WidgetState = componentView(this: world.widgetStates, entityId: entityId)
     if state.enabled is false {
       ret cursorArrow
     }
   }
 
   if componentHas(this: world.pointerEvents, entityId: entityId) {
-    let pe: view PointerEvents => componentView(this: world.pointerEvents, entityId: entityId)
+    let pe: view PointerEvents = componentView(this: world.pointerEvents, entityId: entityId)
     if pe.enabled is false {
       ret cursorArrow
     }

@@ -24,7 +24,7 @@ func createIsland(world: mod PhysicsWorld, setIndex: view Int) ret Int {
     world.islands.add(value: emptyIsland())
   }
   var localIndex: Int = 0
-  if let set: mod SolverSet => world.solverSets.modAt(index: setIndex) {
+  if let set: mod SolverSet = world.solverSets.modAt(index: setIndex) {
     localIndex = set.islandSims.length
     set.islandSims.add(value: islandId)
   }
@@ -51,20 +51,20 @@ func destroyIsland(world: mod PhysicsWorld, islandId: view Int) {
   }
   var setIndex: Int = 0
   var localIndex: Int = 0
-  if let island: view Island => world.islands.viewAt(index: islandId) {
+  if let island: view Island = world.islands.viewAt(index: islandId) {
     setIndex = island.setIndex
     localIndex = island.localIndex
   }
-  if let set: mod SolverSet => world.solverSets.modAt(index: setIndex) {
+  if let set: mod SolverSet = world.solverSets.modAt(index: setIndex) {
     let lastIndex: Int = set.islandSims.length - 1
     let movedIslandId: Int = set.islandSims.copyAtDefault(index: lastIndex)
     set.islandSims.set(index: localIndex, value: movedIslandId)
-    if let moved: mod Island => world.islands.modAt(index: movedIslandId) {
+    if let moved: mod Island = world.islands.modAt(index: movedIslandId) {
       moved.localIndex = localIndex
     }
     set.islandSims.removeLast()
   }
-  if let freed: mod Island => world.islands.modAt(index: islandId) {
+  if let freed: mod Island = world.islands.modAt(index: islandId) {
     freed.bodies.clear()
     freed.contacts.clear()
     freed.joints.clear()
@@ -78,7 +78,7 @@ func destroyIsland(world: mod PhysicsWorld, islandId: view Int) {
 
 # The body count of island `islandId`, read through a view.
 func islandBodyCount(world: view PhysicsWorld, islandId: view Int) ret Int {
-  if let island: view Island => world.islands.viewAt(index: islandId) {
+  if let island: view Island = world.islands.viewAt(index: islandId) {
     ret island.bodies.length
   }
   ret 0
@@ -112,7 +112,7 @@ func mergeIslands(world: mod PhysicsWorld, islandIdA: view Int, islandIdB: view 
   var smallContacts: List(ContactLink) = List.create(ContactLink, cap: 0)
   var smallJoints: List(JointLink) = List.create(JointLink, cap: 0)
   var smallRemoveCount: Int = 0
-  if let small: mod Island => world.islands.modAt(index: smallIslandId) {
+  if let small: mod Island = world.islands.modAt(index: smallIslandId) {
     smallBodies = own small.bodies
     smallContacts = own small.contacts
     smallJoints = own small.joints
@@ -123,11 +123,11 @@ func mergeIslands(world: mod PhysicsWorld, islandIdA: view Int, islandIdB: view 
   loop var i: Int = 0, i < smallBodies.length, ++i {
     let bodyId: Int = smallBodies.copyAtDefault(index: i)
     var bodyIndex: Int = 0
-    if let big: mod Island => world.islands.modAt(index: bigIslandId) {
+    if let big: mod Island = world.islands.modAt(index: bigIslandId) {
       bodyIndex = big.bodies.length
       big.bodies.add(value: bodyId)
     }
-    if let body: mod Body => world.bodies.modAt(index: bodyId) {
+    if let body: mod Body = world.bodies.modAt(index: bodyId) {
       body.islandId = bigIslandId
       body.islandIndex = bodyIndex
     }
@@ -137,11 +137,11 @@ func mergeIslands(world: mod PhysicsWorld, islandIdA: view Int, islandIdB: view 
   loop var i: Int = 0, i < smallContacts.length, ++i {
     let link: ContactLink = smallContacts.copyAtDefault(index: i)
     var contactIndex: Int = 0
-    if let big: mod Island => world.islands.modAt(index: bigIslandId) {
+    if let big: mod Island = world.islands.modAt(index: bigIslandId) {
       contactIndex = big.contacts.length
       big.contacts.add(value: link)
     }
-    if let contact: mod Contact => world.contacts.modAt(index: link.contactId) {
+    if let contact: mod Contact = world.contacts.modAt(index: link.contactId) {
       contact.islandId = bigIslandId
       contact.islandIndex = contactIndex
     }
@@ -151,21 +151,21 @@ func mergeIslands(world: mod PhysicsWorld, islandIdA: view Int, islandIdB: view 
   loop var i: Int = 0, i < smallJoints.length, ++i {
     let link: JointLink = smallJoints.copyAtDefault(index: i)
     var jointIndex: Int = 0
-    if let big: mod Island => world.islands.modAt(index: bigIslandId) {
+    if let big: mod Island = world.islands.modAt(index: bigIslandId) {
       jointIndex = big.joints.length
       big.joints.add(value: link)
     }
-    if let joint: mod Joint => world.joints.modAt(index: link.jointId) {
+    if let joint: mod Joint = world.joints.modAt(index: link.jointId) {
       joint.islandId = bigIslandId
       joint.islandIndex = jointIndex
     }
   }
 
   # Track removed constraints
-  if let big: mod Island => world.islands.modAt(index: bigIslandId) {
+  if let big: mod Island = world.islands.modAt(index: bigIslandId) {
     big.constraintRemoveCount = big.constraintRemoveCount + smallRemoveCount
   }
-  if let small: mod Island => world.islands.modAt(index: smallIslandId) {
+  if let small: mod Island = world.islands.modAt(index: smallIslandId) {
     small.bodies = own smallBodies
     small.contacts = own smallContacts
     small.joints = own smallJoints
@@ -178,7 +178,7 @@ func mergeIslands(world: mod PhysicsWorld, islandIdA: view Int, islandIdB: view 
 func addContactToIsland(world: mod PhysicsWorld, islandId: view Int, contactId: view Int) {
   let contact: ContactSummary = contactSummaryOf(world: world, contactId: contactId)
   var islandIndex: Int = 0
-  if let island: mod Island => world.islands.modAt(index: islandId) {
+  if let island: mod Island = world.islands.modAt(index: islandId) {
     islandIndex = island.contacts.length
     island.contacts.add(
       value: ContactLink {
@@ -188,7 +188,7 @@ func addContactToIsland(world: mod PhysicsWorld, islandId: view Int, contactId: 
       }
     )
   }
-  if let target: mod Contact => world.contacts.modAt(index: contactId) {
+  if let target: mod Contact = world.contacts.modAt(index: contactId) {
     target.islandId = islandId
     target.islandIndex = islandIndex
   }
@@ -229,7 +229,7 @@ func unlinkContact(world: mod PhysicsWorld, contactId: view Int) {
   let islandId: Int = contact.islandId
   let removeIndex: Int = contact.islandIndex
   var movedContactId: Int = -1
-  if let island: mod Island => world.islands.modAt(index: islandId) {
+  if let island: mod Island = world.islands.modAt(index: islandId) {
     let lastIndex: Int = island.contacts.length - 1
     if removeIndex is not lastIndex {
       let moved: ContactLink = island.contacts.copyAtDefault(index: lastIndex)
@@ -241,11 +241,11 @@ func unlinkContact(world: mod PhysicsWorld, contactId: view Int) {
   }
   if movedContactId is not -1 {
     # Fix the island index of the contact swapped into the hole
-    if let moved: mod Contact => world.contacts.modAt(index: movedContactId) {
+    if let moved: mod Contact = world.contacts.modAt(index: movedContactId) {
       moved.islandIndex = removeIndex
     }
   }
-  if let target: mod Contact => world.contacts.modAt(index: contactId) {
+  if let target: mod Contact = world.contacts.modAt(index: contactId) {
     target.islandId = -1
     target.islandIndex = -1
   }
@@ -254,10 +254,10 @@ func unlinkContact(world: mod PhysicsWorld, contactId: view Int) {
 # b3CreateIslandForBody: an island of its own for a new body.
 func createIslandForBody(world: mod PhysicsWorld, setIndex: view Int, bodyId: view Int) {
   let islandId: Int = createIsland(world: world, setIndex: setIndex)
-  if let island: mod Island => world.islands.modAt(index: islandId) {
+  if let island: mod Island = world.islands.modAt(index: islandId) {
     island.bodies.add(value: bodyId)
   }
-  if let body: mod Body => world.bodies.modAt(index: bodyId) {
+  if let body: mod Body = world.bodies.modAt(index: bodyId) {
     body.islandId = islandId
     body.islandIndex = 0
   }
@@ -272,20 +272,20 @@ func removeBodyFromIsland(world: mod PhysicsWorld, bodyId: view Int) {
   }
   let islandId: Int = body.islandId
   var remaining: Int = 0
-  if let island: mod Island => world.islands.modAt(index: islandId) {
+  if let island: mod Island = world.islands.modAt(index: islandId) {
     let localIndex: Int = body.islandIndex
     let movedBodyId: Int = island.bodies.copyAtDefault(index: island.bodies.length - 1)
     island.bodies.set(index: localIndex, value: movedBodyId)
     island.bodies.removeLast()
     remaining = island.bodies.length
-    if let moved: mod Body => world.bodies.modAt(index: movedBodyId) {
+    if let moved: mod Body = world.bodies.modAt(index: movedBodyId) {
       moved.islandIndex = localIndex
     }
   }
   if remaining is 0 {
     destroyIsland(world: world, islandId: islandId)
   }
-  if let removed: mod Body => world.bodies.modAt(index: bodyId) {
+  if let removed: mod Body = world.bodies.modAt(index: bodyId) {
     removed.islandId = -1
     removed.islandIndex = -1
   }
@@ -302,7 +302,7 @@ func destroySolverSet(world: mod PhysicsWorld, setIndex: view Int) {
 # (b3RemoveNonTouchingContact's swap).
 func removeSetContact(world: mod PhysicsWorld, setIndex: view Int, localIndex: view Int) {
   var movedContactId: Int = -1
-  if let set: mod SolverSet => world.solverSets.modAt(index: setIndex) {
+  if let set: mod SolverSet = world.solverSets.modAt(index: setIndex) {
     let lastIndex: Int = set.contactIndices.length - 1
     if localIndex is not lastIndex {
       movedContactId = set.contactIndices.copyAtDefault(index: lastIndex)
@@ -311,7 +311,7 @@ func removeSetContact(world: mod PhysicsWorld, setIndex: view Int, localIndex: v
     set.contactIndices.removeLast()
   }
   if movedContactId is not -1 {
-    if let moved: mod Contact => world.contacts.modAt(index: movedContactId) {
+    if let moved: mod Contact = world.contacts.modAt(index: movedContactId) {
       moved.localIndex = localIndex
     }
   }
@@ -320,7 +320,7 @@ func removeSetContact(world: mod PhysicsWorld, setIndex: view Int, localIndex: v
 # Append contact `contactId` to set `setIndex`'s contact list.
 func addSetContact(world: mod PhysicsWorld, setIndex: view Int, contactId: view Int) ret Int {
   var localIndex: Int = 0
-  if let set: mod SolverSet => world.solverSets.modAt(index: setIndex) {
+  if let set: mod SolverSet = world.solverSets.modAt(index: setIndex) {
     localIndex = set.contactIndices.length
     set.contactIndices.add(value: contactId)
   }
@@ -336,17 +336,17 @@ func wakeSolverSet(world: mod PhysicsWorld, setIndex: view Int) {
   loop let sim: view BodySim in sleeping.bodySims {
     var flags: Int = 0
     var localIndex: Int = 0
-    if let awake: view SolverSet => world.solverSets.viewAt(index: awakeSet) {
+    if let awake: view SolverSet = world.solverSets.viewAt(index: awakeSet) {
       localIndex = awake.bodySims.length
     }
-    if let body: mod Body => world.bodies.modAt(index: sim.bodyId) {
+    if let body: mod Body = world.bodies.modAt(index: sim.bodyId) {
       body.setIndex = awakeSet
       body.localIndex = localIndex
       # Reset the sleep timer
       body.sleepTime = 0.0
       flags = body.flags
     }
-    if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
+    if let awake: mod SolverSet = world.solverSets.modAt(index: awakeSet) {
       awake.bodySims.add(value: sim)
       var state: BodyState = identityBodyState()
       state.flags = flags
@@ -364,7 +364,7 @@ func wakeSolverSet(world: mod PhysicsWorld, setIndex: view Int) {
       if contact.setIndex is not disabledSet {
         # An awake non-touching contact needs its body sim index fixed here
         if contact.setIndex is awakeSet {
-          if let target: mod Contact => world.contacts.modAt(index: contactId) {
+          if let target: mod Contact = world.contacts.modAt(index: contactId) {
             setEncodedBodySim(contact: target, edgeIndex: edgeIndex, encoded: encodedBodySimIndex)
           }
         }
@@ -372,7 +372,7 @@ func wakeSolverSet(world: mod PhysicsWorld, setIndex: view Int) {
       }
       let oldLocalIndex: Int = contact.localIndex
       let newLocalIndex: Int = addSetContact(world: world, setIndex: awakeSet, contactId: contactId)
-      if let target: mod Contact => world.contacts.modAt(index: contactId) {
+      if let target: mod Contact = world.contacts.modAt(index: contactId) {
         target.setIndex = awakeSet
         target.localIndex = newLocalIndex
         setEncodedBodySim(contact: target, edgeIndex: edgeIndex, encoded: encodedBodySimIndex)
@@ -385,7 +385,7 @@ func wakeSolverSet(world: mod PhysicsWorld, setIndex: view Int) {
   loop var i: Int = 0, i < sleeping.contactIndices.length, ++i {
     let contactId: Int = sleeping.contactIndices.copyAtDefault(index: i)
     addContactToGraph(world: world, contactId: contactId)
-    if let target: mod Contact => world.contacts.modAt(index: contactId) {
+    if let target: mod Contact = world.contacts.modAt(index: contactId) {
       target.setIndex = awakeSet
     }
   }
@@ -393,7 +393,7 @@ func wakeSolverSet(world: mod PhysicsWorld, setIndex: view Int) {
   # Transfer the joints from the sleeping set to the constraint graph
   loop let jointSim: view JointSim in sleeping.jointSims {
     addJointToGraph(world: world, jointId: jointSim.jointId, sim: jointSim)
-    if let joint: mod Joint => world.joints.modAt(index: jointSim.jointId) {
+    if let joint: mod Joint = world.joints.modAt(index: jointSim.jointId) {
       joint.setIndex = awakeSet
     }
   }
@@ -403,11 +403,11 @@ func wakeSolverSet(world: mod PhysicsWorld, setIndex: view Int) {
   loop var i: Int = 0, i < sleeping.islandSims.length, ++i {
     let islandId: Int = sleeping.islandSims.copyAtDefault(index: i)
     var localIndex: Int = 0
-    if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
+    if let awake: mod SolverSet = world.solverSets.modAt(index: awakeSet) {
       localIndex = awake.islandSims.length
       awake.islandSims.add(value: islandId)
     }
-    if let island: mod Island => world.islands.modAt(index: islandId) {
+    if let island: mod Island = world.islands.modAt(index: islandId) {
       island.setIndex = awakeSet
       island.localIndex = localIndex
     }
@@ -432,7 +432,7 @@ func wakeBody(world: mod PhysicsWorld, bodyId: view Int) ret Bool {
 func trySleepIsland(world: mod PhysicsWorld, islandId: view Int) {
   var removeCount: Int = 0
   var bodyCount: Int = 0
-  if let island: view Island => world.islands.viewAt(index: islandId) {
+  if let island: view Island = world.islands.viewAt(index: islandId) {
     removeCount = island.constraintRemoveCount
     bodyCount = island.bodies.length
   }
@@ -442,7 +442,7 @@ func trySleepIsland(world: mod PhysicsWorld, islandId: view Int) {
   # The island's lists, moved out (the loops below change the world) and
   # given back before the island moves
   var island: Island = emptyIsland()
-  if let source: mod Island => world.islands.modAt(index: islandId) {
+  if let source: mod Island = world.islands.modAt(index: islandId) {
     island.localIndex = source.localIndex
     island.bodies = own source.bodies
     island.contacts = own source.contacts
@@ -462,19 +462,19 @@ func trySleepIsland(world: mod PhysicsWorld, islandId: view Int) {
     # asleep before it ever moved)
     let moveIndex: Int = bodyAt(world: world, bodyId: bodyId).bodyMoveIndex
     if moveIndex is not -1 {
-      if let event: mod BodyMoveEvent => world.bodyMoveEvents.modAt(index: moveIndex) {
+      if let event: mod BodyMoveEvent = world.bodyMoveEvents.modAt(index: moveIndex) {
         event.fellAsleep = true
       }
-      if let movedBody: mod Body => world.bodies.modAt(index: bodyId) {
+      if let movedBody: mod Body = world.bodies.modAt(index: bodyId) {
         movedBody.bodyMoveIndex = -1
       }
     }
     let awakeBodyIndex: Int = bodyAt(world: world, bodyId: bodyId).localIndex
     var sleepBodyIndex: Int = 0
     var movedBodyId: Int = -1
-    if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
+    if let awake: mod SolverSet = world.solverSets.modAt(index: awakeSet) {
       let sim: BodySim = awake.bodySims.copyAtDefault(index: awakeBodyIndex)
-      if let sleepSet: mod SolverSet => world.solverSets.modAt(index: sleepSetId) {
+      if let sleepSet: mod SolverSet = world.solverSets.modAt(index: sleepSetId) {
         sleepBodyIndex = sleepSet.bodySims.length
         sleepSet.bodySims.add(value: sim)
       }
@@ -498,7 +498,7 @@ func trySleepIsland(world: mod PhysicsWorld, islandId: view Int) {
     if movedBodyId is not -1 {
       # Fix the local index of the moved body
       var movedIslandId: Int = -1
-      if let moved: mod Body => world.bodies.modAt(index: movedBodyId) {
+      if let moved: mod Body = world.bodies.modAt(index: movedBodyId) {
         moved.localIndex = awakeBodyIndex
         movedIslandId = moved.islandId
       }
@@ -506,7 +506,7 @@ func trySleepIsland(world: mod PhysicsWorld, islandId: view Int) {
         refreshBodyContactIndices(world: world, bodyId: movedBodyId)
       }
     }
-    if let body: mod Body => world.bodies.modAt(index: bodyId) {
+    if let body: mod Body = world.bodies.modAt(index: bodyId) {
       body.setIndex = sleepSetId
       body.localIndex = sleepBodyIndex
     }
@@ -523,7 +523,7 @@ func trySleepIsland(world: mod PhysicsWorld, islandId: view Int) {
         # Touching: moved separately below
         continue
       }
-      if let target: mod Contact => world.contacts.modAt(index: contactId) {
+      if let target: mod Contact = world.contacts.modAt(index: contactId) {
         setEncodedBodySim(contact: target, edgeIndex: edgeIndex, encoded: -1)
       }
       # The other body may still be awake; when it falls asleep it moves the
@@ -538,7 +538,7 @@ func trySleepIsland(world: mod PhysicsWorld, islandId: view Int) {
         setIndex: disabledSet
         contactId: contactId
       )
-      if let target: mod Contact => world.contacts.modAt(index: contactId) {
+      if let target: mod Contact = world.contacts.modAt(index: contactId) {
         target.setIndex = disabledSet
         target.localIndex = disabledIndex
       }
@@ -552,7 +552,7 @@ func trySleepIsland(world: mod PhysicsWorld, islandId: view Int) {
     let contact: ContactLinks = contactLinksAt(contacts: world.contacts, contactId: contactId)
     let colorIndex: Int = contact.colorIndex
     var movedId: Int = -1
-    if let color: mod GraphColor => world.constraintGraph.colors.modAt(index: colorIndex) {
+    if let color: mod GraphColor = world.constraintGraph.colors.modAt(index: colorIndex) {
       # Remove the bodies from the colour (a static body's bit has no effect)
       if colorIndex is not overflowIndex {
         clearBit(bitset: color.bodySet, bitIndex: contact.edgeA.bodyId)
@@ -564,7 +564,7 @@ func trySleepIsland(world: mod PhysicsWorld, islandId: view Int) {
       setIndex: sleepSetId
       contactId: contactId
     )
-    if let color: mod GraphColor => world.constraintGraph.colors.modAt(index: colorIndex) {
+    if let color: mod GraphColor = world.constraintGraph.colors.modAt(index: colorIndex) {
       movedId = removeSwapColorContact(
         color: color
         localIndex: contact.localIndex
@@ -572,11 +572,11 @@ func trySleepIsland(world: mod PhysicsWorld, islandId: view Int) {
       )
     }
     if movedId is not -1 {
-      if let moved: mod Contact => world.contacts.modAt(index: movedId) {
+      if let moved: mod Contact = world.contacts.modAt(index: movedId) {
         moved.localIndex = contact.localIndex
       }
     }
-    if let target: mod Contact => world.contacts.modAt(index: contactId) {
+    if let target: mod Contact = world.contacts.modAt(index: contactId) {
       target.setIndex = sleepSetId
       target.colorIndex = -1
       target.localIndex = sleepContactIndex
@@ -593,14 +593,14 @@ func trySleepIsland(world: mod PhysicsWorld, islandId: view Int) {
     let localIndex: Int = joint.localIndex
     var movedId: Int = -1
     var sleepJointIndex: Int = 0
-    if let color: mod GraphColor => world.constraintGraph.colors.modAt(index: colorIndex) {
+    if let color: mod GraphColor = world.constraintGraph.colors.modAt(index: colorIndex) {
       let awakeJointSim: JointSim = color.jointSims.copyAtDefault(index: localIndex)
       if colorIndex is not overflowIndex {
         # Might clear a bit for a static body, which has no effect
         clearBit(bitset: color.bodySet, bitIndex: joint.edgeA.bodyId)
         clearBit(bitset: color.bodySet, bitIndex: joint.edgeB.bodyId)
       }
-      if let sleepSet: mod SolverSet => world.solverSets.modAt(index: sleepSetId) {
+      if let sleepSet: mod SolverSet = world.solverSets.modAt(index: sleepSetId) {
         sleepJointIndex = sleepSet.jointSims.length
         sleepSet.jointSims.add(value: awakeJointSim)
       }
@@ -613,11 +613,11 @@ func trySleepIsland(world: mod PhysicsWorld, islandId: view Int) {
       color.jointSims.removeLast()
     }
     if movedId is not -1 {
-      if let moved: mod Joint => world.joints.modAt(index: movedId) {
+      if let moved: mod Joint = world.joints.modAt(index: movedId) {
         moved.localIndex = localIndex
       }
     }
-    if let target: mod Joint => world.joints.modAt(index: jointId) {
+    if let target: mod Joint = world.joints.modAt(index: jointId) {
       target.setIndex = sleepSetId
       target.colorIndex = -1
       target.localIndex = sleepJointIndex
@@ -626,16 +626,16 @@ func trySleepIsland(world: mod PhysicsWorld, islandId: view Int) {
 
   # Move the island
   let islandIndex: Int = island.localIndex
-  if let source: mod Island => world.islands.modAt(index: islandId) {
+  if let source: mod Island = world.islands.modAt(index: islandId) {
     source.bodies = own island.bodies
     source.contacts = own island.contacts
     source.joints = own island.joints
   }
-  if let sleepSet: mod SolverSet => world.solverSets.modAt(index: sleepSetId) {
+  if let sleepSet: mod SolverSet = world.solverSets.modAt(index: sleepSetId) {
     sleepSet.islandSims.add(value: islandId)
   }
   var movedIslandId: Int = -1
-  if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
+  if let awake: mod SolverSet = world.solverSets.modAt(index: awakeSet) {
     let lastIndex: Int = awake.islandSims.length - 1
     if islandIndex is not lastIndex {
       movedIslandId = awake.islandSims.copyAtDefault(index: lastIndex)
@@ -644,11 +644,11 @@ func trySleepIsland(world: mod PhysicsWorld, islandId: view Int) {
     awake.islandSims.removeLast()
   }
   if movedIslandId is not -1 {
-    if let moved: mod Island => world.islands.modAt(index: movedIslandId) {
+    if let moved: mod Island = world.islands.modAt(index: movedIslandId) {
       moved.localIndex = islandIndex
     }
   }
-  if let target: mod Island => world.islands.modAt(index: islandId) {
+  if let target: mod Island = world.islands.modAt(index: islandId) {
     target.setIndex = sleepSetId
     target.localIndex = 0
   }
@@ -774,7 +774,7 @@ func splitIsland(world: mod PhysicsWorld, baseId: view Int) {
 
   # Still fully connected: no split needed
   if componentCount is 1 {
-    if let island: mod Island => world.islands.modAt(index: baseId) {
+    if let island: mod Island = world.islands.modAt(index: baseId) {
       island.constraintRemoveCount = 0
     }
     ret
@@ -804,11 +804,11 @@ func splitIsland(world: mod PhysicsWorld, baseId: view Int) {
     let root: Int = findIslandRoot(parents: parents, node: i)
     let newIslandId: Int = islandIds.copyAtDefault(index: rootMap.copyAtDefault(index: root))
     var bodyIndex: Int = 0
-    if let island: mod Island => world.islands.modAt(index: newIslandId) {
+    if let island: mod Island = world.islands.modAt(index: newIslandId) {
       bodyIndex = island.bodies.length
       island.bodies.add(value: bodyId)
     }
-    if let body: mod Body => world.bodies.modAt(index: bodyId) {
+    if let body: mod Body = world.bodies.modAt(index: bodyId) {
       body.islandId = newIslandId
       body.islandIndex = bodyIndex
     }
@@ -822,11 +822,11 @@ func splitIsland(world: mod PhysicsWorld, baseId: view Int) {
       targetIslandId = bodyAt(world: world, bodyId: link.bodyIdB).islandId
     }
     var contactIndex: Int = 0
-    if let island: mod Island => world.islands.modAt(index: targetIslandId) {
+    if let island: mod Island = world.islands.modAt(index: targetIslandId) {
       contactIndex = island.contacts.length
       island.contacts.add(value: link)
     }
-    if let contact: mod Contact => world.contacts.modAt(index: link.contactId) {
+    if let contact: mod Contact = world.contacts.modAt(index: link.contactId) {
       contact.islandId = targetIslandId
       contact.islandIndex = contactIndex
     }
@@ -839,11 +839,11 @@ func splitIsland(world: mod PhysicsWorld, baseId: view Int) {
       targetIslandId = bodyAt(world: world, bodyId: link.bodyIdB).islandId
     }
     var jointIndex: Int = 0
-    if let island: mod Island => world.islands.modAt(index: targetIslandId) {
+    if let island: mod Island = world.islands.modAt(index: targetIslandId) {
       jointIndex = island.joints.length
       island.joints.add(value: link)
     }
-    if let joint: mod Joint => world.joints.modAt(index: link.jointId) {
+    if let joint: mod Joint = world.joints.modAt(index: link.jointId) {
       joint.islandId = targetIslandId
       joint.islandIndex = jointIndex
     }

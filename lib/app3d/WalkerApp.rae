@@ -717,7 +717,7 @@ func runWalkerApp(settings: view WalkerAppSettings) ret Int {
       world: app.world
     )} parts + hero + crowd + terrain)"
   )
-  if let wadeSplash: mod WadeSplash => app.wadeSplash {
+  if let wadeSplash: mod WadeSplash = app.wadeSplash {
     prepareSplashPreview(
       wadeSplash: wadeSplash
       cameraSystem: app.cameraSystem
@@ -735,7 +735,7 @@ func runWalkerApp(settings: view WalkerAppSettings) ret Int {
   var exitCode: Int = 0
   if splashTest {
     exitCode = 1
-    if let wadeSplash: mod WadeSplash => app.wadeSplash {
+    if let wadeSplash: mod WadeSplash = app.wadeSplash {
       exitCode = runSplashPoseTest(
         characterSystem: app.characterSystem
         world: app.world
@@ -766,7 +766,7 @@ func runWalkerApp(settings: view WalkerAppSettings) ret Int {
         heartbeatSec: 1.0
       ))
     } else {
-      if let resources: mod GpuResources => app.gpuResources {
+      if let resources: mod GpuResources = app.gpuResources {
         renderWalkerApp(
           uiSystems: app.inputSystem.uiSystems
           cameraSystem: app.cameraSystem
@@ -790,9 +790,9 @@ func runWalkerApp(settings: view WalkerAppSettings) ret Int {
     # has no tables of its own) and recycle the indices of destroyed entities.
     uiFrameEnd(world: app.inputSystem.world, uiSystems: app.inputSystem.uiSystems)
   }
-  if let resources: mod GpuResources => app.gpuResources {
+  if let resources: mod GpuResources = app.gpuResources {
     grassShutdown(grass: app.grassCompute, resources: resources)
-    if let waterSystem: mod WaterSystem => app.waterSystem {
+    if let waterSystem: mod WaterSystem = app.waterSystem {
       waterShutdown(waterSystem: waterSystem, resources: resources)
     }
     spriteShutdown(cache: app.terrainSystem.sprites, resources: resources)

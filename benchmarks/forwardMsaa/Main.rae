@@ -592,8 +592,8 @@ func main() {
   loop round < rounds {
     variant = 0
     loop variant < variantCount {
-      if let targets: view VariantTargets => allTargets.viewAt(index: variant) {
-        if let pipelines: view VariantPipelines => allPipelines.viewAt(index: variant) {
+      if let targets: view VariantTargets = allTargets.viewAt(index: variant) {
+        if let pipelines: view VariantPipelines = allPipelines.viewAt(index: variant) {
           var frame: Int = 0
           loop frame < warmUpFrames + framesPerRound {
             measureFrame(
@@ -624,7 +624,7 @@ func main() {
   }
   variant = 0
   loop variant < variantCount {
-    if let targets: view VariantTargets => allTargets.viewAt(index: variant) {
+    if let targets: view VariantTargets = allTargets.viewAt(index: variant) {
       let gpu: Int = medianOf(samples: gpuSamples, start: variant * perVariant, count: perVariant)
       let firstPass: Int = medianOf(
         samples: firstSamples
@@ -651,7 +651,7 @@ func main() {
       }
       releaseVariantTargets(targets: targets)
     }
-    if let pipelines: view VariantPipelines => allPipelines.viewAt(index: variant) {
+    if let pipelines: view VariantPipelines = allPipelines.viewAt(index: variant) {
       releaseVariantPipelines(pipelines: pipelines)
     }
     variant = variant + 1

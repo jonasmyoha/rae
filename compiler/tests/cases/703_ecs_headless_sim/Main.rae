@@ -92,8 +92,8 @@ func destroyGameEntity(world: mod GameWorld, entityId: view EntityId) {
 func movementSystem(world: mod GameWorld) {
   let hits: List(Query2Match) = query2(tableA: world.positions, tableB: world.velocities)
   loop let row: view Query2Match in hits {
-    let vel: view Velocity => queryViewAt(table: world.velocities, denseIndex: row.indexB)
-    let pos: mod Position => queryModAt(table: world.positions, denseIndex: row.indexA)
+    let vel: view Velocity = queryViewAt(table: world.velocities, denseIndex: row.indexB)
+    let pos: mod Position = queryModAt(table: world.positions, denseIndex: row.indexA)
     pos.x = pos.x + vel.dx
   }
 }
@@ -106,7 +106,7 @@ func firstEnemy(world: view GameWorld) ret EntityId {
     loop var i: Int = 0, i < tagged.length, ++i {
       let e: EntityId = rae_ext_rae_buf_get(buf: tagged.data, index: i)
       if componentHas(this: world.healths, entityId: e) {
-        let h: view Health => componentView(this: world.healths, entityId: e)
+        let h: view Health = componentView(this: world.healths, entityId: e)
         if h.hp > 0 {
           if best.index <= 0 or e.index < best.index {
             best = e
@@ -132,7 +132,7 @@ func applyDamageSystem(world: mod GameWorld) {
   loop var i: Int = 0, i < eventCount(this: world.damage), ++i {
     let ev: DamageEvent = eventAt(this: world.damage, i: i)
     if componentHas(this: world.healths, entityId: ev.target) {
-      let h: mod Health => componentMod(this: world.healths, entityId: ev.target)
+      let h: mod Health = componentMod(this: world.healths, entityId: ev.target)
       h.hp = h.hp - ev.amount
     }
   }
@@ -147,7 +147,7 @@ func cullSystem(world: mod GameWorld) {
     loop var i: Int = 0, i < tagged.length, ++i {
       let e: EntityId = rae_ext_rae_buf_get(buf: tagged.data, index: i)
       if componentHas(this: world.healths, entityId: e) {
-        let h: view Health => componentView(this: world.healths, entityId: e)
+        let h: view Health = componentView(this: world.healths, entityId: e)
         if h.hp <= 0 {
           dead.add(value: e)
         }
@@ -167,7 +167,7 @@ func statsSystem(world: mod GameWorld) {
   var total: Int = 0
   let matches: List(Query2Match) = tagged(dataTable: world.healths, tagTable: world.enemies)
   loop let hit: view Query2Match in matches {
-    let h: view Health => queryViewAt(table: world.healths, denseIndex: hit.indexA)
+    let h: view Health = queryViewAt(table: world.healths, denseIndex: hit.indexA)
     total = total + h.hp
   }
   world.totalEnemyHp = total
@@ -175,7 +175,7 @@ func statsSystem(world: mod GameWorld) {
 
 func heroX(world: view GameWorld, hero: view EntityId) ret Int {
   if componentHas(this: world.positions, entityId: hero) {
-    let p: view Position => componentView(this: world.positions, entityId: hero)
+    let p: view Position = componentView(this: world.positions, entityId: hero)
     ret p.x
   }
   ret -1

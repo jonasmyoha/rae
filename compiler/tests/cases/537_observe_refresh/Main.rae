@@ -64,7 +64,7 @@ func createRegistry() ret Registry {
 # markChanged bumps the system revision.
 func setTrackId(reg: mod Registry, entityId: view EntityId, newId: view Int) {
   if componentHas(this: reg.playback.nowPlaying, entityId: entityId) {
-    let t: mod Track => componentMod(this: reg.playback.nowPlaying, entityId: entityId)
+    let t: mod Track = componentMod(this: reg.playback.nowPlaying, entityId: entityId)
     t.id = newId
     bumpRevision(this: t)
   }
@@ -96,7 +96,7 @@ func revisionOf(reg: view Registry, obs: view Observe) ret Int {
     }
     # component-instance kind
     if componentHas(this: reg.playback.nowPlaying, entityId: obs.entityId) {
-      let t: view Track => componentView(this: reg.playback.nowPlaying, entityId: obs.entityId)
+      let t: view Track = componentView(this: reg.playback.nowPlaying, entityId: obs.entityId)
       ret t.revision
     }
     ret 0
@@ -136,11 +136,11 @@ func refreshObservers(reg: view Registry, observers: mod ComponentTable(Observe)
     let e: EntityId = componentEntityAt(this: observers, i: i)
     var cur: Int = 0
     var seen: Int = 0
-    let obs: view Observe => componentView(this: observers, entityId: e)
+    let obs: view Observe = componentView(this: observers, entityId: e)
     cur = revisionOf(reg: reg, obs: obs)
     seen = obs.observedRevision
     if cur is not seen {
-      let obm: mod Observe => componentMod(this: observers, entityId: e)
+      let obm: mod Observe = componentMod(this: observers, entityId: e)
       obm.observedRevision = cur
       obm.dirty = true
       changed = changed + 1
@@ -151,7 +151,7 @@ func refreshObservers(reg: view Registry, observers: mod ComponentTable(Observe)
 }
 
 func observerDirty(observers: view ComponentTable(Observe), entityId: view EntityId) ret Bool {
-  let o: view Observe => componentView(this: observers, entityId: entityId)
+  let o: view Observe = componentView(this: observers, entityId: entityId)
   ret o.dirty
 }
 

@@ -234,7 +234,7 @@ func updateWalkerApp(app: mod WalkerApp) {
     bushes: bushSpots(propKinds: app.world.propKinds, transforms: app.world.transforms)
     frameTime: deltaTime
   )
-  let after: view ThirdPersonController => controllerOf(
+  let after: view ThirdPersonController = controllerOf(
     world: app.world
     entityId: controlledEntityId
   )
@@ -369,7 +369,7 @@ func updateWalkerApp(app: mod WalkerApp) {
   # dies out, or the wait-loop would freeze them mid-air when you stop wading (#84,
   # the "feed animation sources into the loop" lesson in AGENTS.md).
   var splashesAlive: Bool = false
-  if let wadeSplash: view WadeSplash => app.wadeSplash {
+  if let wadeSplash: view WadeSplash = app.wadeSplash {
     splashesAlive = wadeSplashAlive(wadeSplash: wadeSplash)
   }
   # Bodies still moving (a toppling stack, a character in the air) are an
@@ -426,7 +426,7 @@ func walkerSwitchControl(
 func rememberCharacterModels(world: mod WalkerWorld) {
   loop var i: Int = 0, i < componentCount(this: world.characterModels), ++i {
     let entityId: EntityId = componentEntityAt(this: world.characterModels, i: i)
-    let models: mod CharacterModel => componentMod(this: world.characterModels, entityId: entityId)
+    let models: mod CharacterModel = componentMod(this: world.characterModels, entityId: entityId)
     models.prevModel = models.model
   }
 }
@@ -443,10 +443,10 @@ func updateWalkerCharacters(
       baseModel: characterSystem.basePartModel
       controller: controllerOf(world: world, entityId: entityId)
     )
-    let models: mod CharacterModel => componentMod(this: world.characterModels, entityId: entityId)
+    let models: mod CharacterModel = componentMod(this: world.characterModels, entityId: entityId)
     models.model = model
     if componentHas(this: world.animStates, entityId: entityId) {
-      let anim: mod AnimationState => componentMod(this: world.animStates, entityId: entityId)
+      let anim: mod AnimationState = componentMod(this: world.animStates, entityId: entityId)
       anim.playbackScale = 1.0
       if characterGrounded(physicsSystem: physicsSystem, entityId: entityId) is false {
         anim.playbackScale = airborneClipScale

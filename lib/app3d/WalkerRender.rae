@@ -119,7 +119,7 @@ func drawPhysicsCubes(
     if componentHas(this: world.transforms, entityId: cubeId) is false {
       continue
     }
-    let cube: view PhysicsCube => componentView(this: physicsSystem.cubes, entityId: cubeId)
+    let cube: view PhysicsCube = componentView(this: physicsSystem.cubes, entityId: cubeId)
     let model: Mat4 = physicsCubeModel(
       transform: componentView(this: world.transforms, entityId: cubeId)
       cube: cube
@@ -337,7 +337,7 @@ func drawWalkerScene(
     baseRow: 0
   )
   loop var p: Int = 0, p < walkerWorldPartCount(world: world), ++p {
-    let part: view PartRoughness => walkerWorldPartAt(world: world, i: p)
+    let part: view PartRoughness = walkerWorldPartAt(world: world, i: p)
     let handle: MeshHandle = meshHandle(id: part.meshId, generation: 1)
     let mat: Material3d = {
       baseColor: Vec3.create(x: 1.0, y: 1.0, z: 1.0)

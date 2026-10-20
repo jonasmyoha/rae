@@ -53,7 +53,7 @@ func beginWaterPerf(performance: mod WaterPerf, resources: mod GpuResources) ret
     performance.timing = makeWaterTiming(resources: resources)
     performance.timingMade = true
   }
-  if let timing: mod GpuTiming => performance.timing {
+  if let timing: mod GpuTiming = performance.timing {
     if not timingAvailable(timing: timing) {
       if performance.samples is 0 {
         log("[water perf] GPU timestamps unavailable; configured cadence unchanged")
@@ -76,7 +76,7 @@ func resolveWaterPerf(
   recording: mod Recording
   resources: view GpuResources
 ) {
-  if let timing: view GpuTiming => performance.timing {
+  if let timing: view GpuTiming = performance.timing {
     recordTimingResolve(timing: timing, recording: recording, resources: resources)
   }
 }
@@ -92,7 +92,7 @@ func collectWaterPerf(performance: mod WaterPerf, resources: mod GpuResources) {
   if not performance.enabled {
     ret
   }
-  if let timing: mod GpuTiming => performance.timing {
+  if let timing: mod GpuTiming = performance.timing {
     if timingSampleInFlight(timing: timing) {
       if collectTiming(timing: timing, resources: resources, out: performance.passTimes) {
         log(
@@ -116,7 +116,7 @@ func collectWaterPerf(performance: mod WaterPerf, resources: mod GpuResources) {
 }
 
 func releaseWaterPerf(performance: mod WaterPerf, resources: mod GpuResources) {
-  if let timing: mod GpuTiming => performance.timing {
+  if let timing: mod GpuTiming = performance.timing {
     shutdownTiming(timing: timing, resources: resources)
   }
   performance.timing = none

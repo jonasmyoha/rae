@@ -320,7 +320,7 @@ func acceptOne(worker: mod Worker) {
   var slot: Int = worker.connections.length
   if worker.freeSlots.length > 0 {
     slot = worker.freeSlots.pop()
-    if let connection: mod Connection => worker.connections.modAt(index: slot) {
+    if let connection: mod Connection = worker.connections.modAt(index: slot) {
       connection.socketId = accepted.socketId
       connection.watchingWritable = false
       connection.closing = false
@@ -358,7 +358,7 @@ func acceptOne(worker: mod Worker) {
 # Write the connection's output at the end of this poll
 func markDirty(worker: mod Worker, slot: view Int) {
   var added: Bool = false
-  if let connection: mod Connection => worker.connections.modAt(index: slot) {
+  if let connection: mod Connection = worker.connections.modAt(index: slot) {
     if not connection.dirty {
       connection.dirty = true
       added = true
@@ -371,7 +371,7 @@ func markDirty(worker: mod Worker, slot: view Int) {
 
 # Readable: read, then answer everything that arrived
 func serviceInput(worker: mod Worker, slot: view Int) {
-  if let connection: mod Connection => worker.connections.modAt(index: slot) {
+  if let connection: mod Connection = worker.connections.modAt(index: slot) {
     if not connection.webSocket {
       parseHttp(connection: connection, date: worker.date.text, nextPlayerId: worker.nextPlayerId)
     }
@@ -387,7 +387,7 @@ func serviceInput(worker: mod Worker, slot: view Int) {
 func encodeSnapshot(worker: mod Worker, tickIndex: view Int, latenessNs: view Int) {
   var players: Int = 0
   loop var i: Int = 0, i < worker.connections.length, ++i {
-    if let connection: view Connection => worker.connections.viewAt(index: i) {
+    if let connection: view Connection = worker.connections.viewAt(index: i) {
       if isPlayer(connection: connection) {
         players = players + 1
       }
@@ -409,7 +409,7 @@ func encodeSnapshot(worker: mod Worker, tickIndex: view Int, latenessNs: view In
   appendUInt32(output: worker.scratch, value: worker.missedTicks)
   appendUInt32(output: worker.scratch, value: 0)
   loop var i: Int = 0, i < worker.connections.length, ++i {
-    if let connection: view Connection => worker.connections.viewAt(index: i) {
+    if let connection: view Connection = worker.connections.viewAt(index: i) {
       if isPlayer(connection: connection) {
         appendPlayer(snapshot: worker.scratch, connection: connection)
       }
@@ -429,7 +429,7 @@ func sendSnapshot(worker: mod Worker) {
   let snapshotLength: Int = byteBufferLength(buffer: worker.scratch)
   loop var slot: Int = 0, slot < worker.connections.length, ++slot {
     var sent: Bool = false
-    if let connection: mod Connection => worker.connections.modAt(index: slot) {
+    if let connection: mod Connection = worker.connections.modAt(index: slot) {
       if isPlayer(connection: connection) and byteBufferLength(buffer: connection.output) <= snapshotLength {
         appendBytes(
           buffer: connection.output
@@ -469,7 +469,7 @@ func tick(worker: mod Worker) {
 # output is waiting
 func settle(worker: mod Worker, slot: view Int) {
   var closeIt: Bool = false
-  if let connection: mod Connection => worker.connections.modAt(index: slot) {
+  if let connection: mod Connection = worker.connections.modAt(index: slot) {
     let waiting: Bool = byteBufferLength(buffer: connection.output) > 0
     if connection.closing and not waiting {
       let status: NetStatus = pollerForget(
@@ -514,7 +514,7 @@ func settle(worker: mod Worker, slot: view Int) {
 func flushDirty(worker: mod Worker) {
   loop var i: Int = 0, i < worker.dirtySlots.length, ++i {
     let slot: Int = worker.dirtySlots.copyAtFallback(index: i, fallback: 0)
-    if let connection: mod Connection => worker.connections.modAt(index: slot) {
+    if let connection: mod Connection = worker.connections.modAt(index: slot) {
       connection.dirty = false
       flush(connection: connection)
     }
@@ -536,7 +536,7 @@ func handleReady(worker: mod Worker, readiness: view Readiness) {
     ret
   }
   if readiness.readable or readiness.closed or readiness.failed {
-    if let connection: mod Connection => worker.connections.modAt(index: slot) {
+    if let connection: mod Connection = worker.connections.modAt(index: slot) {
       readInput(connection: connection)
     }
     serviceInput(worker: worker, slot: slot)

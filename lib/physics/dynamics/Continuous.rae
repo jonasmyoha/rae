@@ -61,7 +61,7 @@ func shapeTimeOfImpact(
 ) ret ToiOutput {
   let lengthUnitsPerMeter: Float = world.lengthUnitsPerMeter
   if shapeA.shapeType is ShapeType.compound {
-    if let compound: view CompoundData => world.compounds.viewAt(index: shapeA.compoundIndex) {
+    if let compound: view CompoundData = world.compounds.viewAt(index: shapeA.compoundIndex) {
       ret compoundTimeOfImpact(
         shapeA: shapeA
         compound: compound
@@ -215,7 +215,7 @@ func queryContinuous(
   proxyPoints: mod ProxyPoints
 ) ret Float {
   var result: Float = fraction
-  if let tree: view DynamicTree => world.broadPhase.trees.viewAt(index: treeIndex) {
+  if let tree: view DynamicTree = world.broadPhase.trees.viewAt(index: treeIndex) {
     # The caller's stack, lent to the query and taken back below
     var query: TreeQuery = beginTreeQueryWith(
       tree: tree
@@ -247,7 +247,7 @@ func queryContinuous(
 
 # Mark a shape's proxy moved with its new fat box (b3BroadPhase_MarkProxyMoved).
 func markShapeProxyMoved(world: mod PhysicsWorld, proxyKey: view Int, box: view Aabb) {
-  if let tree: mod DynamicTree => world.broadPhase.trees.modAt(index: proxyType(proxyKey: proxyKey)) {
+  if let tree: mod DynamicTree = world.broadPhase.trees.modAt(index: proxyType(proxyKey: proxyKey)) {
     markProxyMoved(tree: tree, proxyId: proxyId(proxyKey: proxyKey), box: box)
   }
 }
@@ -263,7 +263,7 @@ func deferProxyMoved(
   proxyKey: view Int
   box: view Aabb
 ) {
-  if let taskContext: mod TaskContext => world.taskContexts.modAt(index: chunk) {
+  if let taskContext: mod TaskContext = world.taskContexts.modAt(index: chunk) {
     taskContext.movedProxies.add(value: MovedProxy { proxyKey: proxyKey, box: box })
   }
 }
@@ -272,16 +272,16 @@ func deferProxyMoved(
 func applyMovedProxies(world: mod PhysicsWorld) {
   loop var chunk: Int = 0, chunk < world.taskContexts.length, ++chunk {
     var moved: List(MovedProxy) = List.create(MovedProxy, cap: 0)
-    if let taskContext: mod TaskContext => world.taskContexts.modAt(index: chunk) {
+    if let taskContext: mod TaskContext = world.taskContexts.modAt(index: chunk) {
       moved = own taskContext.movedProxies
     }
     loop var i: Int = 0, i < moved.length, ++i {
-      if let proxy: view MovedProxy => moved.viewAt(index: i) {
+      if let proxy: view MovedProxy = moved.viewAt(index: i) {
         markShapeProxyMoved(world: world, proxyKey: proxy.proxyKey, box: proxy.box)
       }
     }
     moved.clear()
-    if let taskContext: mod TaskContext => world.taskContexts.modAt(index: chunk) {
+    if let taskContext: mod TaskContext = world.taskContexts.modAt(index: chunk) {
       taskContext.movedProxies = own moved
     }
   }
@@ -355,7 +355,7 @@ func solveContinuous(
       fallbackPoints: List.create(Vec3, cap: 0)
     }
   }
-  if let taskContext: mod TaskContext => world.taskContexts.modAt(index: chunk) {
+  if let taskContext: mod TaskContext = world.taskContexts.modAt(index: chunk) {
     sensorHits.hits = own taskContext.continuousHits
     sensorHits.fractions = own taskContext.continuousFractions
     queryStack = own taskContext.continuousQueryStack
@@ -381,7 +381,7 @@ func solveContinuous(
       origin: base
     )
     # Stored to avoid computing it again when there is no impact
-    if let stored: mod PhysicsShape => world.shapes.modAt(index: shapeId) {
+    if let stored: mod PhysicsShape = world.shapes.modAt(index: shapeId) {
       stored.aabb = box2
     }
     fastShape.aabb = box2
@@ -453,8 +453,8 @@ func solveContinuous(
     fastSim.flags = fastSim.flags bitor hadTimeOfImpactFlag
 
     # The lost time loses gravity (other forces and torques are ignored)
-    if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
-      if let state: mod BodyState => awake.bodyStates.modAt(index: simIndex) {
+    if let awake: mod SolverSet = world.solverSets.modAt(index: awakeSet) {
+      if let state: mod BodyState = awake.bodyStates.modAt(index: simIndex) {
         let v: Vec3 = state.linearVelocity
         let timeLoss: Float = (1.0 - fraction) * dt
         var dv: Vec3 = scale(scale: -timeLoss * fastSim.gravityScale, vector: world.gravity)
@@ -471,7 +471,7 @@ func solveContinuous(
       }
     }
     # The move event was written before the impact
-    if let event: mod BodyMoveEvent => world.bodyMoveEvents.modAt(index: simIndex) {
+    if let event: mod BodyMoveEvent = world.bodyMoveEvents.modAt(index: simIndex) {
       event.transform = transform
     }
 
@@ -485,7 +485,7 @@ func solveContinuous(
         transform: transform
         extra: speculative
       )
-      if let stored: mod PhysicsShape => world.shapes.modAt(index: nextId) {
+      if let stored: mod PhysicsShape = world.shapes.modAt(index: nextId) {
         stored.aabb = box
       }
       enlargeBullet = refreshFatBox(
@@ -521,15 +521,15 @@ func solveContinuous(
   # The sensor hits before the solid hit, for serial processing
   loop var i: Int = 0, i < sensorHits.hits.length, ++i {
     if sensorHits.fractions.copyAtDefault(index: i) < fraction {
-      if let taskContext: mod TaskContext => world.taskContexts.modAt(index: chunk) {
+      if let taskContext: mod TaskContext = world.taskContexts.modAt(index: chunk) {
         taskContext.sensorHits.add(value: sensorHits.hits.copyAtDefault(index: i))
       }
     }
   }
-  if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
+  if let awake: mod SolverSet = world.solverSets.modAt(index: awakeSet) {
     awake.bodySims.set(index: simIndex, value: fastSim)
   }
-  if let taskContext: mod TaskContext => world.taskContexts.modAt(index: chunk) {
+  if let taskContext: mod TaskContext = world.taskContexts.modAt(index: chunk) {
     taskContext.continuousHits = own sensorHits.hits
     taskContext.continuousFractions = own sensorHits.fractions
     taskContext.continuousQueryStack = own queryStack

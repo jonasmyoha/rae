@@ -142,7 +142,7 @@ func fftCacheChannel(
 func fftCacheDisplacement(cache: view FftSurfaceCache, x: copy Float, y: copy Float) ret Vec3 {
   var total: Vec3 = { x: 0.0, y: 0.0, z: 0.0 }
   loop var i: Int = 0, i < cache.activeCount, ++i {
-    if let cascade: view FftCascadeCache => cache.cascades.viewAt(index: i) {
+    if let cascade: view FftCascadeCache = cache.cascades.viewAt(index: i) {
       total.x = total.x + fftCacheChannel(
         cascade: cascade
         x: x
@@ -196,7 +196,7 @@ func fftSurfaceCacheUsable(
     ret false
   }
   loop var i: Int = 0, i < cache.activeCount, ++i {
-    if let cascade: view FftCascadeCache => cache.cascades.viewAt(index: i) {
+    if let cascade: view FftCascadeCache = cache.cascades.viewAt(index: i) {
       if cascade.generation is not cache.generation or cascade.values.length is not fftCacheFloats or cascade.tileSize <= 0.0 or cascade.sampleTime > now or now - cascade.sampleTime > maxAge {
         ret false
       }
@@ -213,7 +213,7 @@ func fftSurfaceCacheUsable(
 func fftSurfaceCacheSampleTime(cache: view FftSurfaceCache) ret Float {
   var newest: Float = 0.0 - 1.0
   loop var i: Int = 0, i < cache.activeCount, ++i {
-    if let cascade: view FftCascadeCache => cache.cascades.viewAt(index: i) {
+    if let cascade: view FftCascadeCache = cache.cascades.viewAt(index: i) {
       if cascade.sampleTime > newest {
         newest = cascade.sampleTime
       }
@@ -230,7 +230,7 @@ func fftSurfaceCacheSampleTime(cache: view FftSurfaceCache) ret Float {
 func fftCacheSumJacobian(cache: view FftSurfaceCache, x: copy Float, y: copy Float) ret Float {
   var fold: Float = 0.0
   loop var i: Int = 0, i < cache.activeCount, ++i {
-    if let cascade: view FftCascadeCache => cache.cascades.viewAt(index: i) {
+    if let cascade: view FftCascadeCache = cache.cascades.viewAt(index: i) {
       fold = fold + 1.0 - fftCacheChannel(
         cascade: cascade
         x: x
@@ -290,7 +290,7 @@ func sampleFftSurface(
   var jacobians: Vec3 = { x: 1.0, y: 1.0, z: 1.0 }
   var tiles: Vec3 = { x: 0.0, y: 0.0, z: 0.0 }
   loop var i: Int = 0, i < cache.activeCount, ++i {
-    if let cascade: view FftCascadeCache => cache.cascades.viewAt(index: i) {
+    if let cascade: view FftCascadeCache = cache.cascades.viewAt(index: i) {
       setFftSampleComponent(vector: times, cascade: i, value: cascade.sampleTime)
       setFftSampleComponent(vector: tiles, cascade: i, value: cascade.tileSize)
       setFftSampleComponent(

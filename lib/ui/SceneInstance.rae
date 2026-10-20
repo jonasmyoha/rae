@@ -74,8 +74,8 @@ func createSceneRegistry() ret SceneRegistry {
 }
 
 func registerScene(reg: mod SceneRegistry, key: own String, scene: own Scene) {
-  let idsList: mod List(String) => reg.ids
-  let scenesList: mod List(Scene) => reg.scenes
+  let idsList: mod List(String) = reg.ids
+  let scenesList: mod List(Scene) = reg.scenes
   idsList.add(value: key)
   scenesList.add(value: scene)
 }
@@ -390,10 +390,10 @@ func mountSceneInstanceImpl(
       # Pass 1: allocate entities. The scene's root maps to `mountEntityId`;
       # every other node gets a fresh entity.
       var entitiesByNodeIndex: List(EntityId) = List.create(EntityId, cap: nodeCount)
-      let nodeIdsMap: mod StringMap(Int) => world.nodeIds
+      let nodeIdsMap: mod StringMap(Int) = world.nodeIds
       var i: Int = 0
       loop i < nodeCount {
-        let node: view SceneNode => nodeAt(this: scene, idx: i)
+        let node: view SceneNode = nodeAt(this: scene, idx: i)
         # Explicit struct construction (not `let entity: EntityId =
         # mountEntity`) — the Live VM treats the latter as a view-ref
         # bind and then refuses the reassignment on the next branch.
@@ -420,10 +420,10 @@ func mountSceneInstanceImpl(
       # Pass 2: apply components. For the scene's root node we skip
       # placement components — those belong to the mount entity. Other
       # nodes get all their components applied via `applyComponentByName`.
-      let docView: view JsonDoc => scene.doc
+      let docView: view JsonDoc = scene.doc
       var j: Int = 0
       loop j < nodeCount {
-        let node: view SceneNode => nodeAt(this: scene, idx: j)
+        let node: view SceneNode = nodeAt(this: scene, idx: j)
         let entityId: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: j)
         let isRoot: Bool = j is rootIdx
         let source: SceneSource = {
@@ -483,7 +483,7 @@ func mountSceneInstanceImpl(
       # Pass 3: build hierarchy (Children + Parent).
       var p: Int = 0
       loop p < nodeCount {
-        let node: view SceneNode => nodeAt(this: scene, idx: p)
+        let node: view SceneNode = nodeAt(this: scene, idx: p)
         let parentEntityId: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: p)
         let kn: Int = node.childrenIds.length
         var q: Int = 0
@@ -592,7 +592,7 @@ func applyOverride(world: mod UiWorld, entityId: view EntityId, override: view S
     let textField: String = "text"
     if override.fieldName is textField {
       if componentHas(this: world.texts, entityId: entityId) {
-        let cur: mod Text => componentMod(this: world.texts, entityId: entityId)
+        let cur: mod Text = componentMod(this: world.texts, entityId: entityId)
         cur.text = override.valueString
       }
       ret
@@ -600,7 +600,7 @@ func applyOverride(world: mod UiWorld, entityId: view EntityId, override: view S
     let styleField: String = "styleId"
     if override.fieldName is styleField {
       if componentHas(this: world.texts, entityId: entityId) {
-        let cur: mod Text => componentMod(this: world.texts, entityId: entityId)
+        let cur: mod Text = componentMod(this: world.texts, entityId: entityId)
         cur.styleId = override.valueString
       }
     }
@@ -611,7 +611,7 @@ func applyOverride(world: mod UiWorld, entityId: view EntityId, override: view S
     let textureField: String = "textureKey"
     if override.fieldName is textureField {
       if componentHas(this: world.sprites, entityId: entityId) {
-        let cur: mod Sprite => componentMod(this: world.sprites, entityId: entityId)
+        let cur: mod Sprite = componentMod(this: world.sprites, entityId: entityId)
         cur.textureKey = override.valueString
       }
       ret
@@ -619,7 +619,7 @@ func applyOverride(world: mod UiWorld, entityId: view EntityId, override: view S
     let tintField: String = "tint"
     if override.fieldName is tintField {
       if componentHas(this: world.sprites, entityId: entityId) {
-        let cur: mod Sprite => componentMod(this: world.sprites, entityId: entityId)
+        let cur: mod Sprite = componentMod(this: world.sprites, entityId: entityId)
         cur.tint = parseRgbaString(text: override.valueString)
         # Explicit literal override wins over any scene slot (#235).
         cur.tintSlot = ""
@@ -632,7 +632,7 @@ func applyOverride(world: mod UiWorld, entityId: view EntityId, override: view S
     let actionField: String = "actionId"
     if override.fieldName is actionField {
       if componentHas(this: world.onClicks, entityId: entityId) {
-        let cur: mod OnClick => componentMod(this: world.onClicks, entityId: entityId)
+        let cur: mod OnClick = componentMod(this: world.onClicks, entityId: entityId)
         cur.actionId = override.valueString
       }
     }
@@ -657,7 +657,7 @@ func applyOverride(world: mod UiWorld, entityId: view EntityId, override: view S
       let empty: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: 0.0, y: 0.0 } }
       componentSet(this: world.rects, entityId: entityId, data: empty)
     }
-    let rect: mod Rect => componentMod(this: world.rects, entityId: entityId)
+    let rect: mod Rect = componentMod(this: world.rects, entityId: entityId)
     let value: Float = override.valueString.toFloat()
     let wField: String = "w"
     let hField: String = "h"
@@ -685,7 +685,7 @@ func applyOverride(world: mod UiWorld, entityId: view EntityId, override: view S
       let empty: WidgetId = { id: "", kind: "" }
       componentSet(this: world.widgetIds, entityId: entityId, data: empty)
     }
-    let widgetId: mod WidgetId => componentMod(this: world.widgetIds, entityId: entityId)
+    let widgetId: mod WidgetId = componentMod(this: world.widgetIds, entityId: entityId)
     let idField: String = "id"
     if override.fieldName is idField {
       widgetId.id = "{override.valueString}"
@@ -711,7 +711,7 @@ func applyOverride(world: mod UiWorld, entityId: view EntityId, override: view S
       let initial: WidgetState = { enabled: true, selected: false, loading: false, error: false }
       componentSet(this: world.widgetStates, entityId: entityId, data: initial)
     }
-    let widgetState: mod WidgetState => componentMod(this: world.widgetStates, entityId: entityId)
+    let widgetState: mod WidgetState = componentMod(this: world.widgetStates, entityId: entityId)
     let trueStr: String = "true"
     let v: Bool = override.valueString is trueStr
     if override.fieldName is "enabled" {
@@ -735,7 +735,7 @@ func applyOverride(world: mod UiWorld, entityId: view EntityId, override: view S
     if componentHas(this: world.shapes, entityId: entityId) is false {
       ret
     }
-    let cur: mod Shape => componentMod(this: world.shapes, entityId: entityId)
+    let cur: mod Shape = componentMod(this: world.shapes, entityId: entityId)
     if override.fieldName is "kind" {
       if let kind: ShapeKind = enumFromName(
         ShapeKind
@@ -757,7 +757,7 @@ func applyOverride(world: mod UiWorld, entityId: view EntityId, override: view S
     if componentHas(this: world.gradientFills, entityId: entityId) is false {
       ret
     }
-    let current: mod GradientFill => componentMod(this: world.gradientFills, entityId: entityId)
+    let current: mod GradientFill = componentMod(this: world.gradientFills, entityId: entityId)
     if override.fieldName is "fromSlot" {
       current.fromSlot = "{override.valueString}"
     }
@@ -798,7 +798,7 @@ func applyOverride(world: mod UiWorld, entityId: view EntityId, override: view S
       }
       componentSet(this: world.stateStyles, entityId: entityId, data: fresh)
     }
-    let cur: mod StateStyle => componentMod(this: world.stateStyles, entityId: entityId)
+    let cur: mod StateStyle = componentMod(this: world.stateStyles, entityId: entityId)
     let alpha: Float = override.valueString.toFloat()
     if override.fieldName is "disabledAlpha" {
       cur.disabledAlpha = alpha
@@ -819,7 +819,7 @@ func applyOverride(world: mod UiWorld, entityId: view EntityId, override: view S
       let empty: Padding = { insets: { l: 0.0, t: 0.0, r: 0.0, b: 0.0 } }
       componentSet(this: world.paddings, entityId: entityId, data: empty)
     }
-    let padding: mod Padding => componentMod(this: world.paddings, entityId: entityId)
+    let padding: mod Padding = componentMod(this: world.paddings, entityId: entityId)
     let value: Float = override.valueString.toFloat()
     if override.fieldName is "l" {
       padding.insets.l = value

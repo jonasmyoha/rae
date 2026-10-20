@@ -318,7 +318,7 @@ func encodeText(world: view UiWorld, entityId: view EntityId, text: view Text) r
   if componentHas(this: world.styleOverrides, entityId: entityId) is false {
     ret base
   }
-  let override: view StyleOverride => componentView(this: world.styleOverrides, entityId: entityId)
+  let override: view StyleOverride = componentView(this: world.styleOverrides, entityId: entityId)
   var builder: JsonBuilder = Json.jbObject()
   if override.hasSize {
     Json.jbField(builder: builder, key: "size", valueJson: jsonNumber(value: override.size))
@@ -454,91 +454,91 @@ func authoredComponentJson(
 ) ret String {
   if name is "Rect" {
     if componentHas(this: world.rects, entityId: entityId) {
-      let value: view Rect => componentView(this: world.rects, entityId: entityId)
+      let value: view Rect = componentView(this: world.rects, entityId: entityId)
       ret encodeRect(rect: value)
     }
     ret ""
   }
   if name is "Layout" {
     if componentHas(this: world.layouts, entityId: entityId) {
-      let value: view Layout => componentView(this: world.layouts, entityId: entityId)
+      let value: view Layout = componentView(this: world.layouts, entityId: entityId)
       ret encodeLayout(layout: value)
     }
     ret ""
   }
   if name is "Padding" {
     if componentHas(this: world.paddings, entityId: entityId) {
-      let value: view Padding => componentView(this: world.paddings, entityId: entityId)
+      let value: view Padding = componentView(this: world.paddings, entityId: entityId)
       ret encodeInsets(insets: value.insets)
     }
     ret ""
   }
   if name is "Margin" {
     if componentHas(this: world.margins, entityId: entityId) {
-      let value: view Margin => componentView(this: world.margins, entityId: entityId)
+      let value: view Margin = componentView(this: world.margins, entityId: entityId)
       ret encodeInsets(insets: value.insets)
     }
     ret ""
   }
   if name is "Offset" {
     if componentHas(this: world.offsets, entityId: entityId) {
-      let value: view Offset => componentView(this: world.offsets, entityId: entityId)
+      let value: view Offset = componentView(this: world.offsets, entityId: entityId)
       ret encodeVec2(v: value.delta)
     }
     ret ""
   }
   if name is "Align" {
     if componentHas(this: world.aligns, entityId: entityId) {
-      let value: view Align => componentView(this: world.aligns, entityId: entityId)
+      let value: view Align = componentView(this: world.aligns, entityId: entityId)
       ret encodeAlign(align: value)
     }
     ret ""
   }
   if name is "TextShadow" {
     if componentHas(this: world.textShadows, entityId: entityId) {
-      let value: view TextShadow => componentView(this: world.textShadows, entityId: entityId)
+      let value: view TextShadow = componentView(this: world.textShadows, entityId: entityId)
       ret encodeTextShadow(shadow: value)
     }
     ret ""
   }
   if name is "OpticalAlign" {
     if componentHas(this: world.opticalAligns, entityId: entityId) {
-      let value: view OpticalAlign => componentView(this: world.opticalAligns, entityId: entityId)
+      let value: view OpticalAlign = componentView(this: world.opticalAligns, entityId: entityId)
       ret encodeOpticalAlign(optical: value)
     }
     ret ""
   }
   if name is "Sprite" {
     if componentHas(this: world.sprites, entityId: entityId) {
-      let value: view Sprite => componentView(this: world.sprites, entityId: entityId)
+      let value: view Sprite = componentView(this: world.sprites, entityId: entityId)
       ret encodeSprite(sprite: value)
     }
     ret ""
   }
   if name is "Shape" {
     if componentHas(this: world.shapes, entityId: entityId) {
-      let value: view Shape => componentView(this: world.shapes, entityId: entityId)
+      let value: view Shape = componentView(this: world.shapes, entityId: entityId)
       ret encodeShape(shape: value)
     }
     ret ""
   }
   if name is "GradientFill" {
     if componentHas(this: world.gradientFills, entityId: entityId) {
-      let value: view GradientFill => componentView(this: world.gradientFills, entityId: entityId)
+      let value: view GradientFill = componentView(this: world.gradientFills, entityId: entityId)
       ret encodeGradientFill(gradient: value)
     }
     ret ""
   }
   if name is "Text" {
     if componentHas(this: world.texts, entityId: entityId) {
-      let value: view Text => componentView(this: world.texts, entityId: entityId)
+      let value: view Text = componentView(this: world.texts, entityId: entityId)
       ret encodeText(world: world, entityId: entityId, text: value)
     }
     ret ""
   }
   if name is "DataDependency" {
     if componentHas(this: world.dataDependencies, entityId: entityId) {
-      let value: view DataDependency => componentView(
+      let value: view DataDependency = componentView(
         this: world.dataDependencies
         entityId: entityId
       )
@@ -548,21 +548,21 @@ func authoredComponentJson(
   }
   if name is "RefreshRegion" {
     if componentHas(this: world.refreshRegions, entityId: entityId) {
-      let value: view RefreshRegion => componentView(this: world.refreshRegions, entityId: entityId)
+      let value: view RefreshRegion = componentView(this: world.refreshRegions, entityId: entityId)
       ret encodeRefreshRegion(region: value)
     }
     ret ""
   }
   if name is "SceneInstance" {
     if componentHas(this: world.sceneInstances, entityId: entityId) {
-      let value: view SceneInstance => componentView(this: world.sceneInstances, entityId: entityId)
+      let value: view SceneInstance = componentView(this: world.sceneInstances, entityId: entityId)
       ret encodeSceneInstance(instance: value)
     }
     ret ""
   }
   if name is "ListView" {
     if componentHas(this: world.listViews, entityId: entityId) {
-      let value: view ListView => componentView(this: world.listViews, entityId: entityId)
+      let value: view ListView = componentView(this: world.listViews, entityId: entityId)
       ret encodeListView(listView: value)
     }
     ret ""
@@ -585,7 +585,7 @@ func tableAuthoredJson(T: type, table: view ComponentTable(T), entityId: view En
   if componentHas(this: table, entityId: entityId) is false {
     ret ""
   }
-  let value: view T => componentView(this: table, entityId: entityId)
+  let value: view T = componentView(this: table, entityId: entityId)
   ret encodeComponent(value: value, skip: "")
 }
 
@@ -593,7 +593,7 @@ func tableMachineJson(T: type, table: view ComponentTable(T), entityId: view Ent
   if componentHas(this: table, entityId: entityId) is false {
     ret ""
   }
-  let value: view T => componentView(this: table, entityId: entityId)
+  let value: view T = componentView(this: table, entityId: entityId)
   ret value.toJson()
 }
 
@@ -623,8 +623,8 @@ func componentEqualsIn(
     if componentHas(this: that, entityId: otherEntityId) is false {
       ret false
     }
-    let mine: view T => componentView(this: this, entityId: entityId)
-    let theirs: view T => componentView(this: that, entityId: otherEntityId)
+    let mine: view T = componentView(this: this, entityId: entityId)
+    let theirs: view T = componentView(this: that, entityId: otherEntityId)
     ret equals(a: mine, b: theirs)
   }
   ret false
@@ -671,10 +671,7 @@ func machineComponentJson(
   }
   # Text's override rides along.
   if name is "Text" and componentHas(this: world.styleOverrides, entityId: entityId) {
-    let override: view StyleOverride => componentView(
-      this: world.styleOverrides
-      entityId: entityId
-    )
+    let override: view StyleOverride = componentView(this: world.styleOverrides, entityId: entityId)
     text = "{text}|{override.toJson()}"
   }
   ret text

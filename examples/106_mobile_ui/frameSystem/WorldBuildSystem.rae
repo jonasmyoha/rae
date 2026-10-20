@@ -17,7 +17,7 @@ func refreshActiveAlbumCache(app: mod App, session: mod AppSession) {
   # Cache the active-album bounds + active-track duration so the hot loop
   # never deep-copies a 15-25 track Album. Recompute only when stem or track
   # index actually changes — the user has navigated, so one copy is fine.
-  let appState: mod AppState => app.appState
+  let appState: mod AppState = app.appState
   let stemChanged: Bool = appState.currentAlbumStem is session.cachedAlbumStem is false
   let trackChanged: Bool = appState.currentTrackIndex is not session.cachedTrackIndex
   if stemChanged or trackChanged {
@@ -36,7 +36,7 @@ func refreshActiveAlbumCache(app: mod App, session: mod AppSession) {
 }
 
 func buildSessionWorld(app: mod App, session: mod AppSession) ret UiWorld {
-  let appState: mod AppState => app.appState
+  let appState: mod AppState = app.appState
   var world: UiWorld = buildAppWorld(
     uiSystems: app.uiSystems
     dockSystem: app.musicSystems.dockSystem

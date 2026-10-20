@@ -269,8 +269,8 @@ func canMove(
   dy: view Int
   dr: view Int
 ) ret Int {
-  let cp: view Piece => game.currentPiece
-  let pos: view Position => cp.pos
+  let cp: view Piece = game.currentPiece
+  let pos: view Position = cp.pos
   let newX: Int = pos.x + dx
   let newY: Int = pos.y + dy
   var newRot: Int = (cp.rotation + dr) % 4
@@ -299,9 +299,9 @@ func canMove(
 }
 
 func lockPiece(game: mod Game) {
-  let cp: mod Piece => game.currentPiece
-  let pos: view Position => cp.pos
-  let grid: mod List(Int) => game.grid
+  let cp: mod Piece = game.currentPiece
+  let pos: view Position = cp.pos
+  let grid: mod List(Int) = game.grid
   let kindId: Int = getKindId(kind: cp.kind)
   var py: Int = 0
   loop py < 4 {
@@ -326,7 +326,7 @@ func lockPiece(game: mod Game) {
 }
 
 func checkLines(game: mod Game) {
-  let grid: mod List(Int) => game.grid
+  let grid: mod List(Int) = game.grid
   var linesCleared: Int = 0
   var y: Int = game.height - 1
   loop y >= 0 {
@@ -406,11 +406,11 @@ func randomKind(random: mod Random) ret TetrominoKind {
 }
 
 func spawnPiece(game: mod Game) {
-  let cp: mod Piece => game.currentPiece
+  let cp: mod Piece = game.currentPiece
   cp.kind = game.nextPieceKind
   game.nextPieceKind = randomKind(random: game.random)
 
-  let pos: mod Position => cp.pos
+  let pos: mod Position = cp.pos
   pos.x = game.width / 2 - 2
   pos.y = -1
   cp.rotation = 0
@@ -451,7 +451,7 @@ func initGame(game: mod Game) {
 
   # Initialize grid with 0s
   var i: Int = 0
-  let grid: mod List(Int) => game.grid
+  let grid: mod List(Int) = game.grid
   grid.clear()
   loop i < game.width * game.height {
     grid.add(value: 0)
@@ -567,7 +567,7 @@ func stageTestFrame(game: mod Game) {
     row = row + 1
   }
 
-  let currentPiece: mod Piece => game.currentPiece
+  let currentPiece: mod Piece = game.currentPiece
   currentPiece.kind = TetrominoKind.j
   currentPiece.rotation = 0
   currentPiece.pos.x = 4
@@ -626,8 +626,8 @@ func drawGame(canvas: mod Gpu2dCanvas, game: view Game) {
     y = y + 1
   }
   # Draw current piece
-  let cp: view Piece => game.currentPiece
-  let pos: view Position => cp.pos
+  let cp: view Piece = game.currentPiece
+  let pos: view Position = cp.pos
   let kindId: Int = getKindId(kind: cp.kind)
   var py: Int = 0
   loop py < 4 {
@@ -691,8 +691,8 @@ func handleInput(game: mod Game) {
   if game.state is not GameState.playing {
     ret
   }
-  let cp: mod Piece => game.currentPiece
-  let pos: mod Position => cp.pos
+  let cp: mod Piece = game.currentPiece
+  let pos: mod Position = cp.pos
   var moved: Int = 0
 
   # DAS (Delayed Auto Shift)

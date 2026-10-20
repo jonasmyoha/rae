@@ -105,7 +105,7 @@ func loadSceneIntoPage(
           }
           if alreadySeen is false {
             reachable.set(index: cur, value: true)
-            let n: view SceneNode => nodeAt(this: scene, idx: cur)
+            let n: view SceneNode = nodeAt(this: scene, idx: cur)
             let cn: Int = n.childrenIds.length
             var ci: Int = 0
             loop ci < cn {
@@ -125,7 +125,7 @@ func loadSceneIntoPage(
       # can detect + skip them while keeping the index-by-nodeIndex map
       # intact for sceneNodeIndex lookups.
       var entitiesByNodeIndex: List(EntityId) = List.create(EntityId, cap: nodeCount)
-      let nodeIdsMap: mod StringMap(Int) => world.nodeIds
+      let nodeIdsMap: mod StringMap(Int) = world.nodeIds
       var i: Int = 0
       loop i < nodeCount {
         var isReachable: Bool = false
@@ -133,7 +133,7 @@ func loadSceneIntoPage(
           isReachable = reach
         }
         if isReachable {
-          let node: view SceneNode => nodeAt(this: scene, idx: i)
+          let node: view SceneNode = nodeAt(this: scene, idx: i)
           let entityId: EntityId = createEntity(world: world)
           appendEntityListSL(lst: entitiesByNodeIndex, value: entityId)
           if pageId.length() is 0 {
@@ -150,7 +150,7 @@ func loadSceneIntoPage(
       }
 
       # ---------- pass 2: apply components ----------
-      let docView: view JsonDoc => scene.doc
+      let docView: view JsonDoc = scene.doc
       var j: Int = 0
       loop j < nodeCount {
         var jReach: Bool = false
@@ -160,7 +160,7 @@ func loadSceneIntoPage(
         if jReach is false {
           j = j + 1
         } else {
-          let node: view SceneNode => nodeAt(this: scene, idx: j)
+          let node: view SceneNode = nodeAt(this: scene, idx: j)
           let entityId: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: j)
 
           # Always tag the entity with NodeId + Name (label = nodeId by default)
@@ -232,7 +232,7 @@ func loadSceneIntoPage(
         if pReach is false {
           p = p + 1
         } else {
-          let node: view SceneNode => nodeAt(this: scene, idx: p)
+          let node: view SceneNode = nodeAt(this: scene, idx: p)
           let parentEntityId: EntityId = rae_ext_rae_buf_get(
             buf: entitiesByNodeIndex.data
             index: p
@@ -345,7 +345,7 @@ func resolveSceneInstances(
           reg: registry
           key: componentView(this: world.sceneInstances, entityId: entityId).sceneId
         ) {
-          let scene: view Scene => sceneRegistryGet(reg: registry, idx: idx)
+          let scene: view Scene = sceneRegistryGet(reg: registry, idx: idx)
           let overrides: List(SceneOverride) = sceneInstanceOverrides(
             inst: componentView(this: world.sceneInstances, entityId: entityId)
           )
@@ -421,14 +421,14 @@ func dumpScene(world: view UiWorld, uiSystems: view UiSystems, scene: view Scene
   let n: Int = scene.nodes.length
   var i: Int = 0
   loop i < n {
-    let node: view SceneNode => nodeAt(this: scene, idx: i)
+    let node: view SceneNode = nodeAt(this: scene, idx: i)
     # Resolve via the world's nodeIds map (more authoritative than our
     # local list — covers later runtime additions too).
     if let entityRaw: Int = world.nodeIds.get(k: node.nodeId) {
       let entityId: EntityId = nodeEntityId(world: world, index: entityRaw)
       var parentStr: String = "(root)"
       if componentHas(this: uiSystems.hierarchy.parents, entityId: entityId) {
-        let pl: view Parent => componentView(this: uiSystems.hierarchy.parents, entityId: entityId)
+        let pl: view Parent = componentView(this: uiSystems.hierarchy.parents, entityId: entityId)
         parentStr = "parent=ent{pl.parent.index}"
       }
       var comps: String = componentNamesFor(world: world, entityId: entityId)

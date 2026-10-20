@@ -10,11 +10,11 @@ func main() {
   var grid: Array(Cell, cap: 3) = Array(Cell, cap: 3)
   grid.set(index: 1, value: { hp: 5, tag: 0 })
 
-  if let refm: mod Cell => grid.modAt(index: 1) {
+  if let refm: mod Cell = grid.modAt(index: 1) {
     refm.hp = 99
     refm.tag = 7
   }
-  if let refv: view Cell => grid.viewAt(index: 1) {
+  if let refv: view Cell = grid.viewAt(index: 1) {
     log("after mod-bind hp={refv.hp} tag={refv.tag}")  # 99, 7 if aliasing
   }
 
@@ -27,7 +27,7 @@ func main() {
     total = total + cell.hp
   }
   log("total hp={total}")  # 100 + 1 + 1
-  if let missing: view Cell => grid.viewAt(index: 3) {
+  if let missing: view Cell = grid.viewAt(index: 3) {
     log("wrong {missing.hp}")
   } else {
     log("viewAt(3) is none")

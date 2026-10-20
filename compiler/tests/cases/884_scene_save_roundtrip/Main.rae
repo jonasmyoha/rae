@@ -136,7 +136,7 @@ func compareNode(
     }
   }
   if componentHas(this: a.childrens, entityId: entityId) {
-    let children: view Children => componentView(this: a.childrens, entityId: entityId)
+    let children: view Children = componentView(this: a.childrens, entityId: entityId)
     loop let child: view EntityId in children.ids {
       if componentHas(this: a.nodeIdComponents, entityId: child) {
         compareNode(
@@ -266,7 +266,7 @@ func main() {
     root: "{getEnv(name: "TMPDIR")}/"
   )
   let rootEntityId: EntityId = pageRootOf(world: edited, scene: scene)
-  let rect: mod Rect => componentMod(this: edited.rects, entityId: rootEntityId)
+  let rect: mod Rect = componentMod(this: edited.rects, entityId: rootEntityId)
   rect.size.x = 640.0
   # Components ADDED at runtime, with enum fields: the generic encoder names
   # the members (enumName), the Layout arm spells `kind` as `type`.

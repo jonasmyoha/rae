@@ -58,8 +58,8 @@ func appendAccept(
   entityId: view EntityId
   key: view ByteRange
 ) {
-  let writeBuffer: mod WriteBuffer => componentMod(this: writeBuffers, entityId: entityId)
-  let readBuffer: view ReadBuffer => componentView(this: readBuffers, entityId: entityId)
+  let writeBuffer: mod WriteBuffer = componentMod(this: writeBuffers, entityId: entityId)
+  let readBuffer: view ReadBuffer = componentView(this: readBuffers, entityId: entityId)
   webSocketAppendAcceptKey(output: writeBuffer.buffer, buffer: readBuffer.buffer, key: key)
 }
 
@@ -80,7 +80,7 @@ func appendUpgradeRequired(
   entityId: view EntityId
   date: view String
 ) {
-  let writeBuffer: mod WriteBuffer => componentMod(this: writeBuffers, entityId: entityId)
+  let writeBuffer: mod WriteBuffer = componentMod(this: writeBuffers, entityId: entityId)
   webSocketAppendUpgradeRequired(output: writeBuffer.buffer, date: date)
 }
 
@@ -113,9 +113,9 @@ func decodeConnection(
   closings: mod ComponentTable(Closing)
   entityId: view EntityId
 ) {
-  let session: mod WebSocketSession => componentMod(this: sessions, entityId: entityId)
-  let readBuffer: mod ReadBuffer => componentMod(this: readBuffers, entityId: entityId)
-  let writeBuffer: mod WriteBuffer => componentMod(this: writeBuffers, entityId: entityId)
+  let session: mod WebSocketSession = componentMod(this: sessions, entityId: entityId)
+  let readBuffer: mod ReadBuffer = componentMod(this: readBuffers, entityId: entityId)
+  let writeBuffer: mod WriteBuffer = componentMod(this: writeBuffers, entityId: entityId)
   var message: WebSocketMessage = createWebSocketMessage()
   loop not session.closed {
     let result: WebSocketDecodeResult = webSocketDecodeNext(
@@ -168,8 +168,8 @@ func consumeDecoded(
   readBuffers: mod ComponentTable(ReadBuffer)
   entityId: view EntityId
 ) {
-  let session: mod WebSocketSession => componentMod(this: sessions, entityId: entityId)
-  let readBuffer: mod ReadBuffer => componentMod(this: readBuffers, entityId: entityId)
+  let session: mod WebSocketSession = componentMod(this: sessions, entityId: entityId)
+  let readBuffer: mod ReadBuffer = componentMod(this: readBuffers, entityId: entityId)
   webSocketDecodeConsumed(state: session.decode, buffer: readBuffer.buffer)
 }
 
@@ -178,7 +178,7 @@ func consumeDecoded(
 # The payload of a message as a String (this allocates; for a handler that
 # parses it, like the benchmark's JSON)
 func messageText(server: view HttpServer, event: view WebSocketMessageEvent) ret String {
-  let readBuffer: view ReadBuffer => componentView(
+  let readBuffer: view ReadBuffer = componentView(
     this: server.readBuffers
     entityId: event.connectionEntityId
   )
@@ -189,7 +189,7 @@ func sessionIsOpen(server: view HttpServer, entityId: view EntityId) ret Bool {
   if not componentHas(this: server.webSocketSessions, entityId: entityId) {
     ret false
   }
-  let session: view WebSocketSession => componentView(
+  let session: view WebSocketSession = componentView(
     this: server.webSocketSessions
     entityId: entityId
   )
@@ -201,7 +201,7 @@ func sendText(server: mod HttpServer, entityId: view EntityId, text: view String
   if not sessionIsOpen(server: server, entityId: entityId) {
     ret
   }
-  let writeBuffer: mod WriteBuffer => componentMod(this: server.writeBuffers, entityId: entityId)
+  let writeBuffer: mod WriteBuffer = componentMod(this: server.writeBuffers, entityId: entityId)
   webSocketAppendText(output: writeBuffer.buffer, text: text)
   addTag(table: server.sendings, entityId: entityId)
 }
@@ -227,8 +227,8 @@ func appendFrameFrom(
   to: view EntityId
   event: view WebSocketMessageEvent
 ) {
-  let writeBuffer: mod WriteBuffer => componentMod(this: writeBuffers, entityId: to)
-  let readBuffer: view ReadBuffer => componentView(
+  let writeBuffer: mod WriteBuffer = componentMod(this: writeBuffers, entityId: to)
+  let readBuffer: view ReadBuffer = componentView(
     this: readBuffers
     entityId: event.connectionEntityId
   )
@@ -266,7 +266,7 @@ func appendScratch(
   scratch: view ByteBuffer
   entityId: view EntityId
 ) {
-  let writeBuffer: mod WriteBuffer => componentMod(this: writeBuffers, entityId: entityId)
+  let writeBuffer: mod WriteBuffer = componentMod(this: writeBuffers, entityId: entityId)
   appendBytes(
     buffer: writeBuffer.buffer
     bytes: scratch.bytes
@@ -295,7 +295,7 @@ func encodeFromInto(
   readBuffers: view ComponentTable(ReadBuffer)
   event: view WebSocketMessageEvent
 ) {
-  let readBuffer: view ReadBuffer => componentView(
+  let readBuffer: view ReadBuffer = componentView(
     this: readBuffers
     entityId: event.connectionEntityId
   )
@@ -312,9 +312,9 @@ func closeSession(server: mod HttpServer, entityId: view EntityId, code: view In
   if not sessionIsOpen(server: server, entityId: entityId) {
     ret
   }
-  let writeBuffer: mod WriteBuffer => componentMod(this: server.writeBuffers, entityId: entityId)
+  let writeBuffer: mod WriteBuffer = componentMod(this: server.writeBuffers, entityId: entityId)
   webSocketAppendClose(output: writeBuffer.buffer, code: code, reason: "")
-  let session: mod WebSocketSession => componentMod(
+  let session: mod WebSocketSession = componentMod(
     this: server.webSocketSessions
     entityId: entityId
   )

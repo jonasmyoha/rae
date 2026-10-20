@@ -124,7 +124,7 @@ func executeBlock(
     }
     case SolverStageType.integrateVelocities {
       let gravity: Vec3 = world.gravity
-      if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
+      if let awake: mod SolverSet = world.solverSets.modAt(index: awakeSet) {
         integrateVelocities(
           sims: awake.bodySims
           states: awake.bodyStates
@@ -138,7 +138,7 @@ func executeBlock(
       if joint {
         warmStartJointsBlock(world: world, block: block)
       }
-      if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
+      if let awake: mod SolverSet = world.solverSets.modAt(index: awakeSet) {
         if wide {
           warmStartContactsWide(
             states: awake.bodyStates
@@ -168,7 +168,7 @@ func executeBlock(
         )
       }
       let contactSpeed: Float = world.contactSpeed
-      if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
+      if let awake: mod SolverSet = world.solverSets.modAt(index: awakeSet) {
         if wide {
           pushContactsWide(
             states: awake.bodyStates
@@ -193,7 +193,7 @@ func executeBlock(
     }
     case SolverStageType.integratePositions {
       let maxAngularSpeed: Float = maxRotation() * context.inverseDt
-      if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
+      if let awake: mod SolverSet = world.solverSets.modAt(index: awakeSet) {
         integratePositions(
           states: awake.bodyStates
           block: block
@@ -213,7 +213,7 @@ func executeBlock(
           slot: slot
         )
       }
-      if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
+      if let awake: mod SolverSet = world.solverSets.modAt(index: awakeSet) {
         if wide {
           solveContactsWide(
             states: awake.bodyStates
@@ -237,7 +237,7 @@ func executeBlock(
     case SolverStageType.restitution {
       let threshold: Float = world.restitutionThreshold
       let propagate: Bool = world.enableRestitutionPropagation
-      if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
+      if let awake: mod SolverSet = world.solverSets.modAt(index: awakeSet) {
         if wide {
           applyRestitutionWide(
             states: awake.bodyStates
@@ -286,7 +286,7 @@ func executeBlock(
 }
 
 func setSlotRestitution(world: mod PhysicsWorld, slot: view Int) {
-  if let taskContext: mod TaskContext => world.taskContexts.modAt(index: slot) {
+  if let taskContext: mod TaskContext = world.taskContexts.modAt(index: slot) {
     taskContext.anyRestitution = true
   }
 }

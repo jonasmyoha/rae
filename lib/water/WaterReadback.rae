@@ -88,7 +88,7 @@ func ensureWaterReadback(waterSystem: mod WaterSystem, resources: mod GpuResourc
         waterSystem.cache.binds.set(index: i, value: bind)
       }
     }
-    if let cascade: mod FftCascadeCache => waterSystem.surfaceCache.cascades.modAt(index: i) {
+    if let cascade: mod FftCascadeCache = waterSystem.surfaceCache.cascades.modAt(index: i) {
       loop cascade.values.length < fftCacheFloats {
         cascade.values.add(value: 0.0)
       }
@@ -110,7 +110,7 @@ func updateWaterReadback(waterSystem: mod WaterSystem, resources: mod GpuResourc
   }
   let body: WaterBody = primaryBody(waterSystem: waterSystem)
   loop var i: Int = 0, i < waterSystem.fftAllocatedCount, ++i {
-    if let cascade: mod FftCascadeCache => waterSystem.surfaceCache.cascades.modAt(index: i) {
+    if let cascade: mod FftCascadeCache = waterSystem.surfaceCache.cascades.modAt(index: i) {
       if waterSystem.cache.requestActive.copyAtFallback(index: i, fallback: 0) is 1 {
         let request: ReadbackId = waterSystem.cache.requests.copyAtFallback(
           index: i

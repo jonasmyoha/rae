@@ -60,7 +60,7 @@ func createBroadPhaseProxy(
 ) ret Int {
   let mark: Bool = bodyType is not 0 or forcePairCreation
   var id: Int = -1
-  if let tree: mod DynamicTree => broadPhase.trees.modAt(index: bodyType) {
+  if let tree: mod DynamicTree = broadPhase.trees.modAt(index: bodyType) {
     id = createTreeProxyMarked(
       tree: tree
       box: box
@@ -74,14 +74,14 @@ func createBroadPhaseProxy(
 
 # b3BroadPhase_DestroyProxy
 func destroyBroadPhaseProxy(broadPhase: mod BroadPhase, proxyKey: view Int) {
-  if let tree: mod DynamicTree => broadPhase.trees.modAt(index: proxyType(proxyKey: proxyKey)) {
+  if let tree: mod DynamicTree = broadPhase.trees.modAt(index: proxyType(proxyKey: proxyKey)) {
     destroyTreeProxy(tree: tree, proxyId: proxyId(proxyKey: proxyKey))
   }
 }
 
 # b3BroadPhase_MoveProxy: reinsert with a new box, marked moved.
 func moveBroadPhaseProxy(broadPhase: mod BroadPhase, proxyKey: view Int, box: view Aabb) {
-  if let tree: mod DynamicTree => broadPhase.trees.modAt(index: proxyType(proxyKey: proxyKey)) {
+  if let tree: mod DynamicTree = broadPhase.trees.modAt(index: proxyType(proxyKey: proxyKey)) {
     moveTreeProxyMarked(
       tree: tree
       proxyId: proxyId(proxyKey: proxyKey)
@@ -99,10 +99,10 @@ func broadPhaseTestOverlap(
 ) ret Bool {
   var boxA: Aabb = emptyBounds()
   var boxB: Aabb = emptyBounds()
-  if let treeA: view DynamicTree => broadPhase.trees.viewAt(index: proxyType(proxyKey: proxyKeyA)) {
+  if let treeA: view DynamicTree = broadPhase.trees.viewAt(index: proxyType(proxyKey: proxyKeyA)) {
     boxA = treeProxyAabb(tree: treeA, proxyId: proxyId(proxyKey: proxyKeyA))
   }
-  if let treeB: view DynamicTree => broadPhase.trees.viewAt(index: proxyType(proxyKey: proxyKeyB)) {
+  if let treeB: view DynamicTree = broadPhase.trees.viewAt(index: proxyType(proxyKey: proxyKeyB)) {
     boxB = treeProxyAabb(tree: treeB, proxyId: proxyId(proxyKey: proxyKeyB))
   }
   ret overlaps(first: boxA, second: boxB)
@@ -110,7 +110,7 @@ func broadPhaseTestOverlap(
 
 # b3BroadPhase_GetShapeIndex
 func broadPhaseShapeIndex(broadPhase: view BroadPhase, proxyKey: view Int) ret Int {
-  if let tree: view DynamicTree => broadPhase.trees.viewAt(index: proxyType(proxyKey: proxyKey)) {
+  if let tree: view DynamicTree = broadPhase.trees.viewAt(index: proxyType(proxyKey: proxyKey)) {
     ret treeUserData(tree: tree, proxyId: proxyId(proxyKey: proxyKey)) as Int
   }
   ret -1

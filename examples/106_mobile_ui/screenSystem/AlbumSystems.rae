@@ -44,7 +44,7 @@ func writeAlbumText(world: mod UiWorld, entityId: view EntityId, text: view Stri
   if componentView(this: world.texts, entityId: entityId).text is text {
     ret
   }
-  let current: mod Text => componentMod(this: world.texts, entityId: entityId)
+  let current: mod Text = componentMod(this: world.texts, entityId: entityId)
   current.text = "{text}"
 }
 
@@ -65,7 +65,7 @@ func albumHeaderSystem(
   var i: Int = 0
   loop i < nb {
     let entityId: EntityId = componentEntityAt(this: world.textBindings, i: i)
-    let binding: view TextBinding => queryViewAt(table: world.textBindings, denseIndex: i)
+    let binding: view TextBinding = queryViewAt(table: world.textBindings, denseIndex: i)
     if binding.key is "album.caption" {
       writeAlbumText(world: world, entityId: entityId, text: cv.caption)
     }

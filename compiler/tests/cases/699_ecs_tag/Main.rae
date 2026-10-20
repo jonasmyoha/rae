@@ -37,7 +37,7 @@ func main() {
   let matches: List(Query2Match) = tagged(dataTable: positions, tagTable: enemies)
   var enemySum: Int = 0
   loop let hit: view Query2Match in matches {
-    let position: view Position => queryViewAt(table: positions, denseIndex: hit.indexA)
+    let position: view Position = queryViewAt(table: positions, denseIndex: hit.indexA)
     enemySum = enemySum + position.x
   }
   log("enemy x sum: {enemySum}")

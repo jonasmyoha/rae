@@ -172,7 +172,7 @@ func showBuffer(
   writeBuffers: mod ComponentTable(WriteBuffer)
   entityId: view EntityId
 ) {
-  let writeBuffer: mod WriteBuffer => componentMod(this: writeBuffers, entityId: entityId)
+  let writeBuffer: mod WriteBuffer = componentMod(this: writeBuffers, entityId: entityId)
   let length: Int = byteBufferLength(buffer: writeBuffer.buffer)
   log("--- {label} ({length} bytes)")
   var httpEnd: Int = 0
@@ -423,6 +423,6 @@ func main() ret Int {
 }
 
 func clearOutput(writeBuffers: mod ComponentTable(WriteBuffer), entityId: view EntityId) {
-  let writeBuffer: mod WriteBuffer => componentMod(this: writeBuffers, entityId: entityId)
+  let writeBuffer: mod WriteBuffer = componentMod(this: writeBuffers, entityId: entityId)
   byteBufferClear(buffer: writeBuffer.buffer)
 }

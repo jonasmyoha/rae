@@ -34,7 +34,7 @@ func addChildTo(
       data: Children { ids: List.create(EntityId, cap: 4) }
     )
   }
-  let cache: mod Children => componentMod(this: childrens, entityId: parent)
+  let cache: mod Children = componentMod(this: childrens, entityId: parent)
   cache.ids.add(value: child)
 }
 
@@ -53,7 +53,7 @@ func insertChildAt(
       data: Children { ids: List.create(EntityId, cap: 4) }
     )
   }
-  let cache: mod Children => componentMod(this: childrens, entityId: parent)
+  let cache: mod Children = componentMod(this: childrens, entityId: parent)
   var at: Int = index
   if at < 0 {
     at = 0
@@ -75,7 +75,7 @@ func removeChildFrom(
   if componentHas(this: childrens, entityId: parent) is false {
     ret
   }
-  let cache: mod Children => componentMod(this: childrens, entityId: parent)
+  let cache: mod Children = componentMod(this: childrens, entityId: parent)
   loop var i: Int = 0, i < cache.ids.length, ++i {
     if let existing: EntityId = cache.ids.copyAt(index: i) {
       if existing is child {
@@ -95,7 +95,7 @@ func unlinkFromCurrent(
   child: view EntityId
 ) {
   if componentHas(this: parents, entityId: child) {
-    let current: view Parent => componentView(this: parents, entityId: child)
+    let current: view Parent = componentView(this: parents, entityId: child)
     removeChildFrom(childrens: childrens, parent: current.parent, child: child)
   }
 }
@@ -150,7 +150,7 @@ func getChildren(
 ) ret List(EntityId) {
   var out: List(EntityId) = List.create(EntityId, cap: 4)
   if componentHas(this: childrens, entityId: parent) {
-    let cache: view Children => componentView(this: childrens, entityId: parent)
+    let cache: view Children = componentView(this: childrens, entityId: parent)
     loop var i: Int = 0, i < cache.ids.length, ++i {
       if let existing: EntityId = cache.ids.copyAt(index: i) {
         out.add(value: existing)
@@ -177,7 +177,7 @@ func rebuildParentsFromChildren(
   }
   loop var i: Int = 0, i < componentCount(this: childrens), ++i {
     let owner: EntityId = componentEntityAt(this: childrens, i: i)
-    let cache: mod Children => componentMod(this: childrens, entityId: owner)
+    let cache: mod Children = componentMod(this: childrens, entityId: owner)
     var k: Int = 0
     loop k < cache.ids.length {
       if let child: EntityId = cache.ids.copyAt(index: k) {
@@ -228,7 +228,7 @@ func emitSubtree(
 ) {
   state.order.add(value: node)
   if componentHas(this: childrens, entityId: node) {
-    let cache: view Children => componentView(this: childrens, entityId: node)
+    let cache: view Children = componentView(this: childrens, entityId: node)
     loop var i: Int = 0, i < cache.ids.length, ++i {
       if let childEntityId: EntityId = cache.ids.copyAt(index: i) {
         emitSubtree(state: state, childrens: childrens, node: childEntityId)
@@ -291,7 +291,7 @@ func collectSubtree(
 ) {
   out.add(value: node)
   if componentHas(this: childrens, entityId: node) {
-    let cache: view Children => componentView(this: childrens, entityId: node)
+    let cache: view Children = componentView(this: childrens, entityId: node)
     loop var i: Int = 0, i < cache.ids.length, ++i {
       if let childEntityId: EntityId = cache.ids.copyAt(index: i) {
         collectSubtree(childrens: childrens, node: childEntityId, out: out)
@@ -345,7 +345,7 @@ func destroySubtree(
   # Unlink the root from its parent's Children so the (surviving) parent doesn't
   # dangle to the destroyed root.
   if componentHas(this: parents, entityId: root) {
-    let link: view Parent => componentView(this: parents, entityId: root)
+    let link: view Parent = componentView(this: parents, entityId: root)
     removeChildFrom(childrens: childrens, parent: link.parent, child: root)
   }
   loop var i: Int = 0, i < subtree.length, ++i {

@@ -32,9 +32,9 @@ func anchorBottomSystem(world: mod UiWorld, bottomInset: view Float) pub {
   var i: Int = 0
   loop i < n {
     let entityId: EntityId = componentEntityAt(this: world.anchorBottoms, i: i)
-    let anchor: view AnchorBottom => queryViewAt(table: world.anchorBottoms, denseIndex: i)
+    let anchor: view AnchorBottom = queryViewAt(table: world.anchorBottoms, denseIndex: i)
     if anchor.enabled and componentHas(this: world.rects, entityId: entityId) {
-      let r: view Rect => componentView(this: world.rects, entityId: entityId)
+      let r: view Rect = componentView(this: world.rects, entityId: entityId)
       let wantedY: Float = world.layoutH - r.size.y - bottomInset
       var currentY: Float = wantedY - 1.0
       if componentHas(this: world.offsets, entityId: entityId) {
@@ -55,7 +55,7 @@ func layerTagSystem(world: mod UiWorld) pub {
   loop i < n {
     let entityId: EntityId = componentEntityAt(this: world.layerTags, i: i)
     if componentHas(this: world.layerRefs, entityId: entityId) is false {
-      let tag: view LayerTag => queryViewAt(table: world.layerTags, denseIndex: i)
+      let tag: view LayerTag = queryViewAt(table: world.layerTags, denseIndex: i)
       setLayerById(world: world, entityId: entityId, id: tag.id)
     }
     i = i + 1
@@ -67,7 +67,7 @@ func setTabSpriteTint(world: mod UiWorld, entityId: view EntityId, tint: view Rg
   if current.r is tint.r and current.g is tint.g and current.b is tint.b and current.a is tint.a {
     ret
   }
-  let sprite: mod Sprite => componentMod(this: world.sprites, entityId: entityId)
+  let sprite: mod Sprite = componentMod(this: world.sprites, entityId: entityId)
   sprite.tint = tint
   sprite.tintSlot = ""
 }
@@ -76,7 +76,7 @@ func setTabTextStyle(world: mod UiWorld, entityId: view EntityId, styleId: view 
   if componentView(this: world.texts, entityId: entityId).styleId is styleId {
     ret
   }
-  let text: mod Text => componentMod(this: world.texts, entityId: entityId)
+  let text: mod Text = componentMod(this: world.texts, entityId: entityId)
   text.styleId = "{styleId}"
 }
 
@@ -91,7 +91,7 @@ func navTabsSystem(dockSystem: view DockSystem, world: mod UiWorld, activeTab: S
     var i: Int = 0
     loop i < n {
       let tab: EntityId = componentEntityAt(this: dockSystem.navTabs, i: i)
-      let binding: view NavTab => queryViewAt(table: dockSystem.navTabs, denseIndex: i)
+      let binding: view NavTab = queryViewAt(table: dockSystem.navTabs, denseIndex: i)
       let active: Bool = binding.screen is activeName
       var tint: RgbaColor = inactiveTint
       var style: String = "tabInactive"
@@ -101,7 +101,7 @@ func navTabsSystem(dockSystem: view DockSystem, world: mod UiWorld, activeTab: S
       }
       if componentHas(this: world.childrens, entityId: tab) {
         var kids: List(EntityId) = List.create(EntityId, cap: 4)
-        let ch: view Children => componentView(this: world.childrens, entityId: tab)
+        let ch: view Children = componentView(this: world.childrens, entityId: tab)
         var k: Int = 0
         loop k < ch.ids.length {
           kids.add(value: rae_ext_rae_buf_get(buf: ch.ids.data, index: k))
@@ -118,7 +118,7 @@ func navTabsSystem(dockSystem: view DockSystem, world: mod UiWorld, activeTab: S
       }
       if componentHas(this: world.widgetStates, entityId: tab) {
         if componentView(this: world.widgetStates, entityId: tab).selected is not active {
-          let widgetState: mod WidgetState => componentMod(this: world.widgetStates, entityId: tab)
+          let widgetState: mod WidgetState = componentMod(this: world.widgetStates, entityId: tab)
           widgetState.selected = active
         }
       }

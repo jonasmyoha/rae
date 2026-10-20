@@ -97,7 +97,7 @@ func placeChildren(
 ) {
   unsafe {
     activeChildrenInto(world: world, entityId: entityId, out: scratch)
-    let kids: view List(EntityId) => scratch
+    let kids: view List(EntityId) = scratch
     let n: Int = kids.length
     if n is 0 {
       ret
@@ -106,7 +106,7 @@ func placeChildren(
     var ownW: Float = 0.0
     var ownH: Float = 0.0
     if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) {
-      let cr: view ComputedRect => componentView(
+      let cr: view ComputedRect = componentView(
         this: uiSystems.layout.computedRects
         entityId: entityId
       )
@@ -595,7 +595,7 @@ func placeStack(
       var alignX: AlignKind = AlignKind.center
       var alignY: AlignKind = AlignKind.center
       if componentHas(this: world.aligns, entityId: cid) {
-        let a: view Align => componentView(this: world.aligns, entityId: cid)
+        let a: view Align = componentView(this: world.aligns, entityId: cid)
         if a.hasX {
           alignX = a.x
         }
@@ -644,7 +644,7 @@ func placeStack(
 # -----------------------------------------------------------------
 func computeLinear(world: mod UiWorld, uiSystems: mod UiSystems) {
   unsafe {
-    let order: view List(EntityId) => depthOrder(
+    let order: view List(EntityId) = depthOrder(
       state: world.hierarchyOrder
       parents: uiSystems.hierarchy.parents
       childrens: world.childrens
@@ -666,7 +666,7 @@ func computeLinear(world: mod UiWorld, uiSystems: mod UiSystems) {
       }
     }
     # Standalone roots (no Parent, no Children) are absent from the order.
-    let alive: view List(EntityId) => world.allocator.alive
+    let alive: view List(EntityId) = world.allocator.alive
     loop var k: Int = 0, k < alive.length, ++k {
       let entityId: EntityId = rae_ext_rae_buf_get(buf: alive.data, index: k)
       if componentHas(this: uiSystems.hierarchy.parents, entityId: entityId) is false {

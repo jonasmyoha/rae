@@ -28,7 +28,7 @@ func parentsBeforeChildren(
   loop var i: Int = 0, i < order.length, ++i {
     if let child: EntityId = order.copyAt(index: i) {
       if componentHas(this: parents, entityId: child) {
-        let link: view Parent => componentView(this: parents, entityId: child)
+        let link: view Parent = componentView(this: parents, entityId: child)
         var parentPos: Int = -1
         loop var j: Int = 0, j < order.length, ++j {
           if let other: EntityId = order.copyAt(index: j) {
@@ -86,7 +86,7 @@ func main() {
     parent: r2
   )
 
-  let order: view List(EntityId) => depthOrder(state: ord, parents: parents, childrens: childrens)
+  let order: view List(EntityId) = depthOrder(state: ord, parents: parents, childrens: childrens)
   printOrder(order: order, label: "order")
   log("valid: {parentsBeforeChildren(order: order, parents: parents)}")
 
@@ -97,7 +97,7 @@ func main() {
     child: a1
     parent: r2
   )
-  let order2: view List(EntityId) => depthOrder(state: ord, parents: parents, childrens: childrens)
+  let order2: view List(EntityId) = depthOrder(state: ord, parents: parents, childrens: childrens)
   printOrder(order: order2, label: "order after reparent")
   log("valid after reparent: {parentsBeforeChildren(order: order2, parents: parents)}")
 }

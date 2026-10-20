@@ -68,7 +68,7 @@ func registerImageTexture(
 func canvasLoadImage(canvas: mod Gpu2dCanvas, path: copy String) ret Int {
   ensureBoxResources(canvas: canvas)
   var handle: Int = 0
-  if let resources: mod GpuResources => canvas.gpuResources {
+  if let resources: mod GpuResources = canvas.gpuResources {
     unsafe {
       let rgba: Ptr = g2dDecodeImage(path: path)
       if rgba is webgpuNull() {
@@ -121,7 +121,7 @@ func canvasRegisterImageRgba(
   }
   ensureBoxResources(canvas: canvas)
   var handle: Int = 0
-  if let resources: mod GpuResources => canvas.gpuResources {
+  if let resources: mod GpuResources = canvas.gpuResources {
     let count: Int = width * height
     var bytes: List(UInt8) = List.create(UInt8, cap: count * 4)
     unsafe {

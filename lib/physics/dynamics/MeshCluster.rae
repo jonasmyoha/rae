@@ -455,11 +455,11 @@ func clusterManifolds(
   scratch.clusterCount = 0
   scratch.memberships.clear()
   loop var i: Int = 0, i < accepted.length, ++i {
-    if let manifold: view LocalManifold => manifolds.viewAt(index: accepted.copyAtDefault(index: i)) {
+    if let manifold: view LocalManifold = manifolds.viewAt(index: accepted.copyAtDefault(index: i)) {
       # The first cluster within the (tight) tolerance is taken
       var clusterIndex: Int = -1
       loop var j: Int = 0, j < scratch.clusterCount, ++j {
-        if let cluster: view MeshCluster => scratch.clusters.viewAt(index: j) {
+        if let cluster: view MeshCluster = scratch.clusters.viewAt(index: j) {
           let cosManifoldAngle: Float = dot(left: cluster.manifoldNormal, right: manifold.normal)
           let cosTriangleAngle: Float = dot(
             left: cluster.triangleNormal
@@ -474,7 +474,7 @@ func clusterManifolds(
       }
       if clusterIndex is not -1 {
         scratch.memberships.add(value: clusterIndex)
-        if let cluster: mod MeshCluster => scratch.clusters.modAt(index: clusterIndex) {
+        if let cluster: mod MeshCluster = scratch.clusters.modAt(index: clusterIndex) {
           cluster.pointCapacity = cluster.pointCapacity + manifold.pointCount
         }
       } else {
@@ -489,7 +489,7 @@ func clusterManifolds(
             }
           )
         }
-        if let cluster: mod MeshCluster => scratch.clusters.modAt(index: scratch.clusterCount) {
+        if let cluster: mod MeshCluster = scratch.clusters.modAt(index: scratch.clusterCount) {
           cluster.manifoldNormal = manifold.normal
           cluster.triangleNormal = manifold.triangleNormal
           cluster.points.clear()
@@ -502,8 +502,8 @@ func clusterManifolds(
 
   # Populate the clusters
   loop var i: Int = 0, i < accepted.length, ++i {
-    if let manifold: view LocalManifold => manifolds.viewAt(index: accepted.copyAtDefault(index: i)) {
-      if let cluster: mod MeshCluster => scratch.clusters.modAt(
+    if let manifold: view LocalManifold = manifolds.viewAt(index: accepted.copyAtDefault(index: i)) {
+      if let cluster: mod MeshCluster = scratch.clusters.modAt(
         index: scratch.memberships.copyAtDefault(index: i)
       ) {
         loop var j: Int = 0, j < manifold.pointCount, ++j {
@@ -517,7 +517,7 @@ func clusterManifolds(
 
   # Simplify the clusters
   loop var i: Int = 0, i < scratch.clusterCount, ++i {
-    if let cluster: mod MeshCluster => scratch.clusters.modAt(index: i) {
+    if let cluster: mod MeshCluster = scratch.clusters.modAt(index: i) {
       reduceCluster(
         points: cluster.points
         normal: cluster.triangleNormal

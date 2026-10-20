@@ -64,7 +64,7 @@ func playbackIconSystem(world: mod UiWorld, playbackSystem: mod PlaybackSystem) 
         key: playbackIconKey(playbackSystem: playbackSystem)
       )
       setWidgetSelected(world: world, entityId: entityId, selected: playbackSystem.isPlaying)
-      let icon: mod PlaybackIcon => queryModAt(table: playbackSystem.playbackIcons, denseIndex: i)
+      let icon: mod PlaybackIcon = queryModAt(table: playbackSystem.playbackIcons, denseIndex: i)
       icon.builtRevision = playbackSystem.revision
       changed = true
     }
@@ -106,10 +106,7 @@ func playbackCoverSystem(
         )
         setSpriteKey(world: world, entityId: entityId, key: key)
       }
-      let cover: mod PlaybackCover => queryModAt(
-        table: playbackSystem.playbackCovers
-        denseIndex: i
-      )
+      let cover: mod PlaybackCover = queryModAt(table: playbackSystem.playbackCovers, denseIndex: i)
       cover.builtRevision = playbackSystem.nowPlayingRevision
       changed = true
     }
@@ -118,7 +115,7 @@ func playbackCoverSystem(
     # transition finds it by the same key as the tile it flies from.
     if componentHas(this: world.heroWidgets, entityId: entityId) {
       if componentView(this: world.heroWidgets, entityId: entityId).key is not state.currentAlbumStem {
-        let hero: mod HeroWidget => componentMod(this: world.heroWidgets, entityId: entityId)
+        let hero: mod HeroWidget = componentMod(this: world.heroWidgets, entityId: entityId)
         hero.key = "{state.currentAlbumStem}"
       }
     }
@@ -184,7 +181,7 @@ func likedHeartSystem(
     let entityId: EntityId = componentEntityAt(this: playbackSystem.likedHearts, i: i)
     if queryViewAt(table: playbackSystem.likedHearts, denseIndex: i).styled is false {
       installHeartStyle(world: world, entityId: entityId)
-      let heart: mod LikedHeart => queryModAt(table: playbackSystem.likedHearts, denseIndex: i)
+      let heart: mod LikedHeart = queryModAt(table: playbackSystem.likedHearts, denseIndex: i)
       heart.styled = true
       changed = true
     }
@@ -210,11 +207,11 @@ func writeTrackText(world: mod UiWorld, entityId: view EntityId, value: view Str
   if componentHas(this: world.texts, entityId: entityId) is false {
     ret
   }
-  let cur: view Text => componentView(this: world.texts, entityId: entityId)
+  let cur: view Text = componentView(this: world.texts, entityId: entityId)
   if cur.text is value {
     ret
   }
-  let slot: mod Text => componentMod(this: world.texts, entityId: entityId)
+  let slot: mod Text = componentMod(this: world.texts, entityId: entityId)
   slot.text = "{value}"
 }
 
@@ -231,7 +228,7 @@ func trackTextSystem(
   var stale: Bool = false
   var i: Int = 0
   loop i < n {
-    let binding: view TrackText => componentView(
+    let binding: view TrackText = componentView(
       this: playbackSystem.trackTexts
       entityId: componentEntityAt(this: playbackSystem.trackTexts, i: i)
     )
@@ -254,7 +251,7 @@ func trackTextSystem(
       } else {
         writeTrackText(world: world, entityId: entityId, value: track.title)
       }
-      let binding: mod TrackText => queryModAt(table: playbackSystem.trackTexts, denseIndex: i)
+      let binding: mod TrackText = queryModAt(table: playbackSystem.trackTexts, denseIndex: i)
       binding.builtKey = "{key}"
     }
     i = i + 1
@@ -287,10 +284,7 @@ func playbackTimeSystem(world: mod UiWorld, playbackSystem: mod PlaybackSystem) 
       }
       let label: String = formatDurationMs(ms: (seconds * 1000.0).toInt())
       writeTrackText(world: world, entityId: entityId, value: label)
-      let binding: mod PlaybackTime => queryModAt(
-        table: playbackSystem.playbackTimes
-        denseIndex: i
-      )
+      let binding: mod PlaybackTime = queryModAt(table: playbackSystem.playbackTimes, denseIndex: i)
       binding.builtSecond = second
     }
     i = i + 1

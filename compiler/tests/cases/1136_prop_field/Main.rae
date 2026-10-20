@@ -29,7 +29,7 @@ func part(id: view Int) ret PropPart {
 }
 
 func batchCount(field: view PropField, index: view Int) ret Int {
-  if let batch: view InstanceBatch => field.batches.viewAt(index: index) {
+  if let batch: view InstanceBatch = field.batches.viewAt(index: index) {
     ret batch.count
   }
   ret 0 - 1
@@ -218,7 +218,7 @@ func main() ret Int {
   }
   finishPropField(field: limited)
   var capacity: Int = 0
-  if let batch: view InstanceBatch => limited.batches.viewAt(index: 0) {
+  if let batch: view InstanceBatch = limited.batches.viewAt(index: 0) {
     capacity = batch.capacity
   }
   check(
@@ -262,7 +262,7 @@ func main() ret Int {
   )
   finishPropField(field: billboards)
   gatherPropField(field: billboards, propView: propView, toon: true)
-  let records: view List(Float) => billboards.spriteBatch.records
+  let records: view List(Float) = billboards.spriteBatch.records
   check(
     label: "a far prop at a sprite level is one billboard, not meshes"
     ok: billboards.spriteBatch.count is 1 and batchCount(field: billboards, index: 0) is 0

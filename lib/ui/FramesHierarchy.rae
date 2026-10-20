@@ -23,7 +23,7 @@ func isHierarchyDirectiveKey(key: view String) ret Bool {
 # the gate that keeps pure-overlay scenes (S3) off the hierarchy
 # rebuild path entirely.
 func haveHierarchyDirectives(scene: view Scene, frames: view FrameSet) ret Bool {
-  let doc: view JsonDoc => scene.doc
+  let doc: view JsonDoc = scene.doc
   var f: Int = 0
   loop f < frames.count {
     if let nodesIdx: Int = frames.nodesValueIdxs.copyAt(index: f) {
@@ -98,14 +98,14 @@ func deriveActiveHierarchy(
   frameIdx: opt copy Int
   pageId: view String
 ) {
-  let doc: view JsonDoc => scene.doc
+  let doc: view JsonDoc = scene.doc
   let nodeCount: Int = scene.nodes.length
   if let rootIdx: Int = sceneNodeIndex(this: scene, nodeId: scene.rootNodeId) {
     # Raw entity value per scene node (-1 = not mounted in this page).
     var entityVals: List(Int) = List.create(Int, cap: nodeCount)
     var e: Int = 0
     loop e < nodeCount {
-      let node: view SceneNode => nodeAt(this: scene, idx: e)
+      let node: view SceneNode = nodeAt(this: scene, idx: e)
       var raw: Int = -1
       if let entityRaw: Int = findNodeInPage(world: world, pageId: pageId, nodeId: node.nodeId) {
         raw = entityRaw
@@ -125,7 +125,7 @@ func deriveActiveHierarchy(
     }
     var a: Int = 0
     loop a < nodeCount {
-      let node: view SceneNode => nodeAt(this: scene, idx: a)
+      let node: view SceneNode = nodeAt(this: scene, idx: a)
       let kn: Int = node.childrenIds.length
       var q: Int = 0
       loop q < kn {
@@ -141,7 +141,7 @@ func deriveActiveHierarchy(
     }
 
     # Apply the active frame's directives in declared order.
-    if let activeFrameIdx: view Int => frameIdx {
+    if let activeFrameIdx: view Int = frameIdx {
       var nodesIdx: Int = -1
       if let value: Int = frames.nodesValueIdxs.copyAt(index: activeFrameIdx) {
         nodesIdx = value

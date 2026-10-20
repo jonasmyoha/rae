@@ -26,7 +26,7 @@ func main() {
   } else {
     log("field is-check: NONE")
   }
-  if let n: view String => card.note {
+  if let n: view String = card.note {
     log("field view=>: SOME")
   } else {
     log("field view=>: NONE")
@@ -35,7 +35,7 @@ func main() {
   # Local reassigned some -> none.
   var maybe: opt String = mk(flag: true)
   maybe = none
-  if let m: view String => maybe {
+  if let m: view String = maybe {
     log("local view=>: SOME")
   } else {
     log("local view=>: NONE")
@@ -43,12 +43,12 @@ func main() {
 
   # Present value still binds and reads through view and mod.
   card.note = mk(flag: true)
-  if let present: view String => card.note {
+  if let present: view String = card.note {
     log("present view=>: {present}")
   } else {
     log("present view=>: NONE")
   }
-  if let editable: mod String => card.note {
+  if let editable: mod String = card.note {
     log("present mod=>: {editable}")
   } else {
     log("present mod=>: NONE")

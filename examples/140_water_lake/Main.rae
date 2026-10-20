@@ -281,7 +281,7 @@ func main() ret Int {
         let tag: Int = deferredTagAt(renderer: renderer, i: passIndex)
         gpuPassMark(renderer: renderer, tag: tag)
         if tag is RenderTag.waterFft {
-          if let resources: mod GpuResources => gpuManager {
+          if let resources: mod GpuResources = gpuManager {
             waterFftStep(waterSystem: waterSystem, resources: resources)
             # #849: read the baked spectrum back once and check it (blocking; test only).
             if fftDiag and waterFrames is 2 {
@@ -296,8 +296,8 @@ func main() ret Int {
         if tag is RenderTag.transparentForward {
           # Snapshot the opaque frame, the lake refracts it, then the transparent pass.
           snapshotOpaque(renderer: renderer)
-          if let resources: mod GpuResources => gpuManager {
-            if let meshResources: view GpuResources => renderer.gpuResources {
+          if let resources: mod GpuResources = gpuManager {
+            if let meshResources: view GpuResources = renderer.gpuResources {
               waterDraw(
                 waterSystem: waterSystem
                 resources: resources
@@ -349,7 +349,7 @@ func main() ret Int {
       "[water example] deterministic deferred frame rendered: hour {hour}, 1 island, {cubeCount} boxes, {waterFrames} water frames, {underwaterFrames} underwater frames, caustics {lake.caustics}"
     )
   }
-  if let resources: mod GpuResources => gpuManager {
+  if let resources: mod GpuResources = gpuManager {
     waterShutdown(waterSystem: waterSystem, resources: resources)
     shutdown(resources: resources)
   }

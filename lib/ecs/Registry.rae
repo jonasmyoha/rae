@@ -51,9 +51,9 @@ func createComponentRegistry() ret ComponentRegistry {
 # (#719); registration is name + flags.
 func registerComponent(reg: mod ComponentRegistry, name: view String, flags: view Int) {
   loop var i: Int = 0, i < reg.entries.length, ++i {
-    if let existing: view ComponentEntry => reg.entries.viewAt(index: i) {
+    if let existing: view ComponentEntry = reg.entries.viewAt(index: i) {
       if existing.name is name {
-        let slot: mod ComponentEntry => reg.entries.modAt(index: i)
+        let slot: mod ComponentEntry = reg.entries.modAt(index: i)
         slot.flags = flags
         ret
       }
@@ -67,7 +67,7 @@ func registerComponent(reg: mod ComponentRegistry, name: view String, flags: vie
 # The flags registered for `name`, or 0 (no flags) if it isn't registered.
 func componentFlags(reg: view ComponentRegistry, name: view String) ret Int {
   loop var i: Int = 0, i < reg.entries.length, ++i {
-    if let existing: view ComponentEntry => reg.entries.viewAt(index: i) {
+    if let existing: view ComponentEntry = reg.entries.viewAt(index: i) {
       if existing.name is name {
         ret existing.flags
       }
@@ -79,7 +79,7 @@ func componentFlags(reg: view ComponentRegistry, name: view String) ret Int {
 # Whether `name` is registered at all (independent of its flags).
 func isRegistered(reg: view ComponentRegistry, name: view String) ret Bool {
   loop var i: Int = 0, i < reg.entries.length, ++i {
-    if let existing: view ComponentEntry => reg.entries.viewAt(index: i) {
+    if let existing: view ComponentEntry = reg.entries.viewAt(index: i) {
       if existing.name is name {
         ret true
       }

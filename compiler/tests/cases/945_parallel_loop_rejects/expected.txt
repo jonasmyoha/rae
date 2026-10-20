@@ -7,9 +7,9 @@ tests/cases/945_parallel_loop_rejects/Main.rae:23:5: parallelLoop: the call muta
 tests/cases/945_parallel_loop_rejects/Main.rae:27:5: parallelLoop: the call mutates 'values', which every iteration shares — an iteration may only write its own locals and the element of its own index ('xs.set(index: i, ...)', 'xs.modAt(index: i)')
     27 |     values.set(index: 0, value: i)
        |     ^~~~
-tests/cases/945_parallel_loop_rejects/Main.rae:31:42: parallelLoop: the 'mod' binding aliases 'values', which every iteration shares — an iteration may only write its own locals and the element of its own index ('xs.set(index: i, ...)', 'xs.modAt(index: i)')
-    31 |     if let first: mod Int => values.modAt(index: 0) {
-       |                                          ^~~~
+tests/cases/945_parallel_loop_rejects/Main.rae:31:41: parallelLoop: the 'mod' binding aliases 'values', which every iteration shares — an iteration may only write its own locals and the element of its own index ('xs.set(index: i, ...)', 'xs.modAt(index: i)')
+    31 |     if let first: mod Int = values.modAt(index: 0) {
+       |                                         ^~~~
 tests/cases/945_parallel_loop_rejects/Main.rae:37:19: parallelLoop: the call mutates 'counter', which every iteration shares — an iteration may only write its own locals and the element of its own index ('xs.set(index: i, ...)', 'xs.modAt(index: i)')
     37 |     bump(counter: counter)
        |                   ^~~~
@@ -28,4 +28,3 @@ tests/cases/945_parallel_loop_rejects/Main.rae:54:7: parallelLoop: 'break' canno
 tests/cases/945_parallel_loop_rejects/Main.rae:58:3: parallelLoop runs its iterations on the worker pool, so it needs the counted form 'parallelLoop var i: Int = start, i < end, ++i { ... }'
     58 |   parallelLoop total < 10 {
        |   ^~~~
-

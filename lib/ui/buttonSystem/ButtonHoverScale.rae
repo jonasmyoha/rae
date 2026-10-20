@@ -33,7 +33,7 @@ func hoverScaleContains(
     if componentHas(this: uiSystems.hierarchy.parents, entityId: cur) is false {
       ret false
     }
-    let p: view Parent => componentView(this: uiSystems.hierarchy.parents, entityId: cur)
+    let p: view Parent = componentView(this: uiSystems.hierarchy.parents, entityId: cur)
     if p.parent is ancestor {
       ret true
     }
@@ -70,7 +70,7 @@ func buttonHoverScaleUpdate(
   var i: Int = 0
   loop i < n {
     let entityId: EntityId = componentEntityAt(this: world.hoverScales, i: i)
-    let hs: view HoverScale => componentView(this: world.hoverScales, entityId: entityId)
+    let hs: view HoverScale = componentView(this: world.hoverScales, entityId: entityId)
     var target: Float = hs.restScale
     let containsHover: Bool = hoverScaleContains(
       world: world
@@ -95,7 +95,7 @@ func buttonHoverScaleUpdate(
       # Per-frame animation state is a mutable component update, not a
       # replace/drop cycle. Updating in place avoids allocator churn in the
       # hot hover path that 106 drives while the cursor moves over covers.
-      let slot: mod HoverScale => componentMod(this: world.hoverScales, entityId: entityId)
+      let slot: mod HoverScale = componentMod(this: world.hoverScales, entityId: entityId)
       slot.current = next
       slot.target = target
       if next is not target {

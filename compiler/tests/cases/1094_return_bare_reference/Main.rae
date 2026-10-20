@@ -53,40 +53,40 @@ func pickOptionalText(text: view String) ret opt view String {
 }
 
 func forward(track: view Track) ret view Track {
-  let forwarded: view Track => pick(track: track)
+  let forwarded: view Track = pick(track: track)
   ret forwarded
 }
 
 func main() {
   var track: Track = { value: 3, title: "Intro" }
   log("direct {pick(track: track).value} {pick(track: track).title}")
-  let picked: view Track => pick(track: track)
+  let picked: view Track = pick(track: track)
   log("bound {picked.value} {picked.title}")
-  if let present: view Track => pickOptional(track: track, present: true) {
+  if let present: view Track = pickOptional(track: track, present: true) {
     log("present {present.value} {present.title}")
   }
-  if let missing: view Track => pickOptional(track: track, present: false) {
+  if let missing: view Track = pickOptional(track: track, present: false) {
     log("missing {missing.value}")
   } else {
     log("absent")
   }
-  let changed: mod Track => pickMod(track: mod track)
+  let changed: mod Track = pickMod(track: mod track)
   changed.value = 9
   log("mod {track.value}")
-  if let changedAgain: mod Track => pickOptionalMod(track: mod track) {
+  if let changedAgain: mod Track = pickOptionalMod(track: mod track) {
     changedAgain.value = 10
   }
   log("optional mod {track.value}")
   var shelf: Shelf = { tracks: List.create(Track, cap: 2) }
   shelf.tracks.add(value: Track { value: 5, title: "Outro" })
   log("list {pickList(tracks: shelf.tracks).length} {pickShelfList(shelf: shelf).length}")
-  if let tracks: view List(Track) => pickOptionalList(tracks: shelf.tracks) {
+  if let tracks: view List(Track) = pickOptionalList(tracks: shelf.tracks) {
     log("optional list {tracks.length}")
   }
   let text: String = "hello"
-  let textView: view String => pickText(text: text)
+  let textView: view String = pickText(text: text)
   log("text {textView}")
-  if let found: view String => pickOptionalText(text: text) {
+  if let found: view String = pickOptionalText(text: text) {
     log("optional text {found}")
   }
   log("forward {forward(track: track).title}")

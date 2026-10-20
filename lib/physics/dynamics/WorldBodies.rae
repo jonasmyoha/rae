@@ -70,7 +70,7 @@ func createBody(world: mod PhysicsWorld, def: view BodyDef) ret BodyId {
     if setId is world.solverSets.length {
       world.solverSets.add(value: emptySolverSet(setIndex: 0))
     }
-    if let set: mod SolverSet => world.solverSets.modAt(index: setId) {
+    if let set: mod SolverSet = world.solverSets.modAt(index: setId) {
       set.setIndex = setId
     }
   }
@@ -113,7 +113,7 @@ func createBody(world: mod PhysicsWorld, def: view BodyDef) ret BodyId {
   sim.flags = simFlags
 
   var localIndex: Int = 0
-  if let set: mod SolverSet => world.solverSets.modAt(index: setId) {
+  if let set: mod SolverSet = world.solverSets.modAt(index: setId) {
     set.bodySims.add(value: sim)
     localIndex = set.bodySims.length - 1
     if setId is awakeSet {
@@ -188,7 +188,7 @@ func destroyBody(world: mod PhysicsWorld, bodyId: view BodyId) {
   loop edgeKey is not -1 {
     let contactId: Int = edgeKey shr 1
     let edgeIndex: Int = edgeKey bitand 1
-    if let contact: view Contact => world.contacts.viewAt(index: contactId) {
+    if let contact: view Contact = world.contacts.viewAt(index: contactId) {
       edgeKey = contactEdge(contact: contact, edgeIndex: edgeIndex).nextKey
     }
     destroyContact(world: world, contactId: contactId, wakeBodies: true)
@@ -210,7 +210,7 @@ func destroyBody(world: mod PhysicsWorld, bodyId: view BodyId) {
     destroyShapeProxy(world: world, shapeId: shapeId)
     freeId(pool: world.shapeIdPool, id: shapeId)
     var next: Int = -1
-    if let shape: mod PhysicsShape => world.shapes.modAt(index: shapeId) {
+    if let shape: mod PhysicsShape = world.shapes.modAt(index: shapeId) {
       shape.id = -1
       next = shape.nextShapeId
     }
@@ -224,7 +224,7 @@ func destroyBody(world: mod PhysicsWorld, bodyId: view BodyId) {
   var movedIndex: Int = -1
   var movedBodyId: Int = -1
   var orphaned: Bool = false
-  if let set: mod SolverSet => world.solverSets.modAt(index: setIndex) {
+  if let set: mod SolverSet = world.solverSets.modAt(index: setIndex) {
     let lastIndex: Int = set.bodySims.length - 1
     if body.localIndex is not lastIndex {
       movedIndex = lastIndex
@@ -247,7 +247,7 @@ func destroyBody(world: mod PhysicsWorld, bodyId: view BodyId) {
     }
   }
   if movedBodyId is not -1 {
-    if let moved: mod Body => world.bodies.modAt(index: movedBodyId) {
+    if let moved: mod Body = world.bodies.modAt(index: movedBodyId) {
       moved.localIndex = body.localIndex
     }
     refreshBodyContactIndices(world: world, bodyId: movedBodyId)
@@ -258,7 +258,7 @@ func destroyBody(world: mod PhysicsWorld, bodyId: view BodyId) {
 
   # Free the body and its id (the generation is kept)
   freeId(pool: world.bodyIdPool, id: bodyIndex)
-  if let freed: mod Body => world.bodies.modAt(index: bodyIndex) {
+  if let freed: mod Body = world.bodies.modAt(index: bodyIndex) {
     freed.setIndex = -1
     freed.localIndex = -1
     freed.id = -1
@@ -404,7 +404,7 @@ func getBodyWorldCenter(world: view PhysicsWorld, bodyId: view BodyId) ret Pos {
 
 # b3Shape_GetBody
 func getShapeBody(world: view PhysicsWorld, shapeId: view ShapeId) ret BodyId {
-  if let shape: view PhysicsShape => world.shapes.viewAt(index: shapeId.index1 - 1) {
+  if let shape: view PhysicsShape = world.shapes.viewAt(index: shapeId.index1 - 1) {
     ret makeBodyId(world: world, bodyIndex: shape.bodyId)
   }
   ret BodyId { index1: 0, world0: 0, generation: 0 }
@@ -688,7 +688,7 @@ func applyBodyAngularImpulse(
 # b3Body_SetMassData: override the mass from the shapes.
 func setBodyMassData(world: mod PhysicsWorld, bodyId: view BodyId, massData: view MassData) {
   let bodyIndex: Int = bodyIndexOf(bodyId: bodyId)
-  if let dirty: mod Body => world.bodies.modAt(index: bodyIndex) {
+  if let dirty: mod Body = world.bodies.modAt(index: bodyIndex) {
     dirty.flags = dirty.flags bitand (4294967295 - dirtyMassFlag)
   }
   syncBodyFlags(world: world, bodyId: bodyIndex)

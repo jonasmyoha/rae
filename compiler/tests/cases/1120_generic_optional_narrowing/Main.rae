@@ -13,7 +13,7 @@ type Track {
 }
 
 func describe(T: type, maybe: opt copy T) ret String {
-  if let present: view T => maybe {
+  if let present: view T = maybe {
     ret "some {present}"
   }
   ret "none"
@@ -21,7 +21,7 @@ func describe(T: type, maybe: opt copy T) ret String {
 
 func describeLocal(T: type, value: copy T) ret String {
   let maybe: opt T = value
-  if let present: view T => maybe {
+  if let present: view T = maybe {
     ret "local {present}"
   }
   ret "none"
@@ -29,7 +29,7 @@ func describeLocal(T: type, value: copy T) ret String {
 
 func replaced(T: type, maybe: opt copy T, replacement: copy T) ret opt T {
   var held: opt T = maybe
-  if let present: mod T => held {
+  if let present: mod T = held {
     present = replacement
   }
   ret held

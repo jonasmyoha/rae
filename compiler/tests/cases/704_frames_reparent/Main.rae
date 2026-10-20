@@ -60,7 +60,7 @@ func kidsCount(world: view UiWorld, pageId: view String, parentName: view String
   if componentHas(this: world.childrens, entityId: parent) is false {
     ret 0
   }
-  let ch: view Children => componentView(this: world.childrens, entityId: parent)
+  let ch: view Children = componentView(this: world.childrens, entityId: parent)
   ret ch.ids.length
 }
 
@@ -71,7 +71,7 @@ func moverUnder(world: view UiWorld, pageId: view String, parentName: view Strin
     if componentHas(this: world.childrens, entityId: parent) is false {
       ret false
     }
-    let ch: view Children => componentView(this: world.childrens, entityId: parent)
+    let ch: view Children = componentView(this: world.childrens, entityId: parent)
     loop var i: Int = 0, i < ch.ids.length, ++i {
       let k: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
       if k is mover {

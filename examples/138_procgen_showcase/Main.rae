@@ -293,7 +293,7 @@ func runShowcaseFrame(state: mod ShowcaseState) {
     ret
   }
 
-  let renderer: mod DeferredRenderer => state.renderer
+  let renderer: mod DeferredRenderer = state.renderer
   let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
   gpuPassTimingBegin(renderer: renderer)
   loop var passIndex: Int = 0, passIndex < deferredOrderLength(renderer: renderer), ++passIndex {
@@ -330,8 +330,8 @@ func runShowcaseFrame(state: mod ShowcaseState) {
 # The G-buffer pass: the grove's meshes, then the grass, whose blades the
 # compute pass generated just before
 func renderGroveGeometry(state: mod ShowcaseState, aspect: view Float, deltaTime: view Float) {
-  let renderer: mod DeferredRenderer => state.renderer
-  if let resources: mod GpuResources => state.gpuResources {
+  let renderer: mod DeferredRenderer = state.renderer
+  if let resources: mod GpuResources = state.gpuResources {
     generateGroveGrass(
       grass: state.grass
       resources: resources
@@ -342,7 +342,7 @@ func renderGroveGeometry(state: mod ShowcaseState, aspect: view Float, deltaTime
     )
   }
   ensureRendererResources(renderer: renderer)
-  if let rendererResources: mod GpuResources => renderer.gpuResources {
+  if let rendererResources: mod GpuResources = renderer.gpuResources {
     Gbuffer.beginPass(
       cache: renderer.passes.gbuffer
       resources: rendererResources
@@ -355,7 +355,7 @@ func renderGroveGeometry(state: mod ShowcaseState, aspect: view Float, deltaTime
       resources: rendererResources
       world: state.sceneWorld
     )
-    if let resources: mod GpuResources => state.gpuResources {
+    if let resources: mod GpuResources = state.gpuResources {
       grassDraw(
         grass: state.grass
         resources: resources
@@ -368,7 +368,7 @@ func renderGroveGeometry(state: mod ShowcaseState, aspect: view Float, deltaTime
 }
 
 func endShowcase(state: mod ShowcaseState) {
-  if let resources: mod GpuResources => state.gpuResources {
+  if let resources: mod GpuResources = state.gpuResources {
     grassShutdown(grass: state.grass, resources: resources)
     shutdown(resources: resources)
   }

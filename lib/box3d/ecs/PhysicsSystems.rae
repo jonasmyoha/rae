@@ -29,7 +29,7 @@ func setEntityPosition(
   position: view Vec3
 ) {
   if componentHas(this: transforms, entityId: entityId) {
-    let transform: mod Transform3D => componentMod(this: transforms, entityId: entityId)
+    let transform: mod Transform3D = componentMod(this: transforms, entityId: entityId)
     transform.position = position
   } else {
     var transform: Transform3D = createTransform3D()
@@ -104,7 +104,7 @@ func physicsPushSystem(
     if stamp is rigidBody.syncedTransformStamp {
       continue
     }
-    let transform: view Transform3D => componentView(this: transforms, entityId: entityId)
+    let transform: view Transform3D = componentView(this: transforms, entityId: entityId)
     unsafe {
       if rigidBody.bodyType is BodyType.kinematicBody {
         b3Body_SetTargetTransform(
@@ -123,7 +123,7 @@ func physicsPushSystem(
         )
       }
     }
-    let synced: mod RigidBody => componentMod(this: rigidBodies, entityId: entityId)
+    let synced: mod RigidBody = componentMod(this: rigidBodies, entityId: entityId)
     synced.syncedTransformStamp = stamp
   }
 }
@@ -146,7 +146,7 @@ func setEntityPose(
   entityId: view EntityId
   pose: view Transform
 ) {
-  let transform: mod Transform3D => componentMod(this: transforms, entityId: entityId)
+  let transform: mod Transform3D = componentMod(this: transforms, entityId: entityId)
   transform.position = pose.position
   transform.rotation = pose.rotation
 }
@@ -177,7 +177,7 @@ func physicsPullSystem(
       )
       if componentHas(this: rigidBodies, entityId: entityId) {
         let stamp: Int = componentModStamp(this: transforms, entityId: entityId)
-        let rigidBody: mod RigidBody => componentMod(this: rigidBodies, entityId: entityId)
+        let rigidBody: mod RigidBody = componentMod(this: rigidBodies, entityId: entityId)
         rigidBody.syncedTransformStamp = stamp
       }
     }

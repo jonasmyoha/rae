@@ -32,13 +32,13 @@ func main() {
   log(v2.dx)
   var point: Point = { x: 0.0, y: 0.0 }
   # Mutable binding
-  let pointRef: mod Point => point
+  let pointRef: mod Point = point
   pointRef.x = 10.0
   # 3. Complex types: mod alias
   log("p.x after pRef modification (should be 10.0):")
   log(point.x)
   var target: Point = { x: 5.0, y: 5.0 }
-  let selected: mod Point => target
+  let selected: mod Point = target
   log("Selected point exists, moving it...")
   updatePosition(point: selected, v: v1)
   log("target.x after update (should be 6.0):")

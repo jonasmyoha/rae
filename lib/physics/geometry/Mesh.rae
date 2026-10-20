@@ -287,7 +287,7 @@ func splitBinnedSah(
     loop var i: Int = 0, i < count, ++i {
       let primitive: MeshPrimitive = primitives.copyAtDefault(index: start + i)
       let index: Int = (factor * (componentOf(vector: primitive.center, axis: axis) - lower)) as Int
-      if let bucket: mod MeshBucket => buckets.modAt(index: index) {
+      if let bucket: mod MeshBucket = buckets.modAt(index: index) {
         bucket.count = bucket.count + 1
         bucket.bounds = union(first: bucket.bounds, second: primitive.aabb)
       }
@@ -532,7 +532,7 @@ func buildMeshNode(
       lengthUnitsPerMeter: lengthUnitsPerMeter
     )
     let aabb: Aabb = union(first: split.leftBounds, second: split.rightBounds)
-    if let node: mod MeshNode => nodes.modAt(index: index) {
+    if let node: mod MeshNode = nodes.modAt(index: index) {
       node.kind = split.axis
       node.count = right.index - index
       node.lowerBound = aabb.lowerBound
@@ -578,7 +578,7 @@ func sortMeshTriangles(mesh: mod PhysicsMeshData) ret Bool {
         triangles.add(value: mesh.triangles.copyAtDefault(index: index))
         materials.add(value: mesh.materialIndices.copyAtDefault(index: index))
       }
-      if let stored: mod MeshNode => mesh.nodes.modAt(index: nodeIndex) {
+      if let stored: mod MeshNode = mesh.nodes.modAt(index: nodeIndex) {
         stored.triangleOffset = offset
       }
       offset = offset + node.count
@@ -684,7 +684,7 @@ func identifyMeshEdges(mesh: mod PhysicsMeshData) {
     let edge: MeshEdge = edges.copyAtDefault(index: i)
     let key: Int = (edge.vertex1 shl 32) bitor edge.vertex2
     if let otherIndex: Int = map.get(k: key) {
-      if let base: mod MeshEdge => edges.modAt(index: otherIndex) {
+      if let base: mod MeshEdge = edges.modAt(index: otherIndex) {
         if base.triangleCount is 1 {
           base.triangle2 = edge.triangle1
           base.triangleEdgeIndex2 = edge.triangleEdgeIndex1

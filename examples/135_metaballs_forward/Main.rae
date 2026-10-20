@@ -603,7 +603,7 @@ func main() ret Int {
           # draws into the G-buffer pass, of which only the depth and normals
           # are kept
           ensureRendererResources(renderer: renderer)
-          if let resources: mod GpuResources => renderer.gpuResources {
+          if let resources: mod GpuResources = renderer.gpuResources {
             Gbuffer.beginPass(
               cache: renderer.passes.gbuffer
               resources: resources
@@ -649,7 +649,7 @@ func main() ret Int {
             light: light
             aspect: aspect
           )
-          if let resources: mod GpuResources => renderer.gpuResources {
+          if let resources: mod GpuResources = renderer.gpuResources {
             if uiState.activeScene is 1 {
               drawScene(
                 cache: renderer.passes.gbuffer

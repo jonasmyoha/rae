@@ -16,10 +16,10 @@ func main() {
   componentSet(this: vels, entityId: e1, data: Velocity { dx: 3, dy: 4 })
 
   # Mutate two fields through the mod ref — no componentSet.
-  let v: mod Velocity => componentMod(this: vels, entityId: e1)
+  let v: mod Velocity = componentMod(this: vels, entityId: e1)
   v.dx = v.dx + 10
   v.dy = 100
-  let got: view Velocity => componentView(this: vels, entityId: e1)
+  let got: view Velocity = componentView(this: vels, entityId: e1)
   log("write-through: {got.dx},{got.dy}")
 
   # Mutating a componentCopy COPY must NOT touch storage.
@@ -28,20 +28,20 @@ func main() {
     snapshot = copied
   }
   snapshot.dx = 999
-  let after: view Velocity => componentView(this: vels, entityId: e1)
+  let after: view Velocity = componentView(this: vels, entityId: e1)
   log("copy leaked: {after.dx is 999}")
 
   # Gameplay loop: integrate in place over 3 frames.
   loop var step: Int = 0, step < 3, ++step {
-    let velocity: mod Velocity => componentMod(this: vels, entityId: e1)
+    let velocity: mod Velocity = componentMod(this: vels, entityId: e1)
     velocity.dx = velocity.dx + 1
   }
-  let done: view Velocity => componentView(this: vels, entityId: e1)
+  let done: view Velocity = componentView(this: vels, entityId: e1)
   log("after loop: {done.dx}")
 
   # componentMod eagerly bumps the table generation (change-detection).
   let g0: Int = componentTableGeneration(this: vels)
-  let vm2: mod Velocity => componentMod(this: vels, entityId: e1)
+  let vm2: mod Velocity = componentMod(this: vels, entityId: e1)
   vm2.dy = vm2.dy + 1
   log("generation advanced: {componentTableGeneration(this: vels) > g0}")
 }

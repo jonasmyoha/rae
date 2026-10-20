@@ -18,7 +18,7 @@ type Cell {
 
 # #814: a mod borrow must end before the table is mutated again — scope it here.
 func setViaMod(t: mod ComponentTable(Cell), entityId: view EntityId, v: view Int) {
-  let m: mod Cell => componentMod(this: t, entityId: entityId)
+  let m: mod Cell = componentMod(this: t, entityId: entityId)
   m.v = v
 }
 

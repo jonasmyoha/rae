@@ -81,7 +81,7 @@ func createUiInput() pub ret UiInput {
 
 func uiEntityActive(world: view UiWorld, entityId: view EntityId) ret Bool {
   if componentHas(this: world.actives, entityId: entityId) {
-    let active: view Active => componentView(this: world.actives, entityId: entityId)
+    let active: view Active = componentView(this: world.actives, entityId: entityId)
     ret active.value
   }
   ret true
@@ -123,14 +123,14 @@ func uiPointInEntityTarget(
   if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) is false {
     ret false
   }
-  let wt: view WorldTransform2D => componentView(
+  let wt: view WorldTransform2D = componentView(
     this: uiSystems.transform2d.worldTransforms
     entityId: entityId
   )
   if worldVisualOf(world: world, uiSystems: uiSystems, entityId: entityId).visible is false {
     ret false
   }
-  let cr: view ComputedRect => componentView(
+  let cr: view ComputedRect = componentView(
     this: uiSystems.layout.computedRects
     entityId: entityId
   )
@@ -158,7 +158,7 @@ func uiHitTestEntity(
       ret noEntity()
     }
     if componentHas(this: world.childrens, entityId: entityId) {
-      let children: view Children => componentView(this: world.childrens, entityId: entityId)
+      let children: view Children = componentView(this: world.childrens, entityId: entityId)
       var i: Int = children.ids.length - 1
       loop i >= 0 {
         let child: EntityId = rae_ext_rae_buf_get(buf: children.ids.data, index: i)
@@ -336,7 +336,7 @@ func uiWheelRouteEntity(
     }
     var route: UiWheelRoute = { blocked: false, target: noEntity() }
     if componentHas(this: world.childrens, entityId: entityId) {
-      let children: view Children => componentView(this: world.childrens, entityId: entityId)
+      let children: view Children = componentView(this: world.childrens, entityId: entityId)
       var i: Int = children.ids.length - 1
       loop i >= 0 and route.blocked is false and isNone(this: route.target) {
         let child: EntityId = rae_ext_rae_buf_get(buf: children.ids.data, index: i)
@@ -474,7 +474,7 @@ func updateUiInput(input: mod UiInput, world: mod UiWorld, uiSystems: mod UiSyst
   if released {
     if isNone(this: input.hoveredEntityId) is false {
       if input.hoveredEntityId is input.pressedEntityId {
-        let click: view OnClick => componentView(
+        let click: view OnClick = componentView(
           this: world.onClicks
           entityId: input.hoveredEntityId
         )
