@@ -27,8 +27,17 @@ if [ ! -d "$TEST_DIR" ]; then
   exit 0
 fi
 
-# Find all test directories (directories containing Main.rae)
-TEST_FILES=$(find "$TEST_DIR" \( -name "Main.rae" -o -name "main.rae" \) | sort)
+# Find all test directories (directories containing Main.rae). With a name
+# filter, only the directories that can match it (the name itself, or a
+# number's `<number>_*`): the loop below still checks each name exactly, but
+# it no longer walks all ~850 cases for one, which cost ~5 s per case when the
+# parallel runner calls this script once per case.
+if [ -n "$TEST_NAME_FILTER" ]; then
+  TEST_FILES=$(find "$TEST_DIR" \( -path "*/$TEST_NAME_FILTER/Main.rae" -o -path "*/$TEST_NAME_FILTER/main.rae" \
+    -o -path "*/${TEST_NAME_FILTER}_*/Main.rae" -o -path "*/${TEST_NAME_FILTER}_*/main.rae" \) | sort)
+else
+  TEST_FILES=$(find "$TEST_DIR" \( -name "Main.rae" -o -name "main.rae" \) | sort)
+fi
 
 if [ -z "$TEST_FILES" ]; then
   echo "No test files found in $TEST_DIR"
