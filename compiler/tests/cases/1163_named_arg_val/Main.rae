@@ -1,0 +1,27 @@
+# `val` is a keyword that is also allowed as a name, so a parameter may be
+# called `val`, and a call names it like any other argument:
+# Math.clamp(val: ...) used to fail to parse at `val:`, first argument or
+# not, in a call and in a method call.
+import Math
+
+type Box {
+  size: Int
+}
+
+func scaled(factor: view Int, val: view Int) ret Int {
+  ret factor * val
+}
+
+func grown(this: view Box, val: view Int) ret Int {
+  ret this.size + val
+}
+
+func main() {
+  log("{Math.clamp(val: 1.5, low: 0.0, high: 1.0)}")
+  log("{Math.clamp(val: -3, low: 0, high: 10)}")
+  let half: Float = 1.0 - Math.clamp(val: 0.25, low: 0.0, high: 1.0)
+  log("{half}")
+  log("{scaled(factor: 6, val: 7)}")
+  let box: Box = { size: 2 }
+  log("{box.grown(val: 3)}")
+}

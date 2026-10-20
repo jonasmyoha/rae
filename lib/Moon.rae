@@ -100,7 +100,7 @@ func eclipticToEquatorial(
   ) * Math.sin(x: beta)
   ret MoonEquatorial {
     rightAscension: Math.atan2(y: y, x: x)
-    declination: Math.asin(x: Math.min(a: Math.max(a: z, b: -1.0), b: 1.0))
+    declination: Math.asin(x: Math.clamp(val: z, low: -1.0, high: 1.0))
   }
 }
 
@@ -112,7 +112,7 @@ func towardHourAngle(
   declination: view Float
   latitudeDeg: view Float
 ) ret Vec3 {
-  let phi: Float = moonRadians(degrees: Math.min(a: Math.max(a: latitudeDeg, b: -90.0), b: 90.0))
+  let phi: Float = moonRadians(degrees: Math.clamp(val: latitudeDeg, low: -90.0, high: 90.0))
   let cosD: Float = Math.cos(x: declination)
   ret Vec3.create(
     x: -cosD * Math.sin(x: hourAngle)
@@ -193,9 +193,9 @@ func moonLightLevel(moon: view MoonState) ret Float {
   if moon.up <= 0.0 {
     ret 0.0
   }
-  let rise: Float = Math.min(a: Math.max(a: moon.up / 0.15, b: 0.0), b: 1.0)
+  let rise: Float = Math.clamp(val: moon.up / 0.15, low: 0.0, high: 1.0)
   let fullness: Float = Math.pow(
-    base: Math.min(a: Math.max(a: moon.illumination, b: 0.0), b: 1.0)
+    base: Math.clamp(val: moon.illumination, low: 0.0, high: 1.0)
     exp: 1.5
   )
   ret fullness * rise * rise * (3.0 - 2.0 * rise)
