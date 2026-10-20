@@ -18,6 +18,7 @@ open app3d/WalkerPhysicsChecks
 open app3d/WalkerTerrain
 open box3d/ecs/PhysicsSpawn
 open box3d/ecs/NatureBodies
+open app3d/CharacterBodies
 
 # Fixed steps the walk at a trunk may take (8 s)
 const trunkTestWalkSteps: Int = 480
@@ -243,7 +244,11 @@ func runIslandTrunkTest(
     var lifted: Transform3D = placed
     lifted.position.z = placed.position.z + 30.0
     componentSet(this: transforms, entityId: treeEntityId, data: lifted)
-    stepPhysicsBodies(physicsSystem: physicsSystem, transforms: transforms)
+    stepPhysicsBodies(
+      physics: physicsSystem.physics
+      rigidBodies: physicsSystem.rigidBodies
+      transforms: transforms
+    )
     let followed: Bool = rayHitsEntity(
       physicsSystem: physicsSystem
       entityId: treeEntityId
@@ -258,7 +263,11 @@ func runIslandTrunkTest(
       halfSpan: 3.0
     ) is false
     componentSet(this: transforms, entityId: treeEntityId, data: placed)
-    stepPhysicsBodies(physicsSystem: physicsSystem, transforms: transforms)
+    stepPhysicsBodies(
+      physics: physicsSystem.physics
+      rigidBodies: physicsSystem.rigidBodies
+      transforms: transforms
+    )
     let passed: Bool = blocksRay and stoppedAtBark and followed
     log(
       "[trunktest] blocksRay={blocksRay}, closest {closest} m from the trunk (stoppedAtBark={stoppedAtBark}), followed={followed}, passed={passed}"

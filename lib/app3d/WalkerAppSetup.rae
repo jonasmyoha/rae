@@ -23,6 +23,7 @@ open app3d/WalkerTerrainBodies
 open app3d/WalkerWorld
 open app3d/IslandForest
 open app3d/WideForest
+open app3d/CharacterBodies
 
 # The world the walker is on: the small island in the sea (136, 137), or a
 # wide forest world with lakes and no island (143)
@@ -335,10 +336,10 @@ func createWalkerAppPhysics(
   } else if addIslandGround(physicsSystem: physicsSystem) is false {
     log("[physics] Box3D refused the island height field")
   }
-  addCharacterBody(physicsSystem: physicsSystem, entityId: heroEntityId, feet: heroFeet)
+  addCharacterBody(characters: physicsSystem.characters, entityId: heroEntityId, feet: heroFeet)
   loop let crowdEntityId: view EntityId in crowdEntities {
     addCharacterBody(
-      physicsSystem: physicsSystem
+      characters: physicsSystem.characters
       entityId: crowdEntityId
       feet: controllerFeet(
         controller: controllerOf(controllers: world.controllers, entityId: crowdEntityId)

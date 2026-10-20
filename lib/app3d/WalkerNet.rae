@@ -9,6 +9,7 @@ open ecs/World
 open app3d/NetSeam
 open app3d/WalkerPhysics
 open app3d/WalkerWorld
+open app3d/CharacterBodies
 
 # Spawn/despawn smoke test for the ECS seams (#746): the net seam's recycling
 # check, then a Box3D cube high above the island, stepped, must have moved;
@@ -25,7 +26,7 @@ func seamSelfTest(world: mod WalkerWorld, physicsSystem: mod WalkerPhysics) {
     color: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
   )
   setBodyVelocity(
-    physicsSystem: physicsSystem
+    rigidBodies: physicsSystem.rigidBodies
     entityId: body
     velocity: Vec3.create(x: 1.0, y: 0.0, z: 0.0)
   )
@@ -34,7 +35,11 @@ func seamSelfTest(world: mod WalkerWorld, physicsSystem: mod WalkerPhysics) {
   let beforeX: Float = componentView(this: world.transforms, entityId: body).position.x
   let beforeZ: Float = componentView(this: world.transforms, entityId: body).position.z
   loop var step: Int = 0, step < 6, ++step {
-    stepPhysicsBodies(physicsSystem: physicsSystem, transforms: world.transforms)
+    stepPhysicsBodies(
+      physics: physicsSystem.physics
+      rigidBodies: physicsSystem.rigidBodies
+      transforms: world.transforms
+    )
   }
   let after: view Transform3D = componentView(this: world.transforms, entityId: body)
   # x advances with the velocity, z falls under gravity — both must have moved.
