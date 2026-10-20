@@ -1,0 +1,235 @@
+# The "..." menu's items come from the scene: any node under the menu node
+# is the menu's. An app's own item (a node with its own OnClick in the menu)
+# fires its action for the app, and the menu closes as for Rae's items; a
+# press on it does not count as a press elsewhere. Before, the menu knew a
+# fixed list of item nodes, so a press on an app's item closed the menu
+# before its click (the release) came.
+import String
+open ui/Components
+open ui/Ecs
+open ui/Scene
+open ui/SceneLoader
+open ui/UiSystems
+open ui/inputSystem/InputSystem
+open ecs/Entity
+open ecs/Event
+open Scene3d
+open app3d/CameraRig
+open app3d/UiShell
+open app3d/UiModes
+open app3d/ModeMenu
+
+func node(id: view String, rest: view String) ret String {
+  ret "\"{id}\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":100,\"h\":20\}{rest}\}"
+}
+
+func buildScene() ret String {
+  var s: String = ""
+  s = s.concat(other: "\{")
+  s = s.concat(other: "\"type\":\"Scene\",\"version\":2,\"sceneId\":\"menu\",\"root\":\"Root\",")
+  s = s.concat(other: "\"nodes\":\{")
+  s = s.concat(
+    other: node(
+      id: "Root"
+      rest: ",\"Layout\":\{\"type\":\"Vertical\"\},\"Children\":[\"ModeButton\",\"ContextMenu\",\"Outside\"]"
+    )
+  )
+  s = s.concat(other: ",")
+  s = s.concat(
+    other: node(id: "ModeButton", rest: ",\"OnClick\":\{\"actionId\":\"modeMenu.toggle\"\}")
+  )
+  s = s.concat(other: ",")
+  s = s.concat(
+    other: node(
+      id: "ContextMenu"
+      rest: ",\"Layout\":\{\"type\":\"Vertical\"\},\"Children\":[\"MenuCameraItem\",\"AppItem\"]"
+    )
+  )
+  s = s.concat(other: ",")
+  s = s.concat(
+    other: node(
+      id: "MenuCameraItem"
+      rest: ",\"OnClick\":\{\"actionId\":\"menu.cameraRotation\"\},\"Children\":[\"MenuCameraLabel\"]"
+    )
+  )
+  s = s.concat(other: ",")
+  s = s.concat(
+    other: node(id: "MenuCameraLabel", rest: ",\"Text\":\{\"text\":\"\",\"styleId\":\"body\"\}")
+  )
+  s = s.concat(other: ",")
+  s = s.concat(
+    other: node(
+      id: "AppItem"
+      rest: ",\"OnClick\":\{\"actionId\":\"app.ownThing\"\},\"Children\":[\"AppLabel\"]"
+    )
+  )
+  s = s.concat(other: ",")
+  s = s.concat(
+    other: node(id: "AppLabel", rest: ",\"Text\":\{\"text\":\"Own thing\",\"styleId\":\"body\"\}")
+  )
+  s = s.concat(other: ",")
+  s = s.concat(other: node(id: "Outside", rest: ",\"OnClick\":\{\"actionId\":\"other.thing\"\}"))
+  s = s.concat(other: "\}")
+  s = s.concat(other: "\}")
+  ret s
+}
+
+# One frame: this frame's press (on `pressedNodeId`, "" for none) and click
+# (the action of `clickedNodeId`, "" for none), then the menu
+func frame(
+  step: view String
+  world: mod UiWorld
+  uiSystems: view UiSystems
+  menu: mod ModeMenuState
+  rig: mod CameraRig
+  pressedNodeId: view String
+  clickedNodeId: view String
+  clickedActionId: view String
+) {
+  frameAdvance(UiAction, this: world.uiActions)
+  var input: UiInput = createUiInput()
+  if pressedNodeId.length() > 0 {
+    input.pointer.pressed = true
+    input.pressedEntityId = nodeEntityFor(world: world, nodeId: pressedNodeId)
+  }
+  if clickedNodeId.length() > 0 {
+    eventSend(
+      UiAction
+      this: world.uiActions
+      value: UiAction {
+        entityId: nodeEntityFor(world: world, nodeId: clickedNodeId)
+        actionId: clickedActionId
+      }
+    )
+  }
+  let changed: Bool = updateModeMenuItems(
+    world: world
+    uiSystems: uiSystems
+    menu: menu
+    input: input
+    rig: rig
+  )
+  log(
+    "{step}: open {menu.open}, the app sees its action {modeMenuTapped(
+      world: world
+      actionId: "app.ownThing"
+    )}, camera reversed {rig.reverseDrag}"
+  )
+}
+
+func main() {
+  let scene: Scene = parseScene(source: buildScene())
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 400.0
+  world.layoutH = 400.0
+  let root: EntityId = loadSceneIntoPage(
+    world: world
+    uiSystems: uiSystems
+    scene: scene
+    pageId: ""
+  )
+  var camera: Camera3d = defaultCamera3d()
+  var rig: CameraRig = createCameraRig(camera: camera)
+  var menu: ModeMenuState = createModeMenuState()
+  frame(
+    step: "nothing"
+    world: world
+    uiSystems: uiSystems
+    menu: menu
+    rig: rig
+    pressedNodeId: ""
+    clickedNodeId: ""
+    clickedActionId: ""
+  )
+  frame(
+    step: "the button pressed"
+    world: world
+    uiSystems: uiSystems
+    menu: menu
+    rig: rig
+    pressedNodeId: "ModeButton"
+    clickedNodeId: ""
+    clickedActionId: ""
+  )
+  frame(
+    step: "the button clicked"
+    world: world
+    uiSystems: uiSystems
+    menu: menu
+    rig: rig
+    pressedNodeId: ""
+    clickedNodeId: "ModeButton"
+    clickedActionId: "modeMenu.toggle"
+  )
+  frame(
+    step: "the app's item pressed"
+    world: world
+    uiSystems: uiSystems
+    menu: menu
+    rig: rig
+    pressedNodeId: "AppItem"
+    clickedNodeId: ""
+    clickedActionId: ""
+  )
+  frame(
+    step: "the app's item clicked"
+    world: world
+    uiSystems: uiSystems
+    menu: menu
+    rig: rig
+    pressedNodeId: ""
+    clickedNodeId: "AppItem"
+    clickedActionId: "app.ownThing"
+  )
+  frame(
+    step: "opened again"
+    world: world
+    uiSystems: uiSystems
+    menu: menu
+    rig: rig
+    pressedNodeId: ""
+    clickedNodeId: "ModeButton"
+    clickedActionId: "modeMenu.toggle"
+  )
+  frame(
+    step: "its label pressed"
+    world: world
+    uiSystems: uiSystems
+    menu: menu
+    rig: rig
+    pressedNodeId: "AppLabel"
+    clickedNodeId: ""
+    clickedActionId: ""
+  )
+  frame(
+    step: "Rae's camera item clicked"
+    world: world
+    uiSystems: uiSystems
+    menu: menu
+    rig: rig
+    pressedNodeId: ""
+    clickedNodeId: "MenuCameraItem"
+    clickedActionId: "menu.cameraRotation"
+  )
+  frame(
+    step: "opened again"
+    world: world
+    uiSystems: uiSystems
+    menu: menu
+    rig: rig
+    pressedNodeId: ""
+    clickedNodeId: "ModeButton"
+    clickedActionId: "modeMenu.toggle"
+  )
+  frame(
+    step: "a press outside the menu"
+    world: world
+    uiSystems: uiSystems
+    menu: menu
+    rig: rig
+    pressedNodeId: "Outside"
+    clickedNodeId: ""
+    clickedActionId: ""
+  )
+}

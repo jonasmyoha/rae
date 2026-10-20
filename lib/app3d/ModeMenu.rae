@@ -36,6 +36,8 @@ open ui/nodeBindingSystem/NodeBindingSystem
 open ui/UiSystems
 open ui/inputSystem/InputSystem
 open ecs/Entity
+open ecs/ComponentTable
+open ecs/Event
 open HotReload
 
 # The button's and the items' action ids
@@ -63,12 +65,9 @@ const modeMenuMobileItemNodeId: String = "MenuMobileItem"
 
 const modeMenuMobileLabelNodeId: String = "MenuMobileLabel"
 
-# Where a press may land without closing the menu: the button and the items
-const modeMenuPressNodeIds: String = "ModeButton MenuEditorItem MenuCameraItem MenuGameItem MenuResetItem MenuMobileItem MenuSkipHoursItem MenuMoonItem"
-
 # The clock items a scene with a sky may add (the walkers do): skip some hours
-# ahead, switch the moon. The menu closes when one is chosen; the app does
-# what it says (app3d/WalkerUi).
+# ahead, switch the moon. Like any app's own item, the app does what it says
+# (app3d/WalkerUi) and the menu closes as for its own.
 const modeMenuSkipHoursActionId: String = "menu.skipHours"
 
 const modeMenuMoonActionId: String = "menu.moon"
@@ -118,14 +117,48 @@ func modeMenuTapped(world: view UiWorld, actionId: view String) ret Bool {
   ret false
 }
 
-# Is `entityId` the button or one of the menu's items?
-func isModeMenuPressNode(world: view UiWorld, entityId: view EntityId) ret Bool {
+# Is `entityId` the menu node or anything under it (an item, Rae's or the
+# app's, or an item's label)? The scene says what the items are.
+func inModeMenu(world: view UiWorld, uiSystems: view UiSystems, entityId: view EntityId) ret Bool {
+  let menuNode: EntityId = nodeEntityFor(world: world, nodeId: modeMenuNodeId)
+  if isNone(this: menuNode) {
+    ret false
+  }
+  var current: EntityId = entityId
+  loop isNone(this: current) is false {
+    if current is menuNode {
+      ret true
+    }
+    if componentHas(this: uiSystems.hierarchy.parents, entityId: current) is false {
+      ret false
+    }
+    let parent: view Parent = componentView(this: uiSystems.hierarchy.parents, entityId: current)
+    current = { index: parent.parent.index, generation: parent.parent.generation }
+  }
+  ret false
+}
+
+# Is `entityId` the button or in the menu: a press there does not close it?
+func isModeMenuPressNode(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+) ret Bool {
   if isNone(this: entityId) {
     ret false
   }
-  let nodeIds: List(String) = modeMenuPressNodeIds.split(sep: " ")
-  loop var i: Int = 0, i < nodeIds.length, ++i {
-    if nodeEntityFor(world: world, nodeId: nodeIds.copyAtDefault(index: i)) is entityId {
+  if nodeEntityFor(world: world, nodeId: modeMenuButtonNodeId) is entityId {
+    ret true
+  }
+  ret inModeMenu(world: world, uiSystems: uiSystems, entityId: entityId)
+}
+
+# Was an item in the menu chosen this frame: any UI action from a node in it,
+# whoever handles it (Rae's own here, an app's in its systems)?
+func modeMenuItemChosen(world: view UiWorld, uiSystems: view UiSystems) ret Bool {
+  loop var i: Int = 0, i < eventCount(UiAction, this: world.uiActions), ++i {
+    let action: UiAction = eventAt(UiAction, this: world.uiActions, i: i)
+    if inModeMenu(world: world, uiSystems: uiSystems, entityId: action.entityId) {
       ret true
     }
   }
@@ -155,10 +188,10 @@ func updateModeMenu(
   }
   if updateModeMenuItems(
     world: world
+    uiSystems: uiSystems
     menu: uiModes.modeMenu
     input: input
     rig: rig
-    modeChosen: openEditor or backToGame
   ) {
     changed = true
   }
@@ -167,20 +200,21 @@ func updateModeMenu(
 
 # The menu without the modes (an app with no GAME / EDITOR modes, whose
 # menu has the camera and reset items): reverse the camera's drag, start the
-# program again, open or close it. `modeChosen` whether a mode item was chosen
-# this frame. True when the UI must be laid out again. Its labels and whether
+# program again, open or close it. Any item in the menu node, Rae's or the
+# app's, closes it when chosen. True when the UI must be laid out again. Its labels and whether
 # it is open are bound to their nodes (ui/nodeBindingSystem), so a frame or
 # state that restyles the menu keeps them.
 func updateModeMenuItems(
   world: mod UiWorld
+  uiSystems: view UiSystems
   menu: mod ModeMenuState
   input: view UiInput
   rig: mod CameraRig
-  modeChosen: view Bool
 ) ret Bool {
   let cameraTapped: Bool = modeMenuTapped(world: world, actionId: modeMenuCameraRotationActionId)
   let pressedElsewhere: Bool = input.pointer.pressed and isModeMenuPressNode(
     world: world
+    uiSystems: uiSystems
     entityId: input.pressedEntityId
   ) is false
   var changed: Bool = false
@@ -225,10 +259,7 @@ func updateModeMenuItems(
   let open: Bool = modeMenuOpenAfter(
     open: menu.open
     buttonTapped: modeMenuTapped(world: world, actionId: modeMenuToggleActionId)
-    itemChosen: modeChosen or cameraTapped or resetTapped or mobileTapped or modeMenuTapped(
-      world: world
-      actionId: modeMenuSkipHoursActionId
-    ) or modeMenuTapped(world: world, actionId: modeMenuMoonActionId)
+    itemChosen: modeMenuItemChosen(world: world, uiSystems: uiSystems)
     pressedElsewhere: pressedElsewhere
   )
   if open is not menu.open or menu.openWritten is false {
