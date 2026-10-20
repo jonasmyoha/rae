@@ -1,0 +1,229 @@
+# app3d/KnockedDown and app3d/CameraKnockdownFollow: a character knocked
+# over carries a KnockedDown component (the body it lies as, how long it has
+# been down, when it may get up, whether it wants to, how long that body has
+# lain at rest); stepKnockedDown takes it off when the character may get up,
+# only where the body came to rest (or after getUpLatestSeconds whatever).
+# The character camera moves over to the lying body and back, eased.
+import Math
+import Vec3
+import Quat
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Transform
+open app3d/KnockedDown
+open app3d/CameraKnockdownFollow
+
+func near(a: view Float, b: view Float) ret Bool {
+  ret Math.abs(value: a - b) < 0.001
+}
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func placeBody(transforms: mod ComponentTable(Transform3D), body: view EntityId, at: view Vec3) {
+  let placed: Transform3D = {
+    position: at
+    rotation: Quat.identity()
+    scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
+  }
+  componentSet(this: transforms, entityId: body, data: placed)
+}
+
+func holdDown(knockedDown: mod ComponentTable(KnockedDown), entityId: view EntityId) {
+  let held: mod KnockedDown = componentMod(this: knockedDown, entityId: entityId)
+  held.wantsUp = false
+}
+
+func main() {
+  # ----- the rules --------------------------------------------------------
+  check(
+    label: "nobody bounces straight back up"
+    ok: canGetUp(
+      downSeconds: 0.5
+      readyAfterSeconds: 1.0
+      wantsUp: true
+      restSeconds: 0.5
+    ) is false
+  )
+  check(
+    label: "once ready and at rest, wanting to is enough"
+    ok: canGetUp(
+      downSeconds: 1.2
+      readyAfterSeconds: 1.0
+      wantsUp: true
+      restSeconds: 0.5
+    )
+  )
+  check(
+    label: "a player lies there until they move"
+    ok: canGetUp(
+      downSeconds: 9.0
+      readyAfterSeconds: 1.0
+      wantsUp: false
+      restSeconds: 5.0
+    ) is false
+  )
+  check(
+    label: "a body still sliding does not get up, nor one only just stopped"
+    ok: canGetUp(
+      downSeconds: 1.2
+      readyAfterSeconds: 1.0
+      wantsUp: true
+      restSeconds: 0.0
+    ) is false and canGetUp(
+      downSeconds: 1.2
+      readyAfterSeconds: 1.0
+      wantsUp: true
+      restSeconds: getUpRestSeconds - 0.05
+    ) is false
+  )
+  check(
+    label: "a body that never quite settles still gets up in the end"
+    ok: canGetUp(
+      downSeconds: getUpLatestSeconds
+      readyAfterSeconds: 1.0
+      wantsUp: true
+      restSeconds: 0.0
+    )
+  )
+  check(
+    label: "at rest is the body moving under 0.4 m/s"
+    ok: hipsAtRest(moved: 0.004, deltaTime: 1.0 / 60.0) and hipsAtRest(
+      moved: 0.05
+      deltaTime: 1.0 / 60.0
+    ) is false
+  )
+  # ----- the system: a body sliding 3 m/s for 1 s, then lying still ---------
+  var transforms: ComponentTable(Transform3D) = createComponentTable(Transform3D)
+  var knockedDown: ComponentTable(KnockedDown) = createComponentTable(KnockedDown)
+  let character: EntityId = { index: 2, generation: 0 }
+  let hips: EntityId = { index: 9, generation: 0 }
+  let other: EntityId = { index: 3, generation: 0 }
+  let otherHips: EntityId = { index: 10, generation: 0 }
+  placeBody(transforms: transforms, body: hips, at: Vec3.create(x: 0.0, y: 0.0, z: 0.2))
+  placeBody(transforms: transforms, body: otherHips, at: Vec3.create(x: 5.0, y: 0.0, z: 0.2))
+  knockDown(
+    knockedDown: knockedDown
+    entityId: character
+    body: hips
+    readyAfterSeconds: 0.5
+    bodyAt: Vec3.create(x: 0.0, y: 0.0, z: 0.2)
+  )
+  knockDown(
+    knockedDown: knockedDown
+    entityId: other
+    body: otherHips
+    readyAfterSeconds: 0.5
+    bodyAt: Vec3.create(x: 5.0, y: 0.0, z: 0.2)
+  )
+  # The other one does not want up (a player not touching the controls)
+  holdDown(knockedDown: knockedDown, entityId: other)
+  let step: Float = 1.0 / 60.0
+  var upAt: Float = -1.0
+  var upX: Float = 0.0
+  var x: Float = 0.0
+  loop var i: Int = 1, i <= 240 and upAt < 0.0, ++i {
+    if i <= 60 {
+      x = x + 3.0 * step
+      placeBody(transforms: transforms, body: hips, at: Vec3.create(x: x, y: 0.0, z: 0.2))
+    }
+    let up: List(EntityId) = stepKnockedDown(
+      knockedDown: knockedDown
+      transforms: transforms
+      deltaTime: step
+    )
+    loop let entityId: view EntityId in up {
+      if entityId is character {
+        upAt = i.toFloat() * step
+        upX = x
+      }
+    }
+  }
+  check(
+    label: "it gets up only once the body has lain at rest a moment, where it came to rest (up at {upAt} s, {upX} m)"
+    ok: upAt > 1.0 + getUpRestSeconds - 0.02 and upAt < 1.0 + getUpRestSeconds + 0.05 and near(
+      a: upX
+      b: 3.0
+    )
+  )
+  check(
+    label: "getting up takes the component off; one that does not want up stays down"
+    ok: componentHas(this: knockedDown, entityId: character) is false and componentHas(
+      this: knockedDown
+      entityId: other
+    )
+  )
+  # ----- the camera's follow --------------------------------------------------
+  var blend: Float = 0.0
+  var steps: Int = 0
+  loop blend < 1.0 and steps < 1000 {
+    blend = followBlendStep(blend: blend, down: true, deltaTime: step)
+    steps = steps + 1
+  }
+  let seconds: Float = steps.toFloat() / 60.0
+  check(
+    label: "knocked down, the camera moves over to the body in a moment ({seconds} s)"
+    ok: near(a: blend, b: 1.0) and seconds > 0.2 and seconds < 0.6
+  )
+  let back: Float = followBlendStep(blend: 1.0, down: false, deltaTime: step)
+  check(
+    label: "down it stays; up again it eases back"
+    ok: followBlendStep(blend: 1.0, down: true, deltaTime: 0.5) is 1.0 and back < 1.0 and back > 0.9 and followBlendStep(
+      blend: 0.0
+      down: false
+      deltaTime: 0.5
+    ) is 0.0
+  )
+  let standing: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.9)
+  let lying: Vec3 = Vec3.create(x: 2.0, y: 0.0, z: 0.4)
+  let start: Vec3 = followTarget(controllerTarget: standing, ragdollTarget: lying, blend: 0.0)
+  let end: Vec3 = followTarget(controllerTarget: standing, ragdollTarget: lying, blend: 1.0)
+  let middle: Vec3 = followTarget(controllerTarget: standing, ragdollTarget: lying, blend: 0.5)
+  let early: Vec3 = followTarget(controllerTarget: standing, ragdollTarget: lying, blend: 0.1)
+  check(
+    label: "the target goes from the controller's to the body's, eased"
+    ok: near(a: start.x, b: 0.0) and near(a: start.z, b: 0.9) and near(a: end.x, b: 2.0) and near(
+      a: end.z
+      b: 0.4
+    ) and near(a: middle.x, b: 1.0) and early.x < 0.2
+  )
+  let look: Vec3 = ragdollFollowTarget(hips: Vec3.create(x: 5.0, y: 3.0, z: 0.1))
+  check(
+    label: "at a lying body the camera looks a little above its hips"
+    ok: near(a: look.x, b: 5.0) and near(a: look.y, b: 3.0) and look.z > 0.1 and look.z < 1.1
+  )
+  # The system: the camera over the still-down one, then back once it is up
+  var follow: KnockdownFollow = createKnockdownFollow()
+  var target: Vec3 = standing
+  loop var i: Int = 0, i < 60, ++i {
+    target = stepKnockdownFollow(
+      follow: follow
+      knockedDown: knockedDown
+      transforms: transforms
+      controlled: other
+      controllerTarget: standing
+      deltaTime: step
+    )
+  }
+  let over: Bool = near(a: target.x, b: 5.0) and near(a: target.z, b: 0.2 + ragdollFocusLift)
+  componentRemove(this: knockedDown, entityId: other)
+  loop var i: Int = 0, i < 60, ++i {
+    target = stepKnockdownFollow(
+      follow: follow
+      knockedDown: knockedDown
+      transforms: transforms
+      controlled: other
+      controllerTarget: standing
+      deltaTime: step
+    )
+  }
+  check(
+    label: "the follow system looks at the lying body, and back at the controller once up"
+    ok: over and near(a: target.x, b: 0.0) and near(a: target.z, b: 0.9) and follow.blend is 0.0
+  )
+}
