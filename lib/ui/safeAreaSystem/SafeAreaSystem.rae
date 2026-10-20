@@ -13,6 +13,7 @@
 # particular Viewport shape.
 #
 # See rae/docs/ui-viewport-and-safe-area-plan.md (Phase 1, item 2).
+import Gpu2d
 open ecs/ComponentTable
 open ui/UiSystems
 
@@ -47,4 +48,37 @@ func safeAreaSystem(world: mod UiWorld, uiSystems: mod UiSystems, insets: view I
       i = i + 1
     }
   }
+}
+
+# The OS's safe-area insets now (design units; 0 without a window)
+func osSafeInsets() ret Insets {
+  ret Insets {
+    l: Gpu2d.safeLeft()
+    t: Gpu2d.safeTop()
+    r: Gpu2d.safeRight()
+    b: Gpu2d.safeBottom()
+  }
+}
+
+# The step a layout pass starts with (runUiSystems, runScheduledUiSystems):
+# every node that asks for the safe area gets the screen's insets, the
+# simulated ones while the world has them, else the OS's
+func feedSafeArea(world: mod UiWorld, uiSystems: mod UiSystems) {
+  if world.safeInsetsSimulated {
+    let simulated: Insets = world.simulatedSafeInsets
+    safeAreaSystem(world: world, uiSystems: uiSystems, insets: simulated)
+  } else {
+    safeAreaSystem(world: world, uiSystems: uiSystems, insets: osSafeInsets())
+  }
+}
+
+# Lay the UI out as if the screen's safe area were `insets` (a device
+# simulator, a layout test), until clearSimulatedSafeInsets
+func setSimulatedSafeInsets(world: mod UiWorld, insets: view Insets) {
+  world.simulatedSafeInsets = Insets { l: insets.l, t: insets.t, r: insets.r, b: insets.b }
+  world.safeInsetsSimulated = true
+}
+
+func clearSimulatedSafeInsets(world: mod UiWorld) {
+  world.safeInsetsSimulated = false
 }

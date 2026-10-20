@@ -1,0 +1,35 @@
+# lib/ui/safeAreaSystem: feedSafeArea, the step every layout pass starts with,
+# gives every node that asks for the safe area (a SafeArea component) the
+# screen's insets: the OS's, or those a simulator or a layout test set on the
+# world (a phone's notch on a desktop), until it clears them.
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/World
+open ui/Ecs
+open ui/UiSystems
+open ui/Components
+open ui/safeAreaSystem/SafeAreaSystem
+
+func main() {
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  let root: EntityId = allocEntity(this: world.allocator)
+  componentSet(
+    this: world.safeAreas
+    entityId: root
+    data: SafeArea { extra: Insets { l: 0.0, t: 0.0, r: 0.0, b: 0.0 } }
+  )
+  feedSafeArea(world: world, uiSystems: uiSystems)
+  log(
+    "no window, no OS insets: {componentView(this: uiSystems.safeArea.safeInsets, entityId: root).insets.t is 0.0}"
+  )
+  setSimulatedSafeInsets(world: world, insets: Insets { l: 0.0, t: 59.0, r: 0.0, b: 34.0 })
+  feedSafeArea(world: world, uiSystems: uiSystems)
+  let simulated: Insets = componentView(this: uiSystems.safeArea.safeInsets, entityId: root).insets
+  log("a phone's notch, simulated: {simulated.t is 59.0 and simulated.b is 34.0}")
+  clearSimulatedSafeInsets(world: world)
+  feedSafeArea(world: world, uiSystems: uiSystems)
+  log(
+    "cleared, the OS's again: {componentView(this: uiSystems.safeArea.safeInsets, entityId: root).insets.t is 0.0}"
+  )
+}
