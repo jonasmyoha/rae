@@ -27,6 +27,7 @@ open box3d/ecs/PhysicsTypes
 open box3d/ecs/PhysicsComponents
 open box3d/ecs/PhysicsQueries
 open box3d/ecs/NatureBodies
+open app3d/CharacterBodies
 
 # Fixed steps the walk at the cubes may take (8 s), and the jump (3 s)
 const checkWalkSteps: Int = 480
@@ -226,7 +227,10 @@ func runCubeJumpCheck(
       yaw: yaw
     )
   }
-  let groundedBefore: Bool = characterGrounded(physicsSystem: physicsSystem, entityId: heroEntityId)
+  let groundedBefore: Bool = characterGrounded(
+    characters: physicsSystem.characters
+    entityId: heroEntityId
+  )
   let startZ: Float = componentView(this: controllers, entityId: heroEntityId).position.z
   var jump: InputIntent = standingIntent()
   jump.jump = true
@@ -253,7 +257,7 @@ func runCubeJumpCheck(
       a: peak
       b: componentView(this: controllers, entityId: heroEntityId).position.z - startZ
     )
-    if characterGrounded(physicsSystem: physicsSystem, entityId: heroEntityId) is false {
+    if characterGrounded(characters: physicsSystem.characters, entityId: heroEntityId) is false {
       leftGround = true
     } else if leftGround {
       landed = true
@@ -362,7 +366,7 @@ func placeHero(physicsSystem: mod WalkerPhysics, heroEntityId: view EntityId, fe
   )
   character.mover.transform.p.x = feet.x
   character.mover.transform.p.y = feet.y
-  character.mover.transform.p.z = feet.z + moverCenterAboveFeet
+  character.mover.transform.p.z = feet.z + moverCenterAboveFeet(character: character)
   character.mover.velocity.x = 0.0
   character.mover.velocity.y = 0.0
   character.mover.velocity.z = 0.0
@@ -416,7 +420,10 @@ func runRockBushCheck(
         yaw: 0.0
       )
       # The limit where the step began holds the step's speed
-      let speed: Float = characterSpeed(physicsSystem: physicsSystem, entityId: heroEntityId)
+      let speed: Float = characterSpeed(
+        characters: physicsSystem.characters
+        entityId: heroEntityId
+      )
       if insideLimit < bushNoLimit {
         steps = steps + 1
         fastest = Math.max(a: fastest, b: speed)
@@ -515,7 +522,11 @@ func poolFollows(
         focus: spot
         force: true
       )
-      stepPhysicsBodies(physicsSystem: physicsSystem, transforms: transforms)
+      stepPhysicsBodies(
+        physics: physicsSystem.physics
+        rigidBodies: physicsSystem.rigidBodies
+        transforms: transforms
+      )
       follows = rayHitsPool(physicsSystem: physicsSystem, foot: tree)
       break
     }
@@ -527,6 +538,10 @@ func poolFollows(
     focus: heroFeet
     force: true
   )
-  stepPhysicsBodies(physicsSystem: physicsSystem, transforms: transforms)
+  stepPhysicsBodies(
+    physics: physicsSystem.physics
+    rigidBodies: physicsSystem.rigidBodies
+    transforms: transforms
+  )
   ret follows
 }

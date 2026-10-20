@@ -1,0 +1,163 @@
+# app3d/CharacterBodies — a character's Box3D mover (lib/box3d/ecs
+# CharacterBody) and its ThirdPersonController, for any app's tables: where
+# the mover stands for a controller's feet, the controller read back from the
+# mover, the mover's speed and footing, a body's velocity, one physics step of
+# the bodies, and how many fixed steps a frame pays for. What an app does with
+# its movers each step (who drives them, what holds them) stays its own.
+import Math
+import Vec3
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Transform
+open box3d/ecs/PhysicsTypes
+open box3d/ecs/Physics
+open box3d/ecs/PhysicsComponents
+open box3d/ecs/PhysicsSpawn
+open box3d/ecs/PhysicsSystems
+open box3d/ecs/CharacterMover
+open box3d/Box3d
+open box3d/Box3dTypes
+open app3d/CharacterController
+open app3d/Characters
+
+# Where a mover's capsule middle rests above its feet: the pogo spring's rest
+# length to the lower sphere's centre, then half the capsule (moverRestHeight;
+# 1.4 m for Box3D's sample size)
+func moverCenterAboveFeet(character: view CharacterBody) ret Float {
+  ret moverRestHeight(size: moverSizeOf(mover: character.mover))
+}
+
+# Give `entityId` a mover of the sample size standing with its feet at `feet`
+# (world space)
+func addCharacterBody(
+  characters: mod ComponentTable(CharacterBody)
+  entityId: view EntityId
+  feet: view Vec3
+) {
+  componentSet(
+    this: characters
+    entityId: entityId
+    data: createCharacterBody(
+      position: Vec3 { x: feet.x, y: feet.y, z: feet.z + moverRestHeight(size: sampleMoverSize()) }
+    )
+  )
+}
+
+# The world position of a controller's feet (its position is relative to
+# groundZ, as the renderer reads it)
+func controllerFeet(controller: view ThirdPersonController, groundZ: view Float) ret Vec3 {
+  ret Vec3 {
+    x: controller.position.x
+    y: controller.position.y
+    z: groundZ + controller.position.z
+  }
+}
+
+# The controller of a character from its mover after a step of `fixedStep`
+# seconds: the feet below the capsule, moving / walking from the actual
+# horizontal speed (so a character pushing against something does not run in
+# place), and the heading turned toward where it moves at the turn rate
+func readController(
+  controller: mod ThirdPersonController
+  character: view CharacterBody
+  groundZ: view Float
+  fixedStep: view Float
+) {
+  controller.position = Vec3 {
+    x: character.mover.transform.p.x
+    y: character.mover.transform.p.y
+    z: character.mover.transform.p.z - moverCenterAboveFeet(character: character) - groundZ
+  }
+  let velocityX: Float = character.mover.velocity.x
+  let velocityY: Float = character.mover.velocity.y
+  let speed: Float = Math.sqrt(x: velocityX * velocityX + velocityY * velocityY)
+  controller.moving = speed > standSpeed
+  controller.walking = controller.moving and speed < walkSpeedLimit
+  if controller.moving {
+    # A +Z rotation turns the model's +Y forward axis into the velocity
+    let desiredHeading: Float = Math.atan2(y: -velocityX, x: velocityY)
+    let headingGap: Float = wrapCharacterAngle(angle: desiredHeading - controller.heading)
+    let turnAmount: Float = 1.0 - Math.exp(x: -controller.turnRate * fixedStep)
+    controller.heading = wrapCharacterAngle(angle: controller.heading + headingGap * turnAmount)
+  }
+}
+
+# Is the character standing on something (not in the air)? One without a
+# mover counts as standing.
+func characterGrounded(
+  characters: view ComponentTable(CharacterBody)
+  entityId: view EntityId
+) ret Bool {
+  if componentHas(this: characters, entityId: entityId) is false {
+    ret true
+  }
+  ret componentView(this: characters, entityId: entityId).grounded
+}
+
+# The character's horizontal speed in m/s (0 without a mover)
+func characterSpeed(
+  characters: view ComponentTable(CharacterBody)
+  entityId: view EntityId
+) ret Float {
+  if componentHas(this: characters, entityId: entityId) is false {
+    ret 0.0
+  }
+  let character: view CharacterBody = componentView(this: characters, entityId: entityId)
+  let velocityX: Float = character.mover.velocity.x
+  let velocityY: Float = character.mover.velocity.y
+  ret Math.sqrt(x: velocityX * velocityX + velocityY * velocityY)
+}
+
+# Set a body's linear velocity (m/s, world space)
+func setBodyVelocity(
+  rigidBodies: view ComponentTable(RigidBody)
+  entityId: view EntityId
+  velocity: view Vec3
+) {
+  let bodyId: BodyId = entityBodyId(rigidBodies: rigidBodies, entityId: entityId)
+  unsafe {
+    b3Body_SetLinearVelocity(
+      bodyId: toB3BodyId(bodyId: bodyId)
+      linearVelocity: toB3Vector(vector: velocity)
+    )
+  }
+}
+
+# One step of the bodies: each body's pose from its Transform3D, the Box3D
+# step, the poses back, then the step's events
+func stepPhysicsBodies(
+  physics: mod Physics
+  rigidBodies: mod ComponentTable(RigidBody)
+  transforms: mod ComponentTable(Transform3D)
+) {
+  physicsPushSystem(physics: physics, rigidBodies: rigidBodies, transforms: transforms)
+  physicsStepSystem(physics: physics)
+  physicsPullSystem(physics: physics, rigidBodies: rigidBodies, transforms: transforms)
+  physicsEventSystem(physics: physics)
+}
+
+# How many fixed steps a frame pays for, and the time left over: the frame's
+# time added to `accumulator`, a step taken for every whole `fixedStep` in it,
+# at most `maxSteps` (the time past them is dropped, so a long frame slows the
+# world instead of spiralling)
+type FixedSteps {
+  steps: Int
+  accumulator: Float
+}
+
+func fixedStepsFor(
+  accumulator: view Float
+  frameTime: view Float
+  fixedStep: view Float
+  maxSteps: view Int
+) ret FixedSteps {
+  var left: Float = accumulator + frameTime
+  var steps: Int = 0
+  loop left >= fixedStep {
+    if steps < maxSteps {
+      steps = steps + 1
+    }
+    left = left - fixedStep
+  }
+  ret FixedSteps { steps: steps, accumulator: left }
+}

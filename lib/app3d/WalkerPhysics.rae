@@ -44,6 +44,7 @@ open box3d/ecs/VenueMesh
 open box3d/ecs/NatureBodies
 open box3d/Box3d
 open box3d/Box3dTypes
+open app3d/CharacterBodies
 
 const walkerPhysicsStep: Float = 1.0 / 60.0
 
@@ -52,11 +53,6 @@ const walkerPhysicsSubSteps: Int = 4
 # Fixed steps one frame may take: past this the world slows down instead of
 # spiralling (a stall, a breakpoint)
 const walkerPhysicsMaxSteps: Int = 4
-
-# Where the mover's capsule centre rests above the ground: its pogo spring
-# holds the lower sphere's centre three radii (0.9 m) up, and the capsule's
-# centre is 0.5 m above that (lib/box3d/ecs/CharacterMover updatePogo)
-const moverCenterAboveFeet: Float = 1.4
 
 # The ground's lattice: the render tiles' 1.5 m (18 m cells of 12 segments)
 const walkerGroundSpacing: Float = 1.5
@@ -209,28 +205,6 @@ func followGround(physicsSystem: mod WalkerPhysics, position: view Vec3) ret Boo
   ret addGroundAround(physicsSystem: physicsSystem, centre: position)
 }
 
-# ----- characters --------------------------------------------------------
-# Give `entityId` a mover standing with its feet at `feet` (world space).
-func addCharacterBody(physicsSystem: mod WalkerPhysics, entityId: view EntityId, feet: view Vec3) {
-  componentSet(
-    this: physicsSystem.characters
-    entityId: entityId
-    data: createCharacterBody(
-      position: Vec3 { x: feet.x, y: feet.y, z: feet.z + moverCenterAboveFeet }
-    )
-  )
-}
-
-# The world position of a controller's feet (its position is relative to
-# groundZ, as the renderer reads it).
-func controllerFeet(controller: view ThirdPersonController, groundZ: view Float) ret Vec3 {
-  ret Vec3 {
-    x: controller.position.x
-    y: controller.position.y
-    z: groundZ + controller.position.z
-  }
-}
-
 # The input for the coming fixed steps. Every character stands still, except
 # `controlledEntityId`, which gets a throttle along the camera's forward and
 # right, scaled so a full stick moves at its controller's run speed (walk
@@ -328,59 +302,10 @@ func moveCharacters(
         controller: componentMod(this: controllers, entityId: entityId)
         character: character
         groundZ: groundZ
+        fixedStep: walkerPhysicsStep
       )
     }
   }
-}
-
-# The controller of a character from its mover: the feet below the capsule,
-# moving / walking from the actual horizontal speed (so a character pushing
-# against something does not run in place), and the heading turned toward
-# the direction it moves at the controller's turn rate.
-func readController(
-  controller: mod ThirdPersonController
-  character: view CharacterBody
-  groundZ: view Float
-) {
-  controller.position = Vec3 {
-    x: character.mover.transform.p.x
-    y: character.mover.transform.p.y
-    z: character.mover.transform.p.z - moverCenterAboveFeet - groundZ
-  }
-  let velocityX: Float = character.mover.velocity.x
-  let velocityY: Float = character.mover.velocity.y
-  let speed: Float = Math.sqrt(x: velocityX * velocityX + velocityY * velocityY)
-  controller.moving = speed > standSpeed
-  controller.walking = controller.moving and speed < walkSpeedLimit
-  if controller.moving {
-    # A +Z rotation turns the model's +Y forward axis into the velocity
-    let desiredHeading: Float = Math.atan2(y: -velocityX, x: velocityY)
-    let headingGap: Float = wrapCharacterAngle(angle: desiredHeading - controller.heading)
-    let turnAmount: Float = 1.0 - Math.exp(x: -controller.turnRate * walkerPhysicsStep)
-    controller.heading = wrapCharacterAngle(angle: controller.heading + headingGap * turnAmount)
-  }
-}
-
-# Is the character standing on something (not in the air)?
-func characterGrounded(physicsSystem: view WalkerPhysics, entityId: view EntityId) ret Bool {
-  if componentHas(this: physicsSystem.characters, entityId: entityId) is false {
-    ret true
-  }
-  ret componentView(this: physicsSystem.characters, entityId: entityId).grounded
-}
-
-# The character's horizontal speed in m/s.
-func characterSpeed(physicsSystem: view WalkerPhysics, entityId: view EntityId) ret Float {
-  if componentHas(this: physicsSystem.characters, entityId: entityId) is false {
-    ret 0.0
-  }
-  let character: view CharacterBody = componentView(
-    this: physicsSystem.characters
-    entityId: entityId
-  )
-  let velocityX: Float = character.mover.velocity.x
-  let velocityY: Float = character.mover.velocity.y
-  ret Math.sqrt(x: velocityX * velocityX + velocityY * velocityY)
 }
 
 # ----- loose cubes -------------------------------------------------------
@@ -436,21 +361,6 @@ func despawnPhysicsCube(physicsSystem: mod WalkerPhysics, entityId: view EntityI
     entityId: entityId
   )
   componentRemove(this: physicsSystem.cubes, entityId: entityId)
-}
-
-# Set a body's linear velocity (m/s, world space).
-func setBodyVelocity(
-  physicsSystem: mod WalkerPhysics
-  entityId: view EntityId
-  velocity: view Vec3
-) {
-  let bodyId: BodyId = entityBodyId(rigidBodies: physicsSystem.rigidBodies, entityId: entityId)
-  unsafe {
-    b3Body_SetLinearVelocity(
-      bodyId: toB3BodyId(bodyId: bodyId)
-      linearVelocity: toB3Vector(vector: velocity)
-    )
-  }
 }
 
 # One stack: `columns` x `columns` cubes per layer, `layers` high, its centre
@@ -618,27 +528,6 @@ func physicsCubeModel(transform: view Transform3D, cube: view PhysicsCube) ret M
   )
 }
 
-# ----- the fixed step ----------------------------------------------------
-# The bodies' part of a fixed step: hand game-written poses to the bodies,
-# step the world, write the moved poses back, gather the events.
-func stepPhysicsBodies(
-  physicsSystem: mod WalkerPhysics
-  transforms: mod ComponentTable(Transform3D)
-) {
-  physicsPushSystem(
-    physics: physicsSystem.physics
-    rigidBodies: physicsSystem.rigidBodies
-    transforms: transforms
-  )
-  physicsStepSystem(physics: physicsSystem.physics)
-  physicsPullSystem(
-    physics: physicsSystem.physics
-    rigidBodies: physicsSystem.rigidBodies
-    transforms: transforms
-  )
-  physicsEventSystem(physics: physicsSystem.physics)
-}
-
 # One fixed step: the characters first (the mover reads the world as the last
 # step left it, as Box3D's sample does), then the bodies.
 func walkerPhysicsTick(
@@ -648,7 +537,11 @@ func walkerPhysicsTick(
   bushes: view List(BushSpot)
 ) {
   moveCharacters(physicsSystem: physicsSystem, controllers: controllers, bushes: bushes)
-  stepPhysicsBodies(physicsSystem: physicsSystem, transforms: transforms)
+  stepPhysicsBodies(
+    physics: physicsSystem.physics
+    rigidBodies: physicsSystem.rigidBodies
+    transforms: transforms
+  )
 }
 
 # A frame: the fixed steps `frameTime` pays for, at most walkerPhysicsMaxSteps
@@ -661,22 +554,23 @@ func stepPhysicsFrame(
   bushes: view List(BushSpot)
   frameTime: view Float
 ) ret Int {
-  physicsSystem.accumulator = physicsSystem.accumulator + frameTime
-  var steps: Int = 0
-  loop physicsSystem.accumulator >= walkerPhysicsStep {
-    if steps < walkerPhysicsMaxSteps {
-      walkerPhysicsTick(
-        physicsSystem: physicsSystem
-        transforms: transforms
-        controllers: controllers
-        bushes: bushes
-      )
-      steps = steps + 1
-    }
-    physicsSystem.accumulator = physicsSystem.accumulator - walkerPhysicsStep
+  let due: FixedSteps = fixedStepsFor(
+    accumulator: physicsSystem.accumulator
+    frameTime: frameTime
+    fixedStep: walkerPhysicsStep
+    maxSteps: walkerPhysicsMaxSteps
+  )
+  physicsSystem.accumulator = due.accumulator
+  loop var step: Int = 0, step < due.steps, ++step {
+    walkerPhysicsTick(
+      physicsSystem: physicsSystem
+      transforms: transforms
+      controllers: controllers
+      bushes: bushes
+    )
   }
   advancePhysicsEvents(physics: physicsSystem.physics)
-  ret steps
+  ret due.steps
 }
 
 # ----- tree trunks -------------------------------------------------------
