@@ -36,6 +36,23 @@ func simulateTouch(
   }
 }
 
+# The pointer SDL makes of the first finger on a touch screen (`kind`
+# simulatedTouchDown, simulatedTouchMotion or simulatedTouchUp; x, y 0..1 of
+# the window): the mouse moved there, its button events marked as a finger's
+# (the pointer kind is touch). A pushed finger event makes no pointer, so a
+# test whose finger is the pointer too sends both.
+func nativeSimulateFingerPointer(
+  kind: Int
+  x: Float
+  y: Float
+) unsafe extern("rae_ext_Gpu2d_simulateFingerPointer")
+
+func simulateFingerPointer(kind: copy Int, x: copy Float, y: copy Float) {
+  unsafe {
+    nativeSimulateFingerPointer(kind: kind, x: x, y: y)
+  }
+}
+
 # ...and the event a phone's app gets as it goes to the background
 func nativeSimulateEnterBackground() unsafe extern("rae_ext_Gpu2d_simulateEnterBackground")
 
