@@ -1,0 +1,203 @@
+# app3d/SurfaceMap — what the ground is made of, over a level: a grid of
+# cells over its drawn triangles, each keeping the surface of the highest
+# triangle over its centre (a road over the terrain under it) and that
+# height. Surfaces are the app's own codes (an enum as Int); which surface a
+# glTF material stands for is the app's rules (MaterialSurface: a material
+# name's prefix and its surface), so this map knows no ground of its own.
+# For footprints and dust, for where grass or trees may grow
+# (surfaceGrassField). Pure, so tested in a fixture.
+import Math
+import Vec3
+open Mesh3d
+
+# A grid of surface codes: cells `cellSize` m square from (`originX`,
+# `originY`), `columns` x `rows`, each the surface of the highest triangle
+# found over its centre (`heights`), `emptySurface` where none is
+type SurfaceMap {
+  originX: Float
+  originY: Float
+  cellSize: Float
+  columns: Int
+  rows: Int
+  surfaces: List(Int)
+  heights: List(Float)
+  emptySurface: Int = 0
+}
+
+# Nothing under a cell yet
+const surfaceMapEmptyHeight: Float = -100000.0
+
+# A material name's prefix and the surface it stands for
+type MaterialSurface {
+  prefix: String
+  surface: Int
+}
+
+# The surface a material named `name` stands for: the first rule whose prefix
+# it starts with, else `fallback`
+func surfaceOfMaterialName(
+  name: view String
+  rules: view List(MaterialSurface)
+  fallback: view Int
+) ret Int {
+  loop let rule: view MaterialSurface in rules {
+    if name.startsWith(prefix: rule.prefix) {
+      ret rule.surface
+    }
+  }
+  ret fallback
+}
+
+# A square map `halfExtent` m either side of (`centerX`, `centerY`), every
+# cell `emptySurface`
+func createCodedSurfaceMap(
+  centerX: view Float
+  centerY: view Float
+  halfExtent: view Float
+  cellSize: view Float
+  emptySurface: view Int
+) ret SurfaceMap {
+  let columns: Int = (2.0 * halfExtent / cellSize).toInt()
+  let cells: Int = columns * columns
+  var surfaces: List(Int) = List.create(Int, cap: cells)
+  var heights: List(Float) = List.create(Float, cap: cells)
+  loop var i: Int = 0, i < cells, ++i {
+    surfaces.add(value: emptySurface)
+    heights.add(value: surfaceMapEmptyHeight)
+  }
+  ret SurfaceMap {
+    originX: centerX - halfExtent
+    originY: centerY - halfExtent
+    cellSize: cellSize
+    columns: columns
+    rows: columns
+    surfaces: own surfaces
+    heights: own heights
+    emptySurface: emptySurface
+  }
+}
+
+# The height of triangle (a, b, c) over (x, y), if (x, y) lies inside it seen
+# from above (barycentric); `surfaceMapEmptyHeight` if not
+func triangleHeightAt(
+  a: view Vec3
+  b: view Vec3
+  c: view Vec3
+  x: view Float
+  y: view Float
+) ret Float {
+  let denominator: Float = (b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y)
+  if Math.abs(value: denominator) < 0.000001 {
+    ret surfaceMapEmptyHeight
+  }
+  let wa: Float = ((b.y - c.y) * (x - c.x) + (c.x - b.x) * (y - c.y)) / denominator
+  let wb: Float = ((c.y - a.y) * (x - c.x) + (a.x - c.x) * (y - c.y)) / denominator
+  let wc: Float = 1.0 - wa - wb
+  if wa < -0.0001 or wb < -0.0001 or wc < -0.0001 {
+    ret surfaceMapEmptyHeight
+  }
+  ret wa * a.z + wb * b.z + wc * c.z
+}
+
+# Lay triangle (a, b, c) of `surface` into the map: every cell whose centre
+# it covers takes its surface if it is the highest there yet
+func layTriangle(
+  map: mod SurfaceMap
+  a: view Vec3
+  b: view Vec3
+  c: view Vec3
+  surface: view Int
+) {
+  let lowX: Float = Math.min(a: a.x, b: Math.min(a: b.x, b: c.x))
+  let highX: Float = Math.max(a: a.x, b: Math.max(a: b.x, b: c.x))
+  let lowY: Float = Math.min(a: a.y, b: Math.min(a: b.y, b: c.y))
+  let highY: Float = Math.max(a: a.y, b: Math.max(a: b.y, b: c.y))
+  let firstColumn: Int = Math.max(a: 0, b: ((lowX - map.originX) / map.cellSize - 0.5).toInt())
+  let lastColumn: Int = Math.min(
+    a: map.columns - 1
+    b: ((highX - map.originX) / map.cellSize).toInt()
+  )
+  let firstRow: Int = Math.max(a: 0, b: ((lowY - map.originY) / map.cellSize - 0.5).toInt())
+  let lastRow: Int = Math.min(a: map.rows - 1, b: ((highY - map.originY) / map.cellSize).toInt())
+  loop var row: Int = firstRow, row <= lastRow, ++row {
+    loop var column: Int = firstColumn, column <= lastColumn, ++column {
+      let centerX: Float = map.originX + (column.toFloat() + 0.5) * map.cellSize
+      let centerY: Float = map.originY + (row.toFloat() + 0.5) * map.cellSize
+      let height: Float = triangleHeightAt(
+        a: a
+        b: b
+        c: c
+        x: centerX
+        y: centerY
+      )
+      if height <= surfaceMapEmptyHeight {
+        continue
+      }
+      let cell: Int = row * map.columns + column
+      if height > map.heights.copyAtFallback(index: cell, fallback: surfaceMapEmptyHeight) {
+        map.heights.set(index: cell, value: height)
+        map.surfaces.set(index: cell, value: surface)
+      }
+    }
+  }
+}
+
+# Every triangle of `mesh` (baked into the world) into the map, as `surface`
+func layMesh(map: mod SurfaceMap, mesh: view MeshData, surface: view Int) {
+  loop var triangle: Int = 0, triangle < mesh.indices.length / 3, ++triangle {
+    let a: Int = mesh.indices.copyAtDefault(index: triangle * 3) * 8
+    let b: Int = mesh.indices.copyAtDefault(index: triangle * 3 + 1) * 8
+    let c: Int = mesh.indices.copyAtDefault(index: triangle * 3 + 2) * 8
+    layTriangle(
+      map: map
+      a: Vec3.create(
+        x: vertComponent(verts: mesh.verts, index: a)
+        y: vertComponent(verts: mesh.verts, index: a + 1)
+        z: vertComponent(verts: mesh.verts, index: a + 2)
+      )
+      b: Vec3.create(
+        x: vertComponent(verts: mesh.verts, index: b)
+        y: vertComponent(verts: mesh.verts, index: b + 1)
+        z: vertComponent(verts: mesh.verts, index: b + 2)
+      )
+      c: Vec3.create(
+        x: vertComponent(verts: mesh.verts, index: c)
+        y: vertComponent(verts: mesh.verts, index: c + 1)
+        z: vertComponent(verts: mesh.verts, index: c + 2)
+      )
+      surface: surface
+    )
+  }
+}
+
+# The map's surface at (`x`, `y`); its empty surface outside it
+func surfaceCodeAt(map: view SurfaceMap, x: view Float, y: view Float) ret Int {
+  let column: Int = Math.floor(x: (x - map.originX) / map.cellSize).toInt()
+  let row: Int = Math.floor(x: (y - map.originY) / map.cellSize).toInt()
+  if column < 0 or row < 0 or column >= map.columns or row >= map.rows {
+    ret map.emptySurface
+  }
+  ret map.surfaces.copyAtFallback(index: row * map.columns + column, fallback: map.emptySurface)
+}
+
+# No grass in a grass field's cell (a shader reads anything at or below it
+# as none)
+const grassFieldNone: Float = -100000.0
+
+# Where grass grows, for GPU grass (GrassCompute's surface field): one value
+# per cell, row by row, the ground's height where the cell is `grassSurface`,
+# grassFieldNone elsewhere
+func surfaceGrassField(map: view SurfaceMap, grassSurface: view Int) ret List(Float) {
+  var field: List(Float) = List.create(Float, cap: map.columns * map.rows)
+  loop var cell: Int = 0, cell < map.columns * map.rows, ++cell {
+    var value: Float = grassFieldNone
+    if map.surfaces.copyAtFallback(index: cell, fallback: map.emptySurface) is grassSurface {
+      let height: Float = map.heights.copyAtFallback(index: cell, fallback: grassFieldNone)
+      if height > surfaceMapEmptyHeight {
+        value = height
+      }
+    }
+    field.add(value: value)
+  }
+  ret field
+}
