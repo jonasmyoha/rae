@@ -1,0 +1,77 @@
+# lib/app3d/CharacterBodies: a character's Box3D mover and its controller.
+# The capsule's middle rests moverRestHeight(size) above the feet, for any
+# size; the controller reads its feet, gait and turn from the mover; a frame
+# pays for whole fixed steps, at most so many, the rest dropped.
+import Math
+import Vec3
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/World
+open box3d/ecs/PhysicsComponents
+open box3d/ecs/CharacterMover
+open app3d/CharacterController
+open app3d/CharacterBodies
+
+func near(a: view Float, b: view Float) ret Bool {
+  ret Math.abs(value: a - b) < 0.0001
+}
+
+func main() {
+  var allocator: EntityAllocator = createEntityAllocator()
+  var characters: ComponentTable(CharacterBody) = ComponentTable.create(CharacterBody)
+  let runner: EntityId = allocEntity(this: allocator)
+  let absent: EntityId = allocEntity(this: allocator)
+  addCharacterBody(
+    characters: characters
+    entityId: runner
+    feet: Vec3.create(x: 1.0, y: 2.0, z: 10.0)
+  )
+  let body: CharacterBody = componentCopyAtDefault(this: characters, i: 0)
+  let rest: Float = moverRestHeight(size: sampleMoverSize())
+  log("the capsule rests above the feet: {near(a: body.mover.transform.p.z, b: 10.0 + rest)}")
+  log("its middle is the size's: {near(a: moverCenterAboveFeet(character: body), b: rest)}")
+
+  var moving: CharacterBody = body
+  moving.mover.velocity.y = 3.0
+  var controller: ThirdPersonController = createThirdPersonController()
+  controller.heading = 0.5
+  readController(
+    controller: controller
+    character: moving
+    groundZ: 4.0
+    fixedStep: 1.0 / 60.0
+  )
+  log("the feet relative to the ground: {near(a: controller.position.z, b: 6.0)}")
+  log("moving, not walking at 3 m/s: {controller.moving and controller.walking is false}")
+  log("turned toward +y: {controller.heading < 0.5 and controller.heading > 0.0}")
+  let feet: Vec3 = controllerFeet(controller: controller, groundZ: 4.0)
+  log("the feet in the world: {near(a: feet.z, b: 10.0) and near(a: feet.x, b: 1.0)}")
+  log(
+    "a missing mover stands still and grounded: {characterSpeed(
+      characters: characters
+      entityId: absent
+    ) is 0.0 and characterGrounded(characters: characters, entityId: absent)}"
+  )
+
+  let calm: FixedSteps = fixedStepsFor(
+    accumulator: 0.0
+    frameTime: 0.055
+    fixedStep: 1.0 / 60.0
+    maxSteps: 4
+  )
+  log("a 55 ms frame pays for 3 steps: {calm.steps is 3}")
+  let long: FixedSteps = fixedStepsFor(
+    accumulator: 0.0
+    frameTime: 0.2
+    fixedStep: 1.0 / 60.0
+    maxSteps: 4
+  )
+  log("a long frame takes 4, the rest dropped: {long.steps is 4 and long.accumulator < 1.0 / 60.0}")
+  let carry: FixedSteps = fixedStepsFor(
+    accumulator: 0.01
+    frameTime: 0.01
+    fixedStep: 1.0 / 60.0
+    maxSteps: 4
+  )
+  log("what is left over carries: {carry.steps is 1 and carry.accumulator > 0.0}")
+}
