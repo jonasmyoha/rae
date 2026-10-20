@@ -210,7 +210,7 @@ static void pp_print_binding(PrettyPrinter* pp, const AstStmt* stmt) {
     pp_write_type(pp, stmt->as.let_stmt.type);
   }
   if (stmt->as.let_stmt.value) {
-    pp_write(pp, stmt->as.let_stmt.is_bind ? " => " : " = ");
+    pp_write(pp, " = ");  /* an alias binding too: its mode is in the type */
     pp_expr(pp, stmt->as.let_stmt.value);
   }
 }
@@ -316,7 +316,7 @@ static void pp_print_if_body(PrettyPrinter* pp, const AstStmt* stmt) {
       AstTypeRef shown = *bind->as.let_stmt.type;
       if (bind->as.let_stmt.is_bind) shown.is_opt = false;
       pp_write_type(pp, &shown);
-      pp_write(pp, bind->as.let_stmt.is_bind ? " => " : " = ");
+      pp_write(pp, " = ");  /* an alias binding too: its mode is in the type */
       pp_expr(pp, bind->as.let_stmt.value);
     } else {
       pp_expr(pp, stmt->as.if_stmt.condition);
@@ -356,7 +356,7 @@ static void pp_print_match_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
     AstTypeRef shown = *bind->as.let_stmt.type;
     if (bind->as.let_stmt.is_bind) shown.is_opt = false;
     pp_write_type(pp, &shown);
-    pp_write(pp, bind->as.let_stmt.is_bind ? " => " : " = ");
+    pp_write(pp, " = ");  /* an alias binding too: its mode is in the type */
     pp_expr(pp, bind->as.let_stmt.value);
   } else {
     pp_expr(pp, stmt->as.match_stmt.subject);

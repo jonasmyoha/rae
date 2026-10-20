@@ -2163,7 +2163,13 @@ static AstStmt* parse_binding_statement(Parser* parser, const Token* kw_token, b
   stmt->as.let_stmt.is_var = is_var;
   stmt->as.let_stmt.is_const = is_const;
 
-  if (parser_match(parser, TOK_ASSIGN)) {
+  // docs/binding-modes-design.md §1 (2026-10-20): the mode in the type says
+  // what a binding is, so `=` binds an alias when the type is `view T` /
+  // `mod T`, exactly as `=>` does. `=>` is still accepted until the tree is
+  // swept (binding `=` step 5 makes it an error).
+  bool alias_type = type && (type->is_view || type->is_mod);
+  bool alias_by_assign = alias_type && parser_match(parser, TOK_ASSIGN);
+  if (!alias_by_assign && parser_match(parser, TOK_ASSIGN)) {
     stmt->as.let_stmt.is_bind = false;
     // Rae has NO type inference: a value binding must state its type on the LHS.
     // `let q = makeR()` / `let x = 5` (type inferred from the RHS) is an error —
@@ -2172,9 +2178,6 @@ static AstStmt* parse_binding_statement(Parser* parser, const Token* kw_token, b
     if (require_type && type == NULL) {
         parser_error(parser, kw_token,
             "'%s' needs an explicit type: Rae has no type inference — write '%s name: Type = ...'", kw, kw);
-    }
-    if (type && (type->is_view || type->is_mod)) {
-        parser_error(parser, parser_previous(parser), "use '=>' for alias bindings (view/mod)");
     }
     stmt->as.let_stmt.value = parse_expression(parser);
 
@@ -2188,10 +2191,12 @@ static AstStmt* parse_binding_statement(Parser* parser, const Token* kw_token, b
         && stmt->as.let_stmt.value->as.object_literal.fields != NULL) {
         parser_error(parser, kw_token, "with '%s', the binding's type must be written on the left-hand side only. Remove the type name from the RHS.", kw);
     }
-  } else if (parser_match(parser, TOK_ARROW)) {
+  } else if (alias_by_assign || parser_match(parser, TOK_ARROW)) {
     stmt->as.let_stmt.is_bind = true;
     if (is_const) {
-        parser_error(parser, parser_previous(parser), "'const' is a value, not an alias binding; use '='");
+        parser_error(parser, parser_previous(parser), alias_by_assign
+            ? "'const' is a value, not an alias binding; its type cannot be 'view' or 'mod'"
+            : "'const' is a value, not an alias binding; use '='");
     }
     // Aliases are bind-once (spec 2.2): rebinding is already rejected, so a
     // `var` alias's var-ness could never be exercised — it would only
@@ -3395,6 +3400,7 @@ static AstDecl* parse_global_let_declaration(Parser* parser, bool is_var, bool i
   bool is_bind = false;
   AstExpr* value = NULL;
   if (parser_match(parser, TOK_ASSIGN)) {
+    is_bind = type && (type->is_view || type->is_mod);
     value = parse_expression(parser);
   } else if (parser_match(parser, TOK_ARROW)) {
     is_bind = true;
