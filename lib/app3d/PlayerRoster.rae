@@ -81,3 +81,13 @@ func rosterSwitchNext(roster: mod PlayerRoster) {
 func rosterSwitchPrev(roster: mod PlayerRoster) {
   rosterStep(roster: roster, step: -1)
 }
+
+# A joined remote player. `remoteId` is the transport-assigned peer id; `role`
+# mirrors NetSystem.role for that peer; `controlled` is the character ENTITY this
+# remote player drives (noEntity until it is assigned one). A remote player's
+# input will arrive here instead of from a local device.
+type NetPlayer {
+  remoteId: Int
+  role: Int
+  controlled: EntityId
+}

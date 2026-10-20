@@ -22,44 +22,11 @@ open ecs/hierarchySystem/HierarchySystem
 open app3d/CharacterController
 open app3d/WalkerCharacter
 open app3d/Characters
+open app3d/Material
 open ecs/Tag
 open app3d/PlayerRoster
 open app3d/WalkerTerrain
 open app3d/WalkerPhysics
-
-# One skinned body-mesh part (#740): its uploaded mesh-handle id + surface
-# roughness. Replaces the parallel `partIds`/`partRough` Lists — each part is an
-# entity carrying this component, and the renderer iterates the table.
-type PartRoughness {
-  meshId: Int
-  roughness: Float
-  # Which skin colour's copy of the mesh this is (an app that recolours its
-  # characters uploads one per colour; 0 the authored one)
-  skinColorIndex: Int = 0
-  # A part only some characters show (a moustache, a hat): an app skips it
-  # for a character without it
-  optionalPart: Bool = false
-}
-
-# A gameplay surface material. Capital-D `Material3D` to match the capital-D
-# lib/ecs Transform3D/WorldTransform3D components; distinct from scene3d's
-# `Material3d` that the renderer consumes.
-type Material3D {
-  baseColor: Vec3
-  metallic: Float
-  roughness: Float
-  emission: Vec3
-}
-
-# A joined remote player. `remoteId` is the transport-assigned peer id; `role`
-# mirrors NetSystem.role for that peer; `controlled` is the character ENTITY this
-# remote player drives (noEntity until it is assigned one). A remote player's
-# input will arrive here instead of from a local device.
-type NetPlayer {
-  remoteId: Int
-  role: Int
-  controlled: EntityId
-}
 
 type WalkerWorld {
   allocator: EntityAllocator

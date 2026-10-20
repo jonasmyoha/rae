@@ -58,7 +58,7 @@ open ui/inputSystem/InputSystem
 open ui/renderSystem/RenderSystem
 open ui/UiSystems
 open app3d/WalkerCharacter
-open app3d/WalkerHud
+open app3d/HudOverlays
 open app3d/WalkerInput
 open app3d/WalkerTerrain
 open app3d/WalkerWorld
@@ -78,14 +78,6 @@ type WalkerCamera {
   cameraEntityId: EntityId
   # The character camera turns after the walker (lib/app3d/CameraWalkFollow)
   walkFollow: WalkFollow
-}
-
-# The two entity ids of the rig->camera relation. Rae has no lightweight tuple
-# (see docs/ecs-language-wishlist.md), so a named 2-field carrier hands both ids
-# back from setup to the CameraSystem literal.
-type CameraRigLink {
-  rigEntityId: EntityId
-  cameraEntityId: EntityId
 }
 
 # Create the rig->camera parent relation in the world (call once, at setup).
@@ -204,7 +196,7 @@ func cameraUpdate(
       focusZ: orbitFocusZ
     )
   }
-  let joyActive: Bool = updateWalkerTouch(
+  let joyActive: Bool = updateTouchControls(
     rig: cameraSystem.rig
     moveStick: inputSystem.moveStick
     world: inputSystem.world
