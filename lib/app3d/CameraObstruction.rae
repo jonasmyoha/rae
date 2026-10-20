@@ -1,0 +1,53 @@
+# app3d/CameraObstruction — a character camera pulled in front of what
+# stands between it and its target: a sphere of `radius` swept from the
+# target to the eye against the shapes in `maskBits`, and the rig's view
+# distance shortened to just short of the first hit. What blocks the camera
+# is a category of its own (cameraBlockingCategory by default): a level's
+# walls and architecture opt in; props, cubes, other characters and ragdolls
+# stay out, so the camera does not jump in front of everything that passes.
+import Math
+import Vec3
+open Math3d
+open app3d/CameraRig
+open box3d/ecs/PhysicsTypes
+open box3d/ecs/Physics
+open box3d/ecs/PhysicsQueries
+
+# The shape category that stops a character camera
+const cameraBlockingCategory: UInt64 = 8
+
+# How far short of what it hit the eye stops (m)
+const cameraBlockedGap: Float = 0.02
+
+# The rig's view distance pulled in front of the first shape in `maskBits`
+# between `target` and the rig's eye; true when it was
+func pullCameraFromWalls(
+  rig: mod CameraRig
+  physics: view Physics
+  target: view Vec3
+  radius: view Float
+  maskBits: view UInt64
+) ret Bool {
+  let eye: Vec3 = orbitEye(
+    targetX: target.x
+    targetY: target.y
+    targetZ: target.z
+    yaw: rig.viewYaw
+    pitch: rig.viewOrbitPitch
+    dist: rig.viewDistance
+  )
+  var filter: QueryFilter = defaultQueryFilter()
+  filter.maskBits = maskBits
+  let hit: PhysicsHit = spherecastClosest(
+    physics: physics
+    origin: target
+    radius: radius
+    translation: Vec3.vsub(a: eye, b: target)
+    filter: filter
+  )
+  if hit.hit {
+    rig.viewDistance = Math.max(a: 0.0, b: rig.viewDistance * hit.fraction - cameraBlockedGap)
+    ret true
+  }
+  ret false
+}

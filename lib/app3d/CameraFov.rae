@@ -1,0 +1,56 @@
+# app3d/CameraFov — the camera's default vertical field of view, from the
+# window's shape in points. 50 degrees is right for a desktop window and a
+# phone held upright; a phone on its side (wider than tall, and short)
+# shows far too much at 50, about 90 degrees across, so it narrows to 40,
+# which draws a character 1.28x bigger and the view about 76 degrees across.
+# The default follows the window (a phone turned) while nobody has changed
+# the camera's field of view (FieldOfViewFollow).
+open Scene3d
+
+const defaultFieldOfViewDegrees: Float = 50.0
+
+const phoneLandscapeFieldOfViewDegrees: Float = 40.0
+
+# A landscape window lower than this (points) is a phone on its side; a tablet
+# or a desktop window is taller
+const phoneLandscapeMaxHeight: Float = 500.0
+
+func defaultFieldOfView(widthPoints: view Float, heightPoints: view Float) ret Float {
+  if heightPoints > 0.0 and widthPoints > heightPoints and heightPoints < phoneLandscapeMaxHeight {
+    ret phoneLandscapeFieldOfViewDegrees
+  }
+  ret defaultFieldOfViewDegrees
+}
+
+# The default last given to the camera: while the camera's field of view
+# still is it, nobody changed it, so it follows the window
+type FieldOfViewFollow {
+  applied: Float
+}
+
+# The camera given the default for the window, followed from now on
+func startFieldOfView(
+  camera: mod Camera3d
+  widthPoints: view Float
+  heightPoints: view Float
+) ret FieldOfViewFollow {
+  camera.fovYDeg = defaultFieldOfView(widthPoints: widthPoints, heightPoints: heightPoints)
+  ret FieldOfViewFollow { applied: camera.fovYDeg }
+}
+
+# The default for the window now, given to the camera unless someone changed
+# its field of view; true when it changed
+func followFieldOfView(
+  follow: mod FieldOfViewFollow
+  camera: mod Camera3d
+  widthPoints: view Float
+  heightPoints: view Float
+) ret Bool {
+  let wanted: Float = defaultFieldOfView(widthPoints: widthPoints, heightPoints: heightPoints)
+  if wanted is not follow.applied and camera.fovYDeg is follow.applied {
+    camera.fovYDeg = wanted
+    follow.applied = wanted
+    ret true
+  }
+  ret false
+}
