@@ -1,5 +1,8 @@
-# app3d/WalkerHud — the walker examples' on-screen overlays (136, 137, 143):
-# the touch joystick, the log and debug overlays, and the camera bar chrome.
+# app3d/HudOverlays — the on-screen overlays an app draws in code over its
+# scene UI: the touch joystick (with the camera's touch split and the OS safe
+# area), the log strip and the debug readout, and hiding the camera bar's
+# smoothing toggles. Used by the walker examples (136, 137, 143) and by apps
+# with their own shell.
 import Gpu2d
 open app3d/UiModes
 open RendererDeferred
@@ -18,7 +21,7 @@ open ui/UiSystems
 
 # Update the touch stick AND tell the camera rig to exclude its region, so on a
 # phone one finger drives the joystick while another rotates the camera (#526).
-func updateWalkerTouch(
+func updateTouchControls(
   rig: mod CameraRig
   moveStick: mod VirtualJoystick
   world: mod UiWorld
@@ -63,18 +66,15 @@ func updateWalkerTouch(
   ret active
 }
 
-# Fully show/hide the settings side panel. 136 hides the WHOLE panel when closed
-# (not just the body); its edge tab (settings.open) opens and closes it, and the
-# top-right corner is the "..." mode menu's alone (app3d/ModeMenu).
 # Hide the camera bar's "Mouse"/"Keys" smoothing toggles — not needed, and they
 # crowd the top bar on a phone. (Their smoothing defaults still apply.)
-func walkerHideCameraChrome(world: mod UiWorld) {
+func hideCameraSmoothingToggles(world: mod UiWorld) {
   setNodeActive(world: world, nodeId: "CameraSmoothMouseButton", value: false)
   setNodeActive(world: world, nodeId: "CameraSmoothKeysButton", value: false)
 }
 
 # All HUD overlays, drawn inside the 2D overlay pass (after the ECS UI world).
-func drawWalkerHud(
+func drawHudOverlays(
   logOverlay: view LogOverlay
   gpuUi: view Gpu2dUi
   canvas: mod Gpu2dCanvas

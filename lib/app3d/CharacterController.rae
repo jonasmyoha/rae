@@ -143,3 +143,16 @@ func thirdPersonCameraTarget(controller: view ThirdPersonController, focusZ: vie
     z: controller.position.z + focusZ
   )
 }
+
+# A frame's movement intent. moveX/moveY are analog in [-1, 1] (right+/forward+);
+# walking = the shift-to-walk modifier the controller expects (default is run);
+# jump = Space or F went down this frame (a press, not held: one jump per
+# press); actions is a reserved bitset for discrete button intents (unused
+# today).
+type InputIntent {
+  moveX: Float
+  moveY: Float
+  walking: Bool
+  jump: Bool
+  actions: Int
+}
