@@ -1,0 +1,36 @@
+# A one-letter type name is the type, not a generic parameter: `List(P)` of a
+# struct named `P` (a literal, List.create, a function's ret) and `List(E)` of
+# an enum named `E` used to make C that did not compile ('unknown type name
+# rae_List_rae_P'), because a single capital letter was taken for an
+# unresolved type parameter and the List was never declared. A generic
+# function's own `T` is still a parameter.
+type P {
+  x: Int
+  name: String
+}
+
+enum E { first, second }
+
+func made(count: view Int) ret List(P) {
+  var list: List(P) = List.create(P, cap: count)
+  loop var i: Int = 0, i < count, ++i {
+    list.add(value: { x: i * 10, name: "made {i}" })
+  }
+  ret list
+}
+
+func firstOf(T: type, list: view List(T)) ret T {
+  ret list.copyAtDefault(index: 0)
+}
+
+func main() {
+  let literal: List(P) = List(P) { { x: 1, name: "a" }, { x: 2, name: "b" } }
+  var created: List(P) = List.create(P, cap: 2)
+  created.add(value: { x: 3, name: "c" })
+  let returned: List(P) = made(count: 3)
+  log("literal {literal.length}, first {firstOf(T: P, list: literal).name}")
+  log("created {created.length}, x {created.copyAtDefault(index: 0).x}")
+  log("returned {returned.length}, last {returned.copyAtDefault(index: 2).name}")
+  let kinds: List(E) = List(E) { E.second, E.first }
+  log("enum list {kinds.length}, first is second: {kinds.copyAtDefault(index: 0) is E.second}")
+}
