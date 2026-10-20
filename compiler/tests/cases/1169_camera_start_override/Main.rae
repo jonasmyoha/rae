@@ -1,0 +1,15 @@
+# lib/app3d/CameraRig: the screenshot camera an app starts with comes from
+# RAE_CAMERA_AT, or from the older RAE_WALKER_CAMERA when only that is set
+# (the walker examples' scripts); RAE_CAMERA_AT wins when both are.
+open app3d/CameraRig
+
+func main() {
+  let newOnly: String = cameraStartOverrideFrom(cameraAt: "1 0 0", walkerCamera: "")
+  let oldOnly: String = cameraStartOverrideFrom(cameraAt: "", walkerCamera: "2 0 0")
+  let both: String = cameraStartOverrideFrom(cameraAt: "1 0 0", walkerCamera: "2 0 0")
+  let neither: String = cameraStartOverrideFrom(cameraAt: "", walkerCamera: "")
+  log("new name: {newOnly is "1 0 0"}")
+  log("old name still works: {oldOnly is "2 0 0"}")
+  log("the new name wins: {both is "1 0 0"}")
+  log("none set: {neither.length() is 0}")
+}
