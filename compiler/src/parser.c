@@ -1430,7 +1430,12 @@ static AstExpr* parse_primary(Parser* parser) {
 
   // If not a typed object literal, proceed with other primary expressions
   switch (token->kind) {
+    // `val` and `copy` are keywords that are also names (is_ident_like): a
+    // parameter may be called either, so its body reads it like any local.
+    // No expression starts with `copy` (it is only a parameter mode in a
+    // type), so reading it as a name here is unambiguous.
     case TOK_KW_VAL:
+    case TOK_KW_COPY:
     case TOK_IDENT: {
       parser_advance(parser); // Already peeked and confirmed not a typed object literal
       AstExpr* expr = new_expr(parser, AST_EXPR_IDENT, token);
