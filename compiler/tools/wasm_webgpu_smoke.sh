@@ -98,7 +98,9 @@ if [ ! -x "$CHROME" ]; then CHROME="$(command -v google-chrome || command -v chr
 have_chrome=0
 if [ -n "$CHROME" ] && [ -x "$CHROME" ] && command -v python3 >/dev/null 2>&1; then have_chrome=1; fi
 
-# The console lines of one page served from directory $1, in headless Chrome
+# The console lines of one page served from directory $1, in headless Chrome.
+# Chrome does not exit when the page is done, so it is stopped as soon as a
+# console line matches $3 (the page's verdict), or after 60 s.
 page_console() {
   local port=$((20000 + ($$ + $2) % 20000))
   (cd "$1" && exec perl -e 'alarm shift; exec @ARGV' 90 python3 -m http.server "$port" --bind 127.0.0.1) >/dev/null 2>&1 &
@@ -106,14 +108,22 @@ page_console() {
   sleep 1
   perl -e 'alarm shift; exec @ARGV' 60 "$CHROME" --headless=new --enable-unsafe-webgpu \
     --enable-logging=stderr --v=0 --no-first-run --user-data-dir="$1/chrome" \
-    "http://127.0.0.1:$port/index.html" 2>&1 | grep CONSOLE || true
-  kill "$server" 2>/dev/null || true
-  wait "$server" 2>/dev/null || true
+    "http://127.0.0.1:$port/index.html" > "$1/chrome.log" 2>&1 &
+  local chrome=$!
+  local tick
+  for tick in $(seq 1 120); do
+    grep CONSOLE "$1/chrome.log" 2>/dev/null | grep -qE "$3" && break
+    kill -0 "$chrome" 2>/dev/null || break
+    sleep 0.5
+  done
+  kill "$chrome" "$server" 2>/dev/null || true
+  wait "$chrome" "$server" 2>/dev/null || true
+  grep CONSOLE "$1/chrome.log" || true
 }
 
 task_note="task page built (no Chrome: not run)"
 if [ "$have_chrome" = 1 ]; then
-  console="$(page_console "$TMP/task" 1)"
+  console="$(page_console "$TMP/task" 1 'TASK (OK|FAIL)')"
   if printf '%s' "$console" | grep -q 'TASK OK'; then
     task_note="a waiting task ran between frames in headless Chrome"
   else
@@ -125,7 +135,7 @@ fi
 
 readback_note="readback page built (no Chrome: not run)"
 if [ "$have_chrome" = 1 ]; then
-  console="$(page_console "$TMP/readback" 2)"
+  console="$(page_console "$TMP/readback" 2 'READBACK (OK|FAIL|TIMEOUT)')"
   if printf '%s' "$console" | grep -q 'READBACK OK'; then
     readback_note="readback completed in headless Chrome"
   elif printf '%s' "$console" | grep -q 'READBACK FAIL: no GPU'; then

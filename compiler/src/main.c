@@ -44,6 +44,7 @@
 #include "../build/version_gen.h"
 #include "c_backend.h"
 #include "sema.h"
+#include "runtime_cache.h"
 #include "shader_compose.h"
 #include "mangler.h"
 #include "bindgen.h"
@@ -2887,13 +2888,26 @@ static bool gcc_link_c_to_binary(const char* entry_rae_file,
   const char* avx2_setting = getenv("RAE_X86_AVX2");
   if (__builtin_cpu_supports("avx2") && !(avx2_setting && strcmp(avx2_setting, "0") == 0)) cpu_flags = " -mavx2";
 #endif
-  char cmd[PATH_MAX * 6];
-  snprintf(cmd, sizeof(cmd), "gcc -std=c11 %s%s%s %s -w %s %s -I%s -I/opt/homebrew/include -L/opt/homebrew/lib -framework Foundation -framework ImageIO -framework CoreGraphics %s %s/rae_runtime.c%s %s -o %s",
-           opt_flags, g_float4_scalar ? " -DRAE_FLOAT4_SCALAR" : "", cpu_flags, extra_cflags, sdl3_flags, wgpu_flags, runtime_dir,
-           c_path, runtime_dir, extra_c_files, box3d_flags, out_bin);
-
   long long cc_started_ms = rae_now_ms();
   progress_phase(PROGRESS_CC);
+  // The C runtime is compiled once per set of flags and runtime content and
+  // linked from a cache (runtime_cache.c): it was most of every program's C
+  // compile. Its command carries every flag that reaches it.
+  char runtime_command[PATH_MAX * 4];
+  snprintf(runtime_command, sizeof(runtime_command), "gcc -std=c11 %s%s%s %s -w %s %s -I%s -I/opt/homebrew/include",
+           opt_flags, g_float4_scalar ? " -DRAE_FLOAT4_SCALAR" : "", cpu_flags, extra_cflags, sdl3_flags, wgpu_flags,
+           runtime_dir);
+  char runtime_object[PATH_MAX];
+  if (!runtime_cached_object(runtime_command, runtime_dir, runtime_object, sizeof(runtime_object))) {
+    progress_end(false);
+    fprintf(stderr, "error: failed to compile the C runtime (%s/rae_runtime.c)\n", runtime_dir);
+    return false;
+  }
+  char cmd[PATH_MAX * 6];
+  snprintf(cmd, sizeof(cmd), "gcc -std=c11 %s%s%s %s -w %s %s -I%s -I/opt/homebrew/include -L/opt/homebrew/lib -framework Foundation -framework ImageIO -framework CoreGraphics %s %s%s %s -o %s",
+           opt_flags, g_float4_scalar ? " -DRAE_FLOAT4_SCALAR" : "", cpu_flags, extra_cflags, sdl3_flags, wgpu_flags, runtime_dir,
+           c_path, runtime_object, extra_c_files, box3d_flags, out_bin);
+
   int cc_rc = system(cmd);
   progress_end(cc_rc == 0);
   if (cc_rc != 0) {

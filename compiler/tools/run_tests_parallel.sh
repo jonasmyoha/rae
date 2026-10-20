@@ -44,6 +44,15 @@ JOBS="${JOBS:-$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)}"
 [ -f "$BIN" ] || { echo "Error: $BIN not found. Run 'make build' first."; exit 1; }
 
 OUT=$(mktemp -d -t rae_ptest_XXXXXX); export OUT
+# Every stage's wall time, one "[stage time]" line each (and a summary at
+# the end), so a slow suite shows where its minutes go
+STAGE_TIMES=""
+stage_time() {
+  local seconds=$(( $(date +%s) - $2 ))
+  STAGE_TIMES="$STAGE_TIMES
+  ${seconds}s $1"
+  echo "[stage time] $1: ${seconds}s"
+}
 NAMES=$(find "$TEST_DIR" \( -name "Main.rae" -o -name "main.rae" \) | sort | while read -r f; do
   d=$(dirname "$f"); [[ "$d" == */helpers/* ]] && continue
   [ -f "$d/.raetesthelper" ] && continue
@@ -53,76 +62,98 @@ TOTAL=$(printf '%s\n' "$NAMES" | wc -l | tr -d ' ')
 # #919: the whole-tree format check comes BEFORE the suite (one extra "case").
 TREE_CHECK=1
 if [ -f tools/format-check-tree.sh ]; then
+  stage_start=$(date +%s)
   if bash tools/format-check-tree.sh; then TREE_CHECK=0; fi
+  stage_time "tools/format-check-tree.sh" "$stage_start"
   echo
 fi
 # #1016: the banned-terms gate is one more pre-suite "case" (SKIP counts as a
 # pass: a machine without the term list is not a failure).
 TERMS_CHECK=1
 if [ -f tools/banned-terms-gate.sh ]; then
+  stage_start=$(date +%s)
   if bash tools/banned-terms-gate.sh; then TERMS_CHECK=0; fi
+  stage_time "tools/banned-terms-gate.sh" "$stage_start"
   echo
 fi
 # Example files that copy another example's or a lib/ file, outside the
 # allowlist (tools/example-copy-gate.sh, AGENTS.md "Example families").
 COPY_CHECK=1
 if [ -f tools/example-copy-gate.sh ]; then
+  stage_start=$(date +%s)
   if bash tools/example-copy-gate.sh; then COPY_CHECK=0; fi
+  stage_time "tools/example-copy-gate.sh" "$stage_start"
   echo
 fi
 # The stress cases (docs/stress-tests.md): one more pre-suite "case". A
 # "footgun" case that stops reproducing FAILS here on purpose (the ratchet).
 STRESS_CHECK=1
 if [ -f ../stress/run.sh ]; then
+  stage_start=$(date +%s)
   if bash ../stress/run.sh; then STRESS_CHECK=0; fi
+  stage_time "../stress/run.sh" "$stage_start"
   echo
 fi
 # The threaded fixtures under ThreadSanitizer (tools/tsan-check.sh): one more
 # pre-suite "case"; any TSan report fails it (SKIP without a TSan runtime).
 TSAN_CHECK=1
 if [ -f tools/tsan-check.sh ]; then
+  stage_start=$(date +%s)
   if bash tools/tsan-check.sh; then TSAN_CHECK=0; fi
+  stage_time "tools/tsan-check.sh" "$stage_start"
   echo
 fi
 # Every benchmark program still compiles (tools/benchmarks-compile-check.sh):
 # one more pre-suite "case"; their run.sh builds are not run on every change.
 BENCH_CHECK=1
 if [ -f tools/benchmarks-compile-check.sh ]; then
+  stage_start=$(date +%s)
   if bash tools/benchmarks-compile-check.sh; then BENCH_CHECK=0; fi
+  stage_time "tools/benchmarks-compile-check.sh" "$stage_start"
   echo
 fi
 # lib/Float8's x86-64 and wasm lowerings (tools/float8-lowerings-check.sh):
 # one more pre-suite "case".
 FLOAT8_CHECK=1
 if [ -f tools/float8-lowerings-check.sh ]; then
+  stage_start=$(date +%s)
   if bash tools/float8-lowerings-check.sh; then FLOAT8_CHECK=0; fi
+  stage_time "tools/float8-lowerings-check.sh" "$stage_start"
   echo
 fi
 # The memory-boundary fixtures under AddressSanitizer (tools/asan-check.sh):
 # one more pre-suite "case" (SKIP without an ASan runtime).
 ASAN_CHECK=1
 if [ -f tools/asan-check.sh ]; then
+  stage_start=$(date +%s)
   if bash tools/asan-check.sh; then ASAN_CHECK=0; fi
+  stage_time "tools/asan-check.sh" "$stage_start"
   echo
 fi
 # lib/'s `when` branches type-checked for every real target
 # (tools/check-targets.sh, docs/platform-conditional-code.md §3.4).
 TARGETS_CHECK=1
 if [ -f tools/check-targets.sh ]; then
+  stage_start=$(date +%s)
   if bash tools/check-targets.sh; then TARGETS_CHECK=0; fi
+  stage_time "tools/check-targets.sh" "$stage_start"
   echo
 fi
 # The generated C compiles without warnings (tools/c-warnings-gate.sh).
 WARNINGS_CHECK=1
 if [ -f tools/c-warnings-gate.sh ]; then
+  stage_start=$(date +%s)
   if bash tools/c-warnings-gate.sh; then WARNINGS_CHECK=0; fi
+  stage_time "tools/c-warnings-gate.sh" "$stage_start"
   echo
 fi
 # Both Rae HTTP benchmark servers against every spec/Http.md rule
 # (benchmarks/servers/check.sh --rae, decision F7): correctness, never speed.
 SERVER_CHECK=1
 if [ -f ../benchmarks/servers/check.sh ]; then
+  stage_start=$(date +%s)
   if sh ../benchmarks/servers/check.sh --rae; then SERVER_CHECK=0; fi
+  stage_time "../benchmarks/servers/check.sh" "$stage_start"
   echo
 fi
 echo "Running Rae tests (PARALLEL: $TOTAL cases, $JOBS jobs)..."
@@ -137,11 +168,16 @@ START=$(date +%s)
 # silently fails for every case whose name is not very short.
 printf '%s\n' "$NAMES" | xargs -P "$JOBS" -n 1 bash -c '
   n="$1"
+  case_start=$(date +%s)
   RAE_TEST_NO_HISTORY=1 RAE_TEST_APPLY_SKIPS=1 bash tools/run_tests.sh "$n" > "$OUT/$n.log" 2>&1 </dev/null
   echo $? > "$OUT/$n.rc"
+  echo "$(( $(date +%s) - case_start ))s $n" > "$OUT/$n.time"
   grep -m1 -E "^(PASS|FAIL|SKIP): " "$OUT/$n.log" || true' _
 
 END=$(date +%s)
+stage_time "unit cases ($TOTAL, $JOBS jobs)" "$START"
+echo "Slowest unit cases:"
+cat "$OUT"/*.time 2>/dev/null | sort -rn | head -15 | sed 's/^/  /'
 PASSED=0; FAILED=0; SKIPPED=0; PASSED_NAMES=""
 for n in $NAMES; do
   log="$OUT/$n.log"; rc=$(cat "$OUT/$n.rc" 2>/dev/null || echo 1)
@@ -167,12 +203,16 @@ if [ "$WARNINGS_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED
 # permissions, atomic write, over-cap) — one extra "case" folded into the run.
 if [ -f tools/test-format-cli.sh ]; then
   echo
+  stage_start=$(date +%s)
   if bash tools/test-format-cli.sh; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
+  stage_time "tools/test-format-cli.sh" "$stage_start"
 fi
 
 if [ -f tools/test-packages-cli.sh ]; then
   echo
+  stage_start=$(date +%s)
   if bash tools/test-packages-cli.sh; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
+  stage_time "tools/test-packages-cli.sh" "$stage_start"
 fi
 # The browser build (rae build --target wasm, Emscripten + EmdawnWebGPU):
 # 132 and 134 as pages and an embeddable module, ~50 s. It prints SKIP and
@@ -180,42 +220,56 @@ fi
 # app (wgpu-native's webgpu/wgpu.h; docs/physics-performance-plan.md §10g).
 if [ -f tools/wasm_webgpu_smoke.sh ]; then
   echo
+  stage_start=$(date +%s)
   if bash tools/wasm_webgpu_smoke.sh; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
+  stage_time "tools/wasm_webgpu_smoke.sh" "$stage_start"
 fi
 # The compiler's speed on one standard program (tools/compiler-speed.sh): a
 # measurement, not a case, so it never changes the pass/fail count.
 if [ -f tools/compiler-speed.sh ]; then
   echo
+  stage_start=$(date +%s)
   bash tools/compiler-speed.sh || true
+  stage_time "tools/compiler-speed.sh" "$stage_start"
 fi
 # #44411932: native file-open dialog binding, env-driven headless path.
 if [ -f tools/test-sdl-file-dialog.sh ]; then
   echo
+  stage_start=$(date +%s)
   if bash tools/test-sdl-file-dialog.sh; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
+  stage_time "tools/test-sdl-file-dialog.sh" "$stage_start"
 fi
 # `rae watch` restarts on a `.raescene` change too (the scene is app data no
 # build sees; the supervisor is the one dev loop). Runs a real supervisor on a
 # tiny CLI program — a few seconds.
 if [ -f tools/test-watch-scene-data.sh ]; then
   echo
+  stage_start=$(date +%s)
   if bash tools/test-watch-scene-data.sh; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
+  stage_time "tools/test-watch-scene-data.sh" "$stage_start"
 fi
 # File, asset and console policy (docs/runtime-c-audit.md row 7) with stdin,
 # $RAE_STDLIB and a scratch directory, which a single-file case cannot set.
 if [ -f tools/test-files-io.sh ]; then
   echo
+  stage_start=$(date +%s)
   if bash tools/test-files-io.sh; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
+  stage_time "tools/test-files-io.sh" "$stage_start"
 fi
 # Where `rae build --emit-c --out` writes: new folders, and errors that say why
 if [ -f tools/test-build-out.sh ]; then
   echo
+  stage_start=$(date +%s)
   if bash tools/test-build-out.sh; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
+  stage_time "tools/test-build-out.sh" "$stage_start"
 fi
 echo
 echo "=========================================="
 echo "Results: $PASSED passed, $FAILED failed"
 echo "($SKIPPED skipped; $((END-START)) s wall at $JOBS jobs)"
 echo "=========================================="
+echo "Stage times, slowest first:"
+printf '%s\n' "$STAGE_TIMES" | grep -v '^$' | sort -rn
 [ -f tools/update_test_history.py ] && ./tools/update_test_history.py $PASSED_NAMES >/dev/null 2>&1
 if [ "${RAE_TEST_KEEP_LOGS:-0}" = "1" ]; then echo "(per-case logs kept in $OUT)"; else rm -rf "$OUT"; fi
 RC=0; [ "$FAILED" -gt 0 ] && RC=1
