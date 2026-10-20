@@ -24,13 +24,6 @@ open GltfSkinMesh
 # than an unwrap error. Callers keep their own bounds/clamping logic — the
 # fallback only covers indices this code already treats as unreachable.
 # Shared with gltfRetarget.rae via `open gltf_skin`.
-func floatAt(list: view List(Float), index: copy Int) ret Float {
-  if let value: Float = list.copyAt(index: index) {
-    ret value
-  }
-  ret 0.0
-}
-
 func intAt(list: view List(Int), index: copy Int, fallback: copy Int) ret Int {
   if let value: Int = list.copyAt(index: index) {
     ret value
@@ -134,7 +127,7 @@ func withAtlasColors(
   var out: List(Float) = List.create(Float, cap: m.verts.length)
   var i: Int = 0
   loop i < m.verts.length {
-    out.add(value: floatAt(list: m.verts, index: i))
+    out.add(value: m.verts.copyAtFallback(index: i, fallback: 0.0))
     i = i + 1
   }
   if width <= 0 or height <= 0 or atlas.length < width * height {
@@ -147,8 +140,10 @@ func withAtlasColors(
   var v: Int = 0
   loop v < m.vertCount {
     let base: Int = v * 20
-    var x: Int = Math.floor(x: floatAt(list: out, index: base + 6) * width.toFloat()).toInt()
-    var y: Int = Math.floor(x: floatAt(list: out, index: base + 7) * height.toFloat()).toInt()
+    var x: Int = Math.floor(x: out.copyAtFallback(index: base + 6, fallback: 0.0) * width.toFloat()).toInt()
+    var y: Int = Math.floor(
+      x: out.copyAtFallback(index: base + 7, fallback: 0.0) * height.toFloat()
+    ).toInt()
     # Clamp rather than wrap. A UV marginally outside [0,1] is exporter
     # rounding on a swatch edge, and wrapping would fetch the colour from
     # the opposite side of the atlas — a vivid wrong pixel instead of the
@@ -359,17 +354,17 @@ func captureSkeletonPose(sk: view Skeleton) ret SkeletonPose {
   var localS: List(Float) = List.create(Float, cap: sk.localS.length)
   var index: Int = 0
   loop index < sk.localT.length {
-    localT.add(value: floatAt(list: sk.localT, index: index))
+    localT.add(value: sk.localT.copyAtFallback(index: index, fallback: 0.0))
     index = index + 1
   }
   index = 0
   loop index < sk.localR.length {
-    localR.add(value: floatAt(list: sk.localR, index: index))
+    localR.add(value: sk.localR.copyAtFallback(index: index, fallback: 0.0))
     index = index + 1
   }
   index = 0
   loop index < sk.localS.length {
-    localS.add(value: floatAt(list: sk.localS, index: index))
+    localS.add(value: sk.localS.copyAtFallback(index: index, fallback: 0.0))
     index = index + 1
   }
   ret SkeletonPose { localT: own localT, localR: own localR, localS: own localS }
@@ -378,17 +373,17 @@ func captureSkeletonPose(sk: view Skeleton) ret SkeletonPose {
 func applySkeletonPose(sk: mod Skeleton, pose: view SkeletonPose) {
   var index: Int = 0
   loop index < sk.localT.length and index < pose.localT.length {
-    sk.localT.set(index: index, value: floatAt(list: pose.localT, index: index))
+    sk.localT.set(index: index, value: pose.localT.copyAtFallback(index: index, fallback: 0.0))
     index = index + 1
   }
   index = 0
   loop index < sk.localR.length and index < pose.localR.length {
-    sk.localR.set(index: index, value: floatAt(list: pose.localR, index: index))
+    sk.localR.set(index: index, value: pose.localR.copyAtFallback(index: index, fallback: 0.0))
     index = index + 1
   }
   index = 0
   loop index < sk.localS.length and index < pose.localS.length {
-    sk.localS.set(index: index, value: floatAt(list: pose.localS, index: index))
+    sk.localS.set(index: index, value: pose.localS.copyAtFallback(index: index, fallback: 0.0))
     index = index + 1
   }
 }
@@ -406,15 +401,15 @@ func blendSkeletonPose(sk: mod Skeleton, from: view SkeletonPose, weight: view F
 
   var index: Int = 0
   loop index < sk.localT.length and index < from.localT.length {
-    let source: Float = floatAt(list: from.localT, index: index)
-    let target: Float = floatAt(list: sk.localT, index: index)
+    let source: Float = from.localT.copyAtFallback(index: index, fallback: 0.0)
+    let target: Float = sk.localT.copyAtFallback(index: index, fallback: 0.0)
     sk.localT.set(index: index, value: source + (target - source) * amount)
     index = index + 1
   }
   index = 0
   loop index < sk.localS.length and index < from.localS.length {
-    let source: Float = floatAt(list: from.localS, index: index)
-    let target: Float = floatAt(list: sk.localS, index: index)
+    let source: Float = from.localS.copyAtFallback(index: index, fallback: 0.0)
+    let target: Float = sk.localS.copyAtFallback(index: index, fallback: 0.0)
     sk.localS.set(index: index, value: source + (target - source) * amount)
     index = index + 1
   }
@@ -422,16 +417,16 @@ func blendSkeletonPose(sk: mod Skeleton, from: view SkeletonPose, weight: view F
   var node: Int = 0
   loop node * 4 + 3 < sk.localR.length and node * 4 + 3 < from.localR.length {
     let source: Quat = Quat.create(
-      x: floatAt(list: from.localR, index: node * 4)
-      y: floatAt(list: from.localR, index: node * 4 + 1)
-      z: floatAt(list: from.localR, index: node * 4 + 2)
-      w: floatAt(list: from.localR, index: node * 4 + 3)
+      x: from.localR.copyAtFallback(index: node * 4, fallback: 0.0)
+      y: from.localR.copyAtFallback(index: node * 4 + 1, fallback: 0.0)
+      z: from.localR.copyAtFallback(index: node * 4 + 2, fallback: 0.0)
+      w: from.localR.copyAtFallback(index: node * 4 + 3, fallback: 0.0)
     )
     let target: Quat = Quat.create(
-      x: floatAt(list: sk.localR, index: node * 4)
-      y: floatAt(list: sk.localR, index: node * 4 + 1)
-      z: floatAt(list: sk.localR, index: node * 4 + 2)
-      w: floatAt(list: sk.localR, index: node * 4 + 3)
+      x: sk.localR.copyAtFallback(index: node * 4, fallback: 0.0)
+      y: sk.localR.copyAtFallback(index: node * 4 + 1, fallback: 0.0)
+      z: sk.localR.copyAtFallback(index: node * 4 + 2, fallback: 0.0)
+      w: sk.localR.copyAtFallback(index: node * 4 + 3, fallback: 0.0)
     )
     let blended: Quat = Quat.slerp(a: source, b: target, t: amount)
     sk.localR.set(index: node * 4, value: blended.x)
@@ -449,21 +444,21 @@ func blendSkeletonPose(sk: mod Skeleton, from: view SkeletonPose, weight: view F
 # node around the parent's origin instead of its own.
 func nodeLocalMatrix(sk: view Skeleton, node: view Int) ret Mat4 {
   let t: Mat4 = mat4Translate(
-    x: floatAt(list: sk.localT, index: node * 3)
-    y: floatAt(list: sk.localT, index: node * 3 + 1)
-    z: floatAt(list: sk.localT, index: node * 3 + 2)
+    x: sk.localT.copyAtFallback(index: node * 3, fallback: 0.0)
+    y: sk.localT.copyAtFallback(index: node * 3 + 1, fallback: 0.0)
+    z: sk.localT.copyAtFallback(index: node * 3 + 2, fallback: 0.0)
   )
   let q: Quat = Quat.create(
-    x: floatAt(list: sk.localR, index: node * 4)
-    y: floatAt(list: sk.localR, index: node * 4 + 1)
-    z: floatAt(list: sk.localR, index: node * 4 + 2)
-    w: floatAt(list: sk.localR, index: node * 4 + 3)
+    x: sk.localR.copyAtFallback(index: node * 4, fallback: 0.0)
+    y: sk.localR.copyAtFallback(index: node * 4 + 1, fallback: 0.0)
+    z: sk.localR.copyAtFallback(index: node * 4 + 2, fallback: 0.0)
+    w: sk.localR.copyAtFallback(index: node * 4 + 3, fallback: 0.0)
   )
   let r: Mat4 = Quat.toMat4(q: q)
   let s: Mat4 = mat4ScaleXYZ(
-    x: floatAt(list: sk.localS, index: node * 3)
-    y: floatAt(list: sk.localS, index: node * 3 + 1)
-    z: floatAt(list: sk.localS, index: node * 3 + 2)
+    x: sk.localS.copyAtFallback(index: node * 3, fallback: 0.0)
+    y: sk.localS.copyAtFallback(index: node * 3 + 1, fallback: 0.0)
+    z: sk.localS.copyAtFallback(index: node * 3 + 2, fallback: 0.0)
   )
   ret mat4Mul(a: t, b: mat4Mul(a: r, b: s))
 }
@@ -521,7 +516,7 @@ func buildPaletteInto(sk: view Skeleton, out: mod List(Float)) pub {
     if sk.inverseBind.length >= (j + 1) * 16 {
       var c: Int = 0
       loop c < 16 {
-        ib.m.set(index: c, value: floatAt(list: sk.inverseBind, index: j * 16 + c))
+        ib.m.set(index: c, value: sk.inverseBind.copyAtFallback(index: j * 16 + c, fallback: 0.0))
         c = c + 1
       }
     }
@@ -729,15 +724,15 @@ func loadClip(glb: view Glb, animIndex: view Int, sk: view Skeleton) pub ret Cli
           valueStart.add(value: values.length)
           var i: Int = 0
           loop i < t.length {
-            times.add(value: floatAt(list: t, index: i))
+            times.add(value: t.copyAtFallback(index: i, fallback: 0.0))
             i = i + 1
           }
-          if floatAt(list: t, index: t.length - 1) > duration {
-            duration = floatAt(list: t, index: t.length - 1)
+          if t.copyAtFallback(index: t.length - 1, fallback: 0.0) > duration {
+            duration = t.copyAtFallback(index: t.length - 1, fallback: 0.0)
           }
           i = 0
           loop i < v.length {
-            values.add(value: floatAt(list: v, index: i))
+            values.add(value: v.copyAtFallback(index: i, fallback: 0.0))
             i = i + 1
           }
         }
@@ -797,15 +792,15 @@ func applyClip(sk: mod Skeleton, c: view Clip, time: view Float) pub {
     # tens of keys per channel, and a binary search would cost more in
     # branch overhead than it saves.
     var k: Int = 0
-    loop k + 1 < tn and floatAt(list: c.times, index: ts + k + 1) < t {
+    loop k + 1 < tn and c.times.copyAtFallback(index: ts + k + 1, fallback: 0.0) < t {
       k = k + 1
     }
     var k1: Int = k + 1
     if k1 >= tn {
       k1 = tn - 1
     }
-    let t0: Float = floatAt(list: c.times, index: ts + k)
-    let t1: Float = floatAt(list: c.times, index: ts + k1)
+    let t0: Float = c.times.copyAtFallback(index: ts + k, fallback: 0.0)
+    let t1: Float = c.times.copyAtFallback(index: ts + k1, fallback: 0.0)
     var alpha: Float = 0.0
     if intAt(list: c.interp, index: ci, fallback: interpStep) is interpLinear and t1 > t0 {
       alpha = (t - t0) / (t1 - t0)
@@ -819,16 +814,16 @@ func applyClip(sk: mod Skeleton, c: view Clip, time: view Float) pub {
 
     if p is pathRotation {
       let qa: Quat = Quat.create(
-        x: floatAt(list: c.values, index: vs + k * 4)
-        y: floatAt(list: c.values, index: vs + k * 4 + 1)
-        z: floatAt(list: c.values, index: vs + k * 4 + 2)
-        w: floatAt(list: c.values, index: vs + k * 4 + 3)
+        x: c.values.copyAtFallback(index: vs + k * 4, fallback: 0.0)
+        y: c.values.copyAtFallback(index: vs + k * 4 + 1, fallback: 0.0)
+        z: c.values.copyAtFallback(index: vs + k * 4 + 2, fallback: 0.0)
+        w: c.values.copyAtFallback(index: vs + k * 4 + 3, fallback: 0.0)
       )
       let qb: Quat = Quat.create(
-        x: floatAt(list: c.values, index: vs + k1 * 4)
-        y: floatAt(list: c.values, index: vs + k1 * 4 + 1)
-        z: floatAt(list: c.values, index: vs + k1 * 4 + 2)
-        w: floatAt(list: c.values, index: vs + k1 * 4 + 3)
+        x: c.values.copyAtFallback(index: vs + k1 * 4, fallback: 0.0)
+        y: c.values.copyAtFallback(index: vs + k1 * 4 + 1, fallback: 0.0)
+        z: c.values.copyAtFallback(index: vs + k1 * 4 + 2, fallback: 0.0)
+        w: c.values.copyAtFallback(index: vs + k1 * 4 + 3, fallback: 0.0)
       )
       # SLERP, not a component-wise lerp. Lerping quaternions shortens the
       # result, which shows up as limbs subtly shrinking mid-swing, and it
@@ -842,8 +837,8 @@ func applyClip(sk: mod Skeleton, c: view Clip, time: view Float) pub {
     } else {
       var comp: Int = 0
       loop comp < comps {
-        let a: Float = floatAt(list: c.values, index: vs + k * comps + comp)
-        let bv: Float = floatAt(list: c.values, index: vs + k1 * comps + comp)
+        let a: Float = c.values.copyAtFallback(index: vs + k * comps + comp, fallback: 0.0)
+        let bv: Float = c.values.copyAtFallback(index: vs + k1 * comps + comp, fallback: 0.0)
         let v: Float = a + (bv - a) * alpha
         if p is pathTranslation {
           sk.localT.set(index: node * 3 + comp, value: v)

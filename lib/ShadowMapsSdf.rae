@@ -177,7 +177,7 @@ func shadowMetaballs(
   loop var i: Int = 0, i < balls * 4, ++i {
     shadow.sdf.ballFloats.set(
       index: ci * shadowSdfMaxBalls * 4 + i
-      value: floatAt(list: packedBalls, index: i)
+      value: packedBalls.copyAtFallback(index: i, fallback: 0.0)
     )
   }
   var blend: Float = smoothing
@@ -230,10 +230,13 @@ func shadowSdfDraw(
   }
   var vp: Mat4 = mat4Identity()
   loop var k: Int = 0, k < 16, ++k {
-    vp.m.set(index: k, value: floatAt(list: shadow.cascadeVp, index: cascade * 16 + k))
+    vp.m.set(
+      index: k
+      value: shadow.cascadeVp.copyAtFallback(index: cascade * 16 + k, fallback: 0.0)
+    )
   }
   let inverse: Mat4 = mat4Inverse(a: vp)
-  var span: Float = floatAt(list: shadow.depthRange, index: cascade)
+  var span: Float = shadow.depthRange.copyAtFallback(index: cascade, fallback: 0.0)
   if span <= 0.0 {
     span = 100.0
   }
@@ -246,10 +249,10 @@ func shadowSdfDraw(
     var hi: Vec3 = Vec3.create(x: 0.0 - shadowSdfFar, y: 0.0 - shadowSdfFar, z: 0.0 - shadowSdfFar)
     let base: Int = ci * shadowSdfMaxBalls * 4
     loop var b: Int = 0, b < count, ++b {
-      let r: Float = floatAt(list: shadow.sdf.ballFloats, index: base + b * 4 + 3) + blend
-      let x: Float = floatAt(list: shadow.sdf.ballFloats, index: base + b * 4)
-      let y: Float = floatAt(list: shadow.sdf.ballFloats, index: base + b * 4 + 1)
-      let z: Float = floatAt(list: shadow.sdf.ballFloats, index: base + b * 4 + 2)
+      let r: Float = shadow.sdf.ballFloats.copyAtFallback(index: base + b * 4 + 3, fallback: 0.0) + blend
+      let x: Float = shadow.sdf.ballFloats.copyAtFallback(index: base + b * 4, fallback: 0.0)
+      let y: Float = shadow.sdf.ballFloats.copyAtFallback(index: base + b * 4 + 1, fallback: 0.0)
+      let z: Float = shadow.sdf.ballFloats.copyAtFallback(index: base + b * 4 + 2, fallback: 0.0)
       lo = Vec3.create(
         x: Math.min(a: lo.x, b: x - r)
         y: Math.min(a: lo.y, b: y - r)

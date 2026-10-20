@@ -513,38 +513,64 @@ static Symbol* symbol_table_lookup(SymbolTable* table, Str name) {
 // global of a module that is only `import`ed here (lib/Math's `pi` read from a
 // module that opens physics/math/Scalar). The global is chosen by visibility:
 // one declared in this file wins; otherwise the one module that is visible
-// bare here; when several are, the explicitly `open`ed one; two explicitly
-// opened modules declaring the name are an error naming both. Returns NULL
-// when no visible global by that name exists (the caller keeps its old
-// behaviour). With a NULL module the ambiguity is not reported (const
+// bare here (opened, the project, the prelude). Two such modules declaring
+// the name are an error naming both — the same rule bare function calls
+// follow (resolve_function_overload); the project counts as one module.
+// Returns NULL when no visible global by that name exists (the caller keeps
+// its old behaviour). With a NULL module the ambiguity is not reported (const
 // folding; the read itself reports it).
+static bool sema_same_bare_module(const AstDecl* a, const AstDecl* b);
 static Symbol* sema_resolve_bare_global(SymbolTable* symbols, Str name, const char* file,
                                         AstModule* module, size_t line, size_t column) {
+    /* The project's modules are all visible to each other; an explicit
+     * `open alpha/Values` picks one of them (case 1016). Only then is the
+     * project's pick weighed against the lib modules visible here. */
+    Symbol* project[16]; size_t project_count = 0;
     Symbol* visible[16]; size_t visible_count = 0;
     for (Symbol* curr = symbol_table_first(symbols, name); curr; curr = curr->sameNext) {
         if (!curr->decl || curr->decl->kind != AST_DECL_GLOBAL_LET) continue;
         if (file && curr->decl->origin_file && strcmp(file, curr->decl->origin_file) == 0) return curr;
         if (!sema_decl_opened(file, curr->decl)) continue;
+        char pkg[256] = {0};
+        if (curr->decl->origin_file) sema_package_token(curr->decl->origin_file, pkg, sizeof pkg);
+        bool is_project = curr->decl->origin_file && pkg[0] == '\0';
+        Symbol** into = is_project ? project : visible;
+        size_t* count = is_project ? &project_count : &visible_count;
         bool seen = false;
-        for (size_t i = 0; i < visible_count; i++) if (visible[i]->decl == curr->decl) seen = true;
-        if (!seen && visible_count < 16) visible[visible_count++] = curr;
+        for (size_t i = 0; i < *count; i++)
+            if (into[i]->decl == curr->decl
+                || (!is_project && curr->decl->origin_file && into[i]->decl->origin_file
+                    && sema_same_bare_module(into[i]->decl, curr->decl))) seen = true;
+        if (!seen && *count < 16) into[(*count)++] = curr;
     }
+    if (project_count >= 2) {
+        Symbol* opened = NULL; size_t opened_count = 0;
+        for (size_t i = 0; i < project_count; i++)
+            if (sema_file_declares_package(file, project[i]->decl, /*require_open=*/true)) {
+                opened = project[i]; opened_count++;
+            }
+        if (opened_count == 1) { project[0] = opened; project_count = 1; }
+    }
+    for (size_t i = 0; i < project_count && visible_count < 16; i++) visible[visible_count++] = project[i];
     if (visible_count == 0) return NULL;
     if (visible_count == 1) return visible[0];
-    Symbol* opened[16]; size_t opened_count = 0;
-    for (size_t i = 0; i < visible_count; i++)
-        if (sema_file_declares_package(file, visible[i]->decl, /*require_open=*/true))
-            opened[opened_count++] = visible[i];
-    if (opened_count == 1) return opened[0];
-    Symbol** clash = opened_count >= 2 ? opened : visible;
-    const char* first = clash[0]->decl->module_name ? clash[0]->decl->module_name : clash[0]->decl->origin_file;
-    const char* second = clash[1]->decl->module_name ? clash[1]->decl->module_name : clash[1]->decl->origin_file;
+    Symbol** clash = visible;
+    const char* names[2];
+    for (size_t i = 0; i < 2; i++) {
+        const AstDecl* d = clash[i]->decl;
+        char pkg[256] = {0};
+        if (d->origin_file) sema_package_token(d->origin_file, pkg, sizeof pkg);
+        names[i] = (d->origin_file && pkg[0] == '\0') ? "this project"
+            : (d->module_name ? d->module_name : d->origin_file);
+    }
+    const char* first = names[0];
+    const char* second = names[1];
     // A qualified const is spelled with a top-level module's name
     // (`WorldBiome.matGrass`); a module inside a package (`procgen/Texture`)
     // has no qualified spelling for its consts, so then only "open one" helps.
     const char* qualifier = NULL;
-    if (first && !strchr(first, '/')) qualifier = first;
-    else if (second && !strchr(second, '/')) qualifier = second;
+    if (first && !strchr(first, '/') && strcmp(first, "this project") != 0) qualifier = first;
+    else if (second && !strchr(second, '/') && strcmp(second, "this project") != 0) qualifier = second;
     char buf[512];
     if (qualifier)
         snprintf(buf, sizeof buf,
@@ -1805,6 +1831,48 @@ static void sema_report_arity_mismatch(AstModule* module, Str name, size_t arg_c
     if (module) module->had_error = true;
 }
 
+// Are `a` and `b` in the same module for the bare-name ambiguity rule? Every
+// project file counts as one module (the folder rule covers project folders).
+static bool sema_same_bare_module(const AstDecl* a, const AstDecl* b) {
+    char pa[256], pb[256];
+    sema_package_token(a->origin_file, pa, sizeof pa);
+    sema_package_token(b->origin_file, pb, sizeof pb);
+    if (pa[0] == '\0' || pb[0] == '\0') return pa[0] == '\0' && pb[0] == '\0';
+    if (a->module_name && b->module_name) return strcmp(a->module_name, b->module_name) == 0;
+    return strcmp(a->origin_file, b->origin_file) == 0;
+}
+
+// Do functions `a` and `b` take the same parameter types, so that no call
+// can choose between them? A generic one is compared by its written
+// signature; the others by their resolved types, the mode ignored (a call
+// cannot pick by `view` / `mod`). A parameter type its own module already
+// resolved is taken as resolved there, so two modules' own `World` types
+// stay two types.
+static bool sema_same_param_types(CompilerContext* ctx, AstModule* module, SymbolTable* symbols,
+                                  const AstDecl* a, const AstDecl* b) {
+    const AstFuncDecl* fa = &a->as.func_decl;
+    const AstFuncDecl* fb = &b->as.func_decl;
+    if (fa->generic_params || fb->generic_params) {
+        char sa[512], sb[512];
+        sema_render_signature(fa, sa, sizeof sa);
+        sema_render_signature(fb, sb, sizeof sb);
+        return strcmp(sa, sb) == 0;
+    }
+    const AstParam* pa = fa->params;
+    const AstParam* pb = fb->params;
+    for (; pa && pb; pa = pa->next, pb = pb->next) {
+        TypeInfo* ta = pa->type && pa->type->resolved_type ? pa->type->resolved_type
+                     : sema_resolve_type_internal(ctx, module, symbols, pa->type);
+        TypeInfo* tb = pb->type && pb->type->resolved_type ? pb->type->resolved_type
+                     : sema_resolve_type_internal(ctx, module, symbols, pb->type);
+        if (!ta || !tb) return false;
+        while (ta->kind == TYPE_REF) ta = ta->as.ref.base;
+        while (tb->kind == TYPE_REF) tb = tb->as.ref.base;
+        if (!type_is_same(ta, tb)) return false;
+    }
+    return !pa && !pb;
+}
+
 static AstDecl* resolve_function_overload(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, Str name, AstCallArg* args, AstTypeRef* explicit_generic_args, size_t line, size_t column) {
     size_t arg_count = 0;
     for (AstCallArg* a = args; a; a = a->next) arg_count++;
@@ -1853,6 +1921,68 @@ static AstDecl* resolve_function_overload(CompilerContext* ctx, AstModule* modul
                     (int)name.len, name.data, list);
             diag_error(sema_diag_file(module),
                        (int)line, (int)column, buf);
+            if (module) module->had_error = true;
+            return NULL;
+        }
+    }
+
+    // Module ambiguity, the rule consts already follow (sema_resolve_bare_global):
+    // a bare name resolves in this file's own module and the modules visible
+    // bare here (opened, the project, the prelude). When two of them declare
+    // the same function (the same name, labels and parameter types), the call
+    // is ambiguous: report it instead of picking one silently. One declared
+    // in this very file wins. Overloads stay legal: other labels, or other
+    // parameter types (`drop(this: mod Event)` beside `drop(this: mod Queue)`).
+    // The project counts as one module here (two project folders are the
+    // check above), and `extern`s with one name are one C function.
+    {
+        const AstDecl* cands[32]; size_t cand_count = 0;
+        bool own_file = false;
+        for (Symbol* curr = symbol_table_first(symbols, name); curr; curr = curr->sameNext) {
+            const AstDecl* d = curr->decl;
+            if (!d || d->kind != AST_DECL_FUNC || d->as.func_decl.specialization_args) continue;
+            if (d->as.func_decl.is_extern) continue;
+            if (!d->origin_file || !sema_decl_opened(s_current_decl_origin, d)) continue;
+            size_t pc = 0;
+            for (AstParam* p = d->as.func_decl.params; p; p = p->next) pc++;
+            if (pc != arg_count) continue;
+            bool labels_match = true;
+            AstParam* p = d->as.func_decl.params;
+            for (AstCallArg* a = args; a && p; a = a->next, p = p->next)
+                if (a->name.len && !str_eq(a->name, p->name)) { labels_match = false; break; }
+            if (!labels_match) continue;
+            if (s_current_decl_origin && strcmp(s_current_decl_origin, d->origin_file) == 0) own_file = true;
+            bool seen = false;
+            for (size_t i = 0; i < cand_count; i++) if (cands[i] == d) seen = true;
+            if (!seen && cand_count < 32) cands[cand_count++] = d;
+        }
+        const AstDecl* clash[2] = { NULL, NULL };
+        for (size_t i = 0; i < cand_count && !own_file && !clash[0]; i++) {
+            for (size_t j = i + 1; j < cand_count; j++) {
+                if (sema_same_bare_module(cands[i], cands[j])) continue;
+                if (!sema_same_param_types(ctx, module, symbols, cands[i], cands[j])) continue;
+                clash[0] = cands[i]; clash[1] = cands[j];
+                break;
+            }
+        }
+        if (clash[0]) {
+            const char* names[2]; const char* qualifier = NULL;
+            for (size_t i = 0; i < 2; i++) {
+                char pkg[256]; sema_package_token(clash[i]->origin_file, pkg, sizeof pkg);
+                names[i] = pkg[0] == '\0' ? "this project"
+                    : (clash[i]->module_name ? clash[i]->module_name : clash[i]->origin_file);
+                if (pkg[0] != '\0' && !qualifier) {
+                    const char* slash = strrchr(names[i], '/');
+                    qualifier = slash ? slash + 1 : names[i];
+                }
+            }
+            char buf[600];
+            snprintf(buf, sizeof buf,
+                     "'%.*s' is ambiguous: it is declared in both '%s' and '%s', which are both open here; "
+                     "open only one of them, or qualify the call (`%s.%.*s(...)`)",
+                     (int)name.len, name.data, names[0], names[1], qualifier ? qualifier : "Module",
+                     (int)name.len, name.data);
+            diag_error(sema_diag_file(module), (int)line, (int)column, buf);
             if (module) module->had_error = true;
             return NULL;
         }

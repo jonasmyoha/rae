@@ -1,0 +1,10 @@
+# Two opened lib modules that declare the same function (lib/Float4 and
+# lib/Float8 both have `lowering() ret String`): the bare call is ambiguous,
+# and the error names both modules and the fix, as a const already does (case
+# 966). It used to pick one silently.
+open Float4
+open Float8
+
+func main() {
+  log("{lowering()}")
+}

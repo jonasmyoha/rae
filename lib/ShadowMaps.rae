@@ -182,10 +182,6 @@ func createShadowCacheWith(casterBias: view ShadowCasterBias) ret ShadowCache {
   }
 }
 
-func floatAt(list: view List(Float), index: copy Int) ret Float {
-  ret list.copyAtFallback(index: index, fallback: 0.0)
-}
-
 func sameBufferId(a: view BufferId, b: view BufferId) ret Bool {
   ret a.slot is b.slot and a.generation is b.generation and a.managerTag is b.managerTag
 }
@@ -412,13 +408,13 @@ func shadowBegin(
   shadow.cascadeVp.clear()
   shadow.depthRange.clear()
   loop var i: Int = 0, i < count * 16, ++i {
-    shadow.cascadeVp.add(value: floatAt(list: cascades.viewProj, index: i))
+    shadow.cascadeVp.add(value: cascades.viewProj.copyAtFallback(index: i, fallback: 0.0))
   }
   loop var c: Int = 0, c < count, ++c {
     shadow.depthRange.add(value: cascades.depthRange.copyAtFallback(index: c, fallback: 1.0))
     shadow.scratch.clear()
     loop var k: Int = 0, k < 16, ++k {
-      shadow.scratch.add(value: floatAt(list: cascades.viewProj, index: c * 16 + k))
+      shadow.scratch.add(value: cascades.viewProj.copyAtFallback(index: c * 16 + k, fallback: 0.0))
     }
     unsafe {
       let wroteCascade: Bool = writeBufferFromPtr(
@@ -439,12 +435,21 @@ func shadowBegin(
     shadow.scratch.add(value: 0.0)
   }
   loop var i: Int = 0, i < count * 16, ++i {
-    shadow.scratch.set(index: i, value: floatAt(list: cascades.viewProj, index: i))
+    shadow.scratch.set(index: i, value: cascades.viewProj.copyAtFallback(index: i, fallback: 0.0))
   }
   loop var c: Int = 0, c < count, ++c {
-    shadow.scratch.set(index: 64 + c, value: floatAt(list: cascades.splitFar, index: c))
-    shadow.scratch.set(index: 68 + c, value: floatAt(list: cascades.texelWorld, index: c))
-    shadow.scratch.set(index: 72 + c, value: floatAt(list: shadow.depthRange, index: c))
+    shadow.scratch.set(
+      index: 64 + c
+      value: cascades.splitFar.copyAtFallback(index: c, fallback: 0.0)
+    )
+    shadow.scratch.set(
+      index: 68 + c
+      value: cascades.texelWorld.copyAtFallback(index: c, fallback: 0.0)
+    )
+    shadow.scratch.set(
+      index: 72 + c
+      value: shadow.depthRange.copyAtFallback(index: c, fallback: 0.0)
+    )
   }
   shadow.scratch.set(index: 76, value: count as Float)
   shadow.scratch.set(index: 77, value: resolution as Float)

@@ -88,10 +88,10 @@ func findJointByKey(sk: view Skeleton, key: view String) ret opt Int {
 # Read/write a quaternion packed at slot `i` of a flat `x,y,z,w` List(Float).
 func quatFromList(a: view List(Float), i: copy Int) ret Quat {
   ret quat.create(
-    x: floatAt(list: a, index: i * 4)
-    y: floatAt(list: a, index: i * 4 + 1)
-    z: floatAt(list: a, index: i * 4 + 2)
-    w: floatAt(list: a, index: i * 4 + 3)
+    x: a.copyAtFallback(index: i * 4, fallback: 0.0)
+    y: a.copyAtFallback(index: i * 4 + 1, fallback: 0.0)
+    z: a.copyAtFallback(index: i * 4 + 2, fallback: 0.0)
+    w: a.copyAtFallback(index: i * 4 + 3, fallback: 0.0)
   )
 }
 
@@ -164,19 +164,19 @@ func cloneSourceForSampling(from: view Skeleton, fromBind: view SkeletonPose) re
   let localR: List(Float) = List.create(Float, cap: fromBind.localR.length)
   var i: Int = 0
   loop i < fromBind.localR.length {
-    localR.add(value: floatAt(list: fromBind.localR, index: i))
+    localR.add(value: fromBind.localR.copyAtFallback(index: i, fallback: 0.0))
     i = i + 1
   }
   let localT: List(Float) = List.create(Float, cap: fromBind.localT.length)
   i = 0
   loop i < fromBind.localT.length {
-    localT.add(value: floatAt(list: fromBind.localT, index: i))
+    localT.add(value: fromBind.localT.copyAtFallback(index: i, fallback: 0.0))
     i = i + 1
   }
   let localS: List(Float) = List.create(Float, cap: fromBind.localS.length)
   i = 0
   loop i < fromBind.localS.length {
-    localS.add(value: floatAt(list: fromBind.localS, index: i))
+    localS.add(value: fromBind.localS.copyAtFallback(index: i, fallback: 0.0))
     i = i + 1
   }
   let parent: List(Int) = List.create(Int, cap: from.parent.length)
@@ -395,10 +395,10 @@ func retargetClip(
     var k: Int = 0
     loop k < nSamp {
       let baseIdx: Int = (m * nSamp + k) * 4
-      values.add(value: floatAt(list: valBuf, index: baseIdx))
-      values.add(value: floatAt(list: valBuf, index: baseIdx + 1))
-      values.add(value: floatAt(list: valBuf, index: baseIdx + 2))
-      values.add(value: floatAt(list: valBuf, index: baseIdx + 3))
+      values.add(value: valBuf.copyAtFallback(index: baseIdx, fallback: 0.0))
+      values.add(value: valBuf.copyAtFallback(index: baseIdx + 1, fallback: 0.0))
+      values.add(value: valBuf.copyAtFallback(index: baseIdx + 2, fallback: 0.0))
+      values.add(value: valBuf.copyAtFallback(index: baseIdx + 3, fallback: 0.0))
       k = k + 1
     }
     m = m + 1
