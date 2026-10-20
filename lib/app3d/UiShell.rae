@@ -49,6 +49,7 @@ open ui/Transform
 open ecs/Entity
 open ecs/ComponentTable
 open ui/UiSystems
+open ui/safeAreaSystem/SafeAreaSystem
 
 # ----- window extent --------------------------------------------------
 func windowExtentW() ret Float {
@@ -363,6 +364,9 @@ func mountUiScene(
 # three. Running a subset is the classic source of a UI that is
 # positioned correctly but hit-tests against last frame's rectangles.
 func runUiSystems(world: mod UiWorld, uiSystems: mod UiSystems, res: view Gpu2dUi) {
+  # The screen's safe area first (the OS's, or a simulator's), so the layout
+  # keeps the UI clear of a notch and the home indicator
+  feedSafeArea(world: world, uiSystems: uiSystems)
   measureTextForLayout(world: world, uiSystems: uiSystems, res: res)
   layoutSystem(world: world, uiSystems: uiSystems)
   transformSystem(world: world, uiSystems: uiSystems)
@@ -388,6 +392,7 @@ func runScheduledUiSystems(
   # text hugs its glyphs on the first frame. Compare-before-write means a
   # stable string does not bump the table generation, so layout still skips
   # when nothing moved (measuredTexts is a declared layout read).
+  feedSafeArea(world: world, uiSystems: uiSystems)
   measureTextForLayout(world: world, uiSystems: uiSystems, res: res)
   if uiShouldRun(
     schedule: schedule
