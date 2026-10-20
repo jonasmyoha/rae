@@ -21,8 +21,9 @@
 # the menu. An app without modes (app3d/EditorPanel) puts only the camera
 # item in it and calls updateModeMenuItems. The scene's `editor` state may restyle the menu like
 # the editor's panels: applying a
-# state resets those nodes, so the menu's open/close and the camera item's
-# text are written again whenever the modes' generation moves.
+# state resets those nodes, so the menu binds its open/close and its items'
+# text to their nodes (bindNodeText / bindNodeActive, ui/nodeBindingSystem),
+# which the apply writes again.
 #
 #   ...each frame, after updateUiInput, before layout:
 #   if updateUiModes(world: w, uiSystems: s, uiModes: m) or updateModeMenu(world: w,
@@ -31,6 +32,7 @@ open app3d/UiModes
 open app3d/UiShell
 open app3d/CameraRig
 open ui/Ecs
+open ui/nodeBindingSystem/NodeBindingSystem
 open ui/UiSystems
 open ui/inputSystem/InputSystem
 open ecs/Entity
@@ -154,7 +156,6 @@ func updateModeMenu(
   if updateModeMenuItems(
     world: world
     menu: uiModes.modeMenu
-    generation: uiModes.generation
     input: input
     rig: rig
     modeChosen: openEditor or backToGame
@@ -166,14 +167,13 @@ func updateModeMenu(
 
 # The menu without the modes (an app with no GAME / EDITOR modes, whose
 # menu has the camera and reset items): reverse the camera's drag, start the
-# program again, open or close it. `generation` is the modes' (any number that stays put when
-# nothing is
-# applied), `modeChosen` whether a mode item was chosen this frame. True when
-# the UI must be laid out again.
+# program again, open or close it. `modeChosen` whether a mode item was chosen
+# this frame. True when the UI must be laid out again. Its labels and whether
+# it is open are bound to their nodes (ui/nodeBindingSystem), so a frame or
+# state that restyles the menu keeps them.
 func updateModeMenuItems(
   world: mod UiWorld
   menu: mod ModeMenuState
-  generation: view Int
   input: view UiInput
   rig: mod CameraRig
   modeChosen: view Bool
@@ -196,15 +196,11 @@ func updateModeMenuItems(
   if resetTapped {
     let restarted: Bool = restartFresh()
   }
-  # A frame or state applied since: its nodes are back to their authored
-  # components, so write the menu's again
-  let rewrite: Bool = menu.generation is not generation
-  menu.generation = generation
   # The camera item says what the rig does (an app may start it reversed)
-  if rewrite or menu.cameraLabelReversed is not rig.reverseDrag or menu.cameraLabelWritten is false {
+  if menu.cameraLabelReversed is not rig.reverseDrag or menu.cameraLabelWritten is false {
     menu.cameraLabelReversed = rig.reverseDrag
     menu.cameraLabelWritten = true
-    setNodeText(
+    bindNodeText(
       world: world
       nodeId: modeMenuCameraLabelNodeId
       value: cameraRotationItemText(reversed: rig.reverseDrag)
@@ -213,16 +209,16 @@ func updateModeMenuItems(
   }
   # The mobile item says what the menu does; a phone build has nothing to
   # simulate, so there it is not shown
-  if rewrite or menu.mobileLabelSimulated is not menu.simulateMobile or menu.mobileLabelWritten is false {
+  if menu.mobileLabelSimulated is not menu.simulateMobile or menu.mobileLabelWritten is false {
     menu.mobileLabelSimulated = menu.simulateMobile
     menu.mobileLabelWritten = true
-    setNodeText(
+    bindNodeText(
       world: world
       nodeId: modeMenuMobileLabelNodeId
       value: simulateMobileItemText(simulated: menu.simulateMobile)
     )
     if Target.isMobileOs {
-      setNodeActive(world: world, nodeId: modeMenuMobileItemNodeId, value: false)
+      bindNodeActive(world: world, nodeId: modeMenuMobileItemNodeId, value: false)
     }
     changed = true
   }
@@ -235,9 +231,10 @@ func updateModeMenuItems(
     ) or modeMenuTapped(world: world, actionId: modeMenuMoonActionId)
     pressedElsewhere: pressedElsewhere
   )
-  if rewrite or open is not menu.open {
+  if open is not menu.open or menu.openWritten is false {
     menu.open = open
-    setNodeActive(world: world, nodeId: modeMenuNodeId, value: open)
+    menu.openWritten = true
+    bindNodeActive(world: world, nodeId: modeMenuNodeId, value: open)
     changed = true
   }
   ret changed
