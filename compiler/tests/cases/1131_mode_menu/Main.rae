@@ -3,6 +3,7 @@
 # walker examples cover.
 open app3d/ModeMenu
 open app3d/UiModes
+open Device
 
 func check(label: view String, ok: view Bool) {
   if ok {
@@ -83,13 +84,17 @@ func main() ret Int {
     label: "the mobile item, on"
     ok: simulateMobileItemText(simulated: true) is "Simulate mobile phone: on"
   )
-  # A desktop build starts without touch controls; the menu's item turns them on
+  # A desktop build starts without touch controls; the menu's item turns them
+  # on, by picking the scene's touch frame (a finger as the main pointer)
   var menu: ModeMenuState = createModeMenuState()
   check(
     label: "a desktop build starts without touch controls"
-    ok: touchControlsShown(menu: menu) is false
+    ok: framePointerFor(pointer: Pointer.fine, simulateMobile: menu.simulateMobile, mobileOs: false) is Pointer.fine
   )
   menu.simulateMobile = true
-  check(label: "simulating a phone shows them", ok: touchControlsShown(menu: menu))
+  check(
+    label: "simulating a phone shows them"
+    ok: framePointerFor(pointer: Pointer.fine, simulateMobile: menu.simulateMobile, mobileOs: false) is Pointer.coarse
+  )
   ret 0
 }

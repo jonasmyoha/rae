@@ -1,0 +1,236 @@
+# Touch stick system — a touch joystick as UI (#526 moved onto a node). A
+# TouchStick node's laid-out box is its base; its first child is the knob,
+# moved by a RuntimeOffset to follow the finger (a transform-time
+# translation, no relayout). Each frame touchStickSystem reads the fingers
+# (or, with none, the mouse) and writes every stick's TouchStickState in
+# uiSystems.touchStick: whether it is shown (its node and its parents
+# visible), its base, the finger it owns, its value. An app reads the value
+# for movement and hands the zone and the owned finger to its camera, so a
+# finger on the stick never turns the view.
+import Gpu2d
+import Math
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Hierarchy
+open ui/Components
+open ui/Ecs
+open ui/UiSystems
+open ui/TouchStick
+
+# One finger, as the stick reads it: its id, where it is, and whether it went
+# down this frame
+type StickPointer {
+  id: Int
+  x: Float
+  y: Float
+  pressed: Bool
+}
+
+# This frame's pointers: the fingers, and the mouse for when there are none
+type StickInput {
+  touches: List(StickPointer)
+  mouseX: Float
+  mouseY: Float
+  mousePressed: Bool
+  mouseDown: Bool
+}
+
+func readStickInput() ret StickInput {
+  var touches: List(StickPointer) = List.create(StickPointer, cap: 4)
+  loop var i: Int = 0, i < Gpu2d.touchCount(), ++i {
+    touches.add(
+      value: StickPointer {
+        id: Gpu2d.touchId(index: i)
+        x: Gpu2d.touchX(index: i)
+        y: Gpu2d.touchY(index: i)
+        pressed: Gpu2d.touchPressed(index: i)
+      }
+    )
+  }
+  ret StickInput {
+    touches: own touches
+    mouseX: Gpu2d.pointerX()
+    mouseY: Gpu2d.pointerY()
+    mousePressed: Gpu2d.pointerPressed()
+    mouseDown: Gpu2d.pointerDown()
+  }
+}
+
+# One frame of a shown stick (its base already in `state`): which finger it
+# owns, and its value and knob from where that finger is
+func stepTouchStick(state: mod TouchStickState, input: view StickInput) {
+  let zone: Float = state.zoneRadius
+  var px: Float = 0.0
+  var py: Float = 0.0
+  if input.touches.length > 0 {
+    # Own a finger from the moment it presses inside the zone and keep it for
+    # the whole drag (even out of the zone), so it never turns into a camera
+    # drag; another finger stays free
+    var found: Bool = false
+    loop let touch: view StickPointer in input.touches {
+      # A fresh press on the id we hold: the system reused the id after our
+      # finger lifted; let it go so the zone decides again
+      if state.grabbedId >= 0 and touch.id is state.grabbedId and touch.pressed {
+        state.grabbedId = -1
+      }
+      if state.grabbedId >= 0 and touch.id is state.grabbedId {
+        px = touch.x
+        py = touch.y
+        found = true
+      }
+      if state.grabbedId < 0 and touch.pressed {
+        let dx: Float = touch.x - state.centerX
+        let dy: Float = touch.y - state.centerY
+        if dx * dx + dy * dy <= zone * zone {
+          state.grabbedId = touch.id
+          px = touch.x
+          py = touch.y
+          found = true
+        }
+      }
+    }
+    if found is false {
+      state.grabbedId = -1
+    }
+    state.active = found
+  } else {
+    # No fingers: none owned (a later finger may reuse the id), and the mouse
+    # drives it, from a press inside the zone until it lifts
+    state.grabbedId = -1
+    px = input.mouseX
+    py = input.mouseY
+    if input.mousePressed {
+      let ax: Float = px - state.centerX
+      let ay: Float = py - state.centerY
+      if ax * ax + ay * ay <= zone * zone {
+        state.active = true
+      }
+    }
+    if input.mouseDown is false {
+      state.active = false
+    }
+  }
+  if state.active and state.radius > 0.0 {
+    var dx: Float = px - state.centerX
+    var dy: Float = py - state.centerY
+    let distance: Float = Math.sqrt(x: dx * dx + dy * dy)
+    if distance > state.radius and distance > 0.0001 {
+      let scale: Float = state.radius / distance
+      dx = dx * scale
+      dy = dy * scale
+    }
+    state.knobDX = dx
+    state.knobDY = dy
+    state.valueX = dx / state.radius
+    # Screen down is +y; forward is up
+    state.valueY = 0.0 - dy / state.radius
+  } else {
+    state.knobDX = 0.0
+    state.knobDY = 0.0
+    state.valueX = 0.0
+    state.valueY = 0.0
+  }
+}
+
+# Every TouchStick node this frame: its base from its laid-out box (none
+# while it or a parent is hidden), stepped by the pointers, its knob (first
+# child) offset to match. True when a knob moved: the app runs the
+# transform pass (runUiSystems) so it draws where it is.
+func touchStickSystem(world: view UiWorld, uiSystems: mod UiSystems) ret Bool {
+  let input: StickInput = readStickInput()
+  var moved: Bool = false
+  loop var i: Int = 0, i < componentCount(this: world.touchSticks), ++i {
+    let entityId: EntityId = componentEntityAt(this: world.touchSticks, i: i)
+    let stick: view TouchStick = componentView(this: world.touchSticks, entityId: entityId)
+    if componentHas(this: uiSystems.touchStick.states, entityId: entityId) is false {
+      componentSet(
+        this: uiSystems.touchStick.states
+        entityId: entityId
+        data: createTouchStickState()
+      )
+    }
+    var shown: Bool = componentHas(this: uiSystems.transform2d.worldTransforms, entityId: entityId) and componentHas(
+      this: uiSystems.layout.computedRects
+      entityId: entityId
+    )
+    if shown and componentHas(this: uiSystems.transform2d.worldVisuals, entityId: entityId) {
+      shown = componentView(this: uiSystems.transform2d.worldVisuals, entityId: entityId).visible
+    }
+    var scale: Float = 1.0
+    let state: mod TouchStickState = componentMod(
+      this: uiSystems.touchStick.states
+      entityId: entityId
+    )
+    state.shown = shown
+    if shown {
+      let placed: view WorldTransform2D = componentView(
+        this: uiSystems.transform2d.worldTransforms
+        entityId: entityId
+      )
+      let sized: view ComputedRect = componentView(
+        this: uiSystems.layout.computedRects
+        entityId: entityId
+      )
+      scale = placed.scale.x
+      let width: Float = sized.size.x * placed.scale.x
+      let height: Float = sized.size.y * placed.scale.y
+      state.centerX = placed.position.x + width * 0.5
+      state.centerY = placed.position.y + height * 0.5
+      state.radius = Math.min(a: width, b: height) * 0.5
+      state.zoneRadius = state.radius * stick.zoneShare
+      stepTouchStick(state: state, input: input)
+    } else {
+      state.active = false
+      state.grabbedId = -1
+      state.valueX = 0.0
+      state.valueY = 0.0
+      state.knobDX = 0.0
+      state.knobDY = 0.0
+    }
+    let knobDX: Float = state.knobDX
+    let knobDY: Float = state.knobDY
+    if componentHas(this: world.childrens, entityId: entityId) {
+      let children: view Children = componentView(this: world.childrens, entityId: entityId)
+      if let knob: EntityId = children.ids.copyAt(index: 0) {
+        # The offset is in the knob's own units, before the layout's scale
+        var localX: Float = knobDX
+        var localY: Float = knobDY
+        if scale > 0.0 {
+          localX = knobDX / scale
+          localY = knobDY / scale
+        }
+        var before: Vec2 = { x: 0.0, y: 0.0 }
+        if componentHas(this: uiSystems.transform2d.runtimeOffsets, entityId: knob) {
+          before = componentView(this: uiSystems.transform2d.runtimeOffsets, entityId: knob).delta
+        }
+        if before.x is not localX or before.y is not localY {
+          componentSet(
+            this: uiSystems.transform2d.runtimeOffsets
+            entityId: knob
+            data: RuntimeOffset { delta: Vec2 { x: localX, y: localY } }
+          )
+          moved = true
+        }
+      }
+    }
+  }
+  ret moved
+}
+
+# The state of the TouchStick node `nodeId` (not shown when there is none)
+func touchStickStateOf(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  nodeId: view String
+) ret TouchStickState {
+  if let raw: Int = world.nodeIds.get(k: nodeId) {
+    let entityId: EntityId = nodeEntityId(world: world, index: raw)
+    if let state: TouchStickState = componentCopy(
+      this: uiSystems.touchStick.states
+      entityId: entityId
+    ) {
+      ret state
+    }
+  }
+  ret createTouchStickState()
+}

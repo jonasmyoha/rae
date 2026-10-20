@@ -48,7 +48,6 @@ open ui/LogOverlay
 open ui/WindowGeometry
 open ui/EventLoop
 open ui/DebugOverlay
-open ui/VirtualJoystick
 open ui/Ecs
 open ui/Components
 open ui/inputSystem/InputSystem
@@ -209,8 +208,7 @@ func updateWalkerApp(app: mod WalkerApp) {
   }
   if app.cameraSystem.rig.mode is CameraRigMode.character {
     intent = inputUpdate(
-      moveStick: app.inputSystem.moveStick
-      joyActive: joyActive
+      stick: app.inputSystem.touchStick
       allowKeys: uiPointerCaptured(input: app.inputSystem.ui) is false and app.characterSystem.playing
     )
   }

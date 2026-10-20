@@ -66,7 +66,6 @@ open ui/WindowGeometry
 open ui/scrollRootSystem/ScrollRootSystem
 open ui/EventLoop
 open ui/DebugOverlay
-open ui/VirtualJoystick
 open ui/Ecs
 open ui/Components
 open ui/inputSystem/InputSystem
@@ -119,12 +118,6 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
     let extentW: Float = windowExtentW()
     let extentH: Float = windowExtentH()
     Gpu2d.setDesignResolution(width: extentW, height: extentH, fit: 0)
-
-    var moveStick: VirtualJoystick = createVirtualJoystick(
-      padFracX: 0.06
-      padFracY: 0.11
-      radiusFrac: 0.14
-    )
 
     let assets: String = settings.assets
     let biome: BiomeConfig = walkerBiome(land: settings.land)
@@ -648,7 +641,7 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
         resized: false
       }
       inputSystem: {
-        moveStick: own moveStick
+        touchStick: createTouchStickState()
         ui: own uiInput
         world: own uiWorld
         uiSystems: own uiSystems

@@ -32,6 +32,7 @@
       },
       "Children": [
         "ContentRow",
+        "StickLayer",
         "MenuOverlay"
       ]
     },
@@ -922,6 +923,86 @@
           "mode": "Hug"
         }
       }
+    },
+    "StickLayer": {
+      "Layout": {
+        "type": "Vertical",
+        "alignMain": "End",
+        "alignCross": "Start"
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fill"
+        }
+      },
+      "Padding": {
+        "l": "spaceL",
+        "t": 0,
+        "r": 0,
+        "b": "spaceL"
+      },
+      "Children": [
+        "MoveStick"
+      ]
+    },
+    "MoveStick": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 112,
+        "h": 112
+      },
+      "Size": {
+        "w": {
+          "mode": "Fixed"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Layout": {
+        "type": "Vertical",
+        "alignMain": "Center",
+        "alignCross": "Center"
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "touchStickBase",
+        "radius": 56
+      },
+      "TouchStick": {
+        "zoneShare": 1.7
+      },
+      "Active": {
+        "value": false
+      },
+      "Children": [
+        "MoveStickKnob"
+      ]
+    },
+    "MoveStickKnob": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 48,
+        "h": 48
+      },
+      "Size": {
+        "w": {
+          "mode": "Fixed"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "touchStickKnob",
+        "radius": 24
+      }
     }
   },
   "states": {
@@ -953,6 +1034,29 @@
           }
         },
         "SettingsTabColumn": {
+          "Active": {
+            "value": true
+          }
+        },
+        "StickLayer": {
+          "Active": {
+            "value": false
+          }
+        }
+      }
+    }
+  },
+  "frames": {
+    "Base": {
+      "default": true,
+      "nodes": {}
+    },
+    "Touch": {
+      "when": {
+        "pointer": "coarse"
+      },
+      "nodes": {
+        "MoveStick": {
           "Active": {
             "value": true
           }

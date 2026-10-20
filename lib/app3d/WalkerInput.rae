@@ -13,7 +13,6 @@ open ui/Ecs
 open ui/inputSystem/InputSystem
 open ui/renderSystem/RenderSystem
 open ui/UiSystems
-open ui/VirtualJoystick
 open ui/DebugOverlay
 open ui/LogOverlay
 open ui/WindowGeometry
@@ -24,7 +23,8 @@ open app3d/WalkerPhysics
 
 # Input devices + the UI world state (panels, dialog, overlays)
 type WalkerInput {
-  moveStick: VirtualJoystick
+  # This frame's touch stick (app3d/HudOverlays updateTouchControls)
+  touchStick: TouchStickState
   ui: UiInput
   world: UiWorld
   # The lib UI systems' derived tables (ui/UiSystems), next to the world.
@@ -61,15 +61,11 @@ func jumpPressed(allowKeys: view Bool) ret Bool {
   ret Sdl3.isKeyPressed(key: Keys.keySpace) or Sdl3.isKeyPressed(key: Keys.keyF)
 }
 
-func inputUpdate(
-  moveStick: view VirtualJoystick
-  joyActive: view Bool
-  allowKeys: view Bool
-) ret InputIntent {
-  if joyActive {
+func inputUpdate(stick: view TouchStickState, allowKeys: view Bool) ret InputIntent {
+  if stick.active {
     ret InputIntent {
-      moveX: moveStick.valueX
-      moveY: moveStick.valueY
+      moveX: stick.valueX
+      moveY: stick.valueY
       walking: false
       jump: jumpPressed(allowKeys: allowKeys)
       actions: 0

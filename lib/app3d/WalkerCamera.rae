@@ -50,7 +50,6 @@ open ui/LogOverlay
 open ui/WindowGeometry
 open ui/EventLoop
 open ui/DebugOverlay
-open ui/VirtualJoystick
 open app3d/ModeMenu
 open ui/Ecs
 open ui/Components
@@ -179,13 +178,15 @@ func cameraUpdate(
       focusZ: orbitFocusZ
     )
   }
-  let joyActive: Bool = updateTouchControls(
+  # The scene's touch stick (node MoveStick, shown by its touch frame)
+  inputSystem.touchStick = updateTouchControls(
     rig: cameraSystem.rig
-    moveStick: inputSystem.moveStick
-    enabled: inputSystem.uiModes.editor is false and touchControlsShown(
-      menu: inputSystem.uiModes.modeMenu
-    )
+    world: inputSystem.world
+    uiSystems: inputSystem.uiSystems
+    res: inputSystem.gpuUi
+    stickNodeId: "MoveStick"
   )
+  let joyActive: Bool = inputSystem.touchStick.active
   var cameraMoved: Bool = updateCameraRig(
     rig: cameraSystem.rig
     camera: cameraSystem.camera
