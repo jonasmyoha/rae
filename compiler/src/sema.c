@@ -4624,6 +4624,21 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                                "cannot bind 'mod' to a read-only view: a view cannot be promoted to mutable access");
                     module->had_error = true;
                 }
+                // A `let` is frozen (docs/let-is-frozen.md): a `mod` alias of
+                // it, or of a part of it, would write into it
+                // (an `if let` source is wrapped in the optional's unbox)
+                const AstExpr* place = stmt->as.let_stmt.value;
+                while (place && (place->kind == AST_EXPR_BOX || place->kind == AST_EXPR_UNBOX)) {
+                    place = place->as.unary.operand;
+                }
+                Str let_root = {0};
+                if (!src_is_view && expr_roots_in_let(symbols, place, &let_root)) {
+                    char path[200]; sema_render_access(place, path, sizeof path);
+                    char action[320];
+                    snprintf(action, sizeof action, "cannot bind 'mod' alias '%.*s' to '%s'",
+                             (int)stmt->as.let_stmt.name.len, stmt->as.let_stmt.name.data, path);
+                    sema_report_let_write(module, (int)stmt->line, (int)stmt->column, let_root, action);
+                }
             }
             // Spec 2.3.1: an owned binding cannot take a reference-returning
             // call — "copy what the view refers to" would hide a potentially
@@ -5029,6 +5044,17 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                                         (int)binding->column,
                                         "a 'mod' collection loop requires mutable collection storage");
                              module->had_error = true;
+                         } else if (binding->as.let_stmt.type->is_mod && collection) {
+                             // A `let` is frozen (docs/let-is-frozen.md): a
+                             // `mod` loop over it would write its elements
+                             Str let_root = {0};
+                             if (expr_roots_in_let(symbols, collection, &let_root)) {
+                                 char path[200]; sema_render_access(collection, path, sizeof path);
+                                 char action[320];
+                                 snprintf(action, sizeof action, "cannot loop 'mod' over '%s'", path);
+                                 sema_report_let_write(module, (int)binding->line, (int)binding->column,
+                                                       let_root, action);
+                             }
                          }
                          sema_analyze_stmt(ctx, module, symbols, binding,
                                            current_return_type);

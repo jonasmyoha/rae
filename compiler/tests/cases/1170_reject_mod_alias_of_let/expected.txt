@@ -1,0 +1,15 @@
+tests/cases/1170_reject_mod_alias_of_let/Main.rae:23:3: cannot bind 'mod' alias 'whole' to 'world': 'world' (declared at line 22) is a 'let', which is frozen (docs/let-is-frozen.md); declare it 'var'
+    23 |   let whole: mod World => world
+       |   ^~~~
+tests/cases/1170_reject_mod_alias_of_let/Main.rae:24:3: cannot bind 'mod' alias 'part' to 'world.a': 'world' (declared at line 22) is a 'let', which is frozen (docs/let-is-frozen.md); declare it 'var'
+    24 |   let part: mod Particle => world.a
+       |   ^~~~
+tests/cases/1170_reject_mod_alias_of_let/Main.rae:26:12: cannot loop 'mod' over 'world.particles': 'world' (declared at line 22) is a 'let', which is frozen (docs/let-is-frozen.md); declare it 'var'
+    26 |   loop let particle: mod Particle in world.particles {
+       |            ^~~~
+tests/cases/1170_reject_mod_alias_of_let/Main.rae:30:12: cannot loop 'mod' over 'list': 'list' (declared at line 29) is a 'let', which is frozen (docs/let-is-frozen.md); declare it 'var'
+    30 |   loop let element: mod Particle in list {
+       |            ^~~~
+tests/cases/1170_reject_mod_alias_of_let/Main.rae:34:6: cannot bind 'mod' alias 'found' to 'maybe': 'maybe' (declared at line 33) is a 'let', which is frozen (docs/let-is-frozen.md); declare it 'var'
+    34 |   if let found: mod Particle => maybe {
+       |      ^~~~

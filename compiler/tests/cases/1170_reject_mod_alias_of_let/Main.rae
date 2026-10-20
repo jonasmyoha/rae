@@ -1,0 +1,48 @@
+# A `let` is frozen (docs/let-is-frozen.md), so a `mod` alias of it, or of a
+# part of it (also by `if let` on a `let` optional), and a `mod` loop over a
+# `let` list are refused like a `let` passed to a `mod` parameter: each would
+# write into the `let`. A `var` takes all of them.
+type Particle {
+  x: Int
+}
+
+type World {
+  a: Particle
+  b: Particle
+  particles: List(Particle)
+}
+
+func makeWorld() ret World {
+  var particles: List(Particle) = List.create(Particle, cap: 2)
+  particles.add(value: { x: 3 })
+  ret World { a: { x: 1 }, b: { x: 2 }, particles: own particles }
+}
+
+func main() ret Int {
+  let world: World = makeWorld()
+  let whole: mod World => world
+  let part: mod Particle => world.a
+  part.x = 9
+  loop let particle: mod Particle in world.particles {
+    particle.x = 7
+  }
+  let list: List(Particle) = world.particles
+  loop let element: mod Particle in list {
+    element.x = 5
+  }
+  let maybe: opt Particle = list.copyAt(index: 0)
+  if let found: mod Particle => maybe {
+    found.x = 4
+  }
+  var mutableWorld: World = makeWorld()
+  let fine: mod Particle => mutableWorld.a
+  fine.x = 9
+  loop let particle: mod Particle in mutableWorld.particles {
+    particle.x = 7
+  }
+  var mutableMaybe: opt Particle = list.copyAt(index: 0)
+  if let found: mod Particle => mutableMaybe {
+    found.x = 4
+  }
+  ret 0
+}
