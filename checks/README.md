@@ -9,11 +9,10 @@ a unit test case (the unit suite does not need a GPU device or a browser).
 |---|---|
 | `gpuArgs` | `gpu/GpuArgs`: a packed argument struct reads back the same through WGSL's own layout |
 | `gpuLifetime` | `gpu/GpuLifetime`: recordings, submissions, completion polling, retirement behind in-flight work |
-| `gpuManagerTiming` | `GpuTiming` over the GPU manager: per-pass timestamps read back without blocking |
+| `gpuManagerTiming` | `gpu/GpuTiming`, the one GPU timing module: per-pass timestamps read back without blocking, named passes, and the last sample published as profiler counters (gpu.<pass>, gpu.total) |
 | `gpuReadback` | `gpu/GpuReadback`: concurrent manager-owned readbacks, reuse, cancellation, shutdown |
 | `gpuRender` | `gpu/GpuRender`: a manager render pipeline draws into a texture that is read back and compared |
 | `gpuResources` | `gpu/GpuResources`: two managers, known buffer contents, stale ids, exhaustion, cleanup |
-| `gpuTiming` | `GpuTiming` on its own: a timed buffer copy (docs/webgpu-c-surface-audit.md) |
 | `readRequest` | `webgpu/ReadRequest`: independent buffer reads (docs/webgpu-readback.md) |
 | `webReadback` | a nonblocking readback completes in a `mainLoop`, natively and in the browser |
 | `webTask` | a spawned task that sleeps runs between the frames of a `mainLoop`, natively and in the browser |

@@ -358,9 +358,9 @@ renderer C was added; everything is Rae over the generated bindings and the
   the GPU. `recordComputeTimed` records a compute pass with `timestampWrites`;
   `recordTimingResolve` records the resolve+copy; `startTimingSample` /
   `collectTiming` drive the nonblocking read and convert ticks→microseconds via
-  the queue's timestamp period. The legacy `lib/GpuTiming.rae` keeps its
-  blocking `webgpuMapRead` diagnostic for captures; this is the nonblocking
-  production path and does no adaptive scheduling.
+  the queue's timestamp period. It is the one GPU timing module: the legacy
+  blocking `lib/GpuTiming.rae` was folded into it and deleted (its profiler
+  counters are `publishTimingCounters`); it does no adaptive scheduling.
 - Unavailable-timestamps fallback: when the adapter has no timestamp queries,
   `createGpuTiming` returns an inert `GpuTiming` with `available` false — every
   call is a no-op, `timingWrites` is null (a pass with null timestampWrites runs
@@ -566,8 +566,8 @@ of the water package is a typed ID in an App-owned `gpu/GpuResources`.
     every consumer binds manager IDs instead of adopted externals (#905 for the
     geometry-pass owners and mesh store, #906 for targets / frame / submit /
     shadow / SDF and the end-of-main `shutdownAll()` replacement).
-  - The legacy blocking `lib/GpuTiming.rae` (`rae_gt_set / get`) is the last
-    slot store; it folds into `gpu/GpuTiming` with #906.
+  - The legacy blocking `lib/GpuTiming.rae` (`rae_gt_set / get`) was the last
+    slot store; it has since been folded into `gpu/GpuTiming` and deleted.
 
 ## Implementation notes (#904): the deferred post-passes on the manager
 

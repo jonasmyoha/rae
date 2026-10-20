@@ -1,16 +1,21 @@
-# Hardware check for gpu/GpuTiming (#871): nonblocking per-pass GPU timing over
-# the manager. Records two timed compute passes per frame, resolves, submits,
-# and reads the timestamps back through a manager-owned ReadbackId WITHOUT
-# blocking — repeated across several frames (continuous timing). Exit code 0 =
-# every check passed. The unavailable-timestamps fallback is exercised by the
-# code path even where hardware has timestamps.
+# Hardware check for gpu/GpuTiming (#871), the one GPU timing module:
+# nonblocking per-pass GPU timing over the manager. Records two timed compute
+# passes per frame (the first unnamed, "pass0", the second named "heavy"),
+# resolves, submits, and reads the timestamps back through a manager-owned
+# ReadbackId WITHOUT blocking — repeated across several frames (continuous
+# timing). Then the last sample goes into a profiler capture
+# (publishTimingCounters): counters gpu.pass0, gpu.heavy and gpu.total. Exit
+# code 0 = every check passed. The unavailable-timestamps fallback is
+# exercised by the code path even where hardware has timestamps.
 import Sdl3
+import Profile
 open webgpu/Context
 open webgpu/WebgpuEnums
 open gpu/GpuResources
 open gpu/GpuLifetime
 open gpu/GpuReadback
 open gpu/GpuTiming
+open gpu/DeviceFeatures
 
 func fail(message: view String) ret Bool {
   log("FAIL: {message}")
@@ -59,7 +64,7 @@ func runFrame(
       ) is false {
         ret fail(message: "timed pass A")
       }
-      if let passB: Int = timedPass(timing: timing) {
+      if let passB: Int = timedPassNamed(timing: timing, name: "heavy") {
         if passB is not 1 {
           ret fail(message: "timedPass 1")
         }
@@ -133,6 +138,9 @@ func runFrame(
 
 func main() ret Int {
   unsafe {
+    # The device gets the timestamp-query feature only when it is requested
+    # before it exists (gpu/DeviceFeatures, as Gpu2d.initWindow does)
+    chooseDeviceFeatures()
     if webgpuBootstrap() is not 1 {
       log("no GPU")
       ret 1
@@ -183,6 +191,23 @@ func main() ret Int {
               frame = frame + 1
             }
             log("5 frames of nonblocking 2-pass timing OK (summed total {totalAcrossFrames} us)")
+            # The last sample into a capture: one counter per named pass and the total
+            var profiler: Profiler = Profile.createProfiler()
+            Profile.startCapture(
+              profiler: profiler
+              seconds: 3600.0
+              outPath: "/tmp/rae_gpu_timing_check.json"
+            )
+            publishTimingCounters(timing: timing, profiler: profiler)
+            var countersSeen: String = ""
+            loop let counterName: view String in profiler.names {
+              countersSeen = "{countersSeen} {counterName}"
+            }
+            if countersSeen is not " gpu.pass0 gpu.heavy gpu.total" {
+              log("FAIL: profiler counters were{countersSeen}")
+              ret 1
+            }
+            log("profiler counters:{countersSeen}")
             shutdownTiming(timing: timing, resources: resources)
             if liveReadbackCount(resources: resources) is not 0 {
               log("FAIL: readback leaked")

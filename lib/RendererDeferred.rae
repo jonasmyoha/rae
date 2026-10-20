@@ -845,7 +845,11 @@ func gpuPassTimingBegin(renderer: mod DeferredRenderer) {
     passTimingFrameBegin(passTiming: renderer.passTiming, resources: resources)
   }
   if renderer.passTiming.reportFrames >= passTimingReportFrames {
-    logPassTimingReport(passTiming: renderer.passTiming)
+    if renderer.passTiming.logReports {
+      logPassTimingReport(passTiming: renderer.passTiming)
+    } else {
+      clearPassTimingReport(passTiming: renderer.passTiming)
+    }
   }
 }
 

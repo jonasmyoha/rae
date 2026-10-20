@@ -7,7 +7,13 @@
 # is the GPU time of the pass between them. The readback never blocks: a
 # frame's marks are resolved with its last mark, read back a few frames later,
 # and a new frame is timed only once the last one has landed.
+#
+# It runs under RAE_GPU_PASS_TIMING=1, which also logs a "[gpu passes]"
+# line of averages every few frames, and under a profiler capture
+# (RAE_PROFILE, Profile.maybeAutoStart): publishPassTimingCounters writes the
+# last sample into the capture as counters gpu.<pass> and gpu.total.
 import Sys
+import Profile
 open gpu/GpuResources
 open gpu/GpuLifetime
 open gpu/GpuTiming
@@ -24,6 +30,9 @@ const passTimingMaxMarks: Int = 24
 
 type DeferredPassTiming {
   enabled: Bool
+  # Log the "[gpu passes]" averages (RAE_GPU_PASS_TIMING=1; a capture alone
+  # only fills the profiler's counters)
+  logReports: Bool
   timing: opt GpuTiming
   timingMade: Bool
   # The marks' do-nothing compute pipeline
@@ -55,7 +64,8 @@ func createDeferredPassTiming() ret DeferredPassTiming {
   # The timing (its query set is a raw Ptr) is made at the first frame
   unsafe {
     ret DeferredPassTiming {
-      enabled: Sys.getEnv(name: "RAE_GPU_PASS_TIMING") is "1"
+      enabled: Sys.getEnv(name: "RAE_GPU_PASS_TIMING") is "1" or Sys.getEnv(name: "RAE_PROFILE").length() > 0
+      logReports: Sys.getEnv(name: "RAE_GPU_PASS_TIMING") is "1"
       timing: none
       timingMade: false
       markPipeline: none
@@ -164,6 +174,7 @@ func passTimingMark(
           recording: open
           resources: resources
           pipeline: pipeline
+          name: passTimingSpanName(tag: tag)
         ) is false {
           passTiming.marking = false
           ret
@@ -178,6 +189,7 @@ func passTimingMark(
         recording: recording
         resources: resources
         pipeline: pipeline
+        name: passTimingSpanName(tag: tag)
       ) is false {
         passTiming.marking = false
         ret
@@ -325,4 +337,28 @@ func renderTagName(tag: view Int) ret String {
     ret "present: copy to drawable, present"
   }
   ret "pass {tag}"
+}
+
+# The name of the span a mark starts: the pass of its tag, or "end" for the
+# frame's last mark (which starts no span)
+func passTimingSpanName(tag: view Int) ret String {
+  if tag < 0 {
+    ret "end"
+  }
+  ret renderTagName(tag: tag)
+}
+
+# Write the last frame read back into a profiler capture: gpu.<pass> per
+# pass (microseconds) and gpu.total. Call once a frame; nothing unless the
+# profiler is capturing and a frame has been read back.
+func publishPassTimingCounters(passTiming: view DeferredPassTiming, profiler: mod Profiler) {
+  if let timing: view GpuTiming => passTiming.timing {
+    publishTimingCounters(timing: timing, profiler: profiler)
+  }
+}
+
+# The last frame's per-pass GPU times into a profiler capture (counters
+# gpu.<pass>, gpu.total; RendererPassTiming). Call once a frame.
+func publishGpuPassCounters(renderer: view DeferredRenderer, profiler: mod Profiler) {
+  publishPassTimingCounters(passTiming: renderer.passTiming, profiler: profiler)
 }

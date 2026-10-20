@@ -137,8 +137,9 @@ in an `unsafe { ... }` block), this records the disposition of every remaining
 hand-written GPU/render/water foreign consumer. No silent module exemptions.
 
 **Migrated in #876 (done, verified):**
-- `checks/readRequest` and `checks/gpuTiming` — the raw
-  (pre-manager) readback and GPU-timing hardware checks: extern → `unsafe
+- `checks/readRequest` and `checks/gpuTiming` (since folded into
+  `checks/gpuManagerTiming`) — the raw (pre-manager) readback and GPU-timing
+  hardware checks: extern → `unsafe
   extern`, every webgpu call / raw-Ptr op wrapped at its source site. Both run
   green on hardware.
 - Positive compiler fixtures `626_extern_symbol` and `776_ptr_c_lowering` →
@@ -511,11 +512,11 @@ arrays (the still-C upload ABI) — the end-of-main `Gbuffer.shutdownAll()`
 STAYS for those and for the shadow cascades until #925; the renderer's own
 objects are all retired by `shutdownDeferredRenderer` (live wgpu counts flat
 across 240 headless frames in 110/118). The legacy blocking
-`lib/GpuTiming.rae` keeps its query set + buffers as owner fields now: the
-last C slot store (`g_gt_handles` / `rae_gt_set/get`) is deleted; it remains
-the raw-encoder harness of checks/gpuTiming beside the manager's
-nonblocking `gpu/GpuTiming` (not merged into it — different contracts,
-blocking vs tracked readback).
+`lib/GpuTiming.rae` kept its query set + buffers as owner fields: the
+last C slot store (`g_gt_handles` / `rae_gt_set/get`) is deleted. It has
+since been deleted too: the manager's nonblocking `gpu/GpuTiming` is the one
+GPU timing module (its profiler counters are `publishTimingCounters`), and
+checks/gpuTiming was folded into checks/gpuManagerTiming.
 
 **#925 update (shared renderer slice 3b-ii — the cascaded shadow maps):**
 `lib/ShadowMaps.rae` + `lib/ShadowMapsSdf.rae` — the `ShadowCache` on
