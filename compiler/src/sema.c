@@ -2517,14 +2517,18 @@ static void sema_analyze_decl_inner(CompilerContext* ctx, AstModule* module, Sym
             AstParam* param = decl->as.func_decl.params;
             while (param) {
                 TypeInfo* t = sema_resolve_type_internal(ctx, module, symbols, param->type);
-                // Only struct params without 'mod' are immutable (view by default)
-                // Primitives (Int, Float, Bool, String, Char) are value-copy params — always mutable
+                // Only a `view` parameter is read-only. A `copy` or `own`
+                // parameter is the callee's own value, like a `var`: its
+                // fields and the whole value may be written, and no write
+                // reaches the caller. (A struct parameter with no mode at all
+                // is the error reported above; it is still read-only here so
+                // that one error does not bring a second.)
                 bool is_view_param = false;
-                if (param->type && !param->type->is_mod && !param->type->is_view) {
-                    // Check if it's a struct type (not primitive)
-                    if (t && t->kind == TYPE_STRUCT) is_view_param = true;
-                } else if (param->type && param->type->is_view) {
+                if (param->type && param->type->is_view) {
                     is_view_param = true;
+                } else if (param->type && !param->type->is_mod && !param->type->is_own
+                           && !param->type->is_copy) {
+                    if (t && t->kind == TYPE_STRUCT) is_view_param = true;
                 }
                 Symbol* psym = symbol_table_define(symbols, ctx->ast_arena, param->name, NULL, t, is_view_param);
                 if (psym && param->type && (param->type->is_own || param->type->is_copy)) psym->is_owned_param = true;
