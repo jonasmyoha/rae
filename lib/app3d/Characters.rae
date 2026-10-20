@@ -259,3 +259,17 @@ func setControlledCharacter(controlled: mod ComponentTable(Controlled), entityId
   }
   addTag(Controlled, table: controlled, entityId: entityId)
 }
+
+# One skinned body-mesh part (#740): its uploaded mesh-handle id + surface
+# roughness. Replaces the parallel `partIds`/`partRough` Lists — each part is an
+# entity carrying this component, and the renderer iterates the table.
+type PartRoughness {
+  meshId: Int
+  roughness: Float
+  # Which skin colour's copy of the mesh this is (an app that recolours its
+  # characters uploads one per colour; 0 the authored one)
+  skinColorIndex: Int = 0
+  # A part only some characters show (a moustache, a hat): an app skips it
+  # for a character without it
+  optionalPart: Bool = false
+}

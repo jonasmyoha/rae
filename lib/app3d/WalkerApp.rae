@@ -81,7 +81,7 @@ open app3d/WalkerWorld
 open app3d/WalkerInput
 open app3d/WalkerCamera
 open app3d/WalkerUi
-open app3d/WalkerHud
+open app3d/HudOverlays
 open app3d/WalkerNet
 open app3d/WalkerTerrain
 open app3d/WalkerTerrainBodies
@@ -585,7 +585,7 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
     if chromeMounted is false {
       logWarnLine(ov: logOverlay, text: "editor chrome failed to mount")
     }
-    walkerHideCameraChrome(world: uiWorld)
+    hideCameraSmoothingToggles(world: uiWorld)
     settingsApplyToWorld(settingsState: settingsState, world: uiWorld, uiSystems: uiSystems)
     applyEditorPanelOpen(world: uiWorld, open: settingsState.open)
     setRendererSky(

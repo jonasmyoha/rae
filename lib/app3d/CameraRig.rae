@@ -23,6 +23,7 @@ import Sdl3
 import Vec3
 import Keys
 open Scene3d
+open ecs/Entity
 open Math3d
 
 # Shift makes the WASD camera 4x FASTER, Control makes it 4x SLOWER (for fine framing).
@@ -774,4 +775,12 @@ func applyCameraRigState(
   # reload, which is the opposite of preserving the view.
   snapCameraRigView(rig: rig)
   ret true
+}
+
+# The two entity ids of the rig->camera relation. Rae has no lightweight tuple
+# (see docs/ecs-language-wishlist.md), so a named 2-field carrier hands both ids
+# back from setup to the CameraSystem literal.
+type CameraRigLink {
+  rigEntityId: EntityId
+  cameraEntityId: EntityId
 }
