@@ -1,10 +1,16 @@
-# gpu/GpuTiming — nonblocking per-pass GPU timing over gpu/GpuResources /
-# gpu/GpuLifetime (#871). Timestamps are written at compute-pass boundaries
-# (Metal only supports pass-boundary timestamps), resolved into a manager
-# QueryResolve buffer, copied to a MapRead buffer and read back through a
-# manager-owned ReadbackId — so collection NEVER blocks on the GPU. The legacy
-# lib/GpuTiming.rae keeps the blocking webgpuMapRead diagnostic for captures;
-# this is the nonblocking production path and does no adaptive scheduling.
+# gpu/GpuTiming — per-pass GPU timing over gpu/GpuResources / gpu/GpuLifetime
+# (#871), the one GPU timing module. Timestamps are written at pass
+# boundaries (Metal only supports pass-boundary timestamps), resolved into a
+# manager QueryResolve buffer, copied to a MapRead buffer and read back
+# through a manager-owned ReadbackId — so collection NEVER blocks on the GPU.
+# It does no adaptive scheduling.
+#
+# Each pass has a name (timedPassNamed, or recordTimingMark's `name`;
+# timedPass names it "pass<index>"). The last completed sample keeps its
+# names and microseconds, and publishTimingCounters writes them into a
+# Profiler capture as counters gpu.<name> and gpu.total — a frame or a few
+# late, which a capture does not mind. (Context.webgpuMapRead stays the
+# blocking readback diagnostic; nothing here waits for the GPU.)
 #
 # Unavailable-timestamps fallback: when the adapter lacks timestamp queries,
 # createGpuTiming still returns a valid GpuTiming with `available` false. Every
@@ -17,6 +23,7 @@ open webgpu/WebgpuEnums
 open webgpu/WebgpuTypes
 open gpu/GpuResources
 open gpu/GpuLifetime
+import Profile
 
 # Owns the raw timestamp query set (released by drop); the resolve and readback
 # buffers are manager BufferIds (the manager owns and releases them). `writes`
@@ -34,6 +41,12 @@ type GpuTiming {
   sampling: Bool
   current: ReadbackId
   lastTotalUs: Int
+  # The names of this frame's passes, in claim order; of the sample in
+  # flight; and the last completed sample's names and microseconds
+  passNames: List(String)
+  sampleNames: List(String)
+  lastNames: List(String)
+  lastMicroseconds: List(Int)
 }
 
 # 8 bytes per timestamp, 2 timestamps per pass.
@@ -57,6 +70,10 @@ func unavailableTiming(resources: view GpuResources) ret GpuTiming {
       sampling: false
       current: { managerTag: 0, slot: -1, generation: 0 }
       lastTotalUs: -1
+      passNames: List.create(String, cap: 8)
+      sampleNames: List.create(String, cap: 8)
+      lastNames: List.create(String, cap: 8)
+      lastMicroseconds: List.create(Int, cap: 8)
     }
   }
 }
@@ -119,6 +136,10 @@ func createGpuTiming(resources: mod GpuResources, maxPasses: view Int) ret GpuTi
           sampling: false
           current: { managerTag: 0, slot: -1, generation: 0 }
           lastTotalUs: -1
+          passNames: List.create(String, cap: 8)
+          sampleNames: List.create(String, cap: 8)
+          lastNames: List.create(String, cap: 8)
+          lastMicroseconds: List.create(Int, cap: 8)
         }
       }
     }
@@ -143,11 +164,18 @@ func timingAvailable(timing: view GpuTiming) ret Bool {
 # Resets the per-frame pass list. Call once before recording a frame's passes.
 func beginTimingFrame(timing: mod GpuTiming) {
   timing.passCount = 0
+  timing.passNames.clear()
 }
 
 # Claims a pass slot and points the shared timestampWrites at its two query
-# indices. Returns the pass index, or none when unavailable or the budget is full.
+# indices. Returns the pass index, or none when unavailable or the budget is
+# full. The pass is named "pass<index>"; timedPassNamed gives it a name.
 func timedPass(timing: mod GpuTiming) ret opt Int {
+  ret timedPassNamed(timing: timing, name: "pass{timing.passCount}")
+}
+
+# timedPass, the pass named `name` (its profiler counter is gpu.<name>)
+func timedPassNamed(timing: mod GpuTiming, name: view String) ret opt Int {
   if timing.available is false {
     ret none
   }
@@ -166,6 +194,7 @@ func timedPass(timing: mod GpuTiming) ret opt Int {
     )
   }
   timing.passCount = index + 1
+  timing.passNames.add(value: "{name}")
   ret index
 }
 
@@ -235,6 +264,10 @@ func startTimingSample(timing: mod GpuTiming, resources: mod GpuResources) ret B
   ) {
     timing.current = id
     timing.sampling = true
+    timing.sampleNames.clear()
+    loop let name: view String in timing.passNames {
+      timing.sampleNames.add(value: "{name}")
+    }
     ret true
   }
   ret false
@@ -294,6 +327,7 @@ func collectTiming(
     pass = pass + 1
   }
   timing.lastTotalUs = total
+  keepLastSample(timing: timing, microseconds: out)
   ret true
 }
 
@@ -303,13 +337,15 @@ func collectTiming(
 # nothing: Metal writes no timestamps for a pass with no work), so the GPU
 # stamps the moment the queue reaches it.
 # Marks between passes, read with collectTimingMarks, time whatever ran
-# between them, however those passes record their work. false when
+# between them, however those passes record their work; `name` names the
+# span from this mark to the next (its counter gpu.<name>). false when
 # unavailable, the budget is full or the pass could not begin.
 func recordTimingMark(
   timing: mod GpuTiming
   recording: mod Recording
   resources: view GpuResources
   pipeline: view PipelineId
+  name: view String
 ) ret Bool {
   if recordingIsOpen(recording: recording, resources: resources) is false {
     ret false
@@ -317,7 +353,7 @@ func recordTimingMark(
   if isValidPipeline(resources: resources, id: pipeline) is false {
     ret false
   }
-  if timedPass(timing: timing) is none {
+  if timedPassNamed(timing: timing, name: name) is none {
     ret false
   }
   unsafe {
@@ -392,7 +428,38 @@ func collectTimingMarks(
     total = total + microseconds
   }
   timing.lastTotalUs = total
+  keepLastSample(timing: timing, microseconds: out)
   ret true
+}
+
+# The sample just collected, kept with its pass names for
+# publishTimingCounters (a span between two marks has the name of the mark
+# it starts at)
+func keepLastSample(timing: mod GpuTiming, microseconds: view List(Int)) {
+  timing.lastNames.clear()
+  timing.lastMicroseconds.clear()
+  loop var i: Int = 0, i < microseconds.length, ++i {
+    timing.lastNames.add(value: timing.sampleNames.copyAtDefault(index: i))
+    timing.lastMicroseconds.add(value: microseconds.copyAtDefault(index: i))
+  }
+}
+
+# Write the last completed sample into a capture: one counter per pass,
+# gpu.<name> (microseconds), and gpu.total. Call once a frame; the values are
+# the last sample's (a frame or a few late). Nothing while the profiler is
+# not capturing (Profile.counter) or no sample has completed yet.
+func publishTimingCounters(timing: view GpuTiming, profiler: mod Profiler) {
+  if timing.lastMicroseconds.length is 0 {
+    ret
+  }
+  loop var i: Int = 0, i < timing.lastMicroseconds.length, ++i {
+    Profile.counter(
+      profiler: profiler
+      name: "gpu.{timing.lastNames.copyAtDefault(index: i)}"
+      value: timing.lastMicroseconds.copyAtDefault(index: i)
+    )
+  }
+  Profile.counter(profiler: profiler, name: "gpu.total", value: timing.lastTotalUs)
 }
 
 # Little-endian u64 from 8 bytes (values fit comfortably in Int for GPU ticks).

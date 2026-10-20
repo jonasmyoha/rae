@@ -69,8 +69,10 @@ while waiting, provided its current data pointer and capacity are supplied at
 copy time. On browser builds the application must also return control to the
 browser event loop; this API introduces no blocking sleep to force completion.
 
-`Context.webgpuMapRead` and `GpuTiming.collect` remain available as existing
-blocking capture diagnostics. This change does not add adaptive water scheduling.
+`Context.webgpuMapRead` remains available as the blocking readback
+diagnostic. GPU timing (`gpu/GpuTiming`, the one timing module) reads its
+timestamps back without blocking, and `publishTimingCounters` puts them into a
+profiler capture. This change does not add adaptive water scheduling.
 
 ## Validation
 

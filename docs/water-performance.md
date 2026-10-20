@@ -36,8 +36,9 @@ shutdown does not leave old resources behind. Wave time survives rebuilding.
 
 Example 119 accepts `RAE_WATER_FFT_SIZE`, `RAE_WATER_CASCADES`,
 `RAE_WATER_UPDATE_RATE`, and `RAE_WATER_MOBILE=1` for repeatable comparisons.
-`RAE_WATER_PERF=1` explicitly enables capture-only `GpuTiming` timestamps around
-the evolution/iFFT/post compute pass. Collection blocks for GPU completion;
+`RAE_WATER_PERF=1` explicitly enables `gpu/GpuTiming` timestamps around
+the evolution/iFFT/post compute pass (lib/water/WaterPerf). The sample is read
+back without waiting, a few frames later, one sample in flight at a time;
 **normal rendering never collects or waits for timestamps**. Empty schedule
 slots report zero GPU work. The measurement excludes spectrum baking, surface
 rendering and CPU submission cost.
@@ -98,5 +99,6 @@ per active cascade through nonblocking map requests. Busy requests retain the
 previous completed snapshot; there is no wait or adaptive cadence change.
 Queries explicitly take the cache and a maximum sample age. See
 [water-readback.md](water-readback.md) for the contract, generation invalidation,
-low-resolution limitations and hardware checks. Capture-only `GpuTiming.collect`
-remains separate from ordinary rendering.
+low-resolution limitations and hardware checks. The water's GPU timing
+(`gpu/GpuTiming`, RAE_WATER_PERF) is nonblocking too and separate from
+ordinary rendering.
