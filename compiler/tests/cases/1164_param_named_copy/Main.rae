@@ -1,0 +1,28 @@
+# `copy` is a keyword that is also a name (like `val`): a parameter may be
+# called `copy`, a call names it (`copy: 7`), and the body reads it like any
+# local; it used to fail with "unexpected token in expression". A type's own
+# copy function (`func copy(this: view T) ret T`) still calls as a method.
+type Box {
+  size: Int
+}
+
+func copy(this: view Box) ret Box {
+  ret Box { size: this.size }
+}
+
+func scaled(val: view Int, copy: view Int) ret Int {
+  ret val * copy
+}
+
+func doubled(copy: view Int) ret Int {
+  let twice: Int = copy + copy
+  ret twice
+}
+
+func main() {
+  log("{scaled(val: 6, copy: 7)}")
+  log("{doubled(copy: 21)}")
+  let box: Box = { size: 3 }
+  let other: Box = box.copy()
+  log("{other.size}")
+}
