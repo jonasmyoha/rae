@@ -139,6 +139,21 @@ func renderWalkerApp(
         time: walkerCharacters.animTime
       )
     }
+    # No jump clips: in the air a run stride stands in
+    case ClipKind.jump {
+      applyClip(
+        sk: walkerCharacters.skeleton
+        c: walkerCharacters.runClip
+        time: walkerCharacters.animTime
+      )
+    }
+    case ClipKind.runningJump {
+      applyClip(
+        sk: walkerCharacters.skeleton
+        c: walkerCharacters.runClip
+        time: walkerCharacters.animTime
+      )
+    }
   }
   let transitionActive: Bool = walkerCharacters.transitionElapsed < clipTransitionDuration
   if transitionActive {

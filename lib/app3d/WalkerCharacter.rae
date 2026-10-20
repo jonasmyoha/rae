@@ -156,6 +156,13 @@ func poseCharacterPalette(
     case ClipKind.run {
       applyClip(sk: walkerCharacters.skeleton, c: walkerCharacters.runClip, time: animTime)
     }
+    # The walker has no jump clips: in the air a run stride stands in
+    case ClipKind.jump {
+      applyClip(sk: walkerCharacters.skeleton, c: walkerCharacters.runClip, time: animTime)
+    }
+    case ClipKind.runningJump {
+      applyClip(sk: walkerCharacters.skeleton, c: walkerCharacters.runClip, time: animTime)
+    }
   }
   ret buildPalette(sk: walkerCharacters.skeleton)
 }
