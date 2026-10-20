@@ -74,6 +74,7 @@ open app3d/WalkerRender
 open app3d/WalkerSplash
 open RendererForward
 open RendererPassTiming
+open app3d/WalkerKnockdown
 
 # One frame of a character's clock (app3d/Characters stepCharacterClock): its
 # clip at the walker's rate (walkFast is the walk clip at 1.6x)
@@ -143,9 +144,10 @@ func renderWalkerApp(
       entityId: entityId
       deltaTime: deltaTime
     )
-    characterPaletteInto(
-      animStates: world.animStates
-      animTransitions: world.animTransitions
+    # From its ragdoll while it lies (app3d/WalkerKnockdown), else its clips
+    walkerPaletteInto(
+      physicsSystem: physicsSystem
+      world: world
       characterSystem: characterSystem
       entityId: entityId
       palette: slotPalette

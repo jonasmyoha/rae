@@ -1,0 +1,290 @@
+# app3d/WalkerKnockdown — the walker examples' knockdown, on Rae's ragdolls:
+# running into someone at a run trips the driven character, which falls as a
+# ragdoll (app3d/Ragdoll, the Mixamo rig) launched with its speed; the camera
+# follows its body (app3d/CameraKnockdownFollow, in the update); once the
+# body has come to rest and the player moves or jumps, Rae's get-up system
+# (app3d/KnockedDown) lets it up, and it stands where its hips lie, blending
+# from the pose it lay in (app3d/RagdollGetUp). While it lies its mover is
+# parked, and its skeleton follows the bodies (walkerPaletteInto).
+import Vec3
+import Quat
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Transform
+open ecs/World
+open Math3d
+open GltfSkin
+open WorldBiome
+open box3d/ecs/PhysicsComponents
+open box3d/ecs/CharacterMover
+open app3d/CharacterController
+open app3d/CharacterBodies
+open app3d/CharacterMovers
+open app3d/Characters
+open app3d/KnockedDown
+open app3d/RagdollRig
+open app3d/Ragdoll
+open app3d/RagdollGetUp
+open app3d/WalkerWorld
+open app3d/WalkerPhysics
+open app3d/WalkerCharacter
+
+# Running at least this fast (m/s) into someone this close (m, centre to
+# centre, across the ground) trips the runner
+const walkerTripSpeed: Float = 3.0
+
+const walkerTripDistance: Float = 0.7
+
+# Down at least this long (s) before the player may get up
+const walkerDownSeconds: Float = 0.8
+
+# The ragdoll's shapes collide with everything (Box3D's first category)
+const walkerRagdollCategory: UInt64 = 1
+
+# Trip `entityId` over: it falls as a ragdoll from the pose it is in now,
+# moving at `velocity`, and is down until Rae's get-up system lets it up
+func tripCharacter(
+  physicsSystem: mod WalkerPhysics
+  world: mod WalkerWorld
+  characterSystem: mod CharacterSystem
+  entityId: view EntityId
+  velocity: view Vec3
+) ret Bool {
+  if componentHas(this: physicsSystem.ragdolls, entityId: entityId) {
+    ret false
+  }
+  poseCharacter(
+    animStates: world.animStates
+    animTransitions: world.animTransitions
+    characterSystem: characterSystem
+    entityId: entityId
+  )
+  let fell: Bool = spawnRagdoll(
+    physics: physicsSystem.physics
+    rigidBodies: physicsSystem.rigidBodies
+    colliders: physicsSystem.colliders
+    transforms: world.transforms
+    allocator: world.allocator
+    ragdolls: physicsSystem.ragdolls
+    rig: physicsSystem.ragdollRig
+    skeleton: characterSystem.skeleton
+    characterId: entityId
+    model: walkerWorldModel(
+      baseModel: characterSystem.basePartModel
+      controller: controllerOf(controllers: world.controllers, entityId: entityId)
+    )
+    velocity: velocity
+    radiusScale: 1.0
+    collisionCategory: walkerRagdollCategory
+  )
+  if fell is false {
+    ret false
+  }
+  knockDown(
+    knockedDown: physicsSystem.knockedDown
+    entityId: entityId
+    body: ragdollHipsBody(ragdolls: physicsSystem.ragdolls, characterId: entityId)
+    readyAfterSeconds: walkerDownSeconds
+    bodyAt: ragdollHips(
+      ragdolls: physicsSystem.ragdolls
+      transforms: world.transforms
+      characterId: entityId
+    )
+  )
+  let parked: MoverParked = {}
+  componentSet(this: physicsSystem.moverParked, entityId: entityId, data: parked)
+  ret true
+}
+
+# Does the driven character run into someone this frame: who (none)?
+func trippedOver(
+  physicsSystem: view WalkerPhysics
+  world: view WalkerWorld
+  runnerId: view EntityId
+) ret EntityId {
+  if componentHas(this: physicsSystem.characters, entityId: runnerId) is false or characterSpeed(
+    characters: physicsSystem.characters
+    entityId: runnerId
+  ) < walkerTripSpeed {
+    ret noEntity()
+  }
+  let runner: Vec3 = controllerOf(controllers: world.controllers, entityId: runnerId).position
+  loop var i: Int = 0, i < componentCount(this: world.controllers), ++i {
+    let otherId: EntityId = componentEntityAt(this: world.controllers, i: i)
+    if otherId is not runnerId and componentHas(this: physicsSystem.ragdolls, entityId: otherId) is false {
+      let other: Vec3 = componentView(this: world.controllers, entityId: otherId).position
+      let dx: Float = other.x - runner.x
+      let dy: Float = other.y - runner.y
+      if dx * dx + dy * dy < walkerTripDistance * walkerTripDistance {
+        ret otherId
+      }
+    }
+  }
+  ret noEntity()
+}
+
+# Back on its feet where its hips lie, on the ground there, facing as it did,
+# blending from the pose it lay in
+func standUpFromRagdoll(
+  physicsSystem: mod WalkerPhysics
+  world: mod WalkerWorld
+  characterSystem: mod CharacterSystem
+  entityId: view EntityId
+) {
+  let hips: Vec3 = ragdollHips(
+    ragdolls: physicsSystem.ragdolls
+    transforms: world.transforms
+    characterId: entityId
+  )
+  let lying: view ThirdPersonController = controllerOf(
+    controllers: world.controllers
+    entityId: entityId
+  )
+  var standing: ThirdPersonController = lying
+  standing.position.x = hips.x
+  standing.position.y = hips.y
+  standing.position.z = worldTerrainHeight(
+    x: hips.x
+    y: hips.y
+    groundZ: characterSystem.groundZ
+    cfg: physicsSystem.biome
+  ) - characterSystem.groundZ
+  let lyingPose: SkeletonPose = lyingPoseFrom(
+    ragdolls: physicsSystem.ragdolls
+    transforms: world.transforms
+    rig: physicsSystem.ragdollRig
+    skeleton: characterSystem.skeleton
+    characterId: entityId
+    standingModel: walkerWorldModel(baseModel: characterSystem.basePartModel, controller: standing)
+  )
+  let boneEntities: List(EntityId) = removeRagdoll(
+    physics: physicsSystem.physics
+    rigidBodies: physicsSystem.rigidBodies
+    colliders: physicsSystem.colliders
+    ragdolls: physicsSystem.ragdolls
+    characterId: entityId
+  )
+  loop let boneId: view EntityId in boneEntities {
+    componentRemove(this: world.transforms, entityId: boneId)
+    componentRemove(this: world.worldTransforms, entityId: boneId)
+    freeEntity(this: world.allocator, entityId: boneId)
+  }
+  componentRemove(this: physicsSystem.knockedDown, entityId: entityId)
+  componentRemove(this: physicsSystem.moverParked, entityId: entityId)
+  if componentHas(this: physicsSystem.characters, entityId: entityId) {
+    let character: mod CharacterBody = componentMod(
+      this: physicsSystem.characters
+      entityId: entityId
+    )
+    character.mover.transform.p.x = standing.position.x
+    character.mover.transform.p.y = standing.position.y
+    character.mover.transform.p.z = characterSystem.groundZ + standing.position.z + moverCenterAboveFeet(
+      character: character
+    )
+    character.mover.velocity.x = 0.0
+    character.mover.velocity.y = 0.0
+    character.mover.velocity.z = 0.0
+  }
+  let controller: mod ThirdPersonController = componentMod(
+    this: world.controllers
+    entityId: entityId
+  )
+  controller.position = standing.position
+  beginGetUpBlend(
+    animStates: world.animStates
+    animTransitions: world.animTransitions
+    characterId: entityId
+    lyingPose: own lyingPose
+    standClip: ClipKind.idle as Int
+    duration: getUpBlendSeconds
+  )
+}
+
+# One frame of the walker's knockdown: the driven character trips over
+# whoever it runs into; whoever is down gets up once Rae's get-up system
+# lets them (the driven one once the player moves or jumps)
+func walkerKnockdownUpdate(
+  physicsSystem: mod WalkerPhysics
+  world: mod WalkerWorld
+  characterSystem: mod CharacterSystem
+  controlledEntityId: view EntityId
+  wantsUp: view Bool
+  deltaTime: view Float
+) {
+  if isNone(
+    this: trippedOver(physicsSystem: physicsSystem, world: world, runnerId: controlledEntityId)
+  ) is false {
+    let body: view CharacterBody = componentView(
+      this: physicsSystem.characters
+      entityId: controlledEntityId
+    )
+    let tripped: Bool = tripCharacter(
+      physicsSystem: physicsSystem
+      world: world
+      characterSystem: characterSystem
+      entityId: controlledEntityId
+      velocity: Vec3.create(x: body.mover.velocity.x, y: body.mover.velocity.y, z: 1.5)
+    )
+    if tripped {
+      log(
+        "[knockdown] tripped at {characterSpeed(
+          characters: physicsSystem.characters
+          entityId: controlledEntityId
+        )} m/s"
+      )
+    }
+  }
+  if componentHas(this: physicsSystem.knockedDown, entityId: controlledEntityId) {
+    let down: mod KnockedDown = componentMod(
+      this: physicsSystem.knockedDown
+      entityId: controlledEntityId
+    )
+    down.wantsUp = wantsUp
+  }
+  let up: List(EntityId) = stepKnockedDown(
+    knockedDown: physicsSystem.knockedDown
+    transforms: world.transforms
+    deltaTime: deltaTime
+  )
+  loop let entityId: view EntityId in up {
+    standUpFromRagdoll(
+      physicsSystem: physicsSystem
+      world: world
+      characterSystem: characterSystem
+      entityId: entityId
+    )
+  }
+}
+
+# A character's palette: posed from its ragdoll while it lies, else from its
+# clips (app3d/Characters)
+func walkerPaletteInto(
+  physicsSystem: view WalkerPhysics
+  world: view WalkerWorld
+  characterSystem: mod CharacterSystem
+  entityId: view EntityId
+  palette: mod List(Float)
+) {
+  if componentHas(this: physicsSystem.ragdolls, entityId: entityId) {
+    poseRagdoll(
+      ragdolls: physicsSystem.ragdolls
+      transforms: world.transforms
+      rig: physicsSystem.ragdollRig
+      skeleton: characterSystem.skeleton
+      characterId: entityId
+      model: walkerWorldModel(
+        baseModel: characterSystem.basePartModel
+        controller: controllerOf(controllers: world.controllers, entityId: entityId)
+      )
+    )
+    buildPaletteInto(sk: characterSystem.skeleton, out: palette)
+    ret
+  }
+  characterPaletteInto(
+    animStates: world.animStates
+    animTransitions: world.animTransitions
+    characterSystem: characterSystem
+    entityId: entityId
+    palette: palette
+  )
+}

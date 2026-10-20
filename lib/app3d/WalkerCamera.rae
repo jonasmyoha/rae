@@ -61,6 +61,7 @@ open app3d/HudOverlays
 open app3d/WalkerInput
 open app3d/WalkerTerrain
 open app3d/WalkerWorld
+open app3d/CameraKnockdownFollow
 
 # Camera rig + camera + scene light. (#548)
 # #744: `rigEntityId` and `cameraEntityId` are the two WalkerWorld entities that express
@@ -77,6 +78,9 @@ type WalkerCamera {
   cameraEntityId: EntityId
   # The character camera turns after the walker (lib/app3d/CameraWalkFollow)
   walkFollow: WalkFollow
+  # Over to the driven character's body while it lies knocked down, and back
+  # (lib/app3d/CameraKnockdownFollow)
+  knockdownFollow: KnockdownFollow
 }
 
 # Resolve the camera eye from the rig->camera hierarchy, replacing applyCameraRig.

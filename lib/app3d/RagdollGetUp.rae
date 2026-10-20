@@ -1,0 +1,63 @@
+# app3d/RagdollGetUp — getting up from a ragdoll (app3d/Ragdoll): the pose
+# the body lay in, seen from where the character will stand (lyingPoseFrom),
+# and the blend from it to standing (beginGetUpBlend), so it does not pop
+# up. Where it stands is the app's (where the hips lie, if one may stand
+# there); after taking the ragdoll down, the app begins the blend.
+import Vec3
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Transform
+open Math3d
+open GltfSkin
+open app3d/Characters
+open app3d/RagdollRig
+open app3d/Ragdoll
+
+# The blend from lying to standing (s)
+const getUpBlendSeconds: Float = 0.6
+
+# The pose `characterId`'s ragdoll lies in, under the render model it will
+# stand with (`standingModel`): what the blend to standing starts from
+func lyingPoseFrom(
+  ragdolls: view ComponentTable(Ragdoll)
+  transforms: view ComponentTable(Transform3D)
+  rig: view RagdollRig
+  skeleton: mod Skeleton
+  characterId: view EntityId
+  standingModel: view Mat4
+) ret SkeletonPose {
+  poseRagdoll(
+    ragdolls: ragdolls
+    transforms: transforms
+    rig: rig
+    skeleton: skeleton
+    characterId: characterId
+    model: standingModel
+  )
+  ret captureSkeletonPose(sk: skeleton)
+}
+
+# `characterId` stands blending from `lyingPose` into clip `standClip` from
+# its start, over `duration` seconds
+func beginGetUpBlend(
+  animStates: mod ComponentTable(AnimationState)
+  animTransitions: mod ComponentTable(AnimationTransition)
+  characterId: view EntityId
+  lyingPose: own SkeletonPose
+  standClip: view Int
+  duration: view Float
+) {
+  componentSet(
+    this: animTransitions
+    entityId: characterId
+    data: AnimationTransition {
+      from: own lyingPose
+      elapsed: 0.0
+      duration: duration
+      holdClipFirstFrame: false
+    }
+  )
+  let anim: mod AnimationState = componentMod(this: animStates, entityId: characterId)
+  anim.clipIndex = standClip
+  anim.animTime = 0.0
+}
