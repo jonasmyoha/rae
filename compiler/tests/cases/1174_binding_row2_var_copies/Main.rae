@@ -1,0 +1,18 @@
+# docs/binding-modes-design.md §1, the binding table (2026-10-20): row 2.
+# `var x: T = v` holds a fresh deep copy: `x = v` replaces it with another
+# deep copy, its fields are writable, and the source never changes.
+type Particle {
+  x: Int
+  name: String
+}
+
+func main() {
+  var source: Particle = { x: 1, name: "source" }
+  var copy: Particle = source
+  copy.x = 2
+  copy.name = "copy"
+  log("{source.x} {source.name} / {copy.x} {copy.name}")
+  copy = source
+  source.name = "source changed"
+  log("{source.name} / {copy.x} {copy.name}")
+}

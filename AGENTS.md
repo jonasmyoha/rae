@@ -181,8 +181,8 @@ These instructions define **how Codex should work**, communicate progress, and i
   and a list literal likewise: `ret List(Point) { ... }` (a bare `ret { ... }` is an
   error, never inferred from the return type).
 - What is written but not "inferred": `if let v: T = opt` (you still write `T`),
-  aliases whose `view T`/`mod T` you write (`let v: view T = place`; `=>` is
-  gone, a compile error since 0.2.96), and `loop var i: Int = 0`. The
+  aliases whose `view T`/`mod T` you write (`let v: view T = place`), and
+  `loop var i: Int = 0`. The
   ban is specifically on inferring the type of a binding from its initializer.
 
 ### `const` / `let` / `var` — and a `let` is FROZEN (docs/let-is-frozen.md):
@@ -201,6 +201,23 @@ These instructions define **how Codex should work**, communicate progress, and i
 - Edges: a `let` holding a `Ptr`/`Buffer`, a GPU/entity handle or a
   `mod`/`view` alias freezes the HANDLE, not what it points at (writing
   through it is fine); `if let` and alias bindings make new bindings.
+- **`=` is the only binder; the mode on the line says what a binding is**
+  (maintainer decision 2026-10-20, docs/binding-modes-design.md §1). `=`
+  initializes a binding of the declared type; `view T` and `mod T` are types
+  whose values are aliases, exactly as they already are for parameters and
+  `loop let`. Aliasing is marked by the mode keyword everywhere, and nowhere
+  else: `let x: T = v` is a fresh deep copy, `let x: view T = place` /
+  `let x: mod T = place` an alias, `own y` on the right a move. `=>` is a
+  compile error since 0.2.96 ("alias bindings use `=`"; `rae format`
+  rewrites an old file).
+- **`=` on any line after the declaration WRITES into the place the name
+  denotes; an alias is never rebound.** After `let m: mod Particle =
+  world.a`, the line `m = world.b` deep-copies `world.b` INTO `world.a`, and
+  `world.b` stays independent. A `view` on the left of such a line is an
+  error. `var x: view T` / `var x: mod T` / `loop var x: mod T in list` are
+  errors ("aliases are bind-once"), and a `mod` alias, `mod` loop or `mod`
+  argument of a `let` is the frozen-`let` error. One case per row of the
+  table: compiler/tests/cases/1173–1183.
 - **Prefer `let`.** Write `let` by default and `var` only for a binding the
   code genuinely changes (a loop counter, an accumulator, a value built up
   step by step). A reader sees `let` and knows the value is settled at that

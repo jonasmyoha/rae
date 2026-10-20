@@ -1,0 +1,24 @@
+# docs/binding-modes-design.md §1, the binding table (2026-10-20): row 7.
+# A `view` parameter is never written or rebound; a frozen `let` and a
+# `view` cannot be handed to a `mod` parameter.
+type Particle {
+  x: Int
+}
+
+func readOnly(particle: view Particle, other: view Particle) {
+  particle = other
+  particle.x = 1
+}
+
+func writer(particle: mod Particle) {
+  particle.x = 2
+}
+
+func main() {
+  let frozen: Particle = { x: 1 }
+  var particle: Particle = { x: 1 }
+  let reader: view Particle = particle
+  writer(particle: frozen)
+  writer(particle: reader)
+  readOnly(particle: particle, other: frozen)
+}

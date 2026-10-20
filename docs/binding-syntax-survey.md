@@ -1,7 +1,11 @@
 # Binding syntax: how other languages spell init and `=`
 
 Status: **exploration, closed 2026-09-30: option N was chosen** (see
-`docs/binding-modes-design.md`). Kept as the record of the alternatives. A
+`docs/binding-modes-design.md`). Kept as the record of the alternatives.
+**History:** on 2026-10-20 option N was revised: `=>` was removed and `=` is
+the only binder, the mode in the type deciding whether a binding is an alias
+(`docs/binding-modes-design.md` §1). The `=>` spellings below are the options
+as they were weighed then. A
 companion to `docs/binding-modes-design.md`.
 
 "The settled design" and option A below mean the `name: mode T: value`

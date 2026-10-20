@@ -47,7 +47,7 @@ In a `ret` there is no left-hand side, so the literal carries the type there:
 `ret Point { x: 1, y: 2 }`. Nested literals whose type is not already known from
 context must still be typed: `let t: Transform = { position: Pos { y: 12 } }`.
 
-What you still write but is *not* "inference": `if let v: T = opt`, a `=>` alias's
+What you still write but is *not* "inference": `if let v: T = opt`, an alias's
 `view T`/`mod T`, and `loop var i: Int = 0`.
 
 **Codemod recipe** (semi-automatic — the RHS type still needs a human eye):

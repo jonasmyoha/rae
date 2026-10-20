@@ -5,7 +5,8 @@ revised 2026-10-20: `=` is the only binder, `=>` goes (§1).** The revision
 lands in six queued steps ("binding `=` 1/6" to "6/6"): the compiler takes
 `=` for an alias binding since 0.2.95, the tree was swept to it, and `=>`
 is a compile error since 0.2.96 ('alias bindings use `=`'; `rae format`
-still reads `=>` and rewrites it to `=`). The 2026-09-30 decision replaced the
+still reads `=>` and rewrites it to `=`). Every row of the table in §1 has
+its compiler case (compiler/tests/cases/1173–1183, 0.2.97). The 2026-09-30 decision replaced the
 `name: mode Type: value` grammar settled on 2026-09-29, which is withdrawn
 (it is in git history). The ownership model (who takes, who copies, who
 aliases) is unchanged.
