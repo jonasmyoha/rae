@@ -15,6 +15,7 @@
 # Unknown names are silently ignored (same policy as apply).
 open ecs/ComponentTable
 open ui/TouchStick
+open ui/HudOverlay
 
 func removeComponentByName(world: mod UiWorld, entityId: view EntityId, name: view String) {
   if name is "Rect" {
@@ -123,6 +124,10 @@ func removeComponentByName(world: mod UiWorld, entityId: view EntityId, name: vi
   }
   if name is "TouchStick" {
     componentRemove(this: world.touchSticks, entityId: entityId)
+    ret
+  }
+  if name is "HudOverlay" {
+    componentRemove(this: world.hudOverlays, entityId: entityId)
     ret
   }
   if name is "LayerRoot" {

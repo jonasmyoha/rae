@@ -1,0 +1,54 @@
+# ui/HudOverlay: what is drawn over the scene in the 2D overlay pass is one
+# entity per overlay, with a HudOverlay component (what it draws, its order,
+# which mode shows it). overlaysInOrder gives the entities to draw this
+# frame, lowest order first, for the mode the app is in; Rae draws its own
+# kinds (app3d/HudOverlays drawRaeOverlay), the app its own.
+open ecs/Entity
+open ecs/ComponentTable
+open ui/Ecs
+open ui/HudOverlay
+
+func addOverlay(world: mod UiWorld, overlay: own HudOverlay) ret EntityId {
+  let entityId: EntityId = createEntity(world: world)
+  componentSet(this: world.hudOverlays, entityId: entityId, data: overlay)
+  ret entityId
+}
+
+func listed(world: view UiWorld, editor: view Bool) ret String {
+  var out: String = ""
+  let entities: List(EntityId) = overlaysInOrder(overlays: world.hudOverlays, editor: editor)
+  loop let entityId: view EntityId in entities {
+    let overlay: view HudOverlay = componentView(this: world.hudOverlays, entityId: entityId)
+    out = "{out} {(overlay.draw as OverlayDraw).toString()}:{overlay.order}"
+  }
+  ret out
+}
+
+func main() {
+  var world: UiWorld = createUiWorld()
+  # Added out of order, as an app may
+  let debug: EntityId = addOverlay(
+    world: world
+    overlay: HudOverlay { draw: OverlayDraw.debugReadout, order: 90, shows: OverlayShows.always }
+  )
+  let labels: EntityId = addOverlay(
+    world: world
+    overlay: HudOverlay { draw: OverlayDraw.worldLabels, order: 10, shows: OverlayShows.gameMode }
+  )
+  let log: EntityId = addOverlay(
+    world: world
+    overlay: HudOverlay { draw: OverlayDraw.logStrip, order: 80, shows: OverlayShows.editorMode }
+  )
+  let scene: EntityId = addOverlay(
+    world: world
+    overlay: HudOverlay { draw: OverlayDraw.sceneUi, order: 20, shows: OverlayShows.always }
+  )
+  let appOverlay: EntityId = addOverlay(
+    world: world
+    overlay: HudOverlay { draw: OverlayDraw.app, order: 50, shows: OverlayShows.always }
+  )
+  log("GAME:{listed(world: world, editor: false)}")
+  log("EDITOR:{listed(world: world, editor: true)}")
+  componentRemove(this: world.hudOverlays, entityId: appOverlay)
+  log("the app's taken away:{listed(world: world, editor: false)}")
+}

@@ -1,7 +1,8 @@
 # app3d/HudOverlays — the touch controls' frame step (the scene's touch stick
-# and the camera's touch split), the overlays an app draws in code over its
-# scene UI (the log strip, the debug readout), and hiding the camera bar's
-# smoothing toggles. Used by the walker examples (136, 137, 143) and by apps
+# and the camera's touch split), the system that draws Rae's overlay entities
+# (ui/HudOverlay: the scene UI, the world's labels, the log strip, the debug
+# readout) in the 2D overlay pass, and hiding the camera bar's smoothing
+# toggles. Used by the walker examples (136, 137, 143) and by apps
 # with their own shell.
 import Gpu2d
 open app3d/UiModes
@@ -20,6 +21,13 @@ open app3d/CameraRig
 open ui/safeAreaSystem/SafeAreaSystem
 open Gpu2dCanvas
 open ui/UiSystems
+open ui/HudOverlay
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Transform
+open Scene3d
+open app3d/WorldLabel
+open app3d/WorldLabelDraw
 
 # The touch stick (lib/ui/touchStickSystem: a TouchStick node in the scene,
 # shown by its touch frame) for this frame, and the camera rig told to leave
@@ -72,30 +80,140 @@ func hideCameraSmoothingToggles(world: mod UiWorld) {
   setNodeActive(world: world, nodeId: "CameraSmoothKeysButton", value: false)
 }
 
-# All HUD overlays, drawn inside the 2D overlay pass (after the ECS UI world).
-func drawHudOverlays(
-  logOverlay: view LogOverlay
+# The overlays Rae's UI shell gives an app (ui/HudOverlay), one entity each
+# in the UI world: the world's labels under the scene UI in GAME mode, the
+# scene UI, the log strip in EDITOR mode, the debug readout over everything.
+# An app adds its own between them (OverlayDraw.app, an order of its own).
+const overlayOrderWorldLabels: Int = 10
+
+const overlayOrderSceneUi: Int = 20
+
+const overlayOrderLogStrip: Int = 80
+
+const overlayOrderDebugReadout: Int = 90
+
+func addHudOverlay(world: mod UiWorld, overlay: own HudOverlay) ret EntityId {
+  let entityId: EntityId = createEntity(world: world)
+  componentSet(this: world.hudOverlays, entityId: entityId, data: overlay)
+  ret entityId
+}
+
+# Rae's four overlay entities, at their orders
+func addStandardHudOverlays(world: mod UiWorld) {
+  let labels: EntityId = addHudOverlay(
+    world: world
+    overlay: HudOverlay {
+      draw: OverlayDraw.worldLabels
+      order: overlayOrderWorldLabels
+      shows: OverlayShows.gameMode
+    }
+  )
+  let scene: EntityId = addHudOverlay(
+    world: world
+    overlay: HudOverlay {
+      draw: OverlayDraw.sceneUi
+      order: overlayOrderSceneUi
+      shows: OverlayShows.always
+    }
+  )
+  let logStrip: EntityId = addHudOverlay(
+    world: world
+    overlay: HudOverlay {
+      draw: OverlayDraw.logStrip
+      order: overlayOrderLogStrip
+      shows: OverlayShows.editorMode
+    }
+  )
+  let debug: EntityId = addHudOverlay(
+    world: world
+    overlay: HudOverlay {
+      draw: OverlayDraw.debugReadout
+      order: overlayOrderDebugReadout
+      shows: OverlayShows.always
+    }
+  )
+}
+
+# Draw one of Rae's overlays (an app's own, OverlayDraw.app, draws nothing
+# here), inside the 2D overlay pass
+func drawRaeOverlay(
+  overlay: view HudOverlay
+  world: view UiWorld
+  uiSystems: view UiSystems
   gpuUi: view Gpu2dUi
   canvas: mod Gpu2dCanvas
+  logOverlay: view LogOverlay
   dbg: mod DebugOverlay
+  labels: view ComponentTable(WorldLabel)
+  transforms: view ComponentTable(Transform3D)
+  camera: view Camera3d
+) {
+  match overlay.draw {
+    case OverlayDraw.sceneUi {
+      renderSystemGpu2d(
+        world: world
+        uiSystems: uiSystems
+        res: gpuUi
+        canvas: canvas
+      )
+    }
+    case OverlayDraw.worldLabels {
+      drawWorldLabels(
+        labels: labels
+        transforms: transforms
+        camera: camera
+        canvas: canvas
+        font: gpuUi.textFont
+      )
+    }
+    case OverlayDraw.logStrip {
+      drawLogOverlay(
+        ov: logOverlay
+        canvas: canvas
+        font: gpuUi.textFont
+        screenW: windowExtentW()
+        screenH: windowExtentH()
+      )
+    }
+    case OverlayDraw.debugReadout {
+      drawDebugOverlay(
+        debugOverlay: dbg
+        canvas: canvas
+        font: gpuUi.textFont
+        didRealWork: true
+      )
+    }
+    case OverlayDraw.app {
+    }
+  }
+}
+
+# Every overlay of this frame, in order, for an app with none of its own
+func drawOverlays(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  gpuUi: view Gpu2dUi
+  canvas: mod Gpu2dCanvas
+  logOverlay: view LogOverlay
+  dbg: mod DebugOverlay
+  labels: view ComponentTable(WorldLabel)
+  transforms: view ComponentTable(Transform3D)
+  camera: view Camera3d
   editor: view Bool
 ) {
-  # EDITOR: the log strip. The debug readout is both modes'. (The touch stick
-  # is a scene node, drawn with the rest of the UI.)
-  if editor {
-    drawLogOverlay(
-      ov: logOverlay
+  let entities: List(EntityId) = overlaysInOrder(overlays: world.hudOverlays, editor: editor)
+  loop let entityId: view EntityId in entities {
+    drawRaeOverlay(
+      overlay: componentView(this: world.hudOverlays, entityId: entityId)
+      world: world
+      uiSystems: uiSystems
+      gpuUi: gpuUi
       canvas: canvas
-      font: gpuUi.textFont
-      screenW: windowExtentW()
-      screenH: windowExtentH()
+      logOverlay: logOverlay
+      dbg: dbg
+      labels: labels
+      transforms: transforms
+      camera: camera
     )
   }
-  # Debug D last, so it is above everything else.
-  drawDebugOverlay(
-    debugOverlay: dbg
-    canvas: canvas
-    font: gpuUi.textFont
-    didRealWork: true
-  )
 }

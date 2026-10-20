@@ -1,0 +1,70 @@
+# ui/HudOverlay — what is drawn over the scene in the 2D overlay pass: one
+# entity per overlay in the UI world (`hudOverlays`), each with a HudOverlay
+# saying what it draws, in which order and in which mode. Rae draws its own
+# kinds (app3d/HudOverlays: drawRaeOverlay for one, drawOverlays for all);
+# an overlay an app draws itself is `OverlayDraw.app`, and the app tells its
+# own ones apart by its own component on the same entity. Rae has no
+# function references, so, as with a Schedule, Rae owns the order
+# (overlaysInOrder) and the app calls the draws.
+open ecs/Entity
+open ecs/ComponentTable
+
+# What an overlay draws
+enum OverlayDraw {
+  sceneUi
+  worldLabels
+  logStrip
+  debugReadout
+  app
+}
+
+# The scene UI (the ECS UI world's nodes)
+# Every WorldLabel (app3d/WorldLabel), text standing in the 3D world
+# The log strip (ui/LogOverlay)
+# The debug readout (ui/DebugOverlay)
+# Something the app draws itself
+
+# In which of the GAME / EDITOR modes (app3d/UiModes) it shows
+enum OverlayShows { always, gameMode, editorMode }
+
+type HudOverlay {
+  draw: OverlayDraw
+  # Lower first, so a higher one is drawn over it
+  order: Int
+  shows: OverlayShows
+}
+
+# Does `overlay` show in this mode?
+func overlayShows(overlay: view HudOverlay, editor: view Bool) ret Bool {
+  if overlay.shows is OverlayShows.gameMode {
+    ret editor is false
+  }
+  if overlay.shows is OverlayShows.editorMode {
+    ret editor
+  }
+  ret true
+}
+
+# The overlay entities to draw this frame, lowest order first (equal orders
+# in the table's order), those the mode shows
+func overlaysInOrder(
+  overlays: view ComponentTable(HudOverlay)
+  editor: view Bool
+) ret List(EntityId) {
+  var entities: List(EntityId) = List.create(EntityId, cap: componentCount(this: overlays))
+  var orders: List(Int) = List.create(Int, cap: componentCount(this: overlays))
+  loop var i: Int = 0, i < componentCount(this: overlays), ++i {
+    let entityId: EntityId = componentEntityAt(this: overlays, i: i)
+    let overlay: view HudOverlay = componentView(this: overlays, entityId: entityId)
+    if overlayShows(overlay: overlay, editor: editor) {
+      # Insert after every one with an order not above it
+      var at: Int = orders.length
+      loop at > 0 and orders.copyAtDefault(index: at - 1) > overlay.order {
+        at = at - 1
+      }
+      entities.insert(index: at, value: entityId)
+      orders.insert(index: at, value: overlay.order)
+    }
+  }
+  ret entities
+}
