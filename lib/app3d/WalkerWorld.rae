@@ -43,6 +43,12 @@ type AnimationState {
 type PartRoughness {
   meshId: Int
   roughness: Float
+  # Which skin colour's copy of the mesh this is (an app that recolours its
+  # characters uploads one per colour; 0 the authored one)
+  skinColorIndex: Int = 0
+  # A part only some characters show (a moustache, a hat): an app skips it
+  # for a character without it
+  optionalPart: Bool = false
 }
 
 # A gameplay surface material. Capital-D `Material3D` to match the capital-D
@@ -208,23 +214,17 @@ func walkerWorldEntityCount(world: view WalkerWorld) ret Int {
 func controlledPosition(
   world: view WalkerWorld
   players: view PlayerRoster
-  characterSystem: view CharacterSystem
+  walkerCharacters: view WalkerCharacters
 ) ret Vec3 {
-  ret controllerOf(
-    world: world
-    entityId: rosterControlledEntityId(players: players, characterSystem: characterSystem)
-  ).position
+  ret controllerOf(world: world, entityId: rosterControlledEntityId(players: players)).position
 }
 
 func controlledHeading(
   world: view WalkerWorld
   players: view PlayerRoster
-  characterSystem: view CharacterSystem
+  walkerCharacters: view WalkerCharacters
 ) ret Float {
-  ret controllerOf(
-    world: world
-    entityId: rosterControlledEntityId(players: players, characterSystem: characterSystem)
-  ).heading
+  ret controllerOf(world: world, entityId: rosterControlledEntityId(players: players)).heading
 }
 
 # Despawn a cube: its body, collider and PhysicsCube row (WalkerPhysics),

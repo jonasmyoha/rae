@@ -168,7 +168,7 @@ func drawPhysicsCubesShadow(
 # match arm stays a one-liner (and the systems refactor #543 gives it a home).
 func renderShadowPass(
   cameraSystem: mod WalkerCamera
-  characterSystem: mod CharacterSystem
+  walkerCharacters: mod WalkerCharacters
   inputSystem: mod WalkerInput
   renderSystem: mod WalkerRender
   terrainSystem: mod WalkerTerrain
@@ -201,7 +201,7 @@ func renderShadowPass(
   uploadPalette(
     renderer: renderSystem.renderer
     rows: palette
-    jointCount: jointCount(sk: characterSystem.skeleton)
+    jointCount: jointCount(sk: walkerCharacters.skeleton)
   )
   if inputSystem.settings.shadows {
     beginShadowPass(renderer: renderSystem.renderer, c: cascades)
@@ -214,7 +214,7 @@ func renderShadowPass(
     )
     # Each caster's shadow samples the SAME palette slot its G-buffer instance
     # does (#547), so a crowd member casts its own pose. Hero = slot 0.
-    let jc: Int = jointCount(sk: characterSystem.skeleton)
+    let jc: Int = jointCount(sk: walkerCharacters.skeleton)
     loop var sp: Int = 0, sp < walkerWorldPartCount(world: world), ++sp {
       let sh: MeshHandle = meshHandle(
         id: walkerWorldPartAt(world: world, i: sp).meshId
@@ -223,17 +223,17 @@ func renderShadowPass(
       drawShadowCasterSkinnedWith(
         renderer: renderSystem.renderer
         mesh: sh
-        model: characterSystem.model
+        model: walkerCharacters.model
         paletteBase: 0
       )
-      loop var shadowClone: Int = 0, shadowClone < characterSystem.crowdEntities.length, ++shadowClone {
-        if let member: EntityId = characterSystem.crowdEntities.copyAt(index: shadowClone) {
+      loop var shadowClone: Int = 0, shadowClone < walkerCharacters.crowdEntities.length, ++shadowClone {
+        if let member: EntityId = walkerCharacters.crowdEntities.copyAt(index: shadowClone) {
           let ctrl: view ThirdPersonController => componentView(
             this: world.controllers
             entityId: member
           )
           let cloneModel: Mat4 = walkerWorldModel(
-            baseModel: characterSystem.basePartModel
+            baseModel: walkerCharacters.basePartModel
             controller: ctrl
           )
           drawShadowCasterSkinnedWith(
@@ -259,7 +259,7 @@ func renderShadowPass(
 # before the first scene pass draws it
 func generateWalkerGrass(
   cameraSystem: view WalkerCamera
-  characterSystem: view CharacterSystem
+  walkerCharacters: view WalkerCharacters
   world: view WalkerWorld
   t: copy Float
   deltaTime: copy Float
@@ -268,7 +268,7 @@ func generateWalkerGrass(
   resources: mod GpuResources
 ) {
   var grassToonGen: Int = 0
-  if characterSystem.toon {
+  if walkerCharacters.toon {
     grassToonGen = 1
   }
   var grassView: GrassViewSettings = GrassConfig.grassThirdPersonSettings(
@@ -281,13 +281,13 @@ func generateWalkerGrass(
   grassView.clusterStrength = 0.8
   grassView.tipLighten = 1.25
   grassView.windStrength = 0.45
-  let heroPos: Vec3 = controllerOf(world: world, entityId: characterSystem.heroEntityId).position
+  let heroPos: Vec3 = controllerOf(world: world, entityId: walkerCharacters.heroEntityId).position
   grassGenerate(
     grass: grassCompute
     resources: resources
     playerX: heroPos.x
     playerY: heroPos.y
-    groundZ: characterSystem.groundZ
+    groundZ: walkerCharacters.groundZ
     time: t
     deltaTime: deltaTime
     toon: grassToonGen
@@ -311,7 +311,7 @@ func generateWalkerGrass(
 func drawWalkerScene(
   cache: mod GbufferCache
   rendererResources: mod GpuResources
-  characterSystem: mod CharacterSystem
+  walkerCharacters: mod WalkerCharacters
   terrainSystem: mod WalkerTerrain
   world: mod WalkerWorld
   physicsSystem: view WalkerPhysics
@@ -334,11 +334,11 @@ func drawWalkerScene(
     batch: cubeBatch
     physicsSystem: physicsSystem
     world: world
-    toon: characterSystem.toon
+    toon: walkerCharacters.toon
   )
   # Palettes (hero slot 0 + one per crowd member) were uploaded in renderWalkerApp;
   # the hero's is re-written here into the cache's palette (slot 0).
-  let jc: Int = jointCount(sk: characterSystem.skeleton)
+  let jc: Int = jointCount(sk: walkerCharacters.skeleton)
   uploadPaletteAt(
     cache: cache
     resources: rendererResources
@@ -354,20 +354,20 @@ func drawWalkerScene(
       metallic: 0.0
       roughness: part.roughness
       emission: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
-      toon: characterSystem.toon
+      toon: walkerCharacters.toon
     }
     GbufferSkinned.drawSkinnedInstance(
       cache: cache
       resources: rendererResources
       mesh: handle
-      model: characterSystem.model
-      prevModel: characterSystem.prevModel
+      model: walkerCharacters.model
+      prevModel: walkerCharacters.prevModel
       material: mat
     )
-    setInstanceBatchMesh(batch: characterSystem.crowdBatch, mesh: handle)
-    resetInstanceBatch(batch: characterSystem.crowdBatch)
-    loop var cloneDraw: Int = 0, cloneDraw < characterSystem.crowdEntities.length, ++cloneDraw {
-      if let member: EntityId = characterSystem.crowdEntities.copyAt(index: cloneDraw) {
+    setInstanceBatchMesh(batch: walkerCharacters.crowdBatch, mesh: handle)
+    resetInstanceBatch(batch: walkerCharacters.crowdBatch)
+    loop var cloneDraw: Int = 0, cloneDraw < walkerCharacters.crowdEntities.length, ++cloneDraw {
+      if let member: EntityId = walkerCharacters.crowdEntities.copyAt(index: cloneDraw) {
         # Each crowd member samples its OWN palette slot (#547) so it holds a
         # distinct pose in this single instanced skinned draw. Its model is
         # derived from the entity's controller (#739) — no stored model.
@@ -376,11 +376,11 @@ func drawWalkerScene(
           entityId: member
         )
         let cloneModel: Mat4 = walkerWorldModel(
-          baseModel: characterSystem.basePartModel
+          baseModel: walkerCharacters.basePartModel
           controller: ctrl
         )
         addSkinnedInstance(
-          batch: characterSystem.crowdBatch
+          batch: walkerCharacters.crowdBatch
           model: cloneModel
           prevModel: cloneModel
           material: mat
@@ -391,7 +391,7 @@ func drawWalkerScene(
     drawSkinnedInstances(
       cache: cache
       resources: rendererResources
-      batch: characterSystem.crowdBatch
+      batch: walkerCharacters.crowdBatch
     )
   }
   grassDraw(

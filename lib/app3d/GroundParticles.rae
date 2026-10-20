@@ -1,0 +1,233 @@
+# app3d/GroundParticles — small solid 3D particles kicked up from the ground:
+# a bit of grass or a puff of dust a step or a tyre throws, flying, falling or
+# drifting, then shrinking away. A particle is plain data (its motion, life,
+# size and growth, colour, shape, spin, gravity and drag); a GroundParticles
+# pool keeps a ring of them, the oldest replaced when it is full, each never
+# falling below the ground it was born on, and draws them into the G-buffer
+# (lit and shadowed like the scene) as one instanced draw per shape — blades
+# as stretched boxes that tumble, puffs as low balls that spread. The app
+# decides what a step on its surfaces kicks up; lib/Particles is the other
+# kind, fading cubes in the transparent pass.
+import Math
+import Vec3
+import Quat
+open Math3d
+open Mesh3d
+open Scene3d
+open ecs/Transform
+open GbufferInstanced
+open Gbuffer
+open RendererDeferred
+open gpu/GpuResources
+
+# A blade: a thin stalk (a unit box, stretched); a puff: a low ball
+enum GroundParticleShape { blade, puff }
+
+type GroundParticle {
+  position: Vec3
+  velocity: Vec3
+  # Seconds lived, and how many it lives
+  age: Float
+  lifetime: Float
+  # Its size at birth (m), and how much it grows over its life (0 none, 1
+  # twice the size)
+  size: Float
+  growth: Float
+  color: Vec3
+  shape: GroundParticleShape
+  # Its turn about the up axis (rad) and how fast it turns (rad/s)
+  spin: Float
+  spinRate: Float
+  # Downward pull (m/s^2; dust barely falls) and air drag (1/s)
+  gravity: Float
+  drag: Float
+}
+
+func groundParticleAlive(particle: view GroundParticle) ret Bool {
+  ret particle.age < particle.lifetime
+}
+
+# One step on: drag, gravity, motion, spin, age. It never sinks below `floor`
+# (it lands, and stays).
+func stepGroundParticle(particle: mod GroundParticle, deltaTime: view Float, floor: view Float) {
+  let keep: Float = Math.max(a: 0.0, b: 1.0 - particle.drag * deltaTime)
+  particle.velocity = Vec3.create(
+    x: particle.velocity.x * keep
+    y: particle.velocity.y * keep
+    z: particle.velocity.z * keep - particle.gravity * deltaTime
+  )
+  particle.position = Vec3.vadd(
+    a: particle.position
+    b: Vec3.vscale(a: particle.velocity, s: deltaTime)
+  )
+  if particle.position.z < floor {
+    particle.position = Vec3.create(x: particle.position.x, y: particle.position.y, z: floor)
+    particle.velocity = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  }
+  particle.spin = particle.spin + particle.spinRate * deltaTime
+  particle.age = particle.age + deltaTime
+}
+
+# Its size now: grown over its life, and shrinking away over the last 40%.
+func groundParticleScale(particle: view GroundParticle) ret Float {
+  let t: Float = Math.min(a: 1.0, b: particle.age / particle.lifetime)
+  var shrink: Float = 1.0
+  if t > 0.6 {
+    shrink = (1.0 - t) / 0.4
+  }
+  ret particle.size * (1.0 + particle.growth * t) * Math.max(a: 0.0, b: shrink)
+}
+
+# A blade's thickness and length (m) at scale 1
+const groundParticleBladeThickness: Float = 0.03
+
+const groundParticleBladeLength: Float = 0.12
+
+type GroundParticles {
+  particles: List(GroundParticle)
+  # How many can be alive at once, and where the next one goes once full
+  capacity: Int
+  next: Int
+  # The ground each one was born on: it never falls below it
+  floors: List(Float)
+  bladeBatch: InstanceBatch
+  puffBatch: InstanceBatch
+}
+
+# A pool of `capacity` particles, its two shapes' meshes in `renderer`
+func createGroundParticles(renderer: mod DeferredRenderer, capacity: view Int) ret GroundParticles {
+  let box: MeshData = makeBox(size: 1.0)
+  let ball: MeshData = makeSphere(rings: 4, segments: 6)
+  ret GroundParticles {
+    particles: List.create(GroundParticle, cap: capacity)
+    capacity: capacity
+    next: 0
+    floors: List.create(Float, cap: capacity)
+    bladeBatch: createInstanceBatch(
+      mesh: RendererDeferred.uploadMesh(
+        renderer: renderer
+        verts: box.verts
+        vertCount: box.vertCount
+        indices: box.indices
+      )
+      capacity: capacity
+    )
+    puffBatch: createInstanceBatch(
+      mesh: RendererDeferred.uploadMesh(
+        renderer: renderer
+        verts: ball.verts
+        vertCount: ball.vertCount
+        indices: ball.indices
+      )
+      capacity: capacity
+    )
+  }
+}
+
+# Let `particle` loose, never falling below `floor`; over the oldest once the
+# ring is full.
+func spawnGroundParticle(
+  groundParticles: mod GroundParticles
+  particle: view GroundParticle
+  floor: view Float
+) {
+  if groundParticles.particles.length < groundParticles.capacity {
+    groundParticles.particles.add(value: particle)
+    groundParticles.floors.add(value: floor)
+    ret
+  }
+  groundParticles.particles.set(index: groundParticles.next, value: particle)
+  groundParticles.floors.set(index: groundParticles.next, value: floor)
+  groundParticles.next = (groundParticles.next + 1) % groundParticles.capacity
+}
+
+# Every live particle one step on (once a frame).
+func groundParticlesUpdate(groundParticles: mod GroundParticles, deltaTime: view Float) {
+  loop var i: Int = 0, i < groundParticles.particles.length, ++i {
+    var particle: GroundParticle = groundParticles.particles.copyAtDefault(index: i)
+    if groundParticleAlive(particle: particle) {
+      stepGroundParticle(
+        particle: particle
+        deltaTime: deltaTime
+        floor: groundParticles.floors.copyAtFallback(index: i, fallback: -1000.0)
+      )
+      groundParticles.particles.set(index: i, value: particle)
+    }
+  }
+}
+
+func liveGroundParticleCount(groundParticles: view GroundParticles) ret Int {
+  var live: Int = 0
+  loop let particle: view GroundParticle in groundParticles.particles {
+    if groundParticleAlive(particle: particle) {
+      live = live + 1
+    }
+  }
+  ret live
+}
+
+# Every live particle into the G-buffer's open pass: one draw for the
+# blades, one for the puffs.
+func drawGroundParticles(
+  cache: mod GbufferCache
+  resources: mod GpuResources
+  groundParticles: mod GroundParticles
+  toon: view Bool
+) {
+  resetInstanceBatch(batch: groundParticles.bladeBatch)
+  resetInstanceBatch(batch: groundParticles.puffBatch)
+  loop let particle: view GroundParticle in groundParticles.particles {
+    if groundParticleAlive(particle: particle) is false {
+      continue
+    }
+    let scale: Float = groundParticleScale(particle: particle)
+    if scale <= 0.0 {
+      continue
+    }
+    let material: Material3d = {
+      baseColor: particle.color
+      metallic: 0.0
+      roughness: 0.95
+      emission: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+      toon: toon
+    }
+    if particle.shape is GroundParticleShape.blade {
+      # A stalk, tumbling: turned about the up axis and tipped over by its spin
+      let pose: Transform3D = {
+        position: particle.position
+        rotation: Quat.qmul(
+          a: Quat.fromAxisAngle(axis: Vec3.create(x: 0.0, y: 0.0, z: 1.0), angle: particle.spin)
+          b: Quat.fromAxisAngle(
+            axis: Vec3.create(x: 1.0, y: 0.0, z: 0.0)
+            angle: particle.spin * 0.7
+          )
+        )
+        scale: Vec3.create(
+          x: groundParticleBladeThickness * scale
+          y: groundParticleBladeThickness * scale
+          z: groundParticleBladeLength * scale
+        )
+      }
+      let model: Mat4 = transform3dToMatrix(t: pose)
+      addInstance(
+        batch: groundParticles.bladeBatch
+        model: model
+        prevModel: model
+        material: material
+      )
+    } else {
+      let model: Mat4 = mat4Mul(
+        a: mat4Translate(x: particle.position.x, y: particle.position.y, z: particle.position.z)
+        b: mat4Scale(s: scale)
+      )
+      addInstance(
+        batch: groundParticles.puffBatch
+        model: model
+        prevModel: model
+        material: material
+      )
+    }
+  }
+  drawInstances(cache: cache, resources: resources, batch: groundParticles.bladeBatch)
+  drawInstances(cache: cache, resources: resources, batch: groundParticles.puffBatch)
+}

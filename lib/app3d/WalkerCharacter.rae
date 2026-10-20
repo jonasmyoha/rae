@@ -1,7 +1,7 @@
 # app3d/WalkerCharacter — the walker: a skinned character (a glTF skeleton
 # and its idle / walk / run clips) that is the player's hero plus a crowd of
 # independently animated members, standing on a WorldBiome terrain. Used by
-# the walker examples (136, 137, 143). Holds the CharacterSystem state, the
+# the walker examples (136, 137, 143). Holds the WalkerCharacters state, the
 # clip set and its playback (the speed->clip mapping, posing the shared
 # skeleton into a joint palette), the gait thresholds the physics reads back
 # with, the model matrix of a character and its spawn onto land. Everything
@@ -34,7 +34,7 @@ const walkFastSpeedLimit: Float = 3.6
 # with a ThirdPersonController + AnimationState{clipIndex,animTime} + Transform3D.
 # They're driven in place via componentMod (no copy-out/mutate/set-back), and
 # each member's render model is derived from its controller (walkerWorldModel).
-type CharacterSystem {
+type WalkerCharacters {
   # The toe bones the wading splashes follow (water/WadeSplash); -1 without
   leftFootNode: Int = -1
   rightFootNode: Int = -1
@@ -65,7 +65,15 @@ type CharacterSystem {
 # The character's locomotion clips (idle=0 … run=3). clipIndex stays an Int for
 # storage/serialisation; this enum drives the exhaustive `match`es that dispatch
 # on it, and the panel button id is just `.toString()` so no index->name table.
-enum ClipKind { idle, walk, walkFast, run }
+# The clips a walker may play; an app with jumps has their clips too
+enum ClipKind {
+  idle
+  walk
+  walkFast
+  run
+  jump
+  runningJump
+}
 
 # the walk clip at 1.6x, not a fourth asset
 
@@ -130,26 +138,26 @@ func walkerIntAt(values: view List(Int), index: view Int) ret Int {
 # here, re-posed each call; the hero's palette is built separately, before this
 # runs, so re-posing does not disturb it.
 func poseCharacterPalette(
-  characterSystem: mod CharacterSystem
+  walkerCharacters: mod WalkerCharacters
   clipIndex: copy Int
   animTime: copy Float
 ) ret List(Float) {
-  applySkeletonPose(sk: characterSystem.skeleton, pose: characterSystem.bindPose)
+  applySkeletonPose(sk: walkerCharacters.skeleton, pose: walkerCharacters.bindPose)
   match clipIndex {
     case ClipKind.idle {
-      applyClip(sk: characterSystem.skeleton, c: characterSystem.idleClip, time: animTime)
+      applyClip(sk: walkerCharacters.skeleton, c: walkerCharacters.idleClip, time: animTime)
     }
     case ClipKind.walk {
-      applyClip(sk: characterSystem.skeleton, c: characterSystem.walkClip, time: animTime)
+      applyClip(sk: walkerCharacters.skeleton, c: walkerCharacters.walkClip, time: animTime)
     }
     case ClipKind.walkFast {
-      applyClip(sk: characterSystem.skeleton, c: characterSystem.walkClip, time: animTime)
+      applyClip(sk: walkerCharacters.skeleton, c: walkerCharacters.walkClip, time: animTime)
     }
     case ClipKind.run {
-      applyClip(sk: characterSystem.skeleton, c: characterSystem.runClip, time: animTime)
+      applyClip(sk: walkerCharacters.skeleton, c: walkerCharacters.runClip, time: animTime)
     }
   }
-  ret buildPalette(sk: characterSystem.skeleton)
+  ret buildPalette(sk: walkerCharacters.skeleton)
 }
 
 # Where "Orbit" re-centres: THE CHARACTER'S MIDDLE, not the world floor. The

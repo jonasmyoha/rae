@@ -47,25 +47,25 @@ func prepareSplashPreview(
 # The pose check (WadeSplash.finishWadePoseCheck) on the hero walking for 3 s,
 # the water 12 cm above its feet. 0 when it passed.
 func runSplashPoseTest(
-  characterSystem: mod CharacterSystem
+  walkerCharacters: mod WalkerCharacters
   world: view WalkerWorld
   wadeSplash: mod WadeSplash
 ) ret Int {
-  if characterSystem.leftFootNode < 0 or characterSystem.rightFootNode < 0 {
+  if walkerCharacters.leftFootNode < 0 or walkerCharacters.rightFootNode < 0 {
     ret 1
   }
-  let heroEntityId: EntityId = characterSystem.heroEntityId
+  let heroEntityId: EntityId = walkerCharacters.heroEntityId
   let origin: Vec3 = controllerOf(world: world, entityId: heroEntityId).position
-  let level: Float = origin.z + characterSystem.groundZ + 0.12
+  let level: Float = origin.z + walkerCharacters.groundZ + 0.12
   var check: WadePoseCheck = createWadePoseCheck()
   loop var frame: Int = 0, frame < 180, ++frame {
     let palette: List(Float) = poseCharacterPalette(
-      characterSystem: characterSystem
+      walkerCharacters: walkerCharacters
       clipIndex: ClipKind.walk as Int
       animTime: frame.toFloat() / 60.0
     )
     captureCharacterFeet(
-      characterSystem: characterSystem
+      walkerCharacters: walkerCharacters
       world: world
       wadeSplash: wadeSplash
       entityId: heroEntityId
@@ -90,7 +90,7 @@ func runSplashPoseTest(
 
 # Record the feet of `entityId` in the pose the skeleton has now
 func captureCharacterFeet(
-  characterSystem: view CharacterSystem
+  walkerCharacters: view WalkerCharacters
   world: view WalkerWorld
   wadeSplash: mod WadeSplash
   entityId: view EntityId
@@ -99,11 +99,11 @@ func captureCharacterFeet(
     wadeSplash: wadeSplash
     entityId: entityId
     model: walkerWorldModel(
-      baseModel: characterSystem.basePartModel
+      baseModel: walkerCharacters.basePartModel
       controller: controllerOf(world: world, entityId: entityId)
     )
-    skeleton: characterSystem.skeleton
-    leftFootNode: characterSystem.leftFootNode
-    rightFootNode: characterSystem.rightFootNode
+    skeleton: walkerCharacters.skeleton
+    leftFootNode: walkerCharacters.leftFootNode
+    rightFootNode: walkerCharacters.rightFootNode
   )
 }
