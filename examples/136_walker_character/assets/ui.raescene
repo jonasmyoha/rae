@@ -33,6 +33,7 @@
       "Children": [
         "ContentRow",
         "StickLayer",
+        "JumpLayer",
         "MenuOverlay"
       ]
     },
@@ -1003,6 +1004,84 @@
         "fill": "touchStickKnob",
         "radius": 24
       }
+    },
+    "JumpLayer": {
+      "Layout": {
+        "type": "Vertical",
+        "alignMain": "End",
+        "alignCross": "End"
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fill"
+        }
+      },
+      "Padding": {
+        "l": 0,
+        "t": 0,
+        "r": "spaceL",
+        "b": "spaceL"
+      },
+      "Children": [
+        "JumpButton"
+      ]
+    },
+    "JumpButton": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 96,
+        "h": 96
+      },
+      "Size": {
+        "w": {
+          "mode": "Fixed"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "accent",
+        "radius": 48
+      },
+      "OnClick": {
+        "actionId": "touch.jump"
+      },
+      "Active": {
+        "value": false
+      },
+      "Children": [
+        "JumpLabel"
+      ]
+    },
+    "JumpLabel": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 96,
+        "h": 96
+      },
+      "Text": {
+        "text": "Jump",
+        "styleId": "panelButton"
+      },
+      "OpticalAlign": {
+        "centerX": true,
+        "centerY": true
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fill"
+        }
+      }
     }
   },
   "states": {
@@ -1042,6 +1121,11 @@
           "Active": {
             "value": false
           }
+        },
+        "JumpLayer": {
+          "Active": {
+            "value": false
+          }
         }
       }
     }
@@ -1057,6 +1141,11 @@
       },
       "nodes": {
         "MoveStick": {
+          "Active": {
+            "value": true
+          }
+        },
+        "JumpButton": {
           "Active": {
             "value": true
           }

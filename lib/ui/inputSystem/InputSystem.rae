@@ -12,6 +12,14 @@
 # the notch only when no UI consumed it and the pointer is not over UI.
 # Reading `Gpu2d.wheelMove()` directly from two systems made one wheel notch
 # both scroll a list and zoom the canvas beside it.
+#
+# Every finger presses buttons, not only the pointer's. SDL makes the pointer
+# of the FIRST finger on a touch screen only, so a second finger (a thumb
+# tapping a button while the other holds a joystick) made no click. Each
+# finger that is not the pointer's fires the OnClick action of the node under
+# it as it comes down, once per press (`sendFingerPresses`); the pointer's own
+# finger clicks through the pointer, on release, as the mouse does, so it is
+# counted once.
 open ui/Ecs
 open ui/Components
 open ui/Layer
@@ -56,6 +64,9 @@ type UiInput {
   touchTargetSize: Float
   # Whether the device has a hovering pointer, kept current every frame
   deviceWatch: DeviceWatch
+  # The finger SDL makes the pointer of (Gpu2d.touchId), -1 while none is
+  # down: its press is the pointer's, not one more finger's
+  pointerFingerId: Int = -1
 }
 
 func createUiInput() pub ret UiInput {
@@ -471,6 +482,7 @@ func updateUiInput(input: mod UiInput, world: mod UiWorld, uiSystems: mod UiSyst
   if pressed {
     input.pressedEntityId = input.hoveredEntityId
   }
+  sendFingerPresses(input: input, world: world, uiSystems: uiSystems)
   if released {
     if isNone(this: input.hoveredEntityId) is false {
       if input.hoveredEntityId is input.pressedEntityId {
@@ -505,6 +517,49 @@ func updateUiInput(input: mod UiInput, world: mod UiWorld, uiSystems: mod UiSyst
     hovered: false
     pressed: true
   )
+}
+
+# Fire the OnClick action under every finger that came down this frame, but
+# the pointer's: the finger that comes down as the pointer is pressed by a
+# touch (SDL makes it of the first finger, whose events come first) is the
+# pointer's, until it is lifted.
+func sendFingerPresses(input: mod UiInput, world: mod UiWorld, uiSystems: view UiSystems) {
+  if input.pointerFingerId >= 0 and fingerDown(id: input.pointerFingerId) is false {
+    input.pointerFingerId = -1
+  }
+  loop var i: Int = 0, i < Gpu2d.touchCount(), ++i {
+    if Gpu2d.touchPressed(index: i) {
+      if input.pointerFingerId < 0 and input.pointer.pressed and input.pointer.kind is InputKind.touch {
+        input.pointerFingerId = Gpu2d.touchId(index: i)
+      } else {
+        let hit: EntityId = uiHitTestFor(
+          world: world
+          uiSystems: uiSystems
+          x: Gpu2d.touchX(index: i)
+          y: Gpu2d.touchY(index: i)
+          kind: InputKind.touch
+          touchTargetSize: input.touchTargetSize
+        )
+        if isNone(this: hit) is false {
+          let click: view OnClick = componentView(this: world.onClicks, entityId: hit)
+          eventSend(
+            this: world.uiActions
+            value: UiAction { entityId: hit, actionId: click.actionId }
+          )
+        }
+      }
+    }
+  }
+}
+
+# Is the finger `id` still on the screen?
+func fingerDown(id: view Int) ret Bool {
+  loop var i: Int = 0, i < Gpu2d.touchCount(), ++i {
+    if Gpu2d.touchId(index: i) is id {
+      ret true
+    }
+  }
+  ret false
 }
 
 # The entity a pointer of `kind` hits: the precise rectangle first, so a

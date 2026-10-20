@@ -2,8 +2,9 @@
 # devices and the UI world state (WalkerInput), the window-geometry and
 # hot-reload persistence (WalkerPersist), and inputUpdate, which turns the
 # devices into an INTENT rather than moving the character directly: the touch
-# stick when active, else WASD/arrows (+ shift = walk), and Space or F to
-# jump. The intent becomes the controlled character's mover input
+# stick when active, else WASD/arrows (+ shift = walk), and Space, F or the
+# scene's Jump button (any finger on it) to jump. The intent becomes the controlled character's
+# mover input
 # (WalkerPhysics driveCharacters), so a remote player's intent can arrive from
 # app3d/NetSeam instead of a device.
 import Sdl3
@@ -61,13 +62,22 @@ func jumpPressed(allowKeys: view Bool) ret Bool {
   ret Sdl3.isKeyPressed(key: Keys.keySpace) or Sdl3.isKeyPressed(key: Keys.keyF)
 }
 
-func inputUpdate(stick: view TouchStickState, allowKeys: view Bool) ret InputIntent {
+# The scene's Jump button (shown by its touch frame), pressed this frame by
+# any finger or a click
+const jumpActionId: String = "touch.jump"
+
+func inputUpdate(
+  stick: view TouchStickState
+  allowKeys: view Bool
+  jumpButton: view Bool
+) ret InputIntent {
+  let jump: Bool = jumpPressed(allowKeys: allowKeys) or jumpButton
   if stick.active {
     ret InputIntent {
       moveX: stick.valueX
       moveY: stick.valueY
       walking: false
-      jump: jumpPressed(allowKeys: allowKeys)
+      jump: jump
       actions: 0
     }
   }
@@ -93,7 +103,7 @@ func inputUpdate(stick: view TouchStickState, allowKeys: view Bool) ret InputInt
     moveX: moveX
     moveY: moveY
     walking: walking
-    jump: jumpPressed(allowKeys: allowKeys)
+    jump: jump
     actions: 0
   }
 }
