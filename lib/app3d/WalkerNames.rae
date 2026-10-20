@@ -11,12 +11,13 @@ open app3d/CharacterController
 open app3d/CharacterBodies
 open app3d/WorldLabel
 open app3d/WalkerWorld
+open app3d/CharacterHeight
 
-# A name is 0.26 m tall, 2.05 m over the feet (over the sample character.s head
-# and a little air), full to 18 m from the eye, gone at 28 m
+# A name is 0.26 m tall, a little over the head (its height,
+# app3d/CharacterHeight), full to 18 m from the eye, gone at 28 m
 const crowdNameHeight: Float = 0.26
 
-const crowdNameOverFeet: Float = 2.05
+const crowdNameOverHead: Float = 0.05
 
 # The crowd member `entityId` gets its name, "Walker <number>"
 func addCrowdNameLabel(world: mod WalkerWorld, entityId: view EntityId, number: view Int) {
@@ -31,7 +32,7 @@ func addCrowdNameLabel(world: mod WalkerWorld, entityId: view EntityId, number: 
 }
 
 # Every name over its character's head, but not the driven one's
-func updateCrowdNameLabels(world: mod WalkerWorld, groundZ: view Float) {
+func updateCrowdNameLabels(world: mod WalkerWorld, groundZ: view Float, modelHeight: view Float) {
   loop var i: Int = 0, i < componentCount(this: world.worldLabels), ++i {
     let entityId: EntityId = componentEntityAt(this: world.worldLabels, i: i)
     if componentHas(this: world.controllers, entityId: entityId) {
@@ -40,7 +41,12 @@ func updateCrowdNameLabels(world: mod WalkerWorld, groundZ: view Float) {
         groundZ: groundZ
       )
       let label: mod WorldLabel = componentMod(this: world.worldLabels, entityId: entityId)
-      label.point = Vec3.create(x: feet.x, y: feet.y, z: feet.z + crowdNameOverFeet)
+      let height: Float = characterHeightOf(
+        heights: world.heights
+        entityId: entityId
+        fallback: modelHeight
+      )
+      label.point = Vec3.create(x: feet.x, y: feet.y, z: feet.z + height + crowdNameOverHead)
       label.opacity = 1.0
       if componentHas(this: world.controlled, entityId: entityId) {
         label.opacity = 0.0

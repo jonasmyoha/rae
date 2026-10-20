@@ -1,0 +1,135 @@
+# app3d/LocomotionClips — the clip machine for every character the app asks
+# it to drive (a LocomotionClip component on it, written each frame): a
+# takeoff cuts into the (running) jump clip; once a jump has played out (or
+# when not jumping) the clip follows its mover's speed on the ground
+# (app3d/ClipChoice: hysteresis, held while blending, never faster than it is
+# trying to go), blending in, longer out of a jump. In the air without a jump
+# clip it holds; lying knocked down there is no clip.
+open ecs/Entity
+open ecs/ComponentTable
+open box3d/ecs/CharacterMover
+open app3d/Characters
+open app3d/CharacterBodies
+open app3d/KnockedDown
+open app3d/ClipChoice
+
+# This frame's say on a character's clip: how fast it is trying to go (a
+# player's clip follows their mover: far up), whether its mover took off;
+# and, written back, the clip it changed to (-1: none)
+type LocomotionClip {
+  intendedSpeed: Float = 1000.0
+  jumpStarted: Bool = false
+  changedTo: Int = -1
+}
+
+# Every character with a LocomotionClip, one frame
+func stepLocomotionClips(
+  locomotion: mod ComponentTable(LocomotionClip)
+  animStates: mod ComponentTable(AnimationState)
+  animTransitions: mod ComponentTable(AnimationTransition)
+  characterSystem: mod CharacterSystem
+  characters: view ComponentTable(CharacterBody)
+  knockedDown: view ComponentTable(KnockedDown)
+  knocks: view ComponentTable(KnockRequest)
+) {
+  loop var i: Int = 0, i < componentCount(this: locomotion), ++i {
+    let entityId: EntityId = componentEntityAt(this: locomotion, i: i)
+    let want: LocomotionClip = componentCopyAtDefault(this: locomotion, i: i)
+    var changedTo: Int = 0 - 1
+    if componentHas(this: animStates, entityId: entityId) and componentHas(
+      this: knockedDown
+      entityId: entityId
+    ) is false and componentHas(this: knocks, entityId: entityId) is false {
+      changedTo = driveLocomotionClip(
+        animStates: animStates
+        animTransitions: animTransitions
+        characterSystem: characterSystem
+        characters: characters
+        entityId: entityId
+        jumpStarted: want.jumpStarted
+        intendedSpeed: want.intendedSpeed
+      )
+    }
+    let written: mod LocomotionClip = componentMod(this: locomotion, entityId: entityId)
+    written.changedTo = changedTo
+  }
+}
+
+# One character's clip machine; the new clip when it changed, else -1
+func driveLocomotionClip(
+  animStates: mod ComponentTable(AnimationState)
+  animTransitions: mod ComponentTable(AnimationTransition)
+  characterSystem: mod CharacterSystem
+  characters: view ComponentTable(CharacterBody)
+  entityId: view EntityId
+  jumpStarted: view Bool
+  intendedSpeed: view Float
+) ret Int {
+  let speed: Float = clipSpeed(
+    actual: characterSpeed(characters: characters, entityId: entityId)
+    intended: intendedSpeed
+  )
+  let grounded: Bool = characterGrounded(characters: characters, entityId: entityId)
+  var clipIndex: Int = componentView(this: animStates, entityId: entityId).clipIndex
+  let animTime: Float = componentView(this: animStates, entityId: entityId).animTime
+  var jumpActive: Bool = jumpClipActive(
+    clipIndex: clipIndex
+    animTime: animTime
+    jumpDuration: characterSystem.jumpClip.duration
+    runningJumpDuration: characterSystem.runningJumpClip.duration
+    exitLeadTime: jumpExitLeadTime
+  )
+  var changed: Bool = false
+  # The clip follows the PHYSICAL jump: it starts when the mover takes off,
+  # never for a press in mid-air the mover ignores
+  if jumpStarted {
+    var jumpClip: Int = ClipKind.jump as Int
+    if speed >= standSpeed {
+      jumpClip = ClipKind.runningJump as Int
+    }
+    animationBeginTransition(
+      animStates: animStates
+      animTransitions: animTransitions
+      characterSystem: characterSystem
+      entityId: entityId
+      clipIndex: jumpClip
+      duration: jumpEntryTransitionDuration
+      holdClipFirstFrame: false
+    )
+    if jumpClip is ClipKind.jump {
+      let anim: mod AnimationState = componentMod(this: animStates, entityId: entityId)
+      anim.animTime = standingJumpTakeoffTime
+    }
+    clipIndex = jumpClip
+    jumpActive = true
+    changed = true
+  }
+  var blending: Bool = false
+  if componentHas(this: animTransitions, entityId: entityId) {
+    blending = transitionActive(
+      transition: componentView(this: animTransitions, entityId: entityId)
+    )
+  }
+  let locomotionClip: Int = nextLocomotionClip(speed: speed, current: clipIndex, blending: blending)
+  if jumpActive is false and grounded and locomotionClip is not clipIndex {
+    var duration: Float = normalClipTransitionDuration
+    if clipIndex is ClipKind.jump or clipIndex is ClipKind.runningJump {
+      duration = jumpExitTransitionDuration
+    }
+    animationBeginTransition(
+      animStates: animStates
+      animTransitions: animTransitions
+      characterSystem: characterSystem
+      entityId: entityId
+      clipIndex: locomotionClip
+      duration: duration
+      holdClipFirstFrame: true
+    )
+    clipIndex = locomotionClip
+    changed = true
+  }
+  if changed {
+    ret clipIndex
+  }
+  ret 0 - 1
+}

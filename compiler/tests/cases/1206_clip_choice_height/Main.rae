@@ -1,0 +1,155 @@
+# app3d/ClipChoice and app3d/CharacterHeight: the locomotion clip follows a
+# mover's speed without flicking (hysteresis past each threshold, no new
+# clip while the last still blends in, never faster than the character is
+# trying to go); a character of another height is the shared model scaled
+# about its feet, its strides played faster or slower, its mover's top at
+# its height.
+import Math
+import Vec3
+open Math3d
+open box3d/ecs/CharacterMover
+open app3d/Characters
+open app3d/ClipChoice
+open app3d/CharacterHeight
+
+func check(condition: view Bool, message: view String) {
+  if condition {
+    log("ok   {message}")
+  } else {
+    log("FAIL {message}")
+  }
+}
+
+func near(a: view Float, b: view Float) ret Bool {
+  ret Math.abs(value: a - b) < 0.0001
+}
+
+func main() ret Int {
+  let idle: Int = ClipKind.idle as Int
+  let walk: Int = ClipKind.walk as Int
+  let walkFast: Int = ClipKind.walkFast as Int
+  let run: Int = ClipKind.run as Int
+  let jump: Int = ClipKind.jump as Int
+  # ----- the clip a speed implies ---------------------------------------------
+  check(condition: locomotionClipFor(speed: 0.0) is idle, message: "Standing: idle")
+  check(condition: locomotionClipFor(speed: 1.2) is walk, message: "A walk: walk")
+  check(condition: locomotionClipFor(speed: 3.0) is walkFast, message: "A jog: fast walk")
+  check(condition: locomotionClipFor(speed: 8.0) is run, message: "A sprint: run")
+  # ----- a wobble on a threshold does not flip it -----------------------------
+  check(
+    condition: locomotionClipFrom(speed: standSpeed - 0.05, current: walk) is walk
+    message: "Just under the stand speed, someone walking keeps walking"
+  )
+  check(
+    condition: locomotionClipFrom(speed: 0.05, current: walk) is idle
+    message: "Clearly stopped, it stands"
+  )
+  check(
+    condition: locomotionClipFrom(speed: standSpeed + 0.05, current: idle) is idle
+    message: "Just over the stand speed, a stander keeps standing"
+  )
+  # ----- while the last change still blends in, no new one --------------------
+  check(
+    condition: nextLocomotionClip(speed: 0.05, current: walk, blending: true) is walk
+    message: "Mid-blend into a walk, a stop waits for the blend"
+  )
+  check(
+    condition: nextLocomotionClip(speed: 0.05, current: walk, blending: false) is idle
+    message: "Blend done, the stop shows"
+  )
+  check(
+    condition: nextLocomotionClip(speed: 8.0, current: jump, blending: true) is run
+    message: "Out of a jump the clip follows the speed at once"
+  )
+  # A speed that flips every frame between a stand and a walk changes the clip at
+  # most once per blend
+  var clip: Int = idle
+  var changes: Int = 0
+  var sinceChange: Float = 1.0
+  loop var i: Int = 0, i < 120, ++i {
+    var speed: Float = 0.0
+    if i % 2 is 0 {
+      speed = 1.0
+    }
+    let next: Int = nextLocomotionClip(
+      speed: speed
+      current: clip
+      blending: sinceChange < normalClipTransitionDuration
+    )
+    if next is not clip {
+      changes = changes + 1
+      sinceChange = 0.0
+    }
+    clip = next
+    sinceChange = sinceChange + 1.0 / 60.0
+  }
+  check(
+    condition: changes <= (2.0 / normalClipTransitionDuration).toInt() + 1
+    message: "A speed flipping every frame changes the clip at most once per blend ({changes} in 2 s)"
+  )
+  # ----- a clip never shows faster than the character is trying to go ---------
+  check(
+    condition: locomotionClipFor(speed: clipSpeed(actual: 3.0, intended: 1.2)) is walk
+    message: "Someone walking shoved to 3 m/s still walks"
+  )
+  check(
+    condition: locomotionClipFor(speed: clipSpeed(actual: 1.0, intended: 0.0)) is idle
+    message: "Someone standing still and bumped stays standing"
+  )
+  check(
+    condition: locomotionClipFor(speed: clipSpeed(actual: 0.1, intended: 8.0)) is idle
+    message: "A runner held up (pushing a hurdle) shows how fast it really goes"
+  )
+  check(
+    condition: locomotionClipFor(speed: clipSpeed(actual: 8.0, intended: 8.0)) is run
+    message: "A runner running runs"
+  )
+  # ----- heights ---------------------------------------------------------------
+  let groundZ: Float = 3.0
+  let base: Mat4 = mat4Mul(a: mat4Translate(x: 0.0, y: 0.0, z: groundZ), b: mat4Scale(s: 0.01))
+  let half: Mat4 = scaledPartModel(basePartModel: base, groundZ: groundZ, scale: 0.5)
+  let feet: Vec3 = mat4TransformPoint(m: half, p: Vec3.create(x: 0.0, y: 0.0, z: 0.0))
+  let head: Vec3 = mat4TransformPoint(m: half, p: Vec3.create(x: 0.0, y: 0.0, z: 200.0))
+  check(
+    condition: near(a: feet.z, b: groundZ) and near(a: head.z, b: groundZ + 1.0)
+    message: "Scaled to half about its feet, it still stands on the ground, half as tall"
+  )
+  check(
+    condition: near(
+      a: strideClipRate(
+        clipIndex: run
+        rate: 2.0
+        height: 1.6
+        tunedHeight: 2.0
+      )
+      b: 2.5
+    ) and near(
+      a: strideClipRate(
+        clipIndex: walk
+        rate: 1.0
+        height: 2.0
+        tunedHeight: 2.0
+      )
+      b: 1.0
+    ) and strideClipRate(
+      clipIndex: idle
+      rate: 1.0
+      height: 1.0
+      tunedHeight: 2.0
+    ) is 1.0
+    message: "A shorter character's strides play faster; at the tuned height as tuned; idle as it is"
+  )
+  let sample: MoverSize = sampleMoverSize()
+  let tuned: MoverSize = moverSizeForHeight(height: 2.0, tunedHeight: 2.0)
+  let short: MoverSize = moverSizeForHeight(height: 1.5, tunedHeight: 2.0)
+  let sampleTop: Float = sample.restLength + 2.0 * sample.halfHeight + sample.radius
+  let shortTop: Float = short.restLength + 2.0 * short.halfHeight + short.radius
+  check(
+    condition: near(a: tuned.halfHeight, b: sample.halfHeight) and near(
+      a: shortTop
+      b: sampleTop * 0.75
+    ) and short.radius is sample.radius and short.restLength is sample.restLength
+    message: "At the tuned height the sample's mover; shorter, its top in proportion, its lower sphere the same"
+  )
+  ret 0
+}

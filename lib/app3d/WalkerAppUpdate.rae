@@ -72,6 +72,7 @@ open app3d/NetSeam
 open app3d/CharacterBodies
 open app3d/CameraKnockdownFollow
 open app3d/WalkerKnockdown
+open app3d/LocomotionClips
 
 # The walker app: the system list (WalkerApp.rae's header has the convention)
 type WalkerApp {
@@ -246,16 +247,12 @@ func updateWalkerApp(app: mod WalkerApp) {
     entityId: controlledEntityId
   )
   characterMoved = physicsSteps > 0 and (after.position.x is not before.x or after.position.y is not before.y or after.position.z is not before.z or after.heading is not headingBefore)
-  let grounded: Bool = characterGrounded(
-    characters: app.physicsSystem.characters
-    entityId: controlledEntityId
-  )
-  let controlledClip: Int = moverClipFor(
-    speed: characterSpeed(characters: app.physicsSystem.characters, entityId: controlledEntityId)
-    grounded: grounded
-  )
   # The crowd's names over their heads (app3d/WalkerNames)
-  updateCrowdNameLabels(world: app.world, groundZ: app.characterSystem.groundZ)
+  updateCrowdNameLabels(
+    world: app.world
+    groundZ: app.characterSystem.groundZ
+    modelHeight: app.characterSystem.modelHeight
+  )
   # Running into someone at a run trips the driven character into a ragdoll;
   # whoever is down gets up where they landed (app3d/WalkerKnockdown)
   walkerKnockdownUpdate(
@@ -278,23 +275,44 @@ func updateWalkerApp(app: mod WalkerApp) {
     app.persist.stateDirty = true
   }
   if app.cameraSystem.rig.mode is CameraRigMode.character {
-    # The controlled character's clip follows its mover, blending in
-    # (app3d/Characters): the same for the hero and any crowd member
-    if controlledClip is not walkerClipOf(world: app.world, entityId: controlledEntityId) {
-      animationBeginTransition(
-        animStates: app.world.animStates
-        animTransitions: app.world.animTransitions
-        characterSystem: app.characterSystem
-        entityId: controlledEntityId
-        clipIndex: controlledClip
-        duration: clipTransitionDuration
-        holdClipFirstFrame: false
+    # The controlled character's clip follows its mover, by Rae's clip
+    # machine (app3d/LocomotionClips: a takeoff into the jump clip, the speed
+    # with hysteresis, held while a change blends in): the same for the hero
+    # and any crowd member
+    var tookOff: Bool = false
+    if componentHas(this: app.physicsSystem.moverDrives, entityId: controlledEntityId) {
+      tookOff = componentView(this: app.physicsSystem.moverDrives, entityId: controlledEntityId).tookOff
+    }
+    loop componentCount(this: app.world.locomotionClips) > 0 {
+      componentRemove(
+        this: app.world.locomotionClips
+        entityId: componentEntityAt(this: app.world.locomotionClips, i: 0)
       )
+    }
+    componentSet(
+      this: app.world.locomotionClips
+      entityId: controlledEntityId
+      data: LocomotionClip { jumpStarted: tookOff }
+    )
+    stepLocomotionClips(
+      locomotion: app.world.locomotionClips
+      animStates: app.world.animStates
+      animTransitions: app.world.animTransitions
+      characterSystem: app.characterSystem
+      characters: app.physicsSystem.characters
+      knockedDown: app.physicsSystem.knockedDown
+      knocks: app.physicsSystem.knocks
+    )
+    let changedTo: Int = componentView(
+      this: app.world.locomotionClips
+      entityId: controlledEntityId
+    ).changedTo
+    if changedTo >= 0 {
       setPanelSelection(
         panel: app.inputSystem.clipPanel
         world: app.inputSystem.world
         group: 1
-        id: (controlledClip as ClipKind).toString()
+        id: (changedTo as ClipKind).toString()
       )
     }
     let focusPos: Vec3 = controlledPosition(
@@ -460,9 +478,10 @@ func updateWalkerCharacters(
 ) {
   loop var i: Int = 0, i < componentCount(this: world.characterModels), ++i {
     let entityId: EntityId = componentEntityAt(this: world.characterModels, i: i)
-    let model: Mat4 = walkerWorldModel(
-      baseModel: characterSystem.basePartModel
-      controller: controllerOf(controllers: world.controllers, entityId: entityId)
+    let model: Mat4 = walkerCharacterModel(
+      world: world
+      characterSystem: characterSystem
+      entityId: entityId
     )
     let models: mod CharacterModel = componentMod(this: world.characterModels, entityId: entityId)
     models.model = model

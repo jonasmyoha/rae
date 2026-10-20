@@ -25,6 +25,8 @@ open app3d/IslandForest
 open app3d/WideForest
 open app3d/CharacterBodies
 open app3d/WalkerNames
+open box3d/ecs/CharacterMover
+open app3d/CharacterHeight
 
 # The world the walker is on: the small island in the sea (136, 137), or a
 # wide forest world with lakes and no island (143)
@@ -339,7 +341,8 @@ func createWalkerAppPhysics(
     log("[physics] Box3D refused the island height field")
   }
   addCharacterBody(characters: physicsSystem.characters, entityId: heroEntityId, feet: heroFeet)
-  loop let crowdEntityId: view EntityId in crowdEntities {
+  loop var crowdIndex: Int = 0, crowdIndex < crowdEntities.length, ++crowdIndex {
+    let crowdEntityId: EntityId = crowdEntities.copyAtDefault(index: crowdIndex)
     addCharacterBody(
       characters: physicsSystem.characters
       entityId: crowdEntityId
@@ -347,6 +350,22 @@ func createWalkerAppPhysics(
         controller: controllerOf(controllers: world.controllers, entityId: crowdEntityId)
         groundZ: groundZ
       )
+    )
+    # Characters of different heights on the one model (app3d/CharacterHeight):
+    # its model, clips and mover follow it
+    let height: Float = walkerCrowdHeight(index: crowdIndex)
+    componentSet(
+      this: world.heights
+      entityId: crowdEntityId
+      data: CharacterHeight { height: height }
+    )
+    let body: mod CharacterBody = componentMod(
+      this: physicsSystem.characters
+      entityId: crowdEntityId
+    )
+    resizeCharacterMover(
+      mover: body.mover
+      size: moverSizeForHeight(height: height, tunedHeight: 2.0)
     )
   }
   let cubeCount: Int = spawnCubeStacks(
@@ -418,4 +437,9 @@ func addWalkerCharacterComponents(
     entityId: entityId
     data: CharacterModel { model: model, prevModel: model }
   )
+}
+
+# The crowd's heights (m): 1.55 to 2.05 in turn, the hero the model's 2.0
+func walkerCrowdHeight(index: view Int) ret Float {
+  ret 1.55 + ((index * 3) % 6).toFloat() * 0.1
 }

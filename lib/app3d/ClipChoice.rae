@@ -1,0 +1,96 @@
+# app3d/ClipChoice — which locomotion clip a character plays, from how fast
+# its mover goes: idle / walk / walkFast / run by speed (app3d/Characters'
+# thresholds), with some hysteresis past each threshold, no new clip while
+# the last change still blends in, and never faster than the character is
+# trying to go; so however its speed wobbles (a turn, a shove, a stop-start
+# at a target), a character never flicks between clips. And the jump clips'
+# timings. Pure, so tested in a fixture; app3d/LocomotionClips runs it.
+import Math
+open app3d/Characters
+
+# How long a clip change blends in (s); a walk or run clip is held that long
+const normalClipTransitionDuration: Float = 0.28
+
+# Into a jump at once, out of one over this long (s), starting this long
+# before the jump clip ends
+const jumpEntryTransitionDuration: Float = 0.0
+
+const jumpExitTransitionDuration: Float = 0.28
+
+const jumpExitLeadTime: Float = 0.25
+
+# The standing jump clip crouches for its first half second before it leaves
+# the ground; the physical jump happens on the press, so the clip starts just
+# before its takeoff
+const standingJumpTakeoffTime: Float = 0.45
+
+# How far past a speed threshold (m/s) a character must go before its clip
+# changes
+const clipSpeedHysteresis: Float = 0.15
+
+# A driven character's clip may show at most this much faster than it is
+# trying to go (m/s)
+const clipIntentMargin: Float = 0.2
+
+# The locomotion clip a mover's horizontal `speed` implies: idle when it
+# stands, walk / walkFast / run by speed, so a character pushing against
+# something reads as pushing, not running in place
+func locomotionClipFor(speed: view Float) ret Int {
+  if speed < standSpeed {
+    ret ClipKind.idle as Int
+  }
+  if speed < walkSpeedLimit {
+    ret ClipKind.walk as Int
+  }
+  if speed < walkFastSpeedLimit {
+    ret ClipKind.walkFast as Int
+  }
+  ret ClipKind.run as Int
+}
+
+# The locomotion clip for `speed` when `current` is playing: a change only
+# once the speed is clear of the threshold. A jump clip is not held.
+func locomotionClipFrom(speed: view Float, current: view Int) ret Int {
+  let clip: Int = locomotionClipFor(speed: speed)
+  if current > (ClipKind.run as Int) or clip is current {
+    ret clip
+  }
+  if clip > current {
+    ret Math.max(a: current, b: locomotionClipFor(speed: speed - clipSpeedHysteresis))
+  }
+  ret Math.min(a: current, b: locomotionClipFor(speed: speed + clipSpeedHysteresis))
+}
+
+# The locomotion clip a character with `current` playing moves on to: none
+# while the last change is still `blending` in, else locomotionClipFrom. A
+# jump clip is left at once.
+func nextLocomotionClip(speed: view Float, current: view Int, blending: view Bool) ret Int {
+  if blending and current <= (ClipKind.run as Int) {
+    ret current
+  }
+  ret locomotionClipFrom(speed: speed, current: current)
+}
+
+# The speed a character's clip is chosen from: how fast it goes, but never
+# more than it is trying to go (`intended`): a shove can slow its clip but
+# not make someone walking look like they run
+func clipSpeed(actual: view Float, intended: view Float) ret Float {
+  ret Math.min(a: actual, b: intended + clipIntentMargin)
+}
+
+# Is a jump clip still playing (short of its exit)?
+func jumpClipActive(
+  clipIndex: view Int
+  animTime: view Float
+  jumpDuration: view Float
+  runningJumpDuration: view Float
+  exitLeadTime: view Float
+) ret Bool {
+  if clipIndex is ClipKind.jump {
+    ret animTime < jumpDuration - exitLeadTime
+  }
+  if clipIndex is ClipKind.runningJump {
+    ret animTime < runningJumpDuration - exitLeadTime
+  }
+  ret false
+}

@@ -90,6 +90,9 @@ type WalkerPhysics {
   # they get up (app3d/KnockedDown; app3d/WalkerKnockdown)
   ragdolls: ComponentTable(Ragdoll)
   knockedDown: ComponentTable(KnockedDown)
+  # Knocked over this step, the ragdoll not made yet (the walker trips
+  # straight into one, so it stays empty)
+  knocks: ComponentTable(KnockRequest)
   ragdollRig: RagdollRig
   moverLimits: ComponentTable(MoverSpeedLimit)
   moverSteps: ComponentTable(MoverStep)
@@ -136,6 +139,7 @@ func createWalkerPhysics(
     moverParked: ComponentTable.create(MoverParked)
     ragdolls: ComponentTable.create(Ragdoll)
     knockedDown: ComponentTable.create(KnockedDown)
+    knocks: ComponentTable.create(KnockRequest)
     ragdollRig: createRagdollRig(
       skeleton: emptySkeleton()
       bones: mixamoRagdollBones(prefix: "mixamorig:")
