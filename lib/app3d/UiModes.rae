@@ -109,15 +109,40 @@ func uiModeStates(editor: view Bool, short: view Bool) ret List(String) {
   ret states
 }
 
-# Apply the scene's frames (for the main pointer) and its states (the mode,
+# The main pointer the frames are picked for: a finger while a desktop
+# simulates a phone (the "..." menu's "Simulate mobile phone"), so its
+# touch-only controls show; else the device's own (a phone, or a tablet with
+# a trackpad, keeps what it has)
+func framePointerFor(
+  pointer: view Pointer
+  simulateMobile: view Bool
+  mobileOs: view Bool
+) ret Pointer {
+  if simulateMobile and mobileOs is false {
+    ret Pointer.coarse
+  }
+  ret pointer
+}
+
+# This app's frame pointer now
+func uiModesPointer(menu: view ModeMenuState) ret Pointer {
+  ret framePointerFor(
+    pointer: primaryPointer()
+    simulateMobile: menu.simulateMobile
+    mobileOs: Target.isMobileOs
+  )
+}
+
+# Apply the scene's frames (for the frame pointer) and its states (the mode,
 # the window shape).
 func applyUiModes(world: mod UiWorld, uiSystems: mod UiSystems, uiModes: view UiModes) {
-  applySceneFramesToPageWithStates(
+  applySceneFramesToPageWithStatesFor(
     world: world
     uiSystems: uiSystems
     scene: uiModes.scene
     pageId: ""
     windowPtW: world.layoutW
+    pointer: uiModes.pointer
     forcedFrameId: Sys.getEnv(name: "RAE_UI_FRAME")
     activeStates: uiModeStates(editor: uiModes.editor, short: uiModes.short)
   )
@@ -127,13 +152,14 @@ func applyUiModes(world: mod UiWorld, uiSystems: mod UiSystems, uiModes: view Ui
 # under RAE_UI_MODE=editor), the main pointer, the window's shape.
 func createUiModes(world: mod UiWorld, uiSystems: mod UiSystems, path: view String) ret UiModes {
   let scene: Scene = loadSceneFile(path: path)
+  let modeMenu: ModeMenuState = createModeMenuState()
   let uiModes: UiModes = {
     scene: own scene
-    pointer: primaryPointer()
+    pointer: uiModesPointer(menu: modeMenu)
     editor: Sys.getEnv(name: "RAE_UI_MODE") is "editor"
     short: isShortWindowHeight(height: world.layoutH)
     generation: 1
-    modeMenu: createModeMenuState()
+    modeMenu: modeMenu
   }
   applyUiModes(world: world, uiSystems: uiSystems, uiModes: uiModes)
   ret uiModes
@@ -151,11 +177,12 @@ func setUiModeEditor(
   applyUiModes(world: world, uiSystems: uiSystems, uiModes: uiModes)
 }
 
-# The main pointer changed (a trackpad case on an iPad), or the window turned
-# short or tall (a phone rotated): apply the frames and states again. True when
-# it did (the caller lays the UI out again).
+# The frame pointer changed (a trackpad case on an iPad, "Simulate mobile
+# phone" switched), or the window turned short or tall (a phone rotated):
+# apply the frames and states again. True when it did (the caller lays the UI
+# out again).
 func updateUiModes(world: mod UiWorld, uiSystems: mod UiSystems, uiModes: mod UiModes) ret Bool {
-  let pointer: Pointer = primaryPointer()
+  let pointer: Pointer = uiModesPointer(menu: uiModes.modeMenu)
   let short: Bool = isShortWindowHeight(height: world.layoutH)
   if pointer is uiModes.pointer and short is uiModes.short {
     ret false

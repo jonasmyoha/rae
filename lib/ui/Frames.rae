@@ -810,6 +810,30 @@ func applySceneFramesToPageWithStates(
   forcedFrameId: view String
   activeStates: view List(String)
 ) ret opt Int {
+  ret applySceneFramesToPageWithStatesFor(
+    world: world
+    uiSystems: uiSystems
+    scene: scene
+    pageId: pageId
+    windowPtW: windowPtW
+    pointer: primaryPointer()
+    forcedFrameId: forcedFrameId
+    activeStates: activeStates
+  )
+}
+
+# The same, with the frames picked for `pointer` rather than the device's
+# main pointer (an app simulating a phone on a desktop picks the finger's)
+func applySceneFramesToPageWithStatesFor(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scene: view Scene
+  pageId: view String
+  windowPtW: view Float
+  pointer: view Pointer
+  forcedFrameId: view String
+  activeStates: view List(String)
+) ret opt Int {
   let frames: FrameSet = parseFrames(scene: scene)
   let states: StateSet = parseStates(scene: scene)
   if frames.count is 0 {
@@ -817,9 +841,10 @@ func applySceneFramesToPageWithStates(
       ret none
     }
   }
-  let idx: opt Int = selectFrameIndex(
+  let idx: opt Int = selectFrameIndexFor(
     frames: frames
     windowPtW: windowPtW
+    pointer: pointer
     forcedFrameId: forcedFrameId
   )
   applyFrameToPage(
