@@ -205,7 +205,8 @@ func animationBeginTransition(
 }
 
 # One frame of a character's clock: its clip `rate` times its playbackScale
-# and the global `speed` (while `playing`), and its transition's blend
+# and the global `speed` (while `playing`; not on the update a transition
+# asked to hold the new clip's first frame), and its transition's blend
 func stepCharacterClock(
   anim: mod AnimationState
   transition: mod AnimationTransition
@@ -214,9 +215,10 @@ func stepCharacterClock(
   rate: view Float
   deltaTime: view Float
 ) {
-  if playing {
+  if playing and transition.holdClipFirstFrame is false {
     anim.animTime = anim.animTime + deltaTime * speed * rate * anim.playbackScale
   }
+  transition.holdClipFirstFrame = false
   if transitionActive(transition: transition) {
     transition.elapsed = transition.elapsed + deltaTime
   }
