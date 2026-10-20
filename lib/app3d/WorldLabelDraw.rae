@@ -1,0 +1,99 @@
+# app3d/WorldLabelDraw — the system that draws every WorldLabel entity
+# (app3d/WorldLabel) in the 2D overlay pass, from the camera's eye: centred
+# on where its point lands, in the HUD's SDF font, outlined and shadowed in
+# dark so it reads over any ground. An app calls drawWorldLabels once a frame
+# where it draws its HUD, under it.
+import Math
+import Vec3
+import Gpu2dText
+open Scene3d
+open Gpu2dCanvas
+open SdfText
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Transform
+open app3d/UiShell
+open app3d/WorldLabel
+
+# 0xAARRGGBB of `rgb` at `alpha` times `opacity` (0..1)
+func labelColor(rgb: view Int, alpha: view Float, opacity: view Float) ret Int {
+  let a: Int = Math.min(a: Math.max(a: (alpha * opacity * 255.0).toInt(), b: 0), b: 255)
+  ret (a shl 24) bitor rgb
+}
+
+# Draw `text` centred on world point `at` for `label`'s sizes and colour
+func drawLabelAt(
+  canvas: mod Gpu2dCanvas
+  font: view SdfFont
+  camera: view Camera3d
+  label: view WorldLabel
+  at: view Vec3
+) {
+  let alpha: Float = labelAlpha(
+    label: label
+    distance: Vec3.vlen(a: Vec3.vsub(a: at, b: camera.position))
+  )
+  if alpha <= 0.01 or label.text.length() is 0 {
+    ret
+  }
+  let width: Float = windowExtentW()
+  let height: Float = windowExtentH()
+  if let point: ScreenPoint = projectToScreen(
+    eye: camera.position
+    target: camera.target
+    fovYDeg: camera.fovYDeg
+    aspect: width / Math.max(a: height, b: 1.0)
+    point: at
+  ) {
+    if onScreen(point: point, margin: 0.1) is false {
+      ret
+    }
+    let size: Float = labelPixelSize(
+      worldHeight: label.height
+      depth: point.depth
+      fovYDeg: camera.fovYDeg
+      screenHeight: height
+      smallest: label.smallest
+      largest: label.largest
+    )
+    let textWidth: Float = Gpu2dText.measureText(font: font, text: label.text, sizePx: size)
+    let advance: Float = Gpu2dText.drawTextEx(
+      canvas: canvas
+      font: font
+      text: label.text
+      x: point.x * width - textWidth * 0.5
+      y: point.y * height
+      sizePx: size
+      color: labelColor(rgb: label.color, alpha: alpha, opacity: 1.0)
+      outlineColor: labelColor(rgb: 1118481, alpha: alpha, opacity: 0.85)
+      outlineWidth: Math.max(a: 1.5, b: size * 0.08)
+      shadowColor: labelColor(rgb: 0, alpha: alpha, opacity: 0.45)
+      shadowOffX: 0.0
+      shadowOffY: Math.max(a: 1.5, b: size * 0.08)
+      shadowSoftness: 3.0
+    )
+  }
+}
+
+# Every label, in the order of its table
+func drawWorldLabels(
+  labels: view ComponentTable(WorldLabel)
+  transforms: view ComponentTable(Transform3D)
+  camera: view Camera3d
+  canvas: mod Gpu2dCanvas
+  font: view SdfFont
+) {
+  loop var i: Int = 0, i < componentCount(this: labels), ++i {
+    let entityId: EntityId = componentEntityAt(this: labels, i: i)
+    let label: view WorldLabel = componentView(this: labels, entityId: entityId)
+    if let at: Vec3 = labelWorldPoint(label: label, transforms: transforms) {
+      drawLabelAt(
+        canvas: canvas
+        font: font
+        camera: camera
+        label: label
+        at: at
+      )
+    }
+  }
+}

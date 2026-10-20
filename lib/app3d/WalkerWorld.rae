@@ -28,6 +28,7 @@ open app3d/PlayerRoster
 open app3d/WalkerTerrain
 open app3d/WalkerPhysics
 open app3d/NetSeam
+open app3d/WorldLabel
 
 type WalkerWorld {
   allocator: EntityAllocator
@@ -64,6 +65,8 @@ type WalkerWorld {
   # tables (rigid bodies, colliders, characters, cubes) are WalkerPhysics'
   # own; their poses are in `transforms` here.
   netPlayers: ComponentTable(NetPlayer)
+  # Names over the crowd (app3d/WorldLabel; app3d/WalkerNames writes them)
+  worldLabels: ComponentTable(WorldLabel)
 }
 
 func createWalkerWorld() ret WalkerWorld {
@@ -84,6 +87,7 @@ func createWalkerWorld() ret WalkerWorld {
     childrens: ComponentTable.create(Children)
     hierarchyOrder: createHierarchyOrder()
     netPlayers: ComponentTable.create(NetPlayer)
+    worldLabels: ComponentTable.create(WorldLabel)
   }
 }
 
