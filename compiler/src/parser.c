@@ -967,7 +967,7 @@ static AstExpr* finish_call(Parser* parser, AstExpr* callee, const Token* start_
     // are spelled with the param's actual name (`T:`) or positionally,
     // not via a magic `type:` keyword.
     TokenKind k = parser_peek(parser)->kind;
-    bool is_named_arg = (k == TOK_IDENT) && parser_check_at(parser, 1, TOK_COLON);
+    bool is_named_arg = is_ident_like(k) && parser_check_at(parser, 1, TOK_COLON);
 
     if (arg_idx == 0 && !is_named_arg) {
         // Positional first argument
@@ -1625,7 +1625,7 @@ static AstExpr* parse_postfix(Parser* parser) {
             // arguments are spelled with the param's actual name (`T:`)
             // or positionally, not via a magic `type:` keyword.
             TokenKind k = parser_peek(parser)->kind;
-            bool is_named_arg = (k == TOK_IDENT) && parser_check_at(parser, 1, TOK_COLON);
+            bool is_named_arg = is_ident_like(k) && parser_check_at(parser, 1, TOK_COLON);
 
             if (arg_idx == 0 && !is_named_arg) {
                 // Positional first argument

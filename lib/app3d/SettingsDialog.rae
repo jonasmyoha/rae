@@ -837,7 +837,7 @@ func settingsNightBlend(settingsState: view SettingsState) ret Float {
     dayOfYear: settingsState.timeOfDay.dayOfYear
     latitudeDeg: settingsState.latitude
   )
-  let t: Float = Math.min(a: Math.max(a: -sunUp / 0.06, b: 0.0), b: 1.0)
+  let t: Float = Math.clamp(val: -sunUp / 0.06, low: 0.0, high: 1.0)
   ret t * t * (3.0 - 2.0 * t)
 }
 
@@ -881,7 +881,7 @@ func settingsAddMoon(settingsState: view SettingsState, sky: mod Sky, day: view 
   }
   let moon: MoonState = settingsMoon(settingsState: settingsState)
   let level: Float = moonLightLevel(moon: moon)
-  let night: Float = 1.0 - Math.min(a: Math.max(a: day, b: 0.0), b: 1.0)
+  let night: Float = 1.0 - Math.clamp(val: day, low: 0.0, high: 1.0)
   let ambient: Float = (0.02 + 0.10 * level) * night
   sky.moonDir = moon.direction
   sky.moonAngularRadius = moonAngularRadius
