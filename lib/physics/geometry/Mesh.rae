@@ -36,7 +36,7 @@ const binCount: Int = 8
 
 const desiredTrianglesPerLeaf: Int = 4
 
-const leafNode: Int = 3
+const meshLeafNode: Int = 3
 
 const maximumTrianglesPerLeaf: Int = 8
 
@@ -126,7 +126,7 @@ func componentOf(vector: view Vec3, axis: view Int) ret Float {
 }
 
 func isLeafNode(node: view MeshNode) ret Bool {
-  ret node.kind is leafNode
+  ret node.kind is meshLeafNode
 }
 
 # The cell key of the welding hash: 64-bit, wrapping, as Box3D computes it.
@@ -453,7 +453,7 @@ func addLeafNode(
   nodes.add(value: MeshNode {
     lowerBound: bounds.lowerBound
     upperBound: bounds.upperBound
-    kind: leafNode
+    kind: meshLeafNode
     count: count
     triangleOffset: offset
   })

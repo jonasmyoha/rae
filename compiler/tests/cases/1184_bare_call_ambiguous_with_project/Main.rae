@@ -1,0 +1,11 @@
+# A bare name resolves in this file's module and the modules it OPENS, and
+# when two of them declare it the use is ambiguous. This project declares
+# isShortWindowHeight with the same parameters as lib/app3d/UiModes, which
+# this file opens, so the bare call is an error naming both (it used to pick
+# the project's silently). Importing UiModes instead keeps the bare name the
+# project's (case 1168).
+open app3d/UiModes
+
+func main() {
+  log("{isShortWindowHeight(height: 100.0)}")
+}

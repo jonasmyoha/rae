@@ -85,6 +85,19 @@ the types the compiler itself understands (`List`); collections = pure-Rae
 libraries over `List`/`Buffer` that you import. See `docs/collections.md`.
 
 
+**A bare name that two modules give is ambiguous (compiler 0.2.98).** A bare
+name resolves in the file's own module and the modules visible bare there:
+the ones it opens, the project, the prelude. When two of them declare it —
+a const, or a function with the same name, labels and parameter types — the
+use is an error that names both modules and the fix (open only one, or
+qualify it: `UiModes.isShortWindowHeight(...)`). This holds for two opened
+lib modules, for a project name against an opened lib name, and for a lib
+module against the prelude. A name declared in the file itself wins.
+Overloads stay legal: other labels or other parameter types, in one module or
+several (`drop(this: mod Event)` beside `drop(this: mod Queue)`). An imported
+(not opened) module never takes part: there the bare name is the project's
+and `Module.name` the lib's (fixtures 1184-1187, 966, 1168).
+
 **Picking one of two project modules.** When two project files declare the
 same name, a bare read of it is ambiguous; a file picks one by opening it by
 its package path, relative to the project: `open alpha/Values` (2026-10-07,

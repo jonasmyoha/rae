@@ -78,7 +78,7 @@ func loadSkinnedPrimitiveSmoothed(
   loop i < base.vertCount {
     var c: Int = 0
     loop c < 8 {
-      verts.add(value: floatAt(list: base.verts, index: i * 8 + c))
+      verts.add(value: base.verts.copyAtFallback(index: i * 8 + c, fallback: 0.0))
       c = c + 1
     }
     if hasSkin {
@@ -93,7 +93,7 @@ func loadSkinnedPrimitiveSmoothed(
       var sum: Float = 0.0
       var w: Int = 0
       loop w < 4 {
-        sum = sum + floatAt(list: weights, index: i * 4 + w)
+        sum = sum + weights.copyAtFallback(index: i * 4 + w, fallback: 0.0)
         w = w + 1
       }
       if sum <= 0.0 {
@@ -101,7 +101,7 @@ func loadSkinnedPrimitiveSmoothed(
       }
       w = 0
       loop w < 4 {
-        verts.add(value: floatAt(list: weights, index: i * 4 + w) / sum)
+        verts.add(value: weights.copyAtFallback(index: i * 4 + w, fallback: 0.0) / sum)
         w = w + 1
       }
     } else {
