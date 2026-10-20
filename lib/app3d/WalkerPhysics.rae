@@ -45,6 +45,7 @@ open box3d/ecs/NatureBodies
 open box3d/Box3d
 open box3d/Box3dTypes
 open app3d/CharacterBodies
+open app3d/CharacterMovers
 
 const walkerPhysicsStep: Float = 1.0 / 60.0
 
@@ -78,6 +79,11 @@ type WalkerPhysics {
   rigidBodies: ComponentTable(RigidBody)
   colliders: ComponentTable(Collider)
   characters: ComponentTable(CharacterBody)
+  # The mover system's components (app3d/CharacterMovers)
+  moverDrives: ComponentTable(MoverDrive)
+  moverParked: ComponentTable(MoverParked)
+  moverLimits: ComponentTable(MoverSpeedLimit)
+  moverSteps: ComponentTable(MoverStep)
   cubes: ComponentTable(PhysicsCube)
   # The ground height field now (followGround): its shape, the point it is
   # centred on, and how many times it has been made
@@ -117,6 +123,10 @@ func createWalkerPhysics(
     rigidBodies: ComponentTable.create(RigidBody)
     colliders: ComponentTable.create(Collider)
     characters: ComponentTable.create(CharacterBody)
+    moverDrives: ComponentTable.create(MoverDrive)
+    moverParked: ComponentTable.create(MoverParked)
+    moverLimits: ComponentTable.create(MoverSpeedLimit)
+    moverSteps: ComponentTable.create(MoverStep)
     cubes: ComponentTable.create(PhysicsCube)
     groundShape: nullShapeId()
     groundCentre: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
@@ -203,109 +213,6 @@ func followGround(physicsSystem: mod WalkerPhysics, position: view Vec3) ret Boo
     ret false
   }
   ret addGroundAround(physicsSystem: physicsSystem, centre: position)
-}
-
-# The input for the coming fixed steps. Every character stands still, except
-# `controlledEntityId`, which gets a throttle along the camera's forward and
-# right, scaled so a full stick moves at its controller's run speed (walk
-# speed with the walk modifier), and the jump request. The mover's own speed
-# limit is lib/box3d/ecs's maxSpeed, so the throttle is a fraction of it.
-func driveCharacters(
-  physicsSystem: mod WalkerPhysics
-  controlledEntityId: view EntityId
-  controller: view ThirdPersonController
-  intent: view InputIntent
-  cameraYaw: view Float
-  speedScale: view Float
-) {
-  var inputRight: Float = intent.moveX
-  var inputForward: Float = intent.moveY
-  let lengthSquared: Float = inputRight * inputRight + inputForward * inputForward
-  if lengthSquared > 1.0 {
-    let inverseLength: Float = 1.0 / Math.sqrt(x: lengthSquared)
-    inputRight = inputRight * inverseLength
-    inputForward = inputForward * inverseLength
-  }
-  var speed: Float = controller.runSpeed
-  if intent.walking {
-    speed = controller.walkSpeed
-  }
-  let fraction: Float = speed * speedScale / maxSpeed
-  loop var i: Int = 0, i < componentCount(this: physicsSystem.characters), ++i {
-    let entityId: EntityId = componentEntityAt(this: physicsSystem.characters, i: i)
-    let character: mod CharacterBody = componentMod(
-      this: physicsSystem.characters
-      entityId: entityId
-    )
-    if entityId.index is controlledEntityId.index and entityId.generation is controlledEntityId.generation {
-      # Yaw zero looks from -Y toward +Y, as CameraRig and the old controller
-      character.forward = Vec3 { x: -Math.sin(x: cameraYaw), y: Math.cos(x: cameraYaw), z: 0.0 }
-      character.right = Vec3 { x: Math.cos(x: cameraYaw), y: Math.sin(x: cameraYaw), z: 0.0 }
-      character.throttle = Vec2 { x: inputForward * fraction, y: inputRight * fraction }
-      if intent.jump {
-        character.jump = true
-      }
-    } else {
-      character.throttle = Vec2 { x: 0.0, y: 0.0 }
-    }
-  }
-}
-
-# Every character one fixed step: its mover (held to the speed limit of a
-# bush in `bushes` it stands in), then its feet, heading and gait back into
-# its controller in `controllers` (feet relative to groundZ, as the renderer
-# reads them). Deep water stays a wall: a step that ends where a character
-# cannot wade is undone per axis, so walking into the drop-off at an angle
-# slides along it.
-func moveCharacters(
-  physicsSystem: mod WalkerPhysics
-  controllers: mod ComponentTable(ThirdPersonController)
-  bushes: view List(BushSpot)
-) {
-  let noIgnoredShapes: List(ShapeId) = List.create(ShapeId, cap: 0)
-  let biome: BiomeConfig = physicsSystem.biome
-  let groundZ: Float = physicsSystem.groundZ
-  loop var i: Int = 0, i < componentCount(this: physicsSystem.characters), ++i {
-    let entityId: EntityId = componentEntityAt(this: physicsSystem.characters, i: i)
-    let character: mod CharacterBody = componentMod(
-      this: physicsSystem.characters
-      entityId: entityId
-    )
-    let fromX: Float = character.mover.transform.p.x
-    let fromY: Float = character.mover.transform.p.y
-    let throttle: Vec2 = applyBushLimit(
-      character: character
-      limit: bushSpeedLimitAmong(bushes: bushes, x: fromX, y: fromY)
-    )
-    let center: Vec3 = moveCharacter(
-      character: character
-      physics: physicsSystem.physics
-      ignoreShapeIds: noIgnoredShapes
-    )
-    character.throttle = throttle
-    if worldWadable(x: center.x, y: center.y, cfg: biome) is false {
-      if worldWadable(x: center.x, y: fromY, cfg: biome) {
-        character.mover.transform.p.y = fromY
-        character.mover.velocity.y = 0.0
-      } else if worldWadable(x: fromX, y: center.y, cfg: biome) {
-        character.mover.transform.p.x = fromX
-        character.mover.velocity.x = 0.0
-      } else {
-        character.mover.transform.p.x = fromX
-        character.mover.transform.p.y = fromY
-        character.mover.velocity.x = 0.0
-        character.mover.velocity.y = 0.0
-      }
-    }
-    if componentHas(this: controllers, entityId: entityId) {
-      readController(
-        controller: componentMod(this: controllers, entityId: entityId)
-        character: character
-        groundZ: groundZ
-        fixedStep: walkerPhysicsStep
-      )
-    }
-  }
 }
 
 # ----- loose cubes -------------------------------------------------------
@@ -525,6 +432,103 @@ func physicsCubeModel(transform: view Transform3D, cube: view PhysicsCube) ret M
   ret mat4Mul(
     a: mat4Translate(x: transform.position.x, y: transform.position.y, z: transform.position.z)
     b: mat4Mul(a: Quat.toMat4(q: transform.rotation), b: mat4Scale(s: cube.halfSize * 2.0))
+  )
+}
+
+# The input for the coming fixed steps: `controlledEntityId` driven by the
+# player's `intent` along the camera's yaw, everyone else standing (the mover
+# system, app3d/CharacterMovers)
+func driveCharacters(
+  physicsSystem: mod WalkerPhysics
+  controlledEntityId: view EntityId
+  controllers: view ComponentTable(ThirdPersonController)
+  intent: view InputIntent
+  cameraYaw: view Float
+  speedScale: view Float
+) {
+  loop componentCount(this: physicsSystem.moverDrives) > 0 {
+    componentRemove(
+      this: physicsSystem.moverDrives
+      entityId: componentEntityAt(this: physicsSystem.moverDrives, i: 0)
+    )
+  }
+  componentSet(
+    this: physicsSystem.moverDrives
+    entityId: controlledEntityId
+    data: MoverDrive {
+      intent: intent
+      yaw: cameraYaw
+      speedScale: speedScale
+      tookOff: false
+      # The walker's run (4.2 m/s) is under the mover's cap: no sprint
+      sprints: false
+    }
+  )
+  driveMovers(
+    characters: physicsSystem.characters
+    controllers: controllers
+    drives: physicsSystem.moverDrives
+  )
+}
+
+# Every character one fixed step: held to the speed limit of a bush in
+# `bushes` it stands in, moved (the mover system), deep water a wall (a step
+# that ends where a character cannot wade is undone per axis, so walking into
+# the drop-off at an angle slides along it), then its controller read back
+func moveCharacters(
+  physicsSystem: mod WalkerPhysics
+  controllers: mod ComponentTable(ThirdPersonController)
+  bushes: view List(BushSpot)
+) {
+  loop var i: Int = 0, i < componentCount(this: physicsSystem.characters), ++i {
+    let entityId: EntityId = componentEntityAt(this: physicsSystem.characters, i: i)
+    let body: view CharacterBody = componentView(this: physicsSystem.characters, entityId: entityId)
+    componentSet(
+      this: physicsSystem.moverLimits
+      entityId: entityId
+      data: MoverSpeedLimit {
+        limit: bushSpeedLimitAmong(
+          bushes: bushes
+          x: body.mover.transform.p.x
+          y: body.mover.transform.p.y
+        )
+      }
+    )
+  }
+  moveMovers(
+    physics: physicsSystem.physics
+    characters: physicsSystem.characters
+    parked: physicsSystem.moverParked
+    limits: physicsSystem.moverLimits
+    steps: physicsSystem.moverSteps
+  )
+  let biome: BiomeConfig = physicsSystem.biome
+  loop var i: Int = 0, i < componentCount(this: physicsSystem.moverSteps), ++i {
+    let entityId: EntityId = componentEntityAt(this: physicsSystem.moverSteps, i: i)
+    let step: MoverStep = componentCopyAtDefault(this: physicsSystem.moverSteps, i: i)
+    let character: mod CharacterBody = componentMod(
+      this: physicsSystem.characters
+      entityId: entityId
+    )
+    let center: Vec3 = {
+      x: character.mover.transform.p.x
+      y: character.mover.transform.p.y
+      z: 0.0
+    }
+    holdMoverWithin(
+      character: character
+      step: step
+      insideNow: worldWadable(x: center.x, y: center.y, cfg: biome)
+      insideWithOldY: worldWadable(x: center.x, y: step.fromY, cfg: biome)
+      insideWithOldX: worldWadable(x: step.fromX, y: center.y, cfg: biome)
+    )
+  }
+  readMoverControllers(
+    characters: physicsSystem.characters
+    controllers: controllers
+    parked: physicsSystem.moverParked
+    groundZ: physicsSystem.groundZ
+    fixedStep: walkerPhysicsStep
   )
 }
 

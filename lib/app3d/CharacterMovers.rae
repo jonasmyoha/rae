@@ -1,0 +1,212 @@
+# app3d/CharacterMovers — the mover system: every character's Box3D mover
+# (CharacterBody) driven and moved by components, for any app's tables.
+#
+#   MoverDrive       what a character is trying to do: its input intent, the
+#                    yaw its stick is read along, a speed scale, whether its
+#                    run goes past the mover's normal cap (sprints); tookOff
+#                    tells the app a jump was taken. One with no drive stands.
+#   MoverParked      a tag: the mover is not moved and its controller not
+#                    read back (seated in a vehicle, lying as a ragdoll).
+#   MoverSpeedLimit  this step's speed limit (a bush the app finds it in).
+#   MoverStep        where the mover was before its last step, so an app's
+#                    own wall (deep water, a stand) can undo it per axis.
+#
+# Per frame: the app writes the drives, then driveMovers. Per fixed step: the
+# app writes parked tags and speed limits, then moveMovers, its own walls and
+# bumps, then readMoverControllers.
+import Math
+import Vec3
+open Vec2
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Tag
+open box3d/ecs/PhysicsTypes
+open box3d/ecs/Physics
+open box3d/ecs/PhysicsComponents
+open box3d/ecs/PhysicsSystems
+open box3d/ecs/CharacterMover
+open box3d/ecs/NatureBodies
+open app3d/CharacterController
+open app3d/CharacterBodies
+
+type MoverDrive {
+  intent: InputIntent
+  yaw: Float
+  speedScale: Float
+  tookOff: Bool
+  # A run is the mover's sprint (its cap 1.5x maxSpeed): for a character whose
+  # run is faster than maxSpeed; false keeps every gait under maxSpeed
+  sprints: Bool = true
+}
+
+func createMoverDrive() ret MoverDrive {
+  ret MoverDrive { intent: createInputIntent(), yaw: 0.0, speedScale: 1.0, tookOff: false }
+}
+
+type MoverParked {
+}
+
+type MoverSpeedLimit {
+  limit: Float
+}
+
+type MoverStep {
+  fromX: Float
+  fromY: Float
+}
+
+# One mover's input for the coming fixed steps: a throttle along the yaw's
+# forward and right, so a full stick moves at the controller's run speed
+# (walk speed with the walk modifier) times the speed scale, sprinting while
+# it runs if its drive sprints (the mover's cap is 1.5x maxSpeed then), and the jump request,
+# taken only from the ground. True when a jump was taken.
+func driveMover(
+  character: mod CharacterBody
+  controller: view ThirdPersonController
+  drive: view MoverDrive
+) ret Bool {
+  var inputRight: Float = drive.intent.moveX
+  var inputForward: Float = drive.intent.moveY
+  let lengthSquared: Float = inputRight * inputRight + inputForward * inputForward
+  if lengthSquared > 1.0 {
+    let inverseLength: Float = 1.0 / Math.sqrt(x: lengthSquared)
+    inputRight = inputRight * inverseLength
+    inputForward = inputForward * inverseLength
+  }
+  var speed: Float = controller.runSpeed
+  var sprint: Bool = drive.sprints
+  if drive.intent.walking {
+    speed = controller.walkSpeed
+    sprint = false
+  }
+  var speedCap: Float = maxSpeed
+  if sprint {
+    speedCap = maxSpeed * 1.5
+  }
+  let fraction: Float = speed * drive.speedScale / speedCap
+  # Yaw zero looks from -Y toward +Y, as CameraRig and the controller do
+  character.forward = Vec3 { x: -Math.sin(x: drive.yaw), y: Math.cos(x: drive.yaw), z: 0.0 }
+  character.right = Vec3 { x: Math.cos(x: drive.yaw), y: Math.sin(x: drive.yaw), z: 0.0 }
+  character.throttle = Vec2 { x: inputForward * fraction, y: inputRight * fraction }
+  character.mover.sprint = sprint and lengthSquared > 0.0
+  if drive.intent.jump and character.grounded and character.jump is false {
+    character.jump = true
+    ret true
+  }
+  ret false
+}
+
+# Every mover with a controller driven by its MoverDrive (its tookOff
+# written), or standing when it has none
+func driveMovers(
+  characters: mod ComponentTable(CharacterBody)
+  controllers: view ComponentTable(ThirdPersonController)
+  drives: mod ComponentTable(MoverDrive)
+) {
+  let still: MoverDrive = createMoverDrive()
+  loop var i: Int = 0, i < componentCount(this: characters), ++i {
+    let entityId: EntityId = componentEntityAt(this: characters, i: i)
+    if componentHas(this: controllers, entityId: entityId) {
+      let controller: view ThirdPersonController = componentView(
+        this: controllers
+        entityId: entityId
+      )
+      let character: mod CharacterBody = componentMod(this: characters, entityId: entityId)
+      if componentHas(this: drives, entityId: entityId) {
+        let drive: mod MoverDrive = componentMod(this: drives, entityId: entityId)
+        drive.tookOff = driveMover(character: character, controller: controller, drive: drive)
+      } else {
+        let stood: Bool = driveMover(character: character, controller: controller, drive: still)
+      }
+    }
+  }
+}
+
+# Every mover not parked one fixed step: held to its speed limit if it has
+# one (applyBushLimit; its throttle given back after the step), moved, and
+# where it was before the step kept in `steps` (a parked one has none)
+func moveMovers(
+  physics: mod Physics
+  characters: mod ComponentTable(CharacterBody)
+  parked: view ComponentTable(MoverParked)
+  limits: view ComponentTable(MoverSpeedLimit)
+  steps: mod ComponentTable(MoverStep)
+) {
+  let noIgnoredShapes: List(ShapeId) = List.create(ShapeId, cap: 0)
+  loop var i: Int = 0, i < componentCount(this: characters), ++i {
+    let entityId: EntityId = componentEntityAt(this: characters, i: i)
+    if componentHas(this: parked, entityId: entityId) {
+      componentRemove(this: steps, entityId: entityId)
+      continue
+    }
+    var limit: Float = bushNoLimit
+    if componentHas(this: limits, entityId: entityId) {
+      limit = componentView(this: limits, entityId: entityId).limit
+    }
+    let character: mod CharacterBody = componentMod(this: characters, entityId: entityId)
+    let throttle: Vec2 = applyBushLimit(character: character, limit: limit)
+    let step: MoverStep = {
+      fromX: character.mover.transform.p.x
+      fromY: character.mover.transform.p.y
+    }
+    let center: Vec3 = moveCharacter(
+      character: character
+      physics: physics
+      ignoreShapeIds: noIgnoredShapes
+    )
+    character.throttle = throttle
+    componentSet(this: steps, entityId: entityId, data: step)
+  }
+}
+
+# Undo a step that ended where the app says the mover may not be: back on y
+# alone if that is allowed (`insideWithOldY`: where it is now, its old y), else
+# back on x alone (`insideWithOldX`), else back on both; the velocity on an
+# undone axis stopped. Nothing when it may be where it is (`insideNow`).
+func holdMoverWithin(
+  character: mod CharacterBody
+  step: view MoverStep
+  insideNow: view Bool
+  insideWithOldY: view Bool
+  insideWithOldX: view Bool
+) {
+  if insideNow {
+    ret
+  }
+  if insideWithOldY {
+    character.mover.transform.p.y = step.fromY
+    character.mover.velocity.y = 0.0
+  } else if insideWithOldX {
+    character.mover.transform.p.x = step.fromX
+    character.mover.velocity.x = 0.0
+  } else {
+    character.mover.transform.p.x = step.fromX
+    character.mover.transform.p.y = step.fromY
+    character.mover.velocity.x = 0.0
+    character.mover.velocity.y = 0.0
+  }
+}
+
+# Every controller of a mover not parked read back from it (readController)
+func readMoverControllers(
+  characters: view ComponentTable(CharacterBody)
+  controllers: mod ComponentTable(ThirdPersonController)
+  parked: view ComponentTable(MoverParked)
+  groundZ: view Float
+  fixedStep: view Float
+) {
+  loop var i: Int = 0, i < componentCount(this: characters), ++i {
+    let entityId: EntityId = componentEntityAt(this: characters, i: i)
+    if componentHas(this: controllers, entityId: entityId) and componentHas(
+      this: parked
+      entityId: entityId
+    ) is false {
+      readController(
+        controller: componentMod(this: controllers, entityId: entityId)
+        character: componentView(this: characters, entityId: entityId)
+        groundZ: groundZ
+        fixedStep: fixedStep
+      )
+    }
+  }
+}

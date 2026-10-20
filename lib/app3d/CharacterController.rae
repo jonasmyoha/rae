@@ -161,6 +161,17 @@ type InputIntent {
   actions: Int
 }
 
+# No input: standing, no jump, no action
+func createInputIntent() ret InputIntent {
+  ret InputIntent {
+    moveX: 0.0
+    moveY: 0.0
+    walking: false
+    jump: false
+    actions: 0
+  }
+}
+
 # The ThirdPersonController of a character entity (the hero or anyone else)
 func controllerOf(
   controllers: view ComponentTable(ThirdPersonController)
