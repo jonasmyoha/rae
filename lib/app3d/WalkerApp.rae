@@ -98,6 +98,7 @@ open Calendar
 open app3d/NetSeam
 open app3d/RagdollRig
 open app3d/CameraKnockdownFollow
+open app3d/CameraFov
 open app3d/WalkerKnockdown
 open app3d/WalkerKnockTest
 
@@ -335,6 +336,12 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
     var cubeBatch: InstanceBatch = createInstanceBatch(mesh: cubeMesh, capacity: 64)
 
     var camera: Camera3d = defaultCamera3d()
+    # The field of view for the window's shape (lib/app3d/CameraFov)
+    let fieldOfView: FieldOfViewFollow = startFieldOfView(
+      camera: camera
+      widthPoints: windowExtentW()
+      heightPoints: windowExtentH()
+    )
     let hosekData: HosekDataset = loadDefaultHosekDataset()
     camera.target = Vec3.create(x: 0.0, y: 0.0, z: groundZ + targetHeight * 0.5)
 
@@ -672,6 +679,7 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
         rigEntityId: rigLink.rigEntityId
         cameraEntityId: rigLink.cameraEntityId
         walkFollow: createWalkFollow()
+        fieldOfView: fieldOfView
         knockdownFollow: createKnockdownFollow()
       }
       characterSystem: {

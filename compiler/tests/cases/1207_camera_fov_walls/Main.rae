@@ -1,0 +1,170 @@
+# app3d/CameraFov and app3d/CameraObstruction: the camera's default field
+# of view by window shape (40 degrees on a phone on its side, 50 otherwise),
+# followed while nobody changed it; and a character camera pulled in front
+# of a wall in the blocking category, but not in front of a loose cube.
+import Math
+import Vec3
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open ecs/Transform
+open Scene3d
+open box3d/ecs/PhysicsTypes
+open box3d/ecs/Physics
+open box3d/ecs/PhysicsComponents
+open box3d/ecs/PhysicsSpawn
+open app3d/CameraRig
+open app3d/CameraFov
+open app3d/CameraObstruction
+
+func near(a: view Float, b: view Float) ret Bool {
+  ret Math.abs(value: a - b) < 0.001
+}
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func addBox(
+  physics: mod Physics
+  allocator: mod EntityAllocator
+  rigidBodies: mod ComponentTable(RigidBody)
+  colliders: mod ComponentTable(Collider)
+  transforms: mod ComponentTable(Transform3D)
+  at: view Vec3
+  category: view UInt64
+) {
+  let entityId: EntityId = allocEntity(this: allocator)
+  var def: BodyDef = defaultBodyDef(lengthUnitsPerMeter: 1.0)
+  def.bodyType = BodyType.staticBody
+  def.position = at
+  let body: BodyId = spawnRigidBody(
+    physics: physics
+    rigidBodies: rigidBodies
+    transforms: transforms
+    entityId: entityId
+    def: def
+  )
+  var shapeDef: ShapeDef = defaultShapeDef(lengthUnitsPerMeter: 1.0)
+  shapeDef.filter.categoryBits = category
+  let shape: ShapeId = addBoxCollider(
+    physics: physics
+    rigidBodies: rigidBodies
+    colliders: colliders
+    entityId: entityId
+    def: shapeDef
+    halfExtents: Vec3.create(x: 1.0, y: 0.5, z: 1.0)
+    transform: transformIdentity()
+  )
+}
+
+func distanceAfterPull(physics: view Physics, camera: view Camera3d) ret Float {
+  var rig: CameraRig = createCameraRig(camera: camera)
+  rig.viewYaw = 0.0
+  rig.viewOrbitPitch = 0.0
+  rig.viewDistance = 7.0
+  let pulled: Bool = pullCameraFromWalls(
+    rig: rig
+    physics: physics
+    target: Vec3.create(x: 0.0, y: 0.0, z: 1.0)
+    radius: 0.3
+    maskBits: cameraBlockingCategory
+  )
+  ret rig.viewDistance
+}
+
+func main() {
+  check(
+    label: "a phone upright keeps 50 degrees"
+    ok: near(a: defaultFieldOfView(widthPoints: 390.0, heightPoints: 844.0), b: 50.0)
+  )
+  check(
+    label: "a phone on its side narrows to 40 degrees"
+    ok: near(a: defaultFieldOfView(widthPoints: 844.0, heightPoints: 390.0), b: 40.0)
+  )
+  check(
+    label: "a big phone on its side narrows too"
+    ok: near(a: defaultFieldOfView(widthPoints: 932.0, heightPoints: 430.0), b: 40.0)
+  )
+  check(
+    label: "a desktop window keeps 50 degrees"
+    ok: near(a: defaultFieldOfView(widthPoints: 1280.0, heightPoints: 800.0), b: 50.0)
+  )
+  check(
+    label: "a tablet on its side keeps 50 degrees"
+    ok: near(a: defaultFieldOfView(widthPoints: 1180.0, heightPoints: 820.0), b: 50.0)
+  )
+  check(
+    label: "no window yet keeps 50 degrees"
+    ok: near(a: defaultFieldOfView(widthPoints: 0.0, heightPoints: 0.0), b: 50.0)
+  )
+  # Followed while nobody changed it
+  var camera: Camera3d = defaultCamera3d()
+  var follow: FieldOfViewFollow = startFieldOfView(
+    camera: camera
+    widthPoints: 390.0
+    heightPoints: 844.0
+  )
+  let turned: Bool = followFieldOfView(
+    follow: follow
+    camera: camera
+    widthPoints: 844.0
+    heightPoints: 390.0
+  )
+  let onItsSide: Float = camera.fovYDeg
+  camera.fovYDeg = 65.0
+  let kept: Bool = followFieldOfView(
+    follow: follow
+    camera: camera
+    widthPoints: 390.0
+    heightPoints: 844.0
+  )
+  check(
+    label: "turned on its side it narrows; once someone set it, turning back keeps theirs"
+    ok: turned and near(a: onItsSide, b: 40.0) and kept is false and near(
+      a: camera.fovYDeg
+      b: 65.0
+    )
+  )
+  # ----- pulled in at walls -----------------------------------------------------
+  var allocator: EntityAllocator = createEntityAllocator()
+  var transforms: ComponentTable(Transform3D) = createComponentTable(Transform3D)
+  var rigidBodies: ComponentTable(RigidBody) = createComponentTable(RigidBody)
+  var colliders: ComponentTable(Collider) = createComponentTable(Collider)
+  var physics: Physics = createPhysics(
+    def: defaultPhysicsWorldDef()
+    fixedStep: 1.0 / 60.0
+    subSteps: 4
+  )
+  let open: Float = distanceAfterPull(physics: physics, camera: camera)
+  # A loose cube behind the target (its own category): the camera stays out
+  addBox(
+    physics: physics
+    allocator: allocator
+    rigidBodies: rigidBodies
+    colliders: colliders
+    transforms: transforms
+    at: Vec3.create(x: 0.0, y: -3.0, z: 1.0)
+    category: 1
+  )
+  let pastCube: Float = distanceAfterPull(physics: physics, camera: camera)
+  # A wall further back, in the blocking category: pulled in front of it
+  addBox(
+    physics: physics
+    allocator: allocator
+    rigidBodies: rigidBodies
+    colliders: colliders
+    transforms: transforms
+    at: Vec3.create(x: 0.0, y: -5.0, z: 1.0)
+    category: cameraBlockingCategory
+  )
+  let atWall: Float = distanceAfterPull(physics: physics, camera: camera)
+  check(
+    label: "nothing in the way: 7 m; a loose cube: still 7 m; a wall 5 m back: in front of it ({atWall} m)"
+    ok: near(a: open, b: 7.0) and near(a: pastCube, b: 7.0) and atWall < 4.5 and atWall > 3.5
+  )
+}

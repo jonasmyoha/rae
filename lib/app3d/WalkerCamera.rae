@@ -62,6 +62,9 @@ open app3d/WalkerInput
 open app3d/WalkerTerrain
 open app3d/WalkerWorld
 open app3d/CameraKnockdownFollow
+open app3d/WalkerPhysics
+open app3d/CameraObstruction
+open app3d/CameraFov
 
 # Camera rig + camera + scene light. (#548)
 # #744: `rigEntityId` and `cameraEntityId` are the two WalkerWorld entities that express
@@ -78,6 +81,9 @@ type WalkerCamera {
   cameraEntityId: EntityId
   # The character camera turns after the walker (lib/app3d/CameraWalkFollow)
   walkFollow: WalkFollow
+  # The field of view by window shape, while nobody changed it
+  # (lib/app3d/CameraFov)
+  fieldOfView: FieldOfViewFollow
   # Over to the driven character's body while it lies knocked down, and back
   # (lib/app3d/CameraKnockdownFollow)
   knockdownFollow: KnockdownFollow
@@ -161,6 +167,7 @@ func cameraUpdate(
   world: view WalkerWorld
   heroEntityId: view EntityId
   terrainSystem: view WalkerTerrain
+  physicsSystem: view WalkerPhysics
   deltaTime: copy Float
 ) ret CameraTick {
   let previousMode: CameraRigMode = cameraSystem.rig.mode
@@ -232,6 +239,27 @@ func cameraUpdate(
     ) {
       cameraMoved = true
     }
+    # In front of a tree or a rock between it and the walker
+    # (lib/app3d/CameraObstruction)
+    if pullCameraFromWalls(
+      rig: cameraSystem.rig
+      physics: physicsSystem.physics
+      target: target
+      radius: cameraGroundClearance
+      maskBits: cameraBlockingCategory
+    ) {
+      cameraMoved = true
+    }
+  }
+  # The field of view follows the window's shape: narrower on a phone on its
+  # side (lib/app3d/CameraFov)
+  if followFieldOfView(
+    follow: cameraSystem.fieldOfView
+    camera: cameraSystem.camera
+    widthPoints: windowExtentW()
+    heightPoints: windowExtentH()
+  ) {
+    cameraMoved = true
   }
   if cameraMoved {
     persist.stateDirty = true
