@@ -730,11 +730,6 @@ rae_String rae_ext_Filesystem_prefDir(rae_String org, rae_String app) {
     return s;
 }
 
-rae_Bool rae_ext_Filesystem_makeDir(rae_String path) {
-    if (!path.data) return false;
-    return SDL_CreateDirectory((const char*)path.data);
-}
-
 rae_Bool rae_ext_Filesystem_exists(rae_String path) {
     if (!path.data) return false;
     SDL_PathInfo info;

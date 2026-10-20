@@ -58,7 +58,7 @@ func list(path: view String) ret List(String)
 func glob(path: view String, pattern: view String) ret List(String)
 
 # Mutations
-func makeDir(path: view String) ret Bool       # mkdir -p
+func makeDir(path: view String) ret Bool       # mkdir -p; it is Sys.makeDir (the prelude), not a second one here
 func remove(path: view String) ret Bool
 func rename(from: view String, to: view String) ret Bool
 
@@ -107,7 +107,7 @@ A helper (in `lib/filesystem.rae` or `lib/image.rae`) packages the policy:
 renderTarget(stem):
   dir = filesystem.desktopDir()
   if dir == "": dir = filesystem.join(filesystem.prefDir("Rae","render"), "render")
-  filesystem.makeDir(dir)
+  makeDir(dir)   # Sys.makeDir, which makes the missing parents
   n = 1 + maxExistingIndex(dir, stem, today)
   ret filesystem.join(dir, stem + "_" + today + "_" + pad4(n) + ".png")
 ```
