@@ -341,7 +341,7 @@ func createWalkerAppPhysics(
       physicsSystem: physicsSystem
       entityId: crowdEntityId
       feet: controllerFeet(
-        controller: controllerOf(world: world, entityId: crowdEntityId)
+        controller: controllerOf(controllers: world.controllers, entityId: crowdEntityId)
         groundZ: groundZ
       )
     )
@@ -408,7 +408,7 @@ func addWalkerCharacterComponents(
   )
   let model: Mat4 = walkerWorldModel(
     baseModel: basePartModel
-    controller: controllerOf(world: world, entityId: entityId)
+    controller: controllerOf(controllers: world.controllers, entityId: entityId)
   )
   componentSet(
     this: world.characterModels

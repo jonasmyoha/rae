@@ -96,6 +96,7 @@ open app3d/WalkerSelfTest
 open RendererForward
 open Moon
 open Calendar
+open app3d/NetSeam
 
 # The app's GPU manager (#873): with the sea, its three 256 cascades with
 # their mip chains, readbacks and surface (192, as the downstream game sizes
@@ -366,7 +367,12 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
     applyCameraStartOverride(rig: rig, camera: camera)
     # #744: express the camera rig as an ECS parent relation (rig entity -> camera
     # entity) in the WalkerWorld; applyCameraRigHierarchy resolves the eye each frame.
-    let rigLink: CameraRigLink = createCameraRigLink(world: walkerWorld)
+    let rigLink: CameraRigLink = createCameraRigLink(
+      allocator: walkerWorld.allocator
+      transforms: walkerWorld.transforms
+      parents: walkerWorld.parents
+      childrens: walkerWorld.childrens
+    )
 
     var clipIndex: Int = 0
     var playing: Bool = true
@@ -694,7 +700,7 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
       profiler: Profile.createProfiler()
       grassCompute: own grassCompute
       physicsSystem: own physicsSystem
-      netSystem: { role: 0, tick: 0 }
+      netSeam: createNetSeam()
       players: createPlayerRoster(entities: own rosterEntities)
       persist: { windowGeometry: own windowGeometry, lastStateSave: startT, stateDirty: false }
       wadeSplash: own wadeSplash
