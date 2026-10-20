@@ -85,9 +85,49 @@ type ButtonSystem {
   hoverFades: ComponentTable(HoverFade)
 }
 
+# A touch stick's state (touchStickSystem): shown, its base in design units
+# (middle, radius, the zone a press must start in), the finger it owns (-1
+# none), its value -1..1 (x right, y forward = up the screen) and the knob's
+# offset from the middle
+type TouchStickState {
+  shown: Bool
+  centerX: Float
+  centerY: Float
+  radius: Float
+  zoneRadius: Float
+  active: Bool
+  grabbedId: Int
+  valueX: Float
+  valueY: Float
+  knobDX: Float
+  knobDY: Float
+}
+
+func createTouchStickState() ret TouchStickState {
+  ret TouchStickState {
+    shown: false
+    centerX: 0.0
+    centerY: 0.0
+    radius: 0.0
+    zoneRadius: 0.0
+    active: false
+    grabbedId: -1
+    valueX: 0.0
+    valueY: 0.0
+    knobDX: 0.0
+    knobDY: 0.0
+  }
+}
+
+# touchStickSystem's output: each TouchStick node's state
+type TouchStickSystem {
+  states: ComponentTable(TouchStickState)
+}
+
 type UiSystems {
   layout: LayoutSystem
   safeArea: SafeAreaSystem
+  touchStick: TouchStickSystem
   hierarchy: HierarchySystem
   transform2d: Transform2dSystem
   animation: AnimationSystem
@@ -104,6 +144,7 @@ func createUiSystems() ret UiSystems {
       layoutScales: ComponentTable.create(LayoutScale)
     }
     safeArea: SafeAreaSystem { safeInsets: ComponentTable.create(SafeInsets) }
+    touchStick: TouchStickSystem { states: ComponentTable.create(TouchStickState) }
     hierarchy: HierarchySystem { parents: ComponentTable.create(Parent) }
     transform2d: Transform2dSystem {
       localTransforms: ComponentTable.create(Transform2D)

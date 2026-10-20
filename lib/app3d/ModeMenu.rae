@@ -7,7 +7,8 @@
 # (HotReload.restartFresh), so it works for any app without code of its own;
 # and, in an app with touch controls (its scene has the item), "Simulate
 # mobile phone: off/on", which shows them on a desktop as a phone build always
-# does: the app asks touchControlsShown each frame. Which items show is
+# does (it picks the scene's touch frame, app3d/UiModes framePointerFor, where
+# the touch controls are nodes). Which items show is
 # the scene's `editor` state (app3d/UiModes); the menu's own open/close is set
 # here, outside the state bags. Choosing an item, or a press anywhere else,
 # closes it.
@@ -104,12 +105,6 @@ func simulateMobileItemText(simulated: view Bool) ret String {
     ret "Simulate mobile phone: on"
   }
   ret "Simulate mobile phone: off"
-}
-
-# Are the touch controls (an on-screen joystick) shown: always in a phone
-# build, on a desktop while the menu simulates a phone
-func touchControlsShown(menu: view ModeMenuState) ret Bool {
-  ret menu.simulateMobile
 }
 
 func modeMenuTapped(world: view UiWorld, actionId: view String) ret Bool {

@@ -1,0 +1,151 @@
+# lib/ui/touchStickSystem: the touch joystick's rule, apart from any window.
+# A finger pressing inside the stick's zone is owned until it lifts, even out
+# of the zone, and a second finger is left alone; the knob follows it, no
+# farther than the base's rim, and the value is -1..1 (up is forward). With no
+# fingers the mouse drives it the same way. Letting go puts it back.
+import Math
+open ui/UiSystems
+open ui/touchStickSystem/TouchStickSystem
+
+func near(a: view Float, b: view Float) ret Bool {
+  ret Math.abs(value: a - b) < 0.001
+}
+
+func finger(
+  id: view Int
+  x: view Float
+  y: view Float
+  pressed: view Bool
+) ret StickPointer {
+  ret StickPointer { id: id, x: x, y: y, pressed: pressed }
+}
+
+func main() {
+  var stick: TouchStickState = createTouchStickState()
+  stick.shown = true
+  stick.centerX = 100.0
+  stick.centerY = 500.0
+  stick.radius = 50.0
+  stick.zoneRadius = 85.0
+  var touches: List(StickPointer) = List.create(StickPointer, cap: 2)
+  touches.add(value: finger(
+    id: 7
+    x: 120.0
+    y: 500.0
+    pressed: true
+  ))
+  stepTouchStick(
+    state: stick
+    input: StickInput {
+      touches: touches
+      mouseX: 0.0
+      mouseY: 0.0
+      mousePressed: false
+      mouseDown: false
+    }
+  )
+  log(
+    "a press in the zone is taken: {stick.active and stick.grabbedId is 7 and near(
+      a: stick.valueX
+      b: 0.4
+    )}"
+  )
+
+  var dragged: List(StickPointer) = List.create(StickPointer, cap: 2)
+  dragged.add(value: finger(
+    id: 7
+    x: 100.0
+    y: 300.0
+    pressed: false
+  ))
+  dragged.add(value: finger(
+    id: 8
+    x: 110.0
+    y: 505.0
+    pressed: true
+  ))
+  stepTouchStick(
+    state: stick
+    input: StickInput {
+      touches: dragged
+      mouseX: 0.0
+      mouseY: 0.0
+      mousePressed: false
+      mouseDown: false
+    }
+  )
+  log(
+    "held out of the zone, at the rim, up is forward: {stick.grabbedId is 7 and near(
+      a: stick.valueY
+      b: 1.0
+    ) and near(a: stick.knobDY, b: -50.0)}"
+  )
+
+  var released: List(StickPointer) = List.create(StickPointer, cap: 1)
+  stepTouchStick(
+    state: stick
+    input: StickInput {
+      touches: released
+      mouseX: 0.0
+      mouseY: 0.0
+      mousePressed: false
+      mouseDown: false
+    }
+  )
+  log(
+    "let go, back in the middle: {stick.active is false and stick.grabbedId is -1 and stick.valueY is 0.0 and stick.knobDX is 0.0}"
+  )
+
+  var outside: List(StickPointer) = List.create(StickPointer, cap: 1)
+  outside.add(value: finger(
+    id: 9
+    x: 300.0
+    y: 500.0
+    pressed: true
+  ))
+  stepTouchStick(
+    state: stick
+    input: StickInput {
+      touches: outside
+      mouseX: 0.0
+      mouseY: 0.0
+      mousePressed: false
+      mouseDown: false
+    }
+  )
+  log("a press outside the zone is the camera's: {stick.active is false}")
+
+  stepTouchStick(
+    state: stick
+    input: StickInput {
+      touches: released
+      mouseX: 70.0
+      mouseY: 500.0
+      mousePressed: true
+      mouseDown: true
+    }
+  )
+  log("no fingers, the mouse drives it: {stick.active and near(a: stick.valueX, b: -0.6)}")
+  stepTouchStick(
+    state: stick
+    input: StickInput {
+      touches: released
+      mouseX: 300.0
+      mouseY: 500.0
+      mousePressed: true
+      mouseDown: true
+    }
+  )
+  log("held by the mouse anywhere: {stick.active and near(a: stick.valueX, b: 1.0)}")
+  stepTouchStick(
+    state: stick
+    input: StickInput {
+      touches: released
+      mouseX: 300.0
+      mouseY: 500.0
+      mousePressed: false
+      mouseDown: false
+    }
+  )
+  log("mouse up, let go: {stick.active is false}")
+}
