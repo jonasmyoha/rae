@@ -361,21 +361,9 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
       focusZ: characterFocusZ
     )
     snapCameraRigView(rig: rig)
-    # Screenshot camera (#857): RAE_WALKER_CAMERA holds the twelve space-separated
-    # values of CameraRig.stateString, so a headless frame can look elsewhere
-    # than the spawn (mode 1 is the free camera).
-    let cameraOverride: String = Sys.getEnv(name: "RAE_WALKER_CAMERA")
-    if cameraOverride.length() > 0 {
-      let overrideParts: List(String) = cameraOverride.split(sep: " ")
-      if applyCameraRigState(
-        parts: overrideParts
-        offset: 0
-        rig: rig
-        camera: camera
-      ) {
-        log("[camera] RAE_WALKER_CAMERA applied: {cameraOverride}")
-      }
-    }
+    # Screenshot camera (#857): RAE_CAMERA_AT (or RAE_WALKER_CAMERA), so a
+    # headless frame can look elsewhere than the spawn (app3d/CameraRig)
+    applyCameraStartOverride(rig: rig, camera: camera)
     # #744: express the camera rig as an ECS parent relation (rig entity -> camera
     # entity) in the WalkerWorld; applyCameraRigHierarchy resolves the eye each frame.
     let rigLink: CameraRigLink = createCameraRigLink(world: walkerWorld)

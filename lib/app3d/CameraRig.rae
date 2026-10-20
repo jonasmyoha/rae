@@ -22,6 +22,7 @@ import Gpu2d
 import Sdl3
 import Vec3
 import Keys
+import Sys
 open Scene3d
 open ecs/Entity
 open Math3d
@@ -783,4 +784,38 @@ func applyCameraRigState(
 type CameraRigLink {
   rigEntityId: EntityId
   cameraEntityId: EntityId
+}
+
+# The screenshot camera an app starts with (for repeatable headless frames):
+# the twelve space-separated values of stateString, from RAE_CAMERA_AT, or
+# from RAE_WALKER_CAMERA, the older name the walker examples' scripts use,
+# when only that is set; "" when neither is
+func cameraStartOverrideFrom(cameraAt: view String, walkerCamera: view String) ret String {
+  if cameraAt.length() > 0 {
+    ret cameraAt
+  }
+  ret walkerCamera
+}
+
+# Start `rig` and `camera` at the screenshot camera, if one is set
+# (mode 1 is the free camera). True when it applied.
+func applyCameraStartOverride(rig: mod CameraRig, camera: mod Camera3d) ret Bool {
+  let cameraOverride: String = cameraStartOverrideFrom(
+    cameraAt: Sys.getEnv(name: "RAE_CAMERA_AT")
+    walkerCamera: Sys.getEnv(name: "RAE_WALKER_CAMERA")
+  )
+  if cameraOverride.length() is 0 {
+    ret false
+  }
+  let overrideParts: List(String) = cameraOverride.split(sep: " ")
+  if applyCameraRigState(
+    parts: overrideParts
+    offset: 0
+    rig: rig
+    camera: camera
+  ) {
+    log("[camera] start camera applied: {cameraOverride}")
+    ret true
+  }
+  ret false
 }
