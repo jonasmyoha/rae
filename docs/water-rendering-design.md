@@ -427,7 +427,7 @@ What made the first toon water read badly, and what changed:
   carries streaks, not patches wider than itself, and 114's stream now starts at
   the shore instead of riding out over the sea on the seabed.
 
-Screenshot cameras: 118 is the fixed test frame; 114 takes `RAE_WALKER_CAMERA`
+Screenshot cameras: 118 is the fixed test frame; 114 takes `RAE_CAMERA_AT` (older name `RAE_WALKER_CAMERA`)
 (the twelve values of `CameraRig.stateString`, mode 1 = free) so a headless frame
 can look at the river or the shore.
 

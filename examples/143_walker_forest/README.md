@@ -64,5 +64,5 @@ renderer draws. The example gate (`compiler/tools/run_examples.sh`) runs it
 and a screenshot.
 
 `RAE_FRAME_TIMING=1 RAE_GPU_PASS_TIMING=1 RAE_DRS=off` print the frame and
-GPU pass times; `RAE_WALKER_CAMERA` and `RAE_WALKER_HOUR` set the start
+GPU pass times; `RAE_CAMERA_AT` (or the older `RAE_WALKER_CAMERA`) and `RAE_WALKER_HOUR` set the start
 camera and hour, as in 136.
