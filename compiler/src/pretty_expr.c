@@ -93,6 +93,10 @@ void pp_write_type(PrettyPrinter* pp, const AstTypeRef* type) {
   } else {
     const AstIdentifierPart* part = type->parts;
     bool first = true;
+    if (type->qualifier.len) {
+      pp_write_str(pp, type->qualifier);
+      pp_write_char(pp, '.');
+    }
     while (part) {
       if (!first) pp_space(pp);
       pp_write_str(pp, part->text);

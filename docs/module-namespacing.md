@@ -257,28 +257,50 @@ exactly one thing:
   unknown-field error. Resolution is unchanged; this only adds context on the
   failure path.
 
-### Type names are program-wide
+### Type names belong to their module (compiler 0.2.101)
 
-Functions, globals and constants are namespaced by module; **type and enum
-names are not**. A program has one `Point`, wherever it is declared, and
-every `Point` in every module means that one. So two modules that both
-declare `type Point` (or `enum Point`) cannot be loaded into one program,
-even when neither opens or imports the other. This is a hard error at the
-second declaration, naming the first (fixture 989_duplicate_type_name):
+A type or enum name follows the same rule as every other name. A type is
+reached bare in its own module and in the modules visible bare there (the
+ones the file opens, the project, the prelude), and as `Module.Type` through
+an `import` (or `open`, or its `as` alias), in a type and in an expression:
+
+```rae
+import Device              # lib/Device declares `enum Pointer`
+
+type Pointer {             # this file's own Pointer
+  x: Int
+}
+
+func isFine(pointer: view Device.Pointer) ret Bool {
+  ret pointer is Device.Pointer.fine
+}
+```
+
+So two modules may both declare `type Point` and live in one program, each
+using its own (fixture 989). A file that sees two of them bare must not name
+it bare: the USE is the error, not the declarations (fixture 1190):
 
 ```
-points/Right.rae:3:1: type 'Point' is declared twice: here and at
-points/Left.rae:2:1 — type names are program-wide, so two modules of one
-program cannot declare the same type name; rename one of them
+Main.rae:8:16: type 'Pointer' is ambiguous: it is declared in both 'Device'
+and 'input/Pointers', which are both open here; open only one of them
 ```
 
-Before the diagnostic, the second declaration was silently dropped, and
-the failure surfaced far away as "unknown field" inside the second module's
-own code (lib/physics' `MeshData` and lib/Mesh3d's). Generic templates and
-their specializations share a name by design and are not affected. The fix
-is to rename one type — a library type takes a name specific to its
-library (`PhysicsMeshData`, `PhysicsShape`). Module-scoped type names
-(`Mesh3d.MeshData` as a type) would be a language change, not taken here.
+A type declared in the using file wins, and an explicit `open` picks between
+two project modules, as for consts. One module still cannot declare the same
+type twice (fixture 1191).
+
+How the compiler does it (src/type_names.c): before sema, every declaration
+of a clashing name but one gets an internal name carrying its module
+(`Point__in_points_Right`), and every use is pointed at the declaration its
+file sees; a lib declaration keeps the written name when there is one. The
+written name is what a program reads as text: string conversion
+(`Point { x: 1 }`), `typeName`, JSON keys and component names. A program with
+no clashing names and no `Module.Type` compiles to the same C as before.
+
+Until 0.2.100 type names were program-wide: two modules declaring `type
+Point` could not be in one program at all, and a lib adding a type could
+break any program with a type of that name (lib/physics' `MeshData` was
+renamed `PhysicsMeshData` for this).
 
 ## Contextual keywords
 

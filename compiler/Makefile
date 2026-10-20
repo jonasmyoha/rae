@@ -65,6 +65,7 @@ SRCS = $(SRC_DIR)/main.c \
        $(SRC_DIR)/rae_format.c \
        $(SRC_DIR)/rae_version.c \
        $(SRC_DIR)/runtime_cache.c \
+       $(SRC_DIR)/type_names.c \
        $(SRC_DIR)/may_wait.c \
        $(SRC_DIR)/when_resolve.c \
        $(SRC_DIR)/rae_deps.c \

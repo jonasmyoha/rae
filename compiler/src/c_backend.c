@@ -3465,8 +3465,9 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       // through the ONE formatter (rae_value_to_str_expr, nested: a String
       // is quoted, an enum is its member name, a struct / List / opt recurses).
       fprintf(out, "RAE_UNUSED static rae_String rae_to_str_%s_(const %s* this) {\n", mangled, mangled);
+      Str written = type_written_name(td->name);  // `Point`, not its internal `Point__in_<module>`
       fprintf(out, "  rae_String __out = (rae_String){(uint8_t*)\"%.*s {\", %d};\n",
-          (int)td->name.len, td->name.data, (int)td->name.len + 2);
+          (int)written.len, written.data, (int)written.len + 2);
       bool first = true;
       for (const AstTypeField* f = td->fields; f; f = f->next) {
           int nl = (int)f->name.len; const char* nd = f->name.data;

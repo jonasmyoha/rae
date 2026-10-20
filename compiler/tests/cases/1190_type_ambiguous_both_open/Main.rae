@@ -1,0 +1,11 @@
+# Two modules this file sees bare both declare `Pointer`: lib/Device (opened)
+# and the project's input/Pointers. A bare use is ambiguous, at the USE (the
+# declarations themselves are fine); and a qualified type must name a module
+# the file imports.
+open Device
+
+func main() {
+  let pointer: Pointer = { x: 3 }
+  let missing: Device.Nothing = Device.Nothing.none
+  log("{pointer.x}")
+}

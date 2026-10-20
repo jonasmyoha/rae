@@ -291,6 +291,14 @@ static AstTypeRef* parse_type_ref(Parser* parser) {
   AstIdentifierPart* parts_head = NULL;
   AstIdentifierPart* parts_tail = NULL;
   bool consumed_base = false;
+  // `Module.Type`: a type reached through an imported module
+  // (docs/module-namespacing.md)
+  if (is_ident_like(parser_peek(parser)->kind) && parser_check_at(parser, 1, TOK_DOT)
+      && is_ident_like(parser_peek_at(parser, 2)->kind)
+      && parser_peek_at(parser, 2)->line == parser_peek(parser)->line) {
+    type->qualifier = parser_copy_str(parser, parser_advance(parser)->lexeme);
+    parser_advance(parser);  // '.'
+  }
   
   while (true) {
     TokenKind kind = parser_peek(parser)->kind;
