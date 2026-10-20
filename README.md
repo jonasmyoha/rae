@@ -70,8 +70,8 @@ func longest(tracks: view List(Track)) ret opt view Track {
   # Find the winner by index, so no track is copied, then hand back a view of it.
   var bestIndex: Int = 0
   loop var i: Int = 1, i < tracks.length, ++i {
-    if let candidate: view Track => tracks.viewAt(index: i) {
-      if let best: view Track => tracks.viewAt(index: bestIndex) {
+    if let candidate: view Track = tracks.viewAt(index: i) {
+      if let best: view Track = tracks.viewAt(index: bestIndex) {
         if candidate.seconds > best.seconds {
           bestIndex = i
         }
@@ -97,15 +97,15 @@ func main() {
   }
 
   # `modAt` hands back a mutable window; `rate` writes through it, into the list.
-  if let first: mod Track => tracks.modAt(index: 0) {
+  if let first: mod Track = tracks.modAt(index: 0) {
     first.rate(stars: 5)
   }
-  if let first: view Track => tracks.viewAt(index: 0) {
+  if let first: view Track = tracks.viewAt(index: 0) {
     log("{first.title} rated {first.rating} stars")
   }
 
-  # The optional view, handled with `if let` — `=>` binds it, no copy.
-  if let top: view Track => longest(tracks: tracks) {
+  # The optional view, handled with `if let`: `view` makes it an alias, no copy.
+  if let top: view Track = longest(tracks: tracks) {
     log("longest: {top.title} ({formatDuration(seconds: top.seconds)})")
   } else {
     log("no tracks")
@@ -149,10 +149,10 @@ func nowPlaying(library: view Library) ret opt view Track {
   ret view library.current
 }
 
-# `if let` narrows it to a reference for the branch. `=>` binds — required
-# here because the optional holds a reference, and `=` never produces a
-# shared handle.
-if let track: view Track => nowPlaying(library: view library) {
+# `if let` narrows it to a reference for the branch. The `view` in the
+# binding's type is what makes `track` an alias: without a mode it would be
+# a copy.
+if let track: view Track = nowPlaying(library: view library) {
   log("playing {track.title} — {formatDuration(seconds: track.seconds)}")
 } else {
   log("nothing playing")
@@ -179,10 +179,45 @@ library's own track rather than a copy of it.
   value" should never be a thing you have to guess or go and check.
 - **`{}` is how a value becomes text.** Interpolation evaluates expressions and
   calls, so printing does not need a formatting mini-language.
-- **`=` copies, `=>` binds.** One character tells you whether a line produces an
-  independent value or a second name for an existing one — without knowing how
-  big the type is or what it holds. `=>` is required wherever the type contains
-  `view` or `mod`, and refused everywhere else.
+- **The mode on the line says what a binding is.** `=` initializes a binding
+  of the declared type; `view T` and `mod T` are types whose values are
+  aliases, exactly as they already are for parameters and `loop let`.
+  Aliasing is marked by the mode keyword everywhere, and nowhere else. So
+  `let x: Track = v` is a fresh deep copy, `let x: view Track = place` is a
+  read-only alias, `let x: mod Track = place` is a writing alias, and
+  `own y` on the right is a move — whatever the type holds. (Decided
+  2026-10-20, replacing the `=>` alias binder; the compiler takes the `=`
+  spelling for aliases from the parser step of that change, see
+  `docs/binding-modes-design.md`.)
+
+### Bindings, one table
+
+`=` on a declaration line initializes. `=` on any other line writes into
+the place the name denotes. An alias is never rebound: after
+`let m: mod Particle = world.a`, the line `m = world.b` deep-copies
+`world.b` INTO `world.a`; it does not make `m` point at `world.b`. A `view`
+on the left of such a line is an error.
+
+| binding | `x = v` on a later line | `x.f = v` |
+|---|---|---|
+| `let x: T = v` | error: a `let` is frozen | error |
+| `var x: T = v` | replaces `x` with a deep copy of `v`; the source never changes | allowed |
+| `let x: view T = place` | error: 'cannot assign through read-only view' | error: 'cannot mutate through read-only view' |
+| `let x: mod T = place` | deep-copies `v` into the place | allowed, writes the place |
+| `var x: view T` / `var x: mod T` | error: 'aliases are bind-once; declare with let' | — |
+| `loop let x: view T in list` | error (read-only) | error |
+| `loop let x: mod T in list` | deep-copies `v` into the element | writes the element |
+| `loop var x: mod T in list` | error: 'aliases are bind-once; declare with let' | — |
+| `loop var x: T in list` | a writable local copy of each element | the copy only |
+| parameter `a: T` | error: a parameter needs a mode | — |
+| parameter `a: view T` | error (read-only) | error |
+| parameter `a: mod T` | deep-copies `v` into the caller's place | writes the caller's place; a `let` cannot be passed |
+
+Every alias row also refuses an alias of a temporary
+(`let v: view T = makeThing()`: 'cannot bind a reference to a call that
+returns ownership'), a `view` passed on to `mod`, and a `mod` alias or `mod`
+loop over a `let`. There is no `var` alias: `var` means rebindable, and an
+alias never is.
 
 ## No type inference: types are always written
 
@@ -210,8 +245,8 @@ reported there. The cost — a few characters per line — buys code that reads 
 same for a human and for a tool, which is the whole point of the language.
 
 (Inference-free does not mean annotation-heavy everywhere: `if let v: T = ...`
-narrows an optional, `=>` binds a `view`/`mod` alias whose type you still write,
-and a struct is built as `let p: Point = { ... }`. What is *never* inferred is
+narrows an optional, `let v: view T = place` binds an alias whose type you
+still write, and a struct is built as `let p: Point = { ... }`. What is *never* inferred is
 the type of a binding.)
 
 ## No member functions: every function is a free function
@@ -353,11 +388,14 @@ binding and at the call site (`&mut x`), and when a type change turns a copy
 into a move, every later use of the moved-from value is a compile error rather
 than a change in behaviour.
 
-In Rae the operator carries the meaning, so the meaning survives the refactor:
+In Rae, `=` initializes a binding of the declared type, and `view T` and
+`mod T` are types whose values are aliases, exactly as they already are for
+parameters and `loop let`. Aliasing is marked by the mode keyword
+everywhere, and nowhere else. So the meaning survives the refactor:
 
 ```rae
 func process(x: view Track) ret Track {
-  var y: Track = x  # still a copy — `=` copies, whatever the type
+  var y: Track = x  # still a copy: no mode, so a fresh copy, whatever the type
   y.value = 42  # mutates the copy only
   ret x  # x is untouched, same as the Int version
 }
@@ -368,7 +406,7 @@ If aliasing is what you want, you have to say so — and saying so propagates:
 ```rae
 func process(x: mod Track) ret Track {
   # the signature must say mod
-  let y: mod Track => x  # `=>` binds; `=` would refuse
+  let y: mod Track = x  # an alias: the mode says so
   y.value = 42  # writes to the caller's track
   ret x
 }
@@ -376,12 +414,13 @@ func process(x: mod Track) ret Track {
 
 Now every caller reads `process(x: mod track)` — the mutation is admitted at
 the signature, at the call site, and at the binding. A read-only window can't
-be promoted along the way (`mod Track => x` is an error when `x` is `view`),
+be promoted along the way (`let y: mod Track = x` is an error when `x` is `view`),
 and writing through a view is an error, full stop:
 
 ```rae
-let v: view Track => x
+let v: view Track = x
 v.value = 42          # ERROR: v is a view
+v = other             # ERROR: a view is never written, and never rebound
 ```
 
 So the `Int` → `Track` refactor cannot silently succeed with a changed
@@ -412,9 +451,10 @@ That single rule removes the largest family of memory bugs by construction:
   "reference that survived its owner."
 - **No use-after-free across scopes.** A borrow cannot be held in a struct or
   carried past its owner, so a drop elsewhere cannot leave it dangling.
-- **No aliased-mutation surprises.** `=` copies — always, whatever the type
-  (see above); aliasing is spelled `=>`, and only where the signature already
-  admits `mod`. A read-only `view` can't be promoted to a writer, and writing
+- **No aliased-mutation surprises.** A binding without a mode copies —
+  always, whatever the type (see above); an alias is spelled by `view` /
+  `mod` on its own line, and a writing alias only where the signature
+  already admits `mod`. A read-only `view` can't be promoted to a writer, and writing
   through a `view` is a compile error.
 
 Rust guarantees the same absence of dangling references, but pays for it with a
