@@ -363,8 +363,14 @@ func now() ret Timestamp {
   unsafe {
     ms = nowMs()
   }
-  let secs: Float64 = ms.toFloat() as Float64
-  ret Timestamp { seconds: secs / 1000.0 }
+  ret timestampFromMs(ms: ms)
+}
+
+# A reading `ms` milliseconds after the epoch. Straight to Float64: through
+# Int.toFloat (a 32-bit Float) today's ~1.76e12 ms rounds to 131-second steps.
+func timestampFromMs(ms: view Int) ret Timestamp {
+  let milliseconds: Float64 = ms as Float64
+  ret Timestamp { seconds: milliseconds / 1000.0 }
 }
 
 func atSeconds(s: view Float64) ret Timestamp {

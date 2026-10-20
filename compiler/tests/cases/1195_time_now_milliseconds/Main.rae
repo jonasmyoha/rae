@@ -1,0 +1,17 @@
+# lib/Time: a wall-clock reading keeps its milliseconds. Today's clock is about
+# 1.76e12 ms; through a 32-bit Float it moves in 131-second steps, so two
+# readings minutes apart came out the same (a program seeding from it got
+# the same seed for two minutes, then jumped).
+open Time
+
+func main() {
+  let reading: Timestamp = timestampFromMs(ms: 1760000000123)
+  let back: Int = (reading.seconds * 1000.0 + 0.5) as Int
+  log("the milliseconds survive: {back is 1760000000123}")
+  let later: Timestamp = timestampFromMs(ms: 1760000001123)
+  log(
+    "a second later reads a second later: {later.since(earlier: reading).seconds > 0.999 and later.since(
+      earlier: reading
+    ).seconds < 1.001}"
+  )
+}
