@@ -29,6 +29,9 @@ open app3d/WalkerTerrain
 open app3d/WalkerPhysics
 open app3d/NetSeam
 open app3d/WorldLabel
+open Math3d
+open app3d/LocomotionClips
+open app3d/CharacterHeight
 
 type WalkerWorld {
   allocator: EntityAllocator
@@ -67,6 +70,11 @@ type WalkerWorld {
   netPlayers: ComponentTable(NetPlayer)
   # Names over the crowd (app3d/WorldLabel; app3d/WalkerNames writes them)
   worldLabels: ComponentTable(WorldLabel)
+  # Each character's height (app3d/CharacterHeight: its model, clips and
+  # mover follow it), and what drives its clip this frame
+  # (app3d/LocomotionClips)
+  heights: ComponentTable(CharacterHeight)
+  locomotionClips: ComponentTable(LocomotionClip)
 }
 
 func createWalkerWorld() ret WalkerWorld {
@@ -88,6 +96,8 @@ func createWalkerWorld() ret WalkerWorld {
     hierarchyOrder: createHierarchyOrder()
     netPlayers: ComponentTable.create(NetPlayer)
     worldLabels: ComponentTable.create(WorldLabel)
+    heights: ComponentTable.create(CharacterHeight)
+    locomotionClips: ComponentTable.create(LocomotionClip)
   }
 }
 
@@ -170,4 +180,33 @@ func despawnCubeEntity(
   despawnPhysicsCube(physicsSystem: physicsSystem, entityId: entityId)
   clearEntityComponents(world: world, entityId: entityId)
   freeEntity(this: world.allocator, entityId: entityId)
+}
+
+# `entityId`'s height (the model's own without one)
+func walkerHeightOf(
+  world: view WalkerWorld
+  characterSystem: view CharacterSystem
+  entityId: view EntityId
+) ret Float {
+  ret characterHeightOf(
+    heights: world.heights
+    entityId: entityId
+    fallback: characterSystem.modelHeight
+  )
+}
+
+# `entityId`'s render model: the shared model at its height, where its
+# controller stands
+func walkerCharacterModel(
+  world: view WalkerWorld
+  characterSystem: view CharacterSystem
+  entityId: view EntityId
+) ret Mat4 {
+  ret walkerWorldModel(
+    baseModel: heightPartModel(
+      characterSystem: characterSystem
+      height: walkerHeightOf(world: world, characterSystem: characterSystem, entityId: entityId)
+    )
+    controller: controllerOf(controllers: world.controllers, entityId: entityId)
+  )
 }

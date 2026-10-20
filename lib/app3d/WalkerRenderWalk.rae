@@ -75,6 +75,7 @@ open app3d/WalkerSplash
 open RendererForward
 open RendererPassTiming
 open app3d/WalkerKnockdown
+open app3d/CharacterHeight
 
 # One frame of a character's clock (app3d/Characters stepCharacterClock): its
 # clip at the walker's rate (walkFast is the walk clip at 1.6x)
@@ -100,7 +101,17 @@ func stepWalkerCharacterClock(
     transition: transition
     playing: characterSystem.playing
     speed: characterSystem.speed
-    rate: clipPlaybackRate(clipIndex: anim.clipIndex)
+    # Its strides by its height (app3d/CharacterHeight)
+    rate: strideClipRate(
+      clipIndex: anim.clipIndex
+      rate: clipPlaybackRate(clipIndex: anim.clipIndex)
+      height: characterHeightOf(
+        heights: world.heights
+        entityId: entityId
+        fallback: characterSystem.modelHeight
+      )
+      tunedHeight: characterSystem.tunedHeight
+    )
     deltaTime: deltaTime
   )
 }
