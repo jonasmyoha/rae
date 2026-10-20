@@ -20,6 +20,7 @@ open ui/InputComponents
 open collections/StringMap
 open ui/TouchStick
 open ui/NodeBinding
+open ui/HudOverlay
 
 # One semantic UI action produced by the input system when a click resolves to
 # an OnClick's actionId (#943). Drained by the app's UI dispatch through the
@@ -62,6 +63,9 @@ type UiWorld {
   # apply (ui/NodeBinding, lib/ui/nodeBindingSystem)
   boundTexts: ComponentTable(BoundText)
   boundActives: ComponentTable(BoundActive)
+  # What is drawn over the scene in the 2D overlay pass, one entity each
+  # (ui/HudOverlay)
+  hudOverlays: ComponentTable(HudOverlay)
   aligns: ComponentTable(Align)
   offsets: ComponentTable(Offset)
   constraints: ComponentTable(Constraints)
@@ -247,6 +251,7 @@ func createUiWorld() ret UiWorld {
     touchSticks: ComponentTable.create(TouchStick)
     boundTexts: ComponentTable.create(BoundText)
     boundActives: ComponentTable.create(BoundActive)
+    hudOverlays: ComponentTable.create(HudOverlay)
     aligns: ComponentTable.create(Align)
     offsets: ComponentTable.create(Offset)
     constraints: ComponentTable.create(Constraints)
