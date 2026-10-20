@@ -1,32 +1,81 @@
 # Binding modes
 
-Status: **decided 2026-09-30: option N of `docs/binding-syntax-survey.md`.**
-This replaces the `name: mode Type: value` grammar settled on 2026-09-29,
-which is withdrawn (it is in git history). The ownership model (who takes,
-who copies, who aliases) is unchanged. Only its spelling went back to the
-one Rae already has.
+Status: **decided 2026-09-30: option N of `docs/binding-syntax-survey.md`;
+revised 2026-10-20: `=` is the only binder, `=>` goes (§1).** The revision
+lands in six queued steps ("binding `=` 1/6" to "6/6"): until the parser
+step the compiler still spells an alias binding `=>`, and until the error
+step it accepts both. The 2026-09-30 decision replaced the
+`name: mode Type: value` grammar settled on 2026-09-29, which is withdrawn
+(it is in git history). The ownership model (who takes, who copies, who
+aliases) is unchanged.
 
 Origin: the canvas-hover leak (#13186639) showed that the C backend decides
 ownership with flags flipped during emission. The fix for that is
 implementation work (§5). The syntax question it raised, how a binding says
-what it does, is answered here: by the binder, which Rae already spells three
-ways.
+what it does, is answered here: by the mode written on the binding's line.
 
 ## 1. The decision
 
-Three binders, one meaning each:
+**Decision 2026-10-20: `=` is the only binder; `=>` goes.** A
+binding's mode, written on the same line, decides what the name denotes:
 
-| binder | meaning | where |
-|---|---|---|
-| `:` | a **label**: a name's type and mode, or a slot in *another* namespace that gets a value | parameters, type fields, named arguments, struct-literal fields |
-| `=` | a **place here is written now**: copy, or move with `own` | local declarations, assignments, field defaults |
-| `=>` | a **name is bound to an existing place**: an alias, no value moves | `let v: view T => place`, `if let v: view T => opt` |
+- no mode (`let x: T = v`): the name holds a **fresh deep copy** of the
+  right-hand side;
+- `view T` / `mod T` (`let x: view T = place`): the name is an **alias** of
+  the place on the right;
+- `own x` on the right (`let x: T = own y`): a **move**, `y` ends.
 
-The left side of `f(world: world)` or `{ name: n }` is not a place the caller
-can see. It is a parameter of the callee, or a field of the type being built:
-a slot defined elsewhere and filled from here. The left side of `x = v` is a
-place in this scope, written at this moment. An alias is neither: it names a
-place that already exists.
+`=` initializes a binding of the declared type; `view T` and `mod T` are
+types whose values are aliases, exactly as they already are for parameters
+and `loop let`. Aliasing is marked by the mode keyword everywhere, and
+nowhere else.
+
+**The one subtlety.** `=` on a declaration line initializes. `=` on any
+other line writes into the place the name denotes. An alias can never be
+rebound, so
+
+```rae
+let m: mod Particle = world.a
+m = world.b      # deep-copies world.b INTO world.a; m still denotes world.a
+```
+
+is a write through the alias, not a rebind, and `world.b` stays independent.
+A `view` on the left of a non-declaration `=` is an error.
+
+The table (approved 2026-10-20):
+
+| # | binding | rebind | `x = v` on a later line | `x.f = v` |
+|---|---|---|---|---|
+| 1 | `let x: T = v` | no | error: a `let` is frozen | error: a `let` is frozen |
+| 2 | `var x: T = v` | — | replaces `x` with a deep copy of `v`; the source never changes | allowed |
+| 3 | `let x: view T = place` | no | error: 'cannot assign through read-only view' | error: 'cannot mutate through read-only view' |
+| 4 | `let x: mod T = place` | no | deep-copies `v` into the place | allowed, writes the place |
+| 5 | `var x: view T = …` / `var x: mod T = …` | — | error: 'aliases are bind-once; declare with let' | — |
+| 6 | `loop let x: view T in list` | no | error (read-only) | error (read-only) |
+|   | `loop let x: mod T in list` | no | deep-copies `v` into the element | allowed, writes the element |
+|   | `loop var x: mod T in list` | — | error: 'aliases are bind-once; declare with let' | — |
+|   | `loop var x: T in list` | — | allowed: a writable local copy of each element | allowed, the copy only |
+| 7 | parameter `a: T` (no mode) | — | error: a parameter needs a mode | — |
+|   | parameter `a: view T` | no | error (read-only) | error (read-only) |
+|   | parameter `a: mod T` | no | deep-copies `v` into the caller's place | allowed, writes the caller's place; a `let` cannot be passed to it |
+
+Errors in every alias row (3, 4, 6, 7):
+
+- a `view`/`mod` of a temporary: `let v: view T = makeThing()` is 'cannot
+  bind a reference to a call that returns ownership';
+- a `view` passed on to `mod` (binding, argument or method receiver);
+- (from step 2 of the migration) a `mod` alias of a `let`, or a `mod` loop
+  over a `let`: the same 'frozen' error a `let` passed to a `mod` parameter
+  already gets.
+
+**Considered and rejected: `var x: mod T`.** `var` means rebindable, and an
+alias never is. A `var` alias would make `x = v` ambiguous (rebind the name,
+or write the place?), which is exactly the question the mode keyword is
+there to settle. So an alias is `let`-only, as it already was with `=>`.
+
+Labels stay `:`. The left side of `f(world: world)` or `{ name: n }` is not
+a place the caller can see. It is a parameter of the callee, or a field of
+the type being built: a slot defined elsewhere and filled from here.
 
 Where modes are written:
 
@@ -34,8 +83,8 @@ Where modes are written:
   already the rule (bare parameters are a compile error, see
   `docs/ownership-model.md`). It is the contract with the caller: `own`
   versus `copy` says whether the caller's name ends or survives.
-- **Locals carry one only when they alias**: `let v: view T => x`,
-  `let m: mod T => x`. A value local is `let x: T = v` or `var x: T = v`, and
+- **Locals carry one only when they alias**: `let v: view T = x`,
+  `let m: mod T = x`. A value local is `let x: T = v` or `var x: T = v`, and
   what `=` does is read off the right-hand side (§2).
 - **Return types carry one only when they hand out an alias**: `ret view T`,
   `ret mod T`, `ret opt view T`. A plain `ret T` returns a value. `own` /
@@ -59,9 +108,9 @@ func firstItem(holder: view Holder) ret opt view String
 
 let a: Holder = makeHolder()         # a new value: taken
 let b: Holder = a                    # copied; a stays
-let c: Holder = own a                # moved; a ends
-let v: view Holder => b              # an alias
-let m: mod Holder => c
+var c: Holder = own a                # moved; a ends
+let v: view Holder = b               # an alias
+let m: mod Holder = c                # an alias that writes c
 let n: Int = settings.count          # a field: copied
 
 store(holder: b)                     # own parameter: b ends
@@ -69,20 +118,27 @@ snapshot(holder: c)                  # copy parameter: c stays
 store(holder: v)                     # an alias into own: copied
 holder.label = name                  # copied; name stays
 app.document = own newDocument       # moved
+m = b                                # deep-copies b into c (not a rebind)
 ret Holder { label: other.label, items: own items }   # copied; moved
 
 loop let row: view ListViewRow in rows { … }
 loop var i: Int = 0, i < n, ++i { … }
-if let inner: view Inner => outer.maybe { … }
+if let inner: view Inner = outer.maybe { … }
 if let member: EntityId = selection.copyAt(index: k) { … }
 if var track: Track = loadTrack(id: 3) { track.volume = 0.5 }   # a mutable payload
 loop var word: String in words { … }   # a mutable COPY of each element
 ```
 
+The 2026-09-30 form of this decision had three binders: `:` for labels,
+`=` for "a place here is written now", and `=>` for "a name is bound to an
+existing place". The revision folds `=>` into `=`: the alias is already
+written on the line, in the type, so a second marker in the operator said
+the same thing twice and had to be kept in step with it.
+
 A binding that holds its own value has a frozen `let` form and a mutable
 `var` form, everywhere it appears: `let`/`var`, `if let`/`if var`,
 `loop let x: T in`/`loop var x: T in` (docs/let-is-frozen.md). An alias
-(`view T` / `mod T`, bound with `=>` or as a loop element) has only `let`:
+(`view T` / `mod T`, a local or a loop element) has only `let`:
 its mode already says what it may do, and aliases are bind-once.
 
 ## 2. The matrix
@@ -95,7 +151,7 @@ Sources: an owned name `x`; `own x`; an alias or a field (`v`, `a.b`,
 expression). A call that returns `view T` / `mod T` / `opt view T` yields an
 alias, never a new value.
 
-| source ↓ / receiver → | `own` parameter | `copy` parameter | `view` / `mod` (parameter or `=>` local) | value position (`=`, literal field, `ret`) |
+| source ↓ / receiver → | `own` parameter | `copy` parameter | `view` / `mod` (parameter, alias local or loop element) | value position (`=`, literal field, `ret`) |
 |---|---|---|---|---|
 | owned name `x` | **move**, x ends | copy | alias (`mod`: x must be `var`) | copy |
 | `own x` | move, asserted | error | error | **move**, x ends |
@@ -107,7 +163,7 @@ Rules the table does not show:
 - **A moved name cannot be read** on any path that reaches the move. A `var`
   that was moved from is live again once assigned.
 - **A `const` is an alias-or-field source**: copied or viewed, never taken.
-- **`view` → `mod` is an error**, whether in an `=>` binding or when a `view`
+- **`view` → `mod` is an error**, whether in an alias binding or when a `view`
   is passed to a `mod` parameter. So is passing a field of a `view` to `mod`.
 - **`ret x` of an owned local hands it over**; `ret` of a field copies; `ret`
   of a new value takes it.
@@ -133,9 +189,15 @@ same snippet in 18 languages. In short:
 - **`=` for named arguments** (option M) buys call/declaration mirroring,
   but a parameter label is not a place in the caller's scope, and the change
   touches most lines of the tree.
-- **Option N keeps `README.md`'s refactoring argument literally true**:
-  `=` never aliases and copies whatever the type; `=>` always aliases; a move
-  is always the written word `own`.
+- **Option N keeps `README.md`'s refactoring argument true**: a binding
+  without a mode copies whatever the type; a binding aliases only when its
+  type says `view` or `mod`; a move is always the written word `own`. (In the
+  2026-09-30 form the argument was "the operator carries the meaning": `=`
+  copies, `=>` aliases. Since 2026-10-20 the mode keyword carries it, the
+  same keyword parameters and `loop let` already use.)
+- **Keeping `=>` beside the mode** (the 2026-09-30 form) marks an alias
+  twice, once in the type and once in the operator, and the two must agree
+  or the line is an error. One marker is enough when it is always written.
 
 ## 4. What the compiler must change
 
