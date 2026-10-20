@@ -57,6 +57,11 @@ static int    g_g2d_win_resized = 0;
  * too, marked with SDL_TOUCH_MOUSEID / SDL_PEN_MOUSEID, so the mouse
  * events say which device produced them. */
 static int    g_g2d_pointer_kind = 0;
+/* A simulated finger's pointer (rae_ext_Gpu2d_simulateFingerPointer): once a
+ * test has made one, the pointer stands where it put it (0..1 of the window). */
+static int    g_g2d_sim_pointer = 0;
+static float  g_g2d_sim_pointer_nx = 0.0f;
+static float  g_g2d_sim_pointer_ny = 0.0f;
 
 /* Live resize. macOS runs a window drag-resize in its own event loop, inside
  * whichever SDL call was pumping events when the drag began, so the app's
@@ -672,6 +677,32 @@ void rae_ext_Gpu2d_simulateTouch(int64_t kind, int64_t id, float x, float y){
     SDL_PushEvent(&ev);
 }
 
+/* The pointer SDL makes of a finger (kind 0 down, 1 motion, 2 up; x, y 0..1
+ * of the window): the mouse moved there, and its button events marked
+ * SDL_TOUCH_MOUSEID, as SDL sends them for the first finger on a touch
+ * screen. Pushed events do not make SDL's own pointer, so a test that wants
+ * one finger to be the pointer too sends both. */
+void rae_ext_Gpu2d_simulateFingerPointer(int64_t kind, float x, float y){
+    if (!g_sdl_win) return;
+    int lw = 0, lh = 0; SDL_GetWindowSize(g_sdl_win, &lw, &lh);
+    /* Not SDL_WarpMouseInWindow: on a desktop that moves the real cursor */
+    g_g2d_sim_pointer = 1;
+    g_g2d_sim_pointer_nx = x;
+    g_g2d_sim_pointer_ny = y;
+    if (kind == 1) return;
+    SDL_Event ev;
+    SDL_zero(ev);
+    ev.type = (kind == 0) ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP;
+    ev.button.which = SDL_TOUCH_MOUSEID;
+    ev.button.button = SDL_BUTTON_LEFT;
+    ev.button.down = (kind == 0);
+    ev.button.clicks = 1;
+    ev.button.x = x * (float)lw;
+    ev.button.y = y * (float)lh;
+    if (g_sdl_win) ev.button.windowID = SDL_GetWindowID(g_sdl_win);
+    SDL_PushEvent(&ev);
+}
+
 void rae_ext_Gpu2d_simulateEnterBackground(void){
     SDL_Event ev;
     SDL_zero(ev);
@@ -700,6 +731,7 @@ static void rae_g2d_pointer_design(double* dx, double* dy) {
     }
     float mx = 0, my = 0; SDL_GetMouseState(&mx, &my);
     int lw = 0, lh = 0; if (g_sdl_win) SDL_GetWindowSize(g_sdl_win, &lw, &lh);
+    if (g_g2d_sim_pointer) { mx = g_g2d_sim_pointer_nx * (float)lw; my = g_g2d_sim_pointer_ny * (float)lh; }
     double sclx = (lw > 0) ? (double)g_sdl_w / (double)lw : 1.0;
     double scly = (lh > 0) ? (double)g_sdl_h / (double)lh : 1.0;
     float xf[8]; rae_g2d_compute_xform(xf);

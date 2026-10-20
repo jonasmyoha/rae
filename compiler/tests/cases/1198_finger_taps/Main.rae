@@ -1,0 +1,159 @@
+# Every finger presses a UI button, not only the one SDL makes the pointer
+# of. SDL turns the FIRST finger on a touch screen into the pointer; a second
+# finger makes no pointer events, so on a phone a button could not be pressed
+# while a thumb held a joystick. updateUiInput now fires the OnClick action of
+# the node under every other finger as it comes down, once per press; the
+# pointer's own finger clicks through the pointer on release, as the mouse
+# does, so it is counted once.
+import String
+import Gpu2d
+import Gpu2dSimulatedInput
+open ui/Components
+open ui/Ecs
+open ui/Scene
+open ui/SceneLoader
+open ui/UiSystems
+open ui/layoutSystem/LayoutSystem
+open ui/Transform
+open ui/inputSystem/InputSystem
+open ecs/Entity
+open ecs/Event
+
+func buildScene(width: view Float, height: view Float) ret String {
+  var s: String = ""
+  s = s.concat(other: "\{")
+  s = s.concat(other: "\"type\":\"Scene\",\"version\":2,\"sceneId\":\"taps\",\"root\":\"Root\",")
+  s = s.concat(other: "\"nodes\":\{")
+  s = s.concat(
+    other: "\"Root\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":{width.toInt()},\"h\":{height.toInt()}\},\"Layout\":\{\"type\":\"Horizontal\"\},\"Children\":[\"Left\",\"Right\"]\},"
+  )
+  s = s.concat(
+    other: "\"Left\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":10,\"h\":10\},\"Size\":\{\"w\":\{\"mode\":\"Fill\"\},\"h\":\{\"mode\":\"Fill\"\}\},\"OnClick\":\{\"actionId\":\"press.left\"\}\},"
+  )
+  s = s.concat(
+    other: "\"Right\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":10,\"h\":10\},\"Size\":\{\"w\":\{\"mode\":\"Fill\"\},\"h\":\{\"mode\":\"Fill\"\}\},\"OnClick\":\{\"actionId\":\"press.right\"\}\}"
+  )
+  s = s.concat(other: "\}")
+  s = s.concat(other: "\}")
+  ret s
+}
+
+func finger(kind: view Int, id: view Int, x: view Float) {
+  Gpu2dSimulatedInput.simulateTouch(
+    kind: kind
+    id: id
+    x: x
+    y: 0.5
+  )
+}
+
+func pointer(kind: view Int, x: view Float) {
+  Gpu2dSimulatedInput.simulateFingerPointer(kind: kind, x: x, y: 0.5)
+}
+
+# One frame: the events in, the UI's input read, its actions listed
+func frame(
+  step: view String
+  input: mod UiInput
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+) {
+  let closed: Bool = Gpu2d.pollClose()
+  updateUiInput(input: input, world: world, uiSystems: uiSystems)
+  var actions: String = ""
+  loop var i: Int = 0, i < eventCount(UiAction, this: world.uiActions), ++i {
+    let action: UiAction = eventAt(UiAction, this: world.uiActions, i: i)
+    actions = actions.concat(other: " {action.actionId}")
+  }
+  log("{step}:{actions}")
+}
+
+func main() {
+  Gpu2d.initWindow(width: 400, height: 200, title: "taps")
+  let width: Float = Gpu2d.designWidth()
+  let height: Float = Gpu2d.designHeight()
+  let scene: Scene = parseScene(source: buildScene(width: width, height: height))
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = width
+  world.layoutH = height
+  let root: EntityId = loadSceneIntoPage(
+    world: world
+    uiSystems: uiSystems
+    scene: scene
+    pageId: "p"
+  )
+  layoutSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+  var input: UiInput = createUiInput()
+  let down: Int = Gpu2dSimulatedInput.simulatedTouchDown
+  let up: Int = Gpu2dSimulatedInput.simulatedTouchUp
+  # Two fingers, neither the pointer's (a pushed finger makes no pointer)
+  finger(kind: down, id: 1, x: 0.25)
+  frame(
+    step: "a finger down on the left"
+    input: input
+    world: world
+    uiSystems: uiSystems
+  )
+  finger(kind: down, id: 2, x: 0.75)
+  frame(
+    step: "it held, a second down on the right"
+    input: input
+    world: world
+    uiSystems: uiSystems
+  )
+  frame(
+    step: "both held"
+    input: input
+    world: world
+    uiSystems: uiSystems
+  )
+  finger(kind: up, id: 1, x: 0.25)
+  finger(kind: up, id: 2, x: 0.75)
+  frame(
+    step: "both lifted"
+    input: input
+    world: world
+    uiSystems: uiSystems
+  )
+  # One finger that is also the pointer: it clicks once, on release
+  finger(kind: down, id: 3, x: 0.25)
+  pointer(kind: down, x: 0.25)
+  frame(
+    step: "the pointer's finger down on the left"
+    input: input
+    world: world
+    uiSystems: uiSystems
+  )
+  finger(kind: down, id: 4, x: 0.75)
+  frame(
+    step: "it held, another down on the right"
+    input: input
+    world: world
+    uiSystems: uiSystems
+  )
+  finger(kind: up, id: 4, x: 0.75)
+  frame(
+    step: "the other lifted"
+    input: input
+    world: world
+    uiSystems: uiSystems
+  )
+  finger(kind: up, id: 3, x: 0.25)
+  pointer(kind: up, x: 0.25)
+  frame(
+    step: "the pointer's finger lifted"
+    input: input
+    world: world
+    uiSystems: uiSystems
+  )
+  # A finger down after the pointer's has gone is no pointer's either
+  finger(kind: down, id: 5, x: 0.75)
+  frame(
+    step: "a new finger down on the right"
+    input: input
+    world: world
+    uiSystems: uiSystems
+  )
+}
