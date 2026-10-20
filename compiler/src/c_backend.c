@@ -3144,35 +3144,9 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       fprintf(out, "RAE_UNUSED static %s rae_default_%s_(void);\n", mangled, mangled);
   }
   fprintf(out, "\n");
-  for (size_t i = 0; i < ctx->all_decl_count; i++) {
-      const AstDecl* d = ctx->all_decls[i];
-      if (d->kind != AST_DECL_TYPE || d->as.type_decl.generic_params) continue;
-      if (has_property(d->as.type_decl.properties, "c_struct")) continue;
-      const AstTypeDecl* td = &d->as.type_decl;
-      if (earlier_same_named_type(ctx, i, td->name)) continue;
-      const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = td->name}});
-      fprintf(out, "RAE_UNUSED static %s rae_default_%s_(void) {\n", mangled, mangled);
-      fprintf(out, "  %s __r = {0};\n", mangled);
-      for (const AstTypeField* f = td->fields; f; f = f->next) {
-          if (!f->type || f->type->is_view || f->type->is_mod) continue;
-          if (f->default_value) {
-              // The declared default, emitted with the field's type as the
-              // expected type so a bare `{ x: 1.0, y: 1.0 }` literal lowers.
-              CFuncContext dctx = {0}; dctx.compiler_ctx = ctx; dctx.module = module;
-              dctx.expected_type = *f->type; dctx.has_expected_type = true;
-              fprintf(out, "  __r.%.*s = ", (int)f->name.len, f->name.data);
-              emit_expr(&dctx, f->default_value, out, PREC_LOWEST, false, false);
-              fprintf(out, ";\n");
-              continue;
-          }
-          if (f->type->is_opt || f->type->generic_args) continue;   // none / empty
-          Str base = get_base_type_name(f->type);
-          const char* fm = rae_json_struct_mangled(ctx, module, base);
-          if (fm && !find_enum_decl(NULL, module, base))
-              fprintf(out, "  __r.%.*s = rae_default_%s_();\n", (int)f->name.len, f->name.data, fm);
-      }
-      fprintf(out, "  return __r;\n}\n\n");
-  }
+  // Their definitions come after the module globals (below): a field default
+  // may name a module const (`daySeconds: Float = clockDaySeconds`), whose
+  // `rae_g_` global must be declared before it is read.
 
   // Every struct that gets generated helpers: each non-generic user struct and
   // each concrete generic instantiation (Pair(String), ...), fields substituted
@@ -4436,6 +4410,38 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
           if (webgpu_binding) fprintf(out, "#endif\n");
       }
       fprintf(out, "\n");
+  }
+
+  // #961: the `T.default()` bodies, declared above; here, after the module
+  // globals, because a field default may read one.
+  for (size_t i = 0; i < ctx->all_decl_count; i++) {
+      const AstDecl* d = ctx->all_decls[i];
+      if (d->kind != AST_DECL_TYPE || d->as.type_decl.generic_params) continue;
+      if (has_property(d->as.type_decl.properties, "c_struct")) continue;
+      const AstTypeDecl* td = &d->as.type_decl;
+      if (earlier_same_named_type(ctx, i, td->name)) continue;
+      const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = td->name}});
+      fprintf(out, "RAE_UNUSED static %s rae_default_%s_(void) {\n", mangled, mangled);
+      fprintf(out, "  %s __r = {0};\n", mangled);
+      for (const AstTypeField* f = td->fields; f; f = f->next) {
+          if (!f->type || f->type->is_view || f->type->is_mod) continue;
+          if (f->default_value) {
+              // The declared default, emitted with the field's type as the
+              // expected type so a bare `{ x: 1.0, y: 1.0 }` literal lowers.
+              CFuncContext dctx = {0}; dctx.compiler_ctx = ctx; dctx.module = module;
+              dctx.expected_type = *f->type; dctx.has_expected_type = true;
+              fprintf(out, "  __r.%.*s = ", (int)f->name.len, f->name.data);
+              emit_expr(&dctx, f->default_value, out, PREC_LOWEST, false, false);
+              fprintf(out, ";\n");
+              continue;
+          }
+          if (f->type->is_opt || f->type->generic_args) continue;   // none / empty
+          Str base = get_base_type_name(f->type);
+          const char* fm = rae_json_struct_mangled(ctx, module, base);
+          if (fm && !find_enum_decl(NULL, module, base))
+              fprintf(out, "  __r.%.*s = rae_default_%s_();\n", (int)f->name.len, f->name.data, fm);
+      }
+      fprintf(out, "  return __r;\n}\n\n");
   }
 
   // Forward declarations for user extern functions (not in runtime header)

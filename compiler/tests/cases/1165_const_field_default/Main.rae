@@ -1,0 +1,16 @@
+# A const-valued field default, used from another module than the one that
+# declares the const and the type: a literal that leaves the field out, an
+# empty literal, T.default() and a nested struct. The C used to read the
+# const's global before declaring it, and did not compile (#13107690).
+open Clock
+
+func main() {
+  let given: Clock = { name: "moon" }
+  log("{given.hour} {given.daySeconds} {given.name}")
+  let empty: Clock = {}
+  log("{empty.hour} {empty.daySeconds} {empty.name}")
+  let made: Clock = Clock.default()
+  log("{made.hour} {made.daySeconds}")
+  let calendar: Calendar = {}
+  log("{calendar.clock.hour} {calendar.longDay}")
+}
