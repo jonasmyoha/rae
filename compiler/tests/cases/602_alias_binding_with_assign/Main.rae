@@ -1,0 +1,27 @@
+# docs/binding-modes-design.md §1 (2026-10-20): the mode in the type says
+# what a binding is. With `view T` / `mod T` (at any level, `opt view T`
+# too), `=` binds an alias of the place on the right, exactly as `=>` does;
+# with no mode, `=` makes a copy.
+type Track {
+  title: String
+  seconds: Int
+}
+
+func main() {
+  var track: Track = { title: "Intro", seconds: 95 }
+  let copy: Track = track
+  let writer: mod Track = track
+  writer.seconds = 100
+  let reader: view Track = track
+  writer.title = "Opening"
+  log("{track.title} {track.seconds} {reader.seconds} (copy: {copy.title} {copy.seconds})")
+  let maybe: opt view Track = view track
+  if let found: view Track = maybe {
+    log("found {found.title}")
+  }
+  var tracks: List(Track) = { { title: "a", seconds: 1 } }
+  if let first: mod Track = tracks.modAt(index: 0) {
+    first.seconds = 2
+  }
+  log("{tracks.viewAt(index: 0).seconds}")
+}
