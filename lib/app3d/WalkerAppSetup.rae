@@ -16,6 +16,7 @@ open ui/renderSystem/RenderSystem
 open app3d/ControlPanel
 open app3d/CharacterController
 open app3d/WalkerCharacter
+open app3d/Characters
 open app3d/WalkerPhysics
 open app3d/WalkerTerrain
 open app3d/WalkerTerrainBodies
@@ -389,4 +390,29 @@ func createWalkerAppPhysics(
     )
   }
   ret physicsSystem
+}
+
+# The parts every character entity carries besides its controller and clip:
+# its clip transition (app3d/Characters) and its render model, now and last
+# frame (for motion vectors)
+func addWalkerCharacterComponents(
+  world: mod WalkerWorld
+  entityId: view EntityId
+  skeleton: view Skeleton
+  basePartModel: view Mat4
+) {
+  componentSet(
+    this: world.animTransitions
+    entityId: entityId
+    data: createAnimationTransition(skeleton: skeleton, duration: clipTransitionDuration)
+  )
+  let model: Mat4 = walkerWorldModel(
+    baseModel: basePartModel
+    controller: controllerOf(world: world, entityId: entityId)
+  )
+  componentSet(
+    this: world.characterModels
+    entityId: entityId
+    data: CharacterModel { model: model, prevModel: model }
+  )
 }

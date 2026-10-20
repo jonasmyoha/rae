@@ -1,0 +1,259 @@
+# app3d/Characters — skinned characters as ECS entities: every character, the
+# one the player drives and every other alike, is an entity carrying a
+# ThirdPersonController (CharacterController), an AnimationState (its clip and
+# where in it) and an AnimationTransition (the pose it blends from after a
+# clip change); the one the local player drives also carries the Controlled
+# tag. A CharacterSystem holds only what all of them share: the skeleton (a
+# scratch pose, posed for one character after another), the clips, the bind
+# pose, the playback switches, the asset's placement and the instance batch
+# every character is drawn from. Nothing about one character lives outside
+# its components. The functions work on the component tables, so any app's
+# world can hold them (the walker app shell's WalkerWorld, a game's own).
+import Math
+open Mesh3d
+open Math3d
+open Gltf
+open GltfSkin
+open GbufferInstanced
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Tag
+
+# The clips a character may play (an int clipIndex in an AnimationState): an
+# app without jump clips plays its run clip for them
+enum ClipKind {
+  idle
+  walk
+  walkFast
+  run
+  jump
+  runningJump
+}
+
+# A character's render model this frame and the last (the motion vectors'
+# source), derived from its controller
+type CharacterModel {
+  model: Mat4
+  prevModel: Mat4
+}
+
+# What every character shares
+type CharacterSystem {
+  skeleton: Skeleton
+  idleClip: Clip
+  walkClip: Clip
+  runClip: Clip
+  # An app without jump clips sets them to its run clip
+  jumpClip: Clip
+  runningJumpClip: Clip
+  bindPose: SkeletonPose
+  # Playback: on or paused, and how fast
+  playing: Bool
+  speed: Float
+  toon: Bool
+  # Asset -> entity placement: the model's scale / foot offset and its
+  # authored facing correction. A character's render model is its world
+  # matrix times this.
+  basePartModel: Mat4
+  characterBatch: InstanceBatch
+  groundZ: Float
+  # The toe bones the wading splashes follow (water/WadeSplash); -1 without
+  leftFootNode: Int = -1
+  rightFootNode: Int = -1
+}
+
+# A character's clip and its phase (s into it), and how fast it plays on top
+# of its own rate (1, or slower in the air for an app with no jump clip)
+type AnimationState {
+  clipIndex: Int
+  animTime: Float
+  playbackScale: Float = 1.0
+}
+
+# A character's clip transition: the pose it blends FROM, how far the blend
+# has run and its length (inactive once elapsed >= duration).
+# holdClipFirstFrame keeps the new clip on its first frame for one update
+# after a locomotion switch.
+type AnimationTransition {
+  from: SkeletonPose
+  elapsed: Float
+  duration: Float
+  holdClipFirstFrame: Bool
+}
+
+# Tag: the ONE character the local player drives. Systems that need it ask
+# controlledCharacter(table) rather than a roster which one it is.
+type Controlled {
+}
+
+# Pose the shared (scratch) skeleton at a clip + time. Every character is posed
+# through this, one after another — the skeleton holds no character's state
+# between calls. walk and walkFast share the walk clip (an app plays walkFast
+# faster).
+func poseCharacterClip(
+  characterSystem: mod CharacterSystem
+  clipIndex: copy Int
+  animTime: copy Float
+) {
+  applySkeletonPose(sk: characterSystem.skeleton, pose: characterSystem.bindPose)
+  match clipIndex {
+    case ClipKind.idle {
+      applyClip(sk: characterSystem.skeleton, c: characterSystem.idleClip, time: animTime)
+    }
+    case ClipKind.walk {
+      applyClip(sk: characterSystem.skeleton, c: characterSystem.walkClip, time: animTime)
+    }
+    case ClipKind.walkFast {
+      applyClip(sk: characterSystem.skeleton, c: characterSystem.walkClip, time: animTime)
+    }
+    case ClipKind.run {
+      applyClip(sk: characterSystem.skeleton, c: characterSystem.runClip, time: animTime)
+    }
+    case ClipKind.jump {
+      applyClip(sk: characterSystem.skeleton, c: characterSystem.jumpClip, time: animTime)
+    }
+    case ClipKind.runningJump {
+      applyClip(sk: characterSystem.skeleton, c: characterSystem.runningJumpClip, time: animTime)
+    }
+  }
+}
+
+# A character's starting transition: finished (inactive), sourced from the
+# bind pose so its first real switch has a pose to blend from.
+func createAnimationTransition(
+  skeleton: view Skeleton
+  duration: view Float
+) ret AnimationTransition {
+  ret AnimationTransition {
+    from: captureSkeletonPose(sk: skeleton)
+    elapsed: duration
+    duration: duration
+    holdClipFirstFrame: false
+  }
+}
+
+func transitionActive(transition: view AnimationTransition) ret Bool {
+  ret transition.duration > 0.0 and transition.elapsed < transition.duration
+}
+
+# Pose the scratch skeleton as `entityId` looks RIGHT NOW: its clip at its
+# phase, blended from its transition's pose while that runs (smoothstep).
+func poseCharacter(
+  animStates: view ComponentTable(AnimationState)
+  animTransitions: view ComponentTable(AnimationTransition)
+  characterSystem: mod CharacterSystem
+  entityId: view EntityId
+) {
+  if componentHas(this: animStates, entityId: entityId) is false {
+    applySkeletonPose(sk: characterSystem.skeleton, pose: characterSystem.bindPose)
+    ret
+  }
+  let anim: view AnimationState => componentView(this: animStates, entityId: entityId)
+  poseCharacterClip(
+    characterSystem: characterSystem
+    clipIndex: anim.clipIndex
+    animTime: anim.animTime
+  )
+  if componentHas(this: animTransitions, entityId: entityId) is false {
+    ret
+  }
+  let transition: view AnimationTransition => componentView(
+    this: animTransitions
+    entityId: entityId
+  )
+  if transitionActive(transition: transition) {
+    var blendWeight: Float = Math.min(a: transition.elapsed / transition.duration, b: 1.0)
+    blendWeight = blendWeight * blendWeight * (3.0 - 2.0 * blendWeight)
+    blendSkeletonPose(sk: characterSystem.skeleton, from: transition.from, weight: blendWeight)
+  }
+}
+
+# Switch `entityId` to `clipIndex`, blending from wherever it is now over
+# `duration` seconds (0 = cut). The ONE way any character changes clip.
+func animationBeginTransition(
+  animStates: mod ComponentTable(AnimationState)
+  animTransitions: mod ComponentTable(AnimationTransition)
+  characterSystem: mod CharacterSystem
+  entityId: view EntityId
+  clipIndex: copy Int
+  duration: copy Float
+  holdClipFirstFrame: copy Bool
+) {
+  if componentHas(this: animStates, entityId: entityId) is false {
+    ret
+  }
+  poseCharacter(
+    animStates: animStates
+    animTransitions: animTransitions
+    characterSystem: characterSystem
+    entityId: entityId
+  )
+  let from: SkeletonPose = captureSkeletonPose(sk: characterSystem.skeleton)
+  componentSet(
+    this: animTransitions
+    entityId: entityId
+    data: AnimationTransition {
+      from: own from
+      elapsed: 0.0
+      duration: duration
+      holdClipFirstFrame: holdClipFirstFrame
+    }
+  )
+  let anim: mod AnimationState => componentMod(this: animStates, entityId: entityId)
+  anim.clipIndex = clipIndex
+  anim.animTime = 0.0
+}
+
+# One frame of a character's clock: its clip `rate` times its playbackScale
+# and the global `speed` (while `playing`), and its transition's blend
+func stepCharacterClock(
+  anim: mod AnimationState
+  transition: mod AnimationTransition
+  playing: view Bool
+  speed: view Float
+  rate: view Float
+  deltaTime: view Float
+) {
+  if playing {
+    anim.animTime = anim.animTime + deltaTime * speed * rate * anim.playbackScale
+  }
+  if transitionActive(transition: transition) {
+    transition.elapsed = transition.elapsed + deltaTime
+  }
+}
+
+# The joint palette of `entityId`'s current pose, into `palette` in place
+# (cleared and refilled without giving back capacity, so one list reused per
+# frame allocates nothing)
+func characterPaletteInto(
+  animStates: view ComponentTable(AnimationState)
+  animTransitions: view ComponentTable(AnimationTransition)
+  characterSystem: mod CharacterSystem
+  entityId: view EntityId
+  palette: mod List(Float)
+) {
+  poseCharacter(
+    animStates: animStates
+    animTransitions: animTransitions
+    characterSystem: characterSystem
+    entityId: entityId
+  )
+  buildPaletteInto(sk: characterSystem.skeleton, out: palette)
+}
+
+# The character the local player drives (noEntity when none is tagged)
+func controlledCharacter(controlled: view ComponentTable(Controlled)) ret EntityId {
+  if tagCount(Controlled, table: controlled) > 0 {
+    ret componentEntityAt(this: controlled, i: 0)
+  }
+  ret noEntity()
+}
+
+# Make `entityId` the one the local player drives (and no other)
+func setControlledCharacter(controlled: mod ComponentTable(Controlled), entityId: view EntityId) {
+  let previous: List(EntityId) = taggedEntities(Controlled, table: controlled)
+  loop let tagged: EntityId in previous {
+    removeTag(Controlled, table: controlled, entityId: tagged)
+  }
+  addTag(Controlled, table: controlled, entityId: entityId)
+}
