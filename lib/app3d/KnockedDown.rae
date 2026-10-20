@@ -1,0 +1,121 @@
+# app3d/KnockedDown — a character knocked over: a KnockedDown component on it
+# while it lies, and the system that gets it up (stepKnockedDown). It lies as
+# a body the app spawned (a ragdoll; its hips are the body watched here), and
+# gets up once it has been down long enough, wants to, and that body has come
+# to rest: where it landed, not somewhere along its flight or slide (getting
+# up 0.8 s in, a character still sliding stood up short of where its body
+# stopped). The system takes the component off when the character may get
+# up; the app, seeing it gone, stands its character up where the body lies
+# and takes the body down.
+import Vec3
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Transform
+
+type KnockedDown {
+  # The body it lies as: its rest is what counts (a ragdoll's hips)
+  body: EntityId
+  # How long it has been down, and the earliest it may get up (s)
+  downSeconds: Float = 0.0
+  readyAfterSeconds: Float
+  # Whether it wants up: an app holding a player down until they move or
+  # jump writes it each step; a character on its own always does
+  wantsUp: Bool = true
+  # Where the body was last step, and how long it has lain at rest (s)
+  lastBody: Vec3
+  restSeconds: Float = 0.0
+}
+
+# A body at rest: moving slower than this (m/s)
+const getUpRestSpeed: Float = 0.4
+
+# ...for this long (s) before it may get up
+const getUpRestSeconds: Float = 0.2
+
+# Down this long (s), it gets up at rest or not: a body rocking on a step or
+# a slope never quite settles
+const getUpLatestSeconds: Float = 5.0
+
+# Is a body that moved `moved` metres over `deltaTime` at rest?
+func hipsAtRest(moved: view Float, deltaTime: view Float) ret Bool {
+  ret moved < getUpRestSpeed * deltaTime
+}
+
+# Someone down `downSeconds` gets up once that is `readyAfterSeconds`, their
+# body has lain at rest `restSeconds` long enough (getUpRestSeconds; or they
+# have been down getUpLatestSeconds), and they want to
+func canGetUp(
+  downSeconds: view Float
+  readyAfterSeconds: view Float
+  wantsUp: view Bool
+  restSeconds: view Float
+) ret Bool {
+  let landed: Bool = restSeconds >= getUpRestSeconds or downSeconds >= getUpLatestSeconds
+  ret wantsUp and downSeconds >= readyAfterSeconds and landed
+}
+
+# Knock `entityId` down, lying as `body` (now at `bodyAt`), up at the
+# earliest after `readyAfterSeconds`
+func knockDown(
+  knockedDown: mod ComponentTable(KnockedDown)
+  entityId: view EntityId
+  body: view EntityId
+  readyAfterSeconds: view Float
+  bodyAt: view Vec3
+) {
+  let down: KnockedDown = { body: body, readyAfterSeconds: readyAfterSeconds, lastBody: bodyAt }
+  componentSet(this: knockedDown, entityId: entityId, data: down)
+}
+
+# Where `entityId`'s lying body is now (none when it is not down, or its
+# body has no transform)
+func knockedDownBodyAt(
+  knockedDown: view ComponentTable(KnockedDown)
+  transforms: view ComponentTable(Transform3D)
+  entityId: view EntityId
+) ret opt Vec3 {
+  if componentHas(this: knockedDown, entityId: entityId) is false {
+    ret none
+  }
+  let down: view KnockedDown = componentView(this: knockedDown, entityId: entityId)
+  if componentHas(this: transforms, entityId: down.body) is false {
+    ret none
+  }
+  ret componentView(this: transforms, entityId: down.body).position
+}
+
+# One step for everyone down: their clocks, their bodies' rest; those who may
+# get up lose the component, and are the list returned (the app stands them up)
+func stepKnockedDown(
+  knockedDown: mod ComponentTable(KnockedDown)
+  transforms: view ComponentTable(Transform3D)
+  deltaTime: view Float
+) ret List(EntityId) {
+  var up: List(EntityId) = List.create(EntityId, cap: 4)
+  loop var i: Int = 0, i < componentCount(this: knockedDown), ++i {
+    let entityId: EntityId = componentEntityAt(this: knockedDown, i: i)
+    let down: mod KnockedDown = componentMod(this: knockedDown, entityId: entityId)
+    down.downSeconds = down.downSeconds + deltaTime
+    if componentHas(this: transforms, entityId: down.body) {
+      let at: Vec3 = componentView(this: transforms, entityId: down.body).position
+      if hipsAtRest(moved: Vec3.vlen(a: Vec3.vsub(a: at, b: down.lastBody)), deltaTime: deltaTime) {
+        down.restSeconds = down.restSeconds + deltaTime
+      } else {
+        down.restSeconds = 0.0
+      }
+      down.lastBody = at
+    }
+    if canGetUp(
+      downSeconds: down.downSeconds
+      readyAfterSeconds: down.readyAfterSeconds
+      wantsUp: down.wantsUp
+      restSeconds: down.restSeconds
+    ) {
+      up.add(value: entityId)
+    }
+  }
+  loop let entityId: view EntityId in up {
+    componentRemove(this: knockedDown, entityId: entityId)
+  }
+  ret up
+}

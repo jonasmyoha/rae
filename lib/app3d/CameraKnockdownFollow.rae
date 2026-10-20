@@ -1,0 +1,92 @@
+# app3d/CameraKnockdownFollow — what a character camera follows: the
+# controlled character's controller, or, while it lies knocked down
+# (app3d/KnockedDown), the body it lies as (a ragdoll's hips), which flies
+# and rolls while its mover stands still. The camera moves between the two
+# over a moment (followBlendSeconds, eased), so neither the fall nor getting
+# up snaps the view, and a character on its feet keeps the tight follow it
+# always had.
+import Math
+import Vec3
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Transform
+open app3d/KnockedDown
+
+# How long the camera takes to move over to the body, and back (s)
+const followBlendSeconds: Float = 0.35
+
+# How far above a lying body's hips the camera looks (m): at the body lying
+# there, not at the floor under it
+const ragdollFocusLift: Float = 0.3
+
+# The blend one step on: toward 1 (the body) while `down`, toward 0 (the
+# controller) otherwise
+func followBlendStep(blend: view Float, down: view Bool, deltaTime: view Float) ret Float {
+  let step: Float = deltaTime / followBlendSeconds
+  if down {
+    ret Math.min(a: 1.0, b: blend + step)
+  }
+  ret Math.max(a: 0.0, b: blend - step)
+}
+
+# The camera's target for a blend: the controller's at 0, the body's at 1,
+# eased in and out between
+func followTarget(
+  controllerTarget: view Vec3
+  ragdollTarget: view Vec3
+  blend: view Float
+) ret Vec3 {
+  let t: Float = blend * blend * (3.0 - 2.0 * blend)
+  ret Vec3.create(
+    x: controllerTarget.x + (ragdollTarget.x - controllerTarget.x) * t
+    y: controllerTarget.y + (ragdollTarget.y - controllerTarget.y) * t
+    z: controllerTarget.z + (ragdollTarget.z - controllerTarget.z) * t
+  )
+}
+
+# Where the camera looks at a body whose hips are at `hips`
+func ragdollFollowTarget(hips: view Vec3) ret Vec3 {
+  ret Vec3.create(x: hips.x, y: hips.y, z: hips.z + ragdollFocusLift)
+}
+
+# The camera's follow: how far over to the body it is, and the body's
+# target it moves to (kept while easing back, so getting up does not snap)
+type KnockdownFollow {
+  blend: Float
+  lyingTarget: Vec3
+}
+
+func createKnockdownFollow() ret KnockdownFollow {
+  ret KnockdownFollow { blend: 0.0, lyingTarget: Vec3.create(x: 0.0, y: 0.0, z: 0.0) }
+}
+
+# One step: the target the camera looks at for `controlled`, whose standing
+# target is `controllerTarget`
+func stepKnockdownFollow(
+  follow: mod KnockdownFollow
+  knockedDown: view ComponentTable(KnockedDown)
+  transforms: view ComponentTable(Transform3D)
+  controlled: view EntityId
+  controllerTarget: view Vec3
+  deltaTime: view Float
+) ret Vec3 {
+  follow.blend = followBlendStep(
+    blend: follow.blend
+    down: componentHas(this: knockedDown, entityId: controlled)
+    deltaTime: deltaTime
+  )
+  if let at: Vec3 = knockedDownBodyAt(
+    knockedDown: knockedDown
+    transforms: transforms
+    entityId: controlled
+  ) {
+    follow.lyingTarget = ragdollFollowTarget(hips: at)
+  } else if follow.blend <= 0.0 {
+    follow.lyingTarget = controllerTarget
+  }
+  ret followTarget(
+    controllerTarget: controllerTarget
+    ragdollTarget: follow.lyingTarget
+    blend: follow.blend
+  )
+}
