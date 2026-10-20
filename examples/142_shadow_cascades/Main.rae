@@ -355,8 +355,8 @@ func createShadowState() ret ShadowState {
 
 # The fit onto the buttons' labels and the debug switch
 func showFit(state: mod ShadowState) {
-  let fit: view CascadeFit => state.fit
-  let world: mod UiWorld => state.editorPanel.world
+  let fit: view CascadeFit = state.fit
+  let world: mod UiWorld = state.editorPanel.world
   var focusText: String = "off"
   if fit.focus {
     focusText = "on"
@@ -464,7 +464,7 @@ func runShadowFrame(state: mod ShadowState) {
     ret
   }
 
-  let renderer: mod DeferredRenderer => state.renderer
+  let renderer: mod DeferredRenderer = state.renderer
   let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
   gpuPassTimingBegin(renderer: renderer)
   loop var passIndex: Int = 0, passIndex < deferredOrderLength(renderer: renderer), ++passIndex {

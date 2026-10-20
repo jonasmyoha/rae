@@ -314,7 +314,7 @@ func bodyAt(world: view PhysicsWorld, bodyId: view Int) ret Body {
 
 # A copy of the sim of `body`.
 func bodySimOf(world: view PhysicsWorld, body: view Body) ret BodySim {
-  if let set: view SolverSet => world.solverSets.viewAt(index: body.setIndex) {
+  if let set: view SolverSet = world.solverSets.viewAt(index: body.setIndex) {
     ret set.bodySims.copyAtDefault(index: body.localIndex)
   }
   ret zeroBodySim()
@@ -332,7 +332,7 @@ type ContactSummary {
 }
 
 func contactSummaryOf(world: view PhysicsWorld, contactId: view Int) ret ContactSummary {
-  if let contact: view Contact => world.contacts.viewAt(index: contactId) {
+  if let contact: view Contact = world.contacts.viewAt(index: contactId) {
     ret ContactSummary {
       bodyIdA: contact.edgeA.bodyId
       bodyIdB: contact.edgeB.bodyId
@@ -355,7 +355,7 @@ func contactSummaryOf(world: view PhysicsWorld, contactId: view Int) ret Contact
 # Read one element of solver set `setIndex` through a view: copying the set
 # (`world.solverSets.copyAtDefault(index:)`) would copy every list in it.
 func setBodySimAt(world: view PhysicsWorld, setIndex: view Int, localIndex: view Int) ret BodySim {
-  if let set: view SolverSet => world.solverSets.viewAt(index: setIndex) {
+  if let set: view SolverSet = world.solverSets.viewAt(index: setIndex) {
     ret set.bodySims.copyAtDefault(index: localIndex)
   }
   ret zeroBodySim()
@@ -366,7 +366,7 @@ func setBodyStateAt(
   setIndex: view Int
   localIndex: view Int
 ) ret BodyState {
-  if let set: view SolverSet => world.solverSets.viewAt(index: setIndex) {
+  if let set: view SolverSet = world.solverSets.viewAt(index: setIndex) {
     ret set.bodyStates.copyAtDefault(index: localIndex)
   }
   ret identityBodyState()
@@ -374,21 +374,21 @@ func setBodyStateAt(
 
 # The number of bodies, contacts and islands in solver set `setIndex`.
 func setBodyCount(world: view PhysicsWorld, setIndex: view Int) ret Int {
-  if let set: view SolverSet => world.solverSets.viewAt(index: setIndex) {
+  if let set: view SolverSet = world.solverSets.viewAt(index: setIndex) {
     ret set.bodySims.length
   }
   ret 0
 }
 
 func setContactCount(world: view PhysicsWorld, setIndex: view Int) ret Int {
-  if let set: view SolverSet => world.solverSets.viewAt(index: setIndex) {
+  if let set: view SolverSet = world.solverSets.viewAt(index: setIndex) {
     ret set.contactIndices.length
   }
   ret 0
 }
 
 func setIslandCount(world: view PhysicsWorld, setIndex: view Int) ret Int {
-  if let set: view SolverSet => world.solverSets.viewAt(index: setIndex) {
+  if let set: view SolverSet = world.solverSets.viewAt(index: setIndex) {
     ret set.islandSims.length
   }
   ret 0
@@ -398,7 +398,7 @@ func setIslandCount(world: view PhysicsWorld, setIndex: view Int) ret Int {
 # first; only that list is read).
 func copySetIslandSims(world: view PhysicsWorld, setIndex: view Int, islandSims: mod List(Int)) {
   islandSims.clear()
-  if let set: view SolverSet => world.solverSets.viewAt(index: setIndex) {
+  if let set: view SolverSet = world.solverSets.viewAt(index: setIndex) {
     loop let islandId: view Int in set.islandSims {
       islandSims.add(value: islandId)
     }
@@ -407,7 +407,7 @@ func copySetIslandSims(world: view PhysicsWorld, setIndex: view Int, islandSims:
 
 # Write back the sim of `body`.
 func setBodySim(world: mod PhysicsWorld, body: view Body, sim: view BodySim) {
-  if let set: mod SolverSet => world.solverSets.modAt(index: body.setIndex) {
+  if let set: mod SolverSet = world.solverSets.modAt(index: body.setIndex) {
     set.bodySims.set(index: body.localIndex, value: sim)
   }
 }
@@ -418,14 +418,14 @@ func hasBodyState(body: view Body) ret Bool {
 }
 
 func bodyStateOf(world: view PhysicsWorld, body: view Body) ret BodyState {
-  if let set: view SolverSet => world.solverSets.viewAt(index: awakeSet) {
+  if let set: view SolverSet = world.solverSets.viewAt(index: awakeSet) {
     ret set.bodyStates.copyAtDefault(index: body.localIndex)
   }
   ret identityBodyState()
 }
 
 func setBodyState(world: mod PhysicsWorld, body: view Body, state: view BodyState) {
-  if let set: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
+  if let set: mod SolverSet = world.solverSets.modAt(index: awakeSet) {
     set.bodyStates.set(index: body.localIndex, value: state)
   }
 }
@@ -478,7 +478,7 @@ func refreshBodyContactIndices(world: mod PhysicsWorld, bodyId: view Int) {
   loop contactKey is not -1 {
     let edgeIndex: Int = contactKey bitand 1
     let contactId: Int = contactKey shr 1
-    if let contact: mod Contact => world.contacts.modAt(index: contactId) {
+    if let contact: mod Contact = world.contacts.modAt(index: contactId) {
       contactKey = contactEdge(contact: contact, edgeIndex: edgeIndex).nextKey
       setEncodedBodySim(contact: contact, edgeIndex: edgeIndex, encoded: encoded)
     }
@@ -487,14 +487,14 @@ func refreshBodyContactIndices(world: mod PhysicsWorld, bodyId: view Int) {
 
 # A contact's flags and local index, read without copying the contact.
 func contactFlags(world: view PhysicsWorld, contactId: view Int) ret Int {
-  if let contact: view Contact => world.contacts.viewAt(index: contactId) {
+  if let contact: view Contact = world.contacts.viewAt(index: contactId) {
     ret contact.flags
   }
   ret 0
 }
 
 func contactLocalIndex(world: view PhysicsWorld, contactId: view Int) ret Int {
-  if let contact: view Contact => world.contacts.viewAt(index: contactId) {
+  if let contact: view Contact = world.contacts.viewAt(index: contactId) {
     ret contact.localIndex
   }
   ret -1

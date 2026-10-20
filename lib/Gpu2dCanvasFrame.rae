@@ -48,7 +48,7 @@ func canvasOpenFrame(
   }
   # The drawable when this frame renders straight into it (gpu/Surface)
   let colorView: ResourceRef = canvasFrameTargetRef(canvas: canvas, loads: not clear)
-  if let resources: mod GpuResources => canvas.gpuResources {
+  if let resources: mod GpuResources = canvas.gpuResources {
     if var recording: Recording = beginRecording(resources: resources) {
       let target: RenderTarget = renderTarget(
         colorView: colorView
@@ -75,12 +75,12 @@ func canvasOpenFrame(
 # deferred until the GPU is done — no reliance on wgpu's own tracking), submit,
 # then retire the frame's groups, poll earlier frames and compact the arena.
 func canvasCloseFrame(canvas: mod Gpu2dCanvas) {
-  if let resources: mod GpuResources => canvas.gpuResources {
+  if let resources: mod GpuResources = canvas.gpuResources {
     unsafe {
       endRenderPass(pass: canvas.framePass)
       canvas.framePass = webgpuNull()
     }
-    if let recording: mod Recording => canvas.recording {
+    if let recording: mod Recording = canvas.recording {
       loop var i: Int = 0, i < canvas.frameBinds.length, ++i {
         if let bind: BindGroupId = canvas.frameBinds.copyAt(index: i) {
           recordBindGroupUse(recording: recording, resources: resources, id: bind)
@@ -111,7 +111,7 @@ func canvasFlush(canvas: mod Gpu2dCanvas) {
     ret
   }
   ensureBoxResources(canvas: canvas)
-  if let resources: mod GpuResources => canvas.gpuResources {
+  if let resources: mod GpuResources = canvas.gpuResources {
     uploadViewport(canvas: canvas, resources: resources)
     boxFlushWith(canvas: canvas, resources: resources)
     imageFlushWith(canvas: canvas, resources: resources)
@@ -124,7 +124,7 @@ func canvasFlush(canvas: mod Gpu2dCanvas) {
 # until the submission completes), reset the flush slot cursor and compact the
 # manager's dependency arena so per-frame groups cannot grow it.
 func boxFrameEnd(canvas: mod Gpu2dCanvas) {
-  if let resources: mod GpuResources => canvas.gpuResources {
+  if let resources: mod GpuResources = canvas.gpuResources {
     # Pinned by this frame's submission (canvasCloseFrame), so the retire is
     # deferred until pollSubmissions sees the GPU finish — no wgpu-side reliance.
     retireBindGroupIds(resources: resources, list: canvas.frameBinds)
@@ -140,7 +140,7 @@ func boxFrameEnd(canvas: mod Gpu2dCanvas) {
   # deep-copied the whole atlas (glyph List included) once per frame per
   # atlas just to reset one Int.
   loop var ai: Int = 0, ai < canvas.textAtlases.length, ++ai {
-    if let atlas: mod Gpu2dTextAtlas => canvas.textAtlases.modAt(index: ai) {
+    if let atlas: mod Gpu2dTextAtlas = canvas.textAtlases.modAt(index: ai) {
       atlas.flushIndex = 0
     }
   }
@@ -152,7 +152,7 @@ func boxFrameEnd(canvas: mod Gpu2dCanvas) {
 # Present the canvas's frame (gpu/Surface): the drawable it was drawn into,
 # or the offscreen image copied into one; timed on the canvas's pacer.
 func presentCanvasToSurface(canvas: mod Gpu2dCanvas) {
-  if let resources: mod GpuResources => canvas.gpuResources {
+  if let resources: mod GpuResources = canvas.gpuResources {
     unsafe {
       presentFrameTarget(
         target: canvas.frameTarget

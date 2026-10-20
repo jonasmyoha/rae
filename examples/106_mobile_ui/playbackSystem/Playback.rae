@@ -242,14 +242,14 @@ func applyPlaybackToWorld(
     var i: Int = 0
     loop i < n {
       let trackEntityId: EntityId = componentEntityAt(this: world.progressBars, i: i)
-      let bar: view ProgressBar => queryViewAt(table: world.progressBars, denseIndex: i)
+      let bar: view ProgressBar = queryViewAt(table: world.progressBars, denseIndex: i)
       if bar.enabled and componentHas(this: world.childrens, entityId: trackEntityId) {
-        let kids: view Children => componentView(this: world.childrens, entityId: trackEntityId)
+        let kids: view Children = componentView(this: world.childrens, entityId: trackEntityId)
         if kids.ids.length > 0 {
           let fillEntityId: EntityId = rae_ext_rae_buf_get(buf: kids.ids.data, index: 0)
           var trackW: Float = 0.0
           if componentHas(this: uiSystems.layout.computedRects, entityId: trackEntityId) {
-            let tcr: view ComputedRect => componentView(
+            let tcr: view ComputedRect = componentView(
               this: uiSystems.layout.computedRects
               entityId: trackEntityId
             )
@@ -268,7 +268,7 @@ func applyPlaybackToWorld(
               entityId: fillEntityId
             ).size.x
             if fillWidthChanged(current: currentWidth, next: fillW) {
-              let fillComputed: mod ComputedRect => componentMod(
+              let fillComputed: mod ComputedRect = componentMod(
                 this: uiSystems.layout.computedRects
                 entityId: fillEntityId
               )
@@ -278,7 +278,7 @@ func applyPlaybackToWorld(
           if componentHas(this: world.rects, entityId: fillEntityId) {
             let currentWidth: Float = componentView(this: world.rects, entityId: fillEntityId).size.x
             if fillWidthChanged(current: currentWidth, next: fillW) {
-              let fillRect: mod Rect => componentMod(this: world.rects, entityId: fillEntityId)
+              let fillRect: mod Rect = componentMod(this: world.rects, entityId: fillEntityId)
               fillRect.size.x = fillW
             }
           }

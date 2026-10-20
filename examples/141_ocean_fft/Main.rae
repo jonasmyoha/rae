@@ -329,7 +329,7 @@ func main() ret Int {
           if fixedTestFrame {
             waterSystem.time = 2.0
           }
-          if let resources: mod GpuResources => gpuManager {
+          if let resources: mod GpuResources = gpuManager {
             if tierCheck and gbDeferredPrepare() is not 0 {
               prepareWaterCheck(waterSystem: waterSystem, resources: resources, frame: oceanFrames)
               let before: WaterCheckSample = takeWaterCheckSample(waterSystem: waterSystem)
@@ -395,8 +395,8 @@ func main() ret Int {
         }
         if tag is RenderTag.transparentForward {
           snapshotOpaque(renderer: renderer)
-          if let resources: mod GpuResources => gpuManager {
-            if let meshResources: view GpuResources => renderer.gpuResources {
+          if let resources: mod GpuResources = gpuManager {
+            if let meshResources: view GpuResources = renderer.gpuResources {
               waterDraw(
                 waterSystem: waterSystem
                 resources: resources
@@ -450,7 +450,7 @@ func main() ret Int {
       gpuPassTimingEnd(renderer: renderer)
       world3dPrevTransformSystem(world: sceneWorld)
       if tierCheck and oceanFrames > 0 and oceanFrames % waterCheckStageFrames is 0 {
-        if let resources: mod GpuResources => gpuManager {
+        if let resources: mod GpuResources = gpuManager {
           if not waterFftDiagnoseIfft(waterSystem: waterSystem, resources: resources) {
             checksOk = false
           }
@@ -483,7 +483,7 @@ func main() ret Int {
     endingBody.cascadeCount = 1
     waterSystem.bodies.set(index: 0, value: endingBody)
   }
-  if let resources: mod GpuResources => gpuManager {
+  if let resources: mod GpuResources = gpuManager {
     if tierCheck and not verifyWaterDependencyArena(resources: resources) {
       checksOk = false
     }

@@ -160,7 +160,7 @@ func emptyMeshCastOutput(maxFraction: view Float) ret CastOutput {
 # b3RayCastMesh: the closest front-face triangle the ray crosses. Without
 # a hit the fraction is the input's and the triangle index -1.
 func rayCastMesh(mesh: view Mesh, input: view RayCastInput) ret CastOutput {
-  let data: view PhysicsMeshData => mesh.data
+  let data: view PhysicsMeshData = mesh.data
   let meshScale: Vec3 = mesh.scale
   var bestOutput: CastOutput = emptyMeshCastOutput(maxFraction: input.maxFraction)
 
@@ -261,7 +261,7 @@ func shapeCastMesh(
   input: view ShapeCastInput
   lengthUnitsPerMeter: view Float
 ) ret CastOutput {
-  let data: view PhysicsMeshData => mesh.data
+  let data: view PhysicsMeshData = mesh.data
   let meshScale: Vec3 = mesh.scale
   var bestOutput: CastOutput = emptyMeshCastOutput(maxFraction: input.maxFraction)
 
@@ -457,7 +457,7 @@ func overlapMesh(
   let boundsExtent: Vec3 = subtract(left: boundsMax, right: boundsCenter)
   let tolerance: Float = 0.1 * linearSlop(lengthUnitsPerMeter: lengthUnitsPerMeter)
 
-  let data: view PhysicsMeshData => mesh.data
+  let data: view PhysicsMeshData = mesh.data
   var stack: List(Int) = List.create(Int, cap: meshStackSize)
   var nodeIndex: Int = 0
   loop true {
@@ -589,7 +589,7 @@ func collideMoverAndMesh(
   let invScaledBoundsCenter: Vec3 = halfSum(left: invScaledBoundsMin, right: invScaledBoundsMax)
   let invScaledBoundsExtent: Vec3 = subtract(left: invScaledBoundsMax, right: invScaledBoundsCenter)
 
-  let data: view PhysicsMeshData => mesh.data
+  let data: view PhysicsMeshData = mesh.data
   var stack: List(Int) = List.create(Int, cap: meshStackSize)
   var nodeIndex: Int = 0
   let startCount: Int = planes.length

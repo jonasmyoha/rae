@@ -95,13 +95,13 @@ func setGuideRects(
   let count: Int = componentCount(this: guideSystem.guideRects)
   loop var i: Int = 0, i < count, ++i {
     let entityId: EntityId = componentEntityAt(this: guideSystem.guideRects, i: i)
-    let guide: view GuideRect => queryViewAt(table: guideSystem.guideRects, denseIndex: i)
+    let guide: view GuideRect = queryViewAt(table: guideSystem.guideRects, denseIndex: i)
     if guide.kind is not kind {
       continue
     }
     componentSet(this: world.actives, entityId: entityId, data: Active { value: active })
     if componentHas(this: world.rects, entityId: entityId) {
-      let rect: mod Rect => componentMod(this: world.rects, entityId: entityId)
+      let rect: mod Rect = componentMod(this: world.rects, entityId: entityId)
       rect.position.x = x
       rect.position.y = y
       rect.size.x = w
@@ -124,7 +124,7 @@ func syncGuides(
   safeInsets: view Insets
 ) {
   if componentHas(this: world.rects, entityId: guideSystem.frameSpace) {
-    let rect: mod Rect => componentMod(this: world.rects, entityId: guideSystem.frameSpace)
+    let rect: mod Rect = componentMod(this: world.rects, entityId: guideSystem.frameSpace)
     rect.size.x = designW
     rect.size.y = designH
   }

@@ -161,7 +161,7 @@ func chooseFrameTarget(
 
 # The frame's drawable view as a render-target reference (only when direct)
 func frameTargetRef(target: view FrameTarget) ret ResourceRef {
-  if let viewId: view ExternalId => target.viewId {
+  if let viewId: view ExternalId = target.viewId {
     ret externalRef(id: viewId)
   }
   ret noRef()
@@ -258,7 +258,7 @@ func copyIntoDrawable(
 # Drop this frame's drawable (presented, or abandoned) and start over
 func endFrameTarget(target: mod FrameTarget, resources: mod GpuResources) {
   unsafe {
-    if let viewId: view ExternalId => target.viewId {
+    if let viewId: view ExternalId = target.viewId {
       let released: Bool = releaseExternal(resources: resources, id: viewId)
     }
     target.viewId = none

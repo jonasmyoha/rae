@@ -37,7 +37,7 @@ func resetShapeProxy(
     let contactId: Int = contactKey shr 1
     let edgeIndex: Int = contactKey bitand 1
     var ofThisShape: Bool = false
-    if let contact: view Contact => world.contacts.viewAt(index: contactId) {
+    if let contact: view Contact = world.contacts.viewAt(index: contactId) {
       contactKey = contactEdge(contact: contact, edgeIndex: edgeIndex).nextKey
       ofThisShape = contact.shapeIdA is shapeId or contact.shapeIdB is shapeId
     }
@@ -68,7 +68,7 @@ func resetShapeProxy(
         shapeIndex: shapeId
         forcePairCreation: true
       )
-      if let shape: mod PhysicsShape => world.shapes.modAt(index: shapeId) {
+      if let shape: mod PhysicsShape = world.shapes.modAt(index: shapeId) {
         shape.proxyKey = newKey
       }
     } else {
@@ -98,7 +98,7 @@ func setShapeFilter(
   if filter.maskBits is current.maskBits and filter.categoryBits is current.categoryBits and filter.groupIndex is current.groupIndex {
     ret
   }
-  if let shape: mod PhysicsShape => world.shapes.modAt(index: shapeIndex) {
+  if let shape: mod PhysicsShape = world.shapes.modAt(index: shapeIndex) {
     shape.filter = filter
   }
   if invokeContacts {
@@ -124,7 +124,7 @@ func setShapeDensity(
     ret
   }
   var bodyId: Int = -1
-  if let shape: mod PhysicsShape => world.shapes.modAt(index: shapeIndex) {
+  if let shape: mod PhysicsShape = world.shapes.modAt(index: shapeIndex) {
     shape.density = density
     bodyId = shape.bodyId
   }
@@ -135,14 +135,14 @@ func setShapeDensity(
 
 # b3Shape_SetFriction
 func setShapeFriction(world: mod PhysicsWorld, shapeId: view ShapeId, friction: view Float) {
-  if let shape: mod PhysicsShape => world.shapes.modAt(index: shapeIndexOf(shapeId: shapeId)) {
+  if let shape: mod PhysicsShape = world.shapes.modAt(index: shapeIndexOf(shapeId: shapeId)) {
     shape.material.friction = friction
   }
 }
 
 # b3Shape_SetRestitution
 func setShapeRestitution(world: mod PhysicsWorld, shapeId: view ShapeId, restitution: view Float) {
-  if let shape: mod PhysicsShape => world.shapes.modAt(index: shapeIndexOf(shapeId: shapeId)) {
+  if let shape: mod PhysicsShape = world.shapes.modAt(index: shapeIndexOf(shapeId: shapeId)) {
     shape.material.restitution = restitution
   }
 }
@@ -153,7 +153,7 @@ func setShapeSurfaceMaterial(
   shapeId: view ShapeId
   material: view SurfaceMaterial
 ) {
-  if let shape: mod PhysicsShape => world.shapes.modAt(index: shapeIndexOf(shapeId: shapeId)) {
+  if let shape: mod PhysicsShape = world.shapes.modAt(index: shapeIndexOf(shapeId: shapeId)) {
     shape.material = material
   }
 }
@@ -164,7 +164,7 @@ func setShapeFlag(
   flag: view Int
   enabled: view Bool
 ) {
-  if let shape: mod PhysicsShape => world.shapes.modAt(index: shapeIndexOf(shapeId: shapeId)) {
+  if let shape: mod PhysicsShape = world.shapes.modAt(index: shapeIndexOf(shapeId: shapeId)) {
     if enabled {
       shape.flags = shape.flags bitor flag
     } else {
@@ -220,7 +220,7 @@ func getShapeContactData(
   loop contactKey is not -1 and result.length < capacity {
     let contactId: Int = contactKey shr 1
     let edgeIndex: Int = contactKey bitand 1
-    if let contact: view Contact => world.contacts.viewAt(index: contactId) {
+    if let contact: view Contact = world.contacts.viewAt(index: contactId) {
       let ofThisShape: Bool = contact.shapeIdA is shapeIndex or contact.shapeIdB is shapeIndex
       if ofThisShape and (contact.flags bitand contactTouchingFlag) is not 0 {
         result.add(value: contactDataOf(world: world, contact: contact))
@@ -243,7 +243,7 @@ func getShapeSensorData(
   if sensorIndex is -1 {
     ret result
   }
-  if let sensor: view Sensor => world.sensors.viewAt(index: sensorIndex) {
+  if let sensor: view Sensor = world.sensors.viewAt(index: sensorIndex) {
     loop let visitor: view Visitor in sensor.overlaps2 {
       if result.length < capacity {
         result.add(

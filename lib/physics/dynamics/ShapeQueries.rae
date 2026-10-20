@@ -50,7 +50,7 @@ func rayCastShape(
       )
     }
     case ShapeType.compound {
-      if let compound: view CompoundData => world.compounds.viewAt(index: shape.compoundIndex) {
+      if let compound: view CompoundData = world.compounds.viewAt(index: shape.compoundIndex) {
         output = rayCastCompound(
           compound: compound
           input: localInput
@@ -59,7 +59,7 @@ func rayCastShape(
       }
     }
     case ShapeType.height {
-      if let heightField: view HeightFieldData => world.heightFields.viewAt(
+      if let heightField: view HeightFieldData = world.heightFields.viewAt(
         index: shape.heightFieldIndex
       ) {
         output = rayCastHeightField(
@@ -70,12 +70,12 @@ func rayCastShape(
       }
     }
     case ShapeType.hull {
-      if let hull: view Hull => world.hulls.viewAt(index: shape.hullIndex) {
+      if let hull: view Hull = world.hulls.viewAt(index: shape.hullIndex) {
         output = rayCastHull(hull: hull, input: localInput)
       }
     }
     case ShapeType.mesh {
-      if let mesh: view Mesh => world.meshes.viewAt(index: shape.meshIndex) {
+      if let mesh: view Mesh = world.meshes.viewAt(index: shape.meshIndex) {
         output = rayCastMesh(mesh: mesh, input: localInput)
       }
     }
@@ -122,7 +122,7 @@ func shapeCastShape(
       )
     }
     case ShapeType.compound {
-      if let compound: view CompoundData => world.compounds.viewAt(index: shape.compoundIndex) {
+      if let compound: view CompoundData = world.compounds.viewAt(index: shape.compoundIndex) {
         output = shapeCastCompound(
           compound: compound
           input: localInput
@@ -131,7 +131,7 @@ func shapeCastShape(
       }
     }
     case ShapeType.height {
-      if let heightField: view HeightFieldData => world.heightFields.viewAt(
+      if let heightField: view HeightFieldData = world.heightFields.viewAt(
         index: shape.heightFieldIndex
       ) {
         output = shapeCastHeightField(
@@ -142,7 +142,7 @@ func shapeCastShape(
       }
     }
     case ShapeType.hull {
-      if let hull: view Hull => world.hulls.viewAt(index: shape.hullIndex) {
+      if let hull: view Hull = world.hulls.viewAt(index: shape.hullIndex) {
         output = shapeCastHull(
           hull: hull
           input: localInput
@@ -151,7 +151,7 @@ func shapeCastShape(
       }
     }
     case ShapeType.mesh {
-      if let mesh: view Mesh => world.meshes.viewAt(index: shape.meshIndex) {
+      if let mesh: view Mesh = world.meshes.viewAt(index: shape.meshIndex) {
         output = shapeCastMesh(
           mesh: mesh
           input: localInput
@@ -190,7 +190,7 @@ func overlapShape(
       )
     }
     case ShapeType.compound {
-      if let compound: view CompoundData => world.compounds.viewAt(index: shape.compoundIndex) {
+      if let compound: view CompoundData = world.compounds.viewAt(index: shape.compoundIndex) {
         ret overlapCompound(
           compound: compound
           shapeTransform: transform
@@ -201,7 +201,7 @@ func overlapShape(
       ret false
     }
     case ShapeType.height {
-      if let heightField: view HeightFieldData => world.heightFields.viewAt(
+      if let heightField: view HeightFieldData = world.heightFields.viewAt(
         index: shape.heightFieldIndex
       ) {
         ret overlapHeightField(
@@ -214,7 +214,7 @@ func overlapShape(
       ret false
     }
     case ShapeType.hull {
-      if let hull: view Hull => world.hulls.viewAt(index: shape.hullIndex) {
+      if let hull: view Hull = world.hulls.viewAt(index: shape.hullIndex) {
         ret overlapHull(
           hull: hull
           shapeTransform: transform
@@ -225,7 +225,7 @@ func overlapShape(
       ret false
     }
     case ShapeType.mesh {
-      if let mesh: view Mesh => world.meshes.viewAt(index: shape.meshIndex) {
+      if let mesh: view Mesh = world.meshes.viewAt(index: shape.meshIndex) {
         ret overlapMesh(
           mesh: mesh
           shapeTransform: transform
@@ -276,7 +276,7 @@ func collideMoverShape(
       }
     }
     case ShapeType.compound {
-      if let compound: view CompoundData => world.compounds.viewAt(index: shape.compoundIndex) {
+      if let compound: view CompoundData = world.compounds.viewAt(index: shape.compoundIndex) {
         collideMoverAndCompound(
           planes: planes
           capacity: capacity
@@ -287,7 +287,7 @@ func collideMoverShape(
       }
     }
     case ShapeType.height {
-      if let heightField: view HeightFieldData => world.heightFields.viewAt(
+      if let heightField: view HeightFieldData = world.heightFields.viewAt(
         index: shape.heightFieldIndex
       ) {
         collideMoverAndHeightField(
@@ -299,14 +299,14 @@ func collideMoverShape(
       }
     }
     case ShapeType.hull {
-      if let hull: view Hull => world.hulls.viewAt(index: shape.hullIndex) {
+      if let hull: view Hull = world.hulls.viewAt(index: shape.hullIndex) {
         if collideMoverAndHull(result: result, hull: hull, mover: localMover) > 0 {
           planes.add(value: result)
         }
       }
     }
     case ShapeType.mesh {
-      if let mesh: view Mesh => world.meshes.viewAt(index: shape.meshIndex) {
+      if let mesh: view Mesh = world.meshes.viewAt(index: shape.meshIndex) {
         collideMoverAndMesh(
           planes: planes
           capacity: capacity
@@ -327,7 +327,7 @@ func collideMoverShape(
     }
   }
   loop var i: Int = 0, i < planes.length, ++i {
-    if let plane: mod PlaneResult => planes.modAt(index: i) {
+    if let plane: mod PlaneResult = planes.modAt(index: i) {
       plane.plane.normal = rotateVector(quat: transform.rotation, vector: plane.plane.normal)
       plane.point = transformPoint(transform: transform, point: plane.point)
       plane.materialIndex = clampInt(

@@ -58,7 +58,7 @@ func createShapeProxy(
     shapeIndex: shapeId
     forcePairCreation: forcePairCreation
   )
-  if let stored: mod PhysicsShape => world.shapes.modAt(index: shapeId) {
+  if let stored: mod PhysicsShape = world.shapes.modAt(index: shapeId) {
     stored.proxyKey = proxyKey
   }
 }
@@ -68,7 +68,7 @@ func destroyShapeProxy(world: mod PhysicsWorld, shapeId: view Int) {
   let proxyKey: Int = world.shapes.copyAtDefault(index: shapeId).proxyKey
   if proxyKey is not -1 {
     destroyBroadPhaseProxy(broadPhase: world.broadPhase, proxyKey: proxyKey)
-    if let shape: mod PhysicsShape => world.shapes.modAt(index: shapeId) {
+    if let shape: mod PhysicsShape = world.shapes.modAt(index: shapeId) {
       shape.proxyKey = -1
     }
   }

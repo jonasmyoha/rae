@@ -229,7 +229,7 @@ func packObjects(scene: view Scene3d) ret List(Float) {
   var out: List(Float) = List.create(Float, cap: scene.renderables.length * 12)
   var i: Int = 0
   loop let renderable: view Renderable3d in scene.renderables {
-    if let transform: view Transform3d => scene.transforms.viewAt(index: i) {
+    if let transform: view Transform3d = scene.transforms.viewAt(index: i) {
       out.add(value: renderable.shape.toFloat())
       out.add(value: renderable.material.toFloat())
       out.add(value: transform.x)

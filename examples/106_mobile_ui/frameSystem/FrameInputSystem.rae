@@ -22,10 +22,10 @@ func frameInputSystem(
   frame: mod WorldFrame
   tick: mod FrameTick
 ) {
-  let appState: mod AppState => app.appState
-  let playbackSystem: mod PlaybackSystem => app.musicSystems.playbackSystem
-  let scrollFsm: mod ScrollFsm => session.scrollFsm
-  let input: mod InputSystem => session.input
+  let appState: mod AppState = app.appState
+  let playbackSystem: mod PlaybackSystem = app.musicSystems.playbackSystem
+  let scrollFsm: mod ScrollFsm = session.scrollFsm
+  let input: mod InputSystem = session.input
   # Hot-reload poll. If `rae watch` signalled a fresh build, snapshot
   # route + scroll into .rae/state.json and exit 0. The supervisor sees the
   # clean exit, swaps in the new binary, and the next boot resumes on the
@@ -109,7 +109,7 @@ func frameInputSystem(
       scrollFsm.scrollY = 0.0
     } else {
       if componentHas(this: world.scrollStates, entityId: frame.scrollTarget) {
-        let activeScroll: view ScrollState => componentView(
+        let activeScroll: view ScrollState = componentView(
           this: world.scrollStates
           entityId: frame.scrollTarget
         )

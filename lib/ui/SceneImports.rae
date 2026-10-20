@@ -86,7 +86,7 @@ func sceneFileDirectory(path: view String) ret String {
 # The top-level `import` array of a parsed scene (empty when absent).
 func sceneImports(scene: view Scene) ret List(String) {
   var out: List(String) = List.create(String, cap: 4)
-  let doc: view JsonDoc => scene.doc
+  let doc: view JsonDoc = scene.doc
   if doc.ok is false {
     ret out
   }
@@ -112,7 +112,7 @@ func sceneImports(scene: view Scene) ret List(String) {
 # Whether the scene carries theme token sections of its own (a self-contained
 # page, or a config scene).
 func sceneDeclaresTokens(scene: view Scene) ret Bool {
-  let doc: view JsonDoc => scene.doc
+  let doc: view JsonDoc = scene.doc
   if doc.ok is false {
     ret false
   }
@@ -152,7 +152,7 @@ func collectSceneAssetsBlock(
   sceneLabel: view String
   diagnostics: mod List(SceneDiagnostic)
 ) {
-  let doc: view JsonDoc => scene.doc
+  let doc: view JsonDoc = scene.doc
   if doc.ok is false {
     ret
   }
@@ -328,7 +328,7 @@ func followSceneImports(
       if let registryIdx: Int = sceneRegistryIndex(reg: registry, key: importId) {
         assets.importedIds.add(value: "{importId}")
         assets.importedPaths.add(value: path)
-        let imported: view Scene => sceneRegistryGet(reg: registry, idx: registryIdx)
+        let imported: view Scene = sceneRegistryGet(reg: registry, idx: registryIdx)
         collectSceneAssetsBlock(
           assets: assets
           scene: imported
@@ -399,7 +399,7 @@ func appendSceneReference(
 func sceneReferences(scene: view Scene) ret List(String) {
   var references: List(String) = List.create(String, cap: 8)
   loop var i: Int = 0, i < scene.nodes.length, ++i {
-    let node: view SceneNode => nodeAt(this: scene, idx: i)
+    let node: view SceneNode = nodeAt(this: scene, idx: i)
     let bag: JsonValue = Json.jsonValueAt(doc: scene.doc, idx: node.componentsValueIdx)
     let instanceIdx: Int = Json.field(doc: scene.doc, this: bag, key: "SceneInstance")
     if instanceIdx >= 0 {
@@ -585,7 +585,7 @@ func sceneImportedTheme(
   loop var i: Int = 0, i < assets.importedIds.length, ++i {
     if let importId: String = assets.importedIds.copyAt(index: i) {
       if let idx: Int = sceneRegistryIndex(reg: registry, key: importId) {
-        let imported: view Scene => sceneRegistryGet(reg: registry, idx: idx)
+        let imported: view Scene = sceneRegistryGet(reg: registry, idx: idx)
         parseThemeInto(out: theme, scene: imported)
       }
     }

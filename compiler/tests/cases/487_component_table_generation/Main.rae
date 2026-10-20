@@ -13,7 +13,7 @@ open ecs/ComponentTable
 
 # #814: a mod borrow must end before the table is mutated again — scope it here.
 func modBorrowOnly(tab: mod ComponentTable(Rect), entityId: view EntityId) {
-  let m: mod Rect => componentMod(Rect, this: tab, entityId: entityId)
+  let m: mod Rect = componentMod(Rect, this: tab, entityId: entityId)
 }
 
 func main() {

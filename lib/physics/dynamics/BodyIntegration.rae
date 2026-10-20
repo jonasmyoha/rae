@@ -25,8 +25,8 @@ func integrateVelocities(
   h: view Float
 ) {
   loop var i: Int = block.startIndex, i < block.startIndex + block.count, ++i {
-    if let sim: view BodySim => sims.viewAt(index: i) {
-      if let state: mod BodyState => states.modAt(index: i) {
+    if let sim: view BodySim = sims.viewAt(index: i) {
+      if let state: mod BodyState = states.modAt(index: i) {
         var v: Vec3 = state.linearVelocity
         var w: Vec3 = state.angularVelocity
 
@@ -130,7 +130,7 @@ func integratePositions(
   let maxLinearSpeedSquared: Float = maxLinearSpeed * maxLinearSpeed
   let maxAngularSpeedSquared: Float = maxAngularSpeed * maxAngularSpeed
   loop var i: Int = block.startIndex, i < block.startIndex + block.count, ++i {
-    if let state: mod BodyState => states.modAt(index: i) {
+    if let state: mod BodyState = states.modAt(index: i) {
       let flags: Int = state.flags
       # Motion locks: constraints that come last
       var v: Vec3 = {

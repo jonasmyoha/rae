@@ -40,8 +40,8 @@ func longest(tracks: view List(Track)) ret opt view Track {
   # Find the winner by index, so no track is copied, then hand back a view of it.
   var bestIndex: Int = 0
   loop var i: Int = 1, i < tracks.length, ++i {
-    if let candidate: view Track => tracks.viewAt(index: i) {
-      if let best: view Track => tracks.viewAt(index: bestIndex) {
+    if let candidate: view Track = tracks.viewAt(index: i) {
+      if let best: view Track = tracks.viewAt(index: bestIndex) {
         if candidate.seconds > best.seconds {
           bestIndex = i
         }
@@ -67,15 +67,15 @@ func main() {
   }
 
   # `modAt` hands back a mutable window; `rate` writes through it, into the list.
-  if let first: mod Track => tracks.modAt(index: 0) {
+  if let first: mod Track = tracks.modAt(index: 0) {
     first.rate(stars: 5)
   }
-  if let first: view Track => tracks.viewAt(index: 0) {
+  if let first: view Track = tracks.viewAt(index: 0) {
     log("{first.title} rated {first.rating} stars")
   }
 
   # The optional view, handled with `if let` — `=>` binds it, no copy.
-  if let top: view Track => longest(tracks: tracks) {
+  if let top: view Track = longest(tracks: tracks) {
     log("longest: {top.title} ({formatDuration(seconds: top.seconds)})")
   } else {
     log("no tracks")

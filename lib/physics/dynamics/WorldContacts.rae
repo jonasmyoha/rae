@@ -108,7 +108,7 @@ func createContact(
   var generation: Int = 0
   var manifolds: List(Manifold) = List.create(Manifold, cap: 0)
   var triangleCache: List(TriangleCache) = List.create(TriangleCache, cap: 0)
-  if let slot: mod Contact => world.contacts.modAt(index: contactId) {
+  if let slot: mod Contact = world.contacts.modAt(index: contactId) {
     generation = slot.generation
     manifolds = own slot.manifolds
     triangleCache = own slot.triangleCache
@@ -140,7 +140,7 @@ func createContact(
     contact.flags = contact.flags bitor simMeshContact
   }
   if shapeA.shapeType is ShapeType.compound {
-    if let compound: view CompoundData => world.compounds.viewAt(index: shapeA.compoundIndex) {
+    if let compound: view CompoundData = world.compounds.viewAt(index: shapeA.compoundIndex) {
       if getCompoundChild(compound: compound, childIndex: childIndex).shapeType is ShapeType.mesh {
         contact.flags = contact.flags bitor simMeshContact
       }
@@ -161,11 +161,11 @@ func createContact(
   let keyA: Int = (contactId shl 1) bitor 0
   contact.edgeA = ContactEdge { bodyId: shapeA.bodyId, prevKey: -1, nextKey: bodyA.headContactKey }
   if bodyA.headContactKey is not -1 {
-    if let head: mod Contact => world.contacts.modAt(index: bodyA.headContactKey shr 1) {
+    if let head: mod Contact = world.contacts.modAt(index: bodyA.headContactKey shr 1) {
       setContactEdgePrev(contact: head, edgeIndex: bodyA.headContactKey bitand 1, prevKey: keyA)
     }
   }
-  if let owner: mod Body => world.bodies.modAt(index: shapeA.bodyId) {
+  if let owner: mod Body = world.bodies.modAt(index: shapeA.bodyId) {
     owner.headContactKey = keyA
     owner.contactCount = owner.contactCount + 1
   }
@@ -177,11 +177,11 @@ func createContact(
   if headB is not -1 {
     if (headB shr 1) is contactId {
       setContactEdgePrev(contact: contact, edgeIndex: headB bitand 1, prevKey: keyB)
-    } else if let head: mod Contact => world.contacts.modAt(index: headB shr 1) {
+    } else if let head: mod Contact = world.contacts.modAt(index: headB shr 1) {
       setContactEdgePrev(contact: head, edgeIndex: headB bitand 1, prevKey: keyB)
     }
   }
-  if let owner: mod Body => world.bodies.modAt(index: shapeB.bodyId) {
+  if let owner: mod Body = world.bodies.modAt(index: shapeB.bodyId) {
     owner.headContactKey = keyB
     owner.contactCount = owner.contactCount + 1
   }
@@ -192,7 +192,7 @@ func createContact(
 
   # Contacts are created non-touching. When found touching they link
   # islands and move into the constraint graph.
-  if let set: mod SolverSet => world.solverSets.modAt(index: setIndex) {
+  if let set: mod SolverSet = world.solverSets.modAt(index: setIndex) {
     set.contactIndices.add(value: contactId)
   }
 
@@ -214,21 +214,21 @@ func createContact(
 # Unlink edge `edgeIndex` of a contact from its body's contact list.
 func unlinkContactEdge(world: mod PhysicsWorld, contactId: view Int, edgeIndex: view Int) {
   var edge: ContactEdge = zeroContactEdge()
-  if let contact: view Contact => world.contacts.viewAt(index: contactId) {
+  if let contact: view Contact = world.contacts.viewAt(index: contactId) {
     edge = contactEdge(contact: contact, edgeIndex: edgeIndex)
   }
   if edge.prevKey is not -1 {
-    if let previous: mod Contact => world.contacts.modAt(index: edge.prevKey shr 1) {
+    if let previous: mod Contact = world.contacts.modAt(index: edge.prevKey shr 1) {
       setContactEdgeNext(contact: previous, edgeIndex: edge.prevKey bitand 1, nextKey: edge.nextKey)
     }
   }
   if edge.nextKey is not -1 {
-    if let next: mod Contact => world.contacts.modAt(index: edge.nextKey shr 1) {
+    if let next: mod Contact = world.contacts.modAt(index: edge.nextKey shr 1) {
       setContactEdgePrev(contact: next, edgeIndex: edge.nextKey bitand 1, prevKey: edge.prevKey)
     }
   }
   let edgeKey: Int = (contactId shl 1) bitor edgeIndex
-  if let body: mod Body => world.bodies.modAt(index: edge.bodyId) {
+  if let body: mod Body = world.bodies.modAt(index: edge.bodyId) {
     if body.headContactKey is edgeKey {
       body.headContactKey = edge.nextKey
     }
@@ -253,7 +253,7 @@ func destroyContact(world: mod PhysicsWorld, contactId: view Int, wakeBodies: vi
   var localIndex: Int = 0
   var setIndex: Int = 0
   var endEvent: ContactEndTouchEvent = emptyContactEndTouchEvent()
-  if let contact: view Contact => world.contacts.viewAt(index: contactId) {
+  if let contact: view Contact = world.contacts.viewAt(index: contactId) {
     shapeIdA = contact.shapeIdA
     shapeIdB = contact.shapeIdB
     childIndex = contact.childIndex
@@ -269,7 +269,7 @@ func destroyContact(world: mod PhysicsWorld, contactId: view Int, wakeBodies: vi
   # Remove the pair from the set
   let pairKey: UInt64 = shapePairKey(shape1: shapeIdA, shape2: shapeIdB, child: childIndex)
   let removed: Bool = removePairKey(set: world.broadPhase.pairSet, key: pairKey)
-  if let target: mod Contact => world.contacts.modAt(index: contactId) {
+  if let target: mod Contact = world.contacts.modAt(index: contactId) {
     target.manifolds.clear()
     target.triangleCache.clear()
   }
@@ -302,7 +302,7 @@ func destroyContact(world: mod PhysicsWorld, contactId: view Int, wakeBodies: vi
   }
 
   # Free the contact and its id (the generation is kept)
-  if let freed: mod Contact => world.contacts.modAt(index: contactId) {
+  if let freed: mod Contact = world.contacts.modAt(index: contactId) {
     freed.contactId = -1
     freed.setIndex = -1
     freed.colorIndex = -1
@@ -353,7 +353,7 @@ func collideShapes(
         lengthUnitsPerMeter: lengthUnitsPerMeter
       )
     }
-  } else if let hullA: view Hull => hulls.viewAt(index: shapeA.hullIndex) {
+  } else if let hullA: view Hull = hulls.viewAt(index: shapeA.hullIndex) {
     if shapeB.shapeType is ShapeType.sphere {
       collideHullAndSphere(
         manifold: manifold
@@ -372,7 +372,7 @@ func collideShapes(
         cache: cache.simplexCache
         lengthUnitsPerMeter: lengthUnitsPerMeter
       )
-    } else if let hullB: view Hull => hulls.viewAt(index: shapeB.hullIndex) {
+    } else if let hullB: view Hull = hulls.viewAt(index: shapeB.hullIndex) {
       collideHulls(
         manifold: manifold
         hullA: hullA
@@ -421,12 +421,12 @@ func computeConvexManifold(
   var oldCount: Int = 0
   if contact.manifolds.length is 0 {
     contact.manifolds.add(value: zeroManifold())
-  } else if let old: view Manifold => contact.manifolds.viewAt(index: 0) {
+  } else if let old: view Manifold = contact.manifolds.viewAt(index: 0) {
     oldPoints = old.points
     oldCount = minInt(left: old.pointCount, right: maxManifoldPoints)
   }
 
-  if let manifold: mod Manifold => contact.manifolds.modAt(index: 0) {
+  if let manifold: mod Manifold = contact.manifolds.modAt(index: 0) {
     manifold.pointCount = geometry.pointCount
     let matrixA: Matrix3 = matrixFromQuat(quat: transformA.rotation)
     manifold.normal = multiply(matrix: matrixA, vector: geometry.normal)
@@ -435,7 +435,7 @@ func computeConvexManifold(
     # Contact points are computed in frame A
     loop var i: Int = 0, i < geometry.pointCount, ++i {
       let source: LocalManifoldPoint = manifoldPoint(manifold: geometry, index: i)
-      if let target: mod ManifoldPoint => manifold.points.modAt(index: i) {
+      if let target: mod ManifoldPoint = manifold.points.modAt(index: i) {
         target.anchorA = multiply(matrix: matrixA, vector: source.point)
         target.anchorB = add(left: target.anchorA, right: offset)
         target.separation = source.separation
@@ -447,11 +447,11 @@ func computeConvexManifold(
 
     # Copy impulses from old points
     loop var i: Int = 0, i < geometry.pointCount, ++i {
-      if let point: mod ManifoldPoint => manifold.points.modAt(index: i) {
+      if let point: mod ManifoldPoint = manifold.points.modAt(index: i) {
         point.totalNormalImpulse = 0.0
         point.persisted = false
         loop var j: Int = 0, j < oldCount, ++j {
-          if let old: mod ManifoldPoint => oldPoints.modAt(index: j) {
+          if let old: mod ManifoldPoint = oldPoints.modAt(index: j) {
             if point.featureId is old.featureId {
               point.normalImpulse = old.normalImpulse
               point.persisted = true
@@ -474,7 +474,7 @@ func computeConvexManifold(
 # quarter of its inner radius.
 func updateRollingRadius(shape: view PhysicsShape, hulls: view List(Hull)) ret Float {
   if shape.shapeType is ShapeType.hull {
-    if let hull: view Hull => hulls.viewAt(index: shape.hullIndex) {
+    if let hull: view Hull = hulls.viewAt(index: shape.hullIndex) {
       ret 0.25 * hull.innerRadius
     }
   }
@@ -511,10 +511,10 @@ func updateConvexContact(
   if flip {
     # The feature ids are not flipped: they only need to match, and the
     # flip is consistent
-    if let manifold: mod Manifold => contact.manifolds.modAt(index: 0) {
+    if let manifold: mod Manifold = contact.manifolds.modAt(index: 0) {
       manifold.normal = negate(vector: manifold.normal)
       loop var i: Int = 0, i < manifold.pointCount, ++i {
-        if let point: mod ManifoldPoint => manifold.points.modAt(index: i) {
+        if let point: mod ManifoldPoint = manifold.points.modAt(index: i) {
           let anchorA: Vec3 = point.anchorA
           point.anchorA = point.anchorB
           point.anchorB = anchorA
@@ -685,9 +685,9 @@ func updateCompoundContact(
   # make it relative to the compound origin
   let offset: Vec3 = rotateVector(quat: transformA.rotation, vector: child.transform.position)
   loop var i: Int = 0, i < contact.manifolds.length, ++i {
-    if let manifold: mod Manifold => contact.manifolds.modAt(index: i) {
+    if let manifold: mod Manifold = contact.manifolds.modAt(index: i) {
       loop var j: Int = 0, j < manifold.pointCount, ++j {
-        if let point: mod ManifoldPoint => manifold.points.modAt(index: j) {
+        if let point: mod ManifoldPoint = manifold.points.modAt(index: j) {
           point.anchorA = add(left: point.anchorA, right: offset)
         }
       }
@@ -760,7 +760,7 @@ func updateContact(
 ) ret Bool {
   var touching: Bool = false
   if shapeA.shapeType is ShapeType.compound {
-    if let compound: view CompoundData => compounds.viewAt(index: shapeA.compoundIndex) {
+    if let compound: view CompoundData = compounds.viewAt(index: shapeA.compoundIndex) {
       touching = updateCompoundContact(
         contact: contact
         geometry: geometry
@@ -819,9 +819,9 @@ func updateContact(
     let centerB: Vec3 = rotateVector(quat: transformB.rotation, vector: localCenterB)
     # Adjust the anchors to be relative to the centers of mass
     loop var i: Int = 0, i < contact.manifolds.length, ++i {
-      if let manifold: mod Manifold => contact.manifolds.modAt(index: i) {
+      if let manifold: mod Manifold = contact.manifolds.modAt(index: i) {
         loop var j: Int = 0, j < manifold.pointCount, ++j {
-          if let point: mod ManifoldPoint => manifold.points.modAt(index: j) {
+          if let point: mod ManifoldPoint = manifold.points.modAt(index: j) {
             point.anchorA = subtract(left: point.anchorA, right: centerA)
             point.anchorB = subtract(left: point.anchorB, right: centerB)
           }

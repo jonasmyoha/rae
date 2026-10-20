@@ -51,7 +51,7 @@ func spawnParticle(
     size: size
     color: color
   }
-  let particles: mod List(Particle) => world.particles
+  let particles: mod List(Particle) = world.particles
   particles.set(index: idx, value: p)
 }
 
@@ -100,7 +100,7 @@ func particleSystem(world: mod World) {
         let newLife: Float = p.life - deltaTime
         if newLife <= 0.0 {
           let dead: Particle = makeEmptyParticle()
-          let particles: mod List(Particle) => world.particles
+          let particles: mod List(Particle) = world.particles
           particles.set(index: i, value: dead)
         } else {
           let nx: Float = p.px + p.vx * deltaTime
@@ -120,7 +120,7 @@ func particleSystem(world: mod World) {
             size: p.size
             color: p.color
           }
-          let particles: mod List(Particle) => world.particles
+          let particles: mod List(Particle) = world.particles
           particles.set(index: i, value: updated)
         }
       }

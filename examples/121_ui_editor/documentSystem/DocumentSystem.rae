@@ -285,7 +285,7 @@ func documentDesignSize(document: mod SceneDocument) {
   document.designW = defaultDesignW
   document.designH = defaultDesignH
   document.unitScale = 0.0
-  let scene: view Scene => document.scene
+  let scene: view Scene = document.scene
   if scene.ok {
     let top: JsonValue = Json.root(doc: scene.doc)
     document.unitScale = optFloat(
@@ -295,7 +295,7 @@ func documentDesignSize(document: mod SceneDocument) {
       fallback: 0.0
     )
     if let rootIdx: Int = sceneNodeIndex(this: scene, nodeId: scene.rootNodeId) {
-      let node: view SceneNode => nodeAt(this: scene, idx: rootIdx)
+      let node: view SceneNode = nodeAt(this: scene, idx: rootIdx)
       let bag: JsonValue = Json.jsonValueAt(doc: scene.doc, idx: node.componentsValueIdx)
       let rectIdx: Int = Json.field(doc: scene.doc, this: bag, key: "Rect")
       if rectIdx >= 0 {
@@ -353,7 +353,7 @@ func seedListViewRows(world: mod UiWorld) {
     if componentHas(this: world.listViewDatas, entityId: entityId) {
       continue
     }
-    let list: view ListView => componentView(this: world.listViews, entityId: entityId)
+    let list: view ListView = componentView(this: world.listViews, entityId: entityId)
     var rows: List(ListViewRow) = List.create(ListViewRow, cap: listViewSampleRows)
     loop var row: Int = 0, row < listViewSampleRows, ++row {
       var keys: List(String) = List.create(String, cap: list.bindings.length + 1)
@@ -361,7 +361,7 @@ func seedListViewRows(world: mod UiWorld) {
       keys.add(value: "{list.itemKeyField}")
       values.add(value: "row-{row + 1}")
       loop var b: Int = 0, b < list.bindings.length, ++b {
-        if let binding: view ListViewBinding => list.bindings.viewAt(index: b) {
+        if let binding: view ListViewBinding = list.bindings.viewAt(index: b) {
           keys.add(value: "{binding.itemField}")
           values.add(value: "{binding.itemField} {row + 1}")
         }
@@ -392,7 +392,7 @@ func snapshotDocumentScrolls(world: view UiWorld) ret ScrollSnapshot {
   loop var i: Int = 0, i < count, ++i {
     let entityId: EntityId = componentEntityAt(this: world.scrollStates, i: i)
     if componentHas(this: world.nodeIdComponents, entityId: entityId) {
-      let state: view ScrollState => queryViewAt(table: world.scrollStates, denseIndex: i)
+      let state: view ScrollState = queryViewAt(table: world.scrollStates, denseIndex: i)
       snapshot.nodeIds.add(
         value: "{componentView(this: world.nodeIdComponents, entityId: entityId).id}"
       )
@@ -408,7 +408,7 @@ func restoreDocumentScrolls(world: mod UiWorld, snapshot: view ScrollSnapshot) {
       if let raw: Int = world.nodeIds.get(k: "document/{nodeId}") {
         let entityId: EntityId = nodeEntityId(world: world, index: raw)
         if componentHas(this: world.scrollStates, entityId: entityId) {
-          let state: mod ScrollState => componentMod(this: world.scrollStates, entityId: entityId)
+          let state: mod ScrollState = componentMod(this: world.scrollStates, entityId: entityId)
           state.y = snapshot.offsets.copyAtFallback(index: i, fallback: 0.0)
         }
       }
@@ -470,7 +470,7 @@ func reportUnimportedTheme(document: view SceneDocument, world: mod UiWorld) {
 # entity index.
 func tagMountedNodeIds(world: mod UiWorld, scene: view Scene, pageId: view String) {
   loop var i: Int = 0, i < scene.nodes.length, ++i {
-    let node: view SceneNode => nodeAt(this: scene, idx: i)
+    let node: view SceneNode = nodeAt(this: scene, idx: i)
     if let raw: Int = world.nodeIds.get(k: "{pageId}/{node.nodeId}") {
       let entityId: EntityId = nodeEntityId(world: world, index: raw)
       if componentHas(this: world.nodeIdComponents, entityId: entityId) is false {
@@ -593,7 +593,7 @@ func documentMountSystem(
   seedListViewRows(world: world)
   tagMountedNodeIds(world: world, scene: document.scene, pageId: "document")
   loop var r: Int = 0, r < document.registry.ids.length, ++r {
-    let registered: view Scene => sceneRegistryGet(reg: document.registry, idx: r)
+    let registered: view Scene = sceneRegistryGet(reg: document.registry, idx: r)
     tagMountedNodeIds(world: world, scene: registered, pageId: "document")
   }
   restoreDocumentScrolls(world: world, snapshot: scrolls)

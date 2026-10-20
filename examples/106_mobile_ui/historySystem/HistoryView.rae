@@ -122,7 +122,7 @@ func setHistoryActive(world: mod UiWorld, entityId: view EntityId, active: view 
   }
   var current: Bool = true
   if componentHas(this: world.actives, entityId: entityId) {
-    let a: view Active => componentView(this: world.actives, entityId: entityId)
+    let a: view Active = componentView(this: world.actives, entityId: entityId)
     current = a.value
   }
   if current is not active {
@@ -157,7 +157,7 @@ func historyListSystem(
       # node (an authored `EmptyState { kind: history }`) is toggled by
       # `emptyStateSystem`, no page + node-id lookup here.
       setHistoryActive(world: world, entityId: host, active: hasEntries)
-      let binding: mod HistoryList => queryModAt(table: historySystem.historyLists, denseIndex: i)
+      let binding: mod HistoryList = queryModAt(table: historySystem.historyLists, denseIndex: i)
       binding.builtRevision = state.playHistory.revision
     }
     i = i + 1

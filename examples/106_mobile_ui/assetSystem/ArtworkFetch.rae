@@ -131,7 +131,7 @@ func artworkFetchWorkerWithFallback(
 func artworkFetchIndexOf(jobs: view List(ArtworkFetchJob), outPath: view String) ret Int {
   var i: Int = 0
   loop i < jobs.length() {
-    if let job: view ArtworkFetchJob => jobs.viewAt(index: i) {
+    if let job: view ArtworkFetchJob = jobs.viewAt(index: i) {
       if job.outPath is outPath {
         ret i
       }
@@ -241,7 +241,7 @@ func artworkFetchDrain(queue: mod ArtworkFetchQueue) {
     var index: Int = -1
     var i: Int = 0
     loop i < queue.inFlight.length() and index < 0 {
-      if let job: view ArtworkFetchJob => queue.inFlight.viewAt(index: i) {
+      if let job: view ArtworkFetchJob = queue.inFlight.viewAt(index: i) {
         if job.serial is serial {
           index = i
         }
@@ -259,7 +259,7 @@ func artworkFetchDrain(queue: mod ArtworkFetchQueue) {
       if message.ok {
         status = artworkStatusFetched
       }
-      if let job: view ArtworkFetchJob => queue.inFlight.viewAt(index: index) {
+      if let job: view ArtworkFetchJob = queue.inFlight.viewAt(index: index) {
         queue.finished.add(
           value: ArtworkFetchJob { serial: job.serial, outPath: "{job.outPath}", status: status }
         )
@@ -276,7 +276,7 @@ func artworkFetchStatus(queue: mod ArtworkFetchQueue, outPath: view String) ret 
   let done: Int = artworkFetchIndexOf(jobs: queue.finished, outPath: outPath)
   if done >= 0 {
     var status: Int = artworkStatusPending
-    if let job: view ArtworkFetchJob => queue.finished.viewAt(index: done) {
+    if let job: view ArtworkFetchJob = queue.finished.viewAt(index: done) {
       status = job.status
     }
     queue.finished.removeAt(index: done)

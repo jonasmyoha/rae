@@ -45,7 +45,7 @@ func propsNear(
     }
   }
   loop var g: Int = 0, g < field.groups.length, ++g {
-    if let held: view PropGroup => field.groups.viewAt(index: g) {
+    if let held: view PropGroup = field.groups.viewAt(index: g) {
       if held.used {
         let fromRow: Int = Math.max(a: firstRow.toFloat(), b: held.firstRow.toFloat()).toInt()
         let toRow: Int = Math.min(
@@ -96,7 +96,7 @@ func addPropsNearInCell(
     if distance > reach {
       continue
     }
-    if let kind: view PropKind => field.kinds.viewAt(index: placement.kind) {
+    if let kind: view PropKind = field.kinds.viewAt(index: placement.kind) {
       near.add(value: {
         kind: placement.kind
         placement: placement

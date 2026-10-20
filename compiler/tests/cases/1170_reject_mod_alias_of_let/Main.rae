@@ -20,8 +20,8 @@ func makeWorld() ret World {
 
 func main() ret Int {
   let world: World = makeWorld()
-  let whole: mod World => world
-  let part: mod Particle => world.a
+  let whole: mod World = world
+  let part: mod Particle = world.a
   part.x = 9
   loop let particle: mod Particle in world.particles {
     particle.x = 7
@@ -31,17 +31,17 @@ func main() ret Int {
     element.x = 5
   }
   let maybe: opt Particle = list.copyAt(index: 0)
-  if let found: mod Particle => maybe {
+  if let found: mod Particle = maybe {
     found.x = 4
   }
   var mutableWorld: World = makeWorld()
-  let fine: mod Particle => mutableWorld.a
+  let fine: mod Particle = mutableWorld.a
   fine.x = 9
   loop let particle: mod Particle in mutableWorld.particles {
     particle.x = 7
   }
   var mutableMaybe: opt Particle = list.copyAt(index: 0)
-  if let found: mod Particle => mutableMaybe {
+  if let found: mod Particle = mutableMaybe {
     found.x = 4
   }
   ret 0

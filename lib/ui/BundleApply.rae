@@ -81,7 +81,7 @@ func applyBundle(world: mod UiWorld, entityId: view EntityId, name: view String)
   let empty: BundleSet = createBundleSet()
   var previous: List(String) = List.create(String, cap: 4)
   if componentHas(this: world.bundleRefs, entityId: entityId) {
-    let existing: view BundleRefs => componentView(this: world.bundleRefs, entityId: entityId)
+    let existing: view BundleRefs = componentView(this: world.bundleRefs, entityId: entityId)
     loop let n: view String in existing.names {
       previous.add(value: "{n}")
     }
@@ -97,7 +97,7 @@ func applyBundle(world: mod UiWorld, entityId: view EntityId, name: view String)
     skipPlacement: false
   )
   if previous.length > 0 {
-    let refs: mod BundleRefs => componentMod(this: world.bundleRefs, entityId: entityId)
+    let refs: mod BundleRefs = componentMod(this: world.bundleRefs, entityId: entityId)
     loop let n: view String in previous {
       refs.names.add(value: "{n}")
     }

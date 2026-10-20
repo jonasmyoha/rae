@@ -259,7 +259,7 @@ func driveCharacters(
   let fraction: Float = speed * speedScale / maxSpeed
   loop var i: Int = 0, i < componentCount(this: physicsSystem.characters), ++i {
     let entityId: EntityId = componentEntityAt(this: physicsSystem.characters, i: i)
-    let character: mod CharacterBody => componentMod(
+    let character: mod CharacterBody = componentMod(
       this: physicsSystem.characters
       entityId: entityId
     )
@@ -293,7 +293,7 @@ func moveCharacters(
   let groundZ: Float = physicsSystem.groundZ
   loop var i: Int = 0, i < componentCount(this: physicsSystem.characters), ++i {
     let entityId: EntityId = componentEntityAt(this: physicsSystem.characters, i: i)
-    let character: mod CharacterBody => componentMod(
+    let character: mod CharacterBody = componentMod(
       this: physicsSystem.characters
       entityId: entityId
     )
@@ -374,7 +374,7 @@ func characterSpeed(physicsSystem: view WalkerPhysics, entityId: view EntityId) 
   if componentHas(this: physicsSystem.characters, entityId: entityId) is false {
     ret 0.0
   }
-  let character: view CharacterBody => componentView(
+  let character: view CharacterBody = componentView(
     this: physicsSystem.characters
     entityId: entityId
   )
@@ -801,7 +801,7 @@ func treesNear(
       let start: Int = forest.cellStart.copyAtFallback(index: cell, fallback: 0)
       let end: Int = forest.cellStart.copyAtFallback(index: cell + 1, fallback: 0)
       loop var i: Int = start, i < end, ++i {
-        if let placement: view PropPlacement => forest.placements.viewAt(index: i) {
+        if let placement: view PropPlacement = forest.placements.viewAt(index: i) {
           let gapX: Float = placement.position.x - x
           let gapY: Float = placement.position.y - y
           let distance: Float = gapX * gapX + gapY * gapY

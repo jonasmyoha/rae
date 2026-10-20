@@ -488,7 +488,7 @@ func httpHeaderValue(
   name: view String
 ) ret ByteRange {
   loop var i: Int = 0, i < request.headerCount, ++i {
-    if let header: view HttpHeader => state.headers.viewAt(index: request.headerFirst + i) {
+    if let header: view HttpHeader = state.headers.viewAt(index: request.headerFirst + i) {
       if rangeEquals(
         buffer: buffer
         range: header.name

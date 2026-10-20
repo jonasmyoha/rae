@@ -56,7 +56,7 @@ func fitWriteRect(
   if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) is false {
     ret
   }
-  let cur: view ComputedRect => componentView(
+  let cur: view ComputedRect = componentView(
     this: uiSystems.layout.computedRects
     entityId: entityId
   )
@@ -76,7 +76,7 @@ func fitWriteRect(
   if dirty is false {
     ret
   }
-  let cr: mod ComputedRect => componentMod(this: uiSystems.layout.computedRects, entityId: entityId)
+  let cr: mod ComputedRect = componentMod(this: uiSystems.layout.computedRects, entityId: entityId)
   cr.position.x = x
   cr.position.y = y
   cr.size.x = w
@@ -96,13 +96,13 @@ func fitScaleSubtree(
     if componentHas(this: world.childrens, entityId: entityId) is false {
       ret
     }
-    let ch: view Children => componentView(this: world.childrens, entityId: entityId)
+    let ch: view Children = componentView(this: world.childrens, entityId: entityId)
     let n: Int = ch.ids.length
     var i: Int = 0
     loop i < n {
       let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
       if componentHas(this: world.rects, entityId: cid) {
-        let r: view Rect => componentView(this: world.rects, entityId: cid)
+        let r: view Rect = componentView(this: world.rects, entityId: cid)
         fitWriteRect(
           world: world
           uiSystems: uiSystems
@@ -135,18 +135,18 @@ func fitApplyOne(
   if componentHas(this: uiSystems.hierarchy.parents, entityId: entityId) is false {
     ret
   }
-  let pl: view Parent => componentView(this: uiSystems.hierarchy.parents, entityId: entityId)
+  let pl: view Parent = componentView(this: uiSystems.hierarchy.parents, entityId: entityId)
   if componentHas(this: uiSystems.layout.computedRects, entityId: pl.parent) is false {
     ret
   }
   if componentHas(this: world.rects, entityId: entityId) is false {
     ret
   }
-  let pcr: view ComputedRect => componentView(
+  let pcr: view ComputedRect = componentView(
     this: uiSystems.layout.computedRects
     entityId: pl.parent
   )
-  let design: view Rect => componentView(this: world.rects, entityId: entityId)
+  let design: view Rect = componentView(this: world.rects, entityId: entityId)
   if design.size.x <= 0.0 {
     ret
   }
@@ -158,7 +158,7 @@ func fitApplyOne(
   var availW: Float = pcr.size.x
   var availH: Float = pcr.size.y
   if componentHas(this: world.paddings, entityId: pl.parent) {
-    let pad: view Padding => componentView(this: world.paddings, entityId: pl.parent)
+    let pad: view Padding = componentView(this: world.paddings, entityId: pl.parent)
     padL = pad.insets.l
     padT = pad.insets.t
     availW = availW - pad.insets.l - pad.insets.r
@@ -219,15 +219,15 @@ func fitSystem(world: mod UiWorld, uiSystems: mod UiSystems) pub {
     tableB: uiSystems.layout.computedRects
   )
   loop let row: view Query2Match in hits {
-    let a: view Aspect => queryViewAt(table: world.aspects, denseIndex: row.indexA)
+    let a: view Aspect = queryViewAt(table: world.aspects, denseIndex: row.indexA)
     if a.ratio > 0.0 {
-      let cur: view ComputedRect => queryViewAt(
+      let cur: view ComputedRect = queryViewAt(
         table: uiSystems.layout.computedRects
         denseIndex: row.indexB
       )
       let targetH: Float = cur.size.x / a.ratio
       if fitDiffers(a: cur.size.y, b: targetH) {
-        let cr: mod ComputedRect => queryModAt(
+        let cr: mod ComputedRect = queryModAt(
           table: uiSystems.layout.computedRects
           denseIndex: row.indexB
         )
@@ -239,7 +239,7 @@ func fitSystem(world: mod UiWorld, uiSystems: mod UiSystems) pub {
   var i: Int = 0
   loop i < n {
     let e: EntityId = componentEntityAt(this: world.scaleToFits, i: i)
-    let stf: view ScaleToFit => queryViewAt(table: world.scaleToFits, denseIndex: i)
+    let stf: view ScaleToFit = queryViewAt(table: world.scaleToFits, denseIndex: i)
     fitApplyOne(
       world: world
       uiSystems: uiSystems

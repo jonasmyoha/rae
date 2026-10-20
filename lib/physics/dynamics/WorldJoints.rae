@@ -52,7 +52,7 @@ func destroyContactsBetweenBodies(world: mod PhysicsWorld, bodyIdA: view Int, bo
 # sims; returns its local index.
 func addSetJoint(world: mod PhysicsWorld, setIndex: view Int, sim: view JointSim) ret Int {
   var localIndex: Int = 0
-  if let set: mod SolverSet => world.solverSets.modAt(index: setIndex) {
+  if let set: mod SolverSet = world.solverSets.modAt(index: setIndex) {
     localIndex = set.jointSims.length
     set.jointSims.add(value: sim)
   }
@@ -103,11 +103,11 @@ func createJoint(
   if bodyA.headJointKey is not -1 {
     if (bodyA.headJointKey shr 1) is jointId {
       setJointEdgePrev(joint: joint, edgeIndex: bodyA.headJointKey bitand 1, prevKey: keyA)
-    } else if let head: mod Joint => world.joints.modAt(index: bodyA.headJointKey shr 1) {
+    } else if let head: mod Joint = world.joints.modAt(index: bodyA.headJointKey shr 1) {
       setJointEdgePrev(joint: head, edgeIndex: bodyA.headJointKey bitand 1, prevKey: keyA)
     }
   }
-  if let owner: mod Body => world.bodies.modAt(index: bodyIdA) {
+  if let owner: mod Body = world.bodies.modAt(index: bodyIdA) {
     owner.headJointKey = keyA
     owner.jointCount = owner.jointCount + 1
   }
@@ -119,11 +119,11 @@ func createJoint(
   if headB is not -1 {
     if (headB shr 1) is jointId {
       setJointEdgePrev(joint: joint, edgeIndex: headB bitand 1, prevKey: keyB)
-    } else if let head: mod Joint => world.joints.modAt(index: headB shr 1) {
+    } else if let head: mod Joint = world.joints.modAt(index: headB shr 1) {
       setJointEdgePrev(joint: head, edgeIndex: headB bitand 1, prevKey: keyB)
     }
   }
-  if let owner: mod Body => world.bodies.modAt(index: bodyIdB) {
+  if let owner: mod Body = world.bodies.modAt(index: bodyIdB) {
     owner.headJointKey = keyB
     owner.jointCount = owner.jointCount + 1
   }
@@ -147,7 +147,7 @@ func createJoint(
     # A disabled body puts the joint in the disabled set
     setIndex = disabledSet
     let localIndex: Int = addSetJoint(world: world, setIndex: disabledSet, sim: jointSim)
-    if let target: mod Joint => world.joints.modAt(index: jointId) {
+    if let target: mod Joint = world.joints.modAt(index: jointId) {
       target.setIndex = disabledSet
       target.localIndex = localIndex
     }
@@ -155,7 +155,7 @@ func createJoint(
     # Not attached to a dynamic body
     setIndex = staticSet
     let localIndex: Int = addSetJoint(world: world, setIndex: staticSet, sim: jointSim)
-    if let target: mod Joint => world.joints.modAt(index: jointId) {
+    if let target: mod Joint = world.joints.modAt(index: jointId) {
       target.setIndex = staticSet
       target.localIndex = localIndex
     }
@@ -165,7 +165,7 @@ func createJoint(
       wakeSolverSet(world: world, setIndex: maxSetIndex)
     }
     setIndex = awakeSet
-    if let target: mod Joint => world.joints.modAt(index: jointId) {
+    if let target: mod Joint = world.joints.modAt(index: jointId) {
       target.setIndex = awakeSet
     }
     addJointToGraph(world: world, jointId: jointId, sim: jointSim)
@@ -174,7 +174,7 @@ func createJoint(
     # static set)
     setIndex = maxSetIndex
     let localIndex: Int = addSetJoint(world: world, setIndex: setIndex, sim: jointSim)
-    if let target: mod Joint => world.joints.modAt(index: jointId) {
+    if let target: mod Joint = world.joints.modAt(index: jointId) {
       target.setIndex = setIndex
       target.localIndex = localIndex
     }
@@ -447,17 +447,17 @@ func unlinkJointEdge(world: mod PhysicsWorld, jointId: view Int, edgeIndex: view
     edgeIndex: edgeIndex
   )
   if edge.prevKey is not -1 {
-    if let previous: mod Joint => world.joints.modAt(index: edge.prevKey shr 1) {
+    if let previous: mod Joint = world.joints.modAt(index: edge.prevKey shr 1) {
       setJointEdgeNext(joint: previous, edgeIndex: edge.prevKey bitand 1, nextKey: edge.nextKey)
     }
   }
   if edge.nextKey is not -1 {
-    if let next: mod Joint => world.joints.modAt(index: edge.nextKey shr 1) {
+    if let next: mod Joint = world.joints.modAt(index: edge.nextKey shr 1) {
       setJointEdgePrev(joint: next, edgeIndex: edge.nextKey bitand 1, prevKey: edge.prevKey)
     }
   }
   let edgeKey: Int = (jointId shl 1) bitor edgeIndex
-  if let body: mod Body => world.bodies.modAt(index: edge.bodyId) {
+  if let body: mod Body = world.bodies.modAt(index: edge.bodyId) {
     if body.headJointKey is edgeKey {
       body.headJointKey = edge.nextKey
     }
@@ -526,7 +526,7 @@ func destroyJointInternal(world: mod PhysicsWorld, jointId: view Int, wakeBodies
   }
 
   # Free the joint and its id
-  if let freed: mod Joint => world.joints.modAt(index: jointId) {
+  if let freed: mod Joint = world.joints.modAt(index: jointId) {
     freed.setIndex = -1
     freed.localIndex = -1
     freed.colorIndex = -1

@@ -102,13 +102,13 @@ func passTimingFrameBegin(passTiming: mod DeferredPassTiming, resources: mod Gpu
       entryPoint: "mark"
       constants: noShaderConstants()
     )
-    if let timing: view GpuTiming => passTiming.timing {
+    if let timing: view GpuTiming = passTiming.timing {
       if timingAvailable(timing: timing) is false {
         log("[gpu passes] GPU timestamps unavailable; no per-pass timing")
       }
     }
   }
-  if let timing: mod GpuTiming => passTiming.timing {
+  if let timing: mod GpuTiming = passTiming.timing {
     if timingAvailable(timing: timing) is false {
       ret
     }
@@ -160,14 +160,14 @@ func passTimingMark(
     flushPostPasses(targets: targets, resources: resources)
   }
   var pipeline: PipelineId = { managerTag: 0, slot: -1, generation: 0 }
-  if let made: view PipelineId => passTiming.markPipeline {
+  if let made: view PipelineId = passTiming.markPipeline {
     pipeline = made
   } else {
     passTiming.marking = false
     ret
   }
-  if let timing: mod GpuTiming => passTiming.timing {
-    if let open: mod Recording => targets.post {
+  if let timing: mod GpuTiming = passTiming.timing {
+    if let open: mod Recording = targets.post {
       if recordingIsOpen(recording: open, resources: resources) {
         if recordTimingMark(
           timing: timing
@@ -252,11 +252,11 @@ func clearPassTimingReport(passTiming: mod DeferredPassTiming) {
 
 func passTimingShutdown(passTiming: mod DeferredPassTiming, resources: mod GpuResources) {
   drainSubmissions(inFlight: passTiming.inFlight, resources: resources)
-  if let pipeline: view PipelineId => passTiming.markPipeline {
+  if let pipeline: view PipelineId = passTiming.markPipeline {
     let retired: Bool = retirePipeline(resources: resources, id: pipeline)
   }
   passTiming.markPipeline = none
-  if let timing: mod GpuTiming => passTiming.timing {
+  if let timing: mod GpuTiming = passTiming.timing {
     shutdownTiming(timing: timing, resources: resources)
   }
   passTiming.timing = none
@@ -352,7 +352,7 @@ func passTimingSpanName(tag: view Int) ret String {
 # pass (microseconds) and gpu.total. Call once a frame; nothing unless the
 # profiler is capturing and a frame has been read back.
 func publishPassTimingCounters(passTiming: view DeferredPassTiming, profiler: mod Profiler) {
-  if let timing: view GpuTiming => passTiming.timing {
+  if let timing: view GpuTiming = passTiming.timing {
     publishTimingCounters(timing: timing, profiler: profiler)
   }
 }

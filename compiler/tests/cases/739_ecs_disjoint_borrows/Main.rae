@@ -65,15 +65,15 @@ func main() {
   )
 
   # 2. one element ref threaded through calls (the 114 walker shape)
-  let c: mod Position => componentMod(this: world.positions, entityId: e1)
+  let c: mod Position = componentMod(this: world.positions, entityId: e1)
   bump(position: c)
   bump(position: c)
   ground(position: c, floor: 100)
   log("threaded ref: e1.x={componentView(this: world.positions, entityId: e1).x}")
 
   # 3. a ref into one table plus a ref into another, at once
-  let p2: mod Position => componentMod(this: world.positions, entityId: e2)
-  let velocity: view Velocity => componentView(this: world.velocities, entityId: e2)
+  let p2: mod Position = componentMod(this: world.positions, entityId: e2)
+  let velocity: view Velocity = componentView(this: world.velocities, entityId: e2)
   p2.x = p2.x + velocity.v
   log("two-table refs: e2.x={componentView(this: world.positions, entityId: e2).x}")
 
@@ -81,7 +81,7 @@ func main() {
   var xs: List(Int) = List.create(Int, cap: 1)
   var ys: List(Int) = List.create(Int, cap: 1)
   xs.add(value: 5)
-  if let q: mod Int => xs.modAt(index: 0) {
+  if let q: mod Int = xs.modAt(index: 0) {
     ys.add(value: 6)
     ys.add(value: 7)
     q = q + ys.length

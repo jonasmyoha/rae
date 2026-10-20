@@ -141,7 +141,7 @@ func inputSystem(room: mod GameRoom, server: view HttpServer) {
   loop var i: Int = 0, i < eventCount(this: server.webSocketMessages), ++i {
     let event: WebSocketMessageEvent = eventAt(this: server.webSocketMessages, i: i)
     if event.message.kind is WebSocketOpcode.binary and event.message.payload.count is inputBytes {
-      let readBuffer: view ReadBuffer => componentView(
+      let readBuffer: view ReadBuffer = componentView(
         this: server.readBuffers
         entityId: event.connectionEntityId
       )
@@ -193,7 +193,7 @@ func tickSystem(room: mod GameRoom) {
   loop var i: Int = 0, i < eventCount(this: room.inputs), ++i {
     let input: PlayerInputEvent = eventAt(this: room.inputs, i: i)
     if componentHas(this: room.players, entityId: input.connectionEntityId) {
-      let player: mod PlayerState => componentMod(
+      let player: mod PlayerState = componentMod(
         this: room.players
         entityId: input.connectionEntityId
       )
@@ -223,7 +223,7 @@ func encodeSnapshot(room: mod GameRoom, tickIndex: view Int, latenessNs: view In
   appendUInt32(output: room.snapshot, value: room.missedTicks)
   appendUInt32(output: room.snapshot, value: 0)
   loop var i: Int = 0, i < players, ++i {
-    let player: view PlayerState => queryViewAt(table: room.players, denseIndex: i)
+    let player: view PlayerState = queryViewAt(table: room.players, denseIndex: i)
     appendUInt32(output: room.snapshot, value: player.playerId)
     appendUInt32(output: room.snapshot, value: player.x)
     appendUInt32(output: room.snapshot, value: player.y)
@@ -259,7 +259,7 @@ func appendIfDrained(
   snapshot: view ByteBuffer
   snapshotLength: view Int
 ) ret Bool {
-  let writeBuffer: mod WriteBuffer => componentMod(this: writeBuffers, entityId: entityId)
+  let writeBuffer: mod WriteBuffer = componentMod(this: writeBuffers, entityId: entityId)
   if byteBufferLength(buffer: writeBuffer.buffer) > snapshotLength {
     ret false
   }

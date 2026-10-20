@@ -23,7 +23,7 @@ func viaParam(value: view UInt64) ret UInt64 {
 }
 
 func narrowParam(maybe: opt copy UInt64) ret UInt64 {
-  if let present: view UInt64 => maybe {
+  if let present: view UInt64 = maybe {
     ret present * 3
   }
   ret 0
@@ -43,7 +43,7 @@ func main() {
     signed: -3 as Int32
     mid: 9 as UInt32
   }
-  if let present: view UInt64 => holder.wide {
+  if let present: view UInt64 = holder.wide {
     let copied: UInt64 = present
     log("copy {copied}")
     log("argument {twice(value: present)}")
@@ -51,26 +51,26 @@ func main() {
     log("comparison {present > (10 as UInt64)}")
     log("interpolation {present}")
   }
-  if let present: view UInt8 => holder.small {
+  if let present: view UInt8 = holder.small {
     let copied: UInt8 = present
     log("small {copied} {present + 1} {present is (7 as UInt8)}")
   }
-  if let present: view Int32 => holder.signed {
+  if let present: view Int32 = holder.signed {
     log("signed {present} {present * 2}")
   }
-  if let present: view UInt32 => holder.mid {
+  if let present: view UInt32 = holder.mid {
     let copied: UInt32 = present
     log("mid {copied} {present < (10 as UInt32)}")
   }
-  if let present: mod UInt64 => holder.wide {
+  if let present: mod UInt64 = holder.wide {
     present = present + 2
   }
-  if let present: view UInt64 => holder.wide {
+  if let present: view UInt64 = holder.wide {
     log("written through mod {present}")
   }
 
   let base: UInt64 = 10
-  let baseView: view UInt64 => base
+  let baseView: view UInt64 = base
   log("view local {baseView} {baseView + 1}")
   log("view parameter {viaParam(value: base)} {viaParam(value: baseView)}")
   let four: opt UInt64 = 4 as UInt64
@@ -86,7 +86,7 @@ func main() {
     sum = sum + value
   }
   log("loop sum {sum}")
-  if let second: view UInt64 => values.viewAt(index: 1) {
+  if let second: view UInt64 = values.viewAt(index: 1) {
     log("viewAt {second} {second > (6 as UInt64)}")
   }
 }

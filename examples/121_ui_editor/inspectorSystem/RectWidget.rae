@@ -64,7 +64,7 @@ func rectFieldValue(
   field: view RectField
 ) ret Float {
   if componentHas(this: world.rects, entityId: entityId) {
-    let rect: view Rect => componentView(this: world.rects, entityId: entityId)
+    let rect: view Rect = componentView(this: world.rects, entityId: entityId)
     match field {
       case RectField.x {
         ret rect.position.x
@@ -82,7 +82,7 @@ func rectFieldValue(
   }
   if field is RectField.w or field is RectField.h {
     if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) {
-      let computed: view ComputedRect => componentView(
+      let computed: view ComputedRect = componentView(
         this: uiSystems.layout.computedRects
         entityId: entityId
       )
@@ -94,7 +94,7 @@ func rectFieldValue(
     ret 0.0
   }
   if componentHas(this: uiSystems.transform2d.worldTransforms, entityId: entityId) {
-    let transform: view WorldTransform2D => componentView(
+    let transform: view WorldTransform2D = componentView(
       this: uiSystems.transform2d.worldTransforms
       entityId: entityId
     )
@@ -122,7 +122,7 @@ func rectFieldDriver(
 ) ret String {
   if field is RectField.w or field is RectField.h {
     if componentHas(this: world.sizes, entityId: entityId) {
-      let size: view Size => componentView(this: world.sizes, entityId: entityId)
+      let size: view Size = componentView(this: world.sizes, entityId: entityId)
       var mode: SizeMode = size.w.mode
       if field is RectField.h {
         mode = size.h.mode
@@ -142,7 +142,7 @@ func rectFieldDriver(
     parent = componentView(this: uiSystems.hierarchy.parents, entityId: entityId).parent
   }
   if isNone(this: parent) is false and componentHas(this: world.layouts, entityId: parent) {
-    let layout: view Layout => componentView(this: world.layouts, entityId: parent)
+    let layout: view Layout = componentView(this: world.layouts, entityId: parent)
     if layout.kind is not LayoutType.none {
       # An OWNED copy, not the literal: the layout+align case reassigns
       # `driver` below, and reassigning over a static literal frees it.
@@ -150,7 +150,7 @@ func rectFieldDriver(
     }
   }
   if componentHas(this: world.aligns, entityId: entityId) {
-    let align: view Align => componentView(this: world.aligns, entityId: entityId)
+    let align: view Align = componentView(this: world.aligns, entityId: entityId)
     var aligned: Bool = align.hasX
     if field is RectField.y {
       aligned = align.hasY

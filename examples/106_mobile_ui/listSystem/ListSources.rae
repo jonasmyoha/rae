@@ -128,7 +128,7 @@ func searchData(
     } else {
       var t: Int = 0
       loop t < album.tracks.length and rows.length < maxRows {
-        if let track: view Track => album.tracks.viewAt(index: t) {
+        if let track: view Track = album.tracks.viewAt(index: t) {
           if albumHit or containsFold(haystack: track.title, needle: needle) {
             rows.add(value: searchRow(
               key: "{album.stem}:{t}"
@@ -224,7 +224,7 @@ func sheetData(sheet: view BottomSheetState) ret ListViewData {
 # its REAL history index; the art cell and the placeholder switch follow
 # whether the entry's artwork is loaded.
 func recentData(state: view AppState) ret ListViewData {
-  let history: view PlayHistory => state.playHistory
+  let history: view PlayHistory = state.playHistory
   let n: Int = history.entries.length
   var count: Int = recentlyPlayedPreviewMax
   if n < count {
@@ -234,7 +234,7 @@ func recentData(state: view AppState) ret ListViewData {
   var visual: Int = 0
   loop visual < count {
     let entryIdx: Int = n - 1 - visual
-    if let entry: view PlayHistoryEntry => history.entries.viewAt(index: entryIdx) {
+    if let entry: view PlayHistoryEntry = history.entries.viewAt(index: entryIdx) {
       let hasArt: Bool = historyHasArt(entry: entry)
       var row: ListViewRow = newListRow(cap: 8)
       listCell(row: row, key: "key", value: "{entryIdx}")
@@ -302,7 +302,7 @@ func listViewDataFor(
   if source is ListSourceKind.searchTracks or source is ListSourceKind.searchAlbums {
     var maxRows: Int = 12
     if componentHas(this: world.listViews, entityId: host) {
-      let lv: view ListView => componentView(this: world.listViews, entityId: host)
+      let lv: view ListView = componentView(this: world.listViews, entityId: host)
       if lv.visibleItemCount > 0 {
         maxRows = lv.visibleItemCount
       }
@@ -361,7 +361,7 @@ func listSourceSystem(
         playbackSystem: playbackSystem
       )
       componentSet(this: world.listViewDatas, entityId: host, data: own data)
-      let binding: mod ListSource => queryModAt(table: world.listSources, denseIndex: i)
+      let binding: mod ListSource = queryModAt(table: world.listSources, denseIndex: i)
       binding.builtKey = "{key}"
       changed = true
     }

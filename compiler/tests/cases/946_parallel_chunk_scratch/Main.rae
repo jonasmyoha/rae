@@ -26,7 +26,7 @@ func chunkedPairs(count: view Int, chunks: view Int) ret List(Int) {
     scratch.add(value: List.create(Int, cap: 16))
   }
   parallelLoop var c: Int = 0, c < chunks, ++c {
-    if let buffer: mod List(Int) => scratch.modAt(index: c) {
+    if let buffer: mod List(Int) = scratch.modAt(index: c) {
       let start: Int = c * count / chunks
       let end: Int = (c + 1) * count / chunks
       loop var i: Int = start, i < end, ++i {
@@ -36,7 +36,7 @@ func chunkedPairs(count: view Int, chunks: view Int) ret List(Int) {
   }
   var merged: List(Int) = List.create(Int, cap: 64)
   loop var c: Int = 0, c < chunks, ++c {
-    if let buffer: view List(Int) => scratch.viewAt(index: c) {
+    if let buffer: view List(Int) = scratch.viewAt(index: c) {
       loop var k: Int = 0, k < buffer.length, ++k {
         merged.add(value: buffer.copyAtDefault(index: k))
       }

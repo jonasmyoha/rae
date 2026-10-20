@@ -188,7 +188,7 @@ func acceptOne(worker: mod Worker) {
   var slot: Int = worker.connections.length
   if worker.freeSlots.length > 0 {
     slot = worker.freeSlots.pop()
-    if let connection: mod Connection => worker.connections.modAt(index: slot) {
+    if let connection: mod Connection = worker.connections.modAt(index: slot) {
       connection.socketId = accepted.socketId
       connection.watchingWritable = false
       connection.closing = false
@@ -218,7 +218,7 @@ func acceptOne(worker: mod Worker) {
 # while output is waiting
 func settle(worker: mod Worker, slot: view Int) {
   var closeIt: Bool = false
-  if let connection: mod Connection => worker.connections.modAt(index: slot) {
+  if let connection: mod Connection = worker.connections.modAt(index: slot) {
     let waiting: Bool = byteBufferLength(buffer: connection.output) > 0
     if connection.closing and not waiting {
       let status: NetStatus = pollerForget(
@@ -270,7 +270,7 @@ func handleReady(worker: mod Worker, readiness: view Readiness) {
   if slot < 0 {
     ret
   }
-  if let connection: mod Connection => worker.connections.modAt(index: slot) {
+  if let connection: mod Connection = worker.connections.modAt(index: slot) {
     if readiness.readable or readiness.closed or readiness.failed {
       worker.requests = worker.requests + serviceConnection(
         connection: connection

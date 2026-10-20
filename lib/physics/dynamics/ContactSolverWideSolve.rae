@@ -53,7 +53,7 @@ func warmStartContactsWide(
   block: view SolverBlock
 ) {
   loop var i: Int = block.startIndex, i < block.startIndex + block.count, ++i {
-    if let constraint: view ContactConstraintWide => constraints.viewAt(index: first + i) {
+    if let constraint: view ContactConstraintWide = constraints.viewAt(index: first + i) {
       var bodyA: BodyStateWide = gatherBodies(states: states, indices: constraint.indexA)
       var bodyB: BodyStateWide = gatherBodies(states: states, indices: constraint.indexB)
       let pointCount: Int = widePointCount(constraint: constraint)
@@ -62,9 +62,7 @@ func warmStartContactsWide(
       var momentA: Vec3Wide = zeroVectorWide()
       var momentB: Vec3Wide = zeroVectorWide()
       loop var j: Int = 0, j < pointCount, ++j {
-        if let constraintPoint: view ContactConstraintPointWide => constraint.points.viewAt(
-          index: j
-        ) {
+        if let constraintPoint: view ContactConstraintPointWide = constraint.points.viewAt(index: j) {
           let normalImpulse: FloatWide = constraintPoint.normalImpulse
           totalNormalImpulse = addWide(left: totalNormalImpulse, right: normalImpulse)
           momentA = mulAddVectorWide(
@@ -202,7 +200,7 @@ func pushContactsWide(
   let staticMassScale: FloatWide = splatWide(value: context.staticSoftness.massScale)
   let staticImpulseScale: FloatWide = splatWide(value: context.staticSoftness.impulseScale)
   loop var wideIndex: Int = block.startIndex, wideIndex < block.startIndex + block.count, ++wideIndex {
-    if let constraint: mod ContactConstraintWide => constraints.modAt(index: first + wideIndex) {
+    if let constraint: mod ContactConstraintWide = constraints.modAt(index: first + wideIndex) {
       let pointCount: Int = widePointCount(constraint: constraint)
       var bodyA: BodyStateWide = gatherBodies(states: states, indices: constraint.indexA)
       var bodyB: BodyStateWide = gatherBodies(states: states, indices: constraint.indexB)
@@ -234,7 +232,7 @@ func pushContactsWide(
         vector: constraint.normal
       )
       loop var pointIndex: Int = 0, pointIndex < pointCount, ++pointIndex {
-        if let constraintPoint: mod ContactConstraintPointWide => constraint.points.modAt(
+        if let constraintPoint: mod ContactConstraintPointWide = constraint.points.modAt(
           index: pointIndex
         ) {
           let separation: FloatWide = wideSeparation(
@@ -316,7 +314,7 @@ func solveContactsWide(
   let one: FloatWide = splatWide(value: 1.0)
   let epsilon: FloatWide = splatWide(value: floatEpsilon)
   loop var wideIndex: Int = block.startIndex, wideIndex < block.startIndex + block.count, ++wideIndex {
-    if let constraint: mod ContactConstraintWide => constraints.modAt(index: first + wideIndex) {
+    if let constraint: mod ContactConstraintWide = constraints.modAt(index: first + wideIndex) {
       let pointCount: Int = widePointCount(constraint: constraint)
       var bodyA: BodyStateWide = gatherBodies(states: states, indices: constraint.indexA)
       var bodyB: BodyStateWide = gatherBodies(states: states, indices: constraint.indexB)
@@ -333,7 +331,7 @@ func solveContactsWide(
       var totalNormalImpulse: FloatWide = zeroWide()
       var totalTwistLimit: FloatWide = zeroWide()
       loop var pointIndex: Int = 0, pointIndex < pointCount, ++pointIndex {
-        if let constraintPoint: mod ContactConstraintPointWide => constraint.points.modAt(
+        if let constraintPoint: mod ContactConstraintPointWide = constraint.points.modAt(
           index: pointIndex
         ) {
           let separation: FloatWide = wideSeparation(
@@ -566,7 +564,7 @@ func applyRestitutionWide(
   let negRestitutionThreshold: FloatWide = splatWide(value: -threshold)
   let zero: FloatWide = zeroWide()
   loop var wideIndex: Int = block.startIndex, wideIndex < block.startIndex + block.count, ++wideIndex {
-    if let constraint: mod ContactConstraintWide => constraints.modAt(index: first + wideIndex) {
+    if let constraint: mod ContactConstraintWide = constraints.modAt(index: first + wideIndex) {
       if propagate is false and allZeroWide(value: constraint.restitution) {
         continue
       }
@@ -578,7 +576,7 @@ func applyRestitutionWide(
       let rotationA: Matrix3Wide = matrixFromQuatWide(quat: bodyA.deltaRotation)
       let rotationB: Matrix3Wide = matrixFromQuatWide(quat: bodyB.deltaRotation)
       loop var pointIndex: Int = 0, pointIndex < pointCount, ++pointIndex {
-        if let constraintPoint: mod ContactConstraintPointWide => constraint.points.modAt(
+        if let constraintPoint: mod ContactConstraintPointWide = constraint.points.modAt(
           index: pointIndex
         ) {
           let rA: Vec3Wide = constraintPoint.anchorA

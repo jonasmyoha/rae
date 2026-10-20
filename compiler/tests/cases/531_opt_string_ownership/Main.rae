@@ -16,7 +16,7 @@ func describe(c: view Card) ret String {
   # #656: `if let ... view String => <opt String field>` alone now agrees
   # with `is not none` even after the field is reassigned to none, so the
   # earlier `is not none` guard around this narrowing is no longer needed.
-  if let n: view String => c.note {
+  if let n: view String = c.note {
     out = out.concat(other: "/").concat(other: n)
   }
   ret out
@@ -38,7 +38,7 @@ func main() {
   var o: opt String = makeNote(flag: true)
   o = makeNote(flag: false)
   o = makeNote(flag: true)
-  if let noteText: view String => o {
+  if let noteText: view String = o {
     log("o={noteText}")
   }
 
@@ -56,7 +56,7 @@ func main() {
   var plain: String = ""
   plain = plain.concat(other: "wrapped")
   var w: opt String = plain
-  if let wrapped: view String => w {
+  if let wrapped: view String = w {
     log("w={wrapped}")
   }
 }

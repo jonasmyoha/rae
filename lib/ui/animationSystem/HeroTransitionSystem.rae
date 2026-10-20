@@ -32,7 +32,7 @@ func findHeroOnPage(
   var i: Int = 0
   loop i < n {
     let entityId: EntityId = componentEntityAt(this: world.heroWidgets, i: i)
-    let hero: view HeroWidget => queryViewAt(table: world.heroWidgets, denseIndex: i)
+    let hero: view HeroWidget = queryViewAt(table: world.heroWidgets, denseIndex: i)
     if hero.key is key {
       let page: String = pageOf(world: world, uiSystems: uiSystems, entityId: entityId)
       if page is pageId {
@@ -62,11 +62,11 @@ func heroOnScreen(
   uiSystems: view UiSystems
   entityId: view EntityId
 ) ret Bool {
-  let at: view WorldTransform2D => componentView(
+  let at: view WorldTransform2D = componentView(
     this: uiSystems.transform2d.worldTransforms
     entityId: entityId
   )
-  let box: view ComputedRect => componentView(
+  let box: view ComputedRect = componentView(
     this: uiSystems.layout.computedRects
     entityId: entityId
   )
@@ -92,7 +92,7 @@ func setHeroVisible(world: mod UiWorld, entityId: view EntityId, visible: view B
     ret
   }
   if componentHas(this: world.transforms, entityId: entityId) {
-    let fx: mod TransformFx => componentMod(this: world.transforms, entityId: entityId)
+    let fx: mod TransformFx = componentMod(this: world.transforms, entityId: entityId)
     fx.visible = visible
     ret
   }
@@ -150,19 +150,19 @@ func spawnHeroTransition(
   if heroOnScreen(world: world, uiSystems: uiSystems, entityId: source) is false {
     ret false
   }
-  let sourceAt: view WorldTransform2D => componentView(
+  let sourceAt: view WorldTransform2D = componentView(
     this: uiSystems.transform2d.worldTransforms
     entityId: source
   )
-  let sourceBox: view ComputedRect => componentView(
+  let sourceBox: view ComputedRect = componentView(
     this: uiSystems.layout.computedRects
     entityId: source
   )
-  let targetAt: view WorldTransform2D => componentView(
+  let targetAt: view WorldTransform2D = componentView(
     this: uiSystems.transform2d.worldTransforms
     entityId: target
   )
-  let targetBox: view ComputedRect => componentView(
+  let targetBox: view ComputedRect = componentView(
     this: uiSystems.layout.computedRects
     entityId: target
   )
@@ -240,7 +240,7 @@ func heroTransitionSystem(
   }
   var moving: Bool = false
   loop let flight: view EntityId in flights {
-    let transition: view HeroTransition => componentView(
+    let transition: view HeroTransition = componentView(
       this: uiSystems.heroTransition.heroTransitions
       entityId: flight
     )

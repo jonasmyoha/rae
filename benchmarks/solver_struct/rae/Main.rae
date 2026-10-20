@@ -100,7 +100,7 @@ func main() {
   let startNs: Int = nowNs()
   loop var pass: Int = 0, pass < passes, ++pass {
     loop var i: Int = 0, i < constraintCount, ++i {
-      if let constraint: mod ContactConstraint => constraints.modAt(index: i) {
+      if let constraint: mod ContactConstraint = constraints.modAt(index: i) {
         let a: BodyState = bodies.copyAtDefault(index: constraint.bodyA)
         let b: BodyState = bodies.copyAtDefault(index: constraint.bodyB)
         # Relative normal velocity at the contact: (vB + wB x rB) - (vA + wA x rA).

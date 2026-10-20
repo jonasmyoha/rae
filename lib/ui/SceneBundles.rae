@@ -112,7 +112,7 @@ func bundleIndex(set: view BundleSet, name: view String) ret opt Int {
 # Add every bundle of the scene's top-level `bundles` block that `out` does not
 # have yet (first declaration wins — the nearest scene in resolution order).
 func parseBundlesInto(out: mod BundleSet, scene: view Scene) {
-  let doc: view JsonDoc => scene.doc
+  let doc: view JsonDoc = scene.doc
   if doc.ok is false {
     ret
   }
@@ -148,7 +148,7 @@ func sceneImportedBundles(
   loop var i: Int = 0, i < assets.importedIds.length, ++i {
     if let importId: String = assets.importedIds.copyAt(index: i) {
       if let idx: Int = sceneRegistryIndex(reg: registry, key: importId) {
-        let imported: view Scene => sceneRegistryGet(reg: registry, idx: idx)
+        let imported: view Scene = sceneRegistryGet(reg: registry, idx: idx)
         parseBundlesInto(out: set, scene: imported)
       }
     }

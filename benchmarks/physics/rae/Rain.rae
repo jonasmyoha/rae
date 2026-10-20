@@ -97,7 +97,7 @@ func createGroup(
     z: -0.5 * span + groupDistance * ((rowIndex as Float) + 0.5)
   }
   loop var i: Int = 0, i < rainGroupSize, ++i {
-    if let human: mod Human => rain.humans.modAt(index: groupIndex * rainGroupSize + i) {
+    if let human: mod Human = rain.humans.modAt(index: groupIndex * rainGroupSize + i) {
       createHuman(
         world: world
         human: human
@@ -120,7 +120,7 @@ func destroyGroup(
 ) {
   let groupIndex: Int = rowIndex * rainGridCount + columnIndex
   loop var i: Int = 0, i < rainGroupSize, ++i {
-    if let human: mod Human => rain.humans.modAt(index: groupIndex * rainGroupSize + i) {
+    if let human: mod Human = rain.humans.modAt(index: groupIndex * rainGroupSize + i) {
       destroyHuman(world: world, human: human)
     }
   }

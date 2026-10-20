@@ -13,34 +13,34 @@ func main() {
   tracks.add(value: Track { title: "Outro", seconds: 143 })
 
   # read through a view, no copy
-  if let first: view Track => tracks.viewAt(index: 0) {
+  if let first: view Track = tracks.viewAt(index: 0) {
     log("viewAt: {first.title} / {first.seconds}")
   }
 
   # checked: in range and out of range
-  if let found: view Track => tracks.viewAt(index: 1) {
+  if let found: view Track = tracks.viewAt(index: 1) {
     log("viewGet(1): {found.title}")
   } else {
     log("viewGet(1): none")
   }
-  if let missing: view Track => tracks.viewAt(index: 9) {
+  if let missing: view Track = tracks.viewAt(index: 9) {
     log("viewGet(9): {missing.title}")
   } else {
     log("viewGet(9): none")
   }
 
   # write in place through a mod reference
-  if let second: mod Track => tracks.modAt(index: 1) {
+  if let second: mod Track = tracks.modAt(index: 1) {
     second.seconds = 200
   }
-  if let second: view Track => tracks.viewAt(index: 1) {
+  if let second: view Track = tracks.viewAt(index: 1) {
     log("after modAt: {second.seconds}")
   }
 
-  if let editable: mod Track => tracks.modAt(index: 0) {
+  if let editable: mod Track = tracks.modAt(index: 0) {
     editable.seconds = 99
   }
-  if let first: view Track => tracks.viewAt(index: 0) {
+  if let first: view Track = tracks.viewAt(index: 0) {
     log("after modGet: {first.seconds}")
   }
 }

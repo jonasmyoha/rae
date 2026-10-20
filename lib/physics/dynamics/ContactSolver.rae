@@ -45,7 +45,7 @@ func storeVelocities(
   if index is -1 {
     ret
   }
-  if let state: mod BodyState => states.modAt(index: index) {
+  if let state: mod BodyState = states.modAt(index: index) {
     if (state.flags bitand dynamicFlag) is not 0 {
       state.linearVelocity = linearVelocity
       state.angularVelocity = angularVelocity
@@ -86,7 +86,7 @@ func prepareContactsScalar(
     loop index < colorEndIndex {
       let localIndex: Int = index - span.start
       var spec: ContactSpec = { contactId: -1, manifoldStart: 0, manifoldCount: 0 }
-      if let color: view GraphColor => world.constraintGraph.colors.viewAt(index: span.colorIndex) {
+      if let color: view GraphColor = world.constraintGraph.colors.viewAt(index: span.colorIndex) {
         spec = color.contacts.copyAtDefault(index: localIndex)
       }
       prepareContactScalar(
@@ -120,8 +120,8 @@ func prepareContactScalar(
 ) {
   let contactId: Int = spec.contactId
   var contactConstraint: ContactConstraint = zeroContactConstraint()
-  if let contact: mod Contact => world.contacts.modAt(index: contactId) {
-    if let awake: view SolverSet => world.solverSets.viewAt(index: awakeSet) {
+  if let contact: mod Contact = world.contacts.modAt(index: contactId) {
+    if let awake: view SolverSet = world.solverSets.viewAt(index: awakeSet) {
       var indexA: Int = contact.encodedBodySimA
       if indexA < 0 {
         indexA = -1
@@ -188,7 +188,7 @@ func prepareContactScalar(
       }
 
       loop var manifoldIndex: Int = 0, manifoldIndex < manifoldCount, ++manifoldIndex {
-        if let manifold: mod Manifold => contact.manifolds.modAt(index: manifoldIndex) {
+        if let manifold: mod Manifold = contact.manifolds.modAt(index: manifoldIndex) {
           var constraint: ManifoldConstraint = zeroManifoldConstraint()
           let pointCount: Int = manifold.pointCount
           let normal: Vec3 = manifold.normal
@@ -205,7 +205,7 @@ func prepareContactScalar(
           var centerB: Vec3 = zeroVector()
           var totalFrictionWeight: Float = 0.0
           loop var pointIndex: Int = 0, pointIndex < pointCount, ++pointIndex {
-            if let point: mod ManifoldPoint => manifold.points.modAt(index: pointIndex) {
+            if let point: mod ManifoldPoint = manifold.points.modAt(index: pointIndex) {
               var constraintPoint: ManifoldConstraintPoint = emptyConstraintPoint()
               constraintPoint.anchorA = point.anchorA
               constraintPoint.anchorB = point.anchorB
@@ -262,7 +262,7 @@ func prepareContactScalar(
           constraint.centerA = centerA
           constraint.centerB = centerB
           loop var pointIndex: Int = 0, pointIndex < pointCount, ++pointIndex {
-            if let constraintPoint: mod ManifoldConstraintPoint => constraint.points.modAt(
+            if let constraintPoint: mod ManifoldConstraintPoint = constraint.points.modAt(
               index: pointIndex
             ) {
               constraintPoint.leverArm = distance(from: constraintPoint.anchorA, to: centerA)
@@ -473,12 +473,12 @@ func pushContactsScalar(
     let dp: Vec3 = subtract(left: stateB.deltaPosition, right: stateA.deltaPosition)
     let softness: Softness = contactConstraint.softness
     loop var j: Int = 0, j < contactConstraint.manifoldCount, ++j {
-      if let constraint: mod ManifoldConstraint => manifolds.modAt(
+      if let constraint: mod ManifoldConstraint = manifolds.modAt(
         index: contactConstraint.manifoldStart + j
       ) {
         let normal: Vec3 = constraint.normal
         loop var pointIndex: Int = 0, pointIndex < constraint.pointCount, ++pointIndex {
-          if let constraintPoint: mod ManifoldConstraintPoint => constraint.points.modAt(
+          if let constraintPoint: mod ManifoldConstraintPoint = constraint.points.modAt(
             index: pointIndex
           ) {
             let rA: Vec3 = constraintPoint.anchorA
@@ -572,14 +572,14 @@ func solveContactsScalar(
     let friction: Float = contactConstraint.friction
     let rollingResistance: Float = contactConstraint.rollingResistance
     loop var j: Int = 0, j < contactConstraint.manifoldCount, ++j {
-      if let constraint: mod ManifoldConstraint => manifolds.modAt(
+      if let constraint: mod ManifoldConstraint = manifolds.modAt(
         index: contactConstraint.manifoldStart + j
       ) {
         let normal: Vec3 = constraint.normal
         var totalNormalImpulse: Float = 0.0
         var totalTwistLimit: Float = 0.0
         loop var pointIndex: Int = 0, pointIndex < constraint.pointCount, ++pointIndex {
-          if let constraintPoint: mod ManifoldConstraintPoint => constraint.points.modAt(
+          if let constraintPoint: mod ManifoldConstraintPoint = constraint.points.modAt(
             index: pointIndex
           ) {
             let rA: Vec3 = constraintPoint.anchorA
@@ -753,12 +753,12 @@ func applyRestitutionScalar(
     var wB: Vec3 = stateB.angularVelocity
     let dp: Vec3 = subtract(left: stateB.deltaPosition, right: stateA.deltaPosition)
     loop var j: Int = 0, j < contactConstraint.manifoldCount, ++j {
-      if let constraint: mod ManifoldConstraint => manifolds.modAt(
+      if let constraint: mod ManifoldConstraint = manifolds.modAt(
         index: contactConstraint.manifoldStart + j
       ) {
         let normal: Vec3 = constraint.normal
         loop var pointIndex: Int = 0, pointIndex < constraint.pointCount, ++pointIndex {
-          if let constraintPoint: mod ManifoldConstraintPoint => constraint.points.modAt(
+          if let constraintPoint: mod ManifoldConstraintPoint = constraint.points.modAt(
             index: pointIndex
           ) {
             let rA: Vec3 = constraintPoint.anchorA
@@ -845,14 +845,14 @@ func storeImpulsesScalar(
 ) {
   loop var index: Int = block.startIndex, index < block.startIndex + block.count, ++index {
     let contactConstraint: ContactConstraint = constraints.copyAtDefault(index: index)
-    if let contact: mod Contact => contacts.modAt(index: contactConstraint.contactId) {
+    if let contact: mod Contact = contacts.modAt(index: contactConstraint.contactId) {
       let checkHitEvents: Bool = (contact.flags bitand simEnableHitEvent) is not 0
       var flagged: Bool = false
       loop var manifoldIndex: Int = 0, manifoldIndex < contactConstraint.manifoldCount, ++manifoldIndex {
         let constraint: ManifoldConstraint = manifolds.copyAtDefault(
           index: contactConstraint.manifoldStart + manifoldIndex
         )
-        if let manifold: mod Manifold => contact.manifolds.modAt(index: manifoldIndex) {
+        if let manifold: mod Manifold = contact.manifolds.modAt(index: manifoldIndex) {
           manifold.twistImpulse = constraint.twistImpulse
           manifold.frictionImpulse = blend2(
             firstScale: constraint.frictionImpulse.x
@@ -866,7 +866,7 @@ func storeImpulsesScalar(
               index: pointIndex
               fallback: emptyConstraintPoint()
             )
-            if let point: mod ManifoldPoint => manifold.points.modAt(index: pointIndex) {
+            if let point: mod ManifoldPoint = manifold.points.modAt(index: pointIndex) {
               point.normalImpulse = constraintPoint.normalImpulse
               point.totalNormalImpulse = constraintPoint.totalNormalImpulse
               if checkHitEvents and flagged is false and point.normalVelocity < negHitThreshold and point.totalNormalImpulse > 0.0 {
@@ -886,7 +886,7 @@ func flagHitContacts(world: mod PhysicsWorld, hitContacts: view List(Int), slot:
   if hitContacts.length is 0 {
     ret
   }
-  if let taskContext: mod TaskContext => world.taskContexts.modAt(index: slot) {
+  if let taskContext: mod TaskContext = world.taskContexts.modAt(index: slot) {
     loop var i: Int = 0, i < hitContacts.length, ++i {
       setBit(bitset: taskContext.hitEventBitSet, bitIndex: hitContacts.copyAtDefault(index: i))
     }

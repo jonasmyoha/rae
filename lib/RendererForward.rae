@@ -68,7 +68,7 @@ func createForwardRendererWithUiSky(sky: view Sky) ret DeferredRenderer {
 # it, a forward frame paints the terrain with the lib palette.
 func rendererSetForwardTerrainShader(renderer: mod DeferredRenderer, shader: own Shader) {
   ensureRendererResources(renderer: renderer)
-  if let resources: mod GpuResources => renderer.gpuResources {
+  if let resources: mod GpuResources = renderer.gpuResources {
     terrainSetForwardShader(cache: renderer.passes.gbuffer, resources: resources, shader: shader)
   }
 }
@@ -338,7 +338,7 @@ func beginForwardPass(
   if renderer.hasSky {
     sky = renderer.sky
   }
-  if let resources: mod GpuResources => renderer.gpuResources {
+  if let resources: mod GpuResources = renderer.gpuResources {
     beginForwardMain(
       forward: renderer.passes.forward
       gbuffer: renderer.passes.gbuffer
@@ -355,7 +355,7 @@ func beginForwardPass(
 
 # Draw the sky behind the scene and submit the forward pass
 func endForwardPass(renderer: mod DeferredRenderer) {
-  if let resources: mod GpuResources => renderer.gpuResources {
+  if let resources: mod GpuResources = renderer.gpuResources {
     endForwardMain(
       forward: renderer.passes.forward
       gbuffer: renderer.passes.gbuffer
@@ -380,7 +380,7 @@ func renderForwardPassWorld(
     light: light
     aspect: aspect
   )
-  if let resources: mod GpuResources => renderer.gpuResources {
+  if let resources: mod GpuResources = renderer.gpuResources {
     GbufferWorld.renderSceneWorld(
       cache: renderer.passes.gbuffer
       resources: resources

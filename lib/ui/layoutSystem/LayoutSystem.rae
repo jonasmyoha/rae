@@ -47,7 +47,7 @@ func layoutActive(world: view UiWorld, entityId: view EntityId) ret Bool {
   if componentHas(this: world.actives, entityId: entityId) is false {
     ret true
   }
-  let a: view Active => componentView(this: world.actives, entityId: entityId)
+  let a: view Active = componentView(this: world.actives, entityId: entityId)
   ret a.value
 }
 
@@ -95,7 +95,7 @@ func applyConstraintsW(world: view UiWorld, entityId: view EntityId, w: view Flo
   if componentHas(this: world.constraints, entityId: entityId) is false {
     ret w
   }
-  let c: view Constraints => componentView(this: world.constraints, entityId: entityId)
+  let c: view Constraints = componentView(this: world.constraints, entityId: entityId)
   var r: Float = w
   if c.hasMinW {
     if r < c.minW {
@@ -114,7 +114,7 @@ func applyConstraintsH(world: view UiWorld, entityId: view EntityId, h: view Flo
   if componentHas(this: world.constraints, entityId: entityId) is false {
     ret h
   }
-  let c: view Constraints => componentView(this: world.constraints, entityId: entityId)
+  let c: view Constraints = componentView(this: world.constraints, entityId: entityId)
   var r: Float = h
   if c.hasMinH {
     if r < c.minH {
@@ -135,7 +135,7 @@ func rootExtentAnchor(world: view UiWorld, entityId: view EntityId) ret HExtent 
   if componentHas(this: world.extentAnchors, entityId: entityId) is false {
     ret HExtent.left
   }
-  let a: view ExtentAnchor => componentView(this: world.extentAnchors, entityId: entityId)
+  let a: view ExtentAnchor = componentView(this: world.extentAnchors, entityId: entityId)
   ret a.h
 }
 
@@ -146,7 +146,7 @@ func entityPadding(
 ) ret Insets {
   var base: Insets = { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
   if componentHas(this: world.paddings, entityId: entityId) {
-    let p: view Padding => componentView(this: world.paddings, entityId: entityId)
+    let p: view Padding = componentView(this: world.paddings, entityId: entityId)
     base = p.insets
   }
   # Fold safe-area insets (design units, set by safeAreaSystem from the
@@ -155,16 +155,13 @@ func entityPadding(
   if componentHas(this: world.safeAreas, entityId: entityId) is false {
     ret base
   }
-  let safe: view SafeArea => componentView(this: world.safeAreas, entityId: entityId)
+  let safe: view SafeArea = componentView(this: world.safeAreas, entityId: entityId)
   if safe.enabled is false {
     ret base
   }
   var insets: Insets = { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
   if componentHas(this: uiSystems.safeArea.safeInsets, entityId: entityId) {
-    let si: view SafeInsets => componentView(
-      this: uiSystems.safeArea.safeInsets
-      entityId: entityId
-    )
+    let si: view SafeInsets = componentView(this: uiSystems.safeArea.safeInsets, entityId: entityId)
     insets = si.insets
   }
   ret Insets {
@@ -179,7 +176,7 @@ func entityRect(world: view UiWorld, entityId: view EntityId) ret Rect {
   if componentHas(this: world.rects, entityId: entityId) is false {
     ret Rect { position: { x: 0.0, y: 0.0 }, size: { x: 0.0, y: 0.0 } }
   }
-  let r: view Rect => componentView(this: world.rects, entityId: entityId)
+  let r: view Rect = componentView(this: world.rects, entityId: entityId)
   ret r
 }
 
@@ -187,7 +184,7 @@ func entitySize(world: view UiWorld, entityId: view EntityId) ret Size {
   if componentHas(this: world.sizes, entityId: entityId) is false {
     ret defaultSize()
   }
-  let s: view Size => componentView(this: world.sizes, entityId: entityId)
+  let s: view Size = componentView(this: world.sizes, entityId: entityId)
   ret s
 }
 
@@ -195,7 +192,7 @@ func entityLayout(world: view UiWorld, entityId: view EntityId) ret Layout {
   if componentHas(this: world.layouts, entityId: entityId) is false {
     ret defaultLayout()
   }
-  let l: view Layout => componentView(this: world.layouts, entityId: entityId)
+  let l: view Layout = componentView(this: world.layouts, entityId: entityId)
   ret l
 }
 
@@ -204,7 +201,7 @@ func entityOffset(world: view UiWorld, entityId: view EntityId) ret Vec2 {
   if componentHas(this: world.offsets, entityId: entityId) is false {
     ret Vec2 { x: 0.0, y: 0.0 }
   }
-  let o: view Offset => componentView(this: world.offsets, entityId: entityId)
+  let o: view Offset = componentView(this: world.offsets, entityId: entityId)
   ret o.delta
 }
 
@@ -229,7 +226,7 @@ func activeChildrenInto(world: view UiWorld, entityId: view EntityId, out: mod L
     if componentHas(this: world.childrens, entityId: entityId) is false {
       ret
     }
-    let ch: view Children => componentView(this: world.childrens, entityId: entityId)
+    let ch: view Children = componentView(this: world.childrens, entityId: entityId)
     let n: Int = ch.ids.length
     var i: Int = 0
     loop i < n {
@@ -258,7 +255,7 @@ func measureNode(
 ) {
   unsafe {
     activeChildrenInto(world: world, entityId: entityId, out: scratch)
-    let kids: view List(EntityId) => scratch
+    let kids: view List(EntityId) = scratch
     let n: Int = kids.length
 
     # Compute the container's measured size from its children.
@@ -344,7 +341,7 @@ func measureNode(
       measuredW = rect.size.x
       measuredH = rect.size.y
       if componentHas(this: uiSystems.layout.measuredTexts, entityId: entityId) {
-        let mt: view MeasuredText => componentView(
+        let mt: view MeasuredText = componentView(
           this: uiSystems.layout.measuredTexts
           entityId: entityId
         )
@@ -358,7 +355,7 @@ func measureNode(
     # plus its padding (#71098456). Its children are the pooled row window,
     # which slides with the scroll, so their extent is not the list's size.
     if componentHas(this: world.listViews, entityId: entityId) {
-      let lv: view ListView => componentView(this: world.listViews, entityId: entityId)
+      let lv: view ListView = componentView(this: world.listViews, entityId: entityId)
       if lv.mode is ListViewMode.virtual {
         var shown: Int = 1
         if componentHas(this: world.listViewDatas, entityId: entityId) {
@@ -459,7 +456,7 @@ func measureGrid(
 # measure them directly so a lone root still gets a MeasuredSize for compute.
 func measureLinear(world: mod UiWorld, uiSystems: mod UiSystems) {
   unsafe {
-    let order: view List(EntityId) => depthOrder(
+    let order: view List(EntityId) = depthOrder(
       state: world.hierarchyOrder
       parents: uiSystems.hierarchy.parents
       childrens: world.childrens
@@ -477,7 +474,7 @@ func measureLinear(world: mod UiWorld, uiSystems: mod UiSystems) {
       }
       i = i - 1
     }
-    let alive: view List(EntityId) => world.allocator.alive
+    let alive: view List(EntityId) = world.allocator.alive
     loop var k: Int = 0, k < alive.length, ++k {
       let entityId: EntityId = rae_ext_rae_buf_get(buf: alive.data, index: k)
       if componentHas(this: uiSystems.hierarchy.parents, entityId: entityId) is false {
@@ -506,7 +503,7 @@ func childMeasuredW(
   let rect: Rect = entityRect(world: world, entityId: entityId)
   var measuredW: Float = rect.size.x
   if componentHas(this: uiSystems.layout.measuredSizes, entityId: entityId) {
-    let ms: view MeasuredSize => componentView(
+    let ms: view MeasuredSize = componentView(
       this: uiSystems.layout.measuredSizes
       entityId: entityId
     )
@@ -531,7 +528,7 @@ func childMeasuredH(
   let rect: Rect = entityRect(world: world, entityId: entityId)
   var measuredH: Float = rect.size.y
   if componentHas(this: uiSystems.layout.measuredSizes, entityId: entityId) {
-    let ms: view MeasuredSize => componentView(
+    let ms: view MeasuredSize = componentView(
       this: uiSystems.layout.measuredSizes
       entityId: entityId
     )
@@ -570,7 +567,7 @@ func resolveOwnSize(
   var measuredW: Float = rect.size.x
   var measuredH: Float = rect.size.y
   if componentHas(this: uiSystems.layout.measuredSizes, entityId: entityId) {
-    let ms: view MeasuredSize => componentView(
+    let ms: view MeasuredSize = componentView(
       this: uiSystems.layout.measuredSizes
       entityId: entityId
     )

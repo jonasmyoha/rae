@@ -59,10 +59,10 @@ func main() {
   )
   log("q4 count: {h4.length}")
   loop let row: view Query4Match in h4 {
-    let position: view Position => query4ViewA(tableA: pos, hit: row)
-    let velocity: view Velocity => query4ViewB(tableB: vel, hit: row)
-    let h: view Hp => query4ViewC(tableC: hp, hit: row)
-    let tg: view Tag => query4ViewD(tableD: tag, hit: row)
+    let position: view Position = query4ViewA(tableA: pos, hit: row)
+    let velocity: view Velocity = query4ViewB(tableB: vel, hit: row)
+    let h: view Hp = query4ViewC(tableC: hp, hit: row)
+    let tg: view Tag = query4ViewD(tableD: tag, hit: row)
     log("q4 e{row.entityId.index}: {position.x} {velocity.v} {h.hp} {tg.t}")
   }
 
@@ -75,10 +75,10 @@ func main() {
   )
   log("q4b count: {h4b.length}")
   loop let row: view Query4Match in h4b {
-    let px: mod Position => queryModAt(table: pos, denseIndex: row.indexA)
+    let px: mod Position = queryModAt(table: pos, denseIndex: row.indexA)
     px.x = px.x + 1000
   }
-  let got: view Position => componentView(this: pos, entityId: e4)
+  let got: view Position = componentView(this: pos, entityId: e4)
   log("e4.x after q4 mod: {got.x}")
 
   # query5, smallest table (tag) in slot E.
@@ -91,11 +91,11 @@ func main() {
   )
   log("q5 count: {h5.length}")
   loop let row: view Query5Match in h5 {
-    let position: view Position => query5ViewA(tableA: pos, hit: row)
-    let velocity: view Velocity => query5ViewB(tableB: vel, hit: row)
-    let h: view Hp => query5ViewC(tableC: hp, hit: row)
-    let nn: view Nm => query5ViewD(tableD: nm, hit: row)
-    let tg: view Tag => query5ViewE(tableE: tag, hit: row)
+    let position: view Position = query5ViewA(tableA: pos, hit: row)
+    let velocity: view Velocity = query5ViewB(tableB: vel, hit: row)
+    let h: view Hp = query5ViewC(tableC: hp, hit: row)
+    let nn: view Nm = query5ViewD(tableD: nm, hit: row)
+    let tg: view Tag = query5ViewE(tableE: tag, hit: row)
     log("q5 e{row.entityId.index}: {position.x} {velocity.v} {h.hp} {nn.n} {tg.t}")
   }
 
@@ -109,9 +109,9 @@ func main() {
   )
   log("q5a count: {h5a.length}")
   loop let row: view Query5Match in h5a {
-    let nn: mod Nm => queryModAt(table: nm, denseIndex: row.indexE)
+    let nn: mod Nm = queryModAt(table: nm, denseIndex: row.indexE)
     nn.n = nn.n + 1
   }
-  let gotNm: view Nm => componentView(this: nm, entityId: e4)
+  let gotNm: view Nm = componentView(this: nm, entityId: e4)
   log("e4.n after q5 mod: {gotNm.n}")
 }

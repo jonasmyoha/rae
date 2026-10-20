@@ -42,7 +42,7 @@ type MeshTriangleData {
 
 # b3GetMeshTriangle
 func getMeshTriangle(mesh: view Mesh, triangleIndex: view Int) ret MeshTriangleData {
-  let data: view PhysicsMeshData => mesh.data
+  let data: view PhysicsMeshData = mesh.data
   let triangle: MeshTriangle = data.triangles.copyAtDefault(index: triangleIndex)
   let triangleFlags: Int = data.flags.copyAtDefault(index: triangleIndex)
   let meshScale: Vec3 = mesh.scale
@@ -276,7 +276,7 @@ func queryMeshInto(
   let boundsCenter: Vec3 = multiply(left: half, right: add(left: boundsMin, right: boundsMax))
   let boundsExtent: Vec3 = subtract(left: boundsMax, right: boundsCenter)
 
-  let data: view PhysicsMeshData => mesh.data
+  let data: view PhysicsMeshData = mesh.data
   var nodeIndex: Int = 0
   loop true {
     let node: MeshNode = data.nodes.copyAtDefault(index: nodeIndex)

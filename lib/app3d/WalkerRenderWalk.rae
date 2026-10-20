@@ -90,8 +90,8 @@ func stepWalkerCharacterClock(
   ) is false {
     ret
   }
-  let anim: mod AnimationState => componentMod(this: world.animStates, entityId: entityId)
-  let transition: mod AnimationTransition => componentMod(
+  let anim: mod AnimationState = componentMod(this: world.animStates, entityId: entityId)
+  let transition: mod AnimationTransition = componentMod(
     this: world.animTransitions
     entityId: entityId
   )
@@ -151,7 +151,7 @@ func renderWalkerApp(
       entityId: entityId
       palette: slotPalette
     )
-    if let splash: mod WadeSplash => wadeSplash {
+    if let splash: mod WadeSplash = wadeSplash {
       captureCharacterFeet(
         characterSystem: characterSystem
         world: world
@@ -164,7 +164,7 @@ func renderWalkerApp(
       uploadPalette(renderer: renderSystem.renderer, rows: palette, jointCount: jc)
     } else {
       ensureRendererResources(renderer: renderSystem.renderer)
-      if let rendererResources: mod GpuResources => renderSystem.renderer.gpuResources {
+      if let rendererResources: mod GpuResources = renderSystem.renderer.gpuResources {
         uploadPaletteSlot(
           cache: renderSystem.renderer.passes.gbuffer
           resources: rendererResources
@@ -177,8 +177,8 @@ func renderWalkerApp(
   }
 
   # The wading spray: every foot captured above, against this frame's sea
-  if let splash: mod WadeSplash => wadeSplash {
-    if let sea: mod WaterSystem => waterSystem {
+  if let splash: mod WadeSplash = wadeSplash {
+    if let sea: mod WaterSystem = waterSystem {
       wadeSplashStep(
         wadeSplash: splash
         waterSystem: sea
@@ -242,7 +242,7 @@ func renderWalkerApp(
           grassGenerated = true
         }
         ensureRendererResources(renderer: renderSystem.renderer)
-        if let rendererResources: mod GpuResources => renderSystem.renderer.gpuResources {
+        if let rendererResources: mod GpuResources = renderSystem.renderer.gpuResources {
           Gbuffer.beginPass(
             cache: renderSystem.renderer.passes.gbuffer
             resources: rendererResources
@@ -287,7 +287,7 @@ func renderWalkerApp(
           light: cameraSystem.light
           aspect: aspect
         )
-        if let rendererResources: mod GpuResources => renderSystem.renderer.gpuResources {
+        if let rendererResources: mod GpuResources = renderSystem.renderer.gpuResources {
           drawWalkerScene(
             cache: renderSystem.renderer.passes.gbuffer
             rendererResources: rendererResources
@@ -342,13 +342,13 @@ func renderWalkerApp(
       }
       case RenderTag.waterFft {
         # The sea's FFT wave cascades for this frame (lib/water/IslandSea)
-        if let sea: mod WaterSystem => waterSystem {
+        if let sea: mod WaterSystem = waterSystem {
           waterFftStep(waterSystem: sea, resources: resources)
         }
       }
       case RenderTag.underwater {
         # Underwater fog (#855): the sea / the lake when the camera dips under.
-        if let sea: mod WaterSystem => waterSystem {
+        if let sea: mod WaterSystem = waterSystem {
           waterUnderwaterUpdate(
             waterSystem: sea
             renderer: renderSystem.renderer
@@ -368,8 +368,8 @@ func renderWalkerApp(
         # Opaque snapshot BEFORE the water so a refracting surface can read it (#832),
         # then the FFT sea (lib/water/IslandSea), then the splash droplets blend OVER it.
         snapshotOpaque(renderer: renderSystem.renderer)
-        if let sea: mod WaterSystem => waterSystem {
-          if let meshResources: view GpuResources => renderSystem.renderer.gpuResources {
+        if let sea: mod WaterSystem = waterSystem {
+          if let meshResources: view GpuResources = renderSystem.renderer.gpuResources {
             waterDraw(
               waterSystem: sea
               resources: resources
@@ -384,7 +384,7 @@ func renderWalkerApp(
           }
         }
         # Splash droplets fade by alpha through the transparent pass (#844).
-        if let splash: view WadeSplash => wadeSplash {
+        if let splash: view WadeSplash = wadeSplash {
           drawWadeSplash(
             wadeSplash: splash
             transparent: renderSystem.renderer.passes.transparent

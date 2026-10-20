@@ -355,7 +355,7 @@ func sortPropsIntoCells(
       let placement: PropPlacement = sorted.copyAtDefault(index: i)
       var center: Vec3 = placement.position
       var radius: Float = 0.0
-      if let kind: view PropKind => field.kinds.viewAt(index: placement.kind) {
+      if let kind: view PropKind = field.kinds.viewAt(index: placement.kind) {
         center = propCenter(kind: kind, placement: placement)
         radius = propRadius(kind: kind, placement: placement)
       }
@@ -564,10 +564,10 @@ func growPropBatches(field: mod PropField) {
     let size: Int = propBatchSize(field: field, kind: k)
     var batchIndices: List(Int) = List.create(Int, cap: 8)
     var hasSprite: Bool = false
-    if let kind: view PropKind => field.kinds.viewAt(index: k) {
+    if let kind: view PropKind = field.kinds.viewAt(index: k) {
       let firstLod: Int = field.kindFirstLod.copyAtFallback(index: k, fallback: 0)
       loop var l: Int = 0, l < kind.lods.length, ++l {
-        if let lod: view PropLod => kind.lods.viewAt(index: l) {
+        if let lod: view PropLod = kind.lods.viewAt(index: l) {
           hasSprite = hasSprite or propLodIsSprite(lod: lod)
           let first: Int = field.lodFirstBatch.copyAtFallback(index: firstLod + l, fallback: 0)
           loop var p: Int = 0, p < lod.parts.length, ++p {
@@ -581,7 +581,7 @@ func growPropBatches(field: mod PropField) {
     }
     loop let b: view Int in batchIndices {
       var capacity: Int = 0
-      if let batch: view InstanceBatch => field.batches.viewAt(index: b) {
+      if let batch: view InstanceBatch = field.batches.viewAt(index: b) {
         capacity = batch.capacity
       }
       if capacity < size {
@@ -649,7 +649,7 @@ func propLodAt(kind: view PropKind, distance: view Float) ret opt Int {
 # level of detail its distance picks. `toon` is the frame's shading.
 func gatherPropField(field: mod PropField, propView: view PropView, toon: view Bool) {
   loop var b: Int = 0, b < field.batches.length, ++b {
-    if let batch: mod InstanceBatch => field.batches.modAt(index: b) {
+    if let batch: mod InstanceBatch = field.batches.modAt(index: b) {
       resetInstanceBatch(batch: batch)
     }
   }
@@ -686,7 +686,7 @@ func gatherPropField(field: mod PropField, propView: view PropView, toon: view B
     var groupRow: Int = 0
     var groupColumns: Int = 0
     var groupRows: Int = 0
-    if let held: view PropGroup => field.groups.viewAt(index: g) {
+    if let held: view PropGroup = field.groups.viewAt(index: g) {
       used = held.used
       groupColumn = held.firstColumn
       groupRow = held.firstRow
@@ -774,7 +774,7 @@ func propCellRange(field: view PropField, group: view Int, cell: view Int) ret P
       radius: field.cellRadius.copyAtFallback(index: cell, fallback: 0.0)
     }
   }
-  if let held: view PropGroup => field.groups.viewAt(index: group) {
+  if let held: view PropGroup = field.groups.viewAt(index: group) {
     ret PropCellRange {
       start: held.cellStart.copyAtFallback(index: cell, fallback: 0)
       end: held.cellStart.copyAtFallback(index: cell + 1, fallback: 0)
@@ -789,7 +789,7 @@ func propCellRange(field: view PropField, group: view Int, cell: view Int) ret P
 # model matrix
 func propPlacementAt(field: view PropField, group: view Int, index: view Int) ret PropPlacement {
   if group >= 0 {
-    if let held: view PropGroup => field.groups.viewAt(index: group) {
+    if let held: view PropGroup = field.groups.viewAt(index: group) {
       ret held.placements.copyAtDefault(index: index)
     }
   }
@@ -798,7 +798,7 @@ func propPlacementAt(field: view PropField, group: view Int, index: view Int) re
 
 func propModelAt(field: view PropField, group: view Int, index: view Int) ret Mat4 {
   if group >= 0 {
-    if let held: view PropGroup => field.groups.viewAt(index: group) {
+    if let held: view PropGroup = field.groups.viewAt(index: group) {
       ret held.models.copyAtDefault(index: index)
     }
   }
@@ -829,7 +829,7 @@ func propDrawOf(
     partCount: 0
     model: model
   }
-  if let kind: view PropKind => field.kinds.viewAt(index: placement.kind) {
+  if let kind: view PropKind = field.kinds.viewAt(index: placement.kind) {
     let center: Vec3 = propCenter(kind: kind, placement: placement)
     let distance: Float = Vec3.vlen(a: Vec3.vsub(a: center, b: propView.eye))
     if let lodIndex: Int = propLodAt(kind: kind, distance: distance) {
@@ -838,7 +838,7 @@ func propDrawOf(
         center: center
         radius: propRadius(kind: kind, placement: placement)
       ) {
-        if let lod: view PropLod => kind.lods.viewAt(index: lodIndex) {
+        if let lod: view PropLod = kind.lods.viewAt(index: lodIndex) {
           result.drawn = true
           result.sprite = propLodIsSprite(lod: lod)
           result.partCount = lod.parts.length
@@ -894,7 +894,7 @@ func gatherProp(
   loop var p: Int = 0, p < draw.partCount, ++p {
     var material: Material3d = field.batchMaterials.copyAtDefault(index: draw.firstBatch + p)
     material.toon = toon
-    if let batch: mod InstanceBatch => field.batches.modAt(index: draw.firstBatch + p) {
+    if let batch: mod InstanceBatch = field.batches.modAt(index: draw.firstBatch + p) {
       addInstance(
         batch: batch
         model: draw.model
@@ -961,7 +961,7 @@ func drawPropFieldSpriteShadows(
 func drawPropFieldShadows(renderer: mod DeferredRenderer, field: view PropField) {
   loop var b: Int = 0, b < field.batches.length, ++b {
     if field.batchCastsShadow.copyAtFallback(index: b, fallback: false) {
-      if let batch: view InstanceBatch => field.batches.viewAt(index: b) {
+      if let batch: view InstanceBatch = field.batches.viewAt(index: b) {
         drawShadowCasterBatchWith(
           renderer: renderer
           mesh: field.batchMeshes.copyAtDefault(index: b)

@@ -55,7 +55,7 @@ func accumulateExtents(
 # body's shapes (each with its own density).
 func updateBodyMassData(world: mod PhysicsWorld, bodyId: view Int) {
   # Mass is no longer dirty
-  if let dirty: mod Body => world.bodies.modAt(index: bodyId) {
+  if let dirty: mod Body = world.bodies.modAt(index: bodyId) {
     dirty.flags = dirty.flags bitand (4294967295 - dirtyMassFlag)
   }
   syncBodyFlags(world: world, bodyId: bodyId)
@@ -171,7 +171,7 @@ func updateBodyMassData(world: mod PhysicsWorld, bodyId: view Int) {
   loop edgeKey is not -1 {
     let contactId: Int = edgeKey shr 1
     let edgeIndex: Int = edgeKey bitand 1
-    if let contact: mod Contact => world.contacts.modAt(index: contactId) {
+    if let contact: mod Contact = world.contacts.modAt(index: contactId) {
       contact.flags = contact.flags bitand (bitnot relativeTransformValid)
       edgeKey = contactEdge(contact: contact, edgeIndex: edgeIndex).nextKey
     }

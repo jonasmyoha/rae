@@ -411,13 +411,13 @@ func pageOf(
   var cur: EntityId = { index: entityId.index, generation: entityId.generation }
   loop true {
     if componentHas(this: world.pageRoots, entityId: cur) {
-      let r: view PageRoot => componentView(this: world.pageRoots, entityId: cur)
+      let r: view PageRoot = componentView(this: world.pageRoots, entityId: cur)
       ret r.id
     }
     if componentHas(this: uiSystems.hierarchy.parents, entityId: cur) is false {
       ret ""
     }
-    let pl: view Parent => componentView(this: uiSystems.hierarchy.parents, entityId: cur)
+    let pl: view Parent = componentView(this: uiSystems.hierarchy.parents, entityId: cur)
     cur = { index: pl.parent.index, generation: pl.parent.generation }
   }
   ret ""
@@ -432,7 +432,7 @@ func findPageRootEntity(world: view UiWorld, pageId: view String) pub ret Entity
   var i: Int = 0
   loop i < n {
     let e: EntityId = componentEntityAt(this: world.pageRoots, i: i)
-    let r: view PageRoot => queryViewAt(table: world.pageRoots, denseIndex: i)
+    let r: view PageRoot = queryViewAt(table: world.pageRoots, denseIndex: i)
     if r.id is pageId {
       ret e
     }
@@ -469,7 +469,7 @@ func isPageActive(world: view UiWorld, pageId: view String) pub ret Bool {
   if componentHas(this: world.actives, entityId: root) is false {
     ret false
   }
-  let a: view Active => componentView(this: world.actives, entityId: root)
+  let a: view Active = componentView(this: world.actives, entityId: root)
   ret a.value
 }
 
@@ -516,7 +516,7 @@ func setSpriteKey(world: mod UiWorld, entityId: view EntityId, key: view String)
   if componentView(this: world.sprites, entityId: entityId).textureKey is key {
     ret false
   }
-  let sprite: mod Sprite => componentMod(this: world.sprites, entityId: entityId)
+  let sprite: mod Sprite = componentMod(this: world.sprites, entityId: entityId)
   sprite.textureKey = "{key}"
   ret true
 }
@@ -538,7 +538,7 @@ func updateScrollOffset(
   let ro: RuntimeOffset = { delta: Vec2 { x: 0.0, y: scrollY } }
   componentSet(this: uiSystems.transform2d.runtimeOffsets, entityId: target, data: own ro)
   if componentHas(this: world.scrollStates, entityId: target) {
-    let s: mod ScrollState => componentMod(this: world.scrollStates, entityId: target)
+    let s: mod ScrollState = componentMod(this: world.scrollStates, entityId: target)
     s.y = scrollY
   }
 }
@@ -590,7 +590,7 @@ func dropPendingComponentsOf(world: mod UiWorld, entityId: view EntityId) {
   var i: Int = 0
   loop i < world.pendingComponents.length {
     var hit: Bool = false
-    if let pending: view PendingComponent => world.pendingComponents.viewAt(index: i) {
+    if let pending: view PendingComponent = world.pendingComponents.viewAt(index: i) {
       hit = pending.entityId is entityId
     }
     if hit {

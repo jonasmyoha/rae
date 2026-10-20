@@ -93,7 +93,7 @@ func main() {
   # The node with the unknown components still mounted with the ones it has.
   if let rootRaw: Int = world.nodeIds.get(k: "Root") {
     let root: EntityId = id(v: rootRaw)
-    let layout: view Layout => componentView(this: world.layouts, entityId: root)
+    let layout: view Layout = componentView(this: world.layouts, entityId: root)
     log("Root Layout kind={layout.kind} gap={layout.gap} (unknown token kept the default)")
     log(
       "Root has ComputedRect = {componentHas(this: uiSystems.layout.computedRects, entityId: root)}"
@@ -118,7 +118,7 @@ func main() {
 
   log("--- {world.sceneDiagnostics.length} diagnostics ---")
   loop var i: Int = 0, i < world.sceneDiagnostics.length, ++i {
-    if let entry: view SceneDiagnostic => world.sceneDiagnostics.viewAt(index: i) {
+    if let entry: view SceneDiagnostic = world.sceneDiagnostics.viewAt(index: i) {
       log(formatSceneDiagnostic(diagnostic: entry))
     }
   }

@@ -119,11 +119,11 @@ func rowIds(world: view UiWorld, listEntityId: view EntityId) ret List(String) {
     if componentHas(this: world.childrens, entityId: listEntityId) is false {
       ret out
     }
-    let ch: view Children => componentView(this: world.childrens, entityId: listEntityId)
+    let ch: view Children = componentView(this: world.childrens, entityId: listEntityId)
     var i: Int = 0
     loop i < ch.ids.length {
       let row: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
-      let identity: view ListViewRowKey => componentView(this: world.listViewRowKeys, entityId: row)
+      let identity: view ListViewRowKey = componentView(this: world.listViewRowKeys, entityId: row)
       out.add(value: "{identity.key}@{row.index}")
       i = i + 1
     }
@@ -172,7 +172,7 @@ func main() {
   if let raw: Int = world.nodeIds.get(k: "Grid") {
     listEntityId = id(v: raw)
   }
-  let lv: view ListView => componentView(this: world.listViews, entityId: listEntityId)
+  let lv: view ListView = componentView(this: world.listViews, entityId: listEntityId)
   log(
     "mode flow: {lv.mode is ListViewMode.flow} rowScenes: {lv.rowScenes.length} fit: {lv.fitToColumns}"
   )
@@ -188,21 +188,21 @@ func main() {
   listViewSystem(world: world, uiSystems: uiSystems, scenes: registry)
   log("rows: {describeRows(world: world, listEntityId: listEntityId)}")
   unsafe {
-    let ch: view Children => componentView(this: world.childrens, entityId: listEntityId)
+    let ch: view Children = componentView(this: world.childrens, entityId: listEntityId)
     let first: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: 0)
     let second: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: 1)
-    let firstKey: view ListViewRowKey => componentView(this: world.listViewRowKeys, entityId: first)
-    let secondKey: view ListViewRowKey => componentView(
+    let firstKey: view ListViewRowKey = componentView(this: world.listViewRowKeys, entityId: first)
+    let secondKey: view ListViewRowKey = componentView(
       this: world.listViewRowKeys
       entityId: second
     )
     log("scenes: {firstKey.sceneId} {secondKey.sceneId}")
-    let rect: view Rect => componentView(this: world.rects, entityId: second)
+    let rect: view Rect = componentView(this: world.rects, entityId: second)
     log("tile side: {rect.size.x.toInt()}x{rect.size.y.toInt()} (310 - 10) / 2")
     log("art: {rowNodeText(world: world, row: second, nodeId: "Art")}")
     log("click: {rowNodeText(world: world, row: second, nodeId: "Tile")}")
-    let hero: view HeroWidget => componentView(this: world.heroWidgets, entityId: second)
-    let widget: view WidgetId => componentView(this: world.widgetIds, entityId: second)
+    let hero: view HeroWidget = componentView(this: world.heroWidgets, entityId: second)
+    let widget: view WidgetId = componentView(this: world.widgetIds, entityId: second)
     log("hero: {hero.key} widget kind: {widget.kind}")
   }
   let aliveA: Int = aliveCount(world: world)
@@ -250,9 +250,9 @@ func main() {
   )
   listViewSystem(world: stripWorld, uiSystems: uiSystems, scenes: registry)
   unsafe {
-    let ch: view Children => componentView(this: stripWorld.childrens, entityId: stripEntityId)
+    let ch: view Children = componentView(this: stripWorld.childrens, entityId: stripEntityId)
     let thumb: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: 1)
-    let rect: view Rect => componentView(this: stripWorld.rects, entityId: thumb)
+    let rect: view Rect = componentView(this: stripWorld.rects, entityId: thumb)
     log("strip rows: {ch.ids.length} thumb: {rect.size.x.toInt()}x{rect.size.y.toInt()}")
   }
 }

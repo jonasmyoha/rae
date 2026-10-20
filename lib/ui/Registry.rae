@@ -73,7 +73,7 @@ func isRuntimeTable(name: view String) ret Bool {
   ]
   var i: Int = 0
   loop i < runtime.length() {
-    if let entry: view String => runtime.viewAt(index: i) {
+    if let entry: view String = runtime.viewAt(index: i) {
       if entry is name {
         ret true
       }
@@ -124,7 +124,7 @@ func isKnownComponent(world: view UiWorld, name: view String) ret Bool {
   let known: List(String) = registeredComponentNames(world: world)
   var i: Int = 0
   loop i < known.length() {
-    if let entry: view String => known.viewAt(index: i) {
+    if let entry: view String = known.viewAt(index: i) {
       if entry is name {
         ret true
       }
@@ -365,7 +365,7 @@ func applyAuthoredFixups(
 ) {
   if name is "Rect" {
     # {x, y, w, h} -> position / size.
-    let rect: mod Rect => componentMod(this: world.rects, entityId: entityId)
+    let rect: mod Rect = componentMod(this: world.rects, entityId: entityId)
     rect.position.x = optFloat(
       doc: doc
       container: val
@@ -394,7 +394,7 @@ func applyAuthoredFixups(
   }
   if name is "Layout" {
     # The layout kind is authored as `type` (RUICS vocabulary), not `kind`.
-    let layout: mod Layout => componentMod(this: world.layouts, entityId: entityId)
+    let layout: mod Layout = componentMod(this: world.layouts, entityId: entityId)
     if Json.field(doc: doc, this: val, key: "type") >= 0 {
       layout.kind = parseLayoutType(text: optString(
         doc: doc
@@ -409,7 +409,7 @@ func applyAuthoredFixups(
     # A padding token names a whole Insets preset (#233):
     # `"Padding": "screenEdgePadding"`; an object gives the four sides
     # flattened at the top level (each side may itself be a space token).
-    let padding: mod Padding => componentMod(this: world.paddings, entityId: entityId)
+    let padding: mod Padding = componentMod(this: world.paddings, entityId: entityId)
     let empty: String = ""
     let asStr: String = Json.jsonString(this: val, fallback: empty)
     if asStr.length() > 0 {
@@ -438,7 +438,7 @@ func applyAuthoredFixups(
     ret
   }
   if name is "Margin" {
-    let margin: mod Margin => componentMod(this: world.margins, entityId: entityId)
+    let margin: mod Margin = componentMod(this: world.margins, entityId: entityId)
     margin.insets = deserInsets(
       doc: doc
       theme: world.theme
@@ -450,13 +450,13 @@ func applyAuthoredFixups(
     ret
   }
   if name is "Offset" {
-    let offset: mod Offset => componentMod(this: world.offsets, entityId: entityId)
+    let offset: mod Offset = componentMod(this: world.offsets, entityId: entityId)
     offset.delta = deserVec2(doc: doc, val: val)
     ret
   }
   if name is "Align" {
     # Presence flags: an axis the author did not name stays "unset".
-    let align: mod Align => componentMod(this: world.aligns, entityId: entityId)
+    let align: mod Align = componentMod(this: world.aligns, entityId: entityId)
     align.hasX = Json.field(doc: doc, this: val, key: "x") >= 0
     align.hasY = Json.field(doc: doc, this: val, key: "y") >= 0
     ret
@@ -468,7 +468,7 @@ func applyAuthoredFixups(
     log(
       "[scene] raw TextShadow authored on entity {entityId.index} - prefer a theme shadow token on the text style (see docs/ui-theme-system.md sec 7)"
     )
-    let shadow: mod TextShadow => componentMod(this: world.textShadows, entityId: entityId)
+    let shadow: mod TextShadow = componentMod(this: world.textShadows, entityId: entityId)
     shadow.offset.x = optFloat(
       doc: doc
       container: val
@@ -484,7 +484,7 @@ func applyAuthoredFixups(
     ret
   }
   if name is "OpticalAlign" {
-    let optical: mod OpticalAlign => componentMod(this: world.opticalAligns, entityId: entityId)
+    let optical: mod OpticalAlign = componentMod(this: world.opticalAligns, entityId: entityId)
     optical.bias.x = optFloat(
       doc: doc
       container: val
@@ -500,7 +500,7 @@ func applyAuthoredFixups(
     ret
   }
   if name is "Sprite" {
-    let sprite: mod Sprite => componentMod(this: world.sprites, entityId: entityId)
+    let sprite: mod Sprite = componentMod(this: world.sprites, entityId: entityId)
     sprite.tintSlot = slotNameOf(doc: doc, val: val, key: "tint")
     # Authoring `nineSlice` with any border IS asking for a nine-slice; the
     # flag need not be spelled out (#1003).
@@ -510,13 +510,13 @@ func applyAuthoredFixups(
     ret
   }
   if name is "Shape" {
-    let shape: mod Shape => componentMod(this: world.shapes, entityId: entityId)
+    let shape: mod Shape = componentMod(this: world.shapes, entityId: entityId)
     shape.fillSlot = slotNameOf(doc: doc, val: val, key: "fill")
     shape.strokeSlot = slotNameOf(doc: doc, val: val, key: "stroke")
     ret
   }
   if name is "GradientFill" {
-    let gradient: mod GradientFill => componentMod(this: world.gradientFills, entityId: entityId)
+    let gradient: mod GradientFill = componentMod(this: world.gradientFills, entityId: entityId)
     gradient.fromSlot = slotNameOf(doc: doc, val: val, key: "from")
     gradient.toSlot = slotNameOf(doc: doc, val: val, key: "to")
     ret
@@ -546,7 +546,7 @@ func applyAuthoredFixups(
   if name is "DataDependency" {
     # Authored as sourceKey / fieldKey; the ids are enum members spelled the
     # same way, so the lookup is the compile-time member table.
-    let dep: mod DataDependency => componentMod(this: world.dataDependencies, entityId: entityId)
+    let dep: mod DataDependency = componentMod(this: world.dataDependencies, entityId: entityId)
     dep.resource = dataResourceIdFromString(name: optString(
       doc: doc
       container: val
@@ -562,7 +562,7 @@ func applyAuthoredFixups(
     ret
   }
   if name is "RefreshRegion" {
-    let region: mod RefreshRegion => componentMod(this: world.refreshRegions, entityId: entityId)
+    let region: mod RefreshRegion = componentMod(this: world.refreshRegions, entityId: entityId)
     region.resource = dataResourceIdFromString(name: optString(
       doc: doc
       container: val
@@ -572,12 +572,12 @@ func applyAuthoredFixups(
     ret
   }
   if name is "SceneInstance" {
-    let instance: mod SceneInstance => componentMod(this: world.sceneInstances, entityId: entityId)
+    let instance: mod SceneInstance = componentMod(this: world.sceneInstances, entityId: entityId)
     deserSceneInstanceOverrides(instance: instance, doc: doc, val: val)
     ret
   }
   if name is "ListView" {
-    let listView: mod ListView => componentMod(this: world.listViews, entityId: entityId)
+    let listView: mod ListView = componentMod(this: world.listViews, entityId: entityId)
     listView.bindings = deserListViewBindings(doc: doc, val: val)
     listView.rowScenes = deserListViewRowScenes(doc: doc, val: val)
     ret

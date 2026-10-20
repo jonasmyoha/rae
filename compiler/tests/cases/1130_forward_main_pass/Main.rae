@@ -148,7 +148,7 @@ func pixelLuminance(
 # not be read.
 func readLit(renderer: mod DeferredRenderer) ret List(Float) {
   var samples: List(Float) = List.create(Float, cap: 3)
-  let targets: view DeferredTargets => renderer.passes.targets
+  let targets: view DeferredTargets = renderer.passes.targets
   var texel: Int = 8
   if (targets.litFormat is WGPUTextureFormat_RG11B10Ufloat) {
     texel = 4
@@ -156,7 +156,7 @@ func readLit(renderer: mod DeferredRenderer) ret List(Float) {
   let litWidth: Int = renderer.passes.gbuffer.targetWidth
   let litHeight: Int = renderer.passes.gbuffer.targetHeight
   let bytesPerRow: Int = ((litWidth * texel + 255) / 256) * 256
-  if let resources: mod GpuResources => renderer.gpuResources {
+  if let resources: mod GpuResources = renderer.gpuResources {
     if let buffer: BufferId = createBuffer(
       resources: resources
       size: bytesPerRow * litHeight
@@ -307,8 +307,8 @@ func main() ret Int {
   log("forward renderer: {isForwardRenderer(renderer: forwardRenderer)}")
   var forwardWorld: World3d = buildScene(renderer: forwardRenderer)
   renderFrames(renderer: forwardRenderer, world: forwardWorld, present: true)
-  let forwardCache: view ForwardMainCache => forwardRenderer.passes.forward
-  if let resources: view GpuResources => forwardRenderer.gpuResources {
+  let forwardCache: view ForwardMainCache = forwardRenderer.passes.forward
+  if let resources: view GpuResources = forwardRenderer.gpuResources {
     log(
       "forward pipelines made: {isValidRenderPipeline(
         resources: resources

@@ -55,14 +55,14 @@ func main() {
   let t2: Text = { text: "hello", styleId: "h1", wrapWidthMode: WrapWidthMode.nodeWidth }
   componentSet(this: world.texts, entityId: e2, data: t2)
   log("texts.count: {componentCount(this: world.texts)}")
-  let gotT: view Text => componentView(this: world.texts, entityId: e2)
+  let gotT: view Text = componentView(this: world.texts, entityId: e2)
   log("e2 text: '{gotT.text}' style={gotT.styleId}")
 
   # Add an Active=false to e3 (default is true at construction time;
   # this overrides).
   let a3: Active = { value: false }
   componentSet(this: world.actives, entityId: e3, data: a3)
-  let gotA: view Active => componentView(this: world.actives, entityId: e3)
+  let gotA: view Active = componentView(this: world.actives, entityId: e3)
   log("e3 active: {gotA.value}")
 
   # Iterate the rects table.
@@ -70,7 +70,7 @@ func main() {
   var i: Int = 0
   loop i < rectN {
     let ent: EntityId = componentEntityAt(this: world.rects, i: i)
-    let r: view Rect => queryViewAt(table: world.rects, denseIndex: i)
+    let r: view Rect = queryViewAt(table: world.rects, denseIndex: i)
     log("  rect[{i}] entity={ent.index} {r.size.x}x{r.size.y}")
     i = i + 1
   }
@@ -91,9 +91,9 @@ func main() {
     observedRevision: 7
   }
   componentSet(this: world.dataDependencies, entityId: e2, data: dep)
-  let gotWid: view WidgetId => componentView(this: world.widgetIds, entityId: e2)
-  let gotState: view WidgetState => componentView(this: world.widgetStates, entityId: e2)
-  let gotDep: view DataDependency => componentView(this: world.dataDependencies, entityId: e2)
+  let gotWid: view WidgetId = componentView(this: world.widgetIds, entityId: e2)
+  let gotState: view WidgetState = componentView(this: world.widgetStates, entityId: e2)
+  let gotDep: view DataDependency = componentView(this: world.dataDependencies, entityId: e2)
   log("e2 widget: {gotWid.id} kind={gotWid.kind} enabled={gotState.enabled}")
   log(
     "e2 dependency: playback={gotDep.resource is DataResourceId.playback} isPlaying={gotDep.field is DataFieldId.isPlaying} rev={gotDep.observedRevision}"

@@ -35,7 +35,7 @@ func solvePlanes(
   lengthUnitsPerMeter: view Float
 ) ret PlaneSolverResult {
   loop var i: Int = 0, i < planes.length, ++i {
-    if let plane: mod CollisionPlane => planes.modAt(index: i) {
+    if let plane: mod CollisionPlane = planes.modAt(index: i) {
       plane.push = 0.0
     }
   }
@@ -47,7 +47,7 @@ func solvePlanes(
   loop iteration < 20 {
     var totalPush: Float = 0.0
     loop var planeIndex: Int = 0, planeIndex < planes.length, ++planeIndex {
-      if let plane: mod CollisionPlane => planes.modAt(index: planeIndex) {
+      if let plane: mod CollisionPlane = planes.modAt(index: planeIndex) {
         # Add slop to prevent jitter
         let separation: Float = planeSeparation(plane: plane.plane, point: delta) + slop
         var push: Float = -separation

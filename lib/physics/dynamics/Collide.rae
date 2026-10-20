@@ -78,8 +78,8 @@ func resolveContactBodyPose(
   if setIndex is -1 {
     ret poseOfSim(sim: bodySimOf(world: world, body: bodyAt(world: world, bodyId: bodyId)))
   }
-  if let set: view SolverSet => world.solverSets.viewAt(index: setIndex) {
-    if let sim: view BodySim => set.bodySims.viewAt(index: localIndex) {
+  if let set: view SolverSet = world.solverSets.viewAt(index: setIndex) {
+    if let sim: view BodySim = set.bodySims.viewAt(index: localIndex) {
       ret poseOfSim(sim: sim)
     }
   }
@@ -137,10 +137,10 @@ func recycleContact(
       # Minimize round-off
       let centerDelta: Vec3 = subtractPositions(left: simB.center, right: simA.center)
       loop var m: Int = 0, m < contact.manifolds.length, ++m {
-        if let manifold: mod Manifold => contact.manifolds.modAt(index: m) {
+        if let manifold: mod Manifold = contact.manifolds.modAt(index: m) {
           let normal: Vec3 = manifold.normal
           loop var p: Int = 0, p < manifold.pointCount, ++p {
-            if let point: mod ManifoldPoint => manifold.points.modAt(index: p) {
+            if let point: mod ManifoldPoint = manifold.points.modAt(index: p) {
               # Keep the anchors, update the separation (as sub-stepping)
               let rA: Vec3 = multiply(matrix: matrixA, vector: point.anchorA)
               let rB: Vec3 = multiply(matrix: matrixB, vector: point.anchorB)
@@ -191,7 +191,7 @@ func collideTask(
     var encodedB: Int = 0
     var bodyIdA: Int = 0
     var bodyIdB: Int = 0
-    if let contact: view Contact => world.contacts.viewAt(index: contactId) {
+    if let contact: view Contact = world.contacts.viewAt(index: contactId) {
       shapeIdA = contact.shapeIdA
       shapeIdB = contact.shapeIdB
       encodedA = contact.encodedBodySimA
@@ -205,11 +205,11 @@ func collideTask(
     let boxB: Aabb = world.fatAabbs.copyAtDefault(index: shapeIdB)
     if overlaps(first: boxA, second: boxB) is false {
       # This contact will be destroyed
-      if let contact: mod Contact => world.contacts.modAt(index: contactId) {
+      if let contact: mod Contact = world.contacts.modAt(index: contactId) {
         contact.flags = contact.flags bitor simDisjoint
         contact.flags = contact.flags bitand (bitnot simTouchingFlag)
       }
-      if let taskContext: mod TaskContext => world.taskContexts.modAt(index: workerIndex) {
+      if let taskContext: mod TaskContext = world.taskContexts.modAt(index: workerIndex) {
         setBit(bitset: taskContext.contactStateBitSet, bitIndex: contactId)
       }
       continue
@@ -236,7 +236,7 @@ func collideTask(
     var specColorIndex: Int = -1
     var specLocalIndex: Int = -1
     var specManifoldCount: Int = 0
-    if let contact: mod Contact => world.contacts.modAt(index: contactId) {
+    if let contact: mod Contact = world.contacts.modAt(index: contactId) {
       wasTouching = (contact.flags bitand simTouchingFlag) is not 0
       var recycleTolerance: Float = recycleDistanceNonTouching
       if wasTouching {
@@ -258,9 +258,9 @@ func collideTask(
         contact.cachedRotationB = transformB.rotation
         contact.cachedRelativePose = inverseMultiplyWorld(left: transformA, right: transformB)
         contact.flags = contact.flags bitor relativeTransformValid
-        if let taskContext: mod TaskContext => world.taskContexts.modAt(index: workerIndex) {
-          if let shapeA: view PhysicsShape => world.shapes.viewAt(index: shapeIdA) {
-            if let shapeB: view PhysicsShape => world.shapes.viewAt(index: shapeIdB) {
+        if let taskContext: mod TaskContext = world.taskContexts.modAt(index: workerIndex) {
+          if let shapeA: view PhysicsShape = world.shapes.viewAt(index: shapeIdA) {
+            if let shapeB: view PhysicsShape = world.shapes.viewAt(index: shapeIdB) {
               # This updates solid contacts
               touching = updateContact(
                 contact: contact
@@ -292,9 +292,9 @@ func collideTask(
         if touching {
           # Cache the separations
           loop var m: Int = 0, m < contact.manifolds.length, ++m {
-            if let manifold: mod Manifold => contact.manifolds.modAt(index: m) {
+            if let manifold: mod Manifold = contact.manifolds.modAt(index: m) {
               loop var p: Int = 0, p < manifold.pointCount, ++p {
-                if let point: mod ManifoldPoint => manifold.points.modAt(index: p) {
+                if let point: mod ManifoldPoint = manifold.points.modAt(index: p) {
                   point.baseSeparation = point.separation
                 }
               }
@@ -310,14 +310,14 @@ func collideTask(
       }
     }
     if specColorIndex is not -1 {
-      if let color: mod GraphColor => world.constraintGraph.colors.modAt(index: specColorIndex) {
-        if let spec: mod ContactSpec => color.contacts.modAt(index: specLocalIndex) {
+      if let color: mod GraphColor = world.constraintGraph.colors.modAt(index: specColorIndex) {
+        if let spec: mod ContactSpec = color.contacts.modAt(index: specLocalIndex) {
           spec.manifoldCount = specManifoldCount
         }
       }
     }
     if recycled is false and touching is not wasTouching {
-      if let taskContext: mod TaskContext => world.taskContexts.modAt(index: workerIndex) {
+      if let taskContext: mod TaskContext = world.taskContexts.modAt(index: workerIndex) {
         setBit(bitset: taskContext.contactStateBitSet, bitIndex: contactId)
       }
     }
@@ -359,7 +359,7 @@ func collideChunk(
 # b3AddNonTouchingContact
 func addNonTouchingContact(world: mod PhysicsWorld, contactId: view Int) {
   let localIndex: Int = addSetContact(world: world, setIndex: awakeSet, contactId: contactId)
-  if let contact: mod Contact => world.contacts.modAt(index: contactId) {
+  if let contact: mod Contact = world.contacts.modAt(index: contactId) {
     contact.colorIndex = -1
     contact.localIndex = localIndex
   }
@@ -380,7 +380,7 @@ func collide(world: mod PhysicsWorld) {
       contactIndices.add(value: color.contacts.copyAtDefault(index: j).contactId)
     }
   }
-  if let set: view SolverSet => world.solverSets.viewAt(index: awakeSet) {
+  if let set: view SolverSet = world.solverSets.viewAt(index: awakeSet) {
     loop var j: Int = 0, j < set.contactIndices.length, ++j {
       contactIndices.add(value: set.contactIndices.copyAtDefault(index: j))
     }
@@ -395,7 +395,7 @@ func collide(world: mod PhysicsWorld) {
   # A bit per contact id: contacts move between lists as they change state
   let contactIdCapacity: Int = world.contactIdPool.nextIndex
   loop var i: Int = 0, i < world.taskContexts.length, ++i {
-    if let taskContext: mod TaskContext => world.taskContexts.modAt(index: i) {
+    if let taskContext: mod TaskContext = world.taskContexts.modAt(index: i) {
       setBitCountAndClear(bitset: taskContext.contactStateBitSet, bitCount: contactIdCapacity)
     }
   }
@@ -448,11 +448,11 @@ func collide(world: mod PhysicsWorld) {
   # 0's (as Box3D does; moved out here, not copied, and given back at the
   # end), in contact id order
   var stateBits: Bitset = emptyBitset()
-  if let first: mod TaskContext => world.taskContexts.modAt(index: 0) {
+  if let first: mod TaskContext = world.taskContexts.modAt(index: 0) {
     stateBits = own first.contactStateBitSet
   }
   loop var i: Int = 1, i < world.taskContexts.length, ++i {
-    if let other: view TaskContext => world.taskContexts.viewAt(index: i) {
+    if let other: view TaskContext = world.taskContexts.viewAt(index: i) {
       inPlaceUnion(setA: stateBits, setB: other.contactStateBitSet)
     }
   }
@@ -467,14 +467,14 @@ func collide(world: mod PhysicsWorld) {
       destroyContact(world: world, contactId: contactId, wakeBodies: false)
     } else if (flags bitand simStartedTouching) is not 0 {
       if (flags bitand contactEnableContactEvents) is not 0 {
-        if let contact: view Contact => world.contacts.viewAt(index: contactId) {
+        if let contact: view Contact = world.contacts.viewAt(index: contactId) {
           let event: ContactBeginTouchEvent = contactBeginEventOf(world: world, contact: contact)
           world.contactBeginEvents.add(value: event)
         }
       }
       # Link first: this wakes colliding bodies, so the body sims are in
       # the right place.
-      if let contact: mod Contact => world.contacts.modAt(index: contactId) {
+      if let contact: mod Contact = world.contacts.modAt(index: contactId) {
         contact.flags = contact.flags bitand (bitnot simStartedTouching)
         contact.flags = contact.flags bitor contactTouchingFlag
       }
@@ -483,7 +483,7 @@ func collide(world: mod PhysicsWorld) {
       addContactToGraph(world: world, contactId: contactId)
       removeSetContact(world: world, setIndex: awakeSet, localIndex: oldLocalIndex)
     } else if (flags bitand simStoppedTouching) is not 0 {
-      if let contact: mod Contact => world.contacts.modAt(index: contactId) {
+      if let contact: mod Contact = world.contacts.modAt(index: contactId) {
         contact.flags = contact.flags bitand (bitnot simStoppedTouching)
         contact.flags = contact.flags bitand (bitnot contactTouchingFlag)
       }
@@ -496,7 +496,7 @@ func collide(world: mod PhysicsWorld) {
       var contactFlags: Int = 0
       var endEvents: Bool = false
       var endEvent: ContactEndTouchEvent = emptyContactEndTouchEvent()
-      if let contact: view Contact => world.contacts.viewAt(index: contactId) {
+      if let contact: view Contact = world.contacts.viewAt(index: contactId) {
         colorIndex = contact.colorIndex
         localIndex = contact.localIndex
         bodyIdA = contact.edgeA.bodyId
@@ -522,7 +522,7 @@ func collide(world: mod PhysicsWorld) {
       )
     }
   }
-  if let first: mod TaskContext => world.taskContexts.modAt(index: 0) {
+  if let first: mod TaskContext = world.taskContexts.modAt(index: 0) {
     first.contactStateBitSet = own stateBits
   }
 }

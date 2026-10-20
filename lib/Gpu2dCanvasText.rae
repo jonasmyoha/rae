@@ -62,7 +62,7 @@ func ensureTextAtlas(canvas: mod Gpu2dCanvas, resources: mod GpuResources, ai: c
   if ai < 0 or ai >= canvas.textAtlases.length {
     ret false
   }
-  if let atlas: mod Gpu2dTextAtlas => canvas.textAtlases.modAt(index: ai) {
+  if let atlas: mod Gpu2dTextAtlas = canvas.textAtlases.modAt(index: ai) {
     if isValidTextureView(resources: resources, id: atlas.textureView) {
       ret true
     }
@@ -123,7 +123,7 @@ func textFlushBuffer(
   if ai < 0 or ai >= canvas.textAtlases.length {
     ret current
   }
-  if let atlas: mod Gpu2dTextAtlas => canvas.textAtlases.modAt(index: ai) {
+  if let atlas: mod Gpu2dTextAtlas = canvas.textAtlases.modAt(index: ai) {
     let slot: Int = atlas.flushIndex
     atlas.flushIndex = slot + 1
     loop atlas.buffers.length <= slot {
@@ -210,7 +210,7 @@ func canvasDrawGlyphEx(
     glyphX = centre.x - (sx1 - sx0) / 2.0
     glyphY = centre.y - (sy1 - sy0) / 2.0
   }
-  if let entry: mod Gpu2dTextAtlas => canvas.textAtlases.modAt(index: ai) {
+  if let entry: mod Gpu2dTextAtlas = canvas.textAtlases.modAt(index: ai) {
     entry.glyphs.add(value: glyphX)
     entry.glyphs.add(value: glyphY)
     entry.glyphs.add(value: sx1 - sx0)
@@ -272,7 +272,7 @@ func clearTextBatches(canvas: mod Gpu2dCanvas) {
   # #971: clear the batch Lists IN PLACE — the copyAt/set form deep-copied
   # the whole (just-accumulated) glyph List only to empty it.
   loop var ai: Int = 0, ai < canvas.textAtlases.length, ++ai {
-    if let atlas: mod Gpu2dTextAtlas => canvas.textAtlases.modAt(index: ai) {
+    if let atlas: mod Gpu2dTextAtlas = canvas.textAtlases.modAt(index: ai) {
       atlas.glyphs.clear()
       atlas.glyphClips.clear()
     }
@@ -293,7 +293,7 @@ func textFlushWith(canvas: mod Gpu2dCanvas, resources: mod GpuResources) {
     # #973: read the glyph count through a `view` window — the copyAt this
     # replaced deep-copied the whole atlas (all four Lists) for EVERY atlas
     # EVERY frame just to test its length, ~124 atlas copies/frame in 114.
-    if let atlas: view Gpu2dTextAtlas => canvas.textAtlases.viewAt(index: ai) {
+    if let atlas: view Gpu2dTextAtlas = canvas.textAtlases.viewAt(index: ai) {
       count = atlas.glyphClips.length
     }
     if count > 0 {
@@ -315,7 +315,7 @@ func textClipAt(atlas: view Gpu2dTextAtlas, i: copy Int) ret Int {
 }
 
 func clearTextBatch(canvas: mod Gpu2dCanvas, ai: copy Int) {
-  if let atlas: mod Gpu2dTextAtlas => canvas.textAtlases.modAt(index: ai) {
+  if let atlas: mod Gpu2dTextAtlas = canvas.textAtlases.modAt(index: ai) {
     atlas.glyphs.clear()
     atlas.glyphClips.clear()
   }

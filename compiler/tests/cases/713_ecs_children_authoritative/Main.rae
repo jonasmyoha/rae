@@ -37,7 +37,7 @@ func printOrder(order: view List(EntityId), label: view String) {
 
 func parentIndex(parents: view ComponentTable(Parent), child: view EntityId) ret Int {
   if componentHas(this: parents, entityId: child) {
-    let link: view Parent => componentView(this: parents, entityId: child)
+    let link: view Parent = componentView(this: parents, entityId: child)
     ret link.parent.index
   }
   ret -1
@@ -132,7 +132,7 @@ func main() {
   printKids(childrens: childrens, entityId: other, label: "other after s3 moved")
 
   # ----- single parent healed on rebuild: hand-corrupt a second list -----
-  let dup: mod Children => componentMod(this: childrens, entityId: other)
+  let dup: mod Children = componentMod(this: childrens, entityId: other)
   dup.ids.add(value: s4)
   printKids(childrens: childrens, entityId: other, label: "other corrupted")
   rebuildParentsFromChildren(parents: parents, childrens: childrens)
@@ -142,7 +142,7 @@ func main() {
 
   # ----- depthOrder dirty-tracks on the Children table -----
   var ord: HierarchyOrder = createHierarchyOrder()
-  let order1: view List(EntityId) => depthOrder(state: ord, parents: parents, childrens: childrens)
+  let order1: view List(EntityId) = depthOrder(state: ord, parents: parents, childrens: childrens)
   printOrder(order: order1, label: "order")
   insertChild(
     parents: parents
@@ -151,6 +151,6 @@ func main() {
     child: s5
     index: 0
   )
-  let order2: view List(EntityId) => depthOrder(state: ord, parents: parents, childrens: childrens)
+  let order2: view List(EntityId) = depthOrder(state: ord, parents: parents, childrens: childrens)
   printOrder(order: order2, label: "order after move s5 first")
 }

@@ -124,10 +124,10 @@ func addPanelButton(
   actionId: view String
   group: view Int
 ) pub {
-  let idList: mod List(String) => panel.ids
-  let actionList: mod List(String) => panel.actionIds
-  let groupList: mod List(Int) => panel.groups
-  let labelList: mod List(String) => panel.selectedIds
+  let idList: mod List(String) = panel.ids
+  let actionList: mod List(String) = panel.actionIds
+  let groupList: mod List(Int) = panel.groups
+  let labelList: mod List(String) = panel.selectedIds
   idList.add(value: "{id}")
   actionList.add(value: "{actionId}")
   groupList.add(value: group)
@@ -165,14 +165,14 @@ func buildControlPanel(
   if isNone(this: host) {
     ret false
   }
-  let buttons: mod List(EntityId) => panel.buttonEntities
-  let labels: mod List(EntityId) => panel.labelEntities
+  let buttons: mod List(EntityId) = panel.buttonEntities
+  let labels: mod List(EntityId) = panel.labelEntities
   # APPEND rather than replace. A host may already have authored
   # children — a title, a readout — and a panel that overwrote them would
   # silently delete part of the scene it was asked to extend.
   var kids: List(EntityId) = List.create(EntityId, cap: panel.ids.length + 4)
   if componentHas(this: world.childrens, entityId: host) {
-    let existing: view Children => componentView(this: world.childrens, entityId: host)
+    let existing: view Children = componentView(this: world.childrens, entityId: host)
     var e: Int = 0
     loop e < existing.ids.length {
       kids.add(value: panelEntityAt(values: existing.ids, index: e))
@@ -251,7 +251,7 @@ func buildControlPanel(
 
   # `selectedIds` held the pending labels until now; from here it holds
   # one selected id per group, indexed by group number.
-  let sel: mod List(String) => panel.selectedIds
+  let sel: mod List(String) = panel.selectedIds
   sel.clear()
   var g: Int = 0
   loop g < panel.ids.length + 1 {
@@ -273,7 +273,7 @@ func setPanelButtonLabel(
     if componentHas(this: world.texts, entityId: entityId) is false {
       ret
     }
-    let text: mod Text => componentMod(this: world.texts, entityId: entityId)
+    let text: mod Text = componentMod(this: world.texts, entityId: entityId)
     text.text = "{label}"
   }
 }
@@ -294,7 +294,7 @@ func setPanelSelection(
   if group <= 0 {
     ret
   }
-  let sel: mod List(String) => panel.selectedIds
+  let sel: mod List(String) = panel.selectedIds
   if group < sel.length {
     sel.set(index: group, value: "{id}")
   }
@@ -303,7 +303,7 @@ func setPanelSelection(
     if panelIntAt(values: panel.groups, index: i) is group {
       let entityId: EntityId = panelEntityAt(values: panel.buttonEntities, index: i)
       if componentHas(this: world.shapes, entityId: entityId) {
-        let shape: mod Shape => componentMod(this: world.shapes, entityId: entityId)
+        let shape: mod Shape = componentMod(this: world.shapes, entityId: entityId)
         if panelStringAt(values: panel.ids, index: i) is id {
           shape.fillSlot = panelSlotSelected
         } else {
@@ -327,7 +327,7 @@ func setPanelButtonOn(
     if componentHas(this: world.shapes, entityId: entityId) is false {
       ret
     }
-    let shape: mod Shape => componentMod(this: world.shapes, entityId: entityId)
+    let shape: mod Shape = componentMod(this: world.shapes, entityId: entityId)
     if on {
       shape.fillSlot = panelSlotSelected
     } else {

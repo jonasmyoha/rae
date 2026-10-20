@@ -22,15 +22,15 @@ func main() {
   var table: ComponentTable(Pose) = createComponentTable(Pose)
   let entityId: EntityId = id(v: 3)
   componentSet(this: table, entityId: entityId, data: Pose { x: 2.5, name: "table" })
-  let source: view Pose => componentView(this: table, entityId: entityId)
+  let source: view Pose = componentView(this: table, entityId: entityId)
   let copied: Pose = source
-  let row: mod Pose => componentMod(this: table, entityId: entityId)
+  let row: mod Pose = componentMod(this: table, entityId: entityId)
   row.x = 7.0
   row.name = "changed"
   log("copied {copied.x} {copied.name}")
 
   var box: Box(Pose) = { item: Pose { x: 1.5, name: "boxed" } }
-  let boxed: view Pose => itemOf(box: box)
+  let boxed: view Pose = itemOf(box: box)
   let boxCopy: Pose = boxed
   box.item.name = "box changed"
   log("box copy {boxCopy.x} {boxCopy.name}")

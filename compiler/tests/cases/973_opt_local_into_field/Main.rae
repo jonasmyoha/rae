@@ -19,10 +19,10 @@ func makePayload(first: copy Int) ret opt Payload {
 
 func describe(holder: view Holder) ret String {
   var text: String = "none"
-  if let payload: view Payload => holder.payload {
+  if let payload: view Payload = holder.payload {
     text = "{payload.values.length}:{payload.values.copyAtDefault(index: 0)}"
   }
-  if let label: view String => holder.label {
+  if let label: view String = holder.label {
     text = "{text} {label}"
   }
   ret text
@@ -66,10 +66,10 @@ func main() {
 
   var local: opt Payload = none
   local = other.payload
-  if let payload: mod Payload => local {
+  if let payload: mod Payload = local {
     payload.values.add(value: 99)
   }
-  if let payload: view Payload => local {
+  if let payload: view Payload = local {
     log("local {payload.values.length}")
   }
   log("field untouched {describe(holder: other)}")

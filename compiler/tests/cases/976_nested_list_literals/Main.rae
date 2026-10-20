@@ -33,7 +33,7 @@ func main() {
   loop let row: view List(Point) in grid {
     log("row {row.length} sum {sumX(points: row)}")
   }
-  if let middle: view List(Point) => grid.viewAt(index: 1) {
+  if let middle: view List(Point) = grid.viewAt(index: 1) {
     log("middle {middle.copyAtDefault(index: 0).x} {middle.copyAtDefault(index: 0).y}")
   }
 
@@ -48,8 +48,8 @@ func main() {
   }
 
   let deep: List(List(List(Point))) = { { { first }, { scaled(scale: 2, point: first), first } } }
-  if let outer: view List(List(Point)) => deep.viewAt(index: 0) {
-    if let inner: view List(Point) => outer.viewAt(index: 1) {
+  if let outer: view List(List(Point)) = deep.viewAt(index: 0) {
+    if let inner: view List(Point) = outer.viewAt(index: 1) {
       log("deep {inner.length} sum {sumX(points: inner)}")
     }
   }
@@ -59,7 +59,7 @@ func main() {
     let row: List(Point) = { scaled(scale: i, point: first) }
     built.add(value: row)
   }
-  if let last: mod List(Point) => built.modAt(index: 2) {
+  if let last: mod List(Point) = built.modAt(index: 2) {
     last.add(value: first)
   }
   loop let row: view List(Point) in built {

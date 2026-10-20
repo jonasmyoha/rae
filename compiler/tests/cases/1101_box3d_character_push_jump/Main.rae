@@ -177,7 +177,7 @@ func main() {
 
   # Walk along +y into the stack at 4 m/s until a cube moves
   let rested: List(Vec3) = cubePositions(scene: scene)
-  let walker: mod CharacterBody => componentMod(this: scene.characters, entityId: scene.characterId)
+  let walker: mod CharacterBody = componentMod(this: scene.characters, entityId: scene.characterId)
   walker.forward = Vec3 { x: 0.0, y: 1.0, z: 0.0 }
   walker.right = Vec3 { x: 1.0, y: 0.0, z: 0.0 }
   walker.throttle = Vec2 { x: 4.0 / 6.0, y: 0.0 }
@@ -189,10 +189,7 @@ func main() {
   log("walking into the stack moves a cube: {largestMove(scene: scene, starts: rested) >= 0.05}")
 
   # Stand, then jump once
-  let stander: mod CharacterBody => componentMod(
-    this: scene.characters
-    entityId: scene.characterId
-  )
+  let stander: mod CharacterBody = componentMod(this: scene.characters, entityId: scene.characterId)
   stander.throttle = Vec2 { x: 0.0, y: 0.0 }
   loop var i: Int = 0, i < 60, ++i {
     step(scene: scene)
@@ -200,7 +197,7 @@ func main() {
   log(
     "standing on the ground: {componentView(this: scene.characters, entityId: scene.characterId).grounded}"
   )
-  let jumper: mod CharacterBody => componentMod(this: scene.characters, entityId: scene.characterId)
+  let jumper: mod CharacterBody = componentMod(this: scene.characters, entityId: scene.characterId)
   jumper.jump = true
   var leftGround: Bool = false
   var landed: Bool = false

@@ -298,7 +298,7 @@ func transformOf(
   transforms: view ComponentTable(Transform3D)
   entityId: view EntityId
 ) ret Transform3D {
-  let source: view Transform3D => componentView(this: transforms, entityId: entityId)
+  let source: view Transform3D = componentView(this: transforms, entityId: entityId)
   ret source
 }
 
@@ -356,7 +356,7 @@ func walkClosest(
 
 # Put the hero's mover at rest with its feet on `feet`
 func placeHero(physicsSystem: mod WalkerPhysics, heroEntityId: view EntityId, feet: view Vec3) {
-  let character: mod CharacterBody => componentMod(
+  let character: mod CharacterBody = componentMod(
     this: physicsSystem.characters
     entityId: heroEntityId
   )

@@ -38,11 +38,11 @@ func reportHitEvents(world: mod PhysicsWorld) {
   }
   # The chunks' bits OR-ed into chunk 0's (moved out and given back)
   var bits: Bitset = emptyBitset()
-  if let first: mod TaskContext => world.taskContexts.modAt(index: 0) {
+  if let first: mod TaskContext = world.taskContexts.modAt(index: 0) {
     bits = own first.hitEventBitSet
   }
   loop var i: Int = 1, i < world.taskContexts.length, ++i {
-    if let taskContext: view TaskContext => world.taskContexts.viewAt(index: i) {
+    if let taskContext: view TaskContext = world.taskContexts.viewAt(index: i) {
       if taskContext.hasHitEvents {
         inPlaceUnion(setA: bits, setB: taskContext.hitEventBitSet)
       }
@@ -90,7 +90,7 @@ func reportHitEvents(world: mod PhysicsWorld) {
       world.contactHitEvents.add(value: event)
     }
   }
-  if let first: mod TaskContext => world.taskContexts.modAt(index: 0) {
+  if let first: mod TaskContext = world.taskContexts.modAt(index: 0) {
     first.hitEventBitSet = own bits
   }
 }
@@ -100,17 +100,17 @@ func reportSensorHits(world: mod PhysicsWorld) {
   loop var i: Int = 0, i < world.taskContexts.length, ++i {
     # Moved out of the worker (not copied) and given back below
     var hits: List(SensorHit) = List.create(SensorHit, cap: 0)
-    if let taskContext: mod TaskContext => world.taskContexts.modAt(index: i) {
+    if let taskContext: mod TaskContext = world.taskContexts.modAt(index: i) {
       hits = own taskContext.sensorHits
     }
     loop let hit: view SensorHit in hits {
       let sensorShape: PhysicsShape = world.shapes.copyAtDefault(index: hit.sensorId)
       let visitor: PhysicsShape = world.shapes.copyAtDefault(index: hit.visitorId)
-      if let sensor: mod Sensor => world.sensors.modAt(index: sensorShape.sensorIndex) {
+      if let sensor: mod Sensor = world.sensors.modAt(index: sensorShape.sensorIndex) {
         sensor.hits.add(value: Visitor { shapeId: hit.visitorId, generation: visitor.generation })
       }
     }
-    if let taskContext: mod TaskContext => world.taskContexts.modAt(index: i) {
+    if let taskContext: mod TaskContext = world.taskContexts.modAt(index: i) {
       taskContext.sensorHits = own hits
     }
   }

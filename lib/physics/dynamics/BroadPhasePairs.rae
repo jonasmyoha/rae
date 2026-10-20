@@ -91,7 +91,7 @@ func emitCompoundPairs(
   let compoundShape: PhysicsShape = world.shapes.copyAtDefault(index: compoundShapeId)
   let otherProxyKey: Int = world.shapes.copyAtDefault(index: otherShapeId).proxyKey
   var otherBox: Aabb = { lowerBound: zeroVector(), upperBound: zeroVector() }
-  if let tree: view DynamicTree => world.broadPhase.trees.viewAt(
+  if let tree: view DynamicTree = world.broadPhase.trees.viewAt(
     index: proxyType(proxyKey: otherProxyKey)
   ) {
     otherBox = treeProxyAabb(tree: tree, proxyId: proxyId(proxyKey: otherProxyKey))
@@ -104,7 +104,7 @@ func emitCompoundPairs(
   )
   let localBox: Aabb = transformAabb(transform: invert(transform: compoundTransform), box: otherBox)
   let startCount: Int = pairKeys.length
-  if let compound: view CompoundData => world.compounds.viewAt(index: compoundShape.compoundIndex) {
+  if let compound: view CompoundData = world.compounds.viewAt(index: compoundShape.compoundIndex) {
     let children: List(Int) = queryCompound(compound: compound, bounds: localBox)
     loop let childIndex: view Int in children {
       let key: UInt64 = shapePairKey(
@@ -196,7 +196,7 @@ func flushCandidatePairs(world: view PhysicsWorld, context: mod PairContext) {
 # The type of shape `shapeId`, read through a view (a shape copy would copy
 # its material list).
 func shapeTypeOf(world: view PhysicsWorld, shapeId: view Int) ret ShapeType {
-  if let shape: view PhysicsShape => world.shapes.viewAt(index: shapeId) {
+  if let shape: view PhysicsShape = world.shapes.viewAt(index: shapeId) {
     ret shape.shapeType
   }
   ret ShapeType.capsule
@@ -361,7 +361,7 @@ func selfPairsTask(
   startIndex: view Int
   endIndex: view Int
 ) {
-  if let tree: view DynamicTree => world.broadPhase.trees.viewAt(index: dynamicTree) {
+  if let tree: view DynamicTree = world.broadPhase.trees.viewAt(index: dynamicTree) {
     loop var i: Int = startIndex, i < endIndex, ++i {
       let nodeIndex: Int = siblingIndices.copyAtDefault(index: i)
       let left: TreeNode = treeNode(tree: tree, index: nodeIndex)
@@ -443,8 +443,8 @@ func crossPairsTask(
   startIndex: view Int
   endIndex: view Int
 ) {
-  if let dynamicNodes: view DynamicTree => world.broadPhase.trees.viewAt(index: dynamicTree) {
-    if let staticNodes: view DynamicTree => world.broadPhase.trees.viewAt(index: staticTree) {
+  if let dynamicNodes: view DynamicTree = world.broadPhase.trees.viewAt(index: dynamicTree) {
+    if let staticNodes: view DynamicTree = world.broadPhase.trees.viewAt(index: staticTree) {
       let staticEnd: Int = minInt(left: endIndex, right: staticSeedCount)
       context.checkCompounds = world.compoundShapeCount > 0
       loop var i: Int = startIndex, i < staticEnd, ++i {
@@ -461,7 +461,7 @@ func crossPairsTask(
     }
     flushCandidatePairs(world: world, context: context)
     context.checkCompounds = false
-    if let kinematicNodes: view DynamicTree => world.broadPhase.trees.viewAt(index: kinematicTree) {
+    if let kinematicNodes: view DynamicTree = world.broadPhase.trees.viewAt(index: kinematicTree) {
       loop var i: Int = maxInt(left: startIndex, right: staticSeedCount), i < endIndex, ++i {
         let seed: NodePair = seeds.copyAtDefault(index: i)
         collideCrossPairs(
@@ -491,11 +491,11 @@ func findPairs(world: mod PhysicsWorld, context: mod PairContext) {
   var dynamicMoveCount: Int = 0
   var staticSeedCount: Int = 0
   var kinematicSeedCount: Int = 0
-  if let tree: view DynamicTree => world.broadPhase.trees.viewAt(index: dynamicTree) {
+  if let tree: view DynamicTree = world.broadPhase.trees.viewAt(index: dynamicTree) {
     # The sibling pairs of the dynamic body tree that have moved
     dynamicMoveCount = gatherMovedSiblings(tree: tree, pairIndices: siblingIndices)
     # Seeds for colliding against the static and kinematic trees
-    if let other: view DynamicTree => world.broadPhase.trees.viewAt(index: staticTree) {
+    if let other: view DynamicTree = world.broadPhase.trees.viewAt(index: staticTree) {
       staticSeedCount = gatherCrossSeeds(
         treeA: tree
         treeB: other
@@ -503,7 +503,7 @@ func findPairs(world: mod PhysicsWorld, context: mod PairContext) {
         queue: seedQueue
       )
     }
-    if let other: view DynamicTree => world.broadPhase.trees.viewAt(index: kinematicTree) {
+    if let other: view DynamicTree = world.broadPhase.trees.viewAt(index: kinematicTree) {
       kinematicSeedCount = gatherCrossSeeds(
         treeA: tree
         treeB: other
@@ -578,7 +578,7 @@ func pairChunk(
   chunk: view Int
 ) {
   var pairs: PairContext = emptyPairContext()
-  if let taskContext: mod TaskContext => world.taskContexts.modAt(index: chunk) {
+  if let taskContext: mod TaskContext = world.taskContexts.modAt(index: chunk) {
     pairs = own taskContext.pairs
   }
   let chunkCount: Int = world.taskContexts.length
@@ -633,7 +633,7 @@ func pairChunk(
       )
     )
   }
-  if let taskContext: mod TaskContext => world.taskContexts.modAt(index: chunk) {
+  if let taskContext: mod TaskContext = world.taskContexts.modAt(index: chunk) {
     taskContext.pairs = own pairs
   }
 }
@@ -641,14 +641,14 @@ func pairChunk(
 # Whether a tree's root is marked moved (b3HasTreeMoved), and whether it
 # needs a rebuild (b3NeedsRebuild).
 func hasTreeMoved(world: view PhysicsWorld, treeIndex: view Int) ret Bool {
-  if let tree: view DynamicTree => world.broadPhase.trees.viewAt(index: treeIndex) {
+  if let tree: view DynamicTree = world.broadPhase.trees.viewAt(index: treeIndex) {
     ret isMovedNode(node: treeNode(tree: tree, index: rootNode))
   }
   ret false
 }
 
 func needsRebuild(world: view PhysicsWorld, treeIndex: view Int) ret Bool {
-  if let tree: view DynamicTree => world.broadPhase.trees.viewAt(index: treeIndex) {
+  if let tree: view DynamicTree = world.broadPhase.trees.viewAt(index: treeIndex) {
     ret isMovedNode(node: treeNode(tree: tree, index: rootNode)) or tree.dfsOrdered is false
   }
   ret false
@@ -661,10 +661,10 @@ func finishTreeRebuild(world: mod PhysicsWorld) {
   if world.treeRebuildPending is false {
     ret
   }
-  if let tree: mod DynamicTree => world.broadPhase.trees.modAt(index: dynamicTree) {
+  if let tree: mod DynamicTree = world.broadPhase.trees.modAt(index: dynamicTree) {
     let dynamicLeaves: Int = rebuildTree(tree: tree, fullBuild: false)
   }
-  if let tree: mod DynamicTree => world.broadPhase.trees.modAt(index: kinematicTree) {
+  if let tree: mod DynamicTree = world.broadPhase.trees.modAt(index: kinematicTree) {
     let kinematicLeaves: Int = rebuildTree(tree: tree, fullBuild: false)
   }
   world.treeRebuildPending = false
@@ -689,7 +689,7 @@ func updateBroadPhasePairs(world: mod PhysicsWorld) {
   }
 
   loop var i: Int = 0, i < world.taskContexts.length, ++i {
-    if let taskContext: mod TaskContext => world.taskContexts.modAt(index: i) {
+    if let taskContext: mod TaskContext = world.taskContexts.modAt(index: i) {
       resetPairContext(context: taskContext.pairs)
     }
   }
@@ -702,7 +702,7 @@ func updateBroadPhasePairs(world: mod PhysicsWorld) {
   findPairs(world: world, context: context)
   world.pairContext = own context
 
-  if let tree: mod DynamicTree => world.broadPhase.trees.modAt(index: staticTree) {
+  if let tree: mod DynamicTree = world.broadPhase.trees.modAt(index: staticTree) {
     clearMoved(tree: tree)
   }
 

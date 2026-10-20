@@ -94,10 +94,7 @@ func fractionForX(
   if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) is false {
     ret 0.0
   }
-  let r: view ComputedRect => componentView(
-    this: uiSystems.layout.computedRects
-    entityId: entityId
-  )
+  let r: view ComputedRect = componentView(this: uiSystems.layout.computedRects, entityId: entityId)
   if r.size.x <= 0.0 {
     ret 0.0
   }
@@ -131,7 +128,7 @@ func updateSlider(
     let entityId: EntityId = nodeEntityFor(world: world, nodeId: s.trackId)
     if isNone(this: entityId) is false {
       if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) {
-        let r: view ComputedRect => componentView(
+        let r: view ComputedRect = componentView(
           this: uiSystems.layout.computedRects
           entityId: entityId
         )
@@ -197,7 +194,7 @@ func applySliderFill(s: view Slider, world: mod UiWorld, uiSystems: mod UiSystem
   if delta <= 0.05 {
     ret
   }
-  let fillRect: mod ComputedRect => componentMod(
+  let fillRect: mod ComputedRect = componentMod(
     this: uiSystems.layout.computedRects
     entityId: fill
   )
@@ -221,10 +218,7 @@ func debugNodeRect(world: view UiWorld, uiSystems: view UiSystems, nodeId: view 
     log("[slider] {nodeId}: no ComputedRect")
     ret
   }
-  let r: view ComputedRect => componentView(
-    this: uiSystems.layout.computedRects
-    entityId: entityId
-  )
+  let r: view ComputedRect = componentView(this: uiSystems.layout.computedRects, entityId: entityId)
   log("[slider] {nodeId}: x={r.position.x} y={r.position.y} w={r.size.x} h={r.size.y}")
 }
 
@@ -243,7 +237,7 @@ func nodeScreenX(
   if componentHas(this: uiSystems.transform2d.worldTransforms, entityId: entityId) is false {
     ret 0.0
   }
-  let wt: view WorldTransform2D => componentView(
+  let wt: view WorldTransform2D = componentView(
     this: uiSystems.transform2d.worldTransforms
     entityId: entityId
   )
@@ -258,7 +252,7 @@ func nodeScreenY(
   if componentHas(this: uiSystems.transform2d.worldTransforms, entityId: entityId) is false {
     ret 0.0
   }
-  let wt: view WorldTransform2D => componentView(
+  let wt: view WorldTransform2D = componentView(
     this: uiSystems.transform2d.worldTransforms
     entityId: entityId
   )
@@ -279,10 +273,7 @@ func pointInNode(
   if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) is false {
     ret false
   }
-  let r: view ComputedRect => componentView(
-    this: uiSystems.layout.computedRects
-    entityId: entityId
-  )
+  let r: view ComputedRect = componentView(this: uiSystems.layout.computedRects, entityId: entityId)
   let sx: Float = nodeScreenX(world: world, uiSystems: uiSystems, entityId: entityId)
   let sy: Float = nodeScreenY(world: world, uiSystems: uiSystems, entityId: entityId)
   if x < sx or x > sx + r.size.x {
@@ -308,10 +299,7 @@ func fractionAcrossNode(
   if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) is false {
     ret 0.0
   }
-  let r: view ComputedRect => componentView(
-    this: uiSystems.layout.computedRects
-    entityId: entityId
-  )
+  let r: view ComputedRect = componentView(this: uiSystems.layout.computedRects, entityId: entityId)
   if r.size.x <= 0.0 {
     ret 0.0
   }
@@ -351,11 +339,11 @@ func setNodeFractionWidth(
   if delta <= 0.05 {
     ret
   }
-  let fillRect: mod ComputedRect => componentMod(this: uiSystems.layout.computedRects, entityId: fe)
+  let fillRect: mod ComputedRect = componentMod(this: uiSystems.layout.computedRects, entityId: fe)
   fillRect.position.x = trackX
   fillRect.size.x = want
   if componentHas(this: world.rects, entityId: fe) {
-    let authored: mod Rect => componentMod(this: world.rects, entityId: fe)
+    let authored: mod Rect = componentMod(this: world.rects, entityId: fe)
     authored.size.x = want
   }
 }
@@ -403,10 +391,10 @@ func centreNodeAtFraction(
   # computed one is what this frame draws, and writing only the authored rect
   # leaves the knob a frame behind — or not moving at all where layout does not
   # re-derive it.
-  let handle: mod Rect => componentMod(this: world.rects, entityId: he)
+  let handle: mod Rect = componentMod(this: world.rects, entityId: he)
   handle.position.x = wantX
   if componentHas(this: uiSystems.layout.computedRects, entityId: he) {
-    let handleComputed: mod ComputedRect => componentMod(
+    let handleComputed: mod ComputedRect = componentMod(
       this: uiSystems.layout.computedRects
       entityId: he
     )

@@ -50,14 +50,14 @@ func bushAt(kind: view Int, x: view Float, y: view Float) ret PropPlacement {
 }
 
 func batchCount(field: view PropField) ret Int {
-  if let batch: view InstanceBatch => field.batches.viewAt(index: 0) {
+  if let batch: view InstanceBatch = field.batches.viewAt(index: 0) {
     ret batch.count
   }
   ret 0 - 1
 }
 
 func batchCapacity(field: view PropField) ret Int {
-  if let batch: view InstanceBatch => field.batches.viewAt(index: 0) {
+  if let batch: view InstanceBatch = field.batches.viewAt(index: 0) {
     ret batch.capacity
   }
   ret 0 - 1
@@ -131,8 +131,8 @@ func main() ret Int {
     ) is 6
   )
   var sameRecords: Bool = true
-  if let a: view InstanceBatch => whole.batches.viewAt(index: 0) {
-    if let b: view InstanceBatch => grouped.batches.viewAt(index: 0) {
+  if let a: view InstanceBatch = whole.batches.viewAt(index: 0) {
+    if let b: view InstanceBatch = grouped.batches.viewAt(index: 0) {
       # The same props in the same cells, so the same records, in cell order
       var sumA: Float = 0.0
       var sumB: Float = 0.0

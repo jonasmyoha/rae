@@ -121,7 +121,7 @@ func overlapAabb(
 ) ret TreeStats {
   var treeStats: TreeStats = emptyTreeStats()
   loop var treeIndex: Int = 0, treeIndex < bodyTypeCount, ++treeIndex {
-    if let tree: view DynamicTree => world.broadPhase.trees.viewAt(index: treeIndex) {
+    if let tree: view DynamicTree = world.broadPhase.trees.viewAt(index: treeIndex) {
       var query: TreeQuery = beginTreeQuery(
         tree: tree
         box: box
@@ -131,7 +131,7 @@ func overlapAabb(
       var proxyId: Int = nextTreeQueryProxy(tree: tree, query: query)
       loop proxyId is not -1 {
         let shapeIndex: Int = proxyShapeIndex(tree: tree, proxyId: proxyId)
-        if let shape: view PhysicsShape => world.shapes.viewAt(index: shapeIndex) {
+        if let shape: view PhysicsShape = world.shapes.viewAt(index: shapeIndex) {
           if shouldQueryCollide(shapeFilter: shape.filter, queryFilter: filter) {
             shapeIds.add(value: makeShapeId(world: world, shapeIndex: shapeIndex))
           }
@@ -158,7 +158,7 @@ func overlapShapeProxy(
     origin: origin
   )
   loop var treeIndex: Int = 0, treeIndex < bodyTypeCount, ++treeIndex {
-    if let tree: view DynamicTree => world.broadPhase.trees.viewAt(index: treeIndex) {
+    if let tree: view DynamicTree = world.broadPhase.trees.viewAt(index: treeIndex) {
       var query: TreeQuery = beginTreeQuery(
         tree: tree
         box: box
@@ -168,7 +168,7 @@ func overlapShapeProxy(
       var proxyId: Int = nextTreeQueryProxy(tree: tree, query: query)
       loop proxyId is not -1 {
         let shapeIndex: Int = proxyShapeIndex(tree: tree, proxyId: proxyId)
-        if let shape: view PhysicsShape => world.shapes.viewAt(index: shapeIndex) {
+        if let shape: view PhysicsShape = world.shapes.viewAt(index: shapeIndex) {
           if shouldQueryCollide(shapeFilter: shape.filter, queryFilter: filter) {
             # Re-centred on the query origin
             let transform: Transform = shapeRelativeTransform(
@@ -210,7 +210,7 @@ func collideMover(
   }
   let box: Aabb = offsetAabb(localBox: relativeBox, origin: origin)
   loop var treeIndex: Int = 0, treeIndex < bodyTypeCount, ++treeIndex {
-    if let tree: view DynamicTree => world.broadPhase.trees.viewAt(index: treeIndex) {
+    if let tree: view DynamicTree = world.broadPhase.trees.viewAt(index: treeIndex) {
       var query: TreeQuery = beginTreeQuery(
         tree: tree
         box: box
@@ -220,7 +220,7 @@ func collideMover(
       var proxyId: Int = nextTreeQueryProxy(tree: tree, query: query)
       loop proxyId is not -1 {
         let shapeIndex: Int = proxyShapeIndex(tree: tree, proxyId: proxyId)
-        if let shape: view PhysicsShape => world.shapes.viewAt(index: shapeIndex) {
+        if let shape: view PhysicsShape = world.shapes.viewAt(index: shapeIndex) {
           if shouldQueryCollide(shapeFilter: shape.filter, queryFilter: filter) {
             # Re-centred on the query origin: the mover and the planes are
             # origin relative
@@ -267,7 +267,7 @@ func castRayWith(
   }
   var worldFraction: Float = 1.0
   loop var treeIndex: Int = 0, treeIndex < bodyTypeCount, ++treeIndex {
-    if let tree: view DynamicTree => world.broadPhase.trees.viewAt(index: treeIndex) {
+    if let tree: view DynamicTree = world.broadPhase.trees.viewAt(index: treeIndex) {
       var cast: TreeCast = beginTreeRayCast(
         tree: tree
         input: input
@@ -278,7 +278,7 @@ func castRayWith(
       loop proxyId is not -1 {
         var value: Float = cast.maxFraction
         let shapeIndex: Int = proxyShapeIndex(tree: tree, proxyId: proxyId)
-        if let shape: view PhysicsShape => world.shapes.viewAt(index: shapeIndex) {
+        if let shape: view PhysicsShape = world.shapes.viewAt(index: shapeIndex) {
           if shouldQueryCollide(shapeFilter: shape.filter, queryFilter: filter) {
             let transform: Transform = shapeRelativeTransform(
               world: world
@@ -421,7 +421,7 @@ func castShapeWith(
     maxFraction: 1.0
   }
   loop var treeIndex: Int = 0, treeIndex < bodyTypeCount, ++treeIndex {
-    if let tree: view DynamicTree => world.broadPhase.trees.viewAt(index: treeIndex) {
+    if let tree: view DynamicTree = world.broadPhase.trees.viewAt(index: treeIndex) {
       var cast: TreeCast = beginTreeBoxCast(
         tree: tree
         input: treeInput
@@ -432,7 +432,7 @@ func castShapeWith(
       loop proxyId is not -1 {
         var value: Float = cast.maxFraction
         let shapeIndex: Int = proxyShapeIndex(tree: tree, proxyId: proxyId)
-        if let shape: view PhysicsShape => world.shapes.viewAt(index: shapeIndex) {
+        if let shape: view PhysicsShape = world.shapes.viewAt(index: shapeIndex) {
           if shouldQueryCollide(shapeFilter: shape.filter, queryFilter: filter) {
             # Rebuilt from the origin relative input, taking only the
             # advancing fraction from the tree
@@ -559,7 +559,7 @@ func castMover(
     maxFraction: 1.0
   }
   loop var treeIndex: Int = 0, treeIndex < bodyTypeCount, ++treeIndex {
-    if let tree: view DynamicTree => world.broadPhase.trees.viewAt(index: treeIndex) {
+    if let tree: view DynamicTree = world.broadPhase.trees.viewAt(index: treeIndex) {
       var cast: TreeCast = beginTreeBoxCast(
         tree: tree
         input: treeInput
@@ -570,7 +570,7 @@ func castMover(
       loop proxyId is not -1 {
         var value: Float = worldFraction
         let shapeIndex: Int = proxyShapeIndex(tree: tree, proxyId: proxyId)
-        if let shape: view PhysicsShape => world.shapes.viewAt(index: shapeIndex) {
+        if let shape: view PhysicsShape = world.shapes.viewAt(index: shapeIndex) {
           let shapeId: ShapeId = makeShapeId(world: world, shapeIndex: shapeIndex)
           if shouldQueryCollide(shapeFilter: shape.filter, queryFilter: filter) and isIgnored(
             shapeId: shapeId

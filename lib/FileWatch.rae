@@ -104,7 +104,7 @@ func checkForChanges(watcher: mod FileWatcher, now: view Float64) ret Bool {
   loop var i: Int = 0, i < watcher.entries.length, ++i {
     # Update the mtime in place: rebuilding the entry copied its path and
     # the raw buffer write over the old entry leaked the old one.
-    if let entry: mod WatchEntry => watcher.entries.modAt(index: i) {
+    if let entry: mod WatchEntry = watcher.entries.modAt(index: i) {
       let mt: Float64 = fileModTime(path: entry.path)
       if mt is not entry.lastMtime {
         entry.lastMtime = mt
@@ -115,7 +115,7 @@ func checkForChanges(watcher: mod FileWatcher, now: view Float64) ret Bool {
   if changed {
     fileNotifyClear(fileNotify: watcher.notify)
     loop var j: Int = 0, j < watcher.entries.length, ++j {
-      if let entry: view WatchEntry => watcher.entries.viewAt(index: j) {
+      if let entry: view WatchEntry = watcher.entries.viewAt(index: j) {
         fileNotifyWatch(fileNotify: watcher.notify, path: entry.path)
       }
     }

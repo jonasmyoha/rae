@@ -148,7 +148,7 @@ func poseCharacter(
     applySkeletonPose(sk: characterSystem.skeleton, pose: characterSystem.bindPose)
     ret
   }
-  let anim: view AnimationState => componentView(this: animStates, entityId: entityId)
+  let anim: view AnimationState = componentView(this: animStates, entityId: entityId)
   poseCharacterClip(
     characterSystem: characterSystem
     clipIndex: anim.clipIndex
@@ -157,7 +157,7 @@ func poseCharacter(
   if componentHas(this: animTransitions, entityId: entityId) is false {
     ret
   }
-  let transition: view AnimationTransition => componentView(
+  let transition: view AnimationTransition = componentView(
     this: animTransitions
     entityId: entityId
   )
@@ -199,7 +199,7 @@ func animationBeginTransition(
       holdClipFirstFrame: holdClipFirstFrame
     }
   )
-  let anim: mod AnimationState => componentMod(this: animStates, entityId: entityId)
+  let anim: mod AnimationState = componentMod(this: animStates, entityId: entityId)
   anim.clipIndex = clipIndex
   anim.animTime = 0.0
 }

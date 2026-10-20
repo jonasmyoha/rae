@@ -204,7 +204,7 @@ func extractScene(
   }
 
   loop let renderable: view Renderable3d in scene.renderables {
-    if let transform: view Transform3d => scene.transforms.viewAt(index: renderable.entityIndex) {
+    if let transform: view Transform3d = scene.transforms.viewAt(index: renderable.entityIndex) {
       packed.add(value: renderable.shape.toFloat())
       pushVec3(buf: packed, value: transform.position)
       pushVec3(buf: packed, value: transform.scale)

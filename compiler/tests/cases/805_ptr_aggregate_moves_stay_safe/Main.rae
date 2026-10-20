@@ -28,7 +28,7 @@ func main() {
   # Factory result into an owning binding: a fresh value, not a place-copy.
   var wrap: Wrap = makeWrap(tag: 7)
   # Borrow: reads only the non-Ptr metadata.
-  let borrowed: view Wrap => wrap
+  let borrowed: view Wrap = wrap
   log("borrow {peek(wrap: wrap)} {borrowed.tag}")
   # Move: transfer, not a copy.
   var moved: Wrap = own passThrough(wrap: own wrap)

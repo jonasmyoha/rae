@@ -131,7 +131,7 @@ func finalizeBodies(
         # Bullets wait for the continuous stage; the order of the sweeps
         # does not matter
         if (sim.flags bitand isBulletFlag) is not 0 {
-          if let taskContext: mod TaskContext => world.taskContexts.modAt(index: workerIndex) {
+          if let taskContext: mod TaskContext = world.taskContexts.modAt(index: workerIndex) {
             taskContext.bulletBodies.add(value: simIndex)
           }
         } else {
@@ -150,7 +150,7 @@ func finalizeBodies(
     }
 
     world.bodies.set(index: sim.bodyId, value: body)
-    if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
+    if let awake: mod SolverSet = world.solverSets.modAt(index: awakeSet) {
       awake.bodyStates.set(index: simIndex, value: state)
       awake.bodySims.set(index: simIndex, value: sim)
     }
@@ -170,22 +170,22 @@ func finalizeBodies(
       left: multiply(left: rotationMatrix, right: sim.invInertiaLocal)
       right: transpose(matrix: rotationMatrix)
     )
-    if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
+    if let awake: mod SolverSet = world.solverSets.modAt(index: awakeSet) {
       awake.bodySims.set(index: simIndex, value: sim)
     }
 
     # Any single body in an island can keep it awake
-    if let island: view Island => world.islands.viewAt(index: body.islandId) {
+    if let island: view Island = world.islands.viewAt(index: body.islandId) {
       if body.sleepTime < timeToSleep {
         # Keep the island awake
         let islandIndex: Int = island.localIndex
-        if let taskContext: mod TaskContext => world.taskContexts.modAt(index: workerIndex) {
+        if let taskContext: mod TaskContext = world.taskContexts.modAt(index: workerIndex) {
           setBit(bitset: taskContext.awakeIslandBitSet, bitIndex: islandIndex)
         }
       } else if island.constraintRemoveCount > 0 {
         # Sleepy, but the island needs splitting first: track the sleepiest
         # candidate (ties broken by island id for determinism)
-        if let taskContext: mod TaskContext => world.taskContexts.modAt(index: workerIndex) {
+        if let taskContext: mod TaskContext = world.taskContexts.modAt(index: workerIndex) {
           if body.sleepTime > taskContext.splitSleepTime or (body.sleepTime is taskContext.splitSleepTime and body.islandId > taskContext.splitIslandId) {
             taskContext.splitIslandId = body.islandId
             taskContext.splitSleepTime = body.sleepTime
@@ -207,7 +207,7 @@ func finalizeBodies(
           transform: transform
           extra: speculative
         )
-        if let stored: mod PhysicsShape => world.shapes.modAt(index: shapeId) {
+        if let stored: mod PhysicsShape = world.shapes.modAt(index: shapeId) {
           stored.aabb = box
         }
         let fatBox: Aabb = world.fatAabbs.copyAtDefault(index: shapeId)

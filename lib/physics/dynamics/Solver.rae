@@ -225,7 +225,7 @@ func runSolverStages(world: mod PhysicsWorld, context: mod StepContext) {
 # The block of every overflow contact (b3_overflowBlock)
 func overflowSolverBlock(world: view PhysicsWorld) ret SolverBlock {
   var count: Int = 0
-  if let overflow: view GraphColor => world.constraintGraph.colors.viewAt(index: overflowIndex) {
+  if let overflow: view GraphColor = world.constraintGraph.colors.viewAt(index: overflowIndex) {
     count = overflow.contacts.length
   }
   ret SolverBlock {
@@ -241,7 +241,7 @@ func warmStartOverflow(world: mod PhysicsWorld, context: mod StepContext, block:
   if block.count is 0 {
     ret
   }
-  if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
+  if let awake: mod SolverSet = world.solverSets.modAt(index: awakeSet) {
     warmStartContactsScalar(
       states: awake.bodyStates
       constraints: context.overflowContactConstraints
@@ -258,7 +258,7 @@ func pushOverflow(world: mod PhysicsWorld, context: mod StepContext, block: view
     ret
   }
   let contactSpeed: Float = world.contactSpeed
-  if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
+  if let awake: mod SolverSet = world.solverSets.modAt(index: awakeSet) {
     pushContactsScalar(
       states: awake.bodyStates
       constraints: context.overflowContactConstraints
@@ -276,7 +276,7 @@ func relaxOverflow(world: mod PhysicsWorld, context: mod StepContext, block: vie
   if block.count is 0 {
     ret
   }
-  if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
+  if let awake: mod SolverSet = world.solverSets.modAt(index: awakeSet) {
     solveContactsScalar(
       states: awake.bodyStates
       constraints: context.overflowContactConstraints
@@ -299,7 +299,7 @@ func restitutionOverflow(
   }
   let threshold: Float = world.restitutionThreshold
   let propagate: Bool = world.enableRestitutionPropagation
-  if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
+  if let awake: mod SolverSet = world.solverSets.modAt(index: awakeSet) {
     applyRestitutionScalar(
       states: awake.bodyStates
       constraints: context.overflowContactConstraints
@@ -361,7 +361,7 @@ func solve(world: mod PhysicsWorld, context: mod StepContext) {
   var jointCount: Int = 0
   var graphBlockCount: Int = 0
   loop var i: Int = 0, i < overflowIndex, ++i {
-    if let color: mod GraphColor => world.constraintGraph.colors.modAt(index: i) {
+    if let color: mod GraphColor = world.constraintGraph.colors.modAt(index: i) {
       let colorConvexContactCount: Int = color.convexContacts.length
       let colorContactCount: Int = color.contacts.length
       let colorJointCount: Int = color.jointSims.length
@@ -377,7 +377,7 @@ func solve(world: mod PhysicsWorld, context: mod StepContext) {
       contactCount = contactCount + colorContactCount
       # The manifold starts
       loop var j: Int = 0, j < colorContactCount, ++j {
-        if let spec: mod ContactSpec => color.contacts.modAt(index: j) {
+        if let spec: mod ContactSpec = color.contacts.modAt(index: j) {
           spec.manifoldStart = manifoldCount
           manifoldCount = manifoldCount + spec.manifoldCount
         }
@@ -443,10 +443,10 @@ func solve(world: mod PhysicsWorld, context: mod StepContext) {
   # The overflow colour's manifold starts and constraints
   var overflowCount: Int = 0
   var overflowManifoldCount: Int = 0
-  if let overflow: mod GraphColor => world.constraintGraph.colors.modAt(index: overflowIndex) {
+  if let overflow: mod GraphColor = world.constraintGraph.colors.modAt(index: overflowIndex) {
     overflowCount = overflow.contacts.length
     loop var i: Int = 0, i < overflowCount, ++i {
-      if let spec: mod ContactSpec => overflow.contacts.modAt(index: i) {
+      if let spec: mod ContactSpec = overflow.contacts.modAt(index: i) {
         spec.manifoldStart = overflowManifoldCount
         overflowManifoldCount = overflowManifoldCount + spec.manifoldCount
       }
@@ -477,7 +477,7 @@ func solve(world: mod PhysicsWorld, context: mod StepContext) {
   var jointBase: Int = 0
   loop let plan: view ColorPlan in plans {
     var colorConvexCount: Int = 0
-    if let color: view GraphColor => world.constraintGraph.colors.viewAt(index: plan.colorIndex) {
+    if let color: view GraphColor = world.constraintGraph.colors.viewAt(index: plan.colorIndex) {
       colorConvexCount = color.convexContacts.length
     }
     context.widePrepareSpans.add(
@@ -676,7 +676,7 @@ func solve(world: mod PhysicsWorld, context: mod StepContext) {
   let jointIdCapacity: Int = world.jointIdPool.nextIndex
   let contactIdCapacity: Int = world.contactIdPool.nextIndex
   loop var i: Int = 0, i < world.taskContexts.length, ++i {
-    if let taskContext: mod TaskContext => world.taskContexts.modAt(index: i) {
+    if let taskContext: mod TaskContext = world.taskContexts.modAt(index: i) {
       setBitCountAndClear(bitset: taskContext.jointStateBitSet, bitCount: jointIdCapacity)
       setBitCountAndClear(bitset: taskContext.hitEventBitSet, bitCount: contactIdCapacity)
       taskContext.hasHitEvents = false
@@ -689,7 +689,7 @@ func solve(world: mod PhysicsWorld, context: mod StepContext) {
   # The island bits for body finalization
   let awakeIslandCount: Int = setIslandCount(world: world, setIndex: awakeSet)
   loop var i: Int = 0, i < world.taskContexts.length, ++i {
-    if let taskContext: mod TaskContext => world.taskContexts.modAt(index: i) {
+    if let taskContext: mod TaskContext = world.taskContexts.modAt(index: i) {
       setBitCountAndClear(bitset: taskContext.awakeIslandBitSet, bitCount: awakeIslandCount)
       taskContext.splitIslandId = -1
       taskContext.splitSleepTime = 0.0
@@ -748,10 +748,10 @@ func solve(world: mod PhysicsWorld, context: mod StepContext) {
   reportHitEvents(world: world)
 
   # Refit the kinematic and dynamic trees
-  if let tree: mod DynamicTree => world.broadPhase.trees.modAt(index: 1) {
+  if let tree: mod DynamicTree = world.broadPhase.trees.modAt(index: 1) {
     refitTree(tree: tree)
   }
-  if let tree: mod DynamicTree => world.broadPhase.trees.modAt(index: 2) {
+  if let tree: mod DynamicTree = world.broadPhase.trees.modAt(index: 2) {
     refitTree(tree: tree)
   }
 
@@ -913,14 +913,14 @@ func enlargeBulletProxies(world: mod PhysicsWorld, simIndex: view Int) {
     ret
   }
   sim.flags = sim.flags bitand (bitnot enlargeBulletBoundsFlag)
-  if let awake: mod SolverSet => world.solverSets.modAt(index: awakeSet) {
+  if let awake: mod SolverSet = world.solverSets.modAt(index: awakeSet) {
     awake.bodySims.set(index: simIndex, value: sim)
   }
   var shapeId: Int = bodyAt(world: world, bodyId: sim.bodyId).headShapeId
   loop shapeId is not -1 {
     let shape: PhysicsShape = world.shapes.copyAtDefault(index: shapeId)
     let fatBox: Aabb = world.fatAabbs.copyAtDefault(index: shapeId)
-    if let tree: mod DynamicTree => world.broadPhase.trees.modAt(index: 2) {
+    if let tree: mod DynamicTree = world.broadPhase.trees.modAt(index: 2) {
       let id: Int = proxyId(proxyKey: shape.proxyKey)
       if contains(outer: treeProxyAabb(tree: tree, proxyId: id), inner: fatBox) is false {
         enlargeTreeProxy(tree: tree, proxyId: id, box: fatBox)
@@ -938,7 +938,7 @@ func sleepIslands(world: mod PhysicsWorld) {
   loop var i: Int = 0, i < world.taskContexts.length, ++i {
     var splitIslandId: Int = -1
     var splitSleepTime: Float = 0.0
-    if let taskContext: view TaskContext => world.taskContexts.viewAt(index: i) {
+    if let taskContext: view TaskContext = world.taskContexts.viewAt(index: i) {
       splitIslandId = taskContext.splitIslandId
       splitSleepTime = taskContext.splitSleepTime
     }
@@ -954,11 +954,11 @@ func sleepIslands(world: mod PhysicsWorld) {
   # The chunks' awake islands OR-ed into chunk 0's, moved out (not copied)
   # and given back below
   var awakeIslands: Bitset = emptyBitset()
-  if let first: mod TaskContext => world.taskContexts.modAt(index: 0) {
+  if let first: mod TaskContext = world.taskContexts.modAt(index: 0) {
     awakeIslands = own first.awakeIslandBitSet
   }
   loop var i: Int = 1, i < world.taskContexts.length, ++i {
-    if let other: view TaskContext => world.taskContexts.viewAt(index: i) {
+    if let other: view TaskContext = world.taskContexts.viewAt(index: i) {
       inPlaceUnion(setA: awakeIslands, setB: other.awakeIslandBitSet)
     }
   }
@@ -974,7 +974,7 @@ func sleepIslands(world: mod PhysicsWorld) {
     islandIndex = islandIndex - 1
   }
   world.sleepIslandIds = own islandSims
-  if let first: mod TaskContext => world.taskContexts.modAt(index: 0) {
+  if let first: mod TaskContext = world.taskContexts.modAt(index: 0) {
     first.awakeIslandBitSet = own awakeIslands
   }
 }

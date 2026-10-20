@@ -108,8 +108,8 @@ func authoredFieldValue(
   fieldAuthored = false
   if let index: Int = sceneNodeIndex(this: scene, nodeId: nodeId) {
     found = true
-    let doc: view JsonDoc => scene.doc
-    let node: view SceneNode => nodeAt(this: scene, idx: index)
+    let doc: view JsonDoc = scene.doc
+    let node: view SceneNode = nodeAt(this: scene, idx: index)
     let bag: JsonValue = Json.jsonValueAt(doc: doc, idx: node.componentsValueIdx)
     let componentIdx: Int = Json.field(doc: doc, this: bag, key: component)
     if componentIdx < 0 {
@@ -146,7 +146,7 @@ func decodedFieldIn(
   if componentHas(this: table, entityId: entityId) is false {
     ret missingAuthoredValue()
   }
-  let value: view T => componentView(this: table, entityId: entityId)
+  let value: view T = componentView(this: table, entityId: entityId)
   loop let decoded: view any in fields(value) {
     if fieldName(decoded) is field {
       ret AuthoredValue { text: "{decoded}", readable: true }
@@ -165,10 +165,7 @@ func decodedFieldValue(
   let count: Int = componentCount(this: sourceWorld.sceneSources)
   loop var i: Int = 0, i < count, ++i {
     let entityId: EntityId = componentEntityAt(this: sourceWorld.sceneSources, i: i)
-    let source: view SceneSource => componentView(
-      this: sourceWorld.sceneSources
-      entityId: entityId
-    )
+    let source: view SceneSource = componentView(this: sourceWorld.sceneSources, entityId: entityId)
     if source.sceneId is not sceneId or source.nodeId is not nodeId {
       continue
     }
@@ -195,9 +192,9 @@ func fieldProvenance(
   if componentHas(this: world.sceneSources, entityId: entityId) is false {
     ret FieldProvenance { source: FieldSource.unknown, authoredText: "" }
   }
-  let source: view SceneSource => componentView(this: world.sceneSources, entityId: entityId)
+  let source: view SceneSource = componentView(this: world.sceneSources, entityId: entityId)
   if let sourceIndex: Int = sceneRegistryIndex(reg: sources, key: source.sceneId) {
-    let scene: view Scene => sceneRegistryGet(reg: sources, idx: sourceIndex)
+    let scene: view Scene = sceneRegistryGet(reg: sources, idx: sourceIndex)
     var found: Bool = false
     var componentAuthored: Bool = false
     var fieldAuthored: Bool = false

@@ -30,7 +30,7 @@ func assignContactColor(
   let dynamicB: Bool = typeB is BodyType.dynamicBody
   if dynamicA and dynamicB {
     loop var i: Int = 0, i < dynamicColorCount, ++i {
-      if let color: mod GraphColor => world.constraintGraph.colors.modAt(index: i) {
+      if let color: mod GraphColor = world.constraintGraph.colors.modAt(index: i) {
         if getBit(bitset: color.bodySet, bitIndex: bodyIdA) or getBit(
           bitset: color.bodySet
           bitIndex: bodyIdB
@@ -49,7 +49,7 @@ func assignContactColor(
     }
     var i: Int = overflowIndex - 1
     loop i >= 1 {
-      if let color: mod GraphColor => world.constraintGraph.colors.modAt(index: i) {
+      if let color: mod GraphColor = world.constraintGraph.colors.modAt(index: i) {
         if getBit(bitset: color.bodySet, bitIndex: dynamicBodyId) is false {
           setBitGrow(bitset: color.bodySet, bitIndex: dynamicBodyId)
           ret i
@@ -78,7 +78,7 @@ func addContactToGraph(world: mod PhysicsWorld, contactId: view Int) {
   )
   let isScalar: Bool = (contact.flags bitand simMeshContact) is not 0 or colorIndex is overflowIndex
   var localIndex: Int = 0
-  if let color: mod GraphColor => world.constraintGraph.colors.modAt(index: colorIndex) {
+  if let color: mod GraphColor = world.constraintGraph.colors.modAt(index: colorIndex) {
     if isScalar {
       localIndex = color.contacts.length
       color.contacts.add(
@@ -93,7 +93,7 @@ func addContactToGraph(world: mod PhysicsWorld, contactId: view Int) {
       color.convexContacts.add(value: contactId)
     }
   }
-  if let target: mod Contact => world.contacts.modAt(index: contactId) {
+  if let target: mod Contact = world.contacts.modAt(index: contactId) {
     target.colorIndex = colorIndex
     target.localIndex = localIndex
     target.encodedBodySimA = encodeBodySimIndex(body: bodyA)
@@ -139,7 +139,7 @@ func removeContactFromGraph(
   meshContact: view Bool
 ) {
   var movedId: Int = -1
-  if let color: mod GraphColor => world.constraintGraph.colors.modAt(index: colorIndex) {
+  if let color: mod GraphColor = world.constraintGraph.colors.modAt(index: colorIndex) {
     if colorIndex is not overflowIndex {
       # This might clear a bit for a static body, which has no effect
       clearBit(bitset: color.bodySet, bitIndex: bodyIdA)
@@ -153,7 +153,7 @@ func removeContactFromGraph(
   }
   if movedId is not -1 {
     # Fix the index of the swapped contact
-    if let moved: mod Contact => world.contacts.modAt(index: movedId) {
+    if let moved: mod Contact = world.contacts.modAt(index: movedId) {
       moved.localIndex = localIndex
     }
   }
@@ -173,11 +173,11 @@ func addJointToGraph(world: mod PhysicsWorld, jointId: view Int, sim: view Joint
     typeB: bodyAt(world: world, bodyId: bodyIdB).bodyType
   )
   var localIndex: Int = 0
-  if let color: mod GraphColor => world.constraintGraph.colors.modAt(index: colorIndex) {
+  if let color: mod GraphColor = world.constraintGraph.colors.modAt(index: colorIndex) {
     color.jointSims.add(value: sim)
     localIndex = color.jointSims.length - 1
   }
-  if let target: mod Joint => world.joints.modAt(index: jointId) {
+  if let target: mod Joint = world.joints.modAt(index: jointId) {
     target.colorIndex = colorIndex
     target.localIndex = localIndex
   }
@@ -192,7 +192,7 @@ func removeJointFromGraph(
   localIndex: view Int
 ) {
   var movedId: Int = -1
-  if let color: mod GraphColor => world.constraintGraph.colors.modAt(index: colorIndex) {
+  if let color: mod GraphColor = world.constraintGraph.colors.modAt(index: colorIndex) {
     if colorIndex is not overflowIndex {
       # This might clear a bit for a static body, which has no effect
       clearBit(bitset: color.bodySet, bitIndex: bodyIdA)
@@ -208,7 +208,7 @@ func removeJointFromGraph(
   }
   if movedId is not -1 {
     # Fix the moved joint
-    if let moved: mod Joint => world.joints.modAt(index: movedId) {
+    if let moved: mod Joint = world.joints.modAt(index: movedId) {
       moved.localIndex = localIndex
     }
   }
@@ -218,11 +218,11 @@ func removeJointFromGraph(
 func jointSimOf(world: view PhysicsWorld, jointId: view Int) ret JointSim {
   let joint: Joint = world.joints.copyAtDefault(index: jointId)
   if joint.setIndex is awakeSet {
-    if let color: view GraphColor => world.constraintGraph.colors.viewAt(index: joint.colorIndex) {
+    if let color: view GraphColor = world.constraintGraph.colors.viewAt(index: joint.colorIndex) {
       ret color.jointSims.copyAtDefault(index: joint.localIndex)
     }
   }
-  if let set: view SolverSet => world.solverSets.viewAt(index: joint.setIndex) {
+  if let set: view SolverSet = world.solverSets.viewAt(index: joint.setIndex) {
     ret set.jointSims.copyAtDefault(index: joint.localIndex)
   }
   ret zeroJointSim()

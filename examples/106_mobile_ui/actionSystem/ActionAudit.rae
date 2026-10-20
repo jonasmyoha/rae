@@ -37,7 +37,7 @@ func actionAudit(world: view UiWorld, actionTable: view ActionTable) ret ActionA
     let clicks: Int = componentCount(this: world.onClicks)
     var i: Int = 0
     loop i < clicks {
-      let click: view OnClick => queryViewAt(table: world.onClicks, denseIndex: i)
+      let click: view OnClick = queryViewAt(table: world.onClicks, denseIndex: i)
       auditId(
         actionTable: actionTable
         actionId: click.actionId
@@ -65,7 +65,7 @@ func actionAudit(world: view UiWorld, actionTable: view ActionTable) ret ActionA
     let bindings: Int = componentCount(this: world.actionBindings)
     i = 0
     loop i < bindings {
-      let binding: view ActionBinding => queryViewAt(table: world.actionBindings, denseIndex: i)
+      let binding: view ActionBinding = queryViewAt(table: world.actionBindings, denseIndex: i)
       auditId(
         actionTable: actionTable
         actionId: binding.actionId
@@ -79,7 +79,7 @@ func actionAudit(world: view UiWorld, actionTable: view ActionTable) ret ActionA
     let lists: Int = componentCount(this: world.listViews)
     i = 0
     loop i < lists {
-      let listView: view ListView => queryViewAt(table: world.listViews, denseIndex: i)
+      let listView: view ListView = queryViewAt(table: world.listViews, denseIndex: i)
       let count: Int = listView.bindings.length
       var b: Int = 0
       loop b < count {
