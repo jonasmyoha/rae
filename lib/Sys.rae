@@ -1,4 +1,6 @@
 # System utilities for Rae
+open String
+
 func rae_sys_exit(code: Int) unsafe extern
 
 func rae_sys_get_env(name: String) unsafe extern ret String
@@ -235,11 +237,21 @@ func delete(path: view String) ret Bool {
   }
 }
 
-# Create a single directory at `path` with mode 0755. Idempotent —
-# returns true if the directory already exists. Does NOT create
-# intermediate parents (no `mkdir -p`); call this once per level if
-# you need a nested path.
+# Create the directory at `path` (mode 0755), and every missing folder on
+# the way to it, like `mkdir -p`. True when it exists afterwards, also when
+# it already existed. The one way to make a directory: lib/Filesystem has no
+# second `makeDir` (it had one over SDL that made parents while this one did
+# not, under the same name and parameters).
 func makeDir(path: view String) ret Bool {
+  # Each prefix that ends before a `/` is a parent; the first byte is
+  # skipped so an absolute path does not try to make "" (the root).
+  loop var i: Int = 1, i < path.length(), ++i {
+    if path.byteAt(index: i) is 47 {
+      unsafe {
+        rae_sys_make_dir(path: path.sub(start: 0, len: i))
+      }
+    }
+  }
   unsafe {
     ret rae_sys_make_dir(path: path)
   }
