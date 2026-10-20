@@ -1,0 +1,902 @@
+# A glTF level to walk round: a small level authored as Blender would export
+# it (made without Blender by tools/levels/exportWalkLevel.py; the rules are
+# docs/gltf-levels.md), read by app3d/GltfLevel and made into entities in the
+# file's order. Its meshes are drawn in their base colours (a World3d mesh
+# instance each), its `_collision` nodes are static Box3D triangle meshes, its
+# `marker_spawn` is where the character starts, and its drawn triangles go
+# into a surface map (app3d/SurfaceMap) by material name, so every footprint
+# knows what it stands on and is laid in a darker shade of it: sand on the
+# path, green on the grass, grey on the stone ramp and platform.
+#
+# The character is a Box3D mover (app3d/CharacterBodies, CharacterMovers) drawn
+# as a capsule with a visor showing where it faces: it walks on the level's
+# ground, up its ramp, and is stopped by its walls and crates.
+#
+# Controls: W/A/S/D walk (along the camera's view), Shift walks slowly, Space
+# jumps, Q/E (or the left and right arrow keys) turn the camera.
+#
+#   RAE_LEVEL_SELFTEST=1   headless, no window: the character walks a route
+#                          (into the wall, round onto the grass, up the ramp
+#                          onto the platform) and the run checks each leg;
+#                          exits 1 when one fails
+#   RAE_LEVEL_AUTOWALK=1   the window's character walks that route itself
+#
+# Compiled-target only; needs wgpu-native + SDL3. From the repository root:
+#   rae run examples/144_gltf_level/Main.rae
+# Headless screenshot:
+#   RAE_LEVEL_AUTOWALK=1 RAE_SDL_HEADLESS_MS=9000 \
+#     RAE_GPU2D_SCREENSHOT=/tmp/level.bmp rae run examples/144_gltf_level/Main.rae
+import Math
+import Sys
+import Gpu2d
+import Sdl3
+import Keys
+import Vec3
+open Scene3d
+open Math3d
+open Mesh3d
+open Gbuffer
+open RendererDeferred
+open Rendergraph
+open Shadow3d
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Transform
+open box3d/ecs/PhysicsTypes
+open box3d/ecs/Physics
+open box3d/ecs/PhysicsComponents
+open app3d/GltfLevel
+open app3d/SurfaceMap
+open app3d/CharacterController
+open app3d/CharacterBodies
+open app3d/CharacterMovers
+
+const levelPath: String = "examples/144_gltf_level/assets/walk_level.glb"
+
+const fixedStep: Float = 1.0 / 60.0
+
+# The surfaces this app tells apart (its own codes, from material names)
+const surfaceNone: Int = 0
+
+const surfaceGrass: Int = 1
+
+const surfacePath: Int = 2
+
+const surfaceStone: Int = 3
+
+const surfaceWood: Int = 4
+
+const surfaceKinds: Int = 5
+
+# A footprint every stride, left and right in turn, the last 64 kept
+const strideLength: Float = 0.7
+
+const footprintCount: Int = 64
+
+# How much darker a print is than the surface it is laid on
+const footprintShade: Float = 0.6
+
+# The camera: behind the character's feet and above them
+const cameraDistance: Float = 9.0
+
+const cameraHeight: Float = 4.5
+
+const cameraTurnRate: Float = 1.8
+
+func surfaceName(surface: view Int) ret String {
+  if surface is surfaceGrass {
+    ret "grass"
+  }
+  if surface is surfacePath {
+    ret "path"
+  }
+  if surface is surfaceStone {
+    ret "stone"
+  }
+  if surface is surfaceWood {
+    ret "wood"
+  }
+  ret "nothing"
+}
+
+# The app's rules: what ground each material name stands for
+func surfaceRules() ret List(MaterialSurface) {
+  var rules: List(MaterialSurface) = List.create(MaterialSurface, cap: 5)
+  rules.add(value: MaterialSurface { prefix: "Grass", surface: surfaceGrass })
+  rules.add(value: MaterialSurface { prefix: "Path", surface: surfacePath })
+  rules.add(value: MaterialSurface { prefix: "Stone", surface: surfaceStone })
+  rules.add(value: MaterialSurface { prefix: "Wall", surface: surfaceStone })
+  rules.add(value: MaterialSurface { prefix: "Wood", surface: surfaceWood })
+  ret rules
+}
+
+# A character's last footprints: a ring of drawn entities, the next one to
+# move, how far it has walked since the last, which foot is next, and how
+# many it has laid on each surface
+type FootprintTrail {
+  prints: List(EntityId)
+  next: Int
+  travelled: Float
+  lastX: Float
+  lastY: Float
+  left: Bool
+  surfaceSteps: List(Int)
+  lastSurface: Int
+}
+
+# The meshes the app draws besides the level's own
+type LevelMeshes {
+  capsule: MeshHandle
+  visor: MeshHandle
+  footprint: MeshHandle
+}
+
+# The level's entities and the character's: the drawn scene (World3d, whose
+# allocator makes every entity), where each piece came from, the markers'
+# points, the physics, the surface map, and the character's components
+type LevelWorld {
+  scene: World3d
+  nodes: ComponentTable(LevelNode)
+  markers: ComponentTable(LevelMarker)
+  transforms: ComponentTable(Transform3D)
+  rigidBodies: ComponentTable(RigidBody)
+  colliders: ComponentTable(Collider)
+  physics: Physics
+  surfaceMap: SurfaceMap
+  # Each surface's colour as the level paints it (by surface code)
+  surfaceColors: List(Vec3)
+  controllers: ComponentTable(ThirdPersonController)
+  characters: ComponentTable(CharacterBody)
+  drives: ComponentTable(MoverDrive)
+  parked: ComponentTable(MoverParked)
+  limits: ComponentTable(MoverSpeedLimit)
+  steps: ComponentTable(MoverStep)
+  trails: ComponentTable(FootprintTrail)
+  character: EntityId
+  visor: EntityId
+  accumulator: Float
+}
+
+func createLevelWorld() ret LevelWorld {
+  var surfaceColors: List(Vec3) = List.create(Vec3, cap: surfaceKinds)
+  loop var i: Int = 0, i < surfaceKinds, ++i {
+    surfaceColors.add(value: Vec3 { x: 0.5, y: 0.5, z: 0.5 })
+  }
+  ret LevelWorld {
+    scene: createWorld3d()
+    nodes: createComponentTable(LevelNode)
+    markers: createComponentTable(LevelMarker)
+    transforms: createComponentTable(Transform3D)
+    rigidBodies: createComponentTable(RigidBody)
+    colliders: createComponentTable(Collider)
+    physics: createPhysics(def: defaultPhysicsWorldDef(), fixedStep: fixedStep, subSteps: 4)
+    surfaceMap: createCodedSurfaceMap(
+      centerX: 0.0
+      centerY: 0.0
+      halfExtent: 24.0
+      cellSize: 0.5
+      emptySurface: surfaceNone
+    )
+    surfaceColors: surfaceColors
+    controllers: createComponentTable(ThirdPersonController)
+    characters: createComponentTable(CharacterBody)
+    drives: createComponentTable(MoverDrive)
+    parked: createComponentTable(MoverParked)
+    limits: createComponentTable(MoverSpeedLimit)
+    steps: createComponentTable(MoverStep)
+    trails: createComponentTable(FootprintTrail)
+    character: noEntity()
+    visor: noEntity()
+    accumulator: 0.0
+  }
+}
+
+func plainMaterial(color: view Vec3, roughness: view Float) ret Material3d {
+  ret Material3d {
+    baseColor: color
+    metallic: 0.0
+    roughness: roughness
+    emission: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+    toon: false
+  }
+}
+
+func unitScale() ret Vec3 {
+  ret Vec3 { x: 1.0, y: 1.0, z: 1.0 }
+}
+
+func noRotation() ret Vec3 {
+  ret Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+}
+
+# The level's items as entities, in the file's order: a drawn mesh (in its
+# base colour, uploaded to `renderer` when there is one, and laid into the
+# surface map), a collider, a marker; each with the LevelNode it came from.
+# The number of colliders Box3D refused.
+func buildLevel(
+  world: mod LevelWorld
+  read: view LevelRead
+  renderer: mod DeferredRenderer
+  drawn: view Bool
+) ret Int {
+  let rules: List(MaterialSurface) = surfaceRules()
+  var refused: Int = 0
+  loop let item: view LevelItem in read.items {
+    let entityId: EntityId = world3dAddEntity(world: world.scene)
+    componentSet(
+      this: world.nodes
+      entityId: entityId
+      data: LevelNode {
+        source: levelPath
+        name: item.nodeName
+        collision: item.kind is LevelItemKind.collider
+      }
+    )
+    if item.kind is LevelItemKind.mesh {
+      let surface: Int = surfaceOfMaterialName(
+        name: item.materialName
+        rules: rules
+        fallback: surfaceNone
+      )
+      layMesh(map: world.surfaceMap, mesh: item.mesh, surface: surface)
+      world.surfaceColors.set(index: surface, value: item.color)
+      if drawn {
+        let mesh: MeshHandle = uploadMesh(
+          renderer: renderer
+          verts: item.mesh.verts
+          vertCount: item.mesh.vertCount
+          indices: item.mesh.indices
+        )
+        world3dSetTransform(
+          world: world.scene
+          entityId: entityId
+          transform: Transform3d {
+            position: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+            rotation: noRotation()
+            scale: unitScale()
+          }
+        )
+        world3dSetMaterial(
+          world: world.scene
+          entityId: entityId
+          material: plainMaterial(color: item.color, roughness: 0.85)
+        )
+        world3dSetMeshRenderer(
+          world: world.scene
+          entityId: entityId
+          renderer: MeshRenderer { mesh: mesh, material: -1, visible: true }
+        )
+      }
+    } else if item.kind is LevelItemKind.collider {
+      if addLevelCollider(
+        physics: world.physics
+        colliders: world.colliders
+        entityId: entityId
+        mesh: item.mesh
+        def: defaultShapeDef(lengthUnitsPerMeter: 1.0)
+      ) is false {
+        log("[level] Box3D refused the collider {item.nodeName}")
+        refused = refused + 1
+      }
+    } else {
+      var point: Transform3D = createTransform3D()
+      point.position = item.position
+      componentSet(this: world.transforms, entityId: entityId, data: point)
+      componentSet(
+        this: world.markers
+        entityId: entityId
+        data: LevelMarker { name: item.nodeName }
+      )
+    }
+  }
+  ret refused
+}
+
+# A drawn entity of the app's own (the capsule, its visor, a footprint)
+func addDrawnEntity(
+  world: mod LevelWorld
+  mesh: view MeshHandle
+  color: view Vec3
+  scale: view Vec3
+  visible: view Bool
+) ret EntityId {
+  let entityId: EntityId = world3dAddMeshInstance(
+    world: world.scene
+    mesh: mesh
+    material: plainMaterial(color: color, roughness: 0.6)
+    position: Vec3 { x: 0.0, y: 0.0, z: -100.0 }
+    rotation: noRotation()
+    scale: scale
+  )
+  world3dSetMeshRenderer(
+    world: world.scene
+    entityId: entityId
+    renderer: MeshRenderer { mesh: mesh, material: -1, visible: visible }
+  )
+  ret entityId
+}
+
+# The character at `feet`, facing +y: its controller, a mover standing there,
+# a drive, a footprint trail, and its capsule and visor drawn
+func spawnCharacter(world: mod LevelWorld, feet: view Vec3, meshes: view LevelMeshes) {
+  let character: EntityId = addDrawnEntity(
+    world: world
+    mesh: meshes.capsule
+    color: Vec3 { x: 0.85, y: 0.3, z: 0.55 }
+    scale: Vec3 { x: 0.32, y: 0.32, z: 0.9 }
+    visible: true
+  )
+  world.character = character
+  world.visor = addDrawnEntity(
+    world: world
+    mesh: meshes.visor
+    color: Vec3 { x: 0.15, y: 0.75, z: 0.8 }
+    scale: Vec3 { x: 0.36, y: 0.12, z: 0.14 }
+    visible: true
+  )
+  var controller: ThirdPersonController = createThirdPersonController()
+  controller.position = feet
+  componentSet(this: world.controllers, entityId: character, data: controller)
+  addCharacterBody(characters: world.characters, entityId: character, feet: feet)
+  componentSet(this: world.drives, entityId: character, data: createMoverDrive())
+  var prints: List(EntityId) = List.create(EntityId, cap: footprintCount)
+  loop var i: Int = 0, i < footprintCount, ++i {
+    prints.add(value: addDrawnEntity(
+      world: world
+      mesh: meshes.footprint
+      color: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+      scale: Vec3 { x: 0.13, y: 0.26, z: 0.01 }
+      visible: false
+    ))
+  }
+  var surfaceSteps: List(Int) = List.create(Int, cap: surfaceKinds)
+  loop var i: Int = 0, i < surfaceKinds, ++i {
+    surfaceSteps.add(value: 0)
+  }
+  componentSet(
+    this: world.trails
+    entityId: character
+    data: FootprintTrail {
+      prints: prints
+      next: 0
+      travelled: 0.0
+      lastX: feet.x
+      lastY: feet.y
+      left: true
+      surfaceSteps: surfaceSteps
+      lastSurface: surfaceNone
+    }
+  )
+}
+
+# The character's drive for the coming steps: `intent` along `yaw`
+func driveCharacter(world: mod LevelWorld, intent: view InputIntent, yaw: view Float) {
+  componentSet(
+    this: world.drives
+    entityId: world.character
+    data: MoverDrive { intent: intent, yaw: yaw, speedScale: 1.0, tookOff: false }
+  )
+  driveMovers(characters: world.characters, controllers: world.controllers, drives: world.drives)
+}
+
+# The frame's fixed steps of the movers; how many were taken
+func stepLevel(world: mod LevelWorld, frameTime: view Float) ret Int {
+  let fixedSteps: FixedSteps = fixedStepsFor(
+    accumulator: world.accumulator
+    frameTime: frameTime
+    fixedStep: fixedStep
+    maxSteps: 4
+  )
+  world.accumulator = fixedSteps.accumulator
+  loop var i: Int = 0, i < fixedSteps.steps, ++i {
+    moveMovers(
+      physics: world.physics
+      characters: world.characters
+      parked: world.parked
+      limits: world.limits
+      steps: world.steps
+    )
+    stepPhysicsBodies(
+      physics: world.physics
+      rigidBodies: world.rigidBodies
+      transforms: world.transforms
+    )
+    readMoverControllers(
+      characters: world.characters
+      controllers: world.controllers
+      parked: world.parked
+      groundZ: 0.0
+      fixedStep: fixedStep
+    )
+  }
+  ret fixedSteps.steps
+}
+
+func characterFeet(world: view LevelWorld) ret Vec3 {
+  ret controllerOf(controllers: world.controllers, entityId: world.character).position
+}
+
+func characterHeading(world: view LevelWorld) ret Float {
+  ret controllerOf(controllers: world.controllers, entityId: world.character).heading
+}
+
+# Lay a print every stride the character walks on the ground: the next foot's,
+# beside its path, in a darker shade of the surface the map says is there
+func updateFootprints(world: mod LevelWorld) {
+  if var trail: FootprintTrail = componentCopy(this: world.trails, entityId: world.character) {
+    stepFootprints(world: world, trail: trail)
+    componentSet(this: world.trails, entityId: world.character, data: trail)
+  }
+}
+
+func stepFootprints(world: mod LevelWorld, trail: mod FootprintTrail) {
+  let feet: Vec3 = characterFeet(world: world)
+  let heading: Float = characterHeading(world: world)
+  let grounded: Bool = characterGrounded(characters: world.characters, entityId: world.character)
+  let dx: Float = feet.x - trail.lastX
+  let dy: Float = feet.y - trail.lastY
+  trail.lastX = feet.x
+  trail.lastY = feet.y
+  if grounded is false {
+    ret
+  }
+  trail.travelled = trail.travelled + Math.sqrt(x: dx * dx + dy * dy)
+  if trail.travelled >= strideLength {
+    trail.travelled = trail.travelled - strideLength
+    let surface: Int = surfaceCodeAt(map: world.surfaceMap, x: feet.x, y: feet.y)
+    trail.surfaceSteps.set(
+      index: surface
+      value: trail.surfaceSteps.copyAtDefault(index: surface) + 1
+    )
+    if surface is not trail.lastSurface {
+      log(
+        "[step] on {surfaceName(surface: surface)} at ({tenths(value: feet.x)}, {tenths(
+          value: feet.y
+        )})"
+      )
+      trail.lastSurface = surface
+    }
+    var side: Float = 0.12
+    if trail.left {
+      side = -0.12
+    }
+    trail.left = trail.left is false
+    let rightX: Float = Math.cos(x: heading)
+    let rightY: Float = Math.sin(x: heading)
+    # On the drawn surface the map says is there (the path lies over the
+    # grass collider the mover stands on)
+    var groundZ: Float = surfaceHeightAt(map: world.surfaceMap, x: feet.x, y: feet.y)
+    if groundZ <= surfaceMapEmptyHeight {
+      groundZ = feet.z
+    }
+    let print: EntityId = trail.prints.copyAtDefault(index: trail.next)
+    trail.next = (trail.next + 1) % footprintCount
+    world3dWriteTransform(
+      world: world.scene
+      entityId: print
+      transform: Transform3d {
+        position: Vec3 { x: feet.x + rightX * side, y: feet.y + rightY * side, z: groundZ + 0.006 }
+        rotation: Vec3 { x: 0.0, y: 0.0, z: heading }
+        scale: Vec3 { x: 0.13, y: 0.26, z: 0.01 }
+      }
+    )
+    world3dSetMaterial(
+      world: world.scene
+      entityId: print
+      material: plainMaterial(
+        color: Vec3.vscale(a: world.surfaceColors.copyAtDefault(index: surface), s: footprintShade)
+        roughness: 0.95
+      )
+    )
+    if let shown: MeshRenderer = componentCopy(this: world.scene.meshRenderers, entityId: print) {
+      world3dSetMeshRenderer(
+        world: world.scene
+        entityId: print
+        renderer: MeshRenderer { mesh: shown.mesh, material: -1, visible: true }
+      )
+    }
+  }
+}
+
+# How many prints the character has laid on `surface`
+func surfaceStepCount(world: view LevelWorld, surface: view Int) ret Int {
+  if let trail: FootprintTrail = componentCopy(this: world.trails, entityId: world.character) {
+    ret trail.surfaceSteps.copyAtDefault(index: surface)
+  }
+  ret 0
+}
+
+func tenths(value: view Float) ret Float {
+  ret Math.round(x: value * 10.0) / 10.0
+}
+
+# The capsule and its visor where the mover is, turned to its heading
+func placeCharacterDrawing(world: mod LevelWorld) {
+  let feet: Vec3 = characterFeet(world: world)
+  let heading: Float = characterHeading(world: world)
+  world3dWriteTransform(
+    world: world.scene
+    entityId: world.character
+    transform: Transform3d {
+      position: Vec3 { x: feet.x, y: feet.y, z: feet.z + 0.9 }
+      rotation: Vec3 { x: 0.0, y: 0.0, z: heading }
+      scale: Vec3 { x: 0.32, y: 0.32, z: 0.9 }
+    }
+  )
+  world3dWriteTransform(
+    world: world.scene
+    entityId: world.visor
+    transform: Transform3d {
+      position: Vec3 {
+        x: feet.x - Math.sin(x: heading) * 0.26
+        y: feet.y + Math.cos(x: heading) * 0.26
+        z: feet.z + 1.45
+      }
+      rotation: Vec3 { x: 0.0, y: 0.0, z: heading }
+      scale: Vec3 { x: 0.36, y: 0.12, z: 0.14 }
+    }
+  )
+}
+
+# The level's `marker_spawn`, or its origin when it has none
+func spawnPoint(world: view LevelWorld) ret Vec3 {
+  if let point: Vec3 = levelMarker(
+    markers: world.markers
+    transforms: world.transforms
+    name: "spawn"
+  ) {
+    ret point
+  }
+  log("[level] no marker_spawn: the character starts at the origin")
+  ret Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+}
+
+# The yaw that walks from `from` toward (x, y): forward is (-sin yaw, cos yaw)
+func yawToward(from: view Vec3, x: view Float, y: view Float) ret Float {
+  ret Math.atan2(y: from.x - x, x: y - from.y)
+}
+
+# ----- the route the self-test and the autowalk take ----------------------
+# Standing on the spawn a moment, into the wall up the path, back round onto the grass, up the ramp
+# onto the
+# platform: each leg a point to walk toward, for so long
+type RouteLeg {
+  x: Float
+  y: Float
+  seconds: Float
+}
+
+func walkRoute() ret List(RouteLeg) {
+  var route: List(RouteLeg) = List.create(RouteLeg, cap: 4)
+  route.add(value: RouteLeg { x: 0.0, y: -14.0, seconds: 0.5 })
+  route.add(value: RouteLeg { x: 0.0, y: 14.0, seconds: 8.0 })
+  route.add(value: RouteLeg { x: 5.0, y: -8.0, seconds: 6.0 })
+  route.add(value: RouteLeg { x: 5.0, y: 4.5, seconds: 5.0 })
+  ret route
+}
+
+# Where on the route the character is after `seconds`: the leg's index, or
+# the route's length once it is walked
+func routeLegAt(route: view List(RouteLeg), seconds: view Float) ret Int {
+  var start: Float = 0.0
+  loop var i: Int = 0, i < route.length, ++i {
+    start = start + route.viewAt(index: i).seconds
+    if seconds < start {
+      ret i
+    }
+  }
+  ret route.length
+}
+
+# The intent that walks the route's leg `leg` (none past its end), and its yaw
+type RouteDrive {
+  intent: InputIntent
+  yaw: Float
+}
+
+func routeDrive(route: view List(RouteLeg), leg: view Int, feet: view Vec3) ret RouteDrive {
+  var intent: InputIntent = createInputIntent()
+  if leg >= route.length {
+    ret RouteDrive { intent: intent, yaw: 0.0 }
+  }
+  let target: view RouteLeg = route.viewAt(index: leg)
+  let dx: Float = target.x - feet.x
+  let dy: Float = target.y - feet.y
+  if dx * dx + dy * dy > 0.04 {
+    intent.moveY = 1.0
+  }
+  ret RouteDrive { intent: intent, yaw: yawToward(from: feet, x: target.x, y: target.y) }
+}
+
+func near(a: view Float, b: view Float, within: view Float) ret Bool {
+  ret Math.abs(value: a - b) <= within
+}
+
+func check(label: view String, ok: view Bool) ret Bool {
+  if ok {
+    log("[leveltest] ok   {label}")
+  } else {
+    log("[leveltest] FAIL {label}")
+  }
+  ret ok
+}
+
+# The level read and walked with no window: spawned at the marker, stopped by
+# the wall, on the grass, up the ramp onto the platform
+func selfTest() ret Int {
+  let read: LevelRead = readGltfLevel(path: levelPath, placement: mat4Identity())
+  if read.ok is false {
+    log("[leveltest] FAIL the level did not read: {read.error}")
+    ret 1
+  }
+  var renderer: DeferredRenderer = createDeferredRenderer()
+  var world: LevelWorld = createLevelWorld()
+  let refused: Int = buildLevel(
+    world: world
+    read: read
+    renderer: renderer
+    drawn: false
+  )
+  var passed: Bool = check(
+    label: "read {read.items.length} items, {componentCount(this: world.colliders)} colliders, {componentCount(
+      this: world.markers
+    )} markers"
+    ok: refused is 0 and componentCount(this: world.colliders) is 9 and componentCount(
+      this: world.markers
+    ) is 2
+  )
+  let spawnFeet: Vec3 = spawnPoint(world: world)
+  passed = check(
+    label: "marker spawn at ({spawnFeet.x}, {spawnFeet.y}, {spawnFeet.z})"
+    ok: near(a: spawnFeet.y, b: -14.0, within: 0.001)
+  ) and passed
+  let meshes: LevelMeshes = {
+    capsule: meshHandleNone()
+    visor: meshHandleNone()
+    footprint: meshHandleNone()
+  }
+  spawnCharacter(world: world, feet: spawnFeet, meshes: meshes)
+  let route: List(RouteLeg) = walkRoute()
+  var seconds: Float = 0.0
+  var leg: Int = 0
+  var settled: Vec3 = spawnFeet
+  var atWall: Vec3 = spawnFeet
+  var onGrass: Vec3 = spawnFeet
+  loop leg < route.length {
+    let drive: RouteDrive = routeDrive(route: route, leg: leg, feet: characterFeet(world: world))
+    driveCharacter(world: world, intent: drive.intent, yaw: drive.yaw)
+    let taken: Int = stepLevel(world: world, frameTime: fixedStep)
+    updateFootprints(world: world)
+    seconds = seconds + fixedStep
+    let nowLeg: Int = routeLegAt(route: route, seconds: seconds)
+    if nowLeg is not leg {
+      if leg is 0 {
+        settled = characterFeet(world: world)
+      } else if leg is 1 {
+        atWall = characterFeet(world: world)
+      } else if leg is 2 {
+        onGrass = characterFeet(world: world)
+      }
+      leg = nowLeg
+    }
+  }
+  let end: Vec3 = characterFeet(world: world)
+  passed = check(
+    label: "stands where it spawned on the ground: ({tenths(value: settled.x)}, {tenths(
+      value: settled.y
+    )}, {settled.z})"
+    ok: near(a: settled.x, b: 0.0, within: 0.05) and near(a: settled.y, b: -14.0, within: 0.1) and near(
+      a: settled.z
+      b: 0.0
+      within: 0.08
+    )
+  ) and passed
+  passed = check(
+    label: "walking up the path, stopped by the wall (its face at y 8.75): ({tenths(value: atWall.x)}, {atWall.y})"
+    ok: atWall.y > 7.8 and atWall.y < 8.75 and near(a: atWall.x, b: 0.0, within: 0.3)
+  ) and passed
+  passed = check(
+    label: "back round on the grass: ({tenths(value: onGrass.x)}, {tenths(value: onGrass.y)}, {onGrass.z})"
+    ok: near(a: onGrass.x, b: 5.0, within: 0.4) and near(a: onGrass.y, b: -8.0, within: 0.4) and near(
+      a: onGrass.z
+      b: 0.0
+      within: 0.08
+    ) and surfaceCodeAt(map: world.surfaceMap, x: onGrass.x, y: onGrass.y) is surfaceGrass
+  ) and passed
+  passed = check(
+    label: "up the ramp onto the platform (its top at 1.5 m): ({tenths(value: end.x)}, {tenths(
+      value: end.y
+    )}, {end.z}), on {surfaceName(surface: surfaceCodeAt(map: world.surfaceMap, x: end.x, y: end.y))}"
+    ok: near(a: end.z, b: 1.5, within: 0.08) and end.y > 2.0 and surfaceCodeAt(
+      map: world.surfaceMap
+      x: end.x
+      y: end.y
+    ) is surfaceStone
+  ) and passed
+  let pathSteps: Int = surfaceStepCount(world: world, surface: surfacePath)
+  let grassSteps: Int = surfaceStepCount(world: world, surface: surfaceGrass)
+  let stoneSteps: Int = surfaceStepCount(world: world, surface: surfaceStone)
+  passed = check(
+    label: "footprints by the surface map: {pathSteps} on the path, {grassSteps} on grass, {stoneSteps} on stone"
+    ok: pathSteps > 10 and grassSteps > 10 and stoneSteps > 5
+  ) and passed
+  destroyPhysics(physics: world.physics)
+  shutdownDeferredRenderer(renderer: renderer)
+  log("[leveltest] passed={passed}")
+  if passed {
+    ret 0
+  }
+  ret 1
+}
+
+# ----- the window ------------------------------------------------------------
+# The keys as an intent: W/S forward and back, A/D sideways, Shift walks,
+# Space jumps
+func keyIntent() ret InputIntent {
+  var intent: InputIntent = createInputIntent()
+  if Sdl3.isKeyDown(key: Keys.keyW) or Sdl3.isKeyDown(key: Keys.keyUp) {
+    intent.moveY = intent.moveY + 1.0
+  }
+  if Sdl3.isKeyDown(key: Keys.keyS) or Sdl3.isKeyDown(key: Keys.keyDown) {
+    intent.moveY = intent.moveY - 1.0
+  }
+  if Sdl3.isKeyDown(key: Keys.keyD) {
+    intent.moveX = intent.moveX + 1.0
+  }
+  if Sdl3.isKeyDown(key: Keys.keyA) {
+    intent.moveX = intent.moveX - 1.0
+  }
+  intent.walking = Sdl3.isKeyDown(key: Keys.keyLShift)
+  intent.jump = Sdl3.isKeyPressed(key: Keys.keySpace)
+  ret intent
+}
+
+# Q/E or the left and right arrows turn the camera
+func cameraTurn() ret Float {
+  var turn: Float = 0.0
+  if Sdl3.isKeyDown(key: Keys.keyQ) or Sdl3.isKeyDown(key: Keys.keyLeft) {
+    turn = turn + 1.0
+  }
+  if Sdl3.isKeyDown(key: Keys.keyE) or Sdl3.isKeyDown(key: Keys.keyRight) {
+    turn = turn - 1.0
+  }
+  ret turn
+}
+
+# One frame through the deferred graph: the scene's shadow casters, then
+# the World3d's passes
+func renderLevelFrame(
+  renderer: mod DeferredRenderer
+  scene: view World3d
+  camera: view Camera3d
+  light: view Light3d
+) {
+  let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
+  loop var passIndex: Int = 0, passIndex < deferredOrderLength(renderer: renderer), ++passIndex {
+    let tag: Int = deferredTagAt(renderer: renderer, i: passIndex)
+    if tag is RenderTag.shadow {
+      let cascades: ShadowCascades = fitShadowCascades(
+        camPos: camera.position
+        camTarget: camera.target
+        fovYDeg: camera.fovYDeg
+        aspect: aspect
+        near: camera.nearZ
+        far: 90.0
+        sunDir: light.sunDir
+        count: 3
+        resolution: 2048
+        lambda: 0.7
+        backExtent: 45.0
+      )
+      beginShadowPass(renderer: renderer, c: cascades)
+      renderSceneShadowWorldWith(renderer: renderer, world: scene)
+      endShadowPass(renderer: renderer)
+    } else {
+      renderDeferredPassWorld(
+        renderer: renderer
+        tag: tag
+        world: scene
+        camera: camera
+        light: light
+        aspect: aspect
+      )
+    }
+  }
+}
+
+func runWindowed() ret Int {
+  let read: LevelRead = readGltfLevel(path: levelPath, placement: mat4Identity())
+  if read.ok is false {
+    log("[level] {levelPath} did not read: {read.error}")
+    ret 1
+  }
+  Gpu2d.initWindow(width: 1280, height: 800, title: "144: Rae 3D — a glTF level")
+  var renderer: DeferredRenderer = createDeferredRenderer()
+  var world: LevelWorld = createLevelWorld()
+  let refused: Int = buildLevel(
+    world: world
+    read: read
+    renderer: renderer
+    drawn: true
+  )
+  let spawnFeet: Vec3 = spawnPoint(world: world)
+  let meshes: LevelMeshes = {
+    capsule: uploadMeshData(renderer: renderer, meshData: makeSphere(rings: 16, segments: 24))
+    visor: uploadMeshData(renderer: renderer, meshData: makeBox(size: 1.0))
+    footprint: uploadMeshData(renderer: renderer, meshData: makeBox(size: 1.0))
+  }
+  spawnCharacter(world: world, feet: spawnFeet, meshes: meshes)
+  log(
+    "[level] {levelPath}: {read.items.length} items, {componentCount(this: world.colliders)} colliders ({refused} refused), {componentCount(
+      this: world.markers
+    )} markers; the character at marker spawn ({spawnFeet.x}, {spawnFeet.y}, {spawnFeet.z})"
+  )
+  let graphStatus: Int = compileDeferred(renderer: renderer)
+  if graphStatus is not 0 {
+    log("deferred graph invalid: {statusName(status: graphStatus)}")
+    ret 1
+  }
+  var camera: Camera3d = defaultCamera3d()
+  camera.farZ = 400.0
+  var light: Light3d = defaultLight3d()
+  light.clearColor = Vec3 { x: 0.55, y: 0.72, z: 0.9 }
+  light.sunDir = Vec3.vnorm(a: Vec3 { x: -0.5, y: 0.35, z: -0.8 })
+  let autowalk: Bool = Sys.getEnv(name: "RAE_LEVEL_AUTOWALK").length() > 0
+  let route: List(RouteLeg) = walkRoute()
+  var cameraYaw: Float = 0.0
+  let startTime: Float64 = Gpu2d.nowSeconds()
+  var lastFrame: Float64 = startTime
+  loop not Gpu2d.pollClose() {
+    let now: Float64 = Gpu2d.nowSeconds()
+    let deltaTime: Float = Math.clamp(val: (now - lastFrame) as Float, low: 0.0, high: 0.1)
+    lastFrame = now
+    world3dPrevTransformSystem(world: world.scene)
+    cameraYaw = cameraYaw + cameraTurn() * cameraTurnRate * deltaTime
+    if autowalk {
+      let leg: Int = routeLegAt(route: route, seconds: (now - startTime) as Float)
+      let drive: RouteDrive = routeDrive(route: route, leg: leg, feet: characterFeet(world: world))
+      driveCharacter(world: world, intent: drive.intent, yaw: drive.yaw)
+    } else {
+      driveCharacter(world: world, intent: keyIntent(), yaw: cameraYaw)
+    }
+    let taken: Int = stepLevel(world: world, frameTime: deltaTime)
+    updateFootprints(world: world)
+    placeCharacterDrawing(world: world)
+    let feet: Vec3 = characterFeet(world: world)
+    camera.target = Vec3 { x: feet.x, y: feet.y, z: feet.z + 1.2 }
+    camera.position = Vec3 {
+      x: feet.x + Math.sin(x: cameraYaw) * cameraDistance
+      y: feet.y - Math.cos(x: cameraYaw) * cameraDistance
+      z: feet.z + cameraHeight
+    }
+    if Gpu2d.renderGate() {
+      renderLevelFrame(
+        renderer: renderer
+        scene: world.scene
+        camera: camera
+        light: light
+      )
+    }
+  }
+  destroyPhysics(physics: world.physics)
+  shutdownDeferredRenderer(renderer: renderer)
+  Gbuffer.shutdownAll()
+  Gpu2d.closeWindow()
+  ret 0
+}
+
+func uploadMeshData(renderer: mod DeferredRenderer, meshData: view MeshData) ret MeshHandle {
+  ret uploadMesh(
+    renderer: renderer
+    verts: meshData.verts
+    vertCount: meshData.vertCount
+    indices: meshData.indices
+  )
+}
+
+func main() ret Int {
+  if Sys.getEnv(name: "RAE_LEVEL_SELFTEST").length() > 0 {
+    ret selfTest()
+  }
+  ret runWindowed()
+}

@@ -50,7 +50,9 @@ reserved by Rae's mover queries.
 square); `layMesh` puts each drawn mesh's triangles into it as the surface its
 material stands for (`surfaceOfMaterialName`); every cell keeps the highest
 triangle over its centre (a road over the terrain under it) and that height.
-Surfaces are the app's own codes. `surfaceGrassField` is one value per cell for
+Surfaces are the app's own codes; `surfaceCodeAt` and `surfaceHeightAt` read
+the surface and the height at a point (a footprint lies on the drawn path,
+not on the grass collider under it). `surfaceGrassField` is one value per cell for
 GPU grass (`GrassCompute.grassSetSurfaceField`): the height where the cell is the
 grass surface, none elsewhere.
 
@@ -60,3 +62,15 @@ grass surface, none elsewhere.
 Blender: a 10 m grass plate and its collider, a 2 m stone cube under a lifted
 parent and its collider, and `marker_test` authored as a matrix. Fixture
 `1208_gltf_level` reads it.
+
+## A level to walk round
+
+`python3 tools/levels/exportWalkLevel.py <out.glb>` writes a richer one: a 40 m
+grass field with a sand path up its middle to a wall, two low side walls, a
+stone ramp up to a platform, a stack of crates, every solid piece with its
+`_collision` twin (the path is paint, drawn only), `marker_spawn` and
+`marker_goal`. Example `144_gltf_level` loads it: the meshes drawn in their
+base colours as World3d instances, the colliders, a Box3D mover spawned at
+`marker_spawn`, and footprints shaded by the surface map. Its
+`RAE_LEVEL_SELFTEST=1` walks the character into the wall and up the ramp
+headless, and the example gate checks it.
