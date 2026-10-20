@@ -32,10 +32,14 @@ With `let outer: Outer = ...`:
 | writing a member or element | `outer.inner.value = 5`, `outer.items[i] = 2` |
 | passing it, or a part of it, to a `mod` parameter | `bump(inner: outer.inner)` with `func bump(inner: mod Inner)` |
 | calling a mutating method on it, or on a part of it | `numbers.add(value: 3)` on `let numbers: List(Int)` |
+| binding a `mod` alias to it, or to a part of it (also `if let`) | `let part: mod Inner => outer.inner`, `if let found: mod Inner => maybeInner` |
+| a `mod` collection loop over it, or over a part of it | `loop let item: mod Int in outer.items` |
 
 Each is a compile error: `cannot modify 'outer.inner.value': 'outer' is a 'let',
 which is frozen (docs/let-is-frozen.md); declare it 'var'` (and `cannot pass
-'…' to 'mod' parameter '…'`, `cannot call mutating method '…' on '…'`).
+'…' to 'mod' parameter '…'`, `cannot call mutating method '…' on '…'`,
+`cannot bind 'mod' alias '…' to '…'`, `cannot loop 'mod' over '…'`; the last
+two since compiler 0.2.94, fixture 1170).
 
 A method call counts as mutating when the method it binds to takes
 `this: mod T`. A generic container method (`List.add`) is bound by the C
