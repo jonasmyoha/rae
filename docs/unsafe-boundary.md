@@ -89,9 +89,10 @@ owned; a raw handle obtained inside `unsafe` carries no identity.
 ## Remaining platform constraints
 
 - No global GPU slot table is left: the legacy blocking `lib/GpuTiming.rae`
-  (the raw-encoder capture harness of checks/gpuTiming) holds its query set
+  (the raw-encoder capture harness of checks/gpuTiming) held its query set
   and buffers as fields of its owner since #923 (`g_gt_handles` /
-  `rae_gt_set/get` are gone); the manager's nonblocking `gpu/GpuTiming` is the
+  `rae_gt_set/get` are gone), and has since been folded into and replaced
+  by the manager's nonblocking `gpu/GpuTiming`, the
   timing every renderer capture uses. Every other slot table (water, grass,
   sprites) went with #873/#874.
 - The 3D renderer's C-owned frame state and the 2D renderer's C pipelines are

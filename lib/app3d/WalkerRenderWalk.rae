@@ -74,6 +74,7 @@ open app3d/WalkerInput
 open app3d/WalkerRender
 open app3d/WalkerSplash
 open RendererForward
+open RendererPassTiming
 
 # One frame of a character's clock (app3d/Characters stepCharacterClock): its
 # clip at the walker's rate (walkFast is the walk clip at 1.6x)
@@ -452,5 +453,8 @@ func renderWalkerApp(
     Profile.zoneEnd(profiler: profiler, name: (tag as RenderTag).toString())
   }
   gpuPassTimingEnd(renderer: renderSystem.renderer)
+  # The last read-back frame's per-pass GPU times, into a profiler capture
+  # (gpu.<pass> counters; only while RAE_PROFILE captures)
+  publishGpuPassCounters(renderer: renderSystem.renderer, profiler: profiler)
   capFrameSleep(drs: renderSystem.drs, frameStartSec: now)
 }
