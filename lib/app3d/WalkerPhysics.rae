@@ -115,6 +115,11 @@ type WalkerPhysics {
 # field of `fieldCount` x `fieldCount` points (231 cover an island of radius
 # 150 m), made again round the walker when it has gone `followDistance` from
 # the field's centre (0: never)
+# The category of the walker's ground and loose cubes: everything collides
+# with them, but they are not walls to the camera; the trees and rocks keep
+# every category, so the camera pulls in front of them
+const walkerWorldCategory: UInt64 = 1
+
 func createWalkerPhysics(
   biome: view BiomeConfig
   groundZ: view Float
@@ -192,6 +197,9 @@ func addGroundAround(physicsSystem: mod WalkerPhysics, centre: view Vec3) ret Bo
   }
   var groundDef: ShapeDef = defaultShapeDef(lengthUnitsPerMeter: 1.0)
   groundDef.baseMaterial.friction = 0.8
+  # Not a wall to the camera (app3d/CameraObstruction): it stays over the
+  # ground by OrbitGround instead
+  groundDef.filter.categoryBits = walkerWorldCategory
   if let shapeId: ShapeId = addVenueHeightField(
     physics: physicsSystem.physics
     heights: heights
@@ -260,6 +268,8 @@ func spawnPhysicsCube(
   var shapeDef: ShapeDef = defaultShapeDef(lengthUnitsPerMeter: 1.0)
   shapeDef.density = 200.0
   shapeDef.baseMaterial.friction = 0.6
+  # A loose cube does not stop the camera (app3d/CameraObstruction)
+  shapeDef.filter.categoryBits = walkerWorldCategory
   let shapeId: ShapeId = addBoxCollider(
     physics: physicsSystem.physics
     rigidBodies: physicsSystem.rigidBodies
