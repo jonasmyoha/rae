@@ -1,0 +1,83 @@
+# GrassBlockField: the grass's surface field as a base field (a level's
+# surface map) and after it a block per tile of a grid of streamed tiles,
+# each made once as its tile loads and waiting for the next flush; and the
+# layout constants lib/grass_surface_field.wgsl reads it by.
+open core/Core
+open GrassBlockField
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func constantOf(constants: view List(ShaderConstant), name: view String) ret Float {
+  loop let constant: view ShaderConstant in constants {
+    if constant.name is name {
+      ret constant.value
+    }
+  }
+  ret -1.0
+}
+
+func main() {
+  # A grid of 3 x 2 tiles of 4 x 4 cells, 2 m, from (100, -50)
+  var blocks: GrassBlockField = createGrassBlockField(
+    originX: 100.0
+    originY: -50.0
+    cellSize: 2.0
+    tileCells: 4
+    tileColumns: 3
+    tileRows: 2
+  )
+  check(label: "six blocks of sixteen cells", ok: grassBlocksLength(blocks: blocks) is 96)
+  var corner: Int = -1
+  if let block: Int = grassBlockIndex(blocks: blocks, column: 2, row: 1) {
+    corner = block
+  }
+  check(
+    label: "a tile's block row by row; none outside the grid"
+    ok: corner is 5 and grassBlockIndex(blocks: blocks, column: 3, row: 0) is none and grassBlockIndex(
+      blocks: blocks
+      column: 0
+      row: -1
+    ) is none
+  )
+  var base: List(Float) = List.create(Float, cap: 4)
+  loop var i: Int = 0, i < 4, ++i {
+    base.add(value: 7.0)
+  }
+  let field: List(Float) = grassFieldWithBlocks(blocks: blocks, base: own base)
+  check(
+    label: "the field is the base, then every block with no grass yet"
+    ok: field.length is 100 and field.copyAtDefault(index: 3) is 7.0 and field.copyAtDefault(
+      index: 4
+    ) is grassBlockNone and field.copyAtDefault(index: 99) is grassBlockNone
+  )
+  var values: List(Float) = List.create(Float, cap: 16)
+  loop var i: Int = 0, i < 16, ++i {
+    values.add(value: 2.5)
+  }
+  queueGrassBlock(blocks: blocks, block: corner, values: own values)
+  check(
+    label: "a block is made once, and waits for the flush"
+    ok: grassBlockMade(blocks: blocks, block: corner) and grassBlockMade(blocks: blocks, block: 0) is false and blocks.pending.length is 1
+  )
+  let constants: List(ShaderConstant) = grassFieldConstants(
+    blocks: blocks
+    baseOriginX: -4.0
+    baseOriginY: -4.0
+    baseCell: 2.0
+    baseColumns: 2
+    baseRows: 2
+  )
+  check(
+    label: "the shader's layout: the base's and the blocks' after it"
+    ok: constants.length is 12 and constantOf(constants: constants, name: "RAE_BLOCK_FIELD_OFFSET") is 4.0 and constantOf(
+      constants: constants
+      name: "RAE_BLOCK_FIELD_TILE_COLUMNS"
+    ) is 3.0 and constantOf(constants: constants, name: "RAE_SURFACE_FIELD_ORIGIN_X") is -4.0
+  )
+}
