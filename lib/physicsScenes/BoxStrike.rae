@@ -1,0 +1,111 @@
+# physicsScenes/BoxStrike — a body striking a character: a box (a car's
+# body, seen from above) against a character's circle on the ground. Box3D's
+# movers are not bodies in the world, so a car would drive through them;
+# after the movers move, each character a striker's box touches is knocked
+# over if the body drives into it fast enough, or it runs into the body,
+# otherwise shoved out of its way (physicsScenes/box3d/VehicleStrike runs
+# it). Pure over plain values, so tested in a fixture.
+import Math
+import Vec3
+
+# A body that knocks characters over: its box (half extents in metres along
+# its forward axis, across it and up), centred on the body, which of the
+# body's local axes points forward and which up, and how it strikes
+type Striker {
+  halfLength: Float
+  halfWidth: Float
+  halfHeight: Float
+  localForward: Vec3
+  localUp: Vec3
+  # How fast the body itself has to push into a character to knock it over
+  # (m/s): at walking pace it shoves, at a jog it floors you
+  knockdownSpeed: Float = 2.0
+  # How fast a character has to run into a standing or creeping body to fall
+  # over it (m/s): walking into a parked car, even briskly, only stops you
+  runIntoSpeed: Float = 5.0
+  # How a struck character is thrown: the body's velocity, plus this much
+  # more away from it and up (m/s)
+  throwOut: Float = 1.5
+  throwUp: Float = 1.5
+  # How far past a character's capsule the box reaches (m): a mover keeps its
+  # capsule just clear of the chassis' collider
+  reach: Float = 0.1
+}
+
+# A character's circle against a box: touching or not, the way out of the box
+# (a unit vector on the ground) and how far along it the character has to go
+type BoxContact {
+  touching: Bool
+  normalX: Float
+  normalY: Float
+  depth: Float
+}
+
+func signOfFloat(value: view Float) ret Float {
+  if value < 0.0 {
+    ret 0.0 - 1.0
+  }
+  ret 1.0
+}
+
+# The box at (`centerX`, `centerY`), its length along (`forwardX`, `forwardY`)
+# (a unit vector), against the circle of `radius` at (`pointX`, `pointY`)
+func boxCircleContact(
+  centerX: view Float
+  centerY: view Float
+  forwardX: view Float
+  forwardY: view Float
+  halfLength: view Float
+  halfWidth: view Float
+  pointX: view Float
+  pointY: view Float
+  radius: view Float
+) ret BoxContact {
+  let dx: Float = pointX - centerX
+  let dy: Float = pointY - centerY
+  # In the box's frame: along its length, and to its left
+  let along: Float = dx * forwardX + dy * forwardY
+  let side: Float = dy * forwardX - dx * forwardY
+  var normalAlong: Float = 0.0
+  var normalSide: Float = 0.0
+  var depth: Float = 0.0
+  if Math.abs(value: along) <= halfLength and Math.abs(value: side) <= halfWidth {
+    # Inside: out through the nearest side
+    let outAlong: Float = halfLength - Math.abs(value: along)
+    let outSide: Float = halfWidth - Math.abs(value: side)
+    if outAlong < outSide {
+      normalAlong = signOfFloat(value: along)
+      depth = outAlong + radius
+    } else {
+      normalSide = signOfFloat(value: side)
+      depth = outSide + radius
+    }
+  } else {
+    let pastAlong: Float = along - Math.max(
+      a: 0.0 - halfLength
+      b: Math.min(a: halfLength, b: along)
+    )
+    let pastSide: Float = side - Math.max(a: 0.0 - halfWidth, b: Math.min(a: halfWidth, b: side))
+    let distance: Float = Math.sqrt(x: pastAlong * pastAlong + pastSide * pastSide)
+    if distance >= radius {
+      ret BoxContact { touching: false, normalX: 0.0, normalY: 0.0, depth: 0.0 }
+    }
+    normalAlong = pastAlong / distance
+    normalSide = pastSide / distance
+    depth = radius - distance
+  }
+  ret BoxContact {
+    touching: true
+    normalX: normalAlong * forwardX - normalSide * forwardY
+    normalY: normalAlong * forwardY + normalSide * forwardX
+    depth: depth
+  }
+}
+
+# Does `striker` knock a character over? `push` is how fast the body itself
+# moves into the character (m/s, its velocity along the contact normal),
+# `closingSpeed` how fast the two close (the body's push and the character's
+# own walk into it). Walking into it never floors anyone.
+func strikeKnocks(striker: view Striker, push: view Float, closingSpeed: view Float) ret Bool {
+  ret push >= striker.knockdownSpeed or closingSpeed >= striker.runIntoSpeed
+}

@@ -1,0 +1,225 @@
+# physicsScenes/box3d/ArcadeDrive — the system that drives every arcade car
+# (physicsScenes/ArcadeVehicle's rules): an ArcadeVehicle component on the
+# chassis entity (the car it was built from, its wheel joints, its tuning and
+# its pedal state) and the ArcadeControl the app writes each frame (the
+# stick, whether someone drives, how high it is over the ground). Each frame
+# driveArcadeVehicles turns the stick into pedals (brakes, then reverse),
+# drives the wheels (driveVehicleBodies), holds the wheels still while
+# braking, and, with someone at the wheel and the car on the ground, eases
+# its yaw rate to the one its steered front wheels ask for and its slide out.
+import Math
+import Quat
+open Vec3
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Transform
+open physicsScenes/VehicleTypes
+open physicsScenes/VehicleLibrary
+open physicsScenes/ArcadeVehicle
+open physicsScenes/box3d/VehicleSpawn
+open box3d/ecs/PhysicsTypes
+open box3d/ecs/Physics
+open box3d/ecs/PhysicsComponents
+open box3d/ecs/PhysicsQueries
+open box3d/ecs/PhysicsJoints
+
+# An arcade car, on its chassis entity
+type ArcadeVehicle {
+  car: VehicleDescription
+  # Its wheels' joints, in `car.wheels` order
+  wheelJoints: List(JointId)
+  tuning: ArcadeTuning
+  # In reverse, and how long it has stood still (arcadePedals)
+  reverseGear: Bool
+  stoppedSeconds: Float
+}
+
+# What the app says about an arcade car this frame
+type ArcadeControl {
+  # The stick (-1 .. 1): across steers (right positive), up and down are the
+  # pedals and the gear
+  stickX: Float
+  stickY: Float
+  # Someone drives with the stick this frame (else no throttle, no brakes)
+  pedals: Bool
+  # Someone sits at the wheel (the assist works)
+  hasDriver: Bool
+  # The chassis' centre over the ground under it (m); far up when unknown
+  heightOverGround: Float = 1000.0
+}
+
+# Which way the chassis points (its local +x), in the world
+func chassisForward(rotation: view Quat) ret Vec3 {
+  ret Quat.rotate(q: rotation, v: Vec3.create(x: 1.0, y: 0.0, z: 0.0))
+}
+
+# Every arcade car with a control, one frame
+func driveArcadeVehicles(
+  physics: mod Physics
+  rigidBodies: mod ComponentTable(RigidBody)
+  transforms: view ComponentTable(Transform3D)
+  vehicles: mod ComponentTable(ArcadeVehicle)
+  controls: view ComponentTable(ArcadeControl)
+  deltaTime: view Float
+) {
+  loop var i: Int = 0, i < componentCount(this: vehicles), ++i {
+    let chassisId: EntityId = componentEntityAt(this: vehicles, i: i)
+    if componentHas(this: controls, entityId: chassisId) and componentHas(
+      this: transforms
+      entityId: chassisId
+    ) {
+      stepArcadeVehicle(
+        physics: physics
+        rigidBodies: rigidBodies
+        vehicle: componentMod(this: vehicles, entityId: chassisId)
+        chassisId: chassisId
+        pose: componentView(this: transforms, entityId: chassisId)
+        control: componentView(this: controls, entityId: chassisId)
+        deltaTime: deltaTime
+      )
+    }
+  }
+}
+
+# One car, one frame
+func stepArcadeVehicle(
+  physics: mod Physics
+  rigidBodies: mod ComponentTable(RigidBody)
+  vehicle: mod ArcadeVehicle
+  chassisId: view EntityId
+  pose: view Transform3D
+  control: view ArcadeControl
+  deltaTime: view Float
+) {
+  var command: VehicleCommand = { throttle: 0.0, steer: 0.0 }
+  var braking: Bool = false
+  if control.pedals {
+    let velocity: Vec3 = entityLinearVelocity(
+      physics: physics
+      rigidBodies: rigidBodies
+      entityId: chassisId
+    )
+    # Up drives; down brakes, and backs up only once the car has stopped
+    let pedals: ArcadePedals = arcadePedals(
+      stick: Math.max(a: 0.0 - 1.0, b: Math.min(a: 1.0, b: control.stickY))
+      speed: forwardSpeed(velocity: velocity, chassisRotation: pose.rotation)
+      reverseGear: vehicle.reverseGear
+      stoppedSeconds: vehicle.stoppedSeconds
+      deltaTime: deltaTime
+      tuning: vehicle.tuning
+    )
+    vehicle.reverseGear = pedals.reverseGear
+    vehicle.stoppedSeconds = pedals.stoppedSeconds
+    braking = pedals.braking
+    command = VehicleCommand {
+      throttle: pedals.throttle
+      steer: 0.0 - Math.max(a: 0.0 - 1.0, b: Math.min(a: 1.0, b: control.stickX))
+    }
+  }
+  driveVehicleBodies(
+    physics: physics
+    rigidBodies: rigidBodies
+    chassisId: chassisId
+    wheelJoints: vehicle.wheelJoints
+    car: vehicle.car
+    command: command
+    chassisRotation: pose.rotation
+    frameTime: deltaTime
+  )
+  # The brakes: every wheel held still by its motor, as hard as the tyres grip
+  if braking {
+    loop let jointId: view JointId in vehicle.wheelJoints {
+      setWheelSpinSpeed(physics: physics, jointId: jointId, speed: 0.0)
+      setWheelMaxSpinTorque(physics: physics, jointId: jointId, torque: vehicle.tuning.brakeTorque)
+    }
+  }
+  if control.hasDriver {
+    assistArcadeVehicle(
+      physics: physics
+      rigidBodies: rigidBodies
+      chassisId: chassisId
+      vehicle: vehicle
+      command: command
+      pose: pose
+      heightOverGround: control.heightOverGround
+      deltaTime: deltaTime
+    )
+  }
+}
+
+# The assist: the chassis' yaw rate eased to the one its steered front
+# wheels ask for (the car's own steering angle for this command and speed,
+# so what the wheels show is what it does), and its sliding sideways eased
+# out and carried on as speed; both at its centre of mass, so it turns hard
+# without tipping over. In the air it flies as it will.
+func assistArcadeVehicle(
+  physics: mod Physics
+  rigidBodies: mod ComponentTable(RigidBody)
+  chassisId: view EntityId
+  vehicle: view ArcadeVehicle
+  command: view VehicleCommand
+  pose: view Transform3D
+  heightOverGround: view Float
+  deltaTime: view Float
+) {
+  if arcadeAirborne(heightOverGround: heightOverGround, tuning: vehicle.tuning) {
+    ret
+  }
+  let forward: Vec3 = chassisForward(rotation: pose.rotation)
+  let flat: Float = Math.sqrt(x: forward.x * forward.x + forward.y * forward.y)
+  if flat < 0.5 {
+    ret
+  }
+  let forwardX: Float = forward.x / flat
+  let forwardY: Float = forward.y / flat
+  let linear: Vec3 = entityLinearVelocity(
+    physics: physics
+    rigidBodies: rigidBodies
+    entityId: chassisId
+  )
+  let angular: Vec3 = entityAngularVelocity(
+    physics: physics
+    rigidBodies: rigidBodies
+    entityId: chassisId
+  )
+  let speed: Float = linear.x * forwardX + linear.y * forwardY
+  # Sideways: along the car's right, (forwardY, -forwardX)
+  let across: Float = linear.x * forwardY - linear.y * forwardX
+  let steering: Float = wheelTargets(car: vehicle.car, command: command, speed: speed).copyAtDefault(
+    index: 0
+  ).steeringAngle
+  let share: Float = arcadeAssistShare(speed: speed, tuning: vehicle.tuning)
+  let yawRate: Float = easeToward(
+    current: angular.z
+    target: arcadeYawRate(
+      speed: speed
+      steeringAngle: steering
+      wheelbase: vehicle.tuning.wheelbase
+    )
+    rate: vehicle.tuning.yawAssistRate * share
+    deltaTime: deltaTime
+  )
+  # The slide eased out is turned into speed along the car, not lost: grip
+  # carries it round the turn at the speed it came in with
+  let flatVelocity: FlatVelocity = gripVelocity(
+    along: speed
+    across: across
+    keptAcross: easeToward(
+      current: across
+      target: 0.0
+      rate: vehicle.tuning.gripAssistRate * share
+      deltaTime: deltaTime
+    )
+  )
+  setEntityVelocities(
+    physics: physics
+    rigidBodies: rigidBodies
+    entityId: chassisId
+    linear: Vec3.create(
+      x: forwardX * flatVelocity.along + forwardY * flatVelocity.across
+      y: forwardY * flatVelocity.along - forwardX * flatVelocity.across
+      z: linear.z
+    )
+    angular: Vec3.create(x: angular.x, y: angular.y, z: yawRate)
+  )
+}

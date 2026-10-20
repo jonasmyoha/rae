@@ -1,0 +1,28 @@
+# app3d/CameraChase — a chase camera behind a vehicle: the rig's yaw turns
+# toward the vehicle's heading while it drives forward, the short way
+# round; stopped or reversing it stays where the player left it.
+import Math
+open app3d/CharacterController
+
+# How fast the camera swings behind (1/s), and the speed (m/s) from which it
+# follows at all
+type ChaseTuning {
+  rate: Float = 2.5
+  fromSpeed: Float = 1.0
+}
+
+# The camera's yaw a frame on, toward `heading` (a character heading, as the
+# camera's yaw is) while the vehicle goes `speed` m/s forward
+func chaseYaw(
+  yaw: view Float
+  heading: view Float
+  speed: view Float
+  deltaTime: view Float
+  tuning: view ChaseTuning
+) ret Float {
+  if speed < tuning.fromSpeed {
+    ret yaw
+  }
+  let gap: Float = wrapCharacterAngle(angle: heading - yaw)
+  ret yaw + gap * (1.0 - Math.exp(x: 0.0 - tuning.rate * deltaTime))
+}
