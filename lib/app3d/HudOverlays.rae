@@ -1,6 +1,6 @@
-# app3d/HudOverlays — the on-screen overlays an app draws in code over its
-# scene UI: the touch joystick (with the camera's touch split and the OS safe
-# area), the log strip and the debug readout, and hiding the camera bar's
+# app3d/HudOverlays — the touch controls' frame step (the scene's touch stick
+# and the camera's touch split), the overlays an app draws in code over its
+# scene UI (the log strip, the debug readout), and hiding the camera bar's
 # smoothing toggles. Used by the walker examples (136, 137, 143) and by apps
 # with their own shell.
 import Gpu2d
@@ -13,24 +13,46 @@ open ui/inputSystem/InputSystem
 open ui/LogOverlay
 open ui/DebugOverlay
 open ui/renderSystem/RenderSystem
-open ui/VirtualJoystick
+open ui/touchStickSystem/TouchStickSystem
+open ui/Transform
+open ui/visualBoundsSystem/VisualBoundsSystem
 open app3d/CameraRig
 open ui/safeAreaSystem/SafeAreaSystem
 open Gpu2dCanvas
 open ui/UiSystems
 
-# Update the touch stick AND tell the camera rig to exclude its region, so on a
-# phone one finger drives the joystick while another rotates the camera (#526).
+# The touch stick (lib/ui/touchStickSystem: a TouchStick node in the scene,
+# shown by its touch frame) for this frame, and the camera rig told to leave
+# its zone and its finger alone, so on a phone one finger drives the stick
+# while another turns the camera (#526). When the knob moved, the transform
+# pass runs so it is drawn where it is. The stick `stickNodeId`'s state: its
+# value for movement, `active` while a finger or the mouse holds it.
 func updateTouchControls(
   rig: mod CameraRig
-  moveStick: mod VirtualJoystick
-  enabled: view Bool
-) ret Bool {
-  # (The screen's safe area is the layout pass's own step: lib/ui/safeAreaSystem
-  # feedSafeArea, run by runUiSystems.)
-  # The stick is GAME mode's: in EDITOR it is left alone and the camera gets
-  # every finger
-  if enabled is false {
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  res: view Gpu2dUi
+  stickNodeId: view String
+) ret TouchStickState {
+  if touchStickSystem(world: world, uiSystems: uiSystems) {
+    transformSystem(world: world, uiSystems: uiSystems)
+    visualBoundsSystem(world: world, uiSystems: uiSystems, res: res)
+  }
+  let stick: TouchStickState = touchStickStateOf(
+    world: world
+    uiSystems: uiSystems
+    nodeId: stickNodeId
+  )
+  if stick.shown {
+    setCameraTouch(
+      rig: rig
+      excludeId: stick.grabbedId
+      joystickActive: stick.active
+      zoneX: stick.centerX
+      zoneY: stick.centerY
+      zoneR: stick.zoneRadius
+    )
+  } else {
     setCameraTouch(
       rig: rig
       excludeId: -1
@@ -39,21 +61,8 @@ func updateTouchControls(
       zoneY: 0.0
       zoneR: -1.0
     )
-    ret false
   }
-  let active: Bool = updateVirtualJoystick(joy: moveStick)
-  # Hand the camera the joystick's exclusion zone (same radius the stick grabs
-  # with) + the owned finger id: a press inside the zone is the stick's, outside
-  # is the camera's, and each holds its finger for the whole drag.
-  setCameraTouch(
-    rig: rig
-    excludeId: moveStick.grabbedId
-    joystickActive: active
-    zoneX: moveStick.baseX
-    zoneY: moveStick.baseY
-    zoneR: zoneRadius(joy: moveStick)
-  )
-  ret active
+  ret stick
 }
 
 # Hide the camera bar's "Mouse"/"Keys" smoothing toggles — not needed, and they
@@ -69,13 +78,10 @@ func drawHudOverlays(
   gpuUi: view Gpu2dUi
   canvas: mod Gpu2dCanvas
   dbg: mod DebugOverlay
-  moveStick: view VirtualJoystick
   editor: view Bool
-  touchControls: view Bool
 ) {
-  # GAME mode: the touch stick when touch controls are shown (a phone, or the
-  # "..." menu's "Simulate mobile phone"); EDITOR: the log strip. The debug
-  # readout is both modes'.
+  # EDITOR: the log strip. The debug readout is both modes'. (The touch stick
+  # is a scene node, drawn with the rest of the UI.)
   if editor {
     drawLogOverlay(
       ov: logOverlay
@@ -84,8 +90,6 @@ func drawHudOverlays(
       screenW: windowExtentW()
       screenH: windowExtentH()
     )
-  } else if touchControls {
-    drawVirtualJoystick(joy: moveStick, canvas: canvas)
   }
   # Debug D last, so it is above everything else.
   drawDebugOverlay(
