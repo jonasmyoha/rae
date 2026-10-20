@@ -439,11 +439,19 @@ done:
     g_type_equal_depth--; return res;
 }
 
-bool is_concrete_type(const AstTypeRef* type) {
+// A type with no generic type parameter left in it. A parameter is spelled
+// as one capital letter (`T`, `K`); a one-letter name that a DECLARED type or
+// enum has (`type P { ... }`) is that type, not a parameter — `List(P)` was
+// taken for unresolved and never declared, and the C did not compile.
+bool is_concrete_type(const CompilerContext* ctx, const AstTypeRef* type) {
     if (!type) return true;
-    if (type->parts && !type->parts->next) { Str base = type->parts->text; if (base.len == 1 && base.data[0] >= 'A' && base.data[0] <= 'Z') return false; }
+    if (type->parts && !type->parts->next) {
+        Str base = type->parts->text;
+        if (base.len == 1 && base.data[0] >= 'A' && base.data[0] <= 'Z'
+            && !decl_index_find_type(ctx, base, false) && !decl_index_find_enum(ctx, base)) return false;
+    }
     const AstTypeRef* arg = type->generic_args;
-    while (arg) { if (!is_concrete_type(arg)) return false; arg = arg->next; }
+    while (arg) { if (!is_concrete_type(ctx, arg)) return false; arg = arg->next; }
     return true;
 }
 
@@ -451,7 +459,7 @@ void register_function_specialization(CompilerContext* ctx, const AstFuncDecl* d
     if (!decl || !concrete_args) return;
     for (const AstTypeRef* arg = concrete_args; arg; arg = arg->next) {
         if ((uintptr_t)arg->parts < 0x1000 && (uintptr_t)arg->parts != 0) return;
-        if (!is_concrete_type(arg)) return;
+        if (!is_concrete_type(ctx, arg)) return;
     }
     for (size_t i = 0; i < ctx->specialized_func_count; i++) {
         if (ctx->specialized_funcs[i].decl == decl) {
@@ -543,7 +551,7 @@ static bool generic_type_is_registered_twin(const AstTypeRef* other, const AstTy
 }
 
 void register_generic_type(CompilerContext* ctx, const AstTypeRef* type) {
-    if (!type || !is_concrete_type(type)) return;
+    if (!type || !is_concrete_type(ctx, type)) return;
     if ((uintptr_t)type < 0x1000) return;
     /* A `cap: N` value argument is not a type and has nothing to register. */
     if (type->is_value_arg) return;

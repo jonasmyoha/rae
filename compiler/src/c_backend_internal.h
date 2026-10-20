@@ -337,7 +337,7 @@ void register_decl(CompilerContext* ctx, const AstDecl* decl);
 #include "c_decl_index.h"
 void collect_decls_from_module(CompilerContext* ctx, const AstModule* module);
 bool type_refs_equal(const AstTypeRef* a, const AstTypeRef* b);
-bool is_concrete_type(const AstTypeRef* type);
+bool is_concrete_type(const CompilerContext* ctx, const AstTypeRef* type);
 
 // -- Expression / statement / call emission entry points --
 bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_prec, bool is_lvalue, bool suppress_deref);
