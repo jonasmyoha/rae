@@ -1,0 +1,100 @@
+# app3d/WalkerKnockTest — the walker's knockdown check (RAE_WALKER_PHYSICS_TEST=1,
+# after the physics checks): the hero tripped at 5 m/s falls as a ragdoll,
+# flies on and lands; the camera's follow moves over to its body; once the
+# body has come to rest it gets up where its hips lie, its mover back in
+# play and every bone's body gone. One [knocktest] line; true when all held.
+import Math
+import Vec3
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Transform
+open box3d/ecs/PhysicsComponents
+open app3d/CharacterController
+open app3d/Characters
+open app3d/KnockedDown
+open app3d/Ragdoll
+open app3d/CameraKnockdownFollow
+open app3d/WalkerWorld
+open app3d/WalkerPhysics
+open app3d/WalkerTerrain
+open app3d/WalkerKnockdown
+
+func runWalkerKnockTest(
+  physicsSystem: mod WalkerPhysics
+  world: mod WalkerWorld
+  characterSystem: mod CharacterSystem
+  heroEntityId: view EntityId
+) ret Bool {
+  let bodiesBefore: Int = componentCount(this: physicsSystem.rigidBodies)
+  let start: Vec3 = controllerOf(controllers: world.controllers, entityId: heroEntityId).position
+  let fell: Bool = tripCharacter(
+    physicsSystem: physicsSystem
+    world: world
+    characterSystem: characterSystem
+    entityId: heroEntityId
+    velocity: Vec3.create(x: 5.0, y: 0.0, z: 1.5)
+  )
+  let bones: Int = componentCount(this: physicsSystem.rigidBodies) - bodiesBefore
+  var follow: KnockdownFollow = createKnockdownFollow()
+  let step: Float = 1.0 / 60.0
+  var followedBody: Bool = false
+  var lastHips: Vec3 = start
+  var upAfter: Float = 0.0 - 1.0
+  loop var i: Int = 1, i <= 600 and upAfter < 0.0, ++i {
+    let steps: Int = stepPhysicsFrame(
+      physicsSystem: physicsSystem
+      transforms: world.transforms
+      controllers: world.controllers
+      bushes: bushSpots(propKinds: world.propKinds, transforms: world.transforms)
+      frameTime: step
+    )
+    let down: Bool = componentHas(this: physicsSystem.ragdolls, entityId: heroEntityId)
+    if down {
+      lastHips = ragdollHips(
+        ragdolls: physicsSystem.ragdolls
+        transforms: world.transforms
+        characterId: heroEntityId
+      )
+    }
+    let target: Vec3 = stepKnockdownFollow(
+      follow: follow
+      knockedDown: physicsSystem.knockedDown
+      transforms: world.transforms
+      controlled: heroEntityId
+      controllerTarget: start
+      deltaTime: step
+    )
+    if down and i is 60 {
+      followedBody = Math.abs(value: target.x - lastHips.x) < 0.01 and Math.abs(
+        value: target.y - lastHips.y
+      ) < 0.01
+    }
+    walkerKnockdownUpdate(
+      physicsSystem: physicsSystem
+      world: world
+      characterSystem: characterSystem
+      controlledEntityId: heroEntityId
+      wantsUp: true
+      deltaTime: step
+    )
+    if componentHas(this: physicsSystem.ragdolls, entityId: heroEntityId) is false {
+      upAfter = i.toFloat() * step
+    }
+  }
+  let standing: Vec3 = controllerOf(controllers: world.controllers, entityId: heroEntityId).position
+  let flew: Float = Math.sqrt(
+    x: (lastHips.x - start.x) * (lastHips.x - start.x) + (lastHips.y - start.y) * (lastHips.y - start.y)
+  )
+  let upWhereItLay: Bool = Math.abs(value: standing.x - lastHips.x) < 0.01 and Math.abs(
+    value: standing.y - lastHips.y
+  ) < 0.01
+  let cleared: Bool = componentCount(this: physicsSystem.rigidBodies) is bodiesBefore and componentHas(
+    this: physicsSystem.moverParked
+    entityId: heroEntityId
+  ) is false and componentHas(this: physicsSystem.knockedDown, entityId: heroEntityId) is false
+  let passed: Bool = fell and bones is 11 and flew > 1.0 and followedBody and upAfter > 0.0 and upAfter < getUpLatestSeconds and upWhereItLay and cleared
+  log(
+    "[knocktest] tripped at 5 m/s: fell={fell} as {bones} bodies, its hips {flew} m on, the camera on its body={followedBody}, up after {upAfter} s where its hips lay={upWhereItLay}, bodies and parking cleared={cleared}; passed={passed}"
+  )
+  ret passed
+}

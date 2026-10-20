@@ -70,6 +70,8 @@ open app3d/WalkerRender
 open app3d/WalkerState
 open app3d/NetSeam
 open app3d/CharacterBodies
+open app3d/CameraKnockdownFollow
+open app3d/WalkerKnockdown
 
 # The walker app: the system list (WalkerApp.rae's header has the convention)
 type WalkerApp {
@@ -254,6 +256,16 @@ func updateWalkerApp(app: mod WalkerApp) {
   )
   # The crowd's names over their heads (app3d/WalkerNames)
   updateCrowdNameLabels(world: app.world, groundZ: app.characterSystem.groundZ)
+  # Running into someone at a run trips the driven character into a ragdoll;
+  # whoever is down gets up where they landed (app3d/WalkerKnockdown)
+  walkerKnockdownUpdate(
+    physicsSystem: app.physicsSystem
+    world: app.world
+    characterSystem: app.characterSystem
+    controlledEntityId: controlledEntityId
+    wantsUp: intent.moveX is not 0.0 or intent.moveY is not 0.0 or intent.jump
+    deltaTime: deltaTime
+  )
   # Every character's model follows its controller whenever the physics moved
   # it (one can be pushed or fall while the player drives another), and its
   # clip plays slowed in the air
@@ -289,10 +301,14 @@ func updateWalkerApp(app: mod WalkerApp) {
       controllers: app.world.controllers
       controlled: app.world.controlled
     )
-    app.cameraSystem.camera.target = Vec3.create(
-      x: focusPos.x
-      y: focusPos.y
-      z: focusPos.z + characterFocusZ
+    # Or, while it lies knocked down, its body (app3d/CameraKnockdownFollow)
+    app.cameraSystem.camera.target = stepKnockdownFollow(
+      follow: app.cameraSystem.knockdownFollow
+      knockedDown: app.physicsSystem.knockedDown
+      transforms: app.world.transforms
+      controlled: controlledEntityId
+      controllerTarget: Vec3.create(x: focusPos.x, y: focusPos.y, z: focusPos.z + characterFocusZ)
+      deltaTime: deltaTime
     )
   }
   let followPos: Vec3 = controlledPosition(

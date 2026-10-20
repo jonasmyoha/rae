@@ -46,6 +46,10 @@ open box3d/Box3d
 open box3d/Box3dTypes
 open app3d/CharacterBodies
 open app3d/CharacterMovers
+open GltfSkin
+open app3d/KnockedDown
+open app3d/RagdollRig
+open app3d/Ragdoll
 
 const walkerPhysicsStep: Float = 1.0 / 60.0
 
@@ -82,6 +86,11 @@ type WalkerPhysics {
   # The mover system's components (app3d/CharacterMovers)
   moverDrives: ComponentTable(MoverDrive)
   moverParked: ComponentTable(MoverParked)
+  # Characters lying as ragdolls (app3d/Ragdoll on the Mixamo rig) and when
+  # they get up (app3d/KnockedDown; app3d/WalkerKnockdown)
+  ragdolls: ComponentTable(Ragdoll)
+  knockedDown: ComponentTable(KnockedDown)
+  ragdollRig: RagdollRig
   moverLimits: ComponentTable(MoverSpeedLimit)
   moverSteps: ComponentTable(MoverStep)
   cubes: ComponentTable(PhysicsCube)
@@ -125,6 +134,12 @@ func createWalkerPhysics(
     characters: ComponentTable.create(CharacterBody)
     moverDrives: ComponentTable.create(MoverDrive)
     moverParked: ComponentTable.create(MoverParked)
+    ragdolls: ComponentTable.create(Ragdoll)
+    knockedDown: ComponentTable.create(KnockedDown)
+    ragdollRig: createRagdollRig(
+      skeleton: emptySkeleton()
+      bones: mixamoRagdollBones(prefix: "mixamorig:")
+    )
     moverLimits: ComponentTable.create(MoverSpeedLimit)
     moverSteps: ComponentTable.create(MoverStep)
     cubes: ComponentTable.create(PhysicsCube)

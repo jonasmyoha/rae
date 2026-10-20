@@ -96,6 +96,10 @@ open RendererForward
 open Moon
 open Calendar
 open app3d/NetSeam
+open app3d/RagdollRig
+open app3d/CameraKnockdownFollow
+open app3d/WalkerKnockdown
+open app3d/WalkerKnockTest
 
 # The app's GPU manager (#873): with the sea, its three 256 cascades with
 # their mip chains, readbacks and surface (192, as the downstream game sizes
@@ -668,6 +672,7 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
         rigEntityId: rigLink.rigEntityId
         cameraEntityId: rigLink.cameraEntityId
         walkFollow: createWalkFollow()
+        knockdownFollow: createKnockdownFollow()
       }
       characterSystem: {
         leftFootNode: wadeFootNode(skeleton: sk, name: "mixamorig:LeftToeBase")
@@ -732,6 +737,21 @@ func runWalkerApp(settings: view WalkerAppSettings) ret Int {
   # the trunks, rocks and bushes, report and quit (app3d/WalkerSelfTest),
   # instead of the window loop. RAE_WALKER_SPLASH_TEST=1: the wading spray's
   # pose check (app3d/WalkerSplash), where there is a sea.
+  # The ragdoll's bones on the loaded skeleton (app3d/WalkerKnockdown)
+  app.physicsSystem.ragdollRig = createRagdollRig(
+    skeleton: app.characterSystem.skeleton
+    bones: mixamoRagdollBones(prefix: "mixamorig:")
+  )
+  # RAE_WALKER_TRIP=1 trips the hero at the start (for screenshots of a ragdoll)
+  if Sys.getEnv(name: "RAE_WALKER_TRIP") is "1" {
+    let tripped: Bool = tripCharacter(
+      physicsSystem: app.physicsSystem
+      world: app.world
+      characterSystem: app.characterSystem
+      entityId: rosterEntityAt(roster: app.players, index: 0)
+      velocity: Vec3.create(x: 3.0, y: 2.0, z: 1.5)
+    )
+  }
   let physicsTest: Bool = Sys.getEnv(name: "RAE_WALKER_PHYSICS_TEST").length() > 0
   let splashTest: Bool = Sys.getEnv(name: "RAE_WALKER_SPLASH_TEST").length() > 0
   var exitCode: Int = 0
@@ -753,6 +773,15 @@ func runWalkerApp(settings: view WalkerAppSettings) ret Int {
       pooledTrunks: app.settings.land is WalkerLand.forest
       heroEntityId: rosterEntityAt(roster: app.players, index: 0)
     )
+    # Then the knockdown: tripped, a ragdoll, up where it landed
+    if runWalkerKnockTest(
+      physicsSystem: app.physicsSystem
+      world: app.world
+      characterSystem: app.characterSystem
+      heroEntityId: rosterEntityAt(roster: app.players, index: 0)
+    ) is false {
+      exitCode = 1
+    }
   }
   loop not physicsTest and not splashTest and not Gpu2d.pollClose() {
     beginWalkerFrame(app: app)
