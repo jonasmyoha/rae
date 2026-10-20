@@ -419,7 +419,7 @@ up front to cut it into chunks. `start` and `end` are evaluated once.
 
 **What an iteration may write** (§2b, checked in sema,
 `sema_check_parallel_loop`): its own locals, and the element of its own index
-in a shared List — `xs.set(index: i, value: v)`, `if let x: mod T =>
+in a shared List — `xs.set(index: i, value: v)`, `if let x: mod T =
 xs.modAt(index: i)`, `xs[i] = v`. It may read anything in scope. The compiler
 rejects every other write two iterations could make to one place: assigning a
 shared variable or field, `++` on one, a call that takes a shared value as
@@ -488,7 +488,7 @@ chunk order —
 let chunks: Int = Parallel.workerCount() * 4
 # scratch: List(PairBuffer), one pre-sized slot per chunk
 parallelLoop var c: Int = 0, c < chunks, ++c {
-  if let buffer: mod PairBuffer => scratch.modAt(index: c) {
+  if let buffer: mod PairBuffer = scratch.modAt(index: c) {
     let start: Int = c * count / chunks
     let end: Int = (c + 1) * count / chunks
     loop var i: Int = start, i < end, ++i {

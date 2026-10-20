@@ -29,7 +29,7 @@ The reasons, each worked out below:
    runs sequentially.
 2. **Rae itself is not the obstacle: safe Rae runs a contact-solver kernel at
    C speed.** That holds when the list accessors are the narrowed forms
-   (`if let … = copyAt` to read, `if let slot: mod T => modAt` to write). The
+   (`if let … = copyAt` to read, `if let slot: mod T = modAt` to write). The
    shorter `copyAtDefault` / `set` spellings were 3.5–6× slower; compiler 0.1.99
    lowers them the same way for plain-data elements (§4). The obstacle is
    item 1: SIMD and threads.
@@ -146,7 +146,7 @@ the same checksum.
 | C, plain arrays | 3–4 ms |
 | Rae, `copyAtDefault(index:)` to read, `set(index:value:)` to write | 21–22 ms |
 | Rae, `if let … = copyAt(index:)` to read, `set(index:value:)` to write | 9–10 ms |
-| Rae, `if let … = copyAt(index:)` to read, `if let slot: mod Float => modAt(index:)` to write | 3–4 ms |
+| Rae, `if let … = copyAt(index:)` to read, `if let slot: mod Float = modAt(index:)` to write | 3–4 ms |
 | Rae, raw buffer access in `unsafe` (`rae_ext_rae_buf_get` / `rae_ext_rae_buf_set` on `.data`) | 3 ms |
 
 (The release profile, `--profile release`, gives the same numbers.)

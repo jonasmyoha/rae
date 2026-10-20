@@ -592,7 +592,7 @@ static void pp_print_global_let_decl(PrettyPrinter* pp, const AstDecl* decl) {
     pp_write_type(pp, decl->as.let_decl.type);
   }
   if (decl->as.let_decl.value) {
-    pp_write(pp, decl->as.let_decl.is_bind ? " => " : " = ");
+    pp_write(pp, " = ");  /* an alias binding too: its mode is in the type */
     pp_expr(pp, decl->as.let_decl.value);
   }
   pp_flush_trailing_comment(pp, decl->line, pp->lines_written);

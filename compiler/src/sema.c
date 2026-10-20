@@ -4543,6 +4543,11 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
             break;
         }
         case AST_STMT_LET: {
+            if (stmt->as.let_stmt.arrow_line > 0) {
+                diag_error(sema_diag_file(module), (int)stmt->as.let_stmt.arrow_line,
+                           (int)stmt->as.let_stmt.arrow_column, ALIAS_ARROW_MESSAGE);
+                module->had_error = true;
+            }
             TypeInfo* t = NULL;
             if (stmt->as.let_stmt.type) t = sema_resolve_type_internal(ctx, module, symbols, stmt->as.let_stmt.type);
             if (stmt->as.let_stmt.value) {
@@ -4652,7 +4657,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                 if (sema_call_returns_reference(module, stmt->as.let_stmt.value)) {
                     diag_error(sema_diag_file(module), (int)stmt->line, (int)stmt->column,
                                "this call returns a reference; copying what it refers to must be spelled out: "
-                               "bind it first ('let source: view T => ...'), then copy from the named binding");
+                               "bind it first ('let source: view T = ...'), then copy from the named binding");
                     module->had_error = true;
                 }
             }
@@ -4793,7 +4798,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                         diag_error(sema_diag_file(module), (int)stmt->line, (int)stmt->column,
                                    "this call returns a reference, and this function returns a value; "
                                    "copying what it refers to must be spelled out: bind it first "
-                                   "('let source: view T => ...'), then 'ret source'");
+                                   "('let source: view T = ...'), then 'ret source'");
                         module->had_error = true;
                     }
                     sema_check_returned_ref(ctx, module, symbols, arg->value,
@@ -4868,7 +4873,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                     if (!is_call_src) {
                         diag_error(sema_diag_file(module), (int)b->line, (int)b->column,
                                    "'if let <name>: T = ...' takes ownership, so it needs a call producing "
-                                   "'opt T'; narrowing a stored optional copies — bind 'view T =>' and copy "
+                                   "'opt T'; narrowing a stored optional copies — bind it as 'view T' and copy "
                                    "inside the branch if a copy is wanted (spec 4.2)");
                         module->had_error = true;
                     } else if (bsrc->kind == AST_EXPR_CALL && bsrc->decl_link
@@ -4878,7 +4883,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                         if (rt && rt->is_opt && (rt->is_view || rt->is_mod)) {
                             diag_error(sema_diag_file(module), (int)b->line, (int)b->column,
                                        "this call returns an optional REFERENCE; narrow it with "
-                                       "'if let <name>: view T => ...' (or mod) instead of taking ownership");
+                                       "'if let <name>: view T = ...' (or mod) instead of taking ownership");
                             module->had_error = true;
                         } else if (rt && !rt->is_opt) {
                             diag_error(sema_diag_file(module), (int)b->line, (int)b->column,
@@ -6568,7 +6573,7 @@ static void sema_check_unnarrowed_opt(AstModule* module, const AstExpr* expr) {
         Str name = receiver->as.ident;
         snprintf(message, sizeof message,
                  "'%.*s' is optional (opt %s%.*s) and may be none: check it before using the %s '%.*s' — "
-                 "`if let present: %s%.*s => %.*s { ... }`",
+                 "`if let present: %s%.*s = %.*s { ... }`",
                  (int)name.len, name.data, opt_mode, (int)type_name.len, type_name.data,
                  is_method ? "method" : "field", (int)used.len, used.data,
                  is_mod ? "mod " : "view ", (int)type_name.len, type_name.data,
@@ -6577,10 +6582,10 @@ static void sema_check_unnarrowed_opt(AstModule* module, const AstExpr* expr) {
         /* A produced optional (a call's result) is narrowed by taking it */
         snprintf(message, sizeof message,
                  "this value is optional (opt %s%.*s) and may be none: check it before using the %s '%.*s' — "
-                 "`if let present: %s%.*s %s <the call> { ... }`",
+                 "`if let present: %s%.*s = <the call> { ... }`",
                  opt_mode, (int)type_name.len, type_name.data,
                  is_method ? "method" : "field", (int)used.len, used.data,
-                 opt_mode, (int)type_name.len, type_name.data, reference ? "=>" : "=");
+                 opt_mode, (int)type_name.len, type_name.data);
     }
     diag_error(sema_diag_file(module), (int)expr->line, (int)expr->column, message);
     module->had_error = true;

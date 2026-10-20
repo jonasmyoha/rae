@@ -3,8 +3,8 @@
 # Current rae
 def v: Pos = { x: 5, y: 12 }
 def o: opt Pos = none
-def w: mod Pos => transform.modPosition()
-def r: view Pos => other.pos()
+def w: mod Pos = transform.modPosition()
+def r: view Pos = other.pos()
 
 # old rae has the issue that you can't see type from assignments. It should be a rule to always have type visible on either side of =
 if o is none {
@@ -39,8 +39,8 @@ def result: Int = v.some(that: o)
 # Trying out var, with mandatory val, not defaulting to val. Can get annoying with built-in types like val Int.
 var v: val Pos = { x: 5, y: 12 }
 var o: opt Pos = none
-var w: mod Pos => transform.position()
-var r: view Pos => other.pos()
+var w: mod Pos = transform.position()
+var r: view Pos = other.pos()
 
 # We should change to using type in either side of = like here. It is clear that it is a Pos.
 if o is none {
@@ -149,8 +149,8 @@ v: Pos = { x: 5, y: 12 }
 # or
 v: val Pos = { x: 5, y: 12 }
 o: opt Pos = none
-w: mod Pos => transform.position()
-r: view Pos => other.pos()
+w: mod Pos = transform.position()
+r: view Pos = other.pos()
 
 if o is none {
   o = Pos{ x: 5, y: 12 }
