@@ -1,0 +1,13 @@
+# docs/binding-modes-design.md §1, the binding table (2026-10-20): row 6.
+# `loop var x: mod T in list` is an error: an alias is never rebound, so it
+# has no `var` form (`loop var x: T in list` is the writable copy).
+type Particle {
+  x: Int
+}
+
+func main() {
+  var particles: List(Particle) = { { x: 1 } }
+  loop var particle: mod Particle in particles {
+    particle.x = 2
+  }
+}

@@ -1,0 +1,28 @@
+# docs/binding-modes-design.md §1, the binding table (2026-10-20): row 3, and the errors
+# every alias row shares. `let x: view T = place` is never rebound and never
+# written through: `x = v` and `x.f = v` are errors. A view of a temporary,
+# and a view handed on to `mod`, are errors too.
+type Particle {
+  x: Int
+}
+
+func makeParticle() ret Particle {
+  ret Particle { x: 0 }
+}
+
+func push(particle: mod Particle) {
+  particle.x = particle.x + 1
+}
+
+func main() {
+  var particle: Particle = { x: 1 }
+  var other: Particle = { x: 2 }
+  let reader: view Particle = particle
+  reader = other
+  reader.x = 3
+  let temporary: view Particle = makeParticle()
+  let writer: mod Particle = makeParticle()
+  push(particle: reader)
+  let promoted: mod Particle = reader
+  log("{reader.x} {temporary.x} {writer.x} {promoted.x}")
+}

@@ -3876,7 +3876,7 @@ static void reflect_expand_field_loop(CompilerContext* ctx, AstModule* module,
         REFLECT_FAIL(line, column, "field loop requires a 'let' binding");
     if (binding->as.let_stmt.is_var)
         REFLECT_FAIL(binding->line, binding->column,
-            "collection reference bindings are aliases; use 'let', not 'var'");
+            "aliases are bind-once; declare with 'let', not 'var'");
     AstTypeRef* pattern = binding->as.let_stmt.type;
     if (!pattern)
         REFLECT_FAIL(binding->line, binding->column,

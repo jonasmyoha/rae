@@ -16,8 +16,9 @@
 
 ## Assignment Semantics
 
-- `=` always copies values
-- `=>` transfers ownership
+- `=` with no mode copies the value; `=` with `view T` / `mod T` binds an
+  alias (docs/binding-modes-design.md §1)
+- `own x` transfers ownership
 - No implicit conversions
 
 ## Execution Modes

@@ -11,8 +11,10 @@ Tests blocking Stage 2 auto-drop re-enablement:
 We need to design and implement Rae ownership transfer semantics
 for auto-drop, **without breaking Rae's core rule**:
 
-- `=` means copy / value semantics.
-- `=>` means bind a `view` / `mod` reference.
+- `=` initializes a binding of the declared type: with no mode it is a copy
+  (value semantics); with `view T` / `mod T` it binds an alias. The mode
+  keyword marks aliasing everywhere, and nowhere else
+  (docs/binding-modes-design.md §1; the `=>` binder was removed 2026-10-20).
 - Plain `T` parameters are `val T`, meaning copied by value.
 - Ownership transfer must be explicit in syntax, **except** when
   calling a function whose parameter explicitly says `own T`.
@@ -316,8 +318,8 @@ move `ch` automatically.
 Re-enable auto-drop safely by making the compiler aware of
 explicit ownership transfer. Preserve Rae's readability rule:
 
-- `=`   copies
-- `=>`  borrows
+- `=` with no mode copies
+- `=` with `view T` / `mod T` borrows (an alias)
 - `own` transfers ownership
 
 ## What's already in place for Codex to build on

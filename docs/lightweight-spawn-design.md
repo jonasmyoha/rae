@@ -739,7 +739,7 @@ static int F__step(F__frame* __rae_frame);   /* 1: finished, 0: suspended */
   - inside a collection loop, a mainLoop or parallelLoop, a loop condition or
     a deferred block;
   - on the right of `and` / `or`, or in a match arm;
-  - while a statement temporary is alive, or with an alias local (`=>`, a
+  - while a statement temporary is alive, or with an alias local (a
     `view` / `mod` let) in scope;
   - a twin call with arguments that call or build things, or with an `Any`
     or `mod` result (a String, `opt` or `view` result is handed over since
@@ -1187,7 +1187,7 @@ threads; TSan, leak-checked). 32 tasks each make five checks:
 - read a range of it (`readFileTextRange`, `String`);
 - read a missing file (`opt String` none);
 - delete it;
-- and bind a `view String` result with `=>`.
+- and bind a `view String` result to an alias (`let text: view String = ...`).
 
 All 160 checks pass, and no task is a thread: one past the cap would print
 the runtime's notice.

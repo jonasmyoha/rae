@@ -1,0 +1,13 @@
+# docs/binding-modes-design.md §1, the binding table (2026-10-20): row 3.
+# `let x: view T = place` is an alias, not a copy: it reads the place as it
+# is now, after later writes to it.
+type Particle {
+  x: Int
+}
+
+func main() {
+  var particle: Particle = { x: 1 }
+  let reader: view Particle = particle
+  particle.x = 5
+  log("{reader.x}")
+}
