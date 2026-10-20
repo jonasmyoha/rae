@@ -74,6 +74,7 @@ open ui/renderSystem/RenderSystem
 open app3d/RenderScale
 open ui/UiSystems
 open app3d/WalkerCharacter
+open app3d/Characters
 open app3d/PlayerRoster
 open app3d/WalkerPhysics
 open app3d/WalkerWorld
@@ -231,10 +232,6 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
     }
     let basePartModel: Mat4 = transform3dToMatrix(t: partTransform)
     groundWalker(controller: characterController, groundZ: groundZ, biome: biome)
-    var partModel: Mat4 = walkerWorldModel(
-      baseModel: basePartModel
-      controller: characterController
-    )
 
     var light: Light3d = defaultLight3d()
     # #905/#921: the renderer owns the mesh + skin stores the walker parts,
@@ -327,7 +324,11 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
 
     let cloneCount: Int = walkerCrowdCount
     let firstPart: MeshHandle = meshHandle(id: firstPartId, generation: 1)
-    var characterClones: InstanceBatch = createInstanceBatch(mesh: firstPart, capacity: cloneCount)
+    # One skinned instance batch for every character, the hero's and the crowd's
+    var characterBatch: InstanceBatch = createInstanceBatch(
+      mesh: firstPart
+      capacity: 1 + cloneCount
+    )
     # The physics cubes: one unit box, scaled per cube (app3d/WalkerPhysics)
     let cubeMesh: MeshHandle = uploadMeshDataForTerrain(
       renderer: renderer
@@ -434,11 +435,10 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
       spawnX: characterController.position.x
       spawnY: characterController.position.y
     )
-    partModel = walkerWorldModel(baseModel: basePartModel, controller: characterController)
 
-    # #739: the hero is an entity carrying its ThirdPersonController + Transform3D.
-    # Its clip/animTime + motion-vector model stay on WalkerCharacters (hero-specific
-    # transitions); only the controller moves into the world.
+    # #739: the hero is an entity like any crowd member (app3d/Characters): its
+    # controller, transform, clip, transition and model are components; the
+    # Controlled tag says the player drives it.
     let heroEntityId: EntityId = walkerWorldAddEntity(world: walkerWorld)
     walkerWorldSetController(
       world: walkerWorld
@@ -458,6 +458,26 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
       groundZ: groundZ
       count: cloneCount
     )
+    walkerWorldSetAnim(
+      world: walkerWorld
+      entityId: heroEntityId
+      anim: AnimationState { clipIndex: clipIndex, animTime: 0.0, playbackScale: 1.0 }
+    )
+    addWalkerCharacterComponents(
+      world: walkerWorld
+      entityId: heroEntityId
+      skeleton: sk
+      basePartModel: basePartModel
+    )
+    loop let crowdEntityId: view EntityId in crowdEntities {
+      addWalkerCharacterComponents(
+        world: walkerWorld
+        entityId: crowdEntityId
+        skeleton: sk
+        basePartModel: basePartModel
+      )
+    }
+    setControlledCharacter(controlled: walkerWorld.controlled, entityId: heroEntityId)
     updateInfiniteTerrain(
       terrainSystem: terrainSystem
       renderer: renderer
@@ -659,29 +679,22 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
         cameraEntityId: rigLink.cameraEntityId
         walkFollow: createWalkFollow()
       }
-      walkerCharacters: {
+      characterSystem: {
         leftFootNode: wadeFootNode(skeleton: sk, name: "mixamorig:LeftToeBase")
         rightFootNode: wadeFootNode(skeleton: sk, name: "mixamorig:RightToeBase")
         skeleton: own sk
         idleClip: idleClip
         walkClip: walkClip
         runClip: runClip
+        jumpClip: runClip
+        runningJumpClip: runClip
         bindPose: bindPose
-        transitionFrom: bindPose
-        transitionElapsed: clipTransitionDuration
-        heroEntityId: heroEntityId
-        clipIndex: clipIndex
         playing: playing
         speed: speed
-        animTime: 0.0
         toon: toonShading
         basePartModel: basePartModel
-        model: partModel
-        prevModel: partModel
-        crowdEntities: own crowdEntities
-        crowdBatch: own characterClones
+        characterBatch: own characterBatch
         groundZ: groundZ
-        airborne: false
       }
       terrainSystem: own terrainSystem
       renderSystem: {
@@ -721,7 +734,7 @@ func runWalkerApp(settings: view WalkerAppSettings) ret Int {
       wadeSplash: wadeSplash
       cameraSystem: app.cameraSystem
       biome: app.biome
-      groundZ: app.walkerCharacters.groundZ
+      groundZ: app.characterSystem.groundZ
     )
   }
   Profile.maybeAutoStart(profiler: app.profiler)
@@ -736,7 +749,7 @@ func runWalkerApp(settings: view WalkerAppSettings) ret Int {
     exitCode = 1
     if let wadeSplash: mod WadeSplash => app.wadeSplash {
       exitCode = runSplashPoseTest(
-        walkerCharacters: app.walkerCharacters
+        characterSystem: app.characterSystem
         world: app.world
         wadeSplash: wadeSplash
       )
@@ -748,7 +761,7 @@ func runWalkerApp(settings: view WalkerAppSettings) ret Int {
       world: app.world
       forest: app.terrainSystem.forest
       pooledTrunks: app.settings.land is WalkerLand.forest
-      heroEntityId: app.walkerCharacters.heroEntityId
+      heroEntityId: rosterEntityAt(roster: app.players, index: 0)
     )
   }
   loop not physicsTest and not splashTest and not Gpu2d.pollClose() {
@@ -769,7 +782,7 @@ func runWalkerApp(settings: view WalkerAppSettings) ret Int {
         renderWalkerApp(
           uiSystems: app.inputSystem.uiSystems
           cameraSystem: app.cameraSystem
-          walkerCharacters: app.walkerCharacters
+          characterSystem: app.characterSystem
           frame: app.frame
           inputSystem: app.inputSystem
           renderSystem: app.renderSystem

@@ -21,21 +21,11 @@ open ecs/Hierarchy
 open ecs/hierarchySystem/HierarchySystem
 open app3d/CharacterController
 open app3d/WalkerCharacter
+open app3d/Characters
+open ecs/Tag
 open app3d/PlayerRoster
 open app3d/WalkerTerrain
 open app3d/WalkerPhysics
-
-# Per-entity animation clip + phase (#739). Replaces the CrowdMember.clipIndex /
-# animTime pair; each crowd (and hero) entity holds its own so members animate
-# independently.
-type AnimationState {
-  clipIndex: Int
-  animTime: Float
-  # The clip's playback speed on top of its own rate: 1, or slower while the
-  # character is in the air (there is no jump clip: a slowed run stride
-  # stands in for the leap)
-  playbackScale: Float = 1.0
-}
 
 # One skinned body-mesh part (#740): its uploaded mesh-handle id + surface
 # roughness. Replaces the parallel `partIds`/`partRough` Lists — each part is an
@@ -82,6 +72,11 @@ type WalkerWorld {
   # copy-out/mutate/set-back.
   controllers: ComponentTable(ThirdPersonController)
   animStates: ComponentTable(AnimationState)
+  # A character's clip transition, its render models, and the tag on the one
+  # the local player drives (app3d/Characters)
+  animTransitions: ComponentTable(AnimationTransition)
+  characterModels: ComponentTable(CharacterModel)
+  controlled: ComponentTable(Controlled)
   # #740: skinned body-mesh parts, one entity each.
   partRoughness: ComponentTable(PartRoughness)
   # The terrain's props are recycled entities (app3d/WalkerTerrain):
@@ -111,6 +106,9 @@ func createWalkerWorld() ret WalkerWorld {
     materials: ComponentTable.create(Material3D)
     controllers: ComponentTable.create(ThirdPersonController)
     animStates: ComponentTable.create(AnimationState)
+    animTransitions: ComponentTable.create(AnimationTransition)
+    characterModels: ComponentTable.create(CharacterModel)
+    controlled: ComponentTable.create(Controlled)
     partRoughness: ComponentTable.create(PartRoughness)
     propKinds: ComponentTable.create(TerrainProp)
     treeVariants: ComponentTable.create(TreeVariant)
@@ -214,7 +212,7 @@ func walkerWorldEntityCount(world: view WalkerWorld) ret Int {
 func controlledPosition(
   world: view WalkerWorld
   players: view PlayerRoster
-  walkerCharacters: view WalkerCharacters
+  characterSystem: view CharacterSystem
 ) ret Vec3 {
   ret controllerOf(world: world, entityId: rosterControlledEntityId(players: players)).position
 }
@@ -222,7 +220,7 @@ func controlledPosition(
 func controlledHeading(
   world: view WalkerWorld
   players: view PlayerRoster
-  walkerCharacters: view WalkerCharacters
+  characterSystem: view CharacterSystem
 ) ret Float {
   ret controllerOf(world: world, entityId: rosterControlledEntityId(players: players)).heading
 }
