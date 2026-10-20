@@ -65,6 +65,7 @@ open app3d/WalkerNet
 open app3d/WalkerTerrain
 open app3d/WalkerTerrainBodies
 open app3d/WalkerAppSetup
+open app3d/WalkerNames
 open app3d/WalkerRender
 open app3d/WalkerState
 open app3d/NetSeam
@@ -251,6 +252,8 @@ func updateWalkerApp(app: mod WalkerApp) {
     speed: characterSpeed(characters: app.physicsSystem.characters, entityId: controlledEntityId)
     grounded: grounded
   )
+  # The crowd's names over their heads (app3d/WalkerNames)
+  updateCrowdNameLabels(world: app.world, groundZ: app.characterSystem.groundZ)
   # Every character's model follows its controller whenever the physics moved
   # it (one can be pushed or fall while the player drives another), and its
   # clip plays slowed in the air

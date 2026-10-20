@@ -1,0 +1,153 @@
+# app3d/WorldLabel — text standing in the 3D world: a WorldLabel component on
+# an entity, drawn by app3d/WorldLabelDraw (drawWorldLabels) in the 2D overlay
+# pass for every entity carrying one. A label stands at a world point, or over
+# the entity it follows (its Transform3D position plus an offset); it is drawn
+# where that point lands on the screen, as tall as `height` metres would be
+# there (within `smallest` .. `largest` pt), fading out with its distance from
+# the eye and with the app's own `opacity`. Nothing hides it (no depth test).
+# An app adds an entity with a label and writes its text, place and opacity
+# from its own systems; this module is the component and its maths (pure, so
+# tested in a fixture).
+import Math
+import Vec3
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Transform
+
+type WorldLabel {
+  text: String
+  # The world point, or, following an entity, the offset from its position
+  point: Vec3
+  # The entity it stands over (none: `point` is in the world)
+  follows: EntityId = EntityId { index: -1, generation: 0 }
+  # How tall the text is in the world (m), and the sizes it is kept within on
+  # the screen (pt), so a far label still reads and a near one does not fill
+  # the view
+  height: Float
+  smallest: Float = 11.0
+  largest: Float = 30.0
+  # Full up to `fullUntil` m from the eye, gone at `goneAt` (goneAt 0: no
+  # fade with distance)
+  fullUntil: Float = 0.0
+  goneAt: Float = 0.0
+  # The app's own fade (0..1): an age, a distance from something else
+  opacity: Float = 1.0
+  # The text's colour, 0xRRGGBB; it is outlined and shadowed in dark
+  color: Int = 16777215
+}
+
+# A world point on the screen: x, y from the window's top left, 0..1 across
+# it; depth, how far in front of the eye along the view (m)
+type ScreenPoint {
+  x: Float
+  y: Float
+  depth: Float
+}
+
+# A point nearer the eye than this along the view is not drawn (m)
+const labelNearestDepth: Float = 0.3
+
+# Where `point` lands for a camera at `eye` looking at `target` (+Z up) with
+# a vertical field of view of `fovYDeg` over a window `aspect` wide per tall;
+# none behind the eye
+func projectToScreen(
+  eye: view Vec3
+  target: view Vec3
+  fovYDeg: view Float
+  aspect: view Float
+  point: view Vec3
+) ret opt ScreenPoint {
+  let forward: Vec3 = Vec3.vnorm(a: Vec3.vsub(a: target, b: eye))
+  let up: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
+  let right: Vec3 = Vec3.vnorm(a: Vec3.vcross(a: forward, b: up))
+  let cameraUp: Vec3 = Vec3.vcross(a: right, b: forward)
+  let toPoint: Vec3 = Vec3.vsub(a: point, b: eye)
+  let depth: Float = Vec3.vdot(a: toPoint, b: forward)
+  if depth < labelNearestDepth {
+    ret none
+  }
+  let tanHalf: Float = Math.tan(x: fovYDeg * 0.008726646259971648)
+  let ndcX: Float = Vec3.vdot(a: toPoint, b: right) / (depth * tanHalf * aspect)
+  let ndcY: Float = Vec3.vdot(a: toPoint, b: cameraUp) / (depth * tanHalf)
+  ret ScreenPoint { x: 0.5 + 0.5 * ndcX, y: 0.5 - 0.5 * ndcY, depth: depth }
+}
+
+# Is a projected point on the screen, with `margin` (0..1) of slack?
+func onScreen(point: view ScreenPoint, margin: view Float) ret Bool {
+  ret point.x >= 0.0 - margin and point.x <= 1.0 + margin and point.y >= 0.0 - margin and point.y <= 1.0 + margin
+}
+
+# How tall (pt) text `worldHeight` m tall is drawn `depth` m away on a window
+# `screenHeight` pt tall, kept within `smallest` .. `largest` pt
+func labelPixelSize(
+  worldHeight: view Float
+  depth: view Float
+  fovYDeg: view Float
+  screenHeight: view Float
+  smallest: view Float
+  largest: view Float
+) ret Float {
+  let tanHalf: Float = Math.tan(x: fovYDeg * 0.008726646259971648)
+  let size: Float = worldHeight * screenHeight / (2.0 * tanHalf * Math.max(
+    a: depth
+    b: labelNearestDepth
+  ))
+  ret Math.min(a: Math.max(a: size, b: smallest), b: largest)
+}
+
+# 1 up to `fullUntil` m away, fading to 0 at `goneAt`
+func labelFade(distance: view Float, fullUntil: view Float, goneAt: view Float) ret Float {
+  if distance <= fullUntil {
+    ret 1.0
+  }
+  if distance >= goneAt {
+    ret 0.0
+  }
+  ret 1.0 - (distance - fullUntil) / (goneAt - fullUntil)
+}
+
+# A label shown for a while (a notice): fades in over `fadeIn` s, stands
+# `hold` s, fades out over `fadeOut` s; its opacity `age` s after it was shown
+func noticeAlpha(
+  age: view Float
+  fadeIn: view Float
+  hold: view Float
+  fadeOut: view Float
+) ret Float {
+  if age < 0.0 {
+    ret 0.0
+  }
+  if age < fadeIn {
+    ret age / fadeIn
+  }
+  if age < fadeIn + hold {
+    ret 1.0
+  }
+  ret Math.max(a: 0.0, b: 1.0 - (age - fadeIn - hold) / fadeOut)
+}
+
+# Where `label` stands in the world: its point, or the followed entity's
+# position plus it (none when the followed entity has no Transform3D)
+func labelWorldPoint(
+  label: view WorldLabel
+  transforms: view ComponentTable(Transform3D)
+) ret opt Vec3 {
+  if isNone(this: label.follows) {
+    ret label.point
+  }
+  if componentHas(this: transforms, entityId: label.follows) is false {
+    ret none
+  }
+  let followed: view Transform3D = componentView(this: transforms, entityId: label.follows)
+  ret Vec3.vadd(a: followed.position, b: label.point)
+}
+
+# How opaque `label` is `distance` m from the eye: its distance fade times
+# the app's opacity
+func labelAlpha(label: view WorldLabel, distance: view Float) ret Float {
+  var fade: Float = 1.0
+  if label.goneAt > 0.0 {
+    fade = labelFade(distance: distance, fullUntil: label.fullUntil, goneAt: label.goneAt)
+  }
+  ret fade * label.opacity
+}

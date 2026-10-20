@@ -74,6 +74,7 @@ open app3d/WalkerRender
 open app3d/WalkerSplash
 open RendererForward
 open RendererPassTiming
+open app3d/WorldLabelDraw
 
 # One frame of a character's clock (app3d/Characters stepCharacterClock): its
 # clip at the walker's rate (walkFast is the walk clip at 1.6x)
@@ -429,6 +430,16 @@ func renderWalkerApp(
       }
       case RenderTag.uiOverlay {
         Gpu2d.beginFrameLoad(canvas: renderSystem.renderer.canvas)
+        # The crowd's names in the world (app3d/WalkerNames), under the HUD
+        if inputSystem.uiModes.editor is false {
+          drawWorldLabels(
+            labels: world.worldLabels
+            transforms: world.transforms
+            camera: cameraSystem.camera
+            canvas: renderSystem.renderer.canvas
+            font: inputSystem.gpuUi.textFont
+          )
+        }
         renderSystemGpu2d(
           world: inputSystem.world
           uiSystems: uiSystems

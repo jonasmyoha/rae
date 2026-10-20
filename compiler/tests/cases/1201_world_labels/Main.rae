@@ -1,0 +1,200 @@
+# app3d/WorldLabel: text standing in the 3D world. Where a world point lands
+# on the screen, how tall a label of a world height is drawn there, how it
+# fades with distance and as a notice with age, where a label following an
+# entity stands, and how opaque a label is (its distance fade times the
+# app's own opacity).
+import Math
+import Vec3
+import Quat
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Transform
+open app3d/WorldLabel
+
+func near(a: view Float, b: view Float) ret Bool {
+  ret Math.abs(value: a - b) < 0.0001
+}
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func main() {
+  let eye: Vec3 = Vec3.create(x: 0.0, y: -10.0, z: 0.0)
+  let target: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  var middle: ScreenPoint = { x: 0.0, y: 0.0, depth: 0.0 }
+  if let point: ScreenPoint = projectToScreen(
+    eye: eye
+    target: target
+    fovYDeg: 90.0
+    aspect: 2.0
+    point: target
+  ) {
+    middle = point
+  }
+  var above: ScreenPoint = { x: 0.0, y: 0.0, depth: 0.0 }
+  if let point: ScreenPoint = projectToScreen(
+    eye: eye
+    target: target
+    fovYDeg: 90.0
+    aspect: 2.0
+    point: Vec3.create(x: 1.0, y: 0.0, z: 1.0)
+  ) {
+    above = point
+  }
+  check(
+    label: "the point looked at lands in the middle, as far as it is"
+    ok: near(a: middle.x, b: 0.5) and near(a: middle.y, b: 0.5) and near(a: middle.depth, b: 10.0)
+  )
+  check(
+    label: "a point up and right of it lands above and right (90 degrees, aspect 2)"
+    ok: near(a: above.y, b: 0.45) and near(a: above.x, b: 0.525)
+  )
+  check(
+    label: "nothing behind the eye; on the screen within its margin"
+    ok: projectToScreen(
+      eye: eye
+      target: target
+      fovYDeg: 90.0
+      aspect: 2.0
+      point: Vec3.create(x: 0.0, y: -20.0, z: 0.0)
+    ) is none and onScreen(point: middle, margin: 0.0) and onScreen(
+      point: { x: 1.2, y: 0.5, depth: 5.0 }
+      margin: 0.1
+    ) is false
+  )
+  check(
+    label: "a label is drawn smaller in proportion to its distance, within its sizes"
+    ok: near(
+      a: labelPixelSize(
+        worldHeight: 0.3
+        depth: 5.0
+        fovYDeg: 90.0
+        screenHeight: 800.0
+        smallest: 10.0
+        largest: 60.0
+      )
+      b: 24.0
+    ) and near(
+      a: labelPixelSize(
+        worldHeight: 0.3
+        depth: 10.0
+        fovYDeg: 90.0
+        screenHeight: 800.0
+        smallest: 10.0
+        largest: 60.0
+      )
+      b: 12.0
+    ) and labelPixelSize(
+      worldHeight: 0.3
+      depth: 100.0
+      fovYDeg: 90.0
+      screenHeight: 800.0
+      smallest: 10.0
+      largest: 60.0
+    ) is 10.0 and labelPixelSize(
+      worldHeight: 0.3
+      depth: 0.5
+      fovYDeg: 90.0
+      screenHeight: 800.0
+      smallest: 10.0
+      largest: 60.0
+    ) is 60.0
+  )
+  check(
+    label: "labels fade out with distance"
+    ok: labelFade(distance: 10.0, fullUntil: 20.0, goneAt: 30.0) is 1.0 and near(
+      a: labelFade(distance: 25.0, fullUntil: 20.0, goneAt: 30.0)
+      b: 0.5
+    ) and labelFade(distance: 40.0, fullUntil: 20.0, goneAt: 30.0) is 0.0
+  )
+  check(
+    label: "a notice fades in, stands, fades out"
+    ok: near(
+      a: noticeAlpha(
+        age: 0.25
+        fadeIn: 0.5
+        hold: 2.0
+        fadeOut: 1.0
+      )
+      b: 0.5
+    ) and noticeAlpha(
+      age: 1.5
+      fadeIn: 0.5
+      hold: 2.0
+      fadeOut: 1.0
+    ) is 1.0 and near(
+      a: noticeAlpha(
+        age: 3.0
+        fadeIn: 0.5
+        hold: 2.0
+        fadeOut: 1.0
+      )
+      b: 0.5
+    ) and noticeAlpha(
+      age: 4.0
+      fadeIn: 0.5
+      hold: 2.0
+      fadeOut: 1.0
+    ) is 0.0
+  )
+  # A label over an entity: its position plus the offset, and none once the
+  # entity has no transform
+  var transforms: ComponentTable(Transform3D) = createComponentTable(Transform3D)
+  let walker: EntityId = { index: 4, generation: 0 }
+  let placed: Transform3D = {
+    position: Vec3.create(x: 3.0, y: 4.0, z: 0.5)
+    rotation: Quat.identity()
+    scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
+  }
+  componentSet(this: transforms, entityId: walker, data: placed)
+  let overHead: WorldLabel = {
+    text: "Walker 4"
+    point: Vec3.create(x: 0.0, y: 0.0, z: 2.1)
+    follows: walker
+    height: 0.26
+  }
+  var overHeadAt: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  if let at: Vec3 = labelWorldPoint(label: overHead, transforms: transforms) {
+    overHeadAt = at
+  }
+  let sign: WorldLabel = { text: "Start", point: Vec3.create(x: 10.0, y: 0.0, z: 3.0), height: 0.8 }
+  var signAt: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  if let at: Vec3 = labelWorldPoint(label: sign, transforms: transforms) {
+    signAt = at
+  }
+  check(
+    label: "a label over an entity stands at its position plus the offset; one in the world at its point"
+    ok: near(a: overHeadAt.x, b: 3.0) and near(a: overHeadAt.y, b: 4.0) and near(
+      a: overHeadAt.z
+      b: 2.6
+    ) and near(a: signAt.x, b: 10.0) and near(a: signAt.z, b: 3.0)
+  )
+  componentRemove(this: transforms, entityId: walker)
+  check(
+    label: "a label over an entity with no transform is not drawn"
+    ok: labelWorldPoint(label: overHead, transforms: transforms) is none
+  )
+  let fading: WorldLabel = {
+    text: "Walker 4"
+    point: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    height: 0.26
+    fullUntil: 18.0
+    goneAt: 28.0
+    opacity: 0.5
+  }
+  check(
+    label: "a label's opacity is its distance fade times the app's"
+    ok: near(a: labelAlpha(label: fading, distance: 10.0), b: 0.5) and near(
+      a: labelAlpha(label: fading, distance: 23.0)
+      b: 0.25
+    ) and labelAlpha(label: fading, distance: 30.0) is 0.0 and labelAlpha(
+      label: sign
+      distance: 1000.0
+    ) is 1.0
+  )
+}
