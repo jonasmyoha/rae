@@ -1,0 +1,31 @@
+# docs/binding-modes-design.md §1 (2026-10-20): `=` is the only binder. An
+# alias binding written with the removed `=>` is an error that says to use
+# `=`; the parser still reads it, so `rae format` rewrites an old file to `=`.
+# (This file is kept unformatted on purpose: the suite's format check is off
+# for it.)
+type Point {
+  x: Int
+}
+
+func firstOf(points: view List(Point)) ret opt view Point {
+  ret points.viewAt(index: 0)
+}
+
+func main() {
+  var point: Point = { x: 1 }
+  let writer: mod Point => point
+  let reader: view Point => point
+  var points: List(Point) = { { x: 2 } }
+  if let first: mod Point => points.modAt(index: 0) {
+    first.x = 3
+  }
+  match let found: view Point => firstOf(points: points) {
+    case none {
+      log("none")
+    }
+    default {
+      log("{found.x}")
+    }
+  }
+  log("{writer.x} {reader.x}")
+}

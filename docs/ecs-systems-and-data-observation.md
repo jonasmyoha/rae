@@ -320,7 +320,7 @@ func markChanged(this: mod ToySystem) { this.revision = this.revision + 1 }
 # a DATA-change mutation site bumps the whole chain, eagerly:
 func toySetValue(sys: mod ToySystem, entityId: view EntityId, v: view Int) {
   if componentHas(this: sys.cells, entityId: entityId) {
-    let c: mod Cell => componentMod(this: sys.cells, entityId: entityId) # table generation++
+    let c: mod Cell = componentMod(this: sys.cells, entityId: entityId) # table generation++
     c.v = v
     bumpRevision(this: c)                                            # instance revision++ (explicit)
   }

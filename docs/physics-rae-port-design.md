@@ -78,7 +78,7 @@ one codebase.
 - **Pointers are already indices.** Box3D stores bodies, shapes, contacts and
   joints in arrays addressed by `id = index + generation`; its pointers are
   short-lived views into those arrays. In Rae they are `view`/`mod` bindings
-  (`let body: mod Body => world.bodies.modAt(index: i)`), never stored.
+  (`let body: mod Body = world.bodies.modAt(index: i)`), never stored.
 - **Unions** (a shape is a sphere *or* a capsule *or* a hull …) become an enum
   tag plus the per-kind data. Rae has no sum types by design
   (`docs/match-and-sum-types.md`); the per-kind data either sits in the shape

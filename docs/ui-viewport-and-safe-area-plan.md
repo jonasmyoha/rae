@@ -102,7 +102,7 @@ func safeAreaSystem(world: mod UiWorld, viewport: view Viewport) {
   # For every entity that opts in via the SafeArea component, write a
   # SafeInsets in design units. Layout reads SafeInsets via the
   # effective-padding accessor.
-  let entities: view List(Int) => world.alive
+  let entities: view List(Int) = world.alive
   for entity in entities {
     if not componentHas(world.safeAreas, entityId) { continue }
     let insets: SafeInsets = {

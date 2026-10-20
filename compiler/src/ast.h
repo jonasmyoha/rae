@@ -342,6 +342,10 @@ typedef struct AstWhenBranch {
   struct AstWhenBranch* next;
 } AstWhenBranch;
 
+/* The removed `=>` binder (docs/binding-modes-design.md §1, 2026-10-20) */
+#define ALIAS_ARROW_MESSAGE \
+  "alias bindings use `=`: `let x: view T = place` (`rae format` rewrites `=>` to `=`)"
+
 struct AstStmt {
   AstStmtKind kind;
   size_t line;
@@ -356,6 +360,11 @@ struct AstStmt {
       bool is_var;    // declared with `var` (mutable). let/const are immutable.
       bool is_const;  // declared with `const` (compile-time constant).
       AstExpr* value;
+      // Where an alias binding was written with the removed `=>` (0: it was
+      // not). Sema reports it; the parser accepts it so `rae format` can
+      // still read an old file and rewrite it to `=`.
+      size_t arrow_line;
+      size_t arrow_column;
     } let_stmt;
     struct {
       AstDestructureBinding* bindings;

@@ -23,11 +23,11 @@ if let value: Track = tracks.copyAt(index: index) {
   consume(track: value)
 }
 
-if let value: view Track => tracks.viewAt(index: index) {
+if let value: view Track = tracks.viewAt(index: index) {
   log(value.title)
 }
 
-if let value: mod Track => tracks.modAt(index: index) {
+if let value: mod Track = tracks.modAt(index: index) {
   value.plays = value.plays + 1
 }
 ```

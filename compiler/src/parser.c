@@ -1911,7 +1911,7 @@ static AstStmt* parse_match_statement(Parser* parser, const Token* match_token) 
       AstTypeRef* bt = bind->as.let_stmt.type;
       if (!bt) {
         parser_error(parser, let_token,
-          "'match let' needs the binding's type: 'view T'/'mod T' with '=>', or 'T' with '='");
+          "'match let' needs the binding's type: 'match let name: T = optional' (or 'view T' / 'mod T')");
       } else if (!bind->as.let_stmt.value) {
         parser_error(parser, let_token, "'match let' requires an initializer");
       } else {
@@ -2191,8 +2191,14 @@ static AstStmt* parse_binding_statement(Parser* parser, const Token* kw_token, b
         && stmt->as.let_stmt.value->as.object_literal.fields != NULL) {
         parser_error(parser, kw_token, "with '%s', the binding's type must be written on the left-hand side only. Remove the type name from the RHS.", kw);
     }
-  } else if (alias_by_assign || parser_match(parser, TOK_ARROW)) {
+  } else if (alias_by_assign || (alias_type && parser_match(parser, TOK_ARROW))) {
     stmt->as.let_stmt.is_bind = true;
+    if (!alias_by_assign) {
+      // docs/binding-modes-design.md §1: `=>` is gone. Sema reports it, so
+      // `rae format` (which does not run sema) can still rewrite it to `=`.
+      stmt->as.let_stmt.arrow_line = parser_previous(parser)->line;
+      stmt->as.let_stmt.arrow_column = parser_previous(parser)->column;
+    }
     if (is_const) {
         parser_error(parser, parser_previous(parser), alias_by_assign
             ? "'const' is a value, not an alias binding; its type cannot be 'view' or 'mod'"
@@ -2204,9 +2210,11 @@ static AstStmt* parse_binding_statement(Parser* parser, const Token* kw_token, b
     if (is_var) {
         parser_error(parser, parser_previous(parser), "aliases are bind-once; declare with 'let', not 'var'");
     }
-    if (!type || (!type->is_view && !type->is_mod)) {
-        parser_error(parser, parser_previous(parser), "'=>' is only legal when the target type is mod T or view T");
-    }
+    stmt->as.let_stmt.value = parse_expression(parser);
+  } else if (parser_match(parser, TOK_ARROW)) {
+    // `=>` on a value binding: the same message as on an alias binding
+    parser_error(parser, parser_previous(parser), ALIAS_ARROW_MESSAGE);
+    stmt->as.let_stmt.is_bind = false;
     stmt->as.let_stmt.value = parse_expression(parser);
   } else {
     stmt->as.let_stmt.is_bind = false;
@@ -2278,7 +2286,7 @@ static AstStmt* parse_if_statement(Parser* parser, const Token* if_token) {
       if (!bt) {
         parser_error(parser, let_token, is_var
           ? "'if var' needs the binding's type: 'if var name: T = optional'"
-          : "'if let' needs the binding's type: 'view T'/'mod T' with '=>', or 'T' with '=' (spec 4.2)");
+          : "'if let' needs the binding's type: 'if let name: T = optional' (or 'view T' / 'mod T', spec 4.2)");
       } else if (!(bt->is_view || bt->is_mod)) {
         // OWNED narrowing (spec 4.2): `if let track: Track = getTrack()` is
         // ownership transfer of a produced optional's payload — the same `=`
@@ -2294,8 +2302,8 @@ static AstStmt* parse_if_statement(Parser* parser, const Token* if_token) {
         stmt->as.if_stmt.binding = bind;
         stmt->as.if_stmt.condition = NULL;
       } else if (!bind->as.let_stmt.is_bind) {
-        // A reference type with `=` — parse_binding_statement already
-        // reported "use '=>'"; nothing further to report here.
+        // A reference type that is not a bind
+        // (unreachable: `=` on a reference type is an alias binding)
       } else {
         bt->is_opt = true;
         stmt->as.if_stmt.binding = bind;
@@ -3025,7 +3033,8 @@ static AstStmt* parse_statement(Parser* parser) {
     return stmt;
   }
   if (parser_match(parser, TOK_ARROW)) {
-    parser_error(parser, parser_previous(parser), "rebinding an alias is illegal. '=>' is only for 'let' bindings.");
+    parser_error(parser, parser_previous(parser), "'=>' is not an operator: " ALIAS_ARROW_MESSAGE
+                 ", and an alias is bound once, on its 'let' line");
     return NULL;
   }
 
@@ -3403,6 +3412,7 @@ static AstDecl* parse_global_let_declaration(Parser* parser, bool is_var, bool i
     is_bind = type && (type->is_view || type->is_mod);
     value = parse_expression(parser);
   } else if (parser_match(parser, TOK_ARROW)) {
+    parser_error(parser, parser_previous(parser), ALIAS_ARROW_MESSAGE);
     is_bind = true;
     value = parse_expression(parser);
   }
