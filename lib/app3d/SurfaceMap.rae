@@ -180,6 +180,17 @@ func surfaceCodeAt(map: view SurfaceMap, x: view Float, y: view Float) ret Int {
   ret map.surfaces.copyAtFallback(index: row * map.columns + column, fallback: map.emptySurface)
 }
 
+# The height of the map's topmost triangle at (`x`, `y`) (what a mark laid
+# there lies on); surfaceMapEmptyHeight where nothing is, or outside it
+func surfaceHeightAt(map: view SurfaceMap, x: view Float, y: view Float) ret Float {
+  let column: Int = Math.floor(x: (x - map.originX) / map.cellSize).toInt()
+  let row: Int = Math.floor(x: (y - map.originY) / map.cellSize).toInt()
+  if column < 0 or row < 0 or column >= map.columns or row >= map.rows {
+    ret surfaceMapEmptyHeight
+  }
+  ret map.heights.copyAtFallback(index: row * map.columns + column, fallback: surfaceMapEmptyHeight)
+}
+
 # No grass in a grass field's cell (a shader reads anything at or below it
 # as none)
 const grassFieldNone: Float = -100000.0

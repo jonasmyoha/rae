@@ -1254,6 +1254,28 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             grep -a '^\[mem:live\]' "$TMP_OUT/live-growth.log" 2>/dev/null | sed 's/^/  /'
             ((FAILED++))
           fi
+        elif [ "$EXAMPLE_NAME" = "144_gltf_level" ]; then
+          # A glTF level (tools/levels/exportWalkLevel.py) read by
+          # app3d/GltfLevel: a shaded frame of its meshes in their base
+          # colours with the character walking its route, then the headless
+          # self-test: 9 colliders and 2 markers read, the character at
+          # marker_spawn on the ground, stopped by the wall, up the ramp onto
+          # the platform, and footprints on path, grass and stone from the
+          # surface map.
+          SHOT="$TMP_OUT/gltf-level.bmp"
+          if (cd .. && RAE_LEVEL_AUTOWALK=1 RAE_SDL_HEADLESS_MS=4000 RAE_GPU2D_SCREENSHOT="$SHOT" \
+                perl -e 'alarm shift; exec @ARGV' 60 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
+             && python3 tools/assert_nonblank_bmp.py "$SHOT" --min-colors=500 > "$TMP_OUT/shot.log" 2>&1 \
+             && grep -q "\[level\] .* 9 colliders (0 refused), 2 markers" "$TMP_OUT/render.log" \
+             && (cd .. && RAE_LEVEL_SELFTEST=1 perl -e 'alarm shift; exec @ARGV' 60 "$TMP_OUT/app") > "$TMP_OUT/selftest.log" 2>&1 \
+             && grep -q "\[leveltest\] passed=true" "$TMP_OUT/selftest.log"; then
+            echo "PASS: $EXAMPLE_NAME (a glTF level drawn, collided with, spawned on and walked; footprints by its surface map)"
+            ((PASSED++))
+          else
+            echo "FAIL: $EXAMPLE_NAME (glTF level)"
+            cat "$TMP_OUT/render.log" "$TMP_OUT/shot.log" "$TMP_OUT/selftest.log" 2>/dev/null | sed 's/^/  /'
+            ((FAILED++))
+          fi
         elif [ "$EXAMPLE_NAME" = "143_walker_forest" ]; then
           # The walker on a huge generated terrain: a shaded frame, tens of
           # thousands of trees planted into the forest's PropField, and the
