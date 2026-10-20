@@ -23,12 +23,24 @@ const COMPILER_SPEED = /^@@RAE_COMPILER_SPEED@@ example=(\S+) lines=(\d+) emit_m
 //
 // Run boundaries come from RUN_START/RUN_END sentinels when the producer emits
 // them (the normal path via watch-tests.sh). A bare, un-instrumented `make test
-// > log` has no sentinels; for that we fall back to file truncation = new run
+// > log` has no sentinels; for that we fall back to file replacement = new run
 // and prolonged idle = run ended. The idle fallback is deliberately NOT used
 // once a sentinel-driven run is active — an explicit RUN_END ends it instead,
 // so a slow compile or a hung test is never misreported as "completed".
+//
+// A NEW FILE is seen by its first line, not only by the file getting
+// shorter: watch-tests.sh empties the log and writes RAE_RUN_START, and when
+// the run before was short (a one-case run) the new one can grow past the old
+// size between two polls. Reading on from the old offset then missed the
+// start marker, the run was taken for an un-instrumented one, and every
+// silent stretch over the idle limit (the slow pre-suite checks) ended it —
+// one suite run showed as a string of 6-10 s runs. The first line (the
+// marker, with its run id) changes with every run, so it is compared each
+// poll. A tailer started in the middle of a run (the devtools restarted)
+// attaches to it, and a marked run's clock starts at the epoch in its marker.
 export class TestLogTailer {
   private lastSize = 0;
+  private headLine = "";
   private partial = "";
   private runId: string | null = null;
   private markerRun = false;
@@ -44,8 +56,15 @@ export class TestLogTailer {
 
   start() {
     if (this.timer) return;
-    // Start from the current end so a stale completed log isn't replayed.
-    try { this.lastSize = existsSync(this.logPath) ? statSync(this.logPath).size : 0; } catch { this.lastSize = 0; }
+    // Start from the current end so a stale completed log isn't replayed —
+    // unless it holds a marked run that has not ended: attach to that one
+    // (read it from the start, so its cases and its start time are known).
+    try {
+      const size = existsSync(this.logPath) ? statSync(this.logPath).size : 0;
+      this.headLine = this.readHead(size);
+      const live = RUN_START.test(this.headLine) && !/^@@RAE_RUN_END\b/m.test(this.read(0, size));
+      this.lastSize = live ? 0 : size;
+    } catch { this.lastSize = 0; this.headLine = ""; }
     this.timer = setInterval(() => this.poll(), this.pollMs);
     (this.timer as any)?.unref?.();
   }
@@ -56,11 +75,15 @@ export class TestLogTailer {
     let size = 0;
     try { size = existsSync(this.logPath) ? statSync(this.logPath).size : 0; } catch { return; }
 
-    if (size < this.lastSize) {          // truncated -> a new run replaced the file
+    // A new file: shorter than what was read, or another first line (a new
+    // run's RAE_RUN_START, written into the emptied log)
+    const head = this.readHead(size);
+    if (size < this.lastSize || (this.lastSize > 0 && head !== this.headLine)) {
       this.finishRun();
       this.lastSize = 0;
       this.partial = "";
     }
+    this.headLine = head;
     if (size > this.lastSize) {
       const chunk = this.read(this.lastSize, size);
       this.lastSize = size;
@@ -71,6 +94,14 @@ export class TestLogTailer {
       // waits for its explicit RUN_END and is never ended by idle.
       this.finishRun();
     }
+  }
+
+  // The file's first line (up to 200 bytes; "" while it is empty or the line
+  // is not complete yet)
+  private readHead(size: number): string {
+    const text = this.read(0, Math.min(size, 200));
+    const end = text.indexOf("\n");
+    return end < 0 ? "" : text.slice(0, end);
   }
 
   private read(from: number, to: number): string {
@@ -86,6 +117,12 @@ export class TestLogTailer {
     this.runId = id ?? randomUUID();
     this.markerRun = marker;
     this.passed = 0; this.failed = 0; this.startedAt = Date.now();
+    // A marked run's id is "<epoch seconds>-<pid>" (watch-tests.sh): its
+    // clock starts then, also when the tailer joins it late
+    const epochMs = id ? Number(/^(\d+)-/.exec(id)?.[1] ?? NaN) * 1000 : NaN;
+    if (marker && epochMs <= this.startedAt && this.startedAt - epochMs < 24 * 3600 * 1000) {
+      this.startedAt = epochMs;
+    }
     this.broadcast({ type: "test-run-started", runId: this.runId, mode: "all", command: "external", cwd: this.logPath, targetId: "external", targetLabel: "Agent run (live log)", timestamp: new Date().toISOString(), lastDurationMs: this.stats?.lastTestDurationMs() ?? null });
   }
 

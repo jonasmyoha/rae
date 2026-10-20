@@ -976,7 +976,12 @@ pkill -9 -f 'watch-tests.sh'; pkill -9 -f 'make test'; pkill -9 -f 'run_tests.sh
 ```
 
 Then start the single run. If you need to re-run, kill first, then re-launch —
-never launch a second run on top of a live one.
+never launch a second run on top of a live one. `watch-tests.sh` also enforces
+this itself: a run holds a lock next to the log (`$RAE_TEST_LOG.lock`), and a
+second `watch-tests.sh` prints "another test run (pid N) is writing ...;
+waiting" and WAITS for the first to end (up to `RAE_TEST_LOCK_WAIT` seconds,
+default 3600) instead of emptying the shared log under it. A killed run's
+lock is cleared by the next run.
 
 **Leave no app running (2026-10-08).** Every program you start — an example,
 a scratch test, a screenshot capture — must be gone when you are done with it.
