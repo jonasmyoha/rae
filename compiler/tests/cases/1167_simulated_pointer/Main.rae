@@ -1,0 +1,33 @@
+# lib/app3d/UiModes: the main pointer a scene's frames are picked for. A
+# desktop simulating a phone ("..." menu, "Simulate mobile phone") gets the
+# finger's frames, so its touch-only controls show; otherwise, and always on
+# a phone or tablet, the device's own pointer decides.
+open Device
+open app3d/UiModes
+
+func main() {
+  log(
+    "a desktop as it is: {framePointerFor(
+      pointer: Pointer.fine
+      simulateMobile: false
+      mobileOs: false
+    ) is Pointer.fine}"
+  )
+  log(
+    "a desktop simulating a phone: {framePointerFor(
+      pointer: Pointer.fine
+      simulateMobile: true
+      mobileOs: false
+    ) is Pointer.coarse}"
+  )
+  log(
+    "a phone: {framePointerFor(pointer: Pointer.coarse, simulateMobile: true, mobileOs: true) is Pointer.coarse}"
+  )
+  log(
+    "a tablet with a trackpad keeps it: {framePointerFor(
+      pointer: Pointer.fine
+      simulateMobile: true
+      mobileOs: true
+    ) is Pointer.fine}"
+  )
+}
