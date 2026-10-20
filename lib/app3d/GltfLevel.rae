@@ -1,0 +1,481 @@
+# app3d/GltfLevel — a level authored in Blender and exported as glTF: read
+# into the entities a level is made of. Z-up metres (export with +Y Up off),
+# transforms applied; the file's origin where the app places it. The default
+# scene is walked, parent transforms composed (a node's matrix or its
+# translation / rotation / scale), and each primitive's vertices baked into
+# the world once (normals by the inverse transpose), so drawing and
+# collision agree. A mesh node is drawn in its glTF base colour; a node named
+# `<name>_collision` is a static triangle-mesh collider, never drawn; an
+# empty node named `marker_<name>` is a named point (nonempty, unique). Bad
+# files, unreadable meshes, duplicate markers and cyclic scenes are errors,
+# not silently missing walls. readGltfLevel gives the level's items in the
+# order the file has them, so an app makes its entities, colliders and
+# markers in that order (LevelNode, LevelMarker; addLevelCollider); what a
+# mesh is drawn with is the app's.
+import Vec3
+import Quat
+open Gltf
+open Json
+open Mesh3d
+open Math3d
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Transform
+open box3d/Box3dTypes
+open box3d/ecs/PhysicsTypes
+open box3d/ecs/Physics
+open box3d/ecs/PhysicsSpawn
+open box3d/ecs/VenueMesh
+
+# Where a piece of a level came from: its file, its node, whether it is a
+# collider
+type LevelNode {
+  source: String
+  name: String
+  collision: Bool
+}
+
+# A named point of a level (an empty node `marker_<name>`), at its entity's
+# Transform3D
+type LevelMarker {
+  name: String
+}
+
+enum LevelItemKind { mesh, collider, marker }
+
+# One piece of a level, as the file has it: a drawn mesh or a collider (its
+# primitive baked into the world, its material's name and base colour), or a
+# marker (its point)
+type LevelItem {
+  kind: LevelItemKind
+  nodeName: String
+  mesh: MeshData
+  materialName: String
+  color: Vec3
+  position: Vec3
+}
+
+# A read level: ok, or why not, and its items
+type LevelRead {
+  ok: Bool
+  error: String
+  items: List(LevelItem)
+}
+
+# The point of the marker `name` among `markers`, or none
+func levelMarker(
+  markers: view ComponentTable(LevelMarker)
+  transforms: view ComponentTable(Transform3D)
+  name: view String
+) ret opt Vec3 {
+  loop var i: Int = 0, i < componentCount(this: markers), ++i {
+    let entity: EntityId = componentEntityAt(this: markers, i: i)
+    if componentView(this: markers, entityId: entity).name is name {
+      ret componentView(this: transforms, entityId: entity).position
+    }
+  }
+  ret none
+}
+
+# A collider item's mesh as a static Box3D triangle mesh on `entityId`
+# (shaped by `def`: its category, its friction); false when Box3D refused it
+func addLevelCollider(
+  physics: mod Physics
+  colliders: mod ComponentTable(Collider)
+  entityId: view EntityId
+  mesh: view MeshData
+  def: view ShapeDef
+) ret Bool {
+  if let shapeId: ShapeId = addVenueMesh(
+    physics: physics
+    mesh: mesh
+    transform: Transform {
+      position: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+      rotation: Quat.identity()
+    }
+    def: def
+  ) {
+    recordCollider(
+      physics: physics
+      colliders: colliders
+      entityId: entityId
+      shapeId: shapeId
+    )
+    ret true
+  }
+  ret false
+}
+
+# The level read so far, and whether it is still good
+type LevelReader {
+  path: String
+  ok: Bool
+  error: String
+  items: List(LevelItem)
+  visited: List(Bool)
+  markerNames: List(String)
+}
+
+# No mesh (a marker's)
+func emptyLevelMesh() ret MeshData {
+  ret MeshData {
+    verts: List.create(Float, cap: 0)
+    indices: List.create(Int, cap: 0)
+    vertCount: 0
+  }
+}
+
+# Is `name` among `names`?
+func markerSeen(names: view List(String), name: view String) ret Bool {
+  loop let seen: view String in names {
+    if seen is name {
+      ret true
+    }
+  }
+  ret false
+}
+
+func levelReaderFail(reader: mod LevelReader, reason: view String) {
+  if reader.ok {
+    reader.ok = false
+    reader.error = "{reader.path}: {reason}"
+  }
+}
+
+func readLevelNode(
+  reader: mod LevelReader
+  glb: view Glb
+  nodeIndex: view Int
+  parentMatrix: view Mat4
+) {
+  if reader.ok is false {
+    ret
+  }
+  let nodes: JsonValue = arrayField(glb: glb, obj: root(doc: glb.doc), key: "nodes")
+  if nodeIndex < 0 or nodeIndex >= arrayLen(this: nodes) {
+    levelReaderFail(reader: reader, reason: "invalid scene node")
+    ret
+  }
+  if reader.visited.copyAtDefault(index: nodeIndex) {
+    levelReaderFail(reader: reader, reason: "cyclic or multiply-parented scene node")
+    ret
+  }
+  reader.visited.set(index: nodeIndex, value: true)
+  let node: JsonValue = arrayAt(doc: glb.doc, this: nodes, idx: nodeIndex)
+  let name: String = jsonString(this: objField(glb: glb, obj: node, key: "name"), fallback: "")
+  let matrix: Mat4 = mat4Mul(a: parentMatrix, b: levelLocalMatrix(glb: glb, node: node))
+  let meshIndex: Int = intField(
+    glb: glb
+    obj: node
+    key: "mesh"
+    fallback: -1
+  )
+  if meshIndex < 0 and name.startsWith(prefix: "marker_") {
+    let markerName: String = name.sub(start: 7, len: name.length() - 7)
+    if markerName.length() is 0 {
+      levelReaderFail(reader: reader, reason: "empty marker name")
+      ret
+    }
+    if markerSeen(names: reader.markerNames, name: markerName) {
+      levelReaderFail(reader: reader, reason: "duplicate marker {markerName}")
+      ret
+    }
+    reader.markerNames.add(value: markerName)
+    reader.items.add(value: LevelItem {
+      kind: LevelItemKind.marker
+      nodeName: markerName
+      mesh: emptyLevelMesh()
+      materialName: ""
+      color: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
+      position: mat4TransformPoint(m: matrix, p: Vec3.create(x: 0.0, y: 0.0, z: 0.0))
+    })
+  }
+  if meshIndex >= 0 {
+    let collision: Bool = name.endsWith(suffix: "_collision")
+    let meshes: JsonValue = arrayField(glb: glb, obj: root(doc: glb.doc), key: "meshes")
+    let mesh: JsonValue = arrayAt(doc: glb.doc, this: meshes, idx: meshIndex)
+    let primitives: JsonValue = arrayField(glb: glb, obj: mesh, key: "primitives")
+    if arrayLen(this: primitives) is 0 {
+      levelReaderFail(reader: reader, reason: "mesh {name} has no primitives")
+      ret
+    }
+    loop var i: Int = 0, i < arrayLen(this: primitives), ++i {
+      let primitive: JsonValue = arrayAt(doc: glb.doc, this: primitives, idx: i)
+      var meshData: MeshData = loadPrimitive(glb: glb, meshIndex: meshIndex, primIndex: i)
+      if meshData.vertCount is 0 or meshData.indices.length < 3 {
+        levelReaderFail(reader: reader, reason: "unreadable mesh {name}")
+        ret
+      }
+      levelBakeMesh(mesh: meshData, matrix: matrix)
+      var kind: LevelItemKind = LevelItemKind.mesh
+      if collision {
+        kind = LevelItemKind.collider
+      }
+      reader.items.add(value: LevelItem {
+        kind: kind
+        nodeName: name
+        mesh: own meshData
+        materialName: levelPrimitiveMaterialName(glb: glb, primitive: primitive)
+        color: levelPrimitiveColor(glb: glb, primitive: primitive)
+        position: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+      })
+    }
+  }
+  let children: JsonValue = arrayField(glb: glb, obj: node, key: "children")
+  loop var i: Int = 0, i < arrayLen(this: children), ++i {
+    readLevelNode(
+      reader: reader
+      glb: glb
+      nodeIndex: jsonInt(this: arrayAt(doc: glb.doc, this: children, idx: i), fallback: -1)
+      parentMatrix: matrix
+    )
+  }
+}
+
+# The level in `path`, placed by `placement` (where its origin goes)
+func readGltfLevel(path: view String, placement: view Mat4) ret LevelRead {
+  var reader: LevelReader = {
+    path: "{path}"
+    ok: true
+    error: ""
+    items: List.create(LevelItem, cap: 16)
+    visited: List.create(Bool, cap: 16)
+    markerNames: List.create(String, cap: 4)
+  }
+  let glb: Glb = loadGlb(path: path)
+  if glb.ok is false {
+    ret LevelRead {
+      ok: false
+      error: "{path}: {glb.errorMsg}"
+      items: List.create(LevelItem, cap: 1)
+    }
+  }
+  let document: JsonValue = root(doc: glb.doc)
+  let scenes: JsonValue = arrayField(glb: glb, obj: document, key: "scenes")
+  let scene: JsonValue = arrayAt(
+    doc: glb.doc
+    this: scenes
+    idx: intField(
+      glb: glb
+      obj: document
+      key: "scene"
+      fallback: 0
+    )
+  )
+  let roots: JsonValue = arrayField(glb: glb, obj: scene, key: "nodes")
+  if arrayLen(this: roots) is 0 {
+    ret LevelRead {
+      ok: false
+      error: "{path}: no nodes in the default scene"
+      items: List.create(LevelItem, cap: 1)
+    }
+  }
+  let nodes: JsonValue = arrayField(glb: glb, obj: document, key: "nodes")
+  loop var i: Int = 0, i < arrayLen(this: nodes), ++i {
+    reader.visited.add(value: false)
+  }
+  loop var i: Int = 0, i < arrayLen(this: roots), ++i {
+    readLevelNode(
+      reader: reader
+      glb: glb
+      nodeIndex: jsonInt(this: arrayAt(doc: glb.doc, this: roots, idx: i), fallback: -1)
+      parentMatrix: placement
+    )
+  }
+  ret LevelRead { ok: reader.ok, error: own reader.error, items: own reader.items }
+}
+
+func levelNumber(
+  glb: view Glb
+  values: view JsonValue
+  index: view Int
+  fallback: view Float
+) ret Float {
+  ret jsonFloat(this: arrayAt(doc: glb.doc, this: values, idx: index), fallback: fallback)
+}
+
+func levelLocalMatrix(glb: view Glb, node: view JsonValue) ret Mat4 {
+  let matrix: JsonValue = arrayField(glb: glb, obj: node, key: "matrix")
+  if arrayLen(this: matrix) is 16 {
+    var result: Mat4 = mat4Zero()
+    loop var i: Int = 0, i < 16, ++i {
+      result.m.set(
+        index: i
+        value: levelNumber(
+          glb: glb
+          values: matrix
+          index: i
+          fallback: 0.0
+        )
+      )
+    }
+    ret result
+  }
+  let translation: JsonValue = arrayField(glb: glb, obj: node, key: "translation")
+  let rotation: JsonValue = arrayField(glb: glb, obj: node, key: "rotation")
+  let scale: JsonValue = arrayField(glb: glb, obj: node, key: "scale")
+  let transform: Transform3D = {
+    position: Vec3.create(
+      x: levelNumber(
+        glb: glb
+        values: translation
+        index: 0
+        fallback: 0.0
+      )
+      y: levelNumber(
+        glb: glb
+        values: translation
+        index: 1
+        fallback: 0.0
+      )
+      z: levelNumber(
+        glb: glb
+        values: translation
+        index: 2
+        fallback: 0.0
+      )
+    )
+    rotation: Quat.create(
+      x: levelNumber(
+        glb: glb
+        values: rotation
+        index: 0
+        fallback: 0.0
+      )
+      y: levelNumber(
+        glb: glb
+        values: rotation
+        index: 1
+        fallback: 0.0
+      )
+      z: levelNumber(
+        glb: glb
+        values: rotation
+        index: 2
+        fallback: 0.0
+      )
+      w: levelNumber(
+        glb: glb
+        values: rotation
+        index: 3
+        fallback: 1.0
+      )
+    )
+    scale: Vec3.create(
+      x: levelNumber(
+        glb: glb
+        values: scale
+        index: 0
+        fallback: 1.0
+      )
+      y: levelNumber(
+        glb: glb
+        values: scale
+        index: 1
+        fallback: 1.0
+      )
+      z: levelNumber(
+        glb: glb
+        values: scale
+        index: 2
+        fallback: 1.0
+      )
+    )
+  }
+  ret transform3dToMatrix(t: transform)
+}
+
+func levelBakeMesh(mesh: mod MeshData, matrix: view Mat4) {
+  let inverse: Mat4 = mat4Inverse(a: matrix)
+  loop var i: Int = 0, i < mesh.vertCount, ++i {
+    let base: Int = i * 8
+    let position: Vec3 = mat4TransformPoint(
+      m: matrix
+      p: Vec3 {
+        x: mesh.verts.copyAtDefault(index: base)
+        y: mesh.verts.copyAtDefault(index: base + 1)
+        z: mesh.verts.copyAtDefault(index: base + 2)
+      }
+    )
+    let normal: Vec3 = {
+      x: mesh.verts.copyAtDefault(index: base + 3)
+      y: mesh.verts.copyAtDefault(index: base + 4)
+      z: mesh.verts.copyAtDefault(index: base + 5)
+    }
+    let transformedNormal: Vec3 = Vec3.vnorm(
+      a: Vec3 {
+        x: mat4Get(m: inverse, i: 0) * normal.x + mat4Get(m: inverse, i: 1) * normal.y + mat4Get(
+          m: inverse
+          i: 2
+        ) * normal.z
+        y: mat4Get(m: inverse, i: 4) * normal.x + mat4Get(m: inverse, i: 5) * normal.y + mat4Get(
+          m: inverse
+          i: 6
+        ) * normal.z
+        z: mat4Get(m: inverse, i: 8) * normal.x + mat4Get(m: inverse, i: 9) * normal.y + mat4Get(
+          m: inverse
+          i: 10
+        ) * normal.z
+      }
+    )
+    mesh.verts.set(index: base, value: position.x)
+    mesh.verts.set(index: base + 1, value: position.y)
+    mesh.verts.set(index: base + 2, value: position.z)
+    mesh.verts.set(index: base + 3, value: transformedNormal.x)
+    mesh.verts.set(index: base + 4, value: transformedNormal.y)
+    mesh.verts.set(index: base + 5, value: transformedNormal.z)
+  }
+}
+
+# A primitive's glTF material (null if it names none).
+func levelPrimitiveMaterial(glb: view Glb, primitive: view JsonValue) ret JsonValue {
+  let materials: JsonValue = arrayField(glb: glb, obj: root(doc: glb.doc), key: "materials")
+  ret arrayAt(
+    doc: glb.doc
+    this: materials
+    idx: intField(
+      glb: glb
+      obj: primitive
+      key: "material"
+      fallback: -1
+    )
+  )
+}
+
+# A primitive's material's name (what a surface map classifies it by), or "".
+func levelPrimitiveMaterialName(glb: view Glb, primitive: view JsonValue) ret String {
+  ret jsonString(
+    this: objField(
+      glb: glb
+      obj: levelPrimitiveMaterial(glb: glb, primitive: primitive)
+      key: "name"
+    )
+    fallback: ""
+  )
+}
+
+func levelPrimitiveColor(glb: view Glb, primitive: view JsonValue) ret Vec3 {
+  let material: JsonValue = levelPrimitiveMaterial(glb: glb, primitive: primitive)
+  let surface: JsonValue = objField(glb: glb, obj: material, key: "pbrMetallicRoughness")
+  let color: JsonValue = arrayField(glb: glb, obj: surface, key: "baseColorFactor")
+  ret Vec3.create(
+    x: levelNumber(
+      glb: glb
+      values: color
+      index: 0
+      fallback: 1.0
+    )
+    y: levelNumber(
+      glb: glb
+      values: color
+      index: 1
+      fallback: 1.0
+    )
+    z: levelNumber(
+      glb: glb
+      values: color
+      index: 2
+      fallback: 1.0
+    )
+  )
+}

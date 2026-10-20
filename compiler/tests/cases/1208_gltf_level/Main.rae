@@ -1,0 +1,157 @@
+# app3d/GltfLevel and app3d/SurfaceMap: a small Z-up glTF level (made by
+# tools/levels/exportTestLevel.py) read into its items in the file's order,
+# baked where it is placed; its colliders as Box3D triangle meshes, its
+# marker a point; its drawn triangles into a surface map classified by
+# material name (the app's rules), and the grass field from it.
+import Math
+import Vec3
+open Math3d
+open Mesh3d
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open box3d/ecs/PhysicsTypes
+open box3d/ecs/Physics
+open box3d/ecs/PhysicsComponents
+open box3d/ecs/PhysicsQueries
+open app3d/GltfLevel
+open app3d/SurfaceMap
+
+const levelPath: String = "tests/cases/1208_gltf_level/test_level.glb"
+
+func near(a: view Float, b: view Float) ret Bool {
+  ret Math.abs(value: a - b) < 0.001
+}
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func lowestZ(mesh: view MeshData) ret Float {
+  var low: Float = 1000000.0
+  loop var i: Int = 0, i < mesh.vertCount, ++i {
+    low = Math.min(a: low, b: mesh.verts.copyAtDefault(index: i * 8 + 2))
+  }
+  ret low
+}
+
+func main() {
+  let read: LevelRead = readGltfLevel(
+    path: levelPath
+    placement: mat4Translate(x: 0.0, y: 0.0, z: 10.0)
+  )
+  var kinds: String = ""
+  loop let item: view LevelItem in read.items {
+    kinds = "{kinds} {(item.kind as LevelItemKind).toString()}:{item.nodeName}"
+  }
+  log("items:{kinds}")
+  check(label: "read", ok: read.ok and read.items.length is 5)
+  let ground: view LevelItem = read.items.viewAt(index: 0)
+  let cube: view LevelItem = read.items.viewAt(index: 2)
+  let marker: view LevelItem = read.items.viewAt(index: 4)
+  check(
+    label: "placed where the app puts its origin, the parent's lift composed: the cube's bottom at 10 m on the plate, the marker at 14 m"
+    ok: near(a: lowestZ(mesh: cube.mesh), b: 10.0) and near(a: marker.position.z, b: 14.0) and near(
+      a: lowestZ(mesh: ground.mesh)
+      b: 9.9
+    )
+  )
+  check(
+    label: "each primitive's material name and base colour"
+    ok: ground.materialName is "Grass" and cube.materialName is "Stone" and near(
+      a: cube.color.x
+      b: 0.6
+    )
+  )
+  # The surface map, by the app's rules (1 grass, 2 stone, 0 anything else)
+  var rules: List(MaterialSurface) = List.create(MaterialSurface, cap: 2)
+  rules.add(value: MaterialSurface { prefix: "Grass", surface: 1 })
+  rules.add(value: MaterialSurface { prefix: "Stone", surface: 2 })
+  var map: SurfaceMap = createCodedSurfaceMap(
+    centerX: 0.0
+    centerY: 0.0
+    halfExtent: 8.0
+    cellSize: 2.0
+    emptySurface: 0
+  )
+  loop let item: view LevelItem in read.items {
+    if item.kind is LevelItemKind.mesh {
+      layMesh(
+        map: map
+        mesh: item.mesh
+        surface: surfaceOfMaterialName(name: item.materialName, rules: rules, fallback: 0)
+      )
+    }
+  }
+  check(
+    label: "the surface map: the cube's stone over the grass at the middle, grass at the plate's edge, nothing past it"
+    ok: surfaceCodeAt(map: map, x: 0.5, y: 0.5) is 2 and surfaceCodeAt(map: map, x: 3.0, y: 3.0) is 1 and surfaceCodeAt(
+      map: map
+      x: 7.0
+      y: 7.0
+    ) is 0 and surfaceCodeAt(map: map, x: 50.0, y: 0.0) is 0
+  )
+  let field: List(Float) = surfaceGrassField(map: map, grassSurface: 1)
+  let middle: Int = 4 * map.columns + 4
+  let edge: Int = 5 * map.columns + 5
+  check(
+    label: "the grass field: the ground's height on grass, none under the stone or past the plate"
+    ok: field.length is 64 and field.copyAtDefault(index: middle) <= grassFieldNone and near(
+      a: field.copyAtDefault(index: edge)
+      b: 10.0
+    ) and field.copyAtDefault(index: 0) <= grassFieldNone
+  )
+  # Colliders and markers as entities
+  var allocator: EntityAllocator = createEntityAllocator()
+  var colliders: ComponentTable(Collider) = createComponentTable(Collider)
+  var physics: Physics = createPhysics(
+    def: defaultPhysicsWorldDef()
+    fixedStep: 1.0 / 60.0
+    subSteps: 4
+  )
+  var made: Int = 0
+  loop let item: view LevelItem in read.items {
+    if item.kind is LevelItemKind.collider {
+      if addLevelCollider(
+        physics: physics
+        colliders: colliders
+        entityId: allocEntity(this: allocator)
+        mesh: item.mesh
+        def: defaultShapeDef(lengthUnitsPerMeter: 1.0)
+      ) {
+        made = made + 1
+      }
+    }
+  }
+  let hit: PhysicsHit = raycastClosest(
+    physics: physics
+    origin: Vec3.create(x: 3.0, y: 3.0, z: 20.0)
+    translation: Vec3.create(x: 0.0, y: 0.0, z: -20.0)
+    filter: defaultQueryFilter()
+  )
+  let onCube: PhysicsHit = raycastClosest(
+    physics: physics
+    origin: Vec3.create(x: 0.0, y: 0.0, z: 20.0)
+    translation: Vec3.create(x: 0.0, y: 0.0, z: -20.0)
+    filter: defaultQueryFilter()
+  )
+  check(
+    label: "two colliders; a ray down meets the plate's top at 10 m and the cube's at 12 m"
+    ok: made is 2 and hit.hit and near(a: hit.point.z, b: 10.0) and onCube.hit and near(
+      a: onCube.point.z
+      b: 12.0
+    )
+  )
+  let missing: LevelRead = readGltfLevel(
+    path: "tests/cases/1208_gltf_level/none.glb"
+    placement: mat4Identity()
+  )
+  check(
+    label: "a missing file is an error, not an empty level"
+    ok: missing.ok is false and missing.error.length() > 0
+  )
+}
