@@ -59,7 +59,7 @@ alias in #644):
 
 - `let x: copy Owner = owner` — explicit deep copy (visible allocation). Emits
   the existing `rae_deep_copy_<T>` (already correct).
-- `let x: view Owner => owner` / `mod Owner => owner` — alias, no copy (already
+- `let x: view Owner = owner` / `let x: mod Owner = owner` — alias, no copy (already
   works; the `=>` reference forms).
 - `let x: Owner = owner` (bare value binding of a cascade-drop type) — **error**:
   "`Owner` owns heap; a value copy is a deep copy — write `copy Owner` to copy,

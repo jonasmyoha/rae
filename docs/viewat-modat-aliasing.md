@@ -17,7 +17,7 @@ Reproduction (compiles today with **no diagnostic**):
 ```rae
 var xs: List(Int) = createList(Int, cap: 1)
 xs.add(value: 5)
-if let p: mod Int => xs.modAt(index: 0) {
+if let p: mod Int = xs.modAt(index: 0) {
   xs.add(value: 6)   # grows xs.data -> realloc -> p dangles
   xs.add(value: 7)
   p = 99             # writes through a dangling pointer into freed memory
@@ -50,7 +50,7 @@ with the diagnostic *"cannot mutate a List while a collection loop borrows its
 elements"* (sema.c:1694). This is a conservative, lexical, compile-time check.
 
 The gap: that borrow check is applied ONLY to `loop element in list` bodies. The
-standalone `if let x: view/mod T => list.viewAt/modAt(index:)` binding form has
+standalone `if let x: view/mod T = list.viewAt/modAt(index:)` binding form has
 **no** such check — hence the reproduction above compiles. `docs/list-indexed-
 access.md` §"Remaining lifetime work" already flagged this as required but
 unimplemented.
@@ -59,7 +59,7 @@ unimplemented.
 
 **A. Borrow the container for the binding's scope (Rust-style) — RECOMMENDED.**
 Extend the existing loop-body borrow check to the then-branch of an
-`if let ...: view/mod T => list.viewAt/modAt(index:)` binding: while the binding
+`if let ...: view/mod T = list.viewAt/modAt(index:)` binding: while the binding
 is live, reject the same eight structural mutators on the aliased List. Identify
 the aliased List from the binding's source (the `viewAt`/`modAt` receiver) and
 run `sema_stmt_mutates_collection` over the then-block, reusing the loop
@@ -114,7 +114,7 @@ sema error; `copyAt` + `if let` and mutation of a *different* List still allowed
 — `componentMod` / `componentView` (by entity) and `queryModAt` / `queryViewAt`
 (by dense index), plus the `queryNViewX` / `queryView` accessors — return the
 same kind of pointer into a table's dense storage; #814 extended the rule to them
-(plain `let … =>` bindings and `if let`), rejecting `componentSet` /
+(plain `let x: view T = …` bindings and `if let`), rejecting `componentSet` /
 `componentRemove` / `clearEntityComponents` on the same table while the reference
 is live. The full borrowing story is in `docs/ecs-api-reference.md` §"Borrowing
 rules".

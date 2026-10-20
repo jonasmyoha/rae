@@ -32,7 +32,7 @@ With `let outer: Outer = ...`:
 | writing a member or element | `outer.inner.value = 5`, `outer.items[i] = 2` |
 | passing it, or a part of it, to a `mod` parameter | `bump(inner: outer.inner)` with `func bump(inner: mod Inner)` |
 | calling a mutating method on it, or on a part of it | `numbers.add(value: 3)` on `let numbers: List(Int)` |
-| binding a `mod` alias to it, or to a part of it (also `if let`) | `let part: mod Inner => outer.inner`, `if let found: mod Inner => maybeInner` |
+| binding a `mod` alias to it, or to a part of it (also `if let`) | `let part: mod Inner = outer.inner`, `if let found: mod Inner = maybeInner` |
 | a `mod` collection loop over it, or over a part of it | `loop let item: mod Int in outer.items` |
 
 Each is a compile error: `cannot modify 'outer.inner.value': 'outer' is a 'let',
@@ -53,7 +53,7 @@ receiver's type is consulted, and the call counts when all of them take
   `Buffer`, a GPU resource id or an `EntityId` cannot be rebound, but writing
   *through* it (into the memory or resource it names) is allowed. The check
   stops at the first step through a `Ptr`/`Buffer` or a reference.
-- **Aliases keep their own mode.** `let part: mod Inner => free.inner` is a
+- **Aliases keep their own mode.** `let part: mod Inner = free.inner` is a
   `mod` alias: writes through it land in `free`, which must itself be a
   `var`. A `view` alias (or `view` parameter) stays read-only, as before.
 - **Narrowing makes new bindings.** `if let value: T = maybe` and `=>` bind a
@@ -81,7 +81,7 @@ To change the elements in place, take them as aliases:
 
 An ALIAS (`view T` / `mod T`, bound with `=>` or as a loop element) has no
 `var` form: its mode word already says whether it may write, and an alias is
-bind-once. `if var x: mod T => place` and `loop var x: view T in list` are
+bind-once. `if var x: mod T = place` and `loop var x: view T in list` are
 parse errors (fixture 1020).
 
 Before `if var` existed, the frozen-let migration wrote the mutable payload

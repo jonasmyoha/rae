@@ -128,7 +128,7 @@ func solveColour(
   context: view StepContext
 ) {
   parallelLoop var k: Int = colour.first, k < colour.end, ++k {
-    if let constraint: mod ContactConstraint => constraints.modAt(index: k) {
+    if let constraint: mod ContactConstraint = constraints.modAt(index: k) {
       let a: BodyState = states.copyAtDefault(index: constraint.bodyA)
       let b: BodyState = states.copyAtDefault(index: constraint.bodyB)
       let solved: ContactSolve = solveContact(constraint: constraint, a: a, b: b, context: context)

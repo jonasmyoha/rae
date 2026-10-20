@@ -181,7 +181,8 @@ These instructions define **how Codex should work**, communicate progress, and i
   and a list literal likewise: `ret List(Point) { ... }` (a bare `ret { ... }` is an
   error, never inferred from the return type).
 - What is written but not "inferred": `if let v: T = opt` (you still write `T`),
-  `=>` aliases whose `view T`/`mod T` you write, and `loop var i: Int = 0`. The
+  aliases whose `view T`/`mod T` you write (`let v: view T = place`; `=>` is
+  gone, a compile error since 0.2.96), and `loop var i: Int = 0`. The
   ban is specifically on inferring the type of a binding from its initializer.
 
 ### `const` / `let` / `var` — and a `let` is FROZEN (docs/let-is-frozen.md):
@@ -195,11 +196,11 @@ These instructions define **how Codex should work**, communicate progress, and i
   naming the binding's line. If you change it, it is `var`.
 - Every VALUE binding has both forms: `let`/`var`, `if let`/`if var`,
   `loop let x: T in`/`loop var x: T in` (a mutable copy of each element).
-  Aliases (`view`/`mod`, `=>`) have only `let`. Write `if var x: T = opt`
+  Aliases (`view`/`mod`) have only `let`. Write `if var x: T = opt`
   for a payload you change — never `if let tmp ... { var x = own tmp`.
 - Edges: a `let` holding a `Ptr`/`Buffer`, a GPU/entity handle or a
   `mod`/`view` alias freezes the HANDLE, not what it points at (writing
-  through it is fine); `if let` and `=>` make new bindings.
+  through it is fine); `if let` and alias bindings make new bindings.
 - **Prefer `let`.** Write `let` by default and `var` only for a binding the
   code genuinely changes (a loop counter, an accumulator, a value built up
   step by step). A reader sees `let` and knows the value is settled at that

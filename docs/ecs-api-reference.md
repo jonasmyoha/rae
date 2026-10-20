@@ -138,8 +138,8 @@ which is not the same as *proven safe*.
 
 ### What the checker actually enforces (the complete list)
 
-1. **Reference bindings are bind-once.** `let name: view T => place` /
-   `let name: mod T => place`; never `var` (*"aliases are bind-once; declare with
+1. **Reference bindings are bind-once.** `let name: view T = place` /
+   `let name: mod T = place`; never `var` (*"aliases are bind-once; declare with
    'let', not 'var'"*). Collection-loop and field-loop bindings are aliases too.
 2. **`view` never promotes to `mod`.** You cannot bind `mod` to a `view`, nor
    assign through a `view` (*"cannot assign through read-only view"*).
@@ -148,7 +148,7 @@ which is not the same as *proven safe*.
    to alias storage"*).
 4. **A reference cannot be bound to a call that returns ownership.** Take the value
    with `let name: T = …`, or use a reference-returning accessor.
-5. **The one aliasing rule (#658):** while an `if let p: view/mod T =>
+5. **The one aliasing rule (#658):** while an `if let p: view/mod T =
    list.viewAt/modAt(index:)` binding is live, the **same** `List` may not be
    structurally mutated in that branch — `add`, `set`, `insert`, `remove`,
    `swapRemove`, `clear`, `drop`, `grow`, `pop` — because `add` past capacity
@@ -233,17 +233,17 @@ func movementSystem(world: mod GameWorld, dt: view Float) {
 }
 
 # ALLOWED — one element ref threaded through several calls (114):
-let controller: mod ThirdPersonController => componentMod(this: world.controllers, entityId: hero)
+let controller: mod ThirdPersonController = componentMod(this: world.controllers, entityId: hero)
 updateWalkerMovement(controller: controller, intent: intent, cameraYaw: yaw, dt: dt)
 groundWalker(controller: controller, groundZ: groundZ)
 
 # ALLOWED — a ref into one table plus a ref into another:
-let pos: mod Position => componentMod(this: world.positions, entityId: e)
-let vel: view Velocity => componentView(this: world.velocities, entityId: e)
+let pos: mod Position = componentMod(this: world.positions, entityId: e)
+let vel: view Velocity = componentView(this: world.velocities, entityId: e)
 pos.x = pos.x + vel.v * dt
 
 # REJECTED (#814) — structural mutation of the table you hold a ref into:
-let pos: mod Position => componentMod(this: world.positions, entityId: e)
+let pos: mod Position = componentMod(this: world.positions, entityId: e)
 componentSet(this: world.positions, entityId: other, data: Position { x: 0 })   # may realloc -> pos dangles
 pos.x = 1
 # -> error: cannot mutate a ComponentTable while a componentMod/queryModAt reference ('pos') aliases one of its rows
@@ -268,8 +268,8 @@ without a second lookup:
 
 ```rae
 loop let hit: view Query2Match in query2(tableA: world.positions, tableB: world.velocities) {
-  let pos: mod Position => queryModAt(table: world.positions, denseIndex: hit.indexA)
-  let vel: view Velocity => queryViewAt(table: world.velocities, denseIndex: hit.indexB)
+  let pos: mod Position = queryModAt(table: world.positions, denseIndex: hit.indexA)
+  let vel: view Velocity = queryViewAt(table: world.velocities, denseIndex: hit.indexB)
   pos.x = pos.x + vel.dx
 }
 func queryModAt(table: mod ComponentTable(T), denseIndex: view Int) ret mod T
@@ -336,8 +336,8 @@ exactly. A JOIN hoists its match list and walks it:
 let raeQueryHits0: List(Query2Match) = query2(tableA: pos, tableB: vel)
 loop let raeQueryHit0: view Query2Match in raeQueryHits0 {
   let entityId: EntityId = raeQueryHit0.entityId
-  let p: mod Pos  => queryModAt(table: pos, denseIndex: raeQueryHit0.indexA)
-  let v: view Vel => queryViewAt(table: vel, denseIndex: raeQueryHit0.indexB)
+  let p: mod Pos = queryModAt(table: pos, denseIndex: raeQueryHit0.indexA)
+  let v: view Vel = queryViewAt(table: vel, denseIndex: raeQueryHit0.indexB)
   p.x = p.x + v.v
 }
 ```
@@ -352,7 +352,7 @@ loop let entityId: EntityId, fade: view HoverFade in query(table: fades) { … }
 let raeQueryCount0: Int = queryCount(table: fades)
 loop var raeQueryIndex0: Int = 0, raeQueryIndex0 < raeQueryCount0, ++raeQueryIndex0 {
   let entityId: EntityId = queryEntityAt(table: fades, denseIndex: raeQueryIndex0)
-  let fade: view HoverFade => queryViewAt(table: fades, denseIndex: raeQueryIndex0)
+  let fade: view HoverFade = queryViewAt(table: fades, denseIndex: raeQueryIndex0)
   …
 }
 ```

@@ -2,9 +2,10 @@
 
 Status: **decided 2026-09-30: option N of `docs/binding-syntax-survey.md`;
 revised 2026-10-20: `=` is the only binder, `=>` goes (§1).** The revision
-lands in six queued steps ("binding `=` 1/6" to "6/6"): until the parser
-step the compiler still spells an alias binding `=>`, and until the error
-step it accepts both. The 2026-09-30 decision replaced the
+lands in six queued steps ("binding `=` 1/6" to "6/6"): the compiler takes
+`=` for an alias binding since 0.2.95, the tree was swept to it, and `=>`
+is a compile error since 0.2.96 ('alias bindings use `=`'; `rae format`
+still reads `=>` and rewrites it to `=`). The 2026-09-30 decision replaced the
 `name: mode Type: value` grammar settled on 2026-09-29, which is withdrawn
 (it is in git history). The ownership model (who takes, who copies, who
 aliases) is unchanged.

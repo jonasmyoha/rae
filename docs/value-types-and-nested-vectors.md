@@ -109,8 +109,8 @@ snippets below say `copyAt`.) `copyAt` returns `opt T` **by value**.
 | pattern | returns | generated C | cost |
 |---|---|---|---|
 | `if let particle: Particle = particles.copyAt(index:)` | `opt T` | `rae_Particle particle = data[i];` | **full-struct copy** |
-| `if let particle: view Particle => particles.viewAt(index:)` | `opt view T` | `rae_Particle* particle = &data[i];` … `particle->…` | **pointer, zero copy** |
-| `if let particle: mod Particle => particles.modAt(index:)` | `opt mod T` | `rae_Particle* particle = &data[i]; particle->position.x = …;` | **pointer, in-place write** |
+| `if let particle: view Particle = particles.viewAt(index:)` | `opt view T` | `rae_Particle* particle = &data[i];` … `particle->…` | **pointer, zero copy** |
+| `if let particle: mod Particle = particles.modAt(index:)` | `opt mod T` | `rae_Particle* particle = &data[i]; particle->position.x = …;` | **pointer, in-place write** |
 
 All three are peephole-lowered to a direct bounds-checked index into the contiguous
 `data` block — **none allocate**. The difference is copy-vs-reference:
@@ -125,7 +125,7 @@ All three are peephole-lowered to a direct bounds-checked index into the contigu
   element's owned fields.
 
 The `=>` peephole also fires when a `view`/`mod` alias is bound to `at`/`get`
-directly (`if let particle: view Particle => particles.copyAt(index:)`), aliasing live
+directly (`if let particle: view Particle = particles.copyAt(index:)`), aliasing live
 storage the same way — but `viewAt`/`modAt` are the accessors that actually *return*
 `opt view T` / `opt mod T`, so they are the clearer spelling. Verified at runtime: a
 `modAt` write persists and is seen by a subsequent value/`view` read.
