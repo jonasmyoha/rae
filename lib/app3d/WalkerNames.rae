@@ -1,0 +1,50 @@
+# app3d/WalkerNames — the walker examples' names over their crowd: each crowd
+# character carries a WorldLabel (app3d/WorldLabel) with its name, drawn by
+# drawWorldLabels in the overlay pass (app3d/WalkerRenderWalk). This system
+# writes each label's point over its character's head every frame (the
+# walker keeps its controllers, not its characters' transforms, current) and
+# hides the one the player drives, as friend-group games do.
+import Vec3
+open ecs/Entity
+open ecs/ComponentTable
+open app3d/CharacterController
+open app3d/CharacterBodies
+open app3d/WorldLabel
+open app3d/WalkerWorld
+
+# A name is 0.26 m tall, 2.05 m over the feet (over the sample character.s head
+# and a little air), full to 18 m from the eye, gone at 28 m
+const crowdNameHeight: Float = 0.26
+
+const crowdNameOverFeet: Float = 2.05
+
+# The crowd member `entityId` gets its name, "Walker <number>"
+func addCrowdNameLabel(world: mod WalkerWorld, entityId: view EntityId, number: view Int) {
+  let label: WorldLabel = {
+    text: "Walker {number}"
+    point: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    height: crowdNameHeight
+    fullUntil: 18.0
+    goneAt: 28.0
+  }
+  componentSet(this: world.worldLabels, entityId: entityId, data: label)
+}
+
+# Every name over its character's head, but not the driven one's
+func updateCrowdNameLabels(world: mod WalkerWorld, groundZ: view Float) {
+  loop var i: Int = 0, i < componentCount(this: world.worldLabels), ++i {
+    let entityId: EntityId = componentEntityAt(this: world.worldLabels, i: i)
+    if componentHas(this: world.controllers, entityId: entityId) {
+      let feet: Vec3 = controllerFeet(
+        controller: controllerOf(controllers: world.controllers, entityId: entityId)
+        groundZ: groundZ
+      )
+      let label: mod WorldLabel = componentMod(this: world.worldLabels, entityId: entityId)
+      label.point = Vec3.create(x: feet.x, y: feet.y, z: feet.z + crowdNameOverFeet)
+      label.opacity = 1.0
+      if componentHas(this: world.controlled, entityId: entityId) {
+        label.opacity = 0.0
+      }
+    }
+  }
+}
