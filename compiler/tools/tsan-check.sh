@@ -47,15 +47,17 @@ if [ "$(uname)" = "Darwin" ]; then
   FRAMEWORKS="-framework Foundation -framework ImageIO -framework CoreGraphics"
 fi
 
-passed=0; failed=0
-for name in $CASES; do
+# One fixture case: emit, build under TSan, run, compare. Prints a FAIL line
+# with details and returns 1 on failure; prints nothing on success.
+tsan_case() {
+  local name="$1"
   dir="tests/cases/$name"
   work="$TMP/$name"
   mkdir -p "$work"
   if ! perl -e 'alarm shift; exec @ARGV' 300 "$RAE" build --target compiled --emit-c \
       --project "$dir" --out "$work/out.c" "$dir/Main.rae" > "$work/emit.log" 2>&1; then
     echo "FAIL: tsan $name (emit failed)"; sed 's/^/    /' "$work/emit.log" | tail -5
-    failed=$((failed + 1)); continue
+    return 1
   fi
   # A case's own C beside its Main.rae (as `rae run` links it)
   case_c=()
@@ -63,11 +65,11 @@ for name in $CASES; do
   # -O1 -g: TSan's recommended level; -fno-omit-frame-pointer for its stacks.
   # shellcheck disable=SC2086
   if ! perl -e 'alarm shift; exec @ARGV' 300 "$CC" -std=c11 -O1 -g -fno-omit-frame-pointer \
-      -fsanitize=thread -ffp-contract=off -w "$work/out.c" "$work/rae_runtime.c" ${case_c[@]+"${case_c[@]}"} \
+      -fsanitize=thread -ffp-contract=off -w "$work/out.c" "$TMP/rae_runtime_tsan.o" ${case_c[@]+"${case_c[@]}"} \
       -I"$work" -I/opt/homebrew/include $FRAMEWORKS -lm -lpthread \
       -o "$work/app" > "$work/cc.log" 2>&1; then
     echo "FAIL: tsan $name (TSan build failed)"; sed 's/^/    /' "$work/cc.log" | tail -5
-    failed=$((failed + 1)); continue
+    return 1
   fi
   # The case's own environment (config.env, as run_tests.sh applies it), so a
   # case like 1061's thread cap runs the same path under TSan
@@ -84,11 +86,11 @@ for name in $CASES; do
     reports=$(grep -c "WARNING: ThreadSanitizer" "$work/stderr")
     echo "FAIL: tsan $name ($reports TSan report(s))"
     grep -A12 "WARNING: ThreadSanitizer" "$work/stderr" | head -40 | sed 's/^/    /'
-    failed=$((failed + 1)); continue
+    return 1
   fi
   if [ "$rc" != "0" ]; then
     echo "FAIL: tsan $name (exit $rc)"; tail -5 "$work/stderr" | sed 's/^/    /'
-    failed=$((failed + 1)); continue
+    return 1
   fi
   # Trailing blank lines differ between `rae run` (what expected.txt holds)
   # and the bare binary; nothing else may. The runtime's own `[rae] ...`
@@ -97,10 +99,21 @@ for name in $CASES; do
   if [ -f "$dir/expected.txt" ] && ! diff -q <(trim "$work/stdout") <(trim "$dir/expected.txt") >/dev/null; then
     echo "FAIL: tsan $name (output differs from expected.txt)"
     diff <(trim "$work/stdout") <(trim "$dir/expected.txt") | head -10 | sed 's/^/    /'
-    failed=$((failed + 1)); continue
+    return 1
   fi
-  passed=$((passed + 1))
-done
+  return 0
+}
+export -f tsan_case
+
+# The runtime is the same C for every case (the emit copies runtime/ beside
+# out.c), so it is built under TSan once, here, and linked into each case
+if ! perl -e 'alarm shift; exec @ARGV' 300 "$CC" -std=c11 -O1 -g -fno-omit-frame-pointer \
+    -fsanitize=thread -ffp-contract=off -w -c runtime/rae_runtime.c -Iruntime -I/opt/homebrew/include \
+    -o "$TMP/rae_runtime_tsan.o" > "$TMP/runtime_cc.log" 2>&1; then
+  echo "FAIL: tsan-check (the runtime does not build under TSan)"; tail -5 "$TMP/runtime_cc.log" | sed 's/^/    /'
+  exit 1
+fi
+export RAE CC TIMEOUT_S TMP FRAMEWORKS
 
 # 106_mobile_ui's real workers (the Spotify poller thread, the artwork fetch
 # workers, EventLoop.wake from both): the app built like the example gate
@@ -115,37 +128,64 @@ if [ -z "${RAE_TSAN_FILTER:-}" ] || echo " $RAE_TSAN_FILTER " | grep -q " 106_mo
     echo "SKIP: tsan 106_mobile_ui (needs SDL3 and wgpu-native)"
   fi
 fi
-if [ -n "$APP106" ]; then
-  work="$TMP/106_mobile_ui"; mkdir -p "$work"
+# Its runtime has SDL3 and WebGPU on, so it builds its own copy
+tsan_app106() {
+  local work="$TMP/106_mobile_ui"
   if ! perl -e 'alarm shift; exec @ARGV' 300 "$RAE" build --target compiled --emit-c \
       --project ../examples/106_mobile_ui --out "$work/out.c" ../examples/106_mobile_ui/Main.rae \
       > "$work/emit.log" 2>&1; then
-    echo "FAIL: tsan 106_mobile_ui (emit failed)"; failed=$((failed + 1))
-  elif ! perl -e 'alarm shift; exec @ARGV' 600 "$CC" -std=c11 -O1 -g -fno-omit-frame-pointer \
+    echo "FAIL: tsan 106_mobile_ui (emit failed)"; return 1
+  fi
+  if ! perl -e 'alarm shift; exec @ARGV' 600 "$CC" -std=c11 -O1 -g -fno-omit-frame-pointer \
       -fsanitize=thread -ffp-contract=off -w -o "$work/app" "$work/out.c" "$work/rae_runtime.c" \
       $([ -f "$work/monocypher.c" ] && echo "$work/monocypher.c") \
       -I"$work" -I/opt/homebrew/include -L/opt/homebrew/lib -DRAE_HAS_SDL3 -DRAE_HAS_WEBGPU \
       -I"$WGPU/include" -L"$WGPU/lib" -lwgpu_native -Wl,-rpath,"$WGPU/lib" \
       -framework Metal -framework QuartzCore -lSDL3 $FRAMEWORKS > "$work/cc.log" 2>&1; then
     echo "FAIL: tsan 106_mobile_ui (TSan build failed)"; tail -5 "$work/cc.log" | sed 's/^/    /'
-    failed=$((failed + 1))
-  else
-    (cd .. && RAE_UI_SCREEN=home RAE_AUTO_EXIT_SEC=6 RAE_SDL_HEADLESS_MS=6000 RAE_MEM_STATS=1 \
-      TSAN_OPTIONS="halt_on_error=0 exitcode=66" \
-      perl -e 'alarm shift; exec @ARGV' "$TIMEOUT_S" "$work/app") > "$work/stdout" 2> "$work/stderr"
-    rc=$?
-    if grep -q "ThreadSanitizer" "$work/stderr"; then
-      echo "FAIL: tsan 106_mobile_ui ($(grep -c 'WARNING: ThreadSanitizer' "$work/stderr") TSan report(s))"
-      grep -A12 "WARNING: ThreadSanitizer" "$work/stderr" | head -40 | sed 's/^/    /'
-      failed=$((failed + 1))
-    elif [ "$rc" != "0" ]; then
-      echo "FAIL: tsan 106_mobile_ui (exit $rc)"; tail -5 "$work/stderr" | sed 's/^/    /'
-      failed=$((failed + 1))
-    else
-      passed=$((passed + 1))
-    fi
+    return 1
   fi
-fi
+  (cd .. && RAE_UI_SCREEN=home RAE_AUTO_EXIT_SEC=6 RAE_SDL_HEADLESS_MS=6000 RAE_MEM_STATS=1 \
+    TSAN_OPTIONS="halt_on_error=0 exitcode=66" \
+    perl -e 'alarm shift; exec @ARGV' "$TIMEOUT_S" "$work/app") > "$work/stdout" 2> "$work/stderr"
+  local rc=$?
+  if grep -q "ThreadSanitizer" "$work/stderr"; then
+    echo "FAIL: tsan 106_mobile_ui ($(grep -c 'WARNING: ThreadSanitizer' "$work/stderr") TSan report(s))"
+    grep -A12 "WARNING: ThreadSanitizer" "$work/stderr" | head -40 | sed 's/^/    /'
+    return 1
+  fi
+  if [ "$rc" != "0" ]; then
+    echo "FAIL: tsan 106_mobile_ui (exit $rc)"; tail -5 "$work/stderr" | sed 's/^/    /'
+    return 1
+  fi
+  return 0
+}
+export -f tsan_app106
+export WGPU
+
+# Every program runs in parallel (TSan builds and runs are single-threaded;
+# one after another they took 157 s), 106_mobile_ui first because it is the
+# longest. Each writes its verdict to its own file, and the lines are printed
+# in order after all of them end.
+PROGRAMS=""
+if [ -n "$APP106" ]; then PROGRAMS="106_mobile_ui"; fi
+for name in $CASES; do
+  if [ "$name" != "106_mobile_ui" ]; then PROGRAMS="$PROGRAMS $name"; fi
+done
+JOBS="${JOBS:-$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)}"
+printf '%s\n' $PROGRAMS | xargs -P "$JOBS" -n 1 bash -c '
+  mkdir -p "$TMP/$1"
+  if [ "$1" = "106_mobile_ui" ]; then program=tsan_app106; else program=tsan_case; fi
+  if "$program" "$1" > "$TMP/$1/verdict" 2>&1; then echo 0; else echo 1; fi > "$TMP/$1/rc"' _
+passed=0; failed=0
+for name in $PROGRAMS; do
+  cat "$TMP/$name/verdict" 2>/dev/null
+  if [ "$(cat "$TMP/$name/rc" 2>/dev/null)" = "0" ]; then
+    passed=$((passed + 1))
+  else
+    failed=$((failed + 1))
+  fi
+done
 
 if [ "$failed" = "0" ]; then
   echo "PASS: tsan-check ($passed threaded programs, no ThreadSanitizer report)"

@@ -826,10 +826,35 @@ A bare `make test > /tmp/some-other-file.log` is invisible to the UI (wrong file
 perl -e 'alarm shift; exec @ARGV' 600 bash compiler/tools/watch-tests.sh
 ```
 
-**Run it in the FOREGROUND.** The run takes ~6 minutes (489 cases, ~350 s
-parallel on 10 cores) and the tool call simply returns when it is done. That is
-the whole recipe; everything below is only for the case where you truly cannot
-block.
+**Run it in the FOREGROUND.** The run takes ~5 minutes (843 cases
+in ~130 s parallel on 10 cores, plus the gates) and the tool call
+simply returns when it is done. That is the whole recipe; everything below is
+only for the case where you truly cannot block. Every run ends with "Stage
+times, slowest first" and the 15 slowest unit cases: when the suite gets slow
+again, read those lines before guessing (2026-10-20 they showed that each case
+walked all 843 case directories to find itself, ~5 s per case). The compiled
+C runtime is built once per compile command and runtime source, and kept in
+`~/.cache/rae/runtime/` (`compiler/src/runtime_cache.c`): a small case's C
+build is ~0.2 s, not ~1.9 s. Delete that directory to start over.
+
+**Which tests a task runs.** The full suite is the gate for a change that can
+reach any program. For a change that cannot, run the narrow check instead,
+and say in the commit message which one you ran:
+
+| the change touches | run |
+|---|---|
+| `compiler/src/`, `compiler/runtime/`, `lib/core/`, the Makefile or the test runners | the full suite |
+| a `lib/` module that many programs use (`ecs/`, `collections/`, `Math`, `Vec3`, `ui/`), or `run_cases.sh --grep` finds 50+ cases | the full suite |
+| any other `lib/` module | `bash compiler/tools/run_cases.sh --grep '<its import path>'` (the cases that import it, in parallel), plus `rae build --emit-c` of every example that imports it (`grep -rl '<its import path>' examples`) |
+| one example | build it (`rae build --emit-c`), run it if the change shows on screen, `make example-copy-gate` |
+| one gate or tool script | that gate alone (`make -C compiler tsan`, `bash compiler/tools/wasm_webgpu_smoke.sh`, ...) |
+| docs, `QUEUE.md`, comments, `tools/devtools-web` | no unit tests (the commit hooks run the banned-terms gate) |
+
+`--grep` finds the cases that name the module directly. A module that other
+`lib/` modules import reaches further: grep for those importers too, or run
+the full suite. When you are not sure the narrow check covers the change, run
+the full suite. In a series of queued steps on the same area, run the narrow
+check on each step and the full suite on the last one.
 
 **If you background it, watch the RIGHT marker.** This has cost hours, three
 times: a background run was waited on with
