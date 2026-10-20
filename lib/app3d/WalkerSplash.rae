@@ -57,7 +57,7 @@ func runSplashPoseTest(
     ret 1
   }
   let heroEntityId: EntityId = controlledCharacter(controlled: world.controlled)
-  let origin: Vec3 = controllerOf(world: world, entityId: heroEntityId).position
+  let origin: Vec3 = controllerOf(controllers: world.controllers, entityId: heroEntityId).position
   let level: Float = origin.z + characterSystem.groundZ + 0.12
   var check: WadePoseCheck = createWadePoseCheck()
   loop var frame: Int = 0, frame < 180, ++frame {
@@ -102,7 +102,7 @@ func captureCharacterFeet(
     entityId: entityId
     model: walkerWorldModel(
       baseModel: characterSystem.basePartModel
-      controller: controllerOf(world: world, entityId: entityId)
+      controller: controllerOf(controllers: world.controllers, entityId: entityId)
     )
     skeleton: characterSystem.skeleton
     leftFootNode: characterSystem.leftFootNode

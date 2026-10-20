@@ -68,6 +68,7 @@ open app3d/WalkerTerrainBodies
 open app3d/WalkerAppSetup
 open app3d/WalkerRender
 open app3d/WalkerState
+open app3d/NetSeam
 
 # The walker app: the system list (WalkerApp.rae's header has the convention)
 type WalkerApp {
@@ -87,7 +88,7 @@ type WalkerApp {
   profiler: Profiler  # #764: was lib/profile.rae gProf* globals
   grassCompute: GrassCompute  # #764: was lib/GrassCompute.rae gGrass* globals
   physicsSystem: WalkerPhysics  # fixed-step sim seam (physics.rae, #553)
-  netSystem: WalkerNet  # multiplayer seam (net.rae, #554)
+  netSeam: NetSeam  # multiplayer seam (app3d/NetSeam, #554)
   players: PlayerRoster  # who the local player controls (players.rae, #546)
   persist: WalkerPersist
   # The spray of wading feet (lib/water/WadeSplash) and the FFT sea at the
@@ -127,7 +128,7 @@ func updateWalkerApp(app: mod WalkerApp) {
   let now: Float64 = app.frame.now
   # Multiplayer seam (offline no-op today, #554): pull remote intents in before
   # the local sim; the matching publish runs after it, below.
-  netApplyRemote(netSystem: app.netSystem, world: app.world)
+  netApplyRemote(netSeam: app.netSeam, netPlayers: app.world.netPlayers)
   let uiTick: UiTick = uiUpdate(
     uiSystems: app.inputSystem.uiSystems
     cameraSystem: app.cameraSystem
@@ -214,12 +215,15 @@ func updateWalkerApp(app: mod WalkerApp) {
   }
   # The controller's heading and position before the physics steps, to tell
   # whether the character moved this frame
-  let before: Vec3 = controllerOf(world: app.world, entityId: controlledEntityId).position
-  let headingBefore: Float = controllerOf(world: app.world, entityId: controlledEntityId).heading
+  let before: Vec3 = controllerOf(controllers: app.world.controllers, entityId: controlledEntityId).position
+  let headingBefore: Float = controllerOf(
+    controllers: app.world.controllers
+    entityId: controlledEntityId
+  ).heading
   driveCharacters(
     physicsSystem: app.physicsSystem
     controlledEntityId: controlledEntityId
-    controller: controllerOf(world: app.world, entityId: controlledEntityId)
+    controller: controllerOf(controllers: app.world.controllers, entityId: controlledEntityId)
     intent: intent
     cameraYaw: app.cameraSystem.rig.viewYaw
     speedScale: app.characterSystem.speed
@@ -235,7 +239,7 @@ func updateWalkerApp(app: mod WalkerApp) {
     frameTime: deltaTime
   )
   let after: view ThirdPersonController = controllerOf(
-    world: app.world
+    controllers: app.world.controllers
     entityId: controlledEntityId
   )
   characterMoved = physicsSteps > 0 and (after.position.x is not before.x or after.position.y is not before.y or after.position.z is not before.z or after.heading is not headingBefore)
@@ -279,9 +283,8 @@ func updateWalkerApp(app: mod WalkerApp) {
       )
     }
     let focusPos: Vec3 = controlledPosition(
-      world: app.world
-      players: app.players
-      characterSystem: app.characterSystem
+      controllers: app.world.controllers
+      controlled: app.world.controlled
     )
     app.cameraSystem.camera.target = Vec3.create(
       x: focusPos.x
@@ -290,9 +293,8 @@ func updateWalkerApp(app: mod WalkerApp) {
     )
   }
   let followPos: Vec3 = controlledPosition(
-    world: app.world
-    players: app.players
-    characterSystem: app.characterSystem
+    controllers: app.world.controllers
+    controlled: app.world.controlled
   )
   let terrainWrapped: Bool = updateInfiniteTerrain(
     terrainSystem: app.terrainSystem
@@ -327,7 +329,7 @@ func updateWalkerApp(app: mod WalkerApp) {
     )
   }
 
-  netPublishIntent(netSystem: app.netSystem, world: app.world)
+  netPublishIntent(netSeam: app.netSeam)
 
   # Read in beginWalkerFrame: windowResized() is cleared on read, and reading it
   # again here always gave false, so a resize was never saved
@@ -350,7 +352,7 @@ func updateWalkerApp(app: mod WalkerApp) {
           speed: app.characterSystem.speed
           toon: app.characterSystem.toon
           controller: controllerOf(
-            world: app.world
+            controllers: app.world.controllers
             entityId: rosterEntityAt(roster: app.players, index: 0)
           )
           rig: app.cameraSystem.rig
@@ -441,7 +443,7 @@ func updateWalkerCharacters(
     let entityId: EntityId = componentEntityAt(this: world.characterModels, i: i)
     let model: Mat4 = walkerWorldModel(
       baseModel: characterSystem.basePartModel
-      controller: controllerOf(world: world, entityId: entityId)
+      controller: controllerOf(controllers: world.controllers, entityId: entityId)
     )
     let models: mod CharacterModel = componentMod(this: world.characterModels, entityId: entityId)
     models.model = model

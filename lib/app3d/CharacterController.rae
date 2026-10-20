@@ -6,6 +6,10 @@ import Math
 import Sdl3
 import Vec3
 import Keys
+import Quat
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Transform
 
 const characterPi: Float = 3.141592653589793
 
@@ -155,4 +159,22 @@ type InputIntent {
   walking: Bool
   jump: Bool
   actions: Int
+}
+
+# The ThirdPersonController of a character entity (the hero or anyone else)
+func controllerOf(
+  controllers: view ComponentTable(ThirdPersonController)
+  entityId: view EntityId
+) ret view ThirdPersonController {
+  ret componentView(this: controllers, entityId: entityId)
+}
+
+# A controller's place as a Transform3D: its position, turned by its heading
+# about +z (the character entity's transform follows its controller)
+func controllerTransform3D(controller: view ThirdPersonController) ret Transform3D {
+  ret Transform3D {
+    position: controller.position
+    rotation: Quat.fromAxisAngle(axis: Vec3 { x: 0.0, y: 0.0, z: 1.0 }, angle: controller.heading)
+    scale: Vec3 { x: 1.0, y: 1.0, z: 1.0 }
+  }
 }

@@ -1,0 +1,130 @@
+# app3d/NetSeam — the multiplayer seam (offline today) any app's world can
+# carry. A joined remote player is an ENTITY with a NetPlayer component, joined
+# and left through the world's generational allocator, so a recycled slot's
+# stale handle reads dead. An app calls netApplyRemote before its own sim and
+# netPublishIntent after it; a transport later fills their loop bodies.
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/World
+
+# A joined remote player. `remoteId` is the transport-assigned peer id; `role`
+# mirrors NetSeam.role for that peer; `controlled` is the character ENTITY this
+# remote player drives (noEntity until it is assigned one). A remote player's
+# input will arrive here instead of from a local device.
+type NetPlayer {
+  remoteId: Int
+  role: Int
+  controlled: EntityId
+}
+
+# The seam's own state: role 0 offline, 1 server, 2 client; tick counts the
+# published local frames
+type NetSeam {
+  role: Int
+  tick: Int
+}
+
+func createNetSeam() ret NetSeam {
+  ret NetSeam { role: 0, tick: 0 }
+}
+
+# A player joins: a new entity carrying its NetPlayer
+func netJoin(
+  allocator: mod EntityAllocator
+  netPlayers: mod ComponentTable(NetPlayer)
+  remoteId: view Int
+  role: view Int
+) ret EntityId {
+  let entityId: EntityId = allocEntity(this: allocator)
+  componentSet(
+    this: netPlayers
+    entityId: entityId
+    data: NetPlayer { remoteId: remoteId, role: role, controlled: noEntity() }
+  )
+  ret entityId
+}
+
+# A player leaves: every component row of the entity in `world` (any app's
+# world with an `allocator`) is cleared, then its slot freed, so a later join
+# recycles the index and nothing stale is read from any table
+func netLeave(W: type, world: mod W, entityId: view EntityId) {
+  clearEntityComponents(W, world: world, entityId: entityId)
+  freeEntity(this: world.allocator, entityId: entityId)
+}
+
+func netPlayerCount(netPlayers: view ComponentTable(NetPlayer)) ret Int {
+  ret componentCount(this: netPlayers)
+}
+
+# Pull the remote players' intents in, before the local sim. Offline there is
+# no wire: a transport reads each NetPlayer's latest intent here and drives
+# its `controlled` character, the same seam a local device drives.
+func netApplyRemote(netSeam: mod NetSeam, netPlayers: view ComponentTable(NetPlayer)) {
+  loop var i: Int = 0, i < componentCount(this: netPlayers), ++i {
+  }
+}
+
+# Publish the local player's intent, after the sim. Offline: advance the tick
+# so the seam is seen to run.
+func netPublishIntent(netSeam: mod NetSeam) {
+  netSeam.tick = netSeam.tick + 1
+}
+
+# What the recycling check found: the slot that was freed and joined again,
+# its generation before and after, and whether all of it held
+type NetRecycleCheck {
+  index: Int
+  generationBefore: Int
+  generationAfter: Int
+  ok: Bool
+}
+
+# Join three players, let the middle one leave, join a fourth: the fourth
+# must reuse the freed index with the next generation and the departed handle
+# read dead. Everything it joined leaves again, so `world` is as it was.
+func netRecycleSelfTest(W: type, world: mod W) ret NetRecycleCheck {
+  let first: EntityId = netJoin(
+    allocator: world.allocator
+    netPlayers: world.netPlayers
+    remoteId: 101
+    role: 2
+  )
+  let middle: EntityId = netJoin(
+    allocator: world.allocator
+    netPlayers: world.netPlayers
+    remoteId: 102
+    role: 2
+  )
+  let last: EntityId = netJoin(
+    allocator: world.allocator
+    netPlayers: world.netPlayers
+    remoteId: 103
+    role: 2
+  )
+  netLeave(W, world: world, entityId: middle)
+  let fourth: EntityId = netJoin(
+    allocator: world.allocator
+    netPlayers: world.netPlayers
+    remoteId: 104
+    role: 2
+  )
+  let ok: Bool = fourth.index is middle.index and fourth.generation is middle.generation + 1 and allocatorIsAlive(
+    this: world.allocator
+    entityId: middle
+  ) is false
+  netLeave(W, world: world, entityId: first)
+  netLeave(W, world: world, entityId: last)
+  netLeave(W, world: world, entityId: fourth)
+  ret NetRecycleCheck {
+    index: middle.index
+    generationBefore: middle.generation
+    generationAfter: fourth.generation
+    ok: ok
+  }
+}
+
+# The seam test's log line, with the app's own physics check beside it (its
+# physics differs from app to app)
+func seamTestLine(check: view NetRecycleCheck, physicsOk: view Bool) ret String {
+  ret "[seamtest] net recycle idx={check.index} gen {check.generationBefore}->{check.generationAfter} netOk={check.ok} physicsOk={physicsOk}"
+}

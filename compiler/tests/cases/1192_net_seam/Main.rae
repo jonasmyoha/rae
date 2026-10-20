@@ -1,0 +1,58 @@
+# lib/app3d/NetSeam: a joined remote player is an entity with a NetPlayer
+# component in any app's world; a leave clears all its rows and frees the
+# slot, so the next join recycles the index with the next generation. And
+# lib/app3d/Characters: the controlled character's position comes from the
+# Controlled tag, whichever entity carries it.
+import Vec3
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/World
+open app3d/CharacterController
+open app3d/Characters
+open app3d/NetSeam
+
+type SeamWorld {
+  allocator: EntityAllocator
+  netPlayers: ComponentTable(NetPlayer)
+  controllers: ComponentTable(ThirdPersonController)
+  controlled: ComponentTable(Controlled)
+}
+
+func main() {
+  var world: SeamWorld = {
+    allocator: createEntityAllocator()
+    netPlayers: ComponentTable.create(NetPlayer)
+    controllers: ComponentTable.create(ThirdPersonController)
+    controlled: ComponentTable.create(Controlled)
+  }
+  var netSeam: NetSeam = createNetSeam()
+  let check: NetRecycleCheck = netRecycleSelfTest(SeamWorld, world: world)
+  log("recycled with the next generation: {check.ok}")
+  log("no player left behind: {netPlayerCount(netPlayers: world.netPlayers) is 0}")
+  log(seamTestLine(check: check, physicsOk: true))
+  netApplyRemote(netSeam: netSeam, netPlayers: world.netPlayers)
+  netPublishIntent(netSeam: netSeam)
+  log("a published frame ticks: {netSeam.tick is 1}")
+
+  var walker: ThirdPersonController = createThirdPersonController()
+  walker.position = Vec3.create(x: 3.0, y: 4.0, z: 0.0)
+  walker.heading = 1.5
+  let hero: EntityId = allocEntity(this: world.allocator)
+  let other: EntityId = allocEntity(this: world.allocator)
+  componentSet(this: world.controllers, entityId: hero, data: createThirdPersonController())
+  componentSet(this: world.controllers, entityId: other, data: walker)
+  setControlledCharacter(controlled: world.controlled, entityId: other)
+  let position: Vec3 = controlledPosition(
+    controllers: world.controllers
+    controlled: world.controlled
+  )
+  let heading: Float = controlledHeading(
+    controllers: world.controllers
+    controlled: world.controlled
+  )
+  log("the tagged character's position: {position.x > 2.99 and position.y > 3.99}")
+  log("and heading: {heading > 1.49 and heading < 1.51}")
+  log(
+    "its transform stands where it is: {controllerTransform3D(controller: walker).position.x > 2.99}"
+  )
+}
