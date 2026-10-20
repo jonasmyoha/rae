@@ -1,0 +1,22 @@
+# A type belongs to its module. lib/Device declares `enum Pointer`; this file
+# only imports Device and declares its own `type Pointer`, so the two live
+# side by side: the bare name is this file's, and `Device.Pointer` is the
+# lib's, in a type and in an expression (docs/module-namespacing.md). Loading
+# both used to be an error ("type names are program-wide").
+import Device
+
+type Pointer {
+  x: Int
+}
+
+func isFine(pointer: view Device.Pointer) ret Bool {
+  ret pointer is Device.Pointer.fine
+}
+
+func main() {
+  let mine: Pointer = { x: 3 }
+  let lib: Device.Pointer = Device.Pointer.coarse
+  let kinds: List(Device.Pointer) = { Device.Pointer.fine, lib }
+  log("mine: {mine}")
+  log("lib: {lib}, fine: {isFine(pointer: lib)}, kinds: {kinds.length}")
+}

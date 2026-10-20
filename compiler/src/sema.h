@@ -44,4 +44,23 @@ Str get_base_type_name(const AstTypeRef* type);
 void sema_check_main_loops(AstModule* module, const char* file, const AstFuncDecl* func);
 Str get_decl_name(const AstDecl* d);
 
+/* The visibility rules of a bare name (docs/module-namespacing.md), for the
+ * passes outside sema.c that resolve names by them (type_names.c). */
+bool sema_decl_bare_visible(const char* file, const AstDecl* d);     /* own module, opened, project, prelude */
+bool sema_decl_opened_explicitly(const char* file, const AstDecl* d);
+bool sema_decl_reachable(const char* file, const AstDecl* d);        /* bare-visible or imported */
+bool sema_decl_in_lib(const AstDecl* d);
+bool sema_decl_in_prelude(const AstDecl* d);
+bool sema_file_names_module(const char* file, Str qualifier);     /* `import X` / `open X` / `as X` */
+/* Does `file` reach d's module through `qualifier` (`import a/X` or `as X`)? */
+bool sema_qualifier_reaches(const char* file, Str qualifier, const AstDecl* d);
+
+/* type_names.c: two modules may declare the same type or enum name. Before
+ * sema, every such declaration but one gets an internal name that carries
+ * its module, and every use is pointed at the declaration the using file
+ * sees (an error when two are visible bare). type_written_name gives back
+ * the name as written, for anything a program reads as text. */
+void sema_separate_clashing_type_names(CompilerContext* ctx, AstModule* module);
+Str type_written_name(Str name);
+
 #endif // RAE_SEMA_H

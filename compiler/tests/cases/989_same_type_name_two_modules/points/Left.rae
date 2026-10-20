@@ -1,0 +1,13 @@
+# A module with its own `Point`.
+type Point {
+  x: Int
+  y: Int
+}
+
+func leftSummary() ret String {
+  var points: List(Point) = { { x: 1, y: 2 } }
+  points.add(value: Point { x: 3, y: 4 })
+  let last: Point = points.copyAtFallback(index: 1, fallback: { x: 0, y: 0 })
+  let back: Point = Point.fromJson(json: last.toJson())
+  ret "{points.length} points, last {last.x},{last.y}, JSON {last.toJson()}, back {back.y}"
+}
