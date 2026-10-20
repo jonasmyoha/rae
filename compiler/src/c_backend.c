@@ -46,10 +46,17 @@ bool emitted_list_contains(EmittedTypeList* list, const char* name) {
     return false;
 }
 
+/* Grows: a name past a fixed capacity used to be dropped, so the type was
+ * emitted again further on (a C "redefinition of struct"). */
 void emitted_list_add(EmittedTypeList* list, const char* name) {
-    if (list->count < list->capacity) {
-        list->items[list->count++] = name;
+    if (list->count >= list->capacity) {
+        size_t capacity = list->capacity ? list->capacity * 2 : 64;
+        const char** items = realloc((void*)list->items, capacity * sizeof(*items));
+        if (!items) { fprintf(stderr, "c backend: out of memory growing the emitted-type list\n"); abort(); }
+        list->items = items;
+        list->capacity = capacity;
     }
+    list->items[list->count++] = name;
 }
 
 // (forward declarations live in c_backend_internal.h)
@@ -2252,8 +2259,11 @@ bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* 
 }
 
 // Track emitted specialized functions to avoid redefinitions
-const char* g_emitted_spec_funcs[4096];
+/* Grows (RAE_GROW1): past a fixed 4096 a specialization was not recorded,
+ * so it could be emitted twice. */
+const char** g_emitted_spec_funcs = NULL;
 static size_t g_emitted_spec_func_count = 0;
+static size_t g_emitted_spec_func_cap = 0;
 
 static bool is_container_base(Str base) {
   return str_eq_cstr(base, "List") || str_eq_cstr(base, "StringMap") || str_eq_cstr(base, "IntMap");
@@ -2285,7 +2295,8 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
   for (size_t i = 0; i < g_emitted_spec_func_count; i++) {
       if (strcmp(g_emitted_spec_funcs[i], mangled) == 0) return true;
   }
-  if (g_emitted_spec_func_count < 4096) g_emitted_spec_funcs[g_emitted_spec_func_count++] = mangled;
+  RAE_GROW1(g_emitted_spec_funcs, g_emitted_spec_func_count, g_emitted_spec_func_cap);
+  g_emitted_spec_funcs[g_emitted_spec_func_count++] = mangled;
   // A container drop whose elements are containers calls the ELEMENT
   // container's drop per element (Layer 5 below). That drop may be emitted
   // later or not be forward-declared yet (a `List(List(Point))` made with

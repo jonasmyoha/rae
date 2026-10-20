@@ -219,7 +219,6 @@ void decl_index_note_module(const CompilerContext* ctx, const AstModule* module)
 }
 
 bool decl_index_module_collected(const CompilerContext* ctx, const AstModule* module) {
-  if (ctx->all_decl_count >= ctx->all_decl_cap) return false; /* the list overflowed */
   decl_index_sync(ctx);
   return pointer_contains(module);
 }
