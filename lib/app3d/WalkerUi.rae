@@ -88,9 +88,8 @@ func onCharacterSwitched(
   characterSystem: view CharacterSystem
 ) {
   cameraSystem.rig.yaw = controlledHeading(
-    world: world
-    players: players
-    characterSystem: characterSystem
+    controllers: world.controllers
+    controlled: world.controlled
   )
   snapCameraRigView(rig: cameraSystem.rig)
   persist.stateDirty = true

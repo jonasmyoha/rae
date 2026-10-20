@@ -4,7 +4,7 @@
 # ThirdPersonController and an AnimationState; each skinned body part is an
 # entity with a PartRoughness; the terrain props are WalkerTerrain's
 # TerrainProp / TreeVariant; a joined remote player is a NetPlayer
-# (app3d/WalkerNet). The physics bodies' tables are WalkerPhysics' own, their
+# (app3d/NetSeam). The physics bodies' tables are WalkerPhysics' own, their
 # poses are in `transforms` here.
 #
 # The transform components are lib/ecs's quaternion Transform3D /
@@ -27,6 +27,7 @@ open ecs/Tag
 open app3d/PlayerRoster
 open app3d/WalkerTerrain
 open app3d/WalkerPhysics
+open app3d/NetSeam
 
 type WalkerWorld {
   allocator: EntityAllocator
@@ -150,46 +151,8 @@ func walkerWorldPartAt(world: view WalkerWorld, i: view Int) ret view PartRoughn
   ret queryViewAt(table: world.partRoughness, denseIndex: i)
 }
 
-# Derive a Transform3D from a controller (its position + heading about +Z). Kept
-# in sync at creation and whenever the controller moves, so the ECS transform
-# tracks the gameplay controller (later systems — camera rig #744, quat #745 —
-# read this rather than the controller directly).
-# The ThirdPersonController of an entity (hero or crowd member). A narrow
-# WalkerWorld accessor so systems read a controlled character straight from the
-# world without depending on the App aggregate (#743).
-func controllerOf(world: view WalkerWorld, entityId: view EntityId) ret view ThirdPersonController {
-  ret componentView(this: world.controllers, entityId: entityId)
-}
-
-func controllerTransform3D(controller: view ThirdPersonController) ret Transform3D {
-  ret Transform3D {
-    position: controller.position
-    rotation: Quat.fromAxisAngle(axis: Vec3 { x: 0.0, y: 0.0, z: 1.0 }, angle: controller.heading)
-    scale: Vec3 { x: 1.0, y: 1.0, z: 1.0 }
-  }
-}
-
 func walkerWorldEntityCount(world: view WalkerWorld) ret Int {
   ret allocatorAliveCount(this: world.allocator)
-}
-
-# The world position / heading of whichever character the local player
-# controls (app3d/PlayerRoster) — the hero or a crowd member. Used to aim the
-# camera and stream the terrain around the ACTIVE character.
-func controlledPosition(
-  world: view WalkerWorld
-  players: view PlayerRoster
-  characterSystem: view CharacterSystem
-) ret Vec3 {
-  ret controllerOf(world: world, entityId: rosterControlledEntityId(players: players)).position
-}
-
-func controlledHeading(
-  world: view WalkerWorld
-  players: view PlayerRoster
-  characterSystem: view CharacterSystem
-) ret Float {
-  ret controllerOf(world: world, entityId: rosterControlledEntityId(players: players)).heading
 }
 
 # Despawn a cube: its body, collider and PhysicsCube row (WalkerPhysics),

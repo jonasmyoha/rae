@@ -49,7 +49,7 @@ func runPooledTrunkTest(
   heroEntityId: view EntityId
 ) ret Bool {
   let heroFeet: Vec3 = controllerFeet(
-    controller: controllerOf(world: world, entityId: heroEntityId)
+    controller: controllerOf(controllers: world.controllers, entityId: heroEntityId)
     groundZ: physicsSystem.groundZ
   )
   if let treeEntityId: EntityId = nearestPooledTrunk(
@@ -76,7 +76,7 @@ func runPooledTrunkTest(
     )
     let stoppedAtBark: Bool = closest > treeTrunkRadius + 0.1 and closest < treeTrunkRadius + 1.2
     let feetNow: Vec3 = controllerFeet(
-      controller: controllerOf(world: world, entityId: heroEntityId)
+      controller: controllerOf(controllers: world.controllers, entityId: heroEntityId)
       groundZ: physicsSystem.groundZ
     )
     let followed: Bool = poolFollows(

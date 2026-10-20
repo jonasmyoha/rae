@@ -18,6 +18,8 @@ open GbufferInstanced
 open ecs/Entity
 open ecs/ComponentTable
 open ecs/Tag
+import Vec3
+open app3d/CharacterController
 
 # The clips a character may play (an int clipIndex in an AnimationState): an
 # app without jump clips plays its run clip for them
@@ -272,4 +274,41 @@ type PartRoughness {
   # A part only some characters show (a moustache, a hat): an app skips it
   # for a character without it
   optionalPart: Bool = false
+}
+
+# Below this horizontal speed (m/s) a character stands; below the next it walks;
+# below the last it walks fast; past it it runs
+const standSpeed: Float = 0.25
+
+const walkSpeedLimit: Float = 2.4
+
+const walkFastSpeedLimit: Float = 3.6
+
+# A deterministic, lively clip mix for the crowd (#547): each member animates
+# independently of the player, so the roster reads as distinct characters.
+func crowdClipFor(index: view Int) ret Int {
+  let pick: Int = index % 3
+  if pick is 0 {
+    ret ClipKind.walk as Int
+  }
+  if pick is 1 {
+    ret ClipKind.run as Int
+  }
+  ret ClipKind.idle as Int
+}
+
+# Where the character the local player drives (the Controlled tag) stands,
+# and which way it faces
+func controlledPosition(
+  controllers: view ComponentTable(ThirdPersonController)
+  controlled: view ComponentTable(Controlled)
+) ret Vec3 {
+  ret controllerOf(controllers: controllers, entityId: controlledCharacter(controlled: controlled)).position
+}
+
+func controlledHeading(
+  controllers: view ComponentTable(ThirdPersonController)
+  controlled: view ComponentTable(Controlled)
+) ret Float {
+  ret controllerOf(controllers: controllers, entityId: controlledCharacter(controlled: controlled)).heading
 }

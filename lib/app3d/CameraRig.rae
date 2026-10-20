@@ -25,7 +25,12 @@ import Keys
 import Sys
 open Scene3d
 open ecs/Entity
+open ecs/ComponentTable
 open Math3d
+open ecs/Transform
+open ecs/World
+open ecs/Hierarchy
+open ecs/hierarchySystem/HierarchySystem
 
 # Shift makes the WASD camera 4x FASTER, Control makes it 4x SLOWER (for fine framing).
 # Applied to translation only — boosting the turn rate as well makes the view hard to aim.
@@ -818,4 +823,27 @@ func applyCameraStartOverride(rig: mod CameraRig, camera: mod Camera3d) ret Bool
     ret true
   }
   ret false
+}
+
+# The camera rig as two entities, the rig and the camera, the camera a child
+# of the rig, both at an identity transform to start (call once, at setup;
+# the app places the rig entity each frame and the transform system composes
+# the camera's eye)
+func createCameraRigLink(
+  allocator: mod EntityAllocator
+  transforms: mod ComponentTable(Transform3D)
+  parents: mod ComponentTable(Parent)
+  childrens: mod ComponentTable(Children)
+) ret CameraRigLink {
+  let rigEntityId: EntityId = allocEntity(this: allocator)
+  let cameraEntityId: EntityId = allocEntity(this: allocator)
+  componentSet(this: transforms, entityId: rigEntityId, data: createTransform3D())
+  componentSet(this: transforms, entityId: cameraEntityId, data: createTransform3D())
+  setParent(
+    parents: parents
+    childrens: childrens
+    child: cameraEntityId
+    parent: rigEntityId
+  )
+  ret CameraRigLink { rigEntityId: rigEntityId, cameraEntityId: cameraEntityId }
 }
