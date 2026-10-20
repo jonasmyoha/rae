@@ -1,0 +1,50 @@
+# A `copy` or `own` parameter is the callee's own value, like a `var`: its
+# fields and the whole value may be written, and no write reaches the caller.
+# They used to be read-only ("cannot mutate through read-only view 'a'",
+# "cannot assign to read-only view identifier 'a'"). Only `view` parameters
+# stay read-only.
+type Particle {
+  x: Int
+  name: String
+  tags: List(String)
+}
+
+func editedCopy(particle: copy Particle) ret Particle {
+  particle.x = particle.x + 100
+  particle.name = "edited {particle.name}"
+  particle.tags.add(value: "copied")
+  ret particle
+}
+
+func replacedCopy(particle: copy Particle) ret Int {
+  particle = { x: 7, name: "replaced", tags: List.create(String, cap: 0) }
+  ret particle.x
+}
+
+func editedOwn(particle: own Particle) ret Particle {
+  particle.x = particle.x * 2
+  particle.tags.add(value: "owned")
+  particle = { x: particle.x + 1, name: "rebuilt", tags: own particle.tags }
+  ret particle
+}
+
+func tagsText(particle: view Particle) ret String {
+  var text: String = ""
+  loop let tag: view String in particle.tags {
+    text = "{text}[{tag}]"
+  }
+  ret text
+}
+
+func main() {
+  let original: Particle = { x: 1, name: "first", tags: List.create(String, cap: 2) }
+  let copied: Particle = editedCopy(particle: original)
+  log("copy: {copied.x} {copied.name} {tagsText(particle: copied)}")
+  log("caller after copy: {original.x} {original.name} {tagsText(particle: original)}")
+  log(
+    "whole copy written: {replacedCopy(particle: original)}, caller still {original.x} {original.name}"
+  )
+  var moving: Particle = { x: 5, name: "moving", tags: List.create(String, cap: 2) }
+  let moved: Particle = editedOwn(particle: own moving)
+  log("own: {moved.x} {moved.name} {tagsText(particle: moved)}")
+}
