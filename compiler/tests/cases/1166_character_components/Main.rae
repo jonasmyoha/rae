@@ -1,0 +1,61 @@
+# lib/app3d/Characters: the rules every character entity shares. The
+# Controlled tag is on one entity at a time and moves when control moves; a
+# character's clock runs at its clip's rate, slower in the air, stops while
+# paused, and its clip blend runs out after its duration.
+open ecs/Entity
+open ecs/ComponentTable
+open app3d/Characters
+
+func main() {
+  var controlled: ComponentTable(Controlled) = ComponentTable.create(Controlled)
+  let hero: EntityId = { index: 0, generation: 0 }
+  let other: EntityId = { index: 3, generation: 1 }
+  setControlledCharacter(controlled: controlled, entityId: hero)
+  log("the hero is controlled: {controlledCharacter(controlled: controlled).index is 0}")
+  setControlledCharacter(controlled: controlled, entityId: other)
+  let now: EntityId = controlledCharacter(controlled: controlled)
+  log("control moves to the other: {now.index is 3 and now.generation is 1}")
+  log("one controlled at a time: {componentCount(this: controlled) is 1}")
+
+  var anim: AnimationState = { clipIndex: ClipKind.walk as Int, animTime: 0.0, playbackScale: 1.0 }
+  var transition: AnimationTransition = {
+    from: {
+      localT: List.create(Float, cap: 0)
+      localR: List.create(Float, cap: 0)
+      localS: List.create(Float, cap: 0)
+    }
+    elapsed: 0.0
+    duration: 0.28
+    holdClipFirstFrame: false
+  }
+  log("a fresh blend runs: {transitionActive(transition: transition)}")
+  stepCharacterClock(
+    anim: anim
+    transition: transition
+    playing: true
+    speed: 1.0
+    rate: 1.5
+    deltaTime: 0.2
+  )
+  log("the clock runs at the clip's rate: {anim.animTime > 0.299 and anim.animTime < 0.301}")
+  anim.playbackScale = 0.3
+  stepCharacterClock(
+    anim: anim
+    transition: transition
+    playing: true
+    speed: 1.0
+    rate: 1.5
+    deltaTime: 0.2
+  )
+  log("slower in the air: {anim.animTime > 0.389 and anim.animTime < 0.391}")
+  log("the blend has run out: {transitionActive(transition: transition) is false}")
+  stepCharacterClock(
+    anim: anim
+    transition: transition
+    playing: false
+    speed: 1.0
+    rate: 1.5
+    deltaTime: 0.2
+  )
+  log("paused, the clock stands: {anim.animTime > 0.389 and anim.animTime < 0.391}")
+}

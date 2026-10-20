@@ -12,6 +12,7 @@ open app3d/CameraRig
 open app3d/WalkerWorld
 open water/WadeSplash
 open app3d/WalkerCharacter
+open app3d/Characters
 open app3d/WalkerCamera
 
 # Start the material preview when RAE_WALKER_SPLASH_PREVIEW is set: bursts at
@@ -44,28 +45,29 @@ func prepareSplashPreview(
   log("[splash-preview] no shallow shore found")
 }
 
-# The pose check (WadeSplash.finishWadePoseCheck) on the hero walking for 3 s,
+# The pose check (WadeSplash.finishWadePoseCheck) on the controlled character
+# walking for 3 s,
 # the water 12 cm above its feet. 0 when it passed.
 func runSplashPoseTest(
-  walkerCharacters: mod WalkerCharacters
+  characterSystem: mod CharacterSystem
   world: view WalkerWorld
   wadeSplash: mod WadeSplash
 ) ret Int {
-  if walkerCharacters.leftFootNode < 0 or walkerCharacters.rightFootNode < 0 {
+  if characterSystem.leftFootNode < 0 or characterSystem.rightFootNode < 0 {
     ret 1
   }
-  let heroEntityId: EntityId = walkerCharacters.heroEntityId
+  let heroEntityId: EntityId = controlledCharacter(controlled: world.controlled)
   let origin: Vec3 = controllerOf(world: world, entityId: heroEntityId).position
-  let level: Float = origin.z + walkerCharacters.groundZ + 0.12
+  let level: Float = origin.z + characterSystem.groundZ + 0.12
   var check: WadePoseCheck = createWadePoseCheck()
   loop var frame: Int = 0, frame < 180, ++frame {
-    let palette: List(Float) = poseCharacterPalette(
-      walkerCharacters: walkerCharacters
+    poseCharacterClip(
+      characterSystem: characterSystem
       clipIndex: ClipKind.walk as Int
       animTime: frame.toFloat() / 60.0
     )
     captureCharacterFeet(
-      walkerCharacters: walkerCharacters
+      characterSystem: characterSystem
       world: world
       wadeSplash: wadeSplash
       entityId: heroEntityId
@@ -90,7 +92,7 @@ func runSplashPoseTest(
 
 # Record the feet of `entityId` in the pose the skeleton has now
 func captureCharacterFeet(
-  walkerCharacters: view WalkerCharacters
+  characterSystem: view CharacterSystem
   world: view WalkerWorld
   wadeSplash: mod WadeSplash
   entityId: view EntityId
@@ -99,11 +101,11 @@ func captureCharacterFeet(
     wadeSplash: wadeSplash
     entityId: entityId
     model: walkerWorldModel(
-      baseModel: walkerCharacters.basePartModel
+      baseModel: characterSystem.basePartModel
       controller: controllerOf(world: world, entityId: entityId)
     )
-    skeleton: walkerCharacters.skeleton
-    leftFootNode: walkerCharacters.leftFootNode
-    rightFootNode: walkerCharacters.rightFootNode
+    skeleton: characterSystem.skeleton
+    leftFootNode: characterSystem.leftFootNode
+    rightFootNode: characterSystem.rightFootNode
   )
 }
