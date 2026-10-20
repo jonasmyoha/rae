@@ -8,7 +8,6 @@
 # device.
 import Keys
 open ecs/Entity
-open app3d/WalkerCharacter
 
 # The local player's id. (Naming: constants are camelCase — #746 fixed the old
 # SHOUTING_SNAKE_CASE `PLAYER_LOCAL`, which the language bans.)
@@ -21,60 +20,64 @@ const keyPrevChar: Int = Keys.key1
 
 const keyNextChar: Int = Keys.key2
 
-# The local player's control mapping. `count` is the total number of controllable
-# characters (hero + crowd); `controlledIndex` is which one the player drives.
+# The local player's control mapping: `entities`, the controllable
+# characters in the order switching cycles through (the walker's: the hero,
+# then its crowd); `controlledIndex`, the position of the one the player
+# drives.
 type PlayerRoster {
   controlledIndex: Int
-  count: Int
+  entities: List(EntityId)
 }
 
-func createPlayerRoster(count: copy Int) ret PlayerRoster {
-  ret PlayerRoster { controlledIndex: 0, count: count }
+func createPlayerRoster(entities: own List(EntityId)) ret PlayerRoster {
+  ret PlayerRoster { controlledIndex: 0, entities: own entities }
+}
+
+func rosterCount(roster: view PlayerRoster) ret Int {
+  ret roster.entities.length
+}
+
+# The character at roster position `index` (none past the end)
+func rosterEntityAt(roster: view PlayerRoster, index: view Int) ret EntityId {
+  if let entity: EntityId = roster.entities.copyAt(index: index) {
+    ret entity
+  }
+  ret noEntity()
 }
 
 func rosterControlledIsHero(roster: view PlayerRoster) ret Bool {
   ret roster.controlledIndex is 0
 }
 
-# The crowd-member index (into CharacterSystem.crowd) the local player controls,
-# or -1 when the hero is controlled.
-func rosterControlledCrowdIndex(roster: view PlayerRoster) ret Int {
+# "hero" for roster position 0, "crowd <i>" for the characters after it
+func rosterSlotLabel(roster: view PlayerRoster) ret String {
   if roster.controlledIndex is 0 {
-    ret -1
+    ret "hero"
   }
-  ret roster.controlledIndex - 1
+  ret "crowd {roster.controlledIndex - 1}"
 }
 
-# The GameWorld ENTITY the local player currently controls (#746): the hero
-# entity, or the crowd member entity for the controlled index. This is the
-# roster's ECS view — the same kind of character-entity handle a NetPlayer
-# points at via `controlled`, so local and remote control resolve identically.
-func rosterControlledEntityId(
-  players: view PlayerRoster
-  characterSystem: view CharacterSystem
-) ret EntityId {
-  if rosterControlledIsHero(roster: players) {
-    ret characterSystem.heroEntityId
-  }
-  let idx: Int = rosterControlledCrowdIndex(roster: players)
-  if let entityId: EntityId = characterSystem.crowdEntities.copyAt(index: idx) {
-    ret entityId
-  }
-  ret characterSystem.heroEntityId
+# The ENTITY the local player currently controls (#746): the roster's ECS
+# view — the same kind of character-entity handle a NetPlayer points at via
+# `controlled`, so local and remote control resolve identically.
+func rosterControlledEntityId(players: view PlayerRoster) ret EntityId {
+  ret rosterEntityAt(roster: players, index: players.controlledIndex)
 }
 
-# Cycle to the next / previous controllable character (wraps). No-op with one
-# character, so a roster of just the hero behaves exactly as before.
-func rosterSwitchNext(roster: mod PlayerRoster) {
-  if roster.count <= 1 {
+# Move control `step` positions on (+1 next, -1 previous; wraps). No-op with
+# one character, so a roster of just the hero behaves exactly as before.
+func rosterStep(roster: mod PlayerRoster, step: view Int) {
+  let count: Int = rosterCount(roster: roster)
+  if count <= 1 {
     ret
   }
-  roster.controlledIndex = (roster.controlledIndex + 1) % roster.count
+  roster.controlledIndex = (roster.controlledIndex + count + step) % count
+}
+
+func rosterSwitchNext(roster: mod PlayerRoster) {
+  rosterStep(roster: roster, step: 1)
 }
 
 func rosterSwitchPrev(roster: mod PlayerRoster) {
-  if roster.count <= 1 {
-    ret
-  }
-  roster.controlledIndex = (roster.controlledIndex + roster.count - 1) % roster.count
+  rosterStep(roster: roster, step: -1)
 }

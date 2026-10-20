@@ -78,7 +78,7 @@ open RendererForward
 func renderWalkerApp(
   uiSystems: view UiSystems
   cameraSystem: mod WalkerCamera
-  characterSystem: mod CharacterSystem
+  walkerCharacters: mod WalkerCharacters
   frame: mod WalkerFrame
   inputSystem: mod WalkerInput
   renderSystem: mod WalkerRender
@@ -98,69 +98,69 @@ func renderWalkerApp(
   let now: Float64 = frame.now
 
   var clipRate: Float = 1.0
-  if characterSystem.clipIndex is ClipKind.walkFast {
+  if walkerCharacters.clipIndex is ClipKind.walkFast {
     clipRate = 1.6
   }
-  if characterSystem.airborne {
+  if walkerCharacters.airborne {
     clipRate = clipRate * airborneClipScale
   }
-  if characterSystem.playing {
-    characterSystem.animTime = characterSystem.animTime + deltaTime * characterSystem.speed * clipRate
+  if walkerCharacters.playing {
+    walkerCharacters.animTime = walkerCharacters.animTime + deltaTime * walkerCharacters.speed * clipRate
   }
-  applySkeletonPose(sk: characterSystem.skeleton, pose: characterSystem.bindPose)
+  applySkeletonPose(sk: walkerCharacters.skeleton, pose: walkerCharacters.bindPose)
   # Which clip feeds the pose. walk and walkFast share the walk clip (walkFast is
   # it at 1.6x via clipRate above); once or-patterns land (#622) they merge.
-  match characterSystem.clipIndex {
+  match walkerCharacters.clipIndex {
     case ClipKind.idle {
       applyClip(
-        sk: characterSystem.skeleton
-        c: characterSystem.idleClip
-        time: characterSystem.animTime
+        sk: walkerCharacters.skeleton
+        c: walkerCharacters.idleClip
+        time: walkerCharacters.animTime
       )
     }
     case ClipKind.walk {
       applyClip(
-        sk: characterSystem.skeleton
-        c: characterSystem.walkClip
-        time: characterSystem.animTime
+        sk: walkerCharacters.skeleton
+        c: walkerCharacters.walkClip
+        time: walkerCharacters.animTime
       )
     }
     case ClipKind.walkFast {
       applyClip(
-        sk: characterSystem.skeleton
-        c: characterSystem.walkClip
-        time: characterSystem.animTime
+        sk: walkerCharacters.skeleton
+        c: walkerCharacters.walkClip
+        time: walkerCharacters.animTime
       )
     }
     case ClipKind.run {
       applyClip(
-        sk: characterSystem.skeleton
-        c: characterSystem.runClip
-        time: characterSystem.animTime
+        sk: walkerCharacters.skeleton
+        c: walkerCharacters.runClip
+        time: walkerCharacters.animTime
       )
     }
   }
-  let transitionActive: Bool = characterSystem.transitionElapsed < clipTransitionDuration
+  let transitionActive: Bool = walkerCharacters.transitionElapsed < clipTransitionDuration
   if transitionActive {
-    characterSystem.transitionElapsed = characterSystem.transitionElapsed + deltaTime
-    var blendWeight: Float = characterSystem.transitionElapsed / clipTransitionDuration
+    walkerCharacters.transitionElapsed = walkerCharacters.transitionElapsed + deltaTime
+    var blendWeight: Float = walkerCharacters.transitionElapsed / clipTransitionDuration
     if blendWeight > 1.0 {
       blendWeight = 1.0
     }
     blendWeight = blendWeight * blendWeight * (3.0 - 2.0 * blendWeight)
     blendSkeletonPose(
-      sk: characterSystem.skeleton
-      from: characterSystem.transitionFrom
+      sk: walkerCharacters.skeleton
+      from: walkerCharacters.transitionFrom
       weight: blendWeight
     )
   }
-  let palette: List(Float) = buildPalette(sk: characterSystem.skeleton)
+  let palette: List(Float) = buildPalette(sk: walkerCharacters.skeleton)
   if let splash: mod WadeSplash => wadeSplash {
     captureCharacterFeet(
-      characterSystem: characterSystem
+      walkerCharacters: walkerCharacters
       world: world
       wadeSplash: splash
-      entityId: characterSystem.heroEntityId
+      entityId: walkerCharacters.heroEntityId
     )
   }
 
@@ -172,23 +172,23 @@ func renderWalkerApp(
   # Each crowd member advances its OWN animation and poses into its OWN palette
   # slot (#547) — independent of the player, so member 2 can idle while member 0
   # walks. Slot 0 is the hero (uploaded first, which also creates the buffer).
-  let jc: Int = jointCount(sk: characterSystem.skeleton)
+  let jc: Int = jointCount(sk: walkerCharacters.skeleton)
   uploadPalette(renderer: renderSystem.renderer, rows: palette, jointCount: jc)
-  loop var crowdSlot: Int = 0, crowdSlot < characterSystem.crowdEntities.length, ++crowdSlot {
-    if let member: EntityId = characterSystem.crowdEntities.copyAt(index: crowdSlot) {
+  loop var crowdSlot: Int = 0, crowdSlot < walkerCharacters.crowdEntities.length, ++crowdSlot {
+    if let member: EntityId = walkerCharacters.crowdEntities.copyAt(index: crowdSlot) {
       # Advance this member's AnimationState IN PLACE (#739) — no copy/set-back.
       let anim: mod AnimationState => componentMod(this: world.animStates, entityId: member)
       anim.animTime = anim.animTime + deltaTime * clipPlaybackRate(clipIndex: anim.clipIndex) * anim.playbackScale
       let memberClip: Int = anim.clipIndex
       let memberTime: Float = anim.animTime
       let crowdPalette: List(Float) = poseCharacterPalette(
-        characterSystem: characterSystem
+        walkerCharacters: walkerCharacters
         clipIndex: memberClip
         animTime: memberTime
       )
       if let splash: mod WadeSplash => wadeSplash {
         captureCharacterFeet(
-          characterSystem: characterSystem
+          walkerCharacters: walkerCharacters
           world: world
           wadeSplash: splash
           entityId: member
@@ -246,7 +246,7 @@ func renderWalkerApp(
       case RenderTag.shadow {
         renderShadowPass(
           cameraSystem: cameraSystem
-          characterSystem: characterSystem
+          walkerCharacters: walkerCharacters
           inputSystem: inputSystem
           renderSystem: renderSystem
           terrainSystem: terrainSystem
@@ -262,7 +262,7 @@ func renderWalkerApp(
         if not grassGenerated {
           generateWalkerGrass(
             cameraSystem: cameraSystem
-            characterSystem: characterSystem
+            walkerCharacters: walkerCharacters
             world: world
             t: t
             deltaTime: deltaTime
@@ -284,7 +284,7 @@ func renderWalkerApp(
           drawWalkerScene(
             cache: renderSystem.renderer.passes.gbuffer
             rendererResources: rendererResources
-            characterSystem: characterSystem
+            walkerCharacters: walkerCharacters
             terrainSystem: terrainSystem
             world: world
             physicsSystem: physicsSystem
@@ -302,7 +302,7 @@ func renderWalkerApp(
         if not grassGenerated {
           generateWalkerGrass(
             cameraSystem: cameraSystem
-            characterSystem: characterSystem
+            walkerCharacters: walkerCharacters
             world: world
             t: t
             deltaTime: deltaTime
@@ -322,7 +322,7 @@ func renderWalkerApp(
           drawWalkerScene(
             cache: renderSystem.renderer.passes.gbuffer
             rendererResources: rendererResources
-            characterSystem: characterSystem
+            walkerCharacters: walkerCharacters
             terrainSystem: terrainSystem
             world: world
             physicsSystem: physicsSystem

@@ -437,7 +437,7 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
     partModel = walkerWorldModel(baseModel: basePartModel, controller: characterController)
 
     # #739: the hero is an entity carrying its ThirdPersonController + Transform3D.
-    # Its clip/animTime + motion-vector model stay on CharacterSystem (hero-specific
+    # Its clip/animTime + motion-vector model stay on WalkerCharacters (hero-specific
     # transitions); only the controller moves into the world.
     let heroEntityId: EntityId = walkerWorldAddEntity(world: walkerWorld)
     walkerWorldSetController(
@@ -608,6 +608,13 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
       shader: defaultGrassComputeShader()
       constants: islandConstantsFor(cfg: biome)
     )
+    # Who the local player may control, in switching order: the hero, then
+    # its crowd
+    var rosterEntities: List(EntityId) = List.create(EntityId, cap: 1 + crowdEntities.length)
+    rosterEntities.add(value: heroEntityId)
+    loop let crowdEntityId: view EntityId in crowdEntities {
+      rosterEntities.add(value: crowdEntityId)
+    }
     ret WalkerApp {
       settings: settings
       biome: biome
@@ -652,7 +659,7 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
         cameraEntityId: rigLink.cameraEntityId
         walkFollow: createWalkFollow()
       }
-      characterSystem: {
+      walkerCharacters: {
         leftFootNode: wadeFootNode(skeleton: sk, name: "mixamorig:LeftToeBase")
         rightFootNode: wadeFootNode(skeleton: sk, name: "mixamorig:RightToeBase")
         skeleton: own sk
@@ -687,7 +694,7 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
       grassCompute: own grassCompute
       physicsSystem: own physicsSystem
       netSystem: { role: 0, tick: 0 }
-      players: createPlayerRoster(count: 1 + cloneCount)
+      players: createPlayerRoster(entities: own rosterEntities)
       persist: { windowGeometry: own windowGeometry, lastStateSave: startT, stateDirty: false }
       wadeSplash: own wadeSplash
       waterSystem: own waterSystem
@@ -714,7 +721,7 @@ func runWalkerApp(settings: view WalkerAppSettings) ret Int {
       wadeSplash: wadeSplash
       cameraSystem: app.cameraSystem
       biome: app.biome
-      groundZ: app.characterSystem.groundZ
+      groundZ: app.walkerCharacters.groundZ
     )
   }
   Profile.maybeAutoStart(profiler: app.profiler)
@@ -729,7 +736,7 @@ func runWalkerApp(settings: view WalkerAppSettings) ret Int {
     exitCode = 1
     if let wadeSplash: mod WadeSplash => app.wadeSplash {
       exitCode = runSplashPoseTest(
-        characterSystem: app.characterSystem
+        walkerCharacters: app.walkerCharacters
         world: app.world
         wadeSplash: wadeSplash
       )
@@ -741,7 +748,7 @@ func runWalkerApp(settings: view WalkerAppSettings) ret Int {
       world: app.world
       forest: app.terrainSystem.forest
       pooledTrunks: app.settings.land is WalkerLand.forest
-      heroEntityId: app.characterSystem.heroEntityId
+      heroEntityId: app.walkerCharacters.heroEntityId
     )
   }
   loop not physicsTest and not splashTest and not Gpu2d.pollClose() {
@@ -762,7 +769,7 @@ func runWalkerApp(settings: view WalkerAppSettings) ret Int {
         renderWalkerApp(
           uiSystems: app.inputSystem.uiSystems
           cameraSystem: app.cameraSystem
-          characterSystem: app.characterSystem
+          walkerCharacters: app.walkerCharacters
           frame: app.frame
           inputSystem: app.inputSystem
           renderSystem: app.renderSystem

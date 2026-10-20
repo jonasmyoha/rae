@@ -1,0 +1,60 @@
+# lib/app3d/GroundParticles: a particle's life. A bit of grass kicked up and
+# back flies, lands on its floor (never under it) and is gone after its
+# lifetime; a puff of dust spreads as it rises and shrinks away at its end.
+import Math
+import Vec3
+open app3d/GroundParticles
+
+func main() {
+  let floor: Float = 2.0
+  let grassBit: GroundParticle = {
+    position: Vec3.create(x: 0.0, y: 0.0, z: floor + 0.05)
+    velocity: Vec3.create(x: 0.3, y: -1.2, z: 2.4)
+    age: 0.0
+    lifetime: 0.9
+    size: 1.0
+    growth: 0.0
+    color: Vec3.create(x: 0.2, y: 0.6, z: 0.1)
+    shape: GroundParticleShape.blade
+    spin: 0.0
+    spinRate: 9.0
+    gravity: 9.8
+    drag: 1.5
+  }
+  var bit: GroundParticle = grassBit
+  var peak: Float = bit.position.z
+  loop var step: Int = 0, step < 120, ++step {
+    stepGroundParticle(particle: bit, deltaTime: 1.0 / 60.0, floor: floor)
+    peak = Math.max(a: peak, b: bit.position.z)
+  }
+  log("a bit of grass flies up: {peak > floor + 0.1}")
+  log("and lands on its floor, not under it: {Math.abs(value: bit.position.z - floor) < 0.0001}")
+  log("two seconds on it is gone: {groundParticleAlive(particle: bit) is false}")
+  log("it tumbled: {bit.spin > 1.0}")
+  let dust: GroundParticle = {
+    position: Vec3.create(x: 0.0, y: 0.0, z: floor + 0.05)
+    velocity: Vec3.create(x: 0.0, y: -0.4, z: 0.5)
+    age: 0.0
+    lifetime: 0.6
+    size: 0.08
+    growth: 1.4
+    color: Vec3.create(x: 0.6, y: 0.3, z: 0.2)
+    shape: GroundParticleShape.puff
+    spin: 0.0
+    spinRate: 0.0
+    gravity: 0.3
+    drag: 3.0
+  }
+  var puff: GroundParticle = dust
+  loop var step: Int = 0, step < 15, ++step {
+    stepGroundParticle(particle: puff, deltaTime: 1.0 / 60.0, floor: floor)
+  }
+  log("a fresh puff shows: {groundParticleScale(particle: dust) > 0.0}")
+  log(
+    "a puff spreads as it rises: {groundParticleScale(particle: puff) > groundParticleScale(
+      particle: dust
+    )}"
+  )
+  puff.age = puff.lifetime
+  log("and shrinks away at its end: {groundParticleScale(particle: puff) <= 0.0}")
+}

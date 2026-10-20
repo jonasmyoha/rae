@@ -80,7 +80,7 @@ type WalkerApp {
   frame: WalkerFrame
   inputSystem: WalkerInput
   cameraSystem: WalkerCamera
-  characterSystem: CharacterSystem
+  walkerCharacters: WalkerCharacters
   terrainSystem: WalkerTerrain
   renderSystem: WalkerRender
   profiler: Profiler  # #764: was lib/profile.rae gProf* globals
@@ -130,7 +130,7 @@ func updateWalkerApp(app: mod WalkerApp) {
   let uiTick: UiTick = uiUpdate(
     uiSystems: app.inputSystem.uiSystems
     cameraSystem: app.cameraSystem
-    characterSystem: app.characterSystem
+    walkerCharacters: app.walkerCharacters
     didRealWork: app.frame.dbgDidWork
     inputSystem: app.inputSystem
     persist: app.persist
@@ -150,7 +150,7 @@ func updateWalkerApp(app: mod WalkerApp) {
     inputSystem: app.inputSystem
     persist: app.persist
     world: app.world
-    heroEntityId: app.characterSystem.heroEntityId
+    heroEntityId: app.walkerCharacters.heroEntityId
     terrainSystem: app.terrainSystem
     deltaTime: deltaTime
   )
@@ -176,17 +176,14 @@ func updateWalkerApp(app: mod WalkerApp) {
         persist: app.persist
         players: app.players
         world: app.world
-        characterSystem: app.characterSystem
+        walkerCharacters: app.walkerCharacters
       )
     }
   }
 
-  app.characterSystem.prevModel = app.characterSystem.model
+  app.walkerCharacters.prevModel = app.walkerCharacters.model
   var characterMoved: Bool = false
-  let controlledEntityId: EntityId = rosterControlledEntityId(
-    players: app.players
-    characterSystem: app.characterSystem
-  )
+  let controlledEntityId: EntityId = rosterControlledEntityId(players: app.players)
   # Devices -> intent (input.rae), then the CONTROLLED character's mover gets it
   # as a throttle (and the jump); every other character stands. A remote
   # player's intent would arrive from net.rae instead; the drive is the same.
@@ -201,7 +198,7 @@ func updateWalkerApp(app: mod WalkerApp) {
     intent = inputUpdate(
       moveStick: app.inputSystem.moveStick
       joyActive: joyActive
-      allowKeys: uiPointerCaptured(input: app.inputSystem.ui) is false and app.characterSystem.playing
+      allowKeys: uiPointerCaptured(input: app.inputSystem.ui) is false and app.walkerCharacters.playing
     )
   }
   # The controller's heading and position before the physics steps, to tell
@@ -214,7 +211,7 @@ func updateWalkerApp(app: mod WalkerApp) {
     controller: controllerOf(world: app.world, entityId: controlledEntityId)
     intent: intent
     cameraYaw: app.cameraSystem.rig.viewYaw
-    speedScale: app.characterSystem.speed
+    speedScale: app.walkerCharacters.speed
   )
   # Fixed-timestep physics (#553, lib/box3d/ecs): the movers, then the bodies,
   # at 60 Hz from the frame time, decoupled from render; it writes every
@@ -240,34 +237,34 @@ func updateWalkerApp(app: mod WalkerApp) {
     grounded: grounded
   )
   if rosterControlledIsHero(roster: app.players) {
-    app.characterSystem.airborne = grounded is false
+    app.walkerCharacters.airborne = grounded is false
   } else {
-    app.characterSystem.airborne = characterGrounded(
+    app.walkerCharacters.airborne = characterGrounded(
       physicsSystem: app.physicsSystem
-      entityId: app.characterSystem.heroEntityId
+      entityId: app.walkerCharacters.heroEntityId
     ) is false
   }
   # The hero's model follows its controller whenever the physics moved it (it
   # can be pushed or fall even when the player drives someone else)
-  app.characterSystem.model = walkerWorldModel(
-    baseModel: app.characterSystem.basePartModel
-    controller: controllerOf(world: app.world, entityId: app.characterSystem.heroEntityId)
+  app.walkerCharacters.model = walkerWorldModel(
+    baseModel: app.walkerCharacters.basePartModel
+    controller: controllerOf(world: app.world, entityId: app.walkerCharacters.heroEntityId)
   )
   if characterMoved {
     app.persist.stateDirty = true
   }
   if app.cameraSystem.rig.mode is CameraRigMode.character {
     if rosterControlledIsHero(roster: app.players) {
-      if controlledClip is not app.characterSystem.clipIndex {
-        app.characterSystem.transitionFrom = captureSkeletonPose(sk: app.characterSystem.skeleton)
-        app.characterSystem.transitionElapsed = 0.0
-        app.characterSystem.clipIndex = controlledClip
-        app.characterSystem.animTime = 0.0
+      if controlledClip is not app.walkerCharacters.clipIndex {
+        app.walkerCharacters.transitionFrom = captureSkeletonPose(sk: app.walkerCharacters.skeleton)
+        app.walkerCharacters.transitionElapsed = 0.0
+        app.walkerCharacters.clipIndex = controlledClip
+        app.walkerCharacters.animTime = 0.0
         setPanelSelection(
           panel: app.inputSystem.clipPanel
           world: app.inputSystem.world
           group: 1
-          id: (app.characterSystem.clipIndex as ClipKind).toString()
+          id: (app.walkerCharacters.clipIndex as ClipKind).toString()
         )
       }
     } else {
@@ -283,12 +280,12 @@ func updateWalkerApp(app: mod WalkerApp) {
         drivenAnim.playbackScale = airborneClipScale
       }
       # The hero, no longer player-driven, stands idle.
-      app.characterSystem.clipIndex = ClipKind.idle as Int
+      app.walkerCharacters.clipIndex = ClipKind.idle as Int
     }
     let focusPos: Vec3 = controlledPosition(
       world: app.world
       players: app.players
-      characterSystem: app.characterSystem
+      walkerCharacters: app.walkerCharacters
     )
     app.cameraSystem.camera.target = Vec3.create(
       x: focusPos.x
@@ -299,7 +296,7 @@ func updateWalkerApp(app: mod WalkerApp) {
   let followPos: Vec3 = controlledPosition(
     world: app.world
     players: app.players
-    characterSystem: app.characterSystem
+    walkerCharacters: app.walkerCharacters
   )
   let terrainWrapped: Bool = updateInfiniteTerrain(
     terrainSystem: app.terrainSystem
@@ -322,7 +319,7 @@ func updateWalkerApp(app: mod WalkerApp) {
     let feet: Vec3 = Vec3.create(
       x: followPos.x
       y: followPos.y
-      z: app.characterSystem.groundZ + followPos.z
+      z: app.walkerCharacters.groundZ + followPos.z
     )
     let groundMoved: Bool = followGround(physicsSystem: app.physicsSystem, position: feet)
     let trunksMoved: Bool = updateTrunkPool(
@@ -349,11 +346,11 @@ func updateWalkerApp(app: mod WalkerApp) {
       writeHotReloadStateFor(
         appId: app.settings.appId
         state: serializeWalkerState(
-          clipIndex: app.characterSystem.clipIndex
-          playing: app.characterSystem.playing
-          speed: app.characterSystem.speed
-          toon: app.characterSystem.toon
-          controller: controllerOf(world: app.world, entityId: app.characterSystem.heroEntityId)
+          clipIndex: app.walkerCharacters.clipIndex
+          playing: app.walkerCharacters.playing
+          speed: app.walkerCharacters.speed
+          toon: app.walkerCharacters.toon
+          controller: controllerOf(world: app.world, entityId: app.walkerCharacters.heroEntityId)
           rig: app.cameraSystem.rig
           camera: app.cameraSystem.camera
         )
@@ -365,7 +362,7 @@ func updateWalkerApp(app: mod WalkerApp) {
 
   let hadUiEvents: Bool = uiActionCount(world: app.inputSystem.world) > 0 or app.inputSystem.ui.pointer.down or app.inputSystem.ui.pointer.pressed or app.inputSystem.ui.pointer.released
   let logChanged: Bool = app.inputSystem.logOverlay.revision is not app.inputSystem.lastLogRevision
-  let transitionActive: Bool = app.characterSystem.transitionElapsed < clipTransitionDuration
+  let transitionActive: Bool = app.walkerCharacters.transitionElapsed < clipTransitionDuration
   # Live splash droplets are an animation source: keep rendering until the last one
   # dies out, or the wait-loop would freeze them mid-air when you stop wading (#84,
   # the "feed animation sources into the loop" lesson in AGENTS.md).
@@ -376,7 +373,7 @@ func updateWalkerApp(app: mod WalkerApp) {
   # Bodies still moving (a toppling stack, a character in the air) are an
   # animation source too; the venue's static body is never awake
   let physicsAwake: Bool = physicsCounters(physics: app.physicsSystem.physics).awakeBodyCount > 0 or characterMoved
-  var needsRender: Bool = app.characterSystem.playing or transitionActive or settingsChanged or cameraMoved or characterMoved or terrainWrapped or splashesAlive or physicsAwake or hadUiEvents or logChanged or resized or scrolled or app.frame.renderedOnce is false
+  var needsRender: Bool = app.walkerCharacters.playing or transitionActive or settingsChanged or cameraMoved or characterMoved or terrainWrapped or splashesAlive or physicsAwake or hadUiEvents or logChanged or resized or scrolled or app.frame.renderedOnce is false
   if app.frame.taaSettleFrames > 0 {
     needsRender = true  # only meaningful with TAA on
   }
@@ -386,7 +383,7 @@ func updateWalkerApp(app: mod WalkerApp) {
       # FXAA has no history to converge, and a forward frame (4x MSAA) is
       # final the moment it is drawn
       app.frame.taaSettleFrames = 0
-    } else if app.characterSystem.playing or settingsChanged or cameraMoved or hadUiEvents or resized {
+    } else if app.walkerCharacters.playing or settingsChanged or cameraMoved or hadUiEvents or resized {
       app.frame.taaSettleFrames = 6
     } else {
       app.frame.taaSettleFrames = app.frame.taaSettleFrames - 1
