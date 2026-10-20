@@ -29,7 +29,7 @@ func describe(t: opt view Track) ret String {
 # Writes through an optional mod reference must reach the original. The
 # optional is narrowed first: a field of an unchecked `opt` is an error (4.1).
 func bump(t: opt mod Track) {
-  if let present: mod Track => t {
+  if let present: mod Track = t {
     present.seconds = present.seconds + 1
   }
 }
@@ -53,10 +53,10 @@ func main() {
   log("none is a no-op:  {track.seconds}")
 
   var lib: Library = { current: Track { title: "Outro", seconds: 143 }, hasCurrent: true }
-  let sel: opt view Track => selected(lib: view lib)
+  let sel: opt view Track = selected(lib: view lib)
   log("return present:   {sel is not none}")
 
   lib.hasCurrent = false
-  let empty: opt view Track => selected(lib: view lib)
+  let empty: opt view Track = selected(lib: view lib)
   log("return absent:    {empty is none}")
 }

@@ -69,7 +69,7 @@ func sceneNodeIndex(this: view Scene, nodeId: view String) ret opt Int {
   let n: Int = this.nodes.length
   var i: Int = 0
   loop i < n {
-    let node: view SceneNode => nodeAt(this: this, idx: i)
+    let node: view SceneNode = nodeAt(this: this, idx: i)
     if node.nodeId is nodeId {
       ret i
     }
@@ -179,7 +179,7 @@ func parseScene(source: view String) ret Scene {
   }
 
   # First pass: build SceneNode entries.
-  let nodesList: mod List(SceneNode) => scene.nodes
+  let nodesList: mod List(SceneNode) = scene.nodes
   let count: Int = Json.objectLen(this: nodesVal)
   var i: Int = 0
   loop i < count {
@@ -209,7 +209,7 @@ func parseScene(source: view String) ret Scene {
   let nN: Int = scene.nodes.length
   var j: Int = 0
   loop j < nN {
-    let n: view SceneNode => nodeAt(this: scene, idx: j)
+    let n: view SceneNode = nodeAt(this: scene, idx: j)
     let kn: Int = n.childrenIds.length
     var k: Int = 0
     loop k < kn {

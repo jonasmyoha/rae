@@ -406,7 +406,7 @@ func revealTreeSelection(
     inspectorSystem.lastRevealed = noEntity()
     ret
   }
-  let listView: view ListView => componentView(this: world.listViews, entityId: list)
+  let listView: view ListView = componentView(this: world.listViews, entityId: list)
   let pitch: Float = listView.itemHeight + listView.itemGap
   let window: Float = listView.visibleItemCount.toFloat() * pitch - listView.itemGap
   loop var i: Int = 0, i < inspectorSystem.treeEntities.length, ++i {
@@ -460,7 +460,7 @@ func subtreeHasSelection(
   if componentHas(this: world.childrens, entityId: entityId) is false {
     ret false
   }
-  let children: view Children => componentView(this: world.childrens, entityId: entityId)
+  let children: view Children = componentView(this: world.childrens, entityId: entityId)
   loop var i: Int = 0, i < children.ids.length, ++i {
     let child: EntityId = children.ids.copyAtFallback(index: i, fallback: noEntity())
     if isNone(this: child) {
@@ -618,7 +618,7 @@ func collectTreeRows(
     ret
   }
   if componentHas(this: world.childrens, entityId: entityId) {
-    let children: view Children => componentView(this: world.childrens, entityId: entityId)
+    let children: view Children = componentView(this: world.childrens, entityId: entityId)
     loop var i: Int = 0, i < children.ids.length, ++i {
       collectTreeRows(
         world: world
@@ -657,7 +657,7 @@ func syncTreeViewport(
   if componentHas(this: uiSystems.hierarchy.parents, entityId: list) is false {
     ret false
   }
-  let parentLink: view Parent => componentView(this: uiSystems.hierarchy.parents, entityId: list)
+  let parentLink: view Parent = componentView(this: uiSystems.hierarchy.parents, entityId: list)
   let viewport: EntityId = {
     index: parentLink.parent.index
     generation: parentLink.parent.generation
@@ -666,7 +666,7 @@ func syncTreeViewport(
     ret false
   }
   let height: Float = componentView(this: uiSystems.layout.computedRects, entityId: viewport).size.y
-  let listView: mod ListView => componentMod(this: world.listViews, entityId: list)
+  let listView: mod ListView = componentMod(this: world.listViews, entityId: list)
   let pitch: Float = listView.itemHeight + listView.itemGap
   if height <= 0.0 or pitch <= 0.0 {
     ret false
@@ -740,7 +740,7 @@ type ComponentTally {
 
 func tallyIndexOf(tallies: view List(ComponentTally), name: view String) ret Int {
   loop var i: Int = 0, i < tallies.length, ++i {
-    if let tally: view ComponentTally => tallies.viewAt(index: i) {
+    if let tally: view ComponentTally = tallies.viewAt(index: i) {
       if tally.name is name {
         ret i
       }
@@ -765,7 +765,7 @@ func tallyComponentNames(tallies: mod List(ComponentTally), names: view String) 
       tallies.add(value: ComponentTally { name: stringCopy(string: name), count: 1 })
       continue
     }
-    if let tally: mod ComponentTally => tallies.modAt(index: at) {
+    if let tally: mod ComponentTally = tallies.modAt(index: at) {
       tally.count = tally.count + 1
     }
   }

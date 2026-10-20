@@ -197,20 +197,20 @@ func placeOutline(
   if show is false {
     ret changed
   }
-  let transform: view WorldTransform2D => componentView(
+  let transform: view WorldTransform2D = componentView(
     this: uiSystems.transform2d.worldTransforms
     entityId: target
   )
-  let computed: view ComputedRect => componentView(
+  let computed: view ComputedRect = componentView(
     this: uiSystems.layout.computedRects
     entityId: target
   )
   let w: Float = computed.size.x * transform.scale.x
   let h: Float = computed.size.y * transform.scale.y
   if componentHas(this: world.rects, entityId: outline) {
-    let current: view Rect => componentView(this: world.rects, entityId: outline)
+    let current: view Rect = componentView(this: world.rects, entityId: outline)
     if current.size.x is not w or current.size.y is not h {
-      let rect: mod Rect => componentMod(this: world.rects, entityId: outline)
+      let rect: mod Rect = componentMod(this: world.rects, entityId: outline)
       rect.size.x = w
       rect.size.y = h
       changed = true
@@ -243,7 +243,7 @@ func placeOutlines(
   var changed: Bool = false
   let count: Int = componentCount(this: inspectorSystem.outlineFors)
   loop var i: Int = 0, i < count, ++i {
-    let tag: view OutlineFor => queryViewAt(table: inspectorSystem.outlineFors, denseIndex: i)
+    let tag: view OutlineFor = queryViewAt(table: inspectorSystem.outlineFors, denseIndex: i)
     if tag.role is role {
       if placeOutline(
         world: world
@@ -767,7 +767,7 @@ func cloneInspectorScenes(scene: view Scene, registry: view SceneRegistry) ret S
       if sceneRegistryHas(reg: cloned, key: sceneId) {
         continue
       }
-      let registered: view Scene => sceneRegistryGet(reg: registry, idx: i)
+      let registered: view Scene = sceneRegistryGet(reg: registry, idx: i)
       registerScene(reg: cloned, key: "{sceneId}", scene: cloneInspectorScene(scene: registered))
     }
   }

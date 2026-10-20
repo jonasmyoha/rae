@@ -77,7 +77,7 @@ func topRowLabel(world: view UiWorld, listEntityId: view EntityId) ret String {
     if componentHas(this: world.childrens, entityId: listEntityId) is false {
       ret "(none)"
     }
-    let ch: view Children => componentView(this: world.childrens, entityId: listEntityId)
+    let ch: view Children = componentView(this: world.childrens, entityId: listEntityId)
     if ch.ids.length is 0 {
       ret "(none)"
     }
@@ -85,7 +85,7 @@ func topRowLabel(world: view UiWorld, listEntityId: view EntityId) ret String {
     if componentHas(this: world.childrens, entityId: rowRoot) is false {
       ret "(no child)"
     }
-    let rch: view Children => componentView(this: world.childrens, entityId: rowRoot)
+    let rch: view Children = componentView(this: world.childrens, entityId: rowRoot)
     if rch.ids.length is 0 {
       ret "(no child)"
     }
@@ -93,7 +93,7 @@ func topRowLabel(world: view UiWorld, listEntityId: view EntityId) ret String {
     if componentHas(this: world.texts, entityId: label) is false {
       ret "(no text)"
     }
-    let t: view Text => componentView(this: world.texts, entityId: label)
+    let t: view Text = componentView(this: world.texts, entityId: label)
     ret "{t.text}"
   }
 }
@@ -130,7 +130,7 @@ func main() {
     let has: Bool = componentHas(this: sceneWorld.listViews, entityId: listNode)
     log("List has ListView: {has}")
     if has {
-      let lv: view ListView => componentView(this: sceneWorld.listViews, entityId: listNode)
+      let lv: view ListView = componentView(this: sceneWorld.listViews, entityId: listNode)
       log(
         "itemHeight: {lv.itemHeight.toInt()} visible: {lv.visibleItemCount} overscan: {lv.overscanRows} bindings: {lv.bindings.length}"
       )

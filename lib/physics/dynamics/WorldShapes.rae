@@ -121,11 +121,11 @@ func createShapeInternal(
 
   # The body's doubly linked shape list
   if body.headShapeId is not -1 {
-    if let head: mod PhysicsShape => world.shapes.modAt(index: body.headShapeId) {
+    if let head: mod PhysicsShape = world.shapes.modAt(index: body.headShapeId) {
       head.prevShapeId = shapeId
     }
   }
-  if let added: mod PhysicsShape => world.shapes.modAt(index: shapeId) {
+  if let added: mod PhysicsShape = world.shapes.modAt(index: shapeId) {
     added.prevShapeId = -1
     added.nextShapeId = body.headShapeId
     added.sensorIndex = -1
@@ -136,7 +136,7 @@ func createShapeInternal(
   if def.isSensor {
     world.sensors.add(value: createSensor(shapeId: shapeId))
   }
-  if let owner: mod Body => world.bodies.modAt(index: bodyId) {
+  if let owner: mod Body = world.bodies.modAt(index: bodyId) {
     owner.headShapeId = shapeId
     owner.shapeCount = owner.shapeCount + 1
   }
@@ -178,7 +178,7 @@ func finishShape(
   if def.updateBodyMass {
     updateBodyMassData(world: world, bodyId: bodyIndex)
   } else if (bodyAt(world: world, bodyId: bodyIndex).flags bitand dirtyMassFlag) is 0 {
-    if let body: mod Body => world.bodies.modAt(index: bodyIndex) {
+    if let body: mod Body = world.bodies.modAt(index: bodyIndex) {
       body.flags = body.flags bitor dirtyMassFlag
     }
     syncBodyFlags(world: world, bodyId: bodyIndex)
@@ -249,7 +249,7 @@ func addSharedHull(world: mod PhysicsWorld, hull: view Hull) ret Int {
   let hash: UInt64 = hullContentHash(hull: hull)
   loop var i: Int = 0, i < world.hullHashes.length, ++i {
     if world.hullHashes.copyAtDefault(index: i) is hash {
-      if let existing: view Hull => world.hulls.viewAt(index: i) {
+      if let existing: view Hull = world.hulls.viewAt(index: i) {
         if sameHull(left: existing, right: hull) {
           ret i
         }
@@ -310,7 +310,7 @@ func createTransformedHullShape(
     )
   }
   freeId(pool: world.shapeIdPool, id: shapeId)
-  if let shape: mod PhysicsShape => world.shapes.modAt(index: shapeId) {
+  if let shape: mod PhysicsShape = world.shapes.modAt(index: shapeId) {
     shape.id = -1
   }
   ret nullShapeId()
@@ -421,16 +421,16 @@ func destroyShapeInternal(
 ) {
   let shape: PhysicsShape = world.shapes.copyAtDefault(index: shapeId)
   if shape.prevShapeId is not -1 {
-    if let previous: mod PhysicsShape => world.shapes.modAt(index: shape.prevShapeId) {
+    if let previous: mod PhysicsShape = world.shapes.modAt(index: shape.prevShapeId) {
       previous.nextShapeId = shape.nextShapeId
     }
   }
   if shape.nextShapeId is not -1 {
-    if let next: mod PhysicsShape => world.shapes.modAt(index: shape.nextShapeId) {
+    if let next: mod PhysicsShape = world.shapes.modAt(index: shape.nextShapeId) {
       next.prevShapeId = shape.prevShapeId
     }
   }
-  if let body: mod Body => world.bodies.modAt(index: bodyId) {
+  if let body: mod Body = world.bodies.modAt(index: bodyId) {
     if shapeId is body.headShapeId {
       body.headShapeId = shape.nextShapeId
     }
@@ -458,7 +458,7 @@ func destroyShapeInternal(
   }
 
   freeId(pool: world.shapeIdPool, id: shapeId)
-  if let freed: mod PhysicsShape => world.shapes.modAt(index: shapeId) {
+  if let freed: mod PhysicsShape = world.shapes.modAt(index: shapeId) {
     freed.id = -1
   }
 }

@@ -448,7 +448,7 @@ func spotifyBindingSystem(world: mod UiWorld, spotifySystem: mod SpotifySystem) 
   var i: Int = 0
   loop i < n {
     let entityId: EntityId = componentEntityAt(this: world.textBindings, i: i)
-    let binding: view TextBinding => queryViewAt(table: world.textBindings, denseIndex: i)
+    let binding: view TextBinding = queryViewAt(table: world.textBindings, denseIndex: i)
     if binding.key is "spotify.title" {
       writeTrackText(world: world, entityId: entityId, value: spotifySystem.title)
     }

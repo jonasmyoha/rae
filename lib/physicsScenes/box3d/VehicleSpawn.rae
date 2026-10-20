@@ -191,9 +191,9 @@ func spawnCourse(world: mod VehicleWorld, course: view VehicleCourse) {
 func driveMovers(world: mod VehicleWorld) {
   world.moverTime = world.moverTime + world.physics.fixedStep
   loop var i: Int = 0, i < world.moverIds.length, ++i {
-    if let mover: view CourseMover => world.movers.viewAt(index: i) {
+    if let mover: view CourseMover = world.movers.viewAt(index: i) {
       let pose: SceneFrame = moverPose(mover: mover, time: world.moverTime)
-      let transform: mod Transform3D => componentMod(
+      let transform: mod Transform3D = componentMod(
         this: world.transforms
         entityId: world.moverIds.copyAtDefault(index: i)
       )

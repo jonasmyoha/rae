@@ -76,14 +76,14 @@ func checkListCleanup() ret Bool {
     wgpuBufferRelease(buffer: firstBuffer)
     wgpuBufferRelease(buffer: secondBuffer)
     var correct: Bool = requests.length is 2
-    if let firstRequest: view ReadRequest => requests.viewAt(index: 0) {
+    if let firstRequest: view ReadRequest = requests.viewAt(index: 0) {
       if waitForRead(request: firstRequest) is not 1 {
         correct = false
       }
     } else {
       correct = false
     }
-    if let secondRequest: view ReadRequest => requests.viewAt(index: 1) {
+    if let secondRequest: view ReadRequest = requests.viewAt(index: 1) {
       if waitForRead(request: secondRequest) is not 1 {
         correct = false
       }

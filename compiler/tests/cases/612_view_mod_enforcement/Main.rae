@@ -6,12 +6,12 @@ type Track {
 }
 
 func mutateThroughAlias(x: mod Track) {
-  let y: mod Track => x
+  let y: mod Track = x
   y.value = 42
 }
 
 func readThroughViewAlias(x: view Track) ret Int {
-  let y: view Track => x
+  let y: view Track = x
   ret y.value
 }
 
@@ -23,10 +23,10 @@ func main() {
 
   # liveness (#458): a view observes mutations made while it is alive,
   # and a mod alias's writes are visible through the original.
-  let window: view Track => t
+  let window: view Track = t
   t.value = 50
   log("view sees mutation: {window.value}")
-  let editor: mod Track => t
+  let editor: mod Track = t
   editor.value = 77
   log("original sees mod write: {t.value}")
 }

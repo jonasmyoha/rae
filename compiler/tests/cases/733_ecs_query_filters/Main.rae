@@ -37,7 +37,7 @@ func main() {
   let withoutHits: List(QueryMatch) = without(dataTable: pos, tagTable: tag)
   log("without count: {withoutHits.length}")
   loop let row: view QueryMatch in withoutHits {
-    let position: view Position => queryView(table: pos, hit: row)
+    let position: view Position = queryView(table: pos, hit: row)
     log("without e{row.entityId.index} x={position.x}")
   }
 
@@ -47,13 +47,13 @@ func main() {
 
   # Mutate ONLY e2 through a mod ref; only e2 must be reported.
   if let idx2: Int = componentIndexOf(this: pos, entityId: e2) {
-    let p2: mod Position => queryModAt(table: pos, denseIndex: idx2)
+    let p2: mod Position = queryModAt(table: pos, denseIndex: idx2)
     p2.x = p2.x + 5
   }
   let ch1: List(QueryMatch) = changedSince(table: pos, sinceGeneration: gen0)
   log("changed since gen0: {ch1.length}")
   loop let row: view QueryMatch in ch1 {
-    let position: view Position => queryView(table: pos, hit: row)
+    let position: view Position = queryView(table: pos, hit: row)
     log("changed e{row.entityId.index} x={position.x}")
   }
 
@@ -63,7 +63,7 @@ func main() {
 
   # Mutate e3; only e3 is newer than gen1.
   if let idx3: Int = componentIndexOf(this: pos, entityId: e3) {
-    let p3: mod Position => queryModAt(table: pos, denseIndex: idx3)
+    let p3: mod Position = queryModAt(table: pos, denseIndex: idx3)
     p3.x = p3.x + 7
   }
   let ch2: List(QueryMatch) = changedSince(table: pos, sinceGeneration: gen1)

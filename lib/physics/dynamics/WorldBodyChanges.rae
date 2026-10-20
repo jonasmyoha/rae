@@ -34,7 +34,7 @@ func destroyBodyContacts(world: mod PhysicsWorld, bodyId: view Int, wakeBodies: 
   loop edgeKey is not -1 {
     let contactId: Int = edgeKey shr 1
     let edgeIndex: Int = edgeKey bitand 1
-    if let contact: view Contact => world.contacts.viewAt(index: contactId) {
+    if let contact: view Contact = world.contacts.viewAt(index: contactId) {
       edgeKey = contactEdge(contact: contact, edgeIndex: edgeIndex).nextKey
     }
     destroyContact(world: world, contactId: contactId, wakeBodies: wakeBodies)
@@ -54,20 +54,20 @@ func transferBody(world: mod PhysicsWorld, targetIndex: view Int, bodyId: view I
 
   # Clear transient body flags
   let bodyFlags: Int = body.flags bitand (4294967295 - bodyTransientFlags)
-  if let stored: mod Body => world.bodies.modAt(index: bodyId) {
+  if let stored: mod Body = world.bodies.modAt(index: bodyId) {
     stored.flags = bodyFlags
   }
   sim.flags = sim.flags bitand (4294967295 - (isFastFlag bitor bodyTransientFlags))
 
   var targetLocalIndex: Int = 0
-  if let target: mod SolverSet => world.solverSets.modAt(index: targetIndex) {
+  if let target: mod SolverSet = world.solverSets.modAt(index: targetIndex) {
     targetLocalIndex = target.bodySims.length
     target.bodySims.add(value: sim)
   }
 
   # Remove the sim from the set that owns it
   var movedBodyId: Int = -1
-  if let source: mod SolverSet => world.solverSets.modAt(index: sourceIndex) {
+  if let source: mod SolverSet = world.solverSets.modAt(index: sourceIndex) {
     let lastIndex: Int = source.bodySims.length - 1
     if localIndex is not lastIndex {
       let movedSim: BodySim = source.bodySims.copyAtDefault(index: lastIndex)
@@ -77,14 +77,14 @@ func transferBody(world: mod PhysicsWorld, targetIndex: view Int, bodyId: view I
     source.bodySims.removeLast()
   }
   if movedBodyId is not -1 {
-    if let moved: mod Body => world.bodies.modAt(index: movedBodyId) {
+    if let moved: mod Body = world.bodies.modAt(index: movedBodyId) {
       moved.localIndex = localIndex
     }
     refreshBodyContactIndices(world: world, bodyId: movedBodyId)
   }
 
   if sourceIndex is awakeSet {
-    if let source: mod SolverSet => world.solverSets.modAt(index: sourceIndex) {
+    if let source: mod SolverSet = world.solverSets.modAt(index: sourceIndex) {
       let lastState: Int = source.bodyStates.length - 1
       if localIndex is not lastState {
         source.bodyStates.set(
@@ -97,19 +97,19 @@ func transferBody(world: mod PhysicsWorld, targetIndex: view Int, bodyId: view I
   } else if targetIndex is awakeSet {
     var state: BodyState = identityBodyState()
     state.flags = bodyFlags
-    if let target: mod SolverSet => world.solverSets.modAt(index: targetIndex) {
+    if let target: mod SolverSet = world.solverSets.modAt(index: targetIndex) {
       target.bodyStates.add(value: state)
     }
   }
 
-  if let stored: mod Body => world.bodies.modAt(index: bodyId) {
+  if let stored: mod Body = world.bodies.modAt(index: bodyId) {
     stored.setIndex = targetIndex
     stored.localIndex = targetLocalIndex
   }
 }
 
 func setDynamicFlag(world: mod PhysicsWorld, bodyId: view Int, bodyType: view BodyType) {
-  if let body: mod Body => world.bodies.modAt(index: bodyId) {
+  if let body: mod Body = world.bodies.modAt(index: bodyId) {
     body.bodyType = bodyType
     if bodyType is BodyType.dynamicBody {
       body.flags = body.flags bitor dynamicFlag
@@ -395,7 +395,7 @@ func setBodySleepThreshold(
   bodyId: view BodyId
   sleepThreshold: view Float
 ) {
-  if let body: mod Body => world.bodies.modAt(index: bodyIndexOf(bodyId: bodyId)) {
+  if let body: mod Body = world.bodies.modAt(index: bodyIndexOf(bodyId: bodyId)) {
     body.sleepThreshold = sleepThreshold
   }
 }
@@ -408,7 +408,7 @@ func enableBodySleep(world: mod PhysicsWorld, bodyId: view BodyId, enableSleep: 
   if enableSleep is current {
     ret
   }
-  if let body: mod Body => world.bodies.modAt(index: bodyIndex) {
+  if let body: mod Body = world.bodies.modAt(index: bodyIndex) {
     if enableSleep {
       body.flags = body.flags bitor enableSleepFlag
     } else {
@@ -431,7 +431,7 @@ func setBodyBullet(world: mod PhysicsWorld, bodyId: view BodyId, flag: view Bool
   if (bodyAt(world: world, bodyId: bodyIndex).flags bitand isBulletFlag) is newFlag {
     ret
   }
-  if let body: mod Body => world.bodies.modAt(index: bodyIndex) {
+  if let body: mod Body = world.bodies.modAt(index: bodyIndex) {
     body.flags = (body.flags bitand (4294967295 - isBulletFlag)) bitor newFlag
   }
   syncBodyFlags(world: world, bodyId: bodyIndex)
@@ -448,7 +448,7 @@ func setBodyMotionLocks(world: mod PhysicsWorld, bodyId: view BodyId, locks: vie
   }
   let fixedRotationBefore: Bool = (flags bitand fixedRotationFlags) is fixedRotationFlags
   let fixedRotationAfter: Bool = (newLocks bitand fixedRotationFlags) is fixedRotationFlags
-  if let body: mod Body => world.bodies.modAt(index: bodyIndex) {
+  if let body: mod Body = world.bodies.modAt(index: bodyIndex) {
     body.flags = (body.flags bitand (4294967295 - allLocks)) bitor newLocks
   }
   syncBodyFlags(world: world, bodyId: bodyIndex)
@@ -503,7 +503,7 @@ func getBodyContactData(
   loop contactKey is not -1 and result.length < capacity {
     let contactId: Int = contactKey shr 1
     let edgeIndex: Int = contactKey bitand 1
-    if let contact: view Contact => world.contacts.viewAt(index: contactId) {
+    if let contact: view Contact = world.contacts.viewAt(index: contactId) {
       if (contact.flags bitand contactTouchingFlag) is not 0 {
         result.add(value: contactDataOf(world: world, contact: contact))
       }

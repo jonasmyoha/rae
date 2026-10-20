@@ -279,7 +279,7 @@ func createGpu2dCanvas() ret Gpu2dCanvas {
 }
 
 func ensureBoxResources(canvas: mod Gpu2dCanvas) {
-  if let existing: view GpuResources => canvas.gpuResources {
+  if let existing: view GpuResources = canvas.gpuResources {
     ret
   }
   canvas.gpuResources = GpuResources.create(
@@ -461,7 +461,7 @@ func canvasEnsureOffscreen(canvas: mod Gpu2dCanvas) ret Bool {
     ret false
   }
   ensureBoxResources(canvas: canvas)
-  if let resources: mod GpuResources => canvas.gpuResources {
+  if let resources: mod GpuResources = canvas.gpuResources {
     if width is canvas.offscreenWidth and height is canvas.offscreenHeight and isValidTextureView(
       resources: resources
       id: canvas.offscreenView
@@ -508,7 +508,7 @@ func canvasFrameTargetView(canvas: mod Gpu2dCanvas) unsafe ret Ptr {
     if canvasChooseTarget(canvas: canvas, loads: false) {
       ret canvas.frameTarget.drawableView
     }
-    if let resources: view GpuResources => canvas.gpuResources {
+    if let resources: view GpuResources = canvas.gpuResources {
       ret refHandle(resources: resources, ref: textureViewRef(id: canvas.offscreenView))
     }
     ret webgpuNull()
@@ -525,7 +525,7 @@ func canvasFrameTargetRef(canvas: mod Gpu2dCanvas, loads: view Bool) ret Resourc
 }
 
 func canvasChooseTarget(canvas: mod Gpu2dCanvas, loads: view Bool) ret Bool {
-  if let resources: mod GpuResources => canvas.gpuResources {
+  if let resources: mod GpuResources = canvas.gpuResources {
     ret chooseFrameTarget(
       target: canvas.frameTarget
       resources: resources
@@ -541,7 +541,7 @@ func canvasChooseTarget(canvas: mod Gpu2dCanvas, loads: view Bool) ret Bool {
 # The raw texture handle present copies from (null when there is none).
 func canvasOffscreenTexture(canvas: view Gpu2dCanvas) unsafe ret Ptr {
   unsafe {
-    if let resources: view GpuResources => canvas.gpuResources {
+    if let resources: view GpuResources = canvas.gpuResources {
       if isValidTexture(resources: resources, id: canvas.offscreenTexture) {
         ret slotHandle(table: resources.textures, slot: canvas.offscreenTexture.slot)
       }
@@ -910,7 +910,7 @@ func boxFlushWith(canvas: mod Gpu2dCanvas, resources: mod GpuResources) {
 
 # ----- image pass (#908) --------------------------------------------------
 func canvasShutdown(canvas: mod Gpu2dCanvas) {
-  if let resources: mod GpuResources => canvas.gpuResources {
+  if let resources: mod GpuResources = canvas.gpuResources {
     drainSubmissions(inFlight: canvas.inFlight, resources: resources)
     retireOffscreen(canvas: canvas, resources: resources)
     retireBuffer(resources: resources, id: canvas.viewport)

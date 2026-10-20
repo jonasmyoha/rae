@@ -50,13 +50,13 @@ func rayCastChild(
       output.materialIndex = child.materialIndices.copyAtDefault(index: 0)
     }
     case ShapeType.hull {
-      if let compoundHull: view CompoundHull => compound.hulls.viewAt(index: child.kindIndex) {
+      if let compoundHull: view CompoundHull = compound.hulls.viewAt(index: child.kindIndex) {
         output = rayCastHull(hull: compoundHull.hull, input: localInput)
       }
       output.materialIndex = child.materialIndices.copyAtDefault(index: 0)
     }
     case ShapeType.mesh {
-      if let compoundMesh: view CompoundMesh => compound.meshes.viewAt(index: child.kindIndex) {
+      if let compoundMesh: view CompoundMesh = compound.meshes.viewAt(index: child.kindIndex) {
         output = rayCastMesh(mesh: compoundMesh.mesh, input: localInput)
       }
       output.materialIndex = child.materialIndices.copyAtDefault(index: output.materialIndex)
@@ -86,7 +86,7 @@ func rayCastCompound(
   lengthUnitsPerMeter: view Float
 ) ret CastOutput {
   var result: CastOutput = emptyCastOutput()
-  let tree: view DynamicTree => compound.tree
+  let tree: view DynamicTree = compound.tree
   var cast: TreeCast = beginTreeRayCast(
     tree: tree
     input: input
@@ -144,7 +144,7 @@ func shapeCastChild(
       output.materialIndex = child.materialIndices.copyAtDefault(index: 0)
     }
     case ShapeType.hull {
-      if let compoundHull: view CompoundHull => compound.hulls.viewAt(index: child.kindIndex) {
+      if let compoundHull: view CompoundHull = compound.hulls.viewAt(index: child.kindIndex) {
         output = shapeCastHull(
           hull: compoundHull.hull
           input: localInput
@@ -154,7 +154,7 @@ func shapeCastChild(
       output.materialIndex = child.materialIndices.copyAtDefault(index: 0)
     }
     case ShapeType.mesh {
-      if let compoundMesh: view CompoundMesh => compound.meshes.viewAt(index: child.kindIndex) {
+      if let compoundMesh: view CompoundMesh = compound.meshes.viewAt(index: child.kindIndex) {
         output = shapeCastMesh(
           mesh: compoundMesh.mesh
           input: localInput
@@ -206,7 +206,7 @@ func shapeCastCompound(
     translation: input.translation
     maxFraction: input.maxFraction
   }
-  let tree: view DynamicTree => compound.tree
+  let tree: view DynamicTree = compound.tree
   var cast: TreeCast = beginTreeBoxCast(
     tree: tree
     input: treeInput
@@ -252,7 +252,7 @@ func overlapChild(
       )
     }
     case ShapeType.hull {
-      if let compoundHull: view CompoundHull => compound.hulls.viewAt(index: child.kindIndex) {
+      if let compoundHull: view CompoundHull = compound.hulls.viewAt(index: child.kindIndex) {
         ret overlapHull(
           hull: compoundHull.hull
           shapeTransform: child.transform
@@ -263,7 +263,7 @@ func overlapChild(
       ret false
     }
     case ShapeType.mesh {
-      if let compoundMesh: view CompoundMesh => compound.meshes.viewAt(index: child.kindIndex) {
+      if let compoundMesh: view CompoundMesh = compound.meshes.viewAt(index: child.kindIndex) {
         ret overlapMesh(
           mesh: compoundMesh.mesh
           shapeTransform: child.transform
@@ -301,7 +301,7 @@ func overlapCompound(
 ) ret Bool {
   let localProxy: ShapeProxy = makeLocalProxy(proxy: proxy, transform: shapeTransform)
   let box: Aabb = computeProxyAabb(proxy: localProxy)
-  let tree: view DynamicTree => compound.tree
+  let tree: view DynamicTree = compound.tree
   var query: TreeQuery = beginTreeQuery(
     tree: tree
     box: box
@@ -355,14 +355,14 @@ func collideMoverAndChild(
       }
     }
     case ShapeType.hull {
-      if let compoundHull: view CompoundHull => compound.hulls.viewAt(index: child.kindIndex) {
+      if let compoundHull: view CompoundHull = compound.hulls.viewAt(index: child.kindIndex) {
         if collideMoverAndHull(result: result, hull: compoundHull.hull, mover: localMover) > 0 {
           childPlanes.add(value: result)
         }
       }
     }
     case ShapeType.mesh {
-      if let compoundMesh: view CompoundMesh => compound.meshes.viewAt(index: child.kindIndex) {
+      if let compoundMesh: view CompoundMesh = compound.meshes.viewAt(index: child.kindIndex) {
         collideMoverAndMesh(
           planes: childPlanes
           capacity: capacity
@@ -412,7 +412,7 @@ func collideMoverAndCompound(
     upperBound: add(left: max(left: mover.center1, right: mover.center2), right: radius)
   }
   let startCount: Int = planes.length
-  let tree: view DynamicTree => compound.tree
+  let tree: view DynamicTree = compound.tree
   var query: TreeQuery = beginTreeQuery(
     tree: tree
     box: box

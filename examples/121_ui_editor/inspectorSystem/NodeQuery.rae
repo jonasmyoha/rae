@@ -34,7 +34,7 @@ func deepestNodeAt(
     ret noEntity()
   }
   if componentHas(this: world.childrens, entityId: entityId) {
-    let children: view Children => componentView(this: world.childrens, entityId: entityId)
+    let children: view Children = componentView(this: world.childrens, entityId: entityId)
     loop var i: Int = children.ids.length - 1, i >= 0, --i {
       let hit: EntityId = deepestNodeAt(
         world: world
@@ -85,7 +85,7 @@ func findNodeByIdIn(
     }
   }
   if componentHas(this: world.childrens, entityId: entityId) {
-    let children: view Children => componentView(this: world.childrens, entityId: entityId)
+    let children: view Children = componentView(this: world.childrens, entityId: entityId)
     loop var i: Int = 0, i < children.ids.length, ++i {
       let found: EntityId = findNodeByIdIn(
         world: world
@@ -122,7 +122,7 @@ func siblingOf(
   if isNone(this: parent) or componentHas(this: world.childrens, entityId: parent) is false {
     ret entityId
   }
-  let children: view Children => componentView(this: world.childrens, entityId: parent)
+  let children: view Children = componentView(this: world.childrens, entityId: parent)
   loop var i: Int = 0, i < children.ids.length, ++i {
     if children.ids.copyAtFallback(index: i, fallback: noEntity()) is entityId {
       var next: Int = i + step
@@ -142,7 +142,7 @@ func firstChildOf(world: view UiWorld, entityId: view EntityId) ret EntityId {
   if isNone(this: entityId) or componentHas(this: world.childrens, entityId: entityId) is false {
     ret entityId
   }
-  let children: view Children => componentView(this: world.childrens, entityId: entityId)
+  let children: view Children = componentView(this: world.childrens, entityId: entityId)
   if children.ids.length is 0 {
     ret entityId
   }
@@ -203,7 +203,7 @@ func pendingComponentNames(world: view UiWorld, entityId: view EntityId) ret Str
 # The node's authored type, or "" when it has none.
 func nodePrimaryType(world: view UiWorld, entityId: view EntityId) ret String {
   if componentHas(this: world.primaryTypes, entityId: entityId) {
-    let primary: view PrimaryType => componentView(this: world.primaryTypes, entityId: entityId)
+    let primary: view PrimaryType = componentView(this: world.primaryTypes, entityId: entityId)
     ret "{primary.typeName}"
   }
   ret ""
@@ -215,12 +215,12 @@ func nodePrimaryType(world: view UiWorld, entityId: view EntityId) ret String {
 func nodeTypeLine(world: view UiWorld, entityId: view EntityId) ret String {
   var primaryType: String = ""
   if componentHas(this: world.primaryTypes, entityId: entityId) {
-    let primary: view PrimaryType => componentView(this: world.primaryTypes, entityId: entityId)
+    let primary: view PrimaryType = componentView(this: world.primaryTypes, entityId: entityId)
     primaryType = "{primary.typeName}"
   }
   var label: String = ""
   if componentHas(this: world.names, entityId: entityId) {
-    let name: view Name => componentView(this: world.names, entityId: entityId)
+    let name: view Name = componentView(this: world.names, entityId: entityId)
     label = "{name.label}"
   }
   if primaryType.length() is 0 {
@@ -240,7 +240,7 @@ func bundleProvenanceLine(world: view UiWorld, entityId: view EntityId) ret Stri
   if componentHas(this: world.bundleRefs, entityId: entityId) is false {
     ret ""
   }
-  let refs: view BundleRefs => componentView(this: world.bundleRefs, entityId: entityId)
+  let refs: view BundleRefs = componentView(this: world.bundleRefs, entityId: entityId)
   if refs.names.length is 0 {
     ret ""
   }
@@ -313,7 +313,7 @@ func childIdsOf(world: view UiWorld, entityId: view EntityId) ret String {
   if isNone(this: entityId) or componentHas(this: world.childrens, entityId: entityId) is false {
     ret ""
   }
-  let children: view Children => componentView(this: world.childrens, entityId: entityId)
+  let children: view Children = componentView(this: world.childrens, entityId: entityId)
   var line: String = ""
   var shown: Int = 0
   loop var i: Int = 0, i < children.ids.length, ++i {
@@ -368,7 +368,7 @@ func nodeKindOf(world: view UiWorld, entityId: view EntityId) ret String {
     ret "Scene"
   }
   if componentHas(this: world.sceneSources, entityId: entityId) {
-    let source: view SceneSource => componentView(this: world.sceneSources, entityId: entityId)
+    let source: view SceneSource = componentView(this: world.sceneSources, entityId: entityId)
     if source.root {
       ret "Scene"
     }
@@ -398,22 +398,19 @@ func nodeKindOf(world: view UiWorld, entityId: view EntityId) ret String {
 # is just noise in a narrow panel.
 func nodePreviewOf(world: view UiWorld, entityId: view EntityId) ret String {
   if componentHas(this: world.sceneSources, entityId: entityId) {
-    let source: view SceneSource => componentView(this: world.sceneSources, entityId: entityId)
+    let source: view SceneSource = componentView(this: world.sceneSources, entityId: entityId)
     if source.root and source.sceneId.length() > 0 {
       ret "{source.sceneId}"
     }
   }
   if componentHas(this: world.sceneInstances, entityId: entityId) {
-    let instance: view SceneInstance => componentView(
-      this: world.sceneInstances
-      entityId: entityId
-    )
+    let instance: view SceneInstance = componentView(this: world.sceneInstances, entityId: entityId)
     if instance.sceneId.length() > 0 {
       ret "{instance.sceneId}"
     }
   }
   if componentHas(this: world.texts, entityId: entityId) {
-    let text: view Text => componentView(this: world.texts, entityId: entityId)
+    let text: view Text = componentView(this: world.texts, entityId: entityId)
     # Short on purpose: the row already spends its width on `Name - Kind`,
     # and the panel's inner width is ~346px. A longer preview is clipped by
     # the panel edge mid-word, which reads as broken rather than truncated.
@@ -438,7 +435,7 @@ func treeRowLabelOf(world: view UiWorld, entityId: view EntityId) ret String {
     line = "{line}  {preview}"
   }
   if componentHas(this: world.bundleRefs, entityId: entityId) {
-    let refs: view BundleRefs => componentView(this: world.bundleRefs, entityId: entityId)
+    let refs: view BundleRefs = componentView(this: world.bundleRefs, entityId: entityId)
     if refs.names.length > 0 {
       line = "{line}  +{refs.names.join(sep: "+")}"
     }
@@ -459,7 +456,7 @@ func treeRowMatches(world: view UiWorld, entityId: view EntityId, filter: view S
   if componentHas(this: world.childrens, entityId: entityId) is false {
     ret false
   }
-  let children: view Children => componentView(this: world.childrens, entityId: entityId)
+  let children: view Children = componentView(this: world.childrens, entityId: entityId)
   loop var i: Int = 0, i < children.ids.length, ++i {
     let child: EntityId = children.ids.copyAtFallback(index: i, fallback: noEntity())
     if isNone(this: child) is false and treeRowMatches(

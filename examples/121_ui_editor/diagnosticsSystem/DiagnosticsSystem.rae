@@ -50,7 +50,7 @@ func createTextureSystem() ret TextureSystem {
 
 func textureKeySettled(textureSystem: view TextureSystem, key: view String) ret Bool {
   loop var i: Int = 0, i < textureSystem.resolvedKeys.length, ++i {
-    if let entry: view String => textureSystem.resolvedKeys.viewAt(index: i) {
+    if let entry: view String = textureSystem.resolvedKeys.viewAt(index: i) {
       if entry is key {
         ret true
       }
@@ -89,7 +89,7 @@ func placeholderSizeFor(
     if wanted.copyAtFallback(index: i, fallback: "") is key {
       let entityId: EntityId = wantedEntities.copyAtFallback(index: i, fallback: noEntity())
       if componentHas(this: world.rects, entityId: entityId) {
-        let rect: view Rect => componentView(this: world.rects, entityId: entityId)
+        let rect: view Rect = componentView(this: world.rects, entityId: entityId)
         if rect.size.x > largest {
           largest = rect.size.x
         }
@@ -157,14 +157,14 @@ func textureUpdate(
   var wantedEntities: List(EntityId) = List.create(EntityId, cap: 16)
   let spriteCount: Int = componentCount(this: world.sprites)
   loop var i: Int = 0, i < spriteCount, ++i {
-    let sprite: view Sprite => queryViewAt(table: world.sprites, denseIndex: i)
+    let sprite: view Sprite = queryViewAt(table: world.sprites, denseIndex: i)
     wanted.add(value: "{sprite.textureKey}")
     wantedEntities.add(value: componentEntityAt(this: world.sprites, i: i))
   }
   let animCount: Int = componentCount(this: world.animFrames)
   loop var a: Int = 0, a < animCount, ++a {
     let owner: EntityId = componentEntityAt(this: world.animFrames, i: a)
-    let frames: view AnimFrames => componentView(this: world.animFrames, entityId: owner)
+    let frames: view AnimFrames = componentView(this: world.animFrames, entityId: owner)
     loop var f: Int = 0, f < animFrameCount(frames: frames), ++f {
       wanted.add(value: animFrameKey(frames: frames, index: f))
       wantedEntities.add(value: owner)
@@ -249,7 +249,7 @@ func chromeSyncSystem(
   chromeSystem.diagnosticsCount = count
   var line: String = "{documentStatus}"
   if count > 0 {
-    if let first: view SceneDiagnostic => world.sceneDiagnostics.viewAt(index: 0) {
+    if let first: view SceneDiagnostic = world.sceneDiagnostics.viewAt(index: 0) {
       line = formatSceneDiagnostic(diagnostic: first)
     }
   }
@@ -267,7 +267,7 @@ func logDiagnostics(world: view UiWorld, sceneId: view String, nodeCount: view I
   }
   log("[ui-editor] mounted {sceneId}: {nodeCount} nodes, {count} diagnostics{kept}")
   loop var i: Int = 0, i < count, ++i {
-    if let entry: view SceneDiagnostic => world.sceneDiagnostics.viewAt(index: i) {
+    if let entry: view SceneDiagnostic = world.sceneDiagnostics.viewAt(index: i) {
       log("[ui-editor]   {formatSceneDiagnostic(diagnostic: entry)}")
     }
   }

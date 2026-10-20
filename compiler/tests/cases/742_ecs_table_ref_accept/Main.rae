@@ -38,10 +38,10 @@ func main() {
   componentSet(this: world.velocities, entityId: e, data: Velocity { v: 1 })
 
   componentSet(this: world.positions, entityId: f, data: Position { x: 20 })  # mutate first ...
-  let r: view Position => componentView(this: world.positions, entityId: f)  # ... then borrow
+  let r: view Position = componentView(this: world.positions, entityId: f)  # ... then borrow
   log("late ref: {r.x}")
 
-  let position: mod Position => componentMod(this: world.positions, entityId: e)
+  let position: mod Position = componentMod(this: world.positions, entityId: e)
   componentSet(this: world.velocities, entityId: f, data: Velocity { v: 2 })  # different table
   componentRemove(this: world.velocities, entityId: f)  # different table
   touch(t: world.positions)  # passing it on is fine

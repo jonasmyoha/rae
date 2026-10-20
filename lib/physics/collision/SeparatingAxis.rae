@@ -348,7 +348,7 @@ func computeSeparatingAxis(
   # Faces of A against the vertices of B, seeded by the face most along the
   # center offset.
   faceDots(hull: hullA, direction: deltaCenter, dots: scratch.dotsA)
-  let dotsA: view List(Float) => scratch.dotsA
+  let dotsA: view List(Float) = scratch.dotsA
   var seedIndexA: Int = 0
   var maxDotA: Float = dotsA.copyAtDefault(index: 0)
   loop var i: Int = 1, i < hullA.planes.length, ++i {
@@ -411,7 +411,7 @@ func computeSeparatingAxis(
     direction: negate(vector: multiply(matrix: inverseRotation, vector: deltaCenter))
     dots: scratch.dotsB
   )
-  let dotsB: view List(Float) => scratch.dotsB
+  let dotsB: view List(Float) = scratch.dotsB
   var seedIndexB: Int = 0
   var maxDotB: Float = dotsB.copyAtDefault(index: 0)
   loop var i: Int = 1, i < hullB.planes.length, ++i {
@@ -551,12 +551,12 @@ func testEdgePairs(
   slop: view Float
 ) {
   # B's face normals and vertices in A's frame, negated
-  let normalsB: mod List(Vec3) => edges.normalsB
+  let normalsB: mod List(Vec3) = edges.normalsB
   normalsB.clear()
   loop let plane: view Plane in hullB.planes {
     normalsB.add(value: negate(vector: multiply(matrix: rotation, vector: plane.normal)))
   }
-  let pointsB: mod List(Vec3) => edges.pointsB
+  let pointsB: mod List(Vec3) = edges.pointsB
   pointsB.clear()
   loop let point: view Vec3 in hullB.points {
     pointsB.add(
@@ -568,7 +568,7 @@ func testEdgePairs(
 
   # Per candidate edge of A: its two face normals, its direction, its first
   # vertex, and the parallel tolerance scaled by its length.
-  let edgesA: mod List(EdgeOfA) => edges.edgesA
+  let edgesA: mod List(EdgeOfA) = edges.edgesA
   edgesA.clear()
   let squaredTolerance: Float = parallelEdgeTolerance * parallelEdgeTolerance
   loop let edgeIndex: view Int in edgeIndicesA {

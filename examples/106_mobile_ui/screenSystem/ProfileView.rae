@@ -71,13 +71,13 @@ func profileStatsSystem(
   var i: Int = 0
   loop i < n {
     let entityId: EntityId = componentEntityAt(this: profileSystem.profileStats, i: i)
-    let binding: view ProfileStat => queryViewAt(table: profileSystem.profileStats, denseIndex: i)
+    let binding: view ProfileStat = queryViewAt(table: profileSystem.profileStats, denseIndex: i)
     if componentHas(this: world.texts, entityId: entityId) {
       let wanted: String = profileStatText(state: state, stat: binding.stat)
       # Compared through a view, written in place through componentMod: no
       # copy, and no whole-component write while a view is live.
       if componentView(this: world.texts, entityId: entityId).text is not wanted {
-        let current: mod Text => componentMod(this: world.texts, entityId: entityId)
+        let current: mod Text = componentMod(this: world.texts, entityId: entityId)
         current.text = "{wanted}"
       }
     }
@@ -89,7 +89,7 @@ func profileStatsSystem(
 func setActiveIfChanged(world: mod UiWorld, entityId: view EntityId, active: view Bool) {
   var current: Bool = true
   if componentHas(this: world.actives, entityId: entityId) {
-    let a: view Active => componentView(this: world.actives, entityId: entityId)
+    let a: view Active = componentView(this: world.actives, entityId: entityId)
     current = a.value
   }
   if current is not active {
@@ -111,19 +111,16 @@ func avatarSystem(
     var i: Int = 0
     loop i < n {
       let container: EntityId = componentEntityAt(this: profileSystem.avatarSources, i: i)
-      let source: view AvatarSource => queryViewAt(
-        table: profileSystem.avatarSources
-        denseIndex: i
-      )
+      let source: view AvatarSource = queryViewAt(table: profileSystem.avatarSources, denseIndex: i)
       let loaded: Bool = textureHas(reg: reg, key: source.textureKey)
       if componentHas(this: world.childrens, entityId: container) {
-        let kids: view Children => componentView(this: world.childrens, entityId: container)
+        let kids: view Children = componentView(this: world.childrens, entityId: container)
         var k: Int = 0
         loop k < kids.ids.length {
           let child: EntityId = rae_ext_rae_buf_get(buf: kids.ids.data, index: k)
           var isPhoto: Bool = false
           if componentHas(this: world.sprites, entityId: child) {
-            let sp: view Sprite => componentView(this: world.sprites, entityId: child)
+            let sp: view Sprite = componentView(this: world.sprites, entityId: child)
             isPhoto = sp.textureKey is source.textureKey
           }
           var active: Bool = loaded

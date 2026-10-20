@@ -212,7 +212,7 @@ func structSequentialView(particles: view List(Particle), passes: view Int) {
   loop pass < passes {
     var index: Int = 0
     loop index < particles.length {
-      if let particle: view Particle => particles.viewAt(index: index) {
+      if let particle: view Particle = particles.viewAt(index: index) {
         checksum = checksum + particle.px + particle.vz + particle.mass
       }
       index = index + 1
@@ -257,7 +257,7 @@ func structRandomView(particles: view List(Particle), operations: view Int) {
   var iteration: Int = 0
   loop iteration < operations {
     let index: Int = (iteration * 48271 + 17) % divisor
-    if let particle: view Particle => particles.viewAt(index: index) {
+    if let particle: view Particle = particles.viewAt(index: index) {
       checksum = checksum + particle.px + particle.vz + particle.mass
     }
     iteration = iteration + 1
@@ -540,25 +540,25 @@ func scatterIfLetModAt() {
         total = 0.0
       }
       let lambda: Float = total - previous
-      if let slot: mod Float => world.accumulated.modAt(index: c) {
+      if let slot: mod Float = world.accumulated.modAt(index: c) {
         slot = total
       }
-      if let slot: mod Float => world.vx.modAt(index: a) {
+      if let slot: mod Float = world.vx.modAt(index: a) {
         slot = vxA - invA * lambda * normalX
       }
-      if let slot: mod Float => world.vy.modAt(index: a) {
+      if let slot: mod Float = world.vy.modAt(index: a) {
         slot = vyA - invA * lambda * normalY
       }
-      if let slot: mod Float => world.vz.modAt(index: a) {
+      if let slot: mod Float = world.vz.modAt(index: a) {
         slot = vzA - invA * lambda * normalZ
       }
-      if let slot: mod Float => world.vx.modAt(index: b) {
+      if let slot: mod Float = world.vx.modAt(index: b) {
         slot = vxB + invB * lambda * normalX
       }
-      if let slot: mod Float => world.vy.modAt(index: b) {
+      if let slot: mod Float = world.vy.modAt(index: b) {
         slot = vyB + invB * lambda * normalY
       }
-      if let slot: mod Float => world.vz.modAt(index: b) {
+      if let slot: mod Float = world.vz.modAt(index: b) {
         slot = vzB + invB * lambda * normalZ
       }
     }

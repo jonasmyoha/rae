@@ -879,7 +879,7 @@ func uploadLightUniform(
 # post pass records its render passes and copies into it; nothing reaches the
 # GPU until flushPostPasses. Null when no encoder could be made.
 func postEncoder(targets: mod DeferredTargets, resources: mod GpuResources) ret Ptr {
-  if let recording: view Recording => targets.post {
+  if let recording: view Recording = targets.post {
     if recordingIsOpen(recording: recording, resources: resources) {
       unsafe {
         ret recording.encoder
@@ -904,7 +904,7 @@ func postEncoder(targets: mod DeferredTargets, resources: mod GpuResources) ret 
 # submit, give each pass the values it uploaded; the one shared buffer, the
 # light uniform, gets the same camera matrices from SSAO and lighting.
 func flushPostPasses(targets: mod DeferredTargets, resources: mod GpuResources) {
-  if let recording: mod Recording => targets.post {
+  if let recording: mod Recording = targets.post {
     let tracked: opt SubmissionId = trackSubmission(
       inFlight: targets.postInFlight
       resources: resources

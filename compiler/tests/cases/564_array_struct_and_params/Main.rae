@@ -41,15 +41,15 @@ func main() {
 
   # Nested aggregate: modAt aliases the inner array in place.
   var grid: Array(Array(Float, cap: 2), cap: 2) = Array(Array(Float, cap: 2), cap: 2)
-  if let row: mod Array(Float, cap: 2) => grid.modAt(index: 1) {
+  if let row: mod Array(Float, cap: 2) = grid.modAt(index: 1) {
     row.set(index: 0, value: 7.5)
   }
   var seen: Float = 0.0
   var zero: Float = 1.0
-  if let row: view Array(Float, cap: 2) => grid.viewAt(index: 1) {
+  if let row: view Array(Float, cap: 2) = grid.viewAt(index: 1) {
     seen = row.copyAtFallback(index: 0, fallback: -1.0)
   }
-  if let row: view Array(Float, cap: 2) => grid.viewAt(index: 0) {
+  if let row: view Array(Float, cap: 2) = grid.viewAt(index: 0) {
     zero = row.copyAtFallback(index: 0, fallback: -1.0)
   }
   log("grid={seen} zero={zero}")

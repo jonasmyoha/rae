@@ -82,7 +82,7 @@ func overlapSensor(
       )
     }
     case ShapeType.hull {
-      if let hull: view Hull => world.hulls.viewAt(index: sensorShape.hullIndex) {
+      if let hull: view Hull = world.hulls.viewAt(index: sensorShape.hullIndex) {
         ret overlapHull(
           hull: hull
           shapeTransform: identity
@@ -93,7 +93,7 @@ func overlapSensor(
       ret false
     }
     case ShapeType.compound {
-      if let compound: view CompoundData => world.compounds.viewAt(index: sensorShape.compoundIndex) {
+      if let compound: view CompoundData = world.compounds.viewAt(index: sensorShape.compoundIndex) {
         ret overlapCompound(
           compound: compound
           shapeTransform: identity
@@ -104,7 +104,7 @@ func overlapSensor(
       ret false
     }
     case ShapeType.height {
-      if let heightField: view HeightFieldData => world.heightFields.viewAt(
+      if let heightField: view HeightFieldData = world.heightFields.viewAt(
         index: sensorShape.heightFieldIndex
       ) {
         ret overlapHeightField(
@@ -117,7 +117,7 @@ func overlapSensor(
       ret false
     }
     case ShapeType.mesh {
-      if let mesh: view Mesh => world.meshes.viewAt(index: sensorShape.meshIndex) {
+      if let mesh: view Mesh = world.meshes.viewAt(index: sensorShape.meshIndex) {
         ret overlapMesh(
           mesh: mesh
           shapeTransform: identity
@@ -215,7 +215,7 @@ func sensorTask(
       let queryBounds: Aabb = sensorShape.aabb
       # Query all trees
       loop var treeIndex: Int = 0, treeIndex < 3, ++treeIndex {
-        if let tree: view DynamicTree => world.broadPhase.trees.viewAt(index: treeIndex) {
+        if let tree: view DynamicTree = world.broadPhase.trees.viewAt(index: treeIndex) {
           var query: TreeQuery = beginTreeQuery(
             tree: tree
             box: queryBounds
@@ -270,7 +270,7 @@ func sensorTask(
     }
     world.sensors.set(index: sensorIndex, value: sensor)
     if changed {
-      if let taskContext: mod TaskContext => world.taskContexts.modAt(index: workerIndex) {
+      if let taskContext: mod TaskContext = world.taskContexts.modAt(index: workerIndex) {
         setBit(bitset: taskContext.sensorEventBits, bitIndex: sensorIndex)
       }
     }
@@ -318,7 +318,7 @@ func overlapSensors(world: mod PhysicsWorld) {
     ret
   }
   loop var i: Int = 0, i < world.taskContexts.length, ++i {
-    if let taskContext: mod TaskContext => world.taskContexts.modAt(index: i) {
+    if let taskContext: mod TaskContext = world.taskContexts.modAt(index: i) {
       setBitCountAndClear(bitset: taskContext.sensorEventBits, bitCount: sensorCount)
     }
   }
@@ -354,11 +354,11 @@ func overlapSensors(world: mod PhysicsWorld) {
 
   # The chunks' bits OR-ed into chunk 0's (moved out and given back)
   var bits: Bitset = emptyBitset()
-  if let first: mod TaskContext => world.taskContexts.modAt(index: 0) {
+  if let first: mod TaskContext = world.taskContexts.modAt(index: 0) {
     bits = own first.sensorEventBits
   }
   loop var i: Int = 1, i < world.taskContexts.length, ++i {
-    if let other: view TaskContext => world.taskContexts.viewAt(index: i) {
+    if let other: view TaskContext = world.taskContexts.viewAt(index: i) {
       inPlaceUnion(setA: bits, setB: other.sensorEventBits)
     }
   }
@@ -442,7 +442,7 @@ func overlapSensors(world: mod PhysicsWorld) {
       index2 = index2 + 1
     }
   }
-  if let first: mod TaskContext => world.taskContexts.modAt(index: 0) {
+  if let first: mod TaskContext = world.taskContexts.modAt(index: 0) {
     first.sensorEventBits = own bits
   }
 }
@@ -472,7 +472,7 @@ func destroySensor(world: mod PhysicsWorld, shapeId: view Int) {
   if sensorIndex is not lastIndex {
     let moved: Sensor = world.sensors.copyAtDefault(index: lastIndex)
     world.sensors.set(index: sensorIndex, value: moved)
-    if let movedShape: mod PhysicsShape => world.shapes.modAt(index: moved.shapeId) {
+    if let movedShape: mod PhysicsShape = world.shapes.modAt(index: moved.shapeId) {
       movedShape.sensorIndex = sensorIndex
     }
   }

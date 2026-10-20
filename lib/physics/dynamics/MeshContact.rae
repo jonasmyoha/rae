@@ -121,7 +121,7 @@ func querySurfaceTrianglesInto(
 ) {
   indices.clear()
   if shapeA.shapeType is ShapeType.mesh {
-    if let mesh: view Mesh => meshes.viewAt(index: shapeA.meshIndex) {
+    if let mesh: view Mesh = meshes.viewAt(index: shapeA.meshIndex) {
       queryMeshInto(
         mesh: mesh
         bounds: bounds
@@ -133,7 +133,7 @@ func querySurfaceTrianglesInto(
         indices.add(value: triangle.triangleIndex)
       }
     }
-  } else if let heightField: view HeightFieldData => heightFields.viewAt(
+  } else if let heightField: view HeightFieldData = heightFields.viewAt(
     index: shapeA.heightFieldIndex
   ) {
     queryHeightFieldInto(
@@ -154,10 +154,10 @@ func surfaceTriangle(
   triangleIndex: view Int
 ) ret MeshTriangleData {
   if shapeA.shapeType is ShapeType.mesh {
-    if let mesh: view Mesh => meshes.viewAt(index: shapeA.meshIndex) {
+    if let mesh: view Mesh = meshes.viewAt(index: shapeA.meshIndex) {
       ret getMeshTriangle(mesh: mesh, triangleIndex: triangleIndex)
     }
-  } else if let heightField: view HeightFieldData => heightFields.viewAt(
+  } else if let heightField: view HeightFieldData = heightFields.viewAt(
     index: shapeA.heightFieldIndex
   ) {
     ret getHeightFieldTriangle(heightField: heightField, triangleIndex: triangleIndex)
@@ -185,10 +185,10 @@ func triangleMaterial(
 ) ret SurfaceMaterial {
   var materialIndex: Int = 0
   if shapeA.shapeType is ShapeType.height {
-    if let heightField: view HeightFieldData => heightFields.viewAt(index: shapeA.heightFieldIndex) {
+    if let heightField: view HeightFieldData = heightFields.viewAt(index: shapeA.heightFieldIndex) {
       materialIndex = heightField.materialIndices.copyAtDefault(index: triangleIndex shr 1)
     }
-  } else if let mesh: view Mesh => meshes.viewAt(index: shapeA.meshIndex) {
+  } else if let mesh: view Mesh = meshes.viewAt(index: shapeA.meshIndex) {
     materialIndex = mesh.data.materialIndices.copyAtDefault(index: triangleIndex)
     if materialMap.length > 0 {
       materialIndex = materialMap.copyAtDefault(index: materialIndex)
@@ -257,7 +257,7 @@ func refreshCache(
       index2 = index2 + 1
     }
     if index2 < contact.triangleCache.length {
-      if let old: view TriangleCache => contact.triangleCache.viewAt(index: index2) {
+      if let old: view TriangleCache = contact.triangleCache.viewAt(index: index2) {
         if old.triangleIndex is triangleIndex {
           entry.cache = old.cache
         }
@@ -309,7 +309,7 @@ func collideMeshTriangle(
   lengthUnitsPerMeter: view Float
   triangleScratch: mod TriangleScratch
 ) {
-  if let entry: mod TriangleCache => contact.triangleCache.modAt(index: index) {
+  if let entry: mod TriangleCache = contact.triangleCache.modAt(index: index) {
     match shapeB.shapeType {
       case ShapeType.capsule {
         collideTriangleAndCapsule(
@@ -327,7 +327,7 @@ func collideMeshTriangle(
         if isFast and entry.cache.satCache.kind is SeparatingFeature.edgePairAxis {
           entry.cache.satCache = emptySatCache()
         }
-        if let hullB: view Hull => hulls.viewAt(index: shapeB.hullIndex) {
+        if let hullB: view Hull = hulls.viewAt(index: shapeB.hullIndex) {
           collideTriangleAndHull(
             manifold: manifold
             v1: vertices.copyAtDefault(index: 0)
@@ -419,7 +419,7 @@ func buildMeshManifolds(
   let offsetA: Vec3 = subtractPositions(left: transformB.position, right: transformA.position)
   let normalMatchTolerance: Float = 0.995
   loop var i: Int = 0, i < clusters.clusterCount, ++i {
-    if let cluster: view MeshCluster => clusters.clusters.viewAt(index: i) {
+    if let cluster: view MeshCluster = clusters.clusters.viewAt(index: i) {
       let pointCount: Int = cluster.points.length
       var manifold: Manifold = zeroManifold()
       manifold.pointCount = pointCount
@@ -451,7 +451,7 @@ func buildMeshManifolds(
 
       loop var j: Int = 0, j < pointCount, ++j {
         let source: LocalManifoldPoint = cluster.points.copyAtDefault(index: j)
-        if let target: mod ManifoldPoint => manifold.points.modAt(index: j) {
+        if let target: mod ManifoldPoint = manifold.points.modAt(index: j) {
           # Contact points are computed in frame B
           target.anchorB = multiply(matrix: matrixB, vector: source.point)
           target.anchorA = add(left: target.anchorB, right: offsetA)
@@ -461,9 +461,9 @@ func buildMeshManifolds(
 
           # Preserve the normal impulse if possible
           if bestIndex is not -1 {
-            if let matched: mod Manifold => oldManifolds.modAt(index: bestIndex) {
+            if let matched: mod Manifold = oldManifolds.modAt(index: bestIndex) {
               loop var k: Int = 0, k < matched.pointCount, ++k {
-                if let oldPoint: mod ManifoldPoint => matched.points.modAt(index: k) {
+                if let oldPoint: mod ManifoldPoint = matched.points.modAt(index: k) {
                   if target.featureId is oldPoint.featureId and target.triangleIndex is oldPoint.triangleIndex {
                     target.normalImpulse = oldPoint.normalImpulse
                     target.persisted = true
@@ -579,7 +579,7 @@ func computeMeshManifolds(
         lengthUnitsPerMeter: lengthUnitsPerMeter
         triangleScratch: scratch.triangle
       )
-      if let slot: mod LocalManifold => scratch.manifolds.modAt(index: manifoldIndex) {
+      if let slot: mod LocalManifold = scratch.manifolds.modAt(index: manifoldIndex) {
         keepManifoldInto(slot: slot, source: scratch.smallManifold)
       }
     } else {
@@ -597,7 +597,7 @@ func computeMeshManifolds(
         triangleScratch: scratch.triangle
       )
       if manifoldPointCount > 0 {
-        if let slot: mod LocalManifold => scratch.manifolds.modAt(index: manifoldIndex) {
+        if let slot: mod LocalManifold = scratch.manifolds.modAt(index: manifoldIndex) {
           keepManifoldInto(slot: slot, source: scratch.manifold)
         }
       }
@@ -609,7 +609,7 @@ func computeMeshManifolds(
     totalPointCount = totalPointCount + manifoldPointCount
     scratch.manifoldCount = manifoldIndex + 1
     var isTentative: Bool = false
-    if let kept: mod LocalManifold => scratch.manifolds.modAt(index: manifoldIndex) {
+    if let kept: mod LocalManifold = scratch.manifolds.modAt(index: manifoldIndex) {
       kept.triangleIndex = triangleIndex
       kept.triangleNormal = normalFromPoints(point1: vertex1, point2: vertex2, point3: vertex3)
       kept.i1 = triangle.index1
@@ -665,7 +665,7 @@ func computeMeshManifolds(
       let manifoldIndex: Int = scratch.tentative.copyAtDefault(
         index: scratch.tentativeOrder.copyAtDefault(index: i)
       )
-      if let manifold: view LocalManifold => scratch.manifolds.viewAt(index: manifoldIndex) {
+      if let manifold: view LocalManifold = scratch.manifolds.viewAt(index: manifoldIndex) {
         if shouldCollideTentative(found: scratch.found, manifold: manifold) {
           scratch.accepted.add(value: manifoldIndex)
         }
@@ -677,7 +677,7 @@ func computeMeshManifolds(
     # ignored
     loop var i: Int = 0, i < scratch.tentative.length, ++i {
       let manifoldIndex: Int = scratch.tentative.copyAtDefault(index: i)
-      if let manifold: view LocalManifold => scratch.manifolds.viewAt(index: manifoldIndex) {
+      if let manifold: view LocalManifold = scratch.manifolds.viewAt(index: manifoldIndex) {
         if isFlatEdgeGhost(found: scratch.found, manifold: manifold) is false {
           scratch.accepted.add(value: manifoldIndex)
         }
@@ -745,7 +745,7 @@ func computeMeshManifolds(
   } else if shapeB.shapeType is ShapeType.capsule {
     radiusB = shapeB.capsule.radius
   } else if shapeB.shapeType is ShapeType.hull {
-    if let hullB: view Hull => hulls.viewAt(index: shapeB.hullIndex) {
+    if let hullB: view Hull = hulls.viewAt(index: shapeB.hullIndex) {
       radiusB = hullB.innerRadius
     }
   }

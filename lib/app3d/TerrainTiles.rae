@@ -138,7 +138,7 @@ func updateTerrainTiles(
       # Which mesh is in the slot, and does it cover another cell? (read
       # first: the reshape below writes `tiles`)
       var meshId: Int = 0
-      if let tile: view TerrainTile => tiles.tiles.viewAt(index: slot) {
+      if let tile: view TerrainTile = tiles.tiles.viewAt(index: slot) {
         if tile.cellX is not wantX or tile.cellY is not wantY {
           meshId = tile.meshId
         }
@@ -151,7 +151,7 @@ func updateTerrainTiles(
           cellX: wantX
           cellY: wantY
         )
-        if let tile: mod TerrainTile => tiles.tiles.modAt(index: slot) {
+        if let tile: mod TerrainTile = tiles.tiles.modAt(index: slot) {
           tile.cellX = wantX
           tile.cellY = wantY
         }

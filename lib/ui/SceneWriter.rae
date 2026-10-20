@@ -241,21 +241,21 @@ func writeNode(
   if let index: Int = findNodeInPage(world: fresh, pageId: "", nodeId: nodeId) {
     freshEntityId = nodeEntityId(world: fresh, index: index)
   }
-  let doc: view JsonDoc => scene.doc
+  let doc: view JsonDoc = scene.doc
   var members: List(String) = List.create(String, cap: 12)
   var written: List(String) = List.create(String, cap: 12)
   # Where the author wrote Children (-1: they did not; it goes last).
   var childrenSlot: Int = -1
   var inherited: List(String) = List.create(String, cap: 8)
   if componentHas(this: world.bundleRefs, entityId: entityId) {
-    let refs: view BundleRefs => componentView(this: world.bundleRefs, entityId: entityId)
+    let refs: view BundleRefs = componentView(this: world.bundleRefs, entityId: entityId)
     loop let name: view String in refs.inherited {
       inherited.add(value: "{name}")
     }
   }
   # 1. The authored bag, in the author's order: verbatim when unchanged.
   if let sourceIndex: Int = sceneNodeIndex(this: scene, nodeId: nodeId) {
-    let node: view SceneNode => nodeAt(this: scene, idx: sourceIndex)
+    let node: view SceneNode = nodeAt(this: scene, idx: sourceIndex)
     let bag: JsonValue = Json.jsonValueAt(doc: doc, idx: node.componentsValueIdx)
     let count: Int = Json.objectLen(this: bag)
     loop var k: Int = 0, k < count, ++k {
@@ -343,7 +343,7 @@ func writeNode(
   var childEntities: List(EntityId) = List.create(EntityId, cap: 8)
   let isInstance: Bool = componentHas(this: world.sceneInstances, entityId: entityId)
   if isInstance is false and componentHas(this: world.childrens, entityId: entityId) {
-    let children: view Children => componentView(this: world.childrens, entityId: entityId)
+    let children: view Children = componentView(this: world.childrens, entityId: entityId)
     loop let child: view EntityId in children.ids {
       if isRowEntity(world: world, entityId: child) {
         continue
@@ -417,7 +417,7 @@ func writeSceneText(
   pageRoot: view EntityId
   pageId: view String
 ) ret String {
-  let doc: view JsonDoc => scene.doc
+  let doc: view JsonDoc = scene.doc
   let root: JsonValue = Json.root(doc: doc)
   var text: String = "\{\n"
   # Headers first, in the author's order; `root` follows the mounted root.

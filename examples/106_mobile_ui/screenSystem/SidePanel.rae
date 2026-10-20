@@ -26,7 +26,7 @@ func setGridColumns(
   if let index: Int = findNodeInPage(world: world, pageId: pageId, nodeId: nodeId) {
     let entityId: EntityId = nodeEntityId(world: world, index: index)
     if componentHas(this: world.layouts, entityId: entityId) {
-      let layout: mod Layout => componentMod(this: world.layouts, entityId: entityId)
+      let layout: mod Layout = componentMod(this: world.layouts, entityId: entityId)
       layout.columns = columns
     }
   }
@@ -64,7 +64,7 @@ func mountSidePanel(
     ret noEntity()
   }
   if let sceneIndex: Int = sceneRegistryIndex(reg: scenes.pages, key: libraryPageId) {
-    let scene: view Scene => sceneRegistryGet(reg: scenes.pages, idx: sceneIndex)
+    let scene: view Scene = sceneRegistryGet(reg: scenes.pages, idx: sceneIndex)
     let pageIdCopy: String = "{sidePanelPageId}"
     let root: EntityId = mountPageOrError(
       world: world

@@ -41,7 +41,7 @@ func bytesMatch(check: mod ReadbackCheck) ret Bool {
     out.add(value: 0 as UInt8)
   }
   var copied: Bool = false
-  if let resources: mod GpuResources => check.resources {
+  if let resources: mod GpuResources = check.resources {
     copied = copyReadback(resources: resources, id: check.readback, destination: out)
   }
   if copied is false {
@@ -62,7 +62,7 @@ func bytesMatch(check: mod ReadbackCheck) ret Bool {
 func checkFrame(check: mod ReadbackCheck) ret Bool {
   check.frames = check.frames + 1
   var status: Int = -1
-  if let resources: mod GpuResources => check.resources {
+  if let resources: mod GpuResources = check.resources {
     status = pollReadback(resources: resources, id: check.readback)
   }
   if status is 1 {
@@ -86,7 +86,7 @@ func checkFrame(check: mod ReadbackCheck) ret Bool {
 # The MapRead buffer with its known bytes and the readback of it; false
 # when any of it could not be made.
 func startCheck(check: mod ReadbackCheck) ret Bool {
-  if let resources: mod GpuResources => check.resources {
+  if let resources: mod GpuResources = check.resources {
     if let buffer: BufferId = createBuffer(
       resources: resources
       size: readbackBytes

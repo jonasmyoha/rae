@@ -183,17 +183,14 @@ func buildWorld() ret GameWorld {
 # ball once, steer and jump the character.
 func playScript(world: mod GameWorld, frame: view Int, time: view Float) {
   if true {
-    let platform: mod Transform3D => componentMod(
-      this: world.transforms
-      entityId: world.platformId
-    )
+    let platform: mod Transform3D = componentMod(this: world.transforms, entityId: world.platformId)
     platform.position = Vec3 { x: 2.0 * Math.sin(x: time), y: 4.0, z: 0.5 }
   }
   if frame is 200 {
-    let ball: mod Transform3D => componentMod(this: world.transforms, entityId: world.teleportId)
+    let ball: mod Transform3D = componentMod(this: world.transforms, entityId: world.teleportId)
     ball.position = Vec3 { x: -6.0, y: -6.0, z: 3.0 }
   }
-  let character: mod CharacterBody => componentMod(
+  let character: mod CharacterBody = componentMod(
     this: world.characters
     entityId: world.characterId
   )

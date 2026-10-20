@@ -103,7 +103,7 @@ func scheduleSize(schedule: view Schedule) ret Int {
 # The name of entry `index` (for debugging / an ordered readout).
 func scheduleName(schedule: view Schedule, index: view Int) ret String {
   var out: String = ""
-  if let entry: view ScheduleEntry => schedule.entries.viewAt(index: index) {
+  if let entry: view ScheduleEntry = schedule.entries.viewAt(index: index) {
     out = out.concat(other: entry.name)
   }
   ret out
@@ -114,7 +114,7 @@ func scheduleName(schedule: view Schedule, index: view Int) ret String {
 # value — when it differs from the last run (a read table mutated, or the first
 # run); false to skip when nothing it reads has changed.
 func shouldRun(schedule: mod Schedule, index: view Int, readGeneration: view Int) ret Bool {
-  let slot: mod ScheduleEntry => schedule.entries.modAt(index: index)
+  let slot: mod ScheduleEntry = schedule.entries.modAt(index: index)
   if slot.lastGeneration is readGeneration {
     ret false
   }
@@ -174,7 +174,7 @@ func declaredReadGeneration(
   index: view Int
 ) ret Int {
   var sum: Int = 0
-  if let entry: view ScheduleEntry => schedule.entries.viewAt(index: index) {
+  if let entry: view ScheduleEntry = schedule.entries.viewAt(index: index) {
     var tableIndex: Int = 0
     loop let table: view ComponentTable(any) in fields(world) {
       if scheduleIdsContain(ids: entry.reads, id: tableIndex) {
@@ -223,7 +223,7 @@ func shouldRunDeclaredPlus(
     index: index
   ) + extraGeneration
   let alive: Int = worldAliveCount(W, world: world)
-  let slot: mod ScheduleEntry => schedule.entries.modAt(index: index)
+  let slot: mod ScheduleEntry = schedule.entries.modAt(index: index)
   if slot.skipWhenClean is false {
     ret true
   }
@@ -238,7 +238,7 @@ func shouldRunDeclaredPlus(
 # The declared read / write ids of entry `index` (for a DAG dump or a stager).
 func scheduleReads(schedule: view Schedule, index: view Int) ret List(Int) {
   var out: List(Int) = List.create(Int, cap: 16)
-  if let entry: view ScheduleEntry => schedule.entries.viewAt(index: index) {
+  if let entry: view ScheduleEntry = schedule.entries.viewAt(index: index) {
     loop let id: Int in entry.reads {
       out.add(value: id)
     }
@@ -248,7 +248,7 @@ func scheduleReads(schedule: view Schedule, index: view Int) ret List(Int) {
 
 func scheduleWrites(schedule: view Schedule, index: view Int) ret List(Int) {
   var out: List(Int) = List.create(Int, cap: 16)
-  if let entry: view ScheduleEntry => schedule.entries.viewAt(index: index) {
+  if let entry: view ScheduleEntry = schedule.entries.viewAt(index: index) {
     loop let id: Int in entry.writes {
       out.add(value: id)
     }

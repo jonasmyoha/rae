@@ -57,7 +57,7 @@ func hoverPaintRank(world: view UiWorld, entityId: view EntityId) pub ret Int {
   if componentHas(this: world.hoverScales, entityId: entityId) is false {
     ret 0
   }
-  let hs: view HoverScale => componentView(this: world.hoverScales, entityId: entityId)
+  let hs: view HoverScale = componentView(this: world.hoverScales, entityId: entityId)
   if hs.current <= hs.restScale {
     ret 0
   }
@@ -81,7 +81,7 @@ func subtreeHoverPaintRank(world: view UiWorld, entityId: view EntityId) pub ret
     if componentHas(this: world.childrens, entityId: entityId) is false {
       ret best
     }
-    let ch: view Children => componentView(this: world.childrens, entityId: entityId)
+    let ch: view Children = componentView(this: world.childrens, entityId: entityId)
     let n: Int = ch.ids.length
     var i: Int = 0
     loop i < n {

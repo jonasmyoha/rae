@@ -338,7 +338,7 @@ func putShape(out: mod List(Int), world: view PhysicsWorld, shapeIndex: view Int
       putFloat(out: out, value: shape.capsule.radius)
     }
     case ShapeType.hull {
-      if let hull: view Hull => world.hulls.viewAt(index: shape.hullIndex) {
+      if let hull: view Hull = world.hulls.viewAt(index: shape.hullIndex) {
         putInt(out: out, value: hull.points.length)
         putVec(out: out, vector: hull.center)
         putFloat(out: out, value: hull.volume)

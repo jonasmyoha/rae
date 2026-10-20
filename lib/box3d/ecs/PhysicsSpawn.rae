@@ -64,7 +64,7 @@ func spawnRigidBody(
   }
   setMappedEntity(entities: physics.bodyEntities, index: bodyId.index1 - 1, entityId: entityId)
   if componentHas(this: transforms, entityId: entityId) {
-    let transform: mod Transform3D => componentMod(this: transforms, entityId: entityId)
+    let transform: mod Transform3D = componentMod(this: transforms, entityId: entityId)
     transform.position = def.position
     transform.rotation = def.rotation
   } else {
@@ -94,7 +94,7 @@ func recordCollider(
 ) {
   setMappedEntity(entities: physics.shapeEntities, index: shapeId.index1 - 1, entityId: entityId)
   if componentHas(this: colliders, entityId: entityId) {
-    let collider: mod Collider => componentMod(this: colliders, entityId: entityId)
+    let collider: mod Collider = componentMod(this: colliders, entityId: entityId)
     collider.shapeIds.add(value: shapeId)
   } else {
     var shapeIds: List(ShapeId) = List.create(ShapeId, cap: 1)

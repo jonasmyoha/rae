@@ -46,12 +46,12 @@ func transformSystem3D(
   loop var i: Int = 0, i < componentCount(this: transforms), ++i {
     let entityId: EntityId = componentEntityAt(this: transforms, i: i)
     if componentHas(this: parents, entityId: entityId) is false {
-      let local: view Transform3D => componentView(this: transforms, entityId: entityId)
+      let local: view Transform3D = componentView(this: transforms, entityId: entityId)
       componentSet(this: worldTransforms, entityId: entityId, data: rootWorld3D(local: local))
     }
   }
   # Pass 2: every parented entity in depth order -> world = parentWorld o local.
-  let order: view List(EntityId) => depthOrder(
+  let order: view List(EntityId) = depthOrder(
     state: orderState
     parents: parents
     childrens: childrens
@@ -61,8 +61,8 @@ func transformSystem3D(
       this: parents
       entityId: entityId
     ) {
-      let local: view Transform3D => componentView(this: transforms, entityId: entityId)
-      let link: view Parent => componentView(this: parents, entityId: entityId)
+      let local: view Transform3D = componentView(this: transforms, entityId: entityId)
+      let link: view Parent = componentView(this: parents, entityId: entityId)
       if componentHas(this: worldTransforms, entityId: link.parent) {
         # The parent's row is read as an ARGUMENT, not a binding: the child's
         # componentSet below may append to this same table.
@@ -114,11 +114,11 @@ func transformSystem2D(
   loop var i: Int = 0, i < componentCount(this: transforms), ++i {
     let entityId: EntityId = componentEntityAt(this: transforms, i: i)
     if componentHas(this: parents, entityId: entityId) is false {
-      let local: view Transform2D => componentView(this: transforms, entityId: entityId)
+      let local: view Transform2D = componentView(this: transforms, entityId: entityId)
       componentSet(this: worldTransforms, entityId: entityId, data: rootWorld2D(local: local))
     }
   }
-  let order: view List(EntityId) => depthOrder(
+  let order: view List(EntityId) = depthOrder(
     state: orderState
     parents: parents
     childrens: childrens
@@ -128,8 +128,8 @@ func transformSystem2D(
       this: parents
       entityId: entityId
     ) {
-      let local: view Transform2D => componentView(this: transforms, entityId: entityId)
-      let link: view Parent => componentView(this: parents, entityId: entityId)
+      let local: view Transform2D = componentView(this: transforms, entityId: entityId)
+      let link: view Parent = componentView(this: parents, entityId: entityId)
       if componentHas(this: worldTransforms, entityId: link.parent) {
         # The parent's row is read as an ARGUMENT, not a binding: the child's
         # componentSet below may append to this same table.

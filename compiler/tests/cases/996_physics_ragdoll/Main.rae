@@ -114,7 +114,7 @@ func main() {
   var humans: List(Human) = List.create(Human, cap: humanCount)
   loop var i: Int = 0, i < humanCount, ++i {
     humans.add(value: emptyHuman())
-    if let human: mod Human => humans.modAt(index: i) {
+    if let human: mod Human = humans.modAt(index: i) {
       spawnHuman(world: world, human: human, index: i)
     }
   }
@@ -122,7 +122,7 @@ func main() {
   var actual: List(Int) = List.create(Int, cap: 4096)
   loop var step: Int = 0, step < stepCount, ++step {
     if step is respawnStep {
-      if let human: mod Human => humans.modAt(index: 0) {
+      if let human: mod Human = humans.modAt(index: 0) {
         destroyHuman(world: world, human: human)
         spawnHuman(world: world, human: human, index: 0)
       }

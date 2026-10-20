@@ -915,12 +915,12 @@ func renderSceneShadowWorld(
 ) {
   loop var j: Int = 0, j < componentCount(this: world.meshRenderers), ++j {
     let entityId: EntityId = componentEntityAt(this: world.meshRenderers, i: j)
-    let meshRenderer: view MeshRenderer => componentView(
+    let meshRenderer: view MeshRenderer = componentView(
       this: world.meshRenderers
       entityId: entityId
     )
     if meshRenderer.visible {
-      let transform: view Transform3d => componentView(this: world.transforms, entityId: entityId)
+      let transform: view Transform3d = componentView(this: world.transforms, entityId: entityId)
       drawShadowCaster(
         shadow: shadow
         meshes: meshes

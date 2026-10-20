@@ -380,7 +380,7 @@ func updateInfiniteTerrain(
   let gridSide: Int = terrainSystem.gridSide
   loop var i: Int = 0, i < componentCount(this: propKinds), ++i {
     let entityId: EntityId = componentEntityAt(this: propKinds, i: i)
-    let prop: mod TerrainProp => queryModAt(table: propKinds, denseIndex: i)
+    let prop: mod TerrainProp = queryModAt(table: propKinds, denseIndex: i)
     # The trees are planted once (the app's forest), not streamed
     if prop.kind is kindTree {
       continue
@@ -439,11 +439,11 @@ func gatherTerrainProps(
   }
   loop var i: Int = 0, i < componentCount(this: propKinds), ++i {
     let entityId: EntityId = componentEntityAt(this: propKinds, i: i)
-    let prop: view TerrainProp => queryViewAt(table: propKinds, denseIndex: i)
+    let prop: view TerrainProp = queryViewAt(table: propKinds, denseIndex: i)
     if prop.active {
       let model: Mat4 = transform3dToMatrix(t: componentView(this: transforms, entityId: entityId))
       if prop.kind is kindRock {
-        if let rockPart: mod PropInstancer => terrainSystem.rockParts.modAt(index: prop.variant) {
+        if let rockPart: mod PropInstancer = terrainSystem.rockParts.modAt(index: prop.variant) {
           addPropInstance(prop: rockPart, model: model)
         }
       }

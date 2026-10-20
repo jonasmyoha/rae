@@ -153,8 +153,10 @@ for TARGET in "${TARGETS[@]}"; do
     # a fixture whose source is not canonical fails instead of being rewritten
     # under the runner's feet. The CRLF / missing-final-newline fixtures test
     # the strict lexer on their exact bytes, so the preflight is OFF for them.
+    # 615 pins its errors on the old `=>` alias spelling, which the formatter
+    # rewrites, until the binding `=` step 5 makes `=>` an error.
     case "$TEST_NAME" in
-      345_*|346_*|348_*) export RAE_FORMAT=off ;;
+      345_*|346_*|348_*|615_*) export RAE_FORMAT=off ;;
       *) export RAE_FORMAT=check ;;
     esac
     # A declared shader (`shader(files: [...])`) is validated with naga at

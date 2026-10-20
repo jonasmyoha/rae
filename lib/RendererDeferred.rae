@@ -155,7 +155,7 @@ type DeferredRenderer {
 const deferredManagerCapacity: Int = 1024
 
 func ensureRendererResources(renderer: mod DeferredRenderer) pub {
-  if let existing: view GpuResources => renderer.gpuResources {
+  if let existing: view GpuResources = renderer.gpuResources {
     ret
   }
   renderer.gpuResources = GpuResources.create(
@@ -171,7 +171,7 @@ func ensureRendererResources(renderer: mod DeferredRenderer) pub {
 # its `assets/` parts resolve next to its own files (GbufferTerrain.terrainSetShader).
 func rendererSetTerrainShader(renderer: mod DeferredRenderer, shader: own Shader) {
   ensureRendererResources(renderer: renderer)
-  if let resources: mod GpuResources => renderer.gpuResources {
+  if let resources: mod GpuResources = renderer.gpuResources {
     terrainSetShader(cache: renderer.passes.gbuffer, resources: resources, shader: shader)
   }
 }
@@ -184,7 +184,7 @@ func rendererSetTerrainShaderWithConstants(
   constants: own List(ShaderConstant)
 ) {
   ensureRendererResources(renderer: renderer)
-  if let resources: mod GpuResources => renderer.gpuResources {
+  if let resources: mod GpuResources = renderer.gpuResources {
     terrainSetShaderWithConstants(
       cache: renderer.passes.gbuffer
       resources: resources
@@ -203,7 +203,7 @@ func uploadMesh(
   indices: view List(Int)
 ) pub ret MeshHandle {
   ensureRendererResources(renderer: renderer)
-  if let resources: mod GpuResources => renderer.gpuResources {
+  if let resources: mod GpuResources = renderer.gpuResources {
     ret meshStoreUpload(
       store: renderer.passes.gbuffer.meshes
       resources: resources
@@ -225,7 +225,7 @@ func uploadSkinnedMesh(
   indices: view List(Int)
 ) pub ret MeshHandle {
   ensureRendererResources(renderer: renderer)
-  if let resources: mod GpuResources => renderer.gpuResources {
+  if let resources: mod GpuResources = renderer.gpuResources {
     ret skinStoreUpload(
       store: renderer.passes.gbuffer.skins
       resources: resources
@@ -247,7 +247,7 @@ func uploadPalette(
   jointCount: view Int
 ) pub {
   ensureRendererResources(renderer: renderer)
-  if let resources: mod GpuResources => renderer.gpuResources {
+  if let resources: mod GpuResources = renderer.gpuResources {
     let wrote: Bool = skinStoreWritePalette(
       store: renderer.passes.gbuffer.skins
       resources: resources
@@ -265,7 +265,7 @@ func uploadPalette(
 # beginShadowPass and endShadowPass casts.
 func beginShadowPass(renderer: mod DeferredRenderer, c: view ShadowCascades) pub {
   ensureRendererResources(renderer: renderer)
-  if let resources: mod GpuResources => renderer.gpuResources {
+  if let resources: mod GpuResources = renderer.gpuResources {
     shadowBegin(shadow: renderer.passes.shadow, resources: resources, cascades: c)
   }
 }
@@ -275,7 +275,7 @@ func beginShadowPass(renderer: mod DeferredRenderer, c: view ShadowCascades) pub
 # shared submit (render-perf-5b) saved a submit but made the frame slower
 # (114: 5.3 -> 5.5 ms, 112: 8.5 -> 9.0 ms headless).
 func endShadowPass(renderer: mod DeferredRenderer) {
-  if let resources: mod GpuResources => renderer.gpuResources {
+  if let resources: mod GpuResources = renderer.gpuResources {
     shadowEnd(shadow: renderer.passes.shadow, resources: resources)
   }
 }
@@ -302,7 +302,7 @@ func setShadowCascadeDebug(renderer: mod DeferredRenderer, on: copy Bool) {
 # Every visible mesh of a World3d as a static caster, resolved in this
 # renderer's MeshStore.
 func renderSceneShadowWorldWith(renderer: mod DeferredRenderer, world: view World3d) pub {
-  if let resources: view GpuResources => renderer.gpuResources {
+  if let resources: view GpuResources = renderer.gpuResources {
     ShadowMaps.renderSceneShadowWorld(
       shadow: renderer.passes.shadow
       meshes: renderer.passes.gbuffer.meshes
@@ -318,7 +318,7 @@ func drawShadowCasterWith(
   mesh: view MeshHandle
   model: view Mat4
 ) pub {
-  if let resources: view GpuResources => renderer.gpuResources {
+  if let resources: view GpuResources = renderer.gpuResources {
     drawShadowCaster(
       shadow: renderer.passes.shadow
       meshes: renderer.passes.gbuffer.meshes
@@ -337,7 +337,7 @@ func drawShadowCasterBatchWith(
   mesh: view MeshHandle
   batch: view InstanceBatch
 ) {
-  if let resources: view GpuResources => renderer.gpuResources {
+  if let resources: view GpuResources = renderer.gpuResources {
     drawShadowCasterRecords(
       shadow: renderer.passes.shadow
       meshes: renderer.passes.gbuffer.meshes
@@ -377,7 +377,7 @@ func drawShadowCasterSkinnedWith(
   model: view Mat4
   paletteBase: copy Int
 ) pub {
-  if let resources: view GpuResources => renderer.gpuResources {
+  if let resources: view GpuResources = renderer.gpuResources {
     drawShadowCasterSkinned(
       shadow: renderer.passes.shadow
       skins: renderer.passes.gbuffer.skins
@@ -396,7 +396,7 @@ func shadowMetaballsWith(
   count: copy Int
   smoothing: copy Float
 ) pub {
-  if let resources: mod GpuResources => renderer.gpuResources {
+  if let resources: mod GpuResources = renderer.gpuResources {
     shadowMetaballs(
       shadow: renderer.passes.shadow
       resources: resources
@@ -415,7 +415,7 @@ func updateMeshVerts(
   verts: view List(Float)
   vertCount: view Int
 ) pub {
-  if let resources: view GpuResources => renderer.gpuResources {
+  if let resources: view GpuResources = renderer.gpuResources {
     meshStoreUpdateVerts(
       store: renderer.passes.gbuffer.meshes
       resources: resources
@@ -432,7 +432,7 @@ func updateMeshVerts(
 # still be up for the releases. The geometry frame (#906) drains its in-flight
 # submissions and retires the targets first; C forgets the borrowed views.
 func shutdownDeferredRenderer(renderer: mod DeferredRenderer) {
-  if let resources: mod GpuResources => renderer.gpuResources {
+  if let resources: mod GpuResources = renderer.gpuResources {
     # Anything still recorded goes to the GPU before its objects are retired
     flushPostPasses(targets: renderer.passes.targets, resources: resources)
     postPassesShutdown(
@@ -623,7 +623,7 @@ func renderDeferredPassWorld(
     ret
   }
   ensureRendererResources(renderer: renderer)
-  if let resources: mod GpuResources => renderer.gpuResources {
+  if let resources: mod GpuResources = renderer.gpuResources {
     beginPass(
       cache: renderer.passes.gbuffer
       resources: resources
@@ -676,7 +676,7 @@ func renderDeferredPass(
     ret
   }
   ensureRendererResources(renderer: renderer)
-  if let resources: mod GpuResources => renderer.gpuResources {
+  if let resources: mod GpuResources = renderer.gpuResources {
     renderDeferredPassWith(
       renderer: renderer
       resources: resources
@@ -841,7 +841,7 @@ func renderDeferredPassWith(
 # renderer.passTiming (lastTags, lastMicroseconds, samples). Every call is a
 # no-op while the flag is off.
 func gpuPassTimingBegin(renderer: mod DeferredRenderer) {
-  if let resources: mod GpuResources => renderer.gpuResources {
+  if let resources: mod GpuResources = renderer.gpuResources {
     passTimingFrameBegin(passTiming: renderer.passTiming, resources: resources)
   }
   if renderer.passTiming.reportFrames >= passTimingReportFrames {
@@ -854,7 +854,7 @@ func gpuPassTimingBegin(renderer: mod DeferredRenderer) {
 }
 
 func gpuPassMark(renderer: mod DeferredRenderer, tag: view Int) {
-  if let resources: mod GpuResources => renderer.gpuResources {
+  if let resources: mod GpuResources = renderer.gpuResources {
     passTimingMark(
       passTiming: renderer.passTiming
       resources: resources
@@ -954,7 +954,7 @@ func rendererIsUnderwater(renderer: view DeferredRenderer) pub ret Bool {
 # at the transparentForward tag before their water, then the renderer's pass.
 func snapshotOpaque(renderer: mod DeferredRenderer) {
   ensureRendererResources(renderer: renderer)
-  if let resources: mod GpuResources => renderer.gpuResources {
+  if let resources: mod GpuResources = renderer.gpuResources {
     transparentSnapshot(
       cache: renderer.passes.transparent
       resources: resources
@@ -970,7 +970,7 @@ func snapshotOpaque(renderer: mod DeferredRenderer) {
 # does it for the refracting surfaces; the composite and present do it at
 # the end of the frame.
 func flushDeferredWork(renderer: mod DeferredRenderer) {
-  if let resources: mod GpuResources => renderer.gpuResources {
+  if let resources: mod GpuResources = renderer.gpuResources {
     flushPostPasses(targets: renderer.passes.targets, resources: resources)
   }
 }

@@ -32,7 +32,7 @@ func debugAnchorShown(
     if componentHas(this: uiSystems.hierarchy.parents, entityId: current) is false {
       ret true
     }
-    let link: view Parent => componentView(this: uiSystems.hierarchy.parents, entityId: current)
+    let link: view Parent = componentView(this: uiSystems.hierarchy.parents, entityId: current)
     current = { index: link.parent.index, generation: link.parent.generation }
   }
   ret true
@@ -55,11 +55,11 @@ func followDebugAnchor(
       entityId: entityId
     )
     if placed and debugAnchorShown(world: world, uiSystems: uiSystems, entityId: entityId) {
-      let screen: view WorldTransform2D => componentView(
+      let screen: view WorldTransform2D = componentView(
         this: uiSystems.transform2d.worldTransforms
         entityId: entityId
       )
-      let size: view ComputedRect => componentView(
+      let size: view ComputedRect = componentView(
         this: uiSystems.layout.computedRects
         entityId: entityId
       )

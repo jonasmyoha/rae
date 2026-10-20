@@ -181,7 +181,7 @@ func evaluate(
     )
   } else if name is "heightField.triangle" {
     let triangleIndex: Int = readInt(reader: reader)
-    if let field: view HeightFieldData => state.field {
+    if let field: view HeightFieldData = state.field {
       let triangle: MeshTriangleData = getHeightFieldTriangle(
         heightField: field
         triangleIndex: triangleIndex
@@ -200,12 +200,12 @@ func evaluate(
     }
   } else if name is "heightField.aabb" {
     let transform: Transform = readTransform(reader: reader)
-    if let field: view HeightFieldData => state.field {
+    if let field: view HeightFieldData = state.field {
       putBox(out: out, box: computeHeightFieldAabb(heightField: field, transform: transform))
     }
   } else if name is "heightField.query" {
     let bounds: Aabb = readBox(reader: reader)
-    if let field: view HeightFieldData => state.field {
+    if let field: view HeightFieldData = state.field {
       let found: List(Int) = queryHeightField(heightField: field, bounds: bounds, capacity: 256)
       putInt(out: out, value: found.length)
       loop let triangleIndex: view Int in found {

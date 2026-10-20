@@ -117,7 +117,7 @@ func computeShapeMargin(
       margin = 0.5 * distance(from: shape.capsule.center2, to: shape.capsule.center1) + shape.capsule.radius
     }
     case ShapeType.hull {
-      if let hull: view Hull => hulls.viewAt(index: shape.hullIndex) {
+      if let hull: view Hull = hulls.viewAt(index: shape.hullIndex) {
         var maxExtentSquared: Float = 0.0
         loop let point: view Vec3 in hull.points {
           let squared: Float = distanceSquared(from: point, to: hull.center)
@@ -150,7 +150,7 @@ func shapeCentroid(shape: view PhysicsShape, hulls: view List(Hull)) ret Vec3 {
       ret shape.sphere.center
     }
     case ShapeType.hull {
-      if let hull: view Hull => hulls.viewAt(index: shape.hullIndex) {
+      if let hull: view Hull = hulls.viewAt(index: shape.hullIndex) {
         ret hull.center
       }
       ret zeroVector()
@@ -226,7 +226,7 @@ func computeShapeAabb(
       ret computeSphereAabb(sphere: shape.sphere, transform: transform)
     }
     case ShapeType.hull {
-      if let hull: view Hull => hulls.viewAt(index: shape.hullIndex) {
+      if let hull: view Hull = hulls.viewAt(index: shape.hullIndex) {
         ret computeHullAabb(hull: hull, transform: transform)
       }
       ret Aabb { lowerBound: transform.position, upperBound: transform.position }
@@ -267,7 +267,7 @@ func computeShapeMass(shape: view PhysicsShape, hulls: view List(Hull)) ret Mass
       ret computeSphereMass(sphere: shape.sphere, density: shape.density)
     }
     case ShapeType.hull {
-      if let hull: view Hull => hulls.viewAt(index: shape.hullIndex) {
+      if let hull: view Hull = hulls.viewAt(index: shape.hullIndex) {
         ret computeHullMass(hull: hull, density: shape.density)
       }
       ret zeroMassData()
@@ -320,7 +320,7 @@ func computeShapeExtent(
       ret ShapeExtent { minExtent: radius, maxExtent: add(left: offset, right: grow) }
     }
     case ShapeType.hull {
-      if let hull: view Hull => hulls.viewAt(index: shape.hullIndex) {
+      if let hull: view Hull = hulls.viewAt(index: shape.hullIndex) {
         ret computeHullExtent(hull: hull, origin: localCenter)
       }
       ret ShapeExtent { minExtent: 0.0, maxExtent: zeroVector() }
@@ -356,7 +356,7 @@ func shapeProxyPoints(
     points.add(value: shape.sphere.center)
     ret shape.sphere.radius
   }
-  if let hull: view Hull => hulls.viewAt(index: shape.hullIndex) {
+  if let hull: view Hull = hulls.viewAt(index: shape.hullIndex) {
     loop let point: view Vec3 in hull.points {
       points.add(value: point)
     }
@@ -374,7 +374,7 @@ func makeShapeProxy(shape: view PhysicsShape, hulls: view List(Hull)) ret ShapeP
     let points: List(Vec3) = { shape.sphere.center }
     ret makeProxy(points: points, radius: shape.sphere.radius)
   }
-  if let hull: view Hull => hulls.viewAt(index: shape.hullIndex) {
+  if let hull: view Hull = hulls.viewAt(index: shape.hullIndex) {
     ret makeProxy(points: hull.points, radius: 0.0)
   }
   let empty: List(Vec3) = List.create(Vec3, cap: 0)

@@ -93,7 +93,7 @@ func paintShapeG(
   chain255: view Int
   canvas: mod Gpu2dCanvas
 ) {
-  let sh: view Shape => componentView(this: world.shapes, entityId: entityId)
+  let sh: view Shape = componentView(this: world.shapes, entityId: entityId)
   # Resolve a palette slot from the ACTIVE theme at paint (#235) so a
   # dark/light toggle re-colours without a scene re-parse; empty slot
   # keeps the literal fill.
@@ -241,7 +241,7 @@ func visualBoundsAt(
   res: view Gpu2dUi
 ) ret SdfTextBounds {
   if componentHas(this: world.visualBounds, entityId: entityId) {
-    let vb: view VisualBounds => componentView(this: world.visualBounds, entityId: entityId)
+    let vb: view VisualBounds = componentView(this: world.visualBounds, entityId: entityId)
     var isFresh: Bool = false
     if vb.measuredIcon is isIcon {
       if vb.measuredSize is sizePx {
@@ -279,7 +279,7 @@ func paintSpriteG(
   res: view Gpu2dUi
   canvas: mod Gpu2dCanvas
 ) {
-  let sp: view Sprite => componentView(this: world.sprites, entityId: entityId)
+  let sp: view Sprite = componentView(this: world.sprites, entityId: entityId)
   var tintBase: RgbaColor = sp.tint
   if sp.tintSlot.length() > 0 {
     tintBase = uiThemeColor(theme: world.theme, name: sp.tintSlot)
@@ -312,7 +312,7 @@ func paintSpriteG(
     var gx: Float = drawX + (drawW - sz) / 2.0
     var gy: Float = drawY + (drawH - sz) / 2.0 + sz
     if componentHas(this: world.opticalAligns, entityId: entityId) {
-      let oa: view OpticalAlign => componentView(this: world.opticalAligns, entityId: entityId)
+      let oa: view OpticalAlign = componentView(this: world.opticalAligns, entityId: entityId)
       if oa.enabled {
         let bounds: SdfTextBounds = visualBoundsAt(
           world: world
@@ -351,7 +351,7 @@ func paintSpriteG(
   # image quad's own corner radius — a circle is the centred square at half
   # its side. (A mask sourced from another node stays a rect scissor.)
   if componentHas(this: world.maskShapes, entityId: entityId) {
-    let mask: view MaskShape => componentView(this: world.maskShapes, entityId: entityId)
+    let mask: view MaskShape = componentView(this: world.maskShapes, entityId: entityId)
     if mask.sourceNodeId.length() is 0 {
       if mask.kind is MaskKind.circle {
         var side: Float = drawW
@@ -440,7 +440,7 @@ func paintTextG(
   res: view Gpu2dUi
   canvas: mod Gpu2dCanvas
 ) {
-  let t: view Text => componentView(this: world.texts, entityId: entityId)
+  let t: view Text = componentView(this: world.texts, entityId: entityId)
   if t.text.length() is 0 {
     ret
   }
@@ -455,7 +455,7 @@ func paintTextG(
   # style for the sparse set of entities that carry one; base styleId
   # still drives everything else (alignment, shadow, unset fields).
   if componentHas(this: world.styleOverrides, entityId: entityId) {
-    let so: view StyleOverride => componentView(this: world.styleOverrides, entityId: entityId)
+    let so: view StyleOverride = componentView(this: world.styleOverrides, entityId: entityId)
     size = styleOverrideSize(base: size, so: so)
     if so.hasColor and so.colorSlot.length() > 0 {
       baseCol = uiThemeColor(theme: world.theme, name: so.colorSlot)
@@ -495,7 +495,7 @@ func paintTextG(
   var opticalCenterY: Bool = false
   var opticalBias: Vec2 = { x: 0.0, y: 0.0 }
   if componentHas(this: world.aligns, entityId: entityId) {
-    let al: view Align => componentView(this: world.aligns, entityId: entityId)
+    let al: view Align = componentView(this: world.aligns, entityId: entityId)
     if al.hasX {
       if al.x is AlignKind.center {
         centerX = true
@@ -506,7 +506,7 @@ func paintTextG(
     }
   }
   if componentHas(this: world.opticalAligns, entityId: entityId) {
-    let optical: view OpticalAlign => componentView(this: world.opticalAligns, entityId: entityId)
+    let optical: view OpticalAlign = componentView(this: world.opticalAligns, entityId: entityId)
     opticalEnabled = optical.enabled
     opticalCenterX = optical.centerX
     opticalCenterY = optical.centerY
@@ -595,7 +595,7 @@ func paintTextG(
   var shOffY: Float = 0.0
   var shSoft: Float = 1.0
   if componentHas(this: world.textShadows, entityId: entityId) {
-    let sh: view TextShadow => componentView(this: world.textShadows, entityId: entityId)
+    let sh: view TextShadow = componentView(this: world.textShadows, entityId: entityId)
     hasShadow = true
     shCol = sh.color
     shOffX = sh.offset.x
@@ -696,11 +696,11 @@ func paintEntityG(
   if componentHas(this: uiSystems.transform2d.worldTransforms, entityId: entityId) is false {
     ret
   }
-  let cr: view ComputedRect => componentView(
+  let cr: view ComputedRect = componentView(
     this: uiSystems.layout.computedRects
     entityId: entityId
   )
-  let wt: view WorldTransform2D => componentView(
+  let wt: view WorldTransform2D = componentView(
     this: uiSystems.transform2d.worldTransforms
     entityId: entityId
   )
@@ -794,7 +794,7 @@ func entityClipsChildrenG(world: view UiWorld, entityId: view EntityId) ret Bool
   if componentHas(this: world.overflows, entityId: entityId) is false {
     ret false
   }
-  let op: view OverflowPolicy => componentView(this: world.overflows, entityId: entityId)
+  let op: view OverflowPolicy = componentView(this: world.overflows, entityId: entityId)
   ret op.mode is OverflowMode.clip
 }
 
@@ -842,11 +842,11 @@ func paintSubtreeG(
     if entityClipsChildrenG(world: world, entityId: entityId) {
       if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) {
         if componentHas(this: uiSystems.transform2d.worldTransforms, entityId: entityId) {
-          let ccr: view ComputedRect => componentView(
+          let ccr: view ComputedRect = componentView(
             this: uiSystems.layout.computedRects
             entityId: entityId
           )
-          let cwt: view WorldTransform2D => componentView(
+          let cwt: view WorldTransform2D = componentView(
             this: uiSystems.transform2d.worldTransforms
             entityId: entityId
           )
@@ -873,7 +873,7 @@ func paintSubtreeG(
         }
       }
     }
-    let ch: view Children => componentView(this: world.childrens, entityId: entityId)
+    let ch: view Children = componentView(this: world.childrens, entityId: entityId)
     let n: Int = ch.ids.length
     var pass: Int = 0
     loop pass < 3 {

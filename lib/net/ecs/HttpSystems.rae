@@ -102,7 +102,7 @@ func pollSystem(server: mod HttpServer, timeoutMs: view Int) {
   server.frameNs = nowNs()
   server.secondChanged = updateHttpDate(cache: server.date, epochSeconds: nowMs() / 1000)
   loop var i: Int = 0, i < server.readiness.length, ++i {
-    if let readiness: view Readiness => server.readiness.viewAt(index: i) {
+    if let readiness: view Readiness = server.readiness.viewAt(index: i) {
       if readiness.socketId is server.listenerSocketId {
         server.listenerReady = true
       } else if let entityId: EntityId = get(
@@ -146,7 +146,7 @@ func readInto(
   entityId: view EntityId
   socketId: view SocketId
 ) ret IoResult {
-  let readBuffer: mod ReadBuffer => componentMod(this: readBuffers, entityId: entityId)
+  let readBuffer: mod ReadBuffer = componentMod(this: readBuffers, entityId: entityId)
   var total: Int = 0
   loop var chunk: Int = 0, chunk < 4, ++chunk {
     let result: IoResult = socketReadBuffer(
@@ -174,7 +174,7 @@ func touchKeepAlive(
   nowNs: view Int
 ) {
   if componentHas(this: keepAlives, entityId: entityId) {
-    let keepAlive: mod KeepAlive => componentMod(this: keepAlives, entityId: entityId)
+    let keepAlive: mod KeepAlive = componentMod(this: keepAlives, entityId: entityId)
     keepAlive.idleSinceNs = nowNs
   }
 }
@@ -208,7 +208,7 @@ func takeReply(
   awaitingResults: mod ComponentTable(AwaitingResult)
   entityId: view EntityId
 ) ret opt HttpReply {
-  let awaiting: mod AwaitingResult => componentMod(this: awaitingResults, entityId: entityId)
+  let awaiting: mod AwaitingResult = componentMod(this: awaitingResults, entityId: entityId)
   ret awaiting.task.tryGet()
 }
 
@@ -216,7 +216,7 @@ func awaitedRequest(
   awaitingResults: view ComponentTable(AwaitingResult)
   entityId: view EntityId
 ) ret HttpRequestEvent {
-  let awaiting: view AwaitingResult => componentView(this: awaitingResults, entityId: entityId)
+  let awaiting: view AwaitingResult = componentView(this: awaitingResults, entityId: entityId)
   ret awaiting.request
 }
 
@@ -227,8 +227,8 @@ func resumeAfter(
   readBuffers: mod ComponentTable(ReadBuffer)
   event: view HttpRequestEvent
 ) {
-  let parse: mod HttpParse => componentMod(this: httpParses, entityId: event.connectionEntityId)
-  let readBuffer: mod ReadBuffer => componentMod(
+  let parse: mod HttpParse = componentMod(this: httpParses, entityId: event.connectionEntityId)
+  let readBuffer: mod ReadBuffer = componentMod(
     this: readBuffers
     entityId: event.connectionEntityId
   )
@@ -277,8 +277,8 @@ func parseConnection(
   entityId: view EntityId
   webSocketPath: view String
 ) {
-  let parse: mod HttpParse => componentMod(this: httpParses, entityId: entityId)
-  let readBuffer: view ReadBuffer => componentView(this: readBuffers, entityId: entityId)
+  let parse: mod HttpParse = componentMod(this: httpParses, entityId: entityId)
+  let readBuffer: view ReadBuffer = componentView(this: readBuffers, entityId: entityId)
   var request: HttpRequest = createHttpRequest()
   loop not parse.finished {
     let result: HttpParseResult = httpParseNext(
@@ -396,7 +396,7 @@ func writeFrom(
   entityId: view EntityId
   socketId: view SocketId
 ) ret IoResult {
-  let writeBuffer: mod WriteBuffer => componentMod(this: writeBuffers, entityId: entityId)
+  let writeBuffer: mod WriteBuffer = componentMod(this: writeBuffers, entityId: entityId)
   var total: Int = 0
   loop byteBufferLength(buffer: writeBuffer.buffer) > 0 {
     let result: IoResult = socketWriteBuffer(socketId: socketId, buffer: writeBuffer.buffer)
@@ -412,7 +412,7 @@ func writeFrom(
 }
 
 func unsentBytes(writeBuffers: view ComponentTable(WriteBuffer), entityId: view EntityId) ret Int {
-  let writeBuffer: view WriteBuffer => componentView(this: writeBuffers, entityId: entityId)
+  let writeBuffer: view WriteBuffer = componentView(this: writeBuffers, entityId: entityId)
   ret byteBufferLength(buffer: writeBuffer.buffer)
 }
 
@@ -421,7 +421,7 @@ func setWatchingWritable(
   entityId: view EntityId
   watching: view Bool
 ) {
-  let socket: mod Socket => componentMod(this: sockets, entityId: entityId)
+  let socket: mod Socket = componentMod(this: sockets, entityId: entityId)
   socket.watchingWritable = watching
 }
 
@@ -498,7 +498,7 @@ func timeoutSystem(server: mod HttpServer) {
   }
   loop var i: Int = 0, i < componentCount(this: server.keepAlives), ++i {
     let entityId: EntityId = componentEntityAt(this: server.keepAlives, i: i)
-    let keepAlive: view KeepAlive => queryViewAt(table: server.keepAlives, denseIndex: i)
+    let keepAlive: view KeepAlive = queryViewAt(table: server.keepAlives, denseIndex: i)
     if server.frameNs - keepAlive.idleSinceNs >= server.idleTimeoutNs and not componentHas(
       this: server.awaitingResults
       entityId: entityId
@@ -531,8 +531,8 @@ func consumeParsed(
   readBuffers: mod ComponentTable(ReadBuffer)
   entityId: view EntityId
 ) {
-  let parse: mod HttpParse => componentMod(this: httpParses, entityId: entityId)
-  let readBuffer: mod ReadBuffer => componentMod(this: readBuffers, entityId: entityId)
+  let parse: mod HttpParse = componentMod(this: httpParses, entityId: entityId)
+  let readBuffer: mod ReadBuffer = componentMod(this: readBuffers, entityId: entityId)
   httpParseConsumed(state: parse.state, buffer: readBuffer.buffer)
 }
 

@@ -136,7 +136,7 @@ func parseFrames(scene: view Scene) ret FrameSet {
   if scene.ok is false {
     ret out
   }
-  let doc: view JsonDoc => scene.doc
+  let doc: view JsonDoc = scene.doc
   let root: JsonValue = Json.root(doc: doc)
   let framesIdx: Int = Json.field(doc: doc, this: root, key: "frames")
   if framesIdx < 0 {
@@ -212,7 +212,7 @@ func parseStates(scene: view Scene) ret StateSet {
   if scene.ok is false {
     ret out
   }
-  let doc: view JsonDoc => scene.doc
+  let doc: view JsonDoc = scene.doc
   let root: JsonValue = Json.root(doc: doc)
   let statesIdx: Int = Json.field(doc: doc, this: root, key: "states")
   if statesIdx < 0 {
@@ -263,7 +263,7 @@ func stateNodeBagIdx(
   if nodesIdx < 0 {
     ret none
   }
-  let doc: view JsonDoc => scene.doc
+  let doc: view JsonDoc = scene.doc
   let nodesVal: JsonValue = Json.jsonValueAt(doc: doc, idx: nodesIdx)
   if nodesVal.kind is not JsonKind.object {
     ret none
@@ -403,7 +403,7 @@ func frameNodeBagIdx(
   if nodesIdx < 0 {
     ret none
   }
-  let doc: view JsonDoc => scene.doc
+  let doc: view JsonDoc = scene.doc
   let nodesVal: JsonValue = Json.jsonValueAt(doc: doc, idx: nodesIdx)
   if nodesVal.kind is not JsonKind.object {
     ret none
@@ -431,9 +431,9 @@ func resetNodeToBase(
   nodeId: view String
   entityId: view EntityId
 ) {
-  let doc: view JsonDoc => scene.doc
+  let doc: view JsonDoc = scene.doc
   if let baseIdx: Int = sceneNodeIndex(this: scene, nodeId: nodeId) {
-    let baseNode: view SceneNode => nodeAt(this: scene, idx: baseIdx)
+    let baseNode: view SceneNode = nodeAt(this: scene, idx: baseIdx)
     let baseBag: JsonValue = Json.jsonValueAt(doc: doc, idx: baseNode.componentsValueIdx)
 
     var f: Int = 0
@@ -513,7 +513,7 @@ func stripBagAddedComponents(
   baseBag: view JsonValue
   entityId: view EntityId
 ) {
-  let doc: view JsonDoc => scene.doc
+  let doc: view JsonDoc = scene.doc
   let bag: JsonValue = Json.jsonValueAt(doc: doc, idx: bagIdx)
   let keyCount: Int = Json.objectLen(this: bag)
   var k: Int = 0
@@ -594,7 +594,7 @@ func overlayNodeFromBag(
   entityId: view EntityId
   nodeId: view String
 ) {
-  let doc: view JsonDoc => scene.doc
+  let doc: view JsonDoc = scene.doc
   let bag: JsonValue = Json.jsonValueAt(doc: doc, idx: bagIdx)
   let keyCount: Int = Json.objectLen(this: bag)
   var k: Int = 0
@@ -640,7 +640,7 @@ func accumulateNodeIds(scene: view Scene, nodesIdx: view Int, out: mod List(Stri
   if nodesIdx < 0 {
     ret
   }
-  let doc: view JsonDoc => scene.doc
+  let doc: view JsonDoc = scene.doc
   let nodesVal: JsonValue = Json.jsonValueAt(doc: doc, idx: nodesIdx)
   if nodesVal.kind is not JsonKind.object {
     ret
@@ -726,7 +726,7 @@ func applyFrameToPage(
         nodeId: nodeId
         entityId: entityId
       )
-      if let activeFrameIdx: view Int => frameIdx {
+      if let activeFrameIdx: view Int = frameIdx {
         overlayNodeFromFrame(
           world: world
           scene: scene

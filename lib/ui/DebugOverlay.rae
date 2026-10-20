@@ -203,7 +203,7 @@ func debugPointInRect(
 
 # ----- sampling -------------------------------------------------------
 func debugPruneFrames(debugOverlay: mod DebugOverlay, now: view Float64) {
-  let times: mod List(Float64) => debugOverlay.frameTimes
+  let times: mod List(Float64) = debugOverlay.frameTimes
   loop times.length > 1 {
     let cutoff: Float = (now - times.copyAt(index: 0)) as Float
     if cutoff <= debugOverlay.fpsWindowSec {
@@ -219,7 +219,7 @@ func debugPruneFrames(debugOverlay: mod DebugOverlay, now: view Float64) {
 # the window were late, and a single slow frame does not make it jump.
 func debugRecordFrame(debugOverlay: mod DebugOverlay, now: view Float64, didRealWork: view Bool) {
   if didRealWork {
-    let times: mod List(Float64) => debugOverlay.frameTimes
+    let times: mod List(Float64) = debugOverlay.frameTimes
     times.add(value: now)
     debugPruneFrames(debugOverlay: debugOverlay, now: now)
   }

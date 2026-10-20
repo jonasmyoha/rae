@@ -132,14 +132,14 @@ func pointInEntity(
   if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) is false {
     ret false
   }
-  let wt: view WorldTransform2D => componentView(
+  let wt: view WorldTransform2D = componentView(
     this: uiSystems.transform2d.worldTransforms
     entityId: entityId
   )
   if worldVisualOf(world: world, uiSystems: uiSystems, entityId: entityId).visible is false {
     ret false
   }
-  let cr: view ComputedRect => componentView(
+  let cr: view ComputedRect = componentView(
     this: uiSystems.layout.computedRects
     entityId: entityId
   )
@@ -164,7 +164,7 @@ func hitTestEntity(
 ) ret EntityId {
   unsafe {
     if componentHas(this: world.childrens, entityId: entityId) {
-      let ch: view Children => componentView(this: world.childrens, entityId: entityId)
+      let ch: view Children = componentView(this: world.childrens, entityId: entityId)
       let n: Int = ch.ids.length
       var i: Int = n - 1
       loop i >= 0 {
@@ -357,7 +357,7 @@ func updateInputSystem(
     if isNone(this: hit) is false {
       if hit is input.pressedEntityId {
         if componentHas(this: world.onClicks, entityId: hit) {
-          let oc: view OnClick => componentView(this: world.onClicks, entityId: hit)
+          let oc: view OnClick = componentView(this: world.onClicks, entityId: hit)
           log("[input] fire {oc.actionId} on entity {hit.index}")
           eventSend(this: input.uiActions, value: UiAction { entityId: hit, actionId: oc.actionId })
         } else {

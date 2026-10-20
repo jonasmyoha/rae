@@ -68,7 +68,7 @@ func buildClusterTags(world: view World3d) ret ClusterTags {
   }
   loop var i: Int = 0, i < world3dSdfCount(world: world), ++i {
     let entityId: EntityId = world3dSdfEntityAt(world: world, i: i)
-    let sdf: view SdfPrimitive => world3dSdfDataAt(world: world, i: i)
+    let sdf: view SdfPrimitive = world3dSdfDataAt(world: world, i: i)
     if sdf.cluster is 0 {
       addTag(table: tags.c0, entityId: entityId)
     }
@@ -119,7 +119,7 @@ func animateScene(world: mod World3d, sceneId: view Int, time: view Float) {
   var i: Int = 1
   loop i < world3dMeshRendererCount(world: world) {
     let entityId: EntityId = world3dMeshRendererEntityAt(world: world, i: i)
-    let transform: mod Transform3d => world3dTransformMod(world: world, entityId: entityId)
+    let transform: mod Transform3d = world3dTransformMod(world: world, entityId: entityId)
     let phase: Float = i.toFloat() * 0.173 + sceneId.toFloat()
     transform.rotation = Vec3.create(
       x: time * (0.08 + sceneId.toFloat() * 0.04)
@@ -165,7 +165,7 @@ func animateMetaballLab(world: mod World3d, tags: view ClusterTags, time: view F
   let m0: List(Query2Match) = tagged(dataTable: world.sdfs, tagTable: tags.c0)
   loop let hit: view Query2Match in m0 {
     let p: LabPulse = labPulse(time: time, i: hit.indexA)
-    let transform: mod Transform3d => world3dTransformMod(world: world, entityId: hit.entityId)
+    let transform: mod Transform3d = world3dTransformMod(world: world, entityId: hit.entityId)
     let t: Float = time * 0.46
     transform.position = Vec3.create(
       x: 0.0 - 6.0 + Math.cos(x: t + p.phase) * (1.9 + p.escape * 4.4)
@@ -180,7 +180,7 @@ func animateMetaballLab(world: mod World3d, tags: view ClusterTags, time: view F
   let m1: List(Query2Match) = tagged(dataTable: world.sdfs, tagTable: tags.c1)
   loop let hit: view Query2Match in m1 {
     let p: LabPulse = labPulse(time: time, i: hit.indexA)
-    let transform: mod Transform3d => world3dTransformMod(world: world, entityId: hit.entityId)
+    let transform: mod Transform3d = world3dTransformMod(world: world, entityId: hit.entityId)
     let t: Float = time * 0.21
     transform.position = Vec3.create(
       x: Math.cos(x: t + p.phase) * 1.35
@@ -195,7 +195,7 @@ func animateMetaballLab(world: mod World3d, tags: view ClusterTags, time: view F
   let m2: List(Query2Match) = tagged(dataTable: world.sdfs, tagTable: tags.c2)
   loop let hit: view Query2Match in m2 {
     let p: LabPulse = labPulse(time: time, i: hit.indexA)
-    let transform: mod Transform3d => world3dTransformMod(world: world, entityId: hit.entityId)
+    let transform: mod Transform3d = world3dTransformMod(world: world, entityId: hit.entityId)
     let t: Float = time * 0.63
     transform.position = Vec3.create(
       x: 6.4 + Math.cos(x: t * 0.9 + p.phase * 1.7) * (2.6 + p.escape * 3.2)
@@ -209,7 +209,7 @@ func animateMetaballLab(world: mod World3d, tags: view ClusterTags, time: view F
   let m3: List(Query2Match) = tagged(dataTable: world.sdfs, tagTable: tags.c3)
   loop let hit: view Query2Match in m3 {
     let p: LabPulse = labPulse(time: time, i: hit.indexA)
-    let transform: mod Transform3d => world3dTransformMod(world: world, entityId: hit.entityId)
+    let transform: mod Transform3d = world3dTransformMod(world: world, entityId: hit.entityId)
     let t: Float = time * 1.45
     transform.position = Vec3.create(
       x: 0.0 - 2.6 + Math.cos(x: t + p.phase * 1.3) * (1.3 + p.escape * 3.0)
@@ -224,7 +224,7 @@ func animateMetaballLab(world: mod World3d, tags: view ClusterTags, time: view F
   let m4: List(Query2Match) = tagged(dataTable: world.sdfs, tagTable: tags.c4)
   loop let hit: view Query2Match in m4 {
     let p: LabPulse = labPulse(time: time, i: hit.indexA)
-    let transform: mod Transform3d => world3dTransformMod(world: world, entityId: hit.entityId)
+    let transform: mod Transform3d = world3dTransformMod(world: world, entityId: hit.entityId)
     let t: Float = time * 0.38
     transform.position = Vec3.create(
       x: 3.2 + Math.cos(x: t + p.phase) * (1.2 + p.escape * 4.8)
@@ -239,7 +239,7 @@ func animateMetaballLab(world: mod World3d, tags: view ClusterTags, time: view F
   let m5: List(Query2Match) = tagged(dataTable: world.sdfs, tagTable: tags.c5)
   loop let hit: view Query2Match in m5 {
     let p: LabPulse = labPulse(time: time, i: hit.indexA)
-    let transform: mod Transform3d => world3dTransformMod(world: world, entityId: hit.entityId)
+    let transform: mod Transform3d = world3dTransformMod(world: world, entityId: hit.entityId)
     let t: Float = time * 0.55
     let ring: Float = 2.2 + Math.sin(x: time * 0.33) * 0.9
     transform.position = Vec3.create(
@@ -255,7 +255,7 @@ func animateMetaballLab(world: mod World3d, tags: view ClusterTags, time: view F
   let m6: List(Query2Match) = tagged(dataTable: world.sdfs, tagTable: tags.c6)
   loop let hit: view Query2Match in m6 {
     let p: LabPulse = labPulse(time: time, i: hit.indexA)
-    let transform: mod Transform3d => world3dTransformMod(world: world, entityId: hit.entityId)
+    let transform: mod Transform3d = world3dTransformMod(world: world, entityId: hit.entityId)
     let t: Float = time * 0.16
     transform.position = Vec3.create(
       x: 0.0 - 4.4 + Math.cos(x: t + p.phase) * 0.85
@@ -283,8 +283,8 @@ func animateScene3(world: mod World3d, time: view Float) {
   var i: Int = 0
   loop i < world3dSdfCount(world: world) {
     let entityId: EntityId = world3dSdfEntityAt(world: world, i: i)
-    let sdf: view SdfPrimitive => world3dSdfDataAt(world: world, i: i)
-    let transform: mod Transform3d => world3dTransformMod(world: world, entityId: entityId)
+    let sdf: view SdfPrimitive = world3dSdfDataAt(world: world, i: i)
+    let transform: mod Transform3d = world3dTransformMod(world: world, entityId: entityId)
     let phase: Float = i.toFloat() * 0.6283185
     let idx: Float = i.toFloat()
 
@@ -331,12 +331,12 @@ func animateScene1(
   # the useful shape to watch here: a sphere looks identical under any
   # rotation, so it cannot show a wrong rotation order or a skewed normal
   # transform, and a flat-shaded cube shows both immediately.
-  let cubeATransform: mod Transform3d => world3dTransformMod(world: world, entityId: cubeA)
+  let cubeATransform: mod Transform3d = world3dTransformMod(world: world, entityId: cubeA)
   cubeATransform.rotation = Vec3.create(x: time * 0.7, y: time * 0.31, z: 0.0)
-  let cubeBTransform: mod Transform3d => world3dTransformMod(world: world, entityId: cubeB)
+  let cubeBTransform: mod Transform3d = world3dTransformMod(world: world, entityId: cubeB)
   cubeBTransform.rotation = Vec3.create(x: 0.0, y: time * 0.55, z: time * 0.9)
 
-  let torusTransform: mod Transform3d => world3dTransformMod(world: world, entityId: torus)
+  let torusTransform: mod Transform3d = world3dTransformMod(world: world, entityId: torus)
   torusTransform.rotation = Vec3.create(x: time * 0.35, y: 0.0, z: time * 0.62)
   # Heights are chosen against the ground plane at z=-0.75 so every ball
   # stays INSIDE the SSAO contact radius (~1.2 world units) for its whole
@@ -364,7 +364,7 @@ func animateScene1(
   let m1: List(Query2Match) = tagged(dataTable: world.sdfs, tagTable: tags.c1)
   loop let hit: view Query2Match in m1 {
     let phase: Float = hit.indexA.toFloat() * 1.2566371
-    let transform: mod Transform3d => world3dTransformMod(world: world, entityId: hit.entityId)
+    let transform: mod Transform3d = world3dTransformMod(world: world, entityId: hit.entityId)
     let slow: Float = time * 0.34
     transform.position = Vec3.create(
       x: 0.0 - 5.25 + Math.cos(x: slow + phase) * 0.62
@@ -379,7 +379,7 @@ func animateScene1(
   let m2: List(Query2Match) = tagged(dataTable: world.sdfs, tagTable: tags.c2)
   loop let hit: view Query2Match in m2 {
     let phase: Float = hit.indexA.toFloat() * 1.2566371
-    let transform: mod Transform3d => world3dTransformMod(world: world, entityId: hit.entityId)
+    let transform: mod Transform3d = world3dTransformMod(world: world, entityId: hit.entityId)
     let fast: Float = time * 1.35
     transform.position = Vec3.create(
       x: 0.0 - 0.35 + Math.cos(x: fast + phase * 1.4) * 1.18
@@ -397,7 +397,7 @@ func animateScene1(
   loop let hit: view Query2Match in m0 {
     let i: Int = hit.indexA
     let phase: Float = i.toFloat() * 1.2566371
-    let transform: mod Transform3d => world3dTransformMod(world: world, entityId: hit.entityId)
+    let transform: mod Transform3d = world3dTransformMod(world: world, entityId: hit.entityId)
     var excursion: Float = 0.0
     if i % 3 is 0 {
       var pulse: Float = Math.sin(x: time * 0.26 + phase * 3.1)

@@ -61,7 +61,7 @@ func assignFromField() ret String {
 func assignThroughModRef() ret String {
   var pair: Pair = { first: makeHolder(tag: 4), second: makeHolder(tag: 5) }
   let source: Holder = makeHolder(tag: 6)
-  let slot: mod Holder => pair.first
+  let slot: mod Holder = pair.first
   slot = source
   ret "{pair.first.label} {pair.first.items.length} / {source.label}"
 }
@@ -69,7 +69,7 @@ func assignThroughModRef() ret String {
 func assignStringThroughModRef() ret String {
   var target: Holder = makeHolder(tag: 4)
   let source: String = "new label"
-  let slot: mod String => target.label
+  let slot: mod String = target.label
   slot = source
   ret "{target.label} / {source}"
 }
@@ -81,11 +81,11 @@ func assignThroughModAt() ret String {
   var holders: List(Holder) = List.create(Holder, cap: 2)
   holders.add(value: makeHolder(tag: 4))
   let source: Holder = makeHolder(tag: 5)
-  if let slot: mod Holder => holders.modAt(index: 0) {
+  if let slot: mod Holder = holders.modAt(index: 0) {
     slot = source
   }
   var label: String = ""
-  if let stored: view Holder => holders.viewAt(index: 0) {
+  if let stored: view Holder = holders.viewAt(index: 0) {
     label = "{stored.label} {stored.items.length} / {source.label}"
   }
   ret label
@@ -95,7 +95,7 @@ func assignStringThroughModAt() ret String {
   var labels: List(String) = List.create(String, cap: 2)
   labels.add(value: "old")
   let text: String = "new label"
-  if let cell: mod String => labels.modAt(index: 0) {
+  if let cell: mod String = labels.modAt(index: 0) {
     cell = text
   }
   ret "{labels.copyAtDefault(index: 0)} / {text}"
@@ -106,11 +106,11 @@ func assignThroughModGet() ret String {
   var byName: StringMap(Holder) = StringMap.create(Holder, cap: 4)
   byName.set(k: "slot", value: makeHolder(tag: 4))
   let source: Holder = makeHolder(tag: 5)
-  if let editable: mod Holder => byName.modGet(key: "slot") {
+  if let editable: mod Holder = byName.modGet(key: "slot") {
     editable = source
   }
   var label: String = ""
-  if let stored: view Holder => byName.viewGet(key: "slot") {
+  if let stored: view Holder = byName.viewGet(key: "slot") {
     label = "{stored.label} {stored.items.length} / {source.label}"
   }
   ret label

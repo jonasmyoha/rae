@@ -140,7 +140,7 @@ func putCompound(out: mod List(Float), compound: view CompoundData) {
   loop let material: view SurfaceMaterial in compound.materials {
     putMaterial(out: out, material: material)
   }
-  let tree: view DynamicTree => compound.tree
+  let tree: view DynamicTree = compound.tree
   putInt(out: out, value: tree.nodeEnd)
   loop var k: Int = 0, k < tree.nodeEnd, ++k {
     let node: TreeNode = treeNode(tree: tree, index: k)
@@ -270,12 +270,12 @@ func evaluate(
     }
   } else if name is "compound.aabb" {
     let transform: Transform = readTransform(reader: reader)
-    if let compound: view CompoundData => state.compound {
+    if let compound: view CompoundData = state.compound {
       putBox(out: out, box: computeCompoundAabb(compound: compound, transform: transform))
     }
   } else if name is "compound.query" {
     let bounds: Aabb = readBox(reader: reader)
-    if let compound: view CompoundData => state.compound {
+    if let compound: view CompoundData = state.compound {
       let found: List(Int) = queryCompound(compound: compound, bounds: bounds)
       putInt(out: out, value: found.length)
       loop let childIndex: view Int in found {

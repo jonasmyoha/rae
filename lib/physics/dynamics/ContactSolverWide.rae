@@ -163,7 +163,7 @@ func scatterBodies(
     if index is -1 {
       continue
     }
-    if let state: mod BodyState => states.modAt(index: index) {
+    if let state: mod BodyState = states.modAt(index: index) {
       if (state.flags bitand dynamicFlag) is not 0 {
         state.linearVelocity = Vec3 {
           x: laneOf(value: body.linearVelocity.x, lane: lane)
@@ -234,13 +234,13 @@ func gatherPrepareLane(
     ret prepared
   }
   var contactId: Int = -1
-  if let color: view GraphColor => world.constraintGraph.colors.viewAt(index: span.colorIndex) {
+  if let color: view GraphColor = world.constraintGraph.colors.viewAt(index: span.colorIndex) {
     contactId = color.convexContacts.copyAtDefault(index: contactIndex)
   }
   wide.contactIds.set(index: lane, value: contactId)
   var indexA: Int = -1
   var indexB: Int = -1
-  if let contact: view Contact => world.contacts.viewAt(index: contactId) {
+  if let contact: view Contact = world.contacts.viewAt(index: contactId) {
     indexA = contact.encodedBodySimA
     if indexA < 0 {
       indexA = -1
@@ -254,7 +254,7 @@ func gatherPrepareLane(
     prepared.rollingResistance = contact.rollingResistance
     prepared.tangentVelocity = contact.tangentVelocity
     prepared.hitEvents = (contact.flags bitand simEnableHitEvent) is not 0
-    if let manifold: view Manifold => contact.manifolds.viewAt(index: 0) {
+    if let manifold: view Manifold = contact.manifolds.viewAt(index: 0) {
       wide.pointCounts.set(index: lane, value: manifold.pointCount)
       prepared.normal = manifold.normal
       prepared.twistImpulse = manifold.twistImpulse
@@ -270,12 +270,12 @@ func gatherPrepareLane(
   }
   wide.indexA.set(index: lane, value: indexA + 1)
   wide.indexB.set(index: lane, value: indexB + 1)
-  if let awake: view SolverSet => world.solverSets.viewAt(index: awakeSet) {
-    if let simA: view BodySim => awake.bodySims.viewAt(index: indexA) {
+  if let awake: view SolverSet = world.solverSets.viewAt(index: awakeSet) {
+    if let simA: view BodySim = awake.bodySims.viewAt(index: indexA) {
       prepared.invMassA = simA.invMass
       prepared.invInertiaA = simA.invInertiaWorld
     }
-    if let simB: view BodySim => awake.bodySims.viewAt(index: indexB) {
+    if let simB: view BodySim = awake.bodySims.viewAt(index: indexB) {
       prepared.invMassB = simB.invMass
       prepared.invInertiaB = simB.invInertiaWorld
     }
@@ -356,7 +356,7 @@ func prepareContactsWide(
   let minDet: FloatWide = splatWide(value: minDeterminant)
   var anyRestitution: Bool = false
 
-  let spans: view List(PrepareSpan) => context.widePrepareSpans
+  let spans: view List(PrepareSpan) = context.widePrepareSpans
   var wideIndex: Int = block.startIndex
   let endWideIndex: Int = block.startIndex + block.count
   var slot: Int = spanSlotOf(spans: spans, index: wideIndex)
@@ -369,7 +369,7 @@ func prepareContactsWide(
     loop wideIndex < colorWideEndIndex {
       let localWideIndex: Int = wideIndex - span.start
       # Prefetch the next wide constraint's contacts (read by id, scattered)
-      if let color: view GraphColor => world.constraintGraph.colors.viewAt(index: span.colorIndex) {
+      if let color: view GraphColor = world.constraintGraph.colors.viewAt(index: span.colorIndex) {
         loop var lane: Int = 4, lane < 8, ++lane {
           let nextIndex: Int = 4 * localWideIndex + lane
           if nextIndex < span.count {
@@ -762,7 +762,7 @@ func prepareContactsWide(
           left: pointCountWide
           right: splatWide(value: pointIndex.toFloat())
         )
-        if let constraintPoint: mod ContactConstraintPointWide => wide.points.modAt(
+        if let constraintPoint: mod ContactConstraintPointWide = wide.points.modAt(
           index: pointIndex
         ) {
           let offset: Vec3Wide = subtractVectorWide(left: constraintPoint.anchorA, right: centerA)
@@ -861,13 +861,13 @@ func prepareRelativeVelocities(
 ) {
   var bodyA: BodyStateWide = zeroBodyStateWide()
   var bodyB: BodyStateWide = zeroBodyStateWide()
-  if let awake: view SolverSet => world.solverSets.viewAt(index: awakeSet) {
+  if let awake: view SolverSet = world.solverSets.viewAt(index: awakeSet) {
     bodyA = gatherBodies(states: awake.bodyStates, indices: constraint.indexA)
     bodyB = gatherBodies(states: awake.bodyStates, indices: constraint.indexB)
   }
   loop var pointIndex: Int = 0, pointIndex < maxManifoldPoints, ++pointIndex {
     var vn: FloatWide = zeroWide()
-    if let constraintPoint: mod ContactConstraintPointWide => constraint.points.modAt(
+    if let constraintPoint: mod ContactConstraintPointWide = constraint.points.modAt(
       index: pointIndex
     ) {
       let vrA: Vec3Wide = addVectorWide(
@@ -886,9 +886,9 @@ func prepareRelativeVelocities(
         let laneHit: Bool = (hitEventLanes bitand (1 shl lane)) is not 0
         if laneHit and pointIndex < constraint.pointCounts.copyAtFallback(index: lane, fallback: 0) {
           let contactId: Int = constraint.contactIds.copyAtFallback(index: lane, fallback: -1)
-          if let contact: mod Contact => world.contacts.modAt(index: contactId) {
-            if let manifold: mod Manifold => contact.manifolds.modAt(index: 0) {
-              if let point: mod ManifoldPoint => manifold.points.modAt(index: pointIndex) {
+          if let contact: mod Contact = world.contacts.modAt(index: contactId) {
+            if let manifold: mod Manifold = contact.manifolds.modAt(index: 0) {
+              if let point: mod ManifoldPoint = manifold.points.modAt(index: pointIndex) {
                 point.normalVelocity = laneOf(value: vn, lane: lane)
               }
             }
@@ -919,7 +919,7 @@ func storeImpulsesWide(
 ) {
   let negHitThreshold: Float = -world.hitEventThreshold
   loop var wideIndex: Int = block.startIndex, wideIndex < block.startIndex + block.count, ++wideIndex {
-    if let wide: view ContactConstraintWide => context.wideConstraints.viewAt(index: wideIndex) {
+    if let wide: view ContactConstraintWide = context.wideConstraints.viewAt(index: wideIndex) {
       loop var lane: Int = 0, lane < 4, ++lane {
         let contactId: Int = wide.contactIds.copyAtFallback(index: lane, fallback: -1)
         if contactId is -1 {
@@ -928,8 +928,8 @@ func storeImpulsesWide(
         let f1: Float = laneOf(value: wide.frictionImpulse.x, lane: lane)
         let f2: Float = laneOf(value: wide.frictionImpulse.y, lane: lane)
         var hit: Bool = false
-        if let contact: mod Contact => world.contacts.modAt(index: contactId) {
-          if let manifold: mod Manifold => contact.manifolds.modAt(index: 0) {
+        if let contact: mod Contact = world.contacts.modAt(index: contactId) {
+          if let manifold: mod Manifold = contact.manifolds.modAt(index: 0) {
             manifold.frictionImpulse = Vec3 {
               x: f1 * laneOf(value: wide.tangent1.x, lane: lane) + f2 * laneOf(
                 value: wide.tangent2.x
@@ -951,10 +951,10 @@ func storeImpulsesWide(
               z: laneOf(value: wide.rollingImpulse.z, lane: lane)
             }
             loop var pointIndex: Int = 0, pointIndex < manifold.pointCount, ++pointIndex {
-              if let constraintPoint: view ContactConstraintPointWide => wide.points.viewAt(
+              if let constraintPoint: view ContactConstraintPointWide = wide.points.viewAt(
                 index: pointIndex
               ) {
-                if let point: mod ManifoldPoint => manifold.points.modAt(index: pointIndex) {
+                if let point: mod ManifoldPoint = manifold.points.modAt(index: pointIndex) {
                   point.normalImpulse = laneOf(value: constraintPoint.normalImpulse, lane: lane)
                   point.totalNormalImpulse = laneOf(
                     value: constraintPoint.totalNormalImpulse
@@ -979,7 +979,7 @@ func storeImpulsesWide(
           }
         }
         if hit {
-          if let taskContext: mod TaskContext => world.taskContexts.modAt(index: slot) {
+          if let taskContext: mod TaskContext = world.taskContexts.modAt(index: slot) {
             setBit(bitset: taskContext.hitEventBitSet, bitIndex: contactId)
             taskContext.hasHitEvents = true
           }
