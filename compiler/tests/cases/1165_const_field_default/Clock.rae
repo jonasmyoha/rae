@@ -1,0 +1,19 @@
+# A module whose struct field defaults name its own consts (Main builds the
+# structs): the consts are module globals in the C, so the code that fills a
+# default must come after them
+const clockDaySeconds: Float = 60.0
+
+const clockStartHour: Int = 6
+
+const clockLongDay: Float = clockDaySeconds * 30.0
+
+type Clock {
+  hour: Int = clockStartHour
+  daySeconds: Float = clockDaySeconds
+  name: String = "sun"
+}
+
+type Calendar {
+  clock: Clock
+  longDay: Float = clockLongDay
+}
