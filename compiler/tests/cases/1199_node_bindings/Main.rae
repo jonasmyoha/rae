@@ -1,0 +1,136 @@
+# lib/ui/nodeBindingSystem: what an app writes into a scene node survives a
+# frame or state change. Applying a frame or a state resets every node it
+# names to its authored components, so a label the app had written went back
+# to its authored text, and a card it had shown hid again, until the app
+# wrote it once more. An app now binds a node's text (bindNodeText) or whether
+# it shows (bindNodeActive): the binding is a component on the node, and every
+# frame or state apply writes it again after the scene's own bags.
+import String
+open ui/Components
+open ui/Ecs
+open ui/Scene
+open ui/SceneLoader
+open ui/UiSystems
+open ui/Frames
+open ui/nodeBindingSystem/NodeBindingSystem
+open ecs/Entity
+open ecs/ComponentTable
+
+func buildScene() ret String {
+  var s: String = ""
+  s = s.concat(other: "\{")
+  s = s.concat(other: "\"type\":\"Scene\",\"version\":2,\"sceneId\":\"bind\",\"root\":\"Root\",")
+  s = s.concat(other: "\"nodes\":\{")
+  s = s.concat(
+    other: "\"Root\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":200\},\"Layout\":\{\"type\":\"Vertical\"\},\"Children\":[\"Bound\",\"Unbound\",\"Card\"]\},"
+  )
+  s = s.concat(
+    other: "\"Bound\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":100,\"h\":20\},\"Text\":\{\"text\":\"authored\",\"styleId\":\"body\"\}\},"
+  )
+  s = s.concat(
+    other: "\"Unbound\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":100,\"h\":20\},\"Text\":\{\"text\":\"authored\",\"styleId\":\"body\"\}\},"
+  )
+  s = s.concat(
+    other: "\"Card\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":100,\"h\":20\},\"Active\":\{\"value\":false\}\}"
+  )
+  s = s.concat(other: "\},")
+  s = s.concat(other: "\"states\":\{\"tight\":\{\"nodes\":\{")
+  s = s.concat(
+    other: "\"Bound\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":80,\"h\":16\}\},\"Unbound\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":80,\"h\":16\}\},\"Card\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":80,\"h\":16\}\}"
+  )
+  s = s.concat(other: "\}\}\}")
+  s = s.concat(other: "\}")
+  ret s
+}
+
+func textOf(world: view UiWorld, nodeId: view String) ret String {
+  if let raw: Int = findNodeInPage(world: world, pageId: "", nodeId: nodeId) {
+    let entityId: EntityId = nodeEntityId(world: world, index: raw)
+    ret "{componentView(this: world.texts, entityId: entityId).text}"
+  }
+  ret "?"
+}
+
+func shown(world: view UiWorld, nodeId: view String) ret Bool {
+  if let raw: Int = findNodeInPage(world: world, pageId: "", nodeId: nodeId) {
+    let entityId: EntityId = nodeEntityId(world: world, index: raw)
+    if componentHas(this: world.actives, entityId: entityId) {
+      ret componentView(this: world.actives, entityId: entityId).value
+    }
+    ret true
+  }
+  ret false
+}
+
+func report(step: view String, world: view UiWorld) {
+  log(
+    "{step}: bound '{textOf(world: world, nodeId: "Bound")}', unbound '{textOf(
+      world: world
+      nodeId: "Unbound"
+    )}', card shown {shown(world: world, nodeId: "Card")}"
+  )
+}
+
+func applyStates(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scene: view Scene
+  tight: view Bool
+) {
+  var states: List(String) = List.create(String, cap: 1)
+  if tight {
+    states.add(value: "tight")
+  }
+  let frame: opt Int = applySceneFramesToPageWithStates(
+    world: world
+    uiSystems: uiSystems
+    scene: scene
+    pageId: ""
+    windowPtW: 400.0
+    forcedFrameId: ""
+    activeStates: states
+  )
+}
+
+func main() {
+  let scene: Scene = parseScene(source: buildScene())
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 400.0
+  world.layoutH = 200.0
+  let root: EntityId = loadSceneIntoPage(
+    world: world
+    uiSystems: uiSystems
+    scene: scene
+    pageId: ""
+  )
+  report(step: "loaded", world: world)
+  bindNodeText(world: world, nodeId: "Bound", value: "XP 40")
+  bindNodeActive(world: world, nodeId: "Card", value: true)
+  if let raw: Int = findNodeInPage(world: world, pageId: "", nodeId: "Unbound") {
+    let text: mod Text = componentMod(
+      this: world.texts
+      entityId: nodeEntityId(world: world, index: raw)
+    )
+    text.text = "written"
+  }
+  report(step: "written", world: world)
+  applyStates(
+    world: world
+    uiSystems: uiSystems
+    scene: scene
+    tight: true
+  )
+  report(step: "a state applied", world: world)
+  bindNodeText(world: world, nodeId: "Bound", value: "XP 50")
+  bindNodeActive(world: world, nodeId: "Card", value: false)
+  applyStates(
+    world: world
+    uiSystems: uiSystems
+    scene: scene
+    tight: false
+  )
+  report(step: "rebound, the state taken off", world: world)
+  bindNodeText(world: world, nodeId: "Missing", value: "nothing")
+  report(step: "a node that is not there", world: world)
+}

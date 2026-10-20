@@ -1,0 +1,67 @@
+# ui/nodeBindingSystem — the app's text and showing of scene nodes, written
+# again after every frame or state apply (lib/ui/Frames applyFrameToPage
+# runs applyNodeBindings last). An app writes a node with bindNodeText /
+# bindNodeActive instead of changing its Text or Active itself, and never
+# needs to know which frames or states name the node.
+open ecs/Entity
+open ecs/ComponentTable
+open ui/Ecs
+open ui/Components
+open ui/NodeBinding
+
+# The entity of the scene node `nodeId`, or none
+func boundNodeEntity(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let raw: Int = world.nodeIds.get(k: nodeId) {
+    ret nodeEntityId(world: world, index: raw)
+  }
+  ret noEntity()
+}
+
+# Write the node's text and keep it as the node's binding. A node with no
+# Text, or no such node, is left alone.
+func bindNodeText(world: mod UiWorld, nodeId: view String, value: view String) {
+  let entityId: EntityId = boundNodeEntity(world: world, nodeId: nodeId)
+  if isNone(this: entityId) or componentHas(this: world.texts, entityId: entityId) is false {
+    ret
+  }
+  let bound: BoundText = { text: "{value}" }
+  componentSet(this: world.boundTexts, entityId: entityId, data: bound)
+  let text: mod Text = componentMod(this: world.texts, entityId: entityId)
+  text.text = "{value}"
+}
+
+# Show or hide the node and keep it as the node's binding
+func bindNodeActive(world: mod UiWorld, nodeId: view String, value: view Bool) {
+  let entityId: EntityId = boundNodeEntity(world: world, nodeId: nodeId)
+  if isNone(this: entityId) {
+    ret
+  }
+  let bound: BoundActive = { value: value }
+  componentSet(this: world.boundActives, entityId: entityId, data: bound)
+  let active: Active = { value: value }
+  componentSet(this: world.actives, entityId: entityId, data: active)
+}
+
+# Write every binding into its node again (a node whose page was taken down
+# is skipped)
+func applyNodeBindings(world: mod UiWorld) {
+  loop var i: Int = 0, i < componentCount(this: world.boundTexts), ++i {
+    let entityId: EntityId = componentEntityAt(this: world.boundTexts, i: i)
+    if isAlive(world: world, entityId: entityId) and componentHas(
+      this: world.texts
+      entityId: entityId
+    ) {
+      let bound: view BoundText = componentView(this: world.boundTexts, entityId: entityId)
+      let text: mod Text = componentMod(this: world.texts, entityId: entityId)
+      text.text = "{bound.text}"
+    }
+  }
+  loop var i: Int = 0, i < componentCount(this: world.boundActives), ++i {
+    let entityId: EntityId = componentEntityAt(this: world.boundActives, i: i)
+    if isAlive(world: world, entityId: entityId) {
+      let bound: view BoundActive = componentView(this: world.boundActives, entityId: entityId)
+      let active: Active = { value: bound.value }
+      componentSet(this: world.actives, entityId: entityId, data: active)
+    }
+  }
+}

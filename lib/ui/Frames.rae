@@ -102,6 +102,7 @@ open ecs/hierarchySystem/HierarchySystem
 open ecs/ComponentTable
 open ui/FramesHierarchy
 open ui/UiSystems
+open ui/nodeBindingSystem/NodeBindingSystem
 
 type FrameSet {
   names: List(String)
@@ -754,6 +755,9 @@ func applyFrameToPage(
       }
     }
   }
+  # What the app wrote into the nodes (bindNodeText / bindNodeActive) goes
+  # back on top of the scene's bags
+  applyNodeBindings(world: world)
   # S4: re-derive the active hierarchy when any frame reparents or
   # reorders. Runs with no frameIdx too — falling back to "no frame"
   # must restore the authored structure. States never carry

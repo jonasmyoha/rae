@@ -16,8 +16,10 @@
 #   if uiModes.editor { ...draw the editor-only overlays... }
 #
 # Applying frames and states resets the nodes they name to the scene's authored
-# components, so an app that writes those nodes at run time writes them again
-# when `generation` moves. RAE_UI_MODE=editor starts in EDITOR, RAE_UI_FRAME=<id>
+# components; an app keeps what it writes into them by binding it
+# (bindNodeText / bindNodeActive, ui/nodeBindingSystem), which every apply
+# writes again. `generation` moves on every apply, for anything else that
+# follows it. RAE_UI_MODE=editor starts in EDITOR, RAE_UI_FRAME=<id>
 # forces a frame, RAE_UI_MENU=open starts with the "..." menu open (all for
 # screenshots).
 import Sys
@@ -67,10 +69,8 @@ type ModeMenuState {
   # The mobile item's text as written
   mobileLabelSimulated: Bool
   mobileLabelWritten: Bool
-  # The generation the menu's nodes were last written under: applying a frame
-  # or state resets the nodes it names (the menu, restyled for EDITOR), so
-  # the menu writes them again when the modes' `generation` moves
-  generation: Int
+  # Whether the menu's open state has been written to its node yet
+  openWritten: Bool
 }
 
 # Closed (open under RAE_UI_MENU=open, for screenshots), nothing written yet
@@ -82,7 +82,7 @@ func createModeMenuState() ret ModeMenuState {
     simulateMobile: Target.isMobileOs or Sys.getEnv(name: "RAE_SIMULATE_MOBILE") is "1"
     mobileLabelSimulated: false
     mobileLabelWritten: false
-    generation: 0
+    openWritten: false
   }
 }
 
