@@ -1,0 +1,91 @@
+# app3d/CharacterHeight — characters of different heights on one shared
+# model: a CharacterHeight component on the character, read by what draws it
+# (its model scaled about its feet, so it still stands on the ground), by
+# its clips (a shorter character's shorter strides played faster at the same
+# speed, so its feet do not slide) and by its mover (the capsule's top at its
+# height, the lower sphere kept where it meets what a character steps over).
+# The model is drawn at CharacterSystem.modelHeight; the clips' rates and the
+# mover were tuned at CharacterSystem.tunedHeight.
+import Math
+open ecs/Entity
+open ecs/ComponentTable
+open Math3d
+open box3d/ecs/CharacterMover
+open app3d/Characters
+
+type CharacterHeight {
+  height: Float
+}
+
+# `entityId`'s height, or `fallback` without one
+func characterHeightOf(
+  heights: view ComponentTable(CharacterHeight)
+  entityId: view EntityId
+  fallback: view Float
+) ret Float {
+  if componentHas(this: heights, entityId: entityId) {
+    ret componentView(this: heights, entityId: entityId).height
+  }
+  ret fallback
+}
+
+# How much bigger than tuned a character `height` tall is
+func tunedScale(height: view Float, tunedHeight: view Float) ret Float {
+  ret height / tunedHeight
+}
+
+# How much faster than tuned the walk and run clips play for a character
+# `height` tall: its strides are shorter in proportion at the same speed
+func clipStrideScale(height: view Float, tunedHeight: view Float) ret Float {
+  ret tunedHeight / height
+}
+
+# A clip's playback `rate` for a character `height` tall: the walk, fast
+# walk and run clips by its stride, the others as they are
+func strideClipRate(
+  clipIndex: view Int
+  rate: view Float
+  height: view Float
+  tunedHeight: view Float
+) ret Float {
+  if clipIndex is ClipKind.walk or clipIndex is ClipKind.walkFast or clipIndex is ClipKind.run {
+    ret rate * clipStrideScale(height: height, tunedHeight: tunedHeight)
+  }
+  ret rate
+}
+
+# The model's placement (`basePartModel`, which stands it on `groundZ` under
+# its world transform) scaled by `scale` about its feet
+func scaledPartModel(basePartModel: view Mat4, groundZ: view Float, scale: view Float) ret Mat4 {
+  ret mat4Mul(
+    a: mat4Translate(x: 0.0, y: 0.0, z: groundZ)
+    b: mat4Mul(
+      a: mat4Scale(s: scale)
+      b: mat4Mul(a: mat4Translate(x: 0.0, y: 0.0, z: 0.0 - groundZ), b: basePartModel)
+    )
+  )
+}
+
+# A character `height` tall's placement of the shared model
+func heightPartModel(characterSystem: view CharacterSystem, height: view Float) ret Mat4 {
+  ret scaledPartModel(
+    basePartModel: characterSystem.basePartModel
+    groundZ: characterSystem.groundZ
+    scale: height / characterSystem.modelHeight
+  )
+}
+
+# A mover for a character `height` tall: the capsule's top where the tuned
+# sample's is for its height, scaled; the sample's lower sphere (its radius,
+# held as high) for everyone, since that is what meets a low obstacle's bar
+# and clears it
+func moverSizeForHeight(height: view Float, tunedHeight: view Float) ret MoverSize {
+  let sample: MoverSize = sampleMoverSize()
+  let sampleTop: Float = sample.restLength + 2.0 * sample.halfHeight + sample.radius
+  let top: Float = sampleTop * tunedScale(height: height, tunedHeight: tunedHeight)
+  ret MoverSize {
+    radius: sample.radius
+    halfHeight: Math.max(a: 0.05, b: (top - sample.restLength - sample.radius) * 0.5)
+    restLength: sample.restLength
+  }
+}

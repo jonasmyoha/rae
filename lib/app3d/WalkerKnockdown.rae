@@ -28,6 +28,7 @@ open app3d/RagdollGetUp
 open app3d/WalkerWorld
 open app3d/WalkerPhysics
 open app3d/WalkerCharacter
+open app3d/CharacterHeight
 
 # Running at least this fast (m/s) into someone this close (m, centre to
 # centre, across the ground) trips the runner
@@ -69,12 +70,12 @@ func tripCharacter(
     rig: physicsSystem.ragdollRig
     skeleton: characterSystem.skeleton
     characterId: entityId
-    model: walkerWorldModel(
-      baseModel: characterSystem.basePartModel
-      controller: controllerOf(controllers: world.controllers, entityId: entityId)
-    )
+    model: walkerCharacterModel(world: world, characterSystem: characterSystem, entityId: entityId)
     velocity: velocity
-    radiusScale: 1.0
+    radiusScale: tunedScale(
+      height: walkerHeightOf(world: world, characterSystem: characterSystem, entityId: entityId)
+      tunedHeight: characterSystem.tunedHeight
+    )
     collisionCategory: walkerRagdollCategory
   )
   if fell is false {
@@ -155,7 +156,13 @@ func standUpFromRagdoll(
     rig: physicsSystem.ragdollRig
     skeleton: characterSystem.skeleton
     characterId: entityId
-    standingModel: walkerWorldModel(baseModel: characterSystem.basePartModel, controller: standing)
+    standingModel: walkerWorldModel(
+      baseModel: heightPartModel(
+        characterSystem: characterSystem
+        height: walkerHeightOf(world: world, characterSystem: characterSystem, entityId: entityId)
+      )
+      controller: standing
+    )
   )
   let boneEntities: List(EntityId) = removeRagdoll(
     physics: physicsSystem.physics
@@ -272,9 +279,10 @@ func walkerPaletteInto(
       rig: physicsSystem.ragdollRig
       skeleton: characterSystem.skeleton
       characterId: entityId
-      model: walkerWorldModel(
-        baseModel: characterSystem.basePartModel
-        controller: controllerOf(controllers: world.controllers, entityId: entityId)
+      model: walkerCharacterModel(
+        world: world
+        characterSystem: characterSystem
+        entityId: entityId
       )
     )
     buildPaletteInto(sk: characterSystem.skeleton, out: palette)
