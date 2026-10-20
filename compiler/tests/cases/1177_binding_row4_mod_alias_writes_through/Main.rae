@@ -1,0 +1,32 @@
+# docs/binding-modes-design.md §1, the binding table (2026-10-20): row 4.
+# `let x: mod T = place` is an alias that writes the place. It is never
+# rebound: `x = v` deep-copies v INTO the aliased place, and the source stays
+# independent of it afterwards. Its fields are writable.
+type Particle {
+  x: Int
+  name: String
+}
+
+type World {
+  particles: List(Particle)
+  spare: Particle
+}
+
+func main() {
+  var world: World = {
+    particles: { { x: 1, name: "first" }, { x: 2, name: "second" } }
+    spare: { x: 9, name: "spare" }
+  }
+  let myThing: mod Particle = world.particles.modAt(index: 0)
+  myThing = world.spare
+  world.spare.name = "spare changed"
+  world.spare.x = 10
+  myThing.x = 7
+  let first: view Particle = world.particles.viewAt(index: 0)
+  log("first: {first.x} {first.name}")
+  log("spare: {world.spare.x} {world.spare.name}")
+  var whole: Particle = { x: 0, name: "whole" }
+  let writer: mod Particle = whole
+  writer.name = "written"
+  log("whole: {whole.x} {whole.name}")
+}

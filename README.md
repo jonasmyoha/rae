@@ -186,9 +186,8 @@ library's own track rather than a copy of it.
   `let x: Track = v` is a fresh deep copy, `let x: view Track = place` is a
   read-only alias, `let x: mod Track = place` is a writing alias, and
   `own y` on the right is a move — whatever the type holds. (Decided
-  2026-10-20, replacing the `=>` alias binder; the compiler takes the `=`
-  spelling for aliases from the parser step of that change, see
-  `docs/binding-modes-design.md`.)
+  2026-10-20, replacing the `=>` alias binder, which is a compile error since
+  compiler 0.2.96; see `docs/binding-modes-design.md`.)
 
 ### Bindings, one table
 

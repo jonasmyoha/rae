@@ -1,0 +1,19 @@
+# docs/binding-modes-design.md §1, the binding table (2026-10-20): row 6.
+# `loop let x: view T in list` is read-only, and a `mod` loop over a frozen
+# `let` list would write it.
+type Particle {
+  x: Int
+}
+
+func main() {
+  var particles: List(Particle) = { { x: 1 } }
+  var other: Particle = { x: 2 }
+  loop let particle: view Particle in particles {
+    particle = other
+    particle.x = 3
+  }
+  let frozen: List(Particle) = { { x: 1 } }
+  loop let particle: mod Particle in frozen {
+    particle.x = 4
+  }
+}

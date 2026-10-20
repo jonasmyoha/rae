@@ -1,0 +1,11 @@
+# docs/binding-modes-design.md §1, the binding table (2026-10-20): row 1.
+# `let x: T = v` is frozen: it is not rebound, and nothing in it is written.
+type Particle {
+  x: Int
+}
+
+func main() {
+  let particle: Particle = { x: 1 }
+  particle = { x: 2 }
+  particle.x = 3
+}

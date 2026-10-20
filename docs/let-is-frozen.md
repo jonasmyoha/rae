@@ -56,7 +56,7 @@ receiver's type is consulted, and the call counts when all of them take
 - **Aliases keep their own mode.** `let part: mod Inner = free.inner` is a
   `mod` alias: writes through it land in `free`, which must itself be a
   `var`. A `view` alias (or `view` parameter) stays read-only, as before.
-- **Narrowing makes new bindings.** `if let value: T = maybe` and `=>` bind a
+- **Narrowing makes new bindings.** `if let value: T = maybe` and an alias binding make a
   new name; they do not change the binding they read. The `if let` payload is
   itself a frozen `let`; `if var` is its mutable form (below).
 - **`view` parameters** are unchanged: read-only, as today.
@@ -79,7 +79,7 @@ same move of the payload into the branch, the same drop at its end.
 To change the elements in place, take them as aliases:
 `loop let x: mod T in list { x.count = 0 }`.
 
-An ALIAS (`view T` / `mod T`, bound with `=>` or as a loop element) has no
+An ALIAS (`view T` / `mod T`, a local or a loop element) has no
 `var` form: its mode word already says whether it may write, and an alias is
 bind-once. `if var x: mod T = place` and `loop var x: view T in list` are
 parse errors (fixture 1020).

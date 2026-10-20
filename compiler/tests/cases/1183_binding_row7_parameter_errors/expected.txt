@@ -1,0 +1,12 @@
+tests/cases/1183_binding_row7_parameter_errors/Main.rae:9:12: cannot assign to read-only view parameter 'particle'; declare it 'mod' to allow writes
+     9 |   particle = other
+       |            ^~~~
+tests/cases/1183_binding_row7_parameter_errors/Main.rae:10:14: cannot mutate through read-only view 'particle'
+    10 |   particle.x = 1
+       |              ^~~~
+tests/cases/1183_binding_row7_parameter_errors/Main.rae:21:20: cannot pass 'frozen' to 'mod' parameter 'particle': 'frozen' (declared at line 18) is a 'let', which is frozen (docs/let-is-frozen.md); declare it 'var'
+    21 |   writer(particle: frozen)
+       |                    ^~~~
+tests/cases/1183_binding_row7_parameter_errors/Main.rae:22:20: 'reader' is a read-only view, but parameter 'particle' is 'mod': the callee could write through it. Declare 'reader' as 'mod' where it is bound, or take the parameter as 'view'
+    22 |   writer(particle: reader)
+       |                    ^~~~

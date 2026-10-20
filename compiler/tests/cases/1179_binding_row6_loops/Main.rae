@@ -1,0 +1,29 @@
+# docs/binding-modes-design.md §1, the binding table (2026-10-20): row 6.
+# `loop let x: mod T in list` writes each element (`x = v` deep-copies v
+# into it); `loop var x: T in list` is a writable local COPY of each element;
+# `loop let x: view T in list` reads.
+type Particle {
+  x: Int
+  name: String
+}
+
+func main() {
+  var particles: List(Particle) = { { x: 1, name: "a" }, { x: 2, name: "b" } }
+  var spare: Particle = { x: 9, name: "spare" }
+  loop let particle: mod Particle in particles {
+    particle.x = particle.x * 10
+  }
+  loop let particle: mod Particle in particles {
+    if particle.x > 10 {
+      particle = spare
+    }
+  }
+  spare.name = "spare changed"
+  loop var local: Particle in particles {
+    local.x = 100
+    local.name = "local"
+  }
+  loop let particle: view Particle in particles {
+    log("{particle.x} {particle.name}")
+  }
+}

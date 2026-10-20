@@ -1,0 +1,24 @@
+# docs/binding-modes-design.md §1, the binding table (2026-10-20): row 7.
+# A `mod` parameter writes the caller's place (`a = v` deep-copies v into
+# it); a `view` parameter reads it.
+type Particle {
+  x: Int
+  name: String
+}
+
+func replace(particle: mod Particle, source: view Particle) {
+  particle = source
+  particle.x = particle.x + 1
+}
+
+func describe(particle: view Particle) ret String {
+  ret "{particle.x} {particle.name}"
+}
+
+func main() {
+  var target: Particle = { x: 0, name: "target" }
+  var source: Particle = { x: 5, name: "source" }
+  replace(particle: target, source: source)
+  source.name = "source changed"
+  log("{describe(particle: target)} / {describe(particle: source)}")
+}

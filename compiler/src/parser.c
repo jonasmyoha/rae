@@ -2779,7 +2779,7 @@ static AstStmt* parse_loop_statement(Parser* parser, const Token* loop_token) {
                      "collection loop bindings require an explicit type");
       } else if (type->is_view || type->is_mod) {
         parser_error(parser, var_token,
-                     "collection reference bindings are aliases; use 'let', not 'var'");
+                     "aliases are bind-once; declare with 'let', not 'var'");
       }
 
       AstStmt* init = new_stmt(parser, AST_STMT_LET, var_token);

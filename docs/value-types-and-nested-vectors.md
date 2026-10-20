@@ -101,7 +101,7 @@ names — and it unlocks `vec3.*` math on the fields. Recommended.
 ## 5. Access modes — value copy vs `view`/`mod` (this is the part that matters)
 
 `List` has three read accessors — `copyAt` / `viewAt` / `modAt` — and the choice of
-binding (`=` value, `=> view`, `=> mod`) decides whether you copy the element or
+binding's mode (none: a value, `view T`, `mod T`) decides whether you copy the element or
 alias it in place. (Historical note: this report predates #643, which renamed the
 value accessor `at` → `copyAt` and removed the `get`/`viewGet`/`modGet` aliases;
 snippets below say `copyAt`.) `copyAt` returns `opt T` **by value**.
@@ -118,13 +118,13 @@ All three are peephole-lowered to a direct bounds-checked index into the contigu
 - **value (`= at`)** copies the *whole* element onto the stack. Cheap for a 48-byte
   particle; not free for a large component, and you cannot write back without a
   `set(index:, value:)` round trip.
-- **`view` (`=> viewAt`)** binds a `rae_Particle*` into the list's own storage — no
+- **`view` (`= viewAt`)** binds a `rae_Particle*` into the list's own storage — no
   copy, reads are `particle->field`. Best for read-only access to large elements.
-- **`mod` (`=> modAt`)** binds a mutable pointer; writing `particle.position.x = …`
+- **`mod` (`= modAt`)** binds a mutable pointer; writing `particle.position.x = …`
   stores **in place** — no read-modify-`set` round trip and no drop/re-add of the
   element's owned fields.
 
-The `=>` peephole also fires when a `view`/`mod` alias is bound to `at`/`get`
+The alias peephole also fires when a `view`/`mod` alias is bound to `at`/`get`
 directly (`if let particle: view Particle = particles.copyAt(index:)`), aliasing live
 storage the same way — but `viewAt`/`modAt` are the accessors that actually *return*
 `opt view T` / `opt mod T`, so they are the clearer spelling. Verified at runtime: a

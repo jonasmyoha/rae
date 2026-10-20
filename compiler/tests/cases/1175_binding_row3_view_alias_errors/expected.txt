@@ -1,0 +1,18 @@
+tests/cases/1175_binding_row3_view_alias_errors/Main.rae:21:10: cannot assign through read-only view 'reader'; bind with 'mod' to write through an alias
+    21 |   reader = other
+       |          ^~~~
+tests/cases/1175_binding_row3_view_alias_errors/Main.rae:22:12: cannot mutate through read-only view 'reader'
+    22 |   reader.x = 3
+       |            ^~~~
+tests/cases/1175_binding_row3_view_alias_errors/Main.rae:23:3: cannot bind a reference to a call that returns ownership; write 'let name: T = ...' to take the value, or use a reference-returning accessor (viewAt, modAt, viewGet, modGet)
+    23 |   let temporary: view Particle = makeParticle()
+       |   ^~~~
+tests/cases/1175_binding_row3_view_alias_errors/Main.rae:24:3: cannot bind a reference to a call that returns ownership; write 'let name: T = ...' to take the value, or use a reference-returning accessor (viewAt, modAt, viewGet, modGet)
+    24 |   let writer: mod Particle = makeParticle()
+       |   ^~~~
+tests/cases/1175_binding_row3_view_alias_errors/Main.rae:25:18: 'reader' is a read-only view, but parameter 'particle' is 'mod': the callee could write through it. Declare 'reader' as 'mod' where it is bound, or take the parameter as 'view'
+    25 |   push(particle: reader)
+       |                  ^~~~
+tests/cases/1175_binding_row3_view_alias_errors/Main.rae:26:3: cannot bind 'mod' to a read-only view: a view cannot be promoted to mutable access
+    26 |   let promoted: mod Particle = reader
+       |   ^~~~

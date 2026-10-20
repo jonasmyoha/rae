@@ -169,8 +169,8 @@ flushed by the same code that flushes user-written defers.
 
 **Full design**: see `docs/ownership-model.md`. Summary: explicit
 `own` keyword in expression position (`{ ids: own copy }`) and as
-a parameter mode (`data: own T`). `=` always copies, never moves.
-`=>` borrows. Plain `T` parameters are `val T`. Move detection
+a parameter mode (`data: own T`). `=` with no mode copies, never moves;
+`=` with `view T` / `mod T` borrows. Plain `T` parameters are `val T`. Move detection
 only fires on `own` constructs and `ret`, NOT on bare identifier
 references.
 

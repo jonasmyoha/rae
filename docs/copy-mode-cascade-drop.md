@@ -55,12 +55,12 @@ the author to acknowledge the hidden deep-copy allocation.
 For a **cascade-drop** type, make a bare value binding a sema error and require
 the author to spell the intent — mirroring the copy-vs-alias distinction the rest
 of this epic established (`copyAt`/`viewAt`/`modAt` in #643, `=` value vs `=>`
-alias in #644):
+alias in #644, since 2026-10-20 the mode in the type: `view T` / `mod T`):
 
 - `let x: copy Owner = owner` — explicit deep copy (visible allocation). Emits
   the existing `rae_deep_copy_<T>` (already correct).
 - `let x: view Owner = owner` / `let x: mod Owner = owner` — alias, no copy (already
-  works; the `=>` reference forms).
+  works; the reference forms).
 - `let x: Owner = owner` (bare value binding of a cascade-drop type) — **error**:
   "`Owner` owns heap; a value copy is a deep copy — write `copy Owner` to copy,
   or `view`/`mod` to alias."
