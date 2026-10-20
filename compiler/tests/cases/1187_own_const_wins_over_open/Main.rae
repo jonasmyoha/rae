@@ -1,0 +1,11 @@
+# A bare name declared in this very file wins over the same name in a module
+# this file opens: lib/procgen/Texture declares `matGrass` (0), and so does
+# this file. (A project const in ANOTHER file is ambiguous with the opened
+# module's instead, case 1186.)
+open procgen/Texture
+
+const matGrass: Int = 7
+
+func main() {
+  log("own matGrass {matGrass}, opened matRock {matRock}")
+}

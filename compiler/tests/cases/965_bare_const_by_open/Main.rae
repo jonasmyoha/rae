@@ -3,7 +3,9 @@
 # lib/procgen/Texture both declare `matGrass` and `matRock`, with different
 # values (3/4 and 0/2). An `import` grants only qualified access; the `open`
 # decides a bare read. Before, the first module loaded won, so every line
-# below read the imported module's values.
+# below read the imported module's values. (A file's own const winning over
+# an opened module's is case 1187: a project const in ANOTHER file is
+# ambiguous with an opened module's, case 1186.)
 import WorldBiome
 open procgen/Texture
 
@@ -11,5 +13,4 @@ func main() {
   log("Main opens Texture: grass {matGrass} rock {matRock}")
   log("biome/Reader opens WorldBiome: grass {biomeGrass()} rock {biomeRock()}")
   log("const initializer in biome/Reader: {biomeGrassTimesTen}")
-  log("painter/Own declares its own: {paintedGrass()}")
 }
