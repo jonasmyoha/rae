@@ -1,0 +1,381 @@
+# physicsScenes/ArcadeVehicle, physicsScenes/BoxStrike and app3d/CameraChase:
+# a car's arcade handling (the yaw rate its steered wheels ask for, the
+# assist easing it there and its slide out, carrying the slide on as speed,
+# none at a crawl or in the air), brakes then reverse on one stick, the chase
+# camera behind it, and a body striking a character (a box against a circle;
+# a knockdown only when the body pushes fast enough or the character runs
+# into it). The defaults are a light van's.
+import Sys
+import Math
+import Vec3
+open physicsScenes/ArcadeVehicle
+open physicsScenes/BoxStrike
+open app3d/CameraChase
+
+func check(condition: view Bool, message: view String) {
+  if condition {
+    log("ok   {message}")
+  } else {
+    log("FAIL {message}")
+  }
+}
+
+func near(a: view Float, b: view Float) ret Bool {
+  ret Math.abs(value: a - b) < 0.001
+}
+
+func main() ret Int {
+  let tuning: ArcadeTuning = {}
+  let chase: ChaseTuning = {}
+  let striker: Striker = {
+    halfLength: 2.0
+    halfWidth: 1.0
+    halfHeight: 1.0
+    localForward: Vec3.create(x: 1.0, y: 0.0, z: 0.0)
+    localUp: Vec3.create(x: 0.0, y: 0.0, z: 1.0)
+  }
+  # ----- the chase camera -------------------------------------------------
+  let chased: Float = chaseYaw(
+    yaw: 0.0
+    heading: 1.0
+    speed: 5.0
+    deltaTime: 0.1
+    tuning: chase
+  )
+  check(
+    condition: chased > 0.0 and chased < 1.0
+    message: "Driving, the camera swings toward the car's heading"
+  )
+  check(
+    condition: chaseYaw(
+      yaw: 0.0
+      heading: 1.0
+      speed: 0.2
+      deltaTime: 0.1
+      tuning: chase
+    ) is 0.0
+    message: "Stopped, the camera stays where the player put it"
+  )
+  check(
+    condition: chaseYaw(
+      yaw: 0.0
+      heading: 1.0
+      speed: 0.0 - 3.0
+      deltaTime: 0.1
+      tuning: chase
+    ) is 0.0
+    message: "Reversing, the camera does not swing round"
+  )
+  let acrossPi: Float = chaseYaw(
+    yaw: 3.0
+    heading: 0.0 - 3.0
+    speed: 5.0
+    deltaTime: 0.1
+    tuning: chase
+  )
+  check(condition: acrossPi > 3.0, message: "The camera swings the short way round ({acrossPi})")
+  # ----- a body striking a character --------------------------------------
+  # A 4 x 2 box at the origin facing +x; a character 0.3 m in radius
+  let ahead: BoxContact = boxCircleContact(
+    centerX: 0.0
+    centerY: 0.0
+    forwardX: 1.0
+    forwardY: 0.0
+    halfLength: 2.0
+    halfWidth: 1.0
+    pointX: 2.2
+    pointY: 0.0
+    radius: 0.3
+  )
+  check(
+    condition: ahead.touching and near(a: ahead.normalX, b: 1.0) and near(a: ahead.depth, b: 0.1)
+    message: "A character just ahead of the bumper is touched, pushed forward"
+  )
+  let clear: BoxContact = boxCircleContact(
+    centerX: 0.0
+    centerY: 0.0
+    forwardX: 1.0
+    forwardY: 0.0
+    halfLength: 2.0
+    halfWidth: 1.0
+    pointX: 2.5
+    pointY: 1.5
+    radius: 0.3
+  )
+  check(condition: clear.touching is false, message: "A character off the corner is not touched")
+  let inside: BoxContact = boxCircleContact(
+    centerX: 0.0
+    centerY: 0.0
+    forwardX: 0.0
+    forwardY: 1.0
+    halfLength: 2.0
+    halfWidth: 1.0
+    pointX: 0.0 - 0.8
+    pointY: 0.5
+    radius: 0.3
+  )
+  check(
+    condition: inside.touching and near(a: inside.normalX, b: 0.0 - 1.0) and near(
+      a: inside.depth
+      b: 0.5
+    )
+    message: "A character inside the box is pushed out of its nearest side ({inside.normalX}, {inside.depth})"
+  )
+  # The van's own push into you, or you running into it: a walk never floors you
+  check(
+    condition: strikeKnocks(striker: striker, push: 3.0, closingSpeed: 3.0)
+    message: "A car at a jog knocks you over"
+  )
+  check(
+    condition: strikeKnocks(striker: striker, push: 1.0, closingSpeed: 1.0) is false
+    message: "A car creeping into you only shoves"
+  )
+  check(
+    condition: strikeKnocks(striker: striker, push: 0.0, closingSpeed: 1.0) is false
+    message: "Walking slowly into a parked car does not floor you"
+  )
+  check(
+    condition: strikeKnocks(striker: striker, push: 0.0, closingSpeed: 4.2) is false
+    message: "Nor walking into it at half a stick (4.2 m/s)"
+  )
+  check(
+    condition: strikeKnocks(striker: striker, push: 1.5, closingSpeed: 3.0) is false
+    message: "A creeping car and someone walking meeting: neither is fast enough, a shove"
+  )
+  check(
+    condition: strikeKnocks(striker: striker, push: 0.0, closingSpeed: 8.4)
+    message: "Sprinting into a parked car floors you"
+  )
+  # ----- the arcade handling ------------------------------------------------------
+  # The turn the steered wheels ask for: a bicycle model's yaw rate
+  check(
+    condition: near(
+      a: arcadeYawRate(speed: 10.0, steeringAngle: 0.2, wheelbase: tuning.wheelbase)
+      b: 10.0 * Math.tan(x: 0.2) / tuning.wheelbase
+    )
+    message: "Steered 0.2 rad at 10 m/s, the car turns at v tan(angle) / wheelbase"
+  )
+  check(
+    condition: arcadeYawRate(speed: 0.0 - 3.0, steeringAngle: 0.3, wheelbase: tuning.wheelbase) < 0.0 and arcadeYawRate(
+      speed: 3.0
+      steeringAngle: 0.3
+      wheelbase: tuning.wheelbase
+    ) > 0.0
+    message: "Reversing with the same lock turns it the other way, as a car does"
+  )
+  check(
+    condition: near(
+      a: arcadeYawRate(speed: 0.0, steeringAngle: 0.5, wheelbase: tuning.wheelbase)
+      b: 0.0
+    )
+    message: "Standing still, steering does not spin it"
+  )
+  # Easing a velocity toward the one asked for, the same however the frame is cut
+  check(
+    condition: near(
+      a: easeToward(
+        current: 0.0
+        target: 1.0
+        rate: 10.0
+        deltaTime: 0.1
+      )
+      b: 1.0 - Math.exp(x: 0.0 - 1.0)
+    )
+    message: "At rate 10 for 0.1 s, the gap shrinks by 1/e"
+  )
+  let twoSteps: Float = easeToward(
+    current: easeToward(
+      current: 0.0
+      target: 1.0
+      rate: 10.0
+      deltaTime: 0.05
+    )
+    target: 1.0
+    rate: 10.0
+    deltaTime: 0.05
+  )
+  check(
+    condition: near(
+      a: twoSteps
+      b: easeToward(
+        current: 0.0
+        target: 1.0
+        rate: 10.0
+        deltaTime: 0.1
+      )
+    )
+    message: "Two half steps ease as far as one whole one"
+  )
+  # Grip carries a slide on as speed: the speed stays, the slide shrinks
+  let gripped: FlatVelocity = gripVelocity(along: 8.0, across: 6.0, keptAcross: 2.0)
+  check(
+    condition: near(a: gripped.across, b: 2.0) and near(
+      a: gripped.along * gripped.along + gripped.across * gripped.across
+      b: 100.0
+    ) and gripped.along > 8.0
+    message: "A 10 m/s slide gripped to 2 m/s sideways goes on at 10 m/s, more of it forward"
+  )
+  let reversing: FlatVelocity = gripVelocity(along: 0.0 - 3.0, across: 4.0, keptAcross: 0.0)
+  check(
+    condition: near(a: reversing.along, b: 0.0 - 5.0) and near(a: reversing.across, b: 0.0)
+    message: "Reversing, the slide goes on backward"
+  )
+  # The assist fades in over 1-3 m/s, either way
+  check(
+    condition: near(a: arcadeAssistShare(speed: 0.5, tuning: tuning), b: 0.0) and near(
+      a: arcadeAssistShare(speed: 2.0, tuning: tuning)
+      b: 0.5
+    ) and near(a: arcadeAssistShare(speed: 0.0 - 5.0, tuning: tuning), b: 1.0)
+    message: "No assist at a crawl, half at 2 m/s, all at speed, reversing too"
+  )
+  # In the air (off a jump) the assist lets go
+  check(
+    condition: arcadeAirborne(heightOverGround: tuning.airborneHeight - 0.4, tuning: tuning) is false
+    message: "On its wheels it is not airborne"
+  )
+  check(
+    condition: arcadeAirborne(heightOverGround: tuning.airborneHeight + 0.2, tuning: tuning)
+    message: "Its wheels well off the ground, it is"
+  )
+  # ----- brakes, then reverse -------------------------------------------------------
+  let step: Float = 1.0 / 60.0
+  let driving: ArcadePedals = arcadePedals(
+    stick: 1.0
+    speed: 5.0
+    reverseGear: false
+    stoppedSeconds: 0.0
+    deltaTime: step
+    tuning: tuning
+  )
+  check(
+    condition: near(a: driving.throttle, b: 1.0) and driving.braking is false and driving.reverseGear is false
+    message: "Stick up in the forward gear drives forward"
+  )
+  let braking: ArcadePedals = arcadePedals(
+    stick: 0.0 - 1.0
+    speed: 20.0
+    reverseGear: false
+    stoppedSeconds: 0.0
+    deltaTime: step
+    tuning: tuning
+  )
+  check(
+    condition: braking.braking and near(a: braking.throttle, b: 0.0) and braking.reverseGear is false
+    message: "Stick down at speed brakes, it does not reverse"
+  )
+  let nudged: ArcadePedals = arcadePedals(
+    stick: 0.0 - 0.2
+    speed: 20.0
+    reverseGear: false
+    stoppedSeconds: 0.0
+    deltaTime: step
+    tuning: tuning
+  )
+  check(
+    condition: nudged.braking is false and near(a: nudged.throttle, b: 0.0)
+    message: "A stick nudged down short of the threshold coasts"
+  )
+  let justStopped: ArcadePedals = arcadePedals(
+    stick: 0.0 - 1.0
+    speed: 0.2
+    reverseGear: false
+    stoppedSeconds: 0.0
+    deltaTime: step
+    tuning: tuning
+  )
+  check(
+    condition: justStopped.braking and justStopped.reverseGear is false and near(
+      a: justStopped.stoppedSeconds
+      b: step
+    )
+    message: "Just stopped, still braking: it holds before it may reverse"
+  )
+  let reverses: ArcadePedals = arcadePedals(
+    stick: 0.0 - 1.0
+    speed: 0.2
+    reverseGear: false
+    stoppedSeconds: tuning.reverseAfterSeconds
+    deltaTime: step
+    tuning: tuning
+  )
+  check(
+    condition: reverses.reverseGear and near(a: reverses.throttle, b: 0.0 - 1.0) and reverses.braking is false
+    message: "Stopped long enough with the stick down: into reverse, backing up"
+  )
+  let backing: ArcadePedals = arcadePedals(
+    stick: 0.0 - 1.0
+    speed: 0.0 - 3.0
+    reverseGear: true
+    stoppedSeconds: 0.0
+    deltaTime: step
+    tuning: tuning
+  )
+  check(
+    condition: near(a: backing.throttle, b: 0.0 - 1.0) and backing.reverseGear and backing.braking is false
+    message: "In reverse, stick down backs up"
+  )
+  let stopsBacking: ArcadePedals = arcadePedals(
+    stick: 1.0
+    speed: 0.0 - 3.0
+    reverseGear: true
+    stoppedSeconds: 0.0
+    deltaTime: step
+    tuning: tuning
+  )
+  check(
+    condition: stopsBacking.braking and stopsBacking.reverseGear and near(
+      a: stopsBacking.throttle
+      b: 0.0
+    )
+    message: "Backing up, stick up brakes first"
+  )
+  let forwardAgain: ArcadePedals = arcadePedals(
+    stick: 1.0
+    speed: 0.1
+    reverseGear: true
+    stoppedSeconds: tuning.reverseAfterSeconds
+    deltaTime: step
+    tuning: tuning
+  )
+  check(
+    condition: forwardAgain.reverseGear is false and near(a: forwardAgain.throttle, b: 1.0)
+    message: "Stopped long enough with the stick up: into the forward gear"
+  )
+  let parkedPedals: ArcadePedals = arcadePedals(
+    stick: 0.0
+    speed: 0.1
+    reverseGear: false
+    stoppedSeconds: 1.0
+    deltaTime: step
+    tuning: tuning
+  )
+  check(
+    condition: parkedPedals.braking and near(a: parkedPedals.throttle, b: 0.0)
+    message: "Stopped with the stick let go, it holds still (on a slope too)"
+  )
+  let coasting: ArcadePedals = arcadePedals(
+    stick: 0.0
+    speed: 10.0
+    reverseGear: false
+    stoppedSeconds: 0.0
+    deltaTime: step
+    tuning: tuning
+  )
+  check(
+    condition: coasting.braking is false and near(a: coasting.throttle, b: 0.0)
+    message: "Moving with the stick let go, it coasts"
+  )
+  let rolling: ArcadePedals = arcadePedals(
+    stick: 0.0 - 1.0
+    speed: 3.0
+    reverseGear: false
+    stoppedSeconds: 0.5
+    deltaTime: step
+    tuning: tuning
+  )
+  check(
+    condition: near(a: rolling.stoppedSeconds, b: 0.0) and rolling.braking
+    message: "Moving again, the standing time starts over"
+  )
+  ret 0
+}

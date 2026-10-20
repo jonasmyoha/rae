@@ -43,6 +43,11 @@ open physicsScenes/VehicleApp
 open physicsScenes/PhysicsFrame
 open physicsScenes/PoseBlend
 open physicsScenes/box3d/VehicleSpawn
+open physicsScenes/ArcadeVehicle
+open physicsScenes/box3d/ArcadeDrive
+open box3d/ecs/PhysicsQueries
+open box3d/ecs/PhysicsTypes
+import Math
 
 # This example's fonts and theme (the HUD itself is the shared package's)
 const assetBase: String = "examples/125_vehicle_c/assets/"
@@ -99,6 +104,34 @@ func determinismRun(steps: view Int) ret Int {
   ret 1
 }
 
+# Front to rear axle of `car` (m), for the arcade assist's turn
+func carWheelbase(car: view VehicleDescription) ret Float {
+  var front: Float = 0.0 - 1000.0
+  var rear: Float = 1000.0
+  loop let wheel: view VehicleWheel in car.wheels {
+    front = Math.max(a: front, b: wheel.chassisPoint.x)
+    rear = Math.min(a: rear, b: wheel.chassisPoint.x)
+  }
+  ret front - rear
+}
+
+# How high the chassis' centre is over the course under it (a ray down from
+# it, which starts inside the chassis and so does not hit it); far up when
+# nothing is under it
+func heightOverCourse(world: view VehicleWorld) ret Float {
+  let at: Vec3 = chassisTransform(world: world).position
+  let hit: PhysicsHit = raycastClosest(
+    physics: world.physics
+    origin: at
+    translation: Vec3 { x: 0.0, y: 0.0, z: 0.0 - 20.0 }
+    filter: defaultQueryFilter()
+  )
+  if hit.hit {
+    ret hit.fraction * 20.0
+  }
+  ret 1000.0
+}
+
 # The window: the shared VehicleApp does the frame; this loop makes the calls
 # into the track (spawn, drive, step, respawn, the chassis).
 func runWindowed() ret Int {
@@ -119,6 +152,13 @@ func runWindowed() ret Int {
   spawnCourse(world: world, course: course)
   spawnCrates(world: world, course: course)
   spawnVehicle(world: world, car: app.car)
+  var arcade: ArcadeVehicle = {
+    car: app.car
+    wheelJoints: world.wheelJoints
+    tuning: ArcadeTuning { wheelbase: carWheelbase(car: app.car), airborneHeight: 1.5 }
+    reverseGear: false
+    stoppedSeconds: 0.0
+  }
   let graphStatus: Int = compileDeferred(renderer: renderer)
   if graphStatus is not 0 {
     log("deferred graph invalid: {statusName(status: graphStatus)}")
@@ -137,11 +177,24 @@ func runWindowed() ret Int {
       spawnCrates(world: world, course: course)
       spawnVehicle(world: world, car: app.car)
     }
-    driveVehicle(
-      world: world
-      car: app.car
-      command: app.command
-      frameTime: app.deltaTime
+    # Driven as an arcade car (physicsScenes/box3d/ArcadeDrive): brakes then
+    # reverse on the throttle keys, and an assist turning it as its steered
+    # wheels ask while it is on the ground
+    arcade.wheelJoints = world.wheelJoints
+    stepArcadeVehicle(
+      physics: world.physics
+      rigidBodies: world.rigidBodies
+      vehicle: arcade
+      chassisId: world.chassisId
+      pose: chassisTransform(world: world)
+      control: ArcadeControl {
+        stickX: 0.0 - app.command.steer
+        stickY: app.command.throttle
+        pedals: true
+        hasDriver: true
+        heightOverGround: heightOverCourse(world: world)
+      }
+      deltaTime: app.deltaTime
     )
     let started: Int = nowNs()
     let steps: Int = stepVehicleWorld(world: world, frameTime: app.deltaTime)

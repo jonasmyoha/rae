@@ -1,0 +1,165 @@
+# physicsScenes/ArcadeVehicle — arcade handling for a car on Box3D wheels
+# (physicsScenes/box3d/ArcadeDrive drives it): a tall car's tyres alone
+# corner it in a wide circle, slowly built, so an assist eases the chassis'
+# yaw rate to the one its steered front wheels ask for (the bicycle model)
+# and its sideways sliding out, carrying the slide on as speed, both at its
+# centre of mass so it does not roll; none at a crawl or in the air. The
+# stick is one axis for two pedals and a gear lever: down past a threshold
+# while rolling forward it brakes; only once the car has stood still a moment
+# with it still down does it go into reverse. The tuning's defaults are a
+# light van's. Pure over plain values, so tested in a fixture.
+import Math
+open ecs/Entity
+
+# What a car's arcade handling is tuned to
+type ArcadeTuning {
+  # Front to rear axle (m), for the yaw rate the steered wheels ask for
+  wheelbase: Float = 2.46
+  # How fast the assist eases the yaw rate to the asked one, and the sideways
+  # sliding out (1/s)
+  yawAssistRate: Float = 10.0
+  gripAssistRate: Float = 8.0
+  # No assist below this speed, all of it from this one (m/s, either way)
+  assistFromSpeed: Float = 1.0
+  assistFullSpeed: Float = 3.0
+  # The chassis' centre this far over the ground under it (m): in the air
+  airborneHeight: Float = 1.7
+  # The stick pushed past this against the gear brakes (0..1)
+  brakeStickThreshold: Float = 0.35
+  # Under this speed it stands still (m/s), and after standing this long
+  # (s) with the stick against the gear it changes gear
+  stoppedSpeed: Float = 0.5
+  reverseAfterSeconds: Float = 0.25
+  # Each wheel's brake (N m)
+  brakeTorque: Float = 1600.0
+}
+
+# The yaw rate (rad/s, counter-clockwise seen from above) of a car `speed`
+# m/s forward (negative reversing) with its front wheels steered
+# `steeringAngle` rad: the bicycle model, v tan(angle) / wheelbase
+func arcadeYawRate(speed: view Float, steeringAngle: view Float, wheelbase: view Float) ret Float {
+  ret speed * Math.tan(x: steeringAngle) / wheelbase
+}
+
+# `current` eased toward `target` over `deltaTime` s at `rate` (1/s): the gap
+# shrinks by 1/e every 1/rate s, however the time is cut into steps
+func easeToward(
+  current: view Float
+  target: view Float
+  rate: view Float
+  deltaTime: view Float
+) ret Float {
+  ret current + (target - current) * (1.0 - Math.exp(x: 0.0 - rate * deltaTime))
+}
+
+# A velocity on the ground in the car's own terms: along where it points and
+# across it (to its right)
+type FlatVelocity {
+  along: Float
+  across: Float
+}
+
+# The car's velocity when grip keeps only `keptAcross` of its sideways
+# `across`: the rest is carried on along it, so its speed stays (forward or
+# reversing, whichever it was going)
+func gripVelocity(along: view Float, across: view Float, keptAcross: view Float) ret FlatVelocity {
+  let speedSquared: Float = along * along + across * across
+  let alongSpeed: Float = Math.sqrt(x: Math.max(a: speedSquared - keptAcross * keptAcross, b: 0.0))
+  if along < 0.0 {
+    ret FlatVelocity { along: 0.0 - alongSpeed, across: keptAcross }
+  }
+  ret FlatVelocity { along: alongSpeed, across: keptAcross }
+}
+
+# How much of the assist works at `speed` (m/s, either way): none at a crawl
+# (the tyres turn it well enough, and a car pushing into a pile slows into
+# its own physics again, which wobbles it free), all at speed
+func arcadeAssistShare(speed: view Float, tuning: view ArcadeTuning) ret Float {
+  ret Math.max(
+    a: 0.0
+    b: Math.min(
+      a: 1.0
+      b: (Math.abs(value: speed) - tuning.assistFromSpeed) / (tuning.assistFullSpeed - tuning.assistFromSpeed)
+    )
+  )
+}
+
+# Is the car in the air, its centre `heightOverGround` m over the ground
+# under it? (Then the assist lets it fly.)
+func arcadeAirborne(heightOverGround: view Float, tuning: view ArcadeTuning) ret Bool {
+  ret heightOverGround > tuning.airborneHeight
+}
+
+# This frame's pedals and gear, and how long the car has stood still
+type ArcadePedals {
+  # The drive's throttle (forward positive, reverse negative); 0 while
+  # braking or coasting
+  throttle: Float
+  braking: Bool
+  reverseGear: Bool
+  stoppedSeconds: Float
+}
+
+# The pedals for the stick at `stick` (-1 down .. 1 up) with the car going
+# `speed` m/s forward (negative backing up), in reverse or not, having stood
+# still `stoppedSeconds` before this `deltaTime`. Short of the threshold it
+# coasts; stopped with the stick let go it holds still, as with a parking
+# brake.
+func arcadePedals(
+  stick: view Float
+  speed: view Float
+  reverseGear: view Bool
+  stoppedSeconds: view Float
+  deltaTime: view Float
+  tuning: view ArcadeTuning
+) ret ArcadePedals {
+  var standing: Float = 0.0
+  if Math.abs(value: speed) < tuning.stoppedSpeed {
+    standing = stoppedSeconds + deltaTime
+  }
+  # The stick against the gear: down in the forward gear, up in reverse
+  var against: Bool = stick <= 0.0 - tuning.brakeStickThreshold
+  var along: Bool = stick > 0.0
+  if reverseGear {
+    against = stick >= tuning.brakeStickThreshold
+    along = stick < 0.0
+  }
+  if along {
+    ret ArcadePedals {
+      throttle: stick
+      braking: false
+      reverseGear: reverseGear
+      stoppedSeconds: standing
+    }
+  }
+  if against is false {
+    # Let go: it coasts, and stopped it holds still
+    ret ArcadePedals {
+      throttle: 0.0
+      braking: Math.abs(value: speed) < tuning.stoppedSpeed
+      reverseGear: reverseGear
+      stoppedSeconds: standing
+    }
+  }
+  if standing >= tuning.reverseAfterSeconds {
+    # Stood still long enough: the other gear, moving off in it at once
+    ret ArcadePedals {
+      throttle: stick
+      braking: false
+      reverseGear: reverseGear is false
+      stoppedSeconds: standing
+    }
+  }
+  ret ArcadePedals {
+    throttle: 0.0
+    braking: true
+    reverseGear: reverseGear
+    stoppedSeconds: standing
+  }
+}
+
+# A character sitting in a vehicle (the vehicle's chassis entity): its mover
+# is parked, and the app places it in its seat; a striker does not hit it
+type Seated {
+  vehicleId: EntityId
+}

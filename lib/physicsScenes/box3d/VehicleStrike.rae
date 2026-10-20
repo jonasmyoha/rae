@@ -1,0 +1,164 @@
+# physicsScenes/box3d/VehicleStrike — the system that lets a body strike
+# characters (physicsScenes/BoxStrike's rules): every fixed step, after the
+# movers move, each Striker body's box against every character on its feet
+# and out of a seat. Box3D's movers are not bodies in the world, so a car
+# would drive through them. A character the body drives into fast enough, or
+# that runs into it, is knocked over: a KnockRequest (app3d/KnockedDown) on
+# it, thrown with the body's velocity plus a little away and up, its mover
+# stopped; the app makes its ragdoll. Anyone else touched is shoved out of
+# the box, at least as fast as it pushes: those are returned, as only the
+# app knows where a character may be pushed to.
+import Quat
+open Vec3
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Transform
+open physicsScenes/ArcadeVehicle
+open physicsScenes/BoxStrike
+open box3d/Box3d
+open box3d/ecs/PhysicsTypes
+open box3d/ecs/Physics
+open box3d/ecs/PhysicsComponents
+open box3d/ecs/PhysicsQueries
+open box3d/ecs/CharacterMover
+open app3d/KnockedDown
+
+# A character shoved out of a striker's box: where to, and how fast
+type StrikeShove {
+  characterId: EntityId
+  position: Vec3
+  velocity: Vec3
+}
+
+# Every striker against every character neither down (a KnockedDown or a
+# KnockRequest), nor seated; the knocked get their KnockRequest at once, the
+# shoved are returned
+func strikeCharacters(
+  physics: mod Physics
+  rigidBodies: view ComponentTable(RigidBody)
+  transforms: view ComponentTable(Transform3D)
+  strikers: view ComponentTable(Striker)
+  characters: mod ComponentTable(CharacterBody)
+  seated: view ComponentTable(Seated)
+  knockedDown: view ComponentTable(KnockedDown)
+  knocks: mod ComponentTable(KnockRequest)
+) ret List(StrikeShove) {
+  var shoves: List(StrikeShove) = List.create(StrikeShove, cap: 4)
+  loop var s: Int = 0, s < componentCount(this: strikers), ++s {
+    let strikerId: EntityId = componentEntityAt(this: strikers, i: s)
+    if componentHas(this: transforms, entityId: strikerId) {
+      let striker: Striker = componentCopyAtDefault(this: strikers, i: s)
+      let pose: view Transform3D = componentView(this: transforms, entityId: strikerId)
+      let forward: Vec3 = Quat.rotate(q: pose.rotation, v: striker.localForward)
+      let up: Vec3 = Quat.rotate(q: pose.rotation, v: striker.localUp)
+      let along: Float = Vec3.vlen(a: Vec3.create(x: forward.x, y: forward.y, z: 0.0))
+      # On its nose or its side it is not a box on the ground any more
+      if along >= 0.5 and up.z >= 0.5 {
+        let velocity: Vec3 = entityLinearVelocity(
+          physics: physics
+          rigidBodies: rigidBodies
+          entityId: strikerId
+        )
+        let bottom: Float = pose.position.z - striker.halfHeight
+        let top: Float = pose.position.z + striker.halfHeight
+        loop var i: Int = 0, i < componentCount(this: characters), ++i {
+          let characterId: EntityId = componentEntityAt(this: characters, i: i)
+          if componentHas(this: knockedDown, entityId: characterId) is false and componentHas(
+            this: knocks
+            entityId: characterId
+          ) is false and componentHas(this: seated, entityId: characterId) is false {
+            strikeCharacter(
+              characters: characters
+              knocks: knocks
+              shoves: shoves
+              characterId: characterId
+              striker: striker
+              position: pose.position
+              forwardX: forward.x / along
+              forwardY: forward.y / along
+              bottom: bottom
+              top: top
+              velocity: velocity
+            )
+          }
+        }
+      }
+    }
+  }
+  ret shoves
+}
+
+# One character against one striker's box
+func strikeCharacter(
+  characters: mod ComponentTable(CharacterBody)
+  knocks: mod ComponentTable(KnockRequest)
+  shoves: mod List(StrikeShove)
+  characterId: view EntityId
+  striker: view Striker
+  position: view Vec3
+  forwardX: view Float
+  forwardY: view Float
+  bottom: view Float
+  top: view Float
+  velocity: view Vec3
+) {
+  let character: view CharacterBody = componentView(this: characters, entityId: characterId)
+  let capsule: view b3Capsule = character.mover.capsule
+  let radius: Float = capsule.radius
+  let height: Float = capsule.center2.z - capsule.center1.z + capsule.radius * 2.0
+  let center: Vec3 = fromB3Vector(vector: character.mover.transform.p)
+  if center.z + height * 0.5 < bottom or center.z - height * 0.5 > top {
+    ret
+  }
+  let contact: BoxContact = boxCircleContact(
+    centerX: position.x
+    centerY: position.y
+    forwardX: forwardX
+    forwardY: forwardY
+    halfLength: striker.halfLength
+    halfWidth: striker.halfWidth
+    pointX: center.x
+    pointY: center.y
+    radius: radius + striker.reach
+  )
+  if contact.touching is false {
+    ret
+  }
+  let moving: Vec3 = fromB3Vector(vector: character.mover.velocity)
+  let closing: Float = (velocity.x - moving.x) * contact.normalX + (velocity.y - moving.y) * contact.normalY
+  let pushing: Float = velocity.x * contact.normalX + velocity.y * contact.normalY
+  if strikeKnocks(striker: striker, push: pushing, closingSpeed: closing) {
+    let knock: KnockRequest = {
+      velocity: Vec3.create(
+        x: velocity.x + contact.normalX * striker.throwOut
+        y: velocity.y + contact.normalY * striker.throwOut
+        z: velocity.z + striker.throwUp
+      )
+    }
+    componentSet(this: knocks, entityId: characterId, data: knock)
+    let struck: mod CharacterBody = componentMod(this: characters, entityId: characterId)
+    struck.mover.velocity = toB3Vector(vector: Vec3.create(x: 0.0, y: 0.0, z: 0.0))
+    ret
+  }
+  # Shoved: out of the box, and at least as fast as the box pushes
+  var shoved: Vec3 = moving
+  let alongNormal: Float = moving.x * contact.normalX + moving.y * contact.normalY
+  if pushing > alongNormal {
+    shoved = Vec3.create(
+      x: moving.x + (pushing - alongNormal) * contact.normalX
+      y: moving.y + (pushing - alongNormal) * contact.normalY
+      z: moving.z
+    )
+  }
+  shoves.add(
+    value: StrikeShove {
+      characterId: characterId
+      position: Vec3.create(
+        x: center.x + contact.normalX * contact.depth
+        y: center.y + contact.normalY * contact.depth
+        z: center.z
+      )
+      velocity: shoved
+    }
+  )
+}
