@@ -42,6 +42,7 @@ type FarSprite {
   position: Vec3
   centerZ: Float
   height: Float
+  yaw: Float
   layer: Int
   keep: Float
 }
@@ -117,17 +118,19 @@ func farSpriteKeep(x: view Float, y: view Float) ret Float {
   ret value - Math.floor(x: value)
 }
 
-# A far billboard at `position` (its foot)
+# A far billboard at `position` (its foot), turned `yaw` about z
 func farSpriteAt(
   position: view Vec3
   centerZ: view Float
   height: view Float
+  yaw: view Float
   layer: view Int
 ) ret FarSprite {
   ret FarSprite {
     position: position
     centerZ: centerZ
     height: height
+    yaw: yaw
     layer: layer
     keep: farSpriteKeep(x: position.x, y: position.y)
   }
@@ -148,6 +151,7 @@ func farSpritesOf(field: view PropField, placements: view List(PropPlacement)) r
         position: placement.position
         centerZ: kind.centerHeight * placement.scale
         height: field.spriteHeights.copyAtFallback(index: placement.kind, fallback: 1.0) * placement.scale
+        yaw: placement.yaw
         layer: layer
       ))
     }
@@ -367,6 +371,7 @@ func gatherFarSprites(farSprites: mod FarSprites, propView: view PropView, toon:
           batch: farSprites.batch
           position: sprite.position
           height: sprite.height * grow
+          yaw: sprite.yaw
           layer: sprite.layer
           toon: toon
         )
@@ -396,6 +401,7 @@ func drawFarSprites(
       gbuffer: cache
       records: farSprites.batch.records.data
       count: farSprites.batch.count
+      movedDepth: false
     )
   }
 }

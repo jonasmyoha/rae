@@ -33,10 +33,10 @@ func shadowSpriteArrayGen() unsafe extern("rae_gb_sprite_tex_gen") ret Int
 # The most sprites one frame's shadow pass draws
 const shadowSpriteMax: Int = 8192
 
-# Per sprite: two vec4 (foot and height, layer)
-const shadowSpriteFloats: Int = 8
+# Per sprite: three vec4 (foot and height; layer and fade; yaw)
+const shadowSpriteFloats: Int = 12
 
-const shadowSpriteBytes: Int = 262144  # shadowSpriteMax * 32
+const shadowSpriteBytes: Int = 393216  # shadowSpriteMax * 48
 
 type ShadowSpriteCache {
   pipeMade: Bool
@@ -176,6 +176,11 @@ func shadowQueueSprites(
     shadow.sprites.floats.add(value: records.copyAtFallback(index: base + 40, fallback: 0.0))
     shadow.sprites.floats.add(value: records.copyAtFallback(index: base + 41, fallback: 0.0))
     shadow.sprites.floats.add(value: records.copyAtFallback(index: base + 42, fallback: 0.0))
+    # Its turn about z (an impostor shows the prop turned as its meshes are)
+    shadow.sprites.floats.add(value: Math.atan2(y: scaleY, x: scaleX))
+    shadow.sprites.floats.add(value: 0.0)
+    shadow.sprites.floats.add(value: 0.0)
+    shadow.sprites.floats.add(value: 0.0)
     shadow.sprites.count = shadow.sprites.count + 1
   }
 }

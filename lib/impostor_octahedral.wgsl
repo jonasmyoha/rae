@@ -66,18 +66,65 @@ fn impostorAtlasUv(cell: vec2<f32>, views: f32, local: vec2<f32>) -> vec2<f32> {
   return vec2<f32>(cell.x + 0.5 + 0.5 * local.x, cell.y + 0.5 - 0.5 * local.y) / views;
 }
 
-// The light the far level was lit with before the impostors (the CPU
-// picture's, app3d/SpriteBake spriteBakeLight): from the view's upper left,
-// toward the eye. The impostor draw lights the baked albedo with it and the
-// baked normal, so the far trees keep their look until they are lit through
-// the G-buffer like the meshes (tree LOD step 5).
-fn impostorBakeLight(direction: vec3<f32>) -> vec3<f32> {
-  return normalize(
-    impostorRight(direction) * -0.45 + direction * 0.55 + impostorUp(direction) * 0.7);
+// The three grid points round a direction and their weights (the
+// barycentric weights of the direction in the grid triangle it falls in;
+// they sum to 1). Blending the three views by them changes the picture
+// smoothly as the eye moves round the prop.
+struct ImpostorViews {
+  a: vec2<f32>,
+  b: vec2<f32>,
+  c: vec2<f32>,
+  weights: vec3<f32>,
+};
+fn impostorThreeViews(direction: vec3<f32>, views: f32) -> ImpostorViews {
+  let last = views - 1.0;
+  let grid = clamp(impostorGridUv(direction) * last, vec2<f32>(0.0), vec2<f32>(last));
+  let base = min(floor(grid), vec2<f32>(last - 1.0));
+  let f = grid - base;
+  var result: ImpostorViews;
+  result.b = base + vec2<f32>(1.0, 0.0);
+  result.c = base + vec2<f32>(0.0, 1.0);
+  if (f.x + f.y < 1.0) {
+    result.a = base;
+    result.weights = vec3<f32>(1.0 - f.x - f.y, f.x, f.y);
+  } else {
+    result.a = base + vec2<f32>(1.0);
+    result.weights = vec3<f32>(f.x + f.y - 1.0, 1.0 - f.y, 1.0 - f.x);
+  }
+  return result;
 }
 
-// The shade of that light on a baked normal (-1..1, object space)
-fn impostorBakeShade(normal: vec3<f32>, direction: vec3<f32>) -> f32 {
-  let n = normalize(normal + vec3<f32>(0.0, 0.0, 0.00001));
-  return 0.62 + 0.48 * max(dot(n, impostorBakeLight(direction)), 0.0);
+// Where on view `viewDirection`'s picture (-1..1 along its right and up) the
+// ray toward the eye's direction `eye` through `point` crosses the view's
+// plane (both in the prop's own frame, `point` relative to the sphere's
+// centre, over its radius)
+fn impostorViewPoint(point: vec3<f32>, eye: vec3<f32>, viewDirection: vec3<f32>) -> vec2<f32> {
+  let along = dot(point, viewDirection) / max(dot(eye, viewDirection), 0.2);
+  let onPlane = point - eye * along;
+  return vec2<f32>(dot(onPlane, impostorRight(viewDirection)), dot(onPlane, impostorUp(viewDirection)));
+}
+
+// The parallax of a baked depth: the picture point a ray toward `eye`
+// reaches at the prop's surface, `depth` (-1..1, toward the view's eye)
+// above the view's plane, from where it crosses the plane
+fn impostorParallax(local: vec2<f32>, depth: f32, eye: vec3<f32>, viewDirection: vec3<f32>) -> vec2<f32> {
+  let facing = max(dot(eye, viewDirection), 0.2);
+  let shift = vec2<f32>(dot(eye, impostorRight(viewDirection)), dot(eye, impostorUp(viewDirection))) * (depth / facing);
+  return clamp(local + shift, vec2<f32>(-1.0), vec2<f32>(1.0));
+}
+
+// The point of view `viewDirection`'s picture at `local`, `depth` above its
+// plane, in the prop's own frame (relative to the centre, over the radius)
+fn impostorViewPosition(local: vec2<f32>, depth: f32, viewDirection: vec3<f32>) -> vec3<f32> {
+  return impostorRight(viewDirection) * local.x + impostorUp(viewDirection) * local.y + viewDirection * depth;
+}
+
+// A vector turned by `yaw` about z (the prop's frame to the world), and back
+fn impostorTurn(v: vec3<f32>, yaw: f32) -> vec3<f32> {
+  let c = cos(yaw);
+  let s = sin(yaw);
+  return vec3<f32>(v.x * c - v.y * s, v.x * s + v.y * c, v.z);
+}
+fn impostorUnturn(v: vec3<f32>, yaw: f32) -> vec3<f32> {
+  return impostorTurn(v, -yaw);
 }

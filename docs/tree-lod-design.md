@@ -145,13 +145,32 @@ The mips are coverage-preserving on the GPU (`impostor_mips.wgsl`): per view
 cell a histogram of the averaged alpha, the scale that keeps level 0's share,
 then the write; every species keeps 100% through its 4 levels. Each level is
 made straight from level 0, and a fixed per-texel tie-break orders equal
-averages. `checks/impostorBake` checks this and writes the atlas to PNGs. The far level now draws from the
-atlas instead of the CPU picture: the sprite and sprite-shadow passes have
-an impostor mode (the quad is the bounding sphere's square, turned to the
-eye; the side view nearest the eye, or the sun, is shown) and shade the
-albedo with the baked normal and the old bake light, so 143 looks as
-before. The CPU bake (`app3d/SpriteBake`) stays for other sprites and the
-coverage test.
+averages. `checks/impostorBake` checks this and writes the atlas to PNGs.
+The far level draws from the atlas instead of the CPU picture. The CPU bake
+(`app3d/SpriteBake`) stays for other sprites and the coverage test.
+
+**Step 5 done (2026-10-21).** The sprite pass's impostor mode
+(`sprite_billboard.wgsl`) draws each tree as the sphere's square facing the
+eye. The direction to the eye, turned into the tree's frame by its yaw
+(sprite instances now carry it in their model matrix,
+`addSpriteInstance(yaw:)`), picks the three nearest views and their
+barycentric weights (`impostorThreeViews`). The fragment reads each view
+where the eye's ray meets the tree (one parallax step on the baked depth)
+and blends them by weight and alpha. It writes the baked albedo, the baked
+normal turned to the world and the depth of the point it shows into the
+G-buffer, so the sun, the moon, shadows and SSAO light it like the mesh. The
+old double lighting (baked colour, lit again with an up normal) is gone. The
+phone setting (`blendViews: false`) reads the nearest view only. The sprite
+shadow pass draws the view nearest the sun, in that view's plane.
+
+Writing the depth turns off the early depth test, which made every hidden
+far tree run the full shader (+2 ms). Two things bring that down: a fragment
+where all three views are empty at their plane leaves after three reads (no
+parallax can move it onto the tree), and the far billboards past the field
+(`app3d/FarSprites`, to 1,800 m) use a second pipeline that keeps the quad's
+depth (`drawSpriteInstances(movedDepth: false)`). Frame time on an M-series
+Mac, 2304 x 1440: the walking view 9.3 ms -> 10.0 ms, a view from 28 m up
+over the forest 9.7 ms -> 10.9 ms (run-to-run noise about 0.4 ms).
 
 ### 2.3 Cross-fades instead of switches
 
