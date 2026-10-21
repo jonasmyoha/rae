@@ -1,0 +1,18 @@
+# A type that declares two fields of one name is an error at the second,
+# naming the first's line. The C compiler used to be the first to notice
+# ("duplicate member 'knocks'" on the emitted struct).
+open ecs/ComponentTable
+
+type KnockRequest {
+  strength: Int
+}
+
+type World {
+  knocks: ComponentTable(KnockRequest)
+  count: Int
+  knocks: ComponentTable(KnockRequest)
+}
+
+func main() {
+  log("unreachable")
+}

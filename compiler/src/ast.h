@@ -86,6 +86,8 @@ typedef struct AstTypeField {
   AstTypeRef* type;
   AstExpr* default_value;
   struct AstTypeField* next;
+  size_t line;    /* where the field's name is written (0 for a synthesised field) */
+  size_t column;
 } AstTypeField;
 
 typedef struct AstCallArg {
