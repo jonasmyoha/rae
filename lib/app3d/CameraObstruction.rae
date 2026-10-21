@@ -20,7 +20,10 @@ const cameraBlockingCategory: UInt64 = 8
 const cameraBlockedGap: Float = 0.02
 
 # The rig's view distance pulled in front of the first shape in `maskBits`
-# between `target` and the rig's eye; true when it was
+# between `target` and the rig's eye; true when it was. Only a surface that
+# faces the sweep counts: a wall the target is pressed against (a character
+# climbing it) touches the sphere where the sweep starts, but the sweep
+# leaves it, so it does not pull the camera onto the target.
 func pullCameraFromWalls(
   rig: mod CameraRig
   physics: view Physics
@@ -36,16 +39,18 @@ func pullCameraFromWalls(
     pitch: rig.viewOrbitPitch
     dist: rig.viewDistance
   )
+  let translation: Vec3 = Vec3.vsub(a: eye, b: target)
   var filter: QueryFilter = defaultQueryFilter()
   filter.maskBits = maskBits
   let hit: PhysicsHit = spherecastClosest(
     physics: physics
     origin: target
     radius: radius
-    translation: Vec3.vsub(a: eye, b: target)
+    translation: translation
     filter: filter
   )
-  if hit.hit {
+  let facing: Float = hit.normal.x * translation.x + hit.normal.y * translation.y + hit.normal.z * translation.z
+  if hit.hit and facing < 0.0 {
     rig.viewDistance = Math.max(a: 0.0, b: rig.viewDistance * hit.fraction - cameraBlockedGap)
     ret true
   }
