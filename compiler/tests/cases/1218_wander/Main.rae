@@ -1,0 +1,167 @@
+# app3d/Wander: a wanderer walks to a spot within its range of home, stops
+# a few seconds, and walks again; one that makes no headway stops and picks
+# another later; the controlled one and a parked one get no wander drive.
+# The movers are stood in for by moving each controller along its drive at a
+# walk.
+import Math
+import Vec3
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open ecs/Tag
+open app3d/CharacterController
+open app3d/CharacterMovers
+open app3d/Characters
+open app3d/Wander
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func controllerAt(x: view Float, y: view Float) ret ThirdPersonController {
+  var controller: ThirdPersonController = createThirdPersonController()
+  controller.position = Vec3.create(x: x, y: y, z: 0.0)
+  ret controller
+}
+
+# Each controller with a walking drive goes 1.4 m/s along its yaw, except
+# `stuck`, which stays put
+func moveAlongDrives(
+  controllers: mod ComponentTable(ThirdPersonController)
+  drives: view ComponentTable(MoverDrive)
+  stuck: view EntityId
+  deltaTime: view Float
+) {
+  loop var i: Int = 0, i < componentCount(this: drives), ++i {
+    let entityId: EntityId = componentEntityAt(this: drives, i: i)
+    let drive: MoverDrive = componentCopyAtDefault(this: drives, i: i)
+    if drive.intent.moveY > 0.0 and entityId is not stuck {
+      let controller: mod ThirdPersonController = componentMod(
+        this: controllers
+        entityId: entityId
+      )
+      controller.position.x = controller.position.x - Math.sin(x: drive.yaw) * 1.4 * deltaTime
+      controller.position.y = controller.position.y + Math.cos(x: drive.yaw) * 1.4 * deltaTime
+    }
+  }
+}
+
+func wandererOf(wandering: view Wandering, entityId: view EntityId) ret Wanderer {
+  if let wanderer: Wanderer = componentCopy(this: wandering.wanderers, entityId: entityId) {
+    ret wanderer
+  }
+  ret Wanderer { homeX: 0.0, homeY: 0.0 }
+}
+
+func main() {
+  var allocator: EntityAllocator = createEntityAllocator()
+  var controllers: ComponentTable(ThirdPersonController) = ComponentTable.create(
+    ThirdPersonController
+  )
+  var controlled: ComponentTable(Controlled) = ComponentTable.create(Controlled)
+  var parked: ComponentTable(MoverParked) = ComponentTable.create(MoverParked)
+  var drives: ComponentTable(MoverDrive) = ComponentTable.create(MoverDrive)
+  var wandering: Wandering = createWandering(seed: 7)
+  let walker: EntityId = allocEntity(this: allocator)
+  let stuck: EntityId = allocEntity(this: allocator)
+  let player: EntityId = allocEntity(this: allocator)
+  let lying: EntityId = allocEntity(this: allocator)
+  componentSet(this: controllers, entityId: walker, data: controllerAt(x: 10.0, y: 5.0))
+  componentSet(this: controllers, entityId: stuck, data: controllerAt(x: -10.0, y: 0.0))
+  componentSet(this: controllers, entityId: player, data: controllerAt(x: 0.0, y: 0.0))
+  componentSet(this: controllers, entityId: lying, data: controllerAt(x: 0.0, y: 10.0))
+  addWanderer(
+    wandering: wandering
+    entityId: walker
+    homeX: 10.0
+    homeY: 5.0
+    range: 8.0
+  )
+  addWanderer(
+    wandering: wandering
+    entityId: stuck
+    homeX: -10.0
+    homeY: 0.0
+    range: 8.0
+  )
+  addWanderer(
+    wandering: wandering
+    entityId: player
+    homeX: 0.0
+    homeY: 0.0
+    range: 8.0
+  )
+  addWanderer(
+    wandering: wandering
+    entityId: lying
+    homeX: 0.0
+    homeY: 10.0
+    range: 8.0
+  )
+  addTag(Controlled, table: controlled, entityId: player)
+  addTag(MoverParked, table: parked, entityId: lying)
+  let deltaTime: Float = 1.0 / 30.0
+  var farthest: Float = 0.0
+  var walkingFrames: Int = 0
+  var standingFrames: Int = 0
+  var longestStand: Float = 0.0
+  var stand: Float = 0.0
+  var startedWalking: Bool = false
+  loop var frame: Int = 0, frame < 1800, ++frame {
+    stepWanderers(
+      wandering: wandering
+      controllers: controllers
+      controlled: controlled
+      parked: parked
+      drives: drives
+      deltaTime: deltaTime
+    )
+    moveAlongDrives(
+      controllers: controllers
+      drives: drives
+      stuck: stuck
+      deltaTime: deltaTime
+    )
+    let at: Vec3 = componentView(this: controllers, entityId: walker).position
+    farthest = Math.max(
+      a: farthest
+      b: Math.sqrt(x: (at.x - 10.0) * (at.x - 10.0) + (at.y - 5.0) * (at.y - 5.0))
+    )
+    if componentView(this: drives, entityId: walker).intent.moveY > 0.0 {
+      walkingFrames = walkingFrames + 1
+      startedWalking = true
+      longestStand = Math.max(a: longestStand, b: stand)
+      stand = 0.0
+    } else {
+      standingFrames = standingFrames + 1
+      if startedWalking {
+        stand = stand + deltaTime
+      }
+    }
+  }
+  let walked: Wanderer = wandererOf(wandering: wandering, entityId: walker)
+  check(
+    label: "in 60 s it walks to {walked.arrivals} spots and stops at each, staying within its 8 m range (farthest {farthest} m)"
+    ok: walked.arrivals >= 4 and farthest <= 8.0 + 0.6 and walkingFrames > 0 and standingFrames > 0
+  )
+  check(
+    label: "each stop lasts its pause, 1.5 to 4.5 s (the longest {longestStand} s)"
+    ok: longestStand >= 1.5 and longestStand <= 4.6
+  )
+  let stalled: Wanderer = wandererOf(wandering: wandering, entityId: stuck)
+  check(
+    label: "one that makes no headway gives up its walk ({stalled.stalls} times), stops and tries another"
+    ok: stalled.stalls >= 3 and stalled.arrivals is 0
+  )
+  check(
+    label: "the controlled one and a parked one get no wander drive"
+    ok: componentHas(this: drives, entityId: player) is false and componentHas(
+      this: drives
+      entityId: lying
+    ) is false
+  )
+}

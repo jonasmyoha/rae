@@ -1,0 +1,266 @@
+# app3d/CharacterContact — characters bumping into each other. Box3D's movers
+# are not bodies in the world (each only queries the world's shapes), so two
+# characters would pass through each other. After every mover has moved, each
+# pair whose capsules overlap is resolved here: pushed apart to two radii
+# along the line between them (sideways only, never lifted), and, if they
+# were closing, given an impulse along that line, as two equal bodies with a
+# little bounce. A runner into someone standing therefore slows and sends
+# them stumbling; a runner pushing on keeps shoving. A hard enough bump
+# knocks someone over (Knockdown): the one doing less of the pushing falls,
+# the pusher stays up; two pushing about as hard both fall.
+#
+# resolveCharacterContact is the rule over plain values; bumpMovers is the
+# system: every pair of movers not parked (lying, seated, climbing), their
+# movers moved apart and shoved, and whoever falls given a KnockRequest
+# (app3d/KnockedDown) for the app to make its ragdoll. An app with places a
+# push must not move a character into (a wall it keeps by hand) resolves the
+# pairs itself with the rule.
+import Math
+import Vec3
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Tag
+open box3d/ecs/PhysicsComponents
+open app3d/CharacterMovers
+open app3d/KnockedDown
+
+# Of the impulse along the contact, how much bounces back (0 would be two
+# bodies that stick together, 1 billiard balls).
+const characterBounce: Float = 0.3
+
+# How hard a bump has to be to knock someone over: the speed the two close at
+# along the line between them (m/s). Walking (1.4) or brushing past a runner
+# beside you does not; a jog (3-4) or anything faster into someone does.
+const knockdownClosingSpeed: Float = 3.5
+
+# When both push within this of each other (m/s), a hard bump floors both.
+const bothFallMargin: Float = 1.0
+
+# Who a bump knocks over.
+enum Knockdown { none, aFalls, bFalls, bothFall }
+
+# The one doing less of the pushing falls: each one's push is its own speed
+# toward the other along the line between them.
+func knockdownOf(pushA: view Float, pushB: view Float) ret Knockdown {
+  if pushA + pushB < knockdownClosingSpeed {
+    ret Knockdown.none
+  }
+  if Math.abs(value: pushA - pushB) < bothFallMargin {
+    ret Knockdown.bothFall
+  }
+  if pushA > pushB {
+    ret Knockdown.bFalls
+  }
+  ret Knockdown.aFalls
+}
+
+# When someone knocked over gets up (only where their body came to rest) is
+# app3d/KnockedDown (canGetUp, hipsAtRest).
+
+# A character's collision capsule: its radius and its full height (from the
+# bottom of the lower cap to the top of the upper one), standing up along +Z
+# around its centre.
+type CharacterShape {
+  radius: Float
+  height: Float
+}
+
+# Two characters after their contact: where they are, how they move, and
+# whether they touched at all.
+type CharacterContact {
+  touching: Bool
+  knockdown: Knockdown
+  positionA: Vec3
+  velocityA: Vec3
+  positionB: Vec3
+  velocityB: Vec3
+}
+
+# Resolve the contact between character A and character B (each its own
+# capsule, centre and velocity): touching within their two radii, side by
+# side within half their two heights.
+func resolveCharacterContact(
+  shapeA: view CharacterShape
+  shapeB: view CharacterShape
+  positionA: view Vec3
+  velocityA: view Vec3
+  positionB: view Vec3
+  velocityB: view Vec3
+) ret CharacterContact {
+  let apart: CharacterContact = {
+    touching: false
+    knockdown: Knockdown.none
+    positionA: positionA
+    velocityA: velocityA
+    positionB: positionB
+    velocityB: velocityB
+  }
+  if Math.abs(value: positionB.z - positionA.z) >= (shapeA.height + shapeB.height) * 0.5 {
+    ret apart
+  }
+  let dx: Float = positionB.x - positionA.x
+  let dy: Float = positionB.y - positionA.y
+  let distance: Float = Math.sqrt(x: dx * dx + dy * dy)
+  let contactDistance: Float = shapeA.radius + shapeB.radius
+  if distance >= contactDistance {
+    ret apart
+  }
+  # The line from A to B; on one spot, any line will do
+  var normalX: Float = 1.0
+  var normalY: Float = 0.0
+  if distance > 0.0001 {
+    normalX = dx / distance
+    normalY = dy / distance
+  }
+  let halfPush: Float = (contactDistance - distance) * 0.5
+  # Closing speed along the line; an impulse only if they are closing
+  let closing: Float = (velocityA.x - velocityB.x) * normalX + (velocityA.y - velocityB.y) * normalY
+  var impulse: Float = 0.0
+  if closing > 0.0 {
+    impulse = (1.0 + characterBounce) * closing * 0.5
+  }
+  let pushA: Float = velocityA.x * normalX + velocityA.y * normalY
+  let pushB: Float = 0.0 - (velocityB.x * normalX + velocityB.y * normalY)
+  ret CharacterContact {
+    touching: true
+    knockdown: knockdownOf(pushA: pushA, pushB: pushB)
+    positionA: Vec3.create(
+      x: positionA.x - normalX * halfPush
+      y: positionA.y - normalY * halfPush
+      z: positionA.z
+    )
+    velocityA: Vec3.create(
+      x: velocityA.x - normalX * impulse
+      y: velocityA.y - normalY * impulse
+      z: velocityA.z
+    )
+    positionB: Vec3.create(
+      x: positionB.x + normalX * halfPush
+      y: positionB.y + normalY * halfPush
+      z: positionB.z
+    )
+    velocityB: Vec3.create(
+      x: velocityB.x + normalX * impulse
+      y: velocityB.y + normalY * impulse
+      z: velocityB.z
+    )
+  }
+}
+
+# A mover's collision capsule as a CharacterShape
+func characterShapeOf(character: view CharacterBody) ret CharacterShape {
+  ret CharacterShape {
+    radius: character.mover.capsule.radius
+    height: character.mover.capsule.center2.z - character.mover.capsule.center1.z + character.mover.capsule.radius * 2.0
+  }
+}
+
+func moverPosition(character: view CharacterBody) ret Vec3 {
+  ret Vec3.create(
+    x: character.mover.transform.p.x
+    y: character.mover.transform.p.y
+    z: character.mover.transform.p.z
+  )
+}
+
+func moverVelocity(character: view CharacterBody) ret Vec3 {
+  ret Vec3.create(
+    x: character.mover.velocity.x
+    y: character.mover.velocity.y
+    z: character.mover.velocity.z
+  )
+}
+
+# The mover's place and velocity after a contact (`falls`: knocked over, so
+# it stops where it is; its ragdoll takes the velocity)
+func setMoverAfterContact(
+  character: mod CharacterBody
+  position: view Vec3
+  velocity: view Vec3
+  falls: view Bool
+) {
+  character.mover.transform.p.x = position.x
+  character.mover.transform.p.y = position.y
+  if falls {
+    character.mover.velocity.x = 0.0
+    character.mover.velocity.y = 0.0
+    character.mover.velocity.z = 0.0
+  } else {
+    character.mover.velocity.x = velocity.x
+    character.mover.velocity.y = velocity.y
+  }
+}
+
+# One fixed step of bumps among every mover in `characters` not `parked`:
+# each overlapping pair pushed apart and shoved; whoever a bump knocks over
+# gets a KnockRequest in `knocks` with the velocity it falls at (a little
+# upward, so the body leaves the ground). The number knocked over.
+func bumpMovers(
+  characters: mod ComponentTable(CharacterBody)
+  parked: view ComponentTable(MoverParked)
+  knocks: mod ComponentTable(KnockRequest)
+) ret Int {
+  var fallen: Int = 0
+  let count: Int = componentCount(this: characters)
+  loop var i: Int = 0, i < count, ++i {
+    let idA: EntityId = componentEntityAt(this: characters, i: i)
+    loop var j: Int = i + 1, j < count, ++j {
+      let idB: EntityId = componentEntityAt(this: characters, i: j)
+      if hasTag(MoverParked, table: parked, entityId: idA) or hasTag(
+        MoverParked
+        table: parked
+        entityId: idB
+      ) or componentHas(this: knocks, entityId: idA) or componentHas(this: knocks, entityId: idB) {
+        continue
+      }
+      let a: CharacterBody = componentCopyAtDefault(this: characters, i: i)
+      let b: CharacterBody = componentCopyAtDefault(this: characters, i: j)
+      let contact: CharacterContact = resolveCharacterContact(
+        shapeA: characterShapeOf(character: a)
+        shapeB: characterShapeOf(character: b)
+        positionA: moverPosition(character: a)
+        velocityA: moverVelocity(character: a)
+        positionB: moverPosition(character: b)
+        velocityB: moverVelocity(character: b)
+      )
+      if contact.touching is false {
+        continue
+      }
+      let aFalls: Bool = contact.knockdown is Knockdown.aFalls or contact.knockdown is Knockdown.bothFall
+      let bFalls: Bool = contact.knockdown is Knockdown.bFalls or contact.knockdown is Knockdown.bothFall
+      setMoverAfterContact(
+        character: componentMod(this: characters, entityId: idA)
+        position: contact.positionA
+        velocity: contact.velocityA
+        falls: aFalls
+      )
+      setMoverAfterContact(
+        character: componentMod(this: characters, entityId: idB)
+        position: contact.positionB
+        velocity: contact.velocityB
+        falls: bFalls
+      )
+      if aFalls {
+        componentSet(
+          this: knocks
+          entityId: idA
+          data: KnockRequest {
+            velocity: Vec3.create(x: contact.velocityA.x, y: contact.velocityA.y, z: 1.5)
+          }
+        )
+        fallen = fallen + 1
+      }
+      if bFalls {
+        componentSet(
+          this: knocks
+          entityId: idB
+          data: KnockRequest {
+            velocity: Vec3.create(x: contact.velocityB.x, y: contact.velocityB.y, z: 1.5)
+          }
+        )
+        fallen = fallen + 1
+      }
+    }
+  }
+  ret fallen
+}

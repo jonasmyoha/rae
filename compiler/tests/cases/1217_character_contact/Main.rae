@@ -1,0 +1,305 @@
+# app3d/CharacterContact: the rule (two characters' capsules pushed apart,
+# the shove shared, the one doing less of the pushing knocked over) and the
+# system (bumpMovers) over movers, which knocks over the one stood still,
+# not the runner, and leaves the parked alone.
+import Math
+import Vec3
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open ecs/Tag
+open box3d/ecs/PhysicsComponents
+open app3d/CharacterBodies
+open app3d/CharacterMovers
+open app3d/KnockedDown
+open app3d/CharacterContact
+
+func check(condition: view Bool, message: view String) {
+  if condition {
+    log("ok   {message}")
+  } else {
+    log("FAIL {message}")
+  }
+}
+
+func near(a: view Float, b: view Float) ret Bool {
+  ret Math.abs(value: a - b) < 0.001
+}
+
+func horizontalGap(contact: view CharacterContact) ret Float {
+  let dx: Float = contact.positionB.x - contact.positionA.x
+  let dy: Float = contact.positionB.y - contact.positionA.y
+  ret Math.sqrt(x: dx * dx + dy * dy)
+}
+
+func main() {
+  let shape: CharacterShape = { radius: 0.3, height: 1.6 }
+  let still: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+
+  # ----- apart: nothing happens ---------------------------------------------
+  let apart: CharacterContact = resolveCharacterContact(
+    shapeA: shape
+    shapeB: shape
+    positionA: Vec3.create(x: 0.0, y: 0.0, z: 1.4)
+    velocityA: Vec3.create(x: 5.0, y: 0.0, z: 0.0)
+    positionB: Vec3.create(x: 1.0, y: 0.0, z: 1.4)
+    velocityB: still
+  )
+  check(condition: apart.touching is false, message: "Characters a metre apart do not touch")
+  check(condition: near(a: apart.velocityA.x, b: 5.0), message: "and keep their velocities")
+
+  # ----- a runner into a standing character: both pushed apart, shove shared -
+  let shove: CharacterContact = resolveCharacterContact(
+    shapeA: shape
+    shapeB: shape
+    positionA: Vec3.create(x: 0.0, y: 0.0, z: 1.4)
+    velocityA: Vec3.create(x: 6.0, y: 0.0, z: 0.0)
+    positionB: Vec3.create(x: 0.4, y: 0.0, z: 1.4)
+    velocityB: still
+  )
+  check(condition: shove.touching, message: "Overlapping capsules touch")
+  check(
+    condition: horizontalGap(contact: shove) >= 0.6 - 0.001
+    message: "They are separated to two radii"
+  )
+  check(condition: shove.positionA.x < 0.0, message: "The runner gives way a little")
+  check(condition: shove.positionB.x > 0.4, message: "The one shoved moves away")
+  check(condition: shove.velocityB.x > 2.0, message: "The one shoved is sent moving")
+  check(condition: shove.velocityA.x < 6.0, message: "The runner loses speed into the shove")
+  check(
+    condition: near(a: shove.velocityA.x + shove.velocityB.x, b: 6.0)
+    message: "Equal bodies: momentum along the push is kept"
+  )
+  check(condition: shove.velocityB.x > shove.velocityA.x, message: "After the shove they part")
+
+  # ----- moving apart already: only separated, no extra kick -----------------
+  let parting: CharacterContact = resolveCharacterContact(
+    shapeA: shape
+    shapeB: shape
+    positionA: Vec3.create(x: 0.0, y: 0.0, z: 1.4)
+    velocityA: Vec3.create(x: -1.0, y: 0.0, z: 0.0)
+    positionB: Vec3.create(x: 0.5, y: 0.0, z: 1.4)
+    velocityB: Vec3.create(x: 1.0, y: 0.0, z: 0.0)
+  )
+  check(
+    condition: near(a: parting.velocityA.x, b: -1.0)
+    message: "Parting bodies keep their speed"
+  )
+  check(condition: near(a: parting.velocityB.x, b: 1.0), message: "both of them")
+
+  # ----- the push is along the contact, not along the run --------------------
+  let glancing: CharacterContact = resolveCharacterContact(
+    shapeA: shape
+    shapeB: shape
+    positionA: Vec3.create(x: 0.0, y: 0.0, z: 1.4)
+    velocityA: Vec3.create(x: 6.0, y: 0.0, z: 0.0)
+    positionB: Vec3.create(x: 0.3, y: 0.4, z: 1.4)
+    velocityB: still
+  )
+  check(condition: glancing.velocityB.y > 0.0, message: "A glancing hit pushes sideways too")
+  check(condition: glancing.velocityA.y < 0.0, message: "and deflects the runner the other way")
+
+  # ----- one over the other's head: no contact --------------------------------
+  let over: CharacterContact = resolveCharacterContact(
+    shapeA: shape
+    shapeB: shape
+    positionA: Vec3.create(x: 0.0, y: 0.0, z: 3.1)
+    velocityA: Vec3.create(x: 6.0, y: 0.0, z: 0.0)
+    positionB: Vec3.create(x: 0.2, y: 0.0, z: 1.4)
+    velocityB: still
+  )
+  check(condition: over.touching is false, message: "Jumping clear over someone touches nothing")
+
+  # ----- standing on the same spot: still pushed apart, some way --------------
+  let stacked: CharacterContact = resolveCharacterContact(
+    shapeA: shape
+    shapeB: shape
+    positionA: Vec3.create(x: 2.0, y: 3.0, z: 1.4)
+    velocityA: still
+    positionB: Vec3.create(x: 2.0, y: 3.0, z: 1.4)
+    velocityB: still
+  )
+  check(
+    condition: horizontalGap(contact: stacked) >= 0.6 - 0.001
+    message: "Two characters on one spot are pushed apart"
+  )
+  check(condition: near(a: stacked.positionA.z, b: 1.4), message: "Pushing never lifts anyone")
+  # ----- knockdowns: hard bumps floor the one pushed, not the pusher --------
+  let at: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.4)
+  let beside: Vec3 = Vec3.create(x: 0.5, y: 0.0, z: 1.4)
+  check(
+    condition: resolveCharacterContact(
+      shapeA: shape
+      shapeB: shape
+      positionA: at
+      velocityA: Vec3.create(x: 1.5, y: 0.0, z: 0.0)
+      positionB: beside
+      velocityB: still
+    ).knockdown is Knockdown.none
+    message: "Walking into someone does not floor them"
+  )
+  check(
+    condition: resolveCharacterContact(
+      shapeA: shape
+      shapeB: shape
+      positionA: at
+      velocityA: Vec3.create(x: 4.0, y: 0.0, z: 0.0)
+      positionB: beside
+      velocityB: still
+    ).knockdown is Knockdown.bFalls
+    message: "Jogging into someone floors them"
+  )
+  check(
+    condition: resolveCharacterContact(
+      shapeA: shape
+      shapeB: shape
+      positionA: at
+      velocityA: Vec3.create(x: 8.0, y: 0.0, z: 0.0)
+      positionB: beside
+      velocityB: still
+    ).knockdown is Knockdown.bFalls
+    message: "Sprinting into someone floors them, the sprinter stays up"
+  )
+  check(
+    condition: resolveCharacterContact(
+      shapeA: shape
+      shapeB: shape
+      positionA: at
+      velocityA: still
+      positionB: beside
+      velocityB: Vec3.create(x: 0.0 - 6.0, y: 0.0, z: 0.0)
+    ).knockdown is Knockdown.aFalls
+    message: "Whoever is run into falls, whichever side they are on"
+  )
+  check(
+    condition: resolveCharacterContact(
+      shapeA: shape
+      shapeB: shape
+      positionA: at
+      velocityA: Vec3.create(x: 4.0, y: 0.0, z: 0.0)
+      positionB: beside
+      velocityB: Vec3.create(x: 0.0 - 4.0, y: 0.0, z: 0.0)
+    ).knockdown is Knockdown.bothFall
+    message: "A head-on clash of equals floors both"
+  )
+  check(
+    condition: resolveCharacterContact(
+      shapeA: shape
+      shapeB: shape
+      positionA: at
+      velocityA: Vec3.create(x: 0.0, y: 8.0, z: 0.0)
+      positionB: beside
+      velocityB: Vec3.create(x: 0.0, y: 8.0, z: 0.0)
+    ).knockdown is Knockdown.none
+    message: "Runners brushing side by side stay up"
+  )
+  check(
+    condition: resolveCharacterContact(
+      shapeA: shape
+      shapeB: shape
+      positionA: at
+      velocityA: Vec3.create(x: 4.3, y: 7.0, z: 0.0)
+      positionB: beside
+      velocityB: Vec3.create(x: 0.0, y: 8.0, z: 0.0)
+    ).knockdown is Knockdown.bFalls
+    message: "Veering into the runner beside you floors them"
+  )
+  # ----- characters of different sizes --------------------------------------
+  # A short one (capsule radius 0.22, 1.2 m) and a tall one (0.31, 1.64 m),
+  # each standing at its own rest height
+  let short: CharacterShape = { radius: 0.22, height: 1.2 }
+  let tall: CharacterShape = { radius: 0.31, height: 1.64 }
+  let shortAt: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
+  let standing: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  check(
+    condition: resolveCharacterContact(
+      shapeA: short
+      shapeB: tall
+      positionA: shortAt
+      velocityA: standing
+      positionB: Vec3.create(x: 0.5, y: 0.0, z: 1.43)
+      velocityB: standing
+    ).touching
+    message: "A short and a tall character touch within their two radii (0.53 m)"
+  )
+  check(
+    condition: resolveCharacterContact(
+      shapeA: short
+      shapeB: tall
+      positionA: shortAt
+      velocityA: standing
+      positionB: Vec3.create(x: 0.56, y: 0.0, z: 1.43)
+      velocityB: standing
+    ).touching is false
+    message: "...and not past them"
+  )
+  let pushedApart: CharacterContact = resolveCharacterContact(
+    shapeA: short
+    shapeB: tall
+    positionA: shortAt
+    velocityA: standing
+    positionB: Vec3.create(x: 0.33, y: 0.0, z: 1.43)
+    velocityB: standing
+  )
+  check(
+    condition: Math.abs(value: pushedApart.positionB.x - pushedApart.positionA.x - 0.53) < 0.001
+    message: "Pushed apart to their two radii"
+  )
+  # ----- the system over movers -------------------------------------------------
+  var allocator: EntityAllocator = createEntityAllocator()
+  var characters: ComponentTable(CharacterBody) = ComponentTable.create(CharacterBody)
+  var parked: ComponentTable(MoverParked) = ComponentTable.create(MoverParked)
+  var knocks: ComponentTable(KnockRequest) = ComponentTable.create(KnockRequest)
+  let runner: EntityId = allocEntity(this: allocator)
+  let stander: EntityId = allocEntity(this: allocator)
+  let lying: EntityId = allocEntity(this: allocator)
+  addCharacterBody(
+    characters: characters
+    entityId: runner
+    feet: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  )
+  addCharacterBody(
+    characters: characters
+    entityId: stander
+    feet: Vec3.create(x: 0.4, y: 0.0, z: 0.0)
+  )
+  addCharacterBody(
+    characters: characters
+    entityId: lying
+    feet: Vec3.create(x: 0.2, y: 0.3, z: 0.0)
+  )
+  addTag(MoverParked, table: parked, entityId: lying)
+  componentMod(this: characters, entityId: runner).mover.velocity.x = 5.0
+  let lyingBefore: Float = componentView(this: characters, entityId: lying).mover.transform.p.y
+  let fallen: Int = bumpMovers(characters: characters, parked: parked, knocks: knocks)
+  let apartNow: Float = componentView(this: characters, entityId: stander).mover.transform.p.x - componentView(
+    this: characters
+    entityId: runner
+  ).mover.transform.p.x
+  check(
+    condition: fallen is 1 and componentHas(this: knocks, entityId: stander) and componentHas(
+      this: knocks
+      entityId: runner
+    ) is false and apartNow > 0.59
+    message: "a runner at 5 m/s into someone standing: the one standing is knocked over, the runner stays up, the two pushed apart ({apartNow} m)"
+  )
+  check(
+    condition: componentHas(this: knocks, entityId: lying) is false and Math.abs(
+      value: componentView(this: characters, entityId: lying).mover.transform.p.y - lyingBefore
+    ) < 0.0001
+    message: "someone lying (parked) is left where they are"
+  )
+  # A walk into someone standing: shoved, nobody falls
+  var walkKnocks: ComponentTable(KnockRequest) = ComponentTable.create(KnockRequest)
+  componentMod(this: characters, entityId: stander).mover.transform.p.x = componentView(
+    this: characters
+    entityId: runner
+  ).mover.transform.p.x + 0.45
+  componentMod(this: characters, entityId: runner).mover.velocity.x = 1.4
+  componentMod(this: characters, entityId: stander).mover.velocity.x = 0.0
+  let walkFallen: Int = bumpMovers(characters: characters, parked: parked, knocks: walkKnocks)
+  check(
+    condition: walkFallen is 0 and componentView(this: characters, entityId: stander).mover.velocity.x > 0.0
+    message: "a walk into someone standing shoves them, and nobody falls"
+  )
+}
