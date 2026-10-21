@@ -27,6 +27,7 @@ open app3d/CharacterBodies
 open app3d/WalkerNames
 open box3d/ecs/CharacterMover
 open app3d/CharacterHeight
+open app3d/Climbing
 
 # The world the walker is on: the small island in the sea (136, 137), or a
 # wide forest world with lakes and no island (143)
@@ -341,6 +342,8 @@ func createWalkerAppPhysics(
     log("[physics] Box3D refused the island height field")
   }
   addCharacterBody(characters: physicsSystem.characters, entityId: heroEntityId, feet: heroFeet)
+  # The hero climbs; the crowd, wandering into trees, does not
+  addClimber(climbing: physicsSystem.climbing, entityId: heroEntityId)
   loop var crowdIndex: Int = 0, crowdIndex < crowdEntities.length, ++crowdIndex {
     let crowdEntityId: EntityId = crowdEntities.copyAtDefault(index: crowdIndex)
     addCharacterBody(

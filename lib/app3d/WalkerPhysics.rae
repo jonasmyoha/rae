@@ -52,6 +52,8 @@ open app3d/RagdollRig
 open app3d/Ragdoll
 open app3d/PropColliderRules
 open app3d/PropBodyPool
+open app3d/ClimbRules
+open app3d/Climbing
 
 const walkerPhysicsStep: Float = 1.0 / 60.0
 
@@ -108,6 +110,8 @@ type WalkerPhysics {
   # nearest the walker, the point they were placed round, and how many stand
   # on trees now
   trunkPool: PropBodyPool
+  # Every character climbs what it pushes into (app3d/Climbing)
+  climbing: Climbing
 }
 
 # The physics of a walker on the terrain of `biome` at `groundZ`, its ground a
@@ -155,6 +159,11 @@ func createWalkerPhysics(
     groundCentre: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
     groundFields: 0
     trunkPool: emptyPropBodyPool(settings: walkerTrunkPoolSettings())
+    climbing: createClimbing(
+      tuning: ClimbTuning {}
+      staminaTuning: StaminaTuning {}
+      wallMask: allBits
+    )
   }
 }
 
@@ -548,6 +557,17 @@ func moveCharacters(
       insideWithOldX: worldWadable(x: step.fromX, y: center.y, cfg: biome)
     )
   }
+  # The climbers on their walls (app3d/Climbing), before the rest are read back
+  stepClimbers(
+    climbing: physicsSystem.climbing
+    physics: physicsSystem.physics
+    characters: physicsSystem.characters
+    controllers: controllers
+    drives: physicsSystem.moverDrives
+    parked: physicsSystem.moverParked
+    groundZ: physicsSystem.groundZ
+    deltaTime: walkerPhysicsStep
+  )
   readMoverControllers(
     characters: physicsSystem.characters
     controllers: controllers
