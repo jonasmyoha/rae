@@ -1,0 +1,474 @@
+# An open world streamed in tiles: an endless generated grid of 100 m tiles
+# (a patch of grass or sand, a few blocks of houses on it, each tile the same
+# every time it is made, from its place), of which only those near the camera
+# are in memory. Rae's tile streaming (app3d/TileStreaming) keeps at most 44
+# tiles, one in each slot, loading the nearest wanted one a frame and letting
+# go of those past the unload distance; each tile is an entity, and the
+# example answers the TileLoaded and TileGone events by writing the tile's
+# quads into its slot's ranges of the slot meshes (app3d/SlotMeshes: one mesh
+# per material, a range per slot) or emptying them. So the GPU memory is the
+# 44 slots', however far the camera flies.
+#
+# The camera flies on its own over the grid. A "[tiles]" line every two
+# seconds says how many slots are held, the loads and the let-gos.
+#
+#   RAE_TILES_TEST=1   headless: 900 frames of a 2 km flight at a fixed step,
+#                      then one "[tiletest]" line (never more tiles than slots,
+#                      every held slot drawn, free slots empty, the tiles round
+#                      the camera all held) and the exit code
+#
+# Compiled-target only; needs wgpu-native + SDL3. From the repository root:
+#   rae run examples/145_tile_streaming/Main.rae
+# Headless screenshot:
+#   RAE_SDL_HEADLESS_MS=4000 RAE_GPU2D_SCREENSHOT=/tmp/tiles.bmp \
+#     rae run examples/145_tile_streaming/Main.rae
+import Math
+import Sys
+import Gpu2d
+import Vec3
+open Scene3d
+open Math3d
+open Gbuffer
+open RendererDeferred
+open Rendergraph
+open Shadow3d
+open gpu/GpuResources
+open ecs/Entity
+open ecs/World
+open ecs/Event
+open app3d/TileStreaming
+open app3d/SlotMeshes
+
+const paintGrass: Int = 0
+
+const paintSand: Int = 1
+
+const paintWall: Int = 2
+
+const paintRoof: Int = 3
+
+# The most blocks a tile holds
+const blocksPerTile: Int = 6
+
+# How fast the camera flies (m/s), and how high
+const flightSpeed: Float = 25.0
+
+const flightHeight: Float = 45.0
+
+func tileSettings() ret TileGridSettings {
+  ret TileGridSettings {
+    tileSize: 100.0
+    loadDistance: 300.0
+    unloadDistance: 360.0
+    # The circle of the unload distance holds about pi * 360^2 / 100^2 = 40.7
+    # tile centres
+    slotCount: 44
+  }
+}
+
+func paintMaterial(color: view Vec3) ret Material3d {
+  ret Material3d {
+    baseColor: color
+    metallic: 0.0
+    roughness: 0.9
+    emission: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+    toon: false
+  }
+}
+
+func createTileMeshes(renderer: mod DeferredRenderer) ret SlotMeshes {
+  var capacities: List(Int) = List.create(Int, cap: 4)
+  capacities.add(value: 1)
+  capacities.add(value: 1)
+  capacities.add(value: blocksPerTile * 4)
+  capacities.add(value: blocksPerTile)
+  var materials: List(Material3d) = List.create(Material3d, cap: 4)
+  materials.add(value: paintMaterial(color: Vec3 { x: 0.3, y: 0.55, z: 0.22 }))
+  materials.add(value: paintMaterial(color: Vec3 { x: 0.82, y: 0.72, z: 0.5 }))
+  materials.add(value: paintMaterial(color: Vec3 { x: 0.92, y: 0.86, z: 0.78 }))
+  materials.add(value: paintMaterial(color: Vec3 { x: 0.72, y: 0.32, z: 0.24 }))
+  var castsShadows: List(Bool) = List.create(Bool, cap: 4)
+  castsShadows.add(value: false)
+  castsShadows.add(value: false)
+  castsShadows.add(value: true)
+  castsShadows.add(value: true)
+  ret createSlotMeshes(
+    renderer: renderer
+    slotCount: tileSettings().slotCount
+    capacities: capacities
+    materials: materials
+    castsShadows: castsShadows
+  )
+}
+
+# A tile's content is made from its place, so it is the same each time
+func tileRandom(tile: view GridTile) ret Random {
+  ret createRandom(seed: tile.x * 7349 + tile.y * 9151 + 17)
+}
+
+# Every wall of the tile's blocks, then their roofs, into the scratch and
+# their slot's ranges; its ground a patch of grass or of sand
+func writeTile(
+  slotMeshes: mod SlotMeshes
+  renderer: mod DeferredRenderer
+  slot: view Int
+  tile: view GridTile
+) {
+  let settings: TileGridSettings = tileSettings()
+  var random: Random = tileRandom(tile: tile)
+  let half: Float = settings.tileSize * 0.5
+  let centerX: Float = tileCenterX(settings: settings, tile: tile)
+  let centerY: Float = tileCenterY(settings: settings, tile: tile)
+  let x0: Float = centerX - half
+  let y0: Float = centerY - half
+  let x1: Float = centerX + half
+  let y1: Float = centerY + half
+  let sandy: Bool = random.nextFloat() < 0.3
+  var groundPaint: Int = paintGrass
+  var otherGround: Int = paintSand
+  if sandy {
+    groundPaint = paintSand
+    otherGround = paintGrass
+  }
+  let laid: Bool = putSlotQuad(
+    slotMeshes: slotMeshes
+    paint: groundPaint
+    quad: 0
+    a: Vec3 { x: x0, y: y0, z: 0.0 }
+    b: Vec3 { x: x1, y: y0, z: 0.0 }
+    c: Vec3 { x: x1, y: y1, z: 0.0 }
+    d: Vec3 { x: x0, y: y1, z: 0.0 }
+  )
+  commitSlotQuads(
+    slotMeshes: slotMeshes
+    renderer: renderer
+    slot: slot
+    paint: groundPaint
+    quads: 1
+  )
+  commitSlotQuads(
+    slotMeshes: slotMeshes
+    renderer: renderer
+    slot: slot
+    paint: otherGround
+    quads: 0
+  )
+  # The blocks: a footprint and a height each, rolled in the tile
+  let blocks: Int = (random.nextFloat() * (blocksPerTile + 1).toFloat()).toInt()
+  var lows: List(Vec3) = List.create(Vec3, cap: blocksPerTile)
+  var highs: List(Vec3) = List.create(Vec3, cap: blocksPerTile)
+  loop var i: Int = 0, i < blocks, ++i {
+    let width: Float = 8.0 + random.nextFloat() * 14.0
+    let depth: Float = 8.0 + random.nextFloat() * 14.0
+    let height: Float = 4.0 + random.nextFloat() * random.nextFloat() * 30.0
+    let bx: Float = x0 + 6.0 + random.nextFloat() * (settings.tileSize - 12.0 - width)
+    let by: Float = y0 + 6.0 + random.nextFloat() * (settings.tileSize - 12.0 - depth)
+    lows.add(value: Vec3 { x: bx, y: by, z: 0.0 })
+    highs.add(value: Vec3 { x: bx + width, y: by + depth, z: height })
+  }
+  var walls: Int = 0
+  loop var i: Int = 0, i < blocks, ++i {
+    let low: Vec3 = lows.copyAtDefault(index: i)
+    let high: Vec3 = highs.copyAtDefault(index: i)
+    # Each wall wound so its normal faces out
+    let south: Bool = putWall(
+      slotMeshes: slotMeshes
+      quad: walls
+      a: Vec3 { x: low.x, y: low.y, z: 0.0 }
+      b: Vec3 { x: high.x, y: low.y, z: 0.0 }
+      height: high.z
+    )
+    let north: Bool = putWall(
+      slotMeshes: slotMeshes
+      quad: walls + 1
+      a: Vec3 { x: high.x, y: high.y, z: 0.0 }
+      b: Vec3 { x: low.x, y: high.y, z: 0.0 }
+      height: high.z
+    )
+    let east: Bool = putWall(
+      slotMeshes: slotMeshes
+      quad: walls + 2
+      a: Vec3 { x: high.x, y: low.y, z: 0.0 }
+      b: Vec3 { x: high.x, y: high.y, z: 0.0 }
+      height: high.z
+    )
+    let west: Bool = putWall(
+      slotMeshes: slotMeshes
+      quad: walls + 3
+      a: Vec3 { x: low.x, y: high.y, z: 0.0 }
+      b: Vec3 { x: low.x, y: low.y, z: 0.0 }
+      height: high.z
+    )
+    walls = walls + 4
+  }
+  commitSlotQuads(
+    slotMeshes: slotMeshes
+    renderer: renderer
+    slot: slot
+    paint: paintWall
+    quads: walls
+  )
+  loop var i: Int = 0, i < blocks, ++i {
+    let low: Vec3 = lows.copyAtDefault(index: i)
+    let high: Vec3 = highs.copyAtDefault(index: i)
+    let roofed: Bool = putSlotQuad(
+      slotMeshes: slotMeshes
+      paint: paintRoof
+      quad: i
+      a: Vec3 { x: low.x, y: low.y, z: high.z }
+      b: Vec3 { x: high.x, y: low.y, z: high.z }
+      c: Vec3 { x: high.x, y: high.y, z: high.z }
+      d: Vec3 { x: low.x, y: high.y, z: high.z }
+    )
+  }
+  commitSlotQuads(
+    slotMeshes: slotMeshes
+    renderer: renderer
+    slot: slot
+    paint: paintRoof
+    quads: blocks
+  )
+}
+
+# A wall from `a` to `b` on the ground, `height` tall (its normal to the
+# right of a -> b, seen from above)
+func putWall(
+  slotMeshes: mod SlotMeshes
+  quad: view Int
+  a: view Vec3
+  b: view Vec3
+  height: view Float
+) ret Bool {
+  ret putSlotQuad(
+    slotMeshes: slotMeshes
+    paint: paintWall
+    quad: quad
+    a: a
+    b: b
+    c: Vec3 { x: b.x, y: b.y, z: height }
+    d: Vec3 { x: a.x, y: a.y, z: height }
+  )
+}
+
+# Every slot's ranges emptied
+func emptySlot(slotMeshes: mod SlotMeshes, renderer: mod DeferredRenderer, slot: view Int) {
+  loop var paint: Int = 0, paint < slotMeshPaintCount(slotMeshes: slotMeshes), ++paint {
+    commitSlotQuads(
+      slotMeshes: slotMeshes
+      renderer: renderer
+      slot: slot
+      paint: paint
+      quads: 0
+    )
+  }
+}
+
+# One frame round (x, y): the streamer's events answered
+func streamWorld(
+  streamer: mod TileStreamer
+  allocator: mod EntityAllocator
+  slotMeshes: mod SlotMeshes
+  renderer: mod DeferredRenderer
+  x: view Float
+  y: view Float
+) {
+  streamTiles(
+    streamer: streamer
+    allocator: allocator
+    x: x
+    y: y
+  )
+  loop var i: Int = 0, i < eventCount(TileGone, this: streamer.gone), ++i {
+    emptySlot(
+      slotMeshes: slotMeshes
+      renderer: renderer
+      slot: eventAt(TileGone, this: streamer.gone, i: i).slot
+    )
+  }
+  loop var i: Int = 0, i < eventCount(TileLoaded, this: streamer.loaded), ++i {
+    let loaded: TileLoaded = eventAt(TileLoaded, this: streamer.loaded, i: i)
+    writeTile(
+      slotMeshes: slotMeshes
+      renderer: renderer
+      slot: loaded.slot
+      tile: loaded.tile
+    )
+  }
+}
+
+# Where the camera is `seconds` into its flight: east, weaving north and south
+func flightPoint(seconds: view Float) ret Vec3 {
+  ret Vec3 { x: seconds * flightSpeed, y: Math.sin(x: seconds * 0.15) * 220.0, z: flightHeight }
+}
+
+func renderTiles(
+  renderer: mod DeferredRenderer
+  slotMeshes: mod SlotMeshes
+  camera: view Camera3d
+  light: view Light3d
+) {
+  let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
+  loop var passIndex: Int = 0, passIndex < deferredOrderLength(renderer: renderer), ++passIndex {
+    let tag: Int = deferredTagAt(renderer: renderer, i: passIndex)
+    if tag is RenderTag.shadow {
+      beginShadowPass(
+        renderer: renderer
+        c: fitShadowCascades(
+          camPos: camera.position
+          camTarget: camera.target
+          fovYDeg: camera.fovYDeg
+          aspect: aspect
+          near: camera.nearZ
+          far: 400.0
+          sunDir: light.sunDir
+          count: 3
+          resolution: 2048
+          lambda: 0.7
+          backExtent: 150.0
+        )
+      )
+      drawSlotMeshShadows(renderer: renderer, slotMeshes: slotMeshes)
+      endShadowPass(renderer: renderer)
+    } else if tag is RenderTag.gbuffer {
+      ensureRendererResources(renderer: renderer)
+      if let resources: mod GpuResources = renderer.gpuResources {
+        Gbuffer.beginPass(
+          cache: renderer.passes.gbuffer
+          resources: resources
+          camera: camera
+          light: light
+          aspect: aspect
+        )
+        drawSlotMeshes(
+          cache: renderer.passes.gbuffer
+          resources: resources
+          slotMeshes: slotMeshes
+          toon: false
+        )
+        Gbuffer.endPass(cache: renderer.passes.gbuffer, resources: resources)
+      }
+    } else {
+      renderDeferredPass(
+        renderer: renderer
+        tag: tag
+        camera: camera
+        light: light
+        aspect: aspect
+      )
+    }
+  }
+}
+
+# The headless check: no more tiles than slots, every held slot drawing its
+# ground, every free slot empty, the tiles round the camera all held
+func tileTestPassed(
+  streamer: view TileStreamer
+  slotMeshes: view SlotMeshes
+  at: view Vec3
+) ret Bool {
+  var drawn: Bool = true
+  loop var s: Int = 0, s < streamer.settings.slotCount, ++s {
+    let ground: Int = slotQuadCount(slotMeshes: slotMeshes, slot: s, paint: paintGrass) + slotQuadCount(
+      slotMeshes: slotMeshes
+      slot: s
+      paint: paintSand
+    )
+    if let tile: GridTile = tileInSlot(streamer: streamer, slot: s) {
+      drawn = drawn and ground is 1
+    } else {
+      drawn = drawn and ground is 0 and slotQuadCount(
+        slotMeshes: slotMeshes
+        slot: s
+        paint: paintWall
+      ) is 0
+    }
+  }
+  let held: List(GridTile) = streamedTiles(streamer: streamer)
+  var near: Bool = true
+  loop let tile: view GridTile in tilesToLoad(settings: streamer.settings, x: at.x, y: at.y) {
+    if tileDistance(
+      settings: streamer.settings
+      tile: tile
+      x: at.x
+      y: at.y
+    ) < 200.0 {
+      var found: Bool = false
+      loop let other: view GridTile in held {
+        found = found or sameTile(a: other, b: tile)
+      }
+      near = near and found
+    }
+  }
+  let passed: Bool = held.length <= streamer.settings.slotCount and drawn and near and streamer.loads > 60 and streamer.unloads > 30
+  log(
+    "[tiletest] flew to ({at.x}, {at.y}): {held.length} of {streamer.settings.slotCount} slots held, {streamer.loads} loads, {streamer.unloads} let go; every held slot drawn, free ones empty={drawn}; the tiles within 200 m held={near}; passed={passed}"
+  )
+  ret passed
+}
+
+func main() ret Int {
+  Gpu2d.initWindow(width: 1280, height: 800, title: "145: Rae 3D — an open world streamed in tiles")
+  var renderer: DeferredRenderer = createDeferredRenderer()
+  var slotMeshes: SlotMeshes = createTileMeshes(renderer: renderer)
+  var streamer: TileStreamer = createTileStreamer(settings: tileSettings())
+  var allocator: EntityAllocator = createEntityAllocator()
+  let graphStatus: Int = compileDeferred(renderer: renderer)
+  if graphStatus is not 0 {
+    log("deferred graph invalid: {statusName(status: graphStatus)}")
+    ret 1
+  }
+  var camera: Camera3d = defaultCamera3d()
+  camera.farZ = 1500.0
+  var light: Light3d = defaultLight3d()
+  light.clearColor = Vec3 { x: 0.62, y: 0.76, z: 0.9 }
+  let testing: Bool = Sys.getEnv(name: "RAE_TILES_TEST").length() > 0
+  let startTime: Float64 = Gpu2d.nowSeconds()
+  var seconds: Float = 0.0
+  var frames: Int = 0
+  var lastLog: Float = 0.0
+  var exitCode: Int = 0
+  loop not Gpu2d.pollClose() {
+    if testing {
+      seconds = seconds + 1.0 / 10.0
+    } else {
+      seconds = (Gpu2d.nowSeconds() - startTime) as Float
+    }
+    let at: Vec3 = flightPoint(seconds: seconds)
+    let ahead: Vec3 = flightPoint(seconds: seconds + 2.0)
+    camera.position = at
+    camera.target = Vec3 { x: ahead.x + 60.0, y: ahead.y, z: 0.0 }
+    streamWorld(
+      streamer: streamer
+      allocator: allocator
+      slotMeshes: slotMeshes
+      renderer: renderer
+      x: at.x
+      y: at.y
+    )
+    if seconds - lastLog >= 2.0 and testing is false {
+      log(
+        "[tiles] {usedTileSlots(streamer: streamer)} of {streamer.settings.slotCount} slots, {streamer.loads} loads, {streamer.unloads} let go"
+      )
+      lastLog = seconds
+    }
+    frames = frames + 1
+    if testing and frames >= 900 {
+      if tileTestPassed(streamer: streamer, slotMeshes: slotMeshes, at: at) is false {
+        exitCode = 1
+      }
+      break
+    }
+    if Gpu2d.renderGate() {
+      renderTiles(
+        renderer: renderer
+        slotMeshes: slotMeshes
+        camera: camera
+        light: light
+      )
+    }
+  }
+  shutdownDeferredRenderer(renderer: renderer)
+  Gbuffer.shutdownAll()
+  Gpu2d.closeWindow()
+  ret exitCode
+}

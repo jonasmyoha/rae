@@ -1,0 +1,24 @@
+pack TileStreaming {
+  format: "raepack"
+  version: 1
+  defaultTarget: compiled
+  name: "3D Renderer — An open world streamed in tiles"
+  description: "An endless generated grid of 100 m tiles (grass or sand, blocks of houses), of which only those near the flying camera are in memory: lib/app3d/TileStreaming keeps at most 44, one per slot, loading the nearest wanted one a frame and letting go of those past the unload distance, each tile an entity with TileLoaded / TileGone events; the example answers them by writing the tile's quads into its slot's ranges of lib/app3d/SlotMeshes (one mesh per material, a range per slot) or emptying them. The GPU memory is the slots', however far it flies."
+  category: "3D Renderer"
+  display: {
+    width: 1280
+    height: 800
+  }
+  targets: {
+    target compiled: {
+      label: "Compiled"
+      entry: "Main.rae"
+      sources: {
+        source: {
+          path: "."
+          emit: compiled
+        }
+      }
+    }
+  }
+}
