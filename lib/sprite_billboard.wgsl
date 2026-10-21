@@ -30,7 +30,8 @@ struct DrawU {
 };
 struct SpriteU {
   // a.y = sprite aspect (w/h), a.z = alpha cutoff, a.w = time. (a.x unused —
-  // height is per-instance in DrawU params.x.)
+  // height is per-instance in DrawU params.x.) b.x = tilt, b.y = the hashed
+  // alpha test's band round the cutoff (0: a plain cut).
   a: vec4<f32>,
   b: vec4<f32>,
 };
@@ -58,6 +59,8 @@ struct VsOut {
   @location(3) clipPrev: vec4<f32>,
   @location(4) @interpolate(flat) emissive: f32,
   @location(5) @interpolate(flat) mode: f32,
+  // A per-prop seed for the hashed alpha test, from where it stands
+  @location(6) @interpolate(flat) seed: f32,
 };
 
 // vertex_index 0..5 -> two triangles of a unit quad, u01 in 0..1, v01 in 0..1.
@@ -112,6 +115,7 @@ fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut
   // The shading mode (lit / emissive / toon) as the mesh instances carry it,
   // so a billboard standing in for a toon mesh is shaded toon too
   o.mode = d.params.z;
+  o.seed = fract(sin(dot(base.xy, vec2<f32>(12.9898, 78.233))) * 43758.5453);
   o.pos = vec4<f32>(o.pos.xy + F.jitter.xy * o.pos.w, o.pos.zw);
   return o;
 }
@@ -122,12 +126,35 @@ struct FsOut {
   @location(2) gbc: vec4<f32>,
 };
 
+// The alpha test's threshold: the cutoff, or with a band (b.y > 0, set when
+// TAA resolves it) a hashed threshold in that band round the cutoff (Wyman and
+// McGuire, "Hashed alpha testing", 2017). The hash is fixed per texel of the
+// mip level being sampled and per prop, so the pattern stays on the picture
+// as the camera moves; TAA's jitter samples it at moving points and resolves
+// it into soft leaf edges. The mips keep their coverage under a plain cut
+// (app3d/SpriteBake spriteMipChain), and a band centred on the cutoff keeps
+// close to that coverage.
+fn spriteHash(p: vec3<f32>) -> f32 {
+  var q = fract(p * vec3<f32>(0.1031, 0.1030, 0.0973));
+  q = q + dot(q, q.yxz + vec3<f32>(33.33));
+  return fract((q.x + q.y) * q.z);
+}
+fn alphaThreshold(in: VsOut) -> f32 {
+  let texelPos = in.uv * vec2<f32>(textureDimensions(spriteTex, 0));
+  let footprint = max(length(dpdx(texelPos)), length(dpdy(texelPos)));
+  let band = S.b.y;
+  if (band <= 0.0) { return S.a.z; }
+  let level = max(floor(log2(max(footprint, 1.0))), 0.0);
+  let cell = floor(texelPos / exp2(level));
+  let h = spriteHash(vec3<f32>(cell, in.seed * 1024.0 + level));
+  return S.a.z + (h - 0.5) * band;
+}
 // The surface at this fragment, in the G-buffer encoding: the G-buffer entry
 // below writes it, the forward main pass's fsForward (forward_entry.wgsl)
 // decodes and shades it. The cutout discards in both.
 fn gbufferSurface(in: VsOut) -> FsOut {
   let texel = textureSample(spriteTex, spriteSamp, in.uv, in.layer);
-  if (texel.a < S.a.z) { discard; }   // alpha cutout — no colour, no depth
+  if (texel.a < alphaThreshold(in)) { discard; }   // alpha cutout — no colour, no depth
   // The sprite pixels are already lit (cut from the plate). Face the normal UP so
   // the deferred pass adds only the gentle ground-like ambient/sun rather than a
   // hard directional term that would fight the baked shading — the same reasoning

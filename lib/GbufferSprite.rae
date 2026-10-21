@@ -75,7 +75,22 @@ type SpriteCache {
   # The first billboards drawn in a forward frame were logged (the 137 gate
   # greps the line)
   forwardDrawLogged: Bool
+  # The parameters spriteSetParams was given, and the hashed alpha test's
+  # band last uploaded with them (-1: none yet): the band follows the
+  # frame's TAA, so the uniform is written again when it changes
+  heightK: Float = 1.0
+  aspect: Float = 1.0
+  cutoff: Float = 0.5
+  time: Float = 0.0
+  tilt: Float = 0.0
+  uploadedBand: Float = -1.0
 }
+
+# The hashed alpha test's band round the cutoff when TAA resolves it
+# (sprite_billboard.wgsl alphaThreshold): soft, stable leaf edges. Without
+# TAA (the default FXAA, the forward pass's MSAA) the band is 0, a plain cut
+# on mips that keep their coverage, so nothing is left grainy.
+const spriteHashBand: Float = 0.5
 
 func createSpriteCache() ret SpriteCache {
   ret SpriteCache {
@@ -268,19 +283,29 @@ func spriteSetParams(
   time: copy Float
   tilt: copy Float
 ) {
+  cache.heightK = heightK
+  cache.aspect = aspect
+  cache.cutoff = cutoff
+  cache.time = time
+  cache.tilt = tilt
+  writeSpriteUniform(cache: cache, resources: resources, band: 0.0)
+}
+
+# The sprite uniform (SpriteU) from the cache's parameters and `band`
+func writeSpriteUniform(cache: mod SpriteCache, resources: mod GpuResources, band: view Float) {
   ensureSpriteUniform(cache: cache, resources: resources)
   var args: ArgWriter = createArgs(uniform: true)
   pushVec4F(
     writer: args
-    x: heightK
-    y: aspect
-    z: cutoff
-    w: time
+    x: cache.heightK
+    y: cache.aspect
+    z: cache.cutoff
+    w: cache.time
   )
   pushVec4F(
     writer: args
-    x: tilt
-    y: 0.0
+    x: cache.tilt
+    y: band
     z: 0.0
     w: 0.0
   )
@@ -290,6 +315,7 @@ func spriteSetParams(
     buffer: cache.uniform
     offset: 0
   )
+  cache.uploadedBand = band
 }
 
 # One billboard instance into `batch`: standing at `position` (its foot),
@@ -432,6 +458,14 @@ func drawSpriteInstances(
     ret
   }
   ensurePipelineForDraw(cache: cache, resources: resources, gbuffer: gbuffer)
+  # The hashed alpha test only where TAA resolves it
+  var band: Float = 0.0
+  if gbuffer.taaEnabled and not gbuffer.forwardFrame {
+    band = spriteHashBand
+  }
+  if not (cache.uploadedBand is band) {
+    writeSpriteUniform(cache: cache, resources: resources, band: band)
+  }
   var pipeline: RenderPipelineId = cache.pipeline
   var bindGroup: BindGroupId = cache.bindGroup
   if gbuffer.forwardFrame {
