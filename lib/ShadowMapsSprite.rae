@@ -8,7 +8,9 @@
 #
 # The pictures are the sprite pass's texture array (the C asset upload,
 # rae_gb_sprite_array_*), adopted here as an external view and re-adopted
-# when the array is made again.
+# when the array is made again; or, when the queued sprites come with an
+# impostor atlas (lib/ImpostorAtlas), its albedo's alpha, each quad showing
+# the baked side view nearest the sun.
 import Math
 open Math3d
 open webgpu/Webgpu
@@ -21,6 +23,7 @@ open gpu/GpuRenderPass
 open gpu/GpuRenderTransfer
 open gpu/GpuIds
 open ShadowMaps
+open ImpostorAtlas
 
 # The sprite array, read through the same C accessors as GbufferSprite
 func shadowSpriteArrayView() unsafe extern("rae_gb_sprite_array_view") ret Ptr
@@ -42,8 +45,14 @@ type ShadowSpriteCache {
   params: BufferId
   sampler: SamplerId
   arrayView: ExternalId
-  # The sprite array generation the binds were built over
+  # The sprite array generation and the impostor atlas the binds were
+  # built over
   arrayGen: Int
+  boundImpostors: ImpostorBinding = noImpostorBinding()
+  # This frame's impostor atlas (none: the sprite array), and the frames
+  # buffer bound without one (the shader declares it)
+  impostors: ImpostorBinding = noImpostorBinding()
+  unusedFrames: BufferId = noBufferId()
   binds: List(BindGroupId)  # per cascade
   # Queued this frame: shadowSpriteFloats per sprite, and the pictures'
   # aspect and alpha cutoff
@@ -92,7 +101,9 @@ func ensureShadowSpriteObjects(sprites: mod ShadowSpriteCache, resources: mod Gp
     ret
   }
   sprites.pipeMade = true
-  let spriteShader: Shader = shader(files: ["lib/fade_dither.wgsl", "lib/shadow_sprite.wgsl"])
+  let spriteShader: Shader = shader(
+    files: ["lib/fade_dither.wgsl", "lib/impostor_octahedral.wgsl", "lib/shadow_sprite.wgsl"]
+  )
   if let pipeline: RenderPipelineId = createDepthPipeline(
     resources: resources
     shader: spriteShader
@@ -118,13 +129,21 @@ func ensureShadowSpriteObjects(sprites: mod ShadowSpriteCache, resources: mod Gp
   if let sampler: SamplerId = createSampler(resources: resources) {
     sprites.sampler = sampler
   }
+  if let frames: BufferId = createBuffer(
+    resources: resources
+    size: 16
+    usage: WGPUBufferUsage_Storage + WGPUBufferUsage_CopyDst
+  ) {
+    sprites.unusedFrames = frames
+  }
 }
 
 # Queue billboards as casters (between shadowBegin and shadowEnd): the first
 # `count` records of `records`, `stride` floats each — GbufferSprite's DrawU
 # records, the model's translation the foot, its scale times the roughness
 # slot the height, slot 39 the picture layer. `aspect` and `cutoff` are the
-# pictures' (as GbufferSprite's spriteSetParams has them).
+# pictures' (as GbufferSprite's spriteSetParams has them), `impostors` the
+# atlas the sprite pass draws them from (noImpostorBinding: the sprite array).
 func shadowQueueSprites(
   shadow: mod ShadowCache
   records: view List(Float)
@@ -132,12 +151,14 @@ func shadowQueueSprites(
   count: view Int
   aspect: view Float
   cutoff: view Float
+  impostors: view ImpostorBinding
 ) {
   if not shadow.enabled {
     ret
   }
   shadow.sprites.aspect = aspect
   shadow.sprites.cutoff = cutoff
+  shadow.sprites.impostors = impostors
   loop var record: Int = 0, record < count and shadow.sprites.count < shadowSpriteMax, ++record {
     let base: Int = record * stride
     let scaleX: Float = records.copyAtFallback(index: base, fallback: 1.0)
@@ -176,8 +197,13 @@ func shadowSpritePrepare(shadow: mod ShadowCache, resources: mod GpuResources) r
     hasArray = shadowSpriteArrayView() is not webgpuNull()
     gen = shadowSpriteArrayGen()
   }
-  if hasArray is false {
+  if hasArray is false and shadow.sprites.impostors.viewsPerSide is 0 {
     ret false
+  }
+  if not sameImpostorBinding(first: shadow.sprites.boundImpostors, second: shadow.sprites.impostors) {
+    shadow.sprites.boundImpostors = shadow.sprites.impostors
+    retireBindGroupIds(resources: resources, list: shadow.sprites.binds)
+    shadow.sprites.binds = fillBindGroupIds(count: shadowMaxCascades)
   }
   if gen is not shadow.sprites.arrayGen {
     shadow.sprites.arrayGen = gen
@@ -197,7 +223,7 @@ func shadowSpritePrepare(shadow: mod ShadowCache, resources: mod GpuResources) r
   var params: List(Float) = List.create(Float, cap: 4)
   params.add(value: shadow.sprites.aspect)
   params.add(value: shadow.sprites.cutoff)
-  params.add(value: 0.0)
+  params.add(value: shadow.sprites.impostors.viewsPerSide.toFloat())
   params.add(value: 0.0)
   var wrote: Bool = false
   unsafe {
@@ -231,8 +257,17 @@ func shadowSpritePrepare(shadow: mod ShadowCache, resources: mod GpuResources) r
       )
       entries.add(value: bufferRef(id: shadow.sprites.sprites))
       entries.add(value: bufferRef(id: shadow.sprites.params))
-      entries.add(value: externalRef(id: shadow.sprites.arrayView))
+      if shadow.sprites.impostors.viewsPerSide > 0 {
+        entries.add(value: textureViewRef(id: shadow.sprites.impostors.albedo))
+      } else {
+        entries.add(value: externalRef(id: shadow.sprites.arrayView))
+      }
       entries.add(value: samplerRef(id: shadow.sprites.sampler))
+      if shadow.sprites.impostors.viewsPerSide > 0 {
+        entries.add(value: bufferRef(id: shadow.sprites.impostors.frames))
+      } else {
+        entries.add(value: bufferRef(id: shadow.sprites.unusedFrames))
+      }
       if let bind: BindGroupId = createRenderBindGroup(
         resources: resources
         pipeline: shadow.sprites.pipeline
@@ -291,6 +326,7 @@ func shadowSpriteShutdown(sprites: mod ShadowSpriteCache, resources: mod GpuReso
   retireBuffer(resources: resources, id: sprites.sprites)
   retireBuffer(resources: resources, id: sprites.params)
   retireSampler(resources: resources, id: sprites.sampler)
+  let framesRetired: Bool = retireBuffer(resources: resources, id: sprites.unusedFrames)
   retireRenderPipeline(resources: resources, id: sprites.pipeline)
   let released: Bool = releaseExternal(resources: resources, id: sprites.arrayView)
   sprites = createShadowSpriteCache()

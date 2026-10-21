@@ -132,6 +132,27 @@ cut was left as it is. Alpha to coverage on the forward path is not done.
 * **Shadows:** the shadow pass draws the impostor from the sun's direction
   (the view nearest the sun), alpha-tested with the same coverage.
 
+**Step 4 done (2026-10-21).** `ImpostorBake bakeImpostorAtlas` bakes every
+species at startup in one GPU submission (91 ms for the 9 species on an
+M-series Mac, 43 ms with the phone's views): one render pass per species
+draws the near level's meshes (the ones the renderer already holds) into
+every view cell at once, an instance per view, into two RGBA8 texture
+arrays, unlit albedo + alpha and normal + depth (`ImpostorAtlas`). PC is
+8 x 8 views of 128 pixels (1024 x 1024 a species), the phone 4 x 4
+(`defaultImpostorSettings`, by `Target.isMobileOs`). The grid is
+hemi-octahedral with the horizon on its border (`impostor_octahedral.wgsl`).
+The mips are coverage-preserving on the GPU (`impostor_mips.wgsl`): per view
+cell a histogram of the averaged alpha, the scale that keeps level 0's share,
+then the write; every species keeps 100% through its 4 levels. Each level is
+made straight from level 0, and a fixed per-texel tie-break orders equal
+averages. `checks/impostorBake` checks this and writes the atlas to PNGs. The far level now draws from the
+atlas instead of the CPU picture: the sprite and sprite-shadow passes have
+an impostor mode (the quad is the bounding sphere's square, turned to the
+eye; the side view nearest the eye, or the sun, is shown) and shade the
+albedo with the baked normal and the old bake light, so 143 looks as
+before. The CPU bake (`app3d/SpriteBake`) stays for other sprites and the
+coverage test.
+
 ### 2.3 Cross-fades instead of switches
 
 * Each level has a fade band (about 10% of its distance, at least 4 m). In

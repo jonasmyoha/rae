@@ -1,0 +1,283 @@
+# Hardware check for the octahedral impostor bake (lib/ImpostorBake, tree
+# LOD step 4, docs/tree-lod-design.md §2.2): every tree species of
+# app3d/GroveTrees baked on the GPU into an atlas of 8 x 8 views (the PC
+# settings; RAE_IMPOSTOR_PHONE=1 bakes the phone's 4 x 4), read back level by
+# level. It checks that every species covers part of its layer and that each
+# mip keeps level 0's coverage under the alpha cut within 3%, and writes the
+# atlas to PNG files to look at, in RAE_IMPOSTOR_PNG_DIR (default
+# /tmp/rae-impostor-atlas): per species its albedo (see-through pixels grey),
+# normal and depth at level 0, and the albedo of every mip.
+# Exit code 0 = every check passed.
+import Math
+import Sys
+import Image
+import Vec3
+open webgpu/Context
+open webgpu/WebgpuEnums
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuReadback
+open gpu/GpuRenderTransfer
+open Scene3d
+open Mesh3d
+open MeshStore
+open ImpostorAtlas
+open ImpostorBake
+open ImpostorMips
+open app3d/GroveTrees
+
+const speciesNames: String = "broadleaf umbrella cypress spruce orange red gold crimson palm"
+
+func speciesName(species: view Int) ret String {
+  let names: List(String) = speciesNames.split(sep: " ")
+  ret names.copyAtFallback(index: species, fallback: "species")
+}
+
+# The RGBA bytes of one level of one layer, rows packed (width * 4 bytes)
+func readLevel(
+  resources: mod GpuResources
+  texture: view TextureId
+  mip: view Int
+  layer: view Int
+  size: view Int
+) ret List(UInt8) {
+  var pixels: List(UInt8) = List.create(UInt8, cap: size * size * 4)
+  let bytesPerRow: Int = (size * 4 + 255) / 256 * 256
+  if let buffer: BufferId = createBuffer(
+    resources: resources
+    size: bytesPerRow * size
+    usage: WGPUBufferUsage_MapRead + WGPUBufferUsage_CopyDst
+  ) {
+    if var recording: Recording = beginRecording(resources: resources) {
+      if recordCopyTextureLevelToBuffer(
+        recording: recording
+        resources: resources
+        texture: texture
+        mip: mip
+        layer: layer
+        buffer: buffer
+        bytesPerRow: bytesPerRow
+      ) {
+        if let submission: SubmissionId = submit(resources: resources, recording: recording) {
+          let done: Bool = waitSubmission(resources: resources, id: submission)
+          let retired: Bool = retireSubmission(resources: resources, id: submission)
+          if let read: ReadbackId = startReadback(
+            resources: resources
+            buffer: buffer
+            offset: 0
+            size: bytesPerRow * size
+          ) {
+            if waitReadback(resources: resources, id: read) {
+              var bytes: List(UInt8) = List.create(UInt8, cap: bytesPerRow * size)
+              loop var i: Int = 0, i < bytesPerRow * size, ++i {
+                bytes.add(value: 0)
+              }
+              if copyReadback(resources: resources, id: read, destination: bytes) {
+                loop var row: Int = 0, row < size, ++row {
+                  loop var column: Int = 0, column < size * 4, ++column {
+                    pixels.add(
+                      value: bytes.copyAtFallback(index: row * bytesPerRow + column, fallback: 0)
+                    )
+                  }
+                }
+              }
+            }
+            let readRetired: Bool = retireReadback(resources: resources, id: read)
+          }
+        }
+      }
+    }
+    let bufferRetired: Bool = retireBuffer(resources: resources, id: buffer)
+  }
+  ret pixels
+}
+
+func byteAt(bytes: view List(UInt8), index: view Int) ret Int {
+  ret bytes.copyAtFallback(index: index, fallback: 0) as Int
+}
+
+# The share of pixels whose alpha reaches `cutoff`
+func coverage(pixels: view List(UInt8), cutoff: view Float) ret Float {
+  let limit: Int = (cutoff * 255.0 + 0.5).toInt()
+  let count: Int = pixels.length / 4
+  var kept: Int = 0
+  loop var i: Int = 0, i < count, ++i {
+    if byteAt(bytes: pixels, index: i * 4 + 3) >= limit {
+      kept = kept + 1
+    }
+  }
+  if count is 0 {
+    ret 0.0
+  }
+  ret kept.toFloat() / count.toFloat()
+}
+
+# Which picture of a level a PNG shows
+enum PngPicture { albedo, normal, depth }
+
+# A level as a PNG: its albedo over grey where see-through, its normal, or
+# its depth (black far, white near; grey where see-through)
+func savePicture(
+  path: view String
+  pixels: view List(UInt8)
+  size: view Int
+  picture: view PngPicture
+) ret Bool {
+  var packed: List(Int) = List.create(Int, cap: size * size)
+  loop var i: Int = 0, i < size * size, ++i {
+    let alpha: Int = byteAt(bytes: pixels, index: i * 4 + 3)
+    var red: Int = byteAt(bytes: pixels, index: i * 4)
+    var green: Int = byteAt(bytes: pixels, index: i * 4 + 1)
+    var blue: Int = byteAt(bytes: pixels, index: i * 4 + 2)
+    if picture is PngPicture.depth {
+      red = alpha
+      green = alpha
+      blue = alpha
+    }
+    if picture is PngPicture.albedo {
+      red = (red * alpha + 96 * (255 - alpha)) / 255
+      green = (green * alpha + 96 * (255 - alpha)) / 255
+      blue = (blue * alpha + 96 * (255 - alpha)) / 255
+    }
+    packed.add(value: red * 65536 + green * 256 + blue)
+  }
+  ret Image.savePng(
+    path: path
+    pixels: packed.data
+    width: size
+    height: size
+  )
+}
+
+func main() ret Int {
+  var booted: Int = 0
+  unsafe {
+    booted = webgpuBootstrap()
+  }
+  if booted is not 1 {
+    log("no GPU")
+    ret 1
+  }
+  var folder: String = Sys.getEnv(name: "RAE_IMPOSTOR_PNG_DIR")
+  if folder.length() is 0 {
+    folder = "/tmp/rae-impostor-atlas"
+  }
+  let made: Bool = Sys.makeDir(path: folder)
+  var settings: ImpostorSettings = impostorPcSettings()
+  if Sys.getEnv(name: "RAE_IMPOSTOR_PHONE") is "1" {
+    settings = impostorPhoneSettings()
+  }
+  var failures: Int = 0
+  var issuer: IdIssuer = IdIssuer.create()
+  if var resources: GpuResources = GpuResources.create(issuer: issuer, capacity: 256) {
+    var store: MeshStore = createMeshStore()
+    var subjects: List(ImpostorSubject) = List.create(ImpostorSubject, cap: treeSpeciesCount)
+    loop var species: Int = 0, species < treeSpeciesCount, ++species {
+      let meshes: List(MeshData) = speciesLevelMeshes(
+        species: species
+        patches: nearPatches
+        leaves: nearLeaves
+      )
+      var handles: List(MeshHandle) = List.create(MeshHandle, cap: meshes.length)
+      loop let mesh: view MeshData in meshes {
+        handles.add(value: meshStoreUpload(
+          store: store
+          resources: resources
+          verts: mesh.verts
+          vertCount: mesh.vertCount
+          indices: mesh.indices
+        ))
+      }
+      subjects.add(
+        value: impostorSubject(
+          parts: meshes
+          meshes: handles
+          albedos: speciesAlbedos(species: species)
+        )
+      )
+    }
+    let started: Int = nowMs()
+    var atlas: ImpostorAtlas = bakeImpostorAtlas(
+      resources: resources
+      meshes: store
+      subjects: subjects
+      settings: settings
+      cutoff: spriteCutoff
+    )
+    let milliseconds: Int = nowMs() - started
+    if atlas.layers is not treeSpeciesCount {
+      log("FAIL: the bake made {atlas.layers} layers, not {treeSpeciesCount}")
+      ret 1
+    }
+    log(
+      "baked {atlas.layers} species, {settings.viewsPerSide} x {settings.viewsPerSide} views of {settings.cellSize} pixels, {settings.mips} levels, in {milliseconds} ms"
+    )
+    loop var species: Int = 0, species < atlas.layers, ++species {
+      let name: String = speciesName(species: species)
+      var full: Float = 0.0
+      var low: Float = 10.0
+      var high: Float = 0.0
+      loop var mip: Int = 0, mip < settings.mips, ++mip {
+        let size: Int = impostorLevelSize(settings: settings, level: mip)
+        let albedo: List(UInt8) = readLevel(
+          resources: resources
+          texture: atlas.albedoTexture
+          mip: mip
+          layer: species
+          size: size
+        )
+        let share: Float = coverage(pixels: albedo, cutoff: spriteCutoff)
+        if mip is 0 {
+          full = share
+          let normalDepth: List(UInt8) = readLevel(
+            resources: resources
+            texture: atlas.normalDepthTexture
+            mip: 0
+            layer: species
+            size: size
+          )
+          let wroteNormal: Bool = savePicture(
+            path: "{folder}/{name}-normal.png"
+            pixels: normalDepth
+            size: size
+            picture: PngPicture.normal
+          )
+          let wroteDepth: Bool = savePicture(
+            path: "{folder}/{name}-depth.png"
+            pixels: normalDepth
+            size: size
+            picture: PngPicture.depth
+          )
+        }
+        if full > 0.0 {
+          low = Math.min(a: low, b: share / full)
+          high = Math.max(a: high, b: share / full)
+        }
+        let wroteAlbedo: Bool = savePicture(
+          path: "{folder}/{name}-albedo-mip{mip}.png"
+          pixels: albedo
+          size: size
+          picture: PngPicture.albedo
+        )
+      }
+      let covers: Bool = full > 0.05 and full < 0.8
+      let mipsKeep: Bool = low >= 0.97 and high <= 1.03
+      if not (covers and mipsKeep) {
+        failures = failures + 1
+      }
+      log(
+        "{name}: level 0 covers {(full * 100.0).toInt()}% of its layer ={covers}; the mips keep {(low * 100.0 + 0.5).toInt()}-{(high * 100.0 + 0.5).toInt()}% of it ={mipsKeep}"
+      )
+    }
+    log("pictures written to {folder}")
+    retireImpostorAtlas(atlas: atlas, resources: resources)
+    meshStoreShutdown(store: store, resources: resources)
+    shutdown(resources: resources)
+  }
+  if failures > 0 {
+    log("FAIL: {failures} species")
+    ret 1
+  }
+  log("impostor bake OK")
+  ret 0
+}

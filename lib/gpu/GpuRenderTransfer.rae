@@ -12,6 +12,7 @@ open webgpu/WebgpuTypes
 open gpu/GpuResources
 open gpu/GpuLifetime
 open gpu/GpuRender
+import Math
 
 # One render pass with one indexed draw (a water body is exactly this): begin
 # the pass on the target, set the pipeline, bind group, vertex and index
@@ -301,24 +302,52 @@ func recordCopyTextureToBuffer(
   buffer: view BufferId
   bytesPerRow: view Int
 ) ret Bool {
+  ret recordCopyTextureLevelToBuffer(
+    recording: recording
+    resources: resources
+    texture: texture
+    mip: 0
+    layer: 0
+    buffer: buffer
+    bytesPerRow: bytesPerRow
+  )
+}
+
+# The same for level `mip` of array layer `layer` (its size is the texture's
+# halved `mip` times, at least 1), e.g. one level of an impostor atlas
+func recordCopyTextureLevelToBuffer(
+  recording: mod Recording
+  resources: view GpuResources
+  texture: view TextureId
+  mip: view Int
+  layer: view Int
+  buffer: view BufferId
+  bytesPerRow: view Int
+) ret Bool {
   if recordingIsOpen(recording: recording, resources: resources) is false {
     ret false
   }
-  if isValidTexture(resources: resources, id: texture) is false {
+  if isValidTexture(resources: resources, id: texture) is false or mip < 0 or layer < 0 {
     ret false
   }
-  let width: Int = textureWidth(resources: resources, id: texture)
-  let height: Int = textureHeight(resources: resources, id: texture)
+  var width: Int = textureWidth(resources: resources, id: texture)
+  var height: Int = textureHeight(resources: resources, id: texture)
+  loop var level: Int = 0, level < mip, ++level {
+    width = Math.max(a: width / 2, b: 1)
+    height = Math.max(a: height / 2, b: 1)
+  }
   if width < 1 or height < 1 {
     ret false
   }
   var texel: Int = -1
   unsafe {
-    texel = texelBytes(
-      format: wgpuTextureGetFormat(
-        texture: slotHandle(table: resources.textures, slot: texture.slot)
-      )
-    )
+    let handle: Ptr = slotHandle(table: resources.textures, slot: texture.slot)
+    if mip >= (wgpuTextureGetMipLevelCount(texture: handle) as Int) or layer >= (wgpuTextureGetDepthOrArrayLayers(
+      texture: handle
+    ) as Int) {
+      ret false
+    }
+    texel = texelBytes(format: wgpuTextureGetFormat(texture: handle))
   }
   if texel < 1 {
     ret false
@@ -343,8 +372,8 @@ func recordCopyTextureToBuffer(
   unsafe {
     let source: WGPUTexelCopyTextureInfo = {
       texture: slotHandle(table: resources.textures, slot: texture.slot)
-      mipLevel: 0
-      origin: { x: 0, y: 0, z: 0 }
+      mipLevel: mip as UInt32
+      origin: { x: 0, y: 0, z: layer as UInt32 }
       aspect: WGPUTextureAspect_All
     }
     let destination: WGPUTexelCopyBufferInfo = {

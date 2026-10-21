@@ -3,13 +3,28 @@
 # coarser crown is not bigger or smaller than the full one, so it does not
 # swell or shrink where the levels switch. The middle crowns of broadleaf,
 # umbrella and cypress once covered 18-28% more, the spruce's 6% less.
-# And its billboard keeps the full picture's coverage within 3% at every mip
-# level the trees use (app3d/SpriteBake spriteMipChain): averaged mips under
-# a plain alpha cut once drifted to 85-113% at the fourth level.
+# And a CPU billboard picture of it (app3d/SpriteBake, the far level before
+# the GPU impostors) keeps the full picture's coverage within 3% at each of
+# 4 mip levels (spriteMipChain): averaged mips under a plain alpha cut once
+# drifted to 85-113% at the fourth level. The impostor atlas's mips are
+# checked on the GPU (checks/impostorBake).
 import Math
 open app3d/GroveTrees
 open app3d/TreeCoverage
 open app3d/SpriteBake
+
+const pictureMipLevels: Int = 4
+
+# A species' near level from the side, 192 x 128 pixels
+func speciesPicture(species: view Int) ret SpritePicture {
+  ret bakeSpritePicture(
+    parts: speciesLevelMeshes(species: species, patches: nearPatches, leaves: nearLeaves)
+    colors: speciesAlbedos(species: species)
+    width: 192
+    height: 128
+    aspect: 1.5
+  )
+}
 
 func percent(share: view Float) ret Int {
   ret (share * 100.0 + 0.5).toInt()
@@ -55,7 +70,7 @@ func main() ret Int {
     let full: Float = pictureCoverage(picture: picture, cutoff: spriteCutoff)
     let chain: List(SpritePicture) = spriteMipChain(
       picture: picture
-      mips: spriteMipLevels
+      mips: pictureMipLevels
       cutoff: spriteCutoff
     )
     var mipLow: Float = 10.0
