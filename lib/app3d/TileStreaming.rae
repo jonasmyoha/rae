@@ -1,0 +1,312 @@
+# app3d/TileStreaming — an open world in square tiles, only those near a
+# point in memory. The world is tiles `tileSize` a side, tile (0, 0) centred
+# on the origin. A tile loads once its centre is within `loadDistance` of the
+# point and is let go once it is past `unloadDistance` (apart, so a tile at
+# the edge does not load and unload by turns), at most `slotCount` at a time
+# and one a frame, the nearest first. The slots are what an app keeps per
+# tile on the GPU and in physics (app3d/SlotMeshes, a PropField group per
+# slot), so they are the open world's memory however big the world is.
+#
+# A loaded tile is an entity (from the app's allocator, so the app can put its
+# own components on it) with a StreamedTile component: its place in the grid,
+# its slot, its state. Each frame streamTiles lets go of the tiles past the
+# unload distance and loads the nearest wanted one, and says so in two event
+# queues the app answers:
+#
+#   TileGone    the tile left its slot: the app takes its content out of the
+#               slot (zero its mesh ranges, destroy its colliders, clear its
+#               prop groups) and its own components off the entity, which
+#               streamTiles frees on its next call
+#   TileLoaded  a tile came into a free slot: the app builds its content there
+#
+# What a tile holds is the app's; this is only which tiles, when, where.
+import Math
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open ecs/Event
+
+type TileGridSettings {
+  # A tile's side (m)
+  tileSize: Float
+  # Load a tile whose centre is within this of the point (m); let it go past
+  # unloadDistance
+  loadDistance: Float
+  unloadDistance: Float
+  # Tiles in memory at most
+  slotCount: Int
+}
+
+# One tile's place in the grid
+type GridTile {
+  x: Int
+  y: Int
+}
+
+enum TileState { loaded, gone }
+
+# A streamed tile's entity: its place, its slot, whether it is still loaded
+type StreamedTile {
+  tile: GridTile
+  slot: Int
+  state: TileState
+}
+
+type TileLoaded {
+  entityId: EntityId
+  tile: GridTile
+  slot: Int
+}
+
+type TileGone {
+  entityId: EntityId
+  tile: GridTile
+  slot: Int
+}
+
+type TileStreamer {
+  settings: TileGridSettings
+  # The tile entity in each slot (noEntity when free)
+  slots: List(EntityId)
+  tiles: ComponentTable(StreamedTile)
+  loaded: EventQueue(TileLoaded)
+  gone: EventQueue(TileGone)
+  # The entities let go last call, freed on the next
+  toFree: List(EntityId)
+  loads: Int
+  unloads: Int
+}
+
+func createTileStreamer(settings: view TileGridSettings) ret TileStreamer {
+  var slots: List(EntityId) = List.create(EntityId, cap: settings.slotCount)
+  loop var s: Int = 0, s < settings.slotCount, ++s {
+    slots.add(value: noEntity())
+  }
+  ret TileStreamer {
+    settings: settings
+    slots: own slots
+    tiles: ComponentTable.create(StreamedTile)
+    loaded: createEventQueue(TileLoaded)
+    gone: createEventQueue(TileGone)
+    toFree: List.create(EntityId, cap: settings.slotCount)
+    loads: 0
+    unloads: 0
+  }
+}
+
+# ----- the grid's rules ------------------------------------------------------
+func tileOfPoint(settings: view TileGridSettings, x: view Float, y: view Float) ret GridTile {
+  ret GridTile {
+    x: Math.floor(x: x / settings.tileSize + 0.5).toInt()
+    y: Math.floor(x: y / settings.tileSize + 0.5).toInt()
+  }
+}
+
+func tileCenterX(settings: view TileGridSettings, tile: view GridTile) ret Float {
+  ret tile.x.toFloat() * settings.tileSize
+}
+
+func tileCenterY(settings: view TileGridSettings, tile: view GridTile) ret Float {
+  ret tile.y.toFloat() * settings.tileSize
+}
+
+func tileDistance(
+  settings: view TileGridSettings
+  tile: view GridTile
+  x: view Float
+  y: view Float
+) ret Float {
+  let dx: Float = tileCenterX(settings: settings, tile: tile) - x
+  let dy: Float = tileCenterY(settings: settings, tile: tile) - y
+  ret Math.sqrt(x: dx * dx + dy * dy)
+}
+
+func tileWanted(
+  settings: view TileGridSettings
+  tile: view GridTile
+  x: view Float
+  y: view Float
+) ret Bool {
+  ret tileDistance(
+    settings: settings
+    tile: tile
+    x: x
+    y: y
+  ) <= settings.loadDistance
+}
+
+func tileKept(
+  settings: view TileGridSettings
+  tile: view GridTile
+  x: view Float
+  y: view Float
+) ret Bool {
+  ret tileDistance(
+    settings: settings
+    tile: tile
+    x: x
+    y: y
+  ) <= settings.unloadDistance
+}
+
+func sameTile(a: view GridTile, b: view GridTile) ret Bool {
+  ret a.x is b.x and a.y is b.y
+}
+
+# Every tile wanted round (x, y), row by row from the south-west
+func tilesToLoad(settings: view TileGridSettings, x: view Float, y: view Float) ret List(GridTile) {
+  var tiles: List(GridTile) = List.create(GridTile, cap: settings.slotCount)
+  let centre: GridTile = tileOfPoint(settings: settings, x: x, y: y)
+  let reach: Int = (settings.loadDistance / settings.tileSize).toInt() + 1
+  loop var dy: Int = 0 - reach, dy <= reach, ++dy {
+    loop var dx: Int = 0 - reach, dx <= reach, ++dx {
+      let tile: GridTile = { x: centre.x + dx, y: centre.y + dy }
+      if tileWanted(
+        settings: settings
+        tile: tile
+        x: x
+        y: y
+      ) {
+        tiles.add(value: tile)
+      }
+    }
+  }
+  ret tiles
+}
+
+# The nearest wanted tile not among `loaded`, if there is one and a slot for it
+func nextTileToLoad(
+  settings: view TileGridSettings
+  loaded: view List(GridTile)
+  x: view Float
+  y: view Float
+) ret opt GridTile {
+  if loaded.length >= settings.slotCount {
+    ret none
+  }
+  var best: GridTile = { x: 0, y: 0 }
+  var bestDistance: Float = 1000000.0
+  var found: Bool = false
+  loop let tile: view GridTile in tilesToLoad(settings: settings, x: x, y: y) {
+    var held: Bool = false
+    loop let other: view GridTile in loaded {
+      if sameTile(a: other, b: tile) {
+        held = true
+      }
+    }
+    let distance: Float = tileDistance(
+      settings: settings
+      tile: tile
+      x: x
+      y: y
+    )
+    if held is false and distance < bestDistance {
+      best = tile
+      bestDistance = distance
+      found = true
+    }
+  }
+  if found {
+    ret best
+  }
+  ret none
+}
+
+# ----- the streaming system ----------------------------------------------------
+# The loaded tiles, in slot order
+func streamedTiles(streamer: view TileStreamer) ret List(GridTile) {
+  var tiles: List(GridTile) = List.create(GridTile, cap: streamer.settings.slotCount)
+  loop let entityId: view EntityId in streamer.slots {
+    if isNone(this: entityId) is false {
+      tiles.add(value: componentView(this: streamer.tiles, entityId: entityId).tile)
+    }
+  }
+  ret tiles
+}
+
+# How many slots hold a tile
+func usedTileSlots(streamer: view TileStreamer) ret Int {
+  ret streamedTiles(streamer: streamer).length
+}
+
+# The tile in `slot`, if one is loaded there
+func tileInSlot(streamer: view TileStreamer, slot: view Int) ret opt GridTile {
+  let entityId: EntityId = streamer.slots.copyAtFallback(index: slot, fallback: noEntity())
+  if isNone(this: entityId) {
+    ret none
+  }
+  ret componentView(this: streamer.tiles, entityId: entityId).tile
+}
+
+# One frame round (x, y): free the entities let go last call, then send a
+# TileGone for every tile past the unload distance (in slot order) and a
+# TileLoaded for the nearest wanted tile, into the first free slot. The
+# events of the call before are gone.
+func streamTiles(
+  streamer: mod TileStreamer
+  allocator: mod EntityAllocator
+  x: view Float
+  y: view Float
+) {
+  loop let entityId: view EntityId in streamer.toFree {
+    componentRemove(this: streamer.tiles, entityId: entityId)
+    freeEntity(this: allocator, entityId: entityId)
+  }
+  streamer.toFree.clear()
+  eventClear(TileLoaded, this: streamer.loaded)
+  eventClear(TileGone, this: streamer.gone)
+  let settings: TileGridSettings = streamer.settings
+  loop var s: Int = 0, s < settings.slotCount, ++s {
+    let entityId: EntityId = streamer.slots.copyAtFallback(index: s, fallback: noEntity())
+    if isNone(this: entityId) {
+      continue
+    }
+    let streamed: mod StreamedTile = componentMod(this: streamer.tiles, entityId: entityId)
+    if tileKept(
+      settings: settings
+      tile: streamed.tile
+      x: x
+      y: y
+    ) {
+      continue
+    }
+    streamed.state = TileState.gone
+    let tile: GridTile = streamed.tile
+    eventSend(
+      TileGone
+      this: streamer.gone
+      value: TileGone { entityId: entityId, tile: tile, slot: s }
+    )
+    streamer.slots.set(index: s, value: noEntity())
+    streamer.toFree.add(value: entityId)
+    streamer.unloads = streamer.unloads + 1
+  }
+  if let next: GridTile = nextTileToLoad(
+    settings: settings
+    loaded: streamedTiles(streamer: streamer)
+    x: x
+    y: y
+  ) {
+    var free: Int = -1
+    loop var s: Int = 0, s < settings.slotCount and free < 0, ++s {
+      if isNone(this: streamer.slots.copyAtFallback(index: s, fallback: noEntity())) {
+        free = s
+      }
+    }
+    if free >= 0 {
+      let entityId: EntityId = allocEntity(this: allocator)
+      componentSet(
+        this: streamer.tiles
+        entityId: entityId
+        data: StreamedTile { tile: next, slot: free, state: TileState.loaded }
+      )
+      streamer.slots.set(index: free, value: entityId)
+      eventSend(
+        TileLoaded
+        this: streamer.loaded
+        value: TileLoaded { entityId: entityId, tile: next, slot: free }
+      )
+      streamer.loads = streamer.loads + 1
+    }
+  }
+}
