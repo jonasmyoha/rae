@@ -1,0 +1,19 @@
+# A call that returns a reference (`componentView` returns `view T`) cannot be
+# assigned to a value variable directly, as it cannot initialise a `let`:
+# copying what it refers to is spelled out by binding it first. The C
+# compiler used to be the first to notice (a pointer assigned to a struct).
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Transform
+
+func main() {
+  var transforms: ComponentTable(Transform3D) = ComponentTable.create(Transform3D)
+  let entityId: EntityId = id(v: 1)
+  componentSet(this: transforms, entityId: entityId, data: createTransform3D())
+  var pose: Transform3D = createTransform3D()
+  pose = componentView(this: transforms, entityId: entityId)
+  # The spelled-out copy is fine
+  let source: view Transform3D = componentView(this: transforms, entityId: entityId)
+  pose = source
+  log("{pose.position.x}")
+}
