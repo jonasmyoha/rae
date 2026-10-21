@@ -29,6 +29,18 @@ const crowdTestWalkFrames: Int = 1200
 
 const crowdTestRunFrames: Int = 180
 
+# The walk-and-stop check's range round each one (m)
+const crowdTestWanderRange: Float = 10.0
+
+# Off the ground field (the forest's: it follows the walker): a crowd member
+# placed this far past the field's centre and sent this far on walks there
+# for this many frames on the terrain's own height
+const crowdTestFarOff: Float = 400.0
+
+const crowdTestFarWalk: Float = 30.0
+
+const crowdTestFarFrames: Int = 600
+
 func crowdTestFrame(
   physicsSystem: mod WalkerPhysics
   world: mod WalkerWorld
@@ -133,6 +145,21 @@ func runWalkerCrowdTest(
   var arrivalsBefore: Int = 0
   var clipFrames: Int = 0
   var clipMatches: Int = 0
+  # The walk-and-stop check on a short range round where each stands (its
+  # walks over the whole land take minutes); the land's range back after it
+  var homes: List(Vec3) = List.create(Vec3, cap: count)
+  loop var i: Int = 0, i < count, ++i {
+    let entityId: EntityId = componentEntityAt(this: physicsSystem.wandering.wanderers, i: i)
+    let wanderer: mod Wanderer = componentMod(
+      this: physicsSystem.wandering.wanderers
+      entityId: entityId
+    )
+    homes.add(value: Vec3.create(x: wanderer.homeX, y: wanderer.homeY, z: wanderer.range))
+    let standsAt: Vec3 = controllerOf(controllers: world.controllers, entityId: entityId).position
+    wanderer.homeX = standsAt.x
+    wanderer.homeY = standsAt.y
+    wanderer.range = crowdTestWanderRange
+  }
   loop var i: Int = 0, i < count, ++i {
     let entityId: EntityId = componentEntityAt(this: physicsSystem.wandering.wanderers, i: i)
     starts.add(value: controllerOf(controllers: world.controllers, entityId: entityId).position)
@@ -183,6 +210,17 @@ func runWalkerCrowdTest(
     leastStood = Math.min(a: leastStood, b: stoodFrames.copyAtFallback(index: i, fallback: 0))
   }
   let wandered: Bool = count > 0 and leastGone > 1.5 and arrivals >= count and leastStood > 60
+  loop var i: Int = 0, i < count, ++i {
+    let entityId: EntityId = componentEntityAt(this: physicsSystem.wandering.wanderers, i: i)
+    let wanderer: mod Wanderer = componentMod(
+      this: physicsSystem.wandering.wanderers
+      entityId: entityId
+    )
+    let home: Vec3 = homes.copyAtFallback(index: i, fallback: Vec3.create(x: 0.0, y: 0.0, z: 10.0))
+    wanderer.homeX = home.x
+    wanderer.homeY = home.y
+    wanderer.range = home.z
+  }
   # A clip changes a blend (0.28 s) after the speed does, so a few frames
   # around each start and stop do not match
   var clipShare: Float = 0.0
@@ -279,9 +317,66 @@ func runWalkerCrowdTest(
     }
   }
   let layOk: Bool = lay >= walkerCrowdDownSeconds and lay < walkerCrowdDownSeconds + 2.0
-  let passed: Bool = wandered and clipsFollow and knockedOver and heroDown is false and layOk
+  # ----- off the ground field, on the terrain's own height (the forest) -------------
+  var farWalked: Float = 0.0
+  var farOffGround: Float = 0.0
+  let farTested: Bool = physicsSystem.followDistance > 0.0 and count > 1
+  if farTested {
+    let farId: EntityId = componentEntityAt(this: physicsSystem.wandering.wanderers, i: count - 1)
+    let fromX: Float = physicsSystem.groundCentre.x + crowdTestFarOff
+    let fromY: Float = physicsSystem.groundCentre.y
+    let fromFeet: Vec3 = Vec3.create(
+      x: fromX
+      y: fromY
+      z: worldTerrainHeight(
+        x: fromX
+        y: fromY
+        groundZ: physicsSystem.groundZ
+        cfg: physicsSystem.biome
+      )
+    )
+    placeHero(physicsSystem: physicsSystem, heroEntityId: farId, feet: fromFeet)
+    let farWanderer: mod Wanderer = componentMod(
+      this: physicsSystem.wandering.wanderers
+      entityId: farId
+    )
+    farWanderer.state = WanderState.walking
+    farWanderer.targetX = fromX + crowdTestFarWalk
+    farWanderer.targetY = fromY
+    farWanderer.headwayLeft = 100.0
+    farWanderer.headwayDistance = crowdTestFarWalk
+    loop var frame: Int = 0, frame < crowdTestFarFrames, ++frame {
+      crowdTestFrame(
+        physicsSystem: physicsSystem
+        world: world
+        characterSystem: characterSystem
+        heroEntityId: heroEntityId
+        intent: still
+        yaw: 0.0
+        wanders: true
+      )
+      let feet: Vec3 = controllerFeet(
+        controller: controllerOf(controllers: world.controllers, entityId: farId)
+        groundZ: physicsSystem.groundZ
+      )
+      if frame > 30 {
+        farOffGround = Math.max(
+          a: farOffGround
+          b: Math.abs(value: feet.z - worldTerrainHeight(
+            x: feet.x
+            y: feet.y
+            groundZ: physicsSystem.groundZ
+            cfg: physicsSystem.biome
+          ))
+        )
+      }
+      farWalked = Math.max(a: farWalked, b: feet.x - fromX)
+    }
+  }
+  let farOk: Bool = farTested is false or (farWalked > 10.0 and farOffGround < 0.15)
+  let passed: Bool = wandered and clipsFollow and knockedOver and heroDown is false and layOk and farOk
   log(
-    "[crowdtest] {count} wanderers in 20 s: each went at least {leastGone} m off, {arrivals} spots reached, each stood still {leastStood} frames or more ={wandered}; their clip showed what they did in {clipShare * 100.0}% of frames ={clipsFollow}; the hero ran at one standing (closest {closest} m): it fell={knockedOver}, the hero stayed up={heroDown is false}, it lay {lay} s before it got up ={layOk}; passed={passed}"
+    "[crowdtest] {count} wanderers in 20 s: each went at least {leastGone} m off, {arrivals} spots reached, each stood still {leastStood} frames or more ={wandered}; their clip showed what they did in {clipShare * 100.0}% of frames ={clipsFollow}; the hero ran at one standing (closest {closest} m): it fell={knockedOver}, the hero stayed up={heroDown is false}, it lay {lay} s before it got up ={layOk}; off the ground field (tested={farTested}) it walked {farWalked} m on the terrain, its feet at most {farOffGround} m off it ={farOk}; passed={passed}"
   )
   ret passed
 }

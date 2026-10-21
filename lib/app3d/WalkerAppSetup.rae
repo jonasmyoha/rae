@@ -56,8 +56,19 @@ const walkerDaySeconds: Float = 1800.0
 # How many crowd members walk beside the hero
 const walkerCrowdCount: Int = 5
 
-# How far from where it started each crowd member walks about (m)
-const walkerWanderRange: Float = 10.0
+# Where the crowd walks about: round the land's middle, over the whole
+# island (its radius), or in the wide forest's endless terrain a circle
+# walkerForestWanderRange across (5 km; its forest is 1.2 km square, and off
+# the ground field round the walker the terrain's own height holds them up,
+# WalkerPhysics holdMoversOnTerrain)
+const walkerForestWanderRange: Float = 2500.0
+
+func walkerWanderRange(land: view WalkerLand, biome: view BiomeConfig) ret Float {
+  if land is WalkerLand.forest {
+    ret walkerForestWanderRange
+  }
+  ret biome.islandRadius
+}
 
 func walkerBiome(land: view WalkerLand) ret BiomeConfig {
   if land is WalkerLand.forest {
@@ -366,15 +377,14 @@ func createWalkerAppPhysics(
         groundZ: groundZ
       )
     )
-    # It walks about round where it stands (app3d/Wander): to a spot, a stop,
-    # another spot
-    let home: Vec3 = controllerOf(controllers: world.controllers, entityId: crowdEntityId).position
+    # It walks about the whole land (app3d/Wander): to a spot, a stop,
+    # another spot (walkerWanderRange)
     addWanderer(
       wandering: physicsSystem.wandering
       entityId: crowdEntityId
-      homeX: home.x
-      homeY: home.y
-      range: walkerWanderRange
+      homeX: 0.0
+      homeY: 0.0
+      range: walkerWanderRange(land: land, biome: biome)
     )
     setWalkerCharacterHeight(
       world: world
