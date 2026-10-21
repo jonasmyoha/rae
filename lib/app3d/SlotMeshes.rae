@@ -1,0 +1,285 @@
+# app3d/SlotMeshes — the GPU side of streamed tiles (app3d/TileStreaming):
+# one quad mesh per material ("paint"), each with room for every slot's quads,
+# each slot owning its own range of each mesh. Loading a tile writes its quads
+# of a paint into its slot's range (MeshStore meshStoreUpdateVertsRange; the
+# rest of the range collapses to nothing); letting it go writes none. Each
+# slot draws only the quads it wrote of each paint (drawInstancesRange /
+# drawShadowCasterRange: an index range of the mesh), so free slots and the
+# unused rest of a range cost nothing on the GPU, and the memory is the
+# slots', however big the world is.
+#
+# Writing a range: the app puts its quads' vertices (four a quad, eight floats
+# a vertex: position, normal, uv) into the start of `scratch`, then calls
+# commitSlotQuads with how many it wrote.
+import Math
+import Vec3
+open Scene3d
+open Math3d
+open MeshStore
+open RendererDeferred
+open Gbuffer
+open GbufferInstanced
+open ShadowMaps
+open gpu/GpuResources
+
+type SlotMeshes {
+  slotCount: Int
+  # Each paint's quads a slot (its range's size)
+  capacities: List(Int)
+  meshes: List(MeshHandle)
+  # Each paint's material (its colour, roughness), and whether it casts shadows
+  materials: List(Material3d)
+  castsShadows: List(Bool)
+  # The quads each slot wrote of each paint (slot * paints + paint)
+  slotQuads: List(Int)
+  # One paint's range of one slot, written at a time: the widest range
+  scratch: List(Float)
+  batch: InstanceBatch
+}
+
+func slotMeshPaintCount(slotMeshes: view SlotMeshes) ret Int {
+  ret slotMeshes.capacities.length
+}
+
+# Every slot's range of `paint`'s mesh: its first vertex and its first index
+# (six a quad, two triangles)
+func slotFirstVertex(slotMeshes: view SlotMeshes, slot: view Int, paint: view Int) ret Int {
+  ret slot * slotMeshes.capacities.copyAtFallback(index: paint, fallback: 0) * 4
+}
+
+func slotFirstIndex(slotMeshes: view SlotMeshes, slot: view Int, paint: view Int) ret Int {
+  ret slot * slotMeshes.capacities.copyAtFallback(index: paint, fallback: 0) * 6
+}
+
+# The quads `slot` wrote of `paint`
+func slotQuadCount(slotMeshes: view SlotMeshes, slot: view Int, paint: view Int) ret Int {
+  ret slotMeshes.slotQuads.copyAtFallback(
+    index: slot * slotMeshPaintCount(slotMeshes: slotMeshes) + paint
+    fallback: 0
+  )
+}
+
+# One mesh per paint in `renderer`, `capacities` quads a slot each, drawn in
+# `materials`; every range empty
+func createSlotMeshes(
+  renderer: mod DeferredRenderer
+  slotCount: view Int
+  capacities: view List(Int)
+  materials: view List(Material3d)
+  castsShadows: view List(Bool)
+) ret SlotMeshes {
+  var meshes: List(MeshHandle) = List.create(MeshHandle, cap: capacities.length)
+  var widest: Int = 0
+  loop let capacity: view Int in capacities {
+    let quads: Int = slotCount * capacity
+    widest = Math.max(a: widest.toFloat(), b: capacity.toFloat()).toInt()
+    var verts: List(Float) = List.create(Float, cap: quads * 4 * 8)
+    loop var i: Int = 0, i < quads * 4 * 8, ++i {
+      verts.add(value: 0.0)
+    }
+    # The index buffer never changes: quad k is vertices 4k..4k+3
+    var indices: List(Int) = List.create(Int, cap: quads * 6)
+    loop var k: Int = 0, k < quads, ++k {
+      indices.add(value: k * 4)
+      indices.add(value: k * 4 + 1)
+      indices.add(value: k * 4 + 2)
+      indices.add(value: k * 4)
+      indices.add(value: k * 4 + 2)
+      indices.add(value: k * 4 + 3)
+    }
+    meshes.add(value: uploadMesh(
+      renderer: renderer
+      verts: verts
+      vertCount: quads * 4
+      indices: indices
+    ))
+  }
+  var scratch: List(Float) = List.create(Float, cap: widest * 4 * 8)
+  loop var i: Int = 0, i < widest * 4 * 8, ++i {
+    scratch.add(value: 0.0)
+  }
+  var slotQuads: List(Int) = List.create(Int, cap: slotCount * capacities.length)
+  loop var i: Int = 0, i < slotCount * capacities.length, ++i {
+    slotQuads.add(value: 0)
+  }
+  ret SlotMeshes {
+    slotCount: slotCount
+    capacities: capacities
+    meshes: own meshes
+    materials: materials
+    castsShadows: castsShadows
+    slotQuads: own slotQuads
+    scratch: own scratch
+    batch: createInstanceBatch(mesh: meshHandleNone(), capacity: 1)
+  }
+}
+
+# Put quad `quad`'s corners `a`..`d` (in order round it) into the scratch,
+# with the normal from its first three; true if it fits `paint`'s range
+func putSlotQuad(
+  slotMeshes: mod SlotMeshes
+  paint: view Int
+  quad: view Int
+  a: view Vec3
+  b: view Vec3
+  c: view Vec3
+  d: view Vec3
+) ret Bool {
+  if quad >= slotMeshes.capacities.copyAtFallback(index: paint, fallback: 0) {
+    ret false
+  }
+  let normal: Vec3 = Vec3.vnorm(a: Vec3.vcross(a: Vec3.vsub(a: b, b: a), b: Vec3.vsub(a: d, b: a)))
+  putSlotCorner(
+    slotMeshes: slotMeshes
+    vertex: quad * 4
+    corner: a
+    normal: normal
+  )
+  putSlotCorner(
+    slotMeshes: slotMeshes
+    vertex: quad * 4 + 1
+    corner: b
+    normal: normal
+  )
+  putSlotCorner(
+    slotMeshes: slotMeshes
+    vertex: quad * 4 + 2
+    corner: c
+    normal: normal
+  )
+  putSlotCorner(
+    slotMeshes: slotMeshes
+    vertex: quad * 4 + 3
+    corner: d
+    normal: normal
+  )
+  ret true
+}
+
+func putSlotCorner(
+  slotMeshes: mod SlotMeshes
+  vertex: view Int
+  corner: view Vec3
+  normal: view Vec3
+) {
+  let base: Int = vertex * 8
+  slotMeshes.scratch.set(index: base, value: corner.x)
+  slotMeshes.scratch.set(index: base + 1, value: corner.y)
+  slotMeshes.scratch.set(index: base + 2, value: corner.z)
+  slotMeshes.scratch.set(index: base + 3, value: normal.x)
+  slotMeshes.scratch.set(index: base + 4, value: normal.y)
+  slotMeshes.scratch.set(index: base + 5, value: normal.z)
+  slotMeshes.scratch.set(index: base + 6, value: 0.0)
+  slotMeshes.scratch.set(index: base + 7, value: 0.0)
+}
+
+# Write the scratch's first `quads` quads into `slot`'s range of `paint`'s
+# mesh, the rest of the range collapsed (every corner at the origin); 0 quads
+# empties the range
+func commitSlotQuads(
+  slotMeshes: mod SlotMeshes
+  renderer: mod DeferredRenderer
+  slot: view Int
+  paint: view Int
+  quads: view Int
+) {
+  let capacity: Int = slotMeshes.capacities.copyAtFallback(index: paint, fallback: 0)
+  let written: Int = Math.min(a: quads, b: capacity)
+  slotMeshes.slotQuads.set(
+    index: slot * slotMeshPaintCount(slotMeshes: slotMeshes) + paint
+    value: written
+  )
+  loop var i: Int = written * 4 * 8, i < capacity * 4 * 8, ++i {
+    slotMeshes.scratch.set(index: i, value: 0.0)
+  }
+  if let resources: view GpuResources = renderer.gpuResources {
+    meshStoreUpdateVertsRange(
+      store: renderer.passes.gbuffer.meshes
+      resources: resources
+      mesh: slotMeshes.meshes.copyAtDefault(index: paint)
+      firstVertex: slotFirstVertex(slotMeshes: slotMeshes, slot: slot, paint: paint)
+      verts: slotMeshes.scratch
+      vertCount: capacity * 4
+    )
+  }
+}
+
+# Does any slot draw `paint`?
+func slotPaintUsed(slotMeshes: view SlotMeshes, paint: view Int) ret Bool {
+  loop var s: Int = 0, s < slotMeshes.slotCount, ++s {
+    if slotQuadCount(slotMeshes: slotMeshes, slot: s, paint: paint) > 0 {
+      ret true
+    }
+  }
+  ret false
+}
+
+# Every slot's quads into the open G-buffer pass: one draw per slot and paint
+# it wrote, in the paint's material (`toon` shading or not)
+func drawSlotMeshes(
+  cache: mod GbufferCache
+  resources: mod GpuResources
+  slotMeshes: mod SlotMeshes
+  toon: view Bool
+) {
+  let identity: Mat4 = mat4Identity()
+  loop var paint: Int = 0, paint < slotMeshPaintCount(slotMeshes: slotMeshes), ++paint {
+    if slotPaintUsed(slotMeshes: slotMeshes, paint: paint) is false {
+      continue
+    }
+    setInstanceBatchMesh(
+      batch: slotMeshes.batch
+      mesh: slotMeshes.meshes.copyAtDefault(index: paint)
+    )
+    resetInstanceBatch(batch: slotMeshes.batch)
+    var material: Material3d = slotMeshes.materials.copyAtDefault(index: paint)
+    material.toon = toon
+    addInstance(
+      batch: slotMeshes.batch
+      model: identity
+      prevModel: identity
+      material: material
+    )
+    loop var slot: Int = 0, slot < slotMeshes.slotCount, ++slot {
+      let quads: Int = slotQuadCount(slotMeshes: slotMeshes, slot: slot, paint: paint)
+      if quads > 0 {
+        drawInstancesRange(
+          cache: cache
+          resources: resources
+          batch: slotMeshes.batch
+          firstIndex: slotFirstIndex(slotMeshes: slotMeshes, slot: slot, paint: paint)
+          indexCount: quads * 6
+        )
+      }
+    }
+  }
+}
+
+# Every slot's quads of the paints that cast shadows into the shadow pass
+func drawSlotMeshShadows(renderer: mod DeferredRenderer, slotMeshes: view SlotMeshes) {
+  let identity: Mat4 = mat4Identity()
+  loop var paint: Int = 0, paint < slotMeshPaintCount(slotMeshes: slotMeshes), ++paint {
+    if slotMeshes.castsShadows.copyAtFallback(index: paint, fallback: false) is false or slotPaintUsed(
+      slotMeshes: slotMeshes
+      paint: paint
+    ) is false {
+      continue
+    }
+    if let resources: view GpuResources = renderer.gpuResources {
+      loop var slot: Int = 0, slot < slotMeshes.slotCount, ++slot {
+        let quads: Int = slotQuadCount(slotMeshes: slotMeshes, slot: slot, paint: paint)
+        if quads > 0 {
+          drawShadowCasterRange(
+            shadow: renderer.passes.shadow
+            meshes: renderer.passes.gbuffer.meshes
+            resources: resources
+            mesh: slotMeshes.meshes.copyAtDefault(index: paint)
+            firstIndex: slotFirstIndex(slotMeshes: slotMeshes, slot: slot, paint: paint)
+            indexCount: quads * 6
+            model: identity
+          )
+        }
+      }
+    }
+  }
+}
