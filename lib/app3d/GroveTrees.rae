@@ -265,6 +265,11 @@ const spritePictureAspect: Float = 1.5
 # Below this alpha a picture's pixel is see-through
 const spriteCutoff: Float = 0.5
 
+# The billboards' mip levels: 128 rows down to 16. spriteMipChain keeps each
+# level's coverage within 1% of the full picture's down to there; at 8 rows a
+# narrow crown is ~15 pixels, so one pixel is 7% of it
+const spriteMipLevels: Int = 4
+
 const nearTreeDistance: Float = 30.0
 
 # How much wider than a unit form a species is (PropField scales uniformly,
@@ -462,8 +467,14 @@ func addForestKinds(
   midDistance: view Float
   farDistance: view Float
 ) {
-  # Every layer with its full mip chain, so far billboards do not shimmer
-  let mips: Int = spriteMipCount(w: spritePictureWidth, h: spritePictureHeight)
+  # Every layer with a mip chain, so far billboards do not shimmer, down to
+  # spriteMipLevels levels: a smaller level cannot hold a crown's coverage
+  # (a pixel is several percent of it), and a tree drawn that small is a
+  # few pixels tall, so the GPU clamps to the last level instead
+  let mips: Int = Math.min(
+    a: spriteMipCount(w: spritePictureWidth, h: spritePictureHeight)
+    b: spriteMipLevels
+  )
   spriteInitArray(
     w: spritePictureWidth
     h: spritePictureHeight
@@ -524,7 +535,12 @@ func addForestKinds(
       kind: { lods: own lods, radius: radius, centerHeight: centerHeight }
     )
     let picture: SpritePicture = speciesPicture(species: species)
-    uploadSpritePicture(layer: species, picture: picture, mips: mips)
+    uploadSpritePicture(
+      layer: species
+      picture: picture
+      mips: mips
+      cutoff: spriteCutoff
+    )
     setPropKindSprite(
       field: field
       kind: kind

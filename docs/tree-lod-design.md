@@ -97,6 +97,21 @@ antialiasing resolves, so nothing pops.
   sub-pixel leaves stay soft and stable at distance, and TAA resolves them.
   On the forward MSAA path, alpha to coverage does the same.
 
+**Step 2 done (2026-10-21).** The billboards' mips keep their coverage:
+`app3d/SpriteBake spriteMipChain` scales each level's alpha (bisection, with
+a fixed sub-step jitter so the few alpha values a halved 0/255 picture has
+do not cross the cut all at once) so a cut at 0.5 keeps the full picture's
+share; every species stays at 99-101% over its 4 levels (128 rows down to
+16; a smaller level cannot hold a crown, a pixel being several percent of
+it). The hashed test and Castano's scaling pull against each other (a hash
+over the whole 0..1 range keeps the AVERAGE alpha, which the scaling
+changes), and TAA is off by default (FXAA) and absent in the forward pass,
+where a hash is left as grain. So the threshold is hashed in a band round
+the cutoff (0.5 wide) only in a deferred frame with TAA on, and a plain cut
+otherwise; the band, centred on the cutoff, stays close to the scaled
+coverage. The shadow pass samples mip 0, whose alpha is 0 or 255, so its
+cut was left as it is. Alpha to coverage on the forward path is not done.
+
 ### 2.2 The impostor
 
 * **Bake on the GPU**, once per species at startup: a hemi-octahedral grid
