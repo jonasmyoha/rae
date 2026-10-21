@@ -1,0 +1,380 @@
+# app3d/FarTiles — far forms of streamed tiles, so a world does not pop in: a
+# tile past the near streamer's load distance (app3d/TileStreaming) still
+# shows, as a few boxes the app gives it (its buildings' outlines, say), out
+# to a reach of its own — farther for the tall ones. A second ring of the
+# streamer: which tiles may show far, and how far, is the app's list of
+# candidates (FarTileCandidate), given once; at most `slotCount` are held and
+# `boxCapacity` boxes drawn, however big the world is.
+#
+# Each frame streamFarTiles lets go of the far tiles past their reach (plus
+# `margin`, so one at the edge does not flicker) and, only on a frame the
+# near streamer loaded nothing (a far tile is a whole build for the app),
+# takes the nearest wanted one into a free slot: an entity with a FarTile,
+# and a FarTileLoaded event the app answers with setFarTileBoxes. Every far
+# box is one instanced draw of a unit box (drawFarTiles), its batch made
+# again only when the far or near tiles change; a tile the near streamer
+# holds is drawn in full by the app instead, so its far boxes are left out.
+# No shadows: far forms are past their reach.
+import Vec3
+open Scene3d
+open Math3d
+open Mesh3d
+open RendererDeferred
+open Gbuffer
+open GbufferInstanced
+open GbufferRecord
+open gpu/GpuResources
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open ecs/Event
+open app3d/TileStreaming
+
+type FarTileSettings {
+  # Far tiles held at most, and boxes drawn at most
+  slotCount: Int
+  boxCapacity: Int
+  # A far tile is let go this far past its reach (m)
+  margin: Float
+}
+
+# A tile that may show far, and how far (m, to its centre)
+type FarTileCandidate {
+  tile: GridTile
+  reach: Float
+}
+
+# One box of a far form: a unit box placed, turned about z and sized, in a
+# colour
+type FarBox {
+  center: Vec3
+  yaw: Float
+  size: Vec3
+  color: Vec3
+}
+
+# A held far tile's entity: its place, its slot, its boxes
+type FarTile {
+  tile: GridTile
+  slot: Int
+  boxes: List(FarBox)
+}
+
+type FarTileLoaded {
+  entityId: EntityId
+  tile: GridTile
+  slot: Int
+}
+
+type FarTiles {
+  settings: FarTileSettings
+  candidates: List(FarTileCandidate)
+  # The far tile entity in each slot (noEntity when free)
+  slots: List(EntityId)
+  tiles: ComponentTable(FarTile)
+  loaded: EventQueue(FarTileLoaded)
+  # The entities let go last call, freed on the next
+  toFree: List(EntityId)
+  batch: InstanceBatch
+  # The batch must be made again (and the shading it was made with)
+  dirty: Bool
+  toon: Bool
+  loads: Int
+}
+
+# Far tiles among `candidates` (in the order a wanted list takes them), drawn
+# with a unit box uploaded to `renderer`
+func createFarTiles(
+  renderer: mod DeferredRenderer
+  settings: view FarTileSettings
+  candidates: view List(FarTileCandidate)
+) ret FarTiles {
+  var slots: List(EntityId) = List.create(EntityId, cap: settings.slotCount)
+  loop var s: Int = 0, s < settings.slotCount, ++s {
+    slots.add(value: noEntity())
+  }
+  let box: MeshData = makeBox(size: 1.0)
+  ret FarTiles {
+    settings: settings
+    candidates: candidates
+    slots: own slots
+    tiles: ComponentTable.create(FarTile)
+    loaded: createEventQueue(FarTileLoaded)
+    toFree: List.create(EntityId, cap: settings.slotCount)
+    batch: createInstanceBatch(
+      mesh: uploadMesh(
+        renderer: renderer
+        verts: box.verts
+        vertCount: box.vertCount
+        indices: box.indices
+      )
+      capacity: settings.boxCapacity
+    )
+    dirty: true
+    toon: false
+    loads: 0
+  }
+}
+
+func farTileWanted(
+  grid: view TileGridSettings
+  candidate: view FarTileCandidate
+  x: view Float
+  y: view Float
+) ret Bool {
+  ret candidate.reach > 0.0 and tileDistance(
+    settings: grid
+    tile: candidate.tile
+    x: x
+    y: y
+  ) <= candidate.reach
+}
+
+func farTileKept(
+  grid: view TileGridSettings
+  candidate: view FarTileCandidate
+  margin: view Float
+  x: view Float
+  y: view Float
+) ret Bool {
+  ret candidate.reach > 0.0 and tileDistance(
+    settings: grid
+    tile: candidate.tile
+    x: x
+    y: y
+  ) <= candidate.reach + margin
+}
+
+# Every candidate whose far form is wanted round (x, y), in the candidates'
+# order, at most `slotCount`
+func farTilesWanted(
+  candidates: view List(FarTileCandidate)
+  slotCount: view Int
+  grid: view TileGridSettings
+  x: view Float
+  y: view Float
+) ret List(GridTile) {
+  var tiles: List(GridTile) = List.create(GridTile, cap: slotCount)
+  loop let candidate: view FarTileCandidate in candidates {
+    if farTileWanted(
+      grid: grid
+      candidate: candidate
+      x: x
+      y: y
+    ) and tiles.length < slotCount {
+      tiles.add(value: candidate.tile)
+    }
+  }
+  ret tiles
+}
+
+# The candidate for `tile` (a reach of 0 when it is none)
+func farCandidateOf(farTiles: view FarTiles, tile: view GridTile) ret FarTileCandidate {
+  loop let candidate: view FarTileCandidate in farTiles.candidates {
+    if sameTile(a: candidate.tile, b: tile) {
+      ret candidate
+    }
+  }
+  ret FarTileCandidate { tile: tile, reach: 0.0 }
+}
+
+# The held far tiles, in slot order
+func farTilesHeld(farTiles: view FarTiles) ret List(GridTile) {
+  var tiles: List(GridTile) = List.create(GridTile, cap: farTiles.settings.slotCount)
+  loop let entityId: view EntityId in farTiles.slots {
+    if isNone(this: entityId) is false {
+      tiles.add(value: componentView(this: farTiles.tiles, entityId: entityId).tile)
+    }
+  }
+  ret tiles
+}
+
+# The nearest wanted far tile not yet `held`, if any and if there is room
+func nextFarTile(
+  candidates: view List(FarTileCandidate)
+  slotCount: view Int
+  grid: view TileGridSettings
+  held: view List(GridTile)
+  x: view Float
+  y: view Float
+) ret opt GridTile {
+  if held.length >= slotCount {
+    ret none
+  }
+  var best: GridTile = { x: 0, y: 0 }
+  var bestDistance: Float = 1000000.0
+  var found: Bool = false
+  loop let tile: view GridTile in farTilesWanted(
+    candidates: candidates
+    slotCount: slotCount
+    grid: grid
+    x: x
+    y: y
+  ) {
+    var taken: Bool = false
+    loop let other: view GridTile in held {
+      taken = taken or sameTile(a: other, b: tile)
+    }
+    let distance: Float = tileDistance(
+      settings: grid
+      tile: tile
+      x: x
+      y: y
+    )
+    if taken is false and distance < bestDistance {
+      best = tile
+      bestDistance = distance
+      found = true
+    }
+  }
+  if found {
+    ret best
+  }
+  ret none
+}
+
+# One frame round (x, y), after the near streamer's: free the entities let go
+# last call; let go of the far tiles past their reach; when `near` loaded
+# nothing this frame, take the nearest wanted one (a FarTileLoaded). The near
+# streamer's events this frame also mark the batch to be made again.
+func streamFarTiles(
+  farTiles: mod FarTiles
+  near: view TileStreamer
+  allocator: mod EntityAllocator
+  x: view Float
+  y: view Float
+) {
+  loop let entityId: view EntityId in farTiles.toFree {
+    componentRemove(this: farTiles.tiles, entityId: entityId)
+    freeEntity(this: allocator, entityId: entityId)
+  }
+  farTiles.toFree.clear()
+  eventClear(FarTileLoaded, this: farTiles.loaded)
+  let grid: TileGridSettings = near.settings
+  if eventCount(TileLoaded, this: near.loaded) > 0 or eventCount(TileGone, this: near.gone) > 0 {
+    farTiles.dirty = true
+  }
+  loop var s: Int = 0, s < farTiles.settings.slotCount, ++s {
+    let entityId: EntityId = farTiles.slots.copyAtFallback(index: s, fallback: noEntity())
+    if isNone(this: entityId) {
+      continue
+    }
+    let tile: GridTile = componentView(this: farTiles.tiles, entityId: entityId).tile
+    if farTileKept(
+      grid: grid
+      candidate: farCandidateOf(farTiles: farTiles, tile: tile)
+      margin: farTiles.settings.margin
+      x: x
+      y: y
+    ) {
+      continue
+    }
+    farTiles.slots.set(index: s, value: noEntity())
+    farTiles.toFree.add(value: entityId)
+    farTiles.dirty = true
+  }
+  if eventCount(TileLoaded, this: near.loaded) > 0 {
+    ret
+  }
+  if let next: GridTile = nextFarTile(
+    candidates: farTiles.candidates
+    slotCount: farTiles.settings.slotCount
+    grid: grid
+    held: farTilesHeld(farTiles: farTiles)
+    x: x
+    y: y
+  ) {
+    var free: Int = -1
+    loop var s: Int = 0, s < farTiles.settings.slotCount and free < 0, ++s {
+      if isNone(this: farTiles.slots.copyAtFallback(index: s, fallback: noEntity())) {
+        free = s
+      }
+    }
+    if free >= 0 {
+      let entityId: EntityId = allocEntity(this: allocator)
+      componentSet(
+        this: farTiles.tiles
+        entityId: entityId
+        data: FarTile { tile: next, slot: free, boxes: List.create(FarBox, cap: 0) }
+      )
+      farTiles.slots.set(index: free, value: entityId)
+      eventSend(
+        FarTileLoaded
+        this: farTiles.loaded
+        value: FarTileLoaded { entityId: entityId, tile: next, slot: free }
+      )
+      farTiles.loads = farTiles.loads + 1
+      farTiles.dirty = true
+    }
+  }
+}
+
+# The app's answer to a FarTileLoaded: the tile's boxes
+func setFarTileBoxes(farTiles: mod FarTiles, entityId: view EntityId, boxes: own List(FarBox)) {
+  if componentHas(this: farTiles.tiles, entityId: entityId) is false {
+    ret
+  }
+  let farTile: mod FarTile = componentMod(this: farTiles.tiles, entityId: entityId)
+  farTile.boxes = own boxes
+  farTiles.dirty = true
+}
+
+# The batch again: every held far tile's boxes but those of tiles `near` holds
+func rebuildFarBoxes(farTiles: mod FarTiles, near: view TileStreamer, toon: view Bool) {
+  resetInstanceBatch(batch: farTiles.batch)
+  let nearTiles: List(GridTile) = streamedTiles(streamer: near)
+  loop var s: Int = 0, s < farTiles.settings.slotCount, ++s {
+    let entityId: EntityId = farTiles.slots.copyAtFallback(index: s, fallback: noEntity())
+    if isNone(this: entityId) {
+      continue
+    }
+    let farTile: view FarTile = componentView(this: farTiles.tiles, entityId: entityId)
+    var loadedNear: Bool = false
+    loop let other: view GridTile in nearTiles {
+      loadedNear = loadedNear or sameTile(a: other, b: farTile.tile)
+    }
+    if loadedNear {
+      continue
+    }
+    loop let box: view FarBox in farTile.boxes {
+      let model: Mat4 = modelMatrixOf(
+        t: Transform3d {
+          position: box.center
+          rotation: Vec3.create(x: 0.0, y: 0.0, z: box.yaw)
+          scale: box.size
+        }
+      )
+      addInstance(
+        batch: farTiles.batch
+        model: model
+        prevModel: model
+        material: Material3d {
+          baseColor: box.color
+          metallic: 0.0
+          roughness: 0.95
+          emission: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+          toon: toon
+        }
+      )
+    }
+  }
+  farTiles.dirty = false
+  farTiles.toon = toon
+}
+
+# The far boxes into the open G-buffer pass (one draw), made again first if
+# the far or near tiles (or the shading) changed
+func drawFarTiles(
+  cache: mod GbufferCache
+  resources: mod GpuResources
+  farTiles: mod FarTiles
+  near: view TileStreamer
+  toon: view Bool
+) {
+  if farTiles.dirty or farTiles.toon is not toon {
+    rebuildFarBoxes(farTiles: farTiles, near: near, toon: toon)
+  }
+  if farTiles.batch.count > 0 {
+    drawInstances(cache: cache, resources: resources, batch: farTiles.batch)
+  }
+}
