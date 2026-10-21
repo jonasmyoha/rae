@@ -54,8 +54,14 @@ open app3d/PropColliderRules
 open app3d/PropBodyPool
 open app3d/ClimbRules
 open app3d/Climbing
+open app3d/CharacterContact
+open app3d/Wander
+open app3d/Characters
 
 const walkerPhysicsStep: Float = 1.0 / 60.0
+
+# The crowd's wander picks, the same every run
+const walkerWanderSeed: Int = 1136
 
 const walkerPhysicsSubSteps: Int = 4
 
@@ -94,8 +100,8 @@ type WalkerPhysics {
   # they get up (app3d/KnockedDown; app3d/WalkerKnockdown)
   ragdolls: ComponentTable(Ragdoll)
   knockedDown: ComponentTable(KnockedDown)
-  # Knocked over this step, the ragdoll not made yet (the walker trips
-  # straight into one, so it stays empty)
+  # Knocked over by a bump this step (app3d/CharacterContact: the one doing
+  # less of the pushing), the ragdoll not made yet: the knockdown trips them
   knocks: ComponentTable(KnockRequest)
   ragdollRig: RagdollRig
   moverLimits: ComponentTable(MoverSpeedLimit)
@@ -112,6 +118,8 @@ type WalkerPhysics {
   trunkPool: PropBodyPool
   # Every character climbs what it pushes into (app3d/Climbing)
   climbing: Climbing
+  # The crowd walks about on its own (app3d/Wander)
+  wandering: Wandering
 }
 
 # The physics of a walker on the terrain of `biome` at `groundZ`, its ground a
@@ -164,6 +172,7 @@ func createWalkerPhysics(
       staminaTuning: StaminaTuning {}
       wallMask: allBits
     )
+    wandering: createWandering(seed: walkerWanderSeed)
   }
 }
 
@@ -471,11 +480,68 @@ func physicsCubeModel(transform: view Transform3D, cube: view PhysicsCube) ret M
 
 # The input for the coming fixed steps: `controlledEntityId` driven by the
 # player's `intent` along the camera's yaw, everyone else standing (the mover
-# system, app3d/CharacterMovers)
+# system, app3d/CharacterMovers). The self-tests drive this way, the crowd
+# still.
 func driveCharacters(
   physicsSystem: mod WalkerPhysics
   controlledEntityId: view EntityId
   controllers: view ComponentTable(ThirdPersonController)
+  intent: view InputIntent
+  cameraYaw: view Float
+  speedScale: view Float
+) {
+  setPlayerDrive(
+    physicsSystem: physicsSystem
+    controlledEntityId: controlledEntityId
+    intent: intent
+    cameraYaw: cameraYaw
+    speedScale: speedScale
+  )
+  driveMovers(
+    characters: physicsSystem.characters
+    controllers: controllers
+    drives: physicsSystem.moverDrives
+  )
+}
+
+# A frame's input: the player's drive as driveCharacters gives it, and the
+# crowd's own, walking about (app3d/Wander), `deltaTime` s on
+func driveWalkers(
+  physicsSystem: mod WalkerPhysics
+  controlledEntityId: view EntityId
+  controllers: view ComponentTable(ThirdPersonController)
+  controlled: view ComponentTable(Controlled)
+  intent: view InputIntent
+  cameraYaw: view Float
+  speedScale: view Float
+  deltaTime: view Float
+) {
+  setPlayerDrive(
+    physicsSystem: physicsSystem
+    controlledEntityId: controlledEntityId
+    intent: intent
+    cameraYaw: cameraYaw
+    speedScale: speedScale
+  )
+  stepWanderers(
+    wandering: physicsSystem.wandering
+    controllers: controllers
+    controlled: controlled
+    parked: physicsSystem.moverParked
+    drives: physicsSystem.moverDrives
+    deltaTime: deltaTime
+  )
+  driveMovers(
+    characters: physicsSystem.characters
+    controllers: controllers
+    drives: physicsSystem.moverDrives
+  )
+}
+
+# Only the player's drive: every other drive taken away
+func setPlayerDrive(
+  physicsSystem: mod WalkerPhysics
+  controlledEntityId: view EntityId
   intent: view InputIntent
   cameraYaw: view Float
   speedScale: view Float
@@ -497,11 +563,6 @@ func driveCharacters(
       # The walker's run (4.2 m/s) is under the mover's cap: no sprint
       sprints: false
     }
-  )
-  driveMovers(
-    characters: physicsSystem.characters
-    controllers: controllers
-    drives: physicsSystem.moverDrives
   )
 }
 
@@ -557,6 +618,13 @@ func moveCharacters(
       insideWithOldX: worldWadable(x: step.fromX, y: center.y, cfg: biome)
     )
   }
+  # Bumps between them: pushed apart, and a hard one knocks over the one
+  # doing less of the pushing (app3d/CharacterContact)
+  let fallen: Int = bumpMovers(
+    characters: physicsSystem.characters
+    parked: physicsSystem.moverParked
+    knocks: physicsSystem.knocks
+  )
   # The climbers on their walls (app3d/Climbing), before the rest are read back
   stepClimbers(
     climbing: physicsSystem.climbing

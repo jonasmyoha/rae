@@ -1230,6 +1230,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              && [ "$(grep -c "\[physicstest\] .* passed=true" "$TMP_OUT/physics.log")" -eq 1 ] \
              && [ "$(grep -c "\[marktest\] .* passed=true" "$TMP_OUT/physics.log")" -eq 1 ] \
              && [ "$(grep -c "\[climbtest\] .* passed=true" "$TMP_OUT/physics.log")" -eq 1 ] \
+             && [ "$(grep -c "\[crowdtest\] .* passed=true" "$TMP_OUT/physics.log")" -eq 1 ] \
              && (cd .. && RAE_WALKER_LAYOUT_TEST=1 RAE_UI_FRAME=Touch RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=30000 \
                 perl -e 'alarm shift; exec @ARGV' 60 "$TMP_OUT/app") > "$TMP_OUT/layout.log" 2>&1 \
              && grep -q "\[layouttest\] passed=true" "$TMP_OUT/layout.log" \
@@ -1324,6 +1325,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              && [ "$(grep -c "\[physicstest\] .* passed=true" "$TMP_OUT/physics.log")" -eq 1 ] \
              && [ "$(grep -c "\[marktest\] .* passed=true" "$TMP_OUT/physics.log")" -eq 1 ] \
              && [ "$(grep -c "\[climbtest\] .* passed=true" "$TMP_OUT/physics.log")" -eq 1 ] \
+             && [ "$(grep -c "\[crowdtest\] .* passed=true" "$TMP_OUT/physics.log")" -eq 1 ] \
              && (cd .. && RAE_WALKER_SPLASH_TEST=1 RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=30000 \
                 perl -e 'alarm shift; exec @ARGV' 45 "$TMP_OUT/app") > "$TMP_OUT/splash.log" 2>&1 \
              && grep -q '\[splash-pose\].*ok=true' "$TMP_OUT/splash.log"; then
@@ -1363,6 +1365,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              && [ "$(grep -c "\[physicstest\] .* passed=true" "$TMP_OUT/physics.log")" -eq 1 ] \
              && [ "$(grep -c "\[marktest\] .* passed=true" "$TMP_OUT/physics.log")" -eq 1 ] \
              && [ "$(grep -c "\[climbtest\] .* passed=true" "$TMP_OUT/physics.log")" -eq 1 ] \
+             && [ "$(grep -c "\[crowdtest\] .* passed=true" "$TMP_OUT/physics.log")" -eq 1 ] \
              && (cd .. && RAE_WALKER_CAMERA="1 0 0.3 -0.12 10 0 -170 30 0 0 0 0" RAE_SDL_HEADLESS_MS=1500 \
                 RAE_GPU2D_SCREENSHOT="$TMP_OUT/walker-billboards.bmp" \
                 perl -e 'alarm shift; exec @ARGV' 45 "$TMP_OUT/app") > "$TMP_OUT/billboards.log" 2>&1 \

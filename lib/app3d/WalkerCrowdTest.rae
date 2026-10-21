@@ -1,0 +1,198 @@
+# app3d/WalkerCrowdTest — the walker's crowd check (RAE_WALKER_PHYSICS_TEST=1,
+# after the other checks): for 20 s the crowd walks about on its own
+# (app3d/Wander: each member walks off, reaches spots, stops between them);
+# then the hero runs at a crowd member standing still, and the bump knocks
+# over the one standing (app3d/CharacterContact: the one doing less of the
+# pushing), not the hero. One [crowdtest] line; true when all held.
+import Math
+import Vec3
+open ecs/Entity
+open ecs/ComponentTable
+open WorldBiome
+open app3d/CharacterController
+open app3d/CharacterBodies
+open app3d/Characters
+open app3d/Wander
+open app3d/WalkerWorld
+open app3d/WalkerPhysics
+open app3d/WalkerPhysicsChecks
+open app3d/WalkerTerrainBodies
+open app3d/WalkerKnockdown
+
+# Frames of the crowd's walk about (20 s), and of the hero's run (3 s)
+const crowdTestWalkFrames: Int = 1200
+
+const crowdTestRunFrames: Int = 180
+
+func crowdTestFrame(
+  physicsSystem: mod WalkerPhysics
+  world: mod WalkerWorld
+  characterSystem: mod CharacterSystem
+  heroEntityId: view EntityId
+  intent: view InputIntent
+  yaw: view Float
+  wanders: view Bool
+) {
+  let step: Float = 1.0 / 60.0
+  if wanders {
+    driveWalkers(
+      physicsSystem: physicsSystem
+      controlledEntityId: heroEntityId
+      controllers: world.controllers
+      controlled: world.controlled
+      intent: intent
+      cameraYaw: yaw
+      speedScale: 1.0
+      deltaTime: step
+    )
+  } else {
+    driveCharacters(
+      physicsSystem: physicsSystem
+      controlledEntityId: heroEntityId
+      controllers: world.controllers
+      intent: intent
+      cameraYaw: yaw
+      speedScale: 1.0
+    )
+  }
+  let steps: Int = stepPhysicsFrame(
+    physicsSystem: physicsSystem
+    transforms: world.transforms
+    controllers: world.controllers
+    bushes: bushSpots(propKinds: world.propKinds, transforms: world.transforms)
+    frameTime: step
+  )
+  walkerKnockdownUpdate(
+    physicsSystem: physicsSystem
+    world: world
+    characterSystem: characterSystem
+    controlledEntityId: heroEntityId
+    wantsUp: false
+    deltaTime: step
+  )
+}
+
+func runWalkerCrowdTest(
+  physicsSystem: mod WalkerPhysics
+  world: mod WalkerWorld
+  characterSystem: mod CharacterSystem
+  heroEntityId: view EntityId
+) ret Bool {
+  # ----- the crowd walks about -------------------------------------------------
+  let count: Int = componentCount(this: physicsSystem.wandering.wanderers)
+  var starts: List(Vec3) = List.create(Vec3, cap: count)
+  var farthest: List(Float) = List.create(Float, cap: count)
+  var stoodFrames: List(Int) = List.create(Int, cap: count)
+  var arrivalsBefore: Int = 0
+  loop var i: Int = 0, i < count, ++i {
+    let entityId: EntityId = componentEntityAt(this: physicsSystem.wandering.wanderers, i: i)
+    starts.add(value: controllerOf(controllers: world.controllers, entityId: entityId).position)
+    farthest.add(value: 0.0)
+    stoodFrames.add(value: 0)
+    arrivalsBefore = arrivalsBefore + componentCopyAtDefault(
+      this: physicsSystem.wandering.wanderers
+      i: i
+    ).arrivals
+  }
+  let still: InputIntent = standingIntent()
+  loop var frame: Int = 0, frame < crowdTestWalkFrames, ++frame {
+    crowdTestFrame(
+      physicsSystem: physicsSystem
+      world: world
+      characterSystem: characterSystem
+      heroEntityId: heroEntityId
+      intent: still
+      yaw: 0.0
+      wanders: true
+    )
+    loop var i: Int = 0, i < count, ++i {
+      let entityId: EntityId = componentEntityAt(this: physicsSystem.wandering.wanderers, i: i)
+      let at: Vec3 = controllerOf(controllers: world.controllers, entityId: entityId).position
+      let start: Vec3 = starts.copyAtFallback(index: i, fallback: at)
+      let gone: Float = Math.sqrt(
+        x: (at.x - start.x) * (at.x - start.x) + (at.y - start.y) * (at.y - start.y)
+      )
+      farthest.set(
+        index: i
+        value: Math.max(a: farthest.copyAtFallback(index: i, fallback: 0.0), b: gone)
+      )
+      if controllerOf(controllers: world.controllers, entityId: entityId).moving is false {
+        stoodFrames.set(index: i, value: stoodFrames.copyAtFallback(index: i, fallback: 0) + 1)
+      }
+    }
+  }
+  var arrivals: Int = 0 - arrivalsBefore
+  var leastGone: Float = 1000.0
+  var leastStood: Int = 1000000
+  loop var i: Int = 0, i < count, ++i {
+    arrivals = arrivals + componentCopyAtDefault(this: physicsSystem.wandering.wanderers, i: i).arrivals
+    leastGone = Math.min(a: leastGone, b: farthest.copyAtFallback(index: i, fallback: 0.0))
+    leastStood = Math.min(a: leastStood, b: stoodFrames.copyAtFallback(index: i, fallback: 0))
+  }
+  let wandered: Bool = count > 0 and leastGone > 1.5 and arrivals >= count and leastStood > 60
+  # Everyone up again before the run
+  loop var frame: Int = 0, frame < 360, ++frame {
+    crowdTestFrame(
+      physicsSystem: physicsSystem
+      world: world
+      characterSystem: characterSystem
+      heroEntityId: heroEntityId
+      intent: still
+      yaw: 0.0
+      wanders: false
+    )
+  }
+  # ----- the hero runs at one standing still ------------------------------------
+  var knockedOver: Bool = false
+  var heroDown: Bool = false
+  var closest: Float = 1000.0
+  if count > 0 {
+    let targetId: EntityId = componentEntityAt(this: physicsSystem.wandering.wanderers, i: 0)
+    let target: Vec3 = controllerFeet(
+      controller: controllerOf(controllers: world.controllers, entityId: targetId)
+      groundZ: physicsSystem.groundZ
+    )
+    let fromX: Float = target.x
+    let fromY: Float = target.y - 4.0
+    placeHero(
+      physicsSystem: physicsSystem
+      heroEntityId: heroEntityId
+      feet: Vec3.create(
+        x: fromX
+        y: fromY
+        z: worldTerrainHeight(
+          x: fromX
+          y: fromY
+          groundZ: physicsSystem.groundZ
+          cfg: physicsSystem.biome
+        ) + 0.2
+      )
+    )
+    let run: InputIntent = forwardIntent()
+    loop var frame: Int = 0, frame < crowdTestRunFrames, ++frame {
+      crowdTestFrame(
+        physicsSystem: physicsSystem
+        world: world
+        characterSystem: characterSystem
+        heroEntityId: heroEntityId
+        intent: run
+        yaw: 0.0
+        wanders: false
+      )
+      knockedOver = knockedOver or componentHas(this: physicsSystem.knockedDown, entityId: targetId)
+      heroDown = heroDown or componentHas(this: physicsSystem.knockedDown, entityId: heroEntityId)
+      let hero: Vec3 = controllerOf(controllers: world.controllers, entityId: heroEntityId).position
+      closest = Math.min(
+        a: closest
+        b: Math.sqrt(
+          x: (hero.x - target.x) * (hero.x - target.x) + (hero.y - target.y) * (hero.y - target.y)
+        )
+      )
+    }
+  }
+  let passed: Bool = wandered and knockedOver and heroDown is false
+  log(
+    "[crowdtest] {count} wanderers in 20 s: each went at least {leastGone} m off, {arrivals} spots reached, each stood still {leastStood} frames or more ={wandered}; the hero ran at one standing (closest {closest} m): it fell={knockedOver}, the hero stayed up={heroDown is false}; passed={passed}"
+  )
+  ret passed
+}

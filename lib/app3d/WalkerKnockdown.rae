@@ -1,7 +1,8 @@
 # app3d/WalkerKnockdown — the walker examples' knockdown, on Rae's ragdolls:
-# running into someone at a run trips the driven character, which falls as a
-# ragdoll (app3d/Ragdoll, the Mixamo rig) launched with its speed; the camera
-# follows its body (app3d/CameraKnockdownFollow, in the update); once the
+# a hard bump (app3d/CharacterContact) knocks over the one doing less of the
+# pushing, which falls as a ragdoll (app3d/Ragdoll, the Mixamo rig) thrown
+# with its speed; the camera follows the player's body (app3d/CameraKnockdownFollow, in the
+# update); once the
 # body has come to rest and the player moves or jumps, Rae's get-up system
 # (app3d/KnockedDown) lets it up, and it stands where its hips lie, blending
 # from the pose it lay in (app3d/RagdollGetUp). While it lies its mover is
@@ -29,12 +30,6 @@ open app3d/WalkerWorld
 open app3d/WalkerPhysics
 open app3d/WalkerCharacter
 open app3d/CharacterHeight
-
-# Running at least this fast (m/s) into someone this close (m, centre to
-# centre, across the ground) trips the runner
-const walkerTripSpeed: Float = 3.0
-
-const walkerTripDistance: Float = 0.7
 
 # Down at least this long (s) before the player may get up
 const walkerDownSeconds: Float = 0.8
@@ -95,33 +90,6 @@ func tripCharacter(
   let parked: MoverParked = {}
   componentSet(this: physicsSystem.moverParked, entityId: entityId, data: parked)
   ret true
-}
-
-# Does the driven character run into someone this frame: who (none)?
-func trippedOver(
-  physicsSystem: view WalkerPhysics
-  world: view WalkerWorld
-  runnerId: view EntityId
-) ret EntityId {
-  if componentHas(this: physicsSystem.characters, entityId: runnerId) is false or characterSpeed(
-    characters: physicsSystem.characters
-    entityId: runnerId
-  ) < walkerTripSpeed {
-    ret noEntity()
-  }
-  let runner: Vec3 = controllerOf(controllers: world.controllers, entityId: runnerId).position
-  loop var i: Int = 0, i < componentCount(this: world.controllers), ++i {
-    let otherId: EntityId = componentEntityAt(this: world.controllers, i: i)
-    if otherId is not runnerId and componentHas(this: physicsSystem.ragdolls, entityId: otherId) is false {
-      let other: Vec3 = componentView(this: world.controllers, entityId: otherId).position
-      let dx: Float = other.x - runner.x
-      let dy: Float = other.y - runner.y
-      if dx * dx + dy * dy < walkerTripDistance * walkerTripDistance {
-        ret otherId
-      }
-    }
-  }
-  ret noEntity()
 }
 
 # Back on its feet where its hips lie, on the ground there, facing as it did,
@@ -207,9 +175,10 @@ func standUpFromRagdoll(
   )
 }
 
-# One frame of the walker's knockdown: the driven character trips over
-# whoever it runs into; whoever is down gets up once Rae's get-up system
-# lets them (the driven one once the player moves or jumps)
+# One frame of the walker's knockdown: whoever a bump knocked over this
+# frame (the one doing less of the pushing; app3d/CharacterContact) falls;
+# whoever is down gets up once Rae's get-up system lets them (the driven one
+# once the player moves or jumps)
 func walkerKnockdownUpdate(
   physicsSystem: mod WalkerPhysics
   world: mod WalkerWorld
@@ -218,27 +187,20 @@ func walkerKnockdownUpdate(
   wantsUp: view Bool
   deltaTime: view Float
 ) {
-  if isNone(
-    this: trippedOver(physicsSystem: physicsSystem, world: world, runnerId: controlledEntityId)
-  ) is false {
-    let body: view CharacterBody = componentView(
-      this: physicsSystem.characters
-      entityId: controlledEntityId
-    )
+  # Whoever a bump knocked over (app3d/CharacterContact, in the fixed steps)
+  loop componentCount(this: physicsSystem.knocks) > 0 {
+    let fallenId: EntityId = componentEntityAt(this: physicsSystem.knocks, i: 0)
+    let request: KnockRequest = componentCopyAtDefault(this: physicsSystem.knocks, i: 0)
+    componentRemove(this: physicsSystem.knocks, entityId: fallenId)
     let tripped: Bool = tripCharacter(
       physicsSystem: physicsSystem
       world: world
       characterSystem: characterSystem
-      entityId: controlledEntityId
-      velocity: Vec3.create(x: body.mover.velocity.x, y: body.mover.velocity.y, z: 1.5)
+      entityId: fallenId
+      velocity: request.velocity
     )
     if tripped {
-      log(
-        "[knockdown] tripped at {characterSpeed(
-          characters: physicsSystem.characters
-          entityId: controlledEntityId
-        )} m/s"
-      )
+      log("[knockdown] knocked over at {Vec3.vlen(a: request.velocity)} m/s")
     }
   }
   if componentHas(this: physicsSystem.knockedDown, entityId: controlledEntityId) {
