@@ -97,6 +97,7 @@ open app3d/WalkerSplash
 open app3d/WalkerState
 open app3d/WalkerSelfTest
 open app3d/WalkerClimbTest
+open app3d/WalkerCrowdTest
 open app3d/Climbing
 open RendererForward
 open Moon
@@ -837,6 +838,16 @@ func runWalkerApp(settings: view WalkerAppSettings) ret Int {
       physicsSystem: app.physicsSystem
       world: app.world
       pooledTrunks: app.settings.land is WalkerLand.forest
+      heroEntityId: rosterEntityAt(roster: app.players, index: 0)
+    ) is false {
+      exitCode = 1
+    }
+    # Then the crowd: walking about on its own, and knocked over by the hero
+    # running into one standing
+    if runWalkerCrowdTest(
+      physicsSystem: app.physicsSystem
+      world: app.world
+      characterSystem: app.characterSystem
       heroEntityId: rosterEntityAt(roster: app.players, index: 0)
     ) is false {
       exitCode = 1

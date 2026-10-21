@@ -28,6 +28,7 @@ open app3d/WalkerNames
 open box3d/ecs/CharacterMover
 open app3d/CharacterHeight
 open app3d/Climbing
+open app3d/Wander
 
 # The world the walker is on: the small island in the sea (136, 137), or a
 # wide forest world with lakes and no island (143)
@@ -54,6 +55,9 @@ const walkerDaySeconds: Float = 1800.0
 
 # How many crowd members walk beside the hero
 const walkerCrowdCount: Int = 5
+
+# How far from where it started each crowd member walks about (m)
+const walkerWanderRange: Float = 10.0
 
 func walkerBiome(land: view WalkerLand) ret BiomeConfig {
   if land is WalkerLand.forest {
@@ -353,6 +357,16 @@ func createWalkerAppPhysics(
         controller: controllerOf(controllers: world.controllers, entityId: crowdEntityId)
         groundZ: groundZ
       )
+    )
+    # It walks about round where it stands (app3d/Wander): to a spot, a stop,
+    # another spot
+    let home: Vec3 = controllerOf(controllers: world.controllers, entityId: crowdEntityId).position
+    addWanderer(
+      wandering: physicsSystem.wandering
+      entityId: crowdEntityId
+      homeX: home.x
+      homeY: home.y
+      range: walkerWanderRange
     )
     # Characters of different heights on the one model (app3d/CharacterHeight):
     # its model, clips and mover follow it
