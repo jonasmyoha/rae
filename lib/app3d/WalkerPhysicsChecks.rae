@@ -21,6 +21,7 @@ open ecs/Transform
 open WorldBiome
 open app3d/CharacterController
 open app3d/WalkerPhysics
+open app3d/PropBodyPool
 open app3d/PropField
 open box3d/ecs/Physics
 open box3d/ecs/PhysicsTypes
@@ -450,7 +451,7 @@ func rayHitsPool(physicsSystem: view WalkerPhysics, foot: view Vec3) ret Bool {
     translation: Vec3.create(x: 6.0, y: 0.0, z: 0.0)
     filter: defaultQueryFilter()
   )
-  ret hit.hit and physicsSystem.trunks.contains(value: hit.entityId)
+  ret hit.hit and isPooledPropBody(pool: physicsSystem.trunkPool, entityId: hit.entityId)
 }
 
 # The ground made round a spot 150 m east of the hero (followGround, as the
