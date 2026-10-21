@@ -13,7 +13,10 @@
 # instance's. Their shadows are ShadowMapsSprite's (the same pictures, each
 # quad turned to face the sun). In a forward frame (lib/RendererForward) the
 # same quads are drawn with a forward pipeline: the billboard's
-# gbufferSurface shaded by forward_entry.wgsl into the lit target.
+# gbufferSurface shaded by forward_entry.wgsl into the lit target. With an
+# impostor atlas set (setSpriteImpostors, lib/ImpostorAtlas) the quads read
+# it instead of the sprite array: each prop's bounding sphere, turned to the
+# eye, showing the baked view nearest the direction to it.
 open Gbuffer
 open GbufferInstanced
 open GbufferRecord
@@ -35,6 +38,7 @@ open gpu/GpuArgs
 open gpu/GpuIds
 open ForwardMaterial
 open gpu/DeviceFeatures
+open ImpostorAtlas
 
 # C-side sprite texture array (runtime_gpu3d_gbuffer.c): the array texture is a
 # platform upload; its view and generation are read here.
@@ -84,6 +88,13 @@ type SpriteCache {
   time: Float = 0.0
   tilt: Float = 0.0
   uploadedBand: Float = -1.0
+  # The impostor atlas the quads read instead of the sprite array (none:
+  # no layers), what the G-buffer and forward binds were built over, and
+  # the frames buffer bound when there is none (the shader declares it)
+  impostors: ImpostorAtlas = noImpostorAtlas()
+  boundImpostors: ImpostorBinding = noImpostorBinding()
+  forwardImpostors: ImpostorBinding = noImpostorBinding()
+  unusedFrames: BufferId = noBufferId()
 }
 
 # The hashed alpha test's band round the cutoff when TAA resolves it
@@ -193,6 +204,15 @@ func ensureSpriteDefaults(cache: mod SpriteCache, resources: mod GpuResources) {
     }
   }
   ensureSpriteUniform(cache: cache, resources: resources)
+  if not isValidBuffer(resources: resources, id: cache.unusedFrames) {
+    if let frames: BufferId = createBuffer(
+      resources: resources
+      size: 16
+      usage: WGPUBufferUsage_Storage + WGPUBufferUsage_CopyDst
+    ) {
+      cache.unusedFrames = frames
+    }
+  }
   unsafe {
     if gbSpriteArrayView() is webgpuNull() {
       gbSpriteArrayInit(
@@ -222,7 +242,7 @@ func ensureSpritePipeline(
   if not cache.pipeMade {
     cache.pipeMade = true
     let billboardShader: Shader = shader(
-      files: ["lib/fade_dither.wgsl", "lib/sprite_billboard.wgsl"]
+      files: ["lib/fade_dither.wgsl", "lib/impostor_octahedral.wgsl", "lib/sprite_billboard.wgsl"]
     )
     if let pipeline: RenderPipelineId = createRenderPipeline(
       resources: resources
@@ -239,30 +259,32 @@ func ensureSpritePipeline(
   unsafe {
     gen = gbSpriteTexGen()
   }
-  if gen is cache.bindGen {
+  if gen is cache.bindGen and sameImpostorBinding(
+    first: cache.boundImpostors
+    second: cache.impostors.binding
+  ) and bindGroupIsUsable(resources: resources, id: cache.bindGroup) {
     ret
   }
-  cache.bindGen = gen
-  # The array view changed generation: re-adopt the external and rebuild the
-  # bind group (the old one retires behind any frame still drawing with it).
+  # The bind group is rebuilt (the old one retires behind any frame still
+  # drawing with it); the array view is re-adopted when it changed generation
   retireBindGroup(resources: resources, id: cache.bindGroup)
   cache.bindGroup = noBindGroupId()
-  releaseExternal(resources: resources, id: cache.arrayView)
-  cache.arrayView = noExternalId()
-  unsafe {
-    if let arrayView: ExternalId = adoptExternalTextureView(
-      resources: resources
-      handle: gbSpriteArrayView()
-    ) {
-      cache.arrayView = arrayView
+  if not (gen is cache.bindGen) {
+    cache.bindGen = gen
+    releaseExternal(resources: resources, id: cache.arrayView)
+    cache.arrayView = noExternalId()
+    unsafe {
+      if let arrayView: ExternalId = adoptExternalTextureView(
+        resources: resources
+        handle: gbSpriteArrayView()
+      ) {
+        cache.arrayView = arrayView
+      }
     }
   }
-  var entries: List(ResourceRef) = List.create(ResourceRef, cap: 5)
-  entries.add(value: bufferRef(id: gbuffer.frameUniform))
-  entries.add(value: bufferRef(id: gbuffer.draws))
-  entries.add(value: bufferRef(id: cache.uniform))
-  entries.add(value: externalRef(id: cache.arrayView))
-  entries.add(value: samplerRef(id: cache.sampler))
+  cache.boundImpostors = cache.impostors.binding
+  var entries: List(ResourceRef) = List.create(ResourceRef, cap: 7)
+  addSpriteEntries(cache: cache, gbuffer: gbuffer, entries: entries)
   if let bindGroup: BindGroupId = createRenderBindGroup(
     resources: resources
     pipeline: cache.pipeline
@@ -270,6 +292,49 @@ func ensureSpritePipeline(
   ) {
     cache.bindGroup = bindGroup
   }
+}
+
+# The sprite pass's own bindings 0..6: the frame, the draws, SpriteU, the
+# pictures (the impostor atlas's albedo or the sprite array) and the
+# sampler, then the atlas's normal and depth and its frames (the sprite
+# array and an unread buffer when there is no atlas)
+func addSpriteEntries(
+  cache: view SpriteCache
+  gbuffer: view GbufferCache
+  entries: mod List(ResourceRef)
+) {
+  let impostors: view ImpostorBinding = cache.impostors.binding
+  let hasImpostors: Bool = impostors.viewsPerSide > 0
+  entries.add(value: bufferRef(id: gbuffer.frameUniform))
+  entries.add(value: bufferRef(id: gbuffer.draws))
+  entries.add(value: bufferRef(id: cache.uniform))
+  if hasImpostors {
+    entries.add(value: textureViewRef(id: impostors.albedo))
+  } else {
+    entries.add(value: externalRef(id: cache.arrayView))
+  }
+  entries.add(value: samplerRef(id: cache.sampler))
+  if hasImpostors {
+    entries.add(value: textureViewRef(id: impostors.normalDepth))
+    entries.add(value: bufferRef(id: impostors.frames))
+  } else {
+    entries.add(value: externalRef(id: cache.arrayView))
+    entries.add(value: bufferRef(id: cache.unusedFrames))
+  }
+}
+
+# Draw the quads from `atlas` (ImpostorBake) instead of the sprite array,
+# from the next frame on; the atlas held before is retired. The layers are
+# the same as the sprite array's (one per prop kind), and an instance's
+# height (addSpriteInstance) sizes its prop's bounding sphere.
+func setSpriteImpostors(
+  cache: mod SpriteCache
+  resources: mod GpuResources
+  atlas: view ImpostorAtlas
+) {
+  retireImpostorAtlas(atlas: cache.impostors, resources: resources)
+  cache.impostors = atlas
+  writeSpriteUniform(cache: cache, resources: resources, band: cache.uploadedBand)
 }
 
 # Sprite params (SpriteU): a = (world height per unit instance scale, sprite
@@ -308,7 +373,7 @@ func writeSpriteUniform(cache: mod SpriteCache, resources: mod GpuResources, ban
     writer: args
     x: cache.tilt
     y: band
-    z: 0.0
+    z: cache.impostors.binding.viewsPerSide.toFloat()
     w: 0.0
   )
   uploadArgs(
@@ -386,6 +451,7 @@ func ensureSpriteForward(
       "lib/deferred_shade.wgsl"
       "lib/ssao_upsample.wgsl"
       "lib/fade_dither.wgsl"
+      "lib/impostor_octahedral.wgsl"
       "lib/sprite_billboard.wgsl"
       "lib/forward_entry.wgsl"
     ])
@@ -397,6 +463,7 @@ func ensureSpriteForward(
         "lib/deferred_shade.wgsl"
         "lib/ssao_upsample.wgsl"
         "lib/fade_dither.wgsl"
+        "lib/impostor_octahedral.wgsl"
         "lib/sprite_billboard.wgsl"
         "lib/forward_entry.wgsl"
       ])
@@ -419,20 +486,16 @@ func ensureSpriteForward(
       cache.forwardPipeline = pipeline
     }
   }
-  if cache.forwardBindGen is cache.bindGen and cache.forwardInputsGen is materials.inputsGen and bindGroupIsUsable(
-    resources: resources
-    id: cache.forwardBind
-  ) {
+  if cache.forwardBindGen is cache.bindGen and cache.forwardInputsGen is materials.inputsGen and sameImpostorBinding(
+    first: cache.forwardImpostors
+    second: cache.impostors.binding
+  ) and bindGroupIsUsable(resources: resources, id: cache.forwardBind) {
     ret
   }
   retireBindGroup(resources: resources, id: cache.forwardBind)
   cache.forwardBind = noBindGroupId()
   var entries: List(ResourceRef) = List.create(ResourceRef, cap: 18)
-  entries.add(value: bufferRef(id: gbuffer.frameUniform))
-  entries.add(value: bufferRef(id: gbuffer.draws))
-  entries.add(value: bufferRef(id: cache.uniform))
-  entries.add(value: externalRef(id: cache.arrayView))
-  entries.add(value: samplerRef(id: cache.sampler))
+  addSpriteEntries(cache: cache, gbuffer: gbuffer, entries: entries)
   if not addForwardInputs(entries: entries, inputs: materials.inputs) {
     ret
   }
@@ -444,6 +507,7 @@ func ensureSpriteForward(
     cache.forwardBind = bindGroup
     cache.forwardBindGen = cache.bindGen
     cache.forwardInputsGen = materials.inputsGen
+    cache.forwardImpostors = cache.impostors.binding
   }
 }
 
@@ -533,6 +597,8 @@ func spriteShutdown(cache: mod SpriteCache, resources: mod GpuResources) {
   retireRenderPipeline(resources: resources, id: cache.pipeline)
   retireBuffer(resources: resources, id: cache.uniform)
   retireSampler(resources: resources, id: cache.sampler)
+  retireBuffer(resources: resources, id: cache.unusedFrames)
+  retireImpostorAtlas(atlas: cache.impostors, resources: resources)
   releaseExternal(resources: resources, id: cache.arrayView)
   cache = createSpriteCache()
 }

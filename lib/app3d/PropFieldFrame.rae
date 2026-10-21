@@ -15,6 +15,7 @@ open RendererDeferred
 open GbufferSprite
 open app3d/PropFade
 open app3d/PropField
+open ImpostorAtlas
 
 # Fill the batches with this frame's props: only cells within the draw
 # distance and in the view, and in them only props in the view, each at the
@@ -337,12 +338,14 @@ func drawPropFieldSprites(
 # This frame's billboards into the shadow pass, each facing the sun with its
 # picture's outline (when a kind's sprite level casts shadows; the ones past
 # the cascades' reach fall outside every map). `aspect` and `cutoff` are the
-# pictures' (as GbufferSprite's spriteSetParams has them).
+# pictures' (as GbufferSprite's spriteSetParams has them), `impostors` the
+# atlas the sprite pass draws them from (noImpostorBinding: the sprite array).
 func drawPropFieldSpriteShadows(
   renderer: mod DeferredRenderer
   field: view PropField
   aspect: view Float
   cutoff: view Float
+  impostors: view ImpostorBinding
 ) {
   if field.spriteCastsShadow is false or field.spriteBatch.count <= 0 {
     ret
@@ -352,6 +355,7 @@ func drawPropFieldSpriteShadows(
     batch: field.spriteBatch
     aspect: aspect
     cutoff: cutoff
+    impostors: impostors
   )
 }
 

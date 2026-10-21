@@ -54,6 +54,7 @@ open ShadowMaps
 open ShadowMapsRecords
 open ShadowMapsSprite
 open ShadowMapsSdf
+open ImpostorAtlas
 open gpu/GpuResources
 open gpu/GpuLifetime
 open Gpu2dCanvas
@@ -351,14 +352,14 @@ func drawShadowCasterBatchWith(
   }
 }
 
-# Every billboard of `batch` (GbufferSprite's DrawU records: foot, height,
-# picture layer) as a shadow caster facing the sun, its outline cut by the
-# picture's alpha below `cutoff`; `aspect` is the pictures' width over height.
+# Every billboard of `batch` (GbufferSprite's DrawU records) as a caster facing the sun, cut
+# by the alpha below `cutoff` of its picture (`aspect` wide) or of its `impostors` atlas.
 func drawShadowSpriteBatchWith(
   renderer: mod DeferredRenderer
   batch: view InstanceBatch
   aspect: view Float
   cutoff: view Float
+  impostors: view ImpostorBinding
 ) {
   shadowQueueSprites(
     shadow: renderer.passes.shadow
@@ -367,6 +368,7 @@ func drawShadowSpriteBatchWith(
     count: batch.count
     aspect: aspect
     cutoff: cutoff
+    impostors: impostors
   )
 }
 

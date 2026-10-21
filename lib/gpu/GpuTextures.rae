@@ -200,7 +200,29 @@ func createTextureArray(
   format: view Int32
   usage: view UInt64
 ) ret opt TextureId {
-  if width < 1 or height < 1 or layers < 1 {
+  ret createTextureArrayMipped(
+    resources: resources
+    width: width
+    height: height
+    layers: layers
+    format: format
+    usage: usage
+    mipLevels: 1
+  )
+}
+
+# An array texture with `mipLevels` levels per layer (an impostor atlas: one
+# layer per species, its mips written one level at a time)
+func createTextureArrayMipped(
+  resources: mod GpuResources
+  width: view Int
+  height: view Int
+  layers: view Int
+  format: view Int32
+  usage: view UInt64
+  mipLevels: view Int
+) ret opt TextureId {
+  if width < 1 or height < 1 or layers < 1 or mipLevels < 1 {
     ret none
   }
   if usage is (0 as UInt64) {
@@ -217,7 +239,7 @@ func createTextureArray(
           depthOrArrayLayers: layers as UInt32
         }
         format: format
-        mipLevelCount: 1
+        mipLevelCount: mipLevels as UInt32
         sampleCount: 1
       }
       let handle: Ptr = wgpuDeviceCreateTexture(device: webgpuDevice(), descriptor: descriptor)
@@ -244,22 +266,57 @@ func makeLayerView(
   layerCount: view Int
   dimension: view Int32
 ) ret opt TextureViewId {
-  if isValidTexture(resources: resources, id: texture) is false or baseLayer < 0 or layerCount < 1 {
+  ret createTextureViewRange(
+    resources: resources
+    texture: texture
+    range: {
+      baseMip: 0
+      mipCount: 1
+      baseLayer: baseLayer
+      layerCount: layerCount
+      dimension: dimension
+    }
+  )
+}
+
+# Which part of a texture a view shows: `mipCount` levels from `baseMip`,
+# `layerCount` layers from `baseLayer`, as a 2D or 2DArray view
+type TextureViewRange {
+  baseMip: Int
+  mipCount: Int
+  baseLayer: Int
+  layerCount: Int
+  dimension: Int32
+}
+
+# A view over `range` of `texture` (its own format): one level of one layer
+# to render or write into, or every level of every layer to sample
+func createTextureViewRange(
+  resources: mod GpuResources
+  texture: view TextureId
+  range: view TextureViewRange
+) ret opt TextureViewId {
+  if isValidTexture(resources: resources, id: texture) is false or range.baseLayer < 0 or range.layerCount < 1 or range.baseMip < 0 or range.mipCount < 1 {
     ret none
   }
   if let slot: Int = findFreeSlot(table: resources.textureViews, capacity: resources.capacity) {
     unsafe {
       let textureHandle: Ptr = slotHandle(table: resources.textures, slot: texture.slot)
-      if baseLayer + layerCount > (wgpuTextureGetDepthOrArrayLayers(texture: textureHandle) as Int) {
+      if range.baseLayer + range.layerCount > (wgpuTextureGetDepthOrArrayLayers(
+        texture: textureHandle
+      ) as Int) {
+        ret none
+      }
+      if range.baseMip + range.mipCount > (wgpuTextureGetMipLevelCount(texture: textureHandle) as Int) {
         ret none
       }
       let descriptor: WGPUTextureViewDescriptor = {
         format: wgpuTextureGetFormat(texture: textureHandle)
-        dimension: dimension
-        baseMipLevel: 0
-        mipLevelCount: 1
-        baseArrayLayer: baseLayer as UInt32
-        arrayLayerCount: layerCount as UInt32
+        dimension: range.dimension
+        baseMipLevel: range.baseMip as UInt32
+        mipLevelCount: range.mipCount as UInt32
+        baseArrayLayer: range.baseLayer as UInt32
+        arrayLayerCount: range.layerCount as UInt32
         aspect: WGPUTextureAspect_All
       }
       let handle: Ptr = wgpuTextureCreateView(texture: textureHandle, descriptor: descriptor)
