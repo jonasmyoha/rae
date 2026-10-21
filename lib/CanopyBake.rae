@@ -1,0 +1,455 @@
+# CanopyBake — cluster impostors for a far canopy (docs/tree-lod-design.md
+# §2.4): each cluster (a cell of a forest's trees) baked, once at load, into
+# a page of an ImpostorAtlas from the trees' own impostors
+# (lib/canopy_bake.wgsl: each tree one quad, its view nearest the cluster
+# view's direction), then given coverage-preserving mips (ImpostorMips). The
+# sprite pass's impostor mode draws a cluster as one quad, as it draws a
+# tree. Hundreds of clusters fit in a few layers: a layer holds
+# subjectsPerSide x subjectsPerSide pages.
+#
+#   let atlas: ImpostorAtlas = bakeCanopyAtlas(resources:, trees: treeAtlas.binding,
+#   instances:, clusters:, settings: canopySettings, cutoff: 0.5)
+import Math
+import Vec3
+import Vec4
+open ImpostorAtlas
+open ImpostorBake
+open ImpostorMips
+open webgpu/Webgpu
+open webgpu/Context
+open webgpu/WebgpuEnums
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuIds
+open gpu/GpuRender
+open gpu/GpuRenderPass
+open gpu/GpuTextures
+open gpu/GpuArgs
+open gpu/GpuReadback
+
+# One tree of a cluster: its foot, turn about z, height and subject (layer)
+# in the trees' impostor atlas
+type CanopyTree {
+  position: Vec3
+  yaw: Float
+  height: Float
+  subject: Int
+}
+
+# A cluster: its trees (`firstTree`, `treeCount` of the bake's tree list,
+# which holds each cluster's trees together, in cluster order), its box in
+# the world (centre and half sides; each view is framed to it) and the
+# box's bounding sphere
+type CanopyCluster {
+  centre: Vec3
+  halfSize: Vec3
+  radius: Float
+  firstTree: Int
+  treeCount: Int
+}
+
+# A PC's canopy: 3 x 3 views (the eight sides 45 degrees apart and the top),
+# 128 x 32 pixels a view (a cluster is wide and low; each view is framed to
+# its box), 3 levels, the three nearest blended; 8 x 8 clusters a layer
+# (3072 x 768 pixels)
+func canopyPcSettings() ret ImpostorSettings {
+  ret ImpostorSettings {
+    viewsPerSide: 3
+    cellSize: 128
+    mips: 3
+    blendViews: true
+    subjectsPerSide: 8
+    cellHeight: 32
+  }
+}
+
+# A phone's: 2 x 2 views (four sides), 64 x 16 pixels a view, the nearest
+# one
+func canopyPhoneSettings() ret ImpostorSettings {
+  ret ImpostorSettings {
+    viewsPerSide: 2
+    cellSize: 64
+    mips: 3
+    blendViews: false
+    subjectsPerSide: 8
+    cellHeight: 16
+  }
+}
+
+func defaultCanopySettings() ret ImpostorSettings {
+  if impostorPhoneWanted() {
+    ret canopyPhoneSettings()
+  }
+  ret canopyPcSettings()
+}
+
+# Bake `clusters` of `instances` (trees drawn from the atlas `trees` binds)
+# into a new atlas with `settings`, one page a cluster, the mips keeping
+# their coverage under an alpha cut at `cutoff`. Waits for the GPU (load
+# only). An atlas with no layers when the bake failed.
+func bakeCanopyAtlas(
+  resources: mod GpuResources
+  trees: view ImpostorBinding
+  instances: view List(CanopyTree)
+  clusters: view List(CanopyCluster)
+  settings: view ImpostorSettings
+  cutoff: view Float
+) ret ImpostorAtlas {
+  var atlas: ImpostorAtlas = noImpostorAtlas()
+  if clusters.length < 1 or trees.viewsPerSide < 2 or settings.viewsPerSide < 2 {
+    ret atlas
+  }
+  createImpostorTextures(
+    atlas: atlas
+    resources: resources
+    settings: settings
+    subjects: clusters.length
+  )
+  var scratch: GpuScratch = createGpuScratch()
+  var baked: Bool = false
+  if isValidTexture(resources: resources, id: atlas.albedoTexture) and isValidTexture(
+    resources: resources
+    id: atlas.normalDepthTexture
+  ) {
+    if var recording: Recording = beginRecording(resources: resources) {
+      if recordCanopyViews(
+        recording: recording
+        resources: resources
+        trees: trees
+        instances: instances
+        clusters: clusters
+        atlas: atlas
+        cutoff: cutoff
+        scratch: scratch
+      ) and recordImpostorMips(
+        recording: recording
+        resources: resources
+        atlas: atlas
+        cutoff: cutoff
+        scratch: scratch
+      ) {
+        if let submission: SubmissionId = submit(resources: resources, recording: recording) {
+          baked = waitSubmission(resources: resources, id: submission)
+          let retired: Bool = retireSubmission(resources: resources, id: submission)
+        }
+      }
+    }
+  }
+  retireGpuScratch(scratch: scratch, resources: resources)
+  if baked {
+    # A cluster is drawn at its sphere's centre, at height 1: its frame is
+    # its sphere in metres round that point
+    var frames: ArgWriter = createArgs(uniform: false)
+    loop var cluster: Int = 0, cluster < clusters.length, ++cluster {
+      if let held: view CanopyCluster = clusters.viewAt(index: cluster) {
+        pushImpostorFrame(
+          writer: frames
+          settings: settings
+          subject: cluster
+          centre: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+          radius: held.radius
+          height: 1.0
+          halfBox: held.halfSize
+        )
+      }
+    }
+    baked = bindImpostorAtlas(atlas: atlas, resources: resources, frames: frames)
+  }
+  if not baked {
+    log("[canopy] the bake of {clusters.length} clusters failed")
+    retireImpostorAtlas(atlas: atlas, resources: resources)
+  }
+  ret atlas
+}
+
+# The view pass's pipeline: no vertex buffer (a quad a tree), two colour
+# targets, a depth test on the depth the fragment writes
+func canopyBakePipelineSpec() ret RenderPipelineSpec {
+  var colorFormats: List(Int32) = List.create(Int32, cap: 2)
+  colorFormats.add(value: impostorFormat)
+  colorFormats.add(value: impostorFormat)
+  ret RenderPipelineSpec {
+    vertexStride: 0
+    attributes: List.create(VertexAttributeSpec, cap: 0)
+    colorFormats: own colorFormats
+    alphaBlend: false
+    premultiplied: false
+    depthFormat: WGPUTextureFormat_Depth32Float
+    depthWrite: true
+    depthCompare: WGPUCompareFunction_Less
+    cullMode: WGPUCullMode_None
+    sampleCount: 1
+  }
+}
+
+# The bake's storage: per tree two vec4, per cluster three vec4 (its
+# sphere, its page and its box)
+func canopyTreeArgs(
+  instances: view List(CanopyTree)
+  clusters: view List(CanopyCluster)
+) ret ArgWriter {
+  var writer: ArgWriter = createArgs(uniform: false)
+  loop var cluster: Int = 0, cluster < clusters.length, ++cluster {
+    if let held: view CanopyCluster = clusters.viewAt(index: cluster) {
+      loop var tree: Int = held.firstTree, tree < held.firstTree + held.treeCount, ++tree {
+        if let instance: view CanopyTree = instances.viewAt(index: tree) {
+          pushVec4F(
+            writer: writer
+            x: instance.position.x
+            y: instance.position.y
+            z: instance.position.z
+            w: instance.yaw
+          )
+          pushVec4F(
+            writer: writer
+            x: instance.height
+            y: instance.subject.toFloat()
+            z: cluster.toFloat()
+            w: 0.0
+          )
+        }
+      }
+    }
+  }
+  ret writer
+}
+
+func canopyClusterArgs(
+  clusters: view List(CanopyCluster)
+  settings: view ImpostorSettings
+) ret ArgWriter {
+  var writer: ArgWriter = createArgs(uniform: false)
+  loop var cluster: Int = 0, cluster < clusters.length, ++cluster {
+    if let held: view CanopyCluster = clusters.viewAt(index: cluster) {
+      pushVec4F(
+        writer: writer
+        x: held.centre.x
+        y: held.centre.y
+        z: held.centre.z
+        w: held.radius
+      )
+      let page: Vec4 = impostorPage(settings: settings, subject: cluster)
+      pushVec4F(
+        writer: writer
+        x: page.x
+        y: page.y
+        z: page.z
+        w: page.w
+      )
+      pushImpostorBox(writer: writer, halfBox: held.halfSize, radius: held.radius)
+    }
+  }
+  ret writer
+}
+
+# Level 0 of every layer: one render pass a layer, one draw of every tree
+# of its clusters, an instance per tree and view
+func recordCanopyViews(
+  recording: mod Recording
+  resources: mod GpuResources
+  trees: view ImpostorBinding
+  instances: view List(CanopyTree)
+  clusters: view List(CanopyCluster)
+  atlas: view ImpostorAtlas
+  cutoff: view Float
+  scratch: mod GpuScratch
+) ret Bool {
+  let settings: ImpostorSettings = atlas.settings
+  let viewCount: Int = settings.viewsPerSide * settings.viewsPerSide
+  let size: Int = impostorAtlasSize(settings: settings)
+  let tall: Int = impostorAtlasHeight(settings: settings)
+  var uniform: ArgWriter = createArgs(uniform: true)
+  pushVec4F(
+    writer: uniform
+    x: settings.viewsPerSide.toFloat()
+    y: trees.viewsPerSide.toFloat()
+    z: cutoff
+    w: 0.0
+  )
+  var treeArgs: ArgWriter = canopyTreeArgs(instances: instances, clusters: clusters)
+  var clusterArgs: ArgWriter = canopyClusterArgs(clusters: clusters, settings: settings)
+  let storage: UInt64 = WGPUBufferUsage_Storage + WGPUBufferUsage_CopyDst
+  let uniformBuffer: BufferId = scratchBuffer(
+    resources: resources
+    scratch: scratch
+    size: 16
+    usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst
+  )
+  let treeBuffer: BufferId = scratchBuffer(
+    resources: resources
+    scratch: scratch
+    size: argsLength(writer: treeArgs)
+    usage: storage
+  )
+  let clusterBuffer: BufferId = scratchBuffer(
+    resources: resources
+    scratch: scratch
+    size: argsLength(writer: clusterArgs)
+    usage: storage
+  )
+  if not (uploadArgs(
+    writer: uniform
+    resources: resources
+    buffer: uniformBuffer
+    offset: 0
+  ) and uploadArgs(
+    writer: treeArgs
+    resources: resources
+    buffer: treeBuffer
+    offset: 0
+  ) and uploadArgs(
+    writer: clusterArgs
+    resources: resources
+    buffer: clusterBuffer
+    offset: 0
+  )) {
+    ret false
+  }
+  var pipeline: RenderPipelineId = noRenderPipelineId()
+  if let made: RenderPipelineId = createRenderPipeline(
+    resources: resources
+    shader: shader(files: ["lib/impostor_octahedral.wgsl", "lib/canopy_bake.wgsl"])
+    vertexEntry: "vs"
+    fragmentEntry: "fs"
+    spec: canopyBakePipelineSpec()
+  ) {
+    pipeline = made
+    scratch.renderPipelines.add(value: made)
+  }
+  var sampler: SamplerId = noSamplerId()
+  if let made: SamplerId = createSamplerMipped(
+    resources: resources
+    addressMode: WGPUAddressMode_ClampToEdge
+  ) {
+    sampler = made
+    scratch.samplers.add(value: made)
+  }
+  var entries: List(ResourceRef) = List.create(ResourceRef, cap: 7)
+  entries.add(value: bufferRef(id: uniformBuffer))
+  entries.add(value: bufferRef(id: treeBuffer))
+  entries.add(value: bufferRef(id: clusterBuffer))
+  entries.add(value: bufferRef(id: trees.frames))
+  entries.add(value: textureViewRef(id: trees.albedo))
+  entries.add(value: textureViewRef(id: trees.normalDepth))
+  entries.add(value: samplerRef(id: sampler))
+  var bindGroup: BindGroupId = noBindGroupId()
+  if let made: BindGroupId = createRenderBindGroup(
+    resources: resources
+    pipeline: pipeline
+    entries: entries
+  ) {
+    bindGroup = made
+    scratch.bindGroups.add(value: made)
+  }
+  var depthView: TextureViewId = noTextureViewId()
+  if let depth: TextureId = createTexture(
+    resources: resources
+    width: size
+    height: tall
+    format: WGPUTextureFormat_Depth32Float
+    usage: WGPUTextureUsage_RenderAttachment
+  ) {
+    scratch.textures.add(value: depth)
+    if let made: TextureViewId = createTextureView(resources: resources, texture: depth) {
+      depthView = made
+      scratch.views.add(value: made)
+    }
+  }
+  if not bindGroupIsUsable(resources: resources, id: bindGroup) or not isValidTextureView(
+    resources: resources
+    id: depthView
+  ) {
+    ret false
+  }
+  let perLayer: Int = settings.subjectsPerSide * settings.subjectsPerSide
+  loop var layer: Int = 0, layer < atlas.layers, ++layer {
+    # The trees of this layer's clusters (they are held together, in order)
+    let firstCluster: Int = layer * perLayer
+    let lastCluster: Int = Math.min(a: firstCluster + perLayer, b: clusters.length) - 1
+    let firstTree: Int = clusters.copyAtFallback(index: firstCluster, fallback: noCanopyCluster()).firstTree
+    let last: CanopyCluster = clusters.copyAtFallback(
+      index: lastCluster
+      fallback: noCanopyCluster()
+    )
+    let treeCount: Int = last.firstTree + last.treeCount - firstTree
+    let layerRange: TextureViewRange = {
+      baseMip: 0
+      mipCount: 1
+      baseLayer: layer
+      layerCount: 1
+      dimension: WGPUTextureViewDimension_2D
+    }
+    let albedoView: TextureViewId = scratchView(
+      resources: resources
+      scratch: scratch
+      texture: atlas.albedoTexture
+      range: layerRange
+    )
+    let normalDepthView: TextureViewId = scratchView(
+      resources: resources
+      scratch: scratch
+      texture: atlas.normalDepthTexture
+      range: layerRange
+    )
+    var targets: RenderTargetSet = createRenderTargetSet(clear: true)
+    let albedoAdded: Bool = addColorTarget(
+      targets: targets
+      colorView: textureViewRef(id: albedoView)
+      r: 0.0
+      g: 0.0
+      b: 0.0
+      a: 0.0
+    )
+    let normalDepthAdded: Bool = addColorTarget(
+      targets: targets
+      colorView: textureViewRef(id: normalDepthView)
+      r: 0.5
+      g: 0.5
+      b: 1.0
+      a: 0.0
+    )
+    setDepthTarget(
+      targets: targets
+      depthView: textureViewRef(id: depthView)
+      clear: true
+      clearValue: 1.0
+      readOnly: false
+    )
+    unsafe {
+      let pass: Ptr = beginRenderPassMulti(
+        recording: recording
+        resources: resources
+        targets: targets
+      )
+      if pass is webgpuNull() {
+        ret false
+      }
+      if treeCount > 0 {
+        let drawn: Bool = recordDrawInPass(
+          resources: resources
+          pass: pass
+          pipeline: pipeline
+          bindGroup: bindGroup
+          vertexCount: 6
+          instanceCount: treeCount * viewCount
+          firstVertex: 0
+          firstInstance: firstTree * viewCount
+        )
+      }
+      endRenderPass(pass: pass)
+    }
+  }
+  recordRenderPipelineUse(recording: recording, resources: resources, id: pipeline)
+  recordBindGroupUse(recording: recording, resources: resources, id: bindGroup)
+  ret true
+}
+
+func noCanopyCluster() ret CanopyCluster {
+  ret CanopyCluster {
+    centre: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    halfSize: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
+    radius: 1.0
+    firstTree: 0
+    treeCount: 0
+  }
+}

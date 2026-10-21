@@ -26,6 +26,7 @@ type GpuScratch {
   bindGroups: List(BindGroupId)
   pipelines: List(PipelineId)
   renderPipelines: List(RenderPipelineId)
+  samplers: List(SamplerId) = List.create(SamplerId, cap: 1)
 }
 
 func createGpuScratch() ret GpuScratch {
@@ -51,6 +52,9 @@ func retireGpuScratch(scratch: mod GpuScratch, resources: mod GpuResources) {
   retireTextureViewIds(resources: resources, list: scratch.views)
   retireTextureIds(resources: resources, list: scratch.textures)
   retireBufferIds(resources: resources, list: scratch.buffers)
+  loop let sampler: view SamplerId in scratch.samplers {
+    let retired: Bool = retireSampler(resources: resources, id: sampler)
+  }
   scratch = createGpuScratch()
 }
 
@@ -92,13 +96,22 @@ func scratchView(
   ret noTextureViewId()
 }
 
-# The side (pixels) of level `level` of an atlas
+# The width (pixels) of level `level` of an atlas
 func impostorLevelSize(settings: view ImpostorSettings, level: view Int) ret Int {
-  var size: Int = impostorAtlasSize(settings: settings)
+  ret halvedSize(size: impostorAtlasSize(settings: settings), level: level)
+}
+
+# The height (pixels) of level `level` of an atlas
+func impostorLevelHeight(settings: view ImpostorSettings, level: view Int) ret Int {
+  ret halvedSize(size: impostorAtlasHeight(settings: settings), level: level)
+}
+
+func halvedSize(size: view Int, level: view Int) ret Int {
+  var halved: Int = size
   loop var halving: Int = 0, halving < level, ++halving {
-    size = Math.max(a: size / 2, b: 1)
+    halved = Math.max(a: halved / 2, b: 1)
   }
-  ret size
+  ret halved
 }
 
 # Every layer of level `mip` of an atlas texture, as a 2DArray view
@@ -186,7 +199,8 @@ func recordImpostorMips(
     scratch: scratch
   ) {
     let layers: Int = atlas.layers
-    let cells: Int = settings.viewsPerSide * settings.viewsPerSide * layers
+    let cellsPerSide: Int = impostorViewCellsPerSide(settings: settings)
+    let cells: Int = cellsPerSide * cellsPerSide * layers
     let sourceAlbedo: TextureViewId = scratchView(
       resources: resources
       scratch: scratch
@@ -239,7 +253,7 @@ func recordImpostorLevel(
   pushVec4U(
     writer: uniform
     x: level
-    y: settings.viewsPerSide
+    y: impostorViewCellsPerSide(settings: settings)
     z: settings.cellSize
     w: impostorHistogramBins
   )
@@ -247,7 +261,7 @@ func recordImpostorLevel(
     writer: uniform
     x: cutoff
     y: atlas.layers.toFloat()
-    z: 0.0
+    z: impostorCellHeight(settings: settings).toFloat()
     w: 0.0
   )
   let uniformBuffer: BufferId = scratchBuffer(
@@ -334,15 +348,15 @@ func recordImpostorLevel(
         pipeline: pipelines.write
         entries: writeEntries
       ) {
-        let levelSize: Int = impostorLevelSize(settings: settings, level: level)
-        let groups: Int = (levelSize + 7) / 8
+        let groups: Int = (impostorLevelSize(settings: settings, level: level) + 7) / 8
+        let rows: Int = (impostorLevelHeight(settings: settings, level: level) + 7) / 8
         ret recordCompute(
           recording: recording
           resources: resources
           pipeline: pipelines.count
           bindGroup: countBind
           workgroupsX: groups
-          workgroupsY: groups
+          workgroupsY: rows
           workgroupsZ: atlas.layers
         ) and recordCompute(
           recording: recording
@@ -358,7 +372,7 @@ func recordImpostorLevel(
           pipeline: pipelines.write
           bindGroup: writeBind
           workgroupsX: groups
-          workgroupsY: groups
+          workgroupsY: rows
           workgroupsZ: atlas.layers
         )
       }

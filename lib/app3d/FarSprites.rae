@@ -34,6 +34,8 @@ open Gbuffer
 open gpu/GpuResources
 open GbufferSprite
 open app3d/PropField
+open app3d/PropFade
+open GbufferRecord
 
 # One far billboard: its foot, how high over it its view centre is (what its
 # distance is measured from), its height in the world and its picture's layer;
@@ -45,6 +47,9 @@ type FarSprite {
   yaw: Float
   layer: Int
   keep: Float
+  # The centre of the far canopy cluster it stands in (app3d/FarCanopy):
+  # its fade out is measured from there, as the cluster's fade in is
+  fadeCentre: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
 }
 
 type FarSpriteSettings {
@@ -58,6 +63,12 @@ type FarSpriteSettings {
   # kept ones drawn bigger, at most this many times
   thinFrom: Float
   maxGrow: Float
+  # A far canopy takes over in a band `fadeOutWidth` wide round
+  # `fadeOutMiddle` (m; 0 wide: none): the sprites fade out there, each by
+  # its cluster's distance, with the cluster's seed, so the two make up one
+  # picture (app3d/FarCanopy)
+  fadeOutMiddle: Float = 0.0
+  fadeOutWidth: Float = 0.0
 }
 
 # A block's billboards and the box round their feet
@@ -367,6 +378,18 @@ func gatherFarSprites(farSprites: mod FarSprites, propView: view PropView, toon:
         if propSphereInView(propView: propView, center: center, radius: sprite.height * grow * 0.5) is false {
           continue
         }
+        var fadeShare: Float = 0.0
+        if settings.fadeOutWidth > 0.0 {
+          fadeShare = propBandShare(
+            distance: Vec3.vlen(a: Vec3.vsub(a: sprite.fadeCentre, b: propView.eye))
+            middle: settings.fadeOutMiddle
+            width: settings.fadeOutWidth
+          )
+          if fadeShare >= 1.0 {
+            continue
+          }
+        }
+        let before: Int = farSprites.batch.count
         addSpriteInstance(
           batch: farSprites.batch
           position: sprite.position
@@ -375,6 +398,15 @@ func gatherFarSprites(farSprites: mod FarSprites, propView: view PropView, toon:
           layer: sprite.layer
           toon: toon
         )
+        if fadeShare > 0.0 and farSprites.batch.count > before {
+          setInstanceFade(
+            records: farSprites.batch.records
+            slot: before
+            threshold: fadeShare
+            fadingIn: false
+            seed: propFadeSeed(x: sprite.fadeCentre.x, y: sprite.fadeCentre.y)
+          )
+        }
         farSprites.drawn = farSprites.drawn + 1
         farSprites.farthestDrawn = Math.max(a: farSprites.farthestDrawn, b: distance)
         farSprites.largestGrow = Math.max(a: farSprites.largestGrow, b: grow)

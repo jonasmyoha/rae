@@ -55,9 +55,12 @@ struct SpriteU {
 @group(0) @binding(2) var<uniform> S: SpriteU;
 @group(0) @binding(3) var spriteTex: texture_2d_array<f32>;
 @group(0) @binding(4) var spriteSamp: sampler;
-// Impostor mode: the atlas's normal and depth, and per layer the bounding
-// sphere's centre and radius over the prop's height (the plain mode binds
-// the sprite array and an unread buffer here)
+// Impostor mode: the atlas's normal and depth, and per subject (the
+// instance's "layer") three vec4: the bounding sphere's centre and radius
+// over the prop's height, its page (texture layer, origin u, v, size) and
+// its framing (impostorExtents: a box's half sides over the radius and 1, or
+// 0 for a sphere) (the plain mode binds the sprite array and an unread
+// buffer here)
 @group(0) @binding(5) var impostorNormalDepth: texture_2d_array<f32>;
 @group(0) @binding(6) var<storage, read> impostorFrames: array<vec4<f32>>;
 
@@ -93,6 +96,9 @@ struct VsOut {
   @location(11) @interpolate(flat) cellCWeights: vec4<f32>,
   @location(12) @interpolate(flat) eyeYaw: vec4<f32>,
   @location(13) @interpolate(flat) centreRadius: vec4<f32>,
+  // The subject's page in its texture layer (origin u, v, size) and the
+  // subject (its framing is read from the frames)
+  @location(14) @interpolate(flat) page: vec4<f32>,
 };
 
 // The eye's world position, from the view-projection: the point that clip
@@ -154,11 +160,18 @@ fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut
   o.cellCWeights = vec4<f32>(0.0);
   o.eyeYaw = vec4<f32>(0.0);
   o.centreRadius = vec4<f32>(0.0);
+  o.page = vec4<f32>(0.0, 0.0, 1.0, 0.0);
+  o.layer = i32(max(d.params.w, 0.0));
   let views = S.b.z;
   if (views > 0.5) {
     // The impostor: the sphere's square facing the eye
     let yaw = atan2(d.model[0].y, d.model[0].x);
-    let frame = impostorFrames[u32(max(d.params.w, 0.0))];
+    let subject = u32(max(d.params.w, 0.0));
+    let frame = impostorFrames[subject * 3u];
+    let pageOf = impostorFrames[subject * 3u + 1u];
+    let box = impostorFrames[subject * 3u + 2u];
+    o.layer = i32(pageOf.x);
+    o.page = vec4<f32>(pageOf.yzw, f32(subject));
     let centre = base + impostorTurn(frame.xyz, yaw) * height;
     let radius = frame.w * height;
     var toEye = cameraPosition() - centre;
@@ -183,15 +196,19 @@ fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut
       picks.c = picks.a;
       picks.weights = vec3<f32>(1.0, 0.0, 0.0);
     }
-    let localA = impostorViewPoint(point, eye, impostorViewDirection(picks.a, views));
-    o.localAB = vec4<f32>(localA, impostorViewPoint(point, eye, impostorViewDirection(picks.b, views)));
-    o.localC = impostorViewPoint(point, eye, impostorViewDirection(picks.c, views));
+    let directionA = impostorViewDirection(picks.a, views);
+    let directionB = impostorViewDirection(picks.b, views);
+    let directionC = impostorViewDirection(picks.c, views);
+    let localA = impostorViewPoint(point, eye, directionA, impostorExtents(directionA, box));
+    let localB = impostorViewPoint(point, eye, directionB, impostorExtents(directionB, box));
+    o.localAB = vec4<f32>(localA, localB);
+    o.localC = impostorViewPoint(point, eye, directionC, impostorExtents(directionC, box));
     o.cellsAB = vec4<f32>(picks.a, picks.b);
     o.cellCWeights = vec4<f32>(picks.c, picks.weights.y, picks.weights.z);
     o.eyeYaw = vec4<f32>(eye, yaw);
     o.centreRadius = vec4<f32>(centre, radius);
     // The first view's atlas point: what the hashed alpha test measures
-    o.uv = impostorAtlasUv(picks.a, views, localA);
+    o.uv = impostorPageUv(o.page.xyz, impostorAtlasUv(picks.a, views, localA));
   } else {
     let u = c.x - 0.5;               // -0.5..0.5 across width
     world = base + rightH * (u * width) + up * (c.y * height);
@@ -202,7 +219,6 @@ fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut
   o.pos = F.viewProj * vec4<f32>(world, 1.0);
   o.clipNow = o.pos;
   o.clipPrev = F.prevViewProj * vec4<f32>(world, 1.0);   // static prop: same world
-  o.layer = i32(max(d.params.w, 0.0));
   o.emissive = d.params.y;
   // The shading mode (lit / emissive / toon) as the mesh instances carry it,
   // so a billboard standing in for a toon mesh is shaded toon too
@@ -254,26 +270,38 @@ struct ImpostorTap {
   normal: vec3<f32>,
   position: vec3<f32>,
 };
-fn impostorTap(cell: vec2<f32>, local: vec2<f32>, planeAlpha: f32, eye: vec3<f32>, layer: i32) -> ImpostorTap {
+fn impostorTap(
+  cell: vec2<f32>, local: vec2<f32>, planeAlpha: f32, eye: vec3<f32>, layer: i32, page: vec4<f32>,
+) -> ImpostorTap {
   let views = S.b.z;
   let viewDirection = impostorViewDirection(cell, views);
+  let extents = impostorExtents(viewDirection, impostorFrames[u32(page.w) * 3u + 2u]);
   // One parallax step: the depth where the ray crosses the view's plane
   // (none where nothing was baked) moves the read to where it meets the prop
-  let planeUv = impostorAtlasUv(cell, views, local);
+  let planeUv = impostorPageUv(page.xyz, impostorAtlasUv(cell, views, local));
   let planeDepth = textureSample(impostorNormalDepth, spriteSamp, planeUv, layer).a * 2.0 - 1.0;
-  let moved = impostorParallax(local, planeDepth * planeAlpha, eye, viewDirection);
-  let uv = impostorAtlasUv(cell, views, moved);
+  let moved = impostorParallax(local, planeDepth * planeAlpha, eye, viewDirection, extents);
+  let uv = impostorPageUv(page.xyz, impostorAtlasUv(cell, views, moved));
   let normalDepth = textureSample(impostorNormalDepth, spriteSamp, uv, layer);
   var tap: ImpostorTap;
   tap.albedo = textureSample(spriteTex, spriteSamp, uv, layer);
+  // Off the view's picture (a box framed view is smaller than the quad):
+  // nothing there, not the next view's picture
+  tap.albedo.a = tap.albedo.a * impostorOnPicture(local);
   tap.normal = normalDepth.xyz * 2.0 - vec3<f32>(1.0);
-  tap.position = impostorViewPosition(moved, normalDepth.a * 2.0 - 1.0, viewDirection);
+  tap.position = impostorViewPosition(moved, normalDepth.a * 2.0 - 1.0, viewDirection, extents);
   return tap;
 }
 
 // A view's alpha where the eye's ray crosses its plane
-fn impostorPlaneAlpha(cell: vec2<f32>, local: vec2<f32>, layer: i32) -> f32 {
-  return textureSample(spriteTex, spriteSamp, impostorAtlasUv(cell, S.b.z, local), layer).a;
+fn impostorPlaneAlpha(cell: vec2<f32>, local: vec2<f32>, layer: i32, page: vec4<f32>) -> f32 {
+  let uv = impostorPageUv(page.xyz, impostorAtlasUv(cell, S.b.z, local));
+  return textureSample(spriteTex, spriteSamp, uv, layer).a * impostorOnPicture(local);
+}
+
+// 1 where `local` is on a view's picture (-1..1 both ways), else 0
+fn impostorOnPicture(local: vec2<f32>) -> f32 {
+  return select(0.0, 1.0, abs(local.x) <= 1.0 && abs(local.y) <= 1.0);
 }
 
 // An impostor's surface: its views blended by weight and alpha
@@ -286,24 +314,24 @@ fn impostorSurface(in: VsOut) -> FsOut {
   // crown) leaves here after one read a view, before the full reads (the
   // depth this pass writes turns off the early depth test, so a hidden
   // impostor's fragments run too)
-  let alphaA = impostorPlaneAlpha(in.cellsAB.xy, in.localAB.xy, in.layer);
+  let alphaA = impostorPlaneAlpha(in.cellsAB.xy, in.localAB.xy, in.layer, in.page);
   var alphaB = 0.0;
   var alphaC = 0.0;
   if (blend) {
-    alphaB = impostorPlaneAlpha(in.cellsAB.zw, in.localAB.zw, in.layer);
-    alphaC = impostorPlaneAlpha(in.cellCWeights.xy, in.localC, in.layer);
+    alphaB = impostorPlaneAlpha(in.cellsAB.zw, in.localAB.zw, in.layer, in.page);
+    alphaC = impostorPlaneAlpha(in.cellCWeights.xy, in.localC, in.layer, in.page);
   }
   if (max(alphaA, max(alphaB, alphaC)) <= 0.0) {
     discard;
   }
-  let first = impostorTap(in.cellsAB.xy, in.localAB.xy, alphaA, eye, in.layer);
+  let first = impostorTap(in.cellsAB.xy, in.localAB.xy, alphaA, eye, in.layer, in.page);
   var weights = vec3<f32>(1.0, 0.0, 0.0);
   var second = first;
   var third = first;
   if (blend) {
     weights = vec3<f32>(1.0 - in.cellCWeights.z - in.cellCWeights.w, in.cellCWeights.z, in.cellCWeights.w);
-    second = impostorTap(in.cellsAB.zw, in.localAB.zw, alphaB, eye, in.layer);
-    third = impostorTap(in.cellCWeights.xy, in.localC, alphaC, eye, in.layer);
+    second = impostorTap(in.cellsAB.zw, in.localAB.zw, alphaB, eye, in.layer, in.page);
+    third = impostorTap(in.cellCWeights.xy, in.localC, alphaC, eye, in.layer, in.page);
   }
   let alpha = dot(weights, vec3<f32>(first.albedo.a, second.albedo.a, third.albedo.a));
   // alpha cutout — no colour, no depth; and a level fading in or out

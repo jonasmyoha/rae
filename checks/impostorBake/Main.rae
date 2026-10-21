@@ -6,7 +6,10 @@
 # mip keeps level 0's coverage under the alpha cut within 3%, and writes the
 # atlas to PNG files to look at, in RAE_IMPOSTOR_PNG_DIR (default
 # /tmp/rae-impostor-atlas): per species its albedo (see-through pixels grey),
-# normal and depth at level 0, and the albedo of every mip.
+# normal and depth at level 0, and the albedo of every mip. Then a far canopy
+# (lib/CanopyBake, step 6) of four 40 m cells of these trees, from their
+# impostors: the same coverage check over its mips, and its first layer
+# (the cells' pages) as PNGs.
 # Exit code 0 = every check passed.
 import Math
 import Sys
@@ -25,6 +28,10 @@ open ImpostorAtlas
 open ImpostorBake
 open ImpostorMips
 open app3d/GroveTrees
+open app3d/PropField
+open app3d/FarSprites
+open app3d/FarCanopy
+open CanopyBake
 
 const speciesNames: String = "broadleaf umbrella cypress spruce orange red gold crimson palm"
 
@@ -40,12 +47,13 @@ func readLevel(
   mip: view Int
   layer: view Int
   size: view Int
+  tall: view Int
 ) ret List(UInt8) {
-  var pixels: List(UInt8) = List.create(UInt8, cap: size * size * 4)
+  var pixels: List(UInt8) = List.create(UInt8, cap: size * tall * 4)
   let bytesPerRow: Int = (size * 4 + 255) / 256 * 256
   if let buffer: BufferId = createBuffer(
     resources: resources
-    size: bytesPerRow * size
+    size: bytesPerRow * tall
     usage: WGPUBufferUsage_MapRead + WGPUBufferUsage_CopyDst
   ) {
     if var recording: Recording = beginRecording(resources: resources) {
@@ -65,15 +73,15 @@ func readLevel(
             resources: resources
             buffer: buffer
             offset: 0
-            size: bytesPerRow * size
+            size: bytesPerRow * tall
           ) {
             if waitReadback(resources: resources, id: read) {
-              var bytes: List(UInt8) = List.create(UInt8, cap: bytesPerRow * size)
-              loop var i: Int = 0, i < bytesPerRow * size, ++i {
+              var bytes: List(UInt8) = List.create(UInt8, cap: bytesPerRow * tall)
+              loop var i: Int = 0, i < bytesPerRow * tall, ++i {
                 bytes.add(value: 0)
               }
               if copyReadback(resources: resources, id: read, destination: bytes) {
-                loop var row: Int = 0, row < size, ++row {
+                loop var row: Int = 0, row < tall, ++row {
                   loop var column: Int = 0, column < size * 4, ++column {
                     pixels.add(
                       value: bytes.copyAtFallback(index: row * bytesPerRow + column, fallback: 0)
@@ -121,10 +129,11 @@ func savePicture(
   path: view String
   pixels: view List(UInt8)
   size: view Int
+  tall: view Int
   picture: view PngPicture
 ) ret Bool {
-  var packed: List(Int) = List.create(Int, cap: size * size)
-  loop var i: Int = 0, i < size * size, ++i {
+  var packed: List(Int) = List.create(Int, cap: size * tall)
+  loop var i: Int = 0, i < size * tall, ++i {
     let alpha: Int = byteAt(bytes: pixels, index: i * 4 + 3)
     var red: Int = byteAt(bytes: pixels, index: i * 4)
     var green: Int = byteAt(bytes: pixels, index: i * 4 + 1)
@@ -145,8 +154,129 @@ func savePicture(
     path: path
     pixels: packed.data
     width: size
-    height: size
+    height: tall
   )
+}
+
+# A canopy of four 40 m cells of trees on a jittered 3.5 m grid, baked from
+# the trees' atlas: its pages and mips. The failures.
+func checkCanopy(
+  resources: mod GpuResources
+  trees: view ImpostorBinding
+  folder: view String
+) ret Int {
+  var settings: ImpostorSettings = canopyPcSettings()
+  if Sys.getEnv(name: "RAE_IMPOSTOR_PHONE") is "1" {
+    settings = canopyPhoneSettings()
+  }
+  let field: PropField = createPropField(
+    originX: 0.0
+    originY: 0.0
+    size: 80.0
+    cellSize: 40.0
+  )
+  var sprites: List(FarSprite) = List.create(FarSprite, cap: 600)
+  loop var row: Int = 0, row < 22, ++row {
+    loop var column: Int = 0, column < 22, ++column {
+      let hash: Float = farSpriteKeep(x: column.toFloat(), y: row.toFloat())
+      if hash < 0.4 {
+        continue
+      }
+      let species: Int = (hash * 1000.0).toInt() % treeSpeciesCount
+      sprites.add(value: farSpriteAt(
+        position: Vec3.create(
+          x: column.toFloat() * 3.6 + 1.0 + hash
+          y: row.toFloat() * 3.6 + 1.0 + hash * 0.7
+          z: hash * 3.0
+        )
+        centerZ: 0.0
+        height: 6.0 + hash * 6.0
+        yaw: hash * 40.0
+        layer: species
+      ))
+    }
+  }
+  var instances: List(CanopyTree) = List.create(CanopyTree, cap: sprites.length)
+  let clusters: List(CanopyCluster) = farCanopyClusters(
+    field: field
+    trees: sprites
+    instances: instances
+  )
+  var canopy: ImpostorAtlas = bakeCanopyAtlas(
+    resources: resources
+    trees: trees
+    instances: instances
+    clusters: clusters
+    settings: settings
+    cutoff: spriteCutoff
+  )
+  if canopy.subjects is not 4 {
+    log("FAIL: the canopy bake made {canopy.subjects} clusters, not 4")
+    ret 1
+  }
+  var full: Float = 0.0
+  var low: Float = 10.0
+  var high: Float = 0.0
+  loop var mip: Int = 0, mip < settings.mips, ++mip {
+    let size: Int = impostorLevelSize(settings: settings, level: mip)
+    let tall: Int = impostorLevelHeight(settings: settings, level: mip)
+    let albedo: List(UInt8) = readLevel(
+      resources: resources
+      texture: canopy.albedoTexture
+      mip: mip
+      layer: 0
+      size: size
+      tall: tall
+    )
+    let share: Float = coverage(pixels: albedo, cutoff: spriteCutoff)
+    if mip is 0 {
+      full = share
+      let normalDepth: List(UInt8) = readLevel(
+        resources: resources
+        texture: canopy.normalDepthTexture
+        mip: 0
+        layer: 0
+        size: size
+        tall: tall
+      )
+      let wroteNormal: Bool = savePicture(
+        path: "{folder}/canopy-normal.png"
+        pixels: normalDepth
+        size: size
+        tall: tall
+        picture: PngPicture.normal
+      )
+      let wroteDepth: Bool = savePicture(
+        path: "{folder}/canopy-depth.png"
+        pixels: normalDepth
+        size: size
+        tall: tall
+        picture: PngPicture.depth
+      )
+    }
+    if full > 0.0 {
+      low = Math.min(a: low, b: share / full)
+      high = Math.max(a: high, b: share / full)
+    }
+    let wroteAlbedo: Bool = savePicture(
+      path: "{folder}/canopy-albedo-mip{mip}.png"
+      pixels: albedo
+      size: size
+      tall: tall
+      picture: PngPicture.albedo
+    )
+  }
+  # Four of the layer's 64 pages are used
+  let covers: Bool = full > 0.002
+  let mipsKeep: Bool = low >= 0.97 and high <= 1.03
+  log(
+    "canopy: {instances.length} trees in {clusters.length} clusters, level 0 covers {(full * 1000.0).toInt()} per mille of its layer ={covers}; the mips keep {(low * 100.0 + 0.5).toInt()}-{(high * 100.0 + 0.5).toInt()}% of it ={mipsKeep}"
+  )
+  retireImpostorAtlas(atlas: canopy, resources: resources)
+  if covers and mipsKeep {
+    ret 0
+  }
+  ret 1
 }
 
 func main() ret Int {
@@ -219,12 +349,14 @@ func main() ret Int {
       var high: Float = 0.0
       loop var mip: Int = 0, mip < settings.mips, ++mip {
         let size: Int = impostorLevelSize(settings: settings, level: mip)
+        let tall: Int = impostorLevelHeight(settings: settings, level: mip)
         let albedo: List(UInt8) = readLevel(
           resources: resources
           texture: atlas.albedoTexture
           mip: mip
           layer: species
           size: size
+          tall: tall
         )
         let share: Float = coverage(pixels: albedo, cutoff: spriteCutoff)
         if mip is 0 {
@@ -235,17 +367,20 @@ func main() ret Int {
             mip: 0
             layer: species
             size: size
+            tall: tall
           )
           let wroteNormal: Bool = savePicture(
             path: "{folder}/{name}-normal.png"
             pixels: normalDepth
             size: size
+            tall: tall
             picture: PngPicture.normal
           )
           let wroteDepth: Bool = savePicture(
             path: "{folder}/{name}-depth.png"
             pixels: normalDepth
             size: size
+            tall: tall
             picture: PngPicture.depth
           )
         }
@@ -257,6 +392,7 @@ func main() ret Int {
           path: "{folder}/{name}-albedo-mip{mip}.png"
           pixels: albedo
           size: size
+          tall: tall
           picture: PngPicture.albedo
         )
       }
@@ -269,6 +405,7 @@ func main() ret Int {
         "{name}: level 0 covers {(full * 100.0).toInt()}% of its layer ={covers}; the mips keep {(low * 100.0 + 0.5).toInt()}-{(high * 100.0 + 0.5).toInt()}% of it ={mipsKeep}"
       )
     }
+    failures = failures + checkCanopy(resources: resources, trees: atlas.binding, folder: folder)
     log("pictures written to {folder}")
     retireImpostorAtlas(atlas: atlas, resources: resources)
     meshStoreShutdown(store: store, resources: resources)

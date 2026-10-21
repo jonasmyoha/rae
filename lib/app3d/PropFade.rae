@@ -48,6 +48,19 @@ func propLodPickFrom(maxDistances: view List(Float), distance: view Float) ret P
   ret PropLodPick { near: -1, far: -1, threshold: 0.0 }
 }
 
+# How far (0..1) `distance` is through a fade band `width` wide round
+# `middle`: 0 before it, 1 past it (the far canopy's hand-over,
+# app3d/FarCanopy, where a cell's trees fade out as its cluster fades in)
+func propBandShare(distance: view Float, middle: view Float, width: view Float) ret Float {
+  if width <= 0.0 {
+    if distance < middle {
+      ret 0.0
+    }
+    ret 1.0
+  }
+  ret Math.min(a: Math.max(a: (distance - (middle - width * 0.5)) / width, b: 0.0), b: 1.0)
+}
+
 # A prop's fade seed (0..1) from where it stands, so neighbouring props do not
 # fade in step
 func propFadeSeed(x: view Float, y: view Float) ret Float {

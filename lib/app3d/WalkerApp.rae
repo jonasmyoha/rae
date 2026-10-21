@@ -87,6 +87,7 @@ open app3d/WalkerUi
 open app3d/HudOverlays
 open app3d/WalkerNet
 open app3d/WalkerTerrain
+open app3d/FarCanopy
 open app3d/WalkerTerrainBodies
 open app3d/IslandForest
 open app3d/WalkerAppSetup
@@ -446,6 +447,7 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
       spawnX: characterController.position.x
       spawnY: characterController.position.y
     )
+    bakeWalkerCanopy(terrainSystem: terrainSystem, renderer: renderer)
 
     # #739: the hero is an entity like any crowd member (app3d/Characters): its
     # controller, transform, clip, transition and model are components; the
@@ -904,6 +906,7 @@ func runWalkerApp(settings: view WalkerAppSettings) ret Int {
       waterShutdown(waterSystem: waterSystem, resources: resources)
     }
     spriteShutdown(cache: app.terrainSystem.sprites, resources: resources)
+    farCanopyShutdown(canopy: app.terrainSystem.canopy, resources: resources)
     shutdown(resources: resources)
   }
   shutdownDeferredRenderer(renderer: app.renderSystem.renderer)  # #904: the renderer-owned GPU manager, before the C shutdown

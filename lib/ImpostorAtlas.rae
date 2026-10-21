@@ -1,23 +1,36 @@
 # ImpostorAtlas — the octahedral impostors of a set of props
-# (docs/tree-lod-design.md §2.2): per prop kind, one layer of two texture
-# arrays, each layer a grid of views x views orthographic pictures of the
-# prop (lib/impostor_octahedral.wgsl): its unlit albedo with alpha, and its
-# normal with depth, with coverage-preserving mips. ImpostorBake makes it on
-# the GPU; GbufferSprite and ShadowMapsSprite draw billboards from it.
+# (docs/tree-lod-design.md §2.2): per subject (a prop kind, or a cluster of
+# props: the far canopy, §2.4) a page of two texture arrays, each page a
+# grid of views x views orthographic pictures of the subject
+# (lib/impostor_octahedral.wgsl): its unlit albedo with alpha, and its normal
+# with depth, with coverage-preserving mips. A layer holds subjectsPerSide x
+# subjectsPerSide pages (one for the tree kinds; many for the canopy's
+# hundreds of clusters, past the array's layer limit). ImpostorBake and
+# CanopyBake make it on the GPU; GbufferSprite and ShadowMapsSprite draw
+# billboards from it.
 open gpu/GpuResources
 open gpu/GpuLifetime
 open gpu/GpuIds
 open Scene3d
 import Vec3
+import Sys
+import Vec4
+import Math
+open gpu/GpuArgs
 
 # How an atlas is baked: views per side of the grid, the pixels of one view
-# (its cell, square), and the mip levels (each halves the cell); and how it
-# is drawn: the three nearest views blended, or only the nearest one
+# (its cell: cellSize wide and cellHeight high, 0 for square), the mip
+# levels (each halves the cell) and the pages per side of a layer; and how
+# it is drawn: the three nearest views blended, or only the nearest one. A
+# box framed subject (a canopy cluster, wide and low) is drawn sharper from
+# wide cells: each view's picture is stretched to fill its cell either way.
 type ImpostorSettings {
   viewsPerSide: Int
   cellSize: Int
   mips: Int
   blendViews: Bool
+  subjectsPerSide: Int = 1
+  cellHeight: Int = 0
 }
 
 # A PC: 8 x 8 views of 128 pixels (1024 x 1024 per prop kind), 4 levels
@@ -32,19 +45,28 @@ func impostorPhoneSettings() ret ImpostorSettings {
   ret ImpostorSettings { viewsPerSide: 4, cellSize: 128, mips: 4, blendViews: false }
 }
 
-# The settings for the platform this is built for
+# A phone's settings are wanted: built for one, or a desktop simulating one
+# (RAE_SIMULATE_MOBILE=1, as app3d/UiModes reads it; at startup, as the
+# atlases are baked then)
+func impostorPhoneWanted() ret Bool {
+  ret Target.isMobileOs or Sys.getEnv(name: "RAE_SIMULATE_MOBILE") is "1"
+}
+
+# The settings for the platform this runs as
 func defaultImpostorSettings() ret ImpostorSettings {
-  if Target.isMobileOs {
+  if impostorPhoneWanted() {
     ret impostorPhoneSettings()
   }
   ret impostorPcSettings()
 }
 
 # What a draw binds to read an atlas: both arrays (every layer and level),
-# the layers' frames (per layer one vec4: the bounding sphere's centre and
-# radius, over the prop's height, so a draw scales them by the height it
-# is drawn at), the grid's views per side (0: no atlas) and whether the
-# draw blends three views
+# the subjects' frames (per subject three vec4: the bounding sphere's centre
+# and radius, over the subject's height, so a draw scales them by the height
+# it is drawn at; its page: the layer, the page's origin in the layer's uv
+# and its size; and its framing, a box's half sides over the radius and 1, or
+# 0 for a sphere: impostorExtents; pushImpostorFrame), the grid's views per side (0: no
+# atlas) and whether the draw blends three views
 type ImpostorBinding {
   albedo: TextureViewId
   normalDepth: TextureViewId
@@ -80,6 +102,8 @@ type ImpostorSubject {
 
 type ImpostorAtlas {
   settings: ImpostorSettings
+  # The subjects, and the layers their pages fill
+  subjects: Int = 0
   layers: Int
   albedoTexture: TextureId
   normalDepthTexture: TextureId
@@ -96,9 +120,98 @@ func noImpostorAtlas() ret ImpostorAtlas {
   }
 }
 
-# The atlas's side in pixels at level 0
+# The atlas's width in pixels at level 0
 func impostorAtlasSize(settings: view ImpostorSettings) ret Int {
-  ret settings.viewsPerSide * settings.cellSize
+  ret impostorViewCellsPerSide(settings: settings) * settings.cellSize
+}
+
+# A view cell's height in pixels at level 0
+func impostorCellHeight(settings: view ImpostorSettings) ret Int {
+  if settings.cellHeight > 0 {
+    ret settings.cellHeight
+  }
+  ret settings.cellSize
+}
+
+# The atlas's height in pixels at level 0
+func impostorAtlasHeight(settings: view ImpostorSettings) ret Int {
+  ret impostorViewCellsPerSide(settings: settings) * impostorCellHeight(settings: settings)
+}
+
+# The view cells along a layer's side (every page's)
+func impostorViewCellsPerSide(settings: view ImpostorSettings) ret Int {
+  ret settings.viewsPerSide * Math.max(a: settings.subjectsPerSide, b: 1)
+}
+
+# The layers `subjects` pages fill
+func impostorLayersFor(settings: view ImpostorSettings, subjects: view Int) ret Int {
+  let perLayer: Int = Math.max(a: settings.subjectsPerSide, b: 1) * Math.max(
+    a: settings.subjectsPerSide
+    b: 1
+  )
+  ret (subjects + perLayer - 1) / perLayer
+}
+
+# Where subject `subject`'s page is: (layer, origin u, origin v, size), the
+# origin and size in the layer's uv
+func impostorPage(settings: view ImpostorSettings, subject: view Int) ret Vec4 {
+  let side: Int = Math.max(a: settings.subjectsPerSide, b: 1)
+  let slot: Int = subject % (side * side)
+  let size: Float = 1.0 / side.toFloat()
+  ret Vec4 {
+    x: (subject / (side * side)).toFloat()
+    y: (slot % side).toFloat() * size
+    z: (slot / side).toFloat() * size
+    w: size
+  }
+}
+
+# A subject's frame for the draws' frames buffer: its bounding sphere
+# (`centre`, `radius`) over `height`, its page, and its framing: each view
+# fitted to the box of half sides `halfBox` (a canopy cluster), or with all
+# zero to the sphere (a tree)
+func pushImpostorFrame(
+  writer: mod ArgWriter
+  settings: view ImpostorSettings
+  subject: view Int
+  centre: view Vec3
+  radius: view Float
+  height: view Float
+  halfBox: view Vec3
+) {
+  pushVec4F(
+    writer: writer
+    x: centre.x / height
+    y: centre.y / height
+    z: centre.z / height
+    w: radius / height
+  )
+  let page: Vec4 = impostorPage(settings: settings, subject: subject)
+  pushVec4F(
+    writer: writer
+    x: page.x
+    y: page.y
+    z: page.z
+    w: page.w
+  )
+  pushImpostorBox(writer: writer, halfBox: halfBox, radius: radius)
+}
+
+# A subject's framing (pushImpostorFrame): `halfBox` over `radius`, and 1;
+# all 0 for a sphere
+func pushImpostorBox(writer: mod ArgWriter, halfBox: view Vec3, radius: view Float) {
+  var boxed: Float = 0.0
+  if halfBox.x > 0.0 or halfBox.y > 0.0 or halfBox.z > 0.0 {
+    boxed = 1.0
+  }
+  let over: Float = 1.0 / Math.max(a: radius, b: 0.0001)
+  pushVec4F(
+    writer: writer
+    x: halfBox.x * over
+    y: halfBox.y * over
+    z: halfBox.z * over
+    w: boxed
+  )
 }
 
 # Retire the atlas's GPU objects (they go once no frame still reads them)

@@ -1,0 +1,282 @@
+# app3d/FarCanopy — a forest's far canopy (docs/tree-lod-design.md §2.4):
+# one cluster impostor per cell of its PropField, holding every tree of the
+# cell, drawn past where the trees' own far billboards (app3d/FarSprites)
+# end. Single trees past a few hundred metres are a few pixels each, so a
+# forest drawn as trees there must be thinned; a cell's cluster keeps all of
+# them at one quad a cell, out to the horizon.
+#
+# The clusters are baked once at load (CanopyBake: from the trees' own
+# impostors, so no mesh is drawn again) and drawn by their own sprite pass
+# (GbufferSprite's impostor mode, three views blended, lit through the
+# G-buffer like the trees). Round `settings.fadeMiddle` both are drawn: a
+# cell's trees fade out (FarSprites' fadeOut band, each measured from its
+# cluster's centre) as its cluster fades in, with the same threshold and
+# seed, so every pixel shows one of them (fade_dither.wgsl).
+#
+#   var canopy: FarCanopy = createFarCanopy(settings: { fadeMiddle: 300, fadeWidth: 60,
+#   farDistance: 2000 })
+#   planFarCanopy(canopy:, field:, trees: farSprites)   when the forest is planted
+#   bakeFarCanopy(canopy:, resources:, treeAtlas:, settings:, cutoff:)   then, with the GPU
+#   ...each frame: gatherFarCanopy(canopy:, propView:, toon:)
+#   ...G-buffer: drawFarCanopy(cache:, resources:, canopy:)
+import Math
+import Vec3
+open Scene3d
+open Gbuffer
+open GbufferInstanced
+open GbufferRecord
+open GbufferSprite
+open gpu/GpuResources
+open ImpostorAtlas
+open CanopyBake
+open app3d/PropField
+open app3d/PropFade
+open app3d/FarSprites
+
+# Where the canopy takes over: the fade band's middle and width (m), and how
+# far it is drawn
+type FarCanopySettings {
+  fadeMiddle: Float
+  fadeWidth: Float
+  farDistance: Float
+}
+
+type FarCanopy {
+  settings: FarCanopySettings
+  # The canopy's own sprite pass, over its atlas (the clusters' pages)
+  sprites: SpriteCache
+  # Per cluster: its sphere's centre (where it is drawn) and radius
+  centres: List(Vec3)
+  radii: List(Float)
+  # This frame's clusters
+  batch: InstanceBatch
+  drawn: Int
+  # Planned and waiting for the bake (planFarCanopy, bakeFarCanopy)
+  plannedTrees: List(CanopyTree)
+  plannedClusters: List(CanopyCluster)
+}
+
+func createFarCanopy(settings: view FarCanopySettings) ret FarCanopy {
+  ret FarCanopy {
+    settings: settings
+    sprites: createSpriteCache()
+    centres: List.create(Vec3, cap: 0)
+    radii: List.create(Float, cap: 0)
+    batch: createInstanceBatch(mesh: meshHandleNone(), capacity: 1)
+    drawn: 0
+    plannedTrees: List.create(CanopyTree, cap: 0)
+    plannedClusters: List.create(CanopyCluster, cap: 0)
+  }
+}
+
+# How far round its foot a tree reaches, over its height (the widest crown
+# is the umbrella pine's, 0.55 of its height either side)
+const canopyTreeReach: Float = 0.6
+
+# The clusters of `trees` (a field's far sprites, farSpritesOf) by `field`'s
+# cells, every non-empty cell one; each tree's fadeCentre is set to its
+# cluster's centre. `instances` gets the trees in cluster order.
+func farCanopyClusters(
+  field: view PropField
+  trees: mod List(FarSprite)
+  instances: mod List(CanopyTree)
+) ret List(CanopyCluster) {
+  let cellCount: Int = field.columns * field.columns
+  # The trees of each cell, as a linked list through `next` (-1 ends it)
+  var heads: List(Int) = List.create(Int, cap: cellCount)
+  loop var cell: Int = 0, cell < cellCount, ++cell {
+    heads.add(value: -1)
+  }
+  var next: List(Int) = List.create(Int, cap: trees.length)
+  var cells: List(Int) = List.create(Int, cap: trees.length)
+  loop var tree: Int = 0, tree < trees.length, ++tree {
+    let sprite: FarSprite = trees.copyAtDefault(index: tree)
+    let cell: Int = propCellOf(field: field, x: sprite.position.x, y: sprite.position.y)
+    cells.add(value: cell)
+    next.add(value: heads.copyAtFallback(index: cell, fallback: -1))
+    heads.set(index: cell, value: tree)
+  }
+  var clusters: List(CanopyCluster) = List.create(CanopyCluster, cap: cellCount)
+  var clusterOfCell: List(Int) = List.create(Int, cap: cellCount)
+  loop var cell: Int = 0, cell < cellCount, ++cell {
+    clusterOfCell.add(value: -1)
+    var tree: Int = heads.copyAtFallback(index: cell, fallback: -1)
+    if tree < 0 {
+      continue
+    }
+    var low: Vec3 = Vec3.create(x: 1000000.0, y: 1000000.0, z: 1000000.0)
+    var high: Vec3 = Vec3.create(x: -1000000.0, y: -1000000.0, z: -1000000.0)
+    let firstTree: Int = instances.length
+    loop tree >= 0 {
+      let sprite: FarSprite = trees.copyAtDefault(index: tree)
+      let reach: Float = sprite.height * canopyTreeReach
+      low = Vec3.create(
+        x: Math.min(a: low.x, b: sprite.position.x - reach)
+        y: Math.min(a: low.y, b: sprite.position.y - reach)
+        z: Math.min(a: low.z, b: sprite.position.z)
+      )
+      high = Vec3.create(
+        x: Math.max(a: high.x, b: sprite.position.x + reach)
+        y: Math.max(a: high.y, b: sprite.position.y + reach)
+        z: Math.max(a: high.z, b: sprite.position.z + sprite.height)
+      )
+      instances.add(
+        value: {
+          position: sprite.position
+          yaw: sprite.yaw
+          height: sprite.height
+          subject: sprite.layer
+        }
+      )
+      tree = next.copyAtFallback(index: tree, fallback: -1)
+    }
+    clusterOfCell.set(index: cell, value: clusters.length)
+    clusters.add(value: {
+      centre: Vec3.vscale(a: Vec3.vadd(a: low, b: high), s: 0.5)
+      halfSize: Vec3.vscale(a: Vec3.vsub(a: high, b: low), s: 0.5)
+      radius: Vec3.vlen(a: Vec3.vsub(a: high, b: low)) * 0.5
+      firstTree: firstTree
+      treeCount: instances.length - firstTree
+    })
+  }
+  # Each tree fades out from its cluster's centre
+  loop var tree: Int = 0, tree < trees.length, ++tree {
+    let cluster: Int = clusterOfCell.copyAtFallback(
+      index: cells.copyAtFallback(index: tree, fallback: 0)
+      fallback: -1
+    )
+    if cluster >= 0 {
+      if let sprite: mod FarSprite = trees.modAt(index: tree) {
+        sprite.fadeCentre = clusters.copyAtFallback(index: cluster, fallback: noCanopyCluster()).centre
+      }
+    }
+  }
+  ret clusters
+}
+
+# Plan the canopy of `field`'s trees (`trees`, its far sprites, before they
+# are handed to FarSprites: their fadeCentres are set here), for the bake
+func planFarCanopy(canopy: mod FarCanopy, field: view PropField, trees: mod List(FarSprite)) {
+  canopy.plannedTrees = List.create(CanopyTree, cap: trees.length)
+  canopy.plannedClusters = farCanopyClusters(
+    field: field
+    trees: trees
+    instances: canopy.plannedTrees
+  )
+}
+
+# Bake the planned canopy from the trees' impostor atlas, with `settings`
+# (defaultCanopySettings) and the trees' alpha `cutoff`
+func bakeFarCanopy(
+  canopy: mod FarCanopy
+  resources: mod GpuResources
+  treeAtlas: view ImpostorBinding
+  settings: view ImpostorSettings
+  cutoff: view Float
+) {
+  if canopy.plannedClusters.length is 0 {
+    ret
+  }
+  let instances: List(CanopyTree) = own canopy.plannedTrees
+  let clusters: List(CanopyCluster) = own canopy.plannedClusters
+  canopy.plannedTrees = List.create(CanopyTree, cap: 0)
+  canopy.plannedClusters = List.create(CanopyCluster, cap: 0)
+  let started: Int = nowMs()
+  let atlas: ImpostorAtlas = bakeCanopyAtlas(
+    resources: resources
+    trees: treeAtlas
+    instances: instances
+    clusters: clusters
+    settings: settings
+    cutoff: cutoff
+  )
+  if atlas.subjects is 0 {
+    ret
+  }
+  canopy.centres.clear()
+  canopy.radii.clear()
+  loop let cluster: view CanopyCluster in clusters {
+    canopy.centres.add(value: cluster.centre)
+    canopy.radii.add(value: cluster.radius)
+  }
+  canopy.batch = createInstanceBatch(mesh: meshHandleNone(), capacity: clusters.length)
+  spriteSetParams(
+    cache: canopy.sprites
+    resources: resources
+    heightK: 1.0
+    aspect: 1.0
+    cutoff: cutoff
+    time: 0.0
+    tilt: 0.0
+  )
+  setSpriteImpostors(cache: canopy.sprites, resources: resources, atlas: atlas)
+  let side: Int = impostorAtlasSize(settings: settings)
+  log(
+    "[canopy] {clusters.length} clusters of {instances.length} trees, {settings.viewsPerSide} x {settings.viewsPerSide} views of {settings.cellSize} px, {atlas.layers} layers of {side} px, baked in {nowMs() - started} ms"
+  )
+}
+
+# This frame's clusters: those past the band's start, in reach and in view,
+# fading in across the band
+func gatherFarCanopy(canopy: mod FarCanopy, propView: view PropView, toon: view Bool) {
+  resetInstanceBatch(batch: canopy.batch)
+  canopy.drawn = 0
+  let settings: FarCanopySettings = canopy.settings
+  loop var cluster: Int = 0, cluster < canopy.centres.length, ++cluster {
+    let centre: Vec3 = canopy.centres.copyAtDefault(index: cluster)
+    let radius: Float = canopy.radii.copyAtFallback(index: cluster, fallback: 0.0)
+    let distance: Float = Vec3.vlen(a: Vec3.vsub(a: centre, b: propView.eye))
+    let share: Float = propBandShare(
+      distance: distance
+      middle: settings.fadeMiddle
+      width: settings.fadeWidth
+    )
+    if share <= 0.0 or distance - radius > settings.farDistance {
+      continue
+    }
+    if propSphereInView(propView: propView, center: centre, radius: radius) is false {
+      continue
+    }
+    let before: Int = canopy.batch.count
+    addSpriteInstance(
+      batch: canopy.batch
+      position: centre
+      height: 1.0
+      yaw: 0.0
+      layer: cluster
+      toon: toon
+    )
+    if share < 1.0 and canopy.batch.count > before {
+      setInstanceFade(
+        records: canopy.batch.records
+        slot: before
+        threshold: share
+        fadingIn: true
+        seed: propFadeSeed(x: centre.x, y: centre.y)
+      )
+    }
+    canopy.drawn = canopy.drawn + 1
+  }
+}
+
+# This frame's clusters into the G-buffer (the quad's depth: they are far)
+func drawFarCanopy(cache: mod GbufferCache, resources: mod GpuResources, canopy: mod FarCanopy) {
+  if canopy.batch.count <= 0 {
+    ret
+  }
+  unsafe {
+    drawSpriteInstances(
+      cache: canopy.sprites
+      resources: resources
+      gbuffer: cache
+      records: canopy.batch.records.data
+      count: canopy.batch.count
+      movedDepth: false
+    )
+  }
+}
+
+# The canopy's GPU objects (renderer shutdown)
+func farCanopyShutdown(canopy: mod FarCanopy, resources: mod GpuResources) {
+  spriteShutdown(cache: canopy.sprites, resources: resources)
+}

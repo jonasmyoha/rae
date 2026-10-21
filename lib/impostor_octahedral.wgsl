@@ -60,6 +60,12 @@ fn impostorUp(direction: vec3<f32>) -> vec3<f32> {
   return cross(direction, impostorRight(direction));
 }
 
+// The uv in a layer of a point of its page `page` (origin u, origin v, size:
+// many pages share a layer when there are many subjects, the far canopy's)
+fn impostorPageUv(page: vec3<f32>, uv: vec2<f32>) -> vec2<f32> {
+  return page.xy + uv * page.z;
+}
+
 // The atlas uv of a point of view (i, j)'s picture: `local` is -1..1 across
 // the sphere along the view's right (x) and up (y)
 fn impostorAtlasUv(cell: vec2<f32>, views: f32, local: vec2<f32>) -> vec2<f32> {
@@ -94,29 +100,50 @@ fn impostorThreeViews(direction: vec3<f32>, views: f32) -> ImpostorViews {
   return result;
 }
 
+// How far a subject reaches along a view's right, up and toward its eye,
+// over its radius. A sphere framed subject (a tree) reaches 1 every way; a
+// box framed one (a canopy cluster: `box.w` = 1, `box.xyz` the box's half
+// sides over the radius) its box's outline on the view, so each view's
+// picture holds the box and no more (a wide, low cluster fills its side
+// views top to bottom).
+fn impostorExtents(viewDirection: vec3<f32>, box: vec4<f32>) -> vec3<f32> {
+  if (box.w < 0.5) {
+    return vec3<f32>(1.0);
+  }
+  let reach = vec3<f32>(
+    dot(abs(impostorRight(viewDirection)), box.xyz),
+    dot(abs(impostorUp(viewDirection)), box.xyz),
+    dot(abs(viewDirection), box.xyz));
+  return max(reach, vec3<f32>(0.001));
+}
+
 // Where on view `viewDirection`'s picture (-1..1 along its right and up) the
 // ray toward the eye's direction `eye` through `point` crosses the view's
 // plane (both in the prop's own frame, `point` relative to the sphere's
-// centre, over its radius)
-fn impostorViewPoint(point: vec3<f32>, eye: vec3<f32>, viewDirection: vec3<f32>) -> vec2<f32> {
+// centre, over its radius), the view framed to `extents`
+fn impostorViewPoint(point: vec3<f32>, eye: vec3<f32>, viewDirection: vec3<f32>, extents: vec3<f32>) -> vec2<f32> {
   let along = dot(point, viewDirection) / max(dot(eye, viewDirection), 0.2);
   let onPlane = point - eye * along;
-  return vec2<f32>(dot(onPlane, impostorRight(viewDirection)), dot(onPlane, impostorUp(viewDirection)));
+  return vec2<f32>(dot(onPlane, impostorRight(viewDirection)), dot(onPlane, impostorUp(viewDirection))) / extents.xy;
 }
 
 // The parallax of a baked depth: the picture point a ray toward `eye`
 // reaches at the prop's surface, `depth` (-1..1, toward the view's eye)
 // above the view's plane, from where it crosses the plane
-fn impostorParallax(local: vec2<f32>, depth: f32, eye: vec3<f32>, viewDirection: vec3<f32>) -> vec2<f32> {
+fn impostorParallax(
+  local: vec2<f32>, depth: f32, eye: vec3<f32>, viewDirection: vec3<f32>, extents: vec3<f32>,
+) -> vec2<f32> {
   let facing = max(dot(eye, viewDirection), 0.2);
-  let shift = vec2<f32>(dot(eye, impostorRight(viewDirection)), dot(eye, impostorUp(viewDirection))) * (depth / facing);
+  let across = vec2<f32>(dot(eye, impostorRight(viewDirection)), dot(eye, impostorUp(viewDirection)));
+  let shift = across / extents.xy * (depth * extents.z / facing);
   return clamp(local + shift, vec2<f32>(-1.0), vec2<f32>(1.0));
 }
 
 // The point of view `viewDirection`'s picture at `local`, `depth` above its
 // plane, in the prop's own frame (relative to the centre, over the radius)
-fn impostorViewPosition(local: vec2<f32>, depth: f32, viewDirection: vec3<f32>) -> vec3<f32> {
-  return impostorRight(viewDirection) * local.x + impostorUp(viewDirection) * local.y + viewDirection * depth;
+fn impostorViewPosition(local: vec2<f32>, depth: f32, viewDirection: vec3<f32>, extents: vec3<f32>) -> vec3<f32> {
+  return impostorRight(viewDirection) * (local.x * extents.x) + impostorUp(viewDirection) * (local.y * extents.y)
+    + viewDirection * (depth * extents.z);
 }
 
 // A vector turned by `yaw` about z (the prop's frame to the world), and back

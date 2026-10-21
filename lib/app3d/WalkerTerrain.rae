@@ -41,6 +41,8 @@ open app3d/PropInstancer
 open app3d/PropField
 open app3d/PropFieldFrame
 open app3d/FarSprites
+open app3d/FarCanopy
+open CanopyBake
 open app3d/TerrainTiles
 open app3d/TerrainRocks
 
@@ -133,6 +135,16 @@ const walkerFarTreeThinFrom: Float = 300.0
 
 const walkerFarTreeBlock: Float = 64.0
 
+# Past this distance (m) the far canopy (app3d/FarCanopy: one cluster
+# impostor a forest cell) takes over from the far trees, across a band this
+# wide; the trees are drawn to the band's end plus a cluster's reach (a tree
+# is measured from its cluster's centre), unthinned
+const walkerCanopyFrom: Float = 300.0
+
+const walkerCanopyFadeWidth: Float = 60.0
+
+const walkerCanopyClusterReach: Float = 40.0
+
 type WalkerTerrain {
   # The streamed window: gridSide x gridSide cells round the walker
   gridSide: Int
@@ -157,6 +169,9 @@ type WalkerTerrain {
   # Past the forest's own billboards, its trees' far billboards, standing on
   # the far ground (when the forest has a farReach)
   farTrees: FarSprites
+  # Past the far trees, the forest's cells as cluster impostors (baked once
+  # the forest is planted: bakeWalkerCanopy)
+  canopy: FarCanopy
   farGround: TerrainTiles
   hasFarGround: Bool
   # The bush's three leaf tones
@@ -516,6 +531,11 @@ func gatherForest(terrainSystem: mod WalkerTerrain, camera: view Camera3d, aspec
       propView: propViewOf(camera: camera, aspect: aspect)
       toon: terrainSystem.toon
     )
+    gatherFarCanopy(
+      canopy: terrainSystem.canopy
+      propView: propViewOf(camera: camera, aspect: aspect)
+      toon: terrainSystem.toon
+    )
   }
 }
 
@@ -544,6 +564,7 @@ func drawTerrainProps(
       farSprites: terrainSystem.farTrees
       sprites: terrainSystem.sprites
     )
+    drawFarCanopy(cache: cache, resources: resources, canopy: terrainSystem.canopy)
   }
   loop let part: view PropInstancer in terrainSystem.bushParts {
     drawInstances(cache: cache, resources: resources, batch: part.batch)
@@ -556,14 +577,36 @@ func fillFarTrees(terrainSystem: mod WalkerTerrain) {
   if terrainSystem.hasFarGround is false {
     ret
   }
+  var trees: List(FarSprite) = farSpritesOf(
+    field: terrainSystem.forest
+    placements: terrainSystem.forest.placements
+  )
+  planFarCanopy(canopy: terrainSystem.canopy, field: terrainSystem.forest, trees: trees)
   let added: Int = addFarSpritesInCells(
     farSprites: terrainSystem.farTrees
-    sprites: farSpritesOf(field: terrainSystem.forest, placements: terrainSystem.forest.placements)
+    sprites: trees
     cellSize: walkerFarTreeBlock
   )
   log(
     "[terrain] far trees: {terrainSystem.forest.placements.length} trees in {added} blocks, to {terrainSystem.farTrees.settings.farDistance} m"
   )
+}
+
+# Bake the far canopy planned when the forest was planted (fillFarTrees),
+# from the forest's tree impostors; nothing without a far ground
+func bakeWalkerCanopy(terrainSystem: mod WalkerTerrain, renderer: mod DeferredRenderer) {
+  if terrainSystem.hasFarGround is false {
+    ret
+  }
+  if let resources: mod GpuResources = renderer.gpuResources {
+    bakeFarCanopy(
+      canopy: terrainSystem.canopy
+      resources: resources
+      treeAtlas: terrainSystem.sprites.impostors.binding
+      settings: defaultCanopySettings()
+      cutoff: spriteCutoff
+    )
+  }
 }
 
 func drawTerrainGround(
@@ -720,6 +763,18 @@ func createWalkerTerrain(
   farSettings.limit = walkerFarTreeLimit
   farSettings.thinFrom = walkerFarTreeThinFrom
   let hasFarGround: Bool = forest.farReach > 0.0
+  let canopySettings: FarCanopySettings = {
+    fadeMiddle: walkerCanopyFrom
+    fadeWidth: walkerCanopyFadeWidth
+    farDistance: forest.farDistance + forest.farReach
+  }
+  if hasFarGround {
+    # The canopy holds every tree past its band: the far trees stop there
+    farSettings.farDistance = walkerCanopyFrom + walkerCanopyFadeWidth * 0.5 + walkerCanopyClusterReach
+    farSettings.thinFrom = farSettings.farDistance
+    farSettings.fadeOutMiddle = walkerCanopyFrom
+    farSettings.fadeOutWidth = walkerCanopyFadeWidth
+  }
   var farSide: Int = 1
   if hasFarGround {
     farSide = walkerFarGroundSide
@@ -763,6 +818,7 @@ func createWalkerTerrain(
     forest: own forestField
     sprites: own sprites
     farTrees: own createFarSprites(settings: farSettings)
+    canopy: own createFarCanopy(settings: canopySettings)
     farGround: own farGround
     hasFarGround: hasFarGround
     bushParts: own createBushParts(renderer: renderer, capacity: cellCount)
