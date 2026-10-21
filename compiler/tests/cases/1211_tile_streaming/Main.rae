@@ -1,0 +1,159 @@
+# app3d/TileStreaming: tiles and their places, which are wanted round a
+# point, the load / unload hysteresis, and the streamer walking across a
+# world: one load a frame, the nearest first, never more tiles than slots,
+# each load and let-go an event with its tile entity and slot, a let-go
+# entity freed on the next call.
+import Math
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open ecs/Event
+open app3d/TileStreaming
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func hasTile(tiles: view List(GridTile), tile: view GridTile) ret Bool {
+  loop let held: view GridTile in tiles {
+    if sameTile(a: held, b: tile) {
+      ret true
+    }
+  }
+  ret false
+}
+
+func main() {
+  let settings: TileGridSettings = {
+    tileSize: 200.0
+    loadDistance: 450.0
+    unloadDistance: 560.0
+    slotCount: 26
+  }
+  # ----- tiles and their places -------------------------------------------------
+  let origin: GridTile = tileOfPoint(settings: settings, x: 10.0, y: -20.0)
+  let east: GridTile = tileOfPoint(settings: settings, x: 101.0, y: 0.0)
+  let west: GridTile = tileOfPoint(settings: settings, x: -101.0, y: -320.0)
+  check(
+    label: "tile (0, 0) on the origin, past half a tile east (1, 0), west and south negative, a tile's centre"
+    ok: origin.x is 0 and origin.y is 0 and east.x is 1 and east.y is 0 and west.x is -1 and west.y is -2 and tileCenterX(
+      settings: settings
+      tile: east
+    ) is 200.0
+  )
+  let wanted: List(GridTile) = tilesToLoad(settings: settings, x: 0.0, y: 0.0)
+  check(
+    label: "wanted: its own tile and those within the load distance, not beyond, never more than the slots ({wanted.length})"
+    ok: hasTile(tiles: wanted, tile: { x: 0, y: 0 }) and hasTile(
+      tiles: wanted
+      tile: { x: 2, y: 0 }
+    ) and hasTile(tiles: wanted, tile: { x: 3, y: 0 }) is false and wanted.length <= settings.slotCount
+  )
+  let loaded: GridTile = { x: 2, y: 0 }
+  check(
+    label: "a loaded tile is kept a little past the load distance, let go well past it"
+    ok: tileKept(
+      settings: settings
+      tile: loaded
+      x: -30.0
+      y: 0.0
+    ) and tileKept(
+      settings: settings
+      tile: loaded
+      x: -200.0
+      y: 0.0
+    ) is false
+  )
+  if let first: GridTile = nextTileToLoad(
+    settings: settings
+    loaded: List.create(GridTile, cap: 0)
+    x: 10.0
+    y: 10.0
+  ) {
+    check(label: "the nearest first: its own tile", ok: sameTile(a: first, b: origin))
+  }
+  # ----- the streamer walking across a world -----------------------------------
+  var streamer: TileStreamer = createTileStreamer(settings: settings)
+  var allocator: EntityAllocator = createEntityAllocator()
+  var mostHeld: Int = 0
+  var loads: Int = 0
+  var gones: Int = 0
+  var oneAFrame: Bool = true
+  var slotsRight: Bool = true
+  var goneFreedNext: Bool = true
+  var lastGone: List(EntityId) = List.create(EntityId, cap: 26)
+  loop var step: Int = 0, step < 400, ++step {
+    let px: Float = -1500.0 + step.toFloat() * 8.0
+    let py: Float = Math.sin(x: step.toFloat() * 0.02) * 400.0
+    streamTiles(
+      streamer: streamer
+      allocator: allocator
+      x: px
+      y: py
+    )
+    loop let entityId: view EntityId in lastGone {
+      goneFreedNext = goneFreedNext and allocatorIsAlive(this: allocator, entityId: entityId) is false
+    }
+    lastGone.clear()
+    oneAFrame = oneAFrame and eventCount(TileLoaded, this: streamer.loaded) <= 1
+    loop var i: Int = 0, i < eventCount(TileLoaded, this: streamer.loaded), ++i {
+      let event: TileLoaded = eventAt(TileLoaded, this: streamer.loaded, i: i)
+      let streamed: view StreamedTile = componentView(
+        this: streamer.tiles
+        entityId: event.entityId
+      )
+      slotsRight = slotsRight and streamed.slot is event.slot and sameTile(
+        a: streamed.tile
+        b: event.tile
+      ) and streamed.state is TileState.loaded
+      loads = loads + 1
+    }
+    loop var i: Int = 0, i < eventCount(TileGone, this: streamer.gone), ++i {
+      let event: TileGone = eventAt(TileGone, this: streamer.gone, i: i)
+      # Still alive while the app answers; its slot no longer its (this
+      # frame's load may take it)
+      slotsRight = slotsRight and allocatorIsAlive(this: allocator, entityId: event.entityId) and streamer.slots.copyAtFallback(
+        index: event.slot
+        fallback: noEntity()
+      ) is not event.entityId
+      lastGone.add(value: event.entityId)
+      gones = gones + 1
+    }
+    mostHeld = Math.max(a: mostHeld.toFloat(), b: usedTileSlots(streamer: streamer).toFloat()).toInt()
+  }
+  check(
+    label: "walking 3.2 km: at most {mostHeld} tiles held, {loads} loads, {gones} let go, one load a frame"
+    ok: mostHeld <= settings.slotCount and loads > 30 and gones > 20 and oneAFrame and loads is streamer.loads and gones is streamer.unloads
+  )
+  check(
+    label: "each load's entity carries its tile and slot; a let-go one is alive while answered, out of its slot"
+    ok: slotsRight
+  )
+  check(label: "a let-go tile's entity is freed on the next call", ok: goneFreedNext)
+  # Far away every tile goes; the entities are the tiles held
+  streamTiles(
+    streamer: streamer
+    allocator: allocator
+    x: 50000.0
+    y: 0.0
+  )
+  let goneFar: Int = eventCount(TileGone, this: streamer.gone)
+  streamTiles(
+    streamer: streamer
+    allocator: allocator
+    x: 50000.0
+    y: 0.0
+  )
+  check(
+    label: "far away all {goneFar} let go at once; then only the new tiles live ({allocatorAliveCount(
+      this: allocator
+    )})"
+    ok: goneFar >= 15 and allocatorAliveCount(this: allocator) is usedTileSlots(streamer: streamer) and componentCount(
+      this: streamer.tiles
+    ) is usedTileSlots(streamer: streamer)
+  )
+}
