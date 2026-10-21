@@ -1,0 +1,204 @@
+# app3d/GroundMarks — marks on the ground: footprints (app3d/Footprints),
+# tyre tracks (app3d/WheelTracks). A mark is a flat piece from one point to
+# another in a colour; a trail of them is a ring of `capacity` pieces, the
+# oldest reused once it is full. A piece fades by narrowing (no transparency
+# needed) over the last `fadeSeconds` of its `lifetime`, and the last
+# `tailShare` of a full trail narrows toward its end, so its tail never pops
+# as pieces are reused. Every live piece of a trail is drawn as one instance of
+# a unit box (Mesh3d makeBox size 1) in an instance batch, narrowed as it
+# fades, in its own colour: a system fills one batch with all its trails and
+# draws it once.
+import Math
+import Quat
+import Vec3
+open Math3d
+open ecs/Transform
+open GbufferInstanced
+
+# One piece: from where to where, laid when (the marks' own clock, s), and
+# its colour.
+type MarkPiece {
+  from: Vec3
+  to: Vec3
+  laidAt: Float
+  color: Vec3
+}
+
+# A trail: a ring of pieces (`next` is where the next one goes), and where
+# its maker last left one, if the trail is unbroken.
+type MarkTrail {
+  pieces: List(MarkPiece)
+  capacity: Int
+  next: Int
+  count: Int
+  lastPoint: Vec3
+  hasLastPoint: Bool
+}
+
+# How marks fade: their lifetime (s), the end of it they narrow over (s), and
+# the share of a full trail, at its old end, that narrows away.
+type MarkFading {
+  lifetime: Float
+  fadeSeconds: Float
+  tailShare: Float
+}
+
+func createMarkTrail(capacity: view Int) ret MarkTrail {
+  ret MarkTrail {
+    pieces: List.create(MarkPiece, cap: capacity)
+    capacity: capacity
+    next: 0
+    count: 0
+    lastPoint: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    hasLastPoint: false
+  }
+}
+
+# Add a piece, over the oldest once the ring is full.
+func markTrailAdd(trail: mod MarkTrail, piece: view MarkPiece) {
+  if trail.pieces.length < trail.capacity {
+    trail.pieces.add(value: piece)
+  } else {
+    trail.pieces.set(index: trail.next, value: piece)
+  }
+  trail.next = (trail.next + 1) % trail.capacity
+  trail.count = Math.min(a: trail.count + 1, b: trail.capacity)
+}
+
+# The piece `fromNewest` pieces back from the newest (0 is the newest).
+func markPieceFromNewest(trail: view MarkTrail, fromNewest: view Int) ret MarkPiece {
+  let index: Int = (trail.next - 1 - fromNewest + 2 * trail.capacity) % trail.capacity
+  ret trail.pieces.copyAtDefault(index: index)
+}
+
+# A piece's width, 0 to 1 of its full width: full while young and near the
+# trail's new end, narrowing over the end of its life and over the old end of
+# a trail of `capacity`.
+func markFade(
+  age: view Float
+  fromNewest: view Int
+  capacity: view Int
+  fading: view MarkFading
+) ret Float {
+  let ageFade: Float = Math.min(a: 1.0, b: (fading.lifetime - age) / fading.fadeSeconds)
+  let tailPieces: Float = capacity.toFloat() * fading.tailShare
+  let toEnd: Float = (capacity - 1 - fromNewest).toFloat()
+  let tailFade: Float = Math.min(a: 1.0, b: toEnd / tailPieces)
+  ret Math.max(a: 0.0, b: Math.min(a: ageFade, b: tailFade))
+}
+
+# The model matrix of a piece from `from` to `to`, `width` wide and
+# `thickness` thick, for a unit box (Mesh3d makeBox size 1): its middle
+# between the ends, its length along them (up or down a slope as well), its
+# width across.
+func markPieceModel(
+  from: view Vec3
+  to: view Vec3
+  width: view Float
+  thickness: view Float
+) ret Mat4 {
+  let dx: Float = to.x - from.x
+  let dy: Float = to.y - from.y
+  let dz: Float = to.z - from.z
+  let flat: Float = Math.sqrt(x: dx * dx + dy * dy)
+  let length: Float = Math.sqrt(x: dx * dx + dy * dy + dz * dz)
+  let heading: Quat = Quat.fromAxisAngle(
+    axis: Vec3.create(x: 0.0, y: 0.0, z: 1.0)
+    angle: Math.atan2(y: dy, x: dx)
+  )
+  let slope: Quat = Quat.fromAxisAngle(
+    axis: Vec3.create(x: 0.0, y: 1.0, z: 0.0)
+    angle: 0.0 - Math.atan2(y: dz, x: flat)
+  )
+  let pose: Transform3D = {
+    position: Vec3.create(
+      x: (from.x + to.x) * 0.5
+      y: (from.y + to.y) * 0.5
+      z: (from.z + to.z) * 0.5
+    )
+    rotation: Quat.qmul(a: heading, b: slope)
+    scale: Vec3.create(x: length, y: width, z: thickness)
+  }
+  ret transform3dToMatrix(t: pose)
+}
+
+# Add `trail`'s live pieces, `width` wide at full width and `thickness`
+# thick, at the marks' clock `clock`.
+func addMarkTrailInstances(
+  batch: mod InstanceBatch
+  trail: view MarkTrail
+  clock: view Float
+  width: view Float
+  thickness: view Float
+  fading: view MarkFading
+  toon: view Bool
+) {
+  loop var piece: Int = 0, piece < trail.count, ++piece {
+    let markPiece: MarkPiece = markPieceFromNewest(trail: trail, fromNewest: piece)
+    let fade: Float = markFade(
+      age: clock - markPiece.laidAt
+      fromNewest: piece
+      capacity: trail.capacity
+      fading: fading
+    )
+    if fade <= 0.0 {
+      continue
+    }
+    let model: Mat4 = markPieceModel(
+      from: markPiece.from
+      to: markPiece.to
+      width: width * fade
+      thickness: thickness
+    )
+    addInstance(
+      batch: batch
+      model: model
+      prevModel: model
+      material: {
+        baseColor: markPiece.color
+        metallic: 0.0
+        roughness: 1.0
+        emission: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+        toon: toon
+      }
+    )
+  }
+}
+
+# How many of `trail`'s pieces still show at `clock`, and how long they are
+# end to end (m).
+func markTrailLiveCount(trail: view MarkTrail, clock: view Float, fading: view MarkFading) ret Int {
+  var live: Int = 0
+  loop var piece: Int = 0, piece < trail.count, ++piece {
+    let markPiece: MarkPiece = markPieceFromNewest(trail: trail, fromNewest: piece)
+    if markFade(
+      age: clock - markPiece.laidAt
+      fromNewest: piece
+      capacity: trail.capacity
+      fading: fading
+    ) > 0.0 {
+      live = live + 1
+    }
+  }
+  ret live
+}
+
+func markTrailLiveLength(
+  trail: view MarkTrail
+  clock: view Float
+  fading: view MarkFading
+) ret Float {
+  var length: Float = 0.0
+  loop var piece: Int = 0, piece < trail.count, ++piece {
+    let markPiece: MarkPiece = markPieceFromNewest(trail: trail, fromNewest: piece)
+    if markFade(
+      age: clock - markPiece.laidAt
+      fromNewest: piece
+      capacity: trail.capacity
+      fading: fading
+    ) > 0.0 {
+      length = length + Vec3.vlen(a: Vec3.vsub(a: markPiece.to, b: markPiece.from))
+    }
+  }
+  ret length
+}
