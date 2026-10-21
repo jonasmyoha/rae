@@ -51,6 +51,9 @@ type TerrainTiles {
   tiles: List(TerrainTile)
   # Reused staging buffer for one tile's vertices
   scratchVerts: List(Float)
+  # Drawn this far below its heights (m): a coarse far ground under a finer
+  # near one, so the near one covers it where both are
+  drawDrop: Float = 0.0
 }
 
 # The pool: gridSide x gridSide tiles of `segments` x `segments` quads, each
@@ -230,7 +233,7 @@ func drawTerrainTiles(
       let model: Mat4 = mat4Translate(
         x: tile.cellX.toFloat() * tiles.cellSize
         y: tile.cellY.toFloat() * tiles.cellSize
-        z: 0.0
+        z: 0.0 - tiles.drawDrop
       )
       drawTerrainMesh(
         cache: cache

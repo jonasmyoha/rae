@@ -49,7 +49,8 @@ func wideForestBiome() ret BiomeConfig {
 
 # The forest's PropField: the forested square in 40 m cells, at most 1024
 # trees per batch; the sparser crowns from 60 m, billboards from 140 m
-# (app3d/GroveTrees.addForestKinds)
+# (app3d/GroveTrees.addForestKinds), and past that far billboards on the far
+# ground out to 1,800 m (app3d/FarSprites; the whole forest from its middle)
 func wideForestSettings() ret ForestFieldSettings {
   ret ForestFieldSettings {
     extent: wideForestExtent
@@ -57,6 +58,7 @@ func wideForestSettings() ret ForestFieldSettings {
     batchLimit: 1024
     midDistance: 60.0
     farDistance: 140.0
+    farReach: 1660.0
   }
 }
 
@@ -119,5 +121,6 @@ func plantWideForest(
     }
   }
   finishPropField(field: terrainSystem.forest)
+  fillFarTrees(terrainSystem: terrainSystem)
   ret planted
 }

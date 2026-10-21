@@ -35,6 +35,15 @@ compiler/bin/rae run examples/143_walker_forest/Main.rae
   first two cast shadows), into one instanced draw per species, level and
   part. The field's `batchLimit` keeps each batch at 1,024 instances, so the
   instance memory does not grow with the forest.
+- **Far trees to the horizon** (lib/app3d/FarSprites). Past 140 m, where
+  the field's own billboards end, every tree still stands as a far billboard
+  of the same picture, out to 1,800 m (the camera's far plane is 2,000 m):
+  the trees in 64 m blocks, the nearest blocks first, at most 8,192 a frame,
+  fewer kept past 300 m by the square of the distance and drawn bigger, so the
+  whole forest shows from its edge for about 5,600 billboards (0.35 ms of
+  gather on a desktop). They stand on a far ground: 5 x 5 tiles of 400 m, a
+  vertex every 10 m, from the same height field, drawn 1 m under the near
+  ground, which covers it round the walker.
 - **The trees** stand on a jittered 3.5 m grid, thinned by a forest-density
   noise (woods and meadows a few hundred metres across) and kept off lakes,
   beaches and bare rock. Each 36 m block has one main species, so the forest
