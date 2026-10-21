@@ -39,6 +39,7 @@ open ecs/Transform
 open app3d/GroveTrees
 open app3d/PropInstancer
 open app3d/PropField
+open app3d/FarSprites
 open app3d/TerrainTiles
 open app3d/TerrainRocks
 
@@ -100,14 +101,36 @@ type TreeVariant {
 
 # The forest's PropField: the square round the origin it covers (m), its
 # cells (m), the most trees one batch holds (0: PropField's own limit), and
-# where its sparser crowns and its billboards end (GroveTrees.addForestKinds)
+# where its sparser crowns and its billboards end (GroveTrees.addForestKinds);
+# `farReach` how far past that its trees still stand as far billboards
+# (app3d/FarSprites) on a coarse far ground (0: none, the field is all)
 type ForestFieldSettings {
   extent: Float
   cellSize: Float
   batchLimit: Int
   midDistance: Float
   farDistance: Float
+  farReach: Float = 0.0
 }
+
+# The far ground: walkerFarGroundSide x walkerFarGroundSide tiles of
+# walkerFarGroundCell metres round the walker, a vertex every 10 m, drawn
+# 1 m under the near ground (which covers it near the walker)
+const walkerFarGroundSide: Int = 5
+
+const walkerFarGroundCell: Float = 400.0
+
+const walkerFarGroundSegments: Int = 40
+
+const walkerFarGroundDrop: Float = 1.0
+
+# The far trees: at most this many billboards a frame, thinned past this
+# distance (m), in blocks of this size (m)
+const walkerFarTreeLimit: Int = 8192
+
+const walkerFarTreeThinFrom: Float = 300.0
+
+const walkerFarTreeBlock: Float = 64.0
 
 type WalkerTerrain {
   # The streamed window: gridSide x gridSide cells round the walker
@@ -130,6 +153,11 @@ type WalkerTerrain {
   forest: PropField
   # The sprite pass the forest's far level (its billboards) is drawn with
   sprites: SpriteCache
+  # Past the forest's own billboards, its trees' far billboards, standing on
+  # the far ground (when the forest has a farReach)
+  farTrees: FarSprites
+  farGround: TerrainTiles
+  hasFarGround: Bool
   # The bush's three leaf tones
   bushParts: List(PropInstancer)
 }
@@ -364,10 +392,21 @@ func updateInfiniteTerrain(
   transforms: mod ComponentTable(Transform3D)
   playerPosition: view Vec3
 ) ret Bool {
+  # The far ground first: its cells are not the near ones', so it can move
+  # when they do not
+  var farMoved: Bool = false
+  if terrainSystem.hasFarGround {
+    farMoved = updateTerrainTiles(
+      tiles: terrainSystem.farGround
+      renderer: renderer
+      cellX: Math.floor(x: playerPosition.x / walkerFarGroundCell).toInt()
+      cellY: Math.floor(x: playerPosition.y / walkerFarGroundCell).toInt()
+    )
+  }
   let cellX: Int = Math.floor(x: playerPosition.x / terrainSystem.cellSize).toInt()
   let cellY: Int = Math.floor(x: playerPosition.y / terrainSystem.cellSize).toInt()
   if cellX is terrainSystem.centreCellX and cellY is terrainSystem.centreCellY {
-    ret false
+    ret farMoved
   }
   terrainSystem.centreCellX = cellX
   terrainSystem.centreCellY = cellY
@@ -469,6 +508,14 @@ func gatherForest(terrainSystem: mod WalkerTerrain, camera: view Camera3d, aspec
   var propView: PropView = propViewOf(camera: camera, aspect: aspect)
   propView.halfAngle = Math.min(a: propView.halfAngle + 0.6, b: 3.0)
   gatherPropField(field: terrainSystem.forest, propView: propView, toon: terrainSystem.toon)
+  # The far trees: the picture only (no shadows), so the plain view
+  if terrainSystem.hasFarGround {
+    gatherFarSprites(
+      farSprites: terrainSystem.farTrees
+      propView: propViewOf(camera: camera, aspect: aspect)
+      toon: terrainSystem.toon
+    )
+  }
 }
 
 # This frame's props and forest (gathered above) into the open scene pass
@@ -489,9 +536,33 @@ func drawTerrainProps(
     field: terrainSystem.forest
     sprites: terrainSystem.sprites
   )
+  if terrainSystem.hasFarGround {
+    drawFarSprites(
+      cache: cache
+      resources: resources
+      farSprites: terrainSystem.farTrees
+      sprites: terrainSystem.sprites
+    )
+  }
   loop let part: view PropInstancer in terrainSystem.bushParts {
     drawInstances(cache: cache, resources: resources, batch: part.batch)
   }
+}
+
+# The forest's trees as far billboards, once it is planted (its finished
+# field's placements, in blocks); nothing when the forest has no farReach
+func fillFarTrees(terrainSystem: mod WalkerTerrain) {
+  if terrainSystem.hasFarGround is false {
+    ret
+  }
+  let added: Int = addFarSpritesInCells(
+    farSprites: terrainSystem.farTrees
+    sprites: farSpritesOf(field: terrainSystem.forest, placements: terrainSystem.forest.placements)
+    cellSize: walkerFarTreeBlock
+  )
+  log(
+    "[terrain] far trees: {terrainSystem.forest.placements.length} trees in {added} blocks, to {terrainSystem.farTrees.settings.farDistance} m"
+  )
 }
 
 func drawTerrainGround(
@@ -506,6 +577,14 @@ func drawTerrainGround(
     resources: resources
     time: time
   )
+  if terrainSystem.hasFarGround {
+    drawTerrainTiles(
+      tiles: terrainSystem.farGround
+      cache: cache
+      resources: resources
+      time: time
+    )
+  }
 }
 
 # The rocks, the bushes and the forest into the shadow pass, one instanced
@@ -631,6 +710,27 @@ func createWalkerTerrain(
     sprites: sprites
     settings: forest
   )
+  # Far trees from where the forest's own billboards end; a far ground under
+  # them (one tile when there is none, never drawn)
+  var farSettings: FarSpriteSettings = defaultFarSpriteSettings()
+  farSettings.nearDistance = forest.farDistance
+  farSettings.farDistance = forest.farDistance + forest.farReach
+  farSettings.limit = walkerFarTreeLimit
+  farSettings.thinFrom = walkerFarTreeThinFrom
+  let hasFarGround: Bool = forest.farReach > 0.0
+  var farSide: Int = 1
+  if hasFarGround {
+    farSide = walkerFarGroundSide
+  }
+  var farGround: TerrainTiles = createTerrainTiles(
+    renderer: renderer
+    gridSide: farSide
+    cellSize: walkerFarGroundCell
+    segments: walkerFarGroundSegments
+    groundZ: groundZ
+    biome: biome
+  )
+  farGround.drawDrop = walkerFarGroundDrop
   ret WalkerTerrain {
     gridSide: gridSide
     cellSize: walkerCellSize
@@ -660,6 +760,9 @@ func createWalkerTerrain(
     )
     forest: own forestField
     sprites: own sprites
+    farTrees: own createFarSprites(settings: farSettings)
+    farGround: own farGround
+    hasFarGround: hasFarGround
     bushParts: own createBushParts(renderer: renderer, capacity: cellCount)
   }
 }
