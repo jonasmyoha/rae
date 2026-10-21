@@ -1,0 +1,124 @@
+# app3d/FrameLog — a frame-time log an app turns on by owning a FrameLog and
+# calling frameLogUpdate once a frame (from its own frame loop, not a headless
+# test's): every `frameLogPeriodSeconds` one "[frames]" line with how the last
+# period's frames went — their median and 95th percentile, how many missed the
+# dynamic-resolution controller's budget — and where the resolution stands
+# (the 3D scene's size in pixels, the dynamic scale, the frame cap, the OS
+# thermal state). On a phone the line lands in the app's log file, where a
+# device profile (tools/ios/profile-ios.sh) reads it. The line's rules are
+# pure.
+import Math
+open RendererDeferred
+open app3d/RenderScale
+
+const frameLogPeriodSeconds: Float = 5.0
+
+# Is a line due, `sinceLog` s after the last?
+func frameLogDue(sinceLog: view Float) ret Bool {
+  ret sinceLog >= frameLogPeriodSeconds
+}
+
+# The frame time (s) `share` of the way up `frameTimes` sorted (0.5 the
+# median, 0.95 the 95th percentile, by nearest rank); 0 with none.
+func frameTimePercentile(frameTimes: view List(Float), share: view Float) ret Float {
+  if frameTimes.length is 0 {
+    ret 0.0
+  }
+  var sorted: List(Float) = List.create(Float, cap: frameTimes.length)
+  loop let time: view Float in frameTimes {
+    var at: Int = sorted.length
+    loop at > 0 and sorted.copyAtFallback(index: at - 1, fallback: 0.0) > time {
+      at = at - 1
+    }
+    sorted.insert(index: at, value: time)
+  }
+  var rank: Int = Math.ceil(x: share * sorted.length.toFloat()).toInt() - 1
+  rank = Math.max(a: 0, b: Math.min(a: sorted.length - 1, b: rank))
+  ret sorted.copyAtFallback(index: rank, fallback: 0.0)
+}
+
+# How many of `frameTimes` took longer than `overSeconds`.
+func slowFrameCount(frameTimes: view List(Float), overSeconds: view Float) ret Int {
+  var slow: Int = 0
+  loop let time: view Float in frameTimes {
+    if time > overSeconds {
+      slow = slow + 1
+    }
+  }
+  ret slow
+}
+
+# `seconds` as milliseconds to a tenth ("16.7").
+func millisecondsText(seconds: view Float) ret String {
+  let tenths: Int = Math.round(x: seconds * 10000.0).toInt()
+  ret "{tenths / 10}.{tenths % 10}"
+}
+
+# `value` to a hundredth ("0.70").
+func hundredthsText(value: view Float) ret String {
+  let hundredths: Int = Math.round(x: value * 100.0).toInt()
+  let fraction: Int = hundredths % 100
+  if fraction < 10 {
+    ret "{hundredths / 100}.0{fraction}"
+  }
+  ret "{hundredths / 100}.{fraction}"
+}
+
+func frameLogLine(
+  frameTimes: view List(Float)
+  overSeconds: view Float
+  scale: view Float
+  capFps: view Float
+  thermal: view Int
+  sceneWidth: view Int
+  sceneHeight: view Int
+) ret String {
+  let median: String = millisecondsText(
+    seconds: frameTimePercentile(frameTimes: frameTimes, share: 0.5)
+  )
+  let p95: String = millisecondsText(
+    seconds: frameTimePercentile(frameTimes: frameTimes, share: 0.95)
+  )
+  let slow: Int = slowFrameCount(frameTimes: frameTimes, overSeconds: overSeconds)
+  ret "[frames] {frameTimes.length} in {frameLogPeriodSeconds.toInt()} s: median {median} ms, p95 {p95} ms, {slow} over {millisecondsText(
+    seconds: overSeconds
+  )} ms; scene {sceneWidth}x{sceneHeight}, scale {hundredthsText(value: scale)}, cap {capFps.toInt()} fps, thermal {thermal}"
+}
+
+# The frames since the last line, and the time since it
+type FrameLog {
+  times: List(Float)
+  sinceLog: Float
+}
+
+func createFrameLog() ret FrameLog {
+  ret FrameLog { times: List.create(Float, cap: 512), sinceLog: 0.0 }
+}
+
+# One frame of `deltaTime` s: collected, and the line logged when one is due,
+# from the controller `drs` and the scene `renderer` draws
+func frameLogUpdate(
+  frameLog: mod FrameLog
+  deltaTime: view Float
+  drs: view RenderScaleController
+  renderer: view DeferredRenderer
+) {
+  if deltaTime > 0.0 {
+    frameLog.times.add(value: deltaTime)
+    frameLog.sinceLog = frameLog.sinceLog + deltaTime
+  }
+  if frameLogDue(sinceLog: frameLog.sinceLog) is false {
+    ret
+  }
+  log(frameLogLine(
+    frameTimes: frameLog.times
+    overSeconds: drs.overBudgetSec
+    scale: drs.scale
+    capFps: drs.capFps
+    thermal: thermalState()
+    sceneWidth: renderer.passes.gbuffer.targetWidth
+    sceneHeight: renderer.passes.gbuffer.targetHeight
+  ))
+  frameLog.times.clear()
+  frameLog.sinceLog = 0.0
+}

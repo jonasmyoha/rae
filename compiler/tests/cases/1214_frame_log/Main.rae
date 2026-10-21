@@ -1,0 +1,66 @@
+# app3d/FrameLog: the "[frames]" line's rules — the median and the 95th
+# percentile by nearest rank, the frames over the budget, a line every five
+# seconds, milliseconds to a tenth, the whole line.
+import Math
+open app3d/FrameLog
+
+func near(a: view Float, b: view Float) ret Bool {
+  ret Math.abs(value: a - b) < 0.00001
+}
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func main() {
+  # Twenty frames: eighteen at 60 fps, one late at 25 ms, one at 33 ms
+  var frames: List(Float) = List.create(Float, cap: 20)
+  loop var i: Int = 0, i < 18, ++i {
+    frames.add(value: 0.0167)
+  }
+  frames.add(value: 0.033)
+  frames.add(value: 0.025)
+  let empty: List(Float) = List.create(Float, cap: 0)
+  check(
+    label: "the median the usual frame, the 95th the 19th of 20, the 100th the slowest, none 0"
+    ok: near(a: frameTimePercentile(frameTimes: frames, share: 0.5), b: 0.0167) and near(
+      a: frameTimePercentile(frameTimes: frames, share: 0.95)
+      b: 0.025
+    ) and near(a: frameTimePercentile(frameTimes: frames, share: 1.0), b: 0.033) and near(
+      a: frameTimePercentile(frameTimes: empty, share: 0.5)
+      b: 0.0
+    )
+  )
+  check(
+    label: "two frames over a 20.8 ms budget"
+    ok: slowFrameCount(frameTimes: frames, overSeconds: 0.0208) is 2
+  )
+  check(
+    label: "a line every five seconds"
+    ok: frameLogDue(sinceLog: 4.9) is false and frameLogDue(sinceLog: 5.0)
+  )
+  check(
+    label: "milliseconds to a tenth, a whole one keeping its .0; hundredths"
+    ok: millisecondsText(seconds: 0.01667) is "16.7" and millisecondsText(seconds: 0.03304) is "33.0" and hundredthsText(
+      value: 0.7
+    ) is "0.70"
+  )
+  let line: String = frameLogLine(
+    frameTimes: frames
+    overSeconds: 0.0208
+    scale: 0.7
+    capFps: 60.0
+    thermal: 1
+    sceneWidth: 1564
+    sceneHeight: 720
+  )
+  log(line)
+  check(
+    label: "the whole line"
+    ok: line is "[frames] 20 in 5 s: median 16.7 ms, p95 25.0 ms, 2 over 20.8 ms; scene 1564x720, scale 0.70, cap 60 fps, thermal 1"
+  )
+}
