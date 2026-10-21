@@ -1,0 +1,368 @@
+# ImpostorMips — the impostor atlas's mip levels, made on the GPU with
+# coverage-preserving alpha (lib/impostor_mips.wgsl: per level a histogram
+# pass, a scale per view cell, and the write), recorded after the views are
+# drawn (ImpostorBake). Also the scratch list of the bake's GPU objects that
+# are thrown away once it has run.
+import Math
+open ImpostorAtlas
+open webgpu/WebgpuEnums
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuIds
+open gpu/GpuRender
+open gpu/GpuRenderPass
+open gpu/GpuTextures
+open gpu/GpuArgs
+
+# The bins of a cell's histogram of alpha keys: the cut lands within one
+# bin, so a cell of 128 x 128 pixels keeps its share to well under a pixel
+const impostorHistogramBins: Int = 1024
+
+# GPU objects one bake makes and no longer needs once it has run
+type GpuScratch {
+  buffers: List(BufferId)
+  textures: List(TextureId)
+  views: List(TextureViewId)
+  bindGroups: List(BindGroupId)
+  pipelines: List(PipelineId)
+  renderPipelines: List(RenderPipelineId)
+}
+
+func createGpuScratch() ret GpuScratch {
+  ret GpuScratch {
+    buffers: List.create(BufferId, cap: 16)
+    textures: List.create(TextureId, cap: 2)
+    views: List.create(TextureViewId, cap: 32)
+    bindGroups: List.create(BindGroupId, cap: 16)
+    pipelines: List.create(PipelineId, cap: 4)
+    renderPipelines: List.create(RenderPipelineId, cap: 1)
+  }
+}
+
+# Retire everything in the scratch list (each goes once no submission uses it)
+func retireGpuScratch(scratch: mod GpuScratch, resources: mod GpuResources) {
+  retireBindGroupIds(resources: resources, list: scratch.bindGroups)
+  loop let pipeline: view PipelineId in scratch.pipelines {
+    let retired: Bool = retirePipeline(resources: resources, id: pipeline)
+  }
+  loop let pipeline: view RenderPipelineId in scratch.renderPipelines {
+    let retired: Bool = retireRenderPipeline(resources: resources, id: pipeline)
+  }
+  retireTextureViewIds(resources: resources, list: scratch.views)
+  retireTextureIds(resources: resources, list: scratch.textures)
+  retireBufferIds(resources: resources, list: scratch.buffers)
+  scratch = createGpuScratch()
+}
+
+# A buffer that lives in the scratch list (noBufferId when it cannot be
+# made: whatever binds it then fails)
+func scratchBuffer(
+  resources: mod GpuResources
+  scratch: mod GpuScratch
+  size: view Int
+  usage: view UInt64
+) ret BufferId {
+  if let buffer: BufferId = createBuffer(
+    resources: resources
+    size: Math.max(a: size, b: 16)
+    usage: usage
+  ) {
+    scratch.buffers.add(value: buffer)
+    ret buffer
+  }
+  ret noBufferId()
+}
+
+# A view of the atlas texture `texture` that lives in the scratch list
+# (noTextureViewId when it cannot be made)
+func scratchView(
+  resources: mod GpuResources
+  scratch: mod GpuScratch
+  texture: view TextureId
+  range: view TextureViewRange
+) ret TextureViewId {
+  if let textureView: TextureViewId = createTextureViewRange(
+    resources: resources
+    texture: texture
+    range: range
+  ) {
+    scratch.views.add(value: textureView)
+    ret textureView
+  }
+  ret noTextureViewId()
+}
+
+# The side (pixels) of level `level` of an atlas
+func impostorLevelSize(settings: view ImpostorSettings, level: view Int) ret Int {
+  var size: Int = impostorAtlasSize(settings: settings)
+  loop var halving: Int = 0, halving < level, ++halving {
+    size = Math.max(a: size / 2, b: 1)
+  }
+  ret size
+}
+
+# Every layer of level `mip` of an atlas texture, as a 2DArray view
+func levelRange(mip: view Int, layers: view Int) ret TextureViewRange {
+  ret TextureViewRange {
+    baseMip: mip
+    mipCount: 1
+    baseLayer: 0
+    layerCount: layers
+    dimension: WGPUTextureViewDimension_2DArray
+  }
+}
+
+# The compute pipelines of the mip passes
+type ImpostorMipPipelines {
+  count: PipelineId
+  choose: PipelineId
+  write: PipelineId
+}
+
+func createImpostorMipPipelines(
+  resources: mod GpuResources
+  scratch: mod GpuScratch
+) ret opt ImpostorMipPipelines {
+  let mipShader: Shader = shader(files: ["lib/impostor_mips.wgsl"])
+  if let count: PipelineId = createComputePipeline(
+    resources: resources
+    shader: mipShader
+    entryPoint: "countLevel"
+  ) {
+    scratch.pipelines.add(value: count)
+    if let choose: PipelineId = createComputePipeline(
+      resources: resources
+      shader: mipShader
+      entryPoint: "chooseScale"
+    ) {
+      scratch.pipelines.add(value: choose)
+      if let write: PipelineId = createComputePipeline(
+        resources: resources
+        shader: mipShader
+        entryPoint: "writeLevel"
+      ) {
+        scratch.pipelines.add(value: write)
+        ret ImpostorMipPipelines { count: count, choose: choose, write: write }
+      }
+    }
+  }
+  ret none
+}
+
+# A compute bind group that lives in the scratch list
+func scratchComputeBind(
+  resources: mod GpuResources
+  scratch: mod GpuScratch
+  pipeline: view PipelineId
+  entries: view List(ResourceRef)
+) ret opt BindGroupId {
+  if let bindGroup: BindGroupId = createComputeBindGroupOrdered(
+    resources: resources
+    pipeline: pipeline
+    entries: entries
+  ) {
+    scratch.bindGroups.add(value: bindGroup)
+    ret bindGroup
+  }
+  ret none
+}
+
+# Record levels 1 .. mips - 1 of both atlas textures, each made from level 0
+# with its alpha scaled per view cell so a cut at `cutoff` keeps level 0's
+# share of the cell (level 0 must be drawn earlier in `recording`)
+func recordImpostorMips(
+  recording: mod Recording
+  resources: mod GpuResources
+  atlas: view ImpostorAtlas
+  cutoff: view Float
+  scratch: mod GpuScratch
+) ret Bool {
+  let settings: ImpostorSettings = atlas.settings
+  if settings.mips < 2 {
+    ret true
+  }
+  if let pipelines: ImpostorMipPipelines = createImpostorMipPipelines(
+    resources: resources
+    scratch: scratch
+  ) {
+    let layers: Int = atlas.layers
+    let cells: Int = settings.viewsPerSide * settings.viewsPerSide * layers
+    let sourceAlbedo: TextureViewId = scratchView(
+      resources: resources
+      scratch: scratch
+      texture: atlas.albedoTexture
+      range: levelRange(mip: 0, layers: layers)
+    )
+    let sourceNormalDepth: TextureViewId = scratchView(
+      resources: resources
+      scratch: scratch
+      texture: atlas.normalDepthTexture
+      range: levelRange(mip: 0, layers: layers)
+    )
+    loop var level: Int = 1, level < settings.mips, ++level {
+      if not recordImpostorLevel(
+        recording: recording
+        resources: resources
+        atlas: atlas
+        pipelines: pipelines
+        level: level
+        cells: cells
+        cutoff: cutoff
+        sourceAlbedo: sourceAlbedo
+        sourceNormalDepth: sourceNormalDepth
+        scratch: scratch
+      ) {
+        ret false
+      }
+    }
+    ret true
+  }
+  ret false
+}
+
+# One level's three passes
+func recordImpostorLevel(
+  recording: mod Recording
+  resources: mod GpuResources
+  atlas: view ImpostorAtlas
+  pipelines: view ImpostorMipPipelines
+  level: view Int
+  cells: view Int
+  cutoff: view Float
+  sourceAlbedo: view TextureViewId
+  sourceNormalDepth: view TextureViewId
+  scratch: mod GpuScratch
+) ret Bool {
+  let settings: ImpostorSettings = atlas.settings
+  let storage: UInt64 = WGPUBufferUsage_Storage + WGPUBufferUsage_CopyDst
+  var uniform: ArgWriter = createArgs(uniform: true)
+  pushVec4U(
+    writer: uniform
+    x: level
+    y: settings.viewsPerSide
+    z: settings.cellSize
+    w: impostorHistogramBins
+  )
+  pushVec4F(
+    writer: uniform
+    x: cutoff
+    y: atlas.layers.toFloat()
+    z: 0.0
+    w: 0.0
+  )
+  let uniformBuffer: BufferId = scratchBuffer(
+    resources: resources
+    scratch: scratch
+    size: 32
+    usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst
+  )
+  let histogram: BufferId = scratchBuffer(
+    resources: resources
+    scratch: scratch
+    size: cells * impostorHistogramBins * 4
+    usage: storage
+  )
+  let covered: BufferId = scratchBuffer(
+    resources: resources
+    scratch: scratch
+    size: cells * 4
+    usage: storage
+  )
+  let scales: BufferId = scratchBuffer(
+    resources: resources
+    scratch: scratch
+    size: cells * 4
+    usage: storage
+  )
+  if not uploadArgs(
+    writer: uniform
+    resources: resources
+    buffer: uniformBuffer
+    offset: 0
+  ) {
+    ret false
+  }
+  let targetAlbedo: TextureViewId = scratchView(
+    resources: resources
+    scratch: scratch
+    texture: atlas.albedoTexture
+    range: levelRange(mip: level, layers: atlas.layers)
+  )
+  let targetNormalDepth: TextureViewId = scratchView(
+    resources: resources
+    scratch: scratch
+    texture: atlas.normalDepthTexture
+    range: levelRange(mip: level, layers: atlas.layers)
+  )
+  var countEntries: List(ResourceRef) = List.create(ResourceRef, cap: 5)
+  countEntries.add(value: bufferRef(id: uniformBuffer))
+  countEntries.add(value: textureViewRef(id: sourceAlbedo))
+  countEntries.add(value: skipRef())
+  countEntries.add(value: bufferRef(id: histogram))
+  countEntries.add(value: bufferRef(id: covered))
+  var chooseEntries: List(ResourceRef) = List.create(ResourceRef, cap: 6)
+  chooseEntries.add(value: bufferRef(id: uniformBuffer))
+  chooseEntries.add(value: skipRef())
+  chooseEntries.add(value: skipRef())
+  chooseEntries.add(value: bufferRef(id: histogram))
+  chooseEntries.add(value: bufferRef(id: covered))
+  chooseEntries.add(value: bufferRef(id: scales))
+  var writeEntries: List(ResourceRef) = List.create(ResourceRef, cap: 8)
+  writeEntries.add(value: bufferRef(id: uniformBuffer))
+  writeEntries.add(value: textureViewRef(id: sourceAlbedo))
+  writeEntries.add(value: textureViewRef(id: sourceNormalDepth))
+  writeEntries.add(value: skipRef())
+  writeEntries.add(value: skipRef())
+  writeEntries.add(value: bufferRef(id: scales))
+  writeEntries.add(value: textureViewRef(id: targetAlbedo))
+  writeEntries.add(value: textureViewRef(id: targetNormalDepth))
+  if let countBind: BindGroupId = scratchComputeBind(
+    resources: resources
+    scratch: scratch
+    pipeline: pipelines.count
+    entries: countEntries
+  ) {
+    if let chooseBind: BindGroupId = scratchComputeBind(
+      resources: resources
+      scratch: scratch
+      pipeline: pipelines.choose
+      entries: chooseEntries
+    ) {
+      if let writeBind: BindGroupId = scratchComputeBind(
+        resources: resources
+        scratch: scratch
+        pipeline: pipelines.write
+        entries: writeEntries
+      ) {
+        let levelSize: Int = impostorLevelSize(settings: settings, level: level)
+        let groups: Int = (levelSize + 7) / 8
+        ret recordCompute(
+          recording: recording
+          resources: resources
+          pipeline: pipelines.count
+          bindGroup: countBind
+          workgroupsX: groups
+          workgroupsY: groups
+          workgroupsZ: atlas.layers
+        ) and recordCompute(
+          recording: recording
+          resources: resources
+          pipeline: pipelines.choose
+          bindGroup: chooseBind
+          workgroupsX: (cells + 63) / 64
+          workgroupsY: 1
+          workgroupsZ: 1
+        ) and recordCompute(
+          recording: recording
+          resources: resources
+          pipeline: pipelines.write
+          bindGroup: writeBind
+          workgroupsX: groups
+          workgroupsY: groups
+          workgroupsZ: atlas.layers
+        )
+      }
+    }
+  }
+  ret false
+}

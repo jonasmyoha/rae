@@ -1,0 +1,108 @@
+# ImpostorAtlas — the octahedral impostors of a set of props
+# (docs/tree-lod-design.md §2.2): per prop kind, one layer of two texture
+# arrays, each layer a grid of views x views orthographic pictures of the
+# prop (lib/impostor_octahedral.wgsl): its unlit albedo with alpha, and its
+# normal with depth, with coverage-preserving mips. ImpostorBake makes it on
+# the GPU; GbufferSprite and ShadowMapsSprite draw billboards from it.
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuIds
+open Scene3d
+import Vec3
+
+# How an atlas is baked: views per side of the grid, the pixels of one view
+# (its cell, square), and the mip levels (each halves the cell)
+type ImpostorSettings {
+  viewsPerSide: Int
+  cellSize: Int
+  mips: Int
+}
+
+# A PC: 8 x 8 views of 128 pixels (1024 x 1024 per prop kind), 4 levels
+# (128 down to 16 pixels a view: a smaller one cannot hold a crown's
+# coverage, a pixel being several percent of it)
+func impostorPcSettings() ret ImpostorSettings {
+  ret ImpostorSettings { viewsPerSide: 8, cellSize: 128, mips: 4 }
+}
+
+# A phone: 4 x 4 views (512 x 512 per prop kind)
+func impostorPhoneSettings() ret ImpostorSettings {
+  ret ImpostorSettings { viewsPerSide: 4, cellSize: 128, mips: 4 }
+}
+
+# The settings for the platform this is built for
+func defaultImpostorSettings() ret ImpostorSettings {
+  if Target.isMobileOs {
+    ret impostorPhoneSettings()
+  }
+  ret impostorPcSettings()
+}
+
+# What a draw binds to read an atlas: both arrays (every layer and level),
+# the layers' frames (per layer one vec4: the bounding sphere's centre and
+# radius, over the prop's height, so a draw scales them by the height it
+# is drawn at) and the grid's views per side (0: no atlas)
+type ImpostorBinding {
+  albedo: TextureViewId
+  normalDepth: TextureViewId
+  frames: BufferId
+  viewsPerSide: Int
+}
+
+func noImpostorBinding() ret ImpostorBinding {
+  ret ImpostorBinding {
+    albedo: noTextureViewId()
+    normalDepth: noTextureViewId()
+    frames: noBufferId()
+    viewsPerSide: 0
+  }
+}
+
+# Are two bindings the same atlas (a bind group built over one is still good)
+func sameImpostorBinding(first: view ImpostorBinding, second: view ImpostorBinding) ret Bool {
+  ret first.viewsPerSide is second.viewsPerSide and first.albedo.slot is second.albedo.slot and first.albedo.generation is second.albedo.generation and first.normalDepth.slot is second.normalDepth.slot and first.normalDepth.generation is second.normalDepth.generation and first.frames.slot is second.frames.slot and first.frames.generation is second.frames.generation
+}
+
+# One prop kind to bake: its parts (meshes in the renderer's mesh store,
+# each in an albedo), the bounding sphere of all of them, and its height
+# (the frames are stored over it)
+type ImpostorSubject {
+  meshes: List(MeshHandle)
+  albedos: List(Vec3)
+  centre: Vec3
+  radius: Float
+  height: Float
+}
+
+type ImpostorAtlas {
+  settings: ImpostorSettings
+  layers: Int
+  albedoTexture: TextureId
+  normalDepthTexture: TextureId
+  binding: ImpostorBinding
+}
+
+func noImpostorAtlas() ret ImpostorAtlas {
+  ret ImpostorAtlas {
+    settings: impostorPcSettings()
+    layers: 0
+    albedoTexture: noTextureId()
+    normalDepthTexture: noTextureId()
+    binding: noImpostorBinding()
+  }
+}
+
+# The atlas's side in pixels at level 0
+func impostorAtlasSize(settings: view ImpostorSettings) ret Int {
+  ret settings.viewsPerSide * settings.cellSize
+}
+
+# Retire the atlas's GPU objects (they go once no frame still reads them)
+func retireImpostorAtlas(atlas: mod ImpostorAtlas, resources: mod GpuResources) {
+  let albedoView: Bool = retireTextureView(resources: resources, id: atlas.binding.albedo)
+  let normalDepthView: Bool = retireTextureView(resources: resources, id: atlas.binding.normalDepth)
+  let frames: Bool = retireBuffer(resources: resources, id: atlas.binding.frames)
+  let albedo: Bool = retireTexture(resources: resources, id: atlas.albedoTexture)
+  let normalDepth: Bool = retireTexture(resources: resources, id: atlas.normalDepthTexture)
+  atlas = noImpostorAtlas()
+}

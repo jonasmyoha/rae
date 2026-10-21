@@ -5,7 +5,8 @@
 # generated once. Each tree species becomes an app3d/PropField kind at three
 # levels of detail (addForestKinds), each level its wood and its leaves in
 # three tones: full crowns near, sparser crowns of bigger patches out to the
-# shadows' reach, and a billboard of the species' picture beyond. The
+# shadows' reach, and beyond that an impostor of the near crowns, baked on
+# the GPU from every side (lib/ImpostorBake). The
 # leaf-patch forms are unit height (their width is built into their meshes,
 # speciesWidth), so a placement's scale is their height in metres; the autumn
 # trees and the palm are built at autumnReferenceHeight. Bushes are drawn as
@@ -22,9 +23,10 @@ open procgen/FluffyFoliage
 open procgen/Foliage
 open app3d/PropField
 open app3d/PropInstancer
-open app3d/SpriteBake
 open GbufferSprite
 open gpu/GpuResources
+open ImpostorAtlas
+open ImpostorBake
 
 const speciesBroadleaf: Int = 0
 
@@ -252,23 +254,14 @@ const nearLeaves: Int = outlineLeafCount
 
 const midLeaves: Int = 110
 
-# The far level is a billboard: a picture of the tree (app3d/SpriteBake)
-# drawn on one camera-facing quad. Every species' picture is this many pixels
-# and this wide for its height (GbufferSprite has one aspect for every layer,
-# wide enough for the umbrella pine's crown).
-const spritePictureWidth: Int = 192
-
-const spritePictureHeight: Int = 128
-
+# The far level is an octahedral impostor of the near level (ImpostorBake,
+# one layer of the atlas per species) drawn on one quad per tree by the
+# sprite pass. The sprite pass's aspect for plain pictures (an impostor's
+# quad is its bounding sphere's square instead).
 const spritePictureAspect: Float = 1.5
 
-# Below this alpha a picture's pixel is see-through
+# Below this alpha an impostor's pixel is see-through
 const spriteCutoff: Float = 0.5
-
-# The billboards' mip levels: 128 rows down to 16. spriteMipChain keeps each
-# level's coverage within 1% of the full picture's down to there; at 8 rows a
-# narrow crown is ~15 pixels, so one pixel is 7% of it
-const spriteMipLevels: Int = 4
 
 const nearTreeDistance: Float = 30.0
 
@@ -395,6 +388,62 @@ func speciesLeafColor(species: view Int, tone: view Int) ret Vec3 {
   ret leafColor(form: treeSpeciesForm(species: species), tone: tone)
 }
 
+# The colour of every species' wood
+func speciesWoodColor() ret Vec3 {
+  ret Vec3.create(x: 0.13, y: 0.075, z: 0.04)
+}
+
+# A level of a species as mesh data: its wood, then its leaves in three tones
+func speciesLevelMeshes(species: view Int, patches: view Int, leaves: view Int) ret List(MeshData) {
+  var meshes: List(MeshData) = List.create(MeshData, cap: 4)
+  meshes.add(value: speciesWoodMesh(species: species))
+  loop var tone: Int = 0, tone < 3, ++tone {
+    meshes.add(value: speciesLeavesMesh(
+      species: species
+      tone: tone
+      patches: patches
+      leaves: leaves
+    ))
+  }
+  ret meshes
+}
+
+# The albedos of a level's meshes, in speciesLevelMeshes' order
+func speciesAlbedos(species: view Int) ret List(Vec3) {
+  var albedos: List(Vec3) = List.create(Vec3, cap: 4)
+  albedos.add(value: speciesWoodColor())
+  loop var tone: Int = 0, tone < 3, ++tone {
+    albedos.add(value: speciesLeafColor(species: species, tone: tone))
+  }
+  ret albedos
+}
+
+# A level of uploaded meshes, each in the foliage material of its albedo
+func speciesLodOf(
+  meshes: view List(MeshHandle)
+  albedos: view List(Vec3)
+  maxDistance: view Float
+  castsShadow: view Bool
+) ret PropLod {
+  var parts: List(PropPart) = List.create(PropPart, cap: meshes.length)
+  loop var part: Int = 0, part < meshes.length, ++part {
+    parts.add(
+      value: {
+        mesh: meshes.copyAtDefault(index: part)
+        material: foliageMaterial(
+          color: albedos.copyAtFallback(index: part, fallback: speciesWoodColor())
+        )
+      }
+    )
+  }
+  ret PropLod {
+    parts: own parts
+    maxDistance: maxDistance
+    castsShadow: castsShadow
+    facesCamera: false
+  }
+}
+
 # One level of a species: its wood and its leaves in three tones
 func speciesLod(
   renderer: mod DeferredRenderer
@@ -405,61 +454,31 @@ func speciesLod(
   maxDistance: view Float
   castsShadow: view Bool
 ) ret PropLod {
-  var parts: List(PropPart) = List.create(PropPart, cap: 4)
-  parts.add(
-    value: { mesh: wood, material: foliageMaterial(color: Vec3.create(x: 0.13, y: 0.075, z: 0.04)) }
-  )
+  var meshes: List(MeshHandle) = List.create(MeshHandle, cap: 4)
+  meshes.add(value: wood)
   loop var tone: Int = 0, tone < 3, ++tone {
-    parts.add(value: {
-      mesh: speciesLeaves(
-        renderer: renderer
-        species: species
-        tone: tone
-        patches: patches
-        leaves: leaves
-      )
-      material: foliageMaterial(color: speciesLeafColor(species: species, tone: tone))
-    })
-  }
-  ret PropLod {
-    parts: own parts
-    maxDistance: maxDistance
-    castsShadow: castsShadow
-    facesCamera: false
-  }
-}
-
-# A species' picture for its billboard: its wood and full leaves, each in its
-# colour, drawn from the side
-func speciesPicture(species: view Int) ret SpritePicture {
-  var parts: List(MeshData) = List.create(MeshData, cap: 4)
-  var colors: List(Vec3) = List.create(Vec3, cap: 4)
-  parts.add(value: speciesWoodMesh(species: species))
-  colors.add(value: Vec3.create(x: 0.13, y: 0.075, z: 0.04))
-  loop var tone: Int = 0, tone < 3, ++tone {
-    parts.add(value: speciesLeavesMesh(
+    meshes.add(value: speciesLeaves(
+      renderer: renderer
       species: species
       tone: tone
-      patches: nearPatches
-      leaves: nearLeaves
+      patches: patches
+      leaves: leaves
     ))
-    colors.add(value: speciesLeafColor(species: species, tone: tone))
   }
-  ret bakeSpritePicture(
-    parts: parts
-    colors: colors
-    width: spritePictureWidth
-    height: spritePictureHeight
-    aspect: spritePictureAspect
+  ret speciesLodOf(
+    meshes: meshes
+    albedos: speciesAlbedos(species: species)
+    maxDistance: maxDistance
+    castsShadow: castsShadow
   )
 }
 
 # Every tree species as a PropField kind (kind index = species) at three
 # levels of detail: full crowns near, sparser crowns of bigger patches or
-# leaves out to the shadows' reach, and beyond that a billboard of the
-# species' picture (a layer of the sprite array, made here). `midDistance` is
-# where the sparser crowns end (keep it inside the shadows' reach),
-# `farDistance` where the billboards end.
+# leaves out to the shadows' reach, and beyond that an impostor of the full
+# crowns (a layer of the atlas baked here, drawn by the sprite pass).
+# `midDistance` is where the sparser crowns end (keep it inside the shadows'
+# reach), `farDistance` where the impostors end.
 func addForestKinds(
   field: mod PropField
   renderer: mod DeferredRenderer
@@ -467,20 +486,6 @@ func addForestKinds(
   midDistance: view Float
   farDistance: view Float
 ) {
-  # Every layer with a mip chain, so far billboards do not shimmer, down to
-  # spriteMipLevels levels: a smaller level cannot hold a crown's coverage
-  # (a pixel is several percent of it), and a tree drawn that small is a
-  # few pixels tall, so the GPU clamps to the last level instead
-  let mips: Int = Math.min(
-    a: spriteMipCount(w: spritePictureWidth, h: spritePictureHeight)
-    b: spriteMipLevels
-  )
-  spriteInitArray(
-    w: spritePictureWidth
-    h: spritePictureHeight
-    layers: treeSpeciesCount
-    mips: mips
-  )
   RendererDeferred.ensureRendererResources(renderer: renderer)
   if let resources: mod GpuResources = renderer.gpuResources {
     spriteSetParams(
@@ -493,22 +498,36 @@ func addForestKinds(
       tilt: 0.0
     )
   }
+  var subjects: List(ImpostorSubject) = List.create(ImpostorSubject, cap: treeSpeciesCount)
   loop var species: Int = 0, species < treeSpeciesCount, ++species {
-    let wood: MeshHandle = speciesWood(renderer: renderer, species: species)
-    var lods: List(PropLod) = List.create(PropLod, cap: 3)
-    lods.add(value: speciesLod(
-      renderer: renderer
+    # The near level's meshes, made once: drawn near, and baked into the
+    # impostor (their bounds frame it)
+    let nearMeshes: List(MeshData) = speciesLevelMeshes(
       species: species
-      wood: wood
       patches: nearPatches
       leaves: nearLeaves
+    )
+    let albedos: List(Vec3) = speciesAlbedos(species: species)
+    var nearHandles: List(MeshHandle) = List.create(MeshHandle, cap: nearMeshes.length)
+    loop let mesh: view MeshData in nearMeshes {
+      nearHandles.add(value: uploadFoliage(renderer: renderer, mesh: mesh))
+    }
+    let subject: ImpostorSubject = impostorSubject(
+      parts: nearMeshes
+      meshes: nearHandles
+      albedos: albedos
+    )
+    var lods: List(PropLod) = List.create(PropLod, cap: 3)
+    lods.add(value: speciesLodOf(
+      meshes: nearHandles
+      albedos: albedos
       maxDistance: nearTreeDistance
       castsShadow: true
     ))
     lods.add(value: speciesLod(
       renderer: renderer
       species: species
-      wood: wood
+      wood: nearHandles.copyAtDefault(index: 0)
       patches: midPatches
       leaves: midLeaves
       maxDistance: midDistance
@@ -534,19 +553,23 @@ func addForestKinds(
       field: field
       kind: { lods: own lods, radius: radius, centerHeight: centerHeight }
     )
-    let picture: SpritePicture = speciesPicture(species: species)
-    uploadSpritePicture(
-      layer: species
-      picture: picture
-      mips: mips
-      cutoff: spriteCutoff
-    )
     setPropKindSprite(
       field: field
       kind: kind
       layer: species
-      height: picture.top
+      height: subject.height
     )
+    subjects.add(value: subject)
+  }
+  if let resources: mod GpuResources = renderer.gpuResources {
+    let atlas: ImpostorAtlas = bakeImpostorAtlas(
+      resources: resources
+      meshes: renderer.passes.gbuffer.meshes
+      subjects: subjects
+      settings: defaultImpostorSettings()
+      cutoff: spriteCutoff
+    )
+    setSpriteImpostors(cache: sprites, resources: resources, atlas: atlas)
   }
 }
 

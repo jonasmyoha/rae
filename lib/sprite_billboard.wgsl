@@ -16,6 +16,15 @@
 // Layer (which prop image) rides in DrawU slot 39 = params.w, the field the
 // skinned path calls paletteBase. A billboard is NEVER skinned, so the slot is
 // free here; documented at the writer (gbuffer_instanced addSpriteInstance) too.
+//
+// IMPOSTOR mode (SpriteU b.z = views per side > 0, lib/ImpostorAtlas): the
+// array is an octahedral impostor atlas (impostor_octahedral.wgsl) and the
+// layer's frame (binding 6) places the prop's bounding sphere. The quad stands
+// at the sphere's centre, as wide and tall as the sphere, turned to the eye,
+// and shows the side view of the grid nearest the direction to the eye. The
+// albedo is baked unlit, so it is shaded here with the baked normal and the
+// light the CPU pictures were baked with (impostorBakeShade): the far trees
+// look as they did, until they are lit through the G-buffer (tree LOD step 5).
 
 struct Frame {
   viewProj: mat4x4<f32>,
@@ -41,6 +50,11 @@ struct SpriteU {
 @group(0) @binding(2) var<uniform> S: SpriteU;
 @group(0) @binding(3) var spriteTex: texture_2d_array<f32>;
 @group(0) @binding(4) var spriteSamp: sampler;
+// Impostor mode: the atlas's normal and depth, and per layer the bounding
+// sphere's centre and radius over the prop's height (the plain mode binds
+// the sprite array and an unread buffer here)
+@group(0) @binding(5) var impostorNormalDepth: texture_2d_array<f32>;
+@group(0) @binding(6) var<storage, read> impostorFrames: array<vec4<f32>>;
 
 fn octWrap(v: vec2<f32>) -> vec2<f32> {
   let s = vec2<f32>(select(-1.0, 1.0, v.x >= 0.0), select(-1.0, 1.0, v.y >= 0.0));
@@ -64,7 +78,22 @@ struct VsOut {
   @location(6) @interpolate(flat) seed: f32,
   // Its level cross-fade (fade_dither.wgsl)
   @location(7) @interpolate(flat) fade: vec4<f32>,
+  // Impostor mode: the direction of the view shown (0 otherwise)
+  @location(8) @interpolate(flat) viewDirection: vec3<f32>,
 };
+
+// The eye's world position, from the view-projection: the point that clip
+// x, y and w are all zero at (rows 0, 1 and 3; Cramer's rule)
+fn cameraPosition() -> vec3<f32> {
+  let m = F.viewProj;
+  let r0 = vec4<f32>(m[0].x, m[1].x, m[2].x, m[3].x);
+  let r1 = vec4<f32>(m[0].y, m[1].y, m[2].y, m[3].y);
+  let r3 = vec4<f32>(m[0].w, m[1].w, m[2].w, m[3].w);
+  let bc = cross(r1.xyz, r3.xyz);
+  let det = dot(r0.xyz, bc);
+  let rhs = -vec3<f32>(r0.w, r1.w, r3.w);
+  return (rhs.x * bc + rhs.y * cross(r3.xyz, r0.xyz) + rhs.z * cross(r0.xyz, r1.xyz)) / det;
+}
 
 // vertex_index 0..5 -> two triangles of a unit quad, u01 in 0..1, v01 in 0..1.
 fn quadCorner(vi: u32) -> vec2<f32> {
@@ -105,14 +134,36 @@ fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut
   let up = normalize(mix(vec3<f32>(0.0, 0.0, 1.0), camUp, clamp(S.b.x, 0.0, 1.0)));
 
   let c = quadCorner(vi);          // u01, v01
-  let u = c.x - 0.5;               // -0.5..0.5 across width
-  let world = base + rightH * (u * width) + up * (c.y * height);
+  var world = vec3<f32>(0.0);
+  o.viewDirection = vec3<f32>(0.0);
+  let views = S.b.z;
+  if (views > 0.5) {
+    // The impostor: the sphere's quad, turned to the eye about z, showing
+    // the side view nearest the direction to the eye
+    let frame = impostorFrames[u32(max(d.params.w, 0.0))];
+    let centre = base + frame.xyz * height;
+    let radius = frame.w * height;
+    var toEye = cameraPosition() - centre;
+    toEye.z = 0.0;
+    if (length(toEye) < 0.0001) {
+      toEye = vec3<f32>(1.0, 0.0, 0.0);
+    }
+    let direction = normalize(toEye);
+    let cell = impostorNearestView(direction, views);
+    let local = c * 2.0 - vec2<f32>(1.0);
+    world = centre + impostorRight(direction) * (local.x * radius) + vec3<f32>(0.0, 0.0, local.y * radius);
+    o.uv = impostorAtlasUv(cell, views, local);
+    o.viewDirection = impostorViewDirection(cell, views);
+  } else {
+    let u = c.x - 0.5;               // -0.5..0.5 across width
+    world = base + rightH * (u * width) + up * (c.y * height);
+    // Sprite image has the crown at the TOP (row 0) and trunk at the BOTTOM, so the
+    // quad's top (c.y=1) samples image v=0.
+    o.uv = vec2<f32>(c.x, 1.0 - c.y);
+  }
   o.pos = F.viewProj * vec4<f32>(world, 1.0);
   o.clipNow = o.pos;
   o.clipPrev = F.prevViewProj * vec4<f32>(world, 1.0);   // static prop: same world
-  // Sprite image has the crown at the TOP (row 0) and trunk at the BOTTOM, so the
-  // quad's top (c.y=1) samples image v=0.
-  o.uv = vec2<f32>(c.x, 1.0 - c.y);
   o.layer = i32(max(d.params.w, 0.0));
   o.emissive = d.params.y;
   // The shading mode (lit / emissive / toon) as the mesh instances carry it,
@@ -158,10 +209,16 @@ fn alphaThreshold(in: VsOut) -> f32 {
 // decodes and shades it. The cutout discards in both.
 fn gbufferSurface(in: VsOut) -> FsOut {
   let texel = textureSample(spriteTex, spriteSamp, in.uv, in.layer);
+  let normalDepth = textureSample(impostorNormalDepth, spriteSamp, in.uv, in.layer);
   let threshold = alphaThreshold(in);
   // alpha cutout — no colour, no depth; and a level fading in or out
   if (texel.a < threshold || !fadeKeeps(in.fade, in.pos.xy, fadeFrameOffset(F.jitter.xy))) {
     discard;
+  }
+  // An impostor's albedo is unlit: shade it as the pictures were baked
+  var albedo = texel.rgb;
+  if (S.b.z > 0.5) {
+    albedo = albedo * impostorBakeShade(normalDepth.xyz * 2.0 - vec3<f32>(1.0), in.viewDirection);
   }
   // The sprite pixels are already lit (cut from the plate). Face the normal UP so
   // the deferred pass adds only the gentle ground-like ambient/sun rather than a
@@ -174,7 +231,7 @@ fn gbufferSurface(in: VsOut) -> FsOut {
   let mEnc = clamp(motion, vec2<f32>(-0.5), vec2<f32>(0.5)) + vec2<f32>(0.50196078);
   var o: FsOut;
   o.gba = vec4<f32>(oct.x, oct.y, 0.5, in.mode);      // the instance's mode (0 = lit)
-  o.gbb = vec4<f32>(texel.rgb, 0.9);                  // albedo, high roughness
+  o.gbb = vec4<f32>(albedo, 0.9);                  // albedo, high roughness
   o.gbc = vec4<f32>(mEnc.x, mEnc.y, 0.0, in.emissive);
   return o;
 }

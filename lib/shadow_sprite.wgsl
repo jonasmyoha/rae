@@ -10,8 +10,14 @@
 // light view-projection is the world gradient of the map's x), the same trick
 // the G-buffer sprite takes the camera's from, so it cannot disagree with the
 // cascade fit.
+//
+// Impostor mode (P.a.z = views per side > 0, lib/ImpostorAtlas): the array
+// is an octahedral impostor atlas and the layer's frame (binding 5) places
+// the prop's bounding sphere; the quad stands at the sphere's centre, turned
+// to the sun about z, with the side view nearest the sun's direction.
 struct SU { lightViewProj: mat4x4<f32> };
-// a.x = picture aspect (width over height), a.y = alpha cutoff
+// a.x = picture aspect (width over height), a.y = alpha cutoff, a.z = the
+// impostor grid's views per side (0: plain pictures)
 struct SpriteShadowU { a: vec4<f32> };
 // Per sprite, two vec4: (foot x, y, z, world height), (layer, fade threshold,
 // fading in, fade seed) — the level cross-fade of fade_dither.wgsl
@@ -20,6 +26,9 @@ struct SpriteShadowU { a: vec4<f32> };
 @group(0) @binding(2) var<uniform> P: SpriteShadowU;
 @group(0) @binding(3) var spriteTex: texture_2d_array<f32>;
 @group(0) @binding(4) var spriteSamp: sampler;
+// Impostor mode: per layer the bounding sphere's centre and radius over the
+// prop's height (an unread buffer otherwise)
+@group(0) @binding(5) var<storage, read> impostorFrames: array<vec4<f32>>;
 
 struct VsOut {
   @builtin(position) pos: vec4<f32>,
@@ -44,11 +53,28 @@ fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut
     rightH = vec3<f32>(1.0, 0.0, 0.0);
   }
   rightH = normalize(rightH);
-  let world = foot.xyz + rightH * ((c.x - 0.5) * width) + vec3<f32>(0.0, 0.0, c.y * height);
+  var world = foot.xyz + rightH * ((c.x - 0.5) * width) + vec3<f32>(0.0, 0.0, c.y * height);
+  var uv = vec2<f32>(c.x, 1.0 - c.y);
+  let views = P.a.z;
+  if (views > 0.5) {
+    let frame = impostorFrames[u32(max(extra.x, 0.0))];
+    let centre = foot.xyz + frame.xyz * height;
+    let radius = frame.w * height;
+    // Depth grows away from the sun (row 2 is its world gradient)
+    var towardSun = -vec3<f32>(S.lightViewProj[0].z, S.lightViewProj[1].z, 0.0);
+    if (length(towardSun) < 0.000001) {
+      towardSun = vec3<f32>(1.0, 0.0, 0.0);
+    }
+    let direction = normalize(towardSun);
+    let cell = impostorNearestView(direction, views);
+    let local = c * 2.0 - vec2<f32>(1.0);
+    world = centre + impostorRight(direction) * (local.x * radius) + vec3<f32>(0.0, 0.0, local.y * radius);
+    uv = impostorAtlasUv(cell, views, local);
+  }
   var o: VsOut;
   o.pos = S.lightViewProj * vec4<f32>(world, 1.0);
   // The picture's top row (v = 0) is the prop's top
-  o.uv = vec2<f32>(c.x, 1.0 - c.y);
+  o.uv = uv;
   o.layer = i32(max(extra.x, 0.0));
   o.fade = vec4<f32>(extra.y, extra.z, extra.w, 0.0);
   return o;
