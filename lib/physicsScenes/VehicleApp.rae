@@ -49,6 +49,7 @@ open physicsScenes/VehicleLibrary
 open physicsScenes/PlaygroundRender
 open physicsScenes/PhysicsFrame
 open physicsScenes/VehicleUi
+open app3d/GroundParticles
 
 # How far the camera reaches (the shadow cascades' extent)
 const vehicleReach: Float = 30.0
@@ -64,6 +65,9 @@ type VehicleApp {
   profile: FrameProfile
   meshes: PlaygroundMeshes
   batches: PlaygroundBatches
+  # What the wheels kick up as they lay their tracks (app3d/GroundParticles;
+  # the track's Main lays the tracks into `batches.marks`)
+  groundParticles: GroundParticles
   courseMesh: MeshHandle
   ui: VehicleUi
   camera: Camera3d
@@ -137,6 +141,7 @@ func createVehicleApp(
     profile: createFrameProfile(frameLimit: 0)
     meshes: meshes
     batches: batches
+    groundParticles: createGroundParticles(renderer: renderer, capacity: 512)
     courseMesh: uploadMeshData(renderer: renderer, meshData: courseMesh(course: course))
     ui: createVehicleUi(assetBase: assetBase)
     camera: camera
@@ -451,6 +456,7 @@ func finishVehicleFrame(
       renderer: renderer
       meshes: app.meshes
       batches: app.batches
+      groundParticles: app.groundParticles
       groundMesh: app.courseMesh
       camera: app.camera
       light: app.light

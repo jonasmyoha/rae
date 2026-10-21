@@ -1,7 +1,8 @@
 # One frame of a physics example through the deferred graph, shared by the
 # playgrounds (PlaygroundApp) and the vehicles (VehicleApp): the bodies as
 # shadow casters grouped by mesh kind, the instanced geometry pass
-# (PlaygroundRender), the renderer's generic passes, the lib/ui HUD with the
+# (PlaygroundRender) with any particles kicked up, the renderer's generic passes, the lib/ui HUD
+# with the
 # shared FPS meter on top, and present.
 open physicsScenes/FrameProfile
 import Gpu2d
@@ -19,6 +20,7 @@ open ui/UiSystems
 open ui/DebugOverlay
 open ui/renderSystem/RenderSystem
 open physicsScenes/PlaygroundRender
+open app3d/GroundParticles
 
 # One frame through the deferred graph: the bodies as shadow casters, the
 # instanced geometry pass, the generic passes, the HUD, present.
@@ -26,6 +28,8 @@ func renderPhysicsFrame(
   renderer: mod DeferredRenderer
   meshes: view PlaygroundMeshes
   batches: mod PlaygroundBatches
+  # What the wheels kick up (app3d/GroundParticles), when the example has any
+  groundParticles: opt mod GroundParticles
   groundMesh: view MeshHandle
   camera: view Camera3d
   light: view Light3d
@@ -80,6 +84,14 @@ func renderPhysicsFrame(
           batches: batches
           groundMesh: groundMesh
         )
+        if let particles: mod GroundParticles = groundParticles {
+          drawGroundParticles(
+            cache: renderer.passes.gbuffer
+            resources: resources
+            groundParticles: particles
+            toon: false
+          )
+        }
         Gbuffer.endPass(cache: renderer.passes.gbuffer, resources: resources)
       }
       profileLap(profile: profile, section: profileGbuffer)

@@ -7,7 +7,8 @@
 # height-field course with ramps, a wall, crates and a stunt
 # park (VehicleStunts: a 20 m loop, a plateau, a quarter-pipe, two
 # sweepers and a paddle wheel that bat the car around); a chase camera and a small
-# HUD (speed, step and frame time, track). The car, the course and the window
+# HUD (speed, step and frame time, track), and tyre tracks on the course with
+# dust kicked up (app3d/WheelTracks). The car, the course and the window
 # are the shared package's (VehicleLibrary, VehicleApp); this file makes the
 # track calls.
 #
@@ -47,6 +48,11 @@ open physicsScenes/ArcadeVehicle
 open physicsScenes/box3d/ArcadeDrive
 open box3d/ecs/PhysicsQueries
 open box3d/ecs/PhysicsTypes
+open GbufferInstanced
+open physicsScenes/PlaygroundRender
+open app3d/GroundTouch
+open app3d/GroundParticles
+open app3d/WheelTracks
 import Math
 
 # This example's fonts and theme (the HUD itself is the shared package's)
@@ -132,6 +138,58 @@ func heightOverCourse(world: view VehicleWorld) ret Float {
   ret 1000.0
 }
 
+# What the tyres find on the course: its green, dust off it
+func courseGroundAnswer() ret GroundAnswer {
+  ret GroundAnswer {
+    color: groundMaterial().baseColor
+    lift: 0.01
+    blades: false
+    dustColor: Vec3 { x: 0.62, y: 0.6, z: 0.52 }
+  }
+}
+
+# A track on each of the car's wheels (app3d/WheelTracks)
+func giveWheelTracks(
+  wheelTracks: mod WheelTracks
+  world: view VehicleWorld
+  car: view VehicleDescription
+) {
+  loop let wheelId: view EntityId in world.wheelIds {
+    addWheelTrack(
+      wheelTracks: wheelTracks
+      wheelId: wheelId
+      radius: car.wheelRadius
+      width: 2.0 * car.wheelHalfWidth
+    )
+  }
+}
+
+# The frame's tyre tracks: the wheels that rolled a piece's length onto the
+# course lay one and kick up dust; all of them go into the shell's marks
+func layCourseTracks(
+  wheelTracks: mod WheelTracks
+  world: view VehicleWorld
+  app: mod VehicleApp
+  random: mod Random
+) {
+  findWheelTouches(
+    wheelTracks: wheelTracks
+    physics: world.physics
+    rigidBodies: world.rigidBodies
+    transforms: world.transforms
+    deltaTime: app.deltaTime
+  )
+  loop var i: Int = 0, i < wheelTracks.touches.length, ++i {
+    if let touch: mod GroundTouch = wheelTracks.touches.modAt(index: i) {
+      touch.answer = courseGroundAnswer()
+    }
+  }
+  layWheelTouches(wheelTracks: wheelTracks, groundParticles: app.groundParticles, random: random)
+  groundParticlesUpdate(groundParticles: app.groundParticles, deltaTime: app.deltaTime)
+  resetInstanceBatch(batch: app.batches.marks)
+  addWheelTrackInstances(batch: app.batches.marks, wheelTracks: wheelTracks, toon: false)
+}
+
 # The window: the shared VehicleApp does the frame; this loop makes the calls
 # into the track (spawn, drive, step, respawn, the chassis).
 func runWindowed() ret Int {
@@ -152,6 +210,17 @@ func runWindowed() ret Int {
   spawnCourse(world: world, course: course)
   spawnCrates(world: world, course: course)
   spawnVehicle(world: world, car: app.car)
+  # Tyre tracks on the course (app3d/WheelTracks): the ray down meets the
+  # course (it starts inside the wheel, which it does not hit)
+  var wheelTracks: WheelTracks = createWheelTracks(
+    renderer: renderer
+    tuning: defaultWheelTrackTuning()
+    wheelCapacity: 4
+    groundFilter: defaultQueryFilter()
+  )
+  giveWheelTracks(wheelTracks: wheelTracks, world: world, car: app.car)
+  var trackRandom: Random = createRandom(seed: 125)
+  var tracksLogged: Bool = false
   var arcade: ArcadeVehicle = {
     car: app.car
     wheelJoints: world.wheelJoints
@@ -167,6 +236,9 @@ func runWindowed() ret Int {
   loop not Gpu2d.pollClose() {
     beginVehicleFrame(app: app, uiWorld: uiWorld, uiSystems: uiSystems)
     if readVehicleControls(app: app) {
+      loop let wheelId: view EntityId in world.wheelIds {
+        componentRemove(this: wheelTracks.tracks, entityId: wheelId)
+      }
       despawnVehicle(world: world)
       despawnCrates(world: world)
       if app.cycleSeconds > 0.0 {
@@ -176,6 +248,7 @@ func runWindowed() ret Int {
       }
       spawnCrates(world: world, course: course)
       spawnVehicle(world: world, car: app.car)
+      giveWheelTracks(wheelTracks: wheelTracks, world: world, car: app.car)
     }
     # Driven as an arcade car (physicsScenes/box3d/ArcadeDrive): brakes then
     # reverse on the throttle keys, and an assist turning it as its steered
@@ -199,6 +272,22 @@ func runWindowed() ret Int {
     let started: Int = nowNs()
     let steps: Int = stepVehicleWorld(world: world, frameTime: app.deltaTime)
     recordVehicleStep(app: app, startedNs: started, steps: steps)
+    layCourseTracks(
+      wheelTracks: wheelTracks
+      world: world
+      app: app
+      random: trackRandom
+    )
+    if tracksLogged is false and app.clock >= 2.0 {
+      log(
+        "[tracks] after {tenths(value: app.clock)} s: {wheelTrackPieceCount(
+          wheelTracks: wheelTracks
+        )} pieces, the longest trail {tenths(value: longestWheelTrail(wheelTracks: wheelTracks))} m, {liveGroundParticleCount(
+          groundParticles: app.groundParticles
+        )} dust puffs"
+      )
+      tracksLogged = true
+    }
     # Draw (and follow) the poses between the last two fixed steps, so the
     # motion is smooth however the frames and the steps fall
     let shown: ComponentTable(Transform3D) = interpolatedTransforms(
