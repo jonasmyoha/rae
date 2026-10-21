@@ -1,0 +1,176 @@
+# app3d/GroundTouch — where a foot or a tyre touches the ground, and what the
+# app says is there. Rae's mark systems (app3d/Footprints, app3d/WheelTracks)
+# find the touches of a frame and list them in their resource; the app
+# answers each one from its own surfaces (a surface map, a shape it knows) by
+# writing its GroundAnswer; then the mark system lays the marks and kicks up
+# the particles. So no mark system needs to know how an app tells grass from
+# a road.
+#
+# What a touch kicks up (app3d/GroundParticles): bits of grass where the
+# answer says it kicks up blades, else a puff of dust in the answer's dust
+# colour. More when running than walking; a tyre one or two a piece.
+import Math
+import Vec3
+open ecs/Entity
+open app3d/GroundParticles
+
+# What is under a touch, as the app answers it
+type GroundAnswer {
+  # The colour the ground is drawn in there (a mark is a shade of it)
+  color: Vec3
+  # How far over the physical ground a flat mark must lie to show over what
+  # is drawn there (m)
+  lift: Float
+  # Grass: a touch kicks up blades; anything else, dust
+  blades: Bool
+  dustColor: Vec3
+}
+
+func createGroundAnswer() ret GroundAnswer {
+  ret GroundAnswer {
+    color: Vec3.create(x: 0.5, y: 0.5, z: 0.5)
+    lift: 0.01
+    blades: false
+    dustColor: Vec3.create(x: 0.82, y: 0.78, z: 0.66)
+  }
+}
+
+# A foot or a tyre on the ground this frame: whose, the point on the physical
+# ground, the way it goes (a unit vector) and how fast, how far it rolled
+# since its last mark (tyres), and the app's answer
+type GroundTouch {
+  entityId: EntityId
+  point: Vec3
+  directionX: Float
+  directionY: Float
+  speed: Float
+  distance: Float
+  answer: GroundAnswer
+}
+
+# How many particles one step kicks up at `speed`: a few walking, more
+# running. Grass bits 3 / 5 / 7; dust puffs, which grow and linger, fewer —
+# 2 / 3 / 4.
+func stepParticleCount(speed: view Float, blades: view Bool) ret Int {
+  var count: Int = 7
+  if speed < 2.5 {
+    count = 3
+  } else if speed < 5.5 {
+    count = 5
+  }
+  if blades {
+    ret count
+  }
+  ret (count + 1) / 2
+}
+
+# How many particles a tyre kicks up as it lays a piece, going `speed` m/s:
+# none at a crawl; dust one a piece at any speed (it grows and lingers); grass
+# two when fast
+func tyreParticleCount(speed: view Float, blades: view Bool) ret Int {
+  if speed < 1.0 {
+    ret 0
+  }
+  if speed < 8.0 or blades is false {
+    ret 1
+  }
+  ret 2
+}
+
+# One particle a touch kicks up, from the foot at `feet` going along
+# (`directionX`, `directionY`) at `speed`; `spread`, `lift`, `side` and
+# `shade` are rolls from 0 to 1 that vary it.
+func kickedParticle(
+  answer: view GroundAnswer
+  feet: view Vec3
+  directionX: view Float
+  directionY: view Float
+  speed: view Float
+  spread: view Float
+  lift: view Float
+  side: view Float
+  shade: view Float
+) ret GroundParticle {
+  # Kicked back from the foot, and a little to either side
+  let back: Float = 0.15 + 0.12 * speed * spread
+  let across: Float = (side - 0.5) * 1.2
+  let start: Vec3 = Vec3.create(x: feet.x, y: feet.y, z: feet.z + 0.04)
+  if answer.blades {
+    let greens: Float = 0.7 + 0.6 * shade
+    ret GroundParticle {
+      position: start
+      velocity: Vec3.create(
+        x: 0.0 - directionX * back - directionY * across
+        y: 0.0 - directionY * back + directionX * across
+        z: 1.2 + 1.3 * lift
+      )
+      age: 0.0
+      lifetime: 0.55 + 0.35 * lift
+      size: 1.0
+      growth: 0.0
+      color: Vec3.create(x: 0.08 * greens, y: 0.36 * greens, z: 0.05 * greens)
+      shape: GroundParticleShape.blade
+      spin: shade * 6.28
+      spinRate: (side - 0.5) * 18.0
+      gravity: 9.8
+      drag: 1.5
+    }
+  }
+  let dust: Vec3 = answer.dustColor
+  let tone: Float = 0.85 + 0.3 * shade
+  ret GroundParticle {
+    position: start
+    velocity: Vec3.create(
+      x: 0.0 - directionX * back * 0.6 - directionY * across * 0.5
+      y: 0.0 - directionY * back * 0.6 + directionX * across * 0.5
+      z: 0.25 + 0.45 * lift
+    )
+    age: 0.0
+    lifetime: 0.45 + 0.3 * lift
+    size: 0.05 + 0.04 * spread
+    growth: 1.6
+    color: Vec3.create(x: dust.x * tone, y: dust.y * tone, z: dust.z * tone)
+    shape: GroundParticleShape.puff
+    spin: 0.0
+    spinRate: 0.0
+    gravity: 0.3
+    drag: 2.5
+  }
+}
+
+# Kick up `count` particles from `feet` (rolls from `random`), none falling
+# below `floor`
+func kickUpParticles(
+  groundParticles: mod GroundParticles
+  random: mod Random
+  answer: view GroundAnswer
+  feet: view Vec3
+  directionX: view Float
+  directionY: view Float
+  speed: view Float
+  count: view Int
+  floor: view Float
+) {
+  loop var k: Int = 0, k < count, ++k {
+    spawnGroundParticle(
+      groundParticles: groundParticles
+      particle: kickedParticle(
+        answer: answer
+        feet: feet
+        directionX: directionX
+        directionY: directionY
+        speed: speed
+        spread: random.nextFloat()
+        lift: random.nextFloat()
+        side: random.nextFloat()
+        shade: random.nextFloat()
+      )
+      floor: floor
+    )
+  }
+}
+
+# The colour `shade` of the way from black to `color`
+func shadeOf(color: view Vec3, shade: view Float) ret Vec3 {
+  ret Vec3.create(x: color.x * shade, y: color.y * shade, z: color.z * shade)
+}

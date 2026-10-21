@@ -1,0 +1,343 @@
+# app3d/GroundMarks, app3d/GroundTouch, app3d/Footprints, app3d/WheelTracks:
+# mark trails (the ring, the fade, where a piece lies), strides and prints,
+# what a step or a tyre kicks up for the app's answer, and one walk through
+# the footprint system's find / answer / lay steps on a component table.
+import Math
+import Vec3
+open Math3d
+open Scene3d
+open GbufferInstanced
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/World
+open ecs/Tag
+open box3d/ecs/PhysicsComponents
+open app3d/CharacterController
+open app3d/CharacterMovers
+open app3d/CharacterHeight
+open app3d/GroundMarks
+open app3d/GroundTouch
+open app3d/GroundParticles
+open app3d/Footprints
+open app3d/WheelTracks
+
+func near(a: view Float, b: view Float) ret Bool {
+  ret Math.abs(value: a - b) < 0.001
+}
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func grassAnswer() ret GroundAnswer {
+  ret GroundAnswer {
+    color: Vec3.create(x: 0.2, y: 0.6, z: 0.2)
+    lift: 0.02
+    blades: true
+    dustColor: Vec3.create(x: 0.45, y: 0.5, z: 0.3)
+  }
+}
+
+func trackAnswer() ret GroundAnswer {
+  ret GroundAnswer {
+    color: Vec3.create(x: 0.52, y: 0.085, z: 0.05)
+    lift: 0.02
+    blades: false
+    dustColor: Vec3.create(x: 0.62, y: 0.24, z: 0.17)
+  }
+}
+
+func trailFade(tuning: view WheelTrackTuning, age: view Float, fromNewest: view Int) ret Float {
+  ret markFade(
+    age: age
+    fromNewest: fromNewest
+    capacity: tuning.capacity
+    fading: wheelTrackFading(tuning: tuning)
+  )
+}
+
+func main() {
+  # ----- mark trails ----------------------------------------------------------
+  let wheel: WheelTrackTuning = defaultWheelTrackTuning()
+  check(
+    label: "a fresh piece is full width, until its fade begins, then narrows, gone at the end of its life"
+    ok: near(a: trailFade(tuning: wheel, age: 0.0, fromNewest: 0), b: 1.0) and near(
+      a: trailFade(tuning: wheel, age: wheel.lifetime - wheel.fadeSeconds, fromNewest: 0)
+      b: 1.0
+    ) and trailFade(tuning: wheel, age: wheel.lifetime - wheel.fadeSeconds * 0.5, fromNewest: 0) < 1.0 and trailFade(
+      tuning: wheel
+      age: wheel.lifetime
+      fromNewest: 0
+    ) <= 0.0
+  )
+  var narrowing: Bool = true
+  var previous: Float = 2.0
+  loop var i: Int = 0, i < wheel.capacity, ++i {
+    let width: Float = trailFade(tuning: wheel, age: 1.0, fromNewest: i)
+    narrowing = narrowing and width <= previous
+    previous = width
+  }
+  check(
+    label: "halfway down a trail full width; toward its end it only narrows, its oldest almost nothing"
+    ok: near(a: trailFade(tuning: wheel, age: 0.0, fromNewest: wheel.capacity / 2), b: 1.0) and narrowing and previous < 0.1
+  )
+  var trail: MarkTrail = createMarkTrail(capacity: 20)
+  loop var i: Int = 0, i < 30, ++i {
+    markTrailAdd(
+      trail: trail
+      piece: MarkPiece {
+        from: Vec3.create(x: i.toFloat(), y: 0.0, z: 0.0)
+        to: Vec3.create(x: i.toFloat() + 1.0, y: 0.0, z: 0.0)
+        laidAt: i.toFloat()
+        color: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+      }
+    )
+  }
+  check(
+    label: "a full ring holds its capacity, the newest the last laid, the ten first reused"
+    ok: trail.count is 20 and near(
+      a: markPieceFromNewest(trail: trail, fromNewest: 0).laidAt
+      b: 29.0
+    ) and near(a: markPieceFromNewest(trail: trail, fromNewest: 19).laidAt, b: 10.0)
+  )
+  let model: Mat4 = markPieceModel(
+    from: Vec3.create(x: 1.0, y: 2.0, z: 0.0)
+    to: Vec3.create(x: 1.0, y: 2.5, z: 0.0)
+    width: 0.2
+    thickness: 0.004
+  )
+  let middle: Vec3 = mat4TransformPoint(m: model, p: Vec3.create(x: 0.0, y: 0.0, z: 0.0))
+  let front: Vec3 = mat4TransformPoint(m: model, p: Vec3.create(x: 0.5, y: 0.0, z: 0.0))
+  let side: Vec3 = mat4TransformPoint(m: model, p: Vec3.create(x: 0.0, y: 0.5, z: 0.0))
+  let uphill: Mat4 = markPieceModel(
+    from: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    to: Vec3.create(x: 1.0, y: 0.0, z: 0.1)
+    width: 0.2
+    thickness: 0.004
+  )
+  let uphillFront: Vec3 = mat4TransformPoint(m: uphill, p: Vec3.create(x: 0.5, y: 0.0, z: 0.0))
+  check(
+    label: "a piece lies midway between its ends, as long as the way between them, as wide as asked, up a slope"
+    ok: near(a: middle.y, b: 2.25) and near(a: front.y, b: 2.5) and near(
+      a: Math.abs(value: side.x - 1.0)
+      b: 0.1
+    ) and near(a: uphillFront.z, b: 0.1)
+  )
+  check(
+    label: "a wheel lays a piece a segment on, and a jump breaks its trail"
+    ok: laysTrackPiece(tuning: wheel, distance: wheel.segmentLength - 0.01) is false and laysTrackPiece(
+      tuning: wheel
+      distance: wheel.segmentLength
+    ) and breaksTrack(tuning: wheel, distance: wheel.breakDistance + 0.1) and breaksTrack(
+      tuning: wheel
+      distance: 1.0
+    ) is false
+  )
+  # ----- strides and prints ---------------------------------------------------
+  let feetTuning: FootprintTuning = defaultFootprintTuning()
+  let walk: Float = footprintStride(tuning: feetTuning, speed: 1.4, height: 2.0)
+  let sprint: Float = footprintStride(tuning: feetTuning, speed: 8.4, height: 2.0)
+  check(
+    label: "a stride about 0.6 m walking, 1.7 m at a sprint, shorter in proportion for a shorter character"
+    ok: walk > 0.5 and walk < 0.7 and sprint > 1.6 and sprint <= 1.9 and near(
+      a: footprintStride(tuning: feetTuning, speed: 1.4, height: 1.77)
+      b: walk * 1.77 / 2.0
+    )
+  )
+  let feet: Vec3 = Vec3.create(x: 10.0, y: 5.0, z: -1.0)
+  let leftPrint: MarkPiece = footprintPiece(
+    tuning: feetTuning
+    feet: feet
+    directionX: 0.0
+    directionY: 1.0
+    left: true
+    laidAt: 3.0
+    groundColor: Vec3.create(x: 0.4, y: 0.8, z: 0.2)
+    lift: 0.02
+  )
+  let rightPrint: MarkPiece = footprintPiece(
+    tuning: feetTuning
+    feet: feet
+    directionX: 0.0
+    directionY: 1.0
+    left: false
+    laidAt: 3.0
+    groundColor: Vec3.create(x: 0.4, y: 0.8, z: 0.2)
+    lift: 0.02
+  )
+  check(
+    label: "walking up +y the left print is on -x, the right on +x, heel to toe a shoe long, the lift over the ground, a shade of it"
+    ok: leftPrint.from.x < feet.x and rightPrint.from.x > feet.x and near(
+      a: leftPrint.to.y - leftPrint.from.y
+      b: feetTuning.length
+    ) and near(a: leftPrint.from.z, b: -0.98) and near(
+      a: leftPrint.color.y
+      b: 0.8 * feetTuning.shade
+    )
+  )
+  # ----- what a touch kicks up ------------------------------------------------
+  check(
+    label: "grass bits 3 / 5 / 7 walking, jogging, sprinting; dust 2 / 3 / 4"
+    ok: stepParticleCount(speed: 1.4, blades: true) is 3 and stepParticleCount(
+      speed: 4.0
+      blades: true
+    ) is 5 and stepParticleCount(speed: 8.0, blades: true) is 7 and stepParticleCount(
+      speed: 1.4
+      blades: false
+    ) is 2 and stepParticleCount(speed: 4.0, blades: false) is 3 and stepParticleCount(
+      speed: 8.0
+      blades: false
+    ) is 4
+  )
+  check(
+    label: "a tyre: nothing creeping, one a piece rolling or on dust, two fast on grass"
+    ok: tyreParticleCount(speed: 0.5, blades: true) is 0 and tyreParticleCount(
+      speed: 5.0
+      blades: true
+    ) is 1 and tyreParticleCount(speed: 15.0, blades: true) is 2 and tyreParticleCount(
+      speed: 15.0
+      blades: false
+    ) is 1
+  )
+  let bit: GroundParticle = kickedParticle(
+    answer: grassAnswer()
+    feet: feet
+    directionX: 0.0
+    directionY: 1.0
+    speed: 8.0
+    spread: 0.5
+    lift: 0.5
+    side: 0.5
+    shade: 0.5
+  )
+  let dust: GroundParticle = kickedParticle(
+    answer: trackAnswer()
+    feet: feet
+    directionX: 0.0
+    directionY: 1.0
+    speed: 8.0
+    spread: 1.0
+    lift: 1.0
+    side: 0.5
+    shade: 0.5
+  )
+  check(
+    label: "green blades on grass, a puff in the answer's dust colour elsewhere, kicked back, a puff gone within 0.75 s"
+    ok: bit.shape is GroundParticleShape.blade and bit.color.y > bit.color.x and dust.shape is GroundParticleShape.puff and dust.color.x > dust.color.y and bit.velocity.y < 0.0 and dust.velocity.y < 0.0 and dust.lifetime <= 0.75
+  )
+  # ----- the footprint system: find, answer, lay -----------------------------
+  var footprints: Footprints = {
+    trails: ComponentTable.create(FootprintTrail)
+    clock: 0.0
+    batch: createInstanceBatch(mesh: meshHandleNone(), capacity: 80)
+    tuning: feetTuning
+    touches: List.create(GroundTouch, cap: 4)
+  }
+  var groundParticles: GroundParticles = {
+    particles: List.create(GroundParticle, cap: 64)
+    capacity: 64
+    next: 0
+    floors: List.create(Float, cap: 64)
+    bladeBatch: createInstanceBatch(mesh: meshHandleNone(), capacity: 64)
+    puffBatch: createInstanceBatch(mesh: meshHandleNone(), capacity: 64)
+  }
+  var random: Random = createRandom(seed: 7)
+  var allocator: EntityAllocator = createEntityAllocator()
+  let walker: EntityId = allocEntity(this: allocator)
+  var characters: ComponentTable(CharacterBody) = ComponentTable.create(CharacterBody)
+  var controllers: ComponentTable(ThirdPersonController) = ComponentTable.create(
+    ThirdPersonController
+  )
+  var parked: ComponentTable(MoverParked) = ComponentTable.create(MoverParked)
+  let heights: ComponentTable(CharacterHeight) = ComponentTable.create(CharacterHeight)
+  var body: CharacterBody = createCharacterBody(position: Vec3.create(x: 0.0, y: 0.0, z: 1.4))
+  body.grounded = true
+  body.mover.velocity.y = 1.4
+  componentSet(this: characters, entityId: walker, data: body)
+  componentSet(this: controllers, entityId: walker, data: createThirdPersonController())
+  var touched: Int = 0
+  var onGrass: Int = 0
+  # 3 m up +y at a walk, 2 cm a frame; the first metre on grass, the rest on the track
+  loop var frame: Int = 0, frame < 150, ++frame {
+    let controller: mod ThirdPersonController = componentMod(this: controllers, entityId: walker)
+    controller.position.y = (frame + 1).toFloat() * 0.02
+    findFootsteps(
+      footprints: footprints
+      characters: characters
+      controllers: controllers
+      parked: parked
+      heights: heights
+      fallbackHeight: 2.0
+      groundZ: 0.0
+      deltaTime: 1.0 / 60.0
+    )
+    loop var i: Int = 0, i < footprints.touches.length, ++i {
+      if let touch: mod GroundTouch = footprints.touches.modAt(index: i) {
+        if touch.point.y < 1.0 {
+          touch.answer = grassAnswer()
+          onGrass = onGrass + 1
+        } else {
+          touch.answer = trackAnswer()
+        }
+      }
+      touched = touched + 1
+    }
+    layFootsteps(footprints: footprints, groundParticles: groundParticles, random: random)
+  }
+  let prints: Int = footprintCount(footprints: footprints, entityId: walker)
+  var trailOk: Bool = false
+  var colorsOk: Bool = false
+  if let footsteps: FootprintTrail = componentCopy(this: footprints.trails, entityId: walker) {
+    let newest: MarkPiece = markPieceFromNewest(trail: footsteps.trail, fromNewest: 0)
+    let before: MarkPiece = markPieceFromNewest(trail: footsteps.trail, fromNewest: 1)
+    let oldest: MarkPiece = markPieceFromNewest(
+      trail: footsteps.trail
+      fromNewest: footsteps.trail.count - 1
+    )
+    trailOk = (newest.from.x > 0.0) is not (before.from.x > 0.0)
+    colorsOk = near(a: oldest.color.y, b: 0.6 * feetTuning.shade) and near(
+      a: newest.color.x
+      b: 0.52 * feetTuning.shade
+    )
+  }
+  check(
+    label: "a 3 m walk lays a print a stride: {prints} prints for {touched} touches, left and right in turn, grass then track colours"
+    ok: prints is touched and prints >= 4 and prints <= 6 and onGrass >= 1 and trailOk and colorsOk
+  )
+  check(
+    label: "each step kicked up its particles: {liveGroundParticleCount(
+      groundParticles: groundParticles
+    )}"
+    ok: liveGroundParticleCount(groundParticles: groundParticles) >= onGrass * 3 + (touched - onGrass) * 2
+  )
+  # Parked (seated, knocked down), it leaves nothing
+  addTag(MoverParked, table: parked, entityId: walker)
+  loop var frame: Int = 0, frame < 60, ++frame {
+    let controller: mod ThirdPersonController = componentMod(this: controllers, entityId: walker)
+    controller.position.y = 3.0 + (frame + 1).toFloat() * 0.02
+    findFootsteps(
+      footprints: footprints
+      characters: characters
+      controllers: controllers
+      parked: parked
+      heights: heights
+      fallbackHeight: 2.0
+      groundZ: 0.0
+      deltaTime: 1.0 / 60.0
+    )
+    layFootsteps(footprints: footprints, groundParticles: groundParticles, random: random)
+  }
+  check(
+    label: "parked it lays no prints; a lifetime later none show"
+    ok: footprintCount(footprints: footprints, entityId: walker) is prints and footprints.touches.length is 0
+  )
+  footprints.clock = footprints.clock + feetTuning.lifetime
+  check(
+    label: "gone a lifetime on"
+    ok: footprintCount(footprints: footprints, entityId: walker) is 0
+  )
+}

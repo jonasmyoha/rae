@@ -1,0 +1,351 @@
+# app3d/WheelTracks — every wheel carrying a WheelTrack leaves a trail of
+# flat pieces on the ground behind it (app3d/GroundMarks), one each
+# `segmentLength` it rolls, each a darker shade of what it lies on, and kicks
+# up what a step there would (app3d/GroundTouch). A trail is a ring of
+# `capacity` pieces, so a long drive reuses the oldest; a wheel in the air, or
+# one that jumped (a respawn), breaks its trail. All the pieces of every wheel
+# are one instanced draw of a unit box, each scaled to its piece and narrowed
+# as it fades, so no mesh is ever rebuilt.
+#
+# The WheelTracks resource holds the trails, their clock, the instance batch,
+# the tuning, the ground's query filter and this frame's touches. Each frame:
+#
+#   findWheelTouches  every wheel that rolled a piece's length casts one ray
+#                     down (only then) and, on the ground, lists a GroundTouch
+#                     where its tyre meets it
+#   (the app)         answers each touch (GroundAnswer)
+#   layWheelTouches   lays each touch's piece and kicks up its particles
+#   drawWheelTracks   every live piece into the G-buffer, one instanced draw
+#                     (addWheelTrackInstances for a batch of the app's own)
+import Math
+import Vec3
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Transform
+open Mesh3d
+open RendererDeferred
+open GbufferInstanced
+open Gbuffer
+open gpu/GpuResources
+open box3d/ecs/PhysicsTypes
+open box3d/ecs/Physics
+open box3d/ecs/PhysicsComponents
+open box3d/ecs/PhysicsQueries
+open app3d/GroundMarks
+open app3d/GroundTouch
+open app3d/GroundParticles
+
+type WheelTrackTuning {
+  # A piece every this far a wheel rolls (m), and how many a trail keeps
+  segmentLength: Float
+  capacity: Int
+  # How long a piece lasts (s), over how much of its end it fades (s), and
+  # the share of a full trail that narrows away at its old end
+  lifetime: Float
+  fadeSeconds: Float
+  tailShare: Float
+  # Further than this between pieces is a jump: the trail breaks
+  breakDistance: Float
+  # A piece lies this far over a footprint (which lies the answer's lift
+  # over the ground), so a track over a print shows; and is this thick
+  overFootprints: Float
+  thickness: Float
+  # A wheel is on the ground while its lowest point is within this of it
+  groundReach: Float
+  # How far down the ray looks for the ground (m)
+  rayLength: Float
+  # How much of its surface's colour a piece keeps
+  shade: Float
+}
+
+# A piece every 0.5 m, 400 a wheel (200 m), for 60 s fading over the last 20
+func defaultWheelTrackTuning() ret WheelTrackTuning {
+  ret WheelTrackTuning {
+    segmentLength: 0.5
+    capacity: 400
+    lifetime: 60.0
+    fadeSeconds: 20.0
+    tailShare: 0.25
+    breakDistance: 3.0
+    overFootprints: 0.003
+    thickness: 0.004
+    groundReach: 0.15
+    rayLength: 200.0
+    shade: 0.65
+  }
+}
+
+# A wheel's tracks: its trail, and the tyre's size (m)
+type WheelTrack {
+  trail: MarkTrail
+  radius: Float
+  width: Float
+}
+
+type WheelTracks {
+  tracks: ComponentTable(WheelTrack)
+  # The tracks' own clock (s)
+  clock: Float
+  batch: InstanceBatch
+  tuning: WheelTrackTuning
+  # What the ground ray hits
+  groundFilter: QueryFilter
+  # This frame's touches, for the app to answer
+  touches: List(GroundTouch)
+}
+
+# Wheel tracks with room in their batch for `wheelCapacity` full trails,
+# drawn with a unit box uploaded to `renderer`; the ground ray hits what
+# `groundFilter` lets through
+func createWheelTracks(
+  renderer: mod DeferredRenderer
+  tuning: view WheelTrackTuning
+  wheelCapacity: view Int
+  groundFilter: view QueryFilter
+) ret WheelTracks {
+  let box: MeshData = makeBox(size: 1.0)
+  ret WheelTracks {
+    tracks: ComponentTable.create(WheelTrack)
+    clock: 0.0
+    batch: createInstanceBatch(
+      mesh: uploadMesh(
+        renderer: renderer
+        verts: box.verts
+        vertCount: box.vertCount
+        indices: box.indices
+      )
+      capacity: tuning.capacity * wheelCapacity
+    )
+    tuning: tuning
+    groundFilter: groundFilter
+    touches: List.create(GroundTouch, cap: wheelCapacity)
+  }
+}
+
+# Give the wheel `wheelId` a trail of its own
+func addWheelTrack(
+  wheelTracks: mod WheelTracks
+  wheelId: view EntityId
+  radius: view Float
+  width: view Float
+) {
+  componentSet(
+    this: wheelTracks.tracks
+    entityId: wheelId
+    data: WheelTrack {
+      trail: createMarkTrail(capacity: wheelTracks.tuning.capacity)
+      radius: radius
+      width: width
+    }
+  )
+}
+
+func wheelTrackFading(tuning: view WheelTrackTuning) ret MarkFading {
+  ret MarkFading {
+    lifetime: tuning.lifetime
+    fadeSeconds: tuning.fadeSeconds
+    tailShare: tuning.tailShare
+  }
+}
+
+# Does a wheel `distance` on from its last piece lay the next one?
+func laysTrackPiece(tuning: view WheelTrackTuning, distance: view Float) ret Bool {
+  ret distance >= tuning.segmentLength
+}
+
+# Did a wheel `distance` from its last piece jump rather than roll?
+func breaksTrack(tuning: view WheelTrackTuning, distance: view Float) ret Bool {
+  ret distance > tuning.breakDistance
+}
+
+# The clock on by `deltaTime`, and a touch listed for every wheel (its pose
+# in `transforms`, its speed its body's) that rolled a piece's length and is
+# on the ground (the touches start empty); a wheel in the air breaks its trail
+func findWheelTouches(
+  wheelTracks: mod WheelTracks
+  physics: view Physics
+  rigidBodies: view ComponentTable(RigidBody)
+  transforms: view ComponentTable(Transform3D)
+  deltaTime: view Float
+) {
+  wheelTracks.clock = wheelTracks.clock + deltaTime
+  wheelTracks.touches.clear()
+  let tuning: WheelTrackTuning = wheelTracks.tuning
+  loop var i: Int = 0, i < componentCount(this: wheelTracks.tracks), ++i {
+    let wheelId: EntityId = componentEntityAt(this: wheelTracks.tracks, i: i)
+    if let pose: Transform3D = componentCopy(this: transforms, entityId: wheelId) {
+      let center: Vec3 = pose.position
+      let speed: Float = Vec3.vlen(
+        a: entityLinearVelocity(physics: physics, rigidBodies: rigidBodies, entityId: wheelId)
+      )
+      let wheelTrack: mod WheelTrack = componentMod(this: wheelTracks.tracks, entityId: wheelId)
+      # Where the tyre would touch, if the ground were right under its centre
+      let bottom: Vec3 = Vec3.create(x: center.x, y: center.y, z: center.z - wheelTrack.radius)
+      var distance: Float = 0.0
+      var rolled: Bool = true
+      if wheelTrack.trail.hasLastPoint {
+        let dx: Float = bottom.x - wheelTrack.trail.lastPoint.x
+        let dy: Float = bottom.y - wheelTrack.trail.lastPoint.y
+        distance = Math.sqrt(x: dx * dx + dy * dy)
+        if breaksTrack(tuning: tuning, distance: distance) {
+          wheelTrack.trail.hasLastPoint = false
+        } else if laysTrackPiece(tuning: tuning, distance: distance) is false {
+          rolled = false
+        }
+      }
+      if rolled is false {
+        continue
+      }
+      # One ray down per piece: is the tyre on the ground, and where is it
+      let hit: PhysicsHit = raycastClosest(
+        physics: physics
+        origin: center
+        translation: Vec3.create(x: 0.0, y: 0.0, z: 0.0 - tuning.rayLength)
+        filter: wheelTracks.groundFilter
+      )
+      if hit.hit is false or bottom.z - hit.point.z >= tuning.groundReach {
+        wheelTrack.trail.hasLastPoint = false
+        continue
+      }
+      var directionX: Float = 0.0
+      var directionY: Float = 0.0
+      if wheelTrack.trail.hasLastPoint {
+        let along: Float = Math.max(a: distance, b: 0.0001)
+        directionX = (bottom.x - wheelTrack.trail.lastPoint.x) / along
+        directionY = (bottom.y - wheelTrack.trail.lastPoint.y) / along
+      }
+      wheelTracks.touches.add(value: GroundTouch {
+        entityId: wheelId
+        point: Vec3.create(x: bottom.x, y: bottom.y, z: hit.point.z)
+        directionX: directionX
+        directionY: directionY
+        speed: speed
+        distance: distance
+        answer: createGroundAnswer()
+      })
+    }
+  }
+}
+
+# Each answered touch: its piece from the trail's last point (none for the
+# first of a trail), lying the answer's lift and overFootprints over the
+# ground, and what it kicks up (rolls from `random`)
+func layWheelTouches(
+  wheelTracks: mod WheelTracks
+  groundParticles: mod GroundParticles
+  random: mod Random
+) {
+  let tuning: WheelTrackTuning = wheelTracks.tuning
+  loop var i: Int = 0, i < wheelTracks.touches.length, ++i {
+    let touch: GroundTouch = wheelTracks.touches.copyAtDefault(index: i)
+    if componentHas(this: wheelTracks.tracks, entityId: touch.entityId) is false {
+      continue
+    }
+    let contact: Vec3 = Vec3.create(
+      x: touch.point.x
+      y: touch.point.y
+      z: touch.point.z + touch.answer.lift + tuning.overFootprints
+    )
+    let wheelTrack: mod WheelTrack = componentMod(
+      this: wheelTracks.tracks
+      entityId: touch.entityId
+    )
+    if wheelTrack.trail.hasLastPoint {
+      markTrailAdd(
+        trail: wheelTrack.trail
+        piece: MarkPiece {
+          from: wheelTrack.trail.lastPoint
+          to: contact
+          laidAt: wheelTracks.clock
+          color: shadeOf(color: touch.answer.color, shade: tuning.shade)
+        }
+      )
+      # ...and what the tyre kicks up there, flung back from where it rolls
+      let floor: Float = contact.z - tuning.overFootprints
+      kickUpParticles(
+        groundParticles: groundParticles
+        random: random
+        answer: touch.answer
+        feet: Vec3.create(x: contact.x, y: contact.y, z: floor)
+        directionX: touch.directionX
+        directionY: touch.directionY
+        speed: touch.speed
+        count: tyreParticleCount(speed: touch.speed, blades: touch.answer.blades)
+        floor: floor
+      )
+    }
+    wheelTrack.trail.lastPoint = contact
+    wheelTrack.trail.hasLastPoint = true
+  }
+}
+
+# Every wheel's live pieces into `batch` (`toon` shading or not)
+func addWheelTrackInstances(
+  batch: mod InstanceBatch
+  wheelTracks: view WheelTracks
+  toon: view Bool
+) {
+  loop var i: Int = 0, i < componentCount(this: wheelTracks.tracks), ++i {
+    let wheelTrack: view WheelTrack = componentView(
+      this: wheelTracks.tracks
+      entityId: componentEntityAt(this: wheelTracks.tracks, i: i)
+    )
+    addMarkTrailInstances(
+      batch: batch
+      trail: wheelTrack.trail
+      clock: wheelTracks.clock
+      width: wheelTrack.width
+      thickness: wheelTracks.tuning.thickness
+      fading: wheelTrackFading(tuning: wheelTracks.tuning)
+      toon: toon
+    )
+  }
+}
+
+# Every live piece into the G-buffer's open pass, in one instanced draw
+func drawWheelTracks(
+  cache: mod GbufferCache
+  resources: mod GpuResources
+  wheelTracks: mod WheelTracks
+  toon: view Bool
+) {
+  resetInstanceBatch(batch: wheelTracks.batch)
+  addWheelTrackInstances(batch: wheelTracks.batch, wheelTracks: wheelTracks, toon: toon)
+  drawInstances(cache: cache, resources: resources, batch: wheelTracks.batch)
+}
+
+# How many pieces show now, and how long the longest trail is (m)
+func wheelTrackPieceCount(wheelTracks: view WheelTracks) ret Int {
+  var total: Int = 0
+  loop var i: Int = 0, i < componentCount(this: wheelTracks.tracks), ++i {
+    let wheelTrack: view WheelTrack = componentView(
+      this: wheelTracks.tracks
+      entityId: componentEntityAt(this: wheelTracks.tracks, i: i)
+    )
+    total = total + markTrailLiveCount(
+      trail: wheelTrack.trail
+      clock: wheelTracks.clock
+      fading: wheelTrackFading(tuning: wheelTracks.tuning)
+    )
+  }
+  ret total
+}
+
+func longestWheelTrail(wheelTracks: view WheelTracks) ret Float {
+  var longest: Float = 0.0
+  loop var i: Int = 0, i < componentCount(this: wheelTracks.tracks), ++i {
+    let wheelTrack: view WheelTrack = componentView(
+      this: wheelTracks.tracks
+      entityId: componentEntityAt(this: wheelTracks.tracks, i: i)
+    )
+    longest = Math.max(
+      a: longest
+      b: markTrailLiveLength(
+        trail: wheelTrack.trail
+        clock: wheelTracks.clock
+        fading: wheelTrackFading(tuning: wheelTracks.tuning)
+      )
+    )
+  }
+  ret longest
+}
