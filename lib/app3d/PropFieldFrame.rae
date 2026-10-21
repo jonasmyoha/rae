@@ -1,0 +1,372 @@
+# app3d/PropFieldFrame — a PropField's frame (app3d/PropField): gather the
+# props near the eye and in view into the instance batches, each at the level
+# of detail its distance picks or cross-fading between two (app3d/PropFade),
+# and draw the batches into the G-buffer, the forward pass and the shadows.
+# Split from PropField for its size.
+import Math
+import Vec3
+open Scene3d
+open Math3d
+open GbufferRecord
+open GbufferInstanced
+open Gbuffer
+open gpu/GpuResources
+open RendererDeferred
+open GbufferSprite
+open app3d/PropFade
+open app3d/PropField
+
+# Fill the batches with this frame's props: only cells within the draw
+# distance and in the view, and in them only props in the view, each at the
+# level of detail its distance picks. `toon` is the frame's shading.
+func gatherPropField(field: mod PropField, propView: view PropView, toon: view Bool) {
+  loop var b: Int = 0, b < field.batches.length, ++b {
+    if let batch: mod InstanceBatch = field.batches.modAt(index: b) {
+      resetInstanceBatch(batch: batch)
+    }
+  }
+  resetInstanceBatch(batch: field.spriteBatch)
+  field.visibleCount = 0
+  field.cellsVisited = 0
+  if field.finished is false {
+    ret
+  }
+  let reach: Float = field.drawDistance + field.cellSize
+  let first: Int = propCellOf(field: field, x: propView.eye.x - reach, y: propView.eye.y - reach)
+  let last: Int = propCellOf(field: field, x: propView.eye.x + reach, y: propView.eye.y + reach)
+  let firstColumn: Int = first % field.columns
+  let firstRow: Int = first / field.columns
+  let lastColumn: Int = last % field.columns
+  let lastRow: Int = last / field.columns
+  loop var row: Int = firstRow, row <= lastRow, ++row {
+    loop var column: Int = firstColumn, column <= lastColumn, ++column {
+      gatherPropCell(
+        field: field
+        propView: propView
+        toon: toon
+        group: -1
+        cell: row * field.columns + column
+        column: column
+        row: row
+      )
+    }
+  }
+  # Each group's cells in reach: its window of the grid, cut to the reach
+  loop var g: Int = 0, g < field.groups.length, ++g {
+    var used: Bool = false
+    var groupColumn: Int = 0
+    var groupRow: Int = 0
+    var groupColumns: Int = 0
+    var groupRows: Int = 0
+    if let held: view PropGroup = field.groups.viewAt(index: g) {
+      used = held.used
+      groupColumn = held.firstColumn
+      groupRow = held.firstRow
+      groupColumns = held.columns
+      groupRows = held.rows
+    }
+    if used is false {
+      continue
+    }
+    let fromRow: Int = Math.max(a: firstRow.toFloat(), b: groupRow.toFloat()).toInt()
+    let toRow: Int = Math.min(a: lastRow.toFloat(), b: (groupRow + groupRows - 1).toFloat()).toInt()
+    let fromColumn: Int = Math.max(a: firstColumn.toFloat(), b: groupColumn.toFloat()).toInt()
+    let toColumn: Int = Math.min(
+      a: lastColumn.toFloat()
+      b: (groupColumn + groupColumns - 1).toFloat()
+    ).toInt()
+    loop var row: Int = fromRow, row <= toRow, ++row {
+      loop var column: Int = fromColumn, column <= toColumn, ++column {
+        gatherPropCell(
+          field: field
+          propView: propView
+          toon: toon
+          group: g
+          cell: (row - groupRow) * groupColumns + column - groupColumn
+          column: column
+          row: row
+        )
+      }
+    }
+  }
+}
+
+# One cell's props, of the field's own (`group` -1) or of a group (`cell` in
+# its window), into the batches: when the cell is in reach and in view.
+func gatherPropCell(
+  field: mod PropField
+  propView: view PropView
+  toon: view Bool
+  group: view Int
+  cell: view Int
+  column: view Int
+  row: view Int
+) {
+  let range: PropCellRange = propCellRange(field: field, group: group, cell: cell)
+  if range.start >= range.end {
+    ret
+  }
+  let cellCenter: Vec3 = Vec3.create(
+    x: field.originX + (column.toFloat() + 0.5) * field.cellSize
+    y: field.originY + (row.toFloat() + 0.5) * field.cellSize
+    z: range.centerZ
+  )
+  if Vec3.vlen(a: Vec3.vsub(a: cellCenter, b: propView.eye)) - range.radius > field.drawDistance {
+    ret
+  }
+  if propSphereInView(propView: propView, center: cellCenter, radius: range.radius) is false {
+    ret
+  }
+  field.cellsVisited = field.cellsVisited + 1
+  loop var i: Int = range.start, i < range.end, ++i {
+    gatherProp(
+      field: field
+      propView: propView
+      group: group
+      index: i
+      toon: toon
+    )
+  }
+}
+
+# Where a prop goes this frame at one level: the first batch of the level, how
+# many parts, its model matrix (turned to the eye at a billboard level)
+type PropDraw {
+  # At its kind's sprite level: a billboard, not meshes
+  sprite: Bool
+  firstBatch: Int
+  partCount: Int
+  model: Mat4
+}
+
+func propLevelDraw(
+  field: view PropField
+  propView: view PropView
+  placement: view PropPlacement
+  model: view Mat4
+  kind: view PropKind
+  level: view Int
+) ret PropDraw {
+  var result: PropDraw = { sprite: false, firstBatch: 0, partCount: 0, model: model }
+  if let lod: view PropLod = kind.lods.viewAt(index: level) {
+    result.sprite = propLodIsSprite(lod: lod)
+    result.partCount = lod.parts.length
+    result.firstBatch = field.lodFirstBatch.copyAtFallback(
+      index: field.kindFirstLod.copyAtFallback(index: placement.kind, fallback: 0) + level
+      fallback: 0
+    )
+    if lod.facesCamera {
+      result.model = propModel(
+        placement: placement
+        yaw: Math.atan2(
+          y: propView.eye.y - placement.position.y
+          x: propView.eye.x - placement.position.x
+        )
+      )
+    }
+  }
+  ret result
+}
+
+# One prop into its batches, if it is in reach and in the view: at the level
+# its distance picks, or inside a fade band at two levels, the near one
+# fading out and the far one fading in (app3d/PropFade)
+func gatherProp(
+  field: mod PropField
+  propView: view PropView
+  group: view Int
+  index: view Int
+  toon: view Bool
+) {
+  let placement: PropPlacement = propPlacementAt(field: field, group: group, index: index)
+  # What the kind decides, read while its view is held; the batches are
+  # written after it ends (they live in the same field)
+  var drawn: Bool = false
+  var pick: PropLodPick = { near: -1, far: -1, threshold: 0.0 }
+  var nearDraw: PropDraw = { sprite: false, firstBatch: 0, partCount: 0, model: mat4Identity() }
+  var farDraw: PropDraw = nearDraw
+  if let kind: view PropKind = field.kinds.viewAt(index: placement.kind) {
+    let center: Vec3 = propCenter(kind: kind, placement: placement)
+    let distance: Float = Vec3.vlen(a: Vec3.vsub(a: center, b: propView.eye))
+    pick = propLodPickFrom(maxDistances: kind.lodEnds, distance: distance)
+    if pick.near >= 0 and propSphereInView(
+      propView: propView
+      center: center
+      radius: propRadius(kind: kind, placement: placement)
+    ) {
+      drawn = true
+      let model: Mat4 = propModelAt(field: field, group: group, index: index)
+      nearDraw = propLevelDraw(
+        field: field
+        propView: propView
+        placement: placement
+        model: model
+        kind: kind
+        level: pick.near
+      )
+      if pick.far >= 0 {
+        farDraw = propLevelDraw(
+          field: field
+          propView: propView
+          placement: placement
+          model: model
+          kind: kind
+          level: pick.far
+        )
+      }
+    }
+  }
+  if drawn is false {
+    ret
+  }
+  let fades: Bool = pick.far >= 0 or pick.threshold > 0.0
+  var seed: Float = 0.0
+  if fades {
+    seed = propFadeSeed(x: placement.position.x, y: placement.position.y)
+  }
+  gatherPropLevel(
+    field: field
+    placement: placement
+    draw: nearDraw
+    toon: toon
+    fades: fades
+    threshold: pick.threshold
+    fadingIn: false
+    seed: seed
+  )
+  if pick.far >= 0 {
+    gatherPropLevel(
+      field: field
+      placement: placement
+      draw: farDraw
+      toon: toon
+      fades: true
+      threshold: pick.threshold
+      fadingIn: true
+      seed: seed
+    )
+  }
+  field.visibleCount = field.visibleCount + 1
+}
+
+# A prop at one level into its batches (a billboard or its mesh parts), with
+# its fade when it `fades` (GbufferRecord setInstanceFade)
+func gatherPropLevel(
+  field: mod PropField
+  placement: view PropPlacement
+  draw: view PropDraw
+  toon: view Bool
+  fades: view Bool
+  threshold: view Float
+  fadingIn: view Bool
+  seed: view Float
+) {
+  if draw.sprite {
+    let before: Int = field.spriteBatch.count
+    addSpriteInstance(
+      batch: field.spriteBatch
+      position: placement.position
+      height: field.spriteHeights.copyAtFallback(index: placement.kind, fallback: 1.0) * placement.scale
+      layer: field.spriteLayers.copyAtFallback(index: placement.kind, fallback: 0)
+      toon: toon
+    )
+    if fades and field.spriteBatch.count > before {
+      setInstanceFade(
+        records: field.spriteBatch.records
+        slot: before
+        threshold: threshold
+        fadingIn: fadingIn
+        seed: seed
+      )
+    }
+    ret
+  }
+  loop var p: Int = 0, p < draw.partCount, ++p {
+    var material: Material3d = field.batchMaterials.copyAtDefault(index: draw.firstBatch + p)
+    material.toon = toon
+    if let batch: mod InstanceBatch = field.batches.modAt(index: draw.firstBatch + p) {
+      let before: Int = batch.count
+      addInstance(
+        batch: batch
+        model: draw.model
+        prevModel: draw.model
+        material: material
+      )
+      if fades and batch.count > before {
+        setInstanceFade(
+          records: batch.records
+          slot: before
+          threshold: threshold
+          fadingIn: fadingIn
+          seed: seed
+        )
+      }
+    }
+  }
+}
+
+# This frame's props into the G-buffer: one instanced draw per batch.
+func drawPropField(cache: mod GbufferCache, resources: mod GpuResources, field: view PropField) {
+  loop let batch: view InstanceBatch in field.batches {
+    drawInstances(cache: cache, resources: resources, batch: batch)
+  }
+}
+
+# This frame's billboards (the sprite levels) into the G-buffer: one draw of
+# the sprite pass, `sprites` its pipeline and image array
+func drawPropFieldSprites(
+  cache: mod GbufferCache
+  resources: mod GpuResources
+  field: view PropField
+  sprites: mod SpriteCache
+) {
+  if field.spriteBatch.count <= 0 {
+    ret
+  }
+  unsafe {
+    drawSpriteInstances(
+      cache: sprites
+      resources: resources
+      gbuffer: cache
+      records: field.spriteBatch.records.data
+      count: field.spriteBatch.count
+    )
+  }
+}
+
+# This frame's billboards into the shadow pass, each facing the sun with its
+# picture's outline (when a kind's sprite level casts shadows; the ones past
+# the cascades' reach fall outside every map). `aspect` and `cutoff` are the
+# pictures' (as GbufferSprite's spriteSetParams has them).
+func drawPropFieldSpriteShadows(
+  renderer: mod DeferredRenderer
+  field: view PropField
+  aspect: view Float
+  cutoff: view Float
+) {
+  if field.spriteCastsShadow is false or field.spriteBatch.count <= 0 {
+    ret
+  }
+  drawShadowSpriteBatchWith(
+    renderer: renderer
+    batch: field.spriteBatch
+    aspect: aspect
+    cutoff: cutoff
+  )
+}
+
+# This frame's props that cast shadows (their level says so) into the shadow
+# pass.
+func drawPropFieldShadows(renderer: mod DeferredRenderer, field: view PropField) {
+  loop var b: Int = 0, b < field.batches.length, ++b {
+    if field.batchCastsShadow.copyAtFallback(index: b, fallback: false) {
+      if let batch: view InstanceBatch = field.batches.viewAt(index: b) {
+        drawShadowCasterBatchWith(
+          renderer: renderer
+          mesh: field.batchMeshes.copyAtDefault(index: b)
+          batch: batch
+        )
+      }
+    }
+  }
+}

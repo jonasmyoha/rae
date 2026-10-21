@@ -22,6 +22,7 @@ struct DrawU {
   prevModel: mat4x4<f32>,
   albedoMetallic: vec4<f32>,
   params: vec4<f32>,   // x = roughness, y = emissive(enc), z = mode
+  fade: vec4<f32>,     // the level cross-fade (GbufferRecord [40..43]); 0 when not fading
 };
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var<storage, read> draws: array<DrawU>;

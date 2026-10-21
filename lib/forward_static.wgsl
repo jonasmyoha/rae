@@ -18,6 +18,10 @@ override forwardSsao: f32 = 0.0;
 fn fs(in: VsOut) -> @location(0) vec4<f32> {
   let d = draws[in.inst];
   let material = staticSurface(in, d);
+  // A level of detail fading in or out (fade_dither.wgsl)
+  if (!fadeKeeps(d.fade, in.pos.xy, fadeFrameOffset(F.jitter.xy))) {
+    discard;
+  }
   var surface: ShadedSurface;
   surface.wpos = in.wpos;
   surface.N = material.nrm;

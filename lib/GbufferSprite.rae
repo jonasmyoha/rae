@@ -112,7 +112,7 @@ func createSpriteCache() ret SpriteCache {
 
 const spriteUniformBytes: Int = 32  # two vec4 (SpriteU)
 
-const spriteRecordFloats: Int = 40  # DrawU, same as the instanced path
+const spriteRecordFloats: Int = instanceRecordFloats  # DrawU, same as the instanced path
 
 # Create the sprite image array (one layer per prop kind, `mips` levels each:
 # 1 for none, spriteMipCount for the full chain) + upload one level of a
@@ -221,7 +221,9 @@ func ensureSpritePipeline(
 ) {
   if not cache.pipeMade {
     cache.pipeMade = true
-    let billboardShader: Shader = shader(files: ["lib/sprite_billboard.wgsl"])
+    let billboardShader: Shader = shader(
+      files: ["lib/fade_dither.wgsl", "lib/sprite_billboard.wgsl"]
+    )
     if let pipeline: RenderPipelineId = createRenderPipeline(
       resources: resources
       shader: billboardShader
@@ -383,6 +385,7 @@ func ensureSpriteForward(
       "lib/deferred_uniforms.wgsl"
       "lib/deferred_shade.wgsl"
       "lib/ssao_upsample.wgsl"
+      "lib/fade_dither.wgsl"
       "lib/sprite_billboard.wgsl"
       "lib/forward_entry.wgsl"
     ])
@@ -393,6 +396,7 @@ func ensureSpriteForward(
         "lib/deferred_uniforms.wgsl"
         "lib/deferred_shade.wgsl"
         "lib/ssao_upsample.wgsl"
+        "lib/fade_dither.wgsl"
         "lib/sprite_billboard.wgsl"
         "lib/forward_entry.wgsl"
       ])

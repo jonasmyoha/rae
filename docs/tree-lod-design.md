@@ -144,6 +144,21 @@ cut was left as it is. Alpha to coverage on the forward path is not done.
 * The same fade at the far end: past the impostors' distance, trees fade out
   into the far canopy (2.4) instead of vanishing.
 
+**Step 3 done (2026-10-21).** `app3d/PropFade propLodPickFrom` gives each
+level a band of max(10%, 4 m) centred on the distance it ends at; inside it
+`app3d/PropFieldFrame` draws the prop at both levels with the same threshold
+and a seed hashed from its position (the last level fades out alone, so the
+forest's edge is a fade, not a line). The instance record grew to 44 floats
+(`GbufferRecord` [40..43]: threshold, fading in, seed) and
+`lib/fade_dither.wgsl` holds the dither: interleaved gradient noise (cheap,
+spread like blue noise), moved by the TAA jitter when TAA is on. The
+G-buffer and forward mesh passes, the billboards and both shadow passes
+discard with it; the mesh shadow pass draws the fading casters with a second
+pipeline (`ShadowMapsRecords`), so the solid ones keep the depth-only path.
+A scripted 8 m camera move through 143 shows trees changing gradually, with
+no pop; the frame time did not grow (19.3 ms before, 18.5 ms after, within
+the run-to-run noise).
+
 ### 2.4 Past 140 m: the far canopy
 
 Per PropField cell (40 m), one **cluster impostor**: the cell's trees baked

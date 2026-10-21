@@ -1,6 +1,7 @@
 struct SU { lightViewProj: mat4x4<f32> };
 @group(0) @binding(0) var<uniform> S: SU;
-@group(0) @binding(1) var<storage, read> models: array<mat4x4<f32>>;
+struct Caster { model: mat4x4<f32>, fade: vec4<f32> };  // ShadowMaps' caster floats
+@group(0) @binding(1) var<storage, read> models: array<Caster>;
 @group(0) @binding(2) var<storage, read> palette: array<vec4<f32>>;
 @group(0) @binding(3) var<storage, read> paletteBases: array<u32>;
 fn jointMat(j: u32, base: u32) -> mat4x4<f32> {
@@ -24,5 +25,5 @@ fn vs(@builtin(instance_index) ii: u32,
   skin = skin + jointMat(j.z, pbase) * w.z;
   skin = skin + jointMat(j.w, pbase) * w.w;
   let sp = skin * vec4<f32>(p, 1.0);
-  return S.lightViewProj * (models[ii] * vec4<f32>(sp.xyz, 1.0));
+  return S.lightViewProj * (models[ii].model * vec4<f32>(sp.xyz, 1.0));
 }
