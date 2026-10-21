@@ -241,11 +241,14 @@ func addLeafParts(
 # or leaves per crown and tone (autumn trees and palm), and how far each is
 # drawn. Shadows reach 120 m; every level casts them (the far level's
 # billboards face the sun, cut to the picture's outline).
-const nearPatches: Int = 48
+# The near level is the crowns' outline (procgen/FluffyFoliage,
+# procgen/Foliage): every coarser level is built to cover what it does
+# (docs/tree-lod-design.md §2.1, checked by app3d/TreeCoverage)
+const nearPatches: Int = fluffyOutlinePatches
 
 const midPatches: Int = 14
 
-const nearLeaves: Int = 500
+const nearLeaves: Int = outlineLeafCount
 
 const midLeaves: Int = 110
 

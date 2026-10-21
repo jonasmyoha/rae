@@ -145,6 +145,18 @@ func foliageLeaf(
   }
 }
 
+# The leaf count a crown's outline is drawn at: the near level of detail
+# (app3d/GroveTrees nearLeaves). A crown of fewer leaves keeps that crown's
+# outline and covered area.
+const outlineLeafCount: Int = 500
+
+# How much of a bigger leaf's extra size (over the outline crown's) a
+# coarser crown keeps, and how far inward (in shares of that extra half size)
+# it is pulled: tuned with app3d/TreeCoverage within 3% from every side
+const coarseLeafSize: Float = 1.0
+
+const coarseLeafPull: Float = 0.65
+
 func leafCrown(
   mesh: mod MeshData
   center: view Vec3
@@ -153,12 +165,18 @@ func leafCrown(
   tone: view Int
   leafCount: view Int
 ) {
-  # Fewer leaves, each bigger, so the crown keeps its cover
+  # Fewer leaves, each bigger, so the crown keeps its cover; a bigger leaf
+  # pulled inward by its extra half size, so the coarser crown keeps the full
+  # one's outline, and only part of the extra kept, so it covers the same
+  # area (docs/tree-lod-design.md §2.1, tuned with app3d/TreeCoverage)
   var drawn: Int = leafCount
   if drawn < 1 {
     drawn = 1
   }
-  let leafScale: Float = Math.sqrt(x: fullLeafCount.toFloat() / drawn.toFloat())
+  let fullScale: Float = Math.sqrt(x: fullLeafCount.toFloat() / drawn.toFloat())
+  let outlineScale: Float = Math.sqrt(x: fullLeafCount.toFloat() / outlineLeafCount.toFloat())
+  let extra: Float = Math.max(a: fullScale - outlineScale, b: 0.0)
+  let leafScale: Float = Math.max(a: fullScale, b: outlineScale) - extra * (1.0 - coarseLeafSize)
   loop var i: Int = 0, i < leafCount, ++i {
     if i % 3 is not tone {
       continue
@@ -172,20 +190,20 @@ func leafCrown(
       y: radial * Math.sin(x: angle)
       z: vertical
     )
-    let point: Vec3 = vadd(
-      a: center
-      b: Vec3.create(
-        x: direction.x * radius.x * depth
-        y: direction.y * radius.y * depth
-        z: direction.z * radius.z * depth
-      )
+    let size: Float = (0.065 + hash2(x: i, y: 4, seed: seed) * 0.065) * leafScale
+    let onShell: Vec3 = Vec3.create(
+      x: direction.x * radius.x * depth
+      y: direction.y * radius.y * depth
+      z: direction.z * radius.z * depth
     )
+    let pull: Float = size * (1.0 - outlineScale / leafScale) * 0.5 * coarseLeafPull
+    let point: Vec3 = vadd(a: center, b: vsub(a: onShell, b: vscale(a: vnorm(a: onShell), s: pull)))
     let normal: Vec3 = vnorm(a: Vec3.create(x: direction.x, y: direction.y, z: direction.z + 0.45))
     foliageLeaf(
       mesh: mesh
       center: point
       normal: normal
-      size: (0.065 + hash2(x: i, y: 4, seed: seed) * 0.065) * leafScale
+      size: size
       angle: angle * 3
     )
   }

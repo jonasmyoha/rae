@@ -33,6 +33,26 @@ and at 128 px for the billboard picture through its mips, after the 0.5 cut:
 
 So the silhouette is not the whole story, but it is part of it.
 
+**Step 1 done (2026-10-21).** Measured fairly (areas in the tree's own
+units, so a taller level is not hidden by the bake's framing) and from 8
+sides with `app3d/TreeCoverage`, the middle crowns were further off than the
+side view above showed: broadleaf 122%, umbrella 128%, cypress 118%, spruce
+94%, the autumn trees 105-106%, the palm 103%. Now every species' middle
+level covers 97-103% from every side (case 1228 holds it):
+
+* leaf-patch crowns (`procgen/FluffyFoliage fluffyCrown`): a bigger patch is
+  pulled inward by its extra half size, so it reaches no further than the
+  near crown's, and keeps 90% of its extra size (62% for the flat umbrella
+  crown, whose rim patches overhang above and below its thin layer);
+* the spruce's skirts (`procgen/Spruce`): a polygon of fewer sides is widened
+  to its circle's area;
+* the autumn trees' and palm's leaves (`procgen/Foliage leafCrown`): the
+  same pull, 65% of the extra half size.
+
+The near level is the outline every coarser level is built to: GroveTrees'
+`nearPatches` and `nearLeaves` are `fluffyOutlinePatches` and
+`outlineLeafCount`.
+
 ### Why far trees look bigger than near ones
 
 1. **The middle crown grows 13-18%** (the leaf-patch species). Fewer patches

@@ -1,0 +1,101 @@
+# app3d/TreeCoverage — how much of a side view a tree's level of detail
+# covers, so its levels can be checked to match (docs/tree-lod-design.md
+# §2.1). A level is turned about its axis to each of `directions` evenly
+# spaced yaws, baked from the side (app3d/SpriteBake), and its covered
+# pixels turned back into an area in the tree's own units, so levels of
+# different heights compare fairly. Slow (a CPU bake per direction): for
+# tests and tools, not for a frame.
+import Math
+import Vec3
+open app3d/SpriteBake
+open app3d/GroveTrees
+
+# A copy of `mesh` turned by `angle` (radians) about +Z
+func turnedMesh(mesh: view MeshData, angle: view Float) ret MeshData {
+  var turned: MeshData = mesh
+  let cosine: Float = Math.cos(x: angle)
+  let sine: Float = Math.sin(x: angle)
+  loop var vertex: Int = 0, vertex < turned.vertCount, ++vertex {
+    # its position (floats 0, 1) and its normal (3, 4)
+    loop var pair: Int = 0, pair < 2, ++pair {
+      let at: Int = vertex * 8 + pair * 3
+      let x: Float = turned.verts.copyAtFallback(index: at, fallback: 0.0)
+      let y: Float = turned.verts.copyAtFallback(index: at + 1, fallback: 0.0)
+      turned.verts.set(index: at, value: x * cosine - y * sine)
+      turned.verts.set(index: at + 1, value: x * sine + y * cosine)
+    }
+  }
+  ret turned
+}
+
+# The area (square units) the parts cover from the side after a turn of
+# `angle`, baked `resolution` pixels tall
+func sideArea(parts: view List(MeshData), angle: view Float, resolution: view Int) ret Float {
+  var turned: List(MeshData) = List.create(MeshData, cap: parts.length)
+  var colors: List(Vec3) = List.create(Vec3, cap: parts.length)
+  loop let part: view MeshData in parts {
+    turned.add(value: turnedMesh(mesh: part, angle: angle))
+    colors.add(value: Vec3.create(x: 1.0, y: 1.0, z: 1.0))
+  }
+  # Twice as wide as tall: room for the widest crown at any turn
+  let picture: SpritePicture = bakeSpritePicture(
+    parts: turned
+    colors: colors
+    width: resolution * 2
+    height: resolution
+    aspect: 2.0
+  )
+  var covered: Int = 0
+  loop let pixel: view Int in picture.pixels {
+    if pixel / 16777216 % 256 >= 128 {
+      covered = covered + 1
+    }
+  }
+  let unitsPerPixel: Float = picture.top / resolution.toFloat()
+  ret covered.toFloat() * unitsPerPixel * unitsPerPixel
+}
+
+# A species' level: its wood and its leaves in three tones, at `patches`
+# patches (the leaf-patch forms) or `leaves` leaves (the autumn trees, palm)
+func speciesLevelParts(species: view Int, patches: view Int, leaves: view Int) ret List(MeshData) {
+  var parts: List(MeshData) = List.create(MeshData, cap: 4)
+  parts.add(value: speciesWoodMesh(species: species))
+  loop var tone: Int = 0, tone < 3, ++tone {
+    parts.add(value: speciesLeavesMesh(
+      species: species
+      tone: tone
+      patches: patches
+      leaves: leaves
+    ))
+  }
+  ret parts
+}
+
+# A level's covered area over the near level's, from each of `directions`
+# turns: one share per direction (1.0 = the same)
+func levelCoverageShares(
+  species: view Int
+  patches: view Int
+  leaves: view Int
+  directions: view Int
+  resolution: view Int
+) ret List(Float) {
+  let near: List(MeshData) = speciesLevelParts(
+    species: species
+    patches: nearPatches
+    leaves: nearLeaves
+  )
+  let level: List(MeshData) = speciesLevelParts(species: species, patches: patches, leaves: leaves)
+  var shares: List(Float) = List.create(Float, cap: directions)
+  loop var direction: Int = 0, direction < directions, ++direction {
+    let angle: Float = direction.toFloat() * 6.2831853 / directions.toFloat()
+    let nearArea: Float = sideArea(parts: near, angle: angle, resolution: resolution)
+    let levelArea: Float = sideArea(parts: level, angle: angle, resolution: resolution)
+    var share: Float = 1.0
+    if nearArea > 0.0 {
+      share = levelArea / nearArea
+    }
+    shares.add(value: share)
+  }
+  ret shares
+}

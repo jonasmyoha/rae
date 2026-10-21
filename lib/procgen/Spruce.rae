@@ -13,7 +13,13 @@ func spruceTier(
   seed: view Int
 ) {
   let fraction: Float = tier.toFloat() / 6
-  let width: Float = 0.28 * (1.0 - fraction * 0.88)
+  # A skirt of fewer sides is a polygon inside the same circle, smaller; widen
+  # it to the circle's area, so a coarser level of detail covers what the
+  # full one does (docs/tree-lod-design.md §2.1)
+  let roundness: Float = Math.sqrt(
+    x: 3.1415927 / (sides.toFloat() * 0.5 * Math.sin(x: 6.2831853 / sides.toFloat()))
+  )
+  let width: Float = 0.28 * (1.0 - fraction * 0.88) * roundness
   let level: Float = 0.19 + tier.toFloat() * 0.12
   let turn: Float = tier.toFloat() * 0.61
   let first: Int = mesh.vertCount

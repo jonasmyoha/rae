@@ -1,0 +1,53 @@
+# Every tree species' middle level of detail covers what its near level
+# does, within 3%, from each of 8 sides (docs/tree-lod-design.md §2.1): a
+# coarser crown is not bigger or smaller than the full one, so it does not
+# swell or shrink where the levels switch. The middle crowns of broadleaf,
+# umbrella and cypress once covered 18-28% more, the spruce's 6% less.
+import Math
+open app3d/GroveTrees
+open app3d/TreeCoverage
+
+func percent(share: view Float) ret Int {
+  ret (share * 100.0 + 0.5).toInt()
+}
+
+func main() ret Int {
+  let names: List(String) = {
+    "broadleaf"
+    "umbrella"
+    "cypress"
+    "spruce"
+    "orange"
+    "red"
+    "gold"
+    "crimson"
+    "palm"
+  }
+  var failures: Int = 0
+  loop var species: Int = 0, species < treeSpeciesCount, ++species {
+    let shares: List(Float) = levelCoverageShares(
+      species: species
+      patches: midPatches
+      leaves: midLeaves
+      directions: 8
+      resolution: 256
+    )
+    var low: Float = 10.0
+    var high: Float = 0.0
+    loop let share: view Float in shares {
+      low = Math.min(a: low, b: share)
+      high = Math.max(a: high, b: share)
+    }
+    let fits: Bool = low >= 0.97 and high <= 1.03
+    if fits is false {
+      failures = failures + 1
+    }
+    log(
+      "{names.copyAtFallback(index: species, fallback: "?")}: middle covers {percent(share: low)}-{percent(
+        share: high
+      )}% of the near crown ={fits}"
+    )
+  }
+  log("every middle level within 3%: {failures is 0}")
+  ret 0
+}
