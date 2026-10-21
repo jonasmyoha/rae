@@ -28,6 +28,7 @@ open app3d/WalkerNames
 open box3d/ecs/CharacterMover
 open app3d/Climbing
 open app3d/Wander
+open app3d/CharacterHeight
 
 # The world the walker is on: the small island in the sea (136, 137), or a
 # wide forest world with lakes and no island (143)
@@ -345,6 +346,14 @@ func createWalkerAppPhysics(
     log("[physics] Box3D refused the island height field")
   }
   addCharacterBody(characters: physicsSystem.characters, entityId: heroEntityId, feet: heroFeet)
+  # Real people's heights on the one model (app3d/CharacterHeight): its
+  # model, clips and mover follow it. The hero is the default height.
+  setWalkerCharacterHeight(
+    world: world
+    physicsSystem: physicsSystem
+    entityId: heroEntityId
+    height: walkerHeroHeight
+  )
   # The hero climbs; the crowd, wandering into trees, does not
   addClimber(climbing: physicsSystem.climbing, entityId: heroEntityId)
   loop var crowdIndex: Int = 0, crowdIndex < crowdEntities.length, ++crowdIndex {
@@ -366,6 +375,12 @@ func createWalkerAppPhysics(
       homeX: home.x
       homeY: home.y
       range: walkerWanderRange
+    )
+    setWalkerCharacterHeight(
+      world: world
+      physicsSystem: physicsSystem
+      entityId: crowdEntityId
+      height: walkerCrowdHeight(index: crowdIndex)
     )
   }
   let cubeCount: Int = spawnCubeStacks(
@@ -436,5 +451,41 @@ func addWalkerCharacterComponents(
     this: world.characterModels
     entityId: entityId
     data: CharacterModel { model: model, prevModel: model }
+  )
+}
+
+# The hero's height (m): the default character
+const walkerHeroHeight: Float = 1.77
+
+# The crowd's heights (m), about 1.68 to 1.90, in an order that puts no two
+# alike side by side
+func walkerCrowdHeight(index: view Int) ret Float {
+  let heights: List(Float) = {
+    1.74
+    1.86
+    1.69
+    1.80
+    1.90
+    1.72
+    1.83
+    1.68
+    1.77
+    1.88
+  }
+  ret heights.copyAtFallback(index: index % heights.length, fallback: walkerHeroHeight)
+}
+
+# A character `height` tall: its CharacterHeight, and its mover sized to it
+func setWalkerCharacterHeight(
+  world: mod WalkerWorld
+  physicsSystem: mod WalkerPhysics
+  entityId: view EntityId
+  height: view Float
+) {
+  componentSet(this: world.heights, entityId: entityId, data: CharacterHeight { height: height })
+  let body: mod CharacterBody = componentMod(this: physicsSystem.characters, entityId: entityId)
+  resizeCharacterMover(
+    mover: body.mover
+    size: moverSizeForHeight(height: height, tunedHeight: 2.0)
   )
 }
