@@ -1,0 +1,396 @@
+# app3d/Minimap — a map screen over an app: a rectangle of the world, north
+# (+y) up, fitted as big as it goes into a screen panel under a header (a
+# title, a hint, a close button at the header's left end), with the maths
+# between the two (minimapToScreen / screenToMinimap). The screen is an
+# overlay entity in the UI world (ui/HudOverlay) carrying a Minimap: while
+# open, its full-screen layer node takes every click (so nothing under it
+# moves), and a tap on it either closes the map (on the close button) or
+# sends a MinimapTapped event with the world point the app answers (to take
+# a player there, say). What the map shows is the app's, drawn between
+# drawMinimapPanel and drawMinimapHeader with the view's maths; when it opens
+# and what a tap does are the app's too.
+import Math
+import Gpu2d
+import Gpu2dText
+open Gpu2dCanvas
+open SdfText
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Event
+open ui/Ecs
+open ui/UiSystems
+open app3d/UiShell
+open app3d/LayoutCheck
+
+type MinimapSettings {
+  # The world the map shows (m)
+  worldMinX: Float
+  worldMaxX: Float
+  worldMinY: Float
+  worldMaxY: Float
+  # The header over the map and the margin round it, and the close button's
+  # side (pt)
+  headerHeight: Float = 52.0
+  margin: Float = 12.0
+  closeSize: Float = 44.0
+}
+
+# A point on the map screen (pt) or in the world (m)
+type MinimapPoint {
+  x: Float
+  y: Float
+}
+
+# The map's place on the screen: the panel, and the world inside it at
+# `scale` pt a metre from its top left corner (`left`, `top`)
+type MinimapView {
+  panelX: Float
+  panelY: Float
+  panelW: Float
+  panelH: Float
+  left: Float
+  top: Float
+  scale: Float
+}
+
+# The map in a panel at (x, y), w by h pt: the world fitted below its header,
+# as big as fits, centred
+func minimapViewFor(
+  settings: view MinimapSettings
+  x: view Float
+  y: view Float
+  w: view Float
+  h: view Float
+) ret MinimapView {
+  let roomW: Float = Math.max(a: w - 2.0 * settings.margin, b: 1.0)
+  let roomH: Float = Math.max(a: h - settings.headerHeight - settings.margin, b: 1.0)
+  let worldW: Float = settings.worldMaxX - settings.worldMinX
+  let worldH: Float = settings.worldMaxY - settings.worldMinY
+  let scale: Float = Math.min(a: roomW / worldW, b: roomH / worldH)
+  ret MinimapView {
+    panelX: x
+    panelY: y
+    panelW: w
+    panelH: h
+    left: x + settings.margin + (roomW - worldW * scale) * 0.5
+    top: y + settings.headerHeight + (roomH - worldH * scale) * 0.5
+    scale: scale
+  }
+}
+
+# Where world (x, y) lands on the screen
+func minimapToScreen(
+  settings: view MinimapSettings
+  mapView: view MinimapView
+  x: view Float
+  y: view Float
+) ret MinimapPoint {
+  ret MinimapPoint {
+    x: mapView.left + (x - settings.worldMinX) * mapView.scale
+    y: mapView.top + (settings.worldMaxY - y) * mapView.scale
+  }
+}
+
+# Which world point the screen point (x, y) shows
+func screenToMinimap(
+  settings: view MinimapSettings
+  mapView: view MinimapView
+  x: view Float
+  y: view Float
+) ret MinimapPoint {
+  ret MinimapPoint {
+    x: settings.worldMinX + (x - mapView.left) / mapView.scale
+    y: settings.worldMaxY - (y - mapView.top) / mapView.scale
+  }
+}
+
+# Is the screen point (x, y) on the world the map shows?
+func onMinimapWorld(
+  settings: view MinimapSettings
+  mapView: view MinimapView
+  x: view Float
+  y: view Float
+) ret Bool {
+  let point: MinimapPoint = screenToMinimap(
+    settings: settings
+    mapView: mapView
+    x: x
+    y: y
+  )
+  ret point.x >= settings.worldMinX and point.x <= settings.worldMaxX and point.y >= settings.worldMinY and point.y <= settings.worldMaxY
+}
+
+# The close button's top left: the header's left end (the right end is left
+# free for an app's corner menu)
+func minimapCloseButton(
+  settings: view MinimapSettings
+  mapView: view MinimapView
+) ret MinimapPoint {
+  ret MinimapPoint {
+    x: mapView.panelX + settings.margin
+    y: mapView.panelY + (settings.headerHeight - settings.closeSize) * 0.5
+  }
+}
+
+func onMinimapClose(
+  settings: view MinimapSettings
+  mapView: view MinimapView
+  x: view Float
+  y: view Float
+) ret Bool {
+  let corner: MinimapPoint = minimapCloseButton(settings: settings, mapView: mapView)
+  ret x >= corner.x and x <= corner.x + settings.closeSize and y >= corner.y and y <= corner.y + settings.closeSize
+}
+
+# ----- the map screen as an overlay entity --------------------------------------
+# A map screen: its world and header, its full-screen layer node (shown while
+# open) and the OnClick action a tap on it sends, and whether it is open
+type Minimap {
+  settings: MinimapSettings
+  layerNodeId: String
+  tapActionId: String
+  open: Bool
+}
+
+# A tap on an open map's world: which map, and the world point
+type MinimapTapped {
+  entityId: EntityId
+  x: Float
+  y: Float
+}
+
+type Minimaps {
+  maps: ComponentTable(Minimap)
+  tapped: EventQueue(MinimapTapped)
+}
+
+func createMinimaps() ret Minimaps {
+  ret Minimaps { maps: ComponentTable.create(Minimap), tapped: createEventQueue(MinimapTapped) }
+}
+
+# The map `entityId`'s view: in its layer node's laid-out box
+# (app3d/LayoutCheck), or the whole window when the layer is not shown
+func minimapView(
+  minimaps: view Minimaps
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+) ret MinimapView {
+  let minimap: view Minimap = componentView(this: minimaps.maps, entityId: entityId)
+  let box: LayoutBox = layoutBoxOf(world: world, uiSystems: uiSystems, nodeId: minimap.layerNodeId)
+  if box.shown {
+    ret minimapViewFor(
+      settings: minimap.settings
+      x: box.x
+      y: box.y
+      w: box.w
+      h: box.h
+    )
+  }
+  ret minimapViewFor(
+    settings: minimap.settings
+    x: 0.0
+    y: 0.0
+    w: windowExtentW()
+    h: windowExtentH()
+  )
+}
+
+# Open or close the map `entityId`: its layer node shown or not; true when
+# it changed (the app lays the UI out again then)
+func setMinimapOpen(
+  minimaps: mod Minimaps
+  world: mod UiWorld
+  entityId: view EntityId
+  open: view Bool
+) ret Bool {
+  let minimap: mod Minimap = componentMod(this: minimaps.maps, entityId: entityId)
+  if minimap.open is open {
+    ret false
+  }
+  minimap.open = open
+  setNodeActive(world: world, nodeId: minimap.layerNodeId, value: open)
+  ret true
+}
+
+# A tap at screen point (x, y) on the open map `entityId` seen in `mapView`:
+# on the close button it closes (true: the app lays the UI out again); on
+# the world a MinimapTapped with the world point; elsewhere nothing
+func minimapTap(
+  minimaps: mod Minimaps
+  world: mod UiWorld
+  entityId: view EntityId
+  mapView: view MinimapView
+  x: view Float
+  y: view Float
+) ret Bool {
+  let settings: MinimapSettings = componentView(this: minimaps.maps, entityId: entityId).settings
+  if onMinimapClose(
+    settings: settings
+    mapView: mapView
+    x: x
+    y: y
+  ) {
+    ret setMinimapOpen(
+      minimaps: minimaps
+      world: world
+      entityId: entityId
+      open: false
+    )
+  }
+  if onMinimapWorld(
+    settings: settings
+    mapView: mapView
+    x: x
+    y: y
+  ) {
+    let point: MinimapPoint = screenToMinimap(
+      settings: settings
+      mapView: mapView
+      x: x
+      y: y
+    )
+    eventSend(
+      MinimapTapped
+      this: minimaps.tapped
+      value: MinimapTapped { entityId: entityId, x: point.x, y: point.y }
+    )
+  }
+  ret false
+}
+
+# One frame of every map: last frame's taps gone, then each open map's tap
+# action this frame (at the pointer) handled by minimapTap. True when a map
+# closed (the app lays the UI out again).
+func stepMinimaps(minimaps: mod Minimaps, world: mod UiWorld, uiSystems: view UiSystems) ret Bool {
+  eventClear(MinimapTapped, this: minimaps.tapped)
+  var closed: Bool = false
+  loop var i: Int = 0, i < componentCount(this: minimaps.maps), ++i {
+    let entityId: EntityId = componentEntityAt(this: minimaps.maps, i: i)
+    let minimap: Minimap = componentCopyAtDefault(this: minimaps.maps, i: i)
+    if minimap.open is false {
+      continue
+    }
+    var tapped: Bool = false
+    loop var a: Int = 0, a < uiActionCount(world: world), ++a {
+      tapped = tapped or uiActionAt(world: world, index: a) is minimap.tapActionId
+    }
+    if tapped {
+      let mapView: MinimapView = minimapView(
+        minimaps: minimaps
+        world: world
+        uiSystems: uiSystems
+        entityId: entityId
+      )
+      closed = minimapTap(
+        minimaps: minimaps
+        world: world
+        entityId: entityId
+        mapView: mapView
+        x: Gpu2d.pointerX()
+        y: Gpu2d.pointerY()
+      ) or closed
+    }
+  }
+  ret closed
+}
+
+# ----- drawing -----------------------------------------------------------------
+# The panel under the map (dark, rounded)
+func drawMinimapPanel(canvas: mod Gpu2dCanvas, mapView: view MinimapView) {
+  Gpu2d.drawRoundedRect(
+    canvas: canvas
+    x: mapView.panelX
+    y: mapView.panelY
+    w: mapView.panelW
+    h: mapView.panelH
+    radius: 16.0
+    color: 4027586598
+  )
+}
+
+# The header over the app's content: the close button, the title, the hint
+func drawMinimapHeader(
+  canvas: mod Gpu2dCanvas
+  font: view SdfFont
+  settings: view MinimapSettings
+  mapView: view MinimapView
+  title: view String
+  hint: view String
+) {
+  let titleSize: Float = 24.0
+  let advance: Float = Gpu2dText.drawText(
+    canvas: canvas
+    font: font
+    text: title
+    x: mapView.panelX + settings.margin + settings.closeSize + 14.0
+    y: mapView.panelY + settings.headerHeight * 0.5 + titleSize * 0.35
+    sizePx: titleSize
+    color: 4294967295
+  )
+  let hinted: Float = Gpu2dText.drawText(
+    canvas: canvas
+    font: font
+    text: hint
+    x: advance + 16.0
+    y: mapView.panelY + settings.headerHeight * 0.5 + 5.0
+    sizePx: 14.0
+    color: 3439329279
+  )
+  let close: MinimapPoint = minimapCloseButton(settings: settings, mapView: mapView)
+  Gpu2d.drawRoundedRect(
+    canvas: canvas
+    x: close.x
+    y: close.y
+    w: settings.closeSize
+    h: settings.closeSize
+    radius: 11.0
+    color: 4280955974
+  )
+  let inset: Float = settings.closeSize * 0.32
+  Gpu2d.drawLine(
+    canvas: canvas
+    x0: close.x + inset
+    y0: close.y + inset
+    x1: close.x + settings.closeSize - inset
+    y1: close.y + settings.closeSize - inset
+    thickness: 3.0
+    color: 4294967295
+  )
+  Gpu2d.drawLine(
+    canvas: canvas
+    x0: close.x + settings.closeSize - inset
+    y0: close.y + inset
+    x1: close.x + inset
+    y1: close.y + settings.closeSize - inset
+    thickness: 3.0
+    color: 4294967295
+  )
+}
+
+# A world rectangle filled on the map
+func fillMinimapWorldRect(
+  canvas: mod Gpu2dCanvas
+  settings: view MinimapSettings
+  mapView: view MinimapView
+  minX: view Float
+  minY: view Float
+  maxX: view Float
+  maxY: view Float
+  color: view Int
+) {
+  let corner: MinimapPoint = minimapToScreen(
+    settings: settings
+    mapView: mapView
+    x: minX
+    y: maxY
+  )
+  Gpu2d.drawRect(
+    canvas: canvas
+    x: corner.x
+    y: corner.y
+    w: (maxX - minX) * mapView.scale
+    h: (maxY - minY) * mapView.scale
+    color: color
+  )
+}
