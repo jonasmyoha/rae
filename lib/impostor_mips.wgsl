@@ -16,9 +16,11 @@
 // between those values, which orders the ties without crossing a step, so the
 // share can be met almost exactly (the CPU sprite bake's jitter, made exact).
 struct MipU {
-  // level, views per side, the cell's size at level 0, histogram bins
+  // level, view cells per layer side (every page's views), a cell's size
+  // at level 0, histogram bins
   a: vec4<u32>,
-  // x = the alpha cutoff, y = layers
+  // x = the alpha cutoff, y = layers, z = a cell's height at level 0 (its
+  // width is a.z)
   b: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> U: MipU;
@@ -33,8 +35,8 @@ struct MipU {
 @group(0) @binding(6) var targetAlbedo: texture_storage_2d_array<rgba8unorm, write>;
 @group(0) @binding(7) var targetNormalDepth: texture_storage_2d_array<rgba8unorm, write>;
 
-fn levelSize() -> u32 {
-  return (U.a.y * U.a.z) >> U.a.x;
+fn levelSize() -> vec2<u32> {
+  return vec2<u32>((U.a.y * U.a.z) >> U.a.x, (U.a.y * u32(U.b.z)) >> U.a.x);
 }
 
 fn blockSize() -> u32 {
@@ -42,7 +44,7 @@ fn blockSize() -> u32 {
 }
 
 fn cellOf(texel: vec2<u32>, layer: u32) -> u32 {
-  let cellSize = U.a.z >> U.a.x;
+  let cellSize = vec2<u32>(U.a.z >> U.a.x, u32(U.b.z) >> U.a.x);
   let cell = texel / cellSize;
   return (layer * U.a.y + cell.y) * U.a.y + cell.x;
 }
@@ -87,7 +89,7 @@ fn alphaKey(sum: f32, count: f32, texel: vec2<u32>, layer: u32) -> f32 {
 @compute @workgroup_size(8, 8, 1)
 fn countLevel(@builtin(global_invocation_id) gid: vec3<u32>) {
   let size = levelSize();
-  if (gid.x >= size || gid.y >= size) {
+  if (gid.x >= size.x || gid.y >= size.y) {
     return;
   }
   let texel = gid.xy;
@@ -140,7 +142,7 @@ fn chooseScale(@builtin(global_invocation_id) gid: vec3<u32>) {
 @compute @workgroup_size(8, 8, 1)
 fn writeLevel(@builtin(global_invocation_id) gid: vec3<u32>) {
   let size = levelSize();
-  if (gid.x >= size || gid.y >= size) {
+  if (gid.x >= size.x || gid.y >= size.y) {
     return;
   }
   let texel = gid.xy;

@@ -29,8 +29,9 @@ struct SpriteShadowU { a: vec4<f32> };
 @group(0) @binding(2) var<uniform> P: SpriteShadowU;
 @group(0) @binding(3) var spriteTex: texture_2d_array<f32>;
 @group(0) @binding(4) var spriteSamp: sampler;
-// Impostor mode: per layer the bounding sphere's centre and radius over the
-// prop's height (an unread buffer otherwise)
+// Impostor mode: per subject three vec4, the bounding sphere's centre and
+// radius over the prop's height, its page (texture layer, origin u, v, size)
+// and its framing (impostorExtents) (an unread buffer otherwise)
 @group(0) @binding(5) var<storage, read> impostorFrames: array<vec4<f32>>;
 
 struct VsOut {
@@ -59,9 +60,14 @@ fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut
   rightH = normalize(rightH);
   var world = foot.xyz + rightH * ((c.x - 0.5) * width) + vec3<f32>(0.0, 0.0, c.y * height);
   var uv = vec2<f32>(c.x, 1.0 - c.y);
+  var layer = i32(max(extra.x, 0.0));
   let views = P.a.z;
   if (views > 0.5) {
-    let frame = impostorFrames[u32(max(extra.x, 0.0))];
+    let subject = u32(max(extra.x, 0.0));
+    let frame = impostorFrames[subject * 3u];
+    let pageOf = impostorFrames[subject * 3u + 1u];
+    let box = impostorFrames[subject * 3u + 2u];
+    layer = i32(pageOf.x);
     let centre = foot.xyz + impostorTurn(frame.xyz, yaw) * height;
     let radius = frame.w * height;
     // Depth grows away from the sun (row 2 is its world gradient)
@@ -73,15 +79,16 @@ fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut
     let cell = impostorNearestView(sun, views);
     let viewDirection = impostorViewDirection(cell, views);
     let local = c * 2.0 - vec2<f32>(1.0);
-    let offset = impostorRight(viewDirection) * local.x + impostorUp(viewDirection) * local.y;
+    let extents = impostorExtents(viewDirection, box);
+    let offset = impostorRight(viewDirection) * (local.x * extents.x) + impostorUp(viewDirection) * (local.y * extents.y);
     world = centre + impostorTurn(offset, yaw) * radius;
-    uv = impostorAtlasUv(cell, views, local);
+    uv = impostorPageUv(pageOf.yzw, impostorAtlasUv(cell, views, local));
   }
   var o: VsOut;
   o.pos = S.lightViewProj * vec4<f32>(world, 1.0);
   // The picture's top row (v = 0) is the prop's top
   o.uv = uv;
-  o.layer = i32(max(extra.x, 0.0));
+  o.layer = layer;
   o.fade = vec4<f32>(extra.y, extra.z, extra.w, 0.0);
   return o;
 }

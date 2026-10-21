@@ -206,6 +206,31 @@ together from a few directions at load, drawn as one quad per cell out to
 1-2 km, fading in where the single-tree impostors fade out. With the existing
 aerial perspective and fog, the forest reaches the horizon instead of ending.
 
+**Step 6 done (2026-10-21).** By the time this step ran, 143's far trees
+already reached 1,800 m as single-tree billboards (`app3d/FarSprites`), but
+thinned with distance and drawn up to twice their size to hide the gaps.
+`app3d/FarCanopy` replaces them past 300 m: every non-empty 40 m cell of the
+forest's PropField is one cluster (829 clusters of all 31,090 trees in 143).
+`CanopyBake` bakes them at load in one GPU submission (66 ms) from the
+trees' own impostors, not their meshes: each tree is one quad of its atlas
+view nearest the cluster view (`canopy_bake.wgsl`), with its baked depth, so
+the trees of a cluster hide each other. The clusters are pages of the same
+kind of atlas: many pages share a layer (`subjectsPerSide`, past the 256
+layer limit), and each view is framed to the cluster's box, not its sphere
+(`impostorExtents`), in a wide cell (128 x 32 pixels), so a low, wide
+cluster fills its side views. The sprite pass draws a cluster as it draws a
+tree (three views blended, lit through the G-buffer), with the quad's
+depth. Between 270 and 330 m a cell's trees fade out as its cluster fades
+in, both measured from the cluster's centre with its seed, so the dither
+shows each pixel from one of them; the far trees now stop at 370 m and are
+no longer thinned. PC: 3 x 3 views (8 sides and the top), 13 layers of
+3072 x 768, about 330 MB; the phone setting (`RAE_SIMULATE_MOBILE=1` on a
+desktop): 2 x 2 views of 64 x 16, the nearest one drawn, about 36 MB, baked
+in 27 ms. Frame time on an M-series Mac, 2304 x 1440: the walking view
+unchanged (10.0 ms), a view from 28 m up over the forest 10.4 -> 10.9 ms.
+`checks/impostorBake` also bakes a canopy of four cells and checks its mips
+keep their coverage; the 143 gate checks every planted tree is in a cluster.
+
 ### 2.5 Performance
 
 * PC: near meshes to 30 m, middle to ~70 m, impostors to ~250 m, canopy past

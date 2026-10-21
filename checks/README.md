@@ -13,7 +13,7 @@ a unit test case (the unit suite does not need a GPU device or a browser).
 | `gpuReadback` | `gpu/GpuReadback`: concurrent manager-owned readbacks, reuse, cancellation, shutdown |
 | `gpuRender` | `gpu/GpuRender`: a manager render pipeline draws into a texture that is read back and compared |
 | `gpuResources` | `gpu/GpuResources`: two managers, known buffer contents, stale ids, exhaustion, cleanup |
-| `impostorBake` | `ImpostorBake`: every tree species baked into an octahedral impostor atlas on the GPU; each covers part of its layer and every mip keeps level 0's coverage within 3%; writes the atlas as PNGs to `RAE_IMPOSTOR_PNG_DIR` (default `/tmp/rae-impostor-atlas`; `RAE_IMPOSTOR_PHONE=1` bakes the phone's 4 x 4) |
+| `impostorBake` | `ImpostorBake` and `CanopyBake`: every tree species baked into an octahedral impostor atlas on the GPU, then a far canopy of four 40 m cells baked from those impostors; each covers part of its layer and every mip keeps level 0's coverage within 3%; writes the atlas as PNGs to `RAE_IMPOSTOR_PNG_DIR` (default `/tmp/rae-impostor-atlas`; `RAE_IMPOSTOR_PHONE=1` bakes the phone's 4 x 4) |
 | `readRequest` | `webgpu/ReadRequest`: independent buffer reads (docs/webgpu-readback.md) |
 | `webReadback` | a nonblocking readback completes in a `mainLoop`, natively and in the browser |
 | `webTask` | a spawned task that sleeps runs between the frames of a `mainLoop`, natively and in the browser |
