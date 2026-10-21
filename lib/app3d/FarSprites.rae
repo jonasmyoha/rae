@@ -1,0 +1,401 @@
+# app3d/FarSprites — billboards of far props (trees), from where a
+# PropField's own billboards end out to the horizon, so a forest or a city's
+# trees still stand there far away.
+#
+# A PropField draws its props only within its draw distance, and often only
+# those of the tiles loaded near the eye. This holds a billboard for every
+# far prop, in BLOCKS (one streamed tile's, or one cell of a static field's:
+# setFarSpriteBlock, clearFarSpriteBlock, addFarSpritesInCells), and each
+# frame gatherFarSprites draws the ones between `nearDistance` and
+# `farDistance` that are in view: the nearest blocks first, at most `limit`
+# (so a huge forest costs no more than `limit` billboards a frame). Past
+# `thinFrom` it keeps fewer by the square of the distance (each prop's own
+# stable draw), as the screen area a prop covers falls, and draws the kept
+# ones bigger (up to `maxGrow`), so a far forest stays as full.
+#
+# The pictures are the PropField's (app3d/SpriteBake layers of GbufferSprite's
+# image array): farSpritesOf makes a field's placements into far sprites, its
+# kinds' layers and heights, with the same view centre the field measures its
+# levels' distances from, so the two hand over at `nearDistance` with no gap.
+# Set `nearDistance` to where the field's last (billboard) level ends.
+#
+#   var far: FarSprites = createFarSprites(settings: { nearDistance: 320, ... })
+#   setFarSpriteBlock(farSprites: far, block: tile, sprites: farSpritesOf(field:, placements:))
+#   ...each frame: gatherFarSprites(farSprites: far, propView:, toon:)
+#   ...G-buffer: drawFarSprites(cache:, resources:, farSprites: far, sprites:)
+#
+# No shadows: these stand past any shadow cascade.
+import Math
+import Vec3
+open Math3d
+open Scene3d
+open GbufferInstanced
+open Gbuffer
+open gpu/GpuResources
+open GbufferSprite
+open app3d/PropField
+
+# One far billboard: its foot, how high over it its view centre is (what its
+# distance is measured from), its height in the world and its picture's layer;
+# `keep` (0..1, from its place) decides whether thinning keeps it
+type FarSprite {
+  position: Vec3
+  centerZ: Float
+  height: Float
+  layer: Int
+  keep: Float
+}
+
+type FarSpriteSettings {
+  # Drawn from just past this distance (where the near field ends) out to the
+  # far one (m)
+  nearDistance: Float
+  farDistance: Float
+  # The most drawn in a frame
+  limit: Int
+  # Past this distance fewer are kept, by the square of the distance, the
+  # kept ones drawn bigger, at most this many times
+  thinFrom: Float
+  maxGrow: Float
+}
+
+# A block's billboards and the box round their feet
+type FarSpriteBlock {
+  used: Bool
+  sprites: List(FarSprite)
+  minX: Float
+  minY: Float
+  maxX: Float
+  maxY: Float
+  centerZ: Float
+  radius: Float
+}
+
+type FarSprites {
+  settings: FarSpriteSettings
+  blocks: List(FarSpriteBlock)
+  # This frame's billboards
+  batch: InstanceBatch
+  # The last gather: billboards drawn, blocks looked into, the farthest drawn
+  # and the most a kept one was grown
+  drawn: Int
+  blocksVisited: Int
+  farthestDrawn: Float
+  largestGrow: Float
+  # Scratch for the gather's nearest-first order
+  order: List(Int)
+  orderDistances: List(Float)
+}
+
+func defaultFarSpriteSettings() ret FarSpriteSettings {
+  ret FarSpriteSettings {
+    nearDistance: 320.0
+    farDistance: 2000.0
+    limit: 8192
+    thinFrom: 800.0
+    maxGrow: 2.0
+  }
+}
+
+func createFarSprites(settings: view FarSpriteSettings) ret FarSprites {
+  ret FarSprites {
+    settings: settings
+    blocks: List.create(FarSpriteBlock, cap: 16)
+    batch: createInstanceBatch(mesh: meshHandleNone(), capacity: settings.limit)
+    drawn: 0
+    blocksVisited: 0
+    farthestDrawn: 0.0
+    largestGrow: 1.0
+    order: List.create(Int, cap: 16)
+    orderDistances: List.create(Float, cap: 16)
+  }
+}
+
+# A prop's stable draw for thinning, from where it stands
+func farSpriteKeep(x: view Float, y: view Float) ret Float {
+  let value: Float = Math.sin(x: x * 12.9898 + y * 78.233) * 43758.5453
+  ret value - Math.floor(x: value)
+}
+
+# A far billboard at `position` (its foot)
+func farSpriteAt(
+  position: view Vec3
+  centerZ: view Float
+  height: view Float
+  layer: view Int
+) ret FarSprite {
+  ret FarSprite {
+    position: position
+    centerZ: centerZ
+    height: height
+    layer: layer
+    keep: farSpriteKeep(x: position.x, y: position.y)
+  }
+}
+
+# The placements of `field`'s kinds that have a picture (setPropKindSprite),
+# as far billboards: the picture's layer and height and the kind's view
+# centre, at each placement's scale
+func farSpritesOf(field: view PropField, placements: view List(PropPlacement)) ret List(FarSprite) {
+  var sprites: List(FarSprite) = List.create(FarSprite, cap: placements.length)
+  loop let placement: view PropPlacement in placements {
+    let layer: Int = field.spriteLayers.copyAtFallback(index: placement.kind, fallback: -1)
+    if layer < 0 {
+      continue
+    }
+    if let kind: view PropKind = field.kinds.viewAt(index: placement.kind) {
+      sprites.add(value: farSpriteAt(
+        position: placement.position
+        centerZ: kind.centerHeight * placement.scale
+        height: field.spriteHeights.copyAtFallback(index: placement.kind, fallback: 1.0) * placement.scale
+        layer: layer
+      ))
+    }
+  }
+  ret sprites
+}
+
+func emptyFarSpriteBlock() ret FarSpriteBlock {
+  ret FarSpriteBlock {
+    used: false
+    sprites: List.create(FarSprite, cap: 0)
+    minX: 0.0
+    minY: 0.0
+    maxX: 0.0
+    maxY: 0.0
+    centerZ: 0.0
+    radius: 0.0
+  }
+}
+
+# Block `block`'s billboards are `sprites` (the blocks grow to hold it)
+func setFarSpriteBlock(farSprites: mod FarSprites, block: view Int, sprites: view List(FarSprite)) {
+  loop farSprites.blocks.length <= block {
+    farSprites.blocks.add(value: emptyFarSpriteBlock())
+  }
+  var held: FarSpriteBlock = {
+    used: true
+    sprites: List.create(FarSprite, cap: sprites.length)
+    minX: 0.0
+    minY: 0.0
+    maxX: 0.0
+    maxY: 0.0
+    centerZ: 0.0
+    radius: 0.0
+  }
+  var lowZ: Float = 0.0
+  var highZ: Float = 0.0
+  var tallest: Float = 0.0
+  loop var i: Int = 0, i < sprites.length, ++i {
+    let sprite: FarSprite = sprites.copyAtDefault(index: i)
+    held.sprites.add(value: sprite)
+    let top: Float = sprite.position.z + sprite.height
+    if i is 0 {
+      held.minX = sprite.position.x
+      held.maxX = sprite.position.x
+      held.minY = sprite.position.y
+      held.maxY = sprite.position.y
+      lowZ = sprite.position.z
+      highZ = top
+    }
+    held.minX = Math.min(a: held.minX, b: sprite.position.x)
+    held.maxX = Math.max(a: held.maxX, b: sprite.position.x)
+    held.minY = Math.min(a: held.minY, b: sprite.position.y)
+    held.maxY = Math.max(a: held.maxY, b: sprite.position.y)
+    lowZ = Math.min(a: lowZ, b: sprite.position.z)
+    highZ = Math.max(a: highZ, b: top)
+    tallest = Math.max(a: tallest, b: sprite.height)
+  }
+  held.centerZ = (lowZ + highZ) * 0.5
+  let halfX: Float = (held.maxX - held.minX) * 0.5 + tallest
+  let halfY: Float = (held.maxY - held.minY) * 0.5 + tallest
+  let halfZ: Float = (highZ - lowZ) * 0.5 + tallest
+  held.radius = Math.sqrt(x: halfX * halfX + halfY * halfY + halfZ * halfZ)
+  held.used = sprites.length > 0
+  farSprites.blocks.set(index: block, value: held)
+}
+
+func clearFarSpriteBlock(farSprites: mod FarSprites, block: view Int) {
+  if block < farSprites.blocks.length {
+    farSprites.blocks.set(index: block, value: emptyFarSpriteBlock())
+  }
+}
+
+func farSpriteBlockSet(farSprites: view FarSprites, block: view Int) ret Bool {
+  if let held: view FarSpriteBlock = farSprites.blocks.viewAt(index: block) {
+    ret held.used
+  }
+  ret false
+}
+
+# A static set of billboards (a forest planted once) as blocks of `cellSize`
+# square cells, after the blocks already used; returns the blocks added
+func addFarSpritesInCells(
+  farSprites: mod FarSprites
+  sprites: view List(FarSprite)
+  cellSize: view Float
+) ret Int {
+  if sprites.length is 0 {
+    ret 0
+  }
+  var minX: Float = sprites.copyAtDefault(index: 0).position.x
+  var minY: Float = sprites.copyAtDefault(index: 0).position.y
+  var maxX: Float = minX
+  var maxY: Float = minY
+  loop let sprite: view FarSprite in sprites {
+    minX = Math.min(a: minX, b: sprite.position.x)
+    minY = Math.min(a: minY, b: sprite.position.y)
+    maxX = Math.max(a: maxX, b: sprite.position.x)
+    maxY = Math.max(a: maxY, b: sprite.position.y)
+  }
+  let columns: Int = ((maxX - minX) / cellSize).toInt() + 1
+  let rows: Int = ((maxY - minY) / cellSize).toInt() + 1
+  var cells: List(List(FarSprite)) = List.create(List(FarSprite), cap: columns * rows)
+  loop var c: Int = 0, c < columns * rows, ++c {
+    cells.add(value: List.create(FarSprite, cap: 0))
+  }
+  loop let sprite: view FarSprite in sprites {
+    let column: Int = ((sprite.position.x - minX) / cellSize).toInt()
+    let row: Int = ((sprite.position.y - minY) / cellSize).toInt()
+    if let cell: mod List(FarSprite) = cells.modAt(index: row * columns + column) {
+      cell.add(value: sprite)
+    }
+  }
+  var added: Int = 0
+  loop let cell: view List(FarSprite) in cells {
+    if cell.length > 0 {
+      setFarSpriteBlock(farSprites: farSprites, block: farSprites.blocks.length, sprites: cell)
+      added = added + 1
+    }
+  }
+  ret added
+}
+
+# How far the eye is from a block's box round its feet (0 inside it)
+func farSpriteBlockDistance(held: view FarSpriteBlock, eye: view Vec3) ret Float {
+  let dx: Float = Math.max(a: Math.max(a: held.minX - eye.x, b: eye.x - held.maxX), b: 0.0)
+  let dy: Float = Math.max(a: Math.max(a: held.minY - eye.y, b: eye.y - held.maxY), b: 0.0)
+  let dz: Float = held.centerZ - eye.z
+  ret Math.sqrt(x: dx * dx + dy * dy + dz * dz)
+}
+
+# The billboards of this frame: the blocks in reach and in view, nearest
+# first, and in them each one in reach and view (thinned past thinFrom),
+# until `limit` are drawn
+func gatherFarSprites(farSprites: mod FarSprites, propView: view PropView, toon: view Bool) {
+  resetInstanceBatch(batch: farSprites.batch)
+  farSprites.drawn = 0
+  farSprites.blocksVisited = 0
+  farSprites.farthestDrawn = 0.0
+  farSprites.largestGrow = 1.0
+  let settings: FarSpriteSettings = farSprites.settings
+  # The blocks in reach and in view, in order of distance (an insertion sort:
+  # a few hundred blocks)
+  farSprites.order.clear()
+  farSprites.orderDistances.clear()
+  loop var b: Int = 0, b < farSprites.blocks.length, ++b {
+    if let held: view FarSpriteBlock = farSprites.blocks.viewAt(index: b) {
+      if held.used is false {
+        continue
+      }
+      let distance: Float = farSpriteBlockDistance(held: held, eye: propView.eye)
+      if distance > settings.farDistance {
+        continue
+      }
+      let center: Vec3 = Vec3.create(
+        x: (held.minX + held.maxX) * 0.5
+        y: (held.minY + held.maxY) * 0.5
+        z: held.centerZ
+      )
+      # Wholly within the near distance: the field draws all of it
+      if Vec3.vlen(a: Vec3.vsub(a: center, b: propView.eye)) + held.radius < settings.nearDistance {
+        continue
+      }
+      if propSphereInView(propView: propView, center: center, radius: held.radius) is false {
+        continue
+      }
+      var at: Int = farSprites.order.length
+      farSprites.order.add(value: b)
+      farSprites.orderDistances.add(value: distance)
+      loop at > 0 and farSprites.orderDistances.copyAtFallback(index: at - 1, fallback: 0.0) > distance {
+        farSprites.order.set(
+          index: at
+          value: farSprites.order.copyAtFallback(index: at - 1, fallback: 0)
+        )
+        farSprites.orderDistances.set(
+          index: at
+          value: farSprites.orderDistances.copyAtFallback(index: at - 1, fallback: 0.0)
+        )
+        at = at - 1
+      }
+      farSprites.order.set(index: at, value: b)
+      farSprites.orderDistances.set(index: at, value: distance)
+    }
+  }
+  loop var o: Int = 0, o < farSprites.order.length, ++o {
+    if farSprites.drawn >= settings.limit {
+      ret
+    }
+    let b: Int = farSprites.order.copyAtFallback(index: o, fallback: 0)
+    farSprites.blocksVisited = farSprites.blocksVisited + 1
+    if let held: view FarSpriteBlock = farSprites.blocks.viewAt(index: b) {
+      loop let sprite: view FarSprite in held.sprites {
+        if farSprites.drawn >= settings.limit {
+          ret
+        }
+        let center: Vec3 = Vec3.create(
+          x: sprite.position.x
+          y: sprite.position.y
+          z: sprite.position.z + sprite.centerZ
+        )
+        let distance: Float = Vec3.vlen(a: Vec3.vsub(a: center, b: propView.eye))
+        if distance <= settings.nearDistance or distance > settings.farDistance {
+          continue
+        }
+        var grow: Float = 1.0
+        if distance > settings.thinFrom {
+          let share: Float = settings.thinFrom / distance
+          if sprite.keep > share * share {
+            continue
+          }
+          grow = Math.min(a: settings.maxGrow, b: 1.0 / share)
+        }
+        if propSphereInView(propView: propView, center: center, radius: sprite.height * grow * 0.5) is false {
+          continue
+        }
+        addSpriteInstance(
+          batch: farSprites.batch
+          position: sprite.position
+          height: sprite.height * grow
+          layer: sprite.layer
+          toon: toon
+        )
+        farSprites.drawn = farSprites.drawn + 1
+        farSprites.farthestDrawn = Math.max(a: farSprites.farthestDrawn, b: distance)
+        farSprites.largestGrow = Math.max(a: farSprites.largestGrow, b: grow)
+      }
+    }
+  }
+}
+
+# This frame's far billboards into the G-buffer: one draw of the sprite pass,
+# `sprites` the pipeline and image array the field's pictures are in
+func drawFarSprites(
+  cache: mod GbufferCache
+  resources: mod GpuResources
+  farSprites: view FarSprites
+  sprites: mod SpriteCache
+) {
+  if farSprites.batch.count <= 0 {
+    ret
+  }
+  unsafe {
+    drawSpriteInstances(
+      cache: sprites
+      resources: resources
+      gbuffer: cache
+      records: farSprites.batch.records.data
+      count: farSprites.batch.count
+    )
+  }
+}
