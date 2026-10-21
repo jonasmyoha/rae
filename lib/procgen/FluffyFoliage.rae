@@ -63,6 +63,28 @@ func fluffyPatch(
   }
 }
 
+# The patch count a crown's outline is drawn at: the full level of detail.
+# A crown of fewer, bigger patches keeps that crown's outline and covered
+# area (docs/tree-lod-design.md §2.1): each bigger patch is pulled inward so
+# it reaches no further than the full crown's patches, and sized so the
+# crown covers as much as the full one.
+const fluffyOutlinePatches: Int = 48
+
+# How far inward (in shares of the extra half size) a bigger patch is pulled:
+# its outer edge back where a full crown's patch reaches
+const fluffyCoarsePull: Float = 1.0
+
+# How much of a bigger patch's extra size a form keeps, so the coarser crown
+# covers the full one's area: tuned with app3d/TreeCoverage within 3% from
+# every side. A flat crown (the umbrella pine) keeps less: a disc at its rim
+# overhangs above and below its thin layer, which no inward pull undoes.
+func fluffyCoarseSize(form: view FluffyForm) ret Float {
+  if form is FluffyForm.umbrella {
+    ret 0.62
+  }
+  ret 0.9
+}
+
 # Count changes only patch density: crown centres and bounds keep their seed.
 # A game can build discrete levels once, cache handles, then select by distance.
 func fluffyCrown(
@@ -72,13 +94,20 @@ func fluffyCrown(
   seed: view Int
   patchCount: view Int
   tone: view Int
+  coarseSize: view Float
 ) {
   if patchCount < 4 {
     ret
   }
-  let patchSize: Float = Math.sqrt(
-    x: (radius.x * radius.y + radius.z * radius.x + radius.y * radius.z) / patchCount.toFloat()
-  ) * 1.8
+  let shell: Float = radius.x * radius.y + radius.z * radius.x + radius.y * radius.z
+  let fullSize: Float = Math.sqrt(x: shell / fluffyOutlinePatches.toFloat()) * 1.8
+  var patchSize: Float = Math.sqrt(x: shell / patchCount.toFloat()) * 1.8
+  # A coarser crown: its patches' extra half size, pulled back inside
+  let extra: Float = Math.max(a: patchSize - fullSize, b: 0.0)
+  if extra > 0.0 {
+    patchSize = fullSize + extra * coarseSize
+  }
+  let pull: Float = extra * 0.5 * fluffyCoarsePull
   loop var i: Int = 0, i < patchCount, ++i {
     if i % 3 is not tone {
       continue
@@ -92,14 +121,12 @@ func fluffyCrown(
       z: vertical
     )
     let depth: Float = 0.85 + hash2(x: i, y: 7, seed: seed) * 0.15
-    let point: Vec3 = vadd(
-      a: center
-      b: Vec3.create(
-        x: direction.x * radius.x * depth
-        y: direction.y * radius.y * depth
-        z: direction.z * radius.z * depth
-      )
+    let onShell: Vec3 = Vec3.create(
+      x: direction.x * radius.x * depth
+      y: direction.y * radius.y * depth
+      z: direction.z * radius.z * depth
     )
+    let point: Vec3 = vadd(a: center, b: vsub(a: onShell, b: vscale(a: vnorm(a: onShell), s: pull)))
     fluffyPatch(
       mesh: mesh
       center: point
@@ -164,6 +191,7 @@ func fluffyLeaves(
       seed: seed + i * 71
       patchCount: patchCount
       tone: tone
+      coarseSize: fluffyCoarseSize(form: form)
     )
   }
   ret mesh
