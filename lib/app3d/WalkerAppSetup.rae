@@ -26,7 +26,6 @@ open app3d/WideForest
 open app3d/CharacterBodies
 open app3d/WalkerNames
 open box3d/ecs/CharacterMover
-open app3d/CharacterHeight
 open app3d/Climbing
 open app3d/Wander
 
@@ -368,22 +367,6 @@ func createWalkerAppPhysics(
       homeY: home.y
       range: walkerWanderRange
     )
-    # Characters of different heights on the one model (app3d/CharacterHeight):
-    # its model, clips and mover follow it
-    let height: Float = walkerCrowdHeight(index: crowdIndex)
-    componentSet(
-      this: world.heights
-      entityId: crowdEntityId
-      data: CharacterHeight { height: height }
-    )
-    let body: mod CharacterBody = componentMod(
-      this: physicsSystem.characters
-      entityId: crowdEntityId
-    )
-    resizeCharacterMover(
-      mover: body.mover
-      size: moverSizeForHeight(height: height, tunedHeight: 2.0)
-    )
   }
   let cubeCount: Int = spawnCubeStacks(
     physicsSystem: physicsSystem
@@ -454,9 +437,4 @@ func addWalkerCharacterComponents(
     entityId: entityId
     data: CharacterModel { model: model, prevModel: model }
   )
-}
-
-# The crowd's heights (m): 1.55 to 2.05 in turn, the hero the model's 2.0
-func walkerCrowdHeight(index: view Int) ret Float {
-  ret 1.55 + ((index * 3) % 6).toFloat() * 0.1
 }
