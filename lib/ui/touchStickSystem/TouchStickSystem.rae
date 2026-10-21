@@ -234,3 +234,59 @@ func touchStickStateOf(
   }
   ret createTouchStickState()
 }
+
+# A stick that only shows a value (a node laid out like a stick, with no
+# TouchStick: no finger drives it, a touch on it is the camera's): its knob,
+# the node's first child, placed at (`valueX`, `valueY`), each -1..1, of the
+# room the knob has in the base (right and down positive, as the stick's
+# own value). For showing something a game steers another way, such as the
+# camera's turn aiming at a target. True when the knob moved: the transforms
+# are made again with the next UI pass (or the app runs one).
+func showStickKnob(
+  world: view UiWorld
+  uiSystems: mod UiSystems
+  nodeId: view String
+  valueX: view Float
+  valueY: view Float
+) ret Bool {
+  if let raw: Int = world.nodeIds.get(k: nodeId) {
+    let entityId: EntityId = nodeEntityId(world: world, index: raw)
+    if componentHas(this: world.childrens, entityId: entityId) is false or componentHas(
+      this: uiSystems.layout.computedRects
+      entityId: entityId
+    ) is false {
+      ret false
+    }
+    if let knob: EntityId = componentView(this: world.childrens, entityId: entityId).ids.copyAt(
+      index: 0
+    ) {
+      let base: view ComputedRect = componentView(
+        this: uiSystems.layout.computedRects
+        entityId: entityId
+      )
+      var knobSize: Float = 0.0
+      if componentHas(this: uiSystems.layout.computedRects, entityId: knob) {
+        knobSize = componentView(this: uiSystems.layout.computedRects, entityId: knob).size.x
+      }
+      let room: Float = Math.max(
+        a: 0.0
+        b: (Math.min(a: base.size.x, b: base.size.y) - knobSize) * 0.5
+      )
+      let localX: Float = Math.max(a: -1.0, b: Math.min(a: 1.0, b: valueX)) * room
+      let localY: Float = Math.max(a: -1.0, b: Math.min(a: 1.0, b: valueY)) * room
+      var before: Vec2 = { x: 0.0, y: 0.0 }
+      if componentHas(this: uiSystems.transform2d.runtimeOffsets, entityId: knob) {
+        before = componentView(this: uiSystems.transform2d.runtimeOffsets, entityId: knob).delta
+      }
+      if before.x is not localX or before.y is not localY {
+        componentSet(
+          this: uiSystems.transform2d.runtimeOffsets
+          entityId: knob
+          data: RuntimeOffset { delta: Vec2 { x: localX, y: localY } }
+        )
+        ret true
+      }
+    }
+  }
+  ret false
+}
