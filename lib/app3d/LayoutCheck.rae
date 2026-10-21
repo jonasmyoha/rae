@@ -1,0 +1,216 @@
+# app3d/LayoutCheck — proving a .raescene HUD fits a phone, with numbers: a
+# headless shot always captures at the display's size, so a picture cannot
+# show a phone. Lay the scene out at a case's size with its safe-area insets
+# (setLayoutCase, then the app applies its frames and states as it does each
+# frame, then runUiSystems), then read where each node landed (layoutBoxOf)
+# and check it: inside the safe area, clear of another box or of the
+# screen's middle third, its text fitting its box as shrinkToFit draws it.
+# Which nodes, which texts and which cases are the app's; the iPhone 15 Pro
+# upright and on its side and a desktop window are phoneAndDesktopCases.
+import Math
+import SdfText
+open ecs/Entity
+open ecs/ComponentTable
+open ui/Components
+open ui/Ecs
+open ui/UiSystems
+open ui/Transform
+open ui/TextStyle
+open ui/inputSystem/InputSystem
+open ui/renderSystem/RenderSystem
+open ui/safeAreaSystem/SafeAreaSystem
+open app3d/UiShell
+
+# Where a node landed after layout, in points; not shown when inactive
+type LayoutBox {
+  shown: Bool
+  x: Float
+  y: Float
+  w: Float
+  h: Float
+}
+
+func hiddenLayoutBox() ret LayoutBox {
+  ret LayoutBox {
+    shown: false
+    x: 0.0
+    y: 0.0
+    w: 0.0
+    h: 0.0
+  }
+}
+
+# The box of the node `nodeId` as the last layout placed it
+func layoutBoxOf(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  nodeId: view String
+) ret LayoutBox {
+  let entityId: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
+  if isNone(this: entityId) or uiEntityActive(world: world, entityId: entityId) is false {
+    ret hiddenLayoutBox()
+  }
+  if componentHas(this: uiSystems.transform2d.worldTransforms, entityId: entityId) is false or componentHas(
+    this: uiSystems.layout.computedRects
+    entityId: entityId
+  ) is false {
+    ret hiddenLayoutBox()
+  }
+  let placed: view WorldTransform2D = componentView(
+    this: uiSystems.transform2d.worldTransforms
+    entityId: entityId
+  )
+  let sized: view ComputedRect = componentView(
+    this: uiSystems.layout.computedRects
+    entityId: entityId
+  )
+  ret LayoutBox {
+    shown: true
+    x: placed.position.x
+    y: placed.position.y
+    w: sized.size.x * placed.scale.x
+    h: sized.size.y * placed.scale.y
+  }
+}
+
+# Inside a `width` x `height` window less its safe-area insets (half a point
+# of slack)
+func boxInsideSafeArea(
+  box: view LayoutBox
+  width: view Float
+  height: view Float
+  insets: view Insets
+) ret Bool {
+  ret box.x >= insets.l - 0.5 and box.y >= insets.t - 0.5 and box.x + box.w <= width - insets.r + 0.5 and box.y + box.h <= height - insets.b + 0.5
+}
+
+# Do two shown boxes overlap?
+func layoutBoxesOverlap(a: view LayoutBox, b: view LayoutBox) ret Bool {
+  ret a.shown and b.shown and a.x < b.x + b.w and b.x < a.x + a.w and a.y < b.y + b.h and b.y < a.y + a.h
+}
+
+# Does `box` keep out of the screen's middle third (both ways), the play view?
+func boxClearOfMiddle(box: view LayoutBox, width: view Float, height: view Float) ret Bool {
+  let middle: LayoutBox = {
+    shown: true
+    x: width / 3.0
+    y: height / 3.0
+    w: width / 3.0
+    h: height / 3.0
+  }
+  ret layoutBoxesOverlap(a: box, b: middle) is false
+}
+
+# "Name x,y wxh", for a check's log line
+func layoutBoxText(nodeId: view String, box: view LayoutBox) ret String {
+  ret "{nodeId} {box.x.toInt()},{box.y.toInt()} {box.w.toInt()}x{box.h.toInt()}"
+}
+
+# One screen to lay a scene out at: its size in points and its insets
+type LayoutCase {
+  name: String
+  width: Float
+  height: Float
+  insets: Insets
+}
+
+# An iPhone 15 Pro upright (390x844 pt, 59 top, 34 bottom) and on its side
+# (844x390, 59 left and right, 21 bottom), and a desktop window (1280x800)
+func phoneAndDesktopCases() ret List(LayoutCase) {
+  var cases: List(LayoutCase) = List.create(LayoutCase, cap: 3)
+  cases.add(
+    value: LayoutCase {
+      name: "iPhone 15 Pro portrait"
+      width: 390.0
+      height: 844.0
+      insets: Insets { l: 0.0, t: 59.0, r: 0.0, b: 34.0 }
+    }
+  )
+  cases.add(
+    value: LayoutCase {
+      name: "iPhone 15 Pro landscape"
+      width: 844.0
+      height: 390.0
+      insets: Insets { l: 59.0, t: 0.0, r: 59.0, b: 21.0 }
+    }
+  )
+  cases.add(
+    value: LayoutCase {
+      name: "desktop"
+      width: 1280.0
+      height: 800.0
+      insets: Insets { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
+    }
+  )
+  ret cases
+}
+
+# The layout's size and the safe-area insets the next layout pass reads
+# (setSimulatedSafeInsets) for `layoutCase`; the app applies its frames and
+# states for that size and runs the UI systems after
+func setLayoutCase(world: mod UiWorld, layoutCase: view LayoutCase) {
+  world.layoutW = layoutCase.width
+  world.layoutH = layoutCase.height
+  setSimulatedSafeInsets(world: world, insets: layoutCase.insets)
+}
+
+# The scale `text` is drawn at in `nodeId`'s box in the style `styleId`, as
+# shrinkToFit draws it (1 when it fits at its size)
+func nodeTextScale(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  res: view Gpu2dUi
+  nodeId: view String
+  text: view String
+  styleId: view String
+) ret Float {
+  let box: LayoutBox = layoutBoxOf(world: world, uiSystems: uiSystems, nodeId: nodeId)
+  let size: Float = resolveTextSize(theme: res.theme, styleId: styleId)
+  let natural: Float = SdfText.sdfMeasureTextBounds(font: res.textFont, text: text, sizePx: size).advance
+  if natural > box.w {
+    ret box.w / natural
+  }
+  ret 1.0
+}
+
+# Does `text` fit `nodeId` (shown, drawn at no less than textShrinkMinScale)?
+func nodeTextFits(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  res: view Gpu2dUi
+  nodeId: view String
+  text: view String
+  styleId: view String
+) ret Bool {
+  let scale: Float = nodeTextScale(
+    world: world
+    uiSystems: uiSystems
+    res: res
+    nodeId: nodeId
+    text: text
+    styleId: styleId
+  )
+  ret layoutBoxOf(world: world, uiSystems: uiSystems, nodeId: nodeId).shown and scale >= textShrinkMinScale
+}
+
+# Is every shown node of `nodeIds` inside `layoutCase`'s safe area?
+func shownNodesInside(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  nodeIds: view List(String)
+  layoutCase: view LayoutCase
+) ret Bool {
+  var inside: Bool = true
+  loop let nodeId: view String in nodeIds {
+    let box: LayoutBox = layoutBoxOf(world: world, uiSystems: uiSystems, nodeId: nodeId)
+    if box.shown {
+      inside = inside and boxInsideSafeArea(
+        box: box
+        width: layoutCase.width
+        height: layoutCase.height
+        insets: layoutCase.insets
+      )
+    }
+  }
+  ret inside
+}

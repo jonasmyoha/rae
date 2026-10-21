@@ -1229,6 +1229,9 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              && [ "$(grep -c "\[rockbushtest\] .* passed=true" "$TMP_OUT/physics.log")" -eq 1 ] \
              && [ "$(grep -c "\[physicstest\] .* passed=true" "$TMP_OUT/physics.log")" -eq 1 ] \
              && [ "$(grep -c "\[marktest\] .* passed=true" "$TMP_OUT/physics.log")" -eq 1 ] \
+             && (cd .. && RAE_WALKER_LAYOUT_TEST=1 RAE_UI_FRAME=Touch RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=30000 \
+                perl -e 'alarm shift; exec @ARGV' 60 "$TMP_OUT/app") > "$TMP_OUT/layout.log" 2>&1 \
+             && grep -q "\[layouttest\] passed=true" "$TMP_OUT/layout.log" \
              && (cd .. && RAE_WALKER_SPLASH_TEST=1 RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=30000 \
                 perl -e 'alarm shift; exec @ARGV' 45 "$TMP_OUT/app") > "$TMP_OUT/splash.log" 2>&1 \
              && grep -q '\[splash-pose\].*ok=true' "$TMP_OUT/splash.log" \

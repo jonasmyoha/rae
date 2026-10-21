@@ -79,6 +79,7 @@ open app3d/WalkerPhysics
 open app3d/WalkerMarks
 open app3d/WalkerMarkTest
 open app3d/FrameLog
+open app3d/WalkerLayoutTest
 open app3d/WalkerWorld
 open app3d/WalkerInput
 open app3d/WalkerCamera
@@ -783,6 +784,12 @@ func runWalkerApp(settings: view WalkerAppSettings) ret Int {
       )
     }
   }
+  # RAE_WALKER_LAYOUT_TEST=1: the HUD laid out at phone and desktop sizes fits
+  # each safe area (app3d/WalkerLayoutTest), then quit
+  let layoutTest: Bool = Sys.getEnv(name: "RAE_WALKER_LAYOUT_TEST").length() > 0
+  if layoutTest and runWalkerLayoutTest(inputSystem: app.inputSystem) is false {
+    exitCode = 1
+  }
   if physicsTest {
     exitCode = runWalkerSelfTest(
       physicsSystem: app.physicsSystem
@@ -813,7 +820,7 @@ func runWalkerApp(settings: view WalkerAppSettings) ret Int {
       exitCode = 1
     }
   }
-  loop not physicsTest and not splashTest and not Gpu2d.pollClose() {
+  loop not physicsTest and not splashTest and not layoutTest and not Gpu2d.pollClose() {
     beginWalkerFrame(app: app)
     updateWalkerApp(app: app)
     if Gpu2d.shouldRenderFrame(appNeedsRender: app.frame.needsRender) is false {

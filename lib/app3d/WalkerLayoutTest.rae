@@ -1,0 +1,66 @@
+# app3d/WalkerLayoutTest — the walker's HUD fits a phone (RAE_WALKER_LAYOUT_TEST=1,
+# with RAE_UI_FRAME=Touch for the touch controls): laid out at an iPhone 15
+# Pro upright and on its side and at a desktop window (app3d/LayoutCheck),
+# through the frames and states the walker applies, the "..." button, the
+# Jump button and the stick are inside the safe area, and Jump and the stick
+# do not overlap. One [layouttest] line a case; true when all fit.
+open ui/Components
+open ui/Ecs
+open app3d/UiModes
+open app3d/UiShell
+open app3d/LayoutCheck
+open app3d/WalkerInput
+
+func walkerLayoutCase(inputSystem: mod WalkerInput, layoutCase: view LayoutCase) ret Bool {
+  setLayoutCase(world: inputSystem.world, layoutCase: layoutCase)
+  let reapplied: Bool = updateUiModes(
+    world: inputSystem.world
+    uiSystems: inputSystem.uiSystems
+    uiModes: inputSystem.uiModes
+  )
+  runUiSystems(world: inputSystem.world, uiSystems: inputSystem.uiSystems, res: inputSystem.gpuUi)
+  let modeButton: LayoutBox = layoutBoxOf(
+    world: inputSystem.world
+    uiSystems: inputSystem.uiSystems
+    nodeId: "ModeButton"
+  )
+  let jump: LayoutBox = layoutBoxOf(
+    world: inputSystem.world
+    uiSystems: inputSystem.uiSystems
+    nodeId: "JumpButton"
+  )
+  let stick: LayoutBox = layoutBoxOf(
+    world: inputSystem.world
+    uiSystems: inputSystem.uiSystems
+    nodeId: "MoveStick"
+  )
+  var nodeIds: List(String) = List.create(String, cap: 3)
+  nodeIds.add(value: "ModeButton")
+  nodeIds.add(value: "JumpButton")
+  nodeIds.add(value: "MoveStick")
+  let fits: Bool = modeButton.shown and jump.shown and stick.shown and shownNodesInside(
+    world: inputSystem.world
+    uiSystems: inputSystem.uiSystems
+    nodeIds: nodeIds
+    layoutCase: layoutCase
+  ) and layoutBoxesOverlap(a: jump, b: stick) is false
+  log(
+    "[layouttest] {layoutCase.name} {layoutCase.width.toInt()}x{layoutCase.height.toInt()}: {layoutBoxText(
+      nodeId: "ModeButton"
+      box: modeButton
+    )}; {layoutBoxText(nodeId: "JumpButton", box: jump)}; {layoutBoxText(
+      nodeId: "MoveStick"
+      box: stick
+    )}; fits={fits}"
+  )
+  ret fits
+}
+
+func runWalkerLayoutTest(inputSystem: mod WalkerInput) ret Bool {
+  var passed: Bool = true
+  loop let layoutCase: view LayoutCase in phoneAndDesktopCases() {
+    passed = walkerLayoutCase(inputSystem: inputSystem, layoutCase: layoutCase) and passed
+  }
+  log("[layouttest] passed={passed}")
+  ret passed
+}
