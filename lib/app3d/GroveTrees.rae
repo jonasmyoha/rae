@@ -52,10 +52,15 @@ const treeSpeciesCount: Int = 9
 const autumnReferenceHeight: Float = 5.5
 
 # The trunk the physics gives every tree, whatever its species: a capsule from
-# the foot up into the crown, a little wider than the widest trunk
+# the foot up into the crown, a little wider than the widest trunk. Its top
+# is treeTrunkShare of the tree's height (treeTrunkTop), so a climber goes up
+# the trunk into the crown; treeTrunkHeight is the size a pooled trunk waits
+# at before it is placed on a tree.
 const treeTrunkRadius: Float = 0.3
 
 const treeTrunkHeight: Float = 3.2
+
+const treeTrunkShare: Float = 0.9
 
 func treeSpeciesForm(species: view Int) ret FluffyForm {
   if species is speciesUmbrella {
@@ -135,6 +140,21 @@ func treeScaleAt(species: view Int, number: view Int) ret Float {
     ret 5.5 + size * 3.0
   }
   ret 4.8 + size * 2.4
+}
+
+# How tall a tree of `species` at `scale` stands (m): a leaf-patch form's
+# scale is its height, an autumn tree's or the palm's is a share of
+# autumnReferenceHeight (treeScaleAt)
+func treeHeightFor(species: view Int, scale: view Float) ret Float {
+  if species >= speciesOrange {
+    ret scale * autumnReferenceHeight
+  }
+  ret scale
+}
+
+# The top of its trunk's capsule (m over its foot): up into the crown
+func treeTrunkTop(species: view Int, scale: view Float) ret Float {
+  ret treeHeightFor(species: species, scale: scale) * treeTrunkShare
 }
 
 # An autumn tree's or the palm's leaf colour per tone (Autumn Grove's paint)
