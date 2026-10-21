@@ -8,8 +8,16 @@ import Math
 import Vec3
 import Gpu2d
 open Gpu2dCanvas
+open ecs/Entity
+open ecs/ComponentTable
+open Scene3d
 open app3d/ClimbRules
+open app3d/Climbing
 open app3d/WorldLabel
+open app3d/CharacterController
+open app3d/CharacterBodies
+open app3d/CharacterHeight
+open app3d/UiShell
 
 # The ring's size (pt), its segments, and how far right of the head it sits
 const staminaWheelRadius: Float = 15.0
@@ -86,7 +94,14 @@ func drawStaminaWheel(
     }
     let x: Float = point.x * width + staminaWheelOffset
     let y: Float = point.y * height
-    drawWheelArc(canvas: canvas, x: x, y: y, from: 0.0, to: 1.0, color: 2517899294)
+    drawWheelArc(
+      canvas: canvas
+      x: x
+      y: y
+      from: 0.0
+      to: 1.0
+      color: 2517899294
+    )
     drawWheelArc(
       canvas: canvas
       x: x
@@ -94,6 +109,46 @@ func drawStaminaWheel(
       from: 0.0
       to: staminaShare(stamina: stamina, tuning: tuning)
       color: staminaWheelColor(stamina: stamina, tuning: tuning)
+    )
+  }
+}
+
+# The wheel of the climber `entityId` (app3d/Climbing) beside its head (90%
+# of its CharacterHeight over its controller's feet), seen by `camera` in
+# the window; nothing when it is no climber
+func drawClimberStaminaWheel(
+  canvas: mod Gpu2dCanvas
+  climbing: view Climbing
+  controllers: view ComponentTable(ThirdPersonController)
+  heights: view ComponentTable(CharacterHeight)
+  entityId: view EntityId
+  groundZ: view Float
+  modelHeight: view Float
+  camera: view Camera3d
+) {
+  if let stamina: Stamina = componentCopy(this: climbing.staminas, entityId: entityId) {
+    if componentHas(this: controllers, entityId: entityId) is false {
+      ret
+    }
+    let feet: Vec3 = controllerFeet(
+      controller: componentView(this: controllers, entityId: entityId)
+      groundZ: groundZ
+    )
+    let height: Float = characterHeightOf(
+      heights: heights
+      entityId: entityId
+      fallback: modelHeight
+    )
+    drawStaminaWheel(
+      canvas: canvas
+      stamina: stamina
+      tuning: climbing.staminaTuning
+      head: Vec3.create(x: feet.x, y: feet.y, z: feet.z + height * 0.9)
+      eye: camera.position
+      target: camera.target
+      fovYDeg: camera.fovYDeg
+      width: windowExtentW()
+      height: windowExtentH()
     )
   }
 }

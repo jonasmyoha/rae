@@ -37,6 +37,10 @@ open app3d/ClimbRules
 
 enum ClimbState { free, climbing }
 
+# A climbing mover found this far (m) from where its climb left it was placed
+# elsewhere by the app
+const climbPlacedDistance: Float = 1.0
+
 # A character that may climb: free or on a wall (its outward normal), a leap
 # still to rise (m), and counts of its climbs, pull-ups and let-gos
 type Climber {
@@ -45,6 +49,10 @@ type Climber {
   leapLeft: Float = 0.0
   # Its mover parked by the climb (MoverParked), not by the app
   parkedByClimb: Bool = false
+  # Where the climb left the mover last step: moved away from there by more
+  # than climbPlacedDistance, it was placed elsewhere (a restart, a teleport)
+  # and climbs no more
+  lastCenter: Vec3 = Vec3 { x: 0.0, y: 0.0, z: 0.0 }
   climbs: Int = 0
   mantles: Int = 0
   letGos: Int = 0
@@ -81,6 +89,22 @@ func addClimber(climbing: mod Climbing, entityId: view EntityId) {
     entityId: entityId
     data: fullStamina(tuning: climbing.staminaTuning)
   )
+}
+
+# `entityId` climbs no more: off any wall (its mover no longer parked by a
+# climb), its Climber and stamina gone
+func removeClimber(
+  climbing: mod Climbing
+  parked: mod ComponentTable(MoverParked)
+  entityId: view EntityId
+) {
+  if let climber: Climber = componentCopy(this: climbing.climbers, entityId: entityId) {
+    if climber.parkedByClimb {
+      removeTag(MoverParked, table: parked, entityId: entityId)
+    }
+  }
+  componentRemove(this: climbing.climbers, entityId: entityId)
+  componentRemove(this: climbing.staminas, entityId: entityId)
 }
 
 func isClimbing(climbing: view Climbing, entityId: view EntityId) ret Bool {
@@ -359,9 +383,16 @@ func stepClimbers(
       drive = driven
     }
     let character: mod CharacterBody = componentMod(this: characters, entityId: entityId)
-    # Parked by the app (lying knocked down, seated): no climbing
+    let placedAway: Bool = climber.state is ClimbState.climbing and Vec3.vlen(
+      a: Vec3.vsub(a: moverCenter(character: character), b: climber.lastCenter)
+    ) > climbPlacedDistance
+    # Parked by the app (lying knocked down, seated), or placed elsewhere: no
+    # climbing
     if hasTag(MoverParked, table: parked, entityId: entityId) and climber.parkedByClimb is false {
       climber.state = ClimbState.free
+    } else if placedAway {
+      climber.state = ClimbState.free
+      climber.leapLeft = 0.0
     } else if climber.state is ClimbState.climbing {
       climbStep(
         climbing: climbing
@@ -381,6 +412,7 @@ func stepClimbers(
         drive: drive
       )
     }
+    climber.lastCenter = moverCenter(character: character)
     if climber.state is ClimbState.climbing {
       if climber.parkedByClimb is false {
         addTag(MoverParked, table: parked, entityId: entityId)

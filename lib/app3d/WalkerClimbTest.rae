@@ -1,0 +1,164 @@
+# app3d/WalkerClimbTest — the walker's climbing check (RAE_WALKER_PHYSICS_TEST=1,
+# after app3d/WalkerSelfTest's): the hero walks at the tree nearest it (an
+# island tree's trunk, or the pool's on a wide forest), starts climbing its
+# trunk with nothing marked, climbs on up it while its stamina drains, and
+# comes down again. One [climbtest] line.
+import Math
+import Vec3
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Transform
+open app3d/CharacterController
+open app3d/CharacterBodies
+open app3d/ClimbRules
+open app3d/Climbing
+open app3d/WalkerPhysics
+open app3d/WalkerPhysicsChecks
+open app3d/WalkerTerrainBodies
+open app3d/WalkerSelfTest
+open app3d/WalkerWorld
+
+# Fixed steps to reach the trunk (8 s), to climb (3 s) and to come down (6 s)
+const climbTestWalkSteps: Int = 480
+
+const climbTestUpSteps: Int = 180
+
+const climbTestDownSteps: Int = 360
+
+func backIntent() ret InputIntent {
+  ret InputIntent {
+    moveX: 0.0
+    moveY: -1.0
+    walking: false
+    jump: false
+    actions: 0
+  }
+}
+
+func heroFeetZ(
+  world: view WalkerWorld
+  physicsSystem: view WalkerPhysics
+  heroEntityId: view EntityId
+) ret Float {
+  ret controllerFeet(
+    controller: controllerOf(controllers: world.controllers, entityId: heroEntityId)
+    groundZ: physicsSystem.groundZ
+  ).z
+}
+
+# The tree nearest `point`: the pool's trunk on one, or an island tree
+func climbTestTree(
+  physicsSystem: view WalkerPhysics
+  world: view WalkerWorld
+  pooledTrunks: view Bool
+  point: view Vec3
+) ret opt EntityId {
+  if pooledTrunks {
+    ret nearestPooledTrunk(physicsSystem: physicsSystem, world: world, point: point)
+  }
+  ret nearestIslandTree(
+    treeVariants: world.treeVariants
+    propKinds: world.propKinds
+    transforms: world.transforms
+    point: point
+  )
+}
+
+func runWalkerClimbTest(
+  physicsSystem: mod WalkerPhysics
+  world: mod WalkerWorld
+  pooledTrunks: view Bool
+  heroEntityId: view EntityId
+) ret Bool {
+  let heroFeet: Vec3 = controllerFeet(
+    controller: controllerOf(controllers: world.controllers, entityId: heroEntityId)
+    groundZ: physicsSystem.groundZ
+  )
+  if let treeEntityId: EntityId = climbTestTree(
+    physicsSystem: physicsSystem
+    world: world
+    pooledTrunks: pooledTrunks
+    point: heroFeet
+  ) {
+    let target: Vec3 = transformOf(transforms: world.transforms, entityId: treeEntityId).position
+    let bushes: List(BushSpot) = bushSpots(propKinds: world.propKinds, transforms: world.transforms)
+    # From 3 m south of the trunk, a little over the ground, facing north
+    placeHero(
+      physicsSystem: physicsSystem
+      heroEntityId: heroEntityId
+      feet: Vec3.create(x: target.x, y: target.y - 3.0, z: target.z + 0.3)
+    )
+    let yaw: Float = 0.0
+    let forward: InputIntent = forwardIntent()
+    var walkSteps: Int = 0
+    loop walkSteps < climbTestWalkSteps and isClimbing(
+      climbing: physicsSystem.climbing
+      entityId: heroEntityId
+    ) is false {
+      selfTestStep(
+        physicsSystem: physicsSystem
+        transforms: world.transforms
+        controllers: world.controllers
+        bushes: bushes
+        heroEntityId: heroEntityId
+        intent: forward
+        yaw: yaw
+      )
+      walkSteps = walkSteps + 1
+    }
+    let started: Bool = isClimbing(climbing: physicsSystem.climbing, entityId: heroEntityId)
+    let startZ: Float = heroFeetZ(
+      world: world
+      physicsSystem: physicsSystem
+      heroEntityId: heroEntityId
+    )
+    loop var step: Int = 0, step < climbTestUpSteps, ++step {
+      selfTestStep(
+        physicsSystem: physicsSystem
+        transforms: world.transforms
+        controllers: world.controllers
+        bushes: bushes
+        heroEntityId: heroEntityId
+        intent: forward
+        yaw: yaw
+      )
+    }
+    let rose: Float = heroFeetZ(
+      world: world
+      physicsSystem: physicsSystem
+      heroEntityId: heroEntityId
+    ) - startZ
+    var spent: Float = 0.0
+    if let stamina: Stamina = componentCopy(
+      this: physicsSystem.climbing.staminas
+      entityId: heroEntityId
+    ) {
+      spent = physicsSystem.climbing.staminaTuning.maximum - stamina.value
+    }
+    let back: InputIntent = backIntent()
+    var downSteps: Int = 0
+    loop downSteps < climbTestDownSteps and isClimbing(
+      climbing: physicsSystem.climbing
+      entityId: heroEntityId
+    ) {
+      selfTestStep(
+        physicsSystem: physicsSystem
+        transforms: world.transforms
+        controllers: world.controllers
+        bushes: bushes
+        heroEntityId: heroEntityId
+        intent: back
+        yaw: yaw
+      )
+      downSteps = downSteps + 1
+    }
+    let cameDown: Bool = isClimbing(climbing: physicsSystem.climbing, entityId: heroEntityId) is false
+    let passed: Bool = started and rose > 1.0 and spent > 0.0 and cameDown
+    log(
+      "[climbtest] started={started} after {walkSteps} steps, rose {rose} m in {climbTestUpSteps} steps, stamina spent {spent}, cameDown={cameDown} after {downSteps} steps, passed={passed}"
+    )
+    ret passed
+  }
+  log("[climbtest] no tree, passed=false")
+  ret false
+}
