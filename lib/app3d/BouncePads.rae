@@ -1,0 +1,143 @@
+# app3d/BouncePads — springy ground for characters on movers: a trampoline,
+# a crash mat, a bouncy castle. Box3D's movers are not bodies, so a bouncy
+# material on a collider bounces a ragdoll or a crate but not a character
+# walking on it; a BouncePad does. Each is an entity with a BouncePad: a box
+# over the ground (Z up), its top, how much of a landing's speed it gives
+# back, and the slowest landing it bounces (a character walking on, or
+# settling after its last bounce, just stands). Each fixed step, after the
+# movers moved, bounceMovers sends every mover that has just landed on a pad
+# back up, at the speed it fell with the step before (the mover's own
+# landing has already stopped it: its pogo spring takes hold a little over
+# the ground), as a jump launches it; a jump held as it lands adds to the
+# bounce, so jumping at each landing goes higher every time (a trampoline).
+# Give the pad's collider a bouncy material too, so bodies bounce on it as
+# well.
+import Math
+import Vec3
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Tag
+open box3d/ecs/PhysicsComponents
+open app3d/CharacterMovers
+open app3d/CharacterBodies
+
+type BouncePad {
+  # Its box over the ground (m) and its top's height
+  minX: Float
+  minY: Float
+  maxX: Float
+  maxY: Float
+  topZ: Float
+  # The share of a landing's speed it gives back (1: as high as it fell)
+  restitution: Float = 0.9
+  # A landing slower than this (m/s) is not bounced
+  minimumSpeed: Float = 2.0
+  # A jump held as it lands adds this (m/s), up to maximumSpeed: jumping at
+  # each landing goes higher every bounce, as on a trampoline
+  jumpBoost: Float = 2.5
+  maximumSpeed: Float = 12.0
+}
+
+# A mover's feet this far under to this far over a pad's top (m) stand on it
+# (the pogo spring lands a mover a little over its rest height)
+const padBelowReach: Float = 0.3
+
+const padAboveReach: Float = 0.4
+
+# A mover's vertical speed at the end of the last step (up positive)
+type MoverFall {
+  verticalSpeed: Float
+}
+
+# Every pad, and every mover's vertical speed the step before
+type Bouncing {
+  pads: ComponentTable(BouncePad)
+  falls: ComponentTable(MoverFall)
+}
+
+func createBouncing() ret Bouncing {
+  ret Bouncing { pads: ComponentTable.create(BouncePad), falls: ComponentTable.create(MoverFall) }
+}
+
+# The upward speed a pad gives a mover landing on it at `fallSpeed` (m/s,
+# downward positive); 0 when it lands too slowly to bounce
+func bounceSpeed(pad: view BouncePad, fallSpeed: view Float) ret Float {
+  if fallSpeed < pad.minimumSpeed {
+    ret 0.0
+  }
+  ret Math.min(a: fallSpeed * pad.restitution, b: pad.maximumSpeed)
+}
+
+# ...and with a jump held as it lands: the jump's boost on top (a jump from
+# standing on the pad counts, so the first one starts the bouncing)
+func jumpedBounceSpeed(pad: view BouncePad, fallSpeed: view Float) ret Float {
+  ret Math.min(
+    a: Math.max(a: bounceSpeed(pad: pad, fallSpeed: fallSpeed), b: fallSpeed * pad.restitution) + pad.jumpBoost
+    b: pad.maximumSpeed
+  )
+}
+
+# Are a mover's feet at (x, y, feetZ) on `pad`?
+func onPad(
+  pad: view BouncePad
+  x: view Float
+  y: view Float
+  feetZ: view Float
+) ret Bool {
+  ret x >= pad.minX and x <= pad.maxX and y >= pad.minY and y <= pad.maxY and feetZ >= pad.topZ - padBelowReach and feetZ <= pad.topZ + padAboveReach
+}
+
+# One fixed step, after the movers moved: every mover in `characters` not
+# `parked` that has just landed on one of the pads, falling the step before
+# faster than the pad's minimum, is sent back up, higher when its drive in
+# `drives` holds jump. The number bounced.
+func bounceMovers(
+  bouncing: mod Bouncing
+  characters: mod ComponentTable(CharacterBody)
+  parked: view ComponentTable(MoverParked)
+  drives: view ComponentTable(MoverDrive)
+) ret Int {
+  var bounced: Int = 0
+  loop var i: Int = 0, i < componentCount(this: characters), ++i {
+    let entityId: EntityId = componentEntityAt(this: characters, i: i)
+    var before: Float = 0.0
+    if let fall: MoverFall = componentCopy(this: bouncing.falls, entityId: entityId) {
+      before = fall.verticalSpeed
+    }
+    let character: mod CharacterBody = componentMod(this: characters, entityId: entityId)
+    if hasTag(MoverParked, table: parked, entityId: entityId) is false and character.mover.onGround and before < 0.0 {
+      let feetZ: Float = character.mover.transform.p.z - moverCenterAboveFeet(character: character)
+      loop var p: Int = 0, p < componentCount(this: bouncing.pads), ++p {
+        let pad: BouncePad = componentCopyAtDefault(this: bouncing.pads, i: p)
+        if onPad(
+          pad: pad
+          x: character.mover.transform.p.x
+          y: character.mover.transform.p.y
+          feetZ: feetZ
+        ) {
+          var jumps: Bool = false
+          if let drive: MoverDrive = componentCopy(this: drives, entityId: entityId) {
+            jumps = drive.intent.jump
+          }
+          var speed: Float = bounceSpeed(pad: pad, fallSpeed: 0.0 - before)
+          if jumps {
+            speed = jumpedBounceSpeed(pad: pad, fallSpeed: 0.0 - before)
+          }
+          if speed > 0.0 {
+            character.mover.velocity.z = speed
+            character.mover.onGround = false
+            character.mover.pogoVelocity = 0.0
+            bounced = bounced + 1
+          }
+          break
+        }
+      }
+    }
+    componentSet(
+      this: bouncing.falls
+      entityId: entityId
+      data: MoverFall { verticalSpeed: character.mover.velocity.z }
+    )
+  }
+  ret bounced
+}
