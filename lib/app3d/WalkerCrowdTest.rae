@@ -3,7 +3,10 @@
 # (app3d/Wander: each member walks off, reaches spots, stops between them);
 # then the hero runs at a crowd member standing still, and the bump knocks
 # over the one standing (app3d/CharacterContact: the one doing less of the
-# pushing), not the hero. One [crowdtest] line; true when all held.
+# pushing), not the hero. While they walk about, each one's clip must show
+# what it does (a walk or run clip while it moves, idle while it stands: the
+# crowd once kept its spawn clip and slid). One [crowdtest] line; true when
+# all held.
 import Math
 import Vec3
 open ecs/Entity
@@ -18,6 +21,7 @@ open app3d/WalkerPhysics
 open app3d/WalkerPhysicsChecks
 open app3d/WalkerTerrainBodies
 open app3d/WalkerKnockdown
+open app3d/LocomotionClips
 
 # Frames of the crowd's walk about (20 s), and of the hero's run (3 s)
 const crowdTestWalkFrames: Int = 1200
@@ -70,6 +74,48 @@ func crowdTestFrame(
     wantsUp: false
     deltaTime: step
   )
+  stepOtherLocomotionClips(
+    locomotion: world.locomotionClips
+    animStates: world.animStates
+    animTransitions: world.animTransitions
+    characterSystem: characterSystem
+    characters: physicsSystem.characters
+    knockedDown: physicsSystem.knockedDown
+    knocks: physicsSystem.knocks
+    moverDrives: physicsSystem.moverDrives
+    controlledEntityId: heroEntityId
+  )
+  # Every character's clock, as the app's render phase steps it: a clip
+  # change is held until its blend has run
+  loop var i: Int = 0, i < componentCount(this: world.animStates), ++i {
+    let entityId: EntityId = componentEntityAt(this: world.animStates, i: i)
+    if componentHas(this: world.animTransitions, entityId: entityId) is false {
+      continue
+    }
+    stepCharacterClock(
+      anim: componentMod(this: world.animStates, entityId: entityId)
+      transition: componentMod(this: world.animTransitions, entityId: entityId)
+      playing: true
+      speed: 1.0
+      rate: 1.0
+      deltaTime: step
+    )
+  }
+}
+
+# Does the clip `entityId` shows match what it does: a walk or run clip while
+# it moves, idle while it stands? (No clip counts as matching.)
+func clipShowsMotion(world: view WalkerWorld, entityId: view EntityId) ret Bool {
+  if componentHas(this: world.animStates, entityId: entityId) is false {
+    ret true
+  }
+  let clip: Int = componentView(this: world.animStates, entityId: entityId).clipIndex
+  let moving: Bool = controllerOf(controllers: world.controllers, entityId: entityId).moving
+  let walkingClip: Bool = clip is ClipKind.walk or clip is ClipKind.walkFast or clip is ClipKind.run
+  if moving {
+    ret walkingClip
+  }
+  ret clip is ClipKind.idle
 }
 
 func runWalkerCrowdTest(
@@ -84,6 +130,8 @@ func runWalkerCrowdTest(
   var farthest: List(Float) = List.create(Float, cap: count)
   var stoodFrames: List(Int) = List.create(Int, cap: count)
   var arrivalsBefore: Int = 0
+  var clipFrames: Int = 0
+  var clipMatches: Int = 0
   loop var i: Int = 0, i < count, ++i {
     let entityId: EntityId = componentEntityAt(this: physicsSystem.wandering.wanderers, i: i)
     starts.add(value: controllerOf(controllers: world.controllers, entityId: entityId).position)
@@ -119,6 +167,10 @@ func runWalkerCrowdTest(
       if controllerOf(controllers: world.controllers, entityId: entityId).moving is false {
         stoodFrames.set(index: i, value: stoodFrames.copyAtFallback(index: i, fallback: 0) + 1)
       }
+      clipFrames = clipFrames + 1
+      if clipShowsMotion(world: world, entityId: entityId) {
+        clipMatches = clipMatches + 1
+      }
     }
   }
   var arrivals: Int = 0 - arrivalsBefore
@@ -130,6 +182,13 @@ func runWalkerCrowdTest(
     leastStood = Math.min(a: leastStood, b: stoodFrames.copyAtFallback(index: i, fallback: 0))
   }
   let wandered: Bool = count > 0 and leastGone > 1.5 and arrivals >= count and leastStood > 60
+  # A clip changes a blend (0.28 s) after the speed does, so a few frames
+  # around each start and stop do not match
+  var clipShare: Float = 0.0
+  if clipFrames > 0 {
+    clipShare = clipMatches.toFloat() / clipFrames.toFloat()
+  }
+  let clipsFollow: Bool = clipShare > 0.9
   # Everyone up again before the run
   loop var frame: Int = 0, frame < 360, ++frame {
     crowdTestFrame(
@@ -190,9 +249,9 @@ func runWalkerCrowdTest(
       )
     }
   }
-  let passed: Bool = wandered and knockedOver and heroDown is false
+  let passed: Bool = wandered and clipsFollow and knockedOver and heroDown is false
   log(
-    "[crowdtest] {count} wanderers in 20 s: each went at least {leastGone} m off, {arrivals} spots reached, each stood still {leastStood} frames or more ={wandered}; the hero ran at one standing (closest {closest} m): it fell={knockedOver}, the hero stayed up={heroDown is false}; passed={passed}"
+    "[crowdtest] {count} wanderers in 20 s: each went at least {leastGone} m off, {arrivals} spots reached, each stood still {leastStood} frames or more ={wandered}; their clip showed what they did in {clipShare * 100.0}% of frames ={clipsFollow}; the hero ran at one standing (closest {closest} m): it fell={knockedOver}, the hero stayed up={heroDown is false}; passed={passed}"
   )
   ret passed
 }
