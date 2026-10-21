@@ -92,7 +92,7 @@ func ensureShadowSpriteObjects(sprites: mod ShadowSpriteCache, resources: mod Gp
     ret
   }
   sprites.pipeMade = true
-  let spriteShader: Shader = shader(files: ["lib/shadow_sprite.wgsl"])
+  let spriteShader: Shader = shader(files: ["lib/fade_dither.wgsl", "lib/shadow_sprite.wgsl"])
   if let pipeline: RenderPipelineId = createDepthPipeline(
     resources: resources
     shader: spriteShader
@@ -151,9 +151,10 @@ func shadowQueueSprites(
       value: records.copyAtFallback(index: base + 36, fallback: 1.0) * scale
     )
     shadow.sprites.floats.add(value: records.copyAtFallback(index: base + 39, fallback: 0.0))
-    shadow.sprites.floats.add(value: 0.0)
-    shadow.sprites.floats.add(value: 0.0)
-    shadow.sprites.floats.add(value: 0.0)
+    # Its level cross-fade (GbufferRecord [40..42]): threshold, in or out, seed
+    shadow.sprites.floats.add(value: records.copyAtFallback(index: base + 40, fallback: 0.0))
+    shadow.sprites.floats.add(value: records.copyAtFallback(index: base + 41, fallback: 0.0))
+    shadow.sprites.floats.add(value: records.copyAtFallback(index: base + 42, fallback: 0.0))
     shadow.sprites.count = shadow.sprites.count + 1
   }
 }

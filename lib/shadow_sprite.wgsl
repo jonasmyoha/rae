@@ -13,7 +13,8 @@
 struct SU { lightViewProj: mat4x4<f32> };
 // a.x = picture aspect (width over height), a.y = alpha cutoff
 struct SpriteShadowU { a: vec4<f32> };
-// Per sprite, two vec4: (foot x, y, z, world height), (layer, 0, 0, 0)
+// Per sprite, two vec4: (foot x, y, z, world height), (layer, fade threshold,
+// fading in, fade seed) — the level cross-fade of fade_dither.wgsl
 @group(0) @binding(0) var<uniform> S: SU;
 @group(0) @binding(1) var<storage, read> sprites: array<vec4<f32>>;
 @group(0) @binding(2) var<uniform> P: SpriteShadowU;
@@ -24,6 +25,7 @@ struct VsOut {
   @builtin(position) pos: vec4<f32>,
   @location(0) uv: vec2<f32>,
   @location(1) @interpolate(flat) layer: i32,
+  @location(2) @interpolate(flat) fade: vec4<f32>,
 };
 
 @vertex
@@ -48,13 +50,14 @@ fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut
   // The picture's top row (v = 0) is the prop's top
   o.uv = vec2<f32>(c.x, 1.0 - c.y);
   o.layer = i32(max(extra.x, 0.0));
+  o.fade = vec4<f32>(extra.y, extra.z, extra.w, 0.0);
   return o;
 }
 
 @fragment
 fn fs(in: VsOut) {
   let texel = textureSampleLevel(spriteTex, spriteSamp, in.uv, in.layer, 0.0);
-  if (texel.a < P.a.y) {
+  if (texel.a < P.a.y || !fadeKeeps(in.fade, in.pos.xy, vec2<f32>(0.0))) {
     discard;
   }
 }

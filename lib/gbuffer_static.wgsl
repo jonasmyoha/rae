@@ -14,6 +14,10 @@ fn fs(in: VsOut) -> FsOut {
   let motion = (now - prev) * vec2<f32>(0.5, -0.5);
   let mEnc = clamp(motion, vec2<f32>(-0.5), vec2<f32>(0.5)) + vec2<f32>(0.50196078);
   let surface = staticSurface(in, d);
+  // A level of detail fading in or out (fade_dither.wgsl)
+  if (!fadeKeeps(d.fade, in.pos.xy, fadeFrameOffset(F.jitter.xy))) {
+    discard;
+  }
   let octB = octEncode(surface.nrm);
   var o: FsOut;
   o.gba = vec4<f32>(octB.x, octB.y, 0.5, d.params.z);

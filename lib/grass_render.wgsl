@@ -8,6 +8,7 @@ struct DrawU {
   prevModel: mat4x4<f32>,
   albedoMetallic: vec4<f32>,
   params: vec4<f32>,
+  fade: vec4<f32>,     // the level cross-fade (GbufferRecord [40..43]); 0 when not fading
 };
 struct GrassU {
   a: vec4<f32>,

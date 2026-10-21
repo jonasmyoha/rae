@@ -27,6 +27,7 @@ struct DrawU {
   prevModel: mat4x4<f32>,
   albedoMetallic: vec4<f32>,
   params: vec4<f32>,   // sprite: x=per-instance world height, y=emissive, z=mode, w=layer (slot 39)
+  fade: vec4<f32>,     // the level cross-fade (GbufferRecord [40..43]); 0 when not fading
 };
 struct SpriteU {
   // a.y = sprite aspect (w/h), a.z = alpha cutoff, a.w = time. (a.x unused —
@@ -61,6 +62,8 @@ struct VsOut {
   @location(5) @interpolate(flat) mode: f32,
   // A per-prop seed for the hashed alpha test, from where it stands
   @location(6) @interpolate(flat) seed: f32,
+  // Its level cross-fade (fade_dither.wgsl)
+  @location(7) @interpolate(flat) fade: vec4<f32>,
 };
 
 // vertex_index 0..5 -> two triangles of a unit quad, u01 in 0..1, v01 in 0..1.
@@ -116,6 +119,7 @@ fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut
   // so a billboard standing in for a toon mesh is shaded toon too
   o.mode = d.params.z;
   o.seed = fract(sin(dot(base.xy, vec2<f32>(12.9898, 78.233))) * 43758.5453);
+  o.fade = d.fade;
   o.pos = vec4<f32>(o.pos.xy + F.jitter.xy * o.pos.w, o.pos.zw);
   return o;
 }
@@ -154,7 +158,11 @@ fn alphaThreshold(in: VsOut) -> f32 {
 // decodes and shades it. The cutout discards in both.
 fn gbufferSurface(in: VsOut) -> FsOut {
   let texel = textureSample(spriteTex, spriteSamp, in.uv, in.layer);
-  if (texel.a < alphaThreshold(in)) { discard; }   // alpha cutout — no colour, no depth
+  let threshold = alphaThreshold(in);
+  // alpha cutout — no colour, no depth; and a level fading in or out
+  if (texel.a < threshold || !fadeKeeps(in.fade, in.pos.xy, fadeFrameOffset(F.jitter.xy))) {
+    discard;
+  }
   // The sprite pixels are already lit (cut from the plate). Face the normal UP so
   // the deferred pass adds only the gentle ground-like ambient/sun rather than a
   // hard directional term that would fight the baked shading — the same reasoning

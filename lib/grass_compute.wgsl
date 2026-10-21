@@ -4,6 +4,7 @@ struct DrawU {
   prevModel: mat4x4<f32>,
   albedoMetallic: vec4<f32>,
   params: vec4<f32>,
+  fade: vec4<f32>,     // the level cross-fade (GbufferRecord [40..43]); 0 when not fading
 };
 struct GrassU {
   a: vec4<f32>,
@@ -166,4 +167,5 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let hTip = hash2u(cellI, 113u);
   let tipWidth = hTip * hTip * 0.34;
   outBuf[slot].params = vec4<f32>(0.95, 1.0, mode, tipWidth);
+  outBuf[slot].fade = vec4<f32>(0.0);
 }

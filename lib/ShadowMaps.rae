@@ -58,7 +58,11 @@ const shadowMaxCascades: Int = 4
 
 const shadowMaxDraws: Int = 16384
 
-const shadowModelBytes: Int = 1048576  # shadowMaxDraws mat4s
+# Each caster's floats in the models buffer: its model (16) and its level
+# cross-fade (4, GbufferRecord [40..43]; 0 when not fading)
+const shadowCasterFloats: Int = 20
+
+const shadowModelBytes: Int = shadowMaxDraws * shadowCasterFloats * 4
 
 const shadowPaletteBaseBytes: Int = 65536  # shadowMaxDraws u32s
 
@@ -71,6 +75,10 @@ const shadowDefaultResolution: Int = 2048
 const shadowDefaultCascades: Int = 3
 
 const shadowSkinnedKeyBit: Int = 1099511627776  # 1 << 40: the skinned half of a batch key
+
+# 1 << 41: a static caster that is fading between levels of detail, drawn
+# with the fade pipeline (shadow_static.wgsl vsFade / fsFade)
+const shadowFadeKeyBit: Int = 2199023255552
 
 # How the casters are rasterised into the cascades: which faces are culled
 # and the rasteriser's depth bias (constant, and scaled by the triangle's
@@ -108,11 +116,15 @@ type ShadowCache {
   gen: Int  # bumped when the targets are recreated
   staticPipeline: RenderPipelineId
   skinPipeline: RenderPipelineId
+  # Static casters fading between levels of detail: a fragment stage that
+  # discards by the fade dither (only those, so the others stay depth-only)
+  fadePipeline: RenderPipelineId
   cascadeUniforms: List(BufferId)  # one mat4 per cascade
   models: BufferId
   paletteBases: BufferId
   frameUniform: BufferId
   staticBinds: List(BindGroupId)  # per cascade
+  fadeBinds: List(BindGroupId)  # per cascade, for fadePipeline
   skinBinds: List(BindGroupId)  # per cascade, over `palette`
   palette: BufferId  # the SkinStore palette the skin binds are built over
   enabled: Bool  # between shadowBegin and shadowEnd
@@ -120,7 +132,7 @@ type ShadowCache {
   cascadeVp: List(Float)  # cascadeCount * 16
   depthRange: List(Float)
   drawCount: Int
-  modelFloats: List(Float)  # 16 per caster
+  modelFloats: List(Float)  # shadowCasterFloats per caster
   paletteBaseRows: List(Int32)
   casterKeys: List(Int)
   casterVbufs: List(BufferId)
@@ -153,12 +165,14 @@ func createShadowCacheWith(casterBias: view ShadowCasterBias) ret ShadowCache {
     layers: 0
     gen: 0
     staticPipeline: noRenderPipelineId()
+    fadePipeline: noRenderPipelineId()
     skinPipeline: noRenderPipelineId()
     cascadeUniforms: fillBufferIds(count: shadowMaxCascades)
     models: noBufferId()
     paletteBases: noBufferId()
     frameUniform: noBufferId()
     staticBinds: fillBindGroupIds(count: shadowMaxCascades)
+    fadeBinds: fillBindGroupIds(count: shadowMaxCascades)
     skinBinds: fillBindGroupIds(count: shadowMaxCascades)
     palette: noBufferId()
     enabled: false
@@ -223,7 +237,7 @@ func ensureShadowObjects(shadow: mod ShadowCache, resources: mod GpuResources) {
     ret
   }
   shadow.objectsMade = true
-  let staticShader: Shader = shader(files: ["lib/shadow_static.wgsl"])
+  let staticShader: Shader = shader(files: ["lib/fade_dither.wgsl", "lib/shadow_static.wgsl"])
   let skinnedShader: Shader = shader(files: ["lib/shadow_skinned.wgsl"])
   if let pipeline: RenderPipelineId = createDepthPipeline(
     resources: resources
@@ -232,6 +246,16 @@ func ensureShadowObjects(shadow: mod ShadowCache, resources: mod GpuResources) {
     spec: casterPipelineSpec(skinned: false, bias: shadow.casterBias)
   ) {
     shadow.staticPipeline = pipeline
+  }
+  var fadeSpec: DepthPipelineSpec = casterPipelineSpec(skinned: false, bias: shadow.casterBias)
+  fadeSpec.fragmentEntry = "fsFade"
+  if let pipeline: RenderPipelineId = createDepthPipeline(
+    resources: resources
+    shader: staticShader
+    vertexEntry: "vsFade"
+    spec: fadeSpec
+  ) {
+    shadow.fadePipeline = pipeline
   }
   if let pipeline: RenderPipelineId = createDepthPipeline(
     resources: resources
@@ -292,6 +316,7 @@ func ensureShadowTargets(
   retireTextureView(resources: resources, id: shadow.arrayView)
   retireTexture(resources: resources, id: shadow.texture)
   retireBindGroupIds(resources: resources, list: shadow.staticBinds)
+  retireBindGroupIds(resources: resources, list: shadow.fadeBinds)
   retireBindGroupIds(resources: resources, list: shadow.skinBinds)
   shadow.arrayView = noTextureViewId()
   shadow.texture = noTextureId()
@@ -484,6 +509,9 @@ func shadowQueue(
   loop let column: Float in model.m {
     shadow.modelFloats.add(value: column)
   }
+  loop var i: Int = 0, i < shadowCasterFloats - 16, ++i {
+    shadow.modelFloats.add(value: 0.0)
+  }
   var base: Int = paletteBase
   if base < 0 {
     base = 0
@@ -563,69 +591,6 @@ func drawShadowCasterRange(
   }
 }
 
-# Many static casters of one mesh at once: the first `count` records of
-# `records`, `stride` floats each with the model matrix in the first 16 (an
-# InstanceBatch's DrawU records). The queue ends up exactly as one
-# shadowQueue call per record would leave it, but the models are copied
-# straight out of the batch the G-buffer draws, with no per-caster lookup or
-# matrix rebuild.
-func shadowQueueRecords(
-  shadow: mod ShadowCache
-  key: copy Int
-  vbuf: view BufferId
-  ibuf: view BufferId
-  icount: copy Int
-  records: view List(Float)
-  stride: view Int
-  count: view Int
-) {
-  if not shadow.enabled or icount < 1 {
-    ret
-  }
-  loop var record: Int = 0, record < count and shadow.drawCount < shadowMaxDraws, ++record {
-    let base: Int = record * stride
-    loop var i: Int = 0, i < 16, ++i {
-      shadow.modelFloats.add(value: records.copyAtFallback(index: base + i, fallback: 0.0))
-    }
-    shadow.paletteBaseRows.add(value: 0 as Int32)
-    shadow.casterKeys.add(value: key)
-    shadow.casterVbufs.add(value: vbuf)
-    shadow.casterIbufs.add(value: ibuf)
-    shadow.casterIcounts.add(value: icount)
-    shadow.casterFirstIndices.add(value: 0)
-    shadow.drawCount = shadow.drawCount + 1
-  }
-}
-
-# drawShadowCaster for the first `count` records of an instance batch
-# (shadowQueueRecords).
-func drawShadowCasterRecords(
-  shadow: mod ShadowCache
-  meshes: view MeshStore
-  resources: view GpuResources
-  mesh: view MeshHandle
-  records: view List(Float)
-  stride: view Int
-  count: view Int
-) {
-  if count < 1 or not meshHandleIsValid(h: mesh) {
-    ret
-  }
-  if not meshStoreReady(store: meshes, resources: resources, mesh: mesh.id) {
-    ret
-  }
-  shadowQueueRecords(
-    shadow: shadow
-    key: mesh.id
-    vbuf: meshStoreVbuf(store: meshes, mesh: mesh.id)
-    ibuf: meshStoreIbuf(store: meshes, mesh: mesh.id)
-    icount: meshStoreIndexCount(store: meshes, mesh: mesh.id)
-    records: records
-    stride: stride
-    count: count
-  )
-}
-
 # A skinned caster from a SkinStore. `paletteBase` is its start row in the
 # shared palette (characterPaletteBase, #547) — the SAME base its G-buffer
 # instance uses, so a crowd member's shadow shows its own pose; 0 for a lone
@@ -684,6 +649,21 @@ func ensureShadowBinds(shadow: mod ShadowCache, resources: mod GpuResources) {
         entries: entries
       ) {
         shadow.staticBinds.set(index: c, value: bind)
+      }
+    }
+    if not bindGroupIsUsable(
+      resources: resources
+      id: shadow.fadeBinds.copyAtFallback(index: c, fallback: noBindGroupId())
+    ) {
+      var entries: List(ResourceRef) = List.create(ResourceRef, cap: 2)
+      entries.add(value: bufferRef(id: cascadeUniform))
+      entries.add(value: bufferRef(id: shadow.models))
+      if let bind: BindGroupId = createRenderBindGroup(
+        resources: resources
+        pipeline: shadow.fadePipeline
+        entries: entries
+      ) {
+        shadow.fadeBinds.set(index: c, value: bind)
       }
     }
     let skinBindUsable: Bool = bindGroupIsUsable(
@@ -753,7 +733,10 @@ func drawShadowCasters(
       index: cascade
       fallback: noBindGroupId()
     )
-    if key >= shadowSkinnedKeyBit {
+    if key >= shadowFadeKeyBit {
+      pipeline = shadow.fadePipeline
+      bind = shadow.fadeBinds.copyAtFallback(index: cascade, fallback: noBindGroupId())
+    } else if key >= shadowSkinnedKeyBit {
       pipeline = shadow.skinPipeline
       bind = shadow.skinBinds.copyAtFallback(index: cascade, fallback: noBindGroupId())
     }
@@ -800,7 +783,7 @@ func shadowEnd(shadow: mod ShadowCache, resources: mod GpuResources) {
         id: shadow.models
         offset: 0
         data: shadow.modelFloats.data
-        size: shadow.drawCount * 64
+        size: shadow.drawCount * shadowCasterFloats * 4
       )
       let wroteBases: Bool = writeBufferFromPtr(
         resources: resources
@@ -858,6 +841,7 @@ func shadowEnd(shadow: mod ShadowCache, resources: mod GpuResources) {
     }
     recordRenderPipelineUse(recording: recording, resources: resources, id: shadow.staticPipeline)
     recordRenderPipelineUse(recording: recording, resources: resources, id: shadow.skinPipeline)
+    recordRenderPipelineUse(recording: recording, resources: resources, id: shadow.fadePipeline)
     loop var c: Int = 0, c < shadow.cascadeCount, ++c {
       recordBindGroupUse(
         recording: recording
@@ -868,6 +852,11 @@ func shadowEnd(shadow: mod ShadowCache, resources: mod GpuResources) {
         recording: recording
         resources: resources
         id: shadow.skinBinds.copyAtFallback(index: c, fallback: noBindGroupId())
+      )
+      recordBindGroupUse(
+        recording: recording
+        resources: resources
+        id: shadow.fadeBinds.copyAtFallback(index: c, fallback: noBindGroupId())
       )
     }
     shadowSdfRecordUses(sdf: shadow.sdf, recording: recording, resources: resources)
@@ -894,6 +883,7 @@ func shadowShutdown(shadow: mod ShadowCache, resources: mod GpuResources) {
   shadowSdfShutdown(sdf: shadow.sdf, resources: resources)
   shadowSpriteShutdown(sprites: shadow.sprites, resources: resources)
   retireBindGroupIds(resources: resources, list: shadow.staticBinds)
+  retireBindGroupIds(resources: resources, list: shadow.fadeBinds)
   retireBindGroupIds(resources: resources, list: shadow.skinBinds)
   retireTextureViewIds(resources: resources, list: shadow.layerViews)
   retireTextureView(resources: resources, id: shadow.arrayView)
@@ -905,6 +895,7 @@ func shadowShutdown(shadow: mod ShadowCache, resources: mod GpuResources) {
   retireBuffer(resources: resources, id: shadow.frameUniform)
   retireRenderPipeline(resources: resources, id: shadow.staticPipeline)
   retireRenderPipeline(resources: resources, id: shadow.skinPipeline)
+  retireRenderPipeline(resources: resources, id: shadow.fadePipeline)
   let casterBias: ShadowCasterBias = shadow.casterBias
   shadow = createShadowCacheWith(casterBias: casterBias)
 }

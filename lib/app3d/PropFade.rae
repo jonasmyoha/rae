@@ -1,0 +1,56 @@
+# app3d/PropFade — where a prop's levels of detail cross-fade
+# (docs/tree-lod-design.md §2.3). Each level has a fade band centred on the
+# distance it ends at: inside it the level is drawn fading out and the next
+# one fading in, both with the same threshold and the same per-prop seed, so
+# the screen's dither (fade_dither.wgsl) shows each pixel from exactly one of
+# them; the last level fades out over its band instead of ending. Nothing
+# pops, and only the props inside a band are drawn twice.
+import Math
+
+# A level's fade band is this share of the distance it ends at, and at
+# least propFadeMinWidth metres
+const propFadeShare: Float = 0.1
+
+const propFadeMinWidth: Float = 4.0
+
+# The fade band's width (m) of a level that ends at `maxDistance`
+func propFadeWidth(maxDistance: view Float) ret Float {
+  ret Math.max(a: maxDistance * propFadeShare, b: propFadeMinWidth)
+}
+
+# The levels a prop is drawn at this frame: `near` whole (`threshold` 0), or
+# inside its band `near` fading out and `far` fading in with `threshold`
+# (0..1, how far into the band); `far` -1 past the last level (it fades out
+# alone); `near` -1 when it is not drawn at all
+type PropLodPick {
+  near: Int
+  far: Int
+  threshold: Float
+}
+
+# The pick at `distance` for a kind whose levels end at `maxDistances`
+# (nearest first), kept in the caller's own list so a frame allocates nothing
+func propLodPickFrom(maxDistances: view List(Float), distance: view Float) ret PropLodPick {
+  loop var level: Int = 0, level < maxDistances.length, ++level {
+    let end: Float = maxDistances.copyAtFallback(index: level, fallback: 0.0)
+    let width: Float = propFadeWidth(maxDistance: end)
+    if distance < end - width * 0.5 {
+      ret PropLodPick { near: level, far: -1, threshold: 0.0 }
+    }
+    if distance < end + width * 0.5 {
+      var far: Int = level + 1
+      if far >= maxDistances.length {
+        far = -1
+      }
+      ret PropLodPick { near: level, far: far, threshold: (distance - (end - width * 0.5)) / width }
+    }
+  }
+  ret PropLodPick { near: -1, far: -1, threshold: 0.0 }
+}
+
+# A prop's fade seed (0..1) from where it stands, so neighbouring props do not
+# fade in step
+func propFadeSeed(x: view Float, y: view Float) ret Float {
+  let value: Float = Math.sin(x: x * 12.9898 + y * 78.233) * 43758.5453
+  ret value - Math.floor(x: value)
+}
