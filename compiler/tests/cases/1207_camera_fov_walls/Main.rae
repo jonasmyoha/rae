@@ -167,4 +167,31 @@ func main() {
     label: "nothing in the way: 7 m; a loose cube: still 7 m; a wall 5 m back: in front of it ({atWall} m)"
     ok: near(a: open, b: 7.0) and near(a: pastCube, b: 7.0) and atWall < 4.5 and atWall > 3.5
   )
+  # A wall the target is pressed against (a character climbing it, or just
+  # let go), its sphere already touching it, and the camera on the far side:
+  # the sweep leaves that wall, so the camera stays out (it used to be
+  # pulled onto the target, and the view broke)
+  var againstAllocator: EntityAllocator = createEntityAllocator()
+  var againstTransforms: ComponentTable(Transform3D) = createComponentTable(Transform3D)
+  var againstBodies: ComponentTable(RigidBody) = createComponentTable(RigidBody)
+  var againstColliders: ComponentTable(Collider) = createComponentTable(Collider)
+  var againstPhysics: Physics = createPhysics(
+    def: defaultPhysicsWorldDef()
+    fixedStep: 1.0 / 60.0
+    subSteps: 4
+  )
+  addBox(
+    physics: againstPhysics
+    allocator: againstAllocator
+    rigidBodies: againstBodies
+    colliders: againstColliders
+    transforms: againstTransforms
+    at: Vec3.create(x: 0.0, y: 0.7, z: 1.0)
+    category: cameraBlockingCategory
+  )
+  let pressed: Float = distanceAfterPull(physics: againstPhysics, camera: camera)
+  check(
+    label: "the target pressed against a wall, the camera looking from the other side: still 7 m ({pressed} m)"
+    ok: near(a: pressed, b: 7.0)
+  )
 }
