@@ -58,6 +58,7 @@ open app3d/Characters
 open app3d/PlayerRoster
 open app3d/WalkerPhysics
 open app3d/WalkerMarks
+open app3d/FrameLog
 open app3d/WalkerWorld
 open app3d/WalkerInput
 open app3d/WalkerCamera
@@ -127,6 +128,14 @@ func beginWalkerFrame(app: mod WalkerApp) {
     deltaTime = 0.0
   }
   app.frame.deltaTime = deltaTime
+  if app.renderSystem.frameLogOn {
+    frameLogUpdate(
+      frameLog: app.renderSystem.frameLog
+      deltaTime: deltaTime
+      drs: app.renderSystem.drs
+      renderer: app.renderSystem.renderer
+    )
+  }
 }
 
 # ----- update phase: input, UI, camera, character, terrain, grass, persist --
