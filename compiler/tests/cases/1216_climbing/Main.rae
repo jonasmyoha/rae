@@ -392,5 +392,85 @@ func main() {
       hero: hero
     ).climbs is climbsBefore
   )
+  # A slim post 3 m tall (a thin trunk) on a slope: the ground behind it is
+  # a step 1.2 m up. Up it with the stick held up, then held on at its top.
+  # Past its top there is only that lower ground, under the climber's feet,
+  # so no pull-up: it hangs on at the top, never dropped forward onto it
+  addBox(
+    world: world
+    center: Vec3.create(x: 20.0, y: 3.0, z: 1.5)
+    half: Vec3.create(x: 0.15, y: 0.15, z: 1.5)
+    loose: false
+  )
+  addBox(
+    world: world
+    center: Vec3.create(x: 20.0, y: 4.15, z: 0.6)
+    half: Vec3.create(x: 1.0, y: 1.0, z: 0.6)
+    loose: false
+  )
+  placeHero(world: world, hero: hero, feet: Vec3.create(x: 20.0, y: 1.8, z: 0.0))
+  loop var i: Int = 0, i < 400, ++i {
+    step(world: world, climbing: climbing)
+  }
+  let postClimbs: Int = climberOf(climbing: climbing, hero: hero).climbs
+  let postMantles: Int = climberOf(climbing: climbing, hero: hero).mantles
+  var postOn: Bool = false
+  var postStamina: Float = 0.0
+  loop var i: Int = 0, i < 360, ++i {
+    push(
+      world: world
+      climbing: climbing
+      hero: hero
+      steps: 1
+    )
+    postOn = postOn or isClimbing(climbing: climbing, entityId: hero)
+    if i is 240 {
+      postStamina = staminaOf(climbing: climbing, hero: hero).value
+    }
+  }
+  let postTop: Vec3 = feetOf(world: world, hero: hero)
+  check(
+    label: "up a slim 3 m post with lower ground behind it, held on at its top: still on it (feet z {postTop.z}), no pull-up onto the lower ground behind it; held there the stamina stays ({postStamina} -> {staminaOf(
+      climbing: climbing
+      hero: hero
+    ).value})"
+    ok: climberOf(climbing: climbing, hero: hero).climbs is postClimbs + 1 and isClimbing(
+      climbing: climbing
+      entityId: hero
+    ) and climberOf(climbing: climbing, hero: hero).mantles is postMantles and postTop.z > 1.5 and near(
+      a: staminaOf(climbing: climbing, hero: hero).value
+      b: postStamina
+      within: 0.001
+    ) and postStamina < 100.0
+  )
+  # A post 0.8 m across and 3 m tall (a palm's trunk): its top has no room
+  # for the climber's feet, so held up at the top it hangs on there, with no
+  # pull-up onto the top
+  addBox(
+    world: world
+    center: Vec3.create(x: 30.0, y: 3.0, z: 1.5)
+    half: Vec3.create(x: 0.4, y: 0.4, z: 1.5)
+    loose: false
+  )
+  placeHero(world: world, hero: hero, feet: Vec3.create(x: 30.0, y: 1.5, z: 0.0))
+  loop var i: Int = 0, i < 400, ++i {
+    step(world: world, climbing: climbing)
+  }
+  let thickClimbs: Int = climberOf(climbing: climbing, hero: hero).climbs
+  let thickMantles: Int = climberOf(climbing: climbing, hero: hero).mantles
+  push(
+    world: world
+    climbing: climbing
+    hero: hero
+    steps: 360
+  )
+  let thickTop: Vec3 = feetOf(world: world, hero: hero)
+  check(
+    label: "up a 0.8 m post, held up at its top: still on it (feet z {thickTop.z}), no pull-up onto a top with no room to stand"
+    ok: climberOf(climbing: climbing, hero: hero).climbs is thickClimbs + 1 and isClimbing(
+      climbing: climbing
+      entityId: hero
+    ) and climberOf(climbing: climbing, hero: hero).mantles is thickMantles and thickTop.z > 1.5
+  )
   destroyPhysics(physics: world.physics)
 }
