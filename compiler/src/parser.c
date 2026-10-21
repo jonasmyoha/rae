@@ -3124,6 +3124,19 @@ static AstTypeField* parse_type_fields(Parser* parser, bool skip_name_check) {
     parser_consume(parser, TOK_COLON, "expected ':' after field name");
     AstTypeField* field = parser_alloc(parser, sizeof(AstTypeField));
     field->name = parser_copy_str(parser, field_name->lexeme);
+    field->line = field_name->line;
+    field->column = field_name->column;
+    // A type cannot have two fields of one name (the C compiler used to be
+    // the first to notice, on the emitted struct)
+    for (const AstTypeField* earlier = head; earlier; earlier = earlier->next) {
+      if (str_eq(earlier->name, field->name)) {
+        parser_error(parser, field_name,
+                     "field '%.*s' is declared twice in this type: here and at line %zu:%zu; "
+                     "remove or rename one of them",
+                     (int)field->name.len, field->name.data, earlier->line, earlier->column);
+        break;
+      }
+    }
     field->type = parse_type_ref(parser);
     field->default_value = NULL;
     if (parser_match(parser, TOK_KW_IS) || parser_match(parser, TOK_ASSIGN)) {
