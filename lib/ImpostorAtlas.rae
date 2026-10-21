@@ -11,23 +11,25 @@ open Scene3d
 import Vec3
 
 # How an atlas is baked: views per side of the grid, the pixels of one view
-# (its cell, square), and the mip levels (each halves the cell)
+# (its cell, square), and the mip levels (each halves the cell); and how it
+# is drawn: the three nearest views blended, or only the nearest one
 type ImpostorSettings {
   viewsPerSide: Int
   cellSize: Int
   mips: Int
+  blendViews: Bool
 }
 
 # A PC: 8 x 8 views of 128 pixels (1024 x 1024 per prop kind), 4 levels
 # (128 down to 16 pixels a view: a smaller one cannot hold a crown's
 # coverage, a pixel being several percent of it)
 func impostorPcSettings() ret ImpostorSettings {
-  ret ImpostorSettings { viewsPerSide: 8, cellSize: 128, mips: 4 }
+  ret ImpostorSettings { viewsPerSide: 8, cellSize: 128, mips: 4, blendViews: true }
 }
 
-# A phone: 4 x 4 views (512 x 512 per prop kind)
+# A phone: 4 x 4 views (512 x 512 per prop kind), the nearest one drawn
 func impostorPhoneSettings() ret ImpostorSettings {
-  ret ImpostorSettings { viewsPerSide: 4, cellSize: 128, mips: 4 }
+  ret ImpostorSettings { viewsPerSide: 4, cellSize: 128, mips: 4, blendViews: false }
 }
 
 # The settings for the platform this is built for
@@ -41,12 +43,14 @@ func defaultImpostorSettings() ret ImpostorSettings {
 # What a draw binds to read an atlas: both arrays (every layer and level),
 # the layers' frames (per layer one vec4: the bounding sphere's centre and
 # radius, over the prop's height, so a draw scales them by the height it
-# is drawn at) and the grid's views per side (0: no atlas)
+# is drawn at), the grid's views per side (0: no atlas) and whether the
+# draw blends three views
 type ImpostorBinding {
   albedo: TextureViewId
   normalDepth: TextureViewId
   frames: BufferId
   viewsPerSide: Int
+  blendViews: Bool = true
 }
 
 func noImpostorBinding() ret ImpostorBinding {
