@@ -1,0 +1,41 @@
+# app3d/KnockedDownFollow — a knocked-down character goes where its body
+# goes. Its mover is parked while it lies (app3d/CharacterMovers'
+# MoverParked: not moved, its controller not read back), so without this its
+# controller stays where it fell while the ragdoll flies and slides on, and
+# whatever follows the character (its name over its head, a finish line, a
+# camera) sees it there, then jumps when it gets up where the body lies.
+#
+# Each step the hips' movement since the last step is added to the
+# controller, so the controller keeps its offset from the hips it had when it
+# fell. Run it before stepKnockedDown, which keeps the hips' last place
+# (KnockedDown.lastBody).
+import Vec3
+open ecs/ComponentTable
+open ecs/Transform
+open app3d/CharacterController
+open app3d/KnockedDown
+
+func followKnockedDownBodies(
+  knockedDown: view ComponentTable(KnockedDown)
+  transforms: view ComponentTable(Transform3D)
+  controllers: mod ComponentTable(ThirdPersonController)
+) {
+  loop var i: Int = 0, i < componentCount(this: knockedDown), ++i {
+    let entityId: EntityId = componentEntityAt(this: knockedDown, i: i)
+    let down: view KnockedDown = componentView(this: knockedDown, entityId: entityId)
+    if componentHas(this: transforms, entityId: down.body) and componentHas(
+      this: controllers
+      entityId: entityId
+    ) {
+      let moved: Vec3 = Vec3.vsub(
+        a: componentView(this: transforms, entityId: down.body).position
+        b: down.lastBody
+      )
+      let controller: mod ThirdPersonController = componentMod(
+        this: controllers
+        entityId: entityId
+      )
+      controller.position = Vec3.vadd(a: controller.position, b: moved)
+    }
+  }
+}

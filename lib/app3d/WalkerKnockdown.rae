@@ -23,6 +23,7 @@ open app3d/CharacterBodies
 open app3d/CharacterMovers
 open app3d/Characters
 open app3d/KnockedDown
+open app3d/KnockedDownFollow
 open app3d/RagdollRig
 open app3d/Ragdoll
 open app3d/RagdollGetUp
@@ -218,6 +219,13 @@ func walkerKnockdownUpdate(
     )
     down.wantsUp = wantsUp
   }
+  # Whoever lies there goes where their body goes (app3d/KnockedDownFollow),
+  # so their name over their head rides on the flying body
+  followKnockedDownBodies(
+    knockedDown: physicsSystem.knockedDown
+    transforms: world.transforms
+    controllers: world.controllers
+  )
   let up: List(EntityId) = stepKnockedDown(
     knockedDown: physicsSystem.knockedDown
     transforms: world.transforms
