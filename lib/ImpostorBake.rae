@@ -135,31 +135,12 @@ func bakeImpostorAtlas(
   if subjects.length < 1 or settings.viewsPerSide < 2 or settings.cellSize < 1 or settings.mips < 1 {
     ret atlas
   }
-  let size: Int = impostorAtlasSize(settings: settings)
-  if let albedo: TextureId = createTextureArrayMipped(
+  createImpostorTextures(
+    atlas: atlas
     resources: resources
-    width: size
-    height: size
-    layers: subjects.length
-    format: impostorFormat
-    usage: impostorTextureUsage()
-    mipLevels: settings.mips
-  ) {
-    atlas.albedoTexture = albedo
-  }
-  if let normalDepth: TextureId = createTextureArrayMipped(
-    resources: resources
-    width: size
-    height: size
-    layers: subjects.length
-    format: impostorFormat
-    usage: impostorTextureUsage()
-    mipLevels: settings.mips
-  ) {
-    atlas.normalDepthTexture = normalDepth
-  }
-  atlas.settings = settings
-  atlas.layers = subjects.length
+    settings: settings
+    subjects: subjects.length
+  )
   var scratch: GpuScratch = createGpuScratch()
   var baked: Bool = false
   if isValidTexture(resources: resources, id: atlas.albedoTexture) and isValidTexture(
@@ -190,7 +171,21 @@ func bakeImpostorAtlas(
   }
   retireGpuScratch(scratch: scratch, resources: resources)
   if baked {
-    baked = bindImpostorAtlas(atlas: atlas, resources: resources, subjects: subjects)
+    var frames: ArgWriter = createArgs(uniform: false)
+    loop var subject: Int = 0, subject < subjects.length, ++subject {
+      if let held: view ImpostorSubject = subjects.viewAt(index: subject) {
+        pushImpostorFrame(
+          writer: frames
+          settings: settings
+          subject: subject
+          centre: held.centre
+          radius: held.radius
+          height: held.height
+          halfBox: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+        )
+      }
+    }
+    baked = bindImpostorAtlas(atlas: atlas, resources: resources, frames: frames)
   }
   if not baked {
     log("[impostor] the bake of {subjects.length} props failed")
@@ -199,12 +194,50 @@ func bakeImpostorAtlas(
   ret atlas
 }
 
+# The atlas's two texture arrays for `subjects` pages with `settings`
+# (invalid ids when they cannot be made)
+func createImpostorTextures(
+  atlas: mod ImpostorAtlas
+  resources: mod GpuResources
+  settings: view ImpostorSettings
+  subjects: view Int
+) {
+  let size: Int = impostorAtlasSize(settings: settings)
+  let tall: Int = impostorAtlasHeight(settings: settings)
+  let layers: Int = impostorLayersFor(settings: settings, subjects: subjects)
+  if let albedo: TextureId = createTextureArrayMipped(
+    resources: resources
+    width: size
+    height: tall
+    layers: layers
+    format: impostorFormat
+    usage: impostorTextureUsage()
+    mipLevels: settings.mips
+  ) {
+    atlas.albedoTexture = albedo
+  }
+  if let normalDepth: TextureId = createTextureArrayMipped(
+    resources: resources
+    width: size
+    height: tall
+    layers: layers
+    format: impostorFormat
+    usage: impostorTextureUsage()
+    mipLevels: settings.mips
+  ) {
+    atlas.normalDepthTexture = normalDepth
+  }
+  atlas.settings = settings
+  atlas.subjects = subjects
+  atlas.layers = layers
+}
+
 # The views the draws sample (every layer and level of both textures) and
-# the layers' frames over each prop's height
+# the subjects' `frames` (pushImpostorFrame, one per subject in order)
 func bindImpostorAtlas(
   atlas: mod ImpostorAtlas
   resources: mod GpuResources
-  subjects: view List(ImpostorSubject)
+  frames: mod ArgWriter
 ) ret Bool {
   let range: TextureViewRange = {
     baseMip: 0
@@ -212,16 +245,6 @@ func bindImpostorAtlas(
     baseLayer: 0
     layerCount: atlas.layers
     dimension: WGPUTextureViewDimension_2DArray
-  }
-  var frames: ArgWriter = createArgs(uniform: false)
-  loop let subject: view ImpostorSubject in subjects {
-    pushVec4F(
-      writer: frames
-      x: subject.centre.x / subject.height
-      y: subject.centre.y / subject.height
-      z: subject.centre.z / subject.height
-      w: subject.radius / subject.height
-    )
   }
   if let albedo: TextureViewId = createTextureViewRange(
     resources: resources
@@ -239,7 +262,7 @@ func bindImpostorAtlas(
   }
   if let framesBuffer: BufferId = createBuffer(
     resources: resources
-    size: atlas.layers * 16
+    size: Math.max(a: argsLength(writer: frames), b: 32)
     usage: WGPUBufferUsage_Storage + WGPUBufferUsage_CopyDst
   ) {
     atlas.binding.frames = framesBuffer
@@ -270,6 +293,7 @@ func recordImpostorViews(
   let views: Int = atlas.settings.viewsPerSide
   let viewCount: Int = views * views
   let size: Int = impostorAtlasSize(settings: atlas.settings)
+  let tall: Int = impostorAtlasHeight(settings: atlas.settings)
   var uniform: ArgWriter = createArgs(uniform: true)
   pushVec4F(
     writer: uniform
@@ -369,7 +393,7 @@ func recordImpostorViews(
   if let depth: TextureId = createTexture(
     resources: resources
     width: size
-    height: size
+    height: tall
     format: WGPUTextureFormat_Depth32Float
     usage: WGPUTextureUsage_RenderAttachment
   ) {
