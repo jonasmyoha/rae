@@ -1,0 +1,142 @@
+# app3d/FarSprites: the far props' billboards, past where a PropField's own
+# billboards end, out to the horizon: only those in reach and in view, the
+# nearest first, at most `limit` a frame, thinned with distance past
+# `thinFrom` (the ones kept drawn bigger); blocks of them set and cleared.
+import Math
+import Vec3
+open app3d/PropField
+open app3d/FarSprites
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func sprite(x: view Float, y: view Float) ret FarSprite {
+  ret farSpriteAt(
+    position: Vec3.create(x: x, y: y, z: 0.0)
+    centerZ: 0.0
+    height: 10.0
+    layer: 1
+  )
+}
+
+func lookingNorth() ret PropView {
+  ret PropView {
+    eye: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    forward: Vec3.create(x: 0.0, y: 1.0, z: 0.0)
+    halfAngle: 0.6
+  }
+}
+
+func main() ret Int {
+  var settings: FarSpriteSettings = defaultFarSpriteSettings()
+  settings.nearDistance = 100.0
+  settings.farDistance = 1000.0
+  settings.limit = 1000
+  settings.thinFrom = 10000.0
+  var farSprites: FarSprites = createFarSprites(settings: settings)
+  # A row north, 50 m to 950 m, and one behind the eye
+  var row: List(FarSprite) = List.create(FarSprite, cap: 10)
+  loop var i: Int = 0, i < 10, ++i {
+    row.add(value: sprite(x: 0.0, y: 50.0 + 100.0 * i.toFloat()))
+  }
+  setFarSpriteBlock(farSprites: farSprites, block: 0, sprites: row)
+  var behind: List(FarSprite) = List.create(FarSprite, cap: 1)
+  behind.add(value: sprite(x: 0.0, y: -500.0))
+  setFarSpriteBlock(farSprites: farSprites, block: 3, sprites: behind)
+  gatherFarSprites(farSprites: farSprites, propView: lookingNorth(), toon: false)
+  check(
+    label: "only those past the near distance, within the far one and in view: {farSprites.drawn} of 11"
+    ok: farSprites.drawn is 9 and farSprites.batch.count is 9
+  )
+  check(
+    label: "a block is held once set"
+    ok: farSpriteBlockSet(farSprites: farSprites, block: 3) and farSpriteBlockSet(
+      farSprites: farSprites
+      block: 2
+    ) is false
+  )
+  # At most `limit`, the nearest first
+  var capped: FarSprites = createFarSprites(settings: settings)
+  capped.settings.limit = 3
+  # Farthest block first, so the order is the gather's, not the blocks'
+  var farRow: List(FarSprite) = List.create(FarSprite, cap: 5)
+  var nearRow: List(FarSprite) = List.create(FarSprite, cap: 5)
+  loop var i: Int = 0, i < 5, ++i {
+    nearRow.add(value: sprite(x: 0.0, y: 150.0 + 50.0 * i.toFloat()))
+    farRow.add(value: sprite(x: 0.0, y: 700.0 + 50.0 * i.toFloat()))
+  }
+  setFarSpriteBlock(farSprites: capped, block: 0, sprites: farRow)
+  setFarSpriteBlock(farSprites: capped, block: 1, sprites: nearRow)
+  gatherFarSprites(farSprites: capped, propView: lookingNorth(), toon: false)
+  check(
+    label: "capped at 3, the nearest: the farthest drawn {capped.farthestDrawn} m"
+    ok: capped.drawn is 3 and capped.farthestDrawn < 260.0
+  )
+  clearFarSpriteBlock(farSprites: capped, block: 1)
+  gatherFarSprites(farSprites: capped, propView: lookingNorth(), toon: false)
+  check(
+    label: "the near block cleared: the far one's {capped.drawn}"
+    ok: capped.drawn is 3 and capped.farthestDrawn > 690.0
+  )
+  # Thinned past thinFrom by the square of the distance, the kept drawn bigger
+  var thinned: FarSprites = createFarSprites(settings: settings)
+  thinned.settings.thinFrom = 300.0
+  thinned.settings.limit = 5000
+  var ring: List(FarSprite) = List.create(FarSprite, cap: 2000)
+  loop var i: Int = 0, i < 2000, ++i {
+    ring.add(value: sprite(x: -100.0 + 0.1 * i.toFloat(), y: 900.0))
+  }
+  setFarSpriteBlock(farSprites: thinned, block: 0, sprites: ring)
+  gatherFarSprites(farSprites: thinned, propView: lookingNorth(), toon: false)
+  check(
+    label: "2000 at 900 m thinned from 300 m: {thinned.drawn} kept (about 222)"
+    ok: thinned.drawn > 150 and thinned.drawn < 300
+  )
+  check(
+    label: "the kept drawn up to maxGrow bigger: {thinned.largestGrow}"
+    ok: thinned.largestGrow > 1.9 and thinned.largestGrow <= settings.maxGrow + 0.001
+  )
+  # From a prop field's placements: the kinds with a picture, its layer, its
+  # height and the kind's view centre at the placement's scale
+  var field: PropField = createPropField(
+    originX: -100.0
+    originY: -100.0
+    size: 200.0
+    cellSize: 50.0
+  )
+  let tree: Int = addPropKind(
+    field: field
+    kind: { lods: List.create(PropLod, cap: 0), radius: 3.0, centerHeight: 5.0 }
+  )
+  let rock: Int = addPropKind(
+    field: field
+    kind: { lods: List.create(PropLod, cap: 0), radius: 1.0, centerHeight: 0.5 }
+  )
+  setPropKindSprite(
+    field: field
+    kind: tree
+    layer: 2
+    height: 10.0
+  )
+  var placements: List(PropPlacement) = List.create(PropPlacement, cap: 2)
+  placements.add(
+    value: { kind: tree, position: Vec3.create(x: 1.0, y: 2.0, z: 3.0), yaw: 0.0, scale: 2.0 }
+  )
+  placements.add(
+    value: { kind: rock, position: Vec3.create(x: 4.0, y: 5.0, z: 6.0), yaw: 0.0, scale: 1.0 }
+  )
+  let made: List(FarSprite) = farSpritesOf(field: field, placements: placements)
+  let first: FarSprite = made.copyAtDefault(index: 0)
+  check(
+    label: "a prop field's trees with pictures: {made.length}, height {first.height}, centre {first.centerZ} m up, layer {first.layer}"
+    ok: made.length is 1 and Math.abs(value: first.height - 20.0) < 0.001 and Math.abs(
+      value: first.centerZ - 10.0
+    ) < 0.001 and first.layer is 2 and Math.abs(value: first.position.z - 3.0) < 0.001
+  )
+  ret 0
+}
