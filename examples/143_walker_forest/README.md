@@ -49,6 +49,14 @@ compiler/bin/rae run examples/143_walker_forest/Main.rae
   beaches and bare rock. Each 36 m block has one main species, so the forest
   grows in stands; three trees in ten are mixed in from any species. The
   kinds are those of Autumn Grove (138) without the giant camphor.
+- **How big it is.** The terrain has no edge: its noise goes on in every
+  direction (`wideForestWorldRadius` is 1,000 km). The planted forest is 1.2 x
+  1.2 km round the origin; the near ground drawn round the walker about 300 m
+  across, the far ground 2 x 2 km, the physics ground 240 m.
+- **The crowd walks the whole land** (app3d/Wander): to spots anywhere within
+  2.5 km of the origin (a circle 5 km across), a stop, another spot. Past the
+  physics ground round the walker the terrain's own height holds them up
+  (WalkerPhysics `holdMoversOnTerrain`), so they walk on far away.
 - **Pooled tree physics** (lib/app3d/WalkerPhysics' trunk pool). A tree is not an
   entity. Physics has a fixed pool of 96 static trunk capsules; when the
   walker has moved 2 m, the trees within 16 m are looked up in the forest's
