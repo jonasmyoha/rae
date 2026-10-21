@@ -43,6 +43,9 @@ const capsuleCapacity: Int = 256
 
 const wheelCapacity: Int = 64
 
+# Four wheels' full tyre tracks (app3d/WheelTracks' default 400 pieces)
+const markCapacity: Int = 1600
+
 type PlaygroundMeshes {
   box: MeshHandle
   sphere: MeshHandle
@@ -64,6 +67,9 @@ type PlaygroundBatches {
   # A second part of the ground in `groundCheckerMaterial` (the vehicle
   # course's dark checker squares); no mesh (-1) for the playgrounds
   groundChecker: InstanceBatch
+  # Marks on the ground the app fills each frame (app3d/WheelTracks' tyre
+  # tracks, a unit box per piece); empty for the playgrounds
+  marks: InstanceBatch
 }
 
 func uploadMeshData(renderer: mod DeferredRenderer, meshData: view MeshData) ret MeshHandle {
@@ -100,6 +106,7 @@ func createPlaygroundBatches(meshes: view PlaygroundMeshes) ret PlaygroundBatche
     wheels: createInstanceBatch(mesh: meshes.wheel, capacity: wheelCapacity)
     ground: createInstanceBatch(mesh: meshes.flatGround, capacity: 1)
     groundChecker: createInstanceBatch(mesh: meshHandle(id: -1, generation: 0), capacity: 1)
+    marks: createInstanceBatch(mesh: meshes.box, capacity: markCapacity)
   }
 }
 
@@ -259,7 +266,8 @@ func queueShadowCasters(
   drawShadowCasterBatchWith(renderer: renderer, mesh: meshes.wheel, batch: batches.wheels)
 }
 
-# The geometry pass: the ground, then each kind's batch as one draw.
+# The geometry pass: the ground, the marks on it, then each kind's batch as
+# one draw.
 func drawPlaygroundGeometry(
   cache: mod GbufferCache
   resources: mod GpuResources
@@ -286,6 +294,7 @@ func drawPlaygroundGeometry(
     )
     drawInstances(cache: cache, resources: resources, batch: batches.groundChecker)
   }
+  drawInstances(cache: cache, resources: resources, batch: batches.marks)
   drawInstances(cache: cache, resources: resources, batch: batches.boxes)
   drawInstances(cache: cache, resources: resources, batch: batches.spheres)
   drawInstances(cache: cache, resources: resources, batch: batches.capsules)
