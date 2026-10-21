@@ -96,6 +96,8 @@ open app3d/WalkerAppUpdate
 open app3d/WalkerSplash
 open app3d/WalkerState
 open app3d/WalkerSelfTest
+open app3d/WalkerClimbTest
+open app3d/Climbing
 open RendererForward
 open Moon
 open Calendar
@@ -791,6 +793,13 @@ func runWalkerApp(settings: view WalkerAppSettings) ret Int {
     exitCode = 1
   }
   if physicsTest {
+    # The checks below were written for a hero that does not climb: it climbs
+    # again for its own check after them
+    removeClimber(
+      climbing: app.physicsSystem.climbing
+      parked: app.physicsSystem.moverParked
+      entityId: rosterEntityAt(roster: app.players, index: 0)
+    )
     exitCode = runWalkerSelfTest(
       physicsSystem: app.physicsSystem
       world: app.world
@@ -815,6 +824,19 @@ func runWalkerApp(settings: view WalkerAppSettings) ret Int {
       biome: app.biome
       groundZ: app.characterSystem.groundZ
       modelHeight: app.characterSystem.modelHeight
+      heroEntityId: rosterEntityAt(roster: app.players, index: 0)
+    ) is false {
+      exitCode = 1
+    }
+    # Then climbing: up the nearest tree's trunk and down again
+    addClimber(
+      climbing: app.physicsSystem.climbing
+      entityId: rosterEntityAt(roster: app.players, index: 0)
+    )
+    if runWalkerClimbTest(
+      physicsSystem: app.physicsSystem
+      world: app.world
+      pooledTrunks: app.settings.land is WalkerLand.forest
       heroEntityId: rosterEntityAt(roster: app.players, index: 0)
     ) is false {
       exitCode = 1
