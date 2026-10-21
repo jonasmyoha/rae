@@ -10,8 +10,10 @@
 #   - a climbing one is moved along the wall instead of by the mover: the
 #     stick up and down climbs, sideways goes along, jump leaps up a stretch;
 #     it keeps to the wall as the wall turns (a round trunk); at the top it
-#     pulls itself over onto whatever it can stand on there, at a wall's top
-#     with nothing to stand on (a trunk's top) it goes no higher; climbing
+#     pulls itself over onto whatever it can stand on there (roomToStand: a
+#     roof, a ledge, a cliff's top at its feet or higher); at a wall's top
+#     with nothing to stand on (a trunk's or a pole's top, lower ground
+#     behind a thin trunk) it holds on there and goes no higher; climbing
 #     down to the ground it stands; out of stamina it lets go and falls;
 #   - every climber's stamina fills again on the ground.
 # A climber faces its wall (its controller's heading); while it climbs its
@@ -240,6 +242,62 @@ func startClimb(
   ret false
 }
 
+# How far the ground under a pull-up's footprint may lie from its middle's
+# (m): a step or a gentle roof, not the drop off a trunk's top
+const climbFootprintStep: Float = 0.3
+
+# Is there room to stand at `over`, a top at `topZ`: ground (not a wall)
+# under the front, back and both sides of a capsule of `radius` there, each
+# within climbFootprintStep of the top. A trunk's or a pole's top is not
+# (the climber hangs on at it); a roof, a ledge, a cliff's top is.
+func roomToStand(
+  climbing: view Climbing
+  physics: view Physics
+  over: view Vec3
+  normal: view Vec3
+  radius: view Float
+  topZ: view Float
+) ret Bool {
+  let sideX: Float = 0.0 - normal.y
+  let sideY: Float = normal.x
+  loop var i: Int = 0, i < 4, ++i {
+    var dx: Float = normal.x * radius
+    var dy: Float = normal.y * radius
+    if i is 1 {
+      dx = 0.0 - dx
+      dy = 0.0 - dy
+    }
+    if i is 2 {
+      dx = sideX * radius
+      dy = sideY * radius
+    }
+    if i is 3 {
+      dx = 0.0 - sideX * radius
+      dy = 0.0 - sideY * radius
+    }
+    let found: opt PhysicsHit = groundBelow(
+      climbing: climbing
+      physics: physics
+      origin: Vec3.create(x: over.x + dx, y: over.y + dy, z: topZ + climbFootprintStep)
+      length: climbFootprintStep * 2.0
+    )
+    if found is none {
+      ret false
+    }
+  }
+  ret true
+}
+
+# Out of stamina on a wall: let go of it, a little off it, and fall
+func letGoOfWall(climber: mod Climber, character: mod CharacterBody) {
+  climber.state = ClimbState.free
+  climber.leapLeft = 0.0
+  climber.letGos = climber.letGos + 1
+  character.mover.velocity.x = climber.normal.x * 1.0
+  character.mover.velocity.y = climber.normal.y * 1.0
+  character.mover.velocity.z = 0.0
+}
+
 # One fixed step of `deltaTime` on a wall
 func climbStep(
   climbing: view Climbing
@@ -269,17 +327,10 @@ func climbStep(
     rise = rise + leap
   }
   let along: Float = intent.moveX * tuning.sideSpeed * deltaTime
-  if Math.abs(value: intent.moveX) + Math.abs(value: intent.moveY) > 0.1 {
-    spendStamina(stamina: stamina, amount: climbing.staminaTuning.climbPerSecond * deltaTime)
-  }
-  # Out of stamina: let go, a little off the wall
+  # Out of stamina (a leap may have spent the last): let go, a little off
+  # the wall
   if mayClimb(stamina: stamina) is false {
-    climber.state = ClimbState.free
-    climber.leapLeft = 0.0
-    climber.letGos = climber.letGos + 1
-    character.mover.velocity.x = climber.normal.x * 1.0
-    character.mover.velocity.y = climber.normal.y * 1.0
-    character.mover.velocity.z = 0.0
+    letGoOfWall(climber: climber, character: character)
     ret
   }
   # Climbing down onto the ground: stand
@@ -322,9 +373,20 @@ func climbStep(
         z: next.z
       )
     )
+    # Moving on the wall spends stamina; hanging still, or held at a top
+    # it cannot go over, does not
+    if Math.abs(value: along) + Math.abs(value: rise) > 0.0001 {
+      spendStamina(stamina: stamina, amount: climbing.staminaTuning.climbPerSecond * deltaTime)
+      if mayClimb(stamina: stamina) is false {
+        letGoOfWall(climber: climber, character: character)
+      }
+    }
     ret
   }
-  # No wall there: over the top, pull up onto what is there to stand on
+  # No wall there: over the top, pull up onto what is there to stand on.
+  # Only a top at the climber's feet or higher is this wall's top: ground
+  # lower than that behind a thin trunk (on a slope) is not, and pulling up
+  # onto it dropped the climber forward off the trunk
   if rise > 0.0 {
     let over: Vec3 = Vec3.create(
       x: next.x - climber.normal.x * (radius + tuning.mantleForward)
@@ -337,6 +399,18 @@ func climbStep(
       origin: Vec3.create(x: over.x, y: over.y, z: over.z + aboveFeet)
       length: aboveFeet * 2.0 + tuning.mantleReach
     ) {
+      if top.point.z < center.z - aboveFeet or roomToStand(
+        climbing: climbing
+        physics: physics
+        over: over
+        normal: climber.normal
+        radius: radius
+        topZ: top.point.z
+      ) is false {
+        climber.leapLeft = 0.0
+        setMoverCenter(character: character, center: center)
+        ret
+      }
       climber.state = ClimbState.free
       climber.leapLeft = 0.0
       climber.mantles = climber.mantles + 1
