@@ -1255,6 +1255,24 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             grep -a '^\[mem:live\]' "$TMP_OUT/live-growth.log" 2>/dev/null | sed 's/^/  /'
             ((FAILED++))
           fi
+        elif [ "$EXAMPLE_NAME" = "145_tile_streaming" ]; then
+          # An open world streamed in tiles (app3d/TileStreaming, SlotMeshes):
+          # a shaded frame of the generated grid, then the headless flight of
+          # 2 km: never more tiles than slots, every held slot drawn and every
+          # free one empty, the tiles round the camera held.
+          SHOT="$TMP_OUT/tiles.bmp"
+          if (cd .. && RAE_SDL_HEADLESS_MS=3000 RAE_GPU2D_SCREENSHOT="$SHOT" \
+                perl -e 'alarm shift; exec @ARGV' 60 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
+             && python3 tools/assert_nonblank_bmp.py "$SHOT" --min-colors=500 > "$TMP_OUT/shot.log" 2>&1 \
+             && (cd .. && RAE_TILES_TEST=1 RAE_SDL_HEADLESS_MS=120000 perl -e 'alarm shift; exec @ARGV' 120 "$TMP_OUT/app") > "$TMP_OUT/tiletest.log" 2>&1 \
+             && grep -q "\[tiletest\] .* passed=true" "$TMP_OUT/tiletest.log"; then
+            echo "PASS: $EXAMPLE_NAME (a generated grid streamed round a flight, slots drawn and emptied by the tiles' events)"
+            ((PASSED++))
+          else
+            echo "FAIL: $EXAMPLE_NAME (tile streaming)"
+            cat "$TMP_OUT/render.log" "$TMP_OUT/shot.log" "$TMP_OUT/tiletest.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/  /'
+            ((FAILED++))
+          fi
         elif [ "$EXAMPLE_NAME" = "144_gltf_level" ]; then
           # A glTF level (tools/levels/exportWalkLevel.py) read by
           # app3d/GltfLevel: a shaded frame of its meshes in their base
