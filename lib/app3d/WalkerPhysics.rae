@@ -624,13 +624,15 @@ func stepPhysicsFrame(
 
 # ----- tree trunks -------------------------------------------------------
 # A static body with a trunk capsule for the tree `entityId` at its pose in
-# `transforms`. The trunk is the same for every species and size
-# (GroveTrees.treeTrunkRadius / Height), so a tree that moves only needs its
-# body moved, which the push system does when its Transform3D changes.
+# `transforms`, `height` m tall (GroveTrees.treeTrunkTop: up into its
+# crown, so a climber goes up it), as thick for every tree
+# (GroveTrees.treeTrunkRadius). A tree that moves only needs its body moved,
+# which the push system does when its Transform3D changes.
 func addTreeTrunk(
   physicsSystem: mod WalkerPhysics
   transforms: mod ComponentTable(Transform3D)
   entityId: view EntityId
+  height: view Float
 ) {
   var bodyDef: BodyDef = defaultBodyDef(lengthUnitsPerMeter: 1.0)
   bodyDef.bodyType = BodyType.staticBody
@@ -653,7 +655,7 @@ func addTreeTrunk(
     def: shapeDef
     capsule: {
       center1: Vec3 { x: 0.0, y: 0.0, z: treeTrunkRadius }
-      center2: Vec3 { x: 0.0, y: 0.0, z: treeTrunkHeight }
+      center2: Vec3 { x: 0.0, y: 0.0, z: Math.max(a: height, b: treeTrunkRadius * 2.0) }
       radius: treeTrunkRadius
     }
   )
@@ -680,8 +682,9 @@ const trunkPoolMove: Float = 2.0
 # Where an unused trunk waits: this far below the ground
 const trunkPoolParked: Float = -1000.0
 
-# The pool's settings: trunks only, the same capsule for every species and
-# size (GroveTrees.treeTrunkRadius / Height), the default material
+# The pool's settings: trunks only, each as thick (GroveTrees.treeTrunkRadius)
+# and reaching up into its tree's crown (walkerTrunkRules), the default
+# material
 func walkerTrunkPoolSettings() ret PropPoolSettings {
   ret PropPoolSettings {
     trunkCount: trunkPoolSize
@@ -699,7 +702,8 @@ func walkerTrunkPoolSettings() ret PropPoolSettings {
   }
 }
 
-# Every kind of the forest a trunk of the one size
+# Every kind of the forest a trunk of the one thickness, its top
+# treeTrunkShare of its tree's height (a climber goes up into the crown)
 func walkerTrunkRules(forest: view PropField) ret List(PropColliderRule) {
   var rules: List(PropColliderRule) = List.create(PropColliderRule, cap: forest.kinds.length)
   loop var kind: Int = 0, kind < forest.kinds.length, ++kind {
@@ -707,8 +711,8 @@ func walkerTrunkRules(forest: view PropField) ret List(PropColliderRule) {
       role: PropBodyRole.trunk
       minRadius: treeTrunkRadius
       maxRadius: treeTrunkRadius
-      heightShare: 1000.0
-      maxHeight: treeTrunkHeight
+      heightShare: treeTrunkShare
+      maxHeight: 40.0
     })
   }
   ret rules

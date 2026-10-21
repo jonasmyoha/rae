@@ -17,13 +17,16 @@ open app3d/WalkerPhysicsChecks
 open app3d/WalkerTerrainBodies
 open app3d/WalkerSelfTest
 open app3d/WalkerWorld
+open app3d/GroveTrees
+open app3d/WalkerTerrain
 
-# Fixed steps to reach the trunk (8 s), to climb (3 s) and to come down (6 s)
+# Fixed steps to reach the trunk (8 s), to climb with the stick held up (8 s,
+# under the 11 s the stamina lasts) and to come down (10 s)
 const climbTestWalkSteps: Int = 480
 
-const climbTestUpSteps: Int = 180
+const climbTestUpSteps: Int = 480
 
-const climbTestDownSteps: Int = 360
+const climbTestDownSteps: Int = 600
 
 func backIntent() ret InputIntent {
   ret InputIntent {
@@ -112,6 +115,9 @@ func runWalkerClimbTest(
       physicsSystem: physicsSystem
       heroEntityId: heroEntityId
     )
+    # Held up the whole time: on the trunk all the way, never dropped
+    var heldOn: Bool = true
+    var highest: Float = startZ
     loop var step: Int = 0, step < climbTestUpSteps, ++step {
       selfTestStep(
         physicsSystem: physicsSystem
@@ -121,6 +127,11 @@ func runWalkerClimbTest(
         heroEntityId: heroEntityId
         intent: forward
         yaw: yaw
+      )
+      heldOn = heldOn and isClimbing(climbing: physicsSystem.climbing, entityId: heroEntityId)
+      highest = Math.max(
+        a: highest
+        b: heroFeetZ(world: world, physicsSystem: physicsSystem, heroEntityId: heroEntityId)
       )
     }
     let rose: Float = heroFeetZ(
@@ -153,9 +164,16 @@ func runWalkerClimbTest(
       downSteps = downSteps + 1
     }
     let cameDown: Bool = isClimbing(climbing: physicsSystem.climbing, entityId: heroEntityId) is false
-    let passed: Bool = started and rose > 1.0 and spent > 0.0 and cameDown
+    var treeHeight: Float = 0.0
+    if let variant: TreeVariant = componentCopy(this: world.treeVariants, entityId: treeEntityId) {
+      treeHeight = treeHeightFor(
+        species: variant.species
+        scale: transformOf(transforms: world.transforms, entityId: treeEntityId).scale.z
+      )
+    }
+    let passed: Bool = started and heldOn and rose > treeHeight * 0.45 and spent > 0.0 and cameDown
     log(
-      "[climbtest] started={started} after {walkSteps} steps, rose {rose} m in {climbTestUpSteps} steps, stamina spent {spent}, cameDown={cameDown} after {downSteps} steps, passed={passed}"
+      "[climbtest] a tree {treeHeight} m tall: started={started} after {walkSteps} steps, held up {climbTestUpSteps} steps: on it all along={heldOn}, rose {rose} m (highest {highest - startZ} m), stamina spent {spent}, cameDown={cameDown} after {downSteps} steps, passed={passed}"
     )
     ret passed
   }
