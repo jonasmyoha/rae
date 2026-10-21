@@ -1,0 +1,422 @@
+# app3d/Climbing — climbing for every character with a Climber (app3d/ClimbRules
+# for the rules): no wall is marked; anything static and steep enough the
+# character pushes into is climbed — a tree's trunk, a house, a cliff, a rock.
+# Moving bodies (a loose box, a hurdle, a car) are never walls.
+#
+# Each fixed step, after the movers moved (moveMovers) and before their
+# controllers are read back (readMoverControllers), stepClimbers:
+#   - a free climber whose stick (its MoverDrive, along its yaw) pushes into a
+#     wall within reach of its capsule starts climbing, if its stamina allows;
+#   - a climbing one is moved along the wall instead of by the mover: the
+#     stick up and down climbs, sideways goes along, jump leaps up a stretch;
+#     it keeps to the wall as the wall turns (a round trunk); at the top it
+#     pulls itself over onto whatever it can stand on there, at a wall's top
+#     with nothing to stand on (a trunk's top) it goes no higher; climbing
+#     down to the ground it stands; out of stamina it lets go and falls;
+#   - every climber's stamina fills again on the ground.
+# A climber faces its wall (its controller's heading); while it climbs its
+# mover is parked (MoverParked: not moved, its controller not read back) and
+# this moves the mover and writes the controller instead. An app that parks
+# its own movers each step (knocked down, seated) keeps a climbing one parked
+# too (isClimbing); one the app parks is never climbing.
+import Math
+import Vec3
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Tag
+open box3d/Box3d
+open box3d/Box3dEnums
+open box3d/ecs/PhysicsTypes
+open box3d/ecs/Physics
+open box3d/ecs/PhysicsComponents
+open box3d/ecs/PhysicsQueries
+open app3d/CharacterController
+open app3d/CharacterBodies
+open app3d/CharacterMovers
+open app3d/ClimbRules
+
+enum ClimbState { free, climbing }
+
+# A character that may climb: free or on a wall (its outward normal), a leap
+# still to rise (m), and counts of its climbs, pull-ups and let-gos
+type Climber {
+  state: ClimbState = ClimbState.free
+  normal: Vec3 = Vec3 { x: 0.0, y: -1.0, z: 0.0 }
+  leapLeft: Float = 0.0
+  # Its mover parked by the climb (MoverParked), not by the app
+  parkedByClimb: Bool = false
+  climbs: Int = 0
+  mantles: Int = 0
+  letGos: Int = 0
+}
+
+type Climbing {
+  climbers: ComponentTable(Climber)
+  staminas: ComponentTable(Stamina)
+  tuning: ClimbTuning
+  staminaTuning: StaminaTuning
+  # The collision categories that may be walls (all by default)
+  wallMask: UInt64
+}
+
+func createClimbing(
+  tuning: view ClimbTuning
+  staminaTuning: view StaminaTuning
+  wallMask: view UInt64
+) ret Climbing {
+  ret Climbing {
+    climbers: ComponentTable.create(Climber)
+    staminas: ComponentTable.create(Stamina)
+    tuning: tuning
+    staminaTuning: staminaTuning
+    wallMask: wallMask
+  }
+}
+
+# `entityId` may climb, with full stamina
+func addClimber(climbing: mod Climbing, entityId: view EntityId) {
+  componentSet(this: climbing.climbers, entityId: entityId, data: Climber {})
+  componentSet(
+    this: climbing.staminas
+    entityId: entityId
+    data: fullStamina(tuning: climbing.staminaTuning)
+  )
+}
+
+func isClimbing(climbing: view Climbing, entityId: view EntityId) ret Bool {
+  if componentHas(this: climbing.climbers, entityId: entityId) is false {
+    ret false
+  }
+  ret componentView(this: climbing.climbers, entityId: entityId).state is ClimbState.climbing
+}
+
+# Is the shape `shapeId` on a body that does not move (static or kinematic)?
+func onStillBody(shapeId: view ShapeId) ret Bool {
+  unsafe {
+    ret b3Body_GetType(bodyId: b3Shape_GetBody(shapeId: toB3ShapeId(shapeId: shapeId))) is not b3_dynamicBody
+  }
+}
+
+func wallFilter(climbing: view Climbing) ret QueryFilter {
+  var filter: QueryFilter = defaultQueryFilter()
+  filter.maskBits = climbing.wallMask
+  ret filter
+}
+
+# A wall (still, steep, of a wall category) along `translation` from `origin`
+func wallAlong(
+  climbing: view Climbing
+  physics: view Physics
+  origin: view Vec3
+  translation: view Vec3
+) ret opt PhysicsHit {
+  let hit: PhysicsHit = raycastClosest(
+    physics: physics
+    origin: origin
+    translation: translation
+    filter: wallFilter(climbing: climbing)
+  )
+  if hit.hit and onStillBody(shapeId: hit.shapeId) and isClimbableWall(
+    tuning: climbing.tuning
+    normal: hit.normal
+  ) {
+    ret hit
+  }
+  ret none
+}
+
+# Ground to stand on (not a wall) down from `origin`, within `length`
+func groundBelow(
+  climbing: view Climbing
+  physics: view Physics
+  origin: view Vec3
+  length: view Float
+) ret opt PhysicsHit {
+  let hit: PhysicsHit = raycastClosest(
+    physics: physics
+    origin: origin
+    translation: Vec3.create(x: 0.0, y: 0.0, z: 0.0 - length)
+    filter: wallFilter(climbing: climbing)
+  )
+  if hit.hit and isClimbableWall(tuning: climbing.tuning, normal: hit.normal) is false {
+    ret hit
+  }
+  ret none
+}
+
+# The wall's outward normal, flat (unit)
+func flatNormal(normal: view Vec3) ret Vec3 {
+  let length: Float = Math.max(
+    a: Math.sqrt(x: normal.x * normal.x + normal.y * normal.y)
+    b: 0.0001
+  )
+  ret Vec3.create(x: normal.x / length, y: normal.y / length, z: 0.0)
+}
+
+func setMoverCenter(character: mod CharacterBody, center: view Vec3) {
+  character.mover.transform.p.x = center.x
+  character.mover.transform.p.y = center.y
+  character.mover.transform.p.z = center.z
+  character.mover.velocity.x = 0.0
+  character.mover.velocity.y = 0.0
+  character.mover.velocity.z = 0.0
+  character.mover.pogoVelocity = 0.0
+}
+
+func moverCenter(character: view CharacterBody) ret Vec3 {
+  ret Vec3.create(
+    x: character.mover.transform.p.x
+    y: character.mover.transform.p.y
+    z: character.mover.transform.p.z
+  )
+}
+
+# A free climber starts on a wall its stick pushes into: true when it did
+func startClimb(
+  climbing: view Climbing
+  physics: view Physics
+  climber: mod Climber
+  character: mod CharacterBody
+  drive: view MoverDrive
+) ret Bool {
+  let direction: Vec3 = stickDirection(
+    moveX: drive.intent.moveX
+    moveY: drive.intent.moveY
+    yaw: drive.yaw
+  )
+  if Vec3.vlen(a: direction) < 0.5 {
+    ret false
+  }
+  let radius: Float = character.mover.capsule.radius
+  let center: Vec3 = moverCenter(character: character)
+  if let wall: PhysicsHit = wallAlong(
+    climbing: climbing
+    physics: physics
+    origin: center
+    translation: Vec3.vscale(a: direction, s: radius + climbing.tuning.reach)
+  ) {
+    if pushesInto(tuning: climbing.tuning, direction: direction, normal: wall.normal) is false {
+      ret false
+    }
+    let normal: Vec3 = flatNormal(normal: wall.normal)
+    climber.state = ClimbState.climbing
+    climber.normal = normal
+    climber.leapLeft = 0.0
+    climber.climbs = climber.climbs + 1
+    setMoverCenter(
+      character: character
+      center: Vec3.create(
+        x: wall.point.x + normal.x * (radius + climbing.tuning.gap)
+        y: wall.point.y + normal.y * (radius + climbing.tuning.gap)
+        z: center.z
+      )
+    )
+    ret true
+  }
+  ret false
+}
+
+# One fixed step of `deltaTime` on a wall
+func climbStep(
+  climbing: view Climbing
+  physics: view Physics
+  climber: mod Climber
+  stamina: mod Stamina
+  character: mod CharacterBody
+  intent: view InputIntent
+  deltaTime: view Float
+) {
+  let tuning: ClimbTuning = climbing.tuning
+  let radius: Float = character.mover.capsule.radius
+  let center: Vec3 = moverCenter(character: character)
+  let aboveFeet: Float = moverCenterAboveFeet(character: character)
+  let heading: Float = headingFacing(normal: climber.normal)
+  let rightX: Float = Math.cos(x: heading)
+  let rightY: Float = Math.sin(x: heading)
+  # A leap: asked with jump, paid at once, risen over the next steps
+  if intent.jump and climber.leapLeft <= 0.0 and mayClimb(stamina: stamina) {
+    climber.leapLeft = tuning.leapHeight
+    spendStamina(stamina: stamina, amount: climbing.staminaTuning.leapCost)
+  }
+  var rise: Float = intent.moveY * tuning.climbSpeed * deltaTime
+  if climber.leapLeft > 0.0 {
+    let leap: Float = Math.min(a: tuning.leapSpeed * deltaTime, b: climber.leapLeft)
+    climber.leapLeft = climber.leapLeft - leap
+    rise = rise + leap
+  }
+  let along: Float = intent.moveX * tuning.sideSpeed * deltaTime
+  if Math.abs(value: intent.moveX) + Math.abs(value: intent.moveY) > 0.1 {
+    spendStamina(stamina: stamina, amount: climbing.staminaTuning.climbPerSecond * deltaTime)
+  }
+  # Out of stamina: let go, a little off the wall
+  if mayClimb(stamina: stamina) is false {
+    climber.state = ClimbState.free
+    climber.leapLeft = 0.0
+    climber.letGos = climber.letGos + 1
+    character.mover.velocity.x = climber.normal.x * 1.0
+    character.mover.velocity.y = climber.normal.y * 1.0
+    character.mover.velocity.z = 0.0
+    ret
+  }
+  # Climbing down onto the ground: stand
+  if rise < 0.0 {
+    if let ground: PhysicsHit = groundBelow(
+      climbing: climbing
+      physics: physics
+      origin: center
+      length: aboveFeet + 0.1
+    ) {
+      climber.state = ClimbState.free
+      climber.leapLeft = 0.0
+      setMoverCenter(
+        character: character
+        center: Vec3.create(x: center.x, y: center.y, z: ground.point.z + aboveFeet)
+      )
+      ret
+    }
+  }
+  let next: Vec3 = Vec3.create(
+    x: center.x + rightX * along
+    y: center.y + rightY * along
+    z: center.z + rise
+  )
+  # Keep to the wall at the new place (it may turn: a round trunk)
+  let into: Vec3 = Vec3.vscale(a: climber.normal, s: 0.0 - (radius + tuning.reach * 2.0))
+  if let wall: PhysicsHit = wallAlong(
+    climbing: climbing
+    physics: physics
+    origin: next
+    translation: into
+  ) {
+    let normal: Vec3 = flatNormal(normal: wall.normal)
+    climber.normal = normal
+    setMoverCenter(
+      character: character
+      center: Vec3.create(
+        x: wall.point.x + normal.x * (radius + tuning.gap)
+        y: wall.point.y + normal.y * (radius + tuning.gap)
+        z: next.z
+      )
+    )
+    ret
+  }
+  # No wall there: over the top, pull up onto what is there to stand on
+  if rise > 0.0 {
+    let over: Vec3 = Vec3.create(
+      x: next.x - climber.normal.x * (radius + tuning.mantleForward)
+      y: next.y - climber.normal.y * (radius + tuning.mantleForward)
+      z: next.z
+    )
+    if let top: PhysicsHit = groundBelow(
+      climbing: climbing
+      physics: physics
+      origin: Vec3.create(x: over.x, y: over.y, z: over.z + aboveFeet)
+      length: aboveFeet * 2.0 + tuning.mantleReach
+    ) {
+      climber.state = ClimbState.free
+      climber.leapLeft = 0.0
+      climber.mantles = climber.mantles + 1
+      setMoverCenter(
+        character: character
+        center: Vec3.create(x: over.x, y: over.y, z: top.point.z + aboveFeet)
+      )
+      ret
+    }
+  }
+  # The wall's top with nothing on it, or its side's end: no further
+  climber.leapLeft = 0.0
+  setMoverCenter(character: character, center: center)
+}
+
+# One fixed step of every climber (see the head of this file)
+func stepClimbers(
+  climbing: mod Climbing
+  physics: view Physics
+  characters: mod ComponentTable(CharacterBody)
+  controllers: mod ComponentTable(ThirdPersonController)
+  drives: view ComponentTable(MoverDrive)
+  parked: mod ComponentTable(MoverParked)
+  groundZ: view Float
+  deltaTime: view Float
+) {
+  loop var i: Int = 0, i < componentCount(this: climbing.climbers), ++i {
+    let entityId: EntityId = componentEntityAt(this: climbing.climbers, i: i)
+    if componentHas(this: characters, entityId: entityId) is false or componentHas(
+      this: climbing.staminas
+      entityId: entityId
+    ) is false {
+      continue
+    }
+    var climber: Climber = componentCopyAtDefault(this: climbing.climbers, i: i)
+    var stamina: Stamina = fullStamina(tuning: climbing.staminaTuning)
+    if let held: Stamina = componentCopy(this: climbing.staminas, entityId: entityId) {
+      stamina = held
+    }
+    var intent: InputIntent = createInputIntent()
+    var drive: MoverDrive = createMoverDrive()
+    if let driven: MoverDrive = componentCopy(this: drives, entityId: entityId) {
+      intent = driven.intent
+      drive = driven
+    }
+    let character: mod CharacterBody = componentMod(this: characters, entityId: entityId)
+    # Parked by the app (lying knocked down, seated): no climbing
+    if hasTag(MoverParked, table: parked, entityId: entityId) and climber.parkedByClimb is false {
+      climber.state = ClimbState.free
+    } else if climber.state is ClimbState.climbing {
+      climbStep(
+        climbing: climbing
+        physics: physics
+        climber: climber
+        stamina: stamina
+        character: character
+        intent: intent
+        deltaTime: deltaTime
+      )
+    } else if mayClimb(stamina: stamina) {
+      let started: Bool = startClimb(
+        climbing: climbing
+        physics: physics
+        climber: climber
+        character: character
+        drive: drive
+      )
+    }
+    if climber.state is ClimbState.climbing {
+      if climber.parkedByClimb is false {
+        addTag(MoverParked, table: parked, entityId: entityId)
+        climber.parkedByClimb = true
+      }
+      # Its controller: its feet under the capsule, facing the wall, moving
+      # while it climbs
+      if componentHas(this: controllers, entityId: entityId) {
+        let feetZ: Float = character.mover.transform.p.z - moverCenterAboveFeet(
+          character: character
+        ) - groundZ
+        let controller: mod ThirdPersonController = componentMod(
+          this: controllers
+          entityId: entityId
+        )
+        controller.position = Vec3.create(
+          x: character.mover.transform.p.x
+          y: character.mover.transform.p.y
+          z: feetZ
+        )
+        controller.heading = headingFacing(normal: climber.normal)
+        controller.moving = Math.abs(value: intent.moveX) + Math.abs(value: intent.moveY) > 0.1
+        controller.walking = controller.moving
+      }
+    } else if climber.parkedByClimb {
+      removeTag(MoverParked, table: parked, entityId: entityId)
+      climber.parkedByClimb = false
+    }
+    # On a wall it does not fill (as off the ground)
+    restStamina(
+      stamina: stamina
+      tuning: climbing.staminaTuning
+      grounded: character.grounded and climber.state is ClimbState.free
+      deltaTime: deltaTime
+    )
+    componentSet(this: climbing.climbers, entityId: entityId, data: climber)
+    componentSet(this: climbing.staminas, entityId: entityId, data: stamina)
+  }
+}

@@ -1,0 +1,396 @@
+# app3d/ClimbRules and app3d/Climbing: what is a wall, stamina spent and
+# filled, exhausted until full; and in a Box3D world a mover that walks into
+# a 3 m wall climbs it and pulls itself up onto its top, its stamina filling
+# again there; on a 20 m wall it runs out, lets go, falls, and may not climb
+# again until full; a loose box is never climbed.
+import Math
+import Vec3
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open ecs/Transform
+open box3d/ecs/PhysicsTypes
+open box3d/ecs/Physics
+open box3d/ecs/PhysicsComponents
+open box3d/ecs/PhysicsSpawn
+open box3d/ecs/PhysicsQueries
+open app3d/CharacterController
+open app3d/CharacterBodies
+open app3d/CharacterMovers
+open app3d/ClimbRules
+open app3d/Climbing
+
+func near(a: view Float, b: view Float, within: view Float) ret Bool {
+  ret Math.abs(value: a - b) <= within
+}
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+type TestWorld {
+  physics: Physics
+  allocator: EntityAllocator
+  rigidBodies: ComponentTable(RigidBody)
+  colliders: ComponentTable(Collider)
+  transforms: ComponentTable(Transform3D)
+  characters: ComponentTable(CharacterBody)
+  controllers: ComponentTable(ThirdPersonController)
+  drives: ComponentTable(MoverDrive)
+  parked: ComponentTable(MoverParked)
+  limits: ComponentTable(MoverSpeedLimit)
+  steps: ComponentTable(MoverStep)
+}
+
+# A box `half` round `center`, static or loose
+func addBox(
+  world: mod TestWorld
+  center: view Vec3
+  half: view Vec3
+  loose: view Bool
+) {
+  let entityId: EntityId = allocEntity(this: world.allocator)
+  var bodyDef: BodyDef = defaultBodyDef(lengthUnitsPerMeter: 1.0)
+  bodyDef.bodyType = BodyType.staticBody
+  if loose {
+    bodyDef.bodyType = BodyType.dynamicBody
+  }
+  bodyDef.position = center
+  let bodyId: BodyId = spawnRigidBody(
+    physics: world.physics
+    rigidBodies: world.rigidBodies
+    transforms: world.transforms
+    entityId: entityId
+    def: bodyDef
+  )
+  let shapeId: ShapeId = addBoxCollider(
+    physics: world.physics
+    rigidBodies: world.rigidBodies
+    colliders: world.colliders
+    entityId: entityId
+    def: defaultShapeDef(lengthUnitsPerMeter: 1.0)
+    halfExtents: half
+    transform: transformIdentity()
+  )
+}
+
+# One fixed step standing still (the stick let go)
+func step(world: mod TestWorld, climbing: mod Climbing) {
+  componentSet(
+    this: world.drives
+    entityId: componentEntityAt(this: world.characters, i: 0)
+    data: createMoverDrive()
+  )
+  driveMovers(characters: world.characters, controllers: world.controllers, drives: world.drives)
+  stepMoved(world: world, climbing: climbing)
+}
+
+# One fixed step: the movers moved, the climbers, the controllers read back
+func stepMoved(world: mod TestWorld, climbing: mod Climbing) {
+  moveMovers(
+    physics: world.physics
+    characters: world.characters
+    parked: world.parked
+    limits: world.limits
+    steps: world.steps
+  )
+  stepClimbers(
+    climbing: climbing
+    physics: world.physics
+    characters: world.characters
+    controllers: world.controllers
+    drives: world.drives
+    parked: world.parked
+    groundZ: 0.0
+    deltaTime: 1.0 / 60.0
+  )
+  readMoverControllers(
+    characters: world.characters
+    controllers: world.controllers
+    parked: world.parked
+    groundZ: 0.0
+    fixedStep: 1.0 / 60.0
+  )
+}
+
+# The stick held forward (toward +y) for `steps` steps
+func push(
+  world: mod TestWorld
+  climbing: mod Climbing
+  hero: view EntityId
+  steps: view Int
+) {
+  loop var i: Int = 0, i < steps, ++i {
+    var drive: MoverDrive = createMoverDrive()
+    drive.intent.moveY = 1.0
+    drive.intent.walking = true
+    componentSet(this: world.drives, entityId: hero, data: drive)
+    driveMovers(characters: world.characters, controllers: world.controllers, drives: world.drives)
+    stepMoved(world: world, climbing: climbing)
+  }
+}
+
+func climberOf(climbing: view Climbing, hero: view EntityId) ret Climber {
+  if let climber: Climber = componentCopy(this: climbing.climbers, entityId: hero) {
+    ret climber
+  }
+  ret Climber {}
+}
+
+func staminaOf(climbing: view Climbing, hero: view EntityId) ret Stamina {
+  if let stamina: Stamina = componentCopy(this: climbing.staminas, entityId: hero) {
+    ret stamina
+  }
+  ret fullStamina(tuning: climbing.staminaTuning)
+}
+
+# The hero set down with its feet at `feet`, still
+func placeHero(world: mod TestWorld, hero: view EntityId, feet: view Vec3) {
+  let character: mod CharacterBody = componentMod(this: world.characters, entityId: hero)
+  character.mover.transform.p.x = feet.x
+  character.mover.transform.p.y = feet.y
+  character.mover.transform.p.z = feet.z + moverCenterAboveFeet(character: character)
+  character.mover.velocity.x = 0.0
+  character.mover.velocity.y = 0.0
+  character.mover.velocity.z = 0.0
+}
+
+func feetOf(world: view TestWorld, hero: view EntityId) ret Vec3 {
+  ret controllerOf(controllers: world.controllers, entityId: hero).position
+}
+
+func main() {
+  # ----- the rules -------------------------------------------------------------
+  let tuning: ClimbTuning = {}
+  let staminaTuning: StaminaTuning = {}
+  check(
+    label: "a trunk, a house's wall, a cliff are walls; a hillside one may walk up is not"
+    ok: isClimbableWall(tuning: tuning, normal: Vec3.create(x: 1.0, y: 0.0, z: 0.0)) and isClimbableWall(
+      tuning: tuning
+      normal: Vec3.create(x: 0.9, y: 0.0, z: 0.43)
+    ) and isClimbableWall(tuning: tuning, normal: Vec3.create(x: 0.5, y: 0.0, z: 0.866)) is false
+  )
+  var stamina: Stamina = fullStamina(tuning: staminaTuning)
+  spendStamina(stamina: stamina, amount: 30.0)
+  restStamina(
+    stamina: stamina
+    tuning: staminaTuning
+    grounded: true
+    deltaTime: 0.3
+  )
+  let waited: Bool = near(a: stamina.value, b: 70.0, within: 0.01)
+  restStamina(
+    stamina: stamina
+    tuning: staminaTuning
+    grounded: true
+    deltaTime: 0.5
+  )
+  check(
+    label: "spent, it waits a moment, then fills on the ground ({stamina.value})"
+    ok: waited and stamina.value > 70.0 and mayClimb(stamina: stamina)
+  )
+  spendStamina(stamina: stamina, amount: 500.0)
+  let outOfIt: Bool = stamina.exhausted and mayClimb(stamina: stamina) is false
+  loop var i: Int = 0, i < 60, ++i {
+    restStamina(
+      stamina: stamina
+      tuning: staminaTuning
+      grounded: true
+      deltaTime: 0.05
+    )
+  }
+  let halfway: Bool = stamina.value > 20.0 and stamina.exhausted and mayClimb(stamina: stamina) is false
+  loop var i: Int = 0, i < 60, ++i {
+    restStamina(
+      stamina: stamina
+      tuning: staminaTuning
+      grounded: true
+      deltaTime: 0.05
+    )
+  }
+  check(
+    label: "run out it is exhausted, and stays so until it is full again; the wheel then hides"
+    ok: outOfIt and halfway and stamina.exhausted is false and mayClimb(stamina: stamina) and staminaWheelShows(
+      stamina: stamina
+      tuning: staminaTuning
+    ) is false
+  )
+  check(
+    label: "a climber faces its wall; the stick pushes into it or not"
+    ok: near(a: headingFacing(normal: Vec3.create(x: 0.0, y: -1.0, z: 0.0)), b: 0.0, within: 0.001) and pushesInto(
+      tuning: tuning
+      direction: stickDirection(moveX: 0.0, moveY: 1.0, yaw: 0.0)
+      normal: Vec3.create(x: 0.0, y: -1.0, z: 0.0)
+    ) and pushesInto(
+      tuning: tuning
+      direction: stickDirection(moveX: 1.0, moveY: 0.0, yaw: 0.0)
+      normal: Vec3.create(x: 0.0, y: -1.0, z: 0.0)
+    ) is false
+  )
+  # ----- in a Box3D world ---------------------------------------------------------
+  var world: TestWorld = {
+    physics: createPhysics(def: defaultPhysicsWorldDef(), fixedStep: 1.0 / 60.0, subSteps: 4)
+    allocator: createEntityAllocator()
+    rigidBodies: ComponentTable.create(RigidBody)
+    colliders: ComponentTable.create(Collider)
+    transforms: ComponentTable.create(Transform3D)
+    characters: ComponentTable.create(CharacterBody)
+    controllers: ComponentTable.create(ThirdPersonController)
+    drives: ComponentTable.create(MoverDrive)
+    parked: ComponentTable.create(MoverParked)
+    limits: ComponentTable.create(MoverSpeedLimit)
+    steps: ComponentTable.create(MoverStep)
+  }
+  # The ground, a 3 m wall 3 m ahead (its face at y 3), a 20 m one east, a
+  # loose box west
+  addBox(
+    world: world
+    center: Vec3.create(x: 0.0, y: 0.0, z: -0.5)
+    half: Vec3.create(x: 40.0, y: 40.0, z: 0.5)
+    loose: false
+  )
+  addBox(
+    world: world
+    center: Vec3.create(x: 0.0, y: 5.0, z: 1.5)
+    half: Vec3.create(x: 2.0, y: 2.0, z: 1.5)
+    loose: false
+  )
+  addBox(
+    world: world
+    center: Vec3.create(x: 10.0, y: 5.0, z: 10.0)
+    half: Vec3.create(x: 2.0, y: 2.0, z: 10.0)
+    loose: false
+  )
+  addBox(
+    world: world
+    center: Vec3.create(x: -10.0, y: 3.6, z: 1.0)
+    half: Vec3.create(x: 1.0, y: 0.5, z: 1.0)
+    loose: true
+  )
+  var climbing: Climbing = createClimbing(
+    tuning: tuning
+    staminaTuning: staminaTuning
+    wallMask: allBits
+  )
+  let hero: EntityId = allocEntity(this: world.allocator)
+  componentSet(this: world.controllers, entityId: hero, data: createThirdPersonController())
+  addCharacterBody(
+    characters: world.characters
+    entityId: hero
+    feet: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  )
+  addClimber(climbing: climbing, entityId: hero)
+  loop var i: Int = 0, i < 30, ++i {
+    step(world: world, climbing: climbing)
+  }
+  # Walk into the wall: a climb
+  var toWall: Int = 0
+  loop toWall < 400 and isClimbing(climbing: climbing, entityId: hero) is false {
+    push(
+      world: world
+      climbing: climbing
+      hero: hero
+      steps: 1
+    )
+    toWall = toWall + 1
+  }
+  let atWall: Vec3 = feetOf(world: world, hero: hero)
+  check(
+    label: "walked into the wall, it climbs it after {toWall} steps (feet at y {atWall.y}), facing it"
+    ok: isClimbing(climbing: climbing, entityId: hero) and climberOf(climbing: climbing, hero: hero).climbs is 1 and atWall.y < 3.0 and atWall.y > 2.0 and near(
+      a: controllerOf(controllers: world.controllers, entityId: hero).heading
+      b: 0.0
+      within: 0.01
+    )
+  )
+  # Up it and over its top
+  let spentBefore: Float = staminaOf(climbing: climbing, hero: hero).value
+  var upSteps: Int = 0
+  var highestOnWall: Float = 0.0
+  loop upSteps < 400 and climberOf(climbing: climbing, hero: hero).mantles is 0 {
+    push(
+      world: world
+      climbing: climbing
+      hero: hero
+      steps: 1
+    )
+    highestOnWall = Math.max(a: highestOnWall, b: feetOf(world: world, hero: hero).z)
+    upSteps = upSteps + 1
+  }
+  let onTop: Vec3 = feetOf(world: world, hero: hero)
+  let spent: Float = staminaOf(climbing: climbing, hero: hero).value
+  check(
+    label: "up the wall in {upSteps} steps and pulled up onto its top: feet at y {onTop.y} z {onTop.z}, stamina {spentBefore} -> {spent}"
+    ok: isClimbing(climbing: climbing, entityId: hero) is false and climberOf(
+      climbing: climbing
+      hero: hero
+    ).mantles is 1 and near(a: onTop.z, b: 3.0, within: 0.15) and onTop.y > 3.0 and spent < spentBefore
+  )
+  loop var i: Int = 0, i < 240, ++i {
+    step(world: world, climbing: climbing)
+  }
+  check(
+    label: "standing on top, its stamina fills again ({staminaOf(climbing: climbing, hero: hero).value})"
+    ok: near(a: staminaOf(climbing: climbing, hero: hero).value, b: 100.0, within: 0.01) and near(
+      a: feetOf(world: world, hero: hero).z
+      b: 3.0
+      within: 0.15
+    )
+  )
+  # The 20 m wall: run out on it, let go, fall; no climb again until full
+  placeHero(world: world, hero: hero, feet: Vec3.create(x: 10.0, y: 1.8, z: 0.0))
+  loop var i: Int = 0, i < 30, ++i {
+    step(world: world, climbing: climbing)
+  }
+  var highest: Float = 0.0
+  var letGo: Bool = false
+  loop var i: Int = 0, i < 1200 and letGo is false, ++i {
+    push(
+      world: world
+      climbing: climbing
+      hero: hero
+      steps: 1
+    )
+    highest = Math.max(a: highest, b: feetOf(world: world, hero: hero).z)
+    letGo = climberOf(climbing: climbing, hero: hero).letGos > 0
+  }
+  push(
+    world: world
+    climbing: climbing
+    hero: hero
+    steps: 120
+  )
+  let fallen: Vec3 = feetOf(world: world, hero: hero)
+  let tired: Stamina = staminaOf(climbing: climbing, hero: hero)
+  check(
+    label: "on the 20 m wall it climbs to {highest} m, runs out, lets go and falls (feet z {fallen.z}); exhausted, it does not climb again pushing in"
+    ok: letGo and highest > 5.0 and highest < 18.0 and near(a: fallen.z, b: 0.0, within: 0.15) and tired.exhausted and isClimbing(
+      climbing: climbing
+      entityId: hero
+    ) is false and climberOf(climbing: climbing, hero: hero).climbs is 2
+  )
+  # A loose box is no wall
+  placeHero(world: world, hero: hero, feet: Vec3.create(x: -10.0, y: 1.5, z: 0.0))
+  loop var i: Int = 0, i < 400, ++i {
+    step(world: world, climbing: climbing)
+  }
+  let climbsBefore: Int = climberOf(climbing: climbing, hero: hero).climbs
+  push(
+    world: world
+    climbing: climbing
+    hero: hero
+    steps: 150
+  )
+  check(
+    label: "rested full, it pushes into a loose box and does not climb it"
+    ok: staminaOf(climbing: climbing, hero: hero).exhausted is false and climberOf(
+      climbing: climbing
+      hero: hero
+    ).climbs is climbsBefore
+  )
+  destroyPhysics(physics: world.physics)
+}
