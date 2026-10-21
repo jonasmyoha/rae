@@ -1,0 +1,118 @@
+# app3d/KnockedDownFollow: while a character lies knocked down, its parked
+# controller is carried along with its body (the hips' movement each step
+# added to it), so what follows the character (its name over its head, a
+# finish line, a camera) sees it where the body flies and slides, not where
+# it fell; one not down is left alone.
+import Math
+import Vec3
+import Quat
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Transform
+open app3d/CharacterController
+open app3d/KnockedDown
+open app3d/KnockedDownFollow
+
+func near(a: view Vec3, b: view Vec3) ret Bool {
+  ret Vec3.vlen(a: Vec3.vsub(a: a, b: b)) < 0.001
+}
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func placeBody(transforms: mod ComponentTable(Transform3D), body: view EntityId, at: view Vec3) {
+  let placed: Transform3D = {
+    position: at
+    rotation: Quat.identity()
+    scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
+  }
+  componentSet(this: transforms, entityId: body, data: placed)
+}
+
+func placeController(
+  controllers: mod ComponentTable(ThirdPersonController)
+  entityId: view EntityId
+  at: view Vec3
+) {
+  var controller: ThirdPersonController = createThirdPersonController()
+  controller.position = at
+  componentSet(this: controllers, entityId: entityId, data: controller)
+}
+
+func main() ret Int {
+  let fallen: EntityId = { index: 2, generation: 0 }
+  let hips: EntityId = { index: 9, generation: 0 }
+  let standing: EntityId = { index: 3, generation: 0 }
+  var transforms: ComponentTable(Transform3D) = ComponentTable.create(Transform3D)
+  var controllers: ComponentTable(ThirdPersonController) = ComponentTable.create(
+    ThirdPersonController
+  )
+  var knockedDown: ComponentTable(KnockedDown) = ComponentTable.create(KnockedDown)
+  placeController(
+    controllers: controllers
+    entityId: fallen
+    at: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  )
+  placeController(
+    controllers: controllers
+    entityId: standing
+    at: Vec3.create(x: 5.0, y: 5.0, z: 0.0)
+  )
+  placeBody(transforms: transforms, body: hips, at: Vec3.create(x: 0.0, y: 0.0, z: 1.0))
+  knockDown(
+    knockedDown: knockedDown
+    entityId: fallen
+    body: hips
+    readyAfterSeconds: 100.0
+    bodyAt: Vec3.create(x: 0.0, y: 0.0, z: 1.0)
+  )
+  # The body flies 2 m on and drops: the controller goes with it
+  placeBody(transforms: transforms, body: hips, at: Vec3.create(x: 2.0, y: 1.0, z: 0.4))
+  followKnockedDownBodies(
+    knockedDown: knockedDown
+    transforms: transforms
+    controllers: controllers
+  )
+  let unusedUp: List(EntityId) = stepKnockedDown(
+    knockedDown: knockedDown
+    transforms: transforms
+    deltaTime: 0.1
+  )
+  let after: Vec3 = controllerOf(controllers: controllers, entityId: fallen).position
+  check(
+    label: "the body flew 2 m on and dropped 0.6 m: the controller with it"
+    ok: near(a: after, b: Vec3.create(x: 2.0, y: 1.0, z: -0.6))
+  )
+  # ...and slides on: each step's movement only
+  placeBody(transforms: transforms, body: hips, at: Vec3.create(x: 3.5, y: 1.0, z: 0.2))
+  followKnockedDownBodies(
+    knockedDown: knockedDown
+    transforms: transforms
+    controllers: controllers
+  )
+  let unusedUpAgain: List(EntityId) = stepKnockedDown(
+    knockedDown: knockedDown
+    transforms: transforms
+    deltaTime: 0.1
+  )
+  check(
+    label: "it slides on 1.5 m: the controller too, the hips' offset from it kept"
+    ok: near(
+      a: controllerOf(controllers: controllers, entityId: fallen).position
+      b: Vec3.create(x: 3.5, y: 1.0, z: -0.8)
+    )
+  )
+  check(
+    label: "one standing is left where it is"
+    ok: near(
+      a: controllerOf(controllers: controllers, entityId: standing).position
+      b: Vec3.create(x: 5.0, y: 5.0, z: 0.0)
+    )
+  )
+  ret 0
+}
