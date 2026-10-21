@@ -1,0 +1,118 @@
+# app3d/WalkerMarks — the walker's footprints and what its steps kick up
+# (app3d/Footprints, app3d/GroundParticles): every character with a mover
+# leaves a print each stride, a shade of the ground there, and kicks up bits
+# of grass in the meadow or puffs of sand elsewhere. What is underfoot is the
+# world's terrain field (WorldBiome): its blended ground colour, grass where
+# it is mostly meadow.
+import Math
+import Vec3
+open WorldBiome
+open ecs/ComponentTable
+open RendererDeferred
+open Gbuffer
+open gpu/GpuResources
+open app3d/GroundTouch
+open app3d/GroundParticles
+open app3d/Footprints
+open app3d/WalkerPhysics
+open app3d/WalkerWorld
+
+# How far over the height field a print lies: the terrain mesh is drawn from
+# the same field, but flat between its vertices
+const walkerMarkLift: Float = 0.04
+
+type WalkerMarks {
+  footprints: Footprints
+  groundParticles: GroundParticles
+  random: Random
+}
+
+# Room for `characterCount` characters' full trails
+func createWalkerMarks(renderer: mod DeferredRenderer, characterCount: view Int) ret WalkerMarks {
+  ret WalkerMarks {
+    footprints: createFootprints(
+      renderer: renderer
+      tuning: defaultFootprintTuning()
+      characterCapacity: characterCount
+    )
+    groundParticles: createGroundParticles(renderer: renderer, capacity: 256)
+    random: createRandom(seed: 1147)
+  }
+}
+
+# What is under (`x`, `y`) on the terrain field
+func walkerGroundAnswer(x: view Float, y: view Float, biome: view BiomeConfig) ret GroundAnswer {
+  ret GroundAnswer {
+    color: biomeGroundColor(x: x, y: y, cfg: biome)
+    lift: walkerMarkLift
+    blades: worldIsGrass(x: x, y: y, cfg: biome)
+    dustColor: sandMatColor()
+  }
+}
+
+# One frame: the strides finished, answered from the field, laid; the
+# particles on
+func walkerMarksUpdate(
+  walkerMarks: mod WalkerMarks
+  physicsSystem: view WalkerPhysics
+  world: view WalkerWorld
+  biome: view BiomeConfig
+  groundZ: view Float
+  modelHeight: view Float
+  deltaTime: view Float
+) {
+  findFootsteps(
+    footprints: walkerMarks.footprints
+    characters: physicsSystem.characters
+    controllers: world.controllers
+    parked: physicsSystem.moverParked
+    heights: world.heights
+    fallbackHeight: modelHeight
+    groundZ: groundZ
+    deltaTime: deltaTime
+  )
+  loop var i: Int = 0, i < walkerMarks.footprints.touches.length, ++i {
+    if let touch: mod GroundTouch = walkerMarks.footprints.touches.modAt(index: i) {
+      touch.answer = walkerGroundAnswer(x: touch.point.x, y: touch.point.y, biome: biome)
+    }
+  }
+  layFootsteps(
+    footprints: walkerMarks.footprints
+    groundParticles: walkerMarks.groundParticles
+    random: walkerMarks.random
+  )
+  groundParticlesUpdate(groundParticles: walkerMarks.groundParticles, deltaTime: deltaTime)
+}
+
+# The prints and the particles into the open geometry pass
+func drawWalkerMarks(
+  cache: mod GbufferCache
+  resources: mod GpuResources
+  walkerMarks: mod WalkerMarks
+  toon: view Bool
+) {
+  drawFootprints(
+    cache: cache
+    resources: resources
+    footprints: walkerMarks.footprints
+    toon: toon
+  )
+  drawGroundParticles(
+    cache: cache
+    resources: resources
+    groundParticles: walkerMarks.groundParticles
+    toon: toon
+  )
+}
+
+# How many prints the walker's characters show, all told
+func walkerFootprintCount(walkerMarks: view WalkerMarks) ret Int {
+  var total: Int = 0
+  loop var i: Int = 0, i < componentCount(this: walkerMarks.footprints.trails), ++i {
+    total = total + footprintCount(
+      footprints: walkerMarks.footprints
+      entityId: componentEntityAt(this: walkerMarks.footprints.trails, i: i)
+    )
+  }
+  ret total
+}
