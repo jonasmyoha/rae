@@ -1,0 +1,51 @@
+# Gpu2dCanvasArc — a ring, or an arc of one, on the 2D canvas: one box
+# primitive in the box shader's arc mode (gpu2d_box.wgsl, mode 2), so it is
+# one smooth shape antialiased like every box, not pieces of line. Split out
+# of Gpu2dCanvas for the 1000-line cap.
+import Math
+open Gpu2dCanvas
+
+# A ring round (centerX, centerY) of outer `radius` and `thickness`, drawn
+# clockwise from the top over `share` of the turn (1 the whole ring), with
+# round ends; nothing for a share of 0 or less
+func canvasDrawArc(
+  canvas: mod Gpu2dCanvas
+  centerX: copy Float
+  centerY: copy Float
+  radius: copy Float
+  thickness: copy Float
+  share: copy Float
+  color: copy Int
+) {
+  if share <= 0.0 or radius <= 0.0 or thickness <= 0.0 {
+    ret
+  }
+  # The canvas rotation (#1003) turns the centre about the pivot and the
+  # arc with it, as a box's
+  var boxX: Float = centerX - radius
+  var boxY: Float = centerY - radius
+  var angle: Float = 0.0
+  if canvas.spinAngle is not 0.0 {
+    let centre: SpinPoint = spinPoint(canvas: canvas, x: centerX, y: centerY)
+    boxX = centre.x - radius
+    boxY = centre.y - radius
+    angle = canvas.spinAngle
+  }
+  canvas.prims.add(value: boxX)
+  canvas.prims.add(value: boxY)
+  canvas.prims.add(value: radius * 2.0)
+  canvas.prims.add(value: radius * 2.0)
+  canvas.prims.add(value: radius)
+  canvas.prims.add(value: radius)
+  canvas.prims.add(value: radius)
+  canvas.prims.add(value: radius)
+  pushPremultiplied(canvas: canvas, color: color)
+  pushPremultiplied(canvas: canvas, color: 0)
+  canvas.prims.add(value: Math.min(a: thickness, b: radius))
+  canvas.prims.add(value: angle)
+  # Mode 2: a ring arc
+  canvas.prims.add(value: 2.0)
+  canvas.prims.add(value: Math.min(a: share, b: 1.0))
+  pushPremultiplied(canvas: canvas, color: color)
+  canvas.primClips.add(value: canvas.currentClip)
+}
