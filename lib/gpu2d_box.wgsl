@@ -3,8 +3,11 @@
 // AA: one quad per primitive; the fragment shader evaluates a rounded-box
 // signed distance and antialiases with screen-space derivatives (no MSAA).
 // One pipeline -> filled/rounded rects, per-corner radius, borders, gradients,
-// rotated capsules (lines). Instance layout = 6 x vec4 (std430): rect, radius,
-// fill, border, params, grad.
+// rotated capsules (lines), ring arcs. Instance layout = 6 x vec4 (std430):
+// rect, radius, fill, border, params, grad. params = (border width, angle,
+// mode, gradient angle): mode 1 a gradient, mode 2 a ring arc (Gpu2dCanvasArc:
+// the ring inside the square rect, params.x its thickness, params.w the share
+// of the turn drawn clockwise from the top, round ends).
 struct Prim {
   rect: vec4<f32>,
   radius: vec4<f32>,
@@ -56,6 +59,27 @@ fn sdRoundBox(p: vec2<f32>, b: vec2<f32>, r: vec4<f32>) -> f32 {
   let q = abs(p) - b + vec2<f32>(rr, rr);
   return min(max(q.x, q.y), 0.0) + length(max(q, vec2<f32>(0.0, 0.0))) - rr;
 }
+// A ring of outer radius `outer` and `thickness`, drawn from the top
+// clockwise (screen y down) over `share` of the turn, with round ends
+fn sdRingArc(p: vec2<f32>, outer: f32, thickness: f32, share: f32) -> f32 {
+  let half = thickness * 0.5;
+  let mid = outer - half;
+  let ring = abs(length(p) - mid) - half;
+  if (share >= 0.9999) {
+    return ring;
+  }
+  var turn = atan2(p.x, -p.y) / 6.2831853;
+  if (turn < 0.0) {
+    turn = turn + 1.0;
+  }
+  if (turn <= share) {
+    return ring;
+  }
+  let endAngle = clamp(share, 0.0, 1.0) * 6.2831853;
+  let start = vec2<f32>(0.0, -mid);
+  let end = vec2<f32>(sin(endAngle) * mid, -cos(endAngle) * mid);
+  return min(length(p - start), length(p - end)) - half;
+}
 @fragment
 fn fs(in: VsOut) -> @location(0) vec4<f32> {
   let p = prims[in.inst];
@@ -70,7 +94,11 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
 // site also covers buttons whose height only becomes small after layout.
   let rmax = min(halfSize.x, halfSize.y);
   let rad4 = min(p.radius, vec4<f32>(rmax, rmax, rmax, rmax));
-  let d = sdRoundBox(center, halfSize, rad4);
+  var d = sdRoundBox(center, halfSize, rad4);
+  let arc = p.params.z > 1.5;
+  if (arc) {
+    d = sdRingArc(center, rmax, p.params.x, p.params.w);
+  }
   let aa = max(fwidth(d), 0.0001);
   var cov = 1.0 - smoothstep(-aa, aa, d);
   if (uClip[1].y > 0.5) {  // #118: rounded clip coverage
@@ -82,6 +110,9 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     cov = cov * (1.0 - smoothstep(-caa, caa, cd));
   }
   var col = p.fill;
+  if (arc) {
+    return col * cov;
+  }
   if (p.params.z > 0.5) {
     let uv = in.local / max(p.rect.zw, vec2<f32>(1.0, 1.0));
     let dir = vec2<f32>(cos(p.params.w), sin(p.params.w));
