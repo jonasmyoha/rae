@@ -1,0 +1,173 @@
+# app3d/Minimap: a world rectangle fitted under a header, as big as it goes;
+# a world point to the screen and back, north up; the close button in the
+# header's corner and the world below it; a tap on an open map's world sends
+# a MinimapTapped with the world point, one on the close button closes it,
+# one elsewhere does nothing.
+import Math
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open ecs/Event
+open ui/Ecs
+open app3d/Minimap
+
+func near(a: view Float, b: view Float) ret Bool {
+  ret Math.abs(value: a - b) < 0.01
+}
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func main() {
+  let settings: MinimapSettings = {
+    worldMinX: -950.0
+    worldMaxX: 1750.0
+    worldMinY: -950.0
+    worldMaxY: 950.0
+  }
+  let mapView: MinimapView = minimapViewFor(
+    settings: settings
+    x: 0.0
+    y: 0.0
+    w: 1280.0
+    h: 800.0
+  )
+  check(
+    label: "the world fits under the header, as big as it can"
+    ok: near(a: mapView.scale, b: Math.min(a: (1280.0 - 24.0) / 2700.0, b: (800.0 - 64.0) / 1900.0)) and mapView.top >= settings.headerHeight
+  )
+  let topLeft: MinimapPoint = minimapToScreen(
+    settings: settings
+    mapView: mapView
+    x: -950.0
+    y: 950.0
+  )
+  let bottomRight: MinimapPoint = minimapToScreen(
+    settings: settings
+    mapView: mapView
+    x: 1750.0
+    y: -950.0
+  )
+  check(
+    label: "north-west at the map's top left, the south-east corner inside the panel"
+    ok: near(a: topLeft.x, b: mapView.left) and near(a: topLeft.y, b: mapView.top) and bottomRight.x <= 1280.0 - settings.margin + 0.01 and bottomRight.y <= 800.0 - settings.margin + 0.01
+  )
+  let city: MinimapPoint = minimapToScreen(
+    settings: settings
+    mapView: mapView
+    x: 1000.0
+    y: 220.0
+  )
+  let back: MinimapPoint = screenToMinimap(
+    settings: settings
+    mapView: mapView
+    x: city.x
+    y: city.y
+  )
+  check(
+    label: "a world point there and back, north up"
+    ok: near(a: back.x, b: 1000.0) and near(a: back.y, b: 220.0) and city.y < minimapToScreen(
+      settings: settings
+      mapView: mapView
+      x: 1000.0
+      y: 0.0
+    ).y
+  )
+  let close: MinimapPoint = minimapCloseButton(settings: settings, mapView: mapView)
+  check(
+    label: "the close button in the header's left corner; the world below it"
+    ok: close.x < 640.0 and onMinimapClose(
+      settings: settings
+      mapView: mapView
+      x: close.x + 10.0
+      y: close.y + 10.0
+    ) and onMinimapClose(
+      settings: settings
+      mapView: mapView
+      x: 640.0
+      y: 400.0
+    ) is false and onMinimapWorld(
+      settings: settings
+      mapView: mapView
+      x: 640.0
+      y: 400.0
+    ) and onMinimapWorld(
+      settings: settings
+      mapView: mapView
+      x: 2.0
+      y: 2.0
+    ) is false
+  )
+  # The screen as an entity with a Minimap
+  var world: UiWorld = create()
+  var minimaps: Minimaps = createMinimaps()
+  var allocator: EntityAllocator = createEntityAllocator()
+  let mapId: EntityId = allocEntity(this: allocator)
+  componentSet(
+    this: minimaps.maps
+    entityId: mapId
+    data: Minimap {
+      settings: settings
+      layerNodeId: "MapLayer"
+      tapActionId: "map.tap"
+      open: false
+    }
+  )
+  let opened: Bool = setMinimapOpen(
+    minimaps: minimaps
+    world: world
+    entityId: mapId
+    open: true
+  )
+  let again: Bool = setMinimapOpen(
+    minimaps: minimaps
+    world: world
+    entityId: mapId
+    open: true
+  )
+  let onWorld: Bool = minimapTap(
+    minimaps: minimaps
+    world: world
+    entityId: mapId
+    mapView: mapView
+    x: city.x
+    y: city.y
+  )
+  var tappedRight: Bool = eventCount(MinimapTapped, this: minimaps.tapped) is 1
+  if tappedRight {
+    let tap: MinimapTapped = eventAt(MinimapTapped, this: minimaps.tapped, i: 0)
+    tappedRight = near(a: tap.x, b: 1000.0) and near(a: tap.y, b: 220.0)
+  }
+  let offWorld: Bool = minimapTap(
+    minimaps: minimaps
+    world: world
+    entityId: mapId
+    mapView: mapView
+    x: 2.0
+    y: 2.0
+  )
+  check(
+    label: "opened once; a tap on the world sends its world point, one off it nothing"
+    ok: opened and again is false and onWorld is false and tappedRight and offWorld is false and eventCount(
+      MinimapTapped
+      this: minimaps.tapped
+    ) is 1
+  )
+  let closed: Bool = minimapTap(
+    minimaps: minimaps
+    world: world
+    entityId: mapId
+    mapView: mapView
+    x: close.x + 10.0
+    y: close.y + 10.0
+  )
+  check(
+    label: "a tap on the close button closes it"
+    ok: closed and componentView(this: minimaps.maps, entityId: mapId).open is false
+  )
+}
