@@ -5,6 +5,7 @@
 # (paused, animation off, the slider being dragged), and a test of the clock
 # itself compiles this module and Calendar, not the whole UI and renderer.
 
+import Math
 open Calendar
 
 # The June solstice, so a scene at the Helsinki default opens with the sun
@@ -73,4 +74,28 @@ func timeOfDayDate(timeOfDay: view TimeOfDay) ret CalendarDate {
 # night), rolling the date and the year as the clock does
 func timeOfDaySkip(timeOfDay: mod TimeOfDay, hours: view Float) ret Bool {
   ret timeOfDayAdvance(timeOfDay: timeOfDay, deltaTime: hours * timeOfDay.daySeconds / 24.0)
+}
+
+# ----- the shadows' sun ---------------------------------------------------
+# Moving a shadow-casting light a little every frame makes every shadow edge
+# crawl and flicker across the picture. So the shadows take the light at the
+# clock's hour rounded down to a step of timeOfDayShadowStepSeconds of wall
+# time, while the sky's sun moves on every frame: the day's length / 60,
+# kept from 30 s to 5 minutes (a 5 or 30 minute day steps every 30 s, a
+# 24 hour day every 5 minutes).
+const timeOfDayShadowStepMin: Float = 30.0
+
+const timeOfDayShadowStepMax: Float = 300.0
+
+func timeOfDayShadowStepSeconds(daySeconds: view Float) ret Float {
+  ret Math.clamp(val: daySeconds / 60.0, low: timeOfDayShadowStepMin, high: timeOfDayShadowStepMax)
+}
+
+# The hour the shadows' light is at: the clock's, rounded down to its step
+func timeOfDayShadowHour(timeOfDay: view TimeOfDay) ret Float {
+  if timeOfDay.daySeconds <= 0.0 {
+    ret timeOfDay.hour
+  }
+  let step: Float = 24.0 * timeOfDayShadowStepSeconds(daySeconds: timeOfDay.daySeconds) / timeOfDay.daySeconds
+  ret Math.floor(x: timeOfDay.hour / step) * step
 }
