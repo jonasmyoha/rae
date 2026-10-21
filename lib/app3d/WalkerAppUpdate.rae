@@ -237,13 +237,16 @@ func updateWalkerApp(app: mod WalkerApp) {
     controllers: app.world.controllers
     entityId: controlledEntityId
   ).heading
-  driveCharacters(
+  # The player's drive, and the crowd's own: walking about (app3d/Wander)
+  driveWalkers(
     physicsSystem: app.physicsSystem
     controlledEntityId: controlledEntityId
     controllers: app.world.controllers
+    controlled: app.world.controlled
     intent: intent
     cameraYaw: app.cameraSystem.rig.viewYaw
     speedScale: app.characterSystem.speed
+    deltaTime: deltaTime
   )
   # Fixed-timestep physics (#553, lib/box3d/ecs): the movers, then the bodies,
   # at 60 Hz from the frame time, decoupled from render; it writes every
@@ -266,8 +269,8 @@ func updateWalkerApp(app: mod WalkerApp) {
     groundZ: app.characterSystem.groundZ
     modelHeight: app.characterSystem.modelHeight
   )
-  # Running into someone at a run trips the driven character into a ragdoll;
-  # whoever is down gets up where they landed (app3d/WalkerKnockdown)
+  # Whoever a bump knocked over falls as a ragdoll; whoever is down gets up
+  # where they landed (app3d/WalkerKnockdown)
   walkerKnockdownUpdate(
     physicsSystem: app.physicsSystem
     world: app.world
