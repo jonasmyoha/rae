@@ -30,6 +30,7 @@ open ecs/Entity
 open ecs/World
 open ecs/ComponentTable
 open ecs/Transform
+open ecs/Tag
 open app3d/CharacterController
 open app3d/WalkerCharacter
 open app3d/GroveTrees
@@ -618,6 +619,7 @@ func moveCharacters(
       insideWithOldX: worldWadable(x: step.fromX, y: center.y, cfg: biome)
     )
   }
+  holdMoversOnTerrain(physicsSystem: physicsSystem)
   # Bumps between them: pushed apart, and a hard one knocks over the one
   # doing less of the pushing (app3d/CharacterContact)
   let fallen: Int = bumpMovers(
@@ -643,6 +645,47 @@ func moveCharacters(
     groundZ: physicsSystem.groundZ
     fixedStep: walkerPhysicsStep
   )
+}
+
+# Off the ground field (the forest's follows the walker; the crowd wanders
+# kilometres past it), no ground under a mover: the terrain's own height
+# (worldTerrainHeight, which the field is sampled from) holds up any mover
+# whose feet come down to it there, so it walks on as on the field
+const walkerGroundEdge: Float = 3.0
+
+func holdMoversOnTerrain(physicsSystem: mod WalkerPhysics) {
+  let half: Float = walkerGroundSpacing * ((physicsSystem.fieldCount - 1) / 2).toFloat() - walkerGroundEdge
+  loop var i: Int = 0, i < componentCount(this: physicsSystem.characters), ++i {
+    let entityId: EntityId = componentEntityAt(this: physicsSystem.characters, i: i)
+    if hasTag(MoverParked, table: physicsSystem.moverParked, entityId: entityId) {
+      continue
+    }
+    let character: mod CharacterBody = componentMod(
+      this: physicsSystem.characters
+      entityId: entityId
+    )
+    let x: Float = character.mover.transform.p.x
+    let y: Float = character.mover.transform.p.y
+    if Math.abs(value: x - physicsSystem.groundCentre.x) < half and Math.abs(
+      value: y - physicsSystem.groundCentre.y
+    ) < half {
+      continue
+    }
+    let ground: Float = worldTerrainHeight(
+      x: x
+      y: y
+      groundZ: physicsSystem.groundZ
+      cfg: physicsSystem.biome
+    )
+    let above: Float = moverCenterAboveFeet(character: character)
+    if character.mover.transform.p.z - above <= ground + 0.02 {
+      character.mover.transform.p.z = ground + above
+      if character.mover.velocity.z < 0.0 {
+        character.mover.velocity.z = 0.0
+      }
+      character.mover.onGround = true
+    }
+  }
 }
 
 # One fixed step: the characters first (the mover reads the world as the last
