@@ -3,11 +3,12 @@
 # left over it, clockwise from the top. Green, orange when low, red while
 # exhausted (it must fill all the way before the next climb). It shows while
 # the stamina is not full and a moment after it filled
-# (staminaWheelShows), so it is there only while it matters.
+# (staminaWheelShows), so it is there only while it matters. Each part is
+# one smooth arc (Gpu2dCanvasArc), not pieces of line.
 import Math
 import Vec3
-import Gpu2d
 open Gpu2dCanvas
+open Gpu2dCanvasArc
 open ecs/Entity
 open ecs/ComponentTable
 open Scene3d
@@ -19,14 +20,16 @@ open app3d/CharacterBodies
 open app3d/CharacterHeight
 open app3d/UiShell
 
-# The ring's size (pt), its segments, and how far right of the head it sits
-const staminaWheelRadius: Float = 15.0
+# The ring's outer radius and thickness (pt), and how far right of the head
+# its middle sits
+const staminaWheelRadius: Float = 18.0
 
 const staminaWheelThickness: Float = 6.0
 
-const staminaWheelSegments: Int = 48
-
 const staminaWheelOffset: Float = 42.0
+
+# The track the stamina is drawn over: dark, a little see-through
+const staminaWheelTrackColor: Int = 2517899294
 
 func staminaWheelColor(stamina: view Stamina, tuning: view StaminaTuning) ret Int {
   if stamina.exhausted {
@@ -36,33 +39,6 @@ func staminaWheelColor(stamina: view Stamina, tuning: view StaminaTuning) ret In
     ret 4293957170
   }
   ret 4284404587
-}
-
-# An arc of the ring from `from` to `to` (shares of the turn, clockwise from
-# the top) round (x, y)
-func drawWheelArc(
-  canvas: mod Gpu2dCanvas
-  x: view Float
-  y: view Float
-  from: view Float
-  to: view Float
-  color: view Int
-) {
-  let first: Int = Math.floor(x: from * staminaWheelSegments.toFloat()).toInt()
-  let last: Int = Math.ceil(x: to * staminaWheelSegments.toFloat()).toInt()
-  loop var i: Int = first, i < last, ++i {
-    let a: Float = Math.max(a: from, b: i.toFloat() / staminaWheelSegments.toFloat()) * 6.2831853
-    let b: Float = Math.min(a: to, b: (i + 1).toFloat() / staminaWheelSegments.toFloat()) * 6.2831853
-    Gpu2d.drawLine(
-      canvas: canvas
-      x0: x + Math.sin(x: a) * staminaWheelRadius
-      y0: y - Math.cos(x: a) * staminaWheelRadius
-      x1: x + Math.sin(x: b) * staminaWheelRadius
-      y1: y - Math.cos(x: b) * staminaWheelRadius
-      thickness: staminaWheelThickness
-      color: color
-    )
-  }
 }
 
 # The wheel for `stamina` beside the head at world point `head`, seen from a
@@ -94,20 +70,22 @@ func drawStaminaWheel(
     }
     let x: Float = point.x * width + staminaWheelOffset
     let y: Float = point.y * height
-    drawWheelArc(
+    canvasDrawArc(
       canvas: canvas
-      x: x
-      y: y
-      from: 0.0
-      to: 1.0
-      color: 2517899294
+      centerX: x
+      centerY: y
+      radius: staminaWheelRadius
+      thickness: staminaWheelThickness
+      share: 1.0
+      color: staminaWheelTrackColor
     )
-    drawWheelArc(
+    canvasDrawArc(
       canvas: canvas
-      x: x
-      y: y
-      from: 0.0
-      to: staminaShare(stamina: stamina, tuning: tuning)
+      centerX: x
+      centerY: y
+      radius: staminaWheelRadius
+      thickness: staminaWheelThickness
+      share: staminaShare(stamina: stamina, tuning: tuning)
       color: staminaWheelColor(stamina: stamina, tuning: tuning)
     )
   }
