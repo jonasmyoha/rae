@@ -1,0 +1,191 @@
+# app3d/FarTiles: the far ring of a tile streamer. A strip of candidate
+# tiles with reaches of their own; far tiles taken one a frame, the nearest
+# first, only on a frame the near streamer loaded nothing; the app's answer
+# (its boxes) drawn but for tiles the near streamer holds; let go past the
+# reach and margin, the entity freed on the next call.
+import Math
+import Vec3
+open Scene3d
+open GbufferInstanced
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open ecs/Event
+open app3d/TileStreaming
+open app3d/FarTiles
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+# One frame at (x, y): the near streamer, then the far ring; every far tile
+# taken answered with one box a tile column (its x + 1 boxes)
+func frame(
+  near: mod TileStreamer
+  farTiles: mod FarTiles
+  allocator: mod EntityAllocator
+  x: view Float
+  y: view Float
+) {
+  streamTiles(
+    streamer: near
+    allocator: allocator
+    x: x
+    y: y
+  )
+  streamFarTiles(
+    farTiles: farTiles
+    near: near
+    allocator: allocator
+    x: x
+    y: y
+  )
+  loop var i: Int = 0, i < eventCount(FarTileLoaded, this: farTiles.loaded), ++i {
+    let loaded: FarTileLoaded = eventAt(FarTileLoaded, this: farTiles.loaded, i: i)
+    var boxes: List(FarBox) = List.create(FarBox, cap: 4)
+    loop var b: Int = 0, b <= loaded.tile.x, ++b {
+      boxes.add(
+        value: FarBox {
+          center: Vec3.create(x: loaded.tile.x.toFloat() * 100.0, y: 0.0, z: 5.0)
+          yaw: 0.0
+          size: Vec3.create(x: 4.0, y: 4.0, z: 10.0)
+          color: Vec3.create(x: 0.8, y: 0.8, z: 0.8)
+        }
+      )
+    }
+    setFarTileBoxes(farTiles: farTiles, entityId: loaded.entityId, boxes: own boxes)
+  }
+}
+
+func main() {
+  let grid: TileGridSettings = {
+    tileSize: 100.0
+    loadDistance: 150.0
+    unloadDistance: 200.0
+    slotCount: 9
+  }
+  # A strip of tiles east: x 1..8, the even ones reaching 650 m, the odd 400
+  var candidates: List(FarTileCandidate) = List.create(FarTileCandidate, cap: 8)
+  loop var tx: Int = 1, tx <= 8, ++tx {
+    var reach: Float = 400.0
+    if tx % 2 is 0 {
+      reach = 650.0
+    }
+    candidates.add(value: FarTileCandidate { tile: { x: tx, y: 0 }, reach: reach })
+  }
+  check(
+    label: "wanted from the origin: the tiles within their own reach, in the candidates' order"
+    ok: farTilesWanted(
+      candidates: candidates
+      slotCount: 8
+      grid: grid
+      x: 0.0
+      y: 0.0
+    ).length is 5 and farTilesWanted(
+      candidates: candidates
+      slotCount: 2
+      grid: grid
+      x: 0.0
+      y: 0.0
+    ).length is 2
+  )
+  var near: TileStreamer = createTileStreamer(settings: grid)
+  var farTiles: FarTiles = {
+    settings: FarTileSettings { slotCount: 8, boxCapacity: 64, margin: 60.0 }
+    candidates: candidates
+    slots: {
+      noEntity()
+      noEntity()
+      noEntity()
+      noEntity()
+      noEntity()
+      noEntity()
+      noEntity()
+      noEntity()
+    }
+    tiles: ComponentTable.create(FarTile)
+    loaded: createEventQueue(FarTileLoaded)
+    toFree: List.create(EntityId, cap: 8)
+    batch: createInstanceBatch(mesh: meshHandleNone(), capacity: 64)
+    dirty: true
+    toon: false
+    loads: 0
+  }
+  var allocator: EntityAllocator = createEntityAllocator()
+  # The first frames: the near streamer loads every frame, so no far tile yet
+  var farWhileNear: Bool = true
+  var nearFrames: Int = 0
+  loop var i: Int = 0, i < 40 and farWhileNear, ++i {
+    frame(
+      near: near
+      farTiles: farTiles
+      allocator: allocator
+      x: 0.0
+      y: 0.0
+    )
+    if eventCount(TileLoaded, this: near.loaded) > 0 {
+      nearFrames = nearFrames + 1
+      farWhileNear = eventCount(FarTileLoaded, this: farTiles.loaded) is 0
+    }
+  }
+  let held: List(GridTile) = farTilesHeld(farTiles: farTiles)
+  var nearestFirst: Bool = held.length > 0
+  if let first: GridTile = held.copyAt(index: 0) {
+    nearestFirst = first.x is 1
+  }
+  check(
+    label: "no far tile on a frame the near streamer loaded ({nearFrames} such frames); then one a frame, the nearest first: {held.length} held"
+    ok: farWhileNear and nearFrames > 0 and held.length is 5 and nearestFirst and farTiles.loads is 5
+  )
+  rebuildFarBoxes(farTiles: farTiles, near: near, toon: false)
+  # Tiles 1..6 east of the origin: x 1 is loaded near (100 m), so its 2 boxes
+  # are left out; 2, 3, 4, 6 give 3 + 4 + 5 + 7
+  check(
+    label: "the far boxes but those of tiles held near: {farTiles.batch.count}"
+    ok: farTiles.batch.count is 19
+  )
+  # Walk west: tile 3 (400 m) and 6 (650 m) go, past reach + margin; their entities
+  # are freed on the next call
+  frame(
+    near: near
+    farTiles: farTiles
+    allocator: allocator
+    x: -200.0
+    y: 0.0
+  )
+  let afterWest: Int = farTilesHeld(farTiles: farTiles).length
+  let freedNext: Int = farTiles.toFree.length
+  frame(
+    near: near
+    farTiles: farTiles
+    allocator: allocator
+    x: -200.0
+    y: 0.0
+  )
+  check(
+    label: "at -200 m tiles 3 and 6 are past their reach and margin ({afterWest} held, {freedNext} to free), freed the call after"
+    ok: afterWest is 3 and freedNext is 2 and componentCount(this: farTiles.tiles) is farTilesHeld(
+      farTiles: farTiles
+    ).length
+  )
+  check(
+    label: "a far tile's candidate and kept test: reach plus margin"
+    ok: farTileKept(
+      grid: grid
+      candidate: farCandidateOf(farTiles: farTiles, tile: { x: 6, y: 0 })
+      margin: 60.0
+      x: -100.0
+      y: 0.0
+    ) and farTileKept(
+      grid: grid
+      candidate: farCandidateOf(farTiles: farTiles, tile: { x: 6, y: 0 })
+      margin: 60.0
+      x: -120.0
+      y: 0.0
+    ) is false and farCandidateOf(farTiles: farTiles, tile: { x: 30, y: 0 }).reach is 0.0
+  )
+}
