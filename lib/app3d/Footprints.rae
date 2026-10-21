@@ -1,0 +1,355 @@
+# app3d/Footprints — every character on its feet leaves a footprint each
+# stride, left and right in turn, in a shade of what it treads on, and each
+# step kicks up a few particles (app3d/GroundTouch, app3d/GroundParticles).
+#
+# The FootprintTrail component on a character's entity is its trail (one is
+# given to every character with a mover the first time the system sees it).
+# The Footprints resource holds the trails, the prints' clock, their instance
+# batch, the tuning and this frame's touches. Each frame:
+#
+#   findFootsteps   counts the way every character on its feet has come (not
+#                   parked: lying knocked down, seated; not in the air) and
+#                   lists a GroundTouch at its feet for each stride it
+#                   finished; no ray is cast, the feet are on the ground the
+#                   mover stands on
+#   (the app)       answers each touch (GroundAnswer: colour, mark lift,
+#                   grass or dust)
+#   layFootsteps    lays each touch's print and kicks up its particles
+#   drawFootprints  every live print into the G-buffer, one instanced draw
+import Math
+import Vec3
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Tag
+open Mesh3d
+open Scene3d
+open RendererDeferred
+open GbufferInstanced
+open Gbuffer
+open gpu/GpuResources
+open box3d/ecs/PhysicsComponents
+open app3d/CharacterController
+open app3d/CharacterBodies
+open app3d/CharacterMovers
+open app3d/CharacterHeight
+open app3d/GroundMarks
+open app3d/GroundTouch
+open app3d/GroundParticles
+
+# A footprint's size and how prints are laid and fade
+type FootprintTuning {
+  # A print (m): length heel to toe, width, thickness
+  length: Float
+  width: Float
+  thickness: Float
+  # Half the gap between the feet (m): a print sits this far left or right
+  # of the line the character walks
+  spacing: Float
+  # How many prints a character's trail keeps, how long one lasts (s), over
+  # how much of its end it fades (s), and the share of a full trail that
+  # narrows away at its old end
+  capacity: Int
+  lifetime: Float
+  fadeSeconds: Float
+  tailShare: Float
+  # Moving further than this between frames is a jump (a restart, being put
+  # on a mark): the trail breaks there
+  breakDistance: Float
+  # How much of its surface's colour a print keeps
+  shade: Float
+  # A stride (m) at `speed` for a character `tunedHeight` tall: strideBase +
+  # stridePerSpeed * speed, within strideMin..strideMax; shorter for a
+  # shorter one in proportion, as its walk and run clips play faster
+  # (app3d/CharacterHeight clipStrideScale), so a print lands where a foot does
+  strideBase: Float
+  stridePerSpeed: Float
+  strideMin: Float
+  strideMax: Float
+  tunedHeight: Float
+}
+
+# Big cartoon shoes: 0.3 x 0.13 m, 80 a character for 25 s, fading over 8;
+# a stride about 0.6 m walking and 1.7 m at a sprint for a 2 m character
+func defaultFootprintTuning() ret FootprintTuning {
+  ret FootprintTuning {
+    length: 0.3
+    width: 0.13
+    thickness: 0.003
+    spacing: 0.12
+    capacity: 80
+    lifetime: 25.0
+    fadeSeconds: 8.0
+    tailShare: 0.25
+    breakDistance: 3.0
+    shade: 0.75
+    strideBase: 0.36
+    stridePerSpeed: 0.16
+    strideMin: 0.45
+    strideMax: 1.9
+    tunedHeight: 2.0
+  }
+}
+
+# A character's footprints: its trail, how far it has come since the last
+# print, where its feet were last frame, and which foot is next
+type FootprintTrail {
+  trail: MarkTrail
+  travelled: Float
+  lastFeet: Vec3
+  hasLastFeet: Bool
+  leftFootNext: Bool
+}
+
+type Footprints {
+  trails: ComponentTable(FootprintTrail)
+  # The prints' own clock (s)
+  clock: Float
+  batch: InstanceBatch
+  tuning: FootprintTuning
+  # This frame's steps, for the app to answer
+  touches: List(GroundTouch)
+}
+
+# Footprints with room in their batch for `characterCapacity` full trails,
+# drawn with a unit box uploaded to `renderer`
+func createFootprints(
+  renderer: mod DeferredRenderer
+  tuning: view FootprintTuning
+  characterCapacity: view Int
+) ret Footprints {
+  let box: MeshData = makeBox(size: 1.0)
+  ret Footprints {
+    trails: ComponentTable.create(FootprintTrail)
+    clock: 0.0
+    batch: createInstanceBatch(
+      mesh: uploadMesh(
+        renderer: renderer
+        verts: box.verts
+        vertCount: box.vertCount
+        indices: box.indices
+      )
+      capacity: tuning.capacity * characterCapacity
+    )
+    tuning: tuning
+    touches: List.create(GroundTouch, cap: characterCapacity)
+  }
+}
+
+func footprintFading(tuning: view FootprintTuning) ret MarkFading {
+  ret MarkFading {
+    lifetime: tuning.lifetime
+    fadeSeconds: tuning.fadeSeconds
+    tailShare: tuning.tailShare
+  }
+}
+
+# The length of a stride at `speed` (m/s) for a character `height` tall
+func footprintStride(
+  tuning: view FootprintTuning
+  speed: view Float
+  height: view Float
+) ret Float {
+  let tuned: Float = Math.max(
+    a: tuning.strideMin
+    b: Math.min(a: tuning.strideMax, b: tuning.strideBase + tuning.stridePerSpeed * speed)
+  )
+  ret tuned / clipStrideScale(height: height, tunedHeight: tuning.tunedHeight)
+}
+
+# The print of one foot with the character at `feet` going along
+# (`directionX`, `directionY`) (a unit vector): heel to toe along it, to the
+# left or right of the line, `lift` over the ground, laid at `laidAt`, a
+# shade of `groundColor`
+func footprintPiece(
+  tuning: view FootprintTuning
+  feet: view Vec3
+  directionX: view Float
+  directionY: view Float
+  left: view Bool
+  laidAt: view Float
+  groundColor: view Vec3
+  lift: view Float
+) ret MarkPiece {
+  var side: Float = tuning.spacing
+  if left is false {
+    side = 0.0 - tuning.spacing
+  }
+  # The left of the direction (directionX, directionY) is (-directionY, directionX)
+  let centerX: Float = feet.x - directionY * side
+  let centerY: Float = feet.y + directionX * side
+  let half: Float = tuning.length * 0.5
+  let z: Float = feet.z + lift
+  ret MarkPiece {
+    from: Vec3.create(x: centerX - directionX * half, y: centerY - directionY * half, z: z)
+    to: Vec3.create(x: centerX + directionX * half, y: centerY + directionY * half, z: z)
+    laidAt: laidAt
+    color: shadeOf(color: groundColor, shade: tuning.shade)
+  }
+}
+
+# The clock on by `deltaTime`, and a touch listed for every stride a
+# character on its feet finished since last frame (the touches start empty);
+# a character's stride is for its CharacterHeight, `fallbackHeight` without one
+func findFootsteps(
+  footprints: mod Footprints
+  characters: view ComponentTable(CharacterBody)
+  controllers: view ComponentTable(ThirdPersonController)
+  parked: view ComponentTable(MoverParked)
+  heights: view ComponentTable(CharacterHeight)
+  fallbackHeight: view Float
+  groundZ: view Float
+  deltaTime: view Float
+) {
+  footprints.clock = footprints.clock + deltaTime
+  footprints.touches.clear()
+  loop var i: Int = 0, i < componentCount(this: characters), ++i {
+    let characterId: EntityId = componentEntityAt(this: characters, i: i)
+    if componentHas(this: controllers, entityId: characterId) is false {
+      continue
+    }
+    if componentHas(this: footprints.trails, entityId: characterId) is false {
+      componentSet(
+        this: footprints.trails
+        entityId: characterId
+        data: FootprintTrail {
+          trail: createMarkTrail(capacity: footprints.tuning.capacity)
+          travelled: 0.0
+          lastFeet: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+          hasLastFeet: false
+          leftFootNext: true
+        }
+      )
+    }
+    let onFeet: Bool = hasTag(MoverParked, table: parked, entityId: characterId) is false and characterGrounded(
+      characters: characters
+      entityId: characterId
+    )
+    let feet: Vec3 = controllerFeet(
+      controller: controllerOf(controllers: controllers, entityId: characterId)
+      groundZ: groundZ
+    )
+    let speed: Float = characterSpeed(characters: characters, entityId: characterId)
+    let stride: Float = footprintStride(
+      tuning: footprints.tuning
+      speed: speed
+      height: characterHeightOf(heights: heights, entityId: characterId, fallback: fallbackHeight)
+    )
+    let breakDistance: Float = footprints.tuning.breakDistance
+    let footsteps: mod FootprintTrail = componentMod(this: footprints.trails, entityId: characterId)
+    if onFeet is false {
+      footsteps.hasLastFeet = false
+      continue
+    }
+    if footsteps.hasLastFeet is false {
+      footsteps.lastFeet = feet
+      footsteps.hasLastFeet = true
+      footsteps.travelled = 0.0
+      continue
+    }
+    let dx: Float = feet.x - footsteps.lastFeet.x
+    let dy: Float = feet.y - footsteps.lastFeet.y
+    let moved: Float = Math.sqrt(x: dx * dx + dy * dy)
+    footsteps.lastFeet = feet
+    if moved > breakDistance {
+      footsteps.travelled = 0.0
+      continue
+    }
+    if moved < 0.0001 {
+      continue
+    }
+    footsteps.travelled = footsteps.travelled + moved
+    if footsteps.travelled < stride {
+      continue
+    }
+    footsteps.travelled = 0.0
+    footprints.touches.add(value: GroundTouch {
+      entityId: characterId
+      point: feet
+      directionX: dx / moved
+      directionY: dy / moved
+      speed: speed
+      distance: moved
+      answer: createGroundAnswer()
+    })
+  }
+}
+
+# Each answered touch's print laid, left and right in turn, and its
+# particles kicked up (rolls from `random`)
+func layFootsteps(
+  footprints: mod Footprints
+  groundParticles: mod GroundParticles
+  random: mod Random
+) {
+  loop var i: Int = 0, i < footprints.touches.length, ++i {
+    let touch: GroundTouch = footprints.touches.copyAtDefault(index: i)
+    if componentHas(this: footprints.trails, entityId: touch.entityId) is false {
+      continue
+    }
+    let piece: MarkPiece = footprintPiece(
+      tuning: footprints.tuning
+      feet: touch.point
+      directionX: touch.directionX
+      directionY: touch.directionY
+      left: componentView(this: footprints.trails, entityId: touch.entityId).leftFootNext
+      laidAt: footprints.clock
+      groundColor: touch.answer.color
+      lift: touch.answer.lift
+    )
+    let footsteps: mod FootprintTrail = componentMod(
+      this: footprints.trails
+      entityId: touch.entityId
+    )
+    markTrailAdd(trail: footsteps.trail, piece: piece)
+    footsteps.leftFootNext = footsteps.leftFootNext is false
+    kickUpParticles(
+      groundParticles: groundParticles
+      random: random
+      answer: touch.answer
+      feet: touch.point
+      directionX: touch.directionX
+      directionY: touch.directionY
+      speed: touch.speed
+      count: stepParticleCount(speed: touch.speed, blades: touch.answer.blades)
+      floor: touch.point.z + touch.answer.lift
+    )
+  }
+}
+
+# Every live print into the G-buffer's open pass, in one instanced draw
+func drawFootprints(
+  cache: mod GbufferCache
+  resources: mod GpuResources
+  footprints: mod Footprints
+  toon: view Bool
+) {
+  resetInstanceBatch(batch: footprints.batch)
+  loop var i: Int = 0, i < componentCount(this: footprints.trails), ++i {
+    let footsteps: view FootprintTrail = componentView(
+      this: footprints.trails
+      entityId: componentEntityAt(this: footprints.trails, i: i)
+    )
+    addMarkTrailInstances(
+      batch: footprints.batch
+      trail: footsteps.trail
+      clock: footprints.clock
+      width: footprints.tuning.width
+      thickness: footprints.tuning.thickness
+      fading: footprintFading(tuning: footprints.tuning)
+      toon: toon
+    )
+  }
+  drawInstances(cache: cache, resources: resources, batch: footprints.batch)
+}
+
+# How many prints `entityId` shows now
+func footprintCount(footprints: view Footprints, entityId: view EntityId) ret Int {
+  if componentHas(this: footprints.trails, entityId: entityId) is false {
+    ret 0
+  }
+  ret markTrailLiveCount(
+    trail: componentView(this: footprints.trails, entityId: entityId).trail
+    clock: footprints.clock
+    fading: footprintFading(tuning: footprints.tuning)
+  )
+}
