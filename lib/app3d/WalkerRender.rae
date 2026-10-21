@@ -197,7 +197,9 @@ func renderShadowPass(
       camTarget: cameraSystem.camera.target
       margin: 4.0
     )
-    sunDir: cameraSystem.light.sunDir
+    # The shadows' sun steps every 30 s while time runs (the sky's moves on),
+    # so the shadows do not crawl (app3d/SettingsDialog settingsShadowLightDir)
+    sunDir: settingsShadowLightDir(settingsState: inputSystem.settings)
     count: 4
     resolution: drsShadowRes(drs: renderSystem.drs)
     lambda: 0.75
