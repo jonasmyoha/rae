@@ -1589,7 +1589,8 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           #    tools/box3d-oracle/goldens/vehicle.golden - the same file for
           #    both tracks; 125 is also linked against the scalar library and
           #    must print the same hash.
-          # 2. A headless frame (the car on the course, the HUD) not blank.
+          # 2. A headless frame (the car on the course, the HUD) not blank;
+          #    on 125 its tyre tracks and dust laid by then ([tracks]).
           # 3. Memory flat WHILE running: RAE_VEHICLE_CYCLE_SECONDS=4 respawns
           #    the car (five bodies, five joints) and its nine crates every 4 s
           #    under the autopilot; the [mem:live] peak of a later 24 s window
@@ -1641,6 +1642,14 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             VEHICLE_OK=0
             echo "  screenshot check failed:"
             cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" 2>/dev/null | grep -v '^\[present\]' | tail -8 | sed 's/^/    /'
+          fi
+          # 125 lays tyre tracks on the course (app3d/WheelTracks) and kicks up
+          # dust: by 2 s of the autopilot's drive both are there
+          if [ "$EXAMPLE_NAME" = "125_vehicle_c" ] \
+             && ! grep -qE '^\[tracks\] after [0-9.]+ s: [1-9][0-9]* pieces, the longest trail [0-9.]+ m, [1-9][0-9]* dust puffs' "$TMP_OUT/render.log"; then
+            VEHICLE_OK=0
+            echo "  tyre track check failed (no [tracks] line with pieces and dust):"
+            grep -a '^\[tracks\]' "$TMP_OUT/render.log" | sed 's/^/    /'
           fi
           if (cd .. && RAE_VEHICLE_CYCLE_SECONDS=4 RAE_VEHICLE_AUTOPILOT=1 \
              RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=78000 RAE_MEM_STATS=1 RAE_MEM_STATS_EVERY_MS=2000 \
