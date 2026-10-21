@@ -1,0 +1,126 @@
+# app3d/WalkerMarkTest — the walker's footprint check (RAE_WALKER_PHYSICS_TEST=1,
+# after the knockdown): the hero running 2 s lays a print about every stride
+# and kicks up particles; stopped and standing still it lays none; a print's lifetime later
+# none show. One [marktest] line; true when all held.
+import Math
+import Vec3
+open ecs/Entity
+open ecs/ComponentTable
+open WorldBiome
+open app3d/CharacterController
+open app3d/CharacterBodies
+open app3d/GroundParticles
+open app3d/Footprints
+open app3d/WalkerPhysics
+open app3d/WalkerPhysicsChecks
+open app3d/WalkerTerrain
+open app3d/WalkerWorld
+open app3d/WalkerMarks
+
+# `steps` fixed steps of the hero with `intent`, its marks after each
+func walkerMarkTestSteps(
+  physicsSystem: mod WalkerPhysics
+  world: mod WalkerWorld
+  walkerMarks: mod WalkerMarks
+  biome: view BiomeConfig
+  groundZ: view Float
+  modelHeight: view Float
+  heroEntityId: view EntityId
+  intent: view InputIntent
+  steps: view Int
+) {
+  loop var i: Int = 0, i < steps, ++i {
+    selfTestStep(
+      physicsSystem: physicsSystem
+      transforms: world.transforms
+      controllers: world.controllers
+      bushes: bushSpots(propKinds: world.propKinds, transforms: world.transforms)
+      heroEntityId: heroEntityId
+      intent: intent
+      yaw: 0.0
+    )
+    walkerMarksUpdate(
+      walkerMarks: walkerMarks
+      physicsSystem: physicsSystem
+      world: world
+      biome: biome
+      groundZ: groundZ
+      modelHeight: modelHeight
+      deltaTime: 1.0 / 60.0
+    )
+  }
+}
+
+func runWalkerMarkTest(
+  physicsSystem: mod WalkerPhysics
+  world: mod WalkerWorld
+  walkerMarks: mod WalkerMarks
+  biome: view BiomeConfig
+  groundZ: view Float
+  modelHeight: view Float
+  heroEntityId: view EntityId
+) ret Bool {
+  let start: Vec3 = controllerOf(controllers: world.controllers, entityId: heroEntityId).position
+  let printsBefore: Int = footprintCount(footprints: walkerMarks.footprints, entityId: heroEntityId)
+  walkerMarkTestSteps(
+    physicsSystem: physicsSystem
+    world: world
+    walkerMarks: walkerMarks
+    biome: biome
+    groundZ: groundZ
+    modelHeight: modelHeight
+    heroEntityId: heroEntityId
+    intent: forwardIntent()
+    steps: 120
+  )
+  let end: Vec3 = controllerOf(controllers: world.controllers, entityId: heroEntityId).position
+  let dx: Float = end.x - start.x
+  let dy: Float = end.y - start.y
+  let ran: Float = Math.sqrt(x: dx * dx + dy * dy)
+  let prints: Int = footprintCount(footprints: walkerMarks.footprints, entityId: heroEntityId) - printsBefore
+  let particles: Int = liveGroundParticleCount(groundParticles: walkerMarks.groundParticles)
+  let stride: Float = footprintStride(
+    tuning: walkerMarks.footprints.tuning
+    speed: ran / 2.0
+    height: modelHeight
+  )
+  let laid: Bool = prints >= 2 and Math.abs(value: prints.toFloat() - ran / stride) <= 2.0 and particles > 0
+  # Coming to a stop it may lay one more; then nothing
+  walkerMarkTestSteps(
+    physicsSystem: physicsSystem
+    world: world
+    walkerMarks: walkerMarks
+    biome: biome
+    groundZ: groundZ
+    modelHeight: modelHeight
+    heroEntityId: heroEntityId
+    intent: standingIntent()
+    steps: 30
+  )
+  let printsStopped: Int = footprintCount(
+    footprints: walkerMarks.footprints
+    entityId: heroEntityId
+  )
+  walkerMarkTestSteps(
+    physicsSystem: physicsSystem
+    world: world
+    walkerMarks: walkerMarks
+    biome: biome
+    groundZ: groundZ
+    modelHeight: modelHeight
+    heroEntityId: heroEntityId
+    intent: standingIntent()
+    steps: 90
+  )
+  let standingStill: Bool = footprintCount(
+    footprints: walkerMarks.footprints
+    entityId: heroEntityId
+  ) is printsStopped
+  walkerMarks.footprints.clock = walkerMarks.footprints.clock + walkerMarks.footprints.tuning.lifetime
+  let gone: Bool = walkerFootprintCount(walkerMarks: walkerMarks) is 0
+  let passed: Bool = laid and standingStill and gone
+  log(
+    "[marktest] ran {ran} m: {prints} prints (a stride of {stride} m), {particles} particles kicked up; standing still added none={standingStill}; a lifetime later none={gone}; passed={passed}"
+  )
+  ret passed
+}

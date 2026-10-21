@@ -57,6 +57,7 @@ open app3d/WalkerCharacter
 open app3d/Characters
 open app3d/PlayerRoster
 open app3d/WalkerPhysics
+open app3d/WalkerMarks
 open app3d/WalkerWorld
 open app3d/WalkerInput
 open app3d/WalkerCamera
@@ -92,6 +93,8 @@ type WalkerApp {
   profiler: Profiler  # #764: was lib/profile.rae gProf* globals
   grassCompute: GrassCompute  # #764: was lib/GrassCompute.rae gGrass* globals
   physicsSystem: WalkerPhysics  # fixed-step sim seam (physics.rae, #553)
+  # Footprints and what the steps kick up (app3d/WalkerMarks)
+  walkerMarks: WalkerMarks
   netSeam: NetSeam  # multiplayer seam (app3d/NetSeam, #554)
   players: PlayerRoster  # who the local player controls (players.rae, #546)
   persist: WalkerPersist
@@ -262,6 +265,16 @@ func updateWalkerApp(app: mod WalkerApp) {
     characterSystem: app.characterSystem
     controlledEntityId: controlledEntityId
     wantsUp: intent.moveX is not 0.0 or intent.moveY is not 0.0 or intent.jump
+    deltaTime: deltaTime
+  )
+  # Every character on its feet leaves a print each stride (app3d/WalkerMarks)
+  walkerMarksUpdate(
+    walkerMarks: app.walkerMarks
+    physicsSystem: app.physicsSystem
+    world: app.world
+    biome: app.biome
+    groundZ: app.characterSystem.groundZ
+    modelHeight: app.characterSystem.modelHeight
     deltaTime: deltaTime
   )
   # Every character's model follows its controller whenever the physics moved
