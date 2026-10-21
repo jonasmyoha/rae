@@ -95,6 +95,11 @@ type SpriteCache {
   boundImpostors: ImpostorBinding = noImpostorBinding()
   forwardImpostors: ImpostorBinding = noImpostorBinding()
   unusedFrames: BufferId = noBufferId()
+  # The G-buffer pipeline that keeps the quad's depth (and with it the early
+  # depth test) for an impostor too, and its bind: for far props, where the
+  # moved depth is not worth turning that test off (drawSpriteInstances)
+  quadDepthPipeline: RenderPipelineId = noRenderPipelineId()
+  quadDepthBindGroup: BindGroupId = noBindGroupId()
 }
 
 # The hashed alpha test's band round the cutoff when TAA resolves it
@@ -253,6 +258,15 @@ func ensureSpritePipeline(
     ) {
       cache.pipeline = pipeline
     }
+    if let pipeline: RenderPipelineId = createRenderPipeline(
+      resources: resources
+      shader: billboardShader
+      vertexEntry: "vs"
+      fragmentEntry: "fsQuadDepth"
+      spec: gbufferProceduralPipelineSpec()
+    ) {
+      cache.quadDepthPipeline = pipeline
+    }
   }
   ensureSpriteDefaults(cache: cache, resources: resources)
   var gen: Int = 0
@@ -262,13 +276,18 @@ func ensureSpritePipeline(
   if gen is cache.bindGen and sameImpostorBinding(
     first: cache.boundImpostors
     second: cache.impostors.binding
-  ) and bindGroupIsUsable(resources: resources, id: cache.bindGroup) {
+  ) and bindGroupIsUsable(resources: resources, id: cache.bindGroup) and bindGroupIsUsable(
+    resources: resources
+    id: cache.quadDepthBindGroup
+  ) {
     ret
   }
-  # The bind group is rebuilt (the old one retires behind any frame still
-  # drawing with it); the array view is re-adopted when it changed generation
+  # The bind groups are rebuilt (the old ones retire behind any frame still
+  # drawing with them); the array view is re-adopted when it changed generation
   retireBindGroup(resources: resources, id: cache.bindGroup)
+  retireBindGroup(resources: resources, id: cache.quadDepthBindGroup)
   cache.bindGroup = noBindGroupId()
+  cache.quadDepthBindGroup = noBindGroupId()
   if not (gen is cache.bindGen) {
     cache.bindGen = gen
     releaseExternal(resources: resources, id: cache.arrayView)
@@ -291,6 +310,14 @@ func ensureSpritePipeline(
     entries: entries
   ) {
     cache.bindGroup = bindGroup
+  }
+  # Each pipeline's own layout, so each its own group over the same entries
+  if let bindGroup: BindGroupId = createRenderBindGroup(
+    resources: resources
+    pipeline: cache.quadDepthPipeline
+    entries: entries
+  ) {
+    cache.quadDepthBindGroup = bindGroup
   }
 }
 
@@ -321,6 +348,14 @@ func addSpriteEntries(
     entries.add(value: externalRef(id: cache.arrayView))
     entries.add(value: bufferRef(id: cache.unusedFrames))
   }
+}
+
+# 1 when the impostor draw blends three views, else 0 (the nearest only)
+func impostorBlendFlag(binding: view ImpostorBinding) ret Float {
+  if binding.blendViews {
+    ret 1.0
+  }
+  ret 0.0
 }
 
 # Draw the quads from `atlas` (ImpostorBake) instead of the sprite array,
@@ -374,7 +409,7 @@ func writeSpriteUniform(cache: mod SpriteCache, resources: mod GpuResources, ban
     x: cache.tilt
     y: band
     z: cache.impostors.binding.viewsPerSide.toFloat()
-    w: 0.0
+    w: impostorBlendFlag(binding: cache.impostors.binding)
   )
   uploadArgs(
     writer: args
@@ -386,15 +421,18 @@ func writeSpriteUniform(cache: mod SpriteCache, resources: mod GpuResources, ban
 }
 
 # One billboard instance into `batch`: standing at `position` (its foot),
-# `height` tall in the world, showing layer `layer` of the sprite array, with
-# the instance mode of a `toon` (or lit) mesh. The record is the shared DrawU:
-# the model is a translation and a uniform `scale` (the shader reads the
+# `height` tall in the world, turned `yaw` (radians about z: an impostor shows
+# the prop turned as its meshes are; a plain picture ignores it), showing
+# layer `layer` of the sprite array, with the instance mode of a `toon` (or
+# lit) mesh. The record is the shared DrawU: the model is the turn and the
+# translation, at scale 1 (the shader reads the
 # height per unit scale from params.x, the roughness slot, and the layer from
 # slot 39, the skinned path's palette base — a billboard is never skinned).
 func addSpriteInstance(
   batch: mod InstanceBatch
   position: view Vec3
   height: view Float
+  yaw: view Float
   layer: view Int
   toon: view Bool
 ) {
@@ -405,7 +443,17 @@ func addSpriteInstance(
   if toon {
     toonFlag = 1
   }
-  let model: Mat4 = mat4Translate(x: position.x, y: position.y, z: position.z)
+  # The turn and the translation written straight in (no matrix product:
+  # a frame adds tens of thousands of these)
+  var model: Mat4 = mat4Translate(x: position.x, y: position.y, z: position.z)
+  if not (yaw is 0.0) {
+    let cosine: Float = Math.cos(x: yaw)
+    let sine: Float = Math.sin(x: yaw)
+    model.m.set(index: 0, value: cosine)
+    model.m.set(index: 1, value: sine)
+    model.m.set(index: 4, value: -sine)
+    model.m.set(index: 5, value: cosine)
+  }
   packInstanceRecord(
     records: batch.records
     slot: batch.count
@@ -514,13 +562,17 @@ func ensureSpriteForward(
 # Draw a batch of billboard instances from packed DrawU `records` (count of them):
 # upload to the shared draws buffer at the running base, draw 6 procedural verts x
 # count with the sprite pipeline. `records` is a raw record
-# pointer into the caller's packed floats, hence unsafe.
+# pointer into the caller's packed floats, hence unsafe. With `movedDepth`, an
+# impostor writes the depth of the point it shows (it is lit and shadowed at
+# its surface, not its quad); that turns off the early depth test for the
+# batch, so a batch of far, small props passes false and keeps the quad's.
 func drawSpriteInstances(
   cache: mod SpriteCache
   resources: mod GpuResources
   gbuffer: mod GbufferCache
   records: copy Ptr
   count: copy Int
+  movedDepth: copy Bool
 ) unsafe {
   if count <= 0 {
     ret
@@ -536,6 +588,10 @@ func drawSpriteInstances(
   }
   var pipeline: RenderPipelineId = cache.pipeline
   var bindGroup: BindGroupId = cache.bindGroup
+  if not movedDepth {
+    pipeline = cache.quadDepthPipeline
+    bindGroup = cache.quadDepthBindGroup
+  }
   if gbuffer.forwardFrame {
     ensureSpriteForward(cache: cache, resources: resources, gbuffer: gbuffer)
     pipeline = cache.forwardPipeline
@@ -595,6 +651,8 @@ func spriteShutdown(cache: mod SpriteCache, resources: mod GpuResources) {
   retireRenderPipeline(resources: resources, id: cache.forwardPipeline)
   retireBindGroup(resources: resources, id: cache.bindGroup)
   retireRenderPipeline(resources: resources, id: cache.pipeline)
+  retireBindGroup(resources: resources, id: cache.quadDepthBindGroup)
+  retireRenderPipeline(resources: resources, id: cache.quadDepthPipeline)
   retireBuffer(resources: resources, id: cache.uniform)
   retireSampler(resources: resources, id: cache.sampler)
   retireBuffer(resources: resources, id: cache.unusedFrames)
