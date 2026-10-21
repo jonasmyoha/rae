@@ -845,13 +845,51 @@ func settingsNightBlend(settingsState: view SettingsState) ret Float {
 # on, the moon while it is up. The shadows follow it, so a moonlit night has
 # moon shadows.
 func settingsKeyLightDir(settingsState: view SettingsState) ret Vec3 {
-  if settingsNightBlend(settingsState: settingsState) > 0.0 {
-    let moon: MoonState = settingsMoon(settingsState: settingsState)
-    if moon.up > 0.0 {
-      ret moon.direction
+  ret settingsKeyLightDirAt(settingsState: settingsState, hour: settingsState.timeOfDay.hour)
+}
+
+# ...at `hour` of the clock's day (the night blend is above 0 exactly while
+# the sun is under the horizon)
+func settingsKeyLightDirAt(settingsState: view SettingsState, hour: view Float) ret Vec3 {
+  if settingsState.moon {
+    let sunUp: Float = sunHeightSignedForDate(
+      hour: hour
+      dayOfYear: settingsState.timeOfDay.dayOfYear
+      latitudeDeg: settingsState.latitude
+    )
+    if sunUp < 0.0 {
+      let moon: MoonState = moonForDate(
+        year: settingsState.timeOfDay.year
+        dayOfYear: settingsState.timeOfDay.dayOfYear
+        hour: hour
+        latitudeDeg: settingsState.latitude
+        longitudeDeg: settingsState.longitude
+      )
+      if moon.up > 0.0 {
+        ret moon.direction
+      }
     }
   }
-  ret settingsSunDir(settingsState: settingsState)
+  ret sunDirForDate(
+    hour: hour
+    dayOfYear: settingsState.timeOfDay.dayOfYear
+    latitudeDeg: settingsState.latitude
+  )
+}
+
+# The direction the shadows are cast from: the key light's, but while the
+# clock runs at the hour rounded down to its step (app3d/TimeOfDay
+# timeOfDayShadowHour: every 30 s of a 30 minute day), so the shadows do not
+# crawl as the sun moves; paused, or the time set by hand, the light's own.
+# The sky and the shading still follow the sun every frame.
+func settingsShadowLightDir(settingsState: view SettingsState) ret Vec3 {
+  if settingsState.playing is false or settingsState.animateTime is false or settingsState.timeDragging {
+    ret settingsKeyLightDir(settingsState: settingsState)
+  }
+  ret settingsKeyLightDirAt(
+    settingsState: settingsState
+    hour: timeOfDayShadowHour(timeOfDay: settingsState.timeOfDay)
+  )
 }
 
 # Its colour: the sun's, crossing at dusk to the moon's cold light, which a

@@ -1,0 +1,60 @@
+# app3d/TimeOfDay: the shadows' sun steps while the sky's moves on. Moving
+# the sun's shadows a little every frame makes every shadow edge crawl, so
+# the shadows take the sun at the clock's hour rounded down to a step of
+# timeOfDayShadowStepSeconds of wall time: the day's length / 60, at least
+# 30 s and at most 5 minutes.
+import Math
+open app3d/TimeOfDay
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func near(a: view Float, b: view Float) ret Bool {
+  ret Math.abs(value: a - b) < 0.0001
+}
+
+func main() ret Int {
+  check(
+    label: "a 5 minute day steps every {timeOfDayShadowStepSeconds(daySeconds: 300.0)} s, a 30 minute one every {timeOfDayShadowStepSeconds(
+      daySeconds: 1800.0
+    )} s, a 24 hour one every {timeOfDayShadowStepSeconds(daySeconds: 86400.0)} s"
+    ok: near(a: timeOfDayShadowStepSeconds(daySeconds: 300.0), b: 30.0) and near(
+      a: timeOfDayShadowStepSeconds(daySeconds: 1800.0)
+      b: 30.0
+    ) and near(a: timeOfDayShadowStepSeconds(daySeconds: 86400.0), b: 300.0) and near(
+      a: timeOfDayShadowStepSeconds(daySeconds: 7200.0)
+      b: 120.0
+    )
+  )
+  # A 30 minute day: 30 s of it is 0.4 of an hour
+  var clock: TimeOfDay = createTimeOfDay(hour: 10.0)
+  clock.daySeconds = 1800.0
+  let atStart: Float = timeOfDayShadowHour(timeOfDay: clock)
+  var changes: Int = 0
+  var last: Float = atStart
+  var largest: Float = 0.0
+  # Two minutes and a second of 60 frames a second (the fourth step is at 2 minutes)
+  loop var frame: Int = 0, frame < 7260, ++frame {
+    let unusedMoved: Bool = timeOfDayAdvance(timeOfDay: clock, deltaTime: 1.0 / 60.0)
+    let shadowHour: Float = timeOfDayShadowHour(timeOfDay: clock)
+    if shadowHour is not last {
+      changes = changes + 1
+      largest = Math.max(a: largest, b: shadowHour - last)
+      last = shadowHour
+    }
+  }
+  check(
+    label: "at 10:00 the shadows' hour is 10:00; over 2 minutes of a 30 minute day it changed {changes} times, by one step (0.4 h) each"
+    ok: near(a: atStart, b: 10.0) and changes is 4 and near(a: largest, b: 0.4)
+  )
+  check(
+    label: "it never runs ahead of the clock, and is within one step behind it"
+    ok: last <= clock.hour + 0.0001 and clock.hour - last < 0.4 + 0.0001
+  )
+  ret 0
+}
