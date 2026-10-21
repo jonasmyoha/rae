@@ -72,6 +72,7 @@ open app3d/WalkerRender
 open app3d/WalkerState
 open app3d/NetSeam
 open app3d/CharacterBodies
+open app3d/CharacterHeight
 open app3d/CameraKnockdownFollow
 open app3d/WalkerKnockdown
 open app3d/LocomotionClips
@@ -300,6 +301,19 @@ func updateWalkerApp(app: mod WalkerApp) {
   if characterMoved {
     app.persist.stateDirty = true
   }
+  # Every other character's clip follows its mover too, always: the crowd
+  # walks about on its own, and kept the clip it was spawned with before
+  stepOtherLocomotionClips(
+    locomotion: app.world.locomotionClips
+    animStates: app.world.animStates
+    animTransitions: app.world.animTransitions
+    characterSystem: app.characterSystem
+    characters: app.physicsSystem.characters
+    knockedDown: app.physicsSystem.knockedDown
+    knocks: app.physicsSystem.knocks
+    moverDrives: app.physicsSystem.moverDrives
+    controlledEntityId: controlledEntityId
+  )
   if app.cameraSystem.rig.mode is CameraRigMode.character {
     # The controlled character's clip follows its mover, by Rae's clip
     # machine (app3d/LocomotionClips: a takeoff into the jump clip, the speed
@@ -496,7 +510,9 @@ func rememberCharacterModels(world: mod WalkerWorld) {
   }
 }
 
-# Every character's model from its controller, and its clip slowed in the air
+# Every character's model from its controller, and its clip's rate: on the
+# ground a walk or run plays as fast as the character really moves
+# (app3d/CharacterHeight groundSpeedClipScale), in the air slowed
 func updateWalkerCharacters(
   world: mod WalkerWorld
   characterSystem: view CharacterSystem
@@ -513,7 +529,12 @@ func updateWalkerCharacters(
     models.model = model
     if componentHas(this: world.animStates, entityId: entityId) {
       let anim: mod AnimationState = componentMod(this: world.animStates, entityId: entityId)
-      anim.playbackScale = 1.0
+      anim.playbackScale = groundSpeedClipScale(
+        clipIndex: anim.clipIndex
+        speed: characterSpeed(characters: physicsSystem.characters, entityId: entityId)
+        rate: clipPlaybackRate(clipIndex: anim.clipIndex)
+        timeScale: characterSystem.speed
+      )
       if characterGrounded(characters: physicsSystem.characters, entityId: entityId) is false {
         anim.playbackScale = airborneClipScale
       }

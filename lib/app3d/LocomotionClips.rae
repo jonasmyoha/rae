@@ -12,6 +12,7 @@ open app3d/Characters
 open app3d/CharacterBodies
 open app3d/KnockedDown
 open app3d/ClipChoice
+open app3d/CharacterMovers
 
 # This frame's say on a character's clip: how fast it is trying to go (a
 # player's clip follows their mover: far up), whether its mover took off;
@@ -53,6 +54,51 @@ func stepLocomotionClips(
     let written: mod LocomotionClip = componentMod(this: locomotion, entityId: entityId)
     written.changedTo = changedTo
   }
+}
+
+# Every character with a mover and a clip but `controlledEntityId`, one
+# frame: its takeoff from its MoverDrive, its clip from its speed. The
+# controlled one is left to the app (its clip follows its mover only in the
+# character camera; otherwise the clip panel picks it). The table is emptied
+# first, so it holds only this frame's characters.
+func stepOtherLocomotionClips(
+  locomotion: mod ComponentTable(LocomotionClip)
+  animStates: mod ComponentTable(AnimationState)
+  animTransitions: mod ComponentTable(AnimationTransition)
+  characterSystem: mod CharacterSystem
+  characters: view ComponentTable(CharacterBody)
+  knockedDown: view ComponentTable(KnockedDown)
+  knocks: view ComponentTable(KnockRequest)
+  moverDrives: view ComponentTable(MoverDrive)
+  controlledEntityId: view EntityId
+) {
+  loop componentCount(this: locomotion) > 0 {
+    componentRemove(this: locomotion, entityId: componentEntityAt(this: locomotion, i: 0))
+  }
+  loop var i: Int = 0, i < componentCount(this: characters), ++i {
+    let entityId: EntityId = componentEntityAt(this: characters, i: i)
+    if entityId is controlledEntityId or componentHas(this: animStates, entityId: entityId) is false {
+      continue
+    }
+    var tookOff: Bool = false
+    if componentHas(this: moverDrives, entityId: entityId) {
+      tookOff = componentView(this: moverDrives, entityId: entityId).tookOff
+    }
+    componentSet(
+      this: locomotion
+      entityId: entityId
+      data: LocomotionClip { jumpStarted: tookOff }
+    )
+  }
+  stepLocomotionClips(
+    locomotion: locomotion
+    animStates: animStates
+    animTransitions: animTransitions
+    characterSystem: characterSystem
+    characters: characters
+    knockedDown: knockedDown
+    knocks: knocks
+  )
 }
 
 # One character's clip machine; the new clip when it changed, else -1
