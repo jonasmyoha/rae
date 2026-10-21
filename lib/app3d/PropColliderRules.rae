@@ -1,0 +1,102 @@
+# app3d/PropColliderRules — what a prop is to physics, for a pool of bodies
+# on the props near a point (app3d/PropBodyPool): per kind of a PropField, a
+# trunk capsule (its radius from the prop's height within bounds, or from its
+# scale for a slim one; its height a share of the prop's, capped), a sphere a
+# share of the one round it, a soft part (a bush: no body, slower going), or
+# nothing; the nearest first. Pure (no physics engine), so an app's own rules
+# built on these test without one.
+import Math
+import Vec3
+open app3d/PropField
+open app3d/PropFieldQuery
+
+enum PropBodyRole { none, trunk, sphere, soft }
+
+# What one kind of prop is to physics
+type PropColliderRule {
+  role: PropBodyRole
+  # A trunk: its radius per metre of the prop's height, within min..max; or,
+  # when radiusPerScale is over 0, that radius per unit of the placement's
+  # scale however tall it is (a palm's slim trunk)
+  radiusPerMetre: Float = 0.0
+  minRadius: Float = 0.1
+  maxRadius: Float = 0.5
+  radiusPerScale: Float = 0.0
+  # ...and its height: this share of the prop's, at most maxHeight
+  heightShare: Float = 0.7
+  maxHeight: Float = 3.0
+  # A sphere or a soft part: this share of the sphere round the prop
+  share: Float = 0.75
+}
+
+func noPropCollider() ret PropColliderRule {
+  ret PropColliderRule { role: PropBodyRole.none }
+}
+
+# A prop near the point with no body: its middle and its soft part's radius
+type SoftProp {
+  x: Float
+  y: Float
+  radius: Float
+}
+
+# A gathered trunk or sphere: where its body goes, its size, how far it is
+type PropBodyCandidate {
+  position: Vec3
+  radius: Float
+  height: Float
+  distance: Float
+}
+
+# How tall a prop near the point is (its foot to the top of its sphere)
+func propHeightOf(prop: view PropNear) ret Float {
+  ret prop.center.z + prop.radius - prop.placement.position.z
+}
+
+# A trunk's radius and height for `prop` by `rule`
+func trunkRadiusOf(rule: view PropColliderRule, prop: view PropNear) ret Float {
+  if rule.radiusPerScale > 0.0 {
+    ret rule.radiusPerScale * prop.placement.scale
+  }
+  ret Math.max(
+    a: rule.minRadius
+    b: Math.min(a: rule.maxRadius, b: propHeightOf(prop: prop) * rule.radiusPerMetre)
+  )
+}
+
+func trunkHeightOf(rule: view PropColliderRule, prop: view PropNear) ret Float {
+  ret Math.min(a: rule.maxHeight, b: propHeightOf(prop: prop) * rule.heightShare)
+}
+
+# The indices of the `count` nearest candidates, nearest first (the first
+# gathered of two as near)
+func nearestCandidates(candidates: view List(PropBodyCandidate), count: view Int) ret List(Int) {
+  var taken: List(Bool) = List.create(Bool, cap: candidates.length)
+  loop var i: Int = 0, i < candidates.length, ++i {
+    taken.add(value: false)
+  }
+  var picked: List(Int) = List.create(Int, cap: count)
+  loop picked.length < count and picked.length < candidates.length {
+    var best: Int = -1
+    var bestDistance: Float = 0.0
+    loop var i: Int = 0, i < candidates.length, ++i {
+      if taken.copyAtFallback(index: i, fallback: true) {
+        continue
+      }
+      let distance: Float = candidates.copyAtDefault(index: i).distance
+      if best < 0 or distance < bestDistance {
+        best = i
+        bestDistance = distance
+      }
+    }
+    taken.set(index: best, value: true)
+    picked.add(value: best)
+  }
+  ret picked
+}
+
+# Place the pool again? After moving `moveDistance`, or when what it stands
+# on `changed`
+func propPoolPlacingDue(moved: view Float, moveDistance: view Float, changed: view Bool) ret Bool {
+  ret changed or moved >= moveDistance
+}

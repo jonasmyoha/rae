@@ -50,6 +50,8 @@ open GltfSkin
 open app3d/KnockedDown
 open app3d/RagdollRig
 open app3d/Ragdoll
+open app3d/PropColliderRules
+open app3d/PropBodyPool
 
 const walkerPhysicsStep: Float = 1.0 / 60.0
 
@@ -105,10 +107,7 @@ type WalkerPhysics {
   # The trunk pool (TrunkPool): static trunk bodies moved onto the trees
   # nearest the walker, the point they were placed round, and how many stand
   # on trees now
-  trunks: List(EntityId)
-  trunkFocus: Vec3
-  trunkFocusSet: Bool
-  trunksOnTrees: Int
+  trunkPool: PropBodyPool
 }
 
 # The physics of a walker on the terrain of `biome` at `groundZ`, its ground a
@@ -155,10 +154,7 @@ func createWalkerPhysics(
     groundShape: nullShapeId()
     groundCentre: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
     groundFields: 0
-    trunks: List.create(EntityId, cap: 128)
-    trunkFocus: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
-    trunkFocusSet: false
-    trunksOnTrees: 0
+    trunkPool: emptyPropBodyPool(settings: walkerTrunkPoolSettings())
   }
 }
 
@@ -664,46 +660,56 @@ const trunkPoolMove: Float = 2.0
 # Where an unused trunk waits: this far below the ground
 const trunkPoolParked: Float = -1000.0
 
-# The pool's bodies: static, a trunk capsule each (the same for every species
-# and size, WalkerTrees.treeTrunkRadius / Height), parked until placed. The
-# number of bodies.
+# The pool's settings: trunks only, the same capsule for every species and
+# size (GroveTrees.treeTrunkRadius / Height), the default material
+func walkerTrunkPoolSettings() ret PropPoolSettings {
+  ret PropPoolSettings {
+    trunkCount: trunkPoolSize
+    sphereCount: 0
+    reach: trunkPoolReach
+    moveDistance: trunkPoolMove
+    parkedZ: trunkPoolParked
+    categoryBits: allBits
+    friction: 0.6
+    trunkRestitution: defaultSurfaceMaterial().restitution
+    sphereRestitution: defaultSurfaceMaterial().restitution
+    trunkRadius: treeTrunkRadius
+    trunkHeight: treeTrunkHeight
+    sphereRadius: 0.5
+  }
+}
+
+# Every kind of the forest a trunk of the one size
+func walkerTrunkRules(forest: view PropField) ret List(PropColliderRule) {
+  var rules: List(PropColliderRule) = List.create(PropColliderRule, cap: forest.kinds.length)
+  loop var kind: Int = 0, kind < forest.kinds.length, ++kind {
+    rules.add(value: PropColliderRule {
+      role: PropBodyRole.trunk
+      minRadius: treeTrunkRadius
+      maxRadius: treeTrunkRadius
+      heightShare: 1000.0
+      maxHeight: treeTrunkHeight
+    })
+  }
+  ret rules
+}
+
+# The pool's bodies (app3d/PropBodyPool), parked until placed. The number of
+# bodies.
 func createTrunkPool(
   physicsSystem: mod WalkerPhysics
   allocator: mod EntityAllocator
   transforms: mod ComponentTable(Transform3D)
 ) ret Int {
-  loop var i: Int = 0, i < trunkPoolSize, ++i {
-    let entityId: EntityId = allocEntity(this: allocator)
-    var transform: Transform3D = createTransform3D()
-    transform.position = Vec3.create(x: 0.0, y: 0.0, z: trunkPoolParked)
-    componentSet(this: transforms, entityId: entityId, data: transform)
-    var bodyDef: BodyDef = defaultBodyDef(lengthUnitsPerMeter: 1.0)
-    bodyDef.bodyType = BodyType.staticBody
-    bodyDef.position = transform.position
-    let bodyId: BodyId = spawnRigidBody(
-      physics: physicsSystem.physics
-      rigidBodies: physicsSystem.rigidBodies
-      transforms: transforms
-      entityId: entityId
-      def: bodyDef
-    )
-    var shapeDef: ShapeDef = defaultShapeDef(lengthUnitsPerMeter: 1.0)
-    shapeDef.baseMaterial.friction = 0.6
-    let shapeId: ShapeId = addCapsuleCollider(
-      physics: physicsSystem.physics
-      rigidBodies: physicsSystem.rigidBodies
-      colliders: physicsSystem.colliders
-      entityId: entityId
-      def: shapeDef
-      capsule: {
-        center1: Vec3 { x: 0.0, y: 0.0, z: treeTrunkRadius }
-        center2: Vec3 { x: 0.0, y: 0.0, z: treeTrunkHeight }
-        radius: treeTrunkRadius
-      }
-    )
-    physicsSystem.trunks.add(value: entityId)
-  }
-  ret physicsSystem.trunks.length
+  physicsSystem.trunkPool = createPropBodyPool(
+    physics: physicsSystem.physics
+    rigidBodies: physicsSystem.rigidBodies
+    colliders: physicsSystem.colliders
+    transforms: transforms
+    allocator: allocator
+    settings: walkerTrunkPoolSettings()
+  )
+  ret physicsSystem.trunkPool.trunks.length
 }
 
 # The forest's trees within trunkPoolReach of (x, y): their placement
@@ -743,7 +749,8 @@ func treesNear(
 }
 
 # Place the pool round `focus` (the walker's feet) when the walker has gone
-# trunkPoolMove since the last placing, or `force`. True when it placed.
+# trunkPoolMove since the last placing, or `force`: the nearest trees within
+# trunkPoolReach get a trunk each (app3d/PropBodyPool). True when it placed.
 func updateTrunkPool(
   physicsSystem: mod WalkerPhysics
   transforms: mod ComponentTable(Transform3D)
@@ -751,47 +758,29 @@ func updateTrunkPool(
   focus: view Vec3
   force: view Bool
 ) ret Bool {
-  let movedX: Float = focus.x - physicsSystem.trunkFocus.x
-  let movedY: Float = focus.y - physicsSystem.trunkFocus.y
-  if physicsSystem.trunkFocusSet and force is false and movedX * movedX + movedY * movedY < trunkPoolMove * trunkPoolMove {
-    ret false
-  }
-  physicsSystem.trunkFocus = focus
-  physicsSystem.trunkFocusSet = true
-  var indices: List(Int) = List.create(Int, cap: 256)
-  var distances: List(Float) = List.create(Float, cap: 256)
-  treesNear(
-    forest: forest
+  if force is false and propPoolNeedsPlacing(
+    pool: physicsSystem.trunkPool
     x: focus.x
     y: focus.y
-    indices: indices
-    distances: distances
-  )
-  # The nearest first: pick the nearest remaining one for each trunk (the
-  # pool is small, so a plain selection is enough)
-  var placed: Int = 0
-  loop var trunk: Int = 0, trunk < physicsSystem.trunks.length, ++trunk {
-    var nearest: Int = -1
-    var nearestDistance: Float = 1000000.0
-    loop var i: Int = 0, i < distances.length, ++i {
-      let distance: Float = distances.copyAtFallback(index: i, fallback: 1000000.0)
-      if distance < nearestDistance {
-        nearestDistance = distance
-        nearest = i
-      }
-    }
-    var position: Vec3 = { x: focus.x, y: focus.y, z: trunkPoolParked }
-    if nearest >= 0 {
-      let placementIndex: Int = indices.copyAtFallback(index: nearest, fallback: 0)
-      position = forest.placements.copyAtDefault(index: placementIndex).position
-      distances.set(index: nearest, value: 2000000.0)
-      placed = placed + 1
-    }
-    let entityId: EntityId = physicsSystem.trunks.copyAtFallback(index: trunk, fallback: noEntity())
-    var transform: Transform3D = createTransform3D()
-    transform.position = position
-    componentSet(this: transforms, entityId: entityId, data: transform)
+    changes: 0
+  ) is false {
+    ret false
   }
-  physicsSystem.trunksOnTrees = placed
+  beginPropGathering(pool: physicsSystem.trunkPool)
+  gatherPropBodies(
+    pool: physicsSystem.trunkPool
+    field: forest
+    rules: walkerTrunkRules(forest: forest)
+    x: focus.x
+    y: focus.y
+  )
+  placePropBodies(
+    pool: physicsSystem.trunkPool
+    physics: physicsSystem.physics
+    transforms: transforms
+    x: focus.x
+    y: focus.y
+    changes: 0
+  )
   ret true
 }

@@ -11,6 +11,7 @@ open ecs/Entity
 open ecs/ComponentTable
 open ecs/Transform
 open app3d/WalkerPhysics
+open app3d/PropBodyPool
 open app3d/WalkerPhysicsChecks
 open app3d/GroveTrees
 open app3d/PropField
@@ -26,7 +27,7 @@ func nearestPooledTrunk(
 ) ret opt EntityId {
   var nearest: opt EntityId = none
   var nearestDistance: Float = 1000000.0
-  loop let entityId: view EntityId in physicsSystem.trunks {
+  loop let entityId: view EntityId in physicsSystem.trunkPool.trunks {
     let position: Vec3 = componentView(this: world.transforms, entityId: entityId).position
     if position.z > trunkPoolParked * 0.5 {
       let gap: Vec3 = Vec3.vsub(a: position, b: point)

@@ -1,0 +1,268 @@
+# app3d/PropColliderRules and app3d/PropBodyPool: what a prop is to physics
+# by its kind's rule (a trunk sized by the prop's height or scale, a sphere a
+# share of its own, soft), the nearest first, and a pool of static Box3D
+# bodies in a real world: placed on the nearest candidates at their sizes,
+# the rest parked, placed again after moving or when the app's changes
+# count moves.
+import Math
+import Vec3
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open ecs/Transform
+open box3d/ecs/PhysicsTypes
+open box3d/ecs/Physics
+open box3d/ecs/PhysicsComponents
+open box3d/ecs/PhysicsQueries
+open box3d/ecs/PhysicsSystems
+open app3d/PropFieldQuery
+open app3d/CharacterBodies
+open app3d/PropColliderRules
+open app3d/PropBodyPool
+
+func near(a: view Float, b: view Float) ret Bool {
+  ret Math.abs(value: a - b) < 0.001
+}
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+# A prop `height` tall with its foot at (x, y), at `scale`
+func propAt(
+  x: view Float
+  y: view Float
+  height: view Float
+  scale: view Float
+) ret PropNear {
+  ret PropNear {
+    kind: 0
+    placement: { kind: 0, position: Vec3.create(x: x, y: y, z: 0.0), yaw: 0.0, scale: scale }
+    center: Vec3.create(x: x, y: y, z: height * 0.5)
+    radius: height * 0.5
+    distance: Math.sqrt(x: x * x + y * y)
+  }
+}
+
+func candidateAt(x: view Float, radius: view Float) ret PropBodyCandidate {
+  ret PropBodyCandidate {
+    position: Vec3.create(x: x, y: 0.0, z: 0.0)
+    radius: radius
+    height: 2.5
+    distance: Math.abs(value: x)
+  }
+}
+
+# Does a ray along +y at height 1 m past x = `x` hit a pool body, and where?
+func rayAcross(physics: view Physics, x: view Float) ret PhysicsHit {
+  ret raycastClosest(
+    physics: physics
+    origin: Vec3.create(x: x, y: -5.0, z: 1.0)
+    translation: Vec3.create(x: 0.0, y: 10.0, z: 0.0)
+    filter: defaultQueryFilter()
+  )
+}
+
+func main() {
+  # ----- the rules ----------------------------------------------------------------
+  let tree: PropColliderRule = {
+    role: PropBodyRole.trunk
+    radiusPerMetre: 0.035
+    minRadius: 0.12
+    maxRadius: 0.5
+    heightShare: 0.7
+    maxHeight: 3.2
+  }
+  let palm: PropColliderRule = { role: PropBodyRole.trunk, radiusPerScale: 0.22, maxHeight: 3.2 }
+  check(
+    label: "a trunk's radius by the prop's height within bounds, its height a share capped"
+    ok: near(
+      a: trunkRadiusOf(
+        rule: tree
+        prop: propAt(
+          x: 0.0
+          y: 0.0
+          height: 6.0
+          scale: 1.0
+        )
+      )
+      b: 0.21
+    ) and near(
+      a: trunkRadiusOf(
+        rule: tree
+        prop: propAt(
+          x: 0.0
+          y: 0.0
+          height: 2.0
+          scale: 1.0
+        )
+      )
+      b: 0.12
+    ) and near(
+      a: trunkRadiusOf(
+        rule: tree
+        prop: propAt(
+          x: 0.0
+          y: 0.0
+          height: 40.0
+          scale: 1.0
+        )
+      )
+      b: 0.5
+    ) and near(
+      a: trunkHeightOf(
+        rule: tree
+        prop: propAt(
+          x: 0.0
+          y: 0.0
+          height: 4.0
+          scale: 1.0
+        )
+      )
+      b: 2.8
+    ) and near(
+      a: trunkHeightOf(
+        rule: tree
+        prop: propAt(
+          x: 0.0
+          y: 0.0
+          height: 20.0
+          scale: 1.0
+        )
+      )
+      b: 3.2
+    )
+  )
+  check(
+    label: "a slim trunk by the placement's scale however tall"
+    ok: near(
+      a: trunkRadiusOf(
+        rule: palm
+        prop: propAt(
+          x: 0.0
+          y: 0.0
+          height: 22.0
+          scale: 1.5
+        )
+      )
+      b: 0.33
+    )
+  )
+  var distances: List(PropBodyCandidate) = List.create(PropBodyCandidate, cap: 5)
+  distances.add(value: candidateAt(x: 9.0, radius: 0.2))
+  distances.add(value: candidateAt(x: 2.0, radius: 0.2))
+  distances.add(value: candidateAt(x: 30.0, radius: 0.2))
+  distances.add(value: candidateAt(x: 4.0, radius: 0.2))
+  distances.add(value: candidateAt(x: 2.5, radius: 0.2))
+  let nearest: List(Int) = nearestCandidates(candidates: distances, count: 3)
+  check(
+    label: "the nearest first, all when fewer than asked"
+    ok: nearest.length is 3 and nearest.copyAtDefault(index: 0) is 1 and nearest.copyAtDefault(
+      index: 1
+    ) is 4 and nearest.copyAtDefault(index: 2) is 3 and nearestCandidates(
+      candidates: distances
+      count: 10
+    ).length is 5
+  )
+  check(
+    label: "placed again after moving far enough, or when what it stands on changed"
+    ok: propPoolPlacingDue(moved: 0.5, moveDistance: 3.0, changed: false) is false and propPoolPlacingDue(
+      moved: 3.1
+      moveDistance: 3.0
+      changed: false
+    ) and propPoolPlacingDue(moved: 0.0, moveDistance: 3.0, changed: true)
+  )
+  # ----- the pool in a Box3D world ---------------------------------------------------
+  var physics: Physics = createPhysics(
+    def: defaultPhysicsWorldDef()
+    fixedStep: 1.0 / 60.0
+    subSteps: 4
+  )
+  var rigidBodies: ComponentTable(RigidBody) = ComponentTable.create(RigidBody)
+  var colliders: ComponentTable(Collider) = ComponentTable.create(Collider)
+  var transforms: ComponentTable(Transform3D) = ComponentTable.create(Transform3D)
+  var allocator: EntityAllocator = createEntityAllocator()
+  let settings: PropPoolSettings = {
+    trunkCount: 2
+    sphereCount: 1
+    reach: 20.0
+    moveDistance: 3.0
+    parkedZ: -1000.0
+    categoryBits: 16
+    friction: 0.6
+    trunkRestitution: 0.55
+    sphereRestitution: 0.25
+    trunkRadius: 0.12
+    trunkHeight: 3.2
+    sphereRadius: 0.5
+  }
+  var pool: PropBodyPool = createPropBodyPool(
+    physics: physics
+    rigidBodies: rigidBodies
+    colliders: colliders
+    transforms: transforms
+    allocator: allocator
+    settings: settings
+  )
+  check(
+    label: "two trunks and a sphere, each an entity with a PooledPropBody"
+    ok: pool.trunks.length is 2 and pool.spheres.length is 1 and componentCount(this: pool.bodies) is 3 and propPoolNeedsPlacing(
+      pool: pool
+      x: 0.0
+      y: 0.0
+      changes: 0
+    )
+  )
+  # Three trunk candidates (the farthest left out) and none for the sphere
+  beginPropGathering(pool: pool)
+  pool.trunkCandidates.add(value: candidateAt(x: 6.0, radius: 0.4))
+  pool.trunkCandidates.add(value: candidateAt(x: 2.0, radius: 0.2))
+  pool.trunkCandidates.add(value: candidateAt(x: 12.0, radius: 0.3))
+  placePropBodies(
+    pool: pool
+    physics: physics
+    transforms: transforms
+    x: 0.0
+    y: 0.0
+    changes: 7
+  )
+  stepPhysicsBodies(physics: physics, rigidBodies: rigidBodies, transforms: transforms)
+  let first: PhysicsHit = rayAcross(physics: physics, x: 2.0)
+  let second: PhysicsHit = rayAcross(physics: physics, x: 6.0)
+  let farthest: PhysicsHit = rayAcross(physics: physics, x: 12.0)
+  let sphereAt: Vec3 = componentView(
+    this: transforms
+    entityId: pool.spheres.copyAtDefault(index: 0)
+  ).position
+  check(
+    label: "the two nearest get the trunks at their sizes (a ray meets the bark 0.2 and 0.4 m from the middle), the third none, the sphere parked"
+    ok: first.hit and isPooledPropBody(pool: pool, entityId: first.entityId) and near(
+      a: first.point.y
+      b: -0.2
+    ) and second.hit and near(a: second.point.y, b: -0.4) and farthest.hit is false and sphereAt.z < -999.0 and pool.trunksUsed is 2 and pool.spheresUsed is 0
+  )
+  check(
+    label: "not placed again a metre on with the same changes; placed again 4 m on, or when the changes count moves"
+    ok: propPoolNeedsPlacing(
+      pool: pool
+      x: 1.0
+      y: 0.0
+      changes: 7
+    ) is false and propPoolNeedsPlacing(
+      pool: pool
+      x: 4.0
+      y: 0.0
+      changes: 7
+    ) and propPoolNeedsPlacing(
+      pool: pool
+      x: 0.0
+      y: 0.0
+      changes: 8
+    )
+  )
+  destroyPhysics(physics: physics)
+}

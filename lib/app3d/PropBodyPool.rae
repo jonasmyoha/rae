@@ -1,0 +1,366 @@
+# app3d/PropBodyPool — physics for a world of thousands of props
+# (app3d/PropField): only the ones near a point can be touched, so there is a
+# fixed pool of static bodies (trunk capsules, rock spheres), each an entity
+# with a PooledPropBody, moved onto the nearest trees and rocks and given each
+# prop's own size in place (setCapsuleShape / setSphereShape); the rest wait
+# far below the ground. Props with no body but a soft part (bushes) near the
+# point are listed as SoftProps, for the app to slow movers in.
+#
+# What a prop is to physics is the app's, per kind of each field: a
+# PropColliderRule (app3d/PropColliderRules: a trunk with its radius and
+# height rule, a sphere a share of the prop's, soft, or nothing). Each placing:
+#
+#   beginPropGathering   the candidates emptied
+#   gatherPropBodies     the props of one field within reach of the point,
+#                        classified by that field's rules (call once a field,
+#                        in the order the nearest should be taken from)
+#   placePropBodies      the nearest trunks and spheres onto the pool's bodies,
+#                        each its own size; the rest parked; the soft ones kept
+#
+# propPoolNeedsPlacing says when: after moving `moveDistance`, or when the
+# app's count of changes to its fields (tiles loaded and let go) moved.
+import Math
+import Vec3
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open ecs/Transform
+open box3d/ecs/PhysicsTypes
+open box3d/ecs/Physics
+open box3d/ecs/PhysicsComponents
+open box3d/ecs/PhysicsSpawn
+open app3d/PropField
+open app3d/PropFieldQuery
+open app3d/PropColliderRules
+
+type PropPoolSettings {
+  trunkCount: Int
+  sphereCount: Int
+  # Props this near the point (m) get a body or are soft
+  reach: Float
+  # Placed again once the point has gone this far (m)
+  moveDistance: Float
+  # Where an unused body waits
+  parkedZ: Float
+  # The bodies' shapes: their collision category, friction, and how much of
+  # a speed they give back
+  categoryBits: UInt64
+  friction: Float
+  trunkRestitution: Float
+  sphereRestitution: Float
+  # The parked shapes' sizes
+  trunkRadius: Float
+  trunkHeight: Float
+  sphereRadius: Float
+}
+
+enum PoolShape { capsule, sphere }
+
+# A pooled body's entity: its shape's kind and id
+type PooledPropBody {
+  shape: PoolShape
+  shapeId: ShapeId
+}
+
+type PropBodyPool {
+  settings: PropPoolSettings
+  bodies: ComponentTable(PooledPropBody)
+  trunks: List(EntityId)
+  spheres: List(EntityId)
+  # This placing's candidates
+  trunkCandidates: List(PropBodyCandidate)
+  sphereCandidates: List(PropBodyCandidate)
+  softProps: List(SoftProp)
+  # Where and when it was last placed
+  placed: Bool
+  placedX: Float
+  placedY: Float
+  placedChanges: Int
+  # On props now
+  trunksUsed: Int
+  spheresUsed: Int
+}
+
+func trunkCapsuleOf(radius: view Float, height: view Float) ret Capsule {
+  ret Capsule {
+    center1: Vec3 { x: 0.0, y: 0.0, z: radius }
+    center2: Vec3 { x: 0.0, y: 0.0, z: Math.max(a: height, b: radius * 2.0) }
+    radius: radius
+  }
+}
+
+func poolShapeDef(settings: view PropPoolSettings, restitution: view Float) ret ShapeDef {
+  var shapeDef: ShapeDef = defaultShapeDef(lengthUnitsPerMeter: 1.0)
+  shapeDef.filter.categoryBits = settings.categoryBits
+  shapeDef.baseMaterial.friction = settings.friction
+  shapeDef.baseMaterial.restitution = restitution
+  ret shapeDef
+}
+
+func spawnPoolBody(
+  physics: mod Physics
+  rigidBodies: mod ComponentTable(RigidBody)
+  transforms: mod ComponentTable(Transform3D)
+  allocator: mod EntityAllocator
+  at: view Vec3
+) ret EntityId {
+  let entityId: EntityId = allocEntity(this: allocator)
+  var bodyDef: BodyDef = defaultBodyDef(lengthUnitsPerMeter: 1.0)
+  bodyDef.bodyType = BodyType.staticBody
+  bodyDef.position = at
+  let bodyId: BodyId = spawnRigidBody(
+    physics: physics
+    rigidBodies: rigidBodies
+    transforms: transforms
+    entityId: entityId
+    def: bodyDef
+  )
+  ret entityId
+}
+
+# The pool's bodies, parked: the trunks, then the spheres
+func createPropBodyPool(
+  physics: mod Physics
+  rigidBodies: mod ComponentTable(RigidBody)
+  colliders: mod ComponentTable(Collider)
+  transforms: mod ComponentTable(Transform3D)
+  allocator: mod EntityAllocator
+  settings: view PropPoolSettings
+) ret PropBodyPool {
+  let parked: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: settings.parkedZ)
+  var bodies: ComponentTable(PooledPropBody) = ComponentTable.create(PooledPropBody)
+  var trunks: List(EntityId) = List.create(EntityId, cap: settings.trunkCount)
+  loop var i: Int = 0, i < settings.trunkCount, ++i {
+    let entityId: EntityId = spawnPoolBody(
+      physics: physics
+      rigidBodies: rigidBodies
+      transforms: transforms
+      allocator: allocator
+      at: parked
+    )
+    let shapeId: ShapeId = addCapsuleCollider(
+      physics: physics
+      rigidBodies: rigidBodies
+      colliders: colliders
+      entityId: entityId
+      def: poolShapeDef(settings: settings, restitution: settings.trunkRestitution)
+      capsule: trunkCapsuleOf(radius: settings.trunkRadius, height: settings.trunkHeight)
+    )
+    componentSet(
+      this: bodies
+      entityId: entityId
+      data: PooledPropBody { shape: PoolShape.capsule, shapeId: shapeId }
+    )
+    trunks.add(value: entityId)
+  }
+  var spheres: List(EntityId) = List.create(EntityId, cap: settings.sphereCount)
+  loop var i: Int = 0, i < settings.sphereCount, ++i {
+    let entityId: EntityId = spawnPoolBody(
+      physics: physics
+      rigidBodies: rigidBodies
+      transforms: transforms
+      allocator: allocator
+      at: parked
+    )
+    let shapeId: ShapeId = addSphereCollider(
+      physics: physics
+      rigidBodies: rigidBodies
+      colliders: colliders
+      entityId: entityId
+      def: poolShapeDef(settings: settings, restitution: settings.sphereRestitution)
+      sphere: Sphere { center: Vec3 { x: 0.0, y: 0.0, z: 0.0 }, radius: settings.sphereRadius }
+    )
+    componentSet(
+      this: bodies
+      entityId: entityId
+      data: PooledPropBody { shape: PoolShape.sphere, shapeId: shapeId }
+    )
+    spheres.add(value: entityId)
+  }
+  ret PropBodyPool {
+    settings: settings
+    bodies: own bodies
+    trunks: own trunks
+    spheres: own spheres
+    trunkCandidates: List.create(PropBodyCandidate, cap: 64)
+    sphereCandidates: List.create(PropBodyCandidate, cap: 16)
+    softProps: List.create(SoftProp, cap: 32)
+    placed: false
+    placedX: 0.0
+    placedY: 0.0
+    placedChanges: 0
+    trunksUsed: 0
+    spheresUsed: 0
+  }
+}
+
+# A pool with no bodies yet (an app that makes its physics world later)
+func emptyPropBodyPool(settings: view PropPoolSettings) ret PropBodyPool {
+  ret PropBodyPool {
+    settings: settings
+    bodies: ComponentTable.create(PooledPropBody)
+    trunks: List.create(EntityId, cap: 0)
+    spheres: List.create(EntityId, cap: 0)
+    trunkCandidates: List.create(PropBodyCandidate, cap: 0)
+    sphereCandidates: List.create(PropBodyCandidate, cap: 0)
+    softProps: List.create(SoftProp, cap: 0)
+    placed: false
+    placedX: 0.0
+    placedY: 0.0
+    placedChanges: 0
+    trunksUsed: 0
+    spheresUsed: 0
+  }
+}
+
+# Place the pool again round (x, y)? After moving moveDistance since the
+# last placing, or when the app's `changes` count moved
+func propPoolNeedsPlacing(
+  pool: view PropBodyPool
+  x: view Float
+  y: view Float
+  changes: view Int
+) ret Bool {
+  if pool.placed is false or changes is not pool.placedChanges {
+    ret true
+  }
+  let dx: Float = x - pool.placedX
+  let dy: Float = y - pool.placedY
+  ret propPoolPlacingDue(
+    moved: Math.sqrt(x: dx * dx + dy * dy)
+    moveDistance: pool.settings.moveDistance
+    changed: false
+  )
+}
+
+# This placing's candidates and soft props emptied
+func beginPropGathering(pool: mod PropBodyPool) {
+  pool.trunkCandidates.clear()
+  pool.sphereCandidates.clear()
+  pool.softProps.clear()
+}
+
+# `field`'s props within reach of (x, y), by `rules` (one per kind of the
+# field; a kind past the list has no body)
+func gatherPropBodies(
+  pool: mod PropBodyPool
+  field: view PropField
+  rules: view List(PropColliderRule)
+  x: view Float
+  y: view Float
+) {
+  if field.finished is false {
+    ret
+  }
+  let near: List(PropNear) = propsNear(
+    field: field
+    x: x
+    y: y
+    reach: pool.settings.reach
+  )
+  loop let prop: view PropNear in near {
+    let rule: PropColliderRule = rules.copyAtFallback(index: prop.kind, fallback: noPropCollider())
+    if rule.role is PropBodyRole.trunk {
+      pool.trunkCandidates.add(
+        value: PropBodyCandidate {
+          position: prop.placement.position
+          radius: trunkRadiusOf(rule: rule, prop: prop)
+          height: trunkHeightOf(rule: rule, prop: prop)
+          distance: prop.distance
+        }
+      )
+    } else if rule.role is PropBodyRole.sphere {
+      pool.sphereCandidates.add(
+        value: PropBodyCandidate {
+          position: prop.center
+          radius: prop.radius * rule.share
+          height: 0.0
+          distance: prop.distance
+        }
+      )
+    } else if rule.role is PropBodyRole.soft {
+      pool.softProps.add(
+        value: SoftProp {
+          x: prop.placement.position.x
+          y: prop.placement.position.y
+          radius: prop.radius * rule.share
+        }
+      )
+    }
+  }
+}
+
+func placePoolBody(
+  transforms: mod ComponentTable(Transform3D)
+  entityId: view EntityId
+  at: view Vec3
+) {
+  var transform: Transform3D = createTransform3D()
+  transform.position = at
+  componentSet(this: transforms, entityId: entityId, data: transform)
+}
+
+# The nearest gathered trunks and spheres onto the pool's bodies (their
+# Transform3D; the physics push moves them), each its own size; the rest
+# parked under (x, y). Remembers the placing.
+func placePropBodies(
+  pool: mod PropBodyPool
+  physics: mod Physics
+  transforms: mod ComponentTable(Transform3D)
+  x: view Float
+  y: view Float
+  changes: view Int
+) {
+  let parked: Vec3 = Vec3.create(x: x, y: y, z: pool.settings.parkedZ)
+  let trunkPicks: List(Int) = nearestCandidates(
+    candidates: pool.trunkCandidates
+    count: pool.trunks.length
+  )
+  loop var i: Int = 0, i < pool.trunks.length, ++i {
+    let entityId: EntityId = pool.trunks.copyAtFallback(index: i, fallback: noEntity())
+    if i < trunkPicks.length {
+      let trunk: PropBodyCandidate = pool.trunkCandidates.copyAtDefault(
+        index: trunkPicks.copyAtDefault(index: i)
+      )
+      placePoolBody(transforms: transforms, entityId: entityId, at: trunk.position)
+      setCapsuleShape(
+        physics: physics
+        shapeId: componentView(this: pool.bodies, entityId: entityId).shapeId
+        capsule: trunkCapsuleOf(radius: trunk.radius, height: trunk.height)
+      )
+    } else {
+      placePoolBody(transforms: transforms, entityId: entityId, at: parked)
+    }
+  }
+  let spherePicks: List(Int) = nearestCandidates(
+    candidates: pool.sphereCandidates
+    count: pool.spheres.length
+  )
+  loop var i: Int = 0, i < pool.spheres.length, ++i {
+    let entityId: EntityId = pool.spheres.copyAtFallback(index: i, fallback: noEntity())
+    if i < spherePicks.length {
+      let sphere: PropBodyCandidate = pool.sphereCandidates.copyAtDefault(
+        index: spherePicks.copyAtDefault(index: i)
+      )
+      placePoolBody(transforms: transforms, entityId: entityId, at: sphere.position)
+      setSphereShape(
+        physics: physics
+        shapeId: componentView(this: pool.bodies, entityId: entityId).shapeId
+        sphere: Sphere { center: Vec3 { x: 0.0, y: 0.0, z: 0.0 }, radius: sphere.radius }
+      )
+    } else {
+      placePoolBody(transforms: transforms, entityId: entityId, at: parked)
+    }
+  }
+  pool.trunksUsed = trunkPicks.length
+  pool.spheresUsed = spherePicks.length
+  pool.placed = true
+  pool.placedX = x
+  pool.placedY = y
+  pool.placedChanges = changes
+}
+
+# Is `entityId` one of the pool's bodies?
+func isPooledPropBody(pool: view PropBodyPool, entityId: view EntityId) ret Bool {
+  ret componentHas(this: pool.bodies, entityId: entityId)
+}
