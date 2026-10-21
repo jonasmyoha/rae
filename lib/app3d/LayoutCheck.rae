@@ -56,6 +56,14 @@ func layoutBoxOf(
   ) is false {
     ret hiddenLayoutBox()
   }
+  # A node under a hidden parent keeps the box its last layout gave it: what
+  # is drawn is the transform pass's visibility, its parents' included
+  if componentHas(this: uiSystems.transform2d.worldVisuals, entityId: entityId) and componentView(
+    this: uiSystems.transform2d.worldVisuals
+    entityId: entityId
+  ).visible is false {
+    ret hiddenLayoutBox()
+  }
   let placed: view WorldTransform2D = componentView(
     this: uiSystems.transform2d.worldTransforms
     entityId: entityId
