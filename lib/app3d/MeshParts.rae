@@ -1,0 +1,122 @@
+# app3d/MeshParts — one mesh cut into parts by boxes, for a model that came
+# in one piece but moves in pieces: a door off its frame, a lid off its box,
+# a bar off its stands, a telescope's sliding tube. Each MeshPartBox names
+# a part; a triangle goes to the part of the first box that holds all three
+# of its corners, and to part 0 when none does (so part 0 is "the rest").
+# Corners are in the mesh's own space. offsetMesh then moves a part's
+# vertices, so a part that becomes a body of its own can be drawn round that
+# body's centre.
+import Vec3
+open Mesh3d
+
+type MeshPartBox {
+  min: Vec3
+  max: Vec3
+  part: Int
+}
+
+# Mesh3d's interleaved vertex: position, normal, uv
+const meshPartVertexFloats: Int = 8
+
+func emptyMeshPart() ret MeshData {
+  ret MeshData {
+    verts: List.create(Float, cap: 0)
+    indices: List.create(Int, cap: 0)
+    vertCount: 0
+  }
+}
+
+func meshPartCorner(mesh: view MeshData, vertex: view Int) ret Vec3 {
+  let at: Int = vertex * meshPartVertexFloats
+  ret Vec3.create(
+    x: mesh.verts.copyAtFallback(index: at, fallback: 0.0)
+    y: mesh.verts.copyAtFallback(index: at + 1, fallback: 0.0)
+    z: mesh.verts.copyAtFallback(index: at + 2, fallback: 0.0)
+  )
+}
+
+func boxHolds(box: view MeshPartBox, point: view Vec3) ret Bool {
+  ret point.x >= box.min.x and point.x <= box.max.x and point.y >= box.min.y and point.y <= box.max.y and point.z >= box.min.z and point.z <= box.max.z
+}
+
+# Which part the triangle (a, b, c) of `mesh` goes to
+func meshPartOfTriangle(
+  mesh: view MeshData
+  boxes: view List(MeshPartBox)
+  a: view Int
+  b: view Int
+  c: view Int
+) ret Int {
+  let pa: Vec3 = meshPartCorner(mesh: mesh, vertex: a)
+  let pb: Vec3 = meshPartCorner(mesh: mesh, vertex: b)
+  let pc: Vec3 = meshPartCorner(mesh: mesh, vertex: c)
+  loop let box: view MeshPartBox in boxes {
+    if boxHolds(box: box, point: pa) and boxHolds(box: box, point: pb) and boxHolds(
+      box: box
+      point: pc
+    ) {
+      ret box.part
+    }
+  }
+  ret 0
+}
+
+# Vertex `vertex` of `mesh` appended to `part`
+func copyMeshPartVertex(part: mod MeshData, mesh: view MeshData, vertex: view Int) {
+  loop var k: Int = 0, k < meshPartVertexFloats, ++k {
+    part.verts.add(
+      value: mesh.verts.copyAtFallback(index: vertex * meshPartVertexFloats + k, fallback: 0.0)
+    )
+  }
+  part.indices.add(value: part.vertCount)
+  part.vertCount = part.vertCount + 1
+}
+
+# `mesh` cut into `partCount` parts by `boxes` (each triangle's corners
+# copied into its part, so the parts share nothing)
+func splitMeshIntoParts(
+  mesh: view MeshData
+  boxes: view List(MeshPartBox)
+  partCount: view Int
+) ret List(MeshData) {
+  var parts: List(MeshData) = List.create(MeshData, cap: partCount)
+  loop var i: Int = 0, i < partCount, ++i {
+    parts.add(value: emptyMeshPart())
+  }
+  var tri: Int = 0
+  loop tri + 2 < mesh.indices.length {
+    let a: Int = mesh.indices.copyAtFallback(index: tri, fallback: 0)
+    let b: Int = mesh.indices.copyAtFallback(index: tri + 1, fallback: 0)
+    let c: Int = mesh.indices.copyAtFallback(index: tri + 2, fallback: 0)
+    let part: Int = meshPartOfTriangle(
+      mesh: mesh
+      boxes: boxes
+      a: a
+      b: b
+      c: c
+    )
+    if let target: mod MeshData = parts.modAt(index: part) {
+      copyMeshPartVertex(part: target, mesh: mesh, vertex: a)
+      copyMeshPartVertex(part: target, mesh: mesh, vertex: b)
+      copyMeshPartVertex(part: target, mesh: mesh, vertex: c)
+    }
+    tri = tri + 3
+  }
+  ret parts
+}
+
+# Every vertex of `mesh` moved by `offset`
+func offsetMesh(mesh: mod MeshData, offset: view Vec3) {
+  loop var v: Int = 0, v < mesh.vertCount, ++v {
+    let at: Int = v * meshPartVertexFloats
+    mesh.verts.set(index: at, value: mesh.verts.copyAtFallback(index: at, fallback: 0.0) + offset.x)
+    mesh.verts.set(
+      index: at + 1
+      value: mesh.verts.copyAtFallback(index: at + 1, fallback: 0.0) + offset.y
+    )
+    mesh.verts.set(
+      index: at + 2
+      value: mesh.verts.copyAtFallback(index: at + 2, fallback: 0.0) + offset.z
+    )
+  }
+}

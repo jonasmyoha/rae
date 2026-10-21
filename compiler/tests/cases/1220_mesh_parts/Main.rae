@@ -1,0 +1,126 @@
+# app3d/MeshParts: a mesh cut into parts by boxes (each triangle to the
+# first box holding all its corners, else part 0), and a part moved.
+import Math
+import Vec3
+open Mesh3d
+open app3d/MeshParts
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func addTriangle(
+  mesh: mod MeshData
+  a: view Vec3
+  b: view Vec3
+  c: view Vec3
+) {
+  pushVert(
+    verts: mesh.verts
+    px: a.x
+    py: a.y
+    pz: a.z
+    nx: 0.0
+    ny: 0.0
+    nz: 1.0
+    u: 0.0
+    value: 0.0
+  )
+  pushVert(
+    verts: mesh.verts
+    px: b.x
+    py: b.y
+    pz: b.z
+    nx: 0.0
+    ny: 0.0
+    nz: 1.0
+    u: 1.0
+    value: 0.0
+  )
+  pushVert(
+    verts: mesh.verts
+    px: c.x
+    py: c.y
+    pz: c.z
+    nx: 0.0
+    ny: 0.0
+    nz: 1.0
+    u: 0.0
+    value: 1.0
+  )
+  mesh.indices.add(value: mesh.vertCount)
+  mesh.indices.add(value: mesh.vertCount + 1)
+  mesh.indices.add(value: mesh.vertCount + 2)
+  mesh.vertCount = mesh.vertCount + 3
+}
+
+func main() {
+  var mesh: MeshData = {
+    verts: List.create(Float, cap: 72)
+    indices: List.create(Int, cap: 9)
+    vertCount: 0
+  }
+  # Low (z 0..1), high (z 5..6), and one spanning both (z 0..6)
+  addTriangle(
+    mesh: mesh
+    a: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    b: Vec3.create(x: 1.0, y: 0.0, z: 0.0)
+    c: Vec3.create(x: 0.0, y: 0.0, z: 1.0)
+  )
+  addTriangle(
+    mesh: mesh
+    a: Vec3.create(x: 0.0, y: 0.0, z: 5.0)
+    b: Vec3.create(x: 1.0, y: 0.0, z: 5.0)
+    c: Vec3.create(x: 0.0, y: 0.0, z: 6.0)
+  )
+  addTriangle(
+    mesh: mesh
+    a: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    b: Vec3.create(x: 1.0, y: 0.0, z: 6.0)
+    c: Vec3.create(x: 0.0, y: 0.0, z: 6.0)
+  )
+  var boxes: List(MeshPartBox) = List.create(MeshPartBox, cap: 2)
+  boxes.add(
+    value: MeshPartBox {
+      min: Vec3.create(x: -1.0, y: -1.0, z: 4.0)
+      max: Vec3.create(x: 2.0, y: 1.0, z: 7.0)
+      part: 1
+    }
+  )
+  boxes.add(
+    value: MeshPartBox {
+      min: Vec3.create(x: -1.0, y: -1.0, z: -1.0)
+      max: Vec3.create(x: 2.0, y: 1.0, z: 2.0)
+      part: 2
+    }
+  )
+  let parts: List(MeshData) = splitMeshIntoParts(mesh: mesh, boxes: boxes, partCount: 3)
+  let rest: MeshData = parts.copyAtFallback(index: 0, fallback: emptyMeshPart())
+  let high: MeshData = parts.copyAtFallback(index: 1, fallback: emptyMeshPart())
+  let low: MeshData = parts.copyAtFallback(index: 2, fallback: emptyMeshPart())
+  check(
+    label: "three parts: the high triangle in part 1, the low in part 2, the one spanning both in part 0"
+    ok: parts.length is 3 and high.vertCount is 3 and low.vertCount is 3 and rest.vertCount is 3 and Math.abs(
+      value: meshPartCorner(mesh: high, vertex: 2).z - 6.0
+    ) < 0.0001 and Math.abs(value: meshPartCorner(mesh: rest, vertex: 1).z - 6.0) < 0.0001
+  )
+  check(
+    label: "a part's indices count its own vertices, its normals and uvs copied"
+    ok: low.indices.copyAtFallback(index: 2, fallback: -1) is 2 and low.verts.copyAtFallback(
+      index: 5
+      fallback: 0.0
+    ) is 1.0 and low.verts.copyAtFallback(index: 14, fallback: 0.0) is 1.0
+  )
+  var moved: MeshData = high
+  offsetMesh(mesh: moved, offset: Vec3.create(x: 0.0, y: 0.0, z: -5.0))
+  check(
+    label: "moved down 5 m, the high part's corners stand at z 0 to 1"
+    ok: Math.abs(value: meshPartCorner(mesh: moved, vertex: 0).z) < 0.0001 and Math.abs(
+      value: meshPartCorner(mesh: moved, vertex: 2).z - 1.0
+    ) < 0.0001
+  )
+}
