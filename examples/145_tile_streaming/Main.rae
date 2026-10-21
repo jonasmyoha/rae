@@ -9,6 +9,11 @@
 # per material, a range per slot) or emptying them. So the GPU memory is the
 # 44 slots', however far the camera flies.
 #
+# Tower tiles (one in seven along the flight) also show far, as their blocks'
+# boxes out to 900 m: Rae's far ring (app3d/FarTiles), which takes a far
+# tile only on a frame no near tile loaded and draws every far box in one
+# instanced draw, leaving out tiles held near.
+#
 # The camera flies on its own over the grid. A "[tiles]" line every two
 # seconds says how many slots are held, the loads and the let-gos.
 #
@@ -38,6 +43,7 @@ open ecs/World
 open ecs/Event
 open app3d/TileStreaming
 open app3d/SlotMeshes
+open app3d/FarTiles
 
 const paintGrass: Int = 0
 
@@ -106,6 +112,79 @@ func tileRandom(tile: view GridTile) ret Random {
   ret createRandom(seed: tile.x * 7349 + tile.y * 9151 + 17)
 }
 
+# A tile's ground and blocks: whether it is sand, and each block's lowest
+# and highest corner. One tile in seven has a tower among its blocks.
+type TileBlocks {
+  sandy: Bool
+  lows: List(Vec3)
+  highs: List(Vec3)
+}
+
+func towerTile(tile: view GridTile) ret Bool {
+  ret Math.abs(value: ((tile.x * 31 + tile.y * 17) % 7).toFloat()) < 0.5
+}
+
+func blocksOf(tile: view GridTile) ret TileBlocks {
+  let settings: TileGridSettings = tileSettings()
+  var random: Random = tileRandom(tile: tile)
+  let x0: Float = tileCenterX(settings: settings, tile: tile) - settings.tileSize * 0.5
+  let y0: Float = tileCenterY(settings: settings, tile: tile) - settings.tileSize * 0.5
+  let sandy: Bool = random.nextFloat() < 0.3
+  var blocks: Int = (random.nextFloat() * (blocksPerTile + 1).toFloat()).toInt()
+  let tower: Bool = towerTile(tile: tile)
+  if tower and blocks is 0 {
+    blocks = 1
+  }
+  var lows: List(Vec3) = List.create(Vec3, cap: blocksPerTile)
+  var highs: List(Vec3) = List.create(Vec3, cap: blocksPerTile)
+  loop var i: Int = 0, i < blocks, ++i {
+    let width: Float = 8.0 + random.nextFloat() * 14.0
+    let depth: Float = 8.0 + random.nextFloat() * 14.0
+    var height: Float = 4.0 + random.nextFloat() * random.nextFloat() * 30.0
+    if tower and i is 0 {
+      height = 70.0 + height
+    }
+    let bx: Float = x0 + 6.0 + random.nextFloat() * (settings.tileSize - 12.0 - width)
+    let by: Float = y0 + 6.0 + random.nextFloat() * (settings.tileSize - 12.0 - depth)
+    lows.add(value: Vec3 { x: bx, y: by, z: 0.0 })
+    highs.add(value: Vec3 { x: bx + width, y: by + depth, z: height })
+  }
+  ret TileBlocks { sandy: sandy, lows: own lows, highs: own highs }
+}
+
+# The tower tiles along the flight show far, out to 900 m (app3d/FarTiles)
+func farCandidates() ret List(FarTileCandidate) {
+  var candidates: List(FarTileCandidate) = List.create(FarTileCandidate, cap: 256)
+  loop var ty: Int = -4, ty <= 4, ++ty {
+    loop var tx: Int = -2, tx <= 120, ++tx {
+      let tile: GridTile = { x: tx, y: ty }
+      if towerTile(tile: tile) {
+        candidates.add(value: FarTileCandidate { tile: tile, reach: 900.0 })
+      }
+    }
+  }
+  ret candidates
+}
+
+# A far tile's form: its blocks as boxes, the walls' colour
+func farBoxesOf(tile: view GridTile) ret List(FarBox) {
+  let tileBlocks: TileBlocks = blocksOf(tile: tile)
+  var boxes: List(FarBox) = List.create(FarBox, cap: tileBlocks.lows.length)
+  loop var i: Int = 0, i < tileBlocks.lows.length, ++i {
+    let low: Vec3 = tileBlocks.lows.copyAtDefault(index: i)
+    let high: Vec3 = tileBlocks.highs.copyAtDefault(index: i)
+    boxes.add(
+      value: FarBox {
+        center: Vec3 { x: (low.x + high.x) * 0.5, y: (low.y + high.y) * 0.5, z: high.z * 0.5 }
+        yaw: 0.0
+        size: Vec3 { x: high.x - low.x, y: high.y - low.y, z: high.z }
+        color: Vec3 { x: 0.92, y: 0.86, z: 0.78 }
+      }
+    )
+  }
+  ret boxes
+}
+
 # Every wall of the tile's blocks, then their roofs, into the scratch and
 # their slot's ranges; its ground a patch of grass or of sand
 func writeTile(
@@ -115,7 +194,6 @@ func writeTile(
   tile: view GridTile
 ) {
   let settings: TileGridSettings = tileSettings()
-  var random: Random = tileRandom(tile: tile)
   let half: Float = settings.tileSize * 0.5
   let centerX: Float = tileCenterX(settings: settings, tile: tile)
   let centerY: Float = tileCenterY(settings: settings, tile: tile)
@@ -123,7 +201,7 @@ func writeTile(
   let y0: Float = centerY - half
   let x1: Float = centerX + half
   let y1: Float = centerY + half
-  let sandy: Bool = random.nextFloat() < 0.3
+  let sandy: Bool = blocksOf(tile: tile).sandy
   var groundPaint: Int = paintGrass
   var otherGround: Int = paintSand
   if sandy {
@@ -153,19 +231,10 @@ func writeTile(
     paint: otherGround
     quads: 0
   )
-  # The blocks: a footprint and a height each, rolled in the tile
-  let blocks: Int = (random.nextFloat() * (blocksPerTile + 1).toFloat()).toInt()
-  var lows: List(Vec3) = List.create(Vec3, cap: blocksPerTile)
-  var highs: List(Vec3) = List.create(Vec3, cap: blocksPerTile)
-  loop var i: Int = 0, i < blocks, ++i {
-    let width: Float = 8.0 + random.nextFloat() * 14.0
-    let depth: Float = 8.0 + random.nextFloat() * 14.0
-    let height: Float = 4.0 + random.nextFloat() * random.nextFloat() * 30.0
-    let bx: Float = x0 + 6.0 + random.nextFloat() * (settings.tileSize - 12.0 - width)
-    let by: Float = y0 + 6.0 + random.nextFloat() * (settings.tileSize - 12.0 - depth)
-    lows.add(value: Vec3 { x: bx, y: by, z: 0.0 })
-    highs.add(value: Vec3 { x: bx + width, y: by + depth, z: height })
-  }
+  let tileBlocks: TileBlocks = blocksOf(tile: tile)
+  let blocks: Int = tileBlocks.lows.length
+  let lows: List(Vec3) = tileBlocks.lows
+  let highs: List(Vec3) = tileBlocks.highs
   var walls: Int = 0
   loop var i: Int = 0, i < blocks, ++i {
     let low: Vec3 = lows.copyAtDefault(index: i)
@@ -263,11 +332,13 @@ func emptySlot(slotMeshes: mod SlotMeshes, renderer: mod DeferredRenderer, slot:
   }
 }
 
-# One frame round (x, y): the streamer's events answered
+# One frame round (x, y): the streamer's events answered, then the far
+# ring's (the tower tiles' far forms)
 func streamWorld(
   streamer: mod TileStreamer
   allocator: mod EntityAllocator
   slotMeshes: mod SlotMeshes
+  farTiles: mod FarTiles
   renderer: mod DeferredRenderer
   x: view Float
   y: view Float
@@ -294,6 +365,21 @@ func streamWorld(
       tile: loaded.tile
     )
   }
+  streamFarTiles(
+    farTiles: farTiles
+    near: streamer
+    allocator: allocator
+    x: x
+    y: y
+  )
+  loop var i: Int = 0, i < eventCount(FarTileLoaded, this: farTiles.loaded), ++i {
+    let loaded: FarTileLoaded = eventAt(FarTileLoaded, this: farTiles.loaded, i: i)
+    setFarTileBoxes(
+      farTiles: farTiles
+      entityId: loaded.entityId
+      boxes: farBoxesOf(tile: loaded.tile)
+    )
+  }
 }
 
 # Where the camera is `seconds` into its flight: east, weaving north and south
@@ -304,6 +390,8 @@ func flightPoint(seconds: view Float) ret Vec3 {
 func renderTiles(
   renderer: mod DeferredRenderer
   slotMeshes: mod SlotMeshes
+  farTiles: mod FarTiles
+  streamer: view TileStreamer
   camera: view Camera3d
   light: view Light3d
 ) {
@@ -343,6 +431,13 @@ func renderTiles(
           cache: renderer.passes.gbuffer
           resources: resources
           slotMeshes: slotMeshes
+          toon: false
+        )
+        drawFarTiles(
+          cache: renderer.passes.gbuffer
+          resources: resources
+          farTiles: farTiles
+          near: streamer
           toon: false
         )
         Gbuffer.endPass(cache: renderer.passes.gbuffer, resources: resources)
@@ -406,12 +501,33 @@ func tileTestPassed(
   ret passed
 }
 
+# The far ring, headless: tower tiles held far (only towers), their boxes
+# drawn
+func farTestPassed(farTiles: mod FarTiles, streamer: view TileStreamer) ret Bool {
+  rebuildFarBoxes(farTiles: farTiles, near: streamer, toon: false)
+  let held: List(GridTile) = farTilesHeld(farTiles: farTiles)
+  var allTowers: Bool = true
+  loop let tile: view GridTile in held {
+    allTowers = allTowers and towerTile(tile: tile)
+  }
+  let passed: Bool = held.length > 3 and farTiles.batch.count > 3 and allTowers and farTiles.loads > held.length
+  log(
+    "[fartest] {held.length} tower tiles held far ({farTiles.loads} taken), {farTiles.batch.count} far boxes drawn; passed={passed}"
+  )
+  ret passed
+}
+
 func main() ret Int {
   Gpu2d.initWindow(width: 1280, height: 800, title: "145: Rae 3D — an open world streamed in tiles")
   var renderer: DeferredRenderer = createDeferredRenderer()
   var slotMeshes: SlotMeshes = createTileMeshes(renderer: renderer)
   var streamer: TileStreamer = createTileStreamer(settings: tileSettings())
   var allocator: EntityAllocator = createEntityAllocator()
+  var farTiles: FarTiles = createFarTiles(
+    renderer: renderer
+    settings: FarTileSettings { slotCount: 48, boxCapacity: 512, margin: 100.0 }
+    candidates: farCandidates()
+  )
   let graphStatus: Int = compileDeferred(renderer: renderer)
   if graphStatus is not 0 {
     log("deferred graph invalid: {statusName(status: graphStatus)}")
@@ -441,6 +557,7 @@ func main() ret Int {
       streamer: streamer
       allocator: allocator
       slotMeshes: slotMeshes
+      farTiles: farTiles
       renderer: renderer
       x: at.x
       y: at.y
@@ -453,7 +570,10 @@ func main() ret Int {
     }
     frames = frames + 1
     if testing and frames >= 900 {
-      if tileTestPassed(streamer: streamer, slotMeshes: slotMeshes, at: at) is false {
+      if tileTestPassed(streamer: streamer, slotMeshes: slotMeshes, at: at) is false or farTestPassed(
+        farTiles: farTiles
+        streamer: streamer
+      ) is false {
         exitCode = 1
       }
       break
@@ -462,6 +582,8 @@ func main() ret Int {
       renderTiles(
         renderer: renderer
         slotMeshes: slotMeshes
+        farTiles: farTiles
+        streamer: streamer
         camera: camera
         light: light
       )
