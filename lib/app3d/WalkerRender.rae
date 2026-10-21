@@ -57,6 +57,7 @@ open ui/Components
 open ui/inputSystem/InputSystem
 open ui/renderSystem/RenderSystem
 open app3d/RenderScale
+open app3d/FrameLog
 open Gpu2dCanvas
 open ui/UiSystems
 open app3d/WalkerCharacter
@@ -75,6 +76,10 @@ type WalkerRender {
   shadowLogged: Bool
   # The physics cubes, one instanced draw (the unit box, scaled per cube)
   cubeBatch: InstanceBatch
+  # The "[frames]" line every five seconds (app3d/FrameLog), on under
+  # RAE_FRAME_TIMING=1 (a device profile's runs)
+  frameLog: FrameLog
+  frameLogOn: Bool
 }
 
 # Per-frame scratch shared across systems: timing and the render/park decision.
