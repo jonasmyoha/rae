@@ -343,6 +343,12 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
     var cubeBatch: InstanceBatch = createInstanceBatch(mesh: cubeMesh, capacity: 64)
 
     var camera: Camera3d = defaultCamera3d()
+    # The wide forest's far trees stand to 1,800 m (app3d/FarSprites): its
+    # camera sees out to them. The island keeps the default 200 m (past it,
+    # the near ground's square would show through the sea)
+    if settings.land is WalkerLand.forest {
+      camera.farZ = 2000.0
+    }
     # The field of view for the window's shape (lib/app3d/CameraFov)
     let fieldOfView: FieldOfViewFollow = startFieldOfView(
       camera: camera
