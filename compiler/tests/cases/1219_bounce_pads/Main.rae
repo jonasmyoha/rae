@@ -1,0 +1,270 @@
+# app3d/BouncePads: a mover dropped onto a pad bounces back up, lower each
+# time at a restitution under 1, until its landing is too slow to bounce and
+# it stands; one dropped beside it on plain ground lands and stays; a
+# parked mover is not bounced.
+import Math
+import Vec3
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open ecs/Tag
+open ecs/Transform
+open box3d/ecs/PhysicsTypes
+open box3d/ecs/Physics
+open box3d/ecs/PhysicsComponents
+open box3d/ecs/PhysicsSpawn
+open app3d/CharacterController
+open app3d/CharacterBodies
+open app3d/CharacterMovers
+open app3d/BouncePads
+
+func near(a: view Float, b: view Float, within: view Float) ret Bool {
+  ret Math.abs(value: a - b) <= within
+}
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+type TestWorld {
+  physics: Physics
+  allocator: EntityAllocator
+  rigidBodies: ComponentTable(RigidBody)
+  colliders: ComponentTable(Collider)
+  transforms: ComponentTable(Transform3D)
+  characters: ComponentTable(CharacterBody)
+  controllers: ComponentTable(ThirdPersonController)
+  drives: ComponentTable(MoverDrive)
+  parked: ComponentTable(MoverParked)
+  limits: ComponentTable(MoverSpeedLimit)
+  steps: ComponentTable(MoverStep)
+}
+
+# A box `half` round `center`, static or loose
+func addBox(
+  world: mod TestWorld
+  center: view Vec3
+  half: view Vec3
+  loose: view Bool
+) {
+  let entityId: EntityId = allocEntity(this: world.allocator)
+  var bodyDef: BodyDef = defaultBodyDef(lengthUnitsPerMeter: 1.0)
+  bodyDef.bodyType = BodyType.staticBody
+  if loose {
+    bodyDef.bodyType = BodyType.dynamicBody
+  }
+  bodyDef.position = center
+  let bodyId: BodyId = spawnRigidBody(
+    physics: world.physics
+    rigidBodies: world.rigidBodies
+    transforms: world.transforms
+    entityId: entityId
+    def: bodyDef
+  )
+  let shapeId: ShapeId = addBoxCollider(
+    physics: world.physics
+    rigidBodies: world.rigidBodies
+    colliders: world.colliders
+    entityId: entityId
+    def: defaultShapeDef(lengthUnitsPerMeter: 1.0)
+    halfExtents: half
+    transform: transformIdentity()
+  )
+}
+
+# The hero set down with its feet at `feet`, still
+func placeHero(world: mod TestWorld, hero: view EntityId, feet: view Vec3) {
+  let character: mod CharacterBody = componentMod(this: world.characters, entityId: hero)
+  character.mover.transform.p.x = feet.x
+  character.mover.transform.p.y = feet.y
+  character.mover.transform.p.z = feet.z + moverCenterAboveFeet(character: character)
+  character.mover.velocity.x = 0.0
+  character.mover.velocity.y = 0.0
+  character.mover.velocity.z = 0.0
+}
+
+# One fixed step: the movers, then the pads
+func stepWorld(world: mod TestWorld, bouncing: mod Bouncing) ret Int {
+  moveMovers(
+    physics: world.physics
+    characters: world.characters
+    parked: world.parked
+    limits: world.limits
+    steps: world.steps
+  )
+  ret bounceMovers(
+    bouncing: bouncing
+    characters: world.characters
+    parked: world.parked
+    drives: world.drives
+  )
+}
+
+func feetZ(world: view TestWorld, entityId: view EntityId) ret Float {
+  let character: view CharacterBody = componentView(this: world.characters, entityId: entityId)
+  ret character.mover.transform.p.z - moverCenterAboveFeet(character: character)
+}
+
+func main() {
+  check(
+    label: "a landing at 6 m/s comes back at 5.4 (restitution 0.9); one at 1.5 m/s, under the 2 m/s minimum, does not bounce"
+    ok: near(
+      a: bounceSpeed(
+        pad: BouncePad {
+          minX: 0.0
+          minY: 0.0
+          maxX: 1.0
+          maxY: 1.0
+          topZ: 0.0
+        }
+        fallSpeed: 6.0
+      )
+      b: 5.4
+      within: 0.001
+    ) and bounceSpeed(
+      pad: BouncePad {
+        minX: 0.0
+        minY: 0.0
+        maxX: 1.0
+        maxY: 1.0
+        topZ: 0.0
+      }
+      fallSpeed: 1.5
+    ) is 0.0
+  )
+  var world: TestWorld = {
+    physics: createPhysics(def: defaultPhysicsWorldDef(), fixedStep: 1.0 / 60.0, subSteps: 4)
+    allocator: createEntityAllocator()
+    rigidBodies: ComponentTable.create(RigidBody)
+    colliders: ComponentTable.create(Collider)
+    transforms: ComponentTable.create(Transform3D)
+    characters: ComponentTable.create(CharacterBody)
+    controllers: ComponentTable.create(ThirdPersonController)
+    drives: ComponentTable.create(MoverDrive)
+    parked: ComponentTable.create(MoverParked)
+    limits: ComponentTable.create(MoverSpeedLimit)
+    steps: ComponentTable.create(MoverStep)
+  }
+  # The ground, and a mat 0.7 m tall, 4 m square, round the origin
+  addBox(
+    world: world
+    center: Vec3.create(x: 0.0, y: 0.0, z: -0.5)
+    half: Vec3.create(x: 40.0, y: 40.0, z: 0.5)
+    loose: false
+  )
+  addBox(
+    world: world
+    center: Vec3.create(x: 0.0, y: 0.0, z: 0.35)
+    half: Vec3.create(x: 2.0, y: 2.0, z: 0.35)
+    loose: false
+  )
+  var bouncing: Bouncing = createBouncing()
+  let padId: EntityId = allocEntity(this: world.allocator)
+  componentSet(
+    this: bouncing.pads
+    entityId: padId
+    data: BouncePad {
+      minX: -2.0
+      minY: -2.0
+      maxX: 2.0
+      maxY: 2.0
+      topZ: 0.7
+    }
+  )
+  let jumper: EntityId = allocEntity(this: world.allocator)
+  let beside: EntityId = allocEntity(this: world.allocator)
+  addCharacterBody(
+    characters: world.characters
+    entityId: jumper
+    feet: Vec3.create(x: 0.0, y: 0.0, z: 3.0)
+  )
+  addCharacterBody(
+    characters: world.characters
+    entityId: beside
+    feet: Vec3.create(x: 8.0, y: 0.0, z: 2.3)
+  )
+  # Dropped 2.3 m onto the mat, and 2.3 m onto the ground beside it
+  var bounces: Int = 0
+  var peaks: List(Float) = List.create(Float, cap: 8)
+  var rising: Bool = false
+  var lastFeet: Float = feetZ(world: world, entityId: jumper)
+  var besideHighest: Float = 0.0
+  var besideLanded: Bool = false
+  loop var i: Int = 0, i < 900, ++i {
+    bounces = bounces + stepWorld(world: world, bouncing: bouncing)
+    let now: Float = feetZ(world: world, entityId: jumper)
+    if rising and now < lastFeet {
+      peaks.add(value: lastFeet - 0.7)
+    }
+    rising = now > lastFeet
+    lastFeet = now
+    let besideFeet: Float = feetZ(world: world, entityId: beside)
+    if besideFeet < 0.1 {
+      besideLanded = true
+    }
+    if besideLanded {
+      besideHighest = Math.max(a: besideHighest, b: besideFeet)
+    }
+  }
+  let first: Float = peaks.copyAtFallback(index: 0, fallback: 0.0)
+  let second: Float = peaks.copyAtFallback(index: 1, fallback: 0.0)
+  check(
+    label: "dropped 2.3 m onto the mat it bounces {bounces} times, the first up {first} m over it, the next lower ({second} m)"
+    ok: bounces >= 3 and first > 1.5 and first < 2.3 and second < first and second > 1.0
+  )
+  check(
+    label: "it settles: standing on the mat at the end (feet {lastFeet} m up)"
+    ok: near(a: lastFeet, b: 0.7, within: 0.1)
+  )
+  check(
+    label: "dropped as far onto the ground beside it, it lands and stays (highest after landing {besideHighest} m)"
+    ok: besideLanded and besideHighest < 0.1
+  )
+  # A parked mover falling onto the mat is not bounced
+  placeHero(world: world, hero: jumper, feet: Vec3.create(x: 0.0, y: 0.0, z: 3.0))
+  componentMod(this: world.characters, entityId: jumper).mover.velocity.z = -6.0
+  addTag(MoverParked, table: world.parked, entityId: jumper)
+  componentSet(this: bouncing.falls, entityId: jumper, data: MoverFall { verticalSpeed: -6.0 })
+  componentMod(this: world.characters, entityId: jumper).mover.onGround = true
+  placeHero(world: world, hero: jumper, feet: Vec3.create(x: 0.0, y: 0.0, z: 0.7))
+  let parkedBounces: Int = bounceMovers(
+    bouncing: bouncing
+    characters: world.characters
+    parked: world.parked
+    drives: world.drives
+  )
+  check(label: "a parked mover is not bounced", ok: parkedBounces is 0)
+  removeTag(MoverParked, table: world.parked, entityId: jumper)
+  # Jump held at every landing: each bounce higher, as on a trampoline, up
+  # to the pad's top speed
+  placeHero(world: world, hero: jumper, feet: Vec3.create(x: 0.0, y: 0.0, z: 1.7))
+  var drive: MoverDrive = createMoverDrive()
+  drive.intent.jump = true
+  componentSet(this: world.drives, entityId: jumper, data: drive)
+  var jumpPeaks: List(Float) = List.create(Float, cap: 16)
+  var going: Bool = false
+  var previous: Float = feetZ(world: world, entityId: jumper)
+  loop var i: Int = 0, i < 900, ++i {
+    let bounced: Int = stepWorld(world: world, bouncing: bouncing)
+    let now: Float = feetZ(world: world, entityId: jumper)
+    if going and now < previous {
+      jumpPeaks.add(value: previous - 0.7)
+    }
+    going = now > previous
+    previous = now
+  }
+  let firstJump: Float = jumpPeaks.copyAtFallback(index: 0, fallback: 0.0)
+  let thirdJump: Float = jumpPeaks.copyAtFallback(index: 2, fallback: 0.0)
+  let lastJump: Float = jumpPeaks.copyAtFallback(index: jumpPeaks.length - 1, fallback: 0.0)
+  let topPad: BouncePad = componentCopyAtDefault(this: bouncing.pads, i: 0)
+  let ceiling: Float = topPad.maximumSpeed * topPad.maximumSpeed / (2.0 * 9.0)
+  check(
+    label: "with jump held it goes higher each bounce ({firstJump}, {thirdJump} ... {lastJump} m), up to its top speed's height"
+    ok: jumpPeaks.length >= 4 and thirdJump > firstJump + 0.5 and lastJump > thirdJump and lastJump < ceiling * 1.5
+  )
+  destroyPhysics(physics: world.physics)
+}
