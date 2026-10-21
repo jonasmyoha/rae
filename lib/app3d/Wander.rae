@@ -1,0 +1,206 @@
+# app3d/Wander — characters walking about on their own: each with a Wanderer
+# walks to a spot within its range of its home, stops there a few seconds,
+# then picks another and walks again. stepWanderers, once a frame, writes
+# each one's MoverDrive (app3d/CharacterMovers: a walk toward its spot, or
+# standing), which the mover system then drives. A wanderer the player
+# controls (the Controlled tag) or one parked (lying, seated, climbing) is
+# left alone: its drive is the app's. One that makes no headway toward its
+# spot (water's edge, a wall, a crowd) stops there and later picks another.
+# Every pick comes from the system's own Random, so a seed repeats a walk.
+import Math
+import Vec3
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Tag
+open app3d/CharacterController
+open app3d/CharacterMovers
+open app3d/Characters
+
+enum WanderState { walking, pausing }
+
+type Wanderer {
+  # Its home and how far from it its spots are (m)
+  homeX: Float
+  homeY: Float
+  range: Float = 8.0
+  # Spots nearer than this to where it stands are not picked (m)
+  minimumStep: Float = 2.0
+  # How long it stops at each spot (s)
+  pauseMinimum: Float = 1.5
+  pauseMaximum: Float = 4.5
+  # Its walk: the mover's walk (intent.walking), at this scale of the speed
+  speedScale: Float = 1.0
+  state: WanderState = WanderState.pausing
+  targetX: Float = 0.0
+  targetY: Float = 0.0
+  # Left of its pause (s), and of its time to make headway (s)
+  timeLeft: Float = 0.0
+  headwayLeft: Float = 0.0
+  # Its distance to the spot when headway was last checked (m)
+  headwayDistance: Float = 0.0
+  # Spots reached, and walks given up for want of headway
+  arrivals: Int = 0
+  stalls: Int = 0
+}
+
+type Wandering {
+  wanderers: ComponentTable(Wanderer)
+  random: Random
+}
+
+# Within this of its spot it has arrived (m)
+const wanderArriveDistance: Float = 0.5
+
+# Each this long (s) walking, it must have come this much nearer (m)
+const wanderHeadwaySeconds: Float = 2.0
+
+const wanderHeadwayMetres: Float = 0.5
+
+func createWandering(seed: view Int) ret Wandering {
+  ret Wandering { wanderers: ComponentTable.create(Wanderer), random: createRandom(seed: seed) }
+}
+
+# `entityId` wanders round (homeX, homeY), at first standing a moment
+func addWanderer(
+  wandering: mod Wandering
+  entityId: view EntityId
+  homeX: view Float
+  homeY: view Float
+  range: view Float
+) {
+  var wanderer: Wanderer = { homeX: homeX, homeY: homeY, range: range }
+  wanderer.timeLeft = wanderer.pauseMinimum + wandering.random.nextFloat() * (wanderer.pauseMaximum - wanderer.pauseMinimum)
+  componentSet(this: wandering.wanderers, entityId: entityId, data: wanderer)
+}
+
+# The heading (yaw 0 looks toward +y) from (x, y) toward (toX, toY)
+func headingTo(
+  x: view Float
+  y: view Float
+  toX: view Float
+  toY: view Float
+) ret Float {
+  ret Math.atan2(y: 0.0 - (toX - x), x: toY - y)
+}
+
+# A new spot for `wanderer` standing at (x, y): within its range of home, at
+# least its minimum step away (the last of a few tries if none is)
+func pickWanderTarget(
+  wanderer: mod Wanderer
+  random: mod Random
+  x: view Float
+  y: view Float
+) {
+  loop var i: Int = 0, i < 6, ++i {
+    let angle: Float = random.nextFloat() * 6.2831853
+    let reach: Float = wanderer.range * Math.sqrt(x: random.nextFloat())
+    wanderer.targetX = wanderer.homeX + Math.cos(x: angle) * reach
+    wanderer.targetY = wanderer.homeY + Math.sin(x: angle) * reach
+    let dx: Float = wanderer.targetX - x
+    let dy: Float = wanderer.targetY - y
+    if dx * dx + dy * dy >= wanderer.minimumStep * wanderer.minimumStep {
+      ret
+    }
+  }
+}
+
+# One wanderer standing at (x, y), `deltaTime` s on: walking toward its spot
+# (true) or standing (false). Stops on arriving or without headway; after
+# its pause picks a spot and walks.
+func stepWanderer(
+  wanderer: mod Wanderer
+  random: mod Random
+  x: view Float
+  y: view Float
+  deltaTime: view Float
+) ret Bool {
+  let dx: Float = wanderer.targetX - x
+  let dy: Float = wanderer.targetY - y
+  let distance: Float = Math.sqrt(x: dx * dx + dy * dy)
+  if wanderer.state is WanderState.walking {
+    if distance < wanderArriveDistance {
+      wanderer.arrivals = wanderer.arrivals + 1
+      startPause(wanderer: wanderer, random: random)
+      ret false
+    }
+    wanderer.headwayLeft = wanderer.headwayLeft - deltaTime
+    if wanderer.headwayLeft <= 0.0 {
+      if wanderer.headwayDistance - distance < wanderHeadwayMetres {
+        wanderer.stalls = wanderer.stalls + 1
+        startPause(wanderer: wanderer, random: random)
+        ret false
+      }
+      wanderer.headwayLeft = wanderHeadwaySeconds
+      wanderer.headwayDistance = distance
+    }
+    ret true
+  }
+  wanderer.timeLeft = wanderer.timeLeft - deltaTime
+  if wanderer.timeLeft > 0.0 {
+    ret false
+  }
+  pickWanderTarget(
+    wanderer: wanderer
+    random: random
+    x: x
+    y: y
+  )
+  wanderer.state = WanderState.walking
+  wanderer.headwayLeft = wanderHeadwaySeconds
+  let tx: Float = wanderer.targetX - x
+  let ty: Float = wanderer.targetY - y
+  wanderer.headwayDistance = Math.sqrt(x: tx * tx + ty * ty)
+  ret true
+}
+
+func startPause(wanderer: mod Wanderer, random: mod Random) {
+  wanderer.state = WanderState.pausing
+  wanderer.timeLeft = wanderer.pauseMinimum + random.nextFloat() * (wanderer.pauseMaximum - wanderer.pauseMinimum)
+}
+
+# One frame of every wanderer: each one's drive in `drives` (a walk toward
+# its spot, or standing), from where its controller stands; the controlled
+# one and the parked ones are left to the app
+func stepWanderers(
+  wandering: mod Wandering
+  controllers: view ComponentTable(ThirdPersonController)
+  controlled: view ComponentTable(Controlled)
+  parked: view ComponentTable(MoverParked)
+  drives: mod ComponentTable(MoverDrive)
+  deltaTime: view Float
+) {
+  loop var i: Int = 0, i < componentCount(this: wandering.wanderers), ++i {
+    let entityId: EntityId = componentEntityAt(this: wandering.wanderers, i: i)
+    if componentHas(this: controllers, entityId: entityId) is false or hasTag(
+      Controlled
+      table: controlled
+      entityId: entityId
+    ) or hasTag(MoverParked, table: parked, entityId: entityId) {
+      continue
+    }
+    let at: Vec3 = componentView(this: controllers, entityId: entityId).position
+    var wanderer: Wanderer = componentCopyAtDefault(this: wandering.wanderers, i: i)
+    let walks: Bool = stepWanderer(
+      wanderer: wanderer
+      random: wandering.random
+      x: at.x
+      y: at.y
+      deltaTime: deltaTime
+    )
+    var drive: MoverDrive = createMoverDrive()
+    drive.sprints = false
+    drive.speedScale = wanderer.speedScale
+    if walks {
+      drive.intent.moveY = 1.0
+      drive.intent.walking = true
+      drive.yaw = headingTo(
+        x: at.x
+        y: at.y
+        toX: wanderer.targetX
+        toY: wanderer.targetY
+      )
+    }
+    componentSet(this: drives, entityId: entityId, data: drive)
+    componentSet(this: wandering.wanderers, entityId: entityId, data: wanderer)
+  }
+}
