@@ -586,6 +586,16 @@ void discover_specializations_module(CompilerContext* ctx, const AstModule* modu
                 if (d->as.let_decl.type) { gctx.expected_type = *d->as.let_decl.type; gctx.has_expected_type = true; }
                 discover_specializations_expr_impl(&gctx, d->as.let_decl.value);
             }
+        } else if (d->kind == AST_DECL_TYPE && !d->as.type_decl.generic_params) {
+            // A field default (`points: List(Vec3) = List.create(Vec3, cap: 8)`)
+            // runs in the type's default constructor, so its calls monomorphize
+            // too — with the whole chain below (`create` calls `createList`).
+            for (const AstTypeField* f = d->as.type_decl.fields; f; f = f->next) {
+                if (!f->default_value) continue;
+                CFuncContext fctx = {.compiler_ctx = ctx, .module = module};
+                if (f->type) { fctx.expected_type = *f->type; fctx.has_expected_type = true; }
+                discover_specializations_expr_impl(&fctx, f->default_value);
+            }
         }
     }
     size_t discovered = 0;

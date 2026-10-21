@@ -1,0 +1,18 @@
+# A field default that builds a List (`points: List(Vec3) = List.create(Vec3,
+# cap: 8)`) runs in the type's default constructor, which is emitted after
+# every function it may call; the List's specializations are found from the
+# default too. It used to call `List.create` before C had seen it.
+import Vec3
+
+type Path {
+  points: List(Vec3) = List.create(Vec3, cap: 8)
+  label: String = "path"
+}
+
+func main() {
+  var path: Path = {}
+  path.points.add(value: Vec3.create(x: 1.0, y: 2.0, z: 3.0))
+  let named: Path = { label: "named" }
+  log("{path.label}: {path.points.length} point, first x {path.points.viewAt(index: 0).x}")
+  log("{named.label}: {named.points.length} points")
+}
