@@ -1,0 +1,18 @@
+# A field read straight off a generic call's result is checked against the
+# result's type: `componentView(this: colliders, ...)` returns a Collider,
+# which has `shapeIds`, not `shapeId`. The C compiler used to be the first to
+# notice ("no member named 'shapeId'").
+open ecs/Entity
+open ecs/ComponentTable
+
+type Collider {
+  shapeIds: List(Int)
+}
+
+func main() {
+  var colliders: ComponentTable(Collider) = ComponentTable.create(Collider)
+  let entityId: EntityId = id(v: 1)
+  componentSet(this: colliders, entityId: entityId, data: { shapeIds: { 7 } })
+  log("{componentView(this: colliders, entityId: entityId).shapeIds.length}")
+  log("{componentView(this: colliders, entityId: entityId).shapeId}")
+}

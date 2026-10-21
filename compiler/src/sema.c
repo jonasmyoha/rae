@@ -1164,6 +1164,10 @@ static SemaTaskScope s_task_scopes[SEMA_MAX_TASK_SCOPES];
 static int s_task_scope_count = 0;
 static bool sema_spawn_lends(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* spawn, AstExpr* call);
 static void sema_report_unknown_member(AstModule* module, AstExpr* expr);
+static void sema_report_unknown_member_in(AstModule* module, AstExpr* expr, TypeInfo* t);
+static TypeInfo* sema_generic_call_result(CompilerContext* ctx, AstModule* module, SymbolTable* symbols,
+                                          const AstExpr* call);
+static bool sema_type_has_field(TypeInfo* t, Str name);
 static void sema_render_access(const AstExpr* e, char* out, size_t cap);
 static void sema_warn_let_receiver(AstModule* module, SymbolTable* symbols, const AstExpr* call);
 static bool expr_is_owning(SymbolTable* symbols, const AstExpr* e);
@@ -5399,6 +5403,20 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
         case AST_STMT_ASSIGN: {
             sema_analyze_expr(ctx, module, symbols, stmt->as.assign_stmt.target, true);
             sema_analyze_expr(ctx, module, symbols, stmt->as.assign_stmt.value, true);
+            // The `let x: T = f()` rule for an assignment too: a value place
+            // cannot take a reference-returning call (`pose = componentView(...)`
+            // used to reach the C compiler as a pointer assigned to a struct)
+            {
+                const TypeInfo* target_type = stmt->as.assign_stmt.target->resolved_type;
+                const AstExpr* value = stmt->as.assign_stmt.value;
+                if (target_type && target_type->kind != TYPE_REF && value && value->kind == AST_EXPR_CALL
+                    && sema_call_returns_reference(module, value)) {
+                    diag_error(sema_diag_file(module), (int)stmt->line, (int)stmt->column,
+                               "this call returns a reference; copying what it refers to must be spelled out: "
+                               "bind it first ('let source: view T = ...'), then copy from the named binding");
+                    module->had_error = true;
+                }
+            }
             if (stmt->as.assign_stmt.target->resolved_type) ensure_type_match(ctx, stmt->as.assign_stmt.target->resolved_type, &stmt->as.assign_stmt.value);
             // View restriction checks
             if (stmt->as.assign_stmt.target->kind == AST_EXPR_IDENT) {
@@ -7564,7 +7582,23 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                     break;
                 }
             }
-            if (!member_found && !expr->resolved_type) sema_report_unknown_member(module, expr);
+            if (!member_found && !expr->resolved_type) {
+                /* A generic call's result (`componentView(this: colliders, ...)`)
+                 * has no concrete type here: infer it from the arguments, so a
+                 * field it does not have is reported, not left to the C compiler */
+                const AstExpr* object = expr->as.member.object;
+                TypeInfo* concrete = object && object->kind == AST_EXPR_CALL
+                    && (!object->resolved_type || object->resolved_type->kind == TYPE_GENERIC_PARAM
+                        || (object->resolved_type->kind == TYPE_REF && object->resolved_type->as.ref.base
+                            && object->resolved_type->as.ref.base->kind == TYPE_GENERIC_PARAM))
+                    ? sema_generic_call_result(ctx, module, symbols, object) : NULL;
+                if (concrete) {
+                    if (!sema_type_has_field(concrete, expr->as.member.member))
+                        sema_report_unknown_member_in(module, expr, concrete);
+                } else {
+                    sema_report_unknown_member(module, expr);
+                }
+            }
             break;
         case AST_EXPR_METHOD_CALL:
             // #786: 3-level folder-package qualifier `pkg.Module.func(args)`. The
@@ -9916,12 +9950,68 @@ static bool sema_spawn_lends(CompilerContext* ctx, AstModule* module, SymbolTabl
 }
 
 
+/* The concrete result type of a call to a generic function whose type
+ * arguments sema did not bind (the backend infers them per call): `T` from
+ * the arguments, then the return type with `T` substituted. NULL when it
+ * cannot be inferred. */
+static TypeInfo* sema_generic_call_result(CompilerContext* ctx, AstModule* module, SymbolTable* symbols,
+                                          const AstExpr* call) {
+    const AstDecl* decl = call->decl_link;
+    if (!decl && call->as.call.callee && call->as.call.callee->kind == AST_EXPR_IDENT) {
+        size_t arg_count = 0;
+        for (AstCallArg* a = call->as.call.args; a; a = a->next) arg_count++;
+        for (Symbol* curr = symbol_table_first(symbols, call->as.call.callee->as.ident); curr; curr = curr->sameNext) {
+            const AstDecl* d = curr->decl;
+            if (!d || d->kind != AST_DECL_FUNC || !d->as.func_decl.generic_params) continue;
+            size_t pc = 0;
+            for (AstParam* p = d->as.func_decl.params; p; p = p->next) pc++;
+            if (pc != arg_count) continue;
+            if (decl) return NULL;  /* two candidates: not this function's call to decide */
+            decl = d;
+        }
+    }
+    if (!decl || decl->kind != AST_DECL_FUNC) return NULL;
+    const AstFuncDecl* fd = &decl->as.func_decl;
+    if (!fd->generic_params || !fd->returns || !fd->returns->type) return NULL;
+    const AstTypeRef* patterns[16]; const AstTypeRef* concretes[16]; size_t n = 0;
+    const AstParam* p = fd->params;
+    for (AstCallArg* a = call->as.call.args; a && p && n < 16; a = a->next, p = p->next) {
+        TypeInfo* at = a->value ? a->value->resolved_type : NULL;
+        while (at && at->kind == TYPE_REF) at = at->as.ref.base;
+        if (!at || at->kind == TYPE_VOID || at->kind == TYPE_GENERIC_PARAM) continue;
+        patterns[n] = p->type;
+        concretes[n] = sema_type_ref_of(ctx, at);
+        n++;
+    }
+    if (!n) return NULL;
+    AstTypeRef* inferred = infer_generic_args_multi(ctx, fd, patterns, concretes, n);
+    if (!inferred) return NULL;
+    AstTypeRef* result = substitute_type_ref(ctx, fd->generic_params, inferred, fd->returns->type);
+    if (!result) return NULL;
+    TypeInfo* t = sema_resolve_type_internal(ctx, module, symbols, result);
+    while (t && t->kind == TYPE_REF) t = t->as.ref.base;
+    return (t && t->kind == TYPE_STRUCT) ? t : NULL;
+}
+
+/* Does struct type `t` have a field `name`? Anything else counts as yes. */
+static bool sema_type_has_field(TypeInfo* t, Str name) {
+    if (!t || t->kind != TYPE_STRUCT || !t->as.structure.decl
+        || t->as.structure.decl->kind != AST_DECL_TYPE) return true;
+    for (const AstTypeField* f = t->as.structure.decl->as.type_decl.fields; f; f = f->next)
+        if (str_eq(f->name, name)) return true;
+    return false;
+}
+
 /* `x.name` where x's type is known and has no field `name`: a struct without
  * that field, or a String / number / Bool / Char, which have no fields at all.
  * Without this the C compiler was the first to notice. A String's length is
  * the method `length()` (lib/String.rae), not a field. */
 static void sema_report_unknown_member(AstModule* module, AstExpr* expr) {
-    TypeInfo* t = expr->as.member.object->resolved_type;
+    sema_report_unknown_member_in(module, expr, expr->as.member.object->resolved_type);
+}
+
+/* The same report for an object whose type is `t` */
+static void sema_report_unknown_member_in(AstModule* module, AstExpr* expr, TypeInfo* t) {
     if (t && t->kind == TYPE_REF) t = t->as.ref.base;
     if (!t) return;
     Str member = expr->as.member.member;
