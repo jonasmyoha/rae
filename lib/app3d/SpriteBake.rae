@@ -16,7 +16,8 @@
 #   let picture: SpritePicture = bakeSpritePicture(parts: meshes, colors: colors, width: 96,
 #   height: 128, aspect: 0.75)
 #   spriteInitArray(w: 96, h: 128, layers: 1, mips: spriteMipCount(w: 96, h: 128))
-#   uploadSpritePicture(layer: 0, picture: picture, mips: spriteMipCount(w: 96, h: 128))
+#   uploadSpritePicture(layer: 0, picture: picture, mips: spriteMipCount(w: 96, h: 128), cutoff:
+#   0.5)
 #   ...and the world height of the picture is picture.top (times the prop's scale)
 import Math
 import Vec3
@@ -279,26 +280,124 @@ func halveSpritePicture(picture: view SpritePicture) ret SpritePicture {
 # Upload `picture` and its first `mips` - 1 halvings as levels 0 .. mips - 1
 # of layer `layer` of the sprite array (made with spriteInitArray and the
 # same `mips`)
-func uploadSpritePicture(layer: view Int, picture: view SpritePicture, mips: view Int) {
-  spriteUploadLayer(
-    layer: layer
-    mip: 0
-    pixels: picture.pixels.data
-    w: picture.width
-    h: picture.height
-  )
-  if mips < 2 {
-    ret
+# The share of a picture's pixels whose alpha reaches `cutoff` (0..1): what
+# an alpha cut at `cutoff` keeps
+func pictureCoverage(picture: view SpritePicture, cutoff: view Float) ret Float {
+  if picture.pixels.length is 0 {
+    ret 0.0
   }
-  var level: SpritePicture = halveSpritePicture(picture: picture)
-  loop var mip: Int = 1, mip < mips, ++mip {
-    spriteUploadLayer(
-      layer: layer
-      mip: mip
-      pixels: level.pixels.data
-      w: level.width
-      h: level.height
+  let limit: Int = (cutoff * 255.0 + 0.5).toInt()
+  var kept: Int = 0
+  loop let pixel: view Int in picture.pixels {
+    if pixel / 16777216 % 256 >= limit {
+      kept = kept + 1
+    }
+  }
+  ret kept.toFloat() / picture.pixels.length.toFloat()
+}
+
+# `picture` with every alpha times `scale` (0..255). A level halved from a
+# picture of 0 / 255 alphas holds only a few alpha values, so one scale moves
+# all pixels of a value across the cut at once; a fixed jitter of under two
+# steps per pixel breaks those ties, so the kept share can be set finely.
+func scaledAlphaPicture(picture: view SpritePicture, scale: view Float) ret SpritePicture {
+  var pixels: List(Int) = List.create(Int, cap: picture.pixels.length)
+  loop var i: Int = 0, i < picture.pixels.length, ++i {
+    let pixel: Int = picture.pixels.copyAtFallback(index: i, fallback: 0)
+    let alpha: Int = pixel / 16777216 % 256
+    if alpha is 0 {
+      pixels.add(value: pixel)
+      continue
+    }
+    let jitter: Float = ((i * 2654435761) % 1000).toFloat() / 1000.0 * 3.0 - 1.5
+    let scaled: Int = Math.min(
+      a: Math.max(a: (alpha.toFloat() * scale + jitter + 0.5).toInt(), b: 1)
+      b: 255
     )
-    level = halveSpritePicture(picture: level)
+    pixels.add(value: pixel % 16777216 + scaled * 16777216)
+  }
+  ret SpritePicture {
+    pixels: own pixels
+    width: picture.width
+    height: picture.height
+    top: picture.top
+  }
+}
+
+# A mip level whose alpha cut at `cutoff` keeps `coverage` (the full
+# picture's share) as nearly as its pixels can (Castano, "Computing alpha
+# mipmaps", 2010): averaging alpha blurs a crown's gaps and edges, so a
+# plain cut at a coarse level keeps a different share (a dense crown turns
+# solid, a sparse one thins). Its alpha is scaled by the factor, found by
+# bisection, that brings the kept share to the full picture's.
+func coveragePreservingLevel(
+  level: view SpritePicture
+  coverage: view Float
+  cutoff: view Float
+) ret SpritePicture {
+  var low: Float = 0.0
+  var high: Float = 8.0
+  loop var step: Int = 0, step < 20, ++step {
+    let middle: Float = (low + high) * 0.5
+    if pictureCoverage(picture: scaledAlphaPicture(picture: level, scale: middle), cutoff: cutoff) < coverage {
+      low = middle
+    } else {
+      high = middle
+    }
+  }
+  # Of the two ends, the one whose share is nearer
+  let below: Float = pictureCoverage(
+    picture: scaledAlphaPicture(picture: level, scale: low)
+    cutoff: cutoff
+  )
+  let above: Float = pictureCoverage(
+    picture: scaledAlphaPicture(picture: level, scale: high)
+    cutoff: cutoff
+  )
+  if Math.abs(value: below - coverage) < Math.abs(value: above - coverage) {
+    ret scaledAlphaPicture(picture: level, scale: low)
+  }
+  ret scaledAlphaPicture(picture: level, scale: high)
+}
+
+# The picture and its first `mips` - 1 halvings, each level's alpha scaled
+# so a cut at `cutoff` keeps the full picture's share. Each level is halved
+# from the previous level BEFORE its scaling, so no scale compounds.
+func spriteMipChain(
+  picture: view SpritePicture
+  mips: view Int
+  cutoff: view Float
+) ret List(SpritePicture) {
+  var chain: List(SpritePicture) = List.create(SpritePicture, cap: Math.max(a: mips, b: 1))
+  chain.add(value: picture)
+  let coverage: Float = pictureCoverage(picture: picture, cutoff: cutoff)
+  var raw: SpritePicture = picture
+  loop var mip: Int = 1, mip < mips, ++mip {
+    raw = halveSpritePicture(picture: raw)
+    chain.add(value: coveragePreservingLevel(level: raw, coverage: coverage, cutoff: cutoff))
+  }
+  ret chain
+}
+
+# Upload `picture` and its coverage-preserving mip chain (spriteMipChain,
+# for an alpha cut at `cutoff`) as levels 0 .. mips - 1 of layer `layer` of
+# the sprite array (made with spriteInitArray and the same `mips`)
+func uploadSpritePicture(
+  layer: view Int
+  picture: view SpritePicture
+  mips: view Int
+  cutoff: view Float
+) {
+  let chain: List(SpritePicture) = spriteMipChain(picture: picture, mips: mips, cutoff: cutoff)
+  loop var mip: Int = 0, mip < chain.length, ++mip {
+    if let level: view SpritePicture = chain.viewAt(index: mip) {
+      spriteUploadLayer(
+        layer: layer
+        mip: mip
+        pixels: level.pixels.data
+        w: level.width
+        h: level.height
+      )
+    }
   }
 }
