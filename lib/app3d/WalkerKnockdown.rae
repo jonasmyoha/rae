@@ -34,6 +34,11 @@ open app3d/CharacterHeight
 # Down at least this long (s) before the player may get up
 const walkerDownSeconds: Float = 0.8
 
+# A crowd member knocked over lies there this long before it gets up (s): it
+# stays down long enough to be seen lying, where the driven one gets up as
+# soon as its player moves (after walkerDownSeconds)
+const walkerCrowdDownSeconds: Float = 15.0
+
 # The ragdoll's shapes collide with everything (Box3D's first category)
 const walkerRagdollCategory: UInt64 = 1
 
@@ -201,6 +206,9 @@ func walkerKnockdownUpdate(
     )
     if tripped {
       log("[knockdown] knocked over at {Vec3.vlen(a: request.velocity)} m/s")
+      if fallenId is not controlledEntityId {
+        componentMod(this: physicsSystem.knockedDown, entityId: fallenId).readyAfterSeconds = walkerCrowdDownSeconds
+      }
     }
   }
   if componentHas(this: physicsSystem.knockedDown, entityId: controlledEntityId) {

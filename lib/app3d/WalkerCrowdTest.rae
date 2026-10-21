@@ -3,7 +3,8 @@
 # (app3d/Wander: each member walks off, reaches spots, stops between them);
 # then the hero runs at a crowd member standing still, and the bump knocks
 # over the one standing (app3d/CharacterContact: the one doing less of the
-# pushing), not the hero. While they walk about, each one's clip must show
+# pushing), not the hero, and it lies there walkerCrowdDownSeconds (15 s)
+# before it gets up. While they walk about, each one's clip must show
 # what it does (a walk or run clip while it moves, idle while it stands: the
 # crowd once kept its spawn clip and slid). One [crowdtest] line; true when
 # all held.
@@ -189,8 +190,11 @@ func runWalkerCrowdTest(
     clipShare = clipMatches.toFloat() / clipFrames.toFloat()
   }
   let clipsFollow: Bool = clipShare > 0.9
-  # Everyone up again before the run
-  loop var frame: Int = 0, frame < 360, ++frame {
+  # Everyone up again before the run: at least 6 s, and as long as anyone
+  # a wander bump knocked over still lies there (walkerCrowdDownSeconds)
+  var settled: Int = 0
+  loop settled < 360 or (componentCount(this: physicsSystem.knockedDown) > 0 and settled < 60 * (walkerCrowdDownSeconds.toInt() + 8)) {
+    settled = settled + 1
     crowdTestFrame(
       physicsSystem: physicsSystem
       world: world
@@ -205,6 +209,8 @@ func runWalkerCrowdTest(
   var knockedOver: Bool = false
   var heroDown: Bool = false
   var closest: Float = 1000.0
+  # How long the one knocked over lay before it got up (s; below 0: never)
+  var lay: Float = -1.0
   if count > 0 {
     let targetId: EntityId = componentEntityAt(this: physicsSystem.wandering.wanderers, i: 0)
     let target: Vec3 = controllerFeet(
@@ -228,6 +234,7 @@ func runWalkerCrowdTest(
       )
     )
     let run: InputIntent = forwardIntent()
+    var knockedFrame: Int = -1
     loop var frame: Int = 0, frame < crowdTestRunFrames, ++frame {
       crowdTestFrame(
         physicsSystem: physicsSystem
@@ -239,6 +246,9 @@ func runWalkerCrowdTest(
         wanders: false
       )
       knockedOver = knockedOver or componentHas(this: physicsSystem.knockedDown, entityId: targetId)
+      if knockedOver and knockedFrame < 0 {
+        knockedFrame = frame
+      }
       heroDown = heroDown or componentHas(this: physicsSystem.knockedDown, entityId: heroEntityId)
       let hero: Vec3 = controllerOf(controllers: world.controllers, entityId: heroEntityId).position
       closest = Math.min(
@@ -248,10 +258,30 @@ func runWalkerCrowdTest(
         )
       )
     }
+    # ...and it lies there walkerCrowdDownSeconds before it gets up
+    if knockedFrame >= 0 {
+      var frame: Int = crowdTestRunFrames
+      loop componentHas(this: physicsSystem.knockedDown, entityId: targetId) and frame - knockedFrame < 60 * (walkerCrowdDownSeconds.toInt() + 8) {
+        crowdTestFrame(
+          physicsSystem: physicsSystem
+          world: world
+          characterSystem: characterSystem
+          heroEntityId: heroEntityId
+          intent: still
+          yaw: 0.0
+          wanders: false
+        )
+        frame = frame + 1
+      }
+      if componentHas(this: physicsSystem.knockedDown, entityId: targetId) is false {
+        lay = (frame - knockedFrame).toFloat() / 60.0
+      }
+    }
   }
-  let passed: Bool = wandered and clipsFollow and knockedOver and heroDown is false
+  let layOk: Bool = lay >= walkerCrowdDownSeconds and lay < walkerCrowdDownSeconds + 2.0
+  let passed: Bool = wandered and clipsFollow and knockedOver and heroDown is false and layOk
   log(
-    "[crowdtest] {count} wanderers in 20 s: each went at least {leastGone} m off, {arrivals} spots reached, each stood still {leastStood} frames or more ={wandered}; their clip showed what they did in {clipShare * 100.0}% of frames ={clipsFollow}; the hero ran at one standing (closest {closest} m): it fell={knockedOver}, the hero stayed up={heroDown is false}; passed={passed}"
+    "[crowdtest] {count} wanderers in 20 s: each went at least {leastGone} m off, {arrivals} spots reached, each stood still {leastStood} frames or more ={wandered}; their clip showed what they did in {clipShare * 100.0}% of frames ={clipsFollow}; the hero ran at one standing (closest {closest} m): it fell={knockedOver}, the hero stayed up={heroDown is false}, it lay {lay} s before it got up ={layOk}; passed={passed}"
   )
   ret passed
 }
