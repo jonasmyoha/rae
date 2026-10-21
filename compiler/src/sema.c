@@ -7513,6 +7513,34 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
             sema_analyze_expr(ctx, module, symbols, expr->as.member.object, false);
             sema_report_bad_receiver(ctx, module, symbols, expr->as.member.object);
             bool member_found = false;
+            /* `Enum.case`: the case must be one of the enum's (a missing one
+             * used to reach the C compiler as an undeclared `Enum_case`). A
+             * local of that name is a value, not the enum. */
+            if (expr->as.member.object->kind == AST_EXPR_IDENT) {
+                Symbol* enum_sym = symbol_table_lookup(symbols, expr->as.member.object->as.ident);
+                if (enum_sym && enum_sym->decl && enum_sym->decl->kind == AST_DECL_ENUM) {
+                    const AstEnumDecl* ed = &enum_sym->decl->as.enum_decl;
+                    bool is_case = false;
+                    for (const AstEnumMember* m = ed->members; m; m = m->next)
+                        if (str_eq(m->name, expr->as.member.member)) is_case = true;
+                    if (!is_case) {
+                        char cases[300]; size_t pos = 0; cases[0] = '\0';
+                        for (const AstEnumMember* m = ed->members; m && pos < sizeof cases; m = m->next) {
+                            int w = snprintf(cases + pos, sizeof cases - pos, "%s%.*s", pos ? ", " : "",
+                                             (int)m->name.len, m->name.data);
+                            if (w > 0) pos += (size_t)w;
+                        }
+                        Str written = type_written_name(ed->name);
+                        char buf[500];
+                        snprintf(buf, sizeof buf, "enum '%.*s' has no case '%.*s'; its cases are %s",
+                                 (int)written.len, written.data, (int)expr->as.member.member.len,
+                                 expr->as.member.member.data, cases);
+                        diag_error(sema_diag_file(module), (int)expr->line, (int)expr->column, buf);
+                        module->had_error = true;
+                        break;
+                    }
+                }
+            }
             if (expr->as.member.object->resolved_type) {
                 TypeInfo* t = expr->as.member.object->resolved_type; if (t->kind == TYPE_REF) t = t->as.ref.base;
                 if (t->kind == TYPE_STRUCT) {

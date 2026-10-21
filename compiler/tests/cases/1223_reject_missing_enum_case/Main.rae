@@ -1,0 +1,26 @@
+# A case the enum does not have (`VaultKind.missing`, written before the case
+# is added) is an error naming the enum's cases, in an `is` comparison and
+# in a `match` arm. It used to reach the C compiler ("use of undeclared
+# identifier 'VaultKind_missing'").
+enum VaultKind { small, large }
+
+func describe(kind: view VaultKind) ret String {
+  if kind is VaultKind.missing {
+    ret "missing"
+  }
+  match kind {
+    case VaultKind.small {
+      ret "small"
+    }
+    case VaultKind.gone {
+      ret "gone"
+    }
+    case VaultKind.large {
+      ret "large"
+    }
+  }
+}
+
+func main() {
+  log(describe(kind: VaultKind.large))
+}
