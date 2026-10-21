@@ -35,6 +35,7 @@ open gpu/GpuIds
 import Profile
 import GrassConfig
 open Gbuffer
+open GbufferRecord
 open ForwardMaterial
 open gpu/DeviceFeatures
 import String
@@ -48,7 +49,7 @@ const grassGpuBladeCount: Int = 65536
 # The compute kernel's workgroup size (its `computeWorkgroupSize` override)
 const grassWorkgroupSize: Int = 64
 
-const grassRecordBytes: Int = 160  # 40 floats per DrawU
+const grassRecordBytes: Int = instanceRecordFloats * 4  # one DrawU (GbufferRecord)
 
 const grassUniformFloats: Int = 28  # seven vec4 (GrassU: player/time, count/extent, cam, forward, ground, wind, blade)
 

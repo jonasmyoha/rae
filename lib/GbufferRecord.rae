@@ -30,10 +30,14 @@ func modelMatrixOf(t: view Transform3d) pub ret Mat4 {
 # draws. One DrawU record is `instanceRecordFloats` floats:
 #   [0..15]  model         [16..31] prevModel
 #   [32..34] albedo rgb    [35] metallic
-#   [36] roughness  [37] emissive-or-occlusion  [38] shading mode  [39] spare
+#   [36] roughness  [37] emissive-or-occlusion  [38] shading mode
+#   [39] palette base (skinned) / picture layer (sprite) / pattern (static)
+#   [40..43] fade: the dither threshold, 1 when the instance is fading IN (0:
+#            out), a per-prop seed, spare — all 0 for an instance not fading
+#            (app3d/PropField's level cross-fades, fade_dither.wgsl)
 # mirroring the C staging layout (GB_DRAW_FLOATS). Kept in one Rae place so a
 # caller never touches raw offsets.
-const instanceRecordFloats: Int = 40
+const instanceRecordFloats: Int = 44
 
 # Shading-mode field values, mirroring GB_MODE_* in the runtime. The 2-bit
 # field is stored as a Float in 0..1 so it survives the rgb10a2 target.
@@ -135,6 +139,33 @@ func packInstanceRecord(
   records.set(index: base + 37, value: encodeEmissive(emissive: emissive, toon: toon))
   records.set(index: base + 38, value: encodeMode(emissive: emissive, toon: toon))
   records.set(index: base + 39, value: paletteBase.toFloat())
+  records.set(index: base + 40, value: 0.0)
+  records.set(index: base + 41, value: 0.0)
+  records.set(index: base + 42, value: 0.0)
+  records.set(index: base + 43, value: 0.0)
+}
+
+# The fade of the record at instance `slot` (after packInstanceRecord): drawn
+# only where the screen's dither (fade_dither.wgsl) is at least `threshold`
+# when fading out, or below it when fading in, the dither offset by `seed`
+# (0..1, one per prop) so neighbours do not fade in step. A level fading out
+# and the next fading in with the same threshold and seed cover each pixel
+# exactly once.
+func setInstanceFade(
+  records: mod List(Float)
+  slot: view Int
+  threshold: view Float
+  fadingIn: view Bool
+  seed: view Float
+) {
+  let base: Int = slot * instanceRecordFloats
+  records.set(index: base + 40, value: threshold)
+  var side: Float = 0.0
+  if fadingIn {
+    side = 1.0
+  }
+  records.set(index: base + 41, value: side)
+  records.set(index: base + 42, value: seed)
 }
 
 # Write one mesh instance's surface attributes. Note what is NOT passed:

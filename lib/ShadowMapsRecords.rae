@@ -1,0 +1,114 @@
+# ShadowMaps' casters from instance batches: the records of an InstanceBatch
+# (GbufferRecord's DrawU layout) queued as static casters, each with its
+# level cross-fade, the fading ones under their own key and pipeline
+# (docs/tree-lod-design.md §2.3). Split from ShadowMaps for its size.
+open Scene3d
+open MeshStore
+open gpu/GpuResources
+open gpu/GpuIds
+open ShadowMaps
+
+# Many static casters of one mesh at once: the first `count` records of
+# `records`, `stride` floats each with the model matrix in the first 16 (an
+# InstanceBatch's DrawU records). The queue ends up exactly as one
+# shadowQueue call per record would leave it, but the models are copied
+# straight out of the batch the G-buffer draws, with no per-caster lookup or
+# matrix rebuild.
+func shadowQueueRecords(
+  shadow: mod ShadowCache
+  key: copy Int
+  vbuf: view BufferId
+  ibuf: view BufferId
+  icount: copy Int
+  records: view List(Float)
+  stride: view Int
+  count: view Int
+) {
+  if not shadow.enabled or icount < 1 {
+    ret
+  }
+  # The casters that are not fading first, then the fading ones (their own
+  # pipeline), so each kind stays one instanced run
+  loop var fading: Int = 0, fading < 2, ++fading {
+    loop var record: Int = 0, record < count and shadow.drawCount < shadowMaxDraws, ++record {
+      let base: Int = record * stride
+      let fades: Bool = records.copyAtFallback(index: base + 40, fallback: 0.0) > 0.0 or records.copyAtFallback(
+        index: base + 41
+        fallback: 0.0
+      ) > 0.5
+      if fades is not (fading is 1) {
+        continue
+      }
+      shadowQueueRecord(
+        shadow: shadow
+        key: key
+        vbuf: vbuf
+        ibuf: ibuf
+        icount: icount
+        records: records
+        base: base
+        fades: fades
+      )
+    }
+  }
+}
+
+# One record of shadowQueueRecords: its model and fade into the caster
+# floats, a fading one under the fade key
+func shadowQueueRecord(
+  shadow: mod ShadowCache
+  key: copy Int
+  vbuf: view BufferId
+  ibuf: view BufferId
+  icount: copy Int
+  records: view List(Float)
+  base: copy Int
+  fades: copy Bool
+) {
+  loop var i: Int = 0, i < 16, ++i {
+    shadow.modelFloats.add(value: records.copyAtFallback(index: base + i, fallback: 0.0))
+  }
+  loop var i: Int = 40, i < 44, ++i {
+    shadow.modelFloats.add(value: records.copyAtFallback(index: base + i, fallback: 0.0))
+  }
+  var casterKey: Int = key
+  if fades {
+    casterKey = key + shadowFadeKeyBit
+  }
+  shadow.paletteBaseRows.add(value: 0 as Int32)
+  shadow.casterKeys.add(value: casterKey)
+  shadow.casterVbufs.add(value: vbuf)
+  shadow.casterIbufs.add(value: ibuf)
+  shadow.casterIcounts.add(value: icount)
+  shadow.casterFirstIndices.add(value: 0)
+  shadow.drawCount = shadow.drawCount + 1
+}
+
+# drawShadowCaster for the first `count` records of an instance batch
+# (shadowQueueRecords).
+func drawShadowCasterRecords(
+  shadow: mod ShadowCache
+  meshes: view MeshStore
+  resources: view GpuResources
+  mesh: view MeshHandle
+  records: view List(Float)
+  stride: view Int
+  count: view Int
+) {
+  if count < 1 or not meshHandleIsValid(h: mesh) {
+    ret
+  }
+  if not meshStoreReady(store: meshes, resources: resources, mesh: mesh.id) {
+    ret
+  }
+  shadowQueueRecords(
+    shadow: shadow
+    key: mesh.id
+    vbuf: meshStoreVbuf(store: meshes, mesh: mesh.id)
+    ibuf: meshStoreIbuf(store: meshes, mesh: mesh.id)
+    icount: meshStoreIndexCount(store: meshes, mesh: mesh.id)
+    records: records
+    stride: stride
+    count: count
+  )
+}

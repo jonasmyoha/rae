@@ -42,7 +42,7 @@
  */
 
 #define GB_MAX_DRAWS   4096
-#define GB_DRAW_FLOATS 40   /* mat4 model + mat4 prevModel + vec4 albedo/metallic + vec4 rough/emissive/mode */
+#define GB_DRAW_FLOATS 44   /* mat4 model + mat4 prevModel + vec4 albedo/metallic + vec4 rough/emissive/mode + vec4 fade */
 #define GB_FRAME_BYTES 144  /* viewProj + prevViewProj + jitter (#390/#397) */
 
 /* Debug view selectors, mirrored by lib/gbuffer.rae. A G-buffer inspector

@@ -5,6 +5,8 @@ import Vec3
 open Scene3d
 open GbufferInstanced
 open app3d/PropField
+open app3d/PropFieldFrame
+open app3d/PropFade
 
 func check(label: view String, ok: view Bool) {
   if ok {
@@ -113,7 +115,10 @@ func main() ret Int {
     label: "a point past the field's edge goes to its edge cell"
     ok: propCellOf(field: field, x: 0.0, y: 120.0) is propCellOf(field: field, x: 0.0, y: 49.0)
   )
-  check(label: "the draw distance is the farthest level's", ok: field.drawDistance is 80.0)
+  check(
+    label: "the draw distance reaches the end of the farthest level's fade band (80 + 8 / 2)"
+    ok: field.drawDistance is 84.0
+  )
   check(label: "one batch per kind, level and part (3 + 1)", ok: field.batches.length is 4)
   check(
     label: "only the near level's batches cast shadows"
@@ -126,6 +131,27 @@ func main() ret Int {
   check(label: "15 m away: the near level", ok: propLodAt(kind: treeKind, distance: 15.0) is 0)
   check(label: "45 m away: the far level", ok: propLodAt(kind: treeKind, distance: 45.0) is 1)
   check(label: "past 80 m: not drawn", ok: propLodAt(kind: treeKind, distance: 90.0) is none)
+  # The cross-fades (app3d/PropFade): a band of 10% of a level's end, at least
+  # 4 m, centred on it; inside it the near level fades out and the next in
+  let whole: PropLodPick = propLodPickFrom(maxDistances: treeKind.lodEnds, distance: 15.0)
+  check(
+    label: "15 m away: the near level whole, no fade"
+    ok: whole.near is 0 and whole.far is -1 and whole.threshold is 0.0
+  )
+  let crossing: PropLodPick = propLodPickFrom(maxDistances: treeKind.lodEnds, distance: 30.0)
+  check(
+    label: "30 m away (band 28-32): the near level fading out, the far one in, halfway"
+    ok: crossing.near is 0 and crossing.far is 1 and crossing.threshold is 0.5
+  )
+  let leaving: PropLodPick = propLodPickFrom(maxDistances: treeKind.lodEnds, distance: 82.0)
+  check(
+    label: "82 m away (band 76-84): the last level fading out alone, three quarters"
+    ok: leaving.near is 1 and leaving.far is -1 and leaving.threshold is 0.75
+  )
+  check(
+    label: "past the last band: not drawn"
+    ok: propLodPickFrom(maxDistances: treeKind.lodEnds, distance: 85.0).near is -1
+  )
   # The eye 5 m behind the origin, 1.7 m up, looking down +y
   let camera: Camera3d = {
     position: Vec3.create(x: 0.0, y: -5.0, z: 1.7)
