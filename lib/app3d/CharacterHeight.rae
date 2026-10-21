@@ -40,6 +40,40 @@ func clipStrideScale(height: view Float, tunedHeight: view Float) ret Float {
   ret tunedHeight / height
 }
 
+# The ground speed (m/s) the walk and run clips' feet cover at rate 1 for a
+# character tunedHeight tall: how fast a planted foot moves back under the
+# hips, measured from walk.glb and run.glb (both in place). A character
+# moving at that speed shows its feet standing still on the ground.
+const walkClipGroundSpeed: Float = 1.59
+
+const runClipGroundSpeed: Float = 4.09
+
+# The playback scale that makes a walk, fast walk or run clip match the
+# character's real ground `speed`, so its feet do not slide: `rate` is the
+# clip's own rate (the fast walk is the walk clip at 1.6x) and `timeScale`
+# the speed setting the animation clock already runs at (Characters'
+# stepCharacterClock), both divided out. The height is not: strideClipRate
+# scales by it. 1.0 for the other clips.
+func groundSpeedClipScale(
+  clipIndex: view Int
+  speed: view Float
+  rate: view Float
+  timeScale: view Float
+) ret Float {
+  var clipSpeed: Float = 0.0
+  if clipIndex is ClipKind.walk or clipIndex is ClipKind.walkFast {
+    clipSpeed = walkClipGroundSpeed * rate
+  } else if clipIndex is ClipKind.run {
+    clipSpeed = runClipGroundSpeed * rate
+  }
+  if clipSpeed <= 0.0 or timeScale <= 0.0 {
+    ret 1.0
+  }
+  # Kept to a believable range: a clip blending in at a stop, or a sprint
+  # past the run clip's fastest, never freezes or blurs
+  ret Math.min(a: Math.max(a: speed / (clipSpeed * timeScale), b: 0.3), b: 2.5)
+}
+
 # A clip's playback `rate` for a character `height` tall: the walk, fast
 # walk and run clips by its stride, the others as they are
 func strideClipRate(

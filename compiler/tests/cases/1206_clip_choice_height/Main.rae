@@ -151,5 +151,74 @@ func main() ret Int {
     ) and short.radius is sample.radius and short.restLength is sample.restLength
     message: "At the tuned height the sample's mover; shorter, its top in proportion, its lower sphere the same"
   )
+  # ----- a walk or run plays as fast as the character really moves -----------
+  check(
+    condition: near(
+      a: groundSpeedClipScale(
+        clipIndex: walk
+        speed: walkClipGroundSpeed
+        rate: 1.0
+        timeScale: 1.0
+      )
+      b: 1.0
+    ) and near(
+      a: groundSpeedClipScale(
+        clipIndex: run
+        speed: runClipGroundSpeed * 1.5
+        rate: 1.0
+        timeScale: 1.0
+      )
+      b: 1.5
+    )
+    message: "At its clip's own ground speed a walk plays as authored; half as fast again, half as fast again"
+  )
+  check(
+    condition: near(
+      a: groundSpeedClipScale(
+        clipIndex: walkFast
+        speed: walkClipGroundSpeed * 1.6
+        rate: 1.6
+        timeScale: 1.0
+      )
+      b: 1.0
+    ) and near(
+      a: groundSpeedClipScale(
+        clipIndex: walk
+        speed: walkClipGroundSpeed * 2.0
+        rate: 1.0
+        timeScale: 2.0
+      )
+      b: 1.0
+    )
+    message: "The fast walk's own 1.6x and the clock's speed setting are not counted twice"
+  )
+  check(
+    condition: near(
+      a: groundSpeedClipScale(
+        clipIndex: walk
+        speed: 0.0
+        rate: 1.0
+        timeScale: 1.0
+      )
+      b: 0.3
+    ) and near(
+      a: groundSpeedClipScale(
+        clipIndex: run
+        speed: 50.0
+        rate: 1.0
+        timeScale: 1.0
+      )
+      b: 2.5
+    ) and near(
+      a: groundSpeedClipScale(
+        clipIndex: idle
+        speed: 3.0
+        rate: 1.0
+        timeScale: 1.0
+      )
+      b: 1.0
+    )
+    message: "Kept between 0.3x and 2.5x; idle and the other clips as they are"
+  )
   ret 0
 }
