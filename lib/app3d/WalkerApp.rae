@@ -122,6 +122,15 @@ const walkerGpuCapacityWithSea: Int = 288
 
 const walkerGpuCapacity: Int = 96
 
+# Is one of the walker's self-tests asked for (RAE_WALKER_PHYSICS_TEST,
+# RAE_WALKER_SPLASH_TEST, RAE_WALKER_LAYOUT_TEST)? They run instead of the
+# window loop and start from the scene's own start.
+func walkerSelfTestRequested() ret Bool {
+  ret Sys.getEnv(name: "RAE_WALKER_PHYSICS_TEST").length() > 0 or Sys.getEnv(
+    name: "RAE_WALKER_SPLASH_TEST"
+  ).length() > 0 or Sys.getEnv(name: "RAE_WALKER_LAYOUT_TEST").length() > 0
+}
+
 # ----- setup ---------------------------------------------------------------
 func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
   unsafe {
@@ -427,7 +436,11 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
     let headless: Bool = Sys.getEnv(name: "RAE_SDL_HEADLESS_MS").length() > 0 or Sys.getEnv(
       name: "RAE_HEADLESS_FRAMES"
     ).length() > 0
-    if not headless {
+    # A self-test starts from the scene's own start, never from a saved
+    # session: `rae run` keeps the state in .rae/apps/<app>/ (not the
+    # RAE_HOT_RELOAD_DIR a caller sets), and a hero restored somewhere else
+    # failed five of the physics checks on one machine only
+    if not headless and not walkerSelfTestRequested() {
       let saved: String = readHotReloadStateFor(appId: settings.appId)
       if restoreWalkerState(
         raw: saved
