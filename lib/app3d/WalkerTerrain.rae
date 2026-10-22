@@ -11,7 +11,12 @@
 # kind); when the walker crosses a cell border only the slots whose cell left
 # the window are placed again (the slots wrap, as the tiles do), so a stream
 # moves one row or column of props, not the whole window. A prop over water
-# is inactive and simply not gathered.
+# is inactive and simply not gathered. The entities (and the rocks' and
+# bushes' bodies) stream round the walker; what is DRAWN is a separate list
+# (drawnProps) of the same placements round what the camera looks at, so an
+# editor camera far from the walker still sees rocks and bushes. A cell's
+# props are a function of the cell, so where the two windows overlap they
+# are the same props.
 #
 # Each frame: gatherForest and gatherTerrainProps fill the batches once, then
 # the shadow pass (drawTerrainPropsShadow) and the scene pass
@@ -96,6 +101,14 @@ type TerrainProp {
   variant: Int
 }
 
+# One small prop as it is drawn: its kind, its rock shape (0 for the other
+# kinds) and its model matrix
+type DrawnProp {
+  kind: Int
+  variant: Int
+  model: Mat4
+}
+
 # A tree's species (app3d/GroveTrees), for a tree that is an entity (one
 # Box3D trunk per tree: app3d/IslandForest)
 type TreeVariant {
@@ -176,6 +189,11 @@ type WalkerTerrain {
   hasFarGround: Bool
   # The bush's three leaf tones
   bushParts: List(PropInstancer)
+  # The small props drawn: every placement of the window round the cell
+  # (drawCentreCellX, drawCentreCellY) the camera looks at (updateDrawnProps)
+  drawnProps: List(DrawnProp)
+  drawCentreCellX: Int
+  drawCentreCellY: Int
 }
 
 # The props in the window: one of each kind per cell
@@ -429,10 +447,11 @@ func updateInfiniteTerrain(
     cellX: Math.floor(x: groundFocus.x / terrainSystem.cellSize).toInt()
     cellY: Math.floor(x: groundFocus.y / terrainSystem.cellSize).toInt()
   )
+  let drawnMoved: Bool = updateDrawnProps(terrainSystem: terrainSystem, focus: groundFocus)
   let cellX: Int = Math.floor(x: propFocus.x / terrainSystem.cellSize).toInt()
   let cellY: Int = Math.floor(x: propFocus.y / terrainSystem.cellSize).toInt()
   if cellX is terrainSystem.centreCellX and cellY is terrainSystem.centreCellY {
-    ret groundMoved or nearMoved
+    ret groundMoved or nearMoved or drawnMoved
   }
   terrainSystem.centreCellX = cellX
   terrainSystem.centreCellY = cellY
@@ -480,14 +499,58 @@ func updateInfiniteTerrain(
   ret true
 }
 
+# The small props drawn round `focus` (what the camera looks at): every
+# kind's placement in every cell of the window, as the entities would be
+# placed there. Rebuilt only when `focus` crosses a cell border. True when
+# it was rebuilt.
+func updateDrawnProps(terrainSystem: mod WalkerTerrain, focus: view Vec3) ret Bool {
+  let centreX: Int = Math.floor(x: focus.x / terrainSystem.cellSize).toInt()
+  let centreY: Int = Math.floor(x: focus.y / terrainSystem.cellSize).toInt()
+  if centreX is terrainSystem.drawCentreCellX and centreY is terrainSystem.drawCentreCellY {
+    ret false
+  }
+  terrainSystem.drawCentreCellX = centreX
+  terrainSystem.drawCentreCellY = centreY
+  terrainSystem.drawnProps.clear()
+  let gridSide: Int = terrainSystem.gridSide
+  loop var row: Int = 0, row < gridSide, ++row {
+    loop var column: Int = 0, column < gridSide, ++column {
+      let cellX: Int = centreX - gridSide / 2 + column
+      let cellY: Int = centreY - gridSide / 2 + row
+      # The streamed kinds (kindRock .. kindGrassB, as createWalkerTerrain
+      # spawns them)
+      loop var kind: Int = kindRock, kind <= kindGrassB, ++kind {
+        let transform: Transform3D = kindTransform(
+          terrainSystem: terrainSystem
+          kind: kind
+          cellX: cellX
+          cellY: cellY
+        )
+        if worldPropAllowed(
+          x: transform.position.x
+          y: transform.position.y
+          minGrass: kindMinGrass(kind: kind)
+          cfg: terrainSystem.biome
+        ) {
+          var variant: Int = 0
+          if kind is kindRock {
+            variant = rockShapeAt(cellX: cellX, cellY: cellY)
+          }
+          terrainSystem.drawnProps.add(
+            value: { kind: kind, variant: variant, model: transform3dToMatrix(t: transform) }
+          )
+        }
+      }
+    }
+  }
+  ret true
+}
+
 # ----- draw ----------------------------------------------------------
 # Fill the small props' batches for this frame (before the shadow and scene
-# passes, which both draw them)
-func gatherTerrainProps(
-  terrainSystem: mod WalkerTerrain
-  propKinds: view ComponentTable(TerrainProp)
-  transforms: view ComponentTable(Transform3D)
-) {
+# passes, which both draw them), from the props drawn round the camera's
+# focus (drawnProps), not the walker's entities
+func gatherTerrainProps(terrainSystem: mod WalkerTerrain) {
   loop let part: mod PropInstancer in terrainSystem.rockParts {
     resetInstanceBatch(batch: part.batch)
   }
@@ -496,27 +559,22 @@ func gatherTerrainProps(
   loop let part: mod PropInstancer in terrainSystem.bushParts {
     resetInstanceBatch(batch: part.batch)
   }
-  loop var i: Int = 0, i < componentCount(this: propKinds), ++i {
-    let entityId: EntityId = componentEntityAt(this: propKinds, i: i)
-    let prop: view TerrainProp = queryViewAt(table: propKinds, denseIndex: i)
-    if prop.active {
-      let model: Mat4 = transform3dToMatrix(t: componentView(this: transforms, entityId: entityId))
-      if prop.kind is kindRock {
-        if let rockPart: mod PropInstancer = terrainSystem.rockParts.modAt(index: prop.variant) {
-          addPropInstance(prop: rockPart, model: model)
-        }
+  loop let prop: view DrawnProp in terrainSystem.drawnProps {
+    if prop.kind is kindRock {
+      if let rockPart: mod PropInstancer = terrainSystem.rockParts.modAt(index: prop.variant) {
+        addPropInstance(prop: rockPart, model: prop.model)
       }
-      if prop.kind is kindBush {
-        loop let part: mod PropInstancer in terrainSystem.bushParts {
-          addPropInstance(prop: part, model: model)
-        }
+    }
+    if prop.kind is kindBush {
+      loop let part: mod PropInstancer in terrainSystem.bushParts {
+        addPropInstance(prop: part, model: prop.model)
       }
-      if prop.kind is kindFlower {
-        addPropInstance(prop: terrainSystem.flowerProp, model: model)
-      }
-      if prop.kind is kindGrassA or prop.kind is kindGrassB {
-        addPropInstance(prop: terrainSystem.grassProp, model: model)
-      }
+    }
+    if prop.kind is kindFlower {
+      addPropInstance(prop: terrainSystem.flowerProp, model: prop.model)
+    }
+    if prop.kind is kindGrassA or prop.kind is kindGrassB {
+      addPropInstance(prop: terrainSystem.grassProp, model: prop.model)
     }
   }
 }
@@ -826,5 +884,8 @@ func createWalkerTerrain(
     farGround: own farGround
     hasFarGround: hasFarGround
     bushParts: own createBushParts(renderer: renderer, capacity: cellCount)
+    drawnProps: List.create(DrawnProp, cap: cellCount * 5)
+    drawCentreCellX: 1000000000
+    drawCentreCellY: 1000000000
   }
 }
