@@ -98,9 +98,10 @@ func impostorTextureUsage() ret UInt64 {
   ret WGPUTextureUsage_RenderAttachment + WGPUTextureUsage_TextureBinding + WGPUTextureUsage_StorageBinding + WGPUTextureUsage_CopySrc
 }
 
-# The view pass's pipeline: the mesh store's vertices (position, normal; 32
-# bytes each), two colour targets, a depth test
-func impostorBakePipelineSpec() ret RenderPipelineSpec {
+# The view pass's pipeline: the mesh store's vertices (position, normal
+# first; `vertexStride` bytes each: 32, or 48 for a leaf mesh with its wind
+# pivots, lib/FoliageMesh), two colour targets, a depth test
+func impostorBakePipelineSpec(vertexStride: view Int) ret RenderPipelineSpec {
   var attributes: List(VertexAttributeSpec) = List.create(VertexAttributeSpec, cap: 2)
   attributes.add(value: { format: WGPUVertexFormat_Float32x3, offset: 0, location: 0 })
   attributes.add(value: { format: WGPUVertexFormat_Float32x3, offset: 12, location: 1 })
@@ -108,7 +109,7 @@ func impostorBakePipelineSpec() ret RenderPipelineSpec {
   colorFormats.add(value: impostorFormat)
   colorFormats.add(value: impostorFormat)
   ret RenderPipelineSpec {
-    vertexStride: 32
+    vertexStride: vertexStride
     attributes: own attributes
     colorFormats: own colorFormats
     alphaBlend: false
@@ -366,29 +367,46 @@ func recordImpostorViews(
   )) {
     ret false
   }
+  # One pipeline for ordinary meshes (32-byte vertices) and one for leaf
+  # meshes (48 bytes: lib/FoliageMesh); the same shader and buffers. Read
+  # with the wrong stride, a leaf mesh bakes as garbage.
   var pipeline: RenderPipelineId = noRenderPipelineId()
-  if let made: RenderPipelineId = createRenderPipeline(
-    resources: resources
-    shader: shader(files: ["lib/impostor_octahedral.wgsl", "lib/impostor_bake.wgsl"])
-    vertexEntry: "vs"
-    fragmentEntry: "fs"
-    spec: impostorBakePipelineSpec()
-  ) {
-    pipeline = made
-    scratch.renderPipelines.add(value: made)
-  }
-  var entries: List(ResourceRef) = List.create(ResourceRef, cap: 3)
-  entries.add(value: bufferRef(id: uniformBuffer))
-  entries.add(value: bufferRef(id: partsBuffer))
-  entries.add(value: bufferRef(id: framesBuffer))
   var bindGroup: BindGroupId = noBindGroupId()
-  if let made: BindGroupId = createRenderBindGroup(
-    resources: resources
-    pipeline: pipeline
-    entries: entries
-  ) {
-    bindGroup = made
-    scratch.bindGroups.add(value: made)
+  var foliagePipeline: RenderPipelineId = noRenderPipelineId()
+  var foliageBindGroup: BindGroupId = noBindGroupId()
+  loop var variant: Int = 0, variant < 2, ++variant {
+    let stride: Int = 32 + variant * 16
+    var made: RenderPipelineId = noRenderPipelineId()
+    if let created: RenderPipelineId = createRenderPipeline(
+      resources: resources
+      shader: shader(files: ["lib/impostor_octahedral.wgsl", "lib/impostor_bake.wgsl"])
+      vertexEntry: "vs"
+      fragmentEntry: "fs"
+      spec: impostorBakePipelineSpec(vertexStride: stride)
+    ) {
+      made = created
+      scratch.renderPipelines.add(value: created)
+    }
+    var entries: List(ResourceRef) = List.create(ResourceRef, cap: 3)
+    entries.add(value: bufferRef(id: uniformBuffer))
+    entries.add(value: bufferRef(id: partsBuffer))
+    entries.add(value: bufferRef(id: framesBuffer))
+    var group: BindGroupId = noBindGroupId()
+    if let created: BindGroupId = createRenderBindGroup(
+      resources: resources
+      pipeline: made
+      entries: entries
+    ) {
+      group = created
+      scratch.bindGroups.add(value: created)
+    }
+    if stride is 32 {
+      pipeline = made
+      bindGroup = group
+    } else {
+      foliagePipeline = made
+      foliageBindGroup = group
+    }
   }
   var depthView: TextureViewId = noTextureViewId()
   if let depth: TextureId = createTexture(
@@ -478,12 +496,18 @@ func recordImpostorViews(
             resources: resources
             mesh: mesh.id
           )
+          var partPipeline: RenderPipelineId = pipeline
+          var partBindGroup: BindGroupId = bindGroup
+          if meshStoreHasFoliage(store: meshes, mesh: mesh.id) {
+            partPipeline = foliagePipeline
+            partBindGroup = foliageBindGroup
+          }
           if indexCount > 0 and vertexBuffer is not webgpuNull() {
             let drawn: Bool = recordDrawIndexedInPass(
               resources: resources
               pass: pass
-              pipeline: pipeline
-              bindGroup: bindGroup
+              pipeline: partPipeline
+              bindGroup: partBindGroup
               vertexBuffer: vertexBuffer
               indexBuffer: indexBuffer
               indexCount: indexCount
@@ -500,6 +524,8 @@ func recordImpostorViews(
   }
   recordRenderPipelineUse(recording: recording, resources: resources, id: pipeline)
   recordBindGroupUse(recording: recording, resources: resources, id: bindGroup)
+  recordRenderPipelineUse(recording: recording, resources: resources, id: foliagePipeline)
+  recordBindGroupUse(recording: recording, resources: resources, id: foliageBindGroup)
   ret true
 }
 

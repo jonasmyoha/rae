@@ -9,7 +9,10 @@
 # normal and depth at level 0, and the albedo of every mip. Then a far canopy
 # (lib/CanopyBake, step 6) of four 40 m cells of these trees, from their
 # impostors: the same coverage check over its mips, and its first layer
-# (the cells' pages) as PNGs.
+# (the cells' pages) as PNGs. Last, every species baked again with its leaf
+# meshes in the 48-byte leaf layout (lib/FoliageMesh, as the walker uploads
+# them) must cover its layer as the 32-byte bake does: a pipeline that reads
+# them with the wrong vertex size bakes garbage squares.
 # Exit code 0 = every check passed.
 import Math
 import Sys
@@ -24,6 +27,7 @@ open gpu/GpuRenderTransfer
 open Scene3d
 open Mesh3d
 open MeshStore
+open FoliageMesh
 open ImpostorAtlas
 open ImpostorBake
 open ImpostorMips
@@ -41,6 +45,99 @@ func speciesName(species: view Int) ret String {
 }
 
 # The RGBA bytes of one level of one layer, rows packed (width * 4 bytes)
+# Level 0's coverage of every layer of `atlas`
+func levelZeroCoverage(
+  resources: mod GpuResources
+  atlas: view ImpostorAtlas
+  settings: view ImpostorSettings
+) ret List(Float) {
+  var shares: List(Float) = List.create(Float, cap: atlas.layers)
+  loop var layer: Int = 0, layer < atlas.layers, ++layer {
+    let albedo: List(UInt8) = readLevel(
+      resources: resources
+      texture: atlas.albedoTexture
+      mip: 0
+      layer: layer
+      size: impostorLevelSize(settings: settings, level: 0)
+      tall: impostorLevelHeight(settings: settings, level: 0)
+    )
+    shares.add(value: coverage(pixels: albedo, cutoff: spriteCutoff))
+  }
+  ret shares
+}
+
+# Every species baked with its leaf meshes in the 48-byte leaf layout covers
+# its layer within 1% of `plain`, the 32-byte bake's coverage. The number of
+# species that do not.
+func checkFoliageLayout(
+  resources: mod GpuResources
+  store: mod MeshStore
+  settings: view ImpostorSettings
+  plain: view List(Float)
+) ret Int {
+  var subjects: List(ImpostorSubject) = List.create(ImpostorSubject, cap: treeSpeciesCount)
+  var leafMeshes: Int = 0
+  loop var species: Int = 0, species < treeSpeciesCount, ++species {
+    let meshes: List(MeshData) = speciesLevelMeshes(
+      species: species
+      patches: nearPatches
+      leaves: nearLeaves
+    )
+    var handles: List(MeshHandle) = List.create(MeshHandle, cap: meshes.length)
+    loop let mesh: view MeshData in meshes {
+      if mesh.windPivots.length > 0 {
+        leafMeshes = leafMeshes + 1
+        handles.add(value: uploadFoliageMesh(store: store, resources: resources, mesh: mesh))
+      } else {
+        handles.add(value: meshStoreUpload(
+          store: store
+          resources: resources
+          verts: mesh.verts
+          vertCount: mesh.vertCount
+          indices: mesh.indices
+        ))
+      }
+    }
+    subjects.add(
+      value: impostorSubject(
+        parts: meshes
+        meshes: handles
+        albedos: speciesAlbedos(species: species)
+      )
+    )
+  }
+  var atlas: ImpostorAtlas = bakeImpostorAtlas(
+    resources: resources
+    meshes: store
+    subjects: subjects
+    settings: settings
+    cutoff: spriteCutoff
+  )
+  let shares: List(Float) = levelZeroCoverage(
+    resources: resources
+    atlas: atlas
+    settings: settings
+  )
+  var failures: Int = 0
+  if leafMeshes is 0 or atlas.layers is not treeSpeciesCount {
+    failures = 1
+  }
+  loop var species: Int = 0, species < atlas.layers, ++species {
+    let leaf: Float = shares.copyAtFallback(index: species, fallback: 0.0)
+    let ordinary: Float = plain.copyAtFallback(index: species, fallback: 0.0)
+    let same: Bool = Math.abs(value: leaf - ordinary) <= 0.01
+    if not same {
+      failures = failures + 1
+    }
+    log(
+      "{speciesName(species: species)}: leaf layout covers {(leaf * 1000.0).toInt()} per mille, the 32-byte bake {(ordinary * 1000.0).toInt()} ={same}"
+    )
+  }
+  log("leaf layout: {leafMeshes} leaf meshes baked with their 48-byte vertices")
+  retireImpostorAtlas(atlas: atlas, resources: resources)
+  ret failures
+}
+
 func readLevel(
   resources: mod GpuResources
   texture: view TextureId
@@ -406,6 +503,17 @@ func main() ret Int {
       )
     }
     failures = failures + checkCanopy(resources: resources, trees: atlas.binding, folder: folder)
+    let plain: List(Float) = levelZeroCoverage(
+      resources: resources
+      atlas: atlas
+      settings: settings
+    )
+    failures = failures + checkFoliageLayout(
+      resources: resources
+      store: store
+      settings: settings
+      plain: plain
+    )
     log("pictures written to {folder}")
     retireImpostorAtlas(atlas: atlas, resources: resources)
     meshStoreShutdown(store: store, resources: resources)

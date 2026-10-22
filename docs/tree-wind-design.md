@@ -11,8 +11,17 @@ The structural/branch hierarchy below remains a later refinement.
   ordinary meshes retain their 32-byte layout. No extra per-leaf draws or
   per-frame mesh uploads are introduced.
 - The shader rotates each patch intact, with its shading normal, about its
-  centre. Wind response is small between gusts and stronger during passing
-  gusts. The angle is bounded to 0.14 radians. It has no crown translation.
+  centre. In a steady breeze (strength 1) a patch turns about 6 degrees each
+  way, in a passing gust about 15 degrees and leans a little downwind; the
+  angle is bounded to 0.35 radians. It has no crown translation. (The first
+  version turned under 1 degree between gusts and was bounded to 0.14
+  radians: a leaf moved a few millimetres and the wind could not be seen,
+  2026-10-22.)
+- Every mesh baked into an impostor or drawn by another pipeline must be read
+  with its own vertex size: the impostor bake (lib/ImpostorBake.rae) has a
+  32-byte and a 48-byte pipeline and picks one per mesh with
+  meshStoreHasFoliage. One 32-byte pipeline read the leaf meshes' 48-byte
+  vertices as garbage, and every billboard came out as broken squares.
 - Forest cypress and umbrella foliage have lower flexibility. Spruce skirts,
   wood and other meshes without leaf metadata stay rigid. This deliberately
   removes the old spatial wobble from those shapes; it is not branch simulation.

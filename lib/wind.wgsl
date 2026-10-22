@@ -54,11 +54,15 @@ fn windLeaf(world: vec3<f32>, normal: vec3<f32>, pivot: vec3<f32>, foot: vec3<f3
   let direction = wind.xy / strength;
   let phase = windHash(pivot.xy + vec2<f32>(pivot.z * 0.71, pivot.z * 0.37)) * 6.2831853;
   let gust = windGustAt(foot.xy, wind);
-  // Quiet between passing gusts. Small turning leaves, not bobbing crowns.
-  let activity = 0.12 + clamp(wind.z, 0.0, 1.0) * gust;
-  let response = sin(wind.w * 2.1 + phase) * 0.65
-               + sin(wind.w * 3.7 + phase * 1.43) * 0.35;
-  let angle = clamp(flexibility * min(strength, 2.0) * (0.025 * gust + 0.10 * activity * response), -0.14, 0.14);
+  // Turning leaf patches, not bobbing crowns: in a steady breeze (strength
+  // 1) a patch turns about 6 degrees each way, in a gust about 15, and a
+  // gust also leans it downwind a little. Smaller angles (under 1 degree
+  // between gusts) moved a leaf a few millimetres and could not be seen.
+  let activity = 0.45 + 0.55 * clamp(wind.z, 0.0, 1.0) * gust;
+  let response = sin(wind.w * 2.1 + phase) * 0.5
+               + sin(wind.w * 3.7 + phase * 1.43) * 0.3
+               + sin(wind.w * 6.3 + phase * 2.17) * 0.2;
+  let angle = clamp(flexibility * min(strength, 2.0) * (0.08 * gust + 0.22 * activity * response), -0.35, 0.35);
   let axis = normalize(vec3<f32>(-direction.y, direction.x, 0.25 * sin(phase)));
   result.position = pivot + windRotate(world - pivot, axis, angle);
   result.normal = windRotate(normal, axis, angle);
