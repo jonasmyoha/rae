@@ -333,22 +333,23 @@ fn impostorOnPicture(local: vec2<f32>) -> f32 {
 // not where the view drew them, so a cluster seen between two views keeps
 // its trees. `albedo.a` is 1 on a hit, else 0.
 const impostorMarchSteps: u32 = 12u;
+// Halvings that find where the ray enters the prop between two steps
+const impostorMarchHalvings: u32 = 3u;
 
-// How far (depth units) a point of the ray is behind the surface a view
-// baked where it falls: negative in front of it, or where nothing is
-fn impostorBehind(
-  cell: vec2<f32>, spot: vec3<f32>, viewDirection: vec3<f32>, extents: vec3<f32>, layer: i32,
-  page: vec4<f32>, lod: f32, threshold: f32,
-) -> f32 {
-  let local = vec2<f32>(dot(spot, impostorRight(viewDirection)) / extents.x, dot(spot, impostorUp(viewDirection)) / extents.y);
-  let uv = impostorPageUv(page.xyz, impostorAtlasUv(cell, S.b.z, local));
+// What a view baked at atlas point `uv`, for a point of the ray at depth
+// `depth` (toward the view's eye, depth units): how far the point is behind
+// the surface there, and how deep the prop is there (both impostorEmpty
+// where nothing is)
+const impostorEmpty: f32 = -1000.0;
+fn impostorBehind(uv: vec2<f32>, depth: f32, layer: i32, lod: f32, threshold: f32) -> vec2<f32> {
   let alpha = textureSampleLevel(spriteTex, spriteSamp, uv, layer, lod).a;
   if (alpha < threshold) {
-    return -1.0;
+    return vec2<f32>(impostorEmpty);
   }
-  let surface = impostorDepthOf(textureSampleLevel(impostorNormalDepth, spriteSamp, uv, layer, lod), alpha);
-  return surface - dot(spot, viewDirection) / extents.z;
+  let normalDepth = textureSampleLevel(impostorNormalDepth, spriteSamp, uv, layer, lod);
+  return vec2<f32>(impostorDepthOf(normalDepth, alpha) - depth, impostorThicknessOf(normalDepth, alpha));
 }
+
 fn impostorMarch(
   cell: vec2<f32>, point: vec3<f32>, eye: vec3<f32>, box: vec4<f32>, layer: i32, page: vec4<f32>,
   lod: f32, threshold: f32,
@@ -395,39 +396,59 @@ fn impostorMarch(
   if (anything <= 0.0) {
     return tap;
   }
+  // The ray's atlas point and depth are linear in t: worked out once
+  let uvAt = impostorPageUv(page.xyz, impostorAtlasUv(cell, views, vec2<f32>(dot(point, right) / extents.x, dot(point, up) / extents.y)));
+  let uvMoved = impostorPageUv(page.xyz, impostorAtlasUv(cell, views, vec2<f32>(dot(point + away, right) / extents.x, dot(point + away, up) / extents.y)));
+  let uvPerT = uvMoved - uvAt;
+  let depthAt = dot(point, viewDirection) / extents.z;
+  let depthPerT = dot(away, viewDirection) / extents.z;
   // From the front, the first step that is behind the surface baked where
-  // it falls; then halve back to where the ray crosses that surface, and
-  // keep it if it lies within the depth baked there
+  // it falls. In the prop (within the depth baked there): a hit. Behind it:
+  // halve back to where the ray crosses into the prop's picture or through
+  // its surface, and keep that if it lies within the depth baked there;
+  // else go on past (behind that prop, not in it)
   var front = enter;
+  var hit = -1000.0;
   for (var marched = 0u; marched < steps; marched = marched + 1u) {
     let t = mix(enter, leave, (f32(marched) + 1.0) / f32(steps));
-    if (impostorBehind(cell, point + away * t, viewDirection, extents, layer, page, lod, threshold) < 0.0) {
+    var inside = impostorBehind(uvAt + uvPerT * t, depthAt + depthPerT * t, layer, lod, threshold);
+    if (inside.x < 0.0) {
       front = t;
       continue;
     }
-    var back = t;
-    for (var halving = 0u; halving < 5u; halving = halving + 1u) {
-      let middle = (front + back) * 0.5;
-      if (impostorBehind(cell, point + away * middle, viewDirection, extents, layer, page, lod, threshold) < 0.0) {
-        front = middle;
-      } else {
-        back = middle;
-      }
-    }
-    let spot = point + away * back;
-    let local = vec2<f32>(dot(spot, right) / extents.x, dot(spot, up) / extents.y);
-    let uv = impostorPageUv(page.xyz, impostorAtlasUv(cell, views, local));
-    let normalDepth = textureSampleLevel(impostorNormalDepth, spriteSamp, uv, layer, lod);
-    let albedo = textureSampleLevel(spriteTex, spriteSamp, uv, layer, lod);
-    let behind = impostorDepthOf(normalDepth, albedo.a) - dot(spot, viewDirection) / extents.z;
-    if (behind <= impostorThicknessOf(normalDepth, albedo.a) + 0.02) {
-      tap.albedo = vec4<f32>(albedo.rgb, 1.0);
-      tap.normal = impostorUnpackNormal(normalDepth.xy);
-      tap.position = spot;
+    // Already in the prop: taken as it is (no halving needed to say so)
+    if (inside.x <= inside.y + 0.02) {
+      hit = t;
       break;
     }
-    // Behind the prop there, not in it: go on past
+    var low = front;
+    var high = t;
+    for (var halving = 0u; halving < impostorMarchHalvings; halving = halving + 1u) {
+      let middle = (low + high) * 0.5;
+      let probe = impostorBehind(uvAt + uvPerT * middle, depthAt + depthPerT * middle, layer, lod, threshold);
+      if (probe.x < 0.0) {
+        low = middle;
+      } else {
+        high = middle;
+        inside = probe;
+      }
+    }
+    // How far into the prop the ray may already be at `high`: the depth
+    // the interval left after the halvings spans
+    let unsure = (high - low) * abs(depthPerT);
+    if (inside.x <= inside.y + unsure + 0.02) {
+      hit = high;
+      break;
+    }
     front = t;
+  }
+  if (hit > -1000.0) {
+    let spot = point + away * hit;
+    let local = vec2<f32>(dot(spot, right) / extents.x, dot(spot, up) / extents.y);
+    let uv = impostorPageUv(page.xyz, impostorAtlasUv(cell, views, local));
+    tap.albedo = vec4<f32>(textureSampleLevel(spriteTex, spriteSamp, uv, layer, lod).rgb, 1.0);
+    tap.normal = impostorUnpackNormal(textureSampleLevel(impostorNormalDepth, spriteSamp, uv, layer, lod).xy);
+    tap.position = spot;
   }
   return tap;
 }

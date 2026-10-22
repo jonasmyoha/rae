@@ -9,7 +9,9 @@
 # canopy's views, must agree within canopyTolerance (phoneTolerance with
 # RAE_IMPOSTOR_PHONE=1). Before clusters marched their views, they kept
 # 0-77% of their trees here.
-# RAE_IMPOSTOR_PHONE=1 checks the phone settings. Exit code 0 = passed.
+# RAE_IMPOSTOR_PHONE=1 checks the phone settings. RAE_CANOPY_BENCH=1 times
+# a whole far forest of clusters on the GPU instead (benchCanopy): the
+# measure for the march's cost, steady where the app's frame time is not. Exit code 0 = passed.
 import Math
 import Sys
 import Vec3
@@ -173,6 +175,29 @@ func coveredPixels(
   eye: view Vec3
   target: view Vec3
 ) ret Int {
+  ret drawPicture(
+    resources: resources
+    picture: picture
+    binding: binding
+    batch: batch
+    eye: eye
+    target: target
+    frames: 1
+  )
+}
+
+# Draw `batch` from `binding`'s atlas with the eye at `eye` looking at
+# `target`: once, then the pixels it covers; or `frames` times over (more
+# than 1), then the GPU's microseconds a frame (the bench)
+func drawPicture(
+  resources: mod GpuResources
+  picture: view Picture
+  binding: view ImpostorBinding
+  batch: view InstanceBatch
+  eye: view Vec3
+  target: view Vec3
+  frames: view Int
+) ret Int {
   let look: Mat4 = mat4LookAt(
     eyeX: eye.x
     eyeY: eye.y
@@ -254,6 +279,7 @@ func coveredPixels(
   entries.add(value: textureViewRef(id: binding.normalDepth))
   entries.add(value: bufferRef(id: binding.frames))
   var covered: Int = -1
+  var pending: List(SubmissionId) = List.create(SubmissionId, cap: frames)
   if let bindGroup: BindGroupId = createRenderBindGroup(
     resources: resources
     pipeline: picture.pipeline
@@ -277,45 +303,62 @@ func coveredPixels(
       clearValue: 0.0
       readOnly: false
     )
-    if var recording: Recording = beginRecording(resources: resources) {
-      var drawn: Bool = false
-      unsafe {
-        let pass: Ptr = beginRenderPassMulti(
-          recording: recording
-          resources: resources
-          targets: targets
-        )
-        if pass is not webgpuNull() {
-          drawn = recordDrawInPass(
+    let started: Int = nowNs()
+    loop var frame: Int = 0, frame < frames, ++frame {
+      if var recording: Recording = beginRecording(resources: resources) {
+        var drawn: Bool = false
+        unsafe {
+          let pass: Ptr = beginRenderPassMulti(
+            recording: recording
             resources: resources
-            pass: pass
-            pipeline: picture.pipeline
-            bindGroup: bindGroup
-            vertexCount: 6
-            instanceCount: batch.count
-            firstVertex: 0
-            firstInstance: 0
+            targets: targets
           )
-          endRenderPass(pass: pass)
+          if pass is not webgpuNull() {
+            drawn = recordDrawInPass(
+              resources: resources
+              pass: pass
+              pipeline: picture.pipeline
+              bindGroup: bindGroup
+              vertexCount: 6
+              instanceCount: batch.count
+              firstVertex: 0
+              firstInstance: 0
+            )
+            endRenderPass(pass: pass)
+          }
+        }
+        recordRenderPipelineUse(recording: recording, resources: resources, id: picture.pipeline)
+        recordBindGroupUse(recording: recording, resources: resources, id: bindGroup)
+        # The albedo target: alpha 1 (the roughness) where a fragment was kept
+        var copied: Bool = true
+        if frames is 1 {
+          copied = recordCopyTextureToBuffer(
+            recording: recording
+            resources: resources
+            texture: picture.textures.copyAtFallback(index: 1, fallback: noTextureId())
+            buffer: picture.pixels
+            bytesPerRow: pictureWidth * 4
+          )
+        }
+        if drawn and copied {
+          if let submission: SubmissionId = submit(resources: resources, recording: recording) {
+            if frames is 1 or frame is frames - 1 {
+              let done: Bool = waitSubmission(resources: resources, id: submission)
+            }
+            pending.add(value: submission)
+          }
         }
       }
-      recordRenderPipelineUse(recording: recording, resources: resources, id: picture.pipeline)
-      recordBindGroupUse(recording: recording, resources: resources, id: bindGroup)
-      # The albedo target: alpha 1 (the roughness) where a fragment was kept
-      let copied: Bool = recordCopyTextureToBuffer(
-        recording: recording
-        resources: resources
-        texture: picture.textures.copyAtFallback(index: 1, fallback: noTextureId())
-        buffer: picture.pixels
-        bytesPerRow: pictureWidth * 4
-      )
-      if drawn and copied {
-        if let submission: SubmissionId = submit(resources: resources, recording: recording) {
-          let done: Bool = waitSubmission(resources: resources, id: submission)
-          let retired: Bool = retireSubmission(resources: resources, id: submission)
-          covered = countCovered(resources: resources, pixels: picture.pixels)
-        }
-      }
+    }
+    let elapsed: Int = nowNs() - started
+    loop let submission: view SubmissionId in pending {
+      let done: Bool = waitSubmission(resources: resources, id: submission)
+      let retired: Bool = retireSubmission(resources: resources, id: submission)
+    }
+    if frames is 1 {
+      covered = countCovered(resources: resources, pixels: picture.pixels)
+    } else {
+      covered = elapsed / 1000 / frames
     }
     let bindRetired: Bool = retireBindGroup(resources: resources, id: bindGroup)
   }
@@ -460,6 +503,15 @@ func main() ret Int {
       ret 1
     }
     let picture: Picture = createPicture(resources: resources)
+    if Sys.getEnv(name: "RAE_CANOPY_BENCH") is "1" {
+      benchCanopy(
+        resources: resources
+        picture: picture
+        canopy: canopy.binding
+        clusters: clusters
+      )
+      ret 0
+    }
     var distances: List(Float) = List.create(Float, cap: 2)
     distances.add(value: 150.0)
     distances.add(value: 700.0)
@@ -555,4 +607,97 @@ func speciesNames(species: view Int) ret String {
     sep: " "
   )
   ret names.copyAtFallback(index: species, fallback: "species")
+}
+
+# RAE_CANOPY_BENCH=1: the GPU time of a whole far forest of clusters (a
+# 30 x 30 grid of 40 m cells, the species in turn; those nearer than the
+# canopy's start left out, the rest drawn nearest first, as
+# app3d/FarCanopy draws them), from 500 m outside it low and from 28 m up
+# in its middle, with each view marched and with the views read at their
+# planes (the march's own cost is the difference)
+func benchCanopy(
+  resources: mod GpuResources
+  picture: view Picture
+  canopy: view ImpostorBinding
+  clusters: view List(CanopyCluster)
+) {
+  var eyes: List(Vec3) = List.create(Vec3, cap: 2)
+  var targets: List(Vec3) = List.create(Vec3, cap: 2)
+  eyes.add(value: Vec3.create(x: 600.0, y: -500.0, z: 40.0))
+  targets.add(value: Vec3.create(x: 600.0, y: 600.0, z: 10.0))
+  eyes.add(value: Vec3.create(x: 600.0, y: 600.0, z: 28.0))
+  targets.add(value: Vec3.create(x: 600.0, y: 1200.0, z: 0.0))
+  var unmarched: ImpostorBinding = canopy
+  unmarched.marchViews = false
+  loop var seen: Int = 0, seen < eyes.length, ++seen {
+    let eye: Vec3 = eyes.copyAtDefault(index: seen)
+    let batch: InstanceBatch = benchForest(eye: eye, clusters: clusters)
+    var times: List(Int) = List.create(Int, cap: 2)
+    loop var marched: Int = 0, marched < 2, ++marched {
+      var binding: ImpostorBinding = canopy
+      if marched is 0 {
+        binding = unmarched
+      }
+      let warm: Int = drawPicture(
+        resources: resources
+        picture: picture
+        binding: binding
+        batch: batch
+        eye: eye
+        target: targets.copyAtDefault(index: seen)
+        frames: 5
+      )
+      times.add(value: drawPicture(
+        resources: resources
+        picture: picture
+        binding: binding
+        batch: batch
+        eye: eye
+        target: targets.copyAtDefault(index: seen)
+        frames: 40
+      ))
+    }
+    log(
+      "bench seen {seen}: {batch.count} clusters, unmarched {times.copyAtFallback(
+        index: 0
+        fallback: 0
+      )} us, marched {times.copyAtFallback(index: 1, fallback: 0)} us a frame"
+    )
+  }
+}
+
+# The bench forest's clusters seen from `eye`, nearest first
+func benchForest(eye: view Vec3, clusters: view List(CanopyCluster)) ret InstanceBatch {
+  var keys: List(Int) = List.create(Int, cap: 900)
+  loop var row: Int = 0, row < 30, ++row {
+    loop var column: Int = 0, column < 30, ++column {
+      let x: Float = column.toFloat() * 40.0 + 20.0
+      let y: Float = row.toFloat() * 40.0 + 20.0
+      let distance: Float = Vec3.vlen(a: Vec3.vsub(a: Vec3.create(x: x, y: y, z: 8.0), b: eye))
+      if distance < 270.0 {
+        continue
+      }
+      keys.add(value: (distance * 10.0).toInt() * 1024 + row * 30 + column)
+    }
+  }
+  keys.sort()
+  var batch: InstanceBatch = createInstanceBatch(mesh: meshHandleNone(), capacity: keys.length)
+  loop let key: view Int in keys {
+    let cell: Int = key % 1024
+    let species: Int = (cell * 7 + cell / 30) % clusters.length
+    let cluster: CanopyCluster = clusters.copyAtDefault(index: species)
+    addSpriteInstance(
+      batch: batch
+      position: Vec3.create(
+        x: (cell % 30).toFloat() * 40.0 + 20.0
+        y: (cell / 30).toFloat() * 40.0 + 20.0
+        z: cluster.centre.z
+      )
+      height: 1.0
+      yaw: 0.0
+      layer: species
+      toon: true
+    )
+  }
+  ret batch
 }
