@@ -114,10 +114,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let gy = i / side;
   let extent = G.b.y;
   let spacing = extent / f32(side);
-  let playerCellX = i32(floor(G.a.x / spacing));
-  let playerCellY = i32(floor(G.a.y / spacing));
-  let worldCellX = playerCellX + i32(gx) - i32(side) / 2;
-  let worldCellY = playerCellY + i32(gy) - i32(side) / 2;
+  // The grid's centre: what the camera looks at (G.a.xy)
+  let centreCellX = i32(floor(G.a.x / spacing));
+  let centreCellY = i32(floor(G.a.y / spacing));
+  let worldCellX = centreCellX + i32(gx) - i32(side) / 2;
+  let worldCellY = centreCellY + i32(gy) - i32(side) / 2;
   let cellX = f32(worldCellX) * spacing;
   let cellY = f32(worldCellY) * spacing;
   let cellI = vec2<i32>(worldCellX, worldCellY);
@@ -143,9 +144,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let hWidth = hash2u(cellI, 71u);
   let baseHeight = (0.30 + hHeight * 0.40) * G.g.x;
   let width = (0.055 + hWidth * 0.045) * G.g.y;
-  let distToPlayer = distance(vec2<f32>(bx, by), G.a.xy);
+  let distToCentre = distance(vec2<f32>(bx, by), G.a.xy);
   let radius = extent * 0.5;
-  let edgeFade = 1.0 - smoothstep(radius * 0.6, radius * 0.98, distToPlayer);
+  let edgeFade = 1.0 - smoothstep(radius * 0.6, radius * 0.98, distToCentre);
   let height = baseHeight * edgeFade;
   let scale = vec3<f32>(width, width, height);
   let pos = vec3<f32>(bx, by, bz);

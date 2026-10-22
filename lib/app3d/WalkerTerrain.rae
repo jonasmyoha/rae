@@ -398,40 +398,44 @@ func wrappedCell(gridSide: view Int, centreCell: view Int, column: view Int) ret
 }
 
 # ----- streaming -----------------------------------------------------
-# Place every prop whose slot now maps to another cell, after the walker at
-# `playerPosition` crossed a cell border; reshape the tiles that moved. True
+# Stream the terrain: the ground tiles (near and far, drawn only) round
+# `groundFocus`, what the camera looks at, so the editor camera sees ground
+# wherever it goes; the small props (rocks and bushes, which have physics
+# bodies) round `propFocus`, the walker, so its bodies stay where the
+# character is. Places every prop whose slot now maps to another cell. True
 # when anything was streamed.
 func updateInfiniteTerrain(
   terrainSystem: mod WalkerTerrain
   renderer: mod DeferredRenderer
   propKinds: mod ComponentTable(TerrainProp)
   transforms: mod ComponentTable(Transform3D)
-  playerPosition: view Vec3
+  groundFocus: view Vec3
+  propFocus: view Vec3
 ) ret Bool {
-  # The far ground first: its cells are not the near ones', so it can move
-  # when they do not
-  var farMoved: Bool = false
+  # The far ground: its cells are not the near ones', so it can move when
+  # they do not
+  var groundMoved: Bool = false
   if terrainSystem.hasFarGround {
-    farMoved = updateTerrainTiles(
+    groundMoved = updateTerrainTiles(
       tiles: terrainSystem.farGround
       renderer: renderer
-      cellX: Math.floor(x: playerPosition.x / walkerFarGroundCell).toInt()
-      cellY: Math.floor(x: playerPosition.y / walkerFarGroundCell).toInt()
+      cellX: Math.floor(x: groundFocus.x / walkerFarGroundCell).toInt()
+      cellY: Math.floor(x: groundFocus.y / walkerFarGroundCell).toInt()
     )
   }
-  let cellX: Int = Math.floor(x: playerPosition.x / terrainSystem.cellSize).toInt()
-  let cellY: Int = Math.floor(x: playerPosition.y / terrainSystem.cellSize).toInt()
+  let nearMoved: Bool = updateTerrainTiles(
+    tiles: terrainSystem.ground
+    renderer: renderer
+    cellX: Math.floor(x: groundFocus.x / terrainSystem.cellSize).toInt()
+    cellY: Math.floor(x: groundFocus.y / terrainSystem.cellSize).toInt()
+  )
+  let cellX: Int = Math.floor(x: propFocus.x / terrainSystem.cellSize).toInt()
+  let cellY: Int = Math.floor(x: propFocus.y / terrainSystem.cellSize).toInt()
   if cellX is terrainSystem.centreCellX and cellY is terrainSystem.centreCellY {
-    ret farMoved
+    ret groundMoved or nearMoved
   }
   terrainSystem.centreCellX = cellX
   terrainSystem.centreCellY = cellY
-  let groundMoved: Bool = updateTerrainTiles(
-    tiles: terrainSystem.ground
-    renderer: renderer
-    cellX: cellX
-    cellY: cellY
-  )
   let gridSide: Int = terrainSystem.gridSide
   loop var i: Int = 0, i < componentCount(this: propKinds), ++i {
     let entityId: EntityId = componentEntityAt(this: propKinds, i: i)

@@ -611,14 +611,16 @@ const grassNearKeep: Float = 5.0
 const grassConeCos: Float = 0.36
 
 # Dispatch the grass generation + CULLING compute for this frame. Centres the
-# candidate grid on (playerX, playerY); each survivor (on-terrain, unfaded, inside
+# candidate grid on (centreX, centreY), what the camera looks at (its target,
+# not a character: an editor camera away from the player sees grass too); each survivor
+# (on-terrain, unfaded, inside
 # the view cone from the camera) is appended to a compacted list and bumps the
 # indirect draw's instanceCount. No readback, no blocking. Call BEFORE the pass.
 func grassGenerate(
   grass: mod GrassCompute
   resources: mod GpuResources
-  playerX: copy Float
-  playerY: copy Float
+  centreX: copy Float
+  centreY: copy Float
   groundZ: copy Float
   time: copy Float
   deltaTime: copy Float
@@ -643,8 +645,8 @@ func grassGenerate(
   resetArgs(writer: grass.uniformArgs)
   pushVec4F(
     writer: grass.uniformArgs
-    x: playerX
-    y: playerY
+    x: centreX
+    y: centreY
     z: groundZ
     w: time
   )

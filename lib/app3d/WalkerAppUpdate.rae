@@ -391,12 +391,17 @@ func updateWalkerApp(app: mod WalkerApp) {
     controllers: app.world.controllers
     controlled: app.world.controlled
   )
+  # The ground tiles stream round what the camera looks at (the character in
+  # the game), so the editor camera sees ground under the trees wherever it
+  # goes; the rocks and bushes, which have bodies, and the physics below stay
+  # with the walker
   let terrainWrapped: Bool = updateInfiniteTerrain(
     terrainSystem: app.terrainSystem
     renderer: app.renderSystem.renderer
     propKinds: app.world.propKinds
     transforms: app.world.transforms
-    playerPosition: followPos
+    groundFocus: app.cameraSystem.camera.target
+    propFocus: followPos
   )
   # The reused rock entities moved: give them their new bodies
   if terrainWrapped {

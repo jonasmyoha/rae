@@ -1,13 +1,14 @@
 # app3d/TerrainTiles — the ground of a streamed WorldBiome terrain: a square
 # of gridSide x gridSide heightfield tiles, cellSize metres each, round the
-# cell the player is in. Each tile owns one mesh, rewritten in place when the
-# tile moves to another cell; its vertices carry the absolute world height of
-# the app's biome field (worldTerrainHeight), so what is drawn is what the
-# physics and the props stand on.
+# cell the camera looks at (drawn only: the physics has its own ground). Each
+# tile owns one mesh, rewritten in place when the tile moves to another cell;
+# its vertices carry the absolute world height of the app's biome field
+# (worldTerrainHeight), so what is drawn is what the physics and the props
+# stand on.
 #
 #   var ground: TerrainTiles = createTerrainTiles(renderer: r, gridSide: 7,
 #     cellSize: 18.0, segments: 24, groundZ: z, biome: cfg)
-#   ...when the player's cell may have changed:
+#   ...when the camera's focus cell may have changed:
 #   let moved: Bool = updateTerrainTiles(tiles: ground, renderer: r,
 #     cellX: cx, cellY: cy)
 #   ...in the G-buffer (or forward) pass:
