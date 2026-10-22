@@ -32,9 +32,11 @@ func modelMatrixOf(t: view Transform3d) pub ret Mat4 {
 #   [32..34] albedo rgb    [35] metallic
 #   [36] roughness  [37] emissive-or-occlusion  [38] shading mode
 #   [39] palette base (skinned) / picture layer (sprite) / pattern (static)
-#   [40..43] fade: the dither threshold, 1 when the instance is fading IN (0:
-#            out), a per-prop seed, spare — all 0 for an instance not fading
+#   [40..42] fade: the dither threshold, 1 when the instance is fading IN (0:
+#            out), a per-prop seed — all 0 for an instance not fading
 #            (app3d/PropField's level cross-fades, fade_dither.wgsl)
+#   [43] sway: how much a static instance bends in the wind (0 rigid;
+#        setInstanceSway, lib/wind.wgsl)
 # mirroring the C staging layout (GB_DRAW_FLOATS). Kept in one Rae place so a
 # caller never touches raw offsets.
 const instanceRecordFloats: Int = 44
@@ -166,6 +168,12 @@ func setInstanceFade(
   }
   records.set(index: base + 41, value: side)
   records.set(index: base + 42, value: seed)
+}
+
+# How much a static instance bends in the wind (0: not at all; 1 a tree's
+# tuned sway; lib/wind.wgsl). The shadow casters copy it with the fade.
+func setInstanceSway(records: mod List(Float), slot: view Int, sway: view Float) {
+  records.set(index: slot * instanceRecordFloats + 43, value: sway)
 }
 
 # Write one mesh instance's surface attributes. Note what is NOT passed:

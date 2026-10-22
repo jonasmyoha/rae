@@ -26,6 +26,8 @@ open water/Underwater
 open gpu/GpuResources
 open gpu/GpuLifetime
 open GrassCompute
+open Wind
+open RendererWind
 import GrassConfig
 import app3d/Slider
 open Scene3d
@@ -141,6 +143,12 @@ func renderWalkerApp(
   inputSystem.lastLogRevision = inputSystem.logOverlay.revision
   let deltaTime: Float = frame.deltaTime
   let now: Float64 = frame.now
+  # The wind the trees, bushes and grass sway in, on this frame's time
+  stepWind(state: renderSystem.wind, settings: renderSystem.windSettings, deltaTime: deltaTime)
+  setRendererWind(
+    renderer: renderSystem.renderer
+    wind: windVector(state: renderSystem.wind, settings: renderSystem.windSettings)
+  )
 
   # Every character (app3d/Characters), in its table's order — its position
   # there is its palette slot: its clock one frame on, its pose (blended out of

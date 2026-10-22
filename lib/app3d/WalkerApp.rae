@@ -36,6 +36,7 @@ open water/WaterFft
 open gpu/GpuResources
 open gpu/GpuLifetime
 open GrassCompute
+open Wind
 import GrassConfig
 import app3d/Slider
 open Scene3d
@@ -636,6 +637,7 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
     )
 
     let startT: Float64 = Gpu2d.nowSeconds()
+    let windSettings: WindSettings = windSettingsFromEnv(settings: defaultWindSettings())
     var drs: RenderScaleController = createRenderScaleController(targetFps: 60.0)
 
     # #905: the renderer owns the mesh store the water grid and the particle
@@ -742,6 +744,8 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
         cubeBatch: own cubeBatch
         frameLog: createFrameLog()
         frameLogOn: Sys.getEnv(name: "RAE_FRAME_TIMING").length() > 0
+        windSettings: windSettings
+        wind: createWindState(settings: windSettings)
       }
       profiler: Profile.createProfiler()
       grassCompute: own grassCompute

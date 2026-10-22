@@ -1,7 +1,8 @@
 struct Frame {
   viewProj: mat4x4<f32>,
   prevViewProj: mat4x4<f32>,
-  jitter: vec4<f32>,
+  jitter: vec4<f32>,    // xy the TAA jitter, z the wind's time last frame
+  wind: vec4<f32>,      // the renderer's wind (lib/Wind, lib/wind.wgsl); 0 when none is set
 };
 struct DrawU {
   model: mat4x4<f32>,
@@ -73,17 +74,37 @@ fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut
   var o: VsOut;
   o.height = lp.z;
   let base = vec2<f32>(d.model[3].x, d.model[3].y);
-  let windDir = normalize(GW.f.xy);
+  var windDir = normalize(GW.f.xy);
+  var strength = GW.f.z;
+  var gust = GW.f.w;
+  var timeNow = GW.a.w;
+  var timePrev = GW.a.w - GW.b.w;
+  let windStrength = length(F.wind.xy);
+  if (F.wind.w > 0.0) {
+    // The renderer's wind (its clock runs once it is set): its direction,
+    // its strength times the grass's own tuning (a calm stills the grass),
+    // its gust fronts (the trees' too) pressing the blades flatter and
+    // faster, on its clock
+    if (windStrength > 0.0) {
+      windDir = F.wind.xy / windStrength;
+    }
+    let gustHere = windGustAt(base, F.wind);
+    // (capped: short blades in a gale would lie flat on the ground)
+    strength = GW.f.z * min(windStrength, 1.6) * (1.0 + 0.8 * F.wind.z * gustHere);
+    gust = GW.f.w * (1.0 + 3.0 * gustHere);
+    timeNow = F.wind.w;
+    timePrev = F.jitter.z;
+  }
   let zc = lp.z * lp.z;
   let wNow = d.model * vec4<f32>(lp, 1.0);
-  let bendN = windBend(base, GW.a.w, GW.f.z, GW.f.w);
+  let bendN = windBend(base, timeNow, strength, gust);
   let pNow = vec3<f32>(wNow.x + windDir.x * bendN * zc, wNow.y + windDir.y * bendN * zc, wNow.z);
   o.pos = F.viewProj * vec4<f32>(pNow, 1.0);
   o.nrm = normalize((d.model * vec4<f32>(0.0, 0.0, 1.0, 0.0)).xyz);
   o.inst = ii;
   o.clipNow = o.pos;
   let wPrev = d.prevModel * vec4<f32>(lp, 1.0);
-  let bendP = windBend(base, GW.a.w - GW.b.w, GW.f.z, GW.f.w);
+  let bendP = windBend(base, timePrev, strength, gust);
   let pPrev = vec3<f32>(wPrev.x + windDir.x * bendP * zc, wPrev.y + windDir.y * bendP * zc, wPrev.z);
   o.clipPrev = F.prevViewProj * vec4<f32>(pPrev, 1.0);
   o.pos = vec4<f32>(o.pos.xy + F.jitter.xy * o.pos.w, o.pos.zw);

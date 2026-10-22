@@ -113,7 +113,15 @@ type GbufferCache {
   sceneScale: Float
   frameUniform: BufferId
   draws: BufferId
-  frameFloats: List(Float)  # the frame uniform's 36 floats (viewProj, prevViewProj, jitter)
+  frameFloats: List(Float)  # the frame uniform's 40 floats (viewProj, prevViewProj, jitter, wind)
+  # The wind (lib/Wind: setGbufferWind) the swaying props bend in: direction
+  # times strength, gustiness, time; and last frame's time, for the motion
+  # vectors (in the jitter's z)
+  windX: Float = 0.0
+  windY: Float = 0.0
+  windGustiness: Float = 0.0
+  windTime: Float = 0.0
+  windPrevTime: Float = 0.0
   # The frame-derived matrices (#923, was C's gb_viewproj / _jittered / _prev):
   # the post passes (SSAO, lighting, SDF) reconstruct positions from depth with
   # the matrix the geometry was RASTERISED with — the jittered one.
@@ -432,8 +440,12 @@ func uploadFrameUniform(
   }
   cache.frameFloats.add(value: jx)
   cache.frameFloats.add(value: jy)
+  cache.frameFloats.add(value: cache.windPrevTime)
   cache.frameFloats.add(value: 0.0)
-  cache.frameFloats.add(value: 0.0)
+  cache.frameFloats.add(value: cache.windX)
+  cache.frameFloats.add(value: cache.windY)
+  cache.frameFloats.add(value: cache.windGustiness)
+  cache.frameFloats.add(value: cache.windTime)
   # Remember for NEXT frame, after this frame's copy is handed over.
   cache.prevViewProj = viewProj
   unsafe {
@@ -445,6 +457,25 @@ func uploadFrameUniform(
       size: gbufferFrameFloats * 4
     )
   }
+}
+
+# This frame's wind (lib/Wind windVector): what the swaying props bend in
+# (lib/wind.wgsl); the last one's time is kept for the motion vectors
+func setGbufferWind(
+  cache: mod GbufferCache
+  x: view Float
+  y: view Float
+  gustiness: view Float
+  time: view Float
+) {
+  cache.windPrevTime = cache.windTime
+  if time < cache.windTime or cache.windTime is 0.0 {
+    cache.windPrevTime = time
+  }
+  cache.windX = x
+  cache.windY = y
+  cache.windGustiness = gustiness
+  cache.windTime = time
 }
 
 func gbufferFrameActive(cache: view GbufferCache) ret Bool {

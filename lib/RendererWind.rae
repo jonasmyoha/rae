@@ -1,0 +1,25 @@
+# RendererWind — the wind the deferred renderer's swaying props bend in
+# (lib/Wind's vector, lib/wind.wgsl): the static G-buffer and forward passes
+# and the static shadow casters read it. Set it each frame, before the
+# render; with none set (or a calm one) nothing sways.
+open Gbuffer
+open ShadowMaps
+open Wind
+open RendererDeferred
+
+func setRendererWind(renderer: mod DeferredRenderer, wind: view WindVector) {
+  setGbufferWind(
+    cache: renderer.passes.gbuffer
+    x: wind.x
+    y: wind.y
+    gustiness: wind.gustiness
+    time: wind.time
+  )
+  setShadowWind(
+    shadow: renderer.passes.shadow
+    x: wind.x
+    y: wind.y
+    gustiness: wind.gustiness
+    time: wind.time
+  )
+}

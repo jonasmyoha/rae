@@ -1,0 +1,107 @@
+# Wind — the wind everything that sways reads: trees and bushes (their
+# vertex stages, lib/wind.wgsl), and grass. Its BASE is global: one direction
+# and strength, drifting slowly about the settings' own with the time, the
+# same on every machine for the same time (no state but the clock). Its
+# GUSTS are local but stored nowhere: lib/wind.wgsl's gust field is smooth
+# noise over the world, tens of metres across, travelling with the wind, so
+# gust fronts sweep across the grass and the trees together, as seen from
+# any camera, with no grid to keep or stream.
+#
+#   var wind: WindState = createWindState(settings: defaultWindSettings())
+#   ...each frame: stepWind(state: wind, settings:, deltaTime:)
+#   ...the renderer's: setRendererWind(renderer:, wind: windVector(state: wind, settings:))
+#
+# The strength is in "sway units": 1 is a fresh breeze, the trees' tuned
+# sway; 0 is calm (nothing moves), 2 a strong wind.
+import Math
+import Sys
+
+type WindSettings {
+  # The prevailing direction (radians, 0 toward +x, counter-clockwise) and
+  # strength
+  angle: Float
+  strength: Float
+  # How far the direction swings about it (radians) and the strength about
+  # its own (a share of it), over `driftSeconds`
+  angleSwing: Float
+  strengthSwing: Float
+  driftSeconds: Float
+  # How much the gusts add, 0 (none) to 1 (a gust doubles the push and more)
+  gustiness: Float
+}
+
+type WindState {
+  # Seconds since the start, kept in 64 bits (hours of play stay exact); the
+  # shaders get it wrapped to windTimeWrap
+  time: Float64
+  angle: Float
+  strength: Float
+}
+
+# What the shaders read (one vec4): the direction times the strength, the
+# gustiness, the time (s)
+type WindVector {
+  x: Float
+  y: Float
+  gustiness: Float
+  time: Float
+}
+
+# The shaders' time wraps every hour: a 32-bit float then still holds a
+# quarter of a millisecond (a gust front jumps once an hour)
+const windTimeWrap: Float64 = 3600.0
+
+func defaultWindSettings() ret WindSettings {
+  ret WindSettings {
+    angle: 0.6
+    strength: 1.0
+    angleSwing: 0.35
+    strengthSwing: 0.3
+    driftSeconds: 90.0
+    gustiness: 0.6
+  }
+}
+
+# The settings with RAE_WIND=<strength> applied when it is set (0 a calm,
+# for shots to compare; 2 a strong wind)
+func windSettingsFromEnv(settings: view WindSettings) ret WindSettings {
+  var settled: WindSettings = settings
+  let text: String = Sys.getEnv(name: "RAE_WIND").trim()
+  if text.length() > 0 {
+    settled.strength = Math.max(a: 0.0, b: text.toFloat())
+  }
+  ret settled
+}
+
+func createWindState(settings: view WindSettings) ret WindState {
+  var state: WindState = { time: 0.0, angle: settings.angle, strength: settings.strength }
+  stepWind(state: state, settings: settings, deltaTime: 0.0)
+  ret state
+}
+
+# `deltaTime` s on: the base wind at the new time
+func stepWind(state: mod WindState, settings: view WindSettings, deltaTime: view Float) {
+  state.time = state.time + (Math.max(a: 0.0, b: deltaTime) as Float64)
+  let cycle: Float = 6.2831853 / Math.max(a: settings.driftSeconds, b: 1.0)
+  # The drift's phase from the 64-bit clock, wrapped to whole drift cycles
+  let cycleSeconds: Float64 = (Math.max(a: settings.driftSeconds, b: 1.0) * 100.0) as Float64
+  let phaseTime: Float = (state.time - Math.floor(x: (state.time / cycleSeconds) as Float) as Float64 * cycleSeconds) as Float
+  # Two slow waves each, so the drift does not repeat in an obvious beat
+  let turn: Float = 0.65 * Math.sin(x: phaseTime * cycle) + 0.35 * Math.sin(
+    x: phaseTime * cycle * 2.7 + 1.9
+  )
+  let swell: Float = 0.6 * Math.sin(x: phaseTime * cycle * 1.3 + 0.7) + 0.4 * Math.sin(
+    x: phaseTime * cycle * 3.1 + 2.3
+  )
+  state.angle = settings.angle + settings.angleSwing * turn
+  state.strength = Math.max(a: 0.0, b: settings.strength * (1.0 + settings.strengthSwing * swell))
+}
+
+func windVector(state: view WindState, settings: view WindSettings) ret WindVector {
+  ret WindVector {
+    x: Math.cos(x: state.angle) * state.strength
+    y: Math.sin(x: state.angle) * state.strength
+    gustiness: settings.gustiness
+    time: (state.time - Math.floor(x: (state.time / windTimeWrap) as Float) as Float64 * windTimeWrap) as Float
+  }
+}
