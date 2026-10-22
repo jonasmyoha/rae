@@ -71,6 +71,11 @@ type ModeMenuState {
   mobileLabelWritten: Bool
   # Whether the menu's open state has been written to its node yet
   openWritten: Bool
+  # The app puts itself back as it started when asked (app3d/ModeMenu's
+  # Reset: takeModeMenuReset); without it, Reset starts the program again
+  # with no saved state (HotReload.restartFresh, a desktop only)
+  appResets: Bool = false
+  resetAsked: Bool = false
 }
 
 # Closed (open under RAE_UI_MENU=open, for screenshots), nothing written yet

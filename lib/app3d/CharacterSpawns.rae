@@ -1,0 +1,76 @@
+# app3d/CharacterSpawns — where each character started, for putting an app
+# back as it started (its "..." menu's Reset, a reset key): a CharacterSpawn
+# component on each character, recorded once when the app is made: its feet
+# (world space), heading, clip and the clip's phase. Putting it back on its
+# feet there is the app's (its mover and physics); its clip back is here.
+import Vec3
+open ecs/Entity
+open ecs/ComponentTable
+open app3d/CharacterController
+open app3d/Characters
+open app3d/CharacterBodies
+
+type CharacterSpawn {
+  feet: Vec3
+  heading: Float
+  clipIndex: Int
+  animTime: Float
+}
+
+# Keep how `entityId` starts: its controller's feet and heading and its clip
+# now
+func recordCharacterSpawn(
+  spawns: mod ComponentTable(CharacterSpawn)
+  controllers: view ComponentTable(ThirdPersonController)
+  animStates: view ComponentTable(AnimationState)
+  entityId: view EntityId
+  groundZ: view Float
+) {
+  let controller: view ThirdPersonController = controllerOf(
+    controllers: controllers
+    entityId: entityId
+  )
+  var clipIndex: Int = 0
+  var animTime: Float = 0.0
+  if componentHas(this: animStates, entityId: entityId) {
+    let anim: view AnimationState = componentView(this: animStates, entityId: entityId)
+    clipIndex = anim.clipIndex
+    animTime = anim.animTime
+  }
+  componentSet(
+    this: spawns
+    entityId: entityId
+    data: CharacterSpawn {
+      feet: controllerFeet(controller: controller, groundZ: groundZ)
+      heading: controller.heading
+      clipIndex: clipIndex
+      animTime: animTime
+    }
+  )
+}
+
+# `entityId`'s clip as it started, its running transition finished, so
+# nothing blends from where it was
+func restoreCharacterSpawnClip(
+  spawns: view ComponentTable(CharacterSpawn)
+  animStates: mod ComponentTable(AnimationState)
+  animTransitions: mod ComponentTable(AnimationTransition)
+  entityId: view EntityId
+) {
+  if componentHas(this: spawns, entityId: entityId) is false {
+    ret
+  }
+  let started: view CharacterSpawn = componentView(this: spawns, entityId: entityId)
+  if componentHas(this: animStates, entityId: entityId) {
+    let anim: mod AnimationState = componentMod(this: animStates, entityId: entityId)
+    anim.clipIndex = started.clipIndex
+    anim.animTime = started.animTime
+  }
+  if componentHas(this: animTransitions, entityId: entityId) {
+    let transition: mod AnimationTransition = componentMod(
+      this: animTransitions
+      entityId: entityId
+    )
+    transition.elapsed = transition.duration
+  }
+}

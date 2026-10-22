@@ -1,0 +1,112 @@
+# Putting an app back as it started (the "..." menu's Reset, or a key):
+# app3d/CharacterSpawns keeps each character's start (its feet, heading,
+# clip and the clip's phase) and gives its clip back; app3d/CameraRig's
+# resetCameraRigPose puts the camera's pose back as a copy of the rig taken
+# at the start had it (the mode, turn, pitches, zoom and free place, the
+# view snapped there), keeping the player's own settings (reversed drag,
+# smoothing); and the menu's Reset, in an app that resets itself
+# (appResets), asks it to once (takeModeMenuReset) instead of starting the
+# program again.
+import Math
+import Vec3
+open ecs/Entity
+open ecs/ComponentTable
+open app3d/CharacterController
+open app3d/Characters
+open app3d/CharacterSpawns
+open app3d/CameraRig
+open app3d/UiModes
+open app3d/ModeMenu
+open Scene3d
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func near(a: view Float, b: view Float) ret Bool {
+  ret Math.abs(value: a - b) < 0.0001
+}
+
+func main() ret Int {
+  let walker: EntityId = { index: 2, generation: 0 }
+  var controllers: ComponentTable(ThirdPersonController) = ComponentTable.create(
+    ThirdPersonController
+  )
+  var animStates: ComponentTable(AnimationState) = ComponentTable.create(AnimationState)
+  var animTransitions: ComponentTable(AnimationTransition) = ComponentTable.create(
+    AnimationTransition
+  )
+  var spawns: ComponentTable(CharacterSpawn) = ComponentTable.create(CharacterSpawn)
+  var controller: ThirdPersonController = createThirdPersonController()
+  controller.position = Vec3.create(x: 3.0, y: 4.0, z: 0.9)
+  controller.heading = 1.25
+  componentSet(this: controllers, entityId: walker, data: controller)
+  componentSet(
+    this: animStates
+    entityId: walker
+    data: AnimationState { clipIndex: 2, animTime: 0.4 }
+  )
+  recordCharacterSpawn(
+    spawns: spawns
+    controllers: controllers
+    animStates: animStates
+    entityId: walker
+    groundZ: 0.0
+  )
+  # It walks off, into another clip
+  let anim: mod AnimationState = componentMod(this: animStates, entityId: walker)
+  anim.clipIndex = 5
+  anim.animTime = 1.7
+  let started: CharacterSpawn = componentCopyAtDefault(this: spawns, i: 0)
+  restoreCharacterSpawnClip(
+    spawns: spawns
+    animStates: animStates
+    animTransitions: animTransitions
+    entityId: walker
+  )
+  let back: view AnimationState = componentView(this: animStates, entityId: walker)
+  check(
+    label: "its start kept: feet (3, 4, {started.feet.z}) heading {started.heading}; its clip given back"
+    ok: near(a: started.feet.x, b: 3.0) and near(a: started.feet.y, b: 4.0) and near(
+      a: started.heading
+      b: 1.25
+    ) and back.clipIndex is 2 and near(a: back.animTime, b: 0.4)
+  )
+  # The camera: turned, tipped, zoomed out and put in the free mode, its
+  # drag reversed by the player
+  var rig: CameraRig = createCameraRig(camera: defaultCamera3d())
+  rig.mode = CameraRigMode.character
+  rig.yaw = 0.5
+  rig.orbitPitch = 0.32
+  rig.distance = 7.0
+  snapCameraRigView(rig: rig)
+  let start: CameraRig = rig
+  rig.mode = CameraRigMode.free
+  rig.yaw = 2.0
+  rig.orbitPitch = 1.1
+  rig.distance = 25.0
+  rig.reverseDrag = true
+  resetCameraRigPose(rig: rig, start: start)
+  check(
+    label: "the camera back to its start pose, its view there at once, the reversed drag kept"
+    ok: rig.mode is CameraRigMode.character and near(a: rig.yaw, b: 0.5) and near(
+      a: rig.orbitPitch
+      b: 0.32
+    ) and near(a: rig.distance, b: 7.0) and near(a: rig.viewDistance, b: 7.0) and near(
+      a: rig.viewOrbitPitch
+      b: 0.32
+    ) and rig.reverseDrag
+  )
+  # The menu's Reset, in an app that resets itself: asked once
+  var menu: ModeMenuState = createModeMenuState()
+  menu.appResets = true
+  askModeMenuReset(menu: menu)
+  let first: Bool = takeModeMenuReset(menu: menu)
+  let second: Bool = takeModeMenuReset(menu: menu)
+  check(label: "the menu's Reset asks the app once", ok: first and second is false)
+  ret 0
+}

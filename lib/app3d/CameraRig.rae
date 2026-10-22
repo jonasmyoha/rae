@@ -684,6 +684,20 @@ func applyCameraRig(rig: view CameraRig, camera: mod Camera3d) pub {
 # Used wherever the view is meant to jump rather than glide — a mode
 # switch, a restored snapshot — because easing across a deliberate
 # teleport is a swoop through the scene, not smoothing.
+# The rig's pose back as `start` (a copy of the rig taken when the app
+# began) had it: its mode, turn, pitches, zoom and free place, the view
+# snapped there at once (an app's reset to its start). The player's own
+# settings stay as they are: reversed drag, smoothing, the speeds and limits.
+func resetCameraRigPose(rig: mod CameraRig, start: view CameraRig) {
+  rig.mode = start.mode
+  rig.yaw = start.yaw
+  rig.orbitPitch = start.orbitPitch
+  rig.freePitch = start.freePitch
+  rig.distance = start.distance
+  rig.freePosition = start.freePosition
+  snapCameraRigView(rig: rig)
+}
+
 func snapCameraRigView(rig: mod CameraRig) pub {
   rig.viewYaw = rig.yaw
   rig.viewOrbitPitch = rig.orbitPitch
