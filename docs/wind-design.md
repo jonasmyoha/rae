@@ -55,40 +55,44 @@ The forward main pass and the grass bind the same frame uniform.
 
 ## 3. What sways, and how much
 
+**Only leaves sway. A tree's body (its trunk and branches) never moves.**
+The first version bent the whole tree with its height (a lean of up to
+metres at a tall crown in a gust) and it looked like a glitch: trunks
+rocking, and a jump where a tree changed to its billboard. It was removed
+(2026-10-22).
+
 An instance sways by its record's float [43] (GbufferRecord
 `setInstanceSway`; 0 rigid). The shadow casters copy [40..43] already, so the
 shadow pass reads the same value.
 
-- `app3d/PropField`: `setPropKindSway(field:, kind:, sway:)`, per kind. Every
-  mesh level of the kind (near and middle) writes it into its instances.
+- `app3d/PropField`: each `PropPart` has a `sway` (0 by default). A tree
+  level's part 0 is its wood and keeps 0; its leaf parts get
+  `groveLeafSway` (app3d/GroveTrees). The field keeps it per batch
+  (`batchSways`).
 - `app3d/PropInstancer`: its `sway` field, for props drawn one batch per mesh
-  (the walker's bushes).
+  (the walker's bushes, which are all leaves).
 - A rock, a building or anything else keeps 0 and does not move.
 
-The bend (`windOffset`) grows with the vertex's height over the instance's
-foot (the model matrix's translation): `0.0045 * sway * push * h * min(h, 7)`.
-Past 7 m it grows only linearly, so a tall tree's top does not swing metres.
-Each prop has its own phase and rate (a hash of its foot), a small
-cross-wind part (so a crown circles rather than nods) and a faster per-vertex
-flutter for the leaves. The foot never moves. A tree's trunk bends a little
-with its crown, which reads as the whole tree giving.
-
-Tuned values in the walker: trees 1.0, bushes 4.0 (short, so more for their
-height).
+The motion (`windOffset`) is a few centimetres about where a leaf grows: a
+slow sway in clusters about a metre across (each cluster its own phase), a
+small cross-wind part, and a faster flutter per leaf. It grows with the
+push (a gust presses harder) and a little with the height over the foot
+(`h / (h + 2)`). At the default wind a leaf moves about 5 cm, in a strong
+gust about 15 cm: small enough that the leaves stay on their branches.
 
 ## 4. Levels of detail and billboards
 
-- **Near and middle mesh levels** sway the same way. The bend is a function of
-  the world position and the foot, not of the mesh, so two levels
-  cross-fading (fade_dither.wgsl) bend together and the fade shows no seam.
+- **Near and middle mesh levels** sway the same way. The motion is a
+  function of the world position and the foot, not of the mesh, so two
+  levels cross-fading (fade_dither.wgsl) move together.
 - **Billboards (impostors) do not sway.** The sprite pass writes a depth for
   each texel of the baked picture. Bending the quad would move its outline
   without moving that depth, and it would bend the picture's trunk too. Past
-  the middle level's distance (130 m and more) a sway of a few tens of
-  centimetres is under a pixel or two anyway.
+  the middle level's distance (130 m and more) a leaf's few centimetres are
+  under a pixel anyway.
 - **The far canopy** (app3d/FarCanopy) does not sway, for the same reason.
-- At the switch from the middle level to the billboard, the tree stops
-  swaying. At those distances the movement is too small to see.
+- At the switch from the middle level to the billboard, the leaves stop
+  moving. They move a few centimetres, so at those distances nothing jumps.
 
 ## 5. Grass
 

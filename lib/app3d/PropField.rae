@@ -50,6 +50,9 @@ open app3d/PropFade
 type PropPart {
   mesh: MeshHandle
   material: Material3d
+  # How much it moves in the wind (lib/wind.wgsl): 0 rigid (a trunk, a
+  # rock), 1 a tree's leaves. Only leaves sway; a tree's body stays still.
+  sway: Float = 0.0
 }
 
 # One level of detail of a kind
@@ -131,9 +134,6 @@ type PropField {
   # picture's world height at scale 1 (setPropKindSprite)
   spriteLayers: List(Int)
   spriteHeights: List(Float)
-  # Per kind: how much its mesh levels bend in the wind (0 rigid, 1 a tree's
-  # tuned sway; setPropKindSway, lib/wind.wgsl). A billboard never sways.
-  kindSways: List(Float)
   # This frame's billboards of every kind's sprite level
   spriteBatch: InstanceBatch
   # Some kind's sprite level casts shadows (finishPropField)
@@ -143,6 +143,8 @@ type PropField {
   batches: List(InstanceBatch)
   batchMeshes: List(MeshHandle)
   batchMaterials: List(Material3d)
+  # Per batch: its part's sway (PropPart sway; 0 rigid)
+  batchSways: List(Float)
   batchCastsShadow: List(Bool)
   lodFirstBatch: List(Int)
   kindFirstLod: List(Int)
@@ -190,12 +192,12 @@ func createPropField(
     cellRadius: List.create(Float, cap: count * count)
     spriteLayers: List.create(Int, cap: 8)
     spriteHeights: List.create(Float, cap: 8)
-    kindSways: List.create(Float, cap: 8)
     spriteBatch: createInstanceBatch(mesh: meshHandleNone(), capacity: 0)
     spriteCastsShadow: false
     batches: List.create(InstanceBatch, cap: 16)
     batchMeshes: List.create(MeshHandle, cap: 16)
     batchMaterials: List.create(Material3d, cap: 16)
+    batchSways: List.create(Float, cap: 16)
     batchCastsShadow: List.create(Bool, cap: 16)
     lodFirstBatch: List.create(Int, cap: 16)
     kindFirstLod: List.create(Int, cap: 8)
@@ -213,7 +215,6 @@ func createPropField(
 func addPropKind(field: mod PropField, kind: view PropKind) ret Int {
   field.spriteLayers.add(value: -1)
   field.spriteHeights.add(value: 0.0)
-  field.kindSways.add(value: 0.0)
   var added: PropKind = kind
   added.lodEnds.clear()
   loop let lod: view PropLod in kind.lods {
@@ -234,17 +235,6 @@ func setPropKindSprite(
 ) {
   field.spriteLayers.set(index: kind, value: layer)
   field.spriteHeights.set(index: kind, value: height)
-}
-
-# How much kind `kind`'s mesh levels bend in the wind: 0 rigid (a rock), 1
-# a tree's tuned sway, more for a bush or a palm's fronds (lib/wind.wgsl;
-# the renderer's wind: setRendererWind)
-func setPropKindSway(field: mod PropField, kind: view Int, sway: view Float) {
-  field.kindSways.set(index: kind, value: sway)
-}
-
-func propKindSway(field: view PropField, kind: view Int) ret Float {
-  ret field.kindSways.copyAtFallback(index: kind, fallback: 0.0)
 }
 
 # Is `lod` a sprite level (a billboard of its kind's picture)?
@@ -458,6 +448,7 @@ func finishPropField(field: mod PropField) {
         field.batches.add(value: createInstanceBatch(mesh: part.mesh, capacity: kindCount))
         field.batchMeshes.add(value: part.mesh)
         field.batchMaterials.add(value: part.material)
+        field.batchSways.add(value: part.sway)
         field.batchCastsShadow.add(value: lod.castsShadow)
       }
     }
