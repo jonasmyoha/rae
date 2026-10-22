@@ -54,7 +54,23 @@ type FarCanopy {
   # Planned and waiting for the bake (planFarCanopy, bakeFarCanopy)
   plannedTrees: List(CanopyTree)
   plannedClusters: List(CanopyCluster)
+  # This frame's clusters in reach and view (index and fade share), their
+  # distance bands, and the bands' starts: they are drawn nearest first
+  shown: List(Int) = List.create(Int, cap: 0)
+  shownShares: List(Float) = List.create(Float, cap: 0)
+  shownBands: List(Int) = List.create(Int, cap: 0)
+  bandStarts: List(Int) = List.create(Int, cap: 0)
+  order: List(Int) = List.create(Int, cap: 0)
 }
+
+# The clusters are drawn nearest first, sorted into bands this deep (m), up
+# to canopyBands of them: each cluster marches its views per pixel
+# (sprite_billboard.wgsl impostorMarch), and seen low across a forest they
+# overlap many times over; drawn front to back, the depth test drops the
+# hidden ones before they march
+const canopyBandDepth: Float = 16.0
+
+const canopyBands: Int = 256
 
 func createFarCanopy(settings: view FarCanopySettings) ret FarCanopy {
   ret FarCanopy {
@@ -221,6 +237,9 @@ func bakeFarCanopy(
 func gatherFarCanopy(canopy: mod FarCanopy, propView: view PropView, toon: view Bool) {
   resetInstanceBatch(batch: canopy.batch)
   canopy.drawn = 0
+  canopy.shown.clear()
+  canopy.shownShares.clear()
+  canopy.shownBands.clear()
   let settings: FarCanopySettings = canopy.settings
   loop var cluster: Int = 0, cluster < canopy.centres.length, ++cluster {
     let centre: Vec3 = canopy.centres.copyAtDefault(index: cluster)
@@ -237,6 +256,17 @@ func gatherFarCanopy(canopy: mod FarCanopy, propView: view PropView, toon: view 
     if propSphereInView(propView: propView, center: centre, radius: radius) is false {
       continue
     }
+    canopy.shown.add(value: cluster)
+    canopy.shownShares.add(value: share)
+    canopy.shownBands.add(
+      value: Math.min(a: (distance / canopyBandDepth).toInt(), b: canopyBands - 1)
+    )
+  }
+  sortShownByBand(canopy: canopy)
+  loop let at: view Int in canopy.order {
+    let cluster: Int = canopy.shown.copyAtFallback(index: at, fallback: 0)
+    let share: Float = canopy.shownShares.copyAtFallback(index: at, fallback: 1.0)
+    let centre: Vec3 = canopy.centres.copyAtDefault(index: cluster)
     let before: Int = canopy.batch.count
     addSpriteInstance(
       batch: canopy.batch
@@ -256,6 +286,40 @@ func gatherFarCanopy(canopy: mod FarCanopy, propView: view PropView, toon: view 
       )
     }
     canopy.drawn = canopy.drawn + 1
+  }
+}
+
+# canopy.order: the shown clusters' places in canopy.shown, nearest band
+# first (a counting sort: linear in the clusters)
+func sortShownByBand(canopy: mod FarCanopy) {
+  canopy.bandStarts.clear()
+  loop var band: Int = 0, band <= canopyBands, ++band {
+    canopy.bandStarts.add(value: 0)
+  }
+  loop let band: view Int in canopy.shownBands {
+    canopy.bandStarts.set(
+      index: band + 1
+      value: canopy.bandStarts.copyAtFallback(index: band + 1, fallback: 0) + 1
+    )
+  }
+  loop var band: Int = 1, band <= canopyBands, ++band {
+    canopy.bandStarts.set(
+      index: band
+      value: canopy.bandStarts.copyAtFallback(index: band, fallback: 0) + canopy.bandStarts.copyAtFallback(
+        index: band - 1
+        fallback: 0
+      )
+    )
+  }
+  canopy.order.clear()
+  loop var i: Int = 0, i < canopy.shownBands.length, ++i {
+    canopy.order.add(value: 0)
+  }
+  loop var i: Int = 0, i < canopy.shownBands.length, ++i {
+    let band: Int = canopy.shownBands.copyAtFallback(index: i, fallback: 0)
+    let slot: Int = canopy.bandStarts.copyAtFallback(index: band, fallback: 0)
+    canopy.order.set(index: slot, value: i)
+    canopy.bandStarts.set(index: band, value: slot + 1)
   }
 }
 

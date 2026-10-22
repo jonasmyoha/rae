@@ -31,6 +31,10 @@ type ImpostorSettings {
   blendViews: Bool
   subjectsPerSide: Int = 1
   cellHeight: Int = 0
+  # Each view is marched along the eye's ray (sprite_billboard.wgsl
+  # impostorMarch): for box framed subjects, deep and sparse with views far
+  # apart (the far canopy's clusters), which a single parallax step smears
+  marchViews: Bool = false
 }
 
 # A PC: 8 x 8 views of 128 pixels (1024 x 1024 per prop kind), 4 levels
@@ -73,6 +77,7 @@ type ImpostorBinding {
   frames: BufferId
   viewsPerSide: Int
   blendViews: Bool = true
+  marchViews: Bool = false
 }
 
 func noImpostorBinding() ret ImpostorBinding {

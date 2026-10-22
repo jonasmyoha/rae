@@ -1,0 +1,558 @@
+# Hardware check that a far canopy cluster (app3d/FarCanopy, lib/CanopyBake;
+# docs/tree-lod-design.md §2.4) shows what its trees show. For every tree
+# species of app3d/GroveTrees, a sparse 40 m cell of that species alone is
+# baked into a cluster, and the cluster and the same trees as single
+# impostors (as app3d/FarSprites draws them) are each drawn offscreen with
+# the sprite pass's own shader, from the distances and directions a far
+# forest is seen at, at the 143 walker's picture size and field of view.
+# The covered pixels of the two, summed over four directions between the
+# canopy's views, must agree within canopyTolerance (phoneTolerance with
+# RAE_IMPOSTOR_PHONE=1). Before clusters marched their views, they kept
+# 0-77% of their trees here.
+# RAE_IMPOSTOR_PHONE=1 checks the phone settings. Exit code 0 = passed.
+import Math
+import Sys
+import Vec3
+open webgpu/Context
+open webgpu/WebgpuEnums
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuIds
+open gpu/GpuReadback
+open gpu/GpuRender
+open gpu/GpuRenderPass
+open gpu/GpuRenderTransfer
+open gpu/GpuTextures
+open gpu/GpuArgs
+open Math3d
+open Scene3d
+open Mesh3d
+open MeshStore
+open GbufferInstanced
+open GbufferSprite
+open GrassCompute
+open ImpostorAtlas
+open ImpostorBake
+open CanopyBake
+open app3d/GroveTrees
+open app3d/PropField
+open app3d/FarSprites
+open app3d/FarCanopy
+
+# The picture: the 143 walker's (2304 x 1440, 50 degrees high)
+const pictureWidth: Int = 2304
+
+const pictureHeight: Int = 1440
+
+const pictureFieldOfView: Float = 50.0
+
+# A cluster's covered pixels may differ from its trees' by this share
+# A cluster is rebuilt from views of it about 30 degrees apart, and what one
+# view hides from another is guessed; the phone reads only the nearest of
+# views 45 degrees apart (narrow trees, the cypresses, come out up to a
+# fifth fuller there)
+const canopyTolerance: Float = 0.13
+
+const phoneTolerance: Float = 0.25
+
+# Trees a cell holds: sparse, as in a hill forest of open stands
+const treesPerCell: Int = 14
+
+const cellSize: Float = 40.0
+
+# The offscreen targets the sprite pass draws into (the G-buffer's formats)
+# and the buffers its bind reads
+type Picture {
+  targets: List(TextureViewId)
+  textures: List(TextureId)
+  depth: TextureViewId
+  frame: BufferId
+  draws: BufferId
+  sprite: BufferId
+  pixels: BufferId
+  sampler: SamplerId
+  pipeline: RenderPipelineId
+}
+
+func createPicture(resources: mod GpuResources) ret Picture {
+  var picture: Picture = {
+    targets: List.create(TextureViewId, cap: 3)
+    textures: List.create(TextureId, cap: 4)
+    depth: noTextureViewId()
+    frame: noBufferId()
+    draws: noBufferId()
+    sprite: noBufferId()
+    pixels: noBufferId()
+    sampler: noSamplerId()
+    pipeline: noRenderPipelineId()
+  }
+  var formats: List(Int32) = List.create(Int32, cap: 3)
+  formats.add(value: WGPUTextureFormat_RGB10A2Unorm)
+  formats.add(value: WGPUTextureFormat_RGBA8Unorm)
+  formats.add(value: WGPUTextureFormat_RGBA8Unorm)
+  loop let format: view Int32 in formats {
+    if let texture: TextureId = createTexture(
+      resources: resources
+      width: pictureWidth
+      height: pictureHeight
+      format: format
+      usage: WGPUTextureUsage_RenderAttachment + WGPUTextureUsage_CopySrc
+    ) {
+      picture.textures.add(value: texture)
+      if let made: TextureViewId = createTextureView(resources: resources, texture: texture) {
+        picture.targets.add(value: made)
+      }
+    }
+  }
+  if let texture: TextureId = createTexture(
+    resources: resources
+    width: pictureWidth
+    height: pictureHeight
+    format: WGPUTextureFormat_Depth32Float
+    usage: WGPUTextureUsage_RenderAttachment
+  ) {
+    picture.textures.add(value: texture)
+    if let made: TextureViewId = createTextureView(resources: resources, texture: texture) {
+      picture.depth = made
+    }
+  }
+  let storage: UInt64 = WGPUBufferUsage_Storage + WGPUBufferUsage_CopyDst
+  let uniform: UInt64 = WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst
+  picture.frame = bufferOf(resources: resources, size: 144, usage: uniform)
+  picture.draws = bufferOf(resources: resources, size: 1024 * 176, usage: storage)
+  picture.sprite = bufferOf(resources: resources, size: 48, usage: uniform)
+  picture.pixels = bufferOf(
+    resources: resources
+    size: pictureWidth * 4 * pictureHeight
+    usage: WGPUBufferUsage_MapRead + WGPUBufferUsage_CopyDst
+  )
+  if let made: SamplerId = createSamplerMipped(
+    resources: resources
+    addressMode: WGPUAddressMode_ClampToEdge
+  ) {
+    picture.sampler = made
+  }
+  if let made: RenderPipelineId = createRenderPipeline(
+    resources: resources
+    shader: shader(
+      files: ["lib/fade_dither.wgsl", "lib/impostor_octahedral.wgsl", "lib/sprite_billboard.wgsl"]
+    )
+    vertexEntry: "vs"
+    fragmentEntry: "fsQuadDepth"
+    spec: gbufferProceduralPipelineSpec()
+  ) {
+    picture.pipeline = made
+  }
+  ret picture
+}
+
+# A buffer, or noBufferId when it cannot be made
+func bufferOf(resources: mod GpuResources, size: view Int, usage: view UInt64) ret BufferId {
+  if let buffer: BufferId = createBuffer(resources: resources, size: size, usage: usage) {
+    ret buffer
+  }
+  ret noBufferId()
+}
+
+# A matrix as the 16 floats a uniform takes, column by column
+func matrixFloats(matrix: view Mat4) ret List(Float) {
+  var floats: List(Float) = List.create(Float, cap: 16)
+  loop var i: Int = 0, i < 16, ++i {
+    floats.add(value: mat4Get(m: matrix, i: i))
+  }
+  ret floats
+}
+
+# The pixels `batch` covers, drawn from `binding`'s atlas with the eye at
+# `eye` looking at `target`
+func coveredPixels(
+  resources: mod GpuResources
+  picture: view Picture
+  binding: view ImpostorBinding
+  batch: view InstanceBatch
+  eye: view Vec3
+  target: view Vec3
+) ret Int {
+  let look: Mat4 = mat4LookAt(
+    eyeX: eye.x
+    eyeY: eye.y
+    eyeZ: eye.z
+    atX: target.x
+    atY: target.y
+    atZ: target.z
+    upX: 0.0
+    upY: 0.0
+    upZ: 1.0
+  )
+  let projection: Mat4 = mat4PerspectiveReverseZ(
+    fovYDeg: pictureFieldOfView
+    aspect: pictureWidth.toFloat() / pictureHeight.toFloat()
+    near: 1.0
+    far: 5000.0
+  )
+  let viewProjection: List(Float) = matrixFloats(matrix: mat4Mul(a: projection, b: look))
+  var frame: ArgWriter = createArgs(uniform: true)
+  let pushedNow: Bool = pushMat4(writer: frame, columns: viewProjection)
+  let pushedBefore: Bool = pushMat4(writer: frame, columns: viewProjection)
+  pushVec4F(
+    writer: frame
+    x: 0.0
+    y: 0.0
+    z: 0.0
+    w: 0.0
+  )
+  var sprite: ArgWriter = createArgs(uniform: true)
+  pushVec4F(
+    writer: sprite
+    x: 1.0
+    y: 1.0
+    z: spriteCutoff
+    w: 0.0
+  )
+  pushVec4F(
+    writer: sprite
+    x: 0.0
+    y: 0.0
+    z: binding.viewsPerSide.toFloat()
+    w: impostorBlendFlag(binding: binding)
+  )
+  pushVec4F(
+    writer: sprite
+    x: impostorMarchFlag(binding: binding)
+    y: 0.0
+    z: 0.0
+    w: 0.0
+  )
+  var draws: ArgWriter = createArgs(uniform: false)
+  loop var i: Int = 0, i < batch.count * instanceRecordFloats, ++i {
+    pushF32(writer: draws, value: batch.records.copyAtFallback(index: i, fallback: 0.0))
+  }
+  if not (uploadArgs(
+    writer: frame
+    resources: resources
+    buffer: picture.frame
+    offset: 0
+  ) and uploadArgs(
+    writer: sprite
+    resources: resources
+    buffer: picture.sprite
+    offset: 0
+  ) and uploadArgs(
+    writer: draws
+    resources: resources
+    buffer: picture.draws
+    offset: 0
+  )) {
+    ret -1
+  }
+  var entries: List(ResourceRef) = List.create(ResourceRef, cap: 7)
+  entries.add(value: bufferRef(id: picture.frame))
+  entries.add(value: bufferRef(id: picture.draws))
+  entries.add(value: bufferRef(id: picture.sprite))
+  entries.add(value: textureViewRef(id: binding.albedo))
+  entries.add(value: samplerRef(id: picture.sampler))
+  entries.add(value: textureViewRef(id: binding.normalDepth))
+  entries.add(value: bufferRef(id: binding.frames))
+  var covered: Int = -1
+  if let bindGroup: BindGroupId = createRenderBindGroup(
+    resources: resources
+    pipeline: picture.pipeline
+    entries: entries
+  ) {
+    var targets: RenderTargetSet = createRenderTargetSet(clear: true)
+    loop let target: view TextureViewId in picture.targets {
+      let added: Bool = addColorTarget(
+        targets: targets
+        colorView: textureViewRef(id: target)
+        r: 0.0
+        g: 0.0
+        b: 0.0
+        a: 0.0
+      )
+    }
+    setDepthTarget(
+      targets: targets
+      depthView: textureViewRef(id: picture.depth)
+      clear: true
+      clearValue: 0.0
+      readOnly: false
+    )
+    if var recording: Recording = beginRecording(resources: resources) {
+      var drawn: Bool = false
+      unsafe {
+        let pass: Ptr = beginRenderPassMulti(
+          recording: recording
+          resources: resources
+          targets: targets
+        )
+        if pass is not webgpuNull() {
+          drawn = recordDrawInPass(
+            resources: resources
+            pass: pass
+            pipeline: picture.pipeline
+            bindGroup: bindGroup
+            vertexCount: 6
+            instanceCount: batch.count
+            firstVertex: 0
+            firstInstance: 0
+          )
+          endRenderPass(pass: pass)
+        }
+      }
+      recordRenderPipelineUse(recording: recording, resources: resources, id: picture.pipeline)
+      recordBindGroupUse(recording: recording, resources: resources, id: bindGroup)
+      # The albedo target: alpha 1 (the roughness) where a fragment was kept
+      let copied: Bool = recordCopyTextureToBuffer(
+        recording: recording
+        resources: resources
+        texture: picture.textures.copyAtFallback(index: 1, fallback: noTextureId())
+        buffer: picture.pixels
+        bytesPerRow: pictureWidth * 4
+      )
+      if drawn and copied {
+        if let submission: SubmissionId = submit(resources: resources, recording: recording) {
+          let done: Bool = waitSubmission(resources: resources, id: submission)
+          let retired: Bool = retireSubmission(resources: resources, id: submission)
+          covered = countCovered(resources: resources, pixels: picture.pixels)
+        }
+      }
+    }
+    let bindRetired: Bool = retireBindGroup(resources: resources, id: bindGroup)
+  }
+  ret covered
+}
+
+# The pixels with a fragment in a read-back albedo target
+func countCovered(resources: mod GpuResources, pixels: view BufferId) ret Int {
+  let size: Int = pictureWidth * 4 * pictureHeight
+  var covered: Int = -1
+  if let read: ReadbackId = startReadback(
+    resources: resources
+    buffer: pixels
+    offset: 0
+    size: size
+  ) {
+    if waitReadback(resources: resources, id: read) {
+      var bytes: List(UInt8) = List.create(UInt8, cap: size)
+      loop var i: Int = 0, i < size, ++i {
+        bytes.add(value: 0)
+      }
+      if copyReadback(resources: resources, id: read, destination: bytes) {
+        covered = 0
+        loop var pixel: Int = 0, pixel < size / 4, ++pixel {
+          if bytes.copyAtFallback(index: pixel * 4 + 3, fallback: 0) > 0 {
+            covered = covered + 1
+          }
+        }
+      }
+    }
+    let retired: Bool = retireReadback(resources: resources, id: read)
+  }
+  ret covered
+}
+
+# A stable value 0..1 from two numbers
+func spread(first: view Float, second: view Float) ret Float {
+  ret farSpriteKeep(x: first * 1.37 + 0.11, y: second * 2.71 + 0.37)
+}
+
+func main() ret Int {
+  var booted: Int = 0
+  unsafe {
+    booted = webgpuBootstrap()
+  }
+  if booted is not 1 {
+    log("no GPU")
+    ret 1
+  }
+  var treeSettings: ImpostorSettings = impostorPcSettings()
+  var canopySettings: ImpostorSettings = canopyPcSettings()
+  var tolerance: Float = canopyTolerance
+  if Sys.getEnv(name: "RAE_IMPOSTOR_PHONE") is "1" {
+    tolerance = phoneTolerance
+    treeSettings = impostorPhoneSettings()
+    canopySettings = canopyPhoneSettings()
+  }
+  var failures: Int = 0
+  var issuer: IdIssuer = IdIssuer.create()
+  if var resources: GpuResources = GpuResources.create(issuer: issuer, capacity: 512) {
+    # The trees' atlas, as GroveTrees bakes it
+    var store: MeshStore = createMeshStore()
+    var subjects: List(ImpostorSubject) = List.create(ImpostorSubject, cap: treeSpeciesCount)
+    loop var species: Int = 0, species < treeSpeciesCount, ++species {
+      let meshes: List(MeshData) = speciesLevelMeshes(
+        species: species
+        patches: nearPatches
+        leaves: nearLeaves
+      )
+      var handles: List(MeshHandle) = List.create(MeshHandle, cap: meshes.length)
+      loop let mesh: view MeshData in meshes {
+        handles.add(value: meshStoreUpload(
+          store: store
+          resources: resources
+          verts: mesh.verts
+          vertCount: mesh.vertCount
+          indices: mesh.indices
+        ))
+      }
+      subjects.add(
+        value: impostorSubject(
+          parts: meshes
+          meshes: handles
+          albedos: speciesAlbedos(species: species)
+        )
+      )
+    }
+    var trees: ImpostorAtlas = bakeImpostorAtlas(
+      resources: resources
+      meshes: store
+      subjects: subjects
+      settings: treeSettings
+      cutoff: spriteCutoff
+    )
+    # One cell of each species, in a row of cells far apart (each is drawn
+    # alone)
+    let field: PropField = createPropField(
+      originX: 0.0
+      originY: 0.0
+      size: cellSize * treeSpeciesCount.toFloat()
+      cellSize: cellSize
+    )
+    var sprites: List(FarSprite) = List.create(FarSprite, cap: treeSpeciesCount * treesPerCell)
+    loop var species: Int = 0, species < treeSpeciesCount, ++species {
+      let height: Float = subjects.copyAtDefault(index: species).height
+      loop var tree: Int = 0, tree < treesPerCell, ++tree {
+        let seedA: Float = species.toFloat() * 31.0 + tree.toFloat()
+        # Unit-height forms 8-13 m tall, the autumn trees and palm 0.9-1.3 times their 5.5 m
+        var scale: Float = 8.0 + spread(first: seedA, second: 3.0) * 5.0
+        if species >= speciesOrange {
+          scale = 0.9 + spread(first: seedA, second: 3.0) * 0.4
+        }
+        sprites.add(value: farSpriteAt(
+          position: Vec3.create(
+            x: species.toFloat() * cellSize + 3.0 + spread(first: seedA, second: 1.0) * (cellSize - 6.0)
+            y: 3.0 + spread(first: seedA, second: 2.0) * (cellSize - 6.0)
+            z: 0.0
+          )
+          centerZ: 0.0
+          height: height * scale
+          yaw: spread(first: seedA, second: 4.0) * 6.2831853
+          layer: species
+        ))
+      }
+    }
+    var instances: List(CanopyTree) = List.create(CanopyTree, cap: sprites.length)
+    let clusters: List(CanopyCluster) = farCanopyClusters(
+      field: field
+      trees: sprites
+      instances: instances
+    )
+    var canopy: ImpostorAtlas = bakeCanopyAtlas(
+      resources: resources
+      trees: trees.binding
+      instances: instances
+      clusters: clusters
+      settings: canopySettings
+      cutoff: spriteCutoff
+    )
+    if trees.subjects is not treeSpeciesCount or canopy.subjects is not treeSpeciesCount {
+      log("FAIL: the bakes made {trees.subjects} tree and {canopy.subjects} cluster pages")
+      ret 1
+    }
+    let picture: Picture = createPicture(resources: resources)
+    var distances: List(Float) = List.create(Float, cap: 2)
+    distances.add(value: 150.0)
+    distances.add(value: 700.0)
+    distances.add(value: 1100.0)
+    # Directions between the canopy's baked views (45 degrees apart)
+    var bearings: List(Float) = List.create(Float, cap: 2)
+    bearings.add(value: 0.2)
+    bearings.add(value: 0.52)
+    bearings.add(value: 1.0)
+    bearings.add(value: 1.35)
+    loop var species: Int = 0, species < treeSpeciesCount, ++species {
+      let cluster: CanopyCluster = clusters.copyAtDefault(index: species)
+      var treeBatch: InstanceBatch = createInstanceBatch(
+        mesh: meshHandleNone()
+        capacity: treesPerCell
+      )
+      loop var tree: Int = 0, tree < sprites.length, ++tree {
+        let sprite: FarSprite = sprites.copyAtDefault(index: tree)
+        if sprite.layer is species {
+          addSpriteInstance(
+            batch: treeBatch
+            position: sprite.position
+            height: sprite.height
+            yaw: sprite.yaw
+            layer: sprite.layer
+            toon: true
+          )
+        }
+      }
+      var clusterBatch: InstanceBatch = createInstanceBatch(mesh: meshHandleNone(), capacity: 1)
+      addSpriteInstance(
+        batch: clusterBatch
+        position: cluster.centre
+        height: 1.0
+        yaw: 0.0
+        layer: species
+        toon: true
+      )
+      var line: String = "{speciesNames(species: species)}:"
+      loop let distance: view Float in distances {
+        var treePixels: Int = 0
+        var clusterPixels: Int = 0
+        loop let bearing: view Float in bearings {
+          let eye: Vec3 = Vec3.create(
+            x: cluster.centre.x + distance * Math.cos(x: bearing)
+            y: cluster.centre.y + distance * Math.sin(x: bearing)
+            z: 2.0
+          )
+          treePixels = treePixels + coveredPixels(
+            resources: resources
+            picture: picture
+            binding: trees.binding
+            batch: treeBatch
+            eye: eye
+            target: cluster.centre
+          )
+          clusterPixels = clusterPixels + coveredPixels(
+            resources: resources
+            picture: picture
+            binding: canopy.binding
+            batch: clusterBatch
+            eye: eye
+            target: cluster.centre
+          )
+        }
+        var share: Float = 0.0
+        if treePixels > 0 {
+          share = clusterPixels.toFloat() / treePixels.toFloat()
+        }
+        let agrees: Bool = Math.abs(value: share - 1.0) <= tolerance
+        if not agrees {
+          failures = failures + 1
+        }
+        line = "{line} {distance.toInt()} m: trees {treePixels} px, cluster {clusterPixels} px ({(share * 100.0 + 0.5).toInt()}%) ={agrees};"
+      }
+      log(line)
+    }
+    retireImpostorAtlas(atlas: canopy, resources: resources)
+    retireImpostorAtlas(atlas: trees, resources: resources)
+    meshStoreShutdown(store: store, resources: resources)
+    shutdown(resources: resources)
+  }
+  if failures > 0 {
+    log("FAIL: {failures} species and distances off by more than {(tolerance * 100.0).toInt()}%")
+    ret 1
+  }
+  log("canopy coverage OK")
+  ret 0
+}
+
+func speciesNames(species: view Int) ret String {
+  let names: List(String) = "broadleaf umbrella cypress spruce orange red gold crimson palm".split(
+    sep: " "
+  )
+  ret names.copyAtFallback(index: species, fallback: "species")
+}

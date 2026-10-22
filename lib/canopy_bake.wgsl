@@ -20,7 +20,8 @@ struct BakeU {
 // (layer, origin u, v, size) and its box (half sides over the radius, 1):
 // each view is framed to the box (impostorExtents)
 @group(0) @binding(2) var<storage, read> clusters: array<vec4<f32>>;
-// The tree atlas's frames (per subject: sphere over height, page)
+// The tree atlas's frames (per subject three vec4: sphere over height, page,
+// framing; pushImpostorFrame)
 @group(0) @binding(3) var<storage, read> treeFrames: array<vec4<f32>>;
 @group(0) @binding(4) var treeAlbedo: texture_2d_array<f32>;
 @group(0) @binding(5) var treeNormalDepth: texture_2d_array<f32>;
@@ -59,8 +60,8 @@ fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut
   let clusterSphere = clusters[cluster * 3u];
   let clusterPage = clusters[cluster * 3u + 1u];
   let clusterBox = clusters[cluster * 3u + 2u];
-  let treeFrame = treeFrames[subject * 2u];
-  let treePage = treeFrames[subject * 2u + 1u];
+  let treeFrame = treeFrames[subject * 3u];
+  let treePage = treeFrames[subject * 3u + 1u];
   // The cluster's view, and the tree's own view nearest it
   let direction = impostorViewDirection(cell, views);
   let treeViews = U.a.y;
@@ -103,11 +104,13 @@ fn fs(in: VsOut) -> FsOut {
   }
   // The point's depth toward the cluster view's eye: the tree's plane, moved
   // by the tree's baked depth (its own view is within a few degrees)
-  let depth = clamp(in.depthRadius.x + (normalDepth.a * 2.0 - 1.0) * in.depthRadius.y, -1.0, 1.0);
-  let normal = impostorTurn(normalDepth.xyz * 2.0 - vec3<f32>(1.0), in.yaw);
+  let depth = clamp(in.depthRadius.x + impostorDepthOf(normalDepth, albedo.a) * in.depthRadius.y, -1.0, 1.0);
+  let normal = impostorTurn(impostorUnpackNormal(normalDepth.xy), in.yaw);
+  // The tree's depth behind its surface there, in the cluster's units
+  let behind = impostorThicknessOf(normalDepth, albedo.a) * in.depthRadius.y;
   var o: FsOut;
   o.albedo = vec4<f32>(albedo.rgb, 1.0);
-  o.normalDepth = vec4<f32>(normalize(normal) * 0.5 + vec3<f32>(0.5), 0.5 + 0.5 * depth);
+  o.normalDepth = vec4<f32>(impostorPackNormal(normal), clamp(behind * 0.5, 0.0, 1.0), 0.5 + 0.5 * depth);
   // Nearer the eye is a smaller depth (cleared to 1, test Less)
   o.depth = 0.5 - 0.5 * depth;
   return o;

@@ -49,6 +49,9 @@ struct SpriteU {
   // grid's views per side (0: plain pictures), b.w = 1 to blend three views.
   a: vec4<f32>,
   b: vec4<f32>,
+  // c.x = 1: march each view (a box framed atlas, the far canopy's clusters:
+  // impostorMarchSurface)
+  c: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var<storage, read> draws: array<DrawU>;
@@ -182,7 +185,20 @@ fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut
     let quadRight = impostorRight(eyeWorld);
     let quadUp = cross(eyeWorld, quadRight);
     let local = c * 2.0 - vec2<f32>(1.0);
-    let offset = quadRight * local.x + quadUp * local.y;
+    // A box framed subject's quad stands at the box's front toward the eye
+    // (its depth, the quad's, is then never behind its trees: a cluster on a
+    // slope is not hidden by the ground in its middle); the views are read
+    // along the same rays, so the picture is the same
+    // and is as wide and tall as the box's outline (a wide, low cluster
+    // leaves most of the sphere's square empty)
+    var forward = 0.0;
+    var reach = vec2<f32>(1.0);
+    if (box.w > 0.5) {
+      forward = dot(abs(impostorUnturn(eyeWorld, yaw)), box.xyz);
+      reach = vec2<f32>(
+        dot(abs(impostorUnturn(quadRight, yaw)), box.xyz), dot(abs(impostorUnturn(quadUp, yaw)), box.xyz));
+    }
+    let offset = quadRight * (local.x * reach.x) + quadUp * (local.y * reach.y) + eyeWorld * forward;
     world = centre + offset * radius;
     // The views, in the prop's own frame
     let eye = impostorUnturn(eyeWorld, yaw);
@@ -203,6 +219,10 @@ fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut
     let localB = impostorViewPoint(point, eye, directionB, impostorExtents(directionB, box));
     o.localAB = vec4<f32>(localA, localB);
     o.localC = impostorViewPoint(point, eye, directionC, impostorExtents(directionC, box));
+    if (S.c.x > 0.5) {
+      // Marched: the quad's point in the subject's frame, over its radius
+      o.localAB = vec4<f32>(point, 0.0);
+    }
     o.cellsAB = vec4<f32>(picks.a, picks.b);
     o.cellCWeights = vec4<f32>(picks.c, picks.weights.y, picks.weights.z);
     o.eyeYaw = vec4<f32>(eye, yaw);
@@ -279,8 +299,8 @@ fn impostorTap(
   // One parallax step: the depth where the ray crosses the view's plane
   // (none where nothing was baked) moves the read to where it meets the prop
   let planeUv = impostorPageUv(page.xyz, impostorAtlasUv(cell, views, local));
-  let planeDepth = textureSample(impostorNormalDepth, spriteSamp, planeUv, layer).a * 2.0 - 1.0;
-  let moved = impostorParallax(local, planeDepth * planeAlpha, eye, viewDirection, extents);
+  let planeDepth = impostorDepthOf(textureSample(impostorNormalDepth, spriteSamp, planeUv, layer), planeAlpha);
+  let moved = impostorParallax(local, planeDepth * min(planeAlpha * 2.0, 1.0), eye, viewDirection, extents);
   let uv = impostorPageUv(page.xyz, impostorAtlasUv(cell, views, moved));
   let normalDepth = textureSample(impostorNormalDepth, spriteSamp, uv, layer);
   var tap: ImpostorTap;
@@ -288,8 +308,8 @@ fn impostorTap(
   // Off the view's picture (a box framed view is smaller than the quad):
   // nothing there, not the next view's picture
   tap.albedo.a = tap.albedo.a * impostorOnPicture(local);
-  tap.normal = normalDepth.xyz * 2.0 - vec3<f32>(1.0);
-  tap.position = impostorViewPosition(moved, normalDepth.a * 2.0 - 1.0, viewDirection, extents);
+  tap.normal = impostorUnpackNormal(normalDepth.xy);
+  tap.position = impostorViewPosition(moved, impostorDepthOf(normalDepth, tap.albedo.a), viewDirection, extents);
   return tap;
 }
 
@@ -302,6 +322,169 @@ fn impostorPlaneAlpha(cell: vec2<f32>, local: vec2<f32>, layer: i32, page: vec4<
 // 1 where `local` is on a view's picture (-1..1 both ways), else 0
 fn impostorOnPicture(local: vec2<f32>) -> f32 {
   return select(0.0, 1.0, abs(local.x) <= 1.0 && abs(local.y) <= 1.0);
+}
+
+// One view of a box framed subject (a canopy cluster: deep and sparse, its
+// views far apart) marched along the eye's ray: from where the ray enters
+// the box to where it leaves, each step's point projected onto the view's
+// picture, the first that lies within a crown's thickness behind the
+// surface the view baked there (the depth the bake stored there: about a
+// crown, almost nothing at a trunk). The view's trees are found where they are,
+// not where the view drew them, so a cluster seen between two views keeps
+// its trees. `albedo.a` is 1 on a hit, else 0.
+const impostorMarchSteps: u32 = 12u;
+
+// How far (depth units) a point of the ray is behind the surface a view
+// baked where it falls: negative in front of it, or where nothing is
+fn impostorBehind(
+  cell: vec2<f32>, spot: vec3<f32>, viewDirection: vec3<f32>, extents: vec3<f32>, layer: i32,
+  page: vec4<f32>, lod: f32, threshold: f32,
+) -> f32 {
+  let local = vec2<f32>(dot(spot, impostorRight(viewDirection)) / extents.x, dot(spot, impostorUp(viewDirection)) / extents.y);
+  let uv = impostorPageUv(page.xyz, impostorAtlasUv(cell, S.b.z, local));
+  let alpha = textureSampleLevel(spriteTex, spriteSamp, uv, layer, lod).a;
+  if (alpha < threshold) {
+    return -1.0;
+  }
+  let surface = impostorDepthOf(textureSampleLevel(impostorNormalDepth, spriteSamp, uv, layer, lod), alpha);
+  return surface - dot(spot, viewDirection) / extents.z;
+}
+fn impostorMarch(
+  cell: vec2<f32>, point: vec3<f32>, eye: vec3<f32>, box: vec4<f32>, layer: i32, page: vec4<f32>,
+  lod: f32, threshold: f32,
+) -> ImpostorTap {
+  let views = S.b.z;
+  let viewDirection = impostorViewDirection(cell, views);
+  let extents = impostorExtents(viewDirection, box);
+  let right = impostorRight(viewDirection);
+  let up = impostorUp(viewDirection);
+  var tap: ImpostorTap;
+  tap.albedo = vec4<f32>(0.0);
+  tap.normal = vec3<f32>(0.0, 0.0, 1.0);
+  tap.position = point;
+  // The ray point - eye * t inside the box (|x| <= box.xyz)
+  let away = -eye;
+  let safe = select(away, vec3<f32>(0.000001), abs(away) < vec3<f32>(0.000001));
+  let first = (-box.xyz - point) / safe;
+  let second = (box.xyz - point) / safe;
+  let enter = max(max(min(first.x, second.x), min(first.y, second.y)), min(first.z, second.z));
+  let leave = min(min(max(first.x, second.x), max(first.y, second.y)), max(first.z, second.z));
+  if (leave <= enter) {
+    return tap;
+  }
+  // As many steps as the ray crosses texels of the view's picture at the
+  // level it is read at (a far cluster's picture is a few texels across),
+  // at least 4 and at most impostorMarchSteps
+  let entering = point + away * enter;
+  let leaving = point + away * leave;
+  let across = vec2<f32>(dot(leaving - entering, right) / extents.x, dot(leaving - entering, up) / extents.y);
+  let cellTexels = vec2<f32>(textureDimensions(spriteTex, 0)) * page.z / views / exp2(lod);
+  let texelsCrossed = length(across * 0.5 * cellTexels);
+  let steps = clamp(u32(ceil(texelsCrossed)) + 2u, 4u, impostorMarchSteps);
+  // Nothing on the ray at all: four reads of a level two coarser (a coarse
+  // texel averages the finer ones, so it is 0 only where all are empty, and
+  // filtered it reaches past its texel) skip the march for the empty parts
+  // of the quad, most of it where clusters overlap low across a forest
+  var anything = 0.0;
+  for (var probe = 0u; probe < 4u; probe = probe + 1u) {
+    let spot = point + away * mix(enter, leave, (f32(probe) + 0.5) / 4.0);
+    let local = vec2<f32>(dot(spot, right) / extents.x, dot(spot, up) / extents.y);
+    let uv = impostorPageUv(page.xyz, impostorAtlasUv(cell, views, local));
+    anything = max(anything, textureSampleLevel(spriteTex, spriteSamp, uv, layer, lod + 2.0).a);
+  }
+  if (anything <= 0.0) {
+    return tap;
+  }
+  // From the front, the first step that is behind the surface baked where
+  // it falls; then halve back to where the ray crosses that surface, and
+  // keep it if it lies within the depth baked there
+  var front = enter;
+  for (var marched = 0u; marched < steps; marched = marched + 1u) {
+    let t = mix(enter, leave, (f32(marched) + 1.0) / f32(steps));
+    if (impostorBehind(cell, point + away * t, viewDirection, extents, layer, page, lod, threshold) < 0.0) {
+      front = t;
+      continue;
+    }
+    var back = t;
+    for (var halving = 0u; halving < 5u; halving = halving + 1u) {
+      let middle = (front + back) * 0.5;
+      if (impostorBehind(cell, point + away * middle, viewDirection, extents, layer, page, lod, threshold) < 0.0) {
+        front = middle;
+      } else {
+        back = middle;
+      }
+    }
+    let spot = point + away * back;
+    let local = vec2<f32>(dot(spot, right) / extents.x, dot(spot, up) / extents.y);
+    let uv = impostorPageUv(page.xyz, impostorAtlasUv(cell, views, local));
+    let normalDepth = textureSampleLevel(impostorNormalDepth, spriteSamp, uv, layer, lod);
+    let albedo = textureSampleLevel(spriteTex, spriteSamp, uv, layer, lod);
+    let behind = impostorDepthOf(normalDepth, albedo.a) - dot(spot, viewDirection) / extents.z;
+    if (behind <= impostorThicknessOf(normalDepth, albedo.a) + 0.02) {
+      tap.albedo = vec4<f32>(albedo.rgb, 1.0);
+      tap.normal = impostorUnpackNormal(normalDepth.xy);
+      tap.position = spot;
+      break;
+    }
+    // Behind the prop there, not in it: go on past
+    front = t;
+  }
+  return tap;
+}
+
+// A marched subject's surface: the prop's where the view marched finds it
+// on the eye's ray (marched, the views agree on where the trees are, so a
+// vote of three changes almost nothing; checks/canopyCoverage)
+fn impostorMarchSurface(in: VsOut) -> FsOut {
+  let yaw = in.eyeYaw.w;
+  let point = in.localAB.xyz;
+  let box = impostorFrames[u32(in.page.w) * 3u + 2u];
+  let radius = in.centreRadius.w;
+  // This fragment's own ray from the eye (the quad stands at the box's
+  // front, so the one direction of the quad's centre is off at its edges)
+  let pointWorld = in.centreRadius.xyz + impostorTurn(point, yaw) * radius;
+  let eye = impostorUnturn(normalize(cameraPosition() - pointWorld), yaw);
+  // The picture's mip level, from how fast the first view's picture moves
+  // across the screen (the march reads at one level)
+  let texels = in.uv * vec2<f32>(textureDimensions(spriteTex, 0));
+  let footprint = max(length(dpdx(texels)), length(dpdy(texels)));
+  let lod = max(log2(max(footprint, 1.0)), 0.0);
+  let threshold = alphaThreshold(in);
+  // One view marched a fragment: with three, each by its weight, by a
+  // dither over the screen (stable without TAA, resolved by it), so the
+  // picture moves from view to view without a pop at a third of the cost
+  var cell = in.cellsAB.xy;
+  if (S.b.w > 0.5) {
+    let pick = fadeDither(in.pos.xy, 0.731, fadeFrameOffset(F.jitter.xy));
+    let first = 1.0 - in.cellCWeights.z - in.cellCWeights.w;
+    if (pick >= first) {
+      cell = in.cellsAB.zw;
+      if (pick >= first + in.cellCWeights.z) {
+        cell = in.cellCWeights.xy;
+      }
+    }
+  }
+  let tap = impostorMarch(cell, point, eye, box, in.layer, in.page, lod, threshold);
+  if (tap.albedo.a < 0.5 || !fadeKeeps(in.fade, in.pos.xy, fadeFrameOffset(F.jitter.xy))) {
+    discard;
+  }
+  let albedo = tap.albedo.rgb;
+  let normal = tap.normal;
+  let position = tap.position;
+  let worldNormal = impostorTurn(normal / max(length(normal), 0.0001), yaw);
+  let world = in.centreRadius.xyz + impostorTurn(position, yaw) * radius;
+  let clip = F.viewProj * vec4<f32>(world, 1.0);
+  surfaceDepth = clamp(clip.z / clip.w, 0.0, 1.0);
+  let oct = octEncode(worldNormal);
+  let now = in.clipNow.xy / in.clipNow.w;
+  let prev = in.clipPrev.xy / in.clipPrev.w;
+  let motion = (now - prev) * vec2<f32>(0.5, -0.5);
+  let mEnc = clamp(motion, vec2<f32>(-0.5), vec2<f32>(0.5)) + vec2<f32>(0.50196078);
+  var o: FsOut;
+  o.gba = vec4<f32>(oct.x, oct.y, 0.5, in.mode);
+  o.gbb = vec4<f32>(albedo, 1.0);
+  o.gbc = vec4<f32>(mEnc.x, mEnc.y, 0.0, in.emissive);
+  return o;
 }
 
 // An impostor's surface: its views blended by weight and alpha
@@ -366,6 +549,9 @@ fn impostorSurface(in: VsOut) -> FsOut {
 // decodes and shades it. The cutout discards in both.
 fn gbufferSurface(in: VsOut) -> FsOut {
   surfaceDepth = in.pos.z;
+  if (S.c.x > 0.5) {
+    return impostorMarchSurface(in);
+  }
   if (S.b.z > 0.5) {
     return impostorSurface(in);
   }

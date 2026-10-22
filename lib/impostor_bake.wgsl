@@ -52,8 +52,10 @@ fn vs(@builtin(instance_index) ii: u32,
 struct FsOut {
   // The albedo, unlit, and alpha 1 where the prop is
   @location(0) albedo: vec4<f32>,
-  // The normal (object space, * 0.5 + 0.5), turned to the eye (leaves are
-  // two-sided), and the depth (0.5 + 0.5 * depth: 1 at the sphere's front)
+  // The normal (object space), turned to the eye (leaves are two-sided),
+  // the depth behind it (its mirror about the sphere's centre: about the
+  // crown's depth, nothing at the trunk) and the depth (0.5 + 0.5 * depth:
+  // 1 at the sphere's front); impostorPackNormal's layout
   @location(1) normalDepth: vec4<f32>,
 };
 
@@ -65,6 +67,7 @@ fn fs(in: VsOut) -> FsOut {
   }
   var o: FsOut;
   o.albedo = vec4<f32>(in.albedo, 1.0);
-  o.normalDepth = vec4<f32>(n * 0.5 + vec3<f32>(0.5), clamp(0.5 + 0.5 * in.depth, 0.0, 1.0));
+  o.normalDepth = vec4<f32>(
+    impostorPackNormal(n), clamp(in.depth, 0.0, 1.0), clamp(0.5 + 0.5 * in.depth, 0.0, 1.0));
   return o;
 }

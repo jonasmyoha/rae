@@ -231,6 +231,41 @@ unchanged (10.0 ms), a view from 28 m up over the forest 10.4 -> 10.9 ms.
 `checks/impostorBake` also bakes a canopy of four cells and checks its mips
 keep their coverage; the 143 gate checks every planted tree is in a cluster.
 
+**Follow-up: clusters that keep their trees (2026-10-22).** A downstream
+game's sparse hill forest showed far clusters with far fewer trees than the
+trees themselves, flat umbrella pines and palms nearly gone.
+`checks/canopyCoverage` now measures it: one 40 m cell of each species,
+drawn as a cluster and as its trees with the sprite pass's own shader, at
+150, 700 and 1,100 m from four directions between views. The clusters kept
+0-77% of their trees. Five causes, fixed in order:
+
+* The canopy bake read the trees' frames two vec4 apart after they became
+  three (the box framing): most species baked with another's sphere and
+  page, or not at all (0%).
+* A filtered read at a prop's edge mixed in the empty texels' depth (0, the
+  far back), so edges looked far behind the prop. Depth and the new
+  thickness are now stored times coverage and divided by the filtered alpha
+  (`impostorDepthOf`).
+* A cluster is 40 m deep and its views were 45 degrees apart: seen between
+  two views, a tree lands up to 13 m from where a view drew it, and the one
+  parallax step only moves a pixel that already hits. Box framed atlases now
+  march each view along the fragment's own ray through the box
+  (`impostorMarch`): the first point within the depth baked behind the
+  surface there (the normal is stored octahedral to make room for that
+  thickness; a tree's is its front mirrored about its centre, about a crown,
+  nothing at a trunk). The PC canopy has 4 x 4 views of 96 x 24 (same
+  memory, twelve sides about 30 degrees apart), the phone 3 x 3 of 48 x 12.
+* Averaging three views' alpha lost what the views disagree on; a fragment
+  now marches one view, picked by its weight with a dither.
+* A cluster's quad stood at its centre, so on a slope the ground in front of
+  the centre hid its front trees: the quad now stands at the box's front.
+
+Clusters now keep 88-104% of their trees' pixels on PC (the phone 91-120%).
+The march costs about 1.5 ms in views across the forest (10.3 -> 11.6 ms
+from 28 m up, 9.3 -> 11.0 ms from 1.1 km away; the walking view unchanged),
+after drawing the clusters front to back, sizing the march to the texels
+crossed (at most 12 steps) and skipping rays a coarse level shows empty.
+
 ### 2.5 Performance
 
 * PC: near meshes to 30 m, middle to ~70 m, impostors to ~250 m, canopy past

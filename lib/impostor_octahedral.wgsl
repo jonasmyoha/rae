@@ -72,6 +72,38 @@ fn impostorAtlasUv(cell: vec2<f32>, views: f32, local: vec2<f32>) -> vec2<f32> {
   return vec2<f32>(cell.x + 0.5 + 0.5 * local.x, cell.y + 0.5 - 0.5 * local.y) / views;
 }
 
+// The atlas's normal-and-depth texel (both bakes write it, the mips average
+// it, the draws read it): the normal octahedral in .xy, how deep the prop is
+// behind its front surface there in .z (0..1 = 0..2 depth units: about a
+// crown, almost nothing for a trunk; impostorMarch tests against it) and the
+// front surface's depth in .w (0.5 + 0.5 * depth, 1 at the sphere's or
+// box's front). An empty texel is (0.5, 0.5, 0, 0). The .z and .w are
+// stored times the texel's coverage (the albedo's alpha): a filtered read
+// at a prop's edge mixes in empty texels, and dividing by the filtered
+// alpha (impostorDepthOf, impostorThicknessOf) takes them out again, where
+// a plain read would see the edge far behind the prop.
+fn impostorDepthOf(normalDepth: vec4<f32>, alpha: f32) -> f32 {
+  return clamp(normalDepth.w / max(alpha, 0.001), 0.0, 1.0) * 2.0 - 1.0;
+}
+fn impostorThicknessOf(normalDepth: vec4<f32>, alpha: f32) -> f32 {
+  return clamp(normalDepth.z / max(alpha, 0.001), 0.0, 1.0) * 2.0;
+}
+fn impostorPackNormal(normal: vec3<f32>) -> vec2<f32> {
+  let n = normal / max(abs(normal.x) + abs(normal.y) + abs(normal.z), 0.000001);
+  var p = n.xy;
+  if (n.z < 0.0) {
+    p = (vec2<f32>(1.0) - abs(n.yx)) * vec2<f32>(select(-1.0, 1.0, n.x >= 0.0), select(-1.0, 1.0, n.y >= 0.0));
+  }
+  return p * 0.5 + vec2<f32>(0.5);
+}
+fn impostorUnpackNormal(packed: vec2<f32>) -> vec3<f32> {
+  let f = packed * 2.0 - vec2<f32>(1.0);
+  var n = vec3<f32>(f.x, f.y, 1.0 - abs(f.x) - abs(f.y));
+  let t = max(-n.z, 0.0);
+  n = vec3<f32>(n.x + select(t, -t, n.x >= 0.0), n.y + select(t, -t, n.y >= 0.0), n.z);
+  return normalize(n);
+}
+
 // The three grid points round a direction and their weights (the
 // barycentric weights of the direction in the grid triangle it falls in;
 // they sum to 1). Blending the three views by them changes the picture

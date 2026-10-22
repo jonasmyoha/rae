@@ -48,31 +48,35 @@ type CanopyCluster {
   treeCount: Int
 }
 
-# A PC's canopy: 3 x 3 views (the eight sides 45 degrees apart and the top),
-# 128 x 32 pixels a view (a cluster is wide and low; each view is framed to
-# its box), 3 levels, the three nearest blended; 8 x 8 clusters a layer
-# (3072 x 768 pixels)
+# A PC's canopy: 4 x 4 views (twelve sides about 30 degrees apart, four
+# from above), 96 x 24 pixels a view (a cluster is wide and low; each view
+# is framed to its box), 3 levels, each view marched and the three nearest
+# blended; 8 x 8 clusters a layer (3072 x 768 pixels). Views closer than 45
+# degrees keep a sparse cluster's trees where its trees show them
+# (checks/canopyCoverage).
 func canopyPcSettings() ret ImpostorSettings {
   ret ImpostorSettings {
-    viewsPerSide: 3
-    cellSize: 128
+    viewsPerSide: 4
+    cellSize: 96
     mips: 3
     blendViews: true
     subjectsPerSide: 8
-    cellHeight: 32
+    cellHeight: 24
+    marchViews: true
   }
 }
 
-# A phone's: 2 x 2 views (four sides), 64 x 16 pixels a view, the nearest
-# one
+# A phone's: 3 x 3 views (the eight sides 45 degrees apart and the top),
+# 48 x 12 pixels a view, the nearest one marched (1152 x 288 a layer)
 func canopyPhoneSettings() ret ImpostorSettings {
   ret ImpostorSettings {
-    viewsPerSide: 2
-    cellSize: 64
+    viewsPerSide: 3
+    cellSize: 48
     mips: 3
     blendViews: false
     subjectsPerSide: 8
-    cellHeight: 16
+    cellHeight: 12
+    marchViews: true
   }
 }
 
@@ -405,7 +409,7 @@ func recordCanopyViews(
       colorView: textureViewRef(id: normalDepthView)
       r: 0.5
       g: 0.5
-      b: 1.0
+      b: 0.0
       a: 0.0
     )
     setDepthTarget(

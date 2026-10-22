@@ -152,6 +152,7 @@ fn writeLevel(@builtin(global_invocation_id) gid: vec3<u32>) {
   // see-through texel holds none of them
   var albedo = vec3<f32>(0.0);
   var normal = vec3<f32>(0.0);
+  var behind = 0.0;
   var depth = 0.0;
   var sum = 0.0;
   for (var y = 0u; y < blockWidth; y = y + 1u) {
@@ -160,7 +161,8 @@ fn writeLevel(@builtin(global_invocation_id) gid: vec3<u32>) {
       let colour = textureLoad(sourceAlbedo, source, i32(layer), 0);
       let normalDepth = textureLoad(sourceNormalDepth, source, i32(layer), 0);
       albedo = albedo + colour.rgb * colour.a;
-      normal = normal + (normalDepth.xyz * 2.0 - vec3<f32>(1.0)) * colour.a;
+      normal = normal + impostorUnpackNormal(normalDepth.xy) * colour.a;
+      behind = behind + normalDepth.z * colour.a;
       depth = depth + normalDepth.w * colour.a;
       sum = sum + colour.a;
     }
@@ -168,7 +170,7 @@ fn writeLevel(@builtin(global_invocation_id) gid: vec3<u32>) {
   let destination = vec2<i32>(texel);
   if (sum <= 0.0) {
     textureStore(targetAlbedo, destination, i32(layer), vec4<f32>(0.0));
-    textureStore(targetNormalDepth, destination, i32(layer), vec4<f32>(0.5, 0.5, 1.0, 0.0));
+    textureStore(targetNormalDepth, destination, i32(layer), vec4<f32>(0.5, 0.5, 0.0, 0.0));
     return;
   }
   let count = f32(blockWidth * blockWidth);
@@ -176,5 +178,7 @@ fn writeLevel(@builtin(global_invocation_id) gid: vec3<u32>) {
   let alpha = clamp(key * scales[cellOf(texel, layer)], 0.0, 1.0);
   var n = normal / max(length(normal), 0.0001);
   textureStore(targetAlbedo, destination, i32(layer), vec4<f32>(albedo / sum, alpha));
-  textureStore(targetNormalDepth, destination, i32(layer), vec4<f32>(n * 0.5 + vec3<f32>(0.5), depth / sum));
+  textureStore(
+    targetNormalDepth, destination, i32(layer),
+    vec4<f32>(impostorPackNormal(n), behind / sum * alpha, depth / sum * alpha));
 }
