@@ -7,6 +7,13 @@
 // the vertex stages that read it (the static G-buffer and forward passes,
 // the static shadow pass).
 
+// The tree and bush leaf motion is OFF (trade-off decision 2026-10-22:
+// every version tried looked glitchy). The callers multiply a leaf's
+// flexibility by this, so it is 0 and windLeaf leaves every vertex where it
+// is. windLeaf itself stays (checks/leafWind tests it); 1.0 turns it back on.
+// The grass has its own wind (grass_render.wgsl) and keeps it.
+const windLeafScale: f32 = 0.0;
+
 fn windHash(p: vec2<f32>) -> f32 {
   return fract(sin(dot(p, vec2<f32>(127.1, 311.7))) * 43758.5453);
 }

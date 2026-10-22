@@ -4,6 +4,11 @@ How the renderer's props sway in the wind (lib/Wind.rae, lib/wind.wgsl,
 lib/RendererWind.rae; fixture 1232_wind). The walker examples (136, 137, 143)
 use it.
 
+**The trees and bushes do not move in the wind now (2026-10-22): it looked
+glitchy, so it is switched off (`windLeafScale` in lib/wind.wgsl; see
+docs/tree-wind-design.md). Only the grass follows the wind.** Sections 3
+and 4 describe the motion as it was built.
+
 ## 1. What the wind is
 
 - **A global base wind.** One direction and one strength for the whole
