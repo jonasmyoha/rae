@@ -126,7 +126,7 @@ func createSpriteCache() ret SpriteCache {
   }
 }
 
-const spriteUniformBytes: Int = 32  # two vec4 (SpriteU)
+const spriteUniformBytes: Int = 48  # three vec4 (SpriteU)
 
 const spriteRecordFloats: Int = instanceRecordFloats  # DrawU, same as the instanced path
 
@@ -358,6 +358,14 @@ func impostorBlendFlag(binding: view ImpostorBinding) ret Float {
   ret 0.0
 }
 
+# 1 when the impostor draw marches each view (a box framed atlas), else 0
+func impostorMarchFlag(binding: view ImpostorBinding) ret Float {
+  if binding.marchViews and binding.viewsPerSide > 0 {
+    ret 1.0
+  }
+  ret 0.0
+}
+
 # Draw the quads from `atlas` (ImpostorBake) instead of the sprite array,
 # from the next frame on; the atlas held before is retired. The layers are
 # the same as the sprite array's (one per prop kind), and an instance's
@@ -410,6 +418,13 @@ func writeSpriteUniform(cache: mod SpriteCache, resources: mod GpuResources, ban
     y: band
     z: cache.impostors.binding.viewsPerSide.toFloat()
     w: impostorBlendFlag(binding: cache.impostors.binding)
+  )
+  pushVec4F(
+    writer: args
+    x: impostorMarchFlag(binding: cache.impostors.binding)
+    y: 0.0
+    z: 0.0
+    w: 0.0
   )
   uploadArgs(
     writer: args
