@@ -1122,6 +1122,8 @@ static void sema_lifecycle_post_pass(CompilerContext* ctx, AstModule* module, co
 
 // Defined further down (near the statement analyzer); used earlier by the
 // module-level global/const decl analysis.
+static void sema_const_fill_defaults(Arena* arena, SymbolTable* symbols, AstExpr* literal,
+                                     const AstTypeRef* type, int depth);
 static void sema_fold_const(CompilerContext* ctx, AstModule* module, SymbolTable* symbols,
                             AstExpr* init, Symbol* sym, size_t line, size_t col);
 
@@ -2803,6 +2805,8 @@ static void sema_analyze_decl_inner(CompilerContext* ctx, AstModule* module, Sym
                                       && decl->as.let_decl.value->kind == AST_EXPR_STRING);
                 if (decl->as.let_decl.is_const) {
                     gs->bind_kind = BIND_CONST;
+                    sema_const_fill_defaults(ctx->ast_arena, symbols, decl->as.let_decl.value,
+                                             decl->as.let_decl.type, 0);
                     sema_fold_const(ctx, module, symbols, decl->as.let_decl.value, gs, decl->line, decl->column);
                 } else {
                     gs->bind_kind = immut ? BIND_LET : BIND_MUTABLE;
@@ -3041,6 +3045,76 @@ static ConstResult const_eval(SymbolTable* symbols, AstExpr* e) {
     }
 }
 
+/* A copy of a const initializer, its struct literals copied field by field,
+ * so folding it never rewrites the type declaration's default it came from */
+static AstExpr* sema_copy_const_expr(Arena* arena, const AstExpr* e) {
+    AstExpr* copy = arena_alloc(arena, sizeof(AstExpr));
+    *copy = *e;
+    if (e->kind != AST_EXPR_OBJECT) return copy;
+    AstObjectField* head = NULL;
+    AstObjectField** tail = &head;
+    for (const AstObjectField* f = e->as.object_literal.fields; f; f = f->next) {
+        AstObjectField* field = arena_alloc(arena, sizeof(AstObjectField));
+        *field = *f;
+        field->value = f->value ? sema_copy_const_expr(arena, f->value) : NULL;
+        field->next = NULL;
+        *tail = field;
+        tail = &field->next;
+    }
+    copy->as.object_literal.fields = head;
+    return copy;
+}
+
+/* A struct const's literal with every field it leaves out written in: the
+ * field's declared default, or a nested struct's literal filled the same way.
+ * A module-level C initializer gets no defaults of its own, and this way each
+ * default is checked to be a compile-time value like the given fields. */
+static void sema_const_fill_defaults(Arena* arena, SymbolTable* symbols, AstExpr* literal,
+                                     const AstTypeRef* type, int depth) {
+    if (!literal || !type || depth > 8) return;
+    if (literal->kind == AST_EXPR_COLLECTION_LITERAL && !literal->as.collection.type
+        && !literal->as.collection.elements) {
+        /* `{ }` where a struct is expected: that struct with no fields given */
+        literal->kind = AST_EXPR_OBJECT;
+        literal->as.object_literal.type = NULL;
+        literal->as.object_literal.fields = NULL;
+    }
+    if (literal->kind != AST_EXPR_OBJECT || type->is_opt || type->is_view || type->is_mod) return;
+    const AstDecl* decl = sema_user_struct_decl(symbols, get_base_type_name(type));
+    if (!decl || decl->as.type_decl.generic_params) return;
+    AstObjectField** tail = &literal->as.object_literal.fields;
+    while (*tail) tail = &(*tail)->next;
+    for (const AstTypeField* td = decl->as.type_decl.fields; td; td = td->next) {
+        AstObjectField* given = NULL;
+        for (AstObjectField* f = literal->as.object_literal.fields; f; f = f->next) {
+            if (str_eq(f->name, td->name)) { given = f; break; }
+        }
+        if (given) {
+            sema_const_fill_defaults(arena, symbols, given->value, td->type, depth + 1);
+            continue;
+        }
+        AstExpr* value = NULL;
+        if (td->default_value) {
+            value = sema_copy_const_expr(arena, td->default_value);
+        } else if (td->type && !td->type->is_opt && !td->type->is_view && !td->type->is_mod
+                   && sema_user_struct_decl(symbols, get_base_type_name(td->type))) {
+            value = arena_alloc(arena, sizeof(AstExpr));
+            memset(value, 0, sizeof(AstExpr));
+            value->kind = AST_EXPR_OBJECT;
+            value->line = literal->line;
+            value->column = literal->column;
+        }
+        if (!value) continue;
+        sema_const_fill_defaults(arena, symbols, value, td->type, depth + 1);
+        AstObjectField* field = arena_alloc(arena, sizeof(AstObjectField));
+        memset(field, 0, sizeof(AstObjectField));
+        field->name = td->name;
+        field->value = value;
+        *tail = field;
+        tail = &field->next;
+    }
+}
+
 /* Rewrite a folded const initializer into literal nodes, so the backends emit
  * a plain literal (a C `static` initializer must be a constant expression). A
  * struct literal's fields are folded one by one. */
@@ -3094,6 +3168,24 @@ static void sema_fold_const(CompilerContext* ctx, AstModule* module, SymbolTable
                             AstExpr* init, Symbol* sym, size_t line, size_t col) {
     if (!init) return;
     ConstResult r = const_eval(symbols, init);
+    /* A struct literal: name the field (given, or a default written in) that
+     * is not a compile-time value */
+    for (AstExpr* literal = init; !r.ok && literal && literal->kind == AST_EXPR_OBJECT;) {
+        AstObjectField* bad = NULL;
+        for (AstObjectField* f = literal->as.object_literal.fields; f && !bad; f = f->next) {
+            if (!const_eval(symbols, f->value).ok) bad = f;
+        }
+        if (!bad) break;
+        if (bad->value && bad->value->kind == AST_EXPR_OBJECT) { literal = bad->value; continue; }
+        char msg[256];
+        snprintf(msg, sizeof(msg),
+                 "'const' initializer must be evaluable at compile time: field '%.*s' (written here or its "
+                 "default in the type) is not a literal, an earlier constant, an enum case or arithmetic on them",
+                 (int)bad->name.len, bad->name.data);
+        diag_error(sema_diag_file(module), (int)line, (int)col, msg);
+        module->had_error = true;
+        return;
+    }
     if (!r.ok) {
         diag_error(sema_diag_file(module), (int)line, (int)col,
                    "'const' initializer must be evaluable at compile time (only literals, earlier constants, enum cases, arithmetic on them, and struct literals of them are allowed)");

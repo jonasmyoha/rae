@@ -1,6 +1,8 @@
 # A module-level `const` may be a struct literal whose fields are
 # compile-time values: literals, earlier consts (numeric, String or struct)
-# and arithmetic on them. It is emitted as a static initializer.
+# and arithmetic on them. It is emitted as a static initializer. A field the
+# literal leaves out gets its declared default (a nested struct's too), the
+# same as in a local struct literal.
 type Clock {
   daySeconds: Float
   startHour: Float
@@ -13,6 +15,19 @@ type Preset {
   steps: Int
 }
 
+type Inner {
+  scale: Float = 2.5
+  label: String = "inner"
+}
+
+type Settings {
+  daySeconds: Float = baseSeconds * 2.0
+  startHour: Float = 9.0
+  paused: Bool
+  name: String = title
+  inner: Inner
+}
+
 const baseSeconds: Float = 900.0
 
 const title: String = "walker"
@@ -20,6 +35,10 @@ const title: String = "walker"
 const walkerClock: Clock = { daySeconds: baseSeconds * 2.0, startHour: 9.0, paused: false }
 
 const walkerPreset: Preset = { clock: walkerClock, label: title, steps: -1 }
+
+const defaults: Settings = {}
+
+const someGiven: Settings = { paused: true, inner: { label: "given" } }
 
 func hours(clock: view Clock) ret Float {
   ret clock.daySeconds / 60.0
@@ -32,4 +51,6 @@ func main() {
   log(walkerPreset.steps)
   let copy: Clock = walkerClock
   log(copy.paused)
+  log("defaults: {defaults.daySeconds} {defaults.startHour} {defaults.name} {defaults.inner.scale}")
+  log("given: {someGiven.paused} {someGiven.inner.label} {someGiven.inner.scale}")
 }

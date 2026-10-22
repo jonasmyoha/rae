@@ -1,0 +1,17 @@
+# A struct const's left-out field takes its declared default, so that
+# default must be a compile-time value too. A call is not; the error names
+# the field.
+func makeHour() ret Float {
+  ret 7.0
+}
+
+type Called {
+  startHour: Float = makeHour()
+  paused: Bool
+}
+
+const called: Called = { paused: true }
+
+func main() {
+  log(called.startHour)
+}
