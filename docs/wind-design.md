@@ -101,13 +101,21 @@ gust about 15 cm: small enough that the leaves stay on their branches.
 
 ## 5. Grass
 
-The grass already had its own sway (GrassViewSettings windDirX/Y,
-windStrength, windGust, its own clock). Once the renderer has a wind (its
-time has started), grass_render.wgsl follows it: its direction, its
-strength (capped at 1.6, so short blades never lie flat) times the grass's
-own tuning, the gust field pressing harder and fluttering more, on the
-wind's clock. A calm (`RAE_WIND=0`) stills the grass as it stills the trees.
-With no wind ever set, the grass sways on its own settings as before.
+The grass does NOT follow the renderer's wind (2026-10-23). It sways on its
+own settings and its own clock (GrassViewSettings windDirX/Y, windStrength,
+windGust; grass_render.wgsl windBend), as it did before this wind was
+added.
+
+For a while it followed the renderer's wind and its gust field, and the
+blades twitched. The cause is in `windGustAt`: the gust pattern is moved by
+`direction * time * (2.5 + 3.5 * strength)`, with the time up to an hour,
+while the base wind's direction and strength drift (stepWind). Every small
+drift is multiplied by that large time, so the whole pattern jumps metres
+from one frame to the next, and everything whose strength follows it
+flickers. The trees used the same field (their wind is off, see the top).
+A gust field that is used again must move by an offset that ADDS UP each
+frame (state on the wind, stepped with deltaTime), never one computed from
+the drifting values times the total time.
 
 ## 6. Cost and mobile
 
