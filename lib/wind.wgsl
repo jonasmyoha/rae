@@ -7,12 +7,11 @@
 // the vertex stages that read it (the static G-buffer and forward passes,
 // the static shadow pass).
 
-// The tree and bush leaf motion is OFF (trade-off decision 2026-10-22:
-// every version tried looked glitchy). The callers multiply a leaf's
-// flexibility by this, so it is 0 and windLeaf leaves every vertex where it
-// is. windLeaf itself stays (checks/leafWind tests it); 1.0 turns it back on.
-// The grass has its own wind (grass_render.wgsl) and keeps it.
-const windLeafScale: f32 = 0.0;
+// The tree and bush leaf motion (windLeaf), switched off on 2026-10-22
+// because it looked glitchy and back on 2026-10-23 WITHOUT the gust field:
+// the callers multiply a leaf's flexibility by this; 0.0 stills every leaf.
+// The grass has its own wind (grass_render.wgsl).
+const windLeafScale: f32 = 1.0;
 
 fn windHash(p: vec2<f32>) -> f32 {
   return fract(sin(dot(p, vec2<f32>(127.1, 311.7))) * 43758.5453);
@@ -60,7 +59,10 @@ fn windLeaf(world: vec3<f32>, normal: vec3<f32>, pivot: vec3<f32>, foot: vec3<f3
   if (flexibility <= 0.0 || strength <= 0.0001) { return result; }
   let direction = wind.xy / strength;
   let phase = windHash(pivot.xy + vec2<f32>(pivot.z * 0.71, pivot.z * 0.37)) * 6.2831853;
-  let gust = windGustAt(foot.xy, wind);
+  // A steady gust level, not windGustAt: that field moves by the drifting
+  // direction times the total time and jumps between frames, which made
+  // the leaves (and the grass) twitch (docs/wind-design.md §5)
+  let gust = 0.5;
   // Turning leaf patches, not bobbing crowns: in a steady breeze (strength
   // 1) a patch turns about 6 degrees each way, in a gust about 15, and a
   // gust also leans it downwind a little. Smaller angles (under 1 degree

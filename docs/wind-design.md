@@ -4,10 +4,11 @@ How the renderer's props sway in the wind (lib/Wind.rae, lib/wind.wgsl,
 lib/RendererWind.rae; fixture 1232_wind). The walker examples (136, 137, 143)
 use it.
 
-**The trees and bushes do not move in the wind now (2026-10-22): it looked
-glitchy, so it is switched off (`windLeafScale` in lib/wind.wgsl; see
-docs/tree-wind-design.md). Only the grass follows the wind.** Sections 3
-and 4 describe the motion as it was built.
+**The trees' and bushes' leaves turn in the wind again (2026-10-23), with
+no gusts: windLeaf uses a steady gust level, because the gust field made
+everything that followed it twitch (§5). It was off on 2026-10-22
+(`windLeafScale` in lib/wind.wgsl; docs/tree-wind-design.md). The grass
+keeps its own wind.** Sections 3 and 4 describe an earlier version.
 
 ## 1. What the wind is
 
