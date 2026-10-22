@@ -5,14 +5,16 @@
 struct Frame {
   viewProj: mat4x4<f32>,
   prevViewProj: mat4x4<f32>,
-  jitter: vec4<f32>,
+  jitter: vec4<f32>,    // xy the TAA jitter, z the wind's time last frame
+  wind: vec4<f32>,      // the wind (lib/wind.wgsl): direction * strength, gustiness, time
 };
 struct DrawU {
   model: mat4x4<f32>,
   prevModel: mat4x4<f32>,
   albedoMetallic: vec4<f32>,
   params: vec4<f32>,
-  fade: vec4<f32>,     // the level cross-fade (GbufferRecord [40..43]); 0 when not fading
+  fade: vec4<f32>,     // the level cross-fade (GbufferRecord [40..42]); 0 when not fading;
+                       // w the prop's sway in the wind (0: rigid)
 };
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var<storage, read> draws: array<DrawU>;
@@ -117,14 +119,22 @@ fn vs(@builtin(instance_index) ii: u32,
       @location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) uv: vec2<f32>) -> VsOut {
   let d = draws[ii];
   var o: VsOut;
-  let world = d.model * vec4<f32>(p, 1.0);
+  var world = d.model * vec4<f32>(p, 1.0);
+  var prevWorld = d.prevModel * vec4<f32>(p, 1.0);
+  if (d.fade.w > 0.0) {
+    // Swaying in the wind; last frame's bend from last frame's time, so the
+    // motion vectors carry the sway
+    world = vec4<f32>(world.xyz + windOffset(world.xyz, d.model[3].xyz, d.fade.w, F.wind), 1.0);
+    let prevWind = vec4<f32>(F.wind.xyz, F.jitter.z);
+    prevWorld = vec4<f32>(prevWorld.xyz + windOffset(prevWorld.xyz, d.prevModel[3].xyz, d.fade.w, prevWind), 1.0);
+  }
   o.wpos = world.xyz;
   o.pos = F.viewProj * world;
   o.nrm = normalize((d.model * vec4<f32>(n, 0.0)).xyz);
   o.uv = uv;
   o.inst = ii;
   o.clipNow = o.pos;
-  o.clipPrev = F.prevViewProj * (d.prevModel * vec4<f32>(p, 1.0));
+  o.clipPrev = F.prevViewProj * prevWorld;
   o.pos = vec4<f32>(o.pos.xy + F.jitter.xy * o.pos.w, o.pos.zw);
   return o;
 }

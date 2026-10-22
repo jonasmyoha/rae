@@ -1,0 +1,65 @@
+# lib/Wind: the wind every swaying thing reads (trees, grass; lib/wind.wgsl
+# turns it into gusts and sway on the GPU). Its base is global: a direction
+# and a strength that drift slowly about the settings' own, deterministic in
+# time (the same on every machine); the shaders' vector is that direction
+# times the strength, the gustiness and the time.
+import Math
+open Wind
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func near(a: view Float, b: view Float) ret Bool {
+  ret Math.abs(value: a - b) < 0.0001
+}
+
+func main() ret Int {
+  let settings: WindSettings = defaultWindSettings()
+  var state: WindState = createWindState(settings: settings)
+  var lowest: Float = 1000.0
+  var highest: Float = 0.0
+  var widest: Float = 0.0
+  loop var i: Int = 0, i < 60 * 600, ++i {
+    stepWind(state: state, settings: settings, deltaTime: 1.0 / 60.0)
+    lowest = Math.min(a: lowest, b: state.strength)
+    highest = Math.max(a: highest, b: state.strength)
+    widest = Math.max(a: widest, b: Math.abs(value: state.angle - settings.angle))
+  }
+  check(
+    label: "over 10 minutes the strength drifts within its band and the direction within its swing"
+    ok: lowest >= settings.strength * (1.0 - settings.strengthSwing) - 0.001 and highest <= settings.strength * (1.0 + settings.strengthSwing) + 0.001 and highest - lowest > settings.strength * settings.strengthSwing and widest <= settings.angleSwing + 0.001 and widest > settings.angleSwing * 0.5
+  )
+  check(
+    label: "the time is the sum of the steps"
+    ok: Math.abs(value: (state.time - 600.0) as Float) < 0.001
+  )
+  # The same time, the same wind: from any start
+  var again: WindState = createWindState(settings: settings)
+  stepWind(state: again, settings: settings, deltaTime: 600.0)
+  check(
+    label: "deterministic in time"
+    ok: near(a: again.angle, b: state.angle) and near(a: again.strength, b: state.strength)
+  )
+  let uniform: WindVector = windVector(state: state, settings: settings)
+  check(
+    label: "the shaders' vector: the direction times the strength, the gustiness, the time"
+    ok: near(a: Math.sqrt(x: uniform.x * uniform.x + uniform.y * uniform.y), b: state.strength) and near(
+      a: Math.atan2(y: uniform.y, x: uniform.x)
+      b: state.angle
+    ) and near(a: uniform.gustiness, b: settings.gustiness) and near(a: uniform.time, b: 600.0)
+  )
+  var calm: WindSettings = defaultWindSettings()
+  calm.strength = 0.0
+  var still: WindState = createWindState(settings: calm)
+  stepWind(state: still, settings: calm, deltaTime: 3.0)
+  check(
+    label: "no wind: nothing moves"
+    ok: windVector(state: still, settings: calm).x is 0.0 and still.strength is 0.0
+  )
+  ret 0
+}

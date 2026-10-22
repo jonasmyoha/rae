@@ -23,6 +23,7 @@ open water/Underwater
 open gpu/GpuResources
 open gpu/GpuLifetime
 open GrassCompute
+open Wind
 import GrassConfig
 import app3d/Slider
 open Scene3d
@@ -80,6 +81,10 @@ type WalkerRender {
   # RAE_FRAME_TIMING=1 (a device profile's runs)
   frameLog: FrameLog
   frameLogOn: Bool
+  # The wind the trees, bushes and grass sway in (lib/Wind), stepped each
+  # rendered frame
+  windSettings: WindSettings
+  wind: WindState
 }
 
 # Per-frame scratch shared across systems: timing and the render/park decision.

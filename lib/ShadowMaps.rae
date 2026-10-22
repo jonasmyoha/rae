@@ -105,6 +105,11 @@ func backFaceShadowCasterBias() ret ShadowCasterBias {
 }
 
 type ShadowCache {
+  # The wind the swaying casters bend in (setShadowWind; lib/wind.wgsl)
+  windX: Float = 0.0
+  windY: Float = 0.0
+  windGustiness: Float = 0.0
+  windTime: Float = 0.0
   objectsMade: Bool
   casterBias: ShadowCasterBias
   texture: TextureId
@@ -147,6 +152,22 @@ type ShadowCache {
   sprites: ShadowSpriteCache
   inFlight: List(SubmissionId)
   scratch: List(Float)
+}
+
+# A cascade's uniform: its light view-projection, then the wind (vec4)
+const shadowCascadeUniformBytes: Int = 80
+
+func setShadowWind(
+  shadow: mod ShadowCache
+  x: view Float
+  y: view Float
+  gustiness: view Float
+  time: view Float
+) {
+  shadow.windX = x
+  shadow.windY = y
+  shadow.windGustiness = gustiness
+  shadow.windTime = time
 }
 
 func createShadowCache() ret ShadowCache {
@@ -237,7 +258,9 @@ func ensureShadowObjects(shadow: mod ShadowCache, resources: mod GpuResources) {
     ret
   }
   shadow.objectsMade = true
-  let staticShader: Shader = shader(files: ["lib/fade_dither.wgsl", "lib/shadow_static.wgsl"])
+  let staticShader: Shader = shader(
+    files: ["lib/fade_dither.wgsl", "lib/wind.wgsl", "lib/shadow_static.wgsl"]
+  )
   let skinnedShader: Shader = shader(files: ["lib/shadow_skinned.wgsl"])
   if let pipeline: RenderPipelineId = createDepthPipeline(
     resources: resources
@@ -289,7 +312,7 @@ func ensureShadowObjects(shadow: mod ShadowCache, resources: mod GpuResources) {
   loop var i: Int = 0, i < shadowMaxCascades, ++i {
     if let uniform: BufferId = createBuffer(
       resources: resources
-      size: 64
+      size: shadowCascadeUniformBytes
       usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst
     ) {
       shadow.cascadeUniforms.set(index: i, value: uniform)
@@ -441,13 +464,18 @@ func shadowBegin(
     loop var k: Int = 0, k < 16, ++k {
       shadow.scratch.add(value: cascades.viewProj.copyAtFallback(index: c * 16 + k, fallback: 0.0))
     }
+    # The wind the swaying casters bend in, as in the main pass
+    shadow.scratch.add(value: shadow.windX)
+    shadow.scratch.add(value: shadow.windY)
+    shadow.scratch.add(value: shadow.windGustiness)
+    shadow.scratch.add(value: shadow.windTime)
     unsafe {
       let wroteCascade: Bool = writeBufferFromPtr(
         resources: resources
         id: shadow.cascadeUniforms.copyAtFallback(index: c, fallback: noBufferId())
         offset: 0
         data: shadow.scratch.data
-        size: 64
+        size: shadowCascadeUniformBytes
       )
     }
   }

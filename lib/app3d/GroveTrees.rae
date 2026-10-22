@@ -559,6 +559,7 @@ func addForestKinds(
       layer: species
       height: subject.height
     )
+    setPropKindSway(field: field, kind: kind, sway: groveTreeSway)
     subjects.add(value: subject)
   }
   if let resources: mod GpuResources = renderer.gpuResources {
@@ -573,6 +574,12 @@ func addForestKinds(
   }
 }
 
+# How much the grove's trees and bushes bend in the wind (lib/wind.wgsl):
+# a tree's tuned sway; a bush, short, more for its height
+const groveTreeSway: Float = 1.0
+
+const groveBushSway: Float = 4.0
+
 # The bush's three leaf tones
 func createBushParts(renderer: mod DeferredRenderer, capacity: view Int) ret List(PropInstancer) {
   var parts: List(PropInstancer) = List.create(PropInstancer, cap: 3)
@@ -582,5 +589,10 @@ func createBushParts(renderer: mod DeferredRenderer, capacity: view Int) ret Lis
     form: FluffyForm.bush
     capacity: capacity
   )
+  loop var i: Int = 0, i < parts.length, ++i {
+    if let part: mod PropInstancer = parts.modAt(index: i) {
+      part.sway = groveBushSway
+    }
+  }
   ret parts
 }

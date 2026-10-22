@@ -283,6 +283,7 @@ func gatherPropLevel(
     }
     ret
   }
+  let sway: Float = propKindSway(field: field, kind: placement.kind)
   loop var p: Int = 0, p < draw.partCount, ++p {
     var material: Material3d = field.batchMaterials.copyAtDefault(index: draw.firstBatch + p)
     material.toon = toon
@@ -302,6 +303,9 @@ func gatherPropLevel(
           fadingIn: fadingIn
           seed: seed
         )
+      }
+      if sway > 0.0 and batch.count > before {
+        setInstanceSway(records: batch.records, slot: before, sway: sway)
       }
     }
   }

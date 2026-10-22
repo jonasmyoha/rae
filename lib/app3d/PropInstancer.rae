@@ -11,11 +11,14 @@
 open Math3d
 open Scene3d
 open GbufferInstanced
+open GbufferRecord
 
 type PropInstancer {
   mesh: MeshHandle
   material: Material3d
   batch: InstanceBatch
+  # How much it bends in the wind (0 rigid; GbufferRecord setInstanceSway)
+  sway: Float = 0.0
 }
 
 func createPropInstancer(
@@ -33,12 +36,16 @@ func createPropInstancer(
 # One more prop this frame, at `model` (it does not move, so its previous
 # model is the same)
 func addPropInstance(prop: mod PropInstancer, model: view Mat4) {
+  let before: Int = prop.batch.count
   addInstance(
     batch: prop.batch
     model: model
     prevModel: model
     material: prop.material
   )
+  if prop.sway > 0.0 and prop.batch.count > before {
+    setInstanceSway(records: prop.batch.records, slot: before, sway: prop.sway)
+  }
 }
 
 # Draw the props toon-shaded or not
