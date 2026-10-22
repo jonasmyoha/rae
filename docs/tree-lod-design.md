@@ -266,6 +266,23 @@ from 28 m up, 9.3 -> 11.0 ms from 1.1 km away; the walking view unchanged),
 after drawing the clusters front to back, sizing the march to the texels
 crossed (at most 12 steps) and skipping rays a coarse level shows empty.
 
+**Follow-up: the march's cost (2026-10-22).** `RAE_CANOPY_BENCH=1
+checks/canopyCoverage` times a 1.2 km forest of 900 clusters on the GPU,
+marched and unmarched, steady where the app's frame time swings with the
+machine. It showed the five halvings after each candidate step were half
+the march. Now a step already within the prop is a hit without halving;
+otherwise three halvings find the entry, and the test at the point found
+allows for the depth the remaining interval spans (fewer halvings without
+that allowance lost a tenth of the trees). The ray's atlas point and depth
+are linear along it, worked out once. Bench, from 500 m outside the forest
+and from 28 m up in it: 3.1 -> 2.0 ms and 1.9 -> 1.3 ms (unmarched 0.4 and
+0.3 ms); coverage unchanged (89-103%, the phone's cypress better). In the
+app the two views across the forest are back at their unmarched frame
+times (9.2 and 10.3 ms). Tried and dropped: a coarser level for far
+clusters (cost lay in the near ones, where it blurs), narrowing the march
+to where a coarse level shows something (a forest cluster is rarely empty
+at that level), 10 steps (7%, less coverage).
+
 ### 2.5 Performance
 
 * PC: near meshes to 30 m, middle to ~70 m, impostors to ~250 m, canopy past
