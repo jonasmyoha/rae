@@ -42,7 +42,7 @@ fn vsFoliageFade(@builtin(instance_index) ii: u32, @location(0) p: vec3<f32>,
                  @location(3) pivot: vec4<f32>) -> FadeOut {
   let caster = models[ii];
   let leaf = windLeaf((caster.model * vec4<f32>(p, 1.0)).xyz, vec3<f32>(0.0, 0.0, 1.0),
-    (caster.model * vec4<f32>(pivot.xyz, 1.0)).xyz, caster.model[3].xyz, pivot.w * caster.fade.w, S.wind);
+    (caster.model * vec4<f32>(pivot.xyz, 1.0)).xyz, caster.model[3].xyz, pivot.w * caster.fade.w * windLeafScale, S.wind);
   var result: FadeOut;
   result.pos = S.lightViewProj * vec4<f32>(leaf.position, 1.0);
   result.fade = caster.fade;

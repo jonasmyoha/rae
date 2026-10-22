@@ -120,9 +120,9 @@ fn staticVertex(ii: u32, p: vec3<f32>, n: vec3<f32>, uv: vec2<f32>, pivot: vec4<
   var o: VsOut;
   let normal = normalize((d.model * vec4<f32>(n, 0.0)).xyz);
   let current = windLeaf((d.model * vec4<f32>(p, 1.0)).xyz, normal,
-    (d.model * vec4<f32>(pivot.xyz, 1.0)).xyz, d.model[3].xyz, pivot.w * d.fade.w, F.wind);
+    (d.model * vec4<f32>(pivot.xyz, 1.0)).xyz, d.model[3].xyz, pivot.w * d.fade.w * windLeafScale, F.wind);
   let previous = windLeaf((d.prevModel * vec4<f32>(p, 1.0)).xyz, normal,
-    (d.prevModel * vec4<f32>(pivot.xyz, 1.0)).xyz, d.prevModel[3].xyz, pivot.w * d.fade.w, F.previousWind);
+    (d.prevModel * vec4<f32>(pivot.xyz, 1.0)).xyz, d.prevModel[3].xyz, pivot.w * d.fade.w * windLeafScale, F.previousWind);
   o.wpos = current.position;
   o.pos = F.viewProj * vec4<f32>(current.position, 1.0);
   o.nrm = current.normal;
