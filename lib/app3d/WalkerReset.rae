@@ -1,0 +1,172 @@
+# app3d/WalkerReset — the walker app put back as it started: its "..." menu's
+# Reset (the app resets itself: ModeMenu's appResets) and the R key. Every
+# character (the hero and the crowd) back on its feet where it started,
+# facing as it did, in its starting clip, standing (a ragdoll gone, a climb
+# let go), each wanderer pausing at its start; every physics cube back in
+# its stack, still; the camera's pose as it was set up (CameraRig
+# resetCameraRigPose), behind the hero. The player's own settings (the
+# time of day, the camera's reversed drag, the mode) stay as they are.
+import Vec3
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open ecs/Transform
+open box3d/ecs/PhysicsComponents
+open box3d/ecs/PhysicsSystems
+open box3d/ecs/PhysicsJoints
+open box3d/ecs/CharacterMover
+open app3d/CharacterController
+open app3d/CharacterBodies
+open app3d/CharacterMovers
+open app3d/Characters
+open app3d/CharacterSpawns
+open app3d/CameraRig
+open app3d/Ragdoll
+open app3d/Climbing
+open app3d/Wander
+open app3d/WalkerWorld
+open app3d/WalkerPhysics
+
+type WalkerReset {
+  # Where each character started, the cubes' start poses, and the camera rig
+  # as it was set up
+  spawns: ComponentTable(CharacterSpawn)
+  cubeStarts: ComponentTable(Transform3D)
+  startRig: CameraRig
+}
+
+# The start as it is now (once the world and its physics are made)
+func createWalkerReset(
+  world: view WalkerWorld
+  physicsSystem: view WalkerPhysics
+  startRig: view CameraRig
+  groundZ: view Float
+) ret WalkerReset {
+  var spawns: ComponentTable(CharacterSpawn) = ComponentTable.create(CharacterSpawn)
+  loop var i: Int = 0, i < componentCount(this: physicsSystem.characters), ++i {
+    recordCharacterSpawn(
+      spawns: spawns
+      controllers: world.controllers
+      animStates: world.animStates
+      entityId: componentEntityAt(this: physicsSystem.characters, i: i)
+      groundZ: groundZ
+    )
+  }
+  var cubeStarts: ComponentTable(Transform3D) = ComponentTable.create(Transform3D)
+  loop var i: Int = 0, i < componentCount(this: physicsSystem.cubes), ++i {
+    let cubeId: EntityId = componentEntityAt(this: physicsSystem.cubes, i: i)
+    if let pose: Transform3D = componentCopy(this: world.transforms, entityId: cubeId) {
+      componentSet(this: cubeStarts, entityId: cubeId, data: pose)
+    }
+  }
+  ret WalkerReset { spawns: own spawns, cubeStarts: own cubeStarts, startRig: startRig }
+}
+
+# Everything back as it started (see the header)
+func resetWalkerToStart(
+  walkerReset: view WalkerReset
+  physicsSystem: mod WalkerPhysics
+  world: mod WalkerWorld
+  rig: mod CameraRig
+  groundZ: view Float
+  heroEntityId: view EntityId
+) {
+  loop var i: Int = 0, i < componentCount(this: walkerReset.spawns), ++i {
+    let entityId: EntityId = componentEntityAt(this: walkerReset.spawns, i: i)
+    let started: CharacterSpawn = componentCopyAtDefault(this: walkerReset.spawns, i: i)
+    # Standing: a ragdoll's bones gone, no longer down or on a wall
+    if componentHas(this: physicsSystem.ragdolls, entityId: entityId) {
+      let boneEntities: List(EntityId) = removeRagdoll(
+        physics: physicsSystem.physics
+        rigidBodies: physicsSystem.rigidBodies
+        colliders: physicsSystem.colliders
+        ragdolls: physicsSystem.ragdolls
+        characterId: entityId
+      )
+      loop let boneId: view EntityId in boneEntities {
+        componentRemove(this: world.transforms, entityId: boneId)
+        componentRemove(this: world.worldTransforms, entityId: boneId)
+        freeEntity(this: world.allocator, entityId: boneId)
+      }
+    }
+    componentRemove(this: physicsSystem.knockedDown, entityId: entityId)
+    componentRemove(this: physicsSystem.moverParked, entityId: entityId)
+    if componentHas(this: physicsSystem.climbing.climbers, entityId: entityId) {
+      let climber: mod Climber = componentMod(
+        this: physicsSystem.climbing.climbers
+        entityId: entityId
+      )
+      climber.state = ClimbState.free
+      climber.parkedByClimb = false
+      climber.leapLeft = 0.0
+    }
+    # On its feet where it started
+    if componentHas(this: physicsSystem.characters, entityId: entityId) {
+      let character: mod CharacterBody = componentMod(
+        this: physicsSystem.characters
+        entityId: entityId
+      )
+      character.mover.transform.p.x = started.feet.x
+      character.mover.transform.p.y = started.feet.y
+      character.mover.transform.p.z = started.feet.z + moverCenterAboveFeet(character: character)
+      character.mover.velocity.x = 0.0
+      character.mover.velocity.y = 0.0
+      character.mover.velocity.z = 0.0
+    }
+    if componentHas(this: world.controllers, entityId: entityId) {
+      let controller: mod ThirdPersonController = componentMod(
+        this: world.controllers
+        entityId: entityId
+      )
+      controller.position = Vec3.create(
+        x: started.feet.x
+        y: started.feet.y
+        z: started.feet.z - groundZ
+      )
+      controller.heading = started.heading
+      controller.moving = false
+    }
+    restoreCharacterSpawnClip(
+      spawns: walkerReset.spawns
+      animStates: world.animStates
+      animTransitions: world.animTransitions
+      entityId: entityId
+    )
+    # A wanderer pauses a moment at its start, then walks again
+    if componentHas(this: physicsSystem.wandering.wanderers, entityId: entityId) {
+      let wanderer: mod Wanderer = componentMod(
+        this: physicsSystem.wandering.wanderers
+        entityId: entityId
+      )
+      wanderer.state = WanderState.pausing
+      wanderer.timeLeft = wanderer.pauseMinimum
+    }
+  }
+  # The cubes back in their stacks, still
+  loop var i: Int = 0, i < componentCount(this: walkerReset.cubeStarts), ++i {
+    let cubeId: EntityId = componentEntityAt(this: walkerReset.cubeStarts, i: i)
+    let pose: Transform3D = componentCopyAtDefault(this: walkerReset.cubeStarts, i: i)
+    if componentHas(this: world.transforms, entityId: cubeId) {
+      let now: mod Transform3D = componentMod(this: world.transforms, entityId: cubeId)
+      now.position = pose.position
+      now.rotation = pose.rotation
+    }
+    setEntityVelocities(
+      physics: physicsSystem.physics
+      rigidBodies: physicsSystem.rigidBodies
+      entityId: cubeId
+      linear: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+      angular: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    )
+  }
+  # The camera as it was set up, behind the hero
+  resetCameraRigPose(rig: rig, start: walkerReset.startRig)
+  if rig.mode is CameraRigMode.character and componentHas(
+    this: walkerReset.spawns
+    entityId: heroEntityId
+  ) {
+    rig.yaw = componentView(this: walkerReset.spawns, entityId: heroEntityId).heading
+    snapCameraRigView(rig: rig)
+  }
+  physicsSystem.accumulator = 0.0
+}

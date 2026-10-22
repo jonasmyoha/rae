@@ -3,8 +3,11 @@
 # GAME mode it offers "Open editor" and "Reverse camera rotation: off/on" (the
 # camera rig's reverseDrag, which turns the orbit camera only: the editor's WASD
 # camera always looks where the drag goes); in EDITOR mode "Back to game"; in
-# both "Reset", which starts the program again with no saved state
-# (HotReload.restartFresh), so it works for any app without code of its own;
+# both "Reset": in an app that puts itself back as it started (it sets the
+# menu state's appResets), a request the app takes once (takeModeMenuReset)
+# and answers as its own reset key does; in any other, starting the program
+# again with no saved state (HotReload.restartFresh: a desktop only, a phone
+# cannot start a program again);
 # and, in an app with touch controls (its scene has the item), "Simulate
 # mobile phone: off/on", which shows them on a desktop as a phone build always
 # does (it picks the scene's touch frame, app3d/UiModes framePointerFor, where
@@ -225,10 +228,14 @@ func updateModeMenuItems(
   if mobileTapped {
     menu.simulateMobile = menu.simulateMobile is false
   }
-  # Does not come back when the program restarts
   let resetTapped: Bool = modeMenuTapped(world: world, actionId: modeMenuResetActionId)
   if resetTapped {
-    let restarted: Bool = restartFresh()
+    if menu.appResets {
+      askModeMenuReset(menu: menu)
+    } else {
+      # Does not come back when the program restarts
+      let restarted: Bool = restartFresh()
+    }
   }
   # The camera item says what the rig does (an app may start it reversed)
   if menu.cameraLabelReversed is not rig.reverseDrag or menu.cameraLabelWritten is false {
@@ -269,4 +276,17 @@ func updateModeMenuItems(
     changed = true
   }
   ret changed
+}
+
+# The app's reset, asked (the menu's Reset in an app with appResets)
+func askModeMenuReset(menu: mod ModeMenuState) {
+  menu.resetAsked = true
+}
+
+# Was the app asked to put itself back as it started since it last took it?
+# (once: the request is taken)
+func takeModeMenuReset(menu: mod ModeMenuState) ret Bool {
+  let asked: Bool = menu.resetAsked
+  menu.resetAsked = false
+  ret asked
 }

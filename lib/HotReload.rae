@@ -135,8 +135,10 @@ func writeHotReloadStateFor(appId: view String, state: view String) pub ret Bool
 # A program started with RAE_FRESH_START=1 reads no saved state: both readers
 # above answer "" as on a first launch, so the app starts from its defaults.
 # Nothing is deleted; the app's next save simply replaces the old snapshot.
-# The "..." menu's Reset (app3d/ModeMenu) is this: restartFresh starts the
-# program again in place with the variable set. A later `rae watch` reload
+# restartFresh starts the program again in place with the variable set (a
+# desktop only: a phone cannot start a program again). The "..." menu's Reset
+# (app3d/ModeMenu) does this only in an app that does not put itself back as
+# it started (its menu state's appResets). A later `rae watch` reload
 # relaunches from the supervisor's own environment, without it, so reloads
 # restore state again.
 const freshStartVariable: String = "RAE_FRESH_START"
