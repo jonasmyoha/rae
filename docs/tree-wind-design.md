@@ -1,13 +1,13 @@
 # Tree wind: stable crowns and moving leaves
 
-Status: **OFF** (trade-off decision 2026-10-22). After several tries (a
-whole-tree bend, a per-vertex flutter, rigid leaf rotations) the tree wind
-still looked glitchy and wrong, so the trees and bushes do not move in the
-wind. The switch is `windLeafScale` in lib/wind.wgsl (0.0): the shaders
-multiply each leaf's flexibility by it, so windLeaf leaves every vertex
-where it is. The code below stays (pivots, flexibility, windLeaf,
-checks/leafWind), so a later attempt starts from it; setting the constant to
-1.0 turns the last version back on. The grass keeps its wind.
+Status: **ON again, without gusts** (2026-10-23). It was switched off on
+2026-10-22 because it looked glitchy. Part of that was the gust field
+(`windGustAt`): it moves by the drifting wind direction times the total
+time, so it jumped between frames (docs/wind-design.md §5), and the grass
+twitched the same way. windLeaf now uses a steady gust level (0.5), and the
+rest of the motion (each patch turning about its pivot on the wind clock)
+is unchanged. The switch is `windLeafScale` in lib/wind.wgsl: 1.0 on, 0.0
+every leaf still.
 
 The rigid-leaf implementation is in the shared renderer and generators.
 The structural/branch hierarchy below remains a later refinement.
