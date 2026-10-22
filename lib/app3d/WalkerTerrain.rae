@@ -130,8 +130,9 @@ type ForestFieldSettings {
 }
 
 # The far ground: walkerFarGroundSide x walkerFarGroundSide tiles of
-# walkerFarGroundCell metres round the walker, a vertex every 10 m, drawn
-# 1 m under the near ground (which covers it near the walker)
+# walkerFarGroundCell metres round the camera's focus, a vertex every 10 m,
+# drawn 1 m under the near ground. Under the near ground it has a hole
+# (updateFarGroundHole), so it is not a second terrain below the first
 const walkerFarGroundSide: Int = 5
 
 const walkerFarGroundCell: Float = 400.0
@@ -447,6 +448,9 @@ func updateInfiniteTerrain(
     cellX: Math.floor(x: groundFocus.x / terrainSystem.cellSize).toInt()
     cellY: Math.floor(x: groundFocus.y / terrainSystem.cellSize).toInt()
   )
+  if terrainSystem.hasFarGround {
+    updateFarGroundHole(terrainSystem: terrainSystem, renderer: renderer)
+  }
   let drawnMoved: Bool = updateDrawnProps(terrainSystem: terrainSystem, focus: groundFocus)
   let cellX: Int = Math.floor(x: propFocus.x / terrainSystem.cellSize).toInt()
   let cellY: Int = Math.floor(x: propFocus.y / terrainSystem.cellSize).toInt()
@@ -497,6 +501,31 @@ func updateInfiniteTerrain(
     componentSet(this: transforms, entityId: entityId, data: transform)
   }
   ret true
+}
+
+# Cut the far ground under the near ground: the near tiles' area, less one
+# far quad (10 m) on every side, so the two still overlap at the near
+# ground's edge and no gap opens there
+func updateFarGroundHole(terrainSystem: mod WalkerTerrain, renderer: mod DeferredRenderer) {
+  let near: view TerrainTiles = terrainSystem.ground
+  let half: Int = near.gridSide / 2
+  let margin: Float = walkerFarGroundCell / walkerFarGroundSegments.toFloat()
+  let firstX: Int = near.centreCellX - half
+  let firstY: Int = near.centreCellY - half
+  let lastX: Int = firstX + near.gridSide - 1
+  let lastY: Int = firstY + near.gridSide - 1
+  let minX: Float = (firstX.toFloat() - 0.5) * near.cellSize + margin
+  let minY: Float = (firstY.toFloat() - 0.5) * near.cellSize + margin
+  let maxX: Float = (lastX.toFloat() + 0.5) * near.cellSize - margin
+  let maxY: Float = (lastY.toFloat() + 0.5) * near.cellSize - margin
+  setTerrainTilesHole(
+    tiles: terrainSystem.farGround
+    renderer: renderer
+    minX: minX
+    minY: minY
+    maxX: maxX
+    maxY: maxY
+  )
 }
 
 # The small props drawn round `focus` (what the camera looks at): every
