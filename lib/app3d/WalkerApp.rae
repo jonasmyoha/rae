@@ -37,6 +37,7 @@ open gpu/GpuResources
 open gpu/GpuLifetime
 open GrassCompute
 open Wind
+open RendererMist
 import GrassConfig
 import app3d/Slider
 open Scene3d
@@ -644,6 +645,12 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
         groundAlbedo: 0.30
       )
     )
+    # A light height mist (RendererMist's defaults), its base the sea: the
+    # shore and the far island haze over, the hills stand out of it, and the
+    # far ground fades into the sky
+    var mist: MistSettings = defaultMistSettings()
+    mist.baseHeight = islandSeaSurfaceZ(groundZ: groundZ, biome: biome)
+    setMist(renderer: renderer, mist: mist)
     light.sunDir = settingsKeyLightDir(settingsState: settingsState)
     light.sunColor = settingsKeyLightColor(settingsState: settingsState)
     log(
