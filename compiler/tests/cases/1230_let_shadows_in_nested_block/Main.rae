@@ -1,0 +1,28 @@
+# A binding in a nested block may shadow one of the same name outside it:
+# the inner one is seen inside the block, the outer one again after it. An
+# `if let` binding lives only as long as its statement, so the next `if let`
+# may use the name again.
+# (In the same block a second binding is an error:
+# 1229_let_same_name_twice.)
+func main() ret Int {
+  let count: Int = 1
+  if count > 0 {
+    let count: Int = 2
+    log("inner {count}")
+  }
+  loop var i: Int = 0, i < 2, ++i {
+    let tick: Int = i * 10
+    log("tick {tick}")
+  }
+  log("outer {count}")
+  var names: List(String) = List.create(String, cap: 2)
+  names.add(value: "first")
+  names.add(value: "second")
+  if let name: String = names.copyAt(index: 0) {
+    log("if let {name}")
+  }
+  if let name: String = names.copyAt(index: 1) {
+    log("if let {name}")
+  }
+  ret 0
+}

@@ -143,6 +143,13 @@ A binding that holds its own value has a frozen `let` form and a mutable
 (`view T` / `mod T`, a local or a loop element) has only `let`:
 its mode already says what it may do, and aliases are bind-once.
 
+A name is bound once per scope (2026-10-22). A second binding of a name
+already bound in the same scope is an error naming the first: in one block,
+a parameter's name at the top of a function body, a loop's own variable at
+the top of its body. A nested block may shadow an outer binding, and an `if
+let` binding lives only as long as its statement, so the next `if let` may
+use the name again (cases 1229 and 1230).
+
 ## 2. The matrix
 
 Every place a value lands is a **receiver**, and every value that lands is a

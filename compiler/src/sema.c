@@ -1140,6 +1140,40 @@ typedef struct InstantiationStack {
 static bool sema_is_list_value_accessor(const AstExpr* expr);
 static void sema_analyze_decl(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstDecl* decl);
 static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr, bool is_value_pos);
+/* A second `let`/`var`/`const` of a name already bound in the same scope
+ * (the same block; a parameter's name at a function body's top level; a
+ * loop's own variable at the top of its body) is an error naming the first.
+ * It once passed here and stopped only in clang ("redefinition of 'x'"). A
+ * nested block may still shadow an outer binding. */
+static void sema_check_rebinding(AstModule* module, SymbolTable* symbols, const AstStmt* stmt) {
+    Str name = stmt->as.let_stmt.name;
+    Symbol* earlier = symbol_table_first(symbols, name);
+    if (!earlier || earlier->scope_depth != symbols->current_depth) return;
+    bool is_param = false;
+    for (const AstParam* p = s_current_params; p; p = p->next) {
+        if (str_eq(p->name, name)) { is_param = true; break; }
+    }
+    char buf[512];
+    if (earlier->decl_line > 0) {
+        snprintf(buf, sizeof(buf),
+                 "'%.*s' is already bound on line %d in the same scope; a second binding of the same "
+                 "name there is not allowed (a nested block may shadow it) — rename one of them",
+                 (int)name.len, name.data, earlier->decl_line);
+    } else if (is_param) {
+        snprintf(buf, sizeof(buf),
+                 "'%.*s' is a parameter of this function; a binding at the top of its body cannot reuse "
+                 "the name — rename the binding",
+                 (int)name.len, name.data);
+    } else {
+        snprintf(buf, sizeof(buf),
+                 "'%.*s' is already bound in the same scope; a second binding of the same name there "
+                 "is not allowed — rename one of them",
+                 (int)name.len, name.data);
+    }
+    diag_error(sema_diag_file(module), (int)stmt->line, (int)stmt->column, buf);
+    module->had_error = true;
+}
+
 static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstStmt* stmt, TypeInfo* current_return_type);
 static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstTypeRef* type_ref);
 static bool sema_rewrite_match_let(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstStmt* stmt);
@@ -4929,6 +4963,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
             // reassigned. A `let` is also FROZEN: nothing inside it may be
             // modified either (expr_roots_in_let, docs/let-is-frozen.md).
             bool immut = !stmt->as.let_stmt.is_var;
+            sema_check_rebinding(module, symbols, stmt);
             Symbol* sym = symbol_table_define(symbols, ctx->ast_arena, stmt->as.let_stmt.name, NULL, t, immut);
             /* A `let`/`var` in a body owns frame storage — unless it is
              * itself a reference binding, which merely names storage that
@@ -4991,6 +5026,12 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
             break;
         }
         case AST_STMT_IF: {
+            /* An `if let`'s binding lives only as long as the statement (the
+             * backend wraps it in its own C block): its own scope, so the name
+             * is gone after it and a later `if let` may use it again
+             * (sema_check_rebinding) */
+            bool if_let_scope = stmt->as.if_stmt.binding != NULL;
+            if (if_let_scope) symbol_table_push_scope(symbols);
             if (stmt->as.if_stmt.binding) {
                 // The binding is introduced before the condition, and its name
                 // is visible in the then-branch. Scope handling below.
@@ -5181,6 +5222,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                 while (s) { sema_analyze_stmt(ctx, module, symbols, s, current_return_type); s = s->next; }
                 symbol_table_pop_scope(symbols);
             }
+            if (if_let_scope) symbol_table_pop_scope(symbols);
             break;
         }
         case AST_STMT_LOOP: {

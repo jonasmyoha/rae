@@ -1,0 +1,31 @@
+# A second binding of a name already bound in the same block is an error
+# naming the first (it once passed the checker and stopped only in clang,
+# "redefinition of 'straight' with a different type"); so is reusing a
+# parameter's name at the top of a function body, or a loop's own variable
+# at the top of its body. A nested block may shadow
+# (1230_let_shadows_in_nested_block).
+import Vec3
+
+type Aim {
+  x: Int
+}
+
+func twice(count: view Int) ret Int {
+  let count: Int = 3
+  ret count
+}
+
+func main() ret Int {
+  let straight: List(Vec3) = List.create(Vec3, cap: 1)
+  log("{straight.length}")
+  let straight: Aim = { x: 2 }
+  log("{straight.x}")
+  var total: Int = 1
+  var total: Int = 2
+  log("{total} {twice(count: 1)}")
+  loop var i: Int = 0, i < 1, ++i {
+    let i: Int = 5
+    log("{i}")
+  }
+  ret 0
+}
