@@ -16,9 +16,11 @@ Rae is an ECS-first language. In ECS vocabulary the rule is one sentence:
   a plain field on the World, created with it, passed down, dropped with it.
 - A **constant** is a compile-time value (`const`), immutable, heap-free.
 
-There is no fourth category. A module-level `var`, or a module-level `let` that
-holds heap (`String`, `List`, any struct carrying heap), is a **compiler error**
-(after rollout). Module-level `const` is allowed.
+There is no fourth category. A module-level `var` is a **compiler error**, and
+so is a module-level `let` (since 2026-10-22: a module-level value is a
+`const`). A module-level `const` is allowed: literals, earlier consts, enum
+cases, arithmetic on them and struct literals of them, with no heap (no
+`List`/`Map` or struct carrying one; a String literal is static, so it is fine).
 
 The `App` is the root of that tree: `main` builds it, everything hangs off it,
 and it is passed down. An App is, structurally, "a World plus its Schedule plus

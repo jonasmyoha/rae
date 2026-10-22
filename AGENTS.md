@@ -259,15 +259,17 @@ These instructions define **how Codex should work**, communicate progress, and i
 
 ### NO globals — mutable module-level state is forbidden (see docs/globals-and-app-ownership.md):
 - "No globals" means precisely: a module-level **`var`** (mutable global state)
-  and a module-level **`let` that owns heap** (a `String`, `List`, `Map`, or any
-  struct carrying heap — a global with no owner) are **not allowed**. There is no
-  hidden, program-wide, mutable channel between functions.
-- **`const` is allowed, and so is a plain constant `let`.** A module-level
-  `const` (`const maxRetries: Int = 5`) is a compile-time value, not state. A
-  module-level `let` bound to a POD literal or a string literal
-  (`let title: String = "Rae"`) is likewise a constant with a static buffer, not
-  a global — it should usually just be spelled `const`. What is banned is
-  *mutable* state and *heap ownership* at module level, not named constants.
+  is **not allowed**, and a module-level VALUE is always a **`const`** — a
+  module-level `let` is a compile error ("a module-level value is a `const`,
+  not a `let`"). There is no hidden, program-wide, mutable channel between
+  functions.
+- **A `const` is a compile-time value, not state**: literals, earlier consts,
+  enum cases, arithmetic on them, and a **struct literal of them**
+  (`const maxRetries: Int = 5`, `const title: String = "Rae"`,
+  `const walkerClock: Clock = { daySeconds: 1800.0, startHour: 9.0 }`). A
+  `const` may not own heap (a `List`, a `Map`, a struct carrying one); a
+  String const is a literal with a static buffer, so it is fine. A value
+  computed at run time belongs on its owner, not at module level.
 - The replacement is **ownership**, matching the ECS architecture: a singleton
   becomes a **resource on the World or App** and is threaded explicitly through
   the `mod`/`view` parameter that already says who may touch it — e.g. a former

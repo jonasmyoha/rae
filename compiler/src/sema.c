@@ -2811,44 +2811,28 @@ static void sema_analyze_decl_inner(CompilerContext* ctx, AstModule* module, Sym
                 gs->decl_column = (int)decl->column;
             }
             /* #763 no-globals rule (docs/globals-and-app-ownership.md): a
-             * module-level `var` is mutable global state; a module-level `let`
-             * that owns heap (String/List/Map/struct-with-heap) is global heap
-             * with no owner. Both are a HARD ERROR (universal since #789 cleaned
-             * the last example globals; started as a warning in #763, lib/-scoped
-             * error in #766). `const` and POD-/string-literal `let` (Int/Float/
-             * Bool/plain struct, no heap) are fine. */
-            if (!decl->as.let_decl.is_const) {
+             * module-level `var` is mutable global state, and a module-level
+             * value is a `const` (2026-10-22): a `let` there is an error, and a
+             * `const` may not own heap (a List/Map, or a struct carrying one).
+             * A String const is a literal with a static buffer, so it is fine. */
+            {
                 const char* why = NULL;
-                /* A `let` initialised from a STRING LITERAL is a compile-time
-                 * constant with a STATIC buffer (is_owned=false) — it owns no
-                 * runtime heap and has no lifetime, so it is fine (it should just
-                 * be spelled `const`; #765). Only a `let` whose initialiser
-                 * ALLOCATES (createList/a heap-returning call) is a real global. */
-                bool literal_init = decl->as.let_decl.value
-                                    && decl->as.let_decl.value->kind == AST_EXPR_STRING;
                 const AstTypeRef* gt = decl->as.let_decl.type;
-                bool owns_heap = gt
-                    && (type_owns_heap_storage(ctx, module, gt, 0)
-                        /* String owns a heap buffer too, but ownership.c leaves it
-                         * out; count it here (a literal init is exempted above). */
-                        || (!gt->is_view && !gt->is_mod
-                            && str_eq_cstr(get_base_type_name(gt), "String")));
+                bool owns_heap = gt && type_owns_heap_storage(ctx, module, gt, 0);
                 if (decl->as.let_decl.is_var) {
                     why = "module-level `var` is mutable global state";
-                } else if (owns_heap && !literal_init) {
-                    why = "module-level `let` owns heap (a global with no owner)";
+                } else if (!decl->as.let_decl.is_const) {
+                    why = "a module-level value is a `const`, not a `let`";
+                } else if (owns_heap) {
+                    why = "a module-level `const` cannot own heap";
                 }
                 if (why) {
                     char nog[320];
                     snprintf(nog, sizeof(nog),
-                        "%s: '%.*s' — no globals: make it a component, a resource on the "
-                        "App/World, or a `const`. See docs/globals-and-app-ownership.md",
+                        "%s: '%.*s' — no globals: write `const` for a compile-time value, or make "
+                        "it a component or a resource on the App/World. See "
+                        "docs/globals-and-app-ownership.md",
                         why, (int)decl->as.let_decl.name.len, decl->as.let_decl.name.data);
-                    /* #766/#789 ERROR phase: the no-globals rule is a HARD ERROR
-                     * everywhere — "no exemption" (docs/globals-and-app-ownership.md).
-                     * lib/ was cleaned in #764 and the flagship example apps in #789,
-                     * so a module-level mutable `var` / heap-owning `let` now fails
-                     * the build wherever it appears (was lib/-scoped under #766). */
                     const char* org = decl->origin_file ? decl->origin_file : module->file_path;
                     diag_error(org, (int)decl->line, (int)decl->column, nog);
                     module->had_error = true;
@@ -2933,6 +2917,14 @@ static ConstResult const_eval(SymbolTable* symbols, AstExpr* e) {
             return (ConstResult){ .ok = true, .is_bool = true, .b = e->as.boolean };
         case AST_EXPR_STRING:
             return ok_nonnum;  // valid const, not foldable arithmetic
+        case AST_EXPR_OBJECT:
+            /* A struct literal whose every field is itself a compile-time
+             * value (`const origin: Point = { x: 0, y: -1 }`); the type is
+             * checked for heap fields where the const is declared */
+            for (AstObjectField* f = e->as.object_literal.fields; f; f = f->next) {
+                if (!const_eval(symbols, f->value).ok) return fail;
+            }
+            return ok_nonnum;
         case AST_EXPR_MEMBER: {
             // Enum case (e.g. RenderMode.pathTraced) — a compile-time value the
             // backends already lower to a constant. Its case is known, so `is`
@@ -3049,27 +3041,27 @@ static ConstResult const_eval(SymbolTable* symbols, AstExpr* e) {
     }
 }
 
-// Evaluate a `const` initializer; on success record the folded value on `sym`
-// and rewrite a numeric initializer into a literal node (so the backends emit a
-// plain literal — required because C `static const` initializers must be
-// constant expressions). On failure emit a clear diagnostic.
-static void sema_fold_const(CompilerContext* ctx, AstModule* module, SymbolTable* symbols,
-                            AstExpr* init, Symbol* sym, size_t line, size_t col) {
-    if (!init) return;
-    ConstResult r = const_eval(symbols, init);
-    if (!r.ok) {
-        diag_error(sema_diag_file(module), (int)line, (int)col,
-                   "'const' initializer must be evaluable at compile time (only literals, earlier constants, enum cases, and arithmetic on them are allowed)");
-        module->had_error = true;
+/* Rewrite a folded const initializer into literal nodes, so the backends emit
+ * a plain literal (a C `static` initializer must be a constant expression). A
+ * struct literal's fields are folded one by one. */
+static void sema_fold_const_literal(CompilerContext* ctx, SymbolTable* symbols, AstExpr* init,
+                                    ConstResult r) {
+    if (init->kind == AST_EXPR_OBJECT) {
+        for (AstObjectField* f = init->as.object_literal.fields; f; f = f->next) {
+            sema_fold_const_literal(ctx, symbols, f->value, const_eval(symbols, f->value));
+        }
         return;
     }
-    if (sym) {
-        sym->const_is_number = r.numeric;
-        sym->const_is_float = r.is_float;
-        sym->const_is_unsigned = r.is_unsigned;
-        sym->const_d = r.d;
-        sym->const_i = r.i;
-        sym->const_value = init;
+    /* A field naming another struct or String const takes that const's
+     * literal: a C static initializer cannot read another global */
+    if (init->kind == AST_EXPR_IDENT) {
+        Symbol* named = symbol_table_lookup(symbols, init->as.ident);
+        if (named && named->bind_kind == BIND_CONST && named->const_value
+            && (named->const_value->kind == AST_EXPR_OBJECT
+                || named->const_value->kind == AST_EXPR_STRING)) {
+            *init = *named->const_value;
+            return;
+        }
     }
     /* A Bool folds to its literal, so the backends emit `true`/`false` and a
      * later `when` reads a plain value */
@@ -3092,6 +3084,31 @@ static void sema_fold_const(CompilerContext* ctx, AstModule* module, SymbolTable
             init->as.integer = str_dup_arena(ctx->ast_arena, str_from_cstr(buf));
         }
     }
+}
+
+// Evaluate a `const` initializer; on success record the folded value on `sym`
+// and rewrite a numeric initializer into a literal node (so the backends emit a
+// plain literal — required because C `static const` initializers must be
+// constant expressions). On failure emit a clear diagnostic.
+static void sema_fold_const(CompilerContext* ctx, AstModule* module, SymbolTable* symbols,
+                            AstExpr* init, Symbol* sym, size_t line, size_t col) {
+    if (!init) return;
+    ConstResult r = const_eval(symbols, init);
+    if (!r.ok) {
+        diag_error(sema_diag_file(module), (int)line, (int)col,
+                   "'const' initializer must be evaluable at compile time (only literals, earlier constants, enum cases, arithmetic on them, and struct literals of them are allowed)");
+        module->had_error = true;
+        return;
+    }
+    if (sym) {
+        sym->const_is_number = r.numeric;
+        sym->const_is_float = r.is_float;
+        sym->const_is_unsigned = r.is_unsigned;
+        sym->const_d = r.d;
+        sym->const_i = r.i;
+        sym->const_value = init;
+    }
+    sema_fold_const_literal(ctx, symbols, init, r);
 }
 
 /* Is this struct type an instantiation of the named generic?
