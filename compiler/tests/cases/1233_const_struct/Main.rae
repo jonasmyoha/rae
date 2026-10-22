@@ -1,0 +1,35 @@
+# A module-level `const` may be a struct literal whose fields are
+# compile-time values: literals, earlier consts (numeric, String or struct)
+# and arithmetic on them. It is emitted as a static initializer.
+type Clock {
+  daySeconds: Float
+  startHour: Float
+  paused: Bool
+}
+
+type Preset {
+  clock: Clock
+  label: String
+  steps: Int
+}
+
+const baseSeconds: Float = 900.0
+
+const title: String = "walker"
+
+const walkerClock: Clock = { daySeconds: baseSeconds * 2.0, startHour: 9.0, paused: false }
+
+const walkerPreset: Preset = { clock: walkerClock, label: title, steps: -1 }
+
+func hours(clock: view Clock) ret Float {
+  ret clock.daySeconds / 60.0
+}
+
+func main() {
+  log(walkerClock.daySeconds)
+  log(hours(clock: walkerPreset.clock))
+  log(walkerPreset.label)
+  log(walkerPreset.steps)
+  let copy: Clock = walkerClock
+  log(copy.paused)
+}

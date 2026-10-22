@@ -37,7 +37,7 @@ where the compiler can see it:
 
 ```rae
 # lib/GrassCompute.rae — inside the function that creates the pipeline (a
-# module-level `let` that owns heap is a global, which Rae forbids; the value
+# module-level value must be a compile-time `const`, which a Shader is not; the value
 # lives on the resource that owns the pipeline)
 let grassComputeShader: Shader = shader(
   files: ["lib/noise.wgsl", "lib/world_biome.wgsl", "lib/grass_compute.wgsl"]

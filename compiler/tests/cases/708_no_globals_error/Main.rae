@@ -1,25 +1,33 @@
 import String
 
-# #766/#789 no-globals HARD ERROR (universal). `const` and POD-literal /
-# string-literal `let` are FINE (no diagnostic). A module-level `var` (mutable
-# global) and a `let` that ALLOCATES heap each fail to compile, pointing at the
-# App-ownership doc.
+# The no-globals rule. A `const` is FINE (no diagnostic), including a String
+# literal and a struct of compile-time values. A module-level `var` (mutable
+# global), a module-level `let` (a module-level value is a `const`) and a
+# `const` that owns heap each fail to compile, pointing at the App-ownership
+# doc.
+type Size {
+  width: Float
+  height: Float
+}
+
 const okConst: Int = 5  # fine
 
-let okPodLet: Float = 3.14  # fine (POD literal)
+const okStrLiteral: String = "static"  # fine (string literal = constant)
 
-let okStrLiteral: String = "static"  # fine (string literal = constant)
+const okStruct: Size = { width: 2.0, height: 3.0 }  # fine (POD struct)
 
 var warnVarInt: Int = 0  # ERROR: mutable global
 
 var warnVarList: List(Int) = List.create(Int, cap: 2)  # ERROR: mutable global
 
-let warnHeapStr: String = "a".concat(other: "b")  # ERROR: let allocates heap
+let warnLetFloat: Float = 3.14  # ERROR: a module-level value is a const
 
-let warnHeapList: List(Int) = List.create(Int, cap: 2)  # ERROR: let owns heap
+let warnHeapStr: String = "a".concat(other: "b")  # ERROR: a module-level value is a const
+
+const warnHeapList: List(Int) = List.create(Int, cap: 2)  # ERROR: a const owns heap
 
 func main() {
   warnVarInt = warnVarInt + okConst
   warnVarList.add(value: 1)
-  log("ok: {okConst} {okPodLet} {okStrLiteral}")
+  log("ok: {okConst} {okStrLiteral} {okStruct.width}")
 }
