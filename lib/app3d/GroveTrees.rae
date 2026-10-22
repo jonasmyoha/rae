@@ -427,12 +427,18 @@ func speciesLodOf(
 ) ret PropLod {
   var parts: List(PropPart) = List.create(PropPart, cap: meshes.length)
   loop var part: Int = 0, part < meshes.length, ++part {
+    # Part 0 is the wood, which stays still; the rest are leaves
+    var sway: Float = groveLeafSway
+    if part is 0 {
+      sway = 0.0
+    }
     parts.add(
       value: {
         mesh: meshes.copyAtDefault(index: part)
         material: foliageMaterial(
           color: albedos.copyAtFallback(index: part, fallback: speciesWoodColor())
         )
+        sway: sway
       }
     )
   }
@@ -559,7 +565,6 @@ func addForestKinds(
       layer: species
       height: subject.height
     )
-    setPropKindSway(field: field, kind: kind, sway: groveTreeSway)
     subjects.add(value: subject)
   }
   if let resources: mod GpuResources = renderer.gpuResources {
@@ -574,11 +579,9 @@ func addForestKinds(
   }
 }
 
-# How much the grove's trees and bushes bend in the wind (lib/wind.wgsl):
-# a tree's tuned sway; a bush, short, more for its height
-const groveTreeSway: Float = 1.0
-
-const groveBushSway: Float = 4.0
+# How much the grove's leaves move in the wind (lib/wind.wgsl). Only the
+# leaves sway: a tree's wood (part 0 of each level) stays still.
+const groveLeafSway: Float = 1.0
 
 # The bush's three leaf tones
 func createBushParts(renderer: mod DeferredRenderer, capacity: view Int) ret List(PropInstancer) {
@@ -591,7 +594,7 @@ func createBushParts(renderer: mod DeferredRenderer, capacity: view Int) ret Lis
   )
   loop var i: Int = 0, i < parts.length, ++i {
     if let part: mod PropInstancer = parts.modAt(index: i) {
-      part.sway = groveBushSway
+      part.sway = groveLeafSway
     }
   }
   ret parts
