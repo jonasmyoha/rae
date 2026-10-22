@@ -22,7 +22,13 @@
 # CHEAP STREAMING. A cell's tile is the one at (cellX mod gridSide, cellY mod
 # gridSide), so when the player crosses into the next cell only the row or
 # column that came into view is rewritten, not the whole grid.
+#
+# A HOLE where a finer ground covers it (setTerrainTilesHole): a coarse far
+# ground drawn under a near one leaves out every quad wholly inside the
+# near one's area, so it is not drawn twice there (seen from below the near
+# ground, it was a second terrain 1 m under the first).
 import Math
+open MeshStore
 import RendererDeferred
 open Math3d
 open Mesh3d
@@ -55,6 +61,14 @@ type TerrainTiles {
   # Drawn this far below its heights (m): a coarse far ground under a finer
   # near one, so the near one covers it where both are
   drawDrop: Float = 0.0
+  # The world rectangle whose quads are left out (setTerrainTilesHole);
+  # none while min > max
+  holeMinX: Float = 1.0
+  holeMinY: Float = 1.0
+  holeMaxX: Float = 0.0
+  holeMaxY: Float = 0.0
+  # Reused staging list for one tile's indices
+  scratchIndices: List(Int) = List.create(Int, cap: 0)
 }
 
 # The pool: gridSide x gridSide tiles of `segments` x `segments` quads, each
@@ -155,6 +169,15 @@ func updateTerrainTiles(
           cellX: wantX
           cellY: wantY
         )
+        if terrainTilesHasHole(tiles: tiles) {
+          cutTerrainTileHole(
+            tiles: tiles
+            renderer: renderer
+            meshId: meshId
+            cellX: wantX
+            cellY: wantY
+          )
+        }
         if let tile: mod TerrainTile = tiles.tiles.modAt(index: slot) {
           tile.cellX = wantX
           tile.cellY = wantY
@@ -246,5 +269,129 @@ func drawTerrainTiles(
         time: time
       )
     }
+  }
+}
+
+func terrainTilesHasHole(tiles: view TerrainTiles) ret Bool {
+  ret tiles.holeMinX <= tiles.holeMaxX and tiles.holeMinY <= tiles.holeMaxY
+}
+
+# Does the tile of cell (`cellX`, `cellY`) reach into the hole
+# (minX, minY)-(maxX, maxY)?
+func terrainTileTouches(
+  tiles: view TerrainTiles
+  cellX: view Int
+  cellY: view Int
+  minX: view Float
+  minY: view Float
+  maxX: view Float
+  maxY: view Float
+) ret Bool {
+  let half: Float = tiles.cellSize * 0.5
+  let centreX: Float = cellX.toFloat() * tiles.cellSize
+  let centreY: Float = cellY.toFloat() * tiles.cellSize
+  ret minX <= maxX and minY <= maxY and centreX + half > minX and centreX - half < maxX and centreY + half > minY and centreY - half < maxY
+}
+
+# Leave out of the tiles every quad wholly inside the world rectangle
+# (minX, minY)-(maxX, maxY): the area a finer ground covers. Only the tiles
+# the old or the new hole touches are rewritten (their indices; the
+# vertices stay). min > max: no hole.
+func setTerrainTilesHole(
+  tiles: mod TerrainTiles
+  renderer: mod DeferredRenderer
+  minX: view Float
+  minY: view Float
+  maxX: view Float
+  maxY: view Float
+) {
+  if minX is tiles.holeMinX and minY is tiles.holeMinY and maxX is tiles.holeMaxX and maxY is tiles.holeMaxY {
+    ret
+  }
+  let oldMinX: Float = tiles.holeMinX
+  let oldMinY: Float = tiles.holeMinY
+  let oldMaxX: Float = tiles.holeMaxX
+  let oldMaxY: Float = tiles.holeMaxY
+  tiles.holeMinX = minX
+  tiles.holeMinY = minY
+  tiles.holeMaxX = maxX
+  tiles.holeMaxY = maxY
+  loop var i: Int = 0, i < tiles.tiles.length, ++i {
+    let tile: TerrainTile = tiles.tiles.copyAtDefault(index: i)
+    if tile.meshId < 1 or tile.cellX is 1000000000 {
+      continue
+    }
+    if terrainTileTouches(
+      tiles: tiles
+      cellX: tile.cellX
+      cellY: tile.cellY
+      minX: oldMinX
+      minY: oldMinY
+      maxX: oldMaxX
+      maxY: oldMaxY
+    ) or terrainTileTouches(
+      tiles: tiles
+      cellX: tile.cellX
+      cellY: tile.cellY
+      minX: minX
+      minY: minY
+      maxX: maxX
+      maxY: maxY
+    ) {
+      cutTerrainTileHole(
+        tiles: tiles
+        renderer: renderer
+        meshId: tile.meshId
+        cellX: tile.cellX
+        cellY: tile.cellY
+      )
+    }
+  }
+}
+
+# Rewrite one tile's indices for cell (`cellX`, `cellY`): every quad but
+# those wholly inside the hole, in makePlane's winding (a degenerate
+# triangle when none is left, so the draw stays valid)
+func cutTerrainTileHole(
+  tiles: mod TerrainTiles
+  renderer: mod DeferredRenderer
+  meshId: view Int
+  cellX: view Int
+  cellY: view Int
+) {
+  let segments: Int = tiles.segments
+  let spacing: Float = tiles.cellSize / segments.toFloat()
+  let stride: Int = segments + 1
+  tiles.scratchIndices.clear()
+  loop var row: Int = 0, row < segments, ++row {
+    let lowY: Float = (cellY * segments + row - segments / 2).toFloat() * spacing
+    let inY: Bool = lowY >= tiles.holeMinY and lowY + spacing <= tiles.holeMaxY
+    loop var column: Int = 0, column < segments, ++column {
+      let lowX: Float = (cellX * segments + column - segments / 2).toFloat() * spacing
+      if inY and lowX >= tiles.holeMinX and lowX + spacing <= tiles.holeMaxX {
+        continue
+      }
+      let a: Int = row * stride + column
+      let b: Int = a + stride
+      tiles.scratchIndices.add(value: a)
+      tiles.scratchIndices.add(value: a + 1)
+      tiles.scratchIndices.add(value: b)
+      tiles.scratchIndices.add(value: b)
+      tiles.scratchIndices.add(value: a + 1)
+      tiles.scratchIndices.add(value: b + 1)
+    }
+  }
+  if tiles.scratchIndices.length is 0 {
+    tiles.scratchIndices.add(value: 0)
+    tiles.scratchIndices.add(value: 0)
+    tiles.scratchIndices.add(value: 0)
+  }
+  if let resources: view GpuResources = renderer.gpuResources {
+    let wrote: Bool = meshStoreUpdateIndices(
+      store: renderer.passes.gbuffer.meshes
+      resources: resources
+      mesh: meshHandle(id: meshId, generation: 0)
+      indices: tiles.scratchIndices
+    )
   }
 }

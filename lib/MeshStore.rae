@@ -29,6 +29,9 @@ type MeshEntry {
   indexCount: Int
   vertexCount: Int
   vertexFloats: Int = 8
+  # How many indices its index buffer holds (meshStoreUpdateIndices may
+  # write fewer, never more)
+  indexCapacity: Int = 0
 }
 
 type MeshStore {
@@ -126,6 +129,7 @@ func meshStoreUploadStride(
         indexCount: indices.length
         vertexCount: vertCount
         vertexFloats: vertexFloats
+        indexCapacity: indices.length
       })
       ret meshHandle(id: store.entries.length, generation: 0)
     }
@@ -162,6 +166,43 @@ func meshStoreUpdateVerts(
       )
     }
   }
+}
+
+# Rewrite a mesh's indices in place and draw that many from now on (a
+# terrain tile leaving out the quads another one covers). At most as many as
+# it was created with: a longer list changes nothing and is false.
+func meshStoreUpdateIndices(
+  store: mod MeshStore
+  resources: view GpuResources
+  mesh: view MeshHandle
+  indices: view List(Int)
+) ret Bool {
+  if let entry: MeshEntry = meshStoreEntry(store: store, mesh: mesh.id) {
+    if indices.length < 1 or indices.length > entry.indexCapacity {
+      ret false
+    }
+    store.indexScratch.clear()
+    loop let index: view Int in indices {
+      store.indexScratch.add(value: index as Int32)
+    }
+    var wrote: Bool = false
+    unsafe {
+      wrote = writeBufferFromPtr(
+        resources: resources
+        id: entry.ibuf
+        offset: 0
+        data: store.indexScratch.data
+        size: indices.length * 4
+      )
+    }
+    if wrote {
+      if let stored: mod MeshEntry = store.entries.modAt(index: mesh.id - 1) {
+        stored.indexCount = indices.length
+      }
+    }
+    ret wrote
+  }
+  ret false
 }
 
 # Rewrite `vertCount` vertices of a mesh in place from vertex `firstVertex`
