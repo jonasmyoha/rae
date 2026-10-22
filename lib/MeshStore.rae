@@ -28,6 +28,7 @@ type MeshEntry {
   ibuf: BufferId
   indexCount: Int
   vertexCount: Int
+  vertexFloats: Int = 8
 }
 
 type MeshStore {
@@ -40,6 +41,13 @@ func createMeshStore() ret MeshStore {
     entries: List.create(MeshEntry, cap: 64)
     indexScratch: List.create(Int32, cap: 1024)
   }
+}
+
+func meshStoreHasFoliage(store: view MeshStore, mesh: view Int) ret Bool {
+  if let entry: view MeshEntry = store.entries.viewAt(index: mesh - 1) {
+    ret entry.vertexFloats is 12
+  }
+  ret false
 }
 
 func meshStoreCount(store: view MeshStore) ret Int {
@@ -112,14 +120,13 @@ func meshStoreUploadStride(
           size: indexBytes
         )
       }
-      store.entries.add(
-        value: MeshEntry {
-          vbuf: vbuf
-          ibuf: ibuf
-          indexCount: indices.length
-          vertexCount: vertCount
-        }
-      )
+      store.entries.add(value: MeshEntry {
+        vbuf: vbuf
+        ibuf: ibuf
+        indexCount: indices.length
+        vertexCount: vertCount
+        vertexFloats: vertexFloats
+      })
       ret meshHandle(id: store.entries.length, generation: 0)
     }
     retireBuffer(resources: resources, id: vbuf)

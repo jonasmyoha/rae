@@ -1,0 +1,47 @@
+# An optional static vertex layout for rigid leaf patches: ordinary pos/normal/UV
+# followed by pivot xyz and flexibility. The upload is once per shared mesh.
+open RendererDeferred
+open Mesh3d
+open MeshStore
+open Scene3d
+open gpu/GpuResources
+
+func uploadFoliageMesh(
+  store: mod MeshStore
+  resources: mod GpuResources
+  mesh: view MeshData
+) ret MeshHandle {
+  var vertices: List(Float) = List.create(Float, cap: mesh.vertCount * 12)
+  loop var vertex: Int = 0, vertex < mesh.vertCount, ++vertex {
+    loop var field: Int = 0, field < 8, ++field {
+      vertices.add(value: mesh.verts.copyAtFallback(index: vertex * 8 + field, fallback: 0.0))
+    }
+    loop var field: Int = 0, field < 4, ++field {
+      vertices.add(value: mesh.windPivots.copyAtFallback(index: vertex * 4 + field, fallback: 0.0))
+    }
+  }
+  ret meshStoreUploadStride(
+    store: store
+    resources: resources
+    verts: vertices
+    vertCount: mesh.vertCount
+    indices: mesh.indices
+    vertexFloats: 12
+  )
+}
+
+func uploadFoliage(renderer: mod DeferredRenderer, mesh: view MeshData) ret MeshHandle {
+  if mesh.windPivots.length > 0 {
+    ensureRendererResources(renderer: renderer)
+    if let resources: mod GpuResources = renderer.gpuResources {
+      ret uploadFoliageMesh(store: renderer.passes.gbuffer.meshes, resources: resources, mesh: mesh)
+    }
+    ret meshHandleNone()
+  }
+  ret RendererDeferred.uploadMesh(
+    renderer: renderer
+    verts: mesh.verts
+    vertCount: mesh.vertCount
+    indices: mesh.indices
+  )
+}

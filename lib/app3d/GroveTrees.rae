@@ -15,6 +15,7 @@
 import Math
 import Vec3
 import RendererDeferred
+open FoliageMesh
 open Noise
 open Scene3d
 open Mesh3d
@@ -206,15 +207,6 @@ func foliageMaterial(color: view Vec3) ret Material3d {
   }
 }
 
-func uploadFoliage(renderer: mod DeferredRenderer, mesh: view MeshData) ret MeshHandle {
-  ret RendererDeferred.uploadMesh(
-    renderer: renderer
-    verts: mesh.verts
-    vertCount: mesh.vertCount
-    indices: mesh.indices
-  )
-}
-
 # The leaf tones of `form`, one instancer each, added to `parts`
 func addLeafParts(
   parts: mod List(PropInstancer)
@@ -283,6 +275,15 @@ func widenMesh(mesh: mod MeshData, factor: view Float) {
     ret
   }
   loop var vertex: Int = 0, vertex < mesh.vertCount, ++vertex {
+    if vertex * 4 + 3 < mesh.windPivots.length {
+      loop var axis: Int = 0, axis < 2, ++axis {
+        let index: Int = vertex * 4 + axis
+        mesh.windPivots.set(
+          index: index
+          value: mesh.windPivots.copyAtFallback(index: index, fallback: 0.0) * factor
+        )
+      }
+    }
     let base: Int = vertex * 8
     mesh.verts.set(
       index: base
@@ -360,6 +361,15 @@ func speciesLeavesMesh(
     tone: tone
   )
   widenMesh(mesh: crown, factor: speciesWidth(species: species))
+  var flexibility: Float = 1.0
+  if species is speciesCypress {
+    flexibility = 0.35
+  } else if species is speciesUmbrella {
+    flexibility = 0.55
+  }
+  loop var vertex: Int = 0, vertex < crown.windPivots.length / 4, ++vertex {
+    crown.windPivots.set(index: vertex * 4 + 3, value: flexibility)
+  }
   ret crown
 }
 

@@ -2,8 +2,8 @@
 // (direction times strength xy, gustiness, time). The base is global; the
 // gusts are a smooth field over the world, tens of metres across, travelling
 // with the wind, so a gust front sweeps across everything that sways. A
-// leaf part sways by its flexibility (its record's [43]: 0 rigid;
-// app3d/PropField's PropPart `sway`); a trunk never bends. Composed before
+// leaf patch rotates by its flexibility (record [43] times pivot.w);
+// geometry without attachment metadata stays rigid. Composed before
 // the vertex stages that read it (the static G-buffer and forward passes,
 // the static shadow pass).
 
@@ -36,29 +36,31 @@ fn windGustAt(xy: vec2<f32>, wind: vec4<f32>) -> f32 {
   return smoothstep(0.42, 0.85, n);
 }
 
-// The offset of a swaying leaf vertex at `world`, its prop's foot at
-// `foot`, its flexibility `sway` (0: none), in the wind `wind`. Only leaves
-// sway: the prop's body (a trunk, its branches) gets sway 0 and stays still,
-// so nothing bends as a whole. The leaves move a few centimetres about where
-// they grow: a slow sway in clusters a metre or so across, and a faster
-// flutter per leaf, both more in a gust and more high in the crown.
-fn windOffset(world: vec3<f32>, foot: vec3<f32>, sway: f32, wind: vec4<f32>) -> vec3<f32> {
+// A leaf patch rotates as one rigid shape. The pivot/phase is shared by all
+// its vertices; no position-dependent wave can stretch its surface.
+struct WindLeaf { position: vec3<f32>, normal: vec3<f32> };
+fn windRotate(value: vec3<f32>, axis: vec3<f32>, angle: f32) -> vec3<f32> {
+  let cosine = cos(angle);
+  return value * cosine + cross(axis, value) * sin(angle)
+       + axis * dot(axis, value) * (1.0 - cosine);
+}
+fn windLeaf(world: vec3<f32>, normal: vec3<f32>, pivot: vec3<f32>, foot: vec3<f32>,
+            flexibility: f32, wind: vec4<f32>) -> WindLeaf {
+  var result: WindLeaf;
+  result.position = world;
+  result.normal = normal;
   let strength = length(wind.xy);
-  if (sway <= 0.0 || strength <= 0.0) {
-    return vec3<f32>(0.0);
-  }
-  let dir = wind.xy / strength;
-  let h = max(world.z - foot.z, 0.0);
-  // A gust pushes harder: up to (1 + 2 * gustiness) times the base
-  let push = strength * (1.0 + 2.0 * wind.z * windGustAt(foot.xy, wind));
-  let reach = sway * push * (h / (h + 2.0));
-  // The slow sway: neighbouring leaves together, other clusters at their
-  // own phase
-  let cluster = dot(world, vec3<f32>(0.9, 0.7, 0.5));
-  let slow = 0.05 * reach * sin(wind.w * 1.7 + cluster);
-  // The flutter: fast, per leaf
-  let leaf = dot(world, vec3<f32>(3.1, 2.3, 2.7));
-  let flutter = 0.02 * reach * sin(wind.w * 7.0 + leaf);
-  let across = vec2<f32>(-dir.y, dir.x) * 0.03 * reach * sin(wind.w * 1.3 + cluster * 1.4);
-  return vec3<f32>(dir * (slow + flutter) + across, (slow * 0.3 + flutter) * 0.5);
+  if (flexibility <= 0.0 || strength <= 0.0001) { return result; }
+  let direction = wind.xy / strength;
+  let phase = windHash(pivot.xy + vec2<f32>(pivot.z * 0.71, pivot.z * 0.37)) * 6.2831853;
+  let gust = windGustAt(foot.xy, wind);
+  // Quiet between passing gusts. Small turning leaves, not bobbing crowns.
+  let activity = 0.12 + clamp(wind.z, 0.0, 1.0) * gust;
+  let response = sin(wind.w * 2.1 + phase) * 0.65
+               + sin(wind.w * 3.7 + phase * 1.43) * 0.35;
+  let angle = clamp(flexibility * min(strength, 2.0) * (0.025 * gust + 0.10 * activity * response), -0.14, 0.14);
+  let axis = normalize(vec3<f32>(-direction.y, direction.x, 0.25 * sin(phase)));
+  result.position = pivot + windRotate(world - pivot, axis, angle);
+  result.normal = windRotate(normal, axis, angle);
+  return result;
 }

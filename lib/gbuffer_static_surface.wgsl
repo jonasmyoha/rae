@@ -7,6 +7,7 @@ struct Frame {
   prevViewProj: mat4x4<f32>,
   jitter: vec4<f32>,    // xy the TAA jitter, z the wind's time last frame
   wind: vec4<f32>,      // the wind (lib/wind.wgsl): direction * strength, gustiness, time
+  previousWind: vec4<f32>,
 };
 struct DrawU {
   model: mat4x4<f32>,
@@ -114,29 +115,34 @@ fn gbEmblem(uv: vec2<f32>, base: vec3<f32>, codeF: f32) -> vec3<f32> {
   if (em) { return white; }
   return base;
 }
-@vertex
-fn vs(@builtin(instance_index) ii: u32,
-      @location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) uv: vec2<f32>) -> VsOut {
+fn staticVertex(ii: u32, p: vec3<f32>, n: vec3<f32>, uv: vec2<f32>, pivot: vec4<f32>) -> VsOut {
   let d = draws[ii];
   var o: VsOut;
-  var world = d.model * vec4<f32>(p, 1.0);
-  var prevWorld = d.prevModel * vec4<f32>(p, 1.0);
-  if (d.fade.w > 0.0) {
-    // Swaying in the wind; last frame's bend from last frame's time, so the
-    // motion vectors carry the sway
-    world = vec4<f32>(world.xyz + windOffset(world.xyz, d.model[3].xyz, d.fade.w, F.wind), 1.0);
-    let prevWind = vec4<f32>(F.wind.xyz, F.jitter.z);
-    prevWorld = vec4<f32>(prevWorld.xyz + windOffset(prevWorld.xyz, d.prevModel[3].xyz, d.fade.w, prevWind), 1.0);
-  }
-  o.wpos = world.xyz;
-  o.pos = F.viewProj * world;
-  o.nrm = normalize((d.model * vec4<f32>(n, 0.0)).xyz);
+  let normal = normalize((d.model * vec4<f32>(n, 0.0)).xyz);
+  let current = windLeaf((d.model * vec4<f32>(p, 1.0)).xyz, normal,
+    (d.model * vec4<f32>(pivot.xyz, 1.0)).xyz, d.model[3].xyz, pivot.w * d.fade.w, F.wind);
+  let previous = windLeaf((d.prevModel * vec4<f32>(p, 1.0)).xyz, normal,
+    (d.prevModel * vec4<f32>(pivot.xyz, 1.0)).xyz, d.prevModel[3].xyz, pivot.w * d.fade.w, F.previousWind);
+  o.wpos = current.position;
+  o.pos = F.viewProj * vec4<f32>(current.position, 1.0);
+  o.nrm = current.normal;
   o.uv = uv;
   o.inst = ii;
   o.clipNow = o.pos;
-  o.clipPrev = F.prevViewProj * prevWorld;
+  o.clipPrev = F.prevViewProj * vec4<f32>(previous.position, 1.0);
   o.pos = vec4<f32>(o.pos.xy + F.jitter.xy * o.pos.w, o.pos.zw);
   return o;
+}
+@vertex
+fn vs(@builtin(instance_index) ii: u32,
+      @location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) uv: vec2<f32>) -> VsOut {
+  return staticVertex(ii, p, n, uv, vec4<f32>(0.0));
+}
+@vertex
+fn vsFoliage(@builtin(instance_index) ii: u32,
+      @location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) uv: vec2<f32>,
+      @location(3) pivot: vec4<f32>) -> VsOut {
+  return staticVertex(ii, p, n, uv, pivot);
 }
 // The pattern-modified albedo and normal of a static draw at this fragment
 fn staticSurface(in: VsOut, d: DrawU) -> BrickOut {

@@ -45,6 +45,19 @@ func foliageVertex(mesh: mod MeshData, point: view Vec3, normal: view Vec3) {
   mesh.vertCount = mesh.vertCount + 1
 }
 
+# Mark a complete rigid leaf patch after its vertices have been generated.
+func foliagePivot(mesh: mod MeshData, first: view Int, pivot: view Vec3) {
+  loop mesh.windPivots.length < first * 4 {
+    mesh.windPivots.add(value: 0.0)
+  }
+  loop var vertex: Int = first, vertex < mesh.vertCount, ++vertex {
+    mesh.windPivots.add(value: pivot.x)
+    mesh.windPivots.add(value: pivot.y)
+    mesh.windPivots.add(value: pivot.z)
+    mesh.windPivots.add(value: 1.0)
+  }
+}
+
 func foliageFace(
   mesh: mod MeshData
   first: view Vec3
@@ -135,6 +148,7 @@ func foliageLeaf(
     )
     foliageVertex(mesh: mesh, point: point, normal: normal)
   }
+  foliagePivot(mesh: mesh, first: base, pivot: center)
   loop var i: Int = 1, i < 5, ++i {
     mesh.indices.add(value: base)
     mesh.indices.add(value: base + i)

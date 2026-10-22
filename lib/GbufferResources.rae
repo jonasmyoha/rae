@@ -6,6 +6,7 @@
 # calls these each begin; nothing here is app-facing.
 import Math
 import String
+open FoliagePipeline
 open SkyHosek
 open Vec3
 open Scene3d
@@ -37,7 +38,7 @@ const gbufferTargetC: Int = 2  # rgba8unorm: motion.xy, metallic, occlusion-or-e
 const gbufferTargetDepth: Int = 3  # depth32float, reverse-Z, sampleable
 
 # The frame uniform: viewProj + prevViewProj + jitter (36 floats, #390/#397).
-const gbufferFrameFloats: Int = 40
+const gbufferFrameFloats: Int = 44
 
 # The draws storage buffer holds this many DrawU records per frame (was C's
 # GB_MAX_DRAWS); every draw path clamps to it.
@@ -194,7 +195,10 @@ func ensureGbBuffers(cache: mod GbufferCache, resources: mod GpuResources) {
 # Create the static geometry bind group once (frame uniform @0, draws storage
 # @1 — manager buffers, created once and surviving resizes).
 func ensureStaticBind(cache: mod GbufferCache, resources: mod GpuResources) {
-  if bindGroupIsUsable(resources: resources, id: cache.staticBind) {
+  if bindGroupIsUsable(resources: resources, id: cache.staticBind) and bindGroupIsUsable(
+    resources: resources
+    id: cache.foliage.bind
+  ) {
     ret
   }
   var entries: List(ResourceRef) = List.create(ResourceRef, cap: 2)
@@ -207,6 +211,7 @@ func ensureStaticBind(cache: mod GbufferCache, resources: mod GpuResources) {
   ) {
     cache.staticBind = bind
   }
+  bindFoliage(pass: cache.foliage, resources: resources, entries: entries)
 }
 
 # A G-buffer pipeline from a declared shader (entry points vs / fs) — the
@@ -254,6 +259,13 @@ func ensurePipelines(cache: mod GbufferCache, resources: mod GpuResources) {
     constants: noConstants
     stride: 32
     attributes: gbufferStaticAttributes()
+  )
+  makeFoliagePipeline(
+    pass: cache.foliage
+    resources: resources
+    shader: staticShader
+    spec: gbufferPipelineSpec(stride: 48, attributes: foliageAttributes())
+    constants: noConstants
   )
   var skinAttributes: List(VertexAttributeSpec) = gbufferStaticAttributes()
   skinAttributes.add(value: { format: WGPUVertexFormat_Float32x4, offset: 32, location: 3 })

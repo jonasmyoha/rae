@@ -1,0 +1,75 @@
+# Rigid-leaf shadow layout; the same deformation and LOD mask as colour.
+open ShadowMaps
+open MeshStore
+open FoliagePipeline
+open gpu/GpuRenderDepth
+open gpu/GpuRender
+open gpu/GpuRenderPass
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuIds
+open webgpu/WebgpuEnums
+
+const shadowFoliageKeyBit: Int = 4398046511104
+
+type FoliageShadow {
+  pipeline: RenderPipelineId = noRenderPipelineId()
+  binds: List(BindGroupId) = fillBindGroupIds(count: shadowMaxCascades)
+}
+
+func foliageCasterKey(meshes: view MeshStore, mesh: view Int) ret Int {
+  if meshStoreHasFoliage(store: meshes, mesh: mesh) {
+    ret mesh + shadowFoliageKeyBit
+  }
+  ret mesh
+}
+
+func makeFoliageShadow(shadow: mod ShadowCache, resources: mod GpuResources, shader: view Shader) {
+  var spec: DepthPipelineSpec = casterPipelineSpec(skinned: false, bias: shadow.casterBias)
+  spec.vertexStride = 48
+  spec.attributes.add(value: { format: WGPUVertexFormat_Float32x4, offset: 32, location: 3 })
+  spec.fragmentEntry = "fsFade"
+  if let pipeline: RenderPipelineId = createDepthPipeline(
+    resources: resources
+    shader: shader
+    vertexEntry: "vsFoliageFade"
+    spec: spec
+  ) {
+    shadow.foliage.pipeline = pipeline
+  }
+}
+
+func bindFoliageShadow(shadow: mod ShadowCache, resources: mod GpuResources) {
+  loop var cascade: Int = 0, cascade < shadow.layers, ++cascade {
+    if not bindGroupIsUsable(
+      resources: resources
+      id: shadow.foliage.binds.copyAtFallback(index: cascade, fallback: noBindGroupId())
+    ) {
+      var entries: List(ResourceRef) = List.create(ResourceRef, cap: 2)
+      entries.add(
+        value: bufferRef(
+          id: shadow.cascadeUniforms.copyAtFallback(index: cascade, fallback: noBufferId())
+        )
+      )
+      entries.add(value: bufferRef(id: shadow.models))
+      if let bind: BindGroupId = createRenderBindGroup(
+        resources: resources
+        pipeline: shadow.foliage.pipeline
+        entries: entries
+      ) {
+        shadow.foliage.binds.set(index: cascade, value: bind)
+      }
+    }
+  }
+}
+
+func recordFoliageShadow(
+  shadow: view ShadowCache
+  resources: mod GpuResources
+  recording: mod Recording
+) {
+  recordRenderPipelineUse(recording: recording, resources: resources, id: shadow.foliage.pipeline)
+  loop let bind: BindGroupId in shadow.foliage.binds {
+    recordBindGroupUse(recording: recording, resources: resources, id: bind)
+  }
+}

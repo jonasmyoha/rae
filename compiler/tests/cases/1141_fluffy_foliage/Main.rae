@@ -44,6 +44,33 @@ func main() ret Int {
           patchCount: count
           tone: tone
         )
+        if form is FluffyForm.spruce {
+          if mesh.windPivots.length is not 0 {
+            ret 9
+          }
+        } else {
+          if mesh.windPivots.length is not mesh.vertCount * 4 {
+            ret 10
+          }
+          loop var vertex: Int = 0, vertex < mesh.vertCount, ++vertex {
+            let first: Int = (vertex / 13) * 13
+            loop var field: Int = 0, field < 4, ++field {
+              let value: Float = mesh.windPivots.copyAtFallback(
+                index: vertex * 4 + field
+                fallback: -1
+              )
+              if value is not mesh.windPivots.copyAtFallback(index: first * 4 + field, fallback: -2) {
+                ret 11
+              }
+              if value is not repeat.windPivots.copyAtFallback(
+                index: vertex * 4 + field
+                fallback: -3
+              ) {
+                ret 12
+              }
+            }
+          }
+        }
         var expectedVertices: Int = clusters * count / 3 * 13
         var expectedIndices: Int = clusters * count / 3 * 72
         if form is FluffyForm.spruce {

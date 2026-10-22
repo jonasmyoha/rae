@@ -22,6 +22,7 @@
 # The draws are the G-buffer pass's (the mesh store, the draw records, the
 # World3d query): a forward frame opens the GbufferCache's pass on these
 # targets with the forward pipeline, and the same draw calls fill it.
+open FoliagePipeline
 open Vec3
 open Math3d
 open Scene3d
@@ -57,6 +58,7 @@ const forwardSampleCount: Int = 4
 type ForwardMainCache {
   pipelinesMade: Bool
   pipelineFormat: Int32  # the lit format the pipelines were made for
+  foliage: FoliagePass = {}
   staticPipeline: RenderPipelineId
   skyPipeline: RenderPipelineId
   sdfPipeline: RenderPipelineId  # the metaballs (drawMetaballs uses it in a forward frame)
@@ -174,6 +176,20 @@ func ensureForwardPipelines(
   ) {
     forward.staticPipeline = pipeline
   }
+  makeFoliagePipeline(
+    pass: forward.foliage
+    resources: resources
+    shader: staticShader
+    spec: forwardPipelineSpec(
+      litFormat: litFormat
+      stride: 48
+      attributes: foliageAttributes()
+      depthWrite: true
+      depthCompare: WGPUCompareFunction_Greater
+      cullMode: WGPUCullMode_Back
+    )
+    constants: forwardSsaoConstants(ssao: ssao)
+  )
   # The metaballs: a fullscreen raymarch that writes its own depth
   if let pipeline: RenderPipelineId = createRenderPipelineWithConstants(
     resources: resources
@@ -304,6 +320,8 @@ func ensureForwardBinds(
     forward.bindShadowGen = shadow.gen
     let staticRetired: Bool = retireBindGroup(resources: resources, id: forward.staticBind)
     let skyRetired: Bool = retireBindGroup(resources: resources, id: forward.skyBind)
+    retireBindGroup(resources: resources, id: forward.foliage.bind)
+    forward.foliage.bind = noBindGroupId()
     forward.staticBind = noBindGroupId()
     forward.skyBind = noBindGroupId()
     # The metaballs' forward binds add the same lighting inputs
@@ -344,6 +362,7 @@ func ensureForwardBinds(
     ) {
       forward.staticBind = bind
     }
+    bindFoliage(pass: forward.foliage, resources: resources, entries: entries)
   }
   if not bindGroupIsUsable(resources: resources, id: forward.skyBind) {
     var entries: List(ResourceRef) = List.create(ResourceRef, cap: 1)
@@ -446,6 +465,7 @@ func beginForwardMain(
     pipeline: forward.staticPipeline
     bind: forward.staticBind
   )
+  gbuffer.drawFoliage = forward.foliage
 }
 
 # Draw the sky where nothing was drawn, then close and submit the pass: the
@@ -513,6 +533,7 @@ func retireForwardTargets(forward: mod ForwardMainCache, resources: mod GpuResou
 }
 
 func retireForwardPipelines(forward: mod ForwardMainCache, resources: mod GpuResources) {
+  retireFoliage(pass: forward.foliage, resources: resources)
   let staticBindRetired: Bool = retireBindGroup(resources: resources, id: forward.staticBind)
   let skyBindRetired: Bool = retireBindGroup(resources: resources, id: forward.skyBind)
   let staticRetired: Bool = retireRenderPipeline(resources: resources, id: forward.staticPipeline)

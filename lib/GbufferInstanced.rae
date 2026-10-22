@@ -17,6 +17,7 @@
 # Zero per-frame allocation: `records` is sized once and refilled with set()
 # (packInstanceRecord), never add() — so an instanced field stays inside the
 # walker's zero-alloc frame budget (test 573).
+open FoliagePipeline
 open Gbuffer
 open SkinStore
 open GbufferSkinned
@@ -457,8 +458,8 @@ func drawRecordsRange(
     gbIssueInstancedRange(
       cache: cache
       resources: resources
-      pipeline: cache.drawPipeline
-      bind: cache.drawBind
+      pipeline: meshDrawPipeline(cache: cache, mesh: mesh)
+      bind: meshDrawBind(cache: cache, mesh: mesh)
       vbuf: gbMeshVbuf(cache: cache, resources: resources, mesh: mesh)
       ibuf: gbMeshIbuf(cache: cache, resources: resources, mesh: mesh)
       firstIndex: firstIndex

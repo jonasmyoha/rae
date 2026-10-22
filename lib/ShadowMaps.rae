@@ -33,6 +33,7 @@
 # ShadowMapsSprite.rae.
 import String
 import Math
+open FoliageShadow
 open Scene3d
 open Math3d
 open Shadow3d
@@ -119,6 +120,7 @@ type ShadowCache {
   resolution: Int
   layers: Int
   gen: Int  # bumped when the targets are recreated
+  foliage: FoliageShadow = {}
   staticPipeline: RenderPipelineId
   skinPipeline: RenderPipelineId
   # Static casters fading between levels of detail: a fragment stage that
@@ -261,6 +263,7 @@ func ensureShadowObjects(shadow: mod ShadowCache, resources: mod GpuResources) {
   let staticShader: Shader = shader(
     files: ["lib/fade_dither.wgsl", "lib/wind.wgsl", "lib/shadow_static.wgsl"]
   )
+  makeFoliageShadow(shadow: shadow, resources: resources, shader: staticShader)
   let skinnedShader: Shader = shader(files: ["lib/shadow_skinned.wgsl"])
   if let pipeline: RenderPipelineId = createDepthPipeline(
     resources: resources
@@ -338,6 +341,7 @@ func ensureShadowTargets(
   retireTextureViewIds(resources: resources, list: shadow.layerViews)
   retireTextureView(resources: resources, id: shadow.arrayView)
   retireTexture(resources: resources, id: shadow.texture)
+  retireBindGroupIds(resources: resources, list: shadow.foliage.binds)
   retireBindGroupIds(resources: resources, list: shadow.staticBinds)
   retireBindGroupIds(resources: resources, list: shadow.fadeBinds)
   retireBindGroupIds(resources: resources, list: shadow.skinBinds)
@@ -540,6 +544,9 @@ func shadowQueue(
   loop var i: Int = 0, i < shadowCasterFloats - 16, ++i {
     shadow.modelFloats.add(value: 0.0)
   }
+  if key >= shadowFoliageKeyBit {
+    shadow.modelFloats.set(index: shadow.modelFloats.length - 1, value: 1.0)
+  }
   var base: Int = paletteBase
   if base < 0 {
     base = 0
@@ -569,7 +576,7 @@ func drawShadowCaster(
   }
   shadowQueue(
     shadow: shadow
-    key: mesh.id
+    key: foliageCasterKey(meshes: meshes, mesh: mesh.id)
     vbuf: meshStoreVbuf(store: meshes, mesh: mesh.id)
     ibuf: meshStoreIbuf(store: meshes, mesh: mesh.id)
     icount: meshStoreIndexCount(store: meshes, mesh: mesh.id)
@@ -607,7 +614,7 @@ func drawShadowCasterRange(
   let first: Int = shadow.drawCount
   shadowQueue(
     shadow: shadow
-    key: mesh.id
+    key: foliageCasterKey(meshes: meshes, mesh: mesh.id)
     vbuf: meshStoreVbuf(store: meshes, mesh: mesh.id)
     ibuf: meshStoreIbuf(store: meshes, mesh: mesh.id)
     icount: indices
@@ -659,6 +666,7 @@ func drawShadowCasterSkinned(
 # Per cascade: the static bind (cascade matrix, models) and, over the queued
 # palette, the skinned bind (+ palette, palette bases).
 func ensureShadowBinds(shadow: mod ShadowCache, resources: mod GpuResources) {
+  bindFoliageShadow(shadow: shadow, resources: resources)
   loop var c: Int = 0, c < shadow.layers, ++c {
     let cascadeUniform: BufferId = shadow.cascadeUniforms.copyAtFallback(
       index: c
@@ -761,7 +769,10 @@ func drawShadowCasters(
       index: cascade
       fallback: noBindGroupId()
     )
-    if key >= shadowFadeKeyBit {
+    if key >= shadowFoliageKeyBit {
+      pipeline = shadow.foliage.pipeline
+      bind = shadow.foliage.binds.copyAtFallback(index: cascade, fallback: noBindGroupId())
+    } else if key >= shadowFadeKeyBit {
       pipeline = shadow.fadePipeline
       bind = shadow.fadeBinds.copyAtFallback(index: cascade, fallback: noBindGroupId())
     } else if key >= shadowSkinnedKeyBit {
@@ -867,6 +878,7 @@ func shadowEnd(shadow: mod ShadowCache, resources: mod GpuResources) {
         }
       }
     }
+    recordFoliageShadow(shadow: shadow, resources: resources, recording: recording)
     recordRenderPipelineUse(recording: recording, resources: resources, id: shadow.staticPipeline)
     recordRenderPipelineUse(recording: recording, resources: resources, id: shadow.skinPipeline)
     recordRenderPipelineUse(recording: recording, resources: resources, id: shadow.fadePipeline)
@@ -910,6 +922,7 @@ func shadowShutdown(shadow: mod ShadowCache, resources: mod GpuResources) {
   drainSubmissions(inFlight: shadow.inFlight, resources: resources)
   shadowSdfShutdown(sdf: shadow.sdf, resources: resources)
   shadowSpriteShutdown(sprites: shadow.sprites, resources: resources)
+  retireBindGroupIds(resources: resources, list: shadow.foliage.binds)
   retireBindGroupIds(resources: resources, list: shadow.staticBinds)
   retireBindGroupIds(resources: resources, list: shadow.fadeBinds)
   retireBindGroupIds(resources: resources, list: shadow.skinBinds)
@@ -921,6 +934,8 @@ func shadowShutdown(shadow: mod ShadowCache, resources: mod GpuResources) {
   retireBuffer(resources: resources, id: shadow.models)
   retireBuffer(resources: resources, id: shadow.paletteBases)
   retireBuffer(resources: resources, id: shadow.frameUniform)
+  retireRenderPipeline(resources: resources, id: shadow.foliage.pipeline)
+  shadow.foliage.pipeline = noRenderPipelineId()
   retireRenderPipeline(resources: resources, id: shadow.staticPipeline)
   retireRenderPipeline(resources: resources, id: shadow.skinPipeline)
   retireRenderPipeline(resources: resources, id: shadow.fadePipeline)
