@@ -1,0 +1,22 @@
+@group(0) @binding(0) var<storage, read_write> results: array<u32>;
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) id: vec3<u32>) {
+  let time = f32(id.x) * 0.37;
+  let pivot = vec3<f32>(7.0, -2.0, 5.0);
+  let first = pivot + vec3<f32>(0.7, 0.0, 0.0);
+  let second = pivot + vec3<f32>(0.0, 0.5, 0.2);
+  let normal = vec3<f32>(0.0, 0.0, 1.0);
+  let wind = vec4<f32>(1.0, 0.3, 0.8, time);
+  let a = windLeaf(first, normal, pivot, vec3<f32>(0.0), 1.0, wind);
+  let b = windLeaf(second, normal, pivot, vec3<f32>(0.0), 1.0, wind);
+  let attachment = windLeaf(pivot, normal, pivot, vec3<f32>(0.0), 1.0, wind);
+  let calm = windLeaf(first, normal, pivot, vec3<f32>(0.0), 1.0, vec4<f32>(0.0, 0.0, 1.0, time));
+  let rigid = windLeaf(first, normal, pivot, vec3<f32>(0.0), 0.0, wind);
+  let preserved = abs(distance(a.position, b.position) - distance(first, second)) < 0.00001
+    && abs(distance(a.position, pivot) - distance(first, pivot)) < 0.00001;
+  let normals = abs(length(a.normal) - 1.0) < 0.00001
+    && abs(dot(a.position - pivot, a.normal) - dot(first - pivot, normal)) < 0.00001;
+  let still = all(attachment.position == pivot) && all(calm.position == first) && all(rigid.position == first);
+  results[id.x] = select(0u, 1u, preserved && normals && still);
+  if (distance(a.position, first) > 0.00001) { results[64 + id.x] = 1u; }
+}

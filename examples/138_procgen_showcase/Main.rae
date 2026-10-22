@@ -9,6 +9,8 @@ import Vec3
 import Keys
 import Sdl3
 import Sys
+open Wind
+open RendererWind
 open Scene3d
 open ecs/Entity
 open RendererDeferred
@@ -78,6 +80,8 @@ type ShowcaseState {
   # live in it (the renderer's mesh store lives in the renderer's)
   gpuResources: opt GpuResources
   grass: GrassCompute
+  wind: WindState = createWindState(settings: defaultWindSettings())
+  windSettings: WindSettings = windSettingsFromEnv(settings: defaultWindSettings())
   time: Float
   lastTime: Float64
 }
@@ -237,6 +241,11 @@ func runShowcaseFrame(state: mod ShowcaseState) {
   let deltaTime: Float = (now - state.lastTime) as Float
   state.lastTime = now
   state.time = state.time + deltaTime
+  stepWind(state: state.wind, settings: state.windSettings, deltaTime: deltaTime)
+  setRendererWind(
+    renderer: state.renderer
+    wind: windVector(state: state.wind, settings: state.windSettings)
+  )
 
   let resized: Bool = Gpu2d.windowResized()
   updateWindowGeometry(windowGeometry: state.windowGeometry, now: now, resized: resized)

@@ -1,0 +1,85 @@
+# Optional rigid-leaf pipelines, shared by deferred and forward geometry.
+open Gbuffer
+open GbufferNative
+open MeshStore
+open gpu/GpuRender
+open gpu/GpuRenderPass
+open gpu/GpuLifetime
+open gpu/GpuResources
+open gpu/GpuIds
+open webgpu/WebgpuEnums
+
+type FoliagePass {
+  pipeline: RenderPipelineId = noRenderPipelineId()
+  bind: BindGroupId = noBindGroupId()
+}
+
+func foliageAttributes() ret List(VertexAttributeSpec) {
+  var attributes: List(VertexAttributeSpec) = gbufferStaticAttributes()
+  attributes.add(value: { format: WGPUVertexFormat_Float32x4, offset: 32, location: 3 })
+  ret own attributes
+}
+
+func makeFoliagePipeline(
+  pass: mod FoliagePass
+  resources: mod GpuResources
+  shader: view Shader
+  spec: view RenderPipelineSpec
+  constants: view List(ShaderConstant)
+) {
+  if let pipeline: RenderPipelineId = createRenderPipelineWithConstants(
+    resources: resources
+    shader: shader
+    vertexEntry: "vsFoliage"
+    fragmentEntry: "fs"
+    spec: spec
+    constants: constants
+  ) {
+    pass.pipeline = pipeline
+  }
+}
+
+func bindFoliage(
+  pass: mod FoliagePass
+  resources: mod GpuResources
+  entries: view List(ResourceRef)
+) {
+  if not bindGroupIsUsable(resources: resources, id: pass.bind) {
+    if let bind: BindGroupId = createRenderBindGroup(
+      resources: resources
+      pipeline: pass.pipeline
+      entries: entries
+    ) {
+      pass.bind = bind
+    }
+  }
+}
+
+func retireFoliage(pass: mod FoliagePass, resources: mod GpuResources) {
+  retireBindGroup(resources: resources, id: pass.bind)
+  retireRenderPipeline(resources: resources, id: pass.pipeline)
+  pass = FoliagePass {}
+}
+
+func foliageRecordUses(
+  pass: view FoliagePass
+  recording: mod Recording
+  resources: mod GpuResources
+) {
+  recordRenderPipelineUse(recording: recording, resources: resources, id: pass.pipeline)
+  recordBindGroupUse(recording: recording, resources: resources, id: pass.bind)
+}
+
+func meshDrawPipeline(cache: view GbufferCache, mesh: view Int) ret RenderPipelineId {
+  if meshStoreHasFoliage(store: cache.meshes, mesh: mesh) {
+    ret cache.drawFoliage.pipeline
+  }
+  ret cache.drawPipeline
+}
+
+func meshDrawBind(cache: view GbufferCache, mesh: view Int) ret BindGroupId {
+  if meshStoreHasFoliage(store: cache.meshes, mesh: mesh) {
+    ret cache.drawFoliage.bind
+  }
+  ret cache.drawBind
+}

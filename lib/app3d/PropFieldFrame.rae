@@ -138,6 +138,7 @@ type PropDraw {
   firstBatch: Int
   partCount: Int
   model: Mat4
+  windDetail: Float = 1.0
 }
 
 func propLevelDraw(
@@ -149,6 +150,9 @@ func propLevelDraw(
   level: view Int
 ) ret PropDraw {
   var result: PropDraw = { sprite: false, firstBatch: 0, partCount: 0, model: model }
+  let distance: Float = Vec3.vlen(a: Vec3.vsub(a: placement.position, b: propView.eye))
+  let detail: Float = Math.max(a: 0.0, b: Math.min(a: 1.0, b: (90.0 - distance) / 65.0))
+  result.windDetail = detail * detail * (3.0 - 2.0 * detail)
   if let lod: view PropLod = kind.lods.viewAt(index: level) {
     result.sprite = propLodIsSprite(lod: lod)
     result.partCount = lod.parts.length
@@ -305,7 +309,7 @@ func gatherPropLevel(
       }
       let sway: Float = field.batchSways.copyAtFallback(index: draw.firstBatch + p, fallback: 0.0)
       if sway > 0.0 and batch.count > before {
-        setInstanceSway(records: batch.records, slot: before, sway: sway)
+        setInstanceSway(records: batch.records, slot: before, sway: sway * draw.windDetail)
       }
     }
   }

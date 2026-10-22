@@ -5,6 +5,7 @@
 import Math
 open Noise
 open procgen/FluffyFoliage
+open FoliageMesh
 open RendererDeferred
 open Scene3d
 open Mesh3d
@@ -61,12 +62,7 @@ func uploadFluffySpecies(
       patchCount: 48
       tone: tone
     )
-    handles.add(value: uploadMesh(
-      renderer: renderer
-      verts: leaves.verts
-      vertCount: leaves.vertCount
-      indices: leaves.indices
-    ))
+    handles.add(value: uploadFoliage(renderer: renderer, mesh: leaves))
     log(
       "fluffy species={species} tone={tone} vertices={leaves.vertCount} triangles={leaves.indices.length / 3}"
     )

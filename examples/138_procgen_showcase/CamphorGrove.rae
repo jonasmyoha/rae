@@ -2,6 +2,7 @@
 open procgen/Camphor
 open procgen/CamphorGeometry
 open procgen/Foliage
+open FoliageMesh
 open RendererDeferred
 open Scene3d
 open Mesh3d
@@ -38,12 +39,7 @@ func addCamphorGrove(
         z: 0.055 + part.toFloat() * 0.008
       )
     }
-    let meshHandle: MeshHandle = uploadMesh(
-      renderer: renderer
-      verts: mesh.verts
-      vertCount: mesh.vertCount
-      indices: mesh.indices
-    )
+    let meshHandle: MeshHandle = uploadFoliage(renderer: renderer, mesh: mesh)
     let entityId: EntityId = world3dAddMeshInstance(
       world: world
       mesh: meshHandle

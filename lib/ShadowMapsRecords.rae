@@ -2,6 +2,7 @@
 # (GbufferRecord's DrawU layout) queued as static casters, each with its
 # level cross-fade, the fading ones under their own key and pipeline
 # (docs/tree-lod-design.md §2.3). Split from ShadowMaps for its size.
+open FoliageShadow
 open Scene3d
 open MeshStore
 open gpu/GpuResources
@@ -103,7 +104,7 @@ func drawShadowCasterRecords(
   }
   shadowQueueRecords(
     shadow: shadow
-    key: mesh.id
+    key: foliageCasterKey(meshes: meshes, mesh: mesh.id)
     vbuf: meshStoreVbuf(store: meshes, mesh: mesh.id)
     ibuf: meshStoreIbuf(store: meshes, mesh: mesh.id)
     icount: meshStoreIndexCount(store: meshes, mesh: mesh.id)

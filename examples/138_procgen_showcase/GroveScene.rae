@@ -6,6 +6,7 @@ open Vec3
 open Noise
 open Mesh3d
 open Scene3d
+open FoliageMesh
 open RendererDeferred
 open procgen/Foliage
 open GroveGrass
@@ -40,12 +41,7 @@ func place(
   scale: view Vec3
   rotation: view Float
 ) {
-  let handle: MeshHandle = uploadMesh(
-    renderer: renderer
-    verts: mesh.verts
-    vertCount: mesh.vertCount
-    indices: mesh.indices
-  )
+  let handle: MeshHandle = uploadFoliage(renderer: renderer, mesh: mesh)
   let entityId: EntityId = world3dAddMeshInstance(
     world: world
     mesh: handle

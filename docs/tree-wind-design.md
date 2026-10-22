@@ -1,10 +1,45 @@
 # Tree wind: stable crowns and moving leaves
 
-Status: source review and recommended implementation, 2026-10-22.
-No rendering behaviour changes in this review. Motion still needs visual approval
-from moving captures; a still screenshot cannot prove the result.
+Status: the rigid-leaf implementation is now in the shared renderer and generators.
+The structural/branch hierarchy below remains a later refinement.
 
-## What is wrong today
+## Implemented first pass
+
+- Six-sided leaves and broad scalloped patches preserve a local pivot for every
+  vertex. MeshData keeps optional pivot data separately from positions, normals
+  and UVs. Foliage uploads interleave one extra vec4 (16 bytes per vertex);
+  ordinary meshes retain their 32-byte layout. No extra per-leaf draws or
+  per-frame mesh uploads are introduced.
+- The shader rotates each patch intact, with its shading normal, about its
+  centre. Wind response is small between gusts and stronger during passing
+  gusts. The angle is bounded to 0.14 radians. It has no crown translation.
+- Forest cypress and umbrella foliage have lower flexibility. Spruce skirts,
+  wood and other meshes without leaf metadata stay rigid. This deliberately
+  removes the old spatial wobble from those shapes; it is not branch simulation.
+- Forest instance motion smoothly fades from full at 25 metres to zero at
+  90 metres. Geometry and shadows share that instance factor. The grove's
+  individually placed inspection trees keep full detail. Far impostors remain
+  unchanged and still. A later version can expose the detail range in settings.
+- Dedicated optional foliage pipelines serve deferred, forward, and shadow
+  rendering. The previous full wind vector is retained for motion vectors.
+  Walker 136/137/143 use the shared upload path; Autumn Grove now uses it too
+  and advances an App-owned WindState.
+- The GPU check in checks/leafWind tests 64 times for preserved patch distances,
+  fixed pivots, consistent rotated normals, exact calm and actual movement.
+  Fixture 1141 checks deterministic shared pivots and rigid spruce layers.
+
+There is no C runtime change. The full branch hierarchy and projected-size
+animation LOD proposed below are not part of this first pass. Current phase
+comes from each patch's world pivot, so separately generated coarse patches
+can have different phases during their existing LOD cross-fade.
+
+Verification: full suite 895 passed; GPU leafWind check passed; visual gates
+136, 137, 138 and 143 passed, including the walker's running-memory check,
+all eight grove views, forward billboards, and 31,090 trees / 829 forest clusters.
+The extra vertex cost has not been isolated in a before/after GPU benchmark;
+these results do not claim a frame-time improvement.
+
+## Source review before this implementation
 
 `lib/wind.wgsl::windOffset` applies three continuous sine waves to every
 foliage vertex. Their phases come from the vertex's world position, not from

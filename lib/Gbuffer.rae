@@ -40,6 +40,7 @@
 # docs/coordinate-system.md — the same as the forward path.
 import Math
 import String
+open FoliagePipeline
 open SkyHosek
 open Vec3
 open Scene3d
@@ -113,15 +114,16 @@ type GbufferCache {
   sceneScale: Float
   frameUniform: BufferId
   draws: BufferId
-  frameFloats: List(Float)  # the frame uniform's 40 floats (viewProj, prevViewProj, jitter, wind)
+  frameFloats: List(Float)  # 44 floats: matrices, jitter, current and previous wind
   # The wind (lib/Wind: setGbufferWind) the swaying props bend in: direction
-  # times strength, gustiness, time; and last frame's time, for the motion
-  # vectors (in the jitter's z)
+  # times strength, gustiness, time; and the previous vector for motion
+  # vectors (previous time also remains in jitter.z)
   windX: Float = 0.0
   windY: Float = 0.0
   windGustiness: Float = 0.0
   windTime: Float = 0.0
   windPrevTime: Float = 0.0
+  previousWind: Vec3 = { x: 0, y: 0, z: 0 }
   # The frame-derived matrices (#923, was C's gb_viewproj / _jittered / _prev):
   # the post passes (SSAO, lighting, SDF) reconstruct positions from depth with
   # the matrix the geometry was RASTERISED with — the jittered one.
@@ -137,6 +139,8 @@ type GbufferCache {
   pass: Ptr  # the open geometry pass (null between frames)
   inFlight: List(SubmissionId)
   pipelinesMade: Bool
+  foliage: FoliagePass = {}
+  drawFoliage: FoliagePass = {}
   staticPipeline: RenderPipelineId
   skinPipeline: RenderPipelineId
   staticBind: BindGroupId
@@ -366,6 +370,7 @@ func openGeometryPass(
   bind: view BindGroupId
 ) {
   cache.forwardFrame = forward
+  cache.drawFoliage = cache.foliage
   cache.drawPipeline = pipeline
   cache.drawBind = bind
   if var recording: Recording = beginRecording(resources: resources) {
@@ -446,6 +451,10 @@ func uploadFrameUniform(
   cache.frameFloats.add(value: cache.windY)
   cache.frameFloats.add(value: cache.windGustiness)
   cache.frameFloats.add(value: cache.windTime)
+  cache.frameFloats.add(value: cache.previousWind.x)
+  cache.frameFloats.add(value: cache.previousWind.y)
+  cache.frameFloats.add(value: cache.previousWind.z)
+  cache.frameFloats.add(value: cache.windPrevTime)
   # Remember for NEXT frame, after this frame's copy is handed over.
   cache.prevViewProj = viewProj
   unsafe {
@@ -468,9 +477,11 @@ func setGbufferWind(
   gustiness: view Float
   time: view Float
 ) {
+  cache.previousWind = Vec3.create(x: cache.windX, y: cache.windY, z: cache.windGustiness)
   cache.windPrevTime = cache.windTime
   if time < cache.windTime or cache.windTime is 0.0 {
     cache.windPrevTime = time
+    cache.previousWind = Vec3.create(x: x, y: y, z: gustiness)
   }
   cache.windX = x
   cache.windY = y
@@ -590,8 +601,8 @@ func drawRecords(
     gbIssueInstanced(
       cache: cache
       resources: resources
-      pipeline: cache.drawPipeline
-      bind: cache.drawBind
+      pipeline: meshDrawPipeline(cache: cache, mesh: mesh)
+      bind: meshDrawBind(cache: cache, mesh: mesh)
       vbuf: gbMeshVbuf(cache: cache, resources: resources, mesh: mesh)
       ibuf: gbMeshIbuf(cache: cache, resources: resources, mesh: mesh)
       icount: gbMeshIcount(cache: cache, mesh: mesh)
@@ -797,11 +808,14 @@ func draw(
       toon: toon
       paletteBase: 0
     )
+    if meshStoreHasFoliage(store: cache.meshes, mesh: mesh) {
+      setInstanceSway(records: cache.drawScratch, slot: 0, sway: 1.0)
+    }
     gbIssueInstanced(
       cache: cache
       resources: resources
-      pipeline: cache.drawPipeline
-      bind: cache.drawBind
+      pipeline: meshDrawPipeline(cache: cache, mesh: mesh)
+      bind: meshDrawBind(cache: cache, mesh: mesh)
       vbuf: gbMeshVbuf(cache: cache, resources: resources, mesh: mesh)
       ibuf: gbMeshIbuf(cache: cache, resources: resources, mesh: mesh)
       icount: gbMeshIcount(cache: cache, mesh: mesh)
@@ -872,6 +886,7 @@ func end(cache: mod GbufferCache, resources: mod GpuResources) pub {
   }
   cache.forwardFrame = false
   if let recording: mod Recording = cache.recording {
+    foliageRecordUses(pass: cache.drawFoliage, recording: recording, resources: resources)
     recordRenderPipelineUse(recording: recording, resources: resources, id: cache.staticPipeline)
     recordRenderPipelineUse(recording: recording, resources: resources, id: cache.skinPipeline)
     recordRenderPipelineUse(recording: recording, resources: resources, id: cache.terrainPipeline)
@@ -965,6 +980,7 @@ func gbufferShutdown(cache: mod GbufferCache, resources: mod GpuResources) pub {
     end(cache: cache, resources: resources)
   }
   drainSubmissions(inFlight: cache.inFlight, resources: resources)
+  retireFoliage(pass: cache.foliage, resources: resources)
   retireBindGroup(resources: resources, id: cache.staticBind)
   retireBindGroup(resources: resources, id: cache.skinBind)
   retireRenderPipeline(resources: resources, id: cache.staticPipeline)
