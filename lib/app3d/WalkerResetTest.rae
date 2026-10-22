@@ -1,0 +1,170 @@
+# app3d/WalkerResetTest — the walker's reset check (RAE_WALKER_PHYSICS_TEST=1,
+# after the other checks): a crowd member knocked over, the hero moved 12 m,
+# a cube thrown off its stack, the camera zoomed out, tipped and in the free
+# mode; then the reset (app3d/WalkerReset, as R and the "..." menu's Reset
+# do): every character back on its feet where it started, no ragdoll, the
+# cube back where it stood, the camera's pose as it was set up; a second of
+# physics later the hero still stands there. One [resettest] line; true when
+# all held.
+import Math
+import Vec3
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Transform
+open box3d/ecs/PhysicsJoints
+open app3d/CharacterController
+open app3d/CharacterBodies
+open app3d/Characters
+open app3d/CharacterSpawns
+open app3d/CameraRig
+open app3d/WalkerWorld
+open app3d/WalkerPhysics
+open app3d/WalkerPhysicsChecks
+open app3d/WalkerTerrainBodies
+open app3d/WalkerKnockdown
+open app3d/WalkerReset
+
+func resetTestFeetGap(
+  walkerReset: view WalkerReset
+  world: view WalkerWorld
+  groundZ: view Float
+  entityId: view EntityId
+) ret Float {
+  let started: view CharacterSpawn = componentView(this: walkerReset.spawns, entityId: entityId)
+  let feet: Vec3 = controllerFeet(
+    controller: controllerOf(controllers: world.controllers, entityId: entityId)
+    groundZ: groundZ
+  )
+  ret Math.sqrt(
+    x: (feet.x - started.feet.x) * (feet.x - started.feet.x) + (feet.y - started.feet.y) * (feet.y - started.feet.y)
+  )
+}
+
+func runWalkerResetTest(
+  walkerReset: view WalkerReset
+  physicsSystem: mod WalkerPhysics
+  world: mod WalkerWorld
+  characterSystem: mod CharacterSystem
+  rig: mod CameraRig
+  heroEntityId: view EntityId
+) ret Bool {
+  let groundZ: Float = characterSystem.groundZ
+  # ----- everything moved off its start -----------------------------------------------
+  var crowdId: EntityId = noEntity()
+  loop var i: Int = 0, i < componentCount(this: walkerReset.spawns), ++i {
+    let entityId: EntityId = componentEntityAt(this: walkerReset.spawns, i: i)
+    if entityId is not heroEntityId {
+      crowdId = entityId
+    }
+  }
+  let tripped: Bool = isNone(this: crowdId) is false and tripCharacter(
+    physicsSystem: physicsSystem
+    world: world
+    characterSystem: characterSystem
+    entityId: crowdId
+    velocity: Vec3.create(x: 4.0, y: 0.0, z: 1.0)
+  )
+  let heroStart: view CharacterSpawn = componentView(
+    this: walkerReset.spawns
+    entityId: heroEntityId
+  )
+  placeHero(
+    physicsSystem: physicsSystem
+    heroEntityId: heroEntityId
+    feet: Vec3.create(x: heroStart.feet.x + 12.0, y: heroStart.feet.y, z: heroStart.feet.z + 1.0)
+  )
+  var cubeId: EntityId = noEntity()
+  if componentCount(this: walkerReset.cubeStarts) > 0 {
+    cubeId = componentEntityAt(this: walkerReset.cubeStarts, i: 0)
+    setEntityVelocities(
+      physics: physicsSystem.physics
+      rigidBodies: physicsSystem.rigidBodies
+      entityId: cubeId
+      linear: Vec3.create(x: 0.0, y: 6.0, z: 4.0)
+      angular: Vec3.create(x: 3.0, y: 0.0, z: 0.0)
+    )
+  }
+  let step: Float = 1.0 / 60.0
+  loop var i: Int = 0, i < 60, ++i {
+    let unusedSteps: Int = stepPhysicsFrame(
+      physicsSystem: physicsSystem
+      transforms: world.transforms
+      controllers: world.controllers
+      bushes: bushSpots(propKinds: world.propKinds, transforms: world.transforms)
+      frameTime: step
+    )
+  }
+  rig.mode = CameraRigMode.free
+  rig.distance = rig.maxDistance
+  rig.orbitPitch = 1.2
+  let heroMoved: Float = resetTestFeetGap(
+    walkerReset: walkerReset
+    world: world
+    groundZ: groundZ
+    entityId: heroEntityId
+  )
+  # ----- the reset ---------------------------------------------------------------------
+  resetWalkerToStart(
+    walkerReset: walkerReset
+    physicsSystem: physicsSystem
+    world: world
+    rig: rig
+    groundZ: groundZ
+    heroEntityId: heroEntityId
+  )
+  var farthest: Float = 0.0
+  loop var i: Int = 0, i < componentCount(this: walkerReset.spawns), ++i {
+    farthest = Math.max(
+      a: farthest
+      b: resetTestFeetGap(
+        walkerReset: walkerReset
+        world: world
+        groundZ: groundZ
+        entityId: componentEntityAt(this: walkerReset.spawns, i: i)
+      )
+    )
+  }
+  let standing: Bool = componentCount(this: physicsSystem.ragdolls) is 0 and componentCount(
+    this: physicsSystem.knockedDown
+  ) is 0
+  var cubeGap: Float = 0.0
+  if isNone(this: cubeId) is false {
+    let now: Vec3 = componentView(this: world.transforms, entityId: cubeId).position
+    let started: Vec3 = componentView(this: walkerReset.cubeStarts, entityId: cubeId).position
+    cubeGap = Vec3.vlen(a: Vec3.vsub(a: now, b: started))
+  }
+  let start: CameraRig = walkerReset.startRig
+  let cameraBack: Bool = rig.mode is start.mode and Math.abs(value: rig.distance - start.distance) < 0.001 and Math.abs(
+    value: rig.orbitPitch - start.orbitPitch
+  ) < 0.001 and Math.abs(value: rig.viewDistance - start.distance) < 0.001
+  # ...and it stays: a second of physics, the hero still where it started
+  loop var i: Int = 0, i < 60, ++i {
+    let unusedSteps: Int = stepPhysicsFrame(
+      physicsSystem: physicsSystem
+      transforms: world.transforms
+      controllers: world.controllers
+      bushes: bushSpots(propKinds: world.propKinds, transforms: world.transforms)
+      frameTime: step
+    )
+  }
+  var cubeAfter: Float = 0.0
+  if isNone(this: cubeId) is false {
+    cubeAfter = Vec3.vlen(
+      a: Vec3.vsub(
+        a: componentView(this: world.transforms, entityId: cubeId).position
+        b: componentView(this: walkerReset.cubeStarts, entityId: cubeId).position
+      )
+    )
+  }
+  let heroAfter: Float = resetTestFeetGap(
+    walkerReset: walkerReset
+    world: world
+    groundZ: groundZ
+    entityId: heroEntityId
+  )
+  let passed: Bool = tripped and heroMoved > 5.0 and farthest < 0.01 and standing and cubeGap < 0.01 and cameraBack and heroAfter < 0.3 and cubeAfter < 0.05
+  log(
+    "[resettest] a crowd member knocked over={tripped}, the hero {heroMoved} m off, a cube thrown, the camera zoomed out and free; reset: every character within {farthest} m of its start, standing={standing}, the cube {cubeGap} m from its start, the camera's pose back={cameraBack}; a second later the hero {heroAfter} m and the cube {cubeAfter} m from their starts; passed={passed}"
+  )
+  ret passed
+}

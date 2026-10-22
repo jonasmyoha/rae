@@ -35,6 +35,8 @@ open GltfSkin
 open SdfText
 open Png
 open app3d/CameraRig
+open app3d/WalkerReset
+open app3d/ModeMenu
 open app3d/CharacterController
 open app3d/SettingsDialog
 open SkyHosek
@@ -95,6 +97,8 @@ type WalkerApp {
   profiler: Profiler  # #764: was lib/profile.rae gProf* globals
   grassCompute: GrassCompute  # #764: was lib/GrassCompute.rae gGrass* globals
   physicsSystem: WalkerPhysics  # fixed-step sim seam (physics.rae, #553)
+  # How it all started, for R and the menu's Reset (app3d/WalkerReset)
+  walkerReset: WalkerReset
   # Footprints and what the steps kick up (app3d/WalkerMarks)
   walkerMarks: WalkerMarks
   netSeam: NetSeam  # multiplayer seam (app3d/NetSeam, #554)
@@ -230,6 +234,20 @@ func updateWalkerApp(app: mod WalkerApp) {
       allowKeys: uiPointerCaptured(input: app.inputSystem.ui) is false and app.characterSystem.playing
       jumpButton: uiActionFired(world: app.inputSystem.world, actionId: jumpActionId)
     )
+  }
+  # R, or the "..." menu's Reset: everything back as it started
+  let resetKey: Bool = walkerResetKeyPressed() and uiPointerCaptured(input: app.inputSystem.ui) is false
+  if takeModeMenuReset(menu: app.inputSystem.uiModes.modeMenu) or resetKey {
+    resetWalkerToStart(
+      walkerReset: app.walkerReset
+      physicsSystem: app.physicsSystem
+      world: app.world
+      rig: app.cameraSystem.rig
+      groundZ: app.characterSystem.groundZ
+      heroEntityId: controlledEntityId
+    )
+    app.persist.stateDirty = true
+    log("[reset] the walker back as it started")
   }
   # The controller's heading and position before the physics steps, to tell
   # whether the character moved this frame

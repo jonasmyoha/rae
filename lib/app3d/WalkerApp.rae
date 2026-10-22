@@ -50,6 +50,9 @@ open GltfSkin
 open SdfText
 open Png
 open app3d/CameraRig
+open app3d/WalkerReset
+open app3d/WalkerResetTest
+open app3d/ModeMenu
 open app3d/CameraWalkFollow
 open app3d/CharacterController
 open app3d/SettingsDialog
@@ -150,11 +153,14 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
       path: "{assets}ui.raescene"
       res: gpuUi
     )
-    let uiModes: UiModes = createUiModes(
+    var uiModes: UiModes = createUiModes(
       world: uiWorld
       uiSystems: uiSystems
       path: "{assets}ui.raescene"
     )
+    # The walker puts itself back as it started (app3d/WalkerReset): the
+    # menu's Reset asks it to, as R does, rather than starting it again
+    uiModes.modeMenu.appResets = true
     var uiInput: UiInput = createUiInput()
     var logOverlay: LogOverlay = createLogOverlay(
       capacity: 64
@@ -380,6 +386,9 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
       focusZ: characterFocusZ
     )
     snapCameraRigView(rig: rig)
+    # The camera as set up, before a screenshot override or saved state: what
+    # a reset puts back (app3d/WalkerReset)
+    let startRig: CameraRig = rig
     # Screenshot camera (#857): RAE_CAMERA_AT (or RAE_WALKER_CAMERA), so a
     # headless frame can look elsewhere than the spawn (app3d/CameraRig)
     applyCameraStartOverride(rig: rig, camera: camera)
@@ -511,6 +520,13 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
     # #746: exercise the physics/net ECS seams once at startup — spawn/despawn via
     # generational entities, step a Box3D body. Leaves the world untouched.
     seamSelfTest(world: walkerWorld, physicsSystem: physicsSystem)
+    # How it all starts, for R and the menu's Reset (app3d/WalkerReset)
+    let walkerReset: WalkerReset = createWalkerReset(
+      world: walkerWorld
+      physicsSystem: physicsSystem
+      startRig: startRig
+      groundZ: groundZ
+    )
     if rig.mode is CameraRigMode.character {
       camera.target = thirdPersonCameraTarget(
         controller: characterController
@@ -730,6 +746,7 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
       profiler: Profile.createProfiler()
       grassCompute: own grassCompute
       physicsSystem: own physicsSystem
+      walkerReset: own walkerReset
       walkerMarks: own walkerMarks
       netSeam: createNetSeam()
       players: createPlayerRoster(entities: own rosterEntities)
@@ -856,6 +873,17 @@ func runWalkerApp(settings: view WalkerAppSettings) ret Int {
       physicsSystem: app.physicsSystem
       world: app.world
       characterSystem: app.characterSystem
+      heroEntityId: rosterEntityAt(roster: app.players, index: 0)
+    ) is false {
+      exitCode = 1
+    }
+    # Then R / the menu's Reset: everything back as it started
+    if runWalkerResetTest(
+      walkerReset: app.walkerReset
+      physicsSystem: app.physicsSystem
+      world: app.world
+      characterSystem: app.characterSystem
+      rig: app.cameraSystem.rig
       heroEntityId: rosterEntityAt(roster: app.players, index: 0)
     ) is false {
       exitCode = 1
