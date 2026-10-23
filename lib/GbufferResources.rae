@@ -6,6 +6,7 @@
 # calls these each begin; nothing here is app-facing.
 import Math
 import String
+open SurfaceImages
 open FoliagePipeline
 open SkyHosek
 open Vec3
@@ -195,6 +196,12 @@ func ensureGbBuffers(cache: mod GbufferCache, resources: mod GpuResources) {
 # Create the static geometry bind group once (frame uniform @0, draws storage
 # @1 — manager buffers, created once and surviving resizes).
 func ensureStaticBind(cache: mod GbufferCache, resources: mod GpuResources) {
+  if cache.surfaceImagesBound is not cache.surfaceImages.generation {
+    retireBindGroup(resources: resources, id: cache.staticBind)
+    retireBindGroup(resources: resources, id: cache.foliage.bind)
+    cache.staticBind = noBindGroupId()
+    cache.foliage.bind = noBindGroupId()
+  }
   if bindGroupIsUsable(resources: resources, id: cache.staticBind) and bindGroupIsUsable(
     resources: resources
     id: cache.foliage.bind
@@ -204,6 +211,8 @@ func ensureStaticBind(cache: mod GbufferCache, resources: mod GpuResources) {
   var entries: List(ResourceRef) = List.create(ResourceRef, cap: 2)
   entries.add(value: bufferRef(id: cache.frameUniform))
   entries.add(value: bufferRef(id: cache.draws))
+  surfaceImageEntries(images: cache.surfaceImages, resources: resources, entries: entries)
+  cache.surfaceImagesBound = cache.surfaceImages.generation
   if let bind: BindGroupId = createRenderBindGroup(
     resources: resources
     pipeline: cache.staticPipeline

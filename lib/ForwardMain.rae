@@ -22,6 +22,7 @@
 # The draws are the G-buffer pass's (the mesh store, the draw records, the
 # World3d query): a forward frame opens the GbufferCache's pass on these
 # targets with the forward pipeline, and the same draw calls fill it.
+open SurfaceImages
 open FoliagePipeline
 open Vec3
 open Math3d
@@ -58,6 +59,7 @@ const forwardSampleCount: Int = 4
 type ForwardMainCache {
   pipelinesMade: Bool
   pipelineFormat: Int32  # the lit format the pipelines were made for
+  surfaceImagesBound: Int = -1
   foliage: FoliagePass = {}
   staticPipeline: RenderPipelineId
   skyPipeline: RenderPipelineId
@@ -315,7 +317,7 @@ func ensureForwardBinds(
   targets: view DeferredTargets
   shadow: view ShadowCache
 ) {
-  if not (targets.gen is forward.bindTargetsGen) or not (shadow.gen is forward.bindShadowGen) {
+  if not (targets.gen is forward.bindTargetsGen) or not (shadow.gen is forward.bindShadowGen) or forward.surfaceImagesBound is not gbuffer.surfaceImages.generation {
     forward.bindTargetsGen = targets.gen
     forward.bindShadowGen = shadow.gen
     let staticRetired: Bool = retireBindGroup(resources: resources, id: forward.staticBind)
@@ -349,6 +351,8 @@ func ensureForwardBinds(
     var entries: List(ResourceRef) = List.create(ResourceRef, cap: 6)
     entries.add(value: bufferRef(id: gbuffer.frameUniform))
     entries.add(value: bufferRef(id: gbuffer.draws))
+    surfaceImageEntries(images: gbuffer.surfaceImages, resources: resources, entries: entries)
+    forward.surfaceImagesBound = gbuffer.surfaceImages.generation
     entries.add(value: bufferRef(id: targets.lightUniform))
     entries.add(value: bufferRef(id: shadow.frameUniform))
     entries.add(value: textureViewRef(id: shadow.arrayView))

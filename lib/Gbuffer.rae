@@ -1,17 +1,3 @@
-# gbuffer — the deferred frame's geometry pass (#356, Track B).
-#
-# This module is the deferred renderer's GPU seam. `renderer_deferred` owns the frame graph and
-# dispatches
-# passes; this owns the typed encoding of one of them.
-#
-# WHAT MAKES IT DEFERRED. The pass writes surface ATTRIBUTES — albedo,
-# world normal, metallic/roughness, depth — and performs no lighting at
-# all. Lighting later reads those attributes once per pixel, so its cost
-# stops scaling with the number of objects that contributed. That is the
-# entire reason the frame is being rebuilt this way; a version of this
-# module that shaded here would be the forward renderer wearing a new
-# name.
-#
 # WHY THE G-BUFFER IS PACKED THE WAY IT IS (#366). Three targets plus
 # depth, 16 bytes per pixel, with channels packed ACROSS targets rather
 # than grouped by meaning — bandwidth is the point, and an unused channel
@@ -40,6 +26,7 @@
 # docs/coordinate-system.md — the same as the forward path.
 import Math
 import String
+open SurfaceImages
 open FoliagePipeline
 open SkyHosek
 open Vec3
@@ -139,6 +126,8 @@ type GbufferCache {
   pass: Ptr  # the open geometry pass (null between frames)
   inFlight: List(SubmissionId)
   pipelinesMade: Bool
+  surfaceImages: SurfaceImages = {}
+  surfaceImagesBound: Int = -1
   foliage: FoliagePass = {}
   drawFoliage: FoliagePass = {}
   staticPipeline: RenderPipelineId
@@ -784,6 +773,7 @@ func draw(
   roughness: copy Float
   emissive: copy Float
   toon: copy Int
+  colorTextureLayer: copy Int
 ) pub {
   unsafe {
     if gbMeshReady(cache: cache, resources: resources, mesh: mesh) is 0 {
@@ -806,7 +796,7 @@ func draw(
       roughness: roughness
       emissive: emissive
       toon: toon
-      paletteBase: 0
+      paletteBase: -(colorTextureLayer + 1)
     )
     if meshStoreHasFoliage(store: cache.meshes, mesh: mesh) {
       setInstanceSway(records: cache.drawScratch, slot: 0, sway: 1.0)
@@ -863,6 +853,7 @@ func drawInstance(
     roughness: material.roughness
     emissive: emissive
     toon: toonFlag(material: material)
+    colorTextureLayer: material.colorTextureLayer
   )
 }
 
@@ -980,6 +971,7 @@ func gbufferShutdown(cache: mod GbufferCache, resources: mod GpuResources) pub {
     end(cache: cache, resources: resources)
   }
   drainSubmissions(inFlight: cache.inFlight, resources: resources)
+  retireSurfaceImages(images: cache.surfaceImages, resources: resources)
   retireFoliage(pass: cache.foliage, resources: resources)
   retireBindGroup(resources: resources, id: cache.staticBind)
   retireBindGroup(resources: resources, id: cache.skinBind)

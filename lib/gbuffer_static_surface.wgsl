@@ -19,6 +19,8 @@ struct DrawU {
 };
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var<storage, read> draws: array<DrawU>;
+@group(0) @binding(2) var surfaceImages: texture_2d_array<f32>;
+@group(0) @binding(3) var surfaceSampler: sampler;
 struct VsOut {
   @builtin(position) pos: vec4<f32>,
   @location(0) nrm: vec3<f32>,
@@ -150,7 +152,10 @@ fn staticSurface(in: VsOut, d: DrawU) -> BrickOut {
   var o: BrickOut;
   o.albedo = d.albedoMetallic.rgb;
   o.nrm = n;
-  if (d.params.w > 9.5) {
+  if (d.params.w < -0.5) {
+    let layer = clamp(i32(round(-d.params.w - 1.0)), 0, i32(textureNumLayers(surfaceImages)) - 1);
+    o.albedo *= textureSampleGrad(surfaceImages, surfaceSampler, in.uv, layer, dpdx(in.uv), dpdy(in.uv)).rgb;
+  } else if (d.params.w > 9.5) {
     o.albedo = gbEmblem(in.uv, o.albedo, d.params.w);
   } else if (d.params.w > 1.5) {
     o = gbRoofTiles(in.wpos, n, o.albedo);

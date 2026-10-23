@@ -4,15 +4,15 @@
 // pass runs, so the two paths shade the same. Drawn into a 4x MSAA target with
 // no depth pre-pass of its own; with SSAO (forward-rae-6) a 1x pre-pass feeds
 // the AO, read here, else `ssao` is 1.
-@group(0) @binding(2) var<uniform> L: LightU;
-@group(0) @binding(3) var<uniform> SH: ShadowU;
-@group(0) @binding(4) var shadowTex: texture_depth_2d_array;
-@group(0) @binding(5) var shadowSamp: sampler_comparison;
+@group(0) @binding(4) var<uniform> L: LightU;
+@group(0) @binding(5) var<uniform> SH: ShadowU;
+@group(0) @binding(6) var shadowTex: texture_depth_2d_array;
+@group(0) @binding(7) var shadowSamp: sampler_comparison;
 // SSAO (forward-rae-6): the AO of the 1x depth + normal pre-pass, when the
 // renderer has it (forwardSsao 1, set at pipeline creation; 0 compiles the
 // read out). Composed after ssao_upsample.wgsl.
-@group(0) @binding(6) var aoTex: texture_2d<f32>;
-@group(0) @binding(7) var aoDepthTex: texture_2d<f32>;
+@group(0) @binding(8) var aoTex: texture_2d<f32>;
+@group(0) @binding(9) var aoDepthTex: texture_2d<f32>;
 override forwardSsao: f32 = 0.0;
 @fragment
 fn fs(in: VsOut) -> @location(0) vec4<f32> {
