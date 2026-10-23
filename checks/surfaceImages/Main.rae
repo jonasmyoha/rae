@@ -1,0 +1,111 @@
+# The material image owner's fallback, array upload, mip metadata and failures.
+open SurfaceImages
+open gpu/GpuResources
+open gpu/GpuTextures
+open webgpu/Context
+open webgpu/Webgpu
+
+func imageShape(
+  images: view SurfaceImages
+  resources: view GpuResources
+  size: view Int
+  layers: view Int
+  levels: view Int
+) ret Bool {
+  unsafe {
+    let handle: Ptr = textureHandle(resources: resources, id: images.texture)
+    ret wgpuTextureGetWidth(texture: handle) as Int is size and wgpuTextureGetHeight(
+      texture: handle
+    ) as Int is size and wgpuTextureGetDepthOrArrayLayers(texture: handle) as Int is layers and wgpuTextureGetMipLevelCount(
+      texture: handle
+    ) as Int is levels and wgpuTextureGetFormat(texture: handle) is WGPUTextureFormat_RGBA8UnormSrgb
+  }
+}
+
+func checkImages(resources: mod GpuResources) ret Int {
+  loop var channel: Int = 0, channel < 256, ++channel {
+    if surfaceEncoded(value: surfaceLinear(value: channel.toFloat() / 255.0)) as Int is not channel {
+      ret 1
+    }
+  }
+  # Averaging black and white in linear light encodes to 188, not 128.
+  if surfaceEncoded(value: 0.5) is not 188 {
+    ret 2
+  }
+  var images: SurfaceImages = {}
+  if not setSurfaceImages(images: images, resources: resources, paths: List.create(String, cap: 0)) {
+    ret 3
+  }
+  if not imageShape(
+    images: images
+    resources: resources
+    size: 1
+    layers: 1
+    levels: 1
+  ) {
+    ret 4
+  }
+  let fallback: TextureId = images.texture
+  let paths: List(String) = { "lib/assets/trees/birchBark.png", "lib/assets/trees/birchBark.png" }
+  if not setSurfaceImages(images: images, resources: resources, paths: paths) {
+    ret 5
+  }
+  if not imageShape(
+    images: images
+    resources: resources
+    size: 512
+    layers: 2
+    levels: 10
+  ) {
+    ret 6
+  }
+  if isValidTexture(resources: resources, id: fallback) {
+    ret 7
+  }
+  let generation: Int = images.generation
+  let missing: List(String) = { "checks/surfaceImages/missing.png" }
+  if setSurfaceImages(images: images, resources: resources, paths: missing) {
+    ret 8
+  }
+  var excessive: List(String) = List.create(String, cap: 17)
+  loop var layer: Int = 0, layer < 17, ++layer {
+    excessive.add(value: "lib/assets/trees/birchBark.png")
+  }
+  if setSurfaceImages(images: images, resources: resources, paths: excessive) {
+    ret 9
+  }
+  if images.generation is not generation or images.paths.length is not 2 or not imageShape(
+    images: images
+    resources: resources
+    size: 512
+    layers: 2
+    levels: 10
+  ) {
+    ret 10
+  }
+  let texture: TextureId = images.texture
+  let textureView: TextureViewId = images.textureView
+  let sampler: SamplerId = images.sampler
+  retireSurfaceImages(images: images, resources: resources)
+  if isValidTexture(resources: resources, id: texture) or isValidTextureView(
+    resources: resources
+    id: textureView
+  ) or isValidSampler(resources: resources, id: sampler) {
+    ret 11
+  }
+  log("surface images: sRGB, fallback, two layers, mips, failed replacement and retirement passed")
+  ret 0
+}
+
+func main() ret Int {
+  unsafe {
+    if webgpuBootstrap() is not 1 {
+      ret 12
+    }
+  }
+  var issuer: IdIssuer = IdIssuer.create()
+  if var resources: GpuResources = GpuResources.create(issuer: issuer, capacity: 16) {
+    ret checkImages(resources: resources)
+  }
+  ret 13
+}

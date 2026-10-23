@@ -1,0 +1,218 @@
+# Renderer-owned, opaque sRGB image array for static mesh materials.
+# Install once before drawing; Material3d.colorTextureLayer indexes this array.
+# A renderer with no images uses a single white texel. No per-frame uploads.
+import Image
+import Math
+open gpu/GpuResources
+open gpu/GpuTextures
+open gpu/GpuIds
+open gpu/GpuRender
+open webgpu/Webgpu
+open webgpu/Context
+
+type SurfaceImages {
+  paths: List(String) = List.create(String, cap: 0)
+  texture: TextureId = noTextureId()
+  textureView: TextureViewId = noTextureViewId()
+  sampler: SamplerId = noSamplerId()
+  generation: Int = 0
+}
+
+func retireSurfaceImages(images: mod SurfaceImages, resources: mod GpuResources) {
+  retireTextureView(resources: resources, id: images.textureView)
+  retireTexture(resources: resources, id: images.texture)
+  retireSampler(resources: resources, id: images.sampler)
+  let generation: Int = images.generation + 1
+  images = SurfaceImages { generation: generation }
+}
+
+func surfaceLinear(value: view Float) ret Float {
+  if value <= 0.04045 {
+    ret value / 12.92
+  }
+  ret Math.pow(base: (value + 0.055) / 1.055, exp: 2.4)
+}
+
+func surfaceEncoded(value: view Float) ret UInt8 {
+  var encoded: Float = value * 12.92
+  if value > 0.0031308 {
+    encoded = 1.055 * Math.pow(base: value, exp: 1.0 / 2.4) - 0.055
+  }
+  ret Math.clamp(val: encoded * 255.0 + 0.5, low: 0.0, high: 255.0).toInt() as UInt8
+}
+
+# The list is borrowed only during the synchronous queue copy. All dimensions
+# come from the array created by setSurfaceImages below, never caller metadata.
+func uploadSurfaceLevel(
+  images: view SurfaceImages
+  resources: view GpuResources
+  pixels: view List(Float)
+  size: view Int
+  layer: view Int
+  level: view Int
+) {
+  var bytes: List(UInt8) = List.create(UInt8, cap: size * size * 4)
+  loop var pixel: Int = 0, pixel < size * size, ++pixel {
+    loop var channel: Int = 0, channel < 3, ++channel {
+      bytes.add(value: surfaceEncoded(value: pixels.copyAtDefault(index: pixel * 3 + channel)))
+    }
+    bytes.add(value: 255)
+  }
+  unsafe {
+    let destination: WGPUTexelCopyTextureInfo = {
+      texture: textureHandle(resources: resources, id: images.texture)
+      mipLevel: level as UInt32
+      origin: { x: 0, y: 0, z: layer as UInt32 }
+      aspect: WGPUTextureAspect_All
+    }
+    let layout: WGPUTexelCopyBufferLayout = {
+      bytesPerRow: (size * 4) as UInt32
+      rowsPerImage: size as UInt32
+    }
+    let extent: WGPUExtent3D = {
+      width: size as UInt32
+      height: size as UInt32
+      depthOrArrayLayers: 1
+    }
+    wgpuQueueWriteTexture(
+      queue: webgpuQueue()
+      destination: destination
+      data: bytes.data
+      dataSize: bytes.length as UInt64
+      dataLayout: layout
+      writeSize: extent
+    )
+  }
+}
+
+# Load bounded square PNG layers, generate box-filtered mips in linear light,
+# and use hardware sRGB decoding. Failure leaves the previous array intact.
+func setSurfaceImages(
+  images: mod SurfaceImages
+  resources: mod GpuResources
+  paths: view List(String)
+) ret Bool {
+  if paths.length > 16 {
+    log("surface images support at most 16 layers per renderer")
+    ret false
+  }
+  let size: Int = 512
+  var decoded: List(List(Float)) = List.create(List(Float), cap: paths.length)
+  loop let path: view String in paths {
+    var width: Int = 0
+    var height: Int = 0
+    let pixels: Buffer(Int) = Image.loadPng(path: path, width: width, height: height)
+    if width is not size or height is not size {
+      log("surface image must be a 512 x 512 PNG: {path}")
+      ret false
+    }
+    var linear: List(Float) = List.create(Float, cap: size * size * 3)
+    loop var pixel: Int = 0, pixel < size * size, ++pixel {
+      var packed: Int = 0
+      unsafe {
+        packed = rae_ext_rae_buf_get(Int, buf: pixels, index: pixel)
+      }
+      linear.add(value: surfaceLinear(value: ((packed / 65536) % 256).toFloat() / 255.0))
+      linear.add(value: surfaceLinear(value: ((packed / 256) % 256).toFloat() / 255.0))
+      linear.add(value: surfaceLinear(value: (packed % 256).toFloat() / 255.0))
+    }
+    decoded.add(value: own linear)
+  }
+  var imageSize: Int = size
+  var levels: Int = 10
+  if paths.length is 0 {
+    imageSize = 1
+    levels = 1
+    let white: List(Float) = { 1.0, 1.0, 1.0 }
+    decoded.add(value: white)
+  }
+  var candidate: SurfaceImages = { paths: paths, generation: images.generation + 1 }
+  if let texture: TextureId = createTextureArrayMipped(
+    resources: resources
+    width: imageSize
+    height: imageSize
+    layers: decoded.length
+    format: WGPUTextureFormat_RGBA8UnormSrgb
+    usage: WGPUTextureUsage_CopyDst + WGPUTextureUsage_TextureBinding
+    mipLevels: levels
+  ) {
+    candidate.texture = texture
+  } else {
+    ret false
+  }
+  loop var layer: Int = 0, layer < decoded.length, ++layer {
+    var pixels: List(Float) = decoded.copyAtDefault(index: layer)
+    var side: Int = imageSize
+    loop var level: Int = 0, level < levels, ++level {
+      uploadSurfaceLevel(
+        images: candidate
+        resources: resources
+        pixels: pixels
+        size: side
+        layer: layer
+        level: level
+      )
+      if side > 1 {
+        var smaller: List(Float) = List.create(Float, cap: side * side * 3 / 4)
+        loop var y: Int = 0, y < side / 2, ++y {
+          loop var x: Int = 0, x < side / 2, ++x {
+            loop var channel: Int = 0, channel < 3, ++channel {
+              var sum: Float = 0.0
+              loop var row: Int = 0, row < 2, ++row {
+                loop var column: Int = 0, column < 2, ++column {
+                  sum = sum + pixels.copyAtDefault(
+                    index: ((y * 2 + row) * side + x * 2 + column) * 3 + channel
+                  )
+                }
+              }
+              smaller.add(value: sum * 0.25)
+            }
+          }
+        }
+        pixels = own smaller
+        side = side / 2
+      }
+    }
+  }
+  if let textureView: TextureViewId = createTextureViewRange(
+    resources: resources
+    texture: candidate.texture
+    range: {
+      baseMip: 0
+      mipCount: levels
+      baseLayer: 0
+      layerCount: decoded.length
+      dimension: WGPUTextureViewDimension_2DArray
+    }
+  ) {
+    candidate.textureView = textureView
+  }
+  if let sampler: SamplerId = createSamplerMipped(
+    resources: resources
+    addressMode: WGPUAddressMode_Repeat
+  ) {
+    candidate.sampler = sampler
+  }
+  if not isValidTextureView(resources: resources, id: candidate.textureView) or not isValidSampler(
+    resources: resources
+    id: candidate.sampler
+  ) {
+    retireSurfaceImages(images: candidate, resources: resources)
+    ret false
+  }
+  retireSurfaceImages(images: images, resources: resources)
+  images = own candidate
+  ret true
+}
+
+func surfaceImageEntries(
+  images: mod SurfaceImages
+  resources: mod GpuResources
+  entries: mod List(ResourceRef)
+) {
+  if not isValidTextureView(resources: resources, id: images.textureView) {
+    setSurfaceImages(images: images, resources: resources, paths: List.create(String, cap: 0))
+  }
+  entries.add(value: textureViewRef(id: images.textureView))
+  entries.add(value: samplerRef(id: images.sampler))
+}

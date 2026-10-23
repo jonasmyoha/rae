@@ -3,7 +3,7 @@
 # (GroveGrass). All geometry is authored in Rae. The shared editor panel (app3d/EditorPanel)
 # is the chrome: drag to orbit, wheel to zoom, the camera bar's mode button for
 # the free WASD camera, the menu button for the settings (sky, time of day,
-# shadows, the eight views). Keys 1 through 8 pick the views too.
+# shadows, the nine views). Keys 1 through 9 pick the views too.
 import Gpu2d
 import Vec3
 import Keys
@@ -104,11 +104,11 @@ func createShowcase() ret ShowcaseState {
   var idIssuer: IdIssuer = IdIssuer.create()
 
   # The settings start on the Preetham sky at a fixed mid-morning hour (the
-  # clock runs from the panel), and the panel's scene chooser is the eight views
+  # clock runs from the panel), and the panel's scene chooser is the nine views
   let initialView: Int = groveViewNumber(viewName: Sys.getEnv(name: "RAE_GROVE_VIEW"))
   var settings: SettingsState = createSettingsState(
     scene: initialView
-    sceneCount: 8
+    sceneCount: 9
     speed: 1.0
     toon: true
     hour: 10.0
@@ -158,7 +158,7 @@ func createShowcase() ret ShowcaseState {
 # The grove's materials are authored for a bright sun
 const groveSunStrength: Float = 3.1
 
-# RAE_GROVE_VIEW: grove, trees, rocks, fluffy, evergreen, spruces, camphor, roots
+# RAE_GROVE_VIEW: grove, trees, rocks, fluffy, evergreen, spruces, camphor, roots, birches
 func groveViewNumber(viewName: view String) ret Int {
   if viewName is "trees" {
     ret 2
@@ -177,6 +177,9 @@ func groveViewNumber(viewName: view String) ret Int {
   }
   if viewName is "camphor" {
     ret 7
+  }
+  if viewName is "birches" {
+    ret 9
   }
   if viewName is "roots" {
     ret 8
@@ -229,6 +232,12 @@ func setGroveView(camera: mod Camera3d, cameraRig: mod CameraRig, groveView: vie
     cameraRig.distance = 28
     cameraRig.orbitPitch = 0.10
     cameraRig.yaw = -0.6
+  }
+  if groveView is 9 {
+    camera.target = Vec3.create(x: -19, y: -10, z: 3.8)
+    cameraRig.distance = 17
+    cameraRig.orbitPitch = 0.10
+    cameraRig.yaw = -0.25
   }
   snapCameraRigView(rig: cameraRig)
   applyCameraRig(rig: cameraRig, camera: camera)
@@ -287,6 +296,9 @@ func runShowcaseFrame(state: mod ShowcaseState) {
   }
   if Sdl3.isKeyPressed(key: Keys.key7) {
     selectEditorPanelScene(editorPanel: state.editorPanel, scene: 7)
+  }
+  if Sdl3.isKeyPressed(key: Keys.key9) {
+    selectEditorPanelScene(editorPanel: state.editorPanel, scene: 9)
   }
   if Sdl3.isKeyPressed(key: Keys.key8) {
     selectEditorPanelScene(editorPanel: state.editorPanel, scene: 8)

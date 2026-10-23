@@ -1,0 +1,32 @@
+# Load an opaque material image once into this renderer's shared array.
+# Static materials hold a layer index; the renderer owns all GPU resources.
+import Sys
+import String
+open RendererDeferred
+open SurfaceImages
+open gpu/GpuResources
+
+func rendererLoadSurfaceImage(renderer: mod DeferredRenderer, path: view String) ret Int {
+  ensureRendererResources(renderer: renderer)
+  var resolved: String = path
+  if not Sys.exists(path: resolved) and path.startsWith(prefix: "lib/") {
+    let stdlib: String = Sys.getEnv(name: "RAE_STDLIB")
+    let relative: String = path.sub(start: 4, len: path.length() - 4)
+    resolved = "{stdlib}/{relative}"
+  }
+  let images: mod SurfaceImages = renderer.passes.gbuffer.surfaceImages
+  loop var layer: Int = 0, layer < images.paths.length, ++layer {
+    if images.paths.copyAtDefault(index: layer) is resolved {
+      ret layer
+    }
+  }
+  var paths: List(String) = images.paths
+  paths.add(value: resolved)
+  if let resources: mod GpuResources = renderer.gpuResources {
+    if setSurfaceImages(images: images, resources: resources, paths: paths) {
+      ret paths.length - 1
+    }
+  }
+  log("could not load material image: {path}")
+  ret -1
+}

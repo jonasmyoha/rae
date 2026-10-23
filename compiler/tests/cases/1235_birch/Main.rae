@@ -1,0 +1,92 @@
+open procgen/Birch
+open app3d/GroveTrees
+import Math
+import Vec3
+
+func checkMesh(mesh: view MeshData) ret Bool {
+  if mesh.verts.length is not mesh.vertCount * 8 or mesh.indices.length % 3 is not 0 {
+    ret false
+  }
+  loop let index: view Int in mesh.indices {
+    if index < 0 or index >= mesh.vertCount {
+      ret false
+    }
+  }
+  loop var vertex: Int = 0, vertex < mesh.vertCount, ++vertex {
+    let normal: Vec3 = Vec3.create(
+      x: mesh.verts.copyAtDefault(index: vertex * 8 + 3)
+      y: mesh.verts.copyAtDefault(index: vertex * 8 + 4)
+      z: mesh.verts.copyAtDefault(index: vertex * 8 + 5)
+    )
+    if Math.abs(value: Vec3.vlen(a: normal) - 1.0) > 0.001 {
+      ret false
+    }
+  }
+  ret true
+}
+
+func main() ret Int {
+  let tree: BirchTree = birchTree(seed: 1437, height: 5.5)
+  let repeat: BirchTree = birchTree(seed: 1437, height: 5.5)
+  let different: BirchTree = birchTree(seed: 311, height: 5.5)
+  if not checkMesh(mesh: tree.wood) or not checkMesh(mesh: tree.twigWood) or tree.twigs.length is not 130 {
+    ret 1
+  }
+  var changes: Int = 0
+  loop var index: Int = 0, index < tree.wood.verts.length, ++index {
+    let value: Float = tree.wood.verts.copyAtDefault(index: index)
+    if value is not repeat.wood.verts.copyAtDefault(index: index) {
+      ret 2
+    }
+    if value is not different.wood.verts.copyAtDefault(index: index) {
+      changes = changes + 1
+    }
+  }
+  if changes < 100 {
+    ret 3
+  }
+  # The duplicated first/last vertex on every main-stem ring joins in space
+  # and normal; U differs by one complete texture period.
+  loop var ring: Int = 0, ring <= 16, ++ring {
+    let first: Int = ring * 13 * 8
+    let last: Int = first + 12 * 8
+    loop var axis: Int = 0, axis < 6, ++axis {
+      if Math.abs(
+        value: tree.wood.verts.copyAtDefault(index: first + axis) - tree.wood.verts.copyAtDefault(
+          index: last + axis
+        )
+      ) > 0.00001 {
+        ret 4
+      }
+    }
+    if tree.wood.verts.copyAtDefault(index: last + 6) - tree.wood.verts.copyAtDefault(
+      index: first + 6
+    ) is not 1.0 {
+      ret 5
+    }
+  }
+  var leaves: Int = 0
+  loop var tone: Int = 0, tone < 3, ++tone {
+    let mesh: MeshData = birchLeaves(twigs: tree.twigs, seed: 1437, tone: tone)
+    if not checkMesh(mesh: mesh) or mesh.windPivots.length is not mesh.vertCount * 4 {
+      ret 6
+    }
+    leaves = leaves + mesh.vertCount / 7
+    loop var leaf: Int = 0, leaf < mesh.vertCount / 7, ++leaf {
+      loop var vertex: Int = 0, vertex < 7, ++vertex {
+        loop var axis: Int = 0, axis < 3, ++axis {
+          if mesh.windPivots.copyAtDefault(index: (leaf * 7 + vertex) * 4 + axis) is not mesh.verts.copyAtDefault(
+            index: leaf * 7 * 8 + axis
+          ) {
+            ret 7
+          }
+        }
+      }
+    }
+  }
+  if leaves is not 1820 or speciesForPick(pick: 0.06, palms: false) is not speciesBirch {
+    ret 8
+  }
+  log("birch: valid continuous bark, deterministic seed, attached leaves and forest placement")
+  ret 0
+}

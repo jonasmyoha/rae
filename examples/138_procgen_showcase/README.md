@@ -13,9 +13,11 @@ on a raised garden base.
 - **6** frames the six layered spruces.
 - **7** frames the giant camphor.
 - **8** looks beneath its canopy at the roots and branching trunk.
+- **9** visits the silver-birch stand: textured ivory bark, dark hanging twigs
+  and folded green-to-gold leaves.
 - Drag to orbit, scroll to zoom. The camera bar's **Orbit** button switches to
   the free WASD camera (Q/E down/up, shift to boost) and back.
-- The menu button opens the settings panel: the eight views (Scene 1-8), sky
+- The menu button opens the settings panel: the nine views (Scene 1-9), sky
   model, time of day and date, shadows and TAA.
 - The chrome is the shared editor panel (`lib/app3d/EditorPanel.rae`); the
   debug widget on top shows frame rate and memory.
@@ -27,7 +29,7 @@ compiler/bin/rae run --project examples/138_procgen_showcase examples/138_procge
 ```
 
 `RAE_GROVE_VIEW=trees` or `rocks` selects a reproducible initial close-up.
-The default is the complete grove. The example gate renders all eight views.
+The default is the complete grove. The example gate renders all nine views.
 
 ## Geometry and shading
 
@@ -129,7 +131,7 @@ copied from those examples.
 
 Validation: fixture `1141_fluffy_foliage` checks all five forms at 48/24/12
 detail settings, deterministic vertex output and valid indices. The 138
-example gate renders all eight views. Captures are inspected separately and
+example gate renders all nine views. Captures are inspected separately and
 stored above; `RAE_MEM_STATS=1` runs check tracked String/Buffer cleanup.
 
 ## Layered spruces and slender cypresses
@@ -190,3 +192,23 @@ Keys 7/8 or `RAE_GROVE_VIEW=camphor` / `roots` select the inspection views.
 ![Giant camphor](references/Camphor.png)
 
 ![Under the canopy](references/Roots.png)
+
+## Silver birch
+
+Five birches share the LOD0 prototype from `lib/procgen/Birch.rae`. The same
+prototype is planted by `app3d/GroveTrees` in walkers 136/137 and forest 143.
+Key **9** or `RAE_GROVE_VIEW=birches` frames the stand.
+
+The pale wood uses the original generated `lib/assets/trees/birchBark.png`
+albedo through a renderer-owned sRGB mip array. Thin outer twigs stay dark.
+The 1,820 leaves are folded opaque diamonds with attached wind pivots; there
+are no rectangular alpha cards or new per-frame CPU leaf updates. The five
+mesh parts total 17,875 vertices and 28,932 triangles, including leaf backs.
+
+See [the research and design](../../docs/tree-rendering-2026.md) for the
+geometry/card comparison, primary sources, material API and remaining work.
+This addition focuses on LOD0; it shares that mesh in the existing middle slot
+and uses the existing colour-only distant bake until dedicated birch LODs
+are developed.
+
+![Silver birch stand](references/Birches.png)

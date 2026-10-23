@@ -16,6 +16,8 @@ import Math
 import Vec3
 import RendererDeferred
 open FoliageMesh
+open RendererImages
+open procgen/Birch
 open Noise
 open Scene3d
 open Mesh3d
@@ -48,7 +50,9 @@ const speciesCrimson: Int = 7
 
 const speciesPalm: Int = 8
 
-const treeSpeciesCount: Int = 9
+const speciesBirch: Int = 9
+
+const treeSpeciesCount: Int = 10
 
 # The height (m) the autumn trees and the palm are built at; a placement
 # scales them from it
@@ -82,10 +86,13 @@ func treeSpeciesForm(species: view Int) ret FluffyForm {
 # most, then the autumn trees, the umbrella pine and cypress, and with
 # `palms` now and then a palm
 func speciesForPick(pick: view Float, palms: view Bool) ret Int {
-  if pick < 0.18 {
+  if pick < 0.12 {
+    ret speciesBirch
+  }
+  if pick < 0.26 {
     ret speciesBroadleaf
   }
-  if pick < 0.36 {
+  if pick < 0.40 {
     ret speciesSpruce
   }
   if pick < 0.46 {
@@ -127,6 +134,9 @@ func treeSpeciesAt(x: view Float, y: view Float, number: view Int) ret Int {
 # scaled from autumnReferenceHeight.
 func treeScaleAt(species: view Int, number: view Int) ret Float {
   let size: Float = hash2(x: number, y: 3, seed: 109)
+  if species is speciesBirch {
+    ret (6.5 + size * 2.0) / autumnReferenceHeight
+  }
   if species is speciesPalm {
     ret (5.0 + size * 1.5) / autumnReferenceHeight
   }
@@ -309,6 +319,10 @@ func widenMesh(mesh: mod MeshData, factor: view Float) {
 # A species' wood, uploaded
 func speciesWoodMesh(species: view Int) ret MeshData {
   let seed: Int = 501 + species * 104
+  if species is speciesBirch {
+    let tree: BirchTree = birchTree(seed: seed, height: autumnReferenceHeight)
+    ret tree.wood
+  }
   if species is speciesPalm {
     ret palmWood(seed: seed, height: autumnReferenceHeight, width: 2.0)
   }
@@ -334,6 +348,10 @@ func speciesLeavesMesh(
   leaves: view Int
 ) ret MeshData {
   let seed: Int = 501 + species * 104
+  if species is speciesBirch {
+    let tree: BirchTree = birchTree(seed: seed, height: autumnReferenceHeight)
+    ret birchLeaves(twigs: tree.twigs, seed: seed, tone: tone)
+  }
   if species is speciesPalm {
     ret palmLeaves(
       seed: seed
@@ -392,6 +410,9 @@ func speciesLeaves(
 }
 
 func speciesLeafColor(species: view Int, tone: view Int) ret Vec3 {
+  if species is speciesBirch {
+    ret birchLeafColor(tone: tone)
+  }
   if species >= speciesOrange {
     ret autumnLeafColor(species: species, tone: tone)
   }
@@ -415,15 +436,26 @@ func speciesLevelMeshes(species: view Int, patches: view Int, leaves: view Int) 
       leaves: leaves
     ))
   }
+  if species is speciesBirch {
+    let tree: BirchTree = birchTree(seed: 501 + species * 104, height: autumnReferenceHeight)
+    meshes.add(value: tree.twigWood)
+  }
   ret meshes
 }
 
 # The albedos of a level's meshes, in speciesLevelMeshes' order
 func speciesAlbedos(species: view Int) ret List(Vec3) {
   var albedos: List(Vec3) = List.create(Vec3, cap: 4)
-  albedos.add(value: speciesWoodColor())
+  if species is speciesBirch {
+    albedos.add(value: Vec3.create(x: 0.85, y: 0.85, z: 0.85))
+  } else {
+    albedos.add(value: speciesWoodColor())
+  }
   loop var tone: Int = 0, tone < 3, ++tone {
     albedos.add(value: speciesLeafColor(species: species, tone: tone))
+  }
+  if species is speciesBirch {
+    albedos.add(value: Vec3.create(x: 0.13, y: 0.085, z: 0.055))
   }
   ret albedos
 }
@@ -514,6 +546,10 @@ func addForestKinds(
       tilt: 0.0
     )
   }
+  let birchLayer: Int = rendererLoadSurfaceImage(
+    renderer: renderer
+    path: "lib/assets/trees/birchBark.png"
+  )
   var subjects: List(ImpostorSubject) = List.create(ImpostorSubject, cap: treeSpeciesCount)
   loop var species: Int = 0, species < treeSpeciesCount, ++species {
     # The near level's meshes, made once: drawn near, and baked into the
@@ -540,15 +576,25 @@ func addForestKinds(
       maxDistance: nearTreeDistance
       castsShadow: true
     ))
-    lods.add(value: speciesLod(
-      renderer: renderer
-      species: species
-      wood: nearHandles.copyAtDefault(index: 0)
-      patches: midPatches
-      leaves: midLeaves
-      maxDistance: midDistance
-      castsShadow: true
-    ))
+    if species is speciesBirch {
+      # No reduced birch mesh yet: share LOD0 until the existing far fallback.
+      lods.add(value: speciesLodOf(
+        meshes: nearHandles
+        albedos: albedos
+        maxDistance: midDistance
+        castsShadow: true
+      ))
+    } else {
+      lods.add(value: speciesLod(
+        renderer: renderer
+        species: species
+        wood: nearHandles.copyAtDefault(index: 0)
+        patches: midPatches
+        leaves: midLeaves
+        maxDistance: midDistance
+        castsShadow: true
+      ))
+    }
     lods.add(
       value: {
         parts: List.create(PropPart, cap: 0)
@@ -557,6 +603,13 @@ func addForestKinds(
         facesCamera: true
       }
     )
+    if species is speciesBirch {
+      loop let level: mod PropLod in lods {
+        if let wood: mod PropPart = level.parts.modAt(index: 0) {
+          wood.material.colorTextureLayer = birchLayer
+        }
+      }
+    }
     # The sphere round the tree at scale 1: the leaf-patch forms are unit
     # height, the others autumnReferenceHeight
     var radius: Float = 0.6 * speciesWidth(species: species) + 0.1
