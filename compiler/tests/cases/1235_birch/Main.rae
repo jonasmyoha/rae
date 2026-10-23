@@ -69,24 +69,32 @@ func main() ret Int {
   var patches: Int = 0
   loop var tone: Int = 0, tone < 3, ++tone {
     let mesh: MeshData = birchLeaves(twigs: tree.twigs, seed: 1437, tone: tone)
-    if not checkMesh(mesh: mesh) or mesh.windPivots.length is not mesh.vertCount * 4 {
+    if not checkMesh(mesh: mesh) or mesh.windPivots.length is not mesh.vertCount * 4 or mesh.leafCards.length is not mesh.vertCount * 4 {
       ret 6
     }
-    patches = patches + mesh.vertCount / 9
-    loop var patch: Int = 0, patch < mesh.vertCount / 9, ++patch {
-      loop var vertex: Int = 0, vertex < 9, ++vertex {
-        if mesh.windPivots.copyAtDefault(index: (patch * 9 + vertex) * 4 + 3) >= 0.0 {
+    patches = patches + mesh.vertCount / 4
+    loop var patch: Int = 0, patch < mesh.vertCount / 4, ++patch {
+      loop var vertex: Int = 0, vertex < 4, ++vertex {
+        if mesh.windPivots.copyAtDefault(index: (patch * 4 + vertex) * 4 + 3) >= 0.0 {
           ret 9
         }
         loop var axis: Int = 6, axis < 8, ++axis {
-          let uv: Float = mesh.verts.copyAtDefault(index: (patch * 9 + vertex) * 8 + axis)
+          let uv: Float = mesh.verts.copyAtDefault(index: (patch * 4 + vertex) * 8 + axis)
           if uv < 0.0 or uv > 1.0 {
             ret 10
           }
         }
+        if mesh.leafCards.copyAtDefault(index: (patch * 4 + vertex) * 4 + 3) is not 1.0 {
+          ret 13
+        }
         loop var axis: Int = 0, axis < 3, ++axis {
-          if mesh.windPivots.copyAtDefault(index: (patch * 9 + vertex) * 4 + axis) is not mesh.windPivots.copyAtDefault(
-            index: patch * 9 * 4 + axis
+          if mesh.leafCards.copyAtDefault(index: (patch * 4 + vertex) * 4 + axis) is not mesh.leafCards.copyAtDefault(
+            index: patch * 4 * 4 + axis
+          ) {
+            ret 14
+          }
+          if mesh.windPivots.copyAtDefault(index: (patch * 4 + vertex) * 4 + axis) is not mesh.windPivots.copyAtDefault(
+            index: patch * 4 * 4 + axis
           ) {
             ret 7
           }
@@ -136,7 +144,7 @@ func main() ret Int {
     ret 12
   }
   log(
-    "birch: valid continuous bark, deterministic seed, curved leaf patches, cutout mips and forest placement"
+    "birch: valid continuous bark, deterministic seed, camera-facing leaf clusters, cutout mips and forest placement"
   )
   ret 0
 }

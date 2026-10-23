@@ -156,8 +156,8 @@ type ShadowCache {
   scratch: List(Float)
 }
 
-# A cascade's uniform: its light view-projection, then the wind (vec4)
-const shadowCascadeUniformBytes: Int = 80
+# A cascade's uniform: light view-projection, wind, viewing-camera right/up.
+const shadowCascadeUniformBytes: Int = 112
 
 func setShadowWind(
   shadow: mod ShadowCache
@@ -473,6 +473,14 @@ func shadowBegin(
     shadow.scratch.add(value: shadow.windY)
     shadow.scratch.add(value: shadow.windGustiness)
     shadow.scratch.add(value: shadow.windTime)
+    shadow.scratch.add(value: cascades.cardRight.x)
+    shadow.scratch.add(value: cascades.cardRight.y)
+    shadow.scratch.add(value: cascades.cardRight.z)
+    shadow.scratch.add(value: 0.0)
+    shadow.scratch.add(value: cascades.cardUp.x)
+    shadow.scratch.add(value: cascades.cardUp.y)
+    shadow.scratch.add(value: cascades.cardUp.z)
+    shadow.scratch.add(value: 0.0)
     unsafe {
       let wroteCascade: Bool = writeBufferFromPtr(
         resources: resources

@@ -294,6 +294,12 @@ func widenMesh(mesh: mod MeshData, factor: view Float) {
         )
       }
     }
+    if vertex * 4 + 3 < mesh.leafCards.length {
+      loop var axis: Int = 0, axis < 2, ++axis {
+        let index: Int = vertex * 4 + axis
+        mesh.leafCards.set(index: index, value: mesh.leafCards.copyAtDefault(index: index) * factor)
+      }
+    }
     let base: Int = vertex * 8
     mesh.verts.set(
       index: base

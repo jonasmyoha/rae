@@ -30,9 +30,7 @@ struct VsOut {
   @location(5) @interpolate(flat) imageCode: f32,
 };
 
-@vertex
-fn vs(@builtin(instance_index) ii: u32,
-      @location(0) position: vec3<f32>, @location(1) normal: vec3<f32>, @location(2) imageUv: vec2<f32>) -> VsOut {
+fn bakeVertex(ii: u32, position: vec3<f32>, normal: vec3<f32>, imageUv: vec2<f32>, card: vec4<f32>) -> VsOut {
   let views = u32(U.a.x);
   let viewCount = views * views;
   let part = parts[ii / viewCount];
@@ -40,7 +38,12 @@ fn vs(@builtin(instance_index) ii: u32,
   let cell = vec2<f32>(f32(index % views), f32(index / views));
   let frame = frames[u32(part.albedoLayer.w)];
   let direction = impostorViewDirection(cell, f32(views));
-  let local = (position - frame.xyz) / frame.w;
+  var posed = position;
+  if (card.w > 0.0) {
+    posed = card.xyz + leafCardOffset(position, card.xyz, vec2<f32>(1.0),
+      impostorRight(direction), impostorUp(direction));
+  }
+  let local = (posed - frame.xyz) / frame.w;
   let x = dot(local, impostorRight(direction));
   let y = dot(local, impostorUp(direction));
   let depth = dot(local, direction);
@@ -55,6 +58,17 @@ fn vs(@builtin(instance_index) ii: u32,
   o.direction = direction;
   o.depth = depth;
   return o;
+}
+
+@vertex
+fn vs(@builtin(instance_index) ii: u32, @location(0) position: vec3<f32>,
+      @location(1) normal: vec3<f32>, @location(2) uv: vec2<f32>) -> VsOut {
+  return bakeVertex(ii, position, normal, uv, vec4<f32>(0.0));
+}
+@vertex
+fn vsFoliage(@builtin(instance_index) ii: u32, @location(0) position: vec3<f32>,
+      @location(1) normal: vec3<f32>, @location(2) uv: vec2<f32>, @location(4) card: vec4<f32>) -> VsOut {
+  return bakeVertex(ii, position, normal, uv, card);
 }
 
 struct FsOut {

@@ -17,7 +17,7 @@ Autumn colours should move from soft green through lime to warm gold.
 These identifiers follow [Kew's species account](https://powo.science.kew.org/taxon/urn%3Alsid%3Aipni.org%3Anames%3A295174-1/general-information)
 and the [Woodland Trust's illustrated silver-birch guide](https://www.woodlandtrust.org.uk/trees-woods-and-wildlife/british-trees/a-z-of-british-trees/silver-birch/).
 
-The revised art direction uses uneven hanging sprays with broad smooth lighting,
+The current art direction uses camera-facing leafy clusters with broad smooth lighting,
 a slightly crooked leader and bright white bark with sparse, thick black scars.
 The original individual-leaf geometry was rejected after review.
 The three supplied screenshots favour broad foliage masses and leafy outlines.
@@ -30,7 +30,7 @@ side light, against the sky and from underneath, not only in its thumbnail.
 | Approach | Close-up strengths | Costs and failure modes | Rae decision |
 | --- | --- | --- | --- |
 | Opaque shaped leaves | Real silhouette, folds, depth and stable shadows; no transparent corners | More vertices and tiny triangles; layered geometry still overdraws | Rejected for this birch after visual review |
-| Trimmed alpha-tested branch cards | Efficient authoring and fewer vertices; detailed leaf veins from an atlas | Cutout overdraw, flat views, edge aliasing, mip thinning, shadow-mask matching | Use curved patches with clump normals for this LOD0 |
+| Trimmed alpha-tested branch cards | Efficient authoring and fewer vertices; detailed leaf veins from an atlas | Cutout overdraw, flat views, edge aliasing, mip thinning, shadow-mask matching | Use camera-facing clusters with crown normals for this LOD0 |
 | Broad opaque canopy patches | Small geometry budget, calm painted masses | Reads as generic clumps; loses birch twigs and airiness close up | Keep for other species; not this birch's main form |
 | Geometry plus cards | Shape at silhouette, cheap dense interior | Two material paths, harder lighting and shadow consistency | Useful later if profiling justifies it |
 | Hierarchical virtualized geometry and voxels | Detailed nearby leaves, compact repeated parts, distant aggregate coverage | Requires specialized build, streaming, culling and rasterization infrastructure | Research direction, not this implementation |
@@ -50,14 +50,15 @@ that geometric leaves can be a practical production choice, not a budget to
 copy into an ordinary WebGPU renderer. Rae should start with a bounded mesh
 and count both vertices and shadow draws.
 
-The revised choice is a curved 3 x 3 vertex patch carrying a leaf-cluster
-colour/alpha texture. Four to six patches form each uneven hanging spray.
-Normals mostly follow the broader crown with a small local bend; neither each
-leaf nor each tuft gets its own spherical lighting envelope. Reverse-wound indices make both sides visible without
-flipping the lighting normal. Alpha below 0.5 is discarded in colour, shadow
-and impostor-bake passes. There is no sorted transparent blending.
+The current choice is a four-vertex camera-facing quad carrying a foliage-cluster
+colour/alpha texture. Four to six offset clusters follow each twig group.
+Normals follow the broader crown and rotate with the wind, independently of
+the viewing camera. This replaces the rejected fixed curved cards, which
+looked like hanging sheets when seen from the side. Alpha below 0.5 is
+discarded in colour, shadow and impostor-bake passes. There is no sorted
+transparent blending. See §8 for the complete geometry and shadow contract.
 
-The image uses nearly merged painted leaf shapes with an irregular branch
+The image uses nearly merged painted leaf shapes with an irregular cluster
 silhouette, transparent gaps and little internal contrast. Interior detail
 must not become a separate bright/dark pattern for every leaf. The clump lighting follows
 the general strategy described in [the SpeedTree rendering chapter](https://developer.nvidia.com/gpugems/gpugems3/part-i-geometry/chapter-4-next-generation-speedtree-rendering).
@@ -156,8 +157,8 @@ batches provide the appropriate ownership and culling structure.
   scale. A future set of two or three seed variants can improve repetition
   without making every tree unique on the GPU.
 - Five parts separate pale bark, dark outer twigs and three leaf tones.
-  Leaves use the shipped optional
-  pivot stream; the wood uses the ordinary static vertex layout.
+  Leaves use the optional pivot and card-centre streams; the wood uses the
+  ordinary static vertex layout.
 
 ### Bark texture and materials
 
@@ -176,10 +177,11 @@ repo, resized for runtime):
   horizontal scars, bright white base, deep charcoal marks, subtle papery
   peeling; no beige cast or baked light; tileable. The output has naturally
   varied marks rather than a mathematically exact 50% pixel blend.
-- Leaf edit: irregular hanging branch spray with gaps and transparent margins;
-  merge neighbouring leaf colours into painted masses; no veins, outlines,
-  highlights or leaf-by-leaf shadows. A second edit reduces internal contrast
-  toward 3% while keeping the silhouette.
+- Current leaf generation: a broad asymmetrical cloud fragment with uneven
+  lobes, a missing bite, small gaps and a finely broken silhouette of small
+  pointed diamond leaves. Merge the interior into matte mid-green paint;
+  no veins, stems, outlines, highlights, baked shadow or ball shading.
+  Transparent background and margins. Replace the earlier hanging-spray image.
 - Both were made with the built-in image generator and resized to 512 square.
   Final assets are the two `lib/assets/trees/` paths above.
 
@@ -340,3 +342,53 @@ for silhouette changes. The revised wind check requires a 70 cm spray tip
 to move more than 5 cm in at least 12 of 32 sampled times, alongside the
 existing rigidity, attachment, normal and continuity checks. These are
 correctness and visual checks, not a frame-time performance comparison.
+
+## 8. Camera-facing clusters replace fixed sheets
+
+The fixed patches still exposed thin edges and conspicuous hanging planes.
+The replacement is a shared renderer feature, used by the same birch generator
+in the grove and all three walker variants. Existing bark is unchanged.
+
+`MeshData.leafCards` holds centre xyz and an enabled flag per vertex. The rest
+corner is stored in the mesh's local X/Z plane and UV remains 0..1. The existing
+wind pivot stays separate: wind moves the cluster centre about the twig root,
+then the vertex shader expands its corners along camera right/up. This avoids
+both edge-on cards and stretching a textured leaf shape with spatial noise.
+
+The forward and deferred paths derive axes from the current view-projection.
+Motion vectors expand the previous corner using the previous camera and model,
+with the previous wind. Lighting normals describe the crown, not the billboard
+plane; rotating the camera alone therefore does not rotate the lighting normal.
+The sun shadow pass receives the viewing camera's axes through `ShadowCascades`
+and expands the same cards before projecting into the light. It must not turn
+them toward the sun. Cascade fitting currently uses the renderer's Z-up camera
+convention. A future rolled camera needs its actual view axes supplied there.
+The existing distant atlas bake poses cards toward each atlas view, and subject
+bounds include the card corner radius plus the maximum capped wind travel.
+
+Foliage vertices are now 64 bytes: position/normal/UV (32), wind pivot and
+response (16), card centre/enabled (16). Ordinary meshes remain 32 bytes.
+Other foliage has a zero enabled flag and retains its rigid-patch motion,
+but pays the extra 16 bytes per vertex. Birch reduces each patch from nine
+vertices to four, so its vertex storage falls from 432 to 256 bytes per patch.
+Draw batching and per-instance ownership are unchanged. Cutout overdraw and
+camera-dependent shadow silhouettes remain trade-offs; no frame-time speedup
+is claimed. Dedicated reduced birch geometry is still future work.
+
+The shared GPU wind check also verifies 64 viewing bases: quad dimensions,
+camera-facing orientation and axis recovery under unequal projection scales.
+The generator fixture checks matching centres, pivots and valid UVs per quad.
+The atlas check preserves the ordinary-species coverage comparison and checks
+that camera-facing birch coverage stays within its bounded range.
+
+The grove's front, side (yaw 0.9) and elevated (yaw -1.2, pitch 0.5) captures
+were inspected, along with five timed wind frames. `RAE_CAMERA_AT` now uses
+the existing shared camera override in the grove, so those views can be
+repeated without editing its scene. The main reference is `Birches.png`.
+
+Validation: full suite 896 passed under a 900-second timeout; GPU checks
+`leafWind`, `surfaceImages` and `impostorBake` passed with 150-second per-check
+bounds; visual gates 136, 137, 138 and 143 passed under a 900-second bound.
+This includes the walker's running-memory check, the forward path, all nine
+grove views and the large forest. These are correctness checks, not a GPU
+performance comparison.

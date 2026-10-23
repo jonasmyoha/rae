@@ -16,7 +16,7 @@ The structural/branch hierarchy below remains a later refinement.
 
 - Six-sided leaves and broad scalloped patches preserve a local pivot for every
   vertex. MeshData keeps optional pivot data separately from positions, normals
-  and UVs. Foliage uploads interleave one extra vec4 (16 bytes per vertex);
+  and UVs. Foliage uploads interleave wind and optional card-centre vec4s (32 bytes per vertex);
   ordinary meshes retain their 32-byte layout. No extra per-leaf draws or
   per-frame mesh uploads are introduced.
 - The shader rotates each patch intact, with its shading normal, about its
@@ -28,8 +28,8 @@ The structural/branch hierarchy below remains a later refinement.
   2026-10-22.)
 - Every mesh baked into an impostor or drawn by another pipeline must be read
   with its own vertex size: the impostor bake (lib/ImpostorBake.rae) has a
-  32-byte and a 48-byte pipeline and picks one per mesh with
-  meshStoreHasFoliage. One 32-byte pipeline read the leaf meshes' 48-byte
+  32-byte and a 64-byte pipeline and picks one per mesh with
+  meshStoreHasFoliage. One 32-byte pipeline read the leaf meshes' larger
   vertices as garbage, and every billboard came out as broken squares.
 - Forest cypress and umbrella foliage have lower flexibility. Spruce skirts,
   wood and other meshes without leaf metadata stay rigid. This deliberately
@@ -45,6 +45,12 @@ The structural/branch hierarchy below remains a later refinement.
 - The GPU check in checks/leafWind tests 64 times for preserved patch distances,
   fixed pivots, consistent rotated normals, exact calm and actual movement.
   Fixture 1141 checks deterministic shared pivots and rigid spruce layers.
+
+Birch uses camera-facing clusters: wind moves their centres around fixed twig
+roots, and the camera supplies the corner axes. The crown lighting normal still
+rotates with wind, independently of the camera. Colour, shadow and atlas bake
+passes share the pose. See tree-rendering-2026.md §8 for the vertex layout and
+previous-camera motion-vector handling.
 
 There is no C runtime change. The full branch hierarchy and projected-size
 animation LOD proposed below are not part of this first pass. Current phase

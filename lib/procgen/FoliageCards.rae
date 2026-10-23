@@ -1,5 +1,6 @@
-# Irregular curved sprays, with shading shared across the broader crown.
-# Shape and lighting envelopes are separate: a tuft must not shade as a ball.
+# Camera-facing leaf clusters. Each quad keeps ordinary texture UVs and an
+# explicit centre; its branch pivot is separate so wind can move that centre.
+# Normals describe the crown, never the quad's camera-facing direction.
 import Math
 open Vec3
 open Noise
@@ -17,77 +18,55 @@ func addFoliageSpray(
   let patchCount: Int = 4 + (seed % 3 + 3) % 3
   let flexibility: Float = -(0.80 + hash2(x: seed, y: 7, seed: 29) * 0.40)
   loop var patch: Int = 0, patch < patchCount, ++patch {
-    let height: Float = 1.0 - 2.0 * (patch.toFloat() + 0.5) / patchCount.toFloat()
     let angle: Float = patch.toFloat() * 2.3999632 + hash2(x: seed, y: 3, seed: 29) * 6.2831853
+    let height: Float = 1.0 - 2.0 * (patch.toFloat() + 0.5) / patchCount.toFloat()
     let radial: Float = Math.sqrt(x: 1.0 - height * height)
-    let outward: Vec3 = Vec3.create(
-      x: Math.cos(x: angle) * radial
-      y: Math.sin(x: angle) * radial
-      z: height
+    let offset: Vec3 = Vec3.create(
+      x: Math.cos(x: angle) * radial * extent.x * 0.75
+      y: Math.sin(x: angle) * radial * extent.y * 0.75
+      z: height * extent.z * 0.70
     )
-    let side: Vec3 = foliageBasis(direction: outward)
-    let up: Vec3 = vcross(a: outward, b: side)
-    let patchSize: Float = 0.72 + hash2(x: patch, y: 1, seed: seed) * 0.42
-    let drift: Vec3 = Vec3.create(
-      x: (hash2(x: patch, y: 2, seed: seed) - 0.5) * 0.40
-      y: (hash2(x: patch, y: 3, seed: seed) - 0.5) * 0.40
-      z: (hash2(x: patch, y: 4, seed: seed) - 0.5) * 0.55
-    )
+    let clusterCenter: Vec3 = vadd(a: center, b: offset)
+    let halfWidth: Float = extent.x * (0.55 + hash2(x: patch, y: 1, seed: seed) * 0.22)
+    let halfHeight: Float = extent.z * (0.45 + hash2(x: patch, y: 2, seed: seed) * 0.22)
+    let normal: Vec3 = vnorm(a: vadd(a: shadeNormal, b: vscale(a: offset, s: 0.16)))
+    let mirrored: Bool = hash2(x: patch, y: 6, seed: seed) > 0.5
     let base: Int = mesh.vertCount
-    loop var row: Int = 0, row < 3, ++row {
-      loop var column: Int = 0, column < 3, ++column {
-        let x: Float = column.toFloat() - 1.0
-        let y: Float = row.toFloat() - 1.0
-        let local: Vec3 = vadd(
-          a: vscale(a: outward, s: 0.40 - (x * x + y * y) * 0.12)
-          b: vadd(a: vscale(a: side, s: x * patchSize), b: vscale(a: up, s: y * patchSize))
-        )
-        let offset: Vec3 = vadd(a: local, b: drift)
-        let position: Vec3 = vadd(
-          a: center
-          b: Vec3.create(x: offset.x * extent.x, y: offset.y * extent.y, z: offset.z * extent.z)
-        )
-        let normal: Vec3 = vnorm(a: vadd(a: shadeNormal, b: vscale(a: local, s: 0.22)))
+    loop var row: Int = 0, row < 2, ++row {
+      loop var column: Int = 0, column < 2, ++column {
+        let x: Float = (column.toFloat() * 2.0 - 1.0) * halfWidth
+        let z: Float = (row.toFloat() * 2.0 - 1.0) * halfHeight
+        var textureX: Float = column.toFloat()
+        if mirrored {
+          textureX = 1.0 - textureX
+        }
         pushVert(
           verts: mesh.verts
-          px: position.x
-          py: position.y
-          pz: position.z
+          px: clusterCenter.x + x
+          py: clusterCenter.y
+          pz: clusterCenter.z + z
           nx: normal.x
           ny: normal.y
           nz: normal.z
-          u: column.toFloat() * 0.5
-          value: row.toFloat() * 0.5
+          u: textureX
+          value: 1.0 - row.toFloat()
         )
-        # Negative flexibility chooses the slower coherent cluster response.
         mesh.windPivots.add(value: pivot.x)
         mesh.windPivots.add(value: pivot.y)
         mesh.windPivots.add(value: pivot.z)
         mesh.windPivots.add(value: flexibility)
+        mesh.leafCards.add(value: clusterCenter.x)
+        mesh.leafCards.add(value: clusterCenter.y)
+        mesh.leafCards.add(value: clusterCenter.z)
+        mesh.leafCards.add(value: 1.0)
         mesh.vertCount = mesh.vertCount + 1
       }
     }
-    loop var row: Int = 0, row < 2, ++row {
-      loop var column: Int = 0, column < 2, ++column {
-        let first: Int = base + row * 3 + column
-        let triangles: List(Int) = {
-          first
-          first + 1
-          first + 3
-          first + 1
-          first + 4
-          first + 3
-          first + 3
-          first + 1
-          first
-          first + 3
-          first + 4
-          first + 1
-        }
-        loop let index: Int in triangles {
-          mesh.indices.add(value: index)
-        }
-      }
-    }
+    mesh.indices.add(value: base)
+    mesh.indices.add(value: base + 1)
+    mesh.indices.add(value: base + 2)
+    mesh.indices.add(value: base + 1)
+    mesh.indices.add(value: base + 3)
+    mesh.indices.add(value: base + 2)
   }
 }

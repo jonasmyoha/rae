@@ -32,6 +32,9 @@ open Math3d
 # The per-app cast-shadow ambient darkening knob (shadowCfg.z) is the
 # renderer's ShadowCache's since #925: ShadowMaps.setShadowAmbient.
 type ShadowCascades {
+  # Foliage cards must face the viewing camera in the shadow pass too.
+  cardRight: Vec3 = { x: 1, y: 0, z: 0 }
+  cardUp: Vec3 = { x: 0, y: 0, z: 1 }
   count: Int
   resolution: Int
   viewProj: List(Float)
@@ -189,6 +192,17 @@ func fitShadowCascadesAround(
   }
 
   let forward: Vec3 = Vec3.vnorm(a: Vec3.vsub(a: camTarget, b: camPos))
+  let cameraView: Mat4 = mat4LookAt(
+    eyeX: camPos.x
+    eyeY: camPos.y
+    eyeZ: camPos.z
+    atX: camTarget.x
+    atY: camTarget.y
+    atZ: camTarget.z
+    upX: 0
+    upY: 0
+    upZ: 1
+  )
   let light: Vec3 = Vec3.vnorm(a: sunDir)
   # tan of the half angles, for the slice corner radius.
   let tanY: Float = Math.tan(x: fovYDeg * 0.008726646259971648)
@@ -326,6 +340,16 @@ func fitShadowCascadesAround(
 
   ret ShadowCascades {
     count: count
+    cardRight: Vec3.create(
+      x: cameraView.m.copyAtFallback(index: 0, fallback: 0.0)
+      y: cameraView.m.copyAtFallback(index: 4, fallback: 0.0)
+      z: cameraView.m.copyAtFallback(index: 8, fallback: 0.0)
+    )
+    cardUp: Vec3.create(
+      x: cameraView.m.copyAtFallback(index: 1, fallback: 0.0)
+      y: cameraView.m.copyAtFallback(index: 5, fallback: 0.0)
+      z: cameraView.m.copyAtFallback(index: 9, fallback: 0.0)
+    )
     resolution: resolution
     viewProj: own vp
     splitFar: own splits

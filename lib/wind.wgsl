@@ -94,3 +94,17 @@ fn windLeaf(world: vec3<f32>, normal: vec3<f32>, pivot: vec3<f32>, foot: vec3<f3
   result.normal = windRotate(normal, axis, angle);
   return result;
 }
+
+// Camera-facing cluster geometry, independent of its lighting normal.
+// Rest corners are in local X/Z; the centre and ordinary UVs stay explicit.
+fn leafCardOffset(position: vec3<f32>, centre: vec3<f32>, scale: vec2<f32>,
+                  right: vec3<f32>, up: vec3<f32>) -> vec3<f32> {
+  let offset = position - centre;
+  return right * (offset.x * scale.x) + up * (offset.z * scale.y);
+}
+fn leafCameraRight(viewProj: mat4x4<f32>) -> vec3<f32> {
+  return normalize(vec3<f32>(viewProj[0].x, viewProj[1].x, viewProj[2].x));
+}
+fn leafCameraUp(viewProj: mat4x4<f32>) -> vec3<f32> {
+  return normalize(vec3<f32>(viewProj[0].y, viewProj[1].y, viewProj[2].y));
+}

@@ -197,13 +197,16 @@ Keys 7/8 or `RAE_GROVE_VIEW=camphor` / `roots` select the inspection views.
 
 Five birches share the LOD0 prototype from `lib/procgen/Birch.rae`. The same
 prototype is planted by `app3d/GroveTrees` in walkers 136/137 and forest 143.
-Key **9** or `RAE_GROVE_VIEW=birches` frames the stand.
+Key **9** or `RAE_GROVE_VIEW=birches` frames the stand. The shared
+`RAE_CAMERA_AT` twelve-value camera override also works for repeatable side views.
 
 The wood uses `lib/assets/trees/birchBark.png`: bright white with medium black
 lenticels, occasional broad scars and subtle papery detail. The crown uses
-`birchLeaves.png` on uneven hanging sprays with open gaps. Broader crown
-normals and a low-contrast texture unify the lighting. Fixed twig pivots give
-the sprays visible swaying motion, with different phases and strengths. Colour, shadow and distant
+`birchLeaves.png` on small camera-facing clusters with irregular leafy edges
+and open gaps. The replacement texture merges small leaves into soft painted
+masses. Crown normals stay independent of camera rotation. Fixed twig pivots
+give the clusters visible swaying motion, with different phases and strengths.
+Colour, shadow and distant
 bake passes all use the same alpha cutoff and coverage-preserving texture mips.
 
 The five mesh parts and two textures are shared by every instance. The shared walker forest uses this
