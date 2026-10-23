@@ -199,14 +199,14 @@ Five birches share the LOD0 prototype from `lib/procgen/Birch.rae`. The same
 prototype is planted by `app3d/GroveTrees` in walkers 136/137 and forest 143.
 Key **9** or `RAE_GROVE_VIEW=birches` frames the stand.
 
-The wood uses `lib/assets/trees/birchBark.png`: bright white with sparse, large
-black scars. The crown uses `birchLeaves.png` on 312 curved patches grouped
-into 26 branch clumps. Smooth clump normals unify the lighting; fixed branch
-pivots give the clumps a small, slow wind response. Colour, shadow and distant
+The wood uses `lib/assets/trees/birchBark.png`: bright white with medium black
+lenticels, occasional broad scars and subtle papery detail. The crown uses
+`birchLeaves.png` on uneven hanging sprays with open gaps. Broader crown
+normals and a low-contrast texture unify the lighting. Fixed twig pivots give
+the sprays visible swaying motion, with different phases and strengths. Colour, shadow and distant
 bake passes all use the same alpha cutoff and coverage-preserving texture mips.
 
-The five parts total 7,943 vertices and 12,084 triangles. They and the two
-textures are shared by every instance. The shared walker forest uses this
+The five mesh parts and two textures are shared by every instance. The shared walker forest uses this
 same generator in 136, 137 and 143. The middle LOD still shares the close mesh;
 the existing distant bake now includes the bark and masked leaves. A dedicated
 reduced mesh remains future work. See [the rendering review](../../docs/tree-rendering-2026.md).

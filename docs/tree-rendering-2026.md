@@ -17,7 +17,7 @@ Autumn colours should move from soft green through lime to warm gold.
 These identifiers follow [Kew's species account](https://powo.science.kew.org/taxon/urn%3Alsid%3Aipni.org%3Anames%3A295174-1/general-information)
 and the [Woodland Trust's illustrated silver-birch guide](https://www.woodlandtrust.org.uk/trees-woods-and-wildlife/british-trees/a-z-of-british-trees/silver-birch/).
 
-The revised art direction uses rounded leafy groups with smooth lighting,
+The revised art direction uses uneven hanging sprays with broad smooth lighting,
 a slightly crooked leader and bright white bark with sparse, thick black scars.
 The original individual-leaf geometry was rejected after review.
 The three supplied screenshots favour broad foliage masses and leafy outlines.
@@ -51,15 +51,15 @@ copy into an ordinary WebGPU renderer. Rae should start with a bounded mesh
 and count both vertices and shadow draws.
 
 The revised choice is a curved 3 x 3 vertex patch carrying a leaf-cluster
-colour/alpha texture. Twelve patches surround each branch clump. Normals are
-computed from the clump envelope with an upward bias; they are not the flat
-normals of the cards. Reverse-wound indices make both sides visible without
+colour/alpha texture. Four to six patches form each uneven hanging spray.
+Normals mostly follow the broader crown with a small local bend; neither each
+leaf nor each tuft gets its own spherical lighting envelope. Reverse-wound indices make both sides visible without
 flipping the lighting normal. Alpha below 0.5 is discarded in colour, shadow
 and impostor-bake passes. There is no sorted transparent blending.
 
-The image uses simple overlapping leaf shapes rather than photographic veins
-or baked shadows. The initial textured render was too busy, so it was replaced
-with a simpler generated texture before validation. The clump lighting follows
+The image uses nearly merged painted leaf shapes with an irregular branch
+silhouette, transparent gaps and little internal contrast. Interior detail
+must not become a separate bright/dark pattern for every leaf. The clump lighting follows
 the general strategy described in [the SpeedTree rendering chapter](https://developer.nvidia.com/gpugems/gpugems3/part-i-geometry/chapter-4-next-generation-speedtree-rendering).
 This is an implementation of that general technique, not a reconstruction of
 the unknown renderer in the supplied screenshots.
@@ -111,9 +111,9 @@ A constant green emission term would be the wrong solution.
 The [GPU Gems vegetation chapter](https://developer.nvidia.com/gpugems/gpugems3/part-iii-rendering/chapter-16-vegetation-procedural-animation-and-shading-crysis)
 separates main structural bending from leaf detail and describes independent
 stiffness/phase controls. Rae now has intact leaf-pivot rotations, shared with
-its shadow vertex stage. Birch clumps share a branch attachment as their pivot; all patches in a clump
+its shadow vertex stage. Birch sprays share a twig attachment as their pivot; all patches in a spray
 rotate together, with their normals. Their signed flexibility selects a slow,
-small branch response: fixed per-tree phase, fixed per-branch phase, and no
+visible branch response: fixed per-tree phase, fixed per-branch phase, and no
 noise sampled at a coordinate multiplied by changing wind direction. Wood
 stays rigid. Other species retain their current wind response. This follows
 [SpeedTree's wind guidance](https://docs8.speedtree.com/modeler/doku.php?id=wind_vfx)
@@ -149,9 +149,9 @@ batches provide the appropriate ownership and culling structure.
   vertices share radial normals; the UV seam has duplicate vertices at U=0/1.
   Bark V follows branch length, avoiding a new stretched texture per triangle.
 - Twenty-six irregularly phased limbs carry five hanging twigs each. Each limb
-  has one rounded leaf clump, split across three colour meshes. Each clump has
-  twelve curved patches: 312 patches, 2,808 leaf vertices and 4,992 leaf
-  triangles including both sides. Each clump shares one fixed branch pivot.
+  has one or two unequal hanging sprays, with seeded omissions on outer twigs.
+  Sprays vary in width, depth, length and patch count (four to six). Each spray
+  shares a fixed twig pivot. Three colour meshes keep the existing batching.
 - The shared forest registers one prototype. Grove placements vary yaw and
   scale. A future set of two or three seed variants can improve repetition
   without making every tree unique on the GPU.
@@ -162,21 +162,26 @@ batches provide the appropriate ownership and culling structure.
 ### Bark texture and materials
 
 `lib/assets/trees/birchBark.png` and `birchLeaves.png` are original generated
-512 x 512 PNGs. The bark revision has sparse near-black horizontal scars on
-white, with much less fine noise. Bark V repeats 0.34 times per metre rather
+512 x 512 PNGs. The bark revision balances medium dark lenticels, occasional
+larger scars and subtle pale papery detail on white. It is a visual midpoint
+between the original fine texture and the overly sparse eight-mark revision. Bark V repeats 0.34 times per metre rather
 than 1.4, making the markings about four times longer vertically. The leaf
-texture has broad flat green shapes, transparent margins and small holes.
+texture has low-contrast painted green masses, irregular margins and gaps.
 
 Generation briefs (built-in image generator; originals retained outside the
 repo, resized for runtime):
 
-- Bark: seamless silver-birch albedo; white covering about 90%; about eight
-  large sparse near-black horizontal scars, 15–28% width and 2–5% height;
-  no hairlines, speckle, lighting, shadows or text.
-- Final leaves: dense rounded cluster of about 45 overlapping large simple
-  oval pointed leaves; similar medium green shades; no veins, realistic
-  surface shading or strong shadows; filled centre, transparent background
-  and a few small gaps; margins on every side.
+- Bark edit: use the original detailed and the sparse bold texture as equal
+  references; halfway in detail density and realism; roughly 35–45 varied
+  horizontal scars, bright white base, deep charcoal marks, subtle papery
+  peeling; no beige cast or baked light; tileable. The output has naturally
+  varied marks rather than a mathematically exact 50% pixel blend.
+- Leaf edit: irregular hanging branch spray with gaps and transparent margins;
+  merge neighbouring leaf colours into painted masses; no veins, outlines,
+  highlights or leaf-by-leaf shadows. A second edit reduces internal contrast
+  toward 3% while keeping the silhouette.
+- Both were made with the built-in image generator and resized to 512 square.
+  Final assets are the two `lib/assets/trees/` paths above.
 
 `SurfaceImages` owns a renderer-local RGBA image array, view and repeating
 trilinear sampler. RGB is decoded to linear light before mip generation.
@@ -228,8 +233,10 @@ and fixed population when profiling; a changed distribution is not a valid
 isolated performance comparison. Texture memory for one 512-square RGBA8 mip
 chain is about 1.33 MiB, shared by all birch instances in a renderer.
 
-The revised prototype has 7,943 vertices and 12,084 triangles across five
-parts, including reverse-wound patch faces. That is fewer vertices than the
+The first textured prototype had 7,943 vertices and 12,084 triangles across
+five parts, including reverse-wound patch faces. The subsequent hanging-spray
+revision varies the patch count by seed and remains within the fixture budget.
+Both use fewer vertices than the
 17,875-vertex individual-leaf version, but alpha-tested overdraw can still be
 expensive. Vertex/index storage is about 0.42 MiB per shared prototype. Both
 512-square RGBA8 mip chains total about 2.67 MiB, shared by every instance.
@@ -263,7 +270,7 @@ To visit the stand, run example 138 and press **9**, or start with
 `RAE_GROVE_VIEW=birches`. Both walkers and the huge forest receive the species
 through `app3d/GroveTrees`; no separate generator copies are kept in examples.
 
-## 6. Patch revision validation
+## 6. First patch revision validation (before hanging sprays)
 
 The updated geometry fixture checks seeded stems, valid indices and unit
 normals, UV seams, 312 patches, shared clump pivots and alpha-weighted mip
@@ -287,3 +294,49 @@ a freshly constructed subject.
 Inspected final captures in Autumn Grove and both walker render paths. The
 grove preview is `examples/138_procgen_showcase/references/Birches.png`;
 key **9** opens the birch stand. Its camera now frames the full crowns.
+
+## 7. Animation-background refinement
+
+The round clumps and separately coloured leaves were too artificial. Shape,
+texture and shading need different scales: the silhouette can show leaf tips,
+but large groups should share their light and dark values.
+
+[Harry Alisavakis’s foliage breakdown](https://halisavakis.com/my-take-on-shaders-stylized-tree-leaves/)
+uses masked leaves and custom stylized lighting, and removes normal-map detail
+and specular to reduce visual noise. It also discusses UV-based motion and
+backlighting. We adopt the low-noise albedo/normal direction; UV warping would
+work against our fixed twig attachment and is not used here. This does not
+copy that shader or introduce emission that could glow at night.
+
+[Ascalon’s tree-shader study](https://www.aversionofreality.com/blog/2022/8/7/stylized-tree-shader)
+separates custom normals, world lighting, colour variation and density. Our
+choice is to derive most normal direction from the broader crown, then add
+only a small local bend. Geometry becomes elongated, offset sprays along
+actual twigs, with uneven dimensions and missing outer sprays. This keeps
+full areas alongside open areas without making a set of shaded balls.
+
+Wind uses the existing negative-flexibility path, now with a stronger slow
+swell and independent twig motion. Flexibility varies from 0.8 to 1.2 per
+spray. The angular response is capped at 0.42 radians (24 degrees), with
+ordinary breezes below that limit. Every patch in a spray keeps the same
+pivot, motion and rotated normal. Wood stays fixed. Positive-flexibility
+species keep their existing response. This remains art-directed motion,
+not a branch-physics simulation.
+
+The references are low-resolution stills; they do not identify their engine
+or establish a wind algorithm. This revision aims for their broad painted
+value groups while retaining Rae's day/night lighting and alpha-tested
+shadow path. A dedicated foliage light-transmission model could improve
+backlighting later, but is outside this asset and generator refinement.
+
+Validation for this refinement: cases `1228_tree_levels_cover_alike`,
+`1232_wind` and `1235_birch` passed with a 120-second bound. Hardware checks
+`leafWind`, `surfaceImages` and `impostorBake` passed with 120/150-second
+per-check bounds. Example gates 136, 137, 138 and 143 passed (two bounded
+runs, 900 and 600 seconds), including the walker's running memory check and
+the forest's 31,090 trees. The example-copy gate and formatting checks passed.
+Five timed grove captures were taken across about five seconds and inspected
+for silhouette changes. The revised wind check requires a 70 cm spray tip
+to move more than 5 cm in at least 12 of 32 sampled times, alongside the
+existing rigidity, attachment, normal and continuity checks. These are
+correctness and visual checks, not a frame-time performance comparison.

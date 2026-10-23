@@ -1,5 +1,5 @@
 # Seeded silver birch: a slender, continuous UV-mapped stem, rising limbs,
-# hanging twigs and rounded textured foliage groups. Z-up, metres.
+# hanging twigs and irregular textured foliage sprays. Z-up, metres.
 # The meshes are immutable prototypes; instances share them and their texture.
 import Math
 open Vec3
@@ -164,24 +164,43 @@ func birchTree(seed: view Int, height: view Float) ret BirchTree {
   ret BirchTree { wood: own wood, twigWood: own twigWood, twigs: own twigs }
 }
 
-# Each limb carries a rounded group of curved textured patches. Normals follow
-# the group envelope, not the individual cards. One pivot moves the whole group.
+# Two unequal sprays follow different twigs on each limb. Seeded gaps let
+# branches show through; normals follow the crown rather than each small tuft.
 func birchLeaves(twigs: view List(BirchTwig), seed: view Int, tone: view Int) ret MeshData {
   var mesh: MeshData = foliageMesh()
   loop var branch: Int = 0, branch < twigs.length / 5, ++branch {
     if branch % 3 is not tone {
       continue
     }
-    let twig: BirchTwig = twigs.copyAtDefault(index: branch * 5 + 2)
-    let center: Vec3 = birchCurve(twig: twig, amount: 0.45)
-    let size: Float = 0.82 - branch.toFloat() / 26.0 * 0.25
-    addFoliageCluster(
-      mesh: mesh
-      center: center
-      pivot: twig.start
-      radius: size
-      seed: seed + branch * 41
-    )
+    loop var spray: Int = 0, spray < 2, ++spray {
+      let spraySeed: Int = seed + branch * 41 + spray * 17
+      if spray is 1 and hash2(x: branch, y: 8, seed: seed) < 0.30 {
+        continue
+      }
+      let twig: BirchTwig = twigs.copyAtDefault(index: branch * 5 + 1 + spray * 3)
+      let center: Vec3 = birchCurve(twig: twig, amount: 0.28 + spray.toFloat() * 0.40)
+      let size: Float = (0.80 - branch.toFloat() / 26.0 * 0.25) * (0.82 + hash2(
+        x: branch
+        y: spray
+        seed: seed
+      ) * 0.32)
+      let extent: Vec3 = {
+        x: size * (0.78 + hash2(x: branch, y: 9, seed: seed) * 0.30)
+        y: size * (0.48 + hash2(x: branch, y: 10, seed: seed) * 0.35)
+        z: size * (0.90 + spray.toFloat() * 0.30)
+      }
+      let shadeNormal: Vec3 = vnorm(
+        a: Vec3.create(x: center.x * 0.38, y: center.y * 0.38, z: 0.85 + (center.z - 3.0) * 0.15)
+      )
+      addFoliageSpray(
+        mesh: mesh
+        center: center
+        pivot: twig.start
+        extent: extent
+        shadeNormal: shadeNormal
+        seed: spraySeed
+      )
+    }
   }
   ret own mesh
 }

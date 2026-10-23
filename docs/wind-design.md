@@ -128,12 +128,15 @@ phone's cost is not measured yet. The vertex count of the near tree levels is
 the thing to watch there: lowering the near level's distance on a phone, or
 setting a kind's sway to 0 there, removes it.
 
-### Textured birch clumps (2026-10-23)
+### Textured birch sprays (2026-10-23)
 
-A negative leaf flexibility selects a restrained branch-clump response in
-`windLeaf`; its magnitude controls the response. The twelve curved patches of
-a birch clump share one pivot and phase. A fixed tree phase drives a slow swell;
-a fixed branch phase adds a smaller variation. This keeps the clump rigid and
+A negative leaf flexibility selects a branch-spray response in `windLeaf`;
+its magnitude controls the response. Four to six curved patches in a birch
+spray share one pivot and phase. The response was increased after the first
+version moved too little: spray flexibility is 0.8–1.2, angular travel is capped
+at 0.42 radians, and the hardware check requires visible tip displacement.
+A fixed tree phase drives a slow swell;
+a fixed branch phase adds a smaller variation. This keeps the spray rigid and
 rotates its shading normals with it. Zero wind keeps every vertex unchanged.
 No moving noise coordinate depends on the total time times a changing wind
 direction. Existing positive-flexibility species keep their current motion.
