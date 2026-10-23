@@ -1,5 +1,6 @@
 open procgen/Birch
 open app3d/GroveTrees
+open SurfaceImagePixels
 import Math
 import Vec3
 
@@ -65,18 +66,27 @@ func main() ret Int {
       ret 5
     }
   }
-  var leaves: Int = 0
+  var patches: Int = 0
   loop var tone: Int = 0, tone < 3, ++tone {
     let mesh: MeshData = birchLeaves(twigs: tree.twigs, seed: 1437, tone: tone)
     if not checkMesh(mesh: mesh) or mesh.windPivots.length is not mesh.vertCount * 4 {
       ret 6
     }
-    leaves = leaves + mesh.vertCount / 7
-    loop var leaf: Int = 0, leaf < mesh.vertCount / 7, ++leaf {
-      loop var vertex: Int = 0, vertex < 7, ++vertex {
+    patches = patches + mesh.vertCount / 9
+    loop var cluster: Int = 0, cluster < mesh.vertCount / 108, ++cluster {
+      loop var vertex: Int = 0, vertex < 108, ++vertex {
+        if mesh.windPivots.copyAtDefault(index: (cluster * 108 + vertex) * 4 + 3) >= 0.0 {
+          ret 9
+        }
+        loop var axis: Int = 6, axis < 8, ++axis {
+          let uv: Float = mesh.verts.copyAtDefault(index: (cluster * 108 + vertex) * 8 + axis)
+          if uv < 0.0 or uv > 1.0 {
+            ret 10
+          }
+        }
         loop var axis: Int = 0, axis < 3, ++axis {
-          if mesh.windPivots.copyAtDefault(index: (leaf * 7 + vertex) * 4 + axis) is not mesh.verts.copyAtDefault(
-            index: leaf * 7 * 8 + axis
+          if mesh.windPivots.copyAtDefault(index: (cluster * 108 + vertex) * 4 + axis) is not mesh.windPivots.copyAtDefault(
+            index: cluster * 108 * 4 + axis
           ) {
             ret 7
           }
@@ -84,9 +94,49 @@ func main() ret Int {
       }
     }
   }
-  if leaves is not 1820 or speciesForPick(pick: 0.06, palms: false) is not speciesBirch {
+  if patches is not 312 or speciesForPick(pick: 0.06, palms: false) is not speciesBirch {
     ret 8
   }
-  log("birch: valid continuous bark, deterministic seed, attached leaves and forest placement")
+  # A clear black texel must not darken an opaque green texel in the mip.
+  let pixels: List(Float) = {
+    0
+    1
+    0
+    1
+    0
+    0
+    0
+    0
+    0
+    0
+    0
+    0
+    0
+    0
+    0
+    0
+  }
+  let mip: List(Float) = surfaceDownsample(pixels: pixels, side: 2)
+  if mip.length is not 4 or mip.copyAtDefault(index: 1) is not 1.0 or mip.copyAtDefault(index: 3) is not 0.25 {
+    ret 11
+  }
+  var checker: List(Float) = List.create(Float, cap: 64)
+  loop var pixel: Int = 0, pixel < 16, ++pixel {
+    checker.add(value: 0.2)
+    checker.add(value: 0.5)
+    checker.add(value: 0.1)
+    var alpha: Float = 0.0
+    if pixel % 4 < 2 {
+      alpha = 1.0
+    }
+    checker.add(value: alpha)
+  }
+  let reduced: List(Float) = surfaceDownsample(pixels: checker, side: 4)
+  if surfaceCoverage(pixels: reduced, scale: 1.0) is not 0.5 {
+    ret 12
+  }
+  log(
+    "birch: valid continuous bark, deterministic seed, curved leaf patches, cutout mips and forest placement"
+  )
   ret 0
 }

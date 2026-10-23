@@ -29,6 +29,7 @@
 # value and modelMatrix no longer allocates, so a frame's per-object data
 # path touches the allocator zero times.
 import Gpu2d
+import RendererImages
 open Rendergraph
 open Math3d
 open Scene3d
@@ -260,14 +261,13 @@ func uploadPalette(
   }
 }
 
-# ----- the shadow pass (#925) ------------------------------------------
 # The sun cascades are the renderer's ShadowCache (RenderPasses.shadow); the
 # app fits the cascades (Shadow3d.fitShadowCascades) and, at RenderTag.shadow,
-# opens the pass, queues its casters and closes it. Everything queued between
-# beginShadowPass and endShadowPass casts.
-func beginShadowPass(renderer: mod DeferredRenderer, c: view ShadowCascades) pub {
+# opens the pass, queues its casters and closes it. Every queued caster draws.
+func beginShadowPass(renderer: mod DeferredRenderer, c: view ShadowCascades) {
   ensureRendererResources(renderer: renderer)
   if let resources: mod GpuResources = renderer.gpuResources {
+    RendererImages.prepareShadowImages(renderer: renderer)
     shadowBegin(shadow: renderer.passes.shadow, resources: resources, cascades: c)
   }
 }

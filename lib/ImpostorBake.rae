@@ -11,6 +11,7 @@
 #   subjects.add(value: impostorSubject(parts: meshData, meshes: handles, albedos: colours))
 #   let atlas: ImpostorAtlas = bakeImpostorAtlas(resources: resources, meshes: store,
 #   subjects: subjects, settings: defaultImpostorSettings(), cutoff: 0.5)
+open SurfaceImages
 import Math
 import Vec3
 open Scene3d
@@ -105,6 +106,7 @@ func impostorBakePipelineSpec(vertexStride: view Int) ret RenderPipelineSpec {
   var attributes: List(VertexAttributeSpec) = List.create(VertexAttributeSpec, cap: 2)
   attributes.add(value: { format: WGPUVertexFormat_Float32x3, offset: 0, location: 0 })
   attributes.add(value: { format: WGPUVertexFormat_Float32x3, offset: 12, location: 1 })
+  attributes.add(value: { format: WGPUVertexFormat_Float32x2, offset: 24, location: 2 })
   var colorFormats: List(Int32) = List.create(Int32, cap: 2)
   colorFormats.add(value: impostorFormat)
   colorFormats.add(value: impostorFormat)
@@ -132,8 +134,36 @@ func bakeImpostorAtlas(
   settings: view ImpostorSettings
   cutoff: view Float
 ) ret ImpostorAtlas {
+  var images: SurfaceImages = {}
+  if not setSurfaceImages(images: images, resources: resources, paths: List.create(String, cap: 0)) {
+    ret noImpostorAtlas()
+  }
+  let atlas: ImpostorAtlas = bakeTexturedImpostorAtlas(
+    resources: resources
+    meshes: meshes
+    subjects: subjects
+    settings: settings
+    cutoff: cutoff
+    images: images
+  )
+  retireSurfaceImages(images: images, resources: resources)
+  ret atlas
+}
+
+# The image owner remains alive until this startup-only bake completes.
+func bakeTexturedImpostorAtlas(
+  resources: mod GpuResources
+  meshes: view MeshStore
+  subjects: view List(ImpostorSubject)
+  settings: view ImpostorSettings
+  cutoff: view Float
+  images: view SurfaceImages
+) ret ImpostorAtlas {
   var atlas: ImpostorAtlas = noImpostorAtlas()
-  if subjects.length < 1 or settings.viewsPerSide < 2 or settings.cellSize < 1 or settings.mips < 1 {
+  if subjects.length < 1 or settings.viewsPerSide < 2 or settings.cellSize < 1 or settings.mips < 1 or not isValidTextureView(
+    resources: resources
+    id: images.textureView
+  ) or not isValidSampler(resources: resources, id: images.sampler) {
     ret atlas
   }
   createImpostorTextures(
@@ -156,6 +186,7 @@ func bakeImpostorAtlas(
         subjects: subjects
         atlas: atlas
         scratch: scratch
+        images: images
       ) and recordImpostorMips(
         recording: recording
         resources: resources
@@ -291,6 +322,7 @@ func recordImpostorViews(
   subjects: view List(ImpostorSubject)
   atlas: view ImpostorAtlas
   scratch: mod GpuScratch
+  images: view SurfaceImages
 ) ret Bool {
   let views: Int = atlas.settings.viewsPerSide
   let viewCount: Int = views * views
@@ -326,6 +358,14 @@ func recordImpostorViews(
           y: albedo.y
           z: albedo.z
           w: layer.toFloat()
+        )
+        let imageLayer: Int = subject.imageLayers.copyAtFallback(index: part, fallback: -1)
+        pushVec4F(
+          writer: parts
+          x: -(imageLayer + 1).toFloat()
+          y: 0.0
+          z: 0.0
+          w: 0.0
         )
       }
     }
@@ -391,6 +431,8 @@ func recordImpostorViews(
     entries.add(value: bufferRef(id: uniformBuffer))
     entries.add(value: bufferRef(id: partsBuffer))
     entries.add(value: bufferRef(id: framesBuffer))
+    entries.add(value: textureViewRef(id: images.textureView))
+    entries.add(value: samplerRef(id: images.sampler))
     var group: BindGroupId = noBindGroupId()
     if let created: BindGroupId = createRenderBindGroup(
       resources: resources

@@ -1,7 +1,8 @@
-# Renderer-owned, opaque sRGB image array for static mesh materials.
+# Renderer-owned, cutout sRGB image array for static mesh materials.
 # Install once before drawing; Material3d.colorTextureLayer indexes this array.
 # A renderer with no images uses a single white texel. No per-frame uploads.
 import Image
+open SurfaceImagePixels
 import Math
 open gpu/GpuResources
 open gpu/GpuTextures
@@ -54,9 +55,11 @@ func uploadSurfaceLevel(
   var bytes: List(UInt8) = List.create(UInt8, cap: size * size * 4)
   loop var pixel: Int = 0, pixel < size * size, ++pixel {
     loop var channel: Int = 0, channel < 3, ++channel {
-      bytes.add(value: surfaceEncoded(value: pixels.copyAtDefault(index: pixel * 3 + channel)))
+      bytes.add(value: surfaceEncoded(value: pixels.copyAtDefault(index: pixel * 4 + channel)))
     }
-    bytes.add(value: 255)
+    bytes.add(
+      value: (Math.clamp(val: pixels.copyAtDefault(index: pixel * 4 + 3), low: 0.0, high: 1.0) * 255.0 + 0.5).toInt() as UInt8
+    )
   }
   unsafe {
     let destination: WGPUTexelCopyTextureInfo = {
@@ -85,7 +88,7 @@ func uploadSurfaceLevel(
   }
 }
 
-# Load bounded square PNG layers, generate box-filtered mips in linear light,
+# Load bounded square RGBA PNG layers, generate box-filtered mips in linear light,
 # and use hardware sRGB decoding. Failure leaves the previous array intact.
 func setSurfaceImages(
   images: mod SurfaceImages
@@ -106,7 +109,7 @@ func setSurfaceImages(
       log("surface image must be a 512 x 512 PNG: {path}")
       ret false
     }
-    var linear: List(Float) = List.create(Float, cap: size * size * 3)
+    var linear: List(Float) = List.create(Float, cap: size * size * 4)
     loop var pixel: Int = 0, pixel < size * size, ++pixel {
       var packed: Int = 0
       unsafe {
@@ -115,6 +118,7 @@ func setSurfaceImages(
       linear.add(value: surfaceLinear(value: ((packed / 65536) % 256).toFloat() / 255.0))
       linear.add(value: surfaceLinear(value: ((packed / 256) % 256).toFloat() / 255.0))
       linear.add(value: surfaceLinear(value: (packed % 256).toFloat() / 255.0))
+      linear.add(value: ((packed / 16777216) % 256).toFloat() / 255.0)
     }
     decoded.add(value: own linear)
   }
@@ -123,7 +127,7 @@ func setSurfaceImages(
   if paths.length is 0 {
     imageSize = 1
     levels = 1
-    let white: List(Float) = { 1.0, 1.0, 1.0 }
+    let white: List(Float) = { 1.0, 1.0, 1.0, 1.0 }
     decoded.add(value: white)
   }
   var candidate: SurfaceImages = { paths: paths, generation: images.generation + 1 }
@@ -153,23 +157,7 @@ func setSurfaceImages(
         level: level
       )
       if side > 1 {
-        var smaller: List(Float) = List.create(Float, cap: side * side * 3 / 4)
-        loop var y: Int = 0, y < side / 2, ++y {
-          loop var x: Int = 0, x < side / 2, ++x {
-            loop var channel: Int = 0, channel < 3, ++channel {
-              var sum: Float = 0.0
-              loop var row: Int = 0, row < 2, ++row {
-                loop var column: Int = 0, column < 2, ++column {
-                  sum = sum + pixels.copyAtDefault(
-                    index: ((y * 2 + row) * side + x * 2 + column) * 3 + channel
-                  )
-                }
-              }
-              smaller.add(value: sum * 0.25)
-            }
-          }
-        }
-        pixels = own smaller
+        pixels = surfaceDownsample(pixels: pixels, side: side)
         side = side / 2
       }
     }

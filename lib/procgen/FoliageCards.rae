@@ -1,0 +1,80 @@
+# Curved alpha-tested patches around a clump. Their smooth normals come from
+# the same ellipsoid, so crossing cards do not alternate bright/dark lighting.
+import Math
+open Vec3
+open Noise
+open Mesh3d
+open procgen/Foliage
+
+func addFoliageCluster(
+  mesh: mod MeshData
+  center: view Vec3
+  pivot: view Vec3
+  radius: view Float
+  seed: view Int
+) {
+  loop var patch: Int = 0, patch < 12, ++patch {
+    let height: Float = 1.0 - 2.0 * (patch.toFloat() + 0.5) / 12.0
+    let angle: Float = patch.toFloat() * 2.3999632 + hash2(x: seed, y: 3, seed: 29) * 6.2831853
+    let radial: Float = Math.sqrt(x: 1.0 - height * height)
+    let outward: Vec3 = Vec3.create(
+      x: Math.cos(x: angle) * radial
+      y: Math.sin(x: angle) * radial
+      z: height
+    )
+    let side: Vec3 = foliageBasis(direction: outward)
+    let up: Vec3 = vcross(a: outward, b: side)
+    let base: Int = mesh.vertCount
+    loop var row: Int = 0, row < 3, ++row {
+      loop var column: Int = 0, column < 3, ++column {
+        let x: Float = column.toFloat() - 1.0
+        let y: Float = row.toFloat() - 1.0
+        let local: Vec3 = vadd(
+          a: vscale(a: outward, s: 0.72 - (x * x + y * y) * 0.18)
+          b: vadd(a: vscale(a: side, s: x * 0.78), b: vscale(a: up, s: y * 0.78))
+        )
+        let position: Vec3 = vadd(a: center, b: vscale(a: local, s: radius))
+        let normal: Vec3 = vnorm(a: vadd(a: local, b: Vec3.create(x: 0, y: 0, z: 0.55)))
+        pushVert(
+          verts: mesh.verts
+          px: position.x
+          py: position.y
+          pz: position.z
+          nx: normal.x
+          ny: normal.y
+          nz: normal.z
+          u: column.toFloat() * 0.5
+          value: row.toFloat() * 0.5
+        )
+        # Negative flexibility chooses the slower coherent cluster response.
+        mesh.windPivots.add(value: pivot.x)
+        mesh.windPivots.add(value: pivot.y)
+        mesh.windPivots.add(value: pivot.z)
+        mesh.windPivots.add(value: -0.45)
+        mesh.vertCount = mesh.vertCount + 1
+      }
+    }
+    loop var row: Int = 0, row < 2, ++row {
+      loop var column: Int = 0, column < 2, ++column {
+        let first: Int = base + row * 3 + column
+        let triangles: List(Int) = {
+          first
+          first + 1
+          first + 3
+          first + 1
+          first + 4
+          first + 3
+          first + 3
+          first + 1
+          first
+          first + 3
+          first + 4
+          first + 1
+        }
+        loop let index: Int in triangles {
+          mesh.indices.add(value: index)
+        }
+      }
+    }
+  }
+}

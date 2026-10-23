@@ -1,5 +1,6 @@
-# Load an opaque material image once into this renderer's shared array.
+# Load a material image with alpha once into this renderer's shared array.
 # Static materials hold a layer index; the renderer owns all GPU resources.
+import FoliageShadow
 import Sys
 import String
 open RendererDeferred
@@ -29,4 +30,20 @@ func rendererLoadSurfaceImage(renderer: mod DeferredRenderer, path: view String)
   }
   log("could not load material image: {path}")
   ret -1
+}
+
+# Shadow and colour sample the same image array and coverage-preserving mips.
+func prepareShadowImages(renderer: mod DeferredRenderer) {
+  if let resources: mod GpuResources = renderer.gpuResources {
+    let images: mod SurfaceImages = renderer.passes.gbuffer.surfaceImages
+    if not isValidTextureView(resources: resources, id: images.textureView) {
+      setSurfaceImages(images: images, resources: resources, paths: List.create(String, cap: 0))
+    }
+    FoliageShadow.setFoliageShadowImages(
+      shadow: renderer.passes.shadow
+      resources: resources
+      imageView: images.textureView
+      imageSampler: images.sampler
+    )
+  }
 }

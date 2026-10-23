@@ -13,8 +13,8 @@ on a raised garden base.
 - **6** frames the six layered spruces.
 - **7** frames the giant camphor.
 - **8** looks beneath its canopy at the roots and branching trunk.
-- **9** visits the silver-birch stand: textured ivory bark, dark hanging twigs
-  and folded green-to-gold leaves.
+- **9** visits the silver-birch stand: white bark with bold black marks, hanging twigs
+  and rounded textured leaf clumps.
 - Drag to orbit, scroll to zoom. The camera bar's **Orbit** button switches to
   the free WASD camera (Q/E down/up, shift to boost) and back.
 - The menu button opens the settings panel: the nine views (Scene 1-9), sky
@@ -199,16 +199,16 @@ Five birches share the LOD0 prototype from `lib/procgen/Birch.rae`. The same
 prototype is planted by `app3d/GroveTrees` in walkers 136/137 and forest 143.
 Key **9** or `RAE_GROVE_VIEW=birches` frames the stand.
 
-The pale wood uses the original generated `lib/assets/trees/birchBark.png`
-albedo through a renderer-owned sRGB mip array. Thin outer twigs stay dark.
-The 1,820 leaves are folded opaque diamonds with attached wind pivots; there
-are no rectangular alpha cards or new per-frame CPU leaf updates. The five
-mesh parts total 17,875 vertices and 28,932 triangles, including leaf backs.
+The wood uses `lib/assets/trees/birchBark.png`: bright white with sparse, large
+black scars. The crown uses `birchLeaves.png` on 312 curved patches grouped
+into 26 branch clumps. Smooth clump normals unify the lighting; fixed branch
+pivots give the clumps a small, slow wind response. Colour, shadow and distant
+bake passes all use the same alpha cutoff and coverage-preserving texture mips.
 
-See [the research and design](../../docs/tree-rendering-2026.md) for the
-geometry/card comparison, primary sources, material API and remaining work.
-This addition focuses on LOD0; it shares that mesh in the existing middle slot
-and uses the existing colour-only distant bake until dedicated birch LODs
-are developed.
+The five parts total 7,943 vertices and 12,084 triangles. They and the two
+textures are shared by every instance. The shared walker forest uses this
+same generator in 136, 137 and 143. The middle LOD still shares the close mesh;
+the existing distant bake now includes the bark and masked leaves. A dedicated
+reduced mesh remains future work. See [the rendering review](../../docs/tree-rendering-2026.md).
 
 ![Silver birch stand](references/Birches.png)

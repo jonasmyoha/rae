@@ -60,8 +60,8 @@ const shadowMaxCascades: Int = 4
 const shadowMaxDraws: Int = 16384
 
 # Each caster's floats in the models buffer: its model (16) and its level
-# cross-fade (4, GbufferRecord [40..43]; 0 when not fading)
-const shadowCasterFloats: Int = 20
+# cross-fade (4, GbufferRecord [40..43]) and image code plus padding (4).
+const shadowCasterFloats: Int = 24
 
 const shadowModelBytes: Int = shadowMaxDraws * shadowCasterFloats * 4
 
@@ -545,7 +545,7 @@ func shadowQueue(
     shadow.modelFloats.add(value: 0.0)
   }
   if key >= shadowFoliageKeyBit {
-    shadow.modelFloats.set(index: shadow.modelFloats.length - 1, value: 1.0)
+    shadow.modelFloats.set(index: shadow.modelFloats.length - shadowCasterFloats + 19, value: 1.0)
   }
   var base: Int = paletteBase
   if base < 0 {
@@ -960,6 +960,7 @@ func renderSceneShadowWorld(
     )
     if meshRenderer.visible {
       let transform: view Transform3d = componentView(this: world.transforms, entityId: entityId)
+      let previousCount: Int = shadow.drawCount
       drawShadowCaster(
         shadow: shadow
         meshes: meshes
@@ -967,6 +968,10 @@ func renderSceneShadowWorld(
         mesh: meshRenderer.mesh
         model: modelMatrixOf(t: transform)
       )
+      if shadow.drawCount > previousCount {
+        let material: view Material3d = componentView(this: world.materials, entityId: entityId)
+        setShadowSurface(shadow: shadow, layer: material.colorTextureLayer)
+      }
     }
   }
 }

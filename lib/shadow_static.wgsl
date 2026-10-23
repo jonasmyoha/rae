@@ -6,7 +6,7 @@
 // A swaying caster (fade.w > 0) bends in the wind as in the main pass
 // (lib/wind.wgsl), so its shadow sways with it.
 struct SU { lightViewProj: mat4x4<f32>, wind: vec4<f32> };
-struct Caster { model: mat4x4<f32>, fade: vec4<f32> };
+struct Caster { model: mat4x4<f32>, fade: vec4<f32>, surface: vec4<f32> };
 @group(0) @binding(0) var<uniform> S: SU;
 @group(0) @binding(1) var<storage, read> models: array<Caster>;
 fn casterWorld(ii: u32, p: vec3<f32>) -> vec4<f32> {
@@ -37,14 +37,37 @@ fn fsFade(in: FadeOut) {
   }
 }
 
+@group(0) @binding(2) var surfaceImages: texture_2d_array<f32>;
+@group(0) @binding(3) var surfaceSampler: sampler;
+struct FoliageOut {
+  @builtin(position) pos: vec4<f32>,
+  @location(0) @interpolate(flat) fade: vec4<f32>,
+  @location(1) uv: vec2<f32>,
+  @location(2) @interpolate(flat) imageCode: f32,
+};
 @vertex
 fn vsFoliageFade(@builtin(instance_index) ii: u32, @location(0) p: vec3<f32>,
-                 @location(3) pivot: vec4<f32>) -> FadeOut {
+                 @location(2) uv: vec2<f32>, @location(3) pivot: vec4<f32>) -> FoliageOut {
   let caster = models[ii];
   let leaf = windLeaf((caster.model * vec4<f32>(p, 1.0)).xyz, vec3<f32>(0.0, 0.0, 1.0),
     (caster.model * vec4<f32>(pivot.xyz, 1.0)).xyz, caster.model[3].xyz, pivot.w * caster.fade.w * windLeafScale, S.wind);
-  var result: FadeOut;
+  var result: FoliageOut;
   result.pos = S.lightViewProj * vec4<f32>(leaf.position, 1.0);
   result.fade = caster.fade;
+  result.uv = uv;
+  result.imageCode = caster.surface.x;
   return result;
+}
+
+@fragment
+fn fsFoliage(in: FoliageOut) {
+  let uvDx = dpdx(in.uv);
+  let uvDy = dpdy(in.uv);
+  if (in.imageCode < -0.5) {
+    let layer = i32(-in.imageCode - 1.0);
+    if (textureSampleGrad(surfaceImages, surfaceSampler, in.uv, layer, uvDx, uvDy).a < 0.5) {
+      discard;
+    }
+  }
+  if (!fadeKeeps(in.fade, in.pos.xy, vec2<f32>(0.0))) { discard; }
 }

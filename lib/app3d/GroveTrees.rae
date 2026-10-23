@@ -550,6 +550,10 @@ func addForestKinds(
     renderer: renderer
     path: "lib/assets/trees/birchBark.png"
   )
+  let birchLeafLayer: Int = rendererLoadSurfaceImage(
+    renderer: renderer
+    path: "lib/assets/trees/birchLeaves.png"
+  )
   var subjects: List(ImpostorSubject) = List.create(ImpostorSubject, cap: treeSpeciesCount)
   loop var species: Int = 0, species < treeSpeciesCount, ++species {
     # The near level's meshes, made once: drawn near, and baked into the
@@ -564,11 +568,20 @@ func addForestKinds(
     loop let mesh: view MeshData in nearMeshes {
       nearHandles.add(value: uploadFoliage(renderer: renderer, mesh: mesh))
     }
-    let subject: ImpostorSubject = impostorSubject(
+    var subject: ImpostorSubject = impostorSubject(
       parts: nearMeshes
       meshes: nearHandles
       albedos: albedos
     )
+    if species is speciesBirch {
+      subject.imageLayers = List(Int) {
+        birchLayer
+        birchLeafLayer
+        birchLeafLayer
+        birchLeafLayer
+        -1
+      }
+    }
     var lods: List(PropLod) = List.create(PropLod, cap: 3)
     lods.add(value: speciesLodOf(
       meshes: nearHandles
@@ -608,6 +621,11 @@ func addForestKinds(
         if let wood: mod PropPart = level.parts.modAt(index: 0) {
           wood.material.colorTextureLayer = birchLayer
         }
+        loop var part: Int = 1, part < 4, ++part {
+          if let leaves: mod PropPart = level.parts.modAt(index: part) {
+            leaves.material.colorTextureLayer = birchLeafLayer
+          }
+        }
       }
     }
     # The sphere round the tree at scale 1: the leaf-patch forms are unit
@@ -631,12 +649,13 @@ func addForestKinds(
     subjects.add(value: subject)
   }
   if let resources: mod GpuResources = renderer.gpuResources {
-    let atlas: ImpostorAtlas = bakeImpostorAtlas(
+    let atlas: ImpostorAtlas = bakeTexturedImpostorAtlas(
       resources: resources
       meshes: renderer.passes.gbuffer.meshes
       subjects: subjects
       settings: defaultImpostorSettings()
       cutoff: spriteCutoff
+      images: renderer.passes.gbuffer.surfaceImages
     )
     setSpriteImpostors(cache: sprites, resources: resources, atlas: atlas)
   }

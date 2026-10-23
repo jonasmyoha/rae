@@ -11,9 +11,13 @@ struct BakeU {
 };
 @group(0) @binding(0) var<uniform> U: BakeU;
 // Per part (by instance / views^2): its albedo and the layer it bakes into
-@group(0) @binding(1) var<storage, read> parts: array<vec4<f32>>;
+struct Part { albedoLayer: vec4<f32>, surface: vec4<f32> };
+@group(0) @binding(1) var<storage, read> parts: array<Part>;
 // Per layer: the bounding sphere's centre (mesh units) and radius
 @group(0) @binding(2) var<storage, read> frames: array<vec4<f32>>;
+
+@group(0) @binding(3) var surfaceImages: texture_2d_array<f32>;
+@group(0) @binding(4) var surfaceSampler: sampler;
 
 struct VsOut {
   @builtin(position) pos: vec4<f32>,
@@ -22,17 +26,19 @@ struct VsOut {
   @location(2) @interpolate(flat) direction: vec3<f32>,
   // How near the eye the point is: -1 at the sphere's back, 1 at its front
   @location(3) depth: f32,
+  @location(4) uv: vec2<f32>,
+  @location(5) @interpolate(flat) imageCode: f32,
 };
 
 @vertex
 fn vs(@builtin(instance_index) ii: u32,
-      @location(0) position: vec3<f32>, @location(1) normal: vec3<f32>) -> VsOut {
+      @location(0) position: vec3<f32>, @location(1) normal: vec3<f32>, @location(2) imageUv: vec2<f32>) -> VsOut {
   let views = u32(U.a.x);
   let viewCount = views * views;
   let part = parts[ii / viewCount];
   let index = ii % viewCount;
   let cell = vec2<f32>(f32(index % views), f32(index / views));
-  let frame = frames[u32(part.w)];
+  let frame = frames[u32(part.albedoLayer.w)];
   let direction = impostorViewDirection(cell, f32(views));
   let local = (position - frame.xyz) / frame.w;
   let x = dot(local, impostorRight(direction));
@@ -43,7 +49,9 @@ fn vs(@builtin(instance_index) ii: u32,
   // Nearer the eye is a smaller depth (cleared to 1, test Less)
   o.pos = vec4<f32>(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, 0.5 - 0.5 * depth, 1.0);
   o.normal = normal;
-  o.albedo = part.xyz;
+  o.albedo = part.albedoLayer.xyz;
+  o.uv = imageUv;
+  o.imageCode = part.surface.x;
   o.direction = direction;
   o.depth = depth;
   return o;
@@ -61,12 +69,21 @@ struct FsOut {
 
 @fragment
 fn fs(in: VsOut) -> FsOut {
+  let uvDx = dpdx(in.uv);
+  let uvDy = dpdy(in.uv);
+  var albedo = in.albedo;
+  if (in.imageCode < -0.5) {
+    let texel = textureSampleGrad(surfaceImages, surfaceSampler, in.uv,
+      i32(-in.imageCode - 1.0), uvDx, uvDy);
+    if (texel.a < 0.5) { discard; }
+    albedo *= texel.rgb;
+  }
   var n = normalize(in.normal);
-  if (dot(n, in.direction) < 0.0) {
+  if (in.imageCode >= -0.5 && dot(n, in.direction) < 0.0) {
     n = -n;
   }
   var o: FsOut;
-  o.albedo = vec4<f32>(in.albedo, 1.0);
+  o.albedo = vec4<f32>(albedo, 1.0);
   o.normalDepth = vec4<f32>(
     impostorPackNormal(n), clamp(in.depth, 0.0, 1.0), clamp(0.5 + 0.5 * in.depth, 0.0, 1.0));
   return o;

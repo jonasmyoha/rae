@@ -18,6 +18,10 @@ func addBirchGrove(
     renderer: renderer
     path: "lib/assets/trees/birchBark.png"
   )
+  let leafLayer: Int = rendererLoadSurfaceImage(
+    renderer: renderer
+    path: "lib/assets/trees/birchLeaves.png"
+  )
   let meshes: List(MeshData) = speciesLevelMeshes(
     species: speciesBirch
     patches: nearPatches
@@ -42,6 +46,8 @@ func addBirchGrove(
       var material: Material3d = foliageMaterial(color: colors.copyAtDefault(index: part))
       if part is 0 {
         material.colorTextureLayer = layer
+      } else if part < 4 {
+        material.colorTextureLayer = leafLayer
       }
       let entityId: EntityId = world3dAddMeshInstance(
         world: world
@@ -54,5 +60,5 @@ func addBirchGrove(
     }
     obstacles.add(value: { x: position.x, y: position.y, radius: 0.25 })
   }
-  log("birch grove: 5 trees, textured bark, attached folded leaves")
+  log("birch grove: 5 trees, textured bark, rounded textured leaf clusters")
 }

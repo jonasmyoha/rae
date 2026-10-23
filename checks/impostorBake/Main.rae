@@ -29,6 +29,7 @@ open Mesh3d
 open MeshStore
 open FoliageMesh
 open ImpostorAtlas
+open SurfaceImages
 open ImpostorBake
 open ImpostorMips
 open app3d/GroveTrees
@@ -37,7 +38,7 @@ open app3d/FarSprites
 open app3d/FarCanopy
 open CanopyBake
 
-const speciesNames: String = "broadleaf umbrella cypress spruce orange red gold crimson palm"
+const speciesNames: String = "broadleaf umbrella cypress spruce orange red gold crimson palm birch"
 
 func speciesName(species: view Int) ret String {
   let names: List(String) = speciesNames.split(sep: " ")
@@ -74,6 +75,7 @@ func checkFoliageLayout(
   store: mod MeshStore
   settings: view ImpostorSettings
   plain: view List(Float)
+  images: view SurfaceImages
 ) ret Int {
   var subjects: List(ImpostorSubject) = List.create(ImpostorSubject, cap: treeSpeciesCount)
   var leafMeshes: Int = 0
@@ -98,20 +100,29 @@ func checkFoliageLayout(
         ))
       }
     }
-    subjects.add(
-      value: impostorSubject(
-        parts: meshes
-        meshes: handles
-        albedos: speciesAlbedos(species: species)
-      )
+    var subject: ImpostorSubject = impostorSubject(
+      parts: meshes
+      meshes: handles
+      albedos: speciesAlbedos(species: species)
     )
+    if species is speciesBirch {
+      subject.imageLayers = List(Int) {
+        0
+        1
+        1
+        1
+        -1
+      }
+    }
+    subjects.add(value: subject)
   }
-  var atlas: ImpostorAtlas = bakeImpostorAtlas(
+  var atlas: ImpostorAtlas = bakeTexturedImpostorAtlas(
     resources: resources
     meshes: store
     subjects: subjects
     settings: settings
     cutoff: spriteCutoff
+    images: images
   )
   let shares: List(Float) = levelZeroCoverage(
     resources: resources
@@ -397,7 +408,16 @@ func main() ret Int {
   var failures: Int = 0
   var issuer: IdIssuer = IdIssuer.create()
   if var resources: GpuResources = GpuResources.create(issuer: issuer, capacity: 256) {
+    var images: SurfaceImages = {}
+    let paths: List(String) = {
+      "lib/assets/trees/birchBark.png"
+      "lib/assets/trees/birchLeaves.png"
+    }
+    if not setSurfaceImages(images: images, resources: resources, paths: paths) {
+      ret 1
+    }
     var store: MeshStore = createMeshStore()
+    failures = failures + checkCutout(resources: resources, store: store, images: images)
     var subjects: List(ImpostorSubject) = List.create(ImpostorSubject, cap: treeSpeciesCount)
     loop var species: Int = 0, species < treeSpeciesCount, ++species {
       let meshes: List(MeshData) = speciesLevelMeshes(
@@ -415,21 +435,30 @@ func main() ret Int {
           indices: mesh.indices
         ))
       }
-      subjects.add(
-        value: impostorSubject(
-          parts: meshes
-          meshes: handles
-          albedos: speciesAlbedos(species: species)
-        )
+      var subject: ImpostorSubject = impostorSubject(
+        parts: meshes
+        meshes: handles
+        albedos: speciesAlbedos(species: species)
       )
+      if species is speciesBirch {
+        subject.imageLayers = List(Int) {
+          0
+          1
+          1
+          1
+          -1
+        }
+      }
+      subjects.add(value: subject)
     }
     let started: Int = nowMs()
-    var atlas: ImpostorAtlas = bakeImpostorAtlas(
+    var atlas: ImpostorAtlas = bakeTexturedImpostorAtlas(
       resources: resources
       meshes: store
       subjects: subjects
       settings: settings
       cutoff: spriteCutoff
+      images: images
     )
     let milliseconds: Int = nowMs() - started
     if atlas.layers is not treeSpeciesCount {
@@ -513,10 +542,12 @@ func main() ret Int {
       store: store
       settings: settings
       plain: plain
+      images: images
     )
     log("pictures written to {folder}")
     retireImpostorAtlas(atlas: atlas, resources: resources)
     meshStoreShutdown(store: store, resources: resources)
+    retireSurfaceImages(images: images, resources: resources)
     shutdown(resources: resources)
   }
   if failures > 0 {
@@ -524,5 +555,72 @@ func main() ret Int {
     ret 1
   }
   log("impostor bake OK")
+  ret 0
+}
+
+# An identical plane baked opaque and with the leaf image must have different
+# coverage. This catches a bake that samples RGB but forgets the alpha cut.
+func checkCutout(
+  resources: mod GpuResources
+  store: mod MeshStore
+  images: view SurfaceImages
+) ret Int {
+  let mesh: MeshData = makePlane(size: 2.0, segments: 1)
+  let handle: MeshHandle = meshStoreUpload(
+    store: store
+    resources: resources
+    verts: mesh.verts
+    vertCount: mesh.vertCount
+    indices: mesh.indices
+  )
+  let parts: List(MeshData) = { mesh }
+  let handles: List(MeshHandle) = { handle }
+  let colors: List(Vec3) = { { x: 1, y: 1, z: 1 } }
+  let opaque: ImpostorSubject = impostorSubject(parts: parts, meshes: handles, albedos: colors)
+  var masked: ImpostorSubject = opaque
+  masked.imageLayers = List(Int) { 1 }
+  let subjects: List(ImpostorSubject) = { opaque, masked }
+  let settings: ImpostorSettings = { viewsPerSide: 4, cellSize: 64, mips: 1, blendViews: false }
+  var atlas: ImpostorAtlas = bakeTexturedImpostorAtlas(
+    resources: resources
+    meshes: store
+    subjects: subjects
+    settings: settings
+    cutoff: 0.5
+    images: images
+  )
+  let shares: List(Float) = levelZeroCoverage(
+    resources: resources
+    atlas: atlas
+    settings: settings
+  )
+  let full: Float = shares.copyAtDefault(index: 0)
+  # Existing callers without images still use the one-texel opaque fallback.
+  var untextured: List(ImpostorSubject) = List.create(ImpostorSubject, cap: 1)
+  # Construct a fresh subject: repeated list insertion of one heap-owning
+  # local currently aliases its buffers (separate compiler follow-up in QUEUE).
+  untextured.add(value: impostorSubject(parts: parts, meshes: handles, albedos: colors))
+  var fallback: ImpostorAtlas = bakeImpostorAtlas(
+    resources: resources
+    meshes: store
+    subjects: untextured
+    settings: settings
+    cutoff: 0.5
+  )
+  let fallbackShares: List(Float) = levelZeroCoverage(
+    resources: resources
+    atlas: fallback
+    settings: settings
+  )
+  retireImpostorAtlas(atlas: fallback, resources: resources)
+  if Math.abs(value: fallbackShares.copyAtDefault(index: 0) - full) > 0.001 {
+    ret 1
+  }
+  let cutout: Float = shares.copyAtDefault(index: 1)
+  retireImpostorAtlas(atlas: atlas, resources: resources)
+  log("cutout bake: opaque {full}, masked {cutout}")
+  if full < 0.05 or cutout < full * 0.15 or cutout > full * 0.9 {
+    ret 1
+  }
   ret 0
 }

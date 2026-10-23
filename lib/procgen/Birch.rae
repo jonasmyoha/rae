@@ -1,11 +1,12 @@
 # Seeded silver birch: a slender, continuous UV-mapped stem, rising limbs,
-# hanging twigs and individually folded diamond leaves. Z-up, metres.
+# hanging twigs and rounded textured foliage groups. Z-up, metres.
 # The meshes are immutable prototypes; instances share them and their texture.
 import Math
 open Vec3
 open Mesh3d
 open Noise
 open procgen/Foliage
+open procgen/FoliageCards
 
 type BirchTwig {
   start: Vec3
@@ -70,7 +71,7 @@ func birchTube(
         ny: normal.y
         nz: normal.z
         u: around
-        value: amount * length * 1.4 + curve.start.z * 1.4
+        value: amount * length * 0.34 + curve.start.z * 0.34
       )
       mesh.vertCount = mesh.vertCount + 1
       if ring < steps and column < sides {
@@ -110,7 +111,7 @@ func birchTree(seed: view Int, height: view Float) ret BirchTree {
     let angle: Float = branch.toFloat() * 2.3999632 + hash2(x: branch, y: 0, seed: seed) * 0.65
     let radial: Vec3 = Vec3.create(x: Math.cos(x: angle), y: Math.sin(x: angle), z: 0)
     let side: Vec3 = Vec3.create(x: -radial.y, y: radial.x, z: 0)
-    let reach: Float = height * (0.31 - fraction * 0.19) * (0.80 + hash2(
+    let reach: Float = height * (0.22 - fraction * 0.14) * (0.80 + hash2(
       x: branch
       y: 1
       seed: seed
@@ -163,93 +164,34 @@ func birchTree(seed: view Int, height: view Float) ret BirchTree {
   ret BirchTree { wood: own wood, twigWood: own twigWood, twigs: own twigs }
 }
 
-# A cupped diamond with a raised midrib. Its stem is the fixed wind pivot.
-# The same soft normal on either face avoids black paper backs in toon mode.
-func birchLeaf(
-  mesh: mod MeshData
-  attachment: view Vec3
-  direction: view Vec3
-  size: view Float
-  phase: view Float
-) {
-  let along: Vec3 = vnorm(a: direction)
-  let across: Vec3 = vnorm(a: vcross(a: along, b: Vec3.create(x: 0, y: 0, z: 1)))
-  let normal: Vec3 = vnorm(
-    a: vadd(a: vcross(a: across, b: along), b: Vec3.create(x: 0, y: 0, z: 0.8))
-  )
-  let base: Int = mesh.vertCount
-  let shape: List(Vec3) = {
-    { x: 0.0, y: 0.0, z: 0.0 }
-    { x: 0.24, y: -0.36, z: 0.0 }
-    { x: 0.55, y: -0.46, z: -0.06 }
-    { x: 1.0, y: 0.0, z: -0.15 }
-    { x: 0.55, y: 0.46, z: -0.06 }
-    { x: 0.24, y: 0.36, z: 0.0 }
-    { x: 0.46, y: 0.0, z: 0.12 }
-  }
-  loop let point: view Vec3 in shape {
-    let position: Vec3 = vadd(
-      a: attachment
-      b: vscale(
-        a: vadd(
-          a: vadd(a: vscale(a: along, s: point.x), b: vscale(a: across, s: point.y))
-          b: vscale(a: normal, s: point.z)
-        )
-        s: size
-      )
-    )
-    let shade: Vec3 = vnorm(
-      a: vadd(a: normal, b: vscale(a: across, s: point.y * 0.3 + phase * 0.1))
-    )
-    foliageVertex(mesh: mesh, point: position, normal: shade)
-  }
-  loop var edge: Int = 0, edge < 6, ++edge {
-    mesh.indices.add(value: base + 6)
-    mesh.indices.add(value: base + edge)
-    mesh.indices.add(value: base + (edge + 1) % 6)
-    mesh.indices.add(value: base + 6)
-    mesh.indices.add(value: base + (edge + 1) % 6)
-    mesh.indices.add(value: base + edge)
-  }
-  foliagePivot(mesh: mesh, first: base, pivot: attachment)
-}
-
+# Each limb carries a rounded group of curved textured patches. Normals follow
+# the group envelope, not the individual cards. One pivot moves the whole group.
 func birchLeaves(twigs: view List(BirchTwig), seed: view Int, tone: view Int) ret MeshData {
   var mesh: MeshData = foliageMesh()
-  loop var twigIndex: Int = 0, twigIndex < twigs.length, ++twigIndex {
-    let twig: BirchTwig = twigs.copyAtDefault(index: twigIndex)
-    loop var leaf: Int = 0, leaf < 14, ++leaf {
-      let number: Int = twigIndex * 14 + leaf
-      if number % 3 is not tone {
-        continue
-      }
-      let amount: Float = 0.10 + leaf.toFloat() * 0.062
-      let attachment: Vec3 = birchCurve(twig: twig, amount: amount)
-      let phase: Float = hash2(x: number, y: 4, seed: seed)
-      let angle: Float = twigIndex.toFloat() * 2.39996 + leaf.toFloat() * 2.8 + phase * 0.7
-      let direction: Vec3 = Vec3.create(
-        x: Math.cos(x: angle)
-        y: Math.sin(x: angle)
-        z: -0.9 + phase * 1.6
-      )
-      birchLeaf(
-        mesh: mesh
-        attachment: attachment
-        direction: direction
-        size: 0.19 + phase * 0.095
-        phase: phase
-      )
+  loop var branch: Int = 0, branch < twigs.length / 5, ++branch {
+    if branch % 3 is not tone {
+      continue
     }
+    let twig: BirchTwig = twigs.copyAtDefault(index: branch * 5 + 2)
+    let center: Vec3 = birchCurve(twig: twig, amount: 0.45)
+    let size: Float = 0.82 - branch.toFloat() / 26.0 * 0.25
+    addFoliageCluster(
+      mesh: mesh
+      center: center
+      pivot: twig.start
+      radius: size
+      seed: seed + branch * 41
+    )
   }
   ret own mesh
 }
 
 func birchLeafColor(tone: view Int) ret Vec3 {
   if tone is 0 {
-    ret Vec3.create(x: 0.26, y: 0.37, z: 0.045)
+    ret Vec3.create(x: 0.75, y: 1.0, z: 0.80)
   }
   if tone is 1 {
-    ret Vec3.create(x: 0.49, y: 0.54, z: 0.075)
+    ret Vec3.create(x: 0.87, y: 1.10, z: 0.85)
   }
-  ret Vec3.create(x: 0.69, y: 0.58, z: 0.11)
+  ret Vec3.create(x: 0.98, y: 1.13, z: 0.90)
 }

@@ -154,7 +154,9 @@ fn staticSurface(in: VsOut, d: DrawU) -> BrickOut {
   o.nrm = n;
   if (d.params.w < -0.5) {
     let layer = clamp(i32(round(-d.params.w - 1.0)), 0, i32(textureNumLayers(surfaceImages)) - 1);
-    o.albedo *= textureSampleGrad(surfaceImages, surfaceSampler, in.uv, layer, dpdx(in.uv), dpdy(in.uv)).rgb;
+    let texel = textureSampleGrad(surfaceImages, surfaceSampler, in.uv, layer, dpdx(in.uv), dpdy(in.uv));
+    if (texel.a < 0.5) { discard; }
+    o.albedo *= texel.rgb;
   } else if (d.params.w > 9.5) {
     o.albedo = gbEmblem(in.uv, o.albedo, d.params.w);
   } else if (d.params.w > 1.5) {

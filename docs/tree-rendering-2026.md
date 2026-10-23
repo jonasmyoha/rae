@@ -17,9 +17,11 @@ Autumn colours should move from soft green through lime to warm gold.
 These identifiers follow [Kew's species account](https://powo.science.kew.org/taxon/urn%3Alsid%3Aipni.org%3Anames%3A295174-1/general-information)
 and the [Woodland Trust's illustrated silver-birch guide](https://www.woodlandtrust.org.uk/trees-woods-and-wildlife/british-trees/a-z-of-british-trees/silver-birch/).
 
-The art direction exaggerates leaf size enough to read on screen. It keeps
-open spaces between hanging sprays, a slightly crooked leader and warm ivory
-bark. A uniformly filled sphere, cone or identical stack of canopy discs would
+The revised art direction uses rounded leafy groups with smooth lighting,
+a slightly crooked leader and bright white bark with sparse, thick black scars.
+The original individual-leaf geometry was rejected after review.
+The three supplied screenshots favour broad foliage masses and leafy outlines.
+They are visual references; still images do not identify an engine or wind algorithm. A uniformly filled sphere, cone or identical stack of canopy discs would
 lose the species even with a good texture. The tree should look pleasant in
 side light, against the sky and from underneath, not only in its thumbnail.
 
@@ -27,8 +29,8 @@ side light, against the sky and from underneath, not only in its thumbnail.
 
 | Approach | Close-up strengths | Costs and failure modes | Rae decision |
 | --- | --- | --- | --- |
-| Opaque shaped leaves | Real silhouette, folds, depth and stable shadows; no transparent corners | More vertices and tiny triangles; layered geometry still overdraws | Use for this LOD0 |
-| Trimmed alpha-tested branch cards | Efficient authoring and fewer vertices; detailed leaf veins from an atlas | Cutout overdraw, flat views, edge aliasing, mip thinning, shadow-mask matching | Keep as a future measured alternative |
+| Opaque shaped leaves | Real silhouette, folds, depth and stable shadows; no transparent corners | More vertices and tiny triangles; layered geometry still overdraws | Rejected for this birch after visual review |
+| Trimmed alpha-tested branch cards | Efficient authoring and fewer vertices; detailed leaf veins from an atlas | Cutout overdraw, flat views, edge aliasing, mip thinning, shadow-mask matching | Use curved patches with clump normals for this LOD0 |
 | Broad opaque canopy patches | Small geometry budget, calm painted masses | Reads as generic clumps; loses birch twigs and airiness close up | Keep for other species; not this birch's main form |
 | Geometry plus cards | Shape at silhouette, cheap dense interior | Two material paths, harder lighting and shadow consistency | Useful later if profiling justifies it |
 | Hierarchical virtualized geometry and voxels | Detailed nearby leaves, compact repeated parts, distant aggregate coverage | Requires specialized build, streaming, culling and rasterization infrastructure | Research direction, not this implementation |
@@ -48,11 +50,19 @@ that geometric leaves can be a practical production choice, not a budget to
 copy into an ordinary WebGPU renderer. Rae should start with a bounded mesh
 and count both vertices and shadow draws.
 
-Our choice is a folded diamond with six outline vertices and a raised midrib.
-It has an actual pointed silhouette and a small cup rather than a rectangular
-leaf image. Reverse-wound triangles make the leaf visible from below with the
-existing back-face-culling pipelines. This duplicates indices, not vertices.
-There is no leaf opacity texture, discard or alpha blending in this variant.
+The revised choice is a curved 3 x 3 vertex patch carrying a leaf-cluster
+colour/alpha texture. Twelve patches surround each branch clump. Normals are
+computed from the clump envelope with an upward bias; they are not the flat
+normals of the cards. Reverse-wound indices make both sides visible without
+flipping the lighting normal. Alpha below 0.5 is discarded in colour, shadow
+and impostor-bake passes. There is no sorted transparent blending.
+
+The image uses simple overlapping leaf shapes rather than photographic veins
+or baked shadows. The initial textured render was too busy, so it was replaced
+with a simpler generated texture before validation. The clump lighting follows
+the general strategy described in [the SpeedTree rendering chapter](https://developer.nvidia.com/gpugems/gpugems3/part-i-geometry/chapter-4-next-generation-speedtree-rendering).
+This is an implementation of that general technique, not a reconstruction of
+the unknown renderer in the supplied screenshots.
 
 ### 2.2 The newer virtualized foliage approach
 
@@ -101,8 +111,15 @@ A constant green emission term would be the wrong solution.
 The [GPU Gems vegetation chapter](https://developer.nvidia.com/gpugems/gpugems3/part-iii-rendering/chapter-16-vegetation-procedural-animation-and-shading-crysis)
 separates main structural bending from leaf detail and describes independent
 stiffness/phase controls. Rae now has intact leaf-pivot rotations, shared with
-its shadow vertex stage. Birch leaves use the twig attachment as their pivot;
-wood stays rigid in this implementation. Reintroducing independent displacement
+its shadow vertex stage. Birch clumps share a branch attachment as their pivot; all patches in a clump
+rotate together, with their normals. Their signed flexibility selects a slow,
+small branch response: fixed per-tree phase, fixed per-branch phase, and no
+noise sampled at a coordinate multiplied by changing wind direction. Wood
+stays rigid. Other species retain their current wind response. This follows
+[SpeedTree's wind guidance](https://docs8.speedtree.com/modeler/doku.php?id=wind_vfx)
+on restrained bending and independent branch response; it is not a physical
+branch simulation. GPU checks cover rigidity, calm wind, fixed attachments,
+normal rotation and short time-step continuity for both response modes. Reintroducing independent displacement
 of each leaf vertex would undo the recent wind improvement.
 
 A future branch system needs actual parent-child transforms and conservative
@@ -131,44 +148,57 @@ batches provide the appropriate ownership and culling structure.
 - Continuous ring strips form the slender stem and curved branches. Ring
   vertices share radial normals; the UV seam has duplicate vertices at U=0/1.
   Bark V follows branch length, avoiding a new stretched texture per triangle.
-- Twenty-six irregularly phased limbs carry five hanging twigs each. Fourteen
-  leaves per twig are divided across three colour meshes: 1,820 leaves total.
-  Each seven-vertex leaf has six triangles per side and a fixed attachment.
+- Twenty-six irregularly phased limbs carry five hanging twigs each. Each limb
+  has one rounded leaf clump, split across three colour meshes. Each clump has
+  twelve curved patches: 312 patches, 2,808 leaf vertices and 4,992 leaf
+  triangles including both sides. Each clump shares one fixed branch pivot.
 - The shared forest registers one prototype. Grove placements vary yaw and
   scale. A future set of two or three seed variants can improve repetition
   without making every tree unique on the GPU.
-- Five opaque parts separate pale bark, dark outer twigs and three leaf tones.
+- Five parts separate pale bark, dark outer twigs and three leaf tones.
   Leaves use the shipped optional
   pivot stream; the wood uses the ordinary static vertex layout.
 
 ### Bark texture and materials
 
-`lib/assets/trees/birchBark.png` is an original generated 512 x 512 bark albedo.
-The image-generation tool produced the source; the shipped PNG is resized for
-runtime use. It is warm ivory with broken horizontal charcoal marks. It has no
-intentional directional lighting. Generation does not prove perfect edge
-periodicity; the final wrapped trunk must be inspected for a visible seam.
+`lib/assets/trees/birchBark.png` and `birchLeaves.png` are original generated
+512 x 512 PNGs. The bark revision has sparse near-black horizontal scars on
+white, with much less fine noise. Bark V repeats 0.34 times per metre rather
+than 1.4, making the markings about four times longer vertically. The leaf
+texture has broad flat green shapes, transparent margins and small holes.
 
-The built-in image-generation prompt was: a flat orthographic, seamlessly
-tileable silver-birch bark albedo, warm ivory covering most of the square,
-irregular sparse horizontal charcoal-brown lenticels, occasional peeling scars,
-subtle paper layers, neutral diffuse lighting, no trunk silhouette, text,
-shadows, specular highlights or background. No external artwork was copied.
+Generation briefs (built-in image generator; originals retained outside the
+repo, resized for runtime):
 
-`SurfaceImages` owns a renderer-local opaque image array, view and repeating
-trilinear sampler. It creates mips by averaging decoded linear RGB, then stores
-sRGB texels for hardware decode. `rendererLoadSurfaceImage(renderer, path)`
-returns its layer; `Material3d.colorTextureLayer = -1` keeps plain colour.
-Images are loaded once at startup, cached by resolved path, and multiplied by
-the material tint in the shared static surface shader. Forward and deferred
-paths consume the same sample. Texture/view/sampler lifetimes use GpuResources.
-A renderer without images binds a one-texel white fallback, not a full atlas.
+- Bark: seamless silver-birch albedo; white covering about 90%; about eight
+  large sparse near-black horizontal scars, 15–28% width and 2–5% height;
+  no hairlines, speckle, lighting, shadows or text.
+- Final leaves: dense rounded cluster of about 45 overlapping large simple
+  oval pointed leaves; similar medium green shades; no veins, realistic
+  surface shading or strong shadows; filled centre, transparent background
+  and a few small gaps; margins on every side.
 
-This first API accepts at most 16 square 512-pixel opaque PNGs. The layer index belongs to
-its renderer and is not a transferable global texture handle. Rebuilding the
-array increments its generation and rebuilds consumer bind groups. Load failure
-preserves the previous array and reports the path. Alpha-cutout foliage is not
-silently added to this API: it would need matching shadow and mip semantics.
+`SurfaceImages` owns a renderer-local RGBA image array, view and repeating
+trilinear sampler. RGB is decoded to linear light before mip generation.
+Mip colour is weighted by alpha to avoid dark borders from clear texels;
+alpha is rescaled to keep the covered fraction at cutoff 0.5 as closely as
+the lower resolution permits. It cannot preserve an arbitrary fraction in
+a one-pixel mip. RGB is stored as sRGB for hardware decode; alpha stays linear.
+
+`rendererLoadSurfaceImage(renderer, path)` returns the layer;
+`Material3d.colorTextureLayer = -1` keeps plain colour. Forward and deferred
+colour, foliage shadows, and the existing impostor bake use the same alpha
+cut. Images load once and are shared by every instance. Shadow bindings track
+image view/sampler identity when the array is replaced; old objects retire
+through GpuResources. No per-tree textures or per-frame image uploads. Cutout shadows use the
+foliage vertex layout: upload leaf cards through `uploadFoliage`, including
+when their wind strength is zero. Ordinary bark meshes stay opaque casters.
+
+The bounded API accepts at most 16 square 512-pixel PNGs. The layer belongs to
+its renderer. Failure preserves the previous array. A renderer without images
+binds a one-texel white fallback. Existing untextured impostor callers retain
+that fallback through `bakeImpostorAtlas`; textured callers pass their image
+owner explicitly to `bakeTexturedImpostorAtlas` for the synchronous startup bake.
 
 ### Population and scope
 
@@ -176,11 +206,11 @@ silently added to this API: it would need matching shadow and mip semantics.
 - `app3d/GroveTrees` adds the species to shared deterministic placement, so
   deferred walker 136, forward walker 137 and huge forest 143 receive it.
 - Existing forest distance machinery remains active. The middle representation
-  initially reuses the close-up birch shape; the existing automatic colour-only
-  impostor bake supplies the distant silhouette. This is compatibility for the
-  running forest, **not a finished birch LOD or bark-aware billboard project**.
-- A dedicated reduced middle mesh, bark-aware impostor and aggregate canopy
-  validation are deferred. Never render LOD0 for every tree to the horizon.
+  initially reuses the close-up birch shape; the existing automatic
+  impostor bake now samples bark and leaf images, including their alpha masks.
+  This keeps the running forest correct; it is not a finished birch LOD project.
+- A dedicated reduced middle mesh and further aggregate-canopy tuning are
+  deferred. Never render LOD0 for every tree to the horizon.
 - No new C runtime logic, language feature, per-leaf entity or per-frame CPU
   leaf update is required.
 
@@ -198,21 +228,18 @@ and fixed population when profiling; a changed distribution is not a valid
 isolated performance comparison. Texture memory for one 512-square RGBA8 mip
 chain is about 1.33 MiB, shared by all birch instances in a renderer.
 
-The implemented prototype has 17,875 vertices and 28,932 triangles across five
-parts, including the reverse-wound leaf faces. The uploaded vertex/index data
-is approximately 1.07 MiB (32-byte wood vertices, 48-byte leaf vertices and
-32-bit indices), shared by its instances. This is a geometry budget, not a
-measured GPU frame cost. The first grove capture exposed stretched bark marks
-and overly pale outer twigs; the final version increases the bark's vertical UV
-repeat and separates those twigs into a dark wood part.
+The revised prototype has 7,943 vertices and 12,084 triangles across five
+parts, including reverse-wound patch faces. That is fewer vertices than the
+17,875-vertex individual-leaf version, but alpha-tested overdraw can still be
+expensive. Vertex/index storage is about 0.42 MiB per shared prototype. Both
+512-square RGBA8 mip chains total about 2.67 MiB, shared by every instance.
+These are data budgets, not a claimed frame-time improvement.
 
-Main risks: tiny-leaf aliasing, overly regular hanging sprays, a visible bark
-wrap seam, bright bark clipping under exposure, flat backlighting, and expensive
-shadow geometry in dense nearby stands. The initial solution deliberately has
-no new transmission pass, branch simulation or custom distant representation.
-Those should be separate measured changes with visual references.
+Main risks are cutout overdraw, mip thinning, regular clump placement, a bark
+wrap seam, flat backlighting and self-shadow detail. There is no new
+transmission pass, branch simulation or custom distant representation.
 
-## 5. Recorded validation
+## 5. Original implementation validation (before this revision)
 
 - Compiler suite through `watch-tests.sh`, with a 900-second timeout:
   **896 passed, 0 failed**, including `1235_birch` and the existing nine-species
@@ -235,3 +262,28 @@ Those should be separate measured changes with visual references.
 To visit the stand, run example 138 and press **9**, or start with
 `RAE_GROVE_VIEW=birches`. Both walkers and the huge forest receive the species
 through `app3d/GroveTrees`; no separate generator copies are kept in examples.
+
+## 6. Patch revision validation
+
+The updated geometry fixture checks seeded stems, valid indices and unit
+normals, UV seams, 312 patches, shared clump pivots and alpha-weighted mip
+colour/coverage. The wind hardware check exercises both patch responses.
+The material-image check loads distinct bark and leaf layers. The impostor
+hardware check compares the same plane with and without the leaf alpha mask,
+and bakes textured birch in both ordinary and foliage vertex layouts.
+
+The final compiler run passed **896 tests, 0 failed** through `watch-tests.sh`
+with a 900-second timeout. The first run found a missing explicit renderer
+import; that was corrected before this successful rerun. The four example
+gates (136, 137, 138, 143) passed with a 900-second timeout, including all
+nine grove views, the walker's live memory check, and 31,090 forest trees.
+The hardware image and wind checks passed with explicit timeouts. The GPU
+bake checks include masked coverage and the original untextured fallback;
+the final bake run also passed AddressSanitizer and UndefinedBehaviorSanitizer
+(leak detection disabled). A separate repeated-list-insertion compiler bug
+found in the test setup is recorded in QUEUE; each test owner now receives
+a freshly constructed subject.
+
+Inspected final captures in Autumn Grove and both walker render paths. The
+grove preview is `examples/138_procgen_showcase/references/Birches.png`;
+key **9** opens the birch stand. Its camera now frames the full crowns.
