@@ -45,16 +45,17 @@ func impostorSubject(
   var high: Vec3 = Vec3.create(x: -1000000.0, y: -1000000.0, z: -1000000.0)
   loop let part: view MeshData in parts {
     loop var vertex: Int = 0, vertex < part.vertCount, ++vertex {
-      let point: Vec3 = meshPoint(mesh: part, vertex: vertex)
+      let point: Vec3 = meshBoundsPoint(mesh: part, vertex: vertex)
+      let margin: Float = meshBoundsMargin(mesh: part, vertex: vertex)
       low = Vec3.create(
-        x: Math.min(a: low.x, b: point.x)
-        y: Math.min(a: low.y, b: point.y)
-        z: Math.min(a: low.z, b: point.z)
+        x: Math.min(a: low.x, b: point.x - margin)
+        y: Math.min(a: low.y, b: point.y - margin)
+        z: Math.min(a: low.z, b: point.z - margin)
       )
       high = Vec3.create(
-        x: Math.max(a: high.x, b: point.x)
-        y: Math.max(a: high.y, b: point.y)
-        z: Math.max(a: high.z, b: point.z)
+        x: Math.max(a: high.x, b: point.x + margin)
+        y: Math.max(a: high.y, b: point.y + margin)
+        z: Math.max(a: high.z, b: point.z + margin)
       )
     }
   }
@@ -68,7 +69,10 @@ func impostorSubject(
     loop var vertex: Int = 0, vertex < part.vertCount, ++vertex {
       radius = Math.max(
         a: radius
-        b: Vec3.vlen(a: Vec3.vsub(a: meshPoint(mesh: part, vertex: vertex), b: centre))
+        b: Vec3.vlen(a: Vec3.vsub(a: meshBoundsPoint(mesh: part, vertex: vertex), b: centre)) + meshBoundsMargin(
+          mesh: part
+          vertex: vertex
+        )
       )
     }
   }
@@ -91,6 +95,34 @@ func meshPoint(mesh: view MeshData, vertex: view Int) ret Vec3 {
   )
 }
 
+# A camera-facing quad may turn outside its rest X/Z plane. Its radius plus
+# the capped wind travel must fit for every camera and wind pose.
+func meshBoundsPoint(mesh: view MeshData, vertex: view Int) ret Vec3 {
+  if mesh.leafCards.copyAtDefault(index: vertex * 4 + 3) > 0.0 {
+    ret Vec3.create(
+      x: mesh.leafCards.copyAtDefault(index: vertex * 4)
+      y: mesh.leafCards.copyAtDefault(index: vertex * 4 + 1)
+      z: mesh.leafCards.copyAtDefault(index: vertex * 4 + 2)
+    )
+  }
+  ret meshPoint(mesh: mesh, vertex: vertex)
+}
+
+func meshBoundsMargin(mesh: view MeshData, vertex: view Int) ret Float {
+  if mesh.leafCards.copyAtDefault(index: vertex * 4 + 3) <= 0.0 {
+    ret 0.0
+  }
+  let center: Vec3 = meshBoundsPoint(mesh: mesh, vertex: vertex)
+  let pivot: Vec3 = Vec3.create(
+    x: mesh.windPivots.copyAtDefault(index: vertex * 4)
+    y: mesh.windPivots.copyAtDefault(index: vertex * 4 + 1)
+    z: mesh.windPivots.copyAtDefault(index: vertex * 4 + 2)
+  )
+  ret Vec3.vlen(a: Vec3.vsub(a: meshPoint(mesh: mesh, vertex: vertex), b: center)) + Vec3.vlen(
+    a: Vec3.vsub(a: center, b: pivot)
+  ) * 0.42
+}
+
 # The atlas textures' format and uses: drawn into (level 0), written by the
 # mip passes, sampled by the draws, copied out by a check
 const impostorFormat: Int32 = WGPUTextureFormat_RGBA8Unorm
@@ -100,13 +132,16 @@ func impostorTextureUsage() ret UInt64 {
 }
 
 # The view pass's pipeline: the mesh store's vertices (position, normal
-# first; `vertexStride` bytes each: 32, or 48 for a leaf mesh with its wind
+# first; `vertexStride` bytes each: 32, or 64 for a leaf mesh with its wind
 # pivots, lib/FoliageMesh), two colour targets, a depth test
 func impostorBakePipelineSpec(vertexStride: view Int) ret RenderPipelineSpec {
   var attributes: List(VertexAttributeSpec) = List.create(VertexAttributeSpec, cap: 2)
   attributes.add(value: { format: WGPUVertexFormat_Float32x3, offset: 0, location: 0 })
   attributes.add(value: { format: WGPUVertexFormat_Float32x3, offset: 12, location: 1 })
   attributes.add(value: { format: WGPUVertexFormat_Float32x2, offset: 24, location: 2 })
+  if vertexStride is 64 {
+    attributes.add(value: { format: WGPUVertexFormat_Float32x4, offset: 48, location: 4 })
+  }
   var colorFormats: List(Int32) = List.create(Int32, cap: 2)
   colorFormats.add(value: impostorFormat)
   colorFormats.add(value: impostorFormat)
@@ -408,19 +443,25 @@ func recordImpostorViews(
     ret false
   }
   # One pipeline for ordinary meshes (32-byte vertices) and one for leaf
-  # meshes (48 bytes: lib/FoliageMesh); the same shader and buffers. Read
+  # meshes (64 bytes: lib/FoliageMesh); the same shader and buffers. Read
   # with the wrong stride, a leaf mesh bakes as garbage.
   var pipeline: RenderPipelineId = noRenderPipelineId()
   var bindGroup: BindGroupId = noBindGroupId()
   var foliagePipeline: RenderPipelineId = noRenderPipelineId()
   var foliageBindGroup: BindGroupId = noBindGroupId()
   loop var variant: Int = 0, variant < 2, ++variant {
-    let stride: Int = 32 + variant * 16
+    let stride: Int = 32 + variant * 32
+    var entry: String = "vs"
+    if variant is 1 {
+      entry = "vsFoliage"
+    }
     var made: RenderPipelineId = noRenderPipelineId()
     if let created: RenderPipelineId = createRenderPipeline(
       resources: resources
-      shader: shader(files: ["lib/impostor_octahedral.wgsl", "lib/impostor_bake.wgsl"])
-      vertexEntry: "vs"
+      shader: shader(
+        files: ["lib/wind.wgsl", "lib/impostor_octahedral.wgsl", "lib/impostor_bake.wgsl"]
+      )
+      vertexEntry: entry
       fragmentEntry: "fs"
       spec: impostorBakePipelineSpec(vertexStride: stride)
     ) {

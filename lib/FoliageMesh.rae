@@ -1,7 +1,8 @@
 # An optional static vertex layout for rigid leaf patches: ordinary pos/normal/UV
 # followed by pivot xyz and flexibility: positive for individual patches,
 # negative for slower branch clumps (absolute value is stiffness response).
-# The upload is once per shared mesh.
+# Then card centre xyz/enabled; zero keeps ordinary rigid leaf geometry.
+# The 64-byte layout is uploaded once per shared mesh.
 open RendererDeferred
 open Mesh3d
 open MeshStore
@@ -13,13 +14,16 @@ func uploadFoliageMesh(
   resources: mod GpuResources
   mesh: view MeshData
 ) ret MeshHandle {
-  var vertices: List(Float) = List.create(Float, cap: mesh.vertCount * 12)
+  var vertices: List(Float) = List.create(Float, cap: mesh.vertCount * 16)
   loop var vertex: Int = 0, vertex < mesh.vertCount, ++vertex {
     loop var field: Int = 0, field < 8, ++field {
       vertices.add(value: mesh.verts.copyAtFallback(index: vertex * 8 + field, fallback: 0.0))
     }
     loop var field: Int = 0, field < 4, ++field {
       vertices.add(value: mesh.windPivots.copyAtFallback(index: vertex * 4 + field, fallback: 0.0))
+    }
+    loop var field: Int = 0, field < 4, ++field {
+      vertices.add(value: mesh.leafCards.copyAtFallback(index: vertex * 4 + field, fallback: 0.0))
     }
   }
   ret meshStoreUploadStride(
@@ -28,7 +32,7 @@ func uploadFoliageMesh(
     verts: vertices
     vertCount: mesh.vertCount
     indices: mesh.indices
-    vertexFloats: 12
+    vertexFloats: 16
   )
 }
 

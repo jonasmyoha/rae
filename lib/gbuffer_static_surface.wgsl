@@ -117,14 +117,21 @@ fn gbEmblem(uv: vec2<f32>, base: vec3<f32>, codeF: f32) -> vec3<f32> {
   if (em) { return white; }
   return base;
 }
-fn staticVertex(ii: u32, p: vec3<f32>, n: vec3<f32>, uv: vec2<f32>, pivot: vec4<f32>) -> VsOut {
+fn staticVertex(ii: u32, p: vec3<f32>, n: vec3<f32>, uv: vec2<f32>, pivot: vec4<f32>, card: vec4<f32>) -> VsOut {
   let d = draws[ii];
   var o: VsOut;
   let normal = normalize((d.model * vec4<f32>(n, 0.0)).xyz);
-  let current = windLeaf((d.model * vec4<f32>(p, 1.0)).xyz, normal,
+  let rest = select(p, card.xyz, card.w > 0.0);
+  var current = windLeaf((d.model * vec4<f32>(rest, 1.0)).xyz, normal,
     (d.model * vec4<f32>(pivot.xyz, 1.0)).xyz, d.model[3].xyz, pivot.w * d.fade.w * windLeafScale, F.wind);
-  let previous = windLeaf((d.prevModel * vec4<f32>(p, 1.0)).xyz, normal,
+  var previous = windLeaf((d.prevModel * vec4<f32>(rest, 1.0)).xyz, normal,
     (d.prevModel * vec4<f32>(pivot.xyz, 1.0)).xyz, d.prevModel[3].xyz, pivot.w * d.fade.w * windLeafScale, F.previousWind);
+  if (card.w > 0.0) {
+    current.position += leafCardOffset(p, card.xyz, vec2<f32>(length(d.model[0].xyz), length(d.model[2].xyz)),
+      leafCameraRight(F.viewProj), leafCameraUp(F.viewProj));
+    previous.position += leafCardOffset(p, card.xyz, vec2<f32>(length(d.prevModel[0].xyz), length(d.prevModel[2].xyz)),
+      leafCameraRight(F.prevViewProj), leafCameraUp(F.prevViewProj));
+  }
   o.wpos = current.position;
   o.pos = F.viewProj * vec4<f32>(current.position, 1.0);
   o.nrm = current.normal;
@@ -138,13 +145,13 @@ fn staticVertex(ii: u32, p: vec3<f32>, n: vec3<f32>, uv: vec2<f32>, pivot: vec4<
 @vertex
 fn vs(@builtin(instance_index) ii: u32,
       @location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) uv: vec2<f32>) -> VsOut {
-  return staticVertex(ii, p, n, uv, vec4<f32>(0.0));
+  return staticVertex(ii, p, n, uv, vec4<f32>(0.0), vec4<f32>(0.0));
 }
 @vertex
 fn vsFoliage(@builtin(instance_index) ii: u32,
       @location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) uv: vec2<f32>,
-      @location(3) pivot: vec4<f32>) -> VsOut {
-  return staticVertex(ii, p, n, uv, pivot);
+      @location(3) pivot: vec4<f32>, @location(4) card: vec4<f32>) -> VsOut {
+  return staticVertex(ii, p, n, uv, pivot, card);
 }
 // The pattern-modified albedo and normal of a static draw at this fragment
 fn staticSurface(in: VsOut, d: DrawU) -> BrickOut {
