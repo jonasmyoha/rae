@@ -1,0 +1,70 @@
+# Linear RGB plus straight alpha. Average colour weighted by alpha so clear
+# pixels cannot darken the leaf outline, then preserve coverage at cutoff 0.5.
+import Math
+
+func surfaceCoverage(pixels: view List(Float), scale: view Float) ret Float {
+  var covered: Int = 0
+  loop var pixel: Int = 0, pixel < pixels.length / 4, ++pixel {
+    if pixels.copyAtDefault(index: pixel * 4 + 3) * scale >= 0.5 {
+      covered = covered + 1
+    }
+  }
+  if pixels.length is 0 {
+    ret 0.0
+  }
+  ret covered.toFloat() / (pixels.length / 4).toFloat()
+}
+
+func surfaceDownsample(pixels: view List(Float), side: view Int) ret List(Float) {
+  var smaller: List(Float) = List.create(Float, cap: side * side)
+  loop var y: Int = 0, y < side / 2, ++y {
+    loop var x: Int = 0, x < side / 2, ++x {
+      var alpha: Float = 0.0
+      var red: Float = 0.0
+      var green: Float = 0.0
+      var blue: Float = 0.0
+      loop var row: Int = 0, row < 2, ++row {
+        loop var column: Int = 0, column < 2, ++column {
+          let base: Int = ((y * 2 + row) * side + x * 2 + column) * 4
+          let weight: Float = pixels.copyAtDefault(index: base + 3)
+          alpha = alpha + weight
+          red = red + pixels.copyAtDefault(index: base) * weight
+          green = green + pixels.copyAtDefault(index: base + 1) * weight
+          blue = blue + pixels.copyAtDefault(index: base + 2) * weight
+        }
+      }
+      let divisor: Float = Math.max(a: alpha, b: 0.000001)
+      smaller.add(value: red / divisor)
+      smaller.add(value: green / divisor)
+      smaller.add(value: blue / divisor)
+      smaller.add(value: alpha * 0.25)
+    }
+  }
+  let target: Float = surfaceCoverage(pixels: pixels, scale: 1.0)
+  var low: Float = 0.0
+  var high: Float = 4.0
+  var best: Float = 1.0
+  var error: Float = Math.abs(value: surfaceCoverage(pixels: smaller, scale: 1.0) - target)
+  loop var step: Int = 0, step < 12, ++step {
+    let scale: Float = (low + high) * 0.5
+    let coverage: Float = surfaceCoverage(pixels: smaller, scale: scale)
+    let difference: Float = Math.abs(value: coverage - target)
+    if difference < error {
+      error = difference
+      best = scale
+    }
+    if coverage < target {
+      low = scale
+    } else {
+      high = scale
+    }
+  }
+  loop var pixel: Int = 0, pixel < smaller.length / 4, ++pixel {
+    let index: Int = pixel * 4 + 3
+    smaller.set(
+      index: index
+      value: Math.min(a: 1.0, b: smaller.copyAtDefault(index: index) * best)
+    )
+  }
+  ret own smaller
+}

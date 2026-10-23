@@ -13,6 +13,8 @@ open webgpu/WebgpuEnums
 const shadowFoliageKeyBit: Int = 4398046511104
 
 type FoliageShadow {
+  imageView: TextureViewId = noTextureViewId()
+  imageSampler: SamplerId = noSamplerId()
   pipeline: RenderPipelineId = noRenderPipelineId()
   binds: List(BindGroupId) = fillBindGroupIds(count: shadowMaxCascades)
 }
@@ -27,8 +29,9 @@ func foliageCasterKey(meshes: view MeshStore, mesh: view Int) ret Int {
 func makeFoliageShadow(shadow: mod ShadowCache, resources: mod GpuResources, shader: view Shader) {
   var spec: DepthPipelineSpec = casterPipelineSpec(skinned: false, bias: shadow.casterBias)
   spec.vertexStride = 48
+  spec.attributes.add(value: { format: WGPUVertexFormat_Float32x2, offset: 24, location: 2 })
   spec.attributes.add(value: { format: WGPUVertexFormat_Float32x4, offset: 32, location: 3 })
-  spec.fragmentEntry = "fsFade"
+  spec.fragmentEntry = "fsFoliage"
   if let pipeline: RenderPipelineId = createDepthPipeline(
     resources: resources
     shader: shader
@@ -52,6 +55,8 @@ func bindFoliageShadow(shadow: mod ShadowCache, resources: mod GpuResources) {
         )
       )
       entries.add(value: bufferRef(id: shadow.models))
+      entries.add(value: textureViewRef(id: shadow.foliage.imageView))
+      entries.add(value: samplerRef(id: shadow.foliage.imageSampler))
       if let bind: BindGroupId = createRenderBindGroup(
         resources: resources
         pipeline: shadow.foliage.pipeline
@@ -71,5 +76,32 @@ func recordFoliageShadow(
   recordRenderPipelineUse(recording: recording, resources: resources, id: shadow.foliage.pipeline)
   loop let bind: BindGroupId in shadow.foliage.binds {
     recordBindGroupUse(recording: recording, resources: resources, id: bind)
+  }
+}
+
+# These are borrowed manager IDs; SurfaceImages owns their retirement.
+func setFoliageShadowImages(
+  shadow: mod ShadowCache
+  resources: mod GpuResources
+  imageView: view TextureViewId
+  imageSampler: view SamplerId
+) {
+  if shadow.foliage.imageView is imageView and shadow.foliage.imageSampler is imageSampler {
+    ret
+  }
+  loop let bind: mod BindGroupId in shadow.foliage.binds {
+    let retired: Bool = retireBindGroup(resources: resources, id: bind)
+    bind = noBindGroupId()
+  }
+  shadow.foliage.imageView = imageView
+  shadow.foliage.imageSampler = imageSampler
+}
+
+func setShadowSurface(shadow: mod ShadowCache, layer: view Int) {
+  if layer >= 0 and shadow.modelFloats.length >= shadowCasterFloats {
+    shadow.modelFloats.set(
+      index: shadow.modelFloats.length - shadowCasterFloats + 20
+      value: -(layer + 1).toFloat()
+    )
   }
 }

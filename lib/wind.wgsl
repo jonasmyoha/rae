@@ -56,8 +56,22 @@ fn windLeaf(world: vec3<f32>, normal: vec3<f32>, pivot: vec3<f32>, foot: vec3<f3
   result.position = world;
   result.normal = normal;
   let strength = length(wind.xy);
-  if (flexibility <= 0.0 || strength <= 0.0001) { return result; }
+  if (flexibility == 0.0 || strength <= 0.0001) { return result; }
   let direction = wind.xy / strength;
+  if (flexibility < 0.0) {
+    // Broad foliage groups respond slowly and together. Phase is fixed in
+    // world space; changing wind direction cannot jump an advected noise field.
+    let treePhase = windHash(foot.xy) * 6.2831853;
+    let branchPhase = windHash(pivot.xy + vec2<f32>(pivot.z)) * 6.2831853;
+    let swell = 0.6 + 0.2 * sin(wind.w * 0.63 + treePhase)
+                     + 0.2 * sin(wind.w * 0.91 + treePhase * 1.7);
+    let branch = sin(wind.w * 1.35 + branchPhase) * 0.30;
+    let angle = min(strength, 2.0) * abs(flexibility) * (0.035 * swell + 0.025 * branch);
+    let axis = vec3<f32>(-direction.y, direction.x, 0.0);
+    result.position = pivot + windRotate(world - pivot, axis, angle);
+    result.normal = windRotate(normal, axis, angle);
+    return result;
+  }
   let phase = windHash(pivot.xy + vec2<f32>(pivot.z * 0.71, pivot.z * 0.37)) * 6.2831853;
   // A steady gust level, not windGustAt: that field moves by the drifting
   // direction times the total time and jumps between frames, which made
