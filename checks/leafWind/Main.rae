@@ -88,17 +88,22 @@ func runCheck(resources: mod GpuResources) ret Int {
                 }
                 retireReadback(resources: resources, id: read)
                 var moving: Int = 0
+                var movingSprays: Int = 0
                 loop var i: Int = 0, i < 64, ++i {
                   if bytes.copyAtFallback(index: i * 4, fallback: 0) is not 1 {
                     ret 7
                   }
-                  moving = moving + bytes.copyAtFallback(index: 256 + i * 4, fallback: 0) as Int
+                  let motion: Int = bytes.copyAtFallback(index: 256 + i * 4, fallback: 0) as Int
+                  moving = moving + motion
+                  if i >= 32 {
+                    movingSprays = movingSprays + motion
+                  }
                 }
-                if moving < 48 {
+                if moving < 44 or movingSprays < 12 {
                   ret 8
                 }
                 log(
-                  "leaf wind: 64 times preserve patch shape, attachment, normals and exact calm; leaves move"
+                  "leaf wind: 64 times preserve patch shape, attachment, normals and exact calm; sprays move over 5 cm in {movingSprays} samples"
                 )
                 ret 0
               }

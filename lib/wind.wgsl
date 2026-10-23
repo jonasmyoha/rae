@@ -63,10 +63,13 @@ fn windLeaf(world: vec3<f32>, normal: vec3<f32>, pivot: vec3<f32>, foot: vec3<f3
     // world space; changing wind direction cannot jump an advected noise field.
     let treePhase = windHash(foot.xy) * 6.2831853;
     let branchPhase = windHash(pivot.xy + vec2<f32>(pivot.z)) * 6.2831853;
-    let swell = 0.6 + 0.2 * sin(wind.w * 0.63 + treePhase)
-                     + 0.2 * sin(wind.w * 0.91 + treePhase * 1.7);
-    let branch = sin(wind.w * 1.35 + branchPhase) * 0.30;
-    let angle = min(strength, 2.0) * abs(flexibility) * (0.035 * swell + 0.025 * branch);
+    let activity = 0.75 + 0.25 * clamp(wind.z, 0.0, 1.0);
+    let swell = 0.14 * sin(wind.w * 0.95 + treePhase)
+              + 0.06 * sin(wind.w * 1.47 + treePhase * 1.7);
+    let branch = 0.065 * sin(wind.w * 1.8 + branchPhase)
+               + 0.025 * sin(wind.w * 3.1 + branchPhase * 1.3);
+    let angle = clamp(min(strength, 2.0) * abs(flexibility)
+                    * (0.065 + activity * (swell + branch)), -0.42, 0.42);
     let axis = vec3<f32>(-direction.y, direction.x, 0.0);
     result.position = pivot + windRotate(world - pivot, axis, angle);
     result.normal = windRotate(normal, axis, angle);

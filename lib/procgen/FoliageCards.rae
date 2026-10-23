@@ -1,20 +1,23 @@
-# Curved alpha-tested patches around a clump. Their smooth normals come from
-# the same ellipsoid, so crossing cards do not alternate bright/dark lighting.
+# Irregular curved sprays, with shading shared across the broader crown.
+# Shape and lighting envelopes are separate: a tuft must not shade as a ball.
 import Math
 open Vec3
 open Noise
 open Mesh3d
 open procgen/Foliage
 
-func addFoliageCluster(
+func addFoliageSpray(
   mesh: mod MeshData
   center: view Vec3
   pivot: view Vec3
-  radius: view Float
+  extent: view Vec3
+  shadeNormal: view Vec3
   seed: view Int
 ) {
-  loop var patch: Int = 0, patch < 12, ++patch {
-    let height: Float = 1.0 - 2.0 * (patch.toFloat() + 0.5) / 12.0
+  let patchCount: Int = 4 + (seed % 3 + 3) % 3
+  let flexibility: Float = -(0.80 + hash2(x: seed, y: 7, seed: 29) * 0.40)
+  loop var patch: Int = 0, patch < patchCount, ++patch {
+    let height: Float = 1.0 - 2.0 * (patch.toFloat() + 0.5) / patchCount.toFloat()
     let angle: Float = patch.toFloat() * 2.3999632 + hash2(x: seed, y: 3, seed: 29) * 6.2831853
     let radial: Float = Math.sqrt(x: 1.0 - height * height)
     let outward: Vec3 = Vec3.create(
@@ -24,17 +27,27 @@ func addFoliageCluster(
     )
     let side: Vec3 = foliageBasis(direction: outward)
     let up: Vec3 = vcross(a: outward, b: side)
+    let patchSize: Float = 0.72 + hash2(x: patch, y: 1, seed: seed) * 0.42
+    let drift: Vec3 = Vec3.create(
+      x: (hash2(x: patch, y: 2, seed: seed) - 0.5) * 0.40
+      y: (hash2(x: patch, y: 3, seed: seed) - 0.5) * 0.40
+      z: (hash2(x: patch, y: 4, seed: seed) - 0.5) * 0.55
+    )
     let base: Int = mesh.vertCount
     loop var row: Int = 0, row < 3, ++row {
       loop var column: Int = 0, column < 3, ++column {
         let x: Float = column.toFloat() - 1.0
         let y: Float = row.toFloat() - 1.0
         let local: Vec3 = vadd(
-          a: vscale(a: outward, s: 0.72 - (x * x + y * y) * 0.18)
-          b: vadd(a: vscale(a: side, s: x * 0.78), b: vscale(a: up, s: y * 0.78))
+          a: vscale(a: outward, s: 0.40 - (x * x + y * y) * 0.12)
+          b: vadd(a: vscale(a: side, s: x * patchSize), b: vscale(a: up, s: y * patchSize))
         )
-        let position: Vec3 = vadd(a: center, b: vscale(a: local, s: radius))
-        let normal: Vec3 = vnorm(a: vadd(a: local, b: Vec3.create(x: 0, y: 0, z: 0.55)))
+        let offset: Vec3 = vadd(a: local, b: drift)
+        let position: Vec3 = vadd(
+          a: center
+          b: Vec3.create(x: offset.x * extent.x, y: offset.y * extent.y, z: offset.z * extent.z)
+        )
+        let normal: Vec3 = vnorm(a: vadd(a: shadeNormal, b: vscale(a: local, s: 0.22)))
         pushVert(
           verts: mesh.verts
           px: position.x
@@ -50,7 +63,7 @@ func addFoliageCluster(
         mesh.windPivots.add(value: pivot.x)
         mesh.windPivots.add(value: pivot.y)
         mesh.windPivots.add(value: pivot.z)
-        mesh.windPivots.add(value: -0.45)
+        mesh.windPivots.add(value: flexibility)
         mesh.vertCount = mesh.vertCount + 1
       }
     }

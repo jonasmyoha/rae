@@ -7,7 +7,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
   let second = pivot + vec3<f32>(0.0, 0.5, 0.2);
   let normal = vec3<f32>(0.0, 0.0, 1.0);
   let wind = vec4<f32>(1.0, 0.3, 0.8, time);
-  let flexibility = select(1.0, -0.45, id.x >= 32u);
+  let flexibility = select(1.0, -1.0, id.x >= 32u);
   let a = windLeaf(first, normal, pivot, vec3<f32>(0.0), flexibility, wind);
   let b = windLeaf(second, normal, pivot, vec3<f32>(0.0), flexibility, wind);
   let attachment = windLeaf(pivot, normal, pivot, vec3<f32>(0.0), flexibility, wind);
@@ -22,5 +22,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     vec4<f32>(wind.xyz, time + 0.001));
   let continuous = distance(next.position, a.position) < 0.002;
   results[id.x] = select(0u, 1u, preserved && normals && still && continuous);
-  if (distance(a.position, first) > 0.00001) { results[64 + id.x] = 1u; }
+  // A fresh breeze must move a 70 cm spray tip visibly, not just millimetres.
+  let threshold = select(0.00001, 0.05, id.x >= 32u);
+  results[64 + id.x] = select(0u, 1u, distance(a.position, first) > threshold);
 }
