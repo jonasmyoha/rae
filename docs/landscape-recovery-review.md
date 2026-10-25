@@ -435,3 +435,11 @@ clearing and path-contact captures, with shared ground/tuft colour and uneven
 root groups. The private presentation includes calm/breezy continuous walks in
 both apps. It records matching density settings, surviving counts, cost and
 remaining limits; this is not a claim that the wider meadow art is complete.
+
+## Oxeye daisy recovery
+
+The [daisy comparison](daisy-recovery.md) shows the unchanged rejected plant,
+curved-stem candidate, grouped patch, side/low-sun/night views and shared forest
+integration. The private presentation places these actual renders beside G01/G02
+and credited botanical photographs. Mesh costs and remaining art limits are
+recorded explicitly; this does not approve the whole meadow or the harebell.

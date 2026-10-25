@@ -1,5 +1,6 @@
 # Close studies for the shared meadow-flower generators. Every complete patch
 # is one entity per species material, never an entity or draw per flower head.
+import Sys
 open Vec3
 open Mesh3d
 open Scene3d
@@ -31,27 +32,28 @@ func placeDaisyParts(
   world: mod World3d
   renderer: mod DeferredRenderer
   flowers: view MeadowFlowerParts
+  control: view Bool
   position: view Vec3
 ) {
   placeFlowerPart(
     world: world
     renderer: renderer
     mesh: flowers.stems
-    material: oxeyeStemMaterial()
+    material: oxeyeVariantStemMaterial(control: control)
     position: position
   )
   placeFlowerPart(
     world: world
     renderer: renderer
     mesh: flowers.petals
-    material: oxeyePetalMaterial()
+    material: oxeyeVariantPetalMaterial(control: control)
     position: position
   )
   placeFlowerPart(
     world: world
     renderer: renderer
     mesh: flowers.discs
-    material: oxeyeDiscMaterial()
+    material: oxeyeVariantDiscMaterial(control: control)
     position: position
   )
 }
@@ -84,18 +86,39 @@ func addOxeyeDaisyStudy(
   singlePosition: view Vec3
   patchPosition: view Vec3
 ) {
-  let single: MeadowFlowerParts = oxeyeDaisyPatch(seed: 1307, count: 1, radius: 0.0)
+  # Fixed rejected plant remains beside the candidate at the same scale.
+  let control: MeadowFlowerParts = oxeyeDaisyControlPatch(seed: 1307, count: 1, radius: 0.0)
+  placeDaisyParts(
+    world: world
+    renderer: renderer
+    flowers: control
+    control: true
+    position: Vec3.create(x: singlePosition.x - 0.60, y: singlePosition.y, z: singlePosition.z)
+  )
+  let single: MeadowFlowerParts = oxeyeDaisyVariant(
+    seed: 1307
+    count: 1
+    radius: 0.0
+    control: Sys.getEnv(name: "RAE_DAISY_CONTROL") is "1"
+  )
   placeDaisyParts(
     world: world
     renderer: renderer
     flowers: single
+    control: Sys.getEnv(name: "RAE_DAISY_CONTROL") is "1"
     position: singlePosition
   )
-  let patch: MeadowFlowerParts = oxeyeDaisyPatch(seed: 1871, count: 13, radius: 1.05)
+  let patch: MeadowFlowerParts = oxeyeDaisyVariant(
+    seed: 1871
+    count: 13
+    radius: 1.05
+    control: Sys.getEnv(name: "RAE_DAISY_CONTROL") is "1"
+  )
   placeDaisyParts(
     world: world
     renderer: renderer
     flowers: patch
+    control: Sys.getEnv(name: "RAE_DAISY_CONTROL") is "1"
     position: patchPosition
   )
 }
