@@ -1,0 +1,740 @@
+# A reusable bare-wood study for trunks whose primary branches are joined to
+# the parent surface. The trunk leaves an opening for each branch and the
+# branch bridge reuses that opening's boundary vertices. This avoids the dark
+# collar made by two overlapping tubes. Z-up, metres, deterministic by seed.
+import Math
+open Mesh3d
+open Vec3
+open Noise
+open procgen/Foliage
+open procgen/CamphorGeometry
+
+const forkPi: Float = 3.141592653589793
+
+type SculpturalFork {
+  wood: MeshData
+  boundsMin: Vec3
+  boundsMax: Vec3
+  declaredRadius: Float
+  declaredHeight: Float
+  declaredDepth: Float
+  junctionCount: Int
+  minimumJunctionNormalDot: Float
+  minimumFrameDot: Float
+}
+
+type ForkPath {
+  points: List(Vec3)
+  radii: List(Float)
+}
+
+type ForkFrame {
+  tangent: Vec3
+  side: Vec3
+  across: Vec3
+}
+
+type ForkOpening {
+  ring: Int
+  centerSide: Int
+  boundary0: Int
+  boundary1: Int
+  boundary2: Int
+  boundary3: Int
+  boundary4: Int
+  boundary5: Int
+}
+
+type ForkBounds {
+  minimum: Vec3
+  maximum: Vec3
+}
+
+func forkHash(seed: view Int, x: view Int, y: view Int) ret Float {
+  ret hash2(x: x, y: y, seed: seed)
+}
+
+func forkDistance(a: view Vec3, b: view Vec3) ret Float {
+  let delta: Vec3 = vsub(a: a, b: b)
+  ret Math.sqrt(x: vdot(a: delta, b: delta))
+}
+
+func forkVertex(
+  mesh: mod MeshData
+  point: view Vec3
+  normal: view Vec3
+  u: view Float
+  v: view Float
+) ret Int {
+  let index: Int = mesh.vertCount
+  pushVert(
+    verts: mesh.verts
+    px: point.x
+    py: point.y
+    pz: point.z
+    nx: normal.x
+    ny: normal.y
+    nz: normal.z
+    u: u
+    value: v
+  )
+  mesh.vertCount = mesh.vertCount + 1
+  ret index
+}
+
+func forkPoint(mesh: view MeshData, index: view Int) ret Vec3 {
+  let start: Int = index * 8
+  ret Vec3.create(
+    x: mesh.verts.copyAtFallback(index: start, fallback: 0)
+    y: mesh.verts.copyAtFallback(index: start + 1, fallback: 0)
+    z: mesh.verts.copyAtFallback(index: start + 2, fallback: 0)
+  )
+}
+
+func forkNormal(mesh: view MeshData, index: view Int) ret Vec3 {
+  let start: Int = index * 8
+  ret Vec3.create(
+    x: mesh.verts.copyAtFallback(index: start + 3, fallback: 0)
+    y: mesh.verts.copyAtFallback(index: start + 4, fallback: 0)
+    z: mesh.verts.copyAtFallback(index: start + 5, fallback: 1)
+  )
+}
+
+func forkFrame(points: view List(Vec3), index: view Int, previousSide: view Vec3) ret ForkFrame {
+  let tangent: Vec3 = foliageTangentAt(points: points, index: index)
+  var side: Vec3 = vsub(
+    a: previousSide
+    b: vscale(a: tangent, s: vdot(a: previousSide, b: tangent))
+  )
+  if vdot(a: side, b: side) < 0.0001 {
+    side = foliageBasis(direction: tangent)
+  } else {
+    side = vnorm(a: side)
+  }
+  ret ForkFrame { tangent: tangent, side: side, across: vnorm(a: vcross(a: tangent, b: side)) }
+}
+
+func forkSmoothPath(
+  controls: view List(Vec3)
+  radii: view List(Float)
+  steps: view Int
+) ret ForkPath {
+  var points: List(Vec3) = List.create(Vec3, cap: (controls.length - 1) * steps + 1)
+  var smoothRadii: List(Float) = List.create(Float, cap: (controls.length - 1) * steps + 1)
+  loop var segment: Int = 0, segment < controls.length - 1, ++segment {
+    let start: Vec3 = controls.copyAtDefault(index: segment)
+    let end: Vec3 = controls.copyAtDefault(index: segment + 1)
+    let previous: Vec3 = controls.copyAtFallback(index: segment - 1, fallback: start)
+    let next: Vec3 = controls.copyAtFallback(index: segment + 2, fallback: end)
+    let radius: Float = radii.copyAtDefault(index: segment)
+    let endRadius: Float = radii.copyAtDefault(index: segment + 1)
+    loop var step: Int = 0, step < steps, ++step {
+      let fraction: Float = step.toFloat() / steps.toFloat()
+      points.add(value: camphorCurve(
+        previous: previous
+        start: start
+        end: end
+        next: next
+        fraction: fraction
+      ))
+      smoothRadii.add(value: radius + (endRadius - radius) * fraction)
+    }
+  }
+  points.add(value: controls.copyAtDefault(index: controls.length - 1))
+  smoothRadii.add(value: radii.copyAtDefault(index: radii.length - 1))
+  ret ForkPath { points: own points, radii: own smoothRadii }
+}
+
+func forkPathFrameDot(path: view ForkPath) ret Float {
+  var minimum: Float = 1
+  var side: Vec3 = foliageBasis(direction: foliageTangentAt(points: path.points, index: 0))
+  loop var index: Int = 0, index < path.points.length, ++index {
+    let frame: ForkFrame = forkFrame(points: path.points, index: index, previousSide: side)
+    let agreement: Float = vdot(a: side, b: frame.side)
+    if agreement < minimum {
+      minimum = agreement
+    }
+    side = frame.side
+  }
+  ret minimum
+}
+
+func forkRootScale(angle: view Float, seed: view Int, strength: view Float) ret Float {
+  var influence: Float = 0
+  loop var root: Int = 0, root < 4, ++root {
+    let rootAngle: Float = root.toFloat() * forkPi * 0.5 + forkHash(seed: seed, x: root, y: 71) * 0.42
+    let alignment: Float = Math.cos(x: angle - rootAngle)
+    if alignment > 0.55 {
+      let shaped: Float = (alignment - 0.55) / 0.45
+      influence = influence + shaped * shaped
+    }
+  }
+  ret 1.0 + influence * strength
+}
+
+func forkTrunkVertex(
+  mesh: mod MeshData
+  center: view Vec3
+  frame: view ForkFrame
+  radius: view Float
+  angle: view Float
+  rootStrength: view Float
+  seed: view Int
+  u: view Float
+  v: view Float
+) ret Int {
+  let radial: Vec3 = vadd(
+    a: vscale(a: frame.side, s: Math.cos(x: angle))
+    b: vscale(a: frame.across, s: Math.sin(x: angle))
+  )
+  let scale: Float = forkRootScale(angle: angle, seed: seed, strength: rootStrength)
+  ret forkVertex(
+    mesh: mesh
+    point: vadd(a: center, b: vscale(a: radial, s: radius * scale))
+    normal: radial
+    u: u
+    v: v
+  )
+}
+
+func forkOpeningBoundary(
+  first: view Int
+  sides: view Int
+  ring: view Int
+  centerSide: view Int
+) ret ForkOpening {
+  let left: Int = (centerSide + sides - 1) % sides
+  let middle: Int = centerSide
+  let right: Int = (centerSide + 1) % sides
+  let lower: Int = first + ring * sides
+  let upper: Int = lower + sides
+  ret ForkOpening {
+    ring: ring
+    centerSide: centerSide
+    boundary0: lower + left
+    boundary1: lower + middle
+    boundary2: lower + right
+    boundary3: upper + right
+    boundary4: upper + middle
+    boundary5: upper + left
+  }
+}
+
+func forkOpeningIndex(opening: view ForkOpening, index: view Int) ret Int {
+  if index is 0 {
+    ret opening.boundary0
+  }
+  if index is 1 {
+    ret opening.boundary1
+  }
+  if index is 2 {
+    ret opening.boundary2
+  }
+  if index is 3 {
+    ret opening.boundary3
+  }
+  if index is 4 {
+    ret opening.boundary4
+  }
+  ret opening.boundary5
+}
+
+func forkSkippedQuad(
+  ring: view Int
+  side: view Int
+  opening: view ForkOpening
+  sides: view Int
+) ret Bool {
+  if ring is not opening.ring {
+    ret false
+  }
+  let left: Int = (opening.centerSide + sides - 1) % sides
+  ret side is left or side is opening.centerSide
+}
+
+func forkAddTriangle(
+  mesh: mod MeshData
+  first: view Int
+  second: view Int
+  third: view Int
+  expectedNormal: view Vec3
+) {
+  let a: Vec3 = forkPoint(mesh: mesh, index: first)
+  let b: Vec3 = forkPoint(mesh: mesh, index: second)
+  let c: Vec3 = forkPoint(mesh: mesh, index: third)
+  let normal: Vec3 = vcross(a: vsub(a: b, b: a), b: vsub(a: c, b: a))
+  mesh.indices.add(value: first)
+  if vdot(a: normal, b: expectedNormal) >= 0 {
+    mesh.indices.add(value: second)
+    mesh.indices.add(value: third)
+  } else {
+    mesh.indices.add(value: third)
+    mesh.indices.add(value: second)
+  }
+}
+
+func forkCap(
+  mesh: mod MeshData
+  ringFirst: view Int
+  sides: view Int
+  center: view Vec3
+  normal: view Vec3
+  v: view Float
+) {
+  let centerIndex: Int = forkVertex(
+    mesh: mesh
+    point: center
+    normal: normal
+    u: 0.5
+    v: v
+  )
+  loop var sideIndex: Int = 0, sideIndex < sides, ++sideIndex {
+    forkAddTriangle(
+      mesh: mesh
+      first: ringFirst + sideIndex
+      second: ringFirst + (sideIndex + 1) % sides
+      third: centerIndex
+      expectedNormal: normal
+    )
+  }
+}
+
+func forkTrunk(
+  mesh: mod MeshData
+  path: view ForkPath
+  sides: view Int
+  seed: view Int
+  firstOpeningRing: view Int
+  firstOpeningSide: view Int
+  secondOpeningRing: view Int
+  secondOpeningSide: view Int
+  openingCount: view Int
+) ret List(ForkOpening) {
+  let first: Int = mesh.vertCount
+  var distance: Float = 0
+  var side: Vec3 = foliageBasis(direction: foliageTangentAt(points: path.points, index: 0))
+  loop var ring: Int = 0, ring < path.points.length, ++ring {
+    if ring > 0 {
+      distance = distance + forkDistance(
+        a: path.points.copyAtDefault(index: ring - 1)
+        b: path.points.copyAtDefault(index: ring)
+      )
+    }
+    let frame: ForkFrame = forkFrame(points: path.points, index: ring, previousSide: side)
+    side = frame.side
+    let center: Vec3 = path.points.copyAtDefault(index: ring)
+    let radius: Float = path.radii.copyAtDefault(index: ring)
+    var rootStrength: Float = 0
+    if ring < 4 {
+      rootStrength = (4 - ring).toFloat() * 0.22
+    }
+    loop var sideIndex: Int = 0, sideIndex < sides, ++sideIndex {
+      let angle: Float = sideIndex.toFloat() * 2.0 * forkPi / sides.toFloat()
+      forkTrunkVertex(
+        mesh: mesh
+        center: center
+        frame: frame
+        radius: radius
+        angle: angle
+        rootStrength: rootStrength
+        seed: seed
+        u: sideIndex.toFloat() / sides.toFloat()
+        v: distance
+      )
+    }
+  }
+  var openings: List(ForkOpening) = List.create(ForkOpening, cap: openingCount)
+  let firstOpening: ForkOpening = forkOpeningBoundary(
+    first: first
+    sides: sides
+    ring: firstOpeningRing
+    centerSide: firstOpeningSide
+  )
+  openings.add(value: firstOpening)
+  var secondOpening: ForkOpening = firstOpening
+  if openingCount > 1 {
+    secondOpening = forkOpeningBoundary(
+      first: first
+      sides: sides
+      ring: secondOpeningRing
+      centerSide: secondOpeningSide
+    )
+    openings.add(value: secondOpening)
+  }
+  loop var ring: Int = 0, ring < path.points.length - 1, ++ring {
+    loop var sideIndex: Int = 0, sideIndex < sides, ++sideIndex {
+      let skipFirst: Bool = forkSkippedQuad(
+        ring: ring
+        side: sideIndex
+        opening: firstOpening
+        sides: sides
+      )
+      var skipSecond: Bool = false
+      if openingCount > 1 {
+        skipSecond = forkSkippedQuad(
+          ring: ring
+          side: sideIndex
+          opening: secondOpening
+          sides: sides
+        )
+      }
+      if not skipFirst and not skipSecond {
+        let lower: Int = first + ring * sides + sideIndex
+        let lowerNext: Int = first + ring * sides + (sideIndex + 1) % sides
+        let upper: Int = lower + sides
+        let upperNext: Int = lowerNext + sides
+        mesh.indices.add(value: lower)
+        mesh.indices.add(value: lowerNext)
+        mesh.indices.add(value: upper)
+        mesh.indices.add(value: upper)
+        mesh.indices.add(value: lowerNext)
+        mesh.indices.add(value: upperNext)
+      }
+    }
+  }
+  forkCap(
+    mesh: mesh
+    ringFirst: first + (path.points.length - 1) * sides
+    sides: sides
+    center: path.points.copyAtDefault(index: path.points.length - 1)
+    normal: foliageTangentAt(points: path.points, index: path.points.length - 1)
+    v: distance
+  )
+  ret openings
+}
+
+func forkOpeningCenter(mesh: view MeshData, opening: view ForkOpening) ret Vec3 {
+  var center: Vec3 = Vec3.create(x: 0, y: 0, z: 0)
+  loop var index: Int = 0, index < 6, ++index {
+    center = vadd(
+      a: center
+      b: forkPoint(mesh: mesh, index: forkOpeningIndex(opening: opening, index: index))
+    )
+  }
+  ret vscale(a: center, s: 1.0 / 6)
+}
+
+func forkOpeningNormal(mesh: view MeshData, opening: view ForkOpening) ret Vec3 {
+  var normal: Vec3 = Vec3.create(x: 0, y: 0, z: 0)
+  loop var index: Int = 0, index < 6, ++index {
+    normal = vadd(
+      a: normal
+      b: forkNormal(mesh: mesh, index: forkOpeningIndex(opening: opening, index: index))
+    )
+  }
+  ret vnorm(a: normal)
+}
+
+func forkBranchPath(
+  start: view Vec3
+  direction: view Vec3
+  length: view Float
+  rise: view Float
+  radius: view Float
+) ret ForkPath {
+  let horizontal: Vec3 = vnorm(a: Vec3.create(x: direction.x, y: direction.y, z: 0))
+  let controls: List(Vec3) = {
+    start
+    vadd(
+      a: start
+      b: vadd(a: vscale(a: direction, s: length * 0.28), b: Vec3.create(x: 0, y: 0, z: rise * 0.08))
+    )
+    vadd(
+      a: start
+      b: vadd(a: vscale(a: direction, s: length * 0.62), b: Vec3.create(x: 0, y: 0, z: rise * 0.42))
+    )
+    vadd(
+      a: start
+      b: vadd(
+        a: vscale(a: horizontal, s: length)
+        b: Vec3.create(x: 0, y: 0, z: direction.z * length + rise)
+      )
+    )
+  }
+  let radii: List(Float) = { radius, radius * 0.82, radius * 0.52, radius * 0.14 }
+  ret forkSmoothPath(controls: controls, radii: radii, steps: 3)
+}
+
+func forkJoinedBranch(
+  mesh: mod MeshData
+  opening: view ForkOpening
+  path: view ForkPath
+) ret Float {
+  let sides: Int = 6
+  let center: Vec3 = forkOpeningCenter(mesh: mesh, opening: opening)
+  var side: Vec3 = vsub(a: forkPoint(mesh: mesh, index: opening.boundary0), b: center)
+  let tangent: Vec3 = foliageTangentAt(points: path.points, index: 0)
+  side = vsub(a: side, b: vscale(a: tangent, s: vdot(a: side, b: tangent)))
+  if vdot(a: side, b: side) < 0.0001 {
+    side = foliageBasis(direction: tangent)
+  } else {
+    side = vnorm(a: side)
+  }
+  let first: Int = mesh.vertCount
+  var minimumNormalDot: Float = 1
+  var distance: Float = 0
+  loop var ring: Int = 0, ring < path.points.length, ++ring {
+    if ring > 0 {
+      distance = distance + forkDistance(
+        a: path.points.copyAtDefault(index: ring - 1)
+        b: path.points.copyAtDefault(index: ring)
+      )
+    }
+    let frame: ForkFrame = forkFrame(points: path.points, index: ring, previousSide: side)
+    side = frame.side
+    let branchCenter: Vec3 = path.points.copyAtDefault(index: ring)
+    let radius: Float = path.radii.copyAtDefault(index: ring)
+    loop var sideIndex: Int = 0, sideIndex < sides, ++sideIndex {
+      let angle: Float = sideIndex.toFloat() * 2.0 * forkPi / sides.toFloat()
+      var radial: Vec3 = vadd(
+        a: vscale(a: frame.side, s: Math.cos(x: angle))
+        b: vscale(a: frame.across, s: Math.sin(x: angle))
+      )
+      var normal: Vec3 = radial
+      if ring is 0 {
+        let base: Int = forkOpeningIndex(opening: opening, index: sideIndex)
+        let baseNormal: Vec3 = forkNormal(mesh: mesh, index: base)
+        let baseOffset: Vec3 = vsub(a: forkPoint(mesh: mesh, index: base), b: center)
+        radial = vsub(
+          a: baseOffset
+          b: vscale(a: frame.tangent, s: vdot(a: baseOffset, b: frame.tangent))
+        )
+        if vdot(a: radial, b: radial) < 0.0001 {
+          radial = frame.side
+        } else {
+          radial = vnorm(a: radial)
+        }
+        normal = vnorm(a: vadd(a: baseNormal, b: radial))
+      }
+      forkVertex(
+        mesh: mesh
+        point: vadd(a: branchCenter, b: vscale(a: radial, s: radius))
+        normal: normal
+        u: sideIndex.toFloat() / sides.toFloat()
+        v: distance
+      )
+    }
+  }
+  loop var sideIndex: Int = 0, sideIndex < sides, ++sideIndex {
+    let next: Int = (sideIndex + 1) % sides
+    let base: Int = forkOpeningIndex(opening: opening, index: sideIndex)
+    let baseNext: Int = forkOpeningIndex(opening: opening, index: next)
+    let ring: Int = first + sideIndex
+    let ringNext: Int = first + next
+    let normalDot: Float = vdot(
+      a: forkNormal(mesh: mesh, index: base)
+      b: forkNormal(mesh: mesh, index: ring)
+    )
+    if normalDot < minimumNormalDot {
+      minimumNormalDot = normalDot
+    }
+    let firstExpected: Vec3 = vnorm(
+      a: vadd(
+        a: vadd(a: forkNormal(mesh: mesh, index: base), b: forkNormal(mesh: mesh, index: baseNext))
+        b: forkNormal(mesh: mesh, index: ring)
+      )
+    )
+    let secondExpected: Vec3 = vnorm(
+      a: vadd(
+        a: vadd(a: forkNormal(mesh: mesh, index: ring), b: forkNormal(mesh: mesh, index: baseNext))
+        b: forkNormal(mesh: mesh, index: ringNext)
+      )
+    )
+    forkAddTriangle(
+      mesh: mesh
+      first: base
+      second: baseNext
+      third: ring
+      expectedNormal: firstExpected
+    )
+    forkAddTriangle(
+      mesh: mesh
+      first: ring
+      second: baseNext
+      third: ringNext
+      expectedNormal: secondExpected
+    )
+  }
+  loop var ring: Int = 0, ring < path.points.length - 1, ++ring {
+    loop var sideIndex: Int = 0, sideIndex < sides, ++sideIndex {
+      let lower: Int = first + ring * sides + sideIndex
+      let lowerNext: Int = first + ring * sides + (sideIndex + 1) % sides
+      let upper: Int = lower + sides
+      let upperNext: Int = lowerNext + sides
+      let expected: Vec3 = vnorm(
+        a: vadd(
+          a: forkNormal(mesh: mesh, index: lower)
+          b: forkNormal(mesh: mesh, index: lowerNext)
+        )
+      )
+      forkAddTriangle(
+        mesh: mesh
+        first: lower
+        second: lowerNext
+        third: upper
+        expectedNormal: expected
+      )
+      forkAddTriangle(
+        mesh: mesh
+        first: upper
+        second: lowerNext
+        third: upperNext
+        expectedNormal: expected
+      )
+    }
+  }
+  forkCap(
+    mesh: mesh
+    ringFirst: first + (path.points.length - 1) * sides
+    sides: sides
+    center: path.points.copyAtDefault(index: path.points.length - 1)
+    normal: foliageTangentAt(points: path.points, index: path.points.length - 1)
+    v: distance
+  )
+  ret minimumNormalDot
+}
+
+func forkMeshBounds(mesh: view MeshData) ret ForkBounds {
+  var minimum: Vec3 = Vec3.create(x: 100000, y: 100000, z: 100000)
+  var maximum: Vec3 = Vec3.create(x: -100000, y: -100000, z: -100000)
+  loop var index: Int = 0, index < mesh.vertCount, ++index {
+    let point: Vec3 = forkPoint(mesh: mesh, index: index)
+    if point.x < minimum.x {
+      minimum.x = point.x
+    }
+    if point.y < minimum.y {
+      minimum.y = point.y
+    }
+    if point.z < minimum.z {
+      minimum.z = point.z
+    }
+    if point.x > maximum.x {
+      maximum.x = point.x
+    }
+    if point.y > maximum.y {
+      maximum.y = point.y
+    }
+    if point.z > maximum.z {
+      maximum.z = point.z
+    }
+  }
+  ret ForkBounds { minimum: minimum, maximum: maximum }
+}
+
+func sculpturalFork(seed: view Int, mature: view Bool) ret SculpturalFork {
+  var height: Float = 8.6
+  var baseRadius: Float = 0.62
+  var declaredRadius: Float = 5.4
+  var openingCount: Int = 1
+  if mature {
+    height = 13.8
+    baseRadius = 1.05
+    declaredRadius = 8.4
+    openingCount = 2
+  }
+  let leanAngle: Float = forkHash(seed: seed, x: 1, y: 2) * 2.0 * forkPi
+  let lean: Float = 0.55 + forkHash(seed: seed, x: 2, y: 3) * 0.55
+  let controls: List(Vec3) = {
+    { x: 0, y: 0, z: -0.32 }
+    {
+      x: Math.cos(x: leanAngle) * lean * 0.08
+      y: Math.sin(x: leanAngle) * lean * 0.08
+      z: height * 0.16
+    }
+    {
+      x: Math.cos(x: leanAngle) * lean * 0.42
+      y: Math.sin(x: leanAngle) * lean * 0.42
+      z: height * 0.43
+    }
+    { x: Math.cos(x: leanAngle) * lean, y: Math.sin(x: leanAngle) * lean, z: height * 0.72 }
+    {
+      x: Math.cos(x: leanAngle + 0.25) * lean * 1.45
+      y: Math.sin(x: leanAngle + 0.25) * lean * 1.45
+      z: height
+    }
+  }
+  let radii: List(Float) = {
+    baseRadius * 1.2
+    baseRadius
+    baseRadius * 0.76
+    baseRadius * 0.43
+    baseRadius * 0.12
+  }
+  let trunk: ForkPath = forkSmoothPath(controls: controls, radii: radii, steps: 4)
+  let sides: Int = 12
+  let firstRing: Int = 7
+  let secondRing: Int = 12
+  let firstSide: Int = 2 + seed % 3
+  let secondSide: Int = (firstSide + 5 + seed % 2) % sides
+  var mesh: MeshData = foliageMesh()
+  let openings: List(ForkOpening) = forkTrunk(
+    mesh: mesh
+    path: trunk
+    sides: sides
+    seed: seed
+    firstOpeningRing: firstRing
+    firstOpeningSide: firstSide
+    secondOpeningRing: secondRing
+    secondOpeningSide: secondSide
+    openingCount: openingCount
+  )
+  var minimumJunctionNormalDot: Float = 1
+  var minimumFrameDot: Float = forkPathFrameDot(path: trunk)
+  loop var junction: Int = 0, junction < openingCount, ++junction {
+    let opening: ForkOpening = openings.copyAtDefault(index: junction)
+    let center: Vec3 = forkOpeningCenter(mesh: mesh, opening: opening)
+    let outward: Vec3 = forkOpeningNormal(mesh: mesh, opening: opening)
+    let turn: Float = (forkHash(seed: seed, x: junction, y: 41) - 0.5) * 0.42
+    let direction: Vec3 = vnorm(
+      a: Vec3.create(
+        x: outward.x + Math.cos(x: leanAngle + turn) * 0.18
+        y: outward.y + Math.sin(x: leanAngle + turn) * 0.18
+        z: 0.48 + junction.toFloat() * 0.18
+      )
+    )
+    var length: Float = height * 0.39
+    var rise: Float = height * 0.12
+    var branchRadius: Float = baseRadius * 0.48
+    if junction is 1 {
+      length = height * 0.31
+      rise = height * 0.16
+      branchRadius = baseRadius * 0.34
+    }
+    let start: Vec3 = vadd(a: center, b: vscale(a: direction, s: branchRadius * 0.12))
+    let branch: ForkPath = forkBranchPath(
+      start: start
+      direction: direction
+      length: length
+      rise: rise
+      radius: branchRadius
+    )
+    let normalDot: Float = forkJoinedBranch(mesh: mesh, opening: opening, path: branch)
+    let frameDot: Float = forkPathFrameDot(path: branch)
+    if normalDot < minimumJunctionNormalDot {
+      minimumJunctionNormalDot = normalDot
+    }
+    if frameDot < minimumFrameDot {
+      minimumFrameDot = frameDot
+    }
+  }
+  let bounds: ForkBounds = forkMeshBounds(mesh: mesh)
+  ret SculpturalFork {
+    wood: own mesh
+    boundsMin: bounds.minimum
+    boundsMax: bounds.maximum
+    declaredRadius: declaredRadius
+    declaredHeight: height + 2.0
+    declaredDepth: 1.0
+    junctionCount: openingCount
+    minimumJunctionNormalDot: minimumJunctionNormalDot
+    minimumFrameDot: minimumFrameDot
+  }
+}
+
+func youngSculpturalFork(seed: view Int) ret SculpturalFork {
+  ret sculpturalFork(seed: seed, mature: false)
+}
+
+func matureSculpturalFork(seed: view Int) ret SculpturalFork {
+  ret sculpturalFork(seed: seed, mature: true)
+}

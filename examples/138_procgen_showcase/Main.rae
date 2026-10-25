@@ -106,14 +106,19 @@ func createShowcase() ret ShowcaseState {
   var idIssuer: IdIssuer = IdIssuer.create()
 
   # The settings start on the Preetham sky at a fixed mid-morning hour (the
-  # clock runs from the panel), and the panel's scene chooser is the nine views
+  # clock runs from the panel), and the panel's scene chooser includes the
+  # three bare-fork inspection views used by the landscape art work.
   let initialView: Int = groveViewNumber(viewName: Sys.getEnv(name: "RAE_GROVE_VIEW"))
+  var initialHour: Float = 10.0
+  if initialView is 12 {
+    initialHour = 17.25
+  }
   var settings: SettingsState = createSettingsState(
     scene: initialView
-    sceneCount: 9
+    sceneCount: 12
     speed: 1.0
     toon: true
-    hour: 10.0
+    hour: initialHour
     skyModel: SettingsSkyModel.preetham
   )
   settings.animateTime = false
@@ -188,6 +193,15 @@ func groveViewName(groveView: view Int) ret String {
   if groveView is 9 {
     ret "Silver birch"
   }
+  if groveView is 10 {
+    ret "Joined forks: front"
+  }
+  if groveView is 11 {
+    ret "Joined forks: side"
+  }
+  if groveView is 12 {
+    ret "Joined forks: grazing light"
+  }
   ret "Autumn Grove"
 }
 
@@ -212,6 +226,15 @@ func groveViewReadout(groveView: view Int) ret String {
   }
   if groveView is 9 {
     ret "Five textured-bark trees and leaf sprays"
+  }
+  if groveView is 10 {
+    ret "Young and mature bare wood; joined branch openings"
+  }
+  if groveView is 11 {
+    ret "Continuous taper, lean and unequal primary angles"
+  }
+  if groveView is 12 {
+    ret "Neutral rough wood under a low late-day sun"
   }
   if groveView is 3 {
     ret "Faceted outcrop beside the path"
@@ -242,7 +265,7 @@ func groveResidentTriangles(renderer: view DeferredRenderer) ret Int {
 # The grove's materials are authored for a bright sun
 const groveSunStrength: Float = 3.1
 
-# RAE_GROVE_VIEW: grove, trees, rocks, fluffy, evergreen, spruces, camphor, roots, birches
+# RAE_GROVE_VIEW also accepts forks-front, forks-side and forks-grazing.
 func groveViewNumber(viewName: view String) ret Int {
   if viewName is "trees" {
     ret 2
@@ -267,6 +290,15 @@ func groveViewNumber(viewName: view String) ret Int {
   }
   if viewName is "roots" {
     ret 8
+  }
+  if viewName is "forks-front" {
+    ret 10
+  }
+  if viewName is "forks-side" {
+    ret 11
+  }
+  if viewName is "forks-grazing" {
+    ret 12
   }
   ret 1
 }
@@ -322,6 +354,22 @@ func setGroveView(camera: mod Camera3d, cameraRig: mod CameraRig, groveView: vie
     cameraRig.distance = 22
     cameraRig.orbitPitch = 0.10
     cameraRig.yaw = -0.25
+  }
+  if groveView is 10 {
+    camera.target = Vec3.create(x: 9.5, y: -13.0, z: 6.2)
+    cameraRig.distance = 27
+    cameraRig.orbitPitch = 0.08
+    cameraRig.yaw = -0.10
+  } else if groveView is 11 {
+    camera.target = Vec3.create(x: 9.5, y: -13.0, z: 6.2)
+    cameraRig.distance = 27
+    cameraRig.orbitPitch = 0.08
+    cameraRig.yaw = 1.35
+  } else if groveView is 12 {
+    camera.target = Vec3.create(x: 9.5, y: -13.0, z: 6.2)
+    cameraRig.distance = 25
+    cameraRig.orbitPitch = 0.02
+    cameraRig.yaw = -0.55
   }
   snapCameraRigView(rig: cameraRig)
   applyCameraRig(rig: cameraRig, camera: camera)

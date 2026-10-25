@@ -90,3 +90,19 @@ The run used a hidden offscreen window with no input, one app, and ordinary
 desktop background load. CPU scheduling, thermal state, driver work and timing
 instrumentation affect the result. Use the numbers only as an idle-load
 baseline on this machine, not as a portable performance score.
+
+## Bare joined-fork studies
+
+Autumn Grove also has three environment-only views for the shared sculptural
+fork primitive. They do not replace the nine landscape baseline frames.
+
+| View | Camera target | Yaw / pitch / distance | Time |
+|---|---|---|---|
+| `forks-front` | (9.5, -13.0, 6.2) | -0.10 / 0.08 / 27 m | 10:00 |
+| `forks-side` | (9.5, -13.0, 6.2) | 1.35 / 0.08 / 27 m | 10:00 |
+| `forks-grazing` | (9.5, -13.0, 6.2) | -0.55 / 0.02 / 25 m | 17:15 |
+
+All three use the same 1280 by 800 headless capture settings, neutral rough
+wood material, seed 206 for the young fork and seed 907 for the mature fork.
+The front and side frames expose the joined openings, taper and unequal branch
+angles. The late-day frame exposes frame twists, ring steps and normal seams.
