@@ -4,7 +4,9 @@
 #
 # The cases: fixtures whose subject is that nothing outside a buffer is read or
 # written (the Float4 masked tail allocates every list with its exact length
-# as capacity, so one element too far is a heap overflow). Each is the
+# as capacity, so one element too far is a heap overflow), and fixtures whose
+# subject is that heap is freed exactly once (1236: list-literal elements are
+# copies; 1238: a move on a path that returns). Each is the
 # fixture's own program — the C the compiler emits plus the runtime — built
 # with clang -fsanitize=address,undefined and run as `rae run` would, with the
 # case's config.cmd flags that change the C (`--float4-scalar`). A case fails
@@ -21,7 +23,7 @@ CC="${RAE_ASAN_CC:-clang}"
 TMP="$(mktemp -d -t rae_asan_XXXXXX)"
 trap 'rm -rf "$TMP"' EXIT
 
-CASES="1085_float4_masked_tail 1086_float4_masked_tail_scalar"
+CASES="1085_float4_masked_tail 1086_float4_masked_tail_scalar 1236_list_literal_copies_places 1238_move_in_returning_branch"
 if [ -n "${RAE_ASAN_FILTER:-}" ]; then CASES="$RAE_ASAN_FILTER"; fi
 
 printf 'int main(void) { return 0; }\n' > "$TMP/probe.c"

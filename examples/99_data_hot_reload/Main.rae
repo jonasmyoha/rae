@@ -42,7 +42,7 @@ func main() {
   log("startup config: {loadConfig(path: configPath)}")
 
   var paths: List(String) = List.create(String, cap: 1)
-  paths.add(value: configPath)
+  paths.add(value: "{configPath}")  # a copy: add() takes its value over, and configPath is used below
   var watcher: FileWatcher = FileWatch.createFileWatcher(
     paths: paths
     enabled: true

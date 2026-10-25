@@ -180,7 +180,8 @@ func readLevelNode(
       levelReaderFail(reader: reader, reason: "duplicate marker {markerName}")
       ret
     }
-    reader.markerNames.add(value: markerName)
+    # add() takes its value over; the item below still names the marker
+    reader.markerNames.add(value: "{markerName}")
     reader.items.add(value: LevelItem {
       kind: LevelItemKind.marker
       nodeName: markerName

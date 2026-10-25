@@ -1,0 +1,33 @@
+# A value moved (or dropped) on a path that then returns reaches nothing
+# after it: the use-after-move check follows only the paths that go on. In
+# a loop, a branch that moves and returns does not poison the next pass
+# (lib/String.rae split has this shape).
+func lastWords(text: view String) ret List(String) {
+  var result: List(String) = List.create(String, cap: 4)
+  var remaining: String = text
+  loop true {
+    if let index: Int = remaining.indexOf(sub: " ") {
+      result.add(value: remaining.sub(start: 0, len: index))
+      remaining = remaining.sub(start: index + 1, len: remaining.length() - index - 1)
+    } else {
+      result.add(value: remaining)
+      ret result
+    }
+  }
+  ret result
+}
+
+func keepOrGive(text: own String, give: view Bool) ret Int {
+  var kept: List(String) = List.create(String, cap: 1)
+  if give {
+    kept.add(value: text)
+    ret kept.length
+  }
+  ret text.length()
+}
+
+func main() {
+  let words: List(String) = lastWords(text: "one two three")
+  log("{words.length} {words.copyAtDefault(index: 2)}")
+  log("{keepOrGive(text: "abc", give: true)} {keepOrGive(text: "abcd", give: false)}")
+}

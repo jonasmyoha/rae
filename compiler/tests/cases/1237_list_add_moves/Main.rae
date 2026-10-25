@@ -1,0 +1,22 @@
+# `List.add(value: own T)` takes the value over: a heap-owning local handed
+# to it is moved, and a second use of it is refused at compile time, as for
+# any `own` parameter (stress/06_useAfterMove). The generic List methods are
+# bound by the C backend, so sema found no declaration for them and never
+# marked the move: the second add was accepted and two lists freed one
+# buffer (#90944914). A caller that needs the value twice adds a copy.
+type Payload {
+  items: List(Int)
+}
+
+func makePayload() ret Payload {
+  ret Payload { items: { 1, 2, 3 } }
+}
+
+func main() {
+  let payload: Payload = makePayload()
+  var first: List(Payload) = List.create(Payload, cap: 1)
+  var second: List(Payload) = List.create(Payload, cap: 1)
+  first.add(value: payload)
+  second.add(value: payload)
+  log("{first.length} {second.length}")
+}

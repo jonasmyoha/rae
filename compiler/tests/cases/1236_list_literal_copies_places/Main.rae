@@ -1,0 +1,76 @@
+# A plain list-literal element is a COPY (docs/ownership-model.md), `own x`
+# a move. Putting the same heap-owning local into two literals gave two
+# lists that shared its nested buffer and freed it twice at scope exit
+# (#90944914). Each list now holds its own deep copy: mutating one leaves
+# the other and the source unchanged, and everything is freed exactly once
+# (the runner's exit leak check; compiler/tools/asan-check.sh runs it under
+# ASan and UBSan).
+type Payload {
+  items: List(Int)
+  name: String
+}
+
+type Holder {
+  payload: Payload
+}
+
+func makePayload() ret Payload {
+  ret Payload { items: { 1, 2, 3 }, name: "p".concat(other: "ayload") }
+}
+
+func itemsText(payload: view Payload) ret String {
+  var text: String = "{payload.name}:"
+  loop let item: view Int in payload.items {
+    text = text.concat(other: " {item}")
+  }
+  ret text
+}
+
+# A literal in return position, built from a view parameter twice
+func twice(payload: view Payload) ret List(Payload) {
+  ret List(Payload) { payload, payload }
+}
+
+func main() {
+  let payload: Payload = makePayload()
+  # The same local in two literals, and twice in one literal
+  var first: List(Payload) = { payload }
+  var second: List(Payload) = { payload, payload }
+  log("{first.length} {second.length}")
+  # Mutating one copy changes nothing else
+  if let copy: mod Payload = first.modAt(index: 0) {
+    copy.items.add(value: 4)
+    copy.name = "first"
+  }
+  if let copy: mod Payload = second.modAt(index: 1) {
+    copy.items.set(index: 0, value: 9)
+  }
+  log(itemsText(payload: payload))
+  loop let element: view Payload in first {
+    log(itemsText(payload: element))
+  }
+  loop let element: view Payload in second {
+    log(itemsText(payload: element))
+  }
+  # A nested list and a String local, each in two literals
+  let numbers: List(Int) = { 7, 8 }
+  var nested: List(List(Int)) = { numbers, numbers }
+  if let inner: mod List(Int) = nested.modAt(index: 0) {
+    inner.add(value: 9)
+  }
+  log(
+    "{numbers.length} {nested.copyAtDefault(index: 0).length} {nested.copyAtDefault(index: 1).length}"
+  )
+  let text: String = "a".concat(other: "b")
+  let texts: List(String) = { text, text }
+  log("{texts.length} {text}")
+  # A field place and a return-position literal from a view
+  let holder: Holder = { payload: makePayload() }
+  let fromField: List(Payload) = { holder.payload, holder.payload }
+  let fromView: List(Payload) = twice(payload: holder.payload)
+  log("{fromField.length} {fromView.length} {itemsText(payload: holder.payload)}")
+  # `own` moves the local in: no copy, and it is not dropped again
+  let moved: Payload = makePayload()
+  let owned: List(Payload) = { own moved }
+  log("{owned.length}")
+}

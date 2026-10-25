@@ -471,8 +471,10 @@ func destroySensor(world: mod PhysicsWorld, shapeId: view Int) {
   let lastIndex: Int = world.sensors.length - 1
   if sensorIndex is not lastIndex {
     let moved: Sensor = world.sensors.copyAtDefault(index: lastIndex)
+    # set() takes the sensor over: read its shape first
+    let movedShapeId: Int = moved.shapeId
     world.sensors.set(index: sensorIndex, value: moved)
-    if let movedShape: mod PhysicsShape = world.shapes.modAt(index: moved.shapeId) {
+    if let movedShape: mod PhysicsShape = world.shapes.modAt(index: movedShapeId) {
       movedShape.sensorIndex = sensorIndex
     }
   }

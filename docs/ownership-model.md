@@ -129,6 +129,28 @@ Plain `T` is sugar for `val T`.
 - `field: own x` means move / consume into the field.
 - No implicit field move.
 
+## List-literal element rule (2026-10-25)
+
+The same as a field: an element of `{ a, b }` / `[a, b]` is a COPY, `own x`
+a move.
+
+- A place (a local, a field, an index) of a heap-owning type is deep-copied
+  into the list (`rae_string_copy`, `rae_deep_copy_<T>`); the place keeps
+  its value and its owner drops it once. `{ payload }` in two literals
+  used to give two lists sharing `payload`'s nested buffer, freed twice at
+  scope exit.
+- `own x` moves `x` in; `x` is not dropped again.
+- A fresh value (a call, a literal, an interpolation) moves in.
+
+`list.add(value: x)` is different: `add` declares `value: own T`, so a
+bare local is MOVED (the function-call rule below) and a second use of it is
+the `use of moved value` error. The generic List methods are bound by the C
+backend, so sema finds their declaration by name and receiver type for this
+check (`sema_unresolved_method_decl`). A caller that still needs the value
+passes a copy (`"{text}"`) or reads what it needs before the call. A move on
+a path that then returns does not count after it, and a collection loop's
+binding is fresh on every pass.
+
 ## Return rule
 
 - Returning an owned local from a function moves it out:

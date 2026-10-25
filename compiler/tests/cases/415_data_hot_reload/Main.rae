@@ -43,7 +43,7 @@ func main() {
   log("initial: {readContent(path: path)}")
 
   var paths: List(String) = List.create(String, cap: 1)
-  paths.add(value: path)
+  paths.add(value: "{path}")  # a copy: add() takes its value over, and path is used below
   var watcher: FileWatcher = createFileWatcher(paths: paths, enabled: true, intervalSec: 0.0)
 
   let r1: Bool = checkForChanges(watcher: watcher, now: 100.0)
