@@ -6,6 +6,10 @@ open Noise
 open Mesh3d
 open procgen/Foliage
 
+func foliageSprayFlexibility(seed: view Int) ret Float {
+  ret -(0.80 + hash2(x: seed, y: 7, seed: 29) * 0.40)
+}
+
 func addFoliageCard(
   mesh: mod MeshData
   center: view Vec3
@@ -85,7 +89,7 @@ func addFoliageSpray(
   seed: view Int
 ) {
   let patchCount: Int = 2 + (seed % 2 + 2) % 2
-  let flexibility: Float = -(0.80 + hash2(x: seed, y: 7, seed: 29) * 0.40)
+  let flexibility: Float = foliageSprayFlexibility(seed: seed)
   let direction: Vec3 = vnorm(a: branchDirection)
   let branchSide: Vec3 = foliageBasis(direction: direction)
   loop var patch: Int = 0, patch < patchCount, ++patch {

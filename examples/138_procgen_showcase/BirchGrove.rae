@@ -8,6 +8,7 @@ open Mesh3d
 open Vec3
 open ecs/Entity
 open GroveGrass
+open procgen/Birch
 
 func addBirchGrove(
   world: mod World3d
@@ -22,16 +23,7 @@ func addBirchGrove(
     renderer: renderer
     path: "lib/assets/trees/birchLeaves.png"
   )
-  let meshes: List(MeshData) = speciesLevelMeshes(
-    species: speciesBirch
-    patches: nearPatches
-    leaves: nearLeaves
-  )
   let colors: List(Vec3) = speciesAlbedos(species: speciesBirch)
-  var handles: List(MeshHandle) = List.create(MeshHandle, cap: 4)
-  loop let mesh: view MeshData in meshes {
-    handles.add(value: uploadFoliage(renderer: renderer, mesh: mesh))
-  }
   let positions: List(Vec3) = {
     { x: -16, y: -10, z: 0 }
     { x: -20, y: -7, z: 0 }
@@ -39,9 +31,34 @@ func addBirchGrove(
     { x: -14, y: -16, z: 0 }
     { x: -26, y: -8, z: 0 }
   }
-  loop var tree: Int = 0, tree < positions.length, ++tree {
-    let position: Vec3 = positions.copyAtDefault(index: tree)
-    let size: Float = 1.2 + (tree % 3).toFloat() * 0.16
+  let seeds: List(Int) = {
+    1437
+    311
+    4201
+    827
+    2189
+  }
+  let heights: List(Float) = {
+    7.1
+    8.0
+    6.6
+    7.6
+    8.4
+  }
+  loop var treeIndex: Int = 0, treeIndex < positions.length, ++treeIndex {
+    let position: Vec3 = positions.copyAtDefault(index: treeIndex)
+    let seed: Int = seeds.copyAtDefault(index: treeIndex)
+    let tree: BirchTree = birchTree(seed: seed, height: heights.copyAtDefault(index: treeIndex))
+    var meshes: List(MeshData) = List.create(MeshData, cap: 5)
+    meshes.add(value: tree.wood)
+    loop var tone: Int = 0, tone < 3, ++tone {
+      meshes.add(value: birchLeaves(twigs: tree.twigs, seed: seed, tone: tone))
+    }
+    meshes.add(value: tree.twigWood)
+    var handles: List(MeshHandle) = List.create(MeshHandle, cap: 5)
+    loop let mesh: view MeshData in meshes {
+      handles.add(value: uploadFoliage(renderer: renderer, mesh: mesh))
+    }
     loop var part: Int = 0, part < handles.length, ++part {
       var material: Material3d = foliageMaterial(color: colors.copyAtDefault(index: part))
       if part is 0 {
@@ -54,11 +71,11 @@ func addBirchGrove(
         mesh: handles.copyAtDefault(index: part)
         material: material
         position: position
-        rotation: Vec3.create(x: 0, y: 0, z: tree.toFloat() * 1.7)
-        scale: Vec3.create(x: size, y: size, z: size)
+        rotation: Vec3.create(x: 0, y: 0, z: treeIndex.toFloat() * 1.7)
+        scale: Vec3.create(x: 1, y: 1, z: 1)
       )
     }
     obstacles.add(value: { x: position.x, y: position.y, radius: 0.25 })
   }
-  log("birch grove: 5 trees, textured bark, irregular painted leaf sprays")
+  log("birch grove: 5 seeded trees, 6.6-8.4 m, joined forks and hanging painted sprays")
 }

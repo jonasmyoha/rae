@@ -110,12 +110,16 @@ func createShowcase() ret ShowcaseState {
   # three bare-fork inspection views used by the landscape art work.
   let initialView: Int = groveViewNumber(viewName: Sys.getEnv(name: "RAE_GROVE_VIEW"))
   var initialHour: Float = 10.0
-  if initialView is 12 {
+  if initialView is 12 or initialView is 15 {
     initialHour = 17.25
+  } else if initialView is 16 {
+    initialHour = 7.25
+  } else if initialView is 17 {
+    initialHour = 23.0
   }
   var settings: SettingsState = createSettingsState(
     scene: initialView
-    sceneCount: 12
+    sceneCount: 17
     speed: 1.0
     toon: true
     hour: initialHour
@@ -202,6 +206,21 @@ func groveViewName(groveView: view Int) ret String {
   if groveView is 12 {
     ret "Joined forks: grazing light"
   }
+  if groveView is 13 {
+    ret "Silver birch: side"
+  }
+  if groveView is 14 {
+    ret "Silver birch: under crown"
+  }
+  if groveView is 15 {
+    ret "Silver birch: warm light"
+  }
+  if groveView is 16 {
+    ret "Silver birch: cool light"
+  }
+  if groveView is 17 {
+    ret "Silver birch: night"
+  }
   ret "Autumn Grove"
 }
 
@@ -236,6 +255,21 @@ func groveViewReadout(groveView: view Int) ret String {
   if groveView is 12 {
     ret "Neutral rough wood under a low late-day sun"
   }
+  if groveView is 13 {
+    ret "Five seeds and sizes; profile, hanging sprays and crown gaps"
+  }
+  if groveView is 14 {
+    ret "Visible joined wood, fixed twig roots and foliage underside"
+  }
+  if groveView is 15 {
+    ret "Late-day warm bark and leaf response"
+  }
+  if groveView is 16 {
+    ret "Cool morning bark, shadows and restrained leaf values"
+  }
+  if groveView is 17 {
+    ret "Moonlit bark, twig motion and non-emissive leaves"
+  }
   if groveView is 3 {
     ret "Faceted outcrop beside the path"
   }
@@ -265,7 +299,7 @@ func groveResidentTriangles(renderer: view DeferredRenderer) ret Int {
 # The grove's materials are authored for a bright sun
 const groveSunStrength: Float = 3.1
 
-# RAE_GROVE_VIEW also accepts forks-front, forks-side and forks-grazing.
+# RAE_GROVE_VIEW also accepts the joined-fork and silver-birch studies.
 func groveViewNumber(viewName: view String) ret Int {
   if viewName is "trees" {
     ret 2
@@ -299,6 +333,21 @@ func groveViewNumber(viewName: view String) ret Int {
   }
   if viewName is "forks-grazing" {
     ret 12
+  }
+  if viewName is "birches-side" {
+    ret 13
+  }
+  if viewName is "birches-under" {
+    ret 14
+  }
+  if viewName is "birches-warm" {
+    ret 15
+  }
+  if viewName is "birches-cool" {
+    ret 16
+  }
+  if viewName is "birches-night" {
+    ret 17
   }
   ret 1
 }
@@ -370,6 +419,32 @@ func setGroveView(camera: mod Camera3d, cameraRig: mod CameraRig, groveView: vie
     cameraRig.distance = 25
     cameraRig.orbitPitch = 0.02
     cameraRig.yaw = -0.55
+  }
+  if groveView is 13 {
+    camera.target = Vec3.create(x: -20, y: -10, z: 4.6)
+    cameraRig.distance = 22
+    cameraRig.orbitPitch = 0.08
+    cameraRig.yaw = 1.10
+  } else if groveView is 14 {
+    camera.target = Vec3.create(x: -19, y: -10, z: 5.4)
+    cameraRig.distance = 15
+    cameraRig.orbitPitch = -0.16
+    cameraRig.yaw = 0.38
+  } else if groveView is 15 {
+    camera.target = Vec3.create(x: -19, y: -10, z: 4.6)
+    cameraRig.distance = 22
+    cameraRig.orbitPitch = 0.06
+    cameraRig.yaw = -0.52
+  } else if groveView is 16 {
+    camera.target = Vec3.create(x: -20, y: -10, z: 4.6)
+    cameraRig.distance = 21
+    cameraRig.orbitPitch = 0.08
+    cameraRig.yaw = 0.82
+  } else if groveView is 17 {
+    camera.target = Vec3.create(x: -19, y: -10, z: 4.3)
+    cameraRig.distance = 20
+    cameraRig.orbitPitch = 0.05
+    cameraRig.yaw = -0.32
   }
   snapCameraRigView(rig: cameraRig)
   applyCameraRig(rig: cameraRig, camera: camera)
