@@ -9,19 +9,24 @@ open Vec3
 open ecs/Entity
 open GroveGrass
 open procgen/Birch
+open procgen/Foliage
+open procgen/FoliageCards
+import Sys
 
 func addBirchGrove(
   world: mod World3d
   renderer: mod DeferredRenderer
   obstacles: mod List(GroveObstacle)
 ) {
+  let style: FoliageSprayStyle = birchStudyStyle()
+  let study: String = Sys.getEnv(name: "RAE_BIRCH_STUDY")
   let layer: Int = rendererLoadSurfaceImage(
     renderer: renderer
     path: "lib/assets/trees/birchBark.png"
   )
   let leafLayer: Int = rendererLoadSurfaceImage(
     renderer: renderer
-    path: "lib/assets/trees/birchLeaves.png"
+    path: birchLeafTexture(style: style)
   )
   let colors: List(Vec3) = speciesAlbedos(species: speciesBirch)
   let positions: List(Vec3) = {
@@ -46,15 +51,53 @@ func addBirchGrove(
     8.4
   }
   loop var treeIndex: Int = 0, treeIndex < positions.length, ++treeIndex {
+    if study.length() > 0 and treeIndex > 0 {
+      continue
+    }
     let position: Vec3 = positions.copyAtDefault(index: treeIndex)
     let seed: Int = seeds.copyAtDefault(index: treeIndex)
     let tree: BirchTree = birchTree(seed: seed, height: heights.copyAtDefault(index: treeIndex))
     var meshes: List(MeshData) = List.create(MeshData, cap: 5)
-    meshes.add(value: tree.wood)
-    loop var tone: Int = 0, tone < 3, ++tone {
-      meshes.add(value: birchLeaves(twigs: tree.twigs, seed: seed, tone: tone))
+    var firstTwig: Int = 0
+    var twigCount: Int = -1
+    if study is "branch" {
+      firstTwig = 8
+      twigCount = 1
+      let twig: BirchTwig = tree.twigs.copyAtDefault(index: firstTwig)
+      var branch: MeshData = foliageMesh()
+      birchTube(
+        mesh: branch
+        curve: twig
+        radius: heights.copyAtDefault(index: treeIndex) * 0.0015
+        sides: 4
+        steps: 2
+        seed: seed + firstTwig * 17
+      )
+      birchAnimateTwig(
+        mesh: branch
+        firstVertex: 0
+        pivot: twig.start
+        flexibility: foliageSprayFlexibility(seed: birchSpraySeed(seed: seed, twigIndex: firstTwig))
+      )
+      meshes.add(value: branch)
+      let center: Vec3 = birchCurve(twig: twig, amount: 0.58)
+      log("[birch-study] branch center {center.x + position.x} {center.y + position.y} {center.z}")
+    } else {
+      meshes.add(value: tree.wood)
     }
-    meshes.add(value: tree.twigWood)
+    loop var tone: Int = 0, tone < 3, ++tone {
+      meshes.add(value: birchLeavesStyled(
+        twigs: tree.twigs
+        seed: seed
+        tone: tone
+        style: style
+        firstTwig: firstTwig
+        twigCount: twigCount
+      ))
+    }
+    if study is not "branch" {
+      meshes.add(value: tree.twigWood)
+    }
     var handles: List(MeshHandle) = List.create(MeshHandle, cap: 5)
     loop let mesh: view MeshData in meshes {
       handles.add(value: uploadFoliage(renderer: renderer, mesh: mesh))
@@ -77,5 +120,23 @@ func addBirchGrove(
     }
     obstacles.add(value: { x: position.x, y: position.y, radius: 0.25 })
   }
-  log("birch grove: 5 seeded trees, 6.6-8.4 m, joined forks and hanging painted sprays")
+  if study.length() > 0 {
+    log("birch study: {study}, seed 1437, height 7.1 m, style {style}")
+  } else {
+    log("birch grove: 5 seeded trees, 6.6-8.4 m, joined forks and hanging painted sprays")
+  }
+}
+
+func birchStudyStyle() ret FoliageSprayStyle {
+  let name: String = Sys.getEnv(name: "RAE_BIRCH_STYLE")
+  if name is "texture" {
+    ret FoliageSprayStyle.texture
+  }
+  if name is "connected" {
+    ret FoliageSprayStyle.connected
+  }
+  if name is "control" {
+    ret FoliageSprayStyle.control
+  }
+  ret birchCrownStyle
 }

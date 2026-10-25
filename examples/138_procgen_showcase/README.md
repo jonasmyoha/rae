@@ -300,12 +300,14 @@ near-black lenticels, thicker irregular scars and quiet paper grain. Seeded UV
 offsets stop every limb from starting on the same mark; duplicated minor-branch
 seams and the low-contrast texture edges keep the wrap quiet.
 
-The recovery candidate uses the original full-image fine-edge `birchLeaves.png`,
-not the rejected four-cell atlas. Four or five overlapping camera-facing cards
-make each spray. Centres remain attached to the same twigs, and crown normals
-stay independent of camera direction. The twig and foliage share a fixed wind
-pivot; primary wood remains rigid. Deferred, forward, shadow and distant-bake
-passes retain the existing alpha cutoff and coverage-preserving mips.
+The current crown candidate uses `birchSpray.png`: a connected asymmetric
+cutout with small pointed edge leaves and restrained interior variation.
+Three unequal camera-facing layers follow each supporting twig. Broad crown
+normals vary smoothly across the cards; centres and wind anchors stay attached
+to the unchanged scaffold. The original texture and four/five-card helper
+remain available as `RAE_BIRCH_STYLE=control`. `texture` changes only the image;
+`connected` selects the current geometry as well. The existing toon material,
+alpha cutoff, shadow paths and night lighting remain in use.
 
 The shared forest kind has five mesh parts and two textures reused by every
 instance in 136, 137 and 143. Those forests retain the common
@@ -316,7 +318,11 @@ not switch LODs per instance. See
 [the rendering review](../../docs/tree-rendering-2026.md).
 
 The recovery still shows rounded clumps, dark interior pockets and repeated
-painted details. The forest also lacks a dedicated middle mesh. This is a
-recovery control, not an approved foliage treatment for other species.
+painted details. The forest also lacks a dedicated middle mesh. Each later species still needs its own silhouette and visual review.
 
-![First birch recovery candidate](../../docs/images/landscape-recovery/repair1-front.png)
+![Current crown candidate](../../docs/images/birch-crown-recovery/connected-tree-front.png)
+
+For matched branch/tree alternatives and continuous camera clips, run
+`python3 tools/capture-birch-recovery.py --motion`. See the
+[recovery review](../../docs/landscape-recovery-review.md) for the controlled
+captures and remaining defects.

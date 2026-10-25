@@ -1,0 +1,108 @@
+open procgen/Birch
+open procgen/FoliageCards
+open Mesh3d
+open Vec3
+open ImpostorBake
+import Math
+
+func validateSpray(mesh: view MeshData, pivot: view Vec3, count: view Int) ret Bool {
+  if mesh.vertCount is not count * 4 or mesh.indices.length is not count * 6 {
+    ret false
+  }
+  loop let index: view Int in mesh.indices {
+    if index < 0 or index >= mesh.vertCount {
+      ret false
+    }
+  }
+  loop var vertex: Int = 0, vertex < mesh.vertCount, ++vertex {
+    let offset: Int = vertex * 8
+    let normal: Vec3 = {
+      x: mesh.verts.copyAtDefault(index: offset + 3)
+      y: mesh.verts.copyAtDefault(index: offset + 4)
+      z: mesh.verts.copyAtDefault(index: offset + 5)
+    }
+    if Math.abs(value: vlen(a: normal) - 1.0) > 0.0001 {
+      ret false
+    }
+    let windOffset: Int = vertex * 4
+    if mesh.windPivots.copyAtDefault(index: windOffset) is not pivot.x or mesh.windPivots.copyAtDefault(
+      index: windOffset + 1
+    ) is not pivot.y or mesh.windPivots.copyAtDefault(index: windOffset + 2) is not pivot.z or mesh.windPivots.copyAtDefault(
+      index: windOffset + 3
+    ) >= 0 {
+      ret false
+    }
+    let margin: Float = meshBoundsMargin(mesh: mesh, vertex: vertex)
+    let point: Vec3 = meshPoint(mesh: mesh, vertex: vertex)
+    let center: Vec3 = meshBoundsPoint(mesh: mesh, vertex: vertex)
+    if margin is not margin or margin < vlen(a: vsub(a: point, b: center)) or margin > 5.0 {
+      ret false
+    }
+  }
+  ret true
+}
+
+func main() ret Int {
+  let seeds: List(Int) = { -19, 311, 1437, 4201 }
+  loop let seed: view Int in seeds {
+    let tree: BirchTree = birchTree(seed: seed, height: 7.1)
+    var visible: Int = 0
+    var controlCards: Int = 0
+    var candidateCards: Int = 0
+    loop var twigIndex: Int = 0, twigIndex < tree.twigs.length, ++twigIndex {
+      let twig: BirchTwig = tree.twigs.copyAtDefault(index: twigIndex)
+      let control: MeshData = birchLeavesStyled(
+        twigs: tree.twigs
+        seed: seed
+        tone: twigIndex % 3
+        style: FoliageSprayStyle.control
+        firstTwig: twigIndex
+        twigCount: 1
+      )
+      let candidate: MeshData = birchLeavesStyled(
+        twigs: tree.twigs
+        seed: seed
+        tone: twigIndex % 3
+        style: FoliageSprayStyle.connected
+        firstTwig: twigIndex
+        twigCount: 1
+      )
+      let repeat: MeshData = birchLeavesStyled(
+        twigs: tree.twigs
+        seed: seed
+        tone: twigIndex % 3
+        style: FoliageSprayStyle.connected
+        firstTwig: twigIndex
+        twigCount: 1
+      )
+      if control.vertCount is 0 {
+        if candidate.vertCount is not 0 {
+          ret 1
+        }
+        continue
+      }
+      visible = visible + 1
+      controlCards = controlCards + control.vertCount / 4
+      candidateCards = candidateCards + candidate.vertCount / 4
+      if not validateSpray(mesh: candidate, pivot: twig.start, count: 3) {
+        ret 2
+      }
+      if candidate.verts.length is not repeat.verts.length {
+        ret 3
+      }
+      loop var index: Int = 0, index < candidate.verts.length, ++index {
+        let value: Float = candidate.verts.copyAtDefault(index: index)
+        if value is not value or value is not repeat.verts.copyAtDefault(index: index) {
+          ret 4
+        }
+      }
+    }
+    if visible < 35 or candidateCards >= controlCards {
+      ret 5
+    }
+    log(
+      "seed {seed}: {visible} anchored sprays, {controlCards} control / {candidateCards} candidate cards"
+    )
+  }
+  ret 0
+}
