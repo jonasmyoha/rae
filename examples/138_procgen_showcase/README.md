@@ -240,13 +240,15 @@ Key **9** or `RAE_GROVE_VIEW=birches` frames the stand. The shared
 `RAE_CAMERA_AT` twelve-value camera override also works for repeatable side views.
 
 The wood uses `lib/assets/trees/birchBark.png`: bright white with medium black
-lenticels, occasional broad scars and subtle papery detail. The crown uses
-`birchLeaves.png` on small camera-facing clusters with irregular leafy edges
-and open gaps. The replacement texture merges small leaves into soft painted
-masses. Crown normals stay independent of camera rotation. Fixed twig pivots
-give the clusters visible swaying motion, with different phases and strengths.
-Colour, shadow and distant
-bake passes all use the same alpha cutoff and coverage-preserving texture mips.
+lenticels, occasional broad scars and subtle papery detail. The crown uses an
+original four-cell `birchLeaves.png` atlas. Its broad, drooping and forked
+sprays have different silhouettes, fine cutout edges and deliberate holes.
+Interior cards keep their twig plane while smaller edge cards face the camera,
+so an orbit reveals depth without turning every spray into a visible sheet.
+Crown normals stay independent of both card orientation and camera rotation.
+Fixed twig pivots give the clusters coherent swaying motion. Deferred, forward,
+shadow and distant-bake passes all use the same alpha cutoff; texture and
+impostor mip chains preserve coverage.
 
 The five mesh parts and two textures are shared by every instance. The shared
 walker forest uses this same generator in 136, 137 and 143. Those forests use
@@ -255,5 +257,10 @@ still shares the close mesh. The distant bake includes the bark and masked
 leaves. Autumn Grove deliberately keeps the close inspection mesh and does not
 switch LODs per instance. A dedicated reduced birch mesh remains future work.
 See [the rendering review](../../docs/tree-rendering-2026.md).
+
+The prototype still shows repeated scalloped masses at very close range, and
+some branch-plane cards cross when seen exactly edge-on. The later species pass
+will refine density, seasonal colour and the painted twig hints; this task keeps
+the treatment on birch rather than changing every tree at once.
 
 ![Silver birch stand](references/Birches.png)

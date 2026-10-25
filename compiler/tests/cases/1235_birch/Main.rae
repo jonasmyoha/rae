@@ -1,7 +1,10 @@
 open procgen/Birch
 open app3d/GroveTrees
 open SurfaceImagePixels
+open Png
+open ImpostorBake
 import Math
+import Sys
 import Vec3
 
 func checkMesh(mesh: view MeshData) ret Bool {
@@ -67,6 +70,9 @@ func main() ret Int {
     }
   }
   var patches: Int = 0
+  var cameraFacing: Int = 0
+  var branchFacing: Int = 0
+  var atlasCells: List(Bool) = { false, false, false, false }
   loop var tone: Int = 0, tone < 3, ++tone {
     let mesh: MeshData = birchLeaves(twigs: tree.twigs, seed: 1437, tone: tone)
     if not checkMesh(mesh: mesh) or mesh.windPivots.length is not mesh.vertCount * 4 or mesh.leafCards.length is not mesh.vertCount * 4 {
@@ -84,8 +90,27 @@ func main() ret Int {
             ret 10
           }
         }
-        if mesh.leafCards.copyAtDefault(index: (patch * 4 + vertex) * 4 + 3) is not 1.0 {
+        let cardMode: Float = mesh.leafCards.copyAtDefault(index: (patch * 4 + vertex) * 4 + 3)
+        if cardMode is not 0.0 and cardMode is not 1.0 {
           ret 13
+        }
+        if vertex is 0 {
+          if cardMode is 1.0 {
+            cameraFacing = cameraFacing + 1
+          } else {
+            branchFacing = branchFacing + 1
+          }
+          let base: Int = patch * 4 * 8
+          let u: Float = (mesh.verts.copyAtDefault(index: base + 6) + mesh.verts.copyAtDefault(
+            index: base + 14
+          )) * 0.5
+          let value: Float = (mesh.verts.copyAtDefault(index: base + 7) + mesh.verts.copyAtDefault(
+            index: base + 23
+          )) * 0.5
+          let atlasColumn: Int = (u * 2.0).toInt()
+          let atlasRow: Int = (value * 2.0).toInt()
+          let atlasCell: Int = Math.min(a: atlasRow, b: 1) * 2 + Math.min(a: atlasColumn, b: 1)
+          atlasCells.set(index: atlasCell, value: true)
         }
         loop var axis: Int = 0, axis < 3, ++axis {
           if mesh.leafCards.copyAtDefault(index: (patch * 4 + vertex) * 4 + axis) is not mesh.leafCards.copyAtDefault(
@@ -102,8 +127,16 @@ func main() ret Int {
       }
     }
   }
-  if patches < 180 or patches > 300 or speciesForPick(pick: 0.06, palms: false) is not speciesBirch {
+  if patches < 100 or patches > 180 or cameraFacing < 50 or branchFacing < 30 {
     ret 8
+  }
+  loop let used: Bool in atlasCells {
+    if not used {
+      ret 15
+    }
+  }
+  if speciesForPick(pick: 0.06, palms: false) is not speciesBirch {
+    ret 16
   }
   # A clear black texel must not darken an opaque green texel in the mip.
   let pixels: List(Float) = {
@@ -143,8 +176,65 @@ func main() ret Int {
   if surfaceCoverage(pixels: reduced, scale: 1.0) is not 0.5 {
     ret 12
   }
-  log(
-    "birch: valid continuous bark, deterministic seed, camera-facing leaf clusters, cutout mips and forest placement"
+  let pngBytes: List(Int) = Sys.readFileBytes(path: "lib/assets/trees/birchLeaves.png")
+  var atlasWidth: Int = 0
+  var atlasHeight: Int = 0
+  let atlas: List(Int) = decodePng(
+    png: pngBytes
+    len: pngBytes.length
+    width: atlasWidth
+    height: atlasHeight
   )
+  if atlasWidth is not 512 or atlasHeight is not 512 or atlas.length is not 512 * 512 {
+    ret 17
+  }
+  var quadrantCoverage: List(Int) = { 0, 0, 0, 0 }
+  var gutterPixels: Int = 0
+  loop var y: Int = 0, y < atlasHeight, ++y {
+    loop var x: Int = 0, x < atlasWidth, ++x {
+      let alpha: Int = (atlas.copyAtDefault(index: y * atlasWidth + x) shr 24) bitand 255
+      if x >= 240 and x < 272 or y >= 240 and y < 272 {
+        if alpha >= 128 {
+          gutterPixels = gutterPixels + 1
+        }
+      } else if alpha >= 128 {
+        let quadrant: Int = (y / 256) * 2 + x / 256
+        quadrantCoverage.set(
+          index: quadrant
+          value: quadrantCoverage.copyAtDefault(index: quadrant) + 1
+        )
+      }
+    }
+  }
+  if gutterPixels > 16 {
+    ret 18
+  }
+  loop let coverage: Int in quadrantCoverage {
+    if coverage < 8000 {
+      ret 19
+    }
+  }
+  let seeds: List(Int) = { 19, 311, 1437, 4201 }
+  loop let sampleSeed: Int in seeds {
+    let sampleTree: BirchTree = birchTree(seed: sampleSeed, height: 5.5)
+    loop var tone: Int = 0, tone < 3, ++tone {
+      let sample: MeshData = birchLeaves(twigs: sampleTree.twigs, seed: sampleSeed, tone: tone)
+      if not checkMesh(mesh: sample) {
+        ret 20
+      }
+      loop var vertex: Int = 0, vertex < sample.vertCount, ++vertex {
+        let point: Vec3 = meshBoundsPoint(mesh: sample, vertex: vertex)
+        let rest: Vec3 = meshPoint(mesh: sample, vertex: vertex)
+        let margin: Float = meshBoundsMargin(mesh: sample, vertex: vertex)
+        if point.x is not point.x or point.y is not point.y or point.z is not point.z {
+          ret 21
+        }
+        if margin < 0.0 or margin is not margin or Vec3.vlen(a: Vec3.vsub(a: rest, b: point)) > margin + 0.00001 {
+          ret 22
+        }
+      }
+    }
+  }
+  log("birch: valid bark, hybrid leaf cards, four-cell cutout atlas, mips and forest placement")
   ret 0
 }

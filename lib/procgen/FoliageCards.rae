@@ -1,72 +1,126 @@
-# Camera-facing leaf clusters. Each quad keeps ordinary texture UVs and an
-# explicit centre; its branch pivot is separate so wind can move that centre.
-# Normals describe the crown, never the quad's camera-facing direction.
-import Math
+# Textured leaf clusters. Edge cards may face the camera; interior cards keep
+# the branch plane so an orbit still reveals crown depth. Each quad keeps its
+# branch pivot, atlas cell and broad crown normal separate from its geometry.
 open Vec3
 open Noise
 open Mesh3d
 open procgen/Foliage
 
+func addFoliageCard(
+  mesh: mod MeshData
+  center: view Vec3
+  pivot: view Vec3
+  branchDirection: view Vec3
+  halfWidth: view Float
+  halfHeight: view Float
+  shadeNormal: view Vec3
+  atlasCell: view Int
+  cameraFacing: view Bool
+  mirrored: view Bool
+  flexibility: view Float
+) {
+  let branchUp: Vec3 = vnorm(a: branchDirection)
+  let branchSide: Vec3 = foliageBasis(direction: branchUp)
+  let cellX: Float = (atlasCell % 2).toFloat() * 0.5
+  let cellY: Float = (atlasCell / 2).toFloat() * 0.5
+  let base: Int = mesh.vertCount
+  loop var row: Int = 0, row < 2, ++row {
+    loop var column: Int = 0, column < 2, ++column {
+      let x: Float = (column.toFloat() * 2.0 - 1.0) * halfWidth
+      let z: Float = (row.toFloat() * 2.0 - 1.0) * halfHeight
+      var position: Vec3 = vadd(
+        a: center
+        b: vadd(a: vscale(a: branchSide, s: x), b: vscale(a: branchUp, s: z))
+      )
+      if cameraFacing {
+        position = Vec3.create(x: center.x + x, y: center.y, z: center.z + z)
+      }
+      var textureColumn: Float = column.toFloat()
+      if mirrored {
+        textureColumn = 1.0 - textureColumn
+      }
+      pushVert(
+        verts: mesh.verts
+        px: position.x
+        py: position.y
+        pz: position.z
+        nx: shadeNormal.x
+        ny: shadeNormal.y
+        nz: shadeNormal.z
+        u: cellX + textureColumn * 0.5
+        value: cellY + (1.0 - row.toFloat()) * 0.5
+      )
+      mesh.windPivots.add(value: pivot.x)
+      mesh.windPivots.add(value: pivot.y)
+      mesh.windPivots.add(value: pivot.z)
+      mesh.windPivots.add(value: flexibility)
+      mesh.leafCards.add(value: center.x)
+      mesh.leafCards.add(value: center.y)
+      mesh.leafCards.add(value: center.z)
+      if cameraFacing {
+        mesh.leafCards.add(value: 1.0)
+      } else {
+        mesh.leafCards.add(value: 0.0)
+      }
+      mesh.vertCount = mesh.vertCount + 1
+    }
+  }
+  mesh.indices.add(value: base)
+  mesh.indices.add(value: base + 1)
+  mesh.indices.add(value: base + 2)
+  mesh.indices.add(value: base + 1)
+  mesh.indices.add(value: base + 3)
+  mesh.indices.add(value: base + 2)
+}
+
+# An elongated, branch-supported spray. Most cards retain the twig plane;
+# smaller cards at the ends face the camera to keep a fine, loose silhouette.
 func addFoliageSpray(
   mesh: mod MeshData
   center: view Vec3
   pivot: view Vec3
+  branchDirection: view Vec3
   extent: view Vec3
   shadeNormal: view Vec3
   seed: view Int
 ) {
-  let patchCount: Int = 4 + (seed % 3 + 3) % 3
+  let patchCount: Int = 2 + (seed % 2 + 2) % 2
   let flexibility: Float = -(0.80 + hash2(x: seed, y: 7, seed: 29) * 0.40)
+  let direction: Vec3 = vnorm(a: branchDirection)
+  let branchSide: Vec3 = foliageBasis(direction: direction)
   loop var patch: Int = 0, patch < patchCount, ++patch {
-    let angle: Float = patch.toFloat() * 2.3999632 + hash2(x: seed, y: 3, seed: 29) * 6.2831853
-    let height: Float = 1.0 - 2.0 * (patch.toFloat() + 0.5) / patchCount.toFloat()
-    let radial: Float = Math.sqrt(x: 1.0 - height * height)
-    let offset: Vec3 = Vec3.create(
-      x: Math.cos(x: angle) * radial * extent.x * 0.75
-      y: Math.sin(x: angle) * radial * extent.y * 0.75
-      z: height * extent.z * 0.70
+    let along: Float = patch.toFloat() / (patchCount - 1).toFloat() * 2.0 - 1.0
+    let sideAmount: Float = (hash2(x: patch, y: 3, seed: seed) - 0.5) * extent.y
+    let lift: Float = (hash2(x: patch, y: 4, seed: seed) - 0.5) * extent.z * 0.22
+    let offset: Vec3 = vadd(
+      a: vscale(a: direction, s: along * extent.z * 0.38)
+      b: vadd(a: vscale(a: branchSide, s: sideAmount), b: Vec3.create(x: 0, y: 0, z: lift))
     )
     let clusterCenter: Vec3 = vadd(a: center, b: offset)
-    let halfWidth: Float = extent.x * (0.55 + hash2(x: patch, y: 1, seed: seed) * 0.22)
-    let halfHeight: Float = extent.z * (0.45 + hash2(x: patch, y: 2, seed: seed) * 0.22)
+    let halfWidth: Float = extent.x * (0.50 + hash2(x: patch, y: 1, seed: seed) * 0.16)
+    let halfHeight: Float = extent.z * (0.40 + hash2(x: patch, y: 2, seed: seed) * 0.14)
     let normal: Vec3 = vnorm(a: vadd(a: shadeNormal, b: vscale(a: offset, s: 0.16)))
     let mirrored: Bool = hash2(x: patch, y: 6, seed: seed) > 0.5
-    let base: Int = mesh.vertCount
-    loop var row: Int = 0, row < 2, ++row {
-      loop var column: Int = 0, column < 2, ++column {
-        let x: Float = (column.toFloat() * 2.0 - 1.0) * halfWidth
-        let z: Float = (row.toFloat() * 2.0 - 1.0) * halfHeight
-        var textureX: Float = column.toFloat()
-        if mirrored {
-          textureX = 1.0 - textureX
-        }
-        pushVert(
-          verts: mesh.verts
-          px: clusterCenter.x + x
-          py: clusterCenter.y
-          pz: clusterCenter.z + z
-          nx: normal.x
-          ny: normal.y
-          nz: normal.z
-          u: textureX
-          value: 1.0 - row.toFloat()
-        )
-        mesh.windPivots.add(value: pivot.x)
-        mesh.windPivots.add(value: pivot.y)
-        mesh.windPivots.add(value: pivot.z)
-        mesh.windPivots.add(value: flexibility)
-        mesh.leafCards.add(value: clusterCenter.x)
-        mesh.leafCards.add(value: clusterCenter.y)
-        mesh.leafCards.add(value: clusterCenter.z)
-        mesh.leafCards.add(value: 1.0)
-        mesh.vertCount = mesh.vertCount + 1
-      }
+    let atlasCell: Int = ((seed + patch * 3) % 4 + 4) % 4
+    let edgeCard: Bool = patch is 0 or patchCount is 3 and patch is patchCount - 1
+    var cardWidth: Float = halfWidth
+    var cardHeight: Float = halfHeight
+    if edgeCard {
+      cardWidth = cardWidth * 0.84
+      cardHeight = cardHeight * 0.84
     }
-    mesh.indices.add(value: base)
-    mesh.indices.add(value: base + 1)
-    mesh.indices.add(value: base + 2)
-    mesh.indices.add(value: base + 1)
-    mesh.indices.add(value: base + 3)
-    mesh.indices.add(value: base + 2)
+    addFoliageCard(
+      mesh: mesh
+      center: clusterCenter
+      pivot: pivot
+      branchDirection: direction
+      halfWidth: cardWidth
+      halfHeight: cardHeight
+      shadeNormal: normal
+      atlasCell: atlasCell
+      cameraFacing: edgeCard
+      mirrored: mirrored
+      flexibility: flexibility
+    )
   }
 }
