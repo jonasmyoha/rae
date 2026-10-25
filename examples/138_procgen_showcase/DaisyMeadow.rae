@@ -1,0 +1,79 @@
+# The oxeye-daisy close study: one plant and one bounded meadow patch made by
+# the shared Rae generator. Each study is three mesh entities, one per material,
+# never an entity or draw per ray floret.
+open Vec3
+open Mesh3d
+open Scene3d
+open RendererDeferred
+open FoliageMesh
+open procgen/MeadowFlower
+open ecs/Entity
+
+func placeDaisyPart(
+  world: mod World3d
+  renderer: mod DeferredRenderer
+  mesh: view MeshData
+  material: view Material3d
+  position: view Vec3
+) {
+  let meshHandle: MeshHandle = uploadFoliage(renderer: renderer, mesh: mesh)
+  let entityId: EntityId = world3dAddMeshInstance(
+    world: world
+    mesh: meshHandle
+    material: material
+    position: position
+    rotation: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
+  )
+}
+
+func placeDaisyParts(
+  world: mod World3d
+  renderer: mod DeferredRenderer
+  flowers: view MeadowFlowerParts
+  position: view Vec3
+) {
+  placeDaisyPart(
+    world: world
+    renderer: renderer
+    mesh: flowers.stems
+    material: oxeyeStemMaterial()
+    position: position
+  )
+  placeDaisyPart(
+    world: world
+    renderer: renderer
+    mesh: flowers.petals
+    material: oxeyePetalMaterial()
+    position: position
+  )
+  placeDaisyPart(
+    world: world
+    renderer: renderer
+    mesh: flowers.discs
+    material: oxeyeDiscMaterial()
+    position: position
+  )
+}
+
+func addOxeyeDaisyStudy(
+  world: mod World3d
+  renderer: mod DeferredRenderer
+  singlePosition: view Vec3
+  patchPosition: view Vec3
+) {
+  let single: MeadowFlowerParts = oxeyeDaisyPatch(seed: 1307, count: 1, radius: 0.0)
+  placeDaisyParts(
+    world: world
+    renderer: renderer
+    flowers: single
+    position: singlePosition
+  )
+  let patch: MeadowFlowerParts = oxeyeDaisyPatch(seed: 1871, count: 13, radius: 1.05)
+  placeDaisyParts(
+    world: world
+    renderer: renderer
+    flowers: patch
+    position: patchPosition
+  )
+}

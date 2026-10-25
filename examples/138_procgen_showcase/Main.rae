@@ -118,7 +118,7 @@ func createShowcase() ret ShowcaseState {
   }
   var settings: SettingsState = createSettingsState(
     scene: initialView
-    sceneCount: 17
+    sceneCount: 19
     speed: 1.0
     toon: true
     hour: initialHour
@@ -222,6 +222,9 @@ func groveViewName(groveView: view Int) ret String {
   if groveView is 18 {
     ret "Meadow grass patches"
   }
+  if groveView is 19 {
+    ret "Oxeye daisy"
+  }
   ret "Autumn Grove"
 }
 
@@ -273,6 +276,9 @@ func groveViewReadout(groveView: view Int) ret String {
   }
   if groveView is 18 {
     ret "Seeded gaps, path edge and trunk contacts"
+  }
+  if groveView is 19 {
+    ret "One lit flower and one bounded meadow patch"
   }
   if groveView is 3 {
     ret "Faceted outcrop beside the path"
@@ -355,6 +361,9 @@ func groveViewNumber(viewName: view String) ret Int {
   }
   if viewName is "grass" {
     ret 18
+  }
+  if viewName is "flowers" {
+    ret 19
   }
   ret 1
 }
@@ -457,6 +466,11 @@ func setGroveView(camera: mod Camera3d, cameraRig: mod CameraRig, groveView: vie
     cameraRig.distance = 7.0
     cameraRig.orbitPitch = 0.16
     cameraRig.yaw = 0.72
+  } else if groveView is 19 {
+    camera.target = Vec3.create(x: -1.9, y: -14.0, z: 0.34)
+    cameraRig.distance = 4.6
+    cameraRig.orbitPitch = 0.12
+    cameraRig.yaw = 0.46
   }
   snapCameraRigView(rig: cameraRig)
   applyCameraRig(rig: cameraRig, camera: camera)

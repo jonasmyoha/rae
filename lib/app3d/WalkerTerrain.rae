@@ -34,8 +34,10 @@ open gpu/GpuResources
 open Gltf
 open Scene3d
 open Mesh3d
+open FoliageMesh
 open GbufferInstanced
 open GbufferSprite
+open procgen/MeadowFlower
 open ecs/Entity
 open ecs/World
 open ecs/ComponentTable
@@ -172,7 +174,8 @@ type WalkerTerrain {
   ground: TerrainTiles
   # One instancer per rock shape (TerrainProp.variant)
   rockParts: List(PropInstancer)
-  flowerProp: PropInstancer
+  # Oxeye daisies: one shared patch mesh in three instanced material parts.
+  flowerParts: List(PropInstancer)
   grassProp: PropInstancer
   # The forest: every tree species as a kind at three levels of detail, its
   # placements in cells; only what is near and in view is drawn, one
@@ -254,6 +257,33 @@ func createRockParts(renderer: mod DeferredRenderer, capacity: view Int) ret Lis
       value: createPropInstancer(mesh: shape.mesh, material: shape.material, capacity: capacity)
     )
   }
+  ret parts
+}
+
+func createFlowerParts(renderer: mod DeferredRenderer, capacity: view Int) ret List(PropInstancer) {
+  let flowers: MeadowFlowerParts = oxeyeDaisyPatch(seed: 584, count: 7, radius: 0.62)
+  var parts: List(PropInstancer) = List.create(PropInstancer, cap: 3)
+  var stems: PropInstancer = createPropInstancer(
+    mesh: uploadFoliage(renderer: renderer, mesh: flowers.stems)
+    material: oxeyeStemMaterial()
+    capacity: capacity
+  )
+  stems.sway = 0.72
+  parts.add(value: own stems)
+  var petals: PropInstancer = createPropInstancer(
+    mesh: uploadFoliage(renderer: renderer, mesh: flowers.petals)
+    material: oxeyePetalMaterial()
+    capacity: capacity
+  )
+  petals.sway = 0.72
+  parts.add(value: own petals)
+  var discs: PropInstancer = createPropInstancer(
+    mesh: uploadFoliage(renderer: renderer, mesh: flowers.discs)
+    material: oxeyeDiscMaterial()
+    capacity: capacity
+  )
+  discs.sway = 0.72
+  parts.add(value: own discs)
   ret parts
 }
 
@@ -368,7 +398,7 @@ func kindTransform(
       seedY: 67
       seedScale: 71
       lift: 0.015
-      minScale: 0.35
+      minScale: 0.90
       scaleSpread: 0.25
     )
   }
@@ -583,7 +613,9 @@ func gatherTerrainProps(terrainSystem: mod WalkerTerrain) {
   loop let part: mod PropInstancer in terrainSystem.rockParts {
     resetInstanceBatch(batch: part.batch)
   }
-  resetInstanceBatch(batch: terrainSystem.flowerProp.batch)
+  loop let part: mod PropInstancer in terrainSystem.flowerParts {
+    resetInstanceBatch(batch: part.batch)
+  }
   resetInstanceBatch(batch: terrainSystem.grassProp.batch)
   loop let part: mod PropInstancer in terrainSystem.bushParts {
     resetInstanceBatch(batch: part.batch)
@@ -600,7 +632,9 @@ func gatherTerrainProps(terrainSystem: mod WalkerTerrain) {
       }
     }
     if prop.kind is kindFlower {
-      addPropInstance(prop: terrainSystem.flowerProp, model: prop.model)
+      loop let part: mod PropInstancer in terrainSystem.flowerParts {
+        addPropInstance(prop: part, model: prop.model)
+      }
     }
     if prop.kind is kindGrassA or prop.kind is kindGrassB {
       addPropInstance(prop: terrainSystem.grassProp, model: prop.model)
@@ -639,7 +673,9 @@ func drawTerrainProps(
   loop let part: view PropInstancer in terrainSystem.rockParts {
     drawInstances(cache: cache, resources: resources, batch: part.batch)
   }
-  drawInstances(cache: cache, resources: resources, batch: terrainSystem.flowerProp.batch)
+  loop let part: view PropInstancer in terrainSystem.flowerParts {
+    drawInstances(cache: cache, resources: resources, batch: part.batch)
+  }
   drawInstances(cache: cache, resources: resources, batch: terrainSystem.grassProp.batch)
   drawPropField(cache: cache, resources: resources, field: terrainSystem.forest)
   drawPropFieldSprites(
@@ -757,7 +793,9 @@ func setInfiniteTerrainToon(terrainSystem: mod WalkerTerrain, toon: view Bool) {
   loop let part: mod PropInstancer in terrainSystem.rockParts {
     setPropInstancerToon(prop: part, toon: toon)
   }
-  setPropInstancerToon(prop: terrainSystem.flowerProp, toon: toon)
+  loop let part: mod PropInstancer in terrainSystem.flowerParts {
+    setPropInstancerToon(prop: part, toon: toon)
+  }
   setPropInstancerToon(prop: terrainSystem.grassProp, toon: toon)
   loop let part: mod PropInstancer in terrainSystem.bushParts {
     setPropInstancerToon(prop: part, toon: toon)
@@ -808,15 +846,7 @@ func createWalkerTerrain(
   forest: view ForestFieldSettings
 ) ret WalkerTerrain {
   let cellCount: Int = gridSide * gridSide
-  let flowerMesh: MeshHandle = terrainMesh(
-    renderer: renderer
-    path: "{assets}environment/flower.glb"
-  )
   let grassMesh: MeshHandle = terrainMesh(renderer: renderer, path: "{assets}environment/grass.glb")
-  let flowerMaterial: Material3d = terrainMaterial(
-    color: Vec3.create(x: 0.92, y: 0.38, z: 0.045)
-    roughness: 0.72
-  )
   let grassMaterial: Material3d = terrainMaterial(
     color: Vec3.create(x: 0.18, y: 0.42, z: 0.055)
     roughness: 0.94
@@ -896,11 +926,7 @@ func createWalkerTerrain(
       biome: biome
     )
     rockParts: own createRockParts(renderer: renderer, capacity: cellCount)
-    flowerProp: own createPropInstancer(
-      mesh: flowerMesh
-      material: flowerMaterial
-      capacity: cellCount
-    )
+    flowerParts: own createFlowerParts(renderer: renderer, capacity: cellCount)
     grassProp: own createPropInstancer(
       mesh: grassMesh
       material: grassMaterial

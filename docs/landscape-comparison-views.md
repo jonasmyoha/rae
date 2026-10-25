@@ -43,7 +43,7 @@ requires each BMP pair to be byte-identical.
 | `138-foliage-close` | Small-leaved lime crown | `RAE_GROVE_VIEW=fluffy` | preset close view |
 | `138-birch-backlit` | Silver birch sprays against the bright sky | `RAE_GROVE_VIEW=birches` | `0 2.5 0.1 0 22 0 0 0 -19 -10 0 0` |
 | `138-rocks` | Path-side faceted rock group | `RAE_GROVE_VIEW=rocks` | preset |
-| `143-ground-cover` | GPU grass, instanced grass and the orange flower prop | fixed forest start | `1 0 0.24 -0.20 4.2 0 18.0 0.35 0 0 0 0` |
+| `143-ground-cover` | GPU grass, instanced grass and oxeye-daisy patches | fixed forest start | `1 0 0.24 -0.20 4.2 0 18.0 0.35 0 0 0 0` |
 | `143-walk-00` | Forest path start | fixed forest start | `1 0 0.24 -0.06 4.2 0 -18 2.4 0 0 0 0` |
 | `143-walk-01` | Forest path middle | fixed forest start | `1 0 0.24 -0.06 4.2 0 -5 2.4 0 0 0 0` |
 | `143-walk-02` | Forest path end | fixed forest start | `1 0 0.24 -0.06 4.2 0 8 2.4 0 0 0 0` |
@@ -221,3 +221,27 @@ over the eight-second samples. Maximum resident size was 268.8 MB calm and
 413 buffers and 72 bind groups through frame 840. These are idle-load samples
 on one machine, with shader caches and the hidden-window compositor still in
 the timing; they are useful for regressions, not a portable benchmark.
+
+## Oxeye-daisy prototype
+
+`RAE_GROVE_VIEW=flowers` frames one generated flower beside one 13-plant patch
+in 138. The existing `143-ground-cover` camera shows the shared seven-plant
+patch at walker height. Run `tools/capture-landscape-comparisons.sh flowers` to
+capture both daylight views and the same 143 view at hour 23. The night frame is
+intentionally dark: the petal and disc materials have zero emission and use the
+same deferred lighting as the terrain. The daylight frame shows the modeled
+petal edges and the shadow from each complete head.
+
+The walker terrain still places one bounded prop per streamed cell, but that
+prop is now three instanced material parts sharing one model for seven plants.
+Petal count does not add entities, instance records or draw batches. Each plant
+has a root wind pivot shared by its stem, petals and disc. The fixed patch mesh
+is uploaded once and the three instance buffers retain their original
+`gridSide * gridSide` capacity, so streaming cannot grow them.
+
+The fixed resource sample stayed flat after warm-up. Autumn Grove held 423
+buffers, 30 textures, 33 texture views and 72 bind groups at frames 120, 240
+and 360. The walker held 956 buffers, 55 textures, 113 texture views and 152
+bind groups at frames 120 and 240. These counts include the whole scene; their
+value here is that the generated patch and streamed placements did not create
+new resources over time.

@@ -2,8 +2,8 @@
 
 A procedural prop showcase with about sixty trees (including the six original
 autumn trees and a woodland of the leaf-patch forms over the whole island), rock
-groups across the island, low shrubs, the standard GPU grass and a winding path
-on a raised garden base.
+groups across the island, low shrubs, modeled oxeye daisies, the standard GPU
+grass and a winding path on a raised garden base.
 
 - **1** restores the complete grove.
 - **2** frames the branching wood and leaf crowns.
@@ -18,6 +18,7 @@ on a raised garden base.
 - `RAE_GROVE_VIEW=forks-front`, `forks-side` and `forks-grazing` inspect the
   young and mature bare joined-fork studies. These art-study views are outside
   the 1-9 keyboard set.
+- `RAE_GROVE_VIEW=flowers` frames one oxeye daisy and one 13-plant patch.
 - Drag to orbit, scroll to zoom. The camera bar's **Orbit** button switches to
   the free WASD camera (Q/E down/up, shift to boost) and back.
 - The menu button opens the settings panel. Its app section names the active
@@ -34,7 +35,7 @@ compiler/bin/rae run --project examples/138_procgen_showcase examples/138_procge
 ```
 
 `RAE_GROVE_VIEW=trees` or `rocks` selects a reproducible initial close-up.
-The default is the complete grove. The example gate renders all nine views.
+The default is the complete grove. The example gate renders eleven named views.
 [`docs/landscape-comparison-views.md`](../../docs/landscape-comparison-views.md)
 records the fixed cameras and the capture command used before each landscape
 art pass.
@@ -67,6 +68,16 @@ gives that pass the grove's ground: the island's height, grass inside the rim
 and none on the path. The rocks and trunks go to it as obstacle circles in the
 surface field (`GroveGrass.rae`), so no blade grows through them. Set
 `RAE_GROVE_VIEW=grass` for the low meadow/contact inspection.
+
+`lib/procgen/MeadowFlower.rae` generates the oxeye daisy as one stem-and-leaf
+mesh, one modeled-petal mesh and one disc mesh. A close petal has a lit top,
+underside and narrow edge rather than an alpha card. One root pivot moves each
+complete plant coherently. The 138 study uses three entities for one plant and
+three for the complete patch; the walkers reuse a seven-plant patch through
+three bounded instanced batches. No petal owns an entity or draw, and all three
+rough materials have zero emission.
+
+![Oxeye daisy single plant and patch](references/Flowers.png)
 
 `GroveScene.rae` owns the gold, copper, scarlet and green palette, the path,
 the ground and every placement. All meshes are uploaded once and attached to
@@ -144,7 +155,7 @@ copied from those examples.
 
 Validation: fixture `1141_fluffy_foliage` checks all five forms at 48/24/12
 detail settings, deterministic vertex output and valid indices. The 138
-example gate renders all nine views. Captures are inspected separately and
+example gate renders the named views. Captures are inspected separately and
 stored above; `RAE_MEM_STATS=1` runs check tracked String/Buffer cleanup.
 
 ## Layered spruces and slender cypresses
