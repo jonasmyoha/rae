@@ -147,8 +147,43 @@ alpha-covered pixels, so the old sheet area remains the conservative overdraw
 bound.
 
 Use the existing `143-ground-cover` camera for walker-height review. For 138,
-the meadow around the overview camera is the bounded proof patch. Remaining
-work belongs to the following placement task: broader patch rhythm, ground
-colour blending, and exclusion around individual rocks and trunks. The current
-four-segment silhouette can still show a small elbow under an extreme grazing
-close-up; increasing density or blur is not an accepted fix.
+`RAE_GROVE_VIEW=grass` is the low meadow/contact view. The current four-segment
+silhouette can still show a small elbow under an extreme grazing close-up;
+increasing density or blur is not an accepted fix.
+
+## Grass patches and contacts
+
+Patch membership now comes from two seeded Perlin bands in world metres. The
+8.5 m Autumn Grove and 7.5 m walker scales make connected tufts and empty ground
+rather than a per-blade checker. `patchCoverage` controls the broad occupied
+share; `densityScale` still thins candidates inside it; `bladeVariation` only
+changes width, height, lean and colour. Camera movement changes neither the
+lattice seed nor the patch coordinates.
+
+The app surface remains authoritative. Autumn Grove uses its authored island,
+path and exact rock/trunk circles. The walkers pass their actual `BiomeConfig`
+as shader constants, so water, beach, rock and road decisions match their
+terrain. A bounded list of at most 512 nearby world-space circles removes grass
+under the walker forests' real `PropField` trunks and streamed rock transforms.
+The list is rebuilt from spatially queried nearby props, stored in one reused
+8,196-byte GPU buffer and never grows with the 143 forest. Its circles remain
+fixed in world space when the terrain window moves.
+
+This treatment follows G01 by leaving paths and visible ground between dark
+patches, G02 by keeping within-patch scale and colour variation restrained, and
+G03 by retaining the existing distance thinning instead of extending close
+detail into the far forest. The terrain ground colour and each grass root read
+the same per-app value. Review the 138 grass view and `143-ground-cover` at the
+forest edge, then orbit to a path, shore, rock group and trunk base. A future
+ground-flower task owns the larger warm/cool accents; this pass does not add
+them by increasing grass density.
+
+The post-change fixed metrics run kept 143's settled median at 19 ms and its
+GPU-pass total at 19.6–20.7 ms, compared with the earlier 18.7–19.5 ms frame
+window and 20.3 ms pass total. CPU time remained 5.8–5.9 ms. The walker gained
+one buffer (955 to 956) for the 8,196-byte obstacle field; counts stayed at 956
+buffers and 154 bind groups at frames 240 and 360, then the usual two bind
+groups retired by frame 480. Autumn Grove stayed at 413 buffers from frame 0
+through frame 720 and 72 bind groups after warm-up. These are idle-load samples
+on the same machine, not a portable benchmark; they show bounded resources and
+no accumulating upload objects.

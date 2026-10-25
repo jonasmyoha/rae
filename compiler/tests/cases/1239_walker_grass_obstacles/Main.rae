@@ -1,0 +1,21 @@
+# The walker grass exclusion upload has one fixed allocation. Adding more
+# nearby trunks or rocks clamps the count instead of growing the field.
+open app3d/WalkerGrassObstacles
+
+func main() {
+  var values: List(Float) = emptyWalkerGrassObstacles()
+  var count: Int = 0
+  loop var i: Int = 0, i < 600, ++i {
+    addWalkerGrassObstacle(
+      values: values
+      count: count
+      x: i.toFloat()
+      y: (i * 2).toFloat()
+      radius: 0.5
+    )
+  }
+  log(values.length is walkerGrassObstacleFloats)
+  log(count is walkerGrassObstacleLimit)
+  log(values.copyAtDefault(index: 1) is 0.0)
+  log(values.copyAtDefault(index: 1 + (walkerGrassObstacleLimit - 1) * 4) is 511.0)
+}

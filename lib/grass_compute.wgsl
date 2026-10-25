@@ -14,6 +14,7 @@ struct GrassU {
   e: vec4<f32>,
   f: vec4<f32>,
   g: vec4<f32>,
+  h: vec4<f32>,
 };
 struct Indirect {
   vertexCount: u32,
@@ -132,20 +133,29 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   // Roads overlay the grass biome. Reject their painted footprint outright;
   // shrinking blades leaves conspicuous stubble on dirt. Keep only a narrow
   // fringe where the road overlay is below ten percent.
-  if (raeBiomePath(vec2<f32>(bx, by)) > 0.10) { return; }
+  let bladePosition = vec2<f32>(bx, by);
+  if (raeBiomePath(bladePosition) > 0.10) { return; }
+  if (raeGrassObstacle(bladePosition) > 0.0) { return; }
   let clusterStrength = clamp(G.e.w, 0.0, 1.0);
   if (clusterStrength > 0.0) {
-    let tuft = smoothstep(0.25, 0.70, 0.5 + 0.5 * perlin2(vec2<f32>(bx, by) * 0.65, 173u));
-    if (hash2u(cellI, 179u) > mix(1.0, tuft, clusterStrength)) { return; }
+    let patchScale = max(G.h.x, 0.5);
+    let broad = perlin2(bladePosition / patchScale, 173u) * 0.72;
+    let detail = perlin2(bladePosition / (patchScale * 0.43), 227u) * 0.28;
+    let patchValue = 0.5 + 0.5 * (broad + detail);
+    let threshold = 1.0 - clamp(G.h.y, 0.05, 0.95);
+    let feather = max(G.h.z, 0.001);
+    let patchKeep = smoothstep(threshold - feather, threshold + feather, patchValue);
+    if (hash2u(cellI, 179u) > mix(1.0, patchKeep, clusterStrength)) { return; }
   }
   let bz = terrainHeight(bx, by, G.a.z);
   let yaw = hp * 6.2831853;
   let hHeight = hash2u(cellI, 61u);
   let hWidth = hash2u(cellI, 71u);
-  // Keep broad variation inside each tuft. The three-segment ribbon supplies
+  // Keep broad variation inside each tuft. The four-segment ribbon supplies
   // the close silhouette; density is deliberately unchanged.
-  let baseHeight = (0.28 + hHeight * 0.44) * G.g.x;
-  let width = (0.052 + hWidth * 0.054) * G.g.y;
+  let variation = clamp(G.h.w, 0.0, 1.5);
+  let baseHeight = mix(0.50, 0.28 + hHeight * 0.44, variation) * G.g.x;
+  let width = mix(0.079, 0.052 + hWidth * 0.054, variation) * G.g.y;
   let distToCentre = distance(vec2<f32>(bx, by), G.a.xy);
   let radius = extent * 0.5;
   let edgeFade = 1.0 - smoothstep(radius * 0.6, radius * 0.98, distToCentre);
@@ -165,10 +175,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let m = swayModel(pos, yaw, 0.0, 0.0, scale);
   outBuf[slot].model = m;
   outBuf[slot].prevModel = m;
-  let colourVariation = 0.86 + hash2u(cellI, 103u) * 0.20;
+  let colourVariation = mix(1.0, 0.86 + hash2u(cellI, 103u) * 0.20, variation);
   outBuf[slot].albedoMetallic = vec4<f32>(G.e.rgb * colourVariation, 0.0);
   let mode = select(0.0, 1.0, G.b.z > 0.5);
-  let curve = (hash2u(cellI, 113u) * 2.0 - 1.0) * (0.24 + hash2u(cellI, 127u) * 0.42);
+  let curve = (hash2u(cellI, 113u) * 2.0 - 1.0) * (0.24 + hash2u(cellI, 127u) * 0.42) * variation;
   outBuf[slot].params = vec4<f32>(0.88, 1.0, mode, curve);
   outBuf[slot].fade = vec4<f32>(0.0);
 }

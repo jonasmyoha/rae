@@ -65,6 +65,7 @@ open app3d/WalkerCharacter
 open app3d/Characters
 open app3d/WalkerPhysics
 open app3d/WalkerTerrain
+open app3d/WalkerGrassObstacles
 open app3d/WalkerWorld
 open app3d/WalkerCamera
 open app3d/HudOverlays
@@ -261,6 +262,7 @@ func generateWalkerGrass(
   cameraSystem: view WalkerCamera
   characterSystem: view CharacterSystem
   world: view WalkerWorld
+  terrainSystem: view WalkerTerrain
   t: copy Float
   deltaTime: copy Float
   profiler: mod Profiler
@@ -278,9 +280,21 @@ func generateWalkerGrass(
   grassView.bladeHeightScale = 0.55
   grassView.bladeWidthScale = 1.8
   grassView.densityScale = 0.55
-  grassView.clusterStrength = 0.8
-  grassView.tipLighten = 1.25
+  grassView.clusterStrength = 1.0
+  grassView.patchScale = 7.5
+  grassView.patchCoverage = 0.58
+  grassView.patchFeather = 0.10
+  grassView.bladeVariation = 1.0
+  grassView.tipLighten = 1.18
   grassView.windStrength = 0.45
+  updateWalkerGrassObstacles(
+    grass: grassCompute
+    resources: resources
+    terrainSystem: terrainSystem
+    centreX: cameraSystem.camera.target.x
+    centreY: cameraSystem.camera.target.y
+    reach: grassView.extent * 0.5
+  )
   # Around what the camera looks at: the character in the game, wherever the
   # editor camera looks in the editor
   grassGenerate(

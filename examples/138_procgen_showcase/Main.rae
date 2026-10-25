@@ -221,6 +221,9 @@ func groveViewName(groveView: view Int) ret String {
   if groveView is 17 {
     ret "Silver birch: night"
   }
+  if groveView is 18 {
+    ret "Meadow grass patches"
+  }
   ret "Autumn Grove"
 }
 
@@ -269,6 +272,9 @@ func groveViewReadout(groveView: view Int) ret String {
   }
   if groveView is 17 {
     ret "Moonlit bark, twig motion and non-emissive leaves"
+  }
+  if groveView is 18 {
+    ret "Seeded gaps, path edge and trunk contacts"
   }
   if groveView is 3 {
     ret "Faceted outcrop beside the path"
@@ -348,6 +354,9 @@ func groveViewNumber(viewName: view String) ret Int {
   }
   if viewName is "birches-night" {
     ret 17
+  }
+  if viewName is "grass" {
+    ret 18
   }
   ret 1
 }
@@ -445,6 +454,11 @@ func setGroveView(camera: mod Camera3d, cameraRig: mod CameraRig, groveView: vie
     cameraRig.distance = 20
     cameraRig.orbitPitch = 0.05
     cameraRig.yaw = -0.32
+  } else if groveView is 18 {
+    camera.target = Vec3.create(x: -7.0, y: 5.0, z: 0.35)
+    cameraRig.distance = 7.0
+    cameraRig.orbitPitch = 0.16
+    cameraRig.yaw = 0.72
   }
   snapCameraRigView(rig: cameraRig)
   applyCameraRig(rig: cameraRig, camera: camera)

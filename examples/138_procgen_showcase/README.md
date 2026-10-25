@@ -61,10 +61,12 @@ pebbles wherever the ground is clear.
 
 The grass is the standard lib GPU grass (`lib/GrassCompute.rae`, the walker's,
 with its tuned settings): a compute pass places the blades each frame and
-the G-buffer pass draws them. `assets/grove_surface.wgsl` gives that pass the
-grove's ground: the island's height, grass inside the rim and none on the
-path. The rocks and trunks go to it as obstacle circles in the surface field
-(`GroveGrass.rae`), so no blade grows through them.
+the G-buffer pass draws them. Broad seeded patches leave readable ground gaps,
+while blade variation remains an independent control. `assets/grove_surface.wgsl`
+gives that pass the grove's ground: the island's height, grass inside the rim
+and none on the path. The rocks and trunks go to it as obstacle circles in the
+surface field (`GroveGrass.rae`), so no blade grows through them. Set
+`RAE_GROVE_VIEW=grass` for the low meadow/contact inspection.
 
 `GroveScene.rae` owns the gold, copper, scarlet and green palette, the path,
 the ground and every placement. All meshes are uploaded once and attached to

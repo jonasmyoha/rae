@@ -51,9 +51,9 @@ const grassWorkgroupSize: Int = 64
 
 const grassRecordBytes: Int = instanceRecordFloats * 4  # one DrawU (GbufferRecord)
 
-const grassUniformFloats: Int = 28  # seven vec4 (GrassU: player/time, count/extent, cam, forward, ground, wind, blade)
+const grassUniformFloats: Int = 32  # eight vec4 (camera, ground, wind, blade and patch controls)
 
-const grassUniformBytes: Int = 112
+const grassUniformBytes: Int = 128
 
 const grassIndirectBytes: Int = 16  # 4 u32 DrawIndirect args (vertexCount, instanceCount, ...)
 
@@ -152,14 +152,13 @@ func createGrassCompute() ret GrassCompute {
 # validated at build (docs/shaders-and-the-compiler.md). The island size is
 # the `override` pair WorldBiome.islandConstants() sets at pipeline creation.
 func defaultGrassComputeShader() ret Shader {
-  ret shader(
-    files: [
-      "lib/gpu/computeBounds.wgsl"
-      "lib/noise.wgsl"
-      "lib/world_biome.wgsl"
-      "lib/grass_compute.wgsl"
-    ]
-  )
+  ret shader(files: [
+    "lib/gpu/computeBounds.wgsl"
+    "lib/noise.wgsl"
+    "lib/world_biome.wgsl"
+    "lib/grass_obstacles.wgsl"
+    "lib/grass_compute.wgsl"
+  ])
 }
 
 # Use an app's own compute shader — a declared composition that starts with
@@ -694,6 +693,14 @@ func grassGenerate(
     w: settings.tipLighten
   )
   # g: blade + gradient
+  pushVec4F(
+    writer: grass.uniformArgs
+    x: settings.patchScale
+    y: settings.patchCoverage
+    z: settings.patchFeather
+    w: settings.bladeVariation
+  )
+  # h: broad patch and within-patch variation
   uploadArgs(
     writer: grass.uniformArgs
     resources: resources

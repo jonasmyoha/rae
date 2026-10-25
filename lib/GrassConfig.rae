@@ -24,14 +24,18 @@ type GrassViewSettings {
   bladeHeightScale: Float  # scales the per-blade height (top-down wants shorter)
   bladeWidthScale: Float  # scales blade width (top-down wants wider for coverage)
   densityScale: Float  # 0..1 fraction of candidate blades kept
-  # Zero preserves uniform placement; one groups blades in world-space tufts.
+  # Zero preserves uniform placement; one groups blades in broad world-space patches.
   clusterStrength: Float = 0.0
+  patchScale: Float = 8.0  # average patch span in world metres
+  patchCoverage: Float = 0.72  # broad ground share covered before density thinning
+  patchFeather: Float = 0.12  # soft stochastic boundary in noise-value units
+  bladeVariation: Float = 1.0  # size/lean/colour variation within a patch
   groundColor: Vec3  # gradient bottom = terrain ground colour
   tipLighten: Float  # gradient top multiplier (>1 lighter)
 }
 
 # Third-person: the tuned baseline — tall, dense, detailed blades close to camera.
-func grassThirdPersonSettings(groundColor: copy Vec3) pub ret GrassViewSettings {
+func grassThirdPersonSettings(groundColor: copy Vec3) ret GrassViewSettings {
   ret GrassViewSettings {
     enabled: true
     extent: 40.0
@@ -42,6 +46,10 @@ func grassThirdPersonSettings(groundColor: copy Vec3) pub ret GrassViewSettings 
     bladeHeightScale: 1.0
     bladeWidthScale: 1.0
     densityScale: 1.0
+    patchScale: 8.0
+    patchCoverage: 0.72
+    patchFeather: 0.12
+    bladeVariation: 1.0
     groundColor: groundColor
     tipLighten: 1.8
   }
@@ -50,7 +58,7 @@ func grassThirdPersonSettings(groundColor: copy Vec3) pub ret GrassViewSettings 
 # Top-down / isometric: seen from above, vertical blades project to slivers and the
 # ground shows through, so shorten and WIDEN the blades (more top-facing area),
 # reach much further, and thin the density since near-camera detail is wasted.
-func grassTopDownSettings(groundColor: copy Vec3) pub ret GrassViewSettings {
+func grassTopDownSettings(groundColor: copy Vec3) ret GrassViewSettings {
   ret GrassViewSettings {
     enabled: true
     extent: 80.0
@@ -61,6 +69,10 @@ func grassTopDownSettings(groundColor: copy Vec3) pub ret GrassViewSettings {
     bladeHeightScale: 0.7
     bladeWidthScale: 1.4
     densityScale: 0.7
+    patchScale: 11.0
+    patchCoverage: 0.78
+    patchFeather: 0.10
+    bladeVariation: 0.8
     groundColor: groundColor
     tipLighten: 1.5
   }

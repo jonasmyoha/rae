@@ -18,6 +18,7 @@ struct GrassU {
   e: vec4<f32>,
   f: vec4<f32>,
   g: vec4<f32>,
+  h: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var<storage, read> draws: array<DrawU>;
