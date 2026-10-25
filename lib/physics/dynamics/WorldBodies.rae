@@ -348,7 +348,6 @@ func setBodyTransform(
       extra: speculative
     )
     shape.aabb = box
-    world.shapes.set(index: shapeId, value: shape)
     if contains(outer: world.fatAabbs.copyAtDefault(index: shapeId), inner: box) is false {
       let fatBox: Aabb = inflate(box: box, extension: shape.aabbMargin)
       world.fatAabbs.set(index: shapeId, value: fatBox)
@@ -357,7 +356,10 @@ func setBodyTransform(
         moveBroadPhaseProxy(broadPhase: world.broadPhase, proxyKey: shape.proxyKey, box: fatBox)
       }
     }
-    shapeId = shape.nextShapeId
+    # set() takes the shape over: read what is needed from it first
+    let nextShapeId: Int = shape.nextShapeId
+    world.shapes.set(index: shapeId, value: shape)
+    shapeId = nextShapeId
   }
 }
 

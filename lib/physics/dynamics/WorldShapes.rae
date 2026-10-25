@@ -102,6 +102,8 @@ func createShapeInternal(
     shape.materialCount = 1
     shape.materials = List.create(SurfaceMaterial, cap: 0)
   }
+  # set() takes the shape over: read what is needed from it first
+  let isCompound: Bool = shape.shapeType is ShapeType.compound
   world.shapes.set(index: shapeId, value: shape)
   world.fatAabbs.set(
     index: shapeId
@@ -109,7 +111,7 @@ func createShapeInternal(
   )
 
   if body.setIndex is not disabledSet {
-    let forcePairCreation: Bool = def.invokeContactCreation and shape.shapeType is not ShapeType.compound
+    let forcePairCreation: Bool = def.invokeContactCreation and not isCompound
     createShapeProxy(
       world: world
       shapeId: shapeId

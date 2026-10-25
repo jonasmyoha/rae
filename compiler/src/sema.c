@@ -854,7 +854,10 @@ static bool sema_create_was_attempted(const AstExpr* e);
 /* Names that are "gone" on some path into a point: released by
  * `x.drop()`, or MOVED into an `own T` parameter. `moved[i]` says which, so
  * the diagnostic can say what happened to the value. */
-typedef struct DroppedSet { Str names[64]; bool moved[64]; int count; } DroppedSet;
+/* `unreachable`: the path ended (a `ret`), so what it dropped or moved
+ * reaches nothing after it: an `if` branch that returns does not poison the
+ * code after the `if`, nor the next pass of a loop. */
+typedef struct DroppedSet { Str names[64]; bool moved[64]; int count; bool unreachable; } DroppedSet;
 
 static bool dropped_has(const DroppedSet* set, Str name) {
     for (int i = 0; i < set->count; i++) if (str_eq(set->names[i], name)) return true;
@@ -881,6 +884,8 @@ static void dropped_remove(DroppedSet* set, Str name) {
     }
 }
 static void dropped_union(DroppedSet* into, const DroppedSet* from) {
+    if (from->unreachable) return;
+    if (into->unreachable) { *into = *from; return; }
     for (int i = 0; i < from->count; i++) {
         if (from->moved[i]) moved_add(into, from->names[i]); else dropped_add(into, from->names[i]);
     }
@@ -1054,6 +1059,7 @@ static void flow_stmt(LifecycleFlow* flow, const AstStmt* s, DroppedSet* set) {
                 flow_sweep_create(flow, r->value);
                 flow_check_expr(flow, r->value, set, s->line, s->column);
             }
+            set->unreachable = true;
             break;
         case AST_STMT_IF: {
             if (s->as.if_stmt.binding) flow_stmt(flow, s->as.if_stmt.binding, set);
@@ -1072,11 +1078,18 @@ static void flow_stmt(LifecycleFlow* flow, const AstStmt* s, DroppedSet* set) {
             flow_check_expr(flow, s->as.loop_stmt.condition, set, s->line, s->column);
             DroppedSet body_set = *set;
             flow_block(flow, s->as.loop_stmt.body, &body_set);
-            flow_check_expr(flow, s->as.loop_stmt.increment, &body_set, s->line, s->column);
+            if (!body_set.unreachable)
+                flow_check_expr(flow, s->as.loop_stmt.increment, &body_set, s->line, s->column);
             dropped_union(set, &body_set);
             /* second iteration: what the first one dropped meets the top of the body */
             flow_check_expr(flow, s->as.loop_stmt.condition, set, s->line, s->column);
             DroppedSet again = *set;
+            /* ...except a collection loop's binding (`loop let x: T in xs`),
+             * which is a fresh value on every pass: moving it on one pass
+             * leaves nothing behind for the next */
+            if (s->as.loop_stmt.is_range && s->as.loop_stmt.init
+                && s->as.loop_stmt.init->kind == AST_STMT_LET)
+                dropped_remove(&again, s->as.loop_stmt.init->as.let_stmt.name);
             flow_block(flow, s->as.loop_stmt.body, &again);
             dropped_union(set, &again);
             break;
@@ -1085,6 +1098,7 @@ static void flow_stmt(LifecycleFlow* flow, const AstStmt* s, DroppedSet* set) {
             flow_sweep_create(flow, s->as.match_stmt.subject);
             flow_check_expr(flow, s->as.match_stmt.subject, set, s->line, s->column);
             DroppedSet merged = *set;
+            merged.unreachable = false;
             for (const AstMatchCase* c = s->as.match_stmt.cases; c; c = c->next) {
                 DroppedSet case_set = *set;
                 flow_block(flow, c->block, &case_set);
@@ -1105,7 +1119,8 @@ static void flow_stmt(LifecycleFlow* flow, const AstStmt* s, DroppedSet* set) {
     }
 }
 static void flow_block(LifecycleFlow* flow, const AstBlock* block, DroppedSet* set) {
-    for (const AstStmt* s = block ? block->first : NULL; s; s = s->next) flow_stmt(flow, s, set);
+    for (const AstStmt* s = block ? block->first : NULL; s && !set->unreachable; s = s->next)
+        flow_stmt(flow, s, set);
 }
 
 static void sema_lifecycle_post_pass(CompilerContext* ctx, AstModule* module, const char* file,
@@ -4623,21 +4638,32 @@ static Str sema_pl_type_name(TypeInfo* t) {
 }
 
 // A method call sema left unresolved (the generic List methods are bound by
-// the C backend): does a same-named function whose `this` is the receiver's
-// type take it as `mod`?
-static bool sema_pl_unresolved_method_mutates(SemaParallelScope* scope, const AstExpr* receiver, Str method) {
+// the C backend): the same-named function whose `this` (after any `T: type`
+// parameters) is the receiver's type, or NULL. Its parameter MODES are what
+// the checks need; the specialisation stays the backend's.
+static const AstDecl* sema_unresolved_method_decl(CompilerContext* ctx, const AstExpr* receiver, Str method) {
     Str type_name = sema_pl_type_name(receiver ? receiver->resolved_type : NULL);
-    if (!type_name.len || !scope->ctx) return false;
-    for (size_t i = 0; i < scope->ctx->all_decl_count; i++) {
-        const AstDecl* d = scope->ctx->all_decls[i];
+    if (!type_name.len || !ctx) return NULL;
+    for (size_t i = 0; i < ctx->all_decl_count; i++) {
+        const AstDecl* d = ctx->all_decls[i];
         if (!d || d->kind != AST_DECL_FUNC || !str_eq(d->as.func_decl.name, method)) continue;
+        if (d->as.func_decl.specialization_args) continue;
         const AstParam* p = d->as.func_decl.params;
         while (sema_pl_is_type_param(p)) p = p->next;
         if (!p || !str_eq_cstr(p->name, "this") || !p->type) continue;
         if (!str_eq(get_base_type_name(p->type), type_name)) continue;
-        if (p->type->is_mod) return true;
+        return d;
     }
-    return false;
+    return NULL;
+}
+
+// Does that method take its receiver as `mod`?
+static bool sema_pl_unresolved_method_mutates(SemaParallelScope* scope, const AstExpr* receiver, Str method) {
+    const AstDecl* d = sema_unresolved_method_decl(scope->ctx, receiver, method);
+    if (!d) return false;
+    const AstParam* p = d->as.func_decl.params;
+    while (sema_pl_is_type_param(p)) p = p->next;
+    return p && p->type && p->type->is_mod;
 }
 
 static void sema_pl_check_call(SemaParallelScope* scope, const AstExpr* e, const AstExpr* receiver,
@@ -8445,6 +8471,18 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
              * several routes (method table, generic overload search, general
              * UFCS) and only some of them set it. The receiver occupies the
              * first parameter, hence skip_receiver. */
+            /* A generic method the backend binds (`List.add(value: own T)`)
+             * has no decl_link: its declaration is found by name and
+             * receiver type, so an argument it consumes is a move here too.
+             * Without this `list.add(value: x)` never marked `x` moved, a
+             * second use was accepted, and two lists freed one buffer. */
+            if (!expr->decl_link) {
+                const AstDecl* unresolved = sema_unresolved_method_decl(
+                    ctx, expr->as.method_call.object, expr->as.method_call.method_name);
+                if (unresolved)
+                    sema_check_own_args(ctx, module, symbols, &unresolved->as.func_decl,
+                                        expr->as.method_call.args, true);
+            }
             if (expr->decl_link && expr->decl_link->kind == AST_DECL_FUNC) {
                 sema_check_own_args(ctx, module, symbols, &expr->decl_link->as.func_decl,
                                     expr->as.method_call.args, true);

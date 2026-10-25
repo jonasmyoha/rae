@@ -43,6 +43,59 @@ void emit_deep_copy_source(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
   fprintf(out, ")");
 }
 
+// One element of a list literal (`{ a, b }`, `[a, b]`) as the value handed
+// to the list's add(), which takes it over (docs/ownership-model.md: a plain
+// element is a COPY, `own x` a move):
+// - `own x`: x itself; emitting the `own` marks the local moved;
+// - a PLACE (a local, a field, an index) of a heap-owning type: a deep copy
+//   (rae_string_copy, rae_deep_copy_<T>). The place keeps its value and its
+//   owner drops it, once: `{ payload }` twice made two lists that shared one
+//   buffer and freed it twice;
+// - anything else (a call, a literal, an interpolation) is a fresh value
+//   and moves in; a String is detached from the statement's string pool.
+// A heap-owning place no helper can copy keeps the old behaviour: it moves,
+// and a local is marked moved so its scope does not drop it too.
+void emit_collection_element(CFuncContext* ctx, const AstExpr* value, const AstTypeRef* elem_type,
+                             bool elem_is_string, bool elem_is_any, FILE* out) {
+  bool is_place = value && (value->kind == AST_EXPR_IDENT || value->kind == AST_EXPR_MEMBER
+                            || value->kind == AST_EXPR_INDEX);
+  bool plain_type = elem_type && !elem_type->is_view && !elem_type->is_mod && !elem_type->is_opt;
+  if (is_place && plain_type && !elem_is_any && elem_is_string) {
+    fprintf(out, "rae_string_copy(");
+    emit_expr(ctx, value, out, PREC_LOWEST, false, false);
+    fprintf(out, ")");
+    return;
+  }
+  if (is_place && plain_type && !elem_is_any
+      && type_needs_deep_copy(ctx->compiler_ctx, ctx->module, (AstTypeRef*)elem_type, 0)) {
+    Str base = get_base_type_name(elem_type);
+    bool is_container = str_eq_cstr(base, "List") || str_eq_cstr(base, "StringMap")
+                        || str_eq_cstr(base, "IntMap");
+    const AstDecl* decl = is_container ? NULL : find_type_decl(ctx, ctx->module, base);
+    bool is_user_struct = decl && decl->kind == AST_DECL_TYPE
+                          && !has_property(decl->as.type_decl.properties, "c_struct")
+                          && !decl->as.type_decl.generic_params;
+    if (is_container || is_user_struct) {
+      const char* type_name = rae_mangle_type_specialized(
+          ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)elem_type);
+      int id = ctx->temp_counter++;
+      fprintf(out, "(__extension__ ({ %s __elc%d; rae_deep_copy_%s(&__elc%d, ", type_name, id, type_name, id);
+      emit_deep_copy_source(ctx, value, out);
+      fprintf(out, "); __elc%d; }))", id);
+      return;
+    }
+  }
+  if (elem_is_any) fprintf(out, "rae_any((");
+  if (elem_is_string) fprintf(out, "rae_string_pool_take(");
+  emit_expr(ctx, value, out, PREC_LOWEST, false, false);
+  if (elem_is_string) fprintf(out, ")");
+  if (elem_is_any) fprintf(out, "))");
+  if (value && value->kind == AST_EXPR_IDENT && elem_type
+      && type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, elem_type, 0)) {
+    mark_expr_moved_if_local(ctx, value);
+  }
+}
+
 // File-local helpers.
 static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
@@ -2925,32 +2978,18 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     AstTypeRef saved_exp_le = ctx->expected_type;
                     for (const AstCollectionElement* e = stmt->as.let_stmt.value->as.collection.elements; e; e = e->next) {
                         fprintf(out, "  %s(&%.*s, ", add_name, (int)var_name.len, var_name.data);
-                        if (elem_is_any) fprintf(out, "rae_any((");
-                        if (elem_is_string) fprintf(out, "rae_string_pool_take(");
                         // The element's expected type is the list's element type,
                         // so a nested collection literal (`[[1, 2], [3]]` — each
                         // `[1, 2]` is itself a List(Int) literal) knows what to
                         // lower to instead of failing for want of a declared type.
+                        // A place is copied, `own x` and a fresh value move in
+                        // (emit_collection_element).
                         ctx->has_expected_type = true;
                         ctx->expected_type = *elem_type;
-                        emit_expr(ctx, e->value, out, PREC_LOWEST, false, false);
+                        emit_collection_element(ctx, e->value, elem_type, elem_is_string, elem_is_any, out);
                         ctx->has_expected_type = saved_has_exp_le;
                         ctx->expected_type = saved_exp_le;
-                        if (elem_is_string) fprintf(out, ")");
-                        if (elem_is_any) fprintf(out, "))");
                         fprintf(out, ");\n");
-                        // `add(value: own T)` MOVES the element into the list, so
-                        // a heap-owning local element (`[inner]` where inner is a
-                        // List/String/struct that owns heap) must not also be
-                        // dropped at scope exit — the list owns it now. The direct
-                        // `.add()` path marks this in c_call.c; the literal lowers
-                        // add() by hand, so mark it here too. A POD element (Int)
-                        // owns no heap and is unaffected; a literal/call element is
-                        // not a local and is skipped by mark_expr_moved_if_local.
-                        if (e->value && e->value->kind == AST_EXPR_IDENT
-                            && type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, elem_type, 0)) {
-                            mark_expr_moved_if_local(ctx, e->value);
-                        }
                     }
                     // Register generic type for struct emission
                     register_generic_type(ctx->compiler_ctx, list_type);

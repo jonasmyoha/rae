@@ -327,7 +327,8 @@ func followSceneImports(
       }
       if let registryIdx: Int = sceneRegistryIndex(reg: registry, key: importId) {
         assets.importedIds.add(value: "{importId}")
-        assets.importedPaths.add(value: path)
+        # add() takes its value over; `path` is still used below
+        assets.importedPaths.add(value: "{path}")
         let imported: view Scene = sceneRegistryGet(reg: registry, idx: registryIdx)
         collectSceneAssetsBlock(
           assets: assets

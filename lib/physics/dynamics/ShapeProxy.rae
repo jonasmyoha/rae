@@ -27,11 +27,12 @@ func updateShapeAabbs(
     extra: speculative
   )
   shape.aabb = box
-  world.shapes.set(index: shapeId, value: shape)
   var margin: Float = shape.aabbMargin
   if proxyBodyType is 0 {
     margin = speculative
   }
+  # set() takes the shape over: read what is needed from it first
+  world.shapes.set(index: shapeId, value: shape)
   world.fatAabbs.set(index: shapeId, value: inflate(box: box, extension: margin))
 }
 
