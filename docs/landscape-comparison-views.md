@@ -102,6 +102,11 @@ fork primitive. They do not replace the nine landscape baseline frames.
 | `forks-side` | (9.5, -13.0, 6.2) | 1.35 / 0.08 / 27 m | 10:00 |
 | `forks-grazing` | (9.5, -13.0, 6.2) | -0.55 / 0.02 / 25 m | 17:15 |
 
+The current default is the separate curved-fork recovery. `RAE_FORK_CONTROL=1`
+selects the preserved first mesh without changing placement, camera or material.
+`python3 tools/capture-fork-recovery.py` captures both sets and a manifest outside
+git; see the [matched recovery review](landscape-recovery-review.md#curved-fork-recovery).
+
 All three use the same 1280 by 800 headless capture settings, neutral rough
 wood material, seed 206 for the young fork and seed 907 for the mature fork.
 The front and side frames expose the joined openings, taper and unequal branch

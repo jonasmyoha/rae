@@ -86,6 +86,89 @@ frames, clearly labelled as historical evidence. Their upright thin stalks,
 small geometric heads, angular grass and long pointed wood explain why passing
 geometry and nonblank-image checks did not meet the task.
 
+## Curved fork recovery
+
+The two bare study objects now use `procgen/CurvedFork`, separately from all
+species. `procgen/SculpturalFork.rae` and the old reference PNGs are unchanged.
+Set `RAE_FORK_CONTROL=1` to render the old mesh in the same scene. The comparison
+changes geometry only: young seed 206, mature seed 907, the original placements,
+unit scale, neutral rough material, camera, sky, exposure and effects stay fixed.
+
+### Matched front, side and grazing-light views
+
+| View | Preserved rejected control | Curved recovery |
+|---|---|---|
+| Front, 10:00 | ![Control front](images/fork-recovery/control-front.png) | ![Recovery front](images/fork-recovery/recovery-front.png) |
+| Side, 10:00 | ![Control side](images/fork-recovery/control-side.png) | ![Recovery side](images/fork-recovery/recovery-side.png) |
+| Grazing, 17:15 | ![Control grazing](images/fork-recovery/control-grazing.png) | ![Recovery grazing](images/fork-recovery/recovery-grazing.png) |
+
+The private [HTML presentation](../../../peli_ideoita/environmentReferenceStudy/recoveryReview/index.html#fork-recovery)
+puts these same frames next to the actual T02/T06/T07/T09 crops. T02 and T09
+inform the long changing lean and smooth trunk flow. T06 and T07 inform unequal
+branch directions and heights. The recovered shoulders now emerge gradually;
+the visible cuff in the first recovery attempts was rejected and corrected.
+The side view is particularly useful: it shows the connected crotch without
+foliage hiding it. The low-sun frame shows a continuous surface rather than the
+old ring steps and pointed cones. Roots flare below the ground instead of ending
+on its surface. No wind deformation is attached to the wood.
+
+### Implementation and cost
+
+`CurvedFork` constructs the two seeded scaffolds with the existing curve and
+transported-frame helpers. `CurvedForkBranch` carries the opening's angular
+coordinates along each child, and uses consistent triangle winding through the
+join. `ForkSurface` relaxes the shoulder of the connected control cage, runs two
+bounded Loop-subdivision passes, and derives normals from the welded surface.
+The texture seam is split afterwards with matching normals. Tips and crotches
+receive separate planar charts to avoid cylindrical-UV singularities; unused
+vertices are compacted. The rest of the tubes retain longitudinal UVs.
+
+| Mesh | Preserved control | Recovery |
+|---|---:|---:|
+| Young | 266 vertices / 518 triangles | 6,256 vertices / 11,552 triangles |
+| Mature | 327 vertices / 640 triangles | 8,041 vertices / 14,656 triangles |
+
+In the three matched capture runs, generation of both recovered meshes took
+**2.360–2.548 ms** on this machine. This is startup generation, not work repeated
+per frame. The manifest records each control timing too. Desktop background load
+was present; these are observations, not a rendering-performance benchmark.
+The extra triangles are an explicit cost of this close-view study, not a budget
+for thousands of forest instances. No renderer or shader was changed.
+
+### Reproduce and verify
+
+Run `python3 tools/capture-fork-recovery.py`. It uses the three existing camera
+presets, 60 fixed steps at 1/60 second, wind off, a 1280 × 800 point window,
+1280 × 800 review PNGs, and a timeout on each app run. It restores the saved
+window geometry and leaves full bitmaps/logs outside git. The committed
+[capture manifest](images/fork-recovery/manifest.json) records source hashes,
+seeds, transforms, camera, light, counts, timing and image hashes.
+
+Fixture 1242 checks both ages over four seeds, including a negative seed:
+repeatable vertex/index arrays, finite positions/UVs, nondegenerate outward
+faces, unit normals, stable transported frames, bounds, buried bases, rigid wood,
+closed two-face edges with opposite winding, texture-wrap continuity and equal
+normals at split texture vertices. Fixtures 1142 and 1235 protect the preserved
+fork/Camphor and current birch consumers. These checks establish mesh correctness;
+they do not establish reference-quality art.
+
+Final checks passed: cases 1242/1142/1235; all 14 Autumn Grove example views;
+format-check-tree (1,815 files); example-copy and banned-terms gates. All six
+comparison frames were inspected, their image/source hashes checked, and the
+private presentation's local links verified.
+
+### Remaining limits before species use
+
+This is a primary-fork proof, not a finished tree. The ends are rounded scaffold
+terminations; species work must continue them into smaller branches. The current
+root flare is deliberately simple, with no long exposed surface-root network.
+The plain material makes the shape readable but proves no finished bark paint;
+separate UV charts still need intentional bark treatment at their boundaries.
+The references have richer branching, species-specific proportion and mature
+surface character. No forest generator, lower-detail silhouette or atlas is
+changed here. Judge these comparison images before adopting the primitive in a
+species; do not treat a passing test or this queue outcome as that art approval.
+
 ## All 36 landscape tasks
 
 These decisions concern every task in the landscape series. Unrelated completed

@@ -2,8 +2,9 @@
 
 **Art recovery in progress (25 October 2026).** The first landscape series did
 not meet the supplied references. Birch currently uses a recovery candidate
-with the original fine-edge texture and restored crown coverage; the grass,
-flower and fork study images below remain historical, rejected visual results.
+with the original fine-edge texture and restored crown coverage; the grass
+and flower images below remain historical, rejected visual results. The separate
+bare-fork recovery now has matched before/after captures; it is not a species rollout.
 See the [before/rejected/repair comparison and task audit](../../docs/landscape-recovery-review.md).
 
 A procedural prop showcase with about sixty trees (including the six original
@@ -22,8 +23,9 @@ standard GPU grass and a winding path on a raised garden base.
 - **9** visits the silver-birch stand: white bark with bold black marks, hanging twigs
   and rounded textured leaf clumps.
 - `RAE_GROVE_VIEW=forks-front`, `forks-side` and `forks-grazing` inspect the
-  young and mature bare joined-fork studies. These art-study views are outside
-  the 1-9 keyboard set.
+  young and mature curved bare-fork recovery studies. Set `RAE_FORK_CONTROL=1`
+  for the unchanged rejected meshes at the same transforms. These art-study
+  views are outside the 1-9 keyboard set.
 - `RAE_GROVE_VIEW=flowers` frames one oxeye daisy and one 13-plant patch.
 - `RAE_GROVE_VIEW=bellflowers`, `bellflowers-side` and
   `bellflowers-backlit` inspect one harebell and one 11-plant patch from the
@@ -236,7 +238,22 @@ Keys 7/8 or `RAE_GROVE_VIEW=camphor` / `roots` select the inspection views.
 
 ![Under the canopy](references/Roots.png)
 
-## Joined sculptural fork study
+## Curved fork recovery
+
+`lib/procgen/CurvedFork.rae` now supplies only the two bare study objects.
+It reuses the carried curve frames, replaces straight spear-like limbs with
+unequal curves, and refines one welded surface through the branch shoulders.
+The wood stays rigid. Tips and junctions have separate texture charts; this
+neutral-material study does not establish finished species bark or a full crown.
+
+Run `python3 tools/capture-fork-recovery.py` for all six matched control/recovery
+frames. Each app run is timed out, uses the existing camera presets, and records
+seeds, transforms, camera, light, mesh counts and generation time in a manifest.
+See the [recovery review](../../docs/landscape-recovery-review.md#curved-fork-recovery)
+for the actual images and limitations. The older reference files below are kept
+unchanged as the rejected control, not overwritten to make a gate pass.
+
+### Preserved first fork implementation
 
 `lib/procgen/SculpturalFork.rae` is a bounded wood primitive for later species
 work. It uses the path tangent and carried frame from `procgen/Foliage` and the
@@ -256,7 +273,9 @@ remains rigid.
 The silhouette choices use the private art-plan crops T02 and T06 for the
 continuous unequal split, T07 for branch flow that can remain visible through
 a future crown, and T09 for long lean, different curvature and stable tube
-frames. The primitive is not wired into an existing species yet.
+frames. These statements and images describe the first implementation. Its helper
+functions were subsequently used by birch; the recovery deliberately leaves
+that module and its consumers unchanged.
 
 ![Joined fork front view](references/ForksFront.png)
 
