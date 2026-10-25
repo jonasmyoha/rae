@@ -57,9 +57,10 @@ const grassUniformBytes: Int = 112
 
 const grassIndirectBytes: Int = 16  # 4 u32 DrawIndirect args (vertexCount, instanceCount, ...)
 
-# Vertices per procedural blade: a tapered quad = two triangles (see bladeLocal
-# in the render WGSL). No mesh, no vertex/index buffer.
-const grassBladeVerts: Int = 6
+# Vertices per procedural blade: four joined quads form one curved, tapered
+# ribbon (see bladeLocal in the render WGSL). No mesh, vertex buffer, alpha
+# texture or extra draw is needed.
+const grassBladeVerts: Int = 24
 
 # The grass field's cross-frame state: the "made" flags, the reused per-frame
 # argument writers (allocated once so the hot path stays zero-alloc), the

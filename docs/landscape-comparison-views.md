@@ -123,3 +123,32 @@ the committed evidence. Left to right, its top row is daylight, side and
 under-crown; the bottom row is warm, cool and night.
 
 ![Silver-birch light and view studies](images/birch-finish-studies.jpg)
+
+## Near-grass treatment
+
+The close-view grass now uses one shared four-segment curved ribbon in 138 and
+the three walker renderers. The previous control was a single six-vertex flat
+trapezoid. A textured crossed-clump candidate would have softened its outline,
+but it added transparent coverage, cutout mip tuning and crossing sheets while
+keeping the same stiff centre line. The ribbon was selected because its curve,
+taper and shallow transverse bow change the real silhouette and the lighting
+without an alpha texture. Alpha cutoff, mip generation and texture-edge shadow
+matching therefore do not apply to this path.
+
+Each blade now varies in height, width, lateral curve and a restrained colour
+range. Its base darkens over the lower 32 percent, its tip follows the existing
+per-app colour scale, and its normal blends the bowed surface normal toward the
+sky. This retains broad day and night response without emission or disabled
+shadows. Candidate count, density, biome tests, draw count and storage size are
+unchanged. The maximum procedural vertex work rises from 393,216 vertices
+(65,536 candidates times 6) to 1,572,864 vertices (times 24); compute culling
+and density still reduce the submitted instance count. The ribbon adds no
+alpha-covered pixels, so the old sheet area remains the conservative overdraw
+bound.
+
+Use the existing `143-ground-cover` camera for walker-height review. For 138,
+the meadow around the overview camera is the bounded proof patch. Remaining
+work belongs to the following placement task: broader patch rhythm, ground
+colour blending, and exclusion around individual rocks and trunks. The current
+four-segment silhouette can still show a small elbow under an extreme grazing
+close-up; increasing density or blur is not an accepted fix.
