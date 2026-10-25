@@ -90,8 +90,8 @@ geometry and nonblank-image checks did not meet the task.
 
 These decisions concern every task in the landscape series. Unrelated completed
 compiler/editor tasks are not reopened. Original IDs and technical completion
-notes remain in QUEUE.md; rejected visual outcomes are explicitly marked failed
-and receive separate difficulty-5 recovery tasks. The remaining 26 tasks retain
+notes remain in QUEUE.md; rejected visual outcomes are retained as superseded `[postponed]` records
+and have separate runnable `[ ]` difficulty-5 recovery tasks. The remaining 26 tasks retain
 their IDs and receive the relevant recovery prerequisites.
 
 | Task | Previous state | Decision | Required change |
@@ -151,8 +151,11 @@ their IDs and receive the relevant recovery prerequisites.
 These are bounded replacements for the rejected outcomes, not extra species.
 The remaining species, rock and cloud tasks keep their original IDs. Only tasks
 that consume a rejected foundation gain the corresponding recovery prerequisite.
-The failed outcomes stop automatic queue progression; the comparison report is
-available before any further batch is resumed.
+The initial `failed` markers unnecessarily stopped queue progression. They are
+now superseded `[postponed]` records with links to the six runnable `[ ]`
+recovery tasks. Formal dependencies point to those replacements. Start at
+#64669660 (Sculptural fork visual recovery), followed by #87803692 (Silver birch
+crown recovery). The comparison report remains the visual control for the work.
 
 ## Acceptance from now on
 
