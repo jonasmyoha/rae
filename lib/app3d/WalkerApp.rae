@@ -619,7 +619,7 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
         settingsState: settingsState
       )}, direction {startMoon.direction.x} {startMoon.direction.y} {startMoon.direction.z}"
     )
-    # Default FXAA, the settings pane toggles TAA; a forward frame has 4x MSAA
+    # Default SMAA, the settings pane toggles TAA; a forward frame has 4x MSAA
     # and no TAA
     if not settings.forward {
       setTaaEnabled(renderer: renderer, on: settingsState.taa)
@@ -765,6 +765,7 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
         cubeBatch: own cubeBatch
         frameLog: createFrameLog()
         frameLogOn: Sys.getEnv(name: "RAE_FRAME_TIMING").length() > 0
+        statsLogged: false
         windSettings: windSettings
         wind: createWindState(settings: windSettings)
       }

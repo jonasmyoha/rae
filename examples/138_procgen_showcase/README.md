@@ -17,7 +17,9 @@ on a raised garden base.
   and rounded textured leaf clumps.
 - Drag to orbit, scroll to zoom. The camera bar's **Orbit** button switches to
   the free WASD camera (Q/E down/up, shift to boost) and back.
-- The menu button opens the settings panel: the nine views (Scene 1-9), sky
+- The menu button opens the settings panel. Its app section names the active
+  botanical subject and describes the view. The shared chooser exposes views
+  1-3; keys 1-9 reach every inspection view. The panel also controls the sky
   model, time of day and date, shadows and TAA.
 - The chrome is the shared editor panel (`lib/app3d/EditorPanel.rae`); the
   debug widget on top shows frame rate and memory.
@@ -30,6 +32,9 @@ compiler/bin/rae run --project examples/138_procgen_showcase examples/138_procge
 
 `RAE_GROVE_VIEW=trees` or `rocks` selects a reproducible initial close-up.
 The default is the complete grove. The example gate renders all nine views.
+[`docs/landscape-comparison-views.md`](../../docs/landscape-comparison-views.md)
+records the fixed cameras and the capture command used before each landscape
+art pass.
 
 ## Geometry and shading
 
@@ -62,7 +67,10 @@ path. The rocks and trunks go to it as obstacle circles in the surface field
 the ground and every placement. All meshes are uploaded once and attached to
 entities in `World3d`; the deferred renderer owns the uploaded resources. Every
 material uses the existing cel-shading flag and the same directional light
-and cascaded shadows. The example uses no bitmap textures or imported meshes.
+and cascaded shadows. Tree and rock geometry is generated in Rae, with no
+imported tree meshes. The silver birch is the current exception to the older
+untextured-foliage description: its generated wood and leaf cards sample the
+shared birch bark and leaf textures.
 
 ![The complete grove](references/Grove.png)
 
@@ -118,7 +126,7 @@ spots inside the rim. A spot is kept only when the plant's crown has room:
 clear of the paths, the camphor's clearing, the shrub row, every trunk and
 rock, the woodland so far and the spruce view's line of sight. The lawn in
 front of the overview camera gets only bushes, so the grove stays in view. The
-walker example (136) streams the same forms over its terrain.
+walker examples 136, 137 and 143 stream the same forms over their terrain.
 
 ![Broad leaf patches](references/Fluffy.png)
 
@@ -209,9 +217,12 @@ give the clusters visible swaying motion, with different phases and strengths.
 Colour, shadow and distant
 bake passes all use the same alpha cutoff and coverage-preserving texture mips.
 
-The five mesh parts and two textures are shared by every instance. The shared walker forest uses this
-same generator in 136, 137 and 143. The middle LOD still shares the close mesh;
-the existing distant bake now includes the bark and masked leaves. A dedicated
-reduced mesh remains future work. See [the rendering review](../../docs/tree-rendering-2026.md).
+The five mesh parts and two textures are shared by every instance. The shared
+walker forest uses this same generator in 136, 137 and 143. Those forests use
+the common near/middle/impostor distance path, although birch's middle level
+still shares the close mesh. The distant bake includes the bark and masked
+leaves. Autumn Grove deliberately keeps the close inspection mesh and does not
+switch LODs per instance. A dedicated reduced birch mesh remains future work.
+See [the rendering review](../../docs/tree-rendering-2026.md).
 
 ![Silver birch stand](references/Birches.png)

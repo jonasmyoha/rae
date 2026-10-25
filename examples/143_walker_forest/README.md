@@ -1,9 +1,10 @@
 # Walker in a huge forest
 
 The deferred walker of example 136 on a huge generated terrain instead of an
-island: about 32,000 trees in stands over a 1.2 km square, with lakes and
-meadows between the woods. Walk with WASD (Character mode), jump on Space or
-F; the camera bar's buttons switch to the orbit and free cameras.
+island: 31,090 trees for the current fixed seeds, in stands over a 1.2 km
+square, with lakes and meadows between the woods. Walk with WASD (Character
+mode), jump on Space or F; the camera bar's buttons switch to the orbit and
+free cameras.
 
 The program is the walker app shell (lib/app3d/WalkerApp); `Main.rae` is
 only its settings (`WalkerLand.forest`, the deferred renderer).
@@ -30,11 +31,12 @@ compiler/bin/rae run examples/143_walker_forest/Main.rae
   lib/app3d/PropField), as the downstream game's nature system does it: every
   tree is a placement, sorted into 40 m cells. Each frame only the cells and
   trees within the draw distance and in view are gathered, each at its level
-  of detail (lib/app3d/GroveTrees: full crowns to 30 m, sparser
-  crowns of bigger leaf patches to 60 m, a few big patches to 140 m; the
-  first two cast shadows), into one instanced draw per species, level and
-  part. The field's `batchLimit` keeps each batch at 1,024 instances, so the
-  instance memory does not grow with the forest.
+  of detail. `lib/app3d/GroveTrees` uses full near meshes to 30 m, reduced
+  middle meshes to 60 m, and baked impostor sprites to 140 m; the first two
+  levels cast shadows. Birch currently reuses its near mesh for the middle
+  level. The renderer submits one instanced batch per species, level and part.
+  The field's `batchLimit` keeps each batch at 1,024 instances, so the instance
+  memory does not grow with the forest.
 - **Far trees to the horizon** (lib/app3d/FarSprites). Past 140 m, where
   the field's own billboards end, every tree still stands as a far billboard
   of the same picture, out to 1,800 m (the camera's far plane is 2,000 m):
@@ -83,3 +85,8 @@ and a screenshot.
 `RAE_FRAME_TIMING=1 RAE_GPU_PASS_TIMING=1 RAE_DRS=off` print the frame and
 GPU pass times; `RAE_CAMERA_AT` (or the older `RAE_WALKER_CAMERA`) and `RAE_WALKER_HOUR` set the start
 camera and hour, as in 136.
+
+The fixed landscape cameras, current counts and capture command are recorded in
+[`docs/landscape-comparison-views.md`](../../docs/landscape-comparison-views.md).
+Run `tools/capture-landscape-comparisons.sh captures` from the repository root
+to write full-size temporary evidence under `/tmp`.

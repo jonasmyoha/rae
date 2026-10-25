@@ -32,6 +32,7 @@ import GrassConfig
 import app3d/Slider
 open Scene3d
 open RendererDeferred
+open MeshStore
 open Sky
 open Gbuffer
 import GbufferSkinned
@@ -497,6 +498,19 @@ func renderWalkerApp(
     Profile.zoneEnd(profiler: profiler, name: (tag as RenderTag).toString())
   }
   gpuPassTimingEnd(renderer: renderSystem.renderer)
+  if renderSystem.frameLogOn and renderSystem.statsLogged is false {
+    let store: view MeshStore = renderSystem.renderer.passes.gbuffer.meshes
+    var residentTriangles: Int = 0
+    loop var mesh: Int = 1, mesh <= meshStoreCount(store: store), ++mesh {
+      residentTriangles = residentTriangles + meshStoreIndexCount(store: store, mesh: mesh) / 3
+    }
+    log(
+      "[landscape] walker gbuffer instances {deferredDrawCount(renderer: renderSystem.renderer)}, resident meshes {meshStoreCount(
+        store: store
+      )}, resident triangles {residentTriangles}"
+    )
+    renderSystem.statsLogged = true
+  }
   # The last read-back frame's per-pass GPU times, into a profiler capture
   # (gpu.<pass> counters; only while RAE_PROFILE captures)
   publishGpuPassCounters(renderer: renderSystem.renderer, profiler: profiler)
