@@ -1,0 +1,125 @@
+# Execute the production grass field and check placement/motion invariants on the GPU.
+open webgpu/Context
+open webgpu/WebgpuEnums
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuArgs
+open gpu/GpuReadback
+
+func runCheck(resources: mod GpuResources) ret Int {
+  if let storage: BufferId = createBuffer(
+    resources: resources
+    size: 512
+    usage: WGPUBufferUsage_Storage + WGPUBufferUsage_CopySrc
+  ) {
+    if let staging: BufferId = createBuffer(
+      resources: resources
+      size: 512
+      usage: WGPUBufferUsage_MapRead + WGPUBufferUsage_CopyDst
+    ) {
+      if let pipeline: PipelineId = createComputePipeline(
+        resources: resources
+        shader: shader(files: ["lib/grass_field.wgsl", "lib/grass_motion.wgsl", "grass_check.wgsl"])
+        entryPoint: "main"
+      ) {
+        let buffers: List(BufferId) = { storage }
+        let views: List(TextureViewId) = List.create(TextureViewId, cap: 0)
+        let samplers: List(SamplerId) = List.create(SamplerId, cap: 0)
+        if let bind: BindGroupId = createBindGroup(
+          resources: resources
+          pipeline: pipeline
+          buffers: buffers
+          textureViews: views
+          samplers: samplers
+        ) {
+          if var recording: Recording = beginRecording(resources: resources) {
+            if not recordComputeCommand(
+              recording: recording
+              resources: resources
+              command: computeCommand(
+                pipeline: pipeline
+                bindGroup: bind
+                workgroupsX: 1
+                workgroupsY: 1
+                workgroupsZ: 1
+              )
+            ) {
+              ret 2
+            }
+            if not recordCopyBuffer(
+              recording: recording
+              resources: resources
+              source: storage
+              sourceOffset: 0
+              destination: staging
+              destinationOffset: 0
+              size: 512
+            ) {
+              ret 3
+            }
+            if let submission: SubmissionId = submit(resources: resources, recording: recording) {
+              var submitted: Int = 0
+              loop var attempt: Int = 0, attempt < 1000000 and submitted is 0, ++attempt {
+                submitted = pollSubmission(resources: resources, id: submission)
+              }
+              if submitted is not 1 {
+                ret 4
+              }
+              retireSubmission(resources: resources, id: submission)
+              if let read: ReadbackId = startReadback(
+                resources: resources
+                buffer: staging
+                offset: 0
+                size: 512
+              ) {
+                var status: Int = 0
+                loop var attempt: Int = 0, attempt < 1000000 and status is 0, ++attempt {
+                  status = pollReadback(resources: resources, id: read)
+                }
+                if status is not 1 {
+                  ret 5
+                }
+                var bytes: List(UInt8) = List.create(UInt8, cap: 512)
+                loop var i: Int = 0, i < 512, ++i {
+                  bytes.add(value: 0)
+                }
+                if not copyReadback(resources: resources, id: read, destination: bytes) {
+                  ret 6
+                }
+                retireReadback(resources: resources, id: read)
+                var moving: Int = 0
+                loop var i: Int = 0, i < 64, ++i {
+                  if bytes.copyAtFallback(index: i * 4, fallback: 0) is not 1 {
+                    ret 7
+                  }
+                  moving = moving + (bytes.copyAtFallback(index: 256 + i * 4, fallback: 0) as Int)
+                }
+                if moving < 32 {
+                  ret 8
+                }
+                log(
+                  "grass patches: 64 cells/times preserve roots, exact calm, local coherence, directional bends, streaming placement and colour bounds"
+                )
+                ret 0
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  ret 1
+}
+
+func main() ret Int {
+  unsafe {
+    if webgpuBootstrap() is not 1 {
+      ret 1
+    }
+  }
+  var issuer: IdIssuer = IdIssuer.create()
+  if var resources: GpuResources = GpuResources.create(issuer: issuer, capacity: 16) {
+    ret runCheck(resources: resources)
+  }
+  ret 1
+}

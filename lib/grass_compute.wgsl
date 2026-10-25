@@ -29,42 +29,6 @@ struct Indirect {
 @group(0) @binding(1) var<uniform> G: GrassU;
 @group(0) @binding(2) var<storage, read_write> outBuf: array<DrawU>;
 @group(0) @binding(3) var<storage, read_write> indirect: Indirect;
-fn hashWord(v0: u32) -> u32 {
-  var h = v0;
-  h = h ^ (h >> 16u);
-  h = h * 0x7feb352du;
-  h = h ^ (h >> 15u);
-  h = h * 0x846ca68bu;
-  h = h ^ (h >> 16u);
-  return h;
-}
-fn hashLattice2(p: vec2<i32>, seed: u32) -> u32 {
-  var h = seed ^ 0x9e3779b9u;
-  h = hashWord(h ^ (u32(p.x) * 0x85ebca6bu));
-  h = hashWord(h ^ (u32(p.y) * 0xc2b2ae35u));
-  return h;
-}
-fn hash2u(p: vec2<i32>, seed: u32) -> f32 { return f32(hashLattice2(p, seed)) / 4294967295.0; }
-fn fadeN(t: f32) -> f32 { return t*t*t*(t*(t*6.0-15.0)+10.0); }
-fn grad2(hash: u32, p: vec2<f32>) -> f32 {
-  let h = hash & 7u;
-  if (h == 0u) { return p.x; }
-  if (h == 1u) { return -p.x; }
-  if (h == 2u) { return p.y; }
-  if (h == 3u) { return -p.y; }
-  if (h == 4u) { return (p.x + p.y) * 0.70710678; }
-  if (h == 5u) { return (-p.x + p.y) * 0.70710678; }
-  if (h == 6u) { return (p.x - p.y) * 0.70710678; }
-  return (-p.x - p.y) * 0.70710678;
-}
-fn perlin2(p: vec2<f32>, seed: u32) -> f32 {
-  let cell = vec2<i32>(floor(p));
-  let f = fract(p);
-  let u = vec2<f32>(fadeN(f.x), fadeN(f.y));
-  let a = mix(grad2(hashLattice2(cell, seed), f), grad2(hashLattice2(cell + vec2<i32>(1,0), seed), f - vec2<f32>(1.0,0.0)), u.x);
-  let b = mix(grad2(hashLattice2(cell + vec2<i32>(0,1), seed), f - vec2<f32>(0.0,1.0)), grad2(hashLattice2(cell + vec2<i32>(1,1), seed), f - vec2<f32>(1.0,1.0)), u.x);
-  return mix(a, b, u.y) * 1.41421356;
-}
 // Was a private two-octave Perlin here, unrelated to the terrain the CPU builds.
 // Now the shared field from world_biome.wgsl, which is prepended.
 fn terrainHeight(x: f32, y: f32, groundZ: f32) -> f32 {
@@ -121,28 +85,20 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let centreCellY = i32(floor(G.a.y / spacing));
   let worldCellX = centreCellX + i32(gx) - i32(side) / 2;
   let worldCellY = centreCellY + i32(gy) - i32(side) / 2;
-  let cellX = f32(worldCellX) * spacing;
-  let cellY = f32(worldCellY) * spacing;
   let cellI = vec2<i32>(worldCellX, worldCellY);
-  let jx = hash2u(cellI, 7u);
-  let jy = hash2u(cellI, 13u);
   let hp = hash2u(cellI, 29u);
-  let hs = hash2u(cellI, 43u);
-  let bx = cellX + (jx - 0.5) * spacing * 0.9;
-  let by = cellY + (jy - 0.5) * spacing * 0.9;
+  let clusterStrength = clamp(G.e.w, 0.0, 1.0);
+  let bladePosition = grassCandidatePosition(cellI, spacing, clusterStrength);
+  let bx = bladePosition.x;
+  let by = bladePosition.y;
   if (grassDrawnWeight(vec2<f32>(bx, by)) < GRASS_MIN_WEIGHT) { return; }
   // Roads overlay the grass biome. Reject their painted footprint outright;
   // shrinking blades leaves conspicuous stubble on dirt. Keep only a narrow
   // fringe where the road overlay is below ten percent.
-  let bladePosition = vec2<f32>(bx, by);
   if (raeBiomePath(bladePosition) > 0.10) { return; }
   if (raeGrassObstacle(bladePosition) > 0.0) { return; }
-  let clusterStrength = clamp(G.e.w, 0.0, 1.0);
   if (clusterStrength > 0.0) {
-    let patchScale = max(G.h.x, 0.5);
-    let broad = perlin2(bladePosition / patchScale, 173u) * 0.72;
-    let detail = perlin2(bladePosition / (patchScale * 0.43), 227u) * 0.28;
-    let patchValue = 0.5 + 0.5 * (broad + detail);
+    let patchValue = grassPatchValue(bladePosition, G.h.x);
     let threshold = 1.0 - clamp(G.h.y, 0.05, 0.95);
     let feather = max(G.h.z, 0.001);
     let patchKeep = smoothstep(threshold - feather, threshold + feather, patchValue);
@@ -160,7 +116,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let distToCentre = distance(vec2<f32>(bx, by), G.a.xy);
   let radius = extent * 0.5;
   let edgeFade = 1.0 - smoothstep(radius * 0.6, radius * 0.98, distToCentre);
-  let height = baseHeight * edgeFade;
+  let patchBody = smoothstep(0.36, 0.61, grassPatchValue(bladePosition, G.h.x));
+  var patchHeight = mix(0.62, 1.08, patchBody);
+  if (clusterStrength < 1.0) { patchHeight = mix(1.0, patchHeight, clusterStrength); }
+  let height = baseHeight * patchHeight * edgeFade;
   let pos = vec3<f32>(bx, by, bz);
   if (height < 0.02) { return; }
   if (G.g.z < 0.999 && hash2u(cellI, 131u) > G.g.z) { return; }
@@ -182,7 +141,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   outBuf[slot].model = m;
   outBuf[slot].prevModel = m;
   let colourVariation = mix(1.0, 0.86 + hash2u(cellI, 103u) * 0.20, variation);
-  outBuf[slot].albedoMetallic = vec4<f32>(G.e.rgb * colourVariation, 0.0);
+  var patchColor = grassGroundColor(G.e.rgb, bladePosition, G.h.x, G.h.y);
+  if (clusterStrength < 1.0) { patchColor = mix(G.e.rgb, patchColor, clusterStrength); }
+  outBuf[slot].albedoMetallic = vec4<f32>(patchColor * colourVariation, 0.0);
   let mode = select(0.0, 1.0, G.b.z > 0.5);
   let curve = (hash2u(cellI, 113u) * 2.0 - 1.0) * (0.24 + hash2u(cellI, 127u) * 0.42) * variation;
   outBuf[slot].params = vec4<f32>(0.88, 1.0, mode, curve);

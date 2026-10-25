@@ -52,30 +52,6 @@ struct VsOut {
   @location(4) height: f32,
   @location(5) uv: vec2<f32>,
 };
-fn grassGustEnvelope(base: vec2<f32>, time: f32, direction: vec2<f32>, strength: f32) -> f32 {
-  let acrossDirection = vec2<f32>(-direction.y, direction.x);
-  let along = dot(base, direction);
-  let across = dot(base, acrossDirection);
-  let speed = 0.55 + min(strength, 2.0) * 0.35;
-  let front = 0.5 + 0.5 * sin(along * 0.20 - time * speed + sin(across * 0.08) * 0.8);
-  let broad = 0.5 + 0.5 * sin(along * 0.075 + across * 0.045 - time * speed * 0.43 + 1.7);
-  return smoothstep(0.32, 0.88, front * 0.62 + broad * 0.38);
-}
-fn grassWindOffset(base: vec2<f32>, height: f32, time: f32, wind: vec3<f32>) -> vec2<f32> {
-  let strength = length(wind.xy);
-  if (strength <= 0.0001 || height <= 0.0) { return vec2<f32>(0.0); }
-  let direction = wind.xy / strength;
-  let acrossDirection = vec2<f32>(-direction.y, direction.x);
-  let gustiness = clamp(wind.z, 0.0, 1.5);
-  let gust = grassGustEnvelope(base, time, direction, strength);
-  let rooted = height * height;
-  let body = strength * (0.035 + gustiness * (0.075 + gust * 0.105)) * rooted;
-  // The only quick motion is a small cross-wind tip flutter. Its world-space
-  // phase differs between blades; the lower ribbon stays attached.
-  let tipPhase = dot(base, vec2<f32>(1.73, -1.19)) + time * (3.1 + strength * 0.45);
-  let tip = strength * (0.007 + gustiness * 0.013) * sin(tipPhase) * rooted * rooted;
-  return direction * body + acrossDirection * tip;
-}
 const bladeSegments: u32 = 4u;
 fn bladeLocal(vi: u32, curve: f32) -> vec3<f32> {
   let segment = vi / 6u;
@@ -197,7 +173,7 @@ fn gbufferSurface(in: VsOut) -> FsOut {
   if (GW.i.w > 2.5) {
     if (tuft.a < 0.5) { discard; }
     let tone = clamp(dot(tuft.rgb, vec3<f32>(0.2126, 0.7152, 0.0722)) / 0.16, 0.62, 1.18);
-    albedo = mix(botCol, topCol, height) * tone;
+    albedo = mix(botCol, topCol, height) * mix(0.94, tone, smoothstep(0.0, 0.32, height));
   }
   if (GW.i.w < 0.5) { albedo = mix(botCol, topCol, height); }
   // z = 1: TAA-reactive (render-perf-10): thin, wind-blown blades ghost on history

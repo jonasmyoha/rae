@@ -44,9 +44,13 @@ func createGroveGrass(obstacles: view List(GroveObstacle)) ret GrassCompute {
   var grass: GrassCompute = createGrassCompute()
   grassSetComputeShaderWithConstants(
     grass: grass
-    shader: shader(
-      files: ["lib/gpu/computeBounds.wgsl", "assets/grove_surface.wgsl", "lib/grass_compute.wgsl"]
-    )
+    shader: shader(files: [
+      "lib/gpu/computeBounds.wgsl"
+      "assets/grove_path.wgsl"
+      "assets/grove_surface.wgsl"
+      "lib/grass_field.wgsl"
+      "lib/grass_compute.wgsl"
+    ])
     constants: List.create(ShaderConstant, cap: 0)
   )
   grassSetSurfaceField(grass: grass, values: groveObstacleField(obstacles: obstacles))
@@ -56,20 +60,10 @@ func createGroveGrass(obstacles: view List(GroveObstacle)) ret GrassCompute {
 # The walker's tuned look (136): low, broad tufts in clusters over the
 # painted ground, a gentle wind
 func groveGrassSettings(groundColor: view Vec3) ret GrassViewSettings {
-  var settings: GrassViewSettings = GrassConfig.grassThirdPersonSettings(groundColor: groundColor)
+  var settings: GrassViewSettings = GrassConfig.grassMeadowSettings(groundColor: groundColor)
   settings.extent = groveGrassExtent
-  settings.bladeHeightScale = 0.55
-  settings.bladeWidthScale = 1.8
-  settings.densityScale = 0.55
-  settings.clusterStrength = 1.0
   settings.patchScale = 8.5
-  settings.patchCoverage = 0.58
   settings.patchFeather = 0.11
-  settings.bladeVariation = 1.0
-  settings.tipLighten = 1.18
-  settings.windStrength = 0.48
-  settings.windGust = 0.85
-  settings.distanceStart = 0.32
   settings.farDensityScale = 0.18
   settings.farWidthScale = 1.28
   ret settings

@@ -336,3 +336,12 @@ single ribbon, twelve curved ribbons and the selected cutout on identical roots.
 `RAE_WALKER_HOUR` also sets this showcase's initial light for matched captures.
 See the [grass recovery review](../../docs/grass-recovery.md) for actual frames,
 reference comparisons, costs and remaining ground/patch limitations.
+
+### Connected ground cover
+
+The grove ground now uses the shared terrain material and `grass_field.wgsl`,
+with the same patch scale as its tufts. Paths are ground paint from the existing
+exclusion mask, rather than raised separate meshes. Existing tuft candidates
+form unequal small groups; density and exclusion settings stay unchanged.
+See [the patch and motion comparison](../../docs/grass-patch-recovery.md) for
+fixed before/after views, calm/breezy walks, cost and remaining limits.

@@ -1,6 +1,6 @@
 # All placement and material choices belong to this example. Shared generators
-# and renderer defaults are untouched. Every visible object is a World3d entity;
-# the grass is the lib GPU grass (GroveGrass), kept out of the rocks and trunks.
+# and renderer defaults are untouched. Props are World3d entities; ground and
+# GPU grass are renderer resources. GroveGrass excludes the rocks and trunks.
 import Math
 import Sys
 open Vec3
@@ -215,87 +215,6 @@ func gardenEdge() ret MeshData {
       first: next
       second: bottom
       third: bottomNext
-    )
-  }
-  ret mesh
-}
-
-# A narrow path branches into the old tree's clearing, leaving its roots open.
-func camphorPath() ret MeshData {
-  var mesh: MeshData = foliageMesh()
-  loop var segment: Int = 0, segment < 66, ++segment {
-    let front: Float = segment.toFloat() / 66
-    let back: Float = (segment + 1).toFloat() / 66
-    let firstX: Float = -34.0 * front
-    let secondX: Float = -34.0 * back
-    let firstY: Float = -9.5 + 13.5 * front - 5.0 * Math.sin(x: front * 3.14159265)
-    let secondY: Float = -9.5 + 13.5 * back - 5.0 * Math.sin(x: back * 3.14159265)
-    let first: Vec3 = Vec3.create(
-      x: firstX
-      y: firstY - 0.65
-      z: groundHeight(x: firstX, y: firstY - 0.65) + 0.035
-    )
-    let second: Vec3 = Vec3.create(
-      x: firstX
-      y: firstY + 0.65
-      z: groundHeight(x: firstX, y: firstY + 0.65) + 0.035
-    )
-    let third: Vec3 = Vec3.create(
-      x: secondX
-      y: secondY - 0.65
-      z: groundHeight(x: secondX, y: secondY - 0.65) + 0.035
-    )
-    let fourth: Vec3 = Vec3.create(
-      x: secondX
-      y: secondY + 0.65
-      z: groundHeight(x: secondX, y: secondY + 0.65) + 0.035
-    )
-    foliageFace(
-      mesh: mesh
-      first: first
-      second: second
-      third: third
-    )
-    foliageFace(
-      mesh: mesh
-      first: third
-      second: second
-      third: fourth
-    )
-  }
-  ret mesh
-}
-
-func gardenPath() ret MeshData {
-  var mesh: MeshData = foliageMesh()
-  loop var i: Int = 0, i < 48, ++i {
-    let front: Float = i.toFloat() * 0.5 - 10.4
-    let back: Float = front + 0.5
-    let left: Float = pathCenter(distance: front) - 0.9
-    let right: Float = pathCenter(distance: back) - 0.9
-    let first: Vec3 = Vec3.create(x: left, y: front, z: groundHeight(x: left, y: front) + 0.025)
-    let second: Vec3 = Vec3.create(
-      x: left + 1.8
-      y: front
-      z: groundHeight(x: left + 1.8, y: front) + 0.025
-    )
-    let third: Vec3 = Vec3.create(x: right, y: back, z: groundHeight(x: right, y: back) + 0.025)
-    let fourth: Vec3 = Vec3.create(
-      x: right + 1.8
-      y: back
-      z: groundHeight(x: right + 1.8, y: back) + 0.025
-    )
-    foliageFace(
-      mesh: mesh
-      first: first
-      second: second
-      third: third
-    )
-    foliageFace(
-      mesh: mesh
-      first: third
-      second: second
-      third: fourth
     )
   }
   ret mesh
@@ -528,6 +447,7 @@ func groundIsClear(x: view Float, y: view Float, rocks: view List(GroveRock)) re
 
 # The grove: its World3d, and the obstacles the grass keeps out of
 type Grove {
+  groundMesh: MeshHandle
   world: World3d
   obstacles: List(GroveObstacle)
 }
@@ -558,40 +478,13 @@ func buildGrove(renderer: mod DeferredRenderer) ret Grove {
     rotation: 0
   )
   let ground: MeshData = gardenGround()
-  place(
-    world: world
-    renderer: renderer
-    mesh: ground
-    material: paint(red: groveGroundRed, green: groveGroundGreen, blue: groveGroundBlue)
-    position: origin
-    scale: unit
-    rotation: 0
-  )
+  let groundMesh: MeshHandle = uploadFoliage(renderer: renderer, mesh: ground)
   # Isolated comparison still uses the exact grove specimen and ground.
   # Other trees would occlude it during a full camera orbit.
   if Sys.getEnv(name: "RAE_BIRCH_ISOLATE") is "1" {
     addBirchGrove(world: world, renderer: renderer, obstacles: obstacles)
-    ret Grove { world: own world, obstacles: own obstacles }
+    ret Grove { world: own world, obstacles: own obstacles, groundMesh: groundMesh }
   }
-  place(
-    world: world
-    renderer: renderer
-    mesh: camphorPath()
-    material: paint(red: 0.48, green: 0.32, blue: 0.16)
-    position: origin
-    scale: unit
-    rotation: 0
-  )
-  let path: MeshData = gardenPath()
-  place(
-    world: world
-    renderer: renderer
-    mesh: path
-    material: paint(red: 0.48, green: 0.32, blue: 0.16)
-    position: origin
-    scale: unit
-    rotation: 0
-  )
   loop let spot: view GroveTreeSpot in groveTreeSpots() {
     plantTree(
       world: world
@@ -682,5 +575,5 @@ func buildGrove(renderer: mod DeferredRenderer) ret Grove {
   addBirchGrove(world: world, renderer: renderer, obstacles: obstacles)
   addForkStudy(world: world, renderer: renderer, obstacles: obstacles)
   addFluffyGrove(world: world, renderer: renderer, obstacles: obstacles)
-  ret Grove { world: own world, obstacles: own obstacles }
+  ret Grove { world: own world, obstacles: own obstacles, groundMesh: groundMesh }
 }

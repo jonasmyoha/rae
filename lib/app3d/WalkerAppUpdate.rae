@@ -77,6 +77,7 @@ open app3d/CharacterBodies
 open app3d/CharacterHeight
 open app3d/CameraKnockdownFollow
 open app3d/WalkerKnockdown
+open app3d/CameraStudy
 open app3d/LocomotionClips
 
 # The walker app: the system list (WalkerApp.rae's header has the convention)
@@ -91,6 +92,7 @@ type WalkerApp {
   frame: WalkerFrame
   inputSystem: WalkerInput
   cameraSystem: WalkerCamera
+  cameraStudy: CameraStudy = createCameraStudy()
   characterSystem: CharacterSystem
   terrainSystem: WalkerTerrain
   renderSystem: WalkerRender
@@ -179,7 +181,12 @@ func updateWalkerApp(app: mod WalkerApp) {
     deltaTime: deltaTime
   )
   let joyActive: Bool = camTick.joyActive
-  let cameraMoved: Bool = camTick.cameraMoved
+  let studyMoved: Bool = stepCameraStudy(
+    study: app.cameraStudy
+    rig: app.cameraSystem.rig
+    camera: app.cameraSystem.camera
+  )
+  let cameraMoved: Bool = camTick.cameraMoved or studyMoved
 
   # Character switching (#546): Page Up / Page Down cycle who the local player
   # controls. On a switch, snap the orbit camera behind the new character.

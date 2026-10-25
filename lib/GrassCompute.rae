@@ -164,6 +164,7 @@ func defaultGrassComputeShader() ret Shader {
     "lib/noise.wgsl"
     "lib/world_biome.wgsl"
     "lib/grass_obstacles.wgsl"
+    "lib/grass_field.wgsl"
     "lib/grass_compute.wgsl"
   ])
 }
@@ -360,6 +361,8 @@ func ensureGrassForward(
       "lib/deferred_uniforms.wgsl"
       "lib/deferred_shade.wgsl"
       "lib/ssao_upsample.wgsl"
+      "lib/grass_field.wgsl"
+      "lib/grass_motion.wgsl"
       "lib/grass_render.wgsl"
       "lib/forward_entry.wgsl"
     ])
@@ -370,6 +373,8 @@ func ensureGrassForward(
         "lib/deferred_uniforms.wgsl"
         "lib/deferred_shade.wgsl"
         "lib/ssao_upsample.wgsl"
+        "lib/grass_field.wgsl"
+        "lib/grass_motion.wgsl"
         "lib/grass_render.wgsl"
         "lib/forward_entry.wgsl"
       ])
@@ -537,7 +542,9 @@ func ensureGrassGpu(grass: mod GrassCompute, resources: mod GpuResources) {
       grass.computeBind = computeBind
     }
   }
-  let renderShader: Shader = shader(files: ["lib/grass_render.wgsl"])
+  let renderShader: Shader = shader(
+    files: ["lib/grass_field.wgsl", "lib/grass_motion.wgsl", "lib/grass_render.wgsl"]
+  )
   if let renderPipeline: RenderPipelineId = createRenderPipeline(
     resources: resources
     shader: renderShader
@@ -932,4 +939,12 @@ func grassShutdown(grass: mod GrassCompute, resources: mod GpuResources) {
   releaseGrassGpu(grass: grass, resources: resources)
   drainSubmissions(inFlight: grass.inFlight, resources: resources)
   grass.made = false
+}
+
+# The terrain and the tuft generator must use the app's same patch settings.
+func grassPatchConstants(settings: view GrassViewSettings) ret List(ShaderConstant) {
+  ret List(ShaderConstant) {
+    { name: "RAE_GRASS_PATCH_SCALE", value: settings.patchScale }
+    { name: "RAE_GRASS_PATCH_COVERAGE", value: settings.patchCoverage }
+  }
 }
