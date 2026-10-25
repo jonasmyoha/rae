@@ -115,8 +115,6 @@ func main() ret Int {
   }
   var patches: Int = 0
   var cameraFacing: Int = 0
-  var branchFacing: Int = 0
-  var atlasCells: List(Bool) = { false, false, false, false }
   loop var tone: Int = 0, tone < 3, ++tone {
     let mesh: MeshData = birchLeaves(twigs: tree.twigs, seed: 1437, tone: tone)
     if not checkMesh(mesh: mesh) or mesh.windPivots.length is not mesh.vertCount * 4 or mesh.leafCards.length is not mesh.vertCount * 4 {
@@ -135,26 +133,19 @@ func main() ret Int {
           }
         }
         let cardMode: Float = mesh.leafCards.copyAtDefault(index: (patch * 4 + vertex) * 4 + 3)
-        if cardMode is not 0.0 and cardMode is not 1.0 {
+        if cardMode is not 1.0 {
           ret 13
         }
         if vertex is 0 {
-          if cardMode is 1.0 {
-            cameraFacing = cameraFacing + 1
-          } else {
-            branchFacing = branchFacing + 1
-          }
+          cameraFacing = cameraFacing + 1
           let base: Int = patch * 4 * 8
-          let u: Float = (mesh.verts.copyAtDefault(index: base + 6) + mesh.verts.copyAtDefault(
-            index: base + 14
-          )) * 0.5
-          let value: Float = (mesh.verts.copyAtDefault(index: base + 7) + mesh.verts.copyAtDefault(
-            index: base + 23
-          )) * 0.5
-          let atlasColumn: Int = (u * 2.0).toInt()
-          let atlasRow: Int = (value * 2.0).toInt()
-          let atlasCell: Int = Math.min(a: atlasRow, b: 1) * 2 + Math.min(a: atlasColumn, b: 1)
-          atlasCells.set(index: atlasCell, value: true)
+          let firstU: Float = mesh.verts.copyAtDefault(index: base + 6)
+          let secondU: Float = mesh.verts.copyAtDefault(index: base + 14)
+          let firstV: Float = mesh.verts.copyAtDefault(index: base + 7)
+          let secondV: Float = mesh.verts.copyAtDefault(index: base + 23)
+          if Math.abs(value: firstU - secondU) is not 1.0 or Math.abs(value: firstV - secondV) is not 1.0 {
+            ret 15
+          }
         }
         loop var axis: Int = 0, axis < 3, ++axis {
           if mesh.leafCards.copyAtDefault(index: (patch * 4 + vertex) * 4 + axis) is not mesh.leafCards.copyAtDefault(
@@ -171,13 +162,8 @@ func main() ret Int {
       }
     }
   }
-  if patches < 100 or patches > 180 or cameraFacing < 50 or branchFacing < 30 {
+  if patches < 180 or patches > 360 or cameraFacing is not patches {
     ret 8
-  }
-  loop let used: Bool in atlasCells {
-    if not used {
-      ret 15
-    }
   }
   if speciesForPick(pick: 0.06, palms: false) is not speciesBirch {
     ret 16
@@ -220,7 +206,8 @@ func main() ret Int {
   if surfaceCoverage(pixels: reduced, scale: 1.0) is not 0.5 {
     ret 12
   }
-  let pngBytes: List(Int) = Sys.readFileBytes(path: "lib/assets/trees/birchLeaves.png")
+  let stdlib: String = Sys.getEnv(name: "RAE_STDLIB")
+  let pngBytes: List(Int) = Sys.readFileBytes(path: "{stdlib}/assets/trees/birchLeaves.png")
   var atlasWidth: Int = 0
   var atlasHeight: Int = 0
   let atlas: List(Int) = decodePng(
@@ -232,33 +219,25 @@ func main() ret Int {
   if atlasWidth is not 512 or atlasHeight is not 512 or atlas.length is not 512 * 512 {
     ret 17
   }
-  var quadrantCoverage: List(Int) = { 0, 0, 0, 0 }
-  var gutterPixels: Int = 0
+  # The recovered fine-leaf image occupies the full UV rectangle. It needs
+  # opaque interior coverage and a transparent perimeter, not atlas gutters.
+  var opaquePixels: Int = 0
+  var borderPixels: Int = 0
   loop var y: Int = 0, y < atlasHeight, ++y {
     loop var x: Int = 0, x < atlasWidth, ++x {
       let alpha: Int = (atlas.copyAtDefault(index: y * atlasWidth + x) shr 24) bitand 255
-      if x >= 240 and x < 272 or y >= 240 and y < 272 {
-        if alpha >= 128 {
-          gutterPixels = gutterPixels + 1
+      if alpha >= 128 {
+        opaquePixels = opaquePixels + 1
+        if x is 0 or y is 0 or x is atlasWidth - 1 or y is atlasHeight - 1 {
+          borderPixels = borderPixels + 1
         }
-      } else if alpha >= 128 {
-        let quadrant: Int = (y / 256) * 2 + x / 256
-        quadrantCoverage.set(
-          index: quadrant
-          value: quadrantCoverage.copyAtDefault(index: quadrant) + 1
-        )
       }
     }
   }
-  if gutterPixels > 16 {
+  if opaquePixels < 80000 or opaquePixels > 220000 or borderPixels > 100 {
     ret 18
   }
-  loop let coverage: Int in quadrantCoverage {
-    if coverage < 8000 {
-      ret 19
-    }
-  }
-  let barkBytes: List(Int) = Sys.readFileBytes(path: "lib/assets/trees/birchBark.png")
+  let barkBytes: List(Int) = Sys.readFileBytes(path: "{stdlib}/assets/trees/birchBark.png")
   var barkWidth: Int = 0
   var barkHeight: Int = 0
   let bark: List(Int) = decodePng(
@@ -321,6 +300,6 @@ func main() ret Int {
       }
     }
   }
-  log("birch: joined stable wood, animated twigs, hybrid atlas, mips and bounds")
+  log("birch: joined stable wood, animated twigs, camera-facing coverage, mips and bounds")
   ret 0
 }
