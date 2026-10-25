@@ -24,6 +24,8 @@ struct GrassU {
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var<storage, read> draws: array<DrawU>;
 @group(0) @binding(2) var<uniform> GW: GrassU;
+@group(0) @binding(3) var tuftImage: texture_2d_array<f32>;
+@group(0) @binding(4) var tuftSampler: sampler;
 fn octWrap(v: vec2<f32>) -> vec2<f32> {
   let s = vec2<f32>(select(-1.0, 1.0, v.x >= 0.0), select(-1.0, 1.0, v.y >= 0.0));
   return (vec2<f32>(1.0) - abs(v.yx)) * s;
@@ -48,6 +50,7 @@ struct VsOut {
   @location(2) clipNow: vec4<f32>,
   @location(3) clipPrev: vec4<f32>,
   @location(4) height: f32,
+  @location(5) uv: vec2<f32>,
 };
 fn grassGustEnvelope(base: vec2<f32>, time: f32, direction: vec2<f32>, strength: f32) -> f32 {
   let acrossDirection = vec2<f32>(-direction.y, direction.x);
@@ -102,12 +105,47 @@ fn bladeNormal(z: f32, curve: f32) -> vec3<f32> {
   // daylight while the curved surface still carries a readable highlight.
   return normalize(mix(surfaceNormal, vec3<f32>(0.0, 0.0, 1.0), 0.58));
 }
+// The alternatives share one bounded instance record and identical placement.
+fn quadUv(vertex: u32) -> vec2<f32> {
+  let corners = array<vec2<f32>, 6>(vec2<f32>(0,0), vec2<f32>(1,0), vec2<f32>(1,1),
+    vec2<f32>(0,0), vec2<f32>(1,1), vec2<f32>(0,1));
+  return corners[vertex % 6u];
+}
+fn tuftLocal(vertex: u32, curve: f32) -> vec3<f32> {
+  let uv = quadUv(vertex);
+  let angle = f32(vertex / 6u) * 2.0943951;
+  let across = (uv.x - 0.5) * 2.8;
+  let lean = curve * uv.y * uv.y * 0.45;
+  return vec3<f32>(cos(angle) * across + lean, sin(angle) * across, uv.y);
+}
+fn ribbonTuft(vertex: u32, curve: f32) -> vec3<f32> {
+  let blade = vertex / 24u;
+  let angle = f32(blade) * 2.399963;
+  let lean = curve * 0.35 + sin(f32(blade) * 1.73) * 0.8;
+  let local = bladeLocal(vertex % 24u, lean);
+  let height = 0.60 + f32((blade * 7u) % 12u) * (0.40 / 11.0);
+  let reach = local.z * local.z * (0.85 + f32(blade % 3u) * 0.12);
+  let across = local.x * 0.22 + reach;
+  return vec3<f32>(cos(angle) * across, sin(angle) * across, local.z * height);
+}
 @vertex
 fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut {
   let d = draws[ii];
-  let lp = bladeLocal(vi, d.params.w);
+  var lp = bladeLocal(vi, d.params.w);
+  var uv = vec2<f32>(0.5, 0.5);
+  if (GW.i.w < 0.5) {
+    let corner = quadUv(vi);
+    lp = vec3<f32>((corner.x - 0.5) * mix(1.0, 0.08, corner.y), 0.0, corner.y);
+  } else if (GW.i.w > 2.5) {
+    lp = tuftLocal(vi, d.params.w);
+    let corner = quadUv(vi);
+    uv = vec2<f32>(corner.x, 1.0 - corner.y);
+  } else if (GW.i.w > 1.5) {
+    lp = ribbonTuft(vi, d.params.w);
+  }
   var o: VsOut;
   o.height = lp.z;
+  o.uv = uv;
   let base = vec2<f32>(d.model[3].x, d.model[3].y);
   // Grass reads the same base WindVector as foliage. Broad fronts travel in
   // that direction, while a small per-blade phase moves only the tip.
@@ -118,7 +156,9 @@ fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut
   let offsetNow = grassWindOffset(base, lp.z, timeNow, wind);
   let pNow = vec3<f32>(wNow.xy + offsetNow, wNow.z);
   o.pos = F.viewProj * vec4<f32>(pNow, 1.0);
-  let restNormal = normalize((d.model * vec4<f32>(bladeNormal(lp.z, d.params.w), 0.0)).xyz);
+  var localNormal = bladeNormal(lp.z, d.params.w);
+  if (GW.i.w < 0.5 || GW.i.w > 1.5) { localNormal = vec3<f32>(0.0, 0.0, 1.0); }
+  let restNormal = normalize((d.model * vec4<f32>(localNormal, 0.0)).xyz);
   o.nrm = normalize(restNormal + vec3<f32>(-offsetNow * lp.z * 0.9, 0.0));
   o.inst = ii;
   o.clipNow = o.pos;
@@ -151,7 +191,15 @@ fn gbufferSurface(in: VsOut) -> FsOut {
   let topCol = botCol * GW.g.w;
   let height = clamp(in.height, 0.0, 1.0);
   let grounded = mix(0.58, 1.0, smoothstep(0.0, 0.32, height));
-  let albedo = mix(botCol, topCol, height) * grounded;
+  var albedo = mix(botCol, topCol, height) * grounded;
+  // Sample outside the uniform branch so derivatives remain valid in both paths.
+  let tuft = textureSample(tuftImage, tuftSampler, in.uv, 0);
+  if (GW.i.w > 2.5) {
+    if (tuft.a < 0.5) { discard; }
+    let tone = clamp(dot(tuft.rgb, vec3<f32>(0.2126, 0.7152, 0.0722)) / 0.16, 0.62, 1.18);
+    albedo = mix(botCol, topCol, height) * tone;
+  }
+  if (GW.i.w < 0.5) { albedo = mix(botCol, topCol, height); }
   // z = 1: TAA-reactive (render-perf-10): thin, wind-blown blades ghost on history
   o.gba = vec4<f32>(oct.x, oct.y, 1.0, d.params.z);
   o.gbb = vec4<f32>(albedo, rough);

@@ -46,7 +46,11 @@ func checkImages(resources: mod GpuResources) ret Int {
     ret 4
   }
   let fallback: TextureId = images.texture
-  let paths: List(String) = { "lib/assets/trees/birchBark.png", "lib/assets/trees/birchSpray.png" }
+  let paths: List(String) = {
+    "lib/assets/trees/birchBark.png"
+    "lib/assets/trees/birchSpray.png"
+    "lib/assets/grass/meadowTuft.png"
+  }
   if not setSurfaceImages(images: images, resources: resources, paths: paths) {
     ret 5
   }
@@ -54,7 +58,7 @@ func checkImages(resources: mod GpuResources) ret Int {
     images: images
     resources: resources
     size: 512
-    layers: 2
+    layers: 3
     levels: 10
   ) {
     ret 6
@@ -74,11 +78,11 @@ func checkImages(resources: mod GpuResources) ret Int {
   if setSurfaceImages(images: images, resources: resources, paths: excessive) {
     ret 9
   }
-  if images.generation is not generation or images.paths.length is not 2 or not imageShape(
+  if images.generation is not generation or images.paths.length is not 3 or not imageShape(
     images: images
     resources: resources
     size: 512
-    layers: 2
+    layers: 3
     levels: 10
   ) {
     ret 10
@@ -93,7 +97,9 @@ func checkImages(resources: mod GpuResources) ret Int {
   ) or isValidSampler(resources: resources, id: sampler) {
     ret 11
   }
-  log("surface images: sRGB, fallback, two layers, mips, failed replacement and retirement passed")
+  log(
+    "surface images: sRGB, fallback, three layers, mips, failed replacement and retirement passed"
+  )
   ret 0
 }
 

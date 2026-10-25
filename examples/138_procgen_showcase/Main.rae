@@ -118,6 +118,11 @@ func createShowcase() ret ShowcaseState {
   } else if initialView is 17 {
     initialHour = 23.0
   }
+  # Fixed-light comparisons share the same override as the walker family.
+  let hourOverride: String = Sys.getEnv(name: "RAE_WALKER_HOUR")
+  if hourOverride.length() > 0 {
+    initialHour = hourOverride.toFloat()
+  }
   var settings: SettingsState = createSettingsState(
     scene: initialView
     sceneCount: 22

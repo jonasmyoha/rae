@@ -415,3 +415,15 @@ wind zero. The private presentation also includes actual 136 deferred and 137
 forward starts, plus near and far 143 forest views. The forest views establish
 integration in context; they are not an isolated same-tree measurement of a
 mesh-to-atlas transition. Close card layering and dark pockets remain visible.
+
+## Near-grass recovery
+
+The textured tuft is now selected after matched renders of the old single
+ribbon, a twelve-ribbon clump and an original three-plane cutout. Read the
+[grass comparison](grass-recovery.md) for the close grove and walker-height
+frames, pre-queue control, alpha/mip rules, lighting checks and measured cost.
+The private presentation places those same captures beside G01/G02.
+
+This pass leaves placement and terrain unchanged. Flat ground gaps, repeated
+motifs and close crossed-plane visibility remain explicit limitations. Passing
+the rendering gates does not mean the meadow now matches the references.
