@@ -15,6 +15,7 @@ struct GrassU {
   f: vec4<f32>,
   g: vec4<f32>,
   h: vec4<f32>,
+  i: vec4<f32>,
 };
 struct Indirect {
   vertexCount: u32,
@@ -160,7 +161,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let radius = extent * 0.5;
   let edgeFade = 1.0 - smoothstep(radius * 0.6, radius * 0.98, distToCentre);
   let height = baseHeight * edgeFade;
-  let scale = vec3<f32>(width, width, height);
   let pos = vec3<f32>(bx, by, bz);
   if (height < 0.02) { return; }
   if (G.g.z < 0.999 && hash2u(cellI, 131u) > G.g.z) { return; }
@@ -168,9 +168,15 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let dist = length(toBlade);
   let cosA = dot(toBlade / max(dist, 0.0001), normalize(G.d.xyz));
   if (dist > G.c.w && cosA < G.d.w) { return; }
-  let lodT = clamp((dist - 8.0) / max(radius - 8.0, 1.0), 0.0, 1.0);
-  let keepProb = 1.0 - lodT * 0.7;
+  // Thin only after the near field. Patch membership stays unchanged, while
+  // surviving far ribbons widen a little so the painted ground still reads as
+  // meadow instead of a uniformly empty ring.
+  let distanceShare = dist / max(radius, 0.001);
+  let lodT = smoothstep(clamp(G.i.x, 0.0, 0.9), 0.96, distanceShare);
+  let keepProb = mix(1.0, clamp(G.i.y, 0.05, 1.0), lodT);
   if (hash2u(cellI, 151u) > keepProb) { return; }
+  let distanceWidth = mix(1.0, max(G.i.z, 1.0), lodT);
+  let scale = vec3<f32>(width * distanceWidth, width * distanceWidth, height);
   let slot = atomicAdd(&indirect.instanceCount, 1u);
   let m = swayModel(pos, yaw, 0.0, 0.0, scale);
   outBuf[slot].model = m;

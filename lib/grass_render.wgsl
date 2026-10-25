@@ -19,6 +19,7 @@ struct GrassU {
   f: vec4<f32>,
   g: vec4<f32>,
   h: vec4<f32>,
+  i: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var<storage, read> draws: array<DrawU>;
@@ -48,9 +49,29 @@ struct VsOut {
   @location(3) clipPrev: vec4<f32>,
   @location(4) height: f32,
 };
-fn windBend(base: vec2<f32>, time: f32, strength: f32, gust: f32) -> f32 {
-  let phase = base.x * 0.5 + base.y * 0.35;
-  return strength * (0.22 * sin(time * 1.5 + phase) + 0.06 * gust * sin(time * 3.3 + phase * 1.9) + 0.10);
+fn grassGustEnvelope(base: vec2<f32>, time: f32, direction: vec2<f32>, strength: f32) -> f32 {
+  let acrossDirection = vec2<f32>(-direction.y, direction.x);
+  let along = dot(base, direction);
+  let across = dot(base, acrossDirection);
+  let speed = 0.55 + min(strength, 2.0) * 0.35;
+  let front = 0.5 + 0.5 * sin(along * 0.20 - time * speed + sin(across * 0.08) * 0.8);
+  let broad = 0.5 + 0.5 * sin(along * 0.075 + across * 0.045 - time * speed * 0.43 + 1.7);
+  return smoothstep(0.32, 0.88, front * 0.62 + broad * 0.38);
+}
+fn grassWindOffset(base: vec2<f32>, height: f32, time: f32, wind: vec3<f32>) -> vec2<f32> {
+  let strength = length(wind.xy);
+  if (strength <= 0.0001 || height <= 0.0) { return vec2<f32>(0.0); }
+  let direction = wind.xy / strength;
+  let acrossDirection = vec2<f32>(-direction.y, direction.x);
+  let gustiness = clamp(wind.z, 0.0, 1.5);
+  let gust = grassGustEnvelope(base, time, direction, strength);
+  let rooted = height * height;
+  let body = strength * (0.035 + gustiness * (0.075 + gust * 0.105)) * rooted;
+  // The only quick motion is a small cross-wind tip flutter. Its world-space
+  // phase differs between blades; the lower ribbon stays attached.
+  let tipPhase = dot(base, vec2<f32>(1.73, -1.19)) + time * (3.1 + strength * 0.45);
+  let tip = strength * (0.007 + gustiness * 0.013) * sin(tipPhase) * rooted * rooted;
+  return direction * body + acrossDirection * tip;
 }
 const bladeSegments: u32 = 4u;
 fn bladeLocal(vi: u32, curve: f32) -> vec3<f32> {
@@ -88,26 +109,22 @@ fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut
   var o: VsOut;
   o.height = lp.z;
   let base = vec2<f32>(d.model[3].x, d.model[3].y);
-  // The grass's own steady wind (GrassViewSettings windDirX/Y,
-  // windStrength, windGust) on its own clock. It does not follow the
-  // renderer's wind (lib/wind.wgsl): that one's travelling gust field made
-  // the blades twitch (docs/wind-design.md §5), so it was taken out again.
-  let windDir = normalize(GW.f.xy);
-  let strength = GW.f.z;
-  let gust = GW.f.w;
-  let timeNow = GW.a.w;
-  let timePrev = GW.a.w - GW.b.w;
-  let zc = lp.z * lp.z;
+  // Grass reads the same base WindVector as foliage. Broad fronts travel in
+  // that direction, while a small per-blade phase moves only the tip.
+  let wind = GW.f.xyz;
+  let timeNow = GW.f.w;
+  let timePrev = GW.f.w - GW.b.w;
   let wNow = d.model * vec4<f32>(lp, 1.0);
-  let bendN = windBend(base, timeNow, strength, gust);
-  let pNow = vec3<f32>(wNow.x + windDir.x * bendN * zc, wNow.y + windDir.y * bendN * zc, wNow.z);
+  let offsetNow = grassWindOffset(base, lp.z, timeNow, wind);
+  let pNow = vec3<f32>(wNow.xy + offsetNow, wNow.z);
   o.pos = F.viewProj * vec4<f32>(pNow, 1.0);
-  o.nrm = normalize((d.model * vec4<f32>(bladeNormal(lp.z, d.params.w), 0.0)).xyz);
+  let restNormal = normalize((d.model * vec4<f32>(bladeNormal(lp.z, d.params.w), 0.0)).xyz);
+  o.nrm = normalize(restNormal + vec3<f32>(-offsetNow * lp.z * 0.9, 0.0));
   o.inst = ii;
   o.clipNow = o.pos;
   let wPrev = d.prevModel * vec4<f32>(lp, 1.0);
-  let bendP = windBend(base, timePrev, strength, gust);
-  let pPrev = vec3<f32>(wPrev.x + windDir.x * bendP * zc, wPrev.y + windDir.y * bendP * zc, wPrev.z);
+  let offsetPrev = grassWindOffset(base, lp.z, timePrev, wind);
+  let pPrev = vec3<f32>(wPrev.xy + offsetPrev, wPrev.z);
   o.clipPrev = F.prevViewProj * vec4<f32>(pPrev, 1.0);
   o.pos = vec4<f32>(o.pos.xy + F.jitter.xy * o.pos.w, o.pos.zw);
   return o;

@@ -40,6 +40,7 @@ open ForwardMaterial
 open gpu/DeviceFeatures
 import String
 import WorldBiome
+open Wind
 
 # Blade count MUST be a perfect square: the compute grid is side x side, and the
 # shader derives side = sqrt(count). 256 x 256 = 65536 candidate blades; GPU
@@ -51,9 +52,9 @@ const grassWorkgroupSize: Int = 64
 
 const grassRecordBytes: Int = instanceRecordFloats * 4  # one DrawU (GbufferRecord)
 
-const grassUniformFloats: Int = 32  # eight vec4 (camera, ground, wind, blade and patch controls)
+const grassUniformFloats: Int = 36  # nine vec4 (camera, wind, blade, patch and distance controls)
 
-const grassUniformBytes: Int = 128
+const grassUniformBytes: Int = 144
 
 const grassIndirectBytes: Int = 16  # 4 u32 DrawIndirect args (vertexCount, instanceCount, ...)
 
@@ -620,8 +621,8 @@ func grassGenerate(
   centreX: copy Float
   centreY: copy Float
   groundZ: copy Float
-  time: copy Float
   deltaTime: copy Float
+  wind: view WindVector
   toon: copy Int
   camX: copy Float
   camY: copy Float
@@ -646,7 +647,7 @@ func grassGenerate(
     x: centreX
     y: centreY
     z: groundZ
-    w: time
+    w: wind.time
   )
   pushVec4F(
     writer: grass.uniformArgs
@@ -679,10 +680,10 @@ func grassGenerate(
   # gradient bottom = ground
   pushVec4F(
     writer: grass.uniformArgs
-    x: settings.windDirX
-    y: settings.windDirY
-    z: settings.windStrength
-    w: settings.windGust
+    x: wind.x * settings.windStrength
+    y: wind.y * settings.windStrength
+    z: wind.gustiness * settings.windGust
+    w: wind.time
   )
   # f: wind
   pushVec4F(
@@ -701,6 +702,14 @@ func grassGenerate(
     w: settings.bladeVariation
   )
   # h: broad patch and within-patch variation
+  pushVec4F(
+    writer: grass.uniformArgs
+    x: settings.distanceStart
+    y: settings.farDensityScale
+    z: settings.farWidthScale
+    w: 0.0
+  )
+  # i: distance thinning and silhouette compensation
   uploadArgs(
     writer: grass.uniformArgs
     resources: resources
