@@ -142,8 +142,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let yaw = hp * 6.2831853;
   let hHeight = hash2u(cellI, 61u);
   let hWidth = hash2u(cellI, 71u);
-  let baseHeight = (0.30 + hHeight * 0.40) * G.g.x;
-  let width = (0.055 + hWidth * 0.045) * G.g.y;
+  // Keep broad variation inside each tuft. The three-segment ribbon supplies
+  // the close silhouette; density is deliberately unchanged.
+  let baseHeight = (0.28 + hHeight * 0.44) * G.g.x;
+  let width = (0.052 + hWidth * 0.054) * G.g.y;
   let distToCentre = distance(vec2<f32>(bx, by), G.a.xy);
   let radius = extent * 0.5;
   let edgeFade = 1.0 - smoothstep(radius * 0.6, radius * 0.98, distToCentre);
@@ -163,10 +165,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let m = swayModel(pos, yaw, 0.0, 0.0, scale);
   outBuf[slot].model = m;
   outBuf[slot].prevModel = m;
-  outBuf[slot].albedoMetallic = vec4<f32>(G.e.rgb, 0.0);
+  let colourVariation = 0.86 + hash2u(cellI, 103u) * 0.20;
+  outBuf[slot].albedoMetallic = vec4<f32>(G.e.rgb * colourVariation, 0.0);
   let mode = select(0.0, 1.0, G.b.z > 0.5);
-  let hTip = hash2u(cellI, 113u);
-  let tipWidth = hTip * hTip * 0.34;
-  outBuf[slot].params = vec4<f32>(0.95, 1.0, mode, tipWidth);
+  let curve = (hash2u(cellI, 113u) * 2.0 - 1.0) * (0.24 + hash2u(cellI, 127u) * 0.42);
+  outBuf[slot].params = vec4<f32>(0.88, 1.0, mode, curve);
   outBuf[slot].fade = vec4<f32>(0.0);
 }

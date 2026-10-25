@@ -51,20 +51,34 @@ fn windBend(base: vec2<f32>, time: f32, strength: f32, gust: f32) -> f32 {
   let phase = base.x * 0.5 + base.y * 0.35;
   return strength * (0.22 * sin(time * 1.5 + phase) + 0.06 * gust * sin(time * 3.3 + phase * 1.9) + 0.10);
 }
-fn bladeLocal(vi: u32, tipW: f32) -> vec3<f32> {
+const bladeSegments: u32 = 4u;
+fn bladeLocal(vi: u32, curve: f32) -> vec3<f32> {
+  let segment = vi / 6u;
+  let segmentVertex = vi % 6u;
   var corner = 0u;
-  if (vi == 0u) { corner = 0u; }
-  else if (vi == 1u) { corner = 1u; }
-  else if (vi == 2u) { corner = 3u; }
-  else if (vi == 3u) { corner = 0u; }
-  else if (vi == 4u) { corner = 3u; }
+  if (segmentVertex == 0u) { corner = 0u; }
+  else if (segmentVertex == 1u) { corner = 1u; }
+  else if (segmentVertex == 2u) { corner = 3u; }
+  else if (segmentVertex == 3u) { corner = 0u; }
+  else if (segmentVertex == 4u) { corner = 3u; }
   else { corner = 2u; }
   let top = (corner == 2u) || (corner == 3u);
   let right = (corner == 1u) || (corner == 3u);
-  let z = select(0.0, 1.0, top);
-  let w = select(0.5, tipW, top);
-  let x = select(-w, w, right);
-  return vec3<f32>(x, 0.0, z);
+  let z = (f32(segment) + select(0.0, 1.0, top)) / f32(bladeSegments);
+  let halfWidth = 0.025 + 0.475 * pow(max(1.0 - z, 0.0), 0.72);
+  let centreX = curve * z * z;
+  let x = centreX + select(-halfWidth, halfWidth, right);
+  // A shallow bow makes highlights flow across a tuft instead of lighting the
+  // entire old flat sheet as one polygon.
+  let bow = (0.055 + abs(curve) * 0.045) * sin(z * 3.14159265);
+  return vec3<f32>(x, bow, z);
+}
+fn bladeNormal(z: f32, curve: f32) -> vec3<f32> {
+  let bowSlope = (0.055 + abs(curve) * 0.045) * 3.14159265 * cos(z * 3.14159265);
+  let surfaceNormal = normalize(vec3<f32>(0.0, 1.0, -bowSlope));
+  // Foliage normals lean toward the sky so both sides retain broad, soft
+  // daylight while the curved surface still carries a readable highlight.
+  return normalize(mix(surfaceNormal, vec3<f32>(0.0, 0.0, 1.0), 0.58));
 }
 @vertex
 fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut {
@@ -87,7 +101,7 @@ fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut
   let bendN = windBend(base, timeNow, strength, gust);
   let pNow = vec3<f32>(wNow.x + windDir.x * bendN * zc, wNow.y + windDir.y * bendN * zc, wNow.z);
   o.pos = F.viewProj * vec4<f32>(pNow, 1.0);
-  o.nrm = normalize((d.model * vec4<f32>(0.0, 0.0, 1.0, 0.0)).xyz);
+  o.nrm = normalize((d.model * vec4<f32>(bladeNormal(lp.z, d.params.w), 0.0)).xyz);
   o.inst = ii;
   o.clipNow = o.pos;
   let wPrev = d.prevModel * vec4<f32>(lp, 1.0);
@@ -117,7 +131,9 @@ fn gbufferSurface(in: VsOut) -> FsOut {
   var o: FsOut;
   let botCol = d.albedoMetallic.rgb;
   let topCol = botCol * GW.g.w;
-  let albedo = mix(botCol, topCol, clamp(in.height, 0.0, 1.0));
+  let height = clamp(in.height, 0.0, 1.0);
+  let grounded = mix(0.58, 1.0, smoothstep(0.0, 0.32, height));
+  let albedo = mix(botCol, topCol, height) * grounded;
   // z = 1: TAA-reactive (render-perf-10): thin, wind-blown blades ghost on history
   o.gba = vec4<f32>(oct.x, oct.y, 1.0, d.params.z);
   o.gbb = vec4<f32>(albedo, rough);
