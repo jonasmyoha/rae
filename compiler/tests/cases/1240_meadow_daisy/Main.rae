@@ -1,0 +1,116 @@
+open procgen/MeadowFlower
+open Vec3
+import Math
+
+func flowerMeshValid(mesh: view MeshData) ret Bool {
+  if mesh.vertCount < 1 or mesh.verts.length is not mesh.vertCount * 8 {
+    ret false
+  }
+  if mesh.indices.length < 3 or mesh.indices.length % 3 is not 0 {
+    ret false
+  }
+  if mesh.windPivots.length is not mesh.vertCount * 4 {
+    ret false
+  }
+  loop let index: view Int in mesh.indices {
+    if index < 0 or index >= mesh.vertCount {
+      ret false
+    }
+  }
+  loop var vertex: Int = 0, vertex < mesh.vertCount, ++vertex {
+    loop var field: Int = 0, field < 8, ++field {
+      let value: Float = mesh.verts.copyAtDefault(index: vertex * 8 + field)
+      if value is not value or Math.abs(value: value) > 100.0 {
+        ret false
+      }
+    }
+    let normal: Vec3 = Vec3.create(
+      x: mesh.verts.copyAtDefault(index: vertex * 8 + 3)
+      y: mesh.verts.copyAtDefault(index: vertex * 8 + 4)
+      z: mesh.verts.copyAtDefault(index: vertex * 8 + 5)
+    )
+    if Math.abs(value: Vec3.vlen(a: normal) - 1.0) > 0.002 {
+      ret false
+    }
+    let flexibility: Float = mesh.windPivots.copyAtDefault(index: vertex * 4 + 3)
+    if flexibility < 0.24 or flexibility > 0.34 {
+      ret false
+    }
+  }
+  ret true
+}
+
+func sameMesh(first: view MeshData, second: view MeshData) ret Bool {
+  if first.vertCount is not second.vertCount or first.indices.length is not second.indices.length {
+    ret false
+  }
+  loop var index: Int = 0, index < first.verts.length, ++index {
+    if first.verts.copyAtDefault(index: index) is not second.verts.copyAtDefault(index: index) {
+      ret false
+    }
+  }
+  loop var index: Int = 0, index < first.indices.length, ++index {
+    if first.indices.copyAtDefault(index: index) is not second.indices.copyAtDefault(index: index) {
+      ret false
+    }
+  }
+  ret true
+}
+
+func withinPatchBounds(mesh: view MeshData, radius: view Float) ret Bool {
+  loop var vertex: Int = 0, vertex < mesh.vertCount, ++vertex {
+    let x: Float = mesh.verts.copyAtDefault(index: vertex * 8)
+    let y: Float = mesh.verts.copyAtDefault(index: vertex * 8 + 1)
+    let z: Float = mesh.verts.copyAtDefault(index: vertex * 8 + 2)
+    if Math.abs(value: x) > radius + 0.15 or Math.abs(value: y) > radius + 0.15 {
+      ret false
+    }
+    if z < -0.02 or z > 0.90 {
+      ret false
+    }
+  }
+  ret true
+}
+
+func main() ret Int {
+  let single: MeadowFlowerParts = oxeyeDaisyPatch(seed: 1307, count: 1, radius: 0.0)
+  let patch: MeadowFlowerParts = oxeyeDaisyPatch(seed: 1871, count: 13, radius: 1.05)
+  let repeat: MeadowFlowerParts = oxeyeDaisyPatch(seed: 1871, count: 13, radius: 1.05)
+  let capped: MeadowFlowerParts = oxeyeDaisyPatch(seed: 7, count: 200, radius: 1.0)
+  if single.flowerCount is not 1 or patch.flowerCount is not 13 or capped.flowerCount is not 24 {
+    ret 1
+  }
+  if not flowerMeshValid(mesh: single.stems) or not flowerMeshValid(mesh: single.petals) or not flowerMeshValid(
+    mesh: single.discs
+  ) {
+    ret 2
+  }
+  if not flowerMeshValid(mesh: patch.stems) or not flowerMeshValid(mesh: patch.petals) or not flowerMeshValid(
+    mesh: patch.discs
+  ) {
+    ret 3
+  }
+  if not sameMesh(first: patch.stems, second: repeat.stems) or not sameMesh(
+    first: patch.petals
+    second: repeat.petals
+  ) or not sameMesh(first: patch.discs, second: repeat.discs) {
+    ret 4
+  }
+  if not withinPatchBounds(mesh: patch.stems, radius: 1.05) or not withinPatchBounds(
+    mesh: patch.petals
+    radius: 1.05
+  ) or not withinPatchBounds(mesh: patch.discs, radius: 1.05) {
+    ret 5
+  }
+  let stems: Material3d = oxeyeStemMaterial()
+  let petals: Material3d = oxeyePetalMaterial()
+  let discs: Material3d = oxeyeDiscMaterial()
+  if stems.emission.x is not 0.0 or petals.emission.x is not 0.0 or discs.emission.x is not 0.0 {
+    ret 6
+  }
+  if patch.petals.indices.length / 3 < patch.flowerCount * 20 * 10 {
+    ret 7
+  }
+  log("meadow daisy: bounded lit parts, stable roots and deterministic geometry")
+  ret 0
+}

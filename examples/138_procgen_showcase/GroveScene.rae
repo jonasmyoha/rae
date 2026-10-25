@@ -14,6 +14,7 @@ open FluffyGrove
 open CamphorGrove
 open BirchGrove
 open ForkStudy
+open DaisyMeadow
 open procgen/Rock
 open ecs/Entity
 
@@ -654,6 +655,16 @@ func buildGrove(renderer: mod DeferredRenderer) ret Grove {
       rotation: 0
     )
   }
+  addOxeyeDaisyStudy(
+    world: world
+    renderer: renderer
+    singlePosition: Vec3.create(x: -3.0, y: -14.0, z: groundHeight(x: -3.0, y: -14.0) + 0.015)
+    patchPosition: Vec3.create(x: -0.8, y: -14.0, z: groundHeight(x: -0.8, y: -14.0) + 0.015)
+  )
+  # Reserve the close-study sight line before the seeded woodland fills the
+  # remaining ground.
+  obstacles.add(value: { x: -3.0, y: -14.0, radius: 0.65 })
+  obstacles.add(value: { x: -0.8, y: -14.0, radius: 1.65 })
   addCamphorGrove(world: world, renderer: renderer, obstacles: obstacles)
   addBirchGrove(world: world, renderer: renderer, obstacles: obstacles)
   addForkStudy(world: world, renderer: renderer, obstacles: obstacles)

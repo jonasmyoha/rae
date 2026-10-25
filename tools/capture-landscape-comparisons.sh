@@ -154,6 +154,20 @@ calm: RAE_WIND=0; breezy: RAE_WIND=1.25
 EOF
 }
 
+captureFlowerSet() {
+  captureGrove flowers flowers-138
+  captureForest flowers-143-day '1 0 0.24 -0.20 4.2 0 18.0 0.35 0 0 0 0' 12 1
+  captureForest flowers-143-night '1 0 0.24 -0.20 4.2 0 18.0 0.35 0 0 0 0' 23 1
+  cat > "$output/flower-manifest.txt" <<EOF
+Oxeye-daisy prototype comparison
+commit: $(git -C "$root" rev-parse HEAD)
+clock: 60 frames at 0.016666667 s
+138: one flower and one 13-plant patch; preset flowers; hour 10
+143 day: shared seven-plant patch; fixed ground-cover camera; day 298 hour 12
+143 night: same patch and camera; day 298 hour 23
+EOF
+}
+
 captureMetrics() {
   env RAE_GROVE_VIEW=grove RAE_DEBUG_OVERLAY=0 RAE_UI_HEADLESS=1 \
     RAE_SDL_HEADLESS_MS=8000 RAE_FRAME_TIMING=1 RAE_GPU_PASS_TIMING=1 \
@@ -172,10 +186,11 @@ captureMetrics() {
 case "$mode" in
   captures) captureSet ;;
   grass) captureGrassSet ;;
+  flowers) captureFlowerSet ;;
   verify) verifyStable ;;
   metrics) captureMetrics ;;
   all) captureSet; verifyStable; captureMetrics ;;
-  *) printf '%s\n' "usage: $0 [captures|grass|verify|metrics|all]" >&2; exit 2 ;;
+  *) printf '%s\n' "usage: $0 [captures|grass|flowers|verify|metrics|all]" >&2; exit 2 ;;
 esac
 
 printf '%s\n' "landscape comparison output: $output"

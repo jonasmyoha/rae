@@ -36,6 +36,9 @@ exports Rae's Z-up geometry directly. Trees are split into aligned trunk and
 crown files so Rae can preserve their two-colour cel-shaded appearance without
 depending on the source palette texture.
 
+Flowers are no longer imported by this script. The walkers use the shared Rae
+oxeye-daisy generator in `lib/procgen/MeadowFlower.rae`.
+
 ## Inspecting water splashes
 
 The walker uses `WaterParticles` for small reflective droplet impostors: one

@@ -34,6 +34,5 @@ island="assetstore/FlatKit/Demos/[Demo] IslandWithTrees/IslandWithTrees-Models"
 convert_tree "$forest/lowpoly_tree_001.fbx" tree_broad
 convert_tree "$forest/lowpoly_tree_005.fbx" tree_tall
 convert_prop "$forest/lowpoly_rock_001.fbx" rock.glb
-convert_prop "$forest/lowpoly_flower_001.fbx" flower.glb
 convert_prop "$wanderer/Bush01.fbx" bush.glb
 convert_prop "$island/GrassBunch-v1-03.fbx" grass.glb

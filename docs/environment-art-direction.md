@@ -149,3 +149,27 @@ evidence. This inventory only chooses names and mappings. It does not add a
 kind, delete a current plant, alter the random distribution, replace foliage or
 refresh any visual reference. The final integration tasks must use the mapping
 above when they label views and compare 138 with 136, 137 and 143.
+
+## Meadow flower reference
+
+The first shared ground flower is the **oxeye daisy** (*Leucanthemum vulgare*).
+[Kew Plants of the World Online](https://powo.science.kew.org/taxon/30296198-2)
+accepts that name and records it as a perennial native across Europe into
+western and northern Asia. The
+[USDA Forest Service description](https://www.fs.usda.gov/pnw/pubs/pnw_gtr817.pdf)
+records a 1–3 ft flowering stem, a solitary composite head with 20–30 white ray
+florets around yellow disc florets, and coarse lower leaves. The shared
+prototype keeps those defining parts: one head per slender stem, 20–24 unequal
+rays, a low disc and one or two quiet lower leaves. Its 44–79 cm seeded heights
+fit the source range; the 9–12 cm rendered heads are deliberately larger than a
+typical wild head so their silhouette remains readable from the walker camera.
+
+`procgen/MeadowFlower.rae` generates one bounded plant or a patch of at most 24
+plants as three meshes: stem/leaves, off-white ray florets and yellow discs.
+Petals use thin close geometry with modeled top, underside and outer edges. This
+was chosen over cutout patches because the first reference species has a sparse,
+recognisable radial silhouette and the close geometry keeps real normals and
+grazing edges without alpha shimmer. The three materials are rough, lit and
+non-emissive. Every plant shares one root pivot across all three parts, while a
+patch is reused through three instanced batches. There is no entity, material
+or draw per petal.

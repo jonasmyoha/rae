@@ -1,0 +1,531 @@
+# procgen/MeadowFlower — bounded procedural meadow flowers. One generated
+# patch is split into three material meshes, then shared by every placement.
+# Petals are lit geometry: no alpha cards, emission or draw per floret.
+import Math
+open Vec3
+open Mesh3d
+open Noise
+open Scene3d
+open procgen/Foliage
+
+const flowerTau: Float = 6.283185307179586
+
+const flowerGoldenAngle: Float = 2.399963229728653
+
+const oxeyeMaximumPlants: Int = 24
+
+type MeadowFlowerParts {
+  stems: MeshData
+  petals: MeshData
+  discs: MeshData
+  flowerCount: Int
+}
+
+func flowerMaterial(color: view Vec3, roughness: view Float) ret Material3d {
+  ret Material3d {
+    baseColor: color
+    metallic: 0.0
+    roughness: roughness
+    emission: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    toon: true
+  }
+}
+
+func oxeyeStemMaterial() ret Material3d {
+  ret flowerMaterial(color: Vec3.create(x: 0.055, y: 0.245, z: 0.025), roughness: 0.92)
+}
+
+func oxeyePetalMaterial() ret Material3d {
+  # Warm off-white keeps the ray florets inside the daylight range instead of
+  # reading as flat white interface icons.
+  ret flowerMaterial(color: Vec3.create(x: 0.82, y: 0.80, z: 0.68), roughness: 0.88)
+}
+
+func oxeyeDiscMaterial() ret Material3d {
+  ret flowerMaterial(color: Vec3.create(x: 0.64, y: 0.34, z: 0.018), roughness: 0.86)
+}
+
+func flowerVertex(mesh: mod MeshData, point: view Vec3, normal: view Vec3) {
+  pushVert(
+    verts: mesh.verts
+    px: point.x
+    py: point.y
+    pz: point.z
+    nx: normal.x
+    ny: normal.y
+    nz: normal.z
+    u: 0.0
+    value: 0.0
+  )
+  mesh.vertCount = mesh.vertCount + 1
+}
+
+func flowerFaceNormal(
+  mesh: mod MeshData
+  first: view Vec3
+  second: view Vec3
+  third: view Vec3
+  normal: view Vec3
+) {
+  let base: Int = mesh.vertCount
+  flowerVertex(mesh: mesh, point: first, normal: normal)
+  flowerVertex(mesh: mesh, point: second, normal: normal)
+  flowerVertex(mesh: mesh, point: third, normal: normal)
+  mesh.indices.add(value: base)
+  mesh.indices.add(value: base + 1)
+  mesh.indices.add(value: base + 2)
+}
+
+func flowerWindRange(
+  mesh: mod MeshData
+  firstVertex: view Int
+  pivot: view Vec3
+  flexibility: view Float
+) {
+  loop mesh.windPivots.length < firstVertex * 4 {
+    mesh.windPivots.add(value: 0.0)
+  }
+  loop var vertex: Int = firstVertex, vertex < mesh.vertCount, ++vertex {
+    mesh.windPivots.add(value: pivot.x)
+    mesh.windPivots.add(value: pivot.y)
+    mesh.windPivots.add(value: pivot.z)
+    mesh.windPivots.add(value: flexibility)
+  }
+}
+
+func flowerPlanePoint(
+  center: view Vec3
+  forward: view Vec3
+  side: view Vec3
+  normal: view Vec3
+  along: view Float
+  across: view Float
+  lift: view Float
+) ret Vec3 {
+  ret vadd(
+    a: center
+    b: vadd(
+      a: vscale(a: forward, s: along)
+      b: vadd(a: vscale(a: side, s: across), b: vscale(a: normal, s: lift))
+    )
+  )
+}
+
+func addPetal(
+  mesh: mod MeshData
+  center: view Vec3
+  headNormal: view Vec3
+  radial: view Vec3
+  tangent: view Vec3
+  innerRadius: view Float
+  length: view Float
+  halfWidth: view Float
+  droop: view Float
+) {
+  let thickness: Float = 0.0018
+  let rootLeftTop: Vec3 = flowerPlanePoint(
+    center: center
+    forward: radial
+    side: tangent
+    normal: headNormal
+    along: innerRadius
+    across: -halfWidth * 0.18
+    lift: thickness
+  )
+  let rootRightTop: Vec3 = flowerPlanePoint(
+    center: center
+    forward: radial
+    side: tangent
+    normal: headNormal
+    along: innerRadius
+    across: halfWidth * 0.18
+    lift: thickness
+  )
+  let middleLeftTop: Vec3 = flowerPlanePoint(
+    center: center
+    forward: radial
+    side: tangent
+    normal: headNormal
+    along: innerRadius + length * 0.52
+    across: -halfWidth
+    lift: thickness - droop * 0.20
+  )
+  let middleRightTop: Vec3 = flowerPlanePoint(
+    center: center
+    forward: radial
+    side: tangent
+    normal: headNormal
+    along: innerRadius + length * 0.52
+    across: halfWidth
+    lift: thickness - droop * 0.20
+  )
+  let tipLeftTop: Vec3 = flowerPlanePoint(
+    center: center
+    forward: radial
+    side: tangent
+    normal: headNormal
+    along: innerRadius + length
+    across: -halfWidth * 0.22
+    lift: thickness - droop
+  )
+  let tipRightTop: Vec3 = flowerPlanePoint(
+    center: center
+    forward: radial
+    side: tangent
+    normal: headNormal
+    along: innerRadius + length
+    across: halfWidth * 0.22
+    lift: thickness - droop
+  )
+  let thicknessOffset: Vec3 = vscale(a: headNormal, s: thickness * 2.0)
+  let rootLeftBottom: Vec3 = vsub(a: rootLeftTop, b: thicknessOffset)
+  let rootRightBottom: Vec3 = vsub(a: rootRightTop, b: thicknessOffset)
+  let middleLeftBottom: Vec3 = vsub(a: middleLeftTop, b: thicknessOffset)
+  let middleRightBottom: Vec3 = vsub(a: middleRightTop, b: thicknessOffset)
+  let tipLeftBottom: Vec3 = vsub(a: tipLeftTop, b: thicknessOffset)
+  let tipRightBottom: Vec3 = vsub(a: tipRightTop, b: thicknessOffset)
+  # Broad top and bottom normals keep the whole flower head calm in light.
+  flowerFaceNormal(
+    mesh: mesh
+    first: rootLeftTop
+    second: rootRightTop
+    third: middleLeftTop
+    normal: headNormal
+  )
+  flowerFaceNormal(
+    mesh: mesh
+    first: rootRightTop
+    second: middleRightTop
+    third: middleLeftTop
+    normal: headNormal
+  )
+  flowerFaceNormal(
+    mesh: mesh
+    first: middleLeftTop
+    second: middleRightTop
+    third: tipLeftTop
+    normal: headNormal
+  )
+  flowerFaceNormal(
+    mesh: mesh
+    first: middleRightTop
+    second: tipRightTop
+    third: tipLeftTop
+    normal: headNormal
+  )
+  let underside: Vec3 = vscale(a: headNormal, s: -1.0)
+  flowerFaceNormal(
+    mesh: mesh
+    first: rootRightBottom
+    second: rootLeftBottom
+    third: middleLeftBottom
+    normal: underside
+  )
+  flowerFaceNormal(
+    mesh: mesh
+    first: middleRightBottom
+    second: rootRightBottom
+    third: middleLeftBottom
+    normal: underside
+  )
+  flowerFaceNormal(
+    mesh: mesh
+    first: middleRightBottom
+    second: middleLeftBottom
+    third: tipLeftBottom
+    normal: underside
+  )
+  flowerFaceNormal(
+    mesh: mesh
+    first: tipRightBottom
+    second: middleRightBottom
+    third: tipLeftBottom
+    normal: underside
+  )
+  # The narrow outer edge stops close petals disappearing at grazing angles.
+  foliageFace(
+    mesh: mesh
+    first: middleLeftTop
+    second: tipLeftTop
+    third: middleLeftBottom
+  )
+  foliageFace(
+    mesh: mesh
+    first: tipLeftTop
+    second: tipLeftBottom
+    third: middleLeftBottom
+  )
+  foliageFace(
+    mesh: mesh
+    first: tipLeftTop
+    second: tipRightTop
+    third: tipLeftBottom
+  )
+  foliageFace(
+    mesh: mesh
+    first: tipRightTop
+    second: tipRightBottom
+    third: tipLeftBottom
+  )
+  foliageFace(
+    mesh: mesh
+    first: tipRightTop
+    second: middleRightTop
+    third: tipRightBottom
+  )
+  foliageFace(
+    mesh: mesh
+    first: middleRightTop
+    second: middleRightBottom
+    third: tipRightBottom
+  )
+}
+
+func addDisc(
+  mesh: mod MeshData
+  center: view Vec3
+  headNormal: view Vec3
+  basis: view Vec3
+  across: view Vec3
+  radius: view Float
+) {
+  let top: Vec3 = vadd(a: center, b: vscale(a: headNormal, s: radius * 0.25))
+  loop var segment: Int = 0, segment < 12, ++segment {
+    let angle: Float = segment.toFloat() * flowerTau / 12.0
+    let nextAngle: Float = (segment + 1).toFloat() * flowerTau / 12.0
+    let radial: Vec3 = vadd(
+      a: vscale(a: basis, s: Math.cos(x: angle))
+      b: vscale(a: across, s: Math.sin(x: angle))
+    )
+    let nextRadial: Vec3 = vadd(
+      a: vscale(a: basis, s: Math.cos(x: nextAngle))
+      b: vscale(a: across, s: Math.sin(x: nextAngle))
+    )
+    let edge: Vec3 = vadd(a: center, b: vscale(a: radial, s: radius))
+    let nextEdge: Vec3 = vadd(a: center, b: vscale(a: nextRadial, s: radius))
+    let normal: Vec3 = vnorm(
+      a: vadd(a: headNormal, b: vscale(a: vadd(a: radial, b: nextRadial), s: 0.24))
+    )
+    flowerFaceNormal(
+      mesh: mesh
+      first: top
+      second: edge
+      third: nextEdge
+      normal: normal
+    )
+    flowerFaceNormal(
+      mesh: mesh
+      first: center
+      second: nextEdge
+      third: edge
+      normal: vscale(a: headNormal, s: -1.0)
+    )
+  }
+}
+
+func addStemLeaf(
+  mesh: mod MeshData
+  center: view Vec3
+  outward: view Vec3
+  stemDirection: view Vec3
+  length: view Float
+  width: view Float
+) {
+  let side: Vec3 = vnorm(a: vcross(a: stemDirection, b: outward))
+  let leafNormal: Vec3 = vnorm(
+    a: vadd(a: Vec3.create(x: 0.0, y: 0.0, z: 1.0), b: vscale(a: outward, s: 0.28))
+  )
+  let root: Vec3 = center
+  let middle: Vec3 = vadd(
+    a: center
+    b: vadd(a: vscale(a: outward, s: length * 0.52), b: Vec3.create(x: 0.0, y: 0.0, z: 0.018))
+  )
+  let tip: Vec3 = vadd(
+    a: center
+    b: vadd(a: vscale(a: outward, s: length), b: Vec3.create(x: 0.0, y: 0.0, z: -0.008))
+  )
+  let left: Vec3 = vadd(a: middle, b: vscale(a: side, s: width))
+  let right: Vec3 = vsub(a: middle, b: vscale(a: side, s: width))
+  flowerFaceNormal(
+    mesh: mesh
+    first: root
+    second: right
+    third: left
+    normal: leafNormal
+  )
+  flowerFaceNormal(
+    mesh: mesh
+    first: left
+    second: right
+    third: tip
+    normal: leafNormal
+  )
+  let underside: Vec3 = vscale(a: leafNormal, s: -1.0)
+  flowerFaceNormal(
+    mesh: mesh
+    first: right
+    second: root
+    third: left
+    normal: underside
+  )
+  flowerFaceNormal(
+    mesh: mesh
+    first: right
+    second: left
+    third: tip
+    normal: underside
+  )
+}
+
+# Oxeye daisy (Leucanthemum vulgare): solitary composite heads on slender
+# stems, 20-24 white ray florets around one yellow disc, and sparse lower
+# leaves. Heads are slightly enlarged for a walker camera but keep the real
+# stem/head proportion. One patch is capped at oxeyeMaximumPlants.
+func oxeyeDaisyPatch(seed: view Int, count: view Int, radius: view Float) ret MeadowFlowerParts {
+  var flowerCount: Int = count
+  if flowerCount < 1 {
+    flowerCount = 1
+  }
+  if flowerCount > oxeyeMaximumPlants {
+    flowerCount = oxeyeMaximumPlants
+  }
+  var stems: MeshData = foliageMesh()
+  var petals: MeshData = foliageMesh()
+  var discs: MeshData = foliageMesh()
+  loop var flower: Int = 0, flower < flowerCount, ++flower {
+    var distance: Float = 0.0
+    if flowerCount > 1 {
+      distance = Math.sqrt(x: (flower.toFloat() + 0.35) / flowerCount.toFloat()) * radius
+      distance = distance * (0.72 + hash2(x: flower, y: 2, seed: seed) * 0.28)
+    }
+    let angle: Float = flower.toFloat() * flowerGoldenAngle + hash2(x: flower, y: 3, seed: seed) * 0.55
+    let root: Vec3 = Vec3.create(
+      x: Math.cos(x: angle) * distance
+      y: Math.sin(x: angle) * distance
+      z: -0.012
+    )
+    var height: Float = 0.44 + hash2(x: flower, y: 5, seed: seed) * 0.24
+    if flower % 7 is 0 {
+      height = height + 0.11
+    }
+    let lean: Float = 0.025 + hash2(x: flower, y: 7, seed: seed) * 0.055
+    let leanAngle: Float = angle + (hash2(x: flower, y: 11, seed: seed) - 0.5) * 1.8
+    let head: Vec3 = Vec3.create(
+      x: root.x + Math.cos(x: leanAngle) * lean
+      y: root.y + Math.sin(x: leanAngle) * lean
+      z: root.z + height
+    )
+    let elbow: Vec3 = Vec3.create(
+      x: root.x + Math.cos(x: leanAngle + 0.45) * lean * 0.38
+      y: root.y + Math.sin(x: leanAngle + 0.45) * lean * 0.38
+      z: root.z + height * 0.54
+    )
+    let stemFirst: Int = stems.vertCount
+    foliageBranch(
+      mesh: stems
+      start: root
+      end: elbow
+      radius: 0.010
+      endRadius: 0.0075
+    )
+    foliageBranch(
+      mesh: stems
+      start: elbow
+      end: head
+      radius: 0.0075
+      endRadius: 0.0048
+    )
+    let stemDirection: Vec3 = vnorm(a: vsub(a: head, b: root))
+    let leafAngle: Float = angle + 1.2 + hash2(x: flower, y: 13, seed: seed) * 2.0
+    let leafOutward: Vec3 = Vec3.create(
+      x: Math.cos(x: leafAngle)
+      y: Math.sin(x: leafAngle)
+      z: 0.10
+    )
+    addStemLeaf(
+      mesh: stems
+      center: vadd(a: root, b: vscale(a: stemDirection, s: height * 0.27))
+      outward: vnorm(a: leafOutward)
+      stemDirection: stemDirection
+      length: 0.095 + hash2(x: flower, y: 17, seed: seed) * 0.035
+      width: 0.018
+    )
+    if flower % 3 is 0 {
+      addStemLeaf(
+        mesh: stems
+        center: vadd(a: root, b: vscale(a: stemDirection, s: height * 0.40))
+        outward: vscale(a: vnorm(a: leafOutward), s: -1.0)
+        stemDirection: stemDirection
+        length: 0.075
+        width: 0.014
+      )
+    }
+    let flexibility: Float = 0.24 + hash2(x: flower, y: 19, seed: seed) * 0.10
+    flowerWindRange(
+      mesh: stems
+      firstVertex: stemFirst
+      pivot: root
+      flexibility: flexibility
+    )
+
+    let headNormal: Vec3 = vnorm(
+      a: Vec3.create(x: Math.cos(x: leanAngle) * 0.14, y: Math.sin(x: leanAngle) * 0.14, z: 1.0)
+    )
+    let basis: Vec3 = foliageBasis(direction: headNormal)
+    let across: Vec3 = vnorm(a: vcross(a: headNormal, b: basis))
+    let discRadius: Float = 0.014 + hash2(x: flower, y: 23, seed: seed) * 0.003
+    let rayCount: Int = 20 + (flower + seed) % 5
+    let petalFirst: Int = petals.vertCount
+    loop var ray: Int = 0, ray < rayCount, ++ray {
+      let rayAngle: Float = ray.toFloat() * flowerTau / rayCount.toFloat() + hash2(
+        x: ray
+        y: flower
+        seed: seed
+      ) * 0.035
+      let radial: Vec3 = vadd(
+        a: vscale(a: basis, s: Math.cos(x: rayAngle))
+        b: vscale(a: across, s: Math.sin(x: rayAngle))
+      )
+      let tangent: Vec3 = vnorm(a: vcross(a: headNormal, b: radial))
+      let petalLength: Float = 0.032 + hash2(x: ray, y: 29, seed: seed + flower * 31) * 0.011
+      addPetal(
+        mesh: petals
+        center: head
+        headNormal: headNormal
+        radial: radial
+        tangent: tangent
+        innerRadius: discRadius * 0.78
+        length: petalLength
+        halfWidth: 0.0065 + hash2(x: ray, y: 31, seed: seed + flower * 37) * 0.002
+        droop: hash2(x: ray, y: 37, seed: seed + flower * 41) * 0.006
+      )
+    }
+    flowerWindRange(
+      mesh: petals
+      firstVertex: petalFirst
+      pivot: root
+      flexibility: flexibility
+    )
+    let discFirst: Int = discs.vertCount
+    addDisc(
+      mesh: discs
+      center: vadd(a: head, b: vscale(a: headNormal, s: 0.0025))
+      headNormal: headNormal
+      basis: basis
+      across: across
+      radius: discRadius
+    )
+    flowerWindRange(
+      mesh: discs
+      firstVertex: discFirst
+      pivot: root
+      flexibility: flexibility
+    )
+  }
+  ret MeadowFlowerParts {
+    stems: own stems
+    petals: own petals
+    discs: own discs
+    flowerCount: flowerCount
+  }
+}

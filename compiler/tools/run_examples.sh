@@ -1764,7 +1764,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
         elif [ "$EXAMPLE_NAME" = "138_procgen_showcase" ]; then
           # Inspect the composed grove and all nine close-up camera presets.
           GROVE_OK=1
-          for GROVE_VIEW in grove trees rocks fluffy evergreen spruces camphor roots birches grass; do
+          for GROVE_VIEW in grove trees rocks fluffy evergreen spruces camphor roots birches grass flowers; do
             SCREENSHOT="$TMP_OUT/procgen-$GROVE_VIEW.bmp"
             if ! (cd .. && RAE_GROVE_VIEW="$GROVE_VIEW" RAE_DEBUG_OVERLAY=0 \
                RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=2500 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
@@ -1776,7 +1776,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             fi
           done
           if [ "$GROVE_OK" = 1 ]; then
-            echo "PASS: $EXAMPLE_NAME (ten grove inspection views, including grass contacts, birches, camphor and roots)"
+            echo "PASS: $EXAMPLE_NAME (eleven grove inspection views, including daisies, grass contacts, birches, camphor and roots)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (grove inspection views)"
