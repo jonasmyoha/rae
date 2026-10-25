@@ -92,6 +92,7 @@ open app3d/WalkerUi
 open app3d/HudOverlays
 open app3d/WalkerNet
 open app3d/WalkerTerrain
+open app3d/WalkerGrassObstacles
 open app3d/FarCanopy
 open app3d/WalkerTerrainBodies
 open app3d/IslandForest
@@ -683,6 +684,7 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
       shader: defaultGrassComputeShader()
       constants: islandConstantsFor(cfg: biome)
     )
+    grassSetSurfaceField(grass: grassCompute, values: emptyWalkerGrassObstacles())
     # Who the local player may control, in switching order: the hero, then
     # its crowd
     var rosterEntities: List(EntityId) = List.create(EntityId, cap: 1 + crowdEntities.length)

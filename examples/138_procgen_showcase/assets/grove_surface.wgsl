@@ -58,6 +58,10 @@ fn groveUnderObstacle(p: vec2<f32>) -> bool {
   return false;
 }
 
+fn raeGrassObstacle(p: vec2<f32>) -> f32 {
+  return select(0.0, 1.0, groveUnderObstacle(p));
+}
+
 fn raeBiomeSample(p: vec2<f32>) -> RaeBiome {
   var sample: RaeBiome;
   sample.elevation = 1.0;
