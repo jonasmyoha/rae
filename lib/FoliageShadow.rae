@@ -29,6 +29,7 @@ func foliageCasterKey(meshes: view MeshStore, mesh: view Int) ret Int {
 func makeFoliageShadow(shadow: mod ShadowCache, resources: mod GpuResources, shader: view Shader) {
   var spec: DepthPipelineSpec = casterPipelineSpec(skinned: false, bias: shadow.casterBias)
   spec.vertexStride = 64
+  spec.cullMode = WGPUCullMode_None
   spec.attributes.add(value: { format: WGPUVertexFormat_Float32x2, offset: 24, location: 2 })
   spec.attributes.add(value: { format: WGPUVertexFormat_Float32x4, offset: 32, location: 3 })
   spec.attributes.add(value: { format: WGPUVertexFormat_Float32x4, offset: 48, location: 4 })

@@ -392,3 +392,46 @@ bounds; visual gates 136, 137, 138 and 143 passed under a 900-second bound.
 This includes the walker's running-memory check, the forward path, all nine
 grove views and the large forest. These are correctness checks, not a GPU
 performance comparison.
+
+## 9. Birch hybrid-card prototype
+
+The current proof keeps the shipped twig pivots, card centres and crown
+normals. It changes only silver birch. Every spray now follows its source twig
+and mixes two orientations: an interior card remains in the branch plane while
+one or two smaller silhouette cards face the camera. The branch-plane cards
+hold depth during an orbit; the view-facing cards prevent the outer contour
+from collapsing to a line. Both use the same broad crown normal, so rotating a
+card does not turn its painted light pattern or make each quad light as an
+unrelated leaf.
+
+The original 512-square atlas has four independently painted cells: broad
+asymmetric, narrow drooping, sparse forked and loose edge sprays. A 32-pixel
+transparent cross isolates the cells before mip generation. The albedo keeps
+large low-contrast green masses and reserves small marks for the alpha edge.
+It contains no emission. The ordinary surface-image path supplies
+alpha-weighted, coverage-preserving mips, and the octahedral bake supplies its
+own coverage-preserving distant mips.
+
+The selected seed produces 113 quads: 69 camera-facing edge cards and 44
+branch-plane interior cards, or 452 vertices and 226 triangles across the three
+tone meshes. The atlas's complete RGBA8 mip chain is about 1.33 MiB and remains
+shared by every birch. Foliage pipelines now render both card sides in deferred,
+forward and shadow passes. This is a foliage-pipeline capability; the hybrid
+placement itself remains birch-only. No shadow pass is disabled and the leaves
+keep their ordinary sun, ambient and shadow response.
+
+The remaining close-view limits are visible scalloping inside some painted
+masses, repeated branch hints where the atlas overlaps real twigs, and card
+intersections at exact grazing angles. There is no leaf transmission model or
+dedicated middle-distance birch mesh. Wind still rotates a whole spray around
+its fixed twig pivot. These are inputs to the later silver-birch species pass,
+not reasons to copy this prototype unchanged to every tree.
+
+The 1235 fixture validates four atlas cells, the transparent cell gutter,
+coverage-preserving mips, finite geometry, card pivots and conservative bounds
+across four seeds. Hardware checks `surfaceImages`, `leafWind` and
+`impostorBake` passed. Fixed front, side, elevated and backlit grove captures
+and three forest-walk positions were inspected for disappearing sheets,
+rotation and shimmer. Example gates 136, 137, 138 and 143 passed. These sampled
+views did not show a new pop, but they do not replace a future continuous-motion
+capture when the final species and its middle-distance level are tuned.

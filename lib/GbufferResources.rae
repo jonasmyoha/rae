@@ -269,11 +269,16 @@ func ensurePipelines(cache: mod GbufferCache, resources: mod GpuResources) {
     stride: 32
     attributes: gbufferStaticAttributes()
   )
+  var foliageSpec: RenderPipelineSpec = gbufferPipelineSpec(
+    stride: 64
+    attributes: foliageAttributes()
+  )
+  foliageSpec.cullMode = WGPUCullMode_None
   makeFoliagePipeline(
     pass: cache.foliage
     resources: resources
     shader: staticShader
-    spec: gbufferPipelineSpec(stride: 64, attributes: foliageAttributes())
+    spec: foliageSpec
     constants: noConstants
   )
   var skinAttributes: List(VertexAttributeSpec) = gbufferStaticAttributes()
