@@ -1,5 +1,6 @@
 open procgen/Camphor
 open procgen/CamphorGeometry
+open procgen/SculpturalFork
 open Mesh3d
 open Vec3
 import Math
@@ -18,6 +19,63 @@ func validMesh(mesh: view MeshData) ret Bool {
   }
   loop let value: Float in mesh.verts {
     if value is not value or value < -100 or value > 100 {
+      ret false
+    }
+  }
+  ret true
+}
+
+func sameMesh(first: view MeshData, second: view MeshData) ret Bool {
+  if first.vertCount is not second.vertCount or first.indices.length is not second.indices.length {
+    ret false
+  }
+  loop var index: Int = 0, index < first.verts.length, ++index {
+    if first.verts.copyAtDefault(index: index) is not second.verts.copyAtDefault(index: index) {
+      ret false
+    }
+  }
+  loop var index: Int = 0, index < first.indices.length, ++index {
+    if first.indices.copyAtDefault(index: index) is not second.indices.copyAtDefault(index: index) {
+      ret false
+    }
+  }
+  ret true
+}
+
+func validFork(tree: view SculpturalFork, expectedJunctions: view Int) ret Bool {
+  if not validMesh(mesh: tree.wood) or tree.junctionCount is not expectedJunctions {
+    ret false
+  }
+  if tree.wood.windPivots.length is not 0 or tree.wood.leafCards.length is not 0 {
+    ret false
+  }
+  if tree.minimumJunctionNormalDot < 0.25 or tree.minimumFrameDot < 0.8 {
+    ret false
+  }
+  if tree.boundsMin.z >= 0 or tree.boundsMin.z < -tree.declaredDepth or tree.boundsMax.z > tree.declaredHeight {
+    ret false
+  }
+  loop var index: Int = 0, index < tree.wood.vertCount, ++index {
+    let start: Int = index * 8
+    let x: Float = tree.wood.verts.copyAtDefault(index: start)
+    let y: Float = tree.wood.verts.copyAtDefault(index: start + 1)
+    let z: Float = tree.wood.verts.copyAtDefault(index: start + 2)
+    let nx: Float = tree.wood.verts.copyAtDefault(index: start + 3)
+    let ny: Float = tree.wood.verts.copyAtDefault(index: start + 4)
+    let nz: Float = tree.wood.verts.copyAtDefault(index: start + 5)
+    let u: Float = tree.wood.verts.copyAtDefault(index: start + 6)
+    let v: Float = tree.wood.verts.copyAtDefault(index: start + 7)
+    let normalLength: Float = Math.sqrt(x: nx * nx + ny * ny + nz * nz)
+    if Math.abs(value: normalLength - 1) > 0.001 or u < 0 or u > 1 or v < 0 {
+      ret false
+    }
+    if Math.abs(value: x) > tree.declaredRadius or Math.abs(value: y) > tree.declaredRadius {
+      ret false
+    }
+    if x < tree.boundsMin.x or x > tree.boundsMax.x or y < tree.boundsMin.y or y > tree.boundsMax.y {
+      ret false
+    }
+    if z < tree.boundsMin.z or z > tree.boundsMax.z {
       ret false
     }
   }
@@ -111,6 +169,54 @@ func main() ret Int {
   if empty.vertCount is not 0 or invalidTone.vertCount is not 0 {
     ret 8
   }
-  log("camphor: seeded wood, valid meshes, three leaf budgets, bounded height")
+  let young: SculpturalFork = youngSculpturalFork(seed: 206)
+  let youngRepeat: SculpturalFork = youngSculpturalFork(seed: 206)
+  let mature: SculpturalFork = matureSculpturalFork(seed: 907)
+  let matureRepeat: SculpturalFork = matureSculpturalFork(seed: 907)
+  if not validFork(tree: young, expectedJunctions: 1) or not validFork(
+    tree: mature
+    expectedJunctions: 2
+  ) {
+    ret 11
+  }
+  if not sameMesh(first: young.wood, second: youngRepeat.wood) or not sameMesh(
+    first: mature.wood
+    second: matureRepeat.wood
+  ) {
+    ret 12
+  }
+  if young.wood.vertCount is not 266 or young.wood.indices.length / 3 is not 518 {
+    ret 13
+  }
+  if mature.wood.vertCount is not 327 or mature.wood.indices.length / 3 is not 640 {
+    ret 14
+  }
+  let changedYoung: SculpturalFork = youngSculpturalFork(seed: 207)
+  let changedMature: SculpturalFork = matureSculpturalFork(seed: 908)
+  if sameMesh(first: young.wood, second: changedYoung.wood) or sameMesh(
+    first: mature.wood
+    second: changedMature.wood
+  ) {
+    ret 16
+  }
+  loop var seed: Int = 1, seed <= 8, ++seed {
+    let seededYoung: SculpturalFork = youngSculpturalFork(seed: seed * 71)
+    let repeatedYoung: SculpturalFork = youngSculpturalFork(seed: seed * 71)
+    let seededMature: SculpturalFork = matureSculpturalFork(seed: seed * 97)
+    let repeatedMature: SculpturalFork = matureSculpturalFork(seed: seed * 97)
+    if not validFork(tree: seededYoung, expectedJunctions: 1) or not validFork(
+      tree: seededMature
+      expectedJunctions: 2
+    ) {
+      ret 15
+    }
+    if not sameMesh(first: seededYoung.wood, second: repeatedYoung.wood) or not sameMesh(
+      first: seededMature.wood
+      second: repeatedMature.wood
+    ) {
+      ret 17
+    }
+  }
+  log("camphor/forks: young 266v/518t, mature 327v/640t; deterministic joined wood and bounds")
   ret 0
 }

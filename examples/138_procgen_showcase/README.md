@@ -15,6 +15,9 @@ on a raised garden base.
 - **8** looks beneath its canopy at the roots and branching trunk.
 - **9** visits the silver-birch stand: white bark with bold black marks, hanging twigs
   and rounded textured leaf clumps.
+- `RAE_GROVE_VIEW=forks-front`, `forks-side` and `forks-grazing` inspect the
+  young and mature bare joined-fork studies. These art-study views are outside
+  the 1-9 keyboard set.
 - Drag to orbit, scroll to zoom. The camera bar's **Orbit** button switches to
   the free WASD camera (Q/E down/up, shift to boost) and back.
 - The menu button opens the settings panel. Its app section names the active
@@ -200,6 +203,34 @@ Keys 7/8 or `RAE_GROVE_VIEW=camphor` / `roots` select the inspection views.
 ![Giant camphor](references/Camphor.png)
 
 ![Under the canopy](references/Roots.png)
+
+## Joined sculptural fork study
+
+`lib/procgen/SculpturalFork.rae` is a bounded wood primitive for later species
+work. It uses the path tangent and carried frame from `procgen/Foliage` and the
+Catmull-Rom curve from `CamphorGeometry`. A trunk ring patch is omitted where a
+primary branch starts. The branch bridge reuses the six vertices around that
+opening, so there is one connected surface instead of an intersecting branch
+tube. The trunk and branch UVs advance along their paths, and the carried frame
+does not flip. Four broad root lobes flare below the ground plane.
+
+The young study has one unequal fork at **266 vertices / 518 triangles**. The
+mature study has two staggered forks at **327 vertices / 640 triangles**. Five
+headless 138 runs on the baseline M1 Max generated both meshes in **59-83 us**
+before upload. This range includes allocator and desktop load and is an
+art-pass check, not an engine benchmark. The wood has no wind pivots, so it
+remains rigid.
+
+The silhouette choices use the private art-plan crops T02 and T06 for the
+continuous unequal split, T07 for branch flow that can remain visible through
+a future crown, and T09 for long lean, different curvature and stable tube
+frames. The primitive is not wired into an existing species yet.
+
+![Joined fork front view](references/ForksFront.png)
+
+![Joined fork side view](references/ForksSide.png)
+
+![Joined forks under a low sun](references/ForksGrazing.png)
 
 ## Silver birch
 

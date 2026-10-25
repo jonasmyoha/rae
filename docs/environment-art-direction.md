@@ -83,6 +83,7 @@ consumers because 138 and the walkers deliberately share procedural sources.
 | `procgen/Foliage.palmWood` and `palmLeaves` | kind 8, date palm target | `GroveTrees`; one 138 `GroveScene` legacy palm | Current segmented stem branches into round leaf crowns. It is a compatibility placeholder, not yet a date-palm silhouette. |
 | `procgen/Birch` | kind 9, silver birch | `GroveTrees`; five trees in 138 `BirchGrove` | Separate white-bark stem, twig wood and irregular textured leaf sprays. |
 | `procgen/Camphor` and `CamphorGeometry` | no shared kind | one tree in 138 `CamphorGrove` | One 27.9 m mature camphor tree with buttress roots, seven main scaffold limbs, moss and a broad evergreen crown. It does not belong in normal forest selection. |
+| `procgen/SculpturalFork` | no shared kind | young and mature bare studies in 138 | Reusable continuous trunk with open-patch joined primary branches, stable carried frames, unequal angles and a lobed root flare. It is an isolated geometry proof until a later species task adopts it. |
 | `FluffyForm.bush` | no tree kind; common hazel target (*Corylus avellana*) | shared walker bush instancers; 138 inspection row and woodland, capped at 18 | Current preset has foliage and no wood. The target is a low rounded, multi-stem thicket with smooth pale bark, not a miniature tree ball. |
 
 138 currently builds the forms through four separate modules:
