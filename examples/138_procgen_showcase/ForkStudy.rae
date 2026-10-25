@@ -7,6 +7,8 @@ open Scene3d
 open FoliageMesh
 open RendererDeferred
 open procgen/SculpturalFork
+open procgen/CurvedFork
+import Sys
 open ecs/Entity
 
 func forkStudyMaterial() ret Material3d {
@@ -43,8 +45,9 @@ func addForkStudy(
   obstacles: mod List(GroveObstacle)
 ) {
   let started: Int = nowNs()
-  let young: SculpturalFork = youngSculpturalFork(seed: 206)
-  let mature: SculpturalFork = matureSculpturalFork(seed: 907)
+  let control: Bool = Sys.getEnv(name: "RAE_FORK_CONTROL") is "1"
+  let young: SculpturalFork = forkStudyTree(seed: 206, mature: false, control: control)
+  let mature: SculpturalFork = forkStudyTree(seed: 907, mature: true, control: control)
   let generated: Int = nowNs()
   placeForkStudy(
     world: world
@@ -66,4 +69,11 @@ func addForkStudy(
   log(
     "[fork-study] generated 2 meshes in {microseconds} us; young {young.wood.vertCount} vertices/{young.wood.indices.length / 3} triangles; mature {mature.wood.vertCount} vertices/{mature.wood.indices.length / 3} triangles"
   )
+}
+
+func forkStudyTree(seed: view Int, mature: view Bool, control: view Bool) ret SculpturalFork {
+  if control {
+    ret sculpturalFork(seed: seed, mature: mature)
+  }
+  ret curvedSculpturalFork(seed: seed, mature: mature)
 }

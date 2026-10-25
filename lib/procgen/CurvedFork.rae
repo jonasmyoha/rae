@@ -1,0 +1,293 @@
+# The recovery study is deliberately separate from the preserved fork control
+# and from every species generator. Dimensions are metres, Z is up.
+open Mesh3d
+open Vec3
+open procgen/Foliage
+open procgen/SculpturalFork
+open procgen/ForkSurface
+open procgen/CurvedForkBranch
+import Math
+
+func curvedForkPoint(
+  forward: view Vec3
+  sideways: view Vec3
+  height: view Float
+  along: view Float
+  across: view Float
+  rise: view Float
+) ret Vec3 {
+  ret vadd(
+    a: vscale(a: forward, s: along * height)
+    b: vadd(
+      a: vscale(a: sideways, s: across * height)
+      b: Vec3.create(x: 0, y: 0, z: rise * height)
+    )
+  )
+}
+
+func curvedForkLimb(
+  start: view Vec3
+  outward: view Vec3
+  length: view Float
+  rise: view Float
+  radius: view Float
+  sweep: view Float
+) ret ForkPath {
+  let forward: Vec3 = vnorm(a: Vec3.create(x: outward.x, y: outward.y, z: 0))
+  let sideways: Vec3 = Vec3.create(x: -forward.y, y: forward.x, z: 0)
+  let controls: List(Vec3) = {
+    start
+    vadd(
+      a: start
+      b: vadd(a: vscale(a: forward, s: length * 0.12), b: Vec3.create(x: 0, y: 0, z: rise * 0.20))
+    )
+    vadd(
+      a: start
+      b: vadd(
+        a: vscale(a: forward, s: length * 0.40)
+        b: vadd(
+          a: vscale(a: sideways, s: sweep * length * 0.25)
+          b: Vec3.create(x: 0, y: 0, z: rise * 0.45)
+        )
+      )
+    )
+    vadd(
+      a: start
+      b: vadd(
+        a: vscale(a: forward, s: length * 0.72)
+        b: vadd(
+          a: vscale(a: sideways, s: sweep * length * 0.72)
+          b: Vec3.create(x: 0, y: 0, z: rise * 0.70)
+        )
+      )
+    )
+    vadd(
+      a: start
+      b: vadd(
+        a: vscale(a: forward, s: length * 0.90)
+        b: vadd(
+          a: vscale(a: sideways, s: sweep * length)
+          b: Vec3.create(x: 0, y: 0, z: rise * 0.88)
+        )
+      )
+    )
+    vadd(
+      a: start
+      b: vadd(
+        a: vscale(a: forward, s: length)
+        b: vadd(
+          a: vscale(a: sideways, s: sweep * length * 1.08)
+          b: Vec3.create(x: 0, y: 0, z: rise)
+        )
+      )
+    )
+  }
+  let radii: List(Float) = {
+    radius
+    radius * 0.95
+    radius * 0.79
+    radius * 0.59
+    radius * 0.40
+    radius * 0.27
+  }
+  ret forkSmoothPath(controls: controls, radii: radii, steps: 3)
+}
+
+func curvedSculpturalFork(seed: view Int, mature: view Bool) ret SculpturalFork {
+  var height: Float = 8.6
+  var radius: Float = 0.46
+  var junctions: Int = 1
+  if mature {
+    height = 13.8
+    radius = 0.80
+    junctions = 2
+  }
+  let angle: Float = forkHash(seed: seed, x: 1, y: 2) * forkPi * 2.0
+  let forward: Vec3 = Vec3.create(x: Math.cos(x: angle), y: Math.sin(x: angle), z: 0)
+  let sideways: Vec3 = Vec3.create(x: -forward.y, y: forward.x, z: 0)
+  let lean: Float = 0.85 + forkHash(seed: seed, x: 2, y: 3) * 0.3
+  let controls: List(Vec3) = {
+    Vec3.create(x: 0, y: 0, z: -0.42)
+    curvedForkPoint(
+      forward: forward
+      sideways: sideways
+      height: height
+      along: -0.014
+      across: 0.003
+      rise: 0.07
+    )
+    curvedForkPoint(
+      forward: forward
+      sideways: sideways
+      height: height
+      along: -0.034
+      across: 0.012
+      rise: 0.23
+    )
+    curvedForkPoint(
+      forward: forward
+      sideways: sideways
+      height: height
+      along: 0.012
+      across: 0.023
+      rise: 0.43
+    )
+    curvedForkPoint(
+      forward: forward
+      sideways: sideways
+      height: height
+      along: 0.085 * lean
+      across: 0.005
+      rise: 0.61
+    )
+    curvedForkPoint(
+      forward: forward
+      sideways: sideways
+      height: height
+      along: 0.165 * lean
+      across: -0.021
+      rise: 0.79
+    )
+    curvedForkPoint(
+      forward: forward
+      sideways: sideways
+      height: height
+      along: 0.195 * lean
+      across: -0.058
+      rise: 0.92
+    )
+    curvedForkPoint(
+      forward: forward
+      sideways: sideways
+      height: height
+      along: 0.181 * lean
+      across: -0.079
+      rise: 1.0
+    )
+  }
+  let radii: List(Float) = {
+    radius * 1.38
+    radius * 1.07
+    radius * 0.96
+    radius * 0.88
+    radius * 0.69
+    radius * 0.46
+    radius * 0.32
+    radius * 0.24
+  }
+  let trunk: ForkPath = forkSmoothPath(controls: controls, radii: radii, steps: 3)
+  let sides: Int = 12
+  let firstSide: Int = 2 + (seed % 3 + 3) % 3
+  var cage: MeshData = foliageMesh()
+  let openings: List(ForkOpening) = forkTrunk(
+    mesh: cage
+    path: trunk
+    sides: sides
+    seed: seed
+    firstOpeningRing: 9
+    firstOpeningSide: firstSide
+    secondOpeningRing: 14
+    secondOpeningSide: (firstSide + 5) % sides
+    openingCount: junctions
+  )
+  forkCap(
+    mesh: cage
+    ringFirst: 0
+    sides: sides
+    center: controls.copyAtDefault(index: 0)
+    normal: vscale(a: foliageTangentAt(points: trunk.points, index: 0), s: -1.0)
+    v: 0
+  )
+  var limbs: List(ForkPath) = List.create(ForkPath, cap: junctions)
+  var minimumNormalDot: Float = 1
+  var minimumFrameDot: Float = forkPathFrameDot(path: trunk)
+  loop var junction: Int = 0, junction < junctions, ++junction {
+    let opening: ForkOpening = openings.copyAtDefault(index: junction)
+    let center: Vec3 = forkOpeningCenter(mesh: cage, opening: opening)
+    let outward: Vec3 = forkOpeningNormal(mesh: cage, opening: opening)
+    let branchRadius: Float = radius * (0.66 - junction.toFloat() * 0.22)
+    let start: Vec3 = vadd(a: center, b: vscale(a: outward, s: branchRadius * 0.8))
+    let limb: ForkPath = curvedForkLimb(
+      start: start
+      outward: outward
+      length: height * (0.36 - junction.toFloat() * 0.12)
+      rise: height * (0.44 - junction.toFloat() * 0.22)
+      radius: branchRadius
+      sweep: (forkHash(seed: seed, x: junction, y: 41) - 0.5) * 0.7
+    )
+    let first: Int = cage.vertCount
+    let normalDot: Float = curvedForkJoinedBranch(mesh: cage, opening: opening, path: limb)
+    minimumNormalDot = Math.min(a: minimumNormalDot, b: normalDot)
+    minimumFrameDot = Math.min(a: minimumFrameDot, b: forkPathFrameDot(path: limb))
+    limbs.add(value: limb)
+    # Continue the parent's longitudinal distance into its child. Periodic U
+    # carries the opening phase; the seam is split after surface refinement.
+    let phase: Float = cage.verts.copyAtDefault(index: opening.boundary0 * 8 + 6)
+    let baseDistance: Float = (cage.verts.copyAtDefault(index: opening.boundary0 * 8 + 7) + cage.verts.copyAtDefault(
+      index: opening.boundary5 * 8 + 7
+    )) * 0.5
+    loop var vertex: Int = first, vertex < cage.vertCount, ++vertex {
+      let textureU: Float = cage.verts.copyAtDefault(index: vertex * 8 + 6) + phase
+      var wrapped: Float = textureU
+      if wrapped >= 1 {
+        wrapped = wrapped - 1
+      }
+      cage.verts.set(index: vertex * 8 + 6, value: wrapped)
+      cage.verts.set(
+        index: vertex * 8 + 7
+        value: cage.verts.copyAtDefault(index: vertex * 8 + 7) + baseDistance
+      )
+    }
+  }
+  loop let opening: ForkOpening in openings {
+    relaxForkJunction(
+      mesh: cage
+      center: forkOpeningCenter(mesh: cage, opening: opening)
+      radius: radius * 2.4
+    )
+  }
+  let refined: MeshData = subdivideForkSurface(mesh: cage)
+  var wood: MeshData = subdivideForkSurface(mesh: refined)
+  finishForkSurface(mesh: wood)
+  textureForkPatch(
+    mesh: wood
+    center: controls.copyAtDefault(index: 0)
+    tangent: foliageTangentAt(points: trunk.points, index: 0)
+    radius: radius * 3.0
+  )
+  textureForkPatch(
+    mesh: wood
+    center: trunk.points.copyAtDefault(index: trunk.points.length - 1)
+    tangent: foliageTangentAt(points: trunk.points, index: trunk.points.length - 1)
+    radius: radius * 0.24
+  )
+  loop let limb: view ForkPath in limbs {
+    textureForkPatch(
+      mesh: wood
+      center: limb.points.copyAtDefault(index: limb.points.length - 1)
+      tangent: foliageTangentAt(points: limb.points, index: limb.points.length - 1)
+      radius: limb.radii.copyAtDefault(index: limb.radii.length - 1)
+    )
+  }
+  loop let opening: ForkOpening in openings {
+    textureForkPatch(
+      mesh: wood
+      center: forkOpeningCenter(mesh: cage, opening: opening)
+      tangent: forkOpeningNormal(mesh: cage, opening: opening)
+      radius: radius * 2.0
+    )
+  }
+  wood = compactForkSurface(mesh: wood)
+  let bounds: ForkBounds = forkMeshBounds(mesh: wood)
+  ret SculpturalFork {
+    wood: own wood
+    boundsMin: bounds.minimum
+    boundsMax: bounds.maximum
+    declaredRadius: height * 0.65
+    declaredHeight: height + 1
+    declaredDepth: 1
+    junctionCount: junctions
+    minimumJunctionNormalDot: minimumNormalDot
+    minimumFrameDot: minimumFrameDot
+  }
+}
