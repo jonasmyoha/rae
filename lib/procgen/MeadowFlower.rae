@@ -7,6 +7,7 @@ open Mesh3d
 open Noise
 open Scene3d
 open procgen/Foliage
+open procgen/OxeyeGeometry
 
 const flowerTau: Float = 6.283185307179586
 
@@ -381,7 +382,11 @@ func addStemLeaf(
 # stems, 20-24 white ray florets around one yellow disc, and sparse lower
 # leaves. Heads are slightly enlarged for a walker camera but keep the real
 # stem/head proportion. One patch is capped at oxeyeMaximumPlants.
-func oxeyeDaisyPatch(seed: view Int, count: view Int, radius: view Float) ret MeadowFlowerParts {
+func oxeyeDaisyControlPatch(
+  seed: view Int
+  count: view Int
+  radius: view Float
+) ret MeadowFlowerParts {
   var flowerCount: Int = count
   if flowerCount < 1 {
     flowerCount = 1
@@ -528,4 +533,206 @@ func oxeyeDaisyPatch(seed: view Int, count: view Int, radius: view Float) ret Me
     discs: own discs
     flowerCount: flowerCount
   }
+}
+
+# The recovery keeps count/seed/material ownership, but composes a few unequal
+# groups. Roots, stems and heads are generated once and instanced as three parts.
+func oxeyeDaisyPatch(seed: view Int, count: view Int, radius: view Float) ret MeadowFlowerParts {
+  var flowerCount: Int = count
+  if flowerCount < 1 {
+    flowerCount = 1
+  }
+  if flowerCount > oxeyeMaximumPlants {
+    flowerCount = oxeyeMaximumPlants
+  }
+  var stems: MeshData = foliageMesh()
+  var petals: MeshData = foliageMesh()
+  var discs: MeshData = foliageMesh()
+  loop var flower: Int = 0, flower < flowerCount, ++flower {
+    let group: Int = flower / 3
+    let groupCount: Int = (flowerCount + 2) / 3
+    let groupAngle: Float = group.toFloat() * flowerGoldenAngle + hash2(x: group, y: 3, seed: seed) * 0.8
+    let spread: Float = Math.sqrt(x: (group.toFloat() + 0.3) / groupCount.toFloat()) * Math.max(
+      a: radius
+      b: 0.0
+    ) * 0.62
+    let angle: Float = flower.toFloat() * flowerGoldenAngle + hash2(x: flower, y: 3, seed: seed) * 0.55
+    var root: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: -0.012)
+    if flowerCount > 1 {
+      let offset: Float = Math.max(a: radius, b: 0.0) * (0.12 + hash2(x: flower, y: 2, seed: seed) * 0.12)
+      root.x = Math.cos(x: groupAngle) * spread + Math.cos(x: angle) * offset
+      root.y = Math.sin(x: groupAngle) * spread + Math.sin(x: angle) * offset
+    }
+    var height: Float = 0.44 + hash2(x: flower, y: 5, seed: seed) * 0.24
+    if flower % 7 is 0 {
+      height = height + 0.11
+    }
+    let leanAngle: Float = angle + (hash2(x: flower, y: 11, seed: seed) - 0.5) * 1.8
+    let reach: Float = 0.055 + hash2(x: flower, y: 7, seed: seed) * 0.065
+    let lean: Vec3 = Vec3.create(
+      x: Math.cos(x: leanAngle) * reach
+      y: Math.sin(x: leanAngle) * reach
+      z: 0.0
+    )
+    let curve: Vec3 = Vec3.create(
+      x: Math.cos(x: leanAngle + 1.1) * 0.035
+      y: Math.sin(x: leanAngle + 1.1) * 0.035
+      z: 0.0
+    )
+    let head: Vec3 = oxeyeStemPoint(
+      root: root
+      height: height
+      lean: lean
+      curve: curve
+      amount: 1.0
+    )
+    let stemFirst: Int = stems.vertCount
+    oxeyeStem(
+      mesh: stems
+      root: root
+      height: height
+      lean: lean
+      curve: curve
+    )
+    loop var leaf: Int = 0, leaf < 4, ++leaf {
+      var attachment: Float = 0.06 + leaf.toFloat() * 0.035
+      var leafLength: Float = 0.10 + hash2(x: flower, y: leaf + 51, seed: seed) * 0.055
+      var leafWidth: Float = 0.024
+      if leaf is 3 {
+        attachment = 0.37
+        leafLength = 0.085
+        leafWidth = 0.012
+      }
+      let leafAngle: Float = angle + leaf.toFloat() * flowerGoldenAngle
+      oxeyeLeaf(
+        mesh: stems
+        root: oxeyeStemPoint(
+          root: root
+          height: height
+          lean: lean
+          curve: curve
+          amount: attachment
+        )
+        direction: vnorm(
+          a: Vec3.create(x: Math.cos(x: leafAngle), y: Math.sin(x: leafAngle), z: 0.24)
+        )
+        length: leafLength
+        width: leafWidth
+      )
+    }
+    let tilt: Float = 0.18 + hash2(x: flower, y: 53, seed: seed) * 0.40
+    let headNormal: Vec3 = vnorm(
+      a: Vec3.create(x: Math.cos(x: leanAngle) * tilt, y: Math.sin(x: leanAngle) * tilt, z: 1.0)
+    )
+    let basis: Vec3 = foliageBasis(direction: headNormal)
+    let across: Vec3 = vnorm(a: vcross(a: headNormal, b: basis))
+    let discRadius: Float = 0.020 + hash2(x: flower, y: 23, seed: seed) * 0.003
+    # A green involucre joins the upper stem to the underside of the head.
+    addDisc(
+      mesh: stems
+      center: vsub(a: head, b: vscale(a: headNormal, s: 0.003))
+      headNormal: vscale(a: headNormal, s: -1.0)
+      basis: basis
+      across: vscale(a: across, s: -1.0)
+      radius: discRadius * 0.98
+    )
+    let flexibility: Float = 0.24 + hash2(x: flower, y: 19, seed: seed) * 0.10
+    flowerWindRange(
+      mesh: stems
+      firstVertex: stemFirst
+      pivot: root
+      flexibility: flexibility
+    )
+    let rayCount: Int = 21 + ((flower + seed) % 5 + 5) % 5
+    let petalFirst: Int = petals.vertCount
+    loop var ray: Int = 0, ray < rayCount, ++ray {
+      let rayAngle: Float = ray.toFloat() * flowerTau / rayCount.toFloat() + hash2(
+        x: ray
+        y: flower
+        seed: seed
+      ) * 0.045
+      let radial: Vec3 = vadd(
+        a: vscale(a: basis, s: Math.cos(x: rayAngle))
+        b: vscale(a: across, s: Math.sin(x: rayAngle))
+      )
+      oxeyeRay(
+        mesh: petals
+        center: head
+        normal: headNormal
+        radial: radial
+        tangent: vnorm(a: vcross(a: headNormal, b: radial))
+        radius: discRadius * 0.76
+        length: 0.040 + hash2(x: ray, y: 29, seed: seed + flower * 31) * 0.015
+        width: 0.0075 + hash2(x: ray, y: 31, seed: seed + flower * 37) * 0.0025
+        cup: 0.004 + hash2(x: ray, y: 37, seed: seed + flower * 41) * 0.012
+        twist: (hash2(x: ray, y: 43, seed: seed + flower * 43) - 0.5) * 0.002
+      )
+    }
+    flowerWindRange(
+      mesh: petals
+      firstVertex: petalFirst
+      pivot: root
+      flexibility: flexibility
+    )
+    let discFirst: Int = discs.vertCount
+    oxeyeDome(
+      mesh: discs
+      center: vadd(a: head, b: vscale(a: headNormal, s: 0.0025))
+      normal: headNormal
+      basis: basis
+      across: across
+      radius: discRadius
+    )
+    flowerWindRange(
+      mesh: discs
+      firstVertex: discFirst
+      pivot: root
+      flexibility: flexibility
+    )
+  }
+  ret MeadowFlowerParts {
+    stems: own stems
+    petals: own petals
+    discs: own discs
+    flowerCount: flowerCount
+  }
+}
+
+func oxeyeDaisyVariant(
+  seed: view Int
+  count: view Int
+  radius: view Float
+  control: view Bool
+) ret MeadowFlowerParts {
+  if control {
+    ret oxeyeDaisyControlPatch(seed: seed, count: count, radius: radius)
+  }
+  ret oxeyeDaisyPatch(seed: seed, count: count, radius: radius)
+}
+
+func oxeyeSoftMaterial(color: view Vec3) ret Material3d {
+  var material: Material3d = flowerMaterial(color: color, roughness: 0.94)
+  material.toon = false
+  ret material
+}
+
+func oxeyeVariantStemMaterial(control: view Bool) ret Material3d {
+  if control {
+    ret oxeyeStemMaterial()
+  }
+  ret oxeyeSoftMaterial(color: Vec3.create(x: 0.035, y: 0.125, z: 0.018))
+}
+
+func oxeyeVariantPetalMaterial(control: view Bool) ret Material3d {
+  if control {
+    ret oxeyePetalMaterial()
+  }
+  ret oxeyeSoftMaterial(color: Vec3.create(x: 0.72, y: 0.74, z: 0.65))
+}
+
+func oxeyeVariantDiscMaterial(control: view Bool) ret Material3d {
+  if control {
+    ret oxeyeDiscMaterial()
+  }
+  ret oxeyeSoftMaterial(color: Vec3.create(x: 0.52, y: 0.26, z: 0.012))
 }

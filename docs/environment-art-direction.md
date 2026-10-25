@@ -159,9 +159,9 @@ western and northern Asia. The
 [USDA Forest Service description](https://www.fs.usda.gov/pnw/pubs/pnw_gtr817.pdf)
 records a 1–3 ft flowering stem, a solitary composite head with 20–30 white ray
 florets around yellow disc florets, and coarse lower leaves. The shared
-prototype keeps those defining parts: one head per slender stem, 20–24 unequal
-rays, a low disc and one or two quiet lower leaves. Its 44–79 cm seeded heights
-fit the source range; the 9–12 cm rendered heads are deliberately larger than a
+recovered prototype keeps those defining parts: one head per curved slender
+stem, 21–25 unequal cupped rays, a rounded disc and restrained basal/upper leaves. Its 44–79 cm seeded heights
+fit the source range; the 11–14 cm rendered heads are deliberately larger than a
 typical wild head so their silhouette remains readable from the walker camera.
 
 `procgen/MeadowFlower.rae` generates one bounded plant or a patch of at most 24
@@ -173,6 +173,9 @@ grazing edges without alpha shimmer. The three materials are rough, lit and
 non-emissive. Every plant shares one root pivot across all three parts, while a
 patch is reused through three instanced batches. There is no entity, material
 or draw per petal.
+
+The [daisy recovery comparison](daisy-recovery.md) preserves the rejected plant
+beside the candidate and records matched light/camera views and mesh costs.
 
 The second shared ground flower is the **harebell** (*Campanula rotundifolia*).
 [Kew Plants of the World Online](https://powo.science.kew.org/taxon/urn%3Alsid%3Aipni.org%3Anames%3A30036649-2/general-information)

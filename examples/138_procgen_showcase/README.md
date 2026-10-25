@@ -26,7 +26,10 @@ standard GPU grass and a winding path on a raised garden base.
   young and mature curved bare-fork recovery studies. Set `RAE_FORK_CONTROL=1`
   for the unchanged rejected meshes at the same transforms. These art-study
   views are outside the 1-9 keyboard set.
-- `RAE_GROVE_VIEW=flowers` frames one oxeye daisy and one 13-plant patch.
+- `RAE_GROVE_VIEW=flowers` frames an oxeye daisy and a 13-plant patch.
+  The unchanged rejected plant remains 0.60 m to the left of the single
+  candidate. `RAE_DAISY_CONTROL=1` also restores the old study/forest meshes
+  and materials for matched comparisons.
 - `RAE_GROVE_VIEW=bellflowers`, `bellflowers-side` and
   `bellflowers-backlit` inspect one harebell and one 11-plant patch from the
   front, side and late-day grazing-light views.
@@ -84,12 +87,16 @@ beyond that root exclusion. Set
 `lib/procgen/MeadowFlower.rae` generates the oxeye daisy as one stem-and-leaf
 mesh, one modeled-petal mesh and one disc mesh. A close petal has a lit top,
 underside and narrow edge rather than an alpha card. One root pivot moves each
-complete plant coherently. The 138 study uses three entities for one plant and
+complete plant coherently. The recovered plant uses continuous curved stems,
+cupped rays and soft physical shading; see [matched comparisons](../../docs/daisy-recovery.md).
+The fixed old plant adds three study-only entities. The 138 study uses three entities for one plant and
 three for the complete patch; the walkers reuse a seven-plant patch through
 three bounded instanced batches. No petal owns an entity or draw, and all three
 rough materials have zero emission.
 
-![Oxeye daisy single plant and patch](references/Flowers.png)
+![Recovered oxeye daisy patch](../../docs/images/daisy-recovery/138-candidate-patch.png)
+
+The old `references/Flowers.png` is retained as rejected historical evidence.
 
 `lib/procgen/Harebell.rae` generates a distinct *Campanula rotundifolia*
 silhouette: wiry leaning stems, narrow leaves, alternating upper pedicels and

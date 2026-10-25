@@ -17,6 +17,24 @@ func flowerMeshValid(mesh: view MeshData) ret Bool {
       ret false
     }
   }
+  loop var triangle: Int = 0, triangle < mesh.indices.length / 3, ++triangle {
+    let first: Int = mesh.indices.copyAtDefault(index: triangle * 3) * 8
+    let second: Int = mesh.indices.copyAtDefault(index: triangle * 3 + 1) * 8
+    let third: Int = mesh.indices.copyAtDefault(index: triangle * 3 + 2) * 8
+    let edgeA: Vec3 = Vec3.create(
+      x: mesh.verts.copyAtDefault(index: second) - mesh.verts.copyAtDefault(index: first)
+      y: mesh.verts.copyAtDefault(index: second + 1) - mesh.verts.copyAtDefault(index: first + 1)
+      z: mesh.verts.copyAtDefault(index: second + 2) - mesh.verts.copyAtDefault(index: first + 2)
+    )
+    let edgeB: Vec3 = Vec3.create(
+      x: mesh.verts.copyAtDefault(index: third) - mesh.verts.copyAtDefault(index: first)
+      y: mesh.verts.copyAtDefault(index: third + 1) - mesh.verts.copyAtDefault(index: first + 1)
+      z: mesh.verts.copyAtDefault(index: third + 2) - mesh.verts.copyAtDefault(index: first + 2)
+    )
+    if Vec3.vlen(a: Vec3.vcross(a: edgeA, b: edgeB)) < 0.000000001 {
+      ret false
+    }
+  }
   loop var vertex: Int = 0, vertex < mesh.vertCount, ++vertex {
     loop var field: Int = 0, field < 8, ++field {
       let value: Float = mesh.verts.copyAtDefault(index: vertex * 8 + field)
@@ -72,44 +90,123 @@ func withinPatchBounds(mesh: view MeshData, radius: view Float) ret Bool {
   ret true
 }
 
+# All three materials of a plant must rotate about the same root with the
+# same strength. Otherwise the disc and petals separate from their stem.
+func matchingRoots(parts: view MeadowFlowerParts) ret Bool {
+  let meshes: List(MeshData) = { parts.stems, parts.petals, parts.discs }
+  loop let mesh: view MeshData in meshes {
+    loop var vertex: Int = 0, vertex < mesh.vertCount, ++vertex {
+      let offset: Int = vertex * 4
+      var found: Bool = false
+      loop var root: Int = 0, root < parts.flowerCount, ++root {
+        let other: Int = root * 97 * 4
+        if mesh.windPivots.copyAtDefault(index: offset) is parts.discs.windPivots.copyAtDefault(
+          index: other
+        ) and mesh.windPivots.copyAtDefault(index: offset + 1) is parts.discs.windPivots.copyAtDefault(
+          index: other + 1
+        ) and mesh.windPivots.copyAtDefault(index: offset + 2) is parts.discs.windPivots.copyAtDefault(
+          index: other + 2
+        ) and mesh.windPivots.copyAtDefault(index: offset + 3) is parts.discs.windPivots.copyAtDefault(
+          index: other + 3
+        ) {
+          found = true
+        }
+      }
+      if not found {
+        ret false
+      }
+    }
+  }
+  ret true
+}
+
 func main() ret Int {
   let single: MeadowFlowerParts = oxeyeDaisyPatch(seed: 1307, count: 1, radius: 0.0)
   let patch: MeadowFlowerParts = oxeyeDaisyPatch(seed: 1871, count: 13, radius: 1.05)
   let repeat: MeadowFlowerParts = oxeyeDaisyPatch(seed: 1871, count: 13, radius: 1.05)
   let capped: MeadowFlowerParts = oxeyeDaisyPatch(seed: 7, count: 200, radius: 1.0)
   if single.flowerCount is not 1 or patch.flowerCount is not 13 or capped.flowerCount is not 24 {
+    log("daisy check 1 failed")
     ret 1
   }
   if not flowerMeshValid(mesh: single.stems) or not flowerMeshValid(mesh: single.petals) or not flowerMeshValid(
     mesh: single.discs
   ) {
+    log("daisy check 2 failed")
     ret 2
   }
   if not flowerMeshValid(mesh: patch.stems) or not flowerMeshValid(mesh: patch.petals) or not flowerMeshValid(
     mesh: patch.discs
   ) {
+    log("daisy check 3 failed")
     ret 3
   }
   if not sameMesh(first: patch.stems, second: repeat.stems) or not sameMesh(
     first: patch.petals
     second: repeat.petals
   ) or not sameMesh(first: patch.discs, second: repeat.discs) {
+    log("daisy check 4 failed")
     ret 4
   }
   if not withinPatchBounds(mesh: patch.stems, radius: 1.05) or not withinPatchBounds(
     mesh: patch.petals
     radius: 1.05
   ) or not withinPatchBounds(mesh: patch.discs, radius: 1.05) {
+    log("daisy check 5 failed")
     ret 5
   }
   let stems: Material3d = oxeyeStemMaterial()
   let petals: Material3d = oxeyePetalMaterial()
   let discs: Material3d = oxeyeDiscMaterial()
   if stems.emission.x is not 0.0 or petals.emission.x is not 0.0 or discs.emission.x is not 0.0 {
+    log("daisy check 6 failed")
     ret 6
   }
   if patch.petals.indices.length / 3 < patch.flowerCount * 20 * 10 {
+    log("daisy check 7 failed")
     ret 7
+  }
+  # Negative seeds, minimum count, maximum capacity and the shared forest
+  # seed exercise the actual prototype sizes, including every material part.
+  let seeds: List(Int) = {
+    -19
+    0
+    584
+    1307
+    1871
+  }
+  loop let seed: Int in seeds {
+    let plants: MeadowFlowerParts = oxeyeDaisyPatch(seed: seed, count: 24, radius: 1.05)
+    if not matchingRoots(parts: plants) {
+      log("daisy check 8 failed")
+      ret 8
+    }
+    let meshes: List(MeshData) = { plants.stems, plants.petals, plants.discs }
+    loop let mesh: view MeshData in meshes {
+      if not flowerMeshValid(mesh: mesh) or not withinPatchBounds(mesh: mesh, radius: 1.05) {
+        log("daisy check 9 failed")
+        ret 9
+      }
+    }
+    if plants.stems.vertCount + plants.petals.vertCount + plants.discs.vertCount > 41000 {
+      log("daisy check 10 failed")
+      ret 10
+    }
+  }
+  let old: MeadowFlowerParts = oxeyeDaisyControlPatch(seed: 1307, count: 1, radius: 0.0)
+  if old.stems.vertCount + old.petals.vertCount + old.discs.vertCount is not 1128 or old.stems.indices.length + old.petals.indices.length + old.discs.indices.length is not 1128 {
+    log("daisy check 11 failed")
+    ret 11
+  }
+  let emptyRequest: MeadowFlowerParts = oxeyeDaisyPatch(seed: 0, count: 0, radius: 0.0)
+  if emptyRequest.flowerCount is not 1 {
+    log("daisy check 12 failed")
+    ret 12
+  }
+  let soft: Material3d = oxeyeVariantPetalMaterial(control: false)
+  if soft.toon or soft.emission.x is not 0.0 or soft.emission.y is not 0.0 or soft.emission.z is not 0.0 {
+    log("daisy check 13 failed")
+    ret 13
   }
   log("meadow daisy: bounded lit parts, stable roots and deterministic geometry")
   ret 0

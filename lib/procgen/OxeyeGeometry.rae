@@ -1,0 +1,340 @@
+# Close oxeye geometry. Indexed curved surfaces keep broad, quiet normals;
+# the plant's owner assigns the same root pivot to all three material parts.
+open Vec3
+open Mesh3d
+open procgen/Foliage
+import Math
+
+func oxeyeStemPoint(
+  root: view Vec3
+  height: view Float
+  lean: view Vec3
+  curve: view Vec3
+  amount: view Float
+) ret Vec3 {
+  ret vadd(
+    a: root
+    b: vadd(
+      a: Vec3.create(x: 0.0, y: 0.0, z: height * amount)
+      b: vadd(
+        a: vscale(a: lean, s: amount * amount)
+        b: vscale(a: curve, s: Math.sin(x: amount * 3.14159265))
+      )
+    )
+  )
+}
+
+func oxeyeStem(
+  mesh: mod MeshData
+  root: view Vec3
+  height: view Float
+  lean: view Vec3
+  curve: view Vec3
+) {
+  var points: List(Vec3) = List.create(Vec3, cap: 13)
+  var radii: List(Float) = List.create(Float, cap: 13)
+  loop var step: Int = 0, step <= 12, ++step {
+    let amount: Float = step.toFloat() / 12.0
+    points.add(value: oxeyeStemPoint(
+      root: root
+      height: height
+      lean: lean
+      curve: curve
+      amount: amount
+    ))
+    radii.add(value: 0.0042 - 0.0023 * amount)
+  }
+  foliageTube(
+    mesh: mesh
+    points: points
+    radii: radii
+    sides: 7
+  )
+}
+
+# Two sides of a rounded spoon. The medial ridge is shallow; the lower leaves
+# have a quiet scalloped edge rather than a triangular arrow silhouette.
+func oxeyeLeaf(
+  mesh: mod MeshData
+  root: view Vec3
+  direction: view Vec3
+  length: view Float
+  width: view Float
+) {
+  let side: Vec3 = vnorm(a: vcross(a: Vec3.create(x: 0.0, y: 0.0, z: 1.0), b: direction))
+  let normal: Vec3 = vnorm(a: vcross(a: direction, b: side))
+  let first: Int = mesh.vertCount
+  loop var face: Int = 0, face < 2, ++face {
+    loop var row: Int = 0, row <= 8, ++row {
+      let amount: Float = row.toFloat() / 8.0
+      let breadth: Float = width * (0.07 + Math.sin(x: amount * 3.14159265) * (0.40 + amount * 0.60))
+      loop var column: Int = 0, column < 3, ++column {
+        let across: Float = (column - 1).toFloat()
+        let scallop: Float = 1.0 + 0.11 * Math.sin(x: amount * 31.4159265)
+        let lift: Float = length * (0.24 * Math.sin(x: amount * 3.14159265) - 0.12 * amount * amount) - Math.abs(
+          value: across
+        ) * width * 0.12
+        let point: Vec3 = vadd(
+          a: root
+          b: vadd(
+            a: vscale(a: direction, s: length * amount)
+            b: vadd(
+              a: vscale(a: side, s: breadth * across * scallop)
+              b: vscale(a: normal, s: lift)
+            )
+          )
+        )
+        var shading: Vec3 = vnorm(a: vadd(a: normal, b: vscale(a: side, s: across * 0.16)))
+        if face is 1 {
+          shading = vscale(a: shading, s: -1.0)
+        }
+        foliageVertex(mesh: mesh, point: point, normal: shading)
+      }
+    }
+    loop var row: Int = 0, row < 8, ++row {
+      loop var column: Int = 0, column < 2, ++column {
+        let index: Int = first + face * 27 + row * 3 + column
+        oxeyeQuad(
+          mesh: mesh
+          first: index
+          second: index + 3
+          third: index + 1
+          fourth: index + 4
+          reversed: face is 1
+        )
+      }
+    }
+  }
+}
+
+func oxeyeTriangle(
+  mesh: mod MeshData
+  first: view Int
+  second: view Int
+  third: view Int
+  reversed: view Bool
+) {
+  mesh.indices.add(value: first)
+  if reversed {
+    mesh.indices.add(value: third)
+    mesh.indices.add(value: second)
+  } else {
+    mesh.indices.add(value: second)
+    mesh.indices.add(value: third)
+  }
+}
+
+func oxeyeQuad(
+  mesh: mod MeshData
+  first: view Int
+  second: view Int
+  third: view Int
+  fourth: view Int
+  reversed: view Bool
+) {
+  oxeyeTriangle(
+    mesh: mesh
+    first: first
+    second: second
+    third: third
+    reversed: reversed
+  )
+  oxeyeTriangle(
+    mesh: mesh
+    first: third
+    second: second
+    third: fourth
+    reversed: reversed
+  )
+}
+
+func oxeyeRayWidth(row: view Int) ret Float {
+  if row is 0 {
+    ret 0.16
+  }
+  if row is 1 {
+    ret 0.48
+  }
+  if row is 2 {
+    ret 0.78
+  }
+  if row is 3 {
+    ret 0.96
+  }
+  if row is 4 {
+    ret 1.0
+  }
+  if row is 5 {
+    ret 0.88
+  }
+  if row is 6 {
+    ret 0.78
+  }
+  ret 0.46
+}
+
+func oxeyeRay(
+  mesh: mod MeshData
+  center: view Vec3
+  normal: view Vec3
+  radial: view Vec3
+  tangent: view Vec3
+  radius: view Float
+  length: view Float
+  width: view Float
+  cup: view Float
+  twist: view Float
+) {
+  let first: Int = mesh.vertCount
+  loop var face: Int = 0, face < 2, ++face {
+    loop var row: Int = 0, row < 8, ++row {
+      let amount: Float = row.toFloat() / 7.0
+      let breadth: Float = width * oxeyeRayWidth(row: row)
+      loop var column: Int = 0, column < 3, ++column {
+        let across: Float = (column - 1).toFloat()
+        # A shallow bowl, a soft folded edge and unequal ray tips.
+        let lift: Float = cup * amount * amount - length * 0.075 * amount * amount * amount + width * 0.12 * across * across + twist * across * amount
+        var thickness: Float = 0.00035
+        if face is 1 {
+          thickness = -thickness
+        }
+        let point: Vec3 = vadd(
+          a: center
+          b: vadd(
+            a: vscale(
+              a: radial
+              s: radius + length * (amount - 0.05 * Math.abs(value: across) * amount * amount * amount)
+            )
+            b: vadd(
+              a: vscale(a: tangent, s: breadth * across)
+              b: vscale(a: normal, s: lift + thickness)
+            )
+          )
+        )
+        let slope: Float = (cup * 2.0 * amount / length - 0.225 * amount * amount) * 0.65
+        var shading: Vec3 = vnorm(
+          a: vsub(
+            a: vsub(a: normal, b: vscale(a: radial, s: slope))
+            b: vscale(a: tangent, s: across * 0.16 + twist / width * amount)
+          )
+        )
+        if face is 1 {
+          shading = vscale(a: shading, s: -1.0)
+        }
+        foliageVertex(mesh: mesh, point: point, normal: shading)
+      }
+    }
+    loop var row: Int = 0, row < 7, ++row {
+      loop var column: Int = 0, column < 2, ++column {
+        let index: Int = first + face * 24 + row * 3 + column
+        oxeyeQuad(
+          mesh: mesh
+          first: index
+          second: index + 3
+          third: index + 1
+          fourth: index + 4
+          reversed: face is 1
+        )
+      }
+    }
+  }
+  # Closed perimeter: thin petal edges remain visible at grazing angles.
+  loop var row: Int = 0, row < 7, ++row {
+    let left: Int = first + row * 3
+    let right: Int = left + 2
+    oxeyeQuad(
+      mesh: mesh
+      first: left
+      second: left + 24
+      third: left + 3
+      fourth: left + 27
+      reversed: false
+    )
+    oxeyeQuad(
+      mesh: mesh
+      first: right
+      second: right + 3
+      third: right + 24
+      fourth: right + 27
+      reversed: false
+    )
+  }
+  loop var column: Int = 0, column < 2, ++column {
+    let end: Int = first + 21 + column
+    oxeyeQuad(
+      mesh: mesh
+      first: end
+      second: end + 24
+      third: end + 1
+      fourth: end + 25
+      reversed: false
+    )
+    let start: Int = first + column
+    oxeyeQuad(
+      mesh: mesh
+      first: start
+      second: start + 1
+      third: start + 24
+      fourth: start + 25
+      reversed: false
+    )
+  }
+}
+
+func oxeyeDome(
+  mesh: mod MeshData
+  center: view Vec3
+  normal: view Vec3
+  basis: view Vec3
+  across: view Vec3
+  radius: view Float
+) {
+  let first: Int = mesh.vertCount
+  foliageVertex(
+    mesh: mesh
+    point: vadd(a: center, b: vscale(a: normal, s: radius * 0.32))
+    normal: normal
+  )
+  loop var ring: Int = 1, ring <= 4, ++ring {
+    let amount: Float = ring.toFloat() / 4.0
+    loop var segment: Int = 0, segment < 24, ++segment {
+      let angle: Float = segment.toFloat() * 6.283185307 / 24.0
+      let radial: Vec3 = vadd(
+        a: vscale(a: basis, s: Math.cos(x: angle))
+        b: vscale(a: across, s: Math.sin(x: angle))
+      )
+      let floret: Float = Math.sin(x: angle * 9.0 + ring.toFloat() * 2.4) * 0.00045 * amount
+      let lift: Float = radius * 0.32 * (1.0 - amount * amount) + floret
+      let point: Vec3 = vadd(
+        a: center
+        b: vadd(a: vscale(a: radial, s: radius * amount), b: vscale(a: normal, s: lift))
+      )
+      foliageVertex(
+        mesh: mesh
+        point: point
+        normal: vnorm(a: vadd(a: normal, b: vscale(a: radial, s: amount * 0.48)))
+      )
+    }
+  }
+  loop var segment: Int = 0, segment < 24, ++segment {
+    let next: Int = (segment + 1) % 24
+    oxeyeTriangle(
+      mesh: mesh
+      first: first
+      second: first + 1 + segment
+      third: first + 1 + next
+      reversed: false
+    )
+    loop var ring: Int = 0, ring < 3, ++ring {
+      let lower: Int = first + 1 + ring * 24
+      oxeyeQuad(
+        mesh: mesh
+        first: lower + segment
+        second: lower + 24 + segment
+        third: lower + next
+        fourth: lower + 24 + next
+        reversed: false
+      )
+    }
+  }
+}

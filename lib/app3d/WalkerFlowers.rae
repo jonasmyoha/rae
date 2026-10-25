@@ -1,5 +1,6 @@
 # app3d/WalkerFlowers — the shared fixed flower patch meshes used by every
 # walker terrain. One instancer per species material, never per plant or head.
+import Sys
 open RendererDeferred
 open FoliageMesh
 open procgen/MeadowFlower
@@ -10,25 +11,30 @@ func createWalkerDaisyParts(
   renderer: mod DeferredRenderer
   capacity: view Int
 ) ret List(PropInstancer) {
-  let flowers: MeadowFlowerParts = oxeyeDaisyPatch(seed: 584, count: 7, radius: 0.62)
+  let flowers: MeadowFlowerParts = oxeyeDaisyVariant(
+    seed: 584
+    count: 7
+    radius: 0.62
+    control: Sys.getEnv(name: "RAE_DAISY_CONTROL") is "1"
+  )
   var parts: List(PropInstancer) = List.create(PropInstancer, cap: 3)
   var stems: PropInstancer = createPropInstancer(
     mesh: uploadFoliage(renderer: renderer, mesh: flowers.stems)
-    material: oxeyeStemMaterial()
+    material: oxeyeVariantStemMaterial(control: Sys.getEnv(name: "RAE_DAISY_CONTROL") is "1")
     capacity: capacity
   )
   stems.sway = 0.72
   parts.add(value: own stems)
   var petals: PropInstancer = createPropInstancer(
     mesh: uploadFoliage(renderer: renderer, mesh: flowers.petals)
-    material: oxeyePetalMaterial()
+    material: oxeyeVariantPetalMaterial(control: Sys.getEnv(name: "RAE_DAISY_CONTROL") is "1")
     capacity: capacity
   )
   petals.sway = 0.72
   parts.add(value: own petals)
   var discs: PropInstancer = createPropInstancer(
     mesh: uploadFoliage(renderer: renderer, mesh: flowers.discs)
-    material: oxeyeDiscMaterial()
+    material: oxeyeVariantDiscMaterial(control: Sys.getEnv(name: "RAE_DAISY_CONTROL") is "1")
     capacity: capacity
   )
   discs.sway = 0.72

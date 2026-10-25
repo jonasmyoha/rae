@@ -23,6 +23,7 @@
 # (drawTerrainGround, drawTerrainProps) both draw them, one instanced draw per
 # batch.
 import RendererDeferred
+import Sys
 import Math
 import Noise
 import Vec3
@@ -741,8 +742,8 @@ func drawTerrainGround(
   }
 }
 
-# The rocks, bushes and forest into the shadow pass, one instanced draw per
-# batch. The small flowers and grass tufts do not enter the walker shadow map.
+# Rocks, bushes, daisies and forest use one shadow draw per material batch.
+# Existing grass and harebell shadow policy is unchanged.
 func drawTerrainPropsShadow(renderer: mod DeferredRenderer, terrainSystem: view WalkerTerrain) {
   loop let part: view PropInstancer in terrainSystem.rockParts {
     RendererDeferred.drawShadowCasterBatchWith(
@@ -752,6 +753,13 @@ func drawTerrainPropsShadow(renderer: mod DeferredRenderer, terrainSystem: view 
     )
   }
   loop let part: view PropInstancer in terrainSystem.bushParts {
+    RendererDeferred.drawShadowCasterBatchWith(
+      renderer: renderer
+      mesh: part.mesh
+      batch: part.batch
+    )
+  }
+  loop let part: view PropInstancer in terrainSystem.flowerParts {
     RendererDeferred.drawShadowCasterBatchWith(
       renderer: renderer
       mesh: part.mesh
@@ -776,8 +784,9 @@ func setInfiniteTerrainToon(terrainSystem: mod WalkerTerrain, toon: view Bool) {
   loop let part: mod PropInstancer in terrainSystem.rockParts {
     setPropInstancerToon(prop: part, toon: toon)
   }
+  # The recovered daisy uses broad physical shading independently of terrain.
   loop let part: mod PropInstancer in terrainSystem.flowerParts {
-    setPropInstancerToon(prop: part, toon: toon)
+    setPropInstancerToon(prop: part, toon: toon and Sys.getEnv(name: "RAE_DAISY_CONTROL") is "1")
   }
   loop let part: mod PropInstancer in terrainSystem.harebellParts {
     setPropInstancerToon(prop: part, toon: toon)

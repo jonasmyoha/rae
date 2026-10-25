@@ -26,17 +26,24 @@ type GroveObstacle {
   x: Float
   y: Float
   radius: Float
+  excludeGrass: Bool = true
 }
 
 # The surface field grove_surface.wgsl reads: the count, then x, y, radius
 func groveObstacleField(obstacles: view List(GroveObstacle)) ret List(Float) {
   var field: List(Float) = List.create(Float, cap: 1 + obstacles.length * 3)
-  field.add(value: obstacles.length.toFloat())
+  field.add(value: 0.0)
+  var count: Int = 0
   loop let obstacle: view GroveObstacle in obstacles {
+    if not obstacle.excludeGrass {
+      continue
+    }
+    count = count + 1
     field.add(value: obstacle.x)
     field.add(value: obstacle.y)
     field.add(value: obstacle.radius)
   }
+  field.set(index: 0, value: count.toFloat())
   ret field
 }
 
