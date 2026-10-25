@@ -173,3 +173,30 @@ grazing edges without alpha shimmer. The three materials are rough, lit and
 non-emissive. Every plant shares one root pivot across all three parts, while a
 patch is reused through three instanced batches. There is no entity, material
 or draw per petal.
+
+The second shared ground flower is the **harebell** (*Campanula rotundifolia*).
+[Kew Plants of the World Online](https://powo.science.kew.org/taxon/urn%3Alsid%3Aipni.org%3Anames%3A30036649-2/general-information)
+accepts the species and records its broad temperate native range. The
+[South Dakota State University specimen description](https://openprairie.sdstate.edu/nativeplant/142/)
+records delicate 15–70 cm erect or ascending stems, short upper branches,
+narrow sessile stem leaves and a terminal few-flowered raceme of nodding blue,
+fused campanulate corollas. The
+[Missouri Botanical Garden description](https://plantfinder.mobot.org/PlantFinderDetails.aspx?isprofile=0&letter=C&taxonid=278849)
+also describes wiry stems, nodding blue flowers in small clusters and rounded
+basal leaves that usually wither before flowering.
+
+`procgen/Harebell.rae` keeps that identity in its geometry. Each plant has a
+thin leaning stem, sparse narrow leaves and two to five alternating upper
+pedicels. Every open bell has one fused body, five pointed lobes, a modeled
+inside and a five-sepal calyx. The mouth and length are deliberately enlarged
+so the hanging silhouette remains readable at the walker camera. Seeded plants
+vary from about 30 to 65 cm and patches are capped at 20 plants.
+
+The harebell uses two shared meshes and two rough, non-emissive materials:
+green wood/leaves/calyces and blue-violet corollas. Modeled outer, inner and rim
+surfaces were selected instead of alpha cards because the open mouth and
+backlit edge define this species. This avoids cutout mip shimmer while giving
+side and rear views real lighting. A complete plant shares one root wind pivot,
+so stems, pedicels and bells move together. The walkers instance one fixed
+nine-plant patch through these two batches beside the daisy's three batches;
+plant and head counts do not create more materials or draw batches.

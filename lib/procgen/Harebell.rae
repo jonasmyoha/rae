@@ -1,0 +1,489 @@
+# procgen/Harebell — one bounded harebell family built on MeadowFlower's
+# geometry, material and wind helpers. The green plant and every blue corolla
+# are two shared material meshes, independent of the number of flower heads.
+import Math
+open Vec3
+open Mesh3d
+open Noise
+open Scene3d
+open procgen/Foliage
+open procgen/MeadowFlower
+
+const harebellTau: Float = 6.283185307179586
+
+const harebellGoldenAngle: Float = 2.399963229728653
+
+const harebellMaximumPlants: Int = 20
+
+type HarebellParts {
+  greens: MeshData
+  bells: MeshData
+  plantCount: Int
+  headCount: Int
+}
+
+func harebellGreenMaterial() ret Material3d {
+  ret flowerMaterial(color: Vec3.create(x: 0.045, y: 0.215, z: 0.030), roughness: 0.93)
+}
+
+func harebellCorollaMaterial() ret Material3d {
+  # A medium blue-violet leaves room for sunlight and shadow. It is ordinary
+  # rough lit material, with no emission or baked white centre.
+  ret flowerMaterial(color: Vec3.create(x: 0.20, y: 0.24, z: 0.72), roughness: 0.84)
+}
+
+func harebellRadial(basis: view Vec3, across: view Vec3, angle: view Float) ret Vec3 {
+  ret vadd(a: vscale(a: basis, s: Math.cos(x: angle)), b: vscale(a: across, s: Math.sin(x: angle)))
+}
+
+func harebellRingPoint(
+  attach: view Vec3
+  axis: view Vec3
+  radial: view Vec3
+  distance: view Float
+  radius: view Float
+) ret Vec3 {
+  ret vadd(a: vadd(a: attach, b: vscale(a: axis, s: distance)), b: vscale(a: radial, s: radius))
+}
+
+# One open, fused five-lobed corolla. Ten side segments put a valley between
+# each pointed lobe. Outer and inner surfaces give a real silhouette and calm
+# two-sided lighting without alpha cutouts.
+func addHarebellCorolla(
+  mesh: mod MeshData
+  attach: view Vec3
+  axis: view Vec3
+  length: view Float
+  mouthRadius: view Float
+) {
+  let basis: Vec3 = foliageBasis(direction: axis)
+  let across: Vec3 = vnorm(a: vcross(a: axis, b: basis))
+  let segmentCount: Int = 10
+  let topRadius: Float = mouthRadius * 0.27
+  let middleRadius: Float = mouthRadius * 0.55
+  let thickness: Float = 0.0018
+  loop var segment: Int = 0, segment < segmentCount, ++segment {
+    let angle: Float = segment.toFloat() * harebellTau / segmentCount.toFloat()
+    let nextAngle: Float = (segment + 1).toFloat() * harebellTau / segmentCount.toFloat()
+    let radial: Vec3 = harebellRadial(basis: basis, across: across, angle: angle)
+    let nextRadial: Vec3 = harebellRadial(basis: basis, across: across, angle: nextAngle)
+    var mouthDistance: Float = length
+    var nextMouthDistance: Float = length
+    var outerRadius: Float = mouthRadius
+    var nextOuterRadius: Float = mouthRadius
+    if segment % 2 is 0 {
+      mouthDistance = mouthDistance + length * 0.15
+      outerRadius = outerRadius * 1.08
+    }
+    if (segment + 1) % 2 is 0 {
+      nextMouthDistance = nextMouthDistance + length * 0.15
+      nextOuterRadius = nextOuterRadius * 1.08
+    }
+    let top: Vec3 = harebellRingPoint(
+      attach: attach
+      axis: axis
+      radial: radial
+      distance: 0.0
+      radius: topRadius
+    )
+    let nextTop: Vec3 = harebellRingPoint(
+      attach: attach
+      axis: axis
+      radial: nextRadial
+      distance: 0.0
+      radius: topRadius
+    )
+    let middle: Vec3 = harebellRingPoint(
+      attach: attach
+      axis: axis
+      radial: radial
+      distance: length * 0.50
+      radius: middleRadius
+    )
+    let nextMiddle: Vec3 = harebellRingPoint(
+      attach: attach
+      axis: axis
+      radial: nextRadial
+      distance: length * 0.50
+      radius: middleRadius
+    )
+    let mouth: Vec3 = harebellRingPoint(
+      attach: attach
+      axis: axis
+      radial: radial
+      distance: mouthDistance
+      radius: outerRadius
+    )
+    let nextMouth: Vec3 = harebellRingPoint(
+      attach: attach
+      axis: axis
+      radial: nextRadial
+      distance: nextMouthDistance
+      radius: nextOuterRadius
+    )
+    let averageRadial: Vec3 = vnorm(a: vadd(a: radial, b: nextRadial))
+    let outerNormal: Vec3 = vnorm(a: vadd(a: averageRadial, b: vscale(a: axis, s: -0.24)))
+    flowerFaceNormal(
+      mesh: mesh
+      first: top
+      second: middle
+      third: nextTop
+      normal: outerNormal
+    )
+    flowerFaceNormal(
+      mesh: mesh
+      first: nextTop
+      second: middle
+      third: nextMiddle
+      normal: outerNormal
+    )
+    flowerFaceNormal(
+      mesh: mesh
+      first: middle
+      second: mouth
+      third: nextMiddle
+      normal: outerNormal
+    )
+    flowerFaceNormal(
+      mesh: mesh
+      first: nextMiddle
+      second: mouth
+      third: nextMouth
+      normal: outerNormal
+    )
+
+    let innerTop: Vec3 = harebellRingPoint(
+      attach: attach
+      axis: axis
+      radial: radial
+      distance: thickness
+      radius: topRadius - thickness
+    )
+    let nextInnerTop: Vec3 = harebellRingPoint(
+      attach: attach
+      axis: axis
+      radial: nextRadial
+      distance: thickness
+      radius: topRadius - thickness
+    )
+    let innerMiddle: Vec3 = harebellRingPoint(
+      attach: attach
+      axis: axis
+      radial: radial
+      distance: length * 0.50
+      radius: middleRadius - thickness
+    )
+    let nextInnerMiddle: Vec3 = harebellRingPoint(
+      attach: attach
+      axis: axis
+      radial: nextRadial
+      distance: length * 0.50
+      radius: middleRadius - thickness
+    )
+    let innerMouth: Vec3 = harebellRingPoint(
+      attach: attach
+      axis: axis
+      radial: radial
+      distance: mouthDistance - thickness
+      radius: outerRadius - thickness
+    )
+    let nextInnerMouth: Vec3 = harebellRingPoint(
+      attach: attach
+      axis: axis
+      radial: nextRadial
+      distance: nextMouthDistance - thickness
+      radius: nextOuterRadius - thickness
+    )
+    let innerNormal: Vec3 = vscale(a: outerNormal, s: -1.0)
+    flowerFaceNormal(
+      mesh: mesh
+      first: nextInnerTop
+      second: innerMiddle
+      third: innerTop
+      normal: innerNormal
+    )
+    flowerFaceNormal(
+      mesh: mesh
+      first: nextInnerMiddle
+      second: innerMiddle
+      third: nextInnerTop
+      normal: innerNormal
+    )
+    flowerFaceNormal(
+      mesh: mesh
+      first: nextInnerMiddle
+      second: innerMouth
+      third: innerMiddle
+      normal: innerNormal
+    )
+    flowerFaceNormal(
+      mesh: mesh
+      first: nextInnerMouth
+      second: innerMouth
+      third: nextInnerMiddle
+      normal: innerNormal
+    )
+    flowerFaceNormal(
+      mesh: mesh
+      first: mouth
+      second: innerMouth
+      third: nextMouth
+      normal: vscale(a: axis, s: -1.0)
+    )
+    flowerFaceNormal(
+      mesh: mesh
+      first: nextMouth
+      second: innerMouth
+      third: nextInnerMouth
+      normal: vscale(a: axis, s: -1.0)
+    )
+  }
+}
+
+func addHarebellCalyx(
+  mesh: mod MeshData
+  attach: view Vec3
+  axis: view Vec3
+  radius: view Float
+) {
+  let basis: Vec3 = foliageBasis(direction: axis)
+  let across: Vec3 = vnorm(a: vcross(a: axis, b: basis))
+  loop var sepal: Int = 0, sepal < 5, ++sepal {
+    let angle: Float = sepal.toFloat() * harebellTau / 5.0
+    let radial: Vec3 = harebellRadial(basis: basis, across: across, angle: angle)
+    let side: Vec3 = vnorm(a: vcross(a: axis, b: radial))
+    let rootLeft: Vec3 = vadd(
+      a: attach
+      b: vadd(a: vscale(a: radial, s: radius * 0.30), b: vscale(a: side, s: radius * 0.22))
+    )
+    let rootRight: Vec3 = vadd(
+      a: attach
+      b: vadd(a: vscale(a: radial, s: radius * 0.30), b: vscale(a: side, s: -radius * 0.22))
+    )
+    let tip: Vec3 = vadd(
+      a: attach
+      b: vadd(a: vscale(a: axis, s: radius * 1.35), b: vscale(a: radial, s: radius))
+    )
+    let normal: Vec3 = vnorm(a: vadd(a: radial, b: vscale(a: axis, s: -0.15)))
+    flowerFaceNormal(
+      mesh: mesh
+      first: rootLeft
+      second: rootRight
+      third: tip
+      normal: normal
+    )
+    flowerFaceNormal(
+      mesh: mesh
+      first: rootRight
+      second: rootLeft
+      third: tip
+      normal: vscale(a: normal, s: -1.0)
+    )
+  }
+}
+
+func addHarebellLeaf(
+  mesh: mod MeshData
+  center: view Vec3
+  outward: view Vec3
+  stemDirection: view Vec3
+  length: view Float
+  width: view Float
+) {
+  let side: Vec3 = vnorm(a: vcross(a: stemDirection, b: outward))
+  let leafNormal: Vec3 = vnorm(
+    a: vadd(a: Vec3.create(x: 0.0, y: 0.0, z: 1.0), b: vscale(a: outward, s: 0.20))
+  )
+  let middle: Vec3 = vadd(
+    a: center
+    b: vadd(a: vscale(a: outward, s: length * 0.46), b: Vec3.create(x: 0.0, y: 0.0, z: 0.006))
+  )
+  let tip: Vec3 = vadd(a: center, b: vscale(a: outward, s: length))
+  let left: Vec3 = vadd(a: middle, b: vscale(a: side, s: width))
+  let right: Vec3 = vsub(a: middle, b: vscale(a: side, s: width))
+  flowerFaceNormal(
+    mesh: mesh
+    first: center
+    second: right
+    third: left
+    normal: leafNormal
+  )
+  flowerFaceNormal(
+    mesh: mesh
+    first: left
+    second: right
+    third: tip
+    normal: leafNormal
+  )
+  let underside: Vec3 = vscale(a: leafNormal, s: -1.0)
+  flowerFaceNormal(
+    mesh: mesh
+    first: right
+    second: center
+    third: left
+    normal: underside
+  )
+  flowerFaceNormal(
+    mesh: mesh
+    first: right
+    second: left
+    third: tip
+    normal: underside
+  )
+}
+
+# Harebell (Campanula rotundifolia): wiry upper-branched stems, narrow stem
+# leaves and a loose raceme of two to five nodding fused blue corollas. A
+# patch has two material meshes and is capped at harebellMaximumPlants.
+func harebellPatch(seed: view Int, count: view Int, radius: view Float) ret HarebellParts {
+  var plantCount: Int = count
+  if plantCount < 1 {
+    plantCount = 1
+  }
+  if plantCount > harebellMaximumPlants {
+    plantCount = harebellMaximumPlants
+  }
+  var greens: MeshData = foliageMesh()
+  var bells: MeshData = foliageMesh()
+  var totalHeads: Int = 0
+  loop var plant: Int = 0, plant < plantCount, ++plant {
+    var distance: Float = 0.0
+    if plantCount > 1 {
+      distance = Math.sqrt(x: (plant.toFloat() + 0.42) / plantCount.toFloat()) * radius
+      distance = distance * (0.70 + hash2(x: plant, y: 3, seed: seed) * 0.30)
+    }
+    let patchAngle: Float = plant.toFloat() * harebellGoldenAngle + hash2(
+      x: plant
+      y: 5
+      seed: seed
+    ) * 0.48
+    let root: Vec3 = Vec3.create(
+      x: Math.cos(x: patchAngle) * distance
+      y: Math.sin(x: patchAngle) * distance
+      z: -0.010
+    )
+    var height: Float = 0.30 + hash2(x: plant, y: 7, seed: seed) * 0.27
+    if plant % 6 is 0 {
+      height = height + 0.075
+    }
+    let leanAngle: Float = patchAngle + (hash2(x: plant, y: 11, seed: seed) - 0.5) * 1.7
+    let lean: Float = 0.018 + hash2(x: plant, y: 13, seed: seed) * 0.045
+    let middle: Vec3 = Vec3.create(
+      x: root.x + Math.cos(x: leanAngle + 0.20) * lean * 0.32
+      y: root.y + Math.sin(x: leanAngle + 0.20) * lean * 0.32
+      z: root.z + height * 0.52
+    )
+    let top: Vec3 = Vec3.create(
+      x: root.x + Math.cos(x: leanAngle) * lean
+      y: root.y + Math.sin(x: leanAngle) * lean
+      z: root.z + height
+    )
+    let greenFirst: Int = greens.vertCount
+    foliageBranch(
+      mesh: greens
+      start: root
+      end: middle
+      radius: 0.0065
+      endRadius: 0.0048
+    )
+    foliageBranch(
+      mesh: greens
+      start: middle
+      end: top
+      radius: 0.0048
+      endRadius: 0.0030
+    )
+    let stemDirection: Vec3 = vnorm(a: vsub(a: top, b: root))
+    let leafCount: Int = 3 + (hash2(x: plant, y: 17, seed: seed) * 2.0).toInt()
+    loop var leaf: Int = 0, leaf < leafCount, ++leaf {
+      let fraction: Float = 0.16 + leaf.toFloat() * 0.10
+      let leafAngle: Float = patchAngle + leaf.toFloat() * harebellGoldenAngle
+      let outward: Vec3 = vnorm(
+        a: Vec3.create(x: Math.cos(x: leafAngle), y: Math.sin(x: leafAngle), z: 0.05)
+      )
+      addHarebellLeaf(
+        mesh: greens
+        center: vadd(a: root, b: vscale(a: stemDirection, s: height * fraction))
+        outward: outward
+        stemDirection: stemDirection
+        length: 0.055 + hash2(x: leaf, y: plant, seed: seed + 31) * 0.030
+        width: 0.006 + hash2(x: leaf, y: plant, seed: seed + 37) * 0.003
+      )
+    }
+    let headCount: Int = 2 + (hash2(x: plant, y: 19, seed: seed) * 4.0).toInt()
+    let bellFirst: Int = bells.vertCount
+    loop var head: Int = 0, head < headCount, ++head {
+      let denominator: Float = Math.max(a: 1.0, b: (headCount - 1).toFloat())
+      let fraction: Float = 0.55 + head.toFloat() / denominator * 0.36
+      let branchAngle: Float = patchAngle + head.toFloat() * harebellGoldenAngle + hash2(
+        x: head
+        y: plant
+        seed: seed + 43
+      ) * 0.35
+      let outward: Vec3 = Vec3.create(
+        x: Math.cos(x: branchAngle)
+        y: Math.sin(x: branchAngle)
+        z: 0.0
+      )
+      let branchRoot: Vec3 = vadd(a: root, b: vscale(a: stemDirection, s: height * fraction))
+      let reach: Float = 0.040 + hash2(x: head, y: plant, seed: seed + 47) * 0.035
+      let elbow: Vec3 = vadd(
+        a: branchRoot
+        b: vadd(a: vscale(a: outward, s: reach * 0.55), b: Vec3.create(x: 0.0, y: 0.0, z: 0.030))
+      )
+      let attach: Vec3 = vadd(
+        a: branchRoot
+        b: vadd(a: vscale(a: outward, s: reach), b: Vec3.create(x: 0.0, y: 0.0, z: 0.010))
+      )
+      foliageBranch(
+        mesh: greens
+        start: branchRoot
+        end: elbow
+        radius: 0.0032
+        endRadius: 0.0024
+      )
+      foliageBranch(
+        mesh: greens
+        start: elbow
+        end: attach
+        radius: 0.0024
+        endRadius: 0.0018
+      )
+      let axis: Vec3 = vnorm(a: Vec3.create(x: outward.x * 0.13, y: outward.y * 0.13, z: -1.0))
+      let mouthRadius: Float = 0.022 + hash2(x: head, y: plant, seed: seed + 53) * 0.005
+      addHarebellCalyx(
+        mesh: greens
+        attach: attach
+        axis: axis
+        radius: mouthRadius
+      )
+      addHarebellCorolla(
+        mesh: bells
+        attach: attach
+        axis: axis
+        length: 0.055 + hash2(x: head, y: plant, seed: seed + 59) * 0.012
+        mouthRadius: mouthRadius
+      )
+    }
+    totalHeads = totalHeads + headCount
+    let flexibility: Float = 0.18 + hash2(x: plant, y: 61, seed: seed) * 0.08
+    flowerWindRange(
+      mesh: greens
+      firstVertex: greenFirst
+      pivot: root
+      flexibility: flexibility
+    )
+    flowerWindRange(
+      mesh: bells
+      firstVertex: bellFirst
+      pivot: root
+      flexibility: flexibility
+    )
+  }
+  ret HarebellParts {
+    greens: own greens
+    bells: own bells
+    plantCount: plantCount
+    headCount: totalHeads
+  }
+}

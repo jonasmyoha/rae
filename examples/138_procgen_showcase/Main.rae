@@ -109,7 +109,7 @@ func createShowcase() ret ShowcaseState {
   # three bare-fork inspection views used by the landscape art work.
   let initialView: Int = groveViewNumber(viewName: Sys.getEnv(name: "RAE_GROVE_VIEW"))
   var initialHour: Float = 10.0
-  if initialView is 12 or initialView is 15 {
+  if initialView is 12 or initialView is 15 or initialView is 22 {
     initialHour = 17.25
   } else if initialView is 16 {
     initialHour = 7.25
@@ -118,7 +118,7 @@ func createShowcase() ret ShowcaseState {
   }
   var settings: SettingsState = createSettingsState(
     scene: initialView
-    sceneCount: 19
+    sceneCount: 22
     speed: 1.0
     toon: true
     hour: initialHour
@@ -225,6 +225,15 @@ func groveViewName(groveView: view Int) ret String {
   if groveView is 19 {
     ret "Oxeye daisy"
   }
+  if groveView is 20 {
+    ret "Harebell meadow"
+  }
+  if groveView is 21 {
+    ret "Harebell: side"
+  }
+  if groveView is 22 {
+    ret "Harebell: backlit"
+  }
   ret "Autumn Grove"
 }
 
@@ -279,6 +288,15 @@ func groveViewReadout(groveView: view Int) ret String {
   }
   if groveView is 19 {
     ret "One lit flower and one bounded meadow patch"
+  }
+  if groveView is 20 {
+    ret "Wiry racemes, nodding bells and varied heights in grass"
+  }
+  if groveView is 21 {
+    ret "Open five-lobed mouths, fused sides and sparse linear leaves"
+  }
+  if groveView is 22 {
+    ret "Thin modeled rims and ordinary rough-material backlighting"
   }
   if groveView is 3 {
     ret "Faceted outcrop beside the path"
@@ -364,6 +382,15 @@ func groveViewNumber(viewName: view String) ret Int {
   }
   if viewName is "flowers" {
     ret 19
+  }
+  if viewName is "bellflowers" {
+    ret 20
+  }
+  if viewName is "bellflowers-side" {
+    ret 21
+  }
+  if viewName is "bellflowers-backlit" {
+    ret 22
   }
   ret 1
 }
@@ -471,6 +498,21 @@ func setGroveView(camera: mod Camera3d, cameraRig: mod CameraRig, groveView: vie
     cameraRig.distance = 4.6
     cameraRig.orbitPitch = 0.12
     cameraRig.yaw = 0.46
+  } else if groveView is 20 {
+    camera.target = Vec3.create(x: -6.2, y: -14.0, z: 0.31)
+    cameraRig.distance = 4.8
+    cameraRig.orbitPitch = 0.10
+    cameraRig.yaw = 0.38
+  } else if groveView is 21 {
+    camera.target = Vec3.create(x: -6.2, y: -14.0, z: 0.34)
+    cameraRig.distance = 3.8
+    cameraRig.orbitPitch = 0.03
+    cameraRig.yaw = -0.72
+  } else if groveView is 22 {
+    camera.target = Vec3.create(x: -6.2, y: -14.0, z: 0.38)
+    cameraRig.distance = 4.8
+    cameraRig.orbitPitch = 0.02
+    cameraRig.yaw = 0.38
   }
   snapCameraRigView(rig: cameraRig)
   applyCameraRig(rig: cameraRig, camera: camera)

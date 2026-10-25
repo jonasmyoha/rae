@@ -1,15 +1,15 @@
-# The oxeye-daisy close study: one plant and one bounded meadow patch made by
-# the shared Rae generator. Each study is three mesh entities, one per material,
-# never an entity or draw per ray floret.
+# Close studies for the shared meadow-flower generators. Every complete patch
+# is one entity per species material, never an entity or draw per flower head.
 open Vec3
 open Mesh3d
 open Scene3d
 open RendererDeferred
 open FoliageMesh
 open procgen/MeadowFlower
+open procgen/Harebell
 open ecs/Entity
 
-func placeDaisyPart(
+func placeFlowerPart(
   world: mod World3d
   renderer: mod DeferredRenderer
   mesh: view MeshData
@@ -33,25 +33,47 @@ func placeDaisyParts(
   flowers: view MeadowFlowerParts
   position: view Vec3
 ) {
-  placeDaisyPart(
+  placeFlowerPart(
     world: world
     renderer: renderer
     mesh: flowers.stems
     material: oxeyeStemMaterial()
     position: position
   )
-  placeDaisyPart(
+  placeFlowerPart(
     world: world
     renderer: renderer
     mesh: flowers.petals
     material: oxeyePetalMaterial()
     position: position
   )
-  placeDaisyPart(
+  placeFlowerPart(
     world: world
     renderer: renderer
     mesh: flowers.discs
     material: oxeyeDiscMaterial()
+    position: position
+  )
+}
+
+func placeHarebellParts(
+  world: mod World3d
+  renderer: mod DeferredRenderer
+  flowers: view HarebellParts
+  position: view Vec3
+) {
+  placeFlowerPart(
+    world: world
+    renderer: renderer
+    mesh: flowers.greens
+    material: harebellGreenMaterial()
+    position: position
+  )
+  placeFlowerPart(
+    world: world
+    renderer: renderer
+    mesh: flowers.bells
+    material: harebellCorollaMaterial()
     position: position
   )
 }
@@ -71,6 +93,28 @@ func addOxeyeDaisyStudy(
   )
   let patch: MeadowFlowerParts = oxeyeDaisyPatch(seed: 1871, count: 13, radius: 1.05)
   placeDaisyParts(
+    world: world
+    renderer: renderer
+    flowers: patch
+    position: patchPosition
+  )
+}
+
+func addHarebellStudy(
+  world: mod World3d
+  renderer: mod DeferredRenderer
+  singlePosition: view Vec3
+  patchPosition: view Vec3
+) {
+  let single: HarebellParts = harebellPatch(seed: 2203, count: 1, radius: 0.0)
+  placeHarebellParts(
+    world: world
+    renderer: renderer
+    flowers: single
+    position: singlePosition
+  )
+  let patch: HarebellParts = harebellPatch(seed: 2371, count: 11, radius: 0.92)
+  placeHarebellParts(
     world: world
     renderer: renderer
     flowers: patch

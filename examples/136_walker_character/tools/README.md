@@ -37,7 +37,8 @@ crown files so Rae can preserve their two-colour cel-shaded appearance without
 depending on the source palette texture.
 
 Flowers are no longer imported by this script. The walkers use the shared Rae
-oxeye-daisy generator in `lib/procgen/MeadowFlower.rae`.
+oxeye-daisy generator in `lib/procgen/MeadowFlower.rae` and the harebell
+generator in `lib/procgen/Harebell.rae`.
 
 ## Inspecting water splashes
 

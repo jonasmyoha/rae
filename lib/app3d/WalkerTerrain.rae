@@ -34,10 +34,8 @@ open gpu/GpuResources
 open Gltf
 open Scene3d
 open Mesh3d
-open FoliageMesh
 open GbufferInstanced
 open GbufferSprite
-open procgen/MeadowFlower
 open ecs/Entity
 open ecs/World
 open ecs/ComponentTable
@@ -52,6 +50,7 @@ open app3d/FarCanopy
 open CanopyBake
 open app3d/TerrainTiles
 open app3d/TerrainRocks
+open app3d/WalkerFlowers
 
 # The side of a terrain cell (m): one tile and one prop of each kind
 const walkerCellSize: Float = 18.0
@@ -176,6 +175,8 @@ type WalkerTerrain {
   rockParts: List(PropInstancer)
   # Oxeye daisies: one shared patch mesh in three instanced material parts.
   flowerParts: List(PropInstancer)
+  # Harebells: one shared patch mesh in two instanced material parts.
+  harebellParts: List(PropInstancer)
   grassProp: PropInstancer
   # The forest: every tree species as a kind at three levels of detail, its
   # placements in cells; only what is near and in view is drawn, one
@@ -257,33 +258,6 @@ func createRockParts(renderer: mod DeferredRenderer, capacity: view Int) ret Lis
       value: createPropInstancer(mesh: shape.mesh, material: shape.material, capacity: capacity)
     )
   }
-  ret parts
-}
-
-func createFlowerParts(renderer: mod DeferredRenderer, capacity: view Int) ret List(PropInstancer) {
-  let flowers: MeadowFlowerParts = oxeyeDaisyPatch(seed: 584, count: 7, radius: 0.62)
-  var parts: List(PropInstancer) = List.create(PropInstancer, cap: 3)
-  var stems: PropInstancer = createPropInstancer(
-    mesh: uploadFoliage(renderer: renderer, mesh: flowers.stems)
-    material: oxeyeStemMaterial()
-    capacity: capacity
-  )
-  stems.sway = 0.72
-  parts.add(value: own stems)
-  var petals: PropInstancer = createPropInstancer(
-    mesh: uploadFoliage(renderer: renderer, mesh: flowers.petals)
-    material: oxeyePetalMaterial()
-    capacity: capacity
-  )
-  petals.sway = 0.72
-  parts.add(value: own petals)
-  var discs: PropInstancer = createPropInstancer(
-    mesh: uploadFoliage(renderer: renderer, mesh: flowers.discs)
-    material: oxeyeDiscMaterial()
-    capacity: capacity
-  )
-  discs.sway = 0.72
-  parts.add(value: own discs)
   ret parts
 }
 
@@ -616,6 +590,9 @@ func gatherTerrainProps(terrainSystem: mod WalkerTerrain) {
   loop let part: mod PropInstancer in terrainSystem.flowerParts {
     resetInstanceBatch(batch: part.batch)
   }
+  loop let part: mod PropInstancer in terrainSystem.harebellParts {
+    resetInstanceBatch(batch: part.batch)
+  }
   resetInstanceBatch(batch: terrainSystem.grassProp.batch)
   loop let part: mod PropInstancer in terrainSystem.bushParts {
     resetInstanceBatch(batch: part.batch)
@@ -633,6 +610,9 @@ func gatherTerrainProps(terrainSystem: mod WalkerTerrain) {
     }
     if prop.kind is kindFlower {
       loop let part: mod PropInstancer in terrainSystem.flowerParts {
+        addPropInstance(prop: part, model: prop.model)
+      }
+      loop let part: mod PropInstancer in terrainSystem.harebellParts {
         addPropInstance(prop: part, model: prop.model)
       }
     }
@@ -674,6 +654,9 @@ func drawTerrainProps(
     drawInstances(cache: cache, resources: resources, batch: part.batch)
   }
   loop let part: view PropInstancer in terrainSystem.flowerParts {
+    drawInstances(cache: cache, resources: resources, batch: part.batch)
+  }
+  loop let part: view PropInstancer in terrainSystem.harebellParts {
     drawInstances(cache: cache, resources: resources, batch: part.batch)
   }
   drawInstances(cache: cache, resources: resources, batch: terrainSystem.grassProp.batch)
@@ -758,8 +741,8 @@ func drawTerrainGround(
   }
 }
 
-# The rocks, the bushes and the forest into the shadow pass, one instanced
-# draw per batch (the flowers and grass tufts are too small to matter)
+# The rocks, bushes and forest into the shadow pass, one instanced draw per
+# batch. The small flowers and grass tufts do not enter the walker shadow map.
 func drawTerrainPropsShadow(renderer: mod DeferredRenderer, terrainSystem: view WalkerTerrain) {
   loop let part: view PropInstancer in terrainSystem.rockParts {
     RendererDeferred.drawShadowCasterBatchWith(
@@ -794,6 +777,9 @@ func setInfiniteTerrainToon(terrainSystem: mod WalkerTerrain, toon: view Bool) {
     setPropInstancerToon(prop: part, toon: toon)
   }
   loop let part: mod PropInstancer in terrainSystem.flowerParts {
+    setPropInstancerToon(prop: part, toon: toon)
+  }
+  loop let part: mod PropInstancer in terrainSystem.harebellParts {
     setPropInstancerToon(prop: part, toon: toon)
   }
   setPropInstancerToon(prop: terrainSystem.grassProp, toon: toon)
@@ -926,7 +912,8 @@ func createWalkerTerrain(
       biome: biome
     )
     rockParts: own createRockParts(renderer: renderer, capacity: cellCount)
-    flowerParts: own createFlowerParts(renderer: renderer, capacity: cellCount)
+    flowerParts: own createWalkerDaisyParts(renderer: renderer, capacity: cellCount)
+    harebellParts: own createWalkerHarebellParts(renderer: renderer, capacity: cellCount)
     grassProp: own createPropInstancer(
       mesh: grassMesh
       material: grassMaterial

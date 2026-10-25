@@ -1,0 +1,60 @@
+# app3d/WalkerFlowers — the shared fixed flower patch meshes used by every
+# walker terrain. One instancer per species material, never per plant or head.
+open RendererDeferred
+open FoliageMesh
+open procgen/MeadowFlower
+open procgen/Harebell
+open app3d/PropInstancer
+
+func createWalkerDaisyParts(
+  renderer: mod DeferredRenderer
+  capacity: view Int
+) ret List(PropInstancer) {
+  let flowers: MeadowFlowerParts = oxeyeDaisyPatch(seed: 584, count: 7, radius: 0.62)
+  var parts: List(PropInstancer) = List.create(PropInstancer, cap: 3)
+  var stems: PropInstancer = createPropInstancer(
+    mesh: uploadFoliage(renderer: renderer, mesh: flowers.stems)
+    material: oxeyeStemMaterial()
+    capacity: capacity
+  )
+  stems.sway = 0.72
+  parts.add(value: own stems)
+  var petals: PropInstancer = createPropInstancer(
+    mesh: uploadFoliage(renderer: renderer, mesh: flowers.petals)
+    material: oxeyePetalMaterial()
+    capacity: capacity
+  )
+  petals.sway = 0.72
+  parts.add(value: own petals)
+  var discs: PropInstancer = createPropInstancer(
+    mesh: uploadFoliage(renderer: renderer, mesh: flowers.discs)
+    material: oxeyeDiscMaterial()
+    capacity: capacity
+  )
+  discs.sway = 0.72
+  parts.add(value: own discs)
+  ret parts
+}
+
+func createWalkerHarebellParts(
+  renderer: mod DeferredRenderer
+  capacity: view Int
+) ret List(PropInstancer) {
+  let flowers: HarebellParts = harebellPatch(seed: 941, count: 9, radius: 0.72)
+  var parts: List(PropInstancer) = List.create(PropInstancer, cap: 2)
+  var greens: PropInstancer = createPropInstancer(
+    mesh: uploadFoliage(renderer: renderer, mesh: flowers.greens)
+    material: harebellGreenMaterial()
+    capacity: capacity
+  )
+  greens.sway = 0.62
+  parts.add(value: own greens)
+  var bells: PropInstancer = createPropInstancer(
+    mesh: uploadFoliage(renderer: renderer, mesh: flowers.bells)
+    material: harebellCorollaMaterial()
+    capacity: capacity
+  )
+  bells.sway = 0.62
+  parts.add(value: own bells)
+  ret parts
+}
