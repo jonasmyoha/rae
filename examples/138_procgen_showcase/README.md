@@ -72,12 +72,13 @@ groups over the island (one big rock with smaller ones around it) and single
 pebbles wherever the ground is clear.
 
 The grass is the standard lib GPU grass (`lib/GrassCompute.rae`, the walker's,
-with its tuned settings): a compute pass places the blades each frame and
+with its tuned settings): a compute pass places the tufts each frame and
 the G-buffer pass draws them. Broad seeded patches leave readable ground gaps,
 while blade variation remains an independent control. `assets/grove_surface.wgsl`
 gives that pass the grove's ground: the island's height, grass inside the rim
 and none on the path. The rocks and trunks go to it as obstacle circles in the
-surface field (`GroveGrass.rae`), so no blade grows through them. Set
+surface field (`GroveGrass.rae`), so tuft roots avoid them. Leaf tips can extend
+beyond that root exclusion. Set
 `RAE_GROVE_VIEW=grass` for the low meadow/contact inspection.
 
 `lib/procgen/MeadowFlower.rae` generates the oxeye daisy as one stem-and-leaf
@@ -326,3 +327,12 @@ For matched branch/tree alternatives and continuous camera clips, run
 `python3 tools/capture-birch-recovery.py --motion`. See the
 [recovery review](../../docs/landscape-recovery-review.md) for the controlled
 captures and remaining defects.
+
+## Near-grass comparison
+
+The shared grass now draws original textured tufts. `RAE_GROVE_VIEW=grass`
+frames the patch; `RAE_GRASS_SHAPE=rejected|ribbons|textured` compares the old
+single ribbon, twelve curved ribbons and the selected cutout on identical roots.
+`RAE_WALKER_HOUR` also sets this showcase's initial light for matched captures.
+See the [grass recovery review](../../docs/grass-recovery.md) for actual frames,
+reference comparisons, costs and remaining ground/patch limitations.

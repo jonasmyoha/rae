@@ -34,11 +34,13 @@ open gpu/GpuArgs
 open gpu/GpuIds
 import Profile
 import GrassConfig
+open SurfaceImages
 open Gbuffer
 open GbufferRecord
 open ForwardMaterial
 open gpu/DeviceFeatures
 import String
+import Sys
 import WorldBiome
 open Wind
 
@@ -58,10 +60,8 @@ const grassUniformBytes: Int = 144
 
 const grassIndirectBytes: Int = 16  # 4 u32 DrawIndirect args (vertexCount, instanceCount, ...)
 
-# Vertices per procedural blade: four joined quads form one curved, tapered
-# ribbon (see bladeLocal in the render WGSL). No mesh, vertex buffer, alpha
-# texture or extra draw is needed.
-const grassBladeVerts: Int = 24
+# Vertex count follows GrassShape: preserved quad/ribbon controls and two
+# matched close-view alternatives. All use the same bounded instance storage.
 
 # The grass field's cross-frame state: the "made" flags, the reused per-frame
 # argument writers (allocated once so the hot path stays zero-alloc), the
@@ -74,6 +74,10 @@ type GrassCompute {
   # composition ending in lib/grass_compute.wgsl whose earlier parts define
   # raeTerrainHeight(vec2<f32>, f32) -> f32 and raeBiomeSample(vec2<f32>).
   # Unset = defaultGrassComputeShader() (the lib noise + biome field).
+  report: Bool = false
+  reportFrame: Int = 0
+  shapeOverride: Int = -1
+  images: SurfaceImages = {}
   computeShaderSet: Bool
   computeShader: Shader
   # The `override` constants handed to the app's compute shader at pipeline
@@ -118,6 +122,8 @@ type GrassCompute {
 
 func createGrassCompute() ret GrassCompute {
   ret GrassCompute {
+    report: Sys.getEnv(name: "RAE_GRASS_REPORT") is "1"
+    shapeOverride: GrassConfig.grassShapeOverride()
     computeShaderSet: false
     computeShader: { text: "", sources: List.create(String, cap: 0), generation: 0 }
     computeConstants: List.create(ShaderConstant, cap: 0)
@@ -295,6 +301,7 @@ func gbufferProceduralPipelineSpec() ret RenderPipelineSpec {
 # Retire every grass GPU object (a rebuild or shutdown). The manager releases
 # them once no in-flight submission uses them. No-op on blank IDs.
 func releaseGrassGpu(grass: mod GrassCompute, resources: mod GpuResources) {
+  retireSurfaceImages(images: grass.images, resources: resources)
   retireBindGroup(resources: resources, id: grass.drawBind)
   retireBindGroup(resources: resources, id: grass.computeBind)
   retirePipeline(resources: resources, id: grass.computePipeline)
@@ -432,6 +439,8 @@ func ensureGrassForward(
   entries.add(value: externalRef(id: grass.frameUniform))
   entries.add(value: bufferRef(id: grass.instances))
   entries.add(value: bufferRef(id: grass.uniform))
+  entries.add(value: textureViewRef(id: grass.images.textureView))
+  entries.add(value: samplerRef(id: grass.images.sampler))
   if not addForwardInputs(entries: entries, inputs: adopted) {
     ret
   }
@@ -455,6 +464,15 @@ func ensureGrassGpu(grass: mod GrassCompute, resources: mod GpuResources) {
   # On a REBUILD (island grow reset grass.made) the previous pipelines, buffers
   # and bind groups are retired first — deferred behind any frame still using them.
   releaseGrassGpu(grass: grass, resources: resources)
+  let imageReady: Bool = setSurfaceImages(
+    images: grass.images
+    resources: resources
+    paths: ["lib/assets/grass/meadowTuft.png"]
+  )
+  if not imageReady {
+    log("[grass] tuft image could not be loaded")
+    ret
+  }
   let instBytes: Int = grassGpuBladeCount * grassRecordBytes
   if let instances: BufferId = createBuffer(
     resources: resources
@@ -592,6 +610,8 @@ func ensureGrassDrawBind(
   entries.add(value: externalRef(id: grass.frameUniform))
   entries.add(value: bufferRef(id: grass.instances))
   entries.add(value: bufferRef(id: grass.uniform))
+  entries.add(value: textureViewRef(id: grass.images.textureView))
+  entries.add(value: samplerRef(id: grass.images.sampler))
   if let drawBind: BindGroupId = createRenderBindGroup(
     resources: resources
     pipeline: grass.renderPipeline
@@ -640,6 +660,10 @@ func grassGenerate(
   var toonF: Float = 0.0
   if toon is 1 {
     toonF = 1.0
+  }
+  var shape: Int = settings.shape as Int
+  if grass.shapeOverride >= 0 {
+    shape = grass.shapeOverride
   }
   resetArgs(writer: grass.uniformArgs)
   pushVec4F(
@@ -707,7 +731,7 @@ func grassGenerate(
     x: settings.distanceStart
     y: settings.farDensityScale
     z: settings.farWidthScale
-    w: 0.0
+    w: shape.toFloat()
   )
   # i: distance thinning and silhouette compensation
   uploadArgs(
@@ -719,7 +743,7 @@ func grassGenerate(
 
   # Reset the indirect args so this frame's atomic append counts from 0.
   resetArgs(writer: grass.resetArgs)
-  pushU32(writer: grass.resetArgs, value: grassBladeVerts)
+  pushU32(writer: grass.resetArgs, value: GrassConfig.grassVertexCount(shape: shape))
   pushU32(writer: grass.resetArgs, value: 0)
   pushU32(writer: grass.resetArgs, value: 0)
   pushU32(writer: grass.resetArgs, value: 0)
@@ -742,6 +766,17 @@ func grassGenerate(
       elementCount: grassGpuBladeCount
     ) {
       trackSubmission(inFlight: grass.inFlight, resources: resources, recording: recording)
+    }
+  }
+  if grass.report {
+    grass.reportFrame = grass.reportFrame + 1
+    if grass.reportFrame is 60 {
+      if let count: Int = grassReadVisible(grass: grass, resources: resources) {
+        let vertices: Int = count * GrassConfig.grassVertexCount(shape: shape)
+        log(
+          "[grass-study] shape={shape} instances={count} vertices={vertices} storageBytes={grassGpuBladeCount * grassRecordBytes}"
+        )
+      }
     }
   }
 }

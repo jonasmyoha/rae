@@ -13,8 +13,43 @@
 # (per-region params via ECS + a spatial biome map the compute samples) is a
 # separate sub-system, filed as follow-up.
 import Vec3
+import Sys
+
+enum GrassShape { preQueue, rejected, ribbons, textured }
+
+# One shared capture override; placement and app tuning remain unchanged.
+func grassShapeOverride() ret Int {
+  let name: String = Sys.getEnv(name: "RAE_GRASS_SHAPE")
+  if name is "control" {
+    ret 0
+  }
+  if name is "rejected" {
+    ret 1
+  }
+  if name is "ribbons" {
+    ret 2
+  }
+  if name is "textured" {
+    ret 3
+  }
+  ret -1
+}
+
+func grassVertexCount(shape: view Int) ret Int {
+  if shape is 0 {
+    ret 6
+  }
+  if shape is 1 {
+    ret 24
+  }
+  if shape is 2 {
+    ret 288
+  }
+  ret 18
+}
 
 type GrassViewSettings {
+  shape: GrassShape = GrassShape.textured
   enabled: Bool
   extent: Float  # candidate-grid span / render distance (world units)
   windStrength: Float  # response to the app's shared WindVector

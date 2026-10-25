@@ -1,0 +1,63 @@
+# The authored tuft must have a dense root and cutout gaps that survive mips.
+open Png
+open SurfaceImagePixels
+import Sys
+import Math
+
+func main() ret Int {
+  let root: String = Sys.getEnv(name: "RAE_STDLIB")
+  let bytes: List(Int) = Sys.readFileBytes(path: "{root}/assets/grass/meadowTuft.png")
+  var width: Int = 0
+  var height: Int = 0
+  let image: List(Int) = decodePng(
+    png: bytes
+    len: bytes.length
+    width: width
+    height: height
+  )
+  if width is not 512 or height is not 512 {
+    ret 1
+  }
+  var pixels: List(Float) = List.create(Float, cap: width * height * 4)
+  var rootPixels: Int = 0
+  var borderPixels: Int = 0
+  loop var y: Int = 0, y < height, ++y {
+    loop var x: Int = 0, x < width, ++x {
+      let alpha: Int = (image.copyAtDefault(index: y * width + x) shr 24) bitand 255
+      pixels.add(value: 0.25)
+      pixels.add(value: 0.50)
+      pixels.add(value: 0.10)
+      pixels.add(value: alpha.toFloat() / 255.0)
+      if alpha >= 128 {
+        if x >= 220 and x < 292 and y >= 450 {
+          rootPixels = rootPixels + 1
+        }
+        if x is 0 or x is 511 or y is 0 {
+          borderPixels = borderPixels + 1
+        }
+      }
+    }
+  }
+  let coverage: Float = surfaceCoverage(pixels: pixels, scale: 1.0)
+  if coverage < 0.15 or coverage > 0.50 or rootPixels < 3000 or borderPixels > 8 {
+    ret 2
+  }
+  var side: Int = width
+  loop side > 16 {
+    pixels = surfaceDownsample(pixels: pixels, side: side)
+    side = side / 2
+    if Math.abs(value: surfaceCoverage(pixels: pixels, scale: 1.0) - coverage) > 0.015 {
+      ret 3
+    }
+    # Clear neighbours must not blacken the linear-colour mip edges.
+    loop var pixel: Int = 0, pixel < pixels.length / 4, ++pixel {
+      if pixels.copyAtDefault(index: pixel * 4 + 3) > 0.01 and Math.abs(
+        value: pixels.copyAtDefault(index: pixel * 4 + 1) - 0.50
+      ) > 0.0001 {
+        ret 4
+      }
+    }
+  }
+  log("tuft: transparent perimeter, dense root, alpha coverage through 16px, clean mip colour")
+  ret 0
+}
