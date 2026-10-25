@@ -64,7 +64,7 @@ captureGrove() {
   env RAE_GROVE_VIEW="$view" RAE_CAMERA_AT="$camera" RAE_WIND="$windStrength" RAE_DEBUG_OVERLAY=0 \
     RAE_UI_HEADLESS=1 RAE_HEADLESS_FRAMES="$fixedFrames" RAE_FIXED_DT="$fixedDelta" \
     RAE_GPU2D_SCREENSHOT="$output/$name.bmp" \
-    perl -e 'alarm shift; exec @ARGV' 120 "$root/compiler/bin/rae" run \
+    perl -e 'alarm shift; exec @ARGV or die $!' 120 "$root/compiler/bin/rae" run \
       --project "$root/examples/138_procgen_showcase" \
       "$root/examples/138_procgen_showcase/Main.rae" > "$output/$name.log" 2>&1
   sips -s format png -z 800 1280 "$output/$name.bmp" --out "$output/$name.png" >/dev/null
@@ -78,7 +78,7 @@ captureForest() {
   env RAE_CAMERA_AT="$camera" RAE_WALKER_HOUR="$hour" RAE_WALKER_DAY=298 RAE_WIND="$windStrength" RAE_DRS=off \
     RAE_DEBUG_OVERLAY=0 RAE_UI_HEADLESS=1 RAE_HEADLESS_FRAMES="$fixedFrames" \
     RAE_FIXED_DT="$fixedDelta" RAE_GPU2D_SCREENSHOT="$output/$name.bmp" \
-    perl -e 'alarm shift; exec @ARGV' 150 "$root/compiler/bin/rae" run \
+    perl -e 'alarm shift; exec @ARGV or die $!' 150 "$root/compiler/bin/rae" run \
       --project "$root/examples/143_walker_forest" \
       "$root/examples/143_walker_forest/Main.rae" > "$output/$name.log" 2>&1
   sips -s format png -z 800 1280 "$output/$name.bmp" --out "$output/$name.png" >/dev/null
@@ -168,17 +168,32 @@ clock: 60 frames at 0.016666667 s
 EOF
 }
 
+captureBellflowerSet() {
+  captureGrove bellflowers bellflowers-138
+  captureGrove bellflowers-side bellflowers-138-side
+  captureGrove bellflowers-backlit bellflowers-138-backlit
+  captureForest bellflowers-143-day '1 0 0.24 -0.20 4.2 0 18.0 0.35 0 0 0 0' 12 1
+  captureForest bellflowers-143-night '1 0 0.24 -0.20 4.2 0 18.0 0.35 0 0 0 0' 23 1
+  cat > "$output/bellflower-manifest.txt" <<EOF
+Harebell comparison
+commit: $(git -C "$root" rev-parse HEAD)
+clock: 60 frames at 0.016666667 s
+138: one plant and one 11-plant patch; front, side and late-day backlit presets
+143 day/night: shared nine-plant patch; fixed ground-cover camera; day 298
+EOF
+}
+
 captureMetrics() {
   env RAE_GROVE_VIEW=grove RAE_DEBUG_OVERLAY=0 RAE_UI_HEADLESS=1 \
     RAE_SDL_HEADLESS_MS=8000 RAE_FRAME_TIMING=1 RAE_GPU_PASS_TIMING=1 \
-    RAE_WGPU_REPORT=1 perl -e 'alarm shift; exec @ARGV' 150 \
+    RAE_WGPU_REPORT=1 perl -e 'alarm shift; exec @ARGV or die $!' 150 \
       "$root/compiler/bin/rae" run --project "$root/examples/138_procgen_showcase" \
       "$root/examples/138_procgen_showcase/Main.rae" > "$output/metrics-138.log" 2>&1
   env RAE_CAMERA_AT='1 0 0.24 -0.06 4.2 0 -18 2.4 0 0 0 0' \
     RAE_WALKER_HOUR=12 RAE_WALKER_DAY=298 RAE_DRS=off RAE_DEBUG_OVERLAY=0 \
     RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=12000 RAE_FRAME_TIMING=1 \
     RAE_GPU_PASS_TIMING=1 RAE_WGPU_REPORT=1 \
-    perl -e 'alarm shift; exec @ARGV' 180 "$root/compiler/bin/rae" run \
+    perl -e 'alarm shift; exec @ARGV or die $!' 180 "$root/compiler/bin/rae" run \
       --project "$root/examples/143_walker_forest" \
       "$root/examples/143_walker_forest/Main.rae" > "$output/metrics-143.log" 2>&1
 }
@@ -187,10 +202,11 @@ case "$mode" in
   captures) captureSet ;;
   grass) captureGrassSet ;;
   flowers) captureFlowerSet ;;
+  bellflowers) captureBellflowerSet ;;
   verify) verifyStable ;;
   metrics) captureMetrics ;;
   all) captureSet; verifyStable; captureMetrics ;;
-  *) printf '%s\n' "usage: $0 [captures|grass|flowers|verify|metrics|all]" >&2; exit 2 ;;
+  *) printf '%s\n' "usage: $0 [captures|grass|flowers|bellflowers|verify|metrics|all]" >&2; exit 2 ;;
 esac
 
 printf '%s\n' "landscape comparison output: $output"

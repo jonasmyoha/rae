@@ -2,8 +2,8 @@
 
 A procedural prop showcase with about sixty trees (including the six original
 autumn trees and a woodland of the leaf-patch forms over the whole island), rock
-groups across the island, low shrubs, modeled oxeye daisies, the standard GPU
-grass and a winding path on a raised garden base.
+groups across the island, low shrubs, modeled oxeye daisies and harebells, the
+standard GPU grass and a winding path on a raised garden base.
 
 - **1** restores the complete grove.
 - **2** frames the branching wood and leaf crowns.
@@ -19,6 +19,9 @@ grass and a winding path on a raised garden base.
   young and mature bare joined-fork studies. These art-study views are outside
   the 1-9 keyboard set.
 - `RAE_GROVE_VIEW=flowers` frames one oxeye daisy and one 13-plant patch.
+- `RAE_GROVE_VIEW=bellflowers`, `bellflowers-side` and
+  `bellflowers-backlit` inspect one harebell and one 11-plant patch from the
+  front, side and late-day grazing-light views.
 - Drag to orbit, scroll to zoom. The camera bar's **Orbit** button switches to
   the free WASD camera (Q/E down/up, shift to boost) and back.
 - The menu button opens the settings panel. Its app section names the active
@@ -35,7 +38,7 @@ compiler/bin/rae run --project examples/138_procgen_showcase examples/138_procge
 ```
 
 `RAE_GROVE_VIEW=trees` or `rocks` selects a reproducible initial close-up.
-The default is the complete grove. The example gate renders eleven named views.
+The default is the complete grove. The example gate renders fourteen named views.
 [`docs/landscape-comparison-views.md`](../../docs/landscape-comparison-views.md)
 records the fixed cameras and the capture command used before each landscape
 art pass.
@@ -78,6 +81,16 @@ three bounded instanced batches. No petal owns an entity or draw, and all three
 rough materials have zero emission.
 
 ![Oxeye daisy single plant and patch](references/Flowers.png)
+
+`lib/procgen/Harebell.rae` generates a distinct *Campanula rotundifolia*
+silhouette: wiry leaning stems, narrow leaves, alternating upper pedicels and
+two to five hanging blue-violet bells. Each bell has fused modeled sides, an
+open interior, five pointed lobes and a small calyx. One green mesh and one
+corolla mesh cover the complete patch, so head count does not add materials or
+draws. All surfaces use rough lit zero-emission materials and one root wind
+pivot per plant.
+
+![Harebell single plant and patch](references/Bellflowers.png)
 
 `GroveScene.rae` owns the gold, copper, scarlet and green palette, the path,
 the ground and every placement. All meshes are uploaded once and attached to

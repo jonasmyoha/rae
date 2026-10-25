@@ -245,3 +245,34 @@ and 360. The walker held 956 buffers, 55 textures, 113 texture views and 152
 bind groups at frames 120 and 240. These counts include the whole scene; their
 value here is that the generated patch and streamed placements did not create
 new resources over time.
+
+## Harebell family
+
+`RAE_GROVE_VIEW=bellflowers` frames one harebell and one 11-plant patch mixed
+with grass. `bellflowers-side` lowers and turns the camera to expose the open
+five-lobed mouths, while `bellflowers-backlit` uses the same late-day light as
+the other grazing-light studies. Run
+`tools/capture-landscape-comparisons.sh bellflowers` for those three 138 views
+and the shared mixed daisy/harebell patch in 143 at hours 12 and 23.
+
+The inspected front, side and backlit frames show the intended loose raceme:
+thin alternating pedicels, sparse narrow leaves, visible gaps and hanging blue
+bells. It does not reuse the daisy's upright single-head silhouette. The 143
+day frame shows both species in one seeded ground-cover slot. The night frame
+is dark because both harebell materials have zero emission.
+
+The harebell has no alpha cutout. Its fused corolla is a modeled two-sided
+shell with an open mouth and narrow rim, so deferred, forward and shadow paths
+see the same geometry and there are no cutout mip edges to reconcile. Static
+138 flower entities use the normal scene shadow path. The walker keeps its
+existing small-flower policy and omits both flower families from the cascaded
+shadow map. The walker uploads one nine-plant harebell patch once and adds two
+fixed instanced material batches beside the daisy's three. Streaming changes
+only the bounded instance lists; it cannot add a batch per plant or head.
+
+The post-change resource sample stayed flat. Autumn Grove held 431 buffers, 30
+textures, 33 texture views and 72 bind groups from frames 120 through 1,440.
+The walker held 960 buffers, 55 textures, 113 texture views and 152 bind groups
+from frames 120 through 600. Compared with the daisy-only baseline, the walker
+adds four fixed buffers for two harebell meshes and their two instance batches;
+the counts do not rise as frames or streamed flower placements advance.

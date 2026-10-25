@@ -27,9 +27,10 @@ compiler/bin/rae run examples/143_walker_forest/Main.rae
   walker crosses a cell border only the row or column that left the window
   moves to the new edge (about 1 ms), instead of every tile being reshaped.
   The rocks and bushes cast their shadows as instanced batches.
-  Oxeye daisies use the same slots as the former orange flower mesh: each slot
-  draws one shared seven-plant patch as three material batches, with no entity
-  or draw per petal.
+  Ground flowers use the same slots as the former orange flower mesh: each slot
+  draws one shared seven-plant oxeye-daisy patch and one shared nine-plant
+  harebell patch. The two species use five fixed instanced material batches in
+  total, with no entity or draw per plant, petal or bell.
 - **The forest is one PropField** (lib/app3d/WideForest,
   lib/app3d/PropField), as the downstream game's nature system does it: every
   tree is a placement, sorted into 40 m cells. Each frame only the cells and

@@ -1,0 +1,114 @@
+open procgen/Harebell
+open Vec3
+import Math
+
+func harebellMeshValid(mesh: view MeshData) ret Bool {
+  if mesh.vertCount < 1 or mesh.verts.length is not mesh.vertCount * 8 {
+    ret false
+  }
+  if mesh.indices.length < 3 or mesh.indices.length % 3 is not 0 {
+    ret false
+  }
+  if mesh.windPivots.length is not mesh.vertCount * 4 {
+    ret false
+  }
+  loop let index: view Int in mesh.indices {
+    if index < 0 or index >= mesh.vertCount {
+      ret false
+    }
+  }
+  loop var vertex: Int = 0, vertex < mesh.vertCount, ++vertex {
+    loop var field: Int = 0, field < 8, ++field {
+      let value: Float = mesh.verts.copyAtDefault(index: vertex * 8 + field)
+      if value is not value or Math.abs(value: value) > 100.0 {
+        ret false
+      }
+    }
+    let normal: Vec3 = Vec3.create(
+      x: mesh.verts.copyAtDefault(index: vertex * 8 + 3)
+      y: mesh.verts.copyAtDefault(index: vertex * 8 + 4)
+      z: mesh.verts.copyAtDefault(index: vertex * 8 + 5)
+    )
+    if Math.abs(value: Vec3.vlen(a: normal) - 1.0) > 0.002 {
+      ret false
+    }
+    let flexibility: Float = mesh.windPivots.copyAtDefault(index: vertex * 4 + 3)
+    if flexibility < 0.18 or flexibility > 0.26 {
+      ret false
+    }
+  }
+  ret true
+}
+
+func sameHarebellMesh(first: view MeshData, second: view MeshData) ret Bool {
+  if first.vertCount is not second.vertCount or first.indices.length is not second.indices.length {
+    ret false
+  }
+  loop var index: Int = 0, index < first.verts.length, ++index {
+    if first.verts.copyAtDefault(index: index) is not second.verts.copyAtDefault(index: index) {
+      ret false
+    }
+  }
+  loop var index: Int = 0, index < first.indices.length, ++index {
+    if first.indices.copyAtDefault(index: index) is not second.indices.copyAtDefault(index: index) {
+      ret false
+    }
+  }
+  ret true
+}
+
+func harebellWithinBounds(mesh: view MeshData, radius: view Float) ret Bool {
+  loop var vertex: Int = 0, vertex < mesh.vertCount, ++vertex {
+    let x: Float = mesh.verts.copyAtDefault(index: vertex * 8)
+    let y: Float = mesh.verts.copyAtDefault(index: vertex * 8 + 1)
+    let z: Float = mesh.verts.copyAtDefault(index: vertex * 8 + 2)
+    if Math.abs(value: x) > radius + 0.22 or Math.abs(value: y) > radius + 0.22 {
+      ret false
+    }
+    if z < -0.02 or z > 0.80 {
+      ret false
+    }
+  }
+  ret true
+}
+
+func main() ret Int {
+  let single: HarebellParts = harebellPatch(seed: 2203, count: 1, radius: 0.0)
+  let patch: HarebellParts = harebellPatch(seed: 2371, count: 11, radius: 0.92)
+  let repeat: HarebellParts = harebellPatch(seed: 2371, count: 11, radius: 0.92)
+  let capped: HarebellParts = harebellPatch(seed: 7, count: 200, radius: 1.0)
+  if single.plantCount is not 1 or patch.plantCount is not 11 or capped.plantCount is not 20 {
+    ret 1
+  }
+  if single.headCount < 2 or single.headCount > 5 {
+    ret 2
+  }
+  if patch.headCount < patch.plantCount * 2 or patch.headCount > patch.plantCount * 5 {
+    ret 3
+  }
+  if not harebellMeshValid(mesh: patch.greens) or not harebellMeshValid(mesh: patch.bells) {
+    ret 4
+  }
+  if not sameHarebellMesh(first: patch.greens, second: repeat.greens) or not sameHarebellMesh(
+    first: patch.bells
+    second: repeat.bells
+  ) {
+    ret 5
+  }
+  if not harebellWithinBounds(mesh: patch.greens, radius: 0.92) or not harebellWithinBounds(
+    mesh: patch.bells
+    radius: 0.92
+  ) {
+    ret 6
+  }
+  let greens: Material3d = harebellGreenMaterial()
+  let bells: Material3d = harebellCorollaMaterial()
+  if greens.emission.x is not 0.0 or bells.emission.x is not 0.0 {
+    ret 7
+  }
+  if patch.bells.indices.length / 3 < patch.headCount * 80 {
+    ret 8
+  }
+  log("meadow harebell: bounded two-part racemes with deterministic wind roots")
+  ret 0
+}
