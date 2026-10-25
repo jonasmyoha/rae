@@ -263,8 +263,8 @@ func generateWalkerGrass(
   characterSystem: view CharacterSystem
   world: view WalkerWorld
   terrainSystem: view WalkerTerrain
-  t: copy Float
   deltaTime: copy Float
+  wind: view WindVector
   profiler: mod Profiler
   grassCompute: mod GrassCompute
   resources: mod GpuResources
@@ -286,7 +286,11 @@ func generateWalkerGrass(
   grassView.patchFeather = 0.10
   grassView.bladeVariation = 1.0
   grassView.tipLighten = 1.18
-  grassView.windStrength = 0.45
+  grassView.windStrength = 0.48
+  grassView.windGust = 0.85
+  grassView.distanceStart = 0.32
+  grassView.farDensityScale = 0.22
+  grassView.farWidthScale = 1.25
   updateWalkerGrassObstacles(
     grass: grassCompute
     resources: resources
@@ -303,8 +307,8 @@ func generateWalkerGrass(
     centreX: cameraSystem.camera.target.x
     centreY: cameraSystem.camera.target.y
     groundZ: characterSystem.groundZ
-    time: t
     deltaTime: deltaTime
+    wind: wind
     toon: grassToonGen
     camX: cameraSystem.camera.position.x
     camY: cameraSystem.camera.position.y

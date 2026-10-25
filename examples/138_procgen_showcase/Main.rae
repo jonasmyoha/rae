@@ -83,7 +83,6 @@ type ShowcaseState {
   grass: GrassCompute
   wind: WindState = createWindState(settings: defaultWindSettings())
   windSettings: WindSettings = windSettingsFromEnv(settings: defaultWindSettings())
-  time: Float
   lastTime: Float64
   statsLogged: Bool
 }
@@ -162,7 +161,6 @@ func createShowcase() ret ShowcaseState {
       windowGeometry: own windowGeometry
       gpuResources: GpuResources.create(issuer: idIssuer, capacity: 32)
       grass: createGroveGrass(obstacles: grove.obstacles)
-      time: 0.0
       lastTime: Gpu2d.nowSeconds()
       statsLogged: false
     }
@@ -470,12 +468,9 @@ func runShowcaseFrame(state: mod ShowcaseState) {
   let now: Float64 = Gpu2d.nowSeconds()
   let deltaTime: Float = (now - state.lastTime) as Float
   state.lastTime = now
-  state.time = state.time + deltaTime
   stepWind(state: state.wind, settings: state.windSettings, deltaTime: deltaTime)
-  setRendererWind(
-    renderer: state.renderer
-    wind: windVector(state: state.wind, settings: state.windSettings)
-  )
+  let frameWind: WindVector = windVector(state: state.wind, settings: state.windSettings)
+  setRendererWind(renderer: state.renderer, wind: frameWind)
 
   let resized: Bool = Gpu2d.windowResized()
   updateWindowGeometry(windowGeometry: state.windowGeometry, now: now, resized: resized)
@@ -552,7 +547,12 @@ func runShowcaseFrame(state: mod ShowcaseState) {
         castShadows: state.editorPanel.settings.shadows
       )
     } else if tag is RenderTag.gbuffer {
-      renderGroveGeometry(state: state, aspect: aspect, deltaTime: deltaTime)
+      renderGroveGeometry(
+        state: state
+        aspect: aspect
+        deltaTime: deltaTime
+        wind: frameWind
+      )
     } else if tag is RenderTag.uiOverlay {
       drawEditorPanel(editorPanel: state.editorPanel, canvas: renderer.canvas)
     } else {
@@ -580,7 +580,12 @@ func runShowcaseFrame(state: mod ShowcaseState) {
 
 # The G-buffer pass: the grove's meshes, then the grass, whose blades the
 # compute pass generated just before
-func renderGroveGeometry(state: mod ShowcaseState, aspect: view Float, deltaTime: view Float) {
+func renderGroveGeometry(
+  state: mod ShowcaseState
+  aspect: view Float
+  deltaTime: view Float
+  wind: view WindVector
+) {
   let renderer: mod DeferredRenderer = state.renderer
   if let resources: mod GpuResources = state.gpuResources {
     generateGroveGrass(
@@ -588,8 +593,8 @@ func renderGroveGeometry(state: mod ShowcaseState, aspect: view Float, deltaTime
       resources: resources
       camera: state.camera
       groundColor: Vec3.create(x: groveGroundRed, y: groveGroundGreen, z: groveGroundBlue)
-      time: state.time
       deltaTime: deltaTime
+      wind: wind
     )
   }
   ensureRendererResources(renderer: renderer)

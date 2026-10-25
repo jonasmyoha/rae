@@ -5,6 +5,7 @@
 # inside a stone or a trunk.
 import GrassConfig
 import Vec3
+open Wind
 open GrassCompute
 open Gbuffer
 open Scene3d
@@ -66,7 +67,11 @@ func groveGrassSettings(groundColor: view Vec3) ret GrassViewSettings {
   settings.patchFeather = 0.11
   settings.bladeVariation = 1.0
   settings.tipLighten = 1.18
-  settings.windStrength = 0.45
+  settings.windStrength = 0.48
+  settings.windGust = 0.85
+  settings.distanceStart = 0.32
+  settings.farDensityScale = 0.18
+  settings.farWidthScale = 1.28
   ret settings
 }
 
@@ -76,8 +81,8 @@ func generateGroveGrass(
   resources: mod GpuResources
   camera: view Camera3d
   groundColor: view Vec3
-  time: view Float
   deltaTime: view Float
+  wind: view WindVector
 ) {
   grassGenerate(
     grass: grass
@@ -85,8 +90,8 @@ func generateGroveGrass(
     centreX: groveGrassCentreX
     centreY: groveGrassCentreY
     groundZ: 0.0
-    time: time
     deltaTime: deltaTime
+    wind: wind
     toon: 1
     camX: camera.position.x
     camY: camera.position.y

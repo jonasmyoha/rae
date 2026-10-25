@@ -1,11 +1,9 @@
-# Wind — the wind everything that sways reads: trees and bushes (their
-# vertex stages, lib/wind.wgsl), and grass. Its BASE is global: one direction
-# and strength, drifting slowly about the settings' own with the time, the
-# same on every machine for the same time (no state but the clock). Its
-# GUSTS are local but stored nowhere: lib/wind.wgsl's gust field is smooth
-# noise over the world, tens of metres across, travelling with the wind, so
-# gust fronts sweep across the grass and the trees together, as seen from
-# any camera, with no grid to keep or stream.
+# Wind — the base vector everything that sways reads: trees, bushes and grass.
+# Its direction and strength drift slowly about the settings' own with time,
+# and are the same on every machine for the same time (no state but the clock).
+# Each material turns the vector into motion suited to its shape. Grass uses
+# broad travelling fronts in grass_render.wgsl; foliage rotates its authored
+# branch patches in wind.wgsl.
 #
 #   var wind: WindState = createWindState(settings: defaultWindSettings())
 #   ...each frame: stepWind(state: wind, settings:, deltaTime:)

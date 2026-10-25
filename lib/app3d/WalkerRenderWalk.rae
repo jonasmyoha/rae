@@ -146,10 +146,11 @@ func renderWalkerApp(
   let now: Float64 = frame.now
   # The wind the trees, bushes and grass sway in, on this frame's time
   stepWind(state: renderSystem.wind, settings: renderSystem.windSettings, deltaTime: deltaTime)
-  setRendererWind(
-    renderer: renderSystem.renderer
-    wind: windVector(state: renderSystem.wind, settings: renderSystem.windSettings)
+  let frameWind: WindVector = windVector(
+    state: renderSystem.wind
+    settings: renderSystem.windSettings
   )
+  setRendererWind(renderer: renderSystem.renderer, wind: frameWind)
 
   # Every character (app3d/Characters), in its table's order — its position
   # there is its palette slot: its clock one frame on, its pose (blended out of
@@ -254,8 +255,8 @@ func renderWalkerApp(
             characterSystem: characterSystem
             world: world
             terrainSystem: terrainSystem
-            t: t
             deltaTime: deltaTime
+            wind: frameWind
             profiler: profiler
             grassCompute: grassCompute
             resources: resources
@@ -301,8 +302,8 @@ func renderWalkerApp(
             characterSystem: characterSystem
             world: world
             terrainSystem: terrainSystem
-            t: t
             deltaTime: deltaTime
+            wind: frameWind
             profiler: profiler
             grassCompute: grassCompute
             resources: resources

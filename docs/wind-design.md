@@ -5,10 +5,12 @@ lib/RendererWind.rae; fixture 1232_wind). The walker examples (136, 137, 143)
 use it.
 
 **The trees' and bushes' leaves turn in the wind again (2026-10-23), with
-no gusts: windLeaf uses a steady gust level, because the gust field made
-everything that followed it twitch (§5). It was off on 2026-10-22
+no travelling gust field: windLeaf uses a steady activity level. Grass now
+reads the same base WindVector and makes broad rooted gust fronts with a small
+tip flutter (§5). It was off on 2026-10-22
 (`windLeafScale` in lib/wind.wgsl; docs/tree-wind-design.md). The grass
-keeps its own wind.** Sections 3 and 4 describe an earlier version.
+keeps its own shape-specific response.** Sections 3 and 4 describe an earlier
+version.
 
 ## 1. What the wind is
 
@@ -17,19 +19,14 @@ keeps its own wind.** Sections 3 and 4 describe an earlier version.
   slow sine waves each, so the drift does not beat in an obvious way
   (`stepWind`, period `driftSeconds`, 90 s by default). The base has no state
   but the clock, so two machines with the same time see the same wind.
-- **Local gusts, stored nowhere.** `windGustAt` in lib/wind.wgsl is smooth
-  value noise over the world's xy, in cells of about 55 m, moving with the
-  wind (faster when it is stronger). Where the noise is high a gust presses:
-  up to `1 + 2 * gustiness` times the base on trees and bushes. A gust front
-  sweeps across grass and trees together, and looks the same from every
-  camera.
+- **Material responses.** The base vector carries gustiness and time. Foliage
+  rotates branch-supported patches with fixed world phases. Grass builds two
+  broad travelling bands from world position and the shared direction. These
+  responses need no streamed wind grid and remain camera independent.
 
-Why not a grid of wind areas: a grid would need state, streaming and the same
-values on every machine. A noise field computed in the vertex stage is local
-in the way that matters (gust fronts tens of metres across pass over the
-scene) and costs a few ALU instructions per vertex. Only what is on screen
-pays for it. One wind for the whole world, with no gust field, would look
-mechanical: every tree in step.
+Why not a grid of wind areas: a grid would need state, streaming and matching
+values on every machine. World-space phases give neighbouring plants a shared
+response without making the whole field move in step.
 
 The strength is in "sway units": 1 is a fresh breeze, the strength the trees
 are tuned for; 0 is calm; 2 is a strong wind. `RAE_WIND=<strength>` changes
@@ -102,31 +99,32 @@ gust about 15 cm: small enough that the leaves stay on their branches.
 
 ## 5. Grass
 
-The grass does NOT follow the renderer's wind (2026-10-23). It sways on its
-own settings and its own clock (GrassViewSettings windDirX/Y, windStrength,
-windGust; grass_render.wgsl windBend), as it did before this wind was
-added.
+Grass reads the renderer's current `WindVector`. `windStrength` and `windGust`
+in `GrassViewSettings` scale its response; they no longer define a separate
+direction or clock. `RAE_WIND=0` therefore stills foliage and grass together.
 
-For a while it followed the renderer's wind and its gust field, and the
-blades twitched. The cause is in `windGustAt`: the gust pattern is moved by
-`direction * time * (2.5 + 3.5 * strength)`, with the time up to an hour,
-while the base wind's direction and strength drift (stepWind). Every small
-drift is multiplied by that large time, so the whole pattern jumps metres
-from one frame to the next, and everything whose strength follows it
-flickers. The trees used the same field (their wind is off, see the top).
-A gust field that is used again must move by an offset that ADDS UP each
-frame (state on the wind, stepped with deltaTime), never one computed from
-the drifting values times the total time.
+`grassGustEnvelope` uses the scalar wind clock to move two broad bands along
+the current direction. Direction is applied to the world position, never
+multiplied by total time, so slow direction drift cannot jump the field by a
+large distance. Nearby tufts enter a front together. A blade bends only in the
+wind direction through most of its height; a much smaller cross-wind phase is
+raised to the fourth power and affects its tip. Both offsets are zero at the
+root. This replaces the old pair of full-blade sine waves, which made every
+blade rock back and forth.
+
+Distance thinning begins after the configured near-radius share. It changes
+the candidate probability inside an existing world-space patch, not patch
+membership. Surviving far ribbons widen modestly to preserve the ground read;
+the painted terrain remains visible rather than being covered by extra near
+density.
 
 ## 6. Cost and mobile
 
-All of it is vertex-stage arithmetic: two value-noise lookups and a few sines
-per vertex of a swaying instance. Rigid instances return early. No new GPU
-feature, no texture, no compute pass, no extra buffer beyond 16 bytes of
-uniform. It runs the same on WebGPU over Metal on iOS as on the desktop. The
-phone's cost is not measured yet. The vertex count of the near tree levels is
-the thing to watch there: lowering the near level's distance on a phone, or
-setting a kind's sway to 0 there, removes it.
+All of it is vertex-stage arithmetic. Grass uses two broad sine bands and one
+small tip sine; calm grass returns before them. Foliage uses its existing fixed
+phases. No new GPU feature, texture, compute pass or growing storage is added;
+the grass uniform gains one 16-byte distance-control vector. It runs the same
+on WebGPU over Metal on iOS as on desktop. The phone cost is not measured yet.
 
 ### Textured birch sprays (2026-10-23)
 

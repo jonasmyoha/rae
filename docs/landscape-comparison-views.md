@@ -187,3 +187,37 @@ groups retired by frame 480. Autumn Grove stayed at 413 buffers from frame 0
 through frame 720 and 72 bind groups after warm-up. These are idle-load samples
 on the same machine, not a portable benchmark; they show bounded resources and
 no accumulating upload objects.
+
+## Grass wind and forest density
+
+Grass now reads the same `WindVector` as tree foliage. Its broad fronts are two
+world-space bands travelling along the wind direction. A front bends adjacent
+tufts together; a smaller cross-wind phase affects only the blade tip. Both
+offsets are multiplied by rooted height terms, so the lower vertices do not
+move. `RAE_WIND=0` is fully still, while `RAE_WIND=1.25` is the fixed breezy
+review setting. The implementation does not use a physics body, per-blade CPU
+state or a moving camera coordinate.
+
+The candidate grid remains fixed at 65,536 records. Inside each existing patch,
+distance thinning begins at 32 percent of the visible radius and reaches 22
+percent at the walker edge (18 percent in the wider 138 field). Surviving far
+ribbons widen by 1.25–1.28 rather than extending the near density. Patch shape,
+terrain colour, roads and obstacle circles are unchanged. This keeps G03's
+quiet distant ground while retaining G01/G02 detail near the walker.
+
+Run `tools/capture-landscape-comparisons.sh grass` for paired calm/breezy 138
+orbits, paired 143 ground-cover views, the three fixed forest-walk positions and
+a night view. The inspected frames showed a stable root line, coherent local
+lean, no camera-relative swimming at the three walk positions, and ordinary
+dark material response at hour 23.
+
+Matched 143 runs at the same camera, density and 2365 by 1440 scene measured
+19–20 ms median frames for calm and 20 ms for breezy. Settled G-buffer windows
+were 2.84–3.21 ms calm and 2.67–2.76 ms breezy, so the extra vertex arithmetic
+was below run-to-run noise. CPU process time was 5.37 s calm and 5.27 s breezy
+over the eight-second samples. Maximum resident size was 268.8 MB calm and
+267.0 MB breezy. Both runs held 956 buffers and 154 bind groups through frames
+120–480; the usual two bind groups retired later. The default-wind 138 run held
+413 buffers and 72 bind groups through frame 840. These are idle-load samples
+on one machine, with shader caches and the hidden-window compositor still in
+the timing; they are useful for regressions, not a portable benchmark.

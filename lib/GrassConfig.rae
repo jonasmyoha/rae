@@ -17,10 +17,8 @@ import Vec3
 type GrassViewSettings {
   enabled: Bool
   extent: Float  # candidate-grid span / render distance (world units)
-  windDirX: Float  # coherent wind direction (unit-ish)
-  windDirY: Float
-  windStrength: Float  # 1.0 = the tuned baseline sway
-  windGust: Float  # extra gust amplitude multiplier
+  windStrength: Float  # response to the app's shared WindVector
+  windGust: Float  # response to its broad travelling gusts
   bladeHeightScale: Float  # scales the per-blade height (top-down wants shorter)
   bladeWidthScale: Float  # scales blade width (top-down wants wider for coverage)
   densityScale: Float  # 0..1 fraction of candidate blades kept
@@ -30,6 +28,9 @@ type GrassViewSettings {
   patchCoverage: Float = 0.72  # broad ground share covered before density thinning
   patchFeather: Float = 0.12  # soft stochastic boundary in noise-value units
   bladeVariation: Float = 1.0  # size/lean/colour variation within a patch
+  distanceStart: Float = 0.35  # radius share where distance thinning begins
+  farDensityScale: Float = 0.22  # candidate share kept at the outer edge
+  farWidthScale: Float = 1.28  # modest silhouette compensation for the thinning
   groundColor: Vec3  # gradient bottom = terrain ground colour
   tipLighten: Float  # gradient top multiplier (>1 lighter)
 }
@@ -39,8 +40,6 @@ func grassThirdPersonSettings(groundColor: copy Vec3) ret GrassViewSettings {
   ret GrassViewSettings {
     enabled: true
     extent: 40.0
-    windDirX: 0.82
-    windDirY: 0.57
     windStrength: 1.0
     windGust: 1.0
     bladeHeightScale: 1.0
@@ -50,6 +49,9 @@ func grassThirdPersonSettings(groundColor: copy Vec3) ret GrassViewSettings {
     patchCoverage: 0.72
     patchFeather: 0.12
     bladeVariation: 1.0
+    distanceStart: 0.35
+    farDensityScale: 0.22
+    farWidthScale: 1.28
     groundColor: groundColor
     tipLighten: 1.8
   }
@@ -62,8 +64,6 @@ func grassTopDownSettings(groundColor: copy Vec3) ret GrassViewSettings {
   ret GrassViewSettings {
     enabled: true
     extent: 80.0
-    windDirX: 0.82
-    windDirY: 0.57
     windStrength: 0.6
     windGust: 0.8
     bladeHeightScale: 0.7
@@ -73,6 +73,9 @@ func grassTopDownSettings(groundColor: copy Vec3) ret GrassViewSettings {
     patchCoverage: 0.78
     patchFeather: 0.10
     bladeVariation: 0.8
+    distanceStart: 0.25
+    farDensityScale: 0.16
+    farWidthScale: 1.36
     groundColor: groundColor
     tipLighten: 1.5
   }

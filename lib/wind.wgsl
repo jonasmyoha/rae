@@ -10,7 +10,8 @@
 // The tree and bush leaf motion (windLeaf), switched off on 2026-10-22
 // because it looked glitchy and back on 2026-10-23 WITHOUT the gust field:
 // the callers multiply a leaf's flexibility by this; 0.0 stills every leaf.
-// The grass has its own wind (grass_render.wgsl).
+// Grass reads the same WindVector but builds a cheaper rooted gust envelope in
+// grass_render.wgsl, since this noise function would run once per grass vertex.
 const windLeafScale: f32 = 1.0;
 
 fn windHash(p: vec2<f32>) -> f32 {

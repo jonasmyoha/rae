@@ -60,7 +60,8 @@ captureGrove() {
   view="$1"
   name="$2"
   camera="${3:-}"
-  env RAE_GROVE_VIEW="$view" RAE_CAMERA_AT="$camera" RAE_DEBUG_OVERLAY=0 \
+  windStrength="${4:-1}"
+  env RAE_GROVE_VIEW="$view" RAE_CAMERA_AT="$camera" RAE_WIND="$windStrength" RAE_DEBUG_OVERLAY=0 \
     RAE_UI_HEADLESS=1 RAE_HEADLESS_FRAMES="$fixedFrames" RAE_FIXED_DT="$fixedDelta" \
     RAE_GPU2D_SCREENSHOT="$output/$name.bmp" \
     perl -e 'alarm shift; exec @ARGV' 120 "$root/compiler/bin/rae" run \
@@ -72,7 +73,9 @@ captureGrove() {
 captureForest() {
   name="$1"
   camera="$2"
-  env RAE_CAMERA_AT="$camera" RAE_WALKER_HOUR=12 RAE_WALKER_DAY=298 RAE_DRS=off \
+  hour="${3:-12}"
+  windStrength="${4:-1}"
+  env RAE_CAMERA_AT="$camera" RAE_WALKER_HOUR="$hour" RAE_WALKER_DAY=298 RAE_WIND="$windStrength" RAE_DRS=off \
     RAE_DEBUG_OVERLAY=0 RAE_UI_HEADLESS=1 RAE_HEADLESS_FRAMES="$fixedFrames" \
     RAE_FIXED_DT="$fixedDelta" RAE_GPU2D_SCREENSHOT="$output/$name.bmp" \
     perl -e 'alarm shift; exec @ARGV' 150 "$root/compiler/bin/rae" run \
@@ -131,6 +134,26 @@ verifyStable() {
   cmp "$output/verify-143-a.bmp" "$output/verify-143-b.bmp"
 }
 
+captureGrassSet() {
+  captureGrove grass grass-138-calm '' 0
+  captureGrove grass grass-138-breezy '' 1.25
+  captureForest grass-143-calm '1 0 0.24 -0.20 4.2 0 18.0 0.35 0 0 0 0' 12 0
+  captureForest grass-143-breezy '1 0 0.24 -0.20 4.2 0 18.0 0.35 0 0 0 0' 12 1.25
+  captureForest grass-143-walk-00 '1 0 0.24 -0.06 4.2 0 -18 2.4 0 0 0 0' 12 1.25
+  captureForest grass-143-walk-01 '1 0 0.24 -0.06 4.2 0 -5 2.4 0 0 0 0' 12 1.25
+  captureForest grass-143-walk-02 '1 0 0.24 -0.06 4.2 0 8 2.4 0 0 0 0' 12 1.25
+  captureForest grass-143-night '1 0 0.24 -0.20 4.2 0 18.0 0.35 0 0 0 0' 23 1.25
+  cat > "$output/grass-manifest.txt" <<EOF
+Grass wind and density comparison
+commit: $(git -C "$root" rev-parse HEAD)
+clock: 60 frames at 0.016666667 s
+calm: RAE_WIND=0; breezy: RAE_WIND=1.25
+138: grass contact orbit; hour 10
+143: fixed ground-cover camera, three fixed-path cameras, day 298 hour 12
+143 night: same ground-cover camera, day 298 hour 23
+EOF
+}
+
 captureMetrics() {
   env RAE_GROVE_VIEW=grove RAE_DEBUG_OVERLAY=0 RAE_UI_HEADLESS=1 \
     RAE_SDL_HEADLESS_MS=8000 RAE_FRAME_TIMING=1 RAE_GPU_PASS_TIMING=1 \
@@ -148,10 +171,11 @@ captureMetrics() {
 
 case "$mode" in
   captures) captureSet ;;
+  grass) captureGrassSet ;;
   verify) verifyStable ;;
   metrics) captureMetrics ;;
   all) captureSet; verifyStable; captureMetrics ;;
-  *) printf '%s\n' "usage: $0 [captures|verify|metrics|all]" >&2; exit 2 ;;
+  *) printf '%s\n' "usage: $0 [captures|grass|verify|metrics|all]" >&2; exit 2 ;;
 esac
 
 printf '%s\n' "landscape comparison output: $output"
