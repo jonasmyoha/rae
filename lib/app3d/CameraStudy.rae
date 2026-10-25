@@ -1,0 +1,43 @@
+# Optional reproducible walking-camera evidence; no input changes in normal play.
+open app3d/CameraRig
+open Scene3d
+import Vec3
+import Sys
+import Math
+
+type CameraStudy {
+  enabled: Bool = false
+  output: String = ""
+  frame: Int = 0
+  origin: Vec3 = {}
+}
+
+func createCameraStudy() ret CameraStudy {
+  ret CameraStudy {
+    enabled: Sys.getEnv(name: "RAE_LANDSCAPE_WALK") is "1"
+    output: Sys.getEnv(name: "RAE_LANDSCAPE_FRAMES")
+  }
+}
+
+func stepCameraStudy(study: mod CameraStudy, rig: mod CameraRig, camera: mod Camera3d) ret Bool {
+  if not study.enabled {
+    ret false
+  }
+  if study.frame is 0 {
+    study.origin = rig.freePosition
+  }
+  let distance: Float = Math.min(a: study.frame.toFloat() / 179.0, b: 1.0) * 12.0
+  rig.mode = CameraRigMode.free
+  rig.freePosition = Vec3.create(
+    x: study.origin.x + Math.sin(x: rig.yaw) * distance
+    y: study.origin.y + Math.cos(x: rig.yaw) * distance
+    z: study.origin.z
+  )
+  snapCameraRigView(rig: rig)
+  applyCameraRig(rig: rig, camera: camera)
+  if study.output.length() > 0 {
+    Sys.setEnv(name: "RAE_GPU2D_SCREENSHOT", value: "{study.output}/frame{study.frame}.bmp")
+  }
+  study.frame = study.frame + 1
+  ret true
+}

@@ -2,6 +2,8 @@
 # (app3d/WalkerApp) that depend on its settings: what world the walker is on
 # (the island of 136 / 137, the wide forest of 143), the terrain shader of its
 # renderer, the panels, the crowd, the forest and the physics.
+import GrassConfig
+open GrassCompute
 import Math
 import Vec3
 open Scene3d
@@ -107,6 +109,12 @@ func setWalkerTerrainShader(
   forward: view Bool
   biome: view BiomeConfig
 ) {
+  var constants: List(ShaderConstant) = islandConstantsFor(cfg: biome)
+  loop let entry: ShaderConstant in grassPatchConstants(
+    settings: GrassConfig.grassMeadowSettings(groundColor: walkerGroundColor())
+  ) {
+    constants.add(value: entry)
+  }
   if forward {
     rendererSetForwardTerrainShader(
       renderer: renderer
@@ -119,13 +127,13 @@ func setWalkerTerrainShader(
         "lib/noise.wgsl"
         "lib/world_biome.wgsl"
         "lib/terrain_palette_walker.wgsl"
+        "lib/grass_field.wgsl"
         "lib/terrain_grass_painted.wgsl"
         "lib/terrain_detail_painted.wgsl"
         "lib/terrain_splat.wgsl"
         "lib/forward_entry.wgsl"
       ])
     )
-    ret
   }
   rendererSetTerrainShaderWithConstants(
     renderer: renderer
@@ -133,12 +141,13 @@ func setWalkerTerrainShader(
       "lib/noise.wgsl"
       "lib/world_biome.wgsl"
       "lib/terrain_palette_walker.wgsl"
+      "lib/grass_field.wgsl"
       "lib/terrain_grass_painted.wgsl"
       "lib/terrain_detail_painted.wgsl"
       "lib/terrain_splat.wgsl"
     ])
     # The shader's island radius is the world's (no island in the forest)
-    constants: islandConstantsFor(cfg: biome)
+    constants: own constants
   )
 }
 

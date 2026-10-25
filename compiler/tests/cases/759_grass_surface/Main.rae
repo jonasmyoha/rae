@@ -14,17 +14,19 @@ func main() ret Int {
   log(standard.text.contains(sub: "// --- lib/grass_compute.wgsl"))
   log(standard.text.contains(sub: "// --- lib/grass_obstacles.wgsl"))
   log(standard.text.contains(sub: "distanceWidth"))
-  let render: Shader = shader(files: ["lib/grass_render.wgsl"])
+  let render: Shader = shader(
+    files: ["lib/grass_field.wgsl", "lib/grass_motion.wgsl", "lib/grass_render.wgsl"]
+  )
   log(render.text.contains(sub: "grassGustEnvelope"))
   log(render.text.contains(sub: "rooted * rooted"))
-  log(standard.sources.length() is 5)
+  log(standard.sources.length() is 6)
   let constants: List(ShaderConstant) = WorldBiome.islandConstants()
   log(constants.length() is 2)
   var grassCompute: GrassCompute = GrassCompute.createGrassCompute()
   log(not grassCompute.computeShaderSet)
   GrassCompute.grassSetComputeShader(grass: grassCompute, shader: standard)
   log(grassCompute.computeShaderSet)
-  log(grassCompute.computeShader.sources.length() is 5)
+  log(grassCompute.computeShader.sources.length() is 6)
   # An app's own surface data: none by default; set, it is kept for the GPU
   # (bound at @binding(4)) and the pipeline is rebuilt
   log(grassCompute.surfaceField.length() is 0)

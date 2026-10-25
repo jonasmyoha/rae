@@ -13,6 +13,7 @@ open Wind
 open RendererWind
 open Scene3d
 open ecs/Entity
+open GbufferTerrain
 open RendererDeferred
 open Rendergraph
 open Math3d
@@ -21,6 +22,7 @@ open MeshStore
 open Shadow3d
 open Sky
 open GroveScene
+open app3d/CameraStudy
 open BirchStudy
 open GroveGrass
 open GrassCompute
@@ -72,6 +74,7 @@ func renderShadows(
 # loop.
 type ShowcaseState {
   renderer: DeferredRenderer
+  groundMesh: MeshHandle
   sceneWorld: World3d
   light: Light3d
   camera: Camera3d
@@ -86,6 +89,7 @@ type ShowcaseState {
   windSettings: WindSettings = windSettingsFromEnv(settings: defaultWindSettings())
   lastTime: Float64
   statsLogged: Bool
+  cameraStudy: CameraStudy = createCameraStudy()
   birchStudy: BirchStudy
 }
 
@@ -104,6 +108,24 @@ func createShowcase() ret ShowcaseState {
   restoreWindowGeometry(windowGeometry: windowGeometry)
   var renderer: DeferredRenderer = createDeferredRendererWithUi()
   let grove: Grove = buildGrove(renderer: renderer)
+  var groundConstants: List(ShaderConstant) = grassPatchConstants(
+    settings: groveGrassSettings(
+      groundColor: Vec3.create(x: groveGroundRed, y: groveGroundGreen, z: groveGroundBlue)
+    )
+  )
+  groundConstants.add(value: { name: "RAE_TERRAIN_TOON", value: 1.0 })
+  rendererSetTerrainShaderWithConstants(
+    renderer: renderer
+    shader: shader(
+      files: [
+        "lib/grass_field.wgsl"
+        "assets/grove_path.wgsl"
+        "assets/grove_ground.wgsl"
+        "lib/terrain_splat.wgsl"
+      ]
+    )
+    constants: own groundConstants
+  )
   var idIssuer: IdIssuer = IdIssuer.create()
 
   # The settings start on the Preetham sky at a fixed mid-morning hour (the
@@ -163,6 +185,7 @@ func createShowcase() ret ShowcaseState {
   unsafe {
     ret ShowcaseState {
       renderer: own renderer
+      groundMesh: grove.groundMesh
       sceneWorld: own grove.world
       light: light
       camera: camera
@@ -599,6 +622,7 @@ func runShowcaseFrame(state: mod ShowcaseState) {
   }
 
   stepBirchStudy(study: state.birchStudy, camera: state.camera, rig: state.cameraRig)
+  stepCameraStudy(study: state.cameraStudy, rig: state.cameraRig, camera: state.camera)
   let renderer: mod DeferredRenderer = state.renderer
   let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
   gpuPassTimingBegin(renderer: renderer)
@@ -673,6 +697,15 @@ func renderGroveGeometry(
       camera: state.camera
       light: state.light
       aspect: aspect
+    )
+    drawTerrainMesh(
+      cache: renderer.passes.gbuffer
+      resources: rendererResources
+      mesh: state.groundMesh.id
+      model: mat4Identity()
+      prevModel: mat4Identity()
+      roughness: 1.0
+      time: 0.0
     )
     renderSceneWorld(
       cache: renderer.passes.gbuffer

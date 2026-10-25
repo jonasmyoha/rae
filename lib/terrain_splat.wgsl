@@ -12,6 +12,8 @@
 // Composed with lib/noise.wgsl + lib/world_biome.wgsl + lib/terrain_detail.wgsl
 // prepended. Vertex layout = pos(3)/nrm(3)/uv(2), same as the static pipeline.
 
+override RAE_TERRAIN_TOON: f32 = 0.0;
+
 struct Frame {
   viewProj: mat4x4<f32>,
   prevViewProj: mat4x4<f32>,
@@ -154,7 +156,7 @@ fn gbufferSurface(in: VsOut) -> FsOut {
   let roadT = RAE_TERRAIN_PATH * (textureSample(terrainTex, terrainSamp, uv, RAE_TL_ROAD).rgb / RAE_TERRAIN_ROAD_TEX_MEAN);
   albedo = mix(albedo, roadT, clamp(texBlend * raeBiomePath(in.worldXY) * (1.0 - b.wWater), 0.0, 1.0));
   var o: FsOut;
-  o.gba = vec4<f32>(oct.x, oct.y, 0.5, d.params.z);
+  o.gba = vec4<f32>(oct.x, oct.y, 0.5, max(d.params.z, RAE_TERRAIN_TOON));
   o.gbb = vec4<f32>(albedo, rough);
   o.gbc = vec4<f32>(mEnc.x, mEnc.y, 0.0, d.params.y);
   return o;

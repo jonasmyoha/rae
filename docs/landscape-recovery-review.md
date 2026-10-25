@@ -427,3 +427,11 @@ The private presentation places those same captures beside G01/G02.
 This pass leaves placement and terrain unchanged. Flat ground gaps, repeated
 motifs and close crossed-plane visibility remain explicit limitations. Passing
 the rendering gates does not mean the meadow now matches the references.
+
+## Ground-cover and motion recovery
+
+[Grass patch recovery](grass-patch-recovery.md) records paired forest-edge,
+clearing and path-contact captures, with shared ground/tuft colour and uneven
+root groups. The private presentation includes calm/breezy continuous walks in
+both apps. It records matching density settings, surviving counts, cost and
+remaining limits; this is not a claim that the wider meadow art is complete.
