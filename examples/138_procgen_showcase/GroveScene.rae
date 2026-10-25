@@ -2,6 +2,7 @@
 # and renderer defaults are untouched. Every visible object is a World3d entity;
 # the grass is the lib GPU grass (GroveGrass), kept out of the rocks and trunks.
 import Math
+import Sys
 open Vec3
 open Noise
 open Mesh3d
@@ -566,6 +567,12 @@ func buildGrove(renderer: mod DeferredRenderer) ret Grove {
     scale: unit
     rotation: 0
   )
+  # Isolated comparison still uses the exact grove specimen and ground.
+  # Other trees would occlude it during a full camera orbit.
+  if Sys.getEnv(name: "RAE_BIRCH_ISOLATE") is "1" {
+    addBirchGrove(world: world, renderer: renderer, obstacles: obstacles)
+    ret Grove { world: own world, obstacles: own obstacles }
+  }
   place(
     world: world
     renderer: renderer

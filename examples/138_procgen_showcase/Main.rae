@@ -21,6 +21,7 @@ open MeshStore
 open Shadow3d
 open Sky
 open GroveScene
+open BirchStudy
 open GroveGrass
 open GrassCompute
 open GbufferWorld
@@ -85,6 +86,7 @@ type ShowcaseState {
   windSettings: WindSettings = windSettingsFromEnv(settings: defaultWindSettings())
   lastTime: Float64
   statsLogged: Bool
+  birchStudy: BirchStudy
 }
 
 # The window, the generated grove, the sky and the camera
@@ -147,6 +149,9 @@ func createShowcase() ret ShowcaseState {
   var cameraRig: CameraRig = createCameraRig(camera: camera)
   cameraRig.maxDistance = 120
   setGroveView(camera: camera, cameraRig: cameraRig, groveView: initialView)
+  if Sys.getEnv(name: "RAE_BIRCH_ISOLATE") is "1" {
+    camera.target.z = 4.3
+  }
   applyCameraStartOverride(rig: cameraRig, camera: camera)
 
   # The state takes the renderer's GPU handles with it: moved, never copied
@@ -163,6 +168,7 @@ func createShowcase() ret ShowcaseState {
       grass: createGroveGrass(obstacles: grove.obstacles)
       lastTime: Gpu2d.nowSeconds()
       statsLogged: false
+      birchStudy: createBirchStudy()
     }
   }
 }
@@ -587,6 +593,7 @@ func runShowcaseFrame(state: mod ShowcaseState) {
     ret
   }
 
+  stepBirchStudy(study: state.birchStudy, camera: state.camera, rig: state.cameraRig)
   let renderer: mod DeferredRenderer = state.renderer
   let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
   gpuPassTimingBegin(renderer: renderer)

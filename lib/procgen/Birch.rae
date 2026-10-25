@@ -9,6 +9,8 @@ open procgen/Foliage
 open procgen/FoliageCards
 open procgen/SculpturalFork
 
+const birchCrownStyle: FoliageSprayStyle = FoliageSprayStyle.connected
+
 type BirchTwig {
   start: Vec3
   middle: Vec3
@@ -359,8 +361,37 @@ func birchTree(seed: view Int, height: view Float) ret BirchTree {
 # Each hanging twig supports one irregular spray. Tone partitioning happens by
 # twig identity; the three material meshes combine into one open crown shape.
 func birchLeaves(twigs: view List(BirchTwig), seed: view Int, tone: view Int) ret MeshData {
+  ret birchLeavesStyled(
+    twigs: twigs
+    seed: seed
+    tone: tone
+    style: birchCrownStyle
+    firstTwig: 0
+    twigCount: -1
+  )
+}
+
+func birchLeafTexture(style: view FoliageSprayStyle) ret String {
+  if style is FoliageSprayStyle.control {
+    ret "lib/assets/trees/birchLeaves.png"
+  }
+  ret "lib/assets/trees/birchSpray.png"
+}
+
+func birchLeavesStyled(
+  twigs: view List(BirchTwig)
+  seed: view Int
+  tone: view Int
+  style: view FoliageSprayStyle
+  firstTwig: view Int
+  twigCount: view Int
+) ret MeshData {
   var mesh: MeshData = foliageMesh()
-  loop var twigIndex: Int = 0, twigIndex < twigs.length, ++twigIndex {
+  var endTwig: Int = twigs.length
+  if twigCount >= 0 {
+    endTwig = Math.min(a: endTwig, b: firstTwig + twigCount)
+  }
+  loop var twigIndex: Int = firstTwig, twigIndex < endTwig, ++twigIndex {
     if twigIndex % 3 is not tone {
       continue
     }
@@ -377,6 +408,19 @@ func birchLeaves(twigs: view List(BirchTwig), seed: view Int, tone: view Int) re
       z: size * (0.98 + hash2(x: twigIndex, y: 67, seed: seed) * 0.32)
     }
     let shadeNormal: Vec3 = vnorm(a: Vec3.create(x: center.x * 0.34, y: center.y * 0.34, z: 0.92))
+    if style is FoliageSprayStyle.connected {
+      let broadNormal: Vec3 = vnorm(a: Vec3.create(x: center.x * 0.30, y: center.y * 0.30, z: 0.75))
+      addConnectedFoliageSpray(
+        mesh: mesh
+        center: center
+        pivot: twig.start
+        branchDirection: vsub(a: twig.end, b: twig.start)
+        extent: extent
+        shadeNormal: broadNormal
+        seed: birchSpraySeed(seed: seed, twigIndex: twigIndex)
+      )
+      continue
+    }
     addFoliageSpray(
       mesh: mesh
       center: center

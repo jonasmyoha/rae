@@ -277,3 +277,141 @@ asset paths and failed when run from the official runner's compiler directory.
 It now resolves those images through RAE_STDLIB. Geometry, pivots, conservative
 bounds, alpha coverage and mip checks remain active; the old four-cell atlas
 assertions are replaced by the recovered full-image UV/coverage contract.
+
+## Silver-birch crown recovery — 26 October 2026
+
+The new candidate keeps the newer wood, bark, all twig curves, seeds and tree
+transforms unchanged. It changes the foliage mesh and its albedo cutout only.
+The shared `birchLeaves` entry and forest image loader use the same candidate
+as Autumn Grove; 136, 137 and 143 therefore receive the same generated crown.
+No renderer, lighting shader, global exposure or shadow setting was changed.
+This is a crown recovery, not a claim that the whole birch now matches the art
+references or that the current bark and wood are finished.
+
+### Matched alternatives
+
+The three studies use seed 1437, height 7.1 m, rotation zero and the same 46
+populated twigs. The branch study isolates twig 8 from that exact tree. The
+other grove objects are omitted in **all** controlled studies so they cannot
+hide the crown during an orbit. Ground, camera, sun, exposure and wind phase
+are identical between alternatives. The normal grove composition is unchanged.
+The historical pre-queue and rejected frames above remain separate evidence:
+their different scaffolds prevent treating them as controlled geometry trials.
+
+| Alternative | Image | Geometry and lighting |
+|---|---|---|
+| Control | Original fine-edge image | Original four/five cards per twig; original normals |
+| Texture only | New `birchSpray.png` | Exact control geometry and normals |
+| Connected candidate | Same new image | Three unequal overlapping layers along the same twig, smooth broad crown normals |
+
+![Preserved four/five-card control](images/birch-crown-recovery/control-tree-front.png)
+
+![Connected candidate at the identical camera and scale](images/birch-crown-recovery/connected-tree-front.png)
+
+![Isolated control branch](images/birch-crown-recovery/control-branch-branch.png)
+
+![Isolated connected candidate branch](images/birch-crown-recovery/connected-branch-branch.png)
+
+The original card helper remains unchanged. The candidate uses a new bounded
+helper in `procgen/FoliageCards`: three card centres follow the supporting twig,
+with unequal size and lateral offset. Their normals describe the larger crown
+and vary smoothly across each card. The quads face the camera; their centres,
+lighting normals and wind attachments stay with the tree. The existing rigid
+rotation around the twig pivot remains; primary wood has no wind metadata.
+
+The texture uses an asymmetric connected silhouette, small pointed edge leaves,
+and restrained interior variation. Two earlier texture attempts were rejected:
+one made repetitive feather-like chains, and an almost flat version looked
+like a solid cutout. A physical-material trial was also rejected for its pale
+colour shift. The selected version keeps the same toon material as the control,
+including emission zero, ordinary sun/ambient light and cascaded shadows.
+
+### Lighting and movement
+
+![Side view](images/birch-crown-recovery/connected-tree-side.png)
+
+![Under the crown](images/birch-crown-recovery/connected-tree-under.png)
+
+![Warm evening light](images/birch-crown-recovery/connected-tree-warm.png)
+
+![Cool morning light](images/birch-crown-recovery/connected-tree-cool.png)
+
+![Night response](images/birch-crown-recovery/connected-tree-night.png)
+
+`tools/capture-birch-recovery.py --motion` records matched control and candidate 180-frame
+orbits and 180-frame approaches at 30 fixed steps per second, wind strength 1.
+The approach holds the camera 1.7 m above the ground. These are continuous
+camera paths, not three independently started screenshots. The script changes
+the existing screenshot destination each frame; it adds no renderer readback
+path. Movies and full frames remain outside git and are linked in the private
+recovery presentation. The optional capture state is owned by the showcase.
+
+### Cost and reproducibility
+
+For seed 1437 there are 46 populated sprays: **207 → 138 cards**,
+**828 → 552 vertices**, and **414 → 276 triangles**. Four checked seeds produce
+135–147 candidate cards. There are still three leaf materials, one shared leaf
+image and shared immutable mesh prototypes. Fewer larger cards do not establish
+lower fragment cost: transparent area and overlap still matter. No forest GPU
+speedup is claimed from these geometry counts.
+
+Run `python3 tools/capture-birch-recovery.py --motion`. It builds one temporary
+binary, captures the alternatives and lighting views with explicit timeouts,
+checks two fixed front bitmaps for exact equality, and restores window geometry.
+The [manifest](images/birch-crown-recovery/manifest.json) records the source and
+image hashes, seed, height, camera fields, light, resolution and fixed clock.
+`RAE_BIRCH_STYLE=control|texture|connected` selects the comparison in 138;
+`RAE_BIRCH_STUDY=tree|branch` selects its subject. These controls do not change
+which trees appear in a normal app run.
+
+### Remaining defects and limits
+
+The candidate reduces the round puff repetition, but does not eliminate all
+clumps. Individual cards remain identifiable close to an isolated spray, and
+one mirrored texture still repeats. There are still dark interior pockets and
+occasional exposed white branch fragments. T04/T05 have more deliberate large
+colour masses and richer fine silhouettes; T07 has a more readable woody
+scaffold. The crown comparison does not establish finished bark, improved forks
+on this species, or a new lower-detail mesh. Those were deliberately held fixed.
+The far atlas uses the new mesh and image through the existing baker; it is
+still a static pose and cannot reproduce moving twig detail. Do not copy this
+birch silhouette unchanged to other species or treat passing geometry tests as
+approval of their art direction.
+
+### Verification and atlas evidence
+
+Cases 1235, 1243 and 1228 passed. The new case compares the preserved and
+candidate sprays across four seeds, including a negative seed: populated twig
+identity, deterministic vertices, fixed wind pivots, valid indices, unit
+normals and conservative card bounds. The image check covers opaque interior,
+transparent borders and the existing alpha mip rules.
+
+GPU checks `surfaceImages`, `leafWind`, `impostorBake` and `canopyCoverage`
+passed. The atlas check previously exported the deliberately unposed 32-byte
+control. It now also exports the production 64-byte camera-facing birch and
+checks every view cell, so a healthy whole-layer average cannot hide a missing
+crown in some directions. All 64 cells passed; all four posed mip levels stay
+within the existing 3% coverage tolerance.
+
+![Production camera-facing atlas, unlit albedo](images/birch-crown-recovery/birch-posed-mip0.png)
+
+The 136, 137, 138 and 143 example gates passed. This includes the forward
+billboard path, 14 grove inspection views, and 31,090 forest placements in 829
+canopy clusters. The 136 gate also checks live memory growth. These gates are
+functional checks, not proof of visual quality. Format-check-tree passed for
+1,817 files; example-copy and banned-terms gates passed. The repeated fixed
+front captures are byte-identical. No full compiler suite was needed for this
+bounded generator/example change.
+
+### Unchanged grove and shared consumers
+
+![Five-tree control](images/birch-crown-recovery/control-grove-birches.png)
+
+![Five-tree candidate](images/birch-crown-recovery/connected-grove-birches.png)
+
+The five original showcase seeds, heights and placements remain unchanged.
+These views use the existing birches camera preset, the same fixed clock and
+wind zero. The private presentation also includes actual 136 deferred and 137
+forward starts, plus near and far 143 forest views. The forest views establish
+integration in context; they are not an isolated same-tree measurement of a
+mesh-to-atlas transition. Close card layering and dark pockets remain visible.

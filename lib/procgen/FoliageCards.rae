@@ -100,3 +100,54 @@ func addFoliageSpray(
     )
   }
 }
+
+# Explicit comparison modes keep the same supporting twigs and wind anchors.
+enum FoliageSprayStyle { control, texture, connected }
+
+func addConnectedFoliageSpray(
+  mesh: mod MeshData
+  center: view Vec3
+  pivot: view Vec3
+  branchDirection: view Vec3
+  extent: view Vec3
+  shadeNormal: view Vec3
+  seed: view Int
+) {
+  let direction: Vec3 = vnorm(a: branchDirection)
+  let sideways: Vec3 = foliageBasis(direction: direction)
+  let flexibility: Float = foliageSprayFlexibility(seed: seed)
+  # Fewer, longer overlapping layers follow the supporting spray. A broad
+  # interior connects them; smaller trailing layers break its silhouette.
+  loop var layer: Int = 0, layer < 3, ++layer {
+    let fraction: Float = layer.toFloat() * 0.5
+    let offset: Vec3 = vadd(
+      a: vscale(a: direction, s: (fraction - 0.45) * extent.z * 0.85)
+      b: vscale(a: sideways, s: (hash2(x: layer, y: 3, seed: seed) - 0.5) * extent.y * 0.8)
+    )
+    let size: Float = 1.0 - fraction * 0.18
+    let firstVertex: Int = mesh.vertCount
+    addFoliageCard(
+      mesh: mesh
+      center: vadd(a: center, b: offset)
+      pivot: pivot
+      halfWidth: extent.x * size * 1.05
+      halfHeight: extent.z * size * 0.90
+      shadeNormal: shadeNormal
+      mirrored: hash2(x: layer, y: 6, seed: seed) > 0.5
+      flexibility: flexibility
+    )
+    # Smooth the large crown envelope, not individual leaf-face normals.
+    # This stays attached to the tree while the alpha plane faces the camera.
+    loop var corner: Int = 0, corner < 4, ++corner {
+      let horizontal: Float = ((corner % 2).toFloat() * 2.0 - 1.0) * extent.x * 0.20
+      let vertical: Float = ((corner / 2).toFloat() * 2.0 - 1.0) * extent.z * 0.22
+      let normal: Vec3 = vnorm(
+        a: vadd(a: shadeNormal, b: Vec3.create(x: horizontal, y: 0, z: vertical))
+      )
+      let vertexOffset: Int = (firstVertex + corner) * 8
+      mesh.verts.set(index: vertexOffset + 3, value: normal.x)
+      mesh.verts.set(index: vertexOffset + 4, value: normal.y)
+      mesh.verts.set(index: vertexOffset + 5, value: normal.z)
+    }
+  }
+}
