@@ -109,7 +109,9 @@ angles. The late-day frame exposes frame twists, ring steps and normal seams.
 
 ## Silver-birch species studies
 
-The finished species has a separate bounded capture set:
+The rejected finish pass has a separate bounded capture set. These historical
+images are not an approved visual target. See the matched
+[recovery review](landscape-recovery-review.md) before using them as a baseline:
 
 ```sh
 tools/capture-birch-studies.sh captures
@@ -125,6 +127,11 @@ under-crown; the bottom row is warm, cool and night.
 ![Silver-birch light and view studies](images/birch-finish-studies.jpg)
 
 ## Near-grass treatment
+
+**Visual result rejected on 2026-10-25.** The following records the implemented
+mechanism; it does not establish the requested ground-cover quality. The
+[recovery review](landscape-recovery-review.md) requires a rendered alternative
+comparison before new flower/fern composition uses this as its foundation.
 
 The close-view grass now uses one shared four-segment curved ribbon in 138 and
 the three walker renderers. The previous control was a single six-vertex flat

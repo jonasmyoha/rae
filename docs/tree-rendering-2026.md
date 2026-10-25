@@ -393,7 +393,11 @@ This includes the walker's running-memory check, the forward path, all nine
 grove views and the large forest. These are correctness checks, not a GPU
 performance comparison.
 
-## 9. Birch hybrid-card prototype
+## 9. Rejected birch hybrid-card prototype (historical)
+
+**Rejected in review on 2026-10-25.** This section records the
+prior implementation, not the current recommendation. See section 11 and
+[the recovery review](landscape-recovery-review.md).
 
 The current proof keeps the shipped twig pivots, card centres and crown
 normals. It changes only silver birch. Every spray now follows its source twig
@@ -436,7 +440,11 @@ rotation and shimmer. Example gates 136, 137, 138 and 143 passed. These sampled
 views did not show a new pop, but they do not replace a future continuous-motion
 capture when the final species and its middle-distance level are tuned.
 
-## 10. Finished silver-birch species
+## 10. Rejected silver-birch finish pass (historical)
+
+**The finished claim was wrong.** Technical checks did not establish the desired
+appearance. This result was rejected on 2026-10-25; the captures and
+mesh counts below describe that historical implementation.
 
 The species keeps the hybrid foliage decision from section 9 and replaces the
 old straight, intersecting scaffold. Its stem now uses the shared sculptural
@@ -485,3 +493,24 @@ foliage bounds. Hardware checks `surfaceImages`, `leafWind` and
 `impostorBake` passed. Example gates 136, 137, 138 and 143 passed, and two
 fixed side captures were byte-identical. These checks establish compatibility
 and repeatability; they do not claim a frame-time improvement.
+
+## 11. Recovery control: original fine-edge texture and crown coverage
+
+The 25 October review restores the original `birchLeaves.png` from `e86992db`
+and uses its entire UV rectangle. Four or five unequal overlapping cards per
+twig spray face the camera, with centres distributed along/across the same
+supporting twig. Crown normals remain independent of the camera. The newer
+scaffold, bark, twig pivots, species colours and five study seeds stay unchanged
+so this foliage repair is a controlled comparison against the rejected result.
+
+The first recovery restores much of the lost fullness and fine perimeter. It
+still has distinct clumps, dark pockets and repetitive leaf marks. It is not an
+approved species treatment and must not be rolled out to other trees. Larger
+coverage and more cards also increase potential alpha overdraw; no performance
+improvement is claimed. Shared textures, batches, wind anchors and existing
+surface/shadow/atlas paths remain in use.
+
+[Original, rejected and repaired frames](landscape-recovery-review.md) explain
+the visual differences and link the private reference presentation. The new
+fixture checks camera-facing modes, full-image UVs, alpha coverage, mips and
+bounds; none of these assertions measures visual quality.

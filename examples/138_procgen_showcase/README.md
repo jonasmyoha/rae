@@ -1,5 +1,11 @@
 # Autumn Grove
 
+**Art recovery in progress (25 October 2026).** The first landscape series did
+not meet the supplied references. Birch currently uses a recovery candidate
+with the original fine-edge texture and restored crown coverage; the grass,
+flower and fork study images below remain historical, rejected visual results.
+See the [before/rejected/repair comparison and task audit](../../docs/landscape-recovery-review.md).
+
 A procedural prop showcase with about sixty trees (including the six original
 autumn trees and a woodland of the leaf-patch forms over the whole island), rock
 groups across the island, low shrubs, modeled oxeye daisies and harebells, the
@@ -275,13 +281,12 @@ near-black lenticels, thicker irregular scars and quiet paper grain. Seeded UV
 offsets stop every limb from starting on the same mark; duplicated minor-branch
 seams and the low-contrast texture edges keep the wrap quiet.
 
-The crown uses the original four-cell `birchLeaves.png` atlas. Broad, drooping
-and forked sprays have different silhouettes, fine cutout edges and deliberate
-holes. Interior cards keep their twig plane while smaller edge cards face the
-camera. Each fine brown twig and its attached cards share one fixed pivot and
-slow response, while the trunk and primary branches remain rigid. Crown normals
-stay independent of card orientation. Deferred, forward, shadow and
-distant-bake passes share the same alpha cutoff and coverage-preserving mips.
+The recovery candidate uses the original full-image fine-edge `birchLeaves.png`,
+not the rejected four-cell atlas. Four or five overlapping camera-facing cards
+make each spray. Centres remain attached to the same twigs, and crown normals
+stay independent of camera direction. The twig and foliage share a fixed wind
+pivot; primary wood remains rigid. Deferred, forward, shadow and distant-bake
+passes retain the existing alpha cutoff and coverage-preserving mips.
 
 The shared forest kind has five mesh parts and two textures reused by every
 instance in 136, 137 and 143. Those forests retain the common
@@ -291,9 +296,8 @@ Autumn Grove uploads five independent close prototypes for inspection and does
 not switch LODs per instance. See
 [the rendering review](../../docs/tree-rendering-2026.md).
 
-The close mesh still exposes a crossed card at an exact grazing angle, and the
-painted sprays can repeat where several overlap. The forest's missing dedicated
-middle mesh and those atlas limits remain later work; other tree species do not
-inherit this treatment implicitly.
+The recovery still shows rounded clumps, dark interior pockets and repeated
+painted details. The forest also lacks a dedicated middle mesh. This is a
+recovery control, not an approved foliage treatment for other species.
 
-![Silver birch stand](references/Birches.png)
+![First birch recovery candidate](../../docs/images/landscape-recovery/repair1-front.png)
