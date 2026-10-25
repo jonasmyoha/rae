@@ -33,8 +33,22 @@ func main() ret Int {
   let tree: BirchTree = birchTree(seed: 1437, height: 5.5)
   let repeat: BirchTree = birchTree(seed: 1437, height: 5.5)
   let different: BirchTree = birchTree(seed: 311, height: 5.5)
-  if not checkMesh(mesh: tree.wood) or not checkMesh(mesh: tree.twigWood) or tree.twigs.length is not 130 {
+  let woodValid: Bool = checkMesh(mesh: tree.wood)
+  let twigValid: Bool = checkMesh(mesh: tree.twigWood)
+  if not woodValid or not twigValid {
     ret 1
+  }
+  if tree.twigs.length < 45 or tree.twigs.length > 75 or tree.wood.windPivots.length is not 0 {
+    ret 23
+  }
+  if tree.twigWood.vertCount is not tree.twigs.length * 25 or tree.twigWood.windPivots.length is not tree.twigWood.vertCount * 4 or tree.twigWood.leafCards.length is not tree.twigWood.vertCount * 4 {
+    ret 24
+  }
+  if tree.minimumJunctionNormalDot < 0.25 or tree.minimumFrameDot < 0.8 {
+    ret 29
+  }
+  if tree.wood.verts.length is not repeat.wood.verts.length or tree.wood.indices.length is not repeat.wood.indices.length {
+    ret 25
   }
   var changes: Int = 0
   loop var index: Int = 0, index < tree.wood.verts.length, ++index {
@@ -49,24 +63,54 @@ func main() ret Int {
   if changes < 100 {
     ret 3
   }
-  # The duplicated first/last vertex on every main-stem ring joins in space
-  # and normal; U differs by one complete texture period.
-  loop var ring: Int = 0, ring <= 16, ++ring {
-    let first: Int = ring * 13 * 8
-    let last: Int = first + 12 * 8
-    loop var axis: Int = 0, axis < 6, ++axis {
+  var buriedRoot: Bool = false
+  loop var vertex: Int = 0, vertex < tree.wood.vertCount, ++vertex {
+    if tree.wood.verts.copyAtDefault(index: vertex * 8 + 2) < -0.10 {
+      buriedRoot = true
+    }
+    let u: Float = tree.wood.verts.copyAtDefault(index: vertex * 8 + 6)
+    let value: Float = tree.wood.verts.copyAtDefault(index: vertex * 8 + 7)
+    if u is not u or value is not value {
+      ret 4
+    }
+  }
+  if not buriedRoot {
+    ret 5
+  }
+  # Every fine twig has a stable duplicated UV seam and one shared negative
+  # response around its fixed attachment. Primary wood has no wind metadata.
+  loop var twigIndex: Int = 0, twigIndex < tree.twigs.length, ++twigIndex {
+    let twig: BirchTwig = tree.twigs.copyAtDefault(index: twigIndex)
+    let firstVertex: Int = twigIndex * 25
+    loop var ring: Int = 0, ring < 5, ++ring {
+      let first: Int = (firstVertex + ring * 5) * 8
+      let last: Int = first + 4 * 8
+      loop var axis: Int = 0, axis < 6, ++axis {
+        if Math.abs(
+          value: tree.twigWood.verts.copyAtDefault(index: first + axis) - tree.twigWood.verts.copyAtDefault(
+            index: last + axis
+          )
+        ) > 0.00001 {
+          ret 26
+        }
+      }
       if Math.abs(
-        value: tree.wood.verts.copyAtDefault(index: first + axis) - tree.wood.verts.copyAtDefault(
-          index: last + axis
-        )
+        value: tree.twigWood.verts.copyAtDefault(index: last + 6) - tree.twigWood.verts.copyAtDefault(
+          index: first + 6
+        ) - 1.0
       ) > 0.00001 {
-        ret 4
+        ret 27
       }
     }
-    if tree.wood.verts.copyAtDefault(index: last + 6) - tree.wood.verts.copyAtDefault(
-      index: first + 6
-    ) is not 1.0 {
-      ret 5
+    loop var vertex: Int = 0, vertex < 25, ++vertex {
+      let windBase: Int = (firstVertex + vertex) * 4
+      if tree.twigWood.windPivots.copyAtDefault(index: windBase) is not twig.start.x or tree.twigWood.windPivots.copyAtDefault(
+        index: windBase + 1
+      ) is not twig.start.y or tree.twigWood.windPivots.copyAtDefault(index: windBase + 2) is not twig.start.z or tree.twigWood.windPivots.copyAtDefault(
+        index: windBase + 3
+      ) >= 0.0 {
+        ret 28
+      }
     }
   }
   var patches: Int = 0
@@ -214,9 +258,51 @@ func main() ret Int {
       ret 19
     }
   }
+  let barkBytes: List(Int) = Sys.readFileBytes(path: "lib/assets/trees/birchBark.png")
+  var barkWidth: Int = 0
+  var barkHeight: Int = 0
+  let bark: List(Int) = decodePng(
+    png: barkBytes
+    len: barkBytes.length
+    width: barkWidth
+    height: barkHeight
+  )
+  if barkWidth is not 512 or barkHeight is not 512 {
+    ret 30
+  }
+  var oppositeEdgeDifference: Int = 0
+  loop var offset: Int = 0, offset < 512, ++offset {
+    let left: Int = bark.copyAtDefault(index: offset * 512)
+    let right: Int = bark.copyAtDefault(index: offset * 512 + 511)
+    let top: Int = bark.copyAtDefault(index: offset)
+    let bottom: Int = bark.copyAtDefault(index: 511 * 512 + offset)
+    loop var channel: Int = 0, channel < 3, ++channel {
+      let shift: Int = channel * 8
+      oppositeEdgeDifference = oppositeEdgeDifference + Math.abs(
+        value: ((left shr shift) bitand 255) - ((right shr shift) bitand 255)
+      )
+      oppositeEdgeDifference = oppositeEdgeDifference + Math.abs(
+        value: ((top shr shift) bitand 255) - ((bottom shr shift) bitand 255)
+      )
+    }
+  }
+  if oppositeEdgeDifference > 512 * 6 * 18 {
+    ret 31
+  }
   let seeds: List(Int) = { 19, 311, 1437, 4201 }
-  loop let sampleSeed: Int in seeds {
-    let sampleTree: BirchTree = birchTree(seed: sampleSeed, height: 5.5)
+  let heights: List(Float) = { 4.8, 5.5, 7.2, 8.6 }
+  loop var sampleIndex: Int = 0, sampleIndex < seeds.length, ++sampleIndex {
+    let sampleSeed: Int = seeds.copyAtDefault(index: sampleIndex)
+    let sampleTree: BirchTree = birchTree(
+      seed: sampleSeed
+      height: heights.copyAtDefault(index: sampleIndex)
+    )
+    if not checkMesh(mesh: sampleTree.wood) or not checkMesh(mesh: sampleTree.twigWood) or sampleTree.twigs.length < 45 or sampleTree.twigs.length > 75 {
+      ret 32
+    }
+    if sampleTree.minimumJunctionNormalDot < 0.25 or sampleTree.minimumFrameDot < 0.8 {
+      ret 33
+    }
     loop var tone: Int = 0, tone < 3, ++tone {
       let sample: MeshData = birchLeaves(twigs: sampleTree.twigs, seed: sampleSeed, tone: tone)
       if not checkMesh(mesh: sample) {
@@ -235,6 +321,6 @@ func main() ret Int {
       }
     }
   }
-  log("birch: valid bark, hybrid leaf cards, four-cell cutout atlas, mips and forest placement")
+  log("birch: joined stable wood, animated twigs, hybrid atlas, mips and bounds")
   ret 0
 }

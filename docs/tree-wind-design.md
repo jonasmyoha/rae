@@ -46,11 +46,13 @@ The structural/branch hierarchy below remains a later refinement.
   fixed pivots, consistent rotated normals, exact calm and actual movement.
   Fixture 1141 checks deterministic shared pivots and rigid spruce layers.
 
-Birch uses camera-facing clusters: wind moves their centres around fixed twig
-roots, and the camera supplies the corner axes. The crown lighting normal still
-rotates with wind, independently of the camera. Colour, shadow and atlas bake
-passes share the pose. See tree-rendering-2026.md §8 for the vertex layout and
-previous-camera motion-vector handling.
+Birch uses a mix of branch-plane and camera-facing clusters. Its fine brown
+twig geometry and attached cards carry the same fixed root and response, so
+they rotate together; the trunk and primary white wood have no wind metadata
+and stay rigid. The camera supplies only the camera-facing cards' corner axes.
+The crown lighting normal still rotates with wind independently of the camera.
+Colour, shadow and atlas-bake passes share the pose. See
+tree-rendering-2026.md §8-10 for the vertex layout and finished species.
 
 There is no C runtime change. The full branch hierarchy and projected-size
 animation LOD proposed below are not part of this first pass. Current phase

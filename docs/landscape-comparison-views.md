@@ -106,3 +106,20 @@ All three use the same 1280 by 800 headless capture settings, neutral rough
 wood material, seed 206 for the young fork and seed 907 for the mature fork.
 The front and side frames expose the joined openings, taper and unequal branch
 angles. The late-day frame exposes frame twists, ring steps and normal seams.
+
+## Silver-birch species studies
+
+The finished species has a separate bounded capture set:
+
+```sh
+tools/capture-birch-studies.sh captures
+tools/capture-birch-studies.sh verify
+```
+
+It records daylight, side, under-crown, warm late-day, cool morning and
+moonlit views for the same five seeds and sizes. Full BMP/PNG frames and logs
+stay under `/tmp/rae-birch-studies`; the small review contact sheet below is
+the committed evidence. Left to right, its top row is daylight, side and
+under-crown; the bottom row is warm, cool and night.
+
+![Silver-birch light and view studies](images/birch-finish-studies.jpg)

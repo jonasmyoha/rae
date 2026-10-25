@@ -435,3 +435,53 @@ and three forest-walk positions were inspected for disappearing sheets,
 rotation and shimmer. Example gates 136, 137, 138 and 143 passed. These sampled
 views did not show a new pop, but they do not replace a future continuous-motion
 capture when the final species and its middle-distance level are tuned.
+
+## 10. Finished silver-birch species
+
+The species keeps the hybrid foliage decision from section 9 and replaces the
+old straight, intersecting scaffold. Its stem now uses the shared sculptural
+fork's smooth path, root flare, stable transported frames and open junctions.
+Two unequal primary branches reuse the trunk opening vertices instead of
+placing a cylinder through the bark. Sixteen smaller seeded limbs establish an
+asymmetric crown; their lengths and rise shrink toward the top. Fine hanging
+twigs are distributed unevenly, and fourteen percent of eligible leaf sprays
+are omitted to preserve visible wood and clear sky sectors.
+
+The bark albedo was repainted at an intermediate scale. It keeps a clean white
+paper base, fewer near-black lenticels, several thicker scars and restrained
+grey paper curls. The image's opposite borders differ by less than the bounded
+low-contrast seam threshold in fixture 1235. Minor limbs duplicate their
+texture seam exactly. Seeded U/V offsets prevent a scar from appearing at the
+same branch position throughout a tree. The joined primary mesh retains the
+shared fork topology; the repeat sampler and quiet image borders prevent a
+visible wrap in the inspected side and grazing views.
+
+Only fine twig wood moves. Its vertices carry the same pivot and negative
+response as the attached foliage spray. The twig and leaves therefore turn as
+one branch-supported group while its root stays fixed. The stem, joined
+primaries and other structural limbs use the ordinary rigid vertex layout.
+
+Autumn Grove now shows five independent seeds (1437, 311, 4201, 827 and 2189)
+at 6.6, 7.1, 7.6, 8.0 and 8.4 metres. The walker forests retain their stable
+kind number and use the same generator, bark, leaf atlas, material colours and
+impostor bake. Their current middle level deliberately shares the close mesh;
+this task does not invent an unreviewed reduced silhouette.
+
+The fixed species study covers daylight, profile, underside, warm late-day,
+cool morning and moonlit conditions. The foliage remains non-emissive at night,
+white bark stays legible in daylight without clipping, and the underside keeps
+the joined scaffold visible. Remaining limits are card crossings at exact
+grazing angles, repeatable painted spray details where several cards overlap,
+and the missing dedicated middle-distance birch mesh.
+
+For seed 1437 at the shared 5.5-metre reference size, the finished close model
+contains 3,033 vertices and 3,942 triangles: 1,223/1,984 in rigid structural
+wood, 1,350/1,728 in animated fine twigs, and 460/230 in 115 foliage cards.
+The shared forest instances those five parts; it does not regenerate geometry
+per tree. Fixture 1235 passed for four seeds from 4.8 to 8.6 metres, including
+finite meshes, joined-junction normals, transported frames, buried roots,
+duplicated fine-branch seams, bark-edge contrast, wind pivots and conservative
+foliage bounds. Hardware checks `surfaceImages`, `leafWind` and
+`impostorBake` passed. Example gates 136, 137, 138 and 143 passed, and two
+fixed side captures were byte-identical. These checks establish compatibility
+and repeatability; they do not claim a frame-time improvement.

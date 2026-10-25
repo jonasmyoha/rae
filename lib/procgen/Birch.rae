@@ -1,5 +1,5 @@
-# Seeded silver birch: a slender, continuous UV-mapped stem, rising limbs,
-# hanging twigs and irregular textured foliage sprays. Z-up, metres.
+# Seeded silver birch: a slender joined primary fork, stable-frame limbs,
+# hanging animated twigs and irregular textured foliage sprays. Z-up, metres.
 # The meshes are immutable prototypes; instances share them and their texture.
 import Math
 open Vec3
@@ -7,6 +7,7 @@ open Mesh3d
 open Noise
 open procgen/Foliage
 open procgen/FoliageCards
+open procgen/SculpturalFork
 
 type BirchTwig {
   start: Vec3
@@ -18,6 +19,8 @@ type BirchTree {
   wood: MeshData
   twigWood: MeshData
   twigs: List(BirchTwig)
+  minimumJunctionNormalDot: Float
+  minimumFrameDot: Float
 }
 
 func birchCurve(twig: view BirchTwig, amount: view Float) ret Vec3 {
@@ -31,37 +34,57 @@ func birchCurve(twig: view BirchTwig, amount: view Float) ret Vec3 {
   )
 }
 
-# Shared ring vertices, smooth radial normals and a duplicated UV seam.
-# V measures length in metres; branches keep roughly the same bark-mark size.
-func birchTube(
+func birchPathPoint(path: view ForkPath, amount: view Float) ret Vec3 {
+  let scaled: Float = Math.clamp(val: amount, low: 0.0, high: 1.0) * (path.points.length - 1).toFloat()
+  let first: Int = Math.floor(x: scaled).toInt()
+  let second: Int = Math.min(a: first + 1, b: path.points.length - 1)
+  let blend: Float = scaled - first.toFloat()
+  ret vadd(
+    a: vscale(a: path.points.copyAtDefault(index: first), s: 1.0 - blend)
+    b: vscale(a: path.points.copyAtDefault(index: second), s: blend)
+  )
+}
+
+func birchTwigFromPath(path: view ForkPath) ret BirchTwig {
+  ret BirchTwig {
+    start: path.points.copyAtDefault(index: 0)
+    middle: birchPathPoint(path: path, amount: 0.52)
+    end: path.points.copyAtDefault(index: path.points.length - 1)
+  }
+}
+
+# A duplicated texture seam around each ring, with the same transported frame
+# as the joined-fork primitive. Thin branches do not twist their bark or step
+# their normals as their curve changes direction.
+func birchPathTube(
   mesh: mod MeshData
-  curve: view BirchTwig
-  radius: view Float
+  path: view ForkPath
   sides: view Int
-  steps: view Int
+  uOffset: view Float
+  vOffset: view Float
 ) {
   let base: Int = mesh.vertCount
-  let length: Float = vlen(a: vsub(a: curve.end, b: curve.start))
-  loop var ring: Int = 0, ring <= steps, ++ring {
-    let amount: Float = ring.toFloat() / steps.toFloat()
-    let point: Vec3 = birchCurve(twig: curve, amount: amount)
-    let direction: Vec3 = vnorm(
-      a: vadd(
-        a: vscale(a: vsub(a: curve.middle, b: curve.start), s: 1.0 - amount)
-        b: vscale(a: vsub(a: curve.end, b: curve.middle), s: amount)
+  var distance: Float = 0
+  var previousSide: Vec3 = foliageBasis(direction: foliageTangentAt(points: path.points, index: 0))
+  loop var ring: Int = 0, ring < path.points.length, ++ring {
+    if ring > 0 {
+      distance = distance + forkDistance(
+        a: path.points.copyAtDefault(index: ring - 1)
+        b: path.points.copyAtDefault(index: ring)
       )
-    )
-    let side: Vec3 = foliageBasis(direction: direction)
-    let across: Vec3 = vcross(a: direction, b: side)
-    let taper: Float = 1.0 - amount * 0.88
+    }
+    let frame: ForkFrame = forkFrame(points: path.points, index: ring, previousSide: previousSide)
+    previousSide = frame.side
+    let center: Vec3 = path.points.copyAtDefault(index: ring)
+    let radius: Float = path.radii.copyAtDefault(index: ring)
     loop var column: Int = 0, column <= sides, ++column {
       let around: Float = column.toFloat() / sides.toFloat()
       let angle: Float = around * 6.2831853
       let normal: Vec3 = vadd(
-        a: vscale(a: side, s: Math.cos(x: angle))
-        b: vscale(a: across, s: Math.sin(x: angle))
+        a: vscale(a: frame.side, s: Math.cos(x: angle))
+        b: vscale(a: frame.across, s: Math.sin(x: angle))
       )
-      let position: Vec3 = vadd(a: point, b: vscale(a: normal, s: radius * taper))
+      let position: Vec3 = vadd(a: center, b: vscale(a: normal, s: radius))
       pushVert(
         verts: mesh.verts
         px: position.x
@@ -70,11 +93,11 @@ func birchTube(
         nx: normal.x
         ny: normal.y
         nz: normal.z
-        u: around
-        value: amount * length * 0.34 + curve.start.z * 0.34
+        u: around + uOffset
+        value: distance * 0.30 + vOffset
       )
       mesh.vertCount = mesh.vertCount + 1
-      if ring < steps and column < sides {
+      if ring < path.points.length - 1 and column < sides {
         let first: Int = base + ring * (sides + 1) + column
         mesh.indices.add(value: first)
         mesh.indices.add(value: first + 1)
@@ -87,131 +110,292 @@ func birchTube(
   }
 }
 
+func birchTube(
+  mesh: mod MeshData
+  curve: view BirchTwig
+  radius: view Float
+  sides: view Int
+  steps: view Int
+  seed: view Int
+) {
+  let controls: List(Vec3) = { curve.start, curve.middle, curve.end }
+  let radii: List(Float) = { radius, radius * 0.54, radius * 0.08 }
+  let path: ForkPath = forkSmoothPath(controls: controls, radii: radii, steps: steps)
+  birchPathTube(
+    mesh: mesh
+    path: path
+    sides: sides
+    uOffset: hash2(x: seed, y: 17, seed: 31)
+    vOffset: hash2(x: seed, y: 19, seed: 37)
+  )
+}
+
+func birchScaleForkUvs(
+  mesh: mod MeshData
+  firstVertex: view Int
+  uOffset: view Float
+  vOffset: view Float
+) {
+  loop var vertex: Int = firstVertex, vertex < mesh.vertCount, ++vertex {
+    let base: Int = vertex * 8
+    mesh.verts.set(index: base + 6, value: mesh.verts.copyAtDefault(index: base + 6) + uOffset)
+    mesh.verts.set(
+      index: base + 7
+      value: mesh.verts.copyAtDefault(index: base + 7) * 0.30 + vOffset
+    )
+  }
+}
+
+func birchAnimateTwig(
+  mesh: mod MeshData
+  firstVertex: view Int
+  pivot: view Vec3
+  flexibility: view Float
+) {
+  loop var vertex: Int = firstVertex, vertex < mesh.vertCount, ++vertex {
+    mesh.windPivots.add(value: pivot.x)
+    mesh.windPivots.add(value: pivot.y)
+    mesh.windPivots.add(value: pivot.z)
+    mesh.windPivots.add(value: flexibility)
+    mesh.leafCards.add(value: 0)
+    mesh.leafCards.add(value: 0)
+    mesh.leafCards.add(value: 0)
+    mesh.leafCards.add(value: 0)
+  }
+}
+
+func birchSpraySeed(seed: view Int, twigIndex: view Int) ret Int {
+  ret seed + twigIndex * 41 + 17
+}
+
 func birchTree(seed: view Int, height: view Float) ret BirchTree {
   var wood: MeshData = foliageMesh()
   var twigWood: MeshData = foliageMesh()
-  var twigs: List(BirchTwig) = List.create(BirchTwig, cap: 112)
-  let lean: Float = (hash2(x: seed, y: 2, seed: 117) - 0.5) * height * 0.10
-  let stem: BirchTwig = {
-    start: Vec3.create(x: 0, y: 0, z: 0)
-    middle: Vec3.create(x: -lean * 0.45, y: height * 0.018, z: height * 0.55)
-    end: Vec3.create(x: lean, y: height * 0.025, z: height)
+  var limbs: List(BirchTwig) = List.create(BirchTwig, cap: 20)
+  var twigs: List(BirchTwig) = List.create(BirchTwig, cap: 72)
+
+  let leanAngle: Float = hash2(x: seed, y: 2, seed: 117) * 6.2831853
+  let lean: Float = (0.25 + hash2(x: seed, y: 3, seed: 119) * 0.45) * height * 0.10
+  let stemControls: List(Vec3) = {
+    { x: 0, y: 0, z: -0.16 }
+    {
+      x: Math.cos(x: leanAngle) * lean * 0.08
+      y: Math.sin(x: leanAngle) * lean * 0.08
+      z: height * 0.22
+    }
+    {
+      x: Math.cos(x: leanAngle) * lean * 0.32
+      y: Math.sin(x: leanAngle) * lean * 0.32
+      z: height * 0.48
+    }
+    {
+      x: Math.cos(x: leanAngle) * lean * 0.72
+      y: Math.sin(x: leanAngle) * lean * 0.72
+      z: height * 0.76
+    }
+    { x: Math.cos(x: leanAngle + 0.18) * lean, y: Math.sin(x: leanAngle + 0.18) * lean, z: height }
   }
-  birchTube(
+  let baseRadius: Float = height * 0.023
+  let stemRadii: List(Float) = {
+    baseRadius * 1.30
+    baseRadius
+    baseRadius * 0.78
+    baseRadius * 0.46
+    baseRadius * 0.10
+  }
+  let stem: ForkPath = forkSmoothPath(controls: stemControls, radii: stemRadii, steps: 4)
+  var minimumJunctionNormalDot: Float = 1
+  var minimumFrameDot: Float = forkPathFrameDot(path: stem)
+  let firstSide: Int = 2 + seed % 3
+  let openings: List(ForkOpening) = forkTrunk(
     mesh: wood
-    curve: stem
-    radius: height * 0.025
+    path: stem
     sides: 12
-    steps: 16
+    seed: seed
+    firstOpeningRing: 7
+    firstOpeningSide: firstSide
+    secondOpeningRing: 11
+    secondOpeningSide: (firstSide + 5 + seed % 2) % 12
+    openingCount: 2
   )
-  loop var branch: Int = 0, branch < 26, ++branch {
-    let fraction: Float = branch.toFloat() / 26.0
-    let level: Float = 0.36 + fraction * 0.56
-    let start: Vec3 = birchCurve(twig: stem, amount: level)
-    let angle: Float = branch.toFloat() * 2.3999632 + hash2(x: branch, y: 0, seed: seed) * 0.65
+  birchScaleForkUvs(
+    mesh: wood
+    firstVertex: 0
+    uOffset: hash2(x: seed, y: 23, seed: 43)
+    vOffset: hash2(x: seed, y: 29, seed: 47)
+  )
+
+  loop var primary: Int = 0, primary < openings.length, ++primary {
+    let opening: ForkOpening = openings.copyAtDefault(index: primary)
+    let center: Vec3 = forkOpeningCenter(mesh: wood, opening: opening)
+    let outward: Vec3 = forkOpeningNormal(mesh: wood, opening: opening)
+    let turn: Float = (hash2(x: primary, y: 31, seed: seed) - 0.5) * 0.45
+    let direction: Vec3 = vnorm(
+      a: Vec3.create(
+        x: outward.x + Math.cos(x: leanAngle + turn) * 0.16
+        y: outward.y + Math.sin(x: leanAngle + turn) * 0.16
+        z: 0.42 + primary.toFloat() * 0.16
+      )
+    )
+    let radius: Float = baseRadius * (0.46 - primary.toFloat() * 0.10)
+    let start: Vec3 = vadd(a: center, b: vscale(a: direction, s: radius * 0.12))
+    let branch: ForkPath = forkBranchPath(
+      start: start
+      direction: direction
+      length: height * (0.34 - primary.toFloat() * 0.04)
+      rise: height * (0.10 + primary.toFloat() * 0.04)
+      radius: radius
+    )
+    let firstVertex: Int = wood.vertCount
+    let normalDot: Float = forkJoinedBranch(mesh: wood, opening: opening, path: branch)
+    let frameDot: Float = forkPathFrameDot(path: branch)
+    if normalDot < minimumJunctionNormalDot {
+      minimumJunctionNormalDot = normalDot
+    }
+    if frameDot < minimumFrameDot {
+      minimumFrameDot = frameDot
+    }
+    birchScaleForkUvs(
+      mesh: wood
+      firstVertex: firstVertex
+      uOffset: hash2(x: primary, y: 37, seed: seed)
+      vOffset: hash2(x: primary, y: 41, seed: seed)
+    )
+    limbs.add(value: birchTwigFromPath(path: branch))
+  }
+
+  loop var branch: Int = 0, branch < 16, ++branch {
+    let fraction: Float = branch.toFloat() / 15.0
+    let level: Float = 0.34 + fraction * 0.59
+    let start: Vec3 = birchPathPoint(path: stem, amount: level)
+    let angle: Float = branch.toFloat() * 2.3999632 + hash2(x: branch, y: 0, seed: seed) * 0.82
     let radial: Vec3 = Vec3.create(x: Math.cos(x: angle), y: Math.sin(x: angle), z: 0)
-    let side: Vec3 = Vec3.create(x: -radial.y, y: radial.x, z: 0)
-    let reach: Float = height * (0.22 - fraction * 0.14) * (0.80 + hash2(
+    let reach: Float = height * (0.24 - fraction * 0.14) * (0.72 + hash2(
       x: branch
       y: 1
       seed: seed
-    ) * 0.35)
+    ) * 0.50)
+    let rise: Float = height * (0.10 + hash2(x: branch, y: 2, seed: seed) * 0.10)
     let limb: BirchTwig = {
       start: start
       middle: vadd(
         a: start
-        b: vadd(a: vscale(a: radial, s: reach * 0.55), b: Vec3.create(x: 0, y: 0, z: height * 0.16))
+        b: vadd(a: vscale(a: radial, s: reach * 0.46), b: Vec3.create(x: 0, y: 0, z: rise))
       )
       end: vadd(
         a: start
-        b: vadd(a: vscale(a: radial, s: reach), b: Vec3.create(x: 0, y: 0, z: height * 0.035))
+        b: vadd(
+          a: vscale(a: radial, s: reach)
+          b: Vec3.create(x: 0, y: 0, z: rise * (0.55 + hash2(x: branch, y: 3, seed: seed) * 0.45))
+        )
       )
     }
     birchTube(
       mesh: wood
       curve: limb
-      radius: height * (0.008 - fraction * 0.004)
+      radius: height * (0.0068 - fraction * 0.0034)
       sides: 7
-      steps: 7
+      steps: 3
+      seed: seed + branch * 13
     )
-    loop var spray: Int = 0, spray < 5, ++spray {
-      let attach: Float = 0.38 + spray.toFloat() * 0.14
+    limbs.add(value: limb)
+  }
+
+  loop var limbIndex: Int = 0, limbIndex < limbs.length, ++limbIndex {
+    let limb: BirchTwig = limbs.copyAtDefault(index: limbIndex)
+    let direction: Vec3 = vnorm(a: vsub(a: limb.end, b: limb.start))
+    let side: Vec3 = foliageBasis(direction: direction)
+    var sprayCount: Int = 3
+    if limbIndex < 2 {
+      sprayCount = 5
+    } else if hash2(x: limbIndex, y: 43, seed: seed) < 0.24 {
+      sprayCount = 2
+    } else if hash2(x: limbIndex, y: 47, seed: seed) > 0.72 {
+      sprayCount = 4
+    }
+    loop var spray: Int = 0, spray < sprayCount, ++spray {
+      let attach: Float = 0.28 + spray.toFloat() / (sprayCount - 1).toFloat() * 0.64
       let root: Vec3 = birchCurve(twig: limb, amount: attach)
-      let spread: Float = (hash2(x: branch * 5 + spray, y: 5, seed: seed) - 0.5) * height * 0.18
-      let hang: Float = height * (0.08 + hash2(x: branch * 5 + spray, y: 4, seed: seed) * 0.09)
-      let offset: Vec3 = vadd(
-        a: vscale(a: side, s: spread)
-        b: vscale(a: radial, s: height * 0.085)
-      )
+      let twigIndex: Int = twigs.length
+      let lateral: Float = (hash2(x: twigIndex, y: 5, seed: seed) - 0.5) * height * 0.13
+      let forward: Float = height * (0.045 + hash2(x: twigIndex, y: 7, seed: seed) * 0.055)
+      let hang: Float = height * (0.075 + hash2(x: twigIndex, y: 11, seed: seed) * 0.095)
+      let reach: Vec3 = vadd(a: vscale(a: side, s: lateral), b: vscale(a: direction, s: forward))
       let twig: BirchTwig = {
         start: root
-        middle: vadd(a: root, b: vadd(a: offset, b: Vec3.create(x: 0, y: 0, z: 0.12)))
-        end: vadd(
+        middle: vadd(
           a: root
-          b: vadd(a: vscale(a: offset, s: 1.25), b: Vec3.create(x: 0, y: 0, z: -hang))
+          b: vadd(a: vscale(a: reach, s: 0.58), b: Vec3.create(x: 0, y: 0, z: height * 0.025))
         )
+        end: vadd(a: root, b: vadd(a: reach, b: Vec3.create(x: 0, y: 0, z: -hang)))
       }
+      let firstVertex: Int = twigWood.vertCount
       birchTube(
         mesh: twigWood
         curve: twig
-        radius: height * 0.0019
+        radius: height * 0.0015
         sides: 4
-        steps: 4
+        steps: 2
+        seed: seed + twigIndex * 17
+      )
+      birchAnimateTwig(
+        mesh: twigWood
+        firstVertex: firstVertex
+        pivot: root
+        flexibility: foliageSprayFlexibility(seed: birchSpraySeed(seed: seed, twigIndex: twigIndex))
       )
       twigs.add(value: twig)
     }
   }
-  ret BirchTree { wood: own wood, twigWood: own twigWood, twigs: own twigs }
+  ret BirchTree {
+    wood: own wood
+    twigWood: own twigWood
+    twigs: own twigs
+    minimumJunctionNormalDot: minimumJunctionNormalDot
+    minimumFrameDot: minimumFrameDot
+  }
 }
 
-# Two unequal sprays follow different twigs on each limb. Seeded gaps let
-# branches show through; normals follow the crown rather than each small tuft.
+# Each hanging twig supports one irregular spray. Tone partitioning happens by
+# twig identity; the three material meshes combine into one open crown shape.
 func birchLeaves(twigs: view List(BirchTwig), seed: view Int, tone: view Int) ret MeshData {
   var mesh: MeshData = foliageMesh()
-  loop var branch: Int = 0, branch < twigs.length / 5, ++branch {
-    if branch % 3 is not tone {
+  loop var twigIndex: Int = 0, twigIndex < twigs.length, ++twigIndex {
+    if twigIndex % 3 is not tone {
       continue
     }
-    loop var spray: Int = 0, spray < 2, ++spray {
-      let spraySeed: Int = seed + branch * 41 + spray * 17
-      if spray is 1 and hash2(x: branch, y: 8, seed: seed) < 0.30 {
-        continue
-      }
-      let twig: BirchTwig = twigs.copyAtDefault(index: branch * 5 + 1 + spray * 3)
-      let center: Vec3 = birchCurve(twig: twig, amount: 0.28 + spray.toFloat() * 0.40)
-      let size: Float = (0.80 - branch.toFloat() / 26.0 * 0.25) * (0.82 + hash2(
-        x: branch
-        y: spray
-        seed: seed
-      ) * 0.32)
-      let extent: Vec3 = {
-        x: size * (0.78 + hash2(x: branch, y: 9, seed: seed) * 0.30)
-        y: size * (0.48 + hash2(x: branch, y: 10, seed: seed) * 0.35)
-        z: size * (0.90 + spray.toFloat() * 0.30)
-      }
-      let shadeNormal: Vec3 = vnorm(
-        a: Vec3.create(x: center.x * 0.38, y: center.y * 0.38, z: 0.85 + (center.z - 3.0) * 0.15)
-      )
-      addFoliageSpray(
-        mesh: mesh
-        center: center
-        pivot: twig.start
-        branchDirection: vsub(a: twig.end, b: twig.start)
-        extent: extent
-        shadeNormal: shadeNormal
-        seed: spraySeed
-      )
+    if hash2(x: twigIndex, y: 53, seed: seed) < 0.14 {
+      continue
     }
+    let twig: BirchTwig = twigs.copyAtDefault(index: twigIndex)
+    let center: Vec3 = birchCurve(twig: twig, amount: 0.58)
+    let twigLength: Float = vlen(a: vsub(a: twig.end, b: twig.start))
+    let size: Float = Math.clamp(val: twigLength * 1.16, low: 0.48, high: 0.92)
+    let extent: Vec3 = {
+      x: size * (0.72 + hash2(x: twigIndex, y: 59, seed: seed) * 0.28)
+      y: size * (0.44 + hash2(x: twigIndex, y: 61, seed: seed) * 0.28)
+      z: size * (0.98 + hash2(x: twigIndex, y: 67, seed: seed) * 0.32)
+    }
+    let shadeNormal: Vec3 = vnorm(a: Vec3.create(x: center.x * 0.34, y: center.y * 0.34, z: 0.92))
+    addFoliageSpray(
+      mesh: mesh
+      center: center
+      pivot: twig.start
+      branchDirection: vsub(a: twig.end, b: twig.start)
+      extent: extent
+      shadeNormal: shadeNormal
+      seed: birchSpraySeed(seed: seed, twigIndex: twigIndex)
+    )
   }
   ret own mesh
 }
 
 func birchLeafColor(tone: view Int) ret Vec3 {
   if tone is 0 {
-    ret Vec3.create(x: 0.75, y: 1.0, z: 0.80)
+    ret Vec3.create(x: 0.72, y: 0.98, z: 0.76)
   }
   if tone is 1 {
-    ret Vec3.create(x: 0.87, y: 1.10, z: 0.85)
+    ret Vec3.create(x: 0.84, y: 1.07, z: 0.82)
   }
-  ret Vec3.create(x: 0.98, y: 1.13, z: 0.90)
+  ret Vec3.create(x: 0.94, y: 1.10, z: 0.88)
 }

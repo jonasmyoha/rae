@@ -234,33 +234,40 @@ frames. The primitive is not wired into an existing species yet.
 
 ## Silver birch
 
-Five birches share the LOD0 prototype from `lib/procgen/Birch.rae`. The same
-prototype is planted by `app3d/GroveTrees` in walkers 136/137 and forest 143.
-Key **9** or `RAE_GROVE_VIEW=birches` frames the stand. The shared
-`RAE_CAMERA_AT` twelve-value camera override also works for repeatable side views.
+Five birches use deterministic seeds 1437, 311, 4201, 827 and 2189 at 6.6 to
+8.4 metres. The shared walker forests use the same generator and its selected
+seed as their instanced silver-birch kind. Key **9** or
+`RAE_GROVE_VIEW=birches` frames the daylight stand. The named studies
+`birches-side`, `birches-under`, `birches-warm`, `birches-cool` and
+`birches-night` keep the subject fixed while changing the view or light.
 
-The wood uses `lib/assets/trees/birchBark.png`: bright white with medium black
-lenticels, occasional broad scars and subtle papery detail. The crown uses an
-original four-cell `birchLeaves.png` atlas. Its broad, drooping and forked
-sprays have different silhouettes, fine cutout edges and deliberate holes.
-Interior cards keep their twig plane while smaller edge cards face the camera,
-so an orbit reveals depth without turning every spray into a visible sheet.
-Crown normals stay independent of both card orientation and camera rotation.
-Fixed twig pivots give the clusters coherent swaying motion. Deferred, forward,
-shadow and distant-bake passes all use the same alpha cutoff; texture and
-impostor mip chains preserve coverage.
+The structural mesh reuses the shared sculptural-fork path and junction code:
+a buried root flare leads into a slender leaning stem, two unequal primary
+branches join through openings in the trunk, and the smaller limbs use stable
+transported frames. The revised `birchBark.png` has clean whites, medium-scale
+near-black lenticels, thicker irregular scars and quiet paper grain. Seeded UV
+offsets stop every limb from starting on the same mark; duplicated minor-branch
+seams and the low-contrast texture edges keep the wrap quiet.
 
-The five mesh parts and two textures are shared by every instance. The shared
-walker forest uses this same generator in 136, 137 and 143. Those forests use
-the common near/middle/impostor distance path, although birch's middle level
-still shares the close mesh. The distant bake includes the bark and masked
-leaves. Autumn Grove deliberately keeps the close inspection mesh and does not
-switch LODs per instance. A dedicated reduced birch mesh remains future work.
-See [the rendering review](../../docs/tree-rendering-2026.md).
+The crown uses the original four-cell `birchLeaves.png` atlas. Broad, drooping
+and forked sprays have different silhouettes, fine cutout edges and deliberate
+holes. Interior cards keep their twig plane while smaller edge cards face the
+camera. Each fine brown twig and its attached cards share one fixed pivot and
+slow response, while the trunk and primary branches remain rigid. Crown normals
+stay independent of card orientation. Deferred, forward, shadow and
+distant-bake passes share the same alpha cutoff and coverage-preserving mips.
 
-The prototype still shows repeated scalloped masses at very close range, and
-some branch-plane cards cross when seen exactly edge-on. The later species pass
-will refine density, seasonal colour and the painted twig hints; this task keeps
-the treatment on birch rather than changing every tree at once.
+The shared forest kind has five mesh parts and two textures reused by every
+instance in 136, 137 and 143. Those forests retain the common
+near/middle/impostor distance path, although birch's middle level still shares
+the close mesh. The distant bake includes the revised bark and masked leaves.
+Autumn Grove uploads five independent close prototypes for inspection and does
+not switch LODs per instance. See
+[the rendering review](../../docs/tree-rendering-2026.md).
+
+The close mesh still exposes a crossed card at an exact grazing angle, and the
+painted sprays can repeat where several overlap. The forest's missing dedicated
+middle mesh and those atlas limits remain later work; other tree species do not
+inherit this treatment implicitly.
 
 ![Silver birch stand](references/Birches.png)
