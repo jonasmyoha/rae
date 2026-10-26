@@ -62,20 +62,21 @@ func placeHarebellParts(
   world: mod World3d
   renderer: mod DeferredRenderer
   flowers: view HarebellParts
+  control: view Bool
   position: view Vec3
 ) {
   placeFlowerPart(
     world: world
     renderer: renderer
     mesh: flowers.greens
-    material: harebellGreenMaterial()
+    material: harebellVariantGreenMaterial(control: control)
     position: position
   )
   placeFlowerPart(
     world: world
     renderer: renderer
     mesh: flowers.bells
-    material: harebellCorollaMaterial()
+    material: harebellVariantCorollaMaterial(control: control)
     position: position
   )
 }
@@ -129,18 +130,38 @@ func addHarebellStudy(
   singlePosition: view Vec3
   patchPosition: view Vec3
 ) {
-  let single: HarebellParts = harebellPatch(seed: 2203, count: 1, radius: 0.0)
+  let control: HarebellParts = harebellControlPatch(seed: 2203, count: 1, radius: 0.0)
+  placeHarebellParts(
+    world: world
+    renderer: renderer
+    flowers: control
+    control: true
+    position: Vec3.create(x: singlePosition.x - 0.60, y: singlePosition.y, z: singlePosition.z)
+  )
+  let single: HarebellParts = harebellVariant(
+    seed: 2203
+    count: 1
+    radius: 0.0
+    control: Sys.getEnv(name: "RAE_HAREBELL_CONTROL") is "1"
+  )
   placeHarebellParts(
     world: world
     renderer: renderer
     flowers: single
+    control: Sys.getEnv(name: "RAE_HAREBELL_CONTROL") is "1"
     position: singlePosition
   )
-  let patch: HarebellParts = harebellPatch(seed: 2371, count: 11, radius: 0.92)
+  let patch: HarebellParts = harebellVariant(
+    seed: 2371
+    count: 11
+    radius: 0.92
+    control: Sys.getEnv(name: "RAE_HAREBELL_CONTROL") is "1"
+  )
   placeHarebellParts(
     world: world
     renderer: renderer
     flowers: patch
+    control: Sys.getEnv(name: "RAE_HAREBELL_CONTROL") is "1"
     position: patchPosition
   )
 }

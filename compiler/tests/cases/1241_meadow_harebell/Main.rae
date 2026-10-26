@@ -17,6 +17,24 @@ func harebellMeshValid(mesh: view MeshData) ret Bool {
       ret false
     }
   }
+  loop var triangle: Int = 0, triangle < mesh.indices.length / 3, ++triangle {
+    let first: Int = mesh.indices.copyAtDefault(index: triangle * 3) * 8
+    let second: Int = mesh.indices.copyAtDefault(index: triangle * 3 + 1) * 8
+    let third: Int = mesh.indices.copyAtDefault(index: triangle * 3 + 2) * 8
+    let edgeA: Vec3 = Vec3.create(
+      x: mesh.verts.copyAtDefault(index: second) - mesh.verts.copyAtDefault(index: first)
+      y: mesh.verts.copyAtDefault(index: second + 1) - mesh.verts.copyAtDefault(index: first + 1)
+      z: mesh.verts.copyAtDefault(index: second + 2) - mesh.verts.copyAtDefault(index: first + 2)
+    )
+    let edgeB: Vec3 = Vec3.create(
+      x: mesh.verts.copyAtDefault(index: third) - mesh.verts.copyAtDefault(index: first)
+      y: mesh.verts.copyAtDefault(index: third + 1) - mesh.verts.copyAtDefault(index: first + 1)
+      z: mesh.verts.copyAtDefault(index: third + 2) - mesh.verts.copyAtDefault(index: first + 2)
+    )
+    if Vec3.vlen(a: Vec3.vcross(a: edgeA, b: edgeB)) < 0.000000001 {
+      ret false
+    }
+  }
   loop var vertex: Int = 0, vertex < mesh.vertCount, ++vertex {
     loop var field: Int = 0, field < 8, ++field {
       let value: Float = mesh.verts.copyAtDefault(index: vertex * 8 + field)
@@ -72,6 +90,49 @@ func harebellWithinBounds(mesh: view MeshData, radius: view Float) ret Bool {
   ret true
 }
 
+# Every green vertex must share a buried root and flexibility with a bell.
+# Record transitions rather than assuming a fixed vertex count per plant.
+func harebellRootsMatch(parts: view HarebellParts) ret Bool {
+  var roots: List(Int) = List.create(Int, cap: parts.plantCount)
+  loop var vertex: Int = 0, vertex < parts.bells.vertCount, ++vertex {
+    let offset: Int = vertex * 4
+    if vertex is 0 or parts.bells.windPivots.copyAtDefault(index: offset) is not parts.bells.windPivots.copyAtDefault(
+      index: offset - 4
+    ) or parts.bells.windPivots.copyAtDefault(index: offset + 1) is not parts.bells.windPivots.copyAtDefault(
+      index: offset - 3
+    ) {
+      roots.add(value: offset)
+    }
+    if parts.bells.windPivots.copyAtDefault(index: offset + 2) is not -0.010 {
+      ret false
+    }
+  }
+  if roots.length is not parts.plantCount {
+    ret false
+  }
+  loop var vertex: Int = 0, vertex < parts.greens.vertCount, ++vertex {
+    let offset: Int = vertex * 4
+    var found: Bool = false
+    loop let root: Int in roots {
+      var same: Bool = true
+      loop var field: Int = 0, field < 4, ++field {
+        if parts.greens.windPivots.copyAtDefault(index: offset + field) is not parts.bells.windPivots.copyAtDefault(
+          index: root + field
+        ) {
+          same = false
+        }
+      }
+      if same {
+        found = true
+      }
+    }
+    if not found {
+      ret false
+    }
+  }
+  ret true
+}
+
 func main() ret Int {
   let single: HarebellParts = harebellPatch(seed: 2203, count: 1, radius: 0.0)
   let patch: HarebellParts = harebellPatch(seed: 2371, count: 11, radius: 0.92)
@@ -108,6 +169,45 @@ func main() ret Int {
   }
   if patch.bells.indices.length / 3 < patch.headCount * 80 {
     ret 8
+  }
+  let seeds: List(Int) = {
+    -19
+    0
+    941
+    2203
+    2371
+  }
+  loop let seed: Int in seeds {
+    let plants: HarebellParts = harebellPatch(seed: seed, count: 20, radius: 0.92)
+    if not harebellRootsMatch(parts: plants) {
+      ret 9
+    }
+    let meshes: List(MeshData) = { plants.greens, plants.bells }
+    loop let mesh: view MeshData in meshes {
+      if not harebellMeshValid(mesh: mesh) or not harebellWithinBounds(mesh: mesh, radius: 0.92) {
+        ret 10
+      }
+    }
+    if plants.greens.vertCount + plants.bells.vertCount > 68000 {
+      ret 11
+    }
+  }
+  let old: HarebellParts = harebellControlPatch(seed: 2203, count: 1, radius: 0.0)
+  if old.headCount is not single.headCount or old.bells.vertCount is not old.headCount * 300 {
+    ret 12
+  }
+  let emptyRequest: HarebellParts = harebellPatch(seed: 0, count: 0, radius: 0.0)
+  if emptyRequest.plantCount is not 1 {
+    ret 13
+  }
+  let materials: List(Material3d) = {
+    harebellVariantGreenMaterial(control: false)
+    harebellVariantCorollaMaterial(control: false)
+  }
+  loop let material: view Material3d in materials {
+    if material.toon or material.emission.x is not 0.0 or material.emission.y is not 0.0 or material.emission.z is not 0.0 {
+      ret 14
+    }
   }
   log("meadow harebell: bounded two-part racemes with deterministic wind roots")
   ret 0

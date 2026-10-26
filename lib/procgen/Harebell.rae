@@ -8,6 +8,8 @@ open Noise
 open Scene3d
 open procgen/Foliage
 open procgen/MeadowFlower
+open procgen/HarebellGeometry
+open procgen/OxeyeGeometry
 
 const harebellTau: Float = 6.283185307179586
 
@@ -335,7 +337,7 @@ func addHarebellLeaf(
 # Harebell (Campanula rotundifolia): wiry upper-branched stems, narrow stem
 # leaves and a loose raceme of two to five nodding fused blue corollas. A
 # patch has two material meshes and is capped at harebellMaximumPlants.
-func harebellPatch(seed: view Int, count: view Int, radius: view Float) ret HarebellParts {
+func harebellControlPatch(seed: view Int, count: view Int, radius: view Float) ret HarebellParts {
   var plantCount: Int = count
   if plantCount < 1 {
     plantCount = 1
@@ -463,6 +465,191 @@ func harebellPatch(seed: view Int, count: view Int, radius: view Float) ret Hare
         axis: axis
         length: 0.055 + hash2(x: head, y: plant, seed: seed + 59) * 0.012
         mouthRadius: mouthRadius
+      )
+    }
+    totalHeads = totalHeads + headCount
+    let flexibility: Float = 0.18 + hash2(x: plant, y: 61, seed: seed) * 0.08
+    flowerWindRange(
+      mesh: greens
+      firstVertex: greenFirst
+      pivot: root
+      flexibility: flexibility
+    )
+    flowerWindRange(
+      mesh: bells
+      firstVertex: bellFirst
+      pivot: root
+      flexibility: flexibility
+    )
+  }
+  ret HarebellParts {
+    greens: own greens
+    bells: own bells
+    plantCount: plantCount
+    headCount: totalHeads
+  }
+}
+
+func harebellVariantGreenMaterial(control: view Bool) ret Material3d {
+  if control {
+    ret harebellGreenMaterial()
+  }
+  ret oxeyeSoftMaterial(color: Vec3.create(x: 0.042, y: 0.135, z: 0.025))
+}
+
+func harebellVariantCorollaMaterial(control: view Bool) ret Material3d {
+  if control {
+    ret harebellCorollaMaterial()
+  }
+  ret oxeyeSoftMaterial(color: Vec3.create(x: 0.31, y: 0.27, z: 0.65))
+}
+
+func harebellVariant(
+  seed: view Int
+  count: view Int
+  radius: view Float
+  control: view Bool
+) ret HarebellParts {
+  if control {
+    ret harebellControlPatch(seed: seed, count: count, radius: radius)
+  }
+  ret harebellPatch(seed: seed, count: count, radius: radius)
+}
+
+# Same seeds, height law, head count and patch envelope as the preserved control.
+# Unequal near-neighbour pairs replace a uniform spiral without adding plants.
+func harebellPatch(seed: view Int, count: view Int, radius: view Float) ret HarebellParts {
+  var plantCount: Int = count
+  if plantCount < 1 {
+    plantCount = 1
+  }
+  if plantCount > harebellMaximumPlants {
+    plantCount = harebellMaximumPlants
+  }
+  var greens: MeshData = foliageMesh()
+  var bells: MeshData = foliageMesh()
+  var totalHeads: Int = 0
+  loop var plant: Int = 0, plant < plantCount, ++plant {
+    let group: Int = plant / 2
+    let patchAngle: Float = group.toFloat() * harebellGoldenAngle + hash2(
+      x: group
+      y: 5
+      seed: seed
+    ) * 0.48 + (plant % 2).toFloat() * 0.20
+    var distance: Float = 0.0
+    if plantCount > 1 {
+      distance = Math.sqrt(x: (group.toFloat() + 0.42) / ((plantCount + 1) / 2).toFloat()) * radius * (0.70 + hash2(
+        x: plant
+        y: 3
+        seed: seed
+      ) * 0.30)
+    }
+    let root: Vec3 = Vec3.create(
+      x: Math.cos(x: patchAngle) * distance
+      y: Math.sin(x: patchAngle) * distance
+      z: -0.010
+    )
+    var height: Float = 0.30 + hash2(x: plant, y: 7, seed: seed) * 0.27
+    if plant % 6 is 0 {
+      height = height + 0.075
+    }
+    let leanAngle: Float = patchAngle + (hash2(x: plant, y: 11, seed: seed) - 0.5) * 1.7
+    let reach: Float = 0.035 + hash2(x: plant, y: 13, seed: seed) * 0.065
+    let lean: Vec3 = Vec3.create(
+      x: Math.cos(x: leanAngle) * reach
+      y: Math.sin(x: leanAngle) * reach
+      z: 0.0
+    )
+    let curve: Vec3 = Vec3.create(
+      x: Math.cos(x: leanAngle + 1.4) * 0.024
+      y: Math.sin(x: leanAngle + 1.4) * 0.024
+      z: 0.0
+    )
+    let greenFirst: Int = greens.vertCount
+    let bellFirst: Int = bells.vertCount
+    harebellCurvedStem(
+      mesh: greens
+      root: root
+      height: height
+      lean: lean
+      curve: curve
+    )
+    loop var leaf: Int = 0, leaf < 4, ++leaf {
+      let fraction: Float = 0.10 + leaf.toFloat() * 0.12
+      let leafAngle: Float = patchAngle + leaf.toFloat() * harebellGoldenAngle
+      oxeyeLeaf(
+        mesh: greens
+        root: oxeyeStemPoint(
+          root: root
+          height: height
+          lean: lean
+          curve: curve
+          amount: fraction
+        )
+        direction: vnorm(
+          a: Vec3.create(x: Math.cos(x: leafAngle), y: Math.sin(x: leafAngle), z: 0.42)
+        )
+        length: 0.045 + hash2(x: leaf, y: plant, seed: seed + 31) * 0.035
+        width: 0.0035 + hash2(x: leaf, y: plant, seed: seed + 37) * 0.002
+      )
+    }
+    let headCount: Int = 2 + (hash2(x: plant, y: 19, seed: seed) * 4.0).toInt()
+    loop var head: Int = 0, head < headCount, ++head {
+      let fraction: Float = 0.56 + head.toFloat() / Math.max(a: 1.0, b: (headCount - 1).toFloat()) * 0.44
+      let branchAngle: Float = patchAngle + head.toFloat() * harebellGoldenAngle + hash2(
+        x: head
+        y: plant
+        seed: seed + 43
+      ) * 0.35
+      let outward: Vec3 = Vec3.create(
+        x: Math.cos(x: branchAngle)
+        y: Math.sin(x: branchAngle)
+        z: 0.0
+      )
+      let branchRoot: Vec3 = oxeyeStemPoint(
+        root: root
+        height: height
+        lean: lean
+        curve: curve
+        amount: fraction
+      )
+      let spread: Float = 0.045 + hash2(x: head, y: plant, seed: seed + 47) * 0.045
+      let attach: Vec3 = vadd(
+        a: branchRoot
+        b: vadd(a: vscale(a: outward, s: spread), b: Vec3.create(x: 0.0, y: 0.0, z: 0.012))
+      )
+      let tilt: Float = 0.28 + hash2(x: head, y: plant, seed: seed + 67) * 0.40
+      let axis: Vec3 = vnorm(a: Vec3.create(x: outward.x * tilt, y: outward.y * tilt, z: -1.0))
+      let departure: Vec3 = vnorm(a: vsub(
+        a: oxeyeStemPoint(
+          root: root
+          height: height
+          lean: lean
+          curve: curve
+          amount: fraction + 0.001
+        )
+        b: branchRoot
+      ))
+      harebellPedicel(
+        mesh: greens
+        start: branchRoot
+        attach: attach
+        departure: departure
+        axis: axis
+      )
+      let mouthRadius: Float = 0.024 + hash2(x: head, y: plant, seed: seed + 53) * 0.007
+      addHarebellCalyx(
+        mesh: greens
+        attach: attach
+        axis: axis
+        radius: mouthRadius * 0.58
+      )
+      harebellSoftBell(
+        mesh: bells
+        attach: attach
+        axis: axis
+        length: 0.043 + hash2(x: head, y: plant, seed: seed + 59) * 0.012
+        radius: mouthRadius
       )
     }
     totalHeads = totalHeads + headCount

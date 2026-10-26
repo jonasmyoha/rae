@@ -46,18 +46,25 @@ func createWalkerHarebellParts(
   renderer: mod DeferredRenderer
   capacity: view Int
 ) ret List(PropInstancer) {
-  let flowers: HarebellParts = harebellPatch(seed: 941, count: 9, radius: 0.72)
+  let flowers: HarebellParts = harebellVariant(
+    seed: 941
+    count: 9
+    radius: 0.72
+    control: Sys.getEnv(name: "RAE_HAREBELL_CONTROL") is "1"
+  )
   var parts: List(PropInstancer) = List.create(PropInstancer, cap: 2)
   var greens: PropInstancer = createPropInstancer(
     mesh: uploadFoliage(renderer: renderer, mesh: flowers.greens)
-    material: harebellGreenMaterial()
+    material: harebellVariantGreenMaterial(control: Sys.getEnv(name: "RAE_HAREBELL_CONTROL") is "1")
     capacity: capacity
   )
   greens.sway = 0.62
   parts.add(value: own greens)
   var bells: PropInstancer = createPropInstancer(
     mesh: uploadFoliage(renderer: renderer, mesh: flowers.bells)
-    material: harebellCorollaMaterial()
+    material: harebellVariantCorollaMaterial(
+      control: Sys.getEnv(name: "RAE_HAREBELL_CONTROL") is "1"
+    )
     capacity: capacity
   )
   bells.sway = 0.62

@@ -188,18 +188,19 @@ fused campanulate corollas. The
 also describes wiry stems, nodding blue flowers in small clusters and rounded
 basal leaves that usually wither before flowering.
 
-`procgen/Harebell.rae` keeps that identity in its geometry. Each plant has a
-thin leaning stem, sparse narrow leaves and two to five alternating upper
-pedicels. Every open bell has one fused body, five pointed lobes, a modeled
-inside and a five-sepal calyx. The mouth and length are deliberately enlarged
-so the hanging silhouette remains readable at the walker camera. Seeded plants
-vary from about 30 to 65 cm and patches are capped at 20 plants.
+`procgen/Harebell.rae` now preserves the old plant as `harebellControlPatch`
+and uses the recovered curved-stem generator by default. See the
+[harebell recovery comparison](harebell-recovery.md) for unchanged controls,
+rounded open bells, smooth downward attachments, side/low-sun/night renders,
+walker-height integration, motion and actual mesh cost. The fixed botanical
+identity, two-to-five heads and 30–65 cm height law remain; heads are deliberately
+larger than botanical scale. Sparse paired root groups replace the regular
+spiral without adding plants.
 
-The harebell uses two shared meshes and two rough, non-emissive materials:
-green wood/leaves/calyces and blue-violet corollas. Modeled outer, inner and rim
-surfaces were selected instead of alpha cards because the open mouth and
-backlit edge define this species. This avoids cutout mip shimmer while giving
-side and rear views real lighting. A complete plant shares one root wind pivot,
-so stems, pedicels and bells move together. The walkers instance one fixed
-nine-plant patch through these two batches beside the daisy's three batches;
-plant and head counts do not create more materials or draw batches.
+Two shared rough non-emissive material meshes cover the whole patch. The new
+candidate uses broad physical shading independently of terrain's toon switch;
+`RAE_HAREBELL_CONTROL=1` retains the original materials and mesh. The same
+nine-plant prototype serves all walkers through two bounded batches, including
+the deferred shadow pass. Every part keeps the same buried wind root. The
+geometry has no alpha/mip resource. Stem stipple, repeated forest prototypes
+and simplified flower interiors remain explicit limitations.
