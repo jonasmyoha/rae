@@ -11,6 +11,7 @@ open FoliageMesh
 open RendererDeferred
 open procgen/Foliage
 open procgen/SugarMaple
+open procgen/RedMaple
 open RendererImages
 open GroveGrass
 open FluffyGrove
@@ -72,9 +73,9 @@ func foliagePaint(species: view Int, tone: view Int) ret Material3d {
   ret paint(red: 0.33 * variation, green: 0.035 * variation, blue: 0.022)
 }
 
-# One tree: the wood, then its leaves in three tones. `palm` keeps the
-# palm-style stem (palmWood); every other tree has ordinary branching wood
-# (broadleafTree).
+# One tree: the wood, then its leaves in three tones. Maples use their
+# joined species scaffolds; the unchanged broadleaf and palm paths remain
+# for other presets and explicit controls.
 func plantTree(
   world: mod World3d
   renderer: mod DeferredRenderer
@@ -158,6 +159,46 @@ func plantTree(
     )
     ret
   }
+  if species is 1 and Sys.getEnv(name: "RAE_RED_MAPLE_CONTROL") is not "1" {
+    let tree: RedMapleTree = redMapleTree(seed: seed, height: height, width: width)
+    let barkLayer: Int = rendererLoadSurfaceImage(renderer: renderer, path: redMapleBarkTexture())
+    let leafLayer: Int = rendererLoadSurfaceImage(renderer: renderer, path: redMapleLeafTexture())
+    var woodMaterial: Material3d = bark
+    woodMaterial.baseColor = redMapleWoodColor()
+    woodMaterial.colorTextureLayer = barkLayer
+    place(
+      world: world
+      renderer: renderer
+      mesh: tree.wood
+      material: woodMaterial
+      position: position
+      scale: unit
+      rotation: 0
+    )
+    var triangles: Int = tree.wood.indices.length / 3
+    loop var tone: Int = 0, tone < 3, ++tone {
+      let leaves: MeshData = redMapleLeaves(tree: tree, seed: seed, tone: tone)
+      triangles = triangles + leaves.indices.length / 3
+      if Sys.getEnv(name: "RAE_RED_MAPLE_BARE") is not "1" {
+        var material: Material3d = foliagePaint(species: species, tone: tone)
+        material.baseColor = redMapleLeafColor(tone: tone)
+        material.colorTextureLayer = leafLayer
+        place(
+          world: world
+          renderer: renderer
+          mesh: leaves
+          material: material
+          position: position
+          scale: unit
+          rotation: 0
+        )
+      }
+    }
+    log(
+      "[red-maple] seed={seed} wood={tree.wood.vertCount}v sprays={tree.sprays.length} total={triangles}t"
+    )
+    ret
+  }
   let tree: BroadleafTree = broadleafTree(seed: seed, height: height, width: width)
   place(
     world: world
@@ -169,6 +210,9 @@ func plantTree(
     rotation: 0
   )
   if species is 0 and Sys.getEnv(name: "RAE_MAPLE_BARE") is "1" {
+    ret
+  }
+  if species is 1 and Sys.getEnv(name: "RAE_RED_MAPLE_BARE") is "1" {
     ret
   }
   loop var tone: Int = 0, tone < 3, ++tone {
@@ -546,6 +590,28 @@ func buildGrove(renderer: mod DeferredRenderer) ret Grove {
       palm: false
     )
     obstacles.add(value: { x: -4.8, y: 2, radius: 0.45 })
+    ret Grove { world: own world, obstacles: own obstacles, groundMesh: groundMesh }
+  }
+  if Sys.getEnv(name: "RAE_RED_MAPLE_ISOLATE") is "1" {
+    var seed: Int = 605
+    var height: Float = 5.8
+    if Sys.getEnv(name: "RAE_RED_MAPLE_SEED").length() > 0 {
+      seed = Sys.getEnv(name: "RAE_RED_MAPLE_SEED").toInt()
+    }
+    if Sys.getEnv(name: "RAE_RED_MAPLE_HEIGHT").length() > 0 {
+      height = Sys.getEnv(name: "RAE_RED_MAPLE_HEIGHT").toFloat()
+    }
+    plantTree(
+      world: world
+      renderer: renderer
+      position: Vec3.create(x: 4.2, y: 4, z: 0)
+      height: height
+      width: 1.8
+      seed: seed
+      species: 1
+      palm: false
+    )
+    obstacles.add(value: { x: 4.2, y: 4, radius: 0.45 })
     ret Grove { world: own world, obstacles: own obstacles, groundMesh: groundMesh }
   }
   if Sys.getEnv(name: "RAE_LIME_ISOLATE") is "1" {

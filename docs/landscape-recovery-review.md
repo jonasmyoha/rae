@@ -481,3 +481,16 @@ example gates pass. The report states geometry and resource counts, the larger
 rotating-card bound and the shared near/middle mesh trade-off. Repeated close
 leaf motifs, dark overlaps and limited internal sky gaps remain visible; passing
 the checks does not establish a complete match to the reference art.
+
+## Red maple scarlet refinement
+
+[The red-maple comparison](red-maple-refinement.md) shows the unchanged kind-5
+control, a lighter joined scaffold and the selected muted-scarlet textured
+crown. Its 27 broad sprays make a more open rounded form than the sugar maple.
+The private presentation includes T04/T06/T07, matched bare/full trees, three
+seeds, multiple forest angles, night and a six-second breezy walk.
+
+Seven narrow fixtures, three hardware checks and all four consuming example
+gates pass. The report records the wider tested card bound, geometry/resource
+counts and limitations: repeated close leaf marks, dark overlaps, painted bark
+relief and a shared near/middle mesh. Kind numbers and placements are unchanged.
