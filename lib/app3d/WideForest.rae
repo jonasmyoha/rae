@@ -41,6 +41,16 @@ const wideForestGrassMin: Float = 0.12
 # No tree grows this close (m) to the spawn, where the cube stacks stand
 const wideForestSpawnClearing: Float = 11.0
 
+# The stand of hand-made T02 trees (app3d/ReferenceTree, when the app asks
+# for it): a patch this far ahead of the spawn (m, +y) and this wide, where
+# the forest's own trees do not grow; a T02 tree takes a grid spot there
+# with this chance (the crowns are about 5 m wide, the grid 3.5 m)
+const referenceStandAhead: Float = 30.0
+
+const referenceStandRadius: Float = 22.0
+
+const referenceStandChance: Float = 0.3
+
 func wideForestBiome() ret BiomeConfig {
   var config: BiomeConfig = defaultBiomeConfig()
   config.islandRadius = wideForestWorldRadius
@@ -102,6 +112,27 @@ func plantWideForest(
         cfg: terrainSystem.biome
       ) is false {
         continue
+      }
+      if terrainSystem.referenceStandOn {
+        let standX: Float = x - spawnX
+        let standY: Float = y - spawnY - referenceStandAhead
+        if standX * standX + standY * standY < referenceStandRadius * referenceStandRadius {
+          # the stand's patch: a T02 tree now and then, never the forest's
+          if Noise.hash2(x: column, y: row, seed: 815) < referenceStandChance {
+            terrainSystem.referenceStand.add(value: x)
+            terrainSystem.referenceStand.add(value: y)
+            terrainSystem.referenceStand.add(
+              value: walkerTerrainHeight(terrainSystem: terrainSystem, x: x, y: y) - 0.05
+            )
+            terrainSystem.referenceStand.add(
+              value: Noise.hash2(x: column, y: row, seed: 814) * 6.2831853
+            )
+            terrainSystem.referenceStand.add(
+              value: 0.85 + 0.25 * Noise.hash2(x: column, y: row, seed: 816)
+            )
+          }
+          continue
+        }
       }
       let species: Int = treeSpeciesAt(x: x, y: y, number: planted)
       addPropPlacement(

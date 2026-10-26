@@ -1,0 +1,180 @@
+# app3d/ReferenceTree — the tree being made by hand to match reference crop
+# T02 (lib/treeGen, docs/reference-tree-plan.md), as a stand of such trees
+# among a walker app's forest, so it can be seen in motion and next to the
+# old trees. The wide forest leaves a patch to them and plants them there
+# (app3d/WideForest, WalkerTerrain.referenceStand; WalkerAppSettings
+# referenceTree, example 143). All the trees share one bark mesh, one set of
+# leaf cards and one shadow mesh of the leaf masses (shrunk), each tree
+# turned and sized: the bark as one instance batch, the leaves as one draw
+# of the leaf pass over every tree's placement (treeGen/LeafPass), the
+# shadows as two instance batches. They have no physics bodies: the walker
+# passes through their trunks.
+import Sys
+import Math
+import Vec3
+open Scene3d
+open Math3d
+open Mesh3d
+open Gbuffer
+open GbufferRecord
+open GbufferInstanced
+open RendererDeferred
+open RendererImages
+open gpu/GpuResources
+open treeGen/TreeParams
+open treeGen/Skeleton
+open treeGen/BarkMesh
+open treeGen/Bark
+open treeGen/ClumpMesh
+open treeGen/LeafCards
+open treeGen/LeafImage
+open treeGen/LeafPass
+
+# The bark picture, painted once
+const referenceBarkImagePath: String = ".rae/treeGen/warmBark.png"
+
+# Floats per tree in a stand's list: x y z yaw scale
+const referenceStandFloats: Int = 5
+
+type ReferenceTree {
+  bark: MeshHandle
+  shadowMasses: MeshHandle
+  # one record per tree: the bark (with its material) and the leaf masses'
+  # shadow
+  barkBatch: InstanceBatch
+  massBatch: InstanceBatch
+  leaves: LeafPass
+  count: Int
+}
+
+# The bark picture's layer in the renderer's material images (painted the
+# first time), or -1
+func referenceBarkLayer(renderer: mod DeferredRenderer) ret Int {
+  if not Sys.exists(path: referenceBarkImagePath) {
+    let made: Bool = Sys.makeDir(path: ".rae/treeGen")
+    if not writeBarkImage(path: referenceBarkImagePath) {
+      log("[referenceTree] could not write the bark picture {referenceBarkImagePath}")
+      ret -1
+    }
+  }
+  ret rendererLoadSurfaceImage(renderer: renderer, path: referenceBarkImagePath)
+}
+
+# The T02 tree (seed 1) at every place of `stand` (referenceStandFloats
+# floats each: x y z yaw scale)
+func createReferenceStand(
+  renderer: mod DeferredRenderer
+  stand: view List(Float)
+) ret ReferenceTree {
+  let count: Int = stand.length / referenceStandFloats
+  let params: TreeParams = warmBroadleafParams(seed: 1)
+  let skeleton: TreeSkeleton = growSkeleton(params: params)
+  let barkData: MeshData = barkMesh(skeleton: skeleton)
+  let massData: MeshData = clumpShadowMesh(skeleton: skeleton, scale: 0.75)
+  let bark: MeshHandle = uploadMesh(
+    renderer: renderer
+    verts: barkData.verts
+    vertCount: barkData.vertCount
+    indices: barkData.indices
+  )
+  let shadowMasses: MeshHandle = uploadMesh(
+    renderer: renderer
+    verts: massData.verts
+    vertCount: massData.vertCount
+    indices: massData.indices
+  )
+  let material: Material3d = barkMaterial(layer: referenceBarkLayer(renderer: renderer))
+  var barkBatch: InstanceBatch = createInstanceBatch(mesh: bark, capacity: Math.max(a: count, b: 1))
+  var massBatch: InstanceBatch = createInstanceBatch(
+    mesh: shadowMasses
+    capacity: Math.max(a: count, b: 1)
+  )
+  var placements: List(Float) = List.create(Float, cap: count * leafPlacementFloats)
+  loop var i: Int = 0, i < count, ++i {
+    let base: Int = i * referenceStandFloats
+    let x: Float = stand.copyAtDefault(index: base)
+    let y: Float = stand.copyAtDefault(index: base + 1)
+    let z: Float = stand.copyAtDefault(index: base + 2)
+    let yaw: Float = stand.copyAtDefault(index: base + 3)
+    let scale: Float = stand.copyAtDefault(index: base + 4)
+    let model: Mat4 = modelMatrixOf(
+      t: Transform3d {
+        position: Vec3.create(x: x, y: y, z: z)
+        rotation: Vec3.create(x: 0.0, y: 0.0, z: yaw)
+        scale: Vec3.create(x: scale, y: scale, z: scale)
+      }
+    )
+    addInstance(
+      batch: barkBatch
+      model: model
+      prevModel: model
+      material: material
+    )
+    addInstance(
+      batch: massBatch
+      model: model
+      prevModel: model
+      material: material
+    )
+    leafPlacement(
+      placements: placements
+      x: x
+      y: y
+      z: z
+      yaw: yaw
+      scale: scale
+    )
+  }
+  var leaves: LeafPass = createLeafPass(
+    cards: leafCards(skeleton: skeleton, seed: 1)
+    pictures: leafImageLayerPixels()
+  )
+  setLeafPlacements(leaves: leaves, placements: own placements)
+  log(
+    "[referenceTree] a stand of {count} T02 trees: {skeleton.limbs.length} limbs and {leaves.cards.count} leaf cards each"
+  )
+  ret ReferenceTree {
+    bark: bark
+    shadowMasses: shadowMasses
+    barkBatch: own barkBatch
+    massBatch: own massBatch
+    leaves: own leaves
+    count: count
+  }
+}
+
+# The bark and the leaves, inside the G-buffer pass now open
+func drawReferenceTree(
+  tree: mod ReferenceTree
+  cache: mod GbufferCache
+  rendererResources: mod GpuResources
+  resources: mod GpuResources
+  camera: view Camera3d
+  light: view Light3d
+) {
+  if tree.count is 0 {
+    ret
+  }
+  drawInstances(cache: cache, resources: rendererResources, batch: tree.barkBatch)
+  drawLeaves(
+    leaves: tree.leaves
+    resources: resources
+    gbuffer: cache
+    gbufferResources: rendererResources
+    camera: camera
+    light: light
+  )
+}
+
+# The trunks' and the crowns' shadows, inside the shadow pass now open
+func drawReferenceTreeShadow(tree: view ReferenceTree, renderer: mod DeferredRenderer) {
+  if tree.count is 0 {
+    ret
+  }
+  drawShadowCasterBatchWith(renderer: renderer, mesh: tree.bark, batch: tree.barkBatch)
+  drawShadowCasterBatchWith(renderer: renderer, mesh: tree.shadowMasses, batch: tree.massBatch)
+}
+
+func releaseReferenceTree(tree: mod ReferenceTree, resources: mod GpuResources) {
+  releaseLeafPass(leaves: tree.leaves, resources: resources)
+}

@@ -19,18 +19,34 @@ struct Card {
   colourTurn: vec4<f32>,
   extra: vec4<f32>,     // x: the leaf stamp (image layer); w: light through from behind (0..1)
 };
-// The camera's right and up (world), where it is, and the direction TO the sun
+// The camera's right and up (world), where it is, the direction TO the sun,
+// and x: the number of cards in one tree
 struct LeafU {
   right: vec4<f32>,
   up: vec4<f32>,
   eye: vec4<f32>,
   toSun: vec4<f32>,
+  counts: vec4<f32>,
+};
+// One tree of the same leaves: where (xyz) and its turn about z (w), then
+// its size (x)
+struct Placement {
+  positionYaw: vec4<f32>,
+  scale: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var<storage, read> cards: array<Card>;
 @group(0) @binding(2) var<uniform> U: LeafU;
 @group(0) @binding(3) var leafImage: texture_2d_array<f32>;
 @group(0) @binding(4) var leafSampler: sampler;
+@group(0) @binding(5) var<storage, read> placements: array<Placement>;
+
+// A tree-local vector turned by the tree's yaw
+fn turnByYaw(v: vec3<f32>, yaw: f32) -> vec3<f32> {
+  let c = cos(yaw);
+  let s = sin(yaw);
+  return vec3<f32>(v.x * c - v.y * s, v.x * s + v.y * c, v.z);
+}
 
 fn octWrap(v: vec2<f32>) -> vec2<f32> {
   let s = vec2<f32>(select(-1.0, 1.0, v.x >= 0.0), select(-1.0, 1.0, v.y >= 0.0));
@@ -49,6 +65,7 @@ struct VsOut {
   @location(2) clipNow: vec4<f32>,
   @location(3) clipPrev: vec4<f32>,
   @location(4) wpos: vec3<f32>,
+  @location(5) normal: vec3<f32>,
 };
 
 fn cornerOf(vertex: u32) -> vec2<f32> {
@@ -59,22 +76,30 @@ fn cornerOf(vertex: u32) -> vec2<f32> {
 
 @vertex
 fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut {
-  let card = cards[ii];
+  // instance = tree * cards per tree + card
+  let perTree = max(u32(U.counts.x + 0.5), 1u);
+  let cardIndex = ii % perTree;
+  let tree = placements[ii / perTree];
+  let card = cards[cardIndex];
   let corner = cornerOf(vi);
+  let yaw = tree.positionYaw.w;
+  let size = tree.scale.x;
+  let centre = tree.positionYaw.xyz + turnByYaw(card.positionSize.xyz, yaw) * size;
   // the square, turned in the camera's plane by the card's own turn
-  let local = (corner - vec2<f32>(0.5)) * card.positionSize.w;
+  let local = (corner - vec2<f32>(0.5)) * card.positionSize.w * size;
   let turn = card.colourTurn.w;
   let c = cos(turn);
   let s = sin(turn);
   let across = local.x * c - local.y * s;
   let upward = local.x * s + local.y * c;
-  let world = card.positionSize.xyz + U.right.xyz * across + U.up.xyz * upward;
+  let world = centre + U.right.xyz * across + U.up.xyz * upward;
   var o: VsOut;
   o.pos = F.viewProj * vec4<f32>(world, 1.0);
   o.clipNow = o.pos;
   o.clipPrev = F.prevViewProj * vec4<f32>(world, 1.0);
   o.pos = vec4<f32>(o.pos.xy + F.jitter.xy * o.pos.w, o.pos.zw);
-  o.card = ii;
+  o.card = cardIndex;
+  o.normal = turnByYaw(card.normalOcclusion.xyz, yaw);
   o.uv = vec2<f32>(corner.x, 1.0 - corner.y);
   o.wpos = world;
   return o;
@@ -93,7 +118,7 @@ fn fs(in: VsOut) -> FsOut {
   if (picture.a < 0.5) { discard; }
   // the mass's normal, tilted a little toward where on the card this is, so
   // the leaves on one card do not all shade alike
-  let massNormal = normalize(card.normalOcclusion.xyz);
+  let massNormal = normalize(in.normal);
   let toEye = normalize(U.eye.xyz - in.wpos);
   let offset = (in.uv - vec2<f32>(0.5)) * 2.0;
   var n = normalize(massNormal + (U.right.xyz * offset.x + U.up.xyz * -offset.y) * 0.28);
