@@ -481,6 +481,10 @@ func buildGrove(renderer: mod DeferredRenderer) ret Grove {
   let groundMesh: MeshHandle = uploadFoliage(renderer: renderer, mesh: ground)
   # Isolated comparison still uses the exact grove specimen and ground.
   # Other trees would occlude it during a full camera orbit.
+  if Sys.getEnv(name: "RAE_LIME_ISOLATE") is "1" {
+    addFluffyGrove(world: world, renderer: renderer, obstacles: obstacles)
+    ret Grove { world: own world, obstacles: own obstacles, groundMesh: groundMesh }
+  }
   if Sys.getEnv(name: "RAE_BIRCH_ISOLATE") is "1" {
     addBirchGrove(world: world, renderer: renderer, obstacles: obstacles)
     ret Grove { world: own world, obstacles: own obstacles, groundMesh: groundMesh }

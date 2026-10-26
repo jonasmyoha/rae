@@ -1,0 +1,125 @@
+open app3d/GroveTrees
+open procgen/Lime
+open procgen/FluffyFoliage
+open procgen/SculpturalFork
+open Mesh3d
+open Vec3
+import Math
+
+func validLimeMesh(mesh: view MeshData, leaves: view Bool) ret Bool {
+  if mesh.verts.length is not mesh.vertCount * 8 or mesh.vertCount > 10000 {
+    ret false
+  }
+  loop let value: Float in mesh.verts {
+    if value is not value or Math.abs(value: value) > 10 {
+      ret false
+    }
+  }
+  loop let index: Int in mesh.indices {
+    if index < 0 or index >= mesh.vertCount {
+      ret false
+    }
+  }
+  loop var vertex: Int = 0, vertex < mesh.vertCount, ++vertex {
+    let normal: Vec3 = forkNormal(mesh: mesh, index: vertex)
+    if Math.abs(value: vlen(a: normal) - 1) > 0.002 {
+      ret false
+    }
+    var center: Vec3 = forkPoint(mesh: mesh, index: vertex)
+    var allowance: Float = 0
+    if leaves {
+      if mesh.windPivots.length is not mesh.vertCount * 4 or mesh.leafCards.length is not mesh.vertCount * 4 {
+        ret false
+      }
+      center = Vec3.create(
+        x: mesh.leafCards.copyAtDefault(index: vertex * 4)
+        y: mesh.leafCards.copyAtDefault(index: vertex * 4 + 1)
+        z: mesh.leafCards.copyAtDefault(index: vertex * 4 + 2)
+      )
+      allowance = vlen(a: vsub(a: forkPoint(mesh: mesh, index: vertex), b: center)) + 0.03
+      if mesh.leafCards.copyAtDefault(index: vertex * 4 + 3) is not 1 {
+        ret false
+      }
+      let first: Int = (vertex / 12) * 12
+      loop var field: Int = 0, field < 4, ++field {
+        if mesh.windPivots.copyAtDefault(index: vertex * 4 + field) is not mesh.windPivots.copyAtDefault(
+          index: first * 4 + field
+        ) {
+          ret false
+        }
+      }
+    } else if mesh.windPivots.length > 0 {
+      ret false
+    }
+    if vlen(a: vsub(a: center, b: Vec3.create(x: 0, y: 0, z: 0.55))) + allowance > 0.70 {
+      log("bound: {center.x} {center.y} {center.z} allowance {allowance}")
+      ret false
+    }
+  }
+  ret true
+}
+
+func main() ret Int {
+  if speciesBroadleaf is not 0 or treeSpeciesForm(species: 0) is not FluffyForm.broadleaf {
+    ret 8
+  }
+  let seeds: List(Int) = {
+    73
+    311
+    827
+    1437
+    2189
+    4201
+  }
+  loop let seed: Int in seeds {
+    let tree: LimeTree = limeTree(seed: seed)
+    let repeat: LimeTree = limeTree(seed: seed)
+    if not validLimeMesh(mesh: tree.wood, leaves: false) {
+      ret 1
+    }
+    if tree.sprays.length is not 39 or tree.wood.vertCount is not repeat.wood.vertCount {
+      ret 2
+    }
+    loop var index: Int = 0, index < tree.wood.verts.length, ++index {
+      if tree.wood.verts.copyAtDefault(index: index) is not repeat.wood.verts.copyAtDefault(
+        index: index
+      ) {
+        ret 3
+      }
+    }
+    var triangles: Int = 0
+    loop var tone: Int = 0, tone < 3, ++tone {
+      let leaves: MeshData = limeLeaves(sprays: tree.sprays, seed: seed, tone: tone)
+      if not validLimeMesh(mesh: leaves, leaves: true) {
+        ret 4
+      }
+      triangles = triangles + leaves.indices.length / 3
+    }
+    if triangles is not 222 {
+      ret 5
+    }
+  }
+  # Stable public form mapping; the middle detail uses the same textured crown.
+  let near: MeshData = fluffyLeaves(
+    form: FluffyForm.broadleaf
+    seed: 73
+    patchCount: 48
+    tone: 0
+  )
+  let middle: MeshData = fluffyLeaves(
+    form: FluffyForm.broadleaf
+    seed: 73
+    patchCount: 14
+    tone: 0
+  )
+  if near.verts.length is not middle.verts.length {
+    ret 6
+  }
+  loop var index: Int = 0, index < near.verts.length, ++index {
+    if near.verts.copyAtDefault(index: index) is not middle.verts.copyAtDefault(index: index) {
+      ret 7
+    }
+  }
+  log("lime: kind 0, deterministic joined wood, connected cards, bounded three-tone crown")
+  ret 0
+}

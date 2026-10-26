@@ -1,0 +1,226 @@
+# Small-leaved lime, Tilia cordata. Unit-height geometry keeps forest kind 0
+# and its placement scale unchanged. The joined axes support unequal ascending
+# sprays; no leaf centres are distributed on a spherical shell.
+import Math
+open Vec3
+open Noise
+open Mesh3d
+open procgen/Foliage
+open procgen/FoliageCards
+open procgen/SculpturalFork
+open procgen/CurvedFork
+open procgen/CurvedForkBranch
+open procgen/ForkSurface
+open procgen/Birch
+
+type LimeTree {
+  wood: MeshData
+  sprays: List(BirchTwig)
+}
+
+func limeTree(seed: view Int) ret LimeTree {
+  let turn: Float = hash2(x: seed, y: 1, seed: 773) * 6.2831853
+  let lean: Vec3 = { x: Math.cos(x: turn) * 0.055, y: Math.sin(x: turn) * 0.055, z: 0 }
+  let controls: List(Vec3) = {
+    { x: 0, y: 0, z: -0.035 }
+    { x: -lean.x * 0.15, y: -lean.y * 0.15, z: 0.16 }
+    { x: lean.x * 0.20, y: lean.y * 0.20, z: 0.35 }
+    { x: lean.x * 0.66, y: lean.y * 0.66, z: 0.54 }
+    { x: lean.x, y: lean.y, z: 0.73 }
+    { x: lean.x * 0.82, y: lean.y * 1.14, z: 0.88 }
+  }
+  let radii: List(Float) = {
+    0.047
+    0.032
+    0.027
+    0.020
+    0.011
+    0.003
+  }
+  let trunk: ForkPath = forkSmoothPath(controls: controls, radii: radii, steps: 3)
+  var cage: MeshData = foliageMesh()
+  let side: Int = (seed % 12 + 12) % 12
+  let openings: List(ForkOpening) = forkTrunk(
+    mesh: cage
+    path: trunk
+    sides: 12
+    seed: seed
+    firstOpeningRing: 5
+    firstOpeningSide: side
+    secondOpeningRing: 9
+    secondOpeningSide: (side + 5) % 12
+    openingCount: 2
+  )
+  forkCap(
+    mesh: cage
+    ringFirst: 0
+    sides: 12
+    center: controls.copyAtDefault(index: 0)
+    normal: Vec3.create(x: 0, y: 0, z: -1)
+    v: 0
+  )
+  var axes: List(ForkPath) = List.create(ForkPath, cap: 3)
+  axes.add(value: trunk)
+  loop var branch: Int = 0, branch < 2, ++branch {
+    let opening: ForkOpening = openings.copyAtDefault(index: branch)
+    let outward: Vec3 = forkOpeningNormal(mesh: cage, opening: opening)
+    let center: Vec3 = forkOpeningCenter(mesh: cage, opening: opening)
+    let radius: Float = 0.019 - branch.toFloat() * 0.007
+    let path: ForkPath = curvedForkLimb(
+      start: vadd(a: center, b: vscale(a: outward, s: radius * 0.8))
+      outward: outward
+      length: 0.17 + hash2(x: branch, y: 2, seed: seed) * 0.04
+      rise: 0.43 - branch.toFloat() * 0.16
+      radius: radius
+      sweep: (hash2(x: branch, y: 3, seed: seed) - 0.5) * 0.8
+    )
+    curvedForkJoinedBranch(mesh: cage, opening: opening, path: path)
+    axes.add(value: path)
+  }
+  loop let opening: ForkOpening in openings {
+    relaxForkJunction(
+      mesh: cage
+      center: forkOpeningCenter(mesh: cage, opening: opening)
+      radius: 0.065
+    )
+  }
+  var wood: MeshData = subdivideForkSurface(mesh: cage)
+  finishForkSurface(mesh: wood)
+  wood = compactForkSurface(mesh: wood)
+  var sprays: List(BirchTwig) = List.create(BirchTwig, cap: 48)
+  loop var axis: Int = 0, axis < axes.length, ++axis {
+    let path: ForkPath = axes.copyAtDefault(index: axis)
+    loop var branch: Int = 0, branch < 8, ++branch {
+      let fraction: Float = 0.32 + branch.toFloat() * 0.085
+      var amount: Float = fraction
+      if axis is 0 {
+        amount = 0.44 + branch.toFloat() * 0.065
+      }
+      let start: Vec3 = birchPathPoint(path: path, amount: amount)
+      let angle: Float = turn + branch.toFloat() * 2.399963 + axis.toFloat() * 1.7
+      let spread: Float = (0.15 + hash2(x: branch, y: axis + 11, seed: seed) * 0.09) * (1.20 - amount * 0.56)
+      var end: Vec3 = vadd(
+        a: start
+        b: Vec3.create(
+          x: Math.cos(x: angle) * spread
+          y: Math.sin(x: angle) * spread
+          z: 0.035 + hash2(x: branch, y: axis + 21, seed: seed) * 0.065
+        )
+      )
+      let heightShare: Float = Math.clamp(val: (end.z - 0.62) / 0.43, low: -0.9, high: 0.97)
+      let reach: Float = 0.29 * Math.sqrt(x: 1.0 - heightShare * heightShare)
+      let radial: Float = Math.sqrt(x: end.x * end.x + end.y * end.y)
+      if radial > reach {
+        end.x = end.x * reach / radial
+        end.y = end.y * reach / radial
+      }
+      let middle: Vec3 = vadd(
+        a: vscale(a: vadd(a: start, b: end), s: 0.5)
+        b: Vec3.create(x: 0, y: 0, z: -0.022)
+      )
+      let twig: BirchTwig = { start: start, middle: middle, end: end }
+      birchTube(
+        mesh: wood
+        curve: twig
+        radius: 0.0045 * (1.15 - amount * 0.7)
+        sides: 6
+        steps: 3
+        seed: seed + axis * 71 + branch
+      )
+      sprays.add(value: twig)
+      # Alternating short lateral sprays join neighbouring masses while
+      # leaving the lower main forks and a few sectors open to the sky.
+      if branch % 3 is not 1 {
+        let lateralStart: Vec3 = birchCurve(twig: twig, amount: 0.58)
+        let lateralEnd: Vec3 = vadd(
+          a: lateralStart
+          b: Vec3.create(
+            x: Math.cos(x: angle + 1.1) * spread * 0.62
+            y: Math.sin(x: angle + 1.1) * spread * 0.62
+            z: 0.08
+          )
+        )
+        let lateral: BirchTwig = {
+          start: lateralStart
+          middle: vscale(a: vadd(a: lateralStart, b: lateralEnd), s: 0.5)
+          end: lateralEnd
+        }
+        birchTube(
+          mesh: wood
+          curve: lateral
+          radius: 0.0018
+          sides: 5
+          steps: 2
+          seed: seed + branch * 29
+        )
+        sprays.add(value: lateral)
+      }
+    }
+  }
+  # Longitudinal bark on unit wood: roughly two repeats over tree height.
+  loop var vertex: Int = 0, vertex < wood.vertCount, ++vertex {
+    wood.verts.set(
+      index: vertex * 8 + 7
+      value: wood.verts.copyAtDefault(index: vertex * 8 + 2) * 2.0
+    )
+  }
+  ret LimeTree { wood: own wood, sprays: own sprays }
+}
+
+func limeLeaves(sprays: view List(BirchTwig), seed: view Int, tone: view Int) ret MeshData {
+  var mesh: MeshData = foliageMesh()
+  loop var index: Int = 0, index < sprays.length, ++index {
+    # Two lower sectors expose the scaffold without reducing the upper crown.
+    if index is 0 or index is 14 {
+      continue
+    }
+    if index % 3 is not tone {
+      continue
+    }
+    let twig: BirchTwig = sprays.copyAtDefault(index: index)
+    let center: Vec3 = birchCurve(twig: twig, amount: 0.74)
+    let size: Float = 0.078 + hash2(x: index, y: 31, seed: seed) * 0.045
+    let firstVertex: Int = mesh.vertCount
+    addConnectedFoliageSpray(
+      mesh: mesh
+      center: center
+      pivot: twig.start
+      branchDirection: vsub(a: twig.end, b: twig.start)
+      extent: Vec3.create(x: size * 1.25, y: size * 0.65, z: size * 1.48)
+      shadeNormal: vnorm(a: Vec3.create(x: center.x * 0.7, y: center.y * 0.7, z: 0.86))
+      seed: seed + index * 71
+    )
+    # Rotate the original cutout within the card, independently of its
+    # lighting normal. This breaks the repeated downward-pointing stamp.
+    let turns: Int = (seed + index * 7) % 4
+    loop var vertex: Int = firstVertex, vertex < mesh.vertCount, ++vertex {
+      var u: Float = mesh.verts.copyAtDefault(index: vertex * 8 + 6)
+      var v: Float = mesh.verts.copyAtDefault(index: vertex * 8 + 7)
+      loop var turn: Int = 0, turn < turns, ++turn {
+        let previous: Float = u
+        u = v
+        v = 1.0 - previous
+      }
+      mesh.verts.set(index: vertex * 8 + 6, value: u)
+      mesh.verts.set(index: vertex * 8 + 7, value: v)
+    }
+  }
+  ret own mesh
+}
+
+func limeLeafColor(tone: view Int) ret Vec3 {
+  let variation: Float = 0.94 + tone.toFloat() * 0.055
+  ret Vec3.create(x: 0.72 * variation, y: 0.90 * variation, z: 0.68 * variation)
+}
+
+func limeWoodColor() ret Vec3 {
+  ret Vec3.create(x: 0.82, y: 0.84, z: 0.86)
+}
+
+func limeLeafTexture() ret String {
+  ret "lib/assets/trees/limeSpray.png"
+}
+
+func limeBarkTexture() ret String {
+  ret "lib/assets/trees/limeBark.png"
+}

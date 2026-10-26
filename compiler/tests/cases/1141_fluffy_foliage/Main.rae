@@ -1,3 +1,4 @@
+# Preserved opaque controls; the new textured lime is checked in 1245.
 open procgen/FluffyFoliage
 open Mesh3d
 
@@ -11,7 +12,7 @@ func main() ret Int {
   }
   let counts: List(Int) = { 48, 24, 12 }
   loop let form: FluffyForm in forms {
-    let wood: MeshData = fluffyWood(form: form, seed: 73)
+    let wood: MeshData = fluffyWoodControl(form: form, seed: 73)
     loop let index: Int in wood.indices {
       if index < 0 or index >= wood.vertCount {
         ret 7
@@ -32,13 +33,13 @@ func main() ret Int {
     loop let count: Int in counts {
       var total: Int = 0
       loop var tone: Int = 0, tone < 3, ++tone {
-        let mesh: MeshData = fluffyLeaves(
+        let mesh: MeshData = fluffyLeavesControl(
           form: form
           seed: 73
           patchCount: count
           tone: tone
         )
-        let repeat: MeshData = fluffyLeaves(
+        let repeat: MeshData = fluffyLeavesControl(
           form: form
           seed: 73
           patchCount: count

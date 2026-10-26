@@ -1,6 +1,6 @@
 # app3d/GroveTrees — the trees and bushes of Autumn Grove, as a set of
 # species for a forest: every tree of the grove but its giant camphor — the
-# leaf-patch forms (procgen/FluffyFoliage: broadleaf, umbrella pine, cypress,
+# foliage forms (procgen/FluffyFoliage: small-leaved lime, umbrella pine, cypress,
 # spruce, bush), the four autumn broadleaves and the palm (procgen/Foliage) —
 # generated once. Each tree species becomes an app3d/PropField kind at three
 # levels of detail (addForestKinds), each level its wood and its leaves in
@@ -18,6 +18,7 @@ import RendererDeferred
 open FoliageMesh
 open RendererImages
 open procgen/Birch
+open procgen/Lime
 open Noise
 open Scene3d
 open Mesh3d
@@ -31,6 +32,7 @@ open gpu/GpuResources
 open ImpostorAtlas
 open ImpostorBake
 
+# Stable legacy kind: small-leaved lime (Tilia cordata), never renumbered.
 const speciesBroadleaf: Int = 0
 
 const speciesUmbrella: Int = 1
@@ -416,6 +418,9 @@ func speciesLeaves(
 }
 
 func speciesLeafColor(species: view Int, tone: view Int) ret Vec3 {
+  if species is speciesBroadleaf {
+    ret limeLeafColor(tone: tone)
+  }
   if species is speciesBirch {
     ret birchLeafColor(tone: tone)
   }
@@ -433,6 +438,14 @@ func speciesWoodColor() ret Vec3 {
 # A level of a species as mesh data: its wood, then its leaves in three tones
 func speciesLevelMeshes(species: view Int, patches: view Int, leaves: view Int) ret List(MeshData) {
   var meshes: List(MeshData) = List.create(MeshData, cap: 4)
+  if species is speciesBroadleaf {
+    let tree: LimeTree = limeTree(seed: 73)
+    meshes.add(value: tree.wood)
+    loop var tone: Int = 0, tone < 3, ++tone {
+      meshes.add(value: limeLeaves(sprays: tree.sprays, seed: 73, tone: tone))
+    }
+    ret own meshes
+  }
   meshes.add(value: speciesWoodMesh(species: species))
   loop var tone: Int = 0, tone < 3, ++tone {
     meshes.add(value: speciesLeavesMesh(
@@ -454,6 +467,8 @@ func speciesAlbedos(species: view Int) ret List(Vec3) {
   var albedos: List(Vec3) = List.create(Vec3, cap: 4)
   if species is speciesBirch {
     albedos.add(value: Vec3.create(x: 0.94, y: 0.95, z: 0.97))
+  } else if species is speciesBroadleaf {
+    albedos.add(value: limeWoodColor())
   } else {
     albedos.add(value: speciesWoodColor())
   }
@@ -560,6 +575,8 @@ func addForestKinds(
     renderer: renderer
     path: birchLeafTexture(style: birchCrownStyle)
   )
+  let limeLayer: Int = rendererLoadSurfaceImage(renderer: renderer, path: limeBarkTexture())
+  let limeLeafLayer: Int = rendererLoadSurfaceImage(renderer: renderer, path: limeLeafTexture())
   var subjects: List(ImpostorSubject) = List.create(ImpostorSubject, cap: treeSpeciesCount)
   loop var species: Int = 0, species < treeSpeciesCount, ++species {
     # The near level's meshes, made once: drawn near, and baked into the
@@ -588,6 +605,9 @@ func addForestKinds(
         -1
       }
     }
+    if species is speciesBroadleaf {
+      subject.imageLayers = List(Int) { limeLayer, limeLeafLayer, limeLeafLayer, limeLeafLayer }
+    }
     var lods: List(PropLod) = List.create(PropLod, cap: 3)
     lods.add(value: speciesLodOf(
       meshes: nearHandles
@@ -595,8 +615,9 @@ func addForestKinds(
       maxDistance: nearTreeDistance
       castsShadow: true
     ))
-    if species is speciesBirch {
-      # No reduced birch mesh yet: share LOD0 until the existing far fallback.
+    if species is speciesBirch or species is speciesBroadleaf {
+      # The textured crowns share handles through the middle range; their
+      # existing far level is baked from these same textured meshes.
       lods.add(value: speciesLodOf(
         meshes: nearHandles
         albedos: albedos
@@ -630,6 +651,18 @@ func addForestKinds(
         loop var part: Int = 1, part < 4, ++part {
           if let leaves: mod PropPart = level.parts.modAt(index: part) {
             leaves.material.colorTextureLayer = birchLeafLayer
+          }
+        }
+      }
+    }
+    if species is speciesBroadleaf {
+      loop let level: mod PropLod in lods {
+        if let wood: mod PropPart = level.parts.modAt(index: 0) {
+          wood.material.colorTextureLayer = limeLayer
+        }
+        loop var part: Int = 1, part < 4, ++part {
+          if let leaves: mod PropPart = level.parts.modAt(index: part) {
+            leaves.material.colorTextureLayer = limeLeafLayer
           }
         }
       }
