@@ -40,14 +40,16 @@ func labBarkLayer(renderer: mod DeferredRenderer) ret Int {
 }
 
 # How far to turn the tree about its upright axis so its second leader opens
-# to the camera's right (+x), as T02's fork opens sideways in the picture
+# to the camera's left (-x): T02's fork opens sideways in the picture, to that
+# side (+x showed the tree as T02's mirror image). A turn, not a mirror: the
+# mesh and its lighting stay as they are.
 func forkFacingYaw(skeleton: view TreeSkeleton) ret Float {
   let second: Limb = skeleton.limbs.copyAtDefault(index: 2)
   let lean: Vec3 = Vec3.vsub(
     a: second.points.copyAtDefault(index: 6)
     b: second.points.copyAtDefault(index: 0)
   )
-  ret -Math.atan2(y: lean.y, x: lean.x)
+  ret 3.141592653589793 - Math.atan2(y: lean.y, x: lean.x)
 }
 
 # The generated tree for `seed`, standing at the origin, its fork turned to
