@@ -28,6 +28,7 @@ open Scene3d
 open Mesh3d
 open GbufferInstanced
 open procgen/Spruce
+open procgen/Cypress
 open procgen/FluffyFoliage
 open procgen/Foliage
 open app3d/PropField
@@ -203,7 +204,7 @@ func leafColor(form: view FluffyForm, tone: view Int) ret Vec3 {
   let variation: Float = 0.86 + tone.toFloat() * 0.12
   var color: Vec3 = Vec3.create(x: 0.18, y: 0.35, z: 0.055)
   if form is FluffyForm.cypress {
-    color = Vec3.create(x: 0.025, y: 0.10, z: 0.055)
+    ret cypressLeafColor(tone: tone)
   }
   if form is FluffyForm.umbrella {
     color = Vec3.create(x: 0.055, y: 0.19, z: 0.09)
@@ -444,7 +445,7 @@ func speciesLeavesMesh(
     flexibility = 0.55
   }
   loop var vertex: Int = 0, vertex < crown.windPivots.length / 4, ++vertex {
-    if species is speciesSpruce {
+    if species is speciesSpruce or species is speciesCypress {
       continue
     }
     crown.windPivots.set(index: vertex * 4 + 3, value: flexibility)
@@ -573,6 +574,8 @@ func speciesAlbedos(species: view Int) ret List(Vec3) {
   var albedos: List(Vec3) = List.create(Vec3, cap: 4)
   if species is speciesBirch {
     albedos.add(value: Vec3.create(x: 0.94, y: 0.95, z: 0.97))
+  } else if species is speciesCypress {
+    albedos.add(value: cypressWoodColor())
   } else if species is speciesSpruce {
     albedos.add(value: spruceWoodColor())
   } else if species is speciesRed {
@@ -721,6 +724,14 @@ func addForestKinds(
   )
   let spruceBarkLayer: Int = rendererLoadSurfaceImage(renderer: renderer, path: spruceBarkTexture())
   let spruceLeafLayer: Int = rendererLoadSurfaceImage(renderer: renderer, path: spruceLeafTexture())
+  let cypressBarkLayer: Int = rendererLoadSurfaceImage(
+    renderer: renderer
+    path: cypressBarkTexture()
+  )
+  let cypressLeafLayer: Int = rendererLoadSurfaceImage(
+    renderer: renderer
+    path: cypressLeafTexture()
+  )
   var subjects: List(ImpostorSubject) = List.create(ImpostorSubject, cap: treeSpeciesCount)
   loop var species: Int = 0, species < treeSpeciesCount, ++species {
     # The near level's meshes, made once: drawn near, and baked into the
@@ -792,6 +803,14 @@ func addForestKinds(
         spruceLeafLayer
       }
     }
+    if species is speciesCypress {
+      subject.imageLayers = List(Int) {
+        cypressBarkLayer
+        cypressLeafLayer
+        cypressLeafLayer
+        cypressLeafLayer
+      }
+    }
     var lods: List(PropLod) = List.create(PropLod, cap: 3)
     lods.add(value: speciesLodOf(
       meshes: nearHandles
@@ -799,7 +818,7 @@ func addForestKinds(
       maxDistance: nearTreeDistance
       castsShadow: true
     ))
-    if species is speciesSpruce or species is speciesBirch or species is speciesBroadleaf or species is speciesOrange or species is speciesRed or species is speciesGold or species is speciesCrimson {
+    if species is speciesCypress or species is speciesSpruce or species is speciesBirch or species is speciesBroadleaf or species is speciesOrange or species is speciesRed or species is speciesGold or species is speciesCrimson {
       # The textured crowns share handles through the middle range; their
       # existing far level is baked from these same textured meshes.
       lods.add(value: speciesLodOf(
@@ -851,6 +870,9 @@ func addForestKinds(
     }
     if species is speciesSpruce {
       treeLodImages(lods: lods, barkLayer: spruceBarkLayer, leafLayer: spruceLeafLayer)
+    }
+    if species is speciesCypress {
+      treeLodImages(lods: lods, barkLayer: cypressBarkLayer, leafLayer: cypressLeafLayer)
     }
     # The sphere round the tree at scale 1: the leaf-patch forms are unit
     # height, the others autumnReferenceHeight

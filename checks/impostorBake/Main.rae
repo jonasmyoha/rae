@@ -135,6 +135,9 @@ func checkFoliageLayout(
     if species is speciesSpruce {
       subject.imageLayers = List(Int) { 12, 13, 13, 13 }
     }
+    if species is speciesCypress {
+      subject.imageLayers = List(Int) { 14, 15, 15, 15 }
+    }
     subjects.add(value: subject)
   }
   var atlas: ImpostorAtlas = bakeTexturedImpostorAtlas(
@@ -521,6 +524,8 @@ func main() ret Int {
       "lib/assets/trees/japaneseMapleSpray.png"
       "lib/assets/trees/spruceBark.png"
       "lib/assets/trees/spruceSpray.png"
+      "lib/assets/trees/cypressBark.png"
+      "lib/assets/trees/cypressSpray.png"
     }
     if not setSurfaceImages(images: images, resources: resources, paths: paths) {
       ret 1
@@ -575,6 +580,9 @@ func main() ret Int {
       }
       if species is speciesSpruce {
         subject.imageLayers = List(Int) { 12, 13, 13, 13 }
+      }
+      if species is speciesCypress {
+        subject.imageLayers = List(Int) { 14, 15, 15, 15 }
       }
       subjects.add(value: subject)
     }

@@ -1,6 +1,6 @@
 # Shared foliage forms. Lime uses joined wood and textured connected sprays;
-# spruce has curved needle sprays; the other forms retain opaque patches. Controls preserve the
-# original lime for matched visual comparisons.
+# spruce and cypress use curved evergreen sprays. Other forms retain opaque
+# patches. Controls preserve original meshes for matched visual comparisons.
 # Meshes are local-space, deterministic and independent of any renderer/owner.
 import Math
 open Vec3
@@ -8,6 +8,7 @@ open Noise
 open Mesh3d
 open procgen/Foliage
 open procgen/Spruce
+open procgen/Cypress
 open procgen/SpruceControl
 open procgen/Lime
 
@@ -275,6 +276,9 @@ func fluffyLeaves(
   patchCount: view Int
   tone: view Int
 ) ret MeshData {
+  if form is FluffyForm.cypress {
+    ret cypressLeaves(seed: seed, detail: patchCount, tone: tone)
+  }
   if form is FluffyForm.spruce {
     ret spruceLeaves(seed: seed, detail: patchCount, tone: tone)
   }
@@ -291,6 +295,9 @@ func fluffyLeaves(
 }
 
 func fluffyWood(form: view FluffyForm, seed: view Int) ret MeshData {
+  if form is FluffyForm.cypress {
+    ret cypressWood(seed: seed)
+  }
   if form is FluffyForm.spruce {
     ret spruceWood(seed: seed)
   }

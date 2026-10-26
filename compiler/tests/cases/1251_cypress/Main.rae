@@ -1,0 +1,149 @@
+open procgen/Cypress
+open procgen/FluffyFoliage
+open procgen/SculpturalFork
+open app3d/GroveTrees
+open Mesh3d
+open Vec3
+import Math
+
+func cypressValid(mesh: view MeshData, tone: view Int) ret Bool {
+  if mesh.verts.length is not mesh.vertCount * 8 or mesh.vertCount < 1 or mesh.vertCount > 5000 {
+    ret false
+  }
+  loop let value: Float in mesh.verts {
+    if value is not value or Math.abs(value: value) > 20 {
+      ret false
+    }
+  }
+  loop let index: Int in mesh.indices {
+    if index < 0 or index >= mesh.vertCount {
+      ret false
+    }
+  }
+  if mesh.indices.length % 3 is not 0 {
+    ret false
+  }
+  let foliage: Bool = tone >= 0
+  if foliage {
+    if mesh.windPivots.length is not mesh.vertCount * 4 or mesh.leafCards.length is not 0 {
+      ret false
+    }
+  } else if mesh.windPivots.length is not 0 {
+    ret false
+  }
+  var motionAllowance: Float = 0
+  if foliage {
+    motionAllowance = 0.04
+  }
+  let boundsRadius: Float = 0.6 * speciesWidth(species: speciesCypress) + 0.1
+  var interior: Int = 0
+  if tone is 0 {
+    interior = 204
+  }
+  loop var vertex: Int = 0, vertex < mesh.vertCount, ++vertex {
+    let point: Vec3 = forkPoint(mesh: mesh, index: vertex)
+    if vlen(a: vsub(a: point, b: Vec3.create(x: 0, y: 0, z: 0.55))) + motionAllowance > boundsRadius {
+      ret false
+    }
+    if Math.abs(value: point.x) > 0.19 or Math.abs(value: point.y) > 0.19 or point.z > 1.06 {
+      ret false
+    }
+    if Math.abs(value: vlen(a: forkNormal(mesh: mesh, index: vertex)) - 1) > 0.002 {
+      ret false
+    }
+    if foliage {
+      let strength: Float = mesh.windPivots.copyAtDefault(index: vertex * 4 + 3)
+      if strength < 0 or strength > 0.121 {
+        ret false
+      }
+      if vertex >= interior {
+        let first: Int = interior + ((vertex - interior) / 16) * 16
+        loop var field: Int = 0, field < 4, ++field {
+          if mesh.windPivots.copyAtDefault(index: vertex * 4 + field) is not mesh.windPivots.copyAtDefault(
+            index: first * 4 + field
+          ) {
+            ret false
+          }
+        }
+      }
+    }
+  }
+  ret true
+}
+
+func cypressExtent(mesh: view MeshData) ret Float {
+  var widest: Float = 0
+  loop var vertex: Int = 0, vertex < mesh.vertCount, ++vertex {
+    let point: Vec3 = forkPoint(mesh: mesh, index: vertex)
+    widest = Math.max(a: widest, b: Math.sqrt(x: point.x * point.x + point.y * point.y))
+  }
+  ret widest
+}
+
+func main() ret Int {
+  if speciesCypress is not 2 or Math.abs(value: speciesWidth(species: speciesCypress) - 0.85) > 0.001 {
+    ret 1
+  }
+  if cypressRadius(amount: 0.9) > 0.04 or cypressRadius(amount: 0.0) < 0.13 {
+    ret 8
+  }
+  loop var sample: Int = 0, sample < 32, ++sample {
+    let seed: Int = 73 + sample * 104
+    let wood: MeshData = cypressWood(seed: seed)
+    if not cypressValid(mesh: wood, tone: -1) {
+      ret 2
+    }
+    # The original 0.035 unit trunk radius is retained, not enlarged.
+    if Math.abs(value: forkPoint(mesh: wood, index: 0).x) > 0.036 {
+      ret 3
+    }
+    loop var tone: Int = 0, tone < 3, ++tone {
+      let crown: MeshData = cypressLeaves(seed: seed, detail: nearPatches, tone: tone)
+      let middle: MeshData = cypressLeaves(seed: seed, detail: midPatches, tone: tone)
+      var controlExtent: Float = 0
+      loop var controlTone: Int = 0, controlTone < 3, ++controlTone {
+        let control: MeshData = fluffyLeavesControl(
+          form: FluffyForm.cypress
+          seed: seed
+          patchCount: nearPatches
+          tone: controlTone
+        )
+        controlExtent = Math.max(a: controlExtent, b: cypressExtent(mesh: control))
+      }
+      if cypressExtent(mesh: crown) > controlExtent + 0.002 {
+        ret 9
+      }
+      if not cypressValid(mesh: crown, tone: tone) or crown.vertCount is not middle.vertCount {
+        ret 4
+      }
+      loop var value: Int = 0, value < crown.verts.length, ++value {
+        if crown.verts.copyAtDefault(index: value) is not middle.verts.copyAtDefault(index: value) {
+          ret 5
+        }
+      }
+    }
+    let height: Float = treeScaleAt(species: speciesCypress, number: sample)
+    if height < 8 or height > 11.5 {
+      ret 6
+    }
+  }
+  var vertices: Int = 0
+  var triangles: Int = 0
+  let meshes: List(MeshData) = speciesLevelMeshes(
+    species: speciesCypress
+    patches: nearPatches
+    leaves: nearLeaves
+  )
+  loop var part: Int = 0, part < meshes.length, ++part {
+    let mesh: MeshData = meshes.copyAtDefault(index: part)
+    if not cypressValid(mesh: mesh, tone: part - 1) {
+      ret 7
+    }
+    vertices = vertices + mesh.vertCount
+    triangles = triangles + mesh.indices.length / 3
+  }
+  log(
+    "cypress: {vertices} vertices, {triangles} triangles; 32 seeds, thin bounds, rigid wood, attached sprays and stable kind/height mapping"
+  )
+  ret 0
+}

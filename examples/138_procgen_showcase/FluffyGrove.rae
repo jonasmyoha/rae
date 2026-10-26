@@ -5,6 +5,7 @@
 import Math
 import Sys
 open procgen/Spruce
+open procgen/Cypress
 open procgen/Lime
 open RendererImages
 open Noise
@@ -56,6 +57,9 @@ func uploadFluffySpecies(
   if form is FluffyForm.spruce and Sys.getEnv(name: "RAE_SPRUCE_SEED").length() > 0 {
     seed = Sys.getEnv(name: "RAE_SPRUCE_SEED").toInt()
   }
+  if form is FluffyForm.cypress and Sys.getEnv(name: "RAE_CYPRESS_SEED").length() > 0 {
+    seed = Sys.getEnv(name: "RAE_CYPRESS_SEED").toInt()
+  }
   let control: Bool = form is FluffyForm.broadleaf and Sys.getEnv(name: "RAE_LIME_CONTROL") is "1"
   if form is FluffyForm.broadleaf and not control {
     let tree: LimeTree = limeTree(seed: seed)
@@ -76,6 +80,9 @@ func uploadFluffySpecies(
   if form is FluffyForm.spruce and Sys.getEnv(name: "RAE_SPRUCE_CONTROL") is not "1" {
     wood = spruceWood(seed: seed)
   }
+  if form is FluffyForm.cypress and Sys.getEnv(name: "RAE_CYPRESS_CONTROL") is not "1" {
+    wood = cypressWood(seed: seed)
+  }
   var woodHandle: MeshHandle = meshHandleNone()
   if wood.vertCount > 0 {
     woodHandle = uploadMesh(
@@ -95,6 +102,9 @@ func uploadFluffySpecies(
     )
     if form is FluffyForm.spruce and Sys.getEnv(name: "RAE_SPRUCE_CONTROL") is not "1" {
       leaves = spruceLeaves(seed: seed, detail: 48, tone: tone)
+    }
+    if form is FluffyForm.cypress and Sys.getEnv(name: "RAE_CYPRESS_CONTROL") is not "1" {
+      leaves = cypressLeaves(seed: seed, detail: 48, tone: tone)
     }
     handles.add(value: uploadFoliage(renderer: renderer, mesh: leaves))
     log(
@@ -117,6 +127,8 @@ func plantFluffy(
   limeLeafLayer: view Int
   spruceBarkLayer: view Int
   spruceLeafLayer: view Int
+  cypressBarkLayer: view Int
+  cypressLeafLayer: view Int
   yaw: view Float
 ) {
   loop var part: Int = 0, part < 4, ++part {
@@ -124,6 +136,9 @@ func plantFluffy(
       continue
     }
     if form is FluffyForm.spruce and part > 0 and Sys.getEnv(name: "RAE_SPRUCE_BARE") is "1" {
+      continue
+    }
+    if form is FluffyForm.cypress and part > 0 and Sys.getEnv(name: "RAE_CYPRESS_BARE") is "1" {
       continue
     }
     if form is FluffyForm.bush and part is 0 {
@@ -156,6 +171,14 @@ func plantFluffy(
         material.colorTextureLayer = spruceBarkLayer
       }
     }
+    if form is FluffyForm.cypress and cypressLeafLayer >= 0 {
+      material.baseColor = cypressLeafColor(tone: part - 1)
+      material.colorTextureLayer = cypressLeafLayer
+      if part is 0 {
+        material.baseColor = cypressWoodColor()
+        material.colorTextureLayer = cypressBarkLayer
+      }
+    }
     let entityId: EntityId = world3dAddMeshInstance(
       world: world
       mesh: meshHandle
@@ -184,6 +207,12 @@ func addFluffyGrove(
     spruceBarkLayer = rendererLoadSurfaceImage(renderer: renderer, path: spruceBarkTexture())
     spruceLeafLayer = rendererLoadSurfaceImage(renderer: renderer, path: spruceLeafTexture())
   }
+  var cypressBarkLayer: Int = -1
+  var cypressLeafLayer: Int = -1
+  if Sys.getEnv(name: "RAE_CYPRESS_CONTROL") is not "1" {
+    cypressBarkLayer = rendererLoadSurfaceImage(renderer: renderer, path: cypressBarkTexture())
+    cypressLeafLayer = rendererLoadSurfaceImage(renderer: renderer, path: cypressLeafTexture())
+  }
   var forms: List(FluffyForm) = {
     FluffyForm.broadleaf
     FluffyForm.cypress
@@ -192,9 +221,13 @@ func addFluffyGrove(
     FluffyForm.spruce
   }
   let spruceIsolated: Bool = Sys.getEnv(name: "RAE_SPRUCE_ISOLATE") is "1"
-  let isolated: Bool = Sys.getEnv(name: "RAE_LIME_ISOLATE") is "1" or spruceIsolated
+  let cypressIsolated: Bool = Sys.getEnv(name: "RAE_CYPRESS_ISOLATE") is "1"
+  let isolated: Bool = Sys.getEnv(name: "RAE_LIME_ISOLATE") is "1" or spruceIsolated or cypressIsolated
   if isolated {
     forms = List(FluffyForm) { FluffyForm.broadleaf }
+    if cypressIsolated {
+      forms = List(FluffyForm) { FluffyForm.cypress }
+    }
     if spruceIsolated {
       forms = List(FluffyForm) { FluffyForm.spruce }
     }
@@ -230,6 +263,11 @@ func addFluffyGrove(
       var height: Float = 5.0 + plant.toFloat() * 0.65
       if form is FluffyForm.cypress {
         height = 7.5 + plant.toFloat() * 0.7
+        position = Vec3.create(
+          x: -5.5 + plant.toFloat() * 1.1
+          y: 13.0 + plant.toFloat() * 3.8
+          z: 0
+        )
       }
       if form is FluffyForm.umbrella {
         height = 6.0 + plant.toFloat() * 0.5
@@ -243,8 +281,10 @@ func addFluffyGrove(
         height = heightText.toFloat()
       }
       var widthScale: Float = height
-      if form is FluffyForm.cypress and plant >= 3 {
-        let giantIndex: Int = plant - 3
+      if form is FluffyForm.cypress and (plant >= 3 or (cypressIsolated and Sys.getEnv(
+        name: "RAE_CYPRESS_TALL"
+      ) is "1")) {
+        let giantIndex: Int = Math.max(a: plant - 3, b: 0)
         widthScale = 7.5 + giantIndex.toFloat() * 0.7
         height = widthScale * 3
         position = Vec3.create(
@@ -275,6 +315,8 @@ func addFluffyGrove(
         limeLeafLayer: limeLeafLayer
         spruceBarkLayer: spruceBarkLayer
         spruceLeafLayer: spruceLeafLayer
+        cypressBarkLayer: cypressBarkLayer
+        cypressLeafLayer: cypressLeafLayer
         yaw: plant.toFloat() * 1.7
       )
     }
@@ -290,6 +332,8 @@ func addFluffyGrove(
     limeLeafLayer: limeLeafLayer
     spruceBarkLayer: spruceBarkLayer
     spruceLeafLayer: spruceLeafLayer
+    cypressBarkLayer: cypressBarkLayer
+    cypressLeafLayer: cypressLeafLayer
     obstacles: obstacles
   )
 }
@@ -399,6 +443,8 @@ func addFluffyWoodland(
   limeLeafLayer: view Int
   spruceBarkLayer: view Int
   spruceLeafLayer: view Int
+  cypressBarkLayer: view Int
+  cypressLeafLayer: view Int
   obstacles: mod List(GroveObstacle)
 ) {
   var planted: List(WoodlandPlant) = List.create(WoodlandPlant, cap: 64)
@@ -465,6 +511,8 @@ func addFluffyWoodland(
       limeLeafLayer: limeLeafLayer
       spruceBarkLayer: spruceBarkLayer
       spruceLeafLayer: spruceLeafLayer
+      cypressBarkLayer: cypressBarkLayer
+      cypressLeafLayer: cypressLeafLayer
       yaw: hash2(x: candidate, y: 5, seed: 4177) * 6.2831853
     )
   }
