@@ -151,9 +151,23 @@ Done when: the silhouette (tree in black, sky in white) is close to T02's
 silhouette, and the sky share inside the crown is in T02's range (features 4,
 5).
 
+Done by hand instead (2026-10-26, accepted: "now it is looking really nice"):
+T02's 13 leaf masses were traced as ellipses in looks-development's
+`trace.html`, each on a branch and marked in front of, at, or behind the
+trunk; `examples/146_treeLab/traceTree.py` turns them into ellipsoids
+(`lib/treeGen/TracedT02.rae`, `ClumpMesh.rae`). Placing masses procedurally
+moved to step 6.
+
 ### Step 5 — The clump surface
 
-Each sphere is replaced by a leaf clump:
+Each traced mass is filled with leaves, still by hand: the traced masses
+stay the layout. The technique is Tiny Glade's (looks-development
+`talks/tinyGladeRendering/analysis.md`, "Trees"): the mass is a mesh whose
+vertices are expanded in the vertex shader into small camera-facing leaf
+cards, and the cards write depth, so the mass breaks up into separate leaves
+and shadows, AO and later GI see real leaf depth. The cost is overdraw:
+measure it in the lab from the start. Each mass also gets the hidden twig
+from its branch to its centre. Then:
 
 - a few leaf-cluster cards per clump, with an alpha texture of small leaves
   (one texture made for this tree, painted or generated once);
@@ -168,11 +182,16 @@ Done when: close up and at T02's framing, the clumps have T02's lit top, dark
 underside and ragged edge (features 6, 7), and the measured light-to-dark
 range is close to T02's.
 
-### Step 6 — Variations
+### Step 6 — Variations: from the traced tree to a generator
 
-Three seeds give three trees that are clearly different but clearly the same
-kind (different fork heights, branch counts, clump sizes, lean). Shown in a
-row, like the background trees in T02.
+The tree so far is T02 by hand: traced wood and traced masses. This step
+makes it procedural: the generator learns to grow wood and place masses
+itself, with the traced tree as its target (its fork height, branch
+angles and lengths, trunk taper, the masses' sizes and spread, the share
+behind and in front). Three seeds give three trees that are clearly
+different but clearly the same kind as the traced one (different fork
+heights, branch counts, mass sizes, lean). Shown in a row beside the traced
+tree, like the background trees in T02.
 
 Done when: the review shows three trees of one kind, none a copy of
 another.
@@ -192,6 +211,11 @@ short camera move.
 Measured in the lab and in a forest of a few thousand copies: triangles per
 tree at each distance, frame time on this machine and on the phone. Targets
 are set from the walker forest's current budget.
+
+Leaf cards cost overdraw, so the trees are drawn near to far, as Tiny Glade
+does: visible tree instances go into about 24 depth buckets in one counting
+pass on the GPU, and are still drawn in one indirect draw (their trees took
+about 65% of the unsorted time). Measure the forest with and without it.
 
 Done when: the numbers are written down and within the budget, or the
 trade-off is accepted.
