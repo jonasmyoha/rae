@@ -9,20 +9,19 @@
 #
 # TREELAB_T02   the crop (default: the private reference study's T02.png,
 #               in the looks-development repository)
-# TREELAB_OUT   the picture to write (default: the report's lab/ folder in
-#               looks-development, compare-<camera>.png). T02 is private, so
+# TREELAB_OUT   the picture to write (default: treeReference/lab/ in
+#               looks-development, compare-<camera>.png, not committed there). T02 is private, so
 #               the picture is never written into this repository.
 # TREELAB_ITERATION  a round's name (YYYY-MM-DD-stepN-short-name): also copy
-#               the picture into the report's iterations/<name>/, the history
+#               the picture into treeReference/rounds/<name>/, the history
 #               that is never overwritten (looks-development's README)
 # Needs macOS `sips` (crop, scale, PNG/BMP) and python3 (joins two BMPs).
 set -u
 cd "$(dirname "$0")/../.." || exit 1     # -> the repository root
 CAMERA="${1:-near}"
 LOOKS="${TREELAB_LOOKS_REPO:-$HOME/Documents/my_own_stuff/own_repos/looks-development}"
-STUDY="$LOOKS/environmentReferenceStudy"
-T02="${TREELAB_T02:-$STUDY/crops/T02.png}"
-OUT="${TREELAB_OUT:-$STUDY/referenceTree/lab/compare-$CAMERA.png}"
+T02="${TREELAB_T02:-$LOOKS/references/crops/T02.png}"
+OUT="${TREELAB_OUT:-$LOOKS/treeReference/lab/compare-$CAMERA.png}"
 [ -f "$T02" ] || { echo "error: reference crop not found: $T02 (set TREELAB_T02)" >&2; exit 1; }
 case "$OUT" in "$PWD"/*|examples/*|lib/*|docs/*)
   echo "error: $OUT is inside the repository; T02 is private (set TREELAB_OUT elsewhere)" >&2; exit 1;;
@@ -84,8 +83,8 @@ mkdir -p "$(dirname "$OUT")"
 sips -s format png "$TMP/joined.bmp" --out "$OUT" > /dev/null
 echo "wrote $OUT (left: T02, right: camera '$CAMERA')"
 if [ -n "${TREELAB_ITERATION:-}" ]; then
-  ROUND="$STUDY/referenceTree/iterations/$TREELAB_ITERATION"
+  ROUND="$LOOKS/treeReference/rounds/$TREELAB_ITERATION"
   mkdir -p "$ROUND"
   cp "$OUT" "$ROUND/compare-$CAMERA.png"
-  echo "kept $ROUND/compare-$CAMERA.png (add the round to referenceTree/progress/rounds.js and commit looks-development)"
+  echo "kept $ROUND/compare-$CAMERA.png (add the round to treeReference/rounds.js and commit looks-development)"
 fi

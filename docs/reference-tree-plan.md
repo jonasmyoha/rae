@@ -28,7 +28,7 @@ not change until the last step.
 
 `T02` in the private reference study, which lives in the separate, private
 repository `own_repos/looks-development` (with Git LFS):
-`looks-development/environmentReferenceStudy/crops/T02.png` (source S04,
+`looks-development/references/crops/T02.png` (source S04,
 `hienoja_kasveja_ja_kivia4.jpg`, rectangle x 520, y 320, 330 x 570). The
 reference images are private and are not copied into this repository.
 
@@ -78,11 +78,11 @@ not like a named species from a field guide. So:
 - **The report and its history** live in the looks-development repository
   (`own_repos/looks-development`, private, Git LFS for images and videos).
   Every round of every step is kept, never overwritten, in
-  `environmentReferenceStudy/referenceTree/iterations/YYYY-MM-DD-stepN-short-name/`:
+  `treeReference/rounds/YYYY-MM-DD-stepN-short-name/`:
   `TREELAB_ITERATION=<that name> examples/146_treeLab/compare.sh <camera>`
   for each of `near`, `mid` and `bark`. The round is then ONE entry at the
-  end of `referenceTree/progress/rounds.js` (what changed, the pictures, and
-  later the be response); `referenceTree/progress/index.html` shows
+  end of `treeReference/rounds.js` (what changed, the pictures, and later
+  the response); `treeReference/progress.html` shows
   every round oldest first, the same cameras in the same places, and
   compares any two. Videos of motion go into the round's folder too. Then
   commit the looks-development repository (its own git identity; its README

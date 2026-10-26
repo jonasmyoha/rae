@@ -42,7 +42,7 @@ The landscape plan below is on hold with them.
 
 The landscape tasks below implement the future-plans section of the local
 reference study at
-`/Users/jonas/Documents/my_own_stuff/own_repos/looks-development/environmentReferenceStudy/index.html`
+`/Users/jonas/Documents/my_own_stuff/own_repos/looks-development/references/study.html`
 (moved there from peli_ideoita on 2026-10-26: looks-development is the private,
 Git LFS repository of every iteration's pictures and videos).
 Its `crops/`, contact sheets and `manifest.json` give stable references:
