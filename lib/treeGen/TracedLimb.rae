@@ -1,6 +1,7 @@
-# treeGen/TracedLimb — one limb of a tree traced from a reference picture:
-# its centre line and radii, already in metres (docs/reference-tree-plan.md
-# step 3; lib/treeGen/TracedT02.rae holds T02's).
+# treeGen/TracedLimb — one limb (its centre line and radii) or one leaf mass
+# (an ellipsoid) of a tree traced from a reference picture, already in metres
+# (docs/reference-tree-plan.md steps 3 and 4; lib/treeGen/TracedT02.rae
+# holds T02's).
 import Vec3
 
 type TracedLimb {
@@ -10,4 +11,18 @@ type TracedLimb {
   parent: Int
   # 0 the trunk, 1 a leader, 2 a side branch
   order: Int
+}
+
+# One leaf mass of a traced tree: an ellipsoid, in metres
+type TracedClump {
+  centre: Vec3
+  # its half sizes: across the picture (x), in depth (y) and up (z)
+  radii: Vec3
+  # the underside's height as a part of the top's (a flatter underside)
+  underside: Float
+  # its turn in the picture (radians, clockwise as seen from the trace's
+  # camera)
+  turn: Float
+  # the limb it belongs to
+  parent: Int
 }

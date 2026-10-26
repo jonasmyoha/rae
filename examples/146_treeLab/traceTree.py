@@ -11,10 +11,11 @@ generated tree (docs/reference-tree-plan.md step 3).
       that `alignment` still applies is almost none.
 
   traceTree.py overlay <trace.js> <t02.bmp> <render.bmp> <skeleton.txt> <out.bmp>
-      Three panels at T02's proportions: T02 with the trace (magenta); the
-      render with the trace moved the same way (magenta) and the generated
-      tree's real centre lines (cyan, from the lab's RAE_TREELAB_DUMP); and
-      the two pictures blended half and half, with both lines on top.
+      Three panels at T02's proportions: T02 with the trace (magenta, its
+      leaf masses yellow); the render with the trace moved the same way and
+      the generated tree's real centre lines (cyan, from the lab's
+      RAE_TREELAB_DUMP); and the two pictures blended half and half, with
+      all the lines on top.
 
 Coordinates: the trace is in crop pixels (330 x 570, y down). The render is
 compared through its middle strip in T02's proportions (compare.sh). The
@@ -173,6 +174,40 @@ def traced_limbs(trace):
     return result
 
 
+# How far a mass marked in front of or behind the trunk moves along its line
+# of sight, as a part of its own depth radius
+DEPTH_SHIFT = {"front": -0.8, "middle": 0.0, "behind": 0.8}
+# A mass's depth radius as a part of its mean picture radius, and its
+# underside's height as a part of its top's (1: as traced; the drawn outline
+# is the target)
+DEPTH_RADIUS = 0.9
+UNDERSIDE = 1.0
+
+
+def traced_clumps(trace):
+    """The traced leaf masses as ellipsoids: [(clump, centre, radii, turn)].
+    The centre is where the ellipse's centre meets the tree's plane, moved
+    along that line of sight for "front"/"behind" (and the radii scaled with
+    the distance), so in the picture the mass keeps its place and size.
+    radii = (across, depth, up) in metres; turn in radians, clockwise in the
+    picture."""
+    place, s = alignment(trace)
+    result = []
+    for clump in trace.get("clumps", []):
+        picture = place((clump["x"], clump["y"]))
+        world, metres = unproject(picture)
+        across = clump["rx"] / CROP_H * s * metres
+        up = clump["ry"] / CROP_H * s * metres
+        depth = DEPTH_RADIUS * (across + up) / 2.0
+        shift = DEPTH_SHIFT.get(clump.get("depth", "middle"), 0.0) * depth
+        ray = unit(sub(world, EYE))
+        distance = math.sqrt(dot(sub(world, EYE), sub(world, EYE)))
+        grow = (distance + shift) / distance
+        centre = add(EYE, scale(ray, distance + shift))
+        result.append((clump, centre, (across * grow, depth * grow, up * grow), math.radians(clump["angle"])))
+    return result
+
+
 def write_rae(trace, path):
     lines = [
         "# treeGen/TracedT02: the hand-drawn trace of reference crop T02 as the",
@@ -204,6 +239,22 @@ def write_rae(trace, path):
         lines.append("    order: %d" % order)
         lines.append("  })")
     lines.append("  ret limbs")
+    lines.append("}")
+    lines.append("")
+    lines.append("# The traced leaf masses: ellipsoids at their places in the picture")
+    lines.append("func tracedT02Clumps() ret List(TracedClump) {")
+    clumps = traced_clumps(trace)
+    lines.append("  var clumps: List(TracedClump) = List.create(TracedClump, cap: %d)" % len(clumps))
+    for clump, centre, radii, turn in clumps:
+        lines.append("  # %s (%s)" % (clump["name"], clump.get("depth", "middle")))
+        lines.append("  clumps.add(value: TracedClump {")
+        lines.append("    centre: Vec3.create(x: %.4f, y: %.4f, z: %.4f)" % centre)
+        lines.append("    radii: Vec3.create(x: %.4f, y: %.4f, z: %.4f)" % radii)
+        lines.append("    underside: %.2f" % UNDERSIDE)
+        lines.append("    turn: %.4f" % turn)
+        lines.append("    parent: %d" % clump["parent"])
+        lines.append("  })")
+    lines.append("  ret clumps")
     lines.append("}")
     open(path, "w").write("\n".join(lines) + "\n")
 
@@ -276,6 +327,19 @@ def draw_dot(rows, at, colour, size=4):
 
 MAGENTA = (255, 43, 255)   # RGB; written as BGR below
 CYAN = (40, 240, 255)
+YELLOW = (255, 225, 77)
+
+
+def ellipse_outline(clump, count=72):
+    """A traced leaf mass's outline in crop pixels."""
+    angle = math.radians(clump["angle"])
+    points = []
+    for k in range(count + 1):
+        t = 2.0 * math.pi * k / count
+        along, across = clump["rx"] * math.cos(t), clump["ry"] * math.sin(t)
+        points.append((clump["x"] + along * math.cos(angle) - across * math.sin(angle),
+                       clump["y"] + along * math.sin(angle) + across * math.cos(angle)))
+    return points
 
 
 def bgr(colour):
@@ -327,11 +391,17 @@ def overlay(trace_path, t02_path, render_path, skeleton_path, out_path):
     traced_on_render = [[strip_to_panel(place(p)) for p in smooth(limb["points"], 40)] for limb in trace["limbs"]]
     dots_on_render = [[strip_to_panel(place(p)) for p in limb["points"]] for limb in trace["limbs"]]
     generated = [[strip_to_panel(project(p)) for p in limb] for limb in read_skeleton(skeleton_path)]
-    for rows, curves, dots, skeleton in (
-        (left, traced_on_t02, dots_on_t02, []),
-        (middle, traced_on_render, dots_on_render, generated),
-        (right, traced_on_render, dots_on_render, generated),
+    masses_on_t02 = [[(p[0] / CROP_W * PANEL_W, p[1] / CROP_H * PANEL_H) for p in ellipse_outline(clump)]
+                     for clump in trace.get("clumps", [])]
+    masses_on_render = [[strip_to_panel(place(p)) for p in ellipse_outline(clump)] for clump in trace.get("clumps", [])]
+    for rows, curves, dots, skeleton, masses in (
+        (left, traced_on_t02, dots_on_t02, [], masses_on_t02),
+        (middle, traced_on_render, dots_on_render, generated, masses_on_render),
+        (right, traced_on_render, dots_on_render, generated, masses_on_render),
     ):
+        for outline in masses:
+            for a, b in zip(outline, outline[1:]):
+                draw_line(rows, a, b, bgr(YELLOW), 2)
         for limb in skeleton:
             for a, b in zip(limb, limb[1:]):
                 draw_line(rows, a, b, bgr(CYAN), 3)
