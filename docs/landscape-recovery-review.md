@@ -517,3 +517,18 @@ Matched grove views, three seeds/sizes, bare wood, backlight/night, actual fores
 controls and a breezy walk appear beside T04 in the private presentation.
 Remaining close-card patterns, shelf-like angles, dark overlaps and unreduced
 middle geometry are stated explicitly rather than hidden by the test results.
+
+## Norway spruce refinement
+
+[The spruce comparison](spruce-refinement.md) preserves the old skirt control
+and shows the selected unequal whorls, curved fixed needle sprays and scaly
+grey-brown trunk. Six normal-sized showcase trees retain their placements and
+sizes; shared forest kind 3 retains its mapping. Original textures, broad
+bough normals and restrained pivot motion use the existing renderer paths.
+
+The private presentation includes rejected solid-bough candidates, selected
+close/side/under/backlit/night views, three seeds, an actual 143 stand and
+botanical references beside the art crops. Nine targeted fixtures, three
+hardware checks and four example gates pass. Repeated close texture motifs,
+dark overlaps and the increased, unreduced middle-LOD geometry cost remain
+explicit limitations.

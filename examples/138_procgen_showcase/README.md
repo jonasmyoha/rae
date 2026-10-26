@@ -200,15 +200,17 @@ stored above; `RAE_MEM_STATS=1` runs check tracked String/Buffer cleanup.
 ## Layered spruces and slender cypresses
 
 Six normal-sized spruces (6, 6.7 and 7.4 metres, two of each) stand on the
-right side. `procgen/Spruce` builds six continuous scalloped branch skirts
-with smooth upper normals and closed undersides. Broad inter-tier shadows
-replace the dense leaf-on-leaf self-shadowing of the old patch-based spruce.
-Lighting and other species are unchanged; ground shadows remain enabled.
-The giant master-tree experiment is removed.
+right side. `procgen/Spruce` now breaks the former closed skirts into nine
+unequal whorls, curved primary boughs and hanging secondary needle sprays.
+Three intersecting curved cutout strips per spray keep volume from the side;
+lighting normals describe the bough, rather than each needle. Original quiet
+needle and scaly grey-brown bark textures use the shared material/shadow path.
+Trunk and primary wood remain rigid. Secondary foliage motion is restrained.
 
-At detail 48 each spruce has 864 foliage triangles and 444 vertices,
-plus 1,590 wood triangles. Detail 24/12 reduces the radial subdivision.
-All six trees reuse the same uploaded meshes, with different rotations/scales.
+Each shared prototype has 12,407 vertices and 13,008 triangles including wood.
+Near and middle ranges share this mesh; the existing far atlas is regenerated
+from its textured silhouette. This costs more geometry than the old 2,454-triangle
+opaque tree. The six specimens still reuse four uploaded part meshes.
 Key 6 or `RAE_GROVE_VIEW=spruces` frames this group.
 
 The three tall cypresses remain 22.5, 24.6 and 26.7 metres tall. Only their
@@ -216,6 +218,11 @@ vertical scale is tripled: foliage width and trunk thickness now match the
 original 7.5, 8.2 and 8.9 metre cypresses. All six reuse the same meshes.
 
 ![Layered normal-sized spruces](references/Spruces.png)
+
+[Matched controls, seed studies and limits](../../docs/spruce-refinement.md)
+are recorded separately. `RAE_SPRUCE_CONTROL=1` restores the unchanged old
+mesh/material; `RAE_SPRUCE_SEED` changes the prototype seed, and
+`RAE_SPRUCE_BARE=1` exposes its rigid scaffold.
 
 ## Old camphor clearing
 

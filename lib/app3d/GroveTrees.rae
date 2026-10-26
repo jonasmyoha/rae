@@ -27,6 +27,7 @@ open Noise
 open Scene3d
 open Mesh3d
 open GbufferInstanced
+open procgen/Spruce
 open procgen/FluffyFoliage
 open procgen/Foliage
 open app3d/PropField
@@ -208,7 +209,7 @@ func leafColor(form: view FluffyForm, tone: view Int) ret Vec3 {
     color = Vec3.create(x: 0.055, y: 0.19, z: 0.09)
   }
   if form is FluffyForm.spruce {
-    color = Vec3.create(x: 0.035, y: 0.15, z: 0.075)
+    ret spruceLeafColor(tone: tone)
   }
   if form is FluffyForm.bush {
     color = Vec3.create(x: 0.28, y: 0.39, z: 0.075)
@@ -443,6 +444,9 @@ func speciesLeavesMesh(
     flexibility = 0.55
   }
   loop var vertex: Int = 0, vertex < crown.windPivots.length / 4, ++vertex {
+    if species is speciesSpruce {
+      continue
+    }
     crown.windPivots.set(index: vertex * 4 + 3, value: flexibility)
   }
   ret crown
@@ -569,6 +573,8 @@ func speciesAlbedos(species: view Int) ret List(Vec3) {
   var albedos: List(Vec3) = List.create(Vec3, cap: 4)
   if species is speciesBirch {
     albedos.add(value: Vec3.create(x: 0.94, y: 0.95, z: 0.97))
+  } else if species is speciesSpruce {
+    albedos.add(value: spruceWoodColor())
   } else if species is speciesRed {
     albedos.add(value: redMapleWoodColor())
   } else if species is speciesCrimson {
@@ -713,6 +719,8 @@ func addForestKinds(
     renderer: renderer
     path: japaneseMapleLeafTexture()
   )
+  let spruceBarkLayer: Int = rendererLoadSurfaceImage(renderer: renderer, path: spruceBarkTexture())
+  let spruceLeafLayer: Int = rendererLoadSurfaceImage(renderer: renderer, path: spruceLeafTexture())
   var subjects: List(ImpostorSubject) = List.create(ImpostorSubject, cap: treeSpeciesCount)
   loop var species: Int = 0, species < treeSpeciesCount, ++species {
     # The near level's meshes, made once: drawn near, and baked into the
@@ -776,6 +784,14 @@ func addForestKinds(
         japaneseMapleLeafLayer
       }
     }
+    if species is speciesSpruce {
+      subject.imageLayers = List(Int) {
+        spruceBarkLayer
+        spruceLeafLayer
+        spruceLeafLayer
+        spruceLeafLayer
+      }
+    }
     var lods: List(PropLod) = List.create(PropLod, cap: 3)
     lods.add(value: speciesLodOf(
       meshes: nearHandles
@@ -783,7 +799,7 @@ func addForestKinds(
       maxDistance: nearTreeDistance
       castsShadow: true
     ))
-    if species is speciesBirch or species is speciesBroadleaf or species is speciesOrange or species is speciesRed or species is speciesGold or species is speciesCrimson {
+    if species is speciesSpruce or species is speciesBirch or species is speciesBroadleaf or species is speciesOrange or species is speciesRed or species is speciesGold or species is speciesCrimson {
       # The textured crowns share handles through the middle range; their
       # existing far level is baked from these same textured meshes.
       lods.add(value: speciesLodOf(
@@ -812,76 +828,29 @@ func addForestKinds(
       }
     )
     if species is speciesBirch {
-      loop let level: mod PropLod in lods {
-        if let wood: mod PropPart = level.parts.modAt(index: 0) {
-          wood.material.colorTextureLayer = birchLayer
-        }
-        loop var part: Int = 1, part < 4, ++part {
-          if let leaves: mod PropPart = level.parts.modAt(index: part) {
-            leaves.material.colorTextureLayer = birchLeafLayer
-          }
-        }
-      }
+      treeLodImages(lods: lods, barkLayer: birchLayer, leafLayer: birchLeafLayer)
     }
     if species is speciesBroadleaf {
-      loop let level: mod PropLod in lods {
-        if let wood: mod PropPart = level.parts.modAt(index: 0) {
-          wood.material.colorTextureLayer = limeLayer
-        }
-        loop var part: Int = 1, part < 4, ++part {
-          if let leaves: mod PropPart = level.parts.modAt(index: part) {
-            leaves.material.colorTextureLayer = limeLeafLayer
-          }
-        }
-      }
+      treeLodImages(lods: lods, barkLayer: limeLayer, leafLayer: limeLeafLayer)
     }
     if species is speciesOrange {
-      loop let level: mod PropLod in lods {
-        if let wood: mod PropPart = level.parts.modAt(index: 0) {
-          wood.material.colorTextureLayer = mapleBarkLayer
-        }
-        loop var part: Int = 1, part < 4, ++part {
-          if let leaves: mod PropPart = level.parts.modAt(index: part) {
-            leaves.material.colorTextureLayer = mapleLeafLayer
-          }
-        }
-      }
+      treeLodImages(lods: lods, barkLayer: mapleBarkLayer, leafLayer: mapleLeafLayer)
     }
     if species is speciesRed {
-      loop let level: mod PropLod in lods {
-        if let wood: mod PropPart = level.parts.modAt(index: 0) {
-          wood.material.colorTextureLayer = redMapleBarkLayer
-        }
-        loop var part: Int = 1, part < 4, ++part {
-          if let leaves: mod PropPart = level.parts.modAt(index: part) {
-            leaves.material.colorTextureLayer = redMapleLeafLayer
-          }
-        }
-      }
+      treeLodImages(lods: lods, barkLayer: redMapleBarkLayer, leafLayer: redMapleLeafLayer)
     }
     if species is speciesGold {
-      loop let level: mod PropLod in lods {
-        if let wood: mod PropPart = level.parts.modAt(index: 0) {
-          wood.material.colorTextureLayer = ginkgoBarkLayer
-        }
-        loop var part: Int = 1, part < 4, ++part {
-          if let leaves: mod PropPart = level.parts.modAt(index: part) {
-            leaves.material.colorTextureLayer = ginkgoLeafLayer
-          }
-        }
-      }
+      treeLodImages(lods: lods, barkLayer: ginkgoBarkLayer, leafLayer: ginkgoLeafLayer)
     }
     if species is speciesCrimson {
-      loop let level: mod PropLod in lods {
-        if let wood: mod PropPart = level.parts.modAt(index: 0) {
-          wood.material.colorTextureLayer = japaneseMapleBarkLayer
-        }
-        loop var part: Int = 1, part < 4, ++part {
-          if let leaves: mod PropPart = level.parts.modAt(index: part) {
-            leaves.material.colorTextureLayer = japaneseMapleLeafLayer
-          }
-        }
-      }
+      treeLodImages(
+        lods: lods
+        barkLayer: japaneseMapleBarkLayer
+        leafLayer: japaneseMapleLeafLayer
+      )
+    }
+    if species is speciesSpruce {
+      treeLodImages(lods: lods, barkLayer: spruceBarkLayer, leafLayer: spruceLeafLayer)
     }
     # The sphere round the tree at scale 1: the leaf-patch forms are unit
     # height, the others autumnReferenceHeight
@@ -947,4 +916,18 @@ func createBushParts(renderer: mod DeferredRenderer, capacity: view Int) ret Lis
     }
   }
   ret parts
+}
+
+# One material assignment for every textured species and both mesh levels.
+func treeLodImages(lods: mod List(PropLod), barkLayer: view Int, leafLayer: view Int) {
+  loop let level: mod PropLod in lods {
+    if let wood: mod PropPart = level.parts.modAt(index: 0) {
+      wood.material.colorTextureLayer = barkLayer
+    }
+    loop var part: Int = 1, part < 4, ++part {
+      if let leaves: mod PropPart = level.parts.modAt(index: part) {
+        leaves.material.colorTextureLayer = leafLayer
+      }
+    }
+  }
 }
