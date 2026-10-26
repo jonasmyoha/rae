@@ -74,28 +74,23 @@ func degrees(value: view Float) ret Float {
   ret value * 3.141592653589793 / 180.0
 }
 
-# The T02 tree: 13.5 m, a slim trunk forking at about 60% of its height into
-# two unequal leaders, 4 to 6 slim, mostly straight side branches at 35 to 60
-# degrees with a few small kinks, keeping most of their thickness to the tip. The seed varies the
+# The T02 tree: 12.5 m, a slim trunk forking at about 60% of its height into
+# two unequal leaders, 4 to 6 slim, nearly straight side branches at 35 to 60
+# degrees, keeping most of their thickness to the tip (step 3 round 2, the
+# be best version). The seed varies the
 # S-curve, the leaders' directions, the branch count and every branch.
 func warmBroadleafParams(seed: view Int) ret TreeParams {
   var params: TreeParams = stoutBroadleafParams(seed: seed)
+  # 1 m lower than the stout tree, every proportion kept
+  params.height = 12.5
   params.baseRadius = params.height / 46.0
-  # the lowest branches start near the fork, and all are short
-  params.branchFrom = 0.54
-  params.branchLength = 0.19
-  # the trunk 1 m shorter to the fork than the stout tree's, and only a
-  # gentle S-curve (half the stout tree's swing)
-  params.forkHeight = params.forkHeight - 1.0 / params.height
-  params.trunkSway = params.trunkSway * 0.5
   params.limbThickness = 0.4
   params.limbEndThickness = 0.55
   params.limbBend = 0.006
   params.limbWander = 0.012
-  # straight, but not machine-straight: a kink every few metres
-  params.limbKinkChance = 0.22
-  params.limbKinkMin = degrees(value: 5.0)
-  params.limbKinkMax = degrees(value: 13.0)
+  # No kinks: sharp turns with straight runs between them read as broken,
+  # not organic (step 3 round 3)
+  params.limbKinkChance = 0.0
   ret params
 }
 

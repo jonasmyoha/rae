@@ -146,3 +146,22 @@ func barkMesh(skeleton: view TreeSkeleton) ret MeshData {
   }
   ret mesh
 }
+
+# Mirror a mesh across its upright y-z plane: x positions and normals change
+# sign, and every triangle's corner order is reversed so its faces still
+# point outward. The mirror image of a tree, not a turn of it.
+func mirrorMeshX(mesh: mod MeshData) {
+  loop var vertex: Int = 0, vertex < mesh.vertCount, ++vertex {
+    let base: Int = vertex * 8
+    mesh.verts.set(index: base, value: -mesh.verts.copyAtDefault(index: base))
+    mesh.verts.set(index: base + 3, value: -mesh.verts.copyAtDefault(index: base + 3))
+  }
+  loop var triangle: Int = 0, triangle < mesh.indices.length / 3, ++triangle {
+    let second: Int = mesh.indices.copyAtDefault(index: triangle * 3 + 1)
+    mesh.indices.set(
+      index: triangle * 3 + 1
+      value: mesh.indices.copyAtDefault(index: triangle * 3 + 2)
+    )
+    mesh.indices.set(index: triangle * 3 + 2, value: second)
+  }
+}
