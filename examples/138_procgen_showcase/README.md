@@ -378,3 +378,17 @@ control, several seeds, bare wood, side/backlit/night and shared forest views.
 `RAE_MAPLE_BARE=1` hides only its foliage. `RAE_MAPLE_ISOLATE=1` keeps the first
 specimen and ground for comparisons; `RAE_MAPLE_SEED` / `RAE_MAPLE_HEIGHT` affect
 that isolated study only. The camera remains the existing free-camera override.
+
+## Scarlet red maple
+
+The original red slot (local colour 1, seed 605 at 4.2,4) now uses the shared
+`procgen/RedMaple` generator, with lighter joined branches, a more open rounded
+crown and original scarlet/grey-bark textures. The walkers use this same source
+as kind 5. Other maple slots retain their identities and placements.
+
+[The red-maple comparison](../../docs/red-maple-refinement.md) contains matched
+old/new captures, bare wood, three seeds, forest views and limitations.
+`RAE_RED_MAPLE_ISOLATE=1`, `RAE_RED_MAPLE_CONTROL=1` and
+`RAE_RED_MAPLE_BARE=1` expose its study/control views.
+`tools/capture-red-maple-studies.py` records them; `--view front --wind 1.2
+--motion` uses the existing fixed walking path for a six-second clip.

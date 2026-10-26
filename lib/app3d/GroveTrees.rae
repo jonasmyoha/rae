@@ -20,6 +20,7 @@ open RendererImages
 open procgen/Birch
 open procgen/Lime
 open procgen/SugarMaple
+open procgen/RedMaple
 open Noise
 open Scene3d
 open Mesh3d
@@ -336,6 +337,10 @@ func speciesWoodMesh(species: view Int) ret MeshData {
     let tree: SugarMapleTree = sugarMapleTree(seed: seed, height: autumnReferenceHeight, width: 2.0)
     ret tree.wood
   }
+  if species is speciesRed {
+    let tree: RedMapleTree = redMapleTree(seed: seed, height: autumnReferenceHeight, width: 2.0)
+    ret tree.wood
+  }
   if species is speciesPalm {
     ret palmWood(seed: seed, height: autumnReferenceHeight, width: 2.0)
   }
@@ -368,6 +373,10 @@ func speciesLeavesMesh(
   if species is speciesOrange {
     let tree: SugarMapleTree = sugarMapleTree(seed: seed, height: autumnReferenceHeight, width: 2.0)
     ret sugarMapleLeaves(tree: tree, seed: seed, tone: tone)
+  }
+  if species is speciesRed {
+    let tree: RedMapleTree = redMapleTree(seed: seed, height: autumnReferenceHeight, width: 2.0)
+    ret redMapleLeaves(tree: tree, seed: seed, tone: tone)
   }
   if species is speciesPalm {
     ret palmLeaves(
@@ -430,6 +439,9 @@ func speciesLeafColor(species: view Int, tone: view Int) ret Vec3 {
   if species is speciesOrange {
     ret sugarMapleLeafColor(tone: tone)
   }
+  if species is speciesRed {
+    ret redMapleLeafColor(tone: tone)
+  }
   if species is speciesBroadleaf {
     ret limeLeafColor(tone: tone)
   }
@@ -467,6 +479,15 @@ func speciesLevelMeshes(species: view Int, patches: view Int, leaves: view Int) 
     }
     ret own meshes
   }
+  if species is speciesRed {
+    let seed: Int = 501 + species * 104
+    let tree: RedMapleTree = redMapleTree(seed: seed, height: autumnReferenceHeight, width: 2.0)
+    meshes.add(value: tree.wood)
+    loop var tone: Int = 0, tone < 3, ++tone {
+      meshes.add(value: redMapleLeaves(tree: tree, seed: seed, tone: tone))
+    }
+    ret own meshes
+  }
   meshes.add(value: speciesWoodMesh(species: species))
   loop var tone: Int = 0, tone < 3, ++tone {
     meshes.add(value: speciesLeavesMesh(
@@ -488,6 +509,8 @@ func speciesAlbedos(species: view Int) ret List(Vec3) {
   var albedos: List(Vec3) = List.create(Vec3, cap: 4)
   if species is speciesBirch {
     albedos.add(value: Vec3.create(x: 0.94, y: 0.95, z: 0.97))
+  } else if species is speciesRed {
+    albedos.add(value: redMapleWoodColor())
   } else if species is speciesOrange {
     albedos.add(value: sugarMapleWoodColor())
   } else if species is speciesBroadleaf {
@@ -608,6 +631,14 @@ func addForestKinds(
     renderer: renderer
     path: sugarMapleLeafTexture()
   )
+  let redMapleBarkLayer: Int = rendererLoadSurfaceImage(
+    renderer: renderer
+    path: redMapleBarkTexture()
+  )
+  let redMapleLeafLayer: Int = rendererLoadSurfaceImage(
+    renderer: renderer
+    path: redMapleLeafTexture()
+  )
   var subjects: List(ImpostorSubject) = List.create(ImpostorSubject, cap: treeSpeciesCount)
   loop var species: Int = 0, species < treeSpeciesCount, ++species {
     # The near level's meshes, made once: drawn near, and baked into the
@@ -647,6 +678,14 @@ func addForestKinds(
         mapleLeafLayer
       }
     }
+    if species is speciesRed {
+      subject.imageLayers = List(Int) {
+        redMapleBarkLayer
+        redMapleLeafLayer
+        redMapleLeafLayer
+        redMapleLeafLayer
+      }
+    }
     var lods: List(PropLod) = List.create(PropLod, cap: 3)
     lods.add(value: speciesLodOf(
       meshes: nearHandles
@@ -654,7 +693,7 @@ func addForestKinds(
       maxDistance: nearTreeDistance
       castsShadow: true
     ))
-    if species is speciesBirch or species is speciesBroadleaf or species is speciesOrange {
+    if species is speciesBirch or species is speciesBroadleaf or species is speciesOrange or species is speciesRed {
       # The textured crowns share handles through the middle range; their
       # existing far level is baked from these same textured meshes.
       lods.add(value: speciesLodOf(
@@ -718,6 +757,18 @@ func addForestKinds(
         }
       }
     }
+    if species is speciesRed {
+      loop let level: mod PropLod in lods {
+        if let wood: mod PropPart = level.parts.modAt(index: 0) {
+          wood.material.colorTextureLayer = redMapleBarkLayer
+        }
+        loop var part: Int = 1, part < 4, ++part {
+          if let leaves: mod PropPart = level.parts.modAt(index: part) {
+            leaves.material.colorTextureLayer = redMapleLeafLayer
+          }
+        }
+      }
+    }
     # The sphere round the tree at scale 1: the leaf-patch forms are unit
     # height, the others autumnReferenceHeight
     var radius: Float = 0.6 * speciesWidth(species: species) + 0.1
@@ -728,6 +779,9 @@ func addForestKinds(
     }
     if species is speciesOrange {
       radius = autumnReferenceHeight * sugarMapleRadiusScale
+    }
+    if species is speciesRed {
+      radius = autumnReferenceHeight * redMapleRadiusScale
     }
     let kind: Int = addPropKind(
       field: field
