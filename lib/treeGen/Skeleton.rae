@@ -114,6 +114,12 @@ func growLimb(
   ret Limb { points: own points, radii: own radii, parent: parent, order: order }
 }
 
+# A limb's radius at its tip: a part of its base radius, never under the
+# params' thinnest tip
+func limbTip(params: view TreeParams, baseRadius: view Float) ret Float {
+  ret Math.max(a: params.tipRadius, b: baseRadius * params.limbEndThickness)
+}
+
 # The point of `limb` nearest the height `z`, its index
 func indexAtHeight(limb: view Limb, z: view Float) ret Int {
   var best: Int = 0
@@ -146,9 +152,9 @@ func growSkeleton(params: view TreeParams) ret TreeSkeleton {
     direction: tiltedDirection(angle: params.mainLean, azimuth: azimuth)
     length: mainLength
     baseRadius: forkRadius * 0.94
-    tipRadius: params.tipRadius
-    rise: 0.02
-    wander: 0.035
+    tipRadius: limbTip(params: params, baseRadius: forkRadius * 0.94)
+    rise: params.limbBend * 0.67
+    wander: params.limbWander * 0.7
     parent: 0
     order: 1
     random: random
@@ -161,9 +167,9 @@ func growSkeleton(params: view TreeParams) ret TreeSkeleton {
     )
     length: mainLength * params.secondLength
     baseRadius: forkRadius * 0.7
-    tipRadius: params.tipRadius
-    rise: 0.045
-    wander: 0.04
+    tipRadius: limbTip(params: params, baseRadius: forkRadius * 0.7)
+    rise: params.limbBend * 1.5
+    wander: params.limbWander * 0.8
     parent: 0
     order: 1
     random: random
@@ -191,6 +197,10 @@ func growSkeleton(params: view TreeParams) ret TreeSkeleton {
       low: params.branchAngleMin
       high: params.branchAngleMax
     )
+    let branchRadius: Float = Math.max(
+      a: params.tipRadius * 2.0
+      b: parentRadius * params.limbThickness
+    )
     branchAzimuth = branchAzimuth + 2.3999632 + nextBetween(random: random, low: -0.3, high: 0.3)
     let length: Float = params.height * params.branchLength * (1.15 - 0.55 * along) * nextBetween(
       random: random
@@ -201,10 +211,10 @@ func growSkeleton(params: view TreeParams) ret TreeSkeleton {
       start: base
       direction: tiltedDirection(angle: angle, azimuth: branchAzimuth)
       length: length
-      baseRadius: Math.max(a: params.tipRadius * 2.0, b: parentRadius * 0.62)
-      tipRadius: params.tipRadius
-      rise: 0.03
-      wander: 0.05
+      baseRadius: branchRadius
+      tipRadius: limbTip(params: params, baseRadius: branchRadius)
+      rise: params.limbBend
+      wander: params.limbWander
       parent: parentIndex
       order: 2
       random: random
