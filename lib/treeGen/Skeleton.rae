@@ -352,12 +352,13 @@ func tracedSkeleton(params: view TreeParams) ret TreeSkeleton {
       }
     )
   }
-  # each leaf mass moves in depth with the point of its limb it is level
-  # with, so it stays on its branch
+  # a leaf mass at the trunk moves in depth with the point of its limb it is
+  # level with, so it stays on its branch; one traced wholly in front of or
+  # behind the trunk stays there
   var clumps: List(TracedClump) = List.create(TracedClump, cap: params.tracedClumps.length)
   loop let traced: view TracedClump in params.tracedClumps {
     var clump: TracedClump = traced
-    if traced.parent >= 0 and traced.parent < limbs.length {
+    if traced.side is 0 and traced.parent >= 0 and traced.parent < limbs.length {
       let parent: Limb = limbs.copyAtDefault(index: traced.parent)
       let at: Int = indexAtHeight(limb: parent, z: traced.centre.z)
       clump.centre.y = traced.centre.y + parent.points.copyAtDefault(index: at).y
