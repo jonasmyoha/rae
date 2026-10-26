@@ -1,7 +1,8 @@
 # lib/treeGen (docs/reference-tree-plan.md step 3): the skeleton keeps the
-# reference tree's (crop T02) promises for every seed: a trunk, two unequal
-# leaders forking below the crown, 4 to 6 side branches starting 35 to 60
-# degrees from upright, radii that never grow toward a tip, the same tree for
+# reference tree's (crop T02, as traced by hand) promises for every
+# seed: a trunk, two unequal leaders forking below the crown at 74 to 82% of
+# the height, 4 side branches starting 15 to 52 degrees from upright, all in
+# the top third, radii that never grow toward a tip, the same tree for
 # the same seed; and the bark mesh's triangles all face outward.
 import Math
 import Vec3
@@ -71,6 +72,7 @@ func main() ret Int {
   var leadersOk: Bool = true
   var meshOk: Bool = true
   var evenOk: Bool = true
+  var topThirdOk: Bool = true
   var fewest: Int = 99
   var most: Int = 0
   loop var seed: Int = 1, seed <= 20, ++seed {
@@ -83,7 +85,7 @@ func main() ret Int {
       limbsOk = false
     }
     let fork: Float = skeleton.forkPoint.z / params.height
-    if fork < 0.52 or fork > 0.68 {
+    if fork < 0.74 or fork > 0.82 {
       forkOk = false
     }
     loop let limb: view Limb in skeleton.limbs {
@@ -97,8 +99,11 @@ func main() ret Int {
         )
         let angle: Float = angleFromUpright(direction: start) * 180.0 / 3.141592653589793
         # the first step has already turned a little toward upright
-        if angle < 30.0 or angle > 62.0 {
+        if angle < 15.0 or angle > 52.0 {
           anglesOk = false
+        }
+        if limb.points.copyAtDefault(index: 0).z < params.height * 0.62 {
+          topThirdOk = false
         }
       }
     }
@@ -123,11 +128,12 @@ func main() ret Int {
     }
   }
   check(
-    label: "20 seeds: 4 to 6 side branches ({fewest} to {most})"
-    ok: limbsOk and fewest >= 4 and most <= 6
+    label: "20 seeds: 4 side branches ({fewest} to {most})"
+    ok: limbsOk and fewest is 4 and most is 4
   )
-  check(label: "the fork below the crown, at 52 to 68% of the height", ok: forkOk)
-  check(label: "side branches start 35 to 60 degrees from upright", ok: anglesOk)
+  check(label: "the fork below the crown, at 74 to 82% of the height", ok: forkOk)
+  check(label: "side branches start 15 to 52 degrees from upright", ok: anglesOk)
+  check(label: "side branches start in the top third, above 62% of the height", ok: topThirdOk)
   check(label: "no radius grows toward a tip", ok: radiiOk)
   check(label: "two unequal leaders: the second thinner and lower", ok: leadersOk)
   check(label: "side branches keep at least half their thickness to the tip", ok: evenOk)

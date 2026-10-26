@@ -2,7 +2,6 @@
 # wood (docs/reference-tree-plan.md step 3): the skeleton's tubes in the
 # bark material. The bark image is painted once into .rae/treeLab/ and
 # loaded as one of the renderer's material images.
-import Math
 import Sys
 import Vec3
 open Scene3d
@@ -39,26 +38,12 @@ func labBarkLayer(renderer: mod DeferredRenderer) ret Int {
   ret rendererLoadSurfaceImage(renderer: renderer, path: labBarkImagePath)
 }
 
-# How far to turn the tree about its upright axis so its second leader opens
-# sideways in the picture, to +x (with the mirror below the picture is that
-# one flipped left to right: the fork on T02's side, the left)
-func forkFacingYaw(skeleton: view TreeSkeleton) ret Float {
-  let second: Limb = skeleton.limbs.copyAtDefault(index: 2)
-  let lean: Vec3 = Vec3.vsub(
-    a: second.points.copyAtDefault(index: 6)
-    b: second.points.copyAtDefault(index: 0)
-  )
-  ret -Math.atan2(y: lean.y, x: lean.x)
-}
-
-# The generated tree for `seed`, standing at the origin, its fork turned to
-# open sideways to the camera
+# The generated tree for `seed`, standing at the origin. Its right (+x) is
+# the picture's right, as in the trace of T02 it is built from.
 func addGeneratedTree(world: mod World3d, renderer: mod DeferredRenderer, seed: view Int) {
   let params: TreeParams = warmBroadleafParams(seed: seed)
   let skeleton: TreeSkeleton = growSkeleton(params: params)
-  var mesh: MeshData = barkMesh(skeleton: skeleton)
-  # T02's tree is this one's mirror image: flip it (a true mirror, not a turn)
-  mirrorMeshX(mesh: mesh)
+  let mesh: MeshData = barkMesh(skeleton: skeleton)
   let handle: MeshHandle = uploadMesh(
     renderer: renderer
     verts: mesh.verts
@@ -70,9 +55,7 @@ func addGeneratedTree(world: mod World3d, renderer: mod DeferredRenderer, seed: 
     mesh: handle
     material: barkMaterial(layer: labBarkLayer(renderer: renderer))
     position: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
-    # the opposite turn: mirroring then turning by -yaw is the mirror image of
-    # the tree turned by +yaw (round 2's picture, flipped left to right)
-    rotation: Vec3.create(x: 0.0, y: 0.0, z: -forkFacingYaw(skeleton: skeleton))
+    rotation: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
     scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
   )
   log(

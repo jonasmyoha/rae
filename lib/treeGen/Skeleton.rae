@@ -1,8 +1,9 @@
 # treeGen/Skeleton — a tree's wood as a set of limbs, each a curve of points
 # with a radius at every point (docs/reference-tree-plan.md step 3). Grown
-# from TreeParams: a tapered, S-curved trunk with a root flare, a fork into
-# two unequal leaders below the crown, and 4 to 6 side branches at 35 to 60
-# degrees from upright, thinning to their tips. Written new.
+# from TreeParams: a tapered, gently curved trunk with a root flare, a fork
+# into two unequal leaders below the crown, and side branches: placed by
+# hand from a trace of the reference, or 4 to 6 random ones at 35 to 60
+# degrees from upright. Written new.
 import Math
 import Vec3
 open treeGen/TreeParams
@@ -49,7 +50,13 @@ func growTrunk(params: view TreeParams, random: mod TreeRandom) ret Limb {
   let swing: Vec3 = Vec3.create(x: Math.cos(x: azimuth), y: Math.sin(x: azimuth), z: 0.0)
   let across: Vec3 = Vec3.create(x: -swing.y, y: swing.x, z: 0.0)
   let amplitude: Float = params.trunkSway * params.height
-  let forkRadius: Float = params.baseRadius * 0.76
+  let forkRadius: Float = params.baseRadius * params.forkThickness
+  # the bow lies in the fork's plane, toward the main leader's side
+  let bowSide: Vec3 = Vec3.create(
+    x: Math.cos(x: params.forkAzimuth)
+    y: Math.sin(x: params.forkAzimuth)
+    z: 0.0
+  )
   let steps: Int = 18
   var points: List(Vec3) = List.create(Vec3, cap: steps + 1)
   var radii: List(Float) = List.create(Float, cap: steps + 1)
@@ -59,10 +66,16 @@ func growTrunk(params: view TreeParams, random: mod TreeRandom) ret Limb {
     # one full swing and back, with a little sideways drift
     let side: Float = amplitude * Math.sin(x: t * 6.2831853 * 0.75)
     let drift: Float = amplitude * 0.45 * Math.sin(x: t * 3.1415927)
+    # straight at the foot; the bow begins at 30% of the trunk
+    let bowAt: Float = Math.max(a: 0.0, b: Math.min(a: 1.0, b: (t - 0.3) / 0.75))
+    let bow: Float = params.trunkBow * params.height * Math.sin(x: bowAt * 3.1415927)
     points.add(
       value: Vec3.vadd(
         a: Vec3.create(x: 0.0, y: 0.0, z: z)
-        b: Vec3.vadd(a: Vec3.vscale(a: swing, s: side), b: Vec3.vscale(a: across, s: drift))
+        b: Vec3.vadd(
+          a: Vec3.vadd(a: Vec3.vscale(a: swing, s: side), b: Vec3.vscale(a: across, s: drift))
+          b: Vec3.vscale(a: bowSide, s: bow)
+        )
       )
     )
     let height: Float = Math.max(a: 0.0, b: z)
@@ -185,22 +198,22 @@ func indexAtHeight(limb: view Limb, z: view Float) ret Int {
 func growSkeleton(params: view TreeParams) ret TreeSkeleton {
   var random: TreeRandom = createTreeRandom(seed: params.seed)
   var kinkRandom: TreeRandom = createTreeRandom(seed: params.seed + 7777)
-  var limbs: List(Limb) = List.create(Limb, cap: 3 + params.branchCount)
+  var limbs: List(Limb) = List.create(Limb, cap: 3 + params.branchCount + params.branchSpots.length)
   let trunk: Limb = growTrunk(params: params, random: random)
   let forkPoint: Vec3 = trunk.points.copyAtDefault(index: trunk.points.length - 1)
   let forkRadius: Float = trunk.radii.copyAtDefault(index: trunk.radii.length - 1)
   limbs.add(value: trunk)
-  # The two leaders split apart round the fork: the main one nearly upright,
-  # the second one leaning away from it, shorter and thinner
-  let azimuth: Float = nextUnit(random: random) * 6.2831853
-  let mainLength: Float = (params.height - forkPoint.z) / Math.cos(x: params.mainLean) * 0.94
+  # The two leaders: the main one nearly upright, the second one thinner,
+  # shorter and leaning further, `secondTurn` round the compass from it
+  let azimuth: Float = params.forkAzimuth
+  let mainLength: Float = params.height * params.mainLength
   limbs.add(value: growLimb(
     start: forkPoint
     direction: tiltedDirection(angle: params.mainLean, azimuth: azimuth)
     length: mainLength
     baseRadius: forkRadius * 0.94
     tipRadius: limbTip(params: params, baseRadius: forkRadius * 0.94)
-    rise: params.limbBend * 0.67
+    rise: params.leaderBend
     wander: params.limbWander * 0.7
     kink: limbKinks(params: params)
     parent: 0
@@ -210,14 +223,11 @@ func growSkeleton(params: view TreeParams) ret TreeSkeleton {
   ))
   limbs.add(value: growLimb(
     start: forkPoint
-    direction: tiltedDirection(
-      angle: params.secondLean
-      azimuth: azimuth + 3.1415927 + nextBetween(random: random, low: -0.4, high: 0.4)
-    )
+    direction: tiltedDirection(angle: params.secondLean, azimuth: azimuth + params.secondTurn)
     length: mainLength * params.secondLength
-    baseRadius: forkRadius * 0.7
-    tipRadius: limbTip(params: params, baseRadius: forkRadius * 0.7)
-    rise: params.limbBend * 1.5
+    baseRadius: forkRadius * params.secondThickness
+    tipRadius: limbTip(params: params, baseRadius: forkRadius * params.secondThickness)
+    rise: params.leaderBend
     wander: params.limbWander * 0.8
     kink: limbKinks(params: params)
     parent: 0
@@ -225,10 +235,28 @@ func growSkeleton(params: view TreeParams) ret TreeSkeleton {
     random: random
     kinkRandom: kinkRandom
   ))
-  # The side branches, up the trunk's top and the leaders, longer low down.
-  # They fan out to the two sides of the fork by turns, like T02's crown (all
-  # round the compass, some point along the view and read as sticks pressed
-  # to a leader), each from the wood on its own side, so none cross.
+  # Side branches placed by hand, when the params have them
+  if params.branchSpots.length > 0 {
+    loop let spot: view BranchSpot in params.branchSpots {
+      addSideBranch(
+        limbs: limbs
+        params: params
+        z: params.height * spot.height
+        parentIndex: spot.parent
+        angle: spot.angle
+        azimuth: azimuth + spot.turn
+        length: params.height * spot.length
+        rise: spot.bend
+        random: random
+        kinkRandom: kinkRandom
+      )
+    }
+    ret TreeSkeleton { limbs: own limbs, forkPoint: forkPoint }
+  }
+  # Otherwise random ones, up the trunk's top and the leaders, longer low
+  # down. They fan out to the two sides of the fork by turns (all round the
+  # compass, some point along the view and read as sticks pressed to a
+  # leader), each from the wood on its own side, so none cross.
   let fanStart: Int = (nextUnit(random: random) * 2.0).toInt()
   loop var b: Int = 0, b < params.branchCount, ++b {
     let along: Float = (b.toFloat() + nextBetween(random: random, low: 0.2, high: 0.8)) / params.branchCount.toFloat()
@@ -242,23 +270,15 @@ func growSkeleton(params: view TreeParams) ret TreeSkeleton {
     } else if secondSide and z < limbs.copyAtDefault(index: 2).points.copyAtDefault(index: 14).z {
       parentIndex = 2
     }
-    let parent: Limb = limbs.copyAtDefault(index: parentIndex)
-    let at: Int = Math.max(a: 2, b: indexAtHeight(limb: parent, z: z))
-    let base: Vec3 = parent.points.copyAtDefault(index: at)
-    let parentRadius: Float = parent.radii.copyAtDefault(index: at)
     let angle: Float = nextBetween(
       random: random
       low: params.branchAngleMin
       high: params.branchAngleMax
     )
-    let branchRadius: Float = Math.max(
-      a: params.tipRadius * 2.0
-      b: parentRadius * params.limbThickness
-    )
     # up to 45 degrees off the fork's plane
     var side: Float = 0.0
     if secondSide {
-      side = 3.1415927
+      side = params.secondTurn
     }
     let branchAzimuth: Float = azimuth + side + nextBetween(random: random, low: -0.8, high: 0.8)
     let length: Float = params.height * params.branchLength * (1.15 - 0.55 * along) * nextBetween(
@@ -266,20 +286,57 @@ func growSkeleton(params: view TreeParams) ret TreeSkeleton {
       low: 0.85
       high: 1.15
     )
-    limbs.add(value: growLimb(
-      start: base
-      direction: tiltedDirection(angle: angle, azimuth: branchAzimuth)
+    addSideBranch(
+      limbs: limbs
+      params: params
+      z: z
+      parentIndex: parentIndex
+      angle: angle
+      azimuth: branchAzimuth
       length: length
-      baseRadius: branchRadius
-      tipRadius: limbTip(params: params, baseRadius: branchRadius)
       rise: params.limbBend
-      wander: params.limbWander
-      kink: limbKinks(params: params)
-      parent: parentIndex
-      order: 2
       random: random
       kinkRandom: kinkRandom
-    ))
+    )
   }
   ret TreeSkeleton { limbs: own limbs, forkPoint: forkPoint }
+}
+
+# One side branch from limb `parentIndex` at height `z`, `angle` from
+# upright toward the compass `azimuth`, as thick as limbThickness of its
+# parent there
+func addSideBranch(
+  limbs: mod List(Limb)
+  params: view TreeParams
+  z: view Float
+  parentIndex: view Int
+  angle: view Float
+  azimuth: view Float
+  length: view Float
+  rise: view Float
+  random: mod TreeRandom
+  kinkRandom: mod TreeRandom
+) {
+  let parent: Limb = limbs.copyAtDefault(index: parentIndex)
+  let at: Int = Math.max(a: 2, b: indexAtHeight(limb: parent, z: z))
+  let base: Vec3 = parent.points.copyAtDefault(index: at)
+  let parentRadius: Float = parent.radii.copyAtDefault(index: at)
+  let branchRadius: Float = Math.max(
+    a: params.tipRadius * 2.0
+    b: parentRadius * params.limbThickness
+  )
+  limbs.add(value: growLimb(
+    start: base
+    direction: tiltedDirection(angle: angle, azimuth: azimuth)
+    length: length
+    baseRadius: branchRadius
+    tipRadius: limbTip(params: params, baseRadius: branchRadius)
+    rise: rise
+    wander: params.limbWander
+    kink: limbKinks(params: params)
+    parent: parentIndex
+    order: 2
+    random: random
+    kinkRandom: kinkRandom
+  ))
 }
