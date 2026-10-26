@@ -22,6 +22,7 @@
 
 import Math
 import String
+import Sys
 open ui/Ecs
 open ui/Components
 open ui/inputSystem/InputSystem
@@ -52,6 +53,22 @@ enum SettingsSkyModel { preetham, hosek, stylised, solid }
 # High are today's renderer (the device's resolution ceiling and the dynamic
 # scale); they are here so later steps have their places.
 enum SettingsQuality { low, mid, high, ultra }
+
+# RAE_QUALITY=low|mid|high|ultra starts at that step (screenshots, frame
+# times); otherwise High
+func settingsQualityFromEnv() ret SettingsQuality {
+  let text: String = Sys.getEnv(name: "RAE_QUALITY")
+  if text is "low" {
+    ret SettingsQuality.low
+  }
+  if text is "mid" {
+    ret SettingsQuality.mid
+  }
+  if text is "ultra" {
+    ret SettingsQuality.ultra
+  }
+  ret SettingsQuality.high
+}
 
 # Preetham: the default sky across the examples — the analytic model, listed
 # first here and first in the panel.
@@ -145,6 +162,7 @@ func createSettingsState(
     toon: toon
     taa: false
     skyModel: skyModel
+    quality: settingsQualityFromEnv()
     timeOfDay: createTimeOfDay(hour: hour)
     timeDragging: false
     animateTime: true

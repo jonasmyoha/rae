@@ -19,6 +19,7 @@ import Gpu2d
 import Quat
 open app3d/UiModes
 open app3d/ReferenceTree
+open RendererQuality
 open app3d/EditorPanel
 open ecs/Entity
 open ecs/ComponentTable
@@ -633,6 +634,10 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
     if not settings.forward {
       setTaaEnabled(renderer: renderer, on: settingsState.taa)
     }
+    setRendererFullResolution(
+      renderer: renderer
+      on: settingsState.quality is SettingsQuality.ultra
+    )
     # The camera bar, the settings panel's edge tab (in the slot between the
     # main column and the panel) and the settings (app3d/EditorPanel)
     let chromeMounted: Bool = mountEditorChrome(world: uiWorld, uiSystems: uiSystems, res: gpuUi)

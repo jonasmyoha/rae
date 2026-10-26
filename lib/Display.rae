@@ -11,6 +11,19 @@ when Target.os is Os.web {
 } else {
   # SDL_GetWindowDisplayScale of the app's window; 0 without a window
   func windowDisplayScale() unsafe extern("rae_ext_Display_windowDisplayScale") ret Float
+
+  # The display panel under the window (macOS; elsewhere 0 / -1, unknown):
+  # its id, its width in points, its modes and which are the panel's own
+  func windowPanelDisplay() unsafe extern("rae_ext_Display_windowPanelDisplay") ret Int
+
+  func panelPointsWide(display: Int) unsafe extern("rae_ext_Display_panelPointsWide") ret Float
+
+  func panelModeCount(display: Int) unsafe extern("rae_ext_Display_panelModeCount") ret Int
+
+  func panelNativeModePixelWidth(
+    display: Int
+    index: Int
+  ) unsafe extern("rae_ext_Display_panelNativeModePixelWidth") ret Int
 }
 
 # Pixels per point (2.0 on Retina)
@@ -35,4 +48,37 @@ func scaleFrom(reported: view Float) ret Float {
     ret reported
   }
   ret 1.0
+}
+
+# The screen's real pixels per point where the window is: the panel's own
+# width in pixels over the display's width in points. In a scaled mode
+# ("looks like 3008 x 1692" on a 3840 x 2160 panel: 1.28) it is less than
+# the window's drawable pixels per point (2: macOS draws into a larger image
+# and shrinks it to the panel); on a Retina laptop at its default it equals
+# them. 0 when unknown (not macOS, no window, no native mode marked).
+func physicalPixelsPerPoint() ret Float {
+  when Target.os is Os.web {
+    ret 0.0
+  } else {
+    var nativeWidth: Int = 0
+    var pointsWide: Float = 0.0
+    unsafe {
+      let display: Int = windowPanelDisplay()
+      if display is 0 {
+        ret 0.0
+      }
+      pointsWide = panelPointsWide(display: display)
+      let count: Int = panelModeCount(display: display)
+      loop var i: Int = 0, i < count, ++i {
+        let width: Int = panelNativeModePixelWidth(display: display, index: i)
+        if width > nativeWidth {
+          nativeWidth = width
+        }
+      }
+    }
+    if nativeWidth <= 0 or pointsWide <= 0.0 {
+      ret 0.0
+    }
+    ret nativeWidth.toFloat() / pointsWide
+  }
 }
