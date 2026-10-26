@@ -1,7 +1,7 @@
 # treeGen/LeafPass — draws a tree's leaf cards (LeafCards) into the G-buffer
 # with the leaf shader (leaf_cards.wgsl): one instanced draw of a 6-vertex
 # camera-facing square per card, no vertex buffer, the cards in a storage
-# buffer, the leaf picture (LeafImage) in a one-layer image array. It runs inside the
+# buffer, the leaf stamps (LeafImage) in an image array, one layer each. It runs inside the
 # G-buffer pass, after the scene's meshes (as GrassCompute's grassDraw
 # does), and writes depth, so the leaves hide each other and the wood
 # behind them (docs/reference-tree-plan.md step 5). Written new.
@@ -26,8 +26,9 @@ const leafUniformBytes: Int = 64
 
 type LeafPass {
   cards: LeafCards
-  # the leaf picture: leafImageSize x leafImageSize linear RGBA pixels
-  picture: List(Float)
+  # the leaf stamps: per layer leafImageSize x leafImageSize linear RGBA
+  # pixels
+  pictures: List(List(Float))
   made: Bool
   drawBindMade: Bool
   images: SurfaceImages
@@ -39,11 +40,11 @@ type LeafPass {
   drawBind: BindGroupId
 }
 
-# A pass for `cards`, with the leaf picture (LeafImage.leafPixels)
-func createLeafPass(cards: own LeafCards, picture: own List(Float)) ret LeafPass {
+# A pass for `cards`, with the leaf stamps (LeafImage.leafImageLayerPixels)
+func createLeafPass(cards: own LeafCards, pictures: own List(List(Float))) ret LeafPass {
   ret LeafPass {
     cards: own cards
-    picture: own picture
+    pictures: own pictures
     made: false
     drawBindMade: false
     images: {}
@@ -66,12 +67,10 @@ func ensureLeafGpu(leaves: mod LeafPass, resources: mod GpuResources) {
   if leaves.cards.count is 0 {
     ret
   }
-  var layers: List(List(Float)) = List.create(List(Float), cap: 1)
-  layers.add(value: leaves.picture)
   if not setSurfaceImagePixels(
     images: leaves.images
     resources: resources
-    layers: layers
+    layers: leaves.pictures
     size: leafImageSize
   ) {
     log("[leaves] the leaf picture could not be installed")
