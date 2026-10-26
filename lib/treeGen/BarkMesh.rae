@@ -3,7 +3,7 @@
 # follow the limb with frames carried along it (no twist), the seam vertex is
 # doubled so the bark image wraps once round, and the image runs up the limb
 # one repeat every `barkRepeat` metres. A branch starts inside its parent, so
-# the joint shows no gap. Written new.
+# the joint shows no gap, and every tip is closed by a low dome. Written new.
 import Math
 import Vec3
 open Mesh3d
@@ -84,6 +84,35 @@ func addLimbTube(mesh: mod MeshData, limb: view Limb, sink: view Float) {
       )
       mesh.vertCount = mesh.vertCount + 1
     }
+  }
+  # The tip: a slightly domed cap over the last ring, so a limb that keeps its
+  # thickness to the end is closed (a fan, counter-clockwise seen from beyond
+  # the tip)
+  let last: Int = limb.points.length - 1
+  let tipTangent: Vec3 = limbTangent(limb: limb, i: last)
+  let tipRadius: Float = limb.radii.copyAtDefault(index: last)
+  let apex: Vec3 = Vec3.vadd(
+    a: limb.points.copyAtDefault(index: last)
+    b: Vec3.vscale(a: tipTangent, s: tipRadius * 0.35)
+  )
+  let apexIndex: Int = mesh.vertCount
+  pushVert(
+    verts: mesh.verts
+    px: apex.x
+    py: apex.y
+    pz: apex.z
+    nx: tipTangent.x
+    ny: tipTangent.y
+    nz: tipTangent.z
+    u: 0.5
+    value: travelled / barkRepeat
+  )
+  mesh.vertCount = mesh.vertCount + 1
+  let lastRing: Int = first + last * (sides + 1)
+  loop var j: Int = 0, j < sides, ++j {
+    mesh.indices.add(value: apexIndex)
+    mesh.indices.add(value: lastRing + j)
+    mesh.indices.add(value: lastRing + j + 1)
   }
   # Two triangles per quad, counter-clockwise seen from outside
   let ring: Int = sides + 1

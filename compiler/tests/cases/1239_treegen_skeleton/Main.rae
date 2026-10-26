@@ -70,6 +70,7 @@ func main() ret Int {
   var radiiOk: Bool = true
   var leadersOk: Bool = true
   var meshOk: Bool = true
+  var evenOk: Bool = true
   var fewest: Int = 99
   var most: Int = 0
   loop var seed: Int = 1, seed <= 20, ++seed {
@@ -109,6 +110,14 @@ func main() ret Int {
     ).z >= main.points.copyAtDefault(index: 14).z {
       leadersOk = false
     }
+    # the T02 tree's branches keep most of their thickness to the tip
+    loop let limb: view Limb in skeleton.limbs {
+      if limb.order is 2 and limb.radii.copyAtDefault(index: limb.radii.length - 1) < limb.radii.copyAtDefault(
+        index: 0
+      ) * 0.5 {
+        evenOk = false
+      }
+    }
     if not facesOutward(mesh: barkMesh(skeleton: skeleton)) {
       meshOk = false
     }
@@ -121,7 +130,8 @@ func main() ret Int {
   check(label: "side branches start 35 to 60 degrees from upright", ok: anglesOk)
   check(label: "no radius grows toward a tip", ok: radiiOk)
   check(label: "two unequal leaders: the second thinner and lower", ok: leadersOk)
-  check(label: "every bark triangle faces outward", ok: meshOk)
+  check(label: "side branches keep at least half their thickness to the tip", ok: evenOk)
+  check(label: "every bark triangle faces outward, tip caps too", ok: meshOk)
   let again: TreeSkeleton = growSkeleton(params: warmBroadleafParams(seed: 7))
   let once: TreeSkeleton = growSkeleton(params: warmBroadleafParams(seed: 7))
   let tipAgain: Vec3 = again.limbs.copyAtDefault(index: 3).points.copyAtDefault(index: 14)

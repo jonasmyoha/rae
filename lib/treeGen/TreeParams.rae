@@ -32,6 +32,15 @@ type TreeParams {
   branchLength: Float
   # The thinnest a tip gets (m)
   tipRadius: Float
+  # A side branch's radius at its base, as a part of its parent's there
+  limbThickness: Float
+  # A limb's radius at its tip as a part of its base radius (0: down to
+  # tipRadius; 0.55: nearly even all along)
+  limbEndThickness: Float
+  # How much a limb turns toward upright, and wanders, at each of its steps
+  # (0: dead straight)
+  limbBend: Float
+  limbWander: Float
 }
 
 # A deterministic random number source: one tree per seed, the same on every
@@ -59,10 +68,24 @@ func degrees(value: view Float) ret Float {
   ret value * 3.141592653589793 / 180.0
 }
 
-# The T02 tree: 13.5 m, a thick trunk forking at about 60% of its height into
-# two unequal leaders, 4 to 6 side branches at 35 to 60 degrees. The seed varies
-# the S-curve, the leaders' directions, the branch count and every branch.
+# The T02 tree: 13.5 m, a slim trunk forking at about 60% of its height into
+# two unequal leaders, 4 to 6 slim, nearly straight side branches at 35 to 60
+# degrees that keep most of their thickness to the tip. The seed varies the
+# S-curve, the leaders' directions, the branch count and every branch.
 func warmBroadleafParams(seed: view Int) ret TreeParams {
+  var params: TreeParams = stoutBroadleafParams(seed: seed)
+  params.baseRadius = params.height / 46.0
+  params.limbThickness = 0.4
+  params.limbEndThickness = 0.55
+  params.limbBend = 0.006
+  params.limbWander = 0.012
+  ret params
+}
+
+# A variation kept from step 3's first round: the same tree with a thick
+# trunk (1/17 of the height), thick branches tapering to points, and more
+# curved limbs. Not T02, but a good-looking tree of its own.
+func stoutBroadleafParams(seed: view Int) ret TreeParams {
   var random: TreeRandom = createTreeRandom(seed: seed + 17)
   ret TreeParams {
     seed: seed
@@ -80,5 +103,9 @@ func warmBroadleafParams(seed: view Int) ret TreeParams {
     branchAngleMax: degrees(value: 60.0)
     branchLength: 0.22
     tipRadius: 0.02
+    limbThickness: 0.62
+    limbEndThickness: 0.0
+    limbBend: 0.03
+    limbWander: 0.05
   }
 }
