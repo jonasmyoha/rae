@@ -87,5 +87,5 @@ if [ -n "${TREELAB_ITERATION:-}" ]; then
   ROUND="$STUDY/referenceTree/iterations/$TREELAB_ITERATION"
   mkdir -p "$ROUND"
   cp "$OUT" "$ROUND/compare-$CAMERA.png"
-  echo "kept $ROUND/compare-$CAMERA.png (add the round to iterations/index.html and commit looks-development)"
+  echo "kept $ROUND/compare-$CAMERA.png (add the round to referenceTree/progress/rounds.js and commit looks-development)"
 fi
