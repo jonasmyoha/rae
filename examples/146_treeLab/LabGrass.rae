@@ -1,0 +1,67 @@
+# The tree lab's grass: the standard lib GPU grass (lib/GrassCompute.rae), on
+# the lab's flat ground (assets/lab_surface.wgsl). The grid is centred on the
+# tree, so every camera sees grass round it; the trunk is an obstacle circle.
+import GrassConfig
+import Vec3
+open Wind
+open GrassCompute
+open Scene3d
+open gpu/GpuResources
+open LabScene
+
+# The grid's span round the tree (m)
+const labGrassExtent: Float = 90.0
+
+func createLabGrass() ret GrassCompute {
+  var grass: GrassCompute = createGrassCompute()
+  grassSetComputeShaderWithConstants(
+    grass: grass
+    shader: shader(
+      files: [
+        "lib/gpu/computeBounds.wgsl"
+        "assets/lab_surface.wgsl"
+        "lib/grass_field.wgsl"
+        "lib/grass_compute.wgsl"
+      ]
+    )
+    constants: List.create(ShaderConstant, cap: 0)
+  )
+  # One obstacle: the trunk at the origin
+  grassSetSurfaceField(grass: grass, values: [1.0, 0.0, 0.0, labTrunkRadius + 0.15])
+  ret grass
+}
+
+func labGrassSettings() ret GrassViewSettings {
+  var settings: GrassViewSettings = GrassConfig.grassMeadowSettings(
+    groundColor: Vec3.create(x: labGroundRed, y: labGroundGreen, z: labGroundBlue)
+  )
+  settings.extent = labGrassExtent
+  ret settings
+}
+
+# This frame's blades (the compute pass), before the G-buffer pass draws them
+func generateLabGrass(
+  grass: mod GrassCompute
+  resources: mod GpuResources
+  camera: view Camera3d
+  deltaTime: view Float
+  wind: view WindVector
+) {
+  grassGenerate(
+    grass: grass
+    resources: resources
+    centreX: 0.0
+    centreY: 0.0
+    groundZ: 0.0
+    deltaTime: deltaTime
+    wind: wind
+    toon: 0
+    camX: camera.position.x
+    camY: camera.position.y
+    camZ: camera.position.z
+    fwdX: camera.target.x - camera.position.x
+    fwdY: camera.target.y - camera.position.y
+    fwdZ: camera.target.z - camera.position.z
+    settings: labGrassSettings()
+  )
+}
