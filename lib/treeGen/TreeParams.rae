@@ -1,0 +1,84 @@
+# treeGen/TreeParams — what one generated tree is made from: a seed and a
+# set of numbers (docs/reference-tree-plan.md). The ranges come from
+# reference crop T02, a brown-trunked broadleaf tree with small leaves; the
+# kind is named for how it looks, `warmBroadleaf`. Written new: nothing here
+# comes from the lib's older tree code.
+import Math
+
+type TreeParams {
+  seed: Int
+  # The whole tree's height (m)
+  height: Float
+  # The trunk's radius at its base, above the root flare (m): T02's trunk is
+  # about 1/17 of the tree's height thick there (measured on the crop)
+  baseRadius: Float
+  # Where the trunk forks into its two leaders, as a part of the height
+  forkHeight: Float
+  # How far the trunk's S-curve swings sideways, as a part of the height
+  trunkSway: Float
+  # The main leader's lean from upright, and the second leader's (radians)
+  mainLean: Float
+  secondLean: Float
+  # The second leader's length as a part of the main one's
+  secondLength: Float
+  # The side branches: how many (4 to 6), where on the tree they start (a
+  # part of the height), their angle from upright (radians) and their
+  # length as a part of the height
+  branchCount: Int
+  branchFrom: Float
+  branchTo: Float
+  branchAngleMin: Float
+  branchAngleMax: Float
+  branchLength: Float
+  # The thinnest a tip gets (m)
+  tipRadius: Float
+}
+
+# A deterministic random number source: one tree per seed, the same on every
+# machine
+type TreeRandom {
+  state: Int
+}
+
+func createTreeRandom(seed: view Int) ret TreeRandom {
+  ret TreeRandom { state: (seed * 7919 + 104729) % 2147483648 }
+}
+
+# The next number in 0..1
+func nextUnit(random: mod TreeRandom) ret Float {
+  random.state = (random.state * 1103515245 + 12345) % 2147483648
+  ret random.state.toFloat() / 2147483648.0
+}
+
+# The next number between `low` and `high`
+func nextBetween(random: mod TreeRandom, low: view Float, high: view Float) ret Float {
+  ret low + (high - low) * nextUnit(random: random)
+}
+
+func degrees(value: view Float) ret Float {
+  ret value * 3.141592653589793 / 180.0
+}
+
+# The T02 tree: 13.5 m, a thick trunk forking at about 60% of its height into
+# two unequal leaders, 4 to 6 side branches at 35 to 60 degrees. The seed varies
+# the S-curve, the leaders' directions, the branch count and every branch.
+func warmBroadleafParams(seed: view Int) ret TreeParams {
+  var random: TreeRandom = createTreeRandom(seed: seed + 17)
+  ret TreeParams {
+    seed: seed
+    height: 13.5
+    baseRadius: 13.5 / 34.0
+    forkHeight: nextBetween(random: random, low: 0.56, high: 0.64)
+    trunkSway: nextBetween(random: random, low: 0.01, high: 0.018)
+    mainLean: degrees(value: nextBetween(random: random, low: 6.0, high: 14.0))
+    secondLean: degrees(value: nextBetween(random: random, low: 30.0, high: 40.0))
+    secondLength: nextBetween(random: random, low: 0.62, high: 0.8)
+    branchCount: 4 + Math.min(a: 2, b: (nextUnit(random: random) * 3.0).toInt())
+    branchFrom: 0.46
+    branchTo: 0.86
+    branchAngleMin: degrees(value: 35.0)
+    branchAngleMax: degrees(value: 60.0)
+    branchLength: 0.22
+    tipRadius: 0.02
+  }
+}

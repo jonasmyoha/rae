@@ -1,0 +1,119 @@
+# treeGen/BarkMesh — the wood of a TreeSkeleton as one mesh: a tapered tube
+# along every limb (docs/reference-tree-plan.md step 3). Each tube's rings
+# follow the limb with frames carried along it (no twist), the seam vertex is
+# doubled so the bark image wraps once round, and the image runs up the limb
+# one repeat every `barkRepeat` metres. A branch starts inside its parent, so
+# the joint shows no gap. Written new.
+import Math
+import Vec3
+open Mesh3d
+open treeGen/Skeleton
+
+# Metres of limb per repeat of the bark image along it
+const barkRepeat: Float = 1.6
+
+# Sides of a tube: the trunk and the leaders get more
+func limbSides(limb: view Limb) ret Int {
+  if limb.order is 0 {
+    ret 14
+  }
+  if limb.order is 1 {
+    ret 10
+  }
+  ret 7
+}
+
+# Any unit vector at right angles to `direction`
+func perpendicular(direction: view Vec3) ret Vec3 {
+  var other: Vec3 = Vec3.create(x: 1.0, y: 0.0, z: 0.0)
+  if Math.abs(value: direction.x) > 0.8 {
+    other = Vec3.create(x: 0.0, y: 1.0, z: 0.0)
+  }
+  ret Vec3.vnorm(a: Vec3.vcross(a: direction, b: other))
+}
+
+# The direction of `limb` at point `i` (the mean of its two neighbours)
+func limbTangent(limb: view Limb, i: view Int) ret Vec3 {
+  let last: Int = limb.points.length - 1
+  let before: Vec3 = limb.points.copyAtDefault(index: Math.max(a: 0, b: i - 1))
+  let after: Vec3 = limb.points.copyAtDefault(index: Math.min(a: last, b: i + 1))
+  ret Vec3.vnorm(a: Vec3.vsub(a: after, b: before))
+}
+
+# One limb's tube into `mesh`. A branch is pushed back into its parent by
+# `sink` metres at its base.
+func addLimbTube(mesh: mod MeshData, limb: view Limb, sink: view Float) {
+  let sides: Int = limbSides(limb: limb)
+  let first: Int = mesh.vertCount
+  var normal: Vec3 = perpendicular(direction: limbTangent(limb: limb, i: 0))
+  var travelled: Float = 0.0
+  loop var i: Int = 0, i < limb.points.length, ++i {
+    let tangent: Vec3 = limbTangent(limb: limb, i: i)
+    # carry the frame along: take out of the last normal what now points
+    # along the limb
+    normal = Vec3.vnorm(
+      a: Vec3.vsub(a: normal, b: Vec3.vscale(a: tangent, s: Vec3.vdot(a: normal, b: tangent)))
+    )
+    let binormal: Vec3 = Vec3.vcross(a: tangent, b: normal)
+    var centre: Vec3 = limb.points.copyAtDefault(index: i)
+    if i is 0 {
+      centre = Vec3.vsub(a: centre, b: Vec3.vscale(a: tangent, s: sink))
+    } else {
+      travelled = travelled + Vec3.vlen(
+        a: Vec3.vsub(a: centre, b: limb.points.copyAtDefault(index: i - 1))
+      )
+    }
+    let radius: Float = limb.radii.copyAtDefault(index: i)
+    loop var j: Int = 0, j <= sides, ++j {
+      let theta: Float = j.toFloat() / sides.toFloat() * 6.2831853
+      let out: Vec3 = Vec3.vadd(
+        a: Vec3.vscale(a: normal, s: Math.cos(x: theta))
+        b: Vec3.vscale(a: binormal, s: Math.sin(x: theta))
+      )
+      let position: Vec3 = Vec3.vadd(a: centre, b: Vec3.vscale(a: out, s: radius))
+      pushVert(
+        verts: mesh.verts
+        px: position.x
+        py: position.y
+        pz: position.z
+        nx: out.x
+        ny: out.y
+        nz: out.z
+        u: j.toFloat() / sides.toFloat()
+        value: travelled / barkRepeat
+      )
+      mesh.vertCount = mesh.vertCount + 1
+    }
+  }
+  # Two triangles per quad, counter-clockwise seen from outside
+  let ring: Int = sides + 1
+  loop var i: Int = 0, i + 1 < limb.points.length, ++i {
+    loop var j: Int = 0, j < sides, ++j {
+      let a: Int = first + i * ring + j
+      let b: Int = a + ring
+      mesh.indices.add(value: a)
+      mesh.indices.add(value: a + 1)
+      mesh.indices.add(value: b)
+      mesh.indices.add(value: a + 1)
+      mesh.indices.add(value: b + 1)
+      mesh.indices.add(value: b)
+    }
+  }
+}
+
+# The whole skeleton's wood as one mesh
+func barkMesh(skeleton: view TreeSkeleton) ret MeshData {
+  var mesh: MeshData = {
+    verts: List.create(Float, cap: 4096)
+    indices: List.create(Int, cap: 8192)
+    vertCount: 0
+  }
+  loop let limb: view Limb in skeleton.limbs {
+    var sink: Float = 0.0
+    if limb.parent >= 0 {
+      sink = limb.radii.copyAtDefault(index: 0) * 1.5
+    }
+    addLimbTube(mesh: mesh, limb: limb, sink: sink)
+  }
+  ret mesh
+}

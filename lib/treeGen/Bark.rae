@@ -1,0 +1,135 @@
+# treeGen/Bark — the wood's look (docs/reference-tree-plan.md step 3,
+# checklist 1 and 8): a warm orange-brown with faint, broken vertical
+# streaks, no detailed bark. The colour is the material's; the streaks are a
+# 512 x 512 image painted here, near white, that multiplies it. It tiles both
+# ways (the tube wraps it once round and repeats it up the limb). The broad
+# light-to-dark change across the trunk comes from the sun on the round tube.
+# Written new.
+import Image
+import Math
+import Vec3
+open Scene3d
+
+const barkImageSize: Int = 512
+
+# The warm orange-brown of T02's trunk (linear)
+func barkColor() ret Vec3 {
+  ret Vec3.create(x: 0.34, y: 0.125, z: 0.055)
+}
+
+# A hash of a lattice point to 0..1
+func barkHash(x: view Int, y: view Int, seed: view Int) ret Float {
+  var h: Int = (x * 374761393 + y * 668265263 + seed * 2147483647) % 2147483648
+  h = ((h / 8192) * 1274126177 + h) % 2147483648
+  if h < 0 {
+    h = h + 2147483648
+  }
+  ret h.toFloat() / 2147483648.0
+}
+
+# Smooth value noise on a lattice of `cellsX` x `cellsY` cells that wraps at
+# its edges, at the point (u, v) in 0..1
+func wrappedNoise(
+  u: view Float
+  v: view Float
+  cellsX: view Int
+  cellsY: view Int
+  seed: view Int
+) ret Float {
+  let x: Float = u * cellsX.toFloat()
+  let y: Float = v * cellsY.toFloat()
+  let x0: Int = Math.floor(x: x).toInt()
+  let y0: Int = Math.floor(x: y).toInt()
+  let fx: Float = x - x0.toFloat()
+  let fy: Float = y - y0.toFloat()
+  let sx: Float = fx * fx * (3.0 - 2.0 * fx)
+  let sy: Float = fy * fy * (3.0 - 2.0 * fy)
+  let ax: Int = x0 % cellsX
+  let bx: Int = (x0 + 1) % cellsX
+  let ay: Int = y0 % cellsY
+  let by: Int = (y0 + 1) % cellsY
+  let top: Float = barkHash(x: ax, y: ay, seed: seed) * (1.0 - sx) + barkHash(
+    x: bx
+    y: ay
+    seed: seed
+  ) * sx
+  let bottom: Float = barkHash(x: ax, y: by, seed: seed) * (1.0 - sx) + barkHash(
+    x: bx
+    y: by
+    seed: seed
+  ) * sx
+  ret top * (1.0 - sy) + bottom * sy
+}
+
+# The streak value at (u, v): many narrow columns, each broken along its
+# length; 0 dark .. 1 light
+func barkStreak(u: view Float, v: view Float) ret Float {
+  # long thin streaks: many cells across, few along
+  let fine: Float = wrappedNoise(
+    u: u
+    v: v
+    cellsX: 64
+    cellsY: 6
+    seed: 3
+  )
+  let medium: Float = wrappedNoise(
+    u: u
+    v: v
+    cellsX: 24
+    cellsY: 3
+    seed: 11
+  )
+  let broad: Float = wrappedNoise(
+    u: u
+    v: v
+    cellsX: 6
+    cellsY: 2
+    seed: 23
+  )
+  ret fine * 0.45 + medium * 0.35 + broad * 0.2
+}
+
+# The bark image as packed 0xAARRGGBB pixels, row by row from the top: near
+# white, the streaks a faint darker and slightly cooler
+func barkPixels() ret List(Int) {
+  var pixels: List(Int) = List.create(Int, cap: barkImageSize * barkImageSize)
+  loop var y: Int = 0, y < barkImageSize, ++y {
+    let v: Float = y.toFloat() / barkImageSize.toFloat()
+    loop var x: Int = 0, x < barkImageSize, ++x {
+      let u: Float = x.toFloat() / barkImageSize.toFloat()
+      let streak: Float = barkStreak(u: u, v: v)
+      # 0.74 in the darkest streak, 1.0 in the lightest
+      let light: Float = 0.74 + 0.26 * streak
+      let red: Int = Math.min(a: 255, b: (255.0 * light).toInt())
+      let green: Int = Math.min(a: 255, b: (255.0 * light * (0.97 + 0.03 * streak)).toInt())
+      let blue: Int = Math.min(a: 255, b: (255.0 * light * (0.95 + 0.05 * streak)).toInt())
+      pixels.add(value: 255 * 16777216 + red * 65536 + green * 256 + blue)
+    }
+  }
+  ret pixels
+}
+
+# Paint the bark image and save it as a PNG at `path`, for the renderer's
+# material images (rendererLoadSurfaceImage)
+func writeBarkImage(path: view String) ret Bool {
+  let pixels: List(Int) = barkPixels()
+  ret Image.savePng(
+    path: path
+    pixels: pixels.data
+    width: barkImageSize
+    height: barkImageSize
+  )
+}
+
+# The wood's material: the warm colour, the bark image on top (`layer`, the
+# image's place in the renderer's material images; -1 for none)
+func barkMaterial(layer: view Int) ret Material3d {
+  ret Material3d {
+    colorTextureLayer: layer
+    baseColor: barkColor()
+    metallic: 0.0
+    roughness: 0.85
+    emission: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    toon: false
+  }
+}
