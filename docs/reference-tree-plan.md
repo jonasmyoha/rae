@@ -26,10 +26,11 @@ not change until the last step.
 
 ## The target: crop T02
 
-`T02` in the private reference study:
-`peli_ideoita/environmentReferenceStudy/crops/T02.png` (source S04, `hienoja_kasveja_ja_kivia4.jpg`, rectangle
-x 520, y 320, 330 x 570). The reference images are private and are not
-copied into this repository.
+`T02` in the private reference study, which lives in the separate, private
+repository `own_repos/looks-development` (with Git LFS):
+`looks-development/environmentReferenceStudy/crops/T02.png` (source S04,
+`hienoja_kasveja_ja_kivia4.jpg`, rectangle x 520, y 320, 330 x 570). The
+reference images are private and are not copied into this repository.
 
 What the tree in T02 has (the checklist for every step):
 
@@ -74,11 +75,17 @@ not like a named species from a field guide. So:
   shows the code works. A step ends with the comparison picture and waits for
   a yes or no. A "no" with a reason starts the next round of
   the same step.
-- **The report**: every step adds its comparison picture, its measurements
-  and the score to the private visual report
-  `peli_ideoita/environmentReferenceStudy/referenceTree/index.html` (the
-  step's card, which says "Not started" until then), next to the
-  reference crops. The previous review (`recoveryReview/`) is kept as it is.
+- **The report and its history** live in the looks-development repository
+  (`own_repos/looks-development`, private, Git LFS for images and videos).
+  Every step adds its comparison picture, its measurements and the score to
+  `environmentReferenceStudy/referenceTree/index.html` (the step's card, which
+  says "Not started" until then). Every round of a step is ALSO kept, never
+  overwritten, in `referenceTree/iterations/YYYY-MM-DD-stepN-short-name/` and
+  listed at the top of `referenceTree/iterations/index.html`:
+  `TREELAB_ITERATION=<that name> examples/146_treeLab/compare.sh <camera>`
+  writes both. Videos of motion go into the round's folder too. Then commit
+  the looks-development repository (its own git identity; it has its own
+  README). The previous review (`recoveryReview/`) is kept as it is.
 - **Two simple measurements** help but do not decide: the share of sky
   pixels inside the crown's outline (feature 5), and the light-to-dark range
   (10th to 90th percentile of brightness) inside the crown, compared with the
