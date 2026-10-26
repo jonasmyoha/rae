@@ -36,9 +36,9 @@ What the tree in T02 has (the checklist for every step):
 
 | # | Feature | In T02 |
 |---|---|---|
-| 1 | Trunk | One warm orange-brown trunk, about 1/23 of the tree's height thick at the base and keeping most of that width up to the fork (step 3: 1/40 first, then 1/17 measured on the crop, then slimmer at the be review), a slight S-curve, visible for about 55% of the height |
-| 2 | Fork | At about 60% of the height the trunk splits into two unequal leaders; the opening between them is part of the shape |
-| 3 | Branches | 4 to 6 slim, nearly straight side branches at 35 to 60 degrees, nearly even in thickness to the tip, visible against the sky and through the crown |
+| 1 | Trunk | One warm orange-brown trunk, about 1/26 of the tree's height thick at the base, thinning to 61% of that at the fork; straight to 40% of the height, then bowing gently to the left (the trace of T02: looks-development `treeReference/traces/T02.js`, the target since step 3 round 12) |
+| 2 | Fork | At about 79% of the height (the trace) the trunk splits into two unequal leaders, both leaning right: the main one about 9 degrees, the thinner second one about 28 |
+| 3 | Branches | The 4 short, slim side branches the trace shows, all in the top third: low right off the trunk (66%, 40 degrees), low left (70%, 38 degrees), high left off the main leader (81%, 48 degrees), a top one up left (89%, 20 degrees); nearly even in thickness to the tip, the low ones flattening a little toward it |
 | 4 | Crown start | The lowest clump at about 50% of the height; nothing below it but trunk |
 | 5 | Clumps | 6 to 10 separate clumps of different sizes at branch ends, the top one the largest; sky visible between them (about 20 to 30% of the crown area) |
 | 6 | Clump shading | Lit top in yellow-green, dark blue-green underside, a clear light-to-dark range inside each clump |

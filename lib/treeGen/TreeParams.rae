@@ -14,13 +14,29 @@ type TreeParams {
   baseRadius: Float
   # Where the trunk forks into its two leaders, as a part of the height
   forkHeight: Float
+  # The trunk's radius at the fork as a part of its base radius
+  forkThickness: Float
+  # The compass direction the main leader leans to (radians, 0: +x). The
+  # tree's "right": the side branches are placed relative to it.
+  forkAzimuth: Float
   # How far the trunk's S-curve swings sideways, as a part of the height
   trunkSway: Float
+  # A single bow of the trunk's upper part toward the main leader's side
+  # (negative: away from it), as a part of the height
+  trunkBow: Float
   # The main leader's lean from upright, and the second leader's (radians)
   mainLean: Float
   secondLean: Float
-  # The second leader's length as a part of the main one's
+  # The main leader's length as a part of the height
+  mainLength: Float
+  # The second leader's length as a part of the main one's, its radius as a
+  # part of the trunk's at the fork, and its compass turn from the main one
+  # (radians; 0: the same side, pi: the opposite side)
   secondLength: Float
+  secondThickness: Float
+  secondTurn: Float
+  # How much both leaders turn toward upright at each step (negative: away)
+  leaderBend: Float
   # The side branches: how many (4 to 6), where on the tree they start (a
   # part of the height), their angle from upright (radians) and their
   # length as a part of the height
@@ -30,6 +46,10 @@ type TreeParams {
   branchAngleMin: Float
   branchAngleMax: Float
   branchLength: Float
+  # The side branches placed by hand (from a trace of the reference): when
+  # there are any, they are the tree's side branches instead of the
+  # branchCount random ones above
+  branchSpots: List(BranchSpot)
   # The thinnest a tip gets (m)
   tipRadius: Float
   # A side branch's radius at its base, as a part of its parent's there
@@ -47,6 +67,22 @@ type TreeParams {
   limbKinkChance: Float
   limbKinkMin: Float
   limbKinkMax: Float
+}
+
+# One side branch placed by hand
+type BranchSpot {
+  # Where it starts, as a part of the tree's height
+  height: Float
+  # The limb it grows from: 0 the trunk, 1 the main leader, 2 the second
+  parent: Int
+  # Its compass turn from the main leader's direction (radians; 0: the main
+  # leader's side, pi: the other side)
+  turn: Float
+  # Its angle from upright (radians) and its length (a part of the height)
+  angle: Float
+  length: Float
+  # How much it turns toward upright at each step (negative: it flattens)
+  bend: Float
 }
 
 # A deterministic random number source: one tree per seed, the same on every
@@ -74,32 +110,102 @@ func degrees(value: view Float) ret Float {
   ret value * 3.141592653589793 / 180.0
 }
 
-# The T02 tree: 12.5 m, a slim trunk forking at about 60% of its height into
-# two unequal leaders, 4 to 6 long, slim side branches at 35 to 55 degrees
-# fanning out to the fork's two sides, keeping most of their thickness to
-# the tip (step 3 round 11, built on round 2, the be best). The
-# seed varies the S-curve, the leaders' directions, the branch count and
-# every branch.
+# The T02 tree, built from the be trace of crop T02
+# (looks-development treeReference/traces/T02.js; the tree's height is the
+# trace's base to its highest tip, 468 crop pixels). 12.5 m; a slim trunk,
+# straight to 40% of its height, then bowing gently to the left and thinning
+# to 61% of its base radius at a fork at 79%; two leaders both leaning
+# right, the main one 9 degrees, the thinner second one 28; four short side
+# branches in the top third: low right off the trunk (66%, 40 degrees), low
+# left (70%, 38 degrees), then off the main leader high left (81%, 48
+# degrees) and a top one going up left (89%, 20 degrees). The low ones
+# flatten a little toward their tips, the top one turns upright. Right is
+# +x. The seed moves every part a little and turns each branch up to 20
+# degrees out of the picture's plane.
 func warmBroadleafParams(seed: view Int) ret TreeParams {
   var params: TreeParams = stoutBroadleafParams(seed: seed)
-  # 1 m lower than the stout tree, every proportion kept
+  var random: TreeRandom = createTreeRandom(seed: seed + 31)
   params.height = 12.5
-  params.baseRadius = params.height / 46.0
+  params.baseRadius = params.height / 52.0
+  params.forkHeight = nextBetween(random: random, low: 0.77, high: 0.8)
+  params.forkThickness = 0.61
+  params.forkAzimuth = 0.0
+  params.trunkSway = 0.003
+  params.trunkBow = -nextBetween(random: random, low: 0.012, high: 0.018)
+  params.mainLean = degrees(value: nextBetween(random: random, low: 7.0, high: 11.0))
+  params.mainLength = nextBetween(random: random, low: 0.13, high: 0.15)
+  params.secondLean = degrees(value: nextBetween(random: random, low: 25.0, high: 31.0))
+  params.secondLength = nextBetween(random: random, low: 0.85, high: 0.97)
+  params.secondThickness = 0.55
+  params.secondTurn = nextBetween(random: random, low: -0.3, high: 0.3)
+  params.leaderBend = -0.008
   params.limbThickness = 0.4
-  params.limbEndThickness = 0.55
-  params.limbBend = 0.014
-  params.limbWander = 0.012
+  params.limbEndThickness = 0.5
+  params.limbWander = 0.006
   # No kinks: sharp turns with straight runs between them read as broken,
   # not organic (step 3 round 3)
   params.limbKinkChance = 0.0
-  # T02's crown is a wide fan: a few long, thin limbs leave the wood round
-  # the fork, none low on the trunk and none as stubs at the very top
-  params.branchFrom = 0.5
-  params.branchTo = 0.8
-  params.branchLength = 0.28
-  params.branchAngleMin = degrees(value: 35.0)
-  params.branchAngleMax = degrees(value: 55.0)
+  var spots: List(BranchSpot) = List.create(BranchSpot, cap: 4)
+  spots.add(value: tracedSpot(
+    random: random
+    height: 0.655
+    parent: 0
+    side: 0.0
+    angle: 40.0
+    length: 0.165
+    bend: -0.018
+  ))
+  spots.add(value: tracedSpot(
+    random: random
+    height: 0.7
+    parent: 0
+    side: 3.1415927
+    angle: 38.0
+    length: 0.137
+    bend: -0.018
+  ))
+  spots.add(value: tracedSpot(
+    random: random
+    height: 0.81
+    parent: 1
+    side: 3.1415927
+    angle: 48.0
+    length: 0.075
+    bend: -0.015
+  ))
+  spots.add(value: tracedSpot(
+    random: random
+    height: 0.89
+    parent: 1
+    side: 3.1415927
+    angle: 20.0
+    length: 0.12
+    bend: 0.02
+  ))
+  params.branchSpots = own spots
   ret params
+}
+
+# A traced branch (`side` 0: the main leader's side, pi: the other; `angle`
+# in degrees), moved a little by the seed: its height, angle and length, and
+# a turn of up to 20 degrees out of the picture's plane
+func tracedSpot(
+  random: mod TreeRandom
+  height: view Float
+  parent: view Int
+  side: view Float
+  angle: view Float
+  length: view Float
+  bend: view Float
+) ret BranchSpot {
+  ret BranchSpot {
+    height: height + nextBetween(random: random, low: -0.012, high: 0.012)
+    parent: parent
+    turn: side + nextBetween(random: random, low: -0.35, high: 0.35)
+    angle: degrees(value: angle + nextBetween(random: random, low: -3.0, high: 3.0))
+    length: length * nextBetween(random: random, low: 0.9, high: 1.1)
+    bend: bend
+  }
 }
 
 # A variation kept from step 3's first round: the same tree with a thick
@@ -107,21 +213,32 @@ func warmBroadleafParams(seed: view Int) ret TreeParams {
 # curved limbs. Not T02, but a good-looking tree of its own.
 func stoutBroadleafParams(seed: view Int) ret TreeParams {
   var random: TreeRandom = createTreeRandom(seed: seed + 17)
+  let forkHeight: Float = nextBetween(random: random, low: 0.56, high: 0.64)
+  let mainLean: Float = degrees(value: nextBetween(random: random, low: 6.0, high: 14.0))
   ret TreeParams {
     seed: seed
     height: 13.5
     baseRadius: 13.5 / 34.0
-    forkHeight: nextBetween(random: random, low: 0.56, high: 0.64)
+    forkHeight: forkHeight
+    forkThickness: 0.76
+    forkAzimuth: nextUnit(random: random) * 6.2831853
     trunkSway: nextBetween(random: random, low: 0.01, high: 0.018)
-    mainLean: degrees(value: nextBetween(random: random, low: 6.0, high: 14.0))
+    trunkBow: 0.0
+    mainLean: mainLean
     secondLean: degrees(value: nextBetween(random: random, low: 30.0, high: 40.0))
+    # up to the tree's height
+    mainLength: (1.0 - forkHeight) / Math.cos(x: mainLean) * 0.94
     secondLength: nextBetween(random: random, low: 0.62, high: 0.8)
+    secondThickness: 0.7
+    secondTurn: 3.1415927 + nextBetween(random: random, low: -0.4, high: 0.4)
+    leaderBend: 0.025
     branchCount: 4 + Math.min(a: 2, b: (nextUnit(random: random) * 3.0).toInt())
     branchFrom: 0.46
     branchTo: 0.86
     branchAngleMin: degrees(value: 35.0)
     branchAngleMax: degrees(value: 60.0)
     branchLength: 0.22
+    branchSpots: List.create(BranchSpot, cap: 0)
     tipRadius: 0.02
     limbThickness: 0.62
     limbEndThickness: 0.0
