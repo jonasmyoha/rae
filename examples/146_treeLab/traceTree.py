@@ -6,9 +6,9 @@ generated tree (docs/reference-tree-plan.md step 3).
       Writes lib/treeGen/TracedT02.rae: every traced limb as a 3D centre line.
       Each dot goes through the lab's near camera onto the tree's upright
       plane (y = 0), so the tree seen from that camera covers the trace. The
-      trace is first moved and scaled as a whole so its base dot lands on the
-      ground at the tree's foot and its top on the tree's height (T02's
-      framing is not the lab's); the shape itself is kept.
+      near camera is solved to T02's framing (the trace's base dot on the
+      tree's foot, its top dot at the tree's height), so the move and scale
+      that `alignment` still applies is almost none.
 
   traceTree.py overlay <trace.js> <t02.bmp> <render.bmp> <skeleton.txt> <out.bmp>
       Three panels at T02's proportions: T02 with the trace (magenta); the
@@ -29,9 +29,9 @@ HEIGHT = 12.5                     # the tree's height (m): the trace's top
 CROP_W, CROP_H = 330.0, 570.0
 ASPECT = 1280.0 / 800.0           # the lab's window
 FOV_Y = math.radians(50.0)
-PITCH = math.radians(15.7)
-EYE = (0.92, -15.5, 1.6)
-TARGET = (0.92, -15.5 + 10.0 * math.cos(PITCH), 1.6 + 10.0 * math.sin(PITCH))
+PITCH = math.radians(18.0)
+EYE = (0.69, -15.2, 1.6)
+TARGET = (0.69, -15.2 + 10.0 * math.cos(PITCH), 1.6 + 10.0 * math.sin(PITCH))
 SAMPLES_TRUNK = 19                # the trunk's points (growTrunk's)
 SAMPLES_LIMB = 15                 # every other limb's (growLimb's)
 PANEL_W, PANEL_H = 660, 1140

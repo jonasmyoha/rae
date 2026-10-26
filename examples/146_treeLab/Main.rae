@@ -11,9 +11,9 @@
 # cylinder and spheres instead.
 #
 # Cameras (RAE_TREELAB_CAMERA):
-#   near (default)  frames the 13.5 m tree like T02 frames its tree: from eye
-#                   height 15.5 m away, looking up, the whole trunk down to
-#                   its base in view, the crown's top near the top edge
+#   near (default)  T02's own framing of the 12.5 m tree: from eye height
+#                   15.2 m away, looking 18 degrees up, the trunk's foot
+#                   near the bottom edge, the top near the top edge
 #   mid             the same tree from 40 m
 #   far             the same tree from 120 m
 #   bark            the trunk up close (4 m), for its colour and streaks
@@ -67,13 +67,13 @@ type LabState {
   lastTime: Float64
 }
 
-# The camera RAE_TREELAB_CAMERA names. The near one is worked out from T02:
-# a 13.5 m tree with its crown's top about 7% from the picture's top and its
-# whole trunk visible down to its base (the be choice: a little
-# farther than T02, whose base is hidden), seen from 1.6 m with a 50 degree
-# vertical field: 15.5 m away, looking 15.7 degrees up (the base lands about
-# 92% down), shifted 0.92 m so the trunk stands left of the middle as T02's
-# does.
+# The camera RAE_TREELAB_CAMERA names. The near one is T02's own framing,
+# solved from the hand-drawn trace (examples/146_treeLab/traceTree.py):
+# seen from 1.6 m with a 50 degree vertical field, a 12.5 m tree's foot
+# lands on the trace's base dot (98% down the picture) and its top on the
+# trace's top dot, so the trace maps onto the tree one to one: 15.2 m away,
+# looking 18 degrees up, shifted 0.69 m so the trunk stands left of the
+# middle as T02's does.
 func labCamera(name: view String) ret Camera3d {
   var camera: Camera3d = defaultCamera3d()
   camera.fovYDeg = 50
@@ -95,11 +95,11 @@ func labCamera(name: view String) ret Camera3d {
     camera.target = Vec3.create(x: 0.0, y: 0.0, z: 6.5)
     ret camera
   }
-  let pitch: Float = 15.7 * 3.141592653589793 / 180.0
-  camera.position = Vec3.create(x: 0.92, y: -15.5, z: 1.6)
+  let pitch: Float = 18.0 * 3.141592653589793 / 180.0
+  camera.position = Vec3.create(x: 0.69, y: -15.2, z: 1.6)
   camera.target = Vec3.create(
-    x: 0.92
-    y: -15.5 + 10.0 * Math.cos(x: pitch)
+    x: 0.69
+    y: -15.2 + 10.0 * Math.cos(x: pitch)
     z: 1.6 + 10.0 * Math.sin(x: pitch)
   )
   ret camera
