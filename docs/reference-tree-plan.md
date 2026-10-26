@@ -20,7 +20,8 @@ references get their look from four things, and our trees miss all four:
 
 This plan builds **one tree that matches one reference tree well**, in a
 separate test scene, and is judged against that reference at every step. It
-is not about one species of ours (birch, cypress). The shared tree code does
+is not about one species of ours (birch, cypress), and T02 is not a birch
+(see "What kind of tree it is"). The shared tree code does
 not change until the last step.
 
 ## The target: crop T02
@@ -43,6 +44,23 @@ What the tree in T02 has (the checklist for every step):
 | 7 | Clump edge | Ragged small-leaf edge, with single leaf tips sticking out; no smooth outline |
 | 8 | Trunk shading | A broad light-to-dark change across the trunk, faint vertical streaks; no detailed bark |
 | 9 | Setting | Seen slightly from below against a pale blue sky with clouds; darker, hazier trees behind; low bushes and flowers in front |
+
+### What kind of tree it is
+
+T02 is **not a birch**, and the work is **not based on our birch** (or any
+other species of ours). What species it is cannot be told for sure: it
+could be a pine, or a brown-trunked tree with leaves. The
+decision (2026-10-26): **treat it as a brown-trunked broadleaf tree with
+small leaves** (leaves, not needles), and **make it look like T02 looks**,
+not like a named species from a field guide. So:
+
+- the foliage is small LEAVES in clumps, not needles or needle tufts;
+- the trunk is warm orange-brown (checklist 1 and 8), not the white bark of a
+  birch, and not a pine's plated bark;
+- no botanical source decides a feature that T02 shows otherwise; the crop
+  is the reference, the checklist is the score;
+- the generator's names say what the tree looks like (for example
+  `warmBroadleaf`), not a species it is not.
 
 ## How every step is judged
 
