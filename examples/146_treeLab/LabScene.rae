@@ -308,9 +308,10 @@ func addPlaceholderClouds(world: mod World3d, meshes: view LabMeshes) {
   }
 }
 
-# The whole scene: the ground, the placeholder tree, the trees behind it and
-# the clouds
-func buildLabWorld(meshes: view LabMeshes) ret World3d {
+# The whole scene: the ground, the placeholder tree (when the generated one
+# is not wanted: RAE_TREELAB_TREE=placeholder), the trees behind it and the
+# clouds
+func buildLabWorld(meshes: view LabMeshes, placeholderTree: view Bool) ret World3d {
   var world: World3d = create()
   let ground: Material3d = labMaterial(
     red: labGroundRed
@@ -326,7 +327,9 @@ func buildLabWorld(meshes: view LabMeshes) ret World3d {
     rotation: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
     scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
   )
-  addPlaceholderTree(world: world, meshes: meshes)
+  if placeholderTree {
+    addPlaceholderTree(world: world, meshes: meshes)
+  }
   addBackgroundTrees(world: world, meshes: meshes)
   addPlaceholderClouds(world: world, meshes: meshes)
   ret world

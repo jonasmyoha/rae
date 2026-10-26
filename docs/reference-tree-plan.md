@@ -35,8 +35,8 @@ What the tree in T02 has (the checklist for every step):
 
 | # | Feature | In T02 |
 |---|---|---|
-| 1 | Trunk | One warm orange-brown trunk, thin (about 1/40 of the tree's height at the base), a slight S-curve, visible for about 55% of the height |
-| 2 | Fork | Below the crown the trunk splits into two unequal leaders; the opening between them is part of the shape |
+| 1 | Trunk | One warm orange-brown trunk, about 1/17 of the tree's height thick at the base and keeping most of that width up to the fork (re-measured on the crop in step 3; the first estimate of 1/40 was wrong), a slight S-curve, visible for about 55% of the height |
+| 2 | Fork | At about 60% of the height the trunk splits into two unequal leaders; the opening between them is part of the shape |
 | 3 | Branches | 4 to 6 thin side branches at 35 to 60 degrees, visible against the sky and through the crown |
 | 4 | Crown start | The lowest clump at about 50% of the height; nothing below it but trunk |
 | 5 | Clumps | 6 to 10 separate clumps of different sizes at branch ends, the top one the largest; sky visible between them (about 20 to 30% of the crown area) |

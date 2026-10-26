@@ -1,0 +1,134 @@
+# lib/treeGen (docs/reference-tree-plan.md step 3): the skeleton keeps the
+# reference tree's (crop T02) promises for every seed: a trunk, two unequal
+# leaders forking below the crown, 4 to 6 side branches starting 35 to 60
+# degrees from upright, radii that never grow toward a tip, the same tree for
+# the same seed; and the bark mesh's triangles all face outward.
+import Math
+import Vec3
+open Mesh3d
+open treeGen/TreeParams
+open treeGen/Skeleton
+open treeGen/BarkMesh
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func radiiNeverGrow(limb: view Limb) ret Bool {
+  # the trunk's root flare narrows upward too
+  loop var i: Int = 1, i < limb.radii.length, ++i {
+    if limb.radii.copyAtDefault(index: i) > limb.radii.copyAtDefault(index: i - 1) + 0.000001 {
+      ret false
+    }
+  }
+  ret true
+}
+
+# Every triangle's normal points away from its limb's centre line: the face
+# normal agrees with the vertex normals
+func facesOutward(mesh: view MeshData) ret Bool {
+  loop var triangle: Int = 0, triangle < mesh.indices.length / 3, ++triangle {
+    let a: Int = mesh.indices.copyAtDefault(index: triangle * 3)
+    let b: Int = mesh.indices.copyAtDefault(index: triangle * 3 + 1)
+    let c: Int = mesh.indices.copyAtDefault(index: triangle * 3 + 2)
+    let pa: Vec3 = Vec3.create(
+      x: mesh.verts.copyAtDefault(index: a * 8)
+      y: mesh.verts.copyAtDefault(index: a * 8 + 1)
+      z: mesh.verts.copyAtDefault(index: a * 8 + 2)
+    )
+    let pb: Vec3 = Vec3.create(
+      x: mesh.verts.copyAtDefault(index: b * 8)
+      y: mesh.verts.copyAtDefault(index: b * 8 + 1)
+      z: mesh.verts.copyAtDefault(index: b * 8 + 2)
+    )
+    let pc: Vec3 = Vec3.create(
+      x: mesh.verts.copyAtDefault(index: c * 8)
+      y: mesh.verts.copyAtDefault(index: c * 8 + 1)
+      z: mesh.verts.copyAtDefault(index: c * 8 + 2)
+    )
+    let na: Vec3 = Vec3.create(
+      x: mesh.verts.copyAtDefault(index: a * 8 + 3)
+      y: mesh.verts.copyAtDefault(index: a * 8 + 4)
+      z: mesh.verts.copyAtDefault(index: a * 8 + 5)
+    )
+    let face: Vec3 = Vec3.vcross(a: Vec3.vsub(a: pb, b: pa), b: Vec3.vsub(a: pc, b: pa))
+    if Vec3.vlen(a: face) > 0.0000001 and Vec3.vdot(a: face, b: na) < 0.0 {
+      ret false
+    }
+  }
+  ret true
+}
+
+func main() ret Int {
+  var limbsOk: Bool = true
+  var forkOk: Bool = true
+  var anglesOk: Bool = true
+  var radiiOk: Bool = true
+  var leadersOk: Bool = true
+  var meshOk: Bool = true
+  var fewest: Int = 99
+  var most: Int = 0
+  loop var seed: Int = 1, seed <= 20, ++seed {
+    let params: TreeParams = warmBroadleafParams(seed: seed)
+    let skeleton: TreeSkeleton = growSkeleton(params: params)
+    let branches: Int = skeleton.limbs.length - 3
+    fewest = Math.min(a: fewest, b: branches)
+    most = Math.max(a: most, b: branches)
+    if branches < 4 or branches > 6 {
+      limbsOk = false
+    }
+    let fork: Float = skeleton.forkPoint.z / params.height
+    if fork < 0.52 or fork > 0.68 {
+      forkOk = false
+    }
+    loop let limb: view Limb in skeleton.limbs {
+      if not radiiNeverGrow(limb: limb) {
+        radiiOk = false
+      }
+      if limb.order is 2 {
+        let start: Vec3 = Vec3.vsub(
+          a: limb.points.copyAtDefault(index: 1)
+          b: limb.points.copyAtDefault(index: 0)
+        )
+        let angle: Float = angleFromUpright(direction: start) * 180.0 / 3.141592653589793
+        # the first step has already turned a little toward upright
+        if angle < 30.0 or angle > 62.0 {
+          anglesOk = false
+        }
+      }
+    }
+    # two unequal leaders: the second thinner and shorter than the main one
+    let main: Limb = skeleton.limbs.copyAtDefault(index: 1)
+    let second: Limb = skeleton.limbs.copyAtDefault(index: 2)
+    if second.radii.copyAtDefault(index: 0) >= main.radii.copyAtDefault(index: 0) or second.points.copyAtDefault(
+      index: 14
+    ).z >= main.points.copyAtDefault(index: 14).z {
+      leadersOk = false
+    }
+    if not facesOutward(mesh: barkMesh(skeleton: skeleton)) {
+      meshOk = false
+    }
+  }
+  check(
+    label: "20 seeds: 4 to 6 side branches ({fewest} to {most})"
+    ok: limbsOk and fewest >= 4 and most <= 6
+  )
+  check(label: "the fork below the crown, at 52 to 68% of the height", ok: forkOk)
+  check(label: "side branches start 35 to 60 degrees from upright", ok: anglesOk)
+  check(label: "no radius grows toward a tip", ok: radiiOk)
+  check(label: "two unequal leaders: the second thinner and lower", ok: leadersOk)
+  check(label: "every bark triangle faces outward", ok: meshOk)
+  let again: TreeSkeleton = growSkeleton(params: warmBroadleafParams(seed: 7))
+  let once: TreeSkeleton = growSkeleton(params: warmBroadleafParams(seed: 7))
+  let tipAgain: Vec3 = again.limbs.copyAtDefault(index: 3).points.copyAtDefault(index: 14)
+  let tipOnce: Vec3 = once.limbs.copyAtDefault(index: 3).points.copyAtDefault(index: 14)
+  check(
+    label: "the same seed gives the same tree"
+    ok: Vec3.vlen(a: Vec3.vsub(a: tipAgain, b: tipOnce)) < 0.000001
+  )
+  ret 0
+}

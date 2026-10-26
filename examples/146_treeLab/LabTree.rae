@@ -1,0 +1,76 @@
+# The lab's tree: lib/treeGen's generated tree at the origin. So far the bare
+# wood (docs/reference-tree-plan.md step 3): the skeleton's tubes in the
+# bark material. The bark image is painted once into .rae/treeLab/ and
+# loaded as one of the renderer's material images.
+import Math
+import Sys
+import Vec3
+open Scene3d
+open ecs/Entity
+open RendererDeferred
+open RendererImages
+open Mesh3d
+open treeGen/TreeParams
+open treeGen/Skeleton
+open treeGen/BarkMesh
+open treeGen/Bark
+
+const labBarkImagePath: String = ".rae/treeLab/warmBark.png"
+
+# RAE_TREELAB_SEED, or 1
+func labTreeSeed() ret Int {
+  let text: String = Sys.getEnv(name: "RAE_TREELAB_SEED")
+  if text.length() > 0 {
+    ret text.toInt()
+  }
+  ret 1
+}
+
+# The bark image's layer in the renderer's material images (painted the
+# first time), or -1 when it could not be made
+func labBarkLayer(renderer: mod DeferredRenderer) ret Int {
+  if not Sys.exists(path: labBarkImagePath) {
+    let made: Bool = Sys.makeDir(path: ".rae/treeLab")
+    if not writeBarkImage(path: labBarkImagePath) {
+      log("[treeLab] could not write the bark image {labBarkImagePath}")
+      ret -1
+    }
+  }
+  ret rendererLoadSurfaceImage(renderer: renderer, path: labBarkImagePath)
+}
+
+# How far to turn the tree about its upright axis so its second leader opens
+# to the camera's right (+x), as T02's fork opens sideways in the picture
+func forkFacingYaw(skeleton: view TreeSkeleton) ret Float {
+  let second: Limb = skeleton.limbs.copyAtDefault(index: 2)
+  let lean: Vec3 = Vec3.vsub(
+    a: second.points.copyAtDefault(index: 6)
+    b: second.points.copyAtDefault(index: 0)
+  )
+  ret -Math.atan2(y: lean.y, x: lean.x)
+}
+
+# The generated tree for `seed`, standing at the origin, its fork turned to
+# open sideways to the camera
+func addGeneratedTree(world: mod World3d, renderer: mod DeferredRenderer, seed: view Int) {
+  let params: TreeParams = warmBroadleafParams(seed: seed)
+  let skeleton: TreeSkeleton = growSkeleton(params: params)
+  let mesh: MeshData = barkMesh(skeleton: skeleton)
+  let handle: MeshHandle = uploadMesh(
+    renderer: renderer
+    verts: mesh.verts
+    vertCount: mesh.vertCount
+    indices: mesh.indices
+  )
+  let unusedEntityId: EntityId = world3dAddMeshInstance(
+    world: world
+    mesh: handle
+    material: barkMaterial(layer: labBarkLayer(renderer: renderer))
+    position: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    rotation: Vec3.create(x: 0.0, y: 0.0, z: forkFacingYaw(skeleton: skeleton))
+    scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
+  )
+  log(
+    "[treeLab] warmBroadleaf seed {seed}: {skeleton.limbs.length} limbs, {mesh.vertCount} vertices, {mesh.indices.length / 3} triangles"
+  )
+}

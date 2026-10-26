@@ -1,9 +1,14 @@
 # The tree lab (docs/reference-tree-plan.md step 1): the scene the new tree
 # generator is built and judged in, against ONE reference tree, crop T02 of
-# the private reference study. Nothing here is the generator yet: the tree
-# is a placeholder of cylinders and spheres, the clouds are placeholder
-# puffs. Built new: it uses no tree code of the lib (the plan's "Built new"
-# list), only the renderer, the lib GPU grass and plain meshes.
+# the private reference study. The tree is lib/treeGen's (LabTree.rae); the
+# background trees, bushes and clouds are placeholders of cylinders and
+# spheres. Built new: it uses no older tree code of the lib (the plan's
+# "Built new" list), only lib/treeGen, the renderer, the lib GPU grass and
+# plain meshes.
+#
+# The tree is lib/treeGen's (step 3 on: the bare wood so far), seed
+# RAE_TREELAB_SEED (default 1); RAE_TREELAB_TREE=placeholder shows step 1's
+# cylinder and spheres instead.
 #
 # Cameras (RAE_TREELAB_CAMERA):
 #   near (default)  frames the 13.5 m tree like T02 frames its tree: from eye
@@ -11,6 +16,7 @@
 #                   its base in view, the crown's top near the top edge
 #   mid             the same tree from 40 m
 #   far             the same tree from 120 m
+#   bark            the trunk up close (4 m), for its colour and streaks
 #
 # The comparison picture (T02 beside the render, same height):
 #   examples/146_treeLab/compare.sh [near|mid|far]
@@ -38,6 +44,7 @@ open gpu/GpuLifetime
 open LabScene
 open LabGrass
 open LabLook
+open LabTree
 
 # A fixed late-morning sun from the camera's front left, as in T02 (the
 # trunk is lit on its left): the direction the light TRAVELS
@@ -77,6 +84,12 @@ func labCamera(name: view String) ret Camera3d {
     camera.target = Vec3.create(x: 0.0, y: 0.0, z: 6.5)
     ret camera
   }
+  if name is "bark" {
+    # the trunk up close, at eye height, for its colour and streaks
+    camera.position = Vec3.create(x: 0.6, y: -4.0, z: 1.7)
+    camera.target = Vec3.create(x: 0.0, y: 0.0, z: 2.6)
+    ret camera
+  }
   if name is "far" {
     camera.position = Vec3.create(x: 0.0, y: -120.0, z: 1.6)
     camera.target = Vec3.create(x: 0.0, y: 0.0, z: 6.5)
@@ -100,6 +113,11 @@ func createLab() ret LabState {
   )
   var renderer: DeferredRenderer = createDeferredRenderer()
   let meshes: LabMeshes = createLabMeshes(renderer: renderer)
+  let placeholder: Bool = Sys.getEnv(name: "RAE_TREELAB_TREE") is "placeholder"
+  var world: World3d = buildLabWorld(meshes: meshes, placeholderTree: placeholder)
+  if not placeholder {
+    addGeneratedTree(world: world, renderer: renderer, seed: labTreeSeed())
+  }
   var light: Light3d = defaultLight3d()
   light.sunDir = Vec3.vnorm(a: Vec3.create(x: labSunX, y: labSunY, z: labSunZ))
   applyLabLook(renderer: renderer, light: light)
@@ -108,7 +126,7 @@ func createLab() ret LabState {
   unsafe {
     ret LabState {
       renderer: own renderer
-      world: own buildLabWorld(meshes: meshes)
+      world: own world
       light: light
       camera: labCamera(name: Sys.getEnv(name: "RAE_TREELAB_CAMERA"))
       gpuResources: GpuResources.create(issuer: idIssuer, capacity: 32)
