@@ -117,6 +117,9 @@ func checkFoliageLayout(
         -1
       }
     }
+    if species is speciesBroadleaf {
+      subject.imageLayers = List(Int) { 2, 3, 3, 3 }
+    }
     subjects.add(value: subject)
   }
   var atlas: ImpostorAtlas = bakeTexturedImpostorAtlas(
@@ -140,7 +143,7 @@ func checkFoliageLayout(
     let leaf: Float = shares.copyAtFallback(index: species, fallback: 0.0)
     let ordinary: Float = plain.copyAtFallback(index: species, fallback: 0.0)
     var same: Bool = Math.abs(value: leaf - ordinary) <= 0.01
-    if species is speciesBirch {
+    if species is speciesBirch or species is speciesBroadleaf {
       # Facing cards intentionally differ from the unposed ordinary layout.
       same = leaf > 0.05 and leaf < 0.70
     }
@@ -152,64 +155,69 @@ func checkFoliageLayout(
     )
   }
   log("leaf layout: {leafMeshes} leaf meshes baked with their 64-byte vertices")
-  # Export the actual camera-facing birch, not only the deliberately unposed
-  # 32-byte control above. A healthy layer average can hide empty view cells.
-  let size: Int = impostorLevelSize(settings: settings, level: 0)
-  let tall: Int = impostorLevelHeight(settings: settings, level: 0)
-  let posed: List(UInt8) = readLevel(
-    resources: resources
-    texture: atlas.albedoTexture
-    mip: 0
-    layer: speciesBirch
-    size: size
-    tall: tall
-  )
-  let cellSize: Int = size / settings.viewsPerSide
-  loop var cell: Int = 0, cell < settings.viewsPerSide * settings.viewsPerSide, ++cell {
-    var covered: Int = 0
-    loop var y: Int = 0, y < cellSize, ++y {
-      loop var x: Int = 0, x < cellSize, ++x {
-        let column: Int = (cell % settings.viewsPerSide) * cellSize + x
-        let row: Int = (cell / settings.viewsPerSide) * cellSize + y
-        if posed.copyAtDefault(index: (row * size + column) * 4 + 3) >= 128 {
-          covered = covered + 1
-        }
-      }
-    }
-    if covered < cellSize * cellSize / 30 {
-      log("FAIL: posed birch view {cell} loses its crown: {covered} pixels")
-      failures = failures + 1
-    }
-  }
-  var full: Float = 0
-  loop var mip: Int = 0, mip < settings.mips, ++mip {
-    let mipSize: Int = impostorLevelSize(settings: settings, level: mip)
-    let mipHeight: Int = impostorLevelHeight(settings: settings, level: mip)
-    let pixels: List(UInt8) = readLevel(
+  let posedSpecies: List(Int) = { speciesBroadleaf, speciesBirch }
+  loop let species: Int in posedSpecies {
+    # Export the actual camera-facing textured crowns, not only the deliberately unposed
+    # 32-byte control above. A healthy layer average can hide empty view cells.
+    let size: Int = impostorLevelSize(settings: settings, level: 0)
+    let tall: Int = impostorLevelHeight(settings: settings, level: 0)
+    let posed: List(UInt8) = readLevel(
       resources: resources
       texture: atlas.albedoTexture
-      mip: mip
-      layer: speciesBirch
-      size: mipSize
-      tall: mipHeight
+      mip: 0
+      layer: species
+      size: size
+      tall: tall
     )
-    let share: Float = coverage(pixels: pixels, cutoff: spriteCutoff)
-    if mip is 0 {
-      full = share
+    let cellSize: Int = size / settings.viewsPerSide
+    loop var cell: Int = 0, cell < settings.viewsPerSide * settings.viewsPerSide, ++cell {
+      var covered: Int = 0
+      loop var y: Int = 0, y < cellSize, ++y {
+        loop var x: Int = 0, x < cellSize, ++x {
+          let column: Int = (cell % settings.viewsPerSide) * cellSize + x
+          let row: Int = (cell / settings.viewsPerSide) * cellSize + y
+          if posed.copyAtDefault(index: (row * size + column) * 4 + 3) >= 128 {
+            covered = covered + 1
+          }
+        }
+      }
+      if covered < cellSize * cellSize / 30 {
+        log(
+          "FAIL: posed {speciesName(species: species)} view {cell} loses its crown: {covered} pixels"
+        )
+        failures = failures + 1
+      }
     }
-    if share < full * 0.97 or share > full * 1.03 {
-      failures = failures + 1
-      log("FAIL: posed birch mip {mip} changes coverage")
-    }
-    let wrote: Bool = savePicture(
-      path: "{folder}/birch-posed-mip{mip}.png"
-      pixels: pixels
-      size: mipSize
-      tall: mipHeight
-      picture: PngPicture.albedo
-    )
-    if not wrote {
-      failures = failures + 1
+    var full: Float = 0
+    loop var mip: Int = 0, mip < settings.mips, ++mip {
+      let mipSize: Int = impostorLevelSize(settings: settings, level: mip)
+      let mipHeight: Int = impostorLevelHeight(settings: settings, level: mip)
+      let pixels: List(UInt8) = readLevel(
+        resources: resources
+        texture: atlas.albedoTexture
+        mip: mip
+        layer: species
+        size: mipSize
+        tall: mipHeight
+      )
+      let share: Float = coverage(pixels: pixels, cutoff: spriteCutoff)
+      if mip is 0 {
+        full = share
+      }
+      if share < full * 0.97 or share > full * 1.03 {
+        failures = failures + 1
+        log("FAIL: posed {speciesName(species: species)} mip {mip} changes coverage")
+      }
+      let wrote: Bool = savePicture(
+        path: "{folder}/{speciesName(species: species)}-posed-mip{mip}.png"
+        pixels: pixels
+        size: mipSize
+        tall: mipHeight
+        picture: PngPicture.albedo
+      )
+      if not wrote {
+        failures = failures + 1
+      }
     }
   }
   retireImpostorAtlas(atlas: atlas, resources: resources)
@@ -479,6 +487,8 @@ func main() ret Int {
     let paths: List(String) = {
       "lib/assets/trees/birchBark.png"
       "lib/assets/trees/birchSpray.png"
+      "lib/assets/trees/limeBark.png"
+      "lib/assets/trees/limeSpray.png"
     }
     if not setSurfaceImages(images: images, resources: resources, paths: paths) {
       ret 1
@@ -515,6 +525,9 @@ func main() ret Int {
           1
           -1
         }
+      }
+      if species is speciesBroadleaf {
+        subject.imageLayers = List(Int) { 2, 3, 3, 3 }
       }
       subjects.add(value: subject)
     }

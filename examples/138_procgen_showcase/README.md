@@ -15,7 +15,7 @@ standard GPU grass and a winding path on a raised garden base.
 - **1** restores the complete grove.
 - **2** frames the branching wood and leaf crowns.
 - **3** frames the stone outcrop.
-- **4** frames the broad, fluffy leaf patches.
+- **4** frames the small-leaved limes, beside the unchanged evergreen forms.
 - **5** frames the cypress and umbrella pine group.
 - **6** frames the six layered spruces.
 - **7** frames the giant camphor.
@@ -133,27 +133,35 @@ new rounded broadleaf and Mediterranean evergreen groups. This group first expan
 rounded broadleaves, three slender cypresses, three umbrella pines and three
 low lime-green bushes. The original autumn trees remain for comparison.
 
-`lib/procgen/FluffyFoliage.rae` uses fewer, larger, shallow-domed leaf patches
+The small-leaved lime (forest kind 0) now uses joined wood and connected
+textured sprays through `procgen/Lime`, with original lime bark and leaf
+cutouts. The grove and all three walker forests use that same implementation.
+See [lime refinement](../../docs/lime-refinement.md) for matched controls,
+seeds, bare scaffolds, bounds and the current LOD trade-off.
+
+The remaining forms in `lib/procgen/FluffyFoliage.rae` use fewer, larger, shallow-domed leaf patches
 with softened lobed edges. Their normals follow each crown envelope, giving
 rounded lighting instead of separate flat-card lighting. Seven overlapping
-crowns make a broadleaf or umbrella, nine tapered crowns make a cypress, and
+crowns make the old broadleaf control or umbrella, nine tapered crowns make a cypress, and
 five make a bush. Dark evergreen colours belong to the example materials.
-All geometry is generated in Rae; no new shaders, runtime C or bitmap assets.
+All geometry is generated in Rae. The opaque forms need no bitmap assets;
+lime uses its two original cutouts/albedos. No new shaders or runtime C.
 
-This experiment uses opaque leaf silhouettes. Textured alpha cards can reduce
-triangle counts further, but need matching alpha tests in the shadow pass,
-coverage-preserving mipmaps and an overdraw budget. Opaque patches use the
+The retained opaque forms use mesh silhouettes. Lime uses the shared alpha
+cutout, coverage-preserving mips and matching shadow/atlas rendering. Opaque patches use the
 existing shadow path and avoid those transparent areas. They trade extra
 vertices for simple shading and a consistent silhouette from every angle.
 
 | Form | Patches | Foliage triangles | Foliage vertices |
 |---|---:|---:|---:|
-| Broadleaf / umbrella | 336 | 8,064 | 4,368 |
+| Lime (37 sprays, three cards each) | 111 cards | 222 | 444 |
+| Broadleaf control / umbrella | 336 | 8,064 | 4,368 |
 | Cypress | 432 | 10,368 | 5,616 |
 | Bush | 240 | 5,760 | 3,120 |
 
-These counts include reversed triangles for back faces and exclude wood.
-The wood adds 420 triangles for broadleaf/umbrella, 70 for cypress, none for
+Opaque counts include reversed back-face triangles; lime cards are two-sided
+in the material path. All counts exclude wood.
+For the preserved opaque forms, the wood adds 420 triangles for the broadleaf control/umbrella, 70 for cypress, none for
 bush. `patchCount` is per crown, across all three tones. The showcase uses
 48; 24 and 12 are lower-cost generation budgets tested for deterministic
 output and valid indices. They are not automatic runtime LODs, and their
@@ -162,10 +170,10 @@ get larger, so future culling must use generated mesh bounds.
 
 `FluffyGrove.rae` uploads each form once, then shares its wood and three leaf
 mesh handles among rotated/scaled entities. Mesh ownership remains with the
-renderer. This demonstrates reusable assets, not a benchmark of thousands of
-trees: draw batching, pooled instance updates, distance-selected LODs and
-far billboards remain upstream integration work. Do not render thousands of
-the near-view meshes with individual draw calls.
+renderer. Walkers 136/137/143 use the shared species through instanced batches,
+distance-selected levels and baked far impostors. The grove itself uses
+ordinary world instances for inspection; do not copy that drawing arrangement
+for thousands of near trees.
 
 The same meshes also make the island's woodland (`addFluffyWoodland`): about
 34 broadleaves, spruces, umbrella pines and cypresses and 18 bushes at seeded

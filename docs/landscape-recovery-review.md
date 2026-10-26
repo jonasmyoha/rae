@@ -452,3 +452,18 @@ matched close/side/low-sun/night, sparse patch and walker-height views. The
 private presentation includes G02, a credited botanical photograph and actual
 continuous wind captures. Two shared batches remain; the added surface cost
 and remaining fine-stem/flower-detail limitations are recorded explicitly.
+
+
+## Small-leaved lime refinement
+
+[The lime comparison](lime-refinement.md) records the next species using the
+recovered joined forks and connected foliage sprays. Forest kind 0 and its
+placements remain unchanged. The original opaque tree is preserved as the
+control; the report and private presentation show matched full/bare trees,
+three seed/size pairs, side/underside, warm/night and actual 143 forest views.
+
+The new lime has original bark and leaf assets. Close card overlap, repeated
+leaf marks and regular bark ridges remain visible. Its middle level shares the
+near mesh, with the resulting geometry cost stated explicitly. Six geometry
+fixtures, three targeted hardware checks and all four consuming example gates
+pass; these checks do not establish a complete match to the reference art.

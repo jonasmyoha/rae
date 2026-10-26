@@ -75,7 +75,7 @@ consumers because 138 and the walkers deliberately share procedural sources.
 
 | Generator or preset | Shared mapping | Live consumers | Current distinction |
 |---|---|---|---|
-| `FluffyForm.broadleaf` | kind 0, small-leaved lime target | `GroveTrees`; 138 `FluffyGrove` inspection row and woodland | Rounded scalloped foliage patches over one trunk and branch preset. |
+| `FluffyForm.broadleaf` | kind 0, small-leaved lime target | `GroveTrees`; 138 `FluffyGrove` inspection row and woodland | Joined unequal primary forks and connected textured lime sprays; the original opaque patches remain an explicit comparison control. See [lime refinement](lime-refinement.md). |
 | `FluffyForm.umbrella` | kind 1, stone pine target | `GroveTrees`; 138 `FluffyGrove` inspection row and woodland | Raised flat-spreading crown preset. |
 | `FluffyForm.cypress` | kind 2, Mediterranean cypress target | `GroveTrees`; 138 `FluffyGrove` six-tree inspection row and woodland | Narrow column, including three extra-tall 138 specimens. |
 | `FluffyForm.spruce` plus `procgen/Spruce.spruceLeaves` | kind 3, Norway spruce target | `GroveTrees`; 138 `FluffyGrove` six-tree inspection row and woodland | Six scalloped foliage tiers. `fluffyLeaves` delegates to the spruce generator. |
