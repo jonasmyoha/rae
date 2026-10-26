@@ -50,6 +50,7 @@ fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
   surface.rough = gbb.a;
   surface.ao = gbc.w;
   surface.mode = mode;
+  surface.noRim = select(0.0, 1.0, gba.z < 0.25);
   surface.emissive = 0.0;
   if (isEmissive) {
     surface.emissive = exp(gbc.w * 6.91) - 1.0;

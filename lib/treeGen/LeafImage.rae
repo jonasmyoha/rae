@@ -3,7 +3,7 @@
 # brush stamps leaves: separate, simple almond-shaped leaves scattered over a
 # dab, each pointing roughly outward with a wide jitter, each sized and
 # toned a little differently, painted one over the other. Each leaf is a
-# flat dab, lighter on one side and toward its tip, no midrib and no stem:
+# flat dab of one tone, no gradient, no midrib and no stem:
 # a twig of paired leaflets was rejected as reading like a fern.
 #
 # Three stamps (layers), so neighbouring cards differ. Painted once as
@@ -73,14 +73,10 @@ func leafCover(leaf: view StampLeaf, along: view Float, across: view Float) ret 
   ret Math.clamp(val: (width - Math.abs(value: across)) / 1.5 + 0.5, low: 0.0, high: 1.0)
 }
 
-# The leaf's painted tone there: its own tone, a soft change from its light
-# side to its shaded side, darker toward the base
+# The leaf's painted tone: one flat tone per leaf, like a brush dab
+# (gradients are bad); the leaves of a stamp differ in tone
 func leafShade(leaf: view StampLeaf, along: view Float, across: view Float) ret Float {
-  let t: Float = Math.clamp(val: along / leaf.length, low: 0.0, high: 1.0)
-  let rise: Float = Math.clamp(val: t / 0.45, low: 0.0, high: 1.0)
-  let side: Float = Math.clamp(val: 0.5 + 0.5 * across / leaf.halfWidth, low: 0.0, high: 1.0)
-  let tone: Float = leaf.tone * (0.8 + 0.2 * rise * rise * (3.0 - 2.0 * rise)) * (1.0 - 0.2 * side)
-  ret Math.clamp(val: tone, low: 0.0, high: 1.0)
+  ret leaf.tone
 }
 
 # Stamp `layer`'s pixels: linear RGBA floats, row by row from the top. The

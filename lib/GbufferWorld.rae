@@ -10,6 +10,7 @@
 # through `import gbuffer`.
 open Gbuffer
 open GbufferSdf
+import GbufferRecord
 open gpu/GpuResources
 open Scene3d
 open Vec3
@@ -121,7 +122,7 @@ func renderSceneSdfWorld(
             camY: camera.position.y
             camZ: camera.position.z
             metallic: material.metallic
-            roughness: material.roughness
+            roughness: GbufferRecord.packedRoughness(material: material)
             emR: material.emission.x
             emG: material.emission.y
             emB: material.emission.z

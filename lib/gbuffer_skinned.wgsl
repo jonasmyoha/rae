@@ -67,7 +67,7 @@ fn gbufferSurface(in: VsOut) -> FsOut {
   let d = draws[in.inst];
   let n = normalize(in.nrm);
   let oct = octEncode(n);
-  let rough = clamp(d.params.x, 0.045, 1.0);
+  let rough = clamp(abs(d.params.x), 0.045, 1.0);
   let now = in.clipNow.xy / in.clipNow.w;
   let prev = in.clipPrev.xy / in.clipPrev.w;
   let motion = (now - prev) * vec2<f32>(0.5, -0.5);

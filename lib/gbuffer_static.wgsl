@@ -8,7 +8,10 @@ struct FsOut {
 @fragment
 fn fs(in: VsOut) -> FsOut {
   let d = draws[in.inst];
-  let rough = clamp(d.params.x, 0.045, 1.0);
+  // a negative roughness marks a material without the sky's rim light
+  // (GbufferRecord packedRoughness): z 0.1 tells the lighting so
+  let rough = clamp(abs(d.params.x), 0.045, 1.0);
+  let rimZ = select(0.5, 0.1, d.params.x < 0.0);
   let now = in.clipNow.xy / in.clipNow.w;
   let prev = in.clipPrev.xy / in.clipPrev.w;
   let motion = (now - prev) * vec2<f32>(0.5, -0.5);
@@ -20,7 +23,7 @@ fn fs(in: VsOut) -> FsOut {
   }
   let octB = octEncode(surface.nrm);
   var o: FsOut;
-  o.gba = vec4<f32>(octB.x, octB.y, 0.5, d.params.z);
+  o.gba = vec4<f32>(octB.x, octB.y, rimZ, d.params.z);
   o.gbb = vec4<f32>(surface.albedo, rough);
   o.gbc = vec4<f32>(mEnc.x, mEnc.y,
                      clamp(d.albedoMetallic.a, 0.0, 1.0), d.params.y);

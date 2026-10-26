@@ -98,8 +98,9 @@ func leafCards(skeleton: view TreeSkeleton, seed: view Int) ret LeafCards {
     )
     loop var i: Int = 0, i < cards, ++i {
       let direction: Vec3 = randomDirection(random: random)
-      # most cards near the surface, some deeper in
-      let depth: Float = 0.5 + 0.5 * Math.sqrt(x: nextUnit(random: random))
+      # the cards make a leafy skin near the mass's surface, so the mass
+      # reads as one lump (deeper ones were noise seen through the gaps)
+      let depth: Float = 0.75 + 0.25 * Math.sqrt(x: nextUnit(random: random))
       let local: Vec3 = Vec3.vscale(a: clumpSurface(clump: clump, direction: direction), s: depth)
       let position: Vec3 = Vec3.vadd(
         a: clump.centre
@@ -114,7 +115,7 @@ func leafCards(skeleton: view TreeSkeleton, seed: view Int) ret LeafCards {
         low: 0.0
         high: 1.0
       )
-      let occlusion: Float = (0.15 + 0.85 * Math.pow(base: (depth - 0.5) * 2.0, exp: 1.5)) * (0.7 + 0.3 * height)
+      let occlusion: Float = (0.45 + 0.55 * (depth - 0.75) * 4.0) * (0.8 + 0.2 * height)
       let green: Vec3 = massGreen(pick: (nextUnit(random: random) * 3.0).toInt())
       let shade: Float = nextBetween(random: random, low: 0.9, high: 1.1)
       let size: Float = leafCardSize * nextBetween(random: random, low: 0.8, high: 1.2)
@@ -151,7 +152,7 @@ func leafCards(skeleton: view TreeSkeleton, seed: view Int) ret LeafCards {
         a: stamp.toFloat()
         b: 0.0
         c: 0.0
-        d: Math.pow(base: (depth - 0.5) * 2.0, exp: 2.0)
+        d: Math.pow(base: (depth - 0.75) * 4.0, exp: 2.0)
       )
       count = count + 1
     }
