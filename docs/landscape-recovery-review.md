@@ -504,3 +504,16 @@ control, first candidate, selected front/side/underside, multiple seeds, night,
 actual forest group and posed atlas appear in the private recovery presentation
 beside T04/T05/T07. [The ginkgo report](ginkgo-refinement.md) records the matched
 conditions, shared consumers, costs and remaining close-card/bark limits.
+
+## Bloodgood Japanese maple refinement
+
+[The Japanese-maple comparison](japanese-maple-refinement.md) preserves the
+old crimson control and shows the selected layered burgundy crown, original
+quiet leaf texture and reddish bark. Low joined stems and an explicit
+single-stem option reuse the shared fork and foliage paths. The original grove
+specimen remains in place; stable forest kind 7 uses a smaller 3.2–4.8 m range.
+
+Matched grove views, three seeds/sizes, bare wood, backlight/night, actual forest
+controls and a breezy walk appear beside T04 in the private presentation.
+Remaining close-card patterns, shelf-like angles, dark overlaps and unreduced
+middle geometry are stated explicitly rather than hidden by the test results.
