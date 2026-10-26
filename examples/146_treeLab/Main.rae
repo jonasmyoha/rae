@@ -7,8 +7,8 @@
 #
 # Cameras (RAE_TREELAB_CAMERA):
 #   near (default)  frames the 13.5 m tree like T02 frames its tree: from eye
-#                   height 14 m away, looking up, the trunk leaving the
-#                   picture at the bottom, the crown's top near the top edge
+#                   height 17.5 m away, looking up, the whole trunk down to
+#                   its base in view, the crown's top near the top edge
 #   mid             the same tree from 40 m
 #   far             the same tree from 120 m
 #
@@ -59,10 +59,11 @@ type LabState {
 
 # The camera RAE_TREELAB_CAMERA names. The near one is worked out from T02:
 # a 13.5 m tree with its crown's top about 7% from the picture's top and its
-# trunk leaving the picture at the bottom edge, seen from 1.6 m with a 50
-# degree vertical field: 14 m away, looking 18.5 degrees up (the horizon
-# lands about 86% down), shifted 0.83 m so the trunk stands left of the
-# middle as T02's does.
+# whole trunk visible down to its base (the be choice: a few metres
+# farther than T02, whose base is hidden), seen from 1.6 m with a 50 degree
+# vertical field: 17.5 m away, looking 12.4 degrees up (the base lands about
+# 84% down, the horizon about 73%), shifted 1.04 m so the trunk stands left
+# of the middle as T02's does.
 func labCamera(name: view String) ret Camera3d {
   var camera: Camera3d = defaultCamera3d()
   camera.fovYDeg = 50
@@ -78,11 +79,11 @@ func labCamera(name: view String) ret Camera3d {
     camera.target = Vec3.create(x: 0.0, y: 0.0, z: 6.5)
     ret camera
   }
-  let pitch: Float = 18.5 * 3.141592653589793 / 180.0
-  camera.position = Vec3.create(x: 0.83, y: -14.0, z: 1.6)
+  let pitch: Float = 12.4 * 3.141592653589793 / 180.0
+  camera.position = Vec3.create(x: 1.04, y: -17.5, z: 1.6)
   camera.target = Vec3.create(
-    x: 0.83
-    y: -14.0 + 10.0 * Math.cos(x: pitch)
+    x: 1.04
+    y: -17.5 + 10.0 * Math.cos(x: pitch)
     z: 1.6 + 10.0 * Math.sin(x: pitch)
   )
   ret camera
