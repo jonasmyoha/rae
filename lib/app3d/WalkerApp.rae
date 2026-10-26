@@ -18,6 +18,7 @@ import Profile
 import Gpu2d
 import Quat
 open app3d/UiModes
+open app3d/ReferenceTree
 open app3d/EditorPanel
 open ecs/Entity
 open ecs/ComponentTable
@@ -465,6 +466,8 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
     # Nobody starts in the sea. The origin is not guaranteed land — the island mask
     # only guarantees land is SOMEWHERE inside the radius.
     spawnOnLand(controller: characterController, groundZ: groundZ, biome: biome)
+    # the stand of hand-made T02 trees: the forest leaves it a patch
+    terrainSystem.referenceStandOn = settings.referenceTree
     let treeCount: Int = plantWalkerForest(
       land: settings.land
       terrainSystem: terrainSystem
@@ -473,6 +476,11 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
       spawnY: characterController.position.y
     )
     bakeWalkerCanopy(terrainSystem: terrainSystem, renderer: renderer)
+    # the stand of hand-made T02 trees the forest planted in its patch
+    var referenceTree: opt ReferenceTree = none
+    if settings.referenceTree {
+      referenceTree = createReferenceStand(renderer: renderer, stand: terrainSystem.referenceStand)
+    }
 
     # #739: the hero is an entity like any crowd member (app3d/Characters): its
     # controller, transform, clip, transition and model are components; the
@@ -770,6 +778,7 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
         statsLogged: false
         windSettings: windSettings
         wind: createWindState(settings: windSettings)
+        referenceTree: own referenceTree
       }
       profiler: Profile.createProfiler()
       grassCompute: own grassCompute
@@ -958,6 +967,9 @@ func runWalkerApp(settings: view WalkerAppSettings) ret Int {
   }
   if let resources: mod GpuResources = app.gpuResources {
     grassShutdown(grass: app.grassCompute, resources: resources)
+    if let tree: mod ReferenceTree = app.renderSystem.referenceTree {
+      releaseReferenceTree(tree: tree, resources: resources)
+    }
     if let waterSystem: mod WaterSystem = app.waterSystem {
       waterShutdown(waterSystem: waterSystem, resources: resources)
     }

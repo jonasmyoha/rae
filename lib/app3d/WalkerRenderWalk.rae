@@ -11,6 +11,7 @@ import Profile
 import Gpu2d
 import Vec3
 open app3d/UiModes
+open app3d/ReferenceTree
 open ecs/Entity
 open ecs/ComponentTable
 import Sys
@@ -285,6 +286,16 @@ func renderWalkerApp(
             grassCompute: grassCompute
             resources: resources
           )
+          if let tree: mod ReferenceTree = renderSystem.referenceTree {
+            drawReferenceTree(
+              tree: tree
+              cache: renderSystem.renderer.passes.gbuffer
+              rendererResources: rendererResources
+              resources: resources
+              camera: cameraSystem.camera
+              light: cameraSystem.light
+            )
+          }
           drawWalkerMarks(
             cache: renderSystem.renderer.passes.gbuffer
             resources: rendererResources

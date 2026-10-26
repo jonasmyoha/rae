@@ -21,8 +21,12 @@ open GrassCompute
 open treeGen/LeafCards
 open treeGen/LeafImage
 
-# The leaf uniform's size: four vec4s (leaf_cards.wgsl's LeafU)
-const leafUniformBytes: Int = 64
+# The leaf uniform's size: five vec4s (leaf_cards.wgsl's LeafU)
+const leafUniformBytes: Int = 80
+
+# Floats per tree placement: two vec4s (leaf_cards.wgsl's Placement): x y z
+# yaw, then scale 0 0 0
+const leafPlacementFloats: Int = 8
 
 type LeafPass {
   cards: LeafCards
@@ -34,13 +38,19 @@ type LeafPass {
   images: SurfaceImages
   pipeline: RenderPipelineId
   cardBuffer: BufferId
+  # every tree that wears these leaves: leafPlacementFloats floats each
+  placements: List(Float)
+  placementCount: Int
+  placementBuffer: BufferId
+  placementsDirty: Bool
   uniform: BufferId
   uniformArgs: ArgWriter
   frameUniform: ExternalId
   drawBind: BindGroupId
 }
 
-# A pass for `cards`, with the leaf stamps (LeafImage.leafImageLayerPixels)
+# A pass for `cards`, with the leaf stamps (LeafImage.leafImageLayerPixels),
+# for one tree at the origin (setLeafPlacements for more)
 func createLeafPass(cards: own LeafCards, pictures: own List(List(Float))) ret LeafPass {
   ret LeafPass {
     cards: own cards
@@ -50,11 +60,89 @@ func createLeafPass(cards: own LeafCards, pictures: own List(List(Float))) ret L
     images: {}
     pipeline: noRenderPipelineId()
     cardBuffer: noBufferId()
+    placements: {
+      0.0
+      0.0
+      0.0
+      0.0
+      1.0
+      0.0
+      0.0
+      0.0
+    }
+    placementCount: 1
+    placementBuffer: noBufferId()
+    placementsDirty: true
     uniform: noBufferId()
     uniformArgs: createArgs(uniform: true)
     frameUniform: noExternalId()
     drawBind: noBindGroupId()
   }
+}
+
+# The trees that wear these leaves, each at (x, y, z) turned by `yaw` about
+# z and sized by `scale`: `placements` holds leafPlacementFloats floats per
+# tree (leafPlacement). Uploaded before the next draw.
+func setLeafPlacements(leaves: mod LeafPass, placements: own List(Float)) {
+  leaves.placementCount = placements.length / leafPlacementFloats
+  leaves.placements = own placements
+  leaves.placementsDirty = true
+}
+
+# One tree's placement floats, appended to `placements`
+func leafPlacement(
+  placements: mod List(Float)
+  x: view Float
+  y: view Float
+  z: view Float
+  yaw: view Float
+  scale: view Float
+) {
+  placements.add(value: x)
+  placements.add(value: y)
+  placements.add(value: z)
+  placements.add(value: yaw)
+  placements.add(value: scale)
+  placements.add(value: 0.0)
+  placements.add(value: 0.0)
+  placements.add(value: 0.0)
+}
+
+# The placements' buffer, made again when their number grows (the bind
+# group that holds it is made again then too)
+func uploadLeafPlacements(leaves: mod LeafPass, resources: mod GpuResources) {
+  if not leaves.placementsDirty or leaves.placementCount is 0 {
+    ret
+  }
+  leaves.placementsDirty = false
+  let bytes: Int = leaves.placements.length * 4
+  if not isValidBuffer(resources: resources, id: leaves.placementBuffer) or bufferSize(
+    resources: resources
+    id: leaves.placementBuffer
+  ) < bytes {
+    let unusedOld: Bool = retireBuffer(resources: resources, id: leaves.placementBuffer)
+    leaves.placementBuffer = noBufferId()
+    if let placementBuffer: BufferId = createBuffer(
+      resources: resources
+      size: bytes
+      usage: WGPUBufferUsage_Storage + WGPUBufferUsage_CopyDst
+    ) {
+      leaves.placementBuffer = placementBuffer
+    }
+    let unusedBind: Bool = retireBindGroup(resources: resources, id: leaves.drawBind)
+    leaves.drawBind = noBindGroupId()
+    leaves.drawBindMade = false
+  }
+  var writer: ArgWriter = createArgs(uniform: false)
+  loop let value: view Float in leaves.placements {
+    pushF32(writer: writer, value: value)
+  }
+  let uploaded: Bool = uploadArgs(
+    writer: writer
+    resources: resources
+    buffer: leaves.placementBuffer
+    offset: 0
+  )
 }
 
 # The GPU objects, made on the first draw: the picture, the cards' buffer,
@@ -117,7 +205,7 @@ func ensureLeafGpu(leaves: mod LeafPass, resources: mod GpuResources) {
 
 # The bind group needs the G-buffer's frame uniform, which exists only after
 # its first beginPass: frame @0, cards @1, leaf uniform @2, picture @3,
-# sampler @4
+# sampler @4, placements @5
 func ensureLeafDrawBind(
   leaves: mod LeafPass
   resources: mod GpuResources
@@ -148,6 +236,7 @@ func ensureLeafDrawBind(
   entries.add(value: bufferRef(id: leaves.uniform))
   entries.add(value: textureViewRef(id: leaves.images.textureView))
   entries.add(value: samplerRef(id: leaves.images.sampler))
+  entries.add(value: bufferRef(id: leaves.placementBuffer))
   if let drawBind: BindGroupId = createRenderBindGroup(
     resources: resources
     pipeline: leaves.pipeline
@@ -168,10 +257,11 @@ func drawLeaves(
   camera: view Camera3d
   light: view Light3d
 ) {
-  if leaves.cards.count is 0 or gbuffer.forwardFrame {
+  if leaves.cards.count is 0 or leaves.placementCount is 0 or gbuffer.forwardFrame {
     ret
   }
   ensureLeafGpu(leaves: leaves, resources: resources)
+  uploadLeafPlacements(leaves: leaves, resources: resources)
   ensureLeafDrawBind(
     leaves: leaves
     resources: resources
@@ -211,6 +301,13 @@ func drawLeaves(
     z: toSun.z
     w: 0.0
   )
+  pushVec4F(
+    writer: leaves.uniformArgs
+    x: leaves.cards.count.toFloat()
+    y: 0.0
+    z: 0.0
+    w: 0.0
+  )
   let uploaded: Bool = uploadArgs(
     writer: leaves.uniformArgs
     resources: resources
@@ -227,7 +324,7 @@ func drawLeaves(
       pipeline: leaves.pipeline
       bindGroup: leaves.drawBind
       vertexCount: 6
-      instanceCount: leaves.cards.count
+      instanceCount: leaves.cards.count * leaves.placementCount
       firstVertex: 0
       firstInstance: 0
     )
@@ -241,6 +338,7 @@ func releaseLeafPass(leaves: mod LeafPass, resources: mod GpuResources) {
   retireRenderPipeline(resources: resources, id: leaves.pipeline)
   let unusedCards: Bool = retireBuffer(resources: resources, id: leaves.cardBuffer)
   let unusedUniform: Bool = retireBuffer(resources: resources, id: leaves.uniform)
+  let unusedPlacements: Bool = retireBuffer(resources: resources, id: leaves.placementBuffer)
   let unusedFrame: Bool = releaseExternal(resources: resources, id: leaves.frameUniform)
   leaves.made = false
   leaves.drawBindMade = false

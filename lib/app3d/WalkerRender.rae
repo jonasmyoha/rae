@@ -40,6 +40,7 @@ open GltfSkin
 open SdfText
 open Png
 open app3d/CameraRig
+open app3d/ReferenceTree
 open app3d/CharacterController
 open app3d/SettingsDialog
 open SkyHosek
@@ -90,6 +91,9 @@ type WalkerRender {
   # rendered frame
   windSettings: WindSettings
   wind: WindState
+  # The stand of hand-made T02 trees, when the settings ask for it
+  # (app3d/ReferenceTree)
+  referenceTree: opt ReferenceTree = none
 }
 
 # Per-frame scratch shared across systems: timing and the render/park decision.
@@ -223,6 +227,9 @@ func renderShadowPass(
   if inputSystem.settings.shadows {
     beginShadowPass(renderer: renderSystem.renderer, c: cascades)
     drawTerrainPropsShadow(renderer: renderSystem.renderer, terrainSystem: terrainSystem)
+    if let tree: view ReferenceTree = renderSystem.referenceTree {
+      drawReferenceTreeShadow(tree: tree, renderer: renderSystem.renderer)
+    }
     drawPhysicsCubesShadow(
       renderer: renderSystem.renderer
       batch: renderSystem.cubeBatch
