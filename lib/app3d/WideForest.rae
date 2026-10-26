@@ -114,8 +114,8 @@ func plantWideForest(
         continue
       }
       if terrainSystem.referenceStandOn {
-        let standX: Float = x - spawnX
-        let standY: Float = y - spawnY - referenceStandAhead
+        let standX: Float = x - terrainSystem.referenceStandX
+        let standY: Float = y - terrainSystem.referenceStandY
         if standX * standX + standY * standY < referenceStandRadius * referenceStandRadius {
           # the stand's patch: a T02 tree now and then, never the forest's
           if Noise.hash2(x: column, y: row, seed: 815) < referenceStandChance {
