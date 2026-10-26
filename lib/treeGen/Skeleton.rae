@@ -225,20 +225,22 @@ func growSkeleton(params: view TreeParams) ret TreeSkeleton {
     random: random
     kinkRandom: kinkRandom
   ))
-  # The side branches, spread up the leaders and round the compass (a
-  # golden-angle turn from one to the next), longer low down
-  var branchAzimuth: Float = nextUnit(random: random) * 6.2831853
+  # The side branches, up the trunk's top and the leaders, longer low down.
+  # They fan out to the two sides of the fork by turns, like T02's crown (all
+  # round the compass, some point along the view and read as sticks pressed
+  # to a leader), each from the wood on its own side, so none cross.
+  let fanStart: Int = (nextUnit(random: random) * 2.0).toInt()
   loop var b: Int = 0, b < params.branchCount, ++b {
     let along: Float = (b.toFloat() + nextBetween(random: random, low: 0.2, high: 0.8)) / params.branchCount.toFloat()
-    # every branch raised by the same amount, so all keep their spacing
-    let z: Float = params.height * (params.branchFrom + (params.branchTo - params.branchFrom) * along + params.branchRaise)
-    # below the fork from the trunk; above it alternate the leaders, the main
-    # one taking the higher branches
-    var parentIndex: Int = 2
+    let z: Float = params.height * (params.branchFrom + (params.branchTo - params.branchFrom) * along)
+    let secondSide: Bool = (b + fanStart) % 2 is 1
+    # below the fork from the trunk; above it from the leader on the
+    # branch's side (the main one above the second leader's top)
+    var parentIndex: Int = 1
     if z < forkPoint.z - 0.3 {
       parentIndex = 0
-    } else if b % 2 is 1 or z > limbs.copyAtDefault(index: 2).points.copyAtDefault(index: 14).z {
-      parentIndex = 1
+    } else if secondSide and z < limbs.copyAtDefault(index: 2).points.copyAtDefault(index: 14).z {
+      parentIndex = 2
     }
     let parent: Limb = limbs.copyAtDefault(index: parentIndex)
     let at: Int = Math.max(a: 2, b: indexAtHeight(limb: parent, z: z))
@@ -253,7 +255,12 @@ func growSkeleton(params: view TreeParams) ret TreeSkeleton {
       a: params.tipRadius * 2.0
       b: parentRadius * params.limbThickness
     )
-    branchAzimuth = branchAzimuth + 2.3999632 + nextBetween(random: random, low: -0.3, high: 0.3)
+    # up to 45 degrees off the fork's plane
+    var side: Float = 0.0
+    if secondSide {
+      side = 3.1415927
+    }
+    let branchAzimuth: Float = azimuth + side + nextBetween(random: random, low: -0.8, high: 0.8)
     let length: Float = params.height * params.branchLength * (1.15 - 0.55 * along) * nextBetween(
       random: random
       low: 0.85

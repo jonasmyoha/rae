@@ -30,9 +30,6 @@ type TreeParams {
   branchAngleMin: Float
   branchAngleMax: Float
   branchLength: Float
-  # Every side branch starts this part of the height higher, all by the same
-  # amount, so they keep their spacing (0: none raised)
-  branchRaise: Float
   # The thinnest a tip gets (m)
   tipRadius: Float
   # A side branch's radius at its base, as a part of its parent's there
@@ -78,10 +75,11 @@ func degrees(value: view Float) ret Float {
 }
 
 # The T02 tree: 12.5 m, a slim trunk forking at about 60% of its height into
-# two unequal leaders, 4 to 6 slim, nearly straight side branches at 35 to 60
-# degrees, keeping most of their thickness to the tip (step 3 round 2, the
-# be best version). The seed varies the
-# S-curve, the leaders' directions, the branch count and every branch.
+# two unequal leaders, 4 to 6 long, slim side branches at 35 to 55 degrees
+# fanning out to the fork's two sides, keeping most of their thickness to
+# the tip (step 3 round 11, built on round 2, the be best). The
+# seed varies the S-curve, the leaders' directions, the branch count and
+# every branch.
 func warmBroadleafParams(seed: view Int) ret TreeParams {
   var params: TreeParams = stoutBroadleafParams(seed: seed)
   # 1 m lower than the stout tree, every proportion kept
@@ -89,13 +87,18 @@ func warmBroadleafParams(seed: view Int) ret TreeParams {
   params.baseRadius = params.height / 46.0
   params.limbThickness = 0.4
   params.limbEndThickness = 0.55
-  params.limbBend = 0.006
+  params.limbBend = 0.014
   params.limbWander = 0.012
   # No kinks: sharp turns with straight runs between them read as broken,
   # not organic (step 3 round 3)
   params.limbKinkChance = 0.0
-  # every branch 1 m higher than round 2's, the upper ones with the lowest
-  params.branchRaise = 0.08
+  # T02's crown is a wide fan: a few long, thin limbs leave the wood round
+  # the fork, none low on the trunk and none as stubs at the very top
+  params.branchFrom = 0.5
+  params.branchTo = 0.8
+  params.branchLength = 0.28
+  params.branchAngleMin = degrees(value: 35.0)
+  params.branchAngleMax = degrees(value: 55.0)
   ret params
 }
 
@@ -119,7 +122,6 @@ func stoutBroadleafParams(seed: view Int) ret TreeParams {
     branchAngleMin: degrees(value: 35.0)
     branchAngleMax: degrees(value: 60.0)
     branchLength: 0.22
-    branchRaise: 0.0
     tipRadius: 0.02
     limbThickness: 0.62
     limbEndThickness: 0.0
