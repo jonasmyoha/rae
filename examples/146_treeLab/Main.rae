@@ -1,0 +1,231 @@
+# The tree lab (docs/reference-tree-plan.md step 1): the scene the new tree
+# generator is built and judged in, against ONE reference tree, crop T02 of
+# the private reference study. Nothing here is the generator yet: the tree
+# is a placeholder of cylinders and spheres, the clouds are placeholder
+# puffs. Built new: it uses no tree code of the lib (the plan's "Built new"
+# list), only the renderer, the lib GPU grass and plain meshes.
+#
+# Cameras (RAE_TREELAB_CAMERA):
+#   near (default)  frames the 13.5 m tree like T02 frames its tree: from eye
+#                   height 14 m away, looking up, the trunk leaving the
+#                   picture at the bottom, the crown's top near the top edge
+#   mid             the same tree from 40 m
+#   far             the same tree from 120 m
+#
+# The comparison picture (T02 beside the render, same height):
+#   examples/146_treeLab/compare.sh [near|mid|far]
+# A plain screenshot:
+#   RAE_SDL_HEADLESS_MS=4000 RAE_GPU2D_SCREENSHOT=/tmp/lab.bmp \
+#     rae run examples/146_treeLab/Main.rae
+import Gpu2d
+import Sys
+import Vec3
+import Math
+open Wind
+open Scene3d
+open Gbuffer
+open GbufferWorld
+open RendererDeferred
+open Rendergraph
+open Math3d
+open Shadow3d
+open Sky
+open GrassCompute
+open gpu/GpuResources
+open gpu/GpuLifetime
+open LabScene
+open LabGrass
+
+# A fixed late-morning sun from the camera's front left, as in T02 (the
+# trunk is lit on its left): the direction the light TRAVELS
+const labSunX: Float = 0.5
+
+const labSunY: Float = 0.55
+
+const labSunZ: Float = -0.62
+
+type LabState {
+  renderer: DeferredRenderer
+  world: World3d
+  light: Light3d
+  camera: Camera3d
+  # The app's GPU manager: the grass's compute pass lives in it
+  gpuResources: opt GpuResources
+  grass: GrassCompute
+  windSettings: WindSettings
+  wind: WindState
+  lastTime: Float64
+}
+
+# The camera RAE_TREELAB_CAMERA names. The near one is worked out from T02:
+# a 13.5 m tree with its crown's top about 7% from the picture's top and its
+# trunk leaving the picture at the bottom edge, seen from 1.6 m with a 50
+# degree vertical field: 14 m away, looking 18.5 degrees up (the horizon
+# lands about 86% down), shifted 0.83 m so the trunk stands left of the
+# middle as T02's does.
+func labCamera(name: view String) ret Camera3d {
+  var camera: Camera3d = defaultCamera3d()
+  camera.fovYDeg = 50
+  camera.nearZ = 0.1
+  camera.farZ = 900
+  if name is "mid" {
+    camera.position = Vec3.create(x: 0.0, y: -40.0, z: 1.6)
+    camera.target = Vec3.create(x: 0.0, y: 0.0, z: 6.5)
+    ret camera
+  }
+  if name is "far" {
+    camera.position = Vec3.create(x: 0.0, y: -120.0, z: 1.6)
+    camera.target = Vec3.create(x: 0.0, y: 0.0, z: 6.5)
+    ret camera
+  }
+  let pitch: Float = 18.5 * 3.141592653589793 / 180.0
+  camera.position = Vec3.create(x: 0.83, y: -14.0, z: 1.6)
+  camera.target = Vec3.create(
+    x: 0.83
+    y: -14.0 + 10.0 * Math.cos(x: pitch)
+    z: 1.6 + 10.0 * Math.sin(x: pitch)
+  )
+  ret camera
+}
+
+func createLab() ret LabState {
+  Gpu2d.initWindow(
+    width: 1280
+    height: 800
+    title: "146: Tree lab | camera: RAE_TREELAB_CAMERA=near|mid|far"
+  )
+  var renderer: DeferredRenderer = createDeferredRenderer()
+  let meshes: LabMeshes = createLabMeshes(renderer: renderer)
+  var light: Light3d = defaultLight3d()
+  light.sunDir = Vec3.vnorm(a: Vec3.create(x: labSunX, y: labSunY, z: labSunZ))
+  setRendererSky(
+    renderer: renderer
+    sky: createSkyProcedural(sunDir: light.sunDir, sunColor: light.sunColor, turbidity: 3.0)
+  )
+  var idIssuer: IdIssuer = IdIssuer.create()
+  let windSettings: WindSettings = defaultWindSettings()
+  unsafe {
+    ret LabState {
+      renderer: own renderer
+      world: own buildLabWorld(meshes: meshes)
+      light: light
+      camera: labCamera(name: Sys.getEnv(name: "RAE_TREELAB_CAMERA"))
+      gpuResources: GpuResources.create(issuer: idIssuer, capacity: 32)
+      grass: createLabGrass()
+      windSettings: windSettings
+      wind: createWindState(settings: windSettings)
+      lastTime: Gpu2d.nowSeconds()
+    }
+  }
+}
+
+# The sun's cascades, fitted to the camera; every mesh of the world casts
+func renderLabShadows(state: mod LabState, aspect: view Float) {
+  let cascades: ShadowCascades = fitShadowCascades(
+    camPos: state.camera.position
+    camTarget: state.camera.target
+    fovYDeg: state.camera.fovYDeg
+    aspect: aspect
+    near: state.camera.nearZ
+    far: 160.0
+    sunDir: state.light.sunDir
+    count: 3
+    resolution: 2048
+    lambda: 0.7
+    backExtent: 45.0
+  )
+  beginShadowPass(renderer: state.renderer, c: cascades)
+  renderSceneShadowWorldWith(renderer: state.renderer, world: state.world)
+  endShadowPass(renderer: state.renderer)
+}
+
+# The G-buffer pass: the scene's meshes, then the grass the compute pass
+# generated just before
+func renderLabGeometry(state: mod LabState, aspect: view Float, deltaTime: view Float) {
+  if let resources: mod GpuResources = state.gpuResources {
+    generateLabGrass(
+      grass: state.grass
+      resources: resources
+      camera: state.camera
+      deltaTime: deltaTime
+      wind: windVector(state: state.wind, settings: state.windSettings)
+    )
+  }
+  ensureRendererResources(renderer: state.renderer)
+  if let rendererResources: mod GpuResources = state.renderer.gpuResources {
+    Gbuffer.beginPass(
+      cache: state.renderer.passes.gbuffer
+      resources: rendererResources
+      camera: state.camera
+      light: state.light
+      aspect: aspect
+    )
+    renderSceneWorld(
+      cache: state.renderer.passes.gbuffer
+      resources: rendererResources
+      world: state.world
+    )
+    if let resources: mod GpuResources = state.gpuResources {
+      grassDraw(
+        grass: state.grass
+        resources: resources
+        gbuffer: state.renderer.passes.gbuffer
+        gbufferResources: rendererResources
+      )
+    }
+    Gbuffer.endPass(cache: state.renderer.passes.gbuffer, resources: rendererResources)
+  }
+}
+
+func runLabFrame(state: mod LabState) {
+  let now: Float64 = Gpu2d.nowSeconds()
+  let deltaTime: Float = Math.min(a: (now - state.lastTime) as Float, b: 0.1)
+  state.lastTime = now
+  stepWind(state: state.wind, settings: state.windSettings, deltaTime: deltaTime)
+  if not Gpu2d.renderGate() {
+    ret
+  }
+  let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
+  loop var passIndex: Int = 0, passIndex < deferredOrderLength(renderer: state.renderer), ++passIndex {
+    let tag: Int = deferredTagAt(renderer: state.renderer, i: passIndex)
+    if tag is RenderTag.shadow {
+      renderLabShadows(state: state, aspect: aspect)
+    } else if tag is RenderTag.gbuffer {
+      renderLabGeometry(state: state, aspect: aspect, deltaTime: deltaTime)
+    } else {
+      renderDeferredPassWorld(
+        renderer: state.renderer
+        tag: tag
+        world: state.world
+        camera: state.camera
+        light: state.light
+        aspect: aspect
+      )
+    }
+  }
+  world3dPrevTransformSystem(world: state.world)
+}
+
+func endLab(state: mod LabState) {
+  if let resources: mod GpuResources = state.gpuResources {
+    grassShutdown(grass: state.grass, resources: resources)
+    shutdown(resources: resources)
+  }
+  shutdownDeferredRenderer(renderer: state.renderer)
+  Gbuffer.shutdownAll()
+  Gpu2d.closeWindow()
+}
+
+func main() ret Int {
+  var state: LabState = createLab()
+  let graphStatus: Int = compileDeferred(renderer: state.renderer)
+  if graphStatus is not 0 {
+    log("render graph invalid: {statusName(status: graphStatus)}")
+    ret 1
+  }
+  loop not Gpu2d.pollClose() {
+    runLabFrame(state: state)
+  }
+  endLab(state: state)
+  ret 0
+}
