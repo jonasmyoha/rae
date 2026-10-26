@@ -174,9 +174,12 @@ def traced_limbs(trace):
     return result
 
 
-# How far a mass marked in front of or behind the trunk moves along its line
-# of sight, as a part of its own depth radius
-DEPTH_SHIFT = {"front": -0.8, "middle": 0.0, "behind": 0.8}
+# Which side of the trunk a mass is on: -1 in front, 0 at it, 1 behind. A
+# mass in front or behind moves along its line of sight until its nearest
+# surface clears the trunk's plane by TRUNK_CLEARANCE: wholly in front of
+# the trunk (whose radius is at most about 0.3 m) or wholly behind it.
+DEPTH_SIDE = {"front": -1, "middle": 0, "behind": 1}
+TRUNK_CLEARANCE = 0.35
 # A mass's depth radius as a part of its mean picture radius, and its
 # underside's height as a part of its top's (1: as traced; the drawn outline
 # is the target)
@@ -199,12 +202,20 @@ def traced_clumps(trace):
         across = clump["rx"] / CROP_H * s * metres
         up = clump["ry"] / CROP_H * s * metres
         depth = DEPTH_RADIUS * (across + up) / 2.0
-        shift = DEPTH_SHIFT.get(clump.get("depth", "middle"), 0.0) * depth
+        side = DEPTH_SIDE.get(clump.get("depth", "middle"), 0)
         ray = unit(sub(world, EYE))
         distance = math.sqrt(dot(sub(world, EYE), sub(world, EYE)))
-        grow = (distance + shift) / distance
-        centre = add(EYE, scale(ray, distance + shift))
-        result.append((clump, centre, (across * grow, depth * grow, up * grow), math.radians(clump["angle"])))
+        grow = 1.0
+        if side != 0:
+            # moving m along the ray scales the mass by (distance + m) /
+            # distance (so it keeps its size in the picture) and puts its
+            # centre at y = m * ray.y; its nearest surface, y minus side
+            # times the scaled depth radius, must be side * TRUNK_CLEARANCE:
+            # m * (ray.y - side * depth / distance) = side * (clearance + depth)
+            m = side * (TRUNK_CLEARANCE + depth) / (ray[1] - side * depth / distance)
+            grow = (distance + m) / distance
+            world = add(EYE, scale(ray, distance + m))
+        result.append((clump, world, (across * grow, depth * grow, up * grow), math.radians(clump["angle"]), side))
     return result
 
 
@@ -245,7 +256,7 @@ def write_rae(trace, path):
     lines.append("func tracedT02Clumps() ret List(TracedClump) {")
     clumps = traced_clumps(trace)
     lines.append("  var clumps: List(TracedClump) = List.create(TracedClump, cap: %d)" % len(clumps))
-    for clump, centre, radii, turn in clumps:
+    for clump, centre, radii, turn, side in clumps:
         lines.append("  # %s (%s)" % (clump["name"], clump.get("depth", "middle")))
         lines.append("  clumps.add(value: TracedClump {")
         lines.append("    centre: Vec3.create(x: %.4f, y: %.4f, z: %.4f)" % centre)
@@ -253,6 +264,7 @@ def write_rae(trace, path):
         lines.append("    underside: %.2f" % UNDERSIDE)
         lines.append("    turn: %.4f" % turn)
         lines.append("    parent: %d" % clump["parent"])
+        lines.append("    side: %d" % side)
         lines.append("  })")
     lines.append("  ret clumps")
     lines.append("}")
