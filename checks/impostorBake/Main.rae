@@ -129,6 +129,9 @@ func checkFoliageLayout(
     if species is speciesGold {
       subject.imageLayers = List(Int) { 8, 9, 9, 9 }
     }
+    if species is speciesCrimson {
+      subject.imageLayers = List(Int) { 10, 11, 11, 11 }
+    }
     subjects.add(value: subject)
   }
   var atlas: ImpostorAtlas = bakeTexturedImpostorAtlas(
@@ -152,7 +155,7 @@ func checkFoliageLayout(
     let leaf: Float = shares.copyAtFallback(index: species, fallback: 0.0)
     let ordinary: Float = plain.copyAtFallback(index: species, fallback: 0.0)
     var same: Bool = Math.abs(value: leaf - ordinary) <= 0.01
-    if species is speciesBirch or species is speciesBroadleaf or species is speciesOrange or species is speciesRed or species is speciesGold {
+    if species is speciesBirch or species is speciesBroadleaf or species is speciesOrange or species is speciesRed or species is speciesGold or species is speciesCrimson {
       # Facing cards intentionally differ from the unposed ordinary layout.
       same = leaf > 0.05 and leaf < 0.70
     }
@@ -169,6 +172,7 @@ func checkFoliageLayout(
     speciesOrange
     speciesRed
     speciesGold
+    speciesCrimson
     speciesBirch
   }
   loop let species: Int in posedSpecies {
@@ -510,6 +514,8 @@ func main() ret Int {
       "lib/assets/trees/redMapleSpray.png"
       "lib/assets/trees/ginkgoBark.png"
       "lib/assets/trees/ginkgoSpray.png"
+      "lib/assets/trees/japaneseMapleBark.png"
+      "lib/assets/trees/japaneseMapleSpray.png"
     }
     if not setSurfaceImages(images: images, resources: resources, paths: paths) {
       ret 1
@@ -558,6 +564,9 @@ func main() ret Int {
       }
       if species is speciesGold {
         subject.imageLayers = List(Int) { 8, 9, 9, 9 }
+      }
+      if species is speciesCrimson {
+        subject.imageLayers = List(Int) { 10, 11, 11, 11 }
       }
       subjects.add(value: subject)
     }

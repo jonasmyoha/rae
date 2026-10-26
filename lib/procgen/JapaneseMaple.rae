@@ -1,0 +1,201 @@
+# Bloodgood Japanese maple: low unequal stems carry layered spreading sprays.
+# Z is up. A single-stem option raises the forks without changing the leaf path.
+import Math
+open Noise
+open Vec3
+open Mesh3d
+open procgen/Foliage
+open procgen/FoliageCards
+open procgen/SculpturalFork
+open procgen/CrownScaffold
+open procgen/Birch
+
+# A rotating card can extend sideways farther than a short tree is tall.
+func japaneseMapleBoundsRadius(height: view Float, width: view Float) ret Float {
+  ret Math.max(a: height * 0.95, b: width * 2.25)
+}
+
+type JapaneseMapleTree {
+  wood: MeshData
+  sprays: List(BirchTwig)
+  height: Float
+  width: Float
+}
+
+func japaneseMapleTree(
+  seed: view Int
+  height: view Float
+  width: view Float
+  multiStem: view Bool
+) ret JapaneseMapleTree {
+  let turn: Float = hash2(x: seed, y: 11, seed: 419) * 6.2831853
+  let lean: Vec3 = {
+    x: Math.cos(x: turn) * width * 0.26
+    y: Math.sin(x: turn) * width * 0.26
+    z: 0
+  }
+  let controls: List(Vec3) = {
+    { x: 0, y: 0, z: -height * 0.026 }
+    { x: -lean.x * 0.2, y: -lean.y * 0.2, z: height * 0.16 }
+    { x: lean.x * 0.3, y: lean.y * 0.4, z: height * 0.32 }
+    { x: lean.x, y: lean.y * 0.7, z: height * 0.51 }
+    { x: lean.x * 1.8, y: lean.y, z: height * 0.69 }
+    { x: lean.x * 2.3, y: lean.y * 1.4, z: height * 0.84 }
+  }
+  let radii: List(Float) = {
+    height * 0.059
+    height * 0.040
+    height * 0.028
+    height * 0.019
+    height * 0.011
+    height * 0.0025
+  }
+  let side: Int = (seed % 12 + 12) % 12
+  var first: CrownLimb = {
+    ring: 5
+    side: side
+    radius: height * 0.024
+    length: width * 0.90
+    rise: height * 0.42
+    sweep: -0.22
+  }
+  var second: CrownLimb = {
+    ring: 8
+    side: (side + 5) % 12
+    radius: height * 0.018
+    length: width * 0.72
+    rise: height * 0.30
+    sweep: 0.30
+  }
+  if multiStem {
+    first.ring = 2
+    first.radius = height * 0.034
+    first.rise = height * 0.63
+    second.ring = 5
+    second.radius = height * 0.026
+    second.rise = height * 0.45
+  }
+  let scaffold: CrownScaffold = crownScaffold(
+    controls: controls
+    radii: radii
+    first: first
+    second: second
+    seed: seed
+  )
+  var wood: MeshData = scaffold.wood
+  var sprays: List(BirchTwig) = List.create(BirchTwig, cap: 30)
+  loop var axis: Int = 0, axis < scaffold.axes.length, ++axis {
+    let path: ForkPath = scaffold.axes.copyAtDefault(index: axis)
+    loop var tier: Int = 0, tier < 5, ++tier {
+      let fraction: Float = tier.toFloat() / 4
+      var along: Float = 0.40 + fraction * 0.57
+      if axis is 0 {
+        along = 0.51 + fraction * 0.47
+      }
+      let start: Vec3 = birchPathPoint(path: path, amount: along)
+      loop var pair: Int = 0, pair < 2, ++pair {
+        # Unequal windows reveal the three stems; shoots remain opposing pairs.
+        if tier is 1 and pair is axis % 2 {
+          continue
+        }
+        let angle: Float = turn + axis.toFloat() * 2.1 + tier.toFloat() * 1.17 + pair.toFloat() * 3.14159265
+        let reach: Float = width * (0.75 - fraction * 0.38) * (0.86 + hash2(
+          x: tier
+          y: axis * 2 + pair
+          seed: seed
+        ) * 0.28)
+        let end: Vec3 = vadd(
+          a: start
+          b: Vec3.create(
+            x: Math.cos(x: angle) * reach
+            y: Math.sin(x: angle) * reach
+            z: height * (0.025 + fraction * 0.025)
+          )
+        )
+        let twig: BirchTwig = {
+          start: start
+          middle: vadd(
+            a: vscale(a: vadd(a: start, b: end), s: 0.5)
+            b: Vec3.create(x: 0, y: 0, z: height * 0.045)
+          )
+          end: end
+        }
+        birchTube(
+          mesh: wood
+          curve: twig
+          radius: height * 0.0036 * (1 - fraction * 0.55)
+          sides: 6
+          steps: 5
+          seed: seed + tier * 17 + pair
+        )
+        sprays.add(value: twig)
+      }
+    }
+  }
+  # Older base and smooth reddish upper wood use different vertical texture
+  # regions, with no repeated coarse ridge bands up the fine twigs.
+  loop var vertex: Int = 0, vertex < wood.vertCount, ++vertex {
+    let heightFraction: Float = Math.clamp(
+      val: wood.verts.copyAtDefault(index: vertex * 8 + 2) / height
+      low: 0.0
+      high: 1.0
+    )
+    wood.verts.set(index: vertex * 8 + 7, value: 0.97 - heightFraction * 0.94)
+  }
+  ret JapaneseMapleTree { wood: own wood, sprays: own sprays, height: height, width: width }
+}
+
+func japaneseMapleLeaves(
+  tree: view JapaneseMapleTree
+  seed: view Int
+  tone: view Int
+) ret MeshData {
+  var mesh: MeshData = foliageMesh()
+  loop var index: Int = 0, index < tree.sprays.length, ++index {
+    if index % 3 is not tone {
+      continue
+    }
+    let twig: BirchTwig = tree.sprays.copyAtDefault(index: index)
+    let center: Vec3 = birchCurve(twig: twig, amount: 0.78)
+    let variation: Float = 0.88 + hash2(x: index, y: 61, seed: seed) * 0.27
+    addConnectedFoliageSpray(
+      mesh: mesh
+      center: center
+      pivot: twig.start
+      branchDirection: vsub(a: twig.end, b: twig.start)
+      extent: Vec3.create(
+        x: tree.width * 0.43 * variation
+        y: tree.width * 0.15
+        z: tree.height * 0.095 * variation
+      )
+      shadeNormal: vnorm(
+        a: Vec3.create(x: center.x / tree.width * 0.28, y: center.y / tree.width * 0.28, z: 0.95)
+      )
+      seed: seed + index * 53
+    )
+  }
+  ret own mesh
+}
+
+func japaneseMapleLeafColor(tone: view Int) ret Vec3 {
+  # Restrained warm/cool variation per connected branch, not random leaves.
+  if tone is 0 {
+    ret Vec3.create(x: 0.88, y: 0.87, z: 0.94)
+  }
+  if tone is 1 {
+    ret Vec3.create(x: 0.95, y: 0.87, z: 0.86)
+  }
+  ret Vec3.create(x: 0.90, y: 0.90, z: 0.92)
+}
+
+func japaneseMapleWoodColor() ret Vec3 {
+  ret Vec3.create(x: 0.64, y: 0.61, z: 0.62)
+}
+
+func japaneseMapleLeafTexture() ret String {
+  ret "lib/assets/trees/japaneseMapleSpray.png"
+}
+
+func japaneseMapleBarkTexture() ret String {
+  ret "lib/assets/trees/japaneseMapleBark.png"
+}

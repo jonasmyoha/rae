@@ -1,0 +1,87 @@
+# A joined leader with two unequal primary limbs. Species supply the growth
+# curves; transported frames, junctions and surface cleanup stay shared.
+open Mesh3d
+open Vec3
+open procgen/Foliage
+open procgen/SculpturalFork
+open procgen/CurvedFork
+open procgen/CurvedForkBranch
+open procgen/ForkSurface
+
+type CrownLimb {
+  ring: Int
+  side: Int
+  radius: Float
+  length: Float
+  rise: Float
+  sweep: Float
+}
+
+type CrownScaffold {
+  wood: MeshData
+  axes: List(ForkPath)
+}
+
+func crownScaffold(
+  controls: view List(Vec3)
+  radii: view List(Float)
+  first: view CrownLimb
+  second: view CrownLimb
+  seed: view Int
+) ret CrownScaffold {
+  let leader: ForkPath = forkSmoothPath(controls: controls, radii: radii, steps: 3)
+  var cage: MeshData = foliageMesh()
+  let openings: List(ForkOpening) = forkTrunk(
+    mesh: cage
+    path: leader
+    sides: 12
+    seed: seed
+    firstOpeningRing: first.ring
+    firstOpeningSide: first.side
+    secondOpeningRing: second.ring
+    secondOpeningSide: second.side
+    openingCount: 2
+  )
+  forkCap(
+    mesh: cage
+    ringFirst: 0
+    sides: 12
+    center: controls.copyAtDefault(index: 0)
+    normal: Vec3.create(x: 0, y: 0, z: -1)
+    v: 0
+  )
+  let limbs: List(CrownLimb) = { first, second }
+  var axes: List(ForkPath) = List.create(ForkPath, cap: 3)
+  axes.add(value: leader)
+  loop var branch: Int = 0, branch < 2, ++branch {
+    let limb: CrownLimb = limbs.copyAtDefault(index: branch)
+    let opening: ForkOpening = openings.copyAtDefault(index: branch)
+    let normal: Vec3 = forkOpeningNormal(mesh: cage, opening: opening)
+    let path: ForkPath = curvedForkLimb(
+      start: vadd(
+        a: forkOpeningCenter(mesh: cage, opening: opening)
+        b: vscale(a: normal, s: limb.radius * 0.8)
+      )
+      outward: normal
+      length: limb.length
+      rise: limb.rise
+      radius: limb.radius
+      sweep: limb.sweep
+    )
+    curvedForkJoinedBranch(mesh: cage, opening: opening, path: path)
+    axes.add(value: path)
+  }
+  loop var branch: Int = 0, branch < 2, ++branch {
+    let opening: ForkOpening = openings.copyAtDefault(index: branch)
+    let limb: CrownLimb = limbs.copyAtDefault(index: branch)
+    relaxForkJunction(
+      mesh: cage
+      center: forkOpeningCenter(mesh: cage, opening: opening)
+      radius: limb.radius * 2.4
+    )
+  }
+  var wood: MeshData = subdivideForkSurface(mesh: cage)
+  finishForkSurface(mesh: wood)
+  wood = compactForkSurface(mesh: wood)
+  ret CrownScaffold { wood: own wood, axes: own axes }
+}

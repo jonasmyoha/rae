@@ -412,3 +412,23 @@ controls, three seeds, side/under/bare/low-sun/night and the named group using
 fixed frames. Add `--view front --motion --wind 1.2` for a six-second walk.
 Every child has a timeout; images and recordings stay at the chosen output.
 [Rendered comparisons and limitations](../../docs/ginkgo-refinement.md).
+
+
+### Bloodgood Japanese maple — shared kind 7
+
+`RAE_GROVE_VIEW=japanese-maple` selects the existing crimson specimen at
+(-8.1, 7.5), seed 301, height 4.2 m, width parameter 1.8 m. The scene selector
+names it “Bloodgood Japanese maple”. No old camera number or tree placement is
+reassigned. It now uses layered textured sprays and low joined stems.
+
+`RAE_JAPANESE_MAPLE_ISOLATE=1` removes occluding neighbours for matched studies.
+Add `RAE_JAPANESE_MAPLE_CONTROL=1` for the unchanged old geometry/material,
+`RAE_JAPANESE_MAPLE_BARE=1` for wood, or `RAE_JAPANESE_MAPLE_SINGLE=1` for raised
+single-stem forks. `RAE_JAPANESE_MAPLE_SEED` and `RAE_JAPANESE_MAPLE_HEIGHT` change
+only the isolated specimen. Forest kind 7 uses the same generator with shared
+resources and a deliberately smaller 3.2–4.8 m height range.
+
+`python3 tools/capture-japanese-maple-studies.py /tmp/japanese-maple-review`
+records matched static captures and their manifest. Add `--view front --motion
+--wind 1.2` for a six-second walk. Large outputs stay outside git.
+See [the comparison and remaining limits](../../docs/japanese-maple-refinement.md).

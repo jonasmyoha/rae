@@ -18,6 +18,7 @@ open FluffyGrove
 open CamphorGrove
 open BirchGrove
 open GinkgoGrove
+open JapaneseMapleGrove
 open ForkStudy
 open MeadowFlowers
 open procgen/Rock
@@ -200,6 +201,17 @@ func plantTree(
     )
     ret
   }
+  if species is 3 and Sys.getEnv(name: "RAE_JAPANESE_MAPLE_CONTROL") is not "1" {
+    plantJapaneseMaple(
+      world: world
+      renderer: renderer
+      position: position
+      height: height
+      width: width
+      seed: seed
+    )
+    ret
+  }
   let tree: BroadleafTree = broadleafTree(seed: seed, height: height, width: width)
   place(
     world: world
@@ -210,6 +222,9 @@ func plantTree(
     scale: unit
     rotation: 0
   )
+  if species is 3 and Sys.getEnv(name: "RAE_JAPANESE_MAPLE_BARE") is "1" {
+    ret
+  }
   if species is 0 and Sys.getEnv(name: "RAE_MAPLE_BARE") is "1" {
     ret
   }
@@ -571,6 +586,28 @@ func buildGrove(renderer: mod DeferredRenderer) ret Grove {
   let groundMesh: MeshHandle = uploadFoliage(renderer: renderer, mesh: ground)
   if Sys.getEnv(name: "RAE_GINKGO_ISOLATE") is "1" {
     addGinkgoGrove(world: world, renderer: renderer, obstacles: obstacles)
+    ret Grove { world: own world, obstacles: own obstacles, groundMesh: groundMesh }
+  }
+  if Sys.getEnv(name: "RAE_JAPANESE_MAPLE_ISOLATE") is "1" {
+    var seed: Int = 301
+    var height: Float = 4.2
+    if Sys.getEnv(name: "RAE_JAPANESE_MAPLE_SEED").length() > 0 {
+      seed = Sys.getEnv(name: "RAE_JAPANESE_MAPLE_SEED").toInt()
+    }
+    if Sys.getEnv(name: "RAE_JAPANESE_MAPLE_HEIGHT").length() > 0 {
+      height = Sys.getEnv(name: "RAE_JAPANESE_MAPLE_HEIGHT").toFloat()
+    }
+    plantTree(
+      world: world
+      renderer: renderer
+      position: Vec3.create(x: -8.1, y: 7.5, z: 0)
+      height: height
+      width: 1.8
+      seed: seed
+      species: 3
+      palm: false
+    )
+    obstacles.add(value: { x: -8.1, y: 7.5, radius: 0.4 })
     ret Grove { world: own world, obstacles: own obstacles, groundMesh: groundMesh }
   }
   # Isolated comparison still uses the exact grove specimen and ground.
