@@ -10,10 +10,17 @@ type CameraStudy {
   output: String = ""
   frame: Int = 0
   origin: Vec3 = {}
+  travel: Float = 12.0
 }
 
 func createCameraStudy() ret CameraStudy {
+  let travelText: String = Sys.getEnv(name: "RAE_LANDSCAPE_DISTANCE")
+  var travel: Float = 12.0
+  if travelText.length() > 0 {
+    travel = Math.max(a: 0.0, b: Math.min(a: 12.0, b: travelText.toFloat()))
+  }
   ret CameraStudy {
+    travel: travel
     enabled: Sys.getEnv(name: "RAE_LANDSCAPE_WALK") is "1"
     output: Sys.getEnv(name: "RAE_LANDSCAPE_FRAMES")
   }
@@ -26,7 +33,7 @@ func stepCameraStudy(study: mod CameraStudy, rig: mod CameraRig, camera: mod Cam
   if study.frame is 0 {
     study.origin = rig.freePosition
   }
-  let distance: Float = Math.min(a: study.frame.toFloat() / 179.0, b: 1.0) * 12.0
+  let distance: Float = Math.min(a: study.frame.toFloat() / 179.0, b: 1.0) * study.travel
   rig.mode = CameraRigMode.free
   rig.freePosition = Vec3.create(
     x: study.origin.x + Math.sin(x: rig.yaw) * distance

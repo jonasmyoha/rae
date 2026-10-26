@@ -98,20 +98,22 @@ rough materials have zero emission.
 
 The old `references/Flowers.png` is retained as rejected historical evidence.
 
-`lib/procgen/Harebell.rae` generates a distinct *Campanula rotundifolia*
-silhouette: wiry leaning stems, narrow leaves, alternating upper pedicels and
-two to five hanging blue-violet bells. Each bell has fused modeled sides, an
-open interior, five pointed lobes and a small calyx. One green mesh and one
-corolla mesh cover the complete patch, so head count does not add materials or
-draws. All surfaces use rough lit zero-emission materials and one root wind
-pivot per plant.
+`lib/procgen/Harebell.rae` generates the recovered *Campanula rotundifolia*:
+curved wiry stems, narrow leaves, arched downward attachments and rounded
+open five-lobed bells. Two shared material meshes cover the whole patch.
+Soft rough lighting responds to sunlight and night; wind keeps every plant's
+parts attached to the same root. An unchanged old plant stands beside the
+candidate. `RAE_HAREBELL_CONTROL=1` selects old geometry/materials in the
+whole study and shared walkers. Read the [matched comparison and limits](../../docs/harebell-recovery.md).
 
-![Harebell single plant and patch](references/Bellflowers.png)
+![Recovered harebell with fixed old control](../../docs/images/harebell-recovery/138-candidate-pair.png)
+
+The original `references/Bellflowers.png` remains rejected historical evidence.
 
 `GroveScene.rae` owns the gold, copper, scarlet and green palette, the path,
 the ground and every placement. All meshes are uploaded once and attached to
-entities in `World3d`; the deferred renderer owns the uploaded resources. Every
-material uses the existing cel-shading flag and the same directional light
+entities in `World3d`; the deferred renderer owns the uploaded resources. Tree
+and rock materials use the existing cel-shading flag and the same directional light
 and cascaded shadows. Tree and rock geometry is generated in Rae, with no
 imported tree meshes. The silver birch is the current exception to the older
 untextured-foliage description: its generated wood and leaf cards sample the

@@ -8,6 +8,7 @@ import Profile
 import Gpu2d
 import Vec3
 open app3d/UiModes
+open app3d/PropInstancer
 open ecs/Entity
 open ecs/ComponentTable
 import Sys
@@ -252,6 +253,11 @@ func renderShadowPass(
     log(
       "[shadow] casters {shadowCasterCount(renderer: renderSystem.renderer)}, {cascades.count} cascades at {cascades.resolution}"
     )
+    var harebellCasters: Int = 0
+    loop let part: view PropInstancer in terrainSystem.harebellParts {
+      harebellCasters = harebellCasters + part.batch.count
+    }
+    log("[harebell-shadow] batches={terrainSystem.harebellParts.length} casters={harebellCasters}")
     renderSystem.shadowLogged = true
   }
 }

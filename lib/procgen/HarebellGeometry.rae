@@ -1,0 +1,224 @@
+# Smooth, fused bell surfaces and curved pedicels. One shared mesh per material;
+# no texture, alpha discard or independently moving petal is needed.
+import Math
+open Vec3
+open Mesh3d
+open procgen/Foliage
+open procgen/OxeyeGeometry
+
+func harebellCurvePoint(
+  start: view Vec3
+  first: view Vec3
+  second: view Vec3
+  end: view Vec3
+  amount: view Float
+) ret Vec3 {
+  let remaining: Float = 1.0 - amount
+  ret vadd(
+    a: vadd(
+      a: vscale(a: start, s: remaining * remaining * remaining)
+      b: vscale(a: first, s: 3.0 * remaining * remaining * amount)
+    )
+    b: vadd(
+      a: vscale(a: second, s: 3.0 * remaining * amount * amount)
+      b: vscale(a: end, s: amount * amount * amount)
+    )
+  )
+}
+
+func harebellCurvedStem(
+  mesh: mod MeshData
+  root: view Vec3
+  height: view Float
+  lean: view Vec3
+  curve: view Vec3
+) {
+  var points: List(Vec3) = List.create(Vec3, cap: 13)
+  var radii: List(Float) = List.create(Float, cap: 13)
+  loop var step: Int = 0, step <= 12, ++step {
+    let amount: Float = step.toFloat() / 12.0
+    points.add(value: oxeyeStemPoint(
+      root: root
+      height: height
+      lean: lean
+      curve: curve
+      amount: amount
+    ))
+    radii.add(value: 0.0028 - 0.0015 * amount)
+  }
+  foliageTube(
+    mesh: mesh
+    points: points
+    radii: radii
+    sides: 7
+  )
+}
+
+# Last tangent points into the flower, so the bell hangs from a continuous arch.
+func harebellPedicel(
+  mesh: mod MeshData
+  start: view Vec3
+  attach: view Vec3
+  departure: view Vec3
+  axis: view Vec3
+) {
+  let first: Vec3 = vadd(a: start, b: vscale(a: departure, s: 0.070))
+  let second: Vec3 = vsub(a: attach, b: vscale(a: axis, s: 0.043))
+  var points: List(Vec3) = List.create(Vec3, cap: 17)
+  var radii: List(Float) = List.create(Float, cap: 17)
+  loop var step: Int = 0, step <= 16, ++step {
+    let amount: Float = step.toFloat() / 16.0
+    points.add(value: harebellCurvePoint(
+      start: start
+      first: first
+      second: second
+      end: attach
+      amount: amount
+    ))
+    radii.add(value: 0.0016 - 0.0006 * amount)
+  }
+  foliageTube(
+    mesh: mesh
+    points: points
+    radii: radii
+    sides: 6
+  )
+}
+
+# Rounded shoulder, quiet fused wall, then five broad slightly unequal lips.
+# Continuous derivatives avoid faceted lighting and a hard ring at the flare.
+func harebellBellPoint(
+  amount: view Float
+  angle: view Float
+  length: view Float
+  radius: view Float
+) ret Vec3 {
+  let flare: Float = amount * amount * amount * amount
+  let lobe: Float = Math.cos(x: angle * 5.0)
+  let breadth: Float = radius * (0.18 + 0.88 * Math.sin(x: amount * 1.32) + flare * (0.08 + 0.08 * lobe))
+  let distance: Float = length * (amount + flare * (0.13 * lobe + 0.025 * Math.sin(x: angle + 0.7)))
+  ret Vec3.create(x: breadth * Math.cos(x: angle), y: breadth * Math.sin(x: angle), z: distance)
+}
+
+func harebellBellFrame(
+  point: view Vec3
+  basis: view Vec3
+  across: view Vec3
+  axis: view Vec3
+) ret Vec3 {
+  ret vadd(
+    a: vadd(a: vscale(a: basis, s: point.x), b: vscale(a: across, s: point.y))
+    b: vscale(a: axis, s: point.z)
+  )
+}
+
+func harebellSoftBell(
+  mesh: mod MeshData
+  attach: view Vec3
+  axis: view Vec3
+  length: view Float
+  radius: view Float
+) {
+  let basis: Vec3 = foliageBasis(direction: axis)
+  let across: Vec3 = vnorm(a: vcross(a: axis, b: basis))
+  let first: Int = mesh.vertCount
+  let segments: Int = 30
+  let rings: Int = 8
+  loop var face: Int = 0, face < 2, ++face {
+    loop var ring: Int = 0, ring < rings, ++ring {
+      let amount: Float = ring.toFloat() / (rings - 1).toFloat()
+      loop var segment: Int = 0, segment < segments, ++segment {
+        let angle: Float = segment.toFloat() * 6.283185307 / segments.toFloat()
+        let local: Vec3 = harebellBellPoint(
+          amount: amount
+          angle: angle
+          length: length
+          radius: radius
+        )
+        let along: Vec3 = vsub(
+          a: harebellBellPoint(
+            amount: amount + 0.001
+            angle: angle
+            length: length
+            radius: radius
+          )
+          b: harebellBellPoint(
+            amount: amount - 0.001
+            angle: angle
+            length: length
+            radius: radius
+          )
+        )
+        let around: Vec3 = vsub(
+          a: harebellBellPoint(
+            amount: amount
+            angle: angle + 0.001
+            length: length
+            radius: radius
+          )
+          b: harebellBellPoint(
+            amount: amount
+            angle: angle - 0.001
+            length: length
+            radius: radius
+          )
+        )
+        let localNormal: Vec3 = vnorm(a: vcross(a: around, b: along))
+        let outward: Vec3 = harebellBellFrame(
+          point: localNormal
+          basis: basis
+          across: across
+          axis: axis
+        )
+        let position: Vec3 = vadd(
+          a: attach
+          b: harebellBellFrame(
+            point: local
+            basis: basis
+            across: across
+            axis: axis
+          )
+        )
+        var normal: Vec3 = outward
+        var offset: Float = 0.0003
+        if face is 1 {
+          normal = vscale(a: outward, s: -1.0)
+          offset = -offset
+        }
+        foliageVertex(
+          mesh: mesh
+          point: vadd(a: position, b: vscale(a: outward, s: offset))
+          normal: normal
+        )
+      }
+    }
+    loop var ring: Int = 0, ring < rings - 1, ++ring {
+      loop var segment: Int = 0, segment < segments, ++segment {
+        let index: Int = first + face * rings * segments + ring * segments
+        let next: Int = (segment + 1) % segments
+        oxeyeQuad(
+          mesh: mesh
+          first: index + segment
+          second: index + next
+          third: index + segments + segment
+          fourth: index + segments + next
+          reversed: face is 1
+        )
+      }
+    }
+  }
+  # Join the thin lip: an open mouth with a visible interior, never a blue cap.
+  loop var segment: Int = 0, segment < segments, ++segment {
+    let outer: Int = first + (rings - 1) * segments
+    let inner: Int = outer + rings * segments
+    let next: Int = (segment + 1) % segments
+    oxeyeQuad(
+      mesh: mesh
+      first: outer + segment
+      second: outer + next
+      third: inner + segment
+      fourth: inner + next
+      reversed: true
+    )
+  }
+}

@@ -443,3 +443,12 @@ curved-stem candidate, grouped patch, side/low-sun/night views and shared forest
 integration. The private presentation places these actual renders beside G01/G02
 and credited botanical photographs. Mesh costs and remaining art limits are
 recorded explicitly; this does not approve the whole meadow or the harebell.
+
+## Harebell recovery
+
+The [harebell comparison](harebell-recovery.md) keeps the unchanged angular
+control beside the recovered curved stem and soft open bells. It includes
+matched close/side/low-sun/night, sparse patch and walker-height views. The
+private presentation includes G02, a credited botanical photograph and actual
+continuous wind captures. Two shared batches remain; the added surface cost
+and remaining fine-stem/flower-detail limitations are recorded explicitly.

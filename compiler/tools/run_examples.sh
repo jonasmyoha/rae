@@ -1199,8 +1199,9 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # island's 300-tree forest as instanced batches (one per species,
           # near or middle level and part, PropField; how many depends on what
           # is in view) and the 24 physics cubes. Drawn one tree part at a
-          # time the forest alone was over 1300, so more than 800 means the
-          # forest lost its batching. The river is gone: the sea, the FFT ocean
+          # time the forest alone was over 1300. Keep the old 400..800 range
+          # for existing casters; the new two harebell material batches add
+          # one caster per visible patch per part, reported separately. The river is gone: the sea, the FFT ocean
           # of 141 (lib/water/IslandSea), is the only water body.
           # The physics check (RAE_WALKER_PHYSICS_TEST) settles the cube stacks,
           # walks the hero into one and jumps, then checks the tree trunks: a
@@ -1220,7 +1221,9 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              && [ "$(grep -c "panel buttons: 4 clip, 0 transport" "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c "\[sea\] FFT ocean at z" "$TMP_OUT/render.log")" -eq 1 ] \
              && CASTERS="$(sed -n 's/.*\[shadow\] casters \([0-9]*\), 4 cascades.*/\1/p' "$TMP_OUT/render.log" | head -1)" \
-             && [ -n "$CASTERS" ] && [ "$CASTERS" -ge 400 ] && [ "$CASTERS" -le 800 ] \
+             && HAREBELL_CASTERS="$(sed -n 's/.*\[harebell-shadow\] batches=2 casters=\([0-9]*\).*/\1/p' "$TMP_OUT/render.log" | head -1)" \
+             && [ -n "$CASTERS" ] && [ -n "$HAREBELL_CASTERS" ] && [ "$HAREBELL_CASTERS" -gt 0 ] \
+             && [ "$((CASTERS - HAREBELL_CASTERS))" -ge 400 ] && [ "$((CASTERS - HAREBELL_CASTERS))" -le 800 ] \
              && [ "$(grep -c "\[terrain\] 300 trees planted on the island" "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c "\[seamtest\] .* netOk=true physicsOk=true" "$TMP_OUT/render.log")" -eq 1 ] \
              && (cd .. && RAE_WALKER_PHYSICS_TEST=1 RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=60000 \
@@ -1346,7 +1349,8 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # rocks, leaf bushes), grass and cubes in one 4x MSAA pass, no
           # water. A shaded frame (thousands of colours), all 12 skinned parts
           # loaded, the forward path taken, the 300 island trees planted and
-          # 400 to 800 shadow casters (the forest batched, as in 136). The
+          # 400 to 800 existing casters plus the two harebell batches, as in
+          # 136. A caster count is an instance count, not a draw count. The
           # physics check (RAE_WALKER_PHYSICS_TEST) is 136's: the cubes, the
           # trunks, the rock and the bush. Then a free camera 170 m south of
           # the island (RAE_WALKER_CAMERA) sees every tree past the middle
@@ -1360,7 +1364,9 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              && [ "$(grep -c "\[render\] path: forward (4x MSAA) with SSAO" "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c "skinned parts: 12" "$TMP_OUT/render.log")" -eq 1 ] \
              && CASTERS="$(sed -n 's/.*\[shadow\] casters \([0-9]*\), 4 cascades.*/\1/p' "$TMP_OUT/render.log" | head -1)" \
-             && [ -n "$CASTERS" ] && [ "$CASTERS" -ge 400 ] && [ "$CASTERS" -le 800 ] \
+             && HAREBELL_CASTERS="$(sed -n 's/.*\[harebell-shadow\] batches=2 casters=\([0-9]*\).*/\1/p' "$TMP_OUT/render.log" | head -1)" \
+             && [ -n "$CASTERS" ] && [ -n "$HAREBELL_CASTERS" ] && [ "$HAREBELL_CASTERS" -gt 0 ] \
+             && [ "$((CASTERS - HAREBELL_CASTERS))" -ge 400 ] && [ "$((CASTERS - HAREBELL_CASTERS))" -le 800 ] \
              && [ "$(grep -c "\[terrain\] 300 trees planted on the island" "$TMP_OUT/render.log")" -eq 1 ] \
              && (cd .. && RAE_WALKER_PHYSICS_TEST=1 RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=60000 \
                 perl -e 'alarm shift; exec @ARGV' 60 "$TMP_OUT/app") > "$TMP_OUT/physics.log" 2>&1 \

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure old/candidate daisy meshes in the same forest binary and camera."""
+"""Measure old/candidate flower meshes in the same forest binary and camera."""
 import argparse
 import hashlib
 import json
@@ -13,6 +13,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('binary', type=Path)
     parser.add_argument('output', type=Path)
+    parser.add_argument('--species', choices=['daisy', 'harebell'], default='daisy')
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[1]
     args.output.mkdir(parents=True, exist_ok=True)
@@ -26,7 +27,7 @@ def main():
             env = dict(os.environ, RAE_UI_HEADLESS='1', RAE_HEADLESS_FRAMES='900',
                        RAE_FIXED_DT='0.016666667', RAE_WIND='1.5', RAE_WALKER_HOUR='10',
                        RAE_CAMERA_AT='1 1.5708 0.24 -0.38 4.2 -15.4 5.4 1.745 0 0 0 0',
-                       RAE_DAISY_CONTROL='1' if label == 'control' else '0',
+                       **{'RAE_DAISY_CONTROL' if args.species == 'daisy' else 'RAE_HAREBELL_CONTROL': '1' if label == 'control' else '0'},
                        RAE_DRS='off', RAE_RENDER_SCALE='1', RAE_DEBUG_OVERLAY='0',
                        RAE_GPU_PASS_TIMING='1', RAE_FRAME_TIMING='1', RAE_GRASS_REPORT='1',
                        RAE_WGPU_REPORT='1', RAE_LANDSCAPE_WALK='', RAE_LANDSCAPE_FRAMES='')
@@ -49,7 +50,7 @@ def main():
                               'processSeconds': dict(zip(['real', 'user', 'system'], map(float, timing.groups()))),
                               'peakRssBytes': int(re.search(r'(\d+)  maximum resident set size', text)[1]),
                               'observations': [line for line in text.splitlines() if
-                                               line.startswith(('[grass-study]', '[frame]', '[wgpu-report]'))]}
+                                               line.startswith(('[grass-study]', '[frame]', '[wgpu-report'))]}
             print(label, flush=True)
         (args.output/'costs.json').write_text(json.dumps(results, indent=2)+'\n')
     finally:
