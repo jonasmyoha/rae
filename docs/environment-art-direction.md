@@ -36,15 +36,15 @@ renames code and all consumers together.
 | 3 | `speciesSpruce` | Norway spruce (*Picea abies*) | `FluffyForm.spruce`; foliage routes to `procgen/Spruce` | 5.5–8.5 m | dark evergreen | Conical crown with unequal branch whorls, open gaps and slightly hanging secondary growth. Avoid identical stacked skirts. Bark is grey-brown to purplish and becomes flaky and scaly. |
 | 4 | `speciesOrange` | Sugar maple (*Acer saccharum*), autumn-orange preset | [`procgen/SugarMaple`, joined ascending forks and textured sprays](sugar-maple-refinement.md) | 4.2–6.8 m | copper, orange and restrained red | Dense spreading oval crown on a strong ascending scaffold. Keep broad colour groups and visible forks. Bark is light grey to grey-brown, then long irregular furrows and ridges. |
 | 5 | `speciesRed` | Red maple (*Acer rubrum*), scarlet preset | [`procgen/RedMaple`, lighter joined forks and textured sprays](red-maple-refinement.md) | 4.2–6.8 m | scarlet and red-orange | Rounded crown with ascending branches and a lighter, finer twig rhythm than the sugar maple. Young bark is smooth light grey; old bark develops dark vertical ridges. |
-| 6 | `speciesGold` | Golden Globe ginkgo (*Ginkgo biloba* ‘Golden Globe’) | `procgen/Foliage.broadleafTree` | 4.2–6.8 m | clear autumn gold | Rounded crown, selected as the second rounded-crown candidate. Use visible ascending branch fans and small openings rather than a maple silhouette. The mature trunk should carry grey-brown furrows. Fan-leaf texture and branching must distinguish it from slots 4 and 5. |
+| 6 | `speciesGold` | Golden Globe ginkgo (*Ginkgo biloba* ‘Golden Globe’) | [`procgen/Ginkgo`, joined branch fans and textured fan leaves](ginkgo-refinement.md) | 4.2–6.8 m | clear autumn gold | Rounded crown, selected as the second rounded-crown candidate. Use visible ascending branch fans and small openings rather than a maple silhouette. The mature trunk should carry grey-brown furrows. Fan-leaf texture and branching must distinguish it from slots 4 and 5. |
 | 7 | `speciesCrimson` | Bloodgood Japanese maple (*Acer palmatum* ‘Bloodgood’) | `procgen/Foliage.broadleafTree` | 4.2–6.8 m | burgundy summer to bright crimson autumn | Broad upright round crown with layered spreading branches and a muscular multi-stem option. Keep the crown smaller and more open than the large maples. Smooth grey to dark reddish wood and fine red twigs support the deep foliage. |
 | 8 | `speciesPalm` | Date palm (*Phoenix dactylifera*) | `procgen/Foliage.palmWood` and `palmLeaves` | 5.0–6.5 m | glaucous evergreen | Straight unbranched scarred trunk with one apex crown of stiff pinnate fronds and open sky between fronds. The current branched wood with rounded leaf crowns is a generator mismatch; its later task replaces that form without changing kind 8. |
 | 9 | `speciesBirch` | Silver birch (*Betula pendula*) | `procgen/Birch` | 6.5–8.5 m | fresh green; optional gold later | Slender white stem, dark scars, asymmetrical rising limbs and hanging fine twigs. Preserve visible wood and sparse crown sectors. The shared bark and leaf textures are already the closest current starting point. |
 
 The ten rows above are exhaustive: every value from zero through
-`treeSpeciesCount - 1` appears once. Slots 4 and 5 now use separate sugar-maple and red-maple scaffolds and textures.
-Slots 6 and 7 retain the original broadleaf geometry with seed/colour differences
-until their species work. Colour alone is not botanical evidence.
+`treeSpeciesCount - 1` appears once. Slots 4, 5 and 6 now use separate sugar-maple, red-maple and ginkgo scaffolds and textures.
+Slot 7 retains the original broadleaf geometry
+until its species work. Colour alone is not botanical evidence.
 
 ### Selection and placement
 
@@ -81,14 +81,15 @@ consumers because 138 and the walkers deliberately share procedural sources.
 | `FluffyForm.spruce` plus `procgen/Spruce.spruceLeaves` | kind 3, Norway spruce target | `GroveTrees`; 138 `FluffyGrove` six-tree inspection row and woodland | Six scalloped foliage tiers. `fluffyLeaves` delegates to the spruce generator. |
 | `procgen/SugarMaple` | kind 4, autumn-orange | `GroveTrees`; three 138 `GroveScene` specimens | Joined ascending scaffold and connected textured copper sprays. |
 | `procgen/RedMaple` | kind 5, scarlet | `GroveTrees`; one 138 `GroveScene` specimen | Lighter joined scaffold, rounded open crown, grey bark and connected scarlet sprays. |
-| `procgen/Foliage.broadleafTree` and `broadleafLeaves` | kinds 6–7; explicit controls for 4–5 | `GroveTrees`; 138 `GroveScene` crimson tree and control views | Original flared trunk/forks and individual generated leaf meshes retained for the unfinished species and visual controls. |
+| `procgen/Ginkgo` | kind 6, autumn gold | `GroveTrees`; three 138 `GinkgoGrove` inspection trees | Joined spreading branch fans, alternate short shoots, golden fan-leaf cutout and grey-brown bark. |
+| `procgen/Foliage.broadleafTree` and `broadleafLeaves` | kind 7; explicit controls for 4–6 | `GroveTrees`; 138 `GroveScene` crimson tree and control views | Original flared trunk/forks and individual generated leaf meshes retained for the unfinished species and visual controls. |
 | `procgen/Foliage.palmWood` and `palmLeaves` | kind 8, date palm target | `GroveTrees`; one 138 `GroveScene` legacy palm | Current segmented stem branches into round leaf crowns. It is a compatibility placeholder, not yet a date-palm silhouette. |
 | `procgen/Birch` | kind 9, silver birch | `GroveTrees`; five trees in 138 `BirchGrove` | Separate white-bark stem, twig wood and irregular textured leaf sprays. |
 | `procgen/Camphor` and `CamphorGeometry` | no shared kind | one tree in 138 `CamphorGrove` | One 27.9 m mature camphor tree with buttress roots, seven main scaffold limbs, moss and a broad evergreen crown. It does not belong in normal forest selection. |
 | `procgen/SculpturalFork` | no shared kind | young and mature bare studies in 138 | Reusable continuous trunk with open-patch joined primary branches, stable carried frames, unequal angles and a lobed root flare. It is an isolated geometry proof until a later species task adopts it. |
 | `FluffyForm.bush` | no tree kind; common hazel target (*Corylus avellana*) | shared walker bush instancers; 138 inspection row and woodland, capped at 18 | Current preset has foliage and no wood. The target is a low rounded, multi-stem thicket with smooth pale bark, not a miniature tree ball. |
 
-138 currently builds the forms through four separate modules:
+138 builds the forms through these scene modules:
 
 - `GroveScene` places six legacy plants: three local orange broadleaves, one
   local red broadleaf, one local crimson broadleaf and one green palm.
@@ -96,6 +97,7 @@ consumers because 138 and the walkers deliberately share procedural sources.
   seeded woodland capped at 38 trees and 18 bushes.
 - `BirchGrove` places five trees from shared kind 9 meshes.
 - `CamphorGrove` places one separate mature specimen.
+- `GinkgoGrove` adds a named kind-6 inspection with seeds 1125/311/2189 and heights 5.5/4.6/6.2 m.
 
 ### The 138 numbering discrepancy
 
@@ -114,8 +116,8 @@ ginkgo target. The compatibility map is:
 
 138 has no legacy gold specimen for shared kind 6. Its existing green value 2
 must not be recoloured to gold because that would also recolour the palm. The
-Golden Globe ginkgo task must add an explicit inspection of shared kind 6 while
-preserving all current varieties. Later composition work can replace the local
+named `ginkgo` view now inspects shared kind 6 through `GinkgoGrove`; the three
+new specimens preserve all existing varieties and the green palm. Later composition work can replace the local
 paint numbers with named presets, but it must not pass them directly as shared
 kind numbers.
 

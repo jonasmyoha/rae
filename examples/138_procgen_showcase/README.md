@@ -392,3 +392,23 @@ old/new captures, bare wood, three seeds, forest views and limitations.
 `RAE_RED_MAPLE_BARE=1` expose its study/control views.
 `tools/capture-red-maple-studies.py` records them; `--view front --wind 1.2
 --motion` uses the existing fixed walking path for a six-second clip.
+
+### Golden Globe ginkgo — shared kind 6
+
+`RAE_GROVE_VIEW=ginkgo` opens the named three-tree inspection (seeds
+1125/311/2189, heights 5.5/4.6/6.2 m), also available in the existing scene
+selector. `GinkgoGrove` uses `procgen/Ginkgo`, as do all three walkers. The
+legacy local green paint value 2 and its date palm are unchanged; that paint
+number is not forest kind 6.
+
+`RAE_GINKGO_ISOLATE=1` keeps the first specimen alone. Add
+`RAE_GINKGO_CONTROL=1` for the original gold generator/material or
+`RAE_GINKGO_BARE=1` for its wood. Optional `RAE_GINKGO_SEED` and
+`RAE_GINKGO_HEIGHT` change only the isolated study. These controls do not change
+forest placements or species numbers.
+
+`python3 tools/capture-ginkgo-studies.py /tmp/ginkgo-review` captures matched
+controls, three seeds, side/under/bare/low-sun/night and the named group using
+fixed frames. Add `--view front --motion --wind 1.2` for a six-second walk.
+Every child has a timeout; images and recordings stay at the chosen output.
+[Rendered comparisons and limitations](../../docs/ginkgo-refinement.md).
