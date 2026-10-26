@@ -83,9 +83,11 @@ func growLimb(
   tipRadius: view Float
   rise: view Float
   wander: view Float
+  kink: view LimbKinks
   parent: view Int
   order: view Int
   random: mod TreeRandom
+  kinkRandom: mod TreeRandom
 ) ret Limb {
   let steps: Int = 14
   let step: Float = length / steps.toFloat()
@@ -109,9 +111,53 @@ func growLimb(
         b: Vec3.vadd(a: Vec3.vscale(a: upVector(), s: rise), b: Vec3.vscale(a: jitter, s: wander))
       )
     )
+    # now and then a small kink: a turn of a few degrees about a random axis
+    # across the limb
+    # (its own random numbers, so adding kinks leaves the tree's layout as it
+    # was)
+    if i > 0 and i < steps - 1 and nextUnit(random: kinkRandom) < kink.chance {
+      let around: Float = nextUnit(random: kinkRandom) * 6.2831853
+      let across: Vec3 = kinkAxis(heading: heading, around: around)
+      let angle: Float = nextBetween(random: kinkRandom, low: kink.minAngle, high: kink.maxAngle)
+      heading = Vec3.vnorm(
+        a: Vec3.vadd(
+          a: Vec3.vscale(a: heading, s: Math.cos(x: angle))
+          b: Vec3.vscale(a: across, s: Math.sin(x: angle))
+        )
+      )
+    }
     point = Vec3.vadd(a: point, b: Vec3.vscale(a: heading, s: step))
   }
   ret Limb { points: own points, radii: own radii, parent: parent, order: order }
+}
+
+# How a limb kinks (TreeParams limbKink*)
+type LimbKinks {
+  chance: Float
+  minAngle: Float
+  maxAngle: Float
+}
+
+func limbKinks(params: view TreeParams) ret LimbKinks {
+  ret LimbKinks {
+    chance: params.limbKinkChance
+    minAngle: params.limbKinkMin
+    maxAngle: params.limbKinkMax
+  }
+}
+
+# A unit direction at right angles to `heading`, `around` radians round it
+func kinkAxis(heading: view Vec3, around: view Float) ret Vec3 {
+  var other: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
+  if Math.abs(value: heading.z) > 0.9 {
+    other = Vec3.create(x: 1.0, y: 0.0, z: 0.0)
+  }
+  let first: Vec3 = Vec3.vnorm(a: Vec3.vcross(a: heading, b: other))
+  let second: Vec3 = Vec3.vcross(a: heading, b: first)
+  ret Vec3.vadd(
+    a: Vec3.vscale(a: first, s: Math.cos(x: around))
+    b: Vec3.vscale(a: second, s: Math.sin(x: around))
+  )
 }
 
 # A limb's radius at its tip: a part of its base radius, never under the
@@ -138,6 +184,7 @@ func indexAtHeight(limb: view Limb, z: view Float) ret Int {
 # leader (1, 2), then the side branches
 func growSkeleton(params: view TreeParams) ret TreeSkeleton {
   var random: TreeRandom = createTreeRandom(seed: params.seed)
+  var kinkRandom: TreeRandom = createTreeRandom(seed: params.seed + 7777)
   var limbs: List(Limb) = List.create(Limb, cap: 3 + params.branchCount)
   let trunk: Limb = growTrunk(params: params, random: random)
   let forkPoint: Vec3 = trunk.points.copyAtDefault(index: trunk.points.length - 1)
@@ -155,9 +202,11 @@ func growSkeleton(params: view TreeParams) ret TreeSkeleton {
     tipRadius: limbTip(params: params, baseRadius: forkRadius * 0.94)
     rise: params.limbBend * 0.67
     wander: params.limbWander * 0.7
+    kink: limbKinks(params: params)
     parent: 0
     order: 1
     random: random
+    kinkRandom: kinkRandom
   ))
   limbs.add(value: growLimb(
     start: forkPoint
@@ -170,9 +219,11 @@ func growSkeleton(params: view TreeParams) ret TreeSkeleton {
     tipRadius: limbTip(params: params, baseRadius: forkRadius * 0.7)
     rise: params.limbBend * 1.5
     wander: params.limbWander * 0.8
+    kink: limbKinks(params: params)
     parent: 0
     order: 1
     random: random
+    kinkRandom: kinkRandom
   ))
   # The side branches, spread up the leaders and round the compass (a
   # golden-angle turn from one to the next), longer low down
@@ -215,9 +266,11 @@ func growSkeleton(params: view TreeParams) ret TreeSkeleton {
       tipRadius: limbTip(params: params, baseRadius: branchRadius)
       rise: params.limbBend
       wander: params.limbWander
+      kink: limbKinks(params: params)
       parent: parentIndex
       order: 2
       random: random
+      kinkRandom: kinkRandom
     ))
   }
   ret TreeSkeleton { limbs: own limbs, forkPoint: forkPoint }
