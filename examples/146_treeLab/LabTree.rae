@@ -3,6 +3,8 @@
 # bark material. The bark image is painted once into .rae/treeLab/ and
 # loaded as one of the renderer's material images.
 import Sys
+import Math
+import Image
 import Vec3
 open Scene3d
 open ecs/Entity
@@ -127,19 +129,60 @@ func addGeneratedTree(
     )
   }
   var cards: LeafCards = { floats: List.create(Float, cap: 0), count: 0 }
-  var picture: List(Float) = List.create(Float, cap: 0)
+  var pictures: List(List(Float)) = List.create(List(Float), cap: 0)
   if leaves {
     cards = leafCards(skeleton: skeleton, seed: seed)
-    picture = leafPixels()
+    pictures = leafImageLayerPixels()
+    previewLeafStamps(pictures: pictures)
   }
   log(
     "[treeLab] warmBroadleaf seed {seed}: {skeleton.limbs.length} limbs, {skeleton.clumps.length} leaf masses, {cards.count} leaf cards, {mesh.vertCount} bark vertices"
   )
   dumpLeafCards(cards: cards)
   ret LabTree {
-    leaves: createLeafPass(cards: own cards, picture: own picture)
+    leaves: createLeafPass(cards: own cards, pictures: own pictures)
     massShadow: shadowHandle
     castsMassShadow: leaves
+  }
+}
+
+# RAE_TREELAB_LEAF_PREVIEW=<path.png>: the leaf stamps side by side over
+# mid grey, to look at them (a PNG cannot keep their gaps, so the grey
+# stands in for them)
+func previewLeafStamps(pictures: view List(List(Float))) {
+  let path: String = Sys.getEnv(name: "RAE_TREELAB_LEAF_PREVIEW")
+  if path.length() is 0 {
+    ret
+  }
+  let width: Int = leafImageSize * pictures.length
+  var pixels: List(Int) = List.create(Int, cap: width * leafImageSize)
+  loop var i: Int = 0, i < width * leafImageSize, ++i {
+    pixels.add(value: 0)
+  }
+  var offset: Int = 0
+  loop let layer: view List(Float) in pictures {
+    loop var row: Int = 0, row < leafImageSize, ++row {
+      loop var column: Int = 0, column < leafImageSize, ++column {
+        let base: Int = (row * leafImageSize + column) * 4
+        let alpha: Float = layer.copyAtDefault(index: base + 3)
+        # linear tone to a rough sRGB value, over grey 0.5
+        let tone: Float = Math.pow(base: layer.copyAtDefault(index: base + 1), exp: 1.0 / 2.2)
+        let value: Int = (255.0 * (tone * alpha + 0.5 * (1.0 - alpha))).toInt()
+        pixels.set(
+          index: row * width + offset + column
+          value: 255 * 16777216 + value * 65536 + value * 256 + value
+        )
+      }
+    }
+    offset = offset + leafImageSize
+  }
+  if not Image.savePng(
+    path: path
+    pixels: pixels.data
+    width: width
+    height: leafImageSize
+  ) {
+    log("[treeLab] could not write {path}")
   }
 }
 

@@ -17,7 +17,7 @@ struct Card {
   positionSize: vec4<f32>,
   normalOcclusion: vec4<f32>,
   colourTurn: vec4<f32>,
-  extra: vec4<f32>,     // w: light through from behind (0..1)
+  extra: vec4<f32>,     // x: the leaf stamp (image layer); w: light through from behind (0..1)
 };
 // The camera's right and up (world), where it is, and the direction TO the sun
 struct LeafU {
@@ -89,7 +89,7 @@ struct FsOut {
 @fragment
 fn fs(in: VsOut) -> FsOut {
   let card = cards[in.card];
-  let picture = textureSample(leafImage, leafSampler, in.uv, 0);
+  let picture = textureSample(leafImage, leafSampler, in.uv, i32(card.extra.x + 0.5));
   if (picture.a < 0.5) { discard; }
   // the mass's normal, tilted a little toward where on the card this is, so
   // the leaves on one card do not all shade alike

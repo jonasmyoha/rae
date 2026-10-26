@@ -17,6 +17,7 @@ open treeGen/TreeParams
 open treeGen/TracedLimb
 open treeGen/Skeleton
 open treeGen/ClumpMesh
+open treeGen/LeafImage
 
 # Floats per card in the GPU buffer: 4 vec4s (see leaf_cards.wgsl's Card)
 const leafCardFloats: Int = 16
@@ -138,11 +139,16 @@ func leafCards(skeleton: view TreeSkeleton, seed: view Int) ret LeafCards {
         c: green.z * tint.z * shade
         d: nextUnit(random: random) * 6.2831853
       )
-      # w: how much light comes through the card from behind (thin at the
-      # mass's rim, none deep inside)
+      # x: which leaf stamp (LeafImage) the card shows; w: how much light
+      # comes through the card from behind (thin at the mass's rim, none
+      # deep inside)
+      let stamp: Int = Math.min(
+        a: (nextUnit(random: random) * leafImageLayers.toFloat()).toInt()
+        b: leafImageLayers - 1
+      )
       pushVec4(
         floats: floats
-        a: 0.0
+        a: stamp.toFloat()
         b: 0.0
         c: 0.0
         d: Math.pow(base: (depth - 0.5) * 2.0, exp: 2.0)

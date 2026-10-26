@@ -1,145 +1,154 @@
-# treeGen/LeafImage — the picture on every leaf card of the T02 tree
-# (docs/reference-tree-plan.md step 5): a short twig of small, pointed
-# leaflets, painted once as 512 x 512 linear RGBA pixels with see-through
-# gaps (installed with SurfaceImages.setSurfaceImagePixels: a PNG written by
-# Image.savePng is RGB only and would lose the gaps). T02's
-# leaves are small; a card carries a little spray of them, so a leaf mass of
-# cards breaks up into many separate leaves. The picture is nearly white
-# with soft tone changes: each card's own green (LeafCards) multiplies it.
-# Written new.
+# treeGen/LeafImage — the pictures on the T02 tree's leaf cards
+# (docs/reference-tree-plan.md step 5), painted the way a painter's scatter
+# brush stamps leaves: separate, simple almond-shaped leaves scattered over a
+# dab, each pointing roughly outward with a wide jitter, each sized and
+# toned a little differently, painted one over the other. Each leaf is a
+# flat dab, lighter on one side and toward its tip, no midrib and no stem:
+# a twig of paired leaflets was rejected as reading like a fern.
+#
+# Three stamps (layers), so neighbouring cards differ. Painted once as
+# 512 x 512 linear RGBA pixels with see-through gaps (installed with
+# SurfaceImages.setSurfaceImagePixels: a PNG from Image.savePng is RGB only
+# and would lose the gaps). Nearly white: each card's green (LeafCards)
+# multiplies it. Written new.
 import Math
 open SurfaceImages
+open treeGen/TreeParams
 
 const leafImageSize: Int = 512
 
-# One leaflet: where it starts, its direction (radians, 0 = +x, y down in
-# the picture), its length and its half width, in pixels
-type Leaflet {
+# The number of different stamps
+const leafImageLayers: Int = 3
+
+# One leaf of a stamp: its base, its direction (radians, 0 = +x, y down in
+# the picture), its length and half width (pixels), and its tone
+type StampLeaf {
   x: Float
   y: Float
   angle: Float
   length: Float
   halfWidth: Float
+  tone: Float
 }
 
-# The twig: a stem from the lower left to the upper right with leaflets in
-# pairs along it and one at the tip
-func leaflets() ret List(Leaflet) {
-  var result: List(Leaflet) = List.create(Leaflet, cap: 13)
-  let stemAngle: Float = -0.72
-  let pairs: Int = 6
-  loop var i: Int = 0, i < pairs, ++i {
-    let along: Float = 70.0 + i.toFloat() * 52.0
-    let x: Float = 70.0 + along * Math.cos(x: stemAngle)
-    let y: Float = 450.0 + along * Math.sin(x: stemAngle)
-    # the leaflets get a little smaller toward the tip
-    let size: Float = 1.0 - 0.06 * i.toFloat()
-    result.add(value: Leaflet {
-      x: x
-      y: y
-      angle: stemAngle - 1.0 - 0.08 * i.toFloat()
-      length: 120.0 * size
-      halfWidth: 30.0 * size
-    })
-    result.add(value: Leaflet {
-      x: x
-      y: y
-      angle: stemAngle + 1.0 + 0.08 * i.toFloat()
-      length: 116.0 * size
-      halfWidth: 29.0 * size
+# The leaves of stamp `layer`: 14 to 18 scattered over a disc round the
+# centre, like a scatter brush's dab (not on a ring, which reads as a
+# flower), each pointing outward with a wide angle jitter
+func stampLeaves(layer: view Int) ret List(StampLeaf) {
+  var random: TreeRandom = createTreeRandom(seed: 9100 + layer * 37)
+  let count: Int = 14 + (nextUnit(random: random) * 5.0).toInt()
+  var result: List(StampLeaf) = List.create(StampLeaf, cap: count)
+  let centre: Float = leafImageSize.toFloat() * 0.5
+  loop var i: Int = 0, i < count, ++i {
+    # the leaf's middle anywhere in the disc (evenly over its area)
+    let around: Float = nextUnit(random: random) * 6.2831853
+    let reach: Float = 150.0 * Math.sqrt(x: nextUnit(random: random))
+    let middleX: Float = centre + reach * Math.cos(x: around)
+    let middleY: Float = centre + reach * Math.sin(x: around)
+    let angle: Float = around + nextBetween(random: random, low: -1.0, high: 1.0)
+    let length: Float = nextBetween(random: random, low: 85.0, high: 135.0)
+    result.add(value: StampLeaf {
+      x: middleX - 0.5 * length * Math.cos(x: angle)
+      y: middleY - 0.5 * length * Math.sin(x: angle)
+      angle: angle
+      length: length
+      halfWidth: length * nextBetween(random: random, low: 0.24, high: 0.33)
+      tone: nextBetween(random: random, low: 0.7, high: 1.0)
     })
   }
-  let tipAlong: Float = 70.0 + pairs.toFloat() * 52.0
-  result.add(value: Leaflet {
-    x: 70.0 + tipAlong * Math.cos(x: stemAngle)
-    y: 450.0 + tipAlong * Math.sin(x: stemAngle)
-    angle: stemAngle
-    length: 96.0
-    halfWidth: 25.0
-  })
   ret result
 }
 
-# How much of pixel (x, y) a leaflet covers (0..1, soft at the edge), and
-# its tone there: lighter along the midrib, darker toward the edge and base
-func leafletCover(leaflet: view Leaflet, x: view Float, y: view Float) ret Float {
-  let dx: Float = x - leaflet.x
-  let dy: Float = y - leaflet.y
-  let along: Float = dx * Math.cos(x: leaflet.angle) + dy * Math.sin(x: leaflet.angle)
-  let across: Float = -dx * Math.sin(x: leaflet.angle) + dy * Math.cos(x: leaflet.angle)
-  if along <= 0.0 or along >= leaflet.length {
+# How much of the pixel the leaf covers (0..1, soft at the edge): an almond,
+# widest a little below the middle, rounded at the base, pointed at the tip
+func leafCover(leaf: view StampLeaf, along: view Float, across: view Float) ret Float {
+  if along <= 0.0 or along >= leaf.length {
     ret 0.0
   }
-  let t: Float = along / leaflet.length
-  # widest a third of the way out, pointed at both ends
-  let width: Float = leaflet.halfWidth * Math.pow(
-    base: Math.sin(x: 3.1415927 * Math.pow(base: t, exp: 0.75))
-    exp: 0.9
+  let t: Float = along / leaf.length
+  let width: Float = leaf.halfWidth * Math.pow(
+    base: Math.sin(x: 3.1415927 * Math.pow(base: t, exp: 0.8))
+    exp: 0.75
   )
   ret Math.clamp(val: (width - Math.abs(value: across)) / 1.5 + 0.5, low: 0.0, high: 1.0)
 }
 
-func leafletTone(leaflet: view Leaflet, x: view Float, y: view Float) ret Float {
-  let dx: Float = x - leaflet.x
-  let dy: Float = y - leaflet.y
-  let along: Float = dx * Math.cos(x: leaflet.angle) + dy * Math.sin(x: leaflet.angle)
-  let across: Float = -dx * Math.sin(x: leaflet.angle) + dy * Math.cos(x: leaflet.angle)
-  let side: Float = Math.clamp(
-    val: Math.abs(value: across) / leaflet.halfWidth
-    low: 0.0
-    high: 1.0
-  )
-  let t: Float = Math.clamp(val: along / leaflet.length, low: 0.0, high: 1.0)
-  # a thin light midrib, the half on one side of it a little darker (the
-  # leaflet folds along it)
-  let midrib: Float = Math.clamp(val: 1.0 - Math.abs(value: across) / 2.5, low: 0.0, high: 1.0)
-  var tone: Float = 0.9 - 0.18 * side * side + 0.08 * t
-  if across < 0.0 {
-    tone = tone * 0.88
-  }
-  ret Math.clamp(val: tone + 0.12 * midrib, low: 0.0, high: 1.0)
+# The leaf's painted tone there: its own tone, a soft change from its light
+# side to its shaded side, darker toward the base
+func leafShade(leaf: view StampLeaf, along: view Float, across: view Float) ret Float {
+  let t: Float = Math.clamp(val: along / leaf.length, low: 0.0, high: 1.0)
+  let rise: Float = Math.clamp(val: t / 0.45, low: 0.0, high: 1.0)
+  let side: Float = Math.clamp(val: 0.5 + 0.5 * across / leaf.halfWidth, low: 0.0, high: 1.0)
+  let tone: Float = leaf.tone * (0.8 + 0.2 * rise * rise * (3.0 - 2.0 * rise)) * (1.0 - 0.2 * side)
+  ret Math.clamp(val: tone, low: 0.0, high: 1.0)
 }
 
-# The stem: a thin line along the twig
-func stemCover(x: view Float, y: view Float) ret Float {
-  let stemAngle: Float = -0.72
-  let dx: Float = x - 70.0
-  let dy: Float = y - 450.0
-  let along: Float = dx * Math.cos(x: stemAngle) + dy * Math.sin(x: stemAngle)
-  let across: Float = -dx * Math.sin(x: stemAngle) + dy * Math.cos(x: stemAngle)
-  if along < -20.0 or along > 400.0 {
-    ret 0.0
+# Stamp `layer`'s pixels: linear RGBA floats, row by row from the top. The
+# leaves are painted in order, each over the ones before it, each visiting
+# only the pixels of its own bounding box.
+func leafLayerPixels(layer: view Int) ret List(Float) {
+  let leaves: List(StampLeaf) = stampLeaves(layer: layer)
+  let count: Int = leafImageSize * leafImageSize
+  var tones: List(Float) = List.create(Float, cap: count)
+  var alphas: List(Float) = List.create(Float, cap: count)
+  loop var i: Int = 0, i < count, ++i {
+    tones.add(value: 0.0)
+    alphas.add(value: 0.0)
   }
-  ret Math.clamp(val: (3.0 - Math.abs(value: across)) / 1.5 + 0.5, low: 0.0, high: 1.0)
-}
-
-# The picture's pixels: linear RGBA floats, row by row from the top
-func leafPixels() ret List(Float) {
-  let all: List(Leaflet) = leaflets()
-  var pixels: List(Float) = List.create(Float, cap: leafImageSize * leafImageSize * 4)
-  loop var row: Int = 0, row < leafImageSize, ++row {
-    loop var column: Int = 0, column < leafImageSize, ++column {
-      let x: Float = column.toFloat() + 0.5
-      let y: Float = row.toFloat() + 0.5
-      var cover: Float = 0.0
-      var tone: Float = 0.0
-      loop let leaflet: view Leaflet in all {
-        let here: Float = leafletCover(leaflet: leaflet, x: x, y: y)
-        if here > cover {
-          cover = here
-          tone = leafletTone(leaflet: leaflet, x: x, y: y)
+  loop let leaf: view StampLeaf in leaves {
+    let cosine: Float = Math.cos(x: leaf.angle)
+    let sine: Float = Math.sin(x: leaf.angle)
+    let tipX: Float = leaf.x + leaf.length * cosine
+    let tipY: Float = leaf.y + leaf.length * sine
+    let left: Int = Math.max(a: 0, b: (Math.min(a: leaf.x, b: tipX) - leaf.halfWidth - 2.0).toInt())
+    let right: Int = Math.min(
+      a: leafImageSize - 1
+      b: (Math.max(a: leaf.x, b: tipX) + leaf.halfWidth + 2.0).toInt()
+    )
+    let top: Int = Math.max(a: 0, b: (Math.min(a: leaf.y, b: tipY) - leaf.halfWidth - 2.0).toInt())
+    let bottom: Int = Math.min(
+      a: leafImageSize - 1
+      b: (Math.max(a: leaf.y, b: tipY) + leaf.halfWidth + 2.0).toInt()
+    )
+    loop var row: Int = top, row <= bottom, ++row {
+      loop var column: Int = left, column <= right, ++column {
+        let dx: Float = column.toFloat() + 0.5 - leaf.x
+        let dy: Float = row.toFloat() + 0.5 - leaf.y
+        let along: Float = dx * cosine + dy * sine
+        let across: Float = -dx * sine + dy * cosine
+        let cover: Float = leafCover(leaf: leaf, along: along, across: across)
+        if cover > 0.0 {
+          # this leaf over what is already painted
+          let index: Int = row * leafImageSize + column
+          let below: Float = tones.copyAtDefault(index: index)
+          tones.set(
+            index: index
+            value: leafShade(leaf: leaf, along: along, across: across) * cover + below * (1.0 - cover)
+          )
+          alphas.set(
+            index: index
+            value: cover + alphas.copyAtDefault(index: index) * (1.0 - cover)
+          )
         }
       }
-      let stem: Float = stemCover(x: x, y: y)
-      if stem > cover {
-        cover = stem
-        tone = 0.55
-      }
-      pixels.add(value: surfaceLinear(value: tone * 0.96))
-      pixels.add(value: surfaceLinear(value: tone))
-      pixels.add(value: surfaceLinear(value: tone * 0.86))
-      pixels.add(value: cover)
     }
   }
+  var pixels: List(Float) = List.create(Float, cap: count * 4)
+  loop var i: Int = 0, i < count, ++i {
+    let tone: Float = tones.copyAtDefault(index: i)
+    pixels.add(value: surfaceLinear(value: tone * 0.97))
+    pixels.add(value: surfaceLinear(value: tone))
+    pixels.add(value: surfaceLinear(value: tone * 0.88))
+    pixels.add(value: alphas.copyAtDefault(index: i))
+  }
   ret pixels
+}
+
+# Every stamp, one list of pixels per layer
+func leafImageLayerPixels() ret List(List(Float)) {
+  var layers: List(List(Float)) = List.create(List(Float), cap: leafImageLayers)
+  loop var layer: Int = 0, layer < leafImageLayers, ++layer {
+    layers.add(value: leafLayerPixels(layer: layer))
+  }
+  ret layers
 }
