@@ -5,6 +5,8 @@
 # static and skinned bind groups and the pipeline specs. Gbuffer's frame API
 # calls these each begin; nothing here is app-facing.
 import Math
+import Display
+import Gpu2d
 import String
 open SurfaceImages
 open FoliagePipeline
@@ -141,7 +143,7 @@ func ensureTargets(cache: mod GbufferCache, resources: mod GpuResources) {
   )
   var dynamicScale: Float = cache.dynamicScale
   if cache.fullResolution {
-    ceiling = 1.0
+    ceiling = fullResolutionScale(cache: cache)
     dynamicScale = 1.0
   }
   cache.sceneScale = effectiveRenderScale(dynamicScale: dynamicScale, ceiling: ceiling)
@@ -297,4 +299,23 @@ func ensurePipelines(cache: mod GbufferCache, resources: mod GpuResources) {
     stride: 80
     attributes: skinAttributes
   )
+}
+
+# The full-resolution scale: the screen's own pixels, pixel for pixel. The
+# drawable can hold more than the screen shows (a scaled mode on an external
+# monitor: macOS draws at 2 pixels per point and shrinks the image to the
+# panel's 1.28), so the scale is the panel's pixels per point over the
+# drawable's, never above 1. The panel is read again every 120 frames (the
+# window may move to another monitor); unknown keeps 1.
+func fullResolutionScale(cache: mod GbufferCache) ret Float {
+  if cache.panelCheckFrames <= 0 {
+    cache.panelPixelsPerPoint = Display.physicalPixelsPerPoint()
+    cache.panelCheckFrames = 120
+  }
+  cache.panelCheckFrames = cache.panelCheckFrames - 1
+  let drawablePerPoint: Float = Gpu2d.dpr()
+  if cache.panelPixelsPerPoint <= 0.0 or drawablePerPoint <= 0.0 {
+    ret 1.0
+  }
+  ret Math.min(a: 1.0, b: cache.panelPixelsPerPoint / drawablePerPoint)
 }
