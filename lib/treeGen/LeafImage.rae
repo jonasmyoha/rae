@@ -91,8 +91,11 @@ func leafLayerPixels(layer: view Int) ret List(Float) {
   let count: Int = leafImageSize * leafImageSize
   var tones: List(Float) = List.create(Float, cap: count)
   var alphas: List(Float) = List.create(Float, cap: count)
+  # the gaps get a light leaf tone, not black: the smaller mip levels
+  # average them into the leaves' edges, and black there showed as dark
+  # fringes round every crown seen from afar
   loop var i: Int = 0, i < count, ++i {
-    tones.add(value: 0.0)
+    tones.add(value: 0.8)
     alphas.add(value: 0.0)
   }
   loop let leaf: view StampLeaf in leaves {
