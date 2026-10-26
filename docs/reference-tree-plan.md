@@ -36,7 +36,7 @@ What the tree in T02 has (the checklist for every step):
 
 | # | Feature | In T02 |
 |---|---|---|
-| 1 | Trunk | One warm orange-brown trunk, about 1/26 of the tree's height thick at the base, thinning to 61% of that at the fork; straight to 40% of the height, then bowing gently to the left (the trace of T02: looks-development `treeReference/traces/T02.js`, the target since step 3 round 12) |
+| 1 | Trunk | One warm orange-brown trunk, about 1/26 of the tree's height thick at the base, thinning to 61% of that at the fork; straight to 40% of the height, then bowing gently to the left (the trace of T02: looks-development `treeReference/traces/T02.js`, the target since step 3 round 12; since round 13 the trace IS the tree's centre lines, lib/treeGen/TracedT02.rae, made by examples/146_treeLab/traceTree.py, and compare.sh's overlay-near.png shows them over T02 and the render) |
 | 2 | Fork | At about 79% of the height (the trace) the trunk splits into two unequal leaders, both leaning right: the main one about 9 degrees, the thinner second one about 28 |
 | 3 | Branches | The 4 short, slim side branches the trace shows, all in the top third: low right off the trunk (66%, 40 degrees), low left (70%, 38 degrees), high left off the main leader (81%, 48 degrees), a top one up left (89%, 20 degrees); nearly even in thickness to the tip, the low ones flattening a little toward it |
 | 4 | Crown start | The lowest clump at about 50% of the height; nothing below it but trunk |

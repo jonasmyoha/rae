@@ -38,12 +38,33 @@ func labBarkLayer(renderer: mod DeferredRenderer) ret Int {
   ret rendererLoadSurfaceImage(renderer: renderer, path: labBarkImagePath)
 }
 
+# RAE_TREELAB_DUMP=<path>: write the tree's centre lines there, for
+# traceTree.py's overlay (a `limb` line, then `x y z radius` per point)
+func dumpSkeleton(skeleton: view TreeSkeleton) {
+  let path: String = Sys.getEnv(name: "RAE_TREELAB_DUMP")
+  if path.length() is 0 {
+    ret
+  }
+  var text: String = ""
+  loop let limb: view Limb in skeleton.limbs {
+    text = "{text}limb\n"
+    loop var i: Int = 0, i < limb.points.length, ++i {
+      let point: Vec3 = limb.points.copyAtDefault(index: i)
+      text = "{text}{point.x} {point.y} {point.z} {limb.radii.copyAtDefault(index: i)}\n"
+    }
+  }
+  if not Sys.writeFile(path: path, content: text) {
+    log("[treeLab] could not write {path}")
+  }
+}
+
 # The generated tree for `seed`, standing at the origin. Its right (+x) is
 # the picture's right, as in the trace of T02 it is built from.
 func addGeneratedTree(world: mod World3d, renderer: mod DeferredRenderer, seed: view Int) {
   let params: TreeParams = warmBroadleafParams(seed: seed)
   let skeleton: TreeSkeleton = growSkeleton(params: params)
   let mesh: MeshData = barkMesh(skeleton: skeleton)
+  dumpSkeleton(skeleton: skeleton)
   let handle: MeshHandle = uploadMesh(
     renderer: renderer
     verts: mesh.verts
