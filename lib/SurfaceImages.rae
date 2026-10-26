@@ -122,9 +122,62 @@ func setSurfaceImages(
     }
     decoded.add(value: own linear)
   }
+  ret uploadSurfaceImages(
+    images: images
+    resources: resources
+    paths: paths
+    decoded: own decoded
+    size: size
+  )
+}
+
+# Install pictures made in memory (one list per layer: `size` x `size`
+# pixels of linear RGBA floats, alpha 0..1), e.g. a picture painted in Rae
+# with see-through parts, which a PNG written by Image.savePng (RGB only)
+# cannot carry. `size` is a power of two.
+func setSurfaceImagePixels(
+  images: mod SurfaceImages
+  resources: mod GpuResources
+  layers: view List(List(Float))
+  size: view Int
+) ret Bool {
+  if layers.length > 16 {
+    log("surface images support at most 16 layers per renderer")
+    ret false
+  }
+  var decoded: List(List(Float)) = List.create(List(Float), cap: layers.length)
+  loop let layer: view List(Float) in layers {
+    if layer.length is not size * size * 4 {
+      log("a surface image layer must have {size} x {size} RGBA pixels")
+      ret false
+    }
+    decoded.add(value: layer)
+  }
+  ret uploadSurfaceImages(
+    images: images
+    resources: resources
+    paths: List.create(String, cap: 0)
+    decoded: own decoded
+    size: size
+  )
+}
+
+# The texture array, its mip levels, view and sampler for decoded layers
+func uploadSurfaceImages(
+  images: mod SurfaceImages
+  resources: mod GpuResources
+  paths: view List(String)
+  decoded: own List(List(Float))
+  size: view Int
+) ret Bool {
   var imageSize: Int = size
-  var levels: Int = 10
-  if paths.length is 0 {
+  var levels: Int = 1
+  var side: Int = size
+  loop side > 1 {
+    side = side / 2
+    levels = levels + 1
+  }
+  if decoded.length is 0 {
     imageSize = 1
     levels = 1
     let white: List(Float) = { 1.0, 1.0, 1.0, 1.0 }

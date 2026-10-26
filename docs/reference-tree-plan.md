@@ -182,6 +182,16 @@ Done when: close up and at T02's framing, the clumps have T02's lit top, dark
 underside and ragged edge (features 6, 7), and the measured light-to-dark
 range is close to T02's.
 
+Round 1 (2026-10-26): `lib/treeGen/LeafCards.rae`, `LeafImage.rae`,
+`LeafPass.rae` and `leaf_cards.wgsl` (its own pass in the G-buffer, not the
+old foliage path: `MeshData.leafCards` is read only by `FoliageMesh.rae`,
+on the do-not-import list). The picture is painted in Rae and installed from
+memory (`SurfaceImages.setSurfaceImagePixels`), because a PNG from
+`Image.savePng` cannot keep the see-through gaps. Measured inside the traced
+masses (`traceTree.py overlay`, `measures-near.txt` in the round): brightness
+10th-90th percentile 60-129 on the render, 39-169 on T02; overdraw about 19
+card squares per covered pixel (1,523 cards).
+
 ### Step 6 — Variations: from the traced tree to a generator
 
 The tree so far is T02 by hand: traced wood and traced masses. This step

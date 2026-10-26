@@ -14,8 +14,20 @@ open treeGen/Skeleton
 open treeGen/BarkMesh
 open treeGen/Bark
 open treeGen/ClumpMesh
+open treeGen/LeafImage
+open treeGen/LeafCards
+open treeGen/LeafPass
 
 const labBarkImagePath: String = ".rae/treeLab/warmBark.png"
+
+# What the lab keeps of its generated tree: the leaves to draw in the
+# G-buffer pass, and the solid leaf masses (shrunk to 75%) that cast the
+# crown's shadow
+type LabTree {
+  leaves: LeafPass
+  massShadow: MeshHandle
+  castsMassShadow: Bool
+}
 
 # RAE_TREELAB_SEED, or 1
 func labTreeSeed() ret Int {
@@ -60,8 +72,16 @@ func dumpSkeleton(skeleton: view TreeSkeleton) {
 }
 
 # The generated tree for `seed`, standing at the origin. Its right (+x) is
-# the picture's right, as in the trace of T02 it is built from.
-func addGeneratedTree(world: mod World3d, renderer: mod DeferredRenderer, seed: view Int) {
+# the picture's right, as in the trace of T02 it is built from. Its leaf
+# masses are filled with leaf cards (docs/reference-tree-plan.md step 5);
+# the solid masses still cast the crown's shadow.
+#   RAE_TREELAB_LEAVES=off  the masses as plain solids (step 4's look)
+#   RAE_TREELAB_CLUMPS=off  the bare wood
+func addGeneratedTree(
+  world: mod World3d
+  renderer: mod DeferredRenderer
+  seed: view Int
+) ret LabTree {
   let params: TreeParams = warmBroadleafParams(seed: seed)
   let skeleton: TreeSkeleton = growSkeleton(params: params)
   let mesh: MeshData = barkMesh(skeleton: skeleton)
@@ -80,16 +100,23 @@ func addGeneratedTree(world: mod World3d, renderer: mod DeferredRenderer, seed: 
     rotation: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
     scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
   )
-  # the leaf masses as plain solids, so only their layout is judged
-  # (docs/reference-tree-plan.md step 4); RAE_TREELAB_CLUMPS=off: bare wood
-  if Sys.getEnv(name: "RAE_TREELAB_CLUMPS") is not "off" {
-    let clumps: MeshData = clumpMesh(skeleton: skeleton)
-    let clumpHandle: MeshHandle = uploadMesh(
-      renderer: renderer
-      verts: clumps.verts
-      vertCount: clumps.vertCount
-      indices: clumps.indices
-    )
+  let masses: Bool = Sys.getEnv(name: "RAE_TREELAB_CLUMPS") is not "off"
+  let leaves: Bool = masses and Sys.getEnv(name: "RAE_TREELAB_LEAVES") is not "off"
+  let clumps: MeshData = clumpMesh(skeleton: skeleton)
+  let shadowMasses: MeshData = clumpShadowMesh(skeleton: skeleton, scale: 0.75)
+  let shadowHandle: MeshHandle = uploadMesh(
+    renderer: renderer
+    verts: shadowMasses.verts
+    vertCount: shadowMasses.vertCount
+    indices: shadowMasses.indices
+  )
+  let clumpHandle: MeshHandle = uploadMesh(
+    renderer: renderer
+    verts: clumps.verts
+    vertCount: clumps.vertCount
+    indices: clumps.indices
+  )
+  if masses and not leaves {
     let unusedClumpsEntityId: EntityId = world3dAddMeshInstance(
       world: world
       mesh: clumpHandle
@@ -99,9 +126,40 @@ func addGeneratedTree(world: mod World3d, renderer: mod DeferredRenderer, seed: 
       scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
     )
   }
+  var cards: LeafCards = { floats: List.create(Float, cap: 0), count: 0 }
+  var picture: List(Float) = List.create(Float, cap: 0)
+  if leaves {
+    cards = leafCards(skeleton: skeleton, seed: seed)
+    picture = leafPixels()
+  }
   log(
-    "[treeLab] warmBroadleaf seed {seed}: {skeleton.limbs.length} limbs, {skeleton.clumps.length} leaf masses, {mesh.vertCount} bark vertices"
+    "[treeLab] warmBroadleaf seed {seed}: {skeleton.limbs.length} limbs, {skeleton.clumps.length} leaf masses, {cards.count} leaf cards, {mesh.vertCount} bark vertices"
   )
+  dumpLeafCards(cards: cards)
+  ret LabTree {
+    leaves: createLeafPass(cards: own cards, picture: own picture)
+    massShadow: shadowHandle
+    castsMassShadow: leaves
+  }
+}
+
+# RAE_TREELAB_CARDS=<path>: write the leaf cards there (x y z size per card),
+# for traceTree.py's overdraw measure
+func dumpLeafCards(cards: view LeafCards) {
+  let path: String = Sys.getEnv(name: "RAE_TREELAB_CARDS")
+  if path.length() is 0 {
+    ret
+  }
+  var text: String = ""
+  loop var i: Int = 0, i < cards.count, ++i {
+    let base: Int = i * leafCardFloats
+    text = "{text}{cards.floats.copyAtDefault(index: base)} {cards.floats.copyAtDefault(
+      index: base + 1
+    )} {cards.floats.copyAtDefault(index: base + 2)} {cards.floats.copyAtDefault(index: base + 3)}\n"
+  }
+  if not Sys.writeFile(path: path, content: text) {
+    log("[treeLab] could not write {path}")
+  }
 }
 
 # The leaf masses' plain material for the layout step: a flat, matte

@@ -112,3 +112,21 @@ func clumpMesh(skeleton: view TreeSkeleton) ret MeshData {
   }
   ret mesh
 }
+
+# The masses shrunk to `scale` about their own centres: the crown's shadow
+# caster under leaf cards (the cards fill each mass from half its radius
+# out, so a full-size solid would shade almost every leaf)
+func clumpShadowMesh(skeleton: view TreeSkeleton, scale: view Float) ret MeshData {
+  let perClump: Int = (clumpRings + 1) * (clumpSegments + 1)
+  var mesh: MeshData = {
+    verts: List.create(Float, cap: skeleton.clumps.length * perClump * 8)
+    indices: List.create(Int, cap: skeleton.clumps.length * clumpRings * clumpSegments * 6)
+    vertCount: 0
+  }
+  loop let clump: view TracedClump in skeleton.clumps {
+    var smaller: TracedClump = clump
+    smaller.radii = Vec3.vscale(a: clump.radii, s: scale)
+    addClump(mesh: mesh, clump: smaller)
+  }
+  ret mesh
+}

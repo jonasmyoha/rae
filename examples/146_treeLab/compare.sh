@@ -36,7 +36,7 @@ TMP="$(mktemp -d -t rae_treelab_XXXXXX)"
 trap 'rm -rf "$TMP"' EXIT
 
 # 1. The render, from the chosen camera
-RAE_TREELAB_DUMP="$TMP/skeleton.txt" RAE_TREELAB_CAMERA="$CAMERA" RAE_SDL_HEADLESS_MS=4000 RAE_GPU2D_SCREENSHOT="$TMP/render.bmp" \
+RAE_TREELAB_DUMP="$TMP/skeleton.txt" RAE_TREELAB_CARDS="$TMP/cards.txt" RAE_TREELAB_CAMERA="$CAMERA" RAE_SDL_HEADLESS_MS=4000 RAE_GPU2D_SCREENSHOT="$TMP/render.bmp" \
   perl -e 'alarm shift; exec @ARGV' 240 compiler/bin/rae run examples/146_treeLab/Main.rae \
   > "$TMP/run.log" 2>&1
 [ -f "$TMP/render.bmp" ] || { echo "error: no render (see the run's log below)" >&2; tail -20 "$TMP/run.log" >&2; exit 1; }
@@ -92,7 +92,7 @@ echo "wrote $OUT (left: T02, right: camera '$CAMERA')"
 if [ "$CAMERA" = near ] && [ -f "$TRACE" ] && [ -f "$TMP/skeleton.txt" ]; then
   sips -s format bmp "$T02" --out "$TMP/t02.bmp" > /dev/null
   python3 examples/146_treeLab/traceTree.py overlay "$TRACE" "$TMP/t02.bmp" "$TMP/render.bmp" \
-    "$TMP/skeleton.txt" "$TMP/overlay.bmp" \
+    "$TMP/skeleton.txt" "$TMP/overlay.bmp" "$TMP/cards.txt" \
     && sips -s format png "$TMP/overlay.bmp" --out "$OVERLAY" > /dev/null \
     && echo "wrote $OVERLAY (T02 + trace | render + trace + generated centre lines | both blended)"
 fi
@@ -101,5 +101,6 @@ if [ -n "${TREELAB_ITERATION:-}" ]; then
   mkdir -p "$ROUND"
   cp "$OUT" "$ROUND/compare-$CAMERA.png"
   [ "$CAMERA" = near ] && [ -f "$OVERLAY" ] && cp "$OVERLAY" "$ROUND/overlay-near.png"
+  [ "$CAMERA" = near ] && [ -f "$TMP/measures.txt" ] && cp "$TMP/measures.txt" "$ROUND/measures-near.txt"
   echo "kept $ROUND/compare-$CAMERA.png (add the round to treeReference/rounds.js and commit looks-development)"
 fi

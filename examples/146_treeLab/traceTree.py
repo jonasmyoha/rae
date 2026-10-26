@@ -10,12 +10,15 @@ generated tree (docs/reference-tree-plan.md step 3).
       tree's foot, its top dot at the tree's height), so the move and scale
       that `alignment` still applies is almost none.
 
-  traceTree.py overlay <trace.js> <t02.bmp> <render.bmp> <skeleton.txt> <out.bmp>
+  traceTree.py overlay <trace.js> <t02.bmp> <render.bmp> <skeleton.txt> <out.bmp> [cards.txt]
       Three panels at T02's proportions: T02 with the trace (magenta, its
       leaf masses yellow); the render with the trace moved the same way and
       the generated tree's real centre lines (cyan, from the lab's
       RAE_TREELAB_DUMP); and the two pictures blended half and half, with
-      all the lines on top.
+      all the lines on top. It also prints (and writes beside <out> as
+      measures.txt) the crown's 10th-90th percentile brightness inside the
+      traced leaf masses on T02 and on the render, and, with the lab's
+      leaf cards (RAE_TREELAB_CARDS), their overdraw.
 
 Coordinates: the trace is in crop pixels (330 x 570, y down). The render is
 compared through its middle strip in T02's proportions (compare.sh). The
@@ -23,6 +26,7 @@ near camera's numbers are labCamera's in Main.rae.
 """
 import json
 import math
+import os
 import struct
 import subprocess
 import sys
@@ -371,7 +375,70 @@ def read_skeleton(path):
     return limbs
 
 
-def overlay(trace_path, t02_path, render_path, skeleton_path, out_path):
+def inside_masses(trace, point):
+    """Whether a crop pixel is inside any traced leaf mass."""
+    for clump in trace.get("clumps", []):
+        angle = math.radians(clump["angle"])
+        dx, dy = point[0] - clump["x"], point[1] - clump["y"]
+        along = dx * math.cos(angle) + dy * math.sin(angle)
+        across = -dx * math.sin(angle) + dy * math.cos(angle)
+        if (along / clump["rx"]) ** 2 + (across / clump["ry"]) ** 2 <= 1.0:
+            return True
+    return False
+
+
+def luminance(colour_bgr):
+    b, g, r = colour_bgr
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def percentiles(values):
+    values = sorted(values)
+    if not values:
+        return (0.0, 0.0)
+    return (values[len(values) // 10], values[len(values) * 9 // 10])
+
+
+def crown_brightness(trace, t02, render, place):
+    """The 10th and 90th percentile brightness (0-255, of the picture's
+    sRGB values) inside the traced leaf masses, on T02 and on the render
+    (the masses mapped onto it as the tree is)."""
+    on_t02, on_render = [], []
+    for y in range(0, int(CROP_H)):
+        for x in range(0, int(CROP_W)):
+            if not inside_masses(trace, (x + 0.5, y + 0.5)):
+                continue
+            on_t02.append(luminance(sample(t02, (x + 0.5) / CROP_W, (y + 0.5) / CROP_H)))
+            picture = place((x + 0.5, y + 0.5))
+            on_render.append(luminance(sample(render, picture[0] / ASPECT, picture[1])))
+    return percentiles(on_t02), percentiles(on_render)
+
+
+def card_overdraw(cards_path):
+    """How many card squares cover each pixel the cards cover, on average:
+    the sum of the cards' squares as projected by the near camera over the
+    area they cover together (measured on a grid of 1/600 of the picture's
+    height). The square is the cost, as the shader runs on all of it before
+    cutting the picture's gaps away."""
+    cards = [tuple(float(v) for v in line.split()) for line in open(cards_path) if line.strip()]
+    if not cards:
+        return 0, 0.0, 0.0
+    grid = 600
+    covered = set()
+    total = 0.0
+    for x, y, z, size in cards:
+        d = sub((x, y, z), EYE)
+        depth = dot(d, FORWARD)
+        centre = project((x, y, z))
+        half = size / 2.0 / (depth * 2.0 * TAN)       # in picture heights
+        total += (2.0 * half * grid) ** 2
+        for gx in range(int((centre[0] - half) * grid), int((centre[0] + half) * grid) + 1):
+            for gy in range(int((centre[1] - half) * grid), int((centre[1] + half) * grid) + 1):
+                covered.add((gx, gy))
+    return len(cards), total / max(len(covered), 1), len(covered) / float(grid * grid)
+
+
+def overlay(trace_path, t02_path, render_path, skeleton_path, out_path, cards_path=None):
     trace = read_trace(trace_path)
     t02 = read_bmp(t02_path)
     render = read_bmp(render_path)
@@ -423,6 +490,17 @@ def overlay(trace_path, t02_path, render_path, skeleton_path, out_path):
         for limb in dots:
             for at in limb:
                 draw_dot(rows, at, bgr(MAGENTA))
+    (t02_low, t02_high), (render_low, render_high) = crown_brightness(trace, t02, render, place)
+    lines = [
+        "crown brightness inside the traced leaf masses, 10th-90th percentile (0-255):",
+        "  T02    %.0f - %.0f (range %.0f)" % (t02_low, t02_high, t02_high - t02_low),
+        "  render %.0f - %.0f (range %.0f)" % (render_low, render_high, render_high - render_low),
+    ]
+    if cards_path:
+        count, depth, area = card_overdraw(cards_path)
+        lines.append("leaf cards: %d; overdraw %.1f card squares per covered pixel; they cover %.1f%% of the picture's height squared" % (count, depth, area * 100.0))
+    print("\n".join(lines))
+    open(os.path.join(os.path.dirname(out_path) or ".", "measures.txt"), "w").write("\n".join(lines) + "\n")
     gap = 16
     width = PANEL_W * 3 + gap * 2
     rows = [left[y] + [(22, 25, 24)] * gap + middle[y] + [(22, 25, 24)] * gap + right[y] for y in range(PANEL_H)]
@@ -436,7 +514,7 @@ if __name__ == "__main__":
         subprocess.run(["compiler/bin/rae", "format", "lib/treeGen/TracedT02.rae"], check=True,
                        stdout=subprocess.DEVNULL)
         print("wrote lib/treeGen/TracedT02.rae")
-    elif len(sys.argv) == 7 and sys.argv[1] == "overlay":
+    elif len(sys.argv) in (7, 8) and sys.argv[1] == "overlay":
         overlay(*sys.argv[2:])
     else:
         sys.exit(__doc__)

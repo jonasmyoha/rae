@@ -1,0 +1,248 @@
+# treeGen/LeafPass — draws a tree's leaf cards (LeafCards) into the G-buffer
+# with the leaf shader (leaf_cards.wgsl): one instanced draw of a 6-vertex
+# camera-facing square per card, no vertex buffer, the cards in a storage
+# buffer, the leaf picture (LeafImage) in a one-layer image array. It runs inside the
+# G-buffer pass, after the scene's meshes (as GrassCompute's grassDraw
+# does), and writes depth, so the leaves hide each other and the wood
+# behind them (docs/reference-tree-plan.md step 5). Written new.
+import Vec3
+open Scene3d
+open webgpu/Webgpu
+open webgpu/WebgpuEnums
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuRender
+open gpu/GpuRenderPass
+open gpu/GpuArgs
+open gpu/GpuIds
+open SurfaceImages
+open Gbuffer
+open GrassCompute
+open treeGen/LeafCards
+open treeGen/LeafImage
+
+# The leaf uniform's size: four vec4s (leaf_cards.wgsl's LeafU)
+const leafUniformBytes: Int = 64
+
+type LeafPass {
+  cards: LeafCards
+  # the leaf picture: leafImageSize x leafImageSize linear RGBA pixels
+  picture: List(Float)
+  made: Bool
+  drawBindMade: Bool
+  images: SurfaceImages
+  pipeline: RenderPipelineId
+  cardBuffer: BufferId
+  uniform: BufferId
+  uniformArgs: ArgWriter
+  frameUniform: ExternalId
+  drawBind: BindGroupId
+}
+
+# A pass for `cards`, with the leaf picture (LeafImage.leafPixels)
+func createLeafPass(cards: own LeafCards, picture: own List(Float)) ret LeafPass {
+  ret LeafPass {
+    cards: own cards
+    picture: own picture
+    made: false
+    drawBindMade: false
+    images: {}
+    pipeline: noRenderPipelineId()
+    cardBuffer: noBufferId()
+    uniform: noBufferId()
+    uniformArgs: createArgs(uniform: true)
+    frameUniform: noExternalId()
+    drawBind: noBindGroupId()
+  }
+}
+
+# The GPU objects, made on the first draw: the picture, the cards' buffer,
+# the uniform and the pipeline
+func ensureLeafGpu(leaves: mod LeafPass, resources: mod GpuResources) {
+  if leaves.made {
+    ret
+  }
+  leaves.made = true
+  if leaves.cards.count is 0 {
+    ret
+  }
+  var layers: List(List(Float)) = List.create(List(Float), cap: 1)
+  layers.add(value: leaves.picture)
+  if not setSurfaceImagePixels(
+    images: leaves.images
+    resources: resources
+    layers: layers
+    size: leafImageSize
+  ) {
+    log("[leaves] the leaf picture could not be installed")
+    ret
+  }
+  if let cardBuffer: BufferId = createBuffer(
+    resources: resources
+    size: leaves.cards.floats.length * 4
+    usage: WGPUBufferUsage_Storage + WGPUBufferUsage_CopyDst
+  ) {
+    leaves.cardBuffer = cardBuffer
+    var writer: ArgWriter = createArgs(uniform: false)
+    loop let value: view Float in leaves.cards.floats {
+      pushF32(writer: writer, value: value)
+    }
+    let uploaded: Bool = uploadArgs(
+      writer: writer
+      resources: resources
+      buffer: cardBuffer
+      offset: 0
+    )
+  }
+  if let uniform: BufferId = createBuffer(
+    resources: resources
+    size: leafUniformBytes
+    usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst
+  ) {
+    leaves.uniform = uniform
+  }
+  let leafShader: Shader = shader(files: ["lib/treeGen/leaf_cards.wgsl"])
+  if let pipeline: RenderPipelineId = createRenderPipeline(
+    resources: resources
+    shader: leafShader
+    vertexEntry: "vs"
+    fragmentEntry: "fs"
+    spec: gbufferProceduralPipelineSpec()
+  ) {
+    leaves.pipeline = pipeline
+  }
+  if not isValidRenderPipeline(resources: resources, id: leaves.pipeline) {
+    log("[leaves] the leaf pipeline could not be made; the leaves are not drawn")
+  }
+}
+
+# The bind group needs the G-buffer's frame uniform, which exists only after
+# its first beginPass: frame @0, cards @1, leaf uniform @2, picture @3,
+# sampler @4
+func ensureLeafDrawBind(
+  leaves: mod LeafPass
+  resources: mod GpuResources
+  gbuffer: view GbufferCache
+  gbufferResources: view GpuResources
+) {
+  if leaves.drawBindMade {
+    ret
+  }
+  if not isValidRenderPipeline(resources: resources, id: leaves.pipeline) {
+    ret
+  }
+  if not isValidBuffer(resources: gbufferResources, id: gbuffer.frameUniform) {
+    ret
+  }
+  leaves.drawBindMade = true
+  unsafe {
+    if let frameUniform: ExternalId = adoptExternalBuffer(
+      resources: resources
+      handle: refHandle(resources: gbufferResources, ref: bufferRef(id: gbuffer.frameUniform))
+    ) {
+      leaves.frameUniform = frameUniform
+    }
+  }
+  var entries: List(ResourceRef) = List.create(ResourceRef, cap: 5)
+  entries.add(value: externalRef(id: leaves.frameUniform))
+  entries.add(value: bufferRef(id: leaves.cardBuffer))
+  entries.add(value: bufferRef(id: leaves.uniform))
+  entries.add(value: textureViewRef(id: leaves.images.textureView))
+  entries.add(value: samplerRef(id: leaves.images.sampler))
+  if let drawBind: BindGroupId = createRenderBindGroup(
+    resources: resources
+    pipeline: leaves.pipeline
+    entries: entries
+  ) {
+    leaves.drawBind = drawBind
+  }
+}
+
+# Draw the leaves into the G-buffer pass now open: the camera's right and
+# up turn the cards to face it; `light` gives the sun for the light through
+# the leaves. Call between Gbuffer.beginPass and endPass.
+func drawLeaves(
+  leaves: mod LeafPass
+  resources: mod GpuResources
+  gbuffer: view GbufferCache
+  gbufferResources: view GpuResources
+  camera: view Camera3d
+  light: view Light3d
+) {
+  if leaves.cards.count is 0 or gbuffer.forwardFrame {
+    ret
+  }
+  ensureLeafGpu(leaves: leaves, resources: resources)
+  ensureLeafDrawBind(
+    leaves: leaves
+    resources: resources
+    gbuffer: gbuffer
+    gbufferResources: gbufferResources
+  )
+  let forward: Vec3 = Vec3.vnorm(a: Vec3.vsub(a: camera.target, b: camera.position))
+  let right: Vec3 = Vec3.vnorm(a: Vec3.vcross(a: forward, b: Vec3.create(x: 0.0, y: 0.0, z: 1.0)))
+  let up: Vec3 = Vec3.vcross(a: right, b: forward)
+  let toSun: Vec3 = Vec3.vnorm(a: Vec3.vscale(a: light.sunDir, s: -1.0))
+  resetArgs(writer: leaves.uniformArgs)
+  pushVec4F(
+    writer: leaves.uniformArgs
+    x: right.x
+    y: right.y
+    z: right.z
+    w: 0.0
+  )
+  pushVec4F(
+    writer: leaves.uniformArgs
+    x: up.x
+    y: up.y
+    z: up.z
+    w: 0.0
+  )
+  pushVec4F(
+    writer: leaves.uniformArgs
+    x: camera.position.x
+    y: camera.position.y
+    z: camera.position.z
+    w: 1.0
+  )
+  pushVec4F(
+    writer: leaves.uniformArgs
+    x: toSun.x
+    y: toSun.y
+    z: toSun.z
+    w: 0.0
+  )
+  let uploaded: Bool = uploadArgs(
+    writer: leaves.uniformArgs
+    resources: resources
+    buffer: leaves.uniform
+    offset: 0
+  )
+  unsafe {
+    if not gbufferFrameActive(cache: gbuffer) {
+      ret
+    }
+    let drawn: Bool = recordDrawInPass(
+      resources: resources
+      pass: gbuffer.pass
+      pipeline: leaves.pipeline
+      bindGroup: leaves.drawBind
+      vertexCount: 6
+      instanceCount: leaves.cards.count
+      firstVertex: 0
+      firstInstance: 0
+    )
+  }
+}
+
+# Retire the GPU objects (shutdown)
+func releaseLeafPass(leaves: mod LeafPass, resources: mod GpuResources) {
+  retireSurfaceImages(images: leaves.images, resources: resources)
+  let unusedBind: Bool = retireBindGroup(resources: resources, id: leaves.drawBind)
+  retireRenderPipeline(resources: resources, id: leaves.pipeline)
+  let unusedCards: Bool = retireBuffer(resources: resources, id: leaves.cardBuffer)
+  let unusedUniform: Bool = retireBuffer(resources: resources, id: leaves.uniform)
+  let unusedFrame: Bool = releaseExternal(resources: resources, id: leaves.frameUniform)
+  leaves.made = false
+  leaves.drawBindMade = false
+}

@@ -365,10 +365,50 @@ func tracedSkeleton(params: view TreeParams) ret TreeSkeleton {
     }
     clumps.add(value: clump)
   }
+  # a hidden twig from each mass's branch to the mass's centre (order 3),
+  # so every mass hangs on wood; the leaves hide it
+  loop let clump: view TracedClump in clumps {
+    if clump.parent >= 0 and clump.parent < params.tracedLimbs.length {
+      limbs.add(
+        value: twigTo(
+          parent: limbs.copyAtDefault(index: clump.parent)
+          parentIndex: clump.parent
+          target: clump.centre
+        )
+      )
+    }
+  }
   let trunk: Limb = limbs.copyAtDefault(index: 0)
   ret TreeSkeleton {
     limbs: own limbs
     forkPoint: trunk.points.copyAtDefault(index: trunk.points.length - 1)
     clumps: own clumps
   }
+}
+
+# A thin straight twig from the point of `parent` nearest to `target` to
+# `target`
+func twigTo(parent: view Limb, parentIndex: view Int, target: view Vec3) ret Limb {
+  var nearest: Int = 0
+  var nearestDistance: Float = 1000000.0
+  loop var i: Int = 0, i < parent.points.length, ++i {
+    let distance: Float = Vec3.vlen(
+      a: Vec3.vsub(a: parent.points.copyAtDefault(index: i), b: target)
+    )
+    if distance < nearestDistance {
+      nearestDistance = distance
+      nearest = i
+    }
+  }
+  let start: Vec3 = parent.points.copyAtDefault(index: nearest)
+  let baseRadius: Float = Math.min(a: parent.radii.copyAtDefault(index: nearest) * 0.45, b: 0.035)
+  let steps: Int = 5
+  var points: List(Vec3) = List.create(Vec3, cap: steps + 1)
+  var radii: List(Float) = List.create(Float, cap: steps + 1)
+  loop var i: Int = 0, i <= steps, ++i {
+    let t: Float = i.toFloat() / steps.toFloat()
+    points.add(value: Vec3.vadd(a: start, b: Vec3.vscale(a: Vec3.vsub(a: target, b: start), s: t)))
+    radii.add(value: baseRadius + (0.012 - baseRadius) * t)
+  }
+  ret Limb { points: own points, radii: own radii, parent: parentIndex, order: 3 }
 }
