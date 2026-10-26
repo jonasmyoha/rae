@@ -76,12 +76,28 @@ type ModeMenuState {
   # with no saved state (HotReload.restartFresh, a desktop only)
   appResets: Bool = false
   resetAsked: Bool = false
+  # The window preset child menu (app3d/WindowPresetMenu): open or not, and
+  # whether that has been written to its node yet
+  presetOpen: Bool = false
+  presetOpenWritten: Bool = false
+  # The window's size in points and the 3D scene's rendered size in pixels
+  # as the menu's two lines last showed them (-1: not written yet)
+  windowLabelWidth: Int = -1
+  windowLabelHeight: Int = -1
+  renderLabelWidth: Int = -1
+  renderLabelHeight: Int = -1
+  # The rendered size the app last told the menu (setModeMenuRendering;
+  # 0 x 0: the app does not say)
+  renderWidth: Int = 0
+  renderHeight: Int = 0
 }
 
-# Closed (open under RAE_UI_MENU=open, for screenshots), nothing written yet
+# Closed (open under RAE_UI_MENU=open, and the window preset child menu
+# under RAE_UI_MENU=presets, for screenshots), nothing written yet
 func createModeMenuState() ret ModeMenuState {
   ret ModeMenuState {
     open: Sys.getEnv(name: "RAE_UI_MENU") is "open"
+    presetOpen: Sys.getEnv(name: "RAE_UI_MENU") is "presets"
     cameraLabelReversed: false
     cameraLabelWritten: false
     simulateMobile: Target.isMobileOs or Sys.getEnv(name: "RAE_SIMULATE_MOBILE") is "1"

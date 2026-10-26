@@ -121,6 +121,12 @@ func uiUpdate(
   now: copy Float64
 ) ret UiTick {
   updateUiInput(input: inputSystem.ui, world: inputSystem.world, uiSystems: uiSystems)
+  # the size the 3D scene is drawn at, for the menu's "Rendering" line
+  setModeMenuRendering(
+    menu: inputSystem.uiModes.modeMenu
+    width: renderer.passes.gbuffer.targetWidth
+    height: renderer.passes.gbuffer.targetHeight
+  )
   # GAME / EDITOR: the "..." button's menu (app3d/ModeMenu), a rotation, a
   # change of pointer
   let modesChanged: Bool = updateUiModes(

@@ -1,0 +1,62 @@
+# The window presets of the "..." menu's child menu (app3d/ModeMenu): useful
+# window sizes to try a layout and a renderer at, a desktop's and a phone's
+# and a tablet's, upright and on its side. Choosing one resizes the window
+# (a desktop only: a phone's window is the screen). The sizes are window
+# POINTS, as the OS sizes a window (SDL_SetWindowSize): a phone's or a
+# tablet's own point size, so a preset lays the UI out as that device does;
+# on a Retina screen the window has twice as many pixels.
+#
+# The scene has the child menu's items (WindowPresetItem0, 1, ... with their
+# labels); their texts come from this list, so the list is the one place a
+# preset is named.
+type WindowPreset {
+  name: String
+  width: Int
+  height: Int
+}
+
+# The number of preset items the scenes have
+const windowPresetCount: Int = 16
+
+func windowPreset(name: view String, width: view Int, height: view Int) ret WindowPreset {
+  ret WindowPreset { name: name, width: width, height: height }
+}
+
+func windowPresets() ret List(WindowPreset) {
+  var presets: List(WindowPreset) = List.create(WindowPreset, cap: windowPresetCount)
+  presets.add(value: windowPreset(name: "Desktop HD", width: 1280, height: 720))
+  presets.add(value: windowPreset(name: "Desktop laptop", width: 1366, height: 768))
+  presets.add(value: windowPreset(name: "Desktop HD+", width: 1600, height: 900))
+  presets.add(value: windowPreset(name: "Desktop Full HD", width: 1920, height: 1080))
+  presets.add(value: windowPreset(name: "Desktop QHD", width: 2560, height: 1440))
+  presets.add(value: windowPreset(name: "Desktop portrait", width: 1080, height: 1920))
+  presets.add(value: windowPreset(name: "iPhone SE portrait", width: 375, height: 667))
+  presets.add(value: windowPreset(name: "iPhone SE landscape", width: 667, height: 375))
+  presets.add(value: windowPreset(name: "iPhone 15 portrait", width: 393, height: 852))
+  presets.add(value: windowPreset(name: "iPhone 15 landscape", width: 852, height: 393))
+  presets.add(value: windowPreset(name: "iPhone 15 Pro Max portrait", width: 430, height: 932))
+  presets.add(value: windowPreset(name: "iPhone 15 Pro Max landscape", width: 932, height: 430))
+  presets.add(value: windowPreset(name: "iPad portrait", width: 820, height: 1180))
+  presets.add(value: windowPreset(name: "iPad landscape", width: 1180, height: 820))
+  presets.add(value: windowPreset(name: "iPad Pro 13 portrait", width: 1032, height: 1376))
+  presets.add(value: windowPreset(name: "iPad Pro 13 landscape", width: 1376, height: 1032))
+  ret presets
+}
+
+# A preset item's text: its name and size
+func windowPresetItemText(preset: view WindowPreset) ret String {
+  ret "{preset.name}: {preset.width}x{preset.height}"
+}
+
+# The preset item's action id and its nodes, for preset `index`
+func windowPresetActionId(index: view Int) ret String {
+  ret "menu.windowPreset.{index}"
+}
+
+func windowPresetItemNodeId(index: view Int) ret String {
+  ret "WindowPresetItem{index}"
+}
+
+func windowPresetLabelNodeId(index: view Int) ret String {
+  ret "WindowPresetLabel{index}"
+}
