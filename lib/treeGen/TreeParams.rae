@@ -41,6 +41,12 @@ type TreeParams {
   # (0: dead straight)
   limbBend: Float
   limbWander: Float
+  # Kinks: at each step a limb may turn by a few degrees at once and then run
+  # straight again, as a real branch changes direction where it once grew a
+  # side shoot. The chance per step, and the turn's range (radians).
+  limbKinkChance: Float
+  limbKinkMin: Float
+  limbKinkMax: Float
 }
 
 # A deterministic random number source: one tree per seed, the same on every
@@ -69,8 +75,8 @@ func degrees(value: view Float) ret Float {
 }
 
 # The T02 tree: 13.5 m, a slim trunk forking at about 60% of its height into
-# two unequal leaders, 4 to 6 slim, nearly straight side branches at 35 to 60
-# degrees that keep most of their thickness to the tip. The seed varies the
+# two unequal leaders, 4 to 6 slim, mostly straight side branches at 35 to 60
+# degrees with a few small kinks, keeping most of their thickness to the tip. The seed varies the
 # S-curve, the leaders' directions, the branch count and every branch.
 func warmBroadleafParams(seed: view Int) ret TreeParams {
   var params: TreeParams = stoutBroadleafParams(seed: seed)
@@ -79,6 +85,10 @@ func warmBroadleafParams(seed: view Int) ret TreeParams {
   params.limbEndThickness = 0.55
   params.limbBend = 0.006
   params.limbWander = 0.012
+  # straight, but not machine-straight: a kink every few metres
+  params.limbKinkChance = 0.22
+  params.limbKinkMin = degrees(value: 5.0)
+  params.limbKinkMax = degrees(value: 13.0)
   ret params
 }
 
@@ -107,5 +117,8 @@ func stoutBroadleafParams(seed: view Int) ret TreeParams {
     limbEndThickness: 0.0
     limbBend: 0.03
     limbWander: 0.05
+    limbKinkChance: 0.0
+    limbKinkMin: 0.0
+    limbKinkMax: 0.0
   }
 }
