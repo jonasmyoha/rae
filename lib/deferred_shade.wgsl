@@ -200,6 +200,9 @@ struct ShadedSurface {
   emissive: f32,
   mode: f32,
   ssao: f32,
+  // 1: no sky rim light here (the G-buffer's z channel below 0.25; 0 by
+  // default, so a surface built without it keeps the rim)
+  noRim: f32,
 };
 // The radiance of a surface (linear HDR), fog included
 fn shadeSurface(s: ShadedSurface) -> vec3<f32> {
@@ -256,7 +259,7 @@ fn shadeSurface(s: ShadedSurface) -> vec3<f32> {
   let emit = albedo * emissive;
   let rimF = pow(clamp(1.0 - NoV, half(0.0), half(1.0)), half(RAE_RIM_POWER));
   let rimUp = 1.0 - clamp(Nh.z, half(0.0), half(1.0));
-  let rim = half3(L.ambSky.rgb) * (rimF * rimUp * RAE_RIM_STRENGTH);
+  let rim = half3(L.ambSky.rgb) * (rimF * rimUp * RAE_RIM_STRENGTH) * half(1.0 - s.noRim);
   let contactAO = mix(half(1.0), ao * ssao, half(RAE_AO_CONTACT));
   let castShadowAmb = mix(half(1.0), sunVis, half(SH.shadowCfg.z));
   var lit = direct * contactAO + ambient * castShadowAmb + emit + rim;

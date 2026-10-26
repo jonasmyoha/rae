@@ -184,6 +184,15 @@ func setInstanceSway(records: mod List(Float), slot: view Int, sway: view Float)
 # transform when an object did not move.
 # Bool -> Int at the extern boundary, where Rae's Bool has no defined
 # representation. One place to cross it, so both draw paths agree.
+# The roughness as packed in a draw record: negative when the material has
+# no rim light (gbuffer_static.wgsl reads its size and its sign)
+func packedRoughness(material: view Material3d) ret Float {
+  if material.rimLight {
+    ret material.roughness
+  }
+  ret -Math.max(a: material.roughness, b: 0.045)
+}
+
 func toonFlag(material: view Material3d) ret Int {
   if material.toon {
     ret 1

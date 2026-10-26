@@ -4,8 +4,8 @@
 // cut out (discard) and the rest WRITES DEPTH into the G-buffer, so a leaf
 // mass of cards breaks up into separate leaves that the trunk, the shadows
 // and the AO all see. The shading normal is the card's mass's ellipsoid
-// normal (lit top, dark underside, per mass), tilted a little across the
-// leaflets so neighbouring leaves differ. Written new.
+// normal (lit top, dark underside, per mass), one per card: no gradients.
+// Written new.
 struct Frame {
   viewProj: mat4x4<f32>,
   prevViewProj: mat4x4<f32>,
@@ -120,8 +120,8 @@ fn fs(in: VsOut) -> FsOut {
   // the leaves on one card do not all shade alike
   let massNormal = normalize(in.normal);
   let toEye = normalize(U.eye.xyz - in.wpos);
-  let offset = (in.uv - vec2<f32>(0.5)) * 2.0;
-  var n = normalize(massNormal + (U.right.xyz * offset.x + U.up.xyz * -offset.y) * 0.28);
+  // one normal per card (the mass's): no shading gradient across a card
+  var n = massNormal;
   // a card on the mass's far side shows its face to the camera: turn the
   // part of its normal that points away back toward the viewer, keeping its
   // sideways and up/down lean (otherwise the light model sees the leaf edge
@@ -139,11 +139,14 @@ fn fs(in: VsOut) -> FsOut {
   let mEnc = clamp(motion, vec2<f32>(-0.5), vec2<f32>(0.5)) + vec2<f32>(0.50196078);
   let oct = octEncode(n);
   var o: FsOut;
-  // z 1: TAA-reactive, as thin leaves ghost on the history like grass blades;
-  // w the material occlusion (deeper in the mass and lower in the tree)
-  o.gba = vec4<f32>(oct.x, oct.y, 1.0, clamp(card.normalOcclusion.w, 0.0, 1.0));
+  // z 0.1: no sky rim light (deferred_light.wgsl; the rim painted the
+  // leaves facing across the view ice blue); w the shading mode, 0: lit
+  // (two bits: it once held the occlusion, which turned leaves into
+  // emissive and unlit ones at random)
+  o.gba = vec4<f32>(oct.x, oct.y, 0.1, 0.0);
   o.gbb = vec4<f32>(albedo, 0.8);
-  // metallic 0; shading mode 0: lit
-  o.gbc = vec4<f32>(mEnc.x, mEnc.y, 0.0, 0.0);
+  // metallic 0; w the material occlusion (deeper in the mass and lower in
+  // the tree)
+  o.gbc = vec4<f32>(mEnc.x, mEnc.y, 0.0, clamp(card.normalOcclusion.w, 0.0, 1.0));
   return o;
 }
