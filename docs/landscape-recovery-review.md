@@ -532,3 +532,18 @@ botanical references beside the art crops. Nine targeted fixtures, three
 hardware checks and four example gates pass. Repeated close texture motifs,
 dark overlaps and the increased, unreduced middle-LOD geometry cost remain
 explicit limitations.
+
+
+## Mediterranean cypress refinement
+
+[The cypress comparison](cypress-refinement.md) keeps the unchanged opaque
+control beside the selected narrow column and upright textured scale sprays.
+The six showcase specimens retain their normal/tall height and width scales;
+shared kind 2 and forest placements remain unchanged. Original spray/bark
+images use the existing two-sided surface, wind, shadow and atlas paths.
+
+The private presentation includes the rejected cylindrical first candidate,
+matched side/upward/backlit/night views, three seeds, tall silhouettes,
+actual 143 trees, a breezy walk and botanical references. Remaining smooth
+inner strips, repeated close spray motifs, subtle seed variation and shared
+near/middle geometry are stated explicitly in the report.

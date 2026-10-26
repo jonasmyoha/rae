@@ -142,10 +142,10 @@ seeds, bare scaffolds, bounds and the current LOD trade-off.
 The remaining forms in `lib/procgen/FluffyFoliage.rae` use fewer, larger, shallow-domed leaf patches
 with softened lobed edges. Their normals follow each crown envelope, giving
 rounded lighting instead of separate flat-card lighting. Seven overlapping
-crowns make the old broadleaf control or umbrella, nine tapered crowns make a cypress, and
+crowns make the old broadleaf control or umbrella, nine tapered crowns make the cypress control, and
 five make a bush. Dark evergreen colours belong to the example materials.
 All geometry is generated in Rae. The opaque forms need no bitmap assets;
-lime uses its two original cutouts/albedos. No new shaders or runtime C.
+lime and the refined evergreen species use original cutouts/albedos. No new shaders or runtime C.
 
 The retained opaque forms use mesh silhouettes. Lime uses the shared alpha
 cutout, coverage-preserving mips and matching shadow/atlas rendering. Opaque patches use the
@@ -156,12 +156,13 @@ vertices for simple shading and a consistent silhouette from every angle.
 |---|---:|---:|---:|
 | Lime (37 sprays, three cards each) | 111 cards | 222 | 444 |
 | Broadleaf control / umbrella | 336 | 8,064 | 4,368 |
-| Cypress | 432 | 10,368 | 5,616 |
+| Cypress control | 432 | 10,368 | 5,616 |
+| Cypress (128 upright sprays plus inner surface) | 256 curved strips | 1,920 | 2,252 |
 | Bush | 240 | 5,760 | 3,120 |
 
 Opaque counts include reversed back-face triangles; lime cards are two-sided
 in the material path. All counts exclude wood.
-For the preserved opaque forms, the wood adds 420 triangles for the broadleaf control/umbrella, 70 for cypress, none for
+For the preserved opaque forms, the wood adds 420 triangles for the broadleaf control/umbrella, 70 for the cypress control, none for
 bush. `patchCount` is per crown, across all three tones. The showcase uses
 48; 24 and 12 are lower-cost generation budgets tested for deterministic
 output and valid indices. They are not automatic runtime LODs, and their
@@ -215,7 +216,15 @@ Key 6 or `RAE_GROVE_VIEW=spruces` frames this group.
 
 The three tall cypresses remain 22.5, 24.6 and 26.7 metres tall. Only their
 vertical scale is tripled: foliage width and trunk thickness now match the
-original 7.5, 8.2 and 8.9 metre cypresses. All six reuse the same meshes.
+original 7.5, 8.2 and 8.9 metre cypresses. All six reuse the same meshes. `procgen/Cypress` now combines a narrow inner
+column with 128 ascending textured scale sprays and a rigid thin, lightly
+furrowed trunk. It keeps the original width scales, shared kind 2 and walker
+height range. Normals follow the broad column; attached sprays move slightly
+in wind. The old opaque tree remains available with `RAE_CYPRESS_CONTROL=1`.
+
+[Matched cypress controls, tall silhouettes and limits](../../docs/cypress-refinement.md)
+include the 138 and 143 views. `tools/capture-spruce-studies.py --species cypress`
+reproduces the study with an output directory argument.
 
 ![Layered normal-sized spruces](references/Spruces.png)
 

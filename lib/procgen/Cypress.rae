@@ -1,0 +1,223 @@
+# Mediterranean cypress: a narrow continuous interior with upright scale sprays.
+# Geometry is local unit height; tall instances retain the original width.
+import Math
+open Vec3
+open Mesh3d
+open Noise
+open procgen/Foliage
+open procgen/Birch
+
+func cypressRadius(amount: view Float) ret Float {
+  ret 0.135 * (1.0 - amount * 0.80)
+}
+
+func cypressCenter(amount: view Float) ret Vec3 {
+  ret Vec3.create(x: amount * 0.018, y: 0, z: 0.10 + amount * 0.90)
+}
+
+# A small fixed inner surface carries the column's continuity. Its radius is
+# below the old crown envelope; outer sprays supply the irregular fine edge.
+func cypressInterior(mesh: mod MeshData, seed: view Int) {
+  loop var ring: Int = 0, ring < 17, ++ring {
+    let amount: Float = ring.toFloat() / 16
+    let center: Vec3 = cypressCenter(amount: amount)
+    loop var side: Int = 0, side < 12, ++side {
+      let angle: Float = side.toFloat() * 0.5235988
+      var radius: Float = cypressRadius(amount: amount) * 0.74
+      if ring is 0 or ring is 16 {
+        radius = radius * 0.08
+      }
+      radius = radius * (0.93 + hash2(x: side, y: ring, seed: seed) * 0.12)
+      let normal: Vec3 = vnorm(
+        a: Vec3.create(x: Math.cos(x: angle), y: Math.sin(x: angle), z: 0.23)
+      )
+      foliageVertex(
+        mesh: mesh
+        point: vadd(
+          a: center
+          b: Vec3.create(x: Math.cos(x: angle) * radius, y: Math.sin(x: angle) * radius, z: 0)
+        )
+        normal: normal
+      )
+      mesh.verts.set(index: mesh.verts.length - 2, value: 0.5)
+      mesh.verts.set(index: mesh.verts.length - 1, value: 0.72)
+      mesh.windPivots.add(value: center.x)
+      mesh.windPivots.add(value: center.y)
+      mesh.windPivots.add(value: center.z)
+      mesh.windPivots.add(value: 0)
+      if ring < 16 {
+        let first: Int = ring * 12 + side
+        let next: Int = ring * 12 + (side + 1) % 12
+        mesh.indices.add(value: first)
+        mesh.indices.add(value: next)
+        mesh.indices.add(value: first + 12)
+        mesh.indices.add(value: next)
+        mesh.indices.add(value: next + 12)
+        mesh.indices.add(value: first + 12)
+      }
+    }
+  }
+}
+
+func cypressShoot(seed: view Int, tier: view Int, shoot: view Int) ret BirchTwig {
+  let amount: Float = tier.toFloat() / 15
+  let turn: Float = shoot.toFloat() * 0.7853982 + tier.toFloat() * 2.399963 + hash2(
+    x: tier
+    y: shoot
+    seed: seed
+  ) * 0.35
+  let radial: Vec3 = Vec3.create(x: Math.cos(x: turn), y: Math.sin(x: turn), z: 0)
+  let radius: Float = cypressRadius(amount: amount)
+  let center: Vec3 = cypressCenter(amount: amount * 0.90)
+  let length: Float = 0.18 * (1.0 - amount * 0.45) * (0.88 + hash2(
+    x: shoot
+    y: tier + 19
+    seed: seed
+  ) * 0.22)
+  ret BirchTwig {
+    start: vadd(a: center, b: vscale(a: radial, s: radius * 0.43))
+    middle: vadd(
+      a: center
+      b: Vec3.create(x: radial.x * radius * 0.90, y: radial.y * radius * 0.90, z: length * 0.52)
+    )
+    end: vadd(
+      a: center
+      b: Vec3.create(x: radial.x * radius * 0.70, y: radial.y * radius * 0.70, z: length)
+    )
+  }
+}
+
+func cypressSpray(
+  mesh: mod MeshData
+  curve: view BirchTwig
+  width: view Float
+  seed: view Int
+) {
+  let radial: Vec3 = vnorm(a: Vec3.create(x: curve.middle.x, y: curve.middle.y, z: 0))
+  let tangent: Vec3 = Vec3.create(x: -radial.y, y: radial.x, z: 0)
+  loop var plane: Int = 0, plane < 2, ++plane {
+    let first: Int = mesh.vertCount
+    let angle: Float = plane.toFloat() * 1.5707963 + 0.25
+    let span: Vec3 = vadd(
+      a: vscale(a: tangent, s: Math.cos(x: angle))
+      b: vscale(a: radial, s: Math.sin(x: angle))
+    )
+    loop var ring: Int = 0, ring < 4, ++ring {
+      let amount: Float = ring.toFloat() / 3
+      let point: Vec3 = birchCurve(twig: curve, amount: amount)
+      loop var side: Int = 0, side < 2, ++side {
+        let normal: Vec3 = vnorm(a: Vec3.create(x: radial.x, y: radial.y, z: 0.38))
+        foliageVertex(
+          mesh: mesh
+          point: vadd(a: point, b: vscale(a: span, s: (side.toFloat() * 2 - 1) * width))
+          normal: normal
+        )
+        mesh.verts.set(index: mesh.verts.length - 2, value: side.toFloat())
+        mesh.verts.set(index: mesh.verts.length - 1, value: 1.0 - amount)
+        mesh.windPivots.add(value: curve.start.x)
+        mesh.windPivots.add(value: curve.start.y)
+        mesh.windPivots.add(value: curve.start.z)
+        mesh.windPivots.add(value: 0.12)
+      }
+    }
+    loop var ring: Int = 0, ring < 3, ++ring {
+      let index: Int = first + ring * 2
+      mesh.indices.add(value: index)
+      mesh.indices.add(value: index + 1)
+      mesh.indices.add(value: index + 2)
+      mesh.indices.add(value: index + 1)
+      mesh.indices.add(value: index + 3)
+      mesh.indices.add(value: index + 2)
+    }
+  }
+}
+
+func cypressLeaves(seed: view Int, detail: view Int, tone: view Int) ret MeshData {
+  var mesh: MeshData = foliageMesh()
+  if tone is 0 {
+    cypressInterior(mesh: mesh, seed: seed)
+  }
+  loop var tier: Int = 0, tier < 16, ++tier {
+    loop var shoot: Int = 0, shoot < 8, ++shoot {
+      if (tier + shoot) % 3 is not tone {
+        continue
+      }
+      let amount: Float = tier.toFloat() / 15
+      cypressSpray(
+        mesh: mesh
+        curve: cypressShoot(seed: seed, tier: tier, shoot: shoot)
+        width: 0.060 * (1.0 - amount * 0.67)
+        seed: seed + tier * 8 + shoot
+      )
+    }
+  }
+  ret mesh
+}
+
+func cypressWood(seed: view Int) ret MeshData {
+  var mesh: MeshData = foliageMesh()
+  let trunk: BirchTwig = {
+    start: Vec3.create(x: 0, y: 0, z: -0.02)
+    middle: Vec3.create(x: 0.016, y: 0, z: 0.46)
+    end: Vec3.create(x: 0.028, y: 0, z: 1.0)
+  }
+  birchTube(
+    mesh: mesh
+    curve: trunk
+    radius: 0.035
+    sides: 9
+    steps: 12
+    seed: seed
+  )
+  loop var stem: Int = 0, stem < 12, ++stem {
+    let amount: Float = stem.toFloat() / 12
+    let angle: Float = stem.toFloat() * 2.399963
+    let radius: Float = 0.055 * (1.0 - amount * 0.6)
+    let start: Vec3 = Vec3.create(x: amount * 0.02, y: 0, z: 0.15 + amount * 0.55)
+    let branch: BirchTwig = {
+      start: start
+      middle: vadd(
+        a: start
+        b: Vec3.create(x: Math.cos(x: angle) * radius, y: Math.sin(x: angle) * radius, z: 0.15)
+      )
+      end: vadd(
+        a: start
+        b: Vec3.create(
+          x: Math.cos(x: angle) * radius * 0.8
+          y: Math.sin(x: angle) * radius * 0.8
+          z: 0.27
+        )
+      )
+    }
+    birchTube(
+      mesh: mesh
+      curve: branch
+      radius: 0.008 * (1.0 - amount * 0.5)
+      sides: 5
+      steps: 5
+      seed: seed + stem
+    )
+  }
+  loop var vertex: Int = 0, vertex < mesh.vertCount, ++vertex {
+    let index: Int = vertex * 8 + 7
+    mesh.verts.set(index: index, value: mesh.verts.copyAtDefault(index: index) * 15)
+  }
+  ret mesh
+}
+
+func cypressLeafColor(tone: view Int) ret Vec3 {
+  let value: Float = 0.95 + tone.toFloat() * 0.04
+  ret Vec3.create(x: value * 0.48, y: value * 0.78, z: value * 0.62)
+}
+
+func cypressWoodColor() ret Vec3 {
+  ret Vec3.create(x: 0.50, y: 0.50, z: 0.48)
+}
+
+func cypressLeafTexture() ret String {
+  ret "lib/assets/trees/cypressSpray.png"
+}
+
+func cypressBarkTexture() ret String {
+  ret "lib/assets/trees/cypressBark.png"
+}
