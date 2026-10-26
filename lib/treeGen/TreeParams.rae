@@ -30,6 +30,9 @@ type TreeParams {
   branchAngleMin: Float
   branchAngleMax: Float
   branchLength: Float
+  # No side branch starts below this part of the height: a lower one is
+  # lifted just above it, the higher ones stay (0: none lifted)
+  branchLowest: Float
   # The thinnest a tip gets (m)
   tipRadius: Float
   # A side branch's radius at its base, as a part of its parent's there
@@ -91,6 +94,8 @@ func warmBroadleafParams(seed: view Int) ret TreeParams {
   # No kinks: sharp turns with straight runs between them read as broken,
   # not organic (step 3 round 3)
   params.limbKinkChance = 0.0
+  # the lowest branches start higher than round 2's; the upper ones stay
+  params.branchLowest = 0.62
   ret params
 }
 
@@ -114,6 +119,7 @@ func stoutBroadleafParams(seed: view Int) ret TreeParams {
     branchAngleMin: degrees(value: 35.0)
     branchAngleMax: degrees(value: 60.0)
     branchLength: 0.22
+    branchLowest: 0.0
     tipRadius: 0.02
     limbThickness: 0.62
     limbEndThickness: 0.0
