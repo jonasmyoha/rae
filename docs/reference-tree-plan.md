@@ -77,15 +77,16 @@ not like a named species from a field guide. So:
   the same step.
 - **The report and its history** live in the looks-development repository
   (`own_repos/looks-development`, private, Git LFS for images and videos).
-  Every step adds its comparison picture, its measurements and the score to
-  `environmentReferenceStudy/referenceTree/index.html` (the step's card, which
-  says "Not started" until then). Every round of a step is ALSO kept, never
-  overwritten, in `referenceTree/iterations/YYYY-MM-DD-stepN-short-name/` and
-  listed at the top of `referenceTree/iterations/index.html`:
+  Every round of every step is kept, never overwritten, in
+  `environmentReferenceStudy/referenceTree/iterations/YYYY-MM-DD-stepN-short-name/`:
   `TREELAB_ITERATION=<that name> examples/146_treeLab/compare.sh <camera>`
-  writes both. Videos of motion go into the round's folder too. Then commit
-  the looks-development repository (its own git identity; it has its own
-  README). The previous review (`recoveryReview/`) is kept as it is.
+  for each of `near`, `mid` and `bark`. The round is then ONE entry at the
+  end of `referenceTree/progress/rounds.js` (what changed, the pictures, and
+  later the be response); `referenceTree/progress/index.html` shows
+  every round oldest first, the same cameras in the same places, and
+  compares any two. Videos of motion go into the round's folder too. Then
+  commit the looks-development repository (its own git identity; its README
+  says the same). The older report pages are kept as they were.
 - **Two simple measurements** help but do not decide: the share of sky
   pixels inside the crown's outline (feature 5), and the light-to-dark range
   (10th to 90th percentile of brightness) inside the crown, compared with the
