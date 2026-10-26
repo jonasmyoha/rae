@@ -42,6 +42,9 @@ open ecs/Entity
 open ecs/ComponentTable
 open ecs/Event
 open HotReload
+open app3d/WindowPresetMenu
+import Gpu2d
+import Math
 
 # The button's and the items' action ids
 # (not "menu.toggle", which an older corner button used)
@@ -74,6 +77,20 @@ const modeMenuMobileLabelNodeId: String = "MenuMobileLabel"
 const modeMenuSkipHoursActionId: String = "menu.skipHours"
 
 const modeMenuMoonActionId: String = "menu.moon"
+
+# The window preset item (a desktop only) opens the child menu of window
+# sizes (app3d/WindowPresetMenu) in place of this one; the rendering item
+# only shows the size the 3D scene is drawn at (the app says it:
+# setModeMenuRendering)
+const modeMenuWindowPresetActionId: String = "menu.windowPreset"
+
+const modeMenuWindowPresetItemNodeId: String = "MenuWindowPresetItem"
+
+const modeMenuWindowPresetLabelNodeId: String = "MenuWindowPresetLabel"
+
+const modeMenuRenderingLabelNodeId: String = "MenuRenderingLabel"
+
+const windowPresetMenuNodeId: String = "WindowPresetMenu"
 
 # Is the menu open after this frame? A tap on the button opens or closes it;
 # choosing an item, or a press anywhere else, closes it.
@@ -123,7 +140,22 @@ func modeMenuTapped(world: view UiWorld, actionId: view String) ret Bool {
 # Is `entityId` the menu node or anything under it (an item, Rae's or the
 # app's, or an item's label)? The scene says what the items are.
 func inModeMenu(world: view UiWorld, uiSystems: view UiSystems, entityId: view EntityId) ret Bool {
-  let menuNode: EntityId = nodeEntityFor(world: world, nodeId: modeMenuNodeId)
+  ret inMenuNode(
+    world: world
+    uiSystems: uiSystems
+    entityId: entityId
+    menuNodeId: modeMenuNodeId
+  )
+}
+
+# Is `entityId` the node `menuNodeId` or anything under it?
+func inMenuNode(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  menuNodeId: view String
+) ret Bool {
+  let menuNode: EntityId = nodeEntityFor(world: world, nodeId: menuNodeId)
   if isNone(this: menuNode) {
     ret false
   }
@@ -151,6 +183,14 @@ func isModeMenuPressNode(
     ret false
   }
   if nodeEntityFor(world: world, nodeId: modeMenuButtonNodeId) is entityId {
+    ret true
+  }
+  if inMenuNode(
+    world: world
+    uiSystems: uiSystems
+    entityId: entityId
+    menuNodeId: windowPresetMenuNodeId
+  ) {
     ret true
   }
   ret inModeMenu(world: world, uiSystems: uiSystems, entityId: entityId)
@@ -263,6 +303,9 @@ func updateModeMenuItems(
     }
     changed = true
   }
+  if updateWindowPresetMenu(world: world, menu: menu, pressedElsewhere: pressedElsewhere) {
+    changed = true
+  }
   let open: Bool = modeMenuOpenAfter(
     open: menu.open
     buttonTapped: modeMenuTapped(world: world, actionId: modeMenuToggleActionId)
@@ -289,4 +332,83 @@ func takeModeMenuReset(menu: mod ModeMenuState) ret Bool {
   let asked: Bool = menu.resetAsked
   menu.resetAsked = false
   ret asked
+}
+
+# The size the app's 3D scene is drawn at this frame, in pixels (after the
+# dynamic resolution), for the menu's "Rendering" line
+func setModeMenuRendering(menu: mod ModeMenuState, width: view Int, height: view Int) {
+  menu.renderWidth = width
+  menu.renderHeight = height
+}
+
+# The window preset item and its child menu, and the rendering line: open
+# the child menu (the "..." menu closes, as for any item chosen), resize the
+# window to a chosen preset, close on a press elsewhere or on the "..."
+# button, and keep the two lines' sizes current (a resize by hand too). True
+# when the UI must be laid out again.
+func updateWindowPresetMenu(
+  world: mod UiWorld
+  menu: mod ModeMenuState
+  pressedElsewhere: view Bool
+) ret Bool {
+  var changed: Bool = false
+  var presetOpen: Bool = menu.presetOpen
+  if modeMenuTapped(world: world, actionId: modeMenuWindowPresetActionId) {
+    presetOpen = true
+  } else if modeMenuTapped(world: world, actionId: modeMenuToggleActionId) or pressedElsewhere {
+    presetOpen = false
+  }
+  let presets: List(WindowPreset) = windowPresets()
+  loop var i: Int = 0, i < presets.length, ++i {
+    if modeMenuTapped(world: world, actionId: windowPresetActionId(index: i)) {
+      let preset: WindowPreset = presets.copyAtDefault(index: i)
+      Gpu2d.setWindowSize(w: preset.width, h: preset.height)
+      presetOpen = false
+    }
+  }
+  if presetOpen is not menu.presetOpen or menu.presetOpenWritten is false {
+    if menu.presetOpenWritten is false {
+      # the items' texts, once, from the one list of presets
+      loop var i: Int = 0, i < presets.length, ++i {
+        bindNodeText(
+          world: world
+          nodeId: windowPresetLabelNodeId(index: i)
+          value: windowPresetItemText(preset: presets.copyAtDefault(index: i))
+        )
+      }
+      # a phone's window is its screen: no presets there
+      if Target.isMobileOs {
+        bindNodeActive(world: world, nodeId: modeMenuWindowPresetItemNodeId, value: false)
+      }
+    }
+    menu.presetOpen = presetOpen
+    menu.presetOpenWritten = true
+    bindNodeActive(world: world, nodeId: windowPresetMenuNodeId, value: presetOpen)
+    changed = true
+  }
+  # the window's size in points (as a preset gives it), whatever resized it
+  let scale: Float = Math.max(a: Gpu2d.dpr(), b: 0.01)
+  let windowWidth: Int = (Gpu2d.windowWidth().toFloat() / scale + 0.5).toInt()
+  let windowHeight: Int = (Gpu2d.windowHeight().toFloat() / scale + 0.5).toInt()
+  if windowWidth is not menu.windowLabelWidth or windowHeight is not menu.windowLabelHeight {
+    menu.windowLabelWidth = windowWidth
+    menu.windowLabelHeight = windowHeight
+    bindNodeText(
+      world: world
+      nodeId: modeMenuWindowPresetLabelNodeId
+      value: "Window preset: {windowWidth}x{windowHeight}"
+    )
+    changed = true
+  }
+  if menu.renderWidth is not menu.renderLabelWidth or menu.renderHeight is not menu.renderLabelHeight {
+    menu.renderLabelWidth = menu.renderWidth
+    menu.renderLabelHeight = menu.renderHeight
+    var text: String = "Rendering: {menu.renderWidth}x{menu.renderHeight}"
+    if menu.renderWidth <= 0 {
+      text = "Rendering: native"
+    }
+    bindNodeText(world: world, nodeId: modeMenuRenderingLabelNodeId, value: text)
+    changed = true
+  }
+  ret changed
 }
