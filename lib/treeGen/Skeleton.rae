@@ -166,18 +166,6 @@ func limbTip(params: view TreeParams, baseRadius: view Float) ret Float {
   ret Math.max(a: params.tipRadius, b: baseRadius * params.limbEndThickness)
 }
 
-# A side branch's start height, the low ones lifted: one that would start
-# below `branchLowest` of the height moves into a narrow band just above it
-# (keeping the low ones' order); the ones above it stay where they are
-func liftedBranchHeight(params: view TreeParams, z: view Float) ret Float {
-  let lowest: Float = params.height * params.branchLowest
-  let from: Float = params.height * params.branchFrom
-  if z >= lowest or lowest <= from {
-    ret z
-  }
-  ret lowest + (z - from) / (lowest - from) * params.height * 0.04
-}
-
 # The point of `limb` nearest the height `z`, its index
 func indexAtHeight(limb: view Limb, z: view Float) ret Int {
   var best: Int = 0
@@ -242,8 +230,8 @@ func growSkeleton(params: view TreeParams) ret TreeSkeleton {
   var branchAzimuth: Float = nextUnit(random: random) * 6.2831853
   loop var b: Int = 0, b < params.branchCount, ++b {
     let along: Float = (b.toFloat() + nextBetween(random: random, low: 0.2, high: 0.8)) / params.branchCount.toFloat()
-    let spread: Float = params.height * (params.branchFrom + (params.branchTo - params.branchFrom) * along)
-    let z: Float = liftedBranchHeight(params: params, z: spread)
+    # every branch raised by the same amount, so all keep their spacing
+    let z: Float = params.height * (params.branchFrom + (params.branchTo - params.branchFrom) * along + params.branchRaise)
     # below the fork from the trunk; above it alternate the leaders, the main
     # one taking the higher branches
     var parentIndex: Int = 2
