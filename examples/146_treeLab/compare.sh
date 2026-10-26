@@ -7,15 +7,20 @@
 #
 #   examples/146_treeLab/compare.sh [near|mid|far]
 #
-# TREELAB_T02   the crop (default: the private reference study's T02.png)
-# TREELAB_OUT   the picture to write (default: the private report's lab/
-#               folder, compare-<camera>.png). T02 is private, so the picture
-#               is never written into this repository.
+# TREELAB_T02   the crop (default: the private reference study's T02.png,
+#               in the looks-development repository)
+# TREELAB_OUT   the picture to write (default: the report's lab/ folder in
+#               looks-development, compare-<camera>.png). T02 is private, so
+#               the picture is never written into this repository.
+# TREELAB_ITERATION  a round's name (YYYY-MM-DD-stepN-short-name): also copy
+#               the picture into the report's iterations/<name>/, the history
+#               that is never overwritten (looks-development's README)
 # Needs macOS `sips` (crop, scale, PNG/BMP) and python3 (joins two BMPs).
 set -u
 cd "$(dirname "$0")/../.." || exit 1     # -> the repository root
 CAMERA="${1:-near}"
-STUDY="$HOME/Documents/my_own_stuff/peli_ideoita/environmentReferenceStudy"
+LOOKS="${TREELAB_LOOKS_REPO:-$HOME/Documents/my_own_stuff/own_repos/looks-development}"
+STUDY="$LOOKS/environmentReferenceStudy"
 T02="${TREELAB_T02:-$STUDY/crops/T02.png}"
 OUT="${TREELAB_OUT:-$STUDY/referenceTree/lab/compare-$CAMERA.png}"
 [ -f "$T02" ] || { echo "error: reference crop not found: $T02 (set TREELAB_T02)" >&2; exit 1; }
@@ -78,3 +83,9 @@ PY
 mkdir -p "$(dirname "$OUT")"
 sips -s format png "$TMP/joined.bmp" --out "$OUT" > /dev/null
 echo "wrote $OUT (left: T02, right: camera '$CAMERA')"
+if [ -n "${TREELAB_ITERATION:-}" ]; then
+  ROUND="$STUDY/referenceTree/iterations/$TREELAB_ITERATION"
+  mkdir -p "$ROUND"
+  cp "$OUT" "$ROUND/compare-$CAMERA.png"
+  echo "kept $ROUND/compare-$CAMERA.png (add the round to iterations/index.html and commit looks-development)"
+fi
