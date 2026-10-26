@@ -23,6 +23,7 @@ near camera's numbers are labCamera's in Main.rae.
 import json
 import math
 import struct
+import subprocess
 import sys
 
 HEIGHT = 12.5                     # the tree's height (m): the trace's top
@@ -159,10 +160,10 @@ def traced_limbs(trace):
             radius = p[2] / CROP_H * s * metres
             points.append((world[0], 0.0, world[2], radius))
         if order == 0:
-            # down to just under the ground, with a small root flare
+            # down to just under the ground (the root flare is in the trace's
+            # radii)
             first = points[0]
             points[0] = (first[0], 0.0, min(first[2], 0.0) - 0.25, first[3])
-            points = [(x, y, z, r * (1.0 + 0.28 * math.exp(-max(0.0, z) / 0.4))) for x, y, z, r in points]
         # a pixel spans more metres higher up (farther from the camera), so
         # two equal traced radii would grow upward: never let one grow
         for i in range(1, len(points)):
@@ -349,6 +350,9 @@ def overlay(trace_path, t02_path, render_path, skeleton_path, out_path):
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "import":
         write_rae(read_trace(sys.argv[2]), "lib/treeGen/TracedT02.rae")
+        # the canonical layout, so the tree's format checks pass at once
+        subprocess.run(["compiler/bin/rae", "format", "lib/treeGen/TracedT02.rae"], check=True,
+                       stdout=subprocess.DEVNULL)
         print("wrote lib/treeGen/TracedT02.rae")
     elif len(sys.argv) == 7 and sys.argv[1] == "overlay":
         overlay(*sys.argv[2:])
