@@ -56,6 +56,11 @@ What the tree in T02 has (the checklist for every step):
   shows the code works. A step ends with the comparison picture and waits for
   a yes or no. A "no" with a reason starts the next round of
   the same step.
+- **The report**: every step adds its comparison picture, its measurements
+  and the score to the private visual report
+  `peli_ideoita/environmentReferenceStudy/referenceTree/index.html` (the
+  step's card, which says "Not started" until then), next to the
+  reference crops. The previous review (`recoveryReview/`) is kept as it is.
 - **Two simple measurements** help but do not decide: the share of sky
   pixels inside the crown's outline (feature 5), and the light-to-dark range
   (10th to 90th percentile of brightness) inside the crown, compared with the
