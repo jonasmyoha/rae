@@ -14,6 +14,8 @@
 #
 # The comparison picture (T02 beside the render, same height):
 #   examples/146_treeLab/compare.sh [near|mid|far]
+# The scene look (LabLook: haze, warm sun and cool shade, grade, glow) is on;
+# RAE_TREELAB_LOOK=plain keeps the renderer's defaults for a before/after.
 # A plain screenshot:
 #   RAE_SDL_HEADLESS_MS=4000 RAE_GPU2D_SCREENSHOT=/tmp/lab.bmp \
 #     rae run examples/146_treeLab/Main.rae
@@ -35,6 +37,7 @@ open gpu/GpuResources
 open gpu/GpuLifetime
 open LabScene
 open LabGrass
+open LabLook
 
 # A fixed late-morning sun from the camera's front left, as in T02 (the
 # trunk is lit on its left): the direction the light TRAVELS
@@ -99,10 +102,7 @@ func createLab() ret LabState {
   let meshes: LabMeshes = createLabMeshes(renderer: renderer)
   var light: Light3d = defaultLight3d()
   light.sunDir = Vec3.vnorm(a: Vec3.create(x: labSunX, y: labSunY, z: labSunZ))
-  setRendererSky(
-    renderer: renderer
-    sky: createSkyProcedural(sunDir: light.sunDir, sunColor: light.sunColor, turbidity: 3.0)
-  )
+  applyLabLook(renderer: renderer, light: light)
   var idIssuer: IdIssuer = IdIssuer.create()
   let windSettings: WindSettings = defaultWindSettings()
   unsafe {

@@ -4,6 +4,7 @@
 # cylinders and spheres only: nothing here is tree code, and none of it is
 # meant to look like the reference. It is there so the comparison picture
 # and the camera framing can be judged before step 3 grows a real tree.
+import Math
 import Vec3
 open Scene3d
 open ecs/Entity
@@ -20,11 +21,11 @@ const labTrunkRadius: Float = 0.17
 const labCrownStart: Float = 6.8
 
 # The ground's colour (the grass takes its base colour from it too)
-const labGroundRed: Float = 0.26
+const labGroundRed: Float = 0.09
 
-const labGroundGreen: Float = 0.34
+const labGroundGreen: Float = 0.115
 
-const labGroundBlue: Float = 0.12
+const labGroundBlue: Float = 0.035
 
 type LabMeshes {
   sphere: MeshHandle
@@ -111,9 +112,9 @@ func addPlaceholderTree(world: mod World3d, meshes: view LabMeshes) {
     roughness: 0.9
   )
   let crown: Material3d = labMaterial(
-    red: 0.30
-    green: 0.36
-    blue: 0.24
+    red: 0.16
+    green: 0.20
+    blue: 0.07
     roughness: 0.95
   )
   addStem(
@@ -166,74 +167,118 @@ func addPlaceholderTree(world: mod World3d, meshes: view LabMeshes) {
   }
 }
 
-# Darker placeholder trees behind, as T02 has
+# A seeded random number in 0..1 (a small linear congruential generator): the
+# lab's scene is the same on every run
+func labRandom(seed: mod Int) ret Float {
+  seed = (seed * 1103515245 + 12345) % 2147483648
+  ret seed.toFloat() / 2147483648.0
+}
+
+# The forest behind, as T02 has: a dense band of darker placeholder trees from
+# 10 to 90 m behind the tree, so no horizon shows through, and a few low
+# bushes in front. Plain cylinders and spheres, like the tree itself.
 func addBackgroundTrees(world: mod World3d, meshes: view LabMeshes) {
   let trunk: Material3d = labMaterial(
-    red: 0.30
-    green: 0.18
-    blue: 0.11
+    red: 0.16
+    green: 0.10
+    blue: 0.06
     roughness: 0.9
   )
   let crown: Material3d = labMaterial(
-    red: 0.16
-    green: 0.22
-    blue: 0.14
+    red: 0.045
+    green: 0.07
+    blue: 0.025
     roughness: 0.95
   )
-  # (x, y, height)
-  let trees: List(Float) = [
-    -9.0
-    18.0
-    12.0
-    -4.0
-    30.0
-    15.0
-    6.0
-    24.0
-    11.0
-    12.0
-    40.0
-    16.0
-    -15.0
-    45.0
-    14.0
-    20.0
-    60.0
-    15.0
-    -26.0
-    70.0
-    13.0
-    2.0
-    80.0
-    16.0
-  ]
-  var i: Int = 0
-  loop i + 2 < trees.length {
-    let x: Float = trees.copyAtDefault(index: i)
-    let y: Float = trees.copyAtDefault(index: i + 1)
-    let height: Float = trees.copyAtDefault(index: i + 2)
+  let litCrown: Material3d = labMaterial(
+    red: 0.10
+    green: 0.13
+    blue: 0.03
+    roughness: 0.95
+  )
+  var seed: Int = 7
+  loop var i: Int = 0, i < 140, ++i {
+    let depth: Float = 10.0 + labRandom(seed: seed) * 80.0
+    # wider farther back, so the band fills the view at every depth
+    let x: Float = (labRandom(seed: seed) - 0.5) * (30.0 + depth * 1.6)
+    let height: Float = 9.0 + labRandom(seed: seed) * 8.0
+    # keep the tree's own spot clear
+    if Math.abs(value: x) < 3.0 and depth < 14.0 {
+      continue
+    }
+    var leaves: Material3d = crown
+    if labRandom(seed: seed) < 0.35 {
+      leaves = litCrown
+    }
+    let base: Vec3 = Vec3.create(x: x, y: depth, z: 0.0)
     addStem(
       world: world
       meshes: meshes
-      base: Vec3.create(x: x, y: y, z: 0.0)
-      height: height * 0.8
-      radius: 0.18
+      base: base
+      height: height * 0.75
+      radius: 0.16
       material: trunk
     )
+    let width: Float = height * (0.18 + labRandom(seed: seed) * 0.1)
     addBlob(
       world: world
       meshes: meshes
-      centre: Vec3.create(x: x, y: y, z: height * 0.72)
-      size: Vec3.create(x: height * 0.2, y: height * 0.2, z: height * 0.24)
-      material: crown
+      centre: Vec3.create(x: x, y: depth, z: height * 0.7)
+      size: Vec3.create(x: width, y: width, z: height * 0.26)
+      material: leaves
     )
-    i = i + 3
+  }
+  # Dark undergrowth through the band, so no open horizon shows between the
+  # trunks (T02's forest floor is dense)
+  let undergrowth: Material3d = labMaterial(
+    red: 0.05
+    green: 0.08
+    blue: 0.025
+    roughness: 0.95
+  )
+  loop var i: Int = 0, i < 90, ++i {
+    let depth: Float = 8.0 + labRandom(seed: seed) * 72.0
+    let x: Float = (labRandom(seed: seed) - 0.5) * (30.0 + depth * 1.6)
+    if Math.abs(value: x) < 2.0 and depth < 12.0 {
+      continue
+    }
+    let radius: Float = 1.2 + labRandom(seed: seed) * 1.6
+    addBlob(
+      world: world
+      meshes: meshes
+      centre: Vec3.create(x: x, y: depth, z: radius * 0.5)
+      size: Vec3.create(x: radius * 1.4, y: radius * 1.4, z: radius)
+      material: undergrowth
+    )
+  }
+  # Low bushes in front and round the tree, as T02 has
+  let bush: Material3d = labMaterial(
+    red: 0.22
+    green: 0.25
+    blue: 0.07
+    roughness: 0.95
+  )
+  loop var i: Int = 0, i < 26, ++i {
+    let y: Float = -6.0 + labRandom(seed: seed) * 16.0
+    let x: Float = (labRandom(seed: seed) - 0.5) * 14.0
+    if Math.abs(value: x) < 1.0 and Math.abs(value: y) < 1.0 {
+      continue
+    }
+    let radius: Float = 0.3 + labRandom(seed: seed) * 0.45
+    addBlob(
+      world: world
+      meshes: meshes
+      centre: Vec3.create(x: x, y: y, z: radius * 0.35)
+      size: Vec3.create(x: radius * 1.2, y: radius * 1.2, z: radius * 0.8)
+      material: bush
+    )
   }
 }
 
 # Placeholder clouds: flattened white puffs far behind the tree, lit by
-# their own emission so they read white against the sky. Step 2 decides
-# how the sky and clouds really look.
+# their own emission so they read white against the sky. T02's sky is mostly
+# cloud, so there are many, large and overlapping. They are placeholders: a
+# real cloud look is not part of the tree plan.
 func addPlaceholderClouds(world: mod World3d, meshes: view LabMeshes) {
   var cloud: Material3d = labMaterial(
     red: 1.0
@@ -241,43 +286,25 @@ func addPlaceholderClouds(world: mod World3d, meshes: view LabMeshes) {
     blue: 1.0
     roughness: 1.0
   )
-  cloud.emission = Vec3.create(x: 0.9, y: 0.9, z: 0.9)
-  # (x, z, width) of each cloud, all 420 m behind the tree
-  let clouds: List(Float) = [
-    -150.0
-    170.0
-    60.0
-    -40.0
-    220.0
-    80.0
-    90.0
-    150.0
-    55.0
-    170.0
-    240.0
-    70.0
-  ]
-  var i: Int = 0
-  loop i + 2 < clouds.length {
-    let x: Float = clouds.copyAtDefault(index: i)
-    let z: Float = clouds.copyAtDefault(index: i + 1)
-    let width: Float = clouds.copyAtDefault(index: i + 2)
-    loop var puff: Int = 0, puff < 4, ++puff {
-      let offset: Float = (puff.toFloat() - 1.5) * width * 0.32
-      # the middle puffs stand a little higher
-      var rise: Float = 0.0
-      if puff is 1 or puff is 2 {
-        rise = width * 0.07
-      }
+  cloud.emission = Vec3.create(x: 0.85, y: 0.87, z: 0.9)
+  var seed: Int = 31
+  loop var i: Int = 0, i < 34, ++i {
+    let x: Float = (labRandom(seed: seed) - 0.5) * 520.0
+    let z: Float = 70.0 + labRandom(seed: seed) * 230.0
+    let width: Float = 50.0 + labRandom(seed: seed) * 90.0
+    let y: Float = 380.0 + labRandom(seed: seed) * 120.0
+    loop var puff: Int = 0, puff < 5, ++puff {
+      let offset: Float = (puff.toFloat() - 2.0) * width * 0.24
+      let rise: Float = width * 0.09 * labRandom(seed: seed)
+      let size: Float = width * (0.2 + labRandom(seed: seed) * 0.12)
       addBlob(
         world: world
         meshes: meshes
-        centre: Vec3.create(x: x + offset, y: 420.0, z: z + rise)
-        size: Vec3.create(x: width * 0.3, y: width * 0.12, z: width * 0.16)
+        centre: Vec3.create(x: x + offset, y: y, z: z + rise)
+        size: Vec3.create(x: size, y: size * 0.4, z: size * 0.55)
         material: cloud
       )
     }
-    i = i + 3
   }
 }
 
