@@ -79,7 +79,12 @@ func main() ret Int {
   loop var seed: Int = 1, seed <= 20, ++seed {
     let params: TreeParams = warmBroadleafParams(seed: seed)
     let skeleton: TreeSkeleton = growSkeleton(params: params)
-    let branches: Int = skeleton.limbs.length - 3
+    var branches: Int = 0
+    loop let limb: view Limb in skeleton.limbs {
+      if limb.order is 2 {
+        branches = branches + 1
+      }
+    }
     fewest = Math.min(a: fewest, b: branches)
     most = Math.max(a: most, b: branches)
     if branches < 4 or branches > 6 {

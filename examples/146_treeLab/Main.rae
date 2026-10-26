@@ -45,6 +45,7 @@ open LabScene
 open LabGrass
 open LabLook
 open LabTree
+open treeGen/LeafPass
 
 # A fixed late-morning sun from the camera's front left, as in T02 (the
 # trunk is lit on its left): the direction the light TRAVELS
@@ -62,6 +63,8 @@ type LabState {
   # The app's GPU manager: the grass's compute pass lives in it
   gpuResources: opt GpuResources
   grass: GrassCompute
+  # the generated tree's leaves and its crown's shadow caster
+  tree: opt LabTree
   windSettings: WindSettings
   wind: WindState
   lastTime: Float64
@@ -115,8 +118,9 @@ func createLab() ret LabState {
   let meshes: LabMeshes = createLabMeshes(renderer: renderer)
   let placeholder: Bool = Sys.getEnv(name: "RAE_TREELAB_TREE") is "placeholder"
   var world: World3d = buildLabWorld(meshes: meshes, placeholderTree: placeholder)
+  var tree: opt LabTree = none
   if not placeholder {
-    addGeneratedTree(world: world, renderer: renderer, seed: labTreeSeed())
+    tree = addGeneratedTree(world: world, renderer: renderer, seed: labTreeSeed())
   }
   var light: Light3d = defaultLight3d()
   light.sunDir = Vec3.vnorm(a: Vec3.create(x: labSunX, y: labSunY, z: labSunZ))
@@ -131,6 +135,7 @@ func createLab() ret LabState {
       camera: labCamera(name: Sys.getEnv(name: "RAE_TREELAB_CAMERA"))
       gpuResources: GpuResources.create(issuer: idIssuer, capacity: 32)
       grass: createLabGrass()
+      tree: own tree
       windSettings: windSettings
       wind: createWindState(settings: windSettings)
       lastTime: Gpu2d.nowSeconds()
@@ -155,6 +160,12 @@ func renderLabShadows(state: mod LabState, aspect: view Float) {
   )
   beginShadowPass(renderer: state.renderer, c: cascades)
   renderSceneShadowWorldWith(renderer: state.renderer, world: state.world)
+  # the crown's shadow: its solid leaf masses, drawn only into the shadow maps
+  if let tree: view LabTree = state.tree {
+    if tree.castsMassShadow {
+      drawShadowCasterWith(renderer: state.renderer, mesh: tree.massShadow, model: mat4Identity())
+    }
+  }
   endShadowPass(renderer: state.renderer)
 }
 
@@ -191,6 +202,16 @@ func renderLabGeometry(state: mod LabState, aspect: view Float, deltaTime: view 
         gbuffer: state.renderer.passes.gbuffer
         gbufferResources: rendererResources
       )
+      if let tree: mod LabTree = state.tree {
+        drawLeaves(
+          leaves: tree.leaves
+          resources: resources
+          gbuffer: state.renderer.passes.gbuffer
+          gbufferResources: rendererResources
+          camera: state.camera
+          light: state.light
+        )
+      }
     }
     Gbuffer.endPass(cache: state.renderer.passes.gbuffer, resources: rendererResources)
   }
@@ -228,6 +249,9 @@ func runLabFrame(state: mod LabState) {
 func endLab(state: mod LabState) {
   if let resources: mod GpuResources = state.gpuResources {
     grassShutdown(grass: state.grass, resources: resources)
+    if let tree: mod LabTree = state.tree {
+      releaseLeafPass(leaves: tree.leaves, resources: resources)
+    }
     shutdown(resources: resources)
   }
   shutdownDeferredRenderer(renderer: state.renderer)

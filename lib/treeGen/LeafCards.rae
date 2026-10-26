@@ -1,0 +1,154 @@
+# treeGen/LeafCards — a tree's leaves as camera-facing cards, filling its
+# leaf masses (docs/reference-tree-plan.md step 5, Tiny Glade's technique:
+# looks-development talks/tinyGladeRendering/analysis.md, "Trees"). Each
+# card is one point inside a mass; the leaf shader (leaf_cards.wgsl,
+# LeafPass) turns it into a small square facing the camera with the leaf
+# picture on it, writing depth, so a mass breaks up into separate leaves.
+#
+# Per card the shader gets: where it is and how big; the SHADING normal,
+# taken from its mass's ellipsoid, so light falls across the whole mass
+# (lit top, dark underside) and not card by card; an occlusion, darker the
+# deeper the card is in its mass and the lower in the tree; its green, one
+# of three close ones per mass; and the turn of the picture on the card.
+# Written new.
+import Math
+import Vec3
+open treeGen/TreeParams
+open treeGen/TracedLimb
+open treeGen/Skeleton
+open treeGen/ClumpMesh
+
+# Floats per card in the GPU buffer: 4 vec4s (see leaf_cards.wgsl's Card)
+const leafCardFloats: Int = 16
+
+# A card's width (m): T02's leaves are small, a card a spray of them
+const leafCardSize: Float = 0.6
+
+# How many cards cover each point of a mass's surface, on average
+const leafCardLayers: Float = 4.5
+
+# The cards of a tree, ready for the GPU: leafCardFloats floats each
+type LeafCards {
+  floats: List(Float)
+  count: Int
+}
+
+# An ellipsoid's surface area (Knud Thomsen's formula, within about 1%)
+func ellipsoidArea(radii: view Vec3) ret Float {
+  let p: Float = 1.6075
+  let ab: Float = Math.pow(base: radii.x * radii.y, exp: p)
+  let ac: Float = Math.pow(base: radii.x * radii.z, exp: p)
+  let bc: Float = Math.pow(base: radii.y * radii.z, exp: p)
+  ret 4.0 * 3.1415927 * Math.pow(base: (ab + ac + bc) / 3.0, exp: 1.0 / p)
+}
+
+# A direction spread evenly over the sphere
+func randomDirection(random: mod TreeRandom) ret Vec3 {
+  let z: Float = nextBetween(random: random, low: -1.0, high: 1.0)
+  let around: Float = nextUnit(random: random) * 6.2831853
+  let ring: Float = Math.sqrt(x: Math.max(a: 0.0, b: 1.0 - z * z))
+  ret Vec3.create(x: ring * Math.cos(x: around), y: ring * Math.sin(x: around), z: z)
+}
+
+# The three greens of one mass: T02's crown is an olive yellow-green, not a
+# lime one; its masses differ a little from each other (linear colour)
+func massGreen(pick: view Int) ret Vec3 {
+  var base: Vec3 = Vec3.create(x: 0.19, y: 0.23, z: 0.06)
+  if pick is 1 {
+    base = Vec3.create(x: 0.24, y: 0.27, z: 0.07)
+  } else if pick is 2 {
+    base = Vec3.create(x: 0.14, y: 0.18, z: 0.06)
+  }
+  ret base
+}
+
+func pushVec4(
+  floats: mod List(Float)
+  a: view Float
+  b: view Float
+  c: view Float
+  d: view Float
+) {
+  floats.add(value: a)
+  floats.add(value: b)
+  floats.add(value: c)
+  floats.add(value: d)
+}
+
+# Every leaf mass of `skeleton` filled with cards
+func leafCards(skeleton: view TreeSkeleton, seed: view Int) ret LeafCards {
+  var random: TreeRandom = createTreeRandom(seed: seed + 4242)
+  # the crown's height span, for "lower in the tree is darker"
+  var lowest: Float = 1000000.0
+  var highest: Float = -1000000.0
+  loop let clump: view TracedClump in skeleton.clumps {
+    lowest = Math.min(a: lowest, b: clump.centre.z - clump.radii.z)
+    highest = Math.max(a: highest, b: clump.centre.z + clump.radii.z)
+  }
+  var floats: List(Float) = List.create(Float, cap: 0)
+  var count: Int = 0
+  loop let clump: view TracedClump in skeleton.clumps {
+    let cards: Int = (leafCardLayers * ellipsoidArea(radii: clump.radii) / (leafCardSize * leafCardSize)).toInt()
+    # this mass's own slight shift of all three greens
+    let tint: Vec3 = Vec3.create(
+      x: nextBetween(random: random, low: 0.92, high: 1.08)
+      y: nextBetween(random: random, low: 0.95, high: 1.05)
+      z: nextBetween(random: random, low: 0.9, high: 1.1)
+    )
+    loop var i: Int = 0, i < cards, ++i {
+      let direction: Vec3 = randomDirection(random: random)
+      # most cards near the surface, some deeper in
+      let depth: Float = 0.5 + 0.5 * Math.sqrt(x: nextUnit(random: random))
+      let local: Vec3 = Vec3.vscale(a: clumpSurface(clump: clump, direction: direction), s: depth)
+      let position: Vec3 = Vec3.vadd(
+        a: clump.centre
+        b: turnInPicture(value: local, turn: clump.turn)
+      )
+      let normal: Vec3 = turnInPicture(
+        value: clumpNormal(clump: clump, direction: direction)
+        turn: clump.turn
+      )
+      let height: Float = Math.clamp(
+        val: (position.z - lowest) / Math.max(a: highest - lowest, b: 0.01)
+        low: 0.0
+        high: 1.0
+      )
+      let occlusion: Float = (0.15 + 0.85 * Math.pow(base: (depth - 0.5) * 2.0, exp: 1.5)) * (0.7 + 0.3 * height)
+      let green: Vec3 = massGreen(pick: (nextUnit(random: random) * 3.0).toInt())
+      let shade: Float = nextBetween(random: random, low: 0.9, high: 1.1)
+      let size: Float = leafCardSize * nextBetween(random: random, low: 0.8, high: 1.2)
+      pushVec4(
+        floats: floats
+        a: position.x
+        b: position.y
+        c: position.z
+        d: size
+      )
+      pushVec4(
+        floats: floats
+        a: normal.x
+        b: normal.y
+        c: normal.z
+        d: occlusion
+      )
+      pushVec4(
+        floats: floats
+        a: green.x * tint.x * shade
+        b: green.y * tint.y * shade
+        c: green.z * tint.z * shade
+        d: nextUnit(random: random) * 6.2831853
+      )
+      # w: how much light comes through the card from behind (thin at the
+      # mass's rim, none deep inside)
+      pushVec4(
+        floats: floats
+        a: 0.0
+        b: 0.0
+        c: 0.0
+        d: Math.pow(base: (depth - 0.5) * 2.0, exp: 2.0)
+      )
+      count = count + 1
+    }
+  }
+  ret LeafCards { floats: own floats, count: count }
+}
