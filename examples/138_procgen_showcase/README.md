@@ -362,3 +362,19 @@ exclusion mask, rather than raised separate meshes. Existing tuft candidates
 form unequal small groups; density and exclusion settings stay unchanged.
 See [the patch and motion comparison](../../docs/grass-patch-recovery.md) for
 fixed before/after views, calm/breezy walks, cost and remaining limits.
+
+
+## Autumn-orange sugar maple
+
+The three existing orange-slot trees now use `procgen/SugarMaple`: joined
+ascending forks, wider paired lateral sprays, original grey-brown bark and a
+quiet copper-orange cutout. The red, gold, crimson and palm forms are unchanged.
+The same generator supplies forest kind 4 in 136/137/143; no placement or numeric
+kind has moved. The grove keeps its seeds 501/710/217, heights and positions.
+
+[The maple comparison](../../docs/sugar-maple-refinement.md) records the old
+control, several seeds, bare wood, side/backlit/night and shared forest views.
+`RAE_MAPLE_CONTROL=1` selects the old grove orange geometry/material;
+`RAE_MAPLE_BARE=1` hides only its foliage. `RAE_MAPLE_ISOLATE=1` keeps the first
+specimen and ground for comparisons; `RAE_MAPLE_SEED` / `RAE_MAPLE_HEIGHT` affect
+that isolated study only. The camera remains the existing free-camera override.
