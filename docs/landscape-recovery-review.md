@@ -494,3 +494,13 @@ Seven narrow fixtures, three hardware checks and all four consuming example
 gates pass. The report records the wider tested card bound, geometry/resource
 counts and limitations: repeated close leaf marks, dark overlaps, painted bark
 relief and a shared near/middle mesh. Kind numbers and placements are unchanged.
+
+## Golden Globe ginkgo refinement
+
+Shared kind 6 now has a spreading joined branch fan, alternate short shoots,
+original golden fan-leaf cutout and grey-brown bark. The new named 138 inspection
+preserves the green date palm and all older fixed specimens. The original gold
+control, first candidate, selected front/side/underside, multiple seeds, night,
+actual forest group and posed atlas appear in the private recovery presentation
+beside T04/T05/T07. [The ginkgo report](ginkgo-refinement.md) records the matched
+conditions, shared consumers, costs and remaining close-card/bark limits.

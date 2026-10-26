@@ -147,7 +147,7 @@ func createShowcase() ret ShowcaseState {
   }
   var settings: SettingsState = createSettingsState(
     scene: initialView
-    sceneCount: 22
+    sceneCount: 23
     speed: 1.0
     toon: true
     hour: initialHour
@@ -205,6 +205,9 @@ func createShowcase() ret ShowcaseState {
 # match docs/environment-art-direction.md; the camera presets stay numbered so
 # their keyboard shortcuts and reference names do not change.
 func groveViewName(groveView: view Int) ret String {
+  if groveView is 23 {
+    ret "Golden Globe ginkgo"
+  }
   if groveView is 2 {
     ret "Maples and date palm"
   }
@@ -272,6 +275,9 @@ func groveViewName(groveView: view Int) ret String {
 }
 
 func groveViewReadout(groveView: view Int) ret String {
+  if groveView is 23 {
+    ret "Ginkgo biloba Golden Globe | forest kind 6 | three seeds"
+  }
   if groveView is 2 {
     ret "Sugar maple, red maple, Japanese maple, date palm"
   }
@@ -363,6 +369,9 @@ const groveSunStrength: Float = 3.1
 
 # RAE_GROVE_VIEW also accepts the joined-fork and silver-birch studies.
 func groveViewNumber(viewName: view String) ret Int {
+  if viewName is "ginkgo" {
+    ret 23
+  }
   if viewName is "trees" {
     ret 2
   }
@@ -547,6 +556,12 @@ func setGroveView(camera: mod Camera3d, cameraRig: mod CameraRig, groveView: vie
     cameraRig.distance = 4.8
     cameraRig.orbitPitch = 0.02
     cameraRig.yaw = 0.38
+  }
+  if groveView is 23 {
+    camera.target = Vec3.create(x: 15, y: -4, z: 3)
+    cameraRig.distance = 23
+    cameraRig.orbitPitch = 0.12
+    cameraRig.yaw = 1.35
   }
   snapCameraRigView(rig: cameraRig)
   applyCameraRig(rig: cameraRig, camera: camera)

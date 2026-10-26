@@ -17,6 +17,7 @@ open GroveGrass
 open FluffyGrove
 open CamphorGrove
 open BirchGrove
+open GinkgoGrove
 open ForkStudy
 open MeadowFlowers
 open procgen/Rock
@@ -568,6 +569,10 @@ func buildGrove(renderer: mod DeferredRenderer) ret Grove {
   )
   let ground: MeshData = gardenGround()
   let groundMesh: MeshHandle = uploadFoliage(renderer: renderer, mesh: ground)
+  if Sys.getEnv(name: "RAE_GINKGO_ISOLATE") is "1" {
+    addGinkgoGrove(world: world, renderer: renderer, obstacles: obstacles)
+    ret Grove { world: own world, obstacles: own obstacles, groundMesh: groundMesh }
+  }
   # Isolated comparison still uses the exact grove specimen and ground.
   # Other trees would occlude it during a full camera orbit.
   if Sys.getEnv(name: "RAE_MAPLE_ISOLATE") is "1" {
@@ -708,6 +713,7 @@ func buildGrove(renderer: mod DeferredRenderer) ret Grove {
   # remaining ground.
   obstacles.add(value: { x: -3.0, y: -14.0, radius: 0.65, excludeGrass: false })
   obstacles.add(value: { x: -0.8, y: -14.0, radius: 1.65, excludeGrass: false })
+  addGinkgoGrove(world: world, renderer: renderer, obstacles: obstacles)
   addCamphorGrove(world: world, renderer: renderer, obstacles: obstacles)
   addBirchGrove(world: world, renderer: renderer, obstacles: obstacles)
   addForkStudy(world: world, renderer: renderer, obstacles: obstacles)

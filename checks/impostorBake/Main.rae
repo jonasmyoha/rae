@@ -126,6 +126,9 @@ func checkFoliageLayout(
     if species is speciesRed {
       subject.imageLayers = List(Int) { 6, 7, 7, 7 }
     }
+    if species is speciesGold {
+      subject.imageLayers = List(Int) { 8, 9, 9, 9 }
+    }
     subjects.add(value: subject)
   }
   var atlas: ImpostorAtlas = bakeTexturedImpostorAtlas(
@@ -149,7 +152,7 @@ func checkFoliageLayout(
     let leaf: Float = shares.copyAtFallback(index: species, fallback: 0.0)
     let ordinary: Float = plain.copyAtFallback(index: species, fallback: 0.0)
     var same: Bool = Math.abs(value: leaf - ordinary) <= 0.01
-    if species is speciesBirch or species is speciesBroadleaf or species is speciesOrange or species is speciesRed {
+    if species is speciesBirch or species is speciesBroadleaf or species is speciesOrange or species is speciesRed or species is speciesGold {
       # Facing cards intentionally differ from the unposed ordinary layout.
       same = leaf > 0.05 and leaf < 0.70
     }
@@ -161,7 +164,13 @@ func checkFoliageLayout(
     )
   }
   log("leaf layout: {leafMeshes} leaf meshes baked with their 64-byte vertices")
-  let posedSpecies: List(Int) = { speciesBroadleaf, speciesOrange, speciesRed, speciesBirch }
+  let posedSpecies: List(Int) = {
+    speciesBroadleaf
+    speciesOrange
+    speciesRed
+    speciesGold
+    speciesBirch
+  }
   loop let species: Int in posedSpecies {
     # Export the actual camera-facing textured crowns, not only the deliberately unposed
     # 32-byte control above. A healthy layer average can hide empty view cells.
@@ -499,6 +508,8 @@ func main() ret Int {
       "lib/assets/trees/sugarMapleSpray.png"
       "lib/assets/trees/redMapleBark.png"
       "lib/assets/trees/redMapleSpray.png"
+      "lib/assets/trees/ginkgoBark.png"
+      "lib/assets/trees/ginkgoSpray.png"
     }
     if not setSurfaceImages(images: images, resources: resources, paths: paths) {
       ret 1
@@ -544,6 +555,9 @@ func main() ret Int {
       }
       if species is speciesRed {
         subject.imageLayers = List(Int) { 6, 7, 7, 7 }
+      }
+      if species is speciesGold {
+        subject.imageLayers = List(Int) { 8, 9, 9, 9 }
       }
       subjects.add(value: subject)
     }
