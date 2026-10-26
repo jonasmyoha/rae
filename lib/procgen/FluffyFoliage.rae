@@ -1,5 +1,5 @@
 # Shared foliage forms. Lime uses joined wood and textured connected sprays;
-# the other forms retain their opaque patches. Control functions preserve the
+# spruce has curved needle sprays; the other forms retain opaque patches. Controls preserve the
 # original lime for matched visual comparisons.
 # Meshes are local-space, deterministic and independent of any renderer/owner.
 import Math
@@ -8,6 +8,7 @@ open Noise
 open Mesh3d
 open procgen/Foliage
 open procgen/Spruce
+open procgen/SpruceControl
 open procgen/Lime
 
 enum FluffyForm {
@@ -142,7 +143,7 @@ func fluffyCrown(
 
 # Unit-height forms; scale instances uniformly to preserve leaf proportions.
 # broadleaf/umbrella: seven clusters, bush: five, cypress: nine.
-# Spruce uses continuous branch skirts instead of leaf patches.
+# The control spruce uses continuous skirts; the live form has curved sprays.
 func fluffyLeavesControl(
   form: view FluffyForm
   seed: view Int
@@ -150,7 +151,7 @@ func fluffyLeavesControl(
   tone: view Int
 ) ret MeshData {
   if form is FluffyForm.spruce {
-    ret spruceLeaves(seed: seed, detail: patchCount, tone: tone)
+    ret spruceLeavesControl(seed: seed, detail: patchCount, tone: tone)
   }
   var mesh: MeshData = foliageMesh()
   var clusters: Int = 7
@@ -267,13 +268,16 @@ func fluffyWoodControl(form: view FluffyForm, seed: view Int) ret MeshData {
   ret mesh
 }
 
-# Existing forms keep their geometry; only the named lime uses textured sprays.
+# Named lime and spruce use their shared textured foliage generators.
 func fluffyLeaves(
   form: view FluffyForm
   seed: view Int
   patchCount: view Int
   tone: view Int
 ) ret MeshData {
+  if form is FluffyForm.spruce {
+    ret spruceLeaves(seed: seed, detail: patchCount, tone: tone)
+  }
   if form is FluffyForm.broadleaf {
     let tree: LimeTree = limeTree(seed: seed)
     ret limeLeaves(sprays: tree.sprays, seed: seed, tone: tone)
@@ -287,6 +291,9 @@ func fluffyLeaves(
 }
 
 func fluffyWood(form: view FluffyForm, seed: view Int) ret MeshData {
+  if form is FluffyForm.spruce {
+    ret spruceWood(seed: seed)
+  }
   if form is FluffyForm.broadleaf {
     let tree: LimeTree = limeTree(seed: seed)
     ret tree.wood
