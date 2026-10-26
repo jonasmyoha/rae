@@ -133,13 +133,18 @@ func ensureTargets(cache: mod GbufferCache, resources: mod GpuResources) {
   if surfaceWidth <= 0 or surfaceHeight <= 0 {
     ret
   }
-  let ceiling: Float = ceilingScale(
+  var ceiling: Float = ceilingScale(
     surfaceWidth: surfaceWidth
     surfaceHeight: surfaceHeight
     ceilingWidth: cache.ceilingWidth
     ceilingHeight: cache.ceilingHeight
   )
-  cache.sceneScale = effectiveRenderScale(dynamicScale: cache.dynamicScale, ceiling: ceiling)
+  var dynamicScale: Float = cache.dynamicScale
+  if cache.fullResolution {
+    ceiling = 1.0
+    dynamicScale = 1.0
+  }
+  cache.sceneScale = effectiveRenderScale(dynamicScale: dynamicScale, ceiling: ceiling)
   let w: Int = scaledDimension(full: surfaceWidth, scale: cache.sceneScale)
   let h: Int = scaledDimension(full: surfaceHeight, scale: cache.sceneScale)
   if w is cache.targetWidth and h is cache.targetHeight and gbufferTargetsReady(

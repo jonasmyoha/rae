@@ -24,6 +24,7 @@ import SdfText
 import Vec3
 open Scene3d
 open Sky
+open RendererQuality
 open SkyHosek
 open RendererDeferred
 open Gpu2dCanvas
@@ -525,6 +526,10 @@ func applyEditorPanelSettings(
     z: keyColor.z * sunStrength
   )
   setTaaEnabled(renderer: renderer, on: editorPanel.settings.taa)
+  setRendererFullResolution(
+    renderer: renderer
+    on: editorPanel.settings.quality is SettingsQuality.ultra
+  )
 }
 
 # Draw the chrome and the debug overlay over the frame (RenderTag.uiOverlay)

@@ -1,0 +1,13 @@
+# The renderer's quality settings (app3d/SettingsDialog's Quality: Low, Mid,
+# High, Ultra). For now only one thing changes with them: at Ultra the 3D
+# scene is drawn at the window's native resolution, pixel for pixel, on
+# desktop and on phones alike. The device's resolution ceiling
+# (RenderResolution.defaultRenderCeiling) and the dynamic scale an app's
+# controller sets (app3d/RenderScale) are then ignored, until it is turned
+# off again; the UI is always native.
+open RendererDeferred
+
+# Native resolution on or off (the settings' Ultra quality)
+func setRendererFullResolution(renderer: mod DeferredRenderer, on: view Bool) {
+  renderer.passes.gbuffer.fullResolution = on
+}

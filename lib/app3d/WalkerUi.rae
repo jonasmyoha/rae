@@ -17,6 +17,7 @@ import GrassConfig
 import app3d/Slider
 open Scene3d
 open RendererDeferred
+open RendererQuality
 open Sky
 open Gbuffer
 open Rendergraph
@@ -296,6 +297,10 @@ func uiUpdate(
     if not isForwardRenderer(renderer: renderer) {
       setTaaEnabled(renderer: renderer, on: inputSystem.settings.taa)
     }
+    setRendererFullResolution(
+      renderer: renderer
+      on: inputSystem.settings.quality is SettingsQuality.ultra
+    )
     renderer.sky = settingsBuildSky(
       settingsState: inputSystem.settings
       data: cameraSystem.hosek

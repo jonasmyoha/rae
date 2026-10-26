@@ -46,6 +46,13 @@ open ui/UiSystems
 # a Sky out of.
 enum SettingsSkyModel { preetham, hosek, stylised, solid }
 
+# The renderer's quality steps. For now only Ultra differs: it draws the 3D
+# scene at the window's native resolution, pixel for pixel, with no dynamic
+# resolution, on desktop and on phones alike (RendererQuality). Low, Mid and
+# High are today's renderer (the device's resolution ceiling and the dynamic
+# scale); they are here so later steps have their places.
+enum SettingsQuality { low, mid, high, ultra }
+
 # Preetham: the default sky across the examples — the analytic model, listed
 # first here and first in the panel.
 # Hosek-Wilkie: the fitted physical model.
@@ -105,6 +112,8 @@ type SettingsState {
   # 21k blacked-out samples for SSAO. They need real enable flags in the
   # renderer, not a skipped pass.
   shadows: Bool
+  # The renderer's quality step (High: today's renderer)
+  quality: SettingsQuality = SettingsQuality.high
   dateDragging: Bool
   # Where on Earth, in degrees east. It does not move the sun (the clock is
   # local solar time), but it turns that time into universal time, which is
@@ -316,6 +325,22 @@ func settingsHandleAction(settingsState: mod SettingsState, actionId: view Strin
   }
   if actionId is "settings.anim.faster" {
     settingsState.speed = nextSpeed(current: settingsState.speed, up: true)
+    ret true
+  }
+  if actionId is "settings.quality.low" {
+    settingsState.quality = SettingsQuality.low
+    ret true
+  }
+  if actionId is "settings.quality.mid" {
+    settingsState.quality = SettingsQuality.mid
+    ret true
+  }
+  if actionId is "settings.quality.high" {
+    settingsState.quality = SettingsQuality.high
+    ret true
+  }
+  if actionId is "settings.quality.ultra" {
+    settingsState.quality = SettingsQuality.ultra
     ret true
   }
   if actionId is "settings.sky.hosek" {
@@ -606,6 +631,26 @@ func settingsApplyToWorld(
     world: world
     nodeId: "SettingsAnimTimeButton"
     slot: settingsSlotFor(on: settingsState.animateTime)
+  )
+  setNodeFillSlot(
+    world: world
+    nodeId: "SettingsQualityLow"
+    slot: settingsSlotFor(on: settingsState.quality is SettingsQuality.low)
+  )
+  setNodeFillSlot(
+    world: world
+    nodeId: "SettingsQualityMid"
+    slot: settingsSlotFor(on: settingsState.quality is SettingsQuality.mid)
+  )
+  setNodeFillSlot(
+    world: world
+    nodeId: "SettingsQualityHigh"
+    slot: settingsSlotFor(on: settingsState.quality is SettingsQuality.high)
+  )
+  setNodeFillSlot(
+    world: world
+    nodeId: "SettingsQualityUltra"
+    slot: settingsSlotFor(on: settingsState.quality is SettingsQuality.ultra)
   )
   setNodeFillSlot(
     world: world
