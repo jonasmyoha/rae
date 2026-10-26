@@ -120,6 +120,9 @@ func checkFoliageLayout(
     if species is speciesBroadleaf {
       subject.imageLayers = List(Int) { 2, 3, 3, 3 }
     }
+    if species is speciesOrange {
+      subject.imageLayers = List(Int) { 4, 5, 5, 5 }
+    }
     subjects.add(value: subject)
   }
   var atlas: ImpostorAtlas = bakeTexturedImpostorAtlas(
@@ -143,7 +146,7 @@ func checkFoliageLayout(
     let leaf: Float = shares.copyAtFallback(index: species, fallback: 0.0)
     let ordinary: Float = plain.copyAtFallback(index: species, fallback: 0.0)
     var same: Bool = Math.abs(value: leaf - ordinary) <= 0.01
-    if species is speciesBirch or species is speciesBroadleaf {
+    if species is speciesBirch or species is speciesBroadleaf or species is speciesOrange {
       # Facing cards intentionally differ from the unposed ordinary layout.
       same = leaf > 0.05 and leaf < 0.70
     }
@@ -155,7 +158,7 @@ func checkFoliageLayout(
     )
   }
   log("leaf layout: {leafMeshes} leaf meshes baked with their 64-byte vertices")
-  let posedSpecies: List(Int) = { speciesBroadleaf, speciesBirch }
+  let posedSpecies: List(Int) = { speciesBroadleaf, speciesOrange, speciesBirch }
   loop let species: Int in posedSpecies {
     # Export the actual camera-facing textured crowns, not only the deliberately unposed
     # 32-byte control above. A healthy layer average can hide empty view cells.
@@ -489,6 +492,8 @@ func main() ret Int {
       "lib/assets/trees/birchSpray.png"
       "lib/assets/trees/limeBark.png"
       "lib/assets/trees/limeSpray.png"
+      "lib/assets/trees/sugarMapleBark.png"
+      "lib/assets/trees/sugarMapleSpray.png"
     }
     if not setSurfaceImages(images: images, resources: resources, paths: paths) {
       ret 1
@@ -528,6 +533,9 @@ func main() ret Int {
       }
       if species is speciesBroadleaf {
         subject.imageLayers = List(Int) { 2, 3, 3, 3 }
+      }
+      if species is speciesOrange {
+        subject.imageLayers = List(Int) { 4, 5, 5, 5 }
       }
       subjects.add(value: subject)
     }

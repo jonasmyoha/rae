@@ -10,6 +10,8 @@ open Scene3d
 open FoliageMesh
 open RendererDeferred
 open procgen/Foliage
+open procgen/SugarMaple
+open RendererImages
 open GroveGrass
 open FluffyGrove
 open CamphorGrove
@@ -116,6 +118,46 @@ func plantTree(
     }
     ret
   }
+  if species is 0 and Sys.getEnv(name: "RAE_MAPLE_CONTROL") is not "1" {
+    let tree: SugarMapleTree = sugarMapleTree(seed: seed, height: height, width: width)
+    let barkLayer: Int = rendererLoadSurfaceImage(renderer: renderer, path: sugarMapleBarkTexture())
+    let leafLayer: Int = rendererLoadSurfaceImage(renderer: renderer, path: sugarMapleLeafTexture())
+    var woodMaterial: Material3d = bark
+    woodMaterial.baseColor = sugarMapleWoodColor()
+    woodMaterial.colorTextureLayer = barkLayer
+    place(
+      world: world
+      renderer: renderer
+      mesh: tree.wood
+      material: woodMaterial
+      position: position
+      scale: unit
+      rotation: 0
+    )
+    var triangles: Int = tree.wood.indices.length / 3
+    loop var tone: Int = 0, tone < 3, ++tone {
+      let leaves: MeshData = sugarMapleLeaves(tree: tree, seed: seed, tone: tone)
+      triangles = triangles + leaves.indices.length / 3
+      if Sys.getEnv(name: "RAE_MAPLE_BARE") is not "1" {
+        var material: Material3d = foliagePaint(species: species, tone: tone)
+        material.baseColor = sugarMapleLeafColor(tone: tone)
+        material.colorTextureLayer = leafLayer
+        place(
+          world: world
+          renderer: renderer
+          mesh: leaves
+          material: material
+          position: position
+          scale: unit
+          rotation: 0
+        )
+      }
+    }
+    log(
+      "[sugar-maple] seed={seed} wood={tree.wood.vertCount}v sprays={tree.sprays.length} total={triangles}t"
+    )
+    ret
+  }
   let tree: BroadleafTree = broadleafTree(seed: seed, height: height, width: width)
   place(
     world: world
@@ -126,6 +168,9 @@ func plantTree(
     scale: unit
     rotation: 0
   )
+  if species is 0 and Sys.getEnv(name: "RAE_MAPLE_BARE") is "1" {
+    ret
+  }
   loop var tone: Int = 0, tone < 3, ++tone {
     let leaves: MeshData = broadleafLeaves(
       tips: tree.tips
@@ -481,6 +526,28 @@ func buildGrove(renderer: mod DeferredRenderer) ret Grove {
   let groundMesh: MeshHandle = uploadFoliage(renderer: renderer, mesh: ground)
   # Isolated comparison still uses the exact grove specimen and ground.
   # Other trees would occlude it during a full camera orbit.
+  if Sys.getEnv(name: "RAE_MAPLE_ISOLATE") is "1" {
+    var seed: Int = 501
+    var height: Float = 4.7
+    if Sys.getEnv(name: "RAE_MAPLE_SEED").length() > 0 {
+      seed = Sys.getEnv(name: "RAE_MAPLE_SEED").toInt()
+    }
+    if Sys.getEnv(name: "RAE_MAPLE_HEIGHT").length() > 0 {
+      height = Sys.getEnv(name: "RAE_MAPLE_HEIGHT").toFloat()
+    }
+    plantTree(
+      world: world
+      renderer: renderer
+      position: Vec3.create(x: -4.8, y: 2, z: 0)
+      height: height
+      width: 2.05
+      seed: seed
+      species: 0
+      palm: false
+    )
+    obstacles.add(value: { x: -4.8, y: 2, radius: 0.45 })
+    ret Grove { world: own world, obstacles: own obstacles, groundMesh: groundMesh }
+  }
   if Sys.getEnv(name: "RAE_LIME_ISOLATE") is "1" {
     addFluffyGrove(world: world, renderer: renderer, obstacles: obstacles)
     ret Grove { world: own world, obstacles: own obstacles, groundMesh: groundMesh }

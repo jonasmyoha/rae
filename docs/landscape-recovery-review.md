@@ -467,3 +467,17 @@ leaf marks and regular bark ridges remain visible. Its middle level shares the
 near mesh, with the resulting geometry cost stated explicitly. Six geometry
 fixtures, three targeted hardware checks and all four consuming example gates
 pass; these checks do not establish a complete match to the reference art.
+
+## Sugar maple autumn-orange refinement
+
+[The maple comparison](sugar-maple-refinement.md) records the unchanged opaque
+control and the new kind-4 ascending scaffold, original copper foliage cutout
+and grey-brown bark. It includes three seed/height studies, bare/side/underside,
+backlit/night and matched forest captures beside T04–T07 in the private report.
+Existing maple slots and placements remain distinct.
+
+Five narrow geometry fixtures, three hardware checks and all four consuming
+example gates pass. The report states geometry and resource counts, the larger
+rotating-card bound and the shared near/middle mesh trade-off. Repeated close
+leaf motifs, dark overlaps and limited internal sky gaps remain visible; passing
+the checks does not establish a complete match to the reference art.
