@@ -17,6 +17,13 @@ compiler/bin/rae run examples/143_walker_forest/Main.rae
 
 ## What is different from 136
 
+- **The hand-made reference tree.** 9 m ahead of where the walker starts, at
+  the edge of the spawn clearing, stands the tree being made by hand to
+  match reference crop T02 (lib/treeGen, docs/reference-tree-plan.md): its
+  traced trunk and branches and its leaf cards, among the old trees, so it
+  can be seen in motion (`referenceTree: true`, lib/app3d/ReferenceTree). It
+  has no physics body yet: the walker passes through its trunk.
+
 - **No island.** The lib's biome field (lib/WorldBiome) fades the land into
   the sea at its island radius; this example gives it a radius far past
   anywhere the walker can go (`wideForestBiome`, lib/app3d/WideForest), on the
