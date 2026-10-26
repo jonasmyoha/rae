@@ -52,6 +52,8 @@ type TreeParams {
   # stays on the trace).
   tracedLimbs: List(TracedLimb)
   tracedDepthTurn: Float
+  # The traced tree's leaf masses (none: a bare tree)
+  tracedClumps: List(TracedClump)
   # The thinnest a tip gets (m)
   tipRadius: Float
   # A side branch's radius at its base, as a part of its parent's there
@@ -105,6 +107,7 @@ func warmBroadleafParams(seed: view Int) ret TreeParams {
   var params: TreeParams = stoutBroadleafParams(seed: seed)
   params.height = tracedT02Height
   params.tracedLimbs = tracedT02Limbs()
+  params.tracedClumps = tracedT02Clumps()
   params.tracedDepthTurn = degrees(value: 20.0)
   params.limbEndThickness = 0.45
   ret params
@@ -141,6 +144,7 @@ func stoutBroadleafParams(seed: view Int) ret TreeParams {
     branchLength: 0.22
     tracedLimbs: List.create(TracedLimb, cap: 0)
     tracedDepthTurn: 0.0
+    tracedClumps: List.create(TracedClump, cap: 0)
     tipRadius: 0.02
     limbThickness: 0.62
     limbEndThickness: 0.0

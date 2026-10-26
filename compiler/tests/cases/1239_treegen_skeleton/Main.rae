@@ -10,6 +10,7 @@ open Mesh3d
 open treeGen/TreeParams
 open treeGen/Skeleton
 open treeGen/BarkMesh
+open treeGen/ClumpMesh
 
 func check(label: view String, ok: view Bool) {
   if ok {
@@ -138,6 +139,12 @@ func main() ret Int {
   check(label: "two unequal leaders: the second thinner and lower", ok: leadersOk)
   check(label: "side branches keep at least 45% of their thickness to the tip", ok: evenOk)
   check(label: "every bark triangle faces outward, tip caps too", ok: meshOk)
+  # the traced leaf masses: all of them, solid, facing outward
+  let masses: TreeSkeleton = growSkeleton(params: warmBroadleafParams(seed: 1))
+  check(
+    label: "the traced leaf masses ({masses.clumps.length}) face outward"
+    ok: masses.clumps.length > 0 and facesOutward(mesh: clumpMesh(skeleton: masses))
+  )
   let again: TreeSkeleton = growSkeleton(params: warmBroadleafParams(seed: 7))
   let once: TreeSkeleton = growSkeleton(params: warmBroadleafParams(seed: 7))
   let tipAgain: Vec3 = again.limbs.copyAtDefault(index: 3).points.copyAtDefault(index: 14)

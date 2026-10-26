@@ -13,6 +13,7 @@ open treeGen/TreeParams
 open treeGen/Skeleton
 open treeGen/BarkMesh
 open treeGen/Bark
+open treeGen/ClumpMesh
 
 const labBarkImagePath: String = ".rae/treeLab/warmBark.png"
 
@@ -79,7 +80,39 @@ func addGeneratedTree(world: mod World3d, renderer: mod DeferredRenderer, seed: 
     rotation: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
     scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
   )
+  # the leaf masses as plain solids, so only their layout is judged
+  # (docs/reference-tree-plan.md step 4); RAE_TREELAB_CLUMPS=off: bare wood
+  if Sys.getEnv(name: "RAE_TREELAB_CLUMPS") is not "off" {
+    let clumps: MeshData = clumpMesh(skeleton: skeleton)
+    let clumpHandle: MeshHandle = uploadMesh(
+      renderer: renderer
+      verts: clumps.verts
+      vertCount: clumps.vertCount
+      indices: clumps.indices
+    )
+    let unusedClumpsEntityId: EntityId = world3dAddMeshInstance(
+      world: world
+      mesh: clumpHandle
+      material: clumpLayoutMaterial()
+      position: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+      rotation: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+      scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
+    )
+  }
   log(
-    "[treeLab] warmBroadleaf seed {seed}: {skeleton.limbs.length} limbs, {mesh.vertCount} vertices, {mesh.indices.length / 3} triangles"
+    "[treeLab] warmBroadleaf seed {seed}: {skeleton.limbs.length} limbs, {skeleton.clumps.length} leaf masses, {mesh.vertCount} bark vertices"
   )
+}
+
+# The leaf masses' plain material for the layout step: a flat, matte
+# grey-green, no picture
+func clumpLayoutMaterial() ret Material3d {
+  ret Material3d {
+    colorTextureLayer: -1
+    baseColor: Vec3.create(x: 0.36, y: 0.42, z: 0.3)
+    metallic: 0.0
+    roughness: 1.0
+    emission: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    toon: false
+  }
 }

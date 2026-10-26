@@ -1,0 +1,114 @@
+# treeGen/ClumpMesh — a tree's leaf masses as plain solid ellipsoids, one
+# mesh (docs/reference-tree-plan.md step 4: only their layout is judged,
+# before any leaves). Each mass is a smooth ellipsoid with a flatter
+# underside, turned in the picture's plane (x-z) as it was traced. Written
+# new.
+import Math
+import Vec3
+open Mesh3d
+open treeGen/TracedLimb
+open treeGen/Skeleton
+
+# Rings from top to bottom, and points round each ring
+const clumpRings: Int = 12
+
+const clumpSegments: Int = 20
+
+# A point of `clump`'s surface in its own frame (x across, y in depth, z up)
+# for the unit direction `direction`, and the surface's normal there
+func clumpSurface(clump: view TracedClump, direction: view Vec3) ret Vec3 {
+  var up: Float = clump.radii.z
+  if direction.z < 0.0 {
+    up = clump.radii.z * clump.underside
+  }
+  ret Vec3.create(
+    x: direction.x * clump.radii.x
+    y: direction.y * clump.radii.y
+    z: direction.z * up
+  )
+}
+
+func clumpNormal(clump: view TracedClump, direction: view Vec3) ret Vec3 {
+  var up: Float = clump.radii.z
+  if direction.z < 0.0 {
+    up = clump.radii.z * clump.underside
+  }
+  ret Vec3.vnorm(
+    a: Vec3.create(
+      x: direction.x / clump.radii.x
+      y: direction.y / clump.radii.y
+      z: direction.z / up
+    )
+  )
+}
+
+# Turn a vector of the clump's frame by its picture turn: clockwise as seen
+# from the front (from -y), so about the y axis
+func turnInPicture(value: view Vec3, turn: view Float) ret Vec3 {
+  let cosine: Float = Math.cos(x: turn)
+  let sine: Float = Math.sin(x: turn)
+  ret Vec3.create(
+    x: value.x * cosine + value.z * sine
+    y: value.y
+    z: -value.x * sine + value.z * cosine
+  )
+}
+
+func addClump(mesh: mod MeshData, clump: view TracedClump) {
+  let first: Int = mesh.vertCount
+  loop var ring: Int = 0, ring <= clumpRings, ++ring {
+    let polar: Float = 3.1415927 * ring.toFloat() / clumpRings.toFloat()
+    loop var segment: Int = 0, segment <= clumpSegments, ++segment {
+      let around: Float = 6.2831853 * segment.toFloat() / clumpSegments.toFloat()
+      let direction: Vec3 = Vec3.create(
+        x: Math.sin(x: polar) * Math.cos(x: around)
+        y: Math.sin(x: polar) * Math.sin(x: around)
+        z: Math.cos(x: polar)
+      )
+      let position: Vec3 = Vec3.vadd(
+        a: clump.centre
+        b: turnInPicture(value: clumpSurface(clump: clump, direction: direction), turn: clump.turn)
+      )
+      let normal: Vec3 = turnInPicture(
+        value: clumpNormal(clump: clump, direction: direction)
+        turn: clump.turn
+      )
+      mesh.verts.add(value: position.x)
+      mesh.verts.add(value: position.y)
+      mesh.verts.add(value: position.z)
+      mesh.verts.add(value: normal.x)
+      mesh.verts.add(value: normal.y)
+      mesh.verts.add(value: normal.z)
+      mesh.verts.add(value: segment.toFloat() / clumpSegments.toFloat())
+      mesh.verts.add(value: ring.toFloat() / clumpRings.toFloat())
+      mesh.vertCount = mesh.vertCount + 1
+    }
+  }
+  let row: Int = clumpSegments + 1
+  loop var ring: Int = 0, ring < clumpRings, ++ring {
+    loop var segment: Int = 0, segment < clumpSegments, ++segment {
+      let a: Int = first + ring * row + segment
+      let b: Int = a + row
+      mesh.indices.add(value: a)
+      mesh.indices.add(value: b)
+      mesh.indices.add(value: a + 1)
+      mesh.indices.add(value: a + 1)
+      mesh.indices.add(value: b)
+      mesh.indices.add(value: b + 1)
+    }
+  }
+}
+
+# Every leaf mass of `skeleton` as one mesh
+func clumpMesh(skeleton: view TreeSkeleton) ret MeshData {
+  let perClump: Int = (clumpRings + 1) * (clumpSegments + 1)
+  var mesh: MeshData = {
+    verts: List.create(Float, cap: skeleton.clumps.length * perClump * 8)
+    indices: List.create(Int, cap: skeleton.clumps.length * clumpRings * clumpSegments * 6)
+    vertCount: 0
+  }
+  loop let clump: view TracedClump in skeleton.clumps {
+    addClump(mesh: mesh, clump: clump)
+  }
+  ret mesh
+}
