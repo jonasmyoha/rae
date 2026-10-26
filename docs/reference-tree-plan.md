@@ -1,6 +1,7 @@
 # One tree that matches one reference tree
 
-Status: plan, not started (2026-10-26).
+Status: plan, not started (2026-10-26). Decided: **a generator in Rae**,
+written new, not based on the existing tree code (see "Built new").
 
 ## Why this plan
 
@@ -184,22 +185,40 @@ Done when: the before and after pictures of each example are accepted.
 - Other reference trees (T01's tall tufted tree, T04/T05's autumn trees) are
   done the same way, one at a time, each against its own crop.
 
-## Decision needed before step 3
+## Decided: a generator in Rae, built new
 
-**How the tree is made:**
+The tree is made by a **procedural generator written in Rae** (decision
+2026-10-26). No Blender, no hand-made model, no imported tree mesh.
+One seed and a set of parameters give one tree; the T02 checklist gives the
+parameters' ranges.
 
-- **(a) Procedural, in Rae:** a generator that grows the skeleton from
-  parameters and places the clumps. It fits the existing pipeline (seeds,
-  levels of detail, the impostor bake) and gives endless variations. It is
-  the slower way to find the look.
-- **(b) Made by hand in Blender, loaded as glTF:** faster to find the look,
-  because a person (or an agent through the Blender connection) shapes it
-  directly. It gives a few fixed trees, not endless variations, and leaf-card
-  normals and per-vertex darkness must be set up in Blender.
-- **(c) Both:** find the look by hand in Blender first (steps 3 to 5 as one
-  model), then build the generator to reproduce that model, judged against
-  both T02 and the hand-made tree.
+### Built new, not on the old or new tree rendering
 
-The recommendation is (c): the look is the hard part, and it is found
-fastest by hand; the generator then has a fixed target it can be checked
-against.
+Both the old trees and the new ones have large problems, so the generator
+does not start from them. It lives in its own package, `lib/treeGen/`
+(PascalCase files, e.g. `lib/treeGen/Skeleton.rae`, `Clumps.rae`,
+`Bark.rae`, `TreeMesh.rae`), and it does NOT import, copy or extend:
+
+- the tree species and their helpers in `lib/procgen/`: `Tree`, `Foliage`,
+  `FoliageCards`, `FluffyFoliage`, `CrownScaffold`, `CurvedFork`,
+  `CurvedForkBranch`, `SculpturalFork`, `ForkSurface`, `Birch`, `Camphor`,
+  `CamphorGeometry`, `Cypress`, `Ginkgo`, `Lime`, `JapaneseMaple`,
+  `RedMaple`, `SugarMaple`, `Spruce`, `SpruceControl`, `Palm`;
+- the forest's tree setup in `lib/app3d/GroveTrees.rae`;
+- the foliage mesh, pipeline and shadow path (`lib/FoliageMesh.rae`,
+  `lib/FoliagePipeline.rae`, `lib/FoliageShadow.rae`) and the leaf wind in
+  `lib/wind.wgsl`.
+
+If a piece of those files turns out to be exactly what is needed, it is
+copied into `lib/treeGen/` only with approval, and the
+step says why.
+
+What it MAY use is the general engine, which is not tree code: math
+(`Vec3`, `Quat`, `Math3d`, `Noise`), `Mesh3d`/`MeshStore` and the renderer
+(the G-buffer and forward passes, shadows, materials and textures), the
+image and PNG code, the impostor bake (`lib/ImpostorBake.rae`) for step 7,
+and the ECS. A new shader for the clumps (step 5) is new code in
+`lib/treeGen/`, not a change to the foliage shaders.
+
+The new tree enters the shared forests only in step 9, as a new species
+next to the old ones.
