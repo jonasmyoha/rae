@@ -84,6 +84,10 @@ func warmBroadleafParams(seed: view Int) ret TreeParams {
   # the lowest branches start near the fork, and all are short
   params.branchFrom = 0.54
   params.branchLength = 0.19
+  # the trunk 1 m shorter to the fork than the stout tree's, and only a
+  # gentle S-curve (half the stout tree's swing)
+  params.forkHeight = params.forkHeight - 1.0 / params.height
+  params.trunkSway = params.trunkSway * 0.5
   params.limbThickness = 0.4
   params.limbEndThickness = 0.55
   params.limbBend = 0.006
