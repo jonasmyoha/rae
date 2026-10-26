@@ -12,6 +12,10 @@
 # TREELAB_OUT   the picture to write (default: treeReference/lab/ in
 #               looks-development, compare-<camera>.png, not committed there). T02 is private, so
 #               the picture is never written into this repository.
+# For the near camera it also writes overlay-near.png beside it: T02 with
+# the hand-drawn trace, the render with the trace and the generated tree's
+# centre lines, and the two blended (traceTree.py overlay).
+# TREELAB_TRACE the trace (default: treeReference/traces/T02.js)
 # TREELAB_ITERATION  a round's name (YYYY-MM-DD-stepN-short-name): also copy
 #               the picture into treeReference/rounds/<name>/, the history
 #               that is never overwritten (looks-development's README)
@@ -22,6 +26,8 @@ CAMERA="${1:-near}"
 LOOKS="${TREELAB_LOOKS_REPO:-$HOME/Documents/my_own_stuff/own_repos/looks-development}"
 T02="${TREELAB_T02:-$LOOKS/references/crops/T02.png}"
 OUT="${TREELAB_OUT:-$LOOKS/treeReference/lab/compare-$CAMERA.png}"
+TRACE="${TREELAB_TRACE:-$LOOKS/treeReference/traces/T02.js}"
+OVERLAY="$(dirname "$OUT")/overlay-$CAMERA.png"
 [ -f "$T02" ] || { echo "error: reference crop not found: $T02 (set TREELAB_T02)" >&2; exit 1; }
 case "$OUT" in "$PWD"/*|examples/*|lib/*|docs/*)
   echo "error: $OUT is inside the repository; T02 is private (set TREELAB_OUT elsewhere)" >&2; exit 1;;
@@ -30,7 +36,7 @@ TMP="$(mktemp -d -t rae_treelab_XXXXXX)"
 trap 'rm -rf "$TMP"' EXIT
 
 # 1. The render, from the chosen camera
-RAE_TREELAB_CAMERA="$CAMERA" RAE_SDL_HEADLESS_MS=4000 RAE_GPU2D_SCREENSHOT="$TMP/render.bmp" \
+RAE_TREELAB_DUMP="$TMP/skeleton.txt" RAE_TREELAB_CAMERA="$CAMERA" RAE_SDL_HEADLESS_MS=4000 RAE_GPU2D_SCREENSHOT="$TMP/render.bmp" \
   perl -e 'alarm shift; exec @ARGV' 240 compiler/bin/rae run examples/146_treeLab/Main.rae \
   > "$TMP/run.log" 2>&1
 [ -f "$TMP/render.bmp" ] || { echo "error: no render (see the run's log below)" >&2; tail -20 "$TMP/run.log" >&2; exit 1; }
@@ -82,9 +88,18 @@ PY
 mkdir -p "$(dirname "$OUT")"
 sips -s format png "$TMP/joined.bmp" --out "$OUT" > /dev/null
 echo "wrote $OUT (left: T02, right: camera '$CAMERA')"
+# 4. The overlay (the near camera is the one the trace is aligned to)
+if [ "$CAMERA" = near ] && [ -f "$TRACE" ] && [ -f "$TMP/skeleton.txt" ]; then
+  sips -s format bmp "$T02" --out "$TMP/t02.bmp" > /dev/null
+  python3 examples/146_treeLab/traceTree.py overlay "$TRACE" "$TMP/t02.bmp" "$TMP/render.bmp" \
+    "$TMP/skeleton.txt" "$TMP/overlay.bmp" \
+    && sips -s format png "$TMP/overlay.bmp" --out "$OVERLAY" > /dev/null \
+    && echo "wrote $OVERLAY (T02 + trace | render + trace + generated centre lines | both blended)"
+fi
 if [ -n "${TREELAB_ITERATION:-}" ]; then
   ROUND="$LOOKS/treeReference/rounds/$TREELAB_ITERATION"
   mkdir -p "$ROUND"
   cp "$OUT" "$ROUND/compare-$CAMERA.png"
+  [ "$CAMERA" = near ] && [ -f "$OVERLAY" ] && cp "$OVERLAY" "$ROUND/overlay-near.png"
   echo "kept $ROUND/compare-$CAMERA.png (add the round to treeReference/rounds.js and commit looks-development)"
 fi
