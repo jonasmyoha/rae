@@ -406,6 +406,27 @@ func uploadSceneLight(
     )
     s: scale
   )
+  # The light the height mist scatters toward the eye from all round: half
+  # the sky's from above (Sky.skyLightAbove, each sky model's own light), half
+  # the lit ground's from below, tinted and paled as the mist settings ask.
+  # The shader adds the sun's by its phase function (RendererMist).
+  let around: Vec3 = Vec3.vscale(
+    a: Vec3.vadd(a: Vec3.vscale(a: skyLightAbove(sky: sky), s: scale), b: gndC)
+    s: 0.5
+  )
+  let grey: Float = around.x * 0.2126 + around.y * 0.7152 + around.z * 0.0722
+  let pale: Vec3 = Vec3.vadd(
+    a: around
+    b: Vec3.vscale(
+      a: Vec3.vsub(a: Vec3.create(x: grey, y: grey, z: grey), b: around)
+      s: targets.mistPaleness
+    )
+  )
+  targets.mistLight = Vec3.create(
+    x: pale.x * targets.mistTint.x
+    y: pale.y * targets.mistTint.y
+    z: pale.z * targets.mistTint.z
+  )
   setHosekChannel(targets: targets, c: sky.hosek.r, base: 0)
   setHosekChannel(targets: targets, c: sky.hosek.g, base: 12)
   setHosekChannel(targets: targets, c: sky.hosek.b, base: 24)

@@ -685,10 +685,12 @@ func uploadWaterUniform(
     put4(
       uniform: waterSystem.uniform
       base: 88
-      x: targets.mistTint.x
-      y: targets.mistTint.y
-      z: targets.mistTint.z
-      w: targets.mistPaleness
+      # the light the mist scatters from all round (the renderer's,
+      # GbufferPasses.uploadSceneLight)
+      x: targets.mistLight.x
+      y: targets.mistLight.y
+      z: targets.mistLight.z
+      w: 0.0
     )
     put4(
       uniform: waterSystem.uniform

@@ -101,6 +101,9 @@ type DeferredTargets {
   mistBaseHeight: Float
   mistTint: Vec3
   mistPaleness: Float
+  # The light the mist scatters toward the eye from all round, exposed
+  # (GbufferPasses.uploadSceneLight; LightU night.yzw, and the water's mist)
+  mistLight: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
   # uniforms + pipelines (created once, survive resizes)
   lightUniform: BufferId
   taaUniform: BufferId
@@ -862,12 +865,14 @@ func uploadLightUniform(
     z: -moonDir.z
     w: moonIntensity
   )
+  # the night sky's moonlight, and the light the mist scatters toward the
+  # eye from all round (RendererMist)
   pushVec4F(
     writer: targets.args
     x: nightLight
-    y: 0.0
-    z: 0.0
-    w: 0.0
+    y: targets.mistLight.x
+    z: targets.mistLight.y
+    w: targets.mistLight.z
   )
   ret uploadArgs(
     writer: targets.args

@@ -278,21 +278,24 @@ fn shadeSurface(s: ShadedSurface) -> vec3<f32> {
   }
   return radiance;
 }
-// The sky's colour in `dir` without the sun's disc (skyColor's sky): what a
-// far surface fades to in the mist, so it meets the sky with no seam
-fn mistSkyColor(dir: vec3<f32>) -> vec3<f32> {
-  let kind = L.skyParams.x;
-  let toSun = normalize(-L.sunDir.xyz);
-  var c = L.clearColor.rgb;
-  if (kind > 1.5 && kind < 2.5) { c = skyProcedural(dir, toSun, L.skyParams.y) * L.camPos.w; }
-  if (kind > 2.5 && kind < 3.5) { c = skyStylised(dir, toSun); }
-  if (kind > 3.5) { c = skyHosek(dir, toSun) * L.camPos.w; }
-  return c * L.skyParams.z;
+// How much of the light arriving from `cosAngle` (the cosine between the
+// way to the eye's ray and the way to the light) the mist scatters along
+// the ray: Henyey-Greenstein, mostly forward (g 0.6), so the mist glows
+// toward the sun and is darker away from it; per steradian
+const MIST_FORWARD: f32 = 0.6;
+fn mistPhase(cosAngle: f32) -> f32 {
+  let g2 = MIST_FORWARD * MIST_FORWARD;
+  let d = max(1.0 + g2 - 2.0 * MIST_FORWARD * cosAngle, 0.0001);
+  return (1.0 - g2) / (12.566371 * d * sqrt(d));
 }
 // Height mist (RendererMist): its density falls off exponentially with
 // height above a base, so the optical depth along the ray from the eye to
-// `wpos` has a closed form; the surface fades toward the (paler, tinted)
-// sky in the ray's direction, looking no lower than just over the horizon
+// `wpos` has a closed form. The mist hides what is behind it and adds the
+// light it scatters toward the eye: the light from all round (the sky above
+// and the lit ground below, tinted and paled; L.night.yzw, computed with
+// each sky model's own light) and the key light's (the sun, or the moon at
+// night) by its phase function. All of it is exposed, so the same mist
+// looks the same under every sky.
 fn applyMist(radiance: vec3<f32>, wpos: vec3<f32>) -> vec3<f32> {
   let toP = wpos - L.camPos.xyz;
   let d = max(length(toP), 0.001);
@@ -305,8 +308,7 @@ fn applyMist(radiance: vec3<f32>, wpos: vec3<f32>) -> vec3<f32> {
     depth = atEye * d * (1.0 - exp(-climb)) / climb;
   }
   let amount = 1.0 - exp(-max(depth, 0.0));
-  let sky = mistSkyColor(normalize(vec3<f32>(dir.xy, max(dir.z, 0.03))));
-  let grey = vec3<f32>(dot(sky, vec3<f32>(0.2126, 0.7152, 0.0722)));
-  let mistColor = mix(sky, grey, L.mistTint.w) * L.mistTint.rgb;
-  return mix(radiance, mistColor, amount);
+  let toLight = normalize(-L.sunDir.xyz);
+  let mistLight = L.night.yzw + L.sunColor.rgb * mistPhase(dot(dir, toLight));
+  return mix(radiance, mistLight, amount);
 }
