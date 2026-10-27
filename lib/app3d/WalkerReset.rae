@@ -1,5 +1,8 @@
-# app3d/WalkerReset — the walker app put back as it started: its "..." menu's
-# Reset (the app resets itself: ModeMenu's appResets) and the R key. Every
+# app3d/WalkerReset — the walker app put back as the SCENE starts, in place
+# (no restart): its "..." menu's Reset (the app resets itself: ModeMenu's
+# appResets) and the R key. The start is the fresh start's, never a
+# restored session's: the app builds its world round the fresh start and
+# only then puts the hero where a saved session left it (app3d/WalkerApp). Every
 # character (the hero and the crowd) back on its feet where it started,
 # facing as it did, in its starting clip, standing (a ragdoll gone, a climb
 # let go), each wanderer pausing at its start; every physics cube back in
@@ -101,31 +104,14 @@ func resetWalkerToStart(
       climber.leapLeft = 0.0
     }
     # On its feet where it started
-    if componentHas(this: physicsSystem.characters, entityId: entityId) {
-      let character: mod CharacterBody = componentMod(
-        this: physicsSystem.characters
-        entityId: entityId
-      )
-      character.mover.transform.p.x = started.feet.x
-      character.mover.transform.p.y = started.feet.y
-      character.mover.transform.p.z = started.feet.z + moverCenterAboveFeet(character: character)
-      character.mover.velocity.x = 0.0
-      character.mover.velocity.y = 0.0
-      character.mover.velocity.z = 0.0
-    }
-    if componentHas(this: world.controllers, entityId: entityId) {
-      let controller: mod ThirdPersonController = componentMod(
-        this: world.controllers
-        entityId: entityId
-      )
-      controller.position = Vec3.create(
-        x: started.feet.x
-        y: started.feet.y
-        z: started.feet.z - groundZ
-      )
-      controller.heading = started.heading
-      controller.moving = false
-    }
+    placeCharacter(
+      physicsSystem: physicsSystem
+      world: world
+      entityId: entityId
+      feet: started.feet
+      heading: started.heading
+      groundZ: groundZ
+    )
     restoreCharacterSpawnClip(
       spawns: walkerReset.spawns
       animStates: world.animStates
@@ -169,4 +155,68 @@ func resetWalkerToStart(
     snapCameraRigView(rig: rig)
   }
   physicsSystem.accumulator = 0.0
+}
+
+# A character standing at `feet` (world height) facing `heading`: its
+# physics mover and its controller, still. Reset uses it, and the app's
+# start, to put the hero where a restored session left it.
+func placeCharacter(
+  physicsSystem: mod WalkerPhysics
+  world: mod WalkerWorld
+  entityId: view EntityId
+  feet: view Vec3
+  heading: view Float
+  groundZ: view Float
+) {
+  if componentHas(this: physicsSystem.characters, entityId: entityId) {
+    let character: mod CharacterBody = componentMod(
+      this: physicsSystem.characters
+      entityId: entityId
+    )
+    character.mover.transform.p.x = feet.x
+    character.mover.transform.p.y = feet.y
+    character.mover.transform.p.z = feet.z + moverCenterAboveFeet(character: character)
+    character.mover.velocity.x = 0.0
+    character.mover.velocity.y = 0.0
+    character.mover.velocity.z = 0.0
+  }
+  if componentHas(this: world.controllers, entityId: entityId) {
+    let controller: mod ThirdPersonController = componentMod(
+      this: world.controllers
+      entityId: entityId
+    )
+    controller.position = Vec3.create(x: feet.x, y: feet.y, z: feet.z - groundZ)
+    controller.heading = heading
+    controller.moving = false
+  }
+}
+
+# The hero where a restored session left it (on land), once the world is
+# built round the fresh start and Reset has recorded that start; nothing
+# when no session was restored. `session` ends on land, and `hero` (the
+# app's copy of the hero's controller) as it.
+func placeHeroAtSession(
+  physicsSystem: mod WalkerPhysics
+  world: mod WalkerWorld
+  heroEntityId: view EntityId
+  session: mod ThirdPersonController
+  restored: view Bool
+  groundZ: view Float
+  biome: view BiomeConfig
+  hero: mod ThirdPersonController
+) {
+  if not restored {
+    ret
+  }
+  spawnOnLand(controller: session, groundZ: groundZ, biome: biome)
+  placeCharacter(
+    physicsSystem: physicsSystem
+    world: world
+    entityId: heroEntityId
+    feet: Vec3.create(x: session.position.x, y: session.position.y, z: session.position.z + groundZ)
+    heading: session.heading
+    groundZ: groundZ
+  )
+  # the app's own copy of the hero's controller, as the session left it
+  hero = session
 }
