@@ -1,0 +1,165 @@
+# RendererDeferredShadow — the deferred renderer's sun shadow pass, as the app
+# drives it (split from RendererDeferred for the 1000-line cap): open the
+# pass on the fitted cascades, queue the casters (meshes, instance batches,
+# sprites, skinned bodies, metaballs), close it. RendererDeferred owns the
+# DeferredRenderer type and the rest of the app-facing API.
+import RendererImages
+open Math3d
+open Scene3d
+open Shadow3d
+open ShadowMaps
+open ShadowMapsRecords
+open ShadowMapsSprite
+open ShadowMapsSdf
+open ImpostorAtlas
+open gpu/GpuResources
+open RendererDeferred
+
+# The sun cascades are the renderer's ShadowCache (RenderPasses.shadow); the
+# app fits the cascades (Shadow3d.fitShadowCascades) and, at RenderTag.shadow,
+# opens the pass, queues its casters and closes it. Every queued caster draws.
+func beginShadowPass(renderer: mod DeferredRenderer, c: view ShadowCascades) {
+  ensureRendererResources(renderer: renderer)
+  if let resources: mod GpuResources = renderer.gpuResources {
+    RendererImages.prepareShadowImages(renderer: renderer)
+    shadowBegin(shadow: renderer.passes.shadow, resources: resources, cascades: c)
+  }
+}
+
+# The cascades are their own submit, on purpose: the GPU starts on them while
+# the CPU still records the G-buffer. Recording them into the post passes'
+# shared submit (render-perf-5b) saved a submit but made the frame slower
+# (114: 5.3 -> 5.5 ms, 112: 8.5 -> 9.0 ms headless).
+func endShadowPass(renderer: mod DeferredRenderer) {
+  if let resources: mod GpuResources = renderer.gpuResources {
+    shadowEnd(shadow: renderer.passes.shadow, resources: resources)
+  }
+}
+
+# How many casters the last shadow pass rasterised (#388: only a count tells
+# a working pass from a dead one).
+func shadowCasterCount(renderer: view DeferredRenderer) pub ret Int {
+  ret ShadowMaps.shadowCasterCount(shadow: renderer.passes.shadow)
+}
+
+# Per-app cast-shadow ambient darkening [0..1] (shadowCfg.z; 0 = off).
+func setShadowAmbient(renderer: mod DeferredRenderer, strength: copy Float) pub {
+  ShadowMaps.setShadowAmbient(shadow: renderer.passes.shadow, strength: strength)
+}
+
+# Paint the sun cascades for debugging (example 142): each cascade's area is
+# tinted in its own colour (red, green, blue, yellow from the camera out), each
+# shadow map's square is outlined in that colour, and a line in the same colour
+# marks where the cascade ends. The last line is where the shadows stop.
+func setShadowCascadeDebug(renderer: mod DeferredRenderer, on: copy Bool) {
+  renderer.passes.shadow.debugCascades = on
+}
+
+# Every visible mesh of a World3d as a static caster, resolved in this
+# renderer's MeshStore.
+func renderSceneShadowWorldWith(renderer: mod DeferredRenderer, world: view World3d) pub {
+  if let resources: view GpuResources = renderer.gpuResources {
+    ShadowMaps.renderSceneShadowWorld(
+      shadow: renderer.passes.shadow
+      meshes: renderer.passes.gbuffer.meshes
+      resources: resources
+      world: world
+    )
+  }
+}
+
+# One static caster from this renderer's MeshStore.
+func drawShadowCasterWith(
+  renderer: mod DeferredRenderer
+  mesh: view MeshHandle
+  model: view Mat4
+) pub {
+  if let resources: view GpuResources = renderer.gpuResources {
+    drawShadowCaster(
+      shadow: renderer.passes.shadow
+      meshes: renderer.passes.gbuffer.meshes
+      resources: resources
+      mesh: mesh
+      model: model
+    )
+  }
+}
+
+# Every instance of `batch` as a shadow caster of `mesh` (the batch's own
+# mesh, or a stand-in such as a sphere for capsules): the models the G-buffer
+# draws, queued in one go.
+func drawShadowCasterBatchWith(
+  renderer: mod DeferredRenderer
+  mesh: view MeshHandle
+  batch: view InstanceBatch
+) {
+  if let resources: view GpuResources = renderer.gpuResources {
+    drawShadowCasterRecords(
+      shadow: renderer.passes.shadow
+      meshes: renderer.passes.gbuffer.meshes
+      resources: resources
+      mesh: mesh
+      records: batch.records
+      stride: instanceRecordFloats
+      count: batch.count
+    )
+  }
+}
+
+# Every billboard of `batch` (GbufferSprite's DrawU records) as a caster facing the sun, cut
+# by the alpha below `cutoff` of its picture (`aspect` wide) or of its `impostors` atlas.
+func drawShadowSpriteBatchWith(
+  renderer: mod DeferredRenderer
+  batch: view InstanceBatch
+  aspect: view Float
+  cutoff: view Float
+  impostors: view ImpostorBinding
+) {
+  shadowQueueSprites(
+    shadow: renderer.passes.shadow
+    records: batch.records
+    stride: instanceRecordFloats
+    count: batch.count
+    aspect: aspect
+    cutoff: cutoff
+    impostors: impostors
+  )
+}
+
+# A skinned shadow caster from this renderer's SkinStore; `paletteBase` is its
+# start row in the palette (characterPaletteBase, #547).
+func drawShadowCasterSkinnedWith(
+  renderer: mod DeferredRenderer
+  mesh: view MeshHandle
+  model: view Mat4
+  paletteBase: copy Int
+) pub {
+  if let resources: view GpuResources = renderer.gpuResources {
+    drawShadowCasterSkinned(
+      shadow: renderer.passes.shadow
+      skins: renderer.passes.gbuffer.skins
+      resources: resources
+      mesh: mesh
+      model: model
+      paletteBase: paletteBase
+    )
+  }
+}
+
+# A metaball cluster as a caster (`packedBalls`: count x (x, y, z, radius)).
+func shadowMetaballsWith(
+  renderer: mod DeferredRenderer
+  packedBalls: view List(Float)
+  count: copy Int
+  smoothing: copy Float
+) pub {
+  if let resources: mod GpuResources = renderer.gpuResources {
+    shadowMetaballs(
+      shadow: renderer.passes.shadow
+      resources: resources
+      packedBalls: packedBalls
+      count: count
+      smoothing: smoothing
+    )
+  }
+}
