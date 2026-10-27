@@ -90,7 +90,8 @@ before.
   point lights and emissive materials. Where a painted colour lights the
   scene (a stylised sky's ambient, the solid sky's ambient) it is converted
   with `fromRelativeLight`.
-- The walker scenes' sun is `SettingsSky.settingsSunNoonLux` = 20,000 lux at
+- (Superseded 2026-10-28, see "The walker sun" below.) The walker scenes' sun
+  was `SettingsSky.settingsSunNoonLux` = 20,000 lux at
   noon: their long-standing balance of sun to sky and ambient. A real clear
   noon is about 100,000 lux with the same sky, so the walker sun is about 5
   times weaker than real. The tree lab's sun is 66,000 lux, examples 140 and
@@ -151,6 +152,18 @@ Measured in 143 (exposure fixed at the reference): the far band below the
 horizon under Preetham and under Hosek-Wilkie differed by 13 (noon), 21
 (evening) and 32 (facing the evening sun) levels of 255 before, and by 6, 7
 and 19 after; Preetham's mist barely changed.
+
+## The walker sun (0.2.178)
+
+The walker sun was compared at 20,000 lux (the old balance),
+66,000 (the tree lab's) and 100,000 (a real clear noon), all with the
+automatic exposure (looks-development `lighting/walkerSun.html`); the choice was
+**100,000 lux with the walker camera's exposure compensation at -0.5 EV**
+(`SettingsSky.settingsSunNoonLux`, `WalkerApp.walkerExposureCompensation`;
+the settings panel's Exposure row starts there). The real value means later
+light fits without retuning; the half stop keeps noon's sunlit sand from
+washing out. The editor-panel examples keep 0 EV. `RAE_SUN_LUX=<lux>` still
+tries another sun.
 
 ## Steps (QUEUE)
 

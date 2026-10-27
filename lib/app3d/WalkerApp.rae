@@ -89,6 +89,10 @@ open app3d/CameraFov
 # their mip chains, readbacks and surface (192, as the downstream game sizes
 # its sea), plus what the rest of the walker keeps there; without, the grass
 # compute alone
+# The walker camera's exposure compensation (EV, - darker): the real-strength
+# sun's noon (SettingsSky.settingsSunNoonLux) looked best a half stop down
+const walkerExposureCompensation: Float = -0.5
+
 const walkerGpuCapacityWithSea: Int = 288
 
 const walkerGpuCapacity: Int = 96
@@ -510,6 +514,10 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
       skyModel: settingsSkyFromEnv(fallback: SettingsSkyModel.preetham)
     )
     settingsState.timeOfDay.daySeconds = walkerDaySeconds
+    # The walker's camera a half stop darker than the meter says, so the
+    # real-strength sun's noon does not wash out the sunlit sand (the
+    # settings panel's Exposure row starts here)
+    settingsState.exposureCompensation = walkerExposureCompensation
     # RAE_WALKER_DAY overrides the start day of the year (1..366; 193 in 1995
     # is a full moon), so a headless frame can look at any phase
     let daySetting: String = Sys.getEnv(name: "RAE_WALKER_DAY")
