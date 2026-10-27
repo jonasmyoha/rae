@@ -201,7 +201,7 @@ func createSkyHosek(
   turbidity: view Float
   groundAlbedo: view Float
 ) pub ret Sky {
-  ret Sky {
+  var sky: Sky = {
     kind: SkyKind.hosek
     exposure: 1.0
     yawDeg: 0.0
@@ -225,16 +225,22 @@ func createSkyHosek(
       albedo: groundAlbedo
       solarElevationRad: sunElevationRad(sunDir: sunDir)
     ))
-    # Below the horizon the fit is undefined, so the shader fades to
-    # horizonColor there. A dark ground tone read as a band of mud wherever the
-    # scene's own ground stopped short of the horizon, which is most cameras;
-    # a pale haze reads as distance instead, and meets the sky's bottom edge
-    # without a seam.
+    # Below the horizon the shader fades to horizonColor: the sky's own
+    # light at the horizon (a dark ground tone read as a band of mud wherever
+    # the scene's ground stopped short of the horizon; matching the sky
+    # meets its bottom edge without a seam)
     zenithColor: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
-    # in cd/m2, like the fitted sky it fades to
-    horizonColor: Vec3.create(x: 10400.0, y: 11200.0, z: 12000.0)
+    # set below from the fitted sky itself (hosekHorizonColor)
+    horizonColor: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
     bands: 0.0
   }
+  # Below the horizon the fit is undefined, and the shader and the water fade
+  # to this: the fitted sky's own light just above the horizon, averaged
+  # round it. A fixed daylight haze here (11,000 cd/m2) did not dim with the
+  # sun, so at night the sky ended in a bright band and the water, which
+  # reflects it, glowed as if emissive.
+  sky.horizonColor = hosekHorizonColor(hosek: sky.hosek, sunDir: sunDir)
+  ret sky
 }
 
 # The Hosek-Wilkie RGB dataset gives radiance in W/(m2 sr) per channel; at
@@ -252,6 +258,20 @@ func hosekInCd(hosek: view HosekSky) ret HosekSky {
   scaled.g.radiance = hosek.g.radiance * hosekCdPerUnit
   scaled.b.radiance = hosek.b.radiance * hosekCdPerUnit
   ret scaled
+}
+
+# The fitted sky's mean light just above the horizon (cd/m2), round it
+func hosekHorizonColor(hosek: view HosekSky, sunDir: view Vec3) ret Vec3 {
+  let toSun: Vec3 = Vec3.create(x: -sunDir.x, y: -sunDir.y, z: -sunDir.z)
+  var sum: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  loop var column: Int = 0, column < 12, ++column {
+    let around: Float = column.toFloat() / 12.0 * 6.2831853
+    let dir: Vec3 = Vec3.vnorm(
+      a: Vec3.create(x: Math.cos(x: around), y: Math.sin(x: around), z: 0.03)
+    )
+    sum = Vec3.vadd(a: sum, b: hosekRadiance(sky: hosek, dir: dir, sunDir: toSun))
+  }
+  ret Vec3.vscale(a: sum, s: 1.0 / 12.0)
 }
 
 # Pull a colour toward its own luminance. sat 1 leaves it alone, 0 makes it grey.
