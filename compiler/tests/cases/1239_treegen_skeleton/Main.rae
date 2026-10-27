@@ -137,9 +137,11 @@ func main() ret Int {
     # every child starts clearly thinner than its parent there
     loop let limb: view Limb in skeleton.limbs {
       if limb.order is 1 or limb.order is 2 {
-        if limb.radii.copyAtDefault(index: limb.radii.length - 1) > limb.radii.copyAtDefault(
-          index: 0
-        ) * 0.34 {
+        # thin at the tip, but still able to carry its leaves: at most a
+        # third of its base, or 2.5 cm on a slender one, and never under
+        # 1.8 cm where it joins its twig
+        let tip: Float = limb.radii.copyAtDefault(index: limb.radii.length - 1)
+        if tip > Math.max(a: limb.radii.copyAtDefault(index: 0) * 0.34, b: 0.0251) or tip < 0.0179 {
           evenOk = false
         }
       }
@@ -164,7 +166,10 @@ func main() ret Int {
   check(label: "side branches start high, above 58% of the height", ok: topThirdOk)
   check(label: "no radius grows toward a tip", ok: radiiOk)
   check(label: "the main leader joined onto the trunk; the second one thinner", ok: leadersOk)
-  check(label: "branches thin to fine tips; every child starts thinner than its parent", ok: evenOk)
+  check(
+    label: "branches thin to tips that carry their leaves; every child thinner than its parent"
+    ok: evenOk
+  )
   check(label: "every bark triangle faces outward, tip caps too", ok: meshOk)
   # the traced leaf masses: all of them, solid, facing outward
   let masses: TreeSkeleton = growSkeleton(params: warmBroadleafParams(seed: 1))

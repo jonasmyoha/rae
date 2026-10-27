@@ -16,8 +16,9 @@ open treeGen/TreeParams
 open treeGen/TracedLimb
 open treeGen/Skeleton
 
-# A side branch's radius at its tip (m)
-const sideBranchTip: Float = 0.008
+# A side branch's radius at its tip (m): thick enough to carry its leaves
+# (8 mm read as needles that could not carry them)
+const sideBranchTip: Float = 0.018
 
 # How thick a child may start, as a part of its parent's radius there
 const childRadiusMax: Float = 0.75
@@ -144,9 +145,10 @@ func thinAfterChildren(limbs: mod List(Limb)) {
   }
 }
 
-# The leaders and the branches thin all the way to a fine tip (a seventh of
-# their base, at least 1 cm); the trunk does from the fork up, where it
-# carries the main leader on
+# The leaders and the branches thin all the way to their tip (to two
+# sevenths of their base, at least 2.5 cm, so the upper wood can still carry
+# its leaves); the trunk does from the fork up, where it carries the main
+# leader on
 func taperToTips(limbs: mod List(Limb), forkZ: view Float) {
   loop var i: Int = 0, i < limbs.length, ++i {
     var limb: Limb = limbs.copyAtDefault(index: i)
@@ -160,7 +162,7 @@ func taperToTips(limbs: mod List(Limb), forkZ: view Float) {
     }
     let base: Float = limb.radii.copyAtDefault(index: start)
     let tip: Float = limb.radii.copyAtDefault(index: last)
-    let target: Float = Math.max(a: 0.01, b: base / 7.0)
+    let target: Float = Math.max(a: 0.025, b: base * 2.0 / 7.0)
     if tip <= target {
       continue
     }
@@ -303,7 +305,7 @@ func addSideBranches(
         continue
       }
       let baseRadius: Float = Math.min(a: 0.5 * limb.radii.copyAtDefault(index: at), b: 0.05)
-      if baseRadius <= sideBranchTip {
+      if baseRadius <= sideBranchTip * 1.2 {
         continue
       }
       var points: List(Vec3) = List.create(Vec3, cap: 6)
