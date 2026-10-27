@@ -206,6 +206,14 @@ tree, like the background trees in T02.
 Done when: the review shows three trees of one kind, none a copy of
 another.
 
+Round 1 (2026-10-27): `lib/treeGen/TreeGrower.rae` measures the traced tree
+at run time (`measureTracedTree`, `tracedT02Measures`) and grows trees in
+the traced tree's form (`growFromMeasures`, `grownBroadleafParams(seed)`), so
+the bark, leaf cards and shadows are made exactly as for the traced tree.
+The lab's `row` camera (or `RAE_TREELAB_ROW=1`) shows the traced tree and
+grown seeds 1-3 beside it; looks-development round
+`2026-10-27-step6-grown-row`.
+
 ### Step 7 — At a distance
 
 The tree at 40 m and 120 m, then as a billboard. The impostor bake

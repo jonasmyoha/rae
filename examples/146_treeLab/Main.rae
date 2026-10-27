@@ -17,6 +17,9 @@
 #   mid             the same tree from 40 m
 #   far             the same tree from 120 m
 #   bark            the trunk up close (4 m), for its colour and streaks
+#   row             the traced tree and three trees grown from its measures
+#                   (treeGen/TreeGrower) beside it, from 32 m (also
+#                   RAE_TREELAB_ROW=1 with another camera)
 #
 # The comparison picture (T02 beside the render, same height):
 #   examples/146_treeLab/compare.sh [near|mid|far]
@@ -86,6 +89,13 @@ func labCamera(name: view String) ret Camera3d {
   if name is "mid" {
     camera.position = Vec3.create(x: 0.0, y: -40.0, z: 1.6)
     camera.target = Vec3.create(x: 0.0, y: 0.0, z: 6.5)
+    ret camera
+  }
+  if name is "row" {
+    # the traced tree and the three grown ones beside it (LabTree's row,
+    # 11 m apart along x), all in one frame from 32 m
+    camera.position = Vec3.create(x: 16.5, y: -32.0, z: 1.6)
+    camera.target = Vec3.create(x: 16.5, y: 0.0, z: 6.0)
     ret camera
   }
   if name is "bark" {
@@ -164,7 +174,13 @@ func renderLabShadows(state: mod LabState, aspect: view Float) {
   # the crown's shadow: its solid leaf masses, drawn only into the shadow maps
   if let tree: view LabTree = state.tree {
     if tree.castsMassShadow {
-      drawShadowCasterWith(renderer: state.renderer, mesh: tree.massShadow, model: mat4Identity())
+      loop var i: Int = 0, i < tree.massShadows.length, ++i {
+        drawShadowCasterWith(
+          renderer: state.renderer
+          mesh: tree.massShadows.copyAtDefault(index: i)
+          model: tree.shadowModels.copyAtDefault(index: i)
+        )
+      }
     }
   }
   endShadowPass(renderer: state.renderer)
@@ -204,14 +220,16 @@ func renderLabGeometry(state: mod LabState, aspect: view Float, deltaTime: view 
         gbufferResources: rendererResources
       )
       if let tree: mod LabTree = state.tree {
-        drawLeaves(
-          leaves: tree.leaves
-          resources: resources
-          gbuffer: state.renderer.passes.gbuffer
-          gbufferResources: rendererResources
-          camera: state.camera
-          light: state.light
-        )
+        loop let leaves: mod LeafPass in tree.leaves {
+          drawLeaves(
+            leaves: leaves
+            resources: resources
+            gbuffer: state.renderer.passes.gbuffer
+            gbufferResources: rendererResources
+            camera: state.camera
+            light: state.light
+          )
+        }
       }
     }
     Gbuffer.endPass(cache: state.renderer.passes.gbuffer, resources: rendererResources)
@@ -251,7 +269,9 @@ func endLab(state: mod LabState) {
   if let resources: mod GpuResources = state.gpuResources {
     grassShutdown(grass: state.grass, resources: resources)
     if let tree: mod LabTree = state.tree {
-      releaseLeafPass(leaves: tree.leaves, resources: resources)
+      loop let leaves: mod LeafPass in tree.leaves {
+        releaseLeafPass(leaves: leaves, resources: resources)
+      }
     }
     shutdown(resources: resources)
   }

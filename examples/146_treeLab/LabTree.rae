@@ -19,16 +19,29 @@ open treeGen/ClumpMesh
 open treeGen/LeafImage
 open treeGen/LeafCards
 open treeGen/LeafPass
+open treeGen/TreeGrower
+open Math3d
 
 const labBarkImagePath: String = ".rae/treeLab/warmBark.png"
 
-# What the lab keeps of its generated tree: the leaves to draw in the
+# What the lab keeps of its trees: per tree, the leaves to draw in the
 # G-buffer pass, and the solid leaf masses (shrunk to 75%) that cast the
-# crown's shadow
+# crown's shadow, with where that tree stands
 type LabTree {
-  leaves: LeafPass
-  massShadow: MeshHandle
+  leaves: List(LeafPass)
+  massShadows: List(MeshHandle)
+  shadowModels: List(Mat4)
   castsMassShadow: Bool
+}
+
+# The row's trees stand this far apart along x (the crowns are about 6 m
+# wide)
+const labRowSpacing: Float = 11.0
+
+# The row (docs/reference-tree-plan.md step 6): the traced tree and three
+# grown ones beside it. RAE_TREELAB_ROW=1, or the `row` camera.
+func labRowRequested() ret Bool {
+  ret Sys.getEnv(name: "RAE_TREELAB_ROW") is "1" or Sys.getEnv(name: "RAE_TREELAB_CAMERA") is "row"
 }
 
 # RAE_TREELAB_SEED, or 1
@@ -73,10 +86,12 @@ func dumpSkeleton(skeleton: view TreeSkeleton) {
   }
 }
 
-# The generated tree for `seed`, standing at the origin. Its right (+x) is
-# the picture's right, as in the trace of T02 it is built from. Its leaf
-# masses are filled with leaf cards (docs/reference-tree-plan.md step 5);
-# the solid masses still cast the crown's shadow.
+# The lab's trees: the traced T02 tree (seed `seed`) at the origin, its
+# right (+x) the picture's right, as in the trace it is built from; in the
+# row (labRowRequested) also three trees GROWN from the trace's measures
+# (treeGen/TreeGrower, seeds seed, seed + 1, seed + 2) beside it along +x.
+# The leaf masses are filled with leaf cards (docs/reference-tree-plan.md
+# step 5); the solid masses still cast the crowns' shadows.
 #   RAE_TREELAB_LEAVES=off  the masses as plain solids (step 4's look)
 #   RAE_TREELAB_CLUMPS=off  the bare wood
 func addGeneratedTree(
@@ -84,10 +99,66 @@ func addGeneratedTree(
   renderer: mod DeferredRenderer
   seed: view Int
 ) ret LabTree {
-  let params: TreeParams = warmBroadleafParams(seed: seed)
+  let masses: Bool = Sys.getEnv(name: "RAE_TREELAB_CLUMPS") is not "off"
+  let leaves: Bool = masses and Sys.getEnv(name: "RAE_TREELAB_LEAVES") is not "off"
+  var tree: LabTree = {
+    leaves: List.create(LeafPass, cap: 4)
+    massShadows: List.create(MeshHandle, cap: 4)
+    shadowModels: List.create(Mat4, cap: 4)
+    castsMassShadow: leaves
+  }
+  # the leaf stamps, painted once for every tree
+  var pictures: List(List(Float)) = List.create(List(Float), cap: 0)
+  if leaves {
+    pictures = leafImageLayerPixels()
+    previewLeafStamps(pictures: pictures)
+  }
+  let barkLayer: Int = labBarkLayer(renderer: renderer)
+  addLabTree(
+    world: world
+    renderer: renderer
+    params: warmBroadleafParams(seed: seed)
+    x: 0.0
+    barkLayer: barkLayer
+    pictures: pictures
+    tree: tree
+    traced: true
+  )
+  if labRowRequested() {
+    loop var i: Int = 0, i < 3, ++i {
+      addLabTree(
+        world: world
+        renderer: renderer
+        params: grownBroadleafParams(seed: seed + i)
+        x: (i + 1).toFloat() * labRowSpacing
+        barkLayer: barkLayer
+        pictures: pictures
+        tree: tree
+        traced: false
+      )
+    }
+  }
+  ret tree
+}
+
+# One tree of the lab, standing at (`x`, 0): its bark, its leaf masses (as
+# plain solids, or filled with leaf cards) and the masses' shadow. Only the
+# traced tree writes the overlay's dumps (RAE_TREELAB_DUMP, _CARDS).
+func addLabTree(
+  world: mod World3d
+  renderer: mod DeferredRenderer
+  params: view TreeParams
+  x: view Float
+  barkLayer: view Int
+  pictures: view List(List(Float))
+  tree: mod LabTree
+  traced: view Bool
+) {
   let skeleton: TreeSkeleton = growSkeleton(params: params)
   let mesh: MeshData = barkMesh(skeleton: skeleton)
-  dumpSkeleton(skeleton: skeleton)
+  if traced {
+    dumpSkeleton(skeleton: skeleton)
+  }
   let handle: MeshHandle = uploadMesh(
     renderer: renderer
     verts: mesh.verts
@@ -97,53 +168,65 @@ func addGeneratedTree(
   let unusedEntityId: EntityId = world3dAddMeshInstance(
     world: world
     mesh: handle
-    material: barkMaterial(layer: labBarkLayer(renderer: renderer))
-    position: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    material: barkMaterial(layer: barkLayer)
+    position: Vec3.create(x: x, y: 0.0, z: 0.0)
     rotation: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
     scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
   )
   let masses: Bool = Sys.getEnv(name: "RAE_TREELAB_CLUMPS") is not "off"
-  let leaves: Bool = masses and Sys.getEnv(name: "RAE_TREELAB_LEAVES") is not "off"
-  let clumps: MeshData = clumpMesh(skeleton: skeleton)
-  let shadowMasses: MeshData = clumpShadowMesh(skeleton: skeleton, scale: 0.75)
-  let shadowHandle: MeshHandle = uploadMesh(
-    renderer: renderer
-    verts: shadowMasses.verts
-    vertCount: shadowMasses.vertCount
-    indices: shadowMasses.indices
-  )
-  let clumpHandle: MeshHandle = uploadMesh(
-    renderer: renderer
-    verts: clumps.verts
-    vertCount: clumps.vertCount
-    indices: clumps.indices
-  )
-  if masses and not leaves {
+  if masses and not tree.castsMassShadow {
+    let clumps: MeshData = clumpMesh(skeleton: skeleton)
+    let clumpHandle: MeshHandle = uploadMesh(
+      renderer: renderer
+      verts: clumps.verts
+      vertCount: clumps.vertCount
+      indices: clumps.indices
+    )
     let unusedClumpsEntityId: EntityId = world3dAddMeshInstance(
       world: world
       mesh: clumpHandle
       material: clumpLayoutMaterial()
-      position: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+      position: Vec3.create(x: x, y: 0.0, z: 0.0)
       rotation: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
       scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
     )
   }
-  var cards: LeafCards = { floats: List.create(Float, cap: 0), count: 0 }
-  var pictures: List(List(Float)) = List.create(List(Float), cap: 0)
-  if leaves {
-    cards = leafCards(skeleton: skeleton, seed: seed)
-    pictures = leafImageLayerPixels()
-    previewLeafStamps(pictures: pictures)
+  var cardCount: Int = 0
+  if tree.castsMassShadow {
+    let shadowMasses: MeshData = clumpShadowMesh(skeleton: skeleton, scale: 0.75)
+    tree.massShadows.add(value: uploadMesh(
+      renderer: renderer
+      verts: shadowMasses.verts
+      vertCount: shadowMasses.vertCount
+      indices: shadowMasses.indices
+    ))
+    tree.shadowModels.add(value: mat4Translate(x: x, y: 0.0, z: 0.0))
+    var cards: LeafCards = leafCards(skeleton: skeleton, seed: params.seed)
+    cardCount = cards.count
+    if traced {
+      dumpLeafCards(cards: cards)
+    }
+    var ownPictures: List(List(Float)) = pictures
+    var leaves: LeafPass = createLeafPass(cards: own cards, pictures: own ownPictures)
+    var placements: List(Float) = List.create(Float, cap: leafPlacementFloats)
+    leafPlacement(
+      placements: placements
+      x: x
+      y: 0.0
+      z: 0.0
+      yaw: 0.0
+      scale: 1.0
+    )
+    setLeafPlacements(leaves: leaves, placements: own placements)
+    tree.leaves.add(value: own leaves)
+  }
+  var kind: String = "grown"
+  if traced {
+    kind = "traced"
   }
   log(
-    "[treeLab] warmBroadleaf seed {seed}: {skeleton.limbs.length} limbs, {skeleton.clumps.length} leaf masses, {cards.count} leaf cards, {mesh.vertCount} bark vertices"
+    "[treeLab] {kind} tree, seed {params.seed}, at x {x}: {skeleton.limbs.length} limbs, {skeleton.clumps.length} leaf masses, {cardCount} leaf cards, {mesh.vertCount} bark vertices, fork at {skeleton.forkPoint.z / params.height}"
   )
-  dumpLeafCards(cards: cards)
-  ret LabTree {
-    leaves: createLeafPass(cards: own cards, pictures: own pictures)
-    massShadow: shadowHandle
-    castsMassShadow: leaves
-  }
 }
 
 # RAE_TREELAB_LEAF_PREVIEW=<path.png>: the leaf stamps side by side over

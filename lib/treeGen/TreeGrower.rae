@@ -1,0 +1,542 @@
+# treeGen/TreeGrower — the hand-made T02 tree made procedural
+# (docs/reference-tree-plan.md step 6). The traced tree (TracedT02, the
+# hand-drawn trace of crop T02) is MEASURED here, at run time, so the
+# target stays the trace: its height, trunk taper and bow, fork height, the
+# leaders' lean, length and thickness, the side branches' heights, angles,
+# lengths and thickness, the leaf masses' count, sizes and spread round the
+# fork, and the share of masses in front of and behind the trunk. A seed
+# then GROWS a new tree within ranges round those measures, in the same
+# form as the traced one (TracedLimb lines and TracedClump masses), so the
+# skeleton, the bark, the leaf cards and the shadows are made exactly as
+# for the traced tree. Written new.
+import Math
+import Vec3
+open treeGen/TreeParams
+open treeGen/TracedLimb
+open treeGen/TracedT02
+
+# What the traced tree is, in numbers (heights and lengths as parts of the
+# tree's height, angles in radians, radii in metres for a tree of
+# `height`)
+type TreeMeasures {
+  height: Float
+  forkHeight: Float
+  # the trunk's radius just above the ground and at the fork
+  baseRadius: Float
+  forkRadius: Float
+  # the trunk's largest sideways offset from the straight line foot to fork
+  # (positive: toward the side the leaders lean to), and where on the trunk
+  # (0 foot, 1 fork)
+  bow: Float
+  bowAt: Float
+  # the main and the second leader: lean from upright, length, base radius
+  # as a part of the trunk's at the fork
+  mainLean: Float
+  mainLength: Float
+  mainRadius: Float
+  secondLean: Float
+  secondLength: Float
+  secondRadius: Float
+  # the side branches
+  branchCount: Int
+  branchLowest: Float
+  branchHighest: Float
+  branchAngleMin: Float
+  branchAngleMax: Float
+  branchLengthMin: Float
+  branchLengthMax: Float
+  # a branch's base radius as a part of its parent's there
+  branchRadius: Float
+  # the leaf masses: how many, their radius range (m), the crown's centre
+  # and half spread round the fork (x toward the leaders' side), and the
+  # shares wholly behind and wholly in front of the trunk
+  massCount: Int
+  massRadiusMin: Float
+  massRadiusMax: Float
+  crownX: Float
+  crownZ: Float
+  crownHalfWidth: Float
+  crownHalfHeight: Float
+  shareBehind: Float
+  shareFront: Float
+}
+
+# A grown tree, in the traced tree's form
+type GrownTree {
+  limbs: List(TracedLimb)
+  clumps: List(TracedClump)
+  height: Float
+}
+
+func limbFirst(limb: view TracedLimb) ret Vec3 {
+  ret limb.points.copyAtDefault(index: 0)
+}
+
+func limbLast(limb: view TracedLimb) ret Vec3 {
+  ret limb.points.copyAtDefault(index: limb.points.length - 1)
+}
+
+# A limb's lean from upright, from its first point to its last
+func limbLean(limb: view TracedLimb) ret Float {
+  let along: Vec3 = Vec3.vsub(a: limbLast(limb: limb), b: limbFirst(limb: limb))
+  ret Math.atan2(y: Math.sqrt(x: along.x * along.x + along.y * along.y), x: along.z)
+}
+
+func limbLength(limb: view TracedLimb) ret Float {
+  var length: Float = 0.0
+  loop var i: Int = 1, i < limb.points.length, ++i {
+    length = length + Vec3.vlen(
+      a: Vec3.vsub(
+        a: limb.points.copyAtDefault(index: i)
+        b: limb.points.copyAtDefault(index: i - 1)
+      )
+    )
+  }
+  ret length
+}
+
+# A limb's radius at height `z` (the nearest point's)
+func limbRadiusAt(limb: view TracedLimb, z: view Float) ret Float {
+  var best: Int = 0
+  var bestGap: Float = 1000000.0
+  loop var i: Int = 0, i < limb.points.length, ++i {
+    let gap: Float = Math.abs(value: limb.points.copyAtDefault(index: i).z - z)
+    if gap < bestGap {
+      bestGap = gap
+      best = i
+    }
+  }
+  ret limb.radii.copyAtDefault(index: best)
+}
+
+# The traced tree measured: `limbs` its trunk (first), leaders (order 1, the
+# main one first) and side branches (order 2); `clumps` its leaf masses
+func measureTracedTree(
+  limbs: view List(TracedLimb)
+  clumps: view List(TracedClump)
+  height: view Float
+) ret TreeMeasures {
+  let trunk: TracedLimb = limbs.copyAtDefault(index: 0)
+  let fork: Vec3 = limbLast(limb: trunk)
+  let forkRadius: Float = trunk.radii.copyAtDefault(index: trunk.radii.length - 1)
+  # the leaders: the first order-1 limb is the main one
+  var mainIndex: Int = -1
+  var secondIndex: Int = -1
+  loop var i: Int = 1, i < limbs.length, ++i {
+    if limbs.copyAtDefault(index: i).order is 1 {
+      if mainIndex < 0 {
+        mainIndex = i
+      } else if secondIndex < 0 {
+        secondIndex = i
+      }
+    }
+  }
+  let mainLeader: TracedLimb = limbs.copyAtDefault(index: Math.max(a: mainIndex, b: 0))
+  let secondLeader: TracedLimb = limbs.copyAtDefault(index: Math.max(a: secondIndex, b: 0))
+  # the side the crown leans to: the main leader's
+  var side: Float = 1.0
+  if limbLast(limb: mainLeader).x < limbFirst(limb: mainLeader).x {
+    side = -1.0
+  }
+  # the bow: the trunk's offset from the straight line from just above the
+  # ground (point 1) to the fork
+  let foot: Vec3 = trunk.points.copyAtDefault(index: 1)
+  var bow: Float = 0.0
+  var bowAt: Float = 0.5
+  loop var i: Int = 1, i < trunk.points.length, ++i {
+    let point: Vec3 = trunk.points.copyAtDefault(index: i)
+    let t: Float = (point.z - foot.z) / Math.max(a: fork.z - foot.z, b: 0.01)
+    let offset: Float = (point.x - (foot.x + (fork.x - foot.x) * t)) * side
+    if Math.abs(value: offset) > Math.abs(value: bow) {
+      bow = offset
+      bowAt = t
+    }
+  }
+  # the side branches
+  var branchCount: Int = 0
+  var lowest: Float = 1.0
+  var highest: Float = 0.0
+  var angleMin: Float = 10.0
+  var angleMax: Float = 0.0
+  var lengthMin: Float = 10.0
+  var lengthMax: Float = 0.0
+  var radiusShare: Float = 0.0
+  loop let limb: view TracedLimb in limbs {
+    if limb.order is 2 {
+      branchCount = branchCount + 1
+      let start: Vec3 = limbFirst(limb: limb)
+      lowest = Math.min(a: lowest, b: start.z / height)
+      highest = Math.max(a: highest, b: start.z / height)
+      angleMin = Math.min(a: angleMin, b: limbLean(limb: limb))
+      angleMax = Math.max(a: angleMax, b: limbLean(limb: limb))
+      lengthMin = Math.min(a: lengthMin, b: limbLength(limb: limb) / height)
+      lengthMax = Math.max(a: lengthMax, b: limbLength(limb: limb) / height)
+      if limb.parent >= 0 and limb.parent < limbs.length {
+        let parent: TracedLimb = limbs.copyAtDefault(index: limb.parent)
+        radiusShare = radiusShare + limb.radii.copyAtDefault(index: 0) / Math.max(
+          a: limbRadiusAt(limb: parent, z: start.z)
+          b: 0.001
+        )
+      }
+    }
+  }
+  # the leaf masses
+  var radiusMin: Float = 1000.0
+  var radiusMax: Float = 0.0
+  var sumX: Float = 0.0
+  var sumZ: Float = 0.0
+  var behind: Int = 0
+  var front: Int = 0
+  loop let clump: view TracedClump in clumps {
+    let radius: Float = (clump.radii.x + clump.radii.z) * 0.5
+    radiusMin = Math.min(a: radiusMin, b: radius)
+    radiusMax = Math.max(a: radiusMax, b: radius)
+    sumX = sumX + (clump.centre.x - fork.x) * side
+    sumZ = sumZ + clump.centre.z - fork.z
+    if clump.side > 0 {
+      behind = behind + 1
+    } else if clump.side < 0 {
+      front = front + 1
+    }
+  }
+  let count: Float = Math.max(a: clumps.length.toFloat(), b: 1.0)
+  let meanX: Float = sumX / count
+  let meanZ: Float = sumZ / count
+  var halfWidth: Float = 0.0
+  var halfHeight: Float = 0.0
+  loop let clump: view TracedClump in clumps {
+    halfWidth = Math.max(a: halfWidth, b: Math.abs(value: (clump.centre.x - fork.x) * side - meanX))
+    halfHeight = Math.max(a: halfHeight, b: Math.abs(value: clump.centre.z - fork.z - meanZ))
+  }
+  ret TreeMeasures {
+    height: height
+    forkHeight: fork.z / height
+    baseRadius: trunk.radii.copyAtDefault(index: 1)
+    forkRadius: forkRadius
+    bow: bow / height
+    bowAt: bowAt
+    mainLean: limbLean(limb: mainLeader)
+    mainLength: limbLength(limb: mainLeader) / height
+    mainRadius: mainLeader.radii.copyAtDefault(index: 0) / forkRadius
+    secondLean: limbLean(limb: secondLeader)
+    secondLength: limbLength(limb: secondLeader) / height
+    secondRadius: secondLeader.radii.copyAtDefault(index: 0) / forkRadius
+    branchCount: branchCount
+    branchLowest: lowest
+    branchHighest: highest
+    branchAngleMin: angleMin
+    branchAngleMax: angleMax
+    branchLengthMin: lengthMin
+    branchLengthMax: lengthMax
+    branchRadius: radiusShare / Math.max(a: branchCount.toFloat(), b: 1.0)
+    massCount: clumps.length
+    massRadiusMin: radiusMin
+    massRadiusMax: radiusMax
+    crownX: meanX / height
+    crownZ: meanZ / height
+    crownHalfWidth: halfWidth / height
+    crownHalfHeight: halfHeight / height
+    shareBehind: behind.toFloat() / count
+    shareFront: front.toFloat() / count
+  }
+}
+
+# The T02 tree's measures (TracedT02)
+func tracedT02Measures() ret TreeMeasures {
+  ret measureTracedTree(limbs: tracedT02Limbs(), clumps: tracedT02Clumps(), height: tracedT02Height)
+}
+
+# A straight-ish limb of `steps` + 1 points from `start` along `direction`
+# for `length` metres, its heading turning `bend` radians toward the ground
+# (negative: up) over its length, its radius from `baseRadius` to
+# `tipRadius`
+func grownLimb(
+  start: view Vec3
+  direction: view Vec3
+  length: view Float
+  bend: view Float
+  baseRadius: view Float
+  tipRadius: view Float
+  parent: view Int
+  order: view Int
+) ret TracedLimb {
+  let steps: Int = 14
+  var points: List(Vec3) = List.create(Vec3, cap: steps + 1)
+  var radii: List(Float) = List.create(Float, cap: steps + 1)
+  var point: Vec3 = start
+  var heading: Vec3 = Vec3.vnorm(a: direction)
+  let step: Float = length / steps.toFloat()
+  loop var i: Int = 0, i <= steps, ++i {
+    let t: Float = i.toFloat() / steps.toFloat()
+    points.add(value: point)
+    radii.add(value: baseRadius + (tipRadius - baseRadius) * t)
+    # turn the heading a little down (bend > 0), keeping its sideways way
+    heading = Vec3.vnorm(
+      a: Vec3.vadd(a: heading, b: Vec3.create(x: 0.0, y: 0.0, z: -bend / steps.toFloat()))
+    )
+    point = Vec3.vadd(a: point, b: Vec3.vscale(a: heading, s: step))
+  }
+  ret TracedLimb { points: own points, radii: own radii, parent: parent, order: order }
+}
+
+# Where on `limb` its height is `z`: the point between its two nearest
+func pointAtHeight(limb: view TracedLimb, z: view Float) ret Vec3 {
+  loop var i: Int = 1, i < limb.points.length, ++i {
+    let below: Vec3 = limb.points.copyAtDefault(index: i - 1)
+    let above: Vec3 = limb.points.copyAtDefault(index: i)
+    if above.z >= z {
+      let t: Float = Math.clamp(
+        val: (z - below.z) / Math.max(a: above.z - below.z, b: 0.0001)
+        low: 0.0
+        high: 1.0
+      )
+      ret Vec3.vadd(a: below, b: Vec3.vscale(a: Vec3.vsub(a: above, b: below), s: t))
+    }
+  }
+  ret limbLast(limb: limb)
+}
+
+# A leaf mass of radius about `radius` at `centre` on limb `parent`, wholly
+# behind, at or wholly in front of the trunk by the measured shares
+func grownMass(
+  random: mod TreeRandom
+  measures: view TreeMeasures
+  centre: view Vec3
+  radius: view Float
+  parent: view Int
+) ret TracedClump {
+  let across: Float = radius * nextBetween(random: random, low: 0.9, high: 1.15)
+  let up: Float = radius * nextBetween(random: random, low: 0.85, high: 1.1)
+  let depth: Float = 0.9 * (across + up) * 0.5
+  let pick: Float = nextUnit(random: random)
+  var side: Int = 0
+  var y: Float = nextBetween(random: random, low: -0.3, high: 0.3) * depth
+  if pick < measures.shareBehind {
+    side = 1
+    y = depth + 0.35
+  } else if pick < measures.shareBehind + measures.shareFront {
+    side = -1
+    y = -(depth + 0.35)
+  }
+  ret TracedClump {
+    centre: Vec3.create(x: centre.x, y: y, z: centre.z)
+    radii: Vec3.create(x: across, y: depth, z: up)
+    underside: 1.0
+    turn: nextBetween(random: random, low: -0.3, high: 0.3)
+    parent: parent
+    side: side
+  }
+}
+
+# A tree of the traced tree's kind grown from `seed`: its own height, fork,
+# bow, lean, leaders, 3 to 5 side branches and leaf masses, each within a
+# range round the measures. The crown leans to either side.
+func growFromMeasures(measures: view TreeMeasures, seed: view Int) ret GrownTree {
+  var random: TreeRandom = createTreeRandom(seed: seed * 7 + 1009)
+  var side: Float = 1.0
+  if nextUnit(random: random) < 0.5 {
+    side = -1.0
+  }
+  let height: Float = measures.height * nextBetween(random: random, low: 0.9, high: 1.1)
+  let scale: Float = height / measures.height
+  let forkZ: Float = height * (measures.forkHeight + nextBetween(
+    random: random
+    low: -0.05
+    high: 0.04
+  ))
+  let bow: Float = measures.bow * height * nextBetween(random: random, low: 0.5, high: 1.4) * side
+  let bowAt: Float = Math.clamp(
+    val: measures.bowAt + nextBetween(random: random, low: -0.15, high: 0.15)
+    low: 0.3
+    high: 0.9
+  )
+  let lean: Float = nextBetween(random: random, low: -0.025, high: 0.025)
+  let baseRadius: Float = measures.baseRadius * scale * nextBetween(
+    random: random
+    low: 0.9
+    high: 1.1
+  )
+  let forkRadius: Float = measures.forkRadius * scale * nextBetween(
+    random: random
+    low: 0.9
+    high: 1.1
+  )
+  var limbs: List(TracedLimb) = List.create(TracedLimb, cap: 8)
+  # the trunk: straight at the foot, one bow, a little lean, tapering, with
+  # a root flare
+  let trunkSteps: Int = 18
+  var trunkPoints: List(Vec3) = List.create(Vec3, cap: trunkSteps + 1)
+  var trunkRadii: List(Float) = List.create(Float, cap: trunkSteps + 1)
+  loop var i: Int = 0, i <= trunkSteps, ++i {
+    let t: Float = i.toFloat() / trunkSteps.toFloat()
+    let z: Float = -0.25 + (forkZ + 0.25) * t
+    # the bow rises from nothing to its full at bowAt and eases back by the fork
+    var shape: Float = 0.0
+    if t < bowAt {
+      shape = Math.sin(x: 1.5707963 * t / bowAt)
+    } else {
+      shape = Math.cos(x: 1.5707963 * (t - bowAt) / Math.max(a: 1.0 - bowAt, b: 0.01)) * 0.7 + 0.3
+    }
+    let x: Float = bow * shape * shape + lean * Math.max(a: z, b: 0.0)
+    trunkPoints.add(value: Vec3.create(x: x, y: 0.0, z: z))
+    let flare: Float = 1.0 + 0.28 * Math.exp(x: -Math.max(a: z, b: 0.0) / 0.4)
+    trunkRadii.add(value: (baseRadius + (forkRadius - baseRadius) * t) * flare)
+  }
+  limbs.add(
+    value: TracedLimb { points: own trunkPoints, radii: own trunkRadii, parent: -1, order: 0 }
+  )
+  let fork: Vec3 = limbLast(limb: limbs.copyAtDefault(index: 0))
+  # the leaders, both leaning to the crown's side as in the trace; the main
+  # one turning a little further out as it rises
+  let mainLean: Float = measures.mainLean + nextBetween(random: random, low: -0.06, high: 0.06)
+  limbs.add(value: grownLimb(
+    start: fork
+    direction: Vec3.create(x: side * Math.sin(x: mainLean), y: 0.0, z: Math.cos(x: mainLean))
+    length: measures.mainLength * height * nextBetween(random: random, low: 0.85, high: 1.15)
+    bend: 0.1
+    baseRadius: forkRadius * measures.mainRadius
+    tipRadius: forkRadius * measures.mainRadius * 0.7
+    parent: 0
+    order: 1
+  ))
+  let secondLean: Float = measures.secondLean + nextBetween(random: random, low: -0.08, high: 0.08)
+  limbs.add(value: grownLimb(
+    start: fork
+    direction: Vec3.create(x: side * Math.sin(x: secondLean), y: 0.0, z: Math.cos(x: secondLean))
+    length: measures.secondLength * height * nextBetween(random: random, low: 0.85, high: 1.15)
+    bend: 0.0
+    baseRadius: forkRadius * measures.secondRadius
+    tipRadius: forkRadius * measures.secondRadius * 0.7
+    parent: 0
+    order: 1
+  ))
+  # the side branches: spread up the measured span, to either side by turns,
+  # the low ones longer and flattening, from the trunk below the fork and
+  # from the main leader above it
+  let branchCount: Int = Math.max(
+    a: 3
+    b: Math.min(a: 5, b: measures.branchCount - 1 + (nextUnit(random: random) * 3.0).toInt())
+  )
+  var branchSide: Float = 1.0
+  if nextUnit(random: random) < 0.5 {
+    branchSide = -1.0
+  }
+  loop var b: Int = 0, b < branchCount, ++b {
+    let along: Float = (b.toFloat() + 0.5) / branchCount.toFloat()
+    let at: Float = measures.branchLowest + (measures.branchHighest - measures.branchLowest) * along + nextBetween(
+      random: random
+      low: -0.025
+      high: 0.025
+    )
+    let z: Float = at * height
+    var parent: Int = 0
+    if z > forkZ - 0.3 {
+      parent = 1
+    }
+    let parentLimb: TracedLimb = limbs.copyAtDefault(index: parent)
+    let start: Vec3 = pointAtHeight(limb: parentLimb, z: z)
+    let angle: Float = nextBetween(
+      random: random
+      low: measures.branchAngleMin - 0.05
+      high: measures.branchAngleMax + 0.05
+    )
+    let length: Float = height * (measures.branchLengthMax + (measures.branchLengthMin - measures.branchLengthMax) * along) * nextBetween(
+      random: random
+      low: 0.85
+      high: 1.15
+    )
+    let base: Float = limbRadiusAt(limb: parentLimb, z: z) * measures.branchRadius
+    limbs.add(value: grownLimb(
+      start: start
+      direction: Vec3.create(x: branchSide * Math.sin(x: angle), y: 0.0, z: Math.cos(x: angle))
+      length: length
+      bend: 0.15 * (1.0 - along)
+      baseRadius: base
+      tipRadius: base * 0.5
+      parent: parent
+      order: 2
+    ))
+    branchSide = -branchSide
+  }
+  # the leaf masses: one at every leader's and branch's tip, then more
+  # filling the crown's measured spread, each on its nearest limb
+  var clumps: List(TracedClump) = List.create(TracedClump, cap: measures.massCount + 4)
+  let massCount: Int = Math.max(
+    a: limbs.length
+    b: measures.massCount - 2 + (nextUnit(random: random) * 5.0).toInt()
+  )
+  loop var i: Int = 1, i < limbs.length, ++i {
+    let tip: Vec3 = limbLast(limb: limbs.copyAtDefault(index: i))
+    clumps.add(value: grownMass(
+      random: random
+      measures: measures
+      centre: tip
+      radius: scale * nextBetween(
+        random: random
+        low: measures.massRadiusMin
+        high: measures.massRadiusMax
+      )
+      parent: i
+    ))
+  }
+  let halfWidth: Float = measures.crownHalfWidth * height * nextBetween(
+    random: random
+    low: 0.85
+    high: 1.2
+  )
+  let halfHeight: Float = measures.crownHalfHeight * height * nextBetween(
+    random: random
+    low: 0.85
+    high: 1.2
+  )
+  let centreX: Float = fork.x + side * measures.crownX * height
+  let centreZ: Float = fork.z + measures.crownZ * height
+  loop var m: Int = clumps.length, m < massCount, ++m {
+    # evenly over the crown's ellipse
+    let around: Float = nextUnit(random: random) * 6.2831853
+    let reach: Float = Math.sqrt(x: nextUnit(random: random))
+    let centre: Vec3 = Vec3.create(
+      x: centreX + Math.cos(x: around) * reach * halfWidth
+      y: 0.0
+      z: centreZ + Math.sin(x: around) * reach * halfHeight
+    )
+    # its limb: the leader or branch with a point nearest to it
+    var nearest: Int = 1
+    var nearestGap: Float = 1000000.0
+    loop var i: Int = 1, i < limbs.length, ++i {
+      let limb: TracedLimb = limbs.copyAtDefault(index: i)
+      loop let point: view Vec3 in limb.points {
+        let gap: Float = Vec3.vlen(a: Vec3.vsub(a: point, b: centre))
+        if gap < nearestGap {
+          nearestGap = gap
+          nearest = i
+        }
+      }
+    }
+    clumps.add(value: grownMass(
+      random: random
+      measures: measures
+      centre: centre
+      radius: scale * nextBetween(
+        random: random
+        low: measures.massRadiusMin
+        high: measures.massRadiusMax
+      )
+      parent: nearest
+    ))
+  }
+  ret GrownTree { limbs: own limbs, clumps: own clumps, height: height }
+}
+
+# The T02 tree's params with grown wood and masses in place of the traced
+# ones (step 6): seed 1, 2, 3 ... give different trees of the traced tree's
+# kind. Everything else (the depth turn of the limbs, the bark, the leaves)
+# is the traced tree's.
+func grownBroadleafParams(seed: view Int) ret TreeParams {
+  var params: TreeParams = warmBroadleafParams(seed: seed)
+  var grown: GrownTree = growFromMeasures(measures: tracedT02Measures(), seed: seed)
+  params.height = grown.height
+  params.tracedLimbs = own grown.limbs
+  params.tracedClumps = own grown.clumps
+  ret params
+}

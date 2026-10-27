@@ -11,6 +11,7 @@ open treeGen/TreeParams
 open treeGen/Skeleton
 open treeGen/BarkMesh
 open treeGen/ClumpMesh
+open treeGen/TreeGrower
 
 func check(label: view String, ok: view Bool) {
   if ok {
@@ -158,5 +159,66 @@ func main() ret Int {
     label: "the same seed gives the same tree"
     ok: Vec3.vlen(a: Vec3.vsub(a: tipAgain, b: tipOnce)) < 0.000001
   )
+  checkGrownTrees()
   ret 0
+}
+
+# Step 6: the traced tree measured, and trees grown from the measures
+func checkGrownTrees() {
+  let measures: TreeMeasures = tracedT02Measures()
+  check(
+    label: "the trace measured: fork at 75%, 4 side branches, 13 leaf masses"
+    ok: Math.abs(value: measures.forkHeight - 0.75) < 0.01 and measures.branchCount is 4 and measures.massCount is 13
+  )
+  var forkOk: Bool = true
+  var branchesOk: Bool = true
+  var massesOk: Bool = true
+  var radiiOk: Bool = true
+  var meshOk: Bool = true
+  loop var seed: Int = 1, seed <= 20, ++seed {
+    let params: TreeParams = grownBroadleafParams(seed: seed)
+    let skeleton: TreeSkeleton = growSkeleton(params: params)
+    let fork: Float = skeleton.forkPoint.z / params.height
+    if fork < 0.66 or fork > 0.81 {
+      forkOk = false
+    }
+    var branches: Int = 0
+    loop let limb: view Limb in skeleton.limbs {
+      if limb.order is 2 {
+        branches = branches + 1
+      }
+      if not radiiNeverGrow(limb: limb) {
+        radiiOk = false
+      }
+    }
+    if branches < 3 or branches > 5 {
+      branchesOk = false
+    }
+    # a mass on every leader and branch, and some to fill the crown
+    if skeleton.clumps.length < 2 + branches or skeleton.clumps.length > 18 {
+      massesOk = false
+    }
+    if not facesOutward(mesh: barkMesh(skeleton: skeleton)) or not facesOutward(
+      mesh: clumpMesh(skeleton: skeleton)
+    ) {
+      meshOk = false
+    }
+  }
+  check(label: "20 grown seeds: the fork at 66 to 81% of the height", ok: forkOk)
+  check(label: "20 grown seeds: 3 to 5 side branches", ok: branchesOk)
+  check(label: "20 grown seeds: a leaf mass on every leader and branch, at most 18", ok: massesOk)
+  check(label: "20 grown seeds: no radius grows toward a tip", ok: radiiOk)
+  check(label: "20 grown seeds: every bark and mass triangle faces outward", ok: meshOk)
+  let first: TreeSkeleton = growSkeleton(params: grownBroadleafParams(seed: 1))
+  let second: TreeSkeleton = growSkeleton(params: grownBroadleafParams(seed: 2))
+  let firstAgain: TreeSkeleton = growSkeleton(params: grownBroadleafParams(seed: 1))
+  let topFirst: Vec3 = first.limbs.copyAtDefault(index: 1).points.copyAtDefault(index: 14)
+  let topSecond: Vec3 = second.limbs.copyAtDefault(index: 1).points.copyAtDefault(index: 14)
+  let topAgain: Vec3 = firstAgain.limbs.copyAtDefault(index: 1).points.copyAtDefault(index: 14)
+  check(
+    label: "grown trees: the same seed the same tree, another seed another"
+    ok: Vec3.vlen(a: Vec3.vsub(a: topFirst, b: topAgain)) < 0.000001 and Vec3.vlen(
+      a: Vec3.vsub(a: topFirst, b: topSecond)
+    ) > 0.1
+  )
 }
