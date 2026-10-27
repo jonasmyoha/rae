@@ -1,6 +1,8 @@
-# app3d/WalkerApp — the walker app shell: 136 (the island, deferred), 137 (the
-# island, forward) and 143 (the wide forest, deferred) are each a Main.rae
-# that calls runWalkerApp with its WalkerAppSettings (app3d/WalkerAppSetup).
+# app3d/WalkerApp — the walker app shell's state and its setup: 136 (the
+# island, deferred), 137 (the island, forward) and 143 (the wide forest,
+# deferred) are each a Main.rae that calls runWalkerApp (app3d/WalkerAppRun)
+# with its WalkerAppSettings (app3d/WalkerAppSetup). The world is built in
+# app3d/WalkerAppWorld, round the scene's fresh start.
 #
 # CONVENTION (#822): the `WalkerApp` struct IS the system list. Each system's
 # member is named for what it is and typed as that system's state —
@@ -13,12 +15,12 @@
 # it needs, never the whole app; the app is built by createWalkerApp and
 # sequenced by updateWalkerApp (app3d/WalkerAppUpdate) and renderWalkerApp
 # (app3d/WalkerRenderWalk).
-import Math
 import Profile
 import Gpu2d
 import Quat
 open app3d/UiModes
 open app3d/ReferenceTree
+open app3d/WalkerAppWorld
 open RendererQuality
 open app3d/EditorPanel
 open ecs/Entity
@@ -27,54 +29,37 @@ open ecs/Transform
 import Vec3
 import Sys
 open GbufferInstanced
-open Particles
 open water/WadeSplash
-open water/Water
-open GbufferSprite
 open water/WaterSystem
 open water/IslandSea
 open WorldBiome
-open water/WaterFft
 open gpu/GpuResources
-open gpu/GpuLifetime
 open GrassCompute
 open Wind
 open RendererMist
-import GrassConfig
-import app3d/Slider
 open Scene3d
 open RendererDeferred
-open Sky
-open Gbuffer
 open Rendergraph
 open Math3d
 open Mesh3d
 open Gltf
 open GltfSkin
-open SdfText
 open Png
 open app3d/CameraRig
 open app3d/WalkerReset
-open app3d/WalkerResetTest
-open app3d/ModeMenu
 open app3d/CameraWalkFollow
 open app3d/CharacterController
 open app3d/SettingsDialog
-open ui/Registry
 open SkyHosek
 open app3d/UiShell
 open app3d/ControlPanel
-open app3d/CameraBar
-open Shadow3d
 open app3d/Playback
 open HotReload
 open ui/LogOverlay
 open ui/WindowGeometry
 open ui/scrollRootSystem/ScrollRootSystem
-open ui/EventLoop
 open ui/DebugOverlay
 open ui/Ecs
-open ui/Components
 open ui/inputSystem/InputSystem
 open ui/renderSystem/RenderSystem
 open app3d/RenderScale
@@ -84,39 +69,20 @@ open app3d/Characters
 open app3d/PlayerRoster
 open app3d/WalkerPhysics
 open app3d/WalkerMarks
-open app3d/WalkerMarkTest
 open app3d/FrameLog
-open app3d/WalkerLayoutTest
 open app3d/WalkerWorld
-open app3d/WalkerInput
-open app3d/WalkerCamera
-open app3d/WalkerUi
 open app3d/HudOverlays
-open app3d/WalkerNet
 open app3d/WalkerTerrain
 open app3d/WalkerGrassObstacles
-open app3d/FarCanopy
-open app3d/WalkerTerrainBodies
-open app3d/IslandForest
 open app3d/WalkerAppSetup
-open app3d/WalkerRender
-open app3d/WalkerRenderWalk
 open app3d/WalkerAppUpdate
-open app3d/WalkerSplash
 open app3d/WalkerState
-open app3d/WalkerSelfTest
-open app3d/WalkerClimbTest
-open app3d/WalkerCrowdTest
-open app3d/Climbing
 open RendererForward
 open Moon
 open Calendar
 open app3d/NetSeam
-open app3d/RagdollRig
 open app3d/CameraKnockdownFollow
 open app3d/CameraFov
-open app3d/WalkerKnockdown
-open app3d/WalkerKnockTest
 
 # The app's GPU manager (#873): with the sea, its three 256 cascades with
 # their mip chains, readbacks and surface (192, as the downstream game sizes
@@ -459,107 +425,29 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
       logOverlay: logOverlay
     )
 
-    # Nobody starts in the sea. The origin is not guaranteed land — the island mask
-    # only guarantees land is SOMEWHERE inside the radius.
-    spawnOnLand(controller: characterController, groundZ: groundZ, biome: biome)
-    # the T02 stand's patch, 30 m ahead of the fresh start
-    terrainSystem.referenceStandOn = settings.referenceTree
-    terrainSystem.referenceStandX = characterController.position.x
-    terrainSystem.referenceStandY = characterController.position.y + referenceStandAhead
-    let treeCount: Int = plantWalkerForest(
-      land: settings.land
+    # The world round the FRESH start, then the hero where a session left it
+    # (app3d/WalkerAppWorld)
+    var worldStart: WalkerWorldStart = buildWalkerWorld(
+      settings: settings
       terrainSystem: terrainSystem
-      world: walkerWorld
-      spawnX: characterController.position.x
-      spawnY: characterController.position.y
-    )
-    bakeWalkerCanopy(terrainSystem: terrainSystem, renderer: renderer)
-    # the stand of hand-made T02 trees the forest planted in its patch
-    var referenceTree: opt ReferenceTree = none
-    if settings.referenceTree {
-      referenceTree = createReferenceStand(renderer: renderer, stand: terrainSystem.referenceStand)
-    }
-
-    # #739: the hero is an entity like any crowd member (app3d/Characters): its
-    # controller, transform, clip, transition and model are components; the
-    # Controlled tag says the player drives it.
-    let heroEntityId: EntityId = walkerWorldAddEntity(world: walkerWorld)
-    walkerWorldSetController(
-      world: walkerWorld
-      entityId: heroEntityId
-      controller: characterController
-    )
-    walkerWorldSetTransform(
-      world: walkerWorld
-      entityId: heroEntityId
-      transform: controllerTransform3D(controller: characterController)
-    )
-
-    var crowdEntities: List(EntityId) = spawnWalkerCrowd(
-      world: walkerWorld
-      hero: characterController
-      biome: biome
-      groundZ: groundZ
-      count: cloneCount
-    )
-    walkerWorldSetAnim(
-      world: walkerWorld
-      entityId: heroEntityId
-      anim: AnimationState { clipIndex: clipIndex, animTime: 0.0, playbackScale: 1.0 }
-    )
-    addWalkerCharacterComponents(
-      world: walkerWorld
-      entityId: heroEntityId
-      skeleton: sk
-      basePartModel: basePartModel
-    )
-    loop let crowdEntityId: view EntityId in crowdEntities {
-      addWalkerCharacterComponents(
-        world: walkerWorld
-        entityId: crowdEntityId
-        skeleton: sk
-        basePartModel: basePartModel
-      )
-    }
-    setControlledCharacter(controlled: walkerWorld.controlled, entityId: heroEntityId)
-    updateInfiniteTerrain(
-      terrainSystem: terrainSystem
+      walkerWorld: walkerWorld
       renderer: renderer
-      propKinds: walkerWorld.propKinds
-      transforms: walkerWorld.transforms
-      groundFocus: characterController.position
-      propFocus: characterController.position
-    )
-    var physicsSystem: WalkerPhysics = createWalkerAppPhysics(
-      land: settings.land
+      characterController: characterController
+      sessionController: sessionController
+      sessionRestored: sessionRestored
       biome: biome
       groundZ: groundZ
-      world: walkerWorld
-      terrainSystem: terrainSystem
-      hero: characterController
-      heroEntityId: heroEntityId
-      crowdEntities: crowdEntities
-    )
-    # #746: exercise the physics/net ECS seams once at startup — spawn/despawn via
-    # generational entities, step a Box3D body. Leaves the world untouched.
-    seamSelfTest(world: walkerWorld, physicsSystem: physicsSystem)
-    # How it all starts, for R and the menu's Reset (app3d/WalkerReset)
-    let walkerReset: WalkerReset = createWalkerReset(
-      world: walkerWorld
-      physicsSystem: physicsSystem
+      clipIndex: clipIndex
+      sk: sk
+      basePartModel: basePartModel
+      cloneCount: cloneCount
       startRig: startRig
-      groundZ: groundZ
     )
-    placeHeroAtSession(
-      physicsSystem: physicsSystem
-      world: walkerWorld
-      heroEntityId: heroEntityId
-      session: sessionController
-      restored: sessionRestored
-      groundZ: groundZ
-      biome: biome
-      hero: characterController
-    )
+    let heroEntityId: EntityId = worldStart.heroEntityId
+    var crowdEntities: List(EntityId) = own worldStart.crowdEntities
+    var physicsSystem: WalkerPhysics = own worldStart.physicsSystem
+    let walkerReset: WalkerReset = own worldStart.walkerReset
+    var referenceTree: opt ReferenceTree = own worldStart.referenceTree
     if rig.mode is CameraRigMode.character {
       camera.target = thirdPersonCameraTarget(
         controller: characterController
@@ -807,191 +695,4 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
       ok: true
     }
   }
-}
-
-# ----- the loop ------------------------------------------------------------
-func runWalkerApp(settings: view WalkerAppSettings) ret Int {
-  var app: WalkerApp = createWalkerApp(settings: settings)
-  # #739/#740/#741: the WalkerWorld holds the hero + crowd (controllers), the
-  # skinned body parts (PartRoughness), and the terrain props + heightfield tiles
-  # (TerrainProp) — all recycled ECS entities.
-  log(
-    "[ecs] WalkerWorld: {walkerWorldEntityCount(world: app.world)} entities ({walkerWorldPartCount(
-      world: app.world
-    )} parts + hero + crowd + terrain)"
-  )
-  if let wadeSplash: mod WadeSplash = app.wadeSplash {
-    prepareSplashPreview(
-      wadeSplash: wadeSplash
-      cameraSystem: app.cameraSystem
-      biome: app.biome
-      groundZ: app.characterSystem.groundZ
-    )
-  }
-  Profile.maybeAutoStart(profiler: app.profiler)
-  # RAE_WALKER_PHYSICS_TEST=1: drive the hero into a cube stack and jump, check
-  # the trunks, rocks and bushes, report and quit (app3d/WalkerSelfTest),
-  # instead of the window loop. RAE_WALKER_SPLASH_TEST=1: the wading spray's
-  # pose check (app3d/WalkerSplash), where there is a sea.
-  # The ragdoll's bones on the loaded skeleton (app3d/WalkerKnockdown)
-  app.physicsSystem.ragdollRig = createRagdollRig(
-    skeleton: app.characterSystem.skeleton
-    bones: mixamoRagdollBones(prefix: "mixamorig:")
-  )
-  # RAE_WALKER_TRIP=1 trips the hero at the start (for screenshots of a ragdoll)
-  if Sys.getEnv(name: "RAE_WALKER_TRIP") is "1" {
-    let tripped: Bool = tripCharacter(
-      physicsSystem: app.physicsSystem
-      world: app.world
-      characterSystem: app.characterSystem
-      entityId: rosterEntityAt(roster: app.players, index: 0)
-      velocity: Vec3.create(x: 3.0, y: 2.0, z: 1.5)
-    )
-  }
-  let physicsTest: Bool = Sys.getEnv(name: "RAE_WALKER_PHYSICS_TEST").length() > 0
-  let splashTest: Bool = Sys.getEnv(name: "RAE_WALKER_SPLASH_TEST").length() > 0
-  var exitCode: Int = 0
-  if splashTest {
-    exitCode = 1
-    if let wadeSplash: mod WadeSplash = app.wadeSplash {
-      exitCode = runSplashPoseTest(
-        characterSystem: app.characterSystem
-        world: app.world
-        wadeSplash: wadeSplash
-      )
-    }
-  }
-  # RAE_WALKER_LAYOUT_TEST=1: the HUD laid out at phone and desktop sizes fits
-  # each safe area (app3d/WalkerLayoutTest), then quit
-  let layoutTest: Bool = Sys.getEnv(name: "RAE_WALKER_LAYOUT_TEST").length() > 0
-  if layoutTest and runWalkerLayoutTest(inputSystem: app.inputSystem) is false {
-    exitCode = 1
-  }
-  if physicsTest {
-    # The checks below were written for a hero that does not climb: it climbs
-    # again for its own check after them
-    removeClimber(
-      climbing: app.physicsSystem.climbing
-      parked: app.physicsSystem.moverParked
-      entityId: rosterEntityAt(roster: app.players, index: 0)
-    )
-    exitCode = runWalkerSelfTest(
-      physicsSystem: app.physicsSystem
-      world: app.world
-      forest: app.terrainSystem.forest
-      pooledTrunks: app.settings.land is WalkerLand.forest
-      heroEntityId: rosterEntityAt(roster: app.players, index: 0)
-    )
-    # Then the knockdown: tripped, a ragdoll, up where it landed
-    if runWalkerKnockTest(
-      physicsSystem: app.physicsSystem
-      world: app.world
-      characterSystem: app.characterSystem
-      heroEntityId: rosterEntityAt(roster: app.players, index: 0)
-    ) is false {
-      exitCode = 1
-    }
-    # Then the footprints: a print a stride, none standing still
-    if runWalkerMarkTest(
-      physicsSystem: app.physicsSystem
-      world: app.world
-      walkerMarks: app.walkerMarks
-      biome: app.biome
-      groundZ: app.characterSystem.groundZ
-      modelHeight: app.characterSystem.modelHeight
-      heroEntityId: rosterEntityAt(roster: app.players, index: 0)
-    ) is false {
-      exitCode = 1
-    }
-    # Then climbing: up the nearest tree's trunk and down again
-    addClimber(
-      climbing: app.physicsSystem.climbing
-      entityId: rosterEntityAt(roster: app.players, index: 0)
-    )
-    if runWalkerClimbTest(
-      physicsSystem: app.physicsSystem
-      world: app.world
-      pooledTrunks: app.settings.land is WalkerLand.forest
-      heroEntityId: rosterEntityAt(roster: app.players, index: 0)
-    ) is false {
-      exitCode = 1
-    }
-    # Then the crowd: walking about on its own, and knocked over by the hero
-    # running into one standing
-    if runWalkerCrowdTest(
-      physicsSystem: app.physicsSystem
-      world: app.world
-      characterSystem: app.characterSystem
-      heroEntityId: rosterEntityAt(roster: app.players, index: 0)
-    ) is false {
-      exitCode = 1
-    }
-    # Then R / the menu's Reset: everything back as it started
-    if runWalkerResetTest(
-      walkerReset: app.walkerReset
-      physicsSystem: app.physicsSystem
-      world: app.world
-      characterSystem: app.characterSystem
-      rig: app.cameraSystem.rig
-      heroEntityId: rosterEntityAt(roster: app.players, index: 0)
-    ) is false {
-      exitCode = 1
-    }
-  }
-  loop not physicsTest and not splashTest and not layoutTest and not Gpu2d.pollClose() {
-    beginWalkerFrame(app: app)
-    updateWalkerApp(app: app)
-    if Gpu2d.shouldRenderFrame(appNeedsRender: app.frame.needsRender) is false {
-      # Park until the OS has something to say (shared policy, lib/ui/event_loop).
-      Gpu2d.waitEvents(timeoutSec: nextWaitTimeoutSec(
-        visible: Gpu2d.renderableNow()
-        animating: false
-        mouseDown: false
-        pollWatcher: false
-        frameSec: 0.016667
-        heartbeatSec: 1.0
-      ))
-    } else {
-      if let resources: mod GpuResources = app.gpuResources {
-        renderWalkerApp(
-          uiSystems: app.inputSystem.uiSystems
-          cameraSystem: app.cameraSystem
-          characterSystem: app.characterSystem
-          frame: app.frame
-          inputSystem: app.inputSystem
-          renderSystem: app.renderSystem
-          world: app.world
-          physicsSystem: app.physicsSystem
-          walkerMarks: app.walkerMarks
-          terrainSystem: app.terrainSystem
-          wadeSplash: app.wadeSplash
-          waterSystem: app.waterSystem
-          biome: app.biome
-          resources: resources
-          profiler: app.profiler
-          grassCompute: app.grassCompute
-        )
-      }
-    }
-    # Frame end: report the authored components no lib table matched (this app
-    # has no tables of its own) and recycle the indices of destroyed entities.
-    uiFrameEnd(world: app.inputSystem.world, uiSystems: app.inputSystem.uiSystems)
-  }
-  if let resources: mod GpuResources = app.gpuResources {
-    grassShutdown(grass: app.grassCompute, resources: resources)
-    if let tree: mod ReferenceTree = app.renderSystem.referenceTree {
-      releaseReferenceTree(tree: tree, resources: resources)
-    }
-    if let waterSystem: mod WaterSystem = app.waterSystem {
-      waterShutdown(waterSystem: waterSystem, resources: resources)
-    }
-    spriteShutdown(cache: app.terrainSystem.sprites, resources: resources)
-    farCanopyShutdown(canopy: app.terrainSystem.canopy, resources: resources)
-    shutdown(resources: resources)
-  }
-  shutdownDeferredRenderer(renderer: app.renderSystem.renderer)  # #904: the renderer-owned GPU manager, before the C shutdown
-  destroyPhysicsSystem(physicsSystem: app.physicsSystem)
-  shutdown()
-  Gpu2d.closeWindow()
-  ret exitCode
 }
