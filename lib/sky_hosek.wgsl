@@ -30,6 +30,7 @@ fn skyProcedural(dir: vec3<f32>, toSun: vec3<f32>, t: f32) -> vec3<f32> {
   let zy = (0.00275*ts3 - 0.00610*ts2 + 0.00317*ts) * t * t
          + (-0.04214*ts3 + 0.08970*ts2 - 0.04153*ts + 0.00516) * t
          + (0.15346*ts3 - 0.26756*ts2 + 0.06670*ts + 0.26688);
+  // zY is in kcd/m2; 0.05 is Sky.rae's skyUnitsPerKcd (keep them equal)
   let xx = zx * fx; let yy = max(zy * fz, 0.0001); let YY = zY * fy * 0.05;
   let X = xx * YY / yy; let Z = (1.0 - xx - yy) * YY / yy;
   let rgb = vec3<f32>( 3.2406*X - 1.5372*YY - 0.4986*Z,
