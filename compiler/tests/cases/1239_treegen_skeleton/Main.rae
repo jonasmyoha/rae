@@ -12,6 +12,7 @@ open treeGen/Skeleton
 open treeGen/BarkMesh
 open treeGen/ClumpMesh
 open treeGen/TreeGrower
+open treeGen/BranchDetail
 
 func check(label: view String, ok: view Bool) {
   if ok {
@@ -132,13 +133,22 @@ func main() ret Int {
     ) {
       leadersOk = false
     }
-    # the T02 tree's branches keep most of their thickness over their own
-    # 15 traced points (a twig joined on after them thins on)
+    # as a branch works: every leader and branch thins to a fine tip, and
+    # every child starts clearly thinner than its parent there
     loop let limb: view Limb in skeleton.limbs {
-      if limb.order is 2 and limb.radii.copyAtDefault(
-        index: Math.min(a: 14, b: limb.radii.length - 1)
-      ) < limb.radii.copyAtDefault(index: 0) * 0.45 {
-        evenOk = false
+      if limb.order is 1 or limb.order is 2 {
+        if limb.radii.copyAtDefault(index: limb.radii.length - 1) > limb.radii.copyAtDefault(
+          index: 0
+        ) * 0.34 {
+          evenOk = false
+        }
+      }
+      if limb.parent >= 0 {
+        let parent: Limb = skeleton.limbs.copyAtDefault(index: limb.parent)
+        let at: Int = closestIndex(limb: parent, point: limb.points.copyAtDefault(index: 0))
+        if limb.radii.copyAtDefault(index: 0) > parent.radii.copyAtDefault(index: at) * 0.76 {
+          evenOk = false
+        }
       }
     }
     if not facesOutward(mesh: barkMesh(skeleton: skeleton)) {
@@ -154,7 +164,7 @@ func main() ret Int {
   check(label: "side branches start high, above 58% of the height", ok: topThirdOk)
   check(label: "no radius grows toward a tip", ok: radiiOk)
   check(label: "the main leader joined onto the trunk; the second one thinner", ok: leadersOk)
-  check(label: "side branches keep at least 45% of their thickness to the tip", ok: evenOk)
+  check(label: "branches thin to fine tips; every child starts thinner than its parent", ok: evenOk)
   check(label: "every bark triangle faces outward, tip caps too", ok: meshOk)
   # the traced leaf masses: all of them, solid, facing outward
   let masses: TreeSkeleton = growSkeleton(params: warmBroadleafParams(seed: 1))
