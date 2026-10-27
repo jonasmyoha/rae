@@ -99,6 +99,37 @@ before.
   the sky, the shade and the mist then come out 5 times darker); it is
   queued separately.
 
+## Step 2, done (0.2.175)
+
+`lib/AutoExposure.rae` with `lib/auto_exposure.wgsl`. An app calls
+`autoExposureFrame(renderer, light, deltaTime, compensation, lowestEv100,
+highestEv100)` once per frame before it renders (the walker apps do, in
+`WalkerRenderWalk.renderWalkerApp`); the renderer owns the state
+(`DeferredRenderer.autoExposure`).
+
+- Measurement: one compute workgroup reads a 64 x 64 grid over the frame
+  before's lit HDR image and writes the mean log2 luminance; it is copied to
+  a 16-byte map-read buffer and read back without blocking (a frame or two
+  late). Dividing out the exposure that frame was drawn with gives the
+  scene's own mean luminance.
+- Metering: EV100 = log2(L * 100 / K), K = `autoExposureCalibration` = 26.3,
+  set so a sunny noon in 143 (mean log2 luminance 12.10) meters to
+  `referenceEv100`, the look the lights were tuned at. The usual K = 12.5
+  would have made every scene about a stop darker.
+- Adaptation: Light3d.ev100 moves toward the target with a time constant of
+  1.2 s toward a darker scene and 3 s toward a brighter one.
+- Range: the app narrows the camera to its look. The walker allows one stop
+  open (shade, forest: 143 inside the stand meters 13.07) and two closed,
+  because its night sky and moonlight are tuned bright for their look (the
+  night meters EV100 10.3, which a free camera would turn into an overcast
+  day).
+- Compensation: the settings panel's "Exposure" row (Darker / Brighter, 0.5
+  EV steps, +-4), `SettingsState.exposureCompensation`; apps without
+  automatic exposure (the editor-panel examples) apply it to their fixed
+  camera.
+- `RAE_EXPOSURE=<EV100>` fixes the camera (screenshots, tests);
+  `RAE_EXPOSURE_LOG=1` logs the meter about once a second.
+
 ## Steps (QUEUE)
 
 1. Units and a camera exposure: sun in lux, both skies in cd/m2, a fixed

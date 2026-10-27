@@ -33,6 +33,8 @@ import GrassConfig
 import app3d/Slider
 open Scene3d
 open RendererDeferred
+open AutoExposure
+open LightUnits
 open MeshStore
 open Sky
 open Gbuffer
@@ -122,6 +124,12 @@ func stepWalkerCharacterClock(
   )
 }
 
+# How far the walker's camera may open up (darker scenes) and close down
+# (brighter ones) from the look its lights were tuned at, in stops
+const walkerExposureOpenStops: Float = 1.0
+
+const walkerExposureCloseStops: Float = 2.0
+
 # ----- render phase: animation sample + render-graph walk ------------------
 func renderWalkerApp(
   uiSystems: view UiSystems
@@ -152,6 +160,18 @@ func renderWalkerApp(
     settings: renderSystem.windSettings
   )
   setRendererWind(renderer: renderSystem.renderer, wind: frameWind)
+  # The camera's exposure follows the scene, as an eye does (AutoExposure;
+  # RAE_EXPOSURE=<EV100> fixes it): opening up to a stop for the shade and
+  # the forest, closing up to two for a bright scene, and so keeping the
+  # walker's night (tuned bright for its look) dark
+  autoExposureFrame(
+    renderer: renderSystem.renderer
+    light: cameraSystem.light
+    deltaTime: deltaTime
+    compensation: inputSystem.settings.exposureCompensation
+    lowestEv100: referenceEv100 - walkerExposureOpenStops
+    highestEv100: referenceEv100 + walkerExposureCloseStops
+  )
 
   # Every character (app3d/Characters), in its table's order — its position
   # there is its palette slot: its clock one frame on, its pose (blended out of

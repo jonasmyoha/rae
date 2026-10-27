@@ -1,0 +1,59 @@
+# Light units and the automatic exposure's pure parts (LightUnits,
+# AutoExposure, docs/physical-light-units.md steps 1-2): the camera at the
+# reference exposure sees the old relative units as real light; the meter
+# turns a sunny 143's mean luminance into that exposure; the adaptation
+# moves toward darker scenes faster than toward brighter ones and never
+# overshoots; the settings label's format.
+import Math
+open LightUnits
+open AutoExposure
+open app3d/SettingsDialog
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func main() {
+  let reference: Float = exposureScale(ev100: referenceEv100) * relativeLightUnit
+  check(
+    label: "at the reference exposure one old unit is 20,000 cd/m2"
+    ok: Math.abs(value: reference - 1.0) < 0.0001
+  )
+  check(
+    label: "one stop more halves the light"
+    ok: Math.abs(value: exposureScale(ev100: 15.0) * 2.0 - exposureScale(ev100: 14.0)) < 0.0000001
+  )
+  # 143 at noon measured a mean log2 luminance of 12.10
+  let sunny: Float = meteredEv100(log2Luminance: 12.0976, compensation: 0.0)
+  check(
+    label: "a sunny noon meters to the reference exposure"
+    ok: Math.abs(value: sunny - referenceEv100) < 0.01
+  )
+  check(
+    label: "+1 EV compensation opens the camera one stop"
+    ok: Math.abs(value: meteredEv100(log2Luminance: 12.0976, compensation: 1.0) - (sunny - 1.0)) < 0.0001
+  )
+  # one second toward a scene two stops darker, and two stops brighter
+  let towardDark: Float = adaptedEv100(current: 14.0, target: 12.0, deltaTime: 1.0)
+  let towardBright: Float = adaptedEv100(current: 12.0, target: 14.0, deltaTime: 1.0)
+  check(
+    label: "it moves toward the target, without overshooting"
+    ok: towardDark < 14.0 and towardDark > 12.0 and towardBright > 12.0 and towardBright < 14.0
+  )
+  check(label: "faster toward a darker scene", ok: 14.0 - towardDark > towardBright - 12.0)
+  var settled: Float = 14.0
+  loop var i: Int = 0, i < 600, ++i {
+    settled = adaptedEv100(current: settled, target: 12.0, deltaTime: 1.0 / 60.0)
+  }
+  check(label: "settled within 10 seconds", ok: Math.abs(value: settled - 12.0) < 0.01)
+  check(
+    label: "the settings label: +0.5, -1.0, +0.0"
+    ok: formatExposureCompensation(value: 0.5) is "+0.5" and formatExposureCompensation(value: -1.0) is "-1.0" and formatExposureCompensation(
+      value: 0.0
+    ) is "+0.0"
+  )
+}
