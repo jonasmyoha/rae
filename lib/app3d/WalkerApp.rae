@@ -259,12 +259,6 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
     }
     let basePartModel: Mat4 = transform3dToMatrix(t: partTransform)
     groundWalker(controller: characterController, groundZ: groundZ, biome: biome)
-    # a fresh start's spot: the T02 stand's fixed anchor, whatever is restored
-    let freshStart: Vec3 = worldFindGrass(
-      x: characterController.position.x
-      y: characterController.position.y
-      cfg: biome
-    )
 
     var light: Light3d = defaultLight3d()
     # #905/#921: the renderer owns the mesh + skin stores the walker parts,
@@ -450,33 +444,28 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
     # session: `rae run` keeps the state in .rae/apps/<app>/ (not the
     # RAE_HOT_RELOAD_DIR a caller sets), and a hero restored somewhere else
     # failed five of the physics checks on one machine only
-    if not headless and not walkerSelfTestRequested() {
-      let saved: String = readHotReloadStateFor(appId: settings.appId)
-      if restoreWalkerState(
-        raw: saved
-        clipIndex: clipIndex
-        playing: playing
-        speed: speed
-        toon: toonShading
-        controller: characterController
-        rig: rig
-        camera: camera
-      ) {
-        let pctR: Int = speedPercent(value: speed)
-        logInfoLine(
-          ov: logOverlay
-          text: "state restored: clip {clipIndex}, speed {pctR}%, camera and window kept"
-        )
-      }
-    }
+    # The world is built round the FRESH start (Reset's); a session places the hero
+    var sessionController: ThirdPersonController = characterController
+    let sessionRestored: Bool = restoreWalkerSession(
+      appId: settings.appId
+      allowed: not headless and not walkerSelfTestRequested()
+      clipIndex: clipIndex
+      playing: playing
+      speed: speed
+      toon: toonShading
+      controller: sessionController
+      rig: rig
+      camera: camera
+      logOverlay: logOverlay
+    )
 
     # Nobody starts in the sea. The origin is not guaranteed land — the island mask
     # only guarantees land is SOMEWHERE inside the radius.
     spawnOnLand(controller: characterController, groundZ: groundZ, biome: biome)
-    # the T02 stand's patch, ahead of the fresh start: a reload never moves it
+    # the T02 stand's patch, 30 m ahead of the fresh start
     terrainSystem.referenceStandOn = settings.referenceTree
-    terrainSystem.referenceStandX = freshStart.x
-    terrainSystem.referenceStandY = freshStart.y + referenceStandAhead
+    terrainSystem.referenceStandX = characterController.position.x
+    terrainSystem.referenceStandY = characterController.position.y + referenceStandAhead
     let treeCount: Int = plantWalkerForest(
       land: settings.land
       terrainSystem: terrainSystem
@@ -560,6 +549,16 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
       physicsSystem: physicsSystem
       startRig: startRig
       groundZ: groundZ
+    )
+    placeHeroAtSession(
+      physicsSystem: physicsSystem
+      world: walkerWorld
+      heroEntityId: heroEntityId
+      session: sessionController
+      restored: sessionRestored
+      groundZ: groundZ
+      biome: biome
+      hero: characterController
     )
     if rig.mode is CameraRigMode.character {
       camera.target = thirdPersonCameraTarget(

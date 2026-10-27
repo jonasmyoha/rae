@@ -6,6 +6,8 @@ open Scene3d
 open app3d/CameraRig
 open app3d/CharacterController
 open app3d/Playback
+open HotReload
+open ui/LogOverlay
 
 const walkerStateVersion: Int = 6
 
@@ -90,4 +92,43 @@ func restoreWalkerState(
   }
   # Window geometry has a separate runtime-owned persistence channel.
   ret true
+}
+
+# The app's saved session, when `allowed`: restored into these and logged.
+# True when one was restored. The walker app restores it into a controller
+# of its own: its world is built round the fresh start (Reset's start), and
+# only then is the hero put where the session left it
+# (app3d/WalkerReset placeHeroAtSession).
+func restoreWalkerSession(
+  appId: view String
+  allowed: view Bool
+  clipIndex: mod Int
+  playing: mod Bool
+  speed: mod Float
+  toon: mod Bool
+  controller: mod ThirdPersonController
+  rig: mod CameraRig
+  camera: mod Camera3d
+  logOverlay: mod LogOverlay
+) ret Bool {
+  if not allowed {
+    ret false
+  }
+  if restoreWalkerState(
+    raw: readHotReloadStateFor(appId: appId)
+    clipIndex: clipIndex
+    playing: playing
+    speed: speed
+    toon: toon
+    controller: controller
+    rig: rig
+    camera: camera
+  ) {
+    logInfoLine(
+      ov: logOverlay
+      text: "state restored: clip {clipIndex}, speed {speedPercent(value: speed)}%, camera and window kept"
+    )
+    ret true
+  }
+  ret false
 }
