@@ -61,6 +61,7 @@ open gpu/GpuResources
 open gpu/GpuLifetime
 open Gpu2dCanvas
 open RendererPassTiming
+open AutoExposure
 open RenderResolution
 open RendererPasses
 open ForwardMain
@@ -143,6 +144,9 @@ type DeferredRenderer {
   underwater: UnderwaterParams
   # Per-pass GPU timing (RendererPassTiming), on with RAE_GPU_PASS_TIMING=1
   passTiming: DeferredPassTiming
+  # The automatic exposure (AutoExposure): driven by the app's
+  # autoExposureFrame call, idle otherwise
+  autoExposure: AutoExposure = createAutoExposure()
 }
 
 # The manager slot budget: the post-pass targets + views, uniforms, pipelines
@@ -290,6 +294,7 @@ func shutdownDeferredRenderer(renderer: mod DeferredRenderer) {
   if let resources: mod GpuResources = renderer.gpuResources {
     # Anything still recorded goes to the GPU before its objects are retired
     flushPostPasses(targets: renderer.passes.targets, resources: resources)
+    releaseAutoExposure(autoExposure: renderer.autoExposure, resources: resources)
     postPassesShutdown(
       composite: renderer.passes.composite
       ao: renderer.passes.ao

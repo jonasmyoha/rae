@@ -1,0 +1,350 @@
+# AutoExposure — the camera's exposure follows the scene, as an eye does
+# (docs/physical-light-units.md step 2). Each frame the app calls
+# autoExposureFrame before it renders. It measures the lit HDR image of the
+# frame before (auto_exposure.wgsl: the mean log2 luminance of a 64 x 64
+# grid, one compute workgroup), reads the one number back without blocking
+# (a frame or two late; the adaptation is slow anyway), turns it into a
+# target EV100 and moves Light3d.ev100 toward it over seconds: faster when
+# the scene gets darker than when it gets brighter. Because the result is in
+# the app's Light3d, the renderer, the water and everything else that
+# exposes light (LightUnits) use the same camera.
+#
+# The target: a camera meters the scene's mean luminance L (cd/m2) as
+# EV100 = log2(L * 100 / K). K is the meter's calibration: with the usual
+# 12.5 a sunny scene comes out about 1 stop darker than the walker look the
+# scenes were tuned at (referenceEv100), so autoExposureCalibration is set
+# so that look is what a sunny noon meters to: 143 at noon (its stand view,
+# Preetham) measured a mean log2 luminance of 12.10, which K = 26.3 turns
+# into EV100 14.02. The compensation (the settings dialog's
+# "Exposure", in EV) is added on top: + brighter.
+#
+# RAE_EXPOSURE=<EV100> fixes the camera there (screenshots, tests): no
+# measurement, no adaptation.
+import Sys
+import Math
+open Scene3d
+open LightUnits
+open webgpu/WebgpuEnums
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuReadback
+open gpu/GpuRender
+open gpu/GpuIds
+open GbufferTargets
+open RendererDeferred
+
+# The meter's calibration K in EV100 = log2(L * 100 / K): see above
+const autoExposureCalibration: Float = 26.3
+
+# Seconds to close most of the gap (a time constant): toward a darker
+# scene, and toward a brighter one
+const autoExposureDarkerSeconds: Float = 1.2
+
+const autoExposureBrighterSeconds: Float = 3.0
+
+# The widest range a camera may take (EV100): a moonlit night to a snowfield
+# at noon. An app narrows it (autoExposureFrame's lowest and highest), as
+# engines do with a per-scene Min/Max EV100, when its lights are tuned for a
+# look rather than measured: the walker's night sky is bright for its look,
+# and a camera free to open up to it would turn the night into an overcast
+# day.
+const autoExposureMinEv100: Float = -4.0
+
+const autoExposureMaxEv100: Float = 18.0
+
+# Bytes of the result buffer (4 floats; [0] the mean log2 luminance)
+const autoExposureResultBytes: Int = 16
+
+type AutoExposure {
+  # false when RAE_EXPOSURE fixes the camera
+  adaptive: Bool
+  fixedEv100: Float
+  # the camera now, and where the measurement says it should be
+  ev100: Float
+  targetEv100: Float
+  started: Bool
+  hasTarget: Bool
+  # the last measurement: the scene's mean log2 luminance (cd/m2)
+  sceneLog2Luminance: Float
+  # the GPU side, made at the first frame
+  made: Bool
+  pipeline: opt PipelineId
+  result: BufferId
+  staging: BufferId
+  bind: BindGroupId
+  boundView: TextureViewId
+  inFlight: List(SubmissionId)
+  reading: opt ReadbackId
+  # the exposure scale the measured frame was drawn with
+  readScale: Float
+  # RAE_EXPOSURE_LOG=1: a line about once a second
+  logging: Bool
+  readings: Int
+}
+
+func createAutoExposure() ret AutoExposure {
+  let fixedText: String = Sys.getEnv(name: "RAE_EXPOSURE")
+  ret AutoExposure {
+    adaptive: fixedText.length() is 0
+    fixedEv100: fixedText.toFloat()
+    ev100: referenceEv100
+    targetEv100: referenceEv100
+    started: false
+    hasTarget: false
+    sceneLog2Luminance: 0.0
+    made: false
+    pipeline: none
+    result: noBufferId()
+    staging: noBufferId()
+    bind: noBindGroupId()
+    boundView: noTextureViewId()
+    inFlight: List.create(SubmissionId, cap: 4)
+    reading: none
+    readScale: 1.0
+    logging: Sys.getEnv(name: "RAE_EXPOSURE_LOG") is "1"
+    readings: 0
+  }
+}
+
+func log2Of(value: view Float) ret Float {
+  ret Math.naturalLog(x: value) / 0.6931472
+}
+
+# The EV100 a camera meters for a scene of mean log2 luminance `log2Luminance`
+# (cd/m2), with `compensation` EV on top (+ brighter)
+func meteredEv100(log2Luminance: view Float, compensation: view Float) ret Float {
+  ret log2Luminance + log2Of(value: 100.0 / autoExposureCalibration) - compensation
+}
+
+# One step of the adaptation: `current` toward `target` over `deltaTime`
+# seconds, faster toward a darker scene (a lower EV100)
+func adaptedEv100(current: view Float, target: view Float, deltaTime: view Float) ret Float {
+  var seconds: Float = autoExposureBrighterSeconds
+  if target < current {
+    seconds = autoExposureDarkerSeconds
+  }
+  let keep: Float = Math.exp(x: -Math.max(a: deltaTime, b: 0.0) / seconds)
+  ret target + (current - target) * keep
+}
+
+# The compute pipeline and the two small buffers
+func ensureAutoExposureGpu(autoExposure: mod AutoExposure, resources: mod GpuResources) {
+  if autoExposure.made {
+    ret
+  }
+  autoExposure.made = true
+  let measureShader: Shader = shader(files: ["lib/auto_exposure.wgsl"])
+  autoExposure.pipeline = createComputePipeline(
+    resources: resources
+    shader: measureShader
+    entryPoint: "measure"
+  )
+  if let result: BufferId = createBuffer(
+    resources: resources
+    size: autoExposureResultBytes
+    usage: WGPUBufferUsage_Storage + WGPUBufferUsage_CopySrc
+  ) {
+    autoExposure.result = result
+  }
+  if let staging: BufferId = createBuffer(
+    resources: resources
+    size: autoExposureResultBytes
+    usage: WGPUBufferUsage_CopyDst + WGPUBufferUsage_MapRead
+  ) {
+    autoExposure.staging = staging
+  }
+  if autoExposure.pipeline is none {
+    log("[exposure] the measuring pipeline could not be made; the exposure stays fixed")
+  }
+}
+
+# Take in a measurement that landed: the scene's mean log2 luminance
+func takeAutoExposureReading(autoExposure: mod AutoExposure, resources: mod GpuResources) {
+  if let reading: view ReadbackId = autoExposure.reading {
+    let status: Int = pollReadback(resources: resources, id: reading)
+    if status is 0 {
+      ret
+    }
+    if status is 1 {
+      var bytes: List(UInt8) = List.create(UInt8, cap: autoExposureResultBytes)
+      loop bytes.length < autoExposureResultBytes {
+        bytes.add(value: 0)
+      }
+      if copyReadback(resources: resources, id: reading, destination: bytes) {
+        # result[0], a little-endian f32
+        var bits: Int = 0
+        var place: Int = 1
+        loop var i: Int = 0, i < 4, ++i {
+          bits = bits + (bytes.copyAtFallback(index: i, fallback: 0) as Int) * place
+          place = place * 256
+        }
+        let exposedLog2: Float = Math.floatFromBits(bits: bits)
+        # the lit image was exposed by readScale: undo it for the scene's
+        # own luminance
+        autoExposure.sceneLog2Luminance = exposedLog2 - log2Of(value: autoExposure.readScale)
+        autoExposure.hasTarget = true
+        autoExposure.readings = autoExposure.readings + 1
+      }
+    }
+    let unusedRetired: Bool = retireReadback(resources: resources, id: reading)
+    autoExposure.reading = none
+  }
+}
+
+# Measure `litView` (the frame just drawn, exposed by `scale`) and start
+# reading the result back
+func startAutoExposureMeasure(
+  autoExposure: mod AutoExposure
+  resources: mod GpuResources
+  litView: view TextureViewId
+  scale: view Float
+) {
+  if autoExposure.reading is not none {
+    ret
+  }
+  if not isValidTextureView(resources: resources, id: litView) or not isValidBuffer(
+    resources: resources
+    id: autoExposure.staging
+  ) {
+    ret
+  }
+  var pipeline: PipelineId = { managerTag: 0, slot: -1, generation: 0 }
+  if let made: view PipelineId = autoExposure.pipeline {
+    pipeline = made
+  } else {
+    ret
+  }
+  # the bind group names the lit image, which is made again on a resize
+  if litView.slot is not autoExposure.boundView.slot or litView.generation is not autoExposure.boundView.generation {
+    let unusedOld: Bool = retireBindGroup(resources: resources, id: autoExposure.bind)
+    autoExposure.bind = noBindGroupId()
+    var entries: List(ResourceRef) = List.create(ResourceRef, cap: 2)
+    entries.add(value: textureViewRef(id: litView))
+    entries.add(value: bufferRef(id: autoExposure.result))
+    if let bind: BindGroupId = createComputeBindGroupOrdered(
+      resources: resources
+      pipeline: pipeline
+      entries: entries
+    ) {
+      autoExposure.bind = bind
+      autoExposure.boundView = litView
+    } else {
+      ret
+    }
+  }
+  pollSubmissions(inFlight: autoExposure.inFlight, resources: resources)
+  if var recording: Recording = beginRecording(resources: resources) {
+    if not recordCompute(
+      recording: recording
+      resources: resources
+      pipeline: pipeline
+      bindGroup: autoExposure.bind
+      workgroupsX: 1
+      workgroupsY: 1
+      workgroupsZ: 1
+    ) {
+      ret
+    }
+    if not recordCopyBuffer(
+      recording: recording
+      resources: resources
+      source: autoExposure.result
+      sourceOffset: 0
+      destination: autoExposure.staging
+      destinationOffset: 0
+      size: autoExposureResultBytes
+    ) {
+      ret
+    }
+    if let submitted: SubmissionId = trackSubmission(
+      inFlight: autoExposure.inFlight
+      resources: resources
+      recording: recording
+    ) {
+      autoExposure.reading = startReadback(
+        resources: resources
+        buffer: autoExposure.staging
+        offset: 0
+        size: autoExposureResultBytes
+      )
+      autoExposure.readScale = scale
+    }
+  }
+}
+
+# Once per frame, before the frame renders: take in the last measurement,
+# move the camera toward it by `deltaTime` seconds of adaptation, measure the
+# frame before, and set light.ev100. `compensation` is in EV (+ brighter);
+# the camera stays within [lowestEv100, highestEv100] (and the widest range
+# above). The first frame starts from light.ev100.
+func autoExposureFrame(
+  renderer: mod DeferredRenderer
+  light: mod Light3d
+  deltaTime: view Float
+  compensation: view Float
+  lowestEv100: view Float
+  highestEv100: view Float
+) {
+  var autoExposure: AutoExposure = own renderer.autoExposure
+  if not autoExposure.adaptive {
+    light.ev100 = autoExposure.fixedEv100
+    renderer.autoExposure = own autoExposure
+    ret
+  }
+  if not autoExposure.started {
+    autoExposure.started = true
+    autoExposure.ev100 = light.ev100
+  }
+  # the frame before was drawn with the camera as it is now
+  let drawnScale: Float = exposureScale(ev100: autoExposure.ev100)
+  if let resources: mod GpuResources = renderer.gpuResources {
+    ensureAutoExposureGpu(autoExposure: autoExposure, resources: resources)
+    takeAutoExposureReading(autoExposure: autoExposure, resources: resources)
+    startAutoExposureMeasure(
+      autoExposure: autoExposure
+      resources: resources
+      litView: renderer.passes.targets.litView
+      scale: drawnScale
+    )
+  }
+  if autoExposure.hasTarget {
+    # the range moves the camera, not the compensation: + still brightens
+    # at the range's ends
+    let metered: Float = meteredEv100(
+      log2Luminance: autoExposure.sceneLog2Luminance
+      compensation: 0.0
+    )
+    let lowest: Float = Math.max(a: lowestEv100, b: autoExposureMinEv100)
+    let highest: Float = Math.min(a: highestEv100, b: autoExposureMaxEv100)
+    autoExposure.targetEv100 = Math.clamp(val: metered, low: lowest, high: highest) - compensation
+    autoExposure.ev100 = adaptedEv100(
+      current: autoExposure.ev100
+      target: autoExposure.targetEv100
+      deltaTime: deltaTime
+    )
+  }
+  if autoExposure.logging and autoExposure.hasTarget and autoExposure.readings % 30 is 0 {
+    log(
+      "[exposure] scene log2 luminance {autoExposure.sceneLog2Luminance}, target EV100 {autoExposure.targetEv100}, camera EV100 {autoExposure.ev100}"
+    )
+    autoExposure.readings = autoExposure.readings + 1
+  }
+  light.ev100 = autoExposure.ev100
+  renderer.autoExposure = own autoExposure
+}
+
+# The GPU objects (renderer shutdown)
+func releaseAutoExposure(autoExposure: mod AutoExposure, resources: mod GpuResources) {
+  if let reading: view ReadbackId = autoExposure.reading {
+    let unusedRead: Bool = retireReadback(resources: resources, id: reading)
+  }
+  autoExposure.reading = none
+  let unusedBind: Bool = retireBindGroup(resources: resources, id: autoExposure.bind)
+  let unusedResult: Bool = retireBuffer(resources: resources, id: autoExposure.result)
+  let unusedStaging: Bool = retireBuffer(resources: resources, id: autoExposure.staging)
+  if let pipeline: view PipelineId = autoExposure.pipeline {
+    let unusedPipeline: Bool = retirePipeline(resources: resources, id: pipeline)
+  }
+  autoExposure.pipeline = none
+  autoExposure.made = false
+}

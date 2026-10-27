@@ -54,6 +54,21 @@ enum SettingsSkyModel { preetham, hosek, stylised, solid }
 # scale); they are here so later steps have their places.
 enum SettingsQuality { low, mid, high, ultra }
 
+# The exposure compensation's step and its limit either way (EV)
+const settingsExposureStep: Float = 0.5
+
+const settingsExposureLimit: Float = 4.0
+
+# "+0.5", "-1.0", "+0.0"
+func formatExposureCompensation(value: view Float) ret String {
+  let tenths: Int = Math.round(x: Math.abs(value: value) * 10.0).toInt()
+  var sign: String = "+"
+  if value < -0.01 {
+    sign = "-"
+  }
+  ret "{sign}{tenths / 10}.{tenths % 10}"
+}
+
 # RAE_QUALITY=low|mid|high|ultra starts at that step (screenshots, frame
 # times); otherwise High
 func settingsQualityFromEnv() ret SettingsQuality {
@@ -150,6 +165,9 @@ type SettingsState {
   shadows: Bool
   # The renderer's quality step (High: today's renderer)
   quality: SettingsQuality = SettingsQuality.high
+  # The automatic exposure's compensation in EV (AutoExposure): + brighter,
+  # - darker; steps of settingsExposureStep
+  exposureCompensation: Float = 0.0
   dateDragging: Bool
   # Where on Earth, in degrees east. It does not move the sun (the clock is
   # local solar time), but it turns that time into universal time, which is
@@ -174,7 +192,9 @@ func createSettingsState(
 ) ret SettingsState {
   ret SettingsState {
     playing: true
-    open: false  # the panel starts closed; its edge tab opens it
+    # the panel starts closed; its edge tab opens it (RAE_SETTINGS_OPEN=1
+    # starts it open, for screenshots)
+    open: Sys.getEnv(name: "RAE_SETTINGS_OPEN") is "1"
     scene: scene
     sceneCount: sceneCount
     speed: speed
@@ -362,6 +382,20 @@ func settingsHandleAction(settingsState: mod SettingsState, actionId: view Strin
   }
   if actionId is "settings.anim.faster" {
     settingsState.speed = nextSpeed(current: settingsState.speed, up: true)
+    ret true
+  }
+  if actionId is "settings.exposure.darker" {
+    settingsState.exposureCompensation = Math.max(
+      a: settingsState.exposureCompensation - settingsExposureStep
+      b: -settingsExposureLimit
+    )
+    ret true
+  }
+  if actionId is "settings.exposure.brighter" {
+    settingsState.exposureCompensation = Math.min(
+      a: settingsState.exposureCompensation + settingsExposureStep
+      b: settingsExposureLimit
+    )
     ret true
   }
   if actionId is "settings.quality.low" {
@@ -631,6 +665,11 @@ func settingsApplyToWorld(
   )
   let pct: Int = speedPercent(value: settingsState.speed)
   setNodeText(world: world, nodeId: "SettingsSpeedRow", value: "Animation speed {pct}%")
+  setNodeText(
+    world: world
+    nodeId: "SettingsExposureLabel"
+    value: "Exposure {formatExposureCompensation(value: settingsState.exposureCompensation)} EV"
+  )
   setNodeText(
     world: world
     nodeId: "SettingsTimeLabel"
