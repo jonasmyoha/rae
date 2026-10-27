@@ -386,8 +386,11 @@ func tracedSkeleton(params: view TreeParams) ret TreeSkeleton {
   }
 }
 
-# A thin straight twig from the point of `parent` nearest to `target` to
-# `target`
+# A thin twig from the point of `parent` nearest to `target` to `target`:
+# it leaves along the parent's own direction there and curves round to the
+# target (a curve with its middle control point half way out along the
+# parent), so it grows out of its limb instead of standing off it at an
+# angle
 func twigTo(parent: view Limb, parentIndex: view Int, target: view Vec3) ret Limb {
   var nearest: Int = 0
   var nearestDistance: Float = 1000000.0
@@ -401,13 +404,41 @@ func twigTo(parent: view Limb, parentIndex: view Int, target: view Vec3) ret Lim
     }
   }
   let start: Vec3 = parent.points.copyAtDefault(index: nearest)
-  let baseRadius: Float = Math.min(a: parent.radii.copyAtDefault(index: nearest) * 0.45, b: 0.035)
-  let steps: Int = 5
+  # as thick as its limb where it leaves (it leaves along the limb, so a
+  # twig at a limb's tip carries the limb on with no step), up to 6 cm, and
+  # thin enough for its length that its bend never folds its tube
+  let baseRadius: Float = Math.min(
+    a: parent.radii.copyAtDefault(index: nearest) * 0.95
+    b: Math.min(a: 0.06, b: 0.15 * nearestDistance)
+  )
+  let before: Vec3 = parent.points.copyAtDefault(index: Math.max(a: 0, b: nearest - 1))
+  let after: Vec3 = parent.points.copyAtDefault(
+    index: Math.min(a: parent.points.length - 1, b: nearest + 1)
+  )
+  # along the limb toward the target's side, so the curve never turns back
+  # on itself
+  var along: Vec3 = Vec3.vsub(a: after, b: before)
+  if Vec3.vdot(a: along, b: Vec3.vsub(a: target, b: start)) < 0.0 {
+    along = Vec3.vscale(a: along, s: -1.0)
+  }
+  var control: Vec3 = Vec3.vscale(a: Vec3.vadd(a: start, b: target), s: 0.5)
+  if Vec3.vlen(a: along) > 0.0001 {
+    control = Vec3.vadd(
+      a: start
+      b: Vec3.vscale(a: Vec3.vnorm(a: along), s: 0.5 * Vec3.vlen(a: Vec3.vsub(a: target, b: start)))
+    )
+  }
+  let steps: Int = 8
   var points: List(Vec3) = List.create(Vec3, cap: steps + 1)
   var radii: List(Float) = List.create(Float, cap: steps + 1)
   loop var i: Int = 0, i <= steps, ++i {
     let t: Float = i.toFloat() / steps.toFloat()
-    points.add(value: Vec3.vadd(a: start, b: Vec3.vscale(a: Vec3.vsub(a: target, b: start), s: t)))
+    let first: Vec3 = Vec3.vadd(a: start, b: Vec3.vscale(a: Vec3.vsub(a: control, b: start), s: t))
+    let second: Vec3 = Vec3.vadd(
+      a: control
+      b: Vec3.vscale(a: Vec3.vsub(a: target, b: control), s: t)
+    )
+    points.add(value: Vec3.vadd(a: first, b: Vec3.vscale(a: Vec3.vsub(a: second, b: first), s: t)))
     # never thicker at its end than at its start (a thin parent's twig)
     let tipRadius: Float = Math.min(a: 0.012, b: baseRadius)
     radii.add(value: baseRadius + (tipRadius - baseRadius) * t)
