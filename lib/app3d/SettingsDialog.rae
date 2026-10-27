@@ -70,6 +70,25 @@ func settingsQualityFromEnv() ret SettingsQuality {
   ret SettingsQuality.high
 }
 
+# RAE_SKY=preetham|hosek|stylised|solid starts on that sky (screenshots);
+# otherwise `fallback`
+func settingsSkyFromEnv(fallback: view SettingsSkyModel) ret SettingsSkyModel {
+  let text: String = Sys.getEnv(name: "RAE_SKY")
+  if text is "preetham" {
+    ret SettingsSkyModel.preetham
+  }
+  if text is "hosek" {
+    ret SettingsSkyModel.hosek
+  }
+  if text is "stylised" {
+    ret SettingsSkyModel.stylised
+  }
+  if text is "solid" {
+    ret SettingsSkyModel.solid
+  }
+  ret fallback
+}
+
 # Preetham: the default sky across the examples — the analytic model, listed
 # first here and first in the panel.
 # Hosek-Wilkie: the fitted physical model.
