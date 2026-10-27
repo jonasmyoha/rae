@@ -1,8 +1,12 @@
 # RendererMist — a height mist for the deferred renderer: denser low down,
 # thinning with height, so valleys and far lowland haze over while hilltops
-# and towers stand out of it. A surface fades along the view ray toward the
-# sky's own colour in that direction (paler, and tinted), so the far ground
-# meets the sky with no seam and the sky itself stays. Off by default; an
+# and towers stand out of it. Along the view ray the mist hides what is
+# behind it and adds the light it scatters toward the eye (docs/physical-
+# light-units.md step 3): the light from all round (the sky's own light from
+# above and the lit ground's from below; paler, and tinted) and the sun's,
+# mostly forward, so it glows toward the sun. All of it in the renderer's
+# light units and exposed, so the same mist looks the same under every sky,
+# and the far ground meets the sky with no seam. Off by default; an
 # app turns it on with setMist (defaultMistSettings is a good start: a light
 # morning-ish haze, a few percent at 100 m, about a third at a kilometre near
 # the base height). Distance fog (setFog) is the older, flat kind.
@@ -17,8 +21,9 @@ type MistSettings {
   falloff: Float
   # The height (world z) the density is given at: the lowest ground, say
   baseHeight: Float
-  # A tint on the sky's colour it fades to, and how much of that colour's
-  # saturation it loses (0: the sky's own colour, 1: grey of the same light)
+  # A tint on the light it scatters from all round, and how much of that
+  # light's colour it loses (0: the sky's and the ground's own colour, 1:
+  # grey of the same light); the sun's light it scatters is not tinted
   tint: Vec3
   paleness: Float
 }

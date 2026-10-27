@@ -418,10 +418,54 @@ func radiance(sky: view Sky, dir: view Vec3) pub ret Vec3 {
     let c: Vec3 = preethamRadiance(dir: dir, sunDir: toSun, turbidity: sky.turbidity)
     ret Vec3.vscale(a: c, s: sky.exposure)
   }
+  if sky.kind is SkyKind.hosek {
+    let toSun: Vec3 = Vec3.create(x: -sky.sunDir.x, y: -sky.sunDir.y, z: -sky.sunDir.z)
+    # the fit is not defined below the horizon: the shader fades to the
+    # horizon colour there, and so does this
+    if dir.z <= 0.0 {
+      ret Vec3.vscale(a: sky.horizonColor, s: sky.exposure)
+    }
+    let c: Vec3 = hosekRadiance(sky: sky.hosek, dir: dir, sunDir: toSun)
+    ret Vec3.vscale(a: c, s: sky.exposure)
+  }
   # No implementation yet for the remaining kinds. Returning the clear
   # colour rather than a loud magenta is deliberate: an unimplemented sky
   # should look like no sky, not like a bug in the scene that binds it.
   ret sky.clearColor
+}
+
+# The mean light of the sky above, in cd/m2 (LightUnits): the sky over 48
+# directions spread evenly in height and round the horizon, the sun's own
+# glow left out (the mist adds the sun's light by its phase function, and
+# counting the glow too would count the sun twice), plus the moonlit night
+# sky's ambient. The painted and clear-colour skies' display colours are
+# taken as light (fromRelativeLight). What the height mist scatters toward
+# the eye from above (RendererMist).
+func skyLightAbove(sky: view Sky) ret Vec3 {
+  let toSun: Vec3 = Vec3.vnorm(a: Vec3.create(x: -sky.sunDir.x, y: -sky.sunDir.y, z: -sky.sunDir.z))
+  var sum: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  var count: Int = 0
+  loop var row: Int = 0, row < 4, ++row {
+    let up: Float = 0.06 + 0.88 * row.toFloat() / 3.0
+    let ring: Float = Math.sqrt(x: 1.0 - up * up)
+    loop var column: Int = 0, column < 12, ++column {
+      let around: Float = column.toFloat() / 12.0 * 6.2831853
+      let dir: Vec3 = Vec3.create(
+        x: ring * Math.cos(x: around)
+        y: ring * Math.sin(x: around)
+        z: up
+      )
+      if Vec3.vdot(a: dir, b: toSun) < 0.94 {
+        sum = Vec3.vadd(a: sum, b: radiance(sky: sky, dir: dir))
+        count = count + 1
+      }
+    }
+  }
+  var mean: Vec3 = Vec3.vscale(a: sum, s: 1.0 / Math.max(a: count.toFloat(), b: 1.0))
+  if sky.kind is SkyKind.none or sky.kind is SkyKind.stylised {
+    mean = fromRelativeLight(value: mean)
+  }
+  ret Vec3.vadd(a: mean, b: sky.nightAmbient)
 }
 
 # Is this sky merely reproducing the authored constants? Callers use it

@@ -130,6 +130,28 @@ highestEv100)` once per frame before it renders (the walker apps do, in
 - `RAE_EXPOSURE=<EV100>` fixes the camera (screenshots, tests);
   `RAE_EXPOSURE_LOG=1` logs the meter about once a second.
 
+## Step 3, done (0.2.176)
+
+The height mist adds the light it scatters toward the eye instead of
+copying the sky's colour just over the horizon (`mistSkyColor` is gone):
+
+- From all round: half the sky's own light from above
+  (`Sky.skyLightAbove`: each model's radiance over 48 directions, the sun's
+  glow left out, plus the moonlit night ambient; `Sky.radiance` now has a
+  Hosek-Wilkie branch) and half the lit ground's from below, tinted and
+  paled by the mist settings, exposed. `GbufferPasses.uploadSceneLight`
+  computes it once per frame into `DeferredTargets.mistLight`, sent in
+  `LightU.night.yzw` and to the water's mist.
+- The key light's (the sun, or the moon at night) by a Henyey-Greenstein
+  phase function, g = 0.6, in the shader: the mist glows toward the sun.
+- `deferred_shade.wgsl` applyMist and the water's copy (`waterMist`) use the
+  same maths, so the sea still meets the misted ground with no seam.
+
+Measured in 143 (exposure fixed at the reference): the far band below the
+horizon under Preetham and under Hosek-Wilkie differed by 13 (noon), 21
+(evening) and 32 (facing the evening sun) levels of 255 before, and by 6, 7
+and 19 after; Preetham's mist barely changed.
+
 ## Steps (QUEUE)
 
 1. Units and a camera exposure: sun in lux, both skies in cd/m2, a fixed

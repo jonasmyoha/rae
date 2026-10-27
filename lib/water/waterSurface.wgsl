@@ -43,7 +43,7 @@ struct Water {
   grid: vec4<f32>,          // x = radial cell per metre (mesh mode 2), y = its first cell (m), z = cascade map size (texels), w = band hand-over bins
   bounds: vec4<f32>,        // world xy the body exists in (mesh mode 2): min x, min y, max x, max y
   mist: vec4<f32>,          // the renderer's height mist: density, falloff, base height, on (1) / off (0)
-  mistTint: vec4<f32>,      // rgb = tint, w = paleness
+  mistTint: vec4<f32>,      // rgb = the mist's light from all round (exposed), w unused
   shore: vec4<f32>,         // default biome: full-wave depth (0 disables), terrain ground Z, FFT amplitude
 };
 @group(0) @binding(0) var<uniform> F: Frame;
@@ -326,8 +326,15 @@ fn ssrTrace(origin: vec3<f32>, dir: vec3<f32>) -> vec4<f32> {
 }
 
 // The renderer's height mist (RendererMist; deferred_shade.wgsl's applyMist,
-// same maths), fading toward the water's own two-sample sky in the ray's
-// direction, so the sea meets the misted ground and the sky with no seam.
+// same maths): the mist's light from all round (mistTint.rgb here, the
+// renderer's) plus the sun's by the same phase function, so the sea meets
+// the misted ground and the sky with no seam.
+const WATER_MIST_FORWARD: f32 = 0.6;
+fn waterMistPhase(cosAngle: f32) -> f32 {
+  let g2 = WATER_MIST_FORWARD * WATER_MIST_FORWARD;
+  let d = max(1.0 + g2 - 2.0 * WATER_MIST_FORWARD * cosAngle, 0.0001);
+  return (1.0 - g2) / (12.566371 * d * sqrt(d));
+}
 fn waterMist(colour: vec3<f32>, wpos: vec3<f32>) -> vec3<f32> {
   let toP = wpos - W.camera.xyz;
   let d = max(length(toP), 0.001);
@@ -340,9 +347,7 @@ fn waterMist(colour: vec3<f32>, wpos: vec3<f32>) -> vec3<f32> {
     depth = atEye * d * (1.0 - exp(-climb)) / climb;
   }
   let amount = 1.0 - exp(-max(depth, 0.0));
-  let sky = mix(W.horizon.rgb, W.zenith.rgb, clamp(max(dir.z, 0.03), 0.0, 1.0));
-  let grey = vec3<f32>(dot(sky, vec3<f32>(0.2126, 0.7152, 0.0722)));
-  let mistColour = mix(sky, grey, W.mistTint.w) * W.mistTint.rgb;
+  let mistColour = W.mistTint.rgb + W.sunColor.rgb * waterMistPhase(dot(dir, normalize(-W.sun.xyz)));
   return mix(colour, mistColour, amount);
 }
 
