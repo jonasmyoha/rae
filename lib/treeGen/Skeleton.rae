@@ -480,7 +480,8 @@ func nearestPointIndex(limb: view Limb, target: view Vec3) ret Int {
 }
 
 # A thin straight twig from point `nearest` of `parent` to `target`,
-# `baseRadius` thick there, thinning to 8 mm
+# `baseRadius` thick there, thinning to 1.8 cm (thick enough to carry its
+# leaves)
 func twigTo(
   parent: view Limb
   parentIndex: view Int
@@ -493,7 +494,7 @@ func twigTo(
   var points: List(Vec3) = List.create(Vec3, cap: steps + 1)
   var radii: List(Float) = List.create(Float, cap: steps + 1)
   # never thicker at its end than at its start (a thin parent's twig)
-  let tipRadius: Float = Math.min(a: 0.008, b: baseRadius)
+  let tipRadius: Float = Math.min(a: 0.018, b: baseRadius)
   loop var i: Int = 0, i <= steps, ++i {
     let t: Float = i.toFloat() / steps.toFloat()
     points.add(value: Vec3.vadd(a: start, b: Vec3.vscale(a: Vec3.vsub(a: target, b: start), s: t)))
