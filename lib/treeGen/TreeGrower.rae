@@ -246,37 +246,104 @@ func tracedT02Measures() ret TreeMeasures {
   ret measureTracedTree(limbs: tracedT02Limbs(), clumps: tracedT02Clumps(), height: tracedT02Height)
 }
 
-# A straight-ish limb of `steps` + 1 points from `start` along `direction`
-# for `length` metres, its heading turning `bend` radians toward the ground
-# (negative: up) over its length, its radius from `baseRadius` to
-# `tipRadius`
+# How a grown limb leaves its parent and runs: it starts along `leaving`
+# (the parent's own direction there, so it grows OUT of the parent as a real
+# branch does, not stuck on its side) and turns to `direction` over the
+# first `ease` of its length; it bends `bend` radians toward the ground
+# (negative: up) over its length and wanders by up to `wander` radians; its
+# radius runs from `baseRadius` to `tipRadius`, the base thickened by
+# `collar` (a part) where it joins the parent
+type LimbShape {
+  leaving: Vec3
+  direction: Vec3
+  length: Float
+  ease: Float
+  bend: Float
+  wander: Float
+  baseRadius: Float
+  tipRadius: Float
+  collar: Float
+}
+
+# A smooth 0..1 step over 0..1
+func easeStep(t: view Float) ret Float {
+  let clamped: Float = Math.clamp(val: t, low: 0.0, high: 1.0)
+  ret clamped * clamped * (3.0 - 2.0 * clamped)
+}
+
+# A limb of `steps` + 1 points from `start` in `shape`
 func grownLimb(
+  random: mod TreeRandom
   start: view Vec3
-  direction: view Vec3
-  length: view Float
-  bend: view Float
-  baseRadius: view Float
-  tipRadius: view Float
+  shape: view LimbShape
   parent: view Int
   order: view Int
 ) ret TracedLimb {
-  let steps: Int = 14
+  let steps: Int = 16
   var points: List(Vec3) = List.create(Vec3, cap: steps + 1)
   var radii: List(Float) = List.create(Float, cap: steps + 1)
+  let leaving: Vec3 = Vec3.vnorm(a: shape.leaving)
+  let direction: Vec3 = Vec3.vnorm(a: shape.direction)
+  let side: Vec3 = perpendicularTo(direction: direction)
+  let other: Vec3 = Vec3.vcross(a: direction, b: side)
+  # the wander: two slow sideways swings, each with its own phase
+  let phaseA: Float = nextUnit(random: random) * 6.2831853
+  let phaseB: Float = nextUnit(random: random) * 6.2831853
+  let swings: Float = nextBetween(random: random, low: 1.2, high: 2.2)
   var point: Vec3 = start
-  var heading: Vec3 = Vec3.vnorm(a: direction)
-  let step: Float = length / steps.toFloat()
+  let step: Float = shape.length / steps.toFloat()
   loop var i: Int = 0, i <= steps, ++i {
     let t: Float = i.toFloat() / steps.toFloat()
     points.add(value: point)
-    radii.add(value: baseRadius + (tipRadius - baseRadius) * t)
-    # turn the heading a little down (bend > 0), keeping its sideways way
+    # thinner along the limb; the collar fades over its first tenth
+    let taper: Float = shape.baseRadius + (shape.tipRadius - shape.baseRadius) * t
+    radii.add(value: taper * (1.0 + shape.collar * Math.exp(x: -t / 0.07)))
+    # the heading at the middle of the next step
+    let middle: Float = (i.toFloat() + 0.5) / steps.toFloat()
+    let goal: Vec3 = Vec3.vnorm(
+      a: Vec3.vadd(a: direction, b: Vec3.create(x: 0.0, y: 0.0, z: -shape.bend * middle))
+    )
+    let out: Float = easeStep(t: middle / Math.max(a: shape.ease, b: 0.01))
+    var heading: Vec3 = Vec3.vnorm(
+      a: Vec3.vadd(a: Vec3.vscale(a: leaving, s: 1.0 - out), b: Vec3.vscale(a: goal, s: out))
+    )
+    let swingA: Float = shape.wander * Math.sin(x: phaseA + middle * swings * 6.2831853)
+    let swingB: Float = shape.wander * 0.6 * Math.sin(x: phaseB + middle * swings * 4.7)
     heading = Vec3.vnorm(
-      a: Vec3.vadd(a: heading, b: Vec3.create(x: 0.0, y: 0.0, z: -bend / steps.toFloat()))
+      a: Vec3.vadd(
+        a: heading
+        b: Vec3.vadd(a: Vec3.vscale(a: side, s: swingA), b: Vec3.vscale(a: other, s: swingB))
+      )
     )
     point = Vec3.vadd(a: point, b: Vec3.vscale(a: heading, s: step))
   }
   ret TracedLimb { points: own points, radii: own radii, parent: parent, order: order }
+}
+
+# Any unit vector at right angles to `direction`
+func perpendicularTo(direction: view Vec3) ret Vec3 {
+  var other: Vec3 = Vec3.create(x: 1.0, y: 0.0, z: 0.0)
+  if Math.abs(value: direction.x) > 0.8 {
+    other = Vec3.create(x: 0.0, y: 1.0, z: 0.0)
+  }
+  ret Vec3.vnorm(a: Vec3.vcross(a: direction, b: other))
+}
+
+# The direction of `limb` where its height is `z`
+func directionAtHeight(limb: view TracedLimb, z: view Float) ret Vec3 {
+  loop var i: Int = 1, i < limb.points.length, ++i {
+    let above: Vec3 = limb.points.copyAtDefault(index: i)
+    if above.z >= z {
+      ret Vec3.vnorm(a: Vec3.vsub(a: above, b: limb.points.copyAtDefault(index: i - 1)))
+    }
+  }
+  let last: Int = limb.points.length - 1
+  ret Vec3.vnorm(
+    a: Vec3.vsub(
+      a: limb.points.copyAtDefault(index: last)
+      b: limb.points.copyAtDefault(index: Math.max(a: 0, b: last - 1))
+    )
+  )
 }
 
 # Where on `limb` its height is `z`: the point between its two nearest
@@ -388,25 +455,55 @@ func growFromMeasures(measures: view TreeMeasures, seed: view Int) ret GrownTree
   let fork: Vec3 = limbLast(limb: limbs.copyAtDefault(index: 0))
   # the leaders, both leaning to the crown's side as in the trace; the main
   # one turning a little further out as it rises
+  # the trunk's own direction at the fork: both leaders leave along it and
+  # part over their first third, so the fork is one Y, not two tubes stuck
+  # on the trunk's top. As in the trace, the main leader carries the trunk
+  # on at its thickness and the second one starts a little below the fork,
+  # inside the trunk.
+  let trunkLeaving: Vec3 = directionAtHeight(limb: limbs.copyAtDefault(index: 0), z: forkZ)
+  let secondStart: Vec3 = pointAtHeight(limb: limbs.copyAtDefault(index: 0), z: forkZ - forkRadius)
   let mainLean: Float = measures.mainLean + nextBetween(random: random, low: -0.06, high: 0.06)
+  let mainBase: Float = forkRadius * measures.mainRadius
   limbs.add(value: grownLimb(
+    random: random
     start: fork
-    direction: Vec3.create(x: side * Math.sin(x: mainLean), y: 0.0, z: Math.cos(x: mainLean))
-    length: measures.mainLength * height * nextBetween(random: random, low: 0.85, high: 1.15)
-    bend: 0.1
-    baseRadius: forkRadius * measures.mainRadius
-    tipRadius: forkRadius * measures.mainRadius * 0.7
+    shape: LimbShape {
+      leaving: trunkLeaving
+      direction: Vec3.create(x: side * Math.sin(x: mainLean), y: 0.0, z: Math.cos(x: mainLean))
+      length: measures.mainLength * height * nextBetween(random: random, low: 0.85, high: 1.15)
+      ease: 0.35
+      bend: 0.1
+      wander: 0.06
+      baseRadius: mainBase
+      tipRadius: mainBase * 0.4
+      collar: Math.max(a: 0.0, b: forkRadius / mainBase - 1.0)
+    }
     parent: 0
     order: 1
   ))
   let secondLean: Float = measures.secondLean + nextBetween(random: random, low: -0.08, high: 0.08)
+  let secondBase: Float = forkRadius * measures.secondRadius
+  # the second leader parts from the main one at once (half its lean at
+  # its start), so the two never run side by side as a doubled trunk
+  let secondDirection: Vec3 = Vec3.create(
+    x: side * Math.sin(x: secondLean)
+    y: 0.0
+    z: Math.cos(x: secondLean)
+  )
   limbs.add(value: grownLimb(
-    start: fork
-    direction: Vec3.create(x: side * Math.sin(x: secondLean), y: 0.0, z: Math.cos(x: secondLean))
-    length: measures.secondLength * height * nextBetween(random: random, low: 0.85, high: 1.15)
-    bend: 0.0
-    baseRadius: forkRadius * measures.secondRadius
-    tipRadius: forkRadius * measures.secondRadius * 0.7
+    random: random
+    start: secondStart
+    shape: LimbShape {
+      leaving: Vec3.vadd(a: trunkLeaving, b: secondDirection)
+      direction: secondDirection
+      length: measures.secondLength * height * nextBetween(random: random, low: 0.85, high: 1.15)
+      ease: 0.25
+      bend: 0.0
+      wander: 0.07
+      baseRadius: secondBase
+      tipRadius: secondBase * 0.7
+      collar: 0.15
+    }
     parent: 0
     order: 1
   ))
@@ -446,13 +543,24 @@ func growFromMeasures(measures: view TreeMeasures, seed: view Int) ret GrownTree
       high: 1.15
     )
     let base: Float = limbRadiusAt(limb: parentLimb, z: z) * measures.branchRadius
+    # it leaves half along its parent, curving out to its angle over its
+    # first fifth, then rises a little toward the light at its end
+    let parentDirection: Vec3 = directionAtHeight(limb: parentLimb, z: z)
+    let out: Vec3 = Vec3.create(x: branchSide * Math.sin(x: angle), y: 0.0, z: Math.cos(x: angle))
     limbs.add(value: grownLimb(
+      random: random
       start: start
-      direction: Vec3.create(x: branchSide * Math.sin(x: angle), y: 0.0, z: Math.cos(x: angle))
-      length: length
-      bend: 0.15 * (1.0 - along)
-      baseRadius: base
-      tipRadius: base * 0.5
+      shape: LimbShape {
+        leaving: Vec3.vnorm(a: Vec3.vadd(a: parentDirection, b: out))
+        direction: out
+        length: length
+        ease: 0.2
+        bend: 0.15 * (1.0 - along) - 0.12
+        wander: 0.12
+        baseRadius: base
+        tipRadius: base * 0.5
+        collar: 0.4
+      }
       parent: parent
       order: 2
     ))
