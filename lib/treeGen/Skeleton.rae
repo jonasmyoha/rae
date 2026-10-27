@@ -408,7 +408,9 @@ func twigTo(parent: view Limb, parentIndex: view Int, target: view Vec3) ret Lim
   loop var i: Int = 0, i <= steps, ++i {
     let t: Float = i.toFloat() / steps.toFloat()
     points.add(value: Vec3.vadd(a: start, b: Vec3.vscale(a: Vec3.vsub(a: target, b: start), s: t)))
-    radii.add(value: baseRadius + (0.012 - baseRadius) * t)
+    # never thicker at its end than at its start (a thin parent's twig)
+    let tipRadius: Float = Math.min(a: 0.012, b: baseRadius)
+    radii.add(value: baseRadius + (tipRadius - baseRadius) * t)
   }
   ret Limb { points: own points, radii: own radii, parent: parentIndex, order: 3 }
 }
