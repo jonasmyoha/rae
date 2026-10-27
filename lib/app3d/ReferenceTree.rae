@@ -3,12 +3,12 @@
 # among a walker app's forest, so it can be seen in motion and next to the
 # old trees. The wide forest leaves a patch to them and plants them there
 # (app3d/WideForest, WalkerTerrain.referenceStand; WalkerAppSettings
-# referenceTree, example 143). All the trees share one bark mesh, one set of
-# leaf cards and one shadow mesh of the leaf masses (shrunk), each tree
-# turned and sized: the bark as one instance batch, the leaves as one draw
-# of the leaf pass over every tree's placement (treeGen/LeafPass), the
-# shadows as two instance batches. They have no physics bodies: the walker
-# passes through their trunks.
+# referenceTree, example 143). The trees are GROWN from the trace's measures
+# (treeGen/TreeGrower), a few varieties, each its own tree; every stand tree
+# wears one of them, turned and sized. Per variety: one bark mesh as one
+# instance batch, one draw of its leaf pass over its trees' placements
+# (treeGen/LeafPass), the shadows as two instance batches. They have no
+# physics bodies: the walker passes through their trunks.
 import Sys
 import Math
 import Vec3
@@ -30,6 +30,7 @@ open treeGen/ClumpMesh
 open treeGen/LeafCards
 open treeGen/LeafImage
 open treeGen/LeafPass
+open treeGen/TreeGrower
 
 # The bark picture, painted once
 const referenceBarkImagePath: String = ".rae/treeGen/warmBark.png"
@@ -37,7 +38,11 @@ const referenceBarkImagePath: String = ".rae/treeGen/warmBark.png"
 # Floats per tree in a stand's list: x y z yaw scale
 const referenceStandFloats: Int = 5
 
-type ReferenceTree {
+# The number of different grown trees in a stand
+const referenceVarietyCount: Int = 4
+
+# One grown tree and every stand tree that wears it
+type ReferenceVariety {
   bark: MeshHandle
   shadowMasses: MeshHandle
   # one record per tree: the bark (with its material) and the leaf masses'
@@ -45,6 +50,11 @@ type ReferenceTree {
   barkBatch: InstanceBatch
   massBatch: InstanceBatch
   leaves: LeafPass
+  count: Int
+}
+
+type ReferenceTree {
+  varieties: List(ReferenceVariety)
   count: Int
 }
 
@@ -61,14 +71,18 @@ func referenceBarkLayer(renderer: mod DeferredRenderer) ret Int {
   ret rendererLoadSurfaceImage(renderer: renderer, path: referenceBarkImagePath)
 }
 
-# The T02 tree (seed 1) at every place of `stand` (referenceStandFloats
-# floats each: x y z yaw scale)
-func createReferenceStand(
+# Grown variety `seed` at every `variety`-th place of `stand`
+# (referenceStandFloats floats each: x y z yaw scale), starting at place
+# `variety`
+func createReferenceVariety(
   renderer: mod DeferredRenderer
   stand: view List(Float)
-) ret ReferenceTree {
-  let count: Int = stand.length / referenceStandFloats
-  let params: TreeParams = warmBroadleafParams(seed: 1)
+  variety: view Int
+  material: view Material3d
+  pictures: view List(List(Float))
+) ret ReferenceVariety {
+  let seed: Int = variety + 1
+  let params: TreeParams = grownBroadleafParams(seed: seed)
   let skeleton: TreeSkeleton = growSkeleton(params: params)
   let barkData: MeshData = barkMesh(skeleton: skeleton)
   let massData: MeshData = clumpShadowMesh(skeleton: skeleton, scale: 0.75)
@@ -84,14 +98,16 @@ func createReferenceStand(
     vertCount: massData.vertCount
     indices: massData.indices
   )
-  let material: Material3d = barkMaterial(layer: referenceBarkLayer(renderer: renderer))
-  var barkBatch: InstanceBatch = createInstanceBatch(mesh: bark, capacity: Math.max(a: count, b: 1))
-  var massBatch: InstanceBatch = createInstanceBatch(
-    mesh: shadowMasses
-    capacity: Math.max(a: count, b: 1)
-  )
-  var placements: List(Float) = List.create(Float, cap: count * leafPlacementFloats)
-  loop var i: Int = 0, i < count, ++i {
+  let places: Int = stand.length / referenceStandFloats
+  let capacity: Int = Math.max(a: places / referenceVarietyCount + 1, b: 1)
+  var barkBatch: InstanceBatch = createInstanceBatch(mesh: bark, capacity: capacity)
+  var massBatch: InstanceBatch = createInstanceBatch(mesh: shadowMasses, capacity: capacity)
+  var placements: List(Float) = List.create(Float, cap: capacity * leafPlacementFloats)
+  var count: Int = 0
+  loop var i: Int = variety, i < places, ++i {
+    if i % referenceVarietyCount is not variety {
+      continue
+    }
     let base: Int = i * referenceStandFloats
     let x: Float = stand.copyAtDefault(index: base)
     let y: Float = stand.copyAtDefault(index: base + 1)
@@ -125,18 +141,18 @@ func createReferenceStand(
       yaw: yaw
       scale: scale
     )
+    count = count + 1
   }
+  let ownPictures: List(List(Float)) = pictures
   var leaves: LeafPass = createLeafPass(
-    cards: leafCards(skeleton: skeleton, seed: 1)
-    pictures: leafImageLayerPixels()
+    cards: leafCards(skeleton: skeleton, seed: seed)
+    pictures: own ownPictures
   )
   setLeafPlacements(leaves: leaves, placements: own placements)
   log(
-    "[referenceTree] a stand of {count} T02 trees from {stand.copyAtDefault(index: 0)} {stand.copyAtDefault(
-      index: 1
-    )}: {skeleton.limbs.length} limbs and {leaves.cards.count} leaf cards each"
+    "[referenceTree] grown T02 variety {seed}: {count} trees, {skeleton.limbs.length} limbs and {leaves.cards.count} leaf cards each"
   )
-  ret ReferenceTree {
+  ret ReferenceVariety {
     bark: bark
     shadowMasses: shadowMasses
     barkBatch: own barkBatch
@@ -144,6 +160,38 @@ func createReferenceStand(
     leaves: own leaves
     count: count
   }
+}
+
+# A stand of grown T02 trees, one at every place of `stand`
+# (referenceStandFloats floats each: x y z yaw scale), the varieties taking
+# turns
+func createReferenceStand(
+  renderer: mod DeferredRenderer
+  stand: view List(Float)
+) ret ReferenceTree {
+  let count: Int = stand.length / referenceStandFloats
+  var varieties: List(ReferenceVariety) = List.create(ReferenceVariety, cap: referenceVarietyCount)
+  if count is 0 {
+    ret ReferenceTree { varieties: own varieties, count: 0 }
+  }
+  let material: Material3d = barkMaterial(layer: referenceBarkLayer(renderer: renderer))
+  # the leaf stamps are painted once; each variety's pass gets a copy
+  let pictures: List(List(Float)) = leafImageLayerPixels()
+  loop var variety: Int = 0, variety < Math.min(a: referenceVarietyCount, b: count), ++variety {
+    varieties.add(value: createReferenceVariety(
+      renderer: renderer
+      stand: stand
+      variety: variety
+      material: material
+      pictures: pictures
+    ))
+  }
+  log(
+    "[referenceTree] a stand of {count} grown T02 trees from {stand.copyAtDefault(index: 0)} {stand.copyAtDefault(
+      index: 1
+    )}"
+  )
+  ret ReferenceTree { varieties: own varieties, count: count }
 }
 
 # The bark and the leaves, inside the G-buffer pass now open
@@ -155,29 +203,33 @@ func drawReferenceTree(
   camera: view Camera3d
   light: view Light3d
 ) {
-  if tree.count is 0 {
-    ret
+  loop let variety: mod ReferenceVariety in tree.varieties {
+    drawInstances(cache: cache, resources: rendererResources, batch: variety.barkBatch)
+    drawLeaves(
+      leaves: variety.leaves
+      resources: resources
+      gbuffer: cache
+      gbufferResources: rendererResources
+      camera: camera
+      light: light
+    )
   }
-  drawInstances(cache: cache, resources: rendererResources, batch: tree.barkBatch)
-  drawLeaves(
-    leaves: tree.leaves
-    resources: resources
-    gbuffer: cache
-    gbufferResources: rendererResources
-    camera: camera
-    light: light
-  )
 }
 
 # The trunks' and the crowns' shadows, inside the shadow pass now open
 func drawReferenceTreeShadow(tree: view ReferenceTree, renderer: mod DeferredRenderer) {
-  if tree.count is 0 {
-    ret
+  loop let variety: view ReferenceVariety in tree.varieties {
+    drawShadowCasterBatchWith(renderer: renderer, mesh: variety.bark, batch: variety.barkBatch)
+    drawShadowCasterBatchWith(
+      renderer: renderer
+      mesh: variety.shadowMasses
+      batch: variety.massBatch
+    )
   }
-  drawShadowCasterBatchWith(renderer: renderer, mesh: tree.bark, batch: tree.barkBatch)
-  drawShadowCasterBatchWith(renderer: renderer, mesh: tree.shadowMasses, batch: tree.massBatch)
 }
 
 func releaseReferenceTree(tree: mod ReferenceTree, resources: mod GpuResources) {
-  releaseLeafPass(leaves: tree.leaves, resources: resources)
+  loop let variety: mod ReferenceVariety in tree.varieties {
+    releaseLeafPass(leaves: variety.leaves, resources: resources)
+  }
 }
